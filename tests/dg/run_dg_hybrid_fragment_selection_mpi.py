@@ -45,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
                 "src/gs/dc/dg_hybrid_variational_payload.f90",
                 "src/gs/dc/dg_hybrid_divided_operator.f90",
                 "src/gs/dc/dg_hybrid_fragment_subspace.f90",
+                "src/gs/dc/dg_hybrid_fragment_solver.f90",
                 "src/gs/dc/dg_hybrid_fragment_preconditioner.f90",
                 "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90",
                 "src/gs/dc/dg_hybrid_fragment_admission.f90"]

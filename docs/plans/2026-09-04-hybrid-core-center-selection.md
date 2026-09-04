@@ -578,6 +578,37 @@ same C3-admitted state through these actual operators and the bounded CG budget.
 Do not infer those properties from separate passing assembly and solver tests.
 Main/C6 and general material acceptance remain untouched.
 
+**Second integration checkpoint, 2026-09-04:** The assembled volume/SIPG/
+nonlocal self-block now advances the same state published by combined C3
+admission, without reconstructing the state or rewriting its basis/metric
+fingerprints. Frozen support manifests cover both faces, all four derivative
+rows and both projectors touching each core, with coefficients matching this
+small fixture's assembly maps. A missing neighboring projector contribution
+is rejected collectively without publishing a nonlocal matrix.
+
+The authoritative cached selected frame feeds the real rectangular
+preconditioner and bounded epoch updater. Two calls share one density epoch;
+their cumulative updates stay within three and the returned remaining budget
+matches that cumulative count. The initial residual is nonzero and the final
+occupied physical subspace changes, excluding a no-op or only an internal
+rotation. After each call, metric orthogonality, reconstructed core density,
+electron count and physical core norms agree with independent grid sums.
+This does not force budget exhaustion in the tiny fixture or certify the
+post-exhaustion measurement-only branch; that stronger claim is not made.
+
+Fresh selection/preconditioner/subspace tests pass on 1/2/4/8 ranks (this
+integration on 2/4/8), raw-Wannier tests pass on 2/4/8 with the exact core-null
+negative on 2, and release build succeeds. Independent review has no new
+Critical/Important issue. W90 call-count checks remain unchanged and pass.
+Only tests and this progress record changed; no DC/material run was repeated.
+All unrelated dirty changes and verification logs were preserved.
+
+C5 remains open for the explicit insufficient/sufficient user-cutoff tail
+case and certification of production support-provider completeness. The
+matching hand-written fixture manifests are not that production certificate.
+The same-state bounded-update connection is now tested, but C5/Task 8 and the
+main/C6 production switch are not complete.
+
 **Files:**
 - Modify: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`

@@ -17,7 +17,8 @@ program test_fragment_selection
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload
   use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload,extract_dg_hybrid_fragment_self_block
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
-    initialize_dg_hybrid_fragment_density_checked
+    initialize_dg_hybrid_fragment_density_checked,s_dg_hybrid_fragment_epoch_budget,advance_dg_hybrid_fragment_epoch
+  use dg_hybrid_fragment_solver,only:reconstruct_dg_hybrid_fragment_density,measure_dg_hybrid_fragment_core_norms
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
     prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment,export_dg_hybrid_selected_basis_frame
   use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_fragment_preconditioner,&
@@ -44,6 +45,10 @@ program test_fragment_selection
   type(s_dg_hybrid_dc_reference)::dc_oracle
   integer,allocatable::selected_counts(:)
   complex(real64)::density_metric(4,4)
+  complex(real64)::operator_h(4,4),operator_s(4,4)
+  type(s_dg_hybrid_fragment_preconditioner)::operator_preconditioner
+  type(s_dg_hybrid_preconditioner_key)::operator_key
+  integer(int64)::operator_selection_fp
   logical::density_callback_failure=.false.
   logical::ok
   character(256)::message
@@ -387,7 +392,7 @@ contains
     call require(passed,'fresh projected basis failed validation: '//trim(why))
     call test_combined_admission(raw,chosen,selected_basis,basis_receipt)
     call test_cached_frame_connection(raw,chosen,selected_basis,basis_receipt)
-    call test_selected_operator_assembly(selected_basis,chosen)
+    call test_selected_operator_assembly(selected_basis,chosen,raw,basis_receipt)
     do p=1,5
       changed_basis=selected_basis;changed_receipt=basis_receipt
       if(rank==0)then
@@ -609,15 +614,17 @@ contains
     call test_combined_admission(half_raw,chosen,selected_basis,basis_receipt,.true.)
     call require(run_calls==run0.and.setup_calls==setup0,'half-norm admission reran W90')
   end subroutine
-  subroutine test_selected_operator_assembly(basis,selection)
+  subroutine test_selected_operator_assembly(basis,selection,raw,receipt)
     type(s_dg_hybrid_fragment_basis),intent(in)::basis
     type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
     type(s_dg_hybrid_sipg_face_operator)::face
     type(s_dg_hybrid_fixed_payload)::payload
     complex(real64)::buffers(8,4,np),left(4,4),right(4,4),d(4,4),gradient(4,4)
     complex(real64)::vm(4),vp(4),dm(4),dp(4),jump(8),average(8),face_oracle(8,8)
     complex(real64),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),metric(:,:),nonlocal(:,:),&
-      overlap(:,:),all_overlap(:,:),nl_oracle(:,:),interface_matrix(:,:),zeros(:,:),hff(:,:),sff(:,:)
+      overlap(:,:),all_overlap(:,:),nl_oracle(:,:),interface_matrix(:,:),zeros(:,:),hff(:,:),sff(:,:),bad_nonlocal(:,:)
     integer(int64)::all_ids(4,np),face_ids(8),directory_fp
     integer,allocatable::fragments(:),published_owner(:),published_fragment(:),slots(:),generations(:)
     integer::nb,next_fragment,neighbor_index,p,i,j,owned,own_ids(4),next_ids(4)
@@ -682,6 +689,10 @@ contains
     enddo;enddo;enddo
     call require(maxval(abs(nonlocal-nl_oracle(own_ids,:)))<1d-12,'selected nonlocal differs from projector oracle')
     call require(maxval(abs(nonlocal(:,next_ids)))>0.1d0,'nonlocal neighboring-fragment coupling is missing')
+    if(rank==0)complete(next_ids,1)=.false.
+    call assemble_dg_overlapping_wannier_nonlocal_rows(MPI_COMM_WORLD,nb,basis%global_ids,[int(f,int64)],&
+      [0.7d0],overlap,complete,int(np,int64),bad_nonlocal,owned,passed,why)
+    call require(.not.passed.and..not.allocated(bad_nonlocal),'missing neighboring projector support was accepted')
     zeros=0d0
     call freeze_dg_hybrid_single_owner_payload(MPI_COMM_WORLD,np,basis,metric,kinetic,nonlocal,&
       interface_matrix(own_ids,:),1001_int64,1003_int64,1007_int64,payload,published_owner,published_fragment,&
@@ -694,6 +705,115 @@ contains
     call require(maxval(abs(sff-metric(:,own_ids)))<1d-12.and.&
       maxval(abs(hff-kinetic(:,own_ids)-nonlocal(:,own_ids)-interface_matrix(own_ids,own_ids)))<1d-12,&
       'selected self-block lost volume/interface/nonlocal contributions')
+    call test_admitted_operator_updates(basis,selection,raw,receipt,payload%fingerprint,hff,sff)
+  end subroutine
+  subroutine test_admitted_operator_updates(basis,selection,raw,receipt,operator_fp,h,s)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    integer(int64),intent(in)::operator_fp
+    complex(real64),intent(in)::h(:,:),s(:,:)
+    type(s_dg_hybrid_support_operator)::support(3)
+    type(s_dg_hybrid_admission_report)::report
+    type(s_dg_hybrid_fragment_subspace_state)::state
+    type(s_dg_hybrid_fragment_epoch_budget)::budget
+    integer(int64)::core(4),support_fp(3),frame_fp,fp,workspace
+    integer::prev_fragment,pass,steps,remaining,total_steps,a
+    integer,allocatable::selected(:)
+    complex(real64),allocatable::frame(:,:),psi(:,:),gram(:,:)
+    complex(real64)::initial_projector(4,4),initial_core(4,2),hc(4,2),sc(4,2)
+    real(real64),allocatable::norms(:)
+    real(real64)::spectrum(2),residual,density(8),expected_density(8),electrons
+    logical::passed,converged,advanced,core_mask(8)
+    character(256)::why,reason
+    core=selection%physical_grid_ids(selection%core_row_slots);prev_fragment=1+modulo(f-2,np)
+    ! Required inventory follows both faces, all four volume derivative rows,
+    ! and both projectors that touch this fragment, using the assembly maps.
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,1,&
+      [int(prev_fragment,int64),int(f,int64)],[int(prev_fragment,int64),int(f,int64)],&
+      [1,3,5],core,cmplx([1.5d0,-0.5d0,-0.5d0,1.5d0],0d0,real64),[1d0,1d0],support(1),support_fp(1),passed,why)
+    call require(passed,'assembled boundary inventory: '//trim(why))
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,2,core,core,&
+      [1,3,5,7,9],core([1,2,1,3,2,4,3,4]),&
+      cmplx([-1d0,1d0,-0.5d0,0.5d0,-0.5d0,0.5d0,-1d0,1d0],0d0,real64),&
+      [1d0,1d0,1d0,1d0],support(2),support_fp(2),passed,why)
+    call require(passed,'assembled derivative inventory: '//trim(why))
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,3,&
+      [int(f,int64),int(prev_fragment,int64)],[int(f,int64),int(prev_fragment,int64)],&
+      [1,2,3],core([4,1]),[cmplx(0.6d0,0d0,real64),cmplx(0d0,-0.8d0,real64)],&
+      [1d0,1d0],support(3),support_fp(3),passed,why)
+    call require(passed,'assembled projector inventory: '//trim(why))
+    call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,basis,receipt,support,support_fp,&
+      [1d0,1d0,1d0,1d0],[1d-12,1d-10,1d-10,1d-10],[1d-10,1d-10,1d-10],0d0,0,&
+      1d-8,1d-10,1d-10,state,selected,report,passed,why)
+    call require(passed.and.report%valid,'actual-operator initial admission: '//trim(why))
+    call require(state%state_count==2,'admitted state count changed before bounded update')
+    hc=matmul(h,state%vectors);sc=matmul(s,state%vectors)
+    call require(maxval(abs(hc-matmul(sc,matmul(conjg(transpose(state%vectors)),hc))))>1d-3,&
+      'admitted fixture is stationary before the DG update')
+    initial_core=matmul(basis%buffer_values(selection%core_row_slots,:),state%vectors)
+    initial_projector=matmul(initial_core,conjg(transpose(initial_core)))
+    call export_dg_hybrid_selected_basis_frame(MPI_COMM_WORLD,f,raw,selection,basis,receipt,frame,frame_fp,passed,why)
+    call require(passed,'actual-operator fixed reference: '//trim(why))
+    operator_h=h;operator_s=s;operator_selection_fp=selection%fingerprint
+    operator_key=s_dg_hybrid_preconditioner_key(f,selection%basis_generation,1,state%basis_fingerprint,&
+      state%metric_fingerprint,operator_fp,frame_fp)
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,4,[1_int64,2_int64,3_int64,4_int64],frame,h,s,&
+      operator_key,operator_selection_fp,1d-10,operator_preconditioner,fp,passed,why)
+    call require(passed,'actual-operator fixed preconditioner: '//trim(why))
+    core_mask=.false.;core_mask(selection%core_row_slots)=.true.;total_steps=0
+    do pass=1,2
+      call advance_dg_hybrid_fragment_epoch(MPI_COMM_SELF,4,[1_int64,2_int64,3_int64,4_int64],&
+        f,selection%basis_generation,state%basis_fingerprint,state%metric_fingerprint,1,3,&
+        apply_operator_h,apply_operator_s,apply_operator_preconditioner,1d-12,1d-10,2d0,&
+        budget,state,spectrum,steps,remaining,residual,converged,advanced,reason,workspace,fp,passed,why)
+      call require(passed,'admitted real-operator bounded update: '//trim(why))
+      total_steps=total_steps+steps
+      call require(total_steps<=3.and.remaining==3-total_steps,'same-epoch passes restarted the three-step budget')
+      gram=matmul(conjg(transpose(state%vectors)),matmul(s,state%vectors))
+      do a=1,2;gram(a,a)=gram(a,a)-1d0;enddo
+      call require(maxval(abs(gram))<1d-9,'real-operator update lost core metric orthogonality')
+      psi=matmul(basis%buffer_values,state%vectors);expected_density=0d0
+      do a=1,2;expected_density=expected_density+raw%physical_dc_seed_occupations(selected(a))*abs(psi(:,a))**2;enddo
+      where(.not.core_mask)expected_density=0d0
+      call reconstruct_dg_hybrid_fragment_density(MPI_COMM_SELF,basis,state%vectors,&
+        raw%physical_dc_seed_occupations(selected),2d0,core_mask,[(1d0,a=1,8)],density,electrons,passed,why)
+      call require(passed,'updated physical core density: '//trim(why))
+      call require(maxval(abs(density-expected_density))<1d-10.and.&
+        abs(electrons-sum(expected_density))<1d-10,'updated core density/electrons differ from physical oracle')
+      call measure_dg_hybrid_fragment_core_norms(MPI_COMM_SELF,basis,state%vectors,core_mask,[(1d0,a=1,8)],norms,passed,why)
+      call require(passed,'updated physical core norms: '//trim(why))
+      call require(maxval(abs(norms-1d0))<1d-9,'updated occupied states lost core norm')
+    enddo
+    call require(total_steps>0,'actual DG Hamiltonian did not exercise a local update')
+    call require(maxval(abs(matmul(psi(selection%core_row_slots,:),&
+      conjg(transpose(psi(selection%core_row_slots,:))))-initial_projector))>1d-6,&
+      'bounded DG update did not change the occupied physical subspace')
+  end subroutine
+  subroutine apply_operator_h(input,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    output=matmul(operator_h,input);valid=.true.
+  end subroutine
+  subroutine apply_operator_s(input,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    output=matmul(operator_s,input);valid=.true.
+  end subroutine
+  subroutine apply_operator_preconditioner(input,shifts,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    real(real64),intent(in)::shifts(:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    complex(real64),allocatable::result(:,:)
+    integer(int64)::fp
+    character(256)::why
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64,3_int64,4_int64],&
+      operator_key,operator_preconditioner,shifts,input,result,fp,valid,why,selection_fingerprint=operator_selection_fp)
+    if(valid)output=result
   end subroutine
   subroutine test_cached_frame_connection(raw,selection,basis,receipt)
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
