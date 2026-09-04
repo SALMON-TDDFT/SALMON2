@@ -306,7 +306,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   !(force)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_out,ewald)
+     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_out,ewald,Vxc)
 
      !force on ion directly from field --- should put in calc_force?
 !$omp parallel do private(iatom)
