@@ -27,6 +27,24 @@ strict DC-seed compatibility work.
 
 ## Governing Decisions
 
+### Core-centered construction WF selection (user decision, 2026-09-04)
+
+The authoritative amendment is
+[`2026-09-04-hybrid-core-center-selection-design.md`](2026-09-04-hybrid-core-center-selection-design.md).
+Preserve every generated WF in the raw cache, but admit to a fragment's
+production catalog only WFs whose actual centers belong to its half-open
+periodic core. Keep the selected columns' buffer data. Project PW against the
+selected WF union, certify the actual core metric and seed/support
+reconstruction, and use a selected-space fixed-reference preconditioner.
+Center selection alone is neither a rank nor an accuracy certificate.
+
+This supersedes the former unconditional all-WF production retention and
+zero-padded raw seed-map requirements. Gauge covariance applies inside the
+frozen selected space, not to rotations mixing selected and excluded columns.
+The raw-cache all-column/reconstruction guarantees remain unchanged. Task 8
+main integration waits for the amendment's tests; no production switch has
+been made merely by accepting this design.
+
 ### Production MPI scope (user decision, 2026-09-04)
 
 The conventional-DC to divided-Hybrid production route uses exactly one MPI
@@ -86,8 +104,9 @@ The production construction WFs are generated once per basis epoch on
 freshly converged DC orbitals, buffer-support candidates, and only those local
 atomic projector directions that add metric rank.  The retained rank is
 dynamic.  Wannier90 performs an unconstrained square unitary rotation of the
-whole accepted fragment subspace.  No column is discarded according to its
-post-localization center, and no gauge matching is imposed between fragments.
+whole accepted raw fragment subspace. All columns remain in the raw cache;
+the separate production catalog is selected by core-centered ownership under
+the September 4 amendment. No gauge matching is imposed between fragments.
 Every fragment uses a fragment-specific seed and artifact directory.
 
 The density loop uses a separate control
@@ -118,8 +137,11 @@ its existing converged-or-fail semantics for reference tests.
    directions, remove only metric-null directions, and run unconstrained
    fragment-local Wannier90 once.  There is no preliminary complete LCFO
    diagonalization.  Individual WFs are optimized for locality and are not
-   required to transform symmetrically.
-3. Build the user-cutoff-controlled windowed-PW complement.  The retained
+   required to transform symmetrically. Preserve the raw result and select
+   core-centered WFs into a separately fingerprinted production catalog.
+3. Build the user-cutoff-controlled windowed-PW complement against the selected
+   WF union, verify the actual core metric and project/certify DC seeds in the
+   selected WF+PW space. The retained
    basis count is derived from the material, fragment size, requested energy
    window, metric rank, and PW cutoff; no material-specific count such as 384
    is permitted.
@@ -153,8 +175,9 @@ records the retained rank.  The resulting square subspace is passed to
 Wannier90 on `dc%icomm_frag` with a seed namespace containing the fragment ID.
 The namespace also contains the basis generation so artifacts from different
 epochs cannot collide.  Setup and run occur exactly once per fragment and
-basis epoch, outside the SCF loop.  All accepted columns survive the unitary
-transformation.
+basis epoch, outside the SCF loop. All accepted columns survive in the raw
+cache; final centers, values and transform ordering must remain aligned.
+Production center selection is a separate, loss-checked operation.
 
 Wannier90 receives a square `num_bands=num_wann` space with no disentanglement.
 Its required eigenvalue array is therefore an auxiliary finite zero label for
@@ -171,8 +194,9 @@ by deleting named WFs.  Interface tails, periodic-wrap tails, and nonlocal
 projector support must remain present.  Missing support, duplicate ownership,
 or insufficient metric rank is a collective failure.
 
-Maintain two explicitly related catalogs.  The divided-density catalog keeps
-every internally independent fragment WF and its fragment-assigned PW
+Keep the full raw construction cache in addition to two explicitly related
+production catalogs. The divided-density catalog keeps every admitted
+core-centered fragment WF and its fragment-assigned PW
 complement in the original block layout; local `H_ff/S_ff`, warm-start
 coefficients, and rank--fragment ownership always use this uncompressed
 catalog.  Separately, assemble the complete union metric.  If cross-fragment
@@ -183,12 +207,14 @@ transform is the identity and `S` remains a valid nonidentity generalized
 metric.  The complete transform may mix fragment columns and therefore is
 never fed back into fragment ownership or divided SCF.
 
-Store both maps: DC seed to its uncompressed fragment catalog, and the
+Store the original raw seed map, the recomputed DC seed projection into the
+selected WF+PW catalog, and the
 uncompressed union to the terminal complete catalog.  Composing them must
 reconstruct every retained seed orbital through the terminal catalog whenever
 null compression is applied.  Projectors, occupied density, and eventual LCFO
 observables must be invariant under independent unitary gauges in every
-fragment block.
+selected fragment block. No invariance is asserted for rotations that change
+which raw columns meet the center-selection policy.
 
 ## Divided Density SCF
 
@@ -251,6 +277,12 @@ diagnostic, not a published physical eigenpair receipt.  Exact eigenpair and
 symmetry acceptance is deferred to the one complete LCFO solve.
 
 ### Fixed-frame fragment preconditioner (2026-09-03 amendment)
+
+The square-map construction below describes the all-retained case. When center
+selection removes columns, the September 4 amendment's explicit rectangular
+projected-frame API replaces this construction. Do not pass a sliced
+`U^dagger` to the existing square-unitary API. The denominator safety, epoch
+validation and selected-space physical covariance requirements still apply.
 
 The approved short-update gauge-invariance requirement rules out rebuilding a
 coordinate-diagonal preconditioner from the currently localized WF columns.

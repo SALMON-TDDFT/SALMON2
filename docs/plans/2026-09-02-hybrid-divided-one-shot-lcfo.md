@@ -32,11 +32,24 @@ the exact MPI-count/rank--fragment checkpoint compatibility rule without
 automatic redistribution. Existing general-purpose multi-rank kernel fixtures
 do not broaden this production scope.
 
+**Core-center selection amendment, approved 2026-09-04:** Follow
+[`2026-09-04-hybrid-core-center-selection-design.md`](2026-09-04-hybrid-core-center-selection-design.md)
+and its [implementation plan](2026-09-04-hybrid-core-center-selection.md)
+before resuming the remaining Task 8 wiring. Preserve all generated WFs in the
+raw cache; production uses only core-centered WFs, followed by actual core
+metric and selected-WF+PW reconstruction checks. The PW projection excludes
+discarded raw columns from its projector. Recompute seed coefficients after
+selection and use its explicit fixed projected-reference frame. These rules
+override earlier all-column production/zero-padding statements in historical
+progress notes; those notes remain evidence of what was tested at the time.
+The amendment's first execution checkpoint is C1 (center cache provenance).
+
 **Task 8 priority correction:** The uncommitted multi-rank fragment stream
 entry and its dedicated test changes were withdrawn after this user decision.
 The original one-owner-per-fragment stream remains. Retain the existing main
 rank-count guard and add it to the regression contract. Next, wire the direct
-DC construction cache to the existing single-owner stream, generalized PW
+DC construction cache through the approved core-center selection to the
+existing single-owner stream, generalized selected-WF PW
 projection and uncompressed H/S/CG callbacks; do not spend further Task 8 work
 extending intra-fragment MPI support. Main-route completion remains pending.
 
@@ -397,8 +410,9 @@ run entry points and require:
 - distinct seed directories of the form
   `fragment-%06d/generation-%08d`, with the fragment ID and basis generation
   included in the receipt and fingerprint;
-- every locally generated WF column retained, even when its center lies in an
-  overlapping neighboring buffer;
+- every locally generated WF column retained in the raw construction cache,
+  even when its center lies in an overlapping neighboring buffer; the later
+  selected production catalog is governed by the September 4 amendment;
 - reconstruction of every input DC orbital from the returned seed-to-WF
   coefficients, with invariant occupied projector and occupation-weighted
   density before and after the unconstrained rotation;
@@ -467,9 +481,9 @@ DC orbital columns and every independent accepted buffer/projector direction;
 remove only candidate-space metric null modes before localization, then
 preserve every retained column and its span.  Reject unexpected rank loss,
 non-finite output, a transform that is not unitary within tolerance, a changed
-fragment/basis fingerprint, or a seed directory collision.  Do not select WFs
-by post-localization centers and do not compare or align gauges between
-fragments.
+fragment/basis fingerprint, or a seed directory collision. Do not mutate this
+raw cache during subsequent center selection. Do not compare or align gauges
+between fragments.
 
 Use the accepted fragment lattice, fragment atom list, fractional grid
 coordinates, and retained candidate columns to call the existing
@@ -498,9 +512,10 @@ Return both the candidate-space metric compression and the square Wannier90
 unitary, plus the coefficients that reconstruct every original DC seed
 orbital in the final fragment-WF basis.  Certify the reconstruction in the
 fragment metric and certify invariance of the DC occupied projector and
-occupation-weighted density.  Task 8 uses this map, padded by zero PW
-coefficients, to initialize the occupied-plus-guard `X`; it must not infer the
-inverse transformation from WF ordering or centers.
+occupation-weighted density. The all-retained fixture may pad this map with
+zero PW coefficients. After center selection, Task 8 must instead recompute
+and certify the seed projection into selected WF+PW; it must not slice the
+old coefficients or infer the inverse from WF ordering or centers.
 
 Keep `candidate_rank` and `retained_rank` runtime-sized.  Occupied-plus-guard
 selection belongs to the fragment eigensolver state policy in Task 7; this
@@ -518,7 +533,8 @@ G = W^dagger S W,
 ```
 
 within tolerance.  Apply independent phase, permutation, and full unitary
-rotations inside every complete fragment WF block and require invariant:
+rotations inside each frozen selected fragment WF block (or the complete raw
+block in the all-retained fixture) and require invariant:
 
 - union metric rank and accepted basis span;
 - unchanged fragment ownership and seed coefficients in the uncompressed
@@ -1358,7 +1374,7 @@ entry gate remains RED. The release build passes and review found no
 Critical/Important issue. Pre-existing dirty main changes and validation logs
 are preserved; no material calculation was rerun.
 
-**Core-metric handoff audit, 2026-09-04 (Task 8 paused for design review)**
+**Core-metric handoff audit, 2026-09-04 (implementation pending approved amendment)**
 
 The previously passing DC-cache-to-CG integration uses a physical Gram matrix
 over the complete accepted buffer. Main's actual broken-volume assembly uses
@@ -1373,7 +1389,8 @@ reference map, changing only the integration fixture's S to the actual
 python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py --core-metric-audit
 ```
 
-This 2-rank diagnostic is intentionally RED pending a design decision. The
+This 2-rank diagnostic remains intentionally RED until the selected-path
+amendment is implemented; the unselected negative case must remain covered. The
 assembled self metric first agrees with an independent core-only Gram matrix
 to 1e-12. In the saved pre-localization reference frame its diagonal norms are:
 
@@ -1404,7 +1421,9 @@ discard WFs, replace S by the buffer metric/identity, relax the positivity
 gate, or apply terminal union compression inside the local loop. Any revised
 admissibility or local active-space map needs explicit design approval and
 tests of the actual volume/interface/nonlocal operator, not just this metric
-audit. Existing dirty files and all material verification logs are unchanged.
+audit. The user subsequently approved center selection plus metric/span checks;
+the September 4 amendment records that design and its C1--C6 execution order.
+Existing dirty files and all material verification logs are unchanged.
 
 **Files:**
 
@@ -1443,18 +1462,22 @@ Require one local-update budget per fragment communicator and outer density
 iteration, shared across that fragment's state-extension passes, and require
 the initial production state count to come from the occupied-plus-guard policy
 rather than the full fragment basis.
-Require local `H_ff/S_ff`, seed coefficients, and density reconstruction to use
-only the uncompressed fragment catalog.  Require the union-to-complete map to
+Require local `H_ff/S_ff`, reprojected seed coefficients, and density
+reconstruction to use only the selected uncompressed fragment catalog. Require
+verified center selection before selected-WF PW projection and admission gates
+before any local update. Require the union-to-complete map to
 remain immutable and unused until complete row composition after divided
 convergence.
 
 Require a finite fixed-frame production preconditioner constructed from each
 fragment self block and the saved pre-localization-to-WF map. An identity
 callback remains fixture-only. Test the actual saved Wannier90 transform,
-including complex phases/order, with `F=B Q`; passing identity as Q after
-localization is forbidden. The PW complement uses the unchanged fixed PW
-reference. Check physical preconditioned residuals under independent full WF
-unitary rotations, not only phase/permutation changes.
+including complex phases/order and the selection embedding, with `F=B Q`;
+passing identity as Q after localization is forbidden. Use the amendment's
+rectangular projected frame when columns were selected. The PW complement
+uses its fixed selected-catalog PW reference. Check physical preconditioned
+residuals under independent full selected-space WF unitary rotations, not only
+phase/permutation changes.
 
 Require `yn_dg_hybrid_divided_scf`, `yn_dg_hybrid_continuation_scf`, and
 `yn_dg_hybrid_scf` to be mutually exclusive.
@@ -1494,17 +1517,19 @@ seed checkpoint:
 1. take each fragment's saved `rwf`, spectrum, occupation, density, and
    potential directly from the seed payload;
 2. run the Task 5 unconstrained construction localization once on that
-   fragment communicator and retain every resulting column;
+   fragment communicator, retain every resulting column in the raw cache,
+   and select core-centered columns into the production catalog;
 3. add plane waves selected dynamically by the user input
    `wannier_pw_cutoff`, project them with the generalized union metric, and
    certify metric rank plus buffer/projector/tail coverage;
 4. freeze both the uncompressed fragment catalog and the separately
    fingerprinted union-to-complete transform, then build the common
    variational payload in uncompressed union coordinates; and
-5. initialize each fragment's occupied-plus-guard `X` from
-   `cache%dc_seed_coefficients_in_wannier`, append zero coefficients for the PW
-   complement, and use the seed spectrum/occupations to choose its runtime
-   columns without a complete-cell eigensolve.
+5. reproject and certify the original DC seeds into selected WF+PW using the
+   actual core metric; initialize occupied-plus-guard `X` from that map and
+   use the preserved physical seed spectrum/occupations to choose its runtime
+   columns without a complete-cell eigensolve. Do not use raw-map slicing or
+   zero-PW padding after selection.
 
 There is no preliminary full LCFO and no complete-cell construction-WF
 Wannier90 operation.  A fragment/basis-generation fingerprint mismatch is a
@@ -2067,8 +2092,9 @@ Invoke `@superpowers:requesting-code-review`.  Review especially:
 - common chemical potential and electron count;
 - one unconstrained construction-WF call per fragment/basis generation and no
   total-communicator construction localization;
-- preservation of every local WF column and gauge invariance of the
-  generalized fragment-union PW projection;
+- preservation of the full raw WF cache, correct core-center selection and
+  selected-space gauge invariance of the generalized fragment-union PW
+  projection, with certified seed/support reconstruction;
 - dynamic occupied-plus-guard state extension with no fixed 384-state path;
 - SIPG/nonlocal terms exactly once;
 - bounded warm-started `[X,R,P]` updates, safe rollback, and no dense or
