@@ -189,6 +189,19 @@ remain untouched; no material/DC computation was repeated.
 Files: selection integration test/runner, `dc_fragment_occupation.f90` only if
 needed for the adapter, then the task-owned main-route hunks in parent C6.
 
+**Failure-diagnostic checkpoint:** Resolved the O2 minor diagnostic limitation
+above. The admission gate selects the first failing MPI rank and broadcasts
+its reason with a fixed wire length; successful ranks no longer return an
+empty local message for a remote initializer failure. Reduction/broadcast
+errors have explicit diagnostics. This changes no numerical admission policy.
+Tests fail before the fix with `a remote trial initialization failure lost
+its diagnostic`. After the fix, failures confined to rank zero or the last
+rank share the initializer reason on every rank, publish no selected trial,
+and preserve the previous state. Selection and subspace tests pass on
+1/2/4/8 ranks and the release build succeeds. Independent review reports no
+Critical/Important issue. This is diagnostic hardening only; the production
+thermal transaction, capacity integration and main route remain pending.
+
 1. RED: use the actual volume/SIPG/nonlocal self-block and the new trial state.
    Invoke current-state refresh through the existing occupation epoch at 300 K.
    The half-core-norm example must yield the specified total electron count

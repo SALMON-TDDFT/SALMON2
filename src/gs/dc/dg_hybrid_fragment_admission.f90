@@ -403,11 +403,25 @@ contains
     character(*),intent(in)::description
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::bad,total,ierr
-    bad=merge(0,1,valid)
-    call MPI_Allreduce(bad,total,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    ok=ierr==MPI_SUCCESS.and.total==0;message=''
-    if(.not.ok)message=description
+    integer::rank,failed,first_failed,ierr
+    character(512)::diagnostic
+    ok=.false.;message='fragment admission communicator lookup failed'
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    failed=huge(0);if(.not.valid)failed=rank
+    call MPI_Allreduce(failed,first_failed,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    message='fragment admission status reduction failed'
+    if(ierr/=MPI_SUCCESS)return
+    message='';ok=first_failed==huge(0)
+    if(ok)return
+    ! Use a fixed wire length even when callers have different output lengths.
+    diagnostic=''
+    if(rank==first_failed)diagnostic=description
+    call MPI_Bcast(diagnostic,len(diagnostic),MPI_CHARACTER,first_failed,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      message='fragment admission diagnostic broadcast failed';return
+    endif
+    message=trim(diagnostic)
   end subroutine
   integer(int64) function mix(hash,word)result(next)
     integer(int64),intent(in)::hash,word

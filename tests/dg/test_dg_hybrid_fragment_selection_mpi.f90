@@ -1166,6 +1166,14 @@ contains
           initial,selected,report,passed,why)
         call require(.not.passed.and..not.report%trial_prepared.and..not.allocated(selected).and.&
           all(initial%vectors==saved%vectors),'one-fragment trial failure was not rolled back collectively')
+        call require(index(why,'invalid fragment seed initialization contract')>0,&
+          'a remote trial initialization failure lost its diagnostic')
+        call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+          fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,merge(0,2,rank==np-1),0,1d-10,1d-10,&
+          initial,selected,report,passed,why)
+        call require(.not.passed.and.index(why,'invalid fragment seed initialization contract')>0.and.&
+          .not.report%trial_prepared.and..not.allocated(selected).and.all(initial%vectors==saved%vectors),&
+          'nonroot trial failure was not shared without publication')
         bad_operators=operators;bad_fingerprints=fingerprints
         call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,1,&
           [1_int64],[1_int64],[1,2],[int(4*np+1,int64)],[cmplx(1d0,0d0,real64)],&
