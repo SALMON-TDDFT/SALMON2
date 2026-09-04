@@ -9,10 +9,13 @@ program test_fragment_selection
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
     project_dg_hybrid_core_seeds,s_dg_hybrid_core_projection_report,&
-    s_dg_hybrid_support_samples,check_dg_hybrid_seed_support
+    s_dg_hybrid_support_samples,check_dg_hybrid_seed_support,&
+    s_dg_hybrid_projection_factorization_receipt,validate_dg_hybrid_projected_basis
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_density_checked
+  use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
+    prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment
   implicit none
   integer::rank,np,ierr,f,j,a,nx,variant,owner,expected(4),nexpected,setup_saved,run_saved
   integer::raw_shape(3),core_shape(3),total_shape(3),mapping(8,3),bad_mapping(8,3)
@@ -286,12 +289,15 @@ contains
     call require(setup_calls==setup_before.and.run_calls==run_before,'permuted reference reran W90')
   end subroutine
   subroutine test_selected_pw_connection()
+    type(s_dg_hybrid_fragment_wannier_cache)::half_raw
     type(s_dg_hybrid_fragment_wannier_cache)::raw
     type(s_dg_hybrid_dc_reference)::bound_reference
     type(s_dg_hybrid_core_selection)::chosen,corrupt
     type(s_dg_hybrid_selected_catalog)::active,invalid
     type(s_dg_hybrid_basis_catalog)::packets
     type(s_dg_hybrid_fragment_basis)::selected_basis,unselected_basis
+    type(s_dg_hybrid_fragment_basis)::changed_basis
+    type(s_dg_hybrid_projection_factorization_receipt)::basis_receipt,changed_receipt
     type(s_dg_hybrid_core_projection_report)::report
     type(s_dg_hybrid_fragment_subspace_state)::initial,saved
     integer,allocatable::chosen_seeds(:)
@@ -351,8 +357,28 @@ contains
     enddo
     call build_dg_hybrid_projected_local_fragment_basis(MPI_COMM_WORLD,4*np,np,f,core,core_weights,&
       coords(:,:4),windows(:,:4),physical,active%local_values,coords,windows,packets,g,&
-      active%wannier_owner,2,1d-12,active%fingerprint,selected_basis,mem,fp,passed,why,basis_generation=3)
+      active%wannier_owner,2,1d-12,active%fingerprint,selected_basis,mem,fp,passed,why,&
+      basis_generation=3,projection_receipt=basis_receipt)
     call require(passed,'selected WF to production PW pipeline: '//trim(why))
+    call validate_dg_hybrid_projected_basis(MPI_COMM_WORLD,selected_basis,basis_receipt,&
+      active%fingerprint,passed,why)
+    call require(passed,'fresh projected basis failed validation: '//trim(why))
+    call test_combined_admission(raw,chosen,selected_basis,basis_receipt)
+    do p=1,5
+      changed_basis=selected_basis;changed_receipt=basis_receipt
+      if(rank==0)then
+        select case(p)
+        case(1);changed_basis%buffer_values(1,4)=changed_basis%buffer_values(1,4)+0.1d0
+        case(2);changed_basis%global_ids(1)=changed_basis%global_ids(1)+1_int64
+        case(3);changed_basis%buffer_point_ids(1)=0_int64
+        case(4);changed_receipt%metric_fingerprint=ieor(changed_receipt%metric_fingerprint,1_int64)
+        case(5);deallocate(changed_basis%sector)
+        end select
+      endif
+      call validate_dg_hybrid_projected_basis(MPI_COMM_WORLD,changed_basis,changed_receipt,&
+        active%fingerprint,passed,why)
+      call require(.not.passed,'mutated projected WF/PW payload or receipt accepted')
+    enddo
     call require(all(selected_basis%global_ids(:3)==active%local_active_ids),'pipeline lost active IDs')
     call require(maxval(abs(selected_basis%buffer_values(:,:3)-transpose(active%local_values)))<1d-13,&
       'pipeline clipped selected buffer values')
@@ -537,6 +563,103 @@ contains
     call require(.not.passed.and..not.invalid%valid.and..not.allocated(invalid%local_values),&
       'invalid selection published active catalog')
     call require(run_calls==run0.and.setup_calls==setup0,'PW catalog reran W90')
+    ! A new physical construction, not altered quadrature: seed 2 has half
+    ! its extended-domain norm in the core. Exact projection must precede the
+    ! fail-only density gate; normalizing it must not silently change density.
+    dc(2,:)=0d0;dc(2,2)=sqrt(0.5d0);dc(2,5)=sqrt(0.5d0)
+    call build_dg_hybrid_fragment_wannier(MPI_COMM_WORLD,MPI_COMM_SELF,f,4,'combined-half-norm',&
+      ids,quad,dc,energies,occupations,aux,proj,1d-12,cell,recip,&
+      ['H '],atoms,frac,20,1d-10,10000000_int64,half_raw,passed,why)
+    call require(passed,'half-norm raw construction: '//trim(why))
+    run0=run_calls;setup0=setup_calls
+    call select_dg_hybrid_core_wannier(MPI_COMM_WORLD,f,half_raw,cell,start,tot,[0d0,0d0,0d0],&
+      boxes,widths,[8,1,1],[4,1,1],[4*np,1,1],map,chosen,passed,why)
+    call require(passed,'half-norm selection: '//trim(why))
+    call prepare_dg_hybrid_selected_catalog(MPI_COMM_WORLD,f,half_raw,chosen,active,passed,why)
+    call require(passed,'half-norm catalog: '//trim(why))
+    call build_dg_hybrid_projected_local_fragment_basis(MPI_COMM_WORLD,4*np,np,f,core,core_weights,&
+      coords(:,:4),windows(:,:4),physical,active%local_values,coords,windows,packets,g,&
+      active%wannier_owner,2,1d-12,active%fingerprint,selected_basis,mem,fp,passed,why,&
+      basis_generation=4,projection_receipt=basis_receipt)
+    call require(passed,'half-norm PW projection: '//trim(why))
+    call test_combined_admission(half_raw,chosen,selected_basis,basis_receipt,.true.)
+    call require(run_calls==run0.and.setup_calls==setup0,'half-norm admission reran W90')
+  end subroutine
+  subroutine test_combined_admission(raw,selection,basis,receipt,expect_density_failure)
+    logical,optional,intent(in)::expect_density_failure
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    type(s_dg_hybrid_support_operator)::operators(3),bad_operators(3)
+    type(s_dg_hybrid_admission_report)::report
+    type(s_dg_hybrid_fragment_subspace_state)::initial,saved
+    type(s_dg_hybrid_fragment_basis)::bad_basis
+    integer(int64)::fingerprints(3),bad_fingerprints(3),physical(8)
+    integer,allocatable::selected(:)
+    real(real64)::limits(4),support_limits(3)
+    logical::passed
+    character(256)::why
+    physical=selection%physical_grid_ids;limits=[1d-12,1d-10,1d-10,1d-10];support_limits=1d-10
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,1,&
+      physical([1,4,7]),physical([1,4,7]),&
+      [1,2,3,4],physical([1,4,7]),[cmplx(1d0,0d0,real64),cmplx(1d0,0d0,real64),cmplx(1d0,0d0,real64)],&
+      [1d0,1d0,1d0],operators(1),fingerprints(1),passed,why)
+    call require(passed,'boundary operator manifest: '//trim(why))
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,2,&
+      physical([2,6]),physical([2,6]),&
+      [1,3,5],physical([1,2,5,7]),cmplx([-1d0,1d0,-0.5d0,0.5d0],0d0,real64),&
+      [1d0,1d0],operators(2),fingerprints(2),passed,why)
+    call require(passed,'derivative operator manifest: '//trim(why))
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,3,&
+      [int(f,int64)],[int(f,int64)],&
+      [1,4],physical([1,4,7]),cmplx([1d0,1d0,1d0]/sqrt(3d0),0d0,real64),&
+      [1d0],operators(3),fingerprints(3),passed,why)
+    call require(passed,'projector operator manifest: '//trim(why))
+    call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+      fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,0,1d-8,1d-10,1d-10,&
+      initial,selected,report,passed,why)
+    if(present(expect_density_failure))then
+      if(expect_density_failure)then
+        call require(.not.passed.and.report%core%measured.and.report%support_measured.and.&
+          maxval(report%support_defects)<1d-10.and.report%core%orbital_residual<1d-10.and.&
+          maxval(report%density_defects)>1d-2.and..not.report%valid.and..not.allocated(selected),&
+          'physical half-core-norm seed did not reach/reject at density gate: '//trim(why))
+        limits(3:4)=2d0
+        call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+          fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,0,1d-8,1d-10,1d-10,&
+          initial,selected,report,passed,why)
+        call require(.not.passed.and.index(why,'post-initialization support')>0.and.&
+          .not.allocated(selected).and..not.allocated(initial%vectors),&
+          'loose density gate admitted changed final support: '//trim(why))
+        return
+      endif
+    endif
+    call require(passed.and.report%valid.and.initial%state_count==2.and.all(selected==[1,2]),&
+      'combined selected fragment admission: '//trim(why))
+    saved=initial;bad_basis=basis
+    if(rank==0)bad_basis%buffer_values(1,4)=bad_basis%buffer_values(1,4)+0.1d0
+    call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,bad_basis,receipt,operators,&
+      fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,0,1d-8,1d-10,1d-10,&
+      initial,selected,report,passed,why)
+    call require(.not.passed.and..not.report%valid.and..not.allocated(selected).and.&
+      all(initial%vectors==saved%vectors),'changed PW basis published a solver state')
+    bad_fingerprints=fingerprints
+    if(rank==0)bad_fingerprints(2)=ieor(bad_fingerprints(2),1_int64)
+    call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+      bad_fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,0,1d-8,1d-10,1d-10,&
+      initial,selected,report,passed,why)
+    call require(.not.passed.and.all(initial%vectors==saved%vectors),'stale operator context accepted')
+    call admit_dg_hybrid_selected_fragment(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+      fingerprints,[0.5d0,0.5d0,0.5d0,0.5d0],limits,support_limits,0d0,0,1d-8,1d-10,1d-10,&
+      initial,selected,report,passed,why)
+    call require(.not.passed.and.index(why,'core quadrature')>0.and.&
+      all(initial%vectors==saved%vectors).and..not.allocated(selected),&
+      'changed core quadrature was treated as a physical initialization error')
+    call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,3,1,physical([1,4,7]),physical([4,1,7]),&
+      [1,2,3,4],physical([1,4,7]),cmplx([1d0,1d0,1d0],0d0,real64),&
+      [1d0,1d0,1d0],bad_operators(1),bad_fingerprints(1),passed,why)
+    call require(.not.passed.and.bad_fingerprints(1)==0_int64,'misordered sample manifest accepted')
   end subroutine
   subroutine test_support_checks(full_basis,raw_seeds,dc_coeff,excluded)
     complex(real64),intent(in)::full_basis(8,4),raw_seeds(:,:),dc_coeff(:,:),excluded(8)

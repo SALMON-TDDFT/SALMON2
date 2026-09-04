@@ -41,7 +41,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
                 "src/gs/dc/dg_hybrid_fragment_basis_stream.f90",
                 "src/gs/dc/dg_hybrid_broken_volume.f90",
                 "src/gs/dc/dg_hybrid_fragment_subspace.f90",
-                "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90"]
+                "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90",
+                "src/gs/dc/dg_hybrid_fragment_admission.f90"]
     sources += ["tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90",
                 "tests/dg/test_dg_hybrid_fragment_selection_mpi.f90"]
     executable = build / "selection"

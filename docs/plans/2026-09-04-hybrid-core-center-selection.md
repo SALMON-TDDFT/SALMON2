@@ -306,6 +306,39 @@ nonlocal operator validation remains C5; these explicit stencils are not a
 substitute. C3 remains open, main/C4--C6 are unchanged, and no DC/material run
 was repeated. All pre-existing dirty files and verification logs were retained.
 
+**Sixth partial checkpoint, 2026-09-04 (combined numerical admission):**
+Added `dg_hybrid_fragment_admission` as a separate adapter. It rebuilds the
+selected catalog and raw DC reference, verifies the projected basis payload
+receipt, and binds the ordered physical core IDs and quadrature weights to
+those used by the PW producer. Changed weights are rejected as an input
+binding mismatch, not misreported as a physical density failure.
+
+Frozen sparse support manifests bind channel, fragment, generation, required
+sample identities/order, physical grid IDs, coefficients and weights. The
+adapter evaluates each functional on both the selected basis and raw DC
+reference; callers cannot substitute precomputed support values or density.
+Core projection, support checks and density-checked initialization are combined
+without publishing an intermediate solver state. Independent review identified
+that initialization can change support even when its density error is allowed.
+The initializer now writes a temporary state; all three support channels are
+checked again against the selected raw seeds before final publication.
+
+The regression uses a separately constructed, extended-domain-normalized seed
+with core norm 1/2. Its exact core and support projection passes, but subsequent
+normalization fails the density gate. With only the density tolerance relaxed,
+the old combined entry incorrectly accepted it (RED); the final support gate
+now rejects it (GREEN). Changed basis payloads, stale operator fingerprints,
+misordered manifests and changed quadrature also reject without state changes.
+No additional W90 calls occur during admission of either cached generation.
+
+Selection tests pass on 1/2/4/8 ranks; projected pipeline and raw-Wannier tests
+pass on 2/4/8; fragment-subspace tests pass on 1/2/4/8. Release build succeeds.
+Independent re-review has no remaining Critical/Important issue. This remains
+a numerical checkpoint: actual production operator inventory adapters and
+SIPG/nonlocal acceptance are C5, and the main route remains C6. C3 is not being
+declared a general physical DC handoff. No DC/material calculation was repeated;
+all unrelated dirty changes and existing verification logs were preserved.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`

@@ -28,7 +28,8 @@ module dg_hybrid_projected_fragment_pipeline
   type,public::s_dg_hybrid_projection_factorization_receipt
     logical::valid=.false.
     integer::basis_generation=0,metric_rank=0,metric_factorization_count=0,projected_tile_count=0
-    integer(int64)::wannier_fingerprint=0_int64,metric_fingerprint=0_int64
+    integer(int64)::wannier_fingerprint=0_int64,metric_fingerprint=0_int64,payload_fingerprint=0_int64
+    integer(int64)::core_quadrature_fingerprint=0_int64
   end type s_dg_hybrid_projection_factorization_receipt
   type,public::s_dg_hybrid_dual_basis_catalog
     logical::valid=.false.
@@ -45,6 +46,8 @@ module dg_hybrid_projected_fragment_pipeline
   public::build_dg_hybrid_projected_local_fragment_basis
   public::project_dg_hybrid_core_seeds
   public::check_dg_hybrid_seed_support
+  public::validate_dg_hybrid_projected_basis
+  public::dg_hybrid_core_quadrature_binding
   interface
     subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
       import::real64
@@ -56,6 +59,75 @@ module dg_hybrid_projected_fragment_pipeline
     end subroutine zheev
   end interface
 contains
+  ! Ordered physical core IDs and weights: admission uses this same row order.
+  integer(int64) function dg_hybrid_core_quadrature_binding(ids,weights)result(hash)
+    integer(int64),intent(in)::ids(:)
+    real(real64),intent(in)::weights(:)
+    integer::i
+    hash=0_int64
+    if(size(ids)/=size(weights))return
+    hash=1703_int64
+    call hash_accumulate(hash,int(size(ids),int64))
+    do i=1,size(ids)
+      call hash_accumulate(hash,ids(i))
+      call hash_accumulate(hash,transfer(weights(i),0_int64))
+    enddo
+    if(hash==0_int64)hash=1_int64
+  end function
+  subroutine validate_dg_hybrid_projected_basis(comm,basis,receipt,expected_wannier_fingerprint,ok,message)
+    integer,intent(in)::comm
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    integer(int64),intent(in)::expected_wannier_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical::valid
+    valid=receipt%valid.and.basis%fragment_id>0.and.basis%generation==receipt%basis_generation.and.&
+      receipt%basis_generation>0.and.receipt%wannier_fingerprint==expected_wannier_fingerprint.and.&
+      expected_wannier_fingerprint/=0_int64.and.receipt%metric_fingerprint/=0_int64.and.&
+      receipt%metric_rank>0.and.receipt%metric_factorization_count==1.and.receipt%projected_tile_count>0.and.&
+      allocated(basis%global_ids).and.allocated(basis%sector).and.&
+      allocated(basis%buffer_point_ids).and.allocated(basis%buffer_values)
+    call synchronize_status(comm,valid,'invalid projected basis receipt',ok,message);if(.not.ok)return
+    valid=size(basis%global_ids)>0.and.size(basis%sector)==size(basis%global_ids).and.&
+      all(shape(basis%buffer_values)==[size(basis%buffer_point_ids),size(basis%global_ids)]).and.&
+      all(basis%global_ids>0_int64).and.all(basis%buffer_point_ids>0_int64).and.&
+      all(basis%sector>=1).and.all(basis%sector<=2).and.finite_complex_matrix(basis%buffer_values)
+    call synchronize_status(comm,valid,'invalid projected basis payload',ok,message);if(.not.ok)return
+    valid=receipt%payload_fingerprint/=0_int64.and.&
+      receipt%payload_fingerprint==projected_payload_hash(basis,receipt)
+    call synchronize_status(comm,valid,'projected basis payload integrity mismatch',ok,message)
+  end subroutine
+
+  integer(int64) function projected_payload_hash(basis,receipt)result(hash)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    integer::i,j
+    hash=0_int64
+    if(.not.allocated(basis%global_ids).or..not.allocated(basis%sector).or.&
+      .not.allocated(basis%buffer_point_ids).or..not.allocated(basis%buffer_values))return
+    hash=1701_int64
+    call hash_accumulate(hash,int(basis%fragment_id,int64))
+    call hash_accumulate(hash,int(basis%generation,int64))
+    call hash_accumulate(hash,basis%provenance_fingerprint)
+    call hash_accumulate(hash,int(receipt%basis_generation,int64))
+    call hash_accumulate(hash,int(receipt%metric_rank,int64))
+    call hash_accumulate(hash,int(receipt%metric_factorization_count,int64))
+    call hash_accumulate(hash,int(receipt%projected_tile_count,int64))
+    call hash_accumulate(hash,receipt%wannier_fingerprint)
+    call hash_accumulate(hash,receipt%metric_fingerprint)
+    call hash_accumulate(hash,receipt%core_quadrature_fingerprint)
+    call hash_accumulate(hash,int(size(basis%global_ids),int64))
+    call hash_accumulate(hash,int(size(basis%buffer_point_ids),int64))
+    do i=1,size(basis%global_ids);call hash_accumulate(hash,basis%global_ids(i));enddo
+    do i=1,size(basis%sector);call hash_accumulate(hash,int(basis%sector(i),int64));enddo
+    do i=1,size(basis%buffer_point_ids);call hash_accumulate(hash,basis%buffer_point_ids(i));enddo
+    do j=1,size(basis%buffer_values,2);do i=1,size(basis%buffer_values,1)
+      call hash_accumulate(hash,transfer(real(basis%buffer_values(i,j),real64),0_int64))
+      call hash_accumulate(hash,transfer(aimag(basis%buffer_values(i,j)),0_int64))
+    enddo;enddo
+    if(hash==0_int64)hash=1_int64
+  end function
   ! Numerical admission of supplied support evidence, not a proof of inventory
   ! completeness. The operator adapter must supply required_counts independently
   ! of these arrays and bind sample identities/order to the same raw reference.
@@ -548,6 +620,8 @@ contains
     working_receipt%metric_factorization_count=1
     working_receipt%wannier_fingerprint=wannier_fingerprint
     working_receipt%metric_fingerprint=metric_fingerprint
+    working_receipt%core_quadrature_fingerprint=dg_hybrid_core_quadrature_binding(core_ids,weights)
+    working_receipt%payload_fingerprint=projected_payload_hash(basis,working_receipt)
     if(present(projection_receipt))projection_receipt=working_receipt
     workspace_peak_bytes=working_workspace;fingerprint=working_fingerprint
     deallocate(pw_owner,normalized_buffer_windows);ok=.true.
