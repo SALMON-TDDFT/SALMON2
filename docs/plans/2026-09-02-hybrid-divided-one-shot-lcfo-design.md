@@ -522,3 +522,30 @@ Implementation follows TDD in this order:
    count, reporting stationarity rather than silently adding iterations.
 
 All existing dirty changes and verification directories remain untouched.
+
+## Superseding route-removal decision, 2026-09-05
+
+After the separated fragment-local production route is implemented and its
+focused numerical and source-contract tests are GREEN, remove the obsolete
+divided-only implementation rather than retaining a hidden fallback.  The
+boundary is behavioral, not merely a list of routine names:
+
+- remove the divided callback that applies ordinary grid `hpsi` to every
+  basis tile, its identity-metric companion, and the whole-local-basis dense
+  fragment eigensolver/occupation adapter;
+- remove the preliminary-complete-LCFO-dependent divided branch and any state
+  padding or raw-retained-rank initialization used only by that branch;
+- retain conventional overlapping-Wannier ground state, continuation, shared
+  DC potential/mixing helpers, production operator assembly, and the single
+  terminal complete LCFO path;
+- do not delete shared routines solely because the new divided route no longer
+  calls them; another production or reference route must be checked first; and
+- perform deletion only after the new path passes direct-construction,
+  admission, production-H/S, thermal occupation, bounded-update and divided-SCF
+  tests.  Rerun those tests after deletion so no result depends on the legacy
+  implementation remaining in the source.
+
+This staged replacement is preferred to immediate deletion because it gives a
+testable behavioral handoff while still leaving one supported divided route at
+the end.  There is no runtime option or automatic fallback to the removed
+algorithm.

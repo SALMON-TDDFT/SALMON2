@@ -1603,6 +1603,14 @@ decomposition-consistent.
 
 **Step 5: Run GREEN and build**
 
+Before the final GREEN run, once the separated route itself passes its focused
+tests, delete the obsolete divided-only ordinary-`hpsi`, identity-metric and
+whole-local-basis dense-solve callbacks and the preliminary-LCFO-dependent
+divided branch.  Keep conventional OW, continuation, shared DC
+potential/mixing/operator helpers and terminal LCFO.  Extend the route checks
+to reject definitions as well as calls of the removed divided callbacks, then
+rerun the focused set after deletion.  Do not leave a runtime fallback.
+
 Run:
 
 ```text
