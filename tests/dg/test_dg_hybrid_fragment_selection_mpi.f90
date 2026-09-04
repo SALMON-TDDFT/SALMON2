@@ -10,6 +10,8 @@ program test_fragment_selection
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
     project_dg_hybrid_core_seeds,s_dg_hybrid_core_projection_report
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
+  use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
+    initialize_dg_hybrid_fragment_density_checked
   implicit none
   integer::rank,np,ierr,f,j,a,nx,variant,owner,expected(4),nexpected,setup_saved,run_saved
   integer::raw_shape(3),core_shape(3),total_shape(3),mapping(8,3),bad_mapping(8,3)
@@ -27,6 +29,8 @@ program test_fragment_selection
   type(s_dg_hybrid_core_selection)::selection,again
   type(s_dg_hybrid_selected_catalog)::unequal_catalog
   integer,allocatable::selected_counts(:)
+  complex(real64)::density_metric(4,4)
+  logical::density_callback_failure=.false.
   logical::ok
   character(256)::message
   call MPI_Init(ierr)
@@ -238,6 +242,10 @@ contains
     type(s_dg_hybrid_basis_catalog)::packets
     type(s_dg_hybrid_fragment_basis)::selected_basis,unselected_basis
     type(s_dg_hybrid_core_projection_report)::report
+    type(s_dg_hybrid_fragment_subspace_state)::initial,saved
+    integer,allocatable::chosen_seeds(:)
+    real(real64)::reference_density(4),density_errors(2)
+    real(real64)::density_limit
     real(real64)::cell(3,3),tot(3,3),recip(3,3),boxes(3,np),widths(3,np),start(3)
     real(real64)::coords(3,8),windows(np,8),g(3,1),core_weights(4),quad(8),frac(3,8)
     complex(real64)::dc(2,8),aux(1,8),proj(1,8),target(4)
@@ -370,11 +378,100 @@ contains
     call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,metric_weights,reference,&
       [1.5d0],limits,3,0d0,coeff,report,passed,why)
     call require(.not.passed.and.index(why,'controls differ')>0,'rank-disagreeing projection controls accepted')
+    limits=[1d-12,1d-10,1d-10,1d-10]
+    density_metric=matmul(conjg(transpose(mixed_basis)),mixed_basis)
+    ! The exact projected seed has core norm 1/2: no PW-span error exists.
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,core_weights,reference,&
+      [2d0],limits,3,0d0,coeff,report,passed,why)
+    call require(passed.and.report%orbital_residual<1d-11,'half-norm seed is not exactly representable')
+    reference_density=2d0*abs(reference(:,1))**2
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0],[2d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and.index(why,'post-initializer density mismatch')>0.and.&
+      .not.allocated(initial%vectors).and..not.allocated(chosen_seeds),&
+      'half-norm initializer published density-changing state or mislabeled span failure')
+    call require(abs(density_errors(2)-1d0)<1d-10,'half-norm density did not double as expected')
+    ! Unit-core-norm state is admissible; energy/occupation follow returned IDs.
+    coeff=coeff*sqrt(2d0);reference_density=reference_density*2d0
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0],[2d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(passed.and.all(chosen_seeds==[1]).and.maxval(density_errors)<1d-10,&
+      'density-preserving initialization failed: '//trim(why))
+    saved=initial
+    if(rank==0)reference_density=reference_density*0.5d0
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0],[2d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and..not.allocated(chosen_seeds).and.&
+      all(initial%vectors==saved%vectors).and.all(initial%directions==saved%directions),&
+      'one-rank density failure changed an existing solver state')
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,core_weights,dc_reference,&
+      [0.5d0,1.5d0],limits,3,0d0,coeff,report,passed,why)
+    call require(passed,'fractionally occupied seed projection failed')
+    reference_density=0.5d0*abs(dc_reference(:,1))**2+1.5d0*abs(dc_reference(:,2))**2
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(passed.and.all(chosen_seeds==[2,1]).and.maxval(density_errors)<1d-10,&
+      'energy sorting lost the fractional occupation mapping')
+    saved=initial
+    if(rank==0)reference_density=cshift(reference_density,1)
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and.density_errors(2)<1d-10.and.all(initial%vectors==saved%vectors),&
+      'density redistribution was accepted solely because electron count matched')
+    reference_density=0.5d0*abs(dc_reference(:,1))**2+1.5d0*abs(dc_reference(:,2))**2
+    density_limit=1d-10;if(rank==0)density_limit=2d-10
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      density_limit,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and.index(why,'controls differ')>0,'different density controls accepted')
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],merge(1,0,rank==0),1d-8,1d-10,1d-10,&
+      mixed_basis,core_weights,reference_density,1d-10,1d-10,apply_density_metric,initial,&
+      chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and.index(why,'controls differ')>0,'different guard counts accepted')
+    if(rank==0)then
+      call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+        coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+        1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why,energy_cutoff=-1d0)
+    else
+      call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+        coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+        1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    endif
+    call require(.not.passed.and.index(why,'controls differ')>0,'different cutoff presence accepted')
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why,&
+      energy_cutoff=merge(-1d0,0d0,rank==0))
+    call require(.not.passed.and.index(why,'controls differ')>0,'different energy cutoffs accepted')
+    density_callback_failure=rank==0
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and..not.allocated(chosen_seeds).and.all(initial%vectors==saved%vectors),&
+      'one-rank metric callback failure published state')
+    density_callback_failure=.false.
+    if(rank==0)reference_density(1)=ieee_value(0d0,ieee_quiet_nan)
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,3,11_int64,13_int64,&
+      coeff,[-1d0,-2d0],[0.5d0,1.5d0],0,1d-8,1d-10,1d-10,mixed_basis,core_weights,reference_density,&
+      1d-10,1d-10,apply_density_metric,initial,chosen_seeds,density_errors,passed,why)
+    call require(.not.passed.and.all(initial%vectors==saved%vectors),'nonfinite reference density accepted')
     corrupt=chosen;if(rank==0)corrupt%fingerprint=ieor(corrupt%fingerprint,1_int64)
     call prepare_dg_hybrid_selected_catalog(MPI_COMM_WORLD,f,raw,corrupt,invalid,passed,why)
     call require(.not.passed.and..not.invalid%valid.and..not.allocated(invalid%local_values),&
       'invalid selection published active catalog')
     call require(run_calls==run0.and.setup_calls==setup0,'PW catalog reran W90')
+  end subroutine
+  subroutine apply_density_metric(input,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    output=matmul(density_metric,input);valid=.not.density_callback_failure
   end subroutine
   subroutine invoke(input_cache,input_mapping)
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::input_cache

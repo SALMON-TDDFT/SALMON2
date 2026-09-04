@@ -212,9 +212,41 @@ The probe above does not authorize publishing an accepted solver state or
 claim a general density-preserving DC handoff. C4/C5/C6 and main are unchanged;
 no material/DC calculation was rerun and all pre-existing dirty data is retained.
 
+**Third partial checkpoint, 2026-09-04 (actual initializer density gate):** Added
+`initialize_dg_hybrid_fragment_density_checked` in the subspace module, preserving
+the legacy initializer API. The explicit single-owner adapter validates a
+bijective rank--fragment map, initializes a temporary state on MPI_COMM_SELF,
+and computes physical core density with the returned selected seed IDs and
+their original occupations. The caller's reference density is never rescaled.
+Relative weighted density L1 and absolute electron defects are returned
+separately. Any rank's failure preserves every caller state and publishes no
+selected-seed output; state vectors are moved only after collective admission.
+The callback must be fragment-local, without total-communicator collectives.
+Tolerances, guard count and optional cutoff presence/value are shared controls;
+local seed spectra, occupations and dimensions may differ.
+
+The integrated 2/4/8-rank test first passes an exact core projection with seed
+norm 1/2, then verifies that the real initializer doubles density and is rejected
+specifically as a post-initializer density mismatch, not insufficient PW span.
+A unit-core-norm positive case passes. Fractional occupation/energy reordering,
+equal-electron-number density redistribution, one-rank failure rollback, metric
+callback failure, NaN reference and differing controls are also covered. Review
+prompted the guard/cutoff agreement tests; the guard mismatch was reproduced RED
+before adding those checks. The selection runner passes on 1/2/4/8 ranks, the
+legacy subspace runner passes on 1/2/4/8, the raw-Wannier runner passes on 2/4/8,
+and release builds. Independent review has no remaining Critical/Important issue.
+
+This is fail-only admission, not an occupation transformation or a completed
+production DC handoff. C3 still needs authoritative raw-reference/selected-basis
+binding and required boundary/derivative/projector reconstruction diagnostics.
+The half-norm example is controlled test data, not a representative material
+calculation triggering the separate occupation-design decision. No C4/C5/C6 or
+main switch was attempted; old dirty changes and verification logs are retained.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`
+- Modify: `src/gs/dc/dg_hybrid_fragment_subspace.f90` (density-checked initializer adapter)
 - Modify: `tests/dg/test_dg_hybrid_fragment_selection_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_fragment_selection_mpi.py`
 - Modify: `tests/dg/test_dg_hybrid_projected_fragment_pipeline_mpi.f90`

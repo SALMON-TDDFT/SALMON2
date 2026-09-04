@@ -53,8 +53,112 @@ module dg_hybrid_fragment_subspace
   public::measure_dg_hybrid_fragment_subspace
   public::extend_dg_hybrid_fragment_subspace
   public::initialize_dg_hybrid_fragment_subspace
+  public::initialize_dg_hybrid_fragment_density_checked
   public::advance_dg_hybrid_fragment_epoch
 contains
+  ! Single-owner adapter. The legacy initializer runs on a temporary state on
+  ! MPI_COMM_SELF; only a collectively density-admissible state is published.
+  ! apply_s must be fragment-local (no total-communicator collectives). Guard,
+  ! cutoff presence/value and tolerances are shared controls; seed counts,
+  ! spectra and occupations can differ between fragments.
+  subroutine initialize_dg_hybrid_fragment_density_checked(comm,fragment_id,generation,basis_fp,metric_fp,&
+      seed_coefficients,seed_energies,seed_occupations,guard_count,occupation_tolerance,energy_tolerance,&
+      orthogonality_tolerance,core_basis,weights,reference_density,density_tolerance,electron_tolerance,&
+      apply_s,state,selected_seeds,defects,ok,message,energy_cutoff)
+    integer,intent(in)::comm,fragment_id,generation,guard_count
+    integer(int64),intent(in)::basis_fp,metric_fp
+    complex(real64),intent(in)::seed_coefficients(:,:),core_basis(:,:)
+    real(real64),intent(in)::seed_energies(:),seed_occupations(:),occupation_tolerance,energy_tolerance,&
+      orthogonality_tolerance,weights(:),reference_density(:),density_tolerance,electron_tolerance
+    real(real64),optional,intent(in)::energy_cutoff
+    procedure(fragment_apply)::apply_s
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    integer,allocatable,intent(out)::selected_seeds(:)
+    real(real64),intent(out)::defects(2)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical::halting(3)
+    call suspend_traps(halting);call execute();call restore_traps(halting)
+  contains
+    subroutine execute()
+      type(s_dg_hybrid_fragment_subspace_state)::working
+      integer,allocatable::fragments(:),chosen(:)
+      integer(int64),allocatable::local_ids(:)
+      complex(real64),allocatable::physical(:,:)
+      real(real64),allocatable::density(:)
+      integer::np,ierr,n,p,j,stat
+      real(real64)::controls(8),minimum(8),maximum(8),electrons
+      logical::valid,initialized
+      character(256)::why
+      defects=huge(1d0);ok=.false.;message='invalid density-checked initialization'
+      call MPI_Comm_size(comm,np,ierr)
+      n=size(seed_coefficients,1);p=size(core_basis,1)
+      controls=[occupation_tolerance,energy_tolerance,orthogonality_tolerance,&
+        density_tolerance,electron_tolerance,real(guard_count,real64),&
+        real(merge(1,0,present(energy_cutoff)),real64),0d0]
+      if(present(energy_cutoff))controls(8)=energy_cutoff
+      valid=ierr==MPI_SUCCESS.and.fragment_id>=1.and.fragment_id<=np.and.n>0.and.p>0.and.&
+        size(core_basis,2)==n.and.size(weights)==p.and.size(reference_density)==p.and.&
+        finite(core_basis).and.all(ieee_is_finite(weights)).and.all(weights>0d0).and.&
+        all(ieee_is_finite(reference_density)).and.all(reference_density>=0d0).and.&
+        all(ieee_is_finite(controls)).and.density_tolerance>0d0.and.electron_tolerance>0d0
+      call check(valid,'invalid density-checked initialization input');if(.not.ok)return
+      call MPI_Allreduce(controls,minimum,8,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+      call check(ierr==MPI_SUCCESS,'initial density controls exchange failed');if(.not.ok)return
+      call MPI_Allreduce(controls,maximum,8,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      call check(ierr==MPI_SUCCESS.and.all(minimum==maximum),'initial density controls differ');if(.not.ok)return
+      allocate(fragments(np),local_ids(n),stat=stat)
+      call check(stat==0,'initial density directory allocation failed');if(.not.ok)return
+      call MPI_Allgather(fragment_id,1,MPI_INTEGER,fragments,1,MPI_INTEGER,comm,ierr)
+      valid=ierr==MPI_SUCCESS
+      do j=1,np;valid=valid.and.count(fragments==j)==1;enddo
+      call check(valid,'density-checked initialization requires one rank per fragment');if(.not.ok)return
+      local_ids=[(int(j,int64),j=1,n)]
+      call initialize_dg_hybrid_fragment_subspace(MPI_COMM_SELF,n,local_ids,fragment_id,generation,&
+        basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
+        occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,working,chosen,initialized,why,&
+        energy_cutoff)
+      call check(initialized,'fragment initialization failed: '//trim(why));if(.not.ok)return
+      allocate(physical(p,size(chosen)),density(p),stat=stat)
+      call check(stat==0,'post-initializer density allocation failed');if(.not.ok)return
+      physical=matmul(core_basis,working%vectors);density=0d0
+      do j=1,size(chosen)
+        density=density+seed_occupations(chosen(j))*abs(physical(:,j))**2
+      enddo
+      electrons=sum(weights*reference_density)
+      defects(1)=sum(weights*abs(density-reference_density))/max(1d0,electrons)
+      defects(2)=abs(sum(weights*(density-reference_density)))
+      valid=finite(physical).and.all(ieee_is_finite(density)).and.ieee_is_finite(electrons).and.&
+        all(ieee_is_finite(defects))
+      call check(valid,'nonfinite post-initializer density');if(.not.ok)return
+      write(why,'(a,i0,a,2es14.6)')'post-initializer density mismatch: fragment=',fragment_id,&
+        ' density/electron=',defects
+      call check(defects(1)<=density_tolerance.and.defects(2)<=electron_tolerance,why)
+      if(.not.ok)return
+      call move_alloc(working%vectors,state%vectors);call move_alloc(working%directions,state%directions)
+      state%fragment_id=working%fragment_id;state%basis_generation=working%basis_generation
+      state%basis_fingerprint=working%basis_fingerprint;state%metric_fingerprint=working%metric_fingerprint
+      state%state_count=working%state_count;state%history_rank_used=working%history_rank_used
+      state%maximum_trial_dimension=working%maximum_trial_dimension
+      call move_alloc(chosen,selected_seeds)
+    end subroutine
+    subroutine check(valid,description)
+      logical,intent(in)::valid
+      character(*),intent(in)::description
+      integer::rank,ierr,bad,first_bad
+      character(256)::why
+      call MPI_Comm_rank(comm,rank,ierr)
+      bad=huge(0);if(.not.valid)bad=rank
+      call MPI_Allreduce(bad,first_bad,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      ok=ierr==MPI_SUCCESS;message='initial density status exchange failed'
+      if(.not.ok)return
+      if(first_bad==huge(0))then;message='';return;endif
+      why=description
+      call MPI_Bcast(why,len(why),MPI_CHARACTER,first_bad,comm,ierr)
+      ok=.false.;message=why
+    end subroutine
+  end subroutine initialize_dg_hybrid_fragment_density_checked
+
   subroutine advance_dg_hybrid_fragment_epoch(comm,global_count,row_ids,fragment_id,generation,basis_fp,metric_fp,&
       epoch,maximum_steps,apply_h,apply_s,apply_shifted_preconditioner,intermediate_tolerance,&
       orthogonality_tolerance,allowed_residual_growth,budget,state,eigenvalues,iterations,remaining_steps,&
@@ -145,8 +249,9 @@ contains
       basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
       occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,&
       energy_cutoff)
-    ! Seed columns are physical DC orbitals in uncompressed WF+PW coordinates,
-    ! with zero PW components. Selection never means taking the first named WFs.
+    ! Seed columns are physical DC orbitals in uncompressed WF+PW coordinates;
+    ! selected-space projection may give nonzero PW components. Selection never
+    ! means taking the first named WFs.
     ! The returned inventory is only an initial guess, not a tail/symmetry certificate.
     integer,intent(in)::comm,global_count,fragment_id,generation,guard_count
     integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
