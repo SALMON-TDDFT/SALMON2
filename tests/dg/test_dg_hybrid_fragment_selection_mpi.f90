@@ -17,7 +17,8 @@ program test_fragment_selection
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator,assemble_dg_hybrid_sipg_face
   use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
-    freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection
+    freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
+    materialize_dg_hybrid_production_interior,assemble_dg_hybrid_production_interface_rows
   use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal_rows
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload
   use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload,extract_dg_hybrid_fragment_self_block
@@ -315,14 +316,33 @@ contains
     type(s_dg_hybrid_basis_catalog)::catalog
     type(s_dg_hybrid_fragment_basis)::basis
     type(s_dg_hybrid_core_projection_report)::report
+    type(s_dg_hybrid_fragment_wannier_cache)::bound_raw
+    type(s_dg_hybrid_core_selection)::bound_selection
+    type(s_dg_hybrid_selected_catalog)::bound_active
+    type(s_dg_hybrid_projection_factorization_receipt)::bound_receipt
+    type(s_dg_hybrid_support_operator)::bound_support(3)
+    type(s_dg_hybrid_admission_report)::bound_report
+    type(s_dg_hybrid_fragment_subspace_state)::bound_state
     integer,allocatable::gi(:,:),action(:,:),star(:),conjugate(:)
     real(real64),allocatable::gv(:,:)
     complex(real64),allocatable::coeff(:,:)
     real(real64)::recip(3,3),rotation(3,3,1),coords(3,16),windows(np,16),weights(8)
     real(real64)::wave,cutoffs(2),effective,limits(4),saved_norm,low_residual,low_oracle
     complex(real64)::wf(1,16),tail(16,1),original(16,1)
-    integer(int64)::physical(16),fp,mem,basis_fp
-    integer::p,k,case_id,shell_added,orbit_added,ng,run_before,setup_before
+    complex(real64),allocatable::raw_dc(:,:),raw_aux(:,:),raw_projector(:,:)
+    complex(real64)::raw_overlap
+    real(real64),allocatable::bound_coords(:,:),bound_windows(:,:),raw_fractional(:,:),raw_weights(:)
+    real(real64)::raw_cell(3,3),raw_recip(3,3),bound_boxes(3,np),&
+      bound_widths(3,np),bound_start(3),seed_energy(1),seed_occupation(1)
+    integer,allocatable::bound_mapping(:,:)
+    integer(int64),allocatable::bound_physical(:),raw_ids(:)
+    integer(int64)::physical(16),fp,mem,basis_fp,bound_support_fp(3)
+    complex(real64),allocatable::bound_h(:,:),bound_s(:,:)
+    integer(int64)::bound_operator_fp
+    integer::p,k,case_id,shell_added,orbit_added,ng,run_before,setup_before,bound_run,bound_setup,&
+      shell,first_sufficient_shell,nbound
+    real(real64)::trial_cutoff
+    integer,allocatable::bound_selected(:)
     logical::passed
     character(256)::why
     wave=2d0*acos(-1d0)/real(8*np,real64)
@@ -379,6 +399,104 @@ contains
       call require(all(tail==original).and.abs(saved_norm-1d0)<1d-12,'cutoff probe altered its reference')
     enddo
     call require(run_calls==run_before.and.setup_calls==setup_before,'cutoff change reran W90')
+    nbound=8*np
+    allocate(bound_physical(nbound),raw_ids(nbound),bound_coords(3,nbound),bound_windows(np,nbound),&
+      raw_fractional(3,nbound),raw_weights(nbound),bound_mapping(nbound,3))
+    raw_cell=0d0;raw_recip=0d0;raw_fractional=0d0;bound_boxes=0d0;bound_widths=1d0
+    bound_coords=0d0;bound_windows=0d0
+    raw_cell(1,1)=real(nbound,real64);raw_cell(2,2)=1d0;raw_cell(3,3)=1d0
+    raw_recip(1,1)=wave;raw_recip(2,2)=2d0*acos(-1d0);raw_recip(3,3)=2d0*acos(-1d0)
+    bound_widths(1,:)=8d0
+    do p=1,np;bound_boxes(1,p)=8d0*real(p-1,real64);enddo
+    bound_start=bound_boxes(:,f);raw_weights=1d0;seed_energy=-0.4d0;seed_occupation=2d0
+    allocate(raw_dc(1,nbound),raw_aux(1,nbound),raw_projector(0,nbound))
+    raw_aux=0d0
+    do p=1,nbound
+      bound_physical(p)=int(1+modulo(8*(f-1)+p-1,nbound),int64)
+      ! W90 cache row IDs remain the raw-cell layout; dc_indices below binds
+      ! those rows to their periodic physical IDs.
+      raw_ids(p)=int(p,int64);raw_fractional(1,p)=real(p-1,real64)/real(nbound,real64)
+      bound_mapping(p,:)=[int(bound_physical(p)),1,1]
+      bound_coords(1,p)=real(bound_physical(p)-1_int64,real64)
+      bound_windows(1+int((bound_physical(p)-1_int64)/8_int64),p)=1d0
+      raw_dc(1,p)=0d0
+      if(p<=8)raw_dc(1,p)=sin(wave*real(bound_physical(p)-1_int64,real64))
+    enddo
+    raw_dc=raw_dc/sqrt(sum(abs(raw_dc)**2))
+    raw_aux(1,1)=1d0
+    raw_overlap=dot_product(raw_dc(1,:),raw_aux(1,:))
+    raw_aux=raw_aux-raw_overlap*raw_dc
+    raw_aux=raw_aux/sqrt(sum(abs(raw_aux)**2))
+    use_custom_test_centers=.true.;custom_test_centers_fractional=0d0
+    custom_test_centers_fractional(1:2)=[0.25d0/real(np,real64),1.5d0/real(np,real64)]
+    call build_dg_hybrid_fragment_wannier(MPI_COMM_WORLD,MPI_COMM_SELF,f,9,'bound-cutoff-cache',raw_ids,&
+      raw_weights,raw_dc,seed_energy,seed_occupation,raw_aux,raw_projector,1d-12,raw_cell,raw_recip,&
+      ['H '],atoms,raw_fractional,20,1d-10,10000000_int64,bound_raw,passed,why)
+    use_custom_test_centers=.false.
+    call require(passed,'bound cutoff raw DC construction: '//trim(why))
+    call require(run_calls==run_before+1.and.setup_calls==setup_before+1,&
+      'bound cutoff raw cache did not call Wannier90 exactly once')
+    call select_dg_hybrid_core_wannier(MPI_COMM_WORLD,f,bound_raw,raw_cell,bound_start,&
+      reshape([real(8*np,real64),0d0,0d0,0d0,1d0,0d0,0d0,0d0,1d0],[3,3]),[0d0,0d0,0d0],&
+      bound_boxes,bound_widths,[nbound,1,1],[8,1,1],[nbound,1,1],bound_mapping,bound_selection,passed,why)
+    call require(passed,'bound cutoff center selection: '//trim(why))
+    if(bound_selection%selected_count/=1)then
+      write(why,'(a,i0)')'bound cutoff selected count=',bound_selection%selected_count
+    endif
+    call require(bound_selection%selected_count==1,why)
+    call prepare_dg_hybrid_selected_catalog(MPI_COMM_WORLD,f,bound_raw,bound_selection,bound_active,passed,why)
+    call require(passed,'bound cutoff active catalog: '//trim(why))
+    bound_run=run_calls;bound_setup=setup_calls
+    first_sufficient_shell=-1
+    do shell=0,4
+      trial_cutoff=0d0
+      if(shell>0)trial_cutoff=0.5d0*(real(shell,real64)*wave)**2
+      call build_dg_hybrid_reciprocal_catalog(MPI_COMM_WORLD,recip,rotation,trial_cutoff,1d-12,&
+        gi,gv,action,star,conjugate,fp,effective,shell_added,orbit_added,passed,why)
+      call require(passed,'bound cutoff reciprocal catalog: '//trim(why));ng=size(gv,2)
+      if(allocated(catalog%packets))deallocate(catalog%packets)
+      allocate(catalog%packets(np));catalog%valid=.true.;catalog%requested_cutoff=trial_cutoff
+      catalog%effective_cutoff=effective;catalog%packet_fingerprint=fp;catalog%catalog_fingerprint=fp
+      do p=1,np
+        catalog%packets(p)%fragment_id=p;catalog%packets(p)%owner_rank=np-p;catalog%packets(p)%star_id=1
+        allocate(catalog%packets(p)%g_indices(ng),source=[(k,k=1,ng)])
+      enddo
+      call build_dg_hybrid_projected_local_fragment_basis(MPI_COMM_WORLD,nbound,np,f,bound_physical(:8),weights,&
+        bound_coords(:,:8),bound_windows(:,:8),bound_physical,bound_active%local_values,bound_coords,bound_windows,catalog,gv,&
+        bound_active%wannier_owner,2,1d-12,bound_active%fingerprint,basis,mem,basis_fp,passed,why,&
+        basis_generation=9,projection_receipt=bound_receipt)
+      call require(passed,'bound cutoff projected basis: '//trim(why))
+      call prepare_bound_production_support(basis,bound_support,bound_support_fp,bound_h,bound_s,&
+        bound_operator_fp,passed,why)
+      call require(passed,'bound cutoff production support: '//trim(why))
+      call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,bound_raw,bound_selection,basis,bound_receipt,&
+        bound_support,bound_support_fp,weights,limits,[1d-10,1d-10,1d-10],trial_cutoff,1,0,&
+        1d-10,1d-10,bound_state,bound_selected,bound_report,passed,why)
+      if(passed)then
+        first_sufficient_shell=shell
+        call require(bound_report%trial_prepared.and.bound_state%state_count==1,&
+          'bound raw DC cutoff passed without publishing the bound trial')
+        call test_bound_production_operator_updates(basis,bound_selection,bound_raw,bound_receipt,&
+          bound_state,bound_h,bound_s,bound_operator_fp)
+        exit
+      endif
+      if(rank==0)write(*,'(a,i0,2a)')'BOUND_CUTOFF_REJECT shell=',shell,' reason=',trim(why)
+      if(shell==0)then
+        call require(bound_report%core%measured.and.bound_report%core%orbital_residual>1d-10.and.&
+          index(why,'insufficient core span')>0,&
+          'cutoff=0 did not fail as a measured insufficient core span: '//trim(why))
+      else
+        call require(bound_report%core%measured.and.(index(why,'insufficient core span')>0.or.&
+          index(why,'required support mismatch')>0),&
+          'bound raw DC cutoff failed outside measured core/support gates: '//trim(why))
+      endif
+    enddo
+    call require(first_sufficient_shell==1.and.bound_report%support_measured.and.&
+      maxval(bound_report%support_defects)<1d-10,&
+      'the first sufficient complete PW shell did not reproduce bound core/support data')
+    call require(run_calls==bound_run.and.setup_calls==bound_setup,'bound cutoff admission reran W90')
+    if(rank==0)write(*,'(a,i0,a,i0)')'PASS bound raw cutoff admission on ',np,&
+      ' ranks; first sufficient shell=',first_sufficient_shell
     if(rank==0)write(*,'(a,i0,a,2es12.4)')'PASS explicit cutoff projection on ',np,&
       ' ranks; low/high relative residual=',low_residual,report%orbital_residual
   end subroutine
@@ -739,8 +857,8 @@ contains
     fragments=0
     do p=1,np;fragments(int(all_ids(:,p)))=np-p+1;enddo
     ! Explicit finite-difference quadrature on the selected core samples.
-    ! This tests real assemblers; production trace/stencil inventory is a
-    ! separate C5 gate and is not certified by this small reconstruction.
+    ! This tests real assemblers. The matching manifests below use these exact
+    ! small-fixture maps; production-provider admission is tested separately.
     d=0d0;d(1,1)=-1d0;d(1,2)=1d0;d(2,1)=-0.5d0;d(2,3)=0.5d0
     d(3,2)=-0.5d0;d(3,4)=0.5d0;d(4,3)=-1d0;d(4,4)=1d0
     gradient=matmul(d,left);values=0d0;gradients=0d0
@@ -825,8 +943,6 @@ contains
     logical::passed,converged,advanced,core_mask(8)
     character(256)::why,reason
     core=selection%physical_grid_ids(selection%core_row_slots);prev_fragment=1+modulo(f-2,np)
-    ! Required inventory follows both faces, all four volume derivative rows,
-    ! and both projectors that touch this fragment, using the assembly maps.
     call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,1,&
       [int(prev_fragment,int64),int(f,int64)],[int(prev_fragment,int64),int(f,int64)],&
       [1,3,5],core,cmplx([1.5d0,-0.5d0,-0.5d0,1.5d0],0d0,real64),[1d0,1d0],support(1),support_fp(1),passed,why)
@@ -1421,6 +1537,164 @@ contains
     call require(.not.passed.and.measured.and.maxval(abs(defects-expected_errors))<1d-10,&
       'core-exact state concealed required buffer-tail loss')
   end subroutine
+  subroutine prepare_bound_production_support(basis,support,support_fp,hff,sff,operator_fp,passed,why)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_support_operator),intent(out)::support(3)
+    integer(int64),intent(out)::support_fp(3)
+    complex(real64),allocatable,intent(out)::hff(:,:),sff(:,:)
+    integer(int64),intent(out)::operator_fp
+    logical,intent(out)::passed
+    character(*),intent(out)::why
+    type(s_dg_hybrid_fragment_basis),allocatable::bases(:)
+    type(s_dg_hybrid_production_face_trace),allocatable::faces(:)
+    type(s_dg_hybrid_production_support_receipt)::support_receipt
+    type(s_dg_hybrid_fixed_payload)::payload
+    integer(int64),allocatable::projector_points(:),interior_ids(:)
+    integer,allocatable::basis_owner(:),basis_fragment(:),effective_ids(:),local_ids(:),origins(:,:),sizes(:,:),&
+      interior_fragment(:),payload_owner(:),payload_fragment(:),payload_slots(:),payload_generations(:)
+    integer::fragment,p,nbasis,nbuffer,global_nx,global_nb,face_inventory_count,owned
+    integer::projector_offsets(2)
+    integer(int64)::face_inventory_fp,directory_fp
+    real(real64)::hgs(3),coef_nab(1,3),coef_lap(1,3),projector_weights(1),diagnostics(4)
+    complex(real64)::projector_values(2)
+    complex(real64),allocatable::values(:,:),gradients(:,:,:),kinetic_action(:,:),kinetic_rows(:,:),&
+      metric_rows(:,:),interface_rows(:,:),overlap(:,:),nonlocal_rows(:,:),local_rows(:,:)
+    logical,allocatable::complete(:,:)
+    nbasis=size(basis%global_ids);nbuffer=size(basis%buffer_point_ids)
+    global_nx=8*np
+    allocate(bases(np),origins(3,np),sizes(3,np),local_ids(nbasis),effective_ids(nbasis*np))
+    origins=0;sizes=spread([8,1,1],2,np)
+    do fragment=1,np
+      origins(1,fragment)=8*(fragment-1)
+      if(fragment==f)then
+        bases(fragment)=basis
+      else
+        bases(fragment)%fragment_id=0;bases(fragment)%generation=basis%generation
+        allocate(bases(fragment)%global_ids(0),bases(fragment)%sector(0),&
+          bases(fragment)%buffer_point_ids(global_nx),bases(fragment)%buffer_values(global_nx,0))
+        bases(fragment)%buffer_point_ids=[(int(p,int64),p=1,global_nx)]
+      endif
+    enddo
+    local_ids=int(basis%global_ids);global_nb=nbasis*np
+    call MPI_Allgather(local_ids,nbasis,MPI_INTEGER,effective_ids,nbasis,MPI_INTEGER,MPI_COMM_WORLD,ierr)
+    if(ierr/=MPI_SUCCESS)then;passed=.false.;why='bound production basis gather failed';return;endif
+    if(any([(count(effective_ids==p)/=1,p=1,global_nb)]))then
+      passed=.false.;why='bound production basis IDs are not a complete inventory';return
+    endif
+    effective_ids=[(p,p=1,global_nb)]
+    call freeze_dg_hybrid_basis_directory(MPI_COMM_WORLD,bases,effective_ids,basis_owner,basis_fragment,passed,why)
+    if(.not.passed)then;why='bound production directory: '//trim(why);return;endif
+    coef_nab=reshape([0.5d0,0d0,0d0],[1,3]);hgs=1d0
+    call materialize_dg_hybrid_production_face_collection(MPI_COMM_WORLD,origins,sizes,[global_nx,1,1],hgs,&
+      coef_nab,bases,basis_owner,basis_fragment,effective_ids,faces,passed,why,face_inventory_count,&
+      face_inventory_fp)
+    if(.not.passed)then;why='bound production face materializer: '//trim(why);return;endif
+    projector_offsets=[1,3]
+    allocate(projector_points(2))
+    projector_points=[basis%buffer_point_ids(4),basis%buffer_point_ids(7)]
+    projector_values=[cmplx(0.6d0,0d0,real64),cmplx(0d0,-0.8d0,real64)]
+    projector_weights=1d0
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,f,basis%generation,[global_nx,1,1],coef_nab,basis,&
+      faces,face_inventory_count,face_inventory_fp,projector_offsets,projector_points,projector_values,projector_weights,support,&
+      support_fp,support_receipt,passed,why)
+    if(passed)passed=support_receipt%valid.and.support_receipt%boundary_rows==2.and.&
+      support_receipt%derivative_rows==2.and.support_receipt%projector_rows==1
+    if(.not.passed.and.len_trim(why)==0)why='bound production support receipt is incomplete'
+    if(.not.passed)return
+    allocate(interior_ids(8),interior_fragment(8))
+    interior_ids=basis%buffer_point_ids(:8);interior_fragment=f
+    coef_lap=reshape([1d0,0d0,0d0],[1,3])
+    call materialize_dg_hybrid_production_interior(MPI_COMM_WORLD,[global_nx,1,1],coef_nab,-2d0,coef_lap,&
+      bases,basis_owner,basis_fragment,effective_ids,interior_ids,interior_fragment,values,gradients,&
+      kinetic_action,passed,why)
+    if(.not.passed)then;why='bound production interior: '//trim(why);return;endif
+    call assemble_dg_hybrid_broken_volume_rows(MPI_COMM_WORLD,global_nb,basis%global_ids,basis_fragment,&
+      interior_ids,interior_fragment,[(1d0,p=1,8)],values,gradients,[(1d0,p=1,8)],&
+      kinetic_rows,metric_rows,diagnostics,passed,why)
+    if(.not.passed)then;why='bound production volume rows: '//trim(why);return;endif
+    call assemble_dg_hybrid_production_interface_rows(MPI_COMM_WORLD,global_nb,basis%global_ids,faces,6d0,&
+      interface_rows,passed,why)
+    if(.not.passed)then;why='bound production interface rows: '//trim(why);return;endif
+    allocate(overlap(global_nb,1),complete(global_nb,1));complete=.true.
+    overlap(:,1)=0.6d0*values(:,4)+cmplx(0d0,-0.8d0,real64)*values(:,7)
+    call assemble_dg_overlapping_wannier_nonlocal_rows(MPI_COMM_WORLD,global_nb,basis%global_ids,[int(f,int64)],&
+      [0.7d0],overlap,complete,int(np,int64),nonlocal_rows,owned,passed,why)
+    if(.not.passed.or.owned/=np)then;why='bound production nonlocal rows: '//trim(why);return;endif
+    call freeze_dg_hybrid_single_owner_payload(MPI_COMM_WORLD,np,basis,metric_rows,kinetic_rows,nonlocal_rows,&
+      interface_rows,2001_int64,2003_int64,2007_int64,payload,payload_owner,payload_fragment,payload_slots,&
+      payload_generations,directory_fp,passed,why)
+    if(.not.passed)then;why='bound production payload: '//trim(why);return;endif
+    allocate(local_rows(nbasis,global_nb));local_rows=0d0
+    call extract_dg_hybrid_fragment_self_block(MPI_COMM_SELF,f,[(int(p,int64),p=1,nbasis)],payload_fragment,&
+      payload,local_rows,hff,sff,passed,why,basis_local_slot=payload_slots,basis_generation=payload_generations,&
+      fragment_catalog_fingerprint=2001_int64,fragment_directory_fingerprint=directory_fp)
+    if(.not.passed)then;why='bound production self block: '//trim(why);return;endif
+    operator_fp=payload%fingerprint
+  end subroutine prepare_bound_production_support
+  subroutine test_bound_production_operator_updates(basis,selection,raw,receipt,state,h,s,operator_fp)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    complex(real64),intent(in)::h(:,:),s(:,:)
+    integer(int64),intent(in)::operator_fp
+    type(s_dg_hybrid_fragment_epoch_budget)::budget
+    complex(real64),allocatable::frame(:,:),psi(:,:),gram(:,:),initial_core(:,:),initial_projector(:,:)
+    real(real64),allocatable::spectrum(:),density(:),oracle(:),norms(:)
+    logical,allocatable::core_mask(:)
+    integer(int64)::frame_fp,fp,workspace
+    integer::pass,steps,remaining,total_steps,a,n
+    real(real64)::residual,electrons
+    logical::passed,converged,advanced
+    character(256)::why,reason
+    n=size(basis%global_ids)
+    call require(n==4.and.state%state_count==1,'bound production update fixture has an unexpected state dimension')
+    call export_dg_hybrid_selected_basis_frame(MPI_COMM_WORLD,f,raw,selection,basis,receipt,frame,frame_fp,passed,why)
+    call require(passed,'bound production fixed reference: '//trim(why))
+    operator_h=h;operator_s=s;operator_selection_fp=selection%fingerprint
+    operator_key=s_dg_hybrid_preconditioner_key(f,selection%basis_generation,1,state%basis_fingerprint,&
+      state%metric_fingerprint,operator_fp,frame_fp)
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,n,[(int(a,int64),a=1,n)],frame,h,s,&
+      operator_key,operator_selection_fp,1d-10,operator_preconditioner,fp,passed,why)
+    call require(passed,'bound production fixed preconditioner: '//trim(why))
+    initial_core=matmul(basis%buffer_values(selection%core_row_slots,:),state%vectors)
+    initial_projector=matmul(initial_core,conjg(transpose(initial_core)))
+    allocate(spectrum(state%state_count),core_mask(size(basis%buffer_point_ids)),&
+      density(size(basis%buffer_point_ids)),oracle(size(basis%buffer_point_ids)))
+    core_mask=.false.;core_mask(selection%core_row_slots)=.true.;budget=s_dg_hybrid_fragment_epoch_budget()
+    total_steps=0
+    do pass=1,2
+      call advance_dg_hybrid_fragment_epoch(MPI_COMM_SELF,n,[(int(a,int64),a=1,n)],f,&
+        selection%basis_generation,state%basis_fingerprint,state%metric_fingerprint,1,3,&
+        apply_operator_h,apply_operator_s,apply_operator_preconditioner,1d-12,1d-10,2d0,&
+        budget,state,spectrum,steps,remaining,residual,converged,advanced,reason,workspace,fp,passed,why)
+      call require(passed,'bound production bounded update: '//trim(why))
+      total_steps=total_steps+steps
+      call require(total_steps<=3.and.remaining==3-total_steps,&
+        'bound production update restarted the three-step density-epoch budget')
+      gram=matmul(conjg(transpose(state%vectors)),matmul(s,state%vectors));gram(1,1)=gram(1,1)-1d0
+      call require(maxval(abs(gram))<1d-9,'bound production update lost metric orthogonality')
+      psi=matmul(basis%buffer_values,state%vectors)
+      oracle=raw%physical_dc_seed_occupations(1)*abs(psi(:,1))**2
+      where(.not.core_mask)oracle=0d0
+      call reconstruct_dg_hybrid_fragment_density(MPI_COMM_SELF,basis,state%vectors,&
+        raw%physical_dc_seed_occupations(:1),2d0,&
+        core_mask,[(1d0,a=1,size(core_mask))],density,electrons,passed,why)
+      call require(passed.and.maxval(abs(density-oracle))<1d-10.and.abs(electrons-sum(oracle))<1d-10,&
+        'bound production density/electron oracle: '//trim(why))
+      call measure_dg_hybrid_fragment_core_norms(MPI_COMM_SELF,basis,state%vectors,core_mask,&
+        [(1d0,a=1,size(core_mask))],norms,passed,why)
+      call require(passed.and.maxval(abs(norms-1d0))<1d-9,&
+        'bound production update lost physical core norm: '//trim(why))
+    enddo
+    call require(total_steps>0,'bound production Hamiltonian did not exercise a local update')
+    call require(maxval(abs(matmul(psi(selection%core_row_slots,:),&
+      conjg(transpose(psi(selection%core_row_slots,:))))-initial_projector))>1d-8,&
+      'bound production bounded update did not change the occupied physical subspace')
+    if(rank==0)write(*,'(a,i0,a,i0)')'PASS bound production H/S update on ',np,&
+      ' ranks; density-epoch steps=',total_steps
+  end subroutine test_bound_production_operator_updates
   subroutine test_production_support_provider()
     type(s_dg_hybrid_fragment_basis),allocatable::bases(:)
     type(s_dg_hybrid_production_face_trace),allocatable::faces(:),bad_faces(:)

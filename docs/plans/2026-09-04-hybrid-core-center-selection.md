@@ -689,6 +689,38 @@ operators, rather than the existing hand-written fixture manifests, admit the
 same bound raw DC state at an insufficient and a sufficient user cutoff.  C6
 and the main route remain unchanged.
 
+**Final C5 checkpoint, 2026-09-05:** The combined cutoff case now constructs
+one bound raw DC/W90 cache per fragment and reuses it unchanged while complete
+PW shells are added.  Its buffer covers the full periodic one-dimensional test
+grid so the production face materializer, including centered derivative
+stencils on both fragment boundaries, samples the actual projected basis.  At
+cutoff zero admission is required to fail specifically with a measured,
+nonzero core residual and `insufficient core span`; the first complete nonzero
+PW shell is required to pass without another W90 call.
+
+The passing shell uses the materializer's frozen face count, inventory hash and
+per-slot fingerprints in the production support provider.  Boundary values,
+derivatives and the single two-point complex projector are the exact linear
+functionals used by the subsequent production interface and nonlocal
+operators.  The same admitted state then passes through production interior,
+broken-volume, SIPG-interface and nonlocal assembly, frozen payload/self-block
+extraction, fixed-frame preconditioning and the bounded fragment updater.  Two
+calls share one density epoch and consume exactly three updates in total.
+Independent checks cover metric orthogonality, physical core density, electron
+count, core norm and a genuine change of the occupied physical subspace.
+
+Fresh selection tests pass on 1/2/4/8 ranks, including this combined case on
+2/4/8.  Raw-Wannier tests pass on 2/4/8 plus the exact core-null negative;
+production-face tests pass on 1/2/4/8; projected-pipeline tests pass on 2/4/8;
+preconditioner and fragment-subspace tests pass on 1/2/4/8; and the release
+build succeeds.  Independent final review reports no Critical/Important issue.
+No material DC calculation was repeated, and unrelated dirty changes and
+verification logs were preserved.
+
+C5 is complete.  This establishes readiness to resume C6/Task 8 production
+route work; it does not claim C6, the main switch, material validation, RT
+validation or Task 8 as a whole complete.
+
 **Files:**
 - Modify: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`

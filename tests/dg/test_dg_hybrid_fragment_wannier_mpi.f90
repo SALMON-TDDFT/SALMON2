@@ -5,6 +5,8 @@ module dg_hybrid_fragment_wannier_test_stubs
   integer::setup_calls=0,run_calls=0,expected_fragment_id=0
   integer::fail_run_fragment=0
   logical::override_test_centers=.false.
+  logical::use_custom_test_centers=.false.
+  real(8)::custom_test_centers_fractional(history_limit)=0d0
   character(1024)::setup_seed_history(history_limit)='',run_seed_history(history_limit)=''
   integer::run_band_count_history(history_limit)=0
   logical::run_zero_auxiliary_energies(history_limit)=.false.
@@ -17,6 +19,7 @@ contains
   subroutine reset_w90_stub_state
     setup_calls=0;run_calls=0;expected_fragment_id=0;fail_run_fragment=0
     override_test_centers=.false.
+    use_custom_test_centers=.false.;custom_test_centers_fractional=0d0
     setup_seed_history='';run_seed_history='';setup_saw_dmn=.false.
     run_band_count_history=0;run_zero_auxiliary_energies=.false.
     setup_saw_site_true=.false.;setup_saw_site_false=.false.
@@ -1723,6 +1726,12 @@ subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
   enddo
   wann_centres_loc(1,num_wann_loc)=-0.125d0*8d0*0.52917721067d0
   if(override_test_centers)wann_centres_loc(1,:)=0.9375d0*8d0*0.52917721067d0
+  if(use_custom_test_centers)then
+    wann_centres_loc=0d0
+    do i=1,num_wann_loc
+      wann_centres_loc(1,i)=custom_test_centers_fractional(i)*real_lattice_loc(1,1)
+    enddo
+  endif
   open(newunit=unit,file=trim(seed_name)//'.wout',status='replace',action='write',iostat=io)
   if(io==0)then
     if(run_must_fail(seed_name))then

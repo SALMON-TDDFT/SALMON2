@@ -86,4 +86,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
             print(transaction_marker)
             assert f"PASS explicit cutoff projection on {count} ranks" in result.stdout, result.stdout
             print(next(line for line in result.stdout.splitlines() if line.startswith("PASS explicit cutoff")))
+            bound_marker = f"PASS bound raw cutoff admission on {count} ranks; first sufficient shell=1"
+            assert bound_marker in result.stdout, result.stdout
+            print(bound_marker)
+            operator_marker = f"PASS bound production H/S update on {count} ranks; density-epoch steps="
+            assert operator_marker in result.stdout, result.stdout
+            print(next(line for line in result.stdout.splitlines() if line.startswith(operator_marker)))
 print("PASS core-center selection on 1, 2, 4, and 8 ranks")
