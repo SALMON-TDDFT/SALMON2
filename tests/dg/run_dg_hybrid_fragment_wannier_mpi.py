@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import argparse
 import os
 import shlex
 import shutil
@@ -10,6 +11,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 FRAGMENT_SOURCE = ROOT / "src/gs/dc/dg_hybrid_fragment_wannier.f90"
 TEST_SOURCE = ROOT / "tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90"
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--core-metric-audit", action="store_true",
+                    help="Exercise the pending DC-to-CG handoff with the production core-only metric")
+arguments = parser.parse_args()
 
 
 def lapack_libraries():
@@ -59,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
         ROOT / "src/gs/dc/dg_hybrid_fragment_basis_stream.f90",
         ROOT / "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90",
         ROOT / "src/gs/dc/dg_hybrid_variational_payload.f90",
+        ROOT / "src/gs/dc/dg_hybrid_broken_volume.f90",
         ROOT / "src/gs/dc/dg_hybrid_divided_operator.f90",
         ROOT / "src/gs/dc/dg_hybrid_fragment_preconditioner.f90",
         ROOT / "src/gs/dc/dg_hybrid_fragment_solver.f90",
@@ -107,11 +114,12 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
     environment = os.environ.copy()
     environment["OMP_NUM_THREADS"] = "1"
     environment.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
-    for rank_count in (2, 4, 8):
+    for rank_count in ((2,) if arguments.core_metric_audit else (2, 4, 8)):
         run_directory = build / f"ranks-{rank_count}"
         run_directory.mkdir()
         run = subprocess.run(
-            [launcher, "-n", str(rank_count), str(executable)],
+            [launcher, "-n", str(rank_count), str(executable),
+             *(["--core-metric-audit"] if arguments.core_metric_audit else [])],
             cwd=run_directory,
             capture_output=True,
             text=True,
@@ -133,4 +141,5 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
         assert actual_directories == expected_directories, actual_directories
         assert not list(artifact_root.rglob("*.dmn")), "unconstrained mode emitted .dmn"
 
-print("PASS hybrid fragment Wannier on 2, 4, and 8 ranks")
+print("PASS core-metric audit on 2 ranks" if arguments.core_metric_audit else
+      "PASS hybrid fragment Wannier on 2, 4, and 8 ranks")

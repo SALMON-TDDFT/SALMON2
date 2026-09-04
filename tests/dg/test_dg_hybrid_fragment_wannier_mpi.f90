@@ -47,6 +47,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_subspace,s_dg_hybrid_fragment_epoch_budget,advance_dg_hybrid_fragment_epoch
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,freeze_dg_hybrid_variational_payload
+  use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   use dg_hybrid_divided_operator,only:extract_dg_hybrid_fragment_self_block,&
     dg_hybrid_fragment_directory_fingerprint,freeze_dg_hybrid_single_owner_payload
   use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_preconditioner_key,s_dg_hybrid_fragment_preconditioner,&
@@ -580,6 +581,9 @@ contains
     complex(real64),allocatable::full_basis(:,:),h_rows(:,:),s_rows(:,:),zero_rows(:,:),q(:,:),&
       physical_states(:,:),orthogonality(:,:)
     complex(real64)::physical_h(12,12)
+    complex(real64),allocatable::core_values(:,:),core_gradients(:,:,:),unused_kinetic(:,:),reference_s(:,:)
+    real(real64)::volume_diagnostics(4)
+    character(64)::audit_mode
     real(real64),allocatable::energies(:),core_norms(:)
     real(real64)::residual,core_error
     integer::counts(2),nb,n,nw,a,b,j,pass,steps,remaining,total_steps
@@ -611,6 +615,23 @@ contains
     enddo
     h_rows=matmul(conjg(transpose(full_basis(:,basis%global_ids))),matmul(physical_h,full_basis))
     s_rows=matmul(conjg(transpose(full_basis(:,basis%global_ids))),full_basis)
+    call get_command_argument(1,audit_mode)
+    if(trim(audit_mode)=='--core-metric-audit')then
+      ! Change only S relative to the existing diagnostic H: the production
+      ! volume assembler integrates the owner's unique core, not its buffer.
+      ! This is a handoff audit, not a complete SIPG/material calculation.
+      core_values=transpose(full_basis(pack(basis%buffer_point_ids,core),:))
+      allocate(core_gradients(3,nb,count(core)));core_gradients=0d0
+      call assemble_dg_hybrid_broken_volume_rows(comm_total,nb,basis%global_ids,owners,&
+        pack(basis%buffer_point_ids,core),[(fragment_id,a=1,count(core))],&
+        [(1d0,a=1,count(core))],core_values,core_gradients,[(1d0,a=1,count(core))],&
+        unused_kinetic,s_rows,volume_diagnostics,ok,message)
+      call require_total(ok,'production core-only metric assembly failed: '//trim(message))
+      reference_s=matmul(conjg(transpose(basis%buffer_values(pack([(a,a=1,size(core))],core),:))),&
+        basis%buffer_values(pack([(a,a=1,size(core))],core),:))
+      call require_total(maxval(abs(s_rows(:,basis%global_ids)-reference_s))<1d-12,&
+        'production metric differs from independent unique-core Gram matrix')
+    endif
     allocate(zero_rows(n,nb));zero_rows=0d0
     directory_fp=dg_hybrid_fragment_directory_fingerprint(owners,slots,generations,501_int64)
     call freeze_dg_hybrid_single_owner_payload(comm_total,2,basis,s_rows,h_rows,zero_rows,&
@@ -642,6 +663,11 @@ contains
       'DC integration fixture accidentally uses an identity local metric')
     q(:nw,:nw)=q_wf
     do a=nw+1,n;q(a,a)=1d0;enddo
+    if(trim(audit_mode)=='--core-metric-audit')then
+      reference_s=matmul(conjg(transpose(q)),matmul(integration_s,q))
+      write(*,'(a,i0,a,i0,a,*(es12.4,1x))')'CORE-METRIC-AUDIT fragment=',fragment_id,&
+        ' columns=',n,' reference norms=',[(real(reference_s(a,a),real64),a=1,n)]
+    endif
     integration_key=s_dg_hybrid_preconditioner_key(fragment_id,13,1,501_int64,503_int64,&
       payload%fingerprint,built%receipt%transform_fingerprint)
     call prepare_dg_hybrid_fragment_preconditioner(comm_fragment,n,integration_rows,q,integration_h,&

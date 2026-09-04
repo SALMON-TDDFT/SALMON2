@@ -1358,6 +1358,54 @@ entry gate remains RED. The release build passes and review found no
 Critical/Important issue. Pre-existing dirty main changes and validation logs
 are preserved; no material calculation was rerun.
 
+**Core-metric handoff audit, 2026-09-04 (Task 8 paused for design review)**
+
+The previously passing DC-cache-to-CG integration uses a physical Gram matrix
+over the complete accepted buffer. Main's actual broken-volume assembly uses
+only each fragment's uniquely owned core. Independence in the construction
+metric does not imply independence in that DG metric.
+
+An opt-in reproduction now exercises the same construction cache and fixed
+reference map, changing only the integration fixture's S to the actual
+`assemble_dg_hybrid_broken_volume_rows` result with unit local potential:
+
+```text
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py --core-metric-audit
+```
+
+This 2-rank diagnostic is intentionally RED pending a design decision. The
+assembled self metric first agrees with an independent core-only Gram matrix
+to 1e-12. In the saved pre-localization reference frame its diagonal norms are:
+
+```text
+fragment 1, 5 columns: 1 1 0 0 4
+fragment 2, 6 columns: 1 1 1 0 0 3
+DC integration fixed-frame preconditioner failed:
+nonpositive or unresolved reference metric norm
+```
+
+The two appended buffer/projector candidate directions have support only on
+raw buffer points 7 and 8, outside this fixture's six-point core. Unitary WF
+localization preserves their null combinations in the core metric. The
+preconditioner correctly rejects the zero reference norms before any CG step.
+Adding PW columns does not remove an already present null combination.
+
+This is a synthetic counterexample to the unrestricted handoff, not evidence
+that the actual material's WF catalog has the same null directions. The
+Wannier90 boundary remains stubbed; H remains the prior diagnostic Hermitian
+operator, and zero derivative inputs are used only to request S from the
+volume assembler. This does not validate complete SIPG/nonlocal physics.
+
+No production code or basis policy was changed. The standard fixture still
+passes on 2/4/8 ranks. Preserve this RED diagnostic and resolve how core-null
+construction directions, seed reconstruction, and boundary/projector support
+are handled before switching main to direct construction. Do not silently
+discard WFs, replace S by the buffer metric/identity, relax the positivity
+gate, or apply terminal union compression inside the local loop. Any revised
+admissibility or local active-space map needs explicit design approval and
+tests of the actual volume/interface/nonlocal operator, not just this metric
+audit. Existing dirty files and all material verification logs are unchanged.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`
