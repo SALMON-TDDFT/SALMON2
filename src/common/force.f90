@@ -472,6 +472,7 @@ contains
     real(8)              :: F_tmp(3,nion),F_tmp_l(3,nion),F_sum(3,nion)
     !
     integer :: ix,iy,iz,iia,ia,ib,ipair
+    integer :: nion_mg_l,npair_l ! hoisted: not device-resident as dummy-arg-type members
     real(8) :: rr,rab(3),r(3)
 
     select case(yn_periodic)
@@ -494,16 +495,18 @@ contains
       if(ewald%yn_bookkeep=='y') then
 
          F_tmp_l = 0d0
+         nion_mg_l = info%nion_mg
 #ifdef USE_OPENACC
-!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) copyin(ewald, pp)
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr,npair_l) copyin(ewald, pp)
 #else
-!$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
+!$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr,npair_l)
 #endif
-         do iia= 1,info%nion_mg
+         do iia= 1,nion_mg_l
         !do ia= system%nion_s, system%nion_e
         !do ia=1,nion
             ia = info%ia_mg(iia)
-            do ipair = 1,ewald%npair_bk(iia)
+            npair_l = ewald%npair_bk(iia)
+            do ipair = 1,npair_l
                ix = ewald%bk(1,ipair,iia)
                iy = ewald%bk(2,ipair,iia)
                iz = ewald%bk(3,ipair,iia)

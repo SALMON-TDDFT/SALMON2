@@ -221,6 +221,10 @@ contains
     use timer
     use iso_c_binding
     use nvtx_wrapper
+#if defined(USE_OPENACC) && defined(USE_GEMM)
+    use cublas
+    use openacc
+#endif
     implicit none
 #if defined(USE_OPENACC)
     interface
@@ -273,6 +277,25 @@ contains
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
     complex(8),allocatable :: uVpsi(:)
     real(8) :: jx,jy,jz
+    ! Locals for stencil_current inlined below (OpenACC, non-CUDA branch).
+    integer    :: ix,iy,iz
+    real(8)    :: rtmp
+    complex(8) :: cpsi
+#if defined(USE_OPENACC) && defined(USE_GEMM)
+    ! Batched-GEMM nonlocal current: zpseudo's phase-1 contraction, but four
+    ! projections per (ilma,io) -- zekr_uV plus x/y/z-weighted copies, stacked
+    ! into one packed matrix (4x zpseudo's) so a single GEMM returns all four.
+    integer, parameter :: cur_io_block = 64
+    integer,                     save :: cur_max_nproj = -1
+    integer,    allocatable,     save :: cur_nproj_atom(:), cur_l2g(:,:)
+    complex(8), allocatable,     save :: cur_zekr4(:,:,:), cur_wf(:,:,:), cur_out(:,:,:)
+    real(8),    allocatable,     save :: cur_rinv(:,:)
+    type(cublasHandle),          save :: cur_handle
+    integer    :: cur_ia,cur_p,cur_j,cur_b,cur_natom,cur_ilma,cur_stat
+    integer    :: cur_blk_s,cur_nb,cur_np4
+    complex(8) :: cur_uv,cur_z
+    real(8)    :: cur_w
+#endif
     call nvtxStartRange('calc_current', __LINE__)
     call timer_begin(LOG_CURRENT_CALC)
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -287,8 +310,10 @@ contains
 
     call timer_begin(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
     if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
+#if !defined(USE_OPENACC)
       call calc_uVpsi_rdivided(nspin,info,ppg,psi,uVpsibox,uVpsibox2)
       allocate(uVpsi(ppg%Nlma))
+#endif
     end if
     call timer_end(LOG_CURRENT_CALC_UVPSI_RDIVIDED)
 
@@ -317,20 +342,44 @@ contains
 !$acc enter data copyin(jx,jy,jz)
 !$acc update device(system%vec_Ac)
 
+! Grid-parallel stencil: collapse (ik,io,grid) so gang count is
+! nk*numo*ngrid, not nk*numo; weighting is linear so it moves inside.
 !$acc kernels copyin(BT,ispin,im)
-!$acc loop gang private(ik,io,kAc,wrk1,wrk2,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
+!$acc loop gang private(ik,io,ix,iy,iz,kAc,wrk1,wrk2,wrk3,wrk4,rtmp,cpsi) &
+!$acc&         reduction(+:jx,jy,jz) collapse(5) independent
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
         kAc(1:3) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
-        call stencil_current(mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab &
-                            ,kAc,psi%zwf(:,:,:,ispin,io,ik,im),wrk1,wrk2)
-        wrk3(1) = BT(1,1) * wrk2(1) + BT(1,2) * wrk2(2) + BT(1,3) * wrk2(3)
-        wrk3(2) = BT(2,1) * wrk2(1) + BT(2,2) * wrk2(2) + BT(2,3) * wrk2(3)
-        wrk3(3) = BT(3,1) * wrk2(1) + BT(3,2) * wrk2(2) + BT(3,3) * wrk2(3)
+        cpsi = conjg(psi%zwf(ix,iy,iz,ispin,io,ik,im))
+        rtmp = abs(psi%zwf(ix,iy,iz,ispin,io,ik,im))**2
+        wrk1(1) = kAc(1)*rtmp
+        wrk1(2) = kAc(2)*rtmp
+        wrk1(3) = kAc(3)*rtmp
+        wrk2(1) = aimag(2d0 * ( stencil%coef_nab(1,1) * cpsi * psi%zwf(mg%idx(ix+1),iy,iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(2,1) * cpsi * psi%zwf(mg%idx(ix+2),iy,iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(3,1) * cpsi * psi%zwf(mg%idx(ix+3),iy,iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(4,1) * cpsi * psi%zwf(mg%idx(ix+4),iy,iz,ispin,io,ik,im) ))
+        wrk2(2) = aimag(2d0 * ( stencil%coef_nab(1,2) * cpsi * psi%zwf(ix,mg%idy(iy+1),iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(2,2) * cpsi * psi%zwf(ix,mg%idy(iy+2),iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(3,2) * cpsi * psi%zwf(ix,mg%idy(iy+3),iz,ispin,io,ik,im) &
+                              + stencil%coef_nab(4,2) * cpsi * psi%zwf(ix,mg%idy(iy+4),iz,ispin,io,ik,im) ))
+        wrk2(3) = aimag(2d0 * ( stencil%coef_nab(1,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+1),ispin,io,ik,im) &
+                              + stencil%coef_nab(2,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+2),ispin,io,ik,im) &
+                              + stencil%coef_nab(3,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+3),ispin,io,ik,im) &
+                              + stencil%coef_nab(4,3) * cpsi * psi%zwf(ix,iy,mg%idz(iz+4),ispin,io,ik,im) ))
+        wrk3(1) = BT(1,1)*wrk2(1) + BT(1,2)*wrk2(2) + BT(1,3)*wrk2(3)
+        wrk3(2) = BT(2,1)*wrk2(1) + BT(2,2)*wrk2(2) + BT(2,3)*wrk2(3)
+        wrk3(3) = BT(3,1)*wrk2(1) + BT(3,2)*wrk2(2) + BT(3,3)*wrk2(3)
         wrk4 = (wrk1 + wrk3) * system%rocc(io,ik,ispin) * system%wtk(ik)
         jx = jx + wrk4(1)
         jy = jy + wrk4(2)
         jz = jz + wrk4(3)
+      end do
+      end do
+      end do
       end do
       end do
 !$acc end kernels
@@ -356,6 +405,101 @@ contains
 !$acc exit data copyout(jx,jy,jz)
           call timer_end(LOG_CURRENT_SO_NONLOCAL)
         else ! yn_spinorbit=='y'
+#if defined(USE_GEMM)
+          cur_natom = size(ppg%mps)
+          if (cur_max_nproj < 0) then
+            allocate(cur_nproj_atom(cur_natom))
+            cur_nproj_atom = 0
+            do cur_ilma=1,ppg%Nlma
+              cur_ia = ppg%ia_tbl(cur_ilma)
+              cur_nproj_atom(cur_ia) = cur_nproj_atom(cur_ia) + 1
+            end do
+            cur_max_nproj = maxval(cur_nproj_atom)
+            allocate(cur_l2g(cur_max_nproj, cur_natom))
+            allocate(cur_rinv(cur_max_nproj, cur_natom))
+            cur_l2g  = 0
+            cur_rinv = 0d0
+            cur_nproj_atom = 0   ! reused as a per-atom fill cursor
+            do cur_ilma=1,ppg%Nlma
+              cur_ia = ppg%ia_tbl(cur_ilma)
+              cur_nproj_atom(cur_ia) = cur_nproj_atom(cur_ia) + 1
+              cur_l2g (cur_nproj_atom(cur_ia), cur_ia) = cur_ilma
+              cur_rinv(cur_nproj_atom(cur_ia), cur_ia) = ppg%rinv_uvu(cur_ilma)
+            end do
+            allocate(cur_zekr4(ppg%nps, 4*cur_max_nproj, cur_natom))
+            allocate(cur_wf   (ppg%nps, cur_io_block,    cur_natom))
+            allocate(cur_out  (4*cur_max_nproj, cur_io_block, cur_natom))
+            cur_zekr4 = (0d0,0d0)
+            cur_wf    = (0d0,0d0)
+!$acc enter data copyin(cur_zekr4,cur_wf,cur_l2g,cur_nproj_atom,cur_rinv) create(cur_out)
+            cur_stat = cublasCreate(cur_handle)
+          end if
+          cur_np4 = 4*cur_max_nproj
+          ! cublas must share OpenACC's stream, or the reduction reads the GEMM early.
+          cur_stat = cublasSetStream(cur_handle, acc_get_cuda_stream(acc_async_sync))
+
+          do ik=info%ik_s,info%ik_e
+            ! Refresh per (call, k-point): zekr_uV carries the time-dependent A(t).
+!$acc parallel loop collapse(3) present(ppg,cur_zekr4,cur_l2g,cur_nproj_atom) private(cur_z)
+            do cur_ia=1,cur_natom
+            do cur_p=1,cur_max_nproj
+            do cur_j=1,ppg%nps
+              if (cur_p <= cur_nproj_atom(cur_ia) .and. cur_j <= ppg%mps(cur_ia)) then
+                cur_z = ppg%zekr_uV(cur_j, cur_l2g(cur_p,cur_ia), ik)
+                cur_zekr4(cur_j, cur_p,                   cur_ia) = cur_z
+                cur_zekr4(cur_j, cur_p +   cur_max_nproj, cur_ia) = cur_z * ppg%Rxyz(1,cur_j,cur_ia)
+                cur_zekr4(cur_j, cur_p + 2*cur_max_nproj, cur_ia) = cur_z * ppg%Rxyz(2,cur_j,cur_ia)
+                cur_zekr4(cur_j, cur_p + 3*cur_max_nproj, cur_ia) = cur_z * ppg%Rxyz(3,cur_j,cur_ia)
+              end if
+            end do
+            end do
+            end do
+
+            cur_blk_s = info%io_s
+            do while (cur_blk_s <= info%io_e)
+              cur_nb = min(cur_io_block, info%io_e - cur_blk_s + 1)
+!$acc parallel loop collapse(3) present(psi,ppg,cur_wf)
+              do cur_ia=1,cur_natom
+              do cur_b=1,cur_nb
+              do cur_j=1,ppg%nps
+                if (cur_j <= ppg%mps(cur_ia)) then
+                  cur_wf(cur_j,cur_b,cur_ia) = psi%zwf( &
+                      ppg%jxyz(1,cur_j,cur_ia), ppg%jxyz(2,cur_j,cur_ia), ppg%jxyz(3,cur_j,cur_ia), &
+                      ispin, cur_blk_s+cur_b-1, ik, im)
+                end if
+              end do
+              end do
+              end do
+
+!$acc host_data use_device(cur_zekr4,cur_wf,cur_out)
+              cur_stat = cublasZgemmStridedBatched(cur_handle, CUBLAS_OP_C, CUBLAS_OP_N, &
+                  cur_np4, cur_nb, ppg%nps, &
+                  (1d0,0d0), cur_zekr4, ppg%nps, int(ppg%nps,8)*int(cur_np4,8), &
+                  cur_wf, ppg%nps, int(ppg%nps,8)*int(cur_io_block,8), &
+                  (0d0,0d0), cur_out, cur_np4, int(cur_np4,8)*int(cur_io_block,8), &
+                  cur_natom)
+!$acc end host_data
+              if (cur_stat /= CUBLAS_STATUS_SUCCESS) stop 'calc_current: cublasZgemmStridedBatched failed'
+
+!$acc parallel loop collapse(2) present(cur_out,cur_rinv,cur_nproj_atom,system) &
+!$acc&              private(cur_uv,cur_w,cur_p) reduction(+:jx,jy,jz)
+              do cur_ia=1,cur_natom
+              do cur_b=1,cur_nb
+                cur_w = system%rocc(cur_blk_s+cur_b-1,ik,ispin) * system%wtk(ik)
+!$acc loop seq
+                do cur_p=1,cur_nproj_atom(cur_ia)
+                  cur_uv = cur_out(cur_p,cur_b,cur_ia) * cur_rinv(cur_p,cur_ia)
+                  jx = jx + 2d0*aimag(conjg(cur_out(cur_p +   cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                  jy = jy + 2d0*aimag(conjg(cur_out(cur_p + 2*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                  jz = jz + 2d0*aimag(conjg(cur_out(cur_p + 3*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                end do
+              end do
+              end do
+
+              cur_blk_s = cur_blk_s + cur_nb
+            end do
+          end do
+#else
 !$acc kernels copyin(ispin,im)
 !$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
           do ik=info%ik_s,info%ik_e
@@ -368,6 +512,7 @@ contains
           end do
           end do
 !$acc end kernels
+#endif
 !$acc exit data copyout(jx,jy,jz)
         end if ! yn_spinorbit=='y'
       else ! yn_jm == 'n'
@@ -432,7 +577,11 @@ contains
     end do
     end do
 
-    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
+    if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') then
+#if !defined(USE_OPENACC)
+      deallocate(uVpsibox,uVpsibox2,uVpsi)
+#endif
+    end if
 
     call nvtxEndRange
     return

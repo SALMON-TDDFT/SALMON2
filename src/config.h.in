@@ -19,6 +19,8 @@
 #cmakedefine USE_EIGENEXA
 #cmakedefine USE_LIBXC
 #cmakedefine USE_FFTW
+#cmakedefine USE_GEMM
+#cmakedefine USE_NCCL
 
 #cmakedefine USE_OPT_ARRAY_PADDING
 #cmakedefine USE_OPT_EXPLICIT_VECTORIZATION

@@ -15,6 +15,7 @@
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 MODULE Total_Energy
+
 implicit none
 
 CONTAINS
@@ -299,6 +300,7 @@ CONTAINS
     real(8) :: rr,rab(3),r(3),E_tmp,E_tmp_l,g(3),Gd,sysvol,E_wrk(5),E_sum(5)
     real(8) :: E_wrk_local_1,E_wrk_local_2
     real(8) :: etmp
+    integer :: nion_mg_l
     complex(8) :: rho_e,rho_i
     call nvtxStartRange('calc_Total_Energy_periodic', __LINE__)
     call timer_begin(LOG_TE_PERIODIC_CALC)
@@ -325,13 +327,16 @@ CONTAINS
 
       if(ewald%yn_bookkeep=='y') then
 
+         ! nvfortran >= 26.5 evaluates the loop tripcount on the device,
+         ! where info%nion_mg is not resident; use a local scalar.
+         nion_mg_l = info%nion_mg
 #ifdef USE_OPENACC
 !$acc kernels copyin(ewald)
 !$acc loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) reduction(+:E_tmp)
 #endif
-         do iia=1,info%nion_mg
+         do iia=1,nion_mg_l
         !do ia=1,system%nion
             ia = info%ia_mg(iia)
             do ipair = 1,ewald%npair_bk(iia)
@@ -817,6 +822,7 @@ CONTAINS
     !
     integer :: ix,iy,iz,iia,ia,ib,ir,ipair   !,ig
     integer :: npair_bk_max, npair_bk_loc
+    integer :: nion_mg_l
    !integer :: k,irank, nproc, ig_tmp,ig_sum
     real(8) :: rr,rab(3),r(3) !,g(3),G2
     real(8) :: r1, cutoff_erfc_r, tmp
@@ -850,13 +856,14 @@ CONTAINS
 
     !(check maximum number of pairs and allocate)
     npair_bk_max = 0
+    nion_mg_l = info%nion_mg
 #ifdef USE_OPENACC
 !$acc kernels loop private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) reduction(max:npair_bk_max)
 #else
 !$omp parallel do private(iia,ia,ix,iy,iz,ib,r,rab,rr,npair_bk_loc) &
 !$omp             reduction(max:npair_bk_max)
 #endif
-    do iia=1,info%nion_mg
+    do iia=1,nion_mg_l
    !do ia=1,system%nion
        ia = info%ia_mg(iia)
        npair_bk_loc = 0
@@ -904,12 +911,13 @@ CONTAINS
 820      format(a,i6)
       endif
 
+    nion_mg_l = info%nion_mg
 #ifdef USE_OPENACC
-!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr) copyin(ewald)
+!$acc kernels loop private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #else
 !$omp parallel do private(iia,ia,ipair,ix,iy,iz,ib,r,rab,rr)
 #endif
-    do iia=1,info%nion_mg
+    do iia=1,nion_mg_l
    !do ia=1,system%nion
        ia = info%ia_mg(iia)
        ipair = 0

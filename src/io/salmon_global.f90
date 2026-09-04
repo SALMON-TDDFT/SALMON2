@@ -83,6 +83,7 @@ module salmon_global
   character(1)   :: yn_gramschmidt_blas
   character(1)   :: yn_eigenexa
   character(1)   :: yn_diagonalization_red_mem
+  character(1)   :: yn_nccl_reduction
   character(32)  :: process_allocation
 
 !! &system
