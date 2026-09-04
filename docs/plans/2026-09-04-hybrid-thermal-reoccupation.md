@@ -261,6 +261,42 @@ Fresh selection and occupation regressions pass on 1/2/4/8, the release build
 passes, and independent review has no Critical/Important finding. No DC or
 material run was repeated and unrelated dirty changes/logs remain preserved.
 
+**Transactional numerical adapter checkpoint:** Added production module
+`dg_hybrid_fragment_thermal` with `advance_dg_hybrid_thermal_state` and a single
+allocatable state bundle holding coefficients, extension inventory, current
+energies, occupations and unmixed physical density. The caller supplies an
+already prepared trial and its admission/projection receipts. The adapter
+checks receipt payload, core quadrature, state binding, agreed controls and
+exactly one rank per fragment, then operates on a private copy. It runs real
+bounded updates and extension on MPI_COMM_SELF through the existing common-mu
+occupation epoch; H/S/preconditioner callbacks must be fragment-local.
+
+S actions are checked against the physical core metric of the admitted basis.
+After thermal-tail acceptance, physical density is reconstructed and its
+integral compared with current occupations times measured core norms and the
+occupation solver's count. These are same-state consistency checks, not outer
+SCF convergence. Target-count defect is diagnostic; `valid` means a consistent
+unmixed thermal result, not a converged ground state. Temperature is passed in
+Hartree and is not hardcoded. No mixed density is inspected or normalized.
+
+Only after collective success does `move_alloc` replace the caller's bundle.
+The persistent update budget is intentionally outside the copy, so failed
+attempts do not replenish it. A missing-module RED preceded implementation.
+The real DG fixture verifies capacity failure after actual extension without
+publishing intermediate coefficients/candidate consumption, repeated failure
+within a shared three-update budget, successful publication matching the
+independent density oracle, and a single-rank H failure or inconsistent S
+action preserving an earlier successful bundle. Selection tests pass on
+1/2/4/8 (transaction cases 2/4/8), subspace/occupation/divided-SCF regressions
+pass on 1/2/4/8, and release builds. Independent review has no Critical/Important
+finding; its suggested single-rank S mismatch regression is included.
+
+This connects the numerical routines in production source, but does not yet
+switch the main SCF caller or certify actual production support-provider
+inventories/C5/C6. Those remain open; Task 8 is not complete. The CMake change
+adds only this module; the pre-existing canonical-fingerprint change, other
+dirty work and verification logs remain separate. No DC/material run repeated.
+
 1. RED: use the actual volume/SIPG/nonlocal self-block and the new trial state.
    Invoke current-state refresh through the existing occupation epoch at 300 K.
    The half-core-norm example must yield the specified total electron count

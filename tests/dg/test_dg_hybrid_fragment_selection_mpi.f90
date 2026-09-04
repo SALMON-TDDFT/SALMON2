@@ -27,6 +27,7 @@ program test_fragment_selection
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
     prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment,export_dg_hybrid_selected_basis_frame
   use dg_hybrid_fragment_admission,only:prepare_dg_hybrid_selected_trial
+  use dg_hybrid_fragment_thermal,only:s_dg_hybrid_thermal_state,advance_dg_hybrid_thermal_state
   use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_fragment_preconditioner,&
     s_dg_hybrid_preconditioner_key,prepare_dg_hybrid_frame_preconditioner,apply_dg_hybrid_fragment_preconditioner
   implicit none
@@ -63,6 +64,7 @@ program test_fragment_selection
   integer::thermal_steps
   real(real64),allocatable::thermal_spectrum(:)
   logical::density_callback_failure=.false.
+  logical::thermal_callback_failure=.false.
   logical::ok
   character(256)::message
   call MPI_Init(ierr)
@@ -900,9 +902,11 @@ contains
     complex(real64),allocatable::frame(:,:),psi(:,:),gram(:,:)
     type(s_dg_hybrid_fragment_subspace_state)::entry_state
     type(s_dg_hybrid_fragment_candidate_catalog)::entry_candidates
+    type(s_dg_hybrid_thermal_state),allocatable::accepted,saved_accepted
+    type(s_dg_hybrid_fragment_epoch_budget)::transaction_budget
     real(real64),allocatable::occ(:),stale_occ(:)
     real(real64)::target,local_target,mu,ne,density(8),oracle(8),old_density(4),electrons,total_electrons,z,fd
-    integer::passes,extensions,a,ns
+    integer::passes,extensions,a,ns,steps,total_steps
     integer,allocatable::selected(:)
     integer(int64)::frame_fp,fp
     logical::passed
@@ -1003,6 +1007,58 @@ contains
     call require(extensions==0.and.thermal_state%state_count==2.and.thermal_steps<=3,&
       'tail failure extended fragments before collective exhaustion validation')
     if(rank==0)write(*,'(a,i0,a)')'PASS thermal DG capacity/tail failures on ',np,' ranks'
+    allocate(accepted)
+    accepted%state=entry_state;accepted%candidates=entry_candidates
+    accepted%occupations=[-9d0];accepted%density=[-8d0];accepted%chemical_potential=-7d0
+    transaction_budget=s_dg_hybrid_fragment_epoch_budget();total_steps=0
+    do a=1,2
+      call advance_dg_hybrid_thermal_state(MPI_COMM_WORLD,basis,receipt,report,thermal_core_mask,&
+        [(1d0,j=1,8)],1,3,300d0*kB_au,2d0,7d0*np,1d-8,1d-10,1d-10,1d-12,2d0,&
+        apply_operator_h,apply_operator_s,apply_operator_preconditioner,transaction_budget,accepted,&
+        steps,passes,extensions,passed,why)
+      total_steps=total_steps+steps
+      call require(.not.passed.and.index(why,'insufficient')>0,'thermal transaction accepted exhausted capacity')
+      call require(all(accepted%state%vectors==entry_state%vectors).and.&
+        all(accepted%candidates%used.eqv.entry_candidates%used).and.accepted%state%state_count==2,&
+        'failed thermal transaction published intermediate state or candidate consumption')
+      call require(size(accepted%occupations)==1.and.size(accepted%density)==1,&
+        'failed thermal transaction replaced output extents')
+      call require(accepted%occupations(1)==-9d0.and.accepted%density(1)==-8d0.and.&
+        accepted%chemical_potential==-7d0.and..not.accepted%valid,'failed thermal transaction replaced old outputs')
+    enddo
+    call require(total_steps>0.and.total_steps<=3,'thermal rollback replenished consumed CG budget')
+    transaction_budget=s_dg_hybrid_fragment_epoch_budget()
+    call advance_dg_hybrid_thermal_state(MPI_COMM_WORLD,basis,receipt,report,thermal_core_mask,&
+      [(1d0,j=1,8)],1,3,300d0*kB_au,2d0,target,1d-8,1d-10,1d-10,1d-12,2d0,&
+      apply_operator_h,apply_operator_s,apply_operator_preconditioner,transaction_budget,accepted,&
+      steps,passes,extensions,passed,why)
+    call require(passed.and.accepted%valid,'thermal transaction failed to publish verified density: '//trim(why))
+    call require(maxval(abs(accepted%density-oracle))<1d-10.and.&
+      abs(accepted%electron_count-target)<1d-8.and.accepted%state%state_count==3,&
+      'thermal transaction differs from independent physical density oracle')
+    saved_accepted=accepted;thermal_callback_failure=rank==np-1
+    call advance_dg_hybrid_thermal_state(MPI_COMM_WORLD,basis,receipt,report,thermal_core_mask,&
+      [(1d0,j=1,8)],1,3,300d0*kB_au,2d0,target,1d-8,1d-10,1d-10,1d-12,2d0,&
+      apply_operator_h,apply_operator_s,apply_operator_preconditioner,transaction_budget,accepted,&
+      steps,passes,extensions,passed,why)
+    thermal_callback_failure=.false.
+    call require(.not.passed.and.len_trim(why)>0.and.accepted%valid,&
+      'one-fragment Hamiltonian failure was not rejected collectively')
+    call require(all(accepted%state%vectors==saved_accepted%state%vectors).and.&
+      all(accepted%density==saved_accepted%density).and.all(accepted%occupations==saved_accepted%occupations),&
+      'one-fragment failure overwrote the previously accepted thermal state')
+    transaction_budget=s_dg_hybrid_fragment_epoch_budget()
+    if(rank==np-1)operator_s=2d0*s
+    call advance_dg_hybrid_thermal_state(MPI_COMM_WORLD,basis,receipt,report,thermal_core_mask,&
+      [(1d0,j=1,8)],1,3,300d0*kB_au,2d0,target,1d-8,1d-10,1d-10,1d-12,2d0,&
+      apply_operator_h,apply_operator_s,apply_operator_preconditioner,transaction_budget,accepted,&
+      steps,passes,extensions,passed,why)
+    operator_s=s
+    call require(.not.passed.and.len_trim(why)>0.and.accepted%valid,&
+      'thermal update accepted an S action inconsistent with the physical core metric')
+    call require(all(accepted%state%vectors==saved_accepted%state%vectors).and.&
+      all(accepted%density==saved_accepted%density),'metric mismatch overwrote the accepted thermal state')
+    if(rank==0)write(*,'(a,i0,a)')'PASS thermal DG transaction on ',np,' ranks'
   end subroutine
   subroutine refresh_thermal(epoch,energy,weights,can_grow,valid,diagnostic)
     integer,intent(in)::epoch
@@ -1048,7 +1104,7 @@ contains
     complex(real64),intent(in)::input(:,:)
     complex(real64),intent(out)::output(:,:)
     logical,intent(out)::valid
-    output=matmul(operator_h,input);valid=.true.
+    output=matmul(operator_h,input);valid=.not.thermal_callback_failure
   end subroutine
   subroutine apply_operator_s(input,output,valid)
     complex(real64),intent(in)::input(:,:)

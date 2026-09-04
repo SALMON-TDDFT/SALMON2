@@ -52,7 +52,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
                 "src/gs/dc/dg_hybrid_fragment_solver.f90",
                 "src/gs/dc/dg_hybrid_fragment_preconditioner.f90",
                 "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90",
-                "src/gs/dc/dg_hybrid_fragment_admission.f90"]
+                "src/gs/dc/dg_hybrid_fragment_admission.f90",
+                "src/gs/dc/dg_hybrid_fragment_thermal.f90"]
     sources += ["tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90",
                 "tests/dg/test_dg_hybrid_fragment_selection_mpi.f90"]
     executable = build / "selection"
@@ -78,6 +79,9 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
             failure_marker = f"PASS thermal DG capacity/tail failures on {count} ranks"
             assert failure_marker in result.stdout, result.stdout
             print(failure_marker)
+            transaction_marker = f"PASS thermal DG transaction on {count} ranks"
+            assert transaction_marker in result.stdout, result.stdout
+            print(transaction_marker)
             assert f"PASS explicit cutoff projection on {count} ranks" in result.stdout, result.stdout
             print(next(line for line in result.stdout.splitlines() if line.startswith("PASS explicit cutoff")))
 print("PASS core-center selection on 1, 2, 4, and 8 ranks")
