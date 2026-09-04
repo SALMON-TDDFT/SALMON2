@@ -25,6 +25,21 @@ its implementation; do not silently pass a rectangular map to the old API.
 
 ### Task C1: Preserve final localized centers in the raw cache
 
+**Checkpoint, 2026-09-04:** Implemented and verified on 2/4/8 MPI ranks;
+the release build passes. The raw cache now stores final transform-ordered
+`centers_fractional` in `[0,1)`, including canonicalization of a modulo result
+rounded to exactly one for a tiny negative coordinate. Cache publication moves
+the new array, reuse validates allocation/shape/finiteness/range, and version 2
+of the replicated integrity hash includes centers without changing the basis
+or transform fingerprint definitions. Reversed/unwrapped stub centers test
+alignment with the final transform and values; one-rank center mutation,
+missing allocation, wrong extent and NaN are rejected without another W90 call.
+The tests caught both a missing publication move and the negative-roundoff
+endpoint issue before correction. The unselected core-metric diagnostic still
+rejects zero reference norms; C1 does not select WFs or fix that handoff.
+C2 and the parent Task 8 production switch remain pending. Existing dirty
+code and material validation logs were preserved; no DC run was repeated.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_wannier.f90`
 - Modify: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`

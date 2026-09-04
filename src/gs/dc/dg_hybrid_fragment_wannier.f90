@@ -39,6 +39,8 @@ module dg_hybrid_fragment_wannier
     complex(real64),allocatable::wannier_values(:,:)
     complex(real64),allocatable::candidate_compression(:,:)
     complex(real64),allocatable::wannier_transform(:,:)
+    ! Final transform-column order; fractional coordinates in the construction cell, [0,1).
+    real(real64),allocatable::centers_fractional(:,:)
     complex(real64),allocatable::dc_seed_coefficients_in_wannier(:,:)
     real(real64),allocatable::physical_dc_seed_energies(:)
     real(real64),allocatable::physical_dc_seed_occupations(:)
@@ -962,6 +964,7 @@ contains
     if(code==0.and.(.not.allocated(cache%wannier_values).or.&
         .not.allocated(cache%candidate_compression).or.&
         .not.allocated(cache%wannier_transform).or.&
+        .not.allocated(cache%centers_fractional).or.&
         .not.allocated(cache%dc_seed_coefficients_in_wannier).or.&
         .not.allocated(cache%physical_dc_seed_energies).or.&
         .not.allocated(cache%physical_dc_seed_occupations)))code=50
@@ -969,6 +972,7 @@ contains
       if(any(shape(cache%wannier_values)/=[retained,nlocal]).or.&
           any(shape(cache%candidate_compression)/=[candidate_rank,retained]).or.&
           any(shape(cache%wannier_transform)/=[retained,retained]).or.&
+          any(shape(cache%centers_fractional)/=[3,retained]).or.&
           any(shape(cache%dc_seed_coefficients_in_wannier)/=[retained,nseed]).or.&
           size(cache%physical_dc_seed_energies)/=nseed.or.&
           size(cache%physical_dc_seed_occupations)/=nseed)code=50
@@ -976,12 +980,16 @@ contains
         if(.not.finite_complex(cache%wannier_values).or.&
             .not.finite_complex(cache%candidate_compression).or.&
             .not.finite_complex(cache%wannier_transform).or.&
+            .not.all(ieee_is_finite(cache%centers_fractional)).or.&
             .not.finite_complex(cache%dc_seed_coefficients_in_wannier).or.&
             .not.all(ieee_is_finite(cache%physical_dc_seed_energies)).or.&
             .not.all(ieee_is_finite(cache%physical_dc_seed_occupations)))code=50
         if(.not.bitwise_real_equal(cache%physical_dc_seed_energies,energies).or.&
             .not.bitwise_real_equal(cache%physical_dc_seed_occupations,occupations))code=50
       endif
+    endif
+    if(code==0)then
+      if(any(cache%centers_fractional<0d0).or.any(cache%centers_fractional>=1d0))code=50
     endif
     if(code==0)then
       transform_hash=hash_complex_matrix(cache%wannier_transform,401_int64)
@@ -1216,6 +1224,11 @@ contains
     call move_alloc(retained_values,working_cache%wannier_values)
     call move_alloc(compression,working_cache%candidate_compression)
     call move_alloc(transform,working_cache%wannier_transform)
+    ! The adapter has reordered centers together with transform and values.
+    centers=modulo(centers,1d0)
+    ! Tiny negative inputs can round modulo to the excluded upper endpoint.
+    where(centers==1d0)centers=0d0
+    call move_alloc(centers,working_cache%centers_fractional)
     call move_alloc(seed_coefficients,working_cache%dc_seed_coefficients_in_wannier)
     working_cache%physical_dc_seed_energies=dc_seed_energies
     working_cache%physical_dc_seed_occupations=dc_seed_occupations
@@ -1820,6 +1833,7 @@ contains
     call move_alloc(source%wannier_values,destination%wannier_values)
     call move_alloc(source%candidate_compression,destination%candidate_compression)
     call move_alloc(source%wannier_transform,destination%wannier_transform)
+    call move_alloc(source%centers_fractional,destination%centers_fractional)
     call move_alloc(source%dc_seed_coefficients_in_wannier,&
       destination%dc_seed_coefficients_in_wannier)
     call move_alloc(source%physical_dc_seed_energies,destination%physical_dc_seed_energies)
@@ -2069,6 +2083,8 @@ contains
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
     integer::i,j
     replicated_cache_integrity_hash=initial_hash(709_int64)
+    ! Version 2 includes final periodic centers; basis/transform identities are unchanged.
+    call hash_integer(replicated_cache_integrity_hash,2)
     call hash_integer(replicated_cache_integrity_hash,cache%receipt%fragment_id)
     call hash_integer(replicated_cache_integrity_hash,cache%receipt%basis_generation)
     call hash_integer(replicated_cache_integrity_hash,cache%receipt%candidate_rank)
@@ -2091,6 +2107,7 @@ contains
         cache%dc_seed_coefficients_in_wannier(i,j))
     enddo;enddo
     call hash_real_array(replicated_cache_integrity_hash,cache%physical_dc_seed_energies)
+    call hash_real_array(replicated_cache_integrity_hash,cache%centers_fractional)
     call hash_real_array(replicated_cache_integrity_hash,cache%physical_dc_seed_occupations)
     if(replicated_cache_integrity_hash==0_int64)replicated_cache_integrity_hash=5_int64
   end function replicated_cache_integrity_hash

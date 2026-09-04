@@ -130,6 +130,23 @@ program test_dg_hybrid_fragment_wannier_mpi
     'identical cache reuse changed the published payload')
 
   corrupted_cache=first_snapshot
+  if(total_rank==0)corrupted_cache%centers_fractional(1,1)=&
+    corrupted_cache%centers_fractional(1,1)+0.125d0
+  call require_corrupted_cache_rejected(corrupted_cache,'changed center on one rank')
+  corrupted_cache=first_snapshot
+  if(total_rank==0)deallocate(corrupted_cache%centers_fractional)
+  call require_corrupted_cache_rejected(corrupted_cache,'missing centers on one rank')
+  corrupted_cache=first_snapshot
+  if(total_rank==0)then
+    deallocate(corrupted_cache%centers_fractional)
+    allocate(corrupted_cache%centers_fractional(2,ncandidate));corrupted_cache%centers_fractional=0d0
+  endif
+  call require_corrupted_cache_rejected(corrupted_cache,'wrong center extent on one rank')
+  corrupted_cache=first_snapshot
+  if(total_rank==0)corrupted_cache%centers_fractional(1,1)=ieee_value(0d0,ieee_quiet_nan)
+  call require_corrupted_cache_rejected(corrupted_cache,'nonfinite center on one rank')
+
+  corrupted_cache=first_snapshot
   corrupted_cache%wannier_transform(1,1)=corrupted_cache%wannier_transform(1,1)+&
     cmplx(0.125d0,0d0,real64)
   call require_corrupted_cache_rejected(corrupted_cache,&
@@ -1330,20 +1347,29 @@ contains
     expected_values=matmul(transpose(target_cache%candidate_compression),raw_candidates)
     allocate(expected_transform(ncandidate,ncandidate),expected_centers(3,ncandidate))
     expected_transform=(0d0,0d0);expected_centers=0d0
+    expected_centers(2,:)=-epsilon(1d0)/4d0
     do state=1,ncandidate
       expected_transform(state,state)=(1d0,0d0)
-      expected_centers(1,state)=0.1d0*real(state,real64)
+      expected_centers(1,state)=1d0+0.1d0*real(ncandidate-state,real64)
     enddo
     sine=merge(0.6d0,-0.6d0,fragment_id==1)
     expected_transform(1,1)=0.8d0;expected_transform(2,1)=sine
     expected_transform(1,2)=-sine;expected_transform(2,2)=0.8d0
-    expected_centers(1,ncandidate)=0.875d0
+    expected_centers(1,ncandidate)=-0.125d0
     setup_count_before=setup_calls;run_count_before=run_calls
     call apply_dg_w90_gamma_transform(comm_fragment,grid_ids,expected_values,&
       transform=expected_transform,centers=expected_centers,&
       tolerance=localization_tolerance,ok=expected_ok,message=expected_message)
     call require_total(expected_ok,&
       'fragment-local canonical gauge oracle failed: '//trim(expected_message))
+    call require_total(allocated(target_cache%centers_fractional),'cache did not retain WF centers')
+    call require_total(all(shape(target_cache%centers_fractional)==[3,ncandidate]),'wrong center shape')
+    expected_centers=modulo(expected_centers,1d0)
+    where(expected_centers==1d0)expected_centers=0d0
+    call require_total(maxval(abs(target_cache%centers_fractional-expected_centers))<1d-13,&
+      'cached centers do not match final reordered transform')
+    call require_total(all(target_cache%centers_fractional>=0d0).and.&
+      all(target_cache%centers_fractional<1d0),'cached centers are not periodically wrapped')
     call require_total(setup_calls==setup_count_before.and.run_calls==run_count_before,&
       'fragment-local gauge oracle entered Wannier90 setup or run')
     scale=max(1d0,maxval(abs(expected_transform)),maxval(abs(target_cache%wannier_transform)))
@@ -1354,8 +1380,8 @@ contains
     call require_total(maxval(abs(target_cache%wannier_values-expected_values))<=&
       256d0*epsilon(1d0)*scale,&
       'local cache Wannier values contain a cross-fragment gauge alignment')
-    gauge_marker=real(target_cache%wannier_transform(2,1)*&
-      conjg(target_cache%wannier_transform(1,1)),real64)
+    gauge_marker=real(target_cache%wannier_transform(2,ncandidate-1)*&
+      conjg(target_cache%wannier_transform(1,ncandidate-1)),real64)
     call require_total(merge(gauge_marker>0d0,gauge_marker<0d0,fragment_id==1),&
       'fragment-specific signed stub gauge was collapsed across fragments')
   end subroutine validate_fragment_local_canonical_gauge
@@ -1537,6 +1563,8 @@ contains
       left%local_row_layout_fingerprint==right%local_row_layout_fingerprint.and.&
       all(left%local_grid_ids==right%local_grid_ids)
     same_cache_payload=same_cache_payload.and.&
+      bitwise_real_equal(reshape(left%centers_fractional,[size(left%centers_fractional)]),&
+        reshape(right%centers_fractional,[size(right%centers_fractional)])).and.&
       bitwise_complex_equal(left%wannier_values,right%wannier_values).and.&
       bitwise_complex_equal(left%candidate_compression,right%candidate_compression).and.&
       bitwise_complex_equal(left%wannier_transform,right%wannier_transform).and.&
@@ -1677,10 +1705,11 @@ subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
     enddo
   endif
   lwindow_loc=.true.;wann_centres_loc=0d0;wann_spreads_loc=0d0;spread_loc=0d0
+  wann_centres_loc(2,:)=-epsilon(1d0)/4d0*8d0*0.52917721067d0
   do i=1,num_wann_loc
-    wann_centres_loc(1,i)=0.1d0*real(i,8)*8d0*0.52917721067d0
+    wann_centres_loc(1,i)=(1d0+0.1d0*real(num_wann_loc-i,8))*8d0*0.52917721067d0
   enddo
-  wann_centres_loc(1,num_wann_loc)=0.875d0*8d0*0.52917721067d0
+  wann_centres_loc(1,num_wann_loc)=-0.125d0*8d0*0.52917721067d0
   open(newunit=unit,file=trim(seed_name)//'.wout',status='replace',action='write',iostat=io)
   if(io==0)then
     if(run_must_fail(seed_name))then
