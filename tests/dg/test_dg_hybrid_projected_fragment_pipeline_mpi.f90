@@ -45,7 +45,7 @@ program test_dg_hybrid_projected_fragment_pipeline_mpi
     s_dg_hybrid_projection_factorization_receipt
 #else
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis,&
-    s_dg_hybrid_projection_factorization_receipt
+    s_dg_hybrid_projection_factorization_receipt,build_dg_hybrid_projected_local_fragment_basis
 #endif
   implicit none
   real(real64),parameter::global_point_weights(4)=[0.5_real64,1.25_real64,2.0_real64,0.75_real64]
@@ -55,6 +55,7 @@ program test_dg_hybrid_projected_fragment_pipeline_mpi
   real(real64),allocatable::g_vectors(:,:)
   complex(real64),allocatable::core_wannier(:,:),buffer_wannier(:,:),local_full(:,:),global_full(:,:)
   integer::wannier_owner(2)
+  integer,allocatable::support_slots(:)
   type(s_dg_hybrid_basis_catalog)::catalog
   type(s_dg_hybrid_fragment_basis)::basis
   type(s_dg_hybrid_projection_factorization_receipt)::projection_receipt
@@ -164,6 +165,46 @@ program test_dg_hybrid_projected_fragment_pipeline_mpi
     'generalized metric factorization receipt lacks observable provenance')
   if(rank==0)write(*,'(a,i0,a,i0)')'PROJECTED_FRAGMENT ranks=',nproc,' fingerprint=',fingerprint
 
+#ifndef DG_GENERALIZED_PIPELINE_CONTRACT_SYNTAX
+  call test_variable_fragment_columns
+  if(nproc==2)then
+    call build_dg_hybrid_projected_local_fragment_basis(comm,4,2,fragment_id,core_ids,weights,&
+      core_coordinates,core_windows,buffer_ids,buffer_wannier(fragment_id:fragment_id,:),&
+      buffer_coordinates,buffer_windows,catalog,g_vectors,wannier_owner,1,1d-12,41_int64,&
+      basis,workspace,fingerprint,ok,message,basis_generation=17,projection_receipt=projection_receipt)
+    call require(ok,'local fragment input pipeline failed: '//trim(message))
+    values_ok=basis%generation==17.and.projection_receipt%valid
+    do j=1,size(basis%global_ids)
+      values_ok=values_ok.and.maxval(abs(basis%buffer_values(:,j)-global_full(:,int(basis%global_ids(j)))))<1d-12
+    enddo
+    call require(values_ok,'local fragment input differs from full-union generalized projection')
+    if(rank==0)then
+      support_slots=[2,1]
+    else
+      support_slots=[3,1,4]
+    endif
+    call build_dg_hybrid_projected_local_fragment_basis(comm,4,2,fragment_id,core_ids,weights,&
+      core_coordinates,core_windows,buffer_ids(support_slots),&
+      buffer_wannier(fragment_id:fragment_id,support_slots),buffer_coordinates(:,support_slots),&
+      buffer_windows(:,support_slots),catalog,g_vectors,wannier_owner,2,1d-12,41_int64,&
+      basis,workspace,fingerprint,ok,message,basis_generation=17)
+    call require(ok,'unequal reordered local WF support failed: '//trim(message))
+    values_ok=all(basis%buffer_point_ids==buffer_ids(support_slots))
+    do j=1,size(basis%global_ids)
+      values_ok=values_ok.and.maxval(abs(basis%buffer_values(:,j)-&
+        global_full(support_slots,int(basis%global_ids(j)))))<1d-12
+    enddo
+    call require(values_ok,'support exchange changed physical point ordering or zero extension')
+    if(rank==0)buffer_ids(2)=buffer_ids(1)
+    call build_dg_hybrid_projected_local_fragment_basis(comm,4,2,fragment_id,core_ids,weights,&
+      core_coordinates,core_windows,buffer_ids,buffer_wannier(fragment_id:fragment_id,:),&
+      buffer_coordinates,buffer_windows,catalog,g_vectors,wannier_owner,1,1d-12,41_int64,&
+      basis,workspace,fingerprint,ok,message)
+    call require(.not.ok.and..not.allocated(basis%global_ids),'duplicate source physical IDs accepted')
+    buffer_ids(2)=2_int64
+  endif
+#endif
+
   mismatched_generation=17;if(rank==0)mismatched_generation=18
   call build_dg_hybrid_projected_fragment_basis(comm,4,2,fragment_id,core_ids,weights,core_wannier,&
     core_coordinates,core_windows,buffer_ids,buffer_wannier,buffer_coordinates,buffer_windows,catalog,&
@@ -200,6 +241,54 @@ program test_dg_hybrid_projected_fragment_pipeline_mpi
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid projected fragment pipeline on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+#ifndef DG_GENERALIZED_PIPELINE_CONTRACT_SYNTAX
+  subroutine test_variable_fragment_columns
+    type(s_dg_hybrid_basis_catalog)::pw_catalog
+    type(s_dg_hybrid_fragment_basis)::reference,actual
+    integer::nf,ng,nw,f,a,b,k,first,last,neighbor
+    integer,allocatable::owners(:)
+    integer(int64)::cids(2),bids(3)
+    complex(real64),allocatable::wf(:,:)
+    real(real64),allocatable::windows(:,:)
+    real(real64)::cc(3,2),bc(3,3),gv(3,1)
+    ! Every MPI rank owns exactly one fragment, in reversed rank order.
+    ! Alternating one/two WF columns force multiple width-one tiles.
+    nf=nproc;ng=2*nf;nw=sum([(1+modulo(a,2),a=1,nf)])
+    allocate(owners(nw),wf(nw,ng),windows(nf,ng),pw_catalog%packets(nf))
+    wf=(0d0,0d0);windows=0d0;k=0;f=nf-rank;first=0;last=0
+    do a=1,nf
+      neighbor=2*modulo(a,nf)+1
+      if(a==f)first=k+1
+      do b=1,1+modulo(a,2)
+        k=k+1;owners(k)=a
+        wf(k,2*a-2+b)=cmplx(1d0,0.1d0*b,real64)
+        wf(k,neighbor)=cmplx(0.1d0*b,-0.05d0*a,real64)
+      enddo
+      if(a==f)last=k
+      windows(a,2*a-1:2*a)=1d0
+      pw_catalog%packets(a)%fragment_id=a
+      pw_catalog%packets(a)%star_id=1;pw_catalog%packets(a)%owner_rank=nf-a
+      allocate(pw_catalog%packets(a)%g_indices(1),source=[1])
+    enddo
+    pw_catalog%valid=.true.;pw_catalog%packet_fingerprint=31_int64;pw_catalog%catalog_fingerprint=37_int64
+    cids=int([2*f,2*f-1],int64);bids=int([2*f,2*modulo(f,nf)+1,2*f-1],int64)
+    cc=0d0;bc=0d0;gv=0d0
+    cc(1,:)=real(cids-1_int64,real64);bc(1,:)=real(bids-1_int64,real64)
+    call build_dg_hybrid_projected_fragment_basis(comm,ng,nf,f,cids,[1d0,1d0],wf(:,cids),&
+      cc,windows(:,cids),bids,wf(:,bids),bc,windows(:,bids),pw_catalog,gv,owners,1,1d-12,41_int64,&
+      reference,workspace,fingerprint,ok,message,basis_generation=5)
+    call require(ok,'variable-column reference failed: '//trim(message))
+    call build_dg_hybrid_projected_local_fragment_basis(comm,ng,nf,f,cids,[1d0,1d0],cc,windows(:,cids),&
+      bids,wf(first:last,bids),bc,windows(:,bids),pw_catalog,gv,owners,1,1d-12,41_int64,&
+      actual,workspace,fingerprint,ok,message,basis_generation=5)
+    call require(ok,'variable-column local projection failed: '//trim(message))
+    call require(all(actual%global_ids==reference%global_ids).and.&
+      all(actual%buffer_point_ids==reference%buffer_point_ids).and.actual%generation==5.and.&
+      maxval(abs(actual%buffer_values-reference%buffer_values))<1d-12,&
+      'multiple local WF tiles changed column IDs, physical ordering or projected values')
+  end subroutine test_variable_fragment_columns
+#endif
+
   logical function bitwise_complex_vector_equal(left,right)result(equal)
     complex(real64),intent(in)::left(:),right(:)
     integer::k

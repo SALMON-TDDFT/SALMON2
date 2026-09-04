@@ -1247,6 +1247,33 @@ The main-route construction check remains RED: compact stream insertion
 does not yet wire DC caches into the generalized union projection or the
 production H/S/CG callbacks. No expensive material calculation was rerun.
 
+**Local WF to generalized PW projection checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`build_dg_hybrid_projected_local_fragment_basis` accepts every WF column of
+the rank's fragment on its physical buffer support. It enforces one rank per
+fragment, a replicated ownership directory, and unique in-range source
+physical IDs. Fragment supports and bounded WF-column tiles are broadcast
+to construct the core/buffer union views required by the existing generalized
+Gram projection. No WF is removed, rotated, or relocalized. Physical-ID
+lookup preserves local point order; values outside each supplied support are
+zero. This does not certify that truncating the supplied support is accurate:
+tail/interface/projector coverage remains a downstream acceptance condition.
+
+The existing projection pipeline uses the compact single-owner stream when
+rank and fragment counts match, and retains its legacy idle-rank API. Union
+views are still stored for the existing metric/projection implementation;
+the new wrapper is not a fully sparse union algorithm. Workspace receipts
+include these extra views, tile payloads, support IDs and integer lookups.
+
+The new API initially failed compilation as missing, then passed full-union
+reference comparisons. Tests now cover 2/4/8 ranks with the same number of
+fragments, reversed rank--fragment assignment, unequal WF counts, multiple
+width-one tiles, nonorthogonal complex WF overlaps, reordered and unequal
+support lengths, zero extension, and collective rejection of a duplicate
+source ID on one rank. Stream regression, DC controls and the release build
+pass. Review found no Critical/Important issues. The main-route check remains
+RED: direct DC-cache invocation, accepted-support certification and production
+H/S/CG callback wiring are still pending. No material calculation was rerun.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

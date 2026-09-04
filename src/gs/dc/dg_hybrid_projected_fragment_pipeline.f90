@@ -30,6 +30,7 @@ module dg_hybrid_projected_fragment_pipeline
       uncompressed_local_slots(:),uncompressed_sectors(:),uncompressed_generations(:)
   end type s_dg_hybrid_dual_basis_catalog
   public::build_dg_hybrid_projected_fragment_basis,finalize_dg_hybrid_dual_basis_catalog
+  public::build_dg_hybrid_projected_local_fragment_basis
   interface
     subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
       import::real64
@@ -41,6 +42,156 @@ module dg_hybrid_projected_fragment_pipeline
     end subroutine zheev
   end interface
 contains
+  subroutine build_dg_hybrid_projected_local_fragment_basis(comm,global_point_count,fragment_count,&
+      fragment_id,core_ids,weights,core_coordinates,core_windows,buffer_ids,local_wannier,&
+      buffer_coordinates,buffer_windows,catalog,g_vectors,wannier_owner,tile_width,tolerance,&
+      wannier_fingerprint,basis,workspace_peak_bytes,fingerprint,ok,message,basis_generation,projection_receipt)
+    integer,intent(in)::comm,global_point_count,fragment_count,fragment_id,tile_width,wannier_owner(:)
+    integer(int64),intent(in)::core_ids(:),buffer_ids(:),wannier_fingerprint
+    real(real64),intent(in)::weights(:),core_coordinates(:,:),core_windows(:,:),buffer_coordinates(:,:),&
+      buffer_windows(:,:),g_vectors(:,:),tolerance
+    complex(real64),intent(in)::local_wannier(:,:)
+    type(s_dg_hybrid_basis_catalog),intent(in)::catalog
+    type(s_dg_hybrid_fragment_basis),intent(out)::basis
+    integer(int64),intent(out)::workspace_peak_bytes,fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,optional,intent(in)::basis_generation
+    type(s_dg_hybrid_projection_factorization_receipt),optional,intent(out)::projection_receipt
+    integer::rank,nrank,ierr,metadata(4),minimum(4),maximum(4),status,root,npoint,nwf,&
+      first,width,i,j,k,slot,nowner
+    integer,allocatable::fragments(:),point_counts(:),owner_min(:),owner_max(:),&
+      columns(:),core_map(:),buffer_map(:),point_slot(:)
+    integer(int64),allocatable::source_ids(:)
+    complex(real64),allocatable::core_union(:,:),buffer_union(:,:),tile(:,:)
+    integer(int64)::assembly_elements,assembly_bytes,stage_bytes,working_bytes,index_elements,index_bytes
+    logical::valid,stage_ok
+    character(256)::stage_message
+    ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
+    call clear_fragment_basis(basis)
+    if(present(projection_receipt))projection_receipt=s_dg_hybrid_projection_factorization_receipt()
+    call MPI_Comm_rank(comm,rank,ierr)
+    call MPI_Comm_size(comm,nrank,ierr)
+    metadata=[global_point_count,fragment_count,size(wannier_owner),tile_width]
+    call MPI_Allreduce(metadata,minimum,4,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='local WF metadata agreement failed';return;endif
+    call MPI_Allreduce(metadata,maximum,4,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum/=maximum).or.any(minimum<1))then
+      message='invalid or inconsistent local WF metadata';return
+    endif
+    valid=fragment_count==nrank.and.fragment_id>=1.and.fragment_id<=fragment_count.and.&
+      size(local_wannier,1)==count(wannier_owner==fragment_id).and.&
+      size(local_wannier,2)==size(buffer_ids).and.all(wannier_owner>=1).and.&
+      all(wannier_owner<=fragment_count).and.all(buffer_ids>=1_int64).and.&
+      all(buffer_ids<=int(global_point_count,int64)).and.all(core_ids>=1_int64).and.&
+      all(core_ids<=int(global_point_count,int64)).and.&
+      all(ieee_is_finite(real(local_wannier))).and.all(ieee_is_finite(aimag(local_wannier)))
+    call synchronize_status(comm,valid,'invalid single-owner local WF support',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    allocate(point_slot(global_point_count),stat=status)
+    call synchronize_status(comm,status==0,'cannot allocate physical WF point lookup',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    point_slot=0
+    do i=1,size(buffer_ids)
+      if(point_slot(buffer_ids(i))/=0)valid=.false.
+      point_slot(buffer_ids(i))=i
+    enddo
+    call synchronize_status(comm,valid,'duplicate local WF physical support ID',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    nowner=size(wannier_owner)
+    allocate(fragments(nrank),point_counts(nrank),owner_min(nowner),owner_max(nowner),stat=status)
+    call synchronize_status(comm,status==0,'cannot allocate local WF directory',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    call MPI_Allreduce(wannier_owner,owner_min,nowner,MPI_INTEGER,MPI_MIN,comm,ierr)
+    valid=ierr==MPI_SUCCESS
+    call MPI_Allreduce(wannier_owner,owner_max,nowner,MPI_INTEGER,MPI_MAX,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS.and.all(owner_min==owner_max)
+    call MPI_Allgather(fragment_id,1,MPI_INTEGER,fragments,1,MPI_INTEGER,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS
+    call MPI_Allgather(size(buffer_ids),1,MPI_INTEGER,point_counts,1,MPI_INTEGER,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS
+    do i=1,fragment_count
+      if(count(fragments==i)/=1)valid=.false.
+    enddo
+    call synchronize_status(comm,valid,'inconsistent local WF ownership directory',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    ! Only the accepted physical buffer support is exported; elsewhere each WF is zero.
+    ! This conversion does not certify omitted tails or alter the retained WF columns.
+    allocate(core_union(nowner,size(core_ids)),buffer_union(nowner,size(buffer_ids)),&
+      core_map(size(core_ids)),buffer_map(size(buffer_ids)),columns(nowner),stat=status)
+    call synchronize_status(comm,status==0,'cannot allocate local WF union views',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    core_union=(0d0,0d0);buffer_union=(0d0,0d0);working_bytes=0_int64
+    do root=0,nrank-1
+      npoint=point_counts(root+1);nwf=0
+      do i=1,nowner
+        if(wannier_owner(i)/=fragments(root+1))cycle
+        nwf=nwf+1;columns(nwf)=i
+      enddo
+      allocate(source_ids(npoint),stat=status)
+      call synchronize_status(comm,status==0,'cannot allocate WF support IDs',stage_ok,stage_message)
+      if(.not.stage_ok)then;message=stage_message;return;endif
+      if(rank==root)source_ids=buffer_ids
+      call MPI_Bcast(source_ids,npoint,MPI_INTEGER8,root,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS,'WF support ID exchange failed',stage_ok,stage_message)
+      if(.not.stage_ok)then;message=stage_message;return;endif
+      point_slot=0
+      do j=1,npoint
+        point_slot(source_ids(j))=j
+      enddo
+      core_map=point_slot(core_ids);buffer_map=point_slot(buffer_ids)
+      working_bytes=max(working_bytes,8_int64*npoint)
+      do first=1,nwf,tile_width
+        width=min(tile_width,nwf-first+1)
+        valid=int(width,int64)*int(npoint,int64)<=int(huge(0),int64)
+        call synchronize_status(comm,valid,'WF tile MPI count overflows',stage_ok,stage_message)
+        if(.not.stage_ok)then;message=stage_message;return;endif
+        allocate(tile(width,npoint),stat=status)
+        call synchronize_status(comm,status==0,'cannot allocate WF support tile',stage_ok,stage_message)
+        if(.not.stage_ok)then;message=stage_message;return;endif
+        if(rank==root)tile=local_wannier(first:first+width-1,:)
+        call MPI_Bcast(tile,size(tile),MPI_DOUBLE_COMPLEX,root,comm,ierr)
+        call synchronize_status(comm,ierr==MPI_SUCCESS,'WF support tile exchange failed',stage_ok,stage_message)
+        if(.not.stage_ok)then;message=stage_message;return;endif
+        do k=1,width
+          slot=columns(first+k-1)
+          do i=1,size(core_ids)
+            if(core_map(i)>0)core_union(slot,i)=tile(k,core_map(i))
+          enddo
+          do i=1,size(buffer_ids)
+            if(buffer_map(i)>0)buffer_union(slot,i)=tile(k,buffer_map(i))
+          enddo
+        enddo
+        working_bytes=max(working_bytes,16_int64*size(tile,kind=int64)+8_int64*npoint)
+        deallocate(tile)
+      enddo
+      deallocate(source_ids)
+    enddo
+    valid=.true.;assembly_elements=size(core_union,kind=int64)
+    call checked_add_nonnegative_int64(assembly_elements,size(buffer_union,kind=int64),valid)
+    call checked_multiply_nonnegative_int64(assembly_elements,16_int64,assembly_bytes,valid)
+    index_elements=2_int64*nrank+3_int64*nowner+size(core_map,kind=int64)+&
+      size(buffer_map,kind=int64)+size(point_slot,kind=int64)
+    call checked_multiply_nonnegative_int64(index_elements,int(storage_size(0)/8,int64),index_bytes,valid)
+    call checked_add_nonnegative_int64(assembly_bytes,index_bytes,valid)
+    call checked_add_nonnegative_int64(working_bytes,assembly_bytes,valid)
+    call synchronize_status(comm,valid,'WF union workspace receipt overflows',stage_ok,stage_message)
+    if(.not.stage_ok)then;message=stage_message;return;endif
+    call build_dg_hybrid_projected_fragment_basis(comm,global_point_count,fragment_count,fragment_id,&
+      core_ids,weights,core_union,core_coordinates,core_windows,buffer_ids,buffer_union,&
+      buffer_coordinates,buffer_windows,catalog,g_vectors,wannier_owner,tile_width,tolerance,&
+      wannier_fingerprint,basis,stage_bytes,fingerprint,ok,message,basis_generation,projection_receipt)
+    if(.not.ok)return
+    call checked_add_nonnegative_int64(assembly_bytes,stage_bytes,valid)
+    call synchronize_status(comm,valid,'local WF pipeline workspace receipt overflows',stage_ok,stage_message)
+    if(.not.stage_ok)then
+      call clear_fragment_basis(basis)
+      if(present(projection_receipt))projection_receipt=s_dg_hybrid_projection_factorization_receipt()
+      ok=.false.;fingerprint=0_int64;message=stage_message;return
+    endif
+    workspace_peak_bytes=max(working_bytes,assembly_bytes)
+  end subroutine build_dg_hybrid_projected_local_fragment_basis
+
   subroutine build_dg_hybrid_projected_fragment_basis(comm,global_point_count,fragment_count,&
       fragment_id,core_ids,weights,core_wannier,core_coordinates,core_windows,buffer_ids,&
       buffer_wannier,buffer_coordinates,buffer_windows,catalog,g_vectors,wannier_owner,tile_width,&
@@ -63,7 +214,7 @@ contains
     type(s_dg_hybrid_generalized_metric_factor)::metric_factor
     type(s_dg_hybrid_projection_factorization_receipt)::working_receipt
     integer::packet,g,npw,column,width,i,requested_generation,allocation_status,ierr,&
-      minimum_generation,maximum_generation
+      minimum_generation,maximum_generation,nrank
     integer,allocatable::pw_owner(:)
     real(real64),allocatable::normalized_buffer_windows(:,:)
     complex(real64),allocatable::core_raw(:,:),buffer_raw(:,:),coefficients(:,:),projected_core(:,:),&
@@ -141,9 +292,17 @@ contains
       stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
     working_workspace=max(working_workspace,metric_workspace)
-    call initialize_dg_hybrid_fragment_basis_stream(comm,fragment_count,fragment_id,buffer_ids,&
-      buffer_wannier,wannier_owner,pw_owner,stream,working_basis,stream_workspace,stream_fingerprint,&
-      stage_ok,stage_message)
+    call MPI_Comm_size(comm,nrank,ierr)
+    if(nrank==fragment_count)then
+      call initialize_dg_hybrid_fragment_basis_stream(comm,fragment_count,fragment_id,buffer_ids,&
+        buffer_wannier(pack([(i,i=1,size(wannier_owner))],wannier_owner==fragment_id),:),&
+        wannier_owner,pw_owner,stream,working_basis,stream_workspace,stream_fingerprint,&
+        stage_ok,stage_message,local_wannier_only=.true.,basis_generation=requested_generation)
+    else
+      call initialize_dg_hybrid_fragment_basis_stream(comm,fragment_count,fragment_id,buffer_ids,&
+        buffer_wannier,wannier_owner,pw_owner,stream,working_basis,stream_workspace,stream_fingerprint,&
+        stage_ok,stage_message,basis_generation=requested_generation)
+    endif
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
     do column=1,npw,tile_width
       width=min(tile_width,npw-column+1)
