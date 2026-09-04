@@ -4,6 +4,7 @@ module dg_hybrid_fragment_wannier_test_stubs
   integer,parameter::history_limit=8
   integer::setup_calls=0,run_calls=0,expected_fragment_id=0
   integer::fail_run_fragment=0
+  logical::override_test_centers=.false.
   character(1024)::setup_seed_history(history_limit)='',run_seed_history(history_limit)=''
   integer::run_band_count_history(history_limit)=0
   logical::run_zero_auxiliary_energies(history_limit)=.false.
@@ -15,6 +16,7 @@ module dg_hybrid_fragment_wannier_test_stubs
 contains
   subroutine reset_w90_stub_state
     setup_calls=0;run_calls=0;expected_fragment_id=0;fail_run_fragment=0
+    override_test_centers=.false.
     setup_seed_history='';run_seed_history='';setup_saw_dmn=.false.
     run_band_count_history=0;run_zero_auxiliary_energies=.false.
     setup_saw_site_true=.false.;setup_saw_site_false=.false.
@@ -34,6 +36,7 @@ contains
   end function run_must_fail
 end module dg_hybrid_fragment_wannier_test_stubs
 
+#ifndef DG_W90_STUBS_ONLY
 program test_dg_hybrid_fragment_wannier_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
@@ -1609,6 +1612,7 @@ contains
     endif
   end subroutine require_total
 end program test_dg_hybrid_fragment_wannier_mpi
+#endif
 
 #ifdef W90_TEST_STUBS
 subroutine wannier_setup(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
@@ -1710,6 +1714,7 @@ subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
     wann_centres_loc(1,i)=(1d0+0.1d0*real(num_wann_loc-i,8))*8d0*0.52917721067d0
   enddo
   wann_centres_loc(1,num_wann_loc)=-0.125d0*8d0*0.52917721067d0
+  if(override_test_centers)wann_centres_loc(1,:)=0.9375d0*8d0*0.52917721067d0
   open(newunit=unit,file=trim(seed_name)//'.wout',status='replace',action='write',iostat=io)
   if(io==0)then
     if(run_must_fail(seed_name))then

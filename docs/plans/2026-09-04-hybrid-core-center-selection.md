@@ -75,6 +75,34 @@ wait for feedback under executing-plans.
 
 ### Task C2: Select stable raw columns with periodic core ownership
 
+**Checkpoint, 2026-09-04:** Implemented the geometry classifier and the
+single-owner raw-cache selection adapter in `dg_hybrid_fragment_selection`.
+Selection returns stable raw column IDs and provenance only; raw WF/buffer
+values remain unchanged. The adapter reuses the authoritative cache validator
+through coordinate export on the singleton fragment communicator (temporary
+Q/seed maps are discarded), validates the actual DC index mapping, and checks
+its raw-core-first origin/lattice against the shared grid-aligned core boxes.
+Foreign-centered columns are not transferred to another fragment.
+
+The convention uses a common snapped grid coordinate with a 64-epsilon,
+geometry-scaled tolerance and periodic half-open boxes. Excessive coordinate
+uncertainty is rejected before coordinate division/conversion. The geometry
+fingerprint includes the convention; the final receipt also binds the raw
+cache, distributed WF integrity and exact rank--fragment inventory.
+
+The new 1/2/4/8-rank fixture passes, including reversed rank ownership,
+unequal core widths, translated origins, periodic faces/edges/corners, 3-D
+partitions, roundoff boundary probes, empty selections, coincident centers,
+phase/permutation transport, corrupt centers/cache/mapping, partition overlap
+and rank-disagreeing geometry. Review identified an extreme finite-geometry
+overflow path; its trap-enabled RED reproduction now returns a collective
+error after correction. The original WF fixture passes on 2/4/8 ranks and the
+release build passes. The existing test W90 stubs are reused via a program-only
+preprocessor guard; they are not evidence of material localization accuracy.
+Review has no remaining Critical/Important issue. C3 seed/PW admission and the
+Task 8 main route remain unimplemented; no material/DC calculation was run.
+The unrelated CMake fingerprint entry and pre-existing main edits are retained.
+
 **Files:**
 - Create: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/CMakeLists.txt` (only the new module line)
