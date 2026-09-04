@@ -14,6 +14,12 @@ module dg_hybrid_projected_fragment_pipeline
     finalize_dg_hybrid_fragment_basis_stream
   implicit none
   private
+  type,public::s_dg_hybrid_support_samples
+    ! Rows are required boundary samples, derivative samples or projector
+    ! overlaps; columns are active basis functions / original DC states.
+    complex(real64),allocatable::basis(:,:),reference(:,:)
+    real(real64),allocatable::weights(:)
+  end type
   type,public::s_dg_hybrid_core_projection_report
     logical::measured=.false.
     integer::metric_rank=0
@@ -38,6 +44,7 @@ module dg_hybrid_projected_fragment_pipeline
   public::build_dg_hybrid_projected_fragment_basis,finalize_dg_hybrid_dual_basis_catalog
   public::build_dg_hybrid_projected_local_fragment_basis
   public::project_dg_hybrid_core_seeds
+  public::check_dg_hybrid_seed_support
   interface
     subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
       import::real64
@@ -49,6 +56,91 @@ module dg_hybrid_projected_fragment_pipeline
     end subroutine zheev
   end interface
 contains
+  ! Numerical admission of supplied support evidence, not a proof of inventory
+  ! completeness. The operator adapter must supply required_counts independently
+  ! of these arrays and bind sample identities/order to the same raw reference.
+  ! Channel order: boundary, derivative, nonlocal projector. Each tolerance is
+  ! an absolute weighted L2 orbital error in that channel's physical units,
+  ! matching the raw seed span norm convention. Every seed, not only occupied
+  ! seeds, is checked. This routine neither changes C nor publishes solver state.
+  subroutine check_dg_hybrid_seed_support(comm,coefficients,samples,required_counts,tolerances,&
+      selected_count,pw_cutoff,defects,measured,ok,message)
+    integer,intent(in)::comm,required_counts(3),selected_count
+    complex(real64),intent(in)::coefficients(:,:)
+    type(s_dg_hybrid_support_samples),intent(in)::samples(3)
+    real(real64),intent(in)::tolerances(3),pw_cutoff
+    real(real64),intent(out)::defects(3)
+    logical,intent(out)::measured,ok
+    character(*),intent(out)::message
+    logical::halting(3)
+    call ieee_get_halting_mode(ieee_invalid,halting(1))
+    call ieee_get_halting_mode(ieee_divide_by_zero,halting(2))
+    call ieee_get_halting_mode(ieee_overflow,halting(3))
+    call ieee_set_halting_mode(ieee_invalid,.false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero,.false.)
+    call ieee_set_halting_mode(ieee_overflow,.false.)
+    call execute()
+    call ieee_set_flag(ieee_invalid,.false.);call ieee_set_flag(ieee_divide_by_zero,.false.)
+    call ieee_set_flag(ieee_overflow,.false.)
+    call ieee_set_halting_mode(ieee_invalid,halting(1))
+    call ieee_set_halting_mode(ieee_divide_by_zero,halting(2))
+    call ieee_set_halting_mode(ieee_overflow,halting(3))
+  contains
+    subroutine execute()
+      complex(real64),allocatable::reconstructed(:,:)
+      real(real64)::metadata(4),minimum(4),maximum(4),error2
+      integer::channel,n,m,j,status,ierr
+      logical::valid
+      character(256)::why
+      ok=.false.;measured=.false.;message='';defects=huge(1d0)
+      n=size(coefficients,1);m=size(coefficients,2)
+      valid=n>0.and.m>0.and.selected_count>0.and.selected_count<=n.and.&
+        finite_complex_matrix(coefficients).and.all(required_counts>=0).and.&
+        all(ieee_is_finite(tolerances)).and.all(tolerances>0d0).and.&
+        ieee_is_finite(pw_cutoff).and.pw_cutoff>=0d0
+      do channel=1,3
+        if(.not.allocated(samples(channel)%basis).or..not.allocated(samples(channel)%reference).or.&
+            .not.allocated(samples(channel)%weights))then
+          valid=.false.;cycle
+        endif
+        valid=valid.and.all(shape(samples(channel)%basis)==[required_counts(channel),n]).and.&
+          all(shape(samples(channel)%reference)==[required_counts(channel),m]).and.&
+          size(samples(channel)%weights)==required_counts(channel).and.&
+          finite_complex_matrix(samples(channel)%basis).and.finite_complex_matrix(samples(channel)%reference).and.&
+          all(ieee_is_finite(samples(channel)%weights)).and.all(samples(channel)%weights>0d0)
+      enddo
+      call synchronize_status(comm,valid,'invalid or incomplete required support evidence',ok,message)
+      if(.not.ok)return
+      metadata=[tolerances,pw_cutoff]
+      call MPI_Allreduce(metadata,minimum,4,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS,'support controls exchange failed',ok,message)
+      if(.not.ok)return
+      call MPI_Allreduce(metadata,maximum,4,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS.and.all(minimum==maximum),&
+        'support controls differ between ranks',ok,message);if(.not.ok)return
+      defects=0d0
+      do channel=1,3
+        allocate(reconstructed(required_counts(channel),m),stat=status)
+        call synchronize_status(comm,status==0,'support reconstruction allocation failed',ok,message)
+        if(.not.ok)return
+        reconstructed=matmul(samples(channel)%basis,coefficients)
+        valid=finite_complex_matrix(reconstructed)
+        do j=1,m
+          error2=sum(samples(channel)%weights*abs(reconstructed(:,j)-samples(channel)%reference(:,j))**2)
+          valid=valid.and.ieee_is_finite(error2)
+          defects(channel)=max(defects(channel),sqrt(error2))
+        enddo
+        call synchronize_status(comm,valid,'nonfinite required support reconstruction',ok,message)
+        if(.not.ok)return
+        deallocate(reconstructed)
+      enddo
+      measured=.true.
+      write(why,'(a,i0,a,es12.4,a,3es12.4)')'required support mismatch: selected=',selected_count,&
+        ' cutoff=',pw_cutoff,' boundary/derivative/projector=',defects
+      call synchronize_status(comm,all(defects<=tolerances),why,ok,message)
+    end subroutine
+  end subroutine check_dg_hybrid_seed_support
+
   ! Local core quadrature only; no complete-system Hamiltonian diagonalization.
   ! limits = metric rank, max relative orbital norm, relative density L1,
   ! absolute electron-number defect. A rank loss is never compressed away.

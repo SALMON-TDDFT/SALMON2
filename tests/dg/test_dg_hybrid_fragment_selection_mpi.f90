@@ -8,7 +8,8 @@ program test_fragment_selection
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
-    project_dg_hybrid_core_seeds,s_dg_hybrid_core_projection_report
+    project_dg_hybrid_core_seeds,s_dg_hybrid_core_projection_report,&
+    s_dg_hybrid_support_samples,check_dg_hybrid_seed_support
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_density_checked
@@ -301,6 +302,7 @@ contains
     complex(real64)::dc(2,8),aux(1,8),proj(1,8),target(4)
     complex(real64)::reference(4,1),dependent(4,4),expected_coeff(4,1),mixed_basis(4,4)
     complex(real64)::dc_reference(4,2)
+    complex(real64)::full_mixed_basis(8,4)
     complex(real64)::volume_values(4*np,4),gradients(3,4*np,4),rhs(4,1)
     complex(real64),allocatable::metric_rows(:,:),kinetic_rows(:,:)
     real(real64)::volume_diagnostics(4)
@@ -404,6 +406,9 @@ contains
       bound_reference%occupations,limits,3,0d0,coeff,report,passed,why)
     call require(passed,'immutable raw DC seed projection: '//trim(why))
     call require(maxval(abs(matmul(mixed_basis,coeff)-dc_reference))<1d-11,'raw DC states were not reproduced')
+    full_mixed_basis=selected_basis%buffer_values
+    full_mixed_basis(:,4)=2d0*full_mixed_basis(:,4)+0.3d0*full_mixed_basis(:,1)
+    call test_support_checks(full_mixed_basis,bound_reference%buffer_orbitals,coeff,raw%wannier_values(4,:))
     density_metric=matmul(conjg(transpose(mixed_basis)),mixed_basis)
     reference_density=0d0
     do p=1,size(bound_reference%occupations)
@@ -532,6 +537,108 @@ contains
     call require(.not.passed.and..not.invalid%valid.and..not.allocated(invalid%local_values),&
       'invalid selection published active catalog')
     call require(run_calls==run0.and.setup_calls==setup0,'PW catalog reran W90')
+  end subroutine
+  subroutine test_support_checks(full_basis,raw_seeds,dc_coeff,excluded)
+    complex(real64),intent(in)::full_basis(8,4),raw_seeds(:,:),dc_coeff(:,:),excluded(8)
+    type(s_dg_hybrid_support_samples)::samples(3),changed(3)
+    type(s_dg_hybrid_core_projection_report)::core_report
+    complex(real64)::boundary(3,8),derivative(2,8),projector_map(1,8)
+    complex(real64),allocatable::probe_coeff(:,:)
+    real(real64)::defects(3),tolerances(3),expected_errors(3)
+    integer::channel,counts(3)
+    logical::passed,measured
+    character(256)::why
+    boundary=0d0;boundary(1,1)=1d0;boundary(2,4)=1d0;boundary(3,7)=1d0
+    ! Explicit small difference stencils and a normalized projector functional;
+    ! these test admission arithmetic, not production SIPG assembly (Task C5).
+    derivative=0d0;derivative(1,1)=-1d0;derivative(1,2)=1d0
+    derivative(2,5)=-0.5d0;derivative(2,7)=0.5d0
+    projector_map=0d0;projector_map(1,[1,4,7])=1d0/sqrt(3d0)
+    samples(1)%basis=matmul(boundary,full_basis);samples(1)%reference=matmul(boundary,raw_seeds)
+    samples(2)%basis=matmul(derivative,full_basis);samples(2)%reference=matmul(derivative,raw_seeds)
+    samples(3)%basis=matmul(projector_map,full_basis);samples(3)%reference=matmul(projector_map,raw_seeds)
+    counts=[3,2,1];tolerances=1d-10
+    do channel=1,3;allocate(samples(channel)%weights(counts(channel)),source=1d0);enddo
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,samples,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(passed.and.measured.and.maxval(defects)<1d-11,'exact DC support reconstruction: '//trim(why))
+    do channel=1,3
+      changed=samples
+      if(rank==0)changed(channel)%reference(1,1)=changed(channel)%reference(1,1)+0.25d0
+      call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,changed,counts,tolerances,3,0d0,&
+        defects,measured,passed,why)
+      call require(.not.passed.and.measured.and.index(why,'required support mismatch')>0,&
+        'single-rank support defect was not rejected collectively')
+      if(rank==0)then
+        call require(abs(defects(channel)-0.25d0)<1d-10.and.count(defects>1d-10)==1,&
+          'support channels were mixed or hidden')
+      else
+        call require(maxval(defects)<1d-10,'support report lost local error information')
+      endif
+    enddo
+    changed=samples
+    if(rank==0)deallocate(changed(2)%basis)
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,changed,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(.not.passed.and..not.measured,'missing derivative evidence accepted')
+    counts(1)=4
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,samples,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(.not.passed.and..not.measured,'missing required sample count accepted')
+    counts=[3,2,1]
+    changed=samples
+    if(rank==0)then
+      changed(1)%reference(1,1)=changed(1)%reference(1,1)+0.25d0
+      changed(1)%weights(1)=4d0
+    endif
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,changed,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(.not.passed.and.measured,'weighted support defect accepted')
+    if(rank==0)then
+      call require(abs(defects(1)-0.5d0)<1d-10,'support norm ignored quadrature weights')
+    else
+      call require(defects(1)<1d-10,'weighted support report changed another fragment')
+    endif
+    changed=samples
+    if(rank==0)changed(3)%weights(1)=ieee_value(0d0,ieee_quiet_nan)
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,changed,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(.not.passed.and..not.measured,'nonfinite support weight accepted')
+    changed=samples
+    if(rank==0)changed(1)%reference(1,1)=cmplx(huge(1d0)/2d0,0d0,real64)
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,changed,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(.not.passed.and..not.measured,'overflowing finite support error escaped admission')
+    if(rank==0)tolerances(2)=2d-10
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,samples,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(.not.passed.and.index(why,'controls differ')>0,'different support tolerances accepted')
+    tolerances=1d-10
+    changed=samples
+    if(modulo(rank,2)==0)then
+      counts(3)=0
+      deallocate(changed(3)%basis,changed(3)%reference,changed(3)%weights)
+      allocate(changed(3)%basis(0,4),changed(3)%reference(0,size(dc_coeff,2)),changed(3)%weights(0))
+    endif
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,dc_coeff,changed,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    call require(passed.and.measured.and.maxval(defects)<1d-10,'declared zero projector inventory failed')
+    counts=[3,2,1]
+    ! Exactly representable core restriction, but the excluded buffer tail is
+    ! needed by the declared boundary/stencil/projector inventory.
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,full_basis(:4,:),[1d0,1d0,1d0,1d0],&
+      reshape(excluded(:4),[4,1]),[1d0],[1d-12,1d-10,1d-10,1d-10],3,0d0,&
+      probe_coeff,core_report,passed,why)
+    call require(passed,'support-tail probe failed before support check')
+    changed=samples
+    changed(1)%reference=matmul(boundary,reshape(excluded,[8,1]))
+    changed(2)%reference=matmul(derivative,reshape(excluded,[8,1]))
+    changed(3)%reference=matmul(projector_map,reshape(excluded,[8,1]))
+    call check_dg_hybrid_seed_support(MPI_COMM_WORLD,probe_coeff,changed,counts,tolerances,3,0d0,&
+      defects,measured,passed,why)
+    expected_errors=[sqrt(0.5d0),sqrt(0.5d0)/2d0,sqrt(0.5d0/3d0)]
+    call require(.not.passed.and.measured.and.maxval(abs(defects-expected_errors))<1d-10,&
+      'core-exact state concealed required buffer-tail loss')
   end subroutine
   subroutine apply_density_metric(input,output,valid)
     complex(real64),intent(in)::input(:,:)

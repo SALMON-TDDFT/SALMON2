@@ -271,6 +271,41 @@ and reference together. The generic numerical kernels do not independently
 validate an externally modified reference object. Production main and C4--C6
 remain unchanged; no conventional DC/material run or worktree creation occurred.
 
+**Fifth partial checkpoint, 2026-09-04 (support reconstruction numerical gate):**
+Added `s_dg_hybrid_support_samples` and `check_dg_hybrid_seed_support` to the
+projected pipeline module. Boundary samples, derivative samples and nonlocal
+projector overlaps are checked separately for every seed using the already
+computed coefficients. Each reported defect is the maximum absolute weighted
+L2 orbital error in that channel's physical units, following the raw seed span
+norm convention. Three explicit caller tolerances and cutoff must agree across
+ranks; there is no occupation-based waiver or implicit tolerance relaxation.
+
+The numerical API takes independently supplied required sample counts and
+rejects missing arrays, mismatched extents, nonpositive/nonfinite weights,
+nonfinite values or arithmetic overflow. Allocated zero-row evidence is allowed
+only for a declared zero required count; counts may vary by fragment. All three
+defects remain available on a measured tolerance failure. No coefficient,
+occupation, cutoff or solver state is modified or published by this check.
+
+The integration fixture evaluates explicit boundary sampling, small difference
+stencils and a normalized projector functional on real cached raw DC orbitals
+and the selected WF+PW values. Exact DC reconstruction passes. A core-exact
+excluded-WF probe fails support admission with independently predicted errors
+sqrt(1/2), sqrt(1/2)/2 and sqrt(1/6); its buffer tail cannot be waived by the core
+density result. Single-channel one-rank defects, quadrature scaling, missing
+samples, NaN, finite overflow, differing controls and a declared empty local
+projector inventory are covered. Selection tests pass on 1/2/4/8 ranks (support
+integration on 2/4/8), existing raw-Wannier/pipeline regressions pass on 2/4/8,
+and release builds. Independent review found no Critical/Important issue.
+
+This is numerical admission of supplied evidence, not certification that the
+production operator inventory is complete. The final adapter must still bind
+actual sample IDs/order and required counts to the selected basis, raw reference
+and operator provenance before combined state admission. Production SIPG and
+nonlocal operator validation remains C5; these explicit stencils are not a
+substitute. C3 remains open, main/C4--C6 are unchanged, and no DC/material run
+was repeated. All pre-existing dirty files and verification logs were retained.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`
