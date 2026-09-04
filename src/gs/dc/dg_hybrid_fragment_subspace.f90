@@ -54,6 +54,7 @@ module dg_hybrid_fragment_subspace
   public::extend_dg_hybrid_fragment_subspace
   public::initialize_dg_hybrid_fragment_subspace
   public::initialize_dg_hybrid_fragment_density_checked
+  public::initialize_dg_hybrid_fragment_trial
   public::advance_dg_hybrid_fragment_epoch
 contains
   ! Single-owner adapter. The legacy initializer runs on a temporary state on
@@ -249,6 +250,49 @@ contains
       basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
       occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,&
       energy_cutoff)
+    integer,intent(in)::comm,global_count,fragment_id,generation,guard_count
+    integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
+    complex(real64),intent(in)::seed_coefficients(:,:)
+    real(real64),intent(in)::seed_energies(:),energy_tolerance,orthogonality_tolerance
+    real(real64),optional,intent(in)::energy_cutoff
+    procedure(fragment_apply)::apply_s
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    integer,allocatable,intent(out)::selected_seeds(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),intent(in)::seed_occupations(:),occupation_tolerance
+    call initialize_fragment_seed_core(comm,global_count,row_ids,fragment_id,generation,&
+      basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
+      occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,energy_cutoff)
+  end subroutine initialize_dg_hybrid_fragment_subspace
+
+  subroutine initialize_dg_hybrid_fragment_trial(comm,global_count,row_ids,fragment_id,generation,&
+      basis_fp,metric_fp,seed_coefficients,seed_energies,initial_count,guard_count,&
+      energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,energy_cutoff)
+    ! Trial vectors only: no occupations, density or current-Hamiltonian spectrum.
+    ! Caller must first certify raw projection/support, then refresh H and reoccupy.
+    integer,intent(in)::comm,global_count,fragment_id,generation,guard_count
+    integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
+    complex(real64),intent(in)::seed_coefficients(:,:)
+    real(real64),intent(in)::seed_energies(:),energy_tolerance,orthogonality_tolerance
+    real(real64),optional,intent(in)::energy_cutoff
+    procedure(fragment_apply)::apply_s
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    integer,allocatable,intent(out)::selected_seeds(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,intent(in)::initial_count
+    call initialize_fragment_seed_core(comm,global_count,row_ids,fragment_id,generation,&
+      basis_fp,metric_fp,seed_coefficients,seed_energies,guard_count=guard_count,occupation_tolerance=0d0,&
+      energy_tolerance=energy_tolerance,orthogonality_tolerance=orthogonality_tolerance,&
+      apply_s=apply_s,state=state,selected_seeds=selected_seeds,ok=ok,message=message,&
+      energy_cutoff=energy_cutoff,initial_count=initial_count)
+  end subroutine initialize_dg_hybrid_fragment_trial
+
+  subroutine initialize_fragment_seed_core(comm,global_count,row_ids,fragment_id,generation,&
+      basis_fp,metric_fp,seed_coefficients,seed_energies,seed_occupations,guard_count,&
+      occupation_tolerance,energy_tolerance,orthogonality_tolerance,apply_s,state,selected_seeds,ok,message,&
+      energy_cutoff,initial_count)
     ! Seed columns are physical DC orbitals in uncompressed WF+PW coordinates;
     ! selected-space projection may give nonzero PW components. Selection never
     ! means taking the first named WFs.
@@ -256,8 +300,10 @@ contains
     integer,intent(in)::comm,global_count,fragment_id,generation,guard_count
     integer(int64),intent(in)::row_ids(:),basis_fp,metric_fp
     complex(real64),intent(in)::seed_coefficients(:,:)
-    real(real64),intent(in)::seed_energies(:),seed_occupations(:),occupation_tolerance,&
+    real(real64),intent(in)::seed_energies(:),occupation_tolerance,&
       energy_tolerance,orthogonality_tolerance
+    real(real64),optional,intent(in)::seed_occupations(:)
+    integer,optional,intent(in)::initial_count
     real(real64),optional,intent(in)::energy_cutoff
     procedure(fragment_apply)::apply_s
     type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
@@ -275,6 +321,14 @@ contains
     subroutine execute()
       nseed=size(seed_energies)
       valid=agree_int(comm,nseed)
+      valid=agree_int(comm,merge(1,0,present(initial_count))).and.valid
+      valid=agree_int(comm,merge(1,0,present(seed_occupations))).and.valid
+      if(.not.consensus(comm,valid))return
+      if(present(initial_count))then
+        valid=agree_int(comm,initial_count)
+        if(.not.consensus(comm,valid.and.initial_count>0.and.initial_count<=nseed))return
+      endif
+      if(.not.consensus(comm,present(initial_count).neqv.present(seed_occupations)))return
       valid=agree_int(comm,global_count).and.valid
       valid=agree_int(comm,guard_count).and.valid
       valid=agree_real(comm,occupation_tolerance).and.valid
@@ -286,19 +340,20 @@ contains
         valid=agree_real(comm,energy_cutoff)
         if(.not.consensus(comm,valid.and.ieee_is_finite(energy_cutoff)))return
       endif
-      valid=nseed>0.and.guard_count>=0.and.all(shape(seed_coefficients)==[size(row_ids),nseed]).and.&
-        size(seed_occupations)==nseed
+      valid=nseed>0.and.guard_count>=0.and.all(shape(seed_coefficients)==[size(row_ids),nseed])
+      if(present(seed_occupations))valid=valid.and.size(seed_occupations)==nseed
       valid=valid.and.ieee_is_finite(occupation_tolerance).and.ieee_is_finite(energy_tolerance).and.&
         ieee_is_finite(orthogonality_tolerance)
       if(.not.consensus(comm,valid))return
       if(occupation_tolerance<0d0.or.energy_tolerance<=0d0.or.energy_tolerance>1d-2.or.&
         orthogonality_tolerance<64d0*epsilon(1d0).or.orthogonality_tolerance>1d-2)return
-      valid=finite(seed_coefficients).and.all(ieee_is_finite(seed_energies)).and.&
+      valid=finite(seed_coefficients).and.all(ieee_is_finite(seed_energies))
+      if(present(seed_occupations))valid=valid.and.&
         all(ieee_is_finite(seed_occupations)).and.all(seed_occupations>=0d0)
       if(.not.consensus(comm,valid))return
       do j=1,nseed
         valid=agree_real(comm,seed_energies(j))
-        valid=agree_real(comm,seed_occupations(j)).and.valid
+        if(present(seed_occupations))valid=agree_real(comm,seed_occupations(j)).and.valid
         if(.not.valid)return
       enddo
       allocate(order(nseed),stat=stat)
@@ -313,9 +368,13 @@ contains
         order(k)=tmp
       enddo
       occupied=0
-      do j=1,nseed
-        if(seed_occupations(order(j))>occupation_tolerance)occupied=j
-      enddo
+      if(present(initial_count))then
+        occupied=initial_count
+      else
+        do j=1,nseed
+          if(seed_occupations(order(j))>occupation_tolerance)occupied=j
+        enddo
+      endif
       ! Saturate without integer overflow; later capacity/tail checks request
       ! more invariant shells if the saved DC inventory is insufficient.
       nselected=occupied+min(guard_count,nseed-occupied)
@@ -355,7 +414,7 @@ contains
       call move_alloc(chosen,selected_seeds)
       ok=.true.;message=''
     end subroutine
-  end subroutine initialize_dg_hybrid_fragment_subspace
+  end subroutine initialize_fragment_seed_core
 
   subroutine measure_dg_hybrid_fragment_subspace(comm,global_count,row_ids,fragment_id,generation,&
       basis_fp,metric_fp,apply_h,apply_s,orthogonality_tolerance,state,eigenvalues,relative_residual,&

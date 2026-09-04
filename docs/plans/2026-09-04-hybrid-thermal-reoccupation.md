@@ -81,6 +81,27 @@ Files: `tests/dg/test_dc_fragment_occupation_mpi.f90`, its MPI runner, and this 
 
 ### Task O2: Separate projection certification from state initialization
 
+**First numerical checkpoint:** Added `initialize_dg_hybrid_fragment_trial`
+with explicit initial count, guard count and optional energy cutoff; it takes
+no occupations and returns no density or current-Hamiltonian spectrum. Both
+this and the unchanged legacy public initializer use a private seed core,
+which validates the mutually exclusive inventory policies collectively before
+accessing optional arguments. No synthetic occupation mask is introduced.
+The existing normalization, rank, shell and rollback policies remain intact.
+
+The missing-symbol RED was observed before implementation. Fresh subspace
+tests pass on 1/2/4/8 ranks, including half-core-norm normalization, explicit
+energy-ordered inventory, degenerate guards, invalid/disagreeing count, NaN
+and dependent-seed rejection without overwriting the previous state. Selection
+tests (including legacy density-preserving admission) pass on 1/2/4/8 and
+release builds. Independent review has no Critical/Important issue.
+
+This is only the low-level numerical initializer; its generic distributed
+kernel tests do not change the one-rank-per-fragment production requirement.
+Raw-reference/projection/support factoring and the single-owner combined
+trial-state adapter are still pending O2 work. O3 reoccupation/density and
+main integration remain unimplemented. Existing dirty data/logs are retained.
+
 Files: `src/gs/dc/dg_hybrid_fragment_admission.f90`,
 `src/gs/dc/dg_hybrid_fragment_subspace.f90`,
 `tests/dg/test_dg_hybrid_fragment_selection_mpi.f90`,

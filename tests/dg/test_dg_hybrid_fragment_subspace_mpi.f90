@@ -344,6 +344,28 @@ contains
       energies(1)=-1d0;occupations(1)=2d0
     enddo
     energies(1)=-1d0
+    ! Trial inventory is not a saved occupation mask. Half-core-norm seeds
+    ! may be orthonormalized before a later current-Hamiltonian reoccupation.
+    call initialize_dg_hybrid_fragment_trial(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds/sqrt(2d0),energies,2,1,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(ok.and.initial%state_count==3.and.all(selected==[2,1,3]),&
+      'explicit trial inventory failed: '//trim(message))
+    call require(maxval(abs(initial%vectors-seeds(:,selected)))<1d-12,&
+      'half-core-norm trial was not metric normalized')
+    call initialize_dg_hybrid_fragment_trial(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,2,2,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(ok.and.initial%state_count==5,'trial guard split a degenerate energy shell')
+    snapshot=initial
+    do a=1,3
+      b=0
+      if(a==2)b=7
+      if(a==3)b=merge(1,2,rank==0)
+      if(a==3.and.nproc==1)cycle
+      call initialize_dg_hybrid_fragment_trial(comm,n,ids,7,2,101_int64,203_int64,&
+        seeds,energies,b,0,1d-10,1d-10,apply_s,initial,selected,ok,message)
+      call require(.not.ok.and..not.allocated(selected),'invalid or disagreeing trial inventory accepted')
+      call require(all(initial%vectors==snapshot%vectors),'failed trial preparation changed the old state')
+    enddo
     if(nproc>1)then
       if(rank==0)then
         call initialize_dg_hybrid_fragment_subspace(comm,n,ids,7,2,101_int64,203_int64,&
@@ -360,6 +382,16 @@ contains
     call require(.not.ok.and..not.allocated(selected),'rank-deficient seeds were accepted')
     call require(all(initial%vectors==snapshot%vectors).and.initial%state_count==snapshot%state_count,&
       'failed initialization destroyed an accepted state')
+    call initialize_dg_hybrid_fragment_trial(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,2,1,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(.not.ok.and..not.allocated(selected).and.index(message,'metric rank')>0,&
+      'trial initializer accepted dependent core seeds')
+    call require(all(initial%vectors==snapshot%vectors),'dependent trial overwrote accepted state')
+    if(rank==0)energies(1)=ieee_value(0d0,ieee_quiet_nan)
+    call initialize_dg_hybrid_fragment_trial(comm,n,ids,7,2,101_int64,203_int64,&
+      seeds,energies,2,1,1d-10,1d-10,apply_s,initial,selected,ok,message)
+    call require(.not.ok.and..not.allocated(selected),'trial accepted a nonfinite seed energy')
+    call require(all(initial%vectors==snapshot%vectors),'nonfinite trial overwrote accepted state')
   end subroutine
 
   subroutine test_measurement_only()
