@@ -179,6 +179,7 @@ program test_dg_hybrid_divided_operator_mpi
     metric_tolerance=metric_tolerance,complete_map_fingerprint=2102_int64,complete_map_rank=ncomplete,&
     complete_transform_binding_fingerprint=rectangular_binding_fingerprint)
   call require(ok,'rectangular complete composition failed: '//trim(message))
+  call check_exact_null_composition
   call compare_distributed_rows(output_row_ids,hamiltonian_rows,expected_complete_h,&
     'rectangular Hamiltonian congruence is incorrect')
   call compare_distributed_rows(output_row_ids,complete_metric_rows,expected_complete_s,&
@@ -344,6 +345,31 @@ program test_dg_hybrid_divided_operator_mpi
   if(nproc>1)call MPI_Comm_free(fragment_comm,ierr)
   call MPI_Finalize(ierr)
 contains
+  subroutine check_exact_null_composition
+    type(s_dg_hybrid_fixed_payload)::null_payload
+    complex(real64)::null_metric(nunion,nunion),expected_s(ncomplete,ncomplete)
+    complex(real64),allocatable::null_rows(:,:),h(:,:),s(:,:)
+    integer(int64)::binding,receipt
+    null_metric=dense_metric
+    null_metric(1,2)=cmplx(0d0,-1.3d0,real64);null_metric(2,1)=conjg(null_metric(1,2))
+    allocate(null_rows(size(union_row_ids),nunion))
+    call select_rows(null_metric,union_row_ids,null_rows)
+    call freeze_dg_hybrid_variational_payload(comm,nunion,union_row_ids,null_rows,kinetic_rows,&
+      nonlocal_rows,interface_rows,1101_int64,1402_int64,1103_int64,null_payload,ok,message,&
+      basis_directory_fingerprint=basis_directory_fingerprint)
+    call require(ok,'exact-null payload setup failed: '//trim(message))
+    call compute_dg_hybrid_union_to_complete_binding(comm,rectangular_transform,2102_int64,1d-12,&
+      binding,ok,message)
+    call require(ok,'exact-null transform binding failed: '//trim(message))
+    call compose_dg_hybrid_complete_rows(comm,output_row_ids,null_payload,local_rows,rectangular_transform,&
+      h,s,receipt,ok,message,metric_tolerance=1d-12,complete_map_fingerprint=2102_int64,&
+      complete_map_rank=ncomplete,complete_transform_binding_fingerprint=binding)
+    call require(ok,'exact-null terminal metric rejected as ambiguous: '//trim(message))
+    expected_s=matmul(conjg(transpose(rectangular_transform)),matmul(null_metric,rectangular_transform))
+    call compare_distributed_rows(output_row_ids,s,expected_s,'exact-null complete metric differs from congruence')
+    call compare_distributed_rows(output_row_ids,h,expected_complete_h,'exact-null composition changed Hamiltonian')
+  end subroutine check_exact_null_composition
+
   subroutine make_transform_binding(transform,map_fingerprint,binding_fingerprint)
     complex(real64),intent(in)::transform(:,:)
     integer(int64),intent(in)::map_fingerprint

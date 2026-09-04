@@ -1220,7 +1220,8 @@ contains
     roundoff_floor=64d0*epsilon(1d0)*scale*real(max(1,n),real64)
     cutoff=max(tolerance*scale,roundoff_floor);negative_limit=roundoff_floor
     if(minval(eigenvalues)<-negative_limit)then;message='indefinite Hermitian metric';return;endif
-    if(any(abs(eigenvalues-cutoff)<=16d0*roundoff_floor))then
+    ! Match the generalized projection policy: roundoff-sized modes are null.
+    if(any(eigenvalues>roundoff_floor.and.abs(eigenvalues-cutoff)<=16d0*roundoff_floor))then
       message='ambiguous Hermitian metric rank at cutoff';return
     endif
     retained_rank=count(eigenvalues>cutoff);inverse=(0d0,0d0)

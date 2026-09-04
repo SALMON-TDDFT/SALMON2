@@ -509,7 +509,8 @@ contains
         roundoff_floor=64d0*epsilon(1d0)*scale*real(max(1,nunion),real64)
         cutoff=max(metric_tolerance*scale,roundoff_floor);negative_limit=roundoff_floor
         local_ok=minval(eigenvalues)>=-negative_limit
-        if(local_ok)local_ok=.not.any(abs(eigenvalues-cutoff)<=16d0*roundoff_floor)
+        ! Match the generalized projection policy: roundoff-sized modes are null.
+        if(local_ok)local_ok=.not.any(eigenvalues>roundoff_floor.and.abs(eigenvalues-cutoff)<=16d0*roundoff_floor)
         retained_rank=count(eigenvalues>cutoff)
       endif
     endif

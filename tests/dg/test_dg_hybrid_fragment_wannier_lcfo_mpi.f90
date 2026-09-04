@@ -100,8 +100,8 @@ program test_dg_hybrid_fragment_wannier_lcfo_mpi
   implicit none
   integer,parameter::global_ngrid=8,nfragment=2,nwf=4,npw=2,nunion=nwf+npw,nseed=2,nocc=2
   integer,parameter::fragment_ranks(nfragment)=[4,2]
-  real(real64),parameter::metric_tolerance=1d-8,comparison_tolerance=3d-7,&
-    near_null_amplitude=1d-6,projected_tail_amplitude=1d-3,tail_tolerance=1d-5
+  real(real64)::metric_tolerance=1d-8,near_null_amplitude=1d-6
+  real(real64),parameter::comparison_tolerance=3d-7,projected_tail_amplitude=1d-3,tail_tolerance=1d-5
   real(real64),parameter::global_weights(global_ngrid)=[0.50_real64,0.75_real64,1.00_real64,1.25_real64,&
     1.50_real64,1.75_real64,2.00_real64,2.25_real64]
   integer(int64),parameter::canonical_union_basis_ids(nunion)=[101_int64,205_int64,309_int64,450_int64,&
@@ -153,6 +153,14 @@ program test_dg_hybrid_fragment_wannier_lcfo_mpi
   enddo
   call run_full_rank_identity_case(reference%map_fingerprint)
   call run_negative_contracts
+  ! Exact duplicate fragment directions must pass the downstream catalog
+  ! rank authentication even when its ambiguity band reaches zero.
+  metric_tolerance=1d-12;near_null_amplitude=0d0
+  call make_reference_functions(base_wf,base_pw,physical_seeds)
+  do position=1,nlocal
+    local_wf(:,position)=base_wf(:,row_ids(position));local_pw(:,position)=base_pw(:,row_ids(position))
+  enddo
+  call run_invariant_case(1,current)
   if(rank==0)then
     write(*,'(a,i0,a,i0,a,i0,a,i0,a,i0)')'HYBRID_FRAGMENT_WANNIER_LCFO ranks=',nproc,&
       ' metric_rank=',reference%metric_rank,' generalized_fingerprint=',reference%projection_fingerprint,&

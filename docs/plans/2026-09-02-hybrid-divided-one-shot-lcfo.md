@@ -1274,6 +1274,37 @@ pass. Review found no Critical/Important issues. The main-route check remains
 RED: direct DC-cache invocation, accepted-support certification and production
 H/S/CG callback wiring are still pending. No material calculation was rerun.
 
+**DC-cache integration / numerical-null checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+The DC tensor fixture now connects its constructed WF cache through validated
+coordinate export, the authoritative DC physical-grid mapper, and the local
+WF-to-projected-PW pipeline. In the production-shaped two-rank/two-fragment
+case, all raw buffer points and WF columns survive; the PW complement is
+explicitly nonzero. Padding the saved DC coefficients with zero PW rows
+reconstructs the original orbitals and unique-core density/electron count
+within 1e-10 without another Wannier90 call. This is an integration test of
+production kernels; the existing Wannier90 API boundary remains stubbed and
+is not a physical localization/convergence validation.
+
+This test exposed a real numerical-null classification bug: the ambiguity
+band `16*roundoff_floor` around a small metric cutoff could extend to zero,
+rejecting exact duplicate fragment directions. A standalone nine-identical-WF
+Gram reproduced the failure independently. Ambiguity checking now applies
+only to eigenvalues above `roundoff_floor`; negative-mode rejection and the
+retained-rank cutoff are unchanged. Since cutoff >= roundoff_floor, this
+cannot promote a discarded numerical-null direction into the retained space.
+A resolvable positive eigenvalue at the cutoff is still rejected.
+
+Review identified the same predicate in downstream dual-catalog and complete
+operator authentication. Both were reproduced through their public APIs and
+updated consistently, with separate review-fix changes. Exact-null catalog
+and complete H/S congruence regressions pass on 1/2/4/8 ranks. Common projection,
+DC-WF and local projection regressions pass, and the release build succeeds.
+The common-projection runner needed explicit OpenBLAS linking on this host;
+the default system LAPACK run raised SIGILL, separately from the reproducible
+rank-classification error. Review found no remaining Critical/Important issue.
+No main-route switch, expensive DC rerun, or physical tail-accuracy claim is
+included. The production connection gate remains RED.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`
