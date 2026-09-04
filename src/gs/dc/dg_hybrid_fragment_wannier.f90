@@ -54,8 +54,104 @@ module dg_hybrid_fragment_wannier
   public::pack_dg_hybrid_fragment_dc_seed
   public::build_dg_hybrid_fragment_wannier_from_dc_seed
   public::map_dg_hybrid_fragment_dc_grid
+  public::redistribute_dg_hybrid_fragment_wannier_columns
 
 contains
+
+  ! Transpose ownership, not the physical basis: cache rows are spatially
+  ! distributed, while local solvers own coefficient columns on the full cell.
+  ! owned_columns contains cache-column indices in caller-selected order.
+  ! Physical tags come from map_dg_hybrid_fragment_dc_grid on the same cache rows.
+  ! They are transported here; global inter-fragment core ownership is checked
+  ! downstream. Only one cell-by-tile workspace is replicated at a time.
+  subroutine redistribute_dg_hybrid_fragment_wannier_columns(comm,cache,owned_columns,&
+      physical_ids,core_mask,tile_width,mapped_ids,mapped_core,values,ok,message)
+    integer,intent(in)::comm,tile_width
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    integer(int64),intent(in)::owned_columns(:),physical_ids(:)
+    logical,intent(in)::core_mask(:)
+    integer(int64),allocatable,intent(out)::mapped_ids(:)
+    logical,allocatable,intent(out)::mapped_core(:)
+    complex(real64),allocatable,intent(out)::values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nw,nseed,ncell,width,reference_width,status,ierr,p,j,first,last,count_tile
+    integer(int64)::local_count,total_count,column_count
+    integer(int64),allocatable::ids(:)
+    integer,allocatable::core(:)
+    logical,allocatable::mask(:)
+    complex(real64),allocatable::tile(:,:),output(:,:)
+    logical::valid,build_required
+    valid=cache%valid.and.allocated(cache%local_grid_ids).and.&
+      allocated(cache%physical_dc_seed_energies).and.allocated(cache%physical_dc_seed_occupations)
+    call canonical_total_status(comm,valid,'column redistribution requires a valid Wannier cache',ok,message)
+    if(.not.ok)return
+    nseed=size(cache%physical_dc_seed_energies)
+    call classify_fragment_cache(comm,cache,cache%receipt%fragment_id,cache%receipt%basis_generation,nseed,&
+      cache%receipt%candidate_rank,cache%local_grid_ids,cache%receipt%seed_fingerprint,&
+      cache%receipt%basis_fingerprint,cache%local_row_layout_fingerprint,&
+      cache%physical_dc_seed_energies,cache%physical_dc_seed_occupations,build_required,ok,message)
+    if(.not.ok)return
+    nw=cache%receipt%retained_rank
+    reference_width=tile_width
+    call MPI_Bcast(reference_width,1,MPI_INTEGER,0,comm,ierr)
+    local_count=size(cache%local_grid_ids,kind=int64)
+    call MPI_Allreduce(local_count,total_count,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    local_count=size(owned_columns,kind=int64)
+    call MPI_Allreduce(local_count,column_count,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    valid=tile_width>0.and.tile_width==reference_width.and.total_count>0_int64.and.&
+      total_count<=int(huge(0),int64).and.column_count==int(nw,int64)
+    valid=valid.and.size(physical_ids)==size(cache%local_grid_ids).and.size(core_mask)==size(physical_ids)
+    valid=valid.and.all(physical_ids>0_int64).and.all(owned_columns>=1_int64).and.all(owned_columns<=int(nw,int64))
+    valid=valid.and.all(cache%local_grid_ids>=1_int64).and.all(cache%local_grid_ids<=total_count)
+    call canonical_total_status(comm,valid,'column redistribution has invalid layout, IDs or tile width',ok,message)
+    if(.not.ok)return
+    ncell=int(total_count);width=min(tile_width,nw)
+    valid=extent_product_fits([ncell,width]).and.extent_product_fits([ncell,size(owned_columns)])
+    call canonical_total_status(comm,valid,'column redistribution workspace extent overflows',ok,message)
+    if(.not.ok)return
+    call validate_unique_grid_ids(comm,cache%local_grid_ids,ok,message)
+    if(.not.ok)return
+    call validate_unique_grid_ids(comm,owned_columns,ok,message)
+    if(.not.ok)return
+    allocate(ids(ncell),core(ncell),mask(ncell),tile(ncell,width),&
+      output(ncell,size(owned_columns)),stat=status)
+    call collective_allocation_status(comm,status,'WF coefficient-column redistribution',ok,message)
+    if(.not.ok)return
+    ids=0_int64;core=0
+    do p=1,size(physical_ids)
+      j=int(cache%local_grid_ids(p));ids(j)=physical_ids(p);core(j)=merge(1,0,core_mask(p))
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,ids,ncell,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    valid=ierr==MPI_SUCCESS
+    call MPI_Allreduce(MPI_IN_PLACE,core,ncell,MPI_INTEGER,MPI_MAX,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS
+    call canonical_total_status(comm,valid,'WF physical row-tag redistribution failed',ok,message)
+    if(.not.ok)return
+    first=1
+    do while(first<=nw)
+      count_tile=min(width,nw-first+1);last=first+count_tile-1;tile=0d0
+      do p=1,size(cache%local_grid_ids)
+        tile(int(cache%local_grid_ids(p)),1:count_tile)=cache%wannier_values(first:last,p)
+      enddo
+      call MPI_Allreduce(MPI_IN_PLACE,tile,size(tile),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      call canonical_total_status(comm,ierr==MPI_SUCCESS,'WF column tile redistribution failed',ok,message)
+      if(.not.ok)return
+      do j=1,size(owned_columns)
+        if(owned_columns(j)<int(first,int64).or.owned_columns(j)>int(last,int64))cycle
+        output(:,j)=tile(:,int(owned_columns(j))-first+1)
+      enddo
+      if(last==nw)exit
+      first=last+1
+    enddo
+    mask=core==1
+    call move_alloc(ids,mapped_ids);call move_alloc(mask,mapped_core);call move_alloc(output,values)
+    ok=.true.;message=''
+#else
+    ok=.false.;message='WF coefficient-column redistribution requires MPI'
+#endif
+  end subroutine redistribute_dg_hybrid_fragment_wannier_columns
 
   ! dc%jxyz_tot is authoritative. Raw DC cells place the core at indices
   ! 1:core_shape, not in the middle of a symmetrically padded array. Preserve

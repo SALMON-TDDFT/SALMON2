@@ -1189,6 +1189,28 @@ fixture, release build and whitespace check pass; review found no
 Critical/Important issues. Main and the old LCFO construction route have not
 been modified; the production connection gate remains RED.
 
+**WF ownership transpose checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`redistribute_dg_hybrid_fragment_wannier_columns` converts the validated
+spatial-row-owned DC construction cache into caller-owned WF columns over
+the complete fragment cell. Caller column indices refer to cache columns,
+not physical/global basis IDs, and may be locally reordered. Every raw cell
+row and every retained WF column must have exactly one owner. No WF column
+is dropped or rotated. A cell-by-tile workspace is reduced on the fragment
+communicator; only the requested columns are retained on each rank. Physical
+grid IDs and core masks from the preceding mapper are transported into raw
+cell order, including every buffer point. Global inter-fragment core and
+catalog-ID certification remain downstream responsibilities.
+
+Tests on 2/4/8 ranks include empty coefficient owners, reversed column order,
+tile widths one and three, reconstruction of all original DC seeds, and
+actual occupied-plus-guard subspace initialization using the exported columns
+and saved seed coefficients. The identity metric in this fixture is valid
+for its orthonormal constructed basis, not a production replacement for S.
+Invalid physical tags, duplicate column ownership and corrupted WF caches
+are rejected without publishing output. The complete fragment WF fixture,
+release build and whitespace check pass. Review found no Critical/Important
+issues. Main-route catalog/payload/callback wiring remains pending.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

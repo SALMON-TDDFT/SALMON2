@@ -41,7 +41,8 @@ program test_dg_hybrid_fragment_wannier_mpi
   use dg_overlapping_wannier_w90,only:apply_dg_w90_gamma_transform
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache,&
     build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates,pack_dg_hybrid_fragment_dc_seed,&
-    build_dg_hybrid_fragment_wannier_from_dc_seed,map_dg_hybrid_fragment_dc_grid
+    build_dg_hybrid_fragment_wannier_from_dc_seed,map_dg_hybrid_fragment_dc_grid,&
+    redistribute_dg_hybrid_fragment_wannier_columns
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_subspace
@@ -450,6 +451,7 @@ contains
         call map_dg_hybrid_fragment_dc_grid(comm_fragment,[8,1,1],[4,1,1],[12,1,1],physical_map,&
           built%local_grid_ids,physical_ids,core_mask,ok,message)
         call require_total(ok,'constructed WF physical mapping failed: '//trim(message))
+        if(pass==1)call test_column_export(built,physical_ids,core_mask)
         density=0d0;reference_density=0d0
         do a=1,size(physical_ids)
           if(.not.core_mask(a))cycle
@@ -472,6 +474,75 @@ contains
       esp(:,1,1)=physical_energies
     enddo
   end subroutine test_dc_construction_entry
+
+  subroutine test_column_export(built,physical_ids,core_mask)
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::built
+    integer(int64),intent(in)::physical_ids(:)
+    logical,intent(in)::core_mask(:)
+    integer(int64),allocatable::columns(:),mapped(:),bad_ids(:)
+    logical,allocatable::mask(:)
+    complex(real64),allocatable::values(:,:),first_values(:,:),seed(:,:)
+    type(s_dg_hybrid_fragment_subspace_state)::initial
+    type(s_dg_hybrid_fragment_wannier_cache)::corrupted
+    real(real64)::initial_occupations(nseed)
+    integer,allocatable::selected(:)
+    integer::nw,ncols,a,b,p,width
+    logical::correct
+    nw=built%receipt%retained_rank
+    ncols=count([(mod(a-1,min(fragment_size,2))==fragment_rank,a=1,nw)])
+    allocate(columns(ncols));p=0
+    do a=nw,1,-1
+      if(mod(a-1,min(fragment_size,2))/=fragment_rank)cycle
+      p=p+1;columns(p)=a
+    enddo
+    do width=1,3,2
+      call redistribute_dg_hybrid_fragment_wannier_columns(comm_fragment,built,columns,physical_ids,&
+        core_mask,width,mapped,mask,values,ok,message)
+      call require_total(ok,'WF coefficient-column redistribution failed: '//trim(message))
+      call require_total(all(shape(values)==[8,ncols]).and.all(mapped==[9,10,11,12,1,2,7,8]).and.&
+        all(mask.eqv.[.true.,.true.,.true.,.true.,.false.,.false.,.false.,.false.]),&
+        'column redistribution changed core/buffer row mapping')
+      if(width==1)first_values=values
+      call require_total(all(abs(first_values-values)<1d-14),'column redistribution depends on tile size')
+      seed=matmul(values,built%dc_seed_coefficients_in_wannier(int(columns),:))
+      call MPI_Allreduce(MPI_IN_PLACE,seed,size(seed),MPI_DOUBLE_COMPLEX,MPI_SUM,comm_fragment,ierr)
+      correct=.true.
+      do b=1,nseed;do a=1,8
+        correct=correct.and.abs(seed(a,b)-merge(1d0,0d0,a==b))<1d-10
+      enddo;enddo
+      call require_total(correct,'distributed coefficient columns fail to reconstruct original DC orbitals')
+    enddo
+    initial_occupations=0d0;initial_occupations(1)=2d0
+    call initialize_dg_hybrid_fragment_subspace(comm_fragment,nw,columns,fragment_id,13,&
+      built%receipt%basis_fingerprint,901_int64,built%dc_seed_coefficients_in_wannier(int(columns),:),&
+      physical_energies,initial_occupations,1,1d-8,1d-10,1d-10,fixture_identity_metric,&
+      initial,selected,ok,message)
+    call require_total(ok,'redistributed WF columns failed CG initialization: '//trim(message))
+    call require_total(initial%state_count==2.and.all(selected==[1,2]),&
+      'redistributed WF CG initializer changed occupied-plus-guard selection')
+    seed=matmul(values,initial%vectors)
+    call MPI_Allreduce(MPI_IN_PLACE,seed,size(seed),MPI_DOUBLE_COMPLEX,MPI_SUM,comm_fragment,ierr)
+    correct=.true.
+    do b=1,2;do a=1,8
+      correct=correct.and.abs(seed(a,b)-merge(1d0,0d0,a==b))<1d-10
+    enddo;enddo
+    call require_total(correct,'redistributed CG initial state changed original physical orbitals')
+    corrupted=built
+    if(fragment_rank==0)corrupted%wannier_values(1,1)=corrupted%wannier_values(1,1)+0.1d0
+    call redistribute_dg_hybrid_fragment_wannier_columns(comm_fragment,corrupted,columns,physical_ids,&
+      core_mask,2,mapped,mask,values,ok,message)
+    call require_total(.not.ok.and..not.allocated(values),'corrupted WF cache accepted by column export')
+    bad_ids=physical_ids
+    if(fragment_rank==0)bad_ids(1)=0_int64
+    call redistribute_dg_hybrid_fragment_wannier_columns(comm_fragment,built,columns,bad_ids,&
+      core_mask,2,mapped,mask,values,ok,message)
+    call require_total(.not.ok.and..not.allocated(values).and..not.allocated(mapped),&
+      'invalid physical mapping published coefficient columns')
+    if(fragment_rank==0)columns(1)=columns(size(columns))
+    call redistribute_dg_hybrid_fragment_wannier_columns(comm_fragment,built,columns,physical_ids,&
+      core_mask,2,mapped,mask,values,ok,message)
+    call require_total(.not.ok.and..not.allocated(values),'duplicate WF column ownership accepted')
+  end subroutine test_column_export
 
   subroutine test_orbital_distributed_packing
     real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)
