@@ -18,6 +18,9 @@ assert re.search(r"if\s*\(\s*yn_dg_hybrid_divided_scf\s*==\s*'y'\s*\)\s*then\s*c
 match = re.search(r"\bsubroutine\s+" + entry + r"\b(.*?)\bend subroutine\s+" + entry, source, re.S)
 assert match, "missing separated divided production routine"
 route = match.group(1)
+assert "nproc==dc%n_frag" in re.sub(r"\s+", "", route), (
+    "divided production entry must require MPI size equal to fragment count"
+)
 required = (
     "build_dg_hybrid_fragment_wannier_from_dc_seed",
     "extract_dg_hybrid_fragment_self_block",

@@ -24,6 +24,22 @@ and small MPI tests may proceed.
 The production scope remains the accepted Gamma, non-SOI, PZ-LDA, gapped
 Hybrid route.  Do not broaden theory scope in this plan.
 
+**Production MPI scope, approved 2026-09-04:** Require fragment count equal to
+MPI size and exactly one rank per fragment. Each rank owns its complete local
+WF+PW basis, H/S blocks, and CG state. Do not make intra-fragment orbital or
+coefficient-column redistribution part of the production DC handoff. Preserve
+the exact MPI-count/rank--fragment checkpoint compatibility rule without
+automatic redistribution. Existing general-purpose multi-rank kernel fixtures
+do not broaden this production scope.
+
+**Task 8 priority correction:** The uncommitted multi-rank fragment stream
+entry and its dedicated test changes were withdrawn after this user decision.
+The original one-owner-per-fragment stream remains. Retain the existing main
+rank-count guard and add it to the regression contract. Next, wire the direct
+DC construction cache to the existing single-owner stream, generalized PW
+projection and uncompressed H/S/CG callbacks; do not spend further Task 8 work
+extending intra-fragment MPI support. Main-route completion remains pending.
+
 ### Task 1: Share the authoritative conventional-DC density convergence metric
 
 **Files:**

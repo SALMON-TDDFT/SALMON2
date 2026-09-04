@@ -27,6 +27,23 @@ strict DC-seed compatibility work.
 
 ## Governing Decisions
 
+### Production MPI scope (user decision, 2026-09-04)
+
+The conventional-DC to divided-Hybrid production route uses exactly one MPI
+rank per fragment: `MPI size == fragment count`, with a bijective rank--fragment
+mapping. Each rank retains all WF+PW columns, local H/S blocks, and CG state
+for its fragment. Fragment construction and local updates are parallel across
+fragments; there is no intra-fragment MPI orbital or coefficient-column split.
+Keep the required inter-fragment DG interface/projector communication and the
+established global DC reductions/potential and final LCFO operations.
+
+This scope is chosen to keep the ordinary DC handoff simple. Multi-rank
+fragment distribution is not a prerequisite or a planned production feature
+in this implementation. Existing generic distributed kernels/tests may remain,
+but must not add redistribution requirements to the one-rank handoff. DC seed
+reuse still requires the exact MPI rank count and exact rank--fragment mapping;
+never silently remap or repartition an incompatible seed.
+
 ### Default route
 
 `yn_dg_hybrid_divided_scf='y'` selects the production route.  Its default

@@ -51,6 +51,12 @@ assert "subroutine mu2ne" not in dc_occupation
 assert "subroutine ne2mu_core" not in dc_occupation
 
 assert "yn_dg_hybrid_divided_scf" in MAIN
+assert "ok=nproc==dc%n_frag.and..not.dc%optimized_fragment_geometry" in MAIN, (
+    "production DC handoff must retain exactly one MPI rank per fragment"
+)
+rank_guard = MAIN.index("ok=nproc==dc%n_frag.and..not.dc%optimized_fragment_geometry")
+assert "call comm_logical_and(ok,reusable,dc%icomm_tot)" in MAIN[rank_guard : rank_guard + 300]
+assert "requires one rank per valid dc fragment" in MAIN[rank_guard : rank_guard + 400]
 branch_start = "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then"
 assert branch_start in MAIN, "missing default-off divided DC preparation branch"
 branch = MAIN[MAIN.index(branch_start) :].split("endif", 1)[0]
