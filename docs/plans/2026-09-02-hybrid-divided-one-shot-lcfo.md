@@ -1170,6 +1170,25 @@ uncompressed-catalog/payload/callback wiring remain the next work, including
 mapping raw DC cell order with `dc%jxyz_tot` rather than assuming a centered
 core in the legacy buffer layout. No main-route switch or Si64 run is claimed.
 
+**Physical grid mapping checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`map_dg_hybrid_fragment_dc_grid` maps packed cell IDs through the authoritative
+`dc%jxyz_tot` and marks core ownership with raw indices `1:core_shape`, matching
+the existing DC density aggregation. It preserves row order, periodic buffer
+tails and WF values; it neither centers the core nor truncates/tapers a WF.
+It validates rank-consistent geometry and maps, complete unique raw-cell
+coverage, physical index ranges and nonduplicated core-axis coordinates.
+Physical aliases in the buffer are permitted. This is a per-fragment map;
+unique physical-core ownership across fragments still requires downstream
+certification. Outputs remain unallocated on failure.
+
+MPI tests include reversed/distributed rows, empty owners, periodic wrapping,
+invalid mappings and IDs, and duplicate core coordinates. The direct DC-to-WF
+fixture now maps reconstructed orbitals back to the physical core and compares
+both density and electron count against the original DC seed. The 2/4/8-rank
+fixture, release build and whitespace check pass; review found no
+Critical/Important issues. Main and the old LCFO construction route have not
+been modified; the production connection gate remains RED.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

@@ -41,7 +41,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   use dg_overlapping_wannier_w90,only:apply_dg_w90_gamma_transform
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache,&
     build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates,pack_dg_hybrid_fragment_dc_seed,&
-    build_dg_hybrid_fragment_wannier_from_dc_seed
+    build_dg_hybrid_fragment_wannier_from_dc_seed,map_dg_hybrid_fragment_dc_grid
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_subspace
@@ -92,6 +92,7 @@ program test_dg_hybrid_fragment_wannier_mpi
   call fill_fixture
   call test_dc_tensor_packing
   call test_orbital_distributed_packing
+  call test_dc_physical_grid_mapping
   call require_unique_fragment_rows
   call reset_w90_stub_state;expected_fragment_id=fragment_id
   cache%valid=.false.
@@ -365,10 +366,54 @@ program test_dg_hybrid_fragment_wannier_mpi
   call MPI_Finalize(ierr)
 contains
 
+  subroutine test_dc_physical_grid_mapping
+    integer(int64),allocatable::local_ids(:),physical(:)
+    logical,allocatable::core(:)
+    integer::mapping(4,3),a,p,x,y,z,scenario,local_count,core_count,total_core
+    logical::correct
+    ! DC ordering is core, positive buffer, then wrapped negative buffer.
+    ! In particular x=1 is core, whereas x=3 is not.
+    mapping=0;mapping(:,1)=[5,6,1,4];mapping(1:2,2)=[3,4];mapping(1:2,3)=[1,2]
+    local_count=count([(mod(a-1,min(fragment_size,2))==fragment_rank,a=1,16)])
+    allocate(local_ids(local_count));p=0
+    do a=16,1,-1
+      if(mod(a-1,min(fragment_size,2))/=fragment_rank)cycle
+      p=p+1;local_ids(p)=a
+    enddo
+    call map_dg_hybrid_fragment_dc_grid(comm_fragment,[4,2,2],[2,2,2],[6,4,4],mapping,&
+      local_ids,physical,core,ok,message)
+    call require_total(ok,'DC physical-grid mapping failed: '//trim(message))
+    correct=.true.
+    do p=1,local_count
+      a=int(local_ids(p))-1;x=mod(a,4)+1;y=mod(a/4,2)+1;z=a/8+1
+      correct=correct.and.physical(p)==mapping(x,1)+6*((mapping(y,2)-1)+4*(mapping(z,3)-1))
+      correct=correct.and.(core(p).eqv.(x<=2))
+    enddo
+    core_count=count(core)
+    call MPI_Allreduce(core_count,total_core,1,MPI_INTEGER,MPI_SUM,comm_fragment,ierr)
+    call require_total(correct.and.total_core==8,'DC mapping assumed centered core or reordered WF rows')
+    do scenario=1,3
+      if(fragment_rank==0)then
+        if(scenario==1)mapping(1,1)=0
+        if(scenario==2)local_ids(1)=17_int64
+        if(scenario==3)mapping(2,1)=mapping(1,1)
+      endif
+      call map_dg_hybrid_fragment_dc_grid(comm_fragment,[4,2,2],[2,2,2],[6,4,4],mapping,&
+        local_ids,physical,core,ok,message)
+      call require_total(.not.ok.and..not.allocated(physical).and..not.allocated(core),&
+        'invalid DC mapping published physical ownership')
+      mapping(:,1)=[5,6,1,4]
+      if(scenario==2.and.fragment_rank==0)local_ids(1)=int(16-mod(15,min(fragment_size,2)),int64)
+    enddo
+  end subroutine test_dc_physical_grid_mapping
+
   subroutine test_dc_construction_entry
     real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)
     complex(real64),allocatable::buffer(:,:),projector(:,:),expected(:,:),reconstructed(:,:)
-    integer(int64),allocatable::ids(:)
+    integer(int64),allocatable::ids(:),physical_ids(:)
+    logical,allocatable::core_mask(:)
+    integer::physical_map(8,3)
+    real(real64)::density(12),reference_density(12)
     type(s_dg_hybrid_fragment_wannier_cache)::built,snapshot
     integer::a,b,first,last,points,pass,saved_setup,saved_run
     first=1+fragment_rank*nseed/fragment_size;last=(fragment_rank+1)*nseed/fragment_size
@@ -387,6 +432,8 @@ contains
       do b=1,nseed;expected(b,a)=merge(1d0,0d0,a==b);enddo
     enddo
     saved_setup=setup_calls;saved_run=run_calls
+    physical_map=0;physical_map(:,1)=[9,10,11,12,1,2,7,8]
+    physical_map(1,2:3)=1
     do pass=1,4
       if(pass==3.and.total_rank==0)esp(1,1,1)=ieee_value(0d0,ieee_quiet_nan)
       if(pass==4.and.total_rank==0)ids(1)=99_int64
@@ -400,6 +447,19 @@ contains
         reconstructed=matmul(transpose(built%wannier_values),built%dc_seed_coefficients_in_wannier)
         call require_total(all(abs(reconstructed-transpose(expected))<1d-10),&
           'direct DC construction lost original physical seeds')
+        call map_dg_hybrid_fragment_dc_grid(comm_fragment,[8,1,1],[4,1,1],[12,1,1],physical_map,&
+          built%local_grid_ids,physical_ids,core_mask,ok,message)
+        call require_total(ok,'constructed WF physical mapping failed: '//trim(message))
+        density=0d0;reference_density=0d0
+        do a=1,size(physical_ids)
+          if(.not.core_mask(a))cycle
+          density(int(physical_ids(a)))=sum(physical_occupations*abs(reconstructed(a,:))**2)
+        enddo
+        call MPI_Allreduce(MPI_IN_PLACE,density,12,MPI_DOUBLE_PRECISION,MPI_SUM,comm_fragment,ierr)
+        do b=1,nseed;reference_density(physical_map(b,1))=physical_occupations(b);enddo
+        call require_total(all(abs(density-reference_density)<1d-10).and.&
+          abs(sum(density)-sum(physical_occupations))<1d-10,&
+          'DC-to-WF-to-physical-core mapping changed density or electron count')
         call require_total(setup_calls==saved_setup+merge(1,0,fragment_rank==0).and.&
           run_calls==saved_run+merge(1,0,fragment_rank==0),'DC entry reran construction on cache reuse')
       else

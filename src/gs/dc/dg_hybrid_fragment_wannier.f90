@@ -53,8 +53,82 @@ module dg_hybrid_fragment_wannier
   public::export_dg_hybrid_fragment_coordinates
   public::pack_dg_hybrid_fragment_dc_seed
   public::build_dg_hybrid_fragment_wannier_from_dc_seed
+  public::map_dg_hybrid_fragment_dc_grid
 
 contains
+
+  ! dc%jxyz_tot is authoritative. Raw DC cells place the core at indices
+  ! 1:core_shape, not in the middle of a symmetrically padded array. Preserve
+  ! the WF row order and all buffer values; only label physical density owners.
+  subroutine map_dg_hybrid_fragment_dc_grid(comm,grid_shape,core_shape,total_shape,jxyz_tot,&
+      cell_ids,physical_ids,core_mask,ok,message)
+    integer,intent(in)::comm,grid_shape(3),core_shape(3),total_shape(3),jxyz_tot(:,:)
+    integer(int64),intent(in)::cell_ids(:)
+    integer(int64),allocatable,intent(out)::physical_ids(:)
+    logical,allocatable,intent(out)::core_mask(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::metadata(9),reference(9),axis,i,j,p,xyz(3),global_xyz(3),status,ierr
+    integer,allocatable::reference_map(:,:)
+    integer(int64)::local_count,total_count,cell_count,q
+    integer(int64),allocatable::ids(:)
+    logical,allocatable::mask(:)
+    logical::valid
+    metadata=[grid_shape,core_shape,total_shape];reference=metadata
+    call MPI_Bcast(reference,9,MPI_INTEGER,0,comm,ierr)
+    valid=all(metadata==reference).and.all(grid_shape>0).and.all(core_shape>0).and.&
+      all(core_shape<=grid_shape).and.all(total_shape>0)
+    valid=valid.and.extent_product_fits(grid_shape).and.extent_product_fits(total_shape)
+    valid=valid.and.size(jxyz_tot,1)>=maxval(grid_shape).and.size(jxyz_tot,2)==3
+    valid=valid.and.extent_product_fits([maxval(grid_shape),3])
+    call canonical_total_status(comm,valid,'DC grid mapping has inconsistent or invalid geometry',ok,message)
+    if(.not.ok)return
+    cell_count=product(int(grid_shape,int64));local_count=size(cell_ids,kind=int64)
+    call MPI_Allreduce(local_count,total_count,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    valid=total_count==cell_count.and.all(cell_ids>=1_int64).and.all(cell_ids<=cell_count)
+    do axis=1,3
+      valid=valid.and.all(jxyz_tot(1:grid_shape(axis),axis)>=1).and.&
+        all(jxyz_tot(1:grid_shape(axis),axis)<=total_shape(axis))
+      do i=1,core_shape(axis)
+        do j=i+1,core_shape(axis)
+          valid=valid.and.jxyz_tot(i,axis)/=jxyz_tot(j,axis)
+        enddo
+      enddo
+    enddo
+    call canonical_total_status(comm,valid,'DC grid mapping has invalid IDs, coverage or duplicate core ownership',ok,message)
+    if(.not.ok)return
+    allocate(reference_map(maxval(grid_shape),3),ids(size(cell_ids)),mask(size(cell_ids)),stat=status)
+    call collective_allocation_status(comm,status,'DC physical grid mapping',ok,message)
+    if(.not.ok)return
+    reference_map=0
+    do axis=1,3
+      reference_map(1:grid_shape(axis),axis)=jxyz_tot(1:grid_shape(axis),axis)
+    enddo
+    call MPI_Bcast(reference_map,size(reference_map),MPI_INTEGER,0,comm,ierr)
+    valid=.true.
+    do axis=1,3
+      valid=valid.and.all(reference_map(1:grid_shape(axis),axis)==jxyz_tot(1:grid_shape(axis),axis))
+    enddo
+    call canonical_total_status(comm,valid,'DC grid mapping differs between fragment ranks',ok,message)
+    if(.not.ok)return
+    call validate_unique_grid_ids(comm,cell_ids,ok,message)
+    if(.not.ok)return
+    do p=1,size(cell_ids)
+      q=cell_ids(p)-1_int64
+      xyz(1)=int(modulo(q,int(grid_shape(1),int64)))+1;q=q/int(grid_shape(1),int64)
+      xyz(2)=int(modulo(q,int(grid_shape(2),int64)))+1;xyz(3)=int(q/int(grid_shape(2),int64))+1
+      do axis=1,3;global_xyz(axis)=jxyz_tot(xyz(axis),axis);enddo
+      ids(p)=int(global_xyz(1),int64)+int(total_shape(1),int64)*&
+        (int(global_xyz(2)-1,int64)+int(total_shape(2),int64)*int(global_xyz(3)-1,int64))
+      mask(p)=all(xyz<=core_shape)
+    enddo
+    call move_alloc(ids,physical_ids);call move_alloc(mask,core_mask)
+    ok=.true.;message=''
+#else
+    ok=.false.;message='DC physical grid mapping requires MPI'
+#endif
+  end subroutine map_dg_hybrid_fragment_dc_grid
 
   ! Direct seed entry: all total ranks must participate. Candidate rows are
   ! already on the packer's unique spatial layout, identified explicitly by IDs.
