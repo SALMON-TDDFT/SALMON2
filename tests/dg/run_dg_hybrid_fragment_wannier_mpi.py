@@ -114,12 +114,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
     environment = os.environ.copy()
     environment["OMP_NUM_THREADS"] = "1"
     environment.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
-    for rank_count in ((2,) if arguments.core_metric_audit else (2, 4, 8)):
-        run_directory = build / f"ranks-{rank_count}"
+    cases = [(2, True)] if arguments.core_metric_audit else [(2, False), (4, False), (8, False), (2, True)]
+    for rank_count, audit in cases:
+        run_directory = build / (f"audit-ranks-{rank_count}" if audit else f"ranks-{rank_count}")
         run_directory.mkdir()
         run = subprocess.run(
             [launcher, "-n", str(rank_count), str(executable),
-             *(["--core-metric-audit"] if arguments.core_metric_audit else [])],
+             *(["--core-metric-audit"] if audit else [])],
             cwd=run_directory,
             capture_output=True,
             text=True,
@@ -127,6 +128,9 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
             timeout=60,
         )
         assert run.returncode == 0, (rank_count, run.stdout, run.stderr)
+        if audit:
+            for fragment in (1, 2):
+                assert run.stdout.count(f"PASS expected core-null rejection fragment={fragment}") == 1, run.stdout
         assert (
             f"PASS hybrid fragment Wannier on {rank_count} ranks" in run.stdout
         ), run.stdout
@@ -143,3 +147,5 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
 
 print("PASS core-metric audit on 2 ranks" if arguments.core_metric_audit else
       "PASS hybrid fragment Wannier on 2, 4, and 8 ranks")
+if not arguments.core_metric_audit:
+    print("PASS expected core-null rejection on 2 ranks")

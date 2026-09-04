@@ -545,6 +545,39 @@ physical, not just coefficient-space, covariance after selection.
 
 ### Task C5: Actual small DG handoff and the known counterexample
 
+**First assembly checkpoint, 2026-09-04:** The old unselected audit was first
+rerun and reproduced its RED at the preconditioner, with independently computed
+zero reference norms in both fragments. It is now a permanent expected-negative
+test: require exactly `nonpositive or unresolved reference metric norm`, a
+zero output fingerprint and an independently verified zero norm; return before
+initialization. The normal raw-Wannier runner also executes this two-rank audit
+and requires a success marker from each fragment. Arbitrary failures cannot
+pass this negative case.
+
+The selected-WF/PW fixture now calls actual broken-volume, SIPG and nonlocal
+row assemblers, freezes their single-owner payload and extracts the local
+self-block. Core derivatives are explicit nonzero one-sided/central differences;
+face values extrapolate both neighboring cores to their common midpoint with
+a consistent +x derivative. Each periodic interface is assembled once. A
+normalized complex two-point projector on each interface spans both fragments.
+Independent quadrature/trace/projector sums check the matrices, including
+nonzero cross-fragment blocks and retention of every term in the self-block.
+This is a test-only small discretization, not certification of the eventual
+production trace/stencil/projector support inventory.
+
+Selection tests pass on 1/2/4/8 ranks (the assembly case on 2/4/8, exactly one
+rank per fragment). Raw-Wannier tests pass on 2/4/8 plus the expected-negative
+audit on 2; existing SIPG tests pass on 1/2/4 and divided-operator tests on
+1/2/4/8. Release build succeeds. Independent review has no Critical/Important
+issue for this assembly checkpoint. No production source was changed, no DC
+calculation was repeated, and existing dirty changes/logs were retained.
+
+C5 remains open: connect independently complete operator support manifests,
+exercise an explicit insufficient/sufficient PW cutoff tail case, and pass the
+same C3-admitted state through these actual operators and the bounded CG budget.
+Do not infer those properties from separate passing assembly and solver tests.
+Main/C6 and general material acceptance remain untouched.
+
 **Files:**
 - Modify: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`

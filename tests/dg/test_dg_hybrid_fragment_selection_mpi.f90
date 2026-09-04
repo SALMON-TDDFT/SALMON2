@@ -12,6 +12,10 @@ program test_fragment_selection
     s_dg_hybrid_support_samples,check_dg_hybrid_seed_support,&
     s_dg_hybrid_projection_factorization_receipt,validate_dg_hybrid_projected_basis
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
+  use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator,assemble_dg_hybrid_sipg_face
+  use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal_rows
+  use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload
+  use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload,extract_dg_hybrid_fragment_self_block
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_density_checked
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
@@ -383,6 +387,7 @@ contains
     call require(passed,'fresh projected basis failed validation: '//trim(why))
     call test_combined_admission(raw,chosen,selected_basis,basis_receipt)
     call test_cached_frame_connection(raw,chosen,selected_basis,basis_receipt)
+    call test_selected_operator_assembly(selected_basis,chosen)
     do p=1,5
       changed_basis=selected_basis;changed_receipt=basis_receipt
       if(rank==0)then
@@ -603,6 +608,92 @@ contains
     call require(passed,'half-norm PW projection: '//trim(why))
     call test_combined_admission(half_raw,chosen,selected_basis,basis_receipt,.true.)
     call require(run_calls==run0.and.setup_calls==setup0,'half-norm admission reran W90')
+  end subroutine
+  subroutine test_selected_operator_assembly(basis,selection)
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_sipg_face_operator)::face
+    type(s_dg_hybrid_fixed_payload)::payload
+    complex(real64)::buffers(8,4,np),left(4,4),right(4,4),d(4,4),gradient(4,4)
+    complex(real64)::vm(4),vp(4),dm(4),dp(4),jump(8),average(8),face_oracle(8,8)
+    complex(real64),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),metric(:,:),nonlocal(:,:),&
+      overlap(:,:),all_overlap(:,:),nl_oracle(:,:),interface_matrix(:,:),zeros(:,:),hff(:,:),sff(:,:)
+    integer(int64)::all_ids(4,np),face_ids(8),directory_fp
+    integer,allocatable::fragments(:),published_owner(:),published_fragment(:),slots(:),generations(:)
+    integer::nb,next_fragment,neighbor_index,p,i,j,owned,own_ids(4),next_ids(4)
+    real(real64)::diagnostics(4)
+    logical,allocatable::complete(:,:)
+    logical::passed
+    character(256)::why
+    nb=4*np
+    call MPI_Allgather(basis%buffer_values,32,MPI_DOUBLE_COMPLEX,buffers,32,MPI_DOUBLE_COMPLEX,MPI_COMM_WORLD,ierr)
+    call MPI_Allgather(basis%global_ids,4,MPI_INTEGER8,all_ids,4,MPI_INTEGER8,MPI_COMM_WORLD,ierr)
+    own_ids=int(basis%global_ids);next_fragment=1+modulo(f,np);neighbor_index=np-next_fragment+1
+    next_ids=int(all_ids(:,neighbor_index))
+    left=basis%buffer_values(selection%core_row_slots,:);right=buffers(:4,:,neighbor_index)
+    allocate(fragments(nb),values(nb,4),gradients(3,nb,4),interface_matrix(nb,nb),&
+      overlap(nb,1),all_overlap(nb,np),nl_oracle(nb,nb),complete(nb,1),zeros(4,nb))
+    fragments=0
+    do p=1,np;fragments(int(all_ids(:,p)))=np-p+1;enddo
+    ! Explicit finite-difference quadrature on the selected core samples.
+    ! This tests real assemblers; production trace/stencil inventory is a
+    ! separate C5 gate and is not certified by this small reconstruction.
+    d=0d0;d(1,1)=-1d0;d(1,2)=1d0;d(2,1)=-0.5d0;d(2,3)=0.5d0
+    d(3,2)=-0.5d0;d(3,4)=0.5d0;d(4,3)=-1d0;d(4,4)=1d0
+    gradient=matmul(d,left);values=0d0;gradients=0d0
+    values(own_ids,:)=transpose(left);gradients(1,own_ids,:)=transpose(gradient)
+    call assemble_dg_hybrid_broken_volume_rows(MPI_COMM_WORLD,nb,basis%global_ids,fragments,&
+      selection%physical_grid_ids(selection%core_row_slots),[f,f,f,f],[1d0,1d0,1d0,1d0],&
+      values,gradients,[1d0,1d0,1d0,1d0],kinetic,metric,diagnostics,passed,why)
+    call require(passed,'selected nonzero-gradient volume assembly: '//trim(why))
+    call require(maxval(abs(metric(:,own_ids)-matmul(conjg(transpose(left)),left)))<1d-12,&
+      'selected core metric differs from quadrature oracle')
+    call require(maxval(abs(kinetic(:,own_ids)-0.5d0*matmul(conjg(transpose(gradient)),gradient)))<1d-12,&
+      'selected kinetic matrix differs from derivative oracle')
+    call require(maxval(abs(kinetic))>0.1d0,'selected kinetic fixture has zero gradients')
+    ! Both sides extrapolate to the same midpoint between neighboring cores;
+    ! the normal derivative convention is +x on both sides.
+    vm=1.5d0*left(4,:)-0.5d0*left(3,:);dm=left(4,:)-left(3,:)
+    vp=1.5d0*right(1,:)-0.5d0*right(2,:);dp=right(2,:)-right(1,:)
+    call assemble_dg_hybrid_sipg_face(MPI_COMM_SELF,f,0,[merge(1,0,f==np),0,0],own_ids,next_ids,&
+      vm,dm,vp,dp,1d0,1d0,6d0,face,passed,why)
+    call require(passed,'selected SIPG face assembly: '//trim(why))
+    jump=[vm,-vp];average=0.5d0*[dm,dp]
+    do j=1,8;do i=1,8
+      face_oracle(i,j)=0.5d0*(-conjg(jump(i))*average(j)-conjg(average(i))*jump(j)+&
+        6d0*conjg(jump(i))*jump(j))
+    enddo;enddo
+    call require(maxval(abs(face%total-face_oracle))<1d-12,'selected SIPG differs from two-sided trace oracle')
+    call require(maxval(abs(face%total(:4,5:)))>0.1d0,'selected SIPG has no cross-fragment coupling')
+    face_ids=int(face%global_basis_ids,int64);interface_matrix=0d0
+    interface_matrix(int(face_ids),int(face_ids))=face%total
+    call MPI_Allreduce(MPI_IN_PLACE,interface_matrix,nb*nb,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
+    ! One normalized two-point projector per owned interface; every support
+    ! point is known, including the neighboring fragment's contribution.
+    overlap=0d0;overlap(own_ids,1)=0.6d0*left(4,:)
+    overlap(next_ids,1)=cmplx(0d0,-0.8d0,real64)*right(1,:);complete=.true.
+    call assemble_dg_overlapping_wannier_nonlocal_rows(MPI_COMM_WORLD,nb,basis%global_ids,[int(f,int64)],&
+      [0.7d0],overlap,complete,int(np,int64),nonlocal,owned,passed,why)
+    call require(passed.and.owned==np,'selected cross-core projector assembly: '//trim(why))
+    call MPI_Allgather(overlap,nb,MPI_DOUBLE_COMPLEX,all_overlap,nb,MPI_DOUBLE_COMPLEX,MPI_COMM_WORLD,ierr)
+    nl_oracle=0d0
+    do p=1,np;do j=1,nb;do i=1,nb
+      nl_oracle(i,j)=nl_oracle(i,j)+0.7d0*conjg(all_overlap(i,p))*all_overlap(j,p)
+    enddo;enddo;enddo
+    call require(maxval(abs(nonlocal-nl_oracle(own_ids,:)))<1d-12,'selected nonlocal differs from projector oracle')
+    call require(maxval(abs(nonlocal(:,next_ids)))>0.1d0,'nonlocal neighboring-fragment coupling is missing')
+    zeros=0d0
+    call freeze_dg_hybrid_single_owner_payload(MPI_COMM_WORLD,np,basis,metric,kinetic,nonlocal,&
+      interface_matrix(own_ids,:),1001_int64,1003_int64,1007_int64,payload,published_owner,published_fragment,&
+      slots,generations,directory_fp,passed,why)
+    call require(passed,'selected real-operator payload freeze: '//trim(why))
+    call extract_dg_hybrid_fragment_self_block(MPI_COMM_SELF,f,[1_int64,2_int64,3_int64,4_int64],&
+      published_fragment,payload,zeros,hff,sff,passed,why,basis_local_slot=slots,basis_generation=generations,&
+      fragment_catalog_fingerprint=1001_int64,fragment_directory_fingerprint=directory_fp)
+    call require(passed,'selected real-operator self-block: '//trim(why))
+    call require(maxval(abs(sff-metric(:,own_ids)))<1d-12.and.&
+      maxval(abs(hff-kinetic(:,own_ids)-nonlocal(:,own_ids)-interface_matrix(own_ids,own_ids)))<1d-12,&
+      'selected self-block lost volume/interface/nonlocal contributions')
   end subroutine
   subroutine test_cached_frame_connection(raw,selection,basis,receipt)
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::raw

@@ -692,6 +692,14 @@ contains
       payload%fingerprint,built%receipt%transform_fingerprint)
     call prepare_dg_hybrid_fragment_preconditioner(comm_fragment,n,integration_rows,q,integration_h,&
       integration_s,integration_key,1d-10,integration_preconditioner,preconditioner_fp,ok,message)
+    if(trim(audit_mode)=='--core-metric-audit')then
+      call require_total(.not.ok.and.trim(message)=='nonpositive or unresolved reference metric norm'.and.&
+        preconditioner_fp==0_int64,'core-null audit failed for an unexpected reason: '//trim(message))
+      call require_total(any([(abs(reference_s(a,a))<=1d-12,a=1,n)]),&
+        'core-null audit did not contain an independently verified zero reference norm')
+      if(fragment_rank==0)write(*,'(a,i0)')'PASS expected core-null rejection fragment=',fragment_id
+      return
+    endif
     call require_total(ok,'DC integration fixed-frame preconditioner failed: '//trim(message))
     call initialize_dg_hybrid_fragment_subspace(comm_fragment,n,integration_rows,fragment_id,13,&
       501_int64,503_int64,seed_coefficients,built%physical_dc_seed_energies,built%physical_dc_seed_occupations,&
