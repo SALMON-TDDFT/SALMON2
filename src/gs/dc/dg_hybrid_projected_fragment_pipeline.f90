@@ -1,7 +1,8 @@
 module dg_hybrid_projected_fragment_pipeline
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite,ieee_get_halting_mode,ieee_set_halting_mode,&
+    ieee_set_flag,ieee_invalid,ieee_divide_by_zero,ieee_overflow
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
   use dg_hybrid_windowed_pw_basis,only:materialize_dg_hybrid_windowed_pw_columns
   use dg_hybrid_wannier_complement,only:s_dg_hybrid_generalized_metric_factor,&
@@ -13,6 +14,11 @@ module dg_hybrid_projected_fragment_pipeline
     finalize_dg_hybrid_fragment_basis_stream
   implicit none
   private
+  type,public::s_dg_hybrid_core_projection_report
+    logical::measured=.false.
+    integer::metric_rank=0
+    real(real64)::orbital_residual=huge(1d0),density_defect=huge(1d0),electron_defect=huge(1d0)
+  end type
   type,public::s_dg_hybrid_projection_factorization_receipt
     logical::valid=.false.
     integer::basis_generation=0,metric_rank=0,metric_factorization_count=0,projected_tile_count=0
@@ -31,6 +37,7 @@ module dg_hybrid_projected_fragment_pipeline
   end type s_dg_hybrid_dual_basis_catalog
   public::build_dg_hybrid_projected_fragment_basis,finalize_dg_hybrid_dual_basis_catalog
   public::build_dg_hybrid_projected_local_fragment_basis
+  public::project_dg_hybrid_core_seeds
   interface
     subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
       import::real64
@@ -42,6 +49,92 @@ module dg_hybrid_projected_fragment_pipeline
     end subroutine zheev
   end interface
 contains
+  ! Local core quadrature only; no complete-system Hamiltonian diagonalization.
+  ! limits = metric rank, max relative orbital norm, relative density L1,
+  ! absolute electron-number defect. A rank loss is never compressed away.
+  subroutine project_dg_hybrid_core_seeds(comm,basis,weights,seeds,occupations,limits,&
+      selected_count,pw_cutoff,coefficients,report,ok,message)
+    integer,intent(in)::comm,selected_count
+    complex(real64),intent(in)::basis(:,:),seeds(:,:)
+    real(real64),intent(in)::weights(:),occupations(:),limits(4),pw_cutoff
+    complex(real64),allocatable,intent(out)::coefficients(:,:)
+    type(s_dg_hybrid_core_projection_report),intent(out)::report
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical::halting(3)
+    call ieee_get_halting_mode(ieee_invalid,halting(1))
+    call ieee_get_halting_mode(ieee_divide_by_zero,halting(2))
+    call ieee_get_halting_mode(ieee_overflow,halting(3))
+    call ieee_set_halting_mode(ieee_invalid,.false.)
+    call ieee_set_halting_mode(ieee_divide_by_zero,.false.)
+    call ieee_set_halting_mode(ieee_overflow,.false.)
+    call execute()
+    call ieee_set_flag(ieee_invalid,.false.);call ieee_set_flag(ieee_divide_by_zero,.false.)
+    call ieee_set_flag(ieee_overflow,.false.)
+    call ieee_set_halting_mode(ieee_invalid,halting(1))
+    call ieee_set_halting_mode(ieee_divide_by_zero,halting(2))
+    call ieee_set_halting_mode(ieee_overflow,halting(3))
+  contains
+    subroutine execute()
+      complex(real64),allocatable::weighted(:,:),target(:,:),gram(:,:),inverse(:,:),work(:,:),reconstructed(:,:)
+      real(real64),allocatable::spectrum(:),rho(:),reference(:)
+      real(real64)::minimum(5),maximum(5),metadata(5),norm2,error2,electrons
+      integer::n,m,p,j,status,ierr
+      logical::valid,stage_ok
+      character(256)::why
+      ok=.false.;message='';n=size(basis,2);m=size(seeds,2);p=size(basis,1)
+      valid=n>0.and.n<=huge(0)/3.and.m>0.and.p>0.and.size(seeds,1)==p.and.size(weights)==p.and.&
+        size(occupations)==m.and.selected_count>0.and.selected_count<=n.and.&
+        finite_complex_matrix(basis).and.finite_complex_matrix(seeds).and.&
+        all(ieee_is_finite(weights)).and.all(weights>0d0).and.&
+        all(ieee_is_finite(occupations)).and.all(occupations>=0d0).and.&
+        all(ieee_is_finite(limits)).and.all(limits>0d0).and.ieee_is_finite(pw_cutoff).and.pw_cutoff>=0d0
+      call synchronize_status(comm,valid,'invalid core seed projection input',ok,message);if(.not.ok)return
+      metadata=[limits,pw_cutoff]
+      call MPI_Allreduce(metadata,minimum,5,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS,'core projection controls exchange failed',ok,message)
+      if(.not.ok)return
+      call MPI_Allreduce(metadata,maximum,5,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS.and.all(minimum==maximum),&
+        'core projection controls differ between ranks',ok,message);if(.not.ok)return
+      allocate(weighted(p,n),target(p,m),gram(n,n),work(n,m),reconstructed(p,m),rho(p),reference(p),stat=status)
+      call synchronize_status(comm,status==0,'core projection allocation failed',ok,message);if(.not.ok)return
+      weighted=basis*spread(sqrt(weights),2,n);target=seeds*spread(sqrt(weights),2,m)
+      gram=matmul(conjg(transpose(weighted)),weighted)
+      call hermitian_pseudoinverse(gram,limits(1),inverse,report%metric_rank,spectrum,stage_ok,why)
+      valid=stage_ok.and.report%metric_rank==n
+      call synchronize_status(comm,valid,'unresolved or dependent core metric: '//trim(why),ok,message)
+      if(.not.ok)return
+      work=matmul(inverse,matmul(conjg(transpose(weighted)),target))
+      reconstructed=matmul(basis,work)
+      call synchronize_status(comm,finite_complex_matrix(work).and.finite_complex_matrix(reconstructed),&
+        'nonfinite core seed projection result',ok,message);if(.not.ok)return
+      report%orbital_residual=0d0;rho=0d0;reference=0d0;valid=.true.
+      do j=1,m
+        norm2=sum(weights*abs(seeds(:,j))**2)
+        error2=sum(weights*abs(reconstructed(:,j)-seeds(:,j))**2)
+        valid=valid.and.norm2>tiny(1d0).and.ieee_is_finite(norm2).and.ieee_is_finite(error2)
+        report%orbital_residual=max(report%orbital_residual,sqrt(error2/max(norm2,tiny(1d0))))
+        rho=rho+occupations(j)*abs(reconstructed(:,j))**2
+        reference=reference+occupations(j)*abs(seeds(:,j))**2
+      enddo
+      electrons=sum(weights*reference)
+      report%density_defect=sum(weights*abs(rho-reference))/max(1d0,electrons)
+      report%electron_defect=abs(sum(weights*(rho-reference)))
+      valid=valid.and.all(ieee_is_finite([report%orbital_residual,report%density_defect,&
+        report%electron_defect,electrons])).and.all(ieee_is_finite(rho)).and.all(ieee_is_finite(reference))
+      call synchronize_status(comm,valid,'unresolved core projection diagnostics',ok,message);if(.not.ok)return
+      report%measured=.true.
+      valid=report%orbital_residual<=limits(2).and.report%density_defect<=limits(3).and.&
+        report%electron_defect<=limits(4)
+      write(why,'(a,i0,a,es12.4,a,3es12.4)')'insufficient core span: selected=',selected_count,&
+        ' cutoff=',pw_cutoff,' orbital/density/electron=',report%orbital_residual,&
+        report%density_defect,report%electron_defect
+      call synchronize_status(comm,valid,why,ok,message);if(.not.ok)return
+      call move_alloc(work,coefficients)
+    end subroutine
+  end subroutine project_dg_hybrid_core_seeds
+
   subroutine build_dg_hybrid_projected_local_fragment_basis(comm,global_point_count,fragment_count,&
       fragment_id,core_ids,weights,core_coordinates,core_windows,buffer_ids,local_wannier,&
       buffer_coordinates,buffer_windows,catalog,g_vectors,wannier_owner,tile_width,tolerance,&

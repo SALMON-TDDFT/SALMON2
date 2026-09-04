@@ -11,6 +11,7 @@ module dg_hybrid_fragment_selection
   private
   public::s_dg_hybrid_core_selection,select_dg_hybrid_core_wannier,classify_dg_hybrid_core_centers
   public::export_dg_hybrid_selected_wannier
+  public::s_dg_hybrid_selected_catalog,prepare_dg_hybrid_selected_catalog
   integer,parameter::center_convention=1
   real(real64),parameter::roundoff_factor=64d0*epsilon(1d0)
   type s_dg_hybrid_core_selection
@@ -20,7 +21,76 @@ module dg_hybrid_fragment_selection
     integer(int64),allocatable::raw_column_ids(:)
     integer,allocatable::center_owner(:)
   end type
+  type s_dg_hybrid_selected_catalog
+    logical::valid=.false.
+    integer::fragment_id=0,basis_generation=0
+    integer(int64)::fingerprint=0_int64
+    ! Global active index is the position in these fragment-major arrays.
+    integer,allocatable::wannier_owner(:)
+    integer(int64),allocatable::raw_column_ids(:),local_active_ids(:)
+    complex(real64),allocatable::local_values(:,:)
+  end type
 contains
+  subroutine prepare_dg_hybrid_selected_catalog(comm,fragment_id,cache,selection,catalog,ok,message)
+    integer,intent(in)::comm,fragment_id
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_selected_catalog),intent(out)::catalog
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    type(s_dg_hybrid_selected_catalog)::work
+    integer::np,ierr,status,j,f,root,offset,n,total,minimum,maximum
+    integer,allocatable::fragments(:),counts(:)
+    integer(int64),allocatable::receipts(:)
+    integer(int64)::total64,hash
+    call export_dg_hybrid_selected_wannier(comm,fragment_id,cache,selection,work%local_values,ok,message)
+    if(.not.ok)return
+    call MPI_Comm_size(comm,np,ierr)
+    allocate(fragments(np),counts(np),receipts(np),stat=status)
+    call gate(comm,status==0,'selected catalog directory allocation failed',ok,message);if(.not.ok)return
+    call MPI_Allgather(fragment_id,1,MPI_INTEGER,fragments,1,MPI_INTEGER,comm,ierr)
+    call gate(comm,ierr==MPI_SUCCESS,'selected catalog fragment exchange failed',ok,message);if(.not.ok)return
+    call MPI_Allgather(selection%selected_count,1,MPI_INTEGER,counts,1,MPI_INTEGER,comm,ierr)
+    call gate(comm,ierr==MPI_SUCCESS,'selected catalog count exchange failed',ok,message);if(.not.ok)return
+    call MPI_Allgather(selection%fingerprint,1,MPI_INTEGER8,receipts,1,MPI_INTEGER8,comm,ierr)
+    call gate(comm,ierr==MPI_SUCCESS,'selected catalog receipt exchange failed',ok,message);if(.not.ok)return
+    call MPI_Allreduce(selection%basis_generation,minimum,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call gate(comm,ierr==MPI_SUCCESS,'selected catalog generation exchange failed',ok,message);if(.not.ok)return
+    call MPI_Allreduce(selection%basis_generation,maximum,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call gate(comm,ierr==MPI_SUCCESS.and.minimum==maximum,'selected catalog generations differ',ok,message)
+    if(.not.ok)return
+    total64=sum(int(counts,int64))
+    call gate(comm,total64<=int(huge(0),int64),'selected catalog MPI count overflows',ok,message);if(.not.ok)return
+    total=int(total64)
+    allocate(work%wannier_owner(total),work%raw_column_ids(total),&
+      work%local_active_ids(selection%selected_count),stat=status)
+    call gate(comm,status==0,'selected catalog column allocation failed',ok,message);if(.not.ok)return
+    offset=0;hash=mix(1201_int64,int(np,int64))
+    do f=1,np
+      ! Export validation already certified a bijective rank-fragment map.
+      do root=1,np
+        if(fragments(root)==f)exit
+      enddo
+      n=counts(root)
+      work%wannier_owner(offset+1:offset+n)=f
+      if(f==fragment_id)then
+        work%raw_column_ids(offset+1:offset+n)=selection%raw_column_ids
+        work%local_active_ids=[(int(offset+j,int64),j=1,n)]
+      endif
+      call MPI_Bcast(work%raw_column_ids(offset+1:offset+n),n,MPI_INTEGER8,root-1,comm,ierr)
+      call gate(comm,ierr==MPI_SUCCESS,'selected catalog raw ID exchange failed',ok,message);if(.not.ok)return
+      hash=mix(hash,int(f,int64));hash=mix(hash,int(root-1,int64));hash=mix(hash,int(n,int64))
+      hash=mix(hash,receipts(root))
+      do j=offset+1,offset+n;hash=mix(hash,work%raw_column_ids(j));enddo
+      offset=offset+n
+    enddo
+    work%fragment_id=fragment_id;work%basis_generation=minimum;work%fingerprint=hash;work%valid=.true.
+    catalog=work
+#else
+    ok=.false.;message='selected catalog requires MPI'
+#endif
+  end subroutine
   ! Geometry-only entry: classifies caller-local centers; it does not certify a WF cache.
   subroutine classify_dg_hybrid_core_centers(comm,lattice,origin,lower,extent,grid,centers,result,ok,message)
     integer,intent(in)::comm,grid(3)

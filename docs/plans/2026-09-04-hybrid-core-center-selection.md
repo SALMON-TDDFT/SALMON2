@@ -173,6 +173,45 @@ global IDs, selected-only PW projection, actual core Gram solve, reconstruction
 diagnostics and the fail-only post-initializer density gate remain pending.
 The production main route remains unchanged; no DC/material run was repeated.
 
+**Second partial checkpoint, 2026-09-04 (selected PW connection and core solve):**
+`prepare_dg_hybrid_selected_catalog` now exports validated selected values with
+compact fragment-major active IDs, a separate replicated raw-column provenance
+directory and a shared fingerprint binding every selection receipt and the
+exact rank--fragment inventory. Unequal local counts are supported; generation
+disagreement and invalid/empty selection cannot publish a catalog. This catalog
+feeds the existing local projected-fragment pipeline without adding a dependency
+from that generic pipeline back to Wannier construction.
+
+The 2/4/8-rank integration fixture uses the real raw-cache constructor (only W90
+is stubbed), center selector, selected export and PW projection. An excluded WF
+has a finite core tail: projection against the raw union removes a needed PW
+component, whereas the selected union retains it. All selected buffer values
+and raw/active ID mappings remain intact. The centers/values are a controlled
+algebraic fixture, not evidence of material localization accuracy.
+
+`project_dg_hybrid_core_seeds` builds the weighted core normal equations and
+uses the existing Hermitian metric rank policy. It rejects any rank loss before
+publishing coefficients, rather than adopting a compressed local basis. Its
+local report separates maximum relative orbital residual, relative weighted
+density L1 defect and absolute electron-number defect. Insufficient span reports
+selected count, supplied cutoff and measured defects; no cutoff or occupation
+is modified. The cutoff is diagnostic input, not a new PW catalog generator.
+
+Tests compare a nonorthogonal coordinate example to an independent coefficient
+oracle and to the actual broken-volume unit-potential metric. Raw DC orbitals
+are reconstructed from the full immutable cache map before projection; their
+spectra and occupations are preserved. Unequal per-rank basis/seed dimensions,
+missing PW span, dependent metric, finite overflow and differing controls are
+covered. The selection runner passes on 1/2/4/8 ranks (PW/core integration on
+2/4/8), both original 2/4/8-rank WF/pipeline runners pass, and release builds.
+
+C3 remains incomplete: production admission still needs the bound raw-DC seed
+adapter, required boundary/derivative/projector support diagnostics, and the
+actual initializer's fail-only density/electron gate (including core norm 1/2).
+The probe above does not authorize publishing an accepted solver state or
+claim a general density-preserving DC handoff. C4/C5/C6 and main are unchanged;
+no material/DC calculation was rerun and all pre-existing dirty data is retained.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`

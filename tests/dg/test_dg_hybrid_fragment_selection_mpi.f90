@@ -5,6 +5,11 @@ program test_fragment_selection
   use dg_hybrid_fragment_selection
   use dg_hybrid_fragment_wannier
   use dg_hybrid_fragment_wannier_test_stubs
+  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+  use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
+  use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
+    project_dg_hybrid_core_seeds,s_dg_hybrid_core_projection_report
+  use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   implicit none
   integer::rank,np,ierr,f,j,a,nx,variant,owner,expected(4),nexpected,setup_saved,run_saved
   integer::raw_shape(3),core_shape(3),total_shape(3),mapping(8,3),bad_mapping(8,3)
@@ -20,6 +25,8 @@ program test_fragment_selection
   integer::permutation(8),k
   integer::dims(3),xyz(3)
   type(s_dg_hybrid_core_selection)::selection,again
+  type(s_dg_hybrid_selected_catalog)::unequal_catalog
+  integer,allocatable::selected_counts(:)
   logical::ok
   character(256)::message
   call MPI_Init(ierr)
@@ -70,6 +77,15 @@ program test_fragment_selection
   call require(all(cache%wannier_values==snapshot%wannier_values).and.&
     all(cache%centers_fractional==snapshot%centers_fractional),'selection mutated raw cache')
   call require(setup_calls==setup_saved.and.run_calls==run_saved,'selection reran W90')
+  call prepare_dg_hybrid_selected_catalog(MPI_COMM_WORLD,f,cache,selection,unequal_catalog,ok,message)
+  call require(ok.and.unequal_catalog%valid,'unequal selected catalog: '//trim(message))
+  allocate(selected_counts(np))
+  call MPI_Allgather(nexpected,1,MPI_INTEGER,selected_counts,1,MPI_INTEGER,MPI_COMM_WORLD,ierr)
+  call require(size(unequal_catalog%wannier_owner)==sum(selected_counts),'unequal global count mismatch')
+  call require(count(unequal_catalog%wannier_owner==f)==nexpected,'unequal local count mismatch')
+  call require(all(unequal_catalog%local_active_ids==&
+    int([(sum(selected_counts(np-f+2:))+j,j=1,nexpected)],int64)),&
+    'unequal active ID offsets follow ranks rather than fragments')
 
   call export_dg_hybrid_selected_wannier(MPI_COMM_WORLD,f,cache,selection,selected_values,ok,message)
   call require(ok,'selected value export: '//trim(message))
@@ -211,9 +227,155 @@ program test_fragment_selection
   call classify_dg_hybrid_core_centers(MPI_COMM_WORLD,total_lattice,origin,lower,extent,&
     total_shape,points,again,ok,message)
   call require(.not.ok.and..not.again%valid,'unresolved finite geometry accepted')
+  if(np>=2)call test_selected_pw_connection()
   if(rank==0)write(*,'(a,i0,a)')'PASS core-center selection on ',np,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine test_selected_pw_connection()
+    type(s_dg_hybrid_fragment_wannier_cache)::raw
+    type(s_dg_hybrid_core_selection)::chosen,corrupt
+    type(s_dg_hybrid_selected_catalog)::active,invalid
+    type(s_dg_hybrid_basis_catalog)::packets
+    type(s_dg_hybrid_fragment_basis)::selected_basis,unselected_basis
+    type(s_dg_hybrid_core_projection_report)::report
+    real(real64)::cell(3,3),tot(3,3),recip(3,3),boxes(3,np),widths(3,np),start(3)
+    real(real64)::coords(3,8),windows(np,8),g(3,1),core_weights(4),quad(8),frac(3,8)
+    complex(real64)::dc(2,8),aux(1,8),proj(1,8),target(4)
+    complex(real64)::reference(4,1),dependent(4,4),expected_coeff(4,1),mixed_basis(4,4)
+    complex(real64)::dc_reference(4,2)
+    complex(real64)::volume_values(4*np,4),gradients(3,4*np,4),rhs(4,1)
+    complex(real64),allocatable::metric_rows(:,:),kinetic_rows(:,:)
+    real(real64)::volume_diagnostics(4)
+    complex(real64),allocatable::coeff(:,:)
+    real(real64)::metric_weights(4),limits(4)
+    integer::map(8,3),p,t,owner0,raw_owner(4*np),run0,setup0,local_n,local_m
+    integer(int64)::physical(8),core(4),mem,fp,raw_union_fp
+    logical::passed
+    character(256)::why
+    if(np==1)return
+    cell=0d0;recip=0d0;tot=0d0;boxes=0d0;widths=8d0;g=0d0;quad=1d0;core_weights=1d0
+    do t=1,3;cell(t,t)=8d0;recip(t,t)=2d0*acos(-1d0)/8d0;tot(t,t)=8d0;enddo
+    tot(1,1)=4d0*np;widths(1,:)=4d0
+    do p=1,np;boxes(1,p)=4d0*(p-1);enddo
+    start=boxes(:,f);map=1;coords=0d0;frac=0d0;windows=0d0
+    do p=1,8
+      map(p,1)=1+modulo(4*(f-1)+p-1,4*np)
+      physical(p)=int(map(p,1),int64);coords(1,p)=real(map(p,1)-1,real64)
+      frac(1,p)=real(p-1,real64)/8d0
+      owner0=1+(map(p,1)-1)/4;windows(owner0,p)=1d0
+    enddo
+    core=physical(:4);dc=0d0;aux=0d0;proj=0d0
+    dc(1,1)=1d0;dc(2,2)=1d0;aux(1,3)=1d0
+    ! The excluded raw WF has a finite core tail and an extended-domain part.
+    proj(1,4)=sqrt(0.5d0);proj(1,7)=sqrt(0.5d0)
+    call build_dg_hybrid_fragment_wannier(MPI_COMM_WORLD,MPI_COMM_SELF,f,3,'selected-pw-cache',&
+      ids,quad,dc,energies,occupations,aux,proj,1d-12,cell,recip,&
+      ['H '],atoms,frac,20,1d-10,10000000_int64,raw,passed,why)
+    call require(passed,'PW fixture raw build: '//trim(why));run0=run_calls;setup0=setup_calls
+    call select_dg_hybrid_core_wannier(MPI_COMM_WORLD,f,raw,cell,start,tot,[0d0,0d0,0d0],&
+      boxes,widths,[8,1,1],[4,1,1],[4*np,1,1],map,chosen,passed,why)
+    call require(passed.and.chosen%selected_count==3,'PW fixture center selection: '//trim(why))
+    call prepare_dg_hybrid_selected_catalog(MPI_COMM_WORLD,f,raw,chosen,active,passed,why)
+    call require(passed.and.active%valid,'selected active catalog: '//trim(why))
+    call require(all(active%local_active_ids==int([(3*(f-1)+p,p=1,3)],int64)),&
+      'active IDs must be compact fragment-major, independent of MPI rank order')
+    call require(all(active%raw_column_ids==int([(modulo(p-1,3)+1,p=1,3*np)],int64)),&
+      'raw provenance IDs were replaced by global active IDs')
+    call require(all(active%wannier_owner==[(1+(p-1)/3,p=1,3*np)]),'wrong selected WF inventory')
+    call require(all(active%local_values==raw%wannier_values(:3,:)),'selected catalog changed buffer values')
+    allocate(packets%packets(np));packets%valid=.true.
+    packets%packet_fingerprint=991_int64;packets%catalog_fingerprint=997_int64
+    do p=1,np
+      packets%packets(p)%fragment_id=p;packets%packets(p)%owner_rank=np-p;packets%packets(p)%star_id=1
+      allocate(packets%packets(p)%g_indices(1),source=[1])
+    enddo
+    call build_dg_hybrid_projected_local_fragment_basis(MPI_COMM_WORLD,4*np,np,f,core,core_weights,&
+      coords(:,:4),windows(:,:4),physical,active%local_values,coords,windows,packets,g,&
+      active%wannier_owner,2,1d-12,active%fingerprint,selected_basis,mem,fp,passed,why,basis_generation=3)
+    call require(passed,'selected WF to production PW pipeline: '//trim(why))
+    call require(all(selected_basis%global_ids(:3)==active%local_active_ids),'pipeline lost active IDs')
+    call require(maxval(abs(selected_basis%buffer_values(:,:3)-transpose(active%local_values)))<1d-13,&
+      'pipeline clipped selected buffer values')
+    target=0d0;target(4)=1d0
+    call require(maxval(abs(selected_basis%buffer_values(:4,4)-target))<1d-11,&
+      'selected-only projection removed the needed core PW component')
+    raw_owner=[(1+(p-1)/4,p=1,4*np)]
+    call MPI_Allreduce(raw%receipt%distributed_wannier_fingerprint,raw_union_fp,1,&
+      MPI_INTEGER8,MPI_BXOR,MPI_COMM_WORLD,ierr)
+    if(raw_union_fp==0_int64)raw_union_fp=1_int64
+    call build_dg_hybrid_projected_local_fragment_basis(MPI_COMM_WORLD,4*np,np,f,core,core_weights,&
+      coords(:,:4),windows(:,:4),physical,raw%wannier_values,coords,windows,packets,g,&
+      raw_owner,2,1d-12,raw_union_fp,&
+      unselected_basis,mem,fp,passed,why,basis_generation=3)
+    call require(passed,'unselected comparison pipeline: '//trim(why))
+    call require(maxval(abs(unselected_basis%buffer_values(:4,5)))<1d-11,&
+      'raw-union comparison did not expose lost PW component')
+    ! Independent oracle: the excluded column's core restriction is proportional
+    ! to e4. Slicing its old raw coordinate vector gives zero, whereas the PW
+    ! column represents it exactly. This is a projection probe, not a DC run.
+    reference(:,1)=raw%wannier_values(4,:4)
+    call require(sum(abs(reference)**2)>0.1d0,'excluded WF lacks the required finite core tail')
+    metric_weights=[0.5d0,1.25d0,2d0,0.75d0];limits=[1d-12,1d-10,1d-10,1d-10]
+    mixed_basis=selected_basis%buffer_values(:4,:)
+    ! A nonorthogonal coordinate change makes using an identity S fail.
+    mixed_basis(:,4)=2d0*mixed_basis(:,4)+0.3d0*mixed_basis(:,1)
+    expected_coeff=0d0;expected_coeff(4,1)=reference(4,1)/2d0
+    expected_coeff(1,1)=-0.3d0*expected_coeff(4,1)
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,metric_weights,reference,&
+      [1.5d0],limits,3,0d0,coeff,report,passed,why)
+    call require(passed.and.report%metric_rank==4.and.report%measured,'core seed projection: '//trim(why))
+    call require(maxval(abs(coeff-expected_coeff))<1d-11,'core solve differs from independent coefficient oracle')
+    volume_values=0d0;gradients=0d0
+    volume_values(selected_basis%global_ids,:)=transpose(mixed_basis)
+    call assemble_dg_hybrid_broken_volume_rows(MPI_COMM_WORLD,4*np,selected_basis%global_ids,&
+      [active%wannier_owner,[(p,p=1,np)]],core,[f,f,f,f],metric_weights,volume_values,gradients,&
+      [1d0,1d0,1d0,1d0],kinetic_rows,metric_rows,volume_diagnostics,passed,why)
+    call require(passed,'actual broken-volume core metric: '//trim(why))
+    rhs=matmul(conjg(transpose(mixed_basis)),reference*spread(metric_weights,2,1))
+    call require(maxval(abs(matmul(metric_rows(:,selected_basis%global_ids),coeff)-rhs))<1d-11,&
+      'core projection normal equations disagree with broken-volume metric')
+    call require(report%orbital_residual<1d-11.and.report%density_defect<1d-11.and.&
+      report%electron_defect<1d-11,'exact core projection changed density or electron count')
+    dc_reference=matmul(transpose(raw%wannier_values(:,:4)),raw%dc_seed_coefficients_in_wannier)
+    call require(maxval(abs(dc_reference-transpose(dc(:,:4))))<1d-11,'raw DC reconstruction oracle failed')
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,metric_weights,dc_reference,&
+      raw%physical_dc_seed_occupations,limits,3,0d0,coeff,report,passed,why)
+    call require(passed,'immutable raw DC seed projection: '//trim(why))
+    call require(maxval(abs(matmul(mixed_basis,coeff)-dc_reference))<1d-11,'raw DC states were not reproduced')
+    call require(all(raw%physical_dc_seed_energies==energies).and.&
+      all(raw%physical_dc_seed_occupations==occupations),'projection changed raw physical seed metadata')
+    local_n=3+modulo(rank,2);local_m=1+modulo(rank,2)
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis(:,:local_n),metric_weights,&
+      dc_reference(:,:local_m),raw%physical_dc_seed_occupations(:local_m),limits,3,0d0,&
+      coeff,report,passed,why)
+    call require(passed.and.report%metric_rank==local_n,'unequal local basis/seed counts failed: '//trim(why))
+    ! Insufficient selected-only span: positive S is not enough for admission.
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis(:,:3),metric_weights,reference,&
+      [1.5d0],limits,3,0d0,coeff,report,passed,why)
+    call require(.not.passed.and..not.allocated(coeff).and.report%measured.and.&
+      report%orbital_residual>0.9d0.and.index(why,'insufficient core span')>0,&
+      'insufficient span was not separately diagnosed')
+    dependent=mixed_basis
+    if(rank==0)dependent(:,4)=dependent(:,1)
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,dependent,metric_weights,reference,&
+      [1.5d0],limits,3,0d0,coeff,report,passed,why)
+    call require(.not.passed.and..not.allocated(coeff).and.index(why,'core metric')>0,&
+      'dependent core metric silently compressed or published coefficients')
+    dependent=mixed_basis
+    if(rank==0)dependent(1,1)=cmplx(huge(1d0)/2d0,0d0,real64)
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,dependent,metric_weights,reference,&
+      [1.5d0],limits,3,0d0,coeff,report,passed,why)
+    call require(.not.passed.and..not.allocated(coeff),'overflowing finite metric input escaped admission')
+    if(rank==0)limits(2)=2d-10
+    call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,metric_weights,reference,&
+      [1.5d0],limits,3,0d0,coeff,report,passed,why)
+    call require(.not.passed.and.index(why,'controls differ')>0,'rank-disagreeing projection controls accepted')
+    corrupt=chosen;if(rank==0)corrupt%fingerprint=ieor(corrupt%fingerprint,1_int64)
+    call prepare_dg_hybrid_selected_catalog(MPI_COMM_WORLD,f,raw,corrupt,invalid,passed,why)
+    call require(.not.passed.and..not.invalid%valid.and..not.allocated(invalid%local_values),&
+      'invalid selection published active catalog')
+    call require(run_calls==run0.and.setup_calls==setup0,'PW catalog reran W90')
+  end subroutine
   subroutine invoke(input_cache,input_mapping)
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::input_cache
     integer,intent(in)::input_mapping(:,:)

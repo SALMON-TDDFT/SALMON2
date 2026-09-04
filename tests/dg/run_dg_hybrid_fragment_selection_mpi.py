@@ -34,6 +34,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
     selection = "src/gs/dc/dg_hybrid_fragment_selection.f90"
     if (ROOT / selection).exists():
         sources.append(selection)
+    sources += ["src/common/dg_hybrid_windowed_pw_types.f90",
+                "src/common/dg_hybrid_windowed_pw_basis.f90",
+                "src/common/dg_hybrid_wannier_complement.f90",
+                "src/gs/dc/dg_hybrid_fragment_basis.f90",
+                "src/gs/dc/dg_hybrid_fragment_basis_stream.f90",
+                "src/gs/dc/dg_hybrid_broken_volume.f90",
+                "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90"]
     sources += ["tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90",
                 "tests/dg/test_dg_hybrid_fragment_selection_mpi.f90"]
     executable = build / "selection"
