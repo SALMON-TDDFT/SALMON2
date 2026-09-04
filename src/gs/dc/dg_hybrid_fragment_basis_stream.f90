@@ -16,7 +16,8 @@ module dg_hybrid_fragment_basis_stream
     finalize_dg_hybrid_fragment_basis_stream
 contains
   subroutine initialize_dg_hybrid_fragment_basis_stream(comm,fragment_count,fragment_id,point_ids,&
-      wannier_buffer,wannier_owner,pw_owner,stream,basis,workspace_peak_bytes,fingerprint,ok,message)
+      wannier_buffer,wannier_owner,pw_owner,stream,basis,workspace_peak_bytes,fingerprint,ok,message,&
+      local_wannier_only,basis_generation)
     integer,intent(in)::comm,fragment_count,fragment_id,wannier_owner(:),pw_owner(:)
     integer(int64),intent(in)::point_ids(:)
     complex(real64),intent(in)::wannier_buffer(:,:)
@@ -25,21 +26,41 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes,fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
+    ! Compact input keeps all columns of this fragment, in ascending global WF ID order.
+    ! It does not distribute a fragment's columns across ranks.
+    logical,optional,intent(in)::local_wannier_only
+    integer,optional,intent(in)::basis_generation
     integer::i,j,slot,nlocal,local_bad,global_bad,ierr,minimum,maximum,allocation_status
+    integer::input_mode,generation,nrank,expected_wannier
     integer,allocatable::fragment_presence(:),ownership(:)
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
+    input_mode=0;generation=1
+    if(present(local_wannier_only))input_mode=merge(1,0,local_wannier_only)
+    if(present(basis_generation))generation=basis_generation
+    call agree_integer(input_mode,minimum,maximum,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='inconsistent stream local WF mode';return;endif
+    call agree_integer(generation,minimum,maximum,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.minimum/=maximum.or.minimum<1)then
+      message='invalid or inconsistent stream basis generation';return
+    endif
     call agree_integer(fragment_count,minimum,maximum,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='inconsistent stream fragment count';return;endif
     call agree_integer(size(wannier_owner),minimum,maximum,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='inconsistent stream Wannier count';return;endif
     call agree_integer(size(pw_owner),minimum,maximum,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum/=maximum)then;message='inconsistent stream PW count';return;endif
+    expected_wannier=size(wannier_owner)
+    if(input_mode==1)expected_wannier=count(wannier_owner==fragment_id)
     local_bad=merge(0,1,fragment_count>0.and.fragment_id>=0.and.fragment_id<=fragment_count.and.&
-      size(wannier_owner)>0.and.size(pw_owner)>0.and.size(wannier_buffer,1)==size(wannier_owner).and.&
+      size(wannier_owner)>0.and.size(pw_owner)>0.and.size(wannier_buffer,1)==expected_wannier.and.&
       size(wannier_buffer,2)==size(point_ids).and.all(wannier_owner>=1).and.&
       all(wannier_owner<=fragment_count).and.all(pw_owner>=1).and.all(pw_owner<=fragment_count).and.&
       all(point_ids>0_int64).and.finite_complex(wannier_buffer))
     if(fragment_id==0.and.size(point_ids)/=0)local_bad=1
+    if(input_mode==1)then
+      call MPI_Comm_size(comm,nrank,ierr)
+      if(ierr/=MPI_SUCCESS.or.fragment_count/=nrank.or.fragment_id<1)local_bad=1
+    endif
     do i=1,size(wannier_owner)
       call agree_integer(wannier_owner(i),minimum,maximum,comm,ierr)
       if(ierr/=MPI_SUCCESS.or.minimum/=maximum)local_bad=1
@@ -72,13 +93,17 @@ contains
       call clear_fragment_basis_stream_outputs(stream,basis)
       message='cannot allocate fragment basis stream payload';return
     endif
-    basis%fragment_id=fragment_id;basis%generation=1;basis%buffer_point_ids=point_ids
+    basis%fragment_id=fragment_id;basis%generation=generation;basis%buffer_point_ids=point_ids
     basis%buffer_values=(0d0,0d0);stream%pw_owner=pw_owner;stream%pw_slot=0;stream%pw_filled=.false.
     slot=0
     do i=1,size(wannier_owner)
       if(wannier_owner(i)/=fragment_id)cycle
       slot=slot+1;basis%global_ids(slot)=int(i,int64);basis%sector(slot)=1
-      basis%buffer_values(:,slot)=wannier_buffer(i,:)
+      if(input_mode==1)then
+        basis%buffer_values(:,slot)=wannier_buffer(slot,:)
+      else
+        basis%buffer_values(:,slot)=wannier_buffer(i,:)
+      endif
     enddo
     do i=1,size(pw_owner)
       if(pw_owner(i)/=fragment_id)cycle

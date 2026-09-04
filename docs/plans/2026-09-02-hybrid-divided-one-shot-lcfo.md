@@ -1227,6 +1227,26 @@ are rejected without publishing output. The complete fragment WF fixture,
 release build and whitespace check pass. Review found no Critical/Important
 issues. Main-route catalog/payload/callback wiring remains pending.
 
+**Single-owner local WF input checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+The existing fragment basis stream now accepts optional `local_wannier_only`
+input: each rank supplies all and only its fragment's WF columns, ordered by
+ascending global WF ID. This mode requires exactly one rank per fragment;
+it does not split a fragment's columns among ranks. Replicated owner metadata
+still assigns global IDs. Optional positive `basis_generation` is agreed
+collectively, as is the input mode. Default arguments preserve the old API.
+WF values are copied unchanged, and the existing projected-PW tile append
+path is reused without column reduction or additional localization.
+
+The 2/4-rank stream tests cover differing local WF counts, reversed
+rank--fragment assignment, generation preservation, exact WF/PW values and
+IDs, missing WF columns, invalid generation, unequal fragment/rank counts,
+and rank-disagreeing options. They pass, as do the existing projected
+fragment pipeline tests on 2/4/8 ranks, DC controls check and release build.
+The 8-rank legacy fixture is not an expansion of production MPI scope.
+The main-route construction check remains RED: compact stream insertion
+does not yet wire DC caches into the generalized union projection or the
+production H/S/CG callbacks. No expensive material calculation was rerun.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`
