@@ -243,6 +243,34 @@ The half-norm example is controlled test data, not a representative material
 calculation triggering the separate occupation-design decision. No C4/C5/C6 or
 main switch was attempted; old dirty changes and verification logs are retained.
 
+**Fourth partial checkpoint, 2026-09-04 (bound raw DC reference export):**
+The selection receipt now retains the actual mapper's periodic physical grid
+IDs and core row slots; version 3 of its integrity hash includes their lengths
+and contents. Selected exports reject absent, invalid or modified row mappings
+before using them. This preserves arbitrary raw storage order rather than
+assuming that core samples occupy a contiguous prefix of the stored array.
+
+`export_dg_hybrid_dc_reference` validates both cache and selection, reconstructs
+buffer orbitals from **all** raw WFs and the original DC coefficient map, and
+extracts core orbitals using the sealed row slots. It returns the unchanged DC
+energies/occupations, physical row IDs, generation and local selection binding.
+No selected-column slicing, localization rerun or density normalization occurs.
+All outputs remain unpublished on any rank's validation failure.
+
+Tests cover unequal core sizes, periodic mapping, deliberately interleaved
+core/buffer storage, corrupt row slots/IDs/seed coefficients/occupations, and
+immutable raw reconstruction. The small integration test now uses this exported
+reference for the core solve and density-checked initializer. The selection
+runner passes on 1/2/4/8 ranks, raw-Wannier and projected-pipeline regressions
+pass on 2/4/8, and release builds. Independent review found no Critical/Important
+issue in the export binding. This is not a persisted reference-file format.
+
+C3 remains open for required boundary/derivative/projector support diagnostics
+and the final combined admission path that verifies its mutable selected basis
+and reference together. The generic numerical kernels do not independently
+validate an externally modified reference object. Production main and C4--C6
+remain unchanged; no conventional DC/material run or worktree creation occurred.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`

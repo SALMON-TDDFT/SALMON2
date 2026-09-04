@@ -12,6 +12,7 @@ module dg_hybrid_fragment_selection
   public::s_dg_hybrid_core_selection,select_dg_hybrid_core_wannier,classify_dg_hybrid_core_centers
   public::export_dg_hybrid_selected_wannier
   public::s_dg_hybrid_selected_catalog,prepare_dg_hybrid_selected_catalog
+  public::s_dg_hybrid_dc_reference,export_dg_hybrid_dc_reference
   integer,parameter::center_convention=1
   real(real64),parameter::roundoff_factor=64d0*epsilon(1d0)
   type s_dg_hybrid_core_selection
@@ -20,6 +21,17 @@ module dg_hybrid_fragment_selection
     integer(int64)::raw_cache_fingerprint=0_int64,geometry_fingerprint=0_int64,fingerprint=0_int64
     integer(int64),allocatable::raw_column_ids(:)
     integer,allocatable::center_owner(:)
+    integer,allocatable::core_row_slots(:)
+    integer(int64),allocatable::physical_grid_ids(:)
+  end type
+  type s_dg_hybrid_dc_reference
+    logical::valid=.false.
+    integer::fragment_id=0,basis_generation=0
+    integer(int64)::selection_fingerprint=0_int64
+    integer,allocatable::core_row_slots(:)
+    integer(int64),allocatable::physical_grid_ids(:)
+    complex(real64),allocatable::buffer_orbitals(:,:),core_orbitals(:,:)
+    real(real64),allocatable::energies(:),occupations(:)
   end type
   type s_dg_hybrid_selected_catalog
     logical::valid=.false.
@@ -31,6 +43,42 @@ module dg_hybrid_fragment_selection
     complex(real64),allocatable::local_values(:,:)
   end type
 contains
+  ! Reference orbitals use EVERY raw WF and the immutable original DC map.
+  ! This is not the new selected-space coefficient map and performs no W90 run.
+  subroutine export_dg_hybrid_dc_reference(comm,fragment_id,cache,selection,reference,ok,message)
+    integer,intent(in)::comm,fragment_id
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_dc_reference),intent(out)::reference
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    type(s_dg_hybrid_dc_reference)::work
+    complex(real64),allocatable::selected(:,:)
+    integer::npoint,nseed,ncore,status
+    call export_dg_hybrid_selected_wannier(comm,fragment_id,cache,selection,selected,ok,message)
+    if(.not.ok)return
+    deallocate(selected)
+    npoint=size(cache%wannier_values,2);nseed=size(cache%physical_dc_seed_energies)
+    ncore=size(selection%core_row_slots)
+    allocate(work%buffer_orbitals(npoint,nseed),work%core_orbitals(ncore,nseed),&
+      work%physical_grid_ids(npoint),work%core_row_slots(ncore),&
+      work%energies(nseed),work%occupations(nseed),stat=status)
+    call gate(comm,status==0,'raw DC reference allocation failed',ok,message);if(.not.ok)return
+    work%buffer_orbitals=matmul(transpose(cache%wannier_values),cache%dc_seed_coefficients_in_wannier)
+    call gate(comm,all(ieee_is_finite(real(work%buffer_orbitals))).and.&
+      all(ieee_is_finite(aimag(work%buffer_orbitals))),'nonfinite raw DC reference',ok,message)
+    if(.not.ok)return
+    work%core_orbitals=work%buffer_orbitals(selection%core_row_slots,:)
+    work%physical_grid_ids=selection%physical_grid_ids;work%core_row_slots=selection%core_row_slots
+    work%energies=cache%physical_dc_seed_energies;work%occupations=cache%physical_dc_seed_occupations
+    work%fragment_id=fragment_id;work%basis_generation=selection%basis_generation
+    work%selection_fingerprint=selection%fingerprint;work%valid=.true.
+    reference=work
+#else
+    ok=.false.;message='raw DC reference requires MPI'
+#endif
+  end subroutine
   subroutine prepare_dg_hybrid_selected_catalog(comm,fragment_id,cache,selection,catalog,ok,message)
     integer,intent(in)::comm,fragment_id
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
@@ -277,6 +325,10 @@ contains
       do j=1,raw_grid(a);fingerprint=mix(fingerprint,int(dc_indices(j,a),int64));enddo
     enddo
     work%geometry_fingerprint=fingerprint
+    allocate(work%core_row_slots(count(core_mask)),stat=status)
+    call gate(comm,status==0,'selected core row allocation failed',ok,message);if(.not.ok)return
+    work%core_row_slots=pack([(j,j=1,size(core_mask))],core_mask)
+    call move_alloc(physical_ids,work%physical_grid_ids)
     work%fingerprint=selection_hash(work,cache%receipt%distributed_wannier_fingerprint,rank,fragments)
     result=work;ok=.true.;message=''
 #else
@@ -302,7 +354,8 @@ contains
     call MPI_Comm_size(comm,np,ierr);call MPI_Comm_rank(comm,rank,ierr)
     valid=ierr==MPI_SUCCESS.and.fragment_id>=1.and.fragment_id<=np.and.cache%valid.and.&
       allocated(cache%local_grid_ids).and.selection%valid.and.&
-      allocated(selection%raw_column_ids).and.allocated(selection%center_owner)
+      allocated(selection%raw_column_ids).and.allocated(selection%center_owner).and.&
+      allocated(selection%core_row_slots).and.allocated(selection%physical_grid_ids)
     call gate(comm,valid,'invalid selected WF export input',ok,message);if(.not.ok)return
     allocate(fragments(np),stat=status)
     call gate(comm,status==0,'selected WF ownership allocation failed',ok,message);if(.not.ok)return
@@ -322,6 +375,13 @@ contains
       size(selection%center_owner)==selection%raw_count.and.&
       size(selection%raw_column_ids)==selection%selected_count
     call gate(comm,valid,'selected WF receipt metadata mismatch',ok,message);if(.not.ok)return
+    valid=size(selection%physical_grid_ids)==size(cache%local_grid_ids).and.&
+      all(selection%physical_grid_ids>0_int64).and.size(selection%core_row_slots)>0.and.&
+      all(selection%core_row_slots>=1).and.all(selection%core_row_slots<=size(cache%local_grid_ids))
+    do j=2,size(selection%core_row_slots)
+      valid=valid.and.selection%core_row_slots(j)>selection%core_row_slots(j-1)
+    enddo
+    call gate(comm,valid,'selected WF receipt core grid mismatch',ok,message);if(.not.ok)return
     valid=all(selection%center_owner>=1).and.all(selection%center_owner<=np).and.&
       count(selection%center_owner==fragment_id)==selection%selected_count
     call gate(comm,valid,'selected WF receipt ownership mismatch',ok,message);if(.not.ok)return
@@ -349,8 +409,8 @@ contains
     integer(int64),intent(in)::distributed_fingerprint
     integer,intent(in)::rank,fragments(:)
     integer::j
-    ! Version 2 seals all receipt metadata as well as the exact rank-fragment map.
-    hash=mix(selection%geometry_fingerprint,2_int64)
+    ! Version 3 also seals the actual DC core rows and periodic physical IDs.
+    hash=mix(selection%geometry_fingerprint,3_int64)
     hash=mix(hash,selection%raw_cache_fingerprint);hash=mix(hash,distributed_fingerprint)
     hash=mix(hash,int(selection%fragment_id,int64));hash=mix(hash,int(rank,int64))
     hash=mix(hash,int(selection%basis_generation,int64));hash=mix(hash,int(selection%convention,int64))
@@ -358,6 +418,10 @@ contains
     do j=1,size(fragments);hash=mix(hash,int(fragments(j),int64));enddo
     do j=1,size(selection%center_owner);hash=mix(hash,int(selection%center_owner(j),int64));enddo
     do j=1,size(selection%raw_column_ids);hash=mix(hash,selection%raw_column_ids(j));enddo
+    hash=mix(hash,int(size(selection%physical_grid_ids),int64))
+    do j=1,size(selection%physical_grid_ids);hash=mix(hash,selection%physical_grid_ids(j));enddo
+    hash=mix(hash,int(size(selection%core_row_slots),int64))
+    do j=1,size(selection%core_row_slots);hash=mix(hash,int(selection%core_row_slots(j),int64));enddo
   end function
   subroutine gate(comm,valid,description,ok,message)
     integer,intent(in)::comm

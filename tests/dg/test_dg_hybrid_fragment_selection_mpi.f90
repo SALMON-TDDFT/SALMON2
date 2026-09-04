@@ -28,6 +28,7 @@ program test_fragment_selection
   integer::dims(3),xyz(3)
   type(s_dg_hybrid_core_selection)::selection,again
   type(s_dg_hybrid_selected_catalog)::unequal_catalog
+  type(s_dg_hybrid_dc_reference)::dc_oracle
   integer,allocatable::selected_counts(:)
   complex(real64)::density_metric(4,4)
   logical::density_callback_failure=.false.
@@ -96,7 +97,18 @@ program test_fragment_selection
   call require(all(shape(selected_values)==[nexpected,8]),'selected export dropped buffer rows')
   call require(all(selected_values==cache%wannier_values(expected(:nexpected),:)),&
     'selected export changed raw values/order')
-  do variant=1,7
+  call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,cache,selection,dc_oracle,ok,message)
+  call require(ok.and.dc_oracle%valid,'bound raw DC reference export: '//trim(message))
+  call require(all(dc_oracle%core_row_slots==[(j,j=1,f)]),'raw core row slots disagree with DC mapping')
+  call require(all(dc_oracle%physical_grid_ids==int(mapping(:,1),int64)),&
+    'bound DC reference lost periodic physical grid mapping')
+  call require(maxval(abs(dc_oracle%buffer_orbitals-transpose(seeds)))<1d-11,&
+    'raw DC oracle was sliced by selected WF IDs')
+  call require(maxval(abs(dc_oracle%core_orbitals-transpose(seeds(:,:f))))<1d-11,&
+    'raw DC core oracle used the wrong grid rows')
+  call require(all(dc_oracle%energies==energies).and.all(dc_oracle%occupations==occupations).and.&
+    dc_oracle%selection_fingerprint==selection%fingerprint,'raw DC metadata binding lost')
+  do variant=1,12
     again=selection;bad_cache=cache
     if(rank==0)then
       select case(variant)
@@ -107,13 +119,23 @@ program test_fragment_selection
       case(5);bad_cache%wannier_values(1,1)=bad_cache%wannier_values(1,1)+0.1d0
       case(6);again%geometry_fingerprint=ieor(again%geometry_fingerprint,1_int64)
       case(7);deallocate(again%raw_column_ids)
+      case(8);again%core_row_slots(1)=8
+      case(9);again%physical_grid_ids(1)=0_int64
+      case(10);deallocate(again%core_row_slots)
+      case(11);bad_cache%dc_seed_coefficients_in_wannier(1,1)=&
+        bad_cache%dc_seed_coefficients_in_wannier(1,1)+0.1d0
+      case(12);bad_cache%physical_dc_seed_occupations(1)=bad_cache%physical_dc_seed_occupations(1)+0.1d0
       end select
     endif
     call export_dg_hybrid_selected_wannier(MPI_COMM_WORLD,f,bad_cache,again,selected_values,ok,message)
     call require(.not.ok.and..not.allocated(selected_values),'corrupt selection published WF values')
+    call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,bad_cache,again,dc_oracle,ok,message)
+    call require(.not.ok.and..not.dc_oracle%valid.and..not.allocated(dc_oracle%buffer_orbitals),&
+      'corrupt selection published raw DC reference')
   enddo
   call require(all(cache%wannier_values==snapshot%wannier_values),'export mutated raw cache')
   call require(setup_calls==setup_saved.and.run_calls==run_saved,'export reran W90')
+  call test_permuted_reference()
 
   do variant=1,4
     bad_cache=cache;bad_mapping=mapping
@@ -235,8 +257,36 @@ program test_fragment_selection
   if(rank==0)write(*,'(a,i0,a)')'PASS core-center selection on ',np,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine test_permuted_reference()
+    type(s_dg_hybrid_fragment_wannier_cache)::reordered
+    type(s_dg_hybrid_core_selection)::receipt
+    type(s_dg_hybrid_dc_reference)::oracle
+    integer::order(8),p,setup_before,run_before
+    logical::passed
+    character(256)::why
+    order=[8,1,7,2,6,3,5,4]
+    call build_dg_hybrid_fragment_wannier(MPI_COMM_WORLD,MPI_COMM_SELF,f,4,'reference-permuted-cache',&
+      ids(order),weights(order),seeds(:,order),energies,occupations,buffer(:,order),projector(:,order),&
+      1d-12,lattice,reciprocal,['H '],atoms,fractional(:,order),20,1d-10,10000000_int64,reordered,passed,why)
+    call require(passed,'permuted raw DC reference construction: '//trim(why))
+    call select_dg_hybrid_core_wannier(MPI_COMM_WORLD,f,reordered,lattice,raw_origin,total_lattice,origin,&
+      lower,extent,raw_shape,core_shape,total_shape,mapping,receipt,passed,why)
+    call require(passed,'permuted raw DC selection: '//trim(why))
+    setup_before=setup_calls;run_before=run_calls
+    call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,reordered,receipt,oracle,passed,why)
+    call require(passed,'permuted raw DC export: '//trim(why))
+    call require(all(oracle%core_row_slots==pack([(p,p=1,8)],order<=f)),&
+      'reference assumed core rows precede buffer rows')
+    call require(all(oracle%physical_grid_ids==int(mapping(order,1),int64)),&
+      'reference discarded raw row permutation')
+    call require(maxval(abs(oracle%buffer_orbitals-transpose(seeds(:,order))))<1d-11.and.&
+      maxval(abs(oracle%core_orbitals-transpose(seeds(:,pack(order,order<=f)))))<1d-11,&
+      'reference orbitals do not follow raw core row slots')
+    call require(setup_calls==setup_before.and.run_calls==run_before,'permuted reference reran W90')
+  end subroutine
   subroutine test_selected_pw_connection()
     type(s_dg_hybrid_fragment_wannier_cache)::raw
+    type(s_dg_hybrid_dc_reference)::bound_reference
     type(s_dg_hybrid_core_selection)::chosen,corrupt
     type(s_dg_hybrid_selected_catalog)::active,invalid
     type(s_dg_hybrid_basis_catalog)::packets
@@ -344,12 +394,28 @@ contains
       'core projection normal equations disagree with broken-volume metric')
     call require(report%orbital_residual<1d-11.and.report%density_defect<1d-11.and.&
       report%electron_defect<1d-11,'exact core projection changed density or electron count')
-    dc_reference=matmul(transpose(raw%wannier_values(:,:4)),raw%dc_seed_coefficients_in_wannier)
+    call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,raw,chosen,bound_reference,passed,why)
+    call require(passed,'production raw DC reference adapter: '//trim(why))
+    call require(all(bound_reference%physical_grid_ids==physical).and.&
+      bound_reference%selection_fingerprint==chosen%fingerprint,'reference/selected grid binding differs')
+    dc_reference=bound_reference%core_orbitals
     call require(maxval(abs(dc_reference-transpose(dc(:,:4))))<1d-11,'raw DC reconstruction oracle failed')
     call project_dg_hybrid_core_seeds(MPI_COMM_WORLD,mixed_basis,metric_weights,dc_reference,&
-      raw%physical_dc_seed_occupations,limits,3,0d0,coeff,report,passed,why)
+      bound_reference%occupations,limits,3,0d0,coeff,report,passed,why)
     call require(passed,'immutable raw DC seed projection: '//trim(why))
     call require(maxval(abs(matmul(mixed_basis,coeff)-dc_reference))<1d-11,'raw DC states were not reproduced')
+    density_metric=matmul(conjg(transpose(mixed_basis)),mixed_basis)
+    reference_density=0d0
+    do p=1,size(bound_reference%occupations)
+      reference_density=reference_density+bound_reference%occupations(p)*abs(bound_reference%core_orbitals(:,p))**2
+    enddo
+    call initialize_dg_hybrid_fragment_density_checked(MPI_COMM_WORLD,f,bound_reference%basis_generation,&
+      11_int64,13_int64,coeff,bound_reference%energies,bound_reference%occupations,0,1d-8,1d-10,1d-10,&
+      mixed_basis,core_weights,reference_density,1d-10,1d-10,apply_density_metric,initial,&
+      chosen_seeds,density_errors,passed,why)
+    call require(passed.and.maxval(density_errors)<1d-10,'bound raw DC reference to initializer: '//trim(why))
+    ! The half-norm negative below starts without a previously published state.
+    deallocate(initial%vectors,initial%directions)
     call require(all(raw%physical_dc_seed_energies==energies).and.&
       all(raw%physical_dc_seed_occupations==occupations),'projection changed raw physical seed metadata')
     local_n=3+modulo(rank,2);local_m=1+modulo(rank,2)
