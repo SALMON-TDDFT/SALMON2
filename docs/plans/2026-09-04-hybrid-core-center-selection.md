@@ -545,6 +545,23 @@ physical, not just coefficient-space, covariance after selection.
 
 ### Task C5: Actual small DG handoff and the known counterexample
 
+**Design pause, 2026-09-04 — saved representative DC evidence:** A read-only
+audit of the existing eight-rank Si64 conventional DC checkpoint now triggers
+the explicit C3 occupation-design stop condition. Occupied orbitals have unit
+extended-grid norm but core norms 0.0147253..0.4806794. Original occupations
+give about 32 core electrons per fragment; retaining those occupations after
+core orthonormalization would instead give about 168.0855. The core overlap
+also has sizable off-diagonal entries. This is not a PW-cutoff deficiency and
+cannot be resolved by the existing fail-only admission policy.
+
+See `../notes/2026-09-04-dc-core-density-handoff-audit.md` for checkpoint identity,
+binary layout, physical core mapping, manifest-weight cross-check and results.
+No DC/W90/SCF run was repeated. This is an independently computable necessary
+condition, not a claim that the main route was connected and run. Pause C5/C6
+promotion for user approval of density-preserving occupation transport or a
+different explicit starting-density policy. All prior small numerical tests
+remain useful but cannot establish acceptance of this representative DC state.
+
 **First assembly checkpoint, 2026-09-04:** The old unselected audit was first
 rerun and reproduced its RED at the preconditioner, with independently computed
 zero reference norms in both fragments. It is now a permanent expected-negative
