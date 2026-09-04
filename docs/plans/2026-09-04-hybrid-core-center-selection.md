@@ -393,6 +393,61 @@ alone must not be advertised as a general production handoff.
 
 ### Task C4: Fixed projected-reference preconditioner
 
+**Approved continuation — first increment:** Retain signed denominators and
+add fail-only cancellation detection, as approved by the user after the review
+below. First implement and test the numerical gate separately; wire it into
+the new rectangular entry in the next increment, without changing square API
+semantics. For each state, with signed-scaled reference amplitudes y, compare
+`||Q y||_2` with `tau * sum_a ||q_a||_2 |y_a|`, where
+`tau=max(tolerance,64*epsilon_machine*max(active_count,reference_count))`.
+Use collective Euclidean norms (invariant under a unitary active-space change),
+scale amplitudes before squaring, and accept an identically zero sum of term
+norms. A resolved term sum but unresolved result is an explicit collective
+failure. This diagnoses cancellation for the applied residual; it does not
+certify nonsingularity for every possible residual.
+
+RED/GREEN for this first increment: extend
+`tests/dg/test_dg_hybrid_fragment_preconditioner_mpi.f90` with the reviewed
+three-column example, a noncancelling residual, zero amplitudes, unitary
+transport, stale/differing controls and finite/nonfinite inputs. Add a
+numerical gate in `src/gs/dc/dg_hybrid_fragment_preconditioner.f90`, run
+`python3 tests/dg/run_dg_hybrid_fragment_preconditioner_mpi.py` on 1/2/4/8 ranks,
+then review and checkpoint. The rectangular producer, provenance binding,
+zero-column omission rule and floor-dimension policy remain subsequent C4
+work, not implied complete by this gate.
+
+**Numerical gate checkpoint, 2026-09-04:** The missing gate produced the
+expected RED at link time; the implemented gate passes the full preconditioner
+runner on 1/2/4/8 ranks, including distributed nonzero row contributions,
+complex unitary transport, exact and near cancellation, resolved action,
+zero amplitudes, amplitude scales 1e200 and 1e-200, differing controls and
+replicated amplitudes, and nonfinite input. Release build succeeds. Independent
+review found no Critical/Important issue; its distributed-sum test suggestion
+was added and passed. This is a stand-alone numerical check only: no existing
+square action or production call path was modified. The next C4 increment
+must build and certify the rectangular frame and invoke this gate before
+publishing its applied result.
+
+**Design checkpoint, 2026-09-04 — implementation paused:** Independent review
+found that the proposed rectangular signed-frame action can annihilate a
+nonzero residual despite `Q Q^dagger=I`, positive S and resolved denominators.
+For `Q=sqrt(2/3)*[[1,-1/2,-1/2],[0,sqrt(3)/2,-sqrt(3)/2]]`,
+`H=diag(1,-1)`, `S=I`, and shift zero, the reference H diagonals are
+`[2/3,-1/3,-1/3]` and the resulting action is `diag(0,-3)`.
+An independent arithmetic check gives the first diagonal as 4.44e-16;
+the signed denominator floor does not address this cancellation. Extending
+Q by a scalar identity, taking `H=[[1,0,1],[0,-1,0],[1,0,0]]`, S=I and x=e3
+gives an actual Rayleigh residual e1 at shift zero, also annihilated.
+
+Left-unitary covariance and the square limit hold, but do not imply a usable
+rectangular preconditioner. Before coding, obtain a decision between explicit
+fail-only cancellation detection and a revised action/sign policy. No identity
+fallback or unsigned-denominator replacement is authorized by this review.
+Also specify the roundoff-zero column threshold and the active/reference
+dimension used in the denominator floor. Existing square preconditioner tests
+still pass on 1/2/4/8 ranks. No implementation or production-route change was
+made at this checkpoint, and no DC/material run was repeated.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_preconditioner.f90`
 - Modify: `tests/dg/test_dg_hybrid_fragment_preconditioner_mpi.f90`

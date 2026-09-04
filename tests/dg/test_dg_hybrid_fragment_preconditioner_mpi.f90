@@ -159,11 +159,77 @@ program test_dg_hybrid_fragment_preconditioner_mpi
     application_fingerprint,ok,message)
   call require(.not.ok.and..not.allocated(output),'finite action overflow accepted')
   call test_bounded_covariance()
+  call test_frame_cancellation()
   call ieee_get_halting_mode(ieee_invalid,traps_after)
   call require(traps_before.eqv.traps_after,'floating-point trap state changed')
   if(rank==0)write(*,'(a,i0,a)')'PASS fragment preconditioner on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine test_frame_cancellation()
+    complex(real64)::frame(2,3),rotated(2,3),v(2,2),amplitudes(3,1)
+    complex(real64),allocatable::local_frame(:,:)
+    real(real64)::diagonal(3),tol
+    integer::p,rows
+    frame(1,:)=sqrt(2d0/3d0)*[1d0,-0.5d0,-0.5d0]
+    frame(2,:)=[0d0,sqrt(0.5d0),-sqrt(0.5d0)]
+    diagonal=abs(frame(1,:))**2-abs(frame(2,:))**2
+    rows=0;if(rank==0)rows=2
+    allocate(local_frame(rows,3));local_frame=frame(:rows,:)
+    amplitudes(:,1)=conjg(frame(1,:))/diagonal
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(.not.ok.and.index(message,'cancellation')>0,'signed rectangular cancellation was accepted')
+    v(1,:)=[cmplx(1d0,0d0,real64),cmplx(0d0,1d0,real64)]/sqrt(2d0)
+    v(2,:)=[cmplx(0d0,1d0,real64),cmplx(1d0,0d0,real64)]/sqrt(2d0)
+    rotated=matmul(conjg(transpose(v)),frame);local_frame=rotated(:rows,:)
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(.not.ok,'rotated cancellation was accepted')
+    amplitudes(:,1)=(conjg(frame(1,:))+1d-12*conjg(frame(2,:)))/diagonal
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(.not.ok,'near-cancellation below tolerance was accepted')
+    amplitudes(:,1)=(conjg(frame(1,:))+1d-6*conjg(frame(2,:)))/diagonal
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(ok,'resolved action above cancellation tolerance was rejected')
+    do p=1,2
+      if(p==1)local_frame=frame(:rows,:)
+      if(p==2)local_frame=rotated(:rows,:)
+      amplitudes(:,1)=conjg(frame(2,:))/diagonal
+      call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+      call require(ok,'resolved signed action rejected: '//trim(message))
+    enddo
+    amplitudes=0d0
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(ok,'zero residual was treated as cancellation')
+    amplitudes(:,1)=conjg(frame(2,:))/diagonal*1d200
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(ok,'finite scaled action overflowed the cancellation diagnostic')
+    amplitudes(:,1)=conjg(frame(2,:))/diagonal*1d-200
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(ok,'tiny finite action underflowed the cancellation diagnostic')
+    if(nproc>1)then
+      tol=1d-10;if(rank==0)tol=2d-10
+      call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,tol,ok,message)
+      call require(.not.ok,'different cancellation controls accepted')
+      if(rank==0)amplitudes(1,1)=1d0
+      call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+      call require(.not.ok,'different replicated amplitudes accepted')
+    endif
+    amplitudes=0d0
+    if(rank==0)amplitudes(1,1)=ieee_value(0d0,ieee_quiet_nan)
+    call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+    call require(.not.ok,'nonfinite amplitudes accepted')
+    ! Exercise nonzero partial sums on multiple ranks, not only idle ranks.
+    if(nproc>1)then
+      deallocate(local_frame);rows=merge(1,0,rank<2)
+      allocate(local_frame(rows,3))
+      if(rows==1)local_frame(1,:)=rotated(rank+1,:)
+      amplitudes(:,1)=conjg(frame(1,:))/diagonal
+      call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+      call require(.not.ok,'distributed signed cancellation accepted')
+      amplitudes(:,1)=conjg(frame(2,:))/diagonal
+      call check_dg_hybrid_frame_cancellation(comm,2,local_frame,amplitudes,1d-10,ok,message)
+      call require(ok,'distributed resolved sum rejected')
+    endif
+  end subroutine
   subroutine test_mixed_layouts()
     type(s_dg_hybrid_fragment_preconditioner)::other_cache
     integer(int64),allocatable::other_ids(:)

@@ -192,6 +192,22 @@ unchanged. No matching gauge is imposed between fragments.
 
 ## Validation and release boundary
 
+### Approved signed-cancellation safeguard
+
+Independent C4 review found that a redundant rectangular frame can cancel
+positive and negative inverse-denominator contributions even when all metric
+norms are positive. The user approved retaining the signed rule and stopping
+explicitly on detected cancellation, not replacing the action by identity or
+an unsigned inverse. For signed-scaled reference amplitudes y, reject when
+`||Q y||_2 <= tau * sum_a ||q_a||_2 |y_a|` with a nonzero right-hand term sum.
+Use `tau=max(tolerance,64*epsilon_machine*max(active_count,reference_count))`.
+Scale amplitudes before forming norms; an identically zero term sum is not an
+error. The gate concerns the current applied residual, not global invertibility.
+It assumes the separate producer has certified the frame and its provenance.
+The old square entry retains its existing contract. Rectangular application
+must run this check before accepting output; the stand-alone numerical gate
+alone does not complete C4 or authorize production use.
+
 Test centers and their final ordering first, then geometry/selection, selected
 PW construction and seed projection, rectangular preconditioning, and the
 actual small DG operator handoff. Preserve the old unselected core-metric

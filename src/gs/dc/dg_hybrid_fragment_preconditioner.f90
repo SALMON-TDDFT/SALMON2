@@ -22,7 +22,74 @@ module dg_hybrid_fragment_preconditioner
     real(real64),allocatable::h_diagonal(:),s_diagonal(:)
   end type
   public::prepare_dg_hybrid_fragment_preconditioner,apply_dg_hybrid_fragment_preconditioner
+  public::check_dg_hybrid_frame_cancellation
 contains
+  ! Numerical gate for a previously certified row-isometric rectangular frame.
+  ! y contains replicated signed-scaled reference amplitudes. This does not
+  ! validate frame provenance or certify nonsingularity for every residual.
+  ! The square API remains unchanged; rectangular publication must call this
+  ! gate before returning an accepted action.
+  subroutine check_dg_hybrid_frame_cancellation(comm,active_count,q_rows,y,tolerance,ok,message)
+    integer,intent(in)::comm,active_count
+    complex(real64),intent(in)::q_rows(:,:),y(:,:)
+    real(real64),intent(in)::tolerance
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),allocatable::column_norm(:)
+    complex(real64),allocatable::scaled(:),candidate(:)
+    real(real64)::tau,amplitude_scale,bound,result_norm
+    integer::m,ns,nr,i,j,status,ierr
+    integer(int64)::rows,total_rows,hash
+    logical::valid,halting(3)
+    ok=.false.;message='invalid frame cancellation contract'
+    call suspend_traps(halting);call execute();call restore_traps(halting)
+  contains
+    subroutine execute()
+      m=size(q_rows,2);nr=size(q_rows,1);ns=size(y,2)
+      valid=agree_integer(comm,active_count)
+      valid=agree_integer(comm,m).and.valid
+      valid=agree_integer(comm,ns).and.valid
+      valid=agree_bits(comm,transfer(tolerance,0_int64)).and.valid
+      valid=valid.and.active_count>0.and.m>=active_count.and.ns>0.and.size(y,1)==m.and.&
+        ieee_is_finite(tolerance).and.finite(q_rows).and.finite(y)
+      if(.not.collective_valid(comm,valid))return
+      if(tolerance<64d0*epsilon(1d0).or.tolerance>1d-2)return
+      ! A certified QQ^dagger=I frame has individual entries bounded by one.
+      valid=all(abs(q_rows)<=1d0+tolerance)
+      rows=int(nr,int64)
+      call MPI_Allreduce(rows,total_rows,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+      if(.not.collective_valid(comm,valid.and.ierr==MPI_SUCCESS.and.total_rows==int(active_count,int64)))return
+      hash=1907_int64
+      do j=1,ns;do i=1,m;hash=mix_complex(hash,y(i,j));enddo;enddo
+      if(.not.agree_bits(comm,hash))then;message='rank-disagreeing frame cancellation amplitudes';return;endif
+      tau=max(tolerance,64d0*epsilon(1d0)*real(max(active_count,m),real64))
+      if(tau>=1d0)return
+      allocate(column_norm(m),scaled(m),candidate(nr),stat=status)
+      if(.not.collective_valid(comm,status==0))then;message='cannot allocate cancellation workspace';return;endif
+      column_norm=sum(abs(q_rows)**2,dim=1)
+      call MPI_Allreduce(MPI_IN_PLACE,column_norm,m,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+      if(.not.collective_valid(comm,ierr==MPI_SUCCESS.and.all(ieee_is_finite(column_norm))))return
+      column_norm=sqrt(column_norm)
+      do j=1,ns
+        amplitude_scale=max(maxval(abs(real(y(:,j),real64))),maxval(abs(aimag(y(:,j)))))
+        if(amplitude_scale==0d0)cycle
+        scaled=y(:,j)/amplitude_scale
+        bound=sum(column_norm*abs(scaled))
+        candidate=matmul(q_rows,scaled)
+        result_norm=sum(abs(candidate)**2)
+        call MPI_Allreduce(MPI_IN_PLACE,result_norm,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+        valid=ierr==MPI_SUCCESS.and.ieee_is_finite(bound).and.ieee_is_finite(result_norm)
+        if(.not.collective_valid(comm,valid))then;message='nonfinite frame cancellation diagnostic';return;endif
+        result_norm=sqrt(result_norm)
+        if(bound>0d0.and.result_norm<=tau*bound)then
+          message='signed rectangular frame cancellation: unresolved action relative to term norms'
+          return
+        endif
+      enddo
+      ok=.true.;message=''
+    end subroutine
+  end subroutine check_dg_hybrid_frame_cancellation
+
   subroutine prepare_dg_hybrid_fragment_preconditioner(comm,global_count,row_ids,q_rows,h_rows,s_rows,&
       key,tolerance,cache,fingerprint,ok,message)
     ! F=B Q is an immutable physical reference. Q changes covariantly with B;
