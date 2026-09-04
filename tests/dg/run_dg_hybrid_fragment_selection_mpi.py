@@ -75,6 +75,9 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
         if count > 1:
             assert f"PASS thermal DG handoff on {count} ranks" in result.stdout, result.stdout
             print(next(line for line in result.stdout.splitlines() if line.startswith("PASS thermal DG")))
+            failure_marker = f"PASS thermal DG capacity/tail failures on {count} ranks"
+            assert failure_marker in result.stdout, result.stdout
+            print(failure_marker)
             assert f"PASS explicit cutoff projection on {count} ranks" in result.stdout, result.stdout
             print(next(line for line in result.stdout.splitlines() if line.startswith("PASS explicit cutoff")))
 print("PASS core-center selection on 1, 2, 4, and 8 ranks")

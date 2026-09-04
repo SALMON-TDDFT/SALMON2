@@ -898,6 +898,8 @@ contains
     type(s_dg_hybrid_admission_report)::report
     type(s_dg_hybrid_dc_reference)::reference
     complex(real64),allocatable::frame(:,:),psi(:,:),gram(:,:)
+    type(s_dg_hybrid_fragment_subspace_state)::entry_state
+    type(s_dg_hybrid_fragment_candidate_catalog)::entry_candidates
     real(real64),allocatable::occ(:),stale_occ(:)
     real(real64)::target,local_target,mu,ne,density(8),oracle(8),old_density(4),electrons,total_electrons,z,fd
     integer::passes,extensions,a,ns
@@ -909,6 +911,7 @@ contains
       [1d0,1d0,1d0,1d0],[1d-12,1d-10,1d-10,1d-10],[1d-10,1d-10,1d-10],0d0,2,0,1d-10,1d-10,&
       thermal_state,selected,report,passed,why)
     call require(passed.and.report%trial_prepared.and..not.report%valid,'thermal trial: '//trim(why))
+    entry_state=thermal_state
     call export_dg_hybrid_dc_reference(MPI_COMM_WORLD,f,raw,selection,reference,passed,why)
     call require(passed,'thermal raw density reference: '//trim(why))
     old_density=0d0
@@ -937,6 +940,7 @@ contains
     thermal_candidates%coefficients(4,1)=1d0
     thermal_candidates%energies=[0d0];thermal_candidates%ids=[basis%global_ids(4)]
     thermal_candidates%source_kind=[fragment_pw];thermal_candidates%used=[.false.]
+    entry_candidates=thermal_candidates
     call run_dc_fragment_occupation_epoch(MPI_COMM_WORLD,np,f,.true.,1,4,300d0*kB_au,2d0,target,1d-8,&
       refresh_thermal,extend_thermal,occ,mu,ne,passes,extensions,passed,why)
     call require(passed,'actual-operator 300 K occupation epoch: '//trim(why))
@@ -970,6 +974,35 @@ contains
     call MPI_Allreduce(electrons,total_electrons,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
     call require(abs(total_electrons-target)>0.1d0*np,'old occupations accidentally passed the thermal electron gate')
     if(rank==0)write(*,'(a,i0,a,es12.4)')'PASS thermal DG handoff on ',np,' ranks; electrons=',ne
+    ! Independent failed trial: even after genuine PW extension, three local
+    ! states cannot hold seven electrons per fragment. Never publish occupations.
+    thermal_state=entry_state;thermal_candidates=entry_candidates
+    thermal_budget=s_dg_hybrid_fragment_epoch_budget();thermal_steps=0
+    call run_dc_fragment_occupation_epoch(MPI_COMM_WORLD,np,f,.true.,1,4,300d0*kB_au,2d0,7d0*np,1d-8,&
+      refresh_thermal,extend_thermal,occ,mu,ne,passes,extensions,passed,why)
+    call require(.not.passed.and.index(why,'insufficient')>0.and..not.allocated(occ).and.mu==0d0.and.ne==0d0,&
+      'exhausted real DG capacity published thermal occupations: '//trim(why))
+    call require(extensions==1.and.thermal_state%state_count==3.and.all(thermal_candidates%used),&
+      'real DG capacity failure did not first consume the available PW guard')
+    call require(thermal_steps>0.and.thermal_steps<=3,'failed capacity solve exceeded the local CG budget')
+    ! Re-enter without resetting its persistent budget. Failure must not grant
+    ! another three updates, even though no occupations were returned.
+    call run_dc_fragment_occupation_epoch(MPI_COMM_WORLD,np,f,.true.,1,4,300d0*kB_au,2d0,7d0*np,1d-8,&
+      refresh_thermal,extend_thermal,occ,mu,ne,passes,extensions,passed,why)
+    call require(.not.passed.and..not.allocated(occ).and.thermal_steps<=3,&
+      'failed thermal retry published occupations or replenished the CG budget')
+    ! Separate trial with enough total capacity, but one fragment cannot add
+    ! its thermally required terminal guard. The whole epoch must reject it.
+    thermal_state=entry_state;thermal_candidates=entry_candidates
+    thermal_budget=s_dg_hybrid_fragment_epoch_budget();thermal_steps=0
+    if(rank==np-1)thermal_candidates%used=.true.
+    call run_dc_fragment_occupation_epoch(MPI_COMM_WORLD,np,f,.true.,1,4,300d0*kB_au,2d0,target,1d-8,&
+      refresh_thermal,extend_thermal,occ,mu,ne,passes,extensions,passed,why)
+    call require(.not.passed.and.index(why,'insufficient-spectrum tail')>0.and..not.allocated(occ)&
+      .and.mu==0d0.and.ne==0d0,'one-fragment thermal tail exhaustion was accepted: '//trim(why))
+    call require(extensions==0.and.thermal_state%state_count==2.and.thermal_steps<=3,&
+      'tail failure extended fragments before collective exhaustion validation')
+    if(rank==0)write(*,'(a,i0,a)')'PASS thermal DG capacity/tail failures on ',np,' ranks'
   end subroutine
   subroutine refresh_thermal(epoch,energy,weights,can_grow,valid,diagnostic)
     integer,intent(in)::epoch

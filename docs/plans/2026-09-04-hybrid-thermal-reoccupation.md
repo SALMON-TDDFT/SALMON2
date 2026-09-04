@@ -202,6 +202,27 @@ and preserve the previous state. Selection and subspace tests pass on
 Critical/Important issue. This is diagnostic hardening only; the production
 thermal transaction, capacity integration and main route remain pending.
 
+**Real-operator capacity/tail checkpoint:** Extended the same physical
+300 K integration fixture with exhausted capacity and single-fragment tail
+failures. A target of seven electrons per fragment forces the real PW
+extension from two to three states, then fails because the available states
+cannot hold the target. No occupations or accepted chemical potential/electron
+count are returned. Re-entering the same failed epoch with the persistent
+budget keeps total attempted local updates at most three. A separate trial
+with sufficient total capacity but an unavailable guard on the last MPI rank
+fails collectively with the thermal-tail diagnostic before any extension.
+
+These are tests of existing production routines, not a new implementation
+RED/GREEN or transactional rollback claim. The capacity test explicitly
+observes that intermediate state/candidate changes survive the failed solve.
+The production caller must stage these separately from accepted state/density;
+its consumed update budget must not be restored to the entry value on failure.
+That adapter and physical density publication are still pending. The runner
+requires completion markers for both new failure cases on 2/4/8 ranks.
+Fresh selection and occupation regressions pass on 1/2/4/8, the release build
+passes, and independent review has no Critical/Important finding. No DC or
+material run was repeated and unrelated dirty changes/logs remain preserved.
+
 1. RED: use the actual volume/SIPG/nonlocal self-block and the new trial state.
    Invoke current-state refresh through the existing occupation epoch at 300 K.
    The half-core-norm example must yield the specified total electron count
