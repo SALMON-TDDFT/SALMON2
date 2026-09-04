@@ -12,7 +12,7 @@ module dg_hybrid_fragment_admission
     s_dg_hybrid_core_projection_report,s_dg_hybrid_support_samples,validate_dg_hybrid_projected_basis,&
     project_dg_hybrid_core_seeds,check_dg_hybrid_seed_support,dg_hybrid_core_quadrature_binding
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
-    initialize_dg_hybrid_fragment_density_checked
+    initialize_dg_hybrid_fragment_density_checked,initialize_dg_hybrid_fragment_trial
   implicit none
   private
   type,public::s_dg_hybrid_support_operator
@@ -27,12 +27,14 @@ module dg_hybrid_fragment_admission
   end type
   type,public::s_dg_hybrid_admission_report
     logical::valid=.false.,support_measured=.false.
+    logical::trial_prepared=.false.
     type(s_dg_hybrid_core_projection_report)::core
     real(real64)::support_defects(3)=huge(1d0),density_defects(2)=huge(1d0)
     real(real64)::final_support_defects(3)=huge(1d0)
     integer(int64)::basis_fingerprint=0_int64,metric_fingerprint=0_int64,selection_fingerprint=0_int64
   end type
   public::prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment
+  public::prepare_dg_hybrid_selected_trial
   public::export_dg_hybrid_selected_basis_frame
 contains
   ! Bind the projected reference to the actual selected WF+PW payload. This
@@ -136,8 +138,58 @@ contains
   ! The accepted operator fingerprints identify the current frozen inventory.
   subroutine admit_dg_hybrid_selected_fragment(comm,fragment_id,cache,selection,basis,receipt,operators,&
       expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
+      occupation_tolerance,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff)
+    integer,intent(in)::comm,fragment_id,guard_count
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    type(s_dg_hybrid_support_operator),intent(in)::operators(3)
+    integer(int64),intent(in)::expected_operator_fingerprints(3)
+    real(real64),intent(in)::weights(:),core_limits(4),support_limits(3),pw_cutoff,&
+      energy_tolerance,orthogonality_tolerance
+    real(real64),optional,intent(in)::energy_cutoff
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    integer,allocatable,intent(out)::selected_seeds(:)
+    type(s_dg_hybrid_admission_report),intent(out)::report
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(real64),intent(in)::occupation_tolerance
+    call prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
+      expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
+      occupation_tolerance,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff)
+  end subroutine
+
+  subroutine prepare_dg_hybrid_selected_trial(comm,fragment_id,cache,selection,basis,receipt,operators,&
+      expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,initial_count,guard_count,&
+      energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff)
+    ! Publishes only a trial subspace after raw-reference/core/support checks.
+    ! report%valid remains false: current-H updates and thermal occupation are later.
+    integer,intent(in)::comm,fragment_id,guard_count
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    type(s_dg_hybrid_projection_factorization_receipt),intent(in)::receipt
+    type(s_dg_hybrid_support_operator),intent(in)::operators(3)
+    integer(int64),intent(in)::expected_operator_fingerprints(3)
+    real(real64),intent(in)::weights(:),core_limits(4),support_limits(3),pw_cutoff,&
+      energy_tolerance,orthogonality_tolerance
+    real(real64),optional,intent(in)::energy_cutoff
+    type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
+    integer,allocatable,intent(out)::selected_seeds(:)
+    type(s_dg_hybrid_admission_report),intent(out)::report
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer,intent(in)::initial_count
+    call prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
+      expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
+      0d0,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff,initial_count)
+  end subroutine
+
+  subroutine prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
+      expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
       occupation_tolerance,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,&
-      energy_cutoff)
+      energy_cutoff,initial_count)
     integer,intent(in)::comm,fragment_id,guard_count
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
     type(s_dg_hybrid_core_selection),intent(in)::selection
@@ -154,6 +206,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::metric(:,:)
+    integer,optional,intent(in)::initial_count
     logical::halting(3)
     call ieee_get_halting_mode(ieee_invalid,halting(1))
     call ieee_get_halting_mode(ieee_divide_by_zero,halting(2))
@@ -177,10 +230,35 @@ contains
       integer(int64),allocatable::sorted_ids(:)
       integer,allocatable::point_slots(:)
       integer::nw,n,npoint,ncore,nseed,status,c,j,k,row,slot,counts(3)
+      integer::mode,mode_min,mode_max,ierr
+      real(real64)::controls(4),control_min(4),control_max(4),cutoff_min,cutoff_max
       integer(int64)::metric_fp
       logical::valid,final_measured
       character(512)::support_message
       ok=.false.;message=''
+      mode=merge(1,0,present(initial_count))
+      call MPI_Allreduce(mode,mode_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      call gate(comm,ierr==MPI_SUCCESS,'trial policy exchange failed',ok,message);if(.not.ok)return
+      call MPI_Allreduce(mode,mode_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      call gate(comm,ierr==MPI_SUCCESS.and.mode_min==mode_max,'trial policies differ',ok,message);if(.not.ok)return
+      if(present(initial_count))then
+        controls=[real(guard_count,real64),energy_tolerance,orthogonality_tolerance,&
+          real(merge(1,0,present(energy_cutoff)),real64)]
+        call gate(comm,all(ieee_is_finite(controls)),'nonfinite trial controls',ok,message);if(.not.ok)return
+        call MPI_Allreduce(controls,control_min,4,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+        call gate(comm,ierr==MPI_SUCCESS,'trial controls exchange failed',ok,message);if(.not.ok)return
+        call MPI_Allreduce(controls,control_max,4,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+        call gate(comm,ierr==MPI_SUCCESS.and.all(control_min==control_max),'trial controls differ',ok,message)
+        if(.not.ok)return
+        if(present(energy_cutoff))then
+          call gate(comm,ieee_is_finite(energy_cutoff),'nonfinite trial cutoff',ok,message);if(.not.ok)return
+          call MPI_Allreduce(energy_cutoff,cutoff_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,ierr)
+          call gate(comm,ierr==MPI_SUCCESS,'trial cutoff exchange failed',ok,message);if(.not.ok)return
+          call MPI_Allreduce(energy_cutoff,cutoff_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+          call gate(comm,ierr==MPI_SUCCESS.and.cutoff_min==cutoff_max,'trial cutoffs differ',ok,message)
+          if(.not.ok)return
+        endif
+      endif
       call prepare_dg_hybrid_selected_catalog(comm,fragment_id,cache,selection,catalog,ok,message)
       if(.not.ok)return
       call export_dg_hybrid_dc_reference(comm,fragment_id,cache,selection,reference,ok,message)
@@ -250,6 +328,17 @@ contains
       do j=1,nseed;density=density+reference%occupations(j)*abs(reference%core_orbitals(:,j))**2;enddo
       report%basis_fingerprint=receipt%payload_fingerprint;report%metric_fingerprint=metric_fp
       report%selection_fingerprint=selection%fingerprint
+      if(present(initial_count))then
+        call initialize_dg_hybrid_fragment_trial(MPI_COMM_SELF,n,[(int(j,int64),j=1,n)],&
+          fragment_id,selection%basis_generation,receipt%payload_fingerprint,metric_fp,&
+          coefficients,reference%energies,initial_count,guard_count,energy_tolerance,orthogonality_tolerance,&
+          apply_metric,candidate,chosen,valid,support_message,energy_cutoff)
+        call gate(comm,valid,support_message,ok,message);if(.not.ok)return
+        state=candidate
+        call move_alloc(chosen,selected_seeds)
+        report%trial_prepared=.true.
+        return
+      endif
       call initialize_dg_hybrid_fragment_density_checked(comm,fragment_id,selection%basis_generation,&
         receipt%payload_fingerprint,metric_fp,coefficients,reference%energies,reference%occupations,guard_count,&
         occupation_tolerance,energy_tolerance,orthogonality_tolerance,core_basis,weights,density,&

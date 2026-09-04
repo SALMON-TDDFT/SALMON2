@@ -107,6 +107,37 @@ Files: `src/gs/dc/dg_hybrid_fragment_admission.f90`,
 `tests/dg/test_dg_hybrid_fragment_selection_mpi.f90`,
 `tests/dg/test_dg_hybrid_fragment_subspace_mpi.f90` and corresponding runners.
 
+**Combined trial checkpoint:** Added `prepare_dg_hybrid_selected_trial`.
+The new and legacy public entries share a private raw-cache/selection/basis
+binding, core projection and required-support verification path. Only after
+those checks does the new entry create a temporary trial on MPI_COMM_SELF.
+Every fragment must succeed before state publication. Initial counts may
+differ per fragment; guard/tolerance/optional-cutoff policy agrees collectively.
+Selection/catalog validation retains exactly one rank per fragment.
+
+The returned report sets `trial_prepared=true`, not legacy `valid=true`.
+It does not claim occupations, current-Hamiltonian eigenstates, thermal-tail
+acceptance or an accepted density. The legacy entry still runs its original
+density and final unchanged-raw-column support checks. There is no public
+skip-check flag, no fake occupation data and no density rescaling.
+
+The missing-API/report-field RED preceded implementation. The half-core-norm
+raw-cache integration now passes the new trial path with physical core
+orthogonality while continuing to fail the old density-preserving path.
+Stale support fingerprints, missing required points, a single-fragment invalid
+count and differing optional-cutoff presence fail without replacing an old
+state. Raw W90 call counts remain unchanged. Fresh selection/subspace/300 K
+occupation tests pass on 1/2/4/8, and release builds. Independent review found
+no Critical/Important issue. A minor existing diagnostic limitation remains:
+the generic gate may return an empty local reason on nonfailing ranks when
+another fragment's trial initializer fails.
+
+The numerical trial adapter is connected; current-Hamiltonian rotation and
+operator-action checks, reoccupation and physical new-density validation are
+still O3 integration work. Production support-provider completeness and
+C5/C6/main promotion are not certified by this checkpoint. No DC/material run
+was repeated; unrelated dirty files and logs remain preserved.
+
 1. RED: introduce an explicit trial-state preparation API which has no density-
    preservation claim. A half-core-norm seed must retain its pre-initialization
    projection/support certification but be allowed to form an orthonormal

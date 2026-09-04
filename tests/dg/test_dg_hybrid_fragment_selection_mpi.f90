@@ -22,6 +22,7 @@ program test_fragment_selection
   use dg_hybrid_fragment_solver,only:reconstruct_dg_hybrid_fragment_density,measure_dg_hybrid_fragment_core_norms
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
     prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment,export_dg_hybrid_selected_basis_frame
+  use dg_hybrid_fragment_admission,only:prepare_dg_hybrid_selected_trial
   use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_fragment_preconditioner,&
     s_dg_hybrid_preconditioner_key,prepare_dg_hybrid_frame_preconditioner,apply_dg_hybrid_fragment_preconditioner
   implicit none
@@ -962,6 +963,7 @@ contains
     integer(int64)::fingerprints(3),bad_fingerprints(3),physical(8)
     integer,allocatable::selected(:)
     real(real64)::limits(4),support_limits(3)
+    complex(real64)::trial_core(4,2),trial_gram(2,2)
     logical::passed
     character(256)::why
     physical=selection%physical_grid_ids;limits=[1d-12,1d-10,1d-10,1d-10];support_limits=1d-10
@@ -996,6 +998,52 @@ contains
         call require(.not.passed.and.index(why,'post-initialization support')>0.and.&
           .not.allocated(selected).and..not.allocated(initial%vectors),&
           'loose density gate admitted changed final support: '//trim(why))
+        limits=[1d-12,1d-10,1d-10,1d-10]
+        call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+          fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,2,0,1d-10,1d-10,&
+          initial,selected,report,passed,why)
+        call require(passed.and.report%trial_prepared.and..not.report%valid,&
+          'half-norm reference could not prepare an explicitly unoccupied trial: '//trim(why))
+        call require(report%support_measured.and.maxval(report%support_defects)<1d-10.and.&
+          initial%state_count==2,'trial bypassed raw support checks or changed the requested inventory')
+        trial_core=matmul(basis%buffer_values(selection%core_row_slots,:),initial%vectors)
+        trial_gram=matmul(conjg(transpose(trial_core)),trial_core)
+        trial_gram(1,1)=trial_gram(1,1)-1d0;trial_gram(2,2)=trial_gram(2,2)-1d0
+        call require(maxval(abs(trial_gram))<1d-10,'bound trial is not core-orthonormal')
+        saved=initial;bad_fingerprints=fingerprints
+        if(rank==0)bad_fingerprints(2)=ieor(bad_fingerprints(2),1_int64)
+        call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+          bad_fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,2,0,1d-10,1d-10,&
+          initial,selected,report,passed,why)
+        call require(.not.passed.and..not.report%trial_prepared.and..not.allocated(selected).and.&
+          all(initial%vectors==saved%vectors),'trial ignored stale support or changed a prior state')
+        call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+          fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,merge(0,2,rank==0),0,1d-10,1d-10,&
+          initial,selected,report,passed,why)
+        call require(.not.passed.and..not.report%trial_prepared.and..not.allocated(selected).and.&
+          all(initial%vectors==saved%vectors),'one-fragment trial failure was not rolled back collectively')
+        bad_operators=operators;bad_fingerprints=fingerprints
+        call prepare_dg_hybrid_support_operator(MPI_COMM_WORLD,f,selection%basis_generation,1,&
+          [1_int64],[1_int64],[1,2],[int(4*np+1,int64)],[cmplx(1d0,0d0,real64)],&
+          [1d0],bad_operators(1),bad_fingerprints(1),passed,why)
+        call require(passed,'missing-point fixture manifest was not constructed')
+        call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,bad_operators,&
+          bad_fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,2,0,1d-10,1d-10,&
+          initial,selected,report,passed,why)
+        call require(.not.passed.and.index(why,'required operator point missing')>0.and.&
+          .not.report%trial_prepared.and.all(initial%vectors==saved%vectors),&
+          'trial ignored missing operator support')
+        if(rank==0)then
+          call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+            fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,2,0,1d-10,1d-10,&
+            initial,selected,report,passed,why,energy_cutoff=0d0)
+        else
+          call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,raw,selection,basis,receipt,operators,&
+            fingerprints,[1d0,1d0,1d0,1d0],limits,support_limits,0d0,2,0,1d-10,1d-10,&
+            initial,selected,report,passed,why)
+        endif
+        call require(.not.passed.and.index(why,'controls differ')>0.and..not.report%trial_prepared.and.&
+          all(initial%vectors==saved%vectors),'trial optional controls were not checked collectively')
         return
       endif
     endif
