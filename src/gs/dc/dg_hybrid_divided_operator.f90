@@ -4,12 +4,15 @@ module dg_hybrid_divided_operator
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,s_dg_hybrid_variational_iterate,&
-    compose_dg_hybrid_variational_hamiltonian,verify_dg_hybrid_variational_payload_rows
+    compose_dg_hybrid_variational_hamiltonian,verify_dg_hybrid_variational_payload_rows,&
+    freeze_dg_hybrid_variational_payload
+  use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_wannier_complement,only:compute_dg_hybrid_union_to_complete_binding
   implicit none
   private
   public::extract_dg_hybrid_fragment_self_block,compose_dg_hybrid_complete_rows
   public::dg_hybrid_fragment_directory_fingerprint
+  public::freeze_dg_hybrid_single_owner_payload
   interface
     subroutine zheev(jobz,uplo,n,a,lda,w,work,lwork,rwork,info)
       import::real64
@@ -21,6 +24,91 @@ module dg_hybrid_divided_operator
     end subroutine zheev
   end interface
 contains
+  subroutine freeze_dg_hybrid_single_owner_payload(comm,fragment_count,basis,metric_rows,kinetic_rows,&
+      nonlocal_rows,interface_rows,basis_fp,metric_fp,interface_fp,payload,basis_owner,basis_fragment,&
+      basis_local_slot,basis_generation,directory_fp,ok,message)
+    ! One rank publishes all columns and rows of its uncompressed fragment.
+    ! No union-to-complete transform, column sorting or rank reduction occurs here.
+    integer,intent(in)::comm,fragment_count
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    complex(real64),intent(in)::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),interface_rows(:,:)
+    integer(int64),intent(in)::basis_fp,metric_fp,interface_fp
+    type(s_dg_hybrid_fixed_payload),intent(out)::payload
+    integer,allocatable,intent(out)::basis_owner(:),basis_fragment(:),basis_local_slot(:),basis_generation(:)
+    integer(int64),intent(out)::directory_fp
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,ierr,n,nb,i,p,status
+    integer,allocatable::owners(:),fragments(:),slots(:),generations(:),presence(:),row_count(:)
+    integer(int64)::metadata(4),minimum(4),maximum(4),local_count,total_count,working_fp
+    logical::valid
+    ok=.false.;message='';directory_fp=0_int64
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='single-owner payload rank query failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='single-owner payload size query failed';return;endif
+    metadata=[int(fragment_count,int64),basis_fp,metric_fp,interface_fp]
+    call MPI_Allreduce(metadata,minimum,4,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='single-owner payload metadata agreement failed';return;endif
+    call MPI_Allreduce(metadata,maximum,4,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(minimum/=maximum).or.fragment_count/=nproc.or.any(metadata(2:)==0_int64))then
+      message='single-owner payload requires matching metadata and one rank per fragment';return
+    endif
+    valid=basis%fragment_id>=1.and.basis%fragment_id<=fragment_count.and.basis%generation>0.and.&
+      basis%provenance_fingerprint/=0_int64.and.allocated(basis%global_ids).and.allocated(basis%sector).and.&
+      allocated(basis%buffer_point_ids).and.allocated(basis%buffer_values)
+    call collective_gate(comm,valid,'invalid single-owner fragment basis',ok,message)
+    if(.not.ok)return
+    n=size(basis%global_ids)
+    valid=n>0.and.size(basis%sector)==n.and.all(basis%sector>=1).and.all(basis%sector<=2).and.&
+      all(shape(basis%buffer_values)==[size(basis%buffer_point_ids),n]).and.&
+      all(basis%buffer_point_ids>0_int64).and.finite_matrix(basis%buffer_values)
+    call collective_gate(comm,valid,'invalid single-owner basis column layout',ok,message)
+    if(.not.ok)return
+    local_count=int(n,int64)
+    call MPI_Allreduce(local_count,total_count,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    valid=ierr==MPI_SUCCESS.and.total_count>0_int64.and.total_count<=int(huge(0),int64)
+    call collective_gate(comm,valid,'single-owner global basis count overflows',ok,message)
+    if(.not.ok)return
+    nb=int(total_count)
+    valid=all(basis%global_ids>=1_int64).and.all(basis%global_ids<=total_count)
+    call collective_gate(comm,valid,'single-owner basis IDs are outside the complete inventory',ok,message)
+    if(.not.ok)return
+    allocate(owners(nb),fragments(nb),slots(nb),generations(nb),row_count(nb),presence(fragment_count),stat=status)
+    call collective_gate(comm,status==0,'cannot allocate single-owner basis directory',ok,message)
+    if(.not.ok)return
+    owners=0;fragments=0;slots=0;generations=0;row_count=0;presence=0
+    presence(basis%fragment_id)=1
+    do i=1,n
+      p=int(basis%global_ids(i));row_count(p)=row_count(p)+1
+      owners(p)=rank+1;fragments(p)=basis%fragment_id;slots(p)=i;generations(p)=basis%generation
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,presence,fragment_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    valid=ierr==MPI_SUCCESS
+    call MPI_Allreduce(MPI_IN_PLACE,row_count,nb,MPI_INTEGER,MPI_SUM,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS.and.all(presence==1).and.all(row_count==1)
+    call collective_gate(comm,valid,'single-owner fragment or basis ownership is not unique and complete',ok,message)
+    if(.not.ok)return
+    call MPI_Allreduce(MPI_IN_PLACE,owners,nb,MPI_INTEGER,MPI_MAX,comm,ierr)
+    valid=ierr==MPI_SUCCESS
+    call MPI_Allreduce(MPI_IN_PLACE,fragments,nb,MPI_INTEGER,MPI_MAX,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS
+    call MPI_Allreduce(MPI_IN_PLACE,slots,nb,MPI_INTEGER,MPI_MAX,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS
+    call MPI_Allreduce(MPI_IN_PLACE,generations,nb,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call collective_gate(comm,valid.and.ierr==MPI_SUCCESS,'single-owner directory exchange failed',ok,message)
+    if(.not.ok)return
+    owners=owners-1
+    working_fp=dg_hybrid_fragment_directory_fingerprint(fragments,slots,generations,basis_fp)
+    call freeze_dg_hybrid_variational_payload(comm,nb,basis%global_ids,metric_rows,kinetic_rows,&
+      nonlocal_rows,interface_rows,basis_fp,metric_fp,interface_fp,payload,ok,message,&
+      basis_directory_fingerprint=working_fp)
+    if(.not.ok)return
+    call move_alloc(owners,basis_owner);call move_alloc(fragments,basis_fragment)
+    call move_alloc(slots,basis_local_slot);call move_alloc(generations,basis_generation)
+    directory_fp=working_fp
+  end subroutine freeze_dg_hybrid_single_owner_payload
+
   subroutine extract_dg_hybrid_fragment_self_block(comm_fragment,fragment_id,row_ids,basis_fragment,&
       fixed_payload,local_rows,hff,sff,ok,message,basis_local_slot,basis_generation,&
       fragment_catalog_fingerprint,fragment_directory_fingerprint)

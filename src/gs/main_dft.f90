@@ -116,6 +116,7 @@ use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog,s_dg_hybrid_produ
 use dg_hybrid_production_pw_basis,only:build_dg_hybrid_production_pw_basis
 use dg_hybrid_window_distribution,only:redistribute_dg_hybrid_fragment_windows
 use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
+use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload
 use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
   freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
   assemble_dg_hybrid_production_interface_component_rows,materialize_dg_hybrid_production_interior,&
@@ -1326,7 +1327,7 @@ contains
     integer,allocatable::divided_effective_ids(:),divided_requested_ids(:),divided_selection_effective_ids(:),&
       divided_added_ids(:),&
       divided_closure_parent(:),divided_closure_reason(:),divided_closure_action(:),divided_scope_selectors(:),&
-      divided_basis_owner(:),divided_basis_fragment(:),&
+      divided_basis_owner(:),divided_basis_fragment(:),divided_basis_local_slot(:),divided_basis_generation(:),&
       divided_metric_offsets(:),divided_metric_columns(:),divided_operator_offsets(:),divided_operator_columns(:)
     type(s_dg_hybrid_scope_receipt)::divided_scope_receipt
     type(s_dg_hybrid_production_selection)::divided_production_selection
@@ -1426,7 +1427,7 @@ contains
     integer(8)::divided_pw_fingerprint,divided_buffer_window_fingerprint,divided_fragment_fingerprint,&
       divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,divided_state_workspace,&
       divided_state_fingerprint,divided_final_solver_workspace,divided_final_solver_fingerprint,&
-      divided_selection_fingerprint,divided_fixed_payload_fingerprint
+      divided_selection_fingerprint,divided_fixed_payload_fingerprint,divided_basis_directory_fingerprint
     real(8)::condition_number,closure_residual,spread_max,gauge_correction
     real(8)::adapted_occupied_trace,adapted_occupied_closure,adapted_occupied_gamma_defect,&
       translation_adapted_trace,translation_adapted_closure,translation_adapted_gamma_defect,&
@@ -3574,10 +3575,18 @@ contains
           if(nproc_id_global==0)write(*,'(a,a)')&
             '[HYBRID-VARIATIONAL-PAYLOAD-CAPTURE] prefix=',trim(variational_payload_capture_prefix)
         endif
-        call freeze_dg_hybrid_variational_payload(dc%icomm_tot,size(divided_effective_ids),&
-          divided_lcfo_row_ids,divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,&
-          dg_hybrid_interface_rows,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
-          divided_buffer_window_fingerprint,dg_hybrid_fixed_payload,ok,message)
+        if(yn_dg_hybrid_divided_scf=='y')then
+          call freeze_dg_hybrid_single_owner_payload(dc%icomm_tot,dc%n_frag,divided_fragment_basis,&
+            divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,dg_hybrid_interface_rows,&
+            divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,divided_buffer_window_fingerprint,&
+            dg_hybrid_fixed_payload,divided_basis_owner,divided_basis_fragment,divided_basis_local_slot,&
+            divided_basis_generation,divided_basis_directory_fingerprint,ok,message)
+        else
+          call freeze_dg_hybrid_variational_payload(dc%icomm_tot,size(divided_effective_ids),&
+            divided_lcfo_row_ids,divided_lcfo_srows,dg_hybrid_kinetic_rows,dg_hybrid_nonlocal_rows,&
+            dg_hybrid_interface_rows,divided_fragment_fingerprint,divided_lcfo_operator_fingerprint,&
+            divided_buffer_window_fingerprint,dg_hybrid_fixed_payload,ok,message)
+        endif
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid fixed variational payload freeze failed'
         if(.not.dg_hybrid_fixed_payload%frozen.or.dg_hybrid_fixed_payload%fingerprint==0_8)&

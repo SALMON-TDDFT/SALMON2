@@ -48,7 +48,7 @@ program test_dg_hybrid_fragment_wannier_mpi
     initialize_dg_hybrid_fragment_subspace,s_dg_hybrid_fragment_epoch_budget,advance_dg_hybrid_fragment_epoch
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,freeze_dg_hybrid_variational_payload
   use dg_hybrid_divided_operator,only:extract_dg_hybrid_fragment_self_block,&
-    dg_hybrid_fragment_directory_fingerprint
+    dg_hybrid_fragment_directory_fingerprint,freeze_dg_hybrid_single_owner_payload
   use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_preconditioner_key,s_dg_hybrid_fragment_preconditioner,&
     prepare_dg_hybrid_fragment_preconditioner,apply_dg_hybrid_fragment_preconditioner
   use dg_hybrid_fragment_solver,only:measure_dg_hybrid_fragment_core_norms
@@ -571,17 +571,19 @@ contains
     type(s_dg_hybrid_fragment_basis),intent(in)::basis
     complex(real64),intent(in)::q_wf(:,:),seed_coefficients(:,:)
     logical,intent(in)::core(:)
-    type(s_dg_hybrid_fixed_payload)::payload
+    type(s_dg_hybrid_fixed_payload)::payload,rejected_payload
+    type(s_dg_hybrid_fragment_basis)::bad_basis
     type(s_dg_hybrid_fragment_subspace_state)::state
     type(s_dg_hybrid_fragment_epoch_budget)::budget
-    integer,allocatable::owners(:),slots(:),generations(:),selected(:)
+    integer,allocatable::owners(:),slots(:),generations(:),selected(:),published_owners(:),&
+      published_fragments(:),published_slots(:),published_generations(:)
     complex(real64),allocatable::full_basis(:,:),h_rows(:,:),s_rows(:,:),zero_rows(:,:),q(:,:),&
       physical_states(:,:),orthogonality(:,:)
     complex(real64)::physical_h(12,12)
     real(real64),allocatable::energies(:),core_norms(:)
     real(real64)::residual,core_error
     integer::counts(2),nb,n,nw,a,b,j,pass,steps,remaining,total_steps
-    integer(int64)::directory_fp,workspace,receipt,preconditioner_fp
+    integer(int64)::directory_fp,workspace,receipt,preconditioner_fp,published_directory_fp
     logical::converged,advanced
     character(256)::reason
     n=size(basis%global_ids);nw=size(q_wf,1)
@@ -611,9 +613,21 @@ contains
     s_rows=matmul(conjg(transpose(full_basis(:,basis%global_ids))),full_basis)
     allocate(zero_rows(n,nb));zero_rows=0d0
     directory_fp=dg_hybrid_fragment_directory_fingerprint(owners,slots,generations,501_int64)
-    call freeze_dg_hybrid_variational_payload(comm_total,nb,basis%global_ids,s_rows,h_rows,zero_rows,&
-      zero_rows,501_int64,503_int64,505_int64,payload,ok,message,basis_directory_fingerprint=directory_fp)
+    call freeze_dg_hybrid_single_owner_payload(comm_total,2,basis,s_rows,h_rows,zero_rows,&
+      zero_rows,501_int64,503_int64,505_int64,payload,published_owners,published_fragments,&
+      published_slots,published_generations,published_directory_fp,ok,message)
     call require_total(ok,'DC integration fixed payload failed: '//trim(message))
+    call require_total(all(published_owners==owners-1).and.all(published_fragments==owners).and.&
+      all(published_slots==slots).and.all(published_generations==generations).and.&
+      published_directory_fp==directory_fp.and.payload%basis_directory_fingerprint==directory_fp,&
+      'production payload directory differs from independent fragment inventory')
+    bad_basis=basis
+    if(total_rank==0)bad_basis%global_ids(1)=0_int64
+    call freeze_dg_hybrid_single_owner_payload(comm_total,2,bad_basis,s_rows,h_rows,zero_rows,&
+      zero_rows,501_int64,503_int64,505_int64,rejected_payload,published_owners,published_fragments,&
+      published_slots,published_generations,published_directory_fp,ok,message)
+    call require_total(.not.ok.and..not.rejected_payload%frozen.and..not.allocated(published_owners).and.&
+      published_directory_fp==0_int64,'invalid basis ID published a production payload or directory')
     integration_rows=[(int(a,int64),a=1,n)]
     call extract_dg_hybrid_fragment_self_block(comm_fragment,fragment_id,integration_rows,owners,payload,&
       zero_rows,integration_h,integration_s,ok,message,basis_local_slot=slots,basis_generation=generations,&

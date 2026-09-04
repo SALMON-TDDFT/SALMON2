@@ -56,6 +56,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-divided-operator-") as name:
         "-fcheck=all", "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
         str(root / "src/common/dg_hybrid_wannier_complement.f90"),
         str(root / "src/gs/dc/dg_hybrid_variational_payload.f90"),
+        str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
         str(root / "src/gs/dc/dg_hybrid_divided_operator.f90"),
         str(root / "tests/dg/test_dg_hybrid_divided_operator_mpi.f90"),
         *lapack_libraries(),

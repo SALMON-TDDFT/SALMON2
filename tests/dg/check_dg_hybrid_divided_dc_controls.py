@@ -204,4 +204,16 @@ assert "dg_dc_update_potential_from_distributed_density" in continuation
 assert "allocate(density4(dc%lg_tot%num" not in continuation
 assert "gather_dg_hybrid_divided_core_density(rho_in" not in continuation
 
+single_owner = re.search(
+    r"if\s*\(\s*yn_dg_hybrid_divided_scf\s*==\s*'y'\s*\)\s*then\s*"
+    r"call\s+freeze_dg_hybrid_single_owner_payload\b(.*?)endif", MAIN, re.S
+)
+assert single_owner, "divided main must freeze its single-owner column directory with the fixed payload"
+for token in ("divided_fragment_basis", "divided_basis_local_slot", "divided_basis_generation",
+              "divided_basis_directory_fingerprint", "dg_hybrid_fixed_payload"):
+    assert token in single_owner.group(1), f"single-owner payload handoff lacks {token}"
+assert "call freeze_dg_hybrid_variational_payload" in single_owner.group(1).split("else", 1)[1], (
+    "continuation must retain its existing payload publication path"
+)
+
 print("divided Hybrid DC controls contract: PASS")

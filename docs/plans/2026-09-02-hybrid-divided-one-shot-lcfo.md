@@ -1330,6 +1330,34 @@ untouched, and no expensive DC or Si64 calculation was rerun. Next production
 work must replace the legacy complete-LCFO-dependent payload assembly with
 uncompressed fragment WF+PW coordinates before changing main's SCF callbacks.
 
+**Production payload-directory handoff checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`freeze_dg_hybrid_single_owner_payload` now derives and validates the complete
+global-ID to rank/fragment/local-slot/generation directory from one supplied
+fragment basis per rank. Every retained column must have exactly one owner,
+every fragment exactly one rank, scalar fingerprints must agree, and matrix
+rows must match the unchanged local column order. The directory fingerprint
+is bound into the existing fixed variational payload. No column sorting,
+union compression or matrix-value change occurs in this adapter.
+
+The divided branch in main now uses this publication entry and retains the
+directory arrays needed for later self-block extraction. The continuation
+branch keeps its previous freeze call. This is an actual main integration of
+the payload bookkeeping, not the final switch to direct fragment construction
+or bounded SCF: the old preliminary LCFO and dense callback remain pending.
+Diagnostic matrix capture retains its existing format and is not a serialized
+copy of the new complete directory.
+
+The new API and main-call contract were RED before implementation. The
+1/2/4/8-rank operator fixture covers unequal column counts, reversed rank and
+local-column ordering, invalid/duplicate global IDs, duplicate fragment
+owners, invalid generations, inconsistent scalar fingerprints and bad matrix
+extents. The DC-cache integration fixture consumes this same entry before
+actual H/S extraction and bounded updates. Operator, DC-cache, PW projection,
+DC controls, legacy LCFO and continuation route checks pass; the full Task 8
+entry gate remains RED. The release build passes and review found no
+Critical/Important issue. Pre-existing dirty main changes and validation logs
+are preserved; no material calculation was rerun.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

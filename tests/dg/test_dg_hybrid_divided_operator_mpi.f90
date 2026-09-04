@@ -5,7 +5,8 @@ program test_dg_hybrid_divided_operator_mpi
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,freeze_dg_hybrid_variational_payload
   use dg_hybrid_wannier_complement,only:compute_dg_hybrid_union_to_complete_binding
   use dg_hybrid_divided_operator,only:extract_dg_hybrid_fragment_self_block,&
-    compose_dg_hybrid_complete_rows,dg_hybrid_fragment_directory_fingerprint
+    compose_dg_hybrid_complete_rows,dg_hybrid_fragment_directory_fingerprint,freeze_dg_hybrid_single_owner_payload
+  use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   implicit none
   integer,parameter::nunion=6,ncomplete=5
   real(real64),parameter::metric_tolerance=1d-8,discarded_metric_eigenvalue=1d-10,&
@@ -37,6 +38,7 @@ program test_dg_hybrid_divided_operator_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call check_single_owner_publication
   call build_reference_payload(dense_metric,dense_kinetic,dense_nonlocal,dense_interface,dense_local)
   dense_hamiltonian=dense_kinetic+dense_nonlocal+dense_interface+dense_local
   basis_fragment=[1,2,1,2,1,2]
@@ -345,6 +347,61 @@ program test_dg_hybrid_divided_operator_mpi
   if(nproc>1)call MPI_Comm_free(fragment_comm,ierr)
   call MPI_Finalize(ierr)
 contains
+  subroutine check_single_owner_publication
+    type(s_dg_hybrid_fragment_basis)::basis,bad_basis
+    type(s_dg_hybrid_fixed_payload)::published
+    integer,allocatable::owner(:),fragment(:),slot(:),generation(:)
+    complex(real64),allocatable::metric(:,:),kinetic(:,:),zero(:,:)
+    integer::f,n,nb,first,a,k,scenario
+    integer(int64)::directory_fp,input_fp
+    logical::same
+    ! One rank per fragment, reversed rank assignment and local column order.
+    f=nproc-rank;n=f;nb=nproc*(nproc+1)/2;first=f*(f-1)/2
+    basis%fragment_id=f;basis%generation=17;basis%provenance_fingerprint=301_int64+f
+    allocate(basis%global_ids(n),basis%sector(n),basis%buffer_point_ids(1),basis%buffer_values(1,n))
+    basis%global_ids=[(int(first+n-a+1,int64),a=1,n)]
+    basis%sector=1;basis%sector(n)=2;basis%buffer_point_ids=int(f,int64);basis%buffer_values=1d0
+    allocate(metric(n,nb),kinetic(n,nb),zero(n,nb));metric=0d0;zero=0d0
+    do a=1,n;metric(a,basis%global_ids(a))=1d0;enddo
+    kinetic=2d0*metric
+    call freeze_dg_hybrid_single_owner_payload(comm,nproc,basis,metric,kinetic,zero,zero,&
+      501_int64,503_int64,505_int64,published,owner,fragment,slot,generation,directory_fp,ok,message)
+    call require(ok,'single-owner publication failed: '//trim(message))
+    same=all(published%row_ids==basis%global_ids).and.all(published%metric_rows==metric).and.&
+      all(published%kinetic_rows==kinetic).and.all(generation==17).and.&
+      published%basis_directory_fingerprint==directory_fp
+    do k=1,nproc
+      first=k*(k-1)/2
+      do a=1,k
+        same=same.and.owner(first+a)==nproc-k.and.fragment(first+a)==k.and.slot(first+a)==k-a+1
+      enddo
+    enddo
+    call require(same,'single-owner publication reordered columns or lost rank/fragment/generation bindings')
+    do scenario=1,5
+      bad_basis=basis;input_fp=501_int64
+      if(rank==0)then
+        if(scenario==1)bad_basis%global_ids(1)=0_int64
+        if(scenario==2)bad_basis%generation=0
+        if(scenario==3)bad_basis%fragment_id=1
+        if(scenario==4)input_fp=511_int64
+        if(scenario==5)bad_basis%global_ids(1)=1_int64
+      endif
+      if(nproc==1.and.scenario>=3)cycle
+      call freeze_dg_hybrid_single_owner_payload(comm,nproc,bad_basis,metric,kinetic,zero,zero,&
+        input_fp,503_int64,505_int64,published,owner,fragment,slot,generation,directory_fp,ok,message)
+      call require(.not.ok.and..not.published%frozen.and..not.allocated(owner).and.&
+        .not.allocated(fragment).and..not.allocated(slot).and..not.allocated(generation).and.directory_fp==0_int64,&
+        'invalid single-owner metadata published a payload or directory')
+    enddo
+    call freeze_dg_hybrid_single_owner_payload(comm,nproc+1,basis,metric,kinetic,zero,zero,&
+      501_int64,503_int64,505_int64,published,owner,fragment,slot,generation,directory_fp,ok,message)
+    call require(.not.ok.and..not.published%frozen,'unequal fragment and rank counts accepted')
+    call freeze_dg_hybrid_single_owner_payload(comm,nproc,basis,metric(:,:nb-1),kinetic,zero,zero,&
+      501_int64,503_int64,505_int64,published,owner,fragment,slot,generation,directory_fp,ok,message)
+    call require(.not.ok.and..not.published%frozen.and..not.allocated(owner),&
+      'invalid matrix extent published single-owner directory')
+  end subroutine check_single_owner_publication
+
   subroutine check_exact_null_composition
     type(s_dg_hybrid_fixed_payload)::null_payload
     complex(real64)::null_metric(nunion,nunion),expected_s(ncomplete,ncomplete)
