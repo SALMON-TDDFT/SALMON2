@@ -208,6 +208,16 @@ The old square entry retains its existing contract. Rectangular application
 must run this check before accepting output; the stand-alone numerical gate
 alone does not complete C4 or authorize production use.
 
+The rectangular numerical entry is single-owner (fragment communicator size
+one), consistent with ranks equalling fragments. Define roundoff-zero column
+norm as `64*epsilon_machine*max(active_count,input_reference_count)` and
+recheck identity resolution after omission. Use the retained reference count
+in the signed denominator roundoff dimension and cancellation check. Bind the
+original frame payload, selection and retained count in the cache receipt.
+Input validation must not test metric norms in an artificial identity frame;
+the actual retained reference columns define those tests. Full core-metric
+positive-rank admission remains the separate C3 requirement.
+
 Test centers and their final ordering first, then geometry/selection, selected
 PW construction and seed projection, rectangular preconditioning, and the
 actual small DG operator handoff. Preserve the old unselected core-metric

@@ -16,6 +16,7 @@ module dg_hybrid_fragment_preconditioner
     integer::global_count=0,comm_rank=-1,comm_size=0
     type(s_dg_hybrid_preconditioner_key)::key
     integer(int64)::fingerprint=0_int64
+    integer(int64)::selection_fingerprint=0_int64
     real(real64)::tolerance=0d0
     integer(int64),allocatable::row_ids(:)
     complex(real64),allocatable::q_rows(:,:)
@@ -23,7 +24,90 @@ module dg_hybrid_fragment_preconditioner
   end type
   public::prepare_dg_hybrid_fragment_preconditioner,apply_dg_hybrid_fragment_preconditioner
   public::check_dg_hybrid_frame_cancellation
+  public::prepare_dg_hybrid_frame_preconditioner
 contains
+  ! Single-owner fragment entry (comm=MPI_COMM_SELF in production). Reuse
+  ! square validation with identity coordinates only as a private validation
+  ! stage; never return an identity fallback. H/S are already fragment-local.
+  subroutine prepare_dg_hybrid_frame_preconditioner(comm,n,row_ids,q_rows,h_rows,s_rows,key,&
+      selection_fingerprint,tolerance,cache,fingerprint,ok,message)
+    integer,intent(in)::comm,n
+    integer(int64),intent(in)::row_ids(:),selection_fingerprint
+    complex(real64),intent(in)::q_rows(:,:),h_rows(:,:),s_rows(:,:)
+    type(s_dg_hybrid_preconditioner_key),intent(in)::key
+    real(real64),intent(in)::tolerance
+    type(s_dg_hybrid_fragment_preconditioner),intent(inout)::cache
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_fragment_preconditioner)::work
+    complex(real64),allocatable::identity(:,:),frame(:,:),column(:),gram(:,:),hq(:),sq(:)
+    real(real64),allocatable::hd(:),sd(:)
+    logical,allocatable::keep(:)
+    complex(real64)::dh,ds
+    real(real64)::zero_threshold,scale_h,scale_s
+    integer::np,ierr,m,nkeep,i,j,k,status
+    integer(int64)::base_fp,hash
+    logical::valid,halting(3)
+    ok=.false.;fingerprint=0_int64;message='invalid single-owner rectangular frame'
+    call suspend_traps(halting);call execute();call restore_traps(halting)
+  contains
+    subroutine execute()
+      call MPI_Comm_size(comm,np,ierr)
+      if(.not.collective_valid(comm,ierr==MPI_SUCCESS.and.np==1))return
+      m=size(q_rows,2)
+      valid=n>0.and.m>=n.and.size(row_ids)==n.and.size(q_rows,1)==n.and.&
+        selection_fingerprint/=0_int64.and.ieee_is_finite(tolerance).and.finite(q_rows)
+      if(.not.valid)return
+      if(tolerance<64d0*epsilon(1d0).or.tolerance>1d-2)return
+      if(any(row_ids<1_int64).or.any(row_ids>int(n,int64)))return
+      allocate(identity(n,n),keep(m),column(n),hq(n),sq(n),stat=status)
+      if(status/=0)return
+      identity=0d0
+      do i=1,n;identity(i,int(row_ids(i)))=1d0;enddo
+      call prepare_square_core(comm,n,row_ids,identity,h_rows,s_rows,&
+        key,tolerance,work,base_fp,ok,message,.false.)
+      if(.not.ok)return
+      ok=.false.
+      if(any(abs(q_rows)>1d0+tolerance))then;message='rectangular frame entries exceed unit resolution';return;endif
+      zero_threshold=64d0*epsilon(1d0)*real(max(n,m),real64)
+      keep=sum(abs(q_rows)**2,dim=1)>zero_threshold**2
+      nkeep=count(keep)
+      if(nkeep<n)then;message='rectangular frame does not span active space';return;endif
+      allocate(frame(n,nkeep),gram(n,n),hd(nkeep),sd(nkeep),stat=status)
+      if(status/=0)return
+      k=0
+      do j=1,m
+        if(.not.keep(j))cycle
+        k=k+1;frame(:,k)=q_rows(:,j)
+      enddo
+      gram=matmul(frame,conjg(transpose(frame)))
+      do i=1,n;gram(i,i)=gram(i,i)-1d0;enddo
+      if(.not.finite(gram))return
+      if(maxval(abs(gram))>tolerance)then;message='rectangular frame does not resolve identity';return;endif
+      scale_h=max(1d0,maxval(abs(h_rows)));scale_s=max(1d0,maxval(abs(s_rows)))
+      do j=1,nkeep
+        column(int(row_ids))=frame(:,j)
+        hq=matmul(h_rows,column);sq=matmul(s_rows,column)
+        dh=dot_product(frame(:,j),hq);ds=dot_product(frame(:,j),sq)
+        if(.not.finite_vector([dh,ds]))then;message='nonfinite rectangular reference diagonal';return;endif
+        if(abs(aimag(dh))>tolerance*scale_h.or.abs(aimag(ds))>tolerance*scale_s)then
+          message='complex rectangular reference diagonal';return
+        endif
+        hd(j)=real(dh,real64);sd(j)=real(ds,real64)
+      enddo
+      if(any(sd<=tolerance*maxval(abs(sd))))then
+        message='nonpositive or unresolved rectangular reference metric norm';return
+      endif
+      hash=mix(base_fp,selection_fingerprint);hash=mix(hash,int(m,int64))
+      do j=1,m;do i=1,n;hash=mix_complex(hash,q_rows(i,j));enddo;enddo
+      hash=mix(hash,int(nkeep,int64));if(hash==0_int64)hash=1_int64
+      call move_alloc(frame,work%q_rows);call move_alloc(hd,work%h_diagonal);call move_alloc(sd,work%s_diagonal)
+      work%selection_fingerprint=selection_fingerprint;work%fingerprint=hash
+      cache=work;fingerprint=hash;ok=.true.;message=''
+    end subroutine
+  end subroutine prepare_dg_hybrid_frame_preconditioner
+
   ! Numerical gate for a previously certified row-isometric rectangular frame.
   ! y contains replicated signed-scaled reference amplitudes. This does not
   ! validate frame provenance or certify nonsingularity for every residual.
@@ -92,6 +176,22 @@ contains
 
   subroutine prepare_dg_hybrid_fragment_preconditioner(comm,global_count,row_ids,q_rows,h_rows,s_rows,&
       key,tolerance,cache,fingerprint,ok,message)
+    integer,intent(in)::comm,global_count
+    integer(int64),intent(in)::row_ids(:)
+    complex(real64),intent(in)::q_rows(:,:),h_rows(:,:),s_rows(:,:)
+    type(s_dg_hybrid_preconditioner_key),intent(in)::key
+    real(real64),intent(in)::tolerance
+    type(s_dg_hybrid_fragment_preconditioner),intent(inout)::cache
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    call prepare_square_core(comm,global_count,row_ids,q_rows,h_rows,s_rows,&
+      key,tolerance,cache,fingerprint,ok,message,.true.)
+  end subroutine prepare_dg_hybrid_fragment_preconditioner
+
+  subroutine prepare_square_core(comm,global_count,row_ids,q_rows,h_rows,s_rows,&
+      key,tolerance,cache,fingerprint,ok,message,check_reference_metric)
+    logical,intent(in)::check_reference_metric
     ! F=B Q is an immutable physical reference. Q changes covariantly with B;
     ! it is NOT the complete-system null-compression map or an occupied subset.
     integer,intent(in)::comm,global_count
@@ -171,7 +271,7 @@ contains
         endif
         working%h_diagonal(j)=real(diagonal(1),real64);working%s_diagonal(j)=real(diagonal(2),real64)
       enddo
-      if(any(working%s_diagonal<=tolerance*maxval(abs(working%s_diagonal))))then
+      if(check_reference_metric.and.any(working%s_diagonal<=tolerance*maxval(abs(working%s_diagonal))))then
         message='nonpositive or unresolved reference metric norm';return
       endif
       call MPI_Comm_rank(comm,working%comm_rank,ierr);valid=ierr==MPI_SUCCESS
@@ -204,14 +304,16 @@ contains
       call move_alloc(working%h_diagonal,cache%h_diagonal);call move_alloc(working%s_diagonal,cache%s_diagonal)
       cache%global_count=n;cache%comm_rank=working%comm_rank;cache%comm_size=working%comm_size
       cache%key=key;cache%tolerance=tolerance;cache%fingerprint=global_hash;cache%valid=.true.
+      cache%selection_fingerprint=0_int64
       fingerprint=global_hash;ok=.true.;message=''
     end subroutine
-  end subroutine prepare_dg_hybrid_fragment_preconditioner
+  end subroutine prepare_square_core
 
   subroutine apply_dg_hybrid_fragment_preconditioner(comm,row_ids,key,cache,shifts,residual,output,&
-      fingerprint,ok,message)
+      fingerprint,ok,message,selection_fingerprint)
     integer,intent(in)::comm
     integer(int64),intent(in)::row_ids(:)
+    integer(int64),optional,intent(in)::selection_fingerprint
     type(s_dg_hybrid_preconditioner_key),intent(in)::key
     type(s_dg_hybrid_fragment_preconditioner),intent(in)::cache
     real(real64),intent(in)::shifts(:)
@@ -223,7 +325,7 @@ contains
     complex(real64),allocatable::reference_residual(:,:),candidate(:,:)
     real(real64),allocatable::denominator(:)
     real(real64)::scale,roundoff,floor
-    integer::n,nr,ns,i,j,stat,ierr,rank,nproc
+    integer::n,nr,ns,i,j,stat,ierr,rank,nproc,nreference
     logical::valid,halting(3)
     ok=.false.;message='invalid or stale fixed-frame preconditioner';fingerprint=0_int64
     call suspend_traps(halting);call execute();call restore_traps(halting)
@@ -233,6 +335,13 @@ contains
       valid=agree_integer(comm,size(shifts)).and.valid
       if(.not.collective_valid(comm,valid.and.cache%valid))return
       valid=agree_bits(comm,cache%fingerprint)
+      valid=agree_integer(comm,merge(1,0,present(selection_fingerprint))).and.valid
+      if(.not.collective_valid(comm,valid))return
+      if(cache%selection_fingerprint/=0_int64)valid=valid.and.present(selection_fingerprint)
+      if(present(selection_fingerprint))then
+        valid=agree_bits(comm,selection_fingerprint).and.valid
+        valid=valid.and.selection_fingerprint==cache%selection_fingerprint
+      endif
       valid=valid.and.all(key_words(key)==key_words(cache%key))
       call MPI_Comm_rank(comm,rank,ierr);valid=valid.and.ierr==MPI_SUCCESS
       call MPI_Comm_size(comm,nproc,ierr)
@@ -246,22 +355,23 @@ contains
       do j=1,ns
         if(.not.agree_bits(comm,transfer(shifts(j),0_int64)))then;message='rank-disagreeing Rayleigh shifts';return;endif
       enddo
-      if(int(n,int64)*int(ns,int64)>int(huge(0),int64))return
-      allocate(reference_residual(n,ns),candidate(nr,ns),denominator(n),stat=stat)
+      nreference=size(cache%q_rows,2)
+      if(int(nreference,int64)*int(ns,int64)>int(huge(0),int64))return
+      allocate(reference_residual(nreference,ns),candidate(nr,ns),denominator(nreference),stat=stat)
       if(.not.collective_valid(comm,stat==0))then;message='cannot allocate preconditioner application';return;endif
       reference_residual=matmul(conjg(transpose(cache%q_rows)),residual)
-      call MPI_Allreduce(MPI_IN_PLACE,reference_residual,n*ns,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      call MPI_Allreduce(MPI_IN_PLACE,reference_residual,nreference*ns,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
       if(.not.collective_valid(comm,ierr==MPI_SUCCESS.and.finite(reference_residual)))then
         message='nonfinite transformed residual';return
       endif
       do j=1,ns
         scale=max(1d0,maxval(abs(cache%h_diagonal))+abs(shifts(j))*maxval(abs(cache%s_diagonal)))
-        roundoff=64d0*epsilon(1d0)*real(n,real64)*scale
+        roundoff=64d0*epsilon(1d0)*real(max(n,nreference),real64)*scale
         floor=max(cache%tolerance*scale,roundoff)
         denominator=cache%h_diagonal-shifts(j)*cache%s_diagonal
         valid=ieee_is_finite(scale).and.ieee_is_finite(floor).and.all(ieee_is_finite(denominator))
         if(.not.collective_valid(comm,valid))then;message='nonfinite preconditioner denominator';return;endif
-        do i=1,n
+        do i=1,nreference
           if(abs(denominator(i))<=roundoff)then
             denominator(i)=floor
           else
@@ -273,6 +383,10 @@ contains
       candidate=matmul(cache%q_rows,reference_residual)
       if(.not.collective_valid(comm,finite(reference_residual).and.finite(candidate)))then
         message='nonfinite preconditioned residual';return
+      endif
+      if(cache%selection_fingerprint/=0_int64)then
+        call check_dg_hybrid_frame_cancellation(comm,n,cache%q_rows,reference_residual,cache%tolerance,valid,message)
+        if(.not.valid)return
       endif
       fingerprint=cache%fingerprint
       do j=1,ns;fingerprint=mix(fingerprint,transfer(shifts(j),0_int64));enddo

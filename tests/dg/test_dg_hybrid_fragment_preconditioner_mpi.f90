@@ -160,11 +160,115 @@ program test_dg_hybrid_fragment_preconditioner_mpi
   call require(.not.ok.and..not.allocated(output),'finite action overflow accepted')
   call test_bounded_covariance()
   call test_frame_cancellation()
+  call test_rectangular_entry()
   call ieee_get_halting_mode(ieee_invalid,traps_after)
   call require(traps_before.eqv.traps_after,'floating-point trap state changed')
   if(rank==0)write(*,'(a,i0,a)')'PASS fragment preconditioner on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine test_rectangular_entry()
+    type(s_dg_hybrid_fragment_preconditioner)::frame_cache,square_cache
+    type(s_dg_hybrid_preconditioner_key)::stale
+    complex(real64)::fq(2,4),fh(2,2),fs(2,2),res(2,1),oracle(2,1)
+    complex(real64)::v(2,2),identity(2,2),rotq(2,4),roth(2,2),rots(2,2),rotr(2,1)
+    complex(real64),allocatable::square_answer(:,:)
+    complex(real64),allocatable::answer(:,:)
+    integer(int64)::fp
+    integer::a
+    real(real64)::dh,ds
+    fq=0d0;fq(1,1:3)=sqrt(2d0/3d0)*[1d0,-0.5d0,-0.5d0]
+    fq(2,1:3)=[0d0,sqrt(0.5d0),-sqrt(0.5d0)]
+    fh=0d0;fs=0d0;fh(1,1)=2d0;fh(2,2)=4d0;fs(1,1)=1d0;fs(2,2)=2d0
+    res(:,1)=[1d0,2d0];oracle=0d0
+    do a=1,3
+      dh=real(dot_product(fq(:,a),matmul(fh,fq(:,a))),real64)
+      ds=real(dot_product(fq(:,a),matmul(fs,fq(:,a))),real64)
+      oracle(:,1)=oracle(:,1)+fq(:,a)*dot_product(fq(:,a),res(:,1))/(dh-0.3d0*ds)
+    enddo
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],fq,fh,fs,&
+      key,701_int64,1d-10,frame_cache,fp,ok,message)
+    call require(ok,'rectangular frame preparation: '//trim(message))
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0.3d0],res,answer,fp,ok,message,selection_fingerprint=701_int64)
+    call require(ok,'rectangular frame application: '//trim(message))
+    call require(maxval(abs(answer-oracle))<1d-10,'rectangular action differs from physical oracle')
+    fq(1,4)=1d-8
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],fq,fh,fs,&
+      key,701_int64,1d-10,frame_cache,fp,ok,message)
+    call require(.not.ok.and.index(message,'metric norm')>0,'unresolved nonzero reference column accepted')
+    fq(1,4)=0d0
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0.3d0],res,answer,fp,ok,message,selection_fingerprint=701_int64)
+    call require(ok,'failed frame rebuild destroyed previous cache')
+    call require(maxval(abs(answer-oracle))<1d-10,'failed rebuild changed previous frame action')
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0.3d0],res,answer,fp,ok,message)
+    call require(.not.ok.and..not.allocated(answer),'missing selection receipt accepted')
+    stale=key;stale%operator_epoch=stale%operator_epoch+1
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],stale,frame_cache,&
+      [0.3d0],res,answer,fp,ok,message,selection_fingerprint=701_int64)
+    call require(.not.ok.and..not.allocated(answer),'stale rectangular operator epoch accepted')
+    v(1,:)=[cmplx(1d0,0d0,real64),cmplx(0d0,1d0,real64)]/sqrt(2d0)
+    v(2,:)=[cmplx(0d0,1d0,real64),cmplx(1d0,0d0,real64)]/sqrt(2d0)
+    rotq=matmul(conjg(transpose(v)),fq)
+    roth=matmul(conjg(transpose(v)),matmul(fh,v));rots=matmul(conjg(transpose(v)),matmul(fs,v))
+    rotr=matmul(conjg(transpose(v)),res)
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],rotq,roth,rots,&
+      key,701_int64,1d-10,frame_cache,fp,ok,message)
+    call require(ok,'rotated rectangular frame rejected: '//trim(message))
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0.3d0],rotr,answer,fp,ok,message,selection_fingerprint=701_int64)
+    call require(ok,'rotated rectangular action rejected')
+    call require(maxval(abs(matmul(v,answer)-oracle))<1d-10,'rectangular physical covariance failed')
+    identity=0d0;identity(1,1)=1d0;identity(2,2)=1d0
+    call prepare_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],identity,fh,fs,&
+      key,1d-10,square_cache,fp,ok,message)
+    call require(ok,'square reference preparation failed')
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,square_cache,&
+      [0.3d0],res,square_answer,fp,ok,message)
+    call require(ok,'square reference application failed')
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],identity,fh,fs,&
+      key,701_int64,1d-10,frame_cache,fp,ok,message)
+    call require(ok,'square-limit frame preparation failed')
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0.3d0],res,answer,fp,ok,message,selection_fingerprint=701_int64)
+    call require(ok,'square-limit frame application failed')
+    call require(maxval(abs(answer-square_answer))<1d-12,'rectangular square limit changed old action')
+    ! Matrix validation must not introduce positivity tests in an arbitrary
+    ! identity frame: only the actual reference Q defines these norms.
+    v(1,:)=[1d0,1d0]/sqrt(2d0);v(2,:)=[1d0,-1d0]/sqrt(2d0)
+    fh=identity;fs=identity;fs(1,1)=1d-9
+    call prepare_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],v,fh,fs,&
+      key,1d-6,square_cache,fp,ok,message)
+    call require(ok,'square anisotropic reference failed')
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],v,fh,fs,&
+      key,701_int64,1d-6,frame_cache,fp,ok,message)
+    call require(ok,'identity validation imposed spurious reference norm rejection: '//trim(message))
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0.3d0],res,answer,fp,ok,message,selection_fingerprint=702_int64)
+    call require(.not.ok.and..not.allocated(answer),'changed frame selection accepted')
+    fh(1,1)=1d0;fh(2,2)=-1d0;fs=identity;res(:,1)=[1d0,0d0]
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],fq,fh,fs,&
+      key,701_int64,1d-10,frame_cache,fp,ok,message)
+    call require(ok,'signed frame preparation failed')
+    call apply_dg_hybrid_fragment_preconditioner(MPI_COMM_SELF,[1_int64,2_int64],key,frame_cache,&
+      [0d0],res,answer,fp,ok,message,selection_fingerprint=701_int64)
+    call require(.not.ok.and..not.allocated(answer).and.index(message,'cancellation')>0,&
+      'rectangular entry published an annihilated residual')
+    fq(1,:)=0d0
+    call prepare_dg_hybrid_frame_preconditioner(MPI_COMM_SELF,2,[1_int64,2_int64],fq,fh,fs,&
+      key,701_int64,1d-10,frame_cache,fp,ok,message)
+    call require(.not.ok,'rank-deficient rectangular frame accepted')
+    if(nproc>1)then
+      if(rank==0)then
+        call apply_dg_hybrid_fragment_preconditioner(comm,ids,key,cache,shifts,rr,answer,fp,ok,message,&
+          selection_fingerprint=701_int64)
+      else
+        call apply_dg_hybrid_fragment_preconditioner(comm,ids,key,cache,shifts,rr,answer,fp,ok,message)
+      endif
+      call require(.not.ok.and..not.allocated(answer),'rank-disagreeing selection presence accepted')
+    endif
+  end subroutine
   subroutine test_frame_cancellation()
     complex(real64)::frame(2,3),rotated(2,3),v(2,2),amplitudes(3,1)
     complex(real64),allocatable::local_frame(:,:)

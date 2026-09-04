@@ -448,6 +448,40 @@ dimension used in the denominator floor. Existing square preconditioner tests
 still pass on 1/2/4/8 ranks. No implementation or production-route change was
 made at this checkpoint, and no DC/material run was repeated.
 
+**Second C4 partial checkpoint, 2026-09-04 — rectangular numerical entry:**
+Added `prepare_dg_hybrid_frame_preconditioner` for a single-owner fragment
+communicator (production MPI_COMM_SELF). Multi-rank fragment communicators
+are rejected rather than enabling column distribution. The supplied row IDs,
+Hermitian H/S and finite inputs are validated; only coefficient columns with
+Euclidean norm <= `64*epsilon_machine*max(n,m_input)` are omitted. The retained
+frame must still satisfy `Q Q^dagger=I` within the existing tolerance. Nonzero
+columns with unresolved reference metric norms are rejected, not removed.
+The signed denominator roundoff uses `max(n,m_retained)`; the old square entry
+therefore retains its previous dimension and sign convention.
+
+The private cache binds the original Q payload (including omitted columns),
+selection fingerprint, operator key and layout. Applying a rectangular cache
+requires the matching selection fingerprint. After the signed action is
+formed, the cancellation gate runs before output publication. Failed rebuilds
+preserve the prior cache. This routine checks reference metric norms, not full
+S rank: the separate C3 core-metric admission remains a production prerequisite.
+
+Review found that reusing identity-reference validation also introduced a
+spurious coordinate-dependent metric-norm check. A regression with
+`S=diag(1e-9,1)` and Hadamard Q demonstrated RED versus the old square API.
+Matrix validation is now separated privately from actual-reference metric
+validation; no public skip-validation option exists. The regression is GREEN.
+
+Fresh preconditioner tests pass on 1/2/4/8 ranks, including a nonidentity-metric
+oracle, complex unitary covariance, square-limit equivalence, zero columns,
+unresolved nonzero columns, rank-deficient frames, stale/missing selection,
+operator epochs, optional-argument disagreement, rollback and cancellation
+without publication. Selection/subspace tests pass on 1/2/4/8, raw-Wannier on
+2/4/8, and release build succeeds. Independent re-review has no remaining
+Critical/Important issue. The authoritative raw-U/selection-to-frame exporter
+and its integration with selected admission remain next; C4 and Task 8 are
+not complete. Existing dirty files/logs were retained and no DC run repeated.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_preconditioner.f90`
 - Modify: `tests/dg/test_dg_hybrid_fragment_preconditioner_mpi.f90`
