@@ -665,6 +665,30 @@ C5 still requires cutoff comparison with bound raw DC states and actual
 operator support admission, plus production support-provider completeness.
 The analytic probe does not replace those gates or authorize C6/main changes.
 
+**Production support-provider checkpoint, 2026-09-05:** The production face
+materializer now emits an independently frozen inventory receipt: an ordered
+topology fingerprint, per-slot fingerprints and the expected face count.  A
+new admission adapter requires the exact one-rank-per-fragment mapping and
+turns every face value, the original periodic finite-difference stencil for
+every face derivative, and the supplied physical projector sparse rows into
+the three support operators consumed by combined admission.  It independently
+reapplies the value and derivative rows to the selected buffer basis and
+requires agreement with the frozen production traces before publishing any of
+the three operator fingerprints.
+
+The test uses the actual production topology/face materializer on 2/4/8 ranks.
+It rejects changed derivative coefficients, a mutated frozen trace, an omitted
+face, a same-size duplicate-face substitution, empty projector offsets and
+overflowing grid extents.  Failed calls publish no partial fingerprints.  The
+selection runner passes on 1/2/4/8 ranks, the existing production-face runner
+passes on 1/2/4/8 ranks, and the release build succeeds.  No material DC or
+W90 calculation was repeated.
+
+C5 remains open for the final combined case in which these production-created
+operators, rather than the existing hand-written fixture manifests, admit the
+same bound raw DC state at an insufficient and a sufficient user cutoff.  C6
+and the main route remain unchanged.
+
 **Files:**
 - Modify: `tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90`
 - Modify: `tests/dg/run_dg_hybrid_fragment_wannier_mpi.py`

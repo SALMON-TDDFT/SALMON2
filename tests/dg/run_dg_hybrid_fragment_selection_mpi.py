@@ -45,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
                 "src/gs/dc/dg_hybrid_fragment_basis_stream.f90",
                 "src/gs/dc/dg_hybrid_broken_volume.f90",
                 "src/gs/dc/dg_hybrid_sipg_operator.f90",
+                "src/gs/dc/dg_hybrid_production_face_traces.f90",
                 "src/gs/dc/dg_overlapping_wannier_nonlocal.f90",
                 "src/gs/dc/dg_hybrid_variational_payload.f90",
                 "src/gs/dc/dg_hybrid_divided_operator.f90",
@@ -53,6 +54,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
                 "src/gs/dc/dg_hybrid_fragment_preconditioner.f90",
                 "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90",
                 "src/gs/dc/dg_hybrid_fragment_admission.f90",
+                "src/gs/dc/dg_hybrid_production_support.f90",
                 "src/gs/dc/dg_hybrid_fragment_thermal.f90"]
     sources += ["tests/dg/test_dg_hybrid_fragment_wannier_mpi.f90",
                 "tests/dg/test_dg_hybrid_fragment_selection_mpi.f90"]

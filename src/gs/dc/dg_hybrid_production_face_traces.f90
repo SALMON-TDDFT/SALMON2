@@ -21,6 +21,9 @@ module dg_hybrid_production_face_traces
     integer,allocatable::basis_ids_minus(:),basis_ids_plus(:)
     complex(real64),allocatable::value_minus(:,:),value_plus(:,:)
     complex(real64),allocatable::derivative_minus(:,:),derivative_plus(:,:)
+    integer::production_inventory_count=0
+    integer(int64)::production_inventory_fingerprint=0_int64
+    integer(int64)::production_inventory_slot_fingerprint=0_int64
     integer(int64)::fingerprint=0_int64
   end type s_dg_hybrid_production_face_trace
 
@@ -29,7 +32,7 @@ module dg_hybrid_production_face_traces
     assemble_dg_hybrid_production_interface_rows,assemble_dg_hybrid_production_interface_component_rows,&
     reconstruct_dg_hybrid_production_interface_actions,freeze_dg_hybrid_basis_directory,&
     materialize_dg_hybrid_production_interior,&
-    reconstruct_dg_hybrid_production_interface_state
+    reconstruct_dg_hybrid_production_interface_state,validate_dg_hybrid_production_face_trace_local
 contains
   subroutine freeze_dg_hybrid_basis_directory(icomm,bases,effective_ids,basis_owner,basis_fragment,ok,message)
     integer,intent(in)::icomm,effective_ids(:)
@@ -417,7 +420,7 @@ contains
   end subroutine reconstruct_dg_hybrid_production_interface_actions
 
   subroutine materialize_dg_hybrid_production_face_collection(icomm,origins,sizes,global_size,hgs,coef_nab,bases,&
-      basis_owner,basis_fragment,effective_ids,faces,ok,message)
+      basis_owner,basis_fragment,effective_ids,faces,ok,message,inventory_count,inventory_fingerprint)
     integer,intent(in)::icomm,origins(:,:),sizes(:,:),global_size(3),basis_owner(:),basis_fragment(:),&
       effective_ids(:)
     real(real64),intent(in)::hgs(3),coef_nab(:,:)
@@ -425,12 +428,16 @@ contains
     type(s_dg_hybrid_production_face_trace),allocatable,intent(out)::faces(:)
     logical,intent(out)::ok
     character(*),intent(out)::message
+    integer,optional,intent(out)::inventory_count
+    integer(int64),optional,intent(out)::inventory_fingerprint
 #ifdef USE_MPI
     type(s_dg_hybrid_production_face_trace),allocatable::candidate(:)
     complex(real64),allocatable::value_minus(:,:),value_plus(:,:),derivative_minus(:,:),derivative_plus(:,:)
     integer::fragment,axis,tangent(2),t1,t2,position(3),neighbor_position(3),neighbor,face_count,cell_count,&
       minus_fragment,plus_fragment,minus_point(3),plus_point(3),normal_sign,periodic_shift(3),&
       i,j,g,npoint,column,id_rank,nproc,ierr,local_bad,minimum_integer
+    integer(int64)::inventory_hash
+    integer(int64),allocatable::inventory_slot_hash(:)
     integer,allocatable::ids_minus(:),ids_plus(:),cell_group(:),&
       cell_axis(:),cell_minus_fragment(:),cell_plus_fragment(:),cell_normal_sign(:),cell_shift(:,:),&
       cell_minus_position(:,:),cell_plus_position(:,:),group_axis(:),group_minus_fragment(:),&
@@ -439,6 +446,8 @@ contains
     real(real64)::normal(3),weight
     logical::face_ok,active
     ok=.false.;message='';local_bad=0
+    if(present(inventory_count))inventory_count=0
+    if(present(inventory_fingerprint))inventory_fingerprint=0_int64
     call MPI_Comm_rank(icomm,id_rank,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Comm_size(icomm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     if(size(origins,1)/=3.or.any(shape(origins)/=shape(sizes)).or.size(origins,2)<2.or.&
@@ -516,6 +525,36 @@ contains
         enddo
       enddo
     enddo
+    allocate(inventory_slot_hash(face_count))
+    do g=1,face_count
+      inventory_slot_hash(g)=int(z'BB67AE8584CAA73B',int64)
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(g,int64))
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(group_axis(g),int64))
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(group_minus_fragment(g),int64))
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(group_plus_fragment(g),int64))
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(group_normal_sign(g),int64))
+      do j=1,3
+        inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(group_shift(j,g),int64))
+      enddo
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),transfer(hgs(group_axis(g)),inventory_slot_hash(g)))
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),int(count(cell_group==g),int64))
+      inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),transfer(&
+        product(pack(hgs,[1,2,3]/=group_axis(g))),inventory_slot_hash(g)))
+      do i=1,cell_count
+        if(cell_group(i)/=g)cycle
+        inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),&
+          physical_grid_id(cell_minus_position(:,i),global_size))
+        inventory_slot_hash(g)=ieor(ishftc(inventory_slot_hash(g),11),&
+          physical_grid_id(cell_plus_position(:,i),global_size))
+      enddo
+      if(inventory_slot_hash(g)==0_int64)inventory_slot_hash(g)=int(g,int64)
+    enddo
+    inventory_hash=int(z'6A09E667F3BCC909',int64)
+    inventory_hash=ieor(ishftc(inventory_hash,11),int(face_count,int64))
+    do g=1,face_count
+      inventory_hash=ieor(ishftc(inventory_hash,11),inventory_slot_hash(g))
+    enddo
+    if(inventory_hash==0_int64)inventory_hash=1_int64
     allocate(candidate(face_count))
     do g=1,face_count
       axis=group_axis(g);tangent=pack([1,2,3],[1,2,3]/=axis);npoint=count(cell_group==g)
@@ -567,7 +606,19 @@ contains
         -derivative_plus,candidate(g))
       deallocate(minus_ids,plus_ids,ids_minus,ids_plus,value_minus,derivative_minus,value_plus,derivative_plus)
     enddo
+    do g=1,face_count
+      candidate(g)%global_face_id=g
+      candidate(g)%minus_fragment=group_minus_fragment(g);candidate(g)%plus_fragment=group_plus_fragment(g)
+      candidate(g)%periodic_shift=group_shift(:,g);candidate(g)%canonical_normal=0d0
+      candidate(g)%canonical_normal(group_axis(g))=real(group_normal_sign(g),real64)
+      candidate(g)%h_normal=hgs(group_axis(g))
+      candidate(g)%production_inventory_count=face_count
+      candidate(g)%production_inventory_fingerprint=inventory_hash
+      candidate(g)%production_inventory_slot_fingerprint=inventory_slot_hash(g)
+    enddo
     allocate(faces(face_count));faces=candidate;ok=.true.;message=''
+    if(present(inventory_count))inventory_count=face_count
+    if(present(inventory_fingerprint))inventory_fingerprint=inventory_hash
 #else
     ok=.false.;message='production face materialization requires MPI'
 #endif
@@ -918,6 +969,15 @@ contains
 #endif
     if(ok)then;message='';else;message='duplicate or invalid physical production face collection';endif
   end subroutine validate_dg_hybrid_production_face_collection
+
+  subroutine validate_dg_hybrid_production_face_trace_local(face,ok)
+    type(s_dg_hybrid_production_face_trace),intent(in)::face
+    logical,intent(out)::ok
+    integer::bad
+    integer(int64)::recomputed
+    call validate_stored_face(face,bad,recomputed)
+    ok=bad==0
+  end subroutine validate_dg_hybrid_production_face_trace_local
 
   logical function same_physical_face(first,second) result(same)
     type(s_dg_hybrid_production_face_trace),intent(in)::first,second

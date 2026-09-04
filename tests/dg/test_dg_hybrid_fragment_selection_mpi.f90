@@ -16,6 +16,8 @@ program test_fragment_selection
     s_dg_hybrid_projection_factorization_receipt,validate_dg_hybrid_projected_basis
   use dg_hybrid_broken_volume,only:assemble_dg_hybrid_broken_volume_rows
   use dg_hybrid_sipg_operator,only:s_dg_hybrid_sipg_face_operator,assemble_dg_hybrid_sipg_face
+  use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
+    freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection
   use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal_rows
   use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload
   use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload,extract_dg_hybrid_fragment_self_block
@@ -27,6 +29,8 @@ program test_fragment_selection
   use dg_hybrid_fragment_admission,only:s_dg_hybrid_support_operator,s_dg_hybrid_admission_report,&
     prepare_dg_hybrid_support_operator,admit_dg_hybrid_selected_fragment,export_dg_hybrid_selected_basis_frame
   use dg_hybrid_fragment_admission,only:prepare_dg_hybrid_selected_trial
+  use dg_hybrid_production_support,only:s_dg_hybrid_production_support_receipt,&
+    prepare_dg_hybrid_production_support
   use dg_hybrid_fragment_thermal,only:s_dg_hybrid_thermal_state,advance_dg_hybrid_thermal_state
   use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_fragment_preconditioner,&
     s_dg_hybrid_preconditioner_key,prepare_dg_hybrid_frame_preconditioner,apply_dg_hybrid_fragment_preconditioner
@@ -182,6 +186,7 @@ program test_fragment_selection
   call require(all(cache%wannier_values==snapshot%wannier_values),'export mutated raw cache')
   call require(setup_calls==setup_saved.and.run_calls==run_saved,'export reran W90')
   call test_permuted_reference()
+  call test_production_support_provider()
 
   do variant=1,4
     bad_cache=cache;bad_mapping=mapping
@@ -1416,6 +1421,115 @@ contains
     call require(.not.passed.and.measured.and.maxval(abs(defects-expected_errors))<1d-10,&
       'core-exact state concealed required buffer-tail loss')
   end subroutine
+  subroutine test_production_support_provider()
+    type(s_dg_hybrid_fragment_basis),allocatable::bases(:)
+    type(s_dg_hybrid_production_face_trace),allocatable::faces(:),bad_faces(:)
+    type(s_dg_hybrid_support_operator)::support(3)
+    type(s_dg_hybrid_production_support_receipt)::support_receipt
+    integer,allocatable::basis_owner(:),basis_fragment(:),origins(:,:),sizes(:,:),effective_ids(:),empty_offsets(:)
+    integer::fragment_id,fragment,p,x,y,nx,ngrid,face_inventory_count
+    integer::grid_size(3),projector_offsets(2)
+    integer(int64),allocatable::grid_ids(:),projector_ids(:)
+    integer(int64)::support_fingerprints(3),face_inventory_fingerprint
+    real(real64)::coef_nab(1,3),changed_coef_nab(1,3),hgs(3),projector_weights(1)
+    complex(real64),allocatable::projector_values(:)
+    logical::passed
+    character(256)::why
+    if(np==1)return
+    fragment_id=rank+1;nx=2*np;grid_size=[nx,2,1];ngrid=product(grid_size)
+    allocate(bases(np),origins(3,np),sizes(3,np),effective_ids(np),grid_ids(ngrid))
+    sizes=spread([2,2,1],2,np);origins=0
+    do fragment=1,np
+      origins(1,fragment)=2*(fragment-1);effective_ids(fragment)=fragment
+      bases(fragment)%fragment_id=merge(fragment,0,fragment==fragment_id)
+      bases(fragment)%generation=7
+      allocate(bases(fragment)%global_ids(merge(1,0,fragment==fragment_id)),&
+        bases(fragment)%sector(merge(1,0,fragment==fragment_id)),&
+        bases(fragment)%buffer_point_ids(ngrid),&
+        bases(fragment)%buffer_values(ngrid,merge(1,0,fragment==fragment_id)))
+      if(fragment==fragment_id)then
+        bases(fragment)%global_ids=[int(fragment,int64)];bases(fragment)%sector=[1]
+      endif
+    enddo
+    p=0
+    do y=0,1;do x=0,nx-1
+      p=p+1;grid_ids(p)=int(1+x+nx*y,int64)
+      do fragment=1,np
+        bases(fragment)%buffer_point_ids(p)=grid_ids(p)
+        if(fragment==fragment_id)bases(fragment)%buffer_values(p,1)=&
+          cmplx(real(fragment,real64)*(real(x+1,real64)+0.1d0*y),0.03d0*x,real64)
+      enddo
+    enddo;enddo
+    call freeze_dg_hybrid_basis_directory(MPI_COMM_WORLD,bases,effective_ids,basis_owner,basis_fragment,passed,why)
+    call require(passed,'production support directory: '//trim(why))
+    coef_nab=reshape([0.5d0,0.25d0,0.125d0],[1,3]);hgs=[1d0,2d0,3d0]
+    projector_offsets=[1,3]
+    allocate(projector_ids(2),projector_values(2))
+    projector_ids=[int(1+2*(fragment_id-1),int64),int(1+modulo(2*fragment_id,nx),int64)]
+    projector_values=cmplx([0.75d0,-0.25d0],[0.1d0,0.2d0],real64);projector_weights=1d0
+    call materialize_dg_hybrid_production_face_collection(MPI_COMM_WORLD,origins,sizes,grid_size,hgs,&
+      coef_nab,bases,basis_owner,basis_fragment,effective_ids,faces,passed,why,face_inventory_count,&
+      face_inventory_fingerprint)
+    call require(passed,'production support face inventory: '//trim(why))
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,grid_size,coef_nab,bases(fragment_id),&
+      faces,face_inventory_count,face_inventory_fingerprint,projector_offsets,projector_ids,projector_values,&
+      projector_weights,support,support_fingerprints,&
+      support_receipt,passed,why)
+    call require(passed.and.support_receipt%valid,'production support provider: '//trim(why))
+    call require(all(support_fingerprints/=0_int64).and.support_receipt%boundary_rows==4.and.&
+      support_receipt%derivative_rows==4.and.support_receipt%projector_rows==1,&
+      'production support provider lost a face, stencil, or projector row')
+    call require(support_receipt%maximum_face_value_defect<1d-13.and.&
+      support_receipt%maximum_face_derivative_defect<1d-13,&
+      'production support manifest does not reproduce its frozen face traces')
+    bad_faces=faces
+    if(rank==0)then
+      do p=1,size(bad_faces)
+        if(.not.bad_faces(p)%frozen)cycle
+        if(bad_faces(p)%minus_fragment==fragment_id)then
+          bad_faces(p)%value_minus(1,1)=bad_faces(p)%value_minus(1,1)+0.25d0;exit
+        else if(bad_faces(p)%plus_fragment==fragment_id)then
+          bad_faces(p)%value_plus(1,1)=bad_faces(p)%value_plus(1,1)+0.25d0;exit
+        endif
+      enddo
+    endif
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,grid_size,coef_nab,bases(fragment_id),&
+      bad_faces,face_inventory_count,face_inventory_fingerprint,projector_offsets,projector_ids,projector_values,&
+      projector_weights,support,support_fingerprints,&
+      support_receipt,passed,why)
+    call require(.not.passed.and.index(why,'invalid frozen')>0.and.all(support_fingerprints==0_int64),&
+      'mutated frozen production face was accepted or partially published')
+    bad_faces=faces(:size(faces)-1)
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,grid_size,coef_nab,bases(fragment_id),&
+      bad_faces,face_inventory_count,face_inventory_fingerprint,projector_offsets,projector_ids,projector_values,&
+      projector_weights,support,support_fingerprints,support_receipt,passed,why)
+    call require(.not.passed.and.all(support_fingerprints==0_int64),&
+      'collectively omitted production face was accepted or partially published')
+    bad_faces=faces;bad_faces(size(bad_faces))=bad_faces(1)
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,grid_size,coef_nab,bases(fragment_id),&
+      bad_faces,face_inventory_count,face_inventory_fingerprint,projector_offsets,projector_ids,projector_values,&
+      projector_weights,support,support_fingerprints,support_receipt,passed,why)
+    call require(.not.passed.and.all(support_fingerprints==0_int64),&
+      'same-size duplicate production face substitution was accepted')
+    allocate(empty_offsets(0))
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,grid_size,coef_nab,bases(fragment_id),&
+      faces,face_inventory_count,face_inventory_fingerprint,empty_offsets,projector_ids,projector_values,&
+      projector_weights,support,support_fingerprints,support_receipt,passed,why)
+    call require(.not.passed.and.all(support_fingerprints==0_int64),&
+      'empty projector offsets crashed or partially published support')
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,[huge(0),huge(0),2],coef_nab,&
+      bases(fragment_id),faces,face_inventory_count,face_inventory_fingerprint,projector_offsets,projector_ids,&
+      projector_values,projector_weights,support,support_fingerprints,support_receipt,passed,why)
+    call require(.not.passed.and.all(support_fingerprints==0_int64),&
+      'overflowing production grid extent was accepted')
+    changed_coef_nab=coef_nab;changed_coef_nab(1,1)=0.75d0
+    call prepare_dg_hybrid_production_support(MPI_COMM_WORLD,fragment_id,7,grid_size,changed_coef_nab,&
+      bases(fragment_id),faces,face_inventory_count,face_inventory_fingerprint,projector_offsets,projector_ids,&
+      projector_values,projector_weights,support,&
+      support_fingerprints,support_receipt,passed,why)
+    call require(.not.passed.and.index(why,'derivative')>0,&
+      'stale production derivative coefficients were accepted')
+  end subroutine test_production_support_provider
   subroutine apply_density_metric(input,output,valid)
     complex(real64),intent(in)::input(:,:)
     complex(real64),intent(out)::output(:,:)
