@@ -1146,6 +1146,30 @@ failed before local group-membership validation was added. All fragment WF
 tests, the release build and diff check pass after that fix. Main-route
 construction/callback wiring is still pending; no Si64 calculation was run.
 
+**Direct construction entry checkpoint, 2026-09-04 (Task 8 remains incomplete):**
+`build_dg_hybrid_fragment_wannier_from_dc_seed` now composes the orbital-aware
+DC packer and the fragment Wannier builder. Candidate grid IDs must match the
+unique packed layout exactly. Packing failures are synchronized across all
+fragments before entering construction, so one bad fragment cannot leave its
+peers waiting in the next total-level collective. Existing cache publication
+remains transactional. The MPI fixture exercises the complete entry, physical
+seed reconstruction from WF coefficients, one construction per generation,
+cache reuse and one-rank input/layout failure without cache mutation or W90
+re-entry. External W90 calls use the fixture's stubs; this is not a material
+localization benchmark. The fragment WF fixture passes on 2/4/8 ranks and
+the release build and whitespace check pass. Review found no Critical/Important issues.
+
+`check_dg_hybrid_fragment_wannier_route.py` is now present and intentionally
+RED: main still dispatches through the old complete-system construction.
+It requires a separated divided entry using direct DC construction and the
+bounded update/occupation kernels, and rejects legacy construction/solver
+calls in that entry. The old shared main routine consumes preliminary LCFO
+results throughout its construction block; inserting an isolated new call
+would not safely replace that dependency. Production separation and the
+uncompressed-catalog/payload/callback wiring remain the next work, including
+mapping raw DC cell order with `dc%jxyz_tot` rather than assuming a centered
+core in the legacy buffer layout. No main-route switch or Si64 run is claimed.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

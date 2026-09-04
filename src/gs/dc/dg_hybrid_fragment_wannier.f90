@@ -52,8 +52,58 @@ module dg_hybrid_fragment_wannier
   public::build_dg_hybrid_fragment_wannier
   public::export_dg_hybrid_fragment_coordinates
   public::pack_dg_hybrid_fragment_dc_seed
+  public::build_dg_hybrid_fragment_wannier_from_dc_seed
 
 contains
+
+  ! Direct seed entry: all total ranks must participate. Candidate rows are
+  ! already on the packer's unique spatial layout, identified explicitly by IDs.
+  ! Fragment-local input errors are synchronized before any total-level builder
+  ! collective; a failed fragment therefore cannot strand its peers in W90.
+  subroutine build_dg_hybrid_fragment_wannier_from_dc_seed(comm_total,comm_fragment,orbital_comm,&
+      fragment_id,basis_generation,seed_directory,grid_shape,owned_lower,owned_upper,rwf,esp,rocc,hvol,&
+      candidate_grid_ids,buffer_values,projector_values,metric_tolerance,real_lattice,reciprocal_lattice,&
+      atom_symbols,atoms_cart,num_iter,localization_tolerance,byte_limit,cache,ok,message)
+    integer,intent(in)::comm_total,comm_fragment,orbital_comm,fragment_id,basis_generation
+    integer,intent(in)::grid_shape(3),owned_lower(3),owned_upper(3),num_iter
+    character(*),intent(in)::seed_directory,atom_symbols(:)
+    real(real64),allocatable,intent(in)::rwf(:,:,:,:,:,:,:),esp(:,:,:),rocc(:,:,:)
+    real(real64),intent(in)::hvol,metric_tolerance,real_lattice(3,3),reciprocal_lattice(3,3),&
+      atoms_cart(:,:),localization_tolerance
+    integer(int64),intent(in)::candidate_grid_ids(:),byte_limit
+    complex(real64),intent(in)::buffer_values(:,:),projector_values(:,:)
+    type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::cache
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer(int64),allocatable::ids(:)
+    real(real64),allocatable::weights(:),energies(:),occupations(:),fractional(:,:)
+    complex(real64),allocatable::seeds(:,:)
+    logical::local_ok
+    character(message_length)::local_message
+
+    call validate_fragment_partition(comm_total,comm_fragment,fragment_id,local_ok,local_message)
+    call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+    if(.not.ok)return
+    call pack_dg_hybrid_fragment_dc_seed(comm_fragment,grid_shape,owned_lower,owned_upper,&
+      rwf,esp,rocc,hvol,ids,weights,seeds,energies,occupations,fractional,local_ok,local_message,&
+      orbital_comm=orbital_comm)
+    call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+    if(.not.ok)return
+    local_ok=size(candidate_grid_ids)==size(ids)
+    if(local_ok)local_ok=all(candidate_grid_ids==ids)
+    local_ok=local_ok.and.size(buffer_values,2)==size(ids).and.size(projector_values,2)==size(ids)
+    call canonical_total_status(comm_total,local_ok,&
+      'DC construction candidate rows do not match the packed fragment grid',ok,message)
+    if(.not.ok)return
+    call build_dg_hybrid_fragment_wannier(comm_total,comm_fragment,fragment_id,basis_generation,&
+      seed_directory,ids,weights,seeds,energies,occupations,buffer_values,projector_values,&
+      metric_tolerance,real_lattice,reciprocal_lattice,atom_symbols,atoms_cart,fractional,&
+      num_iter,localization_tolerance,byte_limit,cache,ok,message)
+#else
+    ok=.false.;message='direct DC Wannier construction requires MPI'
+#endif
+  end subroutine build_dg_hybrid_fragment_wannier_from_dc_seed
 
   ! Pack the entire periodic core+buffer cell, excluding only communication halos.
   ! Without orbital_comm, orbitals must be replicated on the spatial communicator.

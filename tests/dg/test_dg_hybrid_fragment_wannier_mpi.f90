@@ -40,7 +40,8 @@ program test_dg_hybrid_fragment_wannier_mpi
   use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
   use dg_overlapping_wannier_w90,only:apply_dg_w90_gamma_transform
   use dg_hybrid_fragment_wannier,only:s_dg_hybrid_fragment_wannier_cache,&
-    build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates,pack_dg_hybrid_fragment_dc_seed
+    build_dg_hybrid_fragment_wannier,export_dg_hybrid_fragment_coordinates,pack_dg_hybrid_fragment_dc_seed,&
+    build_dg_hybrid_fragment_wannier_from_dc_seed
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_subspace
@@ -358,10 +359,59 @@ program test_dg_hybrid_fragment_wannier_mpi
       'duplicate fragment communicator roots published a partial cache')
   endif
 
+  call test_dc_construction_entry
   if(total_rank==0)write(*,'(a,i0,a)')'PASS hybrid fragment Wannier on ',total_size,' ranks'
   call MPI_Comm_free(comm_fragment,ierr)
   call MPI_Finalize(ierr)
 contains
+
+  subroutine test_dc_construction_entry
+    real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)
+    complex(real64),allocatable::buffer(:,:),projector(:,:),expected(:,:),reconstructed(:,:)
+    integer(int64),allocatable::ids(:)
+    type(s_dg_hybrid_fragment_wannier_cache)::built,snapshot
+    integer::a,b,first,last,points,pass,saved_setup,saved_run
+    first=1+fragment_rank*nseed/fragment_size;last=(fragment_rank+1)*nseed/fragment_size
+    allocate(tensor(0:9,0:2,0:2,1,first:last,1,1),esp(nseed,1,1),occ(nseed,1,1))
+    tensor=ieee_value(0d0,ieee_quiet_nan)
+    do b=first,last;do a=1,8
+      tensor(a,1,1,1,b,1,1)=merge(1d0,0d0,a==b)
+    enddo;enddo
+    esp(:,1,1)=physical_energies;occ(:,1,1)=physical_occupations
+    points=merge(8,0,fragment_rank==0)
+    allocate(ids(points),buffer(1,points),projector(1,points),expected(nseed,points))
+    buffer=0d0;projector=0d0;expected=0d0
+    do a=1,points
+      ids(a)=a
+      buffer(1,a)=merge(1d0,0d0,a==8);projector(1,a)=merge(1d0,0d0,a==7)
+      do b=1,nseed;expected(b,a)=merge(1d0,0d0,a==b);enddo
+    enddo
+    saved_setup=setup_calls;saved_run=run_calls
+    do pass=1,4
+      if(pass==3.and.total_rank==0)esp(1,1,1)=ieee_value(0d0,ieee_quiet_nan)
+      if(pass==4.and.total_rank==0)ids(1)=99_int64
+      call build_dg_hybrid_fragment_wannier_from_dc_seed(comm_total,comm_fragment,comm_fragment,&
+        fragment_id,13,artifact_root,[8,1,1],[1,1,1],[8,1,1],tensor,esp,occ,1d0,&
+        ids,buffer,projector,metric_tolerance,real_lattice,reciprocal_lattice,atom_symbols,atoms_cart,&
+        20,localization_tolerance,10000000_int64,built,ok,message)
+      if(pass<=2)then
+        call require_total(ok,'direct DC construction failed: '//trim(message))
+        if(pass==1)snapshot=built
+        reconstructed=matmul(transpose(built%wannier_values),built%dc_seed_coefficients_in_wannier)
+        call require_total(all(abs(reconstructed-transpose(expected))<1d-10),&
+          'direct DC construction lost original physical seeds')
+        call require_total(setup_calls==saved_setup+merge(1,0,fragment_rank==0).and.&
+          run_calls==saved_run+merge(1,0,fragment_rank==0),'DC entry reran construction on cache reuse')
+      else
+        call require_total(.not.ok,'invalid direct DC input accepted')
+        call require_same_message(message,'DC input failure did not propagate across fragments')
+      endif
+      call require_total(same_cache_payload(built,snapshot),'DC entry mutated the published cache')
+      call require_total(setup_calls==saved_setup+merge(1,0,fragment_rank==0).and.&
+        run_calls==saved_run+merge(1,0,fragment_rank==0),'rejected DC input entered Wannier90')
+      esp(:,1,1)=physical_energies
+    enddo
+  end subroutine test_dc_construction_entry
 
   subroutine test_orbital_distributed_packing
     real(real64),allocatable::tensor(:,:,:,:,:,:,:),esp(:,:,:),occ(:,:,:)
