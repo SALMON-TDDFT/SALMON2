@@ -10,7 +10,8 @@ program test_dg_hybrid_wannier_complement_mpi
   integer(int64),allocatable::row_ids(:),duplicate_ids(:)
   real(real64),allocatable::weights(:),duplicate_weights(:)
   complex(real64),allocatable::wannier(:,:),pw(:,:),projected(:,:),dense(:,:),duplicate_w(:,:),duplicate_p(:,:),&
-    generalized_coefficients(:,:),generalized_projected(:,:),near_wannier(:,:),near_pw(:,:),near_expected(:,:)
+    generalized_coefficients(:,:),generalized_projected(:,:),near_wannier(:,:),near_pw(:,:),near_expected(:,:),&
+    duplicate_wannier(:,:)
   complex(real64)::near_residual_local(2),near_residual(2),retained_residual(2),retained_vector(2),&
     retained_projector(2,2)
   integer::packet_ids(np),offsets(np+1),near_ids(3)
@@ -111,6 +112,31 @@ program test_dg_hybrid_wannier_complement_mpi
     'generalized orthogonality receipt is not the retained-space residual')
   call require(generalized_workspace>0_int64.and.generalized_fingerprint/=0_int64,&
     'near-null generalized projection did not publish valid workspace/fingerprint receipts')
+
+  ! Exact duplicate fragment directions are numerical nulls, not uncertain
+  ! positive eigenvalues near the truncation threshold. The old 16*roundoff
+  ! ambiguity band reaches zero for this nine-column Gram at tolerance 1e-12.
+  allocate(duplicate_wannier(9,size(row_ids)));duplicate_wannier=0d0;near_pw=0d0
+  do i=1,size(row_ids)
+    if(row_ids(i)==1_int64)duplicate_wannier(:,i)=1d0/sqrt(weights(i))
+    if(row_ids(i)==2_int64)near_pw(1,i)=1d0
+  enddo
+  call compute_dg_hybrid_generalized_wannier_projection_tile(comm,nrow,row_ids,weights,duplicate_wannier,near_pw,&
+    505_int64,606_int64,1,1d-12,generalized_coefficients,generalized_projected,metric_rank,metric_condition,&
+    orthogonality_defect,generalized_workspace,generalized_fingerprint,ok,message)
+  call require(ok,'exact duplicate WF directions rejected as ambiguous: '//trim(message))
+  call require(metric_rank==1.and.maxval(abs(generalized_projected-near_pw))<1d-12,&
+    'exact-null metric compression changed the independent PW complement')
+
+  near_wannier=0d0
+  do i=1,size(row_ids)
+    if(row_ids(i)==1_int64)near_wannier(1,i)=1d0/sqrt(weights(i))
+    if(row_ids(i)==2_int64)near_wannier(2,i)=1d-4/sqrt(weights(i))
+  enddo
+  call compute_dg_hybrid_generalized_wannier_projection_tile(comm,nrow,row_ids,weights,near_wannier,near_pw,&
+    707_int64,808_int64,1,1d-8,generalized_coefficients,generalized_projected,metric_rank,metric_condition,&
+    orthogonality_defect,generalized_workspace,generalized_fingerprint,ok,message)
+  call require(.not.ok.and.index(message,'ambiguous')>0,'resolvable eigenvalue at metric cutoff was accepted')
 
   if(rank==0)then
     allocate(duplicate_ids(nlocal+1),duplicate_weights(nlocal+1),duplicate_w(nw,nlocal+1),duplicate_p(np,nlocal+1))

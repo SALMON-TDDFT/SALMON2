@@ -381,7 +381,10 @@ contains
     if(any(eigenvalues< -negative_limit))then
       call cleanup_prepare_workspace();message='indefinite generalized Wannier Gram matrix';return
     endif
-    if(any(abs(eigenvalues-metric_cutoff)<=16d0*roundoff_floor))then
+    ! Roundoff-sized modes are already classified as numerical nulls. When
+    ! the cutoff is small, its uncertainty band can reach zero; do not mistake
+    ! exact duplicate fragment directions for resolvable ambiguous modes.
+    if(any(eigenvalues>roundoff_floor.and.abs(eigenvalues-metric_cutoff)<=16d0*roundoff_floor))then
       call cleanup_prepare_workspace();message='ambiguous generalized Wannier metric rank at cutoff';return
     endif
     candidate_rank=count(eigenvalues>metric_cutoff)

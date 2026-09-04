@@ -46,6 +46,10 @@ program test_dg_hybrid_fragment_wannier_mpi
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
     initialize_dg_hybrid_fragment_subspace
+  use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
+  use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
+  use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
+    s_dg_hybrid_projection_factorization_receipt
   implicit none
   integer,parameter::global_ngrid=8,buffer_global_point=8,projector_global_point=7
   integer,parameter::first_generation=7
@@ -452,6 +456,7 @@ contains
           built%local_grid_ids,physical_ids,core_mask,ok,message)
         call require_total(ok,'constructed WF physical mapping failed: '//trim(message))
         if(pass==1)call test_column_export(built,physical_ids,core_mask)
+        if(pass==1.and.total_size==2)call test_dc_cache_to_projected_basis(built)
         density=0d0;reference_density=0d0
         do a=1,size(physical_ids)
           if(.not.core_mask(a))cycle
@@ -474,6 +479,81 @@ contains
       esp(:,1,1)=physical_energies
     enddo
   end subroutine test_dc_construction_entry
+
+  subroutine test_dc_cache_to_projected_basis(built)
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::built
+    type(s_dg_hybrid_basis_catalog)::pw_catalog
+    type(s_dg_hybrid_fragment_basis)::basis
+    type(s_dg_hybrid_projection_factorization_receipt)::receipt
+    integer(int64),allocatable::physical(:),core_ids(:)
+    logical,allocatable::core(:)
+    integer,allocatable::owners(:)
+    complex(real64),allocatable::q(:,:),coeff(:,:),padded(:,:),reconstructed(:,:),expected(:,:)
+    real(real64)::coordinates(3,8),windows(2,8),gv(3,1),density(12),reference(12)
+    integer::mapping(8,3),ranks(2),nw,a,b,n,setup_saved,run_saved
+    integer(int64)::workspace,fingerprint,wf_fingerprint
+    ! Production topology: two fragments, one rank each. All raw DC buffer
+    ! points are preserved and wrapped onto the shared twelve-point physical cell.
+    setup_saved=setup_calls;run_saved=run_calls
+    call export_dg_hybrid_fragment_coordinates(comm_fragment,fragment_id,13,&
+      built%receipt%seed_fingerprint,built%receipt%basis_fingerprint,built%local_grid_ids,&
+      built%local_row_layout_fingerprint,built,q,coeff,ok,message)
+    call require_total(ok,'cache coordinate validation failed before PW projection: '//trim(message))
+    mapping=1
+    mapping(:,1)=[(1+modulo(a-1+6*(fragment_id-1),12),a=1,8)]
+    call map_dg_hybrid_fragment_dc_grid(comm_fragment,[8,1,1],[6,1,1],[12,1,1],mapping,&
+      built%local_grid_ids,physical,core,ok,message)
+    call require_total(ok,'cache physical mapping failed before PW projection: '//trim(message))
+    core_ids=pack(physical,core);nw=built%receipt%retained_rank
+    call MPI_Allgather(nw,1,MPI_INTEGER,ranks,1,MPI_INTEGER,comm_total,ierr)
+    allocate(owners(sum(ranks)))
+    owners(:ranks(1))=1;owners(ranks(1)+1:)=2
+    windows=0d0;coordinates=0d0;gv=0d0
+    do a=1,8
+      coordinates(1,a)=real(physical(a)-1_int64,real64)
+      b=1+int((physical(a)-1_int64)/6_int64);windows(b,a)=1d0
+    enddo
+    allocate(pw_catalog%packets(2));pw_catalog%valid=.true.
+    pw_catalog%packet_fingerprint=101_int64;pw_catalog%catalog_fingerprint=103_int64
+    do a=1,2
+      pw_catalog%packets(a)%fragment_id=a;pw_catalog%packets(a)%owner_rank=a-1
+      pw_catalog%packets(a)%star_id=1
+      allocate(pw_catalog%packets(a)%g_indices(1),source=[1])
+    enddo
+    call MPI_Allreduce(built%receipt%distributed_wannier_fingerprint,wf_fingerprint,1,&
+      MPI_INTEGER8,MPI_BXOR,comm_total,ierr)
+    call build_dg_hybrid_projected_local_fragment_basis(comm_total,12,2,fragment_id,core_ids,&
+      [1d0,1d0,1d0,1d0,1d0,1d0],coordinates(:,1:6),windows(:,1:6),physical,built%wannier_values,&
+      coordinates,windows,pw_catalog,gv,owners,1,metric_tolerance,wf_fingerprint,&
+      basis,workspace,fingerprint,ok,message,basis_generation=13,projection_receipt=receipt)
+    call require_total(ok,'validated DC cache to projected basis failed: '//trim(message))
+    call require_total(basis%generation==13.and.receipt%valid.and.&
+      count(basis%sector==1)==nw.and.all(basis%buffer_point_ids==physical),&
+      'DC cache handoff lost WF columns, generation or buffer points')
+    n=size(basis%global_ids)
+    call require_total(n==nw+1.and.sum(abs(basis%buffer_values(:,nw+1))**2)>1d-4,&
+      'DC cache integration fixture failed to exercise a nonzero PW complement')
+    allocate(padded(n,nseed),expected(8,nseed));padded=0d0;expected=0d0
+    padded(:nw,:)=coeff
+    reconstructed=matmul(basis%buffer_values,padded)
+    do a=1,8;do b=1,nseed
+      if(built%local_grid_ids(a)==int(b,int64))expected(a,b)=1d0
+    enddo;enddo
+    call require_total(maxval(abs(reconstructed-expected))<1d-10,&
+      'WF plus PW seed coefficients no longer reconstruct the original DC orbitals')
+    density=0d0;reference=0d0
+    do a=1,8
+      if(.not.core(a))cycle
+      density(physical(a))=sum(physical_occupations*abs(reconstructed(a,:))**2)
+      reference(physical(a))=sum(physical_occupations*abs(expected(a,:))**2)
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,density,12,MPI_DOUBLE_PRECISION,MPI_SUM,comm_total,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,reference,12,MPI_DOUBLE_PRECISION,MPI_SUM,comm_total,ierr)
+    call require_total(maxval(abs(density-reference))<1d-10.and.abs(sum(density)-sum(reference))<1d-10,&
+      'DC cache to WF plus PW changed physical-core density or electron count')
+    call require_total(setup_calls==setup_saved.and.run_calls==run_saved,&
+      'DC cache to projected basis unexpectedly reran Wannier90')
+  end subroutine test_dc_cache_to_projected_basis
 
   subroutine test_column_export(built,physical_ids,core_mask)
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::built
