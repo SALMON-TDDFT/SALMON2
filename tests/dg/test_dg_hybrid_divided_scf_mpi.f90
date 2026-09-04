@@ -13,7 +13,7 @@ program test_dg_hybrid_divided_scf_mpi
     last_potential_density(:)
   real(real64)::convergence_value,reference_value,electron_count,electron_defect
   real(real64)::callback_electron_offset,density_offset,consistent_density_offset,mixed_offset
-  logical::ok,empty_pw_control,bad_density_nan,fail_terminal_potential
+  logical::ok,empty_pw_control,bad_density_nan,fail_terminal_potential,transient_offsets,bad_mixed_nan
   character(256)::message
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
@@ -61,15 +61,13 @@ program test_dg_hybrid_divided_scf_mpi
   call require(potential_calls>0.and.solve_calls>0,'accepted initial density did not enter SCF')
 
   call reset_case;density=0.45d0
-  if(rank==0)density(1)=density(1)+1.5d0*1d-12/core_weights(1)
+  if(rank==0)density(1)=density(1)+0.1d0/core_weights(1)
   call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',10d0,&
-    update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,2,&
+    update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
     core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
-  call require(.not.ok.and..not.allocated(converged),'invalid initial electron count was published')
-  call require(potential_calls==0.and.solve_calls==0.and.density_calls==0.and.mix_calls==0,&
-    'invalid initial electron count reached an SCF callback')
-  call require(electron_defect>1d-12,'invalid initial electron defect was not reported')
-  call require(convergence_value==huge(1d0),'convergence ran before initial electron gate')
+  call require(ok.and.allocated(converged),'finite initial electron drift prevented SCF convergence')
+  call require(iterations>2.and.mix_calls==iterations-1.and.electron_defect<=1d-12,&
+    'SCF did not wait for mixed-density electron convergence')
 
   call reset_case;density=0.45d0;callback_electron_offset=1d-4
   call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',1d-8,&
@@ -88,12 +86,20 @@ program test_dg_hybrid_divided_scf_mpi
   call require(convergence_value==huge(1d0),'convergence ran before independent electron gate')
 
   call reset_case;density=0.45d0;consistent_density_offset=1d-4
-  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',1d-8,&
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',10d0,&
     update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,2,&
     core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
   call require(.not.ok.and..not.allocated(converged),'target-inconsistent callback density was published')
-  call require(mix_calls==0.and.electron_defect>1d-12,'target electron gate ran after the mixer')
-  call require(convergence_value==huge(1d0),'convergence ran before target electron gate')
+  call require(mix_calls==2.and.electron_defect>1d-12,'finite target drift did not continue iteration')
+  call require(index(message,'did not converge')>0,'persistent electron drift was treated as a hard error')
+  call require(convergence_value<10d0,'persistent drift fixture did not pass the density-only threshold')
+
+  call reset_case;density=0.45d0;consistent_density_offset=0.1d0;transient_offsets=.true.
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',10d0,&
+    update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
+    core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
+  call require(ok.and.iterations>3.and.electron_defect<=1d-12,&
+    'SCF did not tolerate early density drift before occupation redistribution')
 
   call reset_case;density=0.45d0;bad_density_nan=.true.
   call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',1d-8,&
@@ -108,7 +114,27 @@ program test_dg_hybrid_divided_scf_mpi
     update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,2,&
     core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
   call require(.not.ok.and..not.allocated(converged),'invalid mixed density was published')
-  call require(mix_calls==1.and.potential_calls==1,'invalid mixed density reached another potential epoch')
+  call require(mix_calls==2.and.potential_calls==2,'finite mixed drift did not reach the next potential epoch')
+
+  call reset_case;density=0.5d0;mixed_offset=1d-4
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',10d0,&
+    update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
+    core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
+  call require(.not.ok.and..not.allocated(converged).and.mix_calls==80.and.electron_defect>1d-12,&
+    'persistent mixed electron drift was hidden by an exact unmixed output')
+
+  call reset_case;density=0.45d0;mixed_offset=0.1d0;transient_offsets=.true.
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'norm_rho_dng',1d-11,&
+    update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
+    core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
+  call require(ok.and.iterations>3.and.electron_defect<=1d-12,'transient mixer electron drift did not converge')
+
+  call reset_case;density=0.45d0;bad_mixed_nan=.true.
+  call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'rho_dne',1d-8,&
+    update_total_potential,solve_fragments,assemble_core_density,mix_dc_density,80,&
+    core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
+  call require(.not.ok.and.mix_calls==1.and.potential_calls==1.and..not.allocated(converged),&
+    'nonfinite mixed density was allowed into the next SCF step')
 
   call reset_case;density=0.45d0;fail_terminal_potential=.true.
   call run_dg_hybrid_divided_scf(comm,nglobal,core_ids,density,0.5d0,'norm_rho_dng',1d-11,&
@@ -191,7 +217,7 @@ contains
   subroutine assemble_core_density(output_density,electron_count_value,callback_ok)
     real(real64),intent(out)::output_density(:),electron_count_value;logical,intent(out)::callback_ok
     density_calls=density_calls+1;callback_trace=modulo(callback_trace*5+3,1000003);output_density=target
-    if(consistent_density_offset/=0d0.and.rank==0)&
+    if(consistent_density_offset/=0d0.and.rank==0.and.(.not.transient_offsets.or.density_calls<=3))&
       output_density(1)=output_density(1)+consistent_density_offset
     electron_count_value=sum(core_weights*output_density)
     call MPI_Allreduce(MPI_IN_PLACE,electron_count_value,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
@@ -207,13 +233,16 @@ contains
     logical,intent(out)::callback_ok
     mix_calls=mix_calls+1;callback_trace=modulo(callback_trace*5+4,1000003)
     mixed_density=0.5d0*(input_density+output_density)
-    if(mixed_offset/=0d0.and.rank==0)mixed_density(1)=mixed_density(1)+mixed_offset
+    if(mixed_offset/=0d0.and.rank==0.and.(.not.transient_offsets.or.iteration<=3))&
+      mixed_density(1)=mixed_density(1)+mixed_offset
+    if(bad_mixed_nan.and.rank==0)mixed_density(1)=transfer(int(z'7ff8000000000000',int64),0d0)
     callback_ok=iteration>0.and.(empty_pw_control.or..not.empty_pw_control)
   end subroutine mix_dc_density
   subroutine reset_case
     callback_trace=0;potential_calls=0;solve_calls=0;density_calls=0;mix_calls=0
     callback_electron_offset=0d0;density_offset=0d0;consistent_density_offset=0d0;mixed_offset=0d0
     bad_density_nan=.false.;fail_terminal_potential=.false.;empty_pw_control=.false.
+    transient_offsets=.false.;bad_mixed_nan=.false.
     last_potential_density=huge(1d0)
   end subroutine reset_case
   integer function expected_success_trace(iteration_count)result(trace)

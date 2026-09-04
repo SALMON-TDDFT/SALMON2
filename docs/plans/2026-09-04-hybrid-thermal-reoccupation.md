@@ -52,6 +52,44 @@ user-controlled PW cutoff, maximum three local updates per density epoch,
 one-shot terminal LCFO and Exp RT remain unchanged. No new worktree, DC rerun,
 material run or changes to unrelated dirty files. Execute here with checkpoints.
 
+### SCF electron-convergence amendment (user approved)
+
+The user clarified that early DC SCF electron counts may drift and asked to
+use the existing DC path as the reference. In the current worktree,
+`scf_iteration_dft.f90` updates local orbitals, optionally delays occupation
+redistribution until `Miter > nscf_init_redistribution`, assembles total density,
+then mixes density/potential. Its strict DG-DC seed mode waits for mixed-density
+electron convergence when the density threshold has been reached; it does not
+abort early iterations solely for a finite target-count difference. This is
+distinct from the weighted occupation kernel, which still solves the common
+chemical potential for its current core weights and target.
+
+Accordingly, `run_dg_hybrid_divided_scf` must allow finite initial, assembled
+and mixed density target-count drift. Accept convergence only when the density
+criterion and both the current input (initial or previously mixed) and new
+density electron criteria pass. Persistent drift means nonconvergence at the
+iteration limit, not early rollback/error. Keep the existing electron tolerance,
+temperature, density convergence formulas and callback order; do not normalize
+the density or add a new input switch. Comparing the reported electron count
+with the independent integral of the *same* new density remains an immediate
+consistency check. Nonfinite data and ownership errors remain hard failures.
+
+This supersedes an every-SCF-step target-count admission gate, not the raw
+projection/support checks or current-spectrum capacity/tail diagnostics.
+The pending thermal transaction must distinguish these numerical errors from
+ordinary outer SCF nonconvergence; the full route is not yet connected.
+
+**Checkpoint:** The initial-drift test fails before the production change with
+`finite initial electron drift prevented SCF convergence`. After the change,
+1/2/4/8-rank tests cover transient initial/assembled/mixer drift that converges,
+persistent new-density drift even when the density-only threshold is met,
+persistent mixed drift despite an exact new-density electron count, unchanged
+same-density consistency errors and nonfinite mixed-density rejection.
+The existing zero-drift callback order and empty-PW control remain unchanged.
+Release builds and independent review reports no Critical/Important finding.
+This changes only divided SCF convergence control, not conventional DC,
+main-route integration or the pending thermal-state transaction.
+
 ### Task O1: Verify the existing 300 K reoccupation kernel
 
 **Checkpoint:** O1 passes on 1/2/4/8 ranks using the existing production

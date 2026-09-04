@@ -50,7 +50,7 @@ contains
     integer,allocatable::counts(:),displacements(:)
     integer(int64),allocatable::all_ids(:)
     real(real64),allocatable::density(:),new_density(:),mixed_density(:)
-    real(real64)::electron_count,local_absolute_sum,local_square_sum,mixed_electron_defect
+    real(real64)::electron_count,local_absolute_sum,local_square_sum,mixed_electron_defect,input_electron_defect
     real(real64)::real_controls(4),minimum_reals(4),maximum_reals(4)
     logical::callback_ok
     character(256)::electron_message
@@ -119,6 +119,7 @@ contains
     call validate_density_electron_count(initial_density,0d0,.false.,'initial density',&
       electron_defect,callback_ok,electron_message)
     if(.not.callback_ok)then;message=trim(electron_message);return;endif
+    input_electron_defect=electron_defect
     allocate(density(nlocal),new_density(nlocal),mixed_density(nlocal));density=initial_density
     do iterations=1,maximum_iterations
       call update_total_potential(density,callback_ok)
@@ -130,12 +131,15 @@ contains
       call validate_density_electron_count(new_density,electron_count,.true.,&
         'callback or independent density',electron_defect,callback_ok,electron_message)
       if(.not.callback_ok)then;message=trim(electron_message);return;endif
+      ! Like the DC seed convergence path, finite charge drift delays
+      ! convergence; it does not abort the early/mixed-density iteration.
+      electron_defect=max(electron_defect,input_electron_defect)
       local_absolute_sum=sum(abs(new_density-density))
       local_square_sum=sum((new_density-density)**2)
       call reduce_dc_density_convergence(comm,convergence_mode,local_absolute_sum,local_square_sum,&
         cell_volume,expected_electron_count,global_point_count,convergence_value,callback_ok,message)
       if(.not.callback_ok)return
-      if(convergence_value<=threshold)then
+      if(convergence_value<=threshold.and.electron_defect<=electron_tolerance)then
         call update_total_potential(new_density,callback_ok)
         if(.not.collective_success(callback_ok))then
           message='divided SCF terminal potential refresh failed';return
@@ -149,6 +153,7 @@ contains
       if(.not.callback_ok)then
         electron_defect=mixed_electron_defect;message=trim(electron_message);return
       endif
+      input_electron_defect=mixed_electron_defect
       density=mixed_density
     enddo
     message='divided SCF did not converge within maximum_iterations'
@@ -167,7 +172,7 @@ contains
       logical,intent(out)::valid
       character(*),intent(out)::detail
       integer::density_invalid,global_density_invalid,reduction_error
-      real(real64)::local_integral,global_integral,reported_minimum,reported_maximum
+      real(real64)::local_integral,global_integral,reported_minimum,reported_maximum,consistency_defect
 
       valid=.false.;detail='';defect=huge(1d0);density_invalid=0
       if(.not.all(ieee_is_finite(candidate_density)))density_invalid=1
@@ -199,16 +204,16 @@ contains
         if(reduction_error/=MPI_SUCCESS)then
           detail='divided SCF callback electron maximum failed';return
         endif
-        defect=max(defect,abs(reported_minimum-expected_electron_count),&
-          abs(reported_maximum-expected_electron_count),abs(reported_minimum-global_integral),&
-          abs(reported_maximum-global_integral))
+        ! Reported count and independently integrated density describe the
+        ! same state: disagreement here is an error, not SCF nonconvergence.
+        consistency_defect=max(abs(reported_minimum-global_integral),abs(reported_maximum-global_integral))
+        if(.not.ieee_is_finite(consistency_defect).or.consistency_defect>electron_tolerance)then
+          defect=max(defect,consistency_defect)
+          detail='divided SCF '//trim(density_kind)//' electron count mismatch';return
+        endif
       endif
       if(.not.ieee_is_finite(defect))then
         detail='non-finite divided SCF electron defect';return
-      endif
-      if(defect>electron_tolerance)then
-        detail='divided SCF '//trim(density_kind)//' electron count mismatch'
-        return
       endif
       valid=.true.
     end subroutine validate_density_electron_count
