@@ -154,6 +154,25 @@ mixing selected/excluded WFs are deliberately not a selector invariance test.
 
 ### Task C3: Selected PW complement, core metric and DC projection
 
+**Partial checkpoint, 2026-09-04 (selected-value export only):** Added
+`export_dg_hybrid_selected_wannier`. It revalidates the immutable raw cache,
+checks selection metadata/ordered raw IDs and the current exact rank--fragment
+inventory, then exports selected columns without removing any buffer samples.
+Selection receipt hash version 2 additionally seals generation, counts,
+convention and center owners. Empty selection is still valid in the selector,
+but this downstream export collectively rejects unsupported PW-only fragments.
+No raw seed coefficient slicing, occupation change or W90 rerun is introduced.
+
+The new API initially failed to link (expected missing implementation); the
+1/2/4/8-rank fixture now passes full-value/order checks, single-rank receipt or
+cache corruption rejection, missing IDs, empty selection and raw immutability.
+The existing 2/4/8-rank raw-Wannier fixture and release build pass. Independent
+review found no Critical/Important issue; temporary validation maps are freed
+before copying values. This is only the first C3 connection component: active
+global IDs, selected-only PW projection, actual core Gram solve, reconstruction
+diagnostics and the fail-only post-initializer density gate remain pending.
+The production main route remains unchanged; no DC/material run was repeated.
+
 **Files:**
 - Modify: `src/gs/dc/dg_hybrid_fragment_selection.f90`
 - Modify: `src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90`

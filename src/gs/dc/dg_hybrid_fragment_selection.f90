@@ -10,6 +10,7 @@ module dg_hybrid_fragment_selection
   implicit none
   private
   public::s_dg_hybrid_core_selection,select_dg_hybrid_core_wannier,classify_dg_hybrid_core_centers
+  public::export_dg_hybrid_selected_wannier
   integer,parameter::center_convention=1
   real(real64),parameter::roundoff_factor=64d0*epsilon(1d0)
   type s_dg_hybrid_core_selection
@@ -206,17 +207,88 @@ contains
       do j=1,raw_grid(a);fingerprint=mix(fingerprint,int(dc_indices(j,a),int64));enddo
     enddo
     work%geometry_fingerprint=fingerprint
-    fingerprint=mix(fingerprint,work%raw_cache_fingerprint)
-    fingerprint=mix(fingerprint,cache%receipt%distributed_wannier_fingerprint)
-    fingerprint=mix(fingerprint,int(fragment_id,int64));fingerprint=mix(fingerprint,int(rank,int64))
-    do j=1,np;fingerprint=mix(fingerprint,int(fragments(j),int64));enddo
-    do j=1,work%selected_count;fingerprint=mix(fingerprint,work%raw_column_ids(j));enddo
-    work%fingerprint=fingerprint;result=work;ok=.true.;message=''
+    work%fingerprint=selection_hash(work,cache%receipt%distributed_wannier_fingerprint,rank,fragments)
+    result=work;ok=.true.;message=''
 #else
     ok=.false.;message='core-centered WF selection requires MPI'
 #endif
   end subroutine
+
+  ! Export only active columns, retaining every original buffer sample. Raw seed
+  ! coefficients deliberately are not sliced here: selection requires a new solve.
+  subroutine export_dg_hybrid_selected_wannier(comm,fragment_id,cache,selection,values,ok,message)
+    integer,intent(in)::comm,fragment_id
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    complex(real64),allocatable,intent(out)::values(:,:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
 #ifdef USE_MPI
+    integer::np,rank,ierr,j,slot,status
+    integer,allocatable::fragments(:)
+    complex(real64),allocatable::q(:,:),seed(:,:),work(:,:)
+    logical::valid,cache_ok
+    character(256)::cache_message
+    call MPI_Comm_size(comm,np,ierr);call MPI_Comm_rank(comm,rank,ierr)
+    valid=ierr==MPI_SUCCESS.and.fragment_id>=1.and.fragment_id<=np.and.cache%valid.and.&
+      allocated(cache%local_grid_ids).and.selection%valid.and.&
+      allocated(selection%raw_column_ids).and.allocated(selection%center_owner)
+    call gate(comm,valid,'invalid selected WF export input',ok,message);if(.not.ok)return
+    allocate(fragments(np),stat=status)
+    call gate(comm,status==0,'selected WF ownership allocation failed',ok,message);if(.not.ok)return
+    call MPI_Allgather(fragment_id,1,MPI_INTEGER,fragments,1,MPI_INTEGER,comm,ierr)
+    valid=ierr==MPI_SUCCESS
+    do j=1,np;valid=valid.and.count(fragments==j)==1;enddo
+    call gate(comm,valid,'selected WF export requires one rank per fragment',ok,message);if(.not.ok)return
+    call export_dg_hybrid_fragment_coordinates(MPI_COMM_SELF,fragment_id,cache%receipt%basis_generation,&
+      cache%receipt%seed_fingerprint,cache%receipt%basis_fingerprint,cache%local_grid_ids,&
+      cache%local_row_layout_fingerprint,cache,q,seed,cache_ok,cache_message)
+    call gate(comm,cache_ok,'selected WF export rejected raw cache integrity',ok,message);if(.not.ok)return
+    deallocate(q,seed)
+    valid=selection%fragment_id==fragment_id.and.selection%basis_generation==cache%receipt%basis_generation.and.&
+      selection%raw_count==cache%receipt%retained_rank.and.selection%convention==center_convention.and.&
+      selection%raw_cache_fingerprint==cache%receipt%replicated_payload_fingerprint.and.&
+      selection%geometry_fingerprint/=0_int64.and.selection%selected_count>=0.and.&
+      size(selection%center_owner)==selection%raw_count.and.&
+      size(selection%raw_column_ids)==selection%selected_count
+    call gate(comm,valid,'selected WF receipt metadata mismatch',ok,message);if(.not.ok)return
+    valid=all(selection%center_owner>=1).and.all(selection%center_owner<=np).and.&
+      count(selection%center_owner==fragment_id)==selection%selected_count
+    call gate(comm,valid,'selected WF receipt ownership mismatch',ok,message);if(.not.ok)return
+    slot=0
+    do j=1,selection%raw_count
+      if(selection%center_owner(j)/=fragment_id)cycle
+      slot=slot+1;valid=valid.and.selection%raw_column_ids(slot)==int(j,int64)
+    enddo
+    valid=valid.and.selection%fingerprint==&
+      selection_hash(selection,cache%receipt%distributed_wannier_fingerprint,rank,fragments)
+    call gate(comm,valid,'selected WF receipt fingerprint or column mismatch',ok,message);if(.not.ok)return
+    call gate(comm,selection%selected_count>0,'selected WF export: PW-only fragments unsupported',ok,message)
+    if(.not.ok)return
+    allocate(work(selection%selected_count,size(cache%wannier_values,2)),stat=status)
+    call gate(comm,status==0,'selected WF values allocation failed',ok,message);if(.not.ok)return
+    work=cache%wannier_values(selection%raw_column_ids,:)
+    call move_alloc(work,values)
+#else
+    ok=.false.;message='selected WF export requires MPI'
+#endif
+  end subroutine
+#ifdef USE_MPI
+  integer(int64) function selection_hash(selection,distributed_fingerprint,rank,fragments)result(hash)
+    type(s_dg_hybrid_core_selection),intent(in)::selection
+    integer(int64),intent(in)::distributed_fingerprint
+    integer,intent(in)::rank,fragments(:)
+    integer::j
+    ! Version 2 seals all receipt metadata as well as the exact rank-fragment map.
+    hash=mix(selection%geometry_fingerprint,2_int64)
+    hash=mix(hash,selection%raw_cache_fingerprint);hash=mix(hash,distributed_fingerprint)
+    hash=mix(hash,int(selection%fragment_id,int64));hash=mix(hash,int(rank,int64))
+    hash=mix(hash,int(selection%basis_generation,int64));hash=mix(hash,int(selection%convention,int64))
+    hash=mix(hash,int(selection%raw_count,int64));hash=mix(hash,int(selection%selected_count,int64))
+    do j=1,size(fragments);hash=mix(hash,int(fragments(j),int64));enddo
+    do j=1,size(selection%center_owner);hash=mix(hash,int(selection%center_owner(j),int64));enddo
+    do j=1,size(selection%raw_column_ids);hash=mix(hash,selection%raw_column_ids(j));enddo
+  end function
   subroutine gate(comm,valid,description,ok,message)
     integer,intent(in)::comm
     logical,intent(in)::valid

@@ -13,6 +13,7 @@ program test_fragment_selection
   real(real64)::fractional(3,8),weights(8),energies(2),occupations(2),atoms(3,1)
   real(real64)::points(3,8),bad_points(3,8),local_lower(3),local_extent(3),probe(3)
   complex(real64)::seeds(2,8),buffer(1,8),projector(1,8)
+  complex(real64),allocatable::selected_values(:,:)
   integer(int64)::ids(8),first_fp
   type(s_dg_hybrid_fragment_wannier_cache)::cache,bad_cache,snapshot,empty_cache
   complex(real64)::values(8,8),rotated(8,8),physical_projector(8,8),rotated_projector(8,8)
@@ -69,6 +70,30 @@ program test_fragment_selection
   call require(all(cache%wannier_values==snapshot%wannier_values).and.&
     all(cache%centers_fractional==snapshot%centers_fractional),'selection mutated raw cache')
   call require(setup_calls==setup_saved.and.run_calls==run_saved,'selection reran W90')
+
+  call export_dg_hybrid_selected_wannier(MPI_COMM_WORLD,f,cache,selection,selected_values,ok,message)
+  call require(ok,'selected value export: '//trim(message))
+  call require(all(shape(selected_values)==[nexpected,8]),'selected export dropped buffer rows')
+  call require(all(selected_values==cache%wannier_values(expected(:nexpected),:)),&
+    'selected export changed raw values/order')
+  do variant=1,7
+    again=selection;bad_cache=cache
+    if(rank==0)then
+      select case(variant)
+      case(1);again%fingerprint=ieor(again%fingerprint,1_int64)
+      case(2);again%basis_generation=again%basis_generation+1
+      case(3);again%raw_column_ids(1)=0_int64
+      case(4);again%center_owner(1)=0
+      case(5);bad_cache%wannier_values(1,1)=bad_cache%wannier_values(1,1)+0.1d0
+      case(6);again%geometry_fingerprint=ieor(again%geometry_fingerprint,1_int64)
+      case(7);deallocate(again%raw_column_ids)
+      end select
+    endif
+    call export_dg_hybrid_selected_wannier(MPI_COMM_WORLD,f,bad_cache,again,selected_values,ok,message)
+    call require(.not.ok.and..not.allocated(selected_values),'corrupt selection published WF values')
+  enddo
+  call require(all(cache%wannier_values==snapshot%wannier_values),'export mutated raw cache')
+  call require(setup_calls==setup_saved.and.run_calls==run_saved,'export reran W90')
 
   do variant=1,4
     bad_cache=cache;bad_mapping=mapping
@@ -139,6 +164,13 @@ program test_fragment_selection
       'coincident centers were split or deduplicated')
   endif
   call require(setup_calls==setup_saved.and.run_calls==run_saved,'empty selection reran W90')
+  call export_dg_hybrid_selected_wannier(MPI_COMM_WORLD,f,empty_cache,selection,selected_values,ok,message)
+  if(np>1)then
+    call require(.not.ok.and..not.allocated(selected_values).and.index(message,'PW-only')>0,&
+      'empty selection silently enabled PW-only path')
+  else
+    call require(ok,'all-retained single fragment export failed')
+  endif
   bad_points=points
   if(rank==0)bad_points(1,1)=ieee_value(0d0,ieee_quiet_nan)
   call classify_dg_hybrid_core_centers(MPI_COMM_WORLD,total_lattice,origin,lower,extent,&
