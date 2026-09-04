@@ -45,7 +45,13 @@ program test_dg_hybrid_fragment_wannier_mpi
     redistribute_dg_hybrid_fragment_wannier_columns
   use dg_hybrid_fragment_wannier_test_stubs
   use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
-    initialize_dg_hybrid_fragment_subspace
+    initialize_dg_hybrid_fragment_subspace,s_dg_hybrid_fragment_epoch_budget,advance_dg_hybrid_fragment_epoch
+  use dg_hybrid_variational_payload,only:s_dg_hybrid_fixed_payload,freeze_dg_hybrid_variational_payload
+  use dg_hybrid_divided_operator,only:extract_dg_hybrid_fragment_self_block,&
+    dg_hybrid_fragment_directory_fingerprint
+  use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_preconditioner_key,s_dg_hybrid_fragment_preconditioner,&
+    prepare_dg_hybrid_fragment_preconditioner,apply_dg_hybrid_fragment_preconditioner
+  use dg_hybrid_fragment_solver,only:measure_dg_hybrid_fragment_core_norms
   use dg_hybrid_windowed_pw_types,only:s_dg_hybrid_basis_catalog
   use dg_hybrid_fragment_basis,only:s_dg_hybrid_fragment_basis
   use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_local_fragment_basis,&
@@ -77,6 +83,10 @@ program test_dg_hybrid_fragment_wannier_mpi
   type(s_dg_hybrid_fragment_wannier_cache)::cache,first_snapshot,new_cache,failed_cache,&
     rank_deficient_cache,metric_null_cache,mixed_cache,mixed_snapshot,split_cache,&
     corrupted_cache
+  complex(real64),allocatable::integration_h(:,:),integration_s(:,:)
+  integer(int64),allocatable::integration_rows(:)
+  type(s_dg_hybrid_fragment_preconditioner)::integration_preconditioner
+  type(s_dg_hybrid_preconditioner_key)::integration_key
 
   call MPI_Init(ierr);comm_total=MPI_COMM_WORLD
   call MPI_Comm_rank(comm_total,total_rank,ierr)
@@ -551,9 +561,135 @@ contains
     call MPI_Allreduce(MPI_IN_PLACE,reference,12,MPI_DOUBLE_PRECISION,MPI_SUM,comm_total,ierr)
     call require_total(maxval(abs(density-reference))<1d-10.and.abs(sum(density)-sum(reference))<1d-10,&
       'DC cache to WF plus PW changed physical-core density or electron count')
+    call test_projected_basis_local_updates(built,basis,q,padded,core)
     call require_total(setup_calls==setup_saved.and.run_calls==run_saved,&
       'DC cache to projected basis unexpectedly reran Wannier90')
   end subroutine test_dc_cache_to_projected_basis
+
+  subroutine test_projected_basis_local_updates(built,basis,q_wf,seed_coefficients,core)
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::built
+    type(s_dg_hybrid_fragment_basis),intent(in)::basis
+    complex(real64),intent(in)::q_wf(:,:),seed_coefficients(:,:)
+    logical,intent(in)::core(:)
+    type(s_dg_hybrid_fixed_payload)::payload
+    type(s_dg_hybrid_fragment_subspace_state)::state
+    type(s_dg_hybrid_fragment_epoch_budget)::budget
+    integer,allocatable::owners(:),slots(:),generations(:),selected(:)
+    complex(real64),allocatable::full_basis(:,:),h_rows(:,:),s_rows(:,:),zero_rows(:,:),q(:,:),&
+      physical_states(:,:),orthogonality(:,:)
+    complex(real64)::physical_h(12,12)
+    real(real64),allocatable::energies(:),core_norms(:)
+    real(real64)::residual,core_error
+    integer::counts(2),nb,n,nw,a,b,j,pass,steps,remaining,total_steps
+    integer(int64)::directory_fp,workspace,receipt,preconditioner_fp
+    logical::converged,advanced
+    character(256)::reason
+    n=size(basis%global_ids);nw=size(q_wf,1)
+    call MPI_Allgather(n,1,MPI_INTEGER,counts,1,MPI_INTEGER,comm_total,ierr)
+    nb=sum(counts)
+    allocate(full_basis(12,nb),owners(nb),slots(nb),generations(nb),q(n,n))
+    full_basis=0d0;owners=0;slots=0;generations=13;q=0d0
+    do j=1,n
+      owners(basis%global_ids(j))=fragment_id;slots(basis%global_ids(j))=j
+      do a=1,size(core)
+        full_basis(basis%buffer_point_ids(a),basis%global_ids(j))=basis%buffer_values(a,j)
+      enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,full_basis,size(full_basis),MPI_DOUBLE_COMPLEX,MPI_SUM,comm_total,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,owners,nb,MPI_INTEGER,MPI_SUM,comm_total,ierr)
+    call MPI_Allreduce(MPI_IN_PLACE,slots,nb,MPI_INTEGER,MPI_SUM,comm_total,ierr)
+    ! Small independent physical-space oracle, not a production SIPG operator:
+    ! an off-diagonal Hermitian H makes the DC seed a nonstationary warm start.
+    physical_h=0d0
+    do a=1,12
+      physical_h(a,a)=0.2d0*a
+      if(a==12)cycle
+      physical_h(a,a+1)=cmplx(0.03d0,0.01d0,real64)
+      physical_h(a+1,a)=conjg(physical_h(a,a+1))
+    enddo
+    h_rows=matmul(conjg(transpose(full_basis(:,basis%global_ids))),matmul(physical_h,full_basis))
+    s_rows=matmul(conjg(transpose(full_basis(:,basis%global_ids))),full_basis)
+    allocate(zero_rows(n,nb));zero_rows=0d0
+    directory_fp=dg_hybrid_fragment_directory_fingerprint(owners,slots,generations,501_int64)
+    call freeze_dg_hybrid_variational_payload(comm_total,nb,basis%global_ids,s_rows,h_rows,zero_rows,&
+      zero_rows,501_int64,503_int64,505_int64,payload,ok,message,basis_directory_fingerprint=directory_fp)
+    call require_total(ok,'DC integration fixed payload failed: '//trim(message))
+    integration_rows=[(int(a,int64),a=1,n)]
+    call extract_dg_hybrid_fragment_self_block(comm_fragment,fragment_id,integration_rows,owners,payload,&
+      zero_rows,integration_h,integration_s,ok,message,basis_local_slot=slots,basis_generation=generations,&
+      fragment_catalog_fingerprint=501_int64,fragment_directory_fingerprint=directory_fp)
+    call require_total(ok,'DC integration H/S extraction failed: '//trim(message))
+    call require_total(maxval(abs(integration_h-h_rows(:,basis%global_ids)))<1d-12.and.&
+      maxval(abs(integration_s-s_rows(:,basis%global_ids)))<1d-12,&
+      'extracted fragment H/S differs from physical-space oracle')
+    orthogonality=integration_s
+    do a=1,n;orthogonality(a,a)=orthogonality(a,a)-1d0;enddo
+    call require_total(maxval(abs(orthogonality))>1d-3,&
+      'DC integration fixture accidentally uses an identity local metric')
+    q(:nw,:nw)=q_wf
+    do a=nw+1,n;q(a,a)=1d0;enddo
+    integration_key=s_dg_hybrid_preconditioner_key(fragment_id,13,1,501_int64,503_int64,&
+      payload%fingerprint,built%receipt%transform_fingerprint)
+    call prepare_dg_hybrid_fragment_preconditioner(comm_fragment,n,integration_rows,q,integration_h,&
+      integration_s,integration_key,1d-10,integration_preconditioner,preconditioner_fp,ok,message)
+    call require_total(ok,'DC integration fixed-frame preconditioner failed: '//trim(message))
+    call initialize_dg_hybrid_fragment_subspace(comm_fragment,n,integration_rows,fragment_id,13,&
+      501_int64,503_int64,seed_coefficients,built%physical_dc_seed_energies,built%physical_dc_seed_occupations,&
+      0,1d-10,1d-8,1d-10,integration_apply_s,state,selected,ok,message)
+    call require_total(ok,'DC integration occupied subspace initialization failed: '//trim(message))
+    call require_total(state%state_count==nseed.and.state%state_count<n,&
+      'DC integration initialized the full local basis instead of the occupied seed inventory')
+    allocate(energies(state%state_count));total_steps=0
+    do pass=1,2
+      call advance_dg_hybrid_fragment_epoch(comm_fragment,n,integration_rows,fragment_id,13,501_int64,503_int64,&
+        1,3,integration_apply_h,integration_apply_s,integration_apply_preconditioner,1d-12,1d-10,2d0,&
+        budget,state,energies,steps,remaining,residual,converged,advanced,reason,workspace,receipt,ok,message)
+      call require_total(ok,'DC integration bounded fragment update failed: '//trim(message))
+      total_steps=total_steps+steps
+      call require_total(total_steps<=3.and.remaining==3-total_steps,&
+        'repeated fragment update restarted the three-step density-epoch budget')
+      physical_states=matmul(basis%buffer_values,state%vectors)
+      orthogonality=matmul(conjg(transpose(state%vectors)),matmul(integration_s,state%vectors))
+      do a=1,state%state_count;orthogonality(a,a)=orthogonality(a,a)-1d0;enddo
+      call require_total(maxval(abs(orthogonality))<1d-9,'bounded update lost S orthogonality')
+      call measure_dg_hybrid_fragment_core_norms(comm_fragment,basis,state%vectors,core,&
+        [(1d0,a=1,size(core))],core_norms,ok,message)
+      call require_total(ok,'DC integration current core weights failed: '//trim(message))
+      core_error=0d0
+      do b=1,state%state_count
+        core_error=max(core_error,abs(core_norms(b)-sum(abs(physical_states(:,b))**2,mask=core)))
+      enddo
+      call require_total(core_error<1d-10,'current core weights disagree with reconstructed bounded-update orbitals')
+    enddo
+    call require_total(total_steps>0,'DC integration did not exercise a fragment CG update')
+  end subroutine test_projected_basis_local_updates
+
+  subroutine integration_apply_h(input,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    output=matmul(integration_h,input);valid=.true.
+  end subroutine integration_apply_h
+
+  subroutine integration_apply_s(input,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    output=matmul(integration_s,input);valid=.true.
+  end subroutine integration_apply_s
+
+  subroutine integration_apply_preconditioner(input,shifts,output,valid)
+    complex(real64),intent(in)::input(:,:)
+    real(real64),intent(in)::shifts(:)
+    complex(real64),intent(out)::output(:,:)
+    logical,intent(out)::valid
+    complex(real64),allocatable::result(:,:)
+    integer(int64)::receipt
+    character(256)::detail
+    call apply_dg_hybrid_fragment_preconditioner(comm_fragment,integration_rows,integration_key,&
+      integration_preconditioner,shifts,input,result,receipt,valid,detail)
+    if(valid)output=result
+  end subroutine integration_apply_preconditioner
 
   subroutine test_column_export(built,physical_ids,core_mask)
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::built

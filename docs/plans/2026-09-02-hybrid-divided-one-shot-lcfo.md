@@ -1305,6 +1305,31 @@ rank-classification error. Review found no remaining Critical/Important issue.
 No main-route switch, expensive DC rerun, or physical tail-accuracy claim is
 included. The production connection gate remains RED.
 
+**DC cache through local H/S and bounded-update integration checkpoint,
+2026-09-04 (Task 8 remains incomplete):** The existing two-rank/two-fragment
+DC-cache fixture now connects the projected fragment bases to the common
+fixed-payload publisher, actual self-block extraction, fixed-frame
+preconditioner, occupied-seed initialization, epoch-budgeted updater and
+current-coefficient core-norm measurement. A small off-diagonal Hermitian
+physical-space oracle supplies H; S is the actual nonidentity basis Gram.
+This oracle is not the production broken-volume/SIPG/nonlocal assembly.
+
+The saved WF transform supplies the WF block of Q, with identity only in the
+unchanged PW reference block. Original DC occupations select fewer states
+than the local basis dimension. Two update calls in one density epoch share
+the same three-step budget, preserve S orthogonality, and produce core norms
+matching direct reconstruction from the current coefficient vectors. This
+adds integration coverage only; it does not change production routines or
+the main dispatch. Wannier90 remains the existing test-boundary stub.
+
+The test runner passes on 2/4/8 total ranks (this production-shaped chain is
+exercised on two ranks; the other layouts retain their prior general-kernel
+coverage). The release build and whitespace check pass. Review found no
+Critical/Important issue. Existing dirty files and verification logs remain
+untouched, and no expensive DC or Si64 calculation was rerun. Next production
+work must replace the legacy complete-LCFO-dependent payload assembly with
+uncompressed fragment WF+PW coordinates before changing main's SCF callbacks.
+
 **Files:**
 
 - Modify: `src/io/salmon_global.f90:480-545`

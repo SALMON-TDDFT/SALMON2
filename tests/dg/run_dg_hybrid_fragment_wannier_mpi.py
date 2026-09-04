@@ -58,6 +58,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
         ROOT / "src/gs/dc/dg_hybrid_fragment_basis.f90",
         ROOT / "src/gs/dc/dg_hybrid_fragment_basis_stream.f90",
         ROOT / "src/gs/dc/dg_hybrid_projected_fragment_pipeline.f90",
+        ROOT / "src/gs/dc/dg_hybrid_variational_payload.f90",
+        ROOT / "src/gs/dc/dg_hybrid_divided_operator.f90",
+        ROOT / "src/gs/dc/dg_hybrid_fragment_preconditioner.f90",
+        ROOT / "src/gs/dc/dg_hybrid_fragment_solver.f90",
     ]
     # During RED the wished-for module is absent, so compiling the fixture itself
     # gives the useful "cannot open ...mod" diagnostic.  Once implemented, the
