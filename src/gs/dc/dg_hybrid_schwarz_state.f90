@@ -10,6 +10,7 @@ module dg_hybrid_schwarz_state
     logical::valid=.false.
     integer::fragment_id=0,fragment_count=0,basis_generation=0
     integer::local_basis_count=0,trial_count=0,candidate_count=0,thermal_tail_count=0
+    integer::coefficient_epoch=0
     integer(int64)::mapping_fingerprint=0_int64,candidate_fingerprint=0_int64,fingerprint=0_int64
     real(real64)::electron_target=0d0,temperature=0d0,wspin=0d0,chemical_potential=0d0
     integer(int64),allocatable::column_ids(:),source_candidate_ids(:)
@@ -93,6 +94,7 @@ contains
     work%valid=.true.;work%fragment_id=fragment_id;work%fragment_count=fragment_count
     work%basis_generation=basis_generation;work%local_basis_count=size(candidate_vectors,1)
     work%trial_count=ntrial;work%candidate_count=ncandidate;work%thermal_tail_count=thermal_count
+    work%coefficient_epoch=0
     work%mapping_fingerprint=mapping_fingerprint;work%candidate_fingerprint=candidate_fingerprint
     work%electron_target=electron_target;work%temperature=temperature;work%wspin=wspin
     work%chemical_potential=mu
