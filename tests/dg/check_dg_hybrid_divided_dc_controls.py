@@ -152,6 +152,16 @@ for token in (
     "solve_dg_hybrid_schwarz_fragments",
 ):
     assert token in bounded, f"Schwarz divided production entry is missing {token}"
+for token in (
+    "schwarz_coupling_rows",
+    "abs(kinetic_rows)>0d0.or.abs(nonlocal_rows)>0d0.or.&",
+    "abs(interface_rows)>0d0.or.abs(metric_rows)>0d0",
+    "build_dg_hybrid_schwarz_schedule(dc%icomm_tot,dc%i_frag,projected_basis%generation,&",
+    "schwarz_coupling_rows,directory_fingerprint",
+):
+    assert token in bounded, (
+        "Schwarz schedule must cover the structural union of fixed DG and nonlocal couplings: " + token
+    )
 assert "extract_dg_hybrid_fragment_self_block" not in bounded, (
     "production divided SCF still extracts a self block instead of applying full DG rows"
 )

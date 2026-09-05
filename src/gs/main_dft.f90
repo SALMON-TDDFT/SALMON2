@@ -1321,7 +1321,7 @@ contains
     complex(8),allocatable::buffer_candidates(:,:),projector_candidates(:,:),reference_frame(:,:),&
       interior_values(:,:),interior_gradients(:,:,:),interior_kinetic_action(:,:),kinetic_rows(:,:),&
       metric_rows(:,:),local_potential_rows(:,:),nonlocal_rows(:,:),interface_components(:,:,:),&
-      interface_rows(:,:),fragment_h(:,:),fragment_s(:,:),seed_coefficients(:,:),&
+      interface_rows(:,:),schwarz_coupling_rows(:,:),fragment_h(:,:),fragment_s(:,:),seed_coefficients(:,:),&
       final_local_potential_rows(:,:),final_hrows(:,:),final_srows(:,:)
     real(8),allocatable::core_lower(:,:),core_extent(:,:),atom_positions(:,:),raw_weight(:),&
       raw_gradient(:,:),partition_weight(:),partition_gradient(:,:),box_windows(:,:),&
@@ -1632,6 +1632,12 @@ contains
     endif
     allocate(interface_rows(size(projected_basis%global_ids),total_basis_count))
     interface_rows=sum(interface_components,dim=3)
+    allocate(schwarz_coupling_rows(size(projected_basis%global_ids),total_basis_count))
+    schwarz_coupling_rows=(0d0,0d0)
+    where(abs(kinetic_rows)>0d0.or.abs(nonlocal_rows)>0d0.or.&
+      abs(interface_rows)>0d0.or.abs(metric_rows)>0d0)
+      schwarz_coupling_rows=(1d0,0d0)
+    end where
     call ow_fingerprint_distributed_matrix(dc%icomm_tot,projected_basis%global_ids,metric_rows,&
       metric_fingerprint,ok)
     if(.not.ok)error stop 'fragment-local metric fingerprint failed'
@@ -1735,7 +1741,7 @@ contains
     endif
     call build_dg_hybrid_schwarz_schedule(dc%icomm_tot,dc%i_frag,projected_basis%generation,&
       projected_basis%global_ids,payload_owner,payload_fragment,payload_local_slot,payload_generation,&
-      interface_rows,directory_fingerprint,face_fingerprint,bounded_mapping_fingerprint,&
+      schwarz_coupling_rows,directory_fingerprint,face_fingerprint,bounded_mapping_fingerprint,&
       bounded_schwarz_schedule,ok,message)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
