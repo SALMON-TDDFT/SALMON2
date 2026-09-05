@@ -153,6 +153,8 @@ use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_spectrum,&
   reconstruct_dg_hybrid_fragment_density
 use dc_fragment_occupation,only:determine_dc_fragment_occupations
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
+use dg_hybrid_divided_mixing,only:s_dg_hybrid_divided_mixing_state,&
+  prepare_dg_hybrid_divided_mixing,accept_dg_hybrid_divided_mixing
 use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
 use dg_hybrid_generalized_eigensystem,only:s_dg_hybrid_complete_eigensystem,&
@@ -315,6 +317,7 @@ integer(8) :: ow_potential_epoch_snapshot
 integer(8) :: ow_global_grid_count
 type(s_dg_hybrid_ground_state) :: ow_hybrid_ground_state
 type(s_dg_hybrid_fragment_basis) :: divided_fragment_basis
+type(s_dg_hybrid_divided_mixing_state) :: divided_mixing_state
 complex(8),allocatable :: ow_hybrid_hrows(:,:),ow_hybrid_coefficients(:,:)
 complex(8),allocatable :: divided_fragment_coefficients(:,:)
 real(8),allocatable :: ow_hybrid_occupations(:),ow_hybrid_eigenvalues(:),ow_hybrid_potential(:),ow_hybrid_density(:),&
@@ -328,6 +331,8 @@ integer(8) :: ow_hybrid_operator_fingerprint=0_8,ow_hybrid_metric_fingerprint=0_
 integer(8) :: divided_solver_workspace=0_8,divided_solver_fingerprint=0_8
 real(8) :: divided_fragment_electron_count=0d0,divided_fragment_residual=huge(1d0),&
   divided_fragment_orthogonality=huge(1d0)
+integer(8) :: divided_mixing_inventory_fingerprint=0_8
+integer :: divided_mixing_basis_generation=0
 integer :: ow_hybrid_history_count=0
 real(8) :: ow_hybrid_mixing_rate=0d0
 real(8) :: ow_hybrid_eigensystem_residual=huge(1d0),ow_hybrid_orthogonality=huge(1d0),&
@@ -342,6 +347,7 @@ real(8),allocatable :: ow_work_density(:,:,:,:)
 real(8) :: ow_diag_t_hermiticity,ow_diag_vlocal_hermiticity,ow_diag_vnl_hermiticity,&
   ow_diag_h_hermiticity
 logical :: ow_transaction_active
+logical :: divided_mixing_rollback_pending=.false.
 logical :: ow_direct_nonlocal_compared=.false.
 logical :: ow_projector_stage_diagnosed=.false.
 integer :: ilevel_print
@@ -3590,6 +3596,10 @@ contains
         endif
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid fixed variational payload freeze failed'
+        if(yn_dg_hybrid_divided_scf=='y')then
+          divided_mixing_basis_generation=maxval(divided_basis_generation)
+          divided_mixing_inventory_fingerprint=divided_basis_directory_fingerprint
+        endif
         if(.not.dg_hybrid_fixed_payload%frozen.or.dg_hybrid_fixed_payload%fingerprint==0_8)&
           error stop 'divided Hybrid shared variational payload fingerprint is invalid'
         divided_fixed_payload_fingerprint=dg_hybrid_fixed_payload%fingerprint
@@ -7003,30 +7013,43 @@ stage_pass: do
     real(8),intent(out)::mixed_density(:)
     logical,intent(out)::callback_ok
     real(8),allocatable::input_total(:,:,:),new_total(:,:,:)
-    integer::p,ix_local,iy_local,iz_local
+    integer::p,ix_local,iy_local,iz_local,mixing_iteration,mixing_basis_generation
+    integer(8)::mixing_inventory_fingerprint
     character(16)::selected_mixing_method
+    character(64)::reset_reason
+    character(512)::mixing_message
+    real(8)::effective_mixrate
+    logical::reset_required,mixing_ok
 
     callback_ok=.false.;mixed_density=0d0
-    selected_mixing_method=trim(dg_hybrid_divided_mixing)
-    if(trim(dg_hybrid_divided_mixing)=='inherit')selected_mixing_method=trim(method_mixing)
-    if(iteration==1.and.dc%id_tot==0)write(*,'(a,a,a,es16.8,a)')&
-      '[DG-HYBRID-MIXING] method=',trim(selected_mixing_method),' mixrate=',mixing%mixrate,&
-      ' seed_fingerprint_unchanged=T'
     call gather_dg_hybrid_divided_core_density(input_density,input_total,callback_ok)
     if(.not.callback_ok)return
-    dc%rho_tot_s(1)%f=input_total
-    call copy_density(iteration,dc%system_tot%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
     call gather_dg_hybrid_divided_core_density(new_density,new_total,callback_ok)
     if(.not.callback_ok)return
+    mixing_basis_generation=divided_mixing_basis_generation
+    mixing_inventory_fingerprint=divided_mixing_inventory_fingerprint
+    call prepare_dg_hybrid_divided_mixing(dc%icomm_tot,dg_hybrid_divided_mixing,method_mixing,&
+      mixing%mixrate,mixing_basis_generation,mixing_inventory_fingerprint,&
+      divided_mixing_rollback_pending,divided_mixing_state,selected_mixing_method,&
+      effective_mixrate,mixing_iteration,reset_required,reset_reason,mixing_ok,mixing_message)
+    if(.not.mixing_ok)then
+      if(dc%id_tot==0)write(0,'(a)')trim(mixing_message)
+      return
+    endif
+    if(dc%id_tot==0)write(*,'(a,a,a,es16.8,a,i0,a,l1,a,a,a)')&
+      '[DG-HYBRID-MIXING] method=',trim(selected_mixing_method),' mixrate=',effective_mixrate,&
+      ' history_length=',divided_mixing_state%history_length,' reset=',reset_required,&
+      ' reset_reason=',trim(reset_reason),' seed_fingerprint_unchanged=T'
+    dc%rho_tot_s(1)%f=input_total
+    call copy_density(mixing_iteration,dc%system_tot%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
     dc%rho_tot_s(1)%f=new_total
     select case(selected_mixing_method)
     case('simple')
-      call simple_mixing(dc%mg_tot,dc%system_tot,1d0-mixing%mixrate,mixing%mixrate,dc%rho_tot_s,mixing)
+      call simple_mixing(dc%mg_tot,dc%system_tot,1d0-effective_mixrate,effective_mixrate,dc%rho_tot_s,mixing)
     case('broyden')
-      call wrapper_broyden(dc%info_tot%icomm_r,dc%mg_tot,dc%system_tot,dc%rho_tot_s,iteration,mixing)
+      call wrapper_broyden(dc%info_tot%icomm_r,dc%mg_tot,dc%system_tot,dc%rho_tot_s,mixing_iteration,mixing)
     case('pulay')
-      call pulay(dc%mg_tot,dc%info_tot,dc%system_tot,dc%rho_tot_s,iteration,mixing)
-    case('simple_potential')
+      call pulay(dc%mg_tot,dc%info_tot,dc%system_tot,dc%rho_tot_s,mixing_iteration,mixing)
     case default
       return
     end select
@@ -7037,6 +7060,11 @@ stage_pass: do
       mixed_density(p)=dc%rho_tot_s(1)%f(ix_local,iy_local,iz_local)
     enddo
     callback_ok=all(ieee_is_finite(mixed_density))
+    call accept_dg_hybrid_divided_mixing(dc%icomm_tot,mixing_iteration,divided_mixing_state,&
+      mixing_ok,mixing_message,local_accept_ok=callback_ok)
+    if(.not.mixing_ok.and.dc%id_tot==0)write(0,'(a)')trim(mixing_message)
+    callback_ok=mixing_ok
+    divided_mixing_rollback_pending=.not.mixing_ok
   end subroutine mix_dg_hybrid_divided_density
 
   subroutine solve_final_dg_hybrid_divided_lcfo(comm_arg,global_count_arg,nstate_arg,row_ids_arg,&

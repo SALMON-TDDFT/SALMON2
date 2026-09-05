@@ -19,6 +19,7 @@ set(SOURCES
     dg_hybrid_schwarz_state.f90
     dg_hybrid_schwarz_operator.f90
     dg_hybrid_schwarz_solver.f90
+    dg_hybrid_divided_mixing.f90
     dg_hybrid_real_space_residual.f90
     dg_hybrid_variational_potential.f90
     dg_hybrid_generalized_eigensystem.f90
