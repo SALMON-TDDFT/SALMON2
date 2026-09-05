@@ -129,13 +129,8 @@ use dg_hybrid_projected_fragment_pipeline,only:s_dg_hybrid_projection_factorizat
 use dg_hybrid_production_support,only:s_dg_hybrid_production_support_receipt,&
   prepare_dg_hybrid_production_support
 use dg_hybrid_fragment_subspace,only:s_dg_hybrid_fragment_subspace_state,&
-  s_dg_hybrid_fragment_candidate_catalog,s_dg_hybrid_fragment_epoch_budget,fragment_seed,fragment_pw
-use dg_hybrid_fragment_thermal,only:s_dg_hybrid_thermal_state,advance_dg_hybrid_thermal_state
-use dg_hybrid_fragment_preconditioner,only:s_dg_hybrid_fragment_preconditioner,&
-  s_dg_hybrid_preconditioner_key,prepare_dg_hybrid_frame_preconditioner,&
-  apply_dg_hybrid_fragment_preconditioner
-use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload,&
-  extract_dg_hybrid_fragment_self_block
+  s_dg_hybrid_fragment_candidate_catalog,fragment_seed,fragment_pw
+use dg_hybrid_divided_operator,only:freeze_dg_hybrid_single_owner_payload
 use dg_hybrid_production_face_traces,only:s_dg_hybrid_production_face_trace,&
   freeze_dg_hybrid_basis_directory,materialize_dg_hybrid_production_face_collection,&
   assemble_dg_hybrid_production_interface_component_rows,materialize_dg_hybrid_production_interior,&
@@ -168,9 +163,6 @@ use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_
 use plusU_global,only:PLUS_U_ON
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis,&
   build_dg_hybrid_projected_local_fragment_basis
-use dg_hybrid_fragment_solver,only:solve_dg_hybrid_fragment_spectrum,&
-  reconstruct_dg_hybrid_fragment_density
-use dc_fragment_occupation,only:determine_dc_fragment_occupations
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
 use dg_hybrid_divided_mixing,only:s_dg_hybrid_divided_mixing_state,&
   prepare_dg_hybrid_divided_mixing,accept_dg_hybrid_divided_mixing
@@ -179,7 +171,6 @@ use dg_hybrid_schwarz_operator,only:s_dg_hybrid_schwarz_schedule,&
   build_dg_hybrid_schwarz_schedule,apply_dg_hybrid_schwarz_hamiltonian,apply_dg_hybrid_schwarz_rows
 use dg_hybrid_schwarz_solver,only:advance_dg_hybrid_schwarz_epoch,&
   assign_dg_hybrid_schwarz_occupations
-use dg_hybrid_lcfo,only:assemble_dg_hybrid_lcfo_rows
 use dg_nonlocal_projector_range,only:s_dg_nonlocal_range_receipt,analyze_dg_nonlocal_projector_range
 use dg_hybrid_generalized_eigensystem,only:s_dg_hybrid_complete_eigensystem,&
   solve_dg_hybrid_generalized_scalapack,solve_dg_hybrid_generalized_once_and_publish,&
@@ -345,36 +336,26 @@ type(s_dg_hybrid_divided_mixing_state) :: divided_mixing_state
 type(s_dg_hybrid_schwarz_state) :: bounded_schwarz_state
 type(s_dg_hybrid_schwarz_schedule) :: bounded_schwarz_schedule
 complex(8),allocatable :: ow_hybrid_hrows(:,:),ow_hybrid_coefficients(:,:)
-complex(8),allocatable :: divided_fragment_coefficients(:,:)
 real(8),allocatable :: ow_hybrid_occupations(:),ow_hybrid_eigenvalues(:),ow_hybrid_potential(:),ow_hybrid_density(:),&
   ow_hybrid_density_history(:,:),ow_hybrid_new_history(:,:)
 real(8),allocatable :: ow_hybrid_divided_total_density(:,:,:)
-real(8),allocatable :: divided_fragment_eigenvalues(:),divided_fragment_density(:)
-logical,allocatable :: ow_divided_core_mask(:)
 character(16) :: ow_hybrid_divided_convergence
 real(8) :: ow_hybrid_divided_threshold
 integer(8) :: ow_hybrid_operator_fingerprint=0_8,ow_hybrid_metric_fingerprint=0_8
-integer(8) :: divided_solver_workspace=0_8,divided_solver_fingerprint=0_8
-real(8) :: divided_fragment_electron_count=0d0,divided_fragment_residual=huge(1d0),&
+integer(8) :: divided_solver_fingerprint=0_8
+real(8) :: divided_fragment_residual=huge(1d0),&
   divided_fragment_orthogonality=huge(1d0)
-type(s_dg_hybrid_projection_factorization_receipt) :: bounded_projection_receipt
-type(s_dg_hybrid_admission_report) :: bounded_admission_report
 type(s_dg_hybrid_fixed_payload) :: bounded_fixed_payload
-type(s_dg_hybrid_fragment_preconditioner) :: bounded_fragment_preconditioner
-type(s_dg_hybrid_preconditioner_key) :: bounded_preconditioner_key
-type(s_dg_hybrid_fragment_epoch_budget) :: bounded_epoch_budget
-type(s_dg_hybrid_thermal_state),allocatable :: bounded_thermal_state
 complex(8),allocatable :: bounded_interior_values(:,:),bounded_local_potential_rows(:,:),&
-  bounded_fragment_h(:,:),bounded_fragment_s(:,:),bounded_reference_frame(:,:)
+  bounded_fragment_h(:,:),bounded_fragment_s(:,:)
 complex(8),allocatable :: bounded_schwarz_candidate_vectors(:,:)
 real(8),allocatable :: bounded_schwarz_candidate_energies(:)
 integer(8),allocatable :: bounded_schwarz_candidate_ids(:)
-real(8),allocatable :: bounded_core_weights(:),bounded_point_weights(:)
+real(8),allocatable :: bounded_core_weights(:)
 integer,allocatable :: bounded_basis_fragment(:),bounded_basis_local_slot(:),&
   bounded_basis_generation(:),bounded_interior_fragment(:)
 integer(8),allocatable :: bounded_core_ids(:)
-integer(8) :: bounded_global_basis_fingerprint=0_8,bounded_directory_fingerprint=0_8,&
-  bounded_frame_fingerprint=0_8,bounded_selection_fingerprint=0_8
+integer(8) :: bounded_directory_fingerprint=0_8
 integer(8) :: bounded_face_fingerprint=0_8,bounded_mapping_fingerprint=0_8,&
   bounded_candidate_fingerprint=0_8
 integer :: bounded_last_peer_exchange_count=0
@@ -1302,8 +1283,6 @@ contains
     type(s_dg_hybrid_dc_reference)::dc_reference
     type(s_dg_hybrid_core_projection_report)::core_projection_report
     type(s_dg_hybrid_fixed_payload)::fixed_payload
-    type(s_dg_hybrid_fragment_preconditioner)::fragment_preconditioner
-    type(s_dg_hybrid_preconditioner_key)::preconditioner_key
     integer::nproc,rank,ierr,status,p,q,axis,index3(3),raw_grid(3),core_grid(3),global_point_count,&
       local_basis_count,total_basis_count,face_count,initial_count,guard_count,candidate_count,&
       pw_candidate_count,global_column
@@ -1321,7 +1300,7 @@ contains
     complex(8),allocatable::buffer_candidates(:,:),projector_candidates(:,:),reference_frame(:,:),&
       interior_values(:,:),interior_gradients(:,:,:),interior_kinetic_action(:,:),kinetic_rows(:,:),&
       metric_rows(:,:),local_potential_rows(:,:),nonlocal_rows(:,:),interface_components(:,:,:),&
-      interface_rows(:,:),schwarz_coupling_rows(:,:),fragment_h(:,:),fragment_s(:,:),seed_coefficients(:,:),&
+      interface_rows(:,:),schwarz_coupling_rows(:,:),seed_coefficients(:,:),&
       final_local_potential_rows(:,:),final_hrows(:,:),final_srows(:,:)
     real(8),allocatable::core_lower(:,:),core_extent(:,:),atom_positions(:,:),raw_weight(:),&
       raw_gradient(:,:),partition_weight(:),partition_gradient(:,:),box_windows(:,:),&
@@ -1657,14 +1636,6 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'fragment-local variational payload freeze failed'
     endif
-    preconditioner_key%fragment_id=dc%i_frag
-    preconditioner_key%basis_generation=projected_basis%generation
-    preconditioner_key%operator_epoch=1
-    preconditioner_key%basis_fingerprint=admission_report%basis_fingerprint
-    preconditioner_key%metric_fingerprint=admission_report%metric_fingerprint
-    preconditioner_key%operator_fingerprint=fixed_payload%fingerprint
-    preconditioner_key%reference_fingerprint=frame_fingerprint
-
     ! The extension inventory is expressed in the final projected coordinates.
     ! Reproject every immutable physical DC seed; never reinterpret a named WF
     ! column as a physical eigenstate and never pad a seed with zero PW entries.
@@ -1752,35 +1723,23 @@ contains
     ! Each callback is MPI_COMM_SELF inside its fragment; only the common
     ! occupation and outer density loop communicate over dc%icomm_tot.
     divided_fragment_basis=projected_basis
-    bounded_projection_receipt=projection_receipt
-    bounded_admission_report=admission_report
     bounded_fixed_payload=fixed_payload
-    bounded_preconditioner_key=preconditioner_key
     bounded_interior_values=interior_values
     bounded_local_potential_rows=local_potential_rows
-    bounded_reference_frame=reference_frame
     bounded_core_weights=core_weights
-    allocate(bounded_point_weights(size(projected_basis%buffer_point_ids)),source=system%hvol)
     bounded_basis_fragment=payload_fragment
     bounded_basis_local_slot=payload_local_slot
     bounded_basis_generation=payload_generation
     bounded_interior_fragment=interior_fragment
     bounded_core_ids=core_ids
-    bounded_global_basis_fingerprint=global_basis_fingerprint
     bounded_directory_fingerprint=directory_fingerprint
     bounded_face_fingerprint=face_fingerprint
-    bounded_frame_fingerprint=frame_fingerprint
-    bounded_selection_fingerprint=core_selection%fingerprint
     divided_mixing_basis_generation=projected_basis%generation
     divided_mixing_inventory_fingerprint=bounded_schwarz_state%fingerprint
     if(allocated(ow_core_ids))deallocate(ow_core_ids)
     if(allocated(ow_core_weights))deallocate(ow_core_weights)
     allocate(ow_core_ids,source=core_ids);allocate(ow_core_weights,source=core_weights)
     ow_global_grid_count=int(global_point_count,int64)
-    if(allocated(ow_divided_core_mask))deallocate(ow_divided_core_mask)
-    allocate(ow_divided_core_mask(size(projected_basis%buffer_point_ids)),source=.false.)
-    ow_divided_core_mask(core_selection%core_row_slots)=.true.
-
     call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
       ow_hybrid_divided_threshold,ow_hybrid_divided_total_density,ok,message)
     if(.not.ok)then
@@ -2219,7 +2178,6 @@ contains
     real(8),allocatable::one_shot_density(:),one_shot_potential(:)
     real(8),allocatable::hybrid_converged_density(:),ow_initial_occupied_density(:)
     real(8),allocatable::divided_initial_density(:),divided_converged_density(:)
-    real(8),allocatable::divided_lcfo_point_weights(:)
     real(8),allocatable::dg_hybrid_interior_weights(:),dg_hybrid_unit_local_potential(:)
     real(8),allocatable::dg_hybrid_final_density(:)
     real(8),allocatable::spectral_occupied_density(:),spectral_empty_moments(:,:),&
@@ -2380,7 +2338,7 @@ contains
       hybrid_electron_defect,hybrid_symmetry_defect,hybrid_scf_receipts(5)
     real(8)::initial_occupied_charge_local,initial_occupied_charge
     integer::hybrid_iterations
-    integer::divided_iterations,dg_hybrid_nonlocal_ownership_count,divided_global_basis_count
+    integer::dg_hybrid_nonlocal_ownership_count,divided_global_basis_count
     real(8)::divided_convergence_value,divided_electron_defect
     real(8)::divided_final_residual,divided_final_orthogonality,divided_final_projector_defect
     real(8)::divided_full_basis_closure_defect
@@ -2420,6 +2378,8 @@ contains
     character(8),allocatable::w90_atom_symbols(:)
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
+    if(yn_dg_hybrid_divided_scf=='y')&
+      error stop 'divided Hybrid SCF must dispatch to the Schwarz production entry'
     ok=system%nspin==1.and.system%if_real_orbital.and.allocated(spsi%rwf)
     call comm_logical_and(ok,reusable,dc%icomm_tot)
     if(.not.reusable)error stop 'overlapping-Wannier production requires Gamma real DC candidates'
@@ -4417,8 +4377,6 @@ contains
         divided_selection_fingerprint,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
       if(.not.ok)error stop 'divided Hybrid authoritative selection closure failed'
-      if(allocated(ow_divided_core_mask))deallocate(ow_divided_core_mask)
-      allocate(ow_divided_core_mask,source=core_mask)
       call prepare_dg_hybrid_divided_dc_controls(dc,ow_hybrid_divided_convergence,&
         ow_hybrid_divided_threshold,ow_hybrid_divided_total_density,ok,message)
       if(.not.ok)write(0,'(a)')trim(message)
@@ -4572,30 +4530,6 @@ contains
           ow_hybrid_ground_state,dg_hybrid_final_density,dg_hybrid_final_trace,&
           dg_hybrid_final_hamiltonian_rows)
         return
-      else
-        if(divided_fixed_payload_fingerprint==0_8.or.&
-          divided_fixed_payload_fingerprint/=dg_hybrid_fixed_payload%fingerprint)&
-          error stop 'divided Hybrid shared variational payload fingerprint changed'
-        call run_dg_hybrid_divided_scf(dc%icomm_tot,int(expected_core_count),ow_core_ids,&
-          divided_initial_density,dc%system_tot%hvol,&
-          ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
-          update_dg_hybrid_divided_potential,solve_dg_hybrid_divided_fragments,&
-          assemble_dg_hybrid_divided_core_density,mix_dg_hybrid_divided_density,nscf,&
-          ow_core_weights,dc%elec_num_tot,dg_dc_gs_electron_count_tolerance,&
-          divided_converged_density,divided_iterations,divided_convergence_value,&
-          divided_electron_defect,ok,message)
-        if(.not.ok)write(0,'(a)')trim(message)
-        if(.not.ok)error stop 'divided Hybrid SCF failed'
-        if(rank==0)write(*,'(a,i0,a,es16.8,a,es16.8)')&
-          '[OW-GS] divided WF+PW SCF converged iterations=',divided_iterations,&
-          ' density=',divided_convergence_value,' electron_defect=',divided_electron_defect
-        allocate(divided_lcfo_point_weights(size(divided_fragment_basis%buffer_point_ids)),source=system%hvol)
-        call assemble_dg_hybrid_lcfo_rows(dc%icomm_tot,divided_fragment_basis,divided_lcfo_row_ids,&
-          divided_lcfo_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
-          apply_dg_hybrid_divided_fragment_metric,divided_lcfo_hrows,divided_lcfo_srows,&
-          divided_lcfo_peak_elements,divided_lcfo_operator_fingerprint,ok,message)
-        if(.not.ok)write(0,'(a)')trim(message)
-        if(.not.ok)error stop 'divided Hybrid LCFO assembly failed'
       endif
       call build_dg_hybrid_retained_basis_representation(dc%icomm_tot,int(expected_core_count),&
         ow_core_ids,ow_core_weights,ow_pencil_generator_maps,divided_fragment_basis,&
@@ -5833,139 +5767,6 @@ contains
     fingerprint=ow_collective_operator_fingerprint(comm)
     ok=.true.;message=''
   end subroutine
-
-  subroutine apply_dg_hybrid_divided_fragment_hpsi(tile_in,tile_out,callback_ok)
-    complex(8),intent(in)::tile_in(:,:)
-    complex(8),intent(out)::tile_out(:,:)
-    logical,intent(out)::callback_ok
-    type(s_parallel_info)::tile_info
-    type(s_orbital)::tile_psi,tile_hpsi
-    type(s_sendrecv_grid)::tile_srg
-    integer::width,p,ix,iy,iz,io,allocation_status
-
-    callback_ok=.false.;tile_out=(0d0,0d0);width=size(tile_in,2)
-    if(size(tile_in,1)/=product(ow_box_size).or.any(shape(tile_out)/=shape(tile_in)).or.width<1)return
-    if(any(mg%is_array>[1,1,1]).or.any(mg%ie_array<ow_box_size).or.system%nspin/=1)return
-    tile_info=info;tile_info%im_s=1;tile_info%im_e=1;tile_info%numm=1
-    tile_info%ik_s=1;tile_info%ik_e=1;tile_info%numk=1
-    tile_info%io_s=1;tile_info%io_e=width;tile_info%numo=width;tile_info%if_divide_orbit=.false.
-    allocate(tile_psi%zwf(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),&
-      mg%is_array(3):mg%ie_array(3),1,1:width,1,1),&
-      tile_hpsi%zwf(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),&
-      mg%is_array(3):mg%ie_array(3),1,1:width,1,1),stat=allocation_status)
-    if(allocation_status/=0)return
-    tile_psi%zwf=(0d0,0d0);tile_hpsi%zwf=(0d0,0d0);p=0
-    do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
-      p=p+1
-      do io=1,width;tile_psi%zwf(ix,iy,iz,1,io,1,1)=tile_in(p,io);enddo
-    enddo;enddo;enddo
-    call init_sendrecv_grid(tile_srg,mg,width,info%icomm_rko,srg%neig)
-    call hpsi(tile_psi,tile_hpsi,tile_info,mg,v_local,system,stencil,tile_srg,ppg)
-    p=0
-    do iz=1,ow_box_size(3);do iy=1,ow_box_size(2);do ix=1,ow_box_size(1)
-      p=p+1
-      do io=1,width;tile_out(p,io)=tile_hpsi%zwf(ix,iy,iz,1,io,1,1);enddo
-    enddo;enddo;enddo
-    callback_ok=all(ieee_is_finite(real(tile_out))).and.all(ieee_is_finite(aimag(tile_out)))
-    call dealloc_cache(tile_srg)
-    deallocate(tile_psi%zwf,tile_hpsi%zwf)
-  end subroutine apply_dg_hybrid_divided_fragment_hpsi
-
-  subroutine apply_dg_hybrid_divided_fragment_metric(tile_in,tile_out,callback_ok)
-    complex(8),intent(in)::tile_in(:,:)
-    complex(8),intent(out)::tile_out(:,:)
-    logical,intent(out)::callback_ok
-    tile_out=tile_in;callback_ok=all(ieee_is_finite(real(tile_in))).and.all(ieee_is_finite(aimag(tile_in)))
-  end subroutine apply_dg_hybrid_divided_fragment_metric
-
-  subroutine solve_dg_hybrid_divided_fragments(iteration,callback_ok)
-    integer,intent(in)::iteration
-    logical,intent(out)::callback_ok
-    integer::fragment_basis_count,fragment_state_count,maximum_fragment_state_count,&
-      fragment_point_count,ierr_local,&
-      local_bad,global_bad,allocation_status
-    real(8),allocatable::fragment_occupations(:),fragment_point_weights(:),fragment_core_norms(:),&
-      representative_energies(:,:),representative_core_norms(:,:),all_fragment_occupations(:,:)
-    real(8)::chemical_potential,common_electron_count
-    logical,allocatable::representative_mask(:)
-    character(256)::solver_message
-
-    callback_ok=.false.;fragment_basis_count=size(divided_fragment_basis%global_ids)
-    call MPI_Allreduce(MPI_IN_PLACE,fragment_basis_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_frag,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)return
-    fragment_state_count=min(system%no,fragment_basis_count)
-    maximum_fragment_state_count=fragment_state_count
-    call MPI_Allreduce(MPI_IN_PLACE,maximum_fragment_state_count,1,MPI_INTEGER,MPI_MAX,&
-      dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)return
-    fragment_point_count=size(divided_fragment_basis%buffer_point_ids)
-    local_bad=0
-    if(iteration<1.or.fragment_state_count<1.or.size(system%rocc,1)<fragment_state_count)local_bad=1
-    if(.not.allocated(ow_divided_core_mask))then
-      local_bad=1
-    elseif(size(ow_divided_core_mask)/=fragment_point_count)then
-      local_bad=1
-    endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)return
-    if(global_bad/=0)return
-    if(allocated(divided_fragment_coefficients))deallocate(divided_fragment_coefficients)
-    if(allocated(divided_fragment_eigenvalues))deallocate(divided_fragment_eigenvalues)
-    if(allocated(divided_fragment_density))deallocate(divided_fragment_density)
-    allocate(fragment_occupations(fragment_state_count),fragment_point_weights(fragment_point_count),&
-      fragment_core_norms(fragment_state_count),divided_fragment_eigenvalues(fragment_state_count),&
-      divided_fragment_density(fragment_point_count),&
-      representative_energies(maximum_fragment_state_count,dc%n_frag),&
-      representative_core_norms(maximum_fragment_state_count,dc%n_frag),&
-      representative_mask(dc%n_frag),stat=allocation_status)
-    local_bad=merge(0,1,allocation_status==0)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)return
-    if(global_bad/=0)return
-    fragment_point_weights=system%hvol
-    call solve_dg_hybrid_fragment_spectrum(dc%icomm_frag,divided_fragment_basis,fragment_state_count,&
-      ow_divided_core_mask,fragment_point_weights,apply_dg_hybrid_divided_fragment_hpsi,&
-      apply_dg_hybrid_divided_fragment_metric,1d-12,divided_fragment_coefficients,&
-      divided_fragment_eigenvalues,fragment_core_norms,divided_fragment_residual,&
-      divided_fragment_orthogonality,divided_solver_workspace,divided_solver_fingerprint,&
-      callback_ok,solver_message)
-    if(.not.callback_ok)write(0,'(2a)')'divided fragment spectrum: ',trim(solver_message)
-    local_bad=merge(0,1,callback_ok)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
-    if(global_bad/=0)then;callback_ok=.false.;return;endif
-
-    representative_energies=0d0;representative_core_norms=0d0;representative_mask=.false.
-    if(dc%id_frag==0)then
-      representative_mask(dc%i_frag)=.true.
-      representative_energies(:,dc%i_frag)=divided_fragment_eigenvalues(fragment_state_count)
-      representative_energies(1:fragment_state_count,dc%i_frag)=divided_fragment_eigenvalues
-      representative_core_norms(1:fragment_state_count,dc%i_frag)=fragment_core_norms
-    endif
-    call determine_dc_fragment_occupations(dc%icomm_tot,representative_energies,&
-      representative_core_norms,representative_mask,max(0d0,temperature),2d0,&
-      dc%elec_num_tot,dg_dc_gs_electron_count_tolerance,chemical_potential,&
-      all_fragment_occupations,common_electron_count,callback_ok,solver_message,allow_unordered=.true.)
-    if(.not.callback_ok)then
-      write(0,'(2a)')'divided common occupation: ',trim(solver_message);return
-    endif
-    if(abs(common_electron_count-dc%elec_num_tot)>dg_dc_gs_electron_count_tolerance)then
-      callback_ok=.false.;write(0,'(a)')'divided common occupation electron count mismatch';return
-    endif
-    fragment_occupations=all_fragment_occupations(1:fragment_state_count,dc%i_frag)
-    system%mu=chemical_potential
-    system%rocc(:,1,1)=0d0
-    system%rocc(1:fragment_state_count,1,1)=fragment_occupations
-    call reconstruct_dg_hybrid_fragment_density(dc%icomm_frag,divided_fragment_basis,&
-      divided_fragment_coefficients,fragment_occupations,2d0,ow_divided_core_mask,&
-      fragment_point_weights,divided_fragment_density,divided_fragment_electron_count,&
-      callback_ok,solver_message)
-    if(.not.callback_ok)write(0,'(2a)')'divided fragment density: ',trim(solver_message)
-    local_bad=merge(0,1,callback_ok)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
-    callback_ok=global_bad==0
-  end subroutine solve_dg_hybrid_divided_fragments
 
   subroutine gather_dg_hybrid_divided_core_density(core_density,total_density,callback_ok)
     real(8),intent(in)::core_density(:)
@@ -7899,36 +7700,6 @@ stage_pass: do
     callback_ok=ieee_is_finite(residual_arg)
     if(.not.callback_ok)message_arg='mapped-core density covariance defect is not finite'
   end subroutine measure_dg_hybrid_core_density_covariance
-
-  subroutine assemble_dg_hybrid_divided_core_density(core_density,electron_count,callback_ok)
-    real(8),intent(out)::core_density(:),electron_count
-    logical,intent(out)::callback_ok
-    integer::p,position,ierr_local,local_bad,global_bad
-    real(8)::local_electron_count
-
-    callback_ok=.false.;core_density=0d0;electron_count=0d0
-    local_bad=0
-    if(.not.allocated(divided_fragment_density).or.size(core_density)/=size(ow_core_ids))then
-      local_bad=1
-    else
-      do p=1,size(ow_core_ids)
-        position=findloc(divided_fragment_basis%buffer_point_ids,ow_core_ids(p),dim=1)
-        if(position<1)then
-          local_bad=1
-        else
-          core_density(p)=divided_fragment_density(position)
-        endif
-      enddo
-    endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)return
-    if(global_bad/=0)return
-    local_electron_count=sum(ow_core_weights*core_density)
-    call MPI_Allreduce(local_electron_count,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
-      dc%icomm_tot,ierr_local)
-    callback_ok=ierr_local==MPI_SUCCESS.and.all(ieee_is_finite(core_density)).and.&
-      ieee_is_finite(electron_count)
-  end subroutine assemble_dg_hybrid_divided_core_density
 
   subroutine mix_dg_hybrid_divided_density(iteration,input_density,new_density,mixed_density,callback_ok)
     integer,intent(in)::iteration
