@@ -16,6 +16,7 @@ set(SOURCES
     dg_hybrid_broken_volume.f90
     dg_hybrid_variational_payload.f90
     dg_hybrid_divided_operator.f90
+    dg_hybrid_interface_continuation.f90
     dg_hybrid_schwarz_state.f90
     dg_hybrid_schwarz_operator.f90
     dg_hybrid_schwarz_solver.f90
