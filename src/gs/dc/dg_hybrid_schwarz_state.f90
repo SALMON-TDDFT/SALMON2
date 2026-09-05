@@ -13,8 +13,10 @@ module dg_hybrid_schwarz_state
     integer::coefficient_epoch=0
     integer(int64)::mapping_fingerprint=0_int64,candidate_fingerprint=0_int64,fingerprint=0_int64
     real(real64)::electron_target=0d0,temperature=0d0,wspin=0d0,chemical_potential=0d0
+    real(real64)::electron_count=0d0,electron_defect=huge(1d0)
     integer(int64),allocatable::column_ids(:),source_candidate_ids(:)
     complex(real64),allocatable::coefficients(:,:)
+    real(real64),allocatable::energies(:),occupations(:)
   end type
 
   public::initialize_dg_hybrid_schwarz_state,extend_dg_hybrid_schwarz_state
@@ -163,6 +165,9 @@ contains
     call collective_gate(comm,stat==0,'Schwarz extension publication allocation failed',ok,message)
     if(.not.ok)return
     work%trial_count=requested_count;work%column_ids=common_ids;work%coefficients=extended_coefficients
+    if(allocated(work%energies))deallocate(work%energies)
+    if(allocated(work%occupations))deallocate(work%occupations)
+    work%electron_count=0d0;work%electron_defect=huge(1d0)
     work%fingerprint=state_fingerprint(work)
     publish=.true.;if(present(local_publish_ok))publish=local_publish_ok
     valid=publish.and.work%fingerprint/=0_int64.and.finite_matrix(work%coefficients)

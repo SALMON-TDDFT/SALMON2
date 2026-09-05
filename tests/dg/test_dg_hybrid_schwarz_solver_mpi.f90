@@ -2,15 +2,17 @@ program test_dg_hybrid_schwarz_solver_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,initialize_dg_hybrid_schwarz_state
-  use dg_hybrid_schwarz_solver,only:advance_dg_hybrid_schwarz_epoch
+  use dg_hybrid_schwarz_solver,only:advance_dg_hybrid_schwarz_epoch,&
+    assign_dg_hybrid_schwarz_occupations
   implicit none
   integer::ierr,rank,nproc,fragment,nb,ncandidate,j,steps
   integer(int64),allocatable::candidate_ids(:)
   real(real64),allocatable::candidate_energies(:),diagonal(:)
   complex(real64),allocatable::candidate_vectors(:,:),before(:,:),metric_action(:,:),gram(:,:)
-  type(s_dg_hybrid_schwarz_state)::state
-  logical::ok,converged,rolled_back,inject_failure,fail_operator
-  real(real64)::residual,orthogonality
+  type(s_dg_hybrid_schwarz_state)::state,thermal_state
+  logical::ok,converged,rolled_back,inject_failure,fail_operator,occupation_mode,extended
+  real(real64)::residual,orthogonality,mu_min,mu_max
+  real(real64),allocatable::occupation_diagonal(:),occupations(:),energies(:)
   character(512)::message
 
   call MPI_Init(ierr)
@@ -30,7 +32,7 @@ program test_dg_hybrid_schwarz_solver_mpi
     1d-12,1d-10,77123_int64,88231_int64,candidate_ids,candidate_energies,candidate_vectors,&
     state,ok,message)
   call require(ok,'solver fixture state rejected: '//trim(message))
-  inject_failure=.false.;fail_operator=.false.
+  inject_failure=.false.;fail_operator=.false.;occupation_mode=.false.
   call advance_dg_hybrid_schwarz_epoch(MPI_COMM_WORLD,11,3,1d-14,1d-10,10d0,&
     apply_h,apply_s,precondition,state,steps,residual,orthogonality,converged,rolled_back,ok,message)
   call require(ok,'bounded Schwarz update failed: '//trim(message))
@@ -55,6 +57,34 @@ program test_dg_hybrid_schwarz_solver_mpi
   call require(.not.ok.and.rolled_back,'rank-local Hamiltonian failure did not return failure and rollback')
   call require(all(state%coefficients==before),'Hamiltonian failure changed accepted coefficients')
 
+  fail_operator=.false.;occupation_mode=.true.
+  allocate(occupation_diagonal(nb));occupation_diagonal=2d0
+  occupation_diagonal(1)=0d0;occupation_diagonal(2)=1d-5
+  occupation_diagonal(3)=1d0;occupation_diagonal(4)=2d0
+  candidate_energies=[0d0,1d0,2d0,2d0]
+  call initialize_dg_hybrid_schwarz_state(MPI_COMM_WORLD,fragment,nproc,12,2d0,300d0,2d0,1,&
+    1d-12,1d-10,77123_int64,99241_int64,candidate_ids,candidate_energies,candidate_vectors,&
+    thermal_state,ok,message)
+  call require(ok.and.thermal_state%trial_count==2,'thermal extension fixture did not start at two columns')
+  call assign_dg_hybrid_schwarz_occupations(MPI_COMM_WORLD,12,300d0,2d0,2d0,1d-8,1d-10,&
+    candidate_ids,candidate_energies,candidate_vectors,apply_h,apply_s,thermal_state,&
+    occupations,energies,extended,ok,message)
+  call require(ok.and.extended,'unresolved 300 K upper occupation tail did not request extension')
+  call require(thermal_state%trial_count==4,'extension did not include the degenerate candidate boundary')
+  call advance_dg_hybrid_schwarz_epoch(MPI_COMM_WORLD,12,1,1d6,1d-10,10d0,&
+    apply_h,apply_s,precondition,thermal_state,steps,residual,orthogonality,converged,rolled_back,ok,message)
+  call require(ok,'extended common inventory could not be S-orthonormalized')
+  call assign_dg_hybrid_schwarz_occupations(MPI_COMM_WORLD,12,300d0,2d0,2d0,1d-8,1d-10,&
+    candidate_ids,candidate_energies,candidate_vectors,apply_h,apply_s,thermal_state,&
+    occupations,energies,extended,ok,message)
+  call require(ok.and..not.extended,'resolved 300 K occupation spectrum requested another extension')
+  call require(size(occupations)==4.and.abs(2d0*sum(occupations)-2d0)<1d-10,&
+    'global occupations do not reproduce the original electron target')
+  call require(occupations(4)<=1d-8,'published upper occupation tail is unresolved')
+  call MPI_Allreduce(thermal_state%chemical_potential,mu_min,1,MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,ierr)
+  call MPI_Allreduce(thermal_state%chemical_potential,mu_max,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+  call require(mu_min==mu_max,'chemical potential differs between fragments')
+
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid Schwarz solver on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
@@ -62,7 +92,12 @@ contains
     complex(real64),intent(in)::input(:,:)
     complex(real64),intent(out)::output(:,:)
     logical,intent(out)::success
-    output=input*spread(diagonal,2,size(input,2));success=.not.fail_operator
+    if(occupation_mode)then
+      output=input*spread(occupation_diagonal,2,size(input,2))
+    else
+      output=input*spread(diagonal,2,size(input,2))
+    endif
+    success=.not.fail_operator
   end subroutine apply_h
   subroutine apply_s(input,output,success)
     complex(real64),intent(in)::input(:,:)

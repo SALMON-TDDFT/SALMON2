@@ -2,7 +2,7 @@ module dg_hybrid_schwarz_solver
   use mpi
   use,intrinsic::iso_fortran_env,only:real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
-  use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state
+  use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,extend_dg_hybrid_schwarz_state
   implicit none
   private
   abstract interface
@@ -23,8 +23,131 @@ module dg_hybrid_schwarz_solver
       integer,intent(out)::info
     end subroutine zheev
   end interface
-  public::advance_dg_hybrid_schwarz_epoch
+  public::advance_dg_hybrid_schwarz_epoch,assign_dg_hybrid_schwarz_occupations
 contains
+  subroutine assign_dg_hybrid_schwarz_occupations(comm,basis_generation,temperature,wspin,target,&
+      tail_tolerance,degeneracy_tolerance,candidate_ids,candidate_energies,candidate_vectors,&
+      apply_h,apply_s,state,occupations,energies,extended,ok,message)
+    integer,intent(in)::comm,basis_generation
+    real(real64),intent(in)::temperature,wspin,target,tail_tolerance,degeneracy_tolerance
+    integer(kind=8),intent(in)::candidate_ids(:)
+    real(real64),intent(in)::candidate_energies(:)
+    complex(real64),intent(in)::candidate_vectors(:,:)
+    procedure(apply_interface)::apply_h,apply_s
+    type(s_dg_hybrid_schwarz_state),intent(inout)::state
+    real(real64),allocatable,intent(out)::occupations(:),energies(:)
+    logical,intent(out)::extended,ok
+    character(*),intent(out)::message
+    type(s_dg_hybrid_schwarz_state)::work_state
+    complex(real64),allocatable::hcoeff(:,:),projected(:,:),lapack_work(:)
+    real(real64),allocatable::rwork(:),minimum_candidates(:),maximum_candidates(:)
+    real(real64)::orthogonality,mu,electron_count
+    integer::n,lwork,stat,ierr,info,requested
+    logical::success,tail_resolved
+
+    ok=.false.;message='';extended=.false.
+    success=state%valid.and.state%basis_generation==basis_generation.and.temperature>=0d0.and.&
+      wspin>0d0.and.target>0d0.and.tail_tolerance>0d0.and.tail_tolerance<1d0.and.&
+      degeneracy_tolerance>=0d0.and.size(candidate_ids)==state%candidate_count.and.&
+      size(candidate_energies)==state%candidate_count.and.size(candidate_vectors,1)==state%local_basis_count.and.&
+      size(candidate_vectors,2)==state%candidate_count.and.all(ieee_is_finite(candidate_energies)).and.&
+      all(candidate_energies(2:)>=candidate_energies(:size(candidate_energies)-1))
+    call collective_gate(comm,success,'invalid global Schwarz occupation context',ok,message);if(.not.ok)return
+    allocate(minimum_candidates(size(candidate_energies)),maximum_candidates(size(candidate_energies)),stat=stat)
+    call collective_gate(comm,stat==0,'Schwarz occupation candidate allocation failed',ok,message);if(.not.ok)return
+    call MPI_Allreduce(candidate_energies,minimum_candidates,size(candidate_energies),MPI_DOUBLE_PRECISION,&
+      MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='Schwarz occupation energy minimum failed';return;endif
+    call MPI_Allreduce(candidate_energies,maximum_candidates,size(candidate_energies),MPI_DOUBLE_PRECISION,&
+      MPI_MAX,comm,ierr)
+    call collective_gate(comm,ierr==MPI_SUCCESS.and.all(minimum_candidates==maximum_candidates),&
+      'Schwarz occupation candidate energies differ between ranks',ok,message);if(.not.ok)return
+    work_state=state;n=work_state%trial_count;lwork=max(1,2*n*n)
+    call orthonormalize_columns(comm,apply_s,work_state%coefficients,max(64d0*epsilon(1d0),1d-12),&
+      orthogonality,success,message)
+    if(.not.success)then;ok=.false.;return;endif
+    allocate(hcoeff(work_state%local_basis_count,n),projected(n,n),energies(n),occupations(n),&
+      lapack_work(lwork),rwork(max(1,3*n-2)),stat=stat)
+    call collective_gate(comm,stat==0,'Schwarz occupation workspace allocation failed',ok,message);if(.not.ok)return
+    call apply_h(work_state%coefficients,hcoeff,success)
+    call collective_gate(comm,success.and.finite_matrix(hcoeff),'Schwarz occupation Hamiltonian failed',ok,message)
+    if(.not.ok)return
+    projected=matmul(conjg(transpose(work_state%coefficients)),hcoeff)
+    call MPI_Allreduce(MPI_IN_PLACE,projected,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call collective_gate(comm,ierr==MPI_SUCCESS.and.finite_matrix(projected),&
+      'Schwarz occupation Rayleigh reduction failed',ok,message);if(.not.ok)return
+    projected=0.5d0*(projected+conjg(transpose(projected)))
+    call zheev('V','U',n,projected,n,energies,lapack_work,lwork,rwork,info)
+    call collective_gate(comm,info==0.and.all(ieee_is_finite(energies)),&
+      'Schwarz occupation eigensystem failed',ok,message);if(.not.ok)return
+    work_state%coefficients=matmul(work_state%coefficients,projected)
+    call solve_fermi_occupations(energies,temperature,wspin,target,tail_tolerance,&
+      occupations,mu,electron_count,tail_resolved,success)
+    call collective_gate(comm,success,'Schwarz finite-temperature occupation solve failed',ok,message)
+    if(.not.ok)return
+    if(.not.tail_resolved)then
+      call collective_gate(comm,n<work_state%candidate_count,&
+        'Schwarz candidate capacity exhausted before resolving the 300 K occupation tail',ok,message)
+      if(.not.ok)return
+      requested=n+1
+      do while(requested<work_state%candidate_count)
+        if(abs(candidate_energies(requested+1)-candidate_energies(requested))>degeneracy_tolerance)exit
+        requested=requested+1
+      enddo
+      call extend_dg_hybrid_schwarz_state(comm,basis_generation,requested,work_state%mapping_fingerprint,&
+        work_state%candidate_fingerprint,candidate_ids,candidate_vectors,work_state,ok,message)
+      if(.not.ok)return
+      state=work_state;extended=.true.;deallocate(occupations,energies)
+      allocate(occupations(0),energies(0));ok=.true.;message='';return
+    endif
+    if(allocated(work_state%energies))deallocate(work_state%energies)
+    if(allocated(work_state%occupations))deallocate(work_state%occupations)
+    allocate(work_state%energies(n),work_state%occupations(n),stat=stat)
+    call collective_gate(comm,stat==0,'Schwarz occupation publication allocation failed',ok,message)
+    if(.not.ok)return
+    work_state%energies=energies;work_state%occupations=occupations
+    work_state%chemical_potential=mu;work_state%electron_count=electron_count
+    work_state%electron_defect=abs(electron_count-target)
+    state=work_state;ok=.true.;message=''
+  end subroutine assign_dg_hybrid_schwarz_occupations
+
+  subroutine solve_fermi_occupations(energies,temperature,wspin,target,tail_tolerance,occupations,&
+      mu,electron_count,tail_resolved,ok)
+    real(real64),intent(in)::energies(:),temperature,wspin,target,tail_tolerance
+    real(real64),intent(out)::occupations(:),mu,electron_count
+    logical,intent(out)::tail_resolved,ok
+    real(real64),parameter::boltzmann_hartree_per_kelvin=3.166811563d-6
+    real(real64)::lower,upper,mid,kbt,total
+    integer::iteration,j,occupied
+    ok=.false.;tail_resolved=.false.;mu=0d0;electron_count=0d0;occupations=0d0
+    if(size(energies)<1.or.size(occupations)/=size(energies).or.target>wspin*real(size(energies),real64))return
+    if(temperature==0d0)then
+      occupied=ceiling(target/wspin-64d0*epsilon(1d0));occupations(:occupied)=1d0
+      mu=energies(min(size(energies),max(1,occupied)))
+    else
+      kbt=boltzmann_hartree_per_kelvin*temperature
+      lower=energies(1)-max(1d0,64d0*kbt);upper=energies(size(energies))+max(1d0,64d0*kbt)
+      do iteration=1,256
+        mid=0.5d0*(lower+upper)
+        total=wspin*sum([(fermi_value((energies(j)-mid)/kbt),j=1,size(energies))])
+        if(total<target)then;lower=mid;else;upper=mid;endif
+      enddo
+      mu=0.5d0*(lower+upper)
+      occupations=[(fermi_value((energies(j)-mu)/kbt),j=1,size(energies))]
+    endif
+    electron_count=wspin*sum(occupations);tail_resolved=occupations(size(occupations))<=tail_tolerance
+    ok=all(ieee_is_finite(occupations)).and.ieee_is_finite(mu).and.ieee_is_finite(electron_count).and.&
+      abs(electron_count-target)<=max(1d-12,256d0*epsilon(1d0)*max(1d0,target))
+  end subroutine solve_fermi_occupations
+
+  pure real(real64) function fermi_value(x)result(value)
+    real(real64),intent(in)::x
+    if(x>=50d0)then;value=exp(-x)
+    elseif(x<=-50d0)then;value=1d0
+    else;value=1d0/(1d0+exp(x))
+    endif
+  end function fermi_value
+
   subroutine advance_dg_hybrid_schwarz_epoch(comm,basis_generation,maximum_steps,residual_tolerance,&
       orthogonality_tolerance,allowed_residual_growth,apply_h,apply_s,precondition,state,iterations,&
       maximum_residual,orthogonality_defect,converged,rolled_back,ok,message,local_publish_ok)
