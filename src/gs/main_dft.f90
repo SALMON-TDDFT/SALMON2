@@ -1934,7 +1934,7 @@ contains
       bounded_schwarz_state%basis_generation,bounded_directory_fingerprint,bounded_face_fingerprint,&
       bounded_mapping_fingerprint,divided_fragment_basis%global_ids,bounded_basis_fragment,&
       bounded_basis_local_slot,bounded_fixed_payload%kinetic_rows,bounded_fixed_payload%nonlocal_rows,&
-      bounded_fixed_payload%interface_rows,bounded_local_potential_rows,input,candidate,&
+      bounded_fixed_payload%interface_rows,bounded_local_potential_rows,1d0,input,candidate,&
       peer_exchanges,callback_ok,operator_message)
     if(.not.callback_ok)then
       write(error_unit,'(a,a)')'Schwarz H application: ',trim(operator_message);return

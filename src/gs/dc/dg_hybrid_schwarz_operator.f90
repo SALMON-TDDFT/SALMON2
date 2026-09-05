@@ -165,12 +165,14 @@ contains
 
   subroutine apply_dg_hybrid_schwarz_hamiltonian(comm,schedule,basis_generation,directory_fingerprint,&
       face_fingerprint,mapping_fingerprint,row_ids,basis_fragment,basis_local_slot,kinetic_rows,&
-      nonlocal_rows,interface_rows,potential_rows,local_coefficients,output,peer_exchange_count,ok,message)
+      nonlocal_rows,interface_rows,potential_rows,interface_scale,local_coefficients,output,&
+      peer_exchange_count,ok,message)
     integer,intent(in)::comm,basis_generation
     type(s_dg_hybrid_schwarz_schedule),intent(in)::schedule
     integer(int64),intent(in)::directory_fingerprint,face_fingerprint,mapping_fingerprint,row_ids(:)
     integer,intent(in)::basis_fragment(:),basis_local_slot(:)
     complex(real64),intent(in)::kinetic_rows(:,:),nonlocal_rows(:,:),interface_rows(:,:),potential_rows(:,:)
+    real(real64),intent(in)::interface_scale
     complex(real64),intent(in)::local_coefficients(:,:)
     complex(real64),allocatable,intent(inout)::output(:,:)
     integer,intent(out)::peer_exchange_count
@@ -179,7 +181,17 @@ contains
     complex(real64),allocatable::hamiltonian_rows(:,:)
     integer::stat
     logical::valid
+    real(real64)::minimum_scale,maximum_scale
     ok=.false.;message='';peer_exchange_count=0
+    valid=ieee_is_finite(interface_scale)
+    call collective_gate(comm,valid,'nonfinite Schwarz interface scale',ok,message)
+    if(.not.ok)return
+    call MPI_Allreduce(interface_scale,minimum_scale,1,MPI_DOUBLE_PRECISION,MPI_MIN,comm,stat)
+    if(stat/=MPI_SUCCESS)then;message='Schwarz interface scale minimum failed';return;endif
+    call MPI_Allreduce(interface_scale,maximum_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,stat)
+    valid=stat==MPI_SUCCESS.and.minimum_scale==maximum_scale.and.interface_scale>=0d0.and.interface_scale<=1d0
+    call collective_gate(comm,valid,'invalid or rank-disagreeing Schwarz interface scale',ok,message)
+    if(.not.ok)return
     valid=all(shape(kinetic_rows)==shape(interface_rows)).and.&
       all(shape(nonlocal_rows)==shape(interface_rows)).and.all(shape(potential_rows)==shape(interface_rows))
     call collective_gate(comm,valid,'Schwarz Hamiltonian component shapes differ',ok,message)
@@ -187,7 +199,7 @@ contains
     allocate(hamiltonian_rows(size(interface_rows,1),size(interface_rows,2)),stat=stat)
     call collective_gate(comm,stat==0,'Schwarz Hamiltonian staging allocation failed',ok,message)
     if(.not.ok)return
-    hamiltonian_rows=kinetic_rows+nonlocal_rows+interface_rows+potential_rows
+    hamiltonian_rows=kinetic_rows+nonlocal_rows+potential_rows+interface_scale*interface_rows
     call apply_dg_hybrid_schwarz_rows(comm,schedule,basis_generation,directory_fingerprint,&
       face_fingerprint,mapping_fingerprint,row_ids,basis_fragment,basis_local_slot,hamiltonian_rows,&
       local_coefficients,output,peer_exchange_count,ok,message)
