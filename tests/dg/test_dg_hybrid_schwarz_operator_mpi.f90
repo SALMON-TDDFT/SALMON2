@@ -2,15 +2,20 @@ program test_dg_hybrid_schwarz_operator_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_schwarz_operator,only:s_dg_hybrid_schwarz_schedule,&
-    build_dg_hybrid_schwarz_schedule
+    build_dg_hybrid_schwarz_schedule,apply_dg_hybrid_schwarz_rows,&
+    apply_dg_hybrid_schwarz_hamiltonian
   implicit none
-  integer::ierr,rank,nproc,fragment,global_count,local_count,f,p,g,slot,first_global,stat
+  integer::ierr,rank,nproc,fragment,global_count,local_count,f,p,q,g,slot,first_global,stat
   integer(int64)::accepted_fingerprint
   integer,allocatable::counts(:),offsets(:),owners(:),fragments(:),local_slots(:),generations(:),manifest(:)
   integer(int64),allocatable::row_ids(:)
   complex(real64),allocatable::interface_rows(:,:)
+  complex(real64),allocatable::metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),potential_rows(:,:),&
+    local_coefficients(:,:),full_coefficients(:,:),distributed_h(:,:),distributed_s(:,:),&
+    expected_h(:,:),expected_s(:,:),accepted_h(:,:)
   type(s_dg_hybrid_schwarz_schedule)::schedule
   logical::ok,requests_match,slots_match
+  integer::state,exchange_count
   character(512)::message
 
   call MPI_Init(ierr)
@@ -55,6 +60,46 @@ program test_dg_hybrid_schwarz_operator_mpi
   call require(schedule%fingerprint/=0_int64,'schedule fingerprint is zero')
   call fingerprint_agrees(schedule%fingerprint)
   accepted_fingerprint=schedule%fingerprint
+
+  allocate(metric_rows(local_count,global_count),kinetic_rows(local_count,global_count),&
+    nonlocal_rows(local_count,global_count),potential_rows(local_count,global_count),&
+    local_coefficients(local_count,3),full_coefficients(global_count,3),&
+    expected_h(local_count,3),expected_s(local_count,3))
+  metric_rows=(0d0,0d0);kinetic_rows=(0d0,0d0);nonlocal_rows=(0d0,0d0);potential_rows=(0d0,0d0)
+  do p=1,local_count
+    q=int(row_ids(p));metric_rows(p,q)=cmplx(1d0+0.05d0*fragment,0d0,real64)
+    kinetic_rows(p,q)=cmplx(0.7d0+0.03d0*q,0d0,real64)
+    nonlocal_rows(p,q)=cmplx(0.04d0*fragment,-0.002d0*q,real64)
+    potential_rows(p,q)=cmplx(0.11d0+0.01d0*p,0d0,real64)
+  enddo
+  do q=1,global_count
+    do state=1,3
+      full_coefficients(q,state)=cmplx(0.1d0*fragments(q)+0.01d0*local_slots(q),&
+        -0.02d0*state+0.001d0*q,real64)
+    enddo
+  enddo
+  local_coefficients=full_coefficients(first_global:first_global+local_count-1,:)
+  expected_h=matmul(kinetic_rows+nonlocal_rows+potential_rows+interface_rows,full_coefficients)
+  expected_s=matmul(metric_rows,full_coefficients)
+  call apply_dg_hybrid_schwarz_hamiltonian(MPI_COMM_WORLD,schedule,3,81231_int64,93451_int64,&
+    73691_int64,row_ids,fragments,local_slots,kinetic_rows,nonlocal_rows,interface_rows,potential_rows,&
+    local_coefficients,distributed_h,exchange_count,ok,message)
+  call require(ok,'neighbor-only Hamiltonian action failed: '//trim(message))
+  call require(exchange_count==schedule%peer_count,'Hamiltonian contacted a non-neighbor or missed a peer')
+  call require(maxval(abs(distributed_h-expected_h))<1d-12,&
+    'neighbor-only Hamiltonian differs from explicit complete DG matrix')
+  call apply_dg_hybrid_schwarz_rows(MPI_COMM_WORLD,schedule,3,81231_int64,93451_int64,73691_int64,&
+    row_ids,fragments,local_slots,metric_rows,local_coefficients,distributed_s,exchange_count,ok,message)
+  call require(ok,'neighbor-only metric action failed: '//trim(message))
+  call require(exchange_count==0,'block-local metric unexpectedly exchanged coefficient rows')
+  call require(maxval(abs(distributed_s-expected_s))<1d-12,&
+    'distributed metric differs from explicit complete DG matrix')
+  allocate(accepted_h,source=distributed_h)
+  call apply_dg_hybrid_schwarz_hamiltonian(MPI_COMM_WORLD,schedule,3,81231_int64,93452_int64,&
+    73691_int64,row_ids,fragments,local_slots,kinetic_rows,nonlocal_rows,interface_rows,potential_rows,&
+    local_coefficients,distributed_h,exchange_count,ok,message)
+  call require(.not.ok,'stale face fingerprint was accepted by Hamiltonian action')
+  call require(all(distributed_h==accepted_h),'failed Hamiltonian action changed accepted output')
 
   if(size(manifest)>0)then
     call build_dg_hybrid_schwarz_schedule(MPI_COMM_WORLD,fragment,3,row_ids,owners,fragments,local_slots,&

@@ -7,6 +7,13 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SOURCE = (ROOT / "src/gs/dc/dg_hybrid_schwarz_operator.f90").read_text().lower()
+if "subroutine apply_dg_hybrid_schwarz_rows" in SOURCE:
+    APPLY = SOURCE.split("subroutine apply_dg_hybrid_schwarz_rows", 1)[1].split(
+        "end subroutine apply_dg_hybrid_schwarz_rows", 1
+    )[0]
+    assert "mpi_allgather" not in APPLY and "mpi_allgatherv" not in APPLY
+    assert "mpi_irecv" in APPLY and "mpi_isend" in APPLY and "mpi_waitall" in APPLY
 
 with tempfile.TemporaryDirectory(prefix="hybrid-schwarz-operator-") as name:
     build = Path(name)

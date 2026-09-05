@@ -14,7 +14,8 @@ module dg_hybrid_schwarz_operator
     integer(int64),allocatable::receive_global_ids(:)
   end type
 
-  public::build_dg_hybrid_schwarz_schedule
+  public::build_dg_hybrid_schwarz_schedule,apply_dg_hybrid_schwarz_rows
+  public::apply_dg_hybrid_schwarz_hamiltonian
 contains
   subroutine build_dg_hybrid_schwarz_schedule(comm,fragment_id,basis_generation,row_ids,basis_owner,&
       basis_fragment,basis_local_slot,basis_generations,interface_rows,directory_fingerprint,&
@@ -161,6 +162,151 @@ contains
     if(.not.ok)return
     schedule=work;ok=.true.;message=''
   end subroutine build_dg_hybrid_schwarz_schedule
+
+  subroutine apply_dg_hybrid_schwarz_hamiltonian(comm,schedule,basis_generation,directory_fingerprint,&
+      face_fingerprint,mapping_fingerprint,row_ids,basis_fragment,basis_local_slot,kinetic_rows,&
+      nonlocal_rows,interface_rows,potential_rows,local_coefficients,output,peer_exchange_count,ok,message)
+    integer,intent(in)::comm,basis_generation
+    type(s_dg_hybrid_schwarz_schedule),intent(in)::schedule
+    integer(int64),intent(in)::directory_fingerprint,face_fingerprint,mapping_fingerprint,row_ids(:)
+    integer,intent(in)::basis_fragment(:),basis_local_slot(:)
+    complex(real64),intent(in)::kinetic_rows(:,:),nonlocal_rows(:,:),interface_rows(:,:),potential_rows(:,:)
+    complex(real64),intent(in)::local_coefficients(:,:)
+    complex(real64),allocatable,intent(inout)::output(:,:)
+    integer,intent(out)::peer_exchange_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::hamiltonian_rows(:,:)
+    integer::stat
+    logical::valid
+    ok=.false.;message='';peer_exchange_count=0
+    valid=all(shape(kinetic_rows)==shape(interface_rows)).and.&
+      all(shape(nonlocal_rows)==shape(interface_rows)).and.all(shape(potential_rows)==shape(interface_rows))
+    call collective_gate(comm,valid,'Schwarz Hamiltonian component shapes differ',ok,message)
+    if(.not.ok)return
+    allocate(hamiltonian_rows(size(interface_rows,1),size(interface_rows,2)),stat=stat)
+    call collective_gate(comm,stat==0,'Schwarz Hamiltonian staging allocation failed',ok,message)
+    if(.not.ok)return
+    hamiltonian_rows=kinetic_rows+nonlocal_rows+interface_rows+potential_rows
+    call apply_dg_hybrid_schwarz_rows(comm,schedule,basis_generation,directory_fingerprint,&
+      face_fingerprint,mapping_fingerprint,row_ids,basis_fragment,basis_local_slot,hamiltonian_rows,&
+      local_coefficients,output,peer_exchange_count,ok,message)
+  end subroutine apply_dg_hybrid_schwarz_hamiltonian
+
+  subroutine apply_dg_hybrid_schwarz_rows(comm,schedule,basis_generation,directory_fingerprint,&
+      face_fingerprint,mapping_fingerprint,row_ids,basis_fragment,basis_local_slot,operator_rows,&
+      local_coefficients,output,peer_exchange_count,ok,message)
+    integer,intent(in)::comm,basis_generation
+    type(s_dg_hybrid_schwarz_schedule),intent(in)::schedule
+    integer(int64),intent(in)::directory_fingerprint,face_fingerprint,mapping_fingerprint,row_ids(:)
+    integer,intent(in)::basis_fragment(:),basis_local_slot(:)
+    complex(real64),intent(in)::operator_rows(:,:),local_coefficients(:,:)
+    complex(real64),allocatable,intent(inout)::output(:,:)
+    integer,intent(out)::peer_exchange_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,ierr,global_count,local_count,state_count,p,q,k,peer,slot,stat
+    integer::send_begin,send_end,receive_begin,receive_end,request_count,tag
+    integer,allocatable::active_matrix(:,:),mpi_requests(:)
+    complex(real64),allocatable::send_buffer(:,:),receive_buffer(:,:),working(:,:)
+    logical::valid,covered
+
+    ok=.false.;message='';peer_exchange_count=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Schwarz application rank query failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='Schwarz application size query failed';return;endif
+    global_count=size(basis_fragment);local_count=size(row_ids);state_count=size(local_coefficients,2)
+    valid=schedule%valid.and.schedule%fragment_id==rank+1.and.schedule%fragment_count==nproc.and.&
+      schedule%basis_generation==basis_generation.and.schedule%directory_fingerprint==directory_fingerprint.and.&
+      schedule%face_fingerprint==face_fingerprint.and.schedule%mapping_fingerprint==mapping_fingerprint.and.&
+      allocated(schedule%peers).and.allocated(schedule%receive_offsets).and.allocated(schedule%send_offsets).and.&
+      allocated(schedule%receive_global_ids).and.allocated(schedule%send_local_slots)
+    if(valid)valid=size(schedule%peers)==schedule%peer_count.and.&
+      size(schedule%receive_offsets)==schedule%peer_count+1.and.size(schedule%send_offsets)==schedule%peer_count+1.and.&
+      schedule%receive_offsets(1)==1.and.schedule%send_offsets(1)==1.and.&
+      schedule%receive_offsets(schedule%peer_count+1)==size(schedule%receive_global_ids)+1.and.&
+      schedule%send_offsets(schedule%peer_count+1)==size(schedule%send_local_slots)+1
+    if(valid)valid=size(basis_local_slot)==global_count.and.all(shape(operator_rows)==[local_count,global_count]).and.&
+      size(local_coefficients,1)==count(basis_fragment==rank+1).and.state_count>0.and.&
+      all(row_ids>=1_int64).and.all(row_ids<=int(global_count,int64)).and.&
+      all([(basis_fragment(int(row_ids(p)))==rank+1,p=1,local_count)]).and.&
+      all(schedule%receive_global_ids>=1_int64).and.&
+      all(schedule%receive_global_ids<=int(global_count,int64)).and.&
+      all(schedule%send_local_slots>=1).and.all(schedule%send_local_slots<=size(local_coefficients,1)).and.&
+      finite_matrix(operator_rows).and.finite_matrix(local_coefficients)
+    call collective_gate(comm,valid,'invalid or stale Schwarz operator application context',ok,message)
+    if(.not.ok)return
+    covered=.true.
+    do q=1,global_count
+      if(basis_fragment(q)==rank+1.or..not.any(abs(operator_rows(:,q))>0d0))cycle
+      covered=covered.and.any(schedule%receive_global_ids==int(q,int64))
+    enddo
+    call collective_gate(comm,covered,'Schwarz operator contains an unscheduled non-neighbor column',ok,message)
+    if(.not.ok)return
+    allocate(active_matrix(nproc,nproc),stat=stat)
+    call collective_gate(comm,stat==0,'Schwarz active-peer allocation failed',ok,message)
+    if(.not.ok)return
+    active_matrix=0
+    do p=1,schedule%peer_count
+      peer=schedule%peers(p)
+      receive_begin=schedule%receive_offsets(p);receive_end=schedule%receive_offsets(p+1)-1
+      do k=receive_begin,receive_end
+        if(any(abs(operator_rows(:,int(schedule%receive_global_ids(k))))>0d0))active_matrix(rank+1,peer)=1
+      enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,active_matrix,nproc*nproc,MPI_INTEGER,MPI_SUM,comm,ierr)
+    valid=ierr==MPI_SUCCESS.and.all(active_matrix>=0).and.all(active_matrix<=1).and.&
+      all(active_matrix==transpose(active_matrix))
+    call collective_gate(comm,valid,'Schwarz operator peer activity is nonreciprocal',ok,message)
+    if(.not.ok)return
+    peer_exchange_count=count(active_matrix(rank+1,:)==1)
+    allocate(send_buffer(state_count,size(schedule%send_local_slots)),&
+      receive_buffer(state_count,size(schedule%receive_global_ids)),working(local_count,state_count),&
+      mpi_requests(2*peer_exchange_count),stat=stat)
+    call collective_gate(comm,stat==0,'Schwarz exchange workspace allocation failed',ok,message)
+    if(.not.ok)return
+    send_buffer=(0d0,0d0);receive_buffer=(0d0,0d0);working=(0d0,0d0)
+    do k=1,size(schedule%send_local_slots)
+      send_buffer(:,k)=local_coefficients(schedule%send_local_slots(k),:)
+    enddo
+    do q=1,global_count
+      if(basis_fragment(q)/=rank+1)cycle
+      slot=basis_local_slot(q)
+      working=working+spread(operator_rows(:,q),2,state_count)*spread(local_coefficients(slot,:),1,local_count)
+    enddo
+    request_count=0;tag=29471
+    do p=1,schedule%peer_count
+      peer=schedule%peers(p);if(active_matrix(rank+1,peer)==0)cycle
+      receive_begin=schedule%receive_offsets(p);receive_end=schedule%receive_offsets(p+1)-1
+      request_count=request_count+1
+      call MPI_Irecv(receive_buffer(1,receive_begin),state_count*(receive_end-receive_begin+1),&
+        MPI_DOUBLE_COMPLEX,peer-1,tag,comm,mpi_requests(request_count),ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Schwarz neighbor receive failed';return;endif
+    enddo
+    do p=1,schedule%peer_count
+      peer=schedule%peers(p);if(active_matrix(rank+1,peer)==0)cycle
+      send_begin=schedule%send_offsets(p);send_end=schedule%send_offsets(p+1)-1
+      request_count=request_count+1
+      call MPI_Isend(send_buffer(1,send_begin),state_count*(send_end-send_begin+1),MPI_DOUBLE_COMPLEX,&
+        peer-1,tag,comm,mpi_requests(request_count),ierr)
+      if(ierr/=MPI_SUCCESS)then;message='Schwarz neighbor send failed';return;endif
+    enddo
+    if(request_count>0)call MPI_Waitall(request_count,mpi_requests,MPI_STATUSES_IGNORE,ierr)
+    call collective_gate(comm,ierr==MPI_SUCCESS,'Schwarz neighbor exchange completion failed',ok,message)
+    if(.not.ok)return
+    do p=1,schedule%peer_count
+      peer=schedule%peers(p);if(active_matrix(rank+1,peer)==0)cycle
+      receive_begin=schedule%receive_offsets(p);receive_end=schedule%receive_offsets(p+1)-1
+      do k=receive_begin,receive_end
+        q=int(schedule%receive_global_ids(k))
+        working=working+spread(operator_rows(:,q),2,state_count)*spread(receive_buffer(:,k),1,local_count)
+      enddo
+    enddo
+    call collective_gate(comm,finite_matrix(working),'Schwarz operator produced nonfinite rows',ok,message)
+    if(.not.ok)return
+    call move_alloc(working,output);ok=.true.;message=''
+  end subroutine apply_dg_hybrid_schwarz_rows
 
   integer(int64) function schedule_fingerprint(generation,directory_fp,face_fp,mapping_fp,owners,&
       fragments,slots,requests)result(hash)
