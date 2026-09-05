@@ -34,12 +34,14 @@ required = (
     "prepare_dg_hybrid_schwarz_candidate_inventory",
     "initialize_dg_hybrid_schwarz_state",
     "build_dg_hybrid_schwarz_schedule",
-    "run_dg_hybrid_divided_scf",
+    "initialize_dg_hybrid_interface_continuation",
     "solve_dg_hybrid_generalized_once_and_publish",
 )
 for name in required:
     assert re.search(r"\bcall\s+" + name + r"\b", route), f"missing production call: {name}"
-assert route.index("call build_dg_hybrid_fragment_wannier_from_dc_seed") < route.index("call run_dg_hybrid_divided_scf")
+assert route.index("call build_dg_hybrid_fragment_wannier_from_dc_seed") < route.index(
+    "call initialize_dg_hybrid_interface_continuation"
+)
 for name in ("dc_lcfo", "run_dg_overlapping_wannier_ground_state_for_main",
              "setup_dg_w90_gamma_library", "run_dg_w90_gamma_library",
              "apply_dg_hybrid_divided_fragment_hpsi", "solve_dg_hybrid_fragment_spectrum"):

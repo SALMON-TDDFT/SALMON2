@@ -171,11 +171,13 @@ converged_gate = DIVIDED_SCF[
 assert converged_gate.count("call update_total_potential(new_density,callback_ok)") == 1, (
     "the converged divided density must refresh the terminal potential exactly once"
 )
-scf_call = bounded.index("call run_dg_hybrid_divided_scf")
+scf_call = bounded.index("call initialize_dg_hybrid_interface_continuation")
 lcfo_call = bounded.index("call solve_dg_hybrid_generalized_once_and_publish")
 assert scf_call < lcfo_call
+assert bounded.count("call update_dg_hybrid_divided_potential") == 1
+assert bounded.index("call update_dg_hybrid_divided_potential") < scf_call
 assert "call update_dg_hybrid_divided_potential" not in bounded[scf_call:lcfo_call], (
-    "the terminal LCFO must consume the SCF terminal refresh without a duplicate update"
+    "the terminal LCFO must consume the fixed DC potential without a duplicate update"
 )
 for forbidden in (
     "apply_dg_hybrid_divided_fragment_hpsi",

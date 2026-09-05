@@ -166,6 +166,8 @@ use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragmen
 use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
 use dg_hybrid_divided_mixing,only:s_dg_hybrid_divided_mixing_state,&
   prepare_dg_hybrid_divided_mixing,accept_dg_hybrid_divided_mixing
+use dg_hybrid_interface_continuation,only:s_dg_hybrid_interface_continuation,&
+  initialize_dg_hybrid_interface_continuation,accept_dg_hybrid_interface_point
 use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,initialize_dg_hybrid_schwarz_state
 use dg_hybrid_schwarz_operator,only:s_dg_hybrid_schwarz_schedule,&
   build_dg_hybrid_schwarz_schedule,apply_dg_hybrid_schwarz_hamiltonian,apply_dg_hybrid_schwarz_rows
@@ -358,6 +360,7 @@ integer(8),allocatable :: bounded_core_ids(:)
 integer(8) :: bounded_directory_fingerprint=0_8
 integer(8) :: bounded_face_fingerprint=0_8,bounded_mapping_fingerprint=0_8,&
   bounded_candidate_fingerprint=0_8
+real(8) :: bounded_interface_scale=1d0
 integer :: bounded_last_peer_exchange_count=0
 integer(8) :: divided_mixing_inventory_fingerprint=0_8
 integer :: divided_mixing_basis_generation=0
@@ -1283,6 +1286,8 @@ contains
     type(s_dg_hybrid_dc_reference)::dc_reference
     type(s_dg_hybrid_core_projection_report)::core_projection_report
     type(s_dg_hybrid_fixed_payload)::fixed_payload
+    type(s_dg_hybrid_interface_continuation)::interface_continuation
+    type(s_dg_hybrid_schwarz_state)::accepted_schwarz_state
     integer::nproc,rank,ierr,status,p,q,axis,index3(3),raw_grid(3),core_grid(3),global_point_count,&
       local_basis_count,total_basis_count,face_count,initial_count,guard_count,candidate_count,&
       pw_candidate_count,global_column
@@ -1309,15 +1314,15 @@ contains
       initial_density(:),converged_density(:),final_occupations(:)
     complex(8),allocatable::projector_support_values(:)
     real(8)::axis_weight(3),axis_gradient(3),coordinate,sum_defect,gradient_defect,&
-      denominator,convergence_value,electron_defect
+      denominator,convergence_value,electron_defect,accepted_interface_scale
     real(8)::volume_diagnostics(4),local_potential_diagnostics(2),final_scf_receipts(5),&
       final_residual,final_orthogonality,final_projector_defect
     real(8)::reciprocal_rotation(3,3,1),fragment_lattice(3,3),fragment_reciprocal_lattice(3,3)
     integer,allocatable::payload_owner(:),payload_fragment(:),payload_local_slot(:),payload_generation(:),&
       interior_fragment(:)
     character(8),allocatable::atom_symbols(:)
-    integer::scf_iterations,final_state_count
-    logical::ok,collective_ok
+    integer::scf_iterations,final_state_count,continuation_point,continuation_point_limit
+    logical::ok,collective_ok,point_ok
     character(512)::message
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
@@ -1753,25 +1758,65 @@ contains
       index3(2)=modulo(q,dc%lg_tot%num(2))+1;index3(3)=q/dc%lg_tot%num(2)+1
       initial_density(p)=ow_hybrid_divided_total_density(index3(1),index3(2),index3(3))
     enddo
-    call run_dg_hybrid_divided_scf(dc%icomm_tot,global_point_count,core_ids,initial_density,&
-      dc%system_tot%hvol,ow_hybrid_divided_convergence,ow_hybrid_divided_threshold,&
-      update_dg_hybrid_divided_potential,solve_dg_hybrid_schwarz_fragments,&
-      assemble_dg_hybrid_schwarz_core_density,mix_dg_hybrid_divided_density,nscf,core_weights,&
-      dc%elec_num_tot,dg_dc_gs_electron_count_tolerance,converged_density,scf_iterations,&
-      convergence_value,electron_defect,ok,message)
+    call update_dg_hybrid_divided_potential(initial_density,ok)
+    if(.not.ok)error stop 'fixed ordinary-DC density potential update failed'
+    call initialize_dg_hybrid_interface_continuation(dc%icomm_tot,projected_basis%generation,&
+      bounded_mapping_fingerprint,mixing%mixrate,interface_continuation,ok,message)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
-      error stop 'fragment-local divided WF+PW SCF failed'
+      error stop 'DG interface continuation initialization failed'
     endif
+    accepted_schwarz_state=bounded_schwarz_state
+    accepted_interface_scale=0d0
+    continuation_point=0
+    continuation_point_limit=ceiling(1d0/interface_continuation%rate)+2
+    do while(.not.interface_continuation%finished)
+      continuation_point=continuation_point+1
+      if(continuation_point>continuation_point_limit)then
+        bounded_schwarz_state=accepted_schwarz_state
+        if(rank==0)write(error_unit,'(a,es16.8)')&
+          '[DG-HYBRID-DIVIDED] continuation point limit at accepted lambda=',&
+          accepted_interface_scale
+        error stop 'DG interface continuation exceeded its defensive point limit'
+      endif
+      bounded_interface_scale=interface_continuation%lambda
+      call solve_dg_hybrid_schwarz_fragments(continuation_point,point_ok)
+      point_ok=point_ok.and.ieee_is_finite(divided_fragment_residual).and.&
+        ieee_is_finite(divided_fragment_orthogonality).and.&
+        ieee_is_finite(bounded_schwarz_state%electron_defect)
+      call comm_logical_and(point_ok,collective_ok,dc%icomm_tot)
+      if(.not.collective_ok)then
+        bounded_schwarz_state=accepted_schwarz_state
+        call accept_dg_hybrid_interface_point(dc%icomm_tot,projected_basis%generation,&
+          bounded_mapping_fingerprint,.false.,interface_continuation,ok,message)
+        if(rank==0)write(error_unit,'(a,es16.8,2a)')&
+          '[DG-HYBRID-DIVIDED] rejected point; last accepted lambda=',&
+          accepted_interface_scale,' ',trim(message)
+        error stop 'DG interface continuation point failed collectively'
+      endif
+      call accept_dg_hybrid_interface_point(dc%icomm_tot,projected_basis%generation,&
+        bounded_mapping_fingerprint,.true.,interface_continuation,ok,message)
+      if(.not.ok)then
+        bounded_schwarz_state=accepted_schwarz_state
+        if(rank==0)write(error_unit,'(a,es16.8,2a)')&
+          '[DG-HYBRID-DIVIDED] acceptance failed; last accepted lambda=',&
+          accepted_interface_scale,' ',trim(message)
+        error stop 'DG interface continuation acceptance failed'
+      endif
+      accepted_schwarz_state=bounded_schwarz_state
+      accepted_interface_scale=bounded_interface_scale
+    enddo
+    scf_iterations=interface_continuation%accepted_steps
+    convergence_value=divided_fragment_residual
+    electron_defect=bounded_schwarz_state%electron_defect
     if(rank==0)write(*,'(a,2(a,es12.4),a,i0)')'[DG-HYBRID-DIVIDED] selected basis prepared',&
       ' partition_sum_defect=',sum_defect,' partition_gradient_defect=',gradient_defect,&
       ' global_basis_count=',size(projected_basis%global_ids)
-    if(rank==0)write(*,'(a,i0,2(a,es12.4))')'[OW-GS] divided WF+PW SCF converged iterations=',&
-      scf_iterations,' density=',convergence_value,' electron_defect=',electron_defect
+    if(rank==0)write(*,'(a,i0,2(a,es12.4))')'[OW-GS] fixed-density DG continuation points=',&
+      scf_iterations,' residual=',convergence_value,' electron_defect=',electron_defect
 
-    ! The divided density loop has already refreshed the total potential with
-    ! converged_density. Project that terminal potential once, compose the
-    ! complete row-distributed DG operator, and diagonalize it exactly once.
+    ! Project the fixed ordinary-DC potential, compose the complete
+    ! row-distributed DG operator, and diagonalize it exactly once.
     allocate(final_local_potential_rows(size(projected_basis%global_ids),total_basis_count),&
       final_hrows(size(projected_basis%global_ids),total_basis_count),&
       final_srows(size(projected_basis%global_ids),total_basis_count))
@@ -1914,7 +1959,7 @@ contains
       local_slot=bounded_basis_local_slot(global_column)
       bounded_fragment_h(:,local_slot)=bounded_fixed_payload%kinetic_rows(:,global_column)+&
         bounded_fixed_payload%nonlocal_rows(:,global_column)+&
-        bounded_fixed_payload%interface_rows(:,global_column)+&
+        bounded_interface_scale*bounded_fixed_payload%interface_rows(:,global_column)+&
         bounded_local_potential_rows(:,global_column)
       bounded_fragment_s(:,local_slot)=bounded_fixed_payload%metric_rows(:,global_column)
     enddo
@@ -1934,7 +1979,7 @@ contains
       bounded_schwarz_state%basis_generation,bounded_directory_fingerprint,bounded_face_fingerprint,&
       bounded_mapping_fingerprint,divided_fragment_basis%global_ids,bounded_basis_fragment,&
       bounded_basis_local_slot,bounded_fixed_payload%kinetic_rows,bounded_fixed_payload%nonlocal_rows,&
-      bounded_fixed_payload%interface_rows,bounded_local_potential_rows,1d0,input,candidate,&
+      bounded_fixed_payload%interface_rows,bounded_local_potential_rows,bounded_interface_scale,input,candidate,&
       peer_exchanges,callback_ok,operator_message)
     if(.not.callback_ok)then
       write(error_unit,'(a,a)')'Schwarz H application: ',trim(operator_message);return
