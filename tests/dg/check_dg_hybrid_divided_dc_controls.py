@@ -15,6 +15,15 @@ assert "character(1)   :: yn_dg_hybrid_divided_scf" in GLOBAL
 assert "yn_dg_hybrid_divided_scf = 'n'" in INPUT, "divided route must default off"
 assert "call comm_bcast(yn_dg_hybrid_divided_scf" in INPUT
 assert "call yn_argument_check(yn_dg_hybrid_divided_scf)" in INPUT
+assert "character(16)  :: dg_hybrid_divided_mixing" in GLOBAL
+dc_namelist = INPUT[INPUT.index("namelist/dc/") : INPUT.index("!! == default for &unit")]
+assert "dg_hybrid_divided_mixing" in dc_namelist
+assert "dg_hybrid_divided_mixing = 'pulay'" in INPUT
+assert "call string_lowercase(dg_hybrid_divided_mixing)" in INPUT
+assert "call comm_bcast(dg_hybrid_divided_mixing" in INPUT
+assert "'dg_hybrid_divided_mixing',trim(dg_hybrid_divided_mixing)" in INPUT
+assert "select case(trim(dg_hybrid_divided_mixing))" in INPUT
+assert "case('inherit','simple','pulay','broyden')" in INPUT
 
 for token in (
     "subroutine prepare_dg_hybrid_divided_dc_controls",
@@ -173,7 +182,9 @@ mix_start = "subroutine mix_dg_hybrid_divided_density"
 assert mix_start in MAIN, "missing divided DC density mixer adapter"
 mix_callback = MAIN[MAIN.index(mix_start) :].split("end subroutine", 1)[0]
 assert "call copy_density" in mix_callback
-assert "select case(method_mixing)" in mix_callback
+assert "trim(dg_hybrid_divided_mixing)=='inherit'" in mix_callback
+assert "selected_mixing_method=trim(method_mixing)" in mix_callback
+assert "select case(selected_mixing_method)" in mix_callback
 assert "mixing%mixrate" in mix_callback
 for token in ("simple_mixing", "wrapper_broyden", "pulay"):
     assert token in mix_callback, f"divided adapter does not reuse DC mixer: {token}"

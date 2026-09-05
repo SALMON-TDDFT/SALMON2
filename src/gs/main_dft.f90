@@ -47,7 +47,8 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
   dg_ow_w90_initial_projection,wannier_pw_cutoff,wannier_pw_max,nscf,method_mixing,&
-  dg_dc_seed_mode,dg_dc_seed_directory,dg_hybrid_symmetry_energy_window,temperature
+  dg_dc_seed_mode,dg_dc_seed_directory,dg_hybrid_symmetry_energy_window,temperature,&
+  dg_hybrid_divided_mixing
 use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
   DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
   read_dg_dc_seed,write_dg_dc_seed,restore_dg_dc_seed_payload,resolve_dg_dc_seed_mode
@@ -7003,8 +7004,14 @@ stage_pass: do
     logical,intent(out)::callback_ok
     real(8),allocatable::input_total(:,:,:),new_total(:,:,:)
     integer::p,ix_local,iy_local,iz_local
+    character(16)::selected_mixing_method
 
     callback_ok=.false.;mixed_density=0d0
+    selected_mixing_method=trim(dg_hybrid_divided_mixing)
+    if(trim(dg_hybrid_divided_mixing)=='inherit')selected_mixing_method=trim(method_mixing)
+    if(iteration==1.and.dc%id_tot==0)write(*,'(a,a,a,es16.8,a)')&
+      '[DG-HYBRID-MIXING] method=',trim(selected_mixing_method),' mixrate=',mixing%mixrate,&
+      ' seed_fingerprint_unchanged=T'
     call gather_dg_hybrid_divided_core_density(input_density,input_total,callback_ok)
     if(.not.callback_ok)return
     dc%rho_tot_s(1)%f=input_total
@@ -7012,7 +7019,7 @@ stage_pass: do
     call gather_dg_hybrid_divided_core_density(new_density,new_total,callback_ok)
     if(.not.callback_ok)return
     dc%rho_tot_s(1)%f=new_total
-    select case(method_mixing)
+    select case(selected_mixing_method)
     case('simple')
       call simple_mixing(dc%mg_tot,dc%system_tot,1d0-mixing%mixrate,mixing%mixrate,dc%rho_tot_s,mixing)
     case('broyden')

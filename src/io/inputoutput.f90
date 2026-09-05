@@ -636,6 +636,7 @@ contains
       & yn_dg_hybrid_continuation_scf, &
       & yn_dg_hybrid_divided_scf, &
       & dg_hybrid_fragment_cg_steps, &
+      & dg_hybrid_divided_mixing, &
       & dg_hybrid_symmetry_energy_window, &
       & dg_dc_seed_mode, &
       & dg_dc_seed_directory, &
@@ -1164,6 +1165,7 @@ contains
     yn_dg_hybrid_continuation_scf = 'n'
     yn_dg_hybrid_divided_scf = 'n'
     dg_hybrid_fragment_cg_steps = 3
+    dg_hybrid_divided_mixing = 'pulay'
     dg_hybrid_symmetry_energy_window = -1d0
     dg_dc_seed_mode = 'off'
     dg_dc_seed_directory = ''
@@ -1336,6 +1338,7 @@ contains
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
     call string_lowercase(method_mixing)
+    call string_lowercase(dg_hybrid_divided_mixing)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
@@ -1899,6 +1902,7 @@ contains
     call comm_bcast(yn_dg_hybrid_continuation_scf, nproc_group_global)
     call comm_bcast(yn_dg_hybrid_divided_scf, nproc_group_global)
     call comm_bcast(dg_hybrid_fragment_cg_steps, nproc_group_global)
+    call comm_bcast(dg_hybrid_divided_mixing, nproc_group_global)
     call comm_bcast(dg_hybrid_symmetry_energy_window, nproc_group_global)
     if(dg_hybrid_symmetry_energy_window>=0d0) &
       dg_hybrid_symmetry_energy_window = dg_hybrid_symmetry_energy_window*uenergy_to_au
@@ -2970,6 +2974,8 @@ contains
         "yn_dg_hybrid_divided_scf",yn_dg_hybrid_divided_scf
       write(fh_variables_log, '("#",4X,A,"=",I6)') &
         'dg_hybrid_fragment_cg_steps',dg_hybrid_fragment_cg_steps
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_hybrid_divided_mixing',trim(dg_hybrid_divided_mixing)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
         'dg_hybrid_symmetry_energy_window',dg_hybrid_symmetry_energy_window
       write(fh_variables_log, '("#",4X,A,"=",A)') &
@@ -3141,6 +3147,11 @@ contains
     call yn_argument_check(yn_dg_hybrid_divided_scf)
     if(dg_hybrid_fragment_cg_steps<1 .or. dg_hybrid_fragment_cg_steps>256) &
       call sawf_input_fatal("dg_hybrid_fragment_cg_steps must be in [1,256]")
+    select case(trim(dg_hybrid_divided_mixing))
+    case('inherit','simple','pulay','broyden')
+    case default
+      call sawf_input_fatal("dg_hybrid_divided_mixing must be inherit, simple, pulay, or broyden")
+    end select
     if(count([yn_dg_hybrid_divided_scf=='y',yn_dg_hybrid_continuation_scf=='y',yn_dg_hybrid_scf=='y'])>1) &
       call sawf_input_fatal("Hybrid SCF routes are mutually exclusive")
     if(.not.ieee_is_finite(dg_hybrid_symmetry_energy_window) .or. &

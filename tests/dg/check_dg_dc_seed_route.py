@@ -279,11 +279,31 @@ for downstream_control in (
     "window",
     "yn_dg_hybrid",
     "yn_dg_dc_overlapping_wannier",
+    "dg_hybrid_divided_mixing",
 ):
     assert downstream_control not in contract_call, (
         "downstream localization/W90/PW/LCFO/window controls must not enter the "
         f"conventional DC seed fingerprint: {downstream_control}"
     )
+
+_, _, convergence_fingerprint_body = subroutine_extent(
+    MAIN.replace(
+        "integer(int64) function dg_dc_seed_convergence_fingerprint()result(hash)",
+        "subroutine dg_dc_seed_convergence_fingerprint()",
+        1,
+    ).replace(
+        "end function dg_dc_seed_convergence_fingerprint",
+        "end subroutine dg_dc_seed_convergence_fingerprint",
+        1,
+    ),
+    "dg_dc_seed_convergence_fingerprint",
+)
+convergence_fingerprint_compact = compact(convergence_fingerprint_body)
+assert "hash_character(hash,trim(method_mixing))" in convergence_fingerprint_compact
+assert "hash_real(hash,mixing%mixrate)" in convergence_fingerprint_compact
+assert "dg_hybrid_divided_mixing" not in convergence_fingerprint_compact, (
+    "post-seed Hybrid mixing selector changed conventional DC seed compatibility"
+)
 
 assert re.search(
     r"ownership_map\s*\(\s*8\s*\)\s*=\s*int\s*\(\s*dc%id_tot\s*\+\s*1\s*,\s*int64\s*\)",

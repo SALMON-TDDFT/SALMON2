@@ -24,6 +24,7 @@ def compact(text: str) -> str:
 for declaration in (
     r"character\(1\)\s*::\s*yn_dg_hybrid_continuation_scf",
     r"integer\s*::\s*dg_hybrid_fragment_cg_steps",
+    r"character\(16\)\s*::\s*dg_hybrid_divided_mixing",
     r"real\(8\)\s*::\s*dg_hybrid_symmetry_energy_window",
     r"character\(16\)\s*::\s*dg_dc_seed_mode",
     r"character\(256\)\s*::\s*dg_dc_seed_directory",
@@ -37,6 +38,13 @@ assert "call comm_bcast(dg_hybrid_fragment_cg_steps, nproc_group_global)" in INP
 assert "'dg_hybrid_fragment_cg_steps',dg_hybrid_fragment_cg_steps" in INPUT
 assert "dg_hybrid_fragment_cg_steps<1" in compact(INPUT)
 assert "dg_hybrid_fragment_cg_steps>256" in compact(INPUT)
+assert "dg_hybrid_divided_mixing" in dc_namelist
+assert "dg_hybrid_divided_mixing = 'pulay'" in INPUT
+assert "call string_lowercase(dg_hybrid_divided_mixing)" in INPUT
+assert "call comm_bcast(dg_hybrid_divided_mixing" in INPUT
+assert "'dg_hybrid_divided_mixing',trim(dg_hybrid_divided_mixing)" in INPUT
+assert "selectcase(trim(dg_hybrid_divided_mixing))" in compact(INPUT)
+assert "case('inherit','simple','pulay','broyden')" in compact(INPUT)
 for name in (
     "yn_dg_hybrid_continuation_scf",
     "dg_hybrid_symmetry_energy_window",
@@ -132,6 +140,8 @@ def check_invalid_input_exit(executable: Path) -> None:
         ("dg_hybrid_fragment_cg_steps=0", "dg_hybrid_fragment_cg_steps must be in [1,256]"),
         ("dg_hybrid_fragment_cg_steps=-1", "dg_hybrid_fragment_cg_steps must be in [1,256]"),
         ("dg_hybrid_fragment_cg_steps=257", "dg_hybrid_fragment_cg_steps must be in [1,256]"),
+        ("dg_hybrid_divided_mixing='invalid'",
+         "dg_hybrid_divided_mixing must be inherit, simple, pulay, or broyden"),
         ("yn_dg_hybrid_divided_scf='y', yn_dg_hybrid_continuation_scf='y'",
          "Hybrid SCF routes are mutually exclusive"),
         ("yn_dg_hybrid_divided_scf='y', yn_dg_hybrid_scf='y'",
