@@ -28,6 +28,20 @@ assert re.search(
     route,
     re.S,
 ), "production route must initialize interface continuation from mixing%mixrate"
+assert "dg_hybrid_max_interface_points" in route, (
+    "production continuation needs an explicit finite point budget"
+)
+assert re.search(
+    r"interface_continuation%rate\s*>=\s*1d0\s*/\s*real\s*\(\s*"
+    r"dg_hybrid_max_interface_points\s*-\s*2_int64",
+    route,
+), "rate must be range-checked before evaluating its reciprocal"
+rate_guard = compact.index("interface_continuation%rate>=1d0/real")
+rate_reciprocal = compact.index("1d0/interface_continuation%rate")
+assert rate_guard < rate_reciprocal, "unsafe continuation-rate reciprocal precedes its guard"
+assert "ceiling(1d0/interface_continuation%rate,kind=int64)+2_int64" in compact, (
+    "continuation point count must use an explicitly wide integer kind"
+)
 
 potential_calls = re.findall(r"call\s+update_dg_hybrid_divided_potential\s*\(", route)
 assert len(potential_calls) == 1, "restored DC density must update the potential exactly once"
@@ -50,6 +64,14 @@ for forbidden in (
     assert not re.search(r"\bcall\s+" + forbidden + r"\b", route), (
         f"density-feedback operation remains in fixed-density route: {forbidden}"
     )
+for lifecycle in (
+    "divided_mixing_basis_generation=",
+    "divided_mixing_inventory_fingerprint=",
+    "divided_mixing_rollback_pending=",
+):
+    assert lifecycle not in compact, (
+        f"fixed-density production entry mutates density-mixing lifecycle: {lifecycle}"
+    )
 
 assert "dowhile(.not.interface_continuation%finished)" in compact, (
     "production route must solve every lambda point through terminal acceptance"
@@ -70,6 +92,16 @@ assert "300d0" in source.split(
 )[1].split("end subroutine solve_dg_hybrid_schwarz_fragments", 1)[0], (
     "fixed-density continuation must assign common 300 K occupations"
 )
+solver = source.split("subroutine solve_dg_hybrid_schwarz_fragments", 1)[1].split(
+    "end subroutine solve_dg_hybrid_schwarz_fragments", 1
+)[0]
+for lifecycle in (
+    "divided_mixing_inventory_fingerprint=",
+    "divided_mixing_rollback_pending=",
+):
+    assert lifecycle not in re.sub(r"\s+", "", solver), (
+        f"live Schwarz callback mutates density-mixing lifecycle: {lifecycle}"
+    )
 assert "accepted_schwarz_state=bounded_schwarz_state" in compact, (
     "accepted coefficients/state must be carried to the next lambda point"
 )

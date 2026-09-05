@@ -1270,6 +1270,7 @@ contains
   end subroutine run_dg_hybrid_continuation_ground_state_for_main
 
   subroutine run_dg_hybrid_divided_ground_state_for_main
+    integer(int64),parameter::dg_hybrid_max_interface_points=1000000_int64
     type(s_dg_hybrid_fragment_wannier_cache)::fragment_cache
     type(s_dg_hybrid_core_selection)::core_selection
     type(s_dg_hybrid_selected_catalog)::selected_catalog
@@ -1321,7 +1322,8 @@ contains
     integer,allocatable::payload_owner(:),payload_fragment(:),payload_local_slot(:),payload_generation(:),&
       interior_fragment(:)
     character(8),allocatable::atom_symbols(:)
-    integer::scf_iterations,final_state_count,continuation_point,continuation_point_limit
+    integer::scf_iterations,final_state_count
+    integer(int64)::continuation_point,continuation_point_limit
     logical::ok,collective_ok,point_ok
     character(512)::message
 
@@ -1739,8 +1741,6 @@ contains
     bounded_core_ids=core_ids
     bounded_directory_fingerprint=directory_fingerprint
     bounded_face_fingerprint=face_fingerprint
-    divided_mixing_basis_generation=projected_basis%generation
-    divided_mixing_inventory_fingerprint=bounded_schwarz_state%fingerprint
     if(allocated(ow_core_ids))deallocate(ow_core_ids)
     if(allocated(ow_core_weights))deallocate(ow_core_weights)
     allocate(ow_core_ids,source=core_ids);allocate(ow_core_weights,source=core_weights)
@@ -1768,10 +1768,19 @@ contains
     endif
     accepted_schwarz_state=bounded_schwarz_state
     accepted_interface_scale=0d0
-    continuation_point=0
-    continuation_point_limit=ceiling(1d0/interface_continuation%rate)+2
+    continuation_point=0_int64
+    point_ok=interface_continuation%rate>=1d0/&
+      real(dg_hybrid_max_interface_points-2_int64,8)
+    call comm_logical_and(point_ok,collective_ok,dc%icomm_tot)
+    if(.not.collective_ok)then
+      if(rank==0)write(error_unit,'(a,es16.8,a,i0)')&
+        '[DG-HYBRID-DIVIDED] interface increment is too small: rate=',&
+        interface_continuation%rate,' maximum_points=',dg_hybrid_max_interface_points
+      error stop 'DG interface continuation exceeds the finite production point budget'
+    endif
+    continuation_point_limit=ceiling(1d0/interface_continuation%rate,kind=int64)+2_int64
     do while(.not.interface_continuation%finished)
-      continuation_point=continuation_point+1
+      continuation_point=continuation_point+1_int64
       if(continuation_point>continuation_point_limit)then
         bounded_schwarz_state=accepted_schwarz_state
         if(rank==0)write(error_unit,'(a,es16.8)')&
@@ -1780,7 +1789,7 @@ contains
         error stop 'DG interface continuation exceeded its defensive point limit'
       endif
       bounded_interface_scale=interface_continuation%lambda
-      call solve_dg_hybrid_schwarz_fragments(continuation_point,point_ok)
+      call solve_dg_hybrid_schwarz_fragments(int(continuation_point),point_ok)
       point_ok=point_ok.and.ieee_is_finite(divided_fragment_residual).and.&
         ieee_is_finite(divided_fragment_orthogonality).and.&
         ieee_is_finite(bounded_schwarz_state%electron_defect)
@@ -1914,7 +1923,6 @@ contains
       divided_fragment_residual,divided_fragment_orthogonality,converged,rolled_back,&
       callback_ok,solver_message)
     if(.not.callback_ok)then
-      divided_mixing_rollback_pending=rolled_back
       write(error_unit,'(a,a)')'bounded Schwarz update: ',trim(solver_message);return
     endif
     if(local_iterations>dg_hybrid_fragment_cg_steps)then
@@ -1933,8 +1941,6 @@ contains
       if(.not.extended)exit
       extensions=extensions+1
     enddo
-    divided_mixing_inventory_fingerprint=bounded_schwarz_state%fingerprint
-    divided_mixing_rollback_pending=.false.
     system%mu=bounded_schwarz_state%chemical_potential
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
     if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
