@@ -45,7 +45,7 @@ contains
     real(real64),intent(out)::convergence_value,electron_defect
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::i,j,ierr,nproc,nlocal,ntotal,mode_code,local_invalid,global_invalid
+    integer::i,j,ierr,rank,nproc,nlocal,ntotal,mode_code,local_invalid,global_invalid
     integer::integer_controls(3),minimum_integers(3),maximum_integers(3)
     integer,allocatable::counts(:),displacements(:)
     integer(int64),allocatable::all_ids(:)
@@ -97,7 +97,9 @@ contains
       message='rank-disagreeing divided SCF controls';return
     endif
 
-    nlocal=size(core_ids);call MPI_Comm_size(comm,nproc,ierr)
+    nlocal=size(core_ids);call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='divided SCF rank lookup failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
     allocate(counts(nproc),displacements(nproc))
     call MPI_Allgather(nlocal,1,MPI_INTEGER,counts,1,MPI_INTEGER,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='divided SCF ownership count exchange failed';return;endif
@@ -139,6 +141,9 @@ contains
       call reduce_dc_density_convergence(comm,convergence_mode,local_absolute_sum,local_square_sum,&
         cell_volume,expected_electron_count,global_point_count,convergence_value,callback_ok,message)
       if(.not.callback_ok)return
+      if(rank==0.and.(iterations==1.or.mod(iterations,50)==0))write(*,'(a,i0,2(a,es12.4))')&
+        '[DG-HYBRID-DIVIDED-SCF] iteration=',iterations,' convergence=',convergence_value,&
+        ' electron_defect=',electron_defect
       if(convergence_value<=threshold.and.electron_defect<=electron_tolerance)then
         call update_total_potential(new_density,callback_ok)
         if(.not.collective_success(callback_ok))then
@@ -156,7 +161,8 @@ contains
       input_electron_defect=mixed_electron_defect
       density=mixed_density
     enddo
-    message='divided SCF did not converge within maximum_iterations'
+    write(message,'(a,i0,2(a,es12.4))')'divided SCF did not converge within maximum_iterations=',&
+      maximum_iterations,' convergence=',convergence_value,' electron_defect=',electron_defect
   contains
     logical function collective_success(local_ok)
       logical,intent(in)::local_ok

@@ -22,11 +22,13 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer::rank,nproc,ierr,local_bad,global_bad,nlocal,nowned,total_points,max_point
-    integer::i,j,p,r,row,nrows,offset
-    integer,allocatable::row_counts(:),row_displs(:),all_rows(:),row_owner(:),point_ownership(:)
+    integer::i,p,r,row,nrows,offset,fragment
+    integer,allocatable::row_counts(:),row_displs(:),all_rows(:),row_owner(:),point_ownership(:),&
+      points(:),columns(:)
     integer(int64),allocatable::all_row_ids(:)
     complex(real64),allocatable::partial(:,:),reduced(:,:),remote(:)
     real(real64)::local_defect,global_defect,local_scale,global_scale
+    logical::single_fragment_owner
 
     ok=.false.;message='';diagnostics=huge(1d0);local_bad=0
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
@@ -76,25 +78,37 @@ contains
     endif
 
     allocate(local_rows(nowned,global_basis_count));local_rows=(0d0,0d0)
-    do r=0,nproc-1
-      nrows=row_counts(r+1);offset=row_displs(r+1)
-      allocate(partial(nrows,global_basis_count),reduced(nrows,global_basis_count));partial=(0d0,0d0)
-      do i=1,nrows
-        row=all_rows(offset+i)
-        do p=1,nlocal
-          if(basis_fragment(row)/=interior_fragment(p))cycle
-          do j=1,global_basis_count
-            if(basis_fragment(j)/=interior_fragment(p))cycle
-            partial(i,j)=partial(i,j)+weights(p)*local_potential(p)*&
-              conjg(basis_values(row,p))*basis_values(j,p)
-          enddo
+    single_fragment_owner=nlocal>0.and.nowned>0.and.nproc==maxval(basis_fragment).and.&
+      all(interior_fragment==rank+1).and.all(basis_fragment(int(row_ids))==rank+1)
+    local_bad=merge(0,1,single_fragment_owner)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    single_fragment_owner=ierr==MPI_SUCCESS.and.global_bad==0
+    if(single_fragment_owner)then
+      columns=pack([(p,p=1,global_basis_count)],basis_fragment==rank+1)
+      local_rows(:,columns)=matmul(conjg(basis_values(int(row_ids),:))*&
+        spread(weights*local_potential,1,nowned),transpose(basis_values(columns,:)))
+      deallocate(columns)
+    else
+      do r=0,nproc-1
+        nrows=row_counts(r+1);offset=row_displs(r+1)
+        allocate(partial(nrows,global_basis_count),reduced(nrows,global_basis_count));partial=(0d0,0d0)
+        do i=1,nrows
+          row=all_rows(offset+i)
+          fragment=basis_fragment(row)
+          points=pack([(p,p=1,nlocal)],interior_fragment==fragment)
+          columns=pack([(p,p=1,global_basis_count)],basis_fragment==fragment)
+          if(size(points)>0.and.size(columns)>0)then
+            partial(i,columns)=matmul(conjg(basis_values(row,points))*weights(points)*local_potential(points),&
+              transpose(basis_values(columns,points)))
+          endif
+          deallocate(points,columns)
         enddo
+        call MPI_Reduce(partial,reduced,nrows*global_basis_count,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then;message='local-potential row reduction failed';return;endif
+        if(rank==r)local_rows=reduced
+        deallocate(partial,reduced)
       enddo
-      call MPI_Reduce(partial,reduced,nrows*global_basis_count,MPI_DOUBLE_COMPLEX,MPI_SUM,r,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;message='local-potential row reduction failed';return;endif
-      if(rank==r)local_rows=reduced
-      deallocate(partial,reduced)
-    enddo
+    endif
 
     allocate(remote(global_basis_count));local_defect=0d0;local_scale=1d0
     if(nowned>0)local_scale=max(local_scale,maxval(abs(local_rows)))

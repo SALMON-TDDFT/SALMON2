@@ -10,6 +10,7 @@ GLOBAL = (ROOT / "src/io/salmon_global.f90").read_text(errors="replace").lower()
 INPUT = (ROOT / "src/io/inputoutput.f90").read_text(errors="replace").lower()
 DCDTF = (ROOT / "src/gs/dc/dcdft.f90").read_text(errors="replace").lower()
 MAIN = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
+BROKEN = (ROOT / "src/gs/dc/dg_hybrid_broken_volume.f90").read_text(errors="replace").lower()
 MIXING = (ROOT / "src/gs/dc/dg_hybrid_divided_mixing.f90").read_text(errors="replace").lower()
 
 assert "character(1)   :: yn_dg_hybrid_divided_scf" in GLOBAL
@@ -141,44 +142,61 @@ count_exchange = density_loader.index("call mpi_alltoall(send_counts")
 assert count_exchange < density_loader.index("if(ierr/=mpi_success", count_exchange) < density_loader.index(
     "recv_displs(1)=0", count_exchange
 )
-callback_start = "subroutine apply_dg_hybrid_divided_fragment_hpsi"
-assert callback_start in MAIN, "missing divided fragment Hamiltonian callback"
-callback = MAIN[MAIN.index(callback_start) :].split("end subroutine", 1)[0]
-for token in ("call hpsi", "mg", "v_local", "system", "ppg"):
-    assert token in callback, f"divided Hamiltonian callback is missing fragment object: {token}"
-for forbidden in ("dc%mg_tot", "dc%vloc_tot", "dc%system_tot", "dc%ppg_tot"):
-    assert forbidden not in callback, f"divided Hamiltonian callback used total-system operator: {forbidden}"
-solve_start = "subroutine solve_dg_hybrid_divided_fragments"
-assert solve_start in MAIN, "missing divided fragment eigensolver adapter"
-solve_callback = MAIN[MAIN.index(solve_start) :].split("end subroutine", 1)[0]
+entry = "subroutine run_dg_hybrid_divided_ground_state_for_main"
+assert entry in MAIN, "missing separated bounded divided production entry"
+bounded = MAIN[MAIN.index(entry) :].split("end subroutine run_dg_hybrid_divided_ground_state_for_main", 1)[0]
 for token in (
-    "solve_dg_hybrid_fragment_spectrum(dc%icomm_frag",
-    "determine_dc_fragment_occupations(dc%icomm_tot",
-    "reconstruct_dg_hybrid_fragment_density(dc%icomm_frag",
+    "initialize_dg_hybrid_schwarz_state",
+    "build_dg_hybrid_schwarz_schedule",
+    "solve_dg_hybrid_schwarz_fragments",
 ):
-    assert token in solve_callback, f"divided solve is missing split occupation phase: {token}"
-assert solve_callback.index("solve_dg_hybrid_fragment_spectrum") < solve_callback.index(
-    "determine_dc_fragment_occupations"
-) < solve_callback.index("reconstruct_dg_hybrid_fragment_density")
-assert "mpi_max" in solve_callback
-assert "representative_energies(maximum_fragment_state_count,dc%n_frag)" in solve_callback
-for token in (
-    "representative_energies=0d0;representative_core_norms=0d0",
-    "representative_energies(:,dc%i_frag)=divided_fragment_eigenvalues(fragment_state_count)",
-    "representative_energies(1:fragment_state_count,dc%i_frag)=divided_fragment_eigenvalues",
-    "representative_core_norms(1:fragment_state_count,dc%i_frag)=fragment_core_norms",
+    assert token in bounded, f"Schwarz divided production entry is missing {token}"
+assert "extract_dg_hybrid_fragment_self_block" not in bounded, (
+    "production divided SCF still extracts a self block instead of applying full DG rows"
+)
+for forbidden in (
+    "apply_dg_hybrid_divided_fragment_hpsi",
+    "solve_dg_hybrid_fragment_spectrum",
+    "determine_dc_fragment_occupations",
 ):
-    assert token in solve_callback, f"variable fragment-state packing is missing: {token}"
-assert "fragment_occupations=all_fragment_occupations(1:fragment_state_count,dc%i_frag)" in solve_callback
-occupation_call = solve_callback.split("call determine_dc_fragment_occupations", 1)[1].split(
-    "if(.not.callback_ok)", 1
+    assert not re.search(r"\bcall\s+" + forbidden + r"\b", bounded), (
+        f"bounded divided production entry still calls legacy {forbidden}"
+    )
+bounded_solver_name = "subroutine solve_dg_hybrid_schwarz_fragments"
+assert bounded_solver_name in MAIN, "missing bounded Schwarz fragment callback"
+bounded_solver = MAIN[MAIN.index(bounded_solver_name) :].split(
+    "end subroutine solve_dg_hybrid_schwarz_fragments", 1
 )[0]
-assert "allow_unordered=.true." in occupation_call, (
-    "divided SCF must preserve coefficient-order occupations after bounded updates"
+assert "advance_dg_hybrid_schwarz_epoch" in bounded_solver
+assert "assign_dg_hybrid_schwarz_occupations" in bounded_solver
+assert "dg_hybrid_fragment_cg_steps" in bounded_solver and "temperature" in bounded_solver
+assert "apply_dg_hybrid_schwarz_h" in bounded_solver
+assert "apply_dg_hybrid_schwarz_s" in bounded_solver
+assert "local_iterations<=dg_hybrid_fragment_cg_steps" in bounded_solver
+for token in (
+    "apply_dg_hybrid_schwarz_hamiltonian",
+    "apply_dg_hybrid_schwarz_rows",
+    "neighbor_exchanges=",
+    "accepted_cg_steps=",
+    "common_extensions=",
+):
+    assert token in MAIN, f"production Schwarz diagnostics/route is missing {token}"
+local_projection = BROKEN[BROKEN.index("subroutine assemble_dg_hybrid_local_potential_rows") :].split(
+    "end subroutine assemble_dg_hybrid_local_potential_rows", 1
+)[0]
+assert "partial(i,columns)=matmul" in re.sub(r"\s+", "", local_projection), (
+    "density-epoch local-potential projection must use the fragment block matrix product"
 )
-assert not re.search(r"fragment_occupations\s*=\s*system%rocc", solve_callback), (
-    "divided density must not reuse stale host occupations"
-)
+for token in (
+    "single_fragment_owner",
+    "local_rows(:,columns)=matmul",
+):
+    assert token in re.sub(r"\s+", "", local_projection), (
+        "one-rank/one-fragment density epochs must avoid redundant global reductions: " + token
+    )
+thermal = (ROOT / "src/gs/dc/dg_hybrid_fragment_thermal.f90").read_text(errors="replace").lower()
+assert "run_dc_fragment_occupation_epoch" in thermal
+assert "reconstruct_dg_hybrid_fragment_density" in thermal
 mix_start = "subroutine mix_dg_hybrid_divided_density"
 assert mix_start in MAIN, "missing divided DC density mixer adapter"
 mix_callback = MAIN[MAIN.index(mix_start) :].split("end subroutine", 1)[0]

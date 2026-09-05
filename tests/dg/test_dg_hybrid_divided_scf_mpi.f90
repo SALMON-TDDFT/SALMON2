@@ -91,7 +91,8 @@ program test_dg_hybrid_divided_scf_mpi
     core_weights,0.9d0,1d-12,converged,iterations,convergence_value,electron_defect,ok,message)
   call require(.not.ok.and..not.allocated(converged),'target-inconsistent callback density was published')
   call require(mix_calls==2.and.electron_defect>1d-12,'finite target drift did not continue iteration')
-  call require(index(message,'did not converge')>0,'persistent electron drift was treated as a hard error')
+  call require(index(message,'did not converge')>0.and.index(message,'convergence=')>0.and.&
+    index(message,'electron_defect=')>0,'persistent electron drift lost its terminal convergence diagnostic')
   call require(convergence_value<10d0,'persistent drift fixture did not pass the density-only threshold')
 
   call reset_case;density=0.45d0;consistent_density_offset=0.1d0;transient_offsets=.true.
