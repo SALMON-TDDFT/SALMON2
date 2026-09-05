@@ -76,6 +76,18 @@ program test_dg_hybrid_generalized_eigensystem_mpi
     published_state%final_eigensolve_count==1,'final LCFO state was not published')
   solve_invocations=0
   call solve_dg_hybrid_generalized_once_and_publish(comm,n,nstate,row_ids,hrows,srows,1d-11,[1d0,1d0],2d0,&
+    101_int64,103_int64,107_int64,109_int64,fixture_solver,published_state,state_workspace,state_fingerprint,&
+    residual,orthogonality,projector_defect,workspace,fingerprint,ok,message,&
+    electronic_temperature=300d0,occupation_electron_tolerance=1d-8)
+  call require(ok,trim(message));call require(solve_invocations==1,&
+    'thermal publication repeated the final LCFO eigensolve')
+  call require(published_state%noccupied>=1.and.published_state%noccupied<=nstate.and.&
+    size(published_state%occupations)==published_state%noccupied.and.&
+    abs(sum(published_state%occupations)-2d0)<1d-8.and.&
+    maxval(abs(published_state%occupations-1d0))>1d-6,&
+    'final LCFO spectrum did not determine the authoritative 300 K occupations')
+  solve_invocations=0
+  call solve_dg_hybrid_generalized_once_and_publish(comm,n,nstate,row_ids,hrows,srows,1d-11,[1d0,1d0],2d0,&
     101_int64,103_int64,107_int64,109_int64,failing_fixture_solver,published_state,state_workspace,state_fingerprint,&
     residual,orthogonality,projector_defect,workspace,fingerprint,ok,message)
   call require(.not.ok.and.solve_invocations==1,'collective final LCFO failure was not reported exactly once')

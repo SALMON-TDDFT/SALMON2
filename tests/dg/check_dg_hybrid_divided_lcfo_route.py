@@ -1,43 +1,62 @@
 #!/usr/bin/env python3
-"""Production route contract for divided WF+PW SCF and one-shot LCFO."""
+"""Production contract for divided WF+PW SCF and one terminal LCFO solve."""
 
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
-BRANCH_START = "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then"
 
-assert BRANCH_START in SOURCE, "missing divided WF+PW SCF production branch"
-branch = SOURCE[SOURCE.index(BRANCH_START) :]
-continuation_branch = "if(yn_dg_hybrid_continuation_scf=='y')then"
-assert continuation_branch in branch, "missing continuation/divided route selection"
-branch = branch[branch.index(continuation_branch) :]
-assert "else" in branch, "missing divided-only route"
-branch = branch.split("else", 1)[1]
-branch = branch.split("if(yn_dg_hybrid_scf=='y')then", 1)[0]
+ENTRY_NAME = "subroutine run_dg_hybrid_divided_ground_state_for_main"
+ENTRY_END = "end subroutine run_dg_hybrid_divided_ground_state_for_main"
+assert ENTRY_NAME in SOURCE and ENTRY_END in SOURCE
+entry = SOURCE[SOURCE.index(ENTRY_NAME) : SOURCE.index(ENTRY_END)]
 
-scf_position = branch.find("call run_dg_hybrid_divided_scf")
-lcfo_position = branch.find("call assemble_dg_hybrid_lcfo_rows")
-assert scf_position >= 0, "divided branch must run fragment WF+PW SCF"
-assert lcfo_position > scf_position, "LCFO assembly must follow divided SCF"
-assert branch.count("solve_dg_hybrid_generalized_") == 1, (
-    "divided branch must perform exactly one generalized eigensolve"
+assert entry.count("call run_dg_hybrid_divided_scf") == 1, (
+    "production route must perform exactly one divided density SCF"
 )
-checkpoint_position = branch.find("call write_rt_dg_hybrid_occupied_checkpoint")
-assert checkpoint_position > lcfo_position, "occupied checkpoint must follow the one-shot LCFO solve"
-assert branch.count("write_rt_dg_hybrid_occupied_checkpoint") == 1
+scf_position = entry.index("call run_dg_hybrid_divided_scf")
+solve_position = entry.find("call solve_dg_hybrid_generalized_once_and_publish")
+assert solve_position > scf_position, "one terminal LCFO solve must follow divided SCF"
+assert entry.count("call solve_dg_hybrid_generalized_once_and_publish") == 1
+solve_call = entry[solve_position:].split("ok,message)", 1)[0]
+assert "electronic_temperature=bounded_schwarz_state%temperature" in solve_call, (
+    "terminal occupations must be recomputed from the final LCFO spectrum at 300 K"
+)
+assert "occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance" in solve_call
+
+terminal = entry[scf_position:]
+potential_position = terminal.find("call extract_dg_hybrid_core_local_potential")
+projection_position = terminal.find("call assemble_dg_hybrid_local_potential_rows")
+fingerprint_position = terminal.find("call ow_fingerprint_distributed_matrix")
+assert 0 < potential_position < projection_position < fingerprint_position, (
+    "terminal LCFO must project the once-refreshed converged potential"
+)
+assert terminal.count("call assemble_dg_hybrid_local_potential_rows") == 1, (
+    "terminal density-independent and converged-potential rows must be composed once"
+)
+assert "bounded_fixed_payload%kinetic_rows+bounded_fixed_payload%nonlocal_rows+&" in terminal
+assert "bounded_fixed_payload%interface_rows+final_local_potential_rows" in terminal
+assert "final_srows=bounded_fixed_payload%metric_rows" in terminal
+
+checkpoint_position = entry.find("call write_rt_dg_hybrid_occupied_checkpoint")
+assert checkpoint_position > solve_position, "occupied checkpoint must follow terminal LCFO"
+assert entry.count("call write_rt_dg_hybrid_occupied_checkpoint") == 1
+post_lcfo = entry[solve_position:]
 for forbidden in (
+    "call run_dg_hybrid_divided_scf",
+    "call mix_dg_hybrid_divided_density",
     "reconstruct_dg_hybrid_density",
     "post_lcfo_density",
-    "run_dg_hybrid_divided_scf",  # checked separately below for exactly the pre-LCFO call
 ):
-    if forbidden == "run_dg_hybrid_divided_scf":
-        assert branch.count(forbidden) == 1, "divided SCF must not repeat after LCFO"
-    else:
-        assert forbidden not in branch, f"divided route added post-LCFO density work: {forbidden}"
-assert "run_dg_hybrid_self_consistent_ground_state" not in branch, (
-    "divided branch must not use the repeated full-cell Hybrid SCF"
+    assert forbidden not in post_lcfo, f"post-LCFO density work is forbidden: {forbidden}"
+
+SOLVER_NAME = "subroutine solve_dg_hybrid_schwarz_fragments"
+SOLVER_END = "end subroutine solve_dg_hybrid_schwarz_fragments"
+assert SOLVER_NAME in SOURCE and SOLVER_END in SOURCE
+solver = SOURCE[SOURCE.index(SOLVER_NAME) : SOURCE.index(SOLVER_END)]
+assert "solve_dg_hybrid_generalized" not in solver, (
+    "fragment density epochs must not perform a full generalized eigensolve"
 )
 
 for forbidden in (
@@ -46,8 +65,8 @@ for forbidden in (
     "complex(8)::hybrid_h(ntarget,ntarget)",
     "complex(8)::hybrid_s(ntarget,ntarget)",
 ):
-    assert forbidden not in branch.replace(" ", ""), (
-        f"divided branch must not replicate a dense LCFO matrix: {forbidden}"
+    assert forbidden not in entry.replace(" ", ""), (
+        f"divided route must retain row-distributed LCFO storage: {forbidden}"
     )
 
 print("divided WF+PW LCFO route contract: PASS")

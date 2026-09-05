@@ -4,6 +4,7 @@ module dg_hybrid_generalized_eigensystem
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite,ieee_get_halting_mode,ieee_set_halting_mode,ieee_set_flag,&
     ieee_invalid,ieee_divide_by_zero,ieee_overflow
   use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
+  use dg_hybrid_occupation_policy,only:s_dg_hybrid_occupation_result,derive_dg_hybrid_occupation_policy
 #ifdef USE_MPI
   use mpi
 #endif
@@ -491,7 +492,8 @@ contains
   subroutine solve_dg_hybrid_generalized_once_and_publish(comm,global_count,nstate,row_ids,hrows,srows,tolerance,&
       occupations,expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&
       position_fingerprint,solver,state,state_workspace_bytes,state_fingerprint,maximum_residual,&
-      orthogonality_defect,projector_defect,solver_workspace_bytes,solver_fingerprint,ok,message)
+      orthogonality_defect,projector_defect,solver_workspace_bytes,solver_fingerprint,ok,message,&
+      electronic_temperature,occupation_electron_tolerance)
     integer,intent(in)::comm,global_count,nstate
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(in)::hrows(:,:),srows(:,:)
@@ -502,10 +504,13 @@ contains
     integer(int64),intent(out)::state_workspace_bytes,state_fingerprint,solver_workspace_bytes,solver_fingerprint
     real(real64),intent(out)::maximum_residual,orthogonality_defect,projector_defect
     logical,intent(out)::ok;character(*),intent(out)::message
+    real(real64),intent(in),optional::electronic_temperature,occupation_electron_tolerance
     complex(real64),allocatable::coefficients(:,:)
     real(real64),allocatable::eigenvalues(:)
+    type(s_dg_hybrid_occupation_result)::occupation_result
     logical::solver_ok,collective_ok
     integer::ierr
+    real(real64)::publication_tolerance
 
     state=s_dg_hybrid_ground_state();ok=.false.;message='';state_workspace_bytes=0_int64;state_fingerprint=0_int64
     solver_workspace_bytes=0_int64;solver_fingerprint=0_int64;maximum_residual=huge(1d0)
@@ -522,9 +527,24 @@ contains
     collective_ok=solver_ok
     if(.not.collective_ok)then;message='final distributed LCFO eigensolve failed';return;endif
 #endif
-    call validate_dg_hybrid_ground_state(comm,global_count,nstate,row_ids,coefficients,occupations,eigenvalues,&
-      expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&
-      position_fingerprint,tolerance,state,state_workspace_bytes,state_fingerprint,ok,message)
+    if(present(electronic_temperature).neqv.present(occupation_electron_tolerance))then
+      message='final LCFO occupation controls must be supplied together';return
+    endif
+    if(present(electronic_temperature))then
+      call derive_dg_hybrid_occupation_policy(comm,eigenvalues,expected_electron_count,&
+        electronic_temperature,occupation_electron_tolerance,occupation_result,ok,message)
+      if(.not.ok)return
+      publication_tolerance=max(tolerance,occupation_electron_tolerance)
+      call validate_dg_hybrid_ground_state(comm,global_count,occupation_result%noccupied,row_ids,&
+        coefficients(:,:occupation_result%noccupied),occupation_result%occupations(:occupation_result%noccupied),&
+        eigenvalues(:occupation_result%noccupied),expected_electron_count,hybrid_basis_fingerprint,&
+        metric_fingerprint,operator_fingerprint,position_fingerprint,publication_tolerance,state,&
+        state_workspace_bytes,state_fingerprint,ok,message)
+    else
+      call validate_dg_hybrid_ground_state(comm,global_count,nstate,row_ids,coefficients,occupations,eigenvalues,&
+        expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&
+        position_fingerprint,tolerance,state,state_workspace_bytes,state_fingerprint,ok,message)
+    endif
     if(.not.ok)return
     state%converged=.true.;state%final_eigensolve_count=1
   end subroutine solve_dg_hybrid_generalized_once_and_publish

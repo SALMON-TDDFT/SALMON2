@@ -13,6 +13,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-scf-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_scf"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-DUSE_SCALAPACK","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+    str(root/"src/gs/occupation_kernel.f90"),
+    str(root/"src/gs/dc/dg_hybrid_occupation_policy.f90"),
     str(root/"src/gs/dc/dg_hybrid_ground_state_types.f90"),
     str(root/"src/gs/dc/dg_hybrid_generalized_eigensystem.f90"),str(root/"src/gs/dc/dg_hybrid_block_cg.f90"),
     str(root/"src/gs/dc/dg_hybrid_scf.f90"),str(root/"tests/dg/test_dg_hybrid_scf_mpi.f90"),*libraries,"-o",str(exe)],check=True)

@@ -1313,27 +1313,31 @@ contains
     integer(int64)::raw_count,byte_limit,pw_workspace,window_workspace,basis_workspace,&
       pw_fingerprint,window_fingerprint,basis_fingerprint,frame_fingerprint,face_fingerprint,&
       global_basis_fingerprint,metric_fingerprint,interface_fingerprint,directory_fingerprint,&
-      local_potential_fingerprint,preconditioner_fingerprint
+      local_potential_fingerprint,preconditioner_fingerprint,final_operator_fingerprint,&
+      final_state_workspace,final_state_fingerprint,final_solver_workspace,&
+      final_solver_fingerprint,final_checkpoint_fingerprint,final_provenance(6)
     integer(int64)::support_fingerprints(3)
     integer(int64),allocatable::candidate_grid_ids(:),core_ids(:),gathered_basis_ids(:),projector_grid_ids(:)
     complex(8),allocatable::buffer_candidates(:,:),projector_candidates(:,:),reference_frame(:,:),&
       interior_values(:,:),interior_gradients(:,:,:),interior_kinetic_action(:,:),kinetic_rows(:,:),&
       metric_rows(:,:),local_potential_rows(:,:),nonlocal_rows(:,:),interface_components(:,:,:),&
-      interface_rows(:,:),fragment_h(:,:),fragment_s(:,:),seed_coefficients(:,:)
+      interface_rows(:,:),fragment_h(:,:),fragment_s(:,:),seed_coefficients(:,:),&
+      final_local_potential_rows(:,:),final_hrows(:,:),final_srows(:,:)
     real(8),allocatable::core_lower(:,:),core_extent(:,:),atom_positions(:,:),raw_weight(:),&
       raw_gradient(:,:),partition_weight(:),partition_gradient(:,:),box_windows(:,:),&
       core_coordinates(:,:),buffer_coordinates(:,:),core_windows(:,:),buffer_windows(:,:),&
       g_vectors(:,:),core_weights(:),projector_weights(:),unit_potential(:),local_potential(:),&
-      initial_density(:),converged_density(:)
+      initial_density(:),converged_density(:),final_occupations(:)
     complex(8),allocatable::projector_support_values(:)
     real(8)::axis_weight(3),axis_gradient(3),coordinate,sum_defect,gradient_defect,&
       denominator,convergence_value,electron_defect
-    real(8)::volume_diagnostics(4),local_potential_diagnostics(2)
+    real(8)::volume_diagnostics(4),local_potential_diagnostics(2),final_scf_receipts(5),&
+      final_residual,final_orthogonality,final_projector_defect
     real(8)::reciprocal_rotation(3,3,1),fragment_lattice(3,3),fragment_reciprocal_lattice(3,3)
     integer,allocatable::payload_owner(:),payload_fragment(:),payload_local_slot(:),payload_generation(:),&
       interior_fragment(:)
     character(8),allocatable::atom_symbols(:)
-    integer::scf_iterations
+    integer::scf_iterations,final_state_count
     logical::ok,collective_ok
     character(512)::message
 
@@ -1797,8 +1801,67 @@ contains
     if(rank==0)write(*,'(a,2(a,es12.4),a,i0)')'[DG-HYBRID-DIVIDED] selected basis prepared',&
       ' partition_sum_defect=',sum_defect,' partition_gradient_defect=',gradient_defect,&
       ' global_basis_count=',size(projected_basis%global_ids)
-    if(rank==0)write(*,'(a,i0,2(a,es12.4))')'[DG-HYBRID-DIVIDED] local SCF converged iterations=',&
+    if(rank==0)write(*,'(a,i0,2(a,es12.4))')'[OW-GS] divided WF+PW SCF converged iterations=',&
       scf_iterations,' density=',convergence_value,' electron_defect=',electron_defect
+
+    ! The divided density loop has already refreshed the total potential with
+    ! converged_density. Project that terminal potential once, compose the
+    ! complete row-distributed DG operator, and diagonalize it exactly once.
+    allocate(final_local_potential_rows(size(projected_basis%global_ids),total_basis_count),&
+      final_hrows(size(projected_basis%global_ids),total_basis_count),&
+      final_srows(size(projected_basis%global_ids),total_basis_count))
+    call extract_dg_hybrid_core_local_potential(core_ids,local_potential,ok)
+    if(.not.ok)error stop 'terminal divided Hybrid potential extraction failed'
+    call assemble_dg_hybrid_local_potential_rows(dc%icomm_tot,total_basis_count,&
+      projected_basis%global_ids,payload_fragment,core_ids,interior_fragment,core_weights,&
+      interior_values,local_potential,final_local_potential_rows,local_potential_diagnostics,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+      error stop 'terminal divided Hybrid potential projection failed'
+    endif
+    final_hrows=bounded_fixed_payload%kinetic_rows+bounded_fixed_payload%nonlocal_rows+&
+      bounded_fixed_payload%interface_rows+final_local_potential_rows
+    final_srows=bounded_fixed_payload%metric_rows
+    call ow_fingerprint_distributed_matrix(dc%icomm_tot,projected_basis%global_ids,final_hrows,&
+      final_operator_fingerprint,ok)
+    if(.not.ok)error stop 'terminal divided Hybrid operator fingerprint failed'
+    if(.not.allocated(bounded_schwarz_state%occupations))&
+      error stop 'terminal divided Hybrid occupations are unavailable'
+    final_state_count=bounded_schwarz_state%trial_count
+    if(final_state_count<1)error stop 'terminal divided Hybrid occupied inventory is empty'
+    allocate(final_occupations(final_state_count))
+    final_occupations=bounded_schwarz_state%wspin*&
+      bounded_schwarz_state%occupations(:final_state_count)
+    call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,total_basis_count,final_state_count,&
+      projected_basis%global_ids,final_hrows,final_srows,dg_dc_gs_final_orbital_tolerance,&
+      final_occupations,dc%elec_num_tot,global_basis_fingerprint,metric_fingerprint,&
+      final_operator_fingerprint,frame_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
+      ow_hybrid_ground_state,final_state_workspace,final_state_fingerprint,final_residual,&
+      final_orthogonality,final_projector_defect,final_solver_workspace,final_solver_fingerprint,&
+      ok,message,electronic_temperature=bounded_schwarz_state%temperature,&
+      occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance)
+    if(.not.ok)then
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+      error stop 'terminal divided Hybrid LCFO solve failed'
+    endif
+    if(rank==0)write(*,'(a,3(a,es16.8))')'[OW-GS] divided WF+PW LCFO solved once',&
+      ' residual=',final_residual,' orthogonality=',final_orthogonality,&
+      ' projector=',final_projector_defect
+    final_provenance=[pw_fingerprint,window_fingerprint,global_basis_fingerprint,&
+      bounded_fixed_payload%fingerprint,final_operator_fingerprint,final_solver_fingerprint]
+    final_scf_receipts=[convergence_value,final_residual,final_orthogonality,&
+      final_projector_defect,electron_defect]
+    call write_rt_dg_hybrid_occupied_checkpoint(dc%icomm_tot,'./overlapping_wannier_occupied.chk',&
+      ow_hybrid_ground_state%global_count,ow_hybrid_ground_state%owned_row_ids,&
+      ow_hybrid_ground_state%coefficients,ow_hybrid_ground_state%occupations,&
+      ow_hybrid_ground_state%eigenvalues,pw_fingerprint,global_basis_fingerprint,&
+      final_provenance,final_operator_fingerprint,final_state_fingerprint,final_scf_receipts,&
+      max(dg_dc_gs_final_orbital_tolerance,dg_dc_gs_electron_count_tolerance,&
+      maxval(final_scf_receipts)),final_checkpoint_fingerprint,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+      error stop 'terminal divided Hybrid occupied checkpoint failed'
+    endif
   end subroutine run_dg_hybrid_divided_ground_state_for_main
 
   subroutine solve_dg_hybrid_schwarz_fragments(iteration,callback_ok)

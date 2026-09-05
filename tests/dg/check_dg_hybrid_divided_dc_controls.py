@@ -12,6 +12,7 @@ DCDTF = (ROOT / "src/gs/dc/dcdft.f90").read_text(errors="replace").lower()
 MAIN = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 BROKEN = (ROOT / "src/gs/dc/dg_hybrid_broken_volume.f90").read_text(errors="replace").lower()
 MIXING = (ROOT / "src/gs/dc/dg_hybrid_divided_mixing.f90").read_text(errors="replace").lower()
+DIVIDED_SCF = (ROOT / "src/gs/dc/dg_hybrid_divided_scf.f90").read_text(errors="replace").lower()
 
 assert "character(1)   :: yn_dg_hybrid_divided_scf" in GLOBAL
 assert "yn_dg_hybrid_divided_scf = 'n'" in INPUT, "divided route must default off"
@@ -153,6 +154,18 @@ for token in (
     assert token in bounded, f"Schwarz divided production entry is missing {token}"
 assert "extract_dg_hybrid_fragment_self_block" not in bounded, (
     "production divided SCF still extracts a self block instead of applying full DG rows"
+)
+converged_gate = DIVIDED_SCF[
+    DIVIDED_SCF.index("if(convergence_value<=threshold.and.electron_defect<=electron_tolerance)then") :
+].split("endif", 1)[0]
+assert converged_gate.count("call update_total_potential(new_density,callback_ok)") == 1, (
+    "the converged divided density must refresh the terminal potential exactly once"
+)
+scf_call = bounded.index("call run_dg_hybrid_divided_scf")
+lcfo_call = bounded.index("call solve_dg_hybrid_generalized_once_and_publish")
+assert scf_call < lcfo_call
+assert "call update_dg_hybrid_divided_potential" not in bounded[scf_call:lcfo_call], (
+    "the terminal LCFO must consume the SCF terminal refresh without a duplicate update"
 )
 for forbidden in (
     "apply_dg_hybrid_divided_fragment_hpsi",
