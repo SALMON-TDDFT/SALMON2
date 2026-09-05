@@ -34,10 +34,14 @@ contains
 
     ok=.false.;message=''
     controls=[basis_generation];fingerprints=[mapping_fingerprint];rates=[rate]
-    local_bad=merge(0,1,basis_generation>0.and.mapping_fingerprint/=0_int64.and.&
-      ieee_is_finite(rate).and.rate>0d0.and.rate<=1d0)
+    local_bad=merge(0,1,ieee_is_finite(rate))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation validation reduction failed';return;endif
+    if(global_bad/=0)then;message='nonfinite DG interface continuation rate';return;endif
+    local_bad=merge(0,1,basis_generation>0.and.mapping_fingerprint/=0_int64.and.rate>0d0.and.rate<=1d0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='DG interface continuation validation reduction failed';return;endif
+    if(global_bad/=0)then;message='invalid DG interface continuation controls';return;endif
     call MPI_Allreduce(controls,minimum_controls,1,MPI_INTEGER,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation control reduction failed';return;endif
     call MPI_Allreduce(controls,maximum_controls,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -55,8 +59,6 @@ contains
        any(rates/=minimum_rates).or.any(rates/=maximum_rates))then
       message='DG interface continuation controls disagree across ranks';return
     endif
-    if(global_bad/=0)then;message='invalid DG interface continuation controls';return;endif
-
     candidate%valid=.true.
     candidate%basis_generation=basis_generation
     candidate%mapping_fingerprint=mapping_fingerprint
@@ -78,24 +80,30 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     type(s_dg_hybrid_interface_continuation)::candidate
-    integer::controls(4),minimum_controls(4),maximum_controls(4),ierr,local_bad,global_bad
+    integer::controls(6),minimum_controls(6),maximum_controls(6),ierr,local_bad,global_bad
     integer::local_vote,global_vote
     integer(int64)::fingerprints(3),minimum_fingerprints(3),maximum_fingerprints(3)
     real(real64)::reals(2),minimum_reals(2),maximum_reals(2)
 
     ok=.false.;message=''
-    controls=[basis_generation,state%basis_generation,state%step_index,state%accepted_steps]
+    controls=[basis_generation,state%basis_generation,state%step_index,state%accepted_steps,&
+      merge(1,0,state%valid),merge(1,0,state%finished)]
     fingerprints=[mapping_fingerprint,state%mapping_fingerprint,state%fingerprint]
     reals=[state%rate,state%lambda]
-    local_bad=merge(0,1,state%valid.and.state%basis_generation>0.and.&
-      state%mapping_fingerprint/=0_int64.and.ieee_is_finite(state%rate).and.state%rate>0d0.and.&
-      state%rate<=1d0.and.ieee_is_finite(state%lambda).and.state%lambda>=0d0.and.state%lambda<=1d0.and.&
-      state%step_index>=0.and.state%accepted_steps>=0.and.state%fingerprint==state_fingerprint(state))
+    local_bad=merge(0,1,ieee_is_finite(state%rate).and.ieee_is_finite(state%lambda))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface point validation reduction failed';return;endif
-    call MPI_Allreduce(controls,minimum_controls,4,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(global_bad/=0)then;message='nonfinite DG interface continuation state';return;endif
+    local_bad=merge(0,1,state%valid.and.state%basis_generation>0.and.&
+      state%mapping_fingerprint/=0_int64.and.state%rate>0d0.and.state%rate<=1d0.and.&
+      state%lambda>=0d0.and.state%lambda<=1d0.and.state%step_index>=0.and.&
+      state%accepted_steps>=0.and.state%fingerprint==state_fingerprint(state))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='DG interface point validation reduction failed';return;endif
+    if(global_bad/=0)then;message='invalid or stale DG interface continuation state';return;endif
+    call MPI_Allreduce(controls,minimum_controls,6,MPI_INTEGER,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface point control reduction failed';return;endif
-    call MPI_Allreduce(controls,maximum_controls,4,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(controls,maximum_controls,6,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface point control reduction failed';return;endif
     call MPI_Allreduce(fingerprints,minimum_fingerprints,3,MPI_INTEGER8,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface point fingerprint reduction failed';return;endif
@@ -110,10 +118,10 @@ contains
        any(reals/=minimum_reals).or.any(reals/=maximum_reals))then
       message='DG interface continuation controls disagree across ranks';return
     endif
-    if(global_bad/=0.or.basis_generation/=state%basis_generation.or.&
-       mapping_fingerprint/=state%mapping_fingerprint)then
+    if(basis_generation/=state%basis_generation.or.mapping_fingerprint/=state%mapping_fingerprint)then
       message='invalid or stale DG interface continuation state';return
     endif
+    if(state%finished)then;message='DG interface continuation already finished';return;endif
     local_vote=merge(1,0,local_accept)
     call MPI_Allreduce(local_vote,global_vote,1,MPI_INTEGER,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface point acceptance reduction failed';return;endif
