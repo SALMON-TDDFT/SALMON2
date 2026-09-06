@@ -6,6 +6,7 @@ set(SOURCES
     dg_overlapping_wannier_types.f90
     dg_spatial_mlwf_seed.f90
     dg_fragment_scdm_gauge.f90
+    dg_fragment_wf_checkpoint.f90
     dg_hybrid_wannier_selection.f90
     dg_hybrid_full_cell_operator_adapter.f90
     dg_hybrid_occupation_policy.f90
