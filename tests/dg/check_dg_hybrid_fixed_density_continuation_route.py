@@ -95,6 +95,27 @@ assert "300d0" in source.split(
 solver = source.split("subroutine solve_dg_hybrid_schwarz_fragments", 1)[1].split(
     "end subroutine solve_dg_hybrid_schwarz_fragments", 1
 )[0]
+solver_compact = re.sub(r"\s+", "", solver)
+assert "callback_ok=callback_ok.and..not.rolled_back" in solver_compact, (
+    "a Schwarz rollback must be promoted to collective point failure"
+)
+collective_boundaries = (
+    "extract_dg_hybrid_core_local_potential",
+    "assemble_dg_hybrid_local_potential_rows",
+    "ow_fingerprint_distributed_matrix",
+    "assemble_dg_hybrid_schwarz_local_preconditioner_blocks",
+    "advance_dg_hybrid_schwarz_epoch",
+    "assign_dg_hybrid_schwarz_occupations",
+)
+for before, after in zip(collective_boundaries, collective_boundaries[1:]):
+    segment = solver[solver.index(before) : solver.index(after)]
+    assert "comm_logical_and" in segment, (
+        f"missing collective failure gate between {before} and {after}"
+    )
+assert "allocate(core_potential(size(bounded_core_ids)),stat=status_local)" in solver_compact
+assert solver_compact.index("stat=status_local") < solver_compact.index(
+    "extract_dg_hybrid_core_local_potential"
+)
 for lifecycle in (
     "divided_mixing_inventory_fingerprint=",
     "divided_mixing_rollback_pending=",
@@ -107,6 +128,15 @@ assert "accepted_schwarz_state=bounded_schwarz_state" in compact, (
 )
 assert "bounded_schwarz_state=accepted_schwarz_state" in compact, (
     "failed points must restore the last collectively accepted coefficients/state"
+)
+continuation_loop = compact.split("dowhile(.not.interface_continuation%finished)", 1)[1]
+failure_branch = continuation_loop.split("if(.not.collective_ok)then", 1)[1].split("endif", 1)[0]
+assert failure_branch.index("bounded_schwarz_state=accepted_schwarz_state") < failure_branch.index(
+    "accept_dg_hybrid_interface_point"
+), "point failure must restore accepted state before recording collective rejection"
+assert ".false.,interface_continuation" in failure_branch
+assert ".true.,interface_continuation" not in failure_branch, (
+    "a failed or rolled-back point must never be accepted"
 )
 assert re.search(r"call\s+accept_dg_hybrid_interface_point\s*\(", route), (
     "successful points must advance the collective continuation state"

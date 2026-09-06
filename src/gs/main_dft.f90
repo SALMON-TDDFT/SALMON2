@@ -1890,29 +1890,61 @@ contains
     real(8),allocatable::occupations(:),energies(:)
     real(8)::diagnostics(2)
     integer(8)::potential_fingerprint
-    integer::local_iterations,extensions,rank_local,ierr_local
-    logical::converged,rolled_back,extended
+    integer::local_iterations,extensions,rank_local,ierr_local,status_local
+    logical::converged,rolled_back,extended,collective_callback_ok,all_extended,all_not_extended
     character(512)::solver_message
 
-    callback_ok=.false.
-    if(.not.bounded_schwarz_state%valid.or..not.bounded_schwarz_schedule%valid.or.&
-      .not.allocated(bounded_core_ids))return
-    allocate(core_potential(size(bounded_core_ids)))
+    call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
+    callback_ok=ierr_local==MPI_SUCCESS.and.bounded_schwarz_state%valid.and.&
+      bounded_schwarz_schedule%valid.and.allocated(bounded_core_ids)
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(ierr_local==MPI_SUCCESS.and.rank_local==0)&
+        write(error_unit,'(a)')'Schwarz callback preflight failed collectively'
+      return
+    endif
+    allocate(core_potential(size(bounded_core_ids)),stat=status_local)
+    callback_ok=status_local==0
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a)')'Schwarz core-potential allocation failed collectively'
+      return
+    endif
     call extract_dg_hybrid_core_local_potential(bounded_core_ids,core_potential,callback_ok)
-    if(.not.callback_ok)return
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a)')'Schwarz core-potential extraction failed collectively'
+      return
+    endif
     call assemble_dg_hybrid_local_potential_rows(dc%icomm_tot,bounded_fixed_payload%global_basis_count,&
       divided_fragment_basis%global_ids,bounded_basis_fragment,bounded_core_ids,&
       bounded_interior_fragment,bounded_core_weights,bounded_interior_values,core_potential,&
       bounded_local_potential_rows,diagnostics,callback_ok,solver_message)
-    if(.not.callback_ok)then
-      write(error_unit,'(a,a)')'bounded fragment potential projection: ',trim(solver_message);return
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a,a)')&
+        'bounded fragment potential projection failed collectively: ',trim(solver_message)
+      return
     endif
     call ow_fingerprint_distributed_matrix(dc%icomm_tot,divided_fragment_basis%global_ids,&
       bounded_local_potential_rows,potential_fingerprint,callback_ok)
-    if(.not.callback_ok)return
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a)')'Schwarz potential fingerprint failed collectively'
+      return
+    endif
     call assemble_dg_hybrid_schwarz_local_preconditioner_blocks(callback_ok)
-    if(.not.callback_ok)then
-      write(error_unit,'(a)')'Schwarz local preconditioner block assembly failed';return
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a)')&
+        'Schwarz local preconditioner block assembly failed collectively'
+      return
     endif
     bounded_last_peer_exchange_count=0
     call advance_dg_hybrid_schwarz_epoch(dc%icomm_tot,bounded_schwarz_state%basis_generation,&
@@ -1922,11 +1954,20 @@ contains
       apply_dg_hybrid_schwarz_preconditioner,bounded_schwarz_state,local_iterations,&
       divided_fragment_residual,divided_fragment_orthogonality,converged,rolled_back,&
       callback_ok,solver_message)
-    if(.not.callback_ok)then
-      write(error_unit,'(a,a)')'bounded Schwarz update: ',trim(solver_message);return
+    callback_ok=callback_ok.and..not.rolled_back
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a,a)')&
+        'bounded Schwarz update failed or rolled back collectively: ',trim(solver_message)
+      return
     endif
-    if(local_iterations>dg_hybrid_fragment_cg_steps)then
-      callback_ok=.false.;write(error_unit,'(a)')'Schwarz CG step cap was exceeded';return
+    callback_ok=local_iterations<=dg_hybrid_fragment_cg_steps
+    call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+    if(.not.collective_callback_ok)then
+      callback_ok=.false.
+      if(rank_local==0)write(error_unit,'(a)')'Schwarz CG step cap was exceeded collectively'
+      return
     endif
     extensions=0
     do
@@ -1935,15 +1976,25 @@ contains
         bounded_schwarz_candidate_ids,bounded_schwarz_candidate_energies,&
         bounded_schwarz_candidate_vectors,apply_dg_hybrid_schwarz_h,apply_dg_hybrid_schwarz_s,&
         bounded_schwarz_state,occupations,energies,extended,callback_ok,solver_message)
-      if(.not.callback_ok)then
-        write(error_unit,'(a,a)')'global Schwarz occupations: ',trim(solver_message);return
+      call comm_logical_and(callback_ok,collective_callback_ok,dc%icomm_tot)
+      if(.not.collective_callback_ok)then
+        callback_ok=.false.
+        if(rank_local==0)write(error_unit,'(a,a)')&
+          'global Schwarz occupations failed collectively: ',trim(solver_message)
+        return
       endif
-      if(.not.extended)exit
+      call comm_logical_and(extended,all_extended,dc%icomm_tot)
+      call comm_logical_and(.not.extended,all_not_extended,dc%icomm_tot)
+      if(.not.all_extended.and..not.all_not_extended)then
+        callback_ok=.false.
+        if(rank_local==0)write(error_unit,'(a)')&
+          'global Schwarz occupation extension decision disagrees across ranks'
+        return
+      endif
+      if(all_not_extended)exit
       extensions=extensions+1
     enddo
     system%mu=bounded_schwarz_state%chemical_potential
-    call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)then;callback_ok=.false.;return;endif
     if(rank_local==0)write(*,'(a,i0,3(a,i0),3(a,es12.4))')'[DG-HYBRID-SCHWARZ] epoch=',iteration,&
       ' neighbor_exchanges=',bounded_last_peer_exchange_count,' accepted_cg_steps=',local_iterations,&
       ' common_extensions=',extensions,' residual=',divided_fragment_residual,&
@@ -1954,11 +2005,13 @@ contains
 
   subroutine assemble_dg_hybrid_schwarz_local_preconditioner_blocks(callback_ok)
     logical,intent(out)::callback_ok
-    integer::global_column,local_slot,local_count
+    integer::global_column,local_slot,local_count,status_local
     local_count=size(divided_fragment_basis%global_ids);callback_ok=.false.
     if(allocated(bounded_fragment_h))deallocate(bounded_fragment_h)
     if(allocated(bounded_fragment_s))deallocate(bounded_fragment_s)
-    allocate(bounded_fragment_h(local_count,local_count),bounded_fragment_s(local_count,local_count))
+    allocate(bounded_fragment_h(local_count,local_count),bounded_fragment_s(local_count,local_count),&
+      stat=status_local)
+    if(status_local/=0)return
     bounded_fragment_h=0d0;bounded_fragment_s=0d0
     do global_column=1,bounded_fixed_payload%global_basis_count
       if(bounded_basis_fragment(global_column)/=dc%i_frag)cycle

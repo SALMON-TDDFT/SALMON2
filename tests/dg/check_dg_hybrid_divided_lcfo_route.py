@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production contract for divided WF+PW SCF and one terminal LCFO solve."""
+"""Production contract for fixed-density continuation and one terminal LCFO solve."""
 
 from pathlib import Path
 
@@ -12,12 +12,14 @@ ENTRY_END = "end subroutine run_dg_hybrid_divided_ground_state_for_main"
 assert ENTRY_NAME in SOURCE and ENTRY_END in SOURCE
 entry = SOURCE[SOURCE.index(ENTRY_NAME) : SOURCE.index(ENTRY_END)]
 
-assert entry.count("call run_dg_hybrid_divided_scf") == 1, (
-    "production route must perform exactly one divided density SCF"
+assert entry.count("call initialize_dg_hybrid_interface_continuation") == 1, (
+    "production route must initialize exactly one fixed-density interface continuation"
 )
-scf_position = entry.index("call run_dg_hybrid_divided_scf")
+assert "do while(.not.interface_continuation%finished)" in entry
+assert entry.count("call accept_dg_hybrid_interface_point") == 2
+scf_position = entry.index("call initialize_dg_hybrid_interface_continuation")
 solve_position = entry.find("call solve_dg_hybrid_generalized_once_and_publish")
-assert solve_position > scf_position, "one terminal LCFO solve must follow divided SCF"
+assert solve_position > scf_position, "one terminal LCFO solve must follow interface continuation"
 assert entry.count("call solve_dg_hybrid_generalized_once_and_publish") == 1
 solve_call = entry[solve_position:].split("ok,message)", 1)[0]
 assert "electronic_temperature=bounded_schwarz_state%temperature" in solve_call, (
@@ -46,6 +48,8 @@ post_lcfo = entry[solve_position:]
 for forbidden in (
     "call run_dg_hybrid_divided_scf",
     "call mix_dg_hybrid_divided_density",
+    "call update_dg_hybrid_divided_potential",
+    "call dg_dc_update_potential_from_distributed_density",
     "reconstruct_dg_hybrid_density",
     "post_lcfo_density",
 ):
@@ -56,7 +60,7 @@ SOLVER_END = "end subroutine solve_dg_hybrid_schwarz_fragments"
 assert SOLVER_NAME in SOURCE and SOLVER_END in SOURCE
 solver = SOURCE[SOURCE.index(SOLVER_NAME) : SOURCE.index(SOLVER_END)]
 assert "solve_dg_hybrid_generalized" not in solver, (
-    "fragment density epochs must not perform a full generalized eigensolve"
+    "fragment continuation points must not perform a full generalized eigensolve"
 )
 
 for forbidden in (
@@ -69,4 +73,4 @@ for forbidden in (
         f"divided route must retain row-distributed LCFO storage: {forbidden}"
     )
 
-print("divided WF+PW LCFO route contract: PASS")
+print("fixed-density divided WF+PW LCFO route contract: PASS")
