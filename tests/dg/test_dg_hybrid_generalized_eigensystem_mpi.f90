@@ -8,6 +8,7 @@ program test_dg_hybrid_generalized_eigensystem_mpi
     solve_dg_hybrid_generalized_once_and_publish,solve_dg_hybrid_generalized_complete_once,&
     s_dg_hybrid_complete_eigensystem
   use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state
+  use occupation_kernel,only:solve_spectrum_occupations
   implicit none
   integer,parameter::n=4,nstate=2
   integer::comm,rank,nproc,ierr,nowned,row,i,j,position
@@ -16,6 +17,9 @@ program test_dg_hybrid_generalized_eigensystem_mpi
     full_fixture_coefficients(:,:)
   complex(real64)::s(n,n),h(n,n),u(n,n),phase
   real(real64)::expected(n),eigenvalues(nstate),residual,orthogonality,projector_defect
+  real(real64),parameter::boltzmann_hartree_per_kelvin=3.166811563d-6
+  real(real64),allocatable::thermal_spectrum(:,:,:),thermal_occupations(:,:,:),thermal_weights(:)
+  real(real64)::thermal_mu,thermal_count
   integer(int64)::workspace,fingerprint,reference_fingerprint,state_workspace,state_fingerprint
   integer::solve_invocations,complete_solve_invocations,observed_complete_nstate
   type(s_dg_hybrid_ground_state)::published_state
@@ -74,11 +78,24 @@ program test_dg_hybrid_generalized_eigensystem_mpi
   call require(ok,trim(message));call require(solve_invocations==1,'final LCFO eigensolver was not invoked exactly once')
   call require(published_state%valid.and.published_state%converged.and.&
     published_state%final_eigensolve_count==1,'final LCFO state was not published')
+  allocate(thermal_spectrum(232,1,1),thermal_weights(1));thermal_weights=1d0
+  do i=1,232
+    thermal_spectrum(i,1,1)=-1d0+2d0*real(i-1,real64)/231d0
+  enddo
+  call solve_spectrum_occupations(thermal_spectrum,thermal_weights,256d0,&
+    300d0*boltzmann_hartree_per_kelvin,.false.,thermal_occupations,thermal_mu,thermal_count,ok,message)
+  call require(ok.and.abs(thermal_count-256d0)<1d-9,&
+    '232-state terminal spectrum did not reproduce 256 electrons at 300 K: '//trim(message))
+  if(allocated(thermal_occupations))deallocate(thermal_occupations)
+  call solve_spectrum_occupations(thermal_spectrum,thermal_weights,256d0,300d0,.false.,&
+    thermal_occupations,thermal_mu,thermal_count,ok,message)
+  call require(.not.ok.and.index(message,'did not converge')>0,&
+    'raw 300 K value was not rejected when misused as 300 hartree')
   solve_invocations=0
   call solve_dg_hybrid_generalized_once_and_publish(comm,n,nstate,row_ids,hrows,srows,1d-11,[1d0,1d0],2d0,&
     101_int64,103_int64,107_int64,109_int64,fixture_solver,published_state,state_workspace,state_fingerprint,&
     residual,orthogonality,projector_defect,workspace,fingerprint,ok,message,&
-    electronic_temperature=300d0,occupation_electron_tolerance=1d-8)
+    electronic_temperature=300d0*boltzmann_hartree_per_kelvin,occupation_electron_tolerance=1d-8)
   call require(ok,trim(message));call require(solve_invocations==1,&
     'thermal publication repeated the final LCFO eigensolve')
   call require(published_state%noccupied>=1.and.published_state%noccupied<=nstate.and.&

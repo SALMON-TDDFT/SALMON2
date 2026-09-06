@@ -46,8 +46,11 @@ assert "mpi_allreduce" in terminal_guard, (
     "terminal fingerprints must be checked for rank consistency"
 )
 solve_call = entry[solve_position:].split("ok,message)", 1)[0]
-assert "electronic_temperature=bounded_schwarz_state%temperature" in solve_call, (
-    "terminal occupations must be recomputed from the final LCFO spectrum at 300 K"
+assert "electronic_temperature=max(0d0,temperature)" in solve_call, (
+    "terminal occupations must receive SALMON's atomic-unit electronic temperature"
+)
+assert "electronic_temperature=bounded_schwarz_state%temperature" not in solve_call, (
+    "Schwarz state temperature is in kelvin and must not enter the hartree occupation kernel"
 )
 assert "occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance" in solve_call
 

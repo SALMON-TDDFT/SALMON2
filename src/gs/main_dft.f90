@@ -1873,7 +1873,7 @@ contains
       final_operator_fingerprint,frame_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
       ow_hybrid_ground_state,final_state_workspace,final_state_fingerprint,final_residual,&
       final_orthogonality,final_projector_defect,final_solver_workspace,final_solver_fingerprint,&
-      ok,message,electronic_temperature=bounded_schwarz_state%temperature,&
+      ok,message,electronic_temperature=max(0d0,temperature),&
       occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
