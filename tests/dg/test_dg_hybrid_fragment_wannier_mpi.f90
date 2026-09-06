@@ -9,6 +9,8 @@ module dg_hybrid_fragment_wannier_test_stubs
   real(8)::custom_test_centers_fractional(history_limit)=0d0
   character(1024)::setup_seed_history(history_limit)='',run_seed_history(history_limit)=''
   integer::run_band_count_history(history_limit)=0
+  real(8)::run_a_identity_defect(history_limit)=0d0
+  real(8)::run_a_unitarity_defect(history_limit)=huge(0d0)
   logical::run_zero_auxiliary_energies(history_limit)=.false.
   logical::setup_saw_dmn(history_limit)=.false.
   logical::setup_saw_site_true(history_limit)=.false.
@@ -22,6 +24,7 @@ contains
     use_custom_test_centers=.false.;custom_test_centers_fractional=0d0
     setup_seed_history='';run_seed_history='';setup_saw_dmn=.false.
     run_band_count_history=0;run_zero_auxiliary_energies=.false.
+    run_a_identity_defect=0d0;run_a_unitarity_defect=huge(0d0)
     setup_saw_site_true=.false.;setup_saw_site_false=.false.
     setup_saw_symmetrize=.false.;setup_saw_foreign_fragment=.false.
   end subroutine reset_w90_stub_state
@@ -86,10 +89,10 @@ program test_dg_hybrid_fragment_wannier_mpi
   complex(real64)::saved_seed_value,saved_buffer_value,saved_projector_value
   character(2)::atom_symbols(1)
   character(512)::message
-  logical::ok,cache_unchanged
+  logical::ok,cache_unchanged,random_gauge_nonidentity,random_gauge_unitary
   type(s_dg_hybrid_fragment_wannier_cache)::cache,first_snapshot,new_cache,failed_cache,&
     rank_deficient_cache,metric_null_cache,mixed_cache,mixed_snapshot,split_cache,&
-    corrupted_cache
+    corrupted_cache,one_state_cache,low_limit_cache
   complex(real64),allocatable::integration_h(:,:),integration_s(:,:)
   integer(int64),allocatable::integration_rows(:)
   type(s_dg_hybrid_fragment_preconditioner)::integration_preconditioner
@@ -398,6 +401,46 @@ program test_dg_hybrid_fragment_wannier_mpi
     call require_total(cache_is_unpublished(split_cache),&
       'duplicate fragment communicator roots published a partial cache')
   endif
+
+  new_cache%valid=.false.;run_before=run_calls
+  call invoke_builder_layout(comm_total,comm_fragment,first_generation+20,grid_ids,&
+    grid_weights,fractional_coordinates,dc_seed_values,buffer_candidates,&
+    projector_candidates,new_cache,ok,message,initial_projection='random')
+  call require_total(ok,'random-gauge fragment build failed: '//trim(message))
+  call require_total(fragment_rank/=0.or.run_calls==run_before+1,&
+    'random-gauge fragment build did not enter Wannier90 exactly once')
+  random_gauge_nonidentity=.true.;random_gauge_unitary=.true.
+  if(fragment_rank==0)then
+    random_gauge_nonidentity=run_a_identity_defect(run_calls)>1d-3
+    random_gauge_unitary=run_a_unitarity_defect(run_calls)<1d-12
+  endif
+  call require_total(random_gauge_nonidentity,&
+    'random fragment projection left the explicit Wannier90 A gauge unchanged')
+  call require_total(random_gauge_unitary,&
+    'random fragment projection did not supply a unitary Wannier90 A gauge')
+
+  one_state_cache%valid=.false.;run_before=run_calls
+  call invoke_one_state_random(first_generation+21,one_state_cache,ok,message)
+  call require_total(ok,'one-state random-gauge fragment build failed: '//trim(message))
+  random_gauge_nonidentity=.true.;random_gauge_unitary=.true.
+  if(fragment_rank==0)then
+    random_gauge_nonidentity=run_a_identity_defect(run_calls)>1d-3
+    random_gauge_unitary=run_a_unitarity_defect(run_calls)<1d-12
+  endif
+  call require_total(random_gauge_nonidentity.and.random_gauge_unitary,&
+    'one-state random fragment gauge was trivial or non-unitary')
+
+  low_limit_cache%valid=.false.;setup_before=setup_calls;run_before=run_calls
+  call invoke_builder_layout(comm_total,comm_fragment,first_generation+22,grid_ids,&
+    grid_weights,fractional_coordinates,dc_seed_values,buffer_candidates,&
+    projector_candidates,low_limit_cache,ok,message,initial_projection='random',&
+    coordinator_limit=1_int64)
+  call require_total(.not.ok,'random-gauge allocation ignored the coordinator byte limit')
+  call require_same_message(message,'random-gauge byte-limit failure was not collective')
+  call require_total(index(message,'byte limit')>0,&
+    'random-gauge byte-limit failure did not identify its cause')
+  call require_total(setup_calls==setup_before+merge(1,0,fragment_rank==0).and.run_calls==run_before,&
+    'random-gauge byte-limit failure entered Wannier90')
 
   call test_dc_construction_entry
   if(total_rank==0)write(*,'(a,i0,a)')'PASS hybrid fragment Wannier on ',total_size,' ranks'
@@ -1167,7 +1210,7 @@ contains
 
   subroutine invoke_builder_layout(total_communicator,fragment_communicator,generation,&
       layout_grid_ids,layout_grid_weights,layout_fractional,seed_values,buffer_values,&
-      projector_values,target_cache,build_ok,build_message)
+      projector_values,target_cache,build_ok,build_message,initial_projection,coordinator_limit)
     integer,intent(in)::total_communicator,fragment_communicator,generation
     integer(int64),intent(in)::layout_grid_ids(:)
     real(real64),intent(in)::layout_grid_weights(:),layout_fractional(:,:)
@@ -1175,6 +1218,11 @@ contains
     type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::target_cache
     logical,intent(out)::build_ok
     character(*),intent(out)::build_message
+    character(*),optional,intent(in)::initial_projection
+    integer(int64),optional,intent(in)::coordinator_limit
+    integer(int64)::effective_coordinator_limit
+    effective_coordinator_limit=10000000_int64
+    if(present(coordinator_limit))effective_coordinator_limit=coordinator_limit
     call build_dg_hybrid_fragment_wannier(comm_total=total_communicator,&
       comm_fragment=fragment_communicator,fragment_id=fragment_id,&
       basis_generation=generation,seed_directory=artifact_root,&
@@ -1186,9 +1234,27 @@ contains
       fragment_reciprocal_lattice=reciprocal_lattice,atom_symbols=atom_symbols,&
       atoms_cart=atoms_cart,fractional_coordinates=layout_fractional,&
       num_iter=20,localization_tolerance=localization_tolerance,&
-      coordinator_byte_limit=10000000_int64,cache=target_cache,&
-      ok=build_ok,message=build_message)
+      coordinator_byte_limit=effective_coordinator_limit,cache=target_cache,&
+      ok=build_ok,message=build_message,initial_projection=initial_projection)
   end subroutine invoke_builder_layout
+
+  subroutine invoke_one_state_random(generation,target_cache,build_ok,build_message)
+    integer,intent(in)::generation
+    type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::target_cache
+    logical,intent(out)::build_ok
+    character(*),intent(out)::build_message
+    call build_dg_hybrid_fragment_wannier(comm_total=comm_total,comm_fragment=comm_fragment,&
+      fragment_id=fragment_id,basis_generation=generation,seed_directory=artifact_root,&
+      grid_ids=grid_ids,grid_weights=grid_weights,dc_seed_values=dc_seed_values(1:1,:),&
+      dc_seed_energies=physical_energies(1:1),dc_seed_occupations=physical_occupations(1:1),&
+      buffer_candidate_values=buffer_candidates(1:0,:),&
+      projector_candidate_values=projector_candidates(1:0,:),metric_tolerance=metric_tolerance,&
+      fragment_real_lattice=real_lattice,fragment_reciprocal_lattice=reciprocal_lattice,&
+      atom_symbols=atom_symbols,atoms_cart=atoms_cart,fractional_coordinates=fractional_coordinates,&
+      num_iter=20,localization_tolerance=localization_tolerance,&
+      coordinator_byte_limit=10000000_int64,cache=target_cache,ok=build_ok,&
+      message=build_message,initial_projection='random')
+  end subroutine invoke_one_state_random
 
   subroutine require_corrupted_cache_rejected(target_cache,description)
     type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::target_cache
@@ -1700,6 +1766,7 @@ subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
   real(8),intent(out)::wann_centres_loc(3,num_wann_loc),wann_spreads_loc(num_wann_loc),spread_loc(3)
   integer::i,k,unit,io
   real(8)::sine
+  complex(8)::gram(num_wann_loc,num_wann_loc),identity(num_wann_loc,num_wann_loc)
   run_calls=run_calls+1
   if(run_calls<=history_limit)then
     run_seed_history(run_calls)=seed_name
@@ -1707,6 +1774,11 @@ subroutine wannier_run(seed_name,mp_grid_loc,num_kpts_loc,real_lattice_loc,&
     run_zero_auxiliary_energies(run_calls)=num_kpts_loc==1.and.&
       num_bands_loc==num_wann_loc.and.&
       all(ieee_is_finite(eigenvalues_loc)).and.all(eigenvalues_loc==0d0)
+    identity=(0d0,0d0)
+    do i=1,num_wann_loc;identity(i,i)=(1d0,0d0);enddo
+    gram=matmul(conjg(transpose(a_matrix_loc(:,:,1))),a_matrix_loc(:,:,1))
+    run_a_identity_defect(run_calls)=maxval(abs(a_matrix_loc(:,:,1)-identity))
+    run_a_unitarity_defect(run_calls)=maxval(abs(gram-identity))
   endif
   u_matrix_loc=(0d0,0d0);u_matrix_opt_loc=(0d0,0d0)
   do k=1,num_kpts_loc;do i=1,num_wann_loc

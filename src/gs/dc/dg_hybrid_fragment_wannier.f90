@@ -1107,12 +1107,13 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     complex(real64),allocatable::raw(:,:),compression(:,:),retained_values(:,:),&
-      m_matrix(:,:,:),a_matrix(:,:),transform(:,:),seed_coefficients(:,:)
+      m_matrix(:,:,:),a_matrix(:,:),initial_a_matrix(:,:),transform(:,:),seed_coefficients(:,:)
     real(real64),allocatable::eigenvalues(:),centers(:,:),spreads(:)
     integer,allocatable::nncell(:,:)
     real(real64)::spread(3),seed_defect,density_defect,orthogonality_defect,&
       seed_certificate_tolerance
-    integer(int64)::coordinator_bytes,workspace_peak_bytes,transform_fingerprint,&
+    integer(int64)::coordinator_bytes,workspace_peak_bytes,random_gauge_bytes,&
+      assembly_byte_limit,transform_fingerprint,&
       minimum_fingerprint,maximum_fingerprint,payload_fingerprint,wannier_fingerprint
     integer::nseed,nbuffer,nprojector,ncandidate,nlocal,retained_rank,nntot
     integer::ierr,rank,fragment_size,allocation_status
@@ -1152,9 +1153,26 @@ contains
     if(.not.step_ok)then
       call fragment_error(fragment_id,'Wannier90 setup failed',adapter_message,message);return
     endif
-    call assemble_dg_w90_gamma_matrices(comm,retained_values,retained_values,grid_weights,&
-      fractional,nncell,coordinator_byte_limit,m_matrix,a_matrix,coordinator_bytes,&
-      workspace_peak_bytes,step_ok,adapter_message)
+    if(trim(initial_projection)=='random')then
+      call build_deterministic_random_initial_gauge(comm,retained_rank,basis_fingerprint,&
+        coordinator_byte_limit,initial_a_matrix,random_gauge_bytes,assembly_byte_limit,&
+        step_ok,adapter_message)
+      if(.not.step_ok)then
+        call fragment_error(fragment_id,'Wannier90 random gauge failed',adapter_message,message);return
+      endif
+      call assemble_dg_w90_gamma_matrices(comm,retained_values,retained_values,grid_weights,&
+        fractional,nncell,assembly_byte_limit,m_matrix,a_matrix,coordinator_bytes,&
+        workspace_peak_bytes,step_ok,adapter_message,precomputed_a_matrix=initial_a_matrix)
+      deallocate(initial_a_matrix)
+      if(step_ok)then
+        coordinator_bytes=coordinator_bytes+random_gauge_bytes
+        workspace_peak_bytes=workspace_peak_bytes+random_gauge_bytes
+      endif
+    else
+      call assemble_dg_w90_gamma_matrices(comm,retained_values,retained_values,grid_weights,&
+        fractional,nncell,coordinator_byte_limit,m_matrix,a_matrix,coordinator_bytes,&
+        workspace_peak_bytes,step_ok,adapter_message)
+    endif
     if(.not.step_ok)then
       call fragment_error(fragment_id,'Wannier90 matrix assembly failed',adapter_message,message);return
     endif
@@ -1257,6 +1275,138 @@ contains
     working_cache%valid=.true.
     ok=.true.;message=''
   end subroutine construct_fragment_wannier
+
+  subroutine build_deterministic_random_initial_gauge(comm,dimension,seed,coordinator_byte_limit,&
+      a_matrix,gauge_bytes,remaining_byte_limit,ok,message)
+    integer,intent(in)::comm,dimension
+    integer(int64),intent(in)::seed,coordinator_byte_limit
+    complex(real64),allocatable,intent(out)::a_matrix(:,:)
+    integer(int64),intent(out)::gauge_bytes,remaining_byte_limit
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer,parameter::rotations_per_column=32
+    integer::rank,ierr,status,global_status,allocation_status,rotation,left,right,row
+    integer(int64)::state,minimum_seed,maximum_seed,minimum_limit,maximum_limit,&
+      positive_bits,fraction_bits,dimension_64,complex_bytes
+    real(real64)::angle,cosine,sine,unitarity_defect
+    complex(real64)::saved,overlap
+    logical::allocation_ok
+    character(message_length)::allocation_message
+
+    ok=.false.;message='';status=0;rank=0;minimum_seed=seed;maximum_seed=seed
+    minimum_limit=coordinator_byte_limit;maximum_limit=coordinator_byte_limit
+    gauge_bytes=0_int64;remaining_byte_limit=0_int64
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)status=1
+    if(dimension<1.or.dimension>huge(0)/rotations_per_column.or.seed==0_int64.or.&
+        coordinator_byte_limit<=0_int64)status=1
+    call MPI_Allreduce(seed,minimum_seed,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)status=1
+    call MPI_Allreduce(seed,maximum_seed,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)status=1
+    call MPI_Allreduce(coordinator_byte_limit,minimum_limit,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)status=1
+    call MPI_Allreduce(coordinator_byte_limit,maximum_limit,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)status=1
+    if(minimum_seed/=maximum_seed.or.minimum_limit/=maximum_limit)status=1
+    if(status==0)then
+      dimension_64=int(dimension,int64)
+      complex_bytes=int(storage_size((0d0,0d0))/8,int64)
+      if(dimension_64>huge(0_int64)/dimension_64)then
+        status=2
+      else if(dimension_64*dimension_64>huge(0_int64)/complex_bytes)then
+        status=2
+      else
+        gauge_bytes=dimension_64*dimension_64*complex_bytes
+        if(gauge_bytes>=coordinator_byte_limit)then
+          status=3
+        else
+          remaining_byte_limit=coordinator_byte_limit-gauge_bytes
+        endif
+      endif
+    endif
+    call MPI_Allreduce(status,global_status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      allocate(a_matrix(0,0));message='deterministic random gauge status reduction failed';return
+    endif
+    status=global_status
+    if(status/=0)then
+      allocate(a_matrix(0,0))
+      if(status==1)message='invalid deterministic random gauge contract'
+      if(status==2)message='deterministic random gauge byte estimate overflow'
+      if(status==3)message='deterministic random gauge byte limit exceeded'
+      return
+    endif
+    allocation_status=0
+    if(rank==0)then
+      allocate(a_matrix(dimension,dimension),stat=allocation_status)
+    else
+      allocate(a_matrix(0,0),stat=allocation_status)
+    endif
+    call collective_allocation_status(comm,allocation_status,&
+      'deterministic random gauge allocation failed',allocation_ok,allocation_message)
+    if(.not.allocation_ok)then
+      if(.not.allocated(a_matrix))allocate(a_matrix(0,0))
+      message=allocation_message;return
+    endif
+    if(rank==0)then
+      a_matrix=(0d0,0d0)
+      do row=1,dimension;a_matrix(row,row)=(1d0,0d0);enddo
+      state=ieor(seed,int(z'6A09E667F3BCC909',int64))
+      if(state==0_int64)state=int(z'243F6A8885A308D3',int64)
+      if(dimension==1)then
+        call advance_random_bits(state)
+        fraction_bits=iand(state,int(z'001FFFFFFFFFFFFF',int64))
+        angle=2d0*acos(-1d0)*(0.125d0+0.75d0*real(fraction_bits,real64)/real(2_int64**53,real64))
+        a_matrix(1,1)=cmplx(cos(angle),sin(angle),real64)
+      endif
+      do rotation=1,merge(rotations_per_column*dimension,0,dimension>1)
+        call advance_random_bits(state);positive_bits=iand(state,huge(0_int64))
+        left=int(modulo(positive_bits,int(dimension,int64)))+1
+        call advance_random_bits(state);positive_bits=iand(state,huge(0_int64))
+        right=int(modulo(positive_bits,int(dimension,int64)))+1
+        if(right==left)right=modulo(right,dimension)+1
+        call advance_random_bits(state)
+        fraction_bits=iand(state,int(z'001FFFFFFFFFFFFF',int64))
+        angle=2d0*acos(-1d0)*real(fraction_bits,real64)/real(2_int64**53,real64)
+        cosine=cos(angle);sine=sin(angle)
+        do row=1,dimension
+          saved=a_matrix(row,left)
+          a_matrix(row,left)=cosine*saved+sine*a_matrix(row,right)
+          a_matrix(row,right)=-sine*saved+cosine*a_matrix(row,right)
+        enddo
+      enddo
+      unitarity_defect=0d0
+      do right=1,dimension;do left=1,dimension
+        overlap=(0d0,0d0)
+        do row=1,dimension
+          overlap=overlap+conjg(a_matrix(row,left))*a_matrix(row,right)
+        enddo
+        if(left==right)overlap=overlap-1d0
+        unitarity_defect=max(unitarity_defect,abs(overlap))
+      enddo;enddo
+      if(.not.ieee_is_finite(unitarity_defect).or.&
+          unitarity_defect>512d0*epsilon(1d0)*real(dimension,real64))status=2
+    endif
+    call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
+    ok=status==0.and.ierr==MPI_SUCCESS
+    if(.not.ok)message='deterministic random gauge is not unitary'
+#else
+    ok=.false.;message='deterministic random gauge requires MPI';gauge_bytes=0_int64
+    remaining_byte_limit=0_int64;allocate(a_matrix(0,0))
+#endif
+  end subroutine build_deterministic_random_initial_gauge
+
+#ifdef USE_MPI
+  subroutine advance_random_bits(state)
+    integer(int64),intent(inout)::state
+    state=ieor(state,ishft(state,13))
+    state=ieor(state,ishft(state,-7))
+    state=ieor(state,ishft(state,17))
+    if(state==0_int64)state=int(z'BB67AE8584CAA73B',int64)
+  end subroutine advance_random_bits
+#endif
 
   subroutine metric_compress_candidates(comm,raw,weights,tolerance,compression,retained,&
       retained_rank,orthogonality_defect,ok,message)

@@ -135,7 +135,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
             f"PASS hybrid fragment Wannier on {rank_count} ranks" in run.stdout
         ), run.stdout
         artifact_root = run_directory / "fragment-wannier-artifacts"
-        expected_generations = (7, 8, 9, 11, 12, 13)
+        expected_generations = (7, 8, 9, 11, 12, 13, 27, 28, 29)
         expected_directories = {
             artifact_root / f"fragment-{fragment_id:06d}" / f"generation-{generation:08d}"
             for fragment_id in (1, 2)
