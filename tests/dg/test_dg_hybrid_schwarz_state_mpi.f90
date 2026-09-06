@@ -58,6 +58,14 @@ program test_dg_hybrid_schwarz_state_mpi
   call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
   call require(.not.ok,'rank-local common integer perturbation was accepted')
   if(rank==0)state%thermal_tail_count=original_thermal_tail_count
+  state%fragment_count=nproc+1
+  call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
+  call require(.not.ok,'collectively wrong fragment count was accepted')
+  state%fragment_count=nproc
+  state%fragment_id=modulo(rank+1,nproc)+1
+  call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
+  call require(.not.ok,'fragment ID/rank mismatch was accepted')
+  state%fragment_id=rank+1
   call require(size(state%column_ids)==4.and.all(state%column_ids/=0_int64),&
     'common column IDs are missing')
   allocate(minimum_ids(4),maximum_ids(4))

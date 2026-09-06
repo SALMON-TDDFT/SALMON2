@@ -188,11 +188,16 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     integer(int64)::local_receipt,minimum_receipt,maximum_receipt
-    integer::ierr,j
+    integer::ierr,j,rank,nproc
     logical::valid
 
-    receipt=0_int64;ok=.false.;message=''
-    valid=state%valid.and.state%fragment_count>0.and.state%coefficient_epoch>=0.and.&
+    receipt=0_int64;ok=.false.;message='';rank=-1;nproc=-1
+    call MPI_Comm_rank(comm,rank,ierr)
+    valid=ierr==MPI_SUCCESS
+    call MPI_Comm_size(comm,nproc,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS
+    valid=valid.and.state%valid.and.state%fragment_count==nproc.and.state%fragment_id==rank+1.and.&
+      state%coefficient_epoch>=0.and.&
       state%trial_count>0.and.state%candidate_count>=state%trial_count.and.&
       state%thermal_tail_count>=0.and.state%thermal_tail_count<=state%trial_count.and.&
       state%fingerprint/=0_int64.and.allocated(state%energies).and.allocated(state%occupations)

@@ -2041,10 +2041,12 @@ contains
       local_s_diagonal(:),global_s_diagonal(:)
     real(8)::local_interface_norm_squared,global_interface_norm_squared,&
       rayleigh_energy_trace,scaled_interface_action_norm,residual_record,&
-      orthogonality_record,electron_defect_record
+      orthogonality_record,electron_defect_record,diagnostic_state_lambda_record
     integer(int64)::continuation_fingerprint_min,continuation_fingerprint_max
     integer(int64)::dynamic_receipt
-    integer::nstate,j,status_local,ierr_local,rank_local,peer_exchanges,minimum_steps,maximum_steps
+    integer::nstate,j,status_local,ierr_local,rank_local,peer_exchanges,minimum_steps,maximum_steps,&
+      minimum_accept_request,maximum_accept_request
+    real(8)::minimum_state_lambda,maximum_state_lambda
     logical::local_ok,collective_diagnostic_ok,measurement_available,accept_ok,record_ok,dynamic_ok
     character(16)::measurement_status,record_status
     character(512)::diagnostic_message
@@ -2123,6 +2125,42 @@ contains
         dynamic_receipt,dynamic_ok,diagnostic_message)
       measurement_available=dynamic_ok
     endif
+    ! Certify every field used by the rank-zero record before allowing the
+    ! continuation controller to advance.  A metadata failure is therefore a
+    ! measured rollback, not an acceptance whose controller state must be undone.
+    record_ok=ieee_is_finite(diagnostic_state_lambda).and.diagnostic_state_lambda>=0d0.and.&
+      diagnostic_state_lambda<=1d0
+    call MPI_Allreduce(bounded_last_accepted_cg_steps,minimum_steps,1,MPI_INTEGER,MPI_MIN,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
+    call MPI_Allreduce(bounded_last_accepted_cg_steps,maximum_steps,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.minimum_steps==maximum_steps.and.&
+      minimum_steps>=0.and.maximum_steps<=dg_hybrid_fragment_cg_steps
+    call MPI_Allreduce(continuation_fingerprint,continuation_fingerprint_min,1,MPI_INTEGER8,MPI_MIN,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
+    call MPI_Allreduce(continuation_fingerprint,continuation_fingerprint_max,1,MPI_INTEGER8,MPI_MAX,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.&
+      continuation_fingerprint_min==continuation_fingerprint_max.and.continuation_fingerprint_min/=0_int64.and.&
+      continuation_fingerprint==continuation_state%fingerprint
+    call MPI_Allreduce(merge(1,0,local_accept),minimum_accept_request,1,MPI_INTEGER,MPI_MIN,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
+    call MPI_Allreduce(merge(1,0,local_accept),maximum_accept_request,1,MPI_INTEGER,MPI_MAX,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.minimum_accept_request==maximum_accept_request
+    call MPI_Allreduce(diagnostic_state_lambda,minimum_state_lambda,1,MPI_DOUBLE_PRECISION,MPI_MIN,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
+    call MPI_Allreduce(diagnostic_state_lambda,maximum_state_lambda,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
+      dc%icomm_tot,ierr_local)
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.ieee_is_finite(minimum_state_lambda).and.&
+      ieee_is_finite(maximum_state_lambda).and.minimum_state_lambda==maximum_state_lambda.and.&
+      minimum_state_lambda>=0d0.and.maximum_state_lambda<=1d0
+    call comm_logical_and(record_ok,collective_diagnostic_ok,dc%icomm_tot)
+    measurement_available=measurement_available.and.collective_diagnostic_ok
     if(measurement_available)then
       measurement_status='valid'
     else
@@ -2140,31 +2178,16 @@ contains
     endif
     diagnostic_ok=local_accept.and.measurement_available.and.accept_ok
     record_status=merge('accepted','rollback',diagnostic_ok)
-    record_ok=.true.
-    call MPI_Allreduce(bounded_last_accepted_cg_steps,minimum_steps,1,MPI_INTEGER,MPI_MIN,&
-      dc%icomm_tot,ierr_local)
-    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
-    call MPI_Allreduce(bounded_last_accepted_cg_steps,maximum_steps,1,MPI_INTEGER,MPI_MAX,&
-      dc%icomm_tot,ierr_local)
-    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.minimum_steps==maximum_steps
-    call MPI_Allreduce(continuation_fingerprint,continuation_fingerprint_min,1,MPI_INTEGER8,MPI_MIN,&
-      dc%icomm_tot,ierr_local)
-    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
-    call MPI_Allreduce(continuation_fingerprint,continuation_fingerprint_max,1,MPI_INTEGER8,MPI_MAX,&
-      dc%icomm_tot,ierr_local)
-    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.&
-      continuation_fingerprint_min==continuation_fingerprint_max.and.continuation_fingerprint_min/=0_int64
     ! diagnostic_state_lambda identifies the coefficient/occupation snapshot
     ! probed by the attempted operator lambda; on rollback it is not promoted.
     ! Preserve a parseable finite record even when a rejected solver scalar is NaN/Inf.
     residual_record=finite_diagnostic_value(divided_fragment_residual)
     orthogonality_record=finite_diagnostic_value(divided_fragment_orthogonality)
     electron_defect_record=finite_diagnostic_value(bounded_schwarz_state%electron_defect)
-    call comm_logical_and(record_ok,collective_diagnostic_ok,dc%icomm_tot)
-    if(.not.collective_diagnostic_ok)then;diagnostic_ok=.false.;return;endif
+    diagnostic_state_lambda_record=finite_diagnostic_value(diagnostic_state_lambda)
     if(rank_local==0)write(*,'(a,2(a,es24.16),a,i0,5(a,es24.16),5a,i0)')&
       '[DG-HYBRID-CONTINUATION] lambda=',bounded_interface_scale,&
-      ' diagnostic_state_lambda=',diagnostic_state_lambda,&
+      ' diagnostic_state_lambda=',diagnostic_state_lambda_record,&
       ' accepted_cg_steps=',minimum_steps,' residual=',residual_record,&
       ' orthogonality_defect=',orthogonality_record,&
       ' electron_defect=',electron_defect_record,&

@@ -197,6 +197,22 @@ assert "callvalidate_dg_hybrid_schwarz_dynamic_receipt" in diagnostic_compact
 assert diagnostic_compact.index("callvalidate_dg_hybrid_schwarz_dynamic_receipt") < diagnostic_compact.index(
     "callaccept_dg_hybrid_interface_point"
 ), "common dynamic Schwarz state must be certified before continuation acceptance"
+for certification in (
+    "callmpi_allreduce(bounded_last_accepted_cg_steps",
+    "callmpi_allreduce(continuation_fingerprint",
+    "callmpi_allreduce(merge(1,0,local_accept),minimum_accept_request",
+    "callmpi_allreduce(merge(1,0,local_accept),maximum_accept_request",
+    "callmpi_allreduce(diagnostic_state_lambda,minimum_state_lambda",
+    "callmpi_allreduce(diagnostic_state_lambda,maximum_state_lambda",
+    "continuation_fingerprint==continuation_state%fingerprint",
+    "minimum_steps>=0",
+    "maximum_steps<=dg_hybrid_fragment_cg_steps",
+    "callcomm_logical_and(record_ok",
+):
+    assert certification in diagnostic_compact, f"missing pre-accept record certification: {certification}"
+    assert diagnostic_compact.index(certification) < diagnostic_compact.index(
+        "callaccept_dg_hybrid_interface_point"
+    ), f"record certification occurs after continuation mutation: {certification}"
 assert "local_accept.and.measurement_available" in diagnostic_compact, (
     "unavailable diagnostics must never reach a true continuation acceptance"
 )
