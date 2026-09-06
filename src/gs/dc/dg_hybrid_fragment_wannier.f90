@@ -235,7 +235,7 @@ contains
   subroutine build_dg_hybrid_fragment_wannier_from_dc_seed(comm_total,comm_fragment,orbital_comm,&
       fragment_id,basis_generation,seed_directory,grid_shape,owned_lower,owned_upper,rwf,esp,rocc,hvol,&
       candidate_grid_ids,buffer_values,projector_values,metric_tolerance,real_lattice,reciprocal_lattice,&
-      atom_symbols,atoms_cart,num_iter,localization_tolerance,byte_limit,cache,ok,message)
+      atom_symbols,atoms_cart,num_iter,localization_tolerance,byte_limit,cache,ok,message,initial_projection)
     integer,intent(in)::comm_total,comm_fragment,orbital_comm,fragment_id,basis_generation
     integer,intent(in)::grid_shape(3),owned_lower(3),owned_upper(3),num_iter
     character(*),intent(in)::seed_directory,atom_symbols(:)
@@ -247,6 +247,7 @@ contains
     type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::cache
     logical,intent(out)::ok
     character(*),intent(out)::message
+    character(*),optional,intent(in)::initial_projection
 #ifdef USE_MPI
     integer(int64),allocatable::ids(:)
     real(real64),allocatable::weights(:),energies(:),occupations(:),fractional(:,:)
@@ -271,7 +272,7 @@ contains
     call build_dg_hybrid_fragment_wannier(comm_total,comm_fragment,fragment_id,basis_generation,&
       seed_directory,ids,weights,seeds,energies,occupations,buffer_values,projector_values,&
       metric_tolerance,real_lattice,reciprocal_lattice,atom_symbols,atoms_cart,fractional,&
-      num_iter,localization_tolerance,byte_limit,cache,ok,message)
+      num_iter,localization_tolerance,byte_limit,cache,ok,message,initial_projection)
 #else
     ok=.false.;message='direct DC Wannier construction requires MPI'
 #endif
@@ -538,7 +539,7 @@ contains
       dc_seed_energies,dc_seed_occupations,buffer_candidate_values,&
       projector_candidate_values,metric_tolerance,fragment_real_lattice,&
       fragment_reciprocal_lattice,atom_symbols,atoms_cart,fractional_coordinates,&
-      num_iter,localization_tolerance,coordinator_byte_limit,cache,ok,message)
+      num_iter,localization_tolerance,coordinator_byte_limit,cache,ok,message,initial_projection)
     integer,intent(in)::comm_total,comm_fragment,fragment_id,basis_generation,num_iter
     character(*),intent(in)::seed_directory
     integer(int64),intent(in)::grid_ids(:)
@@ -553,14 +554,16 @@ contains
     type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::cache
     logical,intent(out)::ok
     character(*),intent(out)::message
+    character(*),optional,intent(in)::initial_projection
 #ifdef USE_MPI
     type(s_dg_hybrid_fragment_wannier_cache)::working_cache
     real(real64)::inverse_lattice(3,3)
     integer(int64)::seed_fingerprint,basis_fingerprint,local_layout_fingerprint
-    character(message_length)::local_message,seed_name
+    character(message_length)::local_message,seed_name,projection_mode
     logical::local_ok,build_required
 
-    ok=.false.;message='';local_message='';seed_name=''
+    ok=.false.;message='';local_message='';seed_name='';projection_mode='spectral'
+    if(present(initial_projection))projection_mode=trim(initial_projection)
     call validate_fragment_partition(comm_total,comm_fragment,fragment_id,local_ok,local_message)
     call canonical_total_status(comm_total,local_ok,local_message,ok,message)
     if(.not.ok)return
@@ -570,7 +573,7 @@ contains
       buffer_candidate_values,projector_candidate_values,metric_tolerance,&
       fragment_real_lattice,fragment_reciprocal_lattice,atom_symbols,atoms_cart,&
       fractional_coordinates,num_iter,localization_tolerance,coordinator_byte_limit,&
-      inverse_lattice,seed_fingerprint,basis_fingerprint,local_layout_fingerprint,&
+      projection_mode,inverse_lattice,seed_fingerprint,basis_fingerprint,local_layout_fingerprint,&
       local_ok,local_message)
     call canonical_total_status(comm_total,local_ok,local_message,ok,message)
     if(.not.ok)return
@@ -596,7 +599,7 @@ contains
         buffer_candidate_values,projector_candidate_values,metric_tolerance,&
         fragment_real_lattice,fragment_reciprocal_lattice,inverse_lattice,atom_symbols,&
         atoms_cart,fractional_coordinates,num_iter,localization_tolerance,&
-        coordinator_byte_limit,seed_fingerprint,basis_fingerprint,local_layout_fingerprint,&
+        coordinator_byte_limit,projection_mode,seed_fingerprint,basis_fingerprint,local_layout_fingerprint,&
         working_cache,local_ok,local_message)
     endif
     call canonical_total_status(comm_total,local_ok,local_message,ok,message)
@@ -672,10 +675,11 @@ contains
       grid_ids,grid_weights,dc_seed_values,dc_seed_energies,dc_seed_occupations,&
       buffer_values,projector_values,metric_tolerance,real_lattice,reciprocal_lattice,&
       atom_symbols,atoms_cart,fractional,num_iter,localization_tolerance,&
-      coordinator_byte_limit,inverse_lattice,seed_fingerprint,basis_fingerprint,&
+      coordinator_byte_limit,initial_projection,inverse_lattice,seed_fingerprint,basis_fingerprint,&
       local_layout_fingerprint,ok,message)
     integer,intent(in)::comm,fragment_id,basis_generation,num_iter
     character(*),intent(in)::seed_directory
+    character(*),intent(in)::initial_projection
     integer(int64),intent(in)::grid_ids(:)
     real(real64),intent(in)::grid_weights(:),dc_seed_energies(:),dc_seed_occupations(:)
     complex(real64),intent(in)::dc_seed_values(:,:),buffer_values(:,:),projector_values(:,:)
@@ -703,6 +707,7 @@ contains
     bad=0
     if(fragment_id<1.or.fragment_id>999999.or.basis_generation<0.or.&
         basis_generation>99999999.or.num_iter<=0.or.coordinator_byte_limit<=0_int64)bad=10
+    if(trim(initial_projection)/='spectral'.and.trim(initial_projection)/='random')bad=max(bad,10)
     if(len_trim(seed_directory)<1.or.len_trim(seed_directory)>800.or.&
         index(seed_directory,achar(0))>0)bad=max(bad,11)
     if(nseed<1.or.nlocal<0.or.size(grid_weights)/=nlocal.or.&
@@ -750,6 +755,7 @@ contains
     call hash_integer(replica_hash,nseed);call hash_integer(replica_hash,nbuffer)
     call hash_integer(replica_hash,nprojector);call hash_integer(replica_hash,natom)
     call hash_integer(replica_hash,num_iter);call hash_int64(replica_hash,coordinator_byte_limit)
+    call hash_character(replica_hash,trim(initial_projection))
     call hash_real(replica_hash,metric_tolerance);call hash_real(replica_hash,localization_tolerance)
     call hash_character(replica_hash,trimmed_directory(seed_directory))
     call hash_real_array(replica_hash,real_lattice);call hash_real_array(replica_hash,reciprocal_lattice)
@@ -783,6 +789,7 @@ contains
     call hash_integer(basis_fingerprint,total_rows);call hash_integer(basis_fingerprint,nseed)
     call hash_integer(basis_fingerprint,nbuffer);call hash_integer(basis_fingerprint,nprojector)
     call hash_integer(basis_fingerprint,natom);call hash_integer(basis_fingerprint,num_iter)
+    call hash_character(basis_fingerprint,trim(initial_projection))
     call hash_int64(basis_fingerprint,coordinator_byte_limit);call hash_int64(basis_fingerprint,row_basis)
     call hash_real(basis_fingerprint,metric_tolerance);call hash_real(basis_fingerprint,localization_tolerance)
     call hash_real_array(basis_fingerprint,real_lattice)
@@ -1084,10 +1091,11 @@ contains
       grid_ids,grid_weights,dc_seed_values,dc_seed_energies,dc_seed_occupations,&
       buffer_values,projector_values,metric_tolerance,real_lattice,reciprocal_lattice,&
       inverse_lattice,atom_symbols,atoms_cart,fractional,num_iter,localization_tolerance,&
-      coordinator_byte_limit,seed_fingerprint,basis_fingerprint,local_layout_fingerprint,&
+      coordinator_byte_limit,initial_projection,seed_fingerprint,basis_fingerprint,local_layout_fingerprint,&
       working_cache,ok,message)
     integer,intent(in)::comm,fragment_id,basis_generation,num_iter
     character(*),intent(in)::seed_name
+    character(*),intent(in)::initial_projection
     integer(int64),intent(in)::grid_ids(:),coordinator_byte_limit,seed_fingerprint,&
       basis_fingerprint,local_layout_fingerprint
     real(real64),intent(in)::grid_weights(:),dc_seed_energies(:),dc_seed_occupations(:),&
@@ -1139,7 +1147,7 @@ contains
     if(.not.step_ok)then;message='fragment DC seed span failure: '//trim(adapter_message);return;endif
 
     call setup_dg_w90_gamma_library(comm,trim(seed_name),real_lattice,reciprocal_lattice,&
-      atom_symbols,atoms_cart,retained_rank,retained_rank,num_iter,'spectral',&
+      atom_symbols,atoms_cart,retained_rank,retained_rank,num_iter,trim(initial_projection),&
       DG_W90_UNCONSTRAINED,nntot,nncell,step_ok,adapter_message)
     if(.not.step_ok)then
       call fragment_error(fragment_id,'Wannier90 setup failed',adapter_message,message);return

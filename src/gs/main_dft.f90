@@ -1365,7 +1365,7 @@ contains
       spsi%rwf,energy%esp,system%rocc,system%hvol,candidate_grid_ids,buffer_candidates,&
       projector_candidates,dg_dc_metric_rank_tolerance,fragment_lattice,fragment_reciprocal_lattice,&
       atom_symbols,atom_positions,wannier_num_iter,dg_ow_localization_gradient_tolerance,&
-      byte_limit,fragment_cache,ok,message)
+      byte_limit,fragment_cache,ok,message,initial_projection=dg_ow_w90_initial_projection)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'fragment-local DC-to-Wannier construction failed'
