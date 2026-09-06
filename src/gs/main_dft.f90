@@ -48,7 +48,7 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
   dg_ow_w90_initial_projection,wannier_pw_cutoff,wannier_pw_max,nscf,method_mixing,&
   dg_dc_seed_mode,dg_dc_seed_directory,dg_hybrid_symmetry_energy_window,temperature,&
-  dg_hybrid_fragment_cg_steps,dg_hybrid_divided_mixing
+  dg_hybrid_fragment_cg_steps
 use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
   DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
   read_dg_dc_seed,write_dg_dc_seed,restore_dg_dc_seed_payload,resolve_dg_dc_seed_mode

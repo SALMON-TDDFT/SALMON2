@@ -7,6 +7,14 @@ ROOT = Path(__file__).resolve().parents[2]
 source = (ROOT / "src/gs/main_dft.f90").read_text().lower()
 source = re.sub(r"!.*", "", source).replace("&", "")
 
+salmon_global_import = re.search(
+    r"\buse\s+salmon_global\s*,\s*only\s*:(.*?)\nuse\s+", source, re.S
+)
+assert salmon_global_import, "missing main salmon_global ONLY import"
+assert "dg_hybrid_divided_mixing" not in salmon_global_import.group(1), (
+    "fixed-density production must not import the obsolete density-mixing control"
+)
+
 entry_name = "run_dg_hybrid_divided_ground_state_for_main"
 match = re.search(
     rf"\bsubroutine\s+{entry_name}\b(.*?)\bend subroutine\s+{entry_name}",
