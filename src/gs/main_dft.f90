@@ -2178,7 +2178,7 @@ contains
     orthogonality_record=finite_diagnostic_value(divided_fragment_orthogonality)
     electron_defect_record=finite_diagnostic_value(bounded_schwarz_state%electron_defect)
     diagnostic_state_lambda_record=finite_diagnostic_value(diagnostic_state_lambda)
-    if(rank_local==0)write(*,'(a,2(a,es24.16),a,i0,5(a,es24.16),5a,i0)')&
+    if(rank_local==0)write(*,'(2(a,es24.16),a,i0,5(a,es24.16),5a,i0)')&
       '[DG-HYBRID-CONTINUATION] lambda=',bounded_interface_scale,&
       ' diagnostic_state_lambda=',diagnostic_state_lambda_record,&
       ' accepted_cg_steps=',minimum_steps,' residual=',residual_record,&
