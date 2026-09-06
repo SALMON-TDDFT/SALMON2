@@ -19,7 +19,8 @@ module dg_hybrid_schwarz_state
     real(real64),allocatable::energies(:),occupations(:)
   end type
 
-  public::initialize_dg_hybrid_schwarz_state,extend_dg_hybrid_schwarz_state
+  public::initialize_dg_hybrid_schwarz_state,extend_dg_hybrid_schwarz_state,&
+    validate_dg_hybrid_schwarz_dynamic_receipt
 contains
   subroutine initialize_dg_hybrid_schwarz_state(comm,fragment_id,fragment_count,basis_generation,&
       electron_target,temperature,wspin,guard_count,occupation_tail_tolerance,degeneracy_tolerance,&
@@ -179,6 +180,53 @@ contains
     if(.not.ok)return
     state=work;ok=.true.;message=''
   end subroutine extend_dg_hybrid_schwarz_state
+
+  subroutine validate_dg_hybrid_schwarz_dynamic_receipt(comm,state,receipt,ok,message)
+    integer,intent(in)::comm
+    type(s_dg_hybrid_schwarz_state),intent(in)::state
+    integer(int64),intent(out)::receipt
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer(int64)::local_receipt,minimum_receipt,maximum_receipt
+    integer::ierr,j
+    logical::valid
+
+    receipt=0_int64;ok=.false.;message=''
+    valid=state%valid.and.state%fragment_count>0.and.state%coefficient_epoch>=0.and.&
+      state%trial_count>0.and.state%candidate_count>=state%trial_count.and.&
+      state%thermal_tail_count>=0.and.state%thermal_tail_count<=state%trial_count.and.&
+      state%fingerprint/=0_int64.and.allocated(state%energies).and.allocated(state%occupations)
+    if(valid)valid=size(state%energies)==state%trial_count.and.size(state%occupations)==state%trial_count
+    if(valid)valid=all(ieee_is_finite(state%energies)).and.all(ieee_is_finite(state%occupations)).and.&
+      ieee_is_finite(state%chemical_potential).and.ieee_is_finite(state%electron_count).and.&
+      ieee_is_finite(state%electron_defect).and.ieee_is_finite(state%temperature).and.&
+      ieee_is_finite(state%wspin)
+    call collective_gate(comm,valid,'invalid Schwarz dynamic state receipt',ok,message)
+    if(.not.ok)return
+    local_receipt=mix_hash(int(z'510E527FADE682D1',int64),state%fingerprint)
+    local_receipt=mix_hash(local_receipt,int(state%fragment_count,int64))
+    local_receipt=mix_hash(local_receipt,int(state%coefficient_epoch,int64))
+    local_receipt=mix_hash(local_receipt,int(state%trial_count,int64))
+    local_receipt=mix_hash(local_receipt,int(state%candidate_count,int64))
+    local_receipt=mix_hash(local_receipt,int(state%thermal_tail_count,int64))
+    local_receipt=mix_hash(local_receipt,transfer(state%chemical_potential,0_int64))
+    local_receipt=mix_hash(local_receipt,transfer(state%electron_count,0_int64))
+    local_receipt=mix_hash(local_receipt,transfer(state%electron_defect,0_int64))
+    local_receipt=mix_hash(local_receipt,transfer(state%temperature,0_int64))
+    local_receipt=mix_hash(local_receipt,transfer(state%wspin,0_int64))
+    do j=1,state%trial_count
+      local_receipt=mix_hash(local_receipt,transfer(state%energies(j),0_int64))
+      local_receipt=mix_hash(local_receipt,transfer(state%occupations(j),0_int64))
+    enddo
+    if(local_receipt==0_int64)local_receipt=1_int64
+    call MPI_Allreduce(local_receipt,minimum_receipt,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    valid=ierr==MPI_SUCCESS
+    call MPI_Allreduce(local_receipt,maximum_receipt,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    valid=valid.and.ierr==MPI_SUCCESS.and.minimum_receipt==maximum_receipt.and.minimum_receipt/=0_int64
+    call collective_gate(comm,valid,'rank-disagreeing Schwarz dynamic state receipt',ok,message)
+    if(.not.ok)return
+    receipt=minimum_receipt;message=''
+  end subroutine validate_dg_hybrid_schwarz_dynamic_receipt
 
   subroutine thermal_inventory(energies,target,temperature,wspin,guard,tail_tolerance,degeneracy_tolerance,&
       count,thermal_count,mu,occupations,ok)

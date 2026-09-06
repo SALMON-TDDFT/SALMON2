@@ -168,7 +168,8 @@ use dg_hybrid_divided_mixing,only:s_dg_hybrid_divided_mixing_state,&
   prepare_dg_hybrid_divided_mixing,accept_dg_hybrid_divided_mixing
 use dg_hybrid_interface_continuation,only:s_dg_hybrid_interface_continuation,&
   initialize_dg_hybrid_interface_continuation,accept_dg_hybrid_interface_point
-use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,initialize_dg_hybrid_schwarz_state
+use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,initialize_dg_hybrid_schwarz_state,&
+  validate_dg_hybrid_schwarz_dynamic_receipt
 use dg_hybrid_schwarz_operator,only:s_dg_hybrid_schwarz_schedule,&
   build_dg_hybrid_schwarz_schedule,apply_dg_hybrid_schwarz_hamiltonian,apply_dg_hybrid_schwarz_rows
 use dg_hybrid_schwarz_solver,only:advance_dg_hybrid_schwarz_epoch,&
@@ -1302,7 +1303,7 @@ contains
       final_state_workspace,final_state_fingerprint,final_solver_workspace,&
       final_solver_fingerprint,final_checkpoint_fingerprint,final_provenance(6),&
       attempted_continuation_fingerprint,terminal_fingerprints(2),terminal_fingerprints_min(2),&
-      terminal_fingerprints_max(2)
+      terminal_fingerprints_max(2),terminal_dynamic_receipt
     integer(int64)::support_fingerprints(3)
     integer(int64),allocatable::candidate_grid_ids(:),core_ids(:),gathered_basis_ids(:),projector_grid_ids(:)
     complex(8),allocatable::buffer_candidates(:,:),projector_candidates(:,:),reference_frame(:,:),&
@@ -1799,31 +1800,22 @@ contains
       call comm_logical_and(point_ok,collective_ok,dc%icomm_tot)
       if(.not.collective_ok)then
         bounded_schwarz_state=accepted_schwarz_state
-        call accept_dg_hybrid_interface_point(dc%icomm_tot,projected_basis%generation,&
-          bounded_mapping_fingerprint,.false.,interface_continuation,ok,message)
-        call record_dg_hybrid_interface_continuation_diagnostic('rollback',&
-          accepted_interface_scale,attempted_continuation_fingerprint,diagnostic_ok)
-        if(.not.diagnostic_ok)error stop 'DG interface rollback diagnostic failed collectively'
+        call record_dg_hybrid_interface_continuation_diagnostic(accepted_interface_scale,&
+          attempted_continuation_fingerprint,interface_continuation,.false.,diagnostic_ok)
         if(rank==0)write(error_unit,'(a,es16.8,2a)')&
           '[DG-HYBRID-DIVIDED] rejected point; last accepted lambda=',&
           accepted_interface_scale,' ',trim(message)
         error stop 'DG interface continuation point failed collectively'
       endif
-      call accept_dg_hybrid_interface_point(dc%icomm_tot,projected_basis%generation,&
-        bounded_mapping_fingerprint,.true.,interface_continuation,ok,message)
-      if(.not.ok)then
+      call record_dg_hybrid_interface_continuation_diagnostic(bounded_interface_scale,&
+        attempted_continuation_fingerprint,interface_continuation,.true.,diagnostic_ok)
+      if(.not.diagnostic_ok)then
         bounded_schwarz_state=accepted_schwarz_state
-        call record_dg_hybrid_interface_continuation_diagnostic('rollback',&
-          accepted_interface_scale,attempted_continuation_fingerprint,diagnostic_ok)
-        if(.not.diagnostic_ok)error stop 'DG interface acceptance rollback diagnostic failed collectively'
-        if(rank==0)write(error_unit,'(a,es16.8,2a)')&
-          '[DG-HYBRID-DIVIDED] acceptance failed; last accepted lambda=',&
-          accepted_interface_scale,' ',trim(message)
-        error stop 'DG interface continuation acceptance failed'
+        if(rank==0)write(error_unit,'(a,es16.8)')&
+          '[DG-HYBRID-DIVIDED] diagnostic/acceptance rollback; last accepted lambda=',&
+          accepted_interface_scale
+        error stop 'DG interface continuation diagnostic certification failed'
       endif
-      call record_dg_hybrid_interface_continuation_diagnostic('accepted',&
-        bounded_interface_scale,attempted_continuation_fingerprint,diagnostic_ok)
-      if(.not.diagnostic_ok)error stop 'DG interface accepted-point diagnostic failed collectively'
       accepted_schwarz_state=bounded_schwarz_state
       accepted_interface_scale=bounded_interface_scale
     enddo
@@ -1850,10 +1842,12 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'terminal divided Hybrid potential projection failed'
     endif
+    call validate_dg_hybrid_schwarz_dynamic_receipt(dc%icomm_tot,bounded_schwarz_state,&
+      terminal_dynamic_receipt,terminal_state_ok,message)
     terminal_fingerprints=[interface_continuation%fingerprint,bounded_schwarz_state%fingerprint]
     call MPI_Allreduce(terminal_fingerprints,terminal_fingerprints_min,2,MPI_INTEGER8,MPI_MIN,&
       dc%icomm_tot,ierr)
-    terminal_state_ok=ierr==MPI_SUCCESS
+    terminal_state_ok=terminal_state_ok.and.ierr==MPI_SUCCESS
     call MPI_Allreduce(terminal_fingerprints,terminal_fingerprints_max,2,MPI_INTEGER8,MPI_MAX,&
       dc%icomm_tot,ierr)
     terminal_state_ok=terminal_state_ok.and.ierr==MPI_SUCCESS.and.&
@@ -2035,11 +2029,12 @@ contains
     callback_ok=local_iterations<=dg_hybrid_fragment_cg_steps
   end subroutine solve_dg_hybrid_schwarz_fragments
 
-  subroutine record_dg_hybrid_interface_continuation_diagnostic(status_label,&
-      diagnostic_state_lambda,continuation_fingerprint,diagnostic_ok)
-    character(*),intent(in)::status_label
+  subroutine record_dg_hybrid_interface_continuation_diagnostic(&
+      diagnostic_state_lambda,continuation_fingerprint,continuation_state,local_accept,diagnostic_ok)
     real(8),intent(in)::diagnostic_state_lambda
     integer(int64),intent(in)::continuation_fingerprint
+    type(s_dg_hybrid_interface_continuation),intent(inout)::continuation_state
+    logical,intent(in)::local_accept
     logical,intent(out)::diagnostic_ok
     complex(8),allocatable::hcoeff(:,:),scoeff(:,:),scaled_interface_action(:,:)
     real(8),allocatable::local_h_diagonal(:),global_h_diagonal(:),&
@@ -2048,9 +2043,10 @@ contains
       rayleigh_energy_trace,scaled_interface_action_norm,residual_record,&
       orthogonality_record,electron_defect_record
     integer(int64)::continuation_fingerprint_min,continuation_fingerprint_max
+    integer(int64)::dynamic_receipt
     integer::nstate,j,status_local,ierr_local,rank_local,peer_exchanges,minimum_steps,maximum_steps
-    logical::local_ok,collective_diagnostic_ok,measurement_available
-    character(16)::measurement_status
+    logical::local_ok,collective_diagnostic_ok,measurement_available,accept_ok,record_ok,dynamic_ok
+    character(16)::measurement_status,record_status
     character(512)::diagnostic_message
 
     call MPI_Comm_rank(dc%icomm_tot,rank_local,ierr_local)
@@ -2069,7 +2065,12 @@ contains
       measurement_available=collective_diagnostic_ok
     endif
     if(measurement_available)then
-      call apply_dg_hybrid_schwarz_h(bounded_schwarz_state%coefficients,hcoeff,local_ok)
+      call apply_dg_hybrid_schwarz_hamiltonian(dc%icomm_tot,bounded_schwarz_schedule,&
+        bounded_schwarz_state%basis_generation,bounded_directory_fingerprint,bounded_face_fingerprint,&
+        bounded_mapping_fingerprint,divided_fragment_basis%global_ids,bounded_basis_fragment,&
+        bounded_basis_local_slot,bounded_fixed_payload%kinetic_rows,bounded_fixed_payload%nonlocal_rows,&
+        bounded_fixed_payload%interface_rows,bounded_local_potential_rows,bounded_interface_scale,&
+        bounded_schwarz_state%coefficients,hcoeff,peer_exchanges,local_ok,diagnostic_message)
       call comm_logical_and(local_ok,collective_diagnostic_ok,dc%icomm_tot)
       measurement_available=collective_diagnostic_ok
     endif
@@ -2105,15 +2106,22 @@ contains
         all(global_s_diagonal>dg_dc_metric_rank_tolerance)
     endif
     if(measurement_available)then
-      ! The trace is occupation weighted and each Rayleigh quotient is normalized
-      ! by the live distributed S norm, so a small orthogonality defect cannot bias it.
+      ! The trace is occupation weighted and normalizes each diagonal Rayleigh
+      ! quotient by its live distributed S norm.  The separate orthogonality
+      ! defect reports the off-diagonal S overlap that can still bias this trace.
       rayleigh_energy_trace=bounded_schwarz_state%wspin*sum(&
         bounded_schwarz_state%occupations*(global_h_diagonal/global_s_diagonal))
-      ! Each rank owns every output row exactly once; summing row-local squared
-      ! norms therefore measures ||lambda H_interface C||_F without double counting.
+      ! Each rank owns every coefficient-space output row exactly once.  Summing
+      ! those row-local squares gives the row-owned Frobenius action norm
+      ! ||lambda H_interface C||_F without claiming basis invariance.
       scaled_interface_action_norm=sqrt(max(0d0,global_interface_norm_squared))
       measurement_available=ieee_is_finite(rayleigh_energy_trace).and.&
         ieee_is_finite(scaled_interface_action_norm)
+    endif
+    if(measurement_available)then
+      call validate_dg_hybrid_schwarz_dynamic_receipt(dc%icomm_tot,bounded_schwarz_state,&
+        dynamic_receipt,dynamic_ok,diagnostic_message)
+      measurement_available=dynamic_ok
     endif
     if(measurement_available)then
       measurement_status='valid'
@@ -2122,29 +2130,38 @@ contains
       rayleigh_energy_trace=huge(1d0)
       scaled_interface_action_norm=huge(1d0)
     endif
-    diagnostic_ok=.true.
+    if(local_accept.and.measurement_available)then
+      call accept_dg_hybrid_interface_point(dc%icomm_tot,bounded_schwarz_state%basis_generation,&
+        bounded_mapping_fingerprint,.true.,continuation_state,accept_ok,diagnostic_message)
+    else
+      call accept_dg_hybrid_interface_point(dc%icomm_tot,bounded_schwarz_state%basis_generation,&
+        bounded_mapping_fingerprint,.false.,continuation_state,accept_ok,diagnostic_message)
+      accept_ok=.false.
+    endif
+    diagnostic_ok=local_accept.and.measurement_available.and.accept_ok
+    record_status=merge('accepted','rollback',diagnostic_ok)
+    record_ok=.true.
     call MPI_Allreduce(bounded_last_accepted_cg_steps,minimum_steps,1,MPI_INTEGER,MPI_MIN,&
       dc%icomm_tot,ierr_local)
-    diagnostic_ok=diagnostic_ok.and.ierr_local==MPI_SUCCESS
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
     call MPI_Allreduce(bounded_last_accepted_cg_steps,maximum_steps,1,MPI_INTEGER,MPI_MAX,&
       dc%icomm_tot,ierr_local)
-    diagnostic_ok=diagnostic_ok.and.ierr_local==MPI_SUCCESS.and.minimum_steps==maximum_steps
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.minimum_steps==maximum_steps
     call MPI_Allreduce(continuation_fingerprint,continuation_fingerprint_min,1,MPI_INTEGER8,MPI_MIN,&
       dc%icomm_tot,ierr_local)
-    diagnostic_ok=diagnostic_ok.and.ierr_local==MPI_SUCCESS
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS
     call MPI_Allreduce(continuation_fingerprint,continuation_fingerprint_max,1,MPI_INTEGER8,MPI_MAX,&
       dc%icomm_tot,ierr_local)
-    diagnostic_ok=diagnostic_ok.and.ierr_local==MPI_SUCCESS.and.&
+    record_ok=record_ok.and.ierr_local==MPI_SUCCESS.and.&
       continuation_fingerprint_min==continuation_fingerprint_max.and.continuation_fingerprint_min/=0_int64
-    ! On rollback the coefficients/occupations have already been restored to
-    ! diagnostic_state_lambda, while lambda identifies the failed operator point.
+    ! diagnostic_state_lambda identifies the coefficient/occupation snapshot
+    ! probed by the attempted operator lambda; on rollback it is not promoted.
     ! Preserve a parseable finite record even when a rejected solver scalar is NaN/Inf.
     residual_record=finite_diagnostic_value(divided_fragment_residual)
     orthogonality_record=finite_diagnostic_value(divided_fragment_orthogonality)
     electron_defect_record=finite_diagnostic_value(bounded_schwarz_state%electron_defect)
-    call comm_logical_and(diagnostic_ok,collective_diagnostic_ok,dc%icomm_tot)
-    diagnostic_ok=collective_diagnostic_ok
-    if(.not.diagnostic_ok)return
+    call comm_logical_and(record_ok,collective_diagnostic_ok,dc%icomm_tot)
+    if(.not.collective_diagnostic_ok)then;diagnostic_ok=.false.;return;endif
     if(rank_local==0)write(*,'(a,2(a,es24.16),a,i0,5(a,es24.16),5a,i0)')&
       '[DG-HYBRID-CONTINUATION] lambda=',bounded_interface_scale,&
       ' diagnostic_state_lambda=',diagnostic_state_lambda,&
@@ -2153,7 +2170,7 @@ contains
       ' electron_defect=',electron_defect_record,&
       ' rayleigh_energy_trace=',rayleigh_energy_trace,&
       ' scaled_interface_action_norm=',scaled_interface_action_norm,&
-      ' measurement_status=',trim(measurement_status),' status=',trim(status_label),&
+      ' measurement_status=',trim(measurement_status),' status=',trim(record_status),&
       ' continuation_fingerprint=',continuation_fingerprint_min
   end subroutine record_dg_hybrid_interface_continuation_diagnostic
 

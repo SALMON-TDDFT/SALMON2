@@ -130,33 +130,23 @@ assert "bounded_schwarz_state=accepted_schwarz_state" in compact, (
     "failed points must restore the last collectively accepted coefficients/state"
 )
 continuation_loop = compact.split("dowhile(.not.interface_continuation%finished)", 1)[1]
-failure_branch = continuation_loop.split("if(.not.collective_ok)then", 1)[1].split("endif", 1)[0]
-assert failure_branch.index("bounded_schwarz_state=accepted_schwarz_state") < failure_branch.index(
-    "accept_dg_hybrid_interface_point"
-), "point failure must restore accepted state before recording collective rejection"
-assert ".false.,interface_continuation" in failure_branch
-assert ".true.,interface_continuation" not in failure_branch, (
-    "a failed or rolled-back point must never be accepted"
-)
-assert re.search(r"call\s+accept_dg_hybrid_interface_point\s*\(", route), (
-    "successful points must advance the collective continuation state"
-)
+failure_branch = continuation_loop.split("if(.not.collective_ok)then", 1)[1].split("error stop", 1)[0]
+assert "bounded_schwarz_state=accepted_schwarz_state" in failure_branch
 
 diagnostic_call = "call record_dg_hybrid_interface_continuation_diagnostic"
-assert route.count(diagnostic_call) == 3, (
-    "accepted and both collective-failure branches must each emit one continuation record"
+assert route.count(diagnostic_call) == 2, (
+    "solver failure and measured point paths must each have one diagnostic/acceptance call"
 )
 rollback = continuation_loop.split("if(.not.collective_ok)then", 1)[1].split("error stop", 1)[0]
-assert diagnostic_call.replace(" ", "") in rollback and "'rollback'" in rollback, (
+assert diagnostic_call.replace(" ", "") in rollback and ".false.,diagnostic_ok" in rollback, (
     "a rejected point must record rollback before stopping"
 )
-accepted = route.split("call accept_dg_hybrid_interface_point", 2)[2]
-assert diagnostic_call in accepted and "'accepted'" in accepted, (
-    "an accepted point must emit its record exactly once"
+measured_path = route.split("if(.not.collective_ok)then", 1)[1].split("endif", 1)[1]
+assert diagnostic_call in measured_path and ".true." in measured_path, (
+    "a solver-successful point must be measured before certification"
 )
-acceptance_failure = accepted.split("if(.not.ok)then", 1)[1].split("error stop", 1)[0]
-assert diagnostic_call in acceptance_failure and "'rollback'" in acceptance_failure, (
-    "an acceptance failure must emit a rollback record before stopping"
+assert measured_path.index(diagnostic_call) < measured_path.index("accepted_schwarz_state="), (
+    "accepted coefficient snapshot must follow diagnostic certification"
 )
 
 diagnostic = source.split(
@@ -176,8 +166,11 @@ for field in (
     "continuation_fingerprint=",
 ):
     assert field in diagnostic, f"continuation record is missing {field}"
-assert "apply_dg_hybrid_schwarz_h(" in diagnostic, (
-    "Rayleigh trace must use the live H(lambda) callback"
+assert "apply_dg_hybrid_schwarz_hamiltonian(" in diagnostic, (
+    "Rayleigh trace must use the live H(lambda) operator"
+)
+assert "call apply_dg_hybrid_schwarz_h(" not in diagnostic, (
+    "diagnostic H action must not mutate the production peer-exchange counter"
 )
 assert "apply_dg_hybrid_schwarz_s(" in diagnostic, (
     "Rayleigh normalization must use the live metric callback"
@@ -196,6 +189,17 @@ assert "measurement_available=collective_diagnostic_ok" in re.sub(r"\s+", "", di
 )
 assert "rayleigh_energy_trace=huge(1d0)" in re.sub(r"\s+", "", diagnostic)
 assert "scaled_interface_action_norm=huge(1d0)" in re.sub(r"\s+", "", diagnostic)
+diagnostic_compact = re.sub(r"\s+", "", diagnostic)
+assert diagnostic_compact.index("measurement_available=collective_diagnostic_ok") < diagnostic_compact.index(
+    "callaccept_dg_hybrid_interface_point"
+), "measurement must be known collectively before continuation acceptance"
+assert "callvalidate_dg_hybrid_schwarz_dynamic_receipt" in diagnostic_compact
+assert diagnostic_compact.index("callvalidate_dg_hybrid_schwarz_dynamic_receipt") < diagnostic_compact.index(
+    "callaccept_dg_hybrid_interface_point"
+), "common dynamic Schwarz state must be certified before continuation acceptance"
+assert "local_accept.and.measurement_available" in diagnostic_compact, (
+    "unavailable diagnostics must never reach a true continuation acceptance"
+)
 for value in (
     "divided_fragment_residual",
     "divided_fragment_orthogonality",

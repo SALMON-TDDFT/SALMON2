@@ -2,12 +2,14 @@ program test_dg_hybrid_schwarz_state_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,&
-    initialize_dg_hybrid_schwarz_state,extend_dg_hybrid_schwarz_state
+    initialize_dg_hybrid_schwarz_state,extend_dg_hybrid_schwarz_state,&
+    validate_dg_hybrid_schwarz_dynamic_receipt
   implicit none
-  integer::ierr,rank,nproc,fragment,nb,ncandidate,i,j,lo,hi
-  integer(int64)::mapping_fingerprint,candidate_fingerprint,accepted_fingerprint
+  integer::ierr,rank,nproc,fragment,nb,ncandidate,i,j,lo,hi,original_thermal_tail_count
+  integer(int64)::mapping_fingerprint,candidate_fingerprint,accepted_fingerprint,dynamic_receipt
   integer(int64),allocatable::candidate_ids(:),minimum_ids(:),maximum_ids(:)
   real(real64),allocatable::candidate_energies(:)
+  real(real64)::original_occupation
   complex(real64),allocatable::candidate_vectors(:,:)
   type(s_dg_hybrid_schwarz_state)::state,failed_state
   logical::ok
@@ -42,6 +44,20 @@ program test_dg_hybrid_schwarz_state_mpi
     'initial diagnostic spectrum has the wrong trial size')
   call require(abs(state%electron_count-4d0)<1d-10.and.state%electron_defect<1d-10,&
     'initial common-occupation electron count is not diagnostic-ready')
+  call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
+  call require(ok.and.dynamic_receipt/=0_int64,'valid dynamic Schwarz receipt rejected: '//trim(message))
+  original_occupation=state%occupations(1)
+  if(rank==0)state%occupations(1)=state%occupations(1)+1d-3
+  call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
+  call require(.not.ok,'rank-local dynamic occupation perturbation was accepted')
+  if(rank==0)state%occupations(1)=original_occupation
+  call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
+  call require(ok,'restored dynamic Schwarz receipt rejected: '//trim(message))
+  original_thermal_tail_count=state%thermal_tail_count
+  if(rank==0)state%thermal_tail_count=state%thermal_tail_count+1
+  call validate_dg_hybrid_schwarz_dynamic_receipt(MPI_COMM_WORLD,state,dynamic_receipt,ok,message)
+  call require(.not.ok,'rank-local common integer perturbation was accepted')
+  if(rank==0)state%thermal_tail_count=original_thermal_tail_count
   call require(size(state%column_ids)==4.and.all(state%column_ids/=0_int64),&
     'common column IDs are missing')
   allocate(minimum_ids(4),maximum_ids(4))

@@ -16,12 +16,14 @@ assert entry.count("call initialize_dg_hybrid_interface_continuation") == 1, (
     "production route must initialize exactly one fixed-density interface continuation"
 )
 assert "do while(.not.interface_continuation%finished)" in entry
-assert entry.count("call accept_dg_hybrid_interface_point") == 2
+assert entry.count("call accept_dg_hybrid_interface_point") == 0, (
+    "the driver must not advance continuation before diagnostic certification"
+)
 scf_position = entry.index("call initialize_dg_hybrid_interface_continuation")
 solve_position = entry.find("call solve_dg_hybrid_generalized_once_and_publish")
 assert solve_position > scf_position, "one terminal LCFO solve must follow interface continuation"
 assert entry.count("call solve_dg_hybrid_generalized_once_and_publish") == 1
-guard_position = entry.find("terminal_fingerprints=[interface_continuation%fingerprint")
+guard_position = entry.find("call validate_dg_hybrid_schwarz_dynamic_receipt")
 row_position = entry.find("final_hrows=bounded_fixed_payload%kinetic_rows")
 assert scf_position < guard_position < row_position < solve_position, (
     "terminal continuation guard must precede full row composition and the one LCFO solve"
@@ -36,6 +38,7 @@ for required in (
     "bounded_schwarz_state%fingerprint/=0_int64",
     "interface_continuation%basis_generation==bounded_schwarz_state%basis_generation",
     "interface_continuation%mapping_fingerprint==bounded_schwarz_state%mapping_fingerprint",
+    "call validate_dg_hybrid_schwarz_dynamic_receipt",
 ):
     assert required in terminal_guard, f"terminal guard is missing: {required}"
 assert "call comm_logical_and" in terminal_guard
