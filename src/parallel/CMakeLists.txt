@@ -3,6 +3,7 @@ set(SOURCES
     code_optimization.f90
     init_communicator.f90
     set_numcpu.f90
+    automatic_distribution.f90
     network_address.f90
 )
 

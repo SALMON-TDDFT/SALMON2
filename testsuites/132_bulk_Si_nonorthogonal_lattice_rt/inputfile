@@ -10,12 +10,6 @@
   unit_system = 'a.u.'
 /
 
-&parallel
-  nproc_k=4
-  nproc_ob=1
-  nproc_rgrid=1,1,1
-/
-
 &system
   yn_periodic = 'y'
   al_vec2 = 0.0, 5.13, 5.13

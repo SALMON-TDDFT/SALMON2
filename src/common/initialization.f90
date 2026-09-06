@@ -56,7 +56,7 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
   info%npk       = nproc_k
   info%nporbital = nproc_ob
   info%nprgrid   = nproc_rgrid
-  call init_process_distribution(system,stencil%if_orthogonal,comm,info)
+  call init_process_distribution(system,stencil%if_orthogonal,comm,info,lg)
   call init_communicator_dft(comm,info)
 
 ! parallelization
@@ -287,41 +287,35 @@ end subroutine init_dft_system
 
 !===================================================================================================================================
 
-subroutine init_process_distribution(system,if_orthogonal,icomm1,info)
-  use structures, only: s_parallel_info,s_dft_system
+subroutine init_process_distribution(system,if_orthogonal,icomm1,info,lg)
+  use structures, only: s_parallel_info,s_dft_system,s_rgrid
   use parallelization, only: nproc_id_global, nproc_group_global
-  use salmon_global, only: theory
-  use communication, only: comm_is_root,comm_bcast
-  use set_numcpu
+  use salmon_global, only: yn_ffte, quiet
+  use communication, only: comm_is_root,comm_bcast,comm_get_groupinfo
+  use set_numcpu, only: check_numcpu
+  use automatic_distribution, only: select_numcpu_dft
   implicit none
   type(s_dft_system),intent(in)       :: system
   logical, intent(in)                 :: if_orthogonal
   integer, intent(in)                 :: icomm1 ! Communicator for single DFT system.
   type(s_parallel_info),intent(inout) :: info
-  logical :: if_stop
-  integer :: ip
+  type(s_rgrid),intent(in) :: lg
+  logical :: if_stop,found
+  integer :: rank,nproc
 
-  if((info%nporbital + sum(info%nprgrid)) == 0) then
-    ! Process distribution is automatically decided by SALMON.
-    if (if_orthogonal .and. system%ngrid > 16**3) then
-      ! large orthogonal cell: prefer real-space domain decomposition
-      call set_numcpu_general(iprefer_domain_distribution,system%nk,system%no,icomm1,info)
-    else
-      ! small cells, or any non-orthogonal cell: distribute over k-points /
-      ! orbitals only. Non-orthogonal lattices do not support real-space
-      ! parallelization, so rspace_allowed is tied to if_orthogonal.
-      select case(theory)
-      case('dft','dft_band','dft_md','dft2tddft')
-        ip = iprefer_k_distribution
-      case('tddft_response','tddft_pulse','single_scale_maxwell_tddft','multi_scale_maxwell_tddft')
-        ip = iprefer_orbital_distribution
-      case default
-        stop 'invalid theory @ initialization'
-      end select
-      call set_numcpu_general(ip,system%nk,system%no,icomm1,info,rspace_allowed=if_orthogonal)
+  if(info%npk==0.and.info%nporbital==0.and.all(info%nprgrid==0)) then
+    call comm_get_groupinfo(icomm1,rank,nproc)
+    call select_numcpu_dft(nproc,system%nk,system%no,lg%num,lg%nd,if_orthogonal,yn_ffte=='y', &
+                          info%npk,info%nporbital,info%nprgrid,found)
+    if(.not.found) stop 'automatic MPI distribution: no valid k/orbital/grid decomposition; use fewer MPI processes'
+    if(comm_is_root(nproc_id_global).and..not.quiet) then
+      write(*,*) 'Automatic MPI distribution: k-points first; local grid target = 4096'
+      write(*,*) '  nproc_k, nproc_ob, nproc_rgrid =',info%npk,info%nporbital,info%nprgrid
+      write(*,*) '  maximum local grid dimensions =',(lg%num-1)/info%nprgrid+1
     end if
   else
-    ! Process distribution is explicitly specified by user.
+    if(info%npk<1.or.info%nporbital<1.or.any(info%nprgrid<1)) &
+      stop 'MPI distribution: specify all nproc_k, nproc_ob, nproc_rgrid as positive values, or leave all zero'
   end if
 
   ! r-space (spatial) parallelization is not supported for non-orthogonal lattices,

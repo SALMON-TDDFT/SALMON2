@@ -62,4 +62,14 @@ if abs(diff2 - reference_value_2) > permissible_error_2:
 print("# Verification end") 
 print("#" * 60) 
 
+# These eight-k-point cases must assign the usual one/four test ranks to k,
+# for both GS and RT. Keep the physical reference checks above as well.
+distribution = None
+for line in open("outputfile"):
+    if "nproc_k, nproc_ob, nproc_rgrid =" in line:
+        distribution = [int(value) for value in line.split("=")[1].split()]
+if distribution is None or distribution[0] not in (1, 4) or distribution[1:] != [1, 1, 1, 1]:
+    print("Unexpected automatic MPI distribution:", distribution)
+    sys.exit(1)
+
 sys.exit(0)  # Success 

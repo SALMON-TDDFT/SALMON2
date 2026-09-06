@@ -139,3 +139,5 @@ else ()
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/724_Si_diamond_bloch_ms")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/725_Si_bloch_3rd_order")
 endif ()
+
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/parallel_distribution")
