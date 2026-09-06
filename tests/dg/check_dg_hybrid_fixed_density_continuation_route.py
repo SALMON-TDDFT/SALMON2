@@ -52,6 +52,31 @@ assert route.index("call update_dg_hybrid_divided_potential") < route.index(
     "call initialize_dg_hybrid_interface_continuation"
 ), "fixed DC potential must be established before the continuation loop"
 
+for obsolete_import in (
+    "dg_hybrid_divided_scf",
+    "dg_hybrid_divided_mixing",
+):
+    assert not re.search(r"\buse\s+" + obsolete_import + r"\b", source), (
+        f"obsolete density-mixed production import remains: {obsolete_import}"
+    )
+for obsolete_state in (
+    "divided_mixing_state",
+    "divided_mixing_basis_generation",
+    "divided_mixing_inventory_fingerprint",
+    "divided_mixing_rollback_pending",
+):
+    assert obsolete_state not in source, (
+        f"obsolete density-mixing production state remains: {obsolete_state}"
+    )
+for obsolete_callback in (
+    "assemble_dg_hybrid_schwarz_core_density",
+    "gather_dg_hybrid_divided_core_density",
+    "mix_dg_hybrid_divided_density",
+):
+    assert not re.search(r"\bsubroutine\s+" + obsolete_callback + r"\b", source), (
+        f"obsolete density-feedback callback remains: {obsolete_callback}"
+    )
+
 for forbidden in (
     "run_dg_hybrid_divided_scf",
     "assemble_dg_hybrid_schwarz_core_density",

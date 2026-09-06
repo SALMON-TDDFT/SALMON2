@@ -163,9 +163,6 @@ use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_
 use plusU_global,only:PLUS_U_ON
 use dg_hybrid_projected_fragment_pipeline,only:build_dg_hybrid_projected_fragment_basis,&
   build_dg_hybrid_projected_local_fragment_basis
-use dg_hybrid_divided_scf,only:run_dg_hybrid_divided_scf
-use dg_hybrid_divided_mixing,only:s_dg_hybrid_divided_mixing_state,&
-  prepare_dg_hybrid_divided_mixing,accept_dg_hybrid_divided_mixing
 use dg_hybrid_interface_continuation,only:s_dg_hybrid_interface_continuation,&
   initialize_dg_hybrid_interface_continuation,accept_dg_hybrid_interface_point
 use dg_hybrid_schwarz_state,only:s_dg_hybrid_schwarz_state,initialize_dg_hybrid_schwarz_state,&
@@ -335,7 +332,6 @@ integer(8) :: ow_potential_epoch_snapshot
 integer(8) :: ow_global_grid_count
 type(s_dg_hybrid_ground_state) :: ow_hybrid_ground_state
 type(s_dg_hybrid_fragment_basis) :: divided_fragment_basis
-type(s_dg_hybrid_divided_mixing_state) :: divided_mixing_state
 type(s_dg_hybrid_schwarz_state) :: bounded_schwarz_state
 type(s_dg_hybrid_schwarz_schedule) :: bounded_schwarz_schedule
 complex(8),allocatable :: ow_hybrid_hrows(:,:),ow_hybrid_coefficients(:,:)
@@ -363,8 +359,6 @@ integer(8) :: bounded_face_fingerprint=0_8,bounded_mapping_fingerprint=0_8,&
   bounded_candidate_fingerprint=0_8
 real(8) :: bounded_interface_scale=1d0
 integer :: bounded_last_peer_exchange_count=0,bounded_last_accepted_cg_steps=0
-integer(8) :: divided_mixing_inventory_fingerprint=0_8
-integer :: divided_mixing_basis_generation=0
 integer :: ow_hybrid_history_count=0
 real(8) :: ow_hybrid_mixing_rate=0d0
 real(8) :: ow_hybrid_eigensystem_residual=huge(1d0),ow_hybrid_orthogonality=huge(1d0),&
@@ -379,7 +373,6 @@ real(8),allocatable :: ow_work_density(:,:,:,:)
 real(8) :: ow_diag_t_hermiticity,ow_diag_vlocal_hermiticity,ow_diag_vnl_hermiticity,&
   ow_diag_h_hermiticity
 logical :: ow_transaction_active
-logical :: divided_mixing_rollback_pending=.false.
 logical :: ow_direct_nonlocal_compared=.false.
 logical :: ow_projector_stage_diagnosed=.false.
 integer :: ilevel_print
@@ -2285,31 +2278,6 @@ contains
     enddo
     callback_ok=all(ieee_is_finite(real(output))).and.all(ieee_is_finite(aimag(output)))
   end subroutine apply_dg_hybrid_schwarz_preconditioner
-
-  subroutine assemble_dg_hybrid_schwarz_core_density(core_density,electron_count,callback_ok)
-    real(8),intent(out)::core_density(:),electron_count
-    logical,intent(out)::callback_ok
-    complex(8),allocatable::orbital_values(:)
-    real(8)::local_electron_count
-    integer::p,slot,ierr_local
-    callback_ok=.false.;core_density=0d0;electron_count=0d0
-    if(.not.bounded_schwarz_state%valid.or..not.allocated(bounded_schwarz_state%occupations))return
-    if(size(core_density)/=size(bounded_core_ids))return
-    allocate(orbital_values(bounded_schwarz_state%trial_count))
-    do p=1,size(bounded_core_ids)
-      slot=findloc(divided_fragment_basis%buffer_point_ids,bounded_core_ids(p),dim=1)
-      if(slot<1)return
-      orbital_values=matmul(divided_fragment_basis%buffer_values(slot,:),&
-        bounded_schwarz_state%coefficients)
-      core_density(p)=bounded_schwarz_state%wspin*&
-        sum(bounded_schwarz_state%occupations*abs(orbital_values)**2)
-    enddo
-    local_electron_count=sum(bounded_core_weights*core_density)
-    call MPI_Allreduce(local_electron_count,electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,&
-      dc%icomm_tot,ierr_local)
-    callback_ok=ierr_local==MPI_SUCCESS.and.all(ieee_is_finite(core_density)).and.&
-      ieee_is_finite(electron_count)
-  end subroutine assemble_dg_hybrid_schwarz_core_density
 
   subroutine prepare_dg_hybrid_schwarz_candidate_inventory(comm_arg,catalog,ids,energies,vectors,&
       callback_ok,callback_message)
@@ -4784,10 +4752,6 @@ contains
         endif
         if(.not.ok)write(0,'(a)')trim(message)
         if(.not.ok)error stop 'divided Hybrid fixed variational payload freeze failed'
-        if(yn_dg_hybrid_divided_scf=='y')then
-          divided_mixing_basis_generation=maxval(divided_basis_generation)
-          divided_mixing_inventory_fingerprint=divided_basis_directory_fingerprint
-        endif
         if(.not.dg_hybrid_fixed_payload%frozen.or.dg_hybrid_fixed_payload%fingerprint==0_8)&
           error stop 'divided Hybrid shared variational payload fingerprint is invalid'
         divided_fixed_payload_fingerprint=dg_hybrid_fixed_payload%fingerprint
@@ -6074,25 +6038,6 @@ contains
     fingerprint=ow_collective_operator_fingerprint(comm)
     ok=.true.;message=''
   end subroutine
-
-  subroutine gather_dg_hybrid_divided_core_density(core_density,total_density,callback_ok)
-    real(8),intent(in)::core_density(:)
-    real(8),allocatable,intent(out)::total_density(:,:,:)
-    logical,intent(out)::callback_ok
-    real(8),allocatable::local_density(:),global_density(:)
-    integer::p,ierr_local
-
-    callback_ok=.false.
-    if(size(core_density)/=size(ow_core_ids).or.ow_global_grid_count<1_8)return
-    allocate(local_density(int(ow_global_grid_count)),global_density(int(ow_global_grid_count)))
-    local_density=0d0
-    do p=1,size(ow_core_ids);local_density(int(ow_core_ids(p)))=core_density(p);enddo
-    call MPI_Allreduce(local_density,global_density,size(global_density),MPI_DOUBLE_PRECISION,MPI_SUM,&
-      dc%icomm_tot,ierr_local)
-    if(ierr_local/=MPI_SUCCESS)return
-    allocate(total_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3)))
-    total_density=reshape(global_density,dc%lg_tot%num);callback_ok=all(ieee_is_finite(total_density))
-  end subroutine gather_dg_hybrid_divided_core_density
 
   subroutine update_dg_hybrid_divided_potential(core_density,callback_ok)
     real(8),intent(in)::core_density(:)
@@ -8007,66 +7952,6 @@ stage_pass: do
     callback_ok=ieee_is_finite(residual_arg)
     if(.not.callback_ok)message_arg='mapped-core density covariance defect is not finite'
   end subroutine measure_dg_hybrid_core_density_covariance
-
-  subroutine mix_dg_hybrid_divided_density(iteration,input_density,new_density,mixed_density,callback_ok)
-    integer,intent(in)::iteration
-    real(8),intent(in)::input_density(:),new_density(:)
-    real(8),intent(out)::mixed_density(:)
-    logical,intent(out)::callback_ok
-    real(8),allocatable::input_total(:,:,:),new_total(:,:,:)
-    integer::p,ix_local,iy_local,iz_local,mixing_iteration,mixing_basis_generation
-    integer(8)::mixing_inventory_fingerprint
-    character(16)::selected_mixing_method
-    character(64)::reset_reason
-    character(512)::mixing_message
-    real(8)::effective_mixrate
-    logical::reset_required,mixing_ok
-
-    callback_ok=.false.;mixed_density=0d0
-    call gather_dg_hybrid_divided_core_density(input_density,input_total,callback_ok)
-    if(.not.callback_ok)return
-    call gather_dg_hybrid_divided_core_density(new_density,new_total,callback_ok)
-    if(.not.callback_ok)return
-    mixing_basis_generation=divided_mixing_basis_generation
-    mixing_inventory_fingerprint=divided_mixing_inventory_fingerprint
-    call prepare_dg_hybrid_divided_mixing(dc%icomm_tot,dg_hybrid_divided_mixing,method_mixing,&
-      mixing%mixrate,mixing_basis_generation,mixing_inventory_fingerprint,&
-      divided_mixing_rollback_pending,divided_mixing_state,selected_mixing_method,&
-      effective_mixrate,mixing_iteration,reset_required,reset_reason,mixing_ok,mixing_message)
-    if(.not.mixing_ok)then
-      if(dc%id_tot==0)write(0,'(a)')trim(mixing_message)
-      return
-    endif
-    if(dc%id_tot==0)write(*,'(a,a,a,es16.8,a,i0,a,l1,a,a,a)')&
-      '[DG-HYBRID-MIXING] method=',trim(selected_mixing_method),' mixrate=',effective_mixrate,&
-      ' history_length=',divided_mixing_state%history_length,' reset=',reset_required,&
-      ' reset_reason=',trim(reset_reason),' seed_fingerprint_unchanged=T'
-    dc%rho_tot_s(1)%f=input_total
-    call copy_density(mixing_iteration,dc%system_tot%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
-    dc%rho_tot_s(1)%f=new_total
-    select case(selected_mixing_method)
-    case('simple')
-      call simple_mixing(dc%mg_tot,dc%system_tot,1d0-effective_mixrate,effective_mixrate,dc%rho_tot_s,mixing)
-    case('broyden')
-      call wrapper_broyden(dc%info_tot%icomm_r,dc%mg_tot,dc%system_tot,dc%rho_tot_s,mixing_iteration,mixing)
-    case('pulay')
-      call pulay(dc%mg_tot,dc%info_tot,dc%system_tot,dc%rho_tot_s,mixing_iteration,mixing)
-    case default
-      return
-    end select
-    do p=1,size(ow_core_ids)
-      ix_local=int(modulo(ow_core_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
-      iy_local=int(modulo((ow_core_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
-      iz_local=int((ow_core_ids(p)-1_8)/(int(dc%lg_tot%num(1),8)*int(dc%lg_tot%num(2),8)))+1
-      mixed_density(p)=dc%rho_tot_s(1)%f(ix_local,iy_local,iz_local)
-    enddo
-    callback_ok=all(ieee_is_finite(mixed_density))
-    call accept_dg_hybrid_divided_mixing(dc%icomm_tot,mixing_iteration,divided_mixing_state,&
-      mixing_ok,mixing_message,local_accept_ok=callback_ok)
-    if(.not.mixing_ok.and.dc%id_tot==0)write(0,'(a)')trim(mixing_message)
-    callback_ok=mixing_ok
-    divided_mixing_rollback_pending=.not.mixing_ok
-  end subroutine mix_dg_hybrid_divided_density
 
   subroutine solve_final_dg_hybrid_divided_lcfo(comm_arg,global_count_arg,nstate_arg,row_ids_arg,&
       hrows_arg,srows_arg,tolerance_arg,coefficients_arg,eigenvalues_arg,maximum_residual_arg,&

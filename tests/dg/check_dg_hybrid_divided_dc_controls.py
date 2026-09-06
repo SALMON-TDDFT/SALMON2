@@ -222,26 +222,12 @@ for token in (
 thermal = (ROOT / "src/gs/dc/dg_hybrid_fragment_thermal.f90").read_text(errors="replace").lower()
 assert "run_dc_fragment_occupation_epoch" in thermal
 assert "reconstruct_dg_hybrid_fragment_density" in thermal
-mix_start = "subroutine mix_dg_hybrid_divided_density"
-assert mix_start in MAIN, "missing divided DC density mixer adapter"
-mix_callback = MAIN[MAIN.index(mix_start) :].split("end subroutine", 1)[0]
-for token in (
-    "prepare_dg_hybrid_divided_mixing",
-    "accept_dg_hybrid_divided_mixing",
-    "mixing_iteration",
-    "reset_reason",
-    "history_length",
-):
-    assert token in mix_callback, f"divided mixer lacks persistent lifecycle: {token}"
-assert "call copy_density" in mix_callback
-assert "dg_hybrid_divided_mixing,method_mixing" in mix_callback
-assert "select case(selected_mixing_method)" in mix_callback
-assert "mixing%mixrate" in mix_callback
-for token in ("simple_mixing", "wrapper_broyden", "pulay"):
-    assert token in mix_callback, f"divided adapter does not reuse DC mixer: {token}"
-assert "copy_density(mixing_iteration" in mix_callback
-assert "wrapper_broyden" in mix_callback and "mixing_iteration,mixing" in mix_callback
-assert "pulay" in mix_callback and "mixing_iteration,mixing" in mix_callback
+assert "subroutine mix_dg_hybrid_divided_density" not in MAIN, (
+    "fixed-density production must not retain the divided density mixer adapter"
+)
+assert "use dg_hybrid_divided_mixing" not in MAIN, (
+    "fixed-density production must not import divided density-mixing history"
+)
 for token in (
     "basis_generation",
     "common_inventory",
