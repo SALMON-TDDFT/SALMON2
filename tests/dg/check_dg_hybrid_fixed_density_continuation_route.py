@@ -4,8 +4,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-source = (ROOT / "src/gs/main_dft.f90").read_text().lower()
-source = re.sub(r"!.*", "", source).replace("&", "")
+raw_source = (ROOT / "src/gs/main_dft.f90").read_text().lower()
+source = re.sub(r"!.*", "", raw_source).replace("&", "")
 
 salmon_global_import = re.search(
     r"\buse\s+salmon_global\s*,\s*only\s*:(.*?)\nuse\s+", source, re.S
@@ -24,6 +24,21 @@ match = re.search(
 assert match, "missing divided Hybrid production entry"
 route = match.group(1)
 compact = re.sub(r"\s+", "", route)
+
+for obsolete_local in (
+    "local_potential_fingerprint",
+    "preconditioner_fingerprint",
+    "converged_density",
+):
+    assert not re.search(r"\b" + obsolete_local + r"\b", route), (
+        f"unused density-mixed production local remains: {obsolete_local}"
+    )
+assert "outer density loop" not in raw_source, (
+    "fixed-density continuation still carries the obsolete density-loop description"
+)
+assert "fixed-density interface continuation" in raw_source, (
+    "production callback communication comment must describe the supported route"
+)
 
 assert "nproc==dc%n_frag" in compact and "dc%isize_frag==1" in compact, (
     "fixed-density continuation must retain the exact rank-fragment guard"

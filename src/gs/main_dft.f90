@@ -1292,7 +1292,7 @@ contains
     integer(int64)::raw_count,byte_limit,pw_workspace,window_workspace,basis_workspace,&
       pw_fingerprint,window_fingerprint,basis_fingerprint,frame_fingerprint,face_fingerprint,&
       global_basis_fingerprint,metric_fingerprint,interface_fingerprint,directory_fingerprint,&
-      local_potential_fingerprint,preconditioner_fingerprint,final_operator_fingerprint,&
+      final_operator_fingerprint,&
       final_state_workspace,final_state_fingerprint,final_solver_workspace,&
       final_solver_fingerprint,final_checkpoint_fingerprint,final_provenance(6),&
       attempted_continuation_fingerprint,terminal_fingerprints(2),terminal_fingerprints_min(2),&
@@ -1308,7 +1308,7 @@ contains
       raw_gradient(:,:),partition_weight(:),partition_gradient(:,:),box_windows(:,:),&
       core_coordinates(:,:),buffer_coordinates(:,:),core_windows(:,:),buffer_windows(:,:),&
       g_vectors(:,:),core_weights(:),projector_weights(:),unit_potential(:),local_potential(:),&
-      initial_density(:),converged_density(:),final_occupations(:)
+      initial_density(:),final_occupations(:)
     complex(8),allocatable::projector_support_values(:)
     real(8)::axis_weight(3),axis_gradient(3),coordinate,sum_defect,gradient_defect,&
       denominator,convergence_value,electron_defect,accepted_interface_scale
@@ -1724,7 +1724,7 @@ contains
 
     ! Publish the immutable frame/operator context used by sibling callbacks.
     ! Each callback is MPI_COMM_SELF inside its fragment; only the common
-    ! occupation and outer density loop communicate over dc%icomm_tot.
+    ! occupation and fixed-density interface continuation communicate over dc%icomm_tot.
     divided_fragment_basis=projected_basis
     bounded_fixed_payload=fixed_payload
     bounded_interior_values=interior_values
