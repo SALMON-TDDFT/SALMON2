@@ -21,6 +21,27 @@ scf_position = entry.index("call initialize_dg_hybrid_interface_continuation")
 solve_position = entry.find("call solve_dg_hybrid_generalized_once_and_publish")
 assert solve_position > scf_position, "one terminal LCFO solve must follow interface continuation"
 assert entry.count("call solve_dg_hybrid_generalized_once_and_publish") == 1
+guard_position = entry.find("terminal_fingerprints=[interface_continuation%fingerprint")
+row_position = entry.find("final_hrows=bounded_fixed_payload%kinetic_rows")
+assert scf_position < guard_position < row_position < solve_position, (
+    "terminal continuation guard must precede full row composition and the one LCFO solve"
+)
+terminal_guard = entry[guard_position:row_position]
+for required in (
+    "interface_continuation%finished",
+    "interface_continuation%lambda==1d0",
+    "bounded_interface_scale==1d0",
+    "accepted_interface_scale==1d0",
+    "interface_continuation%fingerprint/=0_int64",
+    "bounded_schwarz_state%fingerprint/=0_int64",
+    "interface_continuation%basis_generation==bounded_schwarz_state%basis_generation",
+    "interface_continuation%mapping_fingerprint==bounded_schwarz_state%mapping_fingerprint",
+):
+    assert required in terminal_guard, f"terminal guard is missing: {required}"
+assert "call comm_logical_and" in terminal_guard
+assert "mpi_allreduce" in terminal_guard, (
+    "terminal fingerprints must be checked for rank consistency"
+)
 solve_call = entry[solve_position:].split("ok,message)", 1)[0]
 assert "electronic_temperature=bounded_schwarz_state%temperature" in solve_call, (
     "terminal occupations must be recomputed from the final LCFO spectrum at 300 K"
@@ -40,6 +61,9 @@ assert terminal.count("call assemble_dg_hybrid_local_potential_rows") == 1, (
 assert "bounded_fixed_payload%kinetic_rows+bounded_fixed_payload%nonlocal_rows+&" in terminal
 assert "bounded_fixed_payload%interface_rows+final_local_potential_rows" in terminal
 assert "final_srows=bounded_fixed_payload%metric_rows" in terminal
+assert "fixed-density/non-self-consistent" in entry[solve_position:], (
+    "terminal output must label the LCFO result as fixed-density/non-self-consistent"
+)
 
 checkpoint_position = entry.find("call write_rt_dg_hybrid_occupied_checkpoint")
 assert checkpoint_position > solve_position, "occupied checkpoint must follow terminal LCFO"

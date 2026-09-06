@@ -36,6 +36,12 @@ program test_dg_hybrid_schwarz_state_mpi
   call require(state%trial_count==4,'electron/tail/guard/degeneracy count is not four')
   call require(state%local_basis_count==nb,'unequal local basis size was not retained')
   call require(all(shape(state%coefficients)==[nb,4]),'local coefficient row block has wrong shape')
+  call require(allocated(state%energies).and.allocated(state%occupations),&
+    'initial state must retain common occupations for rollback diagnostics')
+  call require(size(state%energies)==4.and.size(state%occupations)==4,&
+    'initial diagnostic spectrum has the wrong trial size')
+  call require(abs(state%electron_count-4d0)<1d-10.and.state%electron_defect<1d-10,&
+    'initial common-occupation electron count is not diagnostic-ready')
   call require(size(state%column_ids)==4.and.all(state%column_ids/=0_int64),&
     'common column IDs are missing')
   allocate(minimum_ids(4),maximum_ids(4))

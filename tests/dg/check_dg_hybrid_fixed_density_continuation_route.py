@@ -142,6 +142,74 @@ assert re.search(r"call\s+accept_dg_hybrid_interface_point\s*\(", route), (
     "successful points must advance the collective continuation state"
 )
 
+diagnostic_call = "call record_dg_hybrid_interface_continuation_diagnostic"
+assert route.count(diagnostic_call) == 3, (
+    "accepted and both collective-failure branches must each emit one continuation record"
+)
+rollback = continuation_loop.split("if(.not.collective_ok)then", 1)[1].split("error stop", 1)[0]
+assert diagnostic_call.replace(" ", "") in rollback and "'rollback'" in rollback, (
+    "a rejected point must record rollback before stopping"
+)
+accepted = route.split("call accept_dg_hybrid_interface_point", 2)[2]
+assert diagnostic_call in accepted and "'accepted'" in accepted, (
+    "an accepted point must emit its record exactly once"
+)
+acceptance_failure = accepted.split("if(.not.ok)then", 1)[1].split("error stop", 1)[0]
+assert diagnostic_call in acceptance_failure and "'rollback'" in acceptance_failure, (
+    "an acceptance failure must emit a rollback record before stopping"
+)
+
+diagnostic = source.split(
+    "subroutine record_dg_hybrid_interface_continuation_diagnostic", 1
+)[1].split("end subroutine record_dg_hybrid_interface_continuation_diagnostic", 1)[0]
+for field in (
+    "lambda=",
+    "diagnostic_state_lambda=",
+    "accepted_cg_steps=",
+    "residual=",
+    "orthogonality_defect=",
+    "electron_defect=",
+    "rayleigh_energy_trace=",
+    "scaled_interface_action_norm=",
+    "measurement_status=",
+    "status=",
+    "continuation_fingerprint=",
+):
+    assert field in diagnostic, f"continuation record is missing {field}"
+assert "apply_dg_hybrid_schwarz_h(" in diagnostic, (
+    "Rayleigh trace must use the live H(lambda) callback"
+)
+assert "apply_dg_hybrid_schwarz_s(" in diagnostic, (
+    "Rayleigh normalization must use the live metric callback"
+)
+assert "bounded_interface_scale*bounded_fixed_payload%interface_rows" in re.sub(
+    r"\s+", "", diagnostic
+), "interface diagnostic must use the scaled complete SIPG row block"
+assert "mpi_allreduce" in diagnostic and "mpi_sum" in diagnostic, (
+    "row-owned diagnostic contributions must be reduced collectively"
+)
+assert "continuation_fingerprint_min" in diagnostic and "continuation_fingerprint_max" in diagnostic, (
+    "the recorded continuation fingerprint must be rank consistent"
+)
+assert "measurement_available=collective_diagnostic_ok" in re.sub(r"\s+", "", diagnostic), (
+    "operator-measurement failure must select a collective fallback, not suppress the record"
+)
+assert "rayleigh_energy_trace=huge(1d0)" in re.sub(r"\s+", "", diagnostic)
+assert "scaled_interface_action_norm=huge(1d0)" in re.sub(r"\s+", "", diagnostic)
+for value in (
+    "divided_fragment_residual",
+    "divided_fragment_orthogonality",
+    "bounded_schwarz_state%electron_defect",
+):
+    assert f"finite_diagnostic_value({value})" in re.sub(r"\s+", "", diagnostic), (
+        f"rollback records must retain a finite sentinel for nonfinite {value}"
+    )
+assert "rank_local==0" in re.sub(r"\s+", "", diagnostic), (
+    "only rank zero may print the deterministic continuation record"
+)
+for forbidden in ("mpi_allgather", "mpi_allgatherv"):
+    assert forbidden not in diagnostic, "diagnostics must not gather coefficient matrices"
+
 h_callback = source.split("subroutine apply_dg_hybrid_schwarz_h(", 1)[1].split(
     "end subroutine apply_dg_hybrid_schwarz_h", 1
 )[0]

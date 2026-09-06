@@ -101,11 +101,15 @@ contains
     work%electron_target=electron_target;work%temperature=temperature;work%wspin=wspin
     work%chemical_potential=mu
     allocate(work%column_ids(ntrial),work%source_candidate_ids(ncandidate),&
-      work%coefficients(size(candidate_vectors,1),ntrial),stat=stat)
+      work%coefficients(size(candidate_vectors,1),ntrial),work%energies(ntrial),&
+      work%occupations(ntrial),stat=stat)
     call collective_gate(comm,stat==0,'Schwarz state staging allocation failed',ok,message)
     if(.not.ok)return
     work%column_ids=common_ids;work%source_candidate_ids=candidate_ids
     work%coefficients=candidate_vectors(:,1:ntrial)
+    work%energies=candidate_energies(:ntrial);work%occupations=occupations(:ntrial)
+    work%electron_count=wspin*sum(work%occupations)
+    work%electron_defect=abs(work%electron_count-electron_target)
     work%fingerprint=state_fingerprint(work)
     publish=.true.;if(present(local_publish_ok))publish=local_publish_ok
     valid=publish.and.work%fingerprint/=0_int64.and.finite_matrix(work%coefficients)
