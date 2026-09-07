@@ -188,7 +188,11 @@ The final Si64 acceptance run uses the same eight-rank seed and mapping.  It mus
 complete the terminal LCFO, reproduce 256 electrons at 300 K, publish the
 occupied checkpoint, and record Wannier90 iteration counts.  A second run must
 show an exact fragment-WF cache hit on all eight ranks and skip Wannier90 while
-reproducing the projected basis and terminal result fingerprints.
+reproducing the projected-basis and continuation fingerprints exactly and the
+terminal floating state to the solver tolerance.  The occupied-checkpoint state
+fingerprint is an integrity hash of every floating bit, not a tolerance-aware
+physical-state identifier, so its value is recorded but is not required to be
+bitwise stable across independent ScaLAPACK solves.
 
 ## Task 5 production-smoke evidence (2026-09-07)
 
@@ -245,5 +249,80 @@ python3 tests/dg/run_dg_fragment_wf_production_smoke.py \
   --binary /tmp/salmon-task5-build/salmon \
   --result-dir /tmp/dg-fragment-wf-smoke-task5-08 \
   --seed-directory /tmp/dg-fragment-wf-smoke-task5-01/dc-seed
+git diff --check
+```
+
+## Task 6 Si64 SCDM and exact-reuse evidence (2026-09-07)
+
+The controlled Si64 pair is preserved under
+`/private/tmp/si64-t6-scdm-20260907-b`; the complete machine-readable receipt is
+`si64_scdm_reuse_evidence.json`.  Both runs used eight MPI ranks, one OpenMP
+thread, ordinary-DC publication `7047888166118007469`, and rank-fragment mapping
+fingerprint `254086644876463474`.  Both reported `scf_skipped=T`.
+
+The clean run missed the fragment-WF cache and published generation
+`7884354523164536186`.  The checkpoint shards authenticate `scdm` gauge
+algorithm version 1, candidate and retained rank 400, the fixed rank-to-fragment
+mapping, and nonzero per-fragment selection/gauge fingerprints.  The
+post-Wannier90 reconstruction defects range from `7.16e-13` to `7.40e-13`,
+well below the `1e-9` acceptance bound.  Deterministic
+pivot selection and the actual SCDM polar-gauge fingerprint remain covered by
+the focused 1/2/4/8-rank MPI contract; the version-1 production checkpoint does
+not serialize the pivot-ID list.
+
+| fragment | random iterations | SCDM iterations | SCDM W90 wall (s) |
+|---:|---:|---:|---:|
+| 1 | 1342 | 631 | 1690.513 |
+| 2 | 1192 | 631 | 1691.490 |
+| 3 | 2640 | 632 | 1693.709 |
+| 4 | 3058 | 631 | 1692.089 |
+| 5 | 1927 | 631 | 1691.892 |
+| 6 | 1837 | 631 | 1692.011 |
+| 7 | 779 | 632 | 1693.606 |
+| 8 | 783 | 631 | 1690.041 |
+
+SCDM reduced the summed iteration count from 13,558 to 5,050, a 62.75% reduction
+(`0.37247` ratio).  The complete clean run took 2642.7 s.  The exact-reuse run
+hit the same publication on all ranks, created zero `.wout` files, and completed
+in 893.9 s.  Both produced projected-basis fingerprint
+`7640891576956012809`, identical six-point continuation fingerprints, exactly
+one terminal LCFO solve, and no post-LCFO density update.
+
+The clean/reuse terminal LCFO residuals were `2.25175905e-13` and
+`2.55764319e-13`; electron defects were `1.30341959e-10` and
+`1.28807187e-10`, respectively.  The independently authenticated occupied
+streams had identical catalog, basis, provenance, and operator fingerprints.
+Their bitwise state hashes differed because the independent ScaLAPACK solves
+differed by roundoff: maximum occupation, eigenvalue, diagnostic-receipt, and
+coefficient-component differences were `9.90e-13`, `9.41e-14`, `3.06e-14`, and
+`5.92e-12`.  The relative Frobenius difference between the occupation-weighted
+density matrices `C diag(f) C^H` was `4.87e-13`.  The `1e-9` physical-identity
+acceptance applies to occupations, eigenvalues, invariant solver receipts, and
+this orbital-gauge-invariant density comparison within the identical certified
+basis.  Raw coefficient differences are
+recorded only as a diagnostic because eigenvectors may acquire arbitrary phase
+or rotate within an equally occupied degenerate subspace without changing the
+physical state.
+
+Task 6 verification completed with:
+
+```text
+python3 tests/dg/check_dg_hybrid_si64_scdm_runner.py
+python3 tests/dg/check_dg_fragment_w90_initial_projection.py
+python3 tests/dg/check_dg_fragment_wf_restart_route.py
+python3 tests/dg/check_dg_hybrid_fragment_wannier_route.py
+python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_dc_seed_route.py
+python3 tests/dg/check_dg_hybrid_localization_first_inputs.py
+python3 tests/dg/run_dg_fragment_scdm_gauge_mpi.py
+python3 tests/dg/run_dg_fragment_wf_checkpoint_mpi.py
+python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_selection_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
+python3 tests/dg/run_dg_hybrid_si64_scdm_reuse.py \
+  --binary /tmp/salmon-task5-build/salmon \
+  --result-dir /tmp/si64-t6-scdm-20260907-b --analyze-existing
+cmake --build /tmp/salmon-task5-build -j4
 git diff --check
 ```

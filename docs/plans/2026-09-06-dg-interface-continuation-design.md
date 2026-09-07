@@ -77,3 +77,20 @@ Unit and MPI tests must establish:
 - no post-LCFO density update is introduced.
 
 The Si64 diagnostic runs compare residual-versus-lambda and energy-versus-lambda using the same reused DC seed, MPI size, rank-fragment map, basis inventory, and CG cap.
+
+## Si64 fixed-density result
+
+The earlier deterministic-random run measured residual `1.7943383143e2` at
+lambda zero and monotonic growth to `2.0819639807e3` at lambda one.  The final
+SCDM-seeded Task 6 run independently showed the same interpretation: residual
+`1.6698429510e2` at lambda zero and monotonic growth through `4.8146563069e2`,
+`1.0041173397e3`, `1.5678315211e3`, and `2.0077917136e3` to
+`2.5776147956e3` at lambda one.  Its scaled interface-action norm grew from zero
+to `3.8910081811e3`.
+
+Thus the full SIPG interface term is the dominant source of the observed
+fixed-density residual growth.  This diagnosis is separate from the corrected
+terminal occupation-unit bug: the terminal 300 K LCFO solve reproduced 256
+electrons to `1.31e-10`, with a `2.25e-13` generalized residual.  The automatic
+fragment-WF reuse run reproduced all six continuation values and fingerprints
+exactly while invoking Wannier90 zero times.
