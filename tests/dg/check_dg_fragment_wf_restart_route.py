@@ -11,6 +11,7 @@ MAIN = (ROOT / "src/gs/main_dft.f90").read_text().lower()
 BUILDER = (ROOT / "src/gs/dc/dg_hybrid_fragment_wannier.f90").read_text().lower()
 ADMISSION = (ROOT / "src/gs/dc/dg_hybrid_fragment_admission.f90").read_text().lower()
 FIXTURE = (ROOT / "tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in").read_text().lower()
+SMOKE_RUNNER_PATH = ROOT / "tests/dg/run_dg_fragment_wf_production_smoke.py"
 
 for declaration in (
     r"character\(16\)\s*::\s*dg_fragment_wf_checkpoint_mode",
@@ -81,6 +82,16 @@ for token in (
 assert "atomic_create_directory(trim(dg_fragment_wf_checkpoint_directory)" in route
 assert "[dg-fragment-wf]" in route
 assert "checkpoint_hit=" in route
+assert "[dg-hybrid-divided] projected_basis_fingerprint=" in route
+terminal_log = route.split("fixed-density/non-self-consistent divided wf+pw lcfo solved once", 1)[1]
+assert "electron_defect=" in terminal_log[:800]
+
+restore_start = BUILDER.index("subroutine restore_fragment_cache_from_checkpoint")
+restore_end = BUILDER.index("end subroutine restore_fragment_cache_from_checkpoint", restore_start)
+restore = BUILDER[restore_start:restore_end]
+assert "contract%rank/=rank" not in restore, (
+    "a total-communicator checkpoint rank must not be compared with the rank in a one-rank fragment communicator"
+)
 
 # Keep every DC seed visible until the energy-aware initializer has sorted the
 # spectrum and completed a cutoff or degenerate boundary.  Pre-slicing by
@@ -97,5 +108,23 @@ for setting in (
     "dg_fragment_w90_initial_projection='scdm'",
 ):
     assert setting in re.sub(r"\s+", "", FIXTURE)
+
+assert SMOKE_RUNNER_PATH.is_file(), "missing short Si8 production restart smoke runner"
+smoke_runner = SMOKE_RUNNER_PATH.read_text().lower()
+for token in (
+    "si8_overlapping_wannier",
+    'not hit["checkpoint_hit"]',
+    'miss["checkpoint_hit"]',
+    "projected_basis_fingerprint",
+    "electron_defect",
+    "dg_fragment_wf.manifest",
+    "incomplete",
+    "--seed-directory",
+    "occupied_checkpoint_fingerprint",
+    'incomplete["wannier_wout_count"] != ranks',
+    "struct.unpack_from",
+    "seed_preloaded",
+):
+    assert token in smoke_runner, f"short production smoke omits {token}"
 
 print("PASS production SCDM and fragment-WF restart route")

@@ -889,7 +889,10 @@ contains
     character(message_length)::hash_message
     ok=.false.;message='';cache=s_dg_hybrid_fragment_wannier_cache();allocation_status=0
     call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
-    if(ierr/=MPI_SUCCESS.or.nproc/=1.or.contract%rank/=rank.or.&
+    ! contract%rank belongs to the total communicator and was already checked
+    ! by the collective checkpoint reader.  Here rank is fragment-communicator
+    ! local (zero under the required one-rank-per-fragment production layout).
+    if(ierr/=MPI_SUCCESS.or.nproc/=1.or.&
         any(payload%selected_state_ids/=[(int(i,int64),i=1,contract%retained_rank)]))then
       message='restored fragment-WF rank or selection metadata is invalid';return
     endif
@@ -1369,8 +1372,9 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     character(message_length)::generation_directory,base
-    character(15)::fragment_component
-    character(19)::generation_component
+    integer,parameter::w90_seed_name_limit=50
+    character(7)::fragment_component
+    character(9)::generation_component
     integer::rank,ierr,status
     integer(c_int)::retcode
     interface
@@ -1382,11 +1386,14 @@ contains
     end interface
     ok=.false.;message='';seed_name='';status=0
     base=trimmed_directory(base_directory)
-    write(fragment_component,'("fragment-",i6.6)')fragment_id
-    write(generation_component,'("generation-",i8.8)')basis_generation
+    write(fragment_component,'("f",i6.6)')fragment_id
+    write(generation_component,'("g",i8.8)')basis_generation
     generation_directory=trim(base)//'/'//trim(fragment_component)//'/'//trim(generation_component)
-    seed_name=trim(generation_directory)//'/construction_wannier'
-    if(len_trim(generation_directory)>=message_length-2.or.len_trim(seed_name)>=len(seed_name))status=1
+    ! Wannier90 keeps its seed name in a short fixed-length buffer.  Retain
+    ! fragment/generation provenance in the parent path and keep the leaf short.
+    seed_name=trim(generation_directory)//'/w'
+    if(len_trim(generation_directory)>=message_length-2.or.len_trim(seed_name)>=len(seed_name).or.&
+      len_trim(seed_name)>w90_seed_name_limit)status=1
     call MPI_Comm_rank(comm,rank,ierr)
     if(ierr/=MPI_SUCCESS)status=1
     if(rank==0.and.status==0)then

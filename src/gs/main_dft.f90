@@ -1293,7 +1293,7 @@ contains
       fragment_origins(:,:),fragment_sizes(:,:),projector_offsets(:),selected_seeds(:)
     integer(int64)::raw_count,byte_limit,pw_workspace,window_workspace,basis_workspace,&
       pw_fingerprint,window_fingerprint,basis_fingerprint,frame_fingerprint,face_fingerprint,&
-      global_basis_fingerprint,metric_fingerprint,interface_fingerprint,directory_fingerprint,&
+      global_basis_fingerprint,global_frame_fingerprint,metric_fingerprint,interface_fingerprint,directory_fingerprint,&
       final_operator_fingerprint,&
       final_state_workspace,final_state_fingerprint,final_solver_workspace,&
       final_solver_fingerprint,final_checkpoint_fingerprint,final_provenance(6),&
@@ -1313,7 +1313,7 @@ contains
       initial_density(:),final_occupations(:)
     complex(8),allocatable::projector_support_values(:)
     real(8)::axis_weight(3),axis_gradient(3),coordinate,sum_defect,gradient_defect,&
-      denominator,convergence_value,electron_defect,accepted_interface_scale
+      denominator,convergence_value,electron_defect,terminal_electron_defect,accepted_interface_scale
     real(8)::volume_diagnostics(4),local_potential_diagnostics(2),final_scf_receipts(5),&
       final_residual,final_orthogonality,final_projector_defect
     real(8)::reciprocal_rotation(3,3,1),fragment_lattice(3,3),fragment_reciprocal_lattice(3,3)
@@ -1583,6 +1583,11 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'fragment-local fixed reference frame export failed'
     endif
+    call MPI_Allreduce(frame_fingerprint,global_frame_fingerprint,1,MPI_INTEGER8,MPI_BXOR,&
+      dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'fragment-local reference-frame fingerprint reduction failed'
+    global_frame_fingerprint=ieor(global_frame_fingerprint,int(z'3C6EF372FE94F82B',int64))
+    if(global_frame_fingerprint==0_int64)global_frame_fingerprint=1_int64
     allocate(interior_fragment(size(core_ids)),unit_potential(size(core_ids)),&
       local_potential(size(core_ids)),stat=status)
     call comm_logical_and(status==0,collective_ok,dc%icomm_tot)
@@ -1646,6 +1651,8 @@ contains
     if(ierr/=MPI_SUCCESS)error stop 'fragment-local basis fingerprint reduction failed'
     global_basis_fingerprint=ieor(global_basis_fingerprint,int(z'6A09E667F3BCC909',int64))
     if(global_basis_fingerprint==0_int64)global_basis_fingerprint=1_int64
+    if(rank==0)write(*,'(a,i0)')'[DG-HYBRID-DIVIDED] projected_basis_fingerprint=',&
+      global_basis_fingerprint
     call freeze_dg_hybrid_single_owner_payload(dc%icomm_tot,dc%n_frag,projected_basis,metric_rows,&
       kinetic_rows,nonlocal_rows,interface_rows,global_basis_fingerprint,metric_fingerprint,&
       interface_fingerprint,fixed_payload,payload_owner,payload_fragment,payload_local_slot,&
@@ -1885,7 +1892,7 @@ contains
     call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,total_basis_count,final_state_count,&
       projected_basis%global_ids,final_hrows,final_srows,dg_dc_gs_final_orbital_tolerance,&
       final_occupations,dc%elec_num_tot,global_basis_fingerprint,metric_fingerprint,&
-      final_operator_fingerprint,frame_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
+      final_operator_fingerprint,global_frame_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
       ow_hybrid_ground_state,final_state_workspace,final_state_fingerprint,final_residual,&
       final_orthogonality,final_projector_defect,final_solver_workspace,final_solver_fingerprint,&
       ok,message,electronic_temperature=max(0d0,temperature),&
@@ -1894,10 +1901,11 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'terminal divided Hybrid LCFO solve failed'
     endif
-    if(rank==0)write(*,'(a,3(a,es16.8))')&
+    terminal_electron_defect=abs(sum(ow_hybrid_ground_state%occupations)-dc%elec_num_tot)
+    if(rank==0)write(*,'(a,4(a,es16.8))')&
       '[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once',&
       ' residual=',final_residual,' orthogonality=',final_orthogonality,&
-      ' projector=',final_projector_defect
+      ' projector=',final_projector_defect,' electron_defect=',terminal_electron_defect
     final_provenance=[pw_fingerprint,window_fingerprint,global_basis_fingerprint,&
       bounded_fixed_payload%fingerprint,final_operator_fingerprint,final_solver_fingerprint]
     final_scf_receipts=[convergence_value,final_residual,final_orthogonality,&

@@ -46,6 +46,12 @@ assert "mpi_allreduce" in terminal_guard, (
     "terminal fingerprints must be checked for rank consistency"
 )
 solve_call = entry[solve_position:].split("ok,message)", 1)[0]
+assert "call mpi_allreduce(frame_fingerprint,global_frame_fingerprint" in entry, (
+    "fragment-local reference-frame receipts must be reduced to one global receipt"
+)
+assert "final_operator_fingerprint,global_frame_fingerprint" in solve_call, (
+    "terminal state validation must receive the collective reference-frame receipt"
+)
 assert "electronic_temperature=max(0d0,temperature)" in solve_call, (
     "terminal occupations must receive SALMON's atomic-unit electronic temperature"
 )

@@ -190,3 +190,60 @@ occupied checkpoint, and record Wannier90 iteration counts.  A second run must
 show an exact fragment-WF cache hit on all eight ranks and skip Wannier90 while
 reproducing the projected basis and terminal result fingerprints.
 
+## Task 5 production-smoke evidence (2026-09-07)
+
+The eight-fragment Si8 smoke reused the authoritative ordinary-DC publication
+`6738787162284537300` with mapping fingerprint `398352827599223578`; all three
+runs reported `scf_skipped=T`.  Complete logs and the machine-readable receipt
+are under `/private/tmp/dg-fragment-wf-smoke-task5-08`.
+
+The first production attempt exposed Wannier90 3.1's fixed 50-character
+`seedname` limit: the original fragment/generation namespace was truncated
+before `.win`.  The fragment scratch components are now the bounded
+`fNNNNNN/gNNNNNNNN/w` form, and both the implementation and MPI fixture reject
+seeds longer than the library limit.  The next attempt exposed two independent
+collective-receipt defects before a complete hit could be certified:
+
+- a fragment-local reference-frame fingerprint was passed where final-state
+  validation requires one rank-agreed receipt; production now reduces the
+  local fingerprints to a nonzero global-frame fingerprint;
+- restore compared the total-communicator checkpoint rank with the rank in a
+  one-rank fragment communicator.  The collective reader already validates the
+  total rank, so restore now validates only the one-rank fragment layout and
+  uses its local rank for cache metadata.
+
+The final miss, hit, and incomplete-publication recovery receipts were:
+
+| case | WF hit | WF publication | projected basis fingerprint | W90 `.wout` | wall time (s) |
+|---|---:|---:|---:|---:|---:|
+| miss | F | `4636335818477276088` | `7640891576956012809` | 8 | 40.717 |
+| hit | T | `4636335818477276088` | `7640891576956012809` | 0 | 23.704 |
+| manifest removed / recovery | F | `4903723031505013688` | `7640891576956012809` | 8 | 42.104 |
+
+Every run performed exactly one terminal fixed-density/non-self-consistent LCFO,
+performed no density update afterward, wrote an occupied checkpoint whose
+complete native stream and payload fingerprint were independently read back,
+and recorded 300 K in the Schwarz receipt.  The electron-count defect was
+`6.52100596e-11`; terminal residuals were between `8.15e-14` and `8.53e-14`.
+
+The following Task 5 verification completed successfully:
+
+```text
+python3 tests/dg/check_dg_fragment_wf_restart_route.py
+python3 tests/dg/check_dg_hybrid_fragment_wannier_route.py
+python3 tests/dg/check_dg_hybrid_divided_lcfo_route.py
+python3 tests/dg/check_dg_dc_seed_route.py
+python3 tests/dg/check_dg_hybrid_localization_first_inputs.py
+python3 tests/dg/run_dg_fragment_scdm_gauge_mpi.py
+python3 tests/dg/run_dg_fragment_wf_checkpoint_mpi.py
+python3 tests/dg/run_dg_hybrid_generalized_eigensystem_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_wannier_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_selection_mpi.py
+python3 tests/dg/run_dg_hybrid_fragment_subspace_mpi.py
+cmake --build /tmp/salmon-task5-build -j4
+python3 tests/dg/run_dg_fragment_wf_production_smoke.py \
+  --binary /tmp/salmon-task5-build/salmon \
+  --result-dir /tmp/dg-fragment-wf-smoke-task5-08 \
+  --seed-directory /tmp/dg-fragment-wf-smoke-task5-01/dc-seed
+git diff --check
+```

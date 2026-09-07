@@ -31,8 +31,8 @@ contains
 
   function fragment_token(fragment_id)result(token)
     integer,intent(in)::fragment_id
-    character(15)::token
-    write(token,'("fragment-",i6.6)')fragment_id
+    character(7)::token
+    write(token,'("f",i6.6)')fragment_id
   end function fragment_token
 
   logical function run_must_fail(seed)
@@ -1509,9 +1509,10 @@ contains
     condition=setup_calls==merge(call_index,0,fragment_rank==0).and.&
       run_calls==merge(call_index,0,fragment_rank==0)
     if(fragment_rank==0)then
-      write(expected_prefix,'(a,"/fragment-",i6.6,"/generation-",i8.8,"/")')&
+      write(expected_prefix,'(a,"/f",i6.6,"/g",i8.8,"/")')&
         artifact_root,fragment_id,generation
       condition=condition.and.index(setup_seed_history(call_index),trim(expected_prefix))==1
+      condition=condition.and.len_trim(setup_seed_history(call_index))<=50
       condition=condition.and.setup_seed_history(call_index)==run_seed_history(call_index)
       condition=condition.and.run_band_count_history(call_index)==band_count
       condition=condition.and.run_zero_auxiliary_energies(call_index)

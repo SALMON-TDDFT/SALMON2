@@ -140,11 +140,11 @@ with tempfile.TemporaryDirectory(prefix="hybrid-fragment-wannier-") as name:
         artifact_root = run_directory / "fragment-wannier-artifacts"
         expected_generations = (7, 8, 9, 11, 12, 13, 27, 28, 29)
         expected_directories = {
-            artifact_root / f"fragment-{fragment_id:06d}" / f"generation-{generation:08d}"
+            artifact_root / f"f{fragment_id:06d}" / f"g{generation:08d}"
             for fragment_id in (1, 2)
             for generation in expected_generations
         }
-        actual_directories = set(artifact_root.glob("fragment-*/generation-*"))
+        actual_directories = set(artifact_root.glob("f*/g*"))
         assert actual_directories == expected_directories, actual_directories
         assert not list(artifact_root.rglob("*.dmn")), "unconstrained mode emitted .dmn"
 
