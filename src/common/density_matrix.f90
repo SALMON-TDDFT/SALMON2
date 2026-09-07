@@ -212,7 +212,7 @@ contains
     use structures
     use salmon_global, only: yn_jm,yn_spinorbit
     use sendrecv_grid, only: update_overlap_complex8
-    use communication, only: comm_summation
+    use communication, only: comm_summation, comm_show_error
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use pseudo_pt_current_so, only: calc_current_nonlocal_so &
                                   , calc_current_nonlocal_rdivided_so
@@ -222,7 +222,9 @@ contains
     use iso_c_binding
     use nvtx_wrapper
 #if defined(USE_OPENACC) && defined(USE_GEMM)
+    use cudafor
     use cublas
+    use mpi, only: MPI_Allreduce, MPI_DOUBLE_COMPLEX, MPI_SUM
     use openacc
 #endif
     implicit none
@@ -287,12 +289,15 @@ contains
     ! into one packed matrix (4x zpseudo's) so a single GEMM returns all four.
     integer, parameter :: cur_io_block = 64
     integer,                     save :: cur_max_nproj = -1
+    integer,                     save :: cur_norb = 0
     integer,    allocatable,     save :: cur_nproj_atom(:), cur_l2g(:,:)
     complex(8), allocatable,     save :: cur_zekr4(:,:,:), cur_wf(:,:,:), cur_out(:,:,:)
+    complex(8), allocatable,     save :: cur_out_all(:,:,:)
+    complex(8), device, allocatable, save :: cur_dev_g(:,:,:), cur_dev_g2(:,:,:)
     real(8),    allocatable,     save :: cur_rinv(:,:)
     type(cublasHandle),          save :: cur_handle
     integer    :: cur_ia,cur_p,cur_j,cur_b,cur_natom,cur_ilma,cur_stat
-    integer    :: cur_blk_s,cur_nb,cur_np4
+    integer    :: cur_blk_s,cur_nb,cur_np4,cur_mpierr
     complex(8) :: cur_uv,cur_z
     real(8)    :: cur_w
 #endif
@@ -432,6 +437,17 @@ contains
             cur_zekr4 = (0d0,0d0)
             cur_wf    = (0d0,0d0)
 !$acc enter data copyin(cur_zekr4,cur_wf,cur_l2g,cur_nproj_atom,cur_rinv) create(cur_out)
+            if (info%if_divide_rspace) then
+              ! One stacked buffer per k-point so the unweighted projections are
+              ! reduced in a single call instead of once per orbital block.
+              cur_norb = info%io_e - info%io_s + 1
+              allocate(cur_out_all(4*cur_max_nproj, cur_norb, cur_natom))
+!$acc enter data create(cur_out_all)
+              ! MPI reads device buffers directly: handing it managed memory
+              ! round-trips the payload through host memory every call.
+              allocate(cur_dev_g (cur_max_nproj, cur_norb, cur_natom))
+              allocate(cur_dev_g2(cur_max_nproj, cur_norb, cur_natom))
+            end if
             cur_stat = cublasCreate(cur_handle)
           end if
           cur_np4 = 4*cur_max_nproj
@@ -481,6 +497,15 @@ contains
 !$acc end host_data
               if (cur_stat /= CUBLAS_STATUS_SUCCESS) stop 'calc_current: cublasZgemmStridedBatched failed'
 
+              if (info%if_divide_rspace) then
+                ! Stack the block's GEMM output; its unweighted slab is a
+                ! per-rank partial sphere sum, reduced once per k-point below.
+!$acc kernels present(cur_out,cur_out_all)
+                cur_out_all(1:cur_np4, cur_blk_s-info%io_s+1:cur_blk_s-info%io_s+cur_nb, 1:cur_natom) = &
+                    cur_out   (1:cur_np4, 1:cur_nb, 1:cur_natom)
+!$acc end kernels
+              else
+
 !$acc parallel loop collapse(2) present(cur_out,cur_rinv,cur_nproj_atom,system) &
 !$acc&              private(cur_uv,cur_w,cur_p) reduction(+:jx,jy,jz)
               do cur_ia=1,cur_natom
@@ -495,9 +520,44 @@ contains
                 end do
               end do
               end do
+              end if
 
               cur_blk_s = cur_blk_s + cur_nb
             end do
+
+            if (info%if_divide_rspace) then
+              ! Only the unweighted projection goes global: a product of two per-rank
+              ! partials is not repairable by summing currents; icomm_rko assembles
+              ! the weighted terms. MPI must see CUDA-Fortran device buffers --
+              ! managed memory migrates through host memory every call.
+!$acc wait
+!$acc kernels
+              cur_dev_g(1:cur_max_nproj,1:cur_norb,1:cur_natom) = &
+                  cur_out_all(1:cur_max_nproj,1:cur_norb,1:cur_natom)
+!$acc end kernels
+              call MPI_Allreduce(cur_dev_g, cur_dev_g2, cur_max_nproj*cur_norb*cur_natom, &
+                                 MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, cur_mpierr)
+              call comm_show_error(cur_mpierr)
+!$acc kernels
+              cur_out_all(1:cur_max_nproj,1:cur_norb,1:cur_natom) = &
+                  cur_dev_g2(1:cur_max_nproj,1:cur_norb,1:cur_natom)
+!$acc end kernels
+
+!$acc parallel loop collapse(2) present(cur_out_all,cur_rinv,cur_nproj_atom,system) &
+!$acc&              private(cur_uv,cur_w,cur_p) reduction(+:jx,jy,jz)
+              do cur_ia=1,cur_natom
+              do cur_b=1,cur_norb
+                cur_w = system%rocc(info%io_s+cur_b-1,ik,ispin) * system%wtk(ik)
+!$acc loop seq
+                do cur_p=1,cur_nproj_atom(cur_ia)
+                  cur_uv = cur_out_all(cur_p,cur_b,cur_ia) * cur_rinv(cur_p,cur_ia)
+                  jx = jx + 2d0*aimag(conjg(cur_out_all(cur_p +   cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                  jy = jy + 2d0*aimag(conjg(cur_out_all(cur_p + 2*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                  jz = jz + 2d0*aimag(conjg(cur_out_all(cur_p + 3*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
+                end do
+              end do
+              end do
+            end if
           end do
 #else
 !$acc kernels copyin(ispin,im)
