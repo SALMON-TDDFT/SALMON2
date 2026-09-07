@@ -256,6 +256,18 @@ program test_dg_hybrid_continuation_controller_mpi
   call decide_dg_hybrid_stage(icomm,controller,state,report,accept,ok,message)
   call require(ok.and..not.accept,'symmetry failure was accepted')
 
+  call initialize_dg_hybrid_controller(icomm,controls,0.875d0,accepted,3,limit_controller,ok,message)
+  call require(ok,trim(message));limit_state=accepted
+  call propose_dg_hybrid_trial(icomm,limit_controller,limit_state,ok,message)
+  call require(ok.and.limit_controller%trial_lambda==1d0,'final lambda proposal is incorrect')
+  limit_state%trace_cache_valid=.true.
+  call passing_report(limit_controller,report);report%iteration=controls%iteration_limit+2
+  call decide_dg_hybrid_stage(icomm,limit_controller,limit_state,report,accept,ok,message)
+  call require(ok.and..not.accept,'more than one final refresh iteration was accepted')
+  report%iteration=controls%iteration_limit+1
+  call decide_dg_hybrid_stage(icomm,limit_controller,limit_state,report,accept,ok,message)
+  call require(ok.and.accept,'the final refresh outside the ordinary iteration budget was rejected')
+
   call initialize_dg_hybrid_controller(icomm,controls,0d0,accepted,3,limit_controller,ok,message)
   call require(ok,trim(message));limit_state=accepted
   do i=1,controls%maximum_rollbacks

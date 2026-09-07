@@ -981,6 +981,7 @@ contains
       initial_total_density,ok,message)
     use structures,only:s_dcdft
     use salmon_global,only:convergence,threshold
+    use mpi,only:MPI_Allreduce,MPI_IN_PLACE,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_SUCCESS
     use,intrinsic::ieee_arithmetic,only:ieee_is_finite
     implicit none
     type(s_dcdft),intent(in)::dc
@@ -989,7 +990,7 @@ contains
     real(8),allocatable,intent(out)::initial_total_density(:,:,:)
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::allocation_status
+    integer::allocation_status,ix,iy,iz,ierr
 
     ok=.false.;message='';convergence_mode=convergence;density_threshold=threshold
     if(trim(convergence_mode)/='rho_dne'.and.trim(convergence_mode)/='norm_rho'.and.&
@@ -999,11 +1000,24 @@ contains
     if(.not.ieee_is_finite(density_threshold).or.density_threshold<=0d0)then
       message='divided Hybrid SCF requires the existing positive DC threshold';return
     endif
-    allocate(initial_total_density,mold=dc%rho_tot%f,stat=allocation_status)
+    allocate(initial_total_density(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3)),&
+      stat=allocation_status)
     if(allocation_status/=0)then
       message='divided Hybrid SCF could not snapshot dc%rho_tot';return
     endif
-    initial_total_density=dc%rho_tot%f
+    initial_total_density=0d0
+    do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
+    do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
+    do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
+      initial_total_density(ix,iy,iz)=dc%rho_tot%f(ix,iy,iz)
+    enddo
+    enddo
+    enddo
+    call MPI_Allreduce(MPI_IN_PLACE,initial_total_density,size(initial_total_density),&
+      MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      message='divided Hybrid SCF could not gather dc%rho_tot';return
+    endif
     if(.not.all(ieee_is_finite(initial_total_density)))then
       message='divided Hybrid SCF received a non-finite dc%rho_tot';return
     endif

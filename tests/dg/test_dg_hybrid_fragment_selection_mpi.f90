@@ -571,7 +571,11 @@ contains
     do p=1,np;boxes(1,p)=4d0*(p-1);enddo
     start=boxes(:,f);map=1;coords=0d0;frac=0d0;windows=0d0
     do p=1,8
-      map(p,1)=1+modulo(4*(f-1)+p-1,4*np)
+      if(p<=6)then
+        map(p,1)=1+modulo(4*(f-1)+p-1,4*np)
+      else
+        map(p,1)=1+modulo(4*(f-1)+(p-8)-1,4*np)
+      endif
       physical(p)=int(map(p,1),int64);coords(1,p)=real(map(p,1)-1,real64)
       frac(1,p)=real(p-1,real64)/8d0
       owner0=1+(map(p,1)-1)/4;windows(owner0,p)=1d0

@@ -551,25 +551,71 @@ contains
     integer(int64),intent(out)::workspace_peak_bytes,fingerprint
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer,allocatable::fragment_action(:,:),g_integer(:,:),g_action(:,:),g_star(:),g_conjugate(:)
-    real(real64),allocatable::raw_windows(:,:)
+    integer,allocatable::fragment_action(:,:),g_integer(:,:),g_action(:,:),g_star(:),g_conjugate(:),&
+      normalized_row_action(:,:),selected_row_action(:,:),trial_fragment_action(:,:),compatible(:)
+    integer,allocatable::candidate_row_action(:,:)
+    real(real64),allocatable::raw_windows(:,:),trial_windows(:,:),candidate_reciprocal_rotation(:,:,:)
     integer(int64)::window_workspace,window_fingerprint,reciprocal_fingerprint,basis_workspace,basis_fingerprint
-    real(real64)::effective_cutoff
-    integer::shell_added,orbit_added
+    real(real64)::effective_cutoff,identity_rotation(3,3)
     logical::stage_ok
+    integer::i,op,ncompatible,identity_operation,candidate_offset,shell_added,orbit_added
     character(256)::stage_message
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
     catalog%valid=.false.
+    call normalize_dg_hybrid_production_row_action(comm,global_point_count,core_ids,row_action,&
+      normalized_row_action,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    call validate_dg_hybrid_production_rotation_extent(comm,size(normalized_row_action,2),&
+      reciprocal_rotation,stage_ok,stage_message)
+    if(.not.stage_ok)then;message=trim(stage_message);return;endif
+    identity_rotation=0d0
+    do i=1,3;identity_rotation(i,i)=1d0;enddo
+    identity_operation=0
+    do op=1,size(normalized_row_action,2)
+      if(all(normalized_row_action(:,op)==[(i,i=1,global_point_count)]).and.&
+        maxval(abs(reciprocal_rotation(:,:,op)-identity_rotation))<=100d0*tolerance)then
+        identity_operation=op;exit
+      endif
+    enddo
+    candidate_offset=merge(0,1,identity_operation>0)
+    allocate(candidate_row_action(global_point_count,size(normalized_row_action,2)+candidate_offset),&
+      candidate_reciprocal_rotation(3,3,size(normalized_row_action,2)+candidate_offset))
+    if(candidate_offset==1)then
+      candidate_row_action(:,1)=[(i,i=1,global_point_count)]
+      candidate_reciprocal_rotation(:,:,1)=identity_rotation
+    endif
+    candidate_row_action(:,candidate_offset+1:)=normalized_row_action
+    candidate_reciprocal_rotation(:,:,candidate_offset+1:)=reciprocal_rotation
+    allocate(compatible(size(candidate_row_action,2)));compatible=0
+    do op=1,size(candidate_row_action,2)
+      call prepare_dg_hybrid_window_distribution(comm,global_point_count,fragment_count,fragment_ids,&
+        box_ids,box_windows,core_ids,core_fragment_ids,candidate_row_action(:,op:op),trial_windows,&
+        trial_fragment_action,window_workspace,window_fingerprint,stage_ok,stage_message)
+      if(stage_ok)then
+        compatible(op)=1
+        deallocate(trial_windows,trial_fragment_action)
+      elseif(trim(stage_message)/='spatial action does not map whole fragments')then
+        message=trim(stage_message);return
+      endif
+    enddo
+    ncompatible=sum(compatible)
+    if(ncompatible<1)then;message='no symmetry operation maps whole fragments';return;endif
+    allocate(selected_row_action(global_point_count,ncompatible))
+    i=0
+    do op=1,size(compatible)
+      if(compatible(op)==0)cycle
+      i=i+1;selected_row_action(:,i)=candidate_row_action(:,op)
+    enddo
     call prepare_dg_hybrid_window_distribution(comm,global_point_count,fragment_count,fragment_ids,&
-      box_ids,box_windows,core_ids,core_fragment_ids,row_action,raw_windows,fragment_action,&
+      box_ids,box_windows,core_ids,core_fragment_ids,selected_row_action,raw_windows,fragment_action,&
       window_workspace,window_fingerprint,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
-    call build_dg_hybrid_reciprocal_catalog(comm,reciprocal_lattice,reciprocal_rotation,cutoff,tolerance,&
+    call build_dg_hybrid_reciprocal_catalog(comm,reciprocal_lattice,candidate_reciprocal_rotation,cutoff,tolerance,&
       g_integer,g_vectors,g_action,g_star,g_conjugate,reciprocal_fingerprint,effective_cutoff,&
       shell_added,orbit_added,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);return;endif
     call build_dg_hybrid_windowed_pw_basis(comm,global_point_count,core_ids,coordinates,raw_windows,&
-      fragment_action,row_action,g_vectors,reciprocal_rotation,g_action,g_star,g_conjugate,&
+      fragment_action,selected_row_action,g_vectors,candidate_reciprocal_rotation,g_action,g_star,g_conjugate,&
       tile_width,tolerance,windows,catalog,basis_workspace,basis_fingerprint,stage_ok,stage_message)
     if(.not.stage_ok)then;message=trim(stage_message);catalog%valid=.false.;return;endif
     catalog%window_fingerprint=window_fingerprint
@@ -583,7 +629,9 @@ contains
     if(catalog%catalog_fingerprint==0_int64)catalog%catalog_fingerprint=1_int64
     fingerprint=catalog%catalog_fingerprint
     workspace_peak_bytes=max(window_workspace,basis_workspace)
-    deallocate(raw_windows,fragment_action,g_integer,g_action,g_star,g_conjugate)
+    deallocate(raw_windows,fragment_action,g_integer,g_action,g_star,g_conjugate,normalized_row_action,&
+      selected_row_action,compatible)
+    deallocate(candidate_row_action,candidate_reciprocal_rotation)
     ok=.true.
   end subroutine build_dg_hybrid_production_pw_basis
 end module dg_hybrid_production_pw_basis

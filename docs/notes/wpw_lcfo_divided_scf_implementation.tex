@@ -1,0 +1,1647 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{amsmath,amssymb,stmaryrd,booktabs,longtable,array}
+\usepackage[margin=23mm]{geometry}
+\usepackage{hyperref}
+\usepackage{iftex}
+\usepackage{titlesec}
+\ifLuaTeX
+  \usepackage{luatexja-fontspec}
+  \setmainfont{Latin Modern Roman}
+  \setsansfont{Latin Modern Sans}
+  \setmonofont{Latin Modern Mono}
+  \setmainjfont[BoldFont={HaranoAjiMincho-Bold}]{HaranoAjiMincho-Regular}
+  \setsansjfont[BoldFont={HaranoAjiGothic-Bold}]{HaranoAjiGothic-Regular}
+\else
+  \usepackage{CJKutf8}
+  \AtBeginDocument{\begin{CJK*}{UTF8}{min}}
+  \AtEndDocument{\end{CJK*}}
+\fi
+\titleformat{\section}{\Large\bfseries\sffamily}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries\sffamily}{\thesubsection}{1em}{}
+\titleformat{\paragraph}[runin]{\normalfont\normalsize\bfseries\sffamily}{\theparagraph}{1em}{}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\newcommand{\dd}{\mathrm d}
+\newcommand{\ii}{\mathrm i}
+\newcommand{\laplacian}{\nabla^2}
+\newcommand{\code}[1]{\texttt{#1}}
+\title{\sffamily SALMON WF+PW分割SCF/LCFO\\実装者向け技術ノート}
+\author{SALMON developers}
+\date{2026年8月26日}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+本書は、実空間Kohn--Sham問題から、局在軌道（WF）と窓関数付き平面波
+（PW）を併用するfragment基底、分割SCF、そして一度だけ実行する分散LCFO
+一般化固有値問題までを導出し、SALMONの現行Fortran/MPI実装へ対応付ける。
+会話や作業記憶に依存せず、将来の実装者が物理量、離散化、所有権、実行順序、
+検証の限界を再構成できることを目的とする。
+\end{abstract}
+
+\section*{最初に確認する計算ルートと適用限界}
+\addcontentsline{toc}{section}{最初に確認する計算ルートと適用限界}
+本書が説明するのは、WF+PW局所基底を作った後に、全fragmentの保持状態を用いて大域LCFO
+Hamiltonian行列とoverlap行列を組み立て、それらの一般化固有値問題をScaLAPACKで一度だけ
+密対角化するルートである。高速Hamiltonian作用と反復的基底状態計算を用いる別ルートではない。
+したがって、両ルートが共有するのはWF+PW基底を作る上流部分までであり、その後のデータ保持、
+Hamiltonianの表現、基底状態の求め方は異なる。
+
+\paragraph{このルートで保持するデータ。}
+fragment $f$が局所SCF後に残す基底状態数を$M_f^{\rm keep}$とし、全fragmentを合わせたLCFO基底数を
+\begin{equation}
+ M=\sum_f M_f^{\rm keep}
+ \label{eq:upfront-lcfo-dimension}
+\end{equation}
+とする。各保持基底には$1,\ldots,M$のglobal IDを付け、保持基底のglobal IDを一つのrankが一意に所有する。
+各rankは、自分が所有する基底について、その基底が定義されたbuffer上の値とphysical-point IDを保持する。
+最終LCFO行列の組立て後は、各rankは自分が所有する行について全$M$列を保持する。すなわち局所配列は
+概念的に
+\begin{equation}
+ H_{\rm local},S_{\rm local}\in\mathbb C^{M_{\rm owned}\times M}
+ \label{eq:upfront-row-distributed-storage}
+\end{equation}
+である。行はMPI rank間に分散しているが、$H$と$S$は論理的にはdenseな$M\times M$行列であり、
+fragment間blockを疎行列として切り捨てる実装ではない。
+
+\paragraph{実際のデータ処理順序。}
+このルートは次の順に計算する。
+\begin{enumerate}
+\item 分割SCFを収束させ、全fragmentが共有する最終密度$\rho^\star$と、それに対応する固定Hamiltonianを得る。
+\item 各fragmentでWF+PW基底から保持状態を作り、各列へglobal IDを付けてMPI rankへ分担する。
+\item LCFO列$\nu=1,\ldots,M$を一本ずつ処理する。その列のphysical-point値を、それを必要とする
+rankへ再分配し、固定した$\hat H[\rho^\star]$とoverlap作用を評価する。
+\item 各rankは作用後の列と自分が所有する基底行$\mu$との内積を取り、自rankが所有するLCFO行
+$H_{\mu\nu}$と$S_{\mu\nu}$を全ての$\nu$について保存する。
+\item この行分散行列をScaLAPACKが要求する二次元block-cyclic配置へ再分配する。
+\item $S$のCholesky分解、標準Hermitian問題への変換、dense eigensolverを用いて
+$HC=SC\varepsilon$を一度だけ解く。
+\item 必要な固有値と占有状態係数を各rankへ公開して終了する。この結果から密度SCFを再開しない。
+\end{enumerate}
+
+\paragraph{bufferが参照するfragmentの範囲。}
+各fragmentのbufferは、自分のcoreと、そのHamiltonian作用に必要な直近の周囲だけを含む。
+実装は各Cartesian方向についてbuffer幅が一つのfragment領域幅を超えないことを検査している。
+したがって、面、辺または角を共有する直近の隣接fragmentから値を受け取ることはあるが、
+その隣接fragmentを飛び越えて第二近接fragmentの格子点を参照することはない。
+周期境界では、セルの反対側で周期的につながるfragmentを直近の隣接fragmentとして扱う。
+
+ここで、物理的な参照範囲とMPI通信へ参加するrankの範囲を区別する必要がある。
+現在の再分配処理では、所有rankごとの値をcommunicator内でbroadcastし、受信側はphysical-point IDが
+自分のbufferに一致する値だけを採用する。このため全rankがcollective通信に参加することと、遠方fragmentの値に物理的に依存することは異なる。
+全rankが通信呼出しへ参加しても、各fragmentがHamiltonian作用に用いる値は自分のcoreと直近の
+隣接fragmentに属するbuffer格子点だけである。
+
+\paragraph{計算量と大規模化の限界。}
+二つのdense行列$H,S$を合わせた全体記憶量は$O(M^2)$である。MPI分散により各rankの行列記憶量は
+概ね$O(M^2/P)$へ減るが、全rankを合わせた記憶量は$O(M^2)$のままである。ここで$P$はLCFO計算に
+参加するMPI rank数である。また、全ての基底対$(\mu,\nu)$の行列要素を作るため、行列組立てだけでも
+少なくとも$O(M^2)$個の要素評価が必要になる。ScaLAPACKによるdense一般化固有値解法の主要演算量は
+$O(M^3)$である。分散化しても全体の漸近計算量は変わらない。
+
+系サイズ$N$とともに保持LCFO基底数が$M\propto N$で増える場合、全体記憶量は$O(N^2)$、最終対角化は
+$O(N^3)$へ増える。このため、本ルートは実装の物理的整合性を確認するreference経路および
+中小規模系の計算には使えるが、$M$が非常に大きくなる大規模系の最終基底状態計算には使用できない。
+MPI rank数を増やすだけでは、このdense行列という根本的制約は解消しない。
+
+別セッションで実装する、Hamiltonianをdense行列として保持せず高速作用させ、必要な基底状態だけを
+反復的に求めるルートは本書の対象外である。そのルートが目標とする$O(N\log N)$等の計算量は、
+FFT部分だけでなく状態数、直交化、反復回数を含めて別途評価しなければならない。本書の式や検証結果を、
+その高速ルートのスケーリング根拠として用いてはならない。
+
+\tableofcontents
+
+\section*{本書全体の記号規約}
+\addcontentsline{toc}{section}{本書全体の記号規約}
+本書では、記号を初めて用いる箇所で局所的な意味を再掲する。以下は全節に共通する規約である。
+\begin{longtable}{@{}p{0.24\linewidth}p{0.70\linewidth}@{}}
+\toprule 記号 & 全体を通した意味 \\ \midrule
+$d$ & 空間次元。一般DGの導出では任意の$d$、SALMON実装では$d=3$。\\
+$\Omega\subset\mathbb R^d$ & 計算対象の有界領域または周期セル。$\boldsymbol r\in\Omega$は位置。\\
+$\nabla$, $\laplacian$ & $\boldsymbol r$に関する空間勾配とLaplacian。ここで$\laplacian\equiv\nabla\!\cdot\!\nabla$。\\
+$z^*$, $A^\dagger$ & scalar $z$の複素共役、および行列$A$の共役転置。\\
+$\langle u|v\rangle$ & $u,v$の複素内積。連続表示では$\int_\Omega u^*v\,\dd\boldsymbol r$。\\
+$\|x\|_2$ & vector $x$のEuclidean norm。添字のない行列normは本文で指定する。\\
+$I$ & 文脈から定まる次元の単位行列。$0$は同じく零scalar/vector/matrix。\\
+$\operatorname{span}\{\cdots\}$ & 列挙した関数またはvectorの線形包。\\
+$\rho(\boldsymbol r)$ & 電子数密度。原子単位系で体積積分が電子数になる。\\
+$\hat H[\rho]$ & 密度$\rho$から作る連続Kohn--Sham Hamiltonian。\\
+$\mathcal H[\rho]$ & $\hat H[\rho]$を実空間格子へ離散化した作用行列。\\
+$f$; $g$ & fragment添字$f=1,\ldots,N_f$；physical-point添字$g=1,\ldots,N_g$。\\
+$n,m$ & 一電子状態添字。本文中の上限$N_{\rm state}$または占有状態数まで。\\
+$a,b$; $\mu,\nu$ & fragment内基底添字；全体LCFO基底添字。\\
+\bottomrule
+\end{longtable}
+添字範囲を省略した和は、直前に定義した全範囲を走る。太字小文字は空間vectorまたは
+離散列vector、大文字は行列または線形写像、calligraphic文字は作用素・mesh・試行空間を表す。
+上付き$(k)$はSCF反復番号であり、複素共役を意味する$*$とは区別する。
+
+\section{一般的なdiscontinuous Galerkin法}
+\subsection{連続問題とbroken trial space}
+\paragraph{強形式から弱形式へ。}
+一般DG法の出発点として、領域$\Omega\subset\mathbb R^d$上の複素波動関数
+$\psi:\Omega\to\mathbb C$を未知関数とする。$|\psi(\boldsymbol r)|^2$は位置
+$\boldsymbol r$における確率密度なので、$\psi$は確率振幅である。既知の実scalar potentialを
+$V:\Omega\to\mathbb R$、求める固有energyを$E\in\mathbb R$と定義する。Hamiltonianを
+$\hat H=-\laplacian/2+V$と書けば、
+単一粒子Schr\"odinger型固有値問題は
+\begin{equation}
+ \hat H\psi=E\psi,
+ \qquad \hat H=-\frac12\laplacian+V(\boldsymbol r)
+ \quad\text{in }\Omega
+ \label{eq:general-strong}
+\end{equation}
+である。左辺はHamiltonianを波動関数へ作用させた状態、右辺は同じ波動関数をenergy倍した
+状態である。
+
+\paragraph{区間ごとの基底で波動関数を作り直す。}
+議論を具体的にするため、まず1次元区間$\Omega=(0,L)$を$N_e$個の小区間へ
+\begin{equation}
+ 0=x_0<x_1<\cdots<x_{N_e}=L,
+ \qquad K_j=(x_{j-1},x_j)
+ \label{eq:1d-mesh}
+\end{equation}
+と分ける。$x_j$は区間の端点、$K_j$は$j$番目の要素である。各$K_j$の内部だけで定義する
+1次元の式でも微分記法は多次元と統一し、$\nabla\psi$は$x$方向の空間勾配、
+$\laplacian\psi=\nabla\!\cdot\!\nabla\psi$はLaplacianを意味する。
+各$K_j$の内部だけで定義する
+局所基底を$\phi_{j\alpha}(x)$、その複素係数を$c_{j\alpha}$、基底本数を$M_j$とする。
+近似波動関数$\psi_h$を要素ごとに
+\begin{equation}
+ \left.\psi_h\right|_{K_j}(x)
+ =\sum_{\alpha=1}^{M_j}c_{j\alpha}\phi_{j\alpha}(x),
+ \qquad x\in K_j
+ \label{eq:piecewise-ansatz}
+\end{equation}
+と定義する。これは「一つの未知関数$\psi(x)$を直接探す」代わりに、「既知の局所関数
+$\phi_{j\alpha}$をどの係数$c_{j\alpha}$で足せばよいか」を探す、という置換である。
+この段階では、隣接要素の係数同士に関係を課していない。したがって境界$x_j$の左右で
+$\psi_h$が一致するかどうかも、まだ決めていない。
+
+\paragraph{式(1)へ代入すると要素内部では何が起こるか。}
+式\eqref{eq:piecewise-ansatz}を強形式\eqref{eq:general-strong}へ代入すると、各要素内部では
+\begin{equation}
+ \mathcal R_j(x)
+ =\sum_{\alpha=1}^{M_j}c_{j\alpha}
+ \left[-\frac12\laplacian\phi_{j\alpha}
+ +(V(x)-E)\phi_{j\alpha}(x)\right]=0,
+ \qquad x\in K_j
+ \label{eq:element-strong-residual}
+\end{equation}
+となる。$\mathcal R_j$は$j$番目の要素内部におけるSchr\"odinger方程式の残差である。
+基底が完全でない有限次元空間では、一般に全ての$x$で$\mathcal R_j(x)=0$とはできないため、
+後で「残差が全ての試験関数に直交する」という積分条件へ置き換える。
+
+さらに重要なのは要素境界である。左右の局所展開が異なる値を持つと、$\psi_h$にはjumpがある。
+そのような関数を二回微分すると、通常の要素内二階微分だけでなく、境界に集中したdelta関数型の
+寄与が生じる。したがって区分的な式\eqref{eq:piecewise-ansatz}を式(1)の強形式へ大域的に代入できない。
+要素内部の式だけを解いても、電子の確率振幅やkinetic fluxを隣の要素へどう伝えるかが未決定だからである。
+
+ここからDG法へ進むには、(i) 要素ごとに積分する、(ii) kinetic項を部分積分して境界項を露出させる、
+(iii) 左右二つある境界値を数値流束で一つに定める、という手順を取る。まず比較のため、連続な
+波動関数に対する通常の弱形式を導く。強形式は$\laplacian\psi$を各点で評価する。任意の試験波動関数
+$\varphi:\Omega\to\mathbb C$の複素共役$\varphi^*$を掛けて一度部分積分すると、
+二階微分を$\psi$と$\varphi$の一階微分へ分配できる。周期境界または斉次Dirichlet境界なら
+連続な弱形式は
+\begin{equation}
+ \frac12\int_\Omega\nabla \varphi^*\cdot\nabla \psi\,\dd\boldsymbol r
+ +\int_\Omega \varphi^*V\psi\,\dd\boldsymbol r
+ =E\int_\Omega \varphi^*\psi\,\dd\boldsymbol r
+ \qquad(\forall \varphi\in H^1(\Omega))
+ \label{eq:continuous-weak-first}
+\end{equation}
+となる。第一項はbra $\varphi$とket $\psi$の間の運動energy行列要素であり、
+$\varphi=\psi$なら運動エネルギー期待値になる。第二項はpotential energy行列要素、右辺は
+重なりにenergy $E$を掛けたものである。$H^1(\Omega)$は、関数自身と一階弱微分がともに
+二乗可積分な関数の空間である。
+
+式(5)の$\varphi$は、残差のどの成分を測るかを指定する関数である。
+試験波動関数は新しい物理状態ではない。連続問題では全ての許容$\varphi$について式が成立することを要求する。
+離散Galerkin法では各局所基底を順に$\varphi=\phi_{j\beta}$として選び、
+$\langle\varphi|\mathcal R\rangle=0$を係数方程式へ変換する。
+
+\subsection{区分基底からDG Hamiltonianへ}
+ここからは式\eqref{eq:piecewise-ansatz}の区分基底を式(5)へ入れ、要素内部のenergy積分と
+要素境界の結合を一つのHamiltonian行列へまとめる。必要な境界量を順に定義した後、
+式\eqref{eq:dg-matrix}で$H^{\rm DG}$を明示する。
+
+\paragraph{1次元meshで「不連続」を見る。}
+式\eqref{eq:1d-mesh}のmeshを使う。ここで$x$は区間内を連続に動く座標であり、
+$j$は要素と境界を数える離散的な番号である。したがって、波動関数
+$\psi_h(x)$は各開区間$K_j$の内部では連続変数$x$の関数として定義されている。
+
+境界$x_j$そのものへ左要素$K_j$の内部から近づいた値と、右要素$K_{j+1}$の内部から
+近づいた値を、それぞれ
+\begin{equation}
+ \psi_h(x_j^-)=\lim_{x\to x_j^-}\left.\psi_h(x)\right|_{K_j},
+ \qquad
+ \psi_h(x_j^+)=\lim_{x\to x_j^+}\left.\psi_h(x)\right|_{K_{j+1}}
+ \label{eq:1d-traces}
+\end{equation}
+と定義する。記号$x_j^-$と$x_j^+$は別々の格子点ではない。どちらも同じ物理位置$x_j$を表し、
+その位置へ左から近づくか右から近づくかだけが異なる。この二つの極限値を左右のtraceと呼ぶ。
+
+\paragraph{式(6)を使うと式(4)、式(5)はどうなるか。}
+まず式(4)の要素残差$\mathcal R_j$を点ごとに0とする代わりに、要素$K_j$の局所基底
+$\phi_{j\beta}$を試験関数として掛け、
+\begin{equation}
+ \int_{K_j}\phi_{j\beta}^*(x)\mathcal R_j(x)\,\dd x=0
+ \qquad(\beta=1,\ldots,M_j)
+ \label{eq:element-residual-projection}
+\end{equation}
+を要求する。式(4)を代入し、二階微分を含むkinetic項だけを一度部分積分すると
+\begin{align}
+ &\sum_{\alpha=1}^{M_j}c_{j\alpha}\Bigg\{
+ \frac12\int_{K_j}
+ \nabla\phi_{j\beta}^*\cdot\nabla\phi_{j\alpha}\,\dd x
+ +\int_{K_j}\phi_{j\beta}^*V\phi_{j\alpha}\,\dd x \notag\\
+ &\hspace{35mm}
+ -\frac12\left[\phi_{j\beta}^*\nabla\phi_{j\alpha}\right]
+ _{x_{j-1}^+}^{x_j^-}\Bigg\}
+ =E\sum_{\alpha=1}^{M_j}c_{j\alpha}
+ \int_{K_j}\phi_{j\beta}^*\phi_{j\alpha}\,\dd x .
+ \label{eq:element-weak-with-boundary}
+\end{align}
+を得る。
+式(8)を全要素について足した全系の式を、展開を省略せずに書くと
+\begin{align}
+ &\sum_{\ell=1}^{N_e}\Bigg\{
+ \frac12\int_{K_\ell}\nabla\varphi^*(x)\cdot\nabla\psi_h(x)\,\dd x
+ +\int_{K_\ell}\varphi^*(x)V(x)\psi_h(x)\,\dd x \notag\\
+ &\hspace{30mm}
+ -\frac12\left[\varphi^*(x)\nabla\psi_h(x)\right]_{x_{\ell-1}^+}^{x_\ell^-}
+ \Bigg\}
+ =E\sum_{\ell=1}^{N_e}\int_{K_\ell}\varphi^*(x)\psi_h(x)\,\dd x .
+ \label{eq:global-weak-before-regrouping}
+\end{align}
+ここでは一要素の添字$j$を、全要素を走るdummy index $\ell$へ書き換えた。
+第一行の二つの積分を全要素で足したものが全系の体積Hamiltonian、第二行の角括弧を
+全要素で足したものが全系の境界Hamiltonianである。以下では、この全系式に既に含まれている
+角括弧だけを取り出し、同じ物理境界に属する項を隣り合わせに並べ直す。
+
+式(8)の最初の二つの積分は、式(5)と同じ要素内部のkinetic energyとpotential energyである。
+新しく現れた角括弧が、要素の左右端から来る境界項である。上端$x_j^-$と下端
+$x_{j-1}^+$は、それぞれ式(6)と同じ側から評価する。
+
+積分区間との関係を明示する。$K_j=(x_{j-1},x_j)$なので
+$\int_{K_j}=\int_{x_{j-1}}^{x_j}$であり、kinetic項の部分積分は
+\begin{equation}
+ -\frac12\int_{x_{j-1}}^{x_j}\varphi^*(x)\laplacian\psi_h(x)\,\dd x
+ =\frac12\int_{x_{j-1}}^{x_j}\nabla\varphi^*(x)\cdot\nabla\psi_h(x)\,\dd x
+ -\frac12\varphi^*(x_j^-)\nabla\psi_h(x_j^-)
+ +\frac12\varphi^*(x_{j-1}^+)\nabla\psi_h(x_{j-1}^+).
+ \label{eq:ibp-with-explicit-limits}
+\end{equation}
+これは$-[F]_{a}^{b}=-F(b)+F(a)$を使っただけなので、上端は負符号、下端は正符号になる。
+一方、右隣の$K_{j+1}=(x_j,x_{j+1})$では同じ$x_j$が積分区間の\emph{下端}である。
+したがって右要素から来る$x_j$の項には正符号が付く。この「左要素では上端、右要素では下端」
+という幾何学的関係が、後で二つの境界寄与を足す理由と符号を決めている。
+
+ここで式(8)は一つの要素だけに対する一回限りの式ではない。要素番号を一般に$\ell$と書けば、
+$\ell=1,\ldots,N_e$の全要素について同じ形の式(8)が一つずつ存在する。
+内部境界$x_j$は左要素$K_j$の右端であると同時に、右要素$K_{j+1}$の左端である。
+したがって$x_j$の寄与を調べるには、式(8)を$\ell=j$として左要素へ適用した式と、
+$\ell=j+1$として右要素へ適用した式の二本を取り出して足す。右要素は左要素の式から
+突然生成されるのではなく、全要素に用意された別の式(8)から来る。
+
+$K_{j-1}$は境界$x_j$に接していないので、$x_j$の寄与を作る組には入らない。
+ただし$K_j$の左端$x_{j-1}$の項を捨てるわけではない。その項は、境界$x_{j-1}$を共有する
+$K_{j-1}$の右端項と、境界$x_{j-1}$を共有する二要素と後で組にする。同様に全ての内部境界で、
+その境界の左要素と右要素を一組にする。この段階ではまだ$B$という略記を導入せず、次の具体計算で
+一つの内部境界に集まる二項を導出する。
+
+式(8)の角括弧を、共有境界$x_j$に関係する部分だけ実際に展開する。左要素$K_j$では
+\begin{equation}
+ -\frac12\left[\varphi^*\nabla\psi_h\right]_{x_{j-1}^+}^{x_j^-}
+ =\underbrace{-\frac12\varphi^{-*}(\nabla\psi_h)^-}_{x_j\text{からの寄与}}
+ +\underbrace{\frac12\varphi^*(x_{j-1}^+)\nabla\psi_h(x_{j-1}^+)}_{x_{j-1}\text{からの寄与}}.
+\end{equation}
+$x_j$から来る第一項だけを
+\begin{equation}
+ T_{j\to x_j}=-\frac12\varphi^{-*}(\nabla\psi_h)^-
+ \label{eq:left-element-interface-piece}
+\end{equation}
+と呼ぶ。一方、右要素$K_{j+1}$の角括弧は
+\begin{equation}
+ -\frac12\left[\varphi^*\nabla\psi_h\right]_{x_j^+}^{x_{j+1}^-}
+ =\underbrace{-\frac12\varphi^*(x_{j+1}^-)\nabla\psi_h(x_{j+1}^-)}_{x_{j+1}\text{からの寄与}}
+ +\underbrace{\frac12\varphi^{+*}(\nabla\psi_h)^+}_{x_j\text{からの寄与}},
+\end{equation}
+なので、同じ$x_j$から来る第二項は
+\begin{equation}
+ T_{j+1\to x_j}=+\frac12\varphi^{+*}(\nabla\psi_h)^+.
+ \label{eq:right-element-interface-piece}
+\end{equation}
+全要素の式(8)を足すと、端点寄与はこのように物理境界ごとに二つずつ集まる。
+ここで、境界$x_j$が弱形式へ与える総寄与を$B_j$と定義する。
+すると、上で取り出した二項の和から
+\begin{equation}
+ B_j=T_{j\to x_j}+T_{j+1\to x_j}
+ =-\frac12\varphi^{-*}(\nabla\psi_h)^-
+  +\frac12\varphi^{+*}(\nabla\psi_h)^+.
+ \label{eq:boundary-sum-derived}
+\end{equation}
+となる。したがって$B_j$は式(8)へ新しく付け加えた項ではない。式(8)を全要素について足し、
+同じ境界に属する端点項をまとめた結果として必ず現れる。
+
+全ての内部境界について$B_j$を定義し終えたので、ここで初めて全境界和を短く書ける。
+また、外側二端から来る総寄与を$B_{\rm ext}$と定義する。
+具体的には、最左要素$K_1=(x_0,x_1)$の下端項と、最右要素
+$K_{N_e}=(x_{N_e-1},x_{N_e})$の上端項の和
+\begin{equation}
+ B_{\rm ext}=+\frac12\varphi^*(x_0^+)\nabla\psi_h(x_0^+)
+ -\frac12\varphi^*(x_{N_e}^-)\nabla\psi_h(x_{N_e}^-)
+ \label{eq:external-boundary-contribution}
+\end{equation}
+である。左端は$K_1$の積分下端なので正、右端は$K_{N_e}$の積分上端なので負になる。
+斉次Dirichlet境界では許容試験関数が端点で0なのでこの項は消える。Neumann境界では
+指定された微分値を代入する。周期境界では$x_0$と$x_{N_e}$を同じ物理interfaceの左右traceとして
+組み、内部境界と同様の数値流束で処理する。すると
+\begin{align}
+ &\sum_{\ell=1}^{N_e}\left[-\frac12\left[\varphi^*\nabla\psi_h\right]
+ _{x_{\ell-1}^+}^{x_\ell^-}\right] \notag\\
+ &=B_{\rm ext}
+ +\sum_{j=1}^{N_e-1}\left(
+ -\frac12\varphi^{-*}(x_j)(\nabla\psi_h)^-(x_j)
+ +\frac12\varphi^{+*}(x_j)(\nabla\psi_h)^+(x_j)\right)\\
+ &=B_{\rm ext}+\sum_{j=1}^{N_e-1}B_j .
+ \label{eq:explicit-reindex-boundaries}
+\end{align}
+ここで$\ell$は要素を数える添字、$j$は内部境界を数える添字である。第一行で全系への要素和は
+既に完了している。以後はその和の項を同じ$x_j$ごとに並べ替えただけであり、同じ項を二重に加える操作ではない。
+
+\paragraph{$j$番目の領域のDG方程式を再定義する。}
+式\eqref{eq:1d-traces}で見たように、境界$x_j$には左要素から見た波動関数$\psi_h^-$と、
+右要素から見た波動関数$\psi_h^+$がある。DGでは左右の要素が自由度を共有しないので
+\begin{equation}
+ \psi_h(x_j^-)\ne\psi_h(x_j^+)
+ \label{eq:1d-discontinuity}
+\end{equation}
+を許す。勾配にも左側の値$(\nabla\psi_h)^-$と右側の値$(\nabla\psi_h)^+$があり、
+DG近似ではこの二つも一致するとは限らない。
+
+元のSchr\"odinger方程式では、境界を通るkinetic情報は一つでなければならない。しかしDG近似からは
+勾配についても左右二つの値が得られる。そこで、左右の波動関数値と勾配値を入力し、境界で使う一つの
+代表値を返す規則$\mathcal F$を選ぶ。その代表値を
+\begin{equation}
+ \widehat{\nabla\psi}_{\,j}=\mathcal F\!\left(
+ \psi_h^-,\psi_h^+,(\nabla\psi_h)^-,(\nabla\psi_h)^+\right)
+ \label{eq:numerical-derivative-flux}
+\end{equation}
+と定義し、境界$x_j$の数値勾配fluxと呼ぶ。hatは「左右二つの勾配をそのまま使うのではなく、
+計算で採用する一つの境界勾配を作った」ことを表す。同様に左境界$x_{j-1}$には
+$\widehat{\nabla\psi}_{\,j-1}$がある。どちらも隣接二要素の情報から作る共有値である。
+
+ここで一度、式\eqref{eq:numerical-derivative-flux}までの情報だけを使って、全系で解く方程式を
+まとめておく。式\eqref{eq:global-weak-before-regrouping}の全要素和において、境界$x_j$へ接する
+左要素と右要素の二項を同じ$\widehat{\nabla\psi}_{\,j}$で置き換えると
+\begin{align}
+ &\frac12\sum_{\ell=1}^{N_e}\int_{K_\ell}
+ \nabla\varphi^*(x)\cdot\nabla\psi_h(x)\,\dd x
+ +\sum_{\ell=1}^{N_e}\int_{K_\ell}
+ \varphi^*(x)V(x)\psi_h(x)\,\dd x \notag\\
+ &-\frac12\sum_{j=1}^{N_e-1}
+ \left(\varphi^{-*}(x_j)-\varphi^{+*}(x_j)\right)
+ \widehat{\nabla\psi}_{\,j}
+ =E_h\sum_{\ell=1}^{N_e}\int_{K_\ell}
+ \varphi^*(x)\psi_h(x)\,\dd x
+ \label{eq:current-global-dg-equation}
+\end{align}
+を得る。これが、この段階での大域DG固有値問題であり、全ての区分的な試験関数$\varphi$について
+満たすように$\psi_h$と$E_h$を求める。左辺第一行は全要素内部のkinetic energyとpotential energy、
+左辺第二行は全内部境界を介した隣接要素間の結合、右辺はoverlapである。左辺全体を
+$a_h^{\rm flux}(\varphi,\psi_h)$、右辺の積分を$m_h(\varphi,\psi_h)$と略記すれば、同じ式は
+\[
+ a_h^{\rm flux}(\varphi,\psi_h)=E_hm_h(\varphi,\psi_h)
+\]
+となる。
+
+次に、未知の波動関数$\psi_h$を、式\eqref{eq:piecewise-ansatz}で選んだ局所基底を使って
+書き直す。$\phi_{k\alpha}$を要素$K_k$の外側では0とみなせば、全系の区分的な波動関数は
+\begin{equation}
+ \psi_h(x)=\sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}c_{k\alpha}\phi_{k\alpha}(x)
+ \label{eq:global-piecewise-basis-expansion}
+\end{equation}
+と一つの和で書ける。$k$は基底が属する要素、$\alpha$はその要素内の基底番号、
+$c_{k\alpha}$は求める展開係数である。ある点$x\in K_k$では、$K_k$に属する基底だけが値を持つため、
+式\eqref{eq:global-piecewise-basis-expansion}は要素ごとの展開を全要素について並べたものに等しい。
+
+Galerkin法では、左から作用させる試験関数にも別種の関数を導入しない。波動関数の展開に用いた
+同じ基底集合から一つを選ぶ。行を指定する要素番号を$j$、その要素内の基底番号を$\beta$として
+\begin{equation}
+ \varphi(x)=\phi_{j\beta}(x),
+ \qquad
+ \varphi^*(x)=\phi_{j\beta}^*(x),
+ \qquad \beta=1,\ldots,M_j
+ \label{eq:same-galerkin-test-basis}
+\end{equation}
+と置く。「同じ基底」とは、右側の和に現れる基底集合と左側の試験関数の集合が同じという意味である。
+右側では全ての$\phi_{k\alpha}$を足すが、左側ではその集合から一つの$\phi_{j\beta}^*$を選ぶ。
+$j$と$\beta$を全て動かすことで、全展開係数と同じ本数の方程式が得られる。
+
+式\eqref{eq:global-piecewise-basis-expansion}と式\eqref{eq:same-galerkin-test-basis}を
+大域DG方程式へ代入する。$a_h^{\rm flux}$と$m_h$は第二引数について線形なので
+\begin{equation}
+ \sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}c_{k\alpha}
+ a_h^{\rm flux}(\phi_{j\beta},\phi_{k\alpha})
+ =E_h\sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}c_{k\alpha}
+ m_h(\phi_{j\beta},\phi_{k\alpha})
+ \label{eq:basis-projected-flux-equation}
+\end{equation}
+を得る。ここで
+\begin{equation}
+ H^{\rm flux}_{j\beta,k\alpha}=a_h^{\rm flux}
+ (\phi_{j\beta},\phi_{k\alpha}),
+ \qquad
+ S_{j\beta,k\alpha}=m_h
+ (\phi_{j\beta},\phi_{k\alpha})
+ \label{eq:provisional-dg-matrix-elements}
+\end{equation}
+と定義すれば、式\eqref{eq:basis-projected-flux-equation}は係数$c_{k\alpha}$に対する一般化固有値問題である。
+同じ要素の基底間には主に体積積分が寄与し、隣接要素の基底間には数値fluxを含む境界項が寄与する。
+
+外側境界から来る$B_{\rm ext}$は、採用する境界条件に従って
+式\eqref{eq:current-global-dg-equation}へ加える。
+
+これはSIPGを選ぶ前の暫定的なDG方程式である。式\eqref{eq:numerical-derivative-flux}の
+$\mathcal F$を具体化しなければ行列要素は計算できず、さらにHermitian性を保証する項もまだ不足している。
+次に、この暫定式を自己共役なSchr\"odinger Hamiltonianに適したSIPGへ閉じる。
+
+では、規則$\mathcal F$を実際にどう選べばよいだろうか。まず境界$x_j$を左から右へ横切る向きを
+正と決める。この向きを一度固定すれば、左右の値の平均と差を
+\begin{equation}
+ \{\nabla\psi_h\}_j=\frac12\left[(\nabla\psi_h)^-+(\nabla\psi_h)^+\right],
+ \qquad
+ [\psi_h]_j=\psi_h^- -\psi_h^+
+ \label{eq:1d-average-jump-for-flux}
+\end{equation}
+と定義できる。波括弧$\{\,\}_j$は左右勾配の算術平均、角括弧$[\,]_j$は左の波動関数値から
+右の波動関数値を引いたjumpである。ここで用いた上付き$-$は境界へ左側から近づいた値、
+上付き$+$は右側から近づいた値であり、電荷の正負を表してはいない。
+
+最初に考えられる選択は$\widehat{\nabla\psi}_{\,j}=\{\nabla\psi_h\}_j$である。
+真の滑らかな波動関数では左右の勾配が一致するため、この選択は正しい勾配へ戻る。しかし、
+平均だけではjumpを小さくする作用がない。左右要素の独立な係数が作る不連続modeを制御するため、
+SIPGでは平均勾配にjump比例項を加え、数値勾配fluxを
+\begin{equation}
+ \boxed{\widehat{\nabla\psi}_{\,j}=\{\nabla\psi_h\}_j-\frac{\eta_j}{h_j}[\psi_h]_j}
+ \label{eq:1d-sipg-gradient-flux}
+\end{equation}
+と選ぶ。$h_j>0$は境界$x_j$に接する要素の大きさから定める代表長、$\eta_j>0$は無次元の
+penalty係数である。$[\psi_h]_j$は波動関数と同じ次元を持つので、$[\psi_h]_j/h_j$は勾配と
+同じ次元になる。したがって式\eqref{eq:1d-sipg-gradient-flux}では、次元の等しい量だけを加減している。
+
+負号の意味も確認しておく。左側の値が右側より大きく$[\psi_h]_j>0$なら、補正項は正方向の
+数値勾配を小さくする向きに働く。このfluxを左右両要素の境界項へ同じ値として入れると、全系の
+弱形式には$+\eta_j[\varphi^*]_j[\psi_h]_j/(2h_j)$が現れる。試験関数を波動関数自身に取れば
+$+\eta_j|[\psi_h]_j|^2/(2h_j)$となるため、jumpを持つ状態ほどenergyが高くなる。
+これがpenaltyという名称の意味である。境界の向きを逆に選べばjumpと勾配の向きが同時に反転し、
+最終的なenergyは変わらない。
+
+ただし、数値勾配fluxを定めるだけではHermitian性はまだ保証されない。
+式\eqref{eq:1d-sipg-gradient-flux}から得られるのは、物理的な勾配を近似する整合項とpenalty項である。
+自己共役なSchr\"odinger Hamiltonianを離散化するには、さらに試験関数側の平均勾配と波動関数の
+jumpを組み合わせた随伴整合項を加える必要がある。以下で、その項が必要になる場所を式の上で確認する。
+
+試験関数についても波動関数と同じ向きで
+\begin{equation}
+ [\varphi^*]_j=\varphi^{-*}(x_j)-\varphi^{+*}(x_j),
+ \qquad
+ \{\nabla\varphi^*\}_j
+ =\frac12\left[(\nabla\varphi^*)^-+(\nabla\varphi^*)^+\right]
+ \label{eq:1d-test-average-jump}
+\end{equation}
+と定義する。式\eqref{eq:left-element-interface-piece}と
+式\eqref{eq:right-element-interface-piece}の一方的な勾配を、左右要素で共有する
+$\widehat{\nabla\psi}_{\,j}$へ置き換えると、境界$x_j$から来る二項の和は
+\begin{align}
+ &-\frac12\varphi^{-*}(x_j)\widehat{\nabla\psi}_{\,j}
+ +\frac12\varphi^{+*}(x_j)\widehat{\nabla\psi}_{\,j} \notag\\
+ &\qquad=-\frac12[\varphi^*]_j\widehat{\nabla\psi}_{\,j} \notag\\
+ &\qquad=-\frac12[\varphi^*]_j\{\nabla\psi_h\}_j
+ +\frac12\frac{\eta_j}{h_j}[\varphi^*]_j[\psi_h]_j
+ \label{eq:1d-flux-substitution}
+\end{align}
+となる。最後の等号では式\eqref{eq:1d-sipg-gradient-flux}を代入した。第一項が平均勾配を用いる
+整合項、第二項がjumpを抑えるpenalty項である。
+
+しかし、式\eqref{eq:1d-flux-substitution}には$[\varphi^*]_j\{\nabla\psi_h\}_j$はあるが、
+$\{\nabla\varphi^*\}_j[\psi_h]_j$はない。このままtrial波動関数$\psi_h$と試験関数$\varphi$を
+交換すると同じ式へ戻らない。そこで、交換したときに第一の整合項と対になる随伴整合項
+\begin{equation}
+ -\frac12\{\nabla\varphi^*\}_j[\psi_h]_j
+ \label{eq:1d-adjoint-consistency}
+\end{equation}
+を加える。以上を全要素と全内部境界について足すと、一次元SIPGの運動energy部分は
+\begin{align}
+ a_{\rm kin}^{\rm SIPG}(\varphi,\psi_h)
+ =&\frac12\sum_{j=1}^{N_e}\int_{K_j}
+ \nabla\varphi^*\cdot\nabla\psi_h\,\dd x \notag\\
+ &-\frac12\sum_{j=1}^{N_e-1}[\varphi^*]_j\{\nabla\psi_h\}_j
+ -\frac12\sum_{j=1}^{N_e-1}\{\nabla\varphi^*\}_j[\psi_h]_j \notag\\
+ &+\frac12\sum_{j=1}^{N_e-1}\frac{\eta_j}{h_j}
+ [\varphi^*]_j[\psi_h]_j
+ \label{eq:1d-sipg-derived}
+\end{align}
+となる。第二項と第三項はtrialとtestを交換すると互いに入れ替わり、第四項は交換しても同じ形を
+保つ。したがって式\eqref{eq:1d-sipg-derived}全体がHermitianな運動energyの離散表現になる。
+ここでは内部境界だけを書いた。外側境界$B_{\rm ext}$には、周期境界、Dirichlet境界、Neumann境界
+など、元の問題で指定した境界条件に対応する項を別途入れる。
+
+\paragraph{局所基底を使うと式\eqref{eq:1d-sipg-derived}はどうなるか。}
+式\eqref{eq:global-piecewise-basis-expansion}の
+$\psi_h=\sum_{k\alpha}c_{k\alpha}\phi_{k\alpha}$を式\eqref{eq:1d-sipg-derived}へ代入し、
+試験関数には同じ基底集合から$\varphi=\phi_{p\beta}$を選ぶ。ここでは内部境界を数える添字$j$と
+混同しないよう、試験基底が属する要素を$p$と書く。各項は$\psi_h$について線形なので
+\begin{equation}
+ a_{\rm kin}^{\rm SIPG}(\phi_{p\beta},\psi_h)
+ =\sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}
+ c_{k\alpha}K^{\rm SIPG}_{p\beta,k\alpha}
+ \label{eq:basis-expanded-sipg-action}
+\end{equation}
+となる。ここで、基底$\phi_{k\alpha}$から基底$\phi_{p\beta}$への運動energy行列要素は
+\begin{align}
+ K^{\rm SIPG}_{p\beta,k\alpha}
+ =&\frac12\sum_{\ell=1}^{N_e}\int_{K_\ell}
+ \nabla\phi_{p\beta}^*(x)\cdot\nabla\phi_{k\alpha}(x)\,\dd x \notag\\
+ &-\frac12\sum_{j=1}^{N_e-1}
+ [\phi_{p\beta}^*]_j\{\nabla\phi_{k\alpha}\}_j
+ -\frac12\sum_{j=1}^{N_e-1}
+ \{\nabla\phi_{p\beta}^*\}_j[\phi_{k\alpha}]_j \notag\\
+ &+\frac12\sum_{j=1}^{N_e-1}\frac{\eta_j}{h_j}
+ [\phi_{p\beta}^*]_j[\phi_{k\alpha}]_j .
+ \label{eq:sipg-kinetic-matrix-element}
+\end{align}
+第一行は要素内部の運動energy、第二行第一項は数値勾配fluxから来る整合項、第二項はその
+Hermitian共役に必要な随伴整合項、第三行はjumpを抑えるpenalty項である。したがって、
+式\eqref{eq:1d-sipg-derived}に基底展開を代入するとは、この四種類の寄与を基底の全ての組
+$(p\beta,k\alpha)$について計算することにほかならない。
+
+potential行列とoverlap行列も同じ基底対について
+\begin{align}
+ V_{p\beta,k\alpha}
+ =&\sum_{\ell=1}^{N_e}\int_{K_\ell}
+ \phi_{p\beta}^*(x)V(x)\phi_{k\alpha}(x)\,\dd x,\\
+ S_{p\beta,k\alpha}
+ =&\sum_{\ell=1}^{N_e}\int_{K_\ell}
+ \phi_{p\beta}^*(x)\phi_{k\alpha}(x)\,\dd x
+ \label{eq:1d-potential-overlap-matrices}
+\end{align}
+と定義する。これにより、完成した一次元DG Hamiltonian行列は
+\begin{equation}
+ H^{\rm DG}_{p\beta,k\alpha}=K^{\rm SIPG}_{p\beta,k\alpha}+V_{p\beta,k\alpha}
+ \label{eq:1d-dg-hamiltonian-matrix}
+\end{equation}
+であり、実際に解く係数方程式は
+\begin{equation}
+ \sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}
+ H^{\rm DG}_{p\beta,k\alpha}c_{k\alpha}
+ =E_h\sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}
+ S_{p\beta,k\alpha}c_{k\alpha}
+ \label{eq:1d-dg-generalized-eigenproblem}
+\end{equation}
+となる。これを全ての$p=1,\ldots,N_e$と$\beta=1,\ldots,M_p$について並べると、
+一つの大域一般化固有値問題$H^{\rm DG}C=E_hSC$になる。
+
+\paragraph{何を0にして固有状態を決めているのか。}
+ここで「基底は残差が0になるように選ぶのか」という点を明確にする。近似波動関数を強形式へ
+代入したときの残差を記号的に
+\begin{equation}
+ \mathcal R_h(x)=\hat H\psi_h(x)-E_h\psi_h(x)
+ \label{eq:pointwise-dg-residual}
+\end{equation}
+と書く。有限個の基底で作った$\psi_h$について、$\mathcal R_h(x)$が領域内の全ての点で0になるとは
+一般には限らない。Galerkin法は、この残差が点ごとに0であることを要求していない。
+要求するのは、採用した基底空間のどの方向から残差を見ても、その射影が0になることである。
+
+DGでは要素内部の残差だけでなく、左右traceの不一致から来る境界残差もある。その両方を含む
+SIPG弱形式による射影を$\langle\,\cdot\,|\,\cdot\,\rangle_{\rm DG}$と略記すれば、条件は
+\begin{equation}
+ \boxed{\langle\phi_{p\beta}|\mathcal R_h\rangle_{\rm DG}=0}
+ \qquad
+ (p=1,\ldots,N_e,\ \beta=1,\ldots,M_p)
+ \label{eq:projected-dg-residual-zero}
+\end{equation}
+である。この記号は単純な体積積分だけを意味しない。式\eqref{eq:sipg-kinetic-matrix-element}の
+整合項、随伴整合項、penalty項まで含めて、DG方程式の左辺から右辺を引いた量を試験基底方向へ
+射影する、という意味で用いている。
+
+式\eqref{eq:global-piecewise-basis-expansion}を代入すれば、式\eqref{eq:projected-dg-residual-zero}は
+\begin{equation}
+ \sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}
+ \left(H^{\rm DG}_{p\beta,k\alpha}-E_hS_{p\beta,k\alpha}\right)c_{k\alpha}=0
+ \label{eq:projected-residual-matrix-form}
+\end{equation}
+となり、式\eqref{eq:1d-dg-generalized-eigenproblem}そのものである。したがって、基底関数
+$\phi_{k\alpha}$を一本ずつ調整して残差を0にするのではない。まず基底を選んで有限次元の
+近似空間を定め、その後、固有値問題を解いて全基底の線形結合係数$c_{k\alpha}$と$E_h$を決める。
+要約すれば、基底は近似空間を決め、係数はその空間内で射影残差を0にする。
+
+\paragraph{直交基底なら残差は自動的に0になるか。}
+ならない。基底同士の直交性と、残差の基底空間への直交性は別の条件である。前者は
+\begin{equation}
+ S_{IJ}=\langle\phi_I|\phi_J\rangle=\delta_{IJ}
+ \label{eq:orthonormal-basis-overlap}
+\end{equation}
+という基底対のoverlapに関する条件である。ここで$I$と$J$は複合添字$(p,\beta)$と
+$(k,\alpha)$をそれぞれ一つの通し番号で書いたもので、$I,J=1,\ldots,N_{\rm basis}$、
+$N_{\rm basis}=\sum_pM_p$である。後者は式\eqref{eq:projected-dg-residual-zero}であり、求めた
+波動関数とenergyが満たすべき条件である。
+
+基底が正規直交なら$S$が単位行列になるため、$H^{\rm DG}C=E_hSC$は
+$H^{\rm DG}C=E_hC$へ簡単になる。しかし、任意の係数$C$で残差が0になるわけではなく、やはり
+Hamiltonianの固有vectorとなる$C$を解かなければならない。基底が非直交でも、$S$が正則なら
+一般化固有値問題を解くことで同じ射影条件を課せる。
+
+有限基底で式\eqref{eq:projected-dg-residual-zero}を満たしても、残差には採用した基底空間では
+表せない成分が残り得る。物理的に適切な基底を追加し、要素幅を小さくし、penaltyを安定な範囲で
+選ぶことにより近似空間を系統的に改善できれば、完全基底極限で
+\begin{equation}
+ \mathcal R_h\longrightarrow0
+ \label{eq:complete-basis-residual-limit}
+\end{equation}
+が期待される。有限基底で厳密に得るのは「点ごとの残差0」ではなく、「選んだ有限次元空間への
+射影残差0」である。
+
+\paragraph{時間依存DG方程式の導出。}
+次に、同じ空間離散化を時間依存問題へ拡張する。以下では原子単位系$\hbar=1$を用い、
+$\mathrm i$を虚数単位とする。時間依存Schr\"odinger方程式は
+\begin{equation}
+ \mathrm i\,\partial_t\psi(x,t)=\hat H(t)\psi(x,t)
+ \label{eq:time-dependent-strong}
+\end{equation}
+である。時間依存性は外場やpotentialを通して$\hat H(t)$に入り、波動関数も時刻$t$とともに変化する。
+空間微分を含むHamiltonian作用には、定常問題で導いたものと同じSIPGの体積項、二つの整合項、
+penalty項を用いる。時刻$t$におけるその双線形形式を
+$a_t^{\rm SIPG}(\varphi,\psi_h)$と書く。
+
+式\eqref{eq:time-dependent-strong}へ試験関数$\varphi^*$を左から作用させ、要素ごとに積分し、
+空間方向だけにSIPG処理を行うと
+\begin{equation}
+ \mathrm i\,m_h(\varphi,\partial_t\psi_h)
+ =a_t^{\rm SIPG}(\varphi,\psi_h)
+ \qquad(\text{for every piecewise test function }\varphi)
+ \label{eq:time-dependent-dg-weak}
+\end{equation}
+を得る。左辺は波動関数の時間変化、右辺はその瞬間のDG Hamiltonian作用である。
+DGによる置換は空間微分に対して行うので、時間微分$\partial_t$は左辺にそのまま残る。
+
+まず、局所基底は時間に依存しない固定基底であると仮定する。時間変化を全て展開係数に持たせれば
+\begin{equation}
+ \psi_h(x,t)=\sum_{k=1}^{N_e}\sum_{\alpha=1}^{M_k}
+ c_{k\alpha}(t)\phi_{k\alpha}(x)
+ \label{eq:time-dependent-basis-expansion}
+\end{equation}
+であり、基底を時間微分する必要がないので
+\begin{equation}
+ \partial_t\psi_h(x,t)=\sum_{k,\alpha}\dot c_{k\alpha}(t)\phi_{k\alpha}(x)
+ \label{eq:time-derivative-fixed-basis}
+\end{equation}
+となる。dotは展開係数の時間微分、すなわち$\dot c_{k\alpha}=\partial_t c_{k\alpha}$を表す。
+
+試験関数に同じ基底集合から$\varphi=\phi_{p\beta}$を選び、
+式\eqref{eq:time-derivative-fixed-basis}を式\eqref{eq:time-dependent-dg-weak}へ代入すると
+\begin{equation}
+ \mathrm i\sum_{k,\alpha}S_{p\beta,k\alpha}\dot c_{k\alpha}(t)
+ =\sum_{k,\alpha}H^{\rm DG}_{p\beta,k\alpha}(t)c_{k\alpha}(t)
+ \label{eq:time-dependent-dg-coefficients}
+\end{equation}
+を得る。ここで$S_{p\beta,k\alpha}$は式\eqref{eq:1d-potential-overlap-matrices}のoverlap行列、
+$H^{\rm DG}_{p\beta,k\alpha}(t)$は式\eqref{eq:sipg-kinetic-matrix-element}の運動項に
+時刻$t$のpotential行列を加えたものである。複合添字$I=(p,\beta)$、$J=(k,\alpha)$を使えば、
+実際に時間発展させるDG方程式は
+\begin{equation}
+ \boxed{\mathrm i\,S\dot C(t)=H^{\rm DG}(t)C(t)}
+ \label{eq:time-dependent-dg-matrix}
+\end{equation}
+となる。定常問題の$H^{\rm DG}C=E_hSC$ではenergy固有値と固有vectorを求めたのに対し、
+時間依存問題では初期係数$C(t_0)$を与え、式\eqref{eq:time-dependent-dg-matrix}を時間積分して
+$C(t)$を求める。
+
+\paragraph{Hermitian性とノルム保存。}
+固定基底では$S$は時間に依存しない。さらに、SIPGにより
+$H^{\rm DG}(t)=H^{\rm DG}(t)^\dagger$が成り立つとする。
+式\eqref{eq:time-dependent-dg-matrix}とそのHermitian共役を使うと
+\begin{align}
+ \partial_t\!\left[C^\dagger(t)SC(t)\right]
+ &=\dot C^\dagger SC+C^\dagger S\dot C \notag\\
+ &=\mathrm iC^\dagger H^{\rm DG}C
+ -\mathrm iC^\dagger H^{\rm DG}C=0
+ \label{eq:dg-norm-conservation}
+\end{align}
+となる。したがって、連続波動関数のノルム$\int|\psi|^2\,\dd x$に対応する離散ノルム
+$C^\dagger SC$は保存される。実際の時間積分法には、この保存性を数値的にできるだけ壊さない
+unitary法または$S$-unitary法を選ぶ必要がある。
+
+\paragraph{基底自体が時間に依存する場合。}
+もし$\phi_J=\phi_J(x,t)$なら、積の時間微分により
+$\partial_t\psi_h=\sum_J(\dot c_J\phi_J+c_J\partial_t\phi_J)$となる。この場合は
+\begin{equation}
+ D_{IJ}(t)=\langle\phi_I(t)|\partial_t\phi_J(t)\rangle
+ \label{eq:moving-basis-connection}
+\end{equation}
+で定義される基底運動のconnection行列が加わり、係数方程式は
+\begin{equation}
+ \mathrm iS(t)\dot C(t)+\mathrm iD(t)C(t)=H^{\rm DG}(t)C(t)
+ \label{eq:moving-basis-time-dependent-dg}
+\end{equation}
+となる。式\eqref{eq:time-dependent-dg-matrix}は$D=0$となる固定基底の場合である。
+
+\paragraph{要素ごとの係数の独立性をもう一度確認する。}
+式\eqref{eq:global-piecewise-basis-expansion}では、局所基底$\phi_{k\alpha}$の係数を
+$c_{k\alpha}$と書いた。要素番号$k$が異なれば、それらは別の未知係数である。すなわち、
+異なる要素に属する係数の間へ等値条件を課していない。そのため、同じ境界$x_j$で評価しても
+左要素の展開が与える$\psi_h(x_j^-)$と右要素の展開が与える$\psi_h(x_j^+)$は一般には異なる。
+この不一致を許したうえで、式\eqref{eq:sipg-kinetic-matrix-element}の境界行列要素によって
+隣接要素を結合することがDG法の具体的内容である。新しい空間記号を導入する必要はない。
+
+\paragraph{多次元の両側trace。}
+隣接要素$K^+,K^-$の共通面$e=\partial K^+\cap\partial K^-$では、同じ点へ
+両要素内部から近づくtrace
+\begin{equation}
+ \psi^+=\operatorname{tr}_{K^+}\psi,
+ \qquad \psi^-=\operatorname{tr}_{K^-}\psi
+\end{equation}
+が別々に存在する。外向き単位法線を$\boldsymbol n^+$、
+$\boldsymbol n^-=-\boldsymbol n^+$として、scalarのjumpとvectorのaverageを
+\begin{equation}
+ \llbracket \psi\rrbracket=\psi^+\boldsymbol n^++\psi^-\boldsymbol n^- ,
+ \qquad
+ \{\!\{\nabla \psi\}\!\}=\frac12(\nabla \psi^++\nabla \psi^-)
+ \label{eq:jump-average}
+\end{equation}
+と定義する。jumpは境界両側の波動関数差に法線方向を与えたvectorで、averageは両側の
+波動関数勾配を平均したvectorである。連続な$\psi$では$\psi^+=\psi^-$なので
+$\llbracket \psi\rrbracket=0$である。
+周期境界の向かい合う面も一つの内部面pairとして同じ定義を使う。多次元への一般化では、
+一次元の境界点$x_j$を多次元の共通面$e$へ、境界点についての和を面積分へ置き換える。
+式\eqref{eq:1d-sipg-derived}のscalar jumpは法線方向を持つ
+$\llbracket\psi\rrbracket$へ、左右勾配の平均は$\{\!\{\nabla\psi\}\!\}$へ置き換わる。
+この対応を使えば、一次元で導いたSIPGをもう一度部分積分から導き直す必要はない。
+
+\subsection{対称interior-penalty法（SIPG）}
+自己共役Hamiltonianに対応しやすい代表例としてSIPGを示す。内部面集合を$\mathcal E_h$、
+面の代表長を$h_e$、無次元penaltyを$\eta_e>0$とする。運動項の双線形形式は
+\begin{align}
+ a_{\rm kin}(\varphi,\psi)
+ =&\frac12\sum_K\int_K\nabla \varphi^*\cdot\nabla \psi\,\dd\boldsymbol r
+ -\frac12\sum_{e\in\mathcal E_h}\int_e
+ \{\!\{\nabla \varphi^*\}\!\}\cdot\llbracket \psi\rrbracket\,\dd s \notag\\
+ &-\frac12\sum_{e\in\mathcal E_h}\int_e
+ \{\!\{\nabla \psi\}\!\}\cdot\llbracket \varphi^*\rrbracket\,\dd s
+ +\frac12\sum_{e\in\mathcal E_h}\int_e
+ \frac{\eta_e}{h_e}\llbracket \varphi^*\rrbracket\cdot\llbracket \psi\rrbracket\,\dd s .
+ \label{eq:sipg}
+\end{align}
+第一項は要素内部の運動エネルギーである。第二項は
+式\eqref{eq:1d-flux-substitution}の平均勾配による整合項を面積分へ一般化したもの、第三項は
+式\eqref{eq:1d-adjoint-consistency}の随伴整合項、第四項はjumpを抑えるpenalty項である。
+potentialを加えた
+\begin{equation}
+ a(\varphi,\psi)=a_{\rm kin}(\varphi,\psi)+\sum_K\int_K\varphi^*V\psi\,\dd\boldsymbol r,
+ \qquad m(\varphi,\psi)=\sum_K\int_K\varphi^*\psi\,\dd\boldsymbol r
+\end{equation}
+により、一般DG固有値問題は
+\begin{equation}
+ a(\varphi,\psi_h)=E_hm(\varphi,\psi_h)
+ \qquad(\text{全ての区分的試験関数 }\varphi\text{について})
+ \label{eq:dg-weak}
+\end{equation}
+となる。
+
+\paragraph{三つの性質。}
+(i) 真の滑らかな解ではjumpが0なので元の弱形式に戻り、\emph{整合的}である。
+(ii) 式\eqref{eq:sipg}は$\varphi,\psi$の交換と複素共役に対してHermitianで、自己共役性を保つ。
+(iii) trace inequalityで境界の負項を体積勾配項とpenalty項により抑えられるほど
+$\eta_e$を大きく選べばcoerciveになる。小さすぎるpenaltyは要素間jump modeを不安定化し、
+極端に大きいpenaltyは条件数を悪化させる。
+
+要素局所基底$\{\varphi_{K\alpha}\}$で
+$\psi_h=\sum_{K\alpha}c_{K\alpha}\varphi_{K\alpha}$と展開すれば
+\begin{equation}
+ H^{\rm DG}_{K\alpha,L\beta}=a(\varphi_{K\alpha},\varphi_{L\beta}),
+ \quad S^{\rm DG}_{K\alpha,L\beta}=m(\varphi_{K\alpha},\varphi_{L\beta}),
+ \quad H^{\rm DG}c=S^{\rm DG}cE .
+ \label{eq:dg-matrix}
+\end{equation}
+非対角要素blockは共通面のflux/penaltyから生じ、分離した局所自由度を大域状態へ結合する。
+
+\section{DG領域分割の導出}
+\subsection{一般DGと本SALMON経路の関係}
+以後のSALMON実装は、式\eqref{eq:sipg}のface積分とpenaltyを直接組み立てるSIPG有限要素法
+ではない。共有する考えは、(a) 大域空間を局所部分空間へ分ける、(b) 局所自由度は独立に
+保持できる、(c) 最後に非対角blockを含む大域一般化固有値問題で結合する、という三点である。
+相違は、要素間結合を面の数値流束で近似せず、重なりbuffer上で元の実空間Hamiltonianを
+作用させ、空間積分
+$\int_\Omega U_f^\dagger(\boldsymbol r)[\hat H U_{f'}](\boldsymbol r)\,\dd^3r$
+として直接評価する点にある。
+したがって本経路のbuffer overlapとLCFO blockが、一般DGにおけるinterface couplingの役割を
+担うが、penalty parameter $\eta_e$との一対一対応はない。この区別を保った上で、次節から
+SALMON固有のDG領域分割とWF+PW変換を導く。
+
+\subsection{全セル問題と領域制限}
+全格子上の波動関数vectorを$\boldsymbol\psi\in\mathbb C^{N_g}$、差分Hamiltonianを
+$\mathcal H[\rho]$と書く。本書では一様Cartesian格子だけを考える。物理的な内積は
+\begin{equation}
+ \langle u|v\rangle=\int_\Omega u^*(\boldsymbol r)v(\boldsymbol r)\,\dd^3r
+ \label{eq:continuous-spatial-inner-product}
+\end{equation}
+である。全セルの定常Kohn--Sham問題は
+\begin{equation}
+ \mathcal H[\rho]\boldsymbol\psi_n=\epsilon_n\boldsymbol\psi_n,
+ \qquad \int_\Omega\psi_m^*(\boldsymbol r)\psi_n(\boldsymbol r)\,\dd^3r=\delta_{mn}
+ \label{eq:global-grid}
+\end{equation}
+である。時間依存問題は、原子単位系$\hbar=1$で
+\begin{equation}
+ \mathrm i\,\partial_t\boldsymbol\psi_n(t)
+ =\mathcal H[\rho(t),t]\boldsymbol\psi_n(t),
+ \qquad
+ \int_\Omega\psi_m^*(\boldsymbol r,t)\psi_n(\boldsymbol r,t)\,\dd^3r=\delta_{mn}
+ \label{eq:global-grid-time-dependent}
+\end{equation}
+となる。各時刻で
+\begin{equation}
+ \mathcal H^\dagger=\mathcal H
+ \label{eq:global-grid-q-hermiticity}
+\end{equation}
+ならば、時間発展は軌道間の内積を保存する。
+
+\subsection{既存DC+LCFO状態からWFを準備する}
+coreとbuffer上でWF+PW Hamiltonianを作る前に、WF列そのものを準備しなければならない。
+このWFは、後段のWF+PW分割SCFを終えた後に行う最終LCFOから作るのではない。前段にある
+既存のDC+LCFO/Wannier90経路で得た状態から作る。この前後関係を取り違えると、WF+PW基底を
+作るために、そのWF+PW基底を使った最終LCFOの結果が必要になるという循環した説明になる。
+
+まずfragment $f$のLCFO状態を実空間へ戻す。fragment計算で用いた局所基底を
+$\{\phi_\mu^{(f)}(\boldsymbol r)\}_{\mu=1}^{M_f}$とすると、第$n$状態は
+\begin{equation}
+ \psi_n^{(f)}(\boldsymbol r)=\sum_{\mu=1}^{M_f}
+ \phi_\mu^{(f)}(\boldsymbol r)C_{\mu n}^{(f)}
+ \label{eq:fragment-lcfo-real-space}
+\end{equation}
+と再構成される。$C_{\mu n}^{(f)}$は展開係数であり、$\mu$番目の局所基底を第$n$状態へ
+どれだけ混ぜるかを表す。係数を第$n$列に並べたものは行列計算では一般化固有vectorであるが、
+物理的な役割は式\eqref{eq:fragment-lcfo-real-space}の展開係数である。
+
+\paragraph{Wannier90へ渡す状態空間を選ぶ。}
+ここで実装がWannier90へ渡すband空間は、LCFOで計算可能な全固有状態ではない。電子数を$N_e$、
+spin縮退を2とする現在の設定では、LCFOから実空間へ合成するのは
+\begin{equation}
+ N_{\rm occ}=\left\lceil N_e/2\right\rceil
+ \label{eq:wannier-occupied-rank}
+\end{equation}
+本の占有LCFO状態である。すなわち、LCFOで計算可能な全固有状態をWannier90のband空間へ
+渡しているわけではない。非占有LCFO固有状態を全て加える代わりに、各原子について局在化に必要な
+complete $s+p$ projector channelを作る。その総数を$N_{s+p}$とすると、Wannier90へ渡す目標空間は
+\begin{equation}
+ N_{\rm target}=N_{\rm occ}+N_{s+p}
+ \label{eq:wannier-target-rank}
+\end{equation}
+次元である。最初の$N_{\rm occ}$列は実際の占有LCFO波動関数、残りの$N_{s+p}$列は原子中心の
+$s,p_x,p_y,p_z$ projectorであり、後者を「LCFO非占有波動関数」と解釈してはならない。
+
+\paragraph{fragmentのLCFO波動関数を全セル関数へ合成する。}
+式\eqref{eq:fragment-lcfo-real-space}の$\psi_n^{(f)}(\boldsymbol r)$はfragment $f$のbuffer内で
+再構成した局所寄与であり、この段階ではまだ全セル上の一価な入力bandではない。fragmentの重なりを
+滑らかにつなぐpartition weightを$w_f(\boldsymbol r)$とし、重なり領域で
+\begin{equation}
+ \sum_f w_f(\boldsymbol r)=1
+ \label{eq:wannier-fragment-partition}
+\end{equation}
+となるよう規格化する。占有状態$n$の全セルLCFO関数を
+\begin{equation}
+ \widetilde\psi_n^{\rm LCFO}(\boldsymbol r)=\sum_{f=1}^{N_f}w_f(\boldsymbol r)\psi_n^{(f)}(\boldsymbol r)
+ \label{eq:global-lcfo-composition}
+\end{equation}
+と合成する。同じ物理点が複数bufferに含まれても、$w_f$を掛けて足すため二重計数しない。
+
+次に、占有LCFO全セル関数と、後述する全セル上の擬原子軌道projectorを一つのraw seed集合
+$\{q_a\}$へ並べる。原子projectorを通し番号$a-N_{\rm occ}$で$p_{a-N_{\rm occ}}$と書けば、
+\begin{equation}
+ q_a(\boldsymbol r)=\begin{cases}
+ \widetilde\psi_a^{\rm LCFO}(\boldsymbol r),&1\le a\le N_{\rm occ},\\
+ p_{a-N_{\rm occ}}(\boldsymbol r),&N_{\rm occ}<a\le N_{\rm target}
+ \end{cases}
+ \label{eq:wannier-raw-global-seeds}
+\end{equation}
+である。したがって$q_a$は初めから全セル上の関数であり、fragment内だけで終わる関数ではない。
+
+占有LCFO部分空間は並進部分群と点群に対して閉じるように適応し、projector部分空間についても
+対称性の閉包を検査する。この処理後のseedを$q_a^{\rm sym}$と書く。その重なり
+$S_{ab}^{(q)}=\langle q_a^{\rm sym}|q_b^{\rm sym}\rangle$を用いて、線形独立性を保つ変換$Z$を求め、
+\begin{equation}
+ \chi_n(\boldsymbol r)=\sum_{a=1}^{N_{\rm target}}q_a^{\rm sym}(\boldsymbol r)Z_{an},
+ \qquad Z^\dagger S^{(q)}Z=I
+ \label{eq:wannier-global-orthonormal-bands}
+\end{equation}
+と直交規格化する。この$\chi_n$は全セル上の関数であり、MPI rank間に実空間点を分散して保持する。
+実装中の配列\code{global\_closed\_core}が、この$N_{\rm target}$本の$\chi_n$に対応する。
+
+\paragraph{占有LCFO bandについて新しい物理状態を作っているわけではない。}
+ここで、LCFOで得た全系bandはすでに直交規格化されていることを強調する。全系LCFO波動関数を
+$\psi_n^{\rm LCFO}$と書く。fragment出力はこの同じ全系関数をbufferごとに保持した局所表現であり、
+式\eqref{eq:global-lcfo-composition}は新しい近似波動関数を定義するためではなく、それを
+分散全セル表現へmaterializeし直す操作である。partitionとfragmentデータが完全に整合する理想的な場合は
+\begin{equation}
+ \widetilde\psi_n^{\rm LCFO}=\psi_n^{\rm LCFO},
+ \qquad
+ \langle\widetilde\psi_m^{\rm LCFO}|\widetilde\psi_n^{\rm LCFO}\rangle=\delta_{mn}
+ \label{eq:lcfo-materialization-identity}
+\end{equation}
+である。
+
+したがって、占有LCFO blockだけをWannier90へ渡すなら、別の物理状態として$\chi_n$を導入する必要はない。
+その場合は
+\begin{equation}
+ \chi_n=\psi_n^{\rm LCFO}
+ \label{eq:chi-equals-lcfo-when-complete}
+\end{equation}
+と選べる。実装が全セルへの再構成後にrank、直交性、対称閉包を測り、必要な直交規格化をもう一度
+行うのは、window合成、MPI再分配、丸め誤差によって元の性質が失われていないことを確認する
+数値的なsafeguardである。これは新しい物理部分空間を作る操作ではない。占有blockに限定すれば
+\begin{equation}
+ \operatorname{span}\{\chi_n^{\rm occ}\}=\operatorname{span}\{\psi_n^{\rm LCFO}\}
+ \label{eq:occupied-lcfo-span-preserved}
+\end{equation}
+を保つ部分空間内の基底変更である。
+
+一方、式\eqref{eq:wannier-global-orthonormal-bands}では、projectorを加えた全入力空間の直交基底も同じ記号$\chi_n$で表している。
+この全$N_{\rm target}$本の集合にはprojector由来の方向が含まれるため、
+集合全体が占有LCFO bandだけと同一という意味ではない。区別すべきなのは、占有blockの再構成・
+再直交化はLCFO精度を補う新しい物理近似ではなく、空間を拡張しているのはprojector追加の方だという点である。
+
+\paragraph{complete $s+p$ projectorをSALMON側で作る。}
+ここでprojectorと呼んでいる関数は、Wannier90が内部で新たに作るtrial orbitalではなく、SALMONが
+擬ポテンシャルデータから実空間格子上へ生成する擬原子軌道である。また、Hamiltonianの非局所項に
+現れる非局所擬ポテンシャル演算子のprojectorそのものではない。原子$I$の位置を
+$\boldsymbol R_I$、評価点から原子までの変位を
+\begin{equation}
+ \boldsymbol d_I=\boldsymbol r-\boldsymbol R_I,
+ \qquad r_I=|\boldsymbol d_I|,
+ \qquad \widehat{\boldsymbol d}_I=\boldsymbol d_I/r_I
+ \label{eq:sp-projector-relative-coordinate}
+\end{equation}
+と書く。周期系では$\boldsymbol d_I$として最も近い周期像への変位を選ぶ。角運動量$l,m$の
+擬原子軌道projectorは
+\begin{equation}
+ p_{I,lm}(\boldsymbol r)=R_{I,l}(r_I)Y_{lm}^{\rm real}(\widehat{\boldsymbol d}_I)
+ \label{eq:sp-projector-definition}
+\end{equation}
+で定義する。$R_{I,l}$は原子種ごとの擬原子軌道表\code{pp\%upptbl\_ao}から読み、格子点の
+$r_I$へ補間した動径関数、$Y_{lm}^{\rm real}$は実球面調和関数である。原子ごとに$l=0$を一本、
+$l=1$を三本選び、
+\begin{equation}
+ \{p_{I,s},p_{I,p_x},p_{I,p_y},p_{I,p_z}\}
+ \label{eq:complete-sp-projector-shell}
+\end{equation}
+を一組として保持する。$p$成分を一方向だけ選ばないため、回転で$p_x,p_y,p_z$が混ざっても
+この四次元局所空間の外へ出ない。
+
+次に、対称適応・直交規格化後の入力bandを$\chi_n(\boldsymbol r)$、占有LCFO状態と上記projectorを
+並べたanchorを$p_a(\boldsymbol r)$と書く。SALMONはWannier90の初期projection行列を
+\begin{equation}
+ A_{na}=\langle\chi_n|p_a\rangle
+ =\int_\Omega\chi_n^*(\boldsymbol r)p_a(\boldsymbol r)\,\dd^3r
+ \label{eq:wannier-seed-a-matrix}
+\end{equation}
+として実空間積分から計算する。rawな$A$は一般に厳密なunitary行列ではないので、特異値分解
+$A=U_A\Sigma_AV_A^\dagger$を行い、最も近いunitary極因子
+\begin{equation}
+ A_{\rm seed}=U_AV_A^\dagger
+ \label{eq:wannier-seed-polar-factor}
+\end{equation}
+を初期ゲージとして採用する。この同じ$A_{\rm seed}$を用いて後述の$D^{\rm WF}(g)$も構成するため、
+Wannier90の初期ゲージと\code{.dmn}が要求するWF表現のゲージが一致する。
+
+したがってproductionの\code{spectral}経路は、\code{.win}の\code{projections}欄を使って
+Wannier90に同じprojectorを再生成させるのではない。SALMONが計算した$A_{\rm seed}$を
+\code{precomputed\_a\_matrix}として、$M$行列および\code{.dmn}とともにWannier90 libraryへ渡す。
+\code{initial\_projection='random'}の場合だけは別経路で\code{random} projectionを指定する。
+
+\paragraph{Wannier90を実行する前に対称性を渡す。}
+空間群操作$g$が入力bandを混合する行列を$D^{\rm band}(g)$、作ろうとするWFを混合する
+目標行列を$D^{\rm WF}(g)$と書く。実装は各操作についてこの二つの表現を構成し、Wannier90を
+実行する前に\code{overlapping\_wannier\_mlwf.dmn}へ書き出す。Wannier変換行列$U$には
+\begin{equation}
+ D^{\rm band}(g)U=UD^{\rm WF}(g)
+ \label{eq:wannier-intertwining-condition}
+\end{equation}
+という共変性が要求される。この条件は、入力bandを対称操作してからWFへ変換した結果と、先に
+WFへ変換してから目標WF表現で対称操作した結果が同じであることを表す。したがって対称性は、
+生成後のWFを後処理でそろえるだけではなく、Wannier90の局在化問題そのものへ入力される。
+
+\paragraph{Wannier90へ渡す情報の構造。}
+MPI分散された実空間配列$\chi_n(\boldsymbol r)$そのものをWannier90へ渡すのではない。SALMON側で
+Wannier90が必要とする内積を計算し、band数だけを添字に持つ小さな行列へ圧縮して渡す。
+入力band数を$N_b$、WF数を$N_w$とすると、現在の経路では
+$N_b=N_w=N_{\rm target}$、Gamma点だけなので$N_k=1$である。
+
+第一の入力は、隣接セルを表す整数vector$\boldsymbol n_b$ごとのoverlap行列
+\begin{equation}
+ M_{mn}^{(b)}=\int_\Omega\chi_m^*(\boldsymbol r)
+ e^{-2\pi\mathrm i\boldsymbol n_b\cdot\boldsymbol\xi(\boldsymbol r)}
+ \chi_n(\boldsymbol r)\,\dd^3r
+ \label{eq:wannier-m-matrix-interface}
+\end{equation}
+である。$\boldsymbol\xi(\boldsymbol r)$は$\boldsymbol r$の分率座標である。配列形状は
+$N_b\times N_b\times N_{\rm ntot}$であり、$N_{\rm ntot}$はWannier90が要求した隣接セルvector数である。
+この$M$行列がspread汎関数を評価するための空間情報を運ぶ。
+
+第二の入力は式\eqref{eq:wannier-seed-a-matrix}の初期projection行列で、配列形状は
+$N_b\times N_w$である。productionの\code{spectral}経路では、式\eqref{eq:wannier-seed-polar-factor}の
+$A_{\rm seed}$をそのまま用いる。第三の入力はband energy配列であるが、この経路では
+\begin{equation}
+ \varepsilon_n^{\rm W90}=0,
+ \qquad n=1,\ldots,N_b
+ \label{eq:wannier-zero-interface-energy}
+\end{equation}
+としており、LCFO energyを使ったenergy-window disentanglementは行わない。
+
+各rankは自分が所有する実空間点だけから部分積分を計算し、$M$と$A$の各要素をMPI reductionで
+rank 0へreduceしてWannier90 libraryを呼ぶ。したがってWannier90呼出し時にrank 0が保持する主入力は、
+\begin{equation}
+ \{M_{mn}^{(b)},A_{na},\varepsilon_n^{\rm W90},
+ \text{実格子・逆格子・原子種・原子座標}\}
+ \label{eq:wannier-library-memory-input}
+\end{equation}
+である。これに、\code{.win}のGamma点・反復・\code{site\_symmetry}設定と、\code{.dmn}の
+$D^{\rm band}(g),D^{\rm WF}(g)$が加わる。
+
+Wannier90呼出し直前にrank 0が保持する入力を、実際の配列構造に対応させると次のようになる。
+\begin{itemize}
+\item $M$行列：complex配列$N_b\times N_b\times N_{\rm ntot}\times1$。最後の1はGamma点一個を表す。
+\item $A$行列：complex配列$N_b\times N_w\times1$。
+\item 固有値：real配列$N_b\times1$。現在は全要素を0にする。
+\item 実格子、逆格子、Gamma点座標、原子種、原子座標。
+\item \code{.win}に記録された$N_b,N_w$、反復数、\code{gamma\_only}、\code{site\_symmetry}などの設定。
+\item \code{.dmn}に記録された対称操作ごとの$D^{\rm band}(g)$と$D^{\rm WF}(g)$。
+\end{itemize}
+\code{.dmn}は配列引数ではなく、seed名\code{overlapping\_wannier\_mlwf}に対応するファイルとして
+Wannier90が読む。したがって、メモリ引数の$M,A,\varepsilon$と、seedファイルの\code{.win},
+\code{.dmn}を合わせて一回の\code{wannier\_run}入力になる。この境界では$N_g$に比例する波動関数配列をWannier90へ渡さない。
+
+Wannier90からは、最適化部分空間を表す
+$U^{\rm opt}\in\mathbb C^{N_b\times N_w}$、その内部の局在化回転
+$U\in\mathbb C^{N_w\times N_w}$、WF中心、各WFのspreadが返る。SALMONが用いる最終変換は
+\begin{equation}
+ U^{\rm W90}=U^{\rm opt}U
+ \label{eq:wannier-returned-transform}
+\end{equation}
+である。rank 0で得た$U^{\rm W90}$、中心、spreadを全MPI rankへbroadcastし、各rankが自分の
+実空間点についてWFを再構成する。このため、実空間格子数$N_g$に比例する$\chi$配列をrank 0や
+Wannier90内部へ集約する必要はない。
+
+Wannier90 libraryからrank 0上のwrapperへ返る量を列挙すると、
+\begin{itemize}
+\item $U^{\rm opt}$：complex配列$N_b\times N_w\times1$。
+\item $U$：complex配列$N_w\times N_w\times1$。
+\item WF中心：real配列$3\times N_w$。
+\item 各WFのspread：real配列$N_w$。
+\item spreadの内訳を含む全spread $\Omega_{\rm total}$：real 3成分。
+\item energy window内のband選択を表す\code{lwindow}$(N_b,1)$。
+\end{itemize}
+ただし$U^{\rm opt}$と$U$はwrapper内部の一時配列であり、\code{lwindow}も現在の外側interfaceへは
+返さない。wrapper外へ返して全rankへbroadcastするのは、積$U^{\rm W90}=U^{\rm opt}U$、WF中心、
+各WFのspread、全spreadである。現在は$N_b=N_w$でenergy windowを用いないため、\code{lwindow}を
+後段のSALMON計算で使う必要がない。
+
+Wannier90がこの制約の下でband-to-Wannier変換行列$U_{na}^{(f)}$を決めた後、第$a$ WFを
+\begin{align}
+ w_a^{(f)}(\boldsymbol r)
+ &=\sum_{n=1}^{N_f^{\rm band}}\psi_n^{(f)}(\boldsymbol r)U_{na}^{(f)} \notag\\
+ &=\sum_{\mu=1}^{M_f}\phi_\mu^{(f)}(\boldsymbol r)
+ \left[\sum_{n=1}^{N_f^{\rm band}}C_{\mu n}^{(f)}U_{na}^{(f)}\right]
+ \label{eq:fragment-wannier-reconstruction}
+\end{align}
+と作る。したがって、WFを元のfragment基底で表す係数は
+\begin{equation}
+ B_{\mu a}^{(f)}=\sum_n C_{\mu n}^{(f)}U_{na}^{(f)}
+ \label{eq:fragment-wannier-coefficient}
+\end{equation}
+である。つまり$C^{(f)}$だけからWFを作るのではない。局所基底$\Phi^{(f)}$、LCFO展開係数
+$C^{(f)}$、Wannier変換$U^{(f)}$を順に掛け、
+\begin{equation}
+ W^{(f)}=\Phi^{(f)}C^{(f)}U^{(f)}
+ \label{eq:fragment-wannier-matrix-product}
+\end{equation}
+としてWFの実空間値を得る。実装はcore上だけでなく、後のHamiltonian作用に必要なbuffer上でも
+$\Phi^{(f)}C^{(f)}U^{(f)}$を評価する。
+
+\paragraph{Wannier90後にも対称性を検証する。}
+Wannier関数には、位相、列の並び順、縮退部分空間内のユニタリ混合というゲージ自由度がある。
+Wannier90が返した$U$について同じ共変性をもう一度検証し、$D^{\rm band}(g)U-UD^{\rm WF}(g)$
+が許容値以下であることを確認する。その後、列の置換と各列の基準位相を標準化する。
+空間群操作を$g=\{R_g\mid\boldsymbol\tau_g\}$とすれば、実空間WFは
+\begin{equation}
+ \hat g\,w_a=\sum_b w_bD_{ba}(g)
+ \label{eq:wannier-symmetry-action}
+\end{equation}
+と変換される。生成後のWF列を$W$とすると、各生成元について
+\begin{equation}
+ \Delta_g=\left\|\hat gW-WD(g)\right\|
+ \label{eq:wannier-covariance-defect}
+\end{equation}
+と評価する。加えて、$D(e)=I$、$D(g)^\dagger D(g)=I$、および群の積
+$D(g_1)D(g_2)=D(g_1g_2)$の数値残差、WF中心の空間群軌道、実空間WFとその勾配の共変性も
+検査する。浮動小数点計算なので解析的な完全一致を主張するのではなく、これらの残差が指定した
+許容値以下であることを検証する。この検査を通った実空間WFを、後述するWF+PW試行空間の
+WF列$\Phi_f$として初めて使用する。
+
+以上の順序は、占有LCFO状態とcomplete $s+p$ projectorの準備、対称適応と直交規格化、
+$D^{\rm band}$と$D^{\rm WF}$の構成、\code{.dmn}の生成、対称性制約付きWannier90、
+$\Phi^{(f)}C^{(f)}U^{(f)}$による実空間WFの再構成、事後の共変性検証、WF+PW基底構築である。
+その後に行うWF+PW分割SCFと最終LCFOは、このWF準備より下流の処理である。
+
+\subsection{WF+PW基底へDG Hamiltonianを射影して密度を更新する}
+この節で計算したいものを最初に書く。各fragmentの基底を使って、
+$H_{0,f}+H_f^{\rm DG}$のfragment固有値とfragment固有状態を求める。すなわち
+\begin{equation}
+ \left(H_{0,f}+H_f^{\rm DG}\right)c_{fn}=S_fc_{fn}\epsilon_{fn}
+ \label{eq:fragment-dg-eigensystem-goal}
+\end{equation}
+を解く。$f$はfragment、$n$はそのfragmentで求める状態の番号である。
+$c_{fn}$はfragment $f$のWF+PW基底における固有状態の展開係数、$\epsilon_{fn}$は固有値、
+$S_f$は同じ基底のoverlap行列である。
+
+$H_{0,f}$はfragment内部のvolume Hamiltonianであり、運動energyのvolume項、局所potential、
+非局所projectorを含む。$H_f^{\rm DG}$はfragment境界を隣接fragmentへ接続する部分であり、
+interface flux、随伴flux、penaltyを含む。境界項の評価に必要な隣接fragmentの値は隣接通信で取得する。
+得られた占有fragment固有状態から次のSCF密度を作る。
+
+ここで用いる$H_{0,f}[\rho^{(k)}]+H_f^{\rm DG}$は、式\eqref{eq:sipg}と
+式\eqref{eq:dg-weak}で導いたvolume項、interface flux項、随伴flux項、penalty項を全て含む
+fragment DG Hamiltonianである。potentialの局所項と非局所projector項も$H_{0,f}$へ含める。
+
+処理の順序を先に書けば
+\begin{equation}
+ \rho^{(k)}
+ \longrightarrow H_{0,f}[\rho^{(k)}]+H_f^{\rm DG},S_f
+ \longrightarrow (H_{0,f}[\rho^{(k)}]+H_f^{\rm DG})c_{fn}^{(k)}
+                 =S_fc_{fn}^{(k)}\epsilon_{fn}^{(k)}
+ \longrightarrow \rho_f^{(k+1)}
+ \label{eq:fragment-scf-purpose}
+\end{equation}
+である。ここで$k$はSCF反復番号、$f$はfragment番号、$n$はfragment内の状態番号である。
+界面項に必要なtraceは隣接fragmentから受け取るが、2.4で求めるのはfragment DG固有状態であり、全体系の固有状態ではない。
+
+fragment $f$のbuffer領域を$\Omega_f^{\rm buf}$とする。この領域に
+$M_f^{\rm WF}$本のWF $\Phi_{f\alpha}$と、$M_f^{\rm PW}$本の窓付きPW $P_{f\beta}$を用意する。
+fragment $f$の状態$n$を、最初から二種類の基底を明示して
+\begin{equation}
+ \psi_{fn}^{(k)}(\boldsymbol r)
+ =
+ \sum_{\alpha=1}^{M_f^{\rm WF}}\Phi_{f\alpha}(\boldsymbol r)a_{f\alpha n}^{(k)}
+ +\sum_{\beta=1}^{M_f^{\rm PW}}P_{f\beta}(\boldsymbol r)b_{f\beta n}^{(k)}
+ \label{eq:wfpw-expand}
+\end{equation}
+と展開する。$a_{f\alpha n}^{(k)}$はWF係数、$b_{f\beta n}^{(k)}$は窓付きPW係数であり、
+両方が未知量である。
+
+式\eqref{eq:wfpw-expand}をfragment DG固有値方程式へ代入する。
+有限本の基底では残差を実空間の全点で0にできるとは限らないため、まず左から各WFのbra
+$\langle\Phi_{f\gamma}|$を掛け、次に各窓付きPWのbra$\langle P_{f\delta}|$を掛け、
+$\Omega_f^{\rm buf}$で積分する。すなわち
+\begin{align}
+ \left\langle\Phi_{f\gamma}\middle|\hat H_{0,f}[\rho^{(k)}]+\hat H_f^{\rm DG}
+ \middle|\psi_{fn}^{(k)}\right\rangle
+ -\epsilon_{fn}^{(k)}\langle\Phi_{f\gamma}|\psi_{fn}^{(k)}\rangle&=0,\\
+ \left\langle P_{f\delta}\middle|\hat H_{0,f}[\rho^{(k)}]+\hat H_f^{\rm DG}
+ \middle|\psi_{fn}^{(k)}\right\rangle
+ -\epsilon_{fn}^{(k)}\langle P_{f\delta}|\psi_{fn}^{(k)}\rangle&=0
+ \label{eq:wfpw-galerkin-pairs}
+\end{align}
+を全ての$\gamma=1,\ldots,M_f^{\rm WF}$と$\delta=1,\ldots,M_f^{\rm PW}$について課す。
+これがWF+PW基底に対するGalerkin条件である。
+
+ここで第一項はfragment内部のvolume積分と、そのfragment境界の三つの界面項を含む。
+式\eqref{eq:wfpw-expand}をこの二組の条件へ代入し、WF係数とPW係数をまとめると
+\begin{equation}
+ \begin{pmatrix}
+ H_f^{\mathrm{WF,WF}}&H_f^{\mathrm{WF,PW}}\\
+ H_f^{\mathrm{PW,WF}}&H_f^{\mathrm{PW,PW}}
+ \end{pmatrix}
+ \begin{pmatrix}a_f\\b_f\end{pmatrix}
+ =\epsilon_f
+ \begin{pmatrix}
+ S_f^{\mathrm{WF,WF}}&S_f^{\mathrm{WF,PW}}\\
+ S_f^{\mathrm{PW,WF}}&S_f^{\mathrm{PW,PW}}
+ \end{pmatrix}
+ \begin{pmatrix}a_f\\b_f\end{pmatrix}.
+ \label{eq:wfpw-block}
+\end{equation}
+を得る。WFとPWをまとめたfragment基底の総数を
+$M_f=M_f^{\rm WF}+M_f^{\rm PW}$とし、添字$\mu=1,\ldots,M_f$に対して
+\begin{equation*}
+ B_{f\mu}(\boldsymbol r)=\begin{cases}
+ \Phi_{f\mu}(\boldsymbol r),
+ &1\leq\mu\leq M_f^{\rm WF},\\
+ P_{f,\mu-M_f^{\rm WF}}(\boldsymbol r),
+ &M_f^{\rm WF}<\mu\leq M_f
+ \end{cases}
+\end{equation*}
+と定義する。したがって$B_{f\mu}$の前半はWF、後半は窓付きPWである。具体的な行列要素は
+\begin{equation}
+ (H_f)_{\mu\nu}
+ =\left\langle B_{f\mu}\middle|\hat H_{0,f}[\rho^{(k)}]+\hat H_f^{\rm DG}
+ \middle|B_{f\nu}\right\rangle,\qquad
+ (S_f)_{\mu\nu}=\langle B_{f\mu}|B_{f\nu}\rangle
+ \label{eq:wfpw-global-dg-block}
+\end{equation}
+である。例えばfragment $f$内のWF--PW行列要素は
+\begin{align}
+ (H_f^{\mathrm{WF,PW}})_{\gamma\beta}
+ &=\left\langle\Phi_{f\gamma}\middle|\hat H_{0,f}[\rho^{(k)}]+\hat H_f^{\rm DG}
+ \middle|P_{f\beta}\right\rangle,\\
+ (S_f^{\mathrm{WF,PW}})_{\gamma\beta}
+ &=\langle\Phi_{f\gamma}|P_{f\beta}\rangle
+\end{align}
+である。
+対角blockは各部分空間内の運動・potential energy、非対角blockはWFとPWの物理的混成を表す。
+非対角blockを捨てれば二つの基底族は結合せず、境界・高運動量成分がWF状態へ戻れない。
+
+導出後に限り、実装で二種類の列をまとめて扱うための略記として
+\begin{equation}
+ X_f=[\,\Phi_f\;P_f\,],\qquad
+ c_{fn}=\begin{pmatrix}a_{fn}\\b_{fn}\end{pmatrix},\qquad
+ H_fc_{fn}=S_fc_{fn}\epsilon_{fn}
+ \label{eq:local-transform}
+\end{equation}
+と書く。$X_f$は新しい物理的基底ではなく、既に式\eqref{eq:wfpw-expand}へ明示したWF列とPW列を
+一つの配列へ連結した実装上の略記にすぎない。
+
+得られたfragment係数を式\eqref{eq:wfpw-expand}へ戻して占有波動関数を再構成し、core上で
+\begin{equation}
+ \rho_f^{(k+1)}(\boldsymbol r)
+ =\sum_{n=1}^{N_f^{\rm state}}f_n
+  \left|\psi_{fn}^{(k)}(\boldsymbol r)\right|^2
+\end{equation}
+を作る。$f_n$は状態$n$の占有数であり、絶対値二乗にはWF成分、PW成分、および両者の干渉項が
+全て含まれる。全fragmentのcore密度を一意な所有規則で集め、混合した密度を次の反復の入力にする。
+したがって、この局所固有値問題の直接の出力先は分割SCFの密度更新である。
+
+WF重複をPWから除くには、WF同士の重なり行列
+$S_{\Phi\Phi}=\Phi_f^\dagger\Phi_f$が保持空間で可逆であるとして
+\begin{equation}
+ \widetilde P_f=\left[I-\Phi_fS_{\Phi\Phi}^{-1}\Phi_f^\dagger\right]P_f,
+ \qquad \Phi_f^\dagger\widetilde P_f=0.
+ \label{eq:block-project}
+\end{equation}
+この変換後も$\widetilde P_f^\dagger\widetilde P_f$は一般に$I$ではないため、
+問題は一般化固有値問題のままである。小さい計量固有値を落とすrank gateは、
+物理状態を選別するenergy cutoffではなく、数値的に同じ方向を重複保持しないための操作である。
+
+\subsection{fragment解から全体LCFOへの変換}
+2.5で初めて、保持したfragment DG固有状態をLCFO基底として全体系を結合する。
+保持するfragment固有vectorを列に並べた係数行列を$C_f$とし、実空間列$U_f=X_fC_f$を作る。
+全fragmentで保持する列の総数を$M$、その列を大域状態へ混合する係数行列を$A$とする。
+全fragment列を$U=[R_1^\dagger U_1,\ldots,R_{N_f}^\dagger U_{N_f}]$と連結すると、
+全セル状態$\Psi=UA$に対するRayleigh--Ritz条件は
+\begin{equation}
+ \left(\int_\Omega U^\dagger(\boldsymbol r)
+ \hat H[\rho^\star]U(\boldsymbol r)\,\dd^3r\right)A
+ =\left(\int_\Omega U^\dagger(\boldsymbol r)U(\boldsymbol r)\,\dd^3r\right)A\varepsilon.
+ \label{eq:dg-to-lcfo}
+\end{equation}
+左の二行列が最終LCFOの$H$と$S$である。対角fragment blockだけでなく
+$f\ne f'$についても$\int U_f^\dagger\hat HU_{f'}\,\dd^3r$と
+$\int U_f^\dagger U_{f'}\,\dd^3r$を保持するため、
+重なり領域を介したfragment間hybridization、結合・反結合分裂、大域直交性が回復する。
+以上が、全格子問題をDG領域へ制限し、WF+PW係数へ写し、最後にLCFO係数へ再写像する
+\begin{equation}
+ \boldsymbol\psi\quad\longrightarrow\quad c_f=(a_f,b_f)
+ \quad\longrightarrow\quad A
+\end{equation}
+という二段階基底変換である。
+
+\section{適用範囲と絶対不変条件}
+対象は\code{yn\_dg\_hybrid\_divided\_scf='y'}で選ばれる経路である。
+\begin{enumerate}
+\item 既存の DC+LCFO/Wannier90 経路は変更しない。
+\item 分割WF+PW SCF完了後、WF+PW LCFOを exactly-once で分散対角化する。
+\item LCFO後の密度再SCFを行わない。
+\item LCFO後の密度収束判定を行わない。
+\end{enumerate}
+fragment SCFの密度収束と、最終固有対の残差・直交性検査は別の検査である。
+経路は\textbf{実装済み}、焦点化テストは\textbf{単体試験済み}、Si64実系は
+\textbf{物理検証保留}である。所定条件は\textbf{MPI 8 ranks}、
+\code{OMP\_NUM\_THREADS=1}、\textbf{時間打ち切りなし}であり、現時点で成功を主張しない。
+
+\subsection{なぜ空間を分け、最後に再結合するのか}
+絶縁体・半導体では、占有一体密度行列
+\begin{equation}
+ \gamma(\boldsymbol r,\boldsymbol r')=
+ \sum_{n\in\mathrm{occ}} f_n\psi_n(\boldsymbol r)\psi_n^*(\boldsymbol r')
+\end{equation}
+が$|\boldsymbol r-\boldsymbol r'|$とともに減衰する。この\emph{電子密度の近視性}は、
+局所環境をfragmentで記述する根拠を与える。しかしKohn--Sham軌道自体はfragment境界で
+切れてよい量ではなく、結晶全体のBloch的位相、結合・反結合分裂、長距離の直交条件を持つ。
+そこで本方式は二段階に分ける。分割SCFは各局所環境が作るscreened potentialと密度を
+自己無撞着にする。最終LCFOは、その収束potentialを固定したまま局所状態を全セルで混成し、
+fragment間hybridizationと大域直交性を回復する。
+
+この分離は「fragmentが物理的に孤立している」という仮定ではない。局所密度応答はSCFで、
+大域一電子混成はLCFOで扱うという計算上の分解である。窓の重なり幅、WF/PW cutoff、
+fragment寸法を増やした極限で観測量が安定することが、近視性を利用した近似の物理的検査になる。
+
+\section{記法、領域、添字}
+周期セルを$\Omega\subset\mathbb R^3$、体積を$|\Omega|$、格子点数を$N_g$とする。
+$g=1,\ldots,N_g$は分割方法に依存しない\emph{physical-point ID}、
+$\boldsymbol r_g$は座標である。格子点は空間積分を数値評価する点として用いる。
+\begin{longtable}{@{}p{0.23\linewidth}p{0.71\linewidth}@{}}
+\toprule 記号 & 定義 \\ \midrule
+$n,m$ & Kohn--Sham状態。$f_n\in[0,2]$は占有数。\\
+$f$ & fragment番号、$f=1,\ldots,N_f$。\\
+$a,b$ & fragment内WF+PW基底添字。\\
+$\mu,\nu$ & 全fragmentを結合したLCFO基底添字。\\
+$w_f(\boldsymbol r)$ & fragment $f$の窓関数。重なりを許す。\\
+$S_{\mu\nu},H_{\mu\nu}$ & LCFO計量とHamiltonian行列。\\
+$\texttt{icomm\_frag}$ & 同一fragmentの空間rankを結ぶcommunicator。\\
+$\texttt{icomm\_tot}$ & 全fragment・全空間rankを結ぶcommunicator。\\
+\bottomrule
+\end{longtable}
+
+\section{連続Kohn--Sham問題から離散弱形式へ}
+原子単位系で、$v_{\rm ion}^{\rm local}$はlocal ionic potential、
+$\hat V_{\rm ion}^{\rm nonlocal}$はnonlocal pseudopotential、$v_{\rm H}$はHartree potential、
+$v_{\rm xc}$はexchange--correlation potentialである。これらをまとめて
+\begin{equation}
+ \hat H[\rho]= -\frac12\laplacian+v_{\rm ion}^{\rm local}
+ +\hat V_{\rm ion}^{\rm nonlocal}+v_{\rm H}[\rho]+v_{\rm xc}[\rho]
+ \label{eq:ham}
+\end{equation}
+とする。周期境界条件下の強形式と規格化は
+\begin{equation}
+ \hat H[\rho]\psi_n=\epsilon_n\psi_n,
+ \qquad \int_\Omega\psi_m^*\psi_n\dd^3r=\delta_{mn}.
+\end{equation}
+試験関数$\varphi$を掛け、運動項を部分積分すれば
+\begin{equation}
+ \frac12\int_\Omega\nabla\varphi^*\!\cdot\!\nabla\psi_n\dd^3r
+ +\int_\Omega\varphi^*v_{\rm eff}[\rho]\psi_n\dd^3r
+ +\langle\varphi|\hat V_{\rm ion}^{\rm nonlocal}|\psi_n\rangle
+ =\epsilon_n\langle\varphi|\psi_n\rangle .
+\end{equation}
+境界項は周期性で相殺する。基底列$B=(b_1,\ldots,b_M)$に対し、bra--ketは
+$\langle u|v\rangle=\int_\Omega u^*(\boldsymbol r)v(\boldsymbol r)\,\dd^3r$を表す。したがって
+\begin{align}
+ S_{ij}&=\langle b_i|b_j\rangle,\\
+ H_{ij}[\rho]&=\langle b_i|\hat H[\rho]|b_j\rangle.
+ \label{eq:hs}
+\end{align}
+実装はこれらの空間積分を一様Cartesian格子上で評価する。
+非直交基底では$S\ne I$なので、通常固有値問題でなく一般化固有値問題を解く。
+
+\subsection{一般化固有値問題の変分的意味}
+試行波動関数$|\Psi(c)\rangle=\sum_i c_i|b_i\rangle$のエネルギー汎関数は
+\begin{equation}
+ \mathcal R[c]=\frac{c^\dagger Hc}{c^\dagger Sc}.
+\end{equation}
+$c^\dagger Sc=1$の制約下で$\delta(c^\dagger Hc-\epsilon c^\dagger Sc)=0$を取ると
+$Hc=Sc\epsilon$を得る。これはRayleigh--Ritz変分原理であり、最低固有値は選んだ
+試行空間内での最良上界である。したがってPW補完で空間を拡大すれば、同じHamiltonianに
+対する変分自由度は減らない。ただし小さい計量固有値はほぼ線形従属を表し、保持すると
+$S^{-1}$が数値誤差を増幅するためrank gateが必要になる。
+
+\section{窓関数付きPWとWF+PW試行空間}
+raw partition weightから周期境界を含む$w_f(\boldsymbol r_g)$を作る。
+重なり領域では同じ$g$が複数bufferに現れるが、これは同一物理点の局所表現である。
+再分配キーはrank内配列位置でなくphysical-point IDでなければならない。
+
+逆格子基底vectorを列に持つ行列を$B_{\rm rec}$、整数mode indexを
+$\boldsymbol n\in\mathbb Z^3$とし、$\boldsymbol G=B_{\rm rec}\boldsymbol n$を作る。
+$E_{\rm cut}^{\rm PW}$をPW運動energy cutoffとして
+$|\boldsymbol G|^2/2\le E_{\rm cut}^{\rm PW}$を満たすmodeを選ぶ。点群操作の直交行列を$R$とし、
+$R\boldsymbol G$を追加して許容差内の重複を除き、対称閉包する。窓付きPWは
+\begin{equation}
+ p_{f\boldsymbol G}(\boldsymbol r_g)=w_f(\boldsymbol r_g)
+ \frac{e^{\ii\boldsymbol G\cdot\boldsymbol r_g}}{\sqrt{|\Omega|}}.
+ \label{eq:wpw}
+\end{equation}
+窓のため異なる$\boldsymbol G$間も一般には直交しない。
+
+窓付きPWの運動項は、単なる自由電子エネルギー$|\boldsymbol G|^2/2$ではない。
+積の微分を明示すると
+\begin{equation}
+ \nabla\!\left(w_fe^{\ii\boldsymbol G\cdot\boldsymbol r}\right)
+ =e^{\ii\boldsymbol G\cdot\boldsymbol r}
+ \left(\nabla w_f+\ii\boldsymbol G w_f\right),
+\end{equation}
+したがって運動エネルギーには$|\nabla w_f|^2$、$|\boldsymbol G|^2w_f^2$、および
+両者の交差項が現れる。急峻な窓は大きな$\nabla w_f$を生み人工的な運動エネルギーを
+増やす。十分滑らかな重なり窓を用いる理由は、境界局在を数値的に抑えつつ、隣接fragmentが
+同じ物理領域を連続的に表現できるようにするためである。
+
+既存局在関数$\Phi_f=(\phi_{f1},\ldots)$とPWの重複を離散計量で除く：
+\begin{equation}
+ \widetilde p=p-\Phi_f
+ \langle\Phi_f|\Phi_f\rangle^{-1}\langle\Phi_f|p\rangle.
+ \label{eq:projection}
+\end{equation}
+実装は大行列を一括保持せずPW tileをbufferへ再分配し列をstreamする。
+\begin{equation}
+ \mathcal V_f=\operatorname{span}\{\chi_{fa}\}_{a=1}^{M_f}
+ =\operatorname{span}\{\phi_{f\alpha},\widetilde p_{f\boldsymbol G}\}.
+\end{equation}
+線形従属方向は計量固有値のrank許容差で除く。
+
+WFは占有・低エネルギー部分空間を効率よく表すが、局所Hamiltonian作用で生じる節、
+非局所projector応答、境界近傍の短波長成分を有限個のWFだけで閉じる保証はない。
+これが\emph{fragment境界の基底不完全性}である。窓付きPWは特定原子軌道形に偏らない
+systematicな補完を与え、cutoffを上げることで短波長応答を段階的に回収する。
+式\eqref{eq:projection}はWFが既に表した低エネルギー方向をPW側から除き、条件数悪化と
+同じ物理自由度の重複を抑える。
+
+\section{fragment一般化固有値問題と密度}
+SCF反復番号を$k=0,1,\ldots$、入力密度を$\rho^{(k)}$とする。fragment $f$で保持する
+状態数を$N_f^{\rm state}$、状態$n$の占有数を$f_n\in[0,2]$とする。fragment $f$のbufferが覆う
+空間領域を$\Omega_f^{\rm buf}$と書き、この領域に制限した内積を
+\begin{equation}
+ \langle u|v\rangle_{\Omega_f^{\rm buf}}
+ =\int_{\Omega_f^{\rm buf}}u^*(\boldsymbol r)v(\boldsymbol r)\,\dd^3r
+ \label{eq:buffer-inner-product}
+\end{equation}
+と定義する。fragment行列は
+\begin{align}
+ S^f_{ab}&=\langle\chi_{fa}|\chi_{fb}\rangle_{\Omega_f^{\rm buf}},\\
+ H^{f,(k)}_{ab}&=\langle\chi_{fa}|\hat H[\rho^{(k)}]|\chi_{fb}\rangle_{\Omega_f^{\rm buf}},\\
+ H^{f,(k)}C^{f,(k)}&=S^fC^{f,(k)}\varepsilon^{f,(k)},\\
+ (C^{f,(k)})^\dagger S^fC^{f,(k)}&=I.
+\end{align}
+fragment軌道と密度候補は
+\begin{align}
+ \Psi^{f,(k)}_{gn}&=\sum_a\chi_{fa,g}C^{f,(k)}_{an},\\
+ \rho^{(k)}_{f,g}&=\sum_{n=1}^{N_f^{\rm state}}f_n|\Psi^{f,(k)}_{gn}|^2.
+ \label{eq:density}
+\end{align}
+coreでは各$g$を一つのfragmentへ割り当て、重複加算を避ける。電子数
+$N_e^{(k)}=\int_\Omega\rho^{(k)}(\boldsymbol r)\,\dd^3r$は\code{icomm\_tot}でAllreduceする。
+
+窓の重なりはbasisの連続性のために必要だが、密度を各bufferから素朴に足せば同じ電子を
+\emph{二重計数}する。core ownershipは各$g$の密度寄与を一意に選び、bufferはHamiltonian作用に
+必要な周辺情報として使う。partition-of-unity型の別構成を採る場合でも、重みの総和が1になる
+ことを証明しなければ電子数保存は得られない。現実装ではphysical core ownershipがその役割を担う。
+
+\section{分割SCF固定点、混合、収束判定}
+potential更新、fragment solve、core density assemblyをまとめた密度写像を$F$と書く。
+$\rho_{\rm out}^{(k)}=F[\rho^{(k)}]$であり、$\alpha$を無次元mixing率としてsimple mixingは
+\begin{equation}
+ \rho^{(k+1)}=(1-\alpha)\rho^{(k)}+\alpha\rho_{\rm out}^{(k)},
+ \qquad0<\alpha\le1.
+\end{equation}
+Broyden/Pulayも同じ固定点を過去の残差で加速する。密度収束量の代表形は
+\begin{equation}
+ \eta_\rho^{(k)}=\left[
+ \frac{\int_\Omega|\rho_{\rm out}^{(k)}(\boldsymbol r)-\rho^{(k)}(\boldsymbol r)|^2\,\dd^3r}
+ {\int_\Omega|\rho^{(k)}(\boldsymbol r)|^2\,\dd^3r}\right]^{1/2}.
+ \label{eq:rhores}
+\end{equation}
+実際の規約と閾値$\tau_\rho$はDC controlから受け取り、既存mixing routineを使う。
+$\eta_\rho^{(k)}\le\tau_\rho$となった密度を$\rho^\star$とする。
+
+\section{最終LCFO行列の分散組立て}
+最終fragment列を$\{\Xi_\mu\}_{\mu=1}^{M}$へ並べる。$\Xi_{\mu g}$は基底$\mu$の
+physical point $g$での値である。各rankは一部のbasis rowを
+所有するが、列作用の支持点はphysical-point IDで要求・再分配する。
+\begin{align}
+ S_{\mu\nu}&=\langle\Xi_\mu|\Xi_\nu\rangle,\\
+ H_{\mu\nu}&=\langle\Xi_\mu|\hat H[\rho^\star]|\Xi_\nu\rangle.
+ \label{eq:lcfo}
+\end{align}
+重なりbufferがあっても各physical pointの寄与はcore ownershipに従い一度だけ数える。
+列をtile単位で作用・交換するため、一時記憶は全行列複製でなく局所row数とtile幅に比例する。
+
+\section{一度だけの分散一般化固有値解法}
+最終問題は
+\begin{equation}
+ HC=SC\,\varepsilon,\qquad C^\dagger SC=I.
+ \label{eq:final}
+\end{equation}
+$S$の正定値部分空間をrank-revealingに選び、標準問題へ変換する。第$n$固有vectorを$c_n$、
+固有energyを$\epsilon_n$、占有部分空間projectorを$P$とする。Ritz pairには
+\begin{align}
+ r_n&=Hc_n-\epsilon_nSc_n,\\
+ \eta_H&=\max_n\frac{\|r_n\|_2}
+ {\max(1,\|Hc_n\|_2,|\epsilon_n|\|Sc_n\|_2)},\\
+ \eta_S&=\|C^\dagger SC-I\|,\qquad \eta_P=\|P^2-P\|
+\end{align}
+を検査し、$0\le f_n\le2$、$\sum_nf_n=N_e$も確認する。これらは軌道/部分空間の
+receiptであり、式\eqref{eq:rhores}の再評価ではない。
+
+\section{状態機械と「後段SCFなし」の証明}
+\begin{equation}
+ Q_0\xrightarrow{\rm basis}Q_1\xrightarrow{\rm divided\ SCF}Q_2
+ \xrightarrow{\rm assemble\ H,S}Q_3\xrightarrow{\rm solve\ once}Q_4
+ \xrightarrow{\rm validate/publish}Q_5\xrightarrow{\rm return}Q_{\rm end}.
+\end{equation}
+$Q_1\to Q_2$内部だけがpotential更新、fragment solve、密度assembly、mixing、密度gateを
+反復する。$Q_2$へ進めるのはSCF成功時だけである。$Q_3\to Q_4$のcallはloop外に一つだけ
+なのでexactly-onceである。$Q_4$後はreceiptとcheckpointを書いてreturnする。
+$Q_4,Q_5$から$F[\rho]$へ戻る制御辺がないため、LCFO後の密度再SCFも密度収束判定もない。
+
+\subsection{LCFO後に密度を再反復しないことの物理的意味}
+最終LCFO係数$C$から形式的には新しい密度$\rho_{\rm LCFO}$を構成できる。しかしそれを
+$v_{\rm H}+v_{\rm xc}$へ戻せば、別の非線形問題を開始したことになり、「一度だけのLCFO」では
+なくなる。本設計はHamiltonianを$\hat H[\rho^\star]$に固定して大域混成だけを解く
+\emph{凍結密度近似}である。すなわち、fragment SCFがscreeningを決め、LCFOがそのscreened
+Hamiltonianの最良の大域固有状態を選ぶ。
+
+この近似の妥当性は自明ではない。$\rho_{\rm LCFO}-\rho^\star$が大きい系、例えばfragment間の
+強い電荷移動、金属的長距離応答、境界に局在した状態では誤差が増え得る。ただし本経路の
+acceptance criterionはLCFO後の密度差ではなく、所定のSCF収束と最終固有対receiptである。
+将来その密度差を診断量として出力しても、それを収束gateや再SCF triggerへ変更するには
+別設計が必要であり、本経路へ暗黙追加してはならない。
+
+\section{MPI所有権とcommunicator契約}
+識別子を三つに分ける：(i) physical-point ID $g$、(ii) rank-local配列位置$i$、
+(iii) distributed LCFO matrix row ID $\mu$。$i$は再分割で変わり、$\mu$は空間点番号ではない。
+対称操作のrow actionは大域physical-point permutation $g\mapsto Rg$である。
+pencil内位置やrank/local offsetの符号化値を渡してはならない。
+
+\code{icomm\_frag}では同一fragmentの部分和、行列、固有解を合意する。
+\code{icomm\_tot}では全physical pointの再分配、電子数、LCFO row ownership、fingerprint、
+checkpointを合意する。callbackは指定communicator上のcollectiveなので、一部rankだけが入ることや
+別communicatorを暗黙使用することは禁止である。
+
+\section{fingerprintとcheckpoint}
+PW catalog、buffer window、fragment basis/solver、LCFO operator、final solver、stateごとに
+64-bit fingerprintを作る。これは異なる基底・所有権・演算子・解のcheckpoint誤再利用を防ぐ。
+0は未設定と区別し、全rank寄与を順序付きcollectiveで畳み込む。公開payloadには固有値、係数、
+占有数、row IDs、provenance列、SCF/軌道receiptを含める。
+
+\section{実装対応表}
+\begin{longtable}{@{}p{0.30\linewidth}p{0.64\linewidth}@{}}
+\toprule 責務 & 実装 \\ \midrule
+対称閉包PWと窓 & \code{src/common/dg\_hybrid\_reciprocal\_catalog.f90},
+\code{src/common/dg\_hybrid\_production\_pw\_basis.f90}。\\
+窓のphysical-point再分配 & \code{src/common/dg\_hybrid\_window\_distribution.f90}。\\
+WF+PW投影とstream & \code{src/gs/dc/dg\_hybrid\_projected\_fragment\_pipeline.f90},
+\code{src/gs/dc/dg\_hybrid\_fragment\_basis\_stream.f90}。\\
+fragment固有問題 & \code{src/gs/dc/dg\_hybrid\_fragment\_solver.f90}。\\
+分割SCF & \code{src/gs/dc/dg\_hybrid\_divided\_scf.f90}。\\
+LCFO組立て & \code{src/gs/dc/dg\_hybrid\_lcfo\_support\_redistribution.f90},
+\code{src/gs/dc/dg\_hybrid\_lcfo.f90}の
+\code{assemble\_dg\_hybrid\_lcfo\_rows}。\\
+one-shot solve & \code{src/gs/dc/dg\_hybrid\_generalized\_eigensystem.f90}の
+\code{solve\_dg\_hybrid\_generalized\_once\_and\_publish}。\\
+production orchestration & \code{src/gs/main\_dft.f90}の
+\code{prepare\_dg\_hybrid\_divided\_production\_basis}、fragment/density callback群、
+\code{solve\_final\_dg\_hybrid\_divided\_lcfo}。\\
+checkpoint & \code{src/rt/dg/rt\_dg\_hybrid\_checkpoint.f90}の
+\code{write\_rt\_dg\_hybrid\_occupied\_checkpoint}。\\
+\bottomrule
+\end{longtable}
+
+\section{試験とSi64契約}
+本書は\code{tests/dg/check\_wpw\_lcfo\_implementation\_note.py}で検査する。
+実装の焦点化試験はproduction PW basisのMPI 1/2/4/8 rank、route contract、DC control、
+fragment basis/solver、divided SCF、LCFO assembly、one-shot solverを含む。
+Si64 runnerは\code{tests/dg/run\_dg\_hybrid\_si64\_divided\_lcfo.py}である。
+runner終了、収束marker、receipt、checkpointが全て揃うまで物理検証成功と呼ばない。
+
+\appendix
+\section{障害診断史}
+\subsection{window input ownership}
+pencil-owned core point全体へscalar rank-local \code{dc\%i\_frag}を渡し
+\code{invalid distributed window input}となった。MPI所有rankと物理fragment所有者の混同が根因で、
+各physical-point IDと領域境界から\code{core\_fragment\_ids(point)}を作るよう修正した。
+
+\subsection{local/global row action}
+local pencil rowや符号化global-row位置を、全physical-point permutationを要求するAPIへ渡していた。
+production wrapperでpencil mapを\code{all\_core\_ids}経由のphysical row actionへ正規化した。
+
+\subsection{generated bulk memset}
+巨大internal procedure内の\code{divided\_row\_action=0}、続く
+\code{divided\_core\_fragment\_ids=0}でcompiler生成bulk \code{memset}中のSIGSEGVが現れた。
+物理式ではなく巨大host frameとallocatable descriptor配置の実装圧力を示す。
+
+\subsection{host-frame descriptor pressure}
+production basis準備を専用\code{prepare\_dg\_hybrid\_divided\_production\_basis}へ移し、
+descriptor lifetimeを限定した。ただし、この修正がSi64全計算を通過した物理的証拠はまだない。
+保存された失敗runは診断証拠であり成功証拠ではない。
+
+\section{主要commit}
+\begin{longtable}{@{}p{0.18\linewidth}p{0.76\linewidth}@{}}
+\toprule commit & 内容 \\ \midrule
+\code{3660f86e} & 分割Hybrid SCF driver。\\
+\code{36eff0dc} & 成功したSi64 hybrid basis SCF段階を保存。\\
+\code{d1acbf03} & production分割WF+PW basis。\\
+\code{7b053f74} & fragment内一般化固有問題。\\
+\code{a6d305cb} & 分割密度反復をproduction routeへ接続。\\
+\code{728a2488} & 分散LCFOの空間内積を全経路で一貫させた。\\
+\code{2f1cfbe8} & SCF後にWF+PW LCFOを一度だけ解く。\\
+\code{9481240c} & divided LCFO occupied checkpointを公開。\\
+\bottomrule
+\end{longtable}
+
+\section{保守時チェックリスト}
+\begin{enumerate}
+\item 空間積分の定義がfragment/LCFOの$H,S,\rho,N_e$で一貫するか。
+\item physical-point ID、local position、matrix row IDを混同していないか。
+\item fragment collectiveは\code{icomm\_frag}、全体合意は\code{icomm\_tot}か。
+\item SCF収束後からfinal solveまで密度を変更していないか。
+\item final solveのcallはloop外に一つだけか。
+\item final solve後に密度SCF/gateへ戻る辺がないか。
+\item fingerprintとrow ownershipがcheckpoint payloadと一致するか。
+\item 単体試験とSi64物理検証を別の証拠として記録したか。
+\end{enumerate}
+\end{document}

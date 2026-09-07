@@ -1807,10 +1807,7 @@ contains
     call collective_allocation_status(comm,allocation_status,&
       'candidate Gram allocation failed',allocation_ok,allocation_message)
     if(.not.allocation_ok)then;message=allocation_message;return;endif
-    gram=(0d0,0d0)
-    do j=1,n;do i=1,n
-      gram(i,j)=sum(weights*conjg(raw(i,:))*raw(j,:))
-    enddo;enddo
+    gram=matmul(conjg(raw)*spread(weights,1,n),transpose(raw))
     call MPI_Allreduce(MPI_IN_PLACE,gram,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or..not.finite_complex(gram))then
       message='distributed candidate Gram reduction failed';return
@@ -1894,10 +1891,7 @@ contains
     call collective_allocation_status(comm,allocation_status,&
       'retained candidate allocation failed',allocation_ok,allocation_message)
     if(.not.allocation_ok)then;message=allocation_message;return;endif
-    retained=(0d0,0d0)
-    do p=1,size(raw,2);do k=1,retained_rank;do i=1,n
-      retained(k,p)=retained(k,p)+compression(i,k)*raw(i,p)
-    enddo;enddo;enddo
+    retained=matmul(transpose(compression),raw)
     allocation_status=0
     if(.not.extent_product_fits([retained_rank,retained_rank]))then
       allocation_status=1
@@ -1907,10 +1901,7 @@ contains
     call collective_allocation_status(comm,allocation_status,&
       'retained candidate Gram allocation failed',allocation_ok,allocation_message)
     if(.not.allocation_ok)then;message=allocation_message;return;endif
-    retained_gram=(0d0,0d0)
-    do j=1,retained_rank;do i=1,retained_rank
-      retained_gram(i,j)=sum(weights*conjg(retained(i,:))*retained(j,:))
-    enddo;enddo
+    retained_gram=matmul(conjg(retained)*spread(weights,1,retained_rank),transpose(retained))
     call MPI_Allreduce(MPI_IN_PLACE,retained_gram,size(retained_gram),MPI_DOUBLE_COMPLEX,&
       MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or..not.finite_complex(retained_gram))then
@@ -1950,10 +1941,7 @@ contains
     call collective_allocation_status(comm,allocation_status,&
       'seed coefficient allocation failed',allocation_ok,allocation_message)
     if(.not.allocation_ok)then;message=allocation_message;return;endif
-    coefficients=(0d0,0d0)
-    do j=1,size(seeds,1);do i=1,size(basis,1)
-      coefficients(i,j)=sum(weights*conjg(basis(i,:))*seeds(j,:))
-    enddo;enddo
+    coefficients=matmul(conjg(basis)*spread(weights,1,size(basis,1)),transpose(seeds))
     call MPI_Allreduce(MPI_IN_PLACE,coefficients,size(coefficients),MPI_DOUBLE_COMPLEX,&
       MPI_SUM,comm,ierr)
     if(ierr/=MPI_SUCCESS.or..not.finite_complex(coefficients))then
@@ -1968,10 +1956,7 @@ contains
     call collective_allocation_status(comm,allocation_status,&
       'seed reconstruction allocation failed',allocation_ok,allocation_message)
     if(.not.allocation_ok)then;message=allocation_message;return;endif
-    reconstructed=(0d0,0d0)
-    do p=1,size(seeds,2);do j=1,size(seeds,1);do i=1,size(basis,1)
-      reconstructed(j,p)=reconstructed(j,p)+coefficients(i,j)*basis(i,p)
-    enddo;enddo;enddo
+    reconstructed=matmul(transpose(coefficients),basis)
     allocation_status=0
     if(.not.extent_product_fits([size(seeds,1)]))then
       allocation_status=1

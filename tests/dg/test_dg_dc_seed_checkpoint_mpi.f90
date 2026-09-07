@@ -167,13 +167,15 @@ program test_dg_dc_seed_checkpoint_mpi
     call publish_valid_seed()
 
   case('read_existing_rank_mismatch')
-    call require_invalid(contract,write_threshold,'persisted MPI rank-count mismatch was accepted')
+    call require_invalid(contract,write_threshold,'persisted MPI rank-count mismatch was accepted',&
+      'cause=mpi_rank_count')
 
   case('rank_fragment_mismatch')
     call publish_valid_seed()
     expected=contract
     if(rank==0)expected%fragment_id=expected%fragment_id+1
-    call require_invalid(expected,write_threshold,'rank-to-fragment mismatch was accepted')
+    call require_invalid(expected,write_threshold,'rank-to-fragment mismatch was accepted',&
+      'cause=rank_fragment_mapping')
 
   case('local_bound_mismatch')
     call publish_valid_seed()
@@ -312,16 +314,21 @@ contains
     call require(ok,trim(message))
   end subroutine
 
-  subroutine require_invalid(value,threshold,text)
+  subroutine require_invalid(value,threshold,text,expected_cause)
     type(s_dg_dc_seed_contract),intent(in)::value
     real(8),intent(in)::threshold
     character(*),intent(in)::text
+    character(*),intent(in),optional::expected_cause
     call probe_dg_dc_seed(comm,trim(directory),value,density_weight,expected_electrons,electron_tolerance,&
       threshold,status,read_publication_id,message)
     call require(status==DG_DC_SEED_INVALID,text//': '//trim(message))
+    if(present(expected_cause))call require(index(message,expected_cause)>0,&
+      text//' without cause-specific probe diagnostic: '//trim(message))
     call read_dg_dc_seed(comm,trim(directory),value,density_weight,expected_electrons,electron_tolerance,&
       threshold,restored,read_publication_id,ok,message)
     call require(.not.ok,text)
+    if(present(expected_cause))call require(index(message,expected_cause)>0,&
+      text//' without cause-specific read diagnostic: '//trim(message))
   end subroutine
 
   logical function same_payload(left,right)

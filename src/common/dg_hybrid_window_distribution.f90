@@ -94,7 +94,8 @@ contains
 #ifdef USE_MPI
     integer::ierr,noperation,local_bad,global_bad,i,j,f,op,target,mapped,allocation_status
     integer::minimum_integer,maximum_integer
-    integer,allocatable::fragment_presence(:),point_ownership(:),point_fragment(:),local_count(:),global_count(:)
+    integer,allocatable::fragment_presence(:),point_ownership(:),point_fragment(:),point_action(:),&
+      local_count(:),global_count(:)
     integer(int64)::bits,minimum_bits,maximum_bits
     real(real64),allocatable::local_values(:),global_values(:)
     ok=.false.;message='';workspace_peak_bytes=0_int64;fingerprint=0_int64
@@ -114,22 +115,25 @@ contains
     local_bad=merge(0,1,global_point_count>0.and.fragment_count>0.and.noperation>0.and.&
       size(box_windows,1)==size(fragment_ids).and.size(box_windows,2)==size(box_ids).and.&
       size(core_fragment_ids)==size(core_ids).and.&
-      all(shape(row_action)==[global_point_count,noperation]).and.&
+      (size(row_action,1)==global_point_count.or.size(row_action,1)==size(core_ids)).and.&
       all(fragment_ids>=1).and.all(fragment_ids<=fragment_count).and.&
       all(box_ids>=1_int64).and.all(box_ids<=int(global_point_count,int64)).and.&
       all(core_ids>=1_int64).and.all(core_ids<=int(global_point_count,int64)).and.&
       all(core_fragment_ids>=1).and.all(core_fragment_ids<=fragment_count).and.&
       all(ieee_is_finite(box_windows)))
-    do op=1,noperation;do i=1,global_point_count
-      call agree_integer(row_action(i,op),minimum_integer,maximum_integer,comm,ierr)
-      if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)local_bad=1
-    enddo;enddo
+    if(size(row_action,1)==global_point_count)then
+      do op=1,noperation;do i=1,global_point_count
+        call agree_integer(row_action(i,op),minimum_integer,maximum_integer,comm,ierr)
+        if(ierr/=MPI_SUCCESS.or.minimum_integer/=maximum_integer)local_bad=1
+      enddo;enddo
+    endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
       message='invalid distributed window input';return
     endif
     allocate(fragment_presence(fragment_count),point_ownership(global_point_count),&
-      point_fragment(global_point_count),local_count(fragment_count),global_count(fragment_count),&
+      point_fragment(global_point_count),point_action(global_point_count),&
+      local_count(fragment_count),global_count(fragment_count),&
       local_values(fragment_count),global_values(fragment_count),stat=allocation_status)
     local_bad=merge(0,1,allocation_status==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -154,11 +158,19 @@ contains
         any(point_fragment>fragment_count))then
       call cleanup();message='duplicate or missing window core ownership';return
     endif
-    local_bad=0
+    local_bad=0;point_action=0
     do op=1,noperation
       if(any(row_action(:,op)<1).or.any(row_action(:,op)>global_point_count))local_bad=1
+      if(size(row_action,1)==global_point_count)then
+        point_action=row_action(:,op)
+      else
+        point_action=0
+        do i=1,size(core_ids);point_action(int(core_ids(i)))=row_action(i,op);enddo
+        call MPI_Allreduce(MPI_IN_PLACE,point_action,global_point_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)local_bad=1
+      endif
       do target=1,global_point_count
-        if(count(row_action(:,op)==target)/=1)local_bad=1
+        if(count(point_action==target)/=1)local_bad=1
       enddo
     enddo
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -197,11 +209,23 @@ contains
       enddo
     enddo
     fragment_action=0;local_bad=0
-    do op=1,noperation;do target=1,global_point_count
-      f=point_fragment(target);mapped=point_fragment(row_action(target,op))
+    do op=1,noperation
+      if(size(row_action,1)==global_point_count)then
+        point_action=row_action(:,op)
+      else
+        point_action=0
+        do i=1,size(core_ids);point_action(int(core_ids(i)))=row_action(i,op);enddo
+        call MPI_Allreduce(MPI_IN_PLACE,point_action,global_point_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+        if(ierr/=MPI_SUCCESS)then
+          call cleanup();message='distributed spatial action reduction failed';return
+        endif
+      endif
+      do target=1,global_point_count
+      f=point_fragment(target);mapped=point_fragment(point_action(target))
       if(fragment_action(f,op)==0)fragment_action(f,op)=mapped
       if(fragment_action(f,op)/=mapped)local_bad=1
-    enddo;enddo
+      enddo
+    enddo
     do op=1,noperation
       do f=1,fragment_count
         if(count(fragment_action(:,op)==f)/=1)local_bad=1
@@ -214,13 +238,15 @@ contains
     endif
     workspace_peak_bytes=8_int64*int(global_point_count,int64)+24_int64*int(fragment_count,int64)
     if(fingerprint==0_int64)fingerprint=1_int64
-    deallocate(fragment_presence,point_ownership,point_fragment,local_count,global_count,local_values,global_values)
+    deallocate(fragment_presence,point_ownership,point_fragment,point_action,local_count,global_count,&
+      local_values,global_values)
     ok=.true.
   contains
     subroutine cleanup()
       if(allocated(fragment_presence))deallocate(fragment_presence)
       if(allocated(point_ownership))deallocate(point_ownership)
       if(allocated(point_fragment))deallocate(point_fragment)
+      if(allocated(point_action))deallocate(point_action)
       if(allocated(local_count))deallocate(local_count)
       if(allocated(global_count))deallocate(global_count)
       if(allocated(local_values))deallocate(local_values)

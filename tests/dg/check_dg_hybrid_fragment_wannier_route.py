@@ -21,9 +21,46 @@ assert "divided hybrid scf must dispatch to the schwarz production entry" in sou
 match = re.search(r"\bsubroutine\s+" + entry + r"\b(.*?)\bend subroutine\s+" + entry, source, re.S)
 assert match, "missing separated divided production routine"
 route = match.group(1)
+fragment_builder = (ROOT / "src/gs/dc/dg_hybrid_fragment_wannier.f90").read_text().lower()
+admission_source = (ROOT / "src/gs/dc/dg_hybrid_fragment_admission.f90").read_text().lower()
+assert "'dgfw'" in route and "base_directory)//'dg_hybrid_fragment_w90'" not in route, (
+    "production W90 seed path must remain below the library fixed-length seed limit"
+)
+assert "'/w'" in fragment_builder and "'/construction_wannier'" not in fragment_builder, (
+    "fragment W90 leaf name exceeds the library fixed-length seed budget"
+)
+certify = fragment_builder.split("subroutine certify_seed_span", 1)[1].split(
+    "end subroutine certify_seed_span", 1
+)[0]
+compress = fragment_builder.split("subroutine metric_compress_candidates", 1)[1].split(
+    "end subroutine metric_compress_candidates", 1
+)[0]
+for expression in (
+    "coefficients=matmul",
+    "reconstructed=matmul",
+):
+    assert expression in re.sub(r"\s+", "", certify), (
+        "full DC span certification must use the matrix backend, not scalar cubic loops"
+    )
+for expression in ("gram=matmul", "retained=matmul", "retained_gram=matmul"):
+    assert expression in re.sub(r"\s+", "", compress), (
+        "fragment metric compression must use the matrix backend"
+    )
+compact_admission = re.sub(r"\s+|&", "", admission_source)
+assert "trial_seed_count" not in compact_admission, (
+    "pre-slicing DC seeds can split a degenerate energy boundary"
+)
+assert "coefficients,reference%energies,initial_count,guard_count" in compact_admission, (
+    "the complete seed inventory must reach the energy-aware initializer"
+)
 assert "nproc==dc%n_frag" in re.sub(r"\s+", "", route), (
     "divided production entry must require MPI size equal to fragment count"
 )
+compact_route = re.sub(r"\s+", "", route)
+assert "fragment_lattice(axis,axis)=dc%system_tot%hgs(axis)*real(raw_grid(axis),8)" in compact_route
+assert "fragment_reciprocal_lattice(axis,axis)=2d0*acos(-1d0)/fragment_lattice(axis,axis)" in compact_route
+assert not re.search(r"build_dg_hybrid_fragment_wannier_from_dc_seed\(.*?system%primitive_a",
+                     route, re.S), "full-system lattice was passed to fragment Wannier90"
 required = (
     "build_dg_hybrid_fragment_wannier_from_dc_seed",
     "select_dg_hybrid_core_wannier",
@@ -42,11 +79,28 @@ for name in required:
 assert route.index("call build_dg_hybrid_fragment_wannier_from_dc_seed") < route.index(
     "call initialize_dg_hybrid_interface_continuation"
 )
+ordered = (
+    "call build_dg_hybrid_fragment_wannier_from_dc_seed",
+    "call select_dg_hybrid_core_wannier",
+    "call prepare_dg_hybrid_selected_catalog",
+    "call build_dg_hybrid_projected_local_fragment_basis",
+    "call prepare_dg_hybrid_selected_trial",
+    "call initialize_dg_hybrid_interface_continuation",
+)
+for before, after in zip(ordered, ordered[1:]):
+    assert route.index(before) < route.index(after), f"production order must keep {before} before {after}"
 for name in ("dc_lcfo", "run_dg_overlapping_wannier_ground_state_for_main",
              "setup_dg_w90_gamma_library", "run_dg_w90_gamma_library",
              "apply_dg_hybrid_divided_fragment_hpsi", "solve_dg_hybrid_fragment_spectrum"):
     assert not re.search(r"\bcall\s+" + name + r"\b", route), f"legacy production fallback: {name}"
 assert not re.search(r"\b384\b", route), "material-specific state count in production"
+for forbidden in (
+    r"nstate\s*=\s*[^\n]*retained_rank",
+    r"state_count\s*=\s*[^\n]*retained_rank",
+    r"coefficients[^\n]*=\s*0[^\n]*pw",
+    r"dc_seed_coefficients[^\n]*\(\s*:\s*selected_count",
+):
+    assert not re.search(forbidden, route), f"raw/unprojected state shortcut remains: {forbidden}"
 solver_name = "solve_dg_hybrid_schwarz_fragments"
 solver_match = re.search(r"\bsubroutine\s+" + solver_name + r"\b(.*?)\bend subroutine\s+" + solver_name,
                          source, re.S)

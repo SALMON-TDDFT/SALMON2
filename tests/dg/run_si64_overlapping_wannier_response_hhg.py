@@ -21,6 +21,7 @@ LASER_CYCLES = 10.0
 POST_PULSE_CYCLES = 2.0
 LASER_DT_AU = 2.0
 LASER_REFERENCE_DT_AU = 1.0
+HHG_WINDOW = "hann"
 LASER_PULSE_DURATION_AU = LASER_CYCLES * 2.0 * math.pi / LASER_OMEGA_AU
 LASER_TOTAL_DURATION_AU = round(
     (LASER_CYCLES + POST_PULSE_CYCLES) * 2.0 * math.pi / LASER_OMEGA_AU
@@ -55,7 +56,6 @@ def main() -> int:
     parser.add_argument("checkpoint_dir", type=Path)
     parser.add_argument("result_root", type=Path)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
-    parser.add_argument("--structure", choices=("ideal", "displaced"), default="ideal")
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     checkpoint = args.checkpoint_dir.resolve(strict=True)
@@ -66,9 +66,9 @@ def main() -> int:
     atom_lines = [line for line in atoms.splitlines() if line.strip()]
     if len(atom_lines) != 64 or any("'Si'" not in line for line in atom_lines):
         raise RuntimeError("checkpoint provenance is not 64 silicon atoms")
-    fixture_name = "atom.dat" if args.structure == "ideal" else "atom_displaced.dat"
+    fixture_name = "atom.dat"
     if atoms != (args.repo / "tests/dg/data/si64_overlapping_wannier_rt" / fixture_name).read_text():
-        raise RuntimeError(f"checkpoint Si64 coordinates differ from the tracked {args.structure} fixture")
+        raise RuntimeError("checkpoint Si64 coordinates differ from the tracked ideal fixture")
     if not (checkpoint / "Si_rps.dat").is_file():
         raise RuntimeError("genuine Si pseudopotential is missing")
     if sha256(checkpoint / "Si_rps.dat") != sha256(args.repo / "samples/exercise_04_bulkSi_gs/Si_rps.dat"):
@@ -98,10 +98,11 @@ def main() -> int:
     checkpoint_hashes = {item.name: sha256(item) for item in checkpoint_files}
     checkpoint_digest = sha256(manifest_path)
     gs_log = (checkpoint / "run.log").read_text(errors="replace")
-    local_group_orders = [int(value) for value in re.findall(r"exact_site_group_order=(\d+)", gs_log)]
-    promoted_orders = [int(value) for value in re.findall(r"promoted_point_group_order=(\d+)", gs_log)]
-    if len(local_group_orders) != 8 or not promoted_orders or len(set(promoted_orders)) != 1:
-        raise RuntimeError("fresh checkpoint lacks exact fragment-symmetry publication evidence")
+    global_groups = re.findall(r"global_affine_group_order=(\d+)\s+inversion=([TF])", gs_log)
+    inversion_flags = re.findall(r"global_inversion_promoted=([TF])", gs_log)
+    if (not global_groups or global_groups[-1][1] != "T" or
+            not inversion_flags or inversion_flags[-1] != "T"):
+        raise RuntimeError("fresh checkpoint lacks full-system symmetry publication evidence")
     for name, template, axis, dt, nt in cases:
         case = root / name; case.mkdir()
         shutil.copy2(checkpoint / "atom.dat", case / "atom.dat")
@@ -126,10 +127,10 @@ def main() -> int:
             raise RuntimeError(f"{name}: restart missing or source V3 checkpoint changed")
         evidence = {
             "material": "Si", "atomic_number": 14, "atom_count": 64,
-            "structure": args.structure,
+            "structure": "ideal",
             "atom_sha256": sha256(checkpoint / "atom.dat"),
-            "local_exact_group_orders": local_group_orders,
-            "promoted_point_group_order": promoted_orders[0],
+            "global_point_group_order": int(global_groups[-1][0]),
+            "global_inversion_promoted": True,
             "checkpoint_magic": "SALMON_OW_GS_CHECKPOINT_V3",
             "checkpoint_manifest_sha256": checkpoint_digest,
             "observable_sha256": sha256(observable), "axis": axis,
@@ -150,7 +151,7 @@ def main() -> int:
             background = root / ("fieldoff-half-dt" if "half-dt" in name else "fieldoff")
             subprocess.run([sys.executable, str(args.repo / "tools/analyze_overlapping_wannier_spectra.py"), "hhg",
                 "--input", observable, "--background", background / "overlapping_wannier_rt_observables.dat",
-                "--axis", axis, "--window", "exponential", "--damping-time", "1000",
+                "--axis", axis, "--window", HHG_WINDOW,
                 "--carrier-ev", "1.55", "--output", case / "hhg-spectrum.tsv",
                 "--summary", case / "hhg-summary.json"], check=True)
             summary_path = case / "hhg-summary.json"

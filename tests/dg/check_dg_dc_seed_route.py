@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[2]
 MAIN = (ROOT / "src/gs/main_dft.f90").read_text()
 CHECKPOINT = (ROOT / "src/gs/dc/dg_dc_seed_checkpoint.f90").read_text()
 DCDFT = (ROOT / "src/gs/dc/dcdft.f90").read_text()
+SCF = (ROOT / "src/gs/scf_iteration_dft.f90").read_text()
+INITIALIZATION_DFT = (ROOT / "src/gs/initialization_dft.f90").read_text()
+MAIN_DFT_MD = (ROOT / "src/gs/main_dft_md.f90").read_text()
+CANONICAL_PP = (ROOT / "src/gs/dc/dg_canonical_pp_fingerprint.f90").read_text()
 
 
 def compact(text: str) -> str:
@@ -155,6 +159,45 @@ assert re.search(r"if\s*\(\s*dg_dc_seed_run_scf\s*\)\s*then", scf_guard, re.I), 
 assert "DC #SCF =" in (ROOT / "src/gs/scf_iteration_dft.f90").read_text(), (
     "test contract lost the conventional DC SCF receipt"
 )
+_, _, scf_call = call_extent(MAIN, "scf_iteration_dft")
+for seed_call_argument in (
+    "dg_dc_seed_publish",
+    "dg_dc_seed_electron_tolerance",
+):
+    assert seed_call_argument in scf_call.lower(), (
+        f"the conventional SCF seed convergence call omits {seed_call_argument}"
+    )
+for non_seed_source, label in (
+    (INITIALIZATION_DFT, "initial MD SCF"),
+    (MAIN_DFT_MD, "MD-step SCF"),
+):
+    _, _, non_seed_call = call_extent(non_seed_source, "scf_iteration_dft")
+    non_seed_compact = compact(non_seed_call)
+    assert ",.false.,0d0" in non_seed_compact, (
+        f"{label} does not explicitly disable the strict DG DC seed convergence gate"
+    )
+_, _, scf_body = subroutine_extent(SCF, "scf_iteration_dft")
+scf_compact = compact(scf_body)
+for seed_charge_gate in (
+    "require_dg_dc_seed_electron_count",
+    "required_dg_dc_seed_electron_count_tolerance",
+    "sum(dc%rho_tot_s(1)%f)",
+    "dc%system_tot%hvol",
+    "dc%elec_num_tot",
+    "call comm_summation",
+):
+    assert compact(seed_charge_gate) in scf_compact, (
+        f"strict seed SCF convergence omits {seed_charge_gate}"
+    )
+assert "[DG-DC-SEED-WAIT]" in scf_body, (
+    "continued SCF for seed electron-count convergence lacks an audit receipt"
+)
+assert re.search(
+    r"if\s*\(\s*sum1\s*<\s*threshold\s*\.and\.\s*"
+    r"dg_dc_seed_electron_count_converged\s*\)\s*then",
+    scf_body,
+    re.I,
+), "ordinary residual convergence can still bypass strict seed electron-count convergence"
 
 read_call_position, _, _ = call_extent(MAIN, "read_dg_dc_seed")
 restore_call_position, restore_call_end, restore_call = call_extent(
@@ -189,9 +232,34 @@ require_collective_ok_gate(
 assert re.search(r"if\s*\(\s*dg_dc_seed_fatal\s*\).*?error\s+stop", mode_region, re.I | re.S), (
     "read-absent and read/auto-invalid seed states must terminate collectively"
 )
+state_machine_fatal_position = mode_region.lower().index("if(dg_dc_seed_fatal)")
+state_machine_load_position = mode_region.lower().index(
+    "if(dg_dc_seed_load)", state_machine_fatal_position
+)
+state_machine_failure_region = mode_region[
+    state_machine_fatal_position:state_machine_load_position
+]
+assert "dg_dc_seed_message" in state_machine_failure_region.lower(), (
+    "seed state-machine failure discards the probe/resolver diagnostic"
+)
+assert "[DG-DC-SEED-ERROR]" in state_machine_failure_region, (
+    "seed state-machine failure lacks a recognizable diagnostic receipt"
+)
+assert re.search(
+    r"if\s*\(\s*dc%id_tot\s*==\s*0\s*\).*?write\s*\(\s*error_unit",
+    state_machine_failure_region,
+    re.I | re.S,
+), "seed state-machine diagnostic is not emitted by total-system rank zero"
+assert re.search(r"flush\s*\(\s*error_unit\s*\)", state_machine_failure_region, re.I), (
+    "seed state-machine diagnostic is not flushed before fatal termination"
+)
+assert (
+    state_machine_failure_region.index("[DG-DC-SEED-ERROR]")
+    < state_machine_failure_region.lower().index("error stop")
+), "seed state-machine terminates before publishing its detailed diagnostic"
 
 convergence_position = MAIN.lower().index("if(.not.(sum1<threshold))")
-write_position, _, write_call = call_extent(MAIN, "write_dg_dc_seed")
+write_position, write_call_end, write_call = call_extent(MAIN, "write_dg_dc_seed")
 dispatch_positions = [
     position
     for token in (
@@ -223,6 +291,18 @@ for exact_state in ("system", "energy", "spsi", "dc", "sum1", "miter"):
 require_collective_ok_gate(
     MAIN, capture_call_end, write_position, "captured-payload allocation"
 )
+publish_failure_region = MAIN[write_call_end:write_call_end + 700]
+assert "dg_dc_seed_message" in publish_failure_region.lower(), (
+    "production seed publication failure discards the checkpoint writer's diagnostic"
+)
+assert "[DG-DC-SEED-ERROR]" in publish_failure_region, (
+    "production seed publication failure lacks a recognizable diagnostic receipt"
+)
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*dg_dc_seed_ok\s*\).*?error\s+stop",
+    publish_failure_region,
+    re.I | re.S,
+), "production seed publication failure is not fatal after reporting its diagnostic"
 
 _, _, capture_body = subroutine_extent(DCDFT, "capture_dg_dc_seed_payload_dcdft")
 for exact_copy in (
@@ -303,6 +383,55 @@ assert "hash_character(hash,trim(method_mixing))" in convergence_fingerprint_com
 assert "hash_real(hash,mixing%mixrate)" in convergence_fingerprint_compact
 assert "dg_hybrid_divided_mixing" not in convergence_fingerprint_compact, (
     "post-seed Hybrid mixing selector changed conventional DC seed compatibility"
+)
+
+_, _, operator_fingerprint_body = subroutine_extent(
+    MAIN.replace(
+        "integer(int64) function dg_dc_seed_operator_input_fingerprint()result(hash)",
+        "subroutine dg_dc_seed_operator_input_fingerprint()",
+        1,
+    ).replace(
+        "end function dg_dc_seed_operator_input_fingerprint",
+        "end subroutine dg_dc_seed_operator_input_fingerprint",
+        1,
+    ),
+    "dg_dc_seed_operator_input_fingerprint",
+)
+operator_fingerprint_compact = compact(operator_fingerprint_body)
+assert "canonical_pp_fingerprint(pp)" in operator_fingerprint_compact, (
+    "the production DC seed does not use the canonical pseudopotential fingerprint"
+)
+assert "if(pp_fingerprint==0_int64)thenhash=0_int64;return" in operator_fingerprint_compact, (
+    "an incomplete canonical pseudopotential can enter the seed contract"
+)
+assert "hash_pp_info_for_dg_dc_seed" not in MAIN.lower(), (
+    "the seed route still exposes the old whole-allocation pseudopotential hash"
+)
+for canonical_contract in (
+    "SALMON-DG-CANONICAL-PP",
+    "do radial=1,pp%nrloc(element)",
+    "do radial=1,pp%nrps(element)",
+    "do radial=1,pp%nrps_ao(element)",
+    "nlcc_meaning_end(pp,element)",
+):
+    assert compact(canonical_contract) in compact(CANONICAL_PP), (
+        f"canonical pseudopotential contract omits {canonical_contract}"
+    )
+for forbidden_scratch in (
+    "pp%zion",
+    "pp%vpp=",
+    "pp%upp=",
+    "pp%dvpp=",
+    "pp%dupp=",
+    "pp%vpp_f",
+    "pp%upp_f",
+    "pp%dupptbl_ao",
+):
+    assert forbidden_scratch not in CANONICAL_PP.lower(), (
+        f"canonical pseudopotential hash consumes reader scratch: {forbidden_scratch}"
+    )
+assert "canonical_pp_valence_sum(pp)" in compact(MAIN), (
+    "the Hybrid checkpoint pseudopotential receipt still consumes scalar pp%zion scratch"
 )
 
 assert re.search(

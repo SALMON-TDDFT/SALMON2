@@ -283,7 +283,8 @@ subroutine run_dg_hybrid_continuation_rt()
     local_defect,global_defect,local_scale,global_scale,current_total_energy,current_electron_count,&
     current_hamiltonian_residual,stationarity_tolerances(5)
   integer(8)::workspace,fingerprint
-  integer::step,orbital,iterations,ierr,update_count,local_bad,global_bad
+  integer::step,orbital,iterations,ierr,update_count,local_bad,global_bad,&
+    coefficient_rows_local,coefficient_rows_global
   logical::ok,has_energy_reference,zero_field_run
   character(256)::message
   call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
@@ -322,9 +323,18 @@ subroutine run_dg_hybrid_continuation_rt()
     current_hamiltonian_residual,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initial physical invariants failed';endif
   if(.not.allocated(hybrid_state%energy_receipt))error stop 'hybrid DG RT physical energy receipt is absent'
-  if(nproc_id_global==0)write(*,'(a,i0,2(a,es16.8))')'[HYBRID-RT-HANDOFF] payload_fingerprint=',&
+  coefficient_rows_local=size(hybrid_state%coefficients,1)
+  call MPI_Allreduce(coefficient_rows_local,coefficient_rows_global,1,MPI_INTEGER,MPI_SUM,&
+    nproc_group_global,ierr)
+  if(ierr/=MPI_SUCCESS)error stop 'hybrid DG RT coefficient-extent reduction failed'
+  if(nproc_id_global==0)write(*,'(a,i0,2(a,es16.8),8(a,i0))')'[HYBRID-RT-HANDOFF] payload_fingerprint=',&
     hybrid_state%payload_fingerprint,' operator_symmetry=',hybrid_state%startup_operator_covariance,&
-    ' projector_symmetry=',hybrid_state%startup_projector_covariance
+    ' projector_symmetry=',hybrid_state%startup_projector_covariance,&
+    ' certified_rank=',hybrid_state%certified_rank,' state_rank=',hybrid_state%global_count,&
+    ' metric_rank=',hybrid_state%metric%global_count,' operator_rank=',hybrid_state%operators%global_count,&
+    ' basis_rank=',size(hybrid_state%basis_values,1),' coefficient_rows=',coefficient_rows_global,&
+    ' operation_count=',hybrid_state%operation_count,&
+    ' nonidentity_count=',hybrid_state%nonidentity_operation_count
   has_energy_reference=size(hybrid_state%energy_receipt)==7.and.any(hybrid_state%energy_receipt/=0d0)
   if(has_energy_reference)then
     if(abs(current_total_energy-hybrid_state%energy_receipt(1))>&

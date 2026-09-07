@@ -4,7 +4,7 @@
 
 **Goal:** Build and validate a self-consistent Si64 ground state in the fixed Wannier plus windowed-PW hybrid basis, first with complex ScaLAPACK and then with an adaptively stopped block-CG solver.
 
-**Architecture:** Keep the hybrid basis and metric immutable during an outer SALMON Pulay density loop.  Rebuild only the density-dependent sparse Hamiltonian, solve its occupied generalized eigenspace, reconstruct the full-cell density, and publish a multi-orbital checkpoint only after collective physical gates pass.  Use a complex Cholesky plus ScaLAPACK `PZHEEVD` path as the Si64 reference before enabling the matrix-free block-CG replacement.
+**Architecture:** Keep the hybrid basis and metric immutable during the previously validated bounded two-point Anderson density loop (simple mixing plus one residual-history correction, not full Pulay).  Rebuild only the density-dependent sparse Hamiltonian, solve its occupied generalized eigenspace, reconstruct the full-cell density, and publish a multi-orbital checkpoint only after collective physical gates pass.  Use a complex Cholesky plus ScaLAPACK `PZHEEVD` path as the Si64 reference before enabling the matrix-free block-CG replacement.
 
 **Tech Stack:** Fortran 2008, MPI, ScaLAPACK/BLACS, LAPACK test oracles, SALMON density/potential and mixing modules, CMake, Python MPI runners.
 
@@ -23,7 +23,7 @@ Require this order in the eventual production adapter:
 ```text
 fixed hybrid basis -> initial DC+LCFO density -> update potential
 -> sparse H rebuild -> occupied generalized solve -> density reconstruction
--> Pulay update -> convergence gates -> multi-orbital checkpoint
+-> bounded two-point Anderson update -> convergence gates -> multi-orbital checkpoint
 ```
 
 Reject a one-shot checkpoint publication, basis reselection inside SCF, the
@@ -158,7 +158,7 @@ git add src/gs/dc/dg_hybrid_density.f90 tests/dg/test_dg_hybrid_density_mpi.f90 
 git commit -m "feat: reconstruct hybrid occupied density"
 ```
 
-### Task 5: Add the nonlinear SCF controller with Pulay reuse
+### Task 5: Add the nonlinear SCF controller with validated density-history mixing
 
 **Files:**
 - Create: `src/gs/dc/dg_hybrid_scf.f90`
@@ -169,8 +169,8 @@ git commit -m "feat: reconstruct hybrid occupied density"
 **Step 1: Write a synthetic nonlinear RED/GREEN fixture**
 
 Use a small density-dependent Hermitian Hamiltonian with a known fixed point.
-Require convergence from a DC-like initial density using the existing SALMON
-Pulay state.  Add fixtures for simple-mixing startup, Pulay acceleration,
+Require convergence from a DC-like initial density using the previously validated
+two-point Anderson state.  Add fixtures for simple-mixing startup, bounded acceleration,
 oscillation detection, history rejection/reset, decreasing mixing factor,
 inner-solve failure, electron-count failure, and no checkpoint on failure.
 
@@ -180,8 +180,8 @@ Run: `python3 tests/dg/run_dg_hybrid_scf_mpi.py`
 
 **Step 3: Implement callback-driven outer SCF**
 
-The controller owns convergence policy but calls existing SALMON density-mixing
-routines.  Callbacks update the potential, assemble sparse `H`, solve occupied
+The controller owns convergence policy but calls the existing bounded two-point
+Anderson mixer.  Callbacks update the potential, assemble sparse `H`, solve occupied
 states, and reconstruct output density.  Keep the basis and `S` fingerprints
 constant throughout the loop.
 

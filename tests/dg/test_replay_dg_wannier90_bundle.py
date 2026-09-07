@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory(prefix="w90-replay-test-") as name:
             "num_wann = 1\n"
             "site_symmetry = true\n"
             "symmetrize_eps = 1.0d-10\n"
+            "fixed_step = 0.01\n"
         ),
         ".dmn": "dmn\n",
         ".mmn": "mmn\n",
@@ -36,21 +37,42 @@ with tempfile.TemporaryDirectory(prefix="w90-replay-test-") as name:
     result = subprocess.run(
         ["python3", str(DRIVER), str(bundle), "--seed", seed,
          "--executable", str(fake), "--output-directory", str(output),
-         "--symmetry-mode", "constrained", "--symmetrize-eps", "2.5d-8"],
+         "--symmetry-mode", "constrained",
+         "--symmetrize-eps", "2.5d-8", "--site-symmetry", "true",
+         "--trial-step", "0.25", "--num-cg-steps", "2", "--num-iter", "75"],
         text=True, capture_output=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "2.5d-8" in (output / f"{seed}.wout").read_text()
     replay_text = (output / f"{seed}.wout").read_text().lower()
-    assert "2.5d-8" in replay_text
     assert "site_symmetry = true" in replay_text
+    assert "trial_step = 0.25" in replay_text
+    assert "fixed_step" not in replay_text
+    assert "num_cg_steps = 2" in replay_text
+    assert "num_iter = 75" in replay_text
     assert "1.0d-10" in (bundle / f"{seed}.win").read_text()
     receipt = json.loads((output / "replay-receipt.json").read_text())
     assert receipt["returncode"] == 0
     assert receipt["symmetry_mode"] == "constrained"
-    assert set(receipt["input_sha256"]) == {
-        f"{seed}{suffix}"
-        for suffix in (".win", ".dmn", ".mmn", ".amn", ".eig")
-    }
+    assert receipt["site_symmetry"] == "true"
+    assert receipt["trial_step"] == "0.25"
+    assert receipt["num_cg_steps"] == 2
+    assert receipt["num_iter"] == 75
+    assert set(receipt["input_sha256"]) == {f"{seed}{s}" for s in (".win", ".dmn", ".mmn", ".amn", ".eig")}
+
+    fixed_output = root / "fixed-output"
+    fixed = subprocess.run(
+        ["python3", str(DRIVER), str(bundle), "--seed", seed,
+         "--executable", str(fake), "--output-directory", str(fixed_output),
+         "--symmetry-mode", "constrained",
+         "--fixed-step", "0.05", "--num-iter", "20"],
+        text=True, capture_output=True,
+    )
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+    fixed_text = (fixed_output / f"{seed}.wout").read_text().lower()
+    assert "fixed_step = 0.05" in fixed_text
+    assert "trial_step" not in fixed_text
+    assert json.loads((fixed_output / "replay-receipt.json").read_text())["fixed_step"] == "0.05"
 
     with (bundle / f"{seed}.win").open("a") as stream:
         stream.write("site_symmetry = true\nsymmetrize_eps = 2.0d-10\n")
@@ -59,7 +81,9 @@ with tempfile.TemporaryDirectory(prefix="w90-replay-test-") as name:
     unconstrained = subprocess.run(
         ["python3", str(DRIVER), str(bundle), "--seed", seed,
          "--executable", str(fake), "--output-directory", str(unconstrained_output),
-         "--symmetry-mode", "unconstrained", "--symmetrize-eps", "9.9d-9"],
+         "--symmetry-mode", "unconstrained",
+         "--symmetrize-eps", "9.9d-9", "--site-symmetry", "true",
+         "--trial-step", "0.125", "--num-cg-steps", "3", "--num-iter", "50"],
         text=True, capture_output=True,
     )
     assert unconstrained.returncode == 0, unconstrained.stdout + unconstrained.stderr
@@ -67,11 +91,12 @@ with tempfile.TemporaryDirectory(prefix="w90-replay-test-") as name:
     assert "site_symmetry = false" in unconstrained_text
     assert unconstrained_text.count("site_symmetry") == 1
     assert "symmetrize_eps" not in unconstrained_text
+    assert "trial_step = 0.125" in unconstrained_text
+    assert "fixed_step" not in unconstrained_text
     unconstrained_receipt = json.loads(
         (unconstrained_output / "replay-receipt.json").read_text()
     )
     assert unconstrained_receipt["symmetry_mode"] == "unconstrained"
-    assert unconstrained_receipt["symmetrize_eps"] is None
     assert set(unconstrained_receipt["input_sha256"]) == {
         f"{seed}{suffix}" for suffix in (".win", ".mmn", ".amn", ".eig")
     }

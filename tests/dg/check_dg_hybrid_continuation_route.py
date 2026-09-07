@@ -338,6 +338,16 @@ assert "ow_reciprocal_operation_maps" in production_call, (
 assert "global_point_rotations(:,:,global_point_representatives)" in production_call.replace(" ", ""), (
     "Hybrid PW preparation omits the complete authoritative point-cogroup rotations"
 )
+route_start = source.index("subroutine run_dg_overlapping_wannier_ground_state_for_main")
+scope_call_start = source.index("call build_dg_hybrid_scope_receipt", route_start)
+first_wannier_matrix_start = source.index("call assemble_dg_w90_gamma_a_matrix", route_start)
+assert scope_call_start < first_wannier_matrix_start, (
+    "supported-scope validation runs after expensive Wannier/local-basis construction"
+)
+scope_call = source[scope_call_start:scope_call_start + 700]
+assert "xc_func%xctype" in scope_call, (
+    "supported-scope receipt does not authenticate the full production XC descriptor"
+)
 
 driver_name = "subroutine run_dg_hybrid_concrete_continuation"
 assert driver_name in source, "missing contained concrete continuation driver"

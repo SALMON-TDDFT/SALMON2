@@ -57,7 +57,9 @@ git commit -m "test: specify nonlocal projector range diagnostic"
 Store local/adjacent/remote contribution totals, maximum remote fraction,
 operation pair defect, unmatched-channel count, and peak workspace bytes.
 Validate all dimensions, finite inputs, unique physical grid ownership, and the
-one-to-one same-species atom map collectively.
+one-to-one same-species atom map collectively.  Accept explicit dense Wannier
+and projector representations so angular-channel rotations are never inferred
+from atom indices alone.
 
 **Step 2: Accumulate overlap tiles**
 
@@ -116,7 +118,9 @@ every Hamiltonian build.
 Map `ow_core_values` to `dc%mg_tot` in tiles using the existing cached
 redistribution schedule, call the new diagnostic with `dc%ppg_tot`, physical
 atomic positions/species, Wannier centers, and affine operation 5, and print one
-rank-zero receipt.  Do not change `hrows`, `ow_srows`, `ow_rhorows`, density, or
+rank-zero receipt.  Construct complete radial `(2l+1)` projector blocks in
+SALMON's real-harmonic convention and combine them with the exact periodic atom
+permutation.  Do not change `hrows`, `ow_srows`, `ow_rhorows`, density, or
 any acceptance tolerance.
 
 **Step 4: Verify focused tests and build**

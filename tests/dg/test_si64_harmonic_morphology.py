@@ -25,6 +25,12 @@ assert runner.LASER_CYCLES == 10.0
 assert runner.POST_PULSE_CYCLES == 2.0
 assert runner.LASER_DT_AU == 2.0
 assert runner.LASER_REFERENCE_DT_AU == 1.0
+assert runner.HHG_WINDOW == "hann"
+runner_source = Path(runner.__file__).read_text()
+checker_source = checker_path.read_text()
+assert "exact_site_group_order" not in runner_source
+assert "local_exact_group_orders" not in checker_source
+assert "--displaced-root" not in checker_source
 assert runner.laser_sample_count(runner.LASER_DT_AU) * runner.LASER_DT_AU == \
     runner.laser_sample_count(runner.LASER_REFERENCE_DT_AU) * runner.LASER_REFERENCE_DT_AU
 

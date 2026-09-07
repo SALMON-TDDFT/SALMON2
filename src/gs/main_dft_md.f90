@@ -167,7 +167,7 @@ MD_Loop : do it=1,nt
                            rho,rho_jm,rho_s,  &
                            V_local,Vh,Vxc,Vpsl,xc_func,  &
                            pp,ppg,ppn,  &
-                           band,2 )
+                           band,2,.false.,0d0)
 
    ! force
    call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)

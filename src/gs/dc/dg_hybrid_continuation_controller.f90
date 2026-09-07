@@ -500,13 +500,15 @@ contains
     type(s_dg_hybrid_stage_report),intent(in)::report
     logical,intent(out)::accept,ok;character(*),intent(out)::message
 #ifdef USE_MPI
-    logical::local_accept
+    logical::local_accept,iteration_valid
     integer::local_integer,global_integer,ierr,global_iteration,gap_integer,global_gap_integer
     real(real64)::stage_tolerances(residual_channel_count)
     call dg_hybrid_stage_tolerances(controller%controls,controller%trial_lambda,stage_tolerances)
+    iteration_valid=report%iteration>=1.and.&
+      (report%iteration<=controller%controls%iteration_limit.or.&
+      (controller%trial_lambda==1d0.and.report%iteration==controller%controls%iteration_limit+1))
     local_accept=controller%valid.and.controller%trial_active.and.valid_state(state).and.state%trace_cache_valid.and.&
-      report%iteration>=1.and.&
-      report%iteration<=controller%controls%iteration_limit.and.all(ieee_is_finite(report%residuals)).and.&
+      iteration_valid.and.all(ieee_is_finite(report%residuals)).and.&
       all(report%residuals>=0d0).and.all(report%residuals<=stage_tolerances).and.ieee_is_finite(report%projector_overlap).and.&
       report%projector_overlap>=controller%controls%minimum_projector_overlap.and.report%electron_ok.and.&
       report%occupation_ok.and.report%hermitian_ok.and.report%symmetry_ok.and.report%real_space_ok.and.report%finite_ok

@@ -284,7 +284,7 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     type(s_dg_hybrid_core_selection)::work
-    integer::np,rank,ierr,status,a,j,base(3),slot
+    integer::np,rank,ierr,status,a,j,base(3),slot,positive_limit,mapped_offset,expected_index
     integer,allocatable::fragments(:)
     complex(real64),allocatable::q(:,:),seed(:,:)
     real(real64),allocatable::centers(:,:)
@@ -292,7 +292,7 @@ contains
     logical,allocatable::core_mask(:)
     real(real64)::h(3),length(3),expected_lattice(3,3),offset(3),tol(3)
     integer(int64)::fingerprint
-    logical::valid,cache_ok
+    logical::valid,cache_ok,axis_contiguous,axis_core_first
     character(256)::cache_message
     call MPI_Comm_size(comm,np,ierr);call MPI_Comm_rank(comm,rank,ierr)
     valid=ierr==MPI_SUCCESS.and.fragment_id>=1.and.fragment_id<=np.and.cache%valid.and.&
@@ -334,9 +334,23 @@ contains
     base=modulo(nint(offset),total_grid)
     valid=valid.and.all(abs(modulo(core_lower(:,fragment_id)-total_origin,length)/h-&
       real(base,real64))<=tol).and.all(abs(core_extent(:,fragment_id)/h-real(core_grid,real64))<=tol)
-    do a=1,3;do j=1,raw_grid(a)
-      valid=valid.and.dc_indices(j,a)==1+int(modulo(int(base(a),int64)+int(j-1,int64),int(total_grid(a),int64)))
-    enddo;enddo
+    do a=1,3
+      axis_contiguous=.true.
+      axis_core_first=modulo(raw_grid(a)-core_grid(a),2)==0
+      positive_limit=core_grid(a)+(raw_grid(a)-core_grid(a))/2
+      do j=1,raw_grid(a)
+        expected_index=1+int(modulo(int(base(a)+j-1,int64),int(total_grid(a),int64)))
+        axis_contiguous=axis_contiguous.and.dc_indices(j,a)==expected_index
+        if(j<=positive_limit)then
+          mapped_offset=j
+        else
+          mapped_offset=j-raw_grid(a)
+        endif
+        expected_index=1+int(modulo(int(base(a)+mapped_offset-1,int64),int(total_grid(a),int64)))
+        axis_core_first=axis_core_first.and.dc_indices(j,a)==expected_index
+      enddo
+      valid=valid.and.(axis_contiguous.or.axis_core_first)
+    enddo
     call gate(comm,valid,'fragment lattice/origin disagrees with raw DC core-first mapping',ok,message)
     if(.not.ok)return
     deallocate(centers);allocate(centers(3,cache%receipt%retained_rank),stat=status)

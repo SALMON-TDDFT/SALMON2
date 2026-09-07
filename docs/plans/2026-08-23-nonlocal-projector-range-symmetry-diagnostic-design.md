@@ -25,6 +25,11 @@ projector grid, atomic geometry, and one affine operation.  A cached physical-ID
 redistribution places bounded Wannier tiles on `dc%mg_tot`.  For every global
 nonlocal channel, ranks accumulate
 `<beta_a,lm|w_i>` from their local projector support and combine it collectively.
+The adapter supplies both the dense Wannier representation and the projector
+representation in SALMON's radial-channel and real-harmonic ordering.  The
+projector representation contains the periodic atom permutation and a complete
+`(2l+1)` rotation block; atom permutation alone is insufficient for p and d
+channels.
 
 The routine reports only reductions, not the full overlap table:
 
@@ -32,8 +37,8 @@ The routine reports only reductions, not the full overlap table:
   remote-fragment distance class;
 - maximum and total remote fraction over Wannier functions;
 - operation-5 atom-map residual;
-- norm and maximum defect between overlaps of symmetry-related Wannier/atom
-  projector pairs;
+- norm and maximum defect of the overlap covariance relation using the dense
+  Wannier and projector representations;
 - count of channels whose symmetry partner is missing or ambiguous.
 
 Distance classification uses periodic minimum-image distance between the
@@ -41,6 +46,7 @@ Wannier center and projector atom.  Fragment classification is derived from the
 existing `2x2x2` physical fragment geometry, not MPI rank arithmetic.  The
 operation-5 atom permutation is obtained from the atomic positions, species,
 integer rotation, and fractional translation with a one-to-one periodic match.
+Incomplete angular projector shells are rejected.
 
 ## Memory and communication
 

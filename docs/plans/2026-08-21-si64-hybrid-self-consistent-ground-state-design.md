@@ -14,7 +14,7 @@ interact artificially.
 Use two solver stages with one common outer density loop.
 
 1. Establish a reference Si64 calculation with complex ScaLAPACK inside the
-   existing Pulay density-mixing loop.
+   previously validated bounded two-point Anderson density-mixing loop.
 2. Replace only the inner eigensolver with an adaptive block-CG implementation
    and compare it to the converged reference.
 
@@ -39,7 +39,7 @@ Each outer iteration performs:
 6. reconstruct the full-cell output density from all occupied hybrid states;
 7. measure density, energy, eigensystem, metric-orthogonality, and symmetry
    residuals;
-8. update the input density through the existing SALMON Pulay machinery;
+8. update the input density through the existing simple-plus-two-point-Anderson machinery;
 9. publish the RT checkpoint only after all convergence gates pass.
 
 The initial density is the converged DC+LCFO density.  The propagated state is a
@@ -87,12 +87,13 @@ error scale currently allowed by the outer density residual.  The implementation
 must emit the requested and achieved inner tolerances, iteration count, residual
 history summary, and stop reason.
 
-## Pulay Stability
+## Density-Mixing Stability
 
-Reuse the existing SALMON density mixing state and history format.  Do not create
-a second independent mixing algorithm for the hybrid route.
+Reuse `mix_dg_overlapping_wannier_density_history`, the earlier successful
+positivity-preserving simple update with one bounded Anderson correction.  This
+is deliberately not the full SALMON Pulay mixer.
 
-If the density residual grows excessively or alternates, reject the newest Pulay
+If the density residual grows excessively or alternates, reject the newest Anderson
 history contribution, reset the affected history, and reduce the mixing factor.
 An inner solve that fails its acceptance gates must not enter Pulay history.  A
 later stable decrease may restore the configured mixing factor gradually, but no

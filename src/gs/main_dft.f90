@@ -52,8 +52,10 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_hybrid_symmetry_energy_window,temperature,&
   dg_hybrid_fragment_cg_steps
 use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
-  DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
+  DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,DG_DC_SEED_INVALID,&
+  build_dg_dc_seed_contract,probe_dg_dc_seed,&
   read_dg_dc_seed,write_dg_dc_seed,restore_dg_dc_seed_payload,resolve_dg_dc_seed_mode
+use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint,canonical_pp_valence_sum
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -306,7 +308,7 @@ integer :: dg_dc_seed_rwf_bounds(14),dg_dc_seed_rho_bounds(6),dg_dc_seed_vloc_bo
 integer(int64) :: dg_dc_seed_publication_id
 integer(int64) :: dg_dc_seed_immutable_inputs(6),dg_dc_seed_ownership_map(8)
 real(8) :: dg_dc_seed_electron_tolerance
-character(512) :: dg_dc_seed_message
+character(512) :: dg_dc_seed_message,dg_dc_seed_probe_message
 integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_dg_overlapping_wannier_construction) :: ow_basis
@@ -455,6 +457,7 @@ dg_dc_seed_fatal=.false.;dg_dc_seed_scf_skipped=.false.;dg_dc_seed_ok=.true.
 dg_dc_seed_collective_ok=.true.
 dg_dc_seed_status=DG_DC_SEED_ABSENT;dg_dc_seed_publication_id=0_int64
 dg_dc_seed_message='';dg_dc_seed_contract=s_dg_dc_seed_contract()
+dg_dc_seed_probe_message=''
 dg_dc_seed_electron_tolerance=dg_dc_gs_electron_count_tolerance
 if(trim(dg_dc_seed_mode)/='off')then
   dg_dc_seed_ok=.not.(yn_dc/='y'.or.yn_dg_dc_overlapping_wannier/='y'.or.&
@@ -495,21 +498,33 @@ case('read')
   call probe_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
     dc%system_tot%hvol,dc%elec_num_tot,dg_dc_seed_electron_tolerance,threshold,&
     dg_dc_seed_status,dg_dc_seed_publication_id,dg_dc_seed_message)
+  dg_dc_seed_probe_message=dg_dc_seed_message
   call resolve_dg_dc_seed_mode(dg_dc_seed_mode,dg_dc_seed_status,&
     dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal,&
     dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_message)
+  if(dg_dc_seed_status==DG_DC_SEED_INVALID.and.len_trim(dg_dc_seed_probe_message)>0)&
+    dg_dc_seed_message=dg_dc_seed_probe_message
 case('auto')
   call atomic_create_directory(trim(dg_dc_seed_directory),dc%icomm_tot,dc%id_tot)
   call probe_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
     dc%system_tot%hvol,dc%elec_num_tot,dg_dc_seed_electron_tolerance,threshold,&
     dg_dc_seed_status,dg_dc_seed_publication_id,dg_dc_seed_message)
+  dg_dc_seed_probe_message=dg_dc_seed_message
   call resolve_dg_dc_seed_mode(dg_dc_seed_mode,dg_dc_seed_status,&
     dg_dc_seed_run_scf,dg_dc_seed_load,dg_dc_seed_publish,dg_dc_seed_fatal,&
     dg_dc_seed_scf_skipped,dg_dc_seed_ok,dg_dc_seed_message)
+  if(dg_dc_seed_status==DG_DC_SEED_INVALID.and.len_trim(dg_dc_seed_probe_message)>0)&
+    dg_dc_seed_message=dg_dc_seed_probe_message
 case default
   dg_dc_seed_fatal=.true.;dg_dc_seed_message='unknown DG DC seed mode'
 end select
-if(dg_dc_seed_fatal)error stop 'DG DC seed is absent, invalid, or incompatible'
+if(dg_dc_seed_fatal)then
+  if(dc%id_tot==0)then
+    write(error_unit,'(a,a)')'[DG-DC-SEED-ERROR] ',trim(dg_dc_seed_message)
+    flush(error_unit)
+  endif
+  error stop 'DG DC seed is absent, invalid, or incompatible'
+endif
 if(dg_dc_seed_load)then
   call read_dg_dc_seed(dc%icomm_tot,trim(dg_dc_seed_directory),dg_dc_seed_contract,&
     dc%system_tot%hvol,dc%elec_num_tot,dg_dc_seed_electron_tolerance,threshold,&
@@ -602,7 +617,8 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
                         rho,rho_jm,rho_s,  &
                         V_local,Vh,Vxc,Vpsl,xc_func,  &
                         pp,ppg,ppn,  &
-                        band, ilevel_print, dc)
+                        band, ilevel_print,dg_dc_seed_publish,&
+                        dg_dc_seed_electron_tolerance,dc)
 endif
 
 
@@ -738,7 +754,13 @@ if(yn_dc=='y') then
         dg_dc_seed_payload,dc%system_tot%hvol,dc%elec_num_tot,&
         dg_dc_seed_electron_tolerance,threshold,dg_dc_seed_publication_id,&
         dg_dc_seed_ok,dg_dc_seed_message)
-      if(.not.dg_dc_seed_ok)error stop 'failed to publish converged DG DC seed state'
+      if(.not.dg_dc_seed_ok)then
+        if(dc%id_tot==0)then
+          write(error_unit,'(a,a)')'[DG-DC-SEED-ERROR] ',trim(dg_dc_seed_message)
+          flush(error_unit)
+        endif
+        error stop 'failed to publish converged DG DC seed state'
+      endif
     endif
     if(dc%id_tot==0)write(*,'(a,a,a,i0,a,l1,a,i0,a,i0)')&
       '[DG-DC-SEED] mode=',trim(dg_dc_seed_mode),&
@@ -1016,6 +1038,7 @@ contains
 
   integer(int64) function dg_dc_seed_operator_input_fingerprint()result(hash)
     integer::i,j
+    integer(int64)::pp_fingerprint
     hash=int(z'A54FF53A5F1D36F1',int64)
     call hash_integer(hash,merge(1,0,stencil%if_orthogonal))
     call hash_real(hash,stencil%coef_lap0);call hash_real(hash,stencil%coef_lap0_nd1)
@@ -1034,7 +1057,11 @@ contains
     call hash_integer(hash,merge(1,0,xc_func%use_laplacian))
     call hash_integer(hash,merge(1,0,xc_func%use_kinetic_energy))
     call hash_integer(hash,merge(1,0,xc_func%use_current))
-    call hash_pp_info_for_dg_dc_seed(hash)
+    pp_fingerprint=canonical_pp_fingerprint(pp)
+    if(pp_fingerprint==0_int64)then
+      hash=0_int64;return
+    endif
+    call hash_integer8(hash,pp_fingerprint)
     if(hash==0_int64)hash=1_int64
   end function dg_dc_seed_operator_input_fingerprint
 
@@ -1111,53 +1138,6 @@ contains
     call hash_alloc_integer_rank2(hash,grid%jxyz_max)
     if(hash==0_int64)hash=1_int64
   end function dg_dc_seed_ppg_ownership_fingerprint
-
-  subroutine hash_pp_info_for_dg_dc_seed(hash)
-    integer(int64),intent(inout)::hash
-    call hash_real(hash,pp%zion);call hash_integer(hash,pp%lmax)
-    call hash_integer(hash,pp%lmax0);call hash_integer(hash,pp%nrmax)
-    call hash_integer(hash,pp%nrmax0);call hash_integer(hash,merge(1,0,pp%flag_nlcc))
-    call hash_alloc_character_rank1(hash,pp%atom_symbol)
-    call hash_alloc_real_rank1(hash,pp%rmass)
-    call hash_alloc_integer_rank1(hash,pp%mr)
-    call hash_alloc_integer_rank1(hash,pp%lref)
-    call hash_alloc_integer_rank1(hash,pp%nrps)
-    call hash_alloc_integer_rank1(hash,pp%mlps)
-    call hash_alloc_integer_rank2(hash,pp%nproj)
-    call hash_alloc_integer_rank1(hash,pp%num_orb)
-    call hash_alloc_integer_rank1(hash,pp%zps)
-    call hash_alloc_integer_rank1(hash,pp%nrloc)
-    call hash_alloc_real_rank1(hash,pp%rloc)
-    call hash_alloc_real_rank1(hash,pp%rps)
-    call hash_alloc_real_rank2(hash,pp%anorm)
-    call hash_alloc_integer_rank2(hash,pp%inorm)
-    call hash_alloc_real_rank2(hash,pp%anorm_so)
-    call hash_alloc_integer_rank2(hash,pp%inorm_so)
-    call hash_alloc_real_rank2(hash,pp%rad)
-    call hash_alloc_real_rank2(hash,pp%radnl)
-    call hash_alloc_real_rank2(hash,pp%vloctbl)
-    call hash_alloc_real_rank2(hash,pp%dvloctbl)
-    call hash_alloc_real_rank3(hash,pp%udvtbl)
-    call hash_alloc_real_rank3(hash,pp%dudvtbl)
-    call hash_alloc_real_rank2(hash,pp%rho_pp_tbl)
-    call hash_alloc_real_rank2(hash,pp%rho_nlcc_tbl)
-    call hash_alloc_real_rank2(hash,pp%tau_nlcc_tbl)
-    call hash_alloc_real_rank3(hash,pp%upp_f)
-    call hash_alloc_real_rank3(hash,pp%vpp_f)
-    call hash_alloc_real_rank3(hash,pp%vpp_f_so)
-    call hash_alloc_real_rank2(hash,pp%upp)
-    call hash_alloc_real_rank2(hash,pp%dupp)
-    call hash_alloc_real_rank2(hash,pp%vpp)
-    call hash_alloc_real_rank2(hash,pp%dvpp)
-    call hash_alloc_real_rank2(hash,pp%vpp_so)
-    call hash_alloc_real_rank2(hash,pp%dvpp_so)
-    call hash_alloc_real_rank3(hash,pp%udvtbl_so)
-    call hash_alloc_real_rank3(hash,pp%dudvtbl_so)
-    call hash_alloc_real_rank1(hash,pp%rps_ao)
-    call hash_alloc_integer_rank1(hash,pp%nrps_ao)
-    call hash_alloc_real_rank3(hash,pp%upptbl_ao)
-    call hash_alloc_real_rank3(hash,pp%dupptbl_ao)
-  end subroutine hash_pp_info_for_dg_dc_seed
 
   subroutine hash_alloc_character_rank1(hash,values)
     integer(int64),intent(inout)::hash
@@ -2578,7 +2558,8 @@ contains
     integer::representative_pair(2),local_pair(2)
     integer::complete_sp_core_atom_count
     integer(8)::expected_core_count,expected_box_count,basis_fingerprint,operator_fingerprint,&
-      pseudopotential_fingerprint,nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
+      pseudopotential_fingerprint,pseudopotential_fingerprint_min,pseudopotential_fingerprint_max,&
+      nbox8,ncore8,product8,nxy8,local_exact_symmetry_fingerprint,&
       lcfo_symmetry_workspace_peak,adapted_occupied_workspace_peak,occupied_pre_closure_workspace_peak
     integer(8)::translation_adapted_workspace_peak
     integer(8)::adapted_occupied_hamiltonian_fingerprint
@@ -2678,6 +2659,13 @@ contains
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
     if(yn_dg_hybrid_divided_scf=='y')&
       error stop 'divided Hybrid SCF must dispatch to the Schwarz production entry'
+    if(yn_dg_hybrid_continuation_scf=='y')then
+      call build_dg_hybrid_scope_receipt(dc%icomm_tot,merge(1,0,theory=='dft'),iperiodic==3,&
+        dc%system_tot%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
+        xc_func%xctype,divided_scope_receipt,ok,message)
+      if(.not.ok.and.rank==0)write(error_unit,'(a)')trim(message)
+      if(.not.ok)error stop 'DG continuation supported-scope receipt failed'
+    endif
     ok=system%nspin==1.and.system%if_real_orbital.and.allocated(spsi%rwf)
     call comm_logical_and(ok,reusable,dc%icomm_tot)
     if(.not.reusable)error stop 'overlapping-Wannier production requires Gamma real DC candidates'
@@ -2804,7 +2792,15 @@ contains
     endif
     if(rank==0)write(*,'(a,i0)')'[OW-GS-DIAGNOSTIC] total_density_buffer_workspace_peak_bytes=',&
       ow_density_redistribution_workspace
-    pseudopotential_fingerprint=ow_collective_operator_fingerprint(dc%icomm_tot)
+    pseudopotential_fingerprint=canonical_pp_fingerprint(pp)
+    call MPI_Allreduce(pseudopotential_fingerprint,pseudopotential_fingerprint_min,1,MPI_INTEGER8,&
+      MPI_MIN,dc%icomm_tot,ierr)
+    call MPI_Allreduce(pseudopotential_fingerprint,pseudopotential_fingerprint_max,1,MPI_INTEGER8,&
+      MPI_MAX,dc%icomm_tot,ierr)
+    if(pseudopotential_fingerprint==0_8.or.&
+      pseudopotential_fingerprint_min/=pseudopotential_fingerprint_max)&
+      error stop 'canonical pseudopotential fingerprint is invalid or rank inconsistent'
+    pseudopotential_fingerprint=pseudopotential_fingerprint_min
     allocate(lcfo_core_ids(ncore),lcfo_boundary_mask(ncore));core_index=0
     do p=1,nbox
       if(.not.core_mask(p))cycle
@@ -4796,11 +4792,6 @@ contains
           ' defect=',divided_full_basis_closure_defect
         call selection_added_members(divided_requested_ids,divided_selection_effective_ids,divided_added_ids)
         allocate(divided_closure_reason(size(divided_closure_parent)),source=1)
-        call build_dg_hybrid_scope_receipt(dc%icomm_tot,merge(1,0,theory=='dft'),iperiodic==3,&
-          dc%system_tot%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
-          xc_func%xctype,divided_scope_receipt,ok,message)
-        if(.not.ok)write(0,'(a)')trim(message)
-        if(.not.ok)error stop 'DG continuation supported-scope receipt failed'
         allocate(divided_scope_selectors(8));divided_scope_selectors=[divided_scope_receipt%theory_code,&
           merge(1,0,divided_scope_receipt%periodic),divided_scope_receipt%nspin,&
           merge(1,0,divided_scope_receipt%spinorbit),merge(1,0,divided_scope_receipt%plus_u),&
@@ -6689,7 +6680,8 @@ stage_pass: do
       occupied_symmetry_defect,target_symmetry_defect,target_energy_symmetry_defect,density_symmetry_defect,&
       projector_symmetry_residual,real_space_residual,maxval(interface_action_residuals)]
     allocate(checkpoint_payload%pseudopotential_receipt(6),checkpoint_payload%energy_receipt(7))
-    checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),pp%zion,real(pp%lmax,8),&
+    checkpoint_payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),canonical_pp_valence_sum(pp),&
+      real(pp%lmax,8),&
       real(pp%nrmax,8),real(ppg%Nlma,8),real(size(effective_ids),8)*real(size(effective_ids),8)]
     allocate(energy_local_coefficients(size(effective_ids),occupation_result%noccupied),&
       energy_global_coefficients(size(effective_ids),occupation_result%noccupied))

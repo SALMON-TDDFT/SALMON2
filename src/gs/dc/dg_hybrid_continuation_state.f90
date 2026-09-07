@@ -9,7 +9,7 @@ module dg_hybrid_continuation_state
   implicit none
   private
 
-  integer,parameter::dg_xctype_pz=1,dg_xctype_pzm=2,dg_xctype_pbe=3,dg_xctype_pw=7
+  integer,parameter::dg_xctype_none=0,dg_xctype_pz=1,dg_xctype_pzm=2,dg_xctype_pbe=3,dg_xctype_pw=7
 
   type,public::s_dg_hybrid_catalog_receipt
     logical::frozen=.false.
@@ -98,6 +98,7 @@ contains
     ok=.false.;message=''
     local_bad=merge(0,1,theory_code==1.and.periodic.and.nspin==1.and..not.spinorbit.and.&
       .not.plus_u.and..not.hse.and..not.fix_func.and..not.jm.and.size(xctype)>0.and.&
+      count(xctype/=dg_xctype_none)>0.and.&
       all([(supported_xctype(xctype(i)),i=1,size(xctype))]))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
@@ -133,6 +134,7 @@ contains
       .not.receipt%hse.and..not.receipt%fix_func.and..not.receipt%jm)
     if(local_bad==0)then
       if(size(receipt%xctype)<1)then;local_bad=1
+      else if(count(receipt%xctype/=dg_xctype_none)<1)then;local_bad=1
       else if(.not.all([(supported_xctype(receipt%xctype(i)),i=1,size(receipt%xctype))]))then;local_bad=1
       else if(receipt%fingerprint/=scope_fingerprint(receipt))then;local_bad=1
       endif
@@ -355,7 +357,8 @@ contains
 #ifdef USE_MPI
   logical function supported_xctype(value) result(supported)
     integer,intent(in)::value
-    supported=value==dg_xctype_pz.or.value==dg_xctype_pzm.or.value==dg_xctype_pbe.or.value==dg_xctype_pw
+    supported=value==dg_xctype_none.or.value==dg_xctype_pz.or.value==dg_xctype_pzm.or.&
+      value==dg_xctype_pbe.or.value==dg_xctype_pw
   end function supported_xctype
 
   integer(int64) function scope_fingerprint(receipt) result(hash)

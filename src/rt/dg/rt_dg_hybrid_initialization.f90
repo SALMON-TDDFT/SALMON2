@@ -20,7 +20,8 @@ module rt_dg_hybrid_initialization
   type,public::s_rt_dg_hybrid_state
     logical::valid=.false.,initial_invariants_valid=.false.,density_freshly_reconstructed=.false.
     real(real64)::startup_operator_covariance=huge(1d0),startup_projector_covariance=huge(1d0)
-    integer::certified_rank=0,global_count=0,noccupied=0
+    integer::certified_rank=0,global_count=0,noccupied=0,operation_count=0,&
+      nonidentity_operation_count=0
     integer(int64)::payload_fingerprint=0_int64,operator_structure_fingerprint=0_int64,&
       operator_value_fingerprint=0_int64,scope_fingerprint=0_int64
     type(s_dg_hybrid_sparse_metric)::metric
@@ -763,6 +764,8 @@ contains
     allocate(state%eigenvalues,source=payload%certified_basis%certified_eigenvalues)
     allocate(state%energy_receipt,source=payload%energy_receipt)
     state%certified_rank=r;state%global_count=r;state%noccupied=nocc
+    state%operation_count=payload%operation_count
+    state%nonidentity_operation_count=payload%nonidentity_operation_count
     state%operator_structure_fingerprint=structure_fingerprint
     state%operator_value_fingerprint=payload%rt_space%hamiltonian_fingerprint
     state%scope_fingerprint=payload%scope_fingerprint

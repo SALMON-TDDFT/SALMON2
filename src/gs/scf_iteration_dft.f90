@@ -27,7 +27,8 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               rho,rho_jm,rho_s,  &
                               V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
-                              band,ilevel_print,dc)
+                              band,ilevel_print,require_dg_dc_seed_electron_count,&
+                              required_dg_dc_seed_electron_count_tolerance,dc)
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -86,12 +87,15 @@ type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
 type(s_dcdft),optional :: dc
+logical,intent(in) :: require_dg_dc_seed_electron_count
+real(8),intent(in) :: required_dg_dc_seed_electron_count_tolerance
 
-logical :: rion_update, flag_conv
+logical :: rion_update, flag_conv,dg_dc_seed_electron_count_converged
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_scalar) :: rho_old,Vlocal_old
-real(8) :: rNe
+real(8) :: rNe,dg_dc_seed_local_electrons,dg_dc_seed_global_electrons
+real(8) :: dg_dc_seed_electron_count_error
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
@@ -151,7 +155,25 @@ sum1=1d9
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
-   if( sum1 < threshold ) then
+   dg_dc_seed_electron_count_converged=.true.
+   if(require_dg_dc_seed_electron_count.and.sum1<threshold)then
+      if(.not.present(dc))error stop 'strict DG DC seed convergence requires DC state'
+      dg_dc_seed_local_electrons=sum(dc%rho_tot_s(1)%f)
+      call comm_summation(dg_dc_seed_local_electrons,dg_dc_seed_global_electrons,&
+        dc%icomm_tot)
+      dg_dc_seed_global_electrons=dg_dc_seed_global_electrons*dc%system_tot%hvol
+      dg_dc_seed_electron_count_error=abs(dg_dc_seed_global_electrons-dc%elec_num_tot)
+      dg_dc_seed_electron_count_converged=&
+        dg_dc_seed_electron_count_error<=required_dg_dc_seed_electron_count_tolerance
+      if(.not.dg_dc_seed_electron_count_converged.and.comm_is_root(dc%id_tot))then
+        write(*,'(a,i0,a,es24.16,a,es24.16,a,es24.16)')&
+          '[DG-DC-SEED-WAIT] iteration=',Miter,&
+          ' mixed_electrons=',dg_dc_seed_global_electrons,&
+          ' error=',dg_dc_seed_electron_count_error,&
+          ' tolerance=',required_dg_dc_seed_electron_count_tolerance
+      endif
+   endif
+   if( sum1 < threshold .and. dg_dc_seed_electron_count_converged ) then
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1

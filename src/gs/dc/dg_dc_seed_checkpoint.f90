@@ -439,6 +439,7 @@ contains
     type(s_dg_dc_seed_payload),intent(out),optional::payload
 #ifdef USE_MPI
     integer::rank,nproc,ierr,local_bad,global_bad,artifact_state,file_iteration
+    integer::local_contract_mismatch,global_contract_mismatch,stored_nproc
     real(8)::local_density_sum,global_electrons,file_mu,file_residual
     type(s_dg_dc_seed_manifest)::manifest
     logical::file_ok
@@ -463,22 +464,57 @@ contains
       status=DG_DC_SEED_ABSENT;message='no DG DC seed artifacts'
       return
     else if(artifact_state==DG_DC_SEED_INVALID)then
-      message='incomplete or interrupted DG DC seed publication'
+      message='status=invalid cause=publication_state detail=incomplete_or_interrupted'
+      return
+    endif
+
+    call read_manifest_rank_count_collective(comm,&
+      seed_path(directory,'dg_dc_seed.manifest'),stored_nproc,file_ok)
+    if(.not.file_ok)then
+      message='status=invalid cause=manifest_integrity detail=unreadable_header'
+      return
+    else if(stored_nproc/=nproc)then
+      message='status=invalid cause=mpi_rank_count detail=manifest_runtime_mismatch'
       return
     endif
 
     call read_manifest_collective(comm,seed_path(directory,'dg_dc_seed.manifest'),nproc,manifest,file_ok)
-    local_bad=merge(0,1,file_ok)
+    local_contract_mismatch=0
     if(file_ok)then
       if(manifest%version/=seed_version.or.manifest%mpi_size/=nproc.or.&
-         manifest%publication_id==0_int64)local_bad=1
+         manifest%publication_id==0_int64)local_contract_mismatch=max(local_contract_mismatch,1)
       if(manifest%density_weight/=density_weight.or.&
-         manifest%expected_electrons/=expected_electrons)local_bad=1
-      if(.not.same_manifest_contract(manifest,rank,contract))local_bad=1
+         manifest%expected_electrons/=expected_electrons)&
+        local_contract_mismatch=max(local_contract_mismatch,2)
+      if(manifest%immutable_fingerprints(rank+1)/=contract%immutable_fingerprint)&
+        local_contract_mismatch=max(local_contract_mismatch,3)
+      if(any(manifest%rwf_bounds(:,rank+1)/=contract%rwf_bounds).or.&
+         any(manifest%rho_bounds(:,rank+1)/=contract%rho_bounds).or.&
+         any(manifest%vloc_bounds(:,rank+1)/=contract%vloc_bounds))&
+        local_contract_mismatch=max(local_contract_mismatch,4)
+      if(manifest%ownership_fingerprints(rank+1)/=contract%ownership_fingerprint)&
+        local_contract_mismatch=max(local_contract_mismatch,5)
+      if(manifest%fragment_ids(rank+1)/=contract%fragment_id)&
+        local_contract_mismatch=max(local_contract_mismatch,6)
+    else
+      local_contract_mismatch=1
     endif
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
-      message='DG DC seed manifest is corrupt or incompatible'
+    call MPI_Allreduce(local_contract_mismatch,global_contract_mismatch,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(global_contract_mismatch/=0.or.ierr/=MPI_SUCCESS)then
+      select case(global_contract_mismatch)
+      case(2)
+        message='status=invalid cause=seed_policy detail=density_or_electron_mismatch'
+      case(3)
+        message='status=invalid cause=immutable_inputs detail=cell_atom_fragment_physics_operator_or_convergence_mismatch'
+      case(4)
+        message='status=invalid cause=local_bounds detail=rank_local_array_mismatch'
+      case(5)
+        message='status=invalid cause=ownership_mapping detail=rank_owned_grid_mismatch'
+      case(6)
+        message='status=invalid cause=rank_fragment_mapping detail=rank_fragment_mismatch'
+      case default
+        message='status=invalid cause=manifest_integrity detail=corrupt_or_incompatible'
+      end select
       call clear_manifest(manifest)
       return
     endif
@@ -511,7 +547,7 @@ contains
     if(.not.ieee_is_finite(global_electrons).or.&
        abs(global_electrons-expected_electrons)>electron_tolerance)global_bad=1
     if(global_bad/=0.or.ierr/=MPI_SUCCESS)then
-      message='DG DC seed shard is missing, corrupt, unconverged, or has wrong electron count'
+      message='status=invalid cause=shard_payload detail=missing_corrupt_unconverged_or_wrong_electrons'
       if(present(payload))call clear_payload(payload)
       call clear_manifest(manifest)
       status=DG_DC_SEED_INVALID
@@ -965,6 +1001,33 @@ contains
     if(ios==0.and.flush_ios/=0)ios=flush_ios
     if(ios==0.and.close_ios/=0)ios=close_ios
   end subroutine write_manifest_raw
+
+  subroutine read_manifest_rank_count_collective(comm,filename,stored_nproc,ok)
+    integer,intent(in)::comm
+    character(*),intent(in)::filename
+    integer,intent(out)::stored_nproc
+    logical,intent(out)::ok
+    character(32)::magic
+    integer::rank,ierr,unit,ios,file_version,root_ok
+
+    stored_nproc=0;ok=.false.;root_ok=0;magic='';file_version=0
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(rank==0)then
+      open(newunit=unit,file=trim(filename),status='old',access='stream',form='unformatted',&
+        action='read',iostat=ios)
+      if(ios==0)then
+        read(unit,iostat=ios)magic,file_version,stored_nproc
+        close(unit)
+      endif
+      if(ios==0.and.magic==manifest_magic.and.file_version==seed_version.and.stored_nproc>0)&
+        root_ok=1
+    endif
+    call MPI_Bcast(root_ok,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.root_ok/=1)return
+    call MPI_Bcast(stored_nproc,1,MPI_INTEGER,0,comm,ierr)
+    ok=ierr==MPI_SUCCESS
+  end subroutine read_manifest_rank_count_collective
 
   subroutine read_manifest_collective(comm,filename,expected_nproc,manifest,ok)
     integer,intent(in)::comm,expected_nproc

@@ -31,9 +31,10 @@ program test_dg_hybrid_continuation_state_mpi
   local_dc_density=dc_density(int(core_ids));local_trial_density=trial_density(int(core_ids))
 
   call valid_identity_catalog(catalog)
-  call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1],&
+  call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1,0,0],&
     scope,ok,message)
   call require(ok,trim(message))
+  call require(all(scope%xctype==[1,0,0]),'production XC descriptor was not preserved exactly')
   call initialize_dg_hybrid_continuation(icomm,ngrid,core_ids,local_dc_density,local_trial_density,catalog,scope,&
     state,fingerprint,ok,message)
   call require(ok,trim(message))
@@ -110,7 +111,7 @@ program test_dg_hybrid_continuation_state_mpi
     local_trial_density=local_trial_density(:size(local_trial_density)-1)
   endif
   call valid_identity_catalog(catalog)
-  call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1],&
+  call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1,0,0],&
     scope,ok,message)
   call require(ok,trim(message))
   scope%plus_u=.true.
@@ -127,6 +128,12 @@ program test_dg_hybrid_continuation_state_mpi
   call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[99],&
     scope,ok,message)
   call require(.not.ok,'unsupported XC continuation scope was accepted')
+  call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[1,99,0],&
+    scope,ok,message)
+  call require(.not.ok,'unsupported active XC slot in a production descriptor was accepted')
+  call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[0,0,0],&
+    scope,ok,message)
+  call require(.not.ok,'continuation scope without an active XC functional was accepted')
   call build_dg_hybrid_scope_receipt(icomm,1,.true.,1,.false.,.false.,.false.,.false.,.false.,[7],&
     scope,ok,message)
   call require(ok,'built-in PW continuation scope was rejected')

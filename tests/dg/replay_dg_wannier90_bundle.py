@@ -18,11 +18,11 @@ COMMON_SUFFIXES = (".win", ".mmn", ".amn", ".eig")
 CONSTRAINED_SUFFIXES = (".win", ".dmn", ".mmn", ".amn", ".eig")
 
 
-def replace_symmetrize_eps(text: str, value: str) -> str:
+def replace_keyword(text: str, keyword: str, value: str) -> str:
     lines = text.splitlines()
-    replacement = f"symmetrize_eps = {value}"
+    replacement = f"{keyword} = {value}"
     for index, line in enumerate(lines):
-        if line.strip().lower().startswith("symmetrize_eps"):
+        if line.strip().lower().startswith(keyword.lower()):
             lines[index] = replacement
             break
     else:
@@ -31,11 +31,8 @@ def replace_symmetrize_eps(text: str, value: str) -> str:
 
 
 def remove_keyword(text: str, keyword: str) -> str:
-    lines = [
-        line
-        for line in text.splitlines()
-        if not line.strip().lower().startswith(keyword.lower())
-    ]
+    lines = [line for line in text.splitlines()
+             if not line.strip().lower().startswith(keyword.lower())]
     return "\n".join(lines) + "\n"
 
 
@@ -57,6 +54,12 @@ def main() -> int:
         "--symmetry-mode", choices=("constrained", "unconstrained"), required=True
     )
     parser.add_argument("--symmetrize-eps")
+    parser.add_argument("--site-symmetry", choices=("true", "false"))
+    step = parser.add_mutually_exclusive_group()
+    step.add_argument("--trial-step")
+    step.add_argument("--fixed-step")
+    parser.add_argument("--num-cg-steps", type=int)
+    parser.add_argument("--num-iter", type=int)
     args = parser.parse_args()
 
     suffixes = (
@@ -82,13 +85,28 @@ def main() -> int:
         win = run_directory / f"{args.seed}.win"
         win_text = win.read_text()
         effective_symmetrize_eps = args.symmetrize_eps
+        effective_site_symmetry = args.site_symmetry
         if args.symmetry_mode == "unconstrained":
             win_text = remove_keyword(win_text, "symmetrize_eps")
             win_text = remove_keyword(win_text, "site_symmetry")
-            win_text += "site_symmetry = false\n"
+            win_text = replace_keyword(win_text, "site_symmetry", "false")
             effective_symmetrize_eps = None
-        elif args.symmetrize_eps:
-            win_text = replace_symmetrize_eps(win_text, args.symmetrize_eps)
+            effective_site_symmetry = "false"
+        else:
+            if args.symmetrize_eps:
+                win_text = replace_keyword(win_text, "symmetrize_eps", args.symmetrize_eps)
+            if args.site_symmetry:
+                win_text = replace_keyword(win_text, "site_symmetry", args.site_symmetry)
+        if args.trial_step:
+            win_text = remove_keyword(win_text, "fixed_step")
+            win_text = replace_keyword(win_text, "trial_step", args.trial_step)
+        if args.fixed_step:
+            win_text = remove_keyword(win_text, "trial_step")
+            win_text = replace_keyword(win_text, "fixed_step", args.fixed_step)
+        if args.num_cg_steps is not None:
+            win_text = replace_keyword(win_text, "num_cg_steps", str(args.num_cg_steps))
+        if args.num_iter is not None:
+            win_text = replace_keyword(win_text, "num_iter", str(args.num_iter))
         win.write_text(win_text)
         started = time.monotonic()
         result = subprocess.run(
@@ -109,6 +127,11 @@ def main() -> int:
         "seed": args.seed,
         "symmetry_mode": args.symmetry_mode,
         "symmetrize_eps": effective_symmetrize_eps,
+        "site_symmetry": effective_site_symmetry,
+        "trial_step": args.trial_step,
+        "fixed_step": args.fixed_step,
+        "num_cg_steps": args.num_cg_steps,
+        "num_iter": args.num_iter,
     }
     (args.output_directory / "replay-receipt.json").write_text(
         json.dumps(receipt, indent=2, sort_keys=True) + "\n"

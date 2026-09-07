@@ -30,12 +30,13 @@
  dg_ow_boundary_value_tolerance=1d-6
  dg_ow_boundary_gradient_tolerance=1d-6
  dg_ow_symmetry_tolerance=1d-10
+ dg_ow_localization_gradient_tolerance=2d-2
 /
 &parallel
  nproc_k=1
  nproc_ob=1
  nproc_rgrid=1,1,1
- yn_eigenexa='n'
+ yn_eigenexa='y'
 /
 &system
  yn_periodic='y'

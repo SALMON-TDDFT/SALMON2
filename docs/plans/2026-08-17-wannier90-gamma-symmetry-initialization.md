@@ -18,12 +18,12 @@ Modify `tests/dg/check_sawf_dmn_format.py` to require the patched condition
 ### Task 2: Patch projection-path selection
 
 Extend `cmakefiles/Builder/patches/apply_wannier90_generator_symmetry.cmake`
-to replace the original Gamma branch condition. Re-run the regression and
-inspect the patched `overlap.F90`.
+to replace the original Gamma branch condition in both `overlap.F90` and the
+SALMON-used `wannier_lib.F90` projection/optimizer dispatch. Re-run the
+regression and inspect both patched sources.
 
 ### Task 3: Verify and run Si64
 
 Rebuild the Wannier90 library and SALMON, run W90 MPI 1/2/4/8, DMN and route
 tests, then rerun Si64 with 8 MPI ranks. Preserve diagnostics if the covariance
 gate still fails.
-

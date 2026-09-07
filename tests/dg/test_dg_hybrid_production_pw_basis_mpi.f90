@@ -12,8 +12,8 @@ program test_dg_hybrid_production_pw_basis_mpi
 #endif
   implicit none
   integer::comm,rank,nproc,ierr,nowned,i,p
-  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),mixed_row_action(:,:),&
-    coset_row_action(:,:),root_row_action(:,:),root_core_fragment_ids(:)
+  integer,allocatable::fragment_ids(:),core_fragment_ids(:),row_action(:,:),distributed_row_action(:,:),&
+    mixed_row_action(:,:),coset_row_action(:,:),root_row_action(:,:),root_core_fragment_ids(:)
   integer(int64),allocatable::box_ids(:),core_ids(:),root_core_ids(:)
   real(real64),allocatable::box_windows(:,:),coordinates(:,:),windows(:,:),g_vectors(:,:),root_coordinates(:,:)
   real(real64)::reciprocal_lattice(3,3),reciprocal_rotation(3,3,2)
@@ -122,6 +122,15 @@ program test_dg_hybrid_production_pw_basis_mpi
       windows,g_vectors,selection,workspace,fingerprint,ok,message)
     call require(ok,'production analysis refresh after receipt corruption failed: '//trim(message))
   endif
+  allocate(distributed_row_action(size(core_ids),2))
+  do p=1,size(core_ids)
+    distributed_row_action(p,1)=int(core_ids(p))
+    distributed_row_action(p,2)=5-int(core_ids(p))
+  enddo
+  call build_dg_hybrid_production_pw_basis(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,distributed_row_action,reciprocal_lattice,reciprocal_rotation,0d0,2,1d-12,&
+    windows,g_vectors,catalog,workspace,fingerprint,ok,message)
+  call require(ok,'production PW basis rejected distributed row action: '//trim(message))
   if(nproc>1)then
     if(rank==0)then
       allocate(root_core_ids(4),source=box_ids)
@@ -188,6 +197,10 @@ program test_dg_hybrid_production_pw_basis_mpi
   mixed_reciprocal_rotation(1,2,3)=1d0;mixed_reciprocal_rotation(2,1,3)=1d0
   mixed_reciprocal_rotation(3,3,3)=1d0
   mixed_reciprocal_rotation(:,:,4)=-mixed_reciprocal_rotation(:,:,3)
+  call build_dg_hybrid_production_pw_basis(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,0d0,2,1d-12,&
+    windows,g_vectors,catalog,workspace,fingerprint,ok,message)
+  call require(ok,'production PW basis did not retain the fragment-compatible symmetry subgroup: '//trim(message))
   call analyze_dg_hybrid_production_selection(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
     core_fragment_ids,coordinates,mixed_row_action,reciprocal_lattice,mixed_reciprocal_rotation,0d0,2,1d-12,&
     windows,g_vectors,selection,workspace,fingerprint,ok,message)
@@ -229,6 +242,10 @@ program test_dg_hybrid_production_pw_basis_mpi
     0_int64,0.5d0,7,2,1d-12,windows,g_vectors,selection,workspace,fingerprint,ok,message)
   call require(.not.ok.and.index(message,'Wannier symmetry provenance')>0,&
     'LCFO-deferred production selection accepted missing Wannier symmetry provenance')
+  call build_dg_hybrid_production_pw_basis(comm,4,2,fragment_ids,box_ids,box_windows,core_ids,&
+    core_fragment_ids,coordinates,mixed_row_action(:,3:3),reciprocal_lattice,&
+    mixed_reciprocal_rotation(:,:,3:3),0d0,2,1d-12,windows,g_vectors,catalog,workspace,fingerprint,ok,message)
+  call require(ok,'production PW basis did not supply the fragment-compatible identity: '//trim(message))
   if(rank==0)write(*,'(a,i0,a,i0)')'PRODUCTION_PW ranks=',nproc,' fingerprint=',fingerprint
   if(rank==0)write(*,'(a,i0,a)')'PASS hybrid production PW basis on ',nproc,' ranks'
 #ifdef USE_MPI
