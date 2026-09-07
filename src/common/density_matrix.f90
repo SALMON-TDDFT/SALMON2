@@ -298,8 +298,7 @@ contains
     type(cublasHandle),          save :: cur_handle
     integer    :: cur_ia,cur_p,cur_j,cur_b,cur_natom,cur_ilma,cur_stat
     integer    :: cur_blk_s,cur_nb,cur_np4,cur_mpierr
-    complex(8) :: cur_uv,cur_z
-    real(8)    :: cur_w
+    complex(8) :: cur_z
 #endif
     call nvtxStartRange('calc_current', __LINE__)
     call timer_begin(LOG_CURRENT_CALC)
@@ -505,21 +504,7 @@ contains
                     cur_out   (1:cur_np4, 1:cur_nb, 1:cur_natom)
 !$acc end kernels
               else
-
-!$acc parallel loop collapse(2) present(cur_out,cur_rinv,cur_nproj_atom,system) &
-!$acc&              private(cur_uv,cur_w,cur_p) reduction(+:jx,jy,jz)
-              do cur_ia=1,cur_natom
-              do cur_b=1,cur_nb
-                cur_w = system%rocc(cur_blk_s+cur_b-1,ik,ispin) * system%wtk(ik)
-!$acc loop seq
-                do cur_p=1,cur_nproj_atom(cur_ia)
-                  cur_uv = cur_out(cur_p,cur_b,cur_ia) * cur_rinv(cur_p,cur_ia)
-                  jx = jx + 2d0*aimag(conjg(cur_out(cur_p +   cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
-                  jy = jy + 2d0*aimag(conjg(cur_out(cur_p + 2*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
-                  jz = jz + 2d0*aimag(conjg(cur_out(cur_p + 3*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
-                end do
-              end do
-              end do
+                call calc_current_gemm_accumulate(cur_out, cur_nb, cur_blk_s)
               end if
 
               cur_blk_s = cur_blk_s + cur_nb
@@ -535,7 +520,7 @@ contains
               cur_dev_g(1:cur_max_nproj,1:cur_norb,1:cur_natom) = &
                   cur_out_all(1:cur_max_nproj,1:cur_norb,1:cur_natom)
 !$acc end kernels
-              call MPI_Allreduce(cur_dev_g, cur_dev_g2, cur_max_nproj*cur_norb*cur_natom, &
+              call MPI_Allreduce(cur_dev_g, cur_dev_g2, int(cur_max_nproj*cur_norb*cur_natom), &
                                  MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, cur_mpierr)
               call comm_show_error(cur_mpierr)
 !$acc kernels
@@ -543,20 +528,7 @@ contains
                   cur_dev_g2(1:cur_max_nproj,1:cur_norb,1:cur_natom)
 !$acc end kernels
 
-!$acc parallel loop collapse(2) present(cur_out_all,cur_rinv,cur_nproj_atom,system) &
-!$acc&              private(cur_uv,cur_w,cur_p) reduction(+:jx,jy,jz)
-              do cur_ia=1,cur_natom
-              do cur_b=1,cur_norb
-                cur_w = system%rocc(info%io_s+cur_b-1,ik,ispin) * system%wtk(ik)
-!$acc loop seq
-                do cur_p=1,cur_nproj_atom(cur_ia)
-                  cur_uv = cur_out_all(cur_p,cur_b,cur_ia) * cur_rinv(cur_p,cur_ia)
-                  jx = jx + 2d0*aimag(conjg(cur_out_all(cur_p +   cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
-                  jy = jy + 2d0*aimag(conjg(cur_out_all(cur_p + 2*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
-                  jz = jz + 2d0*aimag(conjg(cur_out_all(cur_p + 3*cur_max_nproj,cur_b,cur_ia))*cur_uv)*cur_w
-                end do
-              end do
-              end do
+              call calc_current_gemm_accumulate(cur_out_all, cur_norb, info%io_s)
             end if
           end do
 #else
@@ -645,6 +617,36 @@ contains
 
     call nvtxEndRange
     return
+
+#if defined(USE_OPENACC) && defined(USE_GEMM)
+  contains
+
+    ! Shared by the per-block accumulation (orbital/mixed decomposition,
+    ! reads cur_out) and the post-icomm_r-reduction accumulation (grid
+    ! decomposition, reads cur_out_all): same weighted-projection
+    ! contraction, only the source array and orbital range differ.
+    subroutine calc_current_gemm_accumulate(proj, nb, orb_base)
+      complex(8), intent(in) :: proj(:,:,:)
+      integer,    intent(in) :: nb, orb_base
+      integer    :: g_ia, g_b, g_p
+      complex(8) :: g_uv
+      real(8)    :: g_w
+!$acc parallel loop collapse(2) present(proj,cur_rinv,cur_nproj_atom,system) &
+!$acc&              private(g_uv,g_w,g_p) reduction(+:jx,jy,jz)
+      do g_ia=1,cur_natom
+      do g_b=1,nb
+        g_w = system%rocc(orb_base+g_b-1,ik,ispin) * system%wtk(ik)
+!$acc loop seq
+        do g_p=1,cur_nproj_atom(g_ia)
+          g_uv = proj(g_p,g_b,g_ia) * cur_rinv(g_p,g_ia)
+          jx = jx + 2d0*aimag(conjg(proj(g_p +   cur_max_nproj,g_b,g_ia))*g_uv)*g_w
+          jy = jy + 2d0*aimag(conjg(proj(g_p + 2*cur_max_nproj,g_b,g_ia))*g_uv)*g_w
+          jz = jz + 2d0*aimag(conjg(proj(g_p + 3*cur_max_nproj,g_b,g_ia))*g_uv)*g_w
+        end do
+      end do
+      end do
+    end subroutine calc_current_gemm_accumulate
+#endif
 
   end subroutine calc_current
 
