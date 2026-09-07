@@ -47,7 +47,9 @@ use salmon_global, only: yn_dc_lcfo_flux, yn_dc_lcfo_wannier, yn_dg_hybrid_scf, 
   dg_ow_localization_gradient_tolerance,dg_ow_localization_max_iterations,&
   dg_ow_candidate_states_per_fragment,dg_ow_target_wanniers_per_fragment,wannier_num_iter,&
   dg_ow_w90_initial_projection,wannier_pw_cutoff,wannier_pw_max,nscf,method_mixing,&
-  dg_dc_seed_mode,dg_dc_seed_directory,dg_hybrid_symmetry_energy_window,temperature,&
+  dg_dc_seed_mode,dg_dc_seed_directory,dg_fragment_wf_checkpoint_mode,&
+  dg_fragment_wf_checkpoint_directory,dg_fragment_w90_initial_projection,&
+  dg_hybrid_symmetry_energy_window,temperature,&
   dg_hybrid_fragment_cg_steps
 use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
   DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,build_dg_dc_seed_contract,probe_dg_dc_seed,&
@@ -1297,7 +1299,7 @@ contains
       final_solver_fingerprint,final_checkpoint_fingerprint,final_provenance(6),&
       attempted_continuation_fingerprint,terminal_fingerprints(2),terminal_fingerprints_min(2),&
       terminal_fingerprints_max(2),terminal_dynamic_receipt
-    integer(int64)::support_fingerprints(3)
+    integer(int64)::support_fingerprints(3),fragment_wf_publication_id
     integer(int64),allocatable::candidate_grid_ids(:),core_ids(:),gathered_basis_ids(:),projector_grid_ids(:)
     complex(8),allocatable::buffer_candidates(:,:),projector_candidates(:,:),reference_frame(:,:),&
       interior_values(:,:),interior_gradients(:,:,:),interior_kinetic_action(:,:),kinetic_rows(:,:),&
@@ -1320,8 +1322,8 @@ contains
     character(8),allocatable::atom_symbols(:)
     integer::scf_iterations,final_state_count
     integer(int64)::continuation_point,continuation_point_limit
-    logical::ok,collective_ok,point_ok,diagnostic_ok,terminal_state_ok
-    character(512)::message
+    logical::ok,collective_ok,point_ok,diagnostic_ok,terminal_state_ok,fragment_wf_checkpoint_hit
+    character(512)::message,fragment_wf_checkpoint_reason
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
     ok=ierr==MPI_SUCCESS.and.nproc==dc%n_frag.and.dc%isize_frag==1.and.&
@@ -1360,16 +1362,29 @@ contains
       core_extent(:,p)=real(dc%nxyz_domain_frag(:,p),8)*dc%system_tot%hgs
     enddo
     byte_limit=8_int64*1024_int64*1024_int64*1024_int64
+    if(trim(dg_fragment_wf_checkpoint_mode)/='off')&
+      call atomic_create_directory(trim(dg_fragment_wf_checkpoint_directory),dc%icomm_tot,dc%id_tot)
     call build_dg_hybrid_fragment_wannier_from_dc_seed(dc%icomm_tot,dc%icomm_frag,info%icomm_o,&
       dc%i_frag,1,'dgfw',raw_grid,[1,1,1],raw_grid,&
       spsi%rwf,energy%esp,system%rocc,system%hvol,candidate_grid_ids,buffer_candidates,&
       projector_candidates,dg_dc_metric_rank_tolerance,fragment_lattice,fragment_reciprocal_lattice,&
       atom_symbols,atom_positions,wannier_num_iter,dg_ow_localization_gradient_tolerance,&
-      byte_limit,fragment_cache,ok,message,initial_projection=dg_ow_w90_initial_projection)
+      byte_limit,fragment_cache,ok,message,initial_projection=dg_fragment_w90_initial_projection,&
+      checkpoint_mode=dg_fragment_wf_checkpoint_mode,&
+      checkpoint_directory=dg_fragment_wf_checkpoint_directory,&
+      dc_seed_publication_id=dg_dc_seed_publication_id,&
+      mapping_fingerprint=dg_dc_seed_contract%ownership_fingerprint,&
+      immutable_fingerprint=dg_dc_seed_contract%immutable_fingerprint,&
+      checkpoint_hit=fragment_wf_checkpoint_hit,&
+      checkpoint_publication_id=fragment_wf_publication_id,&
+      checkpoint_reason=fragment_wf_checkpoint_reason)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'fragment-local DC-to-Wannier construction failed'
     endif
+    if(rank==0)write(*,'(a,a,a,l1,a,i0,a,a)')'[DG-FRAGMENT-WF] mode=',&
+      trim(dg_fragment_wf_checkpoint_mode),' checkpoint_hit=',fragment_wf_checkpoint_hit,&
+      ' publication_id=',fragment_wf_publication_id,' reason=',trim(fragment_wf_checkpoint_reason)
     call select_dg_hybrid_core_wannier(dc%icomm_tot,dc%i_frag,fragment_cache,&
       fragment_lattice,dc%rxyz_frag(:,dc%i_frag),dc%system_tot%primitive_a,[0d0,0d0,0d0],&
       core_lower,core_extent,raw_grid,core_grid,dc%lg_tot%num,dc%jxyz_tot,core_selection,ok,message)

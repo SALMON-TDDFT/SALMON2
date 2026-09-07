@@ -28,6 +28,7 @@ module dg_hybrid_fragment_admission
   type,public::s_dg_hybrid_admission_report
     logical::valid=.false.,support_measured=.false.
     logical::trial_prepared=.false.
+    logical::seed_reproduction_required=.true.
     type(s_dg_hybrid_core_projection_report)::core
     real(real64)::support_defects(3)=huge(1d0),density_defects(2)=huge(1d0)
     real(real64)::final_support_defects(3)=huge(1d0)
@@ -162,7 +163,8 @@ contains
 
   subroutine prepare_dg_hybrid_selected_trial(comm,fragment_id,cache,selection,basis,receipt,operators,&
       expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,initial_count,guard_count,&
-      energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff)
+      energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff,&
+      require_seed_reproduction)
     ! Publishes only a trial subspace after raw-reference/core/support checks.
     ! report%valid remains false: current-H updates and thermal occupation are later.
     integer,intent(in)::comm,fragment_id,guard_count
@@ -175,21 +177,29 @@ contains
     real(real64),intent(in)::weights(:),core_limits(4),support_limits(3),pw_cutoff,&
       energy_tolerance,orthogonality_tolerance
     real(real64),optional,intent(in)::energy_cutoff
+    logical,optional,intent(in)::require_seed_reproduction
     type(s_dg_hybrid_fragment_subspace_state),intent(inout)::state
     integer,allocatable,intent(out)::selected_seeds(:)
     type(s_dg_hybrid_admission_report),intent(out)::report
     logical,intent(out)::ok
     character(*),intent(out)::message
     integer,intent(in)::initial_count
-    call prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
-      expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
-      0d0,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff,initial_count)
+    if(present(require_seed_reproduction))then
+      call prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
+        expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
+        0d0,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff,&
+        initial_count,require_seed_reproduction)
+    else
+      call prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
+        expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
+        0d0,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,energy_cutoff,initial_count)
+    endif
   end subroutine
 
   subroutine prepare_selected_fragment_core(comm,fragment_id,cache,selection,basis,receipt,operators,&
       expected_operator_fingerprints,weights,core_limits,support_limits,pw_cutoff,guard_count,&
       occupation_tolerance,energy_tolerance,orthogonality_tolerance,state,selected_seeds,report,ok,message,&
-      energy_cutoff,initial_count)
+      energy_cutoff,initial_count,require_seed_reproduction)
     integer,intent(in)::comm,fragment_id,guard_count
     type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
     type(s_dg_hybrid_core_selection),intent(in)::selection
@@ -207,6 +217,7 @@ contains
     character(*),intent(out)::message
     complex(real64),allocatable::metric(:,:)
     integer,optional,intent(in)::initial_count
+    logical,optional,intent(in)::require_seed_reproduction
     logical::halting(3)
     call ieee_get_halting_mode(ieee_invalid,halting(1))
     call ieee_get_halting_mode(ieee_divide_by_zero,halting(2))
@@ -233,9 +244,12 @@ contains
       integer::mode,mode_min,mode_max,ierr
       real(real64)::controls(4),control_min(4),control_max(4),cutoff_min,cutoff_max
       integer(int64)::metric_fp
-      logical::valid,final_measured
+      logical::valid,final_measured,enforce_seed_reproduction
       character(512)::support_message
       ok=.false.;message=''
+      enforce_seed_reproduction=.true.
+      if(present(require_seed_reproduction))enforce_seed_reproduction=require_seed_reproduction
+      report%seed_reproduction_required=enforce_seed_reproduction
       mode=merge(1,0,present(initial_count))
       call MPI_Allreduce(mode,mode_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
       call gate(comm,ierr==MPI_SUCCESS,'trial policy exchange failed',ok,message);if(.not.ok)return
@@ -293,8 +307,9 @@ contains
       do j=2,npoint;valid=valid.and.sorted_ids(j)>sorted_ids(j-1);enddo
       call gate(comm,valid,'ambiguous physical support in selected admission',ok,message);if(.not.ok)return
       core_basis=basis%buffer_values(reference%core_row_slots,:)
-      call project_dg_hybrid_core_seeds(comm,core_basis,weights,reference%core_orbitals,reference%occupations,&
-        core_limits,nw,pw_cutoff,coefficients,report%core,ok,message)
+      call project_dg_hybrid_core_seeds(comm,core_basis,weights,&
+        reference%core_orbitals,reference%occupations,&
+        core_limits,nw,pw_cutoff,coefficients,report%core,ok,message,enforce_seed_reproduction)
       if(.not.ok)return
       do c=1,3
         counts(c)=size(operators(c)%sample_ids)
@@ -316,7 +331,7 @@ contains
       enddo
       call gate(comm,valid,'required operator point missing from raw/selected buffer',ok,message);if(.not.ok)return
       call check_dg_hybrid_seed_support(comm,coefficients,samples,counts,support_limits,nw,pw_cutoff,&
-        report%support_defects,report%support_measured,ok,message)
+        report%support_defects,report%support_measured,ok,message,enforce_seed_reproduction)
       if(.not.ok)return
       metric=matmul(conjg(transpose(core_basis)),core_basis*spread(weights,2,n))
       metric_fp=mix(receipt%payload_fingerprint,selection%fingerprint)
@@ -325,13 +340,16 @@ contains
         metric_fp=mix(metric_fp,transfer(weights(j),0_int64))
       enddo
       density=0d0
-      do j=1,nseed;density=density+reference%occupations(j)*abs(reference%core_orbitals(:,j))**2;enddo
+      do j=1,nseed
+        density=density+reference%occupations(j)*abs(reference%core_orbitals(:,j))**2
+      enddo
       report%basis_fingerprint=receipt%payload_fingerprint;report%metric_fingerprint=metric_fp
       report%selection_fingerprint=selection%fingerprint
       if(present(initial_count))then
         call initialize_dg_hybrid_fragment_trial(MPI_COMM_SELF,n,[(int(j,int64),j=1,n)],&
           fragment_id,selection%basis_generation,receipt%payload_fingerprint,metric_fp,&
-          coefficients,reference%energies,initial_count,guard_count,energy_tolerance,orthogonality_tolerance,&
+          coefficients,reference%energies,initial_count,guard_count,&
+          energy_tolerance,orthogonality_tolerance,&
           apply_metric,candidate,chosen,valid,support_message,energy_cutoff)
         call gate(comm,valid,support_message,ok,message);if(.not.ok)return
         state=candidate
@@ -340,7 +358,8 @@ contains
         return
       endif
       call initialize_dg_hybrid_fragment_density_checked(comm,fragment_id,selection%basis_generation,&
-        receipt%payload_fingerprint,metric_fp,coefficients,reference%energies,reference%occupations,guard_count,&
+        receipt%payload_fingerprint,metric_fp,coefficients,reference%energies,&
+        reference%occupations,guard_count,&
         occupation_tolerance,energy_tolerance,orthogonality_tolerance,core_basis,weights,density,&
         core_limits(3),core_limits(4),apply_metric,candidate,chosen,report%density_defects,ok,message,energy_cutoff)
       if(.not.ok)return

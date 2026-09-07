@@ -136,13 +136,14 @@ contains
   ! matching the raw seed span norm convention. Every seed, not only occupied
   ! seeds, is checked. This routine neither changes C nor publishes solver state.
   subroutine check_dg_hybrid_seed_support(comm,coefficients,samples,required_counts,tolerances,&
-      selected_count,pw_cutoff,defects,measured,ok,message)
+      selected_count,pw_cutoff,defects,measured,ok,message,enforce_tolerances)
     integer,intent(in)::comm,required_counts(3),selected_count
     complex(real64),intent(in)::coefficients(:,:)
     type(s_dg_hybrid_support_samples),intent(in)::samples(3)
     real(real64),intent(in)::tolerances(3),pw_cutoff
     real(real64),intent(out)::defects(3)
     logical,intent(out)::measured,ok
+    logical,optional,intent(in)::enforce_tolerances
     character(*),intent(out)::message
     logical::halting(3)
     call ieee_get_halting_mode(ieee_invalid,halting(1))
@@ -161,10 +162,11 @@ contains
     subroutine execute()
       complex(real64),allocatable::reconstructed(:,:)
       real(real64)::metadata(4),minimum(4),maximum(4),error2
-      integer::channel,n,m,j,status,ierr
-      logical::valid
+      integer::channel,n,m,j,status,ierr,enforce_flag,enforce_min,enforce_max
+      logical::valid,enforce
       character(256)::why
       ok=.false.;measured=.false.;message='';defects=huge(1d0)
+      enforce=.true.;if(present(enforce_tolerances))enforce=enforce_tolerances
       n=size(coefficients,1);m=size(coefficients,2)
       valid=n>0.and.m>0.and.selected_count>0.and.selected_count<=n.and.&
         finite_complex_matrix(coefficients).and.all(required_counts>=0).and.&
@@ -190,6 +192,12 @@ contains
       call MPI_Allreduce(metadata,maximum,4,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
       call synchronize_status(comm,ierr==MPI_SUCCESS.and.all(minimum==maximum),&
         'support controls differ between ranks',ok,message);if(.not.ok)return
+      enforce_flag=merge(1,0,enforce)
+      call MPI_Allreduce(enforce_flag,enforce_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS,'support policy exchange failed',ok,message);if(.not.ok)return
+      call MPI_Allreduce(enforce_flag,enforce_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS.and.enforce_min==enforce_max,&
+        'support policies differ between ranks',ok,message);if(.not.ok)return
       defects=0d0
       do channel=1,3
         allocate(reconstructed(required_counts(channel),m),stat=status)
@@ -209,7 +217,7 @@ contains
       measured=.true.
       write(why,'(a,i0,a,es12.4,a,3es12.4)')'required support mismatch: selected=',selected_count,&
         ' cutoff=',pw_cutoff,' boundary/derivative/projector=',defects
-      call synchronize_status(comm,all(defects<=tolerances),why,ok,message)
+      call synchronize_status(comm,.not.enforce.or.all(defects<=tolerances),why,ok,message)
     end subroutine
   end subroutine check_dg_hybrid_seed_support
 
@@ -217,13 +225,14 @@ contains
   ! limits = metric rank, max relative orbital norm, relative density L1,
   ! absolute electron-number defect. A rank loss is never compressed away.
   subroutine project_dg_hybrid_core_seeds(comm,basis,weights,seeds,occupations,limits,&
-      selected_count,pw_cutoff,coefficients,report,ok,message)
+      selected_count,pw_cutoff,coefficients,report,ok,message,enforce_limits)
     integer,intent(in)::comm,selected_count
     complex(real64),intent(in)::basis(:,:),seeds(:,:)
     real(real64),intent(in)::weights(:),occupations(:),limits(4),pw_cutoff
     complex(real64),allocatable,intent(out)::coefficients(:,:)
     type(s_dg_hybrid_core_projection_report),intent(out)::report
     logical,intent(out)::ok
+    logical,optional,intent(in)::enforce_limits
     character(*),intent(out)::message
     logical::halting(3)
     call ieee_get_halting_mode(ieee_invalid,halting(1))
@@ -243,10 +252,11 @@ contains
       complex(real64),allocatable::weighted(:,:),target(:,:),gram(:,:),inverse(:,:),work(:,:),reconstructed(:,:)
       real(real64),allocatable::spectrum(:),rho(:),reference(:)
       real(real64)::minimum(5),maximum(5),metadata(5),norm2,error2,electrons
-      integer::n,m,p,j,status,ierr
-      logical::valid,stage_ok
+      integer::n,m,p,j,status,ierr,enforce_flag,enforce_min,enforce_max
+      logical::valid,stage_ok,enforce
       character(256)::why
       ok=.false.;message='';n=size(basis,2);m=size(seeds,2);p=size(basis,1)
+      enforce=.true.;if(present(enforce_limits))enforce=enforce_limits
       valid=n>0.and.n<=huge(0)/3.and.m>0.and.p>0.and.size(seeds,1)==p.and.size(weights)==p.and.&
         size(occupations)==m.and.selected_count>0.and.selected_count<=n.and.&
         finite_complex_matrix(basis).and.finite_complex_matrix(seeds).and.&
@@ -261,6 +271,12 @@ contains
       call MPI_Allreduce(metadata,maximum,5,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
       call synchronize_status(comm,ierr==MPI_SUCCESS.and.all(minimum==maximum),&
         'core projection controls differ between ranks',ok,message);if(.not.ok)return
+      enforce_flag=merge(1,0,enforce)
+      call MPI_Allreduce(enforce_flag,enforce_min,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS,'core projection policy exchange failed',ok,message);if(.not.ok)return
+      call MPI_Allreduce(enforce_flag,enforce_max,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      call synchronize_status(comm,ierr==MPI_SUCCESS.and.enforce_min==enforce_max,&
+        'core projection policies differ between ranks',ok,message);if(.not.ok)return
       allocate(weighted(p,n),target(p,m),gram(n,n),work(n,m),reconstructed(p,m),rho(p),reference(p),stat=status)
       call synchronize_status(comm,status==0,'core projection allocation failed',ok,message);if(.not.ok)return
       weighted=basis*spread(sqrt(weights),2,n);target=seeds*spread(sqrt(weights),2,m)
@@ -289,8 +305,8 @@ contains
         report%electron_defect,electrons])).and.all(ieee_is_finite(rho)).and.all(ieee_is_finite(reference))
       call synchronize_status(comm,valid,'unresolved core projection diagnostics',ok,message);if(.not.ok)return
       report%measured=.true.
-      valid=report%orbital_residual<=limits(2).and.report%density_defect<=limits(3).and.&
-        report%electron_defect<=limits(4)
+      valid=.not.enforce.or.(report%orbital_residual<=limits(2).and.report%density_defect<=limits(3).and.&
+        report%electron_defect<=limits(4))
       write(why,'(a,i0,a,es12.4,a,3es12.4)')'insufficient core span: selected=',selected_count,&
         ' cutoff=',pw_cutoff,' orbital/density/electron=',report%orbital_residual,&
         report%density_defect,report%electron_defect

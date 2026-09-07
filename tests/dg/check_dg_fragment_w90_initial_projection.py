@@ -20,7 +20,7 @@ fragment_call = re.search(
     route,
     re.S,
 )
-assert fragment_call and "dg_ow_w90_initial_projection" in fragment_call.group(1), (
+assert fragment_call and "dg_fragment_w90_initial_projection" in fragment_call.group(1), (
     "fragment Wannier90 construction ignores the user-selected initial projection"
 )
 
@@ -28,9 +28,12 @@ construct = builder.split("subroutine construct_fragment_wannier", 1)[1].split(
     "end subroutine construct_fragment_wannier", 1
 )[0]
 compact_construct = re.sub(r"\s+|&", "", construct)
-assert "num_iter,trim(initial_projection),dg_w90_unconstrained" in compact_construct, (
+assert "if(trim(initial_projection)=='scdm')setup_projection='random'" in compact_construct
+assert "num_iter,trim(setup_projection),dg_w90_unconstrained" in compact_construct, (
     "fragment Wannier90 setup hard-codes its initial projection"
 )
+assert "build_dg_fragment_scdm_gauge" in compact_construct
+assert "precomputed_a_matrix=initial_a_matrix" in compact_construct
 
 contract = builder.split("subroutine validate_fragment_contract", 1)[1].split(
     "end subroutine validate_fragment_contract", 1

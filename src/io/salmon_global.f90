@@ -489,6 +489,9 @@ character(256),allocatable :: atom_name(:)
   real(8)        :: dg_hybrid_symmetry_energy_window
   character(16)  :: dg_dc_seed_mode
   character(256) :: dg_dc_seed_directory
+  character(16)  :: dg_fragment_wf_checkpoint_mode
+  character(256) :: dg_fragment_wf_checkpoint_directory
+  character(16)  :: dg_fragment_w90_initial_projection
   integer        :: dg_dc_handoff_min_iter
   real(8)        :: dg_dc_handoff_tolerance
   integer        :: dg_dc_candidate_orbitals_per_atom

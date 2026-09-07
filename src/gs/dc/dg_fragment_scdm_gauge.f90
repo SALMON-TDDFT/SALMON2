@@ -7,6 +7,7 @@ module dg_fragment_scdm_gauge
 #endif
   implicit none
   private
+  integer,parameter,public::DG_FRAGMENT_SCDM_GAUGE_VERSION=1
   public::build_dg_fragment_scdm_gauge
 contains
   subroutine build_dg_fragment_scdm_gauge(comm,fragment_id,basis_generation,grid_ids,values,weights,&

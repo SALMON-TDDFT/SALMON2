@@ -28,6 +28,9 @@ for declaration in (
     r"real\(8\)\s*::\s*dg_hybrid_symmetry_energy_window",
     r"character\(16\)\s*::\s*dg_dc_seed_mode",
     r"character\(256\)\s*::\s*dg_dc_seed_directory",
+    r"character\(16\)\s*::\s*dg_fragment_wf_checkpoint_mode",
+    r"character\(256\)\s*::\s*dg_fragment_wf_checkpoint_directory",
+    r"character\(16\)\s*::\s*dg_fragment_w90_initial_projection",
 ):
     assert re.search(declaration, GLOBAL), f"missing global declaration: {declaration}"
 
@@ -50,6 +53,9 @@ for name in (
     "dg_hybrid_symmetry_energy_window",
     "dg_dc_seed_mode",
     "dg_dc_seed_directory",
+    "dg_fragment_wf_checkpoint_mode",
+    "dg_fragment_wf_checkpoint_directory",
+    "dg_fragment_w90_initial_projection",
 ):
     assert name in dc_namelist, f"{name} must belong to &dc"
 
@@ -58,6 +64,9 @@ for default in (
     "dg_hybrid_symmetry_energy_window = -1d0",
     "dg_dc_seed_mode = 'off'",
     "dg_dc_seed_directory = ''",
+    "dg_fragment_wf_checkpoint_mode = 'auto'",
+    "dg_fragment_wf_checkpoint_directory = 'dg-fragment-wf-checkpoint'",
+    "dg_fragment_w90_initial_projection = 'scdm'",
 ):
     assert default in INPUT, f"missing compatibility default: {default}"
 
@@ -69,6 +78,9 @@ for name in (
     "dg_hybrid_symmetry_energy_window",
     "dg_dc_seed_mode",
     "dg_dc_seed_directory",
+    "dg_fragment_wf_checkpoint_mode",
+    "dg_fragment_wf_checkpoint_directory",
+    "dg_fragment_w90_initial_projection",
 ):
     assert f"call comm_bcast({name}" in input_broadcasts, (
         f"missing global broadcast for {name}"
@@ -81,6 +93,9 @@ for name in (
     "dg_hybrid_symmetry_energy_window",
     "dg_dc_seed_mode",
     "dg_dc_seed_directory",
+    "dg_fragment_wf_checkpoint_mode",
+    "dg_fragment_wf_checkpoint_directory",
+    "dg_fragment_w90_initial_projection",
 ):
     assert f"'{name}'" in dc_log or f'"{name}"' in dc_log, (
         f"missing variables.log entry for {name}"
@@ -102,6 +117,9 @@ assert "dg_hybrid_symmetry_energy_window<0d0" in packed
 assert "selectcase(trim(dg_dc_seed_mode))" in packed
 assert "case('off','write','read','auto')" in packed
 assert "len_trim(dg_dc_seed_directory)==0" in packed
+assert "selectcase(trim(dg_fragment_wf_checkpoint_mode))" in packed
+assert "len_trim(dg_fragment_wf_checkpoint_directory)==0" in packed
+assert "case('scdm','spectral','random')" in packed
 assert "call yn_argument_check(yn_dg_hybrid_continuation_scf)" in INPUT
 
 continuation_check = INPUT[INPUT.index("subroutine check_bad_input"):]
@@ -171,6 +189,18 @@ def check_invalid_input_exit(executable: Path) -> None:
         (
             "dg_dc_seed_mode='read', dg_dc_seed_directory=' '",
             "dg_dc_seed_directory is required when dg_dc_seed_mode is enabled",
+        ),
+        (
+            "dg_fragment_wf_checkpoint_mode='invalid'",
+            "dg_fragment_wf_checkpoint_mode must be off, write, read, or auto",
+        ),
+        (
+            "dg_fragment_wf_checkpoint_mode='read', dg_fragment_wf_checkpoint_directory=' '",
+            "dg_fragment_wf_checkpoint_directory is required when checkpoint mode is enabled",
+        ),
+        (
+            "dg_fragment_w90_initial_projection='invalid'",
+            "dg_fragment_w90_initial_projection must be scdm, spectral, or random",
         ),
         (
             "yn_dg_hybrid_continuation_scf='y', energy_cut=NaN, "

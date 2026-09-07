@@ -640,6 +640,9 @@ contains
       & dg_hybrid_symmetry_energy_window, &
       & dg_dc_seed_mode, &
       & dg_dc_seed_directory, &
+      & dg_fragment_wf_checkpoint_mode, &
+      & dg_fragment_wf_checkpoint_directory, &
+      & dg_fragment_w90_initial_projection, &
       & dg_dc_handoff_min_iter, &
       & dg_dc_handoff_tolerance, &
       & dg_dc_candidate_orbitals_per_atom, &
@@ -1169,6 +1172,9 @@ contains
     dg_hybrid_symmetry_energy_window = -1d0
     dg_dc_seed_mode = 'off'
     dg_dc_seed_directory = ''
+    dg_fragment_wf_checkpoint_mode = 'auto'
+    dg_fragment_wf_checkpoint_directory = 'dg-fragment-wf-checkpoint'
+    dg_fragment_w90_initial_projection = 'scdm'
     dg_dc_handoff_min_iter = 3
     dg_dc_handoff_tolerance = 1d-3
     dg_dc_candidate_orbitals_per_atom = 40
@@ -1339,6 +1345,8 @@ contains
     call string_lowercase(method_min)
     call string_lowercase(method_mixing)
     call string_lowercase(dg_hybrid_divided_mixing)
+    call string_lowercase(dg_fragment_wf_checkpoint_mode)
+    call string_lowercase(dg_fragment_w90_initial_projection)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
@@ -1908,6 +1916,9 @@ contains
       dg_hybrid_symmetry_energy_window = dg_hybrid_symmetry_energy_window*uenergy_to_au
     call comm_bcast(dg_dc_seed_mode, nproc_group_global)
     call comm_bcast(dg_dc_seed_directory, nproc_group_global)
+    call comm_bcast(dg_fragment_wf_checkpoint_mode, nproc_group_global)
+    call comm_bcast(dg_fragment_wf_checkpoint_directory, nproc_group_global)
+    call comm_bcast(dg_fragment_w90_initial_projection, nproc_group_global)
     call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
     call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
     call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
@@ -2983,6 +2994,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') &
         'dg_dc_seed_directory',trim(dg_dc_seed_directory)
       write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_fragment_wf_checkpoint_mode',trim(dg_fragment_wf_checkpoint_mode)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_fragment_wf_checkpoint_directory',trim(dg_fragment_wf_checkpoint_directory)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_fragment_w90_initial_projection',trim(dg_fragment_w90_initial_projection)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
         "dg_ow_w90_initial_projection",trim(dg_ow_w90_initial_projection)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
       write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
@@ -3165,6 +3182,19 @@ contains
     end select
     if(trim(dg_dc_seed_mode)/='off' .and. len_trim(dg_dc_seed_directory)==0) &
       call sawf_input_fatal("dg_dc_seed_directory is required when dg_dc_seed_mode is enabled")
+    select case(trim(dg_fragment_wf_checkpoint_mode))
+    case('off','write','read','auto')
+    case default
+      call sawf_input_fatal("dg_fragment_wf_checkpoint_mode must be off, write, read, or auto")
+    end select
+    if(trim(dg_fragment_wf_checkpoint_mode)/='off' .and. &
+       len_trim(dg_fragment_wf_checkpoint_directory)==0) &
+      call sawf_input_fatal("dg_fragment_wf_checkpoint_directory is required when checkpoint mode is enabled")
+    select case(trim(dg_fragment_w90_initial_projection))
+    case('scdm','spectral','random')
+    case default
+      call sawf_input_fatal("dg_fragment_w90_initial_projection must be scdm, spectral, or random")
+    end select
     if(yn_dg_hybrid_continuation_scf=='y')then
       if(.not.ieee_is_finite(energy_cut)) &
         call sawf_input_fatal("DG continuation requires finite energy_cut")
@@ -3179,6 +3209,9 @@ contains
     endif
     if(yn_dg_hybrid_divided_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
       call sawf_input_fatal("divided hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_divided_scf=='y' .and. &
+       trim(dg_fragment_wf_checkpoint_mode)/='off' .and. trim(dg_dc_seed_mode)=='off') &
+      call sawf_input_fatal("fragment-WF checkpoint reuse requires DG DC seed checkpoint provenance")
     if(yn_dg_hybrid_divided_scf=='y' .and. yn_scalapack/='y') &
       call sawf_input_fatal("divided hybrid LCFO requires yn_scalapack='y'")
     if(yn_dg_hybrid_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &

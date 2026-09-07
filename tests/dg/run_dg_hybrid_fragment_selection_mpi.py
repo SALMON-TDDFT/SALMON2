@@ -30,6 +30,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as temporary:
         "SYSTEM_HAS_POSIX_ACCESS", "SYSTEM_HAS_POSIX_MKDIR", "SYSTEM_HAS_POSIX_NFTW")))
     sources = ["src/io/posix.c", "src/gs/dc/lcfo_wannier_sawf_seed.f90",
                "src/gs/dc/dg_overlapping_wannier_w90.f90",
+               "src/gs/dc/dg_fragment_scdm_gauge.f90",
+               "src/gs/dc/dg_fragment_wf_checkpoint.f90",
                "src/gs/dc/dg_hybrid_fragment_wannier.f90"]
     selection = "src/gs/dc/dg_hybrid_fragment_selection.f90"
     if (ROOT / selection).exists():

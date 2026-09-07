@@ -6,6 +6,11 @@ module dg_hybrid_fragment_wannier
   use dg_overlapping_wannier_w90,only:DG_W90_UNCONSTRAINED,&
     setup_dg_w90_gamma_library,assemble_dg_w90_gamma_matrices,&
     run_dg_w90_gamma_library,apply_dg_w90_gamma_transform
+  use dg_fragment_scdm_gauge,only:DG_FRAGMENT_SCDM_GAUGE_VERSION,&
+    build_dg_fragment_scdm_gauge
+  use dg_fragment_wf_checkpoint,only:s_dg_fragment_wf_contract,s_dg_fragment_wf_payload,&
+    probe_dg_fragment_wf_checkpoint,read_dg_fragment_wf_checkpoint,&
+    write_dg_fragment_wf_checkpoint,decide_dg_fragment_wf_restart
 #ifdef USE_MPI
   use mpi
 #endif
@@ -235,7 +240,9 @@ contains
   subroutine build_dg_hybrid_fragment_wannier_from_dc_seed(comm_total,comm_fragment,orbital_comm,&
       fragment_id,basis_generation,seed_directory,grid_shape,owned_lower,owned_upper,rwf,esp,rocc,hvol,&
       candidate_grid_ids,buffer_values,projector_values,metric_tolerance,real_lattice,reciprocal_lattice,&
-      atom_symbols,atoms_cart,num_iter,localization_tolerance,byte_limit,cache,ok,message,initial_projection)
+      atom_symbols,atoms_cart,num_iter,localization_tolerance,byte_limit,cache,ok,message,initial_projection,&
+      checkpoint_mode,checkpoint_directory,dc_seed_publication_id,mapping_fingerprint,&
+      immutable_fingerprint,checkpoint_hit,checkpoint_publication_id,checkpoint_reason)
     integer,intent(in)::comm_total,comm_fragment,orbital_comm,fragment_id,basis_generation
     integer,intent(in)::grid_shape(3),owned_lower(3),owned_upper(3),num_iter
     character(*),intent(in)::seed_directory,atom_symbols(:)
@@ -248,6 +255,11 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     character(*),optional,intent(in)::initial_projection
+    character(*),optional,intent(in)::checkpoint_mode,checkpoint_directory
+    integer(int64),optional,intent(in)::dc_seed_publication_id,mapping_fingerprint,immutable_fingerprint
+    logical,optional,intent(out)::checkpoint_hit
+    integer(int64),optional,intent(out)::checkpoint_publication_id
+    character(*),optional,intent(out)::checkpoint_reason
 #ifdef USE_MPI
     integer(int64),allocatable::ids(:)
     real(real64),allocatable::weights(:),energies(:),occupations(:),fractional(:,:)
@@ -272,7 +284,9 @@ contains
     call build_dg_hybrid_fragment_wannier(comm_total,comm_fragment,fragment_id,basis_generation,&
       seed_directory,ids,weights,seeds,energies,occupations,buffer_values,projector_values,&
       metric_tolerance,real_lattice,reciprocal_lattice,atom_symbols,atoms_cart,fractional,&
-      num_iter,localization_tolerance,byte_limit,cache,ok,message,initial_projection)
+      num_iter,localization_tolerance,byte_limit,cache,ok,message,initial_projection,&
+      checkpoint_mode,checkpoint_directory,dc_seed_publication_id,mapping_fingerprint,&
+      immutable_fingerprint,checkpoint_hit,checkpoint_publication_id,checkpoint_reason)
 #else
     ok=.false.;message='direct DC Wannier construction requires MPI'
 #endif
@@ -539,7 +553,9 @@ contains
       dc_seed_energies,dc_seed_occupations,buffer_candidate_values,&
       projector_candidate_values,metric_tolerance,fragment_real_lattice,&
       fragment_reciprocal_lattice,atom_symbols,atoms_cart,fractional_coordinates,&
-      num_iter,localization_tolerance,coordinator_byte_limit,cache,ok,message,initial_projection)
+      num_iter,localization_tolerance,coordinator_byte_limit,cache,ok,message,initial_projection,&
+      checkpoint_mode,checkpoint_directory,dc_seed_publication_id,mapping_fingerprint,&
+      immutable_fingerprint,checkpoint_hit,checkpoint_publication_id,checkpoint_reason)
     integer,intent(in)::comm_total,comm_fragment,fragment_id,basis_generation,num_iter
     character(*),intent(in)::seed_directory
     integer(int64),intent(in)::grid_ids(:)
@@ -555,16 +571,82 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     character(*),optional,intent(in)::initial_projection
+    character(*),optional,intent(in)::checkpoint_mode,checkpoint_directory
+    integer(int64),optional,intent(in)::dc_seed_publication_id,mapping_fingerprint,immutable_fingerprint
+    logical,optional,intent(out)::checkpoint_hit
+    integer(int64),optional,intent(out)::checkpoint_publication_id
+    character(*),optional,intent(out)::checkpoint_reason
 #ifdef USE_MPI
     type(s_dg_hybrid_fragment_wannier_cache)::working_cache
+    type(s_dg_fragment_wf_contract)::wf_contract
+    type(s_dg_fragment_wf_payload)::wf_payload
     real(real64)::inverse_lattice(3,3)
-    integer(int64)::seed_fingerprint,basis_fingerprint,local_layout_fingerprint
-    character(message_length)::local_message,seed_name,projection_mode
-    logical::local_ok,build_required
+    integer(int64)::seed_fingerprint,basis_fingerprint,local_layout_fingerprint,wf_publication,&
+      checkpoint_mapping_fingerprint,checkpoint_dc_publication_id,checkpoint_immutable_fingerprint,&
+      namespace_token
+    integer::wf_status,expected_retained_rank,candidate_rank,wf_policy_code,wf_policy_min,&
+      wf_policy_max,projection_code,projection_min,projection_max,ierr,total_rank
+    character(message_length)::local_message,seed_name,projection_mode,wf_policy,wf_directory,wf_reason,&
+      namespace_directory
+    logical::local_ok,build_required,reuse_checkpoint,regenerate_checkpoint,publish_checkpoint,&
+      fatal_checkpoint,decision_ok,restored_checkpoint
 
     ok=.false.;message='';local_message='';seed_name='';projection_mode='spectral'
+    wf_policy='off';wf_directory='';wf_reason='checkpoint disabled';wf_publication=0_int64
+    checkpoint_mapping_fingerprint=0_int64;checkpoint_dc_publication_id=0_int64
+    checkpoint_immutable_fingerprint=0_int64
+    namespace_token=0_int64;namespace_directory=trim(seed_directory)
+    restored_checkpoint=.false.
     if(present(initial_projection))projection_mode=trim(initial_projection)
+    if(present(checkpoint_mode))wf_policy=trim(checkpoint_mode)
+    if(present(checkpoint_directory))wf_directory=trim(checkpoint_directory)
+    if(present(checkpoint_hit))checkpoint_hit=.false.
+    if(present(checkpoint_publication_id))checkpoint_publication_id=0_int64
+    if(present(checkpoint_reason))checkpoint_reason='checkpoint disabled'
+    select case(trim(wf_policy))
+    case('off');wf_policy_code=1
+    case('write');wf_policy_code=2
+    case('read');wf_policy_code=3
+    case('auto');wf_policy_code=4
+    case default;wf_policy_code=0
+    end select
+    select case(trim(projection_mode))
+    case('scdm');projection_code=1
+    case('spectral');projection_code=2
+    case('random');projection_code=3
+    case default;projection_code=0
+    end select
+    local_ok=.true.
+    call MPI_Allreduce(wf_policy_code,wf_policy_min,1,MPI_INTEGER,MPI_MIN,comm_total,ierr)
+    if(ierr/=MPI_SUCCESS)local_ok=.false.
+    call MPI_Allreduce(wf_policy_code,wf_policy_max,1,MPI_INTEGER,MPI_MAX,comm_total,ierr)
+    if(ierr/=MPI_SUCCESS)local_ok=.false.
+    call MPI_Allreduce(projection_code,projection_min,1,MPI_INTEGER,MPI_MIN,comm_total,ierr)
+    if(ierr/=MPI_SUCCESS)local_ok=.false.
+    call MPI_Allreduce(projection_code,projection_max,1,MPI_INTEGER,MPI_MAX,comm_total,ierr)
+    if(ierr/=MPI_SUCCESS)local_ok=.false.
+    local_ok=local_ok.and.wf_policy_code>0.and.wf_policy_min==wf_policy_max.and.&
+      projection_code>0.and.projection_min==projection_max
+    call canonical_total_status(comm_total,local_ok,&
+      'fragment-WF policy or initial gauge disagrees across total ranks',ok,message)
+    if(.not.ok)return
     call validate_fragment_partition(comm_total,comm_fragment,fragment_id,local_ok,local_message)
+    call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+    if(.not.ok)return
+
+    local_ok=.true.;local_message=''
+    if(trim(wf_policy)/='off')then
+      local_ok=present(checkpoint_directory).and.present(dc_seed_publication_id).and.&
+        present(mapping_fingerprint).and.present(immutable_fingerprint)
+      if(local_ok)local_ok=len_trim(wf_directory)>0.and.dc_seed_publication_id/=0_int64.and.&
+        mapping_fingerprint/=0_int64.and.immutable_fingerprint/=0_int64
+      if(local_ok)then
+        checkpoint_mapping_fingerprint=mapping_fingerprint
+        checkpoint_dc_publication_id=dc_seed_publication_id
+        checkpoint_immutable_fingerprint=immutable_fingerprint
+      endif
+      if(.not.local_ok)local_message='fragment-WF checkpoint provenance is incomplete'
+    endif
     call canonical_total_status(comm_total,local_ok,local_message,ok,message)
     if(.not.ok)return
 
@@ -586,8 +668,63 @@ contains
     call canonical_total_status(comm_total,local_ok,local_message,ok,message)
     if(.not.ok)return
 
+    ! Checkpoint policies are total-system transactions.  Do not let a rank-local
+    ! in-memory cache bypass strict read/write semantics or split this branch.
+    if(trim(wf_policy)/='off')build_required=.true.
+    candidate_rank=size(dc_seed_values,1)+size(buffer_candidate_values,1)+&
+      size(projector_candidate_values,1)
+    if(build_required.and.trim(wf_policy)/='off')then
+      call determine_fragment_retained_rank(comm_fragment,dc_seed_values,buffer_candidate_values,&
+        projector_candidate_values,grid_weights,metric_tolerance,expected_retained_rank,&
+        local_ok,local_message)
+      call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+      if(.not.ok)return
+      call prepare_fragment_checkpoint_contract(comm_total,comm_fragment,fragment_id,basis_generation,&
+        candidate_rank,expected_retained_rank,size(grid_ids),size(dc_seed_values,1),projection_mode,&
+        checkpoint_mapping_fingerprint,checkpoint_dc_publication_id,checkpoint_immutable_fingerprint,&
+        seed_fingerprint,&
+        basis_fingerprint,local_layout_fingerprint,wf_contract,local_ok,local_message)
+      call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+      if(.not.ok)return
+      call probe_dg_fragment_wf_checkpoint(comm_total,trim(wf_directory),wf_contract,&
+        wf_status,wf_publication,wf_reason)
+      call decide_dg_fragment_wf_restart(comm_total,trim(wf_policy),wf_status,reuse_checkpoint,&
+        regenerate_checkpoint,publish_checkpoint,fatal_checkpoint,decision_ok,local_message)
+      if(fatal_checkpoint.or..not.decision_ok)then
+        if(len_trim(wf_reason)>0)local_message=trim(local_message)//': '//trim(wf_reason)
+        call canonical_total_status(comm_total,.false.,local_message,ok,message);return
+      endif
+      if(reuse_checkpoint)then
+        call read_dg_fragment_wf_checkpoint(comm_total,trim(wf_directory),wf_contract,wf_payload,&
+          wf_publication,local_ok,local_message)
+        if(local_ok)call restore_fragment_cache_from_checkpoint(comm_fragment,wf_contract,wf_payload,&
+          seed_fingerprint,basis_fingerprint,local_layout_fingerprint,cache,local_ok,local_message)
+        call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+        if(.not.ok)return
+        build_required=.false.;restored_checkpoint=.true.;wf_reason='compatible checkpoint hit'
+      else if(regenerate_checkpoint)then
+        wf_reason='checkpoint miss: '//trim(wf_reason)
+      endif
+    else
+      publish_checkpoint=.false.
+    endif
+
     local_ok=.true.;local_message=''
-    if(build_required)call create_fragment_namespace(comm_fragment,seed_directory,&
+    if(build_required.and.trim(wf_policy)/='off')then
+      total_rank=-1
+      call MPI_Comm_rank(comm_total,total_rank,ierr)
+      if(total_rank==0.and.ierr==MPI_SUCCESS)call system_clock(namespace_token)
+      call MPI_Bcast(namespace_token,1,MPI_INTEGER8,0,comm_total,ierr)
+      local_ok=ierr==MPI_SUCCESS.and.namespace_token/=0_int64
+      if(local_ok)then
+        namespace_token=nonzero_fingerprint(ieor(namespace_token,&
+          checkpoint_dc_publication_id),443_int64)
+        write(namespace_directory,'(a,"-attempt-",z16.16)')trim(seed_directory),namespace_token
+      else
+        local_message='cannot create a collective fragment-WF scratch namespace'
+      endif
+    endif
+    if(build_required.and.local_ok)call create_fragment_namespace(comm_fragment,namespace_directory,&
       fragment_id,basis_generation,seed_name,local_ok,local_message)
     call canonical_total_status(comm_total,local_ok,local_message,ok,message)
     if(.not.ok)return
@@ -606,6 +743,19 @@ contains
     if(.not.ok)return
 
     if(build_required)call move_fragment_cache(working_cache,cache)
+    if(build_required.and.publish_checkpoint)then
+      call pack_fragment_cache_for_checkpoint(cache,wf_payload,local_ok,local_message)
+      call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+      if(.not.ok)return
+      call write_dg_fragment_wf_checkpoint(comm_total,trim(wf_directory),wf_contract,wf_payload,&
+        wf_publication,local_ok,local_message)
+      call canonical_total_status(comm_total,local_ok,local_message,ok,message)
+      if(.not.ok)return
+      wf_reason='checkpoint generation published'
+    endif
+    if(present(checkpoint_hit))checkpoint_hit=restored_checkpoint
+    if(present(checkpoint_publication_id))checkpoint_publication_id=wf_publication
+    if(present(checkpoint_reason))checkpoint_reason=trim(wf_reason)
     ok=.true.;message=''
 #else
     ok=.false.;message='fragment Wannier construction requires MPI'
@@ -613,6 +763,179 @@ contains
   end subroutine build_dg_hybrid_fragment_wannier
 
 #ifdef USE_MPI
+  subroutine determine_fragment_retained_rank(comm,dc_seed_values,buffer_values,projector_values,&
+      weights,tolerance,retained_rank,ok,message)
+    integer,intent(in)::comm
+    complex(real64),intent(in)::dc_seed_values(:,:),buffer_values(:,:),projector_values(:,:)
+    real(real64),intent(in)::weights(:),tolerance
+    integer,intent(out)::retained_rank
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(real64),allocatable::raw(:,:),compression(:,:),retained(:,:)
+    real(real64)::orthogonality_defect
+    integer::candidate_count,nlocal,allocation_status
+    candidate_count=size(dc_seed_values,1)+size(buffer_values,1)+size(projector_values,1)
+    nlocal=size(weights);allocation_status=0;retained_rank=0;ok=.false.;message=''
+    if(.not.extent_product_fits([candidate_count,nlocal]))then
+      message='fragment checkpoint rank-probe extent overflows';return
+    endif
+    allocate(raw(candidate_count,nlocal),stat=allocation_status)
+    call collective_allocation_status(comm,allocation_status,&
+      'fragment checkpoint rank-probe allocation failed',ok,message)
+    if(.not.ok)return
+    raw(1:size(dc_seed_values,1),:)=dc_seed_values
+    if(size(buffer_values,1)>0)raw(size(dc_seed_values,1)+1:&
+      size(dc_seed_values,1)+size(buffer_values,1),:)=buffer_values
+    if(size(projector_values,1)>0)raw(size(dc_seed_values,1)+size(buffer_values,1)+1:candidate_count,:)=&
+      projector_values
+    call metric_compress_candidates(comm,raw,weights,tolerance,compression,retained,&
+      retained_rank,orthogonality_defect,ok,message)
+  end subroutine determine_fragment_retained_rank
+
+  subroutine prepare_fragment_checkpoint_contract(comm_total,comm_fragment,fragment_id,&
+      basis_generation,candidate_rank,retained_rank,local_rows,seed_count,gauge_mode,&
+      mapping_fingerprint,dc_publication_id,immutable_fingerprint,seed_fingerprint,&
+      basis_fingerprint,local_layout_fingerprint,contract,ok,message)
+    integer,intent(in)::comm_total,comm_fragment,fragment_id,basis_generation,candidate_rank,&
+      retained_rank,local_rows,seed_count
+    character(*),intent(in)::gauge_mode
+    integer(int64),intent(in)::mapping_fingerprint,dc_publication_id,immutable_fingerprint,&
+      seed_fingerprint,basis_fingerprint,local_layout_fingerprint
+    type(s_dg_fragment_wf_contract),intent(out)::contract
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,fragment_size,ierr,gauge_version
+    contract=s_dg_fragment_wf_contract();ok=.false.;message=''
+    call MPI_Comm_rank(comm_total,rank,ierr);if(ierr/=MPI_SUCCESS)then
+      message='fragment checkpoint total-rank query failed';return;endif
+    call MPI_Comm_size(comm_total,nproc,ierr);if(ierr/=MPI_SUCCESS)then
+      message='fragment checkpoint total-size query failed';return;endif
+    call MPI_Comm_size(comm_fragment,fragment_size,ierr)
+    if(ierr/=MPI_SUCCESS.or.fragment_size/=1.or.nproc<1.or.fragment_id/=rank+1)then
+      message='fragment checkpoint requires one fixed rank per fragment';return
+    endif
+    select case(trim(gauge_mode))
+    case('scdm');gauge_version=DG_FRAGMENT_SCDM_GAUGE_VERSION
+    case('spectral','random');gauge_version=1
+    case default;message='unknown fragment checkpoint gauge mode';return
+    end select
+    contract%version=1;contract%mpi_size=nproc;contract%rank=rank
+    contract%fragment_id=fragment_id;contract%basis_generation=basis_generation
+    contract%gauge_algorithm_version=gauge_version;contract%candidate_rank=candidate_rank
+    contract%retained_rank=retained_rank;contract%local_row_count=local_rows
+    contract%seed_count=seed_count;contract%gauge_mode=trim(gauge_mode)
+    contract%mapping_fingerprint=mapping_fingerprint
+    contract%dc_seed_publication_id=dc_publication_id
+    contract%dc_seed_fingerprint=seed_fingerprint
+    contract%grid_fingerprint=nonzero_fingerprint(ieor(local_layout_fingerprint,seed_fingerprint),401_int64)
+    contract%cell_fingerprint=nonzero_fingerprint(basis_fingerprint,403_int64)
+    contract%pseudopotential_fingerprint=immutable_fingerprint
+    contract%fragment_geometry_fingerprint=nonzero_fingerprint(ieor(basis_fingerprint,&
+      ishftc(immutable_fingerprint,7)),409_int64)
+    contract%boundary_fingerprint=nonzero_fingerprint(ieor(basis_fingerprint,&
+      ishftc(local_layout_fingerprint,11)),419_int64)
+    contract%inventory_fingerprint=nonzero_fingerprint(seed_fingerprint,421_int64)
+    contract%ordering_fingerprint=nonzero_fingerprint(local_layout_fingerprint,431_int64)
+    contract%selection_fingerprint=nonzero_fingerprint(basis_fingerprint,433_int64)
+    contract%gauge_fingerprint=nonzero_fingerprint(ieor(basis_fingerprint,&
+      int(gauge_version,int64)),439_int64)
+    contract%local_layout_fingerprint=local_layout_fingerprint
+    ok=all([mapping_fingerprint,dc_publication_id,immutable_fingerprint,seed_fingerprint,&
+      basis_fingerprint,local_layout_fingerprint]/=0_int64)
+    if(.not.ok)message='fragment checkpoint identity contains a zero fingerprint'
+  end subroutine prepare_fragment_checkpoint_contract
+
+  subroutine pack_fragment_cache_for_checkpoint(cache,payload,ok,message)
+    type(s_dg_hybrid_fragment_wannier_cache),intent(in)::cache
+    type(s_dg_fragment_wf_payload),intent(out)::payload
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::allocation_status,i
+    ok=.false.;message='';allocation_status=0
+    if(.not.cache%valid)then;message='cannot checkpoint an invalid fragment-WF cache';return;endif
+    allocate(payload%local_grid_ids,source=cache%local_grid_ids,stat=allocation_status)
+    if(allocation_status==0)allocate(payload%selected_state_ids(cache%receipt%retained_rank),stat=allocation_status)
+    if(allocation_status==0)allocate(payload%wannier_values,source=cache%wannier_values,stat=allocation_status)
+    if(allocation_status==0)allocate(payload%candidate_compression,source=cache%candidate_compression,&
+      stat=allocation_status)
+    if(allocation_status==0)allocate(payload%wannier_transform,source=cache%wannier_transform,&
+      stat=allocation_status)
+    if(allocation_status==0)allocate(payload%centers_fractional,source=cache%centers_fractional,&
+      stat=allocation_status)
+    if(allocation_status==0)allocate(payload%dc_seed_coefficients,&
+      source=cache%dc_seed_coefficients_in_wannier,stat=allocation_status)
+    if(allocation_status==0)allocate(payload%dc_seed_energies,&
+      source=cache%physical_dc_seed_energies,stat=allocation_status)
+    if(allocation_status==0)allocate(payload%dc_seed_occupations,&
+      source=cache%physical_dc_seed_occupations,stat=allocation_status)
+    if(allocation_status/=0)then;message='cannot allocate fragment-WF checkpoint payload';return;endif
+    payload%selected_state_ids=[(int(i,int64),i=1,cache%receipt%retained_rank)]
+    payload%seed_reconstruction_defect=cache%receipt%seed_reconstruction_defect
+    ok=.true.
+  end subroutine pack_fragment_cache_for_checkpoint
+
+  subroutine restore_fragment_cache_from_checkpoint(comm,contract,payload,seed_fingerprint,&
+      basis_fingerprint,local_layout_fingerprint,cache,ok,message)
+    integer,intent(in)::comm
+    type(s_dg_fragment_wf_contract),intent(in)::contract
+    type(s_dg_fragment_wf_payload),intent(in)::payload
+    integer(int64),intent(in)::seed_fingerprint,basis_fingerprint,local_layout_fingerprint
+    type(s_dg_hybrid_fragment_wannier_cache),intent(inout)::cache
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::rank,nproc,ierr,allocation_status,i
+    integer(int64)::wannier_fingerprint
+    logical::hash_ok
+    character(message_length)::hash_message
+    ok=.false.;message='';cache=s_dg_hybrid_fragment_wannier_cache();allocation_status=0
+    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS.or.nproc/=1.or.contract%rank/=rank.or.&
+        any(payload%selected_state_ids/=[(int(i,int64),i=1,contract%retained_rank)]))then
+      message='restored fragment-WF rank or selection metadata is invalid';return
+    endif
+    cache%receipt%fragment_id=contract%fragment_id
+    cache%receipt%basis_generation=contract%basis_generation
+    cache%receipt%candidate_rank=contract%candidate_rank
+    cache%receipt%retained_rank=contract%retained_rank
+    cache%receipt%setup_count=1;cache%receipt%run_count=1
+    cache%receipt%seed_fingerprint=seed_fingerprint
+    cache%receipt%basis_fingerprint=basis_fingerprint
+    cache%receipt%transform_fingerprint=hash_complex_matrix(payload%wannier_transform,401_int64)
+    if(cache%receipt%transform_fingerprint==0_int64)cache%receipt%transform_fingerprint=3_int64
+    cache%receipt%seed_reconstruction_defect=payload%seed_reconstruction_defect
+    cache%fragment_comm_rank=rank;cache%fragment_comm_size=nproc
+    cache%local_row_layout_fingerprint=local_layout_fingerprint
+    allocate(cache%local_grid_ids,source=payload%local_grid_ids,stat=allocation_status)
+    if(allocation_status==0)allocate(cache%wannier_values,source=payload%wannier_values,stat=allocation_status)
+    if(allocation_status==0)allocate(cache%candidate_compression,&
+      source=payload%candidate_compression,stat=allocation_status)
+    if(allocation_status==0)allocate(cache%wannier_transform,source=payload%wannier_transform,&
+      stat=allocation_status)
+    if(allocation_status==0)allocate(cache%centers_fractional,source=payload%centers_fractional,&
+      stat=allocation_status)
+    if(allocation_status==0)allocate(cache%dc_seed_coefficients_in_wannier,&
+      source=payload%dc_seed_coefficients,stat=allocation_status)
+    if(allocation_status==0)allocate(cache%physical_dc_seed_energies,&
+      source=payload%dc_seed_energies,stat=allocation_status)
+    if(allocation_status==0)allocate(cache%physical_dc_seed_occupations,&
+      source=payload%dc_seed_occupations,stat=allocation_status)
+    if(allocation_status/=0)then;message='cannot allocate restored fragment-WF cache';return;endif
+    cache%receipt%replicated_payload_fingerprint=replicated_cache_integrity_hash(cache)
+    if(cache%receipt%replicated_payload_fingerprint==0_int64)&
+      cache%receipt%replicated_payload_fingerprint=5_int64
+    call distributed_wannier_integrity_hash(comm,rank,nproc,local_layout_fingerprint,&
+      cache%local_grid_ids,cache%wannier_values,wannier_fingerprint,hash_ok,hash_message)
+    if(.not.hash_ok)then;message=hash_message;return;endif
+    if(wannier_fingerprint==0_int64)wannier_fingerprint=6_int64
+    cache%receipt%distributed_wannier_fingerprint=wannier_fingerprint
+    cache%valid=.true.;ok=.true.
+  end subroutine restore_fragment_cache_from_checkpoint
+
+  integer(int64) function nonzero_fingerprint(value,fallback)result(hash)
+    integer(int64),intent(in)::value,fallback
+    hash=value;if(hash==0_int64)hash=fallback
+  end function nonzero_fingerprint
+
   subroutine validate_fragment_partition(comm_total,comm_fragment,fragment_id,ok,message)
     integer,intent(in)::comm_total,comm_fragment,fragment_id
     logical,intent(out)::ok
@@ -707,7 +1030,8 @@ contains
     bad=0
     if(fragment_id<1.or.fragment_id>999999.or.basis_generation<0.or.&
         basis_generation>99999999.or.num_iter<=0.or.coordinator_byte_limit<=0_int64)bad=10
-    if(trim(initial_projection)/='spectral'.and.trim(initial_projection)/='random')bad=max(bad,10)
+    if(trim(initial_projection)/='scdm'.and.trim(initial_projection)/='spectral'.and.&
+        trim(initial_projection)/='random')bad=max(bad,10)
     if(len_trim(seed_directory)<1.or.len_trim(seed_directory)>800.or.&
         index(seed_directory,achar(0))>0)bad=max(bad,11)
     if(nseed<1.or.nlocal<0.or.size(grid_weights)/=nlocal.or.&
@@ -1108,16 +1432,18 @@ contains
     character(*),intent(out)::message
     complex(real64),allocatable::raw(:,:),compression(:,:),retained_values(:,:),&
       m_matrix(:,:,:),a_matrix(:,:),initial_a_matrix(:,:),transform(:,:),seed_coefficients(:,:)
+    integer(int64),allocatable::scdm_selected_grid_ids(:)
     real(real64),allocatable::eigenvalues(:),centers(:,:),spreads(:)
     integer,allocatable::nncell(:,:)
     real(real64)::spread(3),seed_defect,density_defect,orthogonality_defect,&
-      seed_certificate_tolerance
-    integer(int64)::coordinator_bytes,workspace_peak_bytes,random_gauge_bytes,&
+      seed_certificate_tolerance,scdm_unitarity_defect,scdm_projector_defect
+    integer(int64)::coordinator_bytes,workspace_peak_bytes,initial_gauge_bytes,&
+      scdm_workspace_peak,scdm_fingerprint,&
       assembly_byte_limit,transform_fingerprint,&
       minimum_fingerprint,maximum_fingerprint,payload_fingerprint,wannier_fingerprint
     integer::nseed,nbuffer,nprojector,ncandidate,nlocal,retained_rank,nntot
     integer::ierr,rank,fragment_size,allocation_status
-    character(message_length)::adapter_message
+    character(message_length)::adapter_message,setup_projection
     logical::step_ok,allocation_ok
 
     ok=.false.;message='';adapter_message='';working_cache%valid=.false.
@@ -1147,15 +1473,36 @@ contains
       density_defect,dc_seed_occupations,step_ok,adapter_message)
     if(.not.step_ok)then;message='fragment DC seed span failure: '//trim(adapter_message);return;endif
 
+    if(trim(initial_projection)=='scdm')then
+      call build_dg_fragment_scdm_gauge(comm,fragment_id,basis_generation,grid_ids,&
+        retained_values,grid_weights,metric_tolerance,coordinator_byte_limit,&
+        scdm_selected_grid_ids,initial_a_matrix,scdm_unitarity_defect,scdm_projector_defect,&
+        scdm_workspace_peak,scdm_fingerprint,step_ok,adapter_message)
+      if(.not.step_ok)then
+        call fragment_error(fragment_id,'fragment SCDM initial gauge failed',adapter_message,message);return
+      endif
+      if(.not.extent_product_fits([retained_rank,retained_rank]))then
+        message='fragment SCDM initial gauge byte extent overflows';return
+      endif
+      initial_gauge_bytes=int(size(initial_a_matrix),int64)*&
+        int(storage_size((0d0,0d0))/8,int64)+int(size(scdm_selected_grid_ids),int64)*&
+        int(storage_size(0_int64)/8,int64)
+      assembly_byte_limit=coordinator_byte_limit-initial_gauge_bytes
+      if(assembly_byte_limit<=0_int64.or.scdm_fingerprint==0_int64)then
+        message='fragment SCDM initial gauge exhausts its coordinator budget';return
+      endif
+    endif
+    setup_projection=trim(initial_projection)
+    if(trim(initial_projection)=='scdm')setup_projection='random'
     call setup_dg_w90_gamma_library(comm,trim(seed_name),real_lattice,reciprocal_lattice,&
-      atom_symbols,atoms_cart,retained_rank,retained_rank,num_iter,trim(initial_projection),&
+      atom_symbols,atoms_cart,retained_rank,retained_rank,num_iter,trim(setup_projection),&
       DG_W90_UNCONSTRAINED,nntot,nncell,step_ok,adapter_message)
     if(.not.step_ok)then
       call fragment_error(fragment_id,'Wannier90 setup failed',adapter_message,message);return
     endif
     if(trim(initial_projection)=='random')then
       call build_deterministic_random_initial_gauge(comm,retained_rank,basis_fingerprint,&
-        coordinator_byte_limit,initial_a_matrix,random_gauge_bytes,assembly_byte_limit,&
+        coordinator_byte_limit,initial_a_matrix,initial_gauge_bytes,assembly_byte_limit,&
         step_ok,adapter_message)
       if(.not.step_ok)then
         call fragment_error(fragment_id,'Wannier90 random gauge failed',adapter_message,message);return
@@ -1165,8 +1512,17 @@ contains
         workspace_peak_bytes,step_ok,adapter_message,precomputed_a_matrix=initial_a_matrix)
       deallocate(initial_a_matrix)
       if(step_ok)then
-        coordinator_bytes=coordinator_bytes+random_gauge_bytes
-        workspace_peak_bytes=workspace_peak_bytes+random_gauge_bytes
+        coordinator_bytes=coordinator_bytes+initial_gauge_bytes
+        workspace_peak_bytes=workspace_peak_bytes+initial_gauge_bytes
+      endif
+    else if(trim(initial_projection)=='scdm')then
+      call assemble_dg_w90_gamma_matrices(comm,retained_values,retained_values,grid_weights,&
+        fractional,nncell,assembly_byte_limit,m_matrix,a_matrix,coordinator_bytes,&
+        workspace_peak_bytes,step_ok,adapter_message,precomputed_a_matrix=initial_a_matrix)
+      deallocate(initial_a_matrix,scdm_selected_grid_ids)
+      if(step_ok)then
+        coordinator_bytes=coordinator_bytes+initial_gauge_bytes
+        workspace_peak_bytes=max(scdm_workspace_peak,workspace_peak_bytes+initial_gauge_bytes)
       endif
     else
       call assemble_dg_w90_gamma_matrices(comm,retained_values,retained_values,grid_weights,&

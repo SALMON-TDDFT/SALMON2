@@ -73,15 +73,12 @@ def render_input(template: str, mixing_method: str, seed_directory: Path) -> str
     if len(selector.findall(template)) != 1:
         raise RuntimeError("expected exactly one Hybrid divided mixing selector")
     rendered = selector.sub(lambda match: match.group("prefix") + f"'{mixing_method}'", template)
-    if re.search(r"\bdg_dc_seed_(?:mode|directory)\s*=", rendered, re.IGNORECASE):
-        raise RuntimeError("Si64 divided fixture unexpectedly contains a seed override")
-    dc_start = rendered.lower().index("&dc")
-    dc_end = rendered.index("/", dc_start)
-    seed_controls = (
-        " dg_dc_seed_mode='read'\n"
-        f" dg_dc_seed_directory='{seed_directory}'\n"
-    )
-    return rendered[:dc_end] + seed_controls + rendered[dc_end:]
+    mode = re.compile(r"^(\s*dg_dc_seed_mode\s*=\s*)['\"]\w+['\"]\s*$", re.I | re.M)
+    directory = re.compile(r"^(\s*dg_dc_seed_directory\s*=\s*)['\"].*?['\"]\s*$", re.I | re.M)
+    if len(mode.findall(rendered)) != 1 or len(directory.findall(rendered)) != 1:
+        raise RuntimeError("Si64 divided fixture must contain one reusable seed contract")
+    rendered = mode.sub(lambda match: match.group(1) + "'read'", rendered)
+    return directory.sub(lambda match: match.group(1) + f"'{seed_directory}'", rendered)
 
 
 def seed_receipt(text: str) -> dict[str, int]:

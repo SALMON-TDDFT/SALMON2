@@ -23,6 +23,11 @@
  yn_dg_hybrid_scf='n'
  yn_dg_hybrid_divided_scf='n'
  yn_dg_hybrid_continuation_scf='y'
+ dg_dc_seed_mode='auto'
+ dg_dc_seed_directory='../dc-seed'
+ dg_fragment_wf_checkpoint_mode='auto'
+ dg_fragment_wf_checkpoint_directory='../fragment-wf-checkpoint'
+ dg_fragment_w90_initial_projection='scdm'
  dg_ow_candidate_states_per_fragment=192
  dg_ow_target_wanniers_per_fragment=0
  dg_dc_gs_density_mix_rate=0.2d0
@@ -35,7 +40,7 @@
  dg_ow_symmetry_tolerance=1d-10
  dg_ow_localization_gradient_tolerance=2d-2
  wannier_num_iter=10000
- dg_ow_w90_initial_projection='random'
+ dg_ow_w90_initial_projection='spectral'
  wannier_pw_cutoff=0.5d0
  dg_hybrid_symmetry_energy_window=0.2d0
 /

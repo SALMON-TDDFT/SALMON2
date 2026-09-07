@@ -485,6 +485,13 @@ contains
         call require(bound_report%core%measured.and.bound_report%core%orbital_residual>1d-10.and.&
           index(why,'insufficient core span')>0,&
           'cutoff=0 did not fail as a measured insufficient core span: '//trim(why))
+        call prepare_dg_hybrid_selected_trial(MPI_COMM_WORLD,f,bound_raw,bound_selection,basis,bound_receipt,&
+          bound_support,bound_support_fp,weights,limits,[1d-10,1d-10,1d-10],trial_cutoff,1,0,&
+          1d-10,1d-10,bound_state,bound_selected,bound_report,passed,why,&
+          require_seed_reproduction=.false.)
+        call require(passed.and.bound_report%trial_prepared.and.bound_report%core%measured.and.&
+          bound_report%core%orbital_residual>1d-10.and.bound_report%support_measured,&
+          'diagnostic-only initial seed projection was not admitted: '//trim(why))
       else
         call require(bound_report%core%measured.and.(index(why,'insufficient core span')>0.or.&
           index(why,'required support mismatch')>0),&
