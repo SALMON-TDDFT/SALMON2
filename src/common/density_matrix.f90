@@ -438,8 +438,8 @@ contains
             cur_wf    = (0d0,0d0)
 !$acc enter data copyin(cur_zekr4,cur_wf,cur_l2g,cur_nproj_atom,cur_rinv) create(cur_out)
             if (info%if_divide_rspace) then
-              ! One stacked buffer per k-point so the unweighted projections are
-              ! reduced in a single call instead of once per orbital block.
+              ! One stacked buffer per k-point: the unweighted projections
+              ! reduce in a single call.
               cur_norb = info%io_e - info%io_s + 1
               allocate(cur_out_all(4*cur_max_nproj, cur_norb, cur_natom))
 !$acc enter data create(cur_out_all)
@@ -526,10 +526,10 @@ contains
             end do
 
             if (info%if_divide_rspace) then
-              ! Only the unweighted projection goes global: a product of two per-rank
-              ! partials is not repairable by summing currents; icomm_rko assembles
-              ! the weighted terms. MPI must see CUDA-Fortran device buffers --
-              ! managed memory migrates through host memory every call.
+              ! icomm_r reduces the unweighted projection across grid ranks;
+              ! the caller's icomm_rko reduction reduces the weighted one.
+              ! CUDA-Fortran device buffers keep the reduction on the GPU --
+              ! managed memory would migrate the payload through host memory.
 !$acc wait
 !$acc kernels
               cur_dev_g(1:cur_max_nproj,1:cur_norb,1:cur_natom) = &
