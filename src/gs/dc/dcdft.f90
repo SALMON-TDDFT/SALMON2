@@ -169,7 +169,8 @@ contains
     end subroutine init_comm_frag
     
     subroutine init_fragment
-      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment, file_atom_coor_frag
+      use salmon_global, only: num_rgrid_buffer, kion, rion, natom, num_rgrid, al, num_fragment, &
+      & file_atom_coor_frag, yn_out_dc_fragment_coor
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag
@@ -275,6 +276,7 @@ contains
       end do
       
       if(file_atom_coor_frag /= 'none') call read_atom_frag ! read & override natom, rion, kion (fragment)
+      if(yn_out_dc_fragment_coor == 'y') call write_atom_frag
       
     ! dc%jxyz_tot: r-grid (fragment) --> r-grid (total)
       allocate(dc%jxyz_tot(maxval(num_rgrid),3))
@@ -295,6 +297,31 @@ contains
       end if
     
     end subroutine init_fragment
+
+    subroutine write_atom_frag
+      use salmon_global, only: base_directory, kion, natom, rion
+      use inputoutput, only: ulength_from_au
+      use communication, only: comm_is_root, comm_sync_all
+      use filesystem, only: atomic_create_directory, get_filehandle
+      implicit none
+      integer :: ia, iu
+      character(256) :: directory, filename
+
+      directory = trim(base_directory)//'data_for_restart/'
+      call atomic_create_directory(directory, dc%icomm_frag, dc%id_frag)
+      if(comm_is_root(dc%id_frag)) then
+        filename = trim(directory)//'atomic_coor.txt'
+        iu = get_filehandle()
+        open(iu, file=filename, status='replace')
+        do ia = 1,natom
+          write(iu,1000) trim(pp%atom_symbol(kion(ia))), rion(1:3,ia)*ulength_from_au, kion(ia)
+        end do
+        close(iu)
+      end if
+      call comm_sync_all(dc%icomm_frag)
+
+1000  format("'",a,"'  ",3f24.18,i4)
+    end subroutine write_atom_frag
     
     function r_periodic(r,a) ! r --> r_periodic in [0,a]
       implicit none
@@ -339,7 +366,6 @@ contains
         rewind(iu)
         do ia = 1,natom
           read(iu,*) cbuf, Rion(1:3,ia), kion(ia)
-          rion(1:3,ia) = rion(1:3,ia)* ulength_to_au
         enddo
         close(iu)
         rion = rion * ulength_to_au
