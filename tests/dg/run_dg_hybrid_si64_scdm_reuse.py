@@ -507,6 +507,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=14400)
     parser.add_argument("--analyze-existing", action="store_true",
                         help="analyze an already completed clean/reuse result without launching MPI")
+    parser.add_argument("--evidence-output", type=Path,
+                        help="explicit JSON output path; analyze-existing requires it outside result-dir")
     args = parser.parse_args()
     if args.mpi_ranks != EXPECTED_MPI_SIZE:
         raise RuntimeError("Si64 SCDM/reuse validation requires exactly 8 MPI ranks")
@@ -547,8 +549,24 @@ def main() -> int:
                 "expected_seed": expected_seed, "wf_checkpoint_directory": str(wf_checkpoint),
                 "fragment_wf_gauge_contracts": gauge_contracts,
                 "runs": [clean, reuse], "comparison": comparison}
-    (result / "si64_scdm_reuse_evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
-    print(result)
+    if args.analyze_existing:
+        payload = {"status": "PASS", "result_dir": str(result), "evidence": evidence}
+        if args.evidence_output is not None:
+            output = args.evidence_output.resolve()
+            try:
+                output.relative_to(result)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError("analyze-existing evidence output must be outside result-dir")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        output = (args.evidence_output or result / "si64_scdm_reuse_evidence.json").resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(evidence, indent=2) + "\n")
+        print(result)
     return 0
 
 

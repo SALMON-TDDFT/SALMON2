@@ -125,6 +125,7 @@ for token in (
     "struct.unpack_from",
     "seed_preloaded",
     "--analyze-existing",
+    "--evidence-output",
     "require_mpi_completion",
     "parse_finite_float",
     "compare_smoke_runs",

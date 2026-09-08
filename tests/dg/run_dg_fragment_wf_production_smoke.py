@@ -413,6 +413,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--analyze-existing", action="store_true",
                         help="analyze an already completed smoke result without launching MPI")
+    parser.add_argument("--evidence-output", type=Path,
+                        help="explicit JSON output path; analyze-existing requires it outside result-dir")
     args = parser.parse_args()
     result = (args.result_dir or Path("/tmp") /
               f"dg-fragment-wf-smoke-{time.strftime('%Y%m%d-%H%M%S')}").resolve()
@@ -472,8 +474,24 @@ def main() -> int:
     evidence = {"mpi_ranks": RANKS, "omp_threads": 1, "seed_preloaded": seed_preloaded,
                 "manifest_removed_for_incomplete_case": str(incomplete_manifest),
                 "runs": [miss, hit, incomplete]}
-    (result / "fragment_wf_smoke_evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
-    print(result)
+    if args.analyze_existing:
+        payload = {"status": "PASS", "result_dir": str(result), "evidence": evidence}
+        if args.evidence_output is not None:
+            output = args.evidence_output.resolve()
+            try:
+                output.relative_to(result)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError("analyze-existing evidence output must be outside result-dir")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        output = (args.evidence_output or result / "fragment_wf_smoke_evidence.json").resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(evidence, indent=2) + "\n")
+        print(result)
     return 0
 
 
