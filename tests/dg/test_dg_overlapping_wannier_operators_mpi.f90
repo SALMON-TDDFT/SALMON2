@@ -1,0 +1,165 @@
+#include "config.h"
+program test_dg_overlapping_wannier_operators_mpi
+  use mpi
+  use dg_overlapping_wannier_operators,only:assemble_dg_overlapping_wannier_weak_operators,&
+    assemble_dg_overlapping_wannier_weak_operator_rows,assemble_dg_stitched_weak_operator_rows
+  implicit none
+  integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned
+  integer(8),allocatable::ids(:),row_ids(:)
+  real(8),allocatable::weights(:),vlocal(:)
+  complex(8),allocatable::values(:,:),gradients(:,:,:),kinetic(:,:),potential(:,:),&
+    reference_kinetic(:,:),reference_potential(:,:),rotated_values(:,:),rotated_gradients(:,:,:),&
+    kinetic_rows(:,:),potential_rows(:,:)
+  complex(8)::gauge(3,3)
+  integer(8)::stitched_ids(2),stitched_peak_elements
+  integer(8),allocatable::stitched_row_ids(:)
+  real(8)::stitched_weights(2),stitched_weight_gradient(3,2),stitched_potential(2)
+  complex(8)::stitched_values(1,2),stitched_gradients(3,1,2)
+  complex(8),allocatable::stitched_kinetic_rows(:,:),stitched_potential_rows(:,:),&
+    stitched_weight_gradient_rows(:,:)
+  real(8)::stitched_t_hermiticity,stitched_v_hermiticity,stitched_weight_gradient_energy
+  logical::ok
+  character(256)::message
+  real(8)::x,k,row_error
+  call MPI_Init(ierr);comm=MPI_COMM_WORLD
+  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  nlocal=count([(mod(p-1,nproc)==rank,p=1,6)])
+  allocate(ids(nlocal),weights(nlocal),vlocal(nlocal),values(3,nlocal),gradients(3,3,nlocal))
+  index=0;k=0.7d0
+  do p=1,6
+    if(mod(p-1,nproc)/=rank)cycle
+    index=index+1;x=0.2d0*p;ids(index)=p;weights(index)=0.4d0+0.03d0*p
+    vlocal(index)=-0.5d0+0.08d0*p
+    values(1,index)=1d0
+    values(2,index)=exp(cmplx(0d0,k*x,8))
+    values(3,index)=0.4d0*values(1,index)+0.3d0*values(2,index)
+    gradients(:,1,index)=(0d0,0d0)
+    gradients(:,2,index)=[cmplx(0d0,k,8)*values(2,index),(0d0,0d0),(0d0,0d0)]
+    gradients(:,3,index)=0.3d0*gradients(:,2,index)
+  enddo
+  call assemble_dg_overlapping_wannier_weak_operators(comm,3,ids,weights,values,gradients,&
+    vlocal,6_8,kinetic,potential,owned,ok,message)
+  call require(ok,trim(message));call require(owned==6,'unique core ownership')
+  call require(maxval(abs(kinetic-conjg(transpose(kinetic))))<1d-13,'Hermitian kinetic')
+  call require(maxval(abs(potential-conjg(transpose(potential))))<1d-13,'Hermitian potential')
+  call require(abs(kinetic(1,1))<1d-14,'constant kinetic reference')
+  call require(abs(real(kinetic(2,2))-0.5d0*k*k*sum_global(weights))<1d-13,&
+    'plane-wave kinetic reference')
+  call require(abs(kinetic(2,3))>1d-8.and.abs(potential(1,3))>1d-8,'off-fragment tail blocks')
+  reference_kinetic=kinetic;reference_potential=potential
+  allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
+  index=0
+  do i=1,3
+    if(mod(i-1,nproc)/=rank)cycle
+    index=index+1;row_ids(index)=i
+  enddo
+  call assemble_dg_overlapping_wannier_weak_operator_rows(comm,3,row_ids,ids,weights,values,&
+    gradients,vlocal,6_8,kinetic_rows,potential_rows,owned,ok,message)
+  call require(ok,trim(message))
+  call require(all(shape(kinetic_rows)==[size(row_ids),3]),'row-owned kinetic shape')
+  row_error=0d0
+  if(size(row_ids)>0)row_error=maxval(abs(kinetic_rows-reference_kinetic(int(row_ids),:)))
+  call require(row_error<1d-13,'row-owned kinetic reference')
+  row_error=0d0
+  if(size(row_ids)>0)row_error=maxval(abs(potential_rows-reference_potential(int(row_ids),:)))
+  call require(row_error<1d-13,'row-owned potential reference')
+  stitched_ids=[1_8,2_8];stitched_weights=1d0/real(nproc,8)
+  stitched_weight_gradient=0d0
+  stitched_weight_gradient(1,:)=[0.2d0,-0.2d0]/real(nproc,8)
+  stitched_potential=[-0.3d0,0.4d0];stitched_values=(1d0,0d0);stitched_gradients=(0d0,0d0)
+  allocate(stitched_row_ids(merge(1,0,rank==0)))
+  if(rank==0)stitched_row_ids=1_8
+  call assemble_dg_stitched_weak_operator_rows(comm,1,stitched_row_ids,stitched_ids,stitched_weights,&
+    stitched_weight_gradient,stitched_values,stitched_gradients,stitched_potential,1d0,&
+    stitched_kinetic_rows,stitched_potential_rows,stitched_weight_gradient_rows,&
+    stitched_t_hermiticity,stitched_v_hermiticity,&
+    stitched_weight_gradient_energy,stitched_peak_elements,ok,message)
+  call require(ok,trim(message))
+  row_error=0d0
+  if(rank==0)row_error=abs(stitched_kinetic_rows(1,1)-cmplx(0.01d0,0d0,8))
+  call require(row_error<1d-13,'weight-gradient kinetic term matches dense weak-form reference')
+  if(rank==0)row_error=abs(stitched_weight_gradient_rows(1,1)-cmplx(0.01d0,0d0,8))
+  call require(row_error<1d-13,'weight-gradient boundary matrix matches the corrected-minus-raw reference')
+  row_error=0d0
+  if(rank==0)row_error=abs(stitched_potential_rows(1,1)-cmplx(0.1d0,0d0,8))
+  call require(row_error<1d-13,'stitched local potential matches dense reference')
+  call require(stitched_t_hermiticity<1d-13.and.stitched_v_hermiticity<1d-13.and.&
+    abs(stitched_weight_gradient_energy-0.01d0)<1d-13.and.stitched_peak_elements>0_8,&
+    'stitched operator receipts are finite and measured')
+  stitched_weights(1)=0d0;stitched_weight_gradient(:,1)=0d0
+  call assemble_dg_stitched_weak_operator_rows(comm,1,stitched_row_ids,stitched_ids,stitched_weights,&
+    stitched_weight_gradient,stitched_values,stitched_gradients,stitched_potential,1d0,&
+    stitched_kinetic_rows,stitched_potential_rows,stitched_weight_gradient_rows,&
+    stitched_t_hermiticity,stitched_v_hermiticity,&
+    stitched_weight_gradient_energy,stitched_peak_elements,ok,message)
+  call require(ok,trim(message));row_error=0d0
+  if(rank==0)row_error=max(abs(stitched_kinetic_rows(1,1)-cmplx(0.005d0,0d0,8)),&
+    abs(stitched_potential_rows(1,1)-cmplx(0.4d0,0d0,8)))
+  call require(row_error<1d-13,'zero outer-buffer weight cuts off value and gradient without a singularity')
+
+  gauge=(0d0,0d0);gauge(1,2)=1d0;gauge(2,1)=-1d0;gauge(3,3)=1d0
+  rotated_values=matmul(gauge,values);allocate(rotated_gradients(3,3,nlocal))
+  do p=1,nlocal;do i=1,3
+    rotated_gradients(i,:,p)=matmul(gauge,gradients(i,:,p))
+  enddo;enddo
+  call assemble_dg_overlapping_wannier_weak_operators(comm,3,ids,weights,rotated_values,&
+    rotated_gradients,vlocal,6_8,kinetic,potential,owned,ok,message)
+  call require(ok,trim(message))
+  call require(maxval(abs(kinetic-matmul(conjg(gauge),matmul(reference_kinetic,transpose(gauge)))))<1d-12,&
+    'kinetic retained-space covariance')
+  call require(maxval(abs(potential-matmul(conjg(gauge),matmul(reference_potential,transpose(gauge)))))<1d-12,&
+    'potential retained-space covariance')
+
+  gauge=(0d0,0d0);gauge(1,1)=sqrt(0.5d0);gauge(1,2)=sqrt(0.5d0)
+  gauge(2,1)=-sqrt(0.5d0);gauge(2,2)=sqrt(0.5d0);gauge(3,3)=1d0
+  rotated_values=matmul(gauge,values)
+  do p=1,nlocal;do i=1,3
+    rotated_gradients(i,:,p)=matmul(gauge,gradients(i,:,p))
+  enddo;enddo
+  call assemble_dg_overlapping_wannier_weak_operators(comm,3,ids,weights,rotated_values,&
+    rotated_gradients,vlocal,6_8,kinetic,potential,owned,ok,message)
+  call require(ok,trim(message))
+  call require(maxval(abs(kinetic-matmul(conjg(gauge),matmul(reference_kinetic,transpose(gauge)))))<1d-12,&
+    'kinetic retained-space rotation covariance')
+  call require(maxval(abs(potential-matmul(conjg(gauge),matmul(reference_potential,transpose(gauge)))))<1d-12,&
+    'potential retained-space rotation covariance')
+
+  if(nproc>1)then
+    call assemble_dg_overlapping_wannier_weak_operator_rows(comm,merge(4,3,rank==0),row_ids,ids,&
+      weights,values,gradients,vlocal,6_8,kinetic_rows,potential_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned nwann rejection')
+    call assemble_dg_overlapping_wannier_weak_operator_rows(comm,3,row_ids,ids,weights,values,&
+      gradients,vlocal,merge(7_8,6_8,rank==0),kinetic_rows,potential_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned core-count rejection')
+    call assemble_dg_overlapping_wannier_weak_operators(comm,merge(4,3,rank==0),ids,weights,values,&
+      gradients,vlocal,6_8,kinetic,potential,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent weak-operator contract rejection')
+  endif
+
+  if(rank==0.and.size(ids)>0)then
+    ids=[ids,ids(1)];weights=[weights,weights(1)];vlocal=[vlocal,vlocal(1)]
+    values=reshape([values,values(:,1)],[3,size(ids)])
+    gradients=reshape([gradients,gradients(:,:,1)],[3,3,size(ids)])
+  endif
+  call assemble_dg_overlapping_wannier_weak_operators(comm,3,ids,weights,values,gradients,&
+    vlocal,6_8,kinetic,potential,owned,ok,message)
+  call require(.not.ok,'duplicate core rejection')
+  if(rank==0)then
+    write(*,'(a,i0,a,4(es24.16,1x))')'OPERATORS ranks=',nproc,' values=',real(reference_kinetic(2,2)),&
+      aimag(reference_kinetic(2,3)),real(reference_potential(1,3)),aimag(reference_potential(2,3))
+    write(*,'(a,i0,a)')'PASS overlapping-Wannier weak operators on ',nproc,' ranks'
+  endif
+  call MPI_Finalize(ierr)
+contains
+  real(8) function sum_global(local)
+    real(8),intent(in)::local(:)
+    real(8)::partial
+    partial=sum(local);call MPI_Allreduce(partial,sum_global,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+  end function
+  subroutine require(condition,label)
+    logical,intent(in)::condition;character(*),intent(in)::label
+    integer::lf,gf
+    lf=merge(0,1,condition);call MPI_Allreduce(lf,gf,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(gf/=0)error stop label
+  end subroutine
+end program

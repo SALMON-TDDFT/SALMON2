@@ -12,6 +12,10 @@ module noncollinear_module
   public :: calc_magnetization_decomposed
   public :: calc_spin_current
   public :: simple_mixing_so
+  public :: get_den_mat_noncollinear
+  public :: set_den_mat_noncollinear
+  public :: get_vxc_mat_noncollinear
+  public :: set_vxc_mat_noncollinear
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -22,6 +26,97 @@ module noncollinear_module
 
 contains
 
+  subroutine ensure_den_mat_bounds(mg)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+
+    if (allocated(den_mat)) then
+      if (lbound(den_mat,1) /= mg%is(1) .or. ubound(den_mat,1) /= mg%ie(1) .or. &
+          lbound(den_mat,2) /= mg%is(2) .or. ubound(den_mat,2) /= mg%ie(2) .or. &
+          lbound(den_mat,3) /= mg%is(3) .or. ubound(den_mat,3) /= mg%ie(3)) then
+        deallocate(den_mat)
+      end if
+    end if
+    if (.not.allocated(den_mat)) then
+      allocate(den_mat(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2))
+    end if
+  end subroutine ensure_den_mat_bounds
+
+  subroutine ensure_vxc_mat_bounds(mg)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+
+    if (allocated(vxc_mat)) then
+      if (lbound(vxc_mat,1) /= mg%is(1) .or. ubound(vxc_mat,1) /= mg%ie(1) .or. &
+          lbound(vxc_mat,2) /= mg%is(2) .or. ubound(vxc_mat,2) /= mg%ie(2) .or. &
+          lbound(vxc_mat,3) /= mg%is(3) .or. ubound(vxc_mat,3) /= mg%ie(3)) then
+        deallocate(vxc_mat)
+      end if
+    end if
+    if (.not.allocated(vxc_mat)) then
+      allocate(vxc_mat(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2))
+    end if
+  end subroutine ensure_vxc_mat_bounds
+
+  subroutine ensure_rot_ang_bounds(mg)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+
+    if (allocated(rot_ang)) then
+      if (lbound(rot_ang,1) /= mg%is(1) .or. ubound(rot_ang,1) /= mg%ie(1) .or. &
+          lbound(rot_ang,2) /= mg%is(2) .or. ubound(rot_ang,2) /= mg%ie(2) .or. &
+          lbound(rot_ang,3) /= mg%is(3) .or. ubound(rot_ang,3) /= mg%ie(3)) then
+        deallocate(rot_ang)
+      end if
+    end if
+    if (.not.allocated(rot_ang)) then
+      allocate(rot_ang(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2))
+    end if
+  end subroutine ensure_rot_ang_bounds
+
+  subroutine get_den_mat_noncollinear(mg, mat)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+    complex(8),intent(out) :: mat(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2)
+
+    if (.not.allocated(den_mat)) stop "get_den_mat_noncollinear: den_mat is not allocated."
+    mat = den_mat
+  end subroutine get_den_mat_noncollinear
+
+  subroutine set_den_mat_noncollinear(mg, mat)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+    complex(8),intent(in) :: mat(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2)
+
+    call ensure_den_mat_bounds(mg)
+    den_mat = mat
+  end subroutine set_den_mat_noncollinear
+
+  subroutine get_vxc_mat_noncollinear(mg, mat)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+    complex(8),intent(out) :: mat(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2)
+
+    if (.not.allocated(vxc_mat)) stop "get_vxc_mat_noncollinear: vxc_mat is not allocated."
+    mat = vxc_mat
+  end subroutine get_vxc_mat_noncollinear
+
+  subroutine set_vxc_mat_noncollinear(mg, mat)
+    use structures, only : s_rgrid
+    implicit none
+    type(s_rgrid),intent(in) :: mg
+    complex(8),intent(in) :: mat(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),2,2)
+
+    call ensure_vxc_mat_bounds(mg)
+    vxc_mat = mat
+  end subroutine set_vxc_mat_noncollinear
+
   subroutine calc_dm_noncollinear( psi, system, info, mg )
     use structures, only : s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use communication, only: comm_summation
@@ -30,18 +125,11 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
     type(s_rgrid),intent(in) :: mg
-    integer :: io,ik,im,is,js,ix,iy,iz,m1,m2,m3,n1,n2,n3
+    integer :: io,ik,im,is,js,ix,iy,iz
     complex(8),allocatable :: ztmp(:,:,:),dmat_tmp(:,:,:,:,:)
     real(8) :: occ
 
-    if ( .not.allocated(den_mat) ) then
-       m1=mg%is(1); n1=mg%ie(1)
-       m2=mg%is(2); n2=mg%ie(2)
-       m3=mg%is(3); n3=mg%ie(3)
-       allocate( den_mat(m1:n1,m2:n2,m3:n3,2,2) )
-       den_mat=zero
-    end if
-
+    call ensure_den_mat_bounds(mg)
     den_mat=zero
 
 #ifdef USE_OPENACC
@@ -102,15 +190,9 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_scalar),intent(inout) :: rho(system%nspin)
     real(8) :: phi,theta,tmp,tmp1
-    integer :: a,b,m1,m2,m3,n1,n2,n3,ix,iy,iz
+    integer :: a,b,ix,iy,iz
 
-    if ( .not.allocated(rot_ang) ) then
-       m1=mg%is(1) ; n1=mg%ie(1)
-       m2=mg%is(2) ; n2=mg%ie(2)
-       m3=mg%is(3) ; n3=mg%ie(3)
-       allocate( rot_ang(m1:n1,m2:n2,m3:n3,2) ) ; rot_ang=0.0d0
-    end if
-
+    call ensure_rot_ang_bounds(mg)
     rot_ang=0.0d0
 
     a=1
@@ -167,14 +249,9 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_scalar),intent(inout) :: Vxc(system%nspin)
     real(8) :: phi,theta,vxc_0,vxc_1
-    integer :: ix,iy,iz,m1,m2,m3,n1,n2,n3
+    integer :: ix,iy,iz
 
-    if ( .not.allocated(vxc_mat) ) then
-       m1=mg%is(1); n1=mg%ie(1)
-       m2=mg%is(2); n2=mg%ie(2)
-       m3=mg%is(3); n3=mg%ie(3)
-       allocate( vxc_mat(m1:n1,m2:n2,m3:n3,2,2) )
-    end if
+    call ensure_vxc_mat_bounds(mg)
     vxc_mat=zero
 
 #ifdef USE_OPENACC

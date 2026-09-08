@@ -39,11 +39,10 @@ contains
       info%icomm_sl = info%icomm_rko
 
       info%npcol = int(sqrt(dble(info%isize_rko)))
-      info%npcol = info%npcol + mod(info%npcol,2)
       do ii=1,100
         info%nprow=info%isize_rko/info%npcol
         if(info%nprow*info%npcol == info%isize_rko) exit
-        info%npcol=info%npcol+2
+        info%npcol=info%npcol+1
       end do
       if (info%nprow > info%npcol) then
         k1          = info%nprow
@@ -70,11 +69,10 @@ contains
       info%icomm_sl = info%icomm_r
 
       info%npcol = int(sqrt(dble(info%isize_r)))
-      info%npcol = info%npcol + mod(info%npcol,2)
       do ii=1,100
         info%nprow=info%isize_r/info%npcol
         if(info%nprow*info%npcol == info%isize_r) exit
-        info%npcol=info%npcol+2
+        info%npcol=info%npcol+1
       end do
       if (info%nprow > info%npcol) then
         k1          = info%nprow
@@ -107,11 +105,10 @@ contains
       info%icomm_sl = info%icomm_o
 
       info%npcol = int(sqrt(dble(info%isize_o)))
-      info%npcol = info%npcol + mod(info%npcol,2)
       do ii=1,100
         info%nprow=info%isize_o/info%npcol
         if(info%nprow*info%npcol == info%isize_o) exit
-        info%npcol=info%npcol+2
+        info%npcol=info%npcol+1
       end do
       if (info%nprow > info%npcol) then
         k1          = info%nprow
@@ -157,6 +154,7 @@ contains
   subroutine init_blacs(info,m)
     use structures, only: s_parallel_info
     use communication, only: comm_summation
+    use mpi, only: MPI_COMM_WORLD, MPI_UNDEFINED, MPI_Comm_group, MPI_Group_translate_ranks, MPI_Group_free
     implicit none
     integer :: NUMROC
     type(s_parallel_info),intent(inout) :: info
@@ -168,8 +166,19 @@ contains
 
     integer :: npo, i, j, i_loc, j_loc, proc_row, proc_col, ip
     integer,allocatable :: icount(:)
+    integer :: nmap, isrc, idst, irow, icol
+    integer :: group_src, group_world
+    integer,allocatable :: rank_src(:), rank_world(:), gridmap_world(:,:)
 
-    if (info%flag_blacs_gridinit) return
+    if (info%flag_blacs_gridinit) then
+      if (m <= info%desca(3)) return
+      if (allocated(info%ndiv)) deallocate(info%ndiv)
+      if (allocated(info%i_tbl)) deallocate(info%i_tbl)
+      if (allocated(info%j_tbl)) deallocate(info%j_tbl)
+      if (allocated(info%iloc_tbl)) deallocate(info%iloc_tbl)
+      if (allocated(info%jloc_tbl)) deallocate(info%jloc_tbl)
+      info%flag_blacs_gridinit = .false.
+    end if
 
     if (.not. allocated(info%gridmap)) &
       stop 'scalapack_module: gridmap not constructed.'
@@ -184,7 +193,35 @@ contains
     end if
 
     call BLACS_GET( 0, 0, ictxt )
-    call BLACS_GRIDMAP( ictxt, info%gridmap, info%nprow, info%nprow, info%npcol )
+    ! BLACS expects world ranks, while gridmap is built with communicator-local ranks.
+    nmap = info%nprow * info%npcol
+    allocate(rank_src(nmap), rank_world(nmap), gridmap_world(info%nprow,info%npcol))
+    isrc = 0
+    do icol=1,info%npcol
+    do irow=1,info%nprow
+      isrc = isrc + 1
+      rank_src(isrc) = info%gridmap(irow,icol)
+    end do
+    end do
+
+    call MPI_Comm_group(info%icomm_rko, group_src, ierr)
+    call MPI_Comm_group(MPI_COMM_WORLD, group_world, ierr)
+    call MPI_Group_translate_ranks(group_src, nmap, rank_src, group_world, rank_world, ierr)
+    call MPI_Group_free(group_world, ierr)
+    call MPI_Group_free(group_src, ierr)
+
+    idst = 0
+    do icol=1,info%npcol
+    do irow=1,info%nprow
+      idst = idst + 1
+      if(rank_world(idst) == MPI_UNDEFINED) stop 'scalapack_module: rank translation failed in init_blacs.'
+      gridmap_world(irow,icol) = rank_world(idst)
+    end do
+    end do
+    deallocate(rank_src, rank_world)
+
+    call BLACS_GRIDMAP( ictxt, gridmap_world, info%nprow, info%nprow, info%npcol )
+    deallocate(gridmap_world)
     call BLACS_GRIDINFO( ictxt, info%nprow, info%npcol, info%myrow, info%mycol )
     info%nrow_local = NUMROC( n, mb, info%myrow, 0, info%nprow )
     info%ncol_local = NUMROC( n, nb, info%mycol, 0, info%npcol )

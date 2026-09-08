@@ -3,6 +3,7 @@ set(SOURCES
     fdtd_eh.f90
     main_maxwell.f90
     fdtd_weyl_gauge.f90
+    optical_vortex_field.f90
     fdtd_coulomb_gauge.f90
     )
 

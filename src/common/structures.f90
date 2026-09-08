@@ -26,8 +26,10 @@ module structures
 #ifdef USE_LIBXC
 #if XC_MAJOR_VERSION <= 4 
     use xc_f90_types_m
-#endif
     use xc_f90_lib_m
+#else
+    use xc_f03_lib_m
+#endif
 #endif
 
 #ifdef USE_OPENACC
@@ -88,6 +90,9 @@ module structures
     real(8) :: E_tot,E_kin,E_h,E_xc,E_ion_ion,E_ion_loc,E_ion_nloc
     real(8) :: E_U
     real(8) :: E_tot0 ! total energy @ t=0
+    real(8) :: elec_num
+    real(8) :: elec_num_raw
+    real(8) :: pw_weight_raw
   end type s_dft_energy
 
   type s_ewald_ion_ion
@@ -360,8 +365,8 @@ module structures
     type(xc_f90_pointer_t) :: func(3)
     type(xc_f90_pointer_t) :: info(3)
 #else
-    TYPE(xc_f90_func_t) :: func(3)
-    TYPE(xc_f90_func_info_t) :: info(3)
+    TYPE(xc_f03_func_t) :: func(3)
+    TYPE(xc_f03_func_info_t) :: info(3)
 #endif
 #endif
   end type
@@ -505,8 +510,10 @@ module structures
   type s_dcdft
   ! summation
     integer :: n_frag ! # of fragments (subsystems)
+    logical :: optimized_fragment_geometry
     integer :: nxyz_domain(3) ! # of r-grid points for the core domain
     integer :: nxyz_buffer(3) ! # of r-grid points for the buffer region
+    integer,allocatable :: nxyz_domain_frag(:,:) ! per-fragment core-domain sizes
     integer,allocatable :: ixyz_frag(:,:) ! r-grid index of the fragment origin
     real(8),allocatable :: rxyz_frag(:,:) ! position of the fragment origin
   ! total system
@@ -520,7 +527,7 @@ module structures
     type(s_pp_grid)         :: ppg_tot
     type(s_reciprocal_grid) :: fg_tot
     type(s_poisson)         :: poisson_tot
-    type(s_sendrecv_grid)   :: srg_scalar_tot
+    type(s_sendrecv_grid)   :: srg_tot,srg_scalar_tot
     type(s_scalar) :: vpsl_tot,vh_tot,rho_tot
     type(s_scalar),allocatable :: rho_tot_s(:),vloc_tot(:),vxc_tot(:)
   ! own fragment
@@ -561,7 +568,7 @@ module structures
   type s_singlescale
     logical :: flag_use
     integer :: fh_rt_micro,fh_excitation,fh_Ac_zt
-    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),curr_ave(3)
+    real(8) :: E_electron,Energy_joule,Energy_poynting(2),coef_nab(4,3),curr_ave(3),light_lz_flux(3),light_lz_cum(3)
     real(8),allocatable :: vec_Ac_old(:,:,:,:),vec_Ac_m(:,:,:,:,:) &
     & ,curr(:,:,:,:),vec_je_old(:,:,:,:),rho_old(:,:,:) &
     & ,current4pi(:,:,:,:),grad_Vh(:,:,:,:),grad_Vh_old(:,:,:,:) &
@@ -741,11 +748,16 @@ contains
 
   subroutine deallocate_dft_system(system)
     type(s_dft_system) :: system
+    DEAL(system%vec_k)
     DEAL(system%rocc)
     DEAL(system%wtk)
+    DEAL(system%Mass)
     DEAL(system%Rion)
     DEAL(system%Velocity)
     DEAL(system%Force)
+    DEAL(system%kion)
+    call deallocate_vector(system%Ac_micro)
+    call deallocate_scalar(system%div_Ac)
   end subroutine deallocate_dft_system
 
   subroutine deallocate_dft_energy(energy)
@@ -758,6 +770,9 @@ contains
     DEAL(rg%idx)
     DEAL(rg%idy)
     DEAL(rg%idz)
+    DEAL(rg%is_all)
+    DEAL(rg%ie_all)
+    DEAL(rg%coordinate)
   end subroutine deallocate_rgrid
 
   subroutine deallocate_orbital(psi)
@@ -800,12 +815,56 @@ contains
     type(s_pp_grid) :: ppg
     DEAL(ppg%mps)
     DEAL(ppg%jxyz)
+    DEAL(ppg%rxyz)
     DEAL(ppg%uv)
     DEAL(ppg%lma_tbl)
     DEAL(ppg%ia_tbl)
     DEAL(ppg%rinv_uvu)
     DEAL(ppg%zekr_uV)
+    DEAL(ppg%zrhoG_ion)
+    DEAL(ppg%zVG_ion)
+    DEAL(ppg%Vpsl_ion)
+    DEAL(ppg%ia_tbl_so)
+    DEAL(ppg%rinv_uvu_so)
     DEAL(ppg%uv_so)
+    DEAL(ppg%zekr_uv_so)
+    DEAL(ppg%Rion_old)
+    DEAL(ppg%jxyz_old)
+    DEAL(ppg%jxx_old)
+    DEAL(ppg%jyy_old)
+    DEAL(ppg%jzz_old)
+    DEAL(ppg%mps_old)
+    DEAL(ppg%rxyz_old)
+    DEAL(ppg%jxyz_min)
+    DEAL(ppg%jxyz_max)
+    DEAL(ppg%jxyz_changed)
+    DEAL(ppg%proj_pairs_ao)
+    DEAL(ppg%proj_pairs_info_ao)
+    DEAL(ppg%ia_tbl_ao)
+    DEAL(ppg%phi_ao)
+    DEAL(ppg%dphi_ao)
+    DEAL(ppg%zekr_phi_ao)
+    DEAL(ppg%mps_ao)
+    DEAL(ppg%jxyz_ao)
+    DEAL(ppg%jxx_ao)
+    DEAL(ppg%jyy_ao)
+    DEAL(ppg%jzz_ao)
+    DEAL(ppg%rxyz_ao)
+    DEAL(ppg%irange_atom)
+    DEAL(ppg%ireferred_atom)
+    DEAL(ppg%ireferred_atom_comm_r)
+    DEAL(ppg%icomm_atom)
+    DEAL(ppg%ilocal_nlma2ilma)
+    DEAL(ppg%ilocal_nlma2ia)
+    DEAL(ppg%uVpsibox)
+    DEAL(ppg%v2nlma)
+    DEAL(ppg%k2ilma)
+    DEAL(ppg%k2j)
+    DEAL(ppg%v2j)
+    DEAL(ppg%save_udVtbl_a)
+    DEAL(ppg%save_udVtbl_b)
+    DEAL(ppg%save_udVtbl_c)
+    DEAL(ppg%save_udVtbl_d)
   end subroutine deallocate_pp_grid
 
   subroutine deallocate_scalar(x)

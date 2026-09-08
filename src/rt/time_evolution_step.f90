@@ -20,7 +20,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
-  use communication, only: comm_is_root, comm_summation, comm_bcast
+  use communication, only: comm_is_root, comm_summation, comm_bcast, comm_get_max
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
   use writefield
   use timer
@@ -42,6 +42,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use dip, only: subdip
   use gram_schmidt_orth, only: gram_schmidt
   use dm_unfold_sub, only: dm_unfold
+  use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
+  use xc_hse_grid_sr, only: compute_stage2_residual, ace_build_test_diagnostics
+  use xc_ace_update_manager, only: ace_update_state, ace_update_init_from_env, ace_update_decision, ace_update_step_rt
   use nvtx_wrapper
   implicit none
   integer,intent(in)       :: itt
@@ -73,13 +76,67 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   type(s_unfold) :: unfold
 
   integer :: ix,iy,iz,iatom,is,nspin,Mit
+  integer, parameter :: n_gprobe = 3
+  integer, parameter :: gprobe_idx(3, n_gprobe) = reshape((/ 1,1,1, 2,1,1, 3,1,1 /), (/3, n_gprobe/))
+  integer :: iprobe
   integer :: idensity, idiffDensity, ielf
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
+  real(8) :: rho_vh_local, rho_vh_sum, rho_vxc_local, rho_vxc_sum, rho_vpsl_local, rho_vpsl_sum
+  real(8) :: rho2_local, rho2_sum
+  real(8) :: rho_max_local(1), rho_max_sum(1)
+  real(8) :: rho_g2_local, rho_g2_sum, sysvol
+  real(8) :: rho_gmax_local(1), rho_gmax_sum(1)
+  complex(8) :: rho_e
+  real(8) :: rho_gprobe_re_local(n_gprobe), rho_gprobe_re_sum(n_gprobe)
+  real(8) :: rho_gprobe_im_local(n_gprobe), rho_gprobe_im_sum(n_gprobe)
+  logical, parameter :: enable_full_energy_component_probe = .false.
+  logical, parameter :: enable_full_rhog_probe = .false.
   character(100) :: comment_line
   logical :: rion_update
   integer :: ihpsieff
+  type(ace_update_state), save :: ace_state_rt
+  logical, save :: ace_state_rt_initialized = .false.
+  logical, save :: sr_fock_test_initialized = .false.
+  logical, save :: sr_fock_test_enabled = .false.
+  logical, save :: sr_fock_test_done = .false.
+  logical, save :: ace_build_test_initialized = .false.
+  logical, save :: ace_build_test_enabled = .false.
+  logical, save :: ace_build_test_done = .false.
+  character(16) :: env_sr_fock
+  character(16) :: env_ace_build
+  integer :: env_sr_stat, env_ace_stat, nsamp
+  integer, allocatable :: sample_idx(:)
+  real(8), allocatable :: stage2_res(:)
+  real(8) :: ex_sr_diag
   call nvtxStartRange('time_evolution_step', __LINE__)
+
+  if (.not. ace_state_rt_initialized) then
+    call ace_update_init_from_env(ace_state_rt)
+    ace_state_rt_initialized = .true.
+  end if
+  if (.not. sr_fock_test_initialized) then
+    env_sr_fock = ''
+    call get_environment_variable('SALMON_HSE_SR_FOCK_TEST', env_sr_fock, status=env_sr_stat)
+    if (env_sr_stat == 0) then
+      select case(trim(adjustl(env_sr_fock)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        sr_fock_test_enabled = .true.
+      end select
+    end if
+    sr_fock_test_initialized = .true.
+  end if
+  if (.not. ace_build_test_initialized) then
+    env_ace_build = ''
+    call get_environment_variable('SALMON_ACE_BUILD_TEST', env_ace_build, status=env_ace_stat)
+    if (env_ace_stat == 0) then
+      select case(trim(adjustl(env_ace_build)))
+      case('1','y','Y','yes','YES','true','TRUE','on','ON')
+        ace_build_test_enabled = .true.
+      end select
+    end if
+    ace_build_test_initialized = .true.
+  end if
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
@@ -151,12 +208,42 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     ! spsi_in --> spsi_out (tpsi = working array)
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
   end if
-    
+
   call timer_end(LOG_CALC_TIME_PROPAGATION)
   
   ! Gram Schmidt orghonormalization
   if((gram_schmidt_interval >= 1) .and. (mod(itt,gram_schmidt_interval) == 0)) then
     call gram_schmidt(system, mg, info, spsi_out)
+  end if
+
+  if (ace_state_rt%ace_enabled) then
+    call ace_update_step_rt(itt, lg, mg, info, fg, poisson, &
+         spsi_in%zwf(:,:,:,1:system%nspin,info%io_s:info%io_e,info%ik_s,info%im_s), &
+         spsi_out%zwf(:,:,:,1:system%nspin,info%io_s:info%io_e,info%ik_s,info%im_s), &
+         ace_state_rt, hse_omega, hse_alpha, system%no, system%hvol, dt, comm=info%icomm_rko)
+  end if
+
+  if (sr_fock_test_enabled .and. (.not. sr_fock_test_done)) then
+    nsamp = min(3, system%no)
+    allocate(sample_idx(nsamp), stage2_res(nsamp))
+    sample_idx = [(ix, ix=1,nsamp)]
+    call compute_stage2_residual(lg, mg, info, fg, poisson, sample_idx, spsi_in%zwf, spsi_out%zwf, &
+                                 hse_omega, hse_alpha, stage2_res, nocc=system%no, &
+                                 comm_orb=info%icomm_o, comm_space=info%icomm_rko, hvol=system%hvol, ex_sr=ex_sr_diag)
+    deallocate(sample_idx, stage2_res)
+    sr_fock_test_done = .true.
+  end if
+
+  if (ace_build_test_enabled .and. (.not. ace_build_test_done) .and. itt == 1) then
+    nsamp = min(3, system%no)
+    allocate(sample_idx(nsamp), stage2_res(nsamp))
+    sample_idx = [(ix, ix=1,nsamp)]
+    call ace_build_test_diagnostics(lg, mg, info, fg, poisson, &
+         spsi_out%zwf(:,:,:,1:system%nspin,info%io_s:info%io_e,info%ik_s,info%im_s), &
+         sample_idx, hse_omega, hse_alpha, system%no, stage2_res, &
+         comm_orb=info%icomm_o, comm_space=info%icomm_rko, hvol=system%hvol, ex_sr=ex_sr_diag)
+    deallocate(sample_idx, stage2_res)
+    ace_build_test_done = .true.
   end if
 
   call timer_begin(LOG_CALC_RHO)
@@ -238,6 +325,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
     
+    ! Update DFT+U density matrix and potential during time evolution
+    if ( PLUS_U_ON ) then
+      call calc_density_matrix_and_energy_plusU( spsi_out, ppg, info, system, energy%E_U )
+    else
+      energy%E_U = 0.0d0
+    end if
+
   end if
 
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
@@ -271,6 +365,77 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_begin(LOG_CALC_TOTAL_ENERGY_PERIODIC)
     call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
     call timer_end(LOG_CALC_TOTAL_ENERGY_PERIODIC)
+    if (enable_full_energy_component_probe .and. comm_is_root(info%id_rko) .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+        "        full-energy-components: itt=", itt, " E_tot=", energy%E_tot, " E_kin=", energy%E_kin, &
+        " E_h=", energy%E_h, " E_ion=", energy%E_ion_loc + energy%E_ion_nloc, &
+        " E_xc=", energy%E_xc, " E_ion_ion=", energy%E_ion_ion
+      flush(6)
+    end if
+    if (enable_full_rhog_probe .and. (itt == 1 .or. mod(itt, 10) == 0)) then
+      rho_vh_local = 0.0d0
+      rho_vxc_local = 0.0d0
+      rho_vpsl_local = 0.0d0
+      rho2_local = 0.0d0
+      rho_max_local(1) = 0.0d0
+      rho_g2_local = 0.0d0
+      rho_gmax_local(1) = 0.0d0
+      rho_gprobe_re_local(:) = 0.0d0
+      rho_gprobe_im_local(:) = 0.0d0
+      sysvol = system%det_a
+      do iz = mg%is(3), mg%ie(3)
+        do iy = mg%is(2), mg%ie(2)
+          do ix = mg%is(1), mg%ie(1)
+            rho_max_local(1) = max(rho_max_local(1), rho%f(ix, iy, iz))
+            rho2_local = rho2_local + rho%f(ix, iy, iz) * rho%f(ix, iy, iz)
+            rho_vh_local = rho_vh_local + rho%f(ix, iy, iz) * Vh%f(ix, iy, iz)
+            rho_vpsl_local = rho_vpsl_local + rho%f(ix, iy, iz) * Vpsl%f(ix, iy, iz)
+            rho_e = poisson%zrhoG_ele(ix, iy, iz)
+            rho_g2_local = rho_g2_local + sysvol * fg%coef(ix, iy, iz) * abs(rho_e)**2
+            rho_gmax_local(1) = max(rho_gmax_local(1), abs(rho_e))
+            do iprobe = 1, n_gprobe
+              if (ix == gprobe_idx(1, iprobe) .and. iy == gprobe_idx(2, iprobe) .and. iz == gprobe_idx(3, iprobe)) then
+                rho_gprobe_re_local(iprobe) = real(rho_e)
+                rho_gprobe_im_local(iprobe) = aimag(rho_e)
+              end if
+            end do
+            do is = 1, system%nspin
+              rho_vxc_local = rho_vxc_local + rho_s(is)%f(ix, iy, iz) * Vxc(is)%f(ix, iy, iz)
+            end do
+          end do
+        end do
+      end do
+      rho_vh_local = rho_vh_local * system%Hvol
+      rho_vxc_local = rho_vxc_local * system%Hvol
+      rho_vpsl_local = rho_vpsl_local * system%Hvol
+      rho2_local = rho2_local * system%Hvol
+      call comm_summation(rho_vh_local, rho_vh_sum, info%icomm_r)
+      call comm_summation(rho_vxc_local, rho_vxc_sum, info%icomm_r)
+      call comm_summation(rho_vpsl_local, rho_vpsl_sum, info%icomm_r)
+      call comm_summation(rho2_local, rho2_sum, info%icomm_r)
+      call comm_summation(rho_g2_local, rho_g2_sum, info%icomm_r)
+      call comm_summation(rho_gprobe_re_local, rho_gprobe_re_sum, n_gprobe, info%icomm_r)
+      call comm_summation(rho_gprobe_im_local, rho_gprobe_im_sum, n_gprobe, info%icomm_r)
+      call comm_get_max(rho_max_local, rho_max_sum, 1, info%icomm_r)
+      call comm_get_max(rho_gmax_local, rho_gmax_sum, 1, info%icomm_r)
+      if (comm_is_root(info%id_rko)) then
+        write(*,'(1x,a,i0,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6,a,1pe14.6)') &
+          "        full-potential-overlap: itt=", itt, " rhoVh=", rho_vh_sum, &
+          " rhoVxc=", rho_vxc_sum, " rhoVpsl=", rho_vpsl_sum, " rho2=", rho2_sum, " rhomax=", rho_max_sum(1), &
+          " rhoG2=", rho_g2_sum, " rhoGmax=", rho_gmax_sum(1)
+        write(*,'(1x,a,i0,6(a,1pe14.6),3(a,1pe14.6))') &
+          "        full-rhoG-probe: itt=", itt, &
+          " g111_re=", rho_gprobe_re_sum(1), " g111_im=", rho_gprobe_im_sum(1), &
+          " g211_re=", rho_gprobe_re_sum(2), " g211_im=", rho_gprobe_im_sum(2), &
+          " g311_re=", rho_gprobe_re_sum(3), " g311_im=", rho_gprobe_im_sum(3), &
+          " g111_abs=", sqrt(rho_gprobe_re_sum(1)**2 + rho_gprobe_im_sum(1)**2), &
+          " g211_abs=", sqrt(rho_gprobe_re_sum(2)**2 + rho_gprobe_im_sum(2)**2), &
+          " g311_abs=", sqrt(rho_gprobe_re_sum(3)**2 + rho_gprobe_im_sum(3)**2)
+        write(*,'(1x,a,i0,3(a,1pe14.6))') "        full-rhoG-probe-gvec: itt=", itt, &
+          " g211_gx=", fg%vec_G(1, 2, 1, 1), " g211_gy=", fg%vec_G(2, 2, 1, 1), " g211_gz=", fg%vec_G(3, 2, 1, 1)
+        flush(6)
+      end if
+    end if
 
     if(singlescale%flag_use) then
       call timer_begin(LOG_CALC_SINGLESCALE)
@@ -438,6 +603,13 @@ contains
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+
+      ! Update DFT+U density matrix and potential (predictor-corrector)
+      if ( PLUS_U_ON ) then
+        call calc_density_matrix_and_energy_plusU( spsi_out, ppg, info, system, energy%E_U )
+      else
+        energy%E_U = 0.0d0
+      end if
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
@@ -547,4 +719,3 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
 
   call nvtxEndRange
 end subroutine calc_current_ion
-

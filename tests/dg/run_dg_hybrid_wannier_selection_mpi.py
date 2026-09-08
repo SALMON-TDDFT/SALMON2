@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+root=Path(__file__).resolve().parents[2]
+with tempfile.TemporaryDirectory(prefix="hybrid-selection-") as name:
+    build=Path(name)
+    (build/"config.h").write_text("")
+    exe=build/"hybrid_selection"
+    subprocess.run([
+        shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+        "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+        str(root/"src/common/dg_hybrid_windowed_pw_types.f90"),
+        str(root/"src/gs/dc/dg_hybrid_wannier_selection.f90"),
+        str(root/"tests/dg/test_dg_hybrid_wannier_selection_mpi.f90"),
+        "-o",str(exe),
+    ],check=True)
+    env=os.environ.copy()
+    env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
+    fingerprints=[]
+    for nrank in (1,2,4,8):
+        run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],
+                           capture_output=True,text=True,env=env)
+        assert run.returncode==0,(nrank,run.stdout,run.stderr)
+        assert f"PASS hybrid Wannier selection on {nrank} ranks" in run.stdout
+        match=re.search(r"HYBRID_SELECTION ranks=\d+ fingerprint=(-?\d+)",run.stdout)
+        assert match,run.stdout
+        fingerprints.append(int(match.group(1)))
+    assert len(set(fingerprints))==1,fingerprints
+print("PASS hybrid Wannier selection on 1, 2, 4, and 8 ranks")

@@ -22,9 +22,12 @@ else
 	F90_STENCIL_FILE=
 endif
 
+# Production DG requires the CMake MPI+ScaLAPACK configuration.  The legacy
+# makefiles intentionally remain conventional SALMON builds.
 F90_SRCS = \
 ./misc/backup_routines.f90 \
 ./misc/misc_routines.f90 \
+./misc/nvtx_wrapper.f90 \
 ./misc/timer.f90 \
 ./misc/unusedvar.f90 \
 ./math/math_constants.f90 \
@@ -60,23 +63,39 @@ F90_SRCS = \
 ./common/lattice.f90 \
 ./symmetry/symmetry_rho.f90 \
 ./symmetry/symmetry_vector.f90 \
+./xc/builtin_pz.f90 \
+./xc/builtin_pw.f90 \
+./paw/paw_variables.f90 \
+./paw/radial_1d.f90 \
 ./atom/pp/read_ps_upf_module.f90 \
+./atom/pp/read_paw_upf_module.f90 \
 ./atom/pp/input_pp.f90 \
 ./atom/pp/salmon_pp.f90 \
 ./poisson/init_poisson.f90 \
+./poisson/poisson_dirichlet.f90 \
 ./poisson/poisson_isolated.f90 \
 ./poisson/poisson_periodic.f90 \
 ./poisson/hartree.f90 \
 ./maxwell/common_maxwell.f90 \
 ./atom/jellium.f90 \
 ./maxwell/fdtd_weyl_gauge.f90 \
-./xc/builtin_pz.f90 \
+./maxwell/optical_vortex_field.f90 \
 ./xc/builtin_pz_sp.f90 \
 ./xc/builtin_pzm.f90 \
 ./xc/builtin_pw92.f90 \
 ./xc/builtin_r2scan.f90 \
 ./xc/builtin_tbmbj.f90 \
+./so/prep_pp_so.f90 \
+./so/pseudo_pt_current_so.f90 \
+./so/pseudo_pt_so.f90 \
+./so/update_kvector_so.f90 \
+./so/noncollinear_module.f90 \
 ./xc/salmon_xc.f90 \
+./xc/xc_hse_grid_sr.f90 \
+./xc/xc_ace_update_manager.f90 \
+./xc/xc_hse.f90 \
+./xc/auxiliary_basis.f90 \
+./xc/xc_hse_ri.f90 \
 ./plusu/calc_jxyz_plusu.f90 \
 ./plusu/calc_nps_plusu.f90 \
 ./plusu/plusu_global.f90 \
@@ -84,21 +103,19 @@ F90_SRCS = \
 ./plusu/prep_pp_plusu.f90 \
 ./plusu/pseudo_pt_plusu.f90 \
 ./plusu/update_kvector_plusu.f90 \
+./plusu/current_plusu.f90 \
 ./so/gram_schmidt_so.f90 \
-./so/noncollinear_module.f90 \
 ./common/initialization.f90 \
-./so/prep_pp_so.f90 \
-./so/pseudo_pt_current_so.f90 \
 ./common/density_matrix.f90 \
-./so/pseudo_pt_so.f90 \
 ./common/force.f90 \
-./so/update_kvector_so.f90 \
 ./common/hamiltonian.f90 \
 ./common/total_energy.f90 \
 ./atom/pp/prep_pp.f90 \
-./so/conjugate_gradient_so.f90 \
+./atom/pp/prep_density_pp.f90 \
 ./gs/band.f90 \
 ./gs/band_dft.f90 \
+./gs/preconditioning.f90 \
+./gs/dc/dc_fragment_geometry.f90 \
 ./gs/conjugate_gradient.f90 \
 ./gs/eigen_subdiag_lapack.f90 \
 ./gs/eigen_subdiag.f90 \
@@ -106,11 +123,17 @@ F90_SRCS = \
 ./gs/gram_schmidt_orth.f90 \
 ./gs/init_gs.f90 \
 ./gs/mixing.f90 \
+./gs/occupation_kernel.f90 \
 ./gs/occupation.f90 \
 ./gs/read_gs.f90 \
 ./gs/subspace_diagonalization.f90 \
 ./io/write.f90 \
 ./gs/scf_iteration.f90 \
+./gs/dc/dcdft.f90 \
+./gs/dc/dcdft_soi.f90 \
+./gs/dc/lcfo.f90 \
+./gs/dc/lcfo_soi.f90 \
+./gs/dc/lcfo_soi_init.f90 \
 ./gs/scf_iteration_dft.f90 \
 ./gs/structure_opt.f90 \
 ./rt/dip.f90 \
@@ -123,6 +146,10 @@ F90_SRCS = \
 ./gs/main_dft.f90 \
 ./gs/main_dft_md.f90 \
 ./rt/initialization_rt.f90 \
+./rt/plusu_fragment_support.f90 \
+./rt/rt_angular_momentum.f90 \
+./rt/rt_local_chern_marker.f90 \
+./rt/rt_local_chern_marker_soi.f90 \
 ./rt/main_tddft.f90 \
 ./rt/taylor.f90 \
 ./rt/time_evolution_step.f90 \
@@ -131,6 +158,15 @@ F90_SRCS = \
 ./maxwell/main_maxwell.f90 \
 ./ms/input_checker_ms.f90 \
 ./ms/main_ms.f90 \
+./ssbe/util_ssbe.f90 \
+./ssbe/datafile_ssbe.f90 \
+./ssbe/input_checker_sbe.f90 \
+./ssbe/gs_info_ssbe.f90 \
+./ssbe/bloch_solver_ssbe.f90 \
+./ssbe/realtime_ssbe.f90 \
+./ssbe/shaper_ssbe.f90 \
+./ssbe/multiscale_ssbe.f90 \
+./ssbe/main_ssbe.f90 \
 ./main.f90
 
 C_SRCS = \

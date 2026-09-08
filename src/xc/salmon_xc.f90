@@ -33,8 +33,19 @@ module salmon_xc
 #ifdef USE_LIBXC
 #if XC_MAJOR_VERSION <= 4 
   use xc_f90_types_m
-#endif
   use xc_f90_lib_m
+#else
+  use xc_f03_lib_m
+#define xc_f90_functional_get_number xc_f03_functional_get_number
+#define xc_f90_func_init xc_f03_func_init
+#define xc_f90_func_get_info xc_f03_func_get_info
+#define xc_f90_func_info_get_family xc_f03_func_info_get_family
+#define xc_f90_func_end xc_f03_func_end
+#define xc_f90_lda_exc_vxc xc_f03_lda_exc_vxc
+#define xc_f90_gga_exc_vxc xc_f03_gga_exc_vxc
+#define xc_f90_mgga_exc_vxc xc_f03_mgga_exc_vxc
+#define xc_f90_version xc_f03_version
+#endif
 #endif
 
   implicit none
@@ -70,6 +81,26 @@ module salmon_xc
 
 contains
 
+  subroutine exchange_correlation_density(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,stencil,Vxc,E_xc)
+    use structures
+    implicit none
+    type(s_dft_system),intent(inout)::system
+    type(s_xc_functional),intent(in)::xc_func
+    type(s_rgrid),intent(in)::mg
+    type(s_sendrecv_grid)::srg_scalar,srg
+    type(s_scalar),intent(in)::rho_s(system%nspin)
+    type(s_pp_info),intent(in)::pp
+    type(s_pp_nlcc),intent(in)::ppn
+    type(s_parallel_info),intent(in)::info
+    type(s_stencil),intent(in)::stencil
+    type(s_scalar)::Vxc(system%nspin)
+    real(8)::E_xc
+    if(xc_func%use_kinetic_energy.or.xc_func%use_current)&
+      error stop 'density-only exchange-correlation does not support orbital-dependent functionals'
+    call exchange_correlation(system=system,xc_func=xc_func,mg=mg,srg_scalar=srg_scalar,srg=srg,rho_s=rho_s,&
+      pp=pp,ppn=ppn,info=info,stencil=stencil,Vxc=Vxc,E_xc=E_xc)
+  end subroutine exchange_correlation_density
+
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
@@ -92,7 +123,7 @@ contains
     type(s_pp_info)         ,intent(in) :: pp
     type(s_pp_nlcc)         ,intent(in) :: ppn
     type(s_parallel_info)   ,intent(in) :: info
-    type(s_orbital)                     :: spsi
+    type(s_orbital),optional            :: spsi
     type(s_stencil)         ,intent(in) :: stencil
     type(s_scalar)                      :: Vxc(system%nspin)
     real(8)                             :: E_xc
@@ -122,11 +153,26 @@ contains
     nspin = system%nspin
 
     if (nspin==1) then
+      if (allocated(rho_tmp)) then
+        if (any(shape(rho_tmp) /= mg%num)) deallocate(rho_tmp)
+      endif
+      if (allocated(vxc_tmp)) then
+        if (any(shape(vxc_tmp) /= mg%num)) deallocate(vxc_tmp)
+      endif
       if (.not.allocated(rho_tmp)) allocate(rho_tmp(mg%num(1), mg%num(2), mg%num(3)))
       if (.not.allocated(vxc_tmp)) allocate(vxc_tmp(mg%num(1), mg%num(2), mg%num(3)))
     else if(nspin==2)then
+      if (allocated(rho_s_tmp)) then
+        if (any(shape(rho_s_tmp) /= [mg%num,2])) deallocate(rho_s_tmp)
+      endif
+      if (allocated(vxc_s_tmp)) then
+        if (any(shape(vxc_s_tmp) /= [mg%num,2])) deallocate(vxc_s_tmp)
+      endif
       if (.not.allocated(rho_s_tmp)) allocate(rho_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
       if (.not.allocated(vxc_s_tmp)) allocate(vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
+    endif
+    if (allocated(eexc_tmp)) then
+      if (any(shape(eexc_tmp) /= mg%num)) deallocate(eexc_tmp)
     endif
     if (.not.allocated(eexc_tmp)) allocate(eexc_tmp(mg%num(1), mg%num(2), mg%num(3)))
 
@@ -251,7 +297,10 @@ contains
       end do
 !$omp end parallel do
 
-      call calc_tau
+      if (xc_func%use_kinetic_energy .or. xc_func%use_current) then
+        if(.not.present(spsi))error stop 'orbital-dependent exchange-correlation requires orbitals'
+        call calc_tau
+      end if
       ! A functional carrying a tau operator is fed the gauge-invariant tau; the
       ! others (TB-mBJ) subtract the current themselves and keep the bare tau.
       if (xc_func%xctype(1) == salmon_xctype_r2scan) call build_gauge_invariant_tau
@@ -755,6 +804,7 @@ contains
 
 
     subroutine setup_xcfunc(name)
+      use salmon_global, only: yn_hse
       implicit none
       character(*), intent(in) :: name
 
@@ -781,7 +831,16 @@ contains
         return
 
       case ('pbe')
-      
+#ifdef USE_LIBXC
+        if (yn_hse == 'y') then
+          ! HSE route: use Libxc-PBE semilocal part automatically.
+          xc%xctype(2) = salmon_xctype_libxc
+          xc%xctype(3) = salmon_xctype_libxc
+          call init_libxc('GGA_X_PBE', 2)
+          call init_libxc('GGA_C_PBE', 3)
+          return
+        end if
+#endif
         xc%xctype(1) = salmon_xctype_pbe
         xc%use_gradient = .true.
         stop "Error: xc=pbe is not available. please use libxc_pbe."
@@ -843,6 +902,18 @@ contains
       !   return
 
 #ifdef USE_LIBXC
+      case('hse', 'hse06')
+        if (yn_hse /= 'y') then
+          stop "Error: xc=hse/hse06 requires yn_hse='y'."
+        end if
+        ! HSE uses separate exact-exchange route (yn_hse='y').
+        ! Set the semilocal part to PBE via Libxc automatically.
+        xc%xctype(2) = salmon_xctype_libxc
+        xc%xctype(3) = salmon_xctype_libxc
+        call init_libxc('GGA_X_PBE', 2)
+        call init_libxc('GGA_C_PBE', 3)
+        return
+
       case('libxc_pz')
         xc%xctype(2) = salmon_xctype_libxc
         xc%xctype(3) = salmon_xctype_libxc
@@ -1216,16 +1287,35 @@ contains
 
     subroutine exec_builtin_pz()
       use nvtx_wrapper
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
       call nvtxStartRange('exec_builtin_pz', __LINE__)
 
       if (xc%ispin == 0) then
+        if (allocated(rho_s_1d)) then
+          if (size(rho_s_1d,1) /= nl) deallocate(rho_s_1d)
+        end if
+        if (allocated(vexc_1d)) then
+          if (size(vexc_1d,1) /= nl) deallocate(vexc_1d)
+        end if
         if (.not.allocated(rho_s_1d)) allocate(rho_s_1d(nl))
         if (.not.allocated(vexc_1d)) allocate(vexc_1d(nl))
       else
+        if (allocated(rho_s_sp_1d)) then
+          if (size(rho_s_sp_1d,1) /= nl) deallocate(rho_s_sp_1d)
+        end if
+        if (allocated(vexc_sp_1d)) then
+          if (size(vexc_sp_1d,1) /= nl) deallocate(vexc_sp_1d)
+        end if
         if (.not.allocated(rho_s_sp_1d)) allocate(rho_s_sp_1d(nl,2))
         if (.not.allocated(vexc_sp_1d)) allocate(vexc_sp_1d(nl,2))
       endif
+      if (allocated(exc_1d)) then
+        if (size(exc_1d,1) /= nl) deallocate(exc_1d)
+      end if
+      if (allocated(eexc_1d)) then
+        if (size(eexc_1d,1) /= nl) deallocate(eexc_1d)
+      end if
       if (.not.allocated(exc_1d)) allocate(exc_1d(nl))
       if (.not.allocated(eexc_1d)) allocate(eexc_1d(nl))
 
@@ -1245,6 +1335,7 @@ contains
 
 #ifndef SALMON_DEBUG_NEGLECT_NLCC
       if (present(rho_nlcc)) then
+      if (pp%flag_nlcc) then
 #ifdef USE_OPENACC
         if ( xc%ispin == 0 ) then
           call exec_builtin_calc_axpy(rho_s_1d, 0.5d0, rho_nlcc, nl)
@@ -1260,13 +1351,24 @@ contains
           rho_s_sp_1d(:,2) = rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
         end if
 #endif
+      end if
       endif
 #endif
 
       if (xc%ispin == 0) then
         call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d)
+        if (.not.all(ieee_is_finite(vexc_1d))) then
+          write(*,'(a,i0,a,2(es12.4,1x),a,l1)') '[XC-PZ-DIAGNOSTIC] nl=',nl, &
+            ' rho_s_min/max=',minval(rho_s_1d),maxval(rho_s_1d), &
+            ' nlcc=',pp%flag_nlcc
+        end if
       else if (xc%ispin == 1) then
         call exc_cor_pz_sp(nl, rho_s_sp_1d, exc_1d, eexc_1d, vexc_sp_1d)
+        if (.not.all(ieee_is_finite(vexc_sp_1d))) then
+          write(*,'(a,i0,a,2(es12.4,1x),a,l1)') '[XC-PZ-DIAGNOSTIC] nl=',nl, &
+            ' rho_s_min/max=',minval(rho_s_sp_1d),maxval(rho_s_sp_1d), &
+            ' nlcc=',pp%flag_nlcc
+        end if
       end if
 
       if (xc%ispin == 0) then
@@ -1728,13 +1830,13 @@ contains
 
          case(XC_FAMILY_LDA)
            call xc_f90_lda_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), &
+             & xc%func(ii), np, rho_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1) &
              & )
 
          case(XC_FAMILY_GGA)
            call xc_f90_gga_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), sigma_1d(1), &
+             & xc%func(ii), np, rho_1d(1), sigma_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1), gvxc_tmp_1d(1) &
              & )
 

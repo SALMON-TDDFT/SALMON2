@@ -13,6 +13,11 @@
 !  See the License for the specific language governing permissions and
 !  limitations under the License.
 !
-subroutine salmon_unusedvar
-  ! simply return, suppressed unused variables.
-end subroutine
+module unusedvar_mod
+  implicit none
+contains
+  subroutine salmon_unusedvar(dummy)
+    class(*), intent(in), dimension(..) :: dummy
+    ! simply return, suppressed unused variables.
+  end subroutine
+end module

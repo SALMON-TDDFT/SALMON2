@@ -1,0 +1,66 @@
+&calculation
+ theory='tddft_response'
+/
+&control
+ sysname='si64_ow_rt'
+/
+&units
+ unit_system='a.u.'
+/
+&dc
+ num_fragment=2,2,2
+ num_rgrid_buffer=6,6,6
+ nproc_rgrid_tot=2,2,2
+ nstate_frag=400
+ yn_dc_lcfo='n'
+ yn_dc_lcfo_flux='n'
+ yn_dc_lcfo_diag='n'
+ yn_dg_dc_overlapping_wannier='n'
+ dg_dc_gs_final_density_tolerance=1d-7
+ dg_dc_gs_final_orbital_tolerance=1d-7
+ dg_dc_gs_electron_count_tolerance=1d-8
+ dg_ow_symmetry_tolerance=1d-10
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+ yn_eigenexa='n'
+/
+&system
+ yn_periodic='y'
+ al=20.52d0,20.52d0,20.52d0
+ nelem=1
+ nstate=256
+ nelec=256
+ natom=64
+ file_atom_coor='atom.dat'
+/
+&pseudo
+ izatom(1)=14
+ file_pseudo(1)='Si_rps.dat'
+ lloc_ps(1)=2
+/
+&functional
+ xc='PZ'
+/
+&rgrid
+ num_rgrid=32,32,32
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&tgrid
+ dt=@DT@
+ nt=@NT@
+/
+&propagation
+ yn_dg_overlapping_wannier_rt='y'
+ yn_dg_overlapping_wannier_rt_restart='n'
+ yn_dg_length_gauge='y'
+/
+&emfield
+ ae_shape1='impulse'
+ e_impulse=@IMPULSE@
+ epdir_re1=@AXIS@
+/

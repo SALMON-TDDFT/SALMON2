@@ -19,6 +19,7 @@
 
 #include "config.h"
 module lcfo
+  use dc_fragment_geometry, only: get_fragment_domain, find_fragment_face_neighbor, fragment_direction_tag
   implicit none
   
   private
@@ -27,13 +28,19 @@ module lcfo
   character(32),parameter :: binfile_wf = "wavefunctions.bin", &
   &                          binfile_rg = "rgrid_index.bin", &
   &                          binfile_bf = "basis_functions.bin", &
+  &                          binfile_bfb = "basis_functions_buffer.bin", &
   &                          binfile_hl = "hamiltonian_local.bin"
+  integer, parameter :: basis_buffer_magic = -22022212
+  integer, parameter :: basis_buffer_version = 2
   
 contains
 
-  subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
-    use communication, only: comm_summation
-    use salmon_global, only: yn_dc_lcfo_diag, lcfo_eigensolver
+  subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
+      retained_count,retained_box_contribution,retained_occupations,write_files,retained_box_count,&
+      retained_eigenvalues)
+    use communication, only: comm_summation,comm_bcast
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use salmon_global, only: yn_dc_lcfo_diag, lcfo_eigensolver, temperature
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -47,6 +54,12 @@ contains
     type(s_orbital)                  :: shpsi,sttpsi
     type(s_sendrecv_grid)            :: srg
     type(s_dcdft)                    :: dc
+    integer, intent(in), optional :: retained_count
+    complex(8), allocatable, intent(out), optional :: retained_box_contribution(:,:)
+    real(8), allocatable, intent(out), optional :: retained_occupations(:)
+    real(8), allocatable, intent(out), optional :: retained_eigenvalues(:)
+    logical, intent(in), optional :: write_files
+    integer, intent(in), optional :: retained_box_count
     !
     type halo_info
       integer :: id_src,id_dst,ifrag_src,dvec(3),length(3),dsp_send(3),dsp_recv(3)
@@ -54,19 +67,40 @@ contains
     end type halo_info
     !
     type(halo_info) :: halo(26) ! 26 = 3^3-1
-    integer :: nspin,n_halo
+    integer :: nspin,n_halo,coefficient_count
     integer :: id_array(dc%n_frag)
     integer :: n_basis(dc%n_frag,system%nspin), n_mat(system%nspin)
     integer :: index_basis(dc%nstate_frag,dc%n_frag,system%nspin)
     real(8) :: hvol
     real(8),allocatable :: f_basis(:,:,:,:,:),hf(:,:,:,:,:),wrk_array(:,:,:,:,:) &
-    & ,esp_tot(:,:),mat_H_local(:,:,:),coef_wf(:,:,:)
+    & ,esp_tot(:,:),mat_H_local(:,:,:),coef_wf(:,:,:),basis_transform(:,:,:)
     !
     integer :: i,j,n,ix,iy,iz,io,jo,ispin,ifrag,jfrag,i_halo
+    logical :: build_coefficients,emit_files
     
     if(dc%id_tot==0) write(*,*) "start DC-LCFO"
     hvol = system%hvol
     nspin = system%nspin
+    build_coefficients = yn_dc_lcfo_diag=='y' .or. present(retained_box_contribution).or.present(retained_eigenvalues)
+    coefficient_count=dc%nstate_tot
+    if(present(retained_count))coefficient_count=max(dc%nstate_tot,retained_count)
+    emit_files = .true.
+    if(present(write_files)) emit_files=write_files
+    if((present(retained_count).neqv.present(retained_box_contribution)).or.&
+        (present(retained_count).neqv.present(retained_occupations))) &
+      error stop 'DC-LCFO: retained count, contribution, and occupations must be requested together'
+    if(present(retained_box_count).and..not.present(retained_count))&
+      error stop 'DC-LCFO: retained buffer count requires retained outputs'
+    if(present(retained_eigenvalues).and..not.present(retained_count))&
+      error stop 'DC-LCFO: retained eigenvalues require retained count'
+    if(present(retained_count))then
+      if(retained_count<1) &
+        error stop 'DC-LCFO: invalid retained contribution count'
+      if(present(retained_box_count))then
+        if(retained_box_count<1.or.retained_box_count>retained_count)&
+          error stop 'DC-LCFO: retained buffer count is outside the retained window'
+      endif
+    end if
     call init_lcfo
     call calc_basis
     call hpsi_basis
@@ -75,14 +109,12 @@ contains
     call calc_hamiltonian_matrix
     if(dc%id_tot==0) write(*,*) "Hamiltonian matrix: done"
     
-    if(yn_dc_lcfo_diag=='y') then
+    if(build_coefficients) then
+      if(coefficient_count>minval(n_mat))error stop 'DC-LCFO: requested coefficient count exceeds LCFO basis rank'
       allocate(esp_tot(maxval(n_mat),nspin))
       if(dc%id_frag==0) then
-        allocate(coef_wf(dc%nstate_frag,dc%nstate_tot,nspin))
+        allocate(coef_wf(dc%nstate_frag,coefficient_count,nspin))
         coef_wf = 0d0
-      end if
-      if(any(n_mat < dc%nstate_tot)) then
-        stop "DC-LCFO: nstate_tot exceeds the Hamiltonian matrix dimension."
       end if
       select case(trim(lcfo_eigensolver))
       case('lapack')
@@ -103,13 +135,24 @@ contains
         stop "DC-LCFO: invalid lcfo_eigensolver."
       end select
       if(dc%id_tot==0) write(*,*) "diagonalization: done"
+      if(allocated(coef_wf))then
+        if(.not.all(ieee_is_finite(coef_wf)))error stop 'DC-LCFO: retained coefficients are not finite'
+      end if
 !      call test_write_psi
     end if
-  
-    call output
+    if(present(retained_occupations)) call build_retained_occupations
+    if(present(retained_eigenvalues))then
+      allocate(retained_eigenvalues(retained_count))
+      retained_eigenvalues=esp_tot(1:retained_count,1)
+      if(.not.all(ieee_is_finite(retained_eigenvalues)))&
+        error stop 'DC-LCFO: retained eigenvalues are not finite'
+    endif
+    if(present(retained_box_contribution)) call build_retained_box_contribution
+    if(emit_files) call output
 
     if(allocated(coef_wf)) deallocate(coef_wf)
     if(allocated(f_basis)) deallocate(f_basis)
+    if(allocated(basis_transform)) deallocate(basis_transform)
     if(allocated(esp_tot)) deallocate(esp_tot)
     if(allocated(mat_H_local)) deallocate(mat_H_local)
     do i=1,n_halo
@@ -122,18 +165,24 @@ contains
     subroutine init_lcfo
       use salmon_global, only: num_fragment
       implicit none
-      integer :: lx,ly,lz
-      integer,dimension(3) :: nh,ir1,ir2,d
+      integer :: lx,ly,lz,ifrag_dst,ifrag_src,matches_dst,matches_src
+      integer :: nxyz_domain(3)
+      integer,dimension(3) :: nh
       integer :: id_tmp(dc%n_frag)
-      
+      integer :: fragment_extent(3,dc%n_frag)
+
       id_tmp = 0
       if(dc%id_frag==0) id_tmp(dc%i_frag) = dc%id_tot + 1
       call comm_summation(id_tmp,id_array,dc%n_frag,dc%icomm_tot)
       id_array = id_array - 1
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
+      do ifrag=1,dc%n_frag
+        call get_fragment_domain(dc,ifrag,fragment_extent(:,ifrag))
+      end do
       
       nh = 0
       do n=1,3 ! x,y,z
-        if(dc%nxyz_buffer(n) > dc%nxyz_domain(n)) stop "DC-LCFO: buffer > domain"
+        if(dc%nxyz_buffer(n) > nxyz_domain(n)) stop "DC-LCFO: buffer > domain"
         if(num_fragment(n) > 1) nh(n) = 1
       end do
       
@@ -144,26 +193,18 @@ contains
         if(lx==0 .and. ly==0 .and. lz==0) cycle
         i = i + 1
         halo(i)%dvec(1:3) = [lx, ly, lz]
-        halo(i)%id_dst = -1
-        halo(i)%id_src = -1
-        do ifrag=1,dc%n_frag
-        ! dc%ixyz_frag: r-grid index of the fragment origin
-          ir1(1:3) = dc%ixyz_frag(1:3,ifrag) ! position of fragment ifrag
-        ! dst neighbor (+)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) + halo(i)%dvec(1:3)*dc%nxyz_domain(1:3) ! neighbor fragment
-          d(1:3) = mod( ir1(1:3) - ir2(1:3) , dc%lg_tot%num(1:3) )
-          if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_dst < 0) then
-            halo(i)%id_dst = id_array(ifrag) ! process ID of the communication destination
-          end if
-        ! src neighbor (-)
-          ir2(1:3) = dc%ixyz_frag(1:3,dc%i_frag) - halo(i)%dvec(1:3)*dc%nxyz_domain(1:3) ! neighbor fragment
-          d(1:3) = mod( ir1(1:3) - ir2(1:3) , dc%lg_tot%num(1:3) )
-          if(d(1)==0 .and. d(2)==0 .and. d(3)==0 .and. halo(i)%id_src < 0) then
-            halo(i)%id_src = id_array(ifrag) ! process ID of the communication source
-            halo(i)%ifrag_src = ifrag
-          end if
-        end do ! ifrag
-        if(halo(i)%id_dst < 0 .or. halo(i)%id_src < 0) stop "DC-LCFO: dst, src"
+        call find_fragment_face_neighbor(dc%ixyz_frag,fragment_extent,dc%lg_tot%num,dc%i_frag,&
+          halo(i)%dvec,ifrag_dst,matches_dst)
+        call find_fragment_face_neighbor(dc%ixyz_frag,fragment_extent,dc%lg_tot%num,dc%i_frag,&
+          -halo(i)%dvec,ifrag_src,matches_src)
+        if(matches_dst/=1.or.matches_src/=1)then
+          write(*,'(a,i0,a,3(1x,i0),a,2(1x,i0))') 'DC-LCFO fragment ',dc%i_frag,&
+            ' has missing/ambiguous halo direction',halo(i)%dvec,'; dst/src matches',matches_dst,matches_src
+          error stop 'DC-LCFO: fragment face topology is not unique'
+        end if
+        halo(i)%id_dst=id_array(ifrag_dst)
+        halo(i)%id_src=id_array(ifrag_src)
+        halo(i)%ifrag_src=ifrag_src
       end do
       end do
       end do
@@ -173,17 +214,17 @@ contains
         do n=1,3 ! x,y,z
           select case (halo(i)%dvec(n))
           case(0)
-            halo(i)%length(n) = dc%nxyz_domain(n)
+            halo(i)%length(n) = nxyz_domain(n)
             halo(i)%dsp_send(n) = 0
             halo(i)%dsp_recv(n) = 0
           case(1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
-            halo(i)%dsp_send(n) = dc%nxyz_domain(n) - dc%nxyz_buffer(n)
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n) + dc%nxyz_buffer(n)
+            halo(i)%dsp_send(n) = nxyz_domain(n) - dc%nxyz_buffer(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n) + dc%nxyz_buffer(n)
           case(-1)
             halo(i)%length(n) = dc%nxyz_buffer(n)
             halo(i)%dsp_send(n) = 0
-            halo(i)%dsp_recv(n) = dc%nxyz_domain(n)
+            halo(i)%dsp_recv(n) = nxyz_domain(n)
           end select
         end do
       end do
@@ -195,11 +236,17 @@ contains
       use salmon_global, only: energy_cut,lambda_cut
       implicit none
       integer :: nb(nspin),itmp(dc%n_frag,nspin)
+      integer :: nxyz_domain(3)
       real(8),dimension(dc%nstate_frag,dc%nstate_frag,system%nspin) :: mat_S,mat_U
       real(8),dimension(dc%nstate_frag,system%nspin) :: lambda
+      real(8) :: alpha_gs, norm_basis
+
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       
-      allocate(f_basis  (dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
-      allocate(wrk_array(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,dc%nstate_frag))
+      allocate(f_basis  (nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      allocate(wrk_array(nxyz_domain(1),nxyz_domain(2),nxyz_domain(3),nspin,dc%nstate_frag))
+      if(.not. allocated(basis_transform)) allocate(basis_transform(dc%nstate_frag,dc%nstate_frag,nspin))
+      basis_transform = 0d0
       
     ! f_basis <-- | \bar{\phi} > (projected fragment orbitals)
       wrk_array = 0d0
@@ -208,7 +255,7 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        if( ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. iz <= dc%nxyz_domain(3) &
+        if( ix <= nxyz_domain(1) .and. iy <= nxyz_domain(2) .and. iz <= nxyz_domain(3) &
         & .and. energy%esp(io,1,ispin) - system%mu < energy_cut ) then ! energy cutoff
           wrk_array(ix,iy,iz,ispin,io) = spsi%rwf(ix,iy,iz,ispin,io,1,1) ! | \phi > @ core domain
         end if
@@ -217,7 +264,7 @@ contains
       end do
       end do
       end do
-      call comm_summation(wrk_array,f_basis,product(dc%nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
+      call comm_summation(wrk_array,f_basis,product(nxyz_domain)*nspin*dc%nstate_frag,info%icomm_rko)
       
     ! mat_S <-- S_{ij} = < \bar{\phi}_i | \bar{\phi}_j > (overlap matrix)
       do ispin=1,nspin
@@ -244,6 +291,7 @@ contains
             do jo=1,dc%nstate_frag
               f_basis(:,:,:,ispin,i) = f_basis(:,:,:,ispin,i) &
               & + wrk_array(:,:,:,ispin,jo) * mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
+              basis_transform(jo,i,ispin) = mat_U(jo,io,ispin) / sqrt(lambda(io,ispin))
             end do
           end if
         end do ! io
@@ -255,12 +303,19 @@ contains
       do ispin=1,nspin
         do io=1,nb(ispin)
           do jo=1,io-1
+            alpha_gs = (sum(f_basis(:,:,:,ispin,jo)*wrk_array(:,:,:,ispin,io)) * hvol) &
+            & / (sum(f_basis(:,:,:,ispin,jo)*f_basis(:,:,:,ispin,jo)) * hvol)
             wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-            & - f_basis(:,:,:,ispin,jo) * sum(f_basis(:,:,:,ispin,jo)*wrk_array(:,:,:,ispin,io)) &
-            & / sum(f_basis(:,:,:,ispin,jo)*f_basis(:,:,:,ispin,jo))
+            & - f_basis(:,:,:,ispin,jo) * alpha_gs
+            basis_transform(:,io,ispin) = basis_transform(:,io,ispin) &
+            & - basis_transform(:,jo,ispin) * alpha_gs
           end do
+          norm_basis = sqrt( sum(wrk_array(:,:,:,ispin,io)*wrk_array(:,:,:,ispin,io)) * hvol )
+          if(norm_basis <= 1.0d-12) stop "DC-LCFO: null basis after core-S cleanup"
+          basis_transform(:,io,ispin) = basis_transform(:,io,ispin) &
+          & / norm_basis
           wrk_array(:,:,:,ispin,io) = wrk_array(:,:,:,ispin,io) &
-          & / sqrt( sum(wrk_array(:,:,:,ispin,io)*wrk_array(:,:,:,ispin,io)) * hvol )
+          & / norm_basis
         end do
       end do ! ispin
       f_basis = wrk_array
@@ -272,7 +327,7 @@ contains
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        if( ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. iz <= dc%nxyz_domain(3) ) then
+        if( ix <= nxyz_domain(1) .and. iy <= nxyz_domain(2) .and. iz <= nxyz_domain(3) ) then
           sttpsi%rwf(ix,iy,iz,ispin,io,1,1) = f_basis(ix,iy,iz,ispin,io)
         end if
       end do
@@ -333,14 +388,16 @@ contains
     subroutine calc_hamiltonian_matrix
       use communication, only: comm_isend, comm_irecv, comm_wait_all
       implicit none
-      integer :: d(3),l(3)
+      integer :: d(3),l(3),nxyz_domain(3)
       integer :: itag_send,itag_recv
+      logical :: valid_send_tag,valid_recv_tag
       integer,dimension(n_halo) :: ireq_send,ireq_recv
       
     ! diagonal block < lambda_{ifrag,io} | H | lambda_{ifrag,jo} >
       allocate(mat_H_local(dc%nstate_frag,dc%nstate_frag,nspin))
       mat_H_local = 0d0
-      l = dc%nxyz_domain
+      call get_fragment_domain(dc,dc%i_frag,nxyz_domain)
+      l = nxyz_domain
       do ispin=1,nspin
       do io=1,n_basis(dc%i_frag,ispin)
       do jo=1,n_basis(dc%i_frag,ispin)
@@ -367,10 +424,14 @@ contains
           end do
 
         ! MPI_ISEND
-          itag_send = dc%i_frag
+          call fragment_direction_tag(dc%i_frag,dc%n_frag,halo(i_halo)%dvec,&
+            itag_send,valid_send_tag)
+          if(.not.valid_send_tag)error stop 'DC-LCFO: send halo tag exceeds portable MPI_TAG_UB'
           ireq_send(i_halo) = comm_isend(halo(i_halo)%buf_send,halo(i_halo)%id_dst,itag_send,dc%icomm_tot)
         ! MPI_IRECV
-          itag_recv = halo(i_halo)%ifrag_src
+          call fragment_direction_tag(halo(i_halo)%ifrag_src,dc%n_frag,halo(i_halo)%dvec,&
+            itag_recv,valid_recv_tag)
+          if(.not.valid_recv_tag)error stop 'DC-LCFO: receive halo tag exceeds portable MPI_TAG_UB'
           ireq_recv(i_halo) = comm_irecv(halo(i_halo)%buf_recv,halo(i_halo)%id_src,itag_recv,dc%icomm_tot)
         end do ! i_halo=1,n_halo
         call comm_wait_all(ireq_recv)
@@ -439,7 +500,7 @@ contains
         call eigen_dsyev(mat_H,esp_tot(1:n,ispin),mat_V)
         if(dc%id_frag==0) then
           ifrag = dc%i_frag
-          do i=1,dc%nstate_tot
+          do i=1,coefficient_count
           do jo=1,n_basis(ifrag,ispin) ; j = index_basis(jo,ifrag,ispin)
             coef_wf(jo,i,ispin) = mat_V(j,i) ! coefficients of the wavefunctions
           end do
@@ -480,7 +541,7 @@ contains
 
       call diag_chefsi(dc,nspin,lcfo_diag_chefsi_filter_degree, &
       & lcfo_diag_chefsi_filter_chunk_size,lcfo_diag_chefsi_max_cycle, &
-      & lcfo_diag_chefsi_residual_tolerance,n_basis,n_mat,n_halo,halo_src, &
+      & lcfo_diag_chefsi_residual_tolerance,coefficient_count,n_basis,n_mat,n_halo,halo_src, &
       & halo_dst,halo_root_src,halo_dvec,mat_H_local,h_halo, &
       & esp_tot,coef_wf)
 
@@ -500,8 +561,8 @@ contains
       real(8), allocatable :: h_div(:,:), v_div(:,:), h(:,:,:), v_tmp1(:,:), v_tmp2(:,:)
       
       allocate(h(dc%nstate_frag,dc%nstate_frag,0:n_halo))
-      allocate(v_tmp1(dc%nstate_frag,dc%nstate_tot))
-      allocate(v_tmp2(dc%nstate_frag,dc%nstate_tot))
+      allocate(v_tmp1(dc%nstate_frag,coefficient_count))
+      allocate(v_tmp2(dc%nstate_frag,coefficient_count))
       do ispin=1,nspin
         if(dc%id_tot==0) write(*,*) "eigenexa diag, #dim=",n_mat(ispin)
         n = n_mat(ispin)
@@ -571,12 +632,12 @@ contains
               ix = eigen_translate_l2g(ix_loc, x_nnod, x_inod)
               ifrag_x = ifrag_array(ix)
               io_x = io_array(ix)
-              if(iy <= dc%nstate_tot .and. ifrag_x == ifrag) then
+              if(iy <= coefficient_count .and. ifrag_x == ifrag) then
                 v_tmp1(io_x,iy) = v_div(ix_loc,iy_loc)
               end if
             end do
           end do
-          call comm_summation(v_tmp1,v_tmp2,dc%nstate_frag*dc%nstate_tot,dc%icomm_tot)
+          call comm_summation(v_tmp1,v_tmp2,dc%nstate_frag*coefficient_count,dc%icomm_tot)
           if(ifrag==dc%i_frag .and. dc%id_frag==0) then
             coef_wf(:,:,ispin) = v_tmp2
           end if
@@ -590,13 +651,118 @@ contains
     end subroutine diag_eigenexa
 #endif
 
+    subroutine build_retained_occupations
+      implicit none
+      integer :: istate,iteration,fully_occupied
+      real(8) :: electron_count,remainder,mu_lower,mu_upper,mu,number_at_mu,fact
+
+      if(nspin/=1)error stop 'DC-LCFO: retained occupation output requires one real-Gamma spin channel'
+      allocate(retained_occupations(retained_count))
+      if(size(retained_occupations)/=retained_count) &
+        error stop 'DC-LCFO: retained occupation extent mismatch'
+      retained_occupations=0d0;electron_count=dc%elec_num_tot
+      if(electron_count<0d0.or.electron_count>2d0*real(retained_count,8)) &
+        error stop 'DC-LCFO: retained rank cannot carry the total electron count'
+      if(temperature<=0d0)then
+        fully_occupied=min(retained_count,int(electron_count/2d0))
+        if(fully_occupied>0)retained_occupations(1:fully_occupied)=2d0
+        remainder=electron_count-2d0*real(fully_occupied,8)
+        if(remainder>10d0*epsilon(1d0).and.fully_occupied<retained_count) &
+          retained_occupations(fully_occupied+1)=remainder
+      else
+        mu_lower=minval(esp_tot(1:retained_count,1))-40d0*temperature
+        mu_upper=maxval(esp_tot(1:retained_count,1))+40d0*temperature
+        do iteration=1,256
+          mu=0.5d0*(mu_lower+mu_upper);number_at_mu=0d0
+          do istate=1,retained_count
+            fact=(esp_tot(istate,1)-mu)/temperature
+            if(fact<=-40d0)then
+              number_at_mu=number_at_mu+2d0
+            else if(fact<40d0)then
+              number_at_mu=number_at_mu+2d0/(1d0+exp(fact))
+            end if
+          end do
+          if(number_at_mu<electron_count)then;mu_lower=mu;else;mu_upper=mu;end if
+        end do
+        mu=0.5d0*(mu_lower+mu_upper)
+        do istate=1,retained_count
+          fact=(esp_tot(istate,1)-mu)/temperature
+          if(fact<=-40d0)then
+            retained_occupations(istate)=2d0
+          else if(fact<40d0)then
+            retained_occupations(istate)=2d0/(1d0+exp(fact))
+          end if
+        end do
+        if(retained_occupations(retained_count)>1d-10) &
+          error stop 'DC-LCFO: retained finite-temperature window has an occupied upper edge'
+      end if
+      if(.not.all(ieee_is_finite(retained_occupations)).or.&
+          abs(sum(retained_occupations)-electron_count)>&
+          1d3*epsilon(1d0)*max(1d0,electron_count)) &
+        error stop 'DC-LCFO: retained occupations do not conserve electron count'
+    end subroutine build_retained_occupations
+
+    subroutine build_retained_box_contribution
+      implicit none
+      integer :: nxyz_domain(3),nxyz_box(3),lb_rwf(3),ub_rwf(3),io_lb,io_ub
+      integer :: ibx,iby,ibz,sx,sy,sz,raw_io,ibasis,istate,point,box_count
+      real(8),allocatable :: effective_coefficient(:,:)
+      complex(8),allocatable :: contribution_local(:,:)
+
+      call get_fragment_domain(dc,dc%i_frag,nxyz_domain)
+      nxyz_box=nxyz_domain+2*dc%nxyz_buffer
+      lb_rwf=[lbound(spsi%rwf,1),lbound(spsi%rwf,2),lbound(spsi%rwf,3)]
+      ub_rwf=[ubound(spsi%rwf,1),ubound(spsi%rwf,2),ubound(spsi%rwf,3)]
+      io_lb=lbound(spsi%rwf,5);io_ub=ubound(spsi%rwf,5)
+      box_count=retained_count
+      if(present(retained_box_count))box_count=retained_box_count
+      allocate(effective_coefficient(dc%nstate_frag,box_count),&
+        contribution_local(box_count,product(nxyz_box)),&
+        retained_box_contribution(box_count,product(nxyz_box)))
+      effective_coefficient=0d0;contribution_local=(0d0,0d0)
+      if(dc%id_frag==0)then
+        do istate=1,box_count
+          do ibasis=1,n_basis(dc%i_frag,1)
+            effective_coefficient(:,istate)=effective_coefficient(:,istate)+&
+              basis_transform(:,ibasis,1)*coef_wf(ibasis,istate,1)
+          end do
+        end do
+      end if
+      call comm_bcast(effective_coefficient,dc%icomm_frag,0)
+      point=0
+      do ibz=1,nxyz_box(3)
+        sz=dc_buffer_box_to_local_index(ibz,nxyz_domain(3),dc%nxyz_buffer(3))
+        do iby=1,nxyz_box(2)
+          sy=dc_buffer_box_to_local_index(iby,nxyz_domain(2),dc%nxyz_buffer(2))
+          do ibx=1,nxyz_box(1)
+            sx=dc_buffer_box_to_local_index(ibx,nxyz_domain(1),dc%nxyz_buffer(1));point=point+1
+            if(sx<lb_rwf(1).or.sx>ub_rwf(1).or.sy<lb_rwf(2).or.sy>ub_rwf(2).or.&
+                sz<lb_rwf(3).or.sz>ub_rwf(3))cycle
+            do raw_io=max(1,io_lb),min(dc%nstate_frag,io_ub)
+              contribution_local(:,point)=contribution_local(:,point)+&
+                cmplx(effective_coefficient(raw_io,:)*spsi%rwf(sx,sy,sz,1,raw_io,1,1),0d0,8)
+            end do
+          end do
+        end do
+      end do
+      call comm_summation(contribution_local,retained_box_contribution,&
+        size(contribution_local),dc%icomm_frag)
+      deallocate(effective_coefficient,contribution_local)
+    end subroutine build_retained_box_contribution
     subroutine output
       use salmon_global, only: base_directory, sysname, unit_energy
       use filesystem, only: get_filehandle
       use inputoutput, only: uenergy_from_au
       implicit none
       integer :: iunit,i_halo
+      integer :: nxyz_domain(3), nxyz_buffer_seed(3), nxyz_box(3)
+      integer :: ibx, iby, ibz, sx, sy, sz, raw_io, ibasis
+      integer :: lb_rwf(3), ub_rwf(3), io_lb, io_ub
       character(256) :: filename
+      real(8) :: coef_val
+      real(8), allocatable :: phi_box_local(:,:,:), phi_box_sum(:,:,:)
+
+      call get_fragment_domain(dc, dc%i_frag, nxyz_domain)
       
     ! total system data
       if(dc%id_tot==0 .and. yn_dc_lcfo_diag=='y') then
@@ -636,11 +802,65 @@ contains
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_bf ! base_directory==./data_dcdft/fragments/dc%i_frag/
         open(iunit,file=filename,form='unformatted',access='stream')
-        write(iunit) dc%nxyz_domain(1:3),nspin,dc%nstate_frag
+        write(iunit) nxyz_domain(1:3),nspin,dc%nstate_frag
         write(iunit) n_basis(dc%i_frag,1:nspin) ! # of basis functions
-        write(iunit) f_basis(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3) &
+        write(iunit) f_basis(1:nxyz_domain(1),1:nxyz_domain(2),1:nxyz_domain(3) &
         & ,1:nspin,1:dc%nstate_frag) ! basis functions | lambda >
         close(iunit)
+      end if
+
+    ! buffered basis functions for DG surface Flux/Flow terms
+      nxyz_buffer_seed(1:3) = dc%nxyz_buffer(1:3)
+      nxyz_box(1:3) = nxyz_domain(1:3) + 2 * nxyz_buffer_seed(1:3)
+      lb_rwf(1) = lbound(spsi%rwf, 1)
+      lb_rwf(2) = lbound(spsi%rwf, 2)
+      lb_rwf(3) = lbound(spsi%rwf, 3)
+      ub_rwf(1) = ubound(spsi%rwf, 1)
+      ub_rwf(2) = ubound(spsi%rwf, 2)
+      ub_rwf(3) = ubound(spsi%rwf, 3)
+      io_lb = lbound(spsi%rwf, 5)
+      io_ub = ubound(spsi%rwf, 5)
+      allocate(phi_box_local(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+      allocate(phi_box_sum(nxyz_box(1), nxyz_box(2), nxyz_box(3)))
+      if(dc%id_frag==0) then
+        iunit = get_filehandle()
+        filename = trim(base_directory)//binfile_bfb
+        open(iunit,file=filename,form='unformatted',access='stream')
+        write(iunit) basis_buffer_magic, basis_buffer_version
+        write(iunit) nxyz_domain(1:3), nxyz_buffer_seed(1:3), nspin, dc%nstate_frag
+        write(iunit) n_basis(dc%i_frag,1:nspin)
+      end if
+      do ispin=1,nspin
+        do ibasis=1,dc%nstate_frag
+          phi_box_local(:,:,:) = 0d0
+          if(ibasis <= n_basis(dc%i_frag,ispin)) then
+            do raw_io=max(1,io_lb),min(dc%nstate_frag,io_ub)
+              coef_val = basis_transform(raw_io,ibasis,ispin)
+              if(abs(coef_val) <= 0d0) cycle
+              do ibz=1,nxyz_box(3)
+                sz = dc_buffer_box_to_local_index(ibz,nxyz_domain(3),nxyz_buffer_seed(3))
+                if(sz < lb_rwf(3) .or. sz > ub_rwf(3)) cycle
+                do iby=1,nxyz_box(2)
+                  sy = dc_buffer_box_to_local_index(iby,nxyz_domain(2),nxyz_buffer_seed(2))
+                  if(sy < lb_rwf(2) .or. sy > ub_rwf(2)) cycle
+                  do ibx=1,nxyz_box(1)
+                    sx = dc_buffer_box_to_local_index(ibx,nxyz_domain(1),nxyz_buffer_seed(1))
+                    if(sx < lb_rwf(1) .or. sx > ub_rwf(1)) cycle
+                    phi_box_local(ibx,iby,ibz) = phi_box_local(ibx,iby,ibz) &
+                    & + coef_val * spsi%rwf(sx,sy,sz,ispin,raw_io,1,1)
+                  end do
+                end do
+              end do
+            end do
+          end if
+          call comm_summation(phi_box_local,phi_box_sum,product(nxyz_box),dc%icomm_frag)
+          if(dc%id_frag==0) write(iunit) phi_box_sum(1:nxyz_box(1),1:nxyz_box(2),1:nxyz_box(3))
+        end do
+      end do
+      if(dc%id_frag==0) close(iunit)
+      deallocate(phi_box_local,phi_box_sum)
+
+      if(dc%id_frag==0) then
       ! local hamiltonian matrix
         iunit = get_filehandle()
         filename = trim(base_directory)//binfile_hl
@@ -676,10 +896,13 @@ contains
       character(30) :: phys_quantity='psi'
       real(8),dimension(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3)) :: wrk1,wrk2
       integer :: ix_tot,iy_tot,iz_tot
+      integer :: nxyz_domain(3)
       integer,parameter :: io_out=1025
       character(256) :: dir_tmp
       
       if(n_mat(1) < io_out) return
+
+      call get_fragment_domain(dc,dc%i_frag,nxyz_domain)
 
       wrk1 = 0d0
       if(dc%id_frag==0) then
@@ -687,9 +910,9 @@ contains
         io = io_out
         jfrag = dc%i_frag
         do jo=1,n_basis(jfrag,ispin) ; j = index_basis(jo,jfrag,ispin)
-        do iz=1,dc%nxyz_domain(3); iz_tot = dc%jxyz_tot(iz,3)
-        do iy=1,dc%nxyz_domain(2); iy_tot = dc%jxyz_tot(iy,2)
-        do ix=1,dc%nxyz_domain(1); ix_tot = dc%jxyz_tot(ix,1)
+        do iz=1,nxyz_domain(3); iz_tot = dc%jxyz_tot(iz,3)
+        do iy=1,nxyz_domain(2); iy_tot = dc%jxyz_tot(iy,2)
+        do ix=1,nxyz_domain(1); ix_tot = dc%jxyz_tot(ix,1)
           wrk1(ix_tot,iy_tot,iz_tot) = wrk1(ix_tot,iy_tot,iz_tot) &
           & + f_basis(ix,iy,iz,ispin,jo) * coef_wf(jo,io,ispin)
         end do
@@ -725,11 +948,26 @@ contains
 
 !===================================================================================================================================
 
+  integer function dc_buffer_box_to_local_index(ibox, ndom, nbuf) result(iloc)
+    implicit none
+    integer, intent(in) :: ibox, ndom, nbuf
+
+    if (nbuf <= 0) then
+      iloc = ibox
+    else if (ibox <= nbuf) then
+      iloc = ndom + nbuf + ibox
+    else
+      iloc = ibox - nbuf
+    end if
+  end function dc_buffer_box_to_local_index
+
+!===================================================================================================================================
+
 ! yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data
   subroutine init_conventional_from_dcdft(lg,mg,system,info,spsi)
     use communication, only: comm_is_root, comm_summation, comm_bcast
     use filesystem, only: get_filehandle
-    use salmon_global,only: num_fragment
+    use salmon_global,only: num_fragment, yn_conventional_from_dcdft
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -751,8 +989,16 @@ contains
     nstate_tot = 0 ! initial
     
     if(comm_is_root(info%id_rko)) then
-      write(*,*) "start init_conventional_from_dcdft"
-      write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "start init_conventional_from_dcdft"
+      else
+        write(*,*) "start init_from_dcdft"
+      end if
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data"
+      else
+        write(*,*) "wavefunctions are reconstructed from DC-LCFO data"
+      end if
       write(*,*) "read from ./data_dcdft directory"
     end if
     
@@ -787,7 +1033,10 @@ contains
       write(filename, '(a, i6.6, a, a)') trim(bdir_frag), jfrag, '/', binfile_rg
       open(iunit,file=filename,form='unformatted',access='stream')
       read(iunit) lgnum_frag(1:3), lgnum_tmp(1:3)
-      if( any( lgnum_tmp /= lg%num ) ) stop "data_dcdft: input mismatch (lg)"
+      if( any( lgnum_tmp /= lg%num ) ) then
+        write(*,*) 'data_dcdft lg mismatch: file lgnum_tmp=', lgnum_tmp, ' expected lg%num=', lg%num
+        stop "data_dcdft: input mismatch (lg)"
+      end if
       allocate(jxyz_tot(maxval(lgnum_frag),3))
       do n=1,3 ! x,y,z
         read(iunit) jxyz_tot(1:lgnum_frag(n),n)
@@ -849,7 +1098,11 @@ contains
     end do
 
     if(comm_is_root(info%id_rko)) then
-      write(*,*) "end init_conventional_from_dcdft"
+      if (yn_conventional_from_dcdft == 'y') then
+        write(*,*) "end init_conventional_from_dcdft"
+      else
+        write(*,*) "end init_from_dcdft"
+      end if
     end if
     
     if(jfrag > 0) deallocate(n_mat,n_basis,index_basis,jxyz_tot,coef_wf,f_basis)

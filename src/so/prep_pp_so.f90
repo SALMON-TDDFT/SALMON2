@@ -52,6 +52,8 @@ contains
         do ll=0,pp%mlps(ik)
         do l=l0,l0+pp%nproj(ll,ik)-1
           if ( pp%inorm(l,ik) == 0 .and. pp%inorm_so(l,ik) == 0 ) cycle
+          if (j_angular_momentum == 1 .and. pp%inorm(l,ik)    == 0) cycle
+          if (j_angular_momentum == 2 .and. pp%inorm_so(l,ik) == 0) cycle
           select case(j_angular_momentum)
           case(1)
             do n_mj=1,2*ll+2
@@ -74,6 +76,14 @@ contains
     Nlma_so = lma
 
     !write(*,*) "Nlma_so=", Nlma_so, ppg%nlma
+
+    if(allocated(lma_tbl_so)) deallocate(lma_tbl_so)
+    if(allocated(ppg%ia_tbl_so)) deallocate(ppg%ia_tbl_so)
+    if(allocated(ppg%rinv_uvu_so)) deallocate(ppg%rinv_uvu_so)
+    if(allocated(ll_tbl_so)) deallocate(ll_tbl_so)
+    if(allocated(jj_tbl_so)) deallocate(jj_tbl_so)
+    if(allocated(mj_tbl_so)) deallocate(mj_tbl_so)
+    if(allocated(ppg%uv_so)) deallocate(ppg%uv_so)
 
     allocate( lma_tbl_so(lm_max,natom,2) ); lma_tbl_so=0
     allocate( ppg%ia_tbl_so(Nlma_so) ); ppg%ia_tbl_so=0
@@ -116,6 +126,8 @@ contains
           do ll=0,pp%mlps(ik)
           do l=l0,l0+pp%nproj(ll,ik)-1
              if ( pp%inorm(l,ik) == 0 .and. pp%inorm_so(l,ik) == 0 ) cycle
+             if (j_angular_momentum == 1 .and. pp%inorm(l,ik)    == 0) cycle
+             if (j_angular_momentum == 2 .and. pp%inorm_so(l,ik) == 0) cycle
              select case( j_angular_momentum )
              case(1)
                 do n_mj=1,2*ll+2
@@ -262,6 +274,9 @@ contains
              l0=0
              do ll=0,pp%mlps(ik)
              do l=l0,l0+pp%nproj(ll,ik)-1
+                if ( pp%inorm(l,ik) == 0 .and. pp%inorm_so(l,ik) == 0 ) cycle
+                if (j_angular_momentum == 1 .and. pp%inorm(l,ik)    == 0) cycle
+                if (j_angular_momentum == 2 .and. pp%inorm_so(l,ik) == 0) cycle
 
                 select case( j_angular_momentum )
                 case( 1 )
@@ -278,13 +293,21 @@ contains
 !
                       m = nint( mj - 0.5d0 )
                       coef=sqrt( dble(ll+mj+0.5d0)/dble(2*ll+1) )
-                      ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      if (abs(m) <= ll .and. coef /= 0d0) then
+                        ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      else
+                        ppg%uv_so(j,ilma,1,1)=(0d0,0d0)
+                      end if
 !
 ! j=l+1/2, beta spin
 !
                       m = nint( mj + 0.5d0 )
                       coef=sqrt( dble(ll-mj+0.5d0)/dble(2*ll+1) )
-                      ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      if (abs(m) <= ll .and. coef /= 0d0) then
+                        ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      else
+                        ppg%uv_so(j,ilma,2,1)=(0d0,0d0)
+                      end if
 
                    end do ! n_mj
 
@@ -302,13 +325,21 @@ contains
 !
                       m = nint( mj - 0.5d0 )
                       coef=sqrt( dble(ll-mj+0.5d0)/dble(2*ll+1) )
-                      ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      if (abs(m) <= ll .and. coef /= 0d0) then
+                        ppg%uv_so(j,ilma,1,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      else
+                        ppg%uv_so(j,ilma,1,1)=(0d0,0d0)
+                      end if
 !
 ! j=l-1/2, beta spin
 !
                       m = nint( mj + 0.5d0 )
                       coef=-sqrt( dble(ll+mj+0.5d0)/dble(2*ll+1) )
-                      ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      if (abs(m) <= ll .and. coef /= 0d0) then
+                        ppg%uv_so(j,ilma,2,1)=coef*uvr(l)*zylm(x,y,z,ll,m)
+                      else
+                        ppg%uv_so(j,ilma,2,1)=(0d0,0d0)
+                      end if
 
                    end do !n_mj
 

@@ -67,7 +67,7 @@ module lcfo_diag_chefsi
 contains
 
   subroutine diag_chefsi(dc,nspin,filter_degree,filter_chunk_size,max_cycle, &
-  & residual_tolerance,n_basis,n_mat,n_halo,halo_src, &
+  & residual_tolerance,requested_state_count,n_basis,n_mat,n_halo,halo_src, &
   & halo_dst,halo_root_src,halo_dvec,h_diag,h_halo,esp_tot,coef_wf)
     use communication, only: comm_bcast, comm_create_group, &
     & comm_free_group, comm_get_max, comm_isend, comm_irecv, &
@@ -79,6 +79,7 @@ contains
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: nspin,filter_degree,filter_chunk_size,max_cycle
+    integer, intent(in) :: requested_state_count
     integer, intent(in) :: n_basis(:,:),n_mat(:),n_halo
     integer, intent(in) :: halo_src(:),halo_dst(:),halo_root_src(:)
     integer, intent(in) :: halo_dvec(:,:)
@@ -95,10 +96,29 @@ contains
     call timer_begin(LOG_CHEFSI_SETUP)
     max_basis = size(h_diag,1)
     npadded = max_basis*dc%n_frag
-    nbuffer = ceiling(0.05d0*real(dc%nstate_tot,8))
-    nbuffer = min(nbuffer,minval(n_mat)-dc%nstate_tot)
+    if(requested_state_count < dc%nstate_tot) then
+      stop "DC-LCFO CheFSI: requested state count is below nstate_tot."
+    end if
+    if(requested_state_count > minval(n_mat)) then
+      stop "DC-LCFO CheFSI: requested state count exceeds the basis rank."
+    end if
+    if(size(esp_tot,1) < requested_state_count) then
+      stop "DC-LCFO CheFSI: eigenvalue output is smaller than the requested state count."
+    end if
+    if(dc%id_frag==0) then
+      if(.not.allocated(coef_wf)) then
+        stop "DC-LCFO CheFSI: coefficient output is not allocated."
+      end if
+      if(size(coef_wf,1) < max_basis .or. &
+      & size(coef_wf,2) < requested_state_count .or. &
+      & size(coef_wf,3) < nspin) then
+        stop "DC-LCFO CheFSI: coefficient output has an invalid shape."
+      end if
+    end if
+    nbuffer = ceiling(0.05d0*real(requested_state_count,8))
+    nbuffer = min(nbuffer,minval(n_mat)-requested_state_count)
     nbuffer = max(0,nbuffer)
-    nsub = dc%nstate_tot+nbuffer
+    nsub = requested_state_count+nbuffer
 
     if(dc%isize_tot /= dc%n_frag*dc%isize_frag) then
       stop "DC-LCFO CheFSI: inconsistent fragment process grid."
@@ -116,7 +136,7 @@ contains
     call timer_end(LOG_CHEFSI_SETUP)
 
     if(dc%id_tot==0) then
-      write(*,*) "CheFSI subspace:",nsub," target:",dc%nstate_tot
+      write(*,*) "CheFSI subspace:",nsub," target:",requested_state_count
       write(*,*) "CheFSI polynomial degree:",filter_degree
       write(*,*) "CheFSI maximum cycles:",max_cycle
       write(*,*) "CheFSI residual tolerance:",residual_tolerance
@@ -191,7 +211,7 @@ contains
       real(8) :: lanczos_residual,lanczos_ritz
       real(8), allocatable :: x(:,:),eigenvalue(:)
 
-      nstate = dc%nstate_tot
+      nstate = requested_state_count
       nlocked = 0
       call initialize_layouts(npadded,nsub,max_basis,grid_natural, &
       & grid_dense,layout_natural,layout_dense,layout_small)
@@ -283,8 +303,9 @@ contains
       integer, intent(in) :: nstate
       real(8), intent(inout) :: eigenvalue(:)
       type(s_chefsi_workspace), intent(out) :: workspace
-      integer :: info,liwork,lwork,lwork_min,ncol,max_ncol
+      integer :: info,liwork,lwork,ncol,max_ncol
       integer(8) :: bytes_per_column,estimated_bytes
+      integer(8) :: lwork_min,lwork_query,pdsyevd_work,pdormtr_work
       real(8) :: work_query(1)
 
       call timer_begin(LOG_CHEFSI_SETUP)
@@ -331,10 +352,28 @@ contains
       if(info/=0) then
         stop "DC-LCFO CheFSI: PDSYEVD workspace query failed."
       end if
-      lwork_min = max(1+6*nsub+2*layout_g%nrow_local* &
-      & layout_g%ncol_local,3*nsub+max(dense_block_size* &
-      & (layout_g%nrow_local+1),3*dense_block_size))
-      lwork = max(10*lwork_min,10*nint(work_query(1)))
+      if(work_query(1)<1d0 .or. &
+      & work_query(1)>real(huge(lwork),8)/10d0) then
+        stop "DC-LCFO CheFSI: invalid PDSYEVD workspace query."
+      end if
+      lwork_query = ceiling(work_query(1),kind=8)
+      ! PDSYEVD's reported minimum can be smaller than the workspace required
+      ! by its internal PDORMTR call when nsub is below the block size.
+      pdsyevd_work = max(1_8+6_8*int(nsub,8) &
+      & +2_8*int(layout_g%nrow_local,8)*int(layout_g%ncol_local,8), &
+      & 3_8*int(nsub,8)+max(int(dense_block_size,8) &
+      & *int(layout_g%nrow_local+1,8),3_8*int(dense_block_size,8))) &
+      & +2_8*int(nsub,8)
+      pdormtr_work = 2_8*int(nsub,8) &
+      & +max(int(dense_block_size,8)*int(dense_block_size-1,8)/2_8, &
+      & int(layout_g%nrow_local+layout_g%ncol_local,8) &
+      & *int(dense_block_size,8)) &
+      & +int(dense_block_size,8)*int(dense_block_size,8)
+      lwork_min = max(pdsyevd_work,pdormtr_work,lwork_query)
+      if(lwork_min>int(huge(lwork),8)/10_8) then
+        stop "DC-LCFO CheFSI: PDSYEVD workspace size overflows integer."
+      end if
+      lwork = int(10_8*lwork_min)
       allocate(workspace%eigen_work(lwork))
       call timer_end(LOG_CHEFSI_SETUP)
     end subroutine initialize_workspace
@@ -1057,7 +1096,7 @@ contains
       end do
       call comm_summation(local_coef,fragment_coef,max_basis*nstate, &
       & dc%icomm_frag)
-      if(dc%id_frag==0) coef_wf(:,:,s) = fragment_coef
+      if(dc%id_frag==0) coef_wf(:,1:nstate,s) = fragment_coef(:,1:nstate)
       deallocate(fragment_coef,local_coef)
       call timer_end(LOG_CHEFSI_EXPORT)
     end subroutine export_coefficients

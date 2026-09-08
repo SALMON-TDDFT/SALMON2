@@ -97,7 +97,6 @@ contains
     complex(8) :: wf_block_send(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3), &
                             lbound(wf%zwf,4):ubound(wf%zwf,4), wfi%numo_max)
     complex(8) :: umat(wfi%numo_max,wfi%numo), umat_tmp(wfi%numo_max,wfi%numo)
-    complex(8) :: ZDOTC
 
     m4 = lbound(wf%zwf,4); n4 = ubound(wf%zwf,4)
     nsize_rg_so = (rg%ie(1)-rg%is(1)+1)*(rg%ie(2)-rg%is(2)+1)*(rg%ie(3)-rg%is(3)+1)*(n4-m4+1)
@@ -123,10 +122,7 @@ contains
             do jo1 = 1, wfi%numo
 
               ! normalize orbital jo1
-              norm2_tmp = real( ZDOTC( &
-               &      nsize_rg_so, wf_block(:,:,:,:,jo1), n_one, &
-               &                wf_block(:,:,:,:,jo1), n_one )) &
-               &     * sys%hvol
+              norm2_tmp = real(sum(conjg(wf_block(:,:,:,:,jo1)) * wf_block(:,:,:,:,jo1))) * sys%hvol
               if (wfi%if_divide_rspace) then
                 call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
               else
@@ -137,10 +133,7 @@ contains
               ! Calculate overlap coefficients:
               coeff_tmp = 0d0
               do jo2 = jo1+1, wfi%numo
-                coeff_tmp(jo2) = ZDOTC( &
-                 &      nsize_rg_so, wf_block(:,:,:,:,jo1), n_one, &
-                 &                wf_block(:,:,:,:,jo2), n_one ) &
-                 &     * sys%hvol
+                coeff_tmp(jo2) = sum(conjg(wf_block(:,:,:,:,jo1)) * wf_block(:,:,:,:,jo2)) * sys%hvol
               end do
               if (wfi%if_divide_rspace) then
                 call comm_summation(coeff_tmp, coeff, wfi%numo, wfi%icomm_r)
@@ -201,10 +194,7 @@ contains
 
                   do jo1 = io3_s, io3_e
                     ! normaliza the orbital jo1
-                    norm2_tmp = real( ZDOTC( &
-                     &      nsize_rg_so, wf_block(:,:,:,:,jo1), n_one, &
-                     &                wf_block(:,:,:,:,jo1), n_one )) &
-                     &     * sys%hvol
+                    norm2_tmp = real(sum(conjg(wf_block(:,:,:,:,jo1)) * wf_block(:,:,:,:,jo1))) * sys%hvol
                     if (wfi%if_divide_rspace) then
                       call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
                     else
@@ -215,10 +205,7 @@ contains
                 ! Calculate overlap coefficients:
                     coeff_tmp = 0d0
                     do jo2 = jo1+1, io3_e
-                      coeff_tmp(jo2) = ZDOTC( &
-                       &      nsize_rg_so, wf_block(:,:,:,:,jo1), n_one, &
-                       &                wf_block(:,:,:,:,jo2), n_one ) &
-                       &     * sys%hvol
+                      coeff_tmp(jo2) = sum(conjg(wf_block(:,:,:,:,jo1)) * wf_block(:,:,:,:,jo2)) * sys%hvol
                     end do
                     if (wfi%if_divide_rspace) then
                       call comm_summation(coeff_tmp(io3_s:io3_e), coeff(io3_s:io3_e), numo3, wfi%icomm_r)

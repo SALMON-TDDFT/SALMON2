@@ -7,6 +7,11 @@ set(SOURCES
     builtin_r2scan.f90
     builtin_tbmbj.f90
     salmon_xc.f90
+    xc_hse.f90
+    xc_hse_grid_sr.f90
+    xc_ace_update_manager.f90
+    auxiliary_basis.f90
+    xc_hse_ri.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

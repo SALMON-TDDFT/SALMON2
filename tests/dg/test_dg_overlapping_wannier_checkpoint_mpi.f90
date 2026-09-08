@@ -1,0 +1,314 @@
+#include "config.h"
+program test_dg_overlapping_wannier_checkpoint_mpi
+  use mpi
+  use iso_fortran_env,only:int64
+  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_positive_inf
+  use dg_overlapping_wannier_checkpoint
+  implicit none
+  integer::comm,rank,nproc,ierr,nlocal,i,unit,ntail,j,nrow
+  integer(int64)::original_publication_id,original_hamiltonian_fingerprint
+  character(512)::prefix,prefix2,prefix_bad,shard
+  type(s_dg_overlapping_wannier_checkpoint)::a,b
+  logical::ok,reusable,exists
+  character(256)::message
+  real(8),parameter::current_gates(6)=[1d-9,1d-9,1d-9,1d-9,10d0,1d-9]
+  call MPI_Init(ierr);comm=MPI_COMM_WORLD
+  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call get_environment_variable('OW_CHECKPOINT_PREFIX',prefix)
+  write(prefix(len_trim(prefix)+1:),'(a,i0)')'-',nproc
+  prefix2=trim(prefix)//'-roundtrip'
+  prefix_bad=trim(prefix)//'-bad'
+  nlocal=count([(mod(i-1,nproc)==rank,i=1,4)])
+  a%basis_generation=7;a%geometry_generation=3
+  a%basis_fingerprint=700_int64;a%operator_fingerprint=900_int64
+  a%hamiltonian_fingerprint=1100_int64;a%observable_fingerprint=1300_int64
+  a%global_lcfo_fingerprint=1700_int64;a%occupation_block_fingerprint=1900_int64
+  a%affine_cocycle_fingerprint=2300_int64;a%redistribution_fingerprint=2900_int64
+  a%mlwf_backend='wannier90';a%mlwf_version='3.1.0'
+  a%mlwf_input_fingerprint=3100_int64;a%mlwf_transform_fingerprint=3700_int64
+  a%mlwf_spreads=[1.5d0,0.5d0,1d0]
+  a%mlwf_coordinator_bytes=4096_int64;a%mlwf_workspace_peak_bytes=2048_int64
+  a%mlwf_coordinator_byte_limit=8192_int64
+  a%mlwf_symmetry_receipts=[1d-13,2d-13,3d-13];a%mlwf_canonical=.true.
+  a%affine_group_order=96;a%translation_subgroup_order=4;a%point_cogroup_order=24
+  a%fixed_center_group_order=24;a%fixed_center_group_fingerprint=4100_int64
+  a%fixed_center_fractional=[0.25d0,0.5d0,0.75d0]
+  a%fixed_center_inversion_present=.true.
+  a%affine_proof_workspace_peak_bytes=1024_int64
+  a%point_projection_workspace_peak_bytes=1536_int64
+  a%occupied_adaptation_workspace_peak_bytes=3072_int64
+  a%occupied_subspace_distance=0.25d0
+  a%occupied_electron_count_drift=2d-13
+  a%occupied_density_interior_difference=3d-12
+  a%occupied_density_boundary_difference=4d-11
+  a%occupied_density_interior_tolerance=1d-9;a%occupied_density_boundary_tolerance=2d-9
+  a%occupied_closure_before=0.5d0;a%occupied_closure_after=5d-13
+  a%occupied_selected_edge=0.75d0;a%occupied_rejected_edge=0.25d0
+  a%occupied_cluster_gap=0.5d0;a%occupied_selected_block_dimension=2
+  a%field_coupling_convention='cell_wrapped_length_velocity'
+  a%density_residual=1d-12;a%coefficient_residual=2d-12;a%charge_error=3d-13;a%accepted=.true.
+  a%unmixed_density_residual=4d-12;a%orthogonality_defect=5d-12;a%metric_condition=2d0
+  a%density_tolerance=1d-9;a%coefficient_tolerance=1d-9;a%orthogonality_tolerance=1d-9
+  a%charge_tolerance=1d-9;a%condition_limit=10d0
+  a%symmetry_closure_residual=1d-12;a%symmetry_tolerance=1d-9
+  a%localization_initial_spread=2d0;a%localization_final_spread=1d0
+  a%localization_maximum_gradient=1d-7;a%localization_iterations=6
+  a%localization_converged=.true.
+  a%gs_acceptance_receipts=0d0;a%gs_acceptance_tolerance=1d-9
+  allocate(a%center_owner(2),a%core_physical_ids(nlocal),a%coefficients(2,1),&
+    a%occupations(1),a%density(nlocal))
+  a%center_owner=[0,mod(1,nproc)]
+  nrow=count(a%center_owner==rank)
+  allocate(a%overlap_row_ids(nrow),a%overlap(nrow,2),a%hamiltonian0(nrow,2),&
+    a%position(3,nrow,2),a%velocity(3,nrow,2))
+  a%overlap=(0d0,0d0);a%hamiltonian0=(0d0,0d0);a%position=(0d0,0d0);a%velocity=(0d0,0d0)
+  j=0
+  do i=1,2
+    if(a%center_owner(i)/=rank)cycle
+    j=j+1;a%overlap_row_ids(j)=i;a%overlap(j,i)=1d0
+    a%hamiltonian0(j,i)=real(i,8)
+    a%position(1,j,i)=0.25d0*real(i,8)
+    a%velocity(1,j,3-i)=cmplx(0d0,merge(0.1d0,-0.1d0,i==1),8)
+  enddo
+  call compute_dg_overlapping_wannier_matrix_fingerprints(comm,a%overlap_row_ids,a%hamiltonian0,&
+    a%position,a%velocity,a%hamiltonian_fingerprint,a%observable_fingerprint,ok)
+  call require(ok,'checkpoint matrix fingerprint construction')
+  original_hamiltonian_fingerprint=a%hamiltonian_fingerprint
+  a%coefficients=reshape([cmplx(1d0,0d0,8),cmplx(0d0,0d0,8)],[2,1]);a%occupations=1d0
+  ntail=count(a%center_owner==rank)
+  allocate(a%tail_center(ntail),a%tail_generation(ntail),a%tail_offsets(ntail+1),&
+    a%tail_physical_ids(5*ntail))
+  j=0;a%tail_offsets(1)=1
+  do i=1,2
+    if(a%center_owner(i)/=rank)cycle
+    j=j+1;a%tail_center(j)=i;a%tail_generation(j)=7;a%tail_offsets(j+1)=5*j+1
+    a%tail_physical_ids(5*j-4:5*j)=[1_int64,2_int64,3_int64,4_int64,1_int64]
+  enddo
+  nlocal=0
+  do i=1,4
+    if(mod(i-1,nproc)/=rank)cycle
+    nlocal=nlocal+1;a%core_physical_ids(nlocal)=i;a%density(nlocal)=0.25d0*i
+  enddo
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix),a,ok,message)
+  call require(ok,trim(message))
+  original_publication_id=a%publication_id
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(ok.and.reusable,trim(message))
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),0,0,0_int64,0_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(ok.and.reusable,'accepted V3 may establish immutable coefficient-RT provenance')
+  call require(all(b%center_owner==a%center_owner).and.all(b%tail_physical_ids==a%tail_physical_ids).and.&
+    all(b%tail_center==a%tail_center).and.all(b%core_physical_ids==a%core_physical_ids).and.&
+    all(b%overlap_row_ids==a%overlap_row_ids),&
+    'checkpoint ownership round trip')
+  call require(all(b%overlap==a%overlap).and.all(b%coefficients==a%coefficients).and.all(b%density==a%density),&
+    'checkpoint payload round trip')
+  call require(b%global_lcfo_fingerprint==a%global_lcfo_fingerprint.and.&
+    b%occupation_block_fingerprint==a%occupation_block_fingerprint.and.&
+    b%affine_cocycle_fingerprint==a%affine_cocycle_fingerprint.and.&
+    b%redistribution_fingerprint==a%redistribution_fingerprint,&
+    'mandatory global-LCFO V3 provenance round trip')
+  call require(b%mlwf_backend==a%mlwf_backend.and.b%mlwf_version==a%mlwf_version.and.&
+    b%mlwf_input_fingerprint==a%mlwf_input_fingerprint.and.&
+    b%mlwf_transform_fingerprint==a%mlwf_transform_fingerprint.and.&
+    all(b%mlwf_spreads==a%mlwf_spreads).and.&
+    b%mlwf_coordinator_bytes==a%mlwf_coordinator_bytes.and.&
+    b%mlwf_workspace_peak_bytes==a%mlwf_workspace_peak_bytes.and.&
+    b%mlwf_coordinator_byte_limit==a%mlwf_coordinator_byte_limit.and.&
+    all(b%mlwf_symmetry_receipts==a%mlwf_symmetry_receipts).and.b%mlwf_canonical,&
+    'mandatory Wannier90 MLWF V3 provenance round trip')
+  call require(b%affine_group_order==a%affine_group_order.and.&
+    b%translation_subgroup_order==a%translation_subgroup_order.and.&
+    b%point_cogroup_order==a%point_cogroup_order.and.&
+    b%fixed_center_group_order==a%fixed_center_group_order.and.&
+    b%fixed_center_group_fingerprint==a%fixed_center_group_fingerprint.and.&
+    all(b%fixed_center_fractional==a%fixed_center_fractional).and.&
+    b%fixed_center_inversion_present.and.&
+    b%affine_proof_workspace_peak_bytes==a%affine_proof_workspace_peak_bytes.and.&
+    b%point_projection_workspace_peak_bytes==a%point_projection_workspace_peak_bytes,&
+    'two-layer affine proof and fixed-center projection provenance round trip')
+  call require(b%occupied_adaptation_workspace_peak_bytes==a%occupied_adaptation_workspace_peak_bytes.and.&
+    b%occupied_selected_block_dimension==a%occupied_selected_block_dimension.and.&
+    b%occupied_subspace_distance==a%occupied_subspace_distance.and.&
+    b%occupied_electron_count_drift==a%occupied_electron_count_drift.and.&
+    b%occupied_density_interior_difference==a%occupied_density_interior_difference.and.&
+    b%occupied_density_boundary_difference==a%occupied_density_boundary_difference.and.&
+    b%occupied_density_interior_tolerance==a%occupied_density_interior_tolerance.and.&
+    b%occupied_density_boundary_tolerance==a%occupied_density_boundary_tolerance.and.&
+    b%occupied_closure_before==a%occupied_closure_before.and.&
+    b%occupied_closure_after==a%occupied_closure_after.and.&
+    b%occupied_selected_edge==a%occupied_selected_edge.and.&
+    b%occupied_rejected_edge==a%occupied_rejected_edge.and.&
+    b%occupied_cluster_gap==a%occupied_cluster_gap,&
+    'symmetry-adapted occupied evidence round trip')
+  call require(b%localization_converged.and.b%localization_iterations==a%localization_iterations.and.&
+    b%localization_initial_spread==a%localization_initial_spread.and.&
+    b%localization_final_spread==a%localization_final_spread.and.&
+    b%localization_maximum_gradient==a%localization_maximum_gradient,&
+    'checkpoint localization evidence round trip')
+  call require(all(b%gs_acceptance_receipts==a%gs_acceptance_receipts).and.&
+    b%gs_acceptance_tolerance==a%gs_acceptance_tolerance,&
+    'mandatory reconstructed-GS acceptance receipts round trip')
+  a%localization_converged=.false.
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'nonconverged localization evidence rejected')
+  a%localization_converged=.true.;a%affine_cocycle_fingerprint=0_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'legacy V3 missing affine-cocycle provenance rejected')
+  a%affine_cocycle_fingerprint=2300_int64
+  a%mlwf_transform_fingerprint=0_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'V3 missing canonical MLWF transform provenance rejected')
+  a%mlwf_transform_fingerprint=3700_int64
+  a%mlwf_canonical=.false.
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'noncanonical MLWF transform rejected')
+  a%mlwf_canonical=.true.;a%mlwf_coordinator_byte_limit=1024_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'over-limit MLWF coordinator allocation rejected')
+  a%mlwf_coordinator_byte_limit=8192_int64;a%mlwf_spreads(1)=2d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'inconsistent MLWF spread decomposition rejected')
+  a%mlwf_spreads(1)=1.5d0;a%mlwf_symmetry_receipts(2)=2d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'post-MLWF symmetry receipt outside tolerance rejected')
+  a%mlwf_symmetry_receipts(2)=2d-13
+  a%fixed_center_inversion_present=.false.
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'centrosymmetric V3 missing fixed-center inversion rejected')
+  a%fixed_center_inversion_present=.true.;a%affine_group_order=95
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'inconsistent affine factor orders rejected')
+  a%affine_group_order=96
+  a%occupied_adaptation_workspace_peak_bytes=0_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'zero occupied-adaptation workspace rejected')
+  a%occupied_adaptation_workspace_peak_bytes=3072_int64
+  a%occupied_cluster_gap=0.4d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'inconsistent occupied cluster edges and gap rejected')
+  a%occupied_cluster_gap=0.5d0
+  a%occupied_density_interior_difference=2d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'occupied interior density difference outside named tolerance rejected')
+  a%occupied_density_interior_difference=3d-12
+  a%occupied_density_boundary_difference=3d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'occupied boundary density difference outside named tolerance rejected')
+  a%occupied_density_boundary_difference=4d-11
+  a%occupied_subspace_distance=ieee_value(0d0,ieee_positive_inf)
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'nonfinite occupied-subspace evidence rejected')
+  a%occupied_subspace_distance=0.25d0
+  a%gs_acceptance_receipts(11)=2d-9
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'out-of-tolerance reconstructed-GS receipt rejected')
+  a%gs_acceptance_receipts(11)=0d0
+  a%localization_final_spread=3d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'nonmonotone localization evidence rejected')
+  a%localization_final_spread=1d0
+  call require(all(b%hamiltonian0==a%hamiltonian0).and.all(b%position==a%position).and.&
+    all(b%velocity==a%velocity).and.b%hamiltonian_fingerprint==a%hamiltonian_fingerprint.and.&
+    b%observable_fingerprint==a%observable_fingerprint.and.&
+    b%field_coupling_convention==a%field_coupling_convention,'checkpoint V3 RT payload round trip')
+  if(size(a%tail_generation)>0)a%tail_generation(1)=a%tail_generation(1)+1
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'stale tail generation rejected')
+  if(size(a%tail_generation)>0)a%tail_generation(1)=a%tail_generation(1)-1
+  if(size(a%tail_offsets)>1)a%tail_offsets(1)=0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'out-of-range tail offset rejected collectively')
+  if(size(a%tail_offsets)>1)a%tail_offsets(1)=1
+  do i=1,size(a%overlap_row_ids)
+    if(a%overlap_row_ids(i)==2_int64)a%overlap_row_ids(i)=1_int64
+  enddo
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  call require(.not.ok,'duplicate/missing overlap row rejected')
+  do i=1,size(a%overlap_row_ids)
+    if(a%center_owner(2)==rank.and.a%overlap_row_ids(i)==1_int64.and.i>1)&
+      a%overlap_row_ids(i)=2_int64
+    if(a%center_owner(2)==rank.and.nproc>1.and.a%overlap_row_ids(i)==1_int64)&
+      a%overlap_row_ids(i)=2_int64
+  enddo
+  a%accepted=.false.;a%charge_error=2d-8
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix),a,ok,message)
+  call require(.not.ok,'unaccepted checkpoint publication rejected')
+  call require(index(message,'code=65')>0,'checkpoint rejection identifies failed invariant')
+  a%accepted=.true.;a%charge_error=3d-13
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(ok.and.reusable,'failed publication preserves prior atomic checkpoint')
+  a%density=a%density+0.125d0
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix),a,ok,message,failure_injection_rank=0)
+  call require(.not.ok,'injected post-shard failure rejected before manifest commit')
+  call require(a%publication_id==original_publication_id,'failed publication restores publication id')
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(ok.and.reusable.and.all(b%density/=a%density),&
+    'same-provenance failed publication preserves prior checkpoint')
+  a%density=a%density-0.125d0
+  if(rank==max(0,nproc-1))a%operator_fingerprint=901_int64
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  if(nproc>1)call require(.not.ok,'rank-inconsistent manifest payload rejected')
+  a%operator_fingerprint=900_int64
+  if(rank==max(0,nproc-1))a%hamiltonian_fingerprint=ieor(original_hamiltonian_fingerprint,1_int64)
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix_bad),a,ok,message)
+  if(nproc>1)call require(.not.ok,'rank-inconsistent RT matrix provenance rejected')
+  a%hamiltonian_fingerprint=original_hamiltonian_fingerprint
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix2),b,ok,message)
+  call require(ok,'write/read/write equivalence')
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),8,3,700_int64,900_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(ok.and..not.reusable,'stale generation rejection')
+  if(rank==0)then
+    write(shard,'(a,".g7-",z16.16,".t",z16.16,".rank",i8.8)')trim(prefix),900_int64,&
+      original_publication_id,max(0,nproc-1)
+    open(newunit=unit,file=trim(shard),status='replace',access='stream',form='unformatted');write(unit)'partial';close(unit)
+  endif
+  call MPI_Barrier(comm,ierr)
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(.not.ok.and..not.reusable,'partial shard rejection')
+  if(rank==0)then
+    open(newunit=unit,file=trim(prefix)//'.manifest',status='replace',access='stream',form='unformatted')
+    write(unit)'NORMAL_DC_CHECKPOINT';close(unit)
+  endif
+  call MPI_Barrier(comm,ierr)
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,current_gates,&
+    b,reusable,ok,message)
+  call require(.not.ok.and..not.reusable,'normal/direct checkpoint rejection')
+  if(rank==0)then
+    ! Recreate an accepted route checkpoint, then require current (tighter) policy gates.
+    call remove_test_file(trim(prefix)//'.manifest')
+  endif
+  call MPI_Barrier(comm,ierr)
+  call write_dg_overlapping_wannier_checkpoint(comm,trim(prefix),a,ok,message)
+  call require(ok,'checkpoint rewrite for current-policy gate')
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,&
+    [1d-13,1d-9,1d-9,1d-9,10d0,1d-9],b,reusable,ok,message)
+  call require(ok.and..not.reusable,'current tighter acceptance policy rejects checkpoint reuse')
+  call read_dg_overlapping_wannier_checkpoint(comm,trim(prefix),7,3,700_int64,900_int64,&
+    merge([ieee_value(0d0,ieee_positive_inf),1d-9,1d-9,1d-9,10d0,1d-9],current_gates,rank==0),&
+    b,reusable,ok,message)
+  call require(.not.ok.and..not.reusable,'rank-skewed non-finite current policy rejected collectively')
+  if(rank==0)then
+    inquire(file=trim(prefix)//'.manifest.temporary',exist=exists)
+    call require(.not.exists,'no shared temporary manifest artifact')
+  endif
+  if(rank==0)write(*,'(a,i0,a,z16.16)')'PASS overlapping-Wannier checkpoint on ',nproc,&
+    ' ranks fingerprint=',original_hamiltonian_fingerprint
+  call MPI_Finalize(ierr)
+contains
+  subroutine require(condition,text)
+    logical,intent(in)::condition;character(*),intent(in)::text
+    if(.not.condition)then;write(0,'(a)')trim(text);error stop 1;endif
+  end subroutine
+  subroutine remove_test_file(filename)
+    character(*),intent(in)::filename
+    integer::delete_unit,delete_ios
+    open(newunit=delete_unit,file=filename,status='old',iostat=delete_ios)
+    if(delete_ios==0)close(delete_unit,status='delete')
+  end subroutine
+end program

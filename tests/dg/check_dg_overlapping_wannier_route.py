@@ -1,0 +1,2157 @@
+#!/usr/bin/env python3
+"""Source contract for the isolated overlapping-Wannier DC route."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+for retained_contract_path in (
+    "tests/dg/check_obsolete_dg_routes_removed.py",
+    "docs/plans/2026-07-31-obsolete-dg-route-inventory.md",
+    "src/gs/dc/dg_overlapping_wannier_checkpoint.f90",
+    "src/gs/dc/dg_overlapping_wannier_construction.f90",
+    "src/gs/dc/dg_overlapping_wannier_localization.f90",
+    "src/gs/dc/dg_overlapping_wannier_w90.f90",
+    "src/rt/dg/rt_dg_overlapping_wannier.f90",
+    "src/gs/dc/lcfo.f90",
+    "src/gs/eigen_subdiag_eigenexa.f90",
+):
+    assert (ROOT / retained_contract_path).is_file(), (
+        f"missing retained route contract/source: {retained_contract_path}"
+    )
+
+
+def source(path: str) -> str:
+    return (ROOT / path).read_text()
+
+
+global_source = source("src/io/salmon_global.f90")
+input_source = source("src/io/inputoutput.f90")
+main_source = source("src/gs/main_dft.f90")
+eigenexa_source = source("src/gs/eigen_subdiag_eigenexa.f90")
+rt_main_source = source("src/rt/main_tddft.f90")
+scf_source = source("src/gs/scf_iteration_dft.f90")
+dcdft_source = source("src/gs/dc/dcdft.f90")
+types_source = source("src/gs/dc/dg_overlapping_wannier_types.f90")
+construction_source = source("src/gs/dc/dg_overlapping_wannier_construction.f90")
+prepared_action = re.search(
+    r"subroutine\s+prepare_dg_translation_character_action(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert prepared_action
+assert not re.search(
+    r"call\s+build_dg_translation_character_intertwining_phase\b",
+    prepared_action.group("body"),
+    re.I,
+), "prepared translation action must not repeat the full one-shot action validation"
+assert construction_source.lower().count(
+    "product_table(right_operation,left_operation)"
+) >= 2, "point pullback composition must use the reversed geometric product order"
+overlap_assembler = re.search(
+    r"subroutine\s+assemble_dg_distributed_basis_symmetry_overlap_rows(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert overlap_assembler
+overlap_assembler_body = overlap_assembler.group("body").lower()
+assert "local_tile" not in overlap_assembler_body, (
+    "the overlap assembler must form the reduce-scatter tile directly without a full transpose copy"
+)
+assert re.search(r"call\s+zgemm\s*\(\s*'n'\s*,\s*'c'", overlap_assembler_body), (
+    "the overlap assembler must use BLAS conjugate-transpose flags instead of materializing transpose(local_basis)"
+)
+tile_loop_position = overlap_assembler_body.find("do isym=1,nsym")
+tile_allocation_position = overlap_assembler_body.find("allocate(image_tile")
+assert 0 <= tile_allocation_position < tile_loop_position, (
+    "overlap tile buffers must be allocated once and reused across all symmetry operations"
+)
+localization_source = source("src/gs/dc/dg_overlapping_wannier_localization.f90")
+w90_source = source("src/gs/dc/dg_overlapping_wannier_w90.f90")
+assert "conv_tol = 1.d-10" in w90_source, (
+    "Gamma Wannier90 input must use an attainable double-precision convergence tolerance"
+)
+assert "conv_tol = 1.d-12" not in w90_source, (
+    "obsolete over-strict Gamma Wannier90 convergence tolerance must be removed"
+)
+assert "trial_step = 2.0d0" in w90_source, (
+    "Gamma Wannier90 input must use the native large-trial-step parabolic line search"
+)
+assert "fixed_step =" not in w90_source, (
+    "Gamma Wannier90 native line-search route must not also configure a fixed step"
+)
+wannier_patch_source = source("cmakefiles/Builder/patches/apply_wannier90_generator_symmetry.cmake")
+assert "symmetry_backtracking_step" in wannier_patch_source, (
+    "the site-symmetry route must retain its last accepted backtracking step"
+)
+assert "trial_spread%om_tot <= wann_spread%om_tot + symmetry_backtracking_tolerance" in wannier_patch_source, (
+    "site-symmetry backtracking must accept using the actual spread"
+)
+assert "symmetry_backtracking_step = 0.5_dp*symmetry_backtracking_step" in wannier_patch_source, (
+    "a rejected symmetry trial must attenuate its step without an iteration schedule"
+)
+assert "Accepted symmetry step" in wannier_patch_source, (
+    "short validation runs must report the step accepted by symmetry backtracking"
+)
+assert "u_matrix_loc = u0_loc" in wannier_patch_source and "m_matrix_loc = m0_loc" in wannier_patch_source, (
+    "every in-memory backtracking retry must restore the saved Wannier90 state"
+)
+production_projection_patch = re.search(
+    r"set\(new_gradient_projection \[=\[(?P<body>.*?)\n\]=\]\)",
+    wannier_patch_source,
+    re.S,
+)
+assert production_projection_patch and "projected_antihermitian_defect" not in production_projection_patch.group("body"), (
+    "temporary O(N^2) anti-Hermitian diagnostics must not remain in the production projection"
+)
+assert "salmon adaptive fixed-step continuation" not in wannier_patch_source.lower(), (
+    "Gamma Wannier90 must keep fixed_step=0.2 for the complete long convergence run"
+)
+assert "0.5_dp*fixed_step" not in wannier_patch_source and "mod(iter - 1, 500) == 0" not in wannier_patch_source, (
+    "the rejected early 500-iteration step-decay schedule must not be patched into Wannier90"
+)
+assert "num_cg_steps = 0" in w90_source, (
+    "Gamma Wannier90 input must disable CG for the stable fixed-step Si64 route"
+)
+periodic_phase_aligner = re.search(
+    r"subroutine\s+align_dg_w90_character_sectors_by_periodic_phase(?P<body>.*?)"
+    r"end\s+subroutine\s+align_dg_w90_character_sectors_by_periodic_phase",
+    w90_source,
+    re.I | re.S,
+)
+assert periodic_phase_aligner
+periodic_phase_aligner_body = periodic_phase_aligner.group("body").lower()
+assert "projector_row(global_row_count)" not in re.sub(
+    r"\s+", "", periodic_phase_aligner_body
+), "periodic-phase alignment must not allocate a global projector row"
+assert not re.search(
+    r"mpi_allreduce\s*\([^\n]*projector_row[^\n]*global_row_count",
+    periodic_phase_aligner_body,
+), "periodic-phase alignment must not communicate the full O(N^2) projector"
+assert "mpi_bcast(projector_value" not in re.sub(
+    r"\s+", "", periodic_phase_aligner_body
+), "periodic-phase projector sketches must not issue one collective per global row"
+point_orbit_builder = re.search(
+    r"subroutine\s+build_point_orbit_blocks(?P<body>.*?)end\s+subroutine\s+build_point_orbit_blocks",
+    w90_source,
+    re.I | re.S,
+)
+assert point_orbit_builder
+point_orbit_body = point_orbit_builder.group("body").lower()
+orbit_generation = point_orbit_body.find("orbit_vectors(:,pidx)=matmul")
+first_point_loop = point_orbit_body.find("do pidx=1,npoint")
+second_point_loop = point_orbit_body.find("do pidx=1,npoint", first_point_loop + 1)
+assert 0 <= first_point_loop <= orbit_generation < second_point_loop, (
+    "every point operation must act on the unchanged seed before orbit residual processing begins"
+)
+for point_orbit_receipt in (
+    "point-orbit cover is incomplete",
+    "point-orbit gram is rank deficient",
+    "point-orbit cluster leakage is excessive",
+):
+    assert point_orbit_receipt in point_orbit_body, (
+        f"joint periodic-center failures must report: {point_orbit_receipt}"
+    )
+position_canonicalizer = re.search(
+    r"subroutine\s+canonicalize_dg_sector_periodic_position_gauge(?P<body>.*?)end\s+subroutine",
+    w90_source,
+    re.I | re.S,
+)
+assert position_canonicalizer
+assert "projector_diagonal_only=.true." in position_canonicalizer.group("body").lower(), (
+    "spatial periodic-position canonicalization must not stream an O(N^2) full projector fingerprint"
+)
+assert re.match(r"\s*#include\s+[\"<]config\.h[\">]", w90_source), (
+    "Wannier90 adapter must import CMake feature macros before conditional compilation"
+)
+lcfo_source = source("src/gs/dc/lcfo.f90")
+projection_source = source("src/gs/dc/dg_overlapping_wannier_projection.f90")
+operators_source = source("src/gs/dc/dg_overlapping_wannier_operators.f90")
+ow_scf_source = source("src/gs/dc/dg_overlapping_wannier_scf.f90")
+ow_solver_source = source("src/gs/dc/dg_overlapping_wannier_solver.f90")
+ow_checkpoint_source = source("src/gs/dc/dg_overlapping_wannier_checkpoint.f90")
+ow_rt_source = source("src/rt/dg/rt_dg_overlapping_wannier.f90")
+dc_cmake = source("src/gs/dc/CMakeLists.txt")
+w90_builder_source = source("cmakefiles/Builder/build_wannier90.cmake")
+xc_source = source("src/xc/salmon_xc.f90")
+si64_runner_source = source("tests/dg/run_si64_overlapping_wannier_gate.py")
+si64_checker_source = source("tests/dg/check_si64_overlapping_wannier_gate.py")
+
+ow_ground_state = re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert ow_ground_state
+full_ow_ground_state_body = ow_ground_state.group("body").lower()
+branch_begin = "! hybrid_localization_first_branch_begin"
+arm_begin = "! hybrid_localization_first_arm_begin"
+arm_end = "! hybrid_localization_first_arm_end"
+legacy_begin = "! hybrid_constrained_legacy_arm_begin"
+legacy_end = "! hybrid_constrained_legacy_arm_end"
+branch_end = "! hybrid_localization_first_branch_end"
+for marker in (branch_begin, arm_begin, arm_end, legacy_begin, legacy_end, branch_end):
+    assert full_ow_ground_state_body.count(marker) == 1, f"missing unique route marker {marker}"
+localization_arm = full_ow_ground_state_body[
+    full_ow_ground_state_body.index(arm_begin) + len(arm_begin):full_ow_ground_state_body.index(arm_end)
+]
+legacy_arm = full_ow_ground_state_body[
+    full_ow_ground_state_body.index(legacy_begin) + len(legacy_begin):full_ow_ground_state_body.index(legacy_end)
+]
+common_tail = full_ow_ground_state_body[
+    full_ow_ground_state_body.index(branch_end) + len(branch_end):
+]
+for route_body, mode in ((localization_arm, "dg_w90_unconstrained"), (legacy_arm, "dg_w90_constrained")):
+    assemble_position = route_body.find("call assemble_dg_w90_gamma_matrices")
+    export_position = route_body.find("call export_dg_w90_replay_bundle")
+    library_position = route_body.find("call run_dg_w90_gamma_library")
+    assert 0 <= assemble_position < export_position < library_position, (
+        "each W90 route must export assembled matrices immediately before the library call"
+    )
+    assert mode in route_body[assemble_position:library_position]
+    assert "w90_nncell" in route_body[export_position:library_position]
+assert "salmon_dg_w90_replay_directory" in localization_arm
+assert "salmon_dg_w90_replay_directory" in legacy_arm
+assert "dg_w90_constrained" not in localization_arm
+assert "dg_w90_unconstrained" not in legacy_arm
+ow_ground_state_body = full_ow_ground_state_body
+assert "call redistribute_dg_row_owned_real_field_to_requests(" in ow_ground_state_body, (
+    "production must redistribute the conserved row-owned total density directly to fragment buffers"
+)
+assert "ow_box_density(p)=rho_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
+    r"\s+", "", ow_ground_state_body
+), "the stitched metric must not use independently solved fragment density"
+assert "ow_box_density(p)=dc%rho_tot_s(1)%f(raw_ix,raw_iy,raw_iz)" not in re.sub(
+    r"\s+", "", ow_ground_state_body
+), "rank-owned total-density slabs must be redistributed by physical ID, not indexed as fragment buffers"
+ow_ground_state_body = legacy_arm + common_tail
+for mlwf_call in (
+    "assemble_dg_w90_gamma_matrices",
+    "run_dg_w90_gamma_library",
+    "apply_dg_w90_gamma_transform",
+    "project_dg_w90_reference_sector_operators",
+    "anchor_dg_w90_reference_character_sector",
+    "materialize_dg_row_owned_sector_on_spatial_grid",
+    "prepare_dg_translation_character_action",
+    "build_dg_translation_character_intertwining_phase_prepared",
+    "align_dg_w90_character_sectors_by_periodic_phase",
+    "sew_dg_w90_periodic_phase_conjugate_sector",
+    "accumulate_dg_translation_character_orbit_sector_values",
+):
+    assert re.search(rf"call\s+{mlwf_call}\b", ow_ground_state_body), (
+        f"production overlapping-Wannier route must call {mlwf_call}"
+    )
+w90_position = ow_ground_state_body.find("call run_dg_w90_gamma_library")
+production_order = [
+    ow_ground_state_body.find("call measure_dg_rank_fixed_symmetry_residuals_eigenexa"),
+    ow_ground_state_body.find("call begin_sawf_dmn"),
+    w90_position,
+    ow_ground_state_body.find("call split_dg_translation_character_sector_eigenexa", w90_position),
+    ow_ground_state_body.find("call project_dg_w90_reference_sector_operators"),
+    ow_ground_state_body.find("call anchor_dg_w90_reference_character_sector"),
+    ow_ground_state_body.find("call materialize_dg_row_owned_sector_on_spatial_grid", w90_position),
+    ow_ground_state_body.find("call prepare_dg_translation_character_action"),
+    ow_ground_state_body.find("call build_dg_translation_character_intertwining_phase_prepared"),
+    ow_ground_state_body.find("call align_dg_w90_character_sectors_by_periodic_phase"),
+    ow_ground_state_body.find("call sew_dg_w90_periodic_phase_conjugate_sector"),
+    ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values"),
+    ow_ground_state_body.find("call redistribute_dg_owned_orbitals_to_center_fragments"),
+    ow_ground_state_body.find("call write_dg_overlapping_wannier_checkpoint"),
+]
+assert all(position >= 0 for position in production_order) and production_order == sorted(production_order), (
+    "production order must be affine proof -> DMN -> W90 -> sectors -> alignment -> inverse transform -> "
+    "redistribution -> V3"
+)
+assert not re.search(r"call\s+canonicalize_dg_sector_periodic_position_gauge\b", ow_ground_state_body), (
+    "production must not use the noncovariant fixed-direction periodic-position gauge"
+)
+inverse_position = ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values")
+center_measure_position = ow_ground_state_body.rfind("call compute_dg_periodic_wannier_centers")
+center_orbit_position = ow_ground_state_body.rfind("call verify_dg_wannier_center_affine_orbits")
+assert 0 <= inverse_position < center_measure_position < center_orbit_position, (
+    "production must measure and validate periodic centers only after character inversion"
+)
+for redundant_post_inverse_call in (
+    "call build_dg_orbital_major_periodic_position_tuple",
+    "call jointly_canonicalize_dg_sector_periodic_position_gauge",
+    "call apply_dg_orbital_rotation_tiled",
+):
+    assert redundant_post_inverse_call not in ow_ground_state_body, (
+        "production must not relocalize the complete Wannier frame after character inversion: "
+        + redundant_post_inverse_call
+    )
+character_loop_position = ow_ground_state_body.find("do translation_character=1")
+prepare_position = ow_ground_state_body.find("call prepare_dg_translation_character_action")
+prepared_apply_position = ow_ground_state_body.find(
+    "call build_dg_translation_character_intertwining_phase_prepared"
+)
+assert 0 <= prepare_position < character_loop_position < prepared_apply_position, (
+    "translation action must be prepared once before the character loop and reused inside it"
+)
+reference_materialize_position = ow_ground_state_body.find(
+    "call materialize_dg_row_owned_sector_on_spatial_grid"
+)
+assert 0 <= reference_materialize_position < prepare_position, (
+    "the anchored reference sector must be materialized before translation-gauge transport"
+)
+assert "call build_dg_translation_character_intertwining_phase(" not in ow_ground_state_body, (
+    "production must not rebuild the finite translation action for every character"
+)
+assert "call align_dg_w90_cross_character_sector_gauge" not in ow_ground_state_body, (
+    "production must not use spread-weighted cross-character links, which vanish for exact translation orbits"
+)
+point_adaptation_failure = re.search(
+    r"if\s*\(\s*\.not\.ok\.or\.adapted_occupied_rank\s*/=\s*nstate\s*\)\s*then(?P<body>.*?)endif",
+    ow_ground_state_body,
+    re.S,
+)
+assert point_adaptation_failure and all(
+    receipt in point_adaptation_failure.group("body")
+    for receipt in (
+        "adapted_occupied_selected_edge",
+        "adapted_occupied_rejected_edge",
+        "adapted_occupied_cluster_gap",
+    )
+), "point-cogroup rank rejection must print the actual spectral boundary before stopping"
+assert "translation_occupied_hamiltonian" in ow_ground_state_body, (
+    "production must construct the occupied Hamiltonian in the translation-adapted frame"
+)
+assert re.search(
+    r"conjg\s*\(\s*lcfo_occupied_core\s*\(.*?\)\s*\).*?translation_adapted_occupied",
+    ow_ground_state_body,
+    re.S,
+), "production Hamiltonian must stream the LCFO-to-translation-adapted overlap"
+point_adaptation_call = re.search(
+    r"call\s+build_dg_cocycle_averaged_occupied_candidates_eigenexa\s*\((?P<body>.*?)\)\s*\n",
+    ow_ground_state_body,
+    re.S,
+)
+assert point_adaptation_call and "occupied_hamiltonian=translation_occupied_hamiltonian" in point_adaptation_call.group("body"), (
+    "point-cogroup adaptation must consume the transformed occupied Hamiltonian"
+)
+assert "spectral dmn operation workspace reallocation failed collectively" not in ow_ground_state_body, (
+    "the DMN loop must consume the builder's allocatable output directly, not reallocate it between operations"
+)
+for required_call in (
+    "prepare_dg_spectral_basin_operators",
+    "project_dg_prepared_spectral_basin_operator",
+    "diagonalize_dg_spectral_basin_operator",
+    "select_dg_spectral_basin_channel_ranks",
+    "propagate_dg_spectral_basin_orbit_channels",
+    "build_dg_spectral_channel_generator_actions",
+):
+    assert re.search(rf"call\s+{required_call}\b", ow_ground_state_body), (
+        f"production must construct the block-monomial trial frame through {required_call}"
+    )
+assert "call prepare_dg_direct_retained_wannier_frame" not in ow_ground_state_body, (
+    "production must not introduce a second retained-frame constructor"
+)
+assert "[ow-gs-diagnostic] spectral_wannier_frame" in ow_ground_state_body, (
+    "production must report the spectral block-monomial frame receipt"
+)
+assert len(re.findall(r"call\s+run_dg_w90_gamma_library", ow_ground_state_body)) == 1, (
+    "direct retained-frame construction must invoke Wannier90 exactly once"
+)
+assert re.search(
+    r"fixed_center_dmn_workspace_peak\s*=\s*0_8",
+    ow_ground_state_body,
+), "the restored fixed-center DMN route must start its own workspace receipt"
+assert re.search(
+    r"w90_input_fingerprint\s*=\s*ieor\s*\(\s*w90_input_fingerprint\s*,\s*"
+    r"spectral_action_aggregate_fingerprint\s*\)",
+    ow_ground_state_body,
+), "the W90/checkpoint provenance must bind every direct target action written to DMN"
+for forbidden_position_extent in (
+    "translation_anchor_rotation(ntarget,ntarget)",
+    "translation_position_lcfo_operator(ntarget,ntarget)",
+    "translation_weighted_reference(ncore,ntarget)",
+):
+    assert forbidden_position_extent not in re.sub(r"\s+", "", ow_ground_state_body), (
+        "periodic-position internal workspace must use translation_sector_rank, not the full retained rank"
+    )
+layout_transition = re.search(
+    r"call\s+materialize_ow_distributed_core_to_buffer\s*\(\s*dc%icomm_tot\s*,\s*"
+    r"global_closed_core\s*,\s*ow_core_ids\s*,\s*&?\s*initial_core_ids\s*,\s*ow_core_values.*?"
+    r"call\s+reindex_dg_point_maps_between_row_layouts.*?global_symmetry_map.*?"
+    r"call\s+reindex_dg_point_maps_between_row_layouts.*?fixed_center_symmetry_map.*?"
+    r"global_closed_core\s*=\s*ow_core_values.*?"
+    r"ow_core_ids\s*=\s*initial_core_ids",
+    ow_ground_state_body,
+    re.I | re.S,
+)
+assert layout_transition, (
+    "the retained basis and both point maps must move together into the physical-ID row layout"
+)
+assert not re.search(
+    r"call\s+exchange_dg_point_permuted_orbital_rows\s*\(\s*dc%icomm_tot\s*,\s*"
+    r"global_closed_core\s*,\s*&?\s*initial_core_ids",
+    ow_ground_state_body,
+), "physical IDs must not be passed to the global-row-index exchange primitive"
+assert "findloc(initial_core_ids,physical_ids(p)" not in re.sub(r"\s+", "", ow_ground_state_body), (
+    "production must not assume balanced retained-core ownership equals DC fragment ownership"
+)
+for forbidden_translation_dense in (
+    "all_translation_representations",
+    "all_translation_projectors",
+    "all_affine_representations",
+    "translation_all_sector_rows",
+    "translation_all_sector_gradients",
+    "local_transform(nstate,nstate)",
+    "transform(nstate,nstate)",
+):
+    assert forbidden_translation_dense not in ow_ground_state_body, (
+        f"production must not retain dense {forbidden_translation_dense}"
+    )
+inverse_position = ow_ground_state_body.find("call accumulate_dg_translation_character_orbit_sector_values")
+post_gauge_affine_proof = ow_ground_state_body.find(
+    "call validate_dg_factored_point_cogroup_gauge", inverse_position
+)
+redistribution_position = ow_ground_state_body.find(
+    "call redistribute_dg_owned_orbitals_to_center_fragments"
+)
+assert inverse_position < post_gauge_affine_proof < redistribution_position, (
+    "the final character gauge needs a streamed post-gauge affine/cocycle proof before redistribution"
+)
+assert "global_translation_cocycle" in ow_ground_state_body[inverse_position:redistribution_position], (
+    "post-gauge point-cogroup proof must consume the factored translation cocycle"
+)
+center_gate_position = ow_ground_state_body.rfind("call verify_dg_wannier_center_affine_orbits")
+center_diagnostic_position = ow_ground_state_body.rfind("call diagnose_dg_point_center_gauge")
+center_owner_position = ow_ground_state_body.rfind("call assign_dg_periodic_centers_to_fragments")
+global_map_release_position = ow_ground_state_body.find("deallocate(global_symmetry_map)")
+assert 0 <= center_gate_position < center_diagnostic_position < center_owner_position, (
+    "a nonmonomial center action must be diagnosed before independent center ownership"
+)
+assert center_diagnostic_position < global_map_release_position, (
+    "center diagnostics must finish before releasing the full affine spatial maps they consume"
+)
+center_diagnostic_block = ow_ground_state_body[center_gate_position:center_owner_position]
+assert "localized wannier center orbit failed" not in center_diagnostic_block, (
+    "a unitary dense point action must not be rejected solely for lacking monomial centers"
+)
+assert "point center-gauge diagnostic failed" in center_diagnostic_block, (
+    "an invalid or nonunitary center diagnostic must still fail closed"
+)
+for center_receipt in ("failed_operation", "monomial_defect", "center_block_leakage"):
+    assert center_receipt in center_diagnostic_block, (
+        f"production center failure diagnostics must publish {center_receipt}"
+    )
+assert "call localize_dg_occupation_blocks" not in ow_ground_state_body, (
+    "production overlapping-Wannier V3 route must not call the custom localizer"
+)
+pre_w90_center_measurement = ow_ground_state_body.find(
+    "call compute_dg_periodic_wannier_centers", 0, ow_ground_state_body.find("call begin_sawf_dmn")
+)
+pre_w90_basin_build = ow_ground_state_body.find(
+    "call build_dg_periodic_spectral_basins", 0, ow_ground_state_body.find("call begin_sawf_dmn")
+)
+pre_w90_block_gate = ow_ground_state_body.find(
+    "call diagnose_dg_point_center_gauge", 0, ow_ground_state_body.find("call begin_sawf_dmn")
+)
+assert pre_w90_basin_build >= 0 and pre_w90_center_measurement < 0 and pre_w90_block_gate < 0, (
+    "production must pass the spectral trial frame directly to Wannier90 without a duplicate pre-localizer"
+)
+assert "pre_wannier_spectral_basins" in ow_ground_state_body[
+    pre_w90_basin_build:ow_ground_state_body.find("call begin_sawf_dmn")
+], "occupied/empty spectral basins must be diagnosed before Wannier90"
+for provenance_field in (
+    "mlwf_backend",
+    "mlwf_version",
+    "mlwf_input_fingerprint",
+    "mlwf_transform_fingerprint",
+    "mlwf_spreads",
+    "mlwf_coordinator_bytes",
+    "mlwf_workspace_peak_bytes",
+    "mlwf_coordinator_byte_limit",
+    "mlwf_symmetry_receipts",
+    "mlwf_canonical",
+    "affine_group_order",
+    "translation_subgroup_order",
+    "point_cogroup_order",
+    "fixed_center_group_order",
+    "fixed_center_group_fingerprint",
+    "fixed_center_fractional",
+    "fixed_center_inversion_present",
+    "affine_proof_workspace_peak_bytes",
+    "point_projection_workspace_peak_bytes",
+    "occupied_subspace_distance",
+    "occupied_electron_count_drift",
+    "occupied_density_interior_difference",
+    "occupied_density_boundary_difference",
+    "occupied_density_interior_tolerance",
+    "occupied_density_boundary_tolerance",
+    "occupied_closure_before",
+    "occupied_closure_after",
+    "occupied_selected_edge",
+    "occupied_rejected_edge",
+    "occupied_cluster_gap",
+    "occupied_selected_block_dimension",
+    "occupied_adaptation_workspace_peak_bytes",
+):
+    assert provenance_field in ow_checkpoint_source.lower(), (
+        f"V3 checkpoint must serialize and validate {provenance_field}"
+    )
+    assert re.search(
+        rf"ow_checkpoint%{provenance_field}\s*=", main_source, re.I
+    ), f"production publication must bind {provenance_field}"
+assert "fingerprint_ow_w90_matrices" in ow_ground_state_body
+assert "fingerprint_ow_w90_transform" in ow_ground_state_body
+assert re.search(
+    r"call\s+orthonormalize_dg_distributed_seed_space\b", ow_ground_state_body
+), "affine-closed LCFO seeds must be orthonormalized without full-orbit regeneration"
+adaptation_call = ow_ground_state_body.find(
+    "call build_dg_group_averaged_occupied_candidates_eigenexa"
+)
+affine_measurement_call = ow_ground_state_body.rfind(
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa"
+)
+dmn_begin_call = ow_ground_state_body.find("call begin_sawf_dmn")
+assert 0 <= adaptation_call < affine_measurement_call < dmn_begin_call, (
+    "fixed-center group-averaged occupied selection must precede full-affine proof and DMN"
+)
+assert re.search(
+    r"global_seed_values\s*\(\s*1\s*:\s*nstate\s*,\s*:\s*\)\s*=\s*"
+    r"(?:adapted_)?occupied_candidates",
+    ow_ground_state_body,
+), "production must replace only the occupied seed block by symmetry-adapted candidates"
+assert not re.search(
+    r"call\s+build_dg_distributed_symmetry_closed_basis\b", ow_ground_state_body
+), "production must not regenerate every affine image after its closure receipt passes"
+for forbidden_dense_affine in (
+    "global_symmetry_overlap",
+    "global_candidate_raw",
+    "global_candidate_representation",
+    "global_retained_representation",
+):
+    assert forbidden_dense_affine not in ow_ground_state_body, (
+        f"production must not retain full-affine dense tensor {forbidden_dense_affine}"
+    )
+assert "lcfo_symmetry_worst_operation" in ow_ground_state_body
+assert not re.search(
+    r"do\s+io\s*=\s*1\s*,\s*size\s*\(\s*global_point_product.*?"
+    r"LCFO_symmetry_operation=",
+    ow_ground_state_body,
+    re.I | re.S,
+), "production must summarize full-affine residuals instead of logging every operation"
+
+assert re.search(r"call\s+zheev\s*\(\s*'v'\s*,\s*'u'", ow_solver_source, re.I), (
+    "the bounded reduced Hermitian Ritz problem must use the existing LAPACK path"
+)
+assert "do sweep=1,100" not in ow_solver_source, (
+    "production block Ritz must not use the replicated cubic Jacobi sweep loop"
+)
+assert "call append_s_orthonormal_block" in ow_solver_source, (
+    "block residual expansion must batch its metric projection and reduction"
+)
+assert "0.2d0*density_tolerance" in ow_scf_source, (
+    "outer SCF must leave margin for the mandatory unmixed fixed-point gate"
+)
+for text in (si64_runner_source, si64_checker_source):
+    assert '"buffer5"' in text and '"buffer6"' in text, (
+        "Si64 matrix must compare admissible split-axis buffer depths"
+    )
+assert "(5, 5, 5)" in si64_runner_source and "(6, 6, 6)" in si64_runner_source
+assert "4x2x1" not in si64_runner_source and "4x2x1" not in si64_checker_source, (
+    "the 32-cubed Si64 acceptance matrix must keep the physical decomposition fixed"
+)
+assert si64_checker_source.count("validate_fixed_decomposition(variables") >= 2, (
+    "every Si64 acceptance row and the normal reference must verify runtime num_fragment"
+)
+assert 'PRODUCTION_BOX_PROFILE = "buffer5"' in si64_checker_source, (
+    "Task 9 must name buffer5 explicitly as the fixed production profile"
+)
+assert "itertools.combinations(values, 2)" not in si64_checker_source, (
+    "buffer6 is diagnostic evidence, not a cross-buffer acceptance coordinate"
+)
+assert re.search(
+    r"args\.minimum_row.*?\(\s*\"2x2x2\"\s*,\s*\"buffer6\"\s*,\s*\"c192-sp48\"",
+    si64_runner_source,
+    re.S,
+), "the focused smoke gate must use the demonstrated buffer-6 configuration"
+assert "manifest_digest_before" in si64_runner_source
+assert "route checkpoint changed during restart reuse" in si64_runner_source
+assert "SALMON_OW_GS_CHECKPOINT_V3" in si64_checker_source
+assert "SALMON_OW_GS_RANK_SHARD_V3" in si64_checker_source
+for token in ("validate_restart_log", "[ow-scf-diagnostic]", "forbidden route marker"):
+    assert token in si64_checker_source.lower(), (
+        "restart validation must reject recomputation and forbidden route markers"
+    )
+assert r"=\s*(\S+)" in si64_checker_source, (
+    "Si64 evidence parser must accept formatted Fortran whitespace after '='"
+)
+assert re.search(
+    r"yn_dg_dc_overlapping_wannier\s*==\s*'y'.*?"
+    r"any\s*\(\s*num_rgrid\s*/\s*num_fragment\s*\+\s*2\s*\*\s*num_rgrid_buffer\s*>\s*num_rgrid\s*\)",
+    input_source,
+    re.I | re.S,
+), "overlapping-Wannier buffer box must not exceed the periodic system on any axis"
+assert re.search(
+    r"yn_dg_dc_overlapping_wannier\s*==\s*'y'.*?"
+    r"all\s*\(\s*num_rgrid\s*/\s*num_fragment\s*\+\s*2\s*\*\s*num_rgrid_buffer\s*==\s*num_rgrid\s*\)",
+    input_source,
+    re.I | re.S,
+), "overlapping-Wannier buffer box must not become the complete periodic system"
+assert "maximum_block_size=min(n,3*nstate)" in ow_solver_source, (
+    "thick-restart coefficient iteration must bound its X/R/P space by n"
+)
+assert "previous_direction=old_q" in ow_solver_source, (
+    "thick restart must retain the preceding Ritz subspace"
+)
+assert re.search(
+    r"block_size\s*==\s*n.*?coefficient_diagnostics.*?"
+    r"full-space Ritz residual exceeds numerical quality gate",
+    ow_solver_source,
+    re.I | re.S,
+), (
+    "a full-space Ritz solve must use the final numerical-quality gate instead of "
+    "constructing another rank-deficient search space"
+)
+append_body = ow_solver_source[
+    ow_solver_source.index("subroutine append_s_orthonormal_block"):
+    ow_solver_source.index("end subroutine", ow_solver_source.index("subroutine append_s_orthonormal_block"))
+]
+assert re.search(r"do\s+projection_pass\s*=\s*1\s*,\s*2", append_body, re.I), (
+    "small residual directions need two-pass S projection to avoid cancellation-amplified "
+    "loss of orthogonality"
+)
+
+flag = r"yn_dg_dc_overlapping_wannier"
+rt_flag = r"yn_dg_overlapping_wannier_rt"
+rt_restart_flag = r"yn_dg_overlapping_wannier_rt_restart"
+
+assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{rt_flag}", global_source, re.I)
+assert re.search(rf"\b{rt_flag}\s*=\s*'n'", input_source, re.I)
+assert re.search(rf"namelist\s*/\s*propagation\s*/.*?\b{rt_flag}\b", input_source, re.I | re.S)
+assert re.search(rf"call\s+comm_bcast\s*\(\s*{rt_flag}\b", input_source, re.I)
+assert re.search(rf"write\s*\(\s*fh_variables_log.*?{rt_flag}", input_source, re.I | re.S)
+assert re.search(rf"call\s+yn_argument_check\s*\(\s*{rt_flag}\s*\)", input_source, re.I)
+assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{rt_restart_flag}", global_source, re.I)
+assert re.search(rf"\b{rt_restart_flag}\s*=\s*'n'", input_source, re.I)
+assert re.search(rf"call\s+yn_argument_check\s*\(\s*{rt_restart_flag}\s*\)", input_source, re.I)
+assert re.search(r"if\s*\(\s*yn_restart\s*==\s*'y'\s*\).*?forbids conventional", input_source, re.I | re.S)
+assert re.search(
+    rf"if\s*\(\s*{rt_flag}\s*==\s*'y'\s*\)\s*then.*?"
+    r"call\s+run_dg_overlapping_wannier_coefficient_rt.*?return",
+    rt_main_source,
+    re.I | re.S,
+), "coefficient RT needs a terminating dispatch before conventional RT initialization"
+rt_dispatch = rt_main_source.lower().find("call run_dg_overlapping_wannier_coefficient_rt")
+legacy_init = rt_main_source.lower().find("call initialization_rt")
+assert 0 <= rt_dispatch < legacy_init
+coefficient_driver = re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_coefficient_rt(?P<body>.*?)end\s+subroutine",
+    rt_main_source,
+    re.I | re.S,
+)
+assert coefficient_driver
+coefficient_body = coefficient_driver.group("body")
+compact_coefficient_body = re.sub(r"\s+", "", coefficient_body.lower())
+for token in (
+    "step==1.and.state%step==0.and.trim(ae_shape1)=='impulse'",
+    "electric_field=-vector_potential_samples(:,step)/dt",
+):
+    assert token in compact_coefficient_body, (
+        f"coefficient RT must preserve the fresh impulse jump: {token}"
+    )
+for required in (
+    "read_dg_overlapping_wannier_checkpoint",
+    "initialize_dg_overlapping_wannier_rt",
+    "advance_dg_overlapping_wannier_rt",
+    "read_dg_overlapping_wannier_rt_restart",
+    "write_dg_overlapping_wannier_rt_restart",
+    "calc_ac_ext_t",
+):
+    assert required in coefficient_body.lower()
+for forbidden in (
+    "initialization_rt",
+    "time_evolution_step",
+    "time_evolution_dg_fragment",
+    "dc_lcfo",
+    "eigenexa",
+    "dg_wpw",
+    "checkpoint_rt",
+):
+    assert forbidden not in coefficient_body.lower(), (
+        f"coefficient RT must not enter forbidden route: {forbidden}"
+    )
+assert "close(unit,iostat=close_ios)" in ow_rt_source.lower()
+assert "stored_digest/=rt_restart_digest" in ow_rt_source.lower()
+assert "call zhegv" in ow_rt_source.lower()
+assert "crank" not in ow_rt_source.lower()
+for observable_api in (
+    "evaluate_dg_overlapping_wannier_observables",
+    "write_dg_overlapping_wannier_rt_observable_sample",
+):
+    assert re.search(rf"public\s*::.*?{observable_api}", ow_rt_source, re.I | re.S), (
+        f"coefficient RT must expose {observable_api}"
+    )
+for observable_call in (
+    "evaluate_dg_overlapping_wannier_observables",
+    "write_dg_overlapping_wannier_rt_observable_sample",
+):
+    assert re.search(rf"call\s+{observable_call}", coefficient_body, re.I), (
+        f"production coefficient RT must call {observable_call}"
+    )
+assert "checkpoint%occupations" in coefficient_body.lower(), (
+    "production observables must use V3 checkpoint occupations"
+)
+assert "overlapping_wannier_rt_observables.dat" in coefficient_body.lower(), (
+    "production coefficient RT must publish the dedicated observable time series"
+)
+assert "step time ex ey ez px py pz jx jy jz" in ow_rt_source.lower(), (
+    "observable evidence must declare the deterministic E/P/J column order"
+)
+
+assert re.search(rf"character\s*\(\s*1\s*\).*::\s*{flag}", global_source, re.I), (
+    "the overlapping-Wannier route needs its own global flag"
+)
+assert re.search(rf"\b{flag}\s*=\s*'n'", input_source, re.I), (
+    "the new route must default off"
+)
+assert re.search(rf"namelist\s*/\s*dc\s*/.*?\b{flag}\b", input_source, re.I | re.S), (
+    "the new flag must be part of the DC namelist"
+)
+assert re.search(rf"call\s+comm_bcast\s*\(\s*{flag}\b", input_source, re.I), (
+    "the new flag must be broadcast collectively"
+)
+assert re.search(
+    rf"write\s*\(\s*fh_variables_log.*?{flag}", input_source, re.I | re.S
+), "the selected route must be recorded in variables.log"
+assert re.search(rf"call\s+yn_argument_check\s*\(\s*{flag}\s*\)", input_source, re.I), (
+    "the new flag must accept only y/n"
+)
+for tolerance in (
+    "dg_ow_boundary_value_tolerance",
+    "dg_ow_boundary_gradient_tolerance",
+    "dg_ow_symmetry_tolerance",
+    "dg_ow_localization_support_tolerance",
+    "dg_ow_localization_spread_tolerance",
+    "dg_ow_localization_gradient_tolerance",
+):
+    assert tolerance in global_source
+    assert tolerance in input_source
+assert re.search(r"dg_ow_localization_support_tolerance\s*=\s*1d-3", input_source, re.I), (
+    "default localization graph must remain sparse for production-sized retained blocks"
+)
+assert re.search(r"dg_ow_localization_spread_tolerance\s*=\s*1d-14", input_source, re.I), (
+    "localization spread resolution must retain resolvable double-precision descent"
+)
+assert re.search(r"dg_ow_localization_max_iterations\s*=\s*1024", input_source, re.I), (
+    "localization iteration budget must cover the genuine-Si64 RCG convergence envelope"
+)
+assert "dg_ow_localization_max_iterations" in global_source
+assert "dg_ow_localization_max_iterations" in input_source
+si64_gs_input = (ROOT / "tests/dg/data/si64_overlapping_wannier_rt/input_gs.in").read_text()
+assert re.search(r"dg_ow_localization_gradient_tolerance\s*=\s*2d-2", si64_gs_input, re.I), (
+    "qualitative Si64 evidence must use the reviewed 0.02 absolute spread-gradient gate"
+)
+for window in (
+    "dg_ow_candidate_states_per_fragment",
+    "dg_ow_target_wanniers_per_fragment",
+):
+    assert window in global_source
+    assert window in input_source
+
+route_checks = [
+    (r"trim\s*\(\s*theory\s*\)\s*/=\s*'dft'", "ground-state DFT only"),
+    (r"\byn_dc\s*/=\s*'y'", "DC only"),
+    (r"\byn_periodic\s*/=\s*'y'", "periodic only"),
+    (r"\byn_spinorbit\s*==\s*'y'", "non-SOI only"),
+    (
+        r"num_kgrid\s*\(\s*1\s*\)\s*\*\s*num_kgrid\s*\(\s*2\s*\)\s*\*\s*"
+        r"num_kgrid\s*\(\s*3\s*\)\s*/=\s*1",
+        "Gamma only",
+    ),
+    (r"trim\s*\(\s*xc\s*\)\s*/=\s*'pz'", "PZ LDA only"),
+    (r"\byn_dc_lcfo\s*==\s*'y'", "LCFO forbidden"),
+    (r"\byn_self_checkpoint\s*==\s*'y'", "normal checkpoint forbidden"),
+    (r"\bcheckpoint_interval\s*>=\s*1", "periodic checkpoint forbidden"),
+]
+for condition, requirement in route_checks:
+    assert re.search(
+        rf"if\s*\(\s*{flag}\s*==\s*'y'.*?{condition}",
+        input_source,
+        re.I | re.S,
+    ), f"overlapping-Wannier validation must enforce: {requirement}"
+
+assert not re.search(
+    rf"if\s*\(\s*{flag}\s*==\s*'y'.*?\byn_eigenexa\s*==\s*'y'.*?forbids EigenExa",
+    input_source,
+    re.I | re.S,
+), "the internal LCFO coefficient path must permit EigenExa"
+assert re.search(r"yn_eigenexa\s*=\s*'y'", si64_gs_input, re.I), (
+    "strict Si64 must exercise the LCFO EigenExa coefficient path"
+)
+
+assert re.search(
+    rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then.*?"
+    r"call\s+run_dg_overlapping_wannier_ground_state_for_main.*?"
+    r"(?:return|error\s+stop)",
+    main_source,
+    re.I | re.S,
+), "main_dft needs an explicit, terminating new-route dispatch"
+scf_position = main_source.lower().find("call scf_iteration_dft")
+route_dispatch_position = main_source.lower().find(
+    "call run_dg_overlapping_wannier_ground_state_for_main"
+)
+lcfo_position = main_source.lower().find("call dc_lcfo_flux", route_dispatch_position)
+assert 0 <= scf_position < route_dispatch_position < lcfo_position, (
+    "construction dispatch must consume the conventional candidate window "
+    "after SCF and terminate before LCFO"
+)
+assert "register_dg_overlapping_wannier_route_driver" not in ow_scf_source
+assert "execute_registered_dg_overlapping_wannier_ground_state" not in ow_scf_source
+assert re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main.*?"
+    r"call\s+dc_lcfo.*?"
+    r"solve_dg_overlapping_wannier_generalized_eigenexa.*?"
+    r"write_dg_overlapping_wannier_checkpoint",
+    main_source,
+    re.I | re.S,
+), "main_dft needs a concrete construction-to-one-shot-EigenExa-to-checkpoint production adapter"
+production_adapter = re.search(
+    r"subroutine\s+run_dg_overlapping_wannier_ground_state_for_main(?P<body>.*?)"
+    r"end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert production_adapter
+full_adapter_body = production_adapter.group("body")
+full_adapter_lower = full_adapter_body.lower()
+adapter_prefix = full_adapter_body[:full_adapter_lower.index(branch_begin)]
+adapter_legacy = full_adapter_body[
+    full_adapter_lower.index(legacy_begin) + len(legacy_begin):full_adapter_lower.index(legacy_end)
+]
+adapter_common = full_adapter_body[
+    full_adapter_lower.index(branch_end) + len(branch_end):
+]
+adapter_body = adapter_prefix + adapter_legacy + adapter_common
+assert "call build_dg_smooth_partition_of_unity(" in adapter_body.lower(), (
+    "production must normalize overlapping core-buffer windows before assembling the global pencil"
+)
+assert "call assemble_dg_stitched_overlap_density_rows(" in adapter_body.lower(), (
+    "production must assemble row-owned overlap and density tiles from normalized buffer coverage"
+)
+assert "call project_dg_full_cell_hamiltonian_tiles(" in source("src/gs/main_dft.f90").lower(), (
+    "production Hamiltonian must use bounded full-cell hpsi tiles"
+)
+assert "call symmetrize_dg_distributed_pencil_rows(" in source("src/gs/main_dft.f90").lower(), (
+    "production must symmetrize stitched H/S/rho row tiles under the atomic affine action"
+)
+assert "ow_pencil_translation_subgroup" in source("src/gs/main_dft.f90").lower() and (
+    "ow_pencil_coset_representatives" in source("src/gs/main_dft.f90").lower()
+), "full affine averaging must use the proven translation-coset factorization"
+assert re.search(
+    r"prefix\s*=\s*['\"]\./overlapping_wannier_gs['\"]",
+    adapter_body,
+    re.I,
+), (
+    "route checkpoint publication must use the communicator-shared run "
+    "directory, not a rank-local DC fragment directory"
+)
+assert not re.search(
+    r"prefix\s*=\s*trim\s*\(\s*base_directory\s*\).*?overlapping_wannier_gs",
+    adapter_body,
+    re.I,
+), "route checkpoint prefix must not depend on rank-local base_directory"
+assert "checkpoint read rejected:" in adapter_body.lower(), (
+    "a rejected route checkpoint must report its exact read/provenance reason"
+)
+assert not re.search(r"build_dg_core_owned_occupied_subspace\s*\(", adapter_body, re.I), (
+    "the production route must not construct a fragment-local occupied direct sum"
+)
+assert not re.search(
+    r"construct_dg_overlapping_wannier_basis\s*\(\s*MPI_COMM_SELF",
+    adapter_body,
+    re.I,
+), "the production route must not construct a fragment-local complement"
+assert re.search(
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget\s*,\s*&?\s*"
+    r"retained_box_count\s*=\s*nstate\s*,\s*&?\s*"
+    r"retained_box_contribution\s*=\s*lcfo_fragment_contribution\s*,\s*&?\s*"
+    r"retained_occupations\s*=\s*lcfo_retained_occupations",
+    adapter_body,
+    re.I | re.S,
+), "LCFO must retain the spectrum but materialize occupied eigenfunction rows"
+assert re.search(
+    r"coefficient_count\s*=\s*max\s*\(\s*dc%nstate_tot\s*,\s*retained_count\s*\)",
+    lcfo_source,
+    re.I,
+), "the in-memory LCFO path must retain requested columns beyond normal nstate_tot"
+assert re.search(
+    r"subroutine\s+dc_lcfo\s*\(.*?retained_count\s*,\s*"
+    r"retained_box_contribution\s*,\s*retained_occupations\s*,\s*write_files\s*,\s*&?\s*"
+    r"retained_box_count\s*,\s*&?\s*retained_eigenvalues\s*\)",
+    lcfo_source,
+    re.I | re.S,
+), "optional LCFO spectrum output must follow the appended buffer-row count"
+assert re.search(
+    r"translation_lcfo_values\s*\(\s*io\s*\)\s*=\s*lcfo_retained_eigenvalues\s*\(\s*io\s*\)",
+    adapter_body,
+    re.I,
+), "the LCFO anchor must use the retained Hamiltonian spectrum, not occupations"
+assert re.search(
+    r"box_count\s*=\s*retained_count.*?present\s*\(\s*retained_box_count\s*\).*?"
+    r"box_count\s*=\s*retained_box_count.*?"
+    r"retained_box_contribution\s*\(\s*box_count\s*,\s*product\s*\(\s*nxyz_box\s*\)\s*\)",
+    lcfo_source,
+    re.I | re.S,
+), "LCFO must allocate buffered rows independently of its larger diagonalization window"
+assert re.search(
+    r"occupations\s*=\s*lcfo_retained_occupations\s*\(\s*1\s*:\s*nstate\s*\)",
+    adapter_body,
+    re.I,
+), "Galerkin occupations must preserve the authoritative LCFO occupation spectrum"
+assert re.search(
+    r"abs\s*\(\s*sum\s*\(\s*occupations\s*\)\s*-\s*dc%elec_num_tot\s*\)",
+    adapter_body,
+    re.I,
+), "retained LCFO occupations must be rechecked against the total electron count"
+assert re.search(
+    r"subroutine\s+assign_dg_overlapping_wannier_occupations\b",
+    construction_source,
+    re.I,
+), "retained occupation assignment must live in the overlapping-Wannier namespace"
+assert re.search(
+    r"maxval\s*\(\s*lcfo_total_symmetry_residual\s*\)\s*>\s*dg_ow_symmetry_tolerance",
+    adapter_body,
+    re.I,
+), "full-affine closure must be accepted before the LCFO seed space is orthonormalized"
+composition_call = adapter_body.lower().find(
+    "call compose_dg_buffered_orbital_tile_to_physical_grid"
+)
+fixed_center_call = adapter_body.lower().find("call prepare_ow_fixed_center_group")
+affine_measurement_call = adapter_body.lower().find(
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa"
+)
+assert 0 <= composition_call < fixed_center_call < affine_measurement_call, (
+    "buffer composition must precede fixed-center adaptation and every full-affine proof"
+)
+translation_adaptation_call = adapter_body.lower().find(
+    "call build_dg_group_averaged_occupied_candidates_eigenexa", fixed_center_call
+)
+point_cogroup_adaptation_call = adapter_body.lower().find(
+    "call build_dg_cocycle_averaged_occupied_candidates_eigenexa", translation_adaptation_call + 1
+)
+post_adaptation_affine_measurement_call = adapter_body.lower().find(
+    "call measure_dg_rank_fixed_symmetry_residuals_eigenexa", point_cogroup_adaptation_call
+)
+assert 0 <= translation_adaptation_call < point_cogroup_adaptation_call < post_adaptation_affine_measurement_call, (
+    "occupied adaptation must close translations before the cocycle-aware point cogroup"
+)
+assert "translation_adapted_occupied" in adapter_body.lower(), (
+    "production must publish a separate translation-subgroup adaptation receipt"
+)
+assert "point_cogroup_adapted_occupied" in adapter_body.lower(), (
+    "production must publish a separate cocycle-aware point-cogroup adaptation receipt"
+)
+assert re.search(
+    r"build_dg_cocycle_averaged_occupied_candidates_eigenexa\s*\(.*?"
+    r"global_symmetry_map\s*\(\s*:\s*,\s*global_translation_subgroup\s*\).*?"
+    r"global_symmetry_map\s*\(\s*:\s*,\s*global_point_representatives\s*\).*?"
+    r"global_point_cogroup_product.*?global_translation_cocycle",
+    adapter_body,
+    re.I | re.S,
+), "production point-cogroup adaptation must consume the proven affine factorization"
+projector_tile_loop = re.search(
+    r"do\s+projector_tile_first\s*=.*?enddo",
+    adapter_body,
+    re.I | re.S,
+)
+assert projector_tile_loop and not re.search(
+    r"deallocate\s*\([^)]*lcfo_core_ids",
+    projector_tile_loop.group(0),
+    re.I,
+), "the final composed physical-grid ownership IDs must survive the projector tile loop"
+assert re.search(
+    r"nstate\s*>\s*huge\s*\(\s*nstate\s*\)\s*/\s*size\s*\(\s*global_translation_subgroup\s*\)",
+    adapter_body,
+    re.I,
+), "translation-orbit dimension must be overflow-checked before EigenExa initialization"
+assert "call accumulate_dg_lcfo_buffer_contributions_to_core" not in adapter_body.lower(), (
+    "fragment-core truncation must not define the support of a pre-Wannier symmetry proof"
+)
+assert re.search(
+    r"call\s+propagate_dg_spectral_basin_orbit_channels\b",
+    adapter_body,
+    re.I,
+), "Wannier90 projections must prepare a symmetry-propagated spectral trial frame"
+assert re.search(
+    r"allocate\s*\(\s*w90_anchors\s*\([^)]*\)\s*,\s*source\s*=\s*global_seed_values",
+    adapter_body,
+    re.I | re.S,
+), "Wannier90 must retain the previously converged global seed anchors"
+assert re.search(r"call\s+assemble_dg_w90_gamma_a_matrix\b", adapter_body, re.I), (
+    "production must assemble the localized seed A matrix before DMN publication"
+)
+assert not re.search(r"w90_anchors\s*=\s*transpose\s*\(\s*spectral_spatial_trials\s*\)", adapter_body, re.I), (
+    "spectral-basin trial rows must not replace the established Wannier90 initial gauge"
+)
+assert (
+    "w90_seed_representation,fixed_center_representation,fixed_center_eigenvalues,"
+    "w90_seed_a_matrix" in re.sub(r"\s+|&", "", adapter_body)
+), "Wannier90 symmetry input must use the same localized seed gauge as the A matrix"
+assert (
+    "w90_seed_representation=matmul(conjg(transpose(w90_seed_a_matrix)),"
+    "matmul(fixed_center_representation,w90_seed_a_matrix))" in re.sub(r"[\s&]+", "", adapter_body)
+), "DMN target representations must be transformed covariantly into the seed gauge"
+assert re.search(
+    r"assemble_dg_w90_gamma_matrices\s*\([^;]*?precomputed_a_matrix\s*=\s*w90_seed_a_matrix",
+    adapter_body,
+    re.I | re.S,
+), "Wannier90 M assembly must reuse rather than recompute the DMN seed A matrix"
+assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
+    "the MLWF transform must be applied in the global LCFO space"
+)
+assert not re.search(r"allocate\s*\(\s*candidate\s*\(",adapter_body,re.I), (
+    "production must not materialize a separate fragment-eigenstate candidate window"
+)
+assert re.search(
+    r"subroutine\s+assemble_dg_distributed_candidate_symmetry",
+    construction_source,
+    re.I,
+), "construction needs streaming distributed candidate symmetry assembly"
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*distributed_candidates\s*\)\s*then\s*"
+    r"call\s+mpi_allgatherv\s*\(\s*candidate_value",
+    construction_source,
+    re.I | re.S,
+), (
+    "only the focused replicated-input path may gather candidate boxes"
+)
+assert "materialize_ow_distributed_core_to_buffer" in adapter_body.lower(), (
+    "production must stream the symmetry-closed core into local buffers"
+)
+assert "materialize_ow_global_tails" not in adapter_body.lower(), (
+    "production must not all-gather full-system real-space Wannier tails"
+)
+assert not re.search(
+    r"allocate\s*\(\s*candidate\s*\(\s*ncandidate\s*,\s*nbox",
+    adapter_body,
+    re.I,
+), (
+    "production must not zero-pad every fragment candidate onto every rank"
+)
+assert "prepare_ow_global_point_action" in adapter_body.lower(), (
+    "production symmetry must be derived from the full-system crystallographic catalog"
+)
+assert "prepare_ow_exact_fragment_symmetry" not in adapter_body.lower(), (
+    "fragment site symmetry must not be a production prerequisite"
+)
+canonical_index_body = re.search(
+    r"integer\s+function\s+dc_to_canonical_index(?P<body>.*?)end\s+function",
+    main_source,
+    re.I | re.S,
+)
+assert canonical_index_body and re.search(
+    r"modulo\s*\(\s*index\s*-\s*1\s*,\s*core_count\s*\+\s*2\s*\*\s*buffer_count\s*\)",
+    canonical_index_body.group("body"),
+    re.I,
+), "periodic-buffer projector support must wrap before canonical indexing"
+atom_map_body = re.search(
+    r"subroutine\s+map_dc_atom_to_physical_atom(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert atom_map_body and re.search(
+    r"epsilon\s*\(\s*1d0\s*\).*?maxval\s*\(\s*abs\s*\(\s*dc%system_tot%primitive_a",
+    atom_map_body.group("body"),
+    re.I | re.S,
+), "periodic physical-atom matching needs a scale-relative floating-point tolerance"
+assert "pp%nrps_ao" in main_source.lower()
+assert "pp%upptbl_ao" in main_source.lower()
+assert re.search(
+    r"do\s+ll\s*=\s*0\s*,\s*1.*?"
+    r"radial_projector.*?pp%upptbl_ao\s*\(\s*1\s*:\s*pp%nrps_ao\s*\(\s*species\s*\)"
+    r"\s*,\s*atomic_orbital_ordinals\s*\(\s*ll\s*\+\s*1\s*,\s*species\s*\)\s*,\s*species\s*\)",
+    main_source,
+    re.I | re.S,
+), "every complete s+p seed channel must use the matching PP pseudo-atomic orbital"
+projector_adapter_body = re.search(
+    r"subroutine\s+build_ow_complete_sp_projectors(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+).group("body")
+assert not re.search(r"radial_projector.*?pp%udvtbl", projector_adapter_body, re.I | re.S), (
+    "the nonlocal PP projector belongs to the Hamiltonian and must not become an s+p orbital seed"
+)
+assert "gaussian" not in re.search(
+    r"subroutine\s+build_ow_complete_sp_projectors(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+).group("body").lower(), "complete-s+p production seeds must not use a Gaussian fallback"
+assert not re.search(r"modulo\s*\(\s*rank\s*\+\s*isym", adapter_body, re.I), (
+    "communicator-rank arithmetic is not a physical fragment symmetry"
+)
+assert "assemble_dg_stitched_weak_operator_rows" not in re.search(
+    r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
+    main_source, re.I | re.S).group("body").lower(), (
+    "the final production Hamiltonian must not use fragment boundary stitching"
+)
+hamiltonian_adapter = re.search(
+    r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert hamiltonian_adapter and "project_dg_full_cell_hamiltonian_tiles" in hamiltonian_adapter.group("body"), (
+    "production must project the total-system hpsi in bounded tiles"
+)
+assert re.search(r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?call\s+hpsi", main_source, re.I | re.S), (
+    "the full-cell tile callback must delegate to SALMON hpsi"
+)
+assert re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?"
+    r"if\s*\(\.not\.full_output_finite\).*?"
+    r"include_nonlocal\s*=\s*\.false\..*?"
+    r"OW-HPSI-FAILURE",
+    main_source,
+    re.I | re.S,
+), (
+    "a nonfinite full hpsi tile must be retried without the nonlocal operator and report "
+    "boundary diagnostics before the generic callback failure is returned"
+)
+assert "OW-HPSI-CONTRACT-FAILURE" in main_source, (
+    "the tile callback must identify rank-local shape/parallel-contract rejection before hpsi"
+)
+assert "OW-HPSI-OWNERSHIP-FAILURE" not in main_source, (
+    "cross-rank ow_core_ids ownership is valid after cached redistribution and must not be rejected"
+)
+assert "type(s_dg_full_cell_redistribution_schedule) :: ow_hpsi_redistribution" in main_source, (
+    "production must retain one cached source-to-mg_tot redistribution schedule"
+)
+assert re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?"
+    r"initialize_dg_full_cell_redistribution.*?"
+    r"apply_dg_full_cell_redistribution_forward.*?"
+    r"call\s+hpsi.*?"
+    r"apply_dg_full_cell_redistribution_reverse",
+    main_source,
+    re.I | re.S,
+), "production hpsi must be bracketed by forward and reverse cached redistributions"
+assert not re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile.*?outside_count\s*=",
+    main_source,
+    re.I | re.S,
+), "cross-rank ow_core_ids ownership is valid and must not be rejected"
+assert re.search(
+    r"if\s*\(\s*yn_dg_dc_overlapping_wannier\s*/=\s*'y'\s*\.and\..*?checkpoint_gs",
+    main_source,
+    re.I | re.S,
+), "overlapping-Wannier route must suppress normal shutdown checkpoint publication"
+
+dispatch_block = re.search(
+    rf"if\s*\(\s*{flag}\s*==\s*'y'\s*\)\s*then(?P<body>.*?)else\s+if",
+    main_source,
+    re.I | re.S,
+)
+assert dispatch_block
+assert not re.search(
+    r"\b(?:dc_lcfo|finalize_eigenexa|publish_dg|checkpoint_gs|main_tddft)\b",
+    dispatch_block.group("body"),
+    re.I,
+), "new-route dispatch must not invoke a forbidden stage"
+
+# Disabled behavior is preserved structurally: the conventional DC publication
+# ladder remains an else-if ladder and the SCF driver is not globally diverted.
+assert re.search(
+    r"if\s*\(\s*yn_dc\s*==\s*'y'\s*\)\s*then.*?"
+    r"else\s+if\s*\(\s*yn_dc_lcfo_flux\s*==\s*'y'\s*\).*?"
+    r"else\s+if\s*\(\s*yn_dc_lcfo\s*==\s*'y'\s*\)",
+    main_source,
+    re.I | re.S,
+), "normal DC LCFO dispatch must remain present"
+assert "yn_dg_dc_overlapping_wannier" not in scf_source, (
+    "Task 1 must stop before, not alter, the conventional SCF call graph"
+)
+for workspace in (
+    "rho_s_1d",
+    "rho_s_sp_1d",
+    "exc_1d",
+    "eexc_1d",
+    "vexc_1d",
+    "vexc_sp_1d",
+):
+    assert re.search(
+        rf"if\s*\(\s*allocated\s*\(\s*{workspace}\s*\)\s*\)\s*then"
+        rf".*?size\s*\(\s*{workspace}\s*,?\s*1?\s*\)\s*/=\s*nl"
+        rf".*?deallocate\s*\(\s*{workspace}\s*\)",
+        xc_source,
+        re.I | re.S,
+    ), f"PZ workspace {workspace} must resize after buffer-local XC evaluation"
+
+assert "dg_overlapping_wannier_types.f90" in dc_cmake
+assert "dg_overlapping_wannier_w90.f90" in dc_cmake
+assert re.search(r'set\s*\(\s*WANNIER90_COMMS\s+"serial"', w90_builder_source, re.I), (
+    "rank-zero Wannier90 library mode requires a serial bundled library"
+)
+assert re.search(r'set\s*\(\s*WANNIER90_BUILD_TARGETS\s+wannier\s+lib', w90_builder_source, re.I), (
+    "bundled serial build must retain both normal-DC executable and OW library"
+)
+assert not re.search(r'set\s*\(\s*WANNIER90_COMMS\s+"mpi"', w90_builder_source, re.I), (
+    "bundled library must not switch to MPI COMMS when SALMON itself uses MPI"
+)
+for token in (
+    "type,public :: s_dg_wannier_tail",
+    "type,public :: s_dg_overlapping_wannier_basis",
+    "owned_core_physical_ids",
+    "physical_grid_ids",
+    "gradient",
+    "generation",
+    "geometry_fingerprint",
+    "basis_fingerprint",
+    "checked_dg_wannier_extent_product",
+    "MPI_Allreduce",
+    "MPI_Allgatherv",
+):
+    assert token.lower() in types_source.lower(), f"missing Task 2 metadata contract: {token}"
+
+assert "dg_overlapping_wannier_construction.f90" in dc_cmake
+for forbidden in ("dc_lcfo", "dg_wpw", "direct_sipg"):
+    assert forbidden not in construction_source.lower(), (
+        f"construction path must not call forbidden stage: {forbidden}"
+    )
+assert construction_source.lower().count("eigen_pdsyevd_ex_distributed_blocks") == 4, (
+    "EigenExa may enter construction only through one import, the two OW-distributed eigensystems, "
+    "and the streamed translation-sector splitter"
+)
+averaged_projector_body = re.search(
+    r"subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa(?P<body>.*?)"
+    r"end\s+subroutine\s+build_dg_group_averaged_occupied_candidates_eigenexa",
+    construction_source,
+    re.I | re.S,
+)
+assert averaged_projector_body
+averaged_projector_lower = averaged_projector_body.group("body").lower()
+assert "orbit_basis" not in averaged_projector_lower, (
+    "group averaging must stream occupied images instead of retaining the real-space orbit tensor"
+)
+assert "cyclic_gram(info%nrow_local,info%ncol_local)" in re.sub(
+    r"\s+", "", averaged_projector_lower
+), "production orbit Gram must use the EigenExa cyclic distributed layout"
+assert re.search(
+    r"call\s+zgemm\s*\(\s*'c'\s*,\s*'t'",
+    construction_source,
+    re.I,
+), "periodic symmetry overlaps must use the BLAS matrix product"
+assert "candidate_symmetry_raw_unitarity_defect" in construction_source.lower()
+assert "candidate_symmetry_polar_correction" in construction_source.lower()
+assert "retained_symmetry_projector_gap" in construction_source.lower()
+assert "align_dg_fragment_wannier_gauge" in construction_source.lower()
+assert "replicate_dg_fragment_wannier_representative" in construction_source.lower()
+assert "verify_dg_fragment_wannier_streaming_closure" in construction_source.lower()
+assert "build_dg_core_owned_occupied_subspace" in construction_source.lower()
+assert "periodic_buffer_boundary_value_norm" in construction_source.lower()
+assert "minimum_pivot=" in adapter_body.lower()
+assert "stitched overlap lost positive-definite rank" in source(
+    "src/gs/dc/dg_overlapping_wannier_metric.f90"
+).lower()
+assert "ow_collective_operator_fingerprint" in adapter_body.lower()
+assert "comm_is_root(nproc_id_global)" not in adapter_body.lower(), (
+    "the route communicator root must use its MPI rank, not mutable global rank state"
+)
+assert re.search(
+    r"call\s+write_ow_ground_state_evidence\s*\(\s*spectrum\s*,\s*noccupied\s*,\s*nproc\s*,\s*rank",
+    adapter_body,
+    re.I,
+), "route evidence publication must be owned by rank zero exactly once"
+potential_update = re.search(
+    r"subroutine\s+dg_dc_update_potential_from_density(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert potential_update
+for field in ("dc%rho_tot%f", "dc%Vh_tot%f", "dc%Vxc_tot(is)%f", "dc%vloc_tot(is)%f"):
+    assert not re.search(
+        rf"all\s*\(\s*ieee_is_finite\s*\(\s*{re.escape(field)}\s*\)\s*\)",
+        potential_update.group("body"),
+        re.I,
+    ), f"distributed DC field {field} must not validate unowned storage"
+assert all(token in potential_update.group("body").lower() for token in (
+    "dc%mg_tot%is(1)", "dc%mg_tot%ie(1)",
+    "dc%mg_tot%is(2)", "dc%mg_tot%ie(2)",
+    "dc%mg_tot%is(3)", "dc%mg_tot%ie(3)",
+)), "DC potential validation must cover exactly the owned total-system slab"
+assert "call build_ow_complete_sp_projectors" in adapter_body.lower()
+assert re.search(
+    r"global_projection_count\s*=\s*size\s*\(\s*manifest_channels\s*\).*?"
+    r"local_target_count\s*=\s*global_projection_count\s*/\s*nproc",
+    adapter_body,
+    re.I | re.S,
+), "global complete-s+p catalog must be rank balanced before LCFO selection"
+assert re.search(
+    r"ntarget\s*=\s*nstate\s*\+\s*global_projection_count.*?"
+    r"call\s+dc_lcfo\s*\(.*?retained_count\s*=\s*ntarget.*?"
+    r"retained_box_count\s*=\s*nstate.*?"
+    r"retained_box_contribution\s*=\s*lcfo_fragment_contribution",
+    adapter_body,
+    re.I | re.S,
+), "LCFO must separate retained spectrum from occupied eigenfunction materialization"
+assert re.search(
+    r"complete_sp_core_atom_count\s*=\s*dc%system_tot%nion\s*/\s*nproc.*?"
+    r"local_target_count\s*/=\s*4\s*\*\s*complete_sp_core_atom_count",
+    adapter_body,
+    re.I | re.S,
+), "production must enforce four complete s+p channels per core-owned atom"
+assert "local_seed_overlap" not in adapter_body.lower(), (
+    "complete-s+p rank selection must not allocate a replicated dense pre-Wannier localizer"
+)
+for forbidden in ("augmented_candidate", "augmented_occupied", "occupied_coefficients"):
+    assert forbidden not in adapter_body.lower(), (
+        f"production must not retain fragment-local complement data: {forbidden}"
+    )
+assert not re.search(
+    r"local_target_count\s*=\s*(?:merge\s*\(\s*)?dg_ow_target_wanniers_per_fragment",
+    adapter_body,
+    re.I,
+), "numeric target input must not override the complete-s+p manifest"
+assert not re.search(
+    r"noccupied\s*>\s*local_target_count",
+    adapter_body,
+    re.I,
+), "occupied rank must not be pre-cut against the raw shell-channel count"
+projector_adapter = re.search(
+    r"subroutine\s+build_ow_complete_sp_projectors\b(?P<body>.*?)"
+    r"end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert projector_adapter, "missing production complete-s+p pseudopotential adapter"
+for token in ("pp%rad", "pp%upptbl_ao", "pp%nrps_ao"):
+    assert token.lower() in projector_adapter.group("body").lower(), (
+        f"production complete-s+p seeds must use pseudo-atomic orbital data: {token}"
+    )
+assert "gaussian" not in projection_source.lower(), (
+    "periodic complete-s+p projectors must not silently fall back to Gaussian seeds"
+)
+assert "expected_core_count" in adapter_body.lower() and "ow_partition_weight" in adapter_body.lower(), (
+    "stitched metric coverage must be checked against every global physical-grid point"
+)
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*present\s*\(\s*center_representative_box_ids\s*\)\s*\)\s*then.*?"
+    r"boundary_value_max\s*>\s*boundary_value_tolerance",
+    construction_source,
+    re.I | re.S,
+), "periodic buffer tails must be measured but not rejected as exterior-zero tails"
+assert not re.search(r"call\s+replicate_ow_global_symmetry_orbit", adapter_body, re.I), (
+    "production must not copy a representative-fragment gauge across the full system"
+)
+direct_core_position = adapter_body.lower().index("call materialize_ow_distributed_core_to_buffer")
+localize_position = adapter_body.lower().index("call run_dg_w90_gamma_library")
+materialize_position = adapter_body.lower().index(
+    "call materialize_ow_distributed_core_to_buffer", direct_core_position + 1
+)
+metric_position = adapter_body.lower().index("call assemble_dg_stitched_overlap_density_rows")
+assert direct_core_position < localize_position < materialize_position < metric_position, (
+    "localization must use the retained core directly and materialize only the final-gauge buffer"
+)
+assert not re.search(
+    r"global_seed_values\s*\(\s*1\s*:\s*nstate.*?=\s*augmented_candidate\s*\(\s*1\s*:\s*nstate",
+    adapter_body,
+    re.I | re.S,
+), "fragment eigenstate indices must not be spliced into fictitious full-system KS seeds"
+assert re.search(
+    r"compose_dg_buffered_orbital_tile_to_physical_grid\s*\(.*?"
+    r"lcfo_fragment_contribution\s*,\s*ow_core_ids\s*,\s*global_seed_values",
+    adapter_body,
+    re.I | re.S,
+), "the occupied block must be composed from LCFO fragment-plus-buffer values"
+assert re.search(
+    r"do\s+projector_tile_first\s*=.*?"
+    r"manifest_channels\s*\(\s*projector_tile_first\s*:\s*projector_tile_last\s*\).*?"
+    r"compose_dg_buffered_orbital_tile_to_physical_grid.*?"
+    r"global_seed_values\s*\(\s*nstate\s*\+\s*projector_tile_first",
+    adapter_body,
+    re.I | re.S,
+), "the complete-s+p complement must be evaluated and buffer-composed in bounded global-channel tiles"
+assert "global_candidate_localizer" not in adapter_body.lower(), (
+    "accepted affine-closed seeds must not re-enter the removed dense fixed-rank selector"
+)
+assert "w90_workspace_peak" in adapter_body and "w90_coordinator_bytes" in adapter_body, (
+    "production must publish Wannier90 coordinator and assembly memory receipts"
+)
+assert "subroutine assemble_dg_periodic_spread_gradient" in localization_source.lower(), (
+    "localization must differentiate the same complete periodic spread used by its line search"
+)
+assert re.search(r"maximum_point_block\s*=\s*4096", localization_source, re.I), (
+    "complete spread-gradient assembly must bound its local-grid temporary storage"
+)
+assert re.search(r"local_action\s*=\s*local_action\s*\+\s*matmul", localization_source, re.I), (
+    "complete spread-gradient actions must use blocked dense matrix products"
+)
+assert not re.search(r"density_potential\s*\(\s*nwannier\s*,\s*npoint\s*\)", localization_source, re.I), (
+    "complete spread-gradient assembly must not duplicate the whole local buffer"
+)
+exponential_body = re.search(
+    r"subroutine\s+exponentiate_antihermitian_block\b(?P<body>.*?)end\s+subroutine",
+    localization_source,
+    re.I | re.S,
+)
+assert exponential_body and "zheev" in exponential_body.group("body").lower(), (
+    "dense global gauge exponential must use one Hermitian eigensolve, not a Taylor matmul series"
+)
+closure_call = adapter_body.find("call orthonormalize_dg_distributed_seed_space")
+localization_call = adapter_body.find("call run_dg_w90_gamma_library")
+assert closure_call >= 0, (
+    "production OW GS must orthonormalize the accepted full-affine-closed seed space"
+)
+run_library_body = re.search(
+    r"subroutine\s+run_dg_w90_gamma_library\b(?P<body>.*?)end\s+subroutine\s+run_dg_w90_gamma_library",
+    w90_source,
+    re.I | re.S,
+)
+setup_library_body = re.search(
+    r"subroutine\s+setup_dg_w90_gamma_library\b(?P<body>.*?)end\s+subroutine\s+setup_dg_w90_gamma_library",
+    w90_source,
+    re.I | re.S,
+)
+assert setup_library_body and "call convert_dg_w90_library_geometry" in setup_library_body.group("body").lower() and all(
+    token in setup_library_body.group("body").lower().split("call wannier_setup", 1)[1]
+    for token in ("real_lattice_w90", "reciprocal_lattice_w90", "atoms_cart_w90")
+), "Wannier90 setup must receive Angstrom geometry through the library API"
+assert run_library_body and "call convert_dg_w90_library_geometry" in run_library_body.group("body").lower() and all(
+    token in run_library_body.group("body").lower().split("call wannier_run", 1)[1]
+    for token in ("real_lattice_w90", "reciprocal_lattice_w90", "atoms_cart_w90")
+), "Wannier90 run must receive Angstrom geometry through the library API"
+assert re.search(
+    r"centers\s*=\s*centers\s*/\s*bohr_to_angstrom.*?spreads\s*=\s*spreads\s*/\s*\(\s*bohr_to_angstrom\s*\*\s*bohr_to_angstrom\s*\)",
+    run_library_body.group("body"),
+    re.I | re.S,
+), "Wannier90 library centers and spreads must return to SALMON atomic units"
+assert run_library_body and re.search(
+    r"MPI_Bcast\s*\(\s*message\s*,",
+    run_library_body.group("body"),
+    re.I,
+), "Wannier90 validation must broadcast and preserve the root-cause diagnostic"
+assert "message='Wannier90 Gamma library run failed validation'" not in run_library_body.group("body"), (
+    "Wannier90 validation must not overwrite its specific failure diagnostic"
+)
+assert "num_iter = 400" not in w90_source, (
+    "production Wannier90 must not bypass the user-configurable iteration limit"
+)
+assert re.search(
+    r"write\s*\(\s*unit\s*,\s*'\(a,i0\)'\s*\)\s*'num_iter\s*=\s*'\s*,\s*num_iter",
+    setup_library_body.group("body"),
+    re.I,
+), "Wannier90 setup must write its configured iteration limit"
+assert re.search(
+    r"validate_dg_w90_convergence_log\s*\([^\n]*\.wout'\s*,\s*num_iter\s*,",
+    run_library_body.group("body"),
+    re.I,
+), "Wannier90 convergence validation must use the configured iteration limit"
+assert re.search(
+    r"call\s+setup_dg_w90_gamma_library\s*\(.*?wannier_num_iter",
+    ow_ground_state_body,
+    re.I | re.S,
+), "production setup must receive the existing wannier_num_iter setting"
+assert re.search(
+    r"call\s+run_dg_w90_gamma_library\s*\(.*?wannier_num_iter",
+    ow_ground_state_body,
+    re.I | re.S,
+), "production run must receive the existing wannier_num_iter setting"
+post_w90_prefix = adapter_body[
+    localization_call:adapter_body.find("call split_dg_translation_character_sector_eigenexa", localization_call)
+]
+assert "call validate_dg_w90_generator_covariance" in post_w90_prefix, (
+    "converged Wannier90 output must be checked against each supplied affine-generator representation"
+)
+assert "call verify_dg_wannier_center_affine_orbits" not in post_w90_prefix, (
+    "dense internal symmetry blocks must not be rejected by a premature monomial centre-orbit gate"
+)
+point_action_body = re.search(
+    r"subroutine\s+prepare_ow_global_point_action\b(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert point_action_body and "duplicate_operation" in point_action_body.group("body").lower(), (
+    "global point action must deduplicate only identical affine operations"
+)
+assert "solve_dg_affine_common_fixed_point" in point_action_body.group("body").lower(), (
+    "global affine action must report common-center availability without requiring it"
+)
+assert "build_sawf_operation_index" in point_action_body.group("body").lower(), (
+    "full affine product metadata must use the bounded SAWF operation hash index"
+)
+assert "lookup_sawf_operation_product" in point_action_body.group("body").lower(), (
+    "each affine product must be resolved directly from its full normalized key"
+)
+assert not re.search(
+    r"do\s+g\s*=.*?do\s+h\s*=.*?do\s+k\s*=.*?all_maps",
+    point_action_body.group("body"),
+    re.I | re.S,
+), "production must not discover affine products by Nsym-candidate grid-map search"
+assert not re.search(r"if\s*\(\s*have_common_center\s*\).*?cycle",point_action_body.group("body"),re.I | re.S), (
+    "valid screw/glide operations must not be discarded for lacking a common fixed point"
+)
+assert localization_call > closure_call, (
+    "full-affine closure acceptance and orthonormalization must precede Wannier localization"
+)
+assert re.search(r"call\s+apply_dg_w90_gamma_transform", adapter_body, re.I), (
+    "Wannier90 localization must finish with SALMON canonical Gamma gauge application"
+)
+assert "replicate_ow_global_symmetry_orbit" not in adapter_body, (
+    "production must not replicate a representative fragment after local construction"
+)
+assert "call run_dg_overlapping_wannier_scf(" not in adapter_body.lower(), (
+    "the stitched pencil is a one-shot post-DC solve; repeated OW-SCF would repeatedly "
+    "symmetrize H/S/rho and feed its reconstructed density back into the operator"
+)
+assert adapter_body.lower().count("call solve_dg_overlapping_wannier_generalized_eigenexa(") == 1, (
+    "production must solve the symmetrized stitched generalized pencil exactly once with EigenExa"
+)
+assert "one_shot_operator_fingerprint" in adapter_body.lower(), (
+    "one-shot assembly must return a separate fingerprint instead of overwriting the expected operator identity"
+)
+assert re.search(
+    r"one_shot_operator_fingerprint\s*/=\s*operator_fingerprint.*?error\s+stop",
+    adapter_body,
+    re.I | re.S,
+), "one-shot assembly must reject an operator fingerprint mismatch"
+adapter_lower = adapter_body.lower()
+generation_position = adapter_lower.find("ow_basis%generation=1")
+tail_generation_position = adapter_lower.find("allocate(ow_tail_generation")
+assert 0 <= generation_position < tail_generation_position, (
+    "the independently constructed Wannier basis must publish a positive generation before "
+    "density tails, fingerprints, and checkpoints consume it"
+)
+build_position = adapter_lower.find("call ow_build_hamiltonian(")
+solve_position = adapter_lower.find("call solve_dg_overlapping_wannier_generalized_eigenexa(")
+density_position = adapter_lower.find("one_shot_density=ow_initial_occupied_density")
+checkpoint_position = adapter_lower.find("call write_dg_overlapping_wannier_checkpoint(")
+assert 0 <= density_position < build_position < solve_position < checkpoint_position, (
+    "production order must restore the preserved occupied-state density, build the full-cell operator, "
+    "solve once with EigenExa, then publish the checkpoint"
+)
+checkpoint_body = re.search(
+    r"subroutine\s+populate_ow_checkpoint(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+).group("body")
+for stale_refinement_receipt in (
+    "refined_residual",
+    "refined_orthogonality",
+    "refined_condition",
+    "refined_coefficients",
+    "refined_eigenvalues",
+):
+    assert stale_refinement_receipt not in checkpoint_body.lower(), (
+        f"one-shot checkpoint must not publish stale refinement receipt {stale_refinement_receipt}"
+    )
+hamiltonian_builder = re.search(
+    r"subroutine\s+ow_build_hamiltonian(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert hamiltonian_builder
+symmetry_source = source("src/gs/dc/dg_overlapping_wannier_symmetry.f90")
+strict_rejection = re.search(
+    r"if\s*\(\s*strict_min\s*==\s*1\s*\)\s*then(?P<body>.*?)"
+    r"message\s*=\s*['\"]input covariance defect exceeds strict pencil publication tolerance",
+    symmetry_source,
+    re.I | re.S,
+)
+assert strict_rejection and strict_rejection.group("body").lower().count("write(0,") >= 4, (
+    "strict covariance rejection receipts must use unbuffered error output so error stop cannot hide them"
+)
+assert "rejected averaged pencil covariance" in symmetry_source.lower(), (
+    "a failed full-group projection must report its post-average H/S/rho residuals"
+)
+assert "rejected averaged pencil worst operations" in symmetry_source.lower(), (
+    "a failed full-group projection must identify the offending generators"
+)
+builder_lower = hamiltonian_builder.group("body").lower()
+assert re.search(
+    r"symmetrize_dg_distributed_pencil_rows\s*\([^;]*?update_auxiliary\s*\)",
+    hamiltonian_builder.group("body"),
+    re.I | re.S,
+), "Hybrid iterations must diagnose raw covariance but only strict-gate the published auxiliary pencil"
+assemble_position = builder_lower.find("call project_dg_full_cell_hamiltonian_tiles(")
+symmetrize_position = builder_lower.find("call symmetrize_dg_distributed_pencil_rows(")
+assert 0 <= assemble_position < symmetrize_position, (
+    "the Hamiltonian builder must validate/symmetrize full-cell rows before returning them"
+)
+component_hermiticity_positions = [
+    builder_lower.find("call ow_distributed_hermiticity(comm,ow_row_ids,kinetic_rows"),
+    builder_lower.find("call ow_distributed_hermiticity(comm,ow_row_ids,local_rows"),
+    builder_lower.find("call ow_distributed_hermiticity(comm,ow_row_ids,nonlocal_rows"),
+]
+assert all(assemble_position < position < symmetrize_position for position in component_hermiticity_positions), (
+    "projected component Hermiticity must be measured before strict covariance can reject the pencil"
+)
+assert "call assemble_ow_nonlocal_rows(" not in builder_lower, (
+    "the normalization-incompatible fragment reference must not run in every Hamiltonian build"
+)
+assert "full_cell/reference_nonlocal_difference" not in builder_lower, (
+    "the temporary raw nonlocal comparison must be removed after diagnosis"
+)
+assert "total_projector_direct/hpsi_nonlocal_difference" in builder_lower, (
+    "the first Hamiltonian assembly must locate any defect after projector overlap"
+)
+assert "ow_direct_nonlocal_compared" in builder_lower, (
+    "the direct/hpsi nonlocal comparison must be guarded to run only once"
+)
+range_adapter = re.search(
+    r"subroutine\s+diagnose_ow_total_nonlocal_projector_range(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert range_adapter
+assert re.search(
+    r"strength\s*\(\s*ilma\s*\)\s*=\s*system%hvol\s*\*\s*dc%ppg_tot%rinv_uvu",
+    range_adapter.group("body"),
+    re.I,
+), "direct C^H D C rows must include the outer real-space integration weight"
+full_cell_callback = re.search(
+    r"subroutine\s+apply_ow_full_cell_hpsi_tile(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert full_cell_callback
+assert re.search(
+    r"tile_info%icomm_r\s*=\s*dc%info_tot%icomm_r",
+    full_cell_callback.group("body"),
+    re.I,
+), "the ineffective whole-communicator experiment must be reverted"
+assert "projector_atom_comm/world_overlap_difference" in full_cell_callback.group("body").lower(), (
+    "the first Hybrid tile must compare atom-communicator and world projector overlaps"
+)
+assert re.search(
+    r"call\s+hpsi\s*\(.*?include_nonlocal\s*=\s*\.false\.\s*\).*?"
+    r"call\s+apply_ow_world_reduced_nonlocal",
+    full_cell_callback.group("body"),
+    re.I | re.S,
+), "the Hybrid correctness reference must add world-reduced nonlocal action after local hpsi"
+range_diagnostic_position = ow_ground_state_body.find("call diagnose_ow_total_nonlocal_projector_range(")
+hybrid_scf_position = ow_ground_state_body.find("call run_dg_hybrid_self_consistent_ground_state(")
+assert center_measure_position < range_diagnostic_position < hybrid_scf_position, (
+    "the total-system projector range diagnostic must run once after centers and before Hybrid-SCF"
+)
+hybrid_setup = ow_ground_state_body[range_diagnostic_position:hybrid_scf_position]
+assert "ow_hybrid_density=ow_box_density" not in hybrid_setup.replace(" ", ""), (
+    "Hybrid initial density must not reuse fragment-stitched box density"
+)
+assert "ow_hybrid_density=ow_initial_occupied_density" in hybrid_setup.replace(" ", "").lower(), (
+    "Hybrid initial potential must use the converged LCFO physical density"
+)
+assert "hybrid_initial_coefficients(io,io)=1d0" not in adapter_body.replace(" ", "").lower(), (
+    "final Wannier columns must not be assumed to preserve the pre-localization occupied ordering"
+)
+assert re.search(
+    r"redistribute_dg_row_owned_real_field_to_requests\s*\([^;]*?"
+    r"ow_total_density_ids\s*,\s*ow_total_density_values\s*,\s*ow_core_ids\s*,\s*"
+    r"ow_initial_occupied_density",
+    adapter_body,
+    re.I | re.S,
+), "initial density must be redistributed by physical ID from the preserved converged DC+LCFO density"
+initial_density_redistribution = adapter_body.lower().find(
+    "ow_total_density_ids,ow_total_density_values,ow_core_ids,ow_initial_occupied_density"
+)
+initial_density_deallocation = adapter_body.lower().find(
+    "deallocate(ow_total_density_ids,ow_total_density_values)"
+)
+assert 0 <= initial_density_redistribution < initial_density_deallocation, (
+    "the converged distributed density must remain alive until the final core layout consumes it"
+)
+assert re.search(
+    r"ow_symmetry_fingerprint\s*=\s*0_8\s*.*?do\s+p\s*=\s*1\s*,\s*nproc\s*.*?"
+    r"ow_symmetry_fingerprint\s*=\s*ieor",
+    ow_ground_state_body,
+    re.I | re.S,
+), "the collective symmetry fingerprint accumulator must be initialized before IEOR"
+assert re.search(
+    r"inherit_dg_w90_affine_receipts\s*\(.*?w90_closure_defect.*?"
+    r"global_retained_group_closure_defect\s*=\s*w90_closure_defect",
+    adapter_body,
+    re.I | re.S,
+), "SCF closure must inherit the accepted full-affine proof through the unitary MLWF gauge"
+assert re.search(
+    r"call\s+populate_ow_checkpoint\s*\(\s*occupations\s*,\s*condition_number\s*,\s*"
+    r"global_retained_group_closure_defect",
+    main_source,
+    re.I | re.S,
+), "V3 checkpoint caller must pass the rank-consistent exact group-algebra closure"
+assert re.search(
+    r"ow_checkpoint%symmetry_closure_residual\s*=\s*closure_residual",
+    main_source,
+    re.I,
+), "V3 checkpoint writer must publish its explicit closure contract"
+for evidence in (
+    "localization_initial_spread",
+    "localization_final_spread",
+    "localization_maximum_gradient",
+    "localization_iterations",
+    "localization_converged",
+):
+    assert evidence in ow_checkpoint_source, f"V3 checkpoint misses {evidence}"
+assert re.search(
+    r"call\s+run_dg_w90_gamma_library.*?if\s*\(\s*\.not\.\s*ok\s*\).*?error\s+stop",
+    adapter_body,
+    re.I | re.S,
+), "rejected Wannier90 MLWF gauges must not reach V3 publication"
+assert not re.search(
+    r"call\s+align_dg_fragment_wannier_gauge",
+    adapter_body,
+    re.I,
+), "production must not assume independently selected retained spaces differ only by gauge"
+assert "inherit_dg_w90_affine_receipts" in adapter_body, (
+    "production must preserve the authoritative global action under MLWF gauge rotation"
+)
+materialize_body = re.search(
+    r"subroutine\s+materialize_ow_distributed_core_to_buffer\b(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert materialize_body
+assert "mpi_bcast(owner_values" in materialize_body.group("body").lower()
+assert "mpi_allgather" not in materialize_body.group("body").lower()
+assert "sort_ow_id_positions" in materialize_body.group("body").lower()
+assert "find_sorted_ow_id" in materialize_body.group("body").lower()
+assert "findloc" not in materialize_body.group("body").lower()
+for required in (
+    "build_dg_balanced_orbital_ownership",
+    "transpose_dg_spatial_cores_to_orbital_owners",
+    "redistribute_dg_owned_orbitals_to_center_fragments",
+    "assign_dg_periodic_centers_to_fragments",
+):
+    assert required in construction_source.lower(), f"missing orbital redistribution primitive: {required}"
+assert construction_source.lower().count("mpi_alltoallv") >= 2, (
+    "both spatial-to-orbital and orbital-to-center-fragment transposes must use MPI_Alltoallv"
+)
+assert not re.search(r"mod\s*\(\s*ntarget\s*,\s*nproc\s*\)\s*/=\s*0", adapter_body, re.I), (
+    "production orbital ownership must support target ranks not divisible by MPI size"
+)
+assert re.search(
+    r"redistribute_dg_owned_orbitals_to_center_fragments\s*\(.*?physical_ids",
+    adapter_body,
+    re.I | re.S,
+), "center-fragment redistribution must send the complete periodic core+buffer box"
+assert re.search(
+    r"nstate\s*=\s*ceiling\s*\(\s*0\.5d0\s*\*\s*dc%elec_num_tot\s*\)",
+    adapter_body,
+    re.I,
+), "production occupied rank must come from the total electron count in the global LCFO ordering"
+assert not re.search(
+    r"do\s+source\s*=\s*1\s*,\s*total_box.*?"
+    r"do\s+j\s*=\s*1\s*,\s*ncandidate\s*;\s*do\s+i\s*=\s*1\s*,\s*ncandidate.*?"
+    r"spatial_overlap\s*\(\s*i\s*,\s*j\s*\)\s*=",
+    construction_source,
+    re.I | re.S,
+), "periodic symmetry overlaps must not use the cubic Fortran scalar loop"
+
+assert "dg_overlapping_wannier_operators.f90" in dc_cmake
+for required in ("gradients", "local_potential", "unique-core", "MPI_Allreduce"):
+    assert required.lower() in operators_source.lower(), (
+        f"missing weak-operator contract: {required}"
+    )
+for forbidden in ("direct_sipg", "face_hamiltonian", "buffer_volume"):
+    assert forbidden not in operators_source.lower(), (
+        f"weak operator must not add an independent path: {forbidden}"
+    )
+
+for required in (
+    "run_dg_overlapping_wannier_scf",
+    "unmixed_density_residual",
+    "mix_density",
+    "rollback_transaction",
+):
+    assert required.lower() in ow_scf_source.lower(), f"missing Task 8 SCF contract: {required}"
+for required in (
+    "manifest_magic",
+    "shard_magic",
+    "versioned_shard_name",
+    "call rename",
+    "unmixed_density_residual",
+    "orthogonality_defect",
+    "metric_condition",
+    "global_lcfo_fingerprint",
+    "occupation_block_fingerprint",
+    "affine_cocycle_fingerprint",
+    "redistribution_fingerprint",
+    "gs_acceptance_receipts",
+    "gs_acceptance_tolerance",
+):
+    assert required.lower() in ow_checkpoint_source.lower(), (
+        f"missing Task 8 route-checkpoint contract: {required}"
+    )
+for forbidden in ("direct_sipg", "lcfo", "eigenexa", "dg_wpw", "checkpoint_gs", "main_tddft"):
+    assert forbidden not in ow_scf_source.lower()
+    if forbidden != "lcfo":
+        assert forbidden not in ow_checkpoint_source.lower()
+
+checkpoint_population = re.search(
+    r"subroutine\s+populate_ow_checkpoint\b(?P<body>.*?)end\s+subroutine",
+    main_source,
+    re.I | re.S,
+)
+assert checkpoint_population
+assert not re.search(
+    r"MPI_Bcast\s*\(\s*owner_basis\s*,\s*nstate\s*\*\s*nlocal",
+    construction_source,
+    re.I,
+), "production symmetry action must not broadcast every owner's complete basis"
+assert not re.search(
+    r"allocate\s*\([^)]*lcfo_occupied_representation\s*\(",
+    adapter_body,
+    re.I | re.S,
+), "production must not retain the unused LCFO representation for every point operation"
+assert not re.search(
+    r"allocate\s*\([^)]*image\s*\(\s*nstate\s*,\s*nlocal\s*\)",
+    construction_source,
+    re.I | re.S,
+), "symmetry residual measurement must tile its image workspace"
+assert not re.search(
+    r"allocate\s*\([^)]*residual\s*\(\s*nstate\s*,\s*nlocal\s*\)",
+    construction_source,
+    re.I | re.S,
+), "symmetry residual measurement must tile its residual workspace"
+direct_eigenexa = re.search(
+    r"subroutine\s+eigen_pdsyevd_ex_distributed_blocks\b(?P<body>.*?)end\s+subroutine",
+    eigenexa_source,
+    re.I | re.S,
+)
+assert direct_eigenexa, "missing direct distributed-block EigenExa adapter"
+assert re.search(r"call\s+eigen_sx\s*\(", direct_eigenexa.group("body"), re.I), (
+    "distributed-block EigenExa adapter must diagonalize its local cyclic block directly"
+)
+assert not re.search(r"\bh\s*\(\s*:\s*,\s*:\s*\)", direct_eigenexa.group("body"), re.I), (
+    "distributed-block EigenExa adapter must not accept a replicated dense input"
+)
+assert "work_matrix" not in direct_eigenexa.group("body").lower(), (
+    "distributed-block EigenExa adapter must consume its local block without a duplicate"
+)
+eigenexa_initializer = re.search(
+    r"subroutine\s+init_eigenexa\b(?P<body>.*?)end\s+subroutine",
+    source("src/gs/eigenexa_module.f90"),
+    re.I | re.S,
+)
+assert eigenexa_initializer and "direct_block_only" in eigenexa_initializer.group("body").lower(), (
+    "OW-sized EigenExa initialization must bypass GS orbital redistribution metadata"
+)
+assert re.search(
+    r"call\s+init_eigenexa_mod\s*\([^\n]*direct_block_only\s*=\s*\.true\.",
+    adapter_body,
+    re.I,
+), "production OW must request direct-block-only EigenExa initialization"
+assert re.search(
+    r"call\s+init_eigenexa_mod\s*\(\s*info\s*,\s*size\s*\(\s*global_seed_values\s*,\s*1\s*\)\s*,"
+    r"[^\n]*direct_block_only\s*=\s*\.true\.",
+    adapter_body,
+    re.I,
+), (
+    "the affine residual EigenExa descriptor must use the measured production-seed rank; "
+    "initializing it with the smaller occupied rank can return false zero closure/workspace"
+)
+rank_fixed_residuals = re.search(
+    r"subroutine\s+measure_dg_rank_fixed_symmetry_residuals_eigenexa\b(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert rank_fixed_residuals, "missing production distributed rank-fixed affine residual implementation"
+assert re.search(
+    r"assemble_dg_eigenexa_cyclic_metric_block\s*\([^)]*?info%nrow_local\s*,\s*info%ncol_local",
+    rank_fixed_residuals.group("body"),
+    re.I | re.S,
+), (
+    "cyclic metric assembly must allocate EigenExa's padded local matrix shape, "
+    "not the smaller unpadded cyclic ownership count"
+)
+for failure_text in (
+    "distributed rank-fixed eigensystem",
+    "distributed rank-fixed occupied metric is singular",
+):
+    failure_branch = re.search(
+        rf"if\s*\([^\n]*\)\s*then(?P<body>.*?)message\s*=\s*'{re.escape(failure_text)}",
+        rank_fixed_residuals.group("body"),
+        re.I | re.S,
+    )
+    assert failure_branch and "ok=.false." in re.sub(r"\s+", "", failure_branch.group("body")).lower(), (
+        f"{failure_text} must not inherit a successful metric-assembly status"
+    )
+    assert "workspace_peak_bytes" in failure_branch.group("body").lower(), (
+        f"{failure_text} must publish the workspace measured before rejection"
+    )
+assert re.search(
+    r"call\s+measure_dg_rank_fixed_symmetry_residuals_eigenexa\s*\(",
+    adapter_body,
+    re.I,
+), "production OW construction must use the EigenExa-distributed residual path"
+assert "call select_dg_group_generators(" in adapter_body.lower(), (
+    "production must prove full affine closure through a deterministic generating set"
+)
+assert not re.search(
+    r"call\s+measure_dg_rank_fixed_symmetry_residuals\s*\(",
+    adapter_body,
+    re.I,
+), "production OW construction must not call the dense-reference residual path"
+for replicated_name in (
+    "local_metric",
+    "metric",
+    "metric_vectors",
+    "metric_inverse_sqrt",
+    "local_overlap",
+    "global_overlap",
+):
+    assert not re.search(
+        rf"allocate\s*\([^)]*\b{replicated_name}\s*\(\s*nstate\s*,\s*nstate\s*\)",
+        rank_fixed_residuals.group("body"),
+        re.I | re.S,
+    ), f"Task 3B forbids replicated nstate-square {replicated_name} storage"
+assert "assemble_dg_eigenexa_cyclic_metric_block" in rank_fixed_residuals.group("body"), (
+    "Task 3B must assemble the rank-fixed metric directly in cyclic EigenExa ownership"
+)
+assert "eigen_pdsyevd_ex_distributed_blocks" in rank_fixed_residuals.group("body"), (
+    "Task 3B must diagonalize the cyclic metric without a replicated dense input"
+)
+assert not re.search(
+    r"MPI_Allreduce\s*\([^\n]*nstate\s*\*\s*nstate",
+    rank_fixed_residuals.group("body"),
+    re.I,
+), "Task 3B forbids all-replicating dense metric or overlap blocks"
+symmetry_closed_builder = re.search(
+    r"subroutine\s+build_dg_distributed_symmetry_closed_basis\b(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert symmetry_closed_builder
+assert not re.search(
+    r"do\s+left\s*=\s*1\s*,\s*noperation.*?do\s+right\s*=\s*1\s*,\s*noperation.*?"
+    r"do\s+source_owner\s*=",
+    symmetry_closed_builder.group("body"),
+    re.I | re.S,
+), "symmetry-closed construction must not repeat an O(Nsym^2*Ngrid) action-table proof"
+row_owned_overlap = re.search(
+    r"subroutine\s+assemble_dg_distributed_basis_symmetry_overlap_rows\b"
+    r"(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert row_owned_overlap, "missing row-owned all-operation symmetry overlap assembly"
+assert "exchange_dg_point_permuted_orbital_rows" in row_owned_overlap.group("body"), (
+    "row-owned symmetry overlaps must use sparse point exchange"
+)
+assert not re.search(r"MPI_Bcast\s*\(", row_owned_overlap.group("body"), re.I), (
+    "row-owned symmetry overlap assembly must not broadcast a complete basis"
+)
+assert not re.search(
+    r"allocate\s*\([^)]*\(\s*nbasis\s*,\s*nbasis\s*,\s*nsym",
+    row_owned_overlap.group("body"),
+    re.I | re.S,
+), "row-owned symmetry overlap assembly must not allocate replicated Nsym*Norb**2"
+assert re.search(
+    r"subroutine\s+validate_dg_streamed_affine_representation\b",
+    construction_source,
+    re.I,
+), "missing bounded-memory one-operation-at-a-time affine validator"
+character_builder = re.search(
+    r"subroutine\s+build_dg_finite_abelian_character_table\b(?P<body>.*?)end\s+subroutine",
+    construction_source,
+    re.I | re.S,
+)
+assert character_builder, "missing canonical finite-translation character construction"
+assert "element_words" in character_builder.group("body").lower(), (
+    "translation characters must expose canonical generator words"
+)
+assert not re.search(r"\bzgeev\b|\bzheev\b", character_builder.group("body"), re.I), (
+    "finite-group characters must not depend on a potentially degenerate eigensolver"
+)
+assert re.search(
+    r"subroutine\s+gather_dg_single_symmetry_representation\b",
+    construction_source,
+    re.I,
+), "missing one-operation fixed-center representation gather"
+dmn_begin = adapter_body.lower().find("call begin_sawf_dmn(")
+dmn_append = adapter_body.lower().find("call append_sawf_dmn_operation(")
+dmn_finish = adapter_body.lower().find("call finish_sawf_dmn(")
+w90_setup = adapter_body.lower().find("call setup_dg_w90_gamma_library(")
+assert min(dmn_begin, dmn_append, dmn_finish, w90_setup) >= 0, (
+    "production must publish a streamed fixed-center DMN before Wannier90 setup"
+)
+assert dmn_begin < dmn_append < dmn_finish < w90_setup, (
+    "fixed-center DMN transaction must complete before Wannier90 setup"
+)
+dmn_transaction = adapter_body[dmn_begin:dmn_finish + 512].lower()
+assert "fixed_center_group_order" in dmn_transaction, (
+    "Wannier90 DMN must contain every operation of the closed fixed-center group"
+)
+assert re.search(
+    r"fixed_center_symmetry_map\s*\(\s*:\s*,\s*fixed_center_operation\s*:\s*"
+    r"fixed_center_operation\s*\)", dmn_transaction, re.S
+), "DMN representations must be assembled from the matching fixed-center operation map"
+assert "global_affine_generators" not in dmn_transaction, (
+    "identity plus affine generators is not a one-pass Reynolds projector"
+)
+assert "require_closed_group=.false." not in dmn_transaction.replace(" ", ""), (
+    "production DMN publication must validate fixed-center group closure"
+)
+post_w90_start = adapter_body.lower().find("call run_dg_w90_gamma_library(")
+post_w90_end = adapter_body.lower().find("wannier90 fixed-center covariance passed", post_w90_start)
+assert 0 <= post_w90_start < post_w90_end, "missing immediate post-Wannier covariance gate"
+post_w90_covariance = adapter_body[post_w90_start:post_w90_end].lower()
+assert "fixed_center_group_order" in post_w90_covariance, (
+    "post-Wannier covariance must validate the complete group supplied through DMN"
+)
+assert re.search(
+    r"fixed_center_symmetry_map\s*\(\s*:\s*,\s*fixed_center_operation\s*:\s*"
+    r"fixed_center_operation\s*\)", post_w90_covariance, re.S
+), "post-Wannier covariance must use the matching fixed-center operation map"
+assert "global_affine_generators" not in post_w90_covariance, (
+    "full-affine covariance is constructed only by the downstream character-sector gauge"
+)
+assert "global_symmetry_map" not in post_w90_covariance, (
+    "the immediate covariance gate must not substitute an operation absent from DMN"
+)
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*writer_ok\s*\)\s*then\s*.*?write\s*\(\s*0\s*,\s*['\"]\(a\)['\"]\s*\)\s*"
+    r"trim\s*\(\s*message\s*\).*?fixed-center\s+DMN\s+transaction\s+could\s+not\s+finish",
+    adapter_body,
+    re.I | re.S,
+), "a rejected fixed-center DMN finish must publish its exact validation reason"
+assert "site_symmetry = .true." in w90_source.lower(), (
+    "Wannier90 setup must enable site_symmetry"
+)
+assert "symmetrize_eps" in w90_source.lower(), (
+    "Wannier90 setup must set an explicit strict symmetrize_eps"
+)
+assert re.search(
+    r"if\s*\(\s*trim\s*\(\s*initial_projection\s*\)\s*==\s*['\"]random['\"]\s*\).*?"
+    r"write\s*\([^\n]*\)\s*['\"]random['\"]",
+    w90_source,
+    re.I | re.S,
+), (
+    "random Wannier90 projections must be selected only by the explicit initial-projection mode"
+)
+assert "inquire(file=trim(seed)//'.dmn'" in w90_source.replace(" ", "").lower(), (
+    "Wannier90 setup must reject a missing DMN before library entry"
+)
+assert re.search(r"call\s+validate_dg_w90_convergence_log\s*\(", w90_source, re.I), (
+    "Wannier90 run must validate its completion receipt"
+)
+assert "All done: wannier90 exiting" in w90_source, (
+    "Wannier90 completion validation must recognize the library's normal-exit banner"
+)
+assert "Wannier90 exhausted its iteration limit before convergence" in w90_source, (
+    "Wannier90 iteration-limit completion must not bypass its convergence receipt"
+)
+assert "Wannier90 transform violates the Gamma-real gauge" not in w90_source, (
+    "a complex unitary Wannier90 gauge must not be rejected for being non-real"
+)
+gamma_apply_body = re.search(
+    r"subroutine\s+apply_dg_w90_gamma_transform\b(?P<body>.*?)end\s+subroutine",
+    w90_source,
+    re.I | re.S,
+)
+assert gamma_apply_body and re.search(
+    r"MPI_Allreduce\s*\(\s*nstate\s*,[^\n]*MPI_MIN", gamma_apply_body.group("body"), re.I
+), "Gamma transform application must agree nstate before count-dependent collectives"
+assert re.search(
+    r"call\s+gather_dg_single_symmetry_representation\s*\(", adapter_body, re.I
+), "production fixed-center DMN must gather one representation operation at a time"
+assert re.search(
+    r"call\s+convert_sawf_pullback_to_active_representation\s*\(", adapter_body, re.I
+), "fixed-center DMN must convert grid pullbacks to the active group representation convention"
+gather_pos = adapter_body.lower().find("call gather_dg_single_symmetry_representation(")
+convert_pos = adapter_body.lower().find("call convert_sawf_pullback_to_active_representation(", gather_pos)
+append_pos = adapter_body.lower().find("call append_sawf_dmn_operation(", convert_pos)
+assert gather_pos < convert_pos < append_pos, (
+    "fixed-center DMN must gather, convert, then append each streamed representation"
+)
+normalized_adapter = re.sub(r"[\s&]+", "", adapter_body.lower())
+assert (
+    "w90_seed_representation,fixed_center_representation,fixed_center_eigenvalues,"
+    "w90_seed_a_matrix" in normalized_adapter
+), "DMN must publish the fixed-center representation in the localized seed gauge"
+assert "require_closed_group=.false." not in dmn_transaction.replace(" ", ""), (
+    "fixed-center DMN must retain the writer's closed-group validation"
+)
+assert "fixed_center_group_order>48" in adapter_body.replace(" ", "").lower(), (
+    "production must reject a fixed-center subgroup above crystallographic order 48"
+)
+assert re.search(r"fixed_center.*inversion", adapter_body, re.I | re.S), (
+    "production must require inversion in the fixed-center subgroup"
+)
+assert re.search(
+    r"call\s+inherit_dg_w90_affine_receipts\s*\(",
+    adapter_body,
+    re.I,
+), "production must inherit the accepted full-affine proof through the unitary MLWF gauge"
+assert not re.search(
+    r"call\s+validate_dg_streamed_affine_representation\s*\([^;]*global_symmetry_map", adapter_body, re.I | re.S
+), "production must not restream all 1536 post-MLWF affine operations"
+assert not re.search(r"w90_symmetry_rows\s*\(", adapter_body, re.I), (
+    "production must not retain Nsym row-owned representation matrices"
+)
+assert not re.search(
+    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\([^;]*global_symmetry_map\s*(?:,|\))",
+    adapter_body,
+    re.I | re.S,
+), "production must not assemble the full-affine all-operation row tensor"
+assert re.search(
+    r"assemble_dg_distributed_basis_symmetry_overlap_rows\s*\([^;]*global_symmetry_map\s*\(\s*:\s*,\s*io\s*:\s*io\s*\)",
+    adapter_body,
+    re.I | re.S,
+), "production must stream one canonical minimal translation generator at a time"
+for provenance in (
+    "global_lcfo_fingerprint",
+    "occupation_block_fingerprint",
+    "affine_cocycle_fingerprint",
+    "redistribution_fingerprint",
+):
+    assert re.search(
+        rf"ow_checkpoint\s*%\s*{provenance}\s*=",
+        checkpoint_population.group("body"),
+        re.I,
+    ), f"production V3 population omits {provenance}"
+assert "ow_checkpoint%gs_acceptance_receipts=" in checkpoint_population.group("body").lower(), (
+    "production V3 population omits reconstructed-GS acceptance receipts"
+)
+assert re.search(
+    r"ow_checkpoint\s*%\s*operator_fingerprint\s*=\s*operator_fingerprint\b",
+    checkpoint_population.group("body"),
+    re.I,
+), (
+    "route checkpoint provenance must retain the immutable pre-SCF operator "
+    "fingerprint, not the final density-dependent Hamiltonian rebuild fingerprint"
+)
+operator_fingerprint_body = re.search(
+    r"function\s+dg_dc_operator_fingerprint\b(?P<body>.*?)end\s+function",
+    main_source,
+    re.I | re.S,
+)
+assert operator_fingerprint_body
+assert "pp%udvtbl" in operator_fingerprint_body.group("body").lower(), (
+    "operator provenance must include the nonlocal pseudopotential operator"
+)
+assert re.search(
+    r"do\s+ii\s*=\s*1\s*,\s*pp\s*%\s*nrps\s*\(\s*kk\s*\).*?"
+    r"do\s+jj\s*=\s*0\s*,\s*sum\s*\(\s*pp\s*%\s*nproj\s*\(\s*:\s*,\s*kk\s*\)\s*\)\s*-\s*1",
+    operator_fingerprint_body.group("body"),
+    re.I | re.S,
+), (
+    "operator provenance must hash only active nonlocal radial/projector "
+    "entries, excluding unused allocated table tails"
+)
+assert "pp%upptbl_ao" not in operator_fingerprint_body.group("body").lower(), (
+    "atomic-orbital projection seeds belong to the basis fingerprint, not "
+    "Hamiltonian operator provenance"
+)
+
+ow_publication = re.search(
+    r"if\s*\(\s*yn_dg_dc_overlapping_wannier\s*==\s*'y'\s*\)\s*then"
+    r"(?P<body>.*?)\n\s*return\s*\n\s*else\s+if\s*\(\s*yn_dc_lcfo_flux",
+    main_source,
+    re.I | re.S,
+)
+assert ow_publication
+assert re.search(
+    r"if\s*\(\s*\.not\.\s*\(\s*sum1\s*<\s*threshold\s*\)\s*\)",
+    ow_publication.group("body"),
+    re.I,
+), (
+    "overlapping-Wannier publication must reject an unconverged conventional DC state"
+)
+assert "run_dg_overlapping_wannier_ground_state_for_main" in ow_publication.group("body")
+
+print("overlapping-Wannier route contract: PASS")

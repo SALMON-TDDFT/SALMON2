@@ -216,6 +216,7 @@ contains
     use nonlocal_potential, only: calc_uVpsi_rdivided
     use pseudo_pt_current_so, only: calc_current_nonlocal_so &
                                   , calc_current_nonlocal_rdivided_so
+    use current_plusU_sub, only: calc_current_plusU, calc_current_plusU_rdivided, PLUS_U_ON
     use sym_vector_sub, only: sym_vector_xyz
     use code_optimization, only: current_omp_mode
     use timer
@@ -267,7 +268,7 @@ contains
     real(8) :: curr(3,system%nspin,info%im_s:info%im_e)
     !
     integer :: ispin,im,ik,io,nspin,ngrid
-    real(8),dimension(3) :: wrk1,wrk2,wrk3,wrk4
+    real(8),dimension(3) :: wrk1,wrk2,wrk3,wrk4,wrk_plusU
     real(8) :: BT(3,3),kAc(3)
     complex(8),allocatable :: uVpsibox (:,:,:,:,:)
     complex(8),allocatable :: uVpsibox2(:,:,:,:,:)
@@ -373,15 +374,32 @@ contains
       else ! yn_jm == 'n'
         wrk3=0.d0
       end if ! yn_jm == 'n'
+      
+      ! Add DFT+U contribution to current (OpenACC version)
+      if ( PLUS_U_ON ) then
+!$acc kernels copyin(ispin,im)
+!$acc loop gang private(ik,io,wrk3,wrk4) reduction(+:jx,jy,jz) collapse(2) independent
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          call calc_current_plusU(wrk3,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          wrk4 = wrk3 * system%rocc(io,ik,ispin) * system%wtk(ik)
+          jx = jx + wrk4(1)
+          jy = jy + wrk4(2)
+          jz = jz + wrk4(3)
+        end do
+        end do
+!$acc end kernels
+!$acc exit data copyout(jx,jy,jz)
+      end if
 
       wrk4(1) = jx
       wrk4(2) = jy
       wrk4(3) = jz
 #else
 !$omp parallel do collapse(2) default(none) &
-!$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,uVpsi) &
+!$omp             private(ik,io,kAc,wrk1,wrk2,wrk3,wrk_plusU,uVpsi) &
 !$omp             shared(info,system,mg,stencil,ppg,psi,uVpsibox2,BT,im,ispin,yn_jm) &
-!$omp             shared(yn_spinorbit) &
+!$omp             shared(yn_spinorbit,PLUS_U_ON) &
 !$omp             reduction(+:wrk4) if(current_omp_mode)
       do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
@@ -412,7 +430,17 @@ contains
           wrk3=0d0
         end if
 
-        wrk4 = wrk4 + (wrk1 + wrk2 + wrk3) * system%rocc(io,ik,ispin)*system%wtk(ik)
+        ! Add DFT+U contribution to current
+        wrk_plusU = 0.0d0
+        if ( PLUS_U_ON ) then
+          if ( info%if_divide_rspace ) then
+            call calc_current_plusU_rdivided(wrk_plusU,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik,info%icomm_r)
+          else
+            call calc_current_plusU(wrk_plusU,psi%zwf(:,:,:,ispin,io,ik,im),ppg,mg%is_array,mg%ie_array,ik)
+          end if
+        end if
+
+        wrk4 = wrk4 + (wrk1 + wrk2 + wrk3 + wrk_plusU) * system%rocc(io,ik,ispin)*system%wtk(ik)
 
       end do
       end do

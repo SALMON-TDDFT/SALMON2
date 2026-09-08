@@ -149,6 +149,9 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call calc_uv
   if ( yn_spinorbit=='y' ) then
     call calc_uv_so(pp,ppg,lg%num,hgs,hvol,property)
+    if(any(ppg%uv_so /= ppg%uv_so)) then
+      stop "init_ps: NaN detected in SO projector (uv_so). Check pseudopotential compatibility for yn_spinorbit='y'."
+    end if
   end if
   if ( PLUS_U_ON ) then
     call calc_uv_plusU( pp, ppg, property )

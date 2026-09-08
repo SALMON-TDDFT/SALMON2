@@ -15,6 +15,8 @@
 !
 !=======================================================================
 
+#include "config.h"
+
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,ewald,  &
                               lg,mg,  &
@@ -27,7 +29,8 @@ subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               rho,rho_jm,rho_s,  &
                               V_local,Vh,Vxc,Vpsl,xc_func,  &
                               pp,ppg,ppn,  &
-                              band,ilevel_print,dc)
+                              band,ilevel_print,require_dg_dc_seed_electron_count,&
+                              required_dg_dc_seed_electron_count_tolerance,dc)
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -52,6 +55,10 @@ use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 use noncollinear_module, only: calc_magnetization
 use dcdft
+use dcdft_soi
+#if defined(USE_MPI) && defined(USE_SCALAPACK)
+use dc_scf_convergence, only: reduce_dc_density_convergence
+#endif
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -84,12 +91,15 @@ type(s_cg)     :: cg
 type(s_mixing) :: mixing
 type(s_band_dft) :: band
 type(s_dcdft),optional :: dc
+logical,intent(in) :: require_dg_dc_seed_electron_count
+real(8),intent(in) :: required_dg_dc_seed_electron_count_tolerance
 
-logical :: rion_update, flag_conv
+logical :: rion_update, flag_conv,dg_dc_seed_electron_count_converged
 integer :: i,j, icnt_conv_nomix
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_scalar) :: rho_old,Vlocal_old
-real(8) :: rNe
+real(8) :: rNe,dg_dc_seed_local_electrons,dg_dc_seed_global_electrons
+real(8) :: dg_dc_seed_electron_count_error
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
@@ -106,7 +116,7 @@ if(nscf_init_mix_zero.gt.1)then
    DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
-      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal)
+      call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal,dc)
       call timer_begin(LOG_CALC_TOTAL_ENERGY)
       call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
       select case(iperiodic)
@@ -149,7 +159,25 @@ sum1=1d9
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
-   if( sum1 < threshold ) then
+   dg_dc_seed_electron_count_converged=.true.
+   if(require_dg_dc_seed_electron_count.and.sum1<threshold)then
+      if(.not.present(dc))error stop 'strict DG DC seed convergence requires DC state'
+      dg_dc_seed_local_electrons=sum(dc%rho_tot_s(1)%f)
+      call comm_summation(dg_dc_seed_local_electrons,dg_dc_seed_global_electrons,&
+        dc%icomm_tot)
+      dg_dc_seed_global_electrons=dg_dc_seed_global_electrons*dc%system_tot%hvol
+      dg_dc_seed_electron_count_error=abs(dg_dc_seed_global_electrons-dc%elec_num_tot)
+      dg_dc_seed_electron_count_converged=&
+        dg_dc_seed_electron_count_error<=required_dg_dc_seed_electron_count_tolerance
+      if(.not.dg_dc_seed_electron_count_converged.and.comm_is_root(dc%id_tot))then
+        write(*,'(a,i0,a,es24.16,a,es24.16,a,es24.16)')&
+          '[DG-DC-SEED-WAIT] iteration=',Miter,&
+          ' mixed_electrons=',dg_dc_seed_global_electrons,&
+          ' error=',dg_dc_seed_electron_count_error,&
+          ' tolerance=',required_dg_dc_seed_electron_count_tolerance
+      endif
+   endif
+   if( sum1 < threshold .and. dg_dc_seed_electron_count_converged ) then
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
@@ -173,7 +201,7 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
-   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
+   call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal,dc)
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
      call copy_density(Miter,system%nspin,mg,rho_s,mixing)
      call timer_begin(LOG_CALC_RHO)
@@ -186,14 +214,22 @@ DFT_Iteration : do iter=Miter+1,nscf
      call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
-       call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
+       if(yn_spinorbit=='y') then
+         call ne2mu_dcdft_soi(mg,info,energy,spsi,dc,system)
+       else
+         call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
+       end if
      end if
      ! rho_s for fragments
      call timer_begin(LOG_CALC_RHO)
      call calc_density(system,rho_s,spsi,info,mg)
      call timer_end(LOG_CALC_RHO)
      ! rho_s (fragment) --> dc%rho_tot_s (total system)
-     call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
+     if(yn_spinorbit=='y') then
+       call calc_rho_total_dcdft_soi(system%nspin,lg,mg,info,rho_s,dc)
+     else
+       call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
+     end if
      ! mixing & local KS potential (total system)
      call update_density_and_potential(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot, &
      & stencil,xc_func,pp,ppn,iter, &
@@ -202,9 +238,15 @@ DFT_Iteration : do iter=Miter+1,nscf
      & rho_jm, & ! dummy
      & dc%Vpsl_tot,dc%Vh_tot,dc%Vxc_tot,dc%vloc_tot, &
      mixing,energy)
-     ! v_local (fragment) = vh (total) + vpsl (total) + vxc (fragment) + v_boundary (fragment)
-     call calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
-  & pp,ppn,spsi,Vxc,energy,dc,v_local)
+     ! dc%vloc_tot (total system) --> v_local (fragment)
+     if(yn_spinorbit=='y') then
+       call calc_vlocal_fragment_dcdft_soi(system%nspin,mg,v_local,dc)
+     else
+       ! The non-SOI path retains the meta-GGA boundary correction introduced
+       ! upstream while rebuilding the fragment view from the total potential.
+       call calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
+    & pp,ppn,spsi,Vxc,energy,dc,v_local)
+     end if
    end if
    call timer_begin(LOG_CALC_TOTAL_ENERGY)
    if( PLUS_U_ON )then
@@ -222,7 +264,11 @@ DFT_Iteration : do iter=Miter+1,nscf
       end select
    else if(yn_dc=='y') then
    ! Divide-and-Conquer method
-     call calc_total_energy_dcdft(mg,system,info,stencil,srg,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
+     if(yn_spinorbit=='y') then
+       call calc_total_energy_dcdft_soi(mg,system,info,v_local,spsi,shpsi,sttpsi,ewald,pp,ppg,rion_update,dc,energy)
+     else
+       call calc_total_energy_dcdft(mg,system,info,stencil,srg,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
+     end if
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
    if(calc_mode=='DFT_BAND')then
@@ -454,35 +500,38 @@ contains
     type(s_parallel_info),intent(in) :: info
     type(s_scalar)       ,intent(in) :: rho,V_local(system%nspin)
     !
-    real(8) :: sum0
+    real(8) :: sum0,local_absolute_sum,local_square_sum
+    logical :: convergence_ok
+    character(256) :: convergence_message
     
     select case(convergence)
-    case('rho_dne')
-      sum0=0d0
-      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
+    case('rho_dne','norm_rho','norm_rho_dng')
+      local_absolute_sum=0d0
+      local_square_sum=0d0
+      !$OMP parallel do reduction(+:local_absolute_sum,local_square_sum) private(iz,iy,ix)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      local_absolute_sum=local_absolute_sum+abs(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))
+      local_square_sum=local_square_sum+(rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
       end do
       end do
       end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      sum1 = sum1*system%Hvol/rNe
-    case('norm_rho','norm_rho_dng')
-      sum0=0.d0
-      !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
-      do iz=mg%is(3),mg%ie(3)
-      do iy=mg%is(2),mg%ie(2)
-      do ix=mg%is(1),mg%ie(1)
-      sum0 = sum0 + (rho%f(ix,iy,iz)-rho_old%f(ix,iy,iz))**2
-      end do
-      end do
-      end do
-      call comm_summation(sum0,sum1,info%icomm_r)
-      if(convergence=='norm_rho_dng')then
-        sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
-      end if
+#if defined(USE_MPI) && defined(USE_SCALAPACK)
+      call reduce_dc_density_convergence(info%icomm_r,convergence,local_absolute_sum,&
+        local_square_sum,system%Hvol,rNe,lg%num(1)*lg%num(2)*lg%num(3),sum1,&
+        convergence_ok,convergence_message)
+      if(.not.convergence_ok)error stop 'invalid DC density convergence reduction'
+#else
+      if(convergence=='rho_dne')then
+        call comm_summation(local_absolute_sum,sum1,info%icomm_r)
+        sum1=sum1*system%Hvol/rNe
+      else
+        call comm_summation(local_square_sum,sum1,info%icomm_r)
+        if(convergence=='norm_rho_dng') &
+          sum1=sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
+      endif
+#endif
     case('norm_pot','norm_pot_dng')
       sum0=0.d0
       !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)

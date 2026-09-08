@@ -19,7 +19,7 @@ endmacro (list_prepend)
 
 # check_mpi_compiler(COMPILER_NAME, RESULT)
 #   This command checks the prefix of ${COMPILER_NAME} is `mpi`.
-#   In almost all of MPI compiler, they takes `mpi` prefix. 
+#   In almost all of MPI compiler, they takes `mpi` prefix.
 #
 #   in:  COMPILER_NAME
 #   out: ${RESULT} (TRUE or FALSE)

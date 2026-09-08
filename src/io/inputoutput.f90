@@ -20,6 +20,7 @@
 module inputoutput
   use phys_constants
   use salmon_global
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   implicit none
 !Physical constant
   real(8),parameter :: au_time_fs = 0.02418884326505d0
@@ -223,6 +224,7 @@ contains
       & yn_self_checkpoint,  &
       & checkpoint_interval, &
       & yn_reset_step_restart, &
+      & yn_reset_occupation_restart, &
       & read_gs_restart_data,  &
       & write_gs_restart_data, &
       & time_shutdown,         &
@@ -285,7 +287,14 @@ contains
       & alibc, &
       & alibxc, &
 #endif
-      & cval
+      & cval, &
+      & yn_hse, &
+      & hse_alpha, &
+      & hse_omega, &
+      & yn_hse_ri, &
+      & hse_ri_ratio, &
+      & yn_hse_cd_ri, &
+      & hse_cd_ri_threshold
 
     namelist/rgrid/ &
       & dl, &
@@ -306,7 +315,12 @@ contains
       & n_hamil, &
       & propagator, &
       & yn_fix_func, &
-      & yn_predictor_corrector
+      & yn_predictor_corrector, &
+      & yn_dg_overlapping_wannier_rt, &
+      & yn_dg_overlapping_wannier_rt_restart, &
+      & yn_rt_dg_hybrid_continuation, &
+      & yn_dg_length_gauge, &
+      & dg_wannier_symmetry_gauge
 
     namelist/scf/ &
       & method_init_wf, &
@@ -314,6 +328,7 @@ contains
       & method_min, &
       & ncg, &
       & ncg_init, &
+      & nstate_freeze_gs, &
       & method_mixing, &
       & mixrate, &
       & nmemory_mb, &
@@ -368,7 +383,13 @@ contains
       & yn_symmetrized_stencil, &
       & yn_put_wall_z_boundary, &
       & wall_height, &
-      & wall_width
+      & wall_width, &
+      & yn_optical_vortex, &
+      & optical_vortex_charge, &
+      & optical_vortex_polarization, &
+      & optical_vortex_radius, &
+      & optical_vortex_center_x, &
+      & optical_vortex_center_y
 
     namelist/multiscale/ &
       & fdtddim, &
@@ -501,6 +522,12 @@ contains
       & out_estatic_rt_step, &
       & yn_out_rvf_rt, &
       & out_rvf_rt_step, &
+      & yn_out_lcm_rt, &
+      & out_lcm_rt_step, &
+      & yn_out_lz_rt, &
+      & out_lz_rt_step, &
+      & dg_hse_ace_max_age, &
+      & dg_hse_ace_coef_thresh, &
       & yn_out_tm, &
       & yn_out_tm_bin, &
       & yn_out_gs_sgm_eps, &
@@ -602,13 +629,100 @@ contains
       & file_atom_coor_frag, &
       & xi_dc, &
       & yn_dc_lcfo, &
+      & yn_dc_lcfo_flux, &
+      & yn_dc_lcfo_flux_weak_volume, &
       & yn_dc_lcfo_diag, &
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
       & lcfo_diag_chefsi_filter_chunk_size, &
       & lcfo_diag_chefsi_max_cycle, &
       & lcfo_diag_chefsi_residual_tolerance, &
+      & yn_dc_fragment_optimization, &
+      & yn_dc_lcfo_wannier, &
+      & yn_dc_lcfo_local_wannier, &
+      & yn_dc_lcfo_wannier_symmetry_gauge, &
+      & yn_dc_lcfo_wannier_pw, &
+      & yn_dc_lcfo_wannier_cluster, &
+      & yn_dc_lcfo_block_diag_h, &
+      & yn_dg_dc_overlapping_wannier, &
+      & yn_dg_hybrid_scf, &
+      & yn_dg_hybrid_continuation_scf, &
+      & yn_dg_hybrid_divided_scf, &
+      & dg_hybrid_fragment_cg_steps, &
+      & dg_hybrid_divided_mixing, &
+      & dg_hybrid_symmetry_energy_window, &
+      & dg_dc_seed_mode, &
+      & dg_dc_seed_directory, &
+      & dg_fragment_wf_checkpoint_mode, &
+      & dg_fragment_wf_checkpoint_directory, &
+      & dg_fragment_w90_initial_projection, &
+      & dg_dc_handoff_min_iter, &
+      & dg_dc_handoff_tolerance, &
+      & dg_dc_candidate_orbitals_per_atom, &
+      & dg_dc_metric_rank_tolerance, &
+      & dg_dc_gs_intermediate_orbital_tolerance, &
+      & dg_dc_gs_intermediate_density_tolerance, &
+      & dg_dc_gs_final_orbital_tolerance, &
+      & dg_dc_gs_final_density_tolerance, &
+      & dg_dc_gs_subspace_tolerance, &
+      & dg_dc_gs_initial_lambda_step, &
+      & dg_dc_gs_minimum_lambda_step, &
+      & dg_dc_gs_maximum_lambda_step, &
+      & dg_dc_gs_allowed_residual_growth, &
+      & dg_dc_gs_density_mix_rate, &
+      & dg_dc_gs_sipg_penalty_factor, &
+      & dg_dc_gs_target_lambda, &
+      & dg_dc_gs_hermiticity_tolerance, &
+      & dg_dc_gs_orthogonality_tolerance, &
+      & dg_dc_gs_face_balance_tolerance, &
+      & dg_ow_boundary_value_tolerance, &
+      & dg_ow_boundary_gradient_tolerance, &
+      & dg_ow_symmetry_tolerance, &
+      & dg_ow_localization_support_tolerance, &
+      & dg_ow_localization_spread_tolerance, &
+      & dg_ow_localization_gradient_tolerance, &
+      & dg_ow_localization_max_iterations, &
+      & dg_ow_candidate_states_per_fragment, &
+      & dg_ow_target_wanniers_per_fragment, &
+      & dg_ow_w90_initial_projection, &
+      & dg_dc_gs_electron_count_tolerance, &
+      & dg_dc_gs_minimum_projector_overlap, &
+      & dg_dc_gs_maximum_scf_iterations, &
+      & dg_dc_gs_maximum_eigensolver_iterations, &
+      & dg_dc_gs_maximum_rollbacks, &
+      & wannier90_command, &
+      & wannier_projection, &
       & nstate_frag, &
+      & lcfo_frag_cache_size, &
+      & wannier_num_wann, &
+      & wannier_num_bands, &
+      & wannier_num_iter, &
+      & num_wannier_cluster, &
+      & wannier_cluster_size, &
+      & wannier_projection_width, &
+      & wannier_amn_svd_tol, &
+      & wannier_amn_reject_tol, &
+      & wannier_dis_froz_max, &
+      & wannier_dis_win_max, &
+      & wannier_pw_cutoff, &
+      & wannier_pw_max, &
+      & wannier_site_symmetry, &
+      & wannier_symmetry_file, &
+      & wannier_symmetry_tolerance, &
+      & wannier_sawf_generation, &
+      & wannier_sawf_global_reference_source, &
+      & wannier_sawf_initial_wavefunction_directory, &
+      & wannier_sawf_symmetry_scope, &
+      & wannier_sawf_structure_class, &
+      & wannier_sawf_parent_symmetry_file, &
+      & wannier_sawf_cache_directory, &
+      & wannier_sawf_buffer_steps, &
+      & wannier_sawf_gauge_tolerance, &
+      & wannier_sawf_buffer_tolerance, &
+      & wannier_sawf_hamiltonian_tolerance, &
+      & wannier_sawf_equivalence_tolerance, &
+      & wannier_sawf_vacuum_density_threshold, &
+      & dg_wannier_symmetry_gauge, &
       & energy_cut, &
       & lambda_cut
 
@@ -673,6 +787,7 @@ contains
     yn_self_checkpoint    = 'n'
     checkpoint_interval   = -1
     yn_reset_step_restart = 'n'
+    yn_reset_occupation_restart = 'n'
     read_gs_restart_data  = 'all'
     write_gs_restart_data = 'all'
     time_shutdown         = -1d0
@@ -732,6 +847,13 @@ contains
     alibc = 'none'
     alibxc= 'none'
     cval  = -1d0
+    yn_hse = 'n'
+    hse_alpha = 0.25d0
+    hse_omega = 0.11d0
+    yn_hse_ri = 'n'              ! RI/DF approximation disabled by default
+    hse_ri_ratio = 3.0d0         ! N_aux/N_basis ratio (3.0 for chemical accuracy)
+    yn_hse_cd_ri = 'n'           ! CD-RI disabled by default
+    hse_cd_ri_threshold = 1.0d-8 ! Threshold for Cholesky vector truncation
 !! == default for &rgrid
     dl        = 0d0
     num_rgrid = 0
@@ -749,12 +871,18 @@ contains
     propagator  = 'middlepoint'
     yn_fix_func = 'n'
     yn_predictor_corrector = 'n'
+    yn_dg_overlapping_wannier_rt = 'n'
+    yn_dg_overlapping_wannier_rt_restart = 'n'
+    yn_rt_dg_hybrid_continuation = 'n'
+    yn_dg_length_gauge = 'n'
+    dg_wannier_symmetry_gauge = 'diagnose'
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
     method_min    = 'cg'
     ncg           = 4
     ncg_init      = 4
+    nstate_freeze_gs = 0
     method_mixing = 'broyden'
     mixrate       = 0.5d0
     nmemory_mb    = 8
@@ -802,7 +930,7 @@ contains
     vec_dipole_source  = 0d0
     cood_dipole_source = 0d0
     rad_dipole_source  = 2d0 ! a.u.
-    
+
 !! == default for &singlescale
     method_singlescale = '3d'
     cutoff_G2_emfield  = -1d0
@@ -810,6 +938,12 @@ contains
     yn_put_wall_z_boundary = 'n'
     wall_height        = 100.0d0 /au_energy_ev * uenergy_from_au !eV
     wall_width         =   5.0d0 /au_length_aa * ulength_from_au !A
+    yn_optical_vortex = 'n'
+    optical_vortex_charge = 0
+    optical_vortex_polarization = 'linear_x'
+    optical_vortex_radius = -1d0
+    optical_vortex_center_x = -1d30
+    optical_vortex_center_y = -1d30
 
 !! == default for &multiscale
     fdtddim    = '1d'
@@ -913,7 +1047,7 @@ contains
     inf_s(:,:)                  = 0d0
     ori_s(:,:)                  = 0d0
     rot_s(:,:)                  = 0d0
-    
+
 !! == default for &analysis
     projection_option   = 'no'
     out_projection_step = 100
@@ -948,6 +1082,12 @@ contains
     out_estatic_rt_step = 50
     yn_out_rvf_rt       = 'n'
     out_rvf_rt_step     = 10
+    yn_out_lcm_rt       = 'n'
+    out_lcm_rt_step     = 100
+    yn_out_lz_rt        = 'n'
+    out_lz_rt_step      = 100
+    dg_hse_ace_max_age     = 20
+    dg_hse_ace_coef_thresh = 5.0d-3
     yn_out_tm           = 'n'
     yn_out_tm_bin       = 'n'
     yn_out_gs_sgm_eps   = 'n'
@@ -1045,6 +1185,8 @@ contains
     file_atom_coor_frag = 'none'
     xi_dc = -1d0
     yn_dc_lcfo = 'y'
+    yn_dc_lcfo_flux = 'n'
+    yn_dc_lcfo_flux_weak_volume = 'y'
     yn_dc_lcfo_diag = 'y'
 #ifdef USE_EIGENEXA
     lcfo_eigensolver = 'eigenexa'
@@ -1055,7 +1197,91 @@ contains
     lcfo_diag_chefsi_filter_chunk_size = 0
     lcfo_diag_chefsi_max_cycle = 200
     lcfo_diag_chefsi_residual_tolerance = 1d-7
+    yn_dc_fragment_optimization = 'n'
+    yn_dc_lcfo_wannier = 'n'
+    yn_dc_lcfo_local_wannier = 'n'
+    yn_dc_lcfo_wannier_symmetry_gauge = 'n'
+    yn_dc_lcfo_wannier_pw = 'n'
+    yn_dc_lcfo_wannier_cluster = 'n'
+    yn_dc_lcfo_block_diag_h = 'n'
+    yn_dg_dc_overlapping_wannier = 'n'
+    yn_dg_hybrid_scf = 'n'
+    yn_dg_hybrid_continuation_scf = 'n'
+    yn_dg_hybrid_divided_scf = 'n'
+    dg_hybrid_fragment_cg_steps = 3
+    dg_hybrid_divided_mixing = 'pulay'
+    dg_hybrid_symmetry_energy_window = -1d0
+    dg_dc_seed_mode = 'off'
+    dg_dc_seed_directory = ''
+    dg_fragment_wf_checkpoint_mode = 'auto'
+    dg_fragment_wf_checkpoint_directory = 'dg-fragment-wf-checkpoint'
+    dg_fragment_w90_initial_projection = 'scdm'
+    dg_dc_handoff_min_iter = 3
+    dg_dc_handoff_tolerance = 1d-3
+    dg_dc_candidate_orbitals_per_atom = 40
+    dg_dc_metric_rank_tolerance = 1d-10
+    dg_dc_gs_intermediate_orbital_tolerance = 1d-5
+    dg_dc_gs_intermediate_density_tolerance = 1d-5
+    dg_dc_gs_final_orbital_tolerance = 1d-7
+    dg_dc_gs_final_density_tolerance = 1d-7
+    dg_dc_gs_subspace_tolerance = 1d-7
+    dg_dc_gs_initial_lambda_step = 0.125d0
+    dg_dc_gs_minimum_lambda_step = 0.015625d0
+    dg_dc_gs_maximum_lambda_step = 0.5d0
+    dg_dc_gs_allowed_residual_growth = 4d0
+    dg_dc_gs_density_mix_rate = 0.5d0
+    dg_dc_gs_sipg_penalty_factor = 81d0
+    dg_dc_gs_target_lambda = 1d0
+    dg_dc_gs_hermiticity_tolerance = 1d-10
+    dg_dc_gs_orthogonality_tolerance = 1d-10
+    dg_dc_gs_face_balance_tolerance = 1d-10
+    dg_ow_boundary_value_tolerance = 1d-6
+    dg_ow_boundary_gradient_tolerance = 1d-6
+    dg_ow_symmetry_tolerance = 1d-10
+    dg_ow_localization_support_tolerance = 1d-3
+    dg_ow_localization_spread_tolerance = 1d-14
+    dg_ow_localization_gradient_tolerance = 1d-6
+    dg_ow_localization_max_iterations = 1024
+    dg_ow_candidate_states_per_fragment = 0
+    dg_ow_target_wanniers_per_fragment = 0
+    dg_ow_w90_initial_projection = 'spectral'
+    dg_dc_gs_electron_count_tolerance = 1d-8
+    dg_dc_gs_minimum_projector_overlap = 0.9d0
+    dg_dc_gs_maximum_scf_iterations = 100
+    dg_dc_gs_maximum_eigensolver_iterations = 500
+    dg_dc_gs_maximum_rollbacks = 8
+    wannier90_command = ''
+    wannier_projection = ''
     nstate_frag = 0
+    lcfo_frag_cache_size = 1
+    wannier_num_wann = 0
+    wannier_num_bands = 0
+    wannier_num_iter = 100
+    num_wannier_cluster = 0
+    wannier_cluster_size = 1
+    wannier_projection_width = 1d0
+    wannier_amn_svd_tol = 1d-8
+    wannier_amn_reject_tol = 0d0
+    wannier_dis_froz_max = 0d0
+    wannier_dis_win_max = 0d0
+    wannier_pw_cutoff = 0d0
+    wannier_pw_max = 0
+    wannier_site_symmetry = 'off'
+    wannier_symmetry_file = 'sym.dat'
+    wannier_symmetry_tolerance = 1d-6
+    wannier_sawf_generation = 'monolithic'
+    wannier_sawf_global_reference_source = 'lcfo'
+    wannier_sawf_initial_wavefunction_directory = ''
+    wannier_sawf_symmetry_scope = 'actual'
+    wannier_sawf_structure_class = 'auto'
+    wannier_sawf_parent_symmetry_file = ''
+    wannier_sawf_cache_directory = 'sawf_templates'
+    wannier_sawf_buffer_steps = [1,2,3]
+    wannier_sawf_hamiltonian_tolerance = 0d0
+    wannier_sawf_gauge_tolerance = 1d-8
+    wannier_sawf_buffer_tolerance = 1d-6
+    wannier_sawf_equivalence_tolerance = 1d-8
+    wannier_sawf_vacuum_density_threshold = 1d-8
     energy_cut = 0d0
     lambda_cut = 1d-3
 !! == default for &unfolding
@@ -1172,10 +1398,17 @@ contains
     call string_lowercase(method_init_wf)
     call string_lowercase(method_min)
     call string_lowercase(method_mixing)
+    call string_lowercase(lcfo_eigensolver)
+    call string_lowercase(dg_hybrid_divided_mixing)
+    call string_lowercase(dg_dc_seed_mode)
+    call string_lowercase(dg_fragment_wf_checkpoint_mode)
+    call string_lowercase(dg_fragment_w90_initial_projection)
+    call string_lowercase(dg_ow_w90_initial_projection)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
+    call string_lowercase(optical_vortex_polarization)
     call string_lowercase(boundary_em(1,1))
     call string_lowercase(boundary_em(1,2))
     call string_lowercase(boundary_em(2,1))
@@ -1196,7 +1429,6 @@ contains
     end if
     call string_lowercase(lattice)
     call string_lowercase(dm_unfold_option)
-    call string_lowercase(lcfo_eigensolver)
 
 ! Broad cast
 !! == bcast for &calculation
@@ -1222,6 +1454,7 @@ contains
       checkpoint_interval = -1 ! FIXME: workaround for zero-divide problem
     call comm_bcast(checkpoint_interval   ,nproc_group_global)
     call comm_bcast(yn_reset_step_restart ,nproc_group_global)
+    call comm_bcast(yn_reset_occupation_restart,nproc_group_global)
     call comm_bcast(read_gs_restart_data  ,nproc_group_global)
     call comm_bcast(write_gs_restart_data ,nproc_group_global)
     call comm_bcast(time_shutdown         ,nproc_group_global)
@@ -1298,6 +1531,13 @@ contains
     call comm_bcast(alibc        ,nproc_group_global)
 #endif
     call comm_bcast(cval         ,nproc_group_global)
+    call comm_bcast(yn_hse       ,nproc_group_global)
+    call comm_bcast(hse_alpha    ,nproc_group_global)
+    call comm_bcast(hse_omega    ,nproc_group_global)
+    call comm_bcast(yn_hse_ri    ,nproc_group_global)
+    call comm_bcast(hse_ri_ratio ,nproc_group_global)
+    call comm_bcast(yn_hse_cd_ri ,nproc_group_global)
+    call comm_bcast(hse_cd_ri_threshold ,nproc_group_global)
 !! == bcast for &rgrid
     call comm_bcast(dl,nproc_group_global)
     dl = dl * ulength_to_au
@@ -1317,12 +1557,18 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
+    call comm_bcast(yn_dg_overlapping_wannier_rt,nproc_group_global)
+    call comm_bcast(yn_dg_overlapping_wannier_rt_restart,nproc_group_global)
+    call comm_bcast(yn_rt_dg_hybrid_continuation,nproc_group_global)
+    call comm_bcast(yn_dg_length_gauge,nproc_group_global)
+    call comm_bcast(dg_wannier_symmetry_gauge,nproc_group_global)
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
     call comm_bcast(iseed_number_change     ,nproc_group_global)
     call comm_bcast(method_min              ,nproc_group_global)
     call comm_bcast(ncg                     ,nproc_group_global)
     call comm_bcast(ncg_init                ,nproc_group_global)
+    call comm_bcast(nstate_freeze_gs        ,nproc_group_global)
     call comm_bcast(method_mixing           ,nproc_group_global)
     call comm_bcast(mixrate                 ,nproc_group_global)
     call comm_bcast(nmemory_mb              ,nproc_group_global)
@@ -1419,8 +1665,17 @@ contains
     call comm_bcast(yn_put_wall_z_boundary,nproc_group_global)
     call comm_bcast(wall_height           ,nproc_group_global)
     call comm_bcast(wall_width            ,nproc_group_global)
+    call comm_bcast(yn_optical_vortex     ,nproc_group_global)
+    call comm_bcast(optical_vortex_charge ,nproc_group_global)
+    call comm_bcast(optical_vortex_polarization,nproc_group_global)
+    call comm_bcast(optical_vortex_radius ,nproc_group_global)
+    call comm_bcast(optical_vortex_center_x,nproc_group_global)
+    call comm_bcast(optical_vortex_center_y,nproc_group_global)
     wall_height = wall_height * uenergy_to_au
     wall_width  = wall_width  * ulength_to_au
+    optical_vortex_radius   = optical_vortex_radius * ulength_to_au
+    optical_vortex_center_x = optical_vortex_center_x * ulength_to_au
+    optical_vortex_center_y = optical_vortex_center_y * ulength_to_au
 
 !! == bcast for &multiscale
     call comm_bcast(fdtddim   ,nproc_group_global)
@@ -1592,6 +1847,12 @@ contains
     call comm_bcast(out_estatic_rt_step ,nproc_group_global)
     call comm_bcast(yn_out_rvf_rt       ,nproc_group_global)
     call comm_bcast(out_rvf_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_lcm_rt       ,nproc_group_global)
+    call comm_bcast(out_lcm_rt_step     ,nproc_group_global)
+    call comm_bcast(yn_out_lz_rt        ,nproc_group_global)
+    call comm_bcast(out_lz_rt_step      ,nproc_group_global)
+    call comm_bcast(dg_hse_ace_max_age     ,nproc_group_global)
+    call comm_bcast(dg_hse_ace_coef_thresh ,nproc_group_global)
     call comm_bcast(yn_out_tm           ,nproc_group_global)
     call comm_bcast(yn_out_tm_bin       ,nproc_group_global)
     call comm_bcast(yn_out_gs_sgm_eps   ,nproc_group_global)
@@ -1700,13 +1961,105 @@ contains
     call comm_bcast(file_atom_coor_frag, nproc_group_global)
     call comm_bcast(xi_dc, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_flux, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_flux_weak_volume, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_degree, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_filter_chunk_size, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_max_cycle, nproc_group_global)
     call comm_bcast(lcfo_diag_chefsi_residual_tolerance, nproc_group_global)
+    call comm_bcast(yn_dc_fragment_optimization, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_local_wannier, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier_symmetry_gauge, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier_pw, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_wannier_cluster, nproc_group_global)
+    call comm_bcast(yn_dc_lcfo_block_diag_h, nproc_group_global)
+    call comm_bcast(yn_dg_dc_overlapping_wannier, nproc_group_global)
+    call comm_bcast(yn_dg_hybrid_scf, nproc_group_global)
+    call comm_bcast(yn_dg_hybrid_continuation_scf, nproc_group_global)
+    call comm_bcast(yn_dg_hybrid_divided_scf, nproc_group_global)
+    call comm_bcast(dg_hybrid_fragment_cg_steps, nproc_group_global)
+    call comm_bcast(dg_hybrid_divided_mixing, nproc_group_global)
+    call comm_bcast(dg_hybrid_symmetry_energy_window, nproc_group_global)
+    if(dg_hybrid_symmetry_energy_window>=0d0) &
+      dg_hybrid_symmetry_energy_window = dg_hybrid_symmetry_energy_window*uenergy_to_au
+    call comm_bcast(dg_dc_seed_mode, nproc_group_global)
+    call comm_bcast(dg_dc_seed_directory, nproc_group_global)
+    call comm_bcast(dg_fragment_wf_checkpoint_mode, nproc_group_global)
+    call comm_bcast(dg_fragment_wf_checkpoint_directory, nproc_group_global)
+    call comm_bcast(dg_fragment_w90_initial_projection, nproc_group_global)
+    call comm_bcast(dg_dc_handoff_min_iter, nproc_group_global)
+    call comm_bcast(dg_dc_handoff_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_candidate_orbitals_per_atom, nproc_group_global)
+    call comm_bcast(dg_dc_metric_rank_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_intermediate_orbital_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_intermediate_density_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_final_orbital_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_final_density_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_subspace_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_initial_lambda_step, nproc_group_global)
+    call comm_bcast(dg_dc_gs_minimum_lambda_step, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_lambda_step, nproc_group_global)
+    call comm_bcast(dg_dc_gs_allowed_residual_growth, nproc_group_global)
+    call comm_bcast(dg_dc_gs_density_mix_rate, nproc_group_global)
+    call comm_bcast(dg_dc_gs_sipg_penalty_factor, nproc_group_global)
+    call comm_bcast(dg_dc_gs_target_lambda, nproc_group_global)
+    call comm_bcast(dg_dc_gs_hermiticity_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_orthogonality_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_face_balance_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_boundary_value_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_boundary_gradient_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_symmetry_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_support_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_spread_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_gradient_tolerance, nproc_group_global)
+    call comm_bcast(dg_ow_localization_max_iterations, nproc_group_global)
+    call comm_bcast(dg_ow_candidate_states_per_fragment, nproc_group_global)
+    call comm_bcast(dg_ow_target_wanniers_per_fragment, nproc_group_global)
+    call comm_bcast(dg_ow_w90_initial_projection, nproc_group_global)
+    call comm_bcast(dg_dc_gs_electron_count_tolerance, nproc_group_global)
+    call comm_bcast(dg_dc_gs_minimum_projector_overlap, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_scf_iterations, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_eigensolver_iterations, nproc_group_global)
+    call comm_bcast(dg_dc_gs_maximum_rollbacks, nproc_group_global)
+    call comm_bcast(wannier90_command, nproc_group_global)
+    call comm_bcast(wannier_projection, nproc_group_global)
     call comm_bcast(nstate_frag, nproc_group_global)
+    call comm_bcast(lcfo_frag_cache_size, nproc_group_global)
+    call comm_bcast(wannier_num_wann, nproc_group_global)
+    call comm_bcast(wannier_num_bands, nproc_group_global)
+    call comm_bcast(wannier_num_iter, nproc_group_global)
+    call comm_bcast(num_wannier_cluster, nproc_group_global)
+    call comm_bcast(wannier_cluster_size, nproc_group_global)
+    call comm_bcast(wannier_projection_width, nproc_group_global)
+    wannier_projection_width = wannier_projection_width * ulength_to_au
+    call comm_bcast(wannier_amn_svd_tol, nproc_group_global)
+    call comm_bcast(wannier_amn_reject_tol, nproc_group_global)
+    call comm_bcast(wannier_dis_froz_max, nproc_group_global)
+    wannier_dis_froz_max = wannier_dis_froz_max * uenergy_to_au
+    call comm_bcast(wannier_dis_win_max, nproc_group_global)
+    wannier_dis_win_max = wannier_dis_win_max * uenergy_to_au
+    call comm_bcast(wannier_pw_cutoff, nproc_group_global)
+    wannier_pw_cutoff = wannier_pw_cutoff * uenergy_to_au
+    call comm_bcast(wannier_pw_max, nproc_group_global)
+    call comm_bcast(wannier_site_symmetry, nproc_group_global)
+    call comm_bcast(wannier_symmetry_file, nproc_group_global)
+    call comm_bcast(wannier_symmetry_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_generation, nproc_group_global)
+    call comm_bcast(wannier_sawf_global_reference_source, nproc_group_global)
+    call comm_bcast(wannier_sawf_initial_wavefunction_directory, nproc_group_global)
+    call comm_bcast(wannier_sawf_symmetry_scope, nproc_group_global)
+    call comm_bcast(wannier_sawf_structure_class, nproc_group_global)
+    call comm_bcast(wannier_sawf_parent_symmetry_file, nproc_group_global)
+    call comm_bcast(wannier_sawf_cache_directory, nproc_group_global)
+    call comm_bcast(wannier_sawf_buffer_steps, nproc_group_global)
+    call comm_bcast(wannier_sawf_hamiltonian_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_gauge_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_buffer_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_equivalence_tolerance, nproc_group_global)
+    call comm_bcast(wannier_sawf_vacuum_density_threshold, nproc_group_global)
     call comm_bcast(energy_cut, nproc_group_global)
     energy_cut = energy_cut * uenergy_to_au
     call comm_bcast(lambda_cut, nproc_group_global)
@@ -2135,6 +2488,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_self_checkpoint', yn_self_checkpoint
       write(fh_variables_log, '("#",4X,A,"=",I5)') 'checkpoint_interval', checkpoint_interval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_step_restart', yn_reset_step_restart
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_reset_occupation_restart', yn_reset_occupation_restart
       write(fh_variables_log, '("#",4X,A,"=",A)') 'read_gs_restart_data', trim(read_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'write_gs_restart_data', trim(write_gs_restart_data)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'time_shutdown', time_shutdown
@@ -2249,6 +2603,13 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'propagator', trim(propagator)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_fix_func', yn_fix_func
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_predictor_corrector', yn_predictor_corrector
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt', yn_dg_overlapping_wannier_rt
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_overlapping_wannier_rt_restart', &
+        yn_dg_overlapping_wannier_rt_restart
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_rt_dg_hybrid_continuation',yn_rt_dg_hybrid_continuation
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_dg_length_gauge', yn_dg_length_gauge
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
+        trim(dg_wannier_symmetry_gauge)
 
       if(inml_scf >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'scf', inml_scf
@@ -2333,6 +2694,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_put_wall_z_boundary', yn_put_wall_z_boundary
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_height', wall_height
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wall_width', wall_width
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_optical_vortex', yn_optical_vortex
+      write(fh_variables_log, '("#",4X,A,"=",I0)') 'optical_vortex_charge', optical_vortex_charge
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'optical_vortex_polarization', optical_vortex_polarization
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_radius', optical_vortex_radius
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_center_x', optical_vortex_center_x
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'optical_vortex_center_y', optical_vortex_center_y
 
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'multiscale', inml_multiscale
       write(fh_variables_log, '("#",4X,A,"=",A)') 'fdtddim', fdtddim
@@ -2544,6 +2911,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_estatic_rt_step', out_estatic_rt_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_rvf_rt', yn_out_rvf_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_rvf_rt_step', out_rvf_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lcm_rt', yn_out_lcm_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lcm_rt_step', out_lcm_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_lz_rt', yn_out_lz_rt
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_lz_rt_step', out_lz_rt_step
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'dg_hse_ace_max_age', dg_hse_ace_max_age
+      write(fh_variables_log, '("#",4X,A,"=",ES15.7)') 'dg_hse_ace_coef_thresh', dg_hse_ace_coef_thresh
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm', yn_out_tm
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_tm_bin', yn_out_tm_bin
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_gs_sgm_eps', yn_out_gs_sgm_eps
@@ -2698,6 +3071,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_flux",yn_dc_lcfo_flux
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dc_lcfo_flux_weak_volume",yn_dc_lcfo_flux_weak_volume
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
       write(fh_variables_log, '("#",4X,A,"=",I6)') &
@@ -2710,7 +3086,149 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
       & "lcfo_diag_chefsi_residual_tolerance", &
       & lcfo_diag_chefsi_residual_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_fragment_optimization",yn_dc_fragment_optimization
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier",yn_dc_lcfo_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_local_wannier",yn_dc_lcfo_local_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_symmetry_gauge",yn_dc_lcfo_wannier_symmetry_gauge
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_pw",yn_dc_lcfo_wannier_pw
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_wannier_cluster",yn_dc_lcfo_wannier_cluster
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_block_diag_h",yn_dc_lcfo_block_diag_h
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dg_dc_overlapping_wannier",yn_dg_dc_overlapping_wannier
+      write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dg_hybrid_scf",yn_dg_hybrid_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dg_hybrid_continuation_scf",yn_dg_hybrid_continuation_scf
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "yn_dg_hybrid_divided_scf",yn_dg_hybrid_divided_scf
+      write(fh_variables_log, '("#",4X,A,"=",I6)') &
+        'dg_hybrid_fragment_cg_steps',dg_hybrid_fragment_cg_steps
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_hybrid_divided_mixing',trim(dg_hybrid_divided_mixing)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_hybrid_symmetry_energy_window',dg_hybrid_symmetry_energy_window
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_dc_seed_mode',trim(dg_dc_seed_mode)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_dc_seed_directory',trim(dg_dc_seed_directory)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_fragment_wf_checkpoint_mode',trim(dg_fragment_wf_checkpoint_mode)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_fragment_wf_checkpoint_directory',trim(dg_fragment_wf_checkpoint_directory)
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        'dg_fragment_w90_initial_projection',trim(dg_fragment_w90_initial_projection)
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_dc_handoff_min_iter',dg_dc_handoff_min_iter
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_handoff_tolerance',dg_dc_handoff_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_dc_candidate_orbitals_per_atom',dg_dc_candidate_orbitals_per_atom
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_metric_rank_tolerance',dg_dc_metric_rank_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_intermediate_orbital_tolerance',dg_dc_gs_intermediate_orbital_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_intermediate_density_tolerance',dg_dc_gs_intermediate_density_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_final_orbital_tolerance',dg_dc_gs_final_orbital_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_final_density_tolerance',dg_dc_gs_final_density_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_subspace_tolerance',dg_dc_gs_subspace_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_initial_lambda_step',dg_dc_gs_initial_lambda_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_minimum_lambda_step',dg_dc_gs_minimum_lambda_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_maximum_lambda_step',dg_dc_gs_maximum_lambda_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_allowed_residual_growth',dg_dc_gs_allowed_residual_growth
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_density_mix_rate',dg_dc_gs_density_mix_rate
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_sipg_penalty_factor',dg_dc_gs_sipg_penalty_factor
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_target_lambda',dg_dc_gs_target_lambda
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_hermiticity_tolerance',dg_dc_gs_hermiticity_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_orthogonality_tolerance',dg_dc_gs_orthogonality_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_face_balance_tolerance',dg_dc_gs_face_balance_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_ow_boundary_value_tolerance',dg_ow_boundary_value_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_ow_boundary_gradient_tolerance',dg_ow_boundary_gradient_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_ow_symmetry_tolerance',dg_ow_symmetry_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_ow_localization_support_tolerance',dg_ow_localization_support_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_ow_localization_spread_tolerance',dg_ow_localization_spread_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_ow_localization_gradient_tolerance',dg_ow_localization_gradient_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_ow_localization_max_iterations',dg_ow_localization_max_iterations
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_ow_candidate_states_per_fragment',dg_ow_candidate_states_per_fragment
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_ow_target_wanniers_per_fragment',dg_ow_target_wanniers_per_fragment
+      write(fh_variables_log, '("#",4X,A,"=",A)') &
+        "dg_ow_w90_initial_projection",trim(dg_ow_w90_initial_projection)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_electron_count_tolerance',dg_dc_gs_electron_count_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') &
+        'dg_dc_gs_minimum_projector_overlap',dg_dc_gs_minimum_projector_overlap
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_dc_gs_maximum_scf_iterations',dg_dc_gs_maximum_scf_iterations
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_dc_gs_maximum_eigensolver_iterations',dg_dc_gs_maximum_eigensolver_iterations
+      write(fh_variables_log, '("#",4X,A,"=",I8)') &
+        'dg_dc_gs_maximum_rollbacks',dg_dc_gs_maximum_rollbacks
+      write(fh_variables_log, '("#",4X,A,"=",A)') "wannier90_command",trim(wannier90_command)
+      write(fh_variables_log, '("#",4X,A,"=",A)') "wannier_projection",trim(wannier_projection)
       write(fh_variables_log, '("#",4X,A,"=",I6)') "nstate_frag",nstate_frag
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "lcfo_frag_cache_size",lcfo_frag_cache_size
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_wann",wannier_num_wann
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_bands",wannier_num_bands
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_num_iter",wannier_num_iter
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "num_wannier_cluster",num_wannier_cluster(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3I4)') "wannier_cluster_size",wannier_cluster_size(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_projection_width', wannier_projection_width
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_amn_svd_tol', wannier_amn_svd_tol
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_amn_reject_tol', wannier_amn_reject_tol
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_froz_max', wannier_dis_froz_max
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_dis_win_max', wannier_dis_win_max
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_pw_cutoff', wannier_pw_cutoff
+      write(fh_variables_log, '("#",4X,A,"=",I6)') "wannier_pw_max",wannier_pw_max
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_site_symmetry', &
+        trim(wannier_site_symmetry)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_symmetry_file', &
+        trim(wannier_symmetry_file)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_symmetry_tolerance', wannier_symmetry_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_generation', trim(wannier_sawf_generation)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_global_reference_source', &
+        trim(wannier_sawf_global_reference_source)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_initial_wavefunction_directory', &
+        trim(wannier_sawf_initial_wavefunction_directory)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_symmetry_scope', trim(wannier_sawf_symmetry_scope)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_structure_class', trim(wannier_sawf_structure_class)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_parent_symmetry_file', &
+        trim(wannier_sawf_parent_symmetry_file)
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'wannier_sawf_cache_directory', &
+        trim(wannier_sawf_cache_directory)
+      write(fh_variables_log, '("#",4X,A,"=",3I6)') 'wannier_sawf_buffer_steps', wannier_sawf_buffer_steps
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_gauge_tolerance', &
+        wannier_sawf_gauge_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_buffer_tolerance', &
+        wannier_sawf_buffer_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_hamiltonian_tolerance', &
+        wannier_sawf_hamiltonian_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_equivalence_tolerance', &
+        wannier_sawf_equivalence_tolerance
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'wannier_sawf_vacuum_density_threshold', &
+        wannier_sawf_vacuum_density_threshold
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'dg_wannier_symmetry_gauge', &
+        trim(dg_wannier_symmetry_gauge)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'energy_cut', energy_cut
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'lambda_cut', lambda_cut
 
@@ -2767,6 +3285,7 @@ contains
     call yn_argument_check(yn_restart)
     call yn_argument_check(yn_self_checkpoint)
     call yn_argument_check(yn_reset_step_restart)
+    call yn_argument_check(yn_reset_occupation_restart)
     call yn_argument_check(yn_ffte)
     call yn_argument_check(yn_fftw)
     call yn_argument_check(yn_scalapack)
@@ -2792,6 +3311,8 @@ contains
     call yn_argument_check(yn_out_elf_rt)
     call yn_argument_check(yn_out_estatic_rt)
     call yn_argument_check(yn_out_rvf_rt)
+    call yn_argument_check(yn_out_lcm_rt)
+    call yn_argument_check(yn_out_lz_rt)
     call yn_argument_check(yn_out_tm)
     call yn_argument_check(yn_out_tm_bin)
     call yn_argument_check(yn_out_intraband_current)
@@ -2823,13 +3344,15 @@ contains
     call yn_argument_check(yn_copy_z)
     call yn_argument_check(yn_symmetrized_stencil)
     call yn_argument_check(yn_put_wall_z_boundary)
+    call yn_argument_check(yn_optical_vortex)
     call yn_argument_check(yn_spinorbit)
     call yn_argument_check(yn_out_mom_distr_gs)
     call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_dc_lcfo)
+    call yn_argument_check(yn_dc_lcfo_flux)
+    call yn_argument_check(yn_dc_lcfo_flux_weak_volume)
     call yn_argument_check(yn_dc_lcfo_diag)
-
 #ifndef USE_MPI
     if(trim(dm_unfold_option)/='no') then
       stop 'dm_unfold_option requires a build with MPI support.'
@@ -2868,6 +3391,249 @@ contains
 #endif
     case default
       stop "lcfo_eigensolver must be 'lapack', 'eigenexa', or 'chefsi'."
+    end select
+
+    call yn_argument_check(yn_dc_fragment_optimization)
+    call yn_argument_check(yn_dc_lcfo_wannier)
+    call yn_argument_check(yn_dc_lcfo_local_wannier)
+    call yn_argument_check(yn_dc_lcfo_wannier_symmetry_gauge)
+    call yn_argument_check(yn_dc_lcfo_wannier_pw)
+    call yn_argument_check(yn_dc_lcfo_wannier_cluster)
+    call yn_argument_check(yn_dc_lcfo_block_diag_h)
+    call yn_argument_check(yn_dg_dc_overlapping_wannier)
+    call yn_argument_check(yn_dg_hybrid_scf)
+    call yn_argument_check(yn_dg_hybrid_continuation_scf)
+    call yn_argument_check(yn_dg_hybrid_divided_scf)
+#if !defined(USE_MPI) || !defined(USE_SCALAPACK)
+    if(yn_dc_lcfo_flux=='y' .or. yn_dg_dc_overlapping_wannier=='y' .or. yn_dg_hybrid_scf=='y' .or. &
+       yn_dg_hybrid_continuation_scf=='y' .or. yn_dg_hybrid_divided_scf=='y' .or. &
+       yn_dg_overlapping_wannier_rt=='y' .or. yn_rt_dg_hybrid_continuation=='y') &
+      call sawf_input_fatal("production DG requires a build with MPI and ScaLAPACK support")
+#endif
+#if defined(USE_MPI) && defined(USE_SCALAPACK) && !defined(USE_EIGENEXA)
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       yn_dg_hybrid_divided_scf/='y' .and. yn_dg_hybrid_continuation_scf/='y' .and. &
+       yn_dg_hybrid_scf/='y') &
+      call sawf_input_fatal("bare overlapping-Wannier one-shot arm requires a build with EigenExa support")
+#endif
+    if((yn_dg_dc_overlapping_wannier=='y' .or. yn_dg_hybrid_divided_scf=='y' .or. &
+        yn_dg_hybrid_continuation_scf=='y' .or. yn_dg_hybrid_scf=='y') .and. &
+       any(num_fragment<=0)) &
+      call sawf_input_fatal("production overlapping/Hybrid DG requires positive num_fragment")
+    if((yn_dg_dc_overlapping_wannier=='y' .or. yn_dg_hybrid_divided_scf=='y' .or. &
+        yn_dg_hybrid_continuation_scf=='y' .or. yn_dg_hybrid_scf=='y') .and. &
+       nproc_size_global /= product(num_fragment)) &
+      call sawf_input_fatal("production overlapping/Hybrid DG requires one MPI rank per fragment")
+    if((yn_dg_dc_overlapping_wannier=='y' .or. yn_dg_hybrid_divided_scf=='y' .or. &
+        yn_dg_hybrid_continuation_scf=='y' .or. yn_dg_hybrid_scf=='y') .and. &
+       yn_dc_fragment_optimization=='y') &
+      call sawf_input_fatal("production overlapping/Hybrid DG requires uniform DC fragments")
+    if(dg_hybrid_fragment_cg_steps<1 .or. dg_hybrid_fragment_cg_steps>256) &
+      call sawf_input_fatal("dg_hybrid_fragment_cg_steps must be in [1,256]")
+    select case(trim(dg_hybrid_divided_mixing))
+    case('inherit','simple','pulay','broyden')
+    case default
+      call sawf_input_fatal("dg_hybrid_divided_mixing must be inherit, simple, pulay, or broyden")
+    end select
+    if(count([yn_dg_hybrid_divided_scf=='y',yn_dg_hybrid_continuation_scf=='y',yn_dg_hybrid_scf=='y'])>1) &
+      call sawf_input_fatal("Hybrid SCF routes are mutually exclusive")
+    if(.not.ieee_is_finite(dg_hybrid_symmetry_energy_window) .or. &
+       (dg_hybrid_symmetry_energy_window<0d0 .and. &
+        dg_hybrid_symmetry_energy_window/=-1d0)) &
+      call sawf_input_fatal("dg_hybrid_symmetry_energy_window must be -1 or nonnegative")
+    select case(trim(dg_dc_seed_mode))
+    case('off','write','read','auto')
+    case default
+      call sawf_input_fatal("dg_dc_seed_mode must be off, write, read, or auto")
+    end select
+    if(trim(dg_dc_seed_mode)/='off' .and. len_trim(dg_dc_seed_directory)==0) &
+      call sawf_input_fatal("dg_dc_seed_directory is required when dg_dc_seed_mode is enabled")
+    select case(trim(dg_fragment_wf_checkpoint_mode))
+    case('off','write','read','auto')
+    case default
+      call sawf_input_fatal("dg_fragment_wf_checkpoint_mode must be off, write, read, or auto")
+    end select
+    if(trim(dg_fragment_wf_checkpoint_mode)/='off' .and. &
+       len_trim(dg_fragment_wf_checkpoint_directory)==0) &
+      call sawf_input_fatal("dg_fragment_wf_checkpoint_directory is required when checkpoint mode is enabled")
+    select case(trim(dg_fragment_w90_initial_projection))
+    case('scdm','spectral','random')
+    case default
+      call sawf_input_fatal("dg_fragment_w90_initial_projection must be scdm, spectral, or random")
+    end select
+    select case(trim(dg_ow_w90_initial_projection))
+    case('spectral','random')
+    case default
+      call sawf_input_fatal("dg_ow_w90_initial_projection must be spectral or random")
+    end select
+    if(yn_dg_hybrid_continuation_scf=='y')then
+      if(.not.ieee_is_finite(energy_cut)) &
+        call sawf_input_fatal("DG continuation requires finite energy_cut")
+      if(.not.ieee_is_finite(lambda_cut) .or. lambda_cut<=0d0) &
+        call sawf_input_fatal("DG continuation requires positive finite lambda_cut")
+      if(.not.ieee_is_finite(wannier_pw_cutoff) .or. wannier_pw_cutoff<=0d0) &
+        call sawf_input_fatal("DG continuation requires positive finite wannier_pw_cutoff")
+    endif
+    if(yn_dg_hybrid_divided_scf=='y')then
+      if(.not.ieee_is_finite(wannier_pw_cutoff) .or. wannier_pw_cutoff<=0d0) &
+        call sawf_input_fatal("divided hybrid SCF requires positive finite wannier_pw_cutoff")
+    endif
+    if(yn_dg_hybrid_divided_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
+      call sawf_input_fatal("divided hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_divided_scf=='y' .and. &
+       trim(dg_fragment_wf_checkpoint_mode)/='off' .and. trim(dg_dc_seed_mode)=='off') &
+      call sawf_input_fatal("fragment-WF checkpoint reuse requires DG DC seed checkpoint provenance")
+    if(yn_dg_hybrid_divided_scf=='y' .and. yn_scalapack/='y') &
+      call sawf_input_fatal("divided hybrid LCFO requires yn_scalapack='y'")
+    if(yn_dg_hybrid_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
+      call sawf_input_fatal("hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_scf=='y' .and. yn_scalapack/='y') &
+      call sawf_input_fatal("hybrid SCF reference route requires yn_scalapack='y'")
+    if(yn_dg_hybrid_continuation_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
+      call sawf_input_fatal("DG continuation requires yn_dg_dc_overlapping_wannier='y'")
+    if(yn_dg_hybrid_continuation_scf=='y' .and. yn_scalapack/='y') &
+      call sawf_input_fatal("DG continuation requires yn_scalapack='y'")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. trim(theory)/='dft') &
+      call sawf_input_fatal("overlapping Wannier route is ground-state DFT only")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_dc/='y') &
+      call sawf_input_fatal("overlapping Wannier route requires yn_dc='y'")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_periodic/='y') &
+      call sawf_input_fatal("overlapping Wannier route requires periodic DC input")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_spinorbit=='y') &
+      call sawf_input_fatal("overlapping Wannier route requires real non-SOI orbitals")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
+      call sawf_input_fatal("overlapping Wannier route is Gamma only")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. trim(xc)/='pz') &
+      call sawf_input_fatal("overlapping Wannier route currently requires PZ LDA")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       (yn_dc_lcfo=='y' .or. yn_dc_lcfo_flux=='y' .or. yn_dc_lcfo_wannier=='y' .or. &
+        yn_dc_lcfo_local_wannier=='y' .or. yn_dc_lcfo_wannier_pw=='y')) &
+      call sawf_input_fatal("overlapping Wannier route forbids LCFO")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. yn_self_checkpoint=='y') &
+      call sawf_input_fatal("overlapping Wannier route forbids normal checkpoint publication")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. checkpoint_interval>=1) &
+      call sawf_input_fatal("overlapping Wannier route forbids periodic normal checkpoints")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. trim(write_gs_restart_data)/='no') &
+      call sawf_input_fatal("overlapping Wannier route requires write_gs_restart_data='no'")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       any(num_rgrid/num_fragment+2*num_rgrid_buffer>num_rgrid)) &
+      call sawf_input_fatal("overlapping Wannier buffer box must not exceed the periodic system")
+    if(yn_dg_dc_overlapping_wannier=='y' .and. &
+       all(num_rgrid/num_fragment+2*num_rgrid_buffer==num_rgrid)) &
+      call sawf_input_fatal("overlapping Wannier buffer box must not equal the complete periodic system")
+    if(dg_dc_handoff_min_iter < 1) &
+      call sawf_input_fatal("dg_dc_handoff_min_iter must be positive")
+    if(.not.ieee_is_finite(dg_dc_handoff_tolerance) .or. dg_dc_handoff_tolerance <= 0d0) &
+      call sawf_input_fatal("dg_dc_handoff_tolerance must be positive")
+    if(dg_dc_candidate_orbitals_per_atom < 1) &
+      call sawf_input_fatal("dg_dc_candidate_orbitals_per_atom must be positive")
+    if(.not.ieee_is_finite(dg_dc_metric_rank_tolerance) .or. dg_dc_metric_rank_tolerance <= 0d0) &
+      call sawf_input_fatal("dg_dc_metric_rank_tolerance must be positive")
+    if(.not.ieee_is_finite(dg_dc_gs_intermediate_orbital_tolerance) .or. &
+       dg_dc_gs_intermediate_orbital_tolerance<=0d0) call sawf_input_fatal("invalid DG DC GS intermediate orbital tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_intermediate_density_tolerance) .or. &
+       dg_dc_gs_intermediate_density_tolerance<=0d0) call sawf_input_fatal("invalid DG DC GS intermediate density tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_final_orbital_tolerance) .or. dg_dc_gs_final_orbital_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS final orbital tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_final_density_tolerance) .or. dg_dc_gs_final_density_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS final density tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_subspace_tolerance) .or. dg_dc_gs_subspace_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS subspace tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_initial_lambda_step) .or. dg_dc_gs_initial_lambda_step<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_minimum_lambda_step) .or. dg_dc_gs_minimum_lambda_step<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_maximum_lambda_step) .or. dg_dc_gs_maximum_lambda_step<=0d0 .or. &
+       dg_dc_gs_minimum_lambda_step>dg_dc_gs_initial_lambda_step .or. &
+       dg_dc_gs_initial_lambda_step>dg_dc_gs_maximum_lambda_step .or. dg_dc_gs_maximum_lambda_step>1d0) &
+      call sawf_input_fatal("invalid DG DC GS lambda step bounds")
+    if(.not.ieee_is_finite(dg_dc_gs_allowed_residual_growth) .or. dg_dc_gs_allowed_residual_growth<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS residual growth")
+    if(.not.ieee_is_finite(dg_dc_gs_density_mix_rate) .or. dg_dc_gs_density_mix_rate<=0d0 .or. &
+       dg_dc_gs_density_mix_rate>1d0) call sawf_input_fatal("invalid DG DC GS density mix rate")
+    if(.not.ieee_is_finite(dg_dc_gs_sipg_penalty_factor) .or. dg_dc_gs_sipg_penalty_factor<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS SIPG penalty factor")
+    if(.not.ieee_is_finite(dg_dc_gs_target_lambda) .or. dg_dc_gs_target_lambda/=1d0) &
+      call sawf_input_fatal("DG DC GS target lambda must be one")
+    if(.not.ieee_is_finite(dg_dc_gs_hermiticity_tolerance) .or. dg_dc_gs_hermiticity_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_orthogonality_tolerance) .or. dg_dc_gs_orthogonality_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_face_balance_tolerance) .or. dg_dc_gs_face_balance_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_dc_gs_electron_count_tolerance) .or. dg_dc_gs_electron_count_tolerance<=0d0) &
+      call sawf_input_fatal("invalid DG DC GS acceptance tolerance")
+    if(.not.ieee_is_finite(dg_dc_gs_minimum_projector_overlap) .or. &
+       dg_dc_gs_minimum_projector_overlap<=0d0 .or. dg_dc_gs_minimum_projector_overlap>1d0) &
+      call sawf_input_fatal("invalid DG DC GS minimum projector overlap")
+    if(.not.ieee_is_finite(dg_ow_boundary_value_tolerance) .or. dg_ow_boundary_value_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_ow_boundary_gradient_tolerance) .or. dg_ow_boundary_gradient_tolerance<=0d0 .or. &
+       .not.ieee_is_finite(dg_ow_symmetry_tolerance) .or. dg_ow_symmetry_tolerance<=0d0) &
+      call sawf_input_fatal("invalid overlapping-Wannier buffer/symmetry tolerance")
+    if(.not.ieee_is_finite(dg_ow_localization_support_tolerance) .or. &
+       dg_ow_localization_support_tolerance<0d0 .or. dg_ow_localization_support_tolerance>1d0 .or. &
+       .not.ieee_is_finite(dg_ow_localization_spread_tolerance) .or. &
+       dg_ow_localization_spread_tolerance<0d0 .or. &
+       .not.ieee_is_finite(dg_ow_localization_gradient_tolerance) .or. &
+       dg_ow_localization_gradient_tolerance<=0d0 .or. dg_ow_localization_max_iterations<1) &
+      call sawf_input_fatal("invalid overlapping-Wannier localization control")
+    if(dg_ow_candidate_states_per_fragment<0 .or. dg_ow_target_wanniers_per_fragment<0 .or. &
+       (dg_ow_candidate_states_per_fragment>0 .and. dg_ow_target_wanniers_per_fragment>&
+        dg_ow_candidate_states_per_fragment)) &
+      call sawf_input_fatal("invalid overlapping-Wannier candidate/target window")
+    if(dg_dc_gs_maximum_scf_iterations<1 .or. dg_dc_gs_maximum_eigensolver_iterations<1 .or. &
+       dg_dc_gs_maximum_rollbacks<0) call sawf_input_fatal("invalid DG DC GS iteration bound")
+    select case(trim(wannier_site_symmetry))
+    case('off', 'auto', 'file')
+    case default
+      call sawf_input_fatal("wannier_site_symmetry must be off, auto, or file")
+    end select
+    if(trim(wannier_site_symmetry) == 'file' .and. len_trim(wannier_symmetry_file) == 0) then
+      call sawf_input_fatal("wannier_site_symmetry='file' requires nonblank wannier_symmetry_file")
+    end if
+    if(wannier_symmetry_tolerance <= 0d0) then
+      call sawf_input_fatal("wannier_symmetry_tolerance must be positive")
+    end if
+    select case(trim(wannier_sawf_generation))
+    case('monolithic','hierarchical')
+    case default
+      call sawf_input_fatal("wannier_sawf_generation must be monolithic or hierarchical")
+    end select
+    select case(trim(wannier_sawf_global_reference_source))
+    case('lcfo')
+    case default
+      call sawf_input_fatal("accepted SAWF global reference source must be lcfo")
+    end select
+    if(len_trim(wannier_sawf_initial_wavefunction_directory)>0) then
+      call sawf_input_fatal("conventional initial wavefunction seed is deferred until pre-diagonalization support")
+    end if
+    if(trim(wannier_sawf_symmetry_scope)/='actual') then
+      call sawf_input_fatal("wannier_sawf_symmetry_scope must be actual; parent symmetry cannot be forced")
+    end if
+    select case(trim(wannier_sawf_structure_class))
+    case('auto','crystal','defect','interface','surface','amorphous')
+    case default
+      call sawf_input_fatal("wannier_sawf_structure_class must be auto, crystal, defect, interface, surface, or amorphous")
+    end select
+    if(any(wannier_sawf_buffer_steps < 0) .or. &
+        any(wannier_sawf_buffer_steps(2:3) <= wannier_sawf_buffer_steps(1:2))) then
+      call sawf_input_fatal("wannier_sawf_buffer_steps must contain three increasing nonnegative buffers")
+    end if
+    if(wannier_sawf_gauge_tolerance<=0d0 .or. wannier_sawf_buffer_tolerance<=0d0 .or. &
+        wannier_sawf_hamiltonian_tolerance<0d0 .or. &
+        wannier_sawf_equivalence_tolerance<=0d0) then
+      call sawf_input_fatal("SAWF scalable-construction tolerances must be positive")
+    end if
+    if(wannier_sawf_vacuum_density_threshold<=0d0)then
+      call sawf_input_fatal("wannier_sawf_vacuum_density_threshold must be positive")
+    end if
+#ifndef HAVE_SPGLIB
+    if(trim(wannier_site_symmetry) == 'auto') then
+      call sawf_input_fatal("wannier_site_symmetry='auto' requires SALMON built with USE_SPGLIB=ON")
+    end if
+#endif
+    call yn_argument_check(yn_dg_length_gauge)
+    select case(trim(dg_wannier_symmetry_gauge))
+    case('none', 'diagnose', 'local_inversion_position', 'direct_amn_global', &
+         'direct_amn_bond_block', 'direct_amn_bond_global')
+    case default
+      stop "dg_wannier_symmetry_gauge must be none, diagnose, local_inversion_position, direct_amn_global, direct_amn_bond_block, or direct_amn_bond_global"
     end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
@@ -3025,6 +3791,24 @@ contains
       case default
         stop "set method_singlescale to '3d', '1d', or '1d_fourier'"
       end select
+      if(yn_optical_vortex=='y') then
+        if(method_singlescale/='3d') stop "yn_optical_vortex='y' requires method_singlescale='3d'"
+        if(optical_vortex_radius<=0d0) stop "optical_vortex_radius must be positive when yn_optical_vortex='y'"
+        if(omega1<=0d0) stop "omega1 must be positive when yn_optical_vortex='y'"
+        if(tw1<=0d0) stop "tw1 must be positive when yn_optical_vortex='y'"
+        select case(trim(optical_vortex_polarization))
+        case('linear_x','linear_y','left_circular','right_circular')
+          continue
+        case default
+          stop "optical_vortex_polarization must be linear_x, linear_y, left_circular, or right_circular"
+        end select
+        select case(trim(ae_shape1))
+        case('Acos2','Acos3','Acos4','Acos6','Acos8')
+          continue
+        case default
+          stop "yn_optical_vortex='y' currently supports ae_shape1 = Acos2, Acos3, Acos4, Acos6, or Acos8"
+        end select
+      end if
     end if
 
     if(theory=='multi_scale_maxwell_tddft') then
@@ -3070,11 +3854,20 @@ contains
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if
-    
+    if(yn_out_lcm_rt=='y' .and. out_lcm_rt_step<=0) then
+      stop "out_lcm_rt_step must be positive when yn_out_lcm_rt=y"
+    end if
+    if(yn_out_lz_rt=='y' .and. out_lz_rt_step<=0) then
+      stop "out_lz_rt_step must be positive when yn_out_lz_rt=y"
+    end if
+
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
-      if(iflag_atom_coor/=ntype_atom_coor_cartesian) stop "DC method (yn_dc=y): use cartesian coordinate."
+      ! Reduced coordinates are converted to Cartesian later in init_dft_system before DC fragment setup.
+      if(iflag_atom_coor/=ntype_atom_coor_cartesian .and. &
+      &  iflag_atom_coor/=ntype_atom_coor_reduced) &
+      & stop "DC method (yn_dc=y): atomic coordinates must be cartesian or reduced."
       !if(temperature < 0d0) stop "DC method (yn_dc=y): temperature must be specified."
       if(num_fragment(1)*num_fragment(2)*num_fragment(3) == 0) &
       & stop "DC method (yn_dc=y): num_fragment must be specified."
@@ -3096,6 +3889,141 @@ contains
       end if
     end if
 
+    if(yn_dc_lcfo_flux=='y') then
+      if(yn_dc/='y') &
+      & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): yn_dc=y must be specified."
+      if(yn_dc_lcfo_diag/='y') &
+      & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): yn_dc_lcfo_diag=y is required to export LCFO coefficients."
+      if(yn_spinorbit=='y') &
+      & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): spin-orbit mode is not implemented."
+      if(yn_dc_fragment_optimization=='y') &
+      & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): yn_dc_fragment_optimization=y is not supported."
+      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
+      & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): # of k-points must be 1."
+      if(nproc_k/=1) &
+      & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): nproc_k must be 1."
+      do i = 1, 3
+        if(num_fragment(i) > 0 .and. mod(num_rgrid(i), num_fragment(i)) == 0) then
+          if(num_rgrid_buffer(i) > num_rgrid(i)/num_fragment(i)) &
+          & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): num_rgrid_buffer must not exceed fragment core size."
+        end if
+      end do
+      if(num_fragment(1)*num_fragment(2)*num_fragment(3) > 0) then
+        if(mod(nproc_size_global, num_fragment(1)*num_fragment(2)*num_fragment(3)) /= 0) &
+        & stop "DC-LCFO flux export (yn_dc_lcfo_flux=y): MPI ranks must be divisible by total fragments."
+      end if
+    end if
+
+    if(yn_dc_lcfo_wannier=='y') then
+#ifndef USE_WANNIER90
+      stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): rebuild SALMON with USE_WANNIER90=ON."
+#endif
+      if(yn_dc/='y') &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): yn_dc=y must be specified."
+      if(yn_dc_lcfo_diag/='y') &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): yn_dc_lcfo_diag=y is required."
+      if(wannier_num_wann <= 0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_wann must be positive."
+      if(wannier_num_bands < 0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_bands must be non-negative."
+      if(wannier_num_bands > 0 .and. wannier_num_bands < wannier_num_wann) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_bands must be >= wannier_num_wann."
+      if(wannier_num_iter < 0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_num_iter must be non-negative."
+      if(wannier_projection_width <= 0d0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_projection_width must be positive."
+      if(wannier_amn_svd_tol < 0d0 .or. wannier_amn_reject_tol < 0d0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): AMN SVD tolerances must be non-negative."
+      if(wannier_dis_win_max < 0d0 .or. wannier_dis_froz_max < 0d0) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): Wannier energy windows must be non-negative."
+      if(wannier_dis_win_max > 0d0 .and. wannier_dis_froz_max > wannier_dis_win_max) &
+      & stop "DC-LCFO Wannier export (yn_dc_lcfo_wannier=y): wannier_dis_froz_max must not exceed wannier_dis_win_max."
+    end if
+
+    if(yn_dc_lcfo_wannier_cluster=='y') then
+      if(yn_dc_lcfo_wannier/='y') &
+      & stop "DC-LCFO Wannier cluster partition requires yn_dc_lcfo_wannier=y."
+      if(any(num_wannier_cluster(1:3) > 0)) then
+        if(any(num_wannier_cluster(1:3) <= 0)) &
+        & stop "DC-LCFO Wannier cluster partition: num_wannier_cluster must be all positive or all omitted."
+        do i=1,3
+          if(num_fragment(i) <= 0) &
+          & stop "DC-LCFO Wannier cluster partition: num_fragment must be specified."
+          if(mod(num_fragment(i), num_wannier_cluster(i)) /= 0) &
+          & stop "DC-LCFO Wannier cluster partition: num_fragment must be divisible by num_wannier_cluster."
+          wannier_cluster_size(i) = num_fragment(i) / num_wannier_cluster(i)
+        end do
+      end if
+      if(yn_dc_lcfo_local_wannier=='y' .and. any(wannier_cluster_size(1:3) /= 1)) &
+      & stop "DC-LCFO Wannier cluster partition is not compatible with fragment-local Wannier export yet."
+      do i=1,3
+        if(wannier_cluster_size(i) <= 0) &
+        & stop "DC-LCFO Wannier cluster partition: wannier_cluster_size must be positive."
+        if(num_fragment(i) <= 0) &
+        & stop "DC-LCFO Wannier cluster partition: num_fragment must be specified."
+        if(mod(num_fragment(i), wannier_cluster_size(i)) /= 0) &
+        & stop "DC-LCFO Wannier cluster partition: num_fragment must be divisible by wannier_cluster_size."
+      end do
+    end if
+
+    if(yn_dc_lcfo_local_wannier=='y') then
+      if(yn_dc/='y') &
+      & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc=y must be specified."
+      if(yn_dc_lcfo_flux/='y') &
+      & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc_lcfo_flux=y is required."
+      if(yn_dc_lcfo_diag/='y') &
+      & stop "DC-LCFO local Wannier export (yn_dc_lcfo_local_wannier=y): yn_dc_lcfo_diag=y is required."
+      if(trim(wannier_projection) /= 'C:sp3' .and. trim(wannier_projection) /= 'c:sp3' .and. &
+      &  trim(wannier_projection) /= 'Si:sp3' .and. trim(wannier_projection) /= 'si:sp3' .and. &
+      &  trim(wannier_projection) /= 'SI:sp3' .and. &
+      &  trim(wannier_projection) /= 'pseudo_channels' .and. &
+      &  trim(wannier_projection) /= 'PSEUDO_CHANNELS' .and. &
+      &  trim(wannier_projection) /= 'bond_centers' .and. &
+      &  trim(wannier_projection) /= 'BOND_CENTERS') &
+      & stop "DC-LCFO local Wannier export: supported wannier_projection values are C:sp3, Si:sp3, pseudo_channels, and bond_centers."
+      if(wannier_projection_width <= 0d0) &
+      & stop "DC-LCFO local Wannier export: wannier_projection_width must be positive."
+      if(lambda_cut <= 0d0) &
+      & stop "DC-LCFO local Wannier export: lambda_cut must be positive for local S cleanup."
+    end if
+
+    if(yn_dc_lcfo_wannier_pw=='y') then
+      if(yn_dc_lcfo_local_wannier/='y') &
+      & stop "DC-LCFO local Wannier PW augmentation requires yn_dc_lcfo_local_wannier=y."
+      if(wannier_pw_cutoff <= 0d0) &
+      & stop "DC-LCFO local Wannier PW augmentation requires wannier_pw_cutoff > 0."
+      if(wannier_pw_max < 0) &
+      & stop "DC-LCFO local Wannier PW augmentation requires wannier_pw_max >= 0."
+    end if
+
+    if(yn_dg_overlapping_wannier_rt=='y')then
+      if(theory/='tddft_pulse'.and.theory/='tddft_response')&
+        stop 'overlapping-Wannier coefficient RT requires TDDFT pulse or response theory.'
+      if(yn_self_checkpoint=='y'.or.checkpoint_interval>=1)&
+        stop 'overlapping-Wannier coefficient RT forbids conventional checkpoint publication.'
+      if(yn_restart=='y')stop 'overlapping-Wannier coefficient RT forbids conventional yn_restart.'
+      if(yn_dc_lcfo=='y'.or.yn_eigenexa=='y')&
+        stop 'overlapping-Wannier coefficient RT forbids LCFO and EigenExa routes.'
+      if(yn_dg_length_gauge/='y')&
+        stop 'overlapping-Wannier coefficient RT currently requires the validated length gauge.'
+      if(nt<1.or.dt<=0d0)stop 'overlapping-Wannier coefficient RT requires positive nt and dt.'
+    endif
+    if(yn_dg_overlapping_wannier_rt_restart=='y'.and.yn_dg_overlapping_wannier_rt/='y')&
+      stop 'overlapping-Wannier RT restart requires its dedicated coefficient RT route.'
+    if(yn_dg_length_gauge=='y' .and. yn_dg_overlapping_wannier_rt/='y'.and.yn_rt_dg_hybrid_continuation/='y') &
+      stop "DG length gauge requires the overlapping-Wannier coefficient RT route."
+    if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
+      stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
+    call yn_argument_check(yn_dg_overlapping_wannier_rt)
+    call yn_argument_check(yn_dg_overlapping_wannier_rt_restart)
+    call yn_argument_check(yn_rt_dg_hybrid_continuation)
+    if(yn_rt_dg_hybrid_continuation=='y')then
+      if(yn_dg_length_gauge/='y'.or.iperiodic/=3.or.yn_spinorbit/='n'.or.yn_fix_func/='n'.or.yn_jm/='n')&
+        stop 'hybrid DG continuation RT requires periodic scalar length-gauge scope.'
+      if(theory/='tddft_response'.and.theory/='tddft_pulse')&
+        stop 'hybrid DG continuation RT requires a TDDFT theory.'
+    endif
+
 #ifdef USE_FFTW
 #else
     if(yn_fftw=='y') then
@@ -3104,6 +4032,17 @@ contains
 #endif
 
   end subroutine check_bad_input
+
+  subroutine sawf_input_fatal(message)
+    use communication, only: comm_is_root
+    use parallelization, only: end_parallel, nproc_id_global
+    implicit none
+    character(*), intent(in) :: message
+
+    if(comm_is_root(nproc_id_global)) write(*,'(a)') 'Bad input: '//trim(message)
+    call end_parallel
+    stop 1
+  end subroutine sawf_input_fatal
 
   subroutine stop_by_bad_input2(inp1,inp2,inp3)
     use parallelization

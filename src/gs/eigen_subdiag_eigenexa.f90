@@ -17,8 +17,41 @@ module eigen_eigenexa
   implicit none
 
   public :: eigen_pdsyevd_ex, eigen_pdsyevd_ex_red_mem
+  public :: eigen_pdsyevd_ex_distributed_blocks
 
 contains
+
+  subroutine eigen_pdsyevd_ex_distributed_blocks(info,n,local_matrix,eigenvalues,&
+      local_eigenvectors,ok,message)
+    use structures, only: s_parallel_info
+    use eigen_libs_mod
+    use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
+    implicit none
+    type(s_parallel_info),intent(in) :: info
+    integer,intent(in) :: n
+    real(8),intent(inout) :: local_matrix(:,:)
+    real(8),intent(out) :: eigenvalues(:)
+    real(8),intent(out) :: local_eigenvectors(:,:)
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+    ok=.false.;message=''
+    if(.not.info%flag_eigenexa_init)then
+      message='EigenExa is not initialized for distributed-block diagonalization';return
+    endif
+    if(n<=0.or.size(eigenvalues)/=n.or.&
+       any(shape(local_matrix)/=[info%nrow_local,info%ncol_local]).or.&
+       any(shape(local_eigenvectors)/=[info%nrow_local,info%ncol_local]))then
+      message='invalid direct distributed-block EigenExa contract';return
+    endif
+    local_eigenvectors=0d0;eigenvalues=0d0
+    call eigen_sx(n,n,local_matrix,info%nrow_local,eigenvalues,local_eigenvectors,&
+      info%nrow_local)
+    if(.not.all(ieee_is_finite(eigenvalues)).or.&
+       .not.all(ieee_is_finite(local_eigenvectors)))then
+      message='direct distributed-block EigenExa result is nonfinite';return
+    endif
+    ok=.true.
+  end subroutine eigen_pdsyevd_ex_distributed_blocks
 
   subroutine eigen_pdsyevd_ex(info,h,e,v)
     use structures, only: s_parallel_info
@@ -46,6 +79,8 @@ contains
     allocate( h_div(info%nrow_local,info%ncol_local), &
               v_div(info%nrow_local,info%ncol_local), &
               v_tmp(n,n) )
+    h_div = 0d0
+    v_div = 0d0
 
 !$omp parallel do private(i,j,i_loc,j_loc) collapse(2)
     do j_loc=is(2),ie(2)
@@ -103,6 +138,8 @@ contains
               v_div(info%nrow_local,info%ncol_local), &
               tmp_mat(system%no, info%numo_max), &
               tmp_mat2(system%no, info%numo_max) )
+    h_div = 0d0
+    v_div = 0d0
 
     do m = 0, info%nporbital - 1
       if(m == info%id_o) then

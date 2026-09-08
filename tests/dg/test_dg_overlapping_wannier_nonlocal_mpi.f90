@@ -1,0 +1,176 @@
+#include "config.h"
+program test_dg_overlapping_wannier_nonlocal_mpi
+  use mpi
+  use dg_overlapping_wannier_nonlocal,only:assemble_dg_overlapping_wannier_nonlocal,&
+    assemble_dg_overlapping_wannier_nonlocal_rows,&
+    collect_dg_overlapping_wannier_projector_overlaps,&
+    apply_dg_overlapping_wannier_nonlocal_action
+  implicit none
+  integer::comm,rank,nproc,ierr,p,i,j,nlocal,index,owned,expected_projectors
+  integer(8),allocatable::ids(:),row_ids(:)
+  real(8),allocatable::strength(:),action_strength(:)
+  complex(8),allocatable::overlap(:,:),matrix(:,:),reference(:,:),rotated(:,:),matrix_rows(:,:)
+  complex(8),allocatable::collected_overlap(:,:)
+  integer(8),allocatable::collected_ids(:)
+  integer,allocatable::complete_atom_ids(:),complete_ordinals(:),test_atom_ids(:),test_ordinals(:)
+  real(8),allocatable::collected_strength(:)
+  real(8),allocatable::complete_strength(:),complete_action_strength(:)
+  complex(8),allocatable::complete_overlap(:,:)
+  complex(8),allocatable::nonlocal_action(:,:)
+  complex(8)::direct_local(3,3),direct_global(3,3)
+  logical,allocatable::complete(:,:)
+  complex(8)::gauge(3,3)
+  logical::ok,split_metadata_ok,split_overlap_ok
+  character(256)::message
+  call MPI_Init(ierr);comm=MPI_COMM_WORLD
+  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  nlocal=count([(mod(p-1,nproc)==rank,p=1,3)])
+  allocate(ids(nlocal),strength(nlocal),overlap(3,nlocal),complete(3,nlocal))
+  index=0
+  do p=1,3
+    if(mod(p-1,nproc)/=rank)cycle
+    index=index+1;ids(index)=p;strength(index)=0.2d0+0.1d0*p
+    overlap(:,index)=[cmplx(0.4d0*p,0.03d0*p,8),cmplx(-0.2d0*p,0.05d0,8),&
+      cmplx(0.1d0,0.07d0*p,8)]
+  enddo
+  complete=.true.
+  direct_local=(0d0,0d0)
+  do p=1,nlocal;do j=1,3;do i=1,3
+    direct_local(i,j)=direct_local(i,j)+strength(p)*conjg(overlap(i,p))*overlap(j,p)
+  enddo;enddo;enddo
+  call MPI_Allreduce(direct_local,direct_global,9,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+  call assemble_dg_overlapping_wannier_nonlocal(comm,3,ids,strength,overlap,complete,3_8,&
+    matrix,owned,ok,message)
+  call require(ok,trim(message));call require(owned==3,'unique projector ownership')
+  call require(maxval(abs(matrix-conjg(transpose(matrix))))<1d-13,'Hermitian nonlocal matrix')
+  call require(maxval(abs(matrix-direct_global))<1d-13,'direct nonlocal reference')
+  call require(abs(matrix(1,2))>1d-8,'overlapping tail-projector block')
+  reference=matrix
+  allocate(row_ids(count([(mod(i-1,nproc)==rank,i=1,3)])))
+  index=0
+  do i=1,3
+    if(mod(i-1,nproc)/=rank)cycle
+    index=index+1;row_ids(index)=i
+  enddo
+  call assemble_dg_overlapping_wannier_nonlocal_rows(comm,3,row_ids,ids,strength,overlap,complete,&
+    3_8,matrix_rows,owned,ok,message)
+  call require(ok,trim(message))
+  if(size(row_ids)>0)then
+    direct_local=(0d0,0d0)
+    direct_local(1:size(row_ids),:)=matrix_rows-reference(int(row_ids),:)
+  else
+    direct_local=(0d0,0d0)
+  endif
+  call require(maxval(abs(direct_local))<1d-13,'row-owned nonlocal reference')
+  gauge=(0d0,0d0);gauge(1,1)=sqrt(0.5d0);gauge(1,2)=sqrt(0.5d0)
+  gauge(2,1)=-sqrt(0.5d0);gauge(2,2)=sqrt(0.5d0);gauge(3,3)=1d0
+  rotated=matmul(gauge,overlap)
+  call assemble_dg_overlapping_wannier_nonlocal(comm,3,ids,strength,rotated,complete,3_8,&
+    matrix,owned,ok,message)
+  call require(ok,trim(message))
+  call require(maxval(abs(matrix-matmul(conjg(gauge),matmul(reference,transpose(gauge)))))<1d-12,&
+    'nonlocal gauge covariance')
+  if(nproc>1)then
+    call assemble_dg_overlapping_wannier_nonlocal_rows(comm,merge(4,3,rank==0),row_ids,ids,&
+      strength,overlap,complete,3_8,matrix_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned nonlocal nwann rejection')
+    call assemble_dg_overlapping_wannier_nonlocal_rows(comm,3,row_ids,ids,strength,overlap,&
+      complete,merge(4_8,3_8,rank==0),matrix_rows,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent row-owned projector-count rejection')
+    call assemble_dg_overlapping_wannier_nonlocal(comm,merge(4,3,rank==0),ids,strength,overlap,&
+      complete,3_8,matrix,owned,ok,message)
+    call require(.not.ok,'rank-inconsistent nonlocal contract rejection')
+  endif
+  if(rank==0.and.size(ids)>0)complete(1,1)=.false.
+  call assemble_dg_overlapping_wannier_nonlocal(comm,3,ids,strength,overlap,complete,3_8,&
+    matrix,owned,ok,message)
+  call require(.not.ok,'incomplete tail-projector rejection');complete=.true.
+  if(rank==0.and.size(ids)>0)then
+    ids=[ids,ids(1)];strength=[strength,strength(1)]
+    overlap=reshape([overlap,overlap(:,1)],[3,size(ids)])
+    complete=reshape([complete,complete(:,1)],[3,size(ids)])
+  endif
+  call assemble_dg_overlapping_wannier_nonlocal(comm,3,ids,strength,overlap,complete,3_8,&
+    matrix,owned,ok,message)
+  call require(.not.ok,'duplicate projector rejection')
+  if(nproc==2)then
+    deallocate(ids,strength,overlap,complete)
+    allocate(ids(1),strength(1),action_strength(1),overlap(3,1),complete(3,1))
+    ids(1)=17_8
+    action_strength(1)=0.4d0
+    strength(1)=2.5d0*action_strength(1)
+    if(rank==0)then
+      overlap(:,1)=[cmplx(0.3d0,0.1d0,8),cmplx(-0.2d0,0d0,8),cmplx(0.1d0,-0.1d0,8)]
+    else
+      overlap(:,1)=[cmplx(-0.1d0,0.2d0,8),cmplx(0.05d0,0.1d0,8),cmplx(0.2d0,0d0,8)]
+    end if
+    complete=.false.
+    call collect_dg_overlapping_wannier_projector_overlaps(comm,3,[5],[2],strength,action_strength,overlap,&
+      collected_ids,collected_strength,collected_overlap,expected_projectors,ok,message,&
+      complete_atom_ids=complete_atom_ids,complete_ordinals=complete_ordinals,&
+      complete_matrix_strength=complete_strength,complete_action_strength=complete_action_strength,&
+      complete_overlap=complete_overlap)
+    call require(ok,trim(message));call require(expected_projectors==1,'split projector identity collection')
+    call require(size(collected_ids)==merge(1,0,rank==0),'split projector has one deterministic owner')
+    call require(all(complete_atom_ids==[5]).and.all(complete_ordinals==[2]),&
+      'complete split-projector identity is unavailable')
+    call require(abs(complete_strength(1)-1d0)<1d-14.and.&
+      abs(complete_action_strength(1)-0.4d0)<1d-14.and.maxval(abs(complete_overlap(:,1)-&
+      [cmplx(0.2d0,0.3d0,8),cmplx(-0.15d0,0.1d0,8),cmplx(0.3d0,-0.1d0,8)]))<1d-14,&
+      'matrix and action projector strengths are not independently preserved')
+    split_metadata_ok=.true.;split_overlap_ok=.true.
+    if(rank==0)then
+      split_metadata_ok=collected_ids(1)==1_8.and.abs(collected_strength(1)-1d0)<1d-14
+      split_overlap_ok=maxval(abs(collected_overlap(:,1)-&
+        [cmplx(0.2d0,0.3d0,8),cmplx(-0.15d0,0.1d0,8),cmplx(0.3d0,-0.1d0,8)]))<1d-14
+    end if
+    call require(split_metadata_ok,'split projector metadata')
+    call require(split_overlap_ok,'split projector overlap is coherently summed')
+
+    deallocate(ids,strength,action_strength,overlap,complete)
+    if(rank==0)then
+      allocate(ids(3),strength(3),action_strength(3),overlap(3,3),complete(3,3))
+      allocate(test_atom_ids(3),test_ordinals(3));test_atom_ids=[7,5,7];test_ordinals=[1,2,1]
+    else
+      allocate(ids(2),strength(2),action_strength(2),overlap(3,2),complete(3,2))
+      allocate(test_atom_ids(2),test_ordinals(2));test_atom_ids=[5,7];test_ordinals=[2,1]
+    endif
+    strength=1d0;action_strength=0.4d0;overlap=cmplx(real(rank+1,8),0d0,8);complete=.false.
+    call collect_dg_overlapping_wannier_projector_overlaps(comm,3,test_atom_ids,test_ordinals,&
+      strength,action_strength,overlap,collected_ids,collected_strength,collected_overlap,&
+      expected_projectors,ok,message,complete_atom_ids=complete_atom_ids,complete_ordinals=complete_ordinals)
+    call require(ok.and.expected_projectors==2,'nonsorted repeated projector keys were not canonicalized')
+    call require(all(complete_atom_ids==[5,7]).and.all(complete_ordinals==[2,1]),&
+      'projector keys are not in deterministic canonical order')
+
+    call apply_dg_overlapping_wannier_nonlocal_action(comm,3,1,[1],[1],[cmplx(0.6d0,0d0,8)],&
+      complete_action_strength,complete_overlap,nonlocal_action,ok,message)
+    call require(ok,trim(message))
+    call require(maxval(abs(nonlocal_action(:,1)-0.4d0*0.6d0*complete_overlap(:,1)))<1d-14,&
+      'pointwise nonlocal strong action uses unweighted rinv_uvu')
+
+    if(rank==0)then
+      call apply_dg_overlapping_wannier_nonlocal_action(comm,3,1,[1],[0],[cmplx(0.6d0,0d0,8)],&
+        complete_action_strength,complete_overlap,nonlocal_action,ok,message)
+    else
+      call apply_dg_overlapping_wannier_nonlocal_action(comm,3,1,[1],[1],[cmplx(0.6d0,0d0,8)],&
+        complete_action_strength,complete_overlap,nonlocal_action,ok,message)
+    endif
+    call require(.not.ok,'rank-local missing projector support is rejected collectively')
+    call MPI_Barrier(comm,ierr)
+    call require(ierr==MPI_SUCCESS,'collective rejection returns every rank before later collective')
+  end if
+  if(rank==0)then
+    write(*,'(a,i0,a,4(es24.16,1x))')'NONLOCAL ranks=',nproc,' values=',real(reference(1,1)),&
+      aimag(reference(1,2)),real(reference(2,3)),aimag(reference(2,3))
+    write(*,'(a,i0,a)')'PASS overlapping-Wannier nonlocal on ',nproc,' ranks'
+  endif
+  call MPI_Finalize(ierr)
+contains
+  subroutine require(condition,label)
+    logical,intent(in)::condition;character(*),intent(in)::label
+    integer::lf,gf
+    lf=merge(0,1,condition);call MPI_Allreduce(lf,gf,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(gf/=0)error stop label
+  end subroutine
+end program

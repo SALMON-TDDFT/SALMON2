@@ -121,7 +121,8 @@ contains
     real(8), parameter :: theta_opt=1.0d0  !alpha=1.0d0 -- this is now from input
     real(8) :: alpha
     integer :: ii,ij,jj,icount,iatom, NA3,ixyz
-    real(8) :: const1,const2,rtmp
+    real(8) :: const1(1,1),const2(1,1)  ! Changed from scalars to (1,1) arrays for dgemm
+    real(8) :: rtmp
     real(8) :: dRion(3,natom), dRabs(natom), dRabs_max
     real(8) :: force_1d(3*natom),dRion_1d(3*natom),optmat_1d(3*natom)
     real(8) :: optmat1_2d(3*natom,3*natom),optmat2_2d(3*natom,3*natom),optmat3_2d(3*natom,3*natom)
@@ -166,7 +167,7 @@ contains
         call dgemm('n','n',1,1,NA3,1d0,opt%dFion,1,optmat_1d,NA3,0d0,const2,1)
         call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,opt%a_dRion,1,0d0,optmat1_2d,NA3)
         !update opt%Hess_mat
-        rtmp = (const1+theta_opt*const2)/(const1**2d0)
+        rtmp = (const1(1,1)+theta_opt*const2(1,1))/(const1(1,1)**2d0)
         !$omp parallel do collapse(2) private(ii,jj)
         do ii=1,NA3
         do jj=1,NA3
@@ -180,7 +181,7 @@ contains
           !$omp parallel do collapse(2) private(ii,jj)
           do ii=1,NA3
           do jj=1,NA3
-             opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)-(1d0/const2)*optmat2_2d(ii,jj)
+             opt%Hess_mat(ii,jj) = opt%Hess_mat(ii,jj)-(1d0/const2(1,1))*optmat2_2d(ii,jj)
           enddo
           enddo
           !$omp end parallel do
@@ -188,7 +189,7 @@ contains
           !theta_opt=1.0d0:BFGS
           call dgemm('n','n',NA3,NA3,1,1d0,optmat_1d,NA3,opt%a_dRion,1,0d0,optmat2_2d,NA3)
           call dgemm('n','n',NA3,NA3,1,1d0,opt%a_dRion,NA3,optmat_1d,1,0d0,optmat3_2d,NA3)
-          rtmp = theta_opt/const1
+          rtmp = theta_opt/const1(1,1)
           !$omp parallel do collapse(2) private(ii,jj)
           do ii=1,NA3
           do jj=1,NA3

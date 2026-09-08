@@ -279,7 +279,7 @@ CONTAINS
     use structures
     use salmon_math
     use math_constants,only : pi,zi
-    use salmon_global, only: kion,aEwald, cutoff_r, yn_jm, yn_fix_func, theory
+    use salmon_global, only: aEwald, cutoff_r, yn_jm, yn_fix_func, theory
     use communication, only: comm_summation,comm_is_root
     use timer
     use nvtx_wrapper
@@ -354,7 +354,7 @@ CONTAINS
                rab(3) = system%Rion(3,ia)-r(3) - system%Rion(3,ib)
                rr = sum(rab(:)**2)
                if(rr .gt. cutoff_r**2) cycle
-               E_tmp = E_tmp + 0.5d0*pp%Zps(Kion(ia))*pp%Zps(Kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
+               E_tmp = E_tmp + 0.5d0*pp%Zps(system%kion(ia))*pp%Zps(system%kion(ib))*erfc_salmon(sqrt(aEwald*rr))/sqrt(rr)
 
             end do  !ipair
          end do     !ia
@@ -418,7 +418,7 @@ CONTAINS
         do ia=info%ia_s,info%ia_e
           r = system%Rion(1:3,ia)
           Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,system%kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
         end do
       end if
     end do
@@ -431,7 +431,7 @@ CONTAINS
 !$omp parallel do collapse(2) default(none) &
 !$omp          reduction(+:E_wrk,etmp) &
 !$omp          private(ix,iy,iz,g,rho_i,rho_e,ia,r,Gd) &
-!$omp          shared(mg,fg,aEwald,system,sysvol,kion,poisson,ppg,info,yn_jm)
+!$omp          shared(mg,fg,aEwald,system,sysvol,poisson,ppg,info,yn_jm)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
@@ -449,7 +449,7 @@ CONTAINS
         do ia=info%ia_s,info%ia_e
           r = system%Rion(1:3,ia)
           Gd = g(1)*r(1) + g(2)*r(2) + g(3)*r(3)
-          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,Kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
+          etmp = etmp + conjg(rho_e)*ppg%zVG_ion(ix,iy,iz,system%kion(ia))*exp(-zI*Gd)  ! electron-ion (core)
         end do
       end if
     end do
@@ -475,11 +475,11 @@ CONTAINS
 !$acc kernels copyin(pp)
 !$acc loop private(ia) reduction(+:zps1,zps2)
 #else
-!$omp parallel do default(none) private(ia) shared(system,pp,Kion) reduction(+:zps1,zps2)
+!$omp parallel do default(none) private(ia) shared(system,pp) reduction(+:zps1,zps2)
 #endif
       do ia=1,system%nion
-        zps1 = zps1 + pp%Zps(Kion(ia))
-        zps2 = zps2 + pp%Zps(Kion(ia))**2
+        zps1 = zps1 + pp%Zps(system%kion(ia))
+        zps2 = zps2 + pp%Zps(system%kion(ia))**2
       end do
 #ifdef USE_OPENACC
 !$acc end kernels

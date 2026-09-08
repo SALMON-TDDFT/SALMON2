@@ -1,5 +1,6 @@
 set(SOURCES
     calc_jxyz_plusu.f90
+    current_plusu.f90
     density_matrix_and_energy_plusu.f90
     prep_pp_plusu.f90
     update_kvector_plusu.f90

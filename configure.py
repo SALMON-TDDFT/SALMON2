@@ -21,6 +21,8 @@
 from optparse import OptionParser, OptionGroup
 import os
 import os.path
+import platform
+import subprocess
 
 SOURCE_DIR = os.path.dirname(__file__)
 
@@ -44,6 +46,77 @@ def add_env(dic, name, var) :
   if var is not None:
     dic[name] = var
 
+def detect_brew_prefix(machine):
+  try:
+    prefix = subprocess.check_output(['brew', '--prefix'], stderr=subprocess.DEVNULL)
+    prefix = prefix.decode().strip()
+    if prefix:
+      return prefix
+  except Exception:
+    pass
+  if machine == 'arm64':
+    return '/opt/homebrew'
+  if machine == 'x86_64':
+    return '/usr/local'
+  return None
+
+def add_macos_openmp_defaults(defines, env_vars, user_env):
+  if platform.system() != 'Darwin':
+    return
+
+  machine = platform.machine()
+  brew_prefix = detect_brew_prefix(machine)
+  if brew_prefix is None:
+    raise RuntimeError('Unsupported macOS CPU architecture: {0}'.format(machine))
+
+  llvm_prefix = os.path.join(brew_prefix, 'opt', 'llvm')
+  libomp_prefix = os.path.join(brew_prefix, 'opt', 'libomp')
+  cc = os.path.join(llvm_prefix, 'bin', 'clang')
+  cxx = os.path.join(llvm_prefix, 'bin', 'clang++')
+  libomp = os.path.join(libomp_prefix, 'lib', 'libomp.dylib')
+
+  if not os.path.exists(cc) or not os.path.exists(cxx):
+    raise RuntimeError('Homebrew LLVM clang/clang++ not found under {0}'.format(llvm_prefix))
+  if not os.path.exists(libomp):
+    raise RuntimeError('Homebrew libomp not found under {0}'.format(libomp_prefix))
+
+  if user_env.get('CC') == '/usr/bin/clang' or user_env.get('CXX') == '/usr/bin/clang++':
+    raise RuntimeError('Do not use Apple /usr/bin/clang for macOS OpenMP builds')
+
+  env_vars.setdefault('CC', cc)
+  env_vars.setdefault('CXX', cxx)
+  env_vars.setdefault('OMPI_CC', cc)
+  env_vars.setdefault('OMPI_CXX', cxx)
+  env_vars['CFLAGS'] = append_env_flags(user_env.get('CFLAGS'), '-fopenmp', env_vars.get('CFLAGS'))
+  env_vars['CPPFLAGS'] = append_env_flags(user_env.get('CPPFLAGS'), '-I{0}/include'.format(libomp_prefix),
+                                         env_vars.get('CPPFLAGS'))
+  env_vars['LDFLAGS'] = append_env_flags(user_env.get('LDFLAGS'), '-L{0}/lib'.format(libomp_prefix),
+                                        env_vars.get('LDFLAGS'))
+  env_vars['LIBS'] = append_env_flags(user_env.get('LIBS'), '-lomp', env_vars.get('LIBS'))
+
+  defines.setdefault('CMAKE_C_COMPILER', cc)
+  defines.setdefault('CMAKE_CXX_COMPILER', cxx)
+  defines['OpenMP_ROOT'] = libomp_prefix
+  defines['OpenMP_C_FLAGS'] = '-fopenmp'
+  defines['OpenMP_C_LIB_NAMES'] = 'omp'
+  defines['OpenMP_omp_LIBRARY'] = libomp
+
+def append_env_flags(user_value, extra, current_value=None):
+  if current_value:
+    base = current_value
+  elif user_value:
+    base = user_value
+  else:
+    base = ''
+  if base:
+    return '{0} {1}'.format(base, extra)
+  return extra
+
+def remove_failed_cmake_cache():
+  cache_path = os.path.join(os.getcwd(), 'CMakeCache.txt')
+  if os.path.exists(cache_path):
+    os.remove(cache_path)
+
 usage  = "usage: %prog [options]"
 parser = OptionParser(usage)
 
@@ -66,6 +139,8 @@ group.add_option('--enable-libxc',      action='store_true',  dest='libxc')
 group.add_option('--disable-libxc',     action='store_false', dest='libxc', help='enable/disable Libxc library.')
 group.add_option('--enable-fftw',        action='store_true',  dest='fftw')
 group.add_option('--disable-fftw',       action='store_false', dest='fftw', help='enable/disable computations FFTW library.')
+group.add_option('--enable-wannier90',   action='store_true',  dest='wannier90')
+group.add_option('--disable-wannier90',  action='store_false', dest='wannier90', help='enable/disable computations with Wannier90 library (SALMON will build it internally).')
 group.add_option('--with-lapack',       action='store', type=str, default=None, dest='lapack_installdir', help='specify install path to LAPACK/ScaLAPACK')
 group.add_option('--with-libxc',        action='store', type=str, default=None, dest='libxc_installdir', help='specify install path to Libxc package')
 
@@ -92,8 +167,23 @@ if (options.libxc_installdir is not None):
   options.libxc = True
 
 dict = {}
+env_dict = {}
+user_env_dict = {}
+for var in args:
+  (k, v) = var.split('=', 1)
+  user_env_dict[k] = v
+  env_dict[k] = v
+
 if options.arch is not None:
-  dict['CMAKE_TOOLCHAIN_FILE']     = options.arch.lower()
+  arch = options.arch.lower()
+  toolchain = arch
+  if not os.path.isabs(toolchain):
+    if not toolchain.endswith('.cmake'):
+      toolchain = toolchain + '.cmake'
+    candidate = os.path.join(SOURCE_DIR, 'platforms', toolchain)
+    if os.path.exists(candidate):
+      toolchain = candidate
+  dict['CMAKE_TOOLCHAIN_FILE']     = toolchain
 if options.prefix is not None:
   dict['CMAKE_INSTALL_PREFIX']     = options.prefix
 dict['CMAKE_BUILD_TYPE']           = debug_or_release(options.debug)
@@ -107,6 +197,7 @@ add_option(dict, 'USE_SCALAPACK',       options.scalapack)
 add_option(dict, 'USE_EIGENEXA',        options.eigenexa)
 add_option(dict, 'USE_LIBXC',           options.libxc)
 add_option(dict, 'USE_FFTW',            options.fftw)
+add_option(dict, 'USE_WANNIER90',       options.wannier90)
 
 add_option(dict, 'USE_OPT_ARRAY_PADDING',          options.padding)
 add_option(dict, 'USE_OPT_EXPLICIT_VECTORIZATION', options.explicit_vec)
@@ -114,16 +205,20 @@ add_option(dict, 'USE_OPT_EXPLICIT_VECTORIZATION', options.explicit_vec)
 if options.simd is not None:
   dict['SIMD_SET'] = options.simd.upper()
 
+add_macos_openmp_defaults(dict, env_dict, user_env_dict)
+if not options.dry_run:
+  remove_failed_cmake_cache()
+
 define = ''
 for k,v in dict.items():
   define = '{0} -D {1}={2}'.format(define, k, v)
 
 env = ''
-for var in args:
-  (k, v) = var.split('=', 1)
+for k, v in env_dict.items():
   env = '{0} {1}="{2}"'.format(env, k, v)
 
 ### configuration
 comm = '{2} cmake {0} {1}'.format(define, SOURCE_DIR, env)
 print('    $ %s' % comm)
-os.system(comm)
+if not options.dry_run:
+  os.system(comm)

@@ -16,6 +16,7 @@ set(SOURCES
     structure_opt.f90
     subspace_diagonalization.f90
     read_gs.f90
+    occupation_kernel.f90
     occupation.f90
    )
    

@@ -13,6 +13,7 @@ endif ()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/platforms)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Modules)
 include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
+include(${CMAKE_SOURCE_DIR}/cmakefiles/configure_macos_openmp.cmake)
 
 
 ### Project settings
@@ -45,6 +46,8 @@ option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
+option_set(USE_WANNIER90 "Use Wannier90 library"   OFF)
+option_set(USE_SPGLIB    "Use spglib library"       OFF)
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)

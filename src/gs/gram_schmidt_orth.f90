@@ -403,7 +403,6 @@ contains
                      &                wf_block(:,:,:,jo1), n_one )) &
                      &     * sys%hvol
 #endif
-
                     if (wfi%if_divide_rspace) then
                       call comm_summation(norm2_tmp, norm2, wfi%icomm_r)
                     else
@@ -425,7 +424,6 @@ contains
                 ! Calculate overlap coefficients:
                     coeff_tmp = 0d0
                     do jo2 = jo1+1, io3_e
-
 #if defined(USE_OPENACC) && defined(USE_CUDA_CUBLASV2)
 !$acc data copyin(wf_block(:,:,:,jo1), wf_block(:,:,:,jo2))
 !$acc host_data use_device(wf_block(:,:,:,jo1), wf_block(:,:,:,jo2))

@@ -25,7 +25,7 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,include_nonlocal)
   use structures
   use stencil_sub
   use nonlocal_potential
@@ -53,10 +53,11 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   type(s_pp_grid),intent(in) :: ppg
   type(s_orbital)            :: tpsi,htpsi
   type(s_orbital),optional   :: ttpsi
+  logical,intent(in),optional :: include_nonlocal
   !
   integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
   real(8) :: k_nabt(Nd,3),k_lap0,kAc(3)
-  logical :: if_kAc,if_singlescale
+  logical :: if_kAc,if_singlescale,apply_nonlocal
   logical :: is_enable_overlapping
   !real(8) :: tmp,tmp1
   real(8) :: kAc0(3)
@@ -75,6 +76,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   
   if_kAc = (yn_periodic=='y')
   if_singlescale = allocated(system%Ac_micro%v)
+  apply_nonlocal=.true.
+  if(present(include_nonlocal))apply_nonlocal=include_nonlocal
 
   ! check: can we execute computation/communication overlapping
   if (if_singlescale) then
@@ -116,16 +119,16 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call nvtxEndRange()
 
     ! nonlocal potential
-    if ( yn_spinorbit=='y' ) then
+    if (apply_nonlocal.and.yn_spinorbit=='y' ) then
       ! pseudopotential
       if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
-    else
+    else if(apply_nonlocal)then
       ! pseudopotential
       if(yn_jm=='n') call dpseudo(tpsi,htpsi,info,Nspin,ppg)
     end if
 
     ! DFT+U
-    if ( PLUS_U_ON ) then
+    if (apply_nonlocal.and.PLUS_U_ON ) then
       call pseudo_plusU(tpsi,htpsi,system,info,ppg)
     end if
 
@@ -445,7 +448,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   ! nonlocal potential
     call nvtxStartRange('nonlocal potential', __LINE__)
-    if(yn_jm=='n') then
+    if(yn_jm=='n'.and.apply_nonlocal) then
       if ( yn_spinorbit=='y' ) then
         call op_xc_noncollinear( tpsi, htpsi, info, mg )
         call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)

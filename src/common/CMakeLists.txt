@@ -14,6 +14,26 @@ set(SOURCES
    force.f90
    )
 
+if (USE_MPI AND USE_SCALAPACK)
+  list(APPEND SOURCES
+   dg_nodal_state.f90
+   dg_nodal_interfaces.f90
+   dg_nodal_sipg.f90
+   dg_buffer_window_projector.f90
+   dg_hybrid_windowed_pw_types.f90
+   dg_hybrid_reciprocal_catalog.f90
+   dg_hybrid_window_distribution.f90
+   dg_hybrid_windowed_pw_basis.f90
+   dg_hybrid_production_pw_basis.f90
+   dg_hybrid_wannier_complement.f90
+   dg_hybrid_sparse_metric.f90
+   dg_hybrid_sparse_operators.f90
+   dg_hybrid_continuation_residuals.f90
+   dg_hybrid_continuation_acceptance.f90
+   dg_hybrid_total_energy.f90
+   )
+endif ()
+
 if (IS_FUJITSU_COMPILER)
   set(SOURCES ${SOURCES}
       zstencil_core/typical/seq_frt.f90

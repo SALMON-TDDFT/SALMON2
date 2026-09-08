@@ -33,6 +33,8 @@
 #include <stdio.h> /* snprintf */
 #include <ftw.h>
 
+int snprintf(char *str, size_t size, const char *format, ...);
+
 #if defined(SYSTEM_HAS_PATH_MAX_IN_LIMITS_H)
 #include <limits.h>
 #elif defined(SYSTEM_HAS_PATH_MAX_IN_LINUX_LIMITS_H)

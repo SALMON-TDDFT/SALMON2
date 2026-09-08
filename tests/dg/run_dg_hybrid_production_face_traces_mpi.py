@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import os
+import shutil
+import subprocess
+import tempfile
+
+root = Path(__file__).resolve().parents[2]
+production_source = (root / "src/gs/dc/dg_hybrid_production_face_traces.f90").read_text().lower()
+assert "owner_rank" not in production_source, (
+    "the obsolete central face-owner path is still present"
+)
+assert "group_action" not in production_source, (
+    "SIPG face payload still duplicates retained-basis symmetry closure"
+)
+materialization_body = production_source.split(
+    "subroutine materialize_dg_hybrid_production_face_collection", 1
+)[1].split("end subroutine materialize_dg_hybrid_production_face_collection", 1)[0]
+assert "reduce_complex_matrix" not in materialization_body, (
+    "production face traces are still replicated with a communicator-wide reduction"
+)
+assert "mpi_allreduce" not in materialization_body, (
+    "production face materialization still contains a communicator-wide synchronization"
+)
+interior_body = production_source.split(
+    "subroutine materialize_dg_hybrid_production_interior", 1
+)[1].split("end subroutine materialize_dg_hybrid_production_interior", 1)[0]
+assert "kinetic_action" in interior_body and "5*nrequest" in interior_body, (
+    "interior response does not pack value, three gradients, and kinetic action together"
+)
+assert "do basis=1,size(effective_ids)" not in interior_body, (
+    "interior communication is still repeated basis by basis"
+)
+assert "mpi_allreduce(values" not in interior_body and "mpi_allreduce(gradients" not in interior_body, (
+    "production interior basis data are replicated by a global reduction"
+)
+assert "subroutine materialize_dg_hybrid_production_kinetic_action" not in production_source, (
+    "obsolete separate kinetic materializer was retained"
+)
+state_body = production_source.split(
+    "subroutine reconstruct_dg_hybrid_production_interface_state", 1
+)[1].split("end subroutine reconstruct_dg_hybrid_production_interface_state", 1)[0]
+for token in ("value_density", "normal_density", "cross_density", "derivative_minus", "derivative_plus"):
+    assert token in state_body, "production interface state omits " + token
+for forbidden in ("metric_tensor", "covariant", "contravariant"):
+    assert forbidden not in state_body, "orthogonal-cell interface path contains " + forbidden
+assembly_body = production_source.split("subroutine assemble_dg_hybrid_production_face", 1)[1].split(
+    "end subroutine assemble_dg_hybrid_production_face", 1
+)[0]
+assert "call assemble_dg_hybrid_sipg_face" not in assembly_body, (
+    "production grouped assembly must not invoke a collective SIPG assembler per quadrature point"
+)
+assert "reduce_complex_matrix" not in assembly_body, (
+    "production SIPG face blocks are still replicated with a communicator-wide reduction"
+)
+row_body = production_source.split(
+    "subroutine assemble_dg_hybrid_production_interface_rows", 1
+)[1].split("end subroutine assemble_dg_hybrid_production_interface_rows", 1)[0]
+assert "mpi_allreduce" not in row_body, (
+    "production SIPG row assembly still performs communicator-wide ownership exchange"
+)
+with tempfile.TemporaryDirectory(prefix="hybrid-production-face-traces-") as name:
+    build = Path(name)
+    (build / "config.h").write_text("")
+    exe = build / "hybrid_production_face_traces"
+    subprocess.run([
+        shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-std=f2008",
+        "-ffree-line-length-none", "-I", str(build), "-J", str(build),
+        "-fcheck=all", "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
+        str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
+        str(root / "src/gs/dc/dg_hybrid_broken_volume.f90"),
+        str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
+        str(root / "src/gs/dc/dg_hybrid_production_face_traces.f90"),
+        str(root / "tests/dg/test_dg_hybrid_production_face_traces_mpi.f90"),
+        "-o", str(exe),
+    ], check=True)
+    subprocess.run([
+        shutil.which("mpifort"), "-cpp", "-std=f2008", "-ffree-line-length-none",
+        "-I", str(build), "-J", str(build), "-fcheck=all", "-c",
+        str(root / "src/gs/dc/dg_hybrid_fragment_basis.f90"),
+        str(root / "src/gs/dc/dg_hybrid_broken_volume.f90"),
+        str(root / "src/gs/dc/dg_hybrid_sipg_operator.f90"),
+        str(root / "src/gs/dc/dg_hybrid_production_face_traces.f90"),
+    ], cwd=build, check=True)
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+    env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
+    for nrank in (1, 2, 4, 8):
+        run = subprocess.run(
+            [shutil.which("mpiexec"), "-n", str(nrank), str(exe)],
+            capture_output=True, text=True, env=env,
+        )
+        assert run.returncode == 0, (nrank, run.stdout, run.stderr)
+        assert f"PASS production face traces on {nrank} ranks" in run.stdout
+print("PASS production face traces on 1, 2, 4, and 8 ranks")

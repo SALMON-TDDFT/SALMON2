@@ -15,6 +15,7 @@
 !
 ! NOTE: this is a dummy for single node only application
 module communication
+  use unusedvar_mod, only: salmon_unusedvar
   implicit none
 
   integer, private, parameter :: DEAD_BEEF       = int(z'7FFFDEAD')
@@ -55,6 +56,7 @@ module communication
   public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
   public :: comm_alltoall
+  public :: comm_alltoallv
   public :: comm_get_min
   public :: comm_get_max
 
@@ -245,6 +247,11 @@ module communication
   interface comm_alltoall
     ! 1-D array
     module procedure comm_alltoall_array1d_complex
+  end interface
+
+  interface comm_alltoallv
+    ! 1-D array
+    module procedure comm_alltoallv_array1d_double
   end interface
 
   interface comm_get_min
@@ -1287,6 +1294,28 @@ contains
     UNUSED_VARIABLE(ncount)
     !NOP! ABORT_MESSAGE(ngroup,"comm_alltoall_array1d_complex")
     outvalue = invalue
+  end subroutine
+
+  subroutine comm_alltoallv_array1d_double(invalue, sendcounts, sdispls, outvalue, recvcounts, rdispls, ngroup)
+    implicit none
+    real(8), intent(in)  :: invalue(:)
+    integer, intent(in)  :: sendcounts(:)
+    integer, intent(in)  :: sdispls(:)
+    real(8), intent(out) :: outvalue(:)
+    integer, intent(in)  :: recvcounts(:)
+    integer, intent(in)  :: rdispls(:)
+    integer, intent(in)  :: ngroup
+    integer :: ncopy, send_first, recv_first
+    UNUSED_VARIABLE(ngroup)
+    !NOP! ABORT_MESSAGE(ngroup,"comm_alltoallv_array1d_double")
+    if (min(size(sendcounts),size(sdispls),size(recvcounts),size(rdispls)) < 1) &
+      call abort_show_message("comm_alltoallv_array1d_double: missing one-rank metadata")
+    ncopy=sendcounts(1);send_first=1+sdispls(1);recv_first=1+rdispls(1)
+    if (ncopy<0.or.recvcounts(1)/=ncopy.or.sdispls(1)<0.or.rdispls(1)<0) &
+      call abort_show_message("comm_alltoallv_array1d_double: invalid one-rank counts or displacements")
+    if (send_first+ncopy-1>size(invalue).or.recv_first+ncopy-1>size(outvalue)) &
+      call abort_show_message("comm_alltoallv_array1d_double: one-rank slice is out of bounds")
+    if (ncopy>0) outvalue(recv_first:recv_first+ncopy-1)=invalue(send_first:send_first+ncopy-1)
   end subroutine
 
   subroutine comm_get_min_double(svalue, ngroup)

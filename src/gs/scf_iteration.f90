@@ -20,13 +20,14 @@ module scf_iteration_sub
 contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
-            &   miter,nscf_init_no_diagonal)
-  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
+            &   miter,nscf_init_no_diagonal,dc)
+  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,nstate_freeze_gs
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
   use subspace_diagonalization, only: ssdg
+  use xc_ace_update_manager, only: ace_update_state, ace_update_init_from_env, ace_update_decision
   implicit none
   type(s_rgrid),          intent(in)    :: mg
   type(s_dft_system),     intent(in)    :: system
@@ -39,18 +40,58 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   type(s_scalar),         intent(in)    :: vlocal(system%nspin)
   integer,                intent(in)    :: miter
   integer,                intent(in)    :: nscf_init_no_diagonal
+  type(s_dcdft), optional,intent(in)    :: dc
   !
   integer :: nncg
+  integer :: freeze_e
+  logical :: has_frozen_local
+  real(8), allocatable :: frozen_rwf(:,:,:,:,:)
+  complex(8), allocatable :: frozen_zwf(:,:,:,:,:)
+  type(ace_update_state), save :: ace_state_gs
+  logical, save :: ace_state_gs_initialized = .false.
+  complex(8), allocatable :: psi_prev_ace(:,:,:,:,:), psi_curr_ace(:,:,:,:,:)
+
+  if (.not. ace_state_gs_initialized) then
+    call ace_update_init_from_env(ace_state_gs)
+    ace_state_gs_initialized = .true.
+  end if
+  if (ace_state_gs%ace_enabled) then
+    allocate(psi_prev_ace(lbound(spsi%rwf,1):ubound(spsi%rwf,1), &
+                          lbound(spsi%rwf,2):ubound(spsi%rwf,2), &
+                          lbound(spsi%rwf,3):ubound(spsi%rwf,3), &
+                          1:system%nspin, info%io_s:info%io_e))
+    allocate(psi_curr_ace(lbound(spsi%rwf,1):ubound(spsi%rwf,1), &
+                          lbound(spsi%rwf,2):ubound(spsi%rwf,2), &
+                          lbound(spsi%rwf,3):ubound(spsi%rwf,3), &
+                          1:system%nspin, info%io_s:info%io_e))
+    if (system%if_real_orbital) then
+      psi_prev_ace = cmplx(spsi%rwf(:,:,:,:,info%io_s:info%io_e,info%ik_s,info%im_s), 0.d0, kind=8)
+    else
+      psi_prev_ace = spsi%zwf(:,:,:,:,info%io_s:info%io_e,info%ik_s,info%im_s)
+    end if
+  end if
 
   if(miter==1) then
     nncg = ncg_init
   else
     nncg = ncg
   end if
-  
+  freeze_e = min(info%io_e,nstate_freeze_gs)
+  has_frozen_local = nstate_freeze_gs > 0 .and. info%io_s <= freeze_e
+  if(has_frozen_local) then
+    if(system%if_real_orbital) then
+      allocate(frozen_rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+        1:system%nspin,info%io_s:freeze_e))
+      frozen_rwf = spsi%rwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s)
+    else
+      allocate(frozen_zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3), &
+        1:system%nspin,info%io_s:freeze_e))
+      frozen_zwf = spsi%zwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s)
+    end if
+  end if
 ! subspace diagonalization
   call timer_begin(LOG_CALC_SUBSPACE_DIAG)
-  if(yn_subspace_diagonalization == 'y')then
+  if(yn_subspace_diagonalization == 'y' .and. nstate_freeze_gs == 0)then
     if(miter > nscf_init_no_diagonal)then
       call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     end if
@@ -66,19 +107,42 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
 
+  if(has_frozen_local) then
+    if(system%if_real_orbital) then
+      spsi%rwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s) = frozen_rwf
+      deallocate(frozen_rwf)
+    else
+      spsi%zwf(:,:,:,1:system%nspin,info%io_s:freeze_e,info%ik_s,info%im_s) = frozen_zwf
+      deallocate(frozen_zwf)
+    end if
+  end if
+
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
+
+  if (ace_state_gs%ace_enabled) then
+    if (system%if_real_orbital) then
+      psi_curr_ace = cmplx(spsi%rwf(:,:,:,:,info%io_s:info%io_e,info%ik_s,info%im_s), 0.d0, kind=8)
+    else
+      psi_curr_ace = spsi%zwf(:,:,:,:,info%io_s:info%io_e,info%ik_s,info%im_s)
+    end if
+    call ace_update_decision(miter, &
+         psi_prev_ace, psi_curr_ace, &
+         ace_state_gs, info, hvol=system%hvol, comm=info%icomm_rko)
+    deallocate(psi_prev_ace, psi_curr_ace)
+  end if
 
 end subroutine solve_orbitals
 
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc,yn_hse,hse_alpha
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
   use salmon_xc, only: exchange_correlation
+  use xc_hse, only: calc_xc_hse_fft
   use noncollinear_module, only: simple_mixing_so
   use hamiltonian, only: update_vlocal
   implicit none
@@ -103,6 +167,7 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
   type(s_dft_energy),     intent(inout) :: energy
   !
   integer :: j
+  real(8) :: e_xc_hse
 
   select case(method_mixing)
   case ('simple')
@@ -141,10 +206,25 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
       call simple_mixing_potential(mg,system,1.d0-mixing%mixrate,mixing%mixrate,Vh,Vxc,mixing)
     end if
     
-    call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,Vlocal)
-    
+  end if
+
+  ! ===================================================================
+  ! HSE Hybrid Functional: Add exact exchange contribution via FFT
+  ! Reuses Hartree solver infrastructure for fast Coulomb convolution
+  ! ===================================================================
+  if(yn_hse=='y') then
+    call timer_begin(LOG_CALC_EXC_COR)
+    do j = 1, system%nspin
+      call calc_xc_hse_fft(rho_s(j)%f, Vxc(j)%f, e_xc_hse, &
+                           system, lg, mg, info, fg, poisson, &
+                           srg_scalar, stencil, hse_alpha)
+      energy%E_xc = energy%E_xc + e_xc_hse
+    end do
+    call timer_end(LOG_CALC_EXC_COR)
   end if
   
+  call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,Vlocal)
+
 end subroutine update_density_and_potential
 
 end module scf_iteration_sub

@@ -57,6 +57,7 @@ module salmon_global
   character(1)   :: yn_self_checkpoint
   integer        :: checkpoint_interval
   character(1)   :: yn_reset_step_restart
+  character(1)   :: yn_reset_occupation_restart
   character(256) :: read_gs_restart_data
   character(256) :: write_gs_restart_data
   real(8)        :: time_shutdown
@@ -125,6 +126,15 @@ module salmon_global
   character(64)  :: alibxc
   real(8)        :: cval
 
+  ! HSE hybrid functional parameters (Plan A: density matrix method)
+  character(1)   :: yn_hse                       ! Enable HSE functional (default: 'n')
+  real(8)        :: hse_alpha                    ! Exact exchange mixing coefficient (default: 0.25d0 for PBE0)
+  real(8)        :: hse_omega                    ! Screening parameter in a.u. (default: 0.11d0)
+  character(1)   :: yn_hse_ri                    ! Enable RI/DF approximation for HSE (Plan C, default: 'n')
+  real(8)        :: hse_ri_ratio                 ! N_aux/N_basis ratio for RI (default: 3.0d0)
+  character(1)   :: yn_hse_cd_ri                 ! Enable Cholesky Decomposition RI (default: 'n')
+  real(8)        :: hse_cd_ri_threshold          ! CD-RI threshold (default: 1.0d-8)
+
 !! &rgrid
   real(8)        :: dl(3)
   integer        :: num_rgrid(3)
@@ -145,12 +155,20 @@ module salmon_global
   character(16)  :: propagator
   character(1)   :: yn_fix_func
   character(1)   :: yn_predictor_corrector
+  character(1)   :: yn_dg_overlapping_wannier_rt
+  character(1)   :: yn_dg_overlapping_wannier_rt_restart
+  character(1)   :: yn_rt_dg_hybrid_continuation
+  character(1)   :: yn_dg_length_gauge
+  character(32)  :: dg_wannier_symmetry_gauge
+
+  ! Plane wave basis mixing for DG-Fragment RT
 
 !! &scf
   character(8)   :: method_init_wf
   integer        :: iseed_number_change
   character(8)   :: method_min
   integer        :: ncg,ncg_init
+  integer        :: nstate_freeze_gs
   character(16)  :: method_mixing
   real(8)        :: mixrate
   integer        :: nmemory_mb
@@ -206,6 +224,12 @@ module salmon_global
   character(1)   :: yn_put_wall_z_boundary
   real(8)        :: wall_height
   real(8)        :: wall_width
+  character(1)   :: yn_optical_vortex
+  integer        :: optical_vortex_charge
+  character(16)  :: optical_vortex_polarization
+  real(8)        :: optical_vortex_radius
+  real(8)        :: optical_vortex_center_x
+  real(8)        :: optical_vortex_center_y
 
 !! &multiscale
   character(16)  :: fdtddim
@@ -337,6 +361,12 @@ module salmon_global
   integer        :: out_estatic_rt_step
   character(1)   :: yn_out_rvf_rt
   integer        :: out_rvf_rt_step
+  character(1)   :: yn_out_lcm_rt
+  integer        :: out_lcm_rt_step
+  character(1)   :: yn_out_lz_rt
+  integer        :: out_lz_rt_step
+  integer        :: dg_hse_ace_max_age
+  real(8)        :: dg_hse_ace_coef_thresh
   character(1)   :: yn_out_tm
   character(1)   :: yn_out_tm_bin
   character(1)   :: yn_out_gs_sgm_eps
@@ -447,15 +477,102 @@ character(256),allocatable :: atom_name(:)
   character(256) :: file_atom_coor_frag
   real(8)        :: xi_dc
   character(1)   :: yn_dc_lcfo
+  character(1)   :: yn_dc_lcfo_flux
+  character(1)   :: yn_dc_lcfo_flux_weak_volume
   character(1)   :: yn_dc_lcfo_diag
   character(16)  :: lcfo_eigensolver
   integer        :: lcfo_diag_chefsi_filter_degree
   integer        :: lcfo_diag_chefsi_filter_chunk_size
   integer        :: lcfo_diag_chefsi_max_cycle
   real(8)        :: lcfo_diag_chefsi_residual_tolerance
+  character(1)   :: yn_dc_fragment_optimization
+  character(1)   :: yn_dc_lcfo_wannier
+  character(1)   :: yn_dc_lcfo_local_wannier
+  character(1)   :: yn_dc_lcfo_wannier_symmetry_gauge
+  character(1)   :: yn_dc_lcfo_wannier_pw
+  character(1)   :: yn_dc_lcfo_wannier_cluster
+  character(1)   :: yn_dc_lcfo_block_diag_h
+  character(1)   :: yn_dg_dc_overlapping_wannier
+  character(1)   :: yn_dg_hybrid_scf
+  character(1)   :: yn_dg_hybrid_continuation_scf
+  character(1)   :: yn_dg_hybrid_divided_scf
+  integer        :: dg_hybrid_fragment_cg_steps
+  character(16)  :: dg_hybrid_divided_mixing
+  real(8)        :: dg_hybrid_symmetry_energy_window
+  character(16)  :: dg_dc_seed_mode
+  character(256) :: dg_dc_seed_directory
+  character(16)  :: dg_fragment_wf_checkpoint_mode
+  character(256) :: dg_fragment_wf_checkpoint_directory
+  character(16)  :: dg_fragment_w90_initial_projection
+  integer        :: dg_dc_handoff_min_iter
+  real(8)        :: dg_dc_handoff_tolerance
+  integer        :: dg_dc_candidate_orbitals_per_atom
+  real(8)        :: dg_dc_metric_rank_tolerance
+  real(8)        :: dg_dc_gs_intermediate_orbital_tolerance
+  real(8)        :: dg_dc_gs_intermediate_density_tolerance
+  real(8)        :: dg_dc_gs_final_orbital_tolerance
+  real(8)        :: dg_dc_gs_final_density_tolerance
+  real(8)        :: dg_dc_gs_subspace_tolerance
+  real(8)        :: dg_dc_gs_initial_lambda_step
+  real(8)        :: dg_dc_gs_minimum_lambda_step
+  real(8)        :: dg_dc_gs_maximum_lambda_step
+  real(8)        :: dg_dc_gs_allowed_residual_growth
+  real(8)        :: dg_dc_gs_density_mix_rate
+  real(8)        :: dg_dc_gs_sipg_penalty_factor
+  real(8)        :: dg_dc_gs_target_lambda
+  real(8)        :: dg_dc_gs_hermiticity_tolerance
+  real(8)        :: dg_dc_gs_orthogonality_tolerance
+  real(8)        :: dg_dc_gs_face_balance_tolerance
+  real(8)        :: dg_ow_boundary_value_tolerance
+  real(8)        :: dg_ow_boundary_gradient_tolerance
+  real(8)        :: dg_ow_symmetry_tolerance
+  real(8)        :: dg_ow_localization_support_tolerance
+  real(8)        :: dg_ow_localization_spread_tolerance
+  real(8)        :: dg_ow_localization_gradient_tolerance
+  integer        :: dg_ow_localization_max_iterations
+  integer        :: dg_ow_candidate_states_per_fragment
+  integer        :: dg_ow_target_wanniers_per_fragment
+  character(16)  :: dg_ow_w90_initial_projection
+  real(8)        :: dg_dc_gs_electron_count_tolerance
+  real(8)        :: dg_dc_gs_minimum_projector_overlap
+  integer        :: dg_dc_gs_maximum_scf_iterations
+  integer        :: dg_dc_gs_maximum_eigensolver_iterations
+  integer        :: dg_dc_gs_maximum_rollbacks
+  character(256) :: wannier90_command
+  character(256) :: wannier_projection
   integer        :: nstate_frag
+  integer        :: lcfo_frag_cache_size
+  integer        :: wannier_num_wann
+  integer        :: wannier_num_bands
+  integer        :: wannier_num_iter
+  integer        :: num_wannier_cluster(3)
+  integer        :: wannier_cluster_size(3)
+  real(8)        :: wannier_projection_width
+  real(8)        :: wannier_amn_svd_tol
+  real(8)        :: wannier_amn_reject_tol
+  real(8)        :: wannier_dis_froz_max
+  real(8)        :: wannier_dis_win_max
+  real(8)        :: wannier_pw_cutoff
+  integer        :: wannier_pw_max
+  character(16)  :: wannier_site_symmetry
+  character(256) :: wannier_symmetry_file
+  real(8)        :: wannier_symmetry_tolerance
+  character(16)  :: wannier_sawf_generation
+  character(32)  :: wannier_sawf_global_reference_source
+  character(256) :: wannier_sawf_initial_wavefunction_directory
+  character(16)  :: wannier_sawf_symmetry_scope
+  character(16)  :: wannier_sawf_structure_class
+  character(256) :: wannier_sawf_parent_symmetry_file
+  character(256) :: wannier_sawf_cache_directory
+  integer        :: wannier_sawf_buffer_steps(3)
+  real(8)        :: wannier_sawf_gauge_tolerance
+  real(8)        :: wannier_sawf_buffer_tolerance
+  real(8)        :: wannier_sawf_hamiltonian_tolerance
+  real(8)        :: wannier_sawf_equivalence_tolerance
+  real(8)        :: wannier_sawf_vacuum_density_threshold
   real(8)        :: energy_cut
   real(8)        :: lambda_cut
+
 
   !! &unfolding
   character(256) :: dm_unfold_option

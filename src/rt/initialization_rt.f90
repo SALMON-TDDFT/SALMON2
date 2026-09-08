@@ -18,10 +18,11 @@
 module initialization_rt_sub
   use nvtx_wrapper
   implicit none
+  private::initialization_rt_common
 
 contains
 
-subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+subroutine initialization_rt_common( Mit, system, energy, ewald, rt, md, &
                      singlescale,  &
                      stencil, fg, poisson,  &
                      lg, mg, info,  &
@@ -36,6 +37,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
   use salmon_xc
+  use salmon_math, only: erfc_salmon
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
@@ -57,14 +59,14 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
-  use salmon_global, only: quiet
+  use salmon_global, only: quiet, yn_conventional_from_dcdft, yn_spinorbit, yn_jm
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
+  use lcfo_soi_init, only: init_conventional_from_dcdft_soi
   implicit none
   integer,parameter :: Nd = 4
-
   real(8)       :: debye2au   ! [D]  -> [a.u.]
 
   type(s_rgrid) :: lg
@@ -83,13 +85,14 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_scalar) :: Vpsl
   type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
   type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
-  type(s_orbital) :: spsi_in,spsi_out
-  type(s_orbital) :: tpsi ! temporary wavefunctions
+  type(s_orbital),optional :: spsi_in,spsi_out
+  type(s_orbital),optional :: tpsi ! temporary wavefunctions
   type(s_sendrecv_grid) :: srg,srg_scalar
   type(s_pp_info) :: pp
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
+  logical :: initialize_conventional_orbitals
   type(s_ofile) :: ofile
   type(s_unfold) :: unfold
   
@@ -105,6 +108,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   logical :: rion_update
 
   call nvtxStartRange('initialization_rt', __LINE__)
+  initialize_conventional_orbitals=present(spsi_in).and.present(spsi_out).and.present(tpsi)
+  curr_e_tmp(:, :) = 0.0d0
+  curr_i_tmp(:) = 0.0d0
 
   call timer_begin(LOG_INIT_RT)
 
@@ -222,9 +228,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     call make_rho_jm(lg,mg,info,system,rho_jm)
   end if
   
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
-  call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
-  call allocate_orbital_complex(system%nspin,mg,info,tpsi)
+  if(initialize_conventional_orbitals)then
+    call allocate_orbital_complex(system%nspin,mg,info,spsi_in)
+    call allocate_orbital_complex(system%nspin,mg,info,spsi_out)
+    call allocate_orbital_complex(system%nspin,mg,info,tpsi)
+  endif
   
   if(propagator=='aetrs')then
     allocate(rt%vloc_t(system%nspin),rt%vloc_new(system%nspin),rt%vloc_old(system%nspin,2))
@@ -241,25 +249,35 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   !$acc enter data copyin(mg)
   !$acc enter data copyin(stencil)
   !$acc enter data copyin(V_local)
-  !$acc enter data copyin(spsi_in,spsi_out,tpsi) 
+  if(initialize_conventional_orbitals)then
+    !$acc enter data copyin(spsi_in,spsi_out,tpsi)
+  endif
   !$acc enter data copyin(ppg)
   
-  call timer_begin(LOG_RESTART_SYNC)
-  call timer_begin(LOG_RESTART_SELF)
-  if(yn_conventional_from_dcdft=='n') then
-    call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
-  else
-  ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data
-    call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
-  end if
-  if(yn_reset_step_restart=='y' ) Mit=0
-  call timer_end(LOG_RESTART_SELF)
-  call comm_sync_all
-  call timer_end(LOG_RESTART_SYNC)
-  if(yn_restart=='n') Mit=0
+  if(initialize_conventional_orbitals)then
+    call timer_begin(LOG_RESTART_SYNC)
+    call timer_begin(LOG_RESTART_SELF)
+    if(yn_conventional_from_dcdft=='n') then
+      call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
+    else
+  ! conventional TDDFT wavefunctions are reconstructed from DC-LCFO data
+      if(yn_spinorbit=='y') then
+        call init_conventional_from_dcdft_soi(lg,mg,system,info,spsi_in)
+      else
+        call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
+      end if
+    end if
+    if(yn_reset_step_restart=='y' ) Mit=0
+    call timer_end(LOG_RESTART_SELF)
+    call comm_sync_all
+    call timer_end(LOG_RESTART_SYNC)
+    if(yn_restart=='n') Mit=0
 
-  if((gram_schmidt_interval == 0) ) then
-    call gram_schmidt(system, mg, info, spsi_in)
+    if(gram_schmidt_interval == 0) then
+      call gram_schmidt(system, mg, info, spsi_in)
+    end if
+  else
+    Mit=0
   end if
 
   if(yn_jm=='n') then
@@ -269,7 +287,21 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
       write(*, '(1x, a, es23.15e3)') "Maximal tau_NLCC=", maxval(ppn%tau_nlcc)
     end if
   end if
-  
+
+  if(.not.initialize_conventional_orbitals)then
+    do jspin=1,system%nspin
+      rho_s(jspin)%f=0d0
+      rt%rho0_s(jspin)%f=0d0
+      Vxc(jspin)%f=0d0
+      V_local(jspin)%f=0d0
+    enddo
+    rho%f=0d0;Vh%f=0d0;Vh_stock1%f=0d0;Vh_stock2%f=0d0
+    call nvtxEndRange
+    call timer_end(LOG_READ_GS_DATA)
+    call nvtxEndRange
+    return
+  endif
+
   call calc_density(system,rho_s,spsi_in,info,mg)
   rho%f = 0d0
   do jspin=1,system%nspin
@@ -331,7 +363,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call  init_nion_div(system,lg,mg,info)
   end select
   if(ewald%yn_bookkeep=='y') call init_ewald(system,info,ewald)
-  
+
   ! calculation of GS total energy
   call calc_eigen_energy(energy,spsi_in,spsi_out,tpsi,system,info,mg,V_local,stencil,srg,ppg)
   if(yn_jm=='n') then
@@ -558,6 +590,71 @@ subroutine init_code_optimization
   call nvtxEndRange
 end subroutine init_code_optimization
 
+
+end subroutine initialization_rt_common
+
+subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+                     singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
+                     srg, srg_scalar, spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s, &
+                     V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn, unfold )
+  use structures
+  implicit none
+  integer :: Mit
+  type(s_dft_system) :: system
+  type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
+  type(s_rt) :: rt
+  type(s_md) :: md
+  type(s_singlescale) :: singlescale
+  type(s_stencil) :: stencil
+  type(s_reciprocal_grid) :: fg
+  type(s_poisson) :: poisson
+  type(s_rgrid) :: lg,mg
+  type(s_parallel_info) :: info
+  type(s_xc_functional) :: xc_func
+  type(s_ofile) :: ofl
+  type(s_sendrecv_grid) :: srg,srg_scalar
+  type(s_orbital) :: spsi_in,spsi_out,tpsi
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
+  type(s_pp_nlcc) :: ppn
+  type(s_unfold) :: unfold
+  call initialization_rt_common(Mit,system,energy,ewald,rt,md,singlescale,stencil,fg,poisson,lg,mg,info,xc_func,ofl,&
+    srg,srg_scalar,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,pp,ppg,ppn,unfold)
 end subroutine initialization_rt
+
+subroutine initialization_rt_dg_hybrid( Mit, system, energy, ewald, rt, md, &
+                     singlescale, stencil, fg, poisson, lg, mg, info, xc_func, ofl, &
+                     srg, srg_scalar, rho, rho_jm, rho_s, &
+                     V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl, pp, ppg, ppn )
+  use structures
+  implicit none
+  integer :: Mit
+  type(s_dft_system) :: system
+  type(s_dft_energy) :: energy
+  type(s_ewald_ion_ion) :: ewald
+  type(s_rt) :: rt
+  type(s_md) :: md
+  type(s_singlescale) :: singlescale
+  type(s_stencil) :: stencil
+  type(s_reciprocal_grid) :: fg
+  type(s_poisson) :: poisson
+  type(s_rgrid) :: lg,mg
+  type(s_parallel_info) :: info
+  type(s_xc_functional) :: xc_func
+  type(s_ofile) :: ofl
+  type(s_sendrecv_grid) :: srg,srg_scalar
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_pp_info) :: pp
+  type(s_pp_grid) :: ppg
+  type(s_pp_nlcc) :: ppn
+  type(s_unfold) :: unfold
+  call initialization_rt_common(Mit,system,energy,ewald,rt,md,singlescale,stencil,fg,poisson,lg,mg,info,xc_func,ofl,&
+    srg,srg_scalar,rho=rho,rho_jm=rho_jm,rho_s=rho_s,V_local=V_local,Vbox=Vbox,Vh=Vh,Vh_stock1=Vh_stock1,&
+    Vh_stock2=Vh_stock2,Vxc=Vxc,Vpsl=Vpsl,pp=pp,ppg=ppg,ppn=ppn,unfold=unfold)
+end subroutine initialization_rt_dg_hybrid
 
 end module initialization_rt_sub

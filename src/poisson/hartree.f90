@@ -36,6 +36,7 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   use poisson_isolated
   use poisson_periodic
   use poisson_dirichlet, only: jones
+  use salmon_global, only: hse_omega
   use nvtx_wrapper
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg
@@ -48,6 +49,20 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   type(s_stencil)        ,intent(in)    :: stencil
   type(s_scalar)         ,intent(in)    :: rho
   type(s_scalar)         ,intent(inout) :: Vh
+  character(16) :: env_hse_sr
+  logical :: use_hse_sr_hartree
+  integer :: env_status
+
+  env_hse_sr = ''
+  use_hse_sr_hartree = .false.
+  call get_environment_variable('SALMON_HSE_SR_HARTREE', env_hse_sr, status=env_status)
+  if (env_status == 0) then
+    select case(trim(adjustl(env_hse_sr)))
+    case('1','y','Y','yes','YES','true','TRUE','on','ON')
+      use_hse_sr_hartree = .true.
+    end select
+  end if
+
   call nvtxStartRange('hartree', __LINE__)
   
   select case(iperiodic)
@@ -81,13 +96,25 @@ subroutine hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
 #endif
       select case(yn_ffte)
       case('n')
-        call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
+        if (use_hse_sr_hartree) then
+          call poisson_ft_hse_sr(lg,mg,info,fg,rho,Vh,poisson,hse_omega)
+        else
+          call poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
+        end if
       case('y')
-        call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+        if (use_hse_sr_hartree) then
+          call poisson_ffte_hse_sr(lg,mg,info,fg,rho,Vh,poisson,hse_omega)
+        else
+          call poisson_ffte(lg,mg,info,fg,rho,Vh,poisson)
+        end if
       end select
 #ifdef USE_FFTW
     case('y')
-      call poisson_fftw(lg,mg,info,fg,rho,Vh,poisson)
+      if (use_hse_sr_hartree) then
+        call poisson_fftw_hse_sr(lg,mg,info,fg,rho,Vh,poisson,hse_omega)
+      else
+        call poisson_fftw(lg,mg,info,fg,rho,Vh,poisson)
+      end if
     end select
 #endif
   end select

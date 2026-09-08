@@ -165,6 +165,10 @@ contains
     integer :: ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb
     integer :: ilma,ia,j,ix,iy,iz,Nlma,iproj
     complex(8) :: phipsi
+#ifdef SALMON_ENABLE_MPI3
+    integer, allocatable :: ireqs(:)
+    integer :: nreq,ierr,is,ie,ns,natom_local
+#endif
 
     call timer_begin(LOG_UHPSI_PSEUDO)
 
@@ -187,17 +191,17 @@ contains
     do ispin=1,Nspin
 
       do iproj=1,Nlma
-        ia = ppg%ia_tbl_ao(ilma)
+        ia = ppg%ia_tbl_ao(iproj)
         phipsi = zero
         do j=1,ppg%mps_ao(ia)
           ix = ppg%jxyz_ao(1,j,ia)
           iy = ppg%jxyz_ao(2,j,ia)
           iz = ppg%jxyz_ao(3,j,ia)
-          phipsi = phipsi + conjg( ppg%zekr_phi_ao(j,ilma,ik) ) &
+          phipsi = phipsi + conjg( ppg%zekr_phi_ao(j,iproj,ik) ) &
                           * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
-        phipsi = phipsi * ppg%rinv_uvu(ilma)
-        phipsibox(ispin,io,ik,im,ilma) = phipsi
+        phipsi = phipsi * ppg%rinv_uvu(iproj)
+        phipsibox(ispin,io,ik,im,iproj) = phipsi
       end do ! iproj
 
     end do
@@ -210,20 +214,25 @@ contains
     call timer_begin(LOG_UHPSI_PSEUDO_COMM)
 #ifdef SALMON_ENABLE_MPI3
 ! FIXME: This subroutine uses MPI functions directly...
+    natom_local = size(ppg%ireferred_atom)
+    allocate(ireqs(natom_local))
     nreq = 0
-    do ia=1,natom
+    do ia=1,natom_local
       if ( ppg%ireferred_atom(ia) ) then
         is = ppg%irange_atom(1,ia)
         ie = ppg%irange_atom(2,ia)
         ns = ie - is + 1
         nreq = nreq + 1
-        call MPI_Iallreduce( uvpsibox (Nspin,io_s,ik_s,im_s,is) &
-                           , uvpsibox2(Nspin,io_s,ik_s,im_s,is) &
+        call MPI_Iallreduce( phipsibox (1,io_s,ik_s,im_s,is) &
+                           , phipsibox2(1,io_s,ik_s,im_s,is) &
                            , ns*norb, MPI_DOUBLE_COMPLEX, MPI_SUM, ppg%icomm_atom(ia) &
                            , ireqs(nreq), ierr )
       end if
     end do
-    call comm_wait_all(ireqs(1:nreq))
+    if (nreq > 0) then
+      call comm_wait_all(ireqs(1:nreq))
+    end if
+    deallocate(ireqs)
 #else
     call comm_summation(phipsibox,phipsibox2,Nlma*Norb,info%icomm_r)
 #endif
