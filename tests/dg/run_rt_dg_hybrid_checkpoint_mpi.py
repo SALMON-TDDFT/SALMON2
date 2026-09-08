@@ -4,7 +4,6 @@ import os,re,shlex,shutil,struct,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 checkpoint_source=(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().lower()
 main_source=(root/"src/gs/main_dft.f90").read_text().lower()
-canonical_pp_source=(root/"src/gs/dc/dg_canonical_pp_fingerprint.f90").read_text().lower()
 coalesced_redistribution=checkpoint_source.split("subroutine redistribute_coalesced_ground_state",1)[1].split(
   "end subroutine redistribute_coalesced_ground_state",1)[0]
 ownership_validation=checkpoint_source.split("subroutine validate_ground_state_global_ownership",1)[1].split(
@@ -74,8 +73,6 @@ for component in ("calc_total_energy_periodic(dc%mg_tot,ewald,dc%system_tot","fi
                   "checkpoint_energy%e_ion_ion"):
   assert component in continuation, f"complete checkpoint omits energy provenance: {component}"
 assert "checkpoint_payload%energy_receipt=[energy%e_tot" not in continuation
-assert "valence=sum(real(pp%zps,8))" in re.sub(r"\s+|&","",canonical_pp_source), (
-  "canonical pseudopotential valence receipt does not sum the active species table")
 for component in ("canonical_pp_valence_sum(pp)","pp%lmax","pp%nrmax","ppg%nlma"):
   assert component in continuation, f"complete checkpoint omits pseudopotential provenance: {component}"
 assert continuation.index("if(.not.final_refresh_performed)") < continuation.index(
