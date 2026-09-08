@@ -37,6 +37,7 @@ contains
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid sparse Hybrid projection contract';return;endif
     call build_row_owners(comm,global_count,row_ids,owners,ok,ierr)
     if(ierr/=MPI_SUCCESS.or..not.ok)then;message='sparse projection rows do not have unique owners';return;endif
+    ok=.false.
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(active(global_count));local_values=(0d0,0d0)
     ! Bound the temporary projection map by one owner's rows.  Re-scanning the
@@ -59,7 +60,15 @@ contains
       enddo
       call route_contributions_to_single_owner(comm,global_count,destination,contributions,row_ids,row_offsets,&
         column_ids,local_values,ierr)
-      if(ierr/=MPI_SUCCESS)exit
+      if(ierr==-1)then
+        message='sparse projection contribution missing from structural CSR';return
+      endif
+      if(ierr==-2)then
+        message='sparse projection owner count exceeds MPI integer extent';return
+      endif
+      if(ierr/=MPI_SUCCESS)then
+        message='sparse projection exchange failed or contribution missing from structural CSR';return
+      endif
     enddo
     ok=ierr==MPI_SUCCESS
     if(ok)then;message='';else;message='sparse local-potential owner exchange failed';endif
@@ -77,11 +86,12 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::i,edge,row,nproc,p,destination,ierr,local_bad,global_bad,total_send,total_recv,location
+    integer::i,edge,row,nproc,p,destination,ierr,local_bad,global_bad,total_send,total_recv,location,send_bad,recv_bad
     integer,allocatable::owners(:),send_counts(:),recv_counts(:),send_displacements(:),recv_displacements(:),cursor(:)
     integer(int64),allocatable::send_keys(:),recv_keys(:)
     complex(real64),allocatable::send_values(:),recv_values(:)
     real(real64)::local_defect,global_defect,local_scale,global_scale
+    integer(int64)::total_send64,total_recv64
     ok=.false.;message='';local_bad=0
     if(size(row_offsets)/=size(row_ids)+1.or.size(column_ids)/=size(values))local_bad=1
     if(size(row_offsets)>0)then
@@ -98,12 +108,18 @@ contains
     send_counts=0
     do i=1,size(row_ids)
       do edge=row_offsets(i),row_offsets(i+1)-1
-        destination=owners(column_ids(edge));send_counts(destination)=send_counts(destination)+1
+        destination=owners(column_ids(edge))
+        if(send_counts(destination)==huge(0))then;local_bad=1;else;send_counts(destination)=send_counts(destination)+1;endif
       enddo
     enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='sparse Hermitian send count exceeds MPI integer extent';return;endif
     call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr);if(ierr/=MPI_SUCCESS)return
-    call make_displacements(send_counts,send_displacements,total_send)
-    call make_displacements(recv_counts,recv_displacements,total_recv)
+    call make_displacements(send_counts,send_displacements,total_send,total_send64,send_bad)
+    call make_displacements(recv_counts,recv_displacements,total_recv,total_recv64,recv_bad)
+    local_bad=max(send_bad,recv_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='sparse Hermitian displacement exceeds MPI integer extent';return;endif
     allocate(send_keys(total_send),recv_keys(total_recv),send_values(total_send),recv_values(total_recv));cursor=send_displacements
     do i=1,size(row_ids)
       row=int(row_ids(i))
@@ -223,19 +239,26 @@ contains
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(inout)::local_values(:)
     integer,intent(out)::ierr
-    integer::rank,nproc,sender,count,i,q,status(MPI_STATUS_SIZE)
+    integer::rank,nproc,sender,count,i,q,status(MPI_STATUS_SIZE),local_bad,global_bad,accumulate_ierr
     integer(int64),allocatable::keys(:),received_keys(:)
     complex(real64),allocatable::values(:),received_values(:)
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    if(map%count>int(huge(0),int64))then;ierr=1;return;endif
+    local_bad=merge(1,0,map%count>int(huge(0),int64))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(global_bad/=0)then;ierr=-2;return;endif
     allocate(keys(int(map%count)),values(int(map%count)));q=0
     do i=1,size(map%keys);if(map%keys(i)>0_int64)then;q=q+1;keys(q)=map%keys(i);values(q)=map%values(i);endif;enddo
     do sender=0,nproc-1
+      local_bad=0
       count=merge(size(keys),0,rank==sender)
       call MPI_Bcast(count,1,MPI_INTEGER,sender,comm,ierr);if(ierr/=MPI_SUCCESS)return
       if(sender==destination-1)then
-        if(rank==destination-1)call accumulate_owner_values(n,keys,values,row_ids,offsets,columns,local_values,ierr)
+        if(rank==destination-1)then
+          call accumulate_owner_values(n,keys,values,row_ids,offsets,columns,local_values,accumulate_ierr)
+          if(accumulate_ierr/=MPI_SUCCESS)local_bad=1
+        endif
       elseif(rank==sender)then
         call MPI_Send(keys,count,MPI_INTEGER8,destination-1,1800+sender,comm,ierr)
         if(ierr==MPI_SUCCESS)call MPI_Send(values,count,MPI_DOUBLE_COMPLEX,destination-1,1900+sender,comm,ierr)
@@ -243,11 +266,20 @@ contains
         allocate(received_keys(count),received_values(count))
         call MPI_Recv(received_keys,count,MPI_INTEGER8,sender,1800+sender,comm,status,ierr)
         if(ierr==MPI_SUCCESS)call MPI_Recv(received_values,count,MPI_DOUBLE_COMPLEX,sender,1900+sender,comm,status,ierr)
-        if(ierr==MPI_SUCCESS)call accumulate_owner_values(n,received_keys,received_values,row_ids,offsets,columns,&
-          local_values,ierr)
+        if(ierr==MPI_SUCCESS)then
+          call accumulate_owner_values(n,received_keys,received_values,row_ids,offsets,columns,local_values,&
+            accumulate_ierr)
+          if(accumulate_ierr/=MPI_SUCCESS)local_bad=1
+        endif
         deallocate(received_keys,received_values)
       endif
       if(ierr/=MPI_SUCCESS)return
+      ! A missing structural edge is detected only by the row owner.  Share it
+      ! before any rank enters the next sender broadcast, otherwise peers can
+      ! wait forever in a different collective.
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)return
+      if(global_bad/=0)then;ierr=-1;return;endif
     enddo
   end subroutine route_contributions_to_single_owner
   subroutine accumulate_owner_values(n,keys,values,row_ids,offsets,columns,local_values,ierr)
@@ -266,11 +298,19 @@ contains
       local_values(location)=local_values(location)+values(p)
     enddo
   end subroutine accumulate_owner_values
-  subroutine make_displacements(counts,displacements,total)
+  subroutine make_displacements(counts,displacements,total,total64,bad)
     integer,intent(in)::counts(:)
-    integer,intent(out)::displacements(:),total
+    integer,intent(out)::displacements(:),total,bad
+    integer(int64),intent(out)::total64
     integer::p
-    displacements(1)=0;do p=2,size(counts);displacements(p)=displacements(p-1)+counts(p-1);enddo;total=sum(counts)
+    integer(int64)::running
+    bad=0;running=0_int64
+    do p=1,size(counts)
+      if(running>int(huge(0),int64))then;bad=1;displacements(p)=0;else;displacements(p)=int(running);endif
+      running=running+int(counts(p),int64)
+    enddo
+    total64=running
+    if(running>int(huge(0),int64))then;bad=1;total=0;else;total=int(running);endif
   end subroutine make_displacements
   pure integer function find_row_position(rows,target) result(location)
     integer(int64),intent(in)::rows(:)

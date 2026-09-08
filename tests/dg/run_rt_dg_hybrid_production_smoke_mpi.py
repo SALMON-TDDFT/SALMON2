@@ -28,9 +28,11 @@ def require_localized_publisher(body: str) -> None:
         "terminal LCFO eigenvectors are not stored as initial localized-basis coefficients"
     assert "callproject_divided_v3_component" not in compact, \
         "formal publisher spectrally rotates the RT operator and destroys localized support"
-    assert "mpi_allreduce(ppg%nlma,global_projector_count" in compact and \
+    assert "global_projector_count=dc%ppg_tot%nlma" in compact and \
         "real(global_projector_count,8)" in compact, \
-        "formal v3 pseudopotential receipt stores a fragment-local projector count"
+        "formal v3 pseudopotential receipt does not use the authoritative full-system projector count"
+    assert "mpi_allreduce(ppg%nlma,global_projector_count" not in compact, \
+        "formal v3 pseudopotential receipt double-counts overlapping fragment-buffer projectors"
 
 
 require_localized_publisher(formal_publisher)
@@ -39,6 +41,7 @@ for old, replacement in (
     ("payload%rt_space%basis_values=basis_values", "payload%rt_space%basis_values=rt_basis_values"),
     ("payload%certified_basis%initial_occupied_amplitudes=full_coefficients(:,1:nocc)",
      "payload%certified_basis%initial_occupied_amplitudes=(0d0,0d0)"),
+    ("global_projector_count=dc%ppg_tot%Nlma", "global_projector_count=ppg%Nlma"),
 ):
     mutated = formal_publisher.replace(old, replacement, 1)
     assert mutated != formal_publisher, old
@@ -61,6 +64,11 @@ def require_hybrid_route_contract(source: str) -> None:
     assert "[HYBRID-RT-STEP] step=" in continuation and "path=PP+HARTREE+XC" in continuation
     assert "[HYBRID-RT-STATE]" in continuation
     assert "[HYBRID-RT-PROJECTION]" in continuation
+    assert "[HYBRID-RT-CHECKPOINT-STATIONARITY]" in continuation
+    assert "[HYBRID-RT-REFRESH-STATIONARITY]" in continuation
+    assert "establish_fixed_density_reference=.true." in continuation.lower()
+    density_update_source = (root / "src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
+    assert "new_h=new_h+state%hamiltonian_reference_correction" in density_update_source
     assert "call propagate_rt_dg_hybrid_length_gauge" in continuation
     for token in ("call hartree", "call exchange_correlation_density", "call update_vlocal"):
         assert token in projection.lower(), token
@@ -219,6 +227,10 @@ def h4_rt_input() -> str:
 """
 
 
+def h4_rt_zero_input() -> str:
+    return h4_rt_input().replace("ae_shape1='impulse'", "ae_shape1='none'").replace("e_impulse=1d-4", "e_impulse=0d0")
+
+
 require_hybrid_route_contract(main_source)
 divided_route = main_dft_source.split("subroutine run_dg_hybrid_divided_ground_state_for_main", 1)[1].split(
     "end subroutine run_dg_hybrid_divided_ground_state_for_main", 1
@@ -234,6 +246,9 @@ for old, replacement in (
     ("[HYBRID-RT-ROUTE]", "[REMOVED-HYBRID-RT-ROUTE]"),
     ("[HYBRID-RT-STEP]", "[REMOVED-HYBRID-RT-STEP]"),
     ("potential=PP+HARTREE+XC", "potential=CONVENTIONAL"),
+    ("[HYBRID-RT-CHECKPOINT-STATIONARITY]", "[REMOVED-CHECKPOINT-STATIONARITY]"),
+    ("[HYBRID-RT-REFRESH-STATIONARITY]", "[REMOVED-REFRESH-STATIONARITY]"),
+    ("establish_fixed_density_reference=.true.", "establish_fixed_density_reference=.false."),
 ):
     mutated = main_source.replace(old, replacement)
     try:
@@ -275,11 +290,15 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         assert receipt in gs.stdout, receipt
     handoff = re.findall(
         r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo construction_rank=(\d+) solved_rank=(\d+) "
-        r"certified_rank=(\d+) rt_rank=(\d+) occupied_rank=(\d+).*writer_count=(\d+)", gs.stdout,
+        r"certified_rank=(\d+) rt_rank=(\d+) occupied_rank=(\d+) projector_count=(\d+).*writer_count=(\d+)", gs.stdout,
     )
     assert len(handoff) == 1, gs.stdout
-    construction, solved, certified, rt_rank, occupied, writer_count = map(int, handoff[0])
+    construction, solved, certified, rt_rank, occupied, projector_count, writer_count = map(int, handoff[0])
     assert construction == solved == rt_rank and construction > certified >= occupied > 0 and writer_count == 1
+    assert projector_count == 12, (
+        "two-fragment overlapping buffers did not retain the 12-projector full H4 system identity",
+        projector_count,
+    )
     checkpoint = work / "hybrid_dg_ground_state.chk"
     assert checkpoint.is_file() and checkpoint.stat().st_size > 1024, (
         "formal divided terminal LCFO did not publish its v3 Hybrid GS checkpoint",
@@ -323,11 +342,38 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     assert all(float(step[1]) > 0.0 and float(step[4]) > 0.0 for step in steps)
     assert "[DG-OW-RT]" not in rt.stdout
     assert "production DG requires a build with MPI and ScaLAPACK support" not in rt.stdout + rt.stderr
+
+    zero = subprocess.run(
+        [mpiexec, "-n", "2", str(salmon)], input=h4_rt_zero_input(), cwd=work, env=env,
+        capture_output=True, text=True, timeout=180,
+    )
+    assert zero.returncode == 0, (zero.stdout, zero.stderr)
+    checkpoint_stationarity = re.search(
+        r"\[HYBRID-RT-CHECKPOINT-STATIONARITY\]\s+orbital_residual=\s*(\S+)\s+metric_defect=\s*(\S+)",
+        zero.stdout,
+    )
+    assert checkpoint_stationarity, zero.stdout
+    assert all(float(value) <= 1e-4 for value in checkpoint_stationarity.groups()), checkpoint_stationarity.groups()
+    refresh_stationarity = re.search(
+        r"\[HYBRID-RT-REFRESH-STATIONARITY\]\s+h_residual=\s*(\S+)\s+hamiltonian_delta=\s*(\S+)",
+        zero.stdout,
+    )
+    assert refresh_stationarity, zero.stdout
+    assert float(refresh_stationarity.group(1)) <= 1e-4, refresh_stationarity.groups()
+    zero_steps = re.findall(
+        r"\[HYBRID-RT-STATIONARITY\] step=(\d+) density=\s*(\S+) energy=\s*(\S+) "
+        r"projector=\s*(\S+) electron=\s*(\S+) h_residual=\s*(\S+) current_bound=\s*(\S+)", zero.stdout,
+    )
+    assert [int(step[0]) for step in zero_steps] == [1, 2], zero.stdout
+    assert all(math.isfinite(float(value)) and float(value) <= 1e-4 for step in zero_steps for value in step[1:])
     checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     print(f"producer_binary_sha256={binary_hash}")
     print(f"checkpoint_sha256={checkpoint_hash}")
     for line in rt.stdout.splitlines():
         if line.startswith("[HYBRID-RT-"):
             print(f"ranks=2 {line}")
+    for line in zero.stdout.splitlines():
+        if line.startswith("[HYBRID-RT-STATIONARITY]") or line.startswith("[HYBRID-RT-REFRESH-STATIONARITY]"):
+            print(f"ranks=2 zero-field {line}")
 
 print("PASS actual production divided-Hybrid H4 GS-to-Exp-RT smoke on 2 ranks")

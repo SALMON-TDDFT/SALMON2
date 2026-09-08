@@ -77,20 +77,23 @@ contains
 #endif
   end subroutine reconstruct_rt_dg_hybrid_density
 
-  subroutine update_rt_dg_hybrid_density(comm,state,density,project_local,ok,message)
+  subroutine update_rt_dg_hybrid_density(comm,state,density,project_local,ok,message,establish_fixed_density_reference)
     integer,intent(in)::comm
     type(s_rt_dg_hybrid_state),intent(inout)::state
     real(real64),intent(in)::density(:)
     procedure(project_rt_density)::project_local
+    logical,intent(in),optional::establish_fixed_density_reference
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
     complex(real64),allocatable::new_local(:),new_h(:)
     integer::i,j,edge,ierr,local_bad,global_bad
     integer(int64)::local_hash,global_xor,global_sum,bits,pair_hash
-    logical::callback_ok
+    logical::callback_ok,establish_reference
     character(256)::callback_message
-    ok=.false.;message='';local_bad=0
+    ok=.false.;message='';local_bad=0;establish_reference=.false.
+    if(present(establish_fixed_density_reference))establish_reference=establish_fixed_density_reference
+    if(establish_reference.and.state%fixed_density_reference_valid)local_bad=1
     if(.not.state%density_freshly_reconstructed)then
       call validate_certified_rt_state(comm,state,ok,message);if(.not.ok)return
     endif
@@ -115,6 +118,26 @@ contains
         new_h(edge)=state%kinetic_rows(i,j)+state%nonlocal_rows(i,j)+new_local(edge)+state%sipg_rows(i,j)
       enddo
     enddo
+    if(establish_reference)then
+      allocate(state%local_reference_correction(size(new_local)),&
+        state%hamiltonian_reference_correction(size(new_h)))
+      state%local_reference_correction=state%local_rows-new_local
+      state%hamiltonian_reference_correction=state%operators%hamiltonian_values-new_h
+      state%reference_refresh_defect=0d0;state%reference_refresh_scale=1d0
+      if(size(new_h)>0)then
+        state%reference_refresh_defect=maxval(abs(state%hamiltonian_reference_correction))
+        state%reference_refresh_scale=max(1d0,maxval(abs(state%operators%hamiltonian_values)))
+      endif
+      state%fixed_density_reference_valid=.true.
+    endif
+    if(state%fixed_density_reference_valid)then
+      if(size(state%local_reference_correction)/=size(new_local).or.&
+          size(state%hamiltonian_reference_correction)/=size(new_h))then
+        message='invalid hybrid RT fixed-density reference correction';return
+      endif
+      new_local=new_local+state%local_reference_correction
+      new_h=new_h+state%hamiltonian_reference_correction
+    endif
     local_bad=merge(0,1,all(ieee_is_finite(real(new_h))).and.all(ieee_is_finite(aimag(new_h))))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonfinite hybrid RT updated Hamiltonian';return;endif

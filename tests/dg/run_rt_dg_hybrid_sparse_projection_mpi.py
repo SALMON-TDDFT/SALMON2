@@ -10,18 +10,29 @@ assert graph_source.exists(),"RED: missing exact structural Hybrid operator grap
 assert projection_source.exists(),"RED: missing testable production sparse projection kernel"
 projection_text=projection_source.read_text()
 graph_text=graph_source.read_text()
+fixture_text=(root/"tests/dg/test_rt_dg_hybrid_sparse_projection_mpi.f90").read_text()
 for label,text in (("graph",graph_text),("projection",projection_text)):
   assert "MPI_Allgatherv" not in text, f"RED: {label} replicates the global sparse edge catalog"
 assert "operator_raw_count=nactive*(nactive+1)/2" not in graph_text.replace(" ",""), \
   "RED: structural graph accumulates point-by-point duplicate pairs before unique"
 assert "peak_workspace_keys" in graph_text and "integer(int64)" in graph_text, \
   "RED: structural graph has no auditable int64 bounded-workspace receipt"
+assert "make_checked_displacements" in graph_text and "integer(int64)::running" in graph_text, \
+  "RED: structural graph cumulative MPI extents are not checked in int64"
+assert "make_displacements" in projection_text and "integer(int64)::running" in projection_text, \
+  "RED: sparse projection cumulative MPI extents are not checked in int64"
 assert "partial_values(global_edge_count)" not in projection_text.replace(" ",""), \
   "RED: sparse projection allocates a global-edge-sized replicated buffer"
 partner_scan="do edge=1,total" in projection_text and "do i=1,total" in projection_text
 assert not partner_scan,"RED: Hermitian partner validation still performs O(nnz^2) global edge scans"
 assert "MPI_Alltoallv" in graph_text and "MPI_Alltoallv" in projection_text, \
   "RED: sparse support/projection is not routed directly to row owners"
+assert "fragment*nproc/8" in fixture_text and "nproc==8" in fixture_text and "nowned==50" in fixture_text, \
+  "RED: scaling fixture does not model one 50-basis fragment per rank at eight ranks"
+assert "call project_rt_dg_hybrid_sparse_edges(comm,n,rows" in fixture_text, \
+  "RED: production sparse projection is not exercised by the 400-basis scaling fixture"
+assert "if(global_bad/=0)then;ierr=-1;return;endif" in projection_text, \
+  "RED: owner-only missing-edge failures are not propagated collectively"
 
 if os.environ.get("SALMON_LAPACK_LIBS"):
   libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
@@ -35,7 +46,7 @@ def compile_and_run(build,projection,label,expect_success,graph=graph_source):
     str(graph),str(projection),str(root/"tests/dg/test_rt_dg_hybrid_sparse_projection_mpi.f90"),
     *libs,"-o",str(exe)],check=True,capture_output=True,text=True)
   mutation_detected=False
-  for nrank in (1,2,4):
+  for nrank in (1,2,4,8):
     run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],capture_output=True,text=True,
       env={**os.environ,"OMP_NUM_THREADS":"1","OMPI_MCA_rmaps_base_oversubscribe":"1"},timeout=45)
     if expect_success:
@@ -54,9 +65,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
     "counts":("count=merge(size(keys),0,rank==sender)", "count=0"),
     "order":("call MPI_Send(keys,count,MPI_INTEGER8,destination-1,1800+sender,comm,ierr)",
       "call MPI_Send(keys(size(keys):1:-1),count,MPI_INTEGER8,destination-1,1800+sender,comm,ierr)"),
-    "displacements":("displacements(p)=displacements(p-1)+counts(p-1)", "displacements(p)=0"),
+    "displacements":("running=running+int(counts(p),int64)", "running=0_int64"),
     "permutation":("call MPI_Send(values,count,MPI_DOUBLE_COMPLEX,destination-1,1900+sender,comm,ierr)",
       "call MPI_Send(-values,count,MPI_DOUBLE_COMPLEX,destination-1,1900+sender,comm,ierr)"),
+    "missing-collective":("if(global_bad/=0)then;ierr=-1;return;endif",
+      "if(.false.)then;ierr=-1;return;endif"),
+    "stale-success":("if(ierr/=MPI_SUCCESS.or..not.ok)then;message='sparse projection rows do not have unique owners';return;endif\n    ok=.false.",
+      "if(ierr/=MPI_SUCCESS.or..not.ok)then;message='sparse projection rows do not have unique owners';return;endif\n    ok=.true."),
   }
   for label,(old,new) in mutations.items():
     assert source.count(old)==1,(label,source.count(old));mutated=build/f"projection-{label}.f90"
@@ -68,4 +83,4 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
   mutated_graph.write_text(graph_text.replace(dedup_old,dedup_new,1))
   compile_and_run(build,projection_source,"duplicate-accumulation",False,mutated_graph)
 
-print("PASS structural/support and production sparse projection on 1, 2, and 4 ranks; mutations rejected")
+print("PASS structural/support and production sparse projection on 1, 2, 4, and 8 ranks; mutations rejected")

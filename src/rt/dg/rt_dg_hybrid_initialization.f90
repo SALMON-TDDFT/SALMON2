@@ -20,8 +20,11 @@ module rt_dg_hybrid_initialization
   integer(int64),parameter::cell_wrapped_position_convention_fingerprint=&
     int(z'43454C4C57524150',int64)
   type,public::s_rt_dg_hybrid_state
-    logical::valid=.false.,initial_invariants_valid=.false.,density_freshly_reconstructed=.false.
-    real(real64)::startup_operator_covariance=huge(1d0),startup_projector_covariance=huge(1d0)
+    logical::valid=.false.,initial_invariants_valid=.false.,density_freshly_reconstructed=.false.,&
+      fixed_density_reference_valid=.false.
+    real(real64)::startup_operator_covariance=huge(1d0),startup_projector_covariance=huge(1d0),&
+      startup_orbital_residual=huge(1d0),startup_metric_defect=huge(1d0)
+    real(real64)::reference_refresh_defect=0d0,reference_refresh_scale=1d0
     integer::certified_rank=0,global_count=0,noccupied=0,operation_count=0,&
       nonidentity_operation_count=0
     integer(int64)::payload_fingerprint=0_int64,operator_structure_fingerprint=0_int64,&
@@ -30,7 +33,8 @@ module rt_dg_hybrid_initialization
     type(s_dg_hybrid_sparse_operators)::operators
     integer(int64),allocatable::owned_row_ids(:),grid_ids(:)
     complex(real64),allocatable::coefficients(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),&
-      local_rows(:),sipg_rows(:,:),basis_values(:,:)
+      local_rows(:),sipg_rows(:,:),basis_values(:,:),local_reference_correction(:),&
+      hamiltonian_reference_correction(:)
     real(real64),allocatable::density(:),grid_weights(:),occupations(:),eigenvalues(:),energy_receipt(:)
   end type s_rt_dg_hybrid_state
   type,public::s_rt_dg_hybrid_v3_startup_receipt
@@ -102,6 +106,8 @@ contains
     state%payload_fingerprint=payload_fingerprint
     state%startup_operator_covariance=receipt%fixed_operator_covariance_defect
     state%startup_projector_covariance=receipt%projector_defect
+    state%startup_orbital_residual=receipt%orbital_residual
+    state%startup_metric_defect=receipt%metric_defect
     state%initial_invariants_valid=.true.;state%valid=.true.;ok=.true.;message=''
 #else
     ok=.false.;message='hybrid RT initialization requires MPI'

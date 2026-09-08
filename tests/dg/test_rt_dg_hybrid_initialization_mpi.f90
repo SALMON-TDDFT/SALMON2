@@ -23,6 +23,7 @@ program test_rt_dg_hybrid_initialization_mpi
   type(s_rt_dg_hybrid_state)::state
   logical::force_callback_failure=.false.
   real(real64)::reference_density_total=0d0
+  real(real64)::reference_shift=0d0
   complex(real64)::sparse_local_reference(3,3)=(0d0,0d0)
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
@@ -253,10 +254,15 @@ contains
     value_before=state%operator_value_fingerprint
     allocate(hamiltonian_before,source=state%operators%hamiltonian_values)
     allocate(density_for_update,source=state%density)
-    call update_rt_dg_hybrid_density(comm,state,density_for_update,project_density_local,ok,message)
+    reference_shift=0.25d0
+    call update_rt_dg_hybrid_density(comm,state,density_for_update,project_density_local,ok,message,&
+      establish_fixed_density_reference=.true.)
     call require(ok,'certified RT local-potential update failed: '//trim(message))
     call require(all(state%operators%hamiltonian_values==hamiltonian_before),&
-      'stored certified density did not reproduce exact H_rt(0)')
+      'fixed-density reference did not preserve exact checkpoint H_rt(0)')
+    call require(state%fixed_density_reference_valid,'fixed-density reference was not established on every rank')
+    call require(any_rank([state%reference_refresh_defect>0d0]),&
+      'material t=0 potential refresh did not establish a measured reference correction')
     state%density=state%density+0.125d0
     density_for_update=state%density
     call update_rt_dg_hybrid_density(comm,state,density_for_update,project_density_local,ok,message)
@@ -888,7 +894,7 @@ contains
       do edge=row_offsets(q),row_offsets(q+1)-1
         local_values(edge)=payload%rt_space%local_rows(row_position,column_ids(edge))
         if(column_ids(edge)==int(row_ids(q)))local_values(edge)=local_values(edge)+&
-          cmplx(global_sum-reference_density_total,0d0,real64)
+          cmplx(global_sum-reference_density_total+reference_shift,0d0,real64)
       enddo
     enddo
   end subroutine project_density_local

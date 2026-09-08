@@ -14,31 +14,53 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   call exercise_structural_graph
   call exercise_repeated_support_scaling
   call exercise_sparse_projection
+  call exercise_missing_edge_collective_failure
   if(rank==0)write(*,'(a,i0,a)')'PASS structural Hybrid sparse projection on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
   subroutine exercise_repeated_support_scaling
     integer,parameter::n=400,np_global=16000
-    integer::nowned,npoint,row,point,i,j,slot,fragment,first,local_nnz
+    integer::nowned,npoint,row,point,i,j,k,slot,fragment,first,nactive,owner,local_nnz,min_nnz,max_nnz,edge
     integer(int64)::local_unique,peak_workspace,global_unique,global_peak
-    integer(int64),allocatable::rows(:)
+    integer(int64),allocatable::rows(:),grid_ids(:)
     integer,allocatable::mo(:),mc(:),oo(:),oc(:)
-    complex(real64),allocatable::basis(:,:),metric(:,:),zero2(:,:),position(:,:,:)
-    logical::scale_ok
-    nowned=count([(mod(row-1,nproc)==rank,row=1,n)])
-    npoint=count([(mod(point-1,nproc)==rank,point=1,np_global)])
-    allocate(rows(nowned),basis(n,npoint),metric(nowned,n),zero2(nowned,n),position(3,nowned,n))
+    real(real64),allocatable::weights(:),potential(:)
+    complex(real64),allocatable::basis(:,:),metric(:,:),zero2(:,:),position(:,:,:),actual(:),dense_local(:,:),dense(:,:)
+    logical::scale_ok,projection_ok,large_values_ok,zero_row_ok
+    nowned=0
+    do row=1,n
+      fragment=(row-1)/50;owner=min(nproc-1,fragment*nproc/8)
+      if(owner==rank)nowned=nowned+1
+    enddo
+    npoint=0
+    do point=1,np_global
+      fragment=mod(point-1,8);owner=min(nproc-1,fragment*nproc/8)
+      if(owner==rank)npoint=npoint+1
+    enddo
+    allocate(rows(nowned),grid_ids(npoint),weights(npoint),potential(npoint),basis(n,npoint),metric(nowned,n),&
+      zero2(nowned,n),position(3,nowned,n))
     i=0
     do row=1,n
-      if(mod(row-1,nproc)==rank)then;i=i+1;rows(i)=row;endif
+      fragment=(row-1)/50;owner=min(nproc-1,fragment*nproc/8)
+      if(owner==rank)then;i=i+1;rows(i)=row;endif
     enddo
+    if(nproc==8)then
+      call require(nowned==50,'eight-rank scaling does not own one 50-basis fragment per rank')
+      call require(all(rows==[(int(rank*50+i,int64),i=1,50)]),'eight-rank fragment rows are not contiguous')
+    endif
     basis=(0d0,0d0);metric=(0d0,0d0);zero2=(0d0,0d0);position=(0d0,0d0)
     do i=1,nowned;metric(i,int(rows(i)))=(1d0,0d0);enddo
     slot=0
     do point=1,np_global
-      if(mod(point-1,nproc)/=rank)cycle
-      slot=slot+1;fragment=mod(point-1,8);first=fragment*50+mod((point-1)/8,46)+1
-      do j=first,first+3;basis(j,slot)=cmplx(1d0+0.01d0*j,0.02d0*j,real64);enddo
+      fragment=mod(point-1,8);owner=min(nproc-1,fragment*nproc/8)
+      if(owner/=rank)cycle
+      slot=slot+1;grid_ids(slot)=point;weights(slot)=0.25d0+1d-5*point
+      potential(slot)=(-1d0)**point*(0.4d0+2d-5*point)
+      first=fragment*50+mod((point-1)/8,46)+1
+      nactive=merge(1,4,fragment==7)
+      do j=first,first+nactive-1
+        basis(j,slot)=cmplx(1d0+0.01d0*j+1d-6*point,0.02d0*j-2d-6*point,real64)
+      enddo
     enddo
     call build_rt_dg_hybrid_structural_graph(comm,n,rows,basis,metric,zero2,zero2,zero2,zero2,zero2,position,&
       mo,mc,oo,oc,scale_ok,message,local_unique_candidates=local_unique,peak_workspace_keys=peak_workspace)
@@ -50,6 +72,38 @@ contains
     call require(global_peak<50000_int64,'structural graph workspace is not bounded by unique sparse support')
     call require(int(local_nnz,int64)<=global_unique+int(n,int64),&
       'owner-local CSR exceeds point support plus metric diagonal')
+    call MPI_Allreduce(local_nnz,min_nnz,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(local_nnz,max_nnz,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(nproc==8)call require(min_nnz<max_nnz,'unequal fragment sparsity was not exercised')
+
+    allocate(actual(size(oc)),dense_local(n,n),dense(n,n));dense_local=(0d0,0d0)
+    do slot=1,npoint
+      do j=1,n
+        if(basis(j,slot)==(0d0,0d0))cycle
+        do k=1,n
+          if(basis(k,slot)==(0d0,0d0))cycle
+          dense_local(j,k)=dense_local(j,k)+weights(slot)*potential(slot)*conjg(basis(j,slot))*basis(k,slot)
+        enddo
+      enddo
+    enddo
+    call MPI_Allreduce(dense_local,dense,n*n,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+    call project_rt_dg_hybrid_sparse_edges(comm,n,rows,oo,oc,grid_ids,weights,basis,potential,actual,&
+      projection_ok,message)
+    call require(projection_ok,'large owner-local sparse projection failed: '//trim(message))
+    large_values_ok=.true.
+    do i=1,nowned
+      row=int(rows(i))
+      do edge=oo(i),oo(i+1)-1
+        large_values_ok=large_values_ok.and.abs(actual(edge)-dense(row,oc(edge)))<1d-11
+      enddo
+    enddo
+    call require(large_values_ok,'large sparse projection differs from dense oracle')
+    zero_row_ok=.true.
+    if(any(rows==400_int64))then
+      i=0;do j=1,nowned;if(rows(j)==400_int64)i=j;enddo
+      zero_row_ok=all(abs(actual(oo(i):oo(i+1)-1))<1d-15)
+    endif
+    call require(zero_row_ok,'zero-support basis row projected a nonzero value')
   end subroutine exercise_repeated_support_scaling
 
   subroutine exercise_structural_graph
@@ -191,6 +245,33 @@ contains
     if(nproc==4)call require(any_rank(nowned==0),'four-rank projection did not exercise a zero-owned rank')
     call require(any_rank(any(row_ids==3_int64)),'zero-degree operator row was not owned')
   end subroutine exercise_sparse_projection
+
+  subroutine exercise_missing_edge_collective_failure
+    integer,parameter::r=2,g=1
+    integer::row,i,nowned,npoint
+    integer(int64),allocatable::row_ids(:),grid_ids(:)
+    integer,allocatable::offsets(:),columns(:)
+    real(real64),allocatable::weights(:),potential(:)
+    complex(real64),allocatable::basis(:,:),actual(:)
+    logical::missing_ok
+    nowned=count([(mod(row-1,nproc)==rank,row=1,r)])
+    npoint=merge(1,0,rank==0)
+    allocate(row_ids(nowned),offsets(nowned+1),columns(nowned),grid_ids(npoint),weights(npoint),&
+      potential(npoint),basis(r,npoint),actual(nowned))
+    i=0;offsets(1)=1
+    do row=1,r
+      if(mod(row-1,nproc)/=rank)cycle
+      i=i+1;row_ids(i)=row;columns(i)=row;offsets(i+1)=i+1
+    enddo
+    if(npoint==1)then
+      grid_ids(1)=1_int64;weights(1)=1d0;potential(1)=2d0
+      basis(:,1)=[(1d0,0d0),(0.5d0,0.25d0)]
+    endif
+    call project_rt_dg_hybrid_sparse_edges(comm,r,row_ids,offsets,columns,grid_ids,weights,basis,potential,&
+      actual,missing_ok,message)
+    call require(.not.missing_ok,'projection accepted contributions missing from structural CSR')
+    call require(index(message,'missing')>0,'missing-edge collective failure has no named diagnostic')
+  end subroutine exercise_missing_edge_collective_failure
 
   integer function find_edge(offsets,columns,row_position,column) result(position)
     integer,intent(in)::offsets(:),columns(:),row_position,column

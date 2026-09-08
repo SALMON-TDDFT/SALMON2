@@ -306,6 +306,9 @@ subroutine run_dg_hybrid_continuation_rt()
     dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance],hybrid_state,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initialization failed';endif
   if(nproc_id_global==0)write(*,'(a)')'[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC'
+  if(nproc_id_global==0)write(*,'(a,2(a,es16.8))')'[HYBRID-RT-CHECKPOINT-STATIONARITY]',&
+    ' orbital_residual=',hybrid_state%startup_orbital_residual,&
+    ' metric_defect=',hybrid_state%startup_metric_defect
   local_state_norms=[sum(abs(hybrid_state%basis_values)**2),sum(hybrid_state%density**2),&
     sum(abs(hybrid_state%operators%hamiltonian_values)**2),sum(abs(hybrid_state%kinetic_rows)**2),&
     sum(abs(hybrid_state%nonlocal_rows)**2),sum(abs(hybrid_state%local_rows)**2),&
@@ -330,16 +333,14 @@ subroutine run_dg_hybrid_continuation_rt()
   if(.not.ok)error stop 'hybrid DG RT initial density reconstruction failed'
   density_for_update=hybrid_state%density
   call update_rt_dg_hybrid_density(nproc_group_global,hybrid_state,density_for_update,&
-    project_salmon_local_rows,ok,message)
+    project_salmon_local_rows,ok,message,establish_fixed_density_reference=.true.)
   update_count=update_count+1
   local_bad=merge(0,1,ok);local_defect=huge(1d0);local_scale=1d0
   global_bad=1;global_defect=huge(1d0);global_scale=1d0
   if(ok)then
     local_defect=0d0;local_scale=1d0
-    if(size(initial_hamiltonian)>0)then
-      local_defect=maxval(abs(hybrid_state%operators%hamiltonian_values-initial_hamiltonian))
-      local_scale=max(1d0,maxval(abs(initial_hamiltonian)))
-    endif
+    local_defect=hybrid_state%reference_refresh_defect
+    local_scale=hybrid_state%reference_refresh_scale
   endif
   call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,nproc_group_global,ierr)
   if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_defect,global_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
@@ -367,6 +368,8 @@ subroutine run_dg_hybrid_continuation_rt()
   call evaluate_hybrid_rt_physical_invariants(current_total_energy,current_electron_count,&
     current_hamiltonian_residual,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initial physical invariants failed';endif
+  if(nproc_id_global==0)write(*,'(a,2(a,es16.8))')'[HYBRID-RT-REFRESH-STATIONARITY]',&
+    ' h_residual=',current_hamiltonian_residual,' hamiltonian_delta=',global_defect/global_scale
   if(.not.allocated(hybrid_state%energy_receipt))error stop 'hybrid DG RT physical energy receipt is absent'
   coefficient_rows_local=size(hybrid_state%coefficients,1)
   call MPI_Allreduce(coefficient_rows_local,coefficient_rows_global,1,MPI_INTEGER,MPI_SUM,&
@@ -445,10 +448,11 @@ subroutine run_dg_hybrid_continuation_rt()
         apply_hybrid_metric_to_coefficients(),current_electron_count,current_hamiltonian_residual,&
         stationarity_tolerances,stationarity_receipt,ok,message)
       if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT zero-field stationarity failed';endif
-      if(nproc_id_global==0)write(*,'(a,i0,5(a,es16.8))')'[HYBRID-RT-STATIONARITY] step=',step,&
+      if(nproc_id_global==0)write(*,'(a,i0,6(a,es16.8))')'[HYBRID-RT-STATIONARITY] step=',step,&
         ' density=',stationarity_receipt%density_drift,' energy=',stationarity_receipt%energy_drift,&
         ' projector=',stationarity_receipt%projector_drift,' electron=',stationarity_receipt%electron_drift,&
-        ' h_residual=',stationarity_receipt%hamiltonian_residual
+        ' h_residual=',stationarity_receipt%hamiltonian_residual,&
+        ' current_bound=',stationarity_receipt%projector_drift/max(dt,tiny(1d0))
     endif
   enddo
   if(update_count/=nt+1)error stop 'hybrid DG RT density update schedule violated'

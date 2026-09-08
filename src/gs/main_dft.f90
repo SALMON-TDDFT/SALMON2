@@ -2089,8 +2089,9 @@ contains
     payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
     allocate(payload%continuation_receipt(8));payload%continuation_receipt=[1d0,stationarity_defect,&
       metric_defect,projector_defect,electron_defect,electron_count,real(n,8),real(certified_rank,8)]
-    call MPI_Allreduce(ppg%Nlma,global_projector_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='v3 global projector-count reduction failed';return;endif
+    ! Fragment pseudopotential grids include buffer atoms (and periodic images),
+    ! so summing their projector counts would double-count the physical system.
+    global_projector_count=dc%ppg_tot%Nlma
     allocate(payload%pseudopotential_receipt(6));payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),&
       canonical_pp_valence_sum(pp),real(pp%lmax,8),real(pp%nrmax,8),real(global_projector_count,8),&
       real(n,8)*real(n,8)]
@@ -2227,8 +2228,9 @@ contains
     call write_rt_dg_hybrid_ground_state_checkpoint(dc%icomm_tot,'./hybrid_dg_ground_state.chk',payload,&
       fingerprint,local_ok,local_message)
     if(.not.local_ok)then;message='v3 write failed: '//trim(local_message);return;endif
-    if(rank==0)write(*,'(a,5(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo',&
+    if(rank==0)write(*,'(a,6(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo',&
       ' construction_rank=',n,' solved_rank=',n,' certified_rank=',certified_rank,' rt_rank=',r,' occupied_rank=',nocc,&
+      ' projector_count=',global_projector_count,&
       ' stationarity=',stationarity_defect,' metric=',metric_defect,' projector=',projector_defect,&
       ' electron=',electron_defect,' writer_count=',1
     ok=.true.;message=''

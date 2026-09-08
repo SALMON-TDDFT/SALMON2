@@ -93,6 +93,10 @@ contains
     if(ierr==MPI_SUCCESS)call route_set_to_row_owners(comm,global_count,owners,closure_support,operator_support,&
       .true.,ierr,workspace_peak)
     if(ierr/=MPI_SUCCESS)then;message='Hybrid Hermitian support closure exchange failed';return;endif
+    local_bad=merge(1,0,metric_support%count>int(huge(0),int64).or.&
+      operator_support%count>int(huge(0),int64))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='Hybrid CSR count exceeds MPI integer extent';return;endif
     call build_owned_csr(global_count,row_ids,metric_support,metric_offsets,metric_columns)
     call build_owned_csr(global_count,row_ids,operator_support,operator_offsets,operator_columns)
     if(present(peak_workspace_keys))peak_workspace_keys=max(workspace_peak,point_support%peak_capacity,&
@@ -170,26 +174,31 @@ contains
     logical,intent(in)::reverse
     integer,intent(out)::ierr
     integer(int64),intent(inout)::workspace_peak
-    integer::nproc,p,q,row,column,destination,total_send,total_recv
+    integer::nproc,p,q,row,column,destination,total_send,total_recv,local_bad,global_bad,send_bad,recv_bad
+    integer(int64)::total_send64,total_recv64
     integer,allocatable::send_counts(:),recv_counts(:),send_displacements(:),recv_displacements(:),cursor(:)
     integer(int64),allocatable::keys(:),send_keys(:),recv_keys(:)
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(send_counts(nproc),recv_counts(nproc),send_displacements(nproc),recv_displacements(nproc),cursor(nproc))
+    local_bad=merge(1,0,source%count>int(huge(0),int64))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
     send_counts=0;call extract_sorted(source,keys)
     do q=1,size(keys)
       row=int((keys(q)-1_int64)/int(n,int64))+1;column=int(modulo(keys(q)-1_int64,int(n,int64)))+1
       if(reverse)then;p=row;row=column;column=p;endif
       destination=owners(row);if(destination<1.or.destination>nproc)then;ierr=1;return;endif
-      if(send_counts(destination)==huge(0))then;ierr=1;return;endif
-      send_counts(destination)=send_counts(destination)+1
+      if(send_counts(destination)==huge(0))then;local_bad=1;else;send_counts(destination)=send_counts(destination)+1;endif
     enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
     call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr);if(ierr/=MPI_SUCCESS)return
-    send_displacements(1)=0;recv_displacements(1)=0
-    do p=2,nproc
-      send_displacements(p)=send_displacements(p-1)+send_counts(p-1)
-      recv_displacements(p)=recv_displacements(p-1)+recv_counts(p-1)
-    enddo
-    total_send=sum(send_counts);total_recv=sum(recv_counts);allocate(send_keys(total_send),recv_keys(total_recv));cursor=send_displacements
+    call make_checked_displacements(send_counts,send_displacements,total_send,total_send64,send_bad)
+    call make_checked_displacements(recv_counts,recv_displacements,total_recv,total_recv64,recv_bad)
+    local_bad=max(send_bad,recv_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
+    allocate(send_keys(total_send),recv_keys(total_recv));cursor=send_displacements
     do q=1,size(keys)
       row=int((keys(q)-1_int64)/int(n,int64))+1;column=int(modulo(keys(q)-1_int64,int(n,int64)))+1
       if(reverse)then;p=row;row=column;column=p;endif
@@ -207,10 +216,13 @@ contains
     type(key_set),intent(inout)::target
     integer,intent(out)::ierr
     integer(int64),intent(inout)::workspace_peak
-    integer::rank,nproc,sender,count,q,status(MPI_STATUS_SIZE)
+    integer::rank,nproc,sender,count,q,status(MPI_STATUS_SIZE),local_bad,global_bad
     integer(int64),allocatable::keys(:),received(:)
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    local_bad=merge(1,0,source%count>int(huge(0),int64))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
     call extract_sorted(source,keys)
     do sender=0,nproc-1
       count=merge(size(keys),0,rank==sender)
@@ -228,6 +240,20 @@ contains
       if(ierr/=MPI_SUCCESS)return
     enddo
   end subroutine route_set_to_single_owner
+  subroutine make_checked_displacements(counts,displacements,total,total64,bad)
+    integer,intent(in)::counts(:)
+    integer,intent(out)::displacements(:),total,bad
+    integer(int64),intent(out)::total64
+    integer::p
+    integer(int64)::running
+    bad=0;running=0_int64
+    do p=1,size(counts)
+      if(running>int(huge(0),int64))then;bad=1;displacements(p)=0;else;displacements(p)=int(running);endif
+      running=running+int(counts(p),int64)
+    enddo
+    total64=running
+    if(running>int(huge(0),int64))then;bad=1;total=0;else;total=int(running);endif
+  end subroutine make_checked_displacements
   subroutine merge_set(source,target)
     type(key_set),intent(in)::source
     type(key_set),intent(inout)::target
