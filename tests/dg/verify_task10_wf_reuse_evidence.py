@@ -195,7 +195,12 @@ def validate_raw_evidence(si64_result: Path, smoke_result: Path) -> dict[str, An
             "completion_receipts": [run["completion_receipts"] for run in smoke_runs],
             "wannier90_fragment_ids": [run["wannier_fragment_ids"] for run in smoke_runs],
             "projected_basis_fingerprints": [run["projected_basis_fingerprint"] for run in smoke_runs],
-            "continuation_receipts_identical": smoke_runs[0]["schwarz_receipts"]
+            "continuation_receipts_identical": smoke_runs[0]["continuation_receipts"]
+                == smoke_runs[1]["continuation_receipts"]
+                == smoke_runs[2]["continuation_receipts"],
+            "continuation_fingerprints": [
+                run["continuation_fingerprints"] for run in smoke_runs],
+            "schwarz_summaries_identical": smoke_runs[0]["schwarz_receipts"]
                 == smoke_runs[1]["schwarz_receipts"] == smoke_runs[2]["schwarz_receipts"],
             "terminal_residuals": [run["terminal_residual"] for run in smoke_runs],
             "terminal_electron_defects": [run["electron_defect"] for run in smoke_runs],

@@ -162,6 +162,56 @@ def one_match(pattern: str, text: str, label: str) -> re.Match[str]:
     return matches[0]
 
 
+def continuation_receipts(text: str, case: str) -> list[dict[str, int | float | str]]:
+    """Parse and validate the actual six DG continuation identity receipts."""
+    pattern = re.compile(
+        rf"\[DG-HYBRID-CONTINUATION\]\s+lambda=\s*({FLOAT_TOKEN})\s+"
+        rf"diagnostic_state_lambda=\s*({FLOAT_TOKEN})\s+accepted_cg_steps=(\d+)\s+"
+        rf"residual=\s*({FLOAT_TOKEN})\s+orthogonality_defect=\s*({FLOAT_TOKEN})\s+"
+        rf"electron_defect=\s*({FLOAT_TOKEN})\s+rayleigh_energy_trace=\s*({FLOAT_TOKEN})\s+"
+        rf"scaled_interface_action_norm=\s*({FLOAT_TOKEN})\s+measurement_status=(\w+)\s+"
+        r"status=(\w+)\s+continuation_fingerprint=(-?\d+)",
+        re.IGNORECASE,
+    )
+    receipts = [{
+        "lambda": parse_finite_float(
+            row.group(1), f"{case} continuation lambda", minimum=0.0, maximum=1.0),
+        "diagnostic_state_lambda": parse_finite_float(
+            row.group(2), f"{case} continuation diagnostic lambda", minimum=0.0,
+            maximum=1.0),
+        "accepted_cg_steps": int(row.group(3)),
+        "residual": parse_finite_float(
+            row.group(4), f"{case} continuation residual", minimum=0.0),
+        "orthogonality_defect": parse_finite_float(
+            row.group(5), f"{case} continuation orthogonality defect", minimum=0.0,
+            maximum=TERMINAL_SOLVER_TOLERANCE),
+        "electron_defect": parse_finite_float(
+            row.group(6), f"{case} continuation electron defect", minimum=0.0,
+            maximum=ELECTRON_TOLERANCE),
+        "rayleigh_energy_trace": parse_finite_float(
+            row.group(7), f"{case} continuation Rayleigh energy trace"),
+        "scaled_interface_action_norm": parse_finite_float(
+            row.group(8), f"{case} continuation scaled interface action norm", minimum=0.0),
+        "measurement_status": row.group(9),
+        "status": row.group(10),
+        "continuation_fingerprint": int(row.group(11)),
+    } for row in pattern.finditer(text)]
+    valid_schedule = (
+        len(receipts) == 6
+        and all(math.isclose(item["lambda"], 0.2 * index, rel_tol=0.0, abs_tol=1.0e-14)
+                and math.isclose(item["diagnostic_state_lambda"], item["lambda"],
+                                 rel_tol=0.0, abs_tol=1.0e-14)
+                for index, item in enumerate(receipts))
+        and all(item["measurement_status"].lower() == "valid"
+                and item["status"].lower() == "accepted"
+                and 1 <= item["accepted_cg_steps"] <= 3
+                and item["continuation_fingerprint"] != 0 for item in receipts)
+    )
+    if not valid_schedule:
+        raise RuntimeError(f"{case} did not complete the exact six-record DG continuation contract")
+    return receipts
+
+
 def wannier90_fragment_ids(run_dir: Path) -> list[int]:
     """Return a unique fragment inventory for every Wannier90 output."""
     fragment_ids = []
@@ -213,6 +263,7 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
         text,
         re.IGNORECASE,
     ))
+    continuation = continuation_receipts(text, case)
     terminal_position = terminal.start()
     occupied = run_dir / "overlapping_wannier_occupied.chk"
     occupied_checkpoint_fingerprint = validate_occupied_checkpoint(occupied)
@@ -271,6 +322,9 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
         "terminal_projector": terminal_projector,
         "electron_defect": terminal_electron_defect,
         "schwarz_receipts": schwarz_receipts,
+        "continuation_receipts": continuation,
+        "continuation_fingerprints": [
+            item["continuation_fingerprint"] for item in continuation],
         "schwarz_temperature_kelvin": schwarz_receipts[-1]["temperature"] if schwarz_receipts else None,
         "terminal_lcfo_count": text.count(
             "[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once"
@@ -305,9 +359,12 @@ def compare_smoke_runs(miss: dict, hit: dict, incomplete: dict, seed_preloaded: 
     fingerprints = {item["projected_basis_fingerprint"] for item in (miss, hit, incomplete)}
     if len(fingerprints) != 1:
         raise RuntimeError("projected basis changed across miss/hit/incomplete recovery")
+    if not (miss["continuation_receipts"] == hit["continuation_receipts"]
+            == incomplete["continuation_receipts"]):
+        raise RuntimeError("DG continuation identity receipts changed across miss/hit/incomplete recovery")
     if not (miss["schwarz_receipts"] == hit["schwarz_receipts"]
             == incomplete["schwarz_receipts"]):
-        raise RuntimeError("DG continuation receipts changed across miss/hit/incomplete recovery")
+        raise RuntimeError("DG Schwarz summaries changed across miss/hit/incomplete recovery")
     expected_fragment_ids = list(range(1, RANKS + 1))
     if miss["wannier_fragment_ids"] != expected_fragment_ids or hit["wannier_fragment_ids"]:
         raise RuntimeError("Wannier90 artifacts do not prove miss generation and hit bypass")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import math
+import copy
 import struct
 import tempfile
 from pathlib import Path
@@ -181,6 +182,7 @@ with tempfile.TemporaryDirectory(prefix="si64-scdm-runner-") as name:
     smoke_log = (
         "[DG-FRAGMENT-WF] mode=auto checkpoint_hit=T publication_id=606 reason=compatible checkpoint hit\n"
         "[DG-HYBRID-DIVIDED] projected_basis_fingerprint=707\n"
+        + continuation_lines + "\n"
         + smoke_schwarz + "\n"
         "[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once "
         "residual=2.0E-13 orthogonality=1.0E-14 projector=1.0E-14 electron_defect=1.0E-10\n"
@@ -192,9 +194,9 @@ with tempfile.TemporaryDirectory(prefix="si64-scdm-runner-") as name:
     SMOKE.validate_occupied_checkpoint = lambda path: 1001
     try:
         (smoke_run / "run.log").write_text(smoke_log)
-        assert SMOKE.parse_evidence("valid-smoke-parser", smoke_run, 1.0, None)[
-            "completion_receipts"
-        ] == SMOKE.RANKS
+        valid_smoke_evidence = SMOKE.parse_evidence(
+            "valid-smoke-parser", smoke_run, 1.0, None)
+        assert valid_smoke_evidence["completion_receipts"] == SMOKE.RANKS
         terminal_end = smoke_log.index("\n", smoke_log.index("[OW-GS]")) + 1
         (smoke_run / "run.log").write_text(smoke_log[:terminal_end])
         try:
@@ -212,8 +214,48 @@ with tempfile.TemporaryDirectory(prefix="si64-scdm-runner-") as name:
             assert "finite" in str(error).lower()
         else:
             raise AssertionError("smoke parser accepted a finite-overflow terminal scalar")
+
+        hit_log_with_changed_continuation = smoke_log.replace(
+            "continuation_fingerprint=101", "continuation_fingerprint=999", 1
+        )
+        (smoke_run / "run.log").write_text(hit_log_with_changed_continuation)
+        hit_with_changed_continuation = SMOKE.parse_evidence(
+            "hit-with-changed-continuation", smoke_run, 1.0, None)
+        assert (hit_with_changed_continuation["schwarz_receipts"]
+                == valid_smoke_evidence["schwarz_receipts"])
+        assert (hit_with_changed_continuation["continuation_fingerprints"]
+                != valid_smoke_evidence["continuation_fingerprints"])
     finally:
         SMOKE.validate_occupied_checkpoint = saved_smoke_validator
+
+    miss_evidence = copy.deepcopy(valid_smoke_evidence)
+    hit_evidence = copy.deepcopy(hit_with_changed_continuation)
+    incomplete_evidence = copy.deepcopy(valid_smoke_evidence)
+    miss_evidence.update({
+        "checkpoint_hit": False,
+        "dc_scf_skipped": False,
+        "wannier_fragment_ids": list(range(1, SMOKE.RANKS + 1)),
+    })
+    hit_evidence.update({
+        "checkpoint_hit": True,
+        "dc_scf_skipped": True,
+        "wannier_fragment_ids": [],
+    })
+    incomplete_evidence.update({
+        "checkpoint_hit": False,
+        "dc_scf_skipped": True,
+        "wf_publication_id": valid_smoke_evidence["wf_publication_id"] + 1,
+        "wannier_fragment_ids": list(range(1, SMOKE.RANKS + 1)),
+    })
+    try:
+        SMOKE.compare_smoke_runs(
+            miss_evidence, hit_evidence, incomplete_evidence, seed_preloaded=False)
+    except RuntimeError as error:
+        assert "continuation" in str(error).lower()
+    else:
+        raise AssertionError(
+            "smoke comparison accepted a changed hit continuation fingerprint with unchanged Schwarz"
+        )
 
     duplicate_smoke_wout_a = root / "smoke-w90-a/f000001/g00000001/w.wout"
     duplicate_smoke_wout_b = root / "smoke-w90-b/f000001/g00000002/w.wout"
