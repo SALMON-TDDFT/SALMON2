@@ -12,10 +12,46 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call exercise_structural_graph
+  call exercise_repeated_support_scaling
   call exercise_sparse_projection
   if(rank==0)write(*,'(a,i0,a)')'PASS structural Hybrid sparse projection on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine exercise_repeated_support_scaling
+    integer,parameter::n=400,np_global=16000
+    integer::nowned,npoint,row,point,i,j,slot,fragment,first,local_nnz
+    integer(int64)::local_unique,peak_workspace,global_unique,global_peak
+    integer(int64),allocatable::rows(:)
+    integer,allocatable::mo(:),mc(:),oo(:),oc(:)
+    complex(real64),allocatable::basis(:,:),metric(:,:),zero2(:,:),position(:,:,:)
+    logical::scale_ok
+    nowned=count([(mod(row-1,nproc)==rank,row=1,n)])
+    npoint=count([(mod(point-1,nproc)==rank,point=1,np_global)])
+    allocate(rows(nowned),basis(n,npoint),metric(nowned,n),zero2(nowned,n),position(3,nowned,n))
+    i=0
+    do row=1,n
+      if(mod(row-1,nproc)==rank)then;i=i+1;rows(i)=row;endif
+    enddo
+    basis=(0d0,0d0);metric=(0d0,0d0);zero2=(0d0,0d0);position=(0d0,0d0)
+    do i=1,nowned;metric(i,int(rows(i)))=(1d0,0d0);enddo
+    slot=0
+    do point=1,np_global
+      if(mod(point-1,nproc)/=rank)cycle
+      slot=slot+1;fragment=mod(point-1,8);first=fragment*50+mod((point-1)/8,46)+1
+      do j=first,first+3;basis(j,slot)=cmplx(1d0+0.01d0*j,0.02d0*j,real64);enddo
+    enddo
+    call build_rt_dg_hybrid_structural_graph(comm,n,rows,basis,metric,zero2,zero2,zero2,zero2,zero2,position,&
+      mo,mc,oo,oc,scale_ok,message,local_unique_candidates=local_unique,peak_workspace_keys=peak_workspace)
+    call require(scale_ok,'repeated-support structural graph failed: '//trim(message))
+    local_nnz=size(oc)
+    call MPI_Allreduce(local_unique,global_unique,1,MPI_INTEGER8,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(peak_workspace,global_peak,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    call require(global_unique<20000_int64,'localized support graph grew with repeated grid points')
+    call require(global_peak<50000_int64,'structural graph workspace is not bounded by unique sparse support')
+    call require(int(local_nnz,int64)<=global_unique+int(n,int64),&
+      'owner-local CSR exceeds point support plus metric diagonal')
+  end subroutine exercise_repeated_support_scaling
+
   subroutine exercise_structural_graph
     integer,parameter::r=3,g=4
     integer::i,j,row,nowned,npoint,point,metric_nnz,operator_nnz,edge

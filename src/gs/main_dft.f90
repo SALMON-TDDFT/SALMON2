@@ -1989,7 +1989,8 @@ contains
     real(8),allocatable::coordinates(:,:),density(:)
     integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:),&
       rt_owner(:)
-    integer::n,r,nocc,nrow,npoint,nrtrow,i,j,p,a,rank,nproc,ierr,requested_rank,certified_rank
+    integer::n,r,nocc,nrow,npoint,nrtrow,i,j,p,a,rank,nproc,ierr,requested_rank,certified_rank,&
+      global_projector_count
     integer(8)::fingerprint
     real(8)::electron_count,window,cutoff,cluster_tolerance
     logical::local_ok
@@ -2023,7 +2024,9 @@ contains
       certified_rank=certified_rank+1
     enddo
     if(certified_rank>=n)then;message='terminal divided LCFO lacks an energy-window proof state';return;endif
-    r=certified_rank
+    ! Keep the localized construction basis as the RT representation.  The
+    ! smaller certified_rank is an energy-window receipt, not a basis cut.
+    r=n
 
     allocate(coordinates(3,npoint))
     do p=1,npoint
@@ -2085,9 +2088,12 @@ contains
     payload%scope_selectors=[1,1,1,0,0,0,0,0];payload%xc_types=xc_func%xctype
     payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
     allocate(payload%continuation_receipt(8));payload%continuation_receipt=[1d0,stationarity_defect,&
-      metric_defect,projector_defect,electron_defect,electron_count,real(n,8),real(r,8)]
+      metric_defect,projector_defect,electron_defect,electron_count,real(n,8),real(certified_rank,8)]
+    call MPI_Allreduce(ppg%Nlma,global_projector_count,1,MPI_INTEGER,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='v3 global projector-count reduction failed';return;endif
     allocate(payload%pseudopotential_receipt(6));payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),&
-      canonical_pp_valence_sum(pp),real(pp%lmax,8),real(pp%nrmax,8),real(ppg%Nlma,8),real(n,8)*real(n,8)]
+      canonical_pp_valence_sum(pp),real(pp%lmax,8),real(pp%nrmax,8),real(global_projector_count,8),&
+      real(n,8)*real(n,8)]
     allocate(payload%energy_receipt(7));payload%energy_receipt=0d0
     allocate(payload%face_ids(0),payload%face_point_ids(0),payload%face_metadata(8,0),payload%face_offsets(1),&
       payload%face_weight_offsets(1),payload%face_basis_offsets(1),payload%face_value_offsets(1),&
@@ -2113,20 +2119,21 @@ contains
     payload%certified_basis%construction_count=n;payload%certified_basis%certified_count=r
     payload%certified_basis%occupied_count=nocc;payload%certified_basis%localization_iterations=0
     allocate(payload%certified_basis%construction_row_ids,source=row_ids)
-    nrtrow=count([(mod(i-1,nproc)==rank,i=1,r)])
+    nrtrow=nrow
     allocate(payload%certified_basis%transformation_row_ids(nrtrow),&
       payload%certified_basis%c_cert(nrow,r),payload%certified_basis%u_rt(nrtrow,r),&
       payload%certified_basis%b_rt(nrow,r),payload%certified_basis%initial_occupied_amplitudes(r,nocc),&
       payload%certified_basis%certified_eigenvalues(r),payload%certified_basis%occupations(nocc),&
       payload%certified_basis%centers(3,r),payload%certified_basis%spreads_before(r),&
       payload%certified_basis%spreads_after(r))
-    payload%certified_basis%c_cert=solved_coefficients(:,:r);payload%certified_basis%b_rt=solved_coefficients(:,:r)
+    payload%certified_basis%c_cert=solved_coefficients
+    payload%certified_basis%b_rt=(0d0,0d0)
+    do i=1,nrow;payload%certified_basis%b_rt(i,int(row_ids(i)))=(1d0,0d0);enddo
     payload%certified_basis%u_rt=(0d0,0d0);j=0
-    do i=1,r;if(mod(i-1,nproc)/=rank)cycle;j=j+1
-      payload%certified_basis%transformation_row_ids(j)=i;payload%certified_basis%u_rt(j,i)=(1d0,0d0);enddo
-    payload%certified_basis%initial_occupied_amplitudes=(0d0,0d0)
-    do i=1,nocc;payload%certified_basis%initial_occupied_amplitudes(i,i)=(1d0,0d0);enddo
-    payload%certified_basis%certified_eigenvalues=solved_eigenvalues(:r)
+    do i=1,nrow;j=j+1;payload%certified_basis%transformation_row_ids(j)=row_ids(i)
+      payload%certified_basis%u_rt(j,int(row_ids(i)))=(1d0,0d0);enddo
+    payload%certified_basis%initial_occupied_amplitudes=full_coefficients(:,1:nocc)
+    payload%certified_basis%certified_eigenvalues=solved_eigenvalues
     payload%certified_basis%occupations=occupied_state%occupations
     payload%certified_basis%centers=0d0;payload%certified_basis%spreads_before=0d0
     payload%certified_basis%spreads_after=0d0;payload%certified_basis%spread_before_total=0d0
@@ -2143,8 +2150,7 @@ contains
     payload%certified_basis%scalar_covariance_defect=0d0
     payload%certified_basis%vector_covariance_defect=0d0;payload%certified_basis%tensor_covariance_defect=0d0
 
-    allocate(rt_basis_values(r,npoint));rt_basis_values=transpose(matmul(transpose(basis_values),full_coefficients(:,:r)))
-    allocate(rt_owner(r));do i=1,r;rt_owner(i)=mod(i-1,nproc)+1;enddo
+    allocate(rt_owner(r));rt_owner=row_owner+1
     payload%rt_space%valid=.true.;payload%rt_space%rank=r;payload%rt_space%operation_count=1
     payload%rt_space%scalar_count=5;payload%rt_space%vector_count=1;payload%rt_space%tensor_count=0
     allocate(payload%rt_space%row_ids(nrtrow),payload%rt_space%row_owner_keys(r),&
@@ -2159,34 +2165,23 @@ contains
     payload%rt_space%row_owner_keys=rt_owner;payload%rt_space%grid_owner_keys=rank+1
     payload%rt_space%representation=(0d0,0d0);do i=1,r;payload%rt_space%representation(i,i,1)=(1d0,0d0);enddo
     payload%rt_space%cartesian_rotations=0d0;do a=1,3;payload%rt_space%cartesian_rotations(a,a,1)=1d0;enddo
-    payload%rt_space%basis_values=rt_basis_values;payload%rt_space%density=density
-    call project_divided_v3_component(row_ids,full_coefficients(:,:r),metric_rows,rt_metric,local_ok)
-    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),kinetic_rows,rt_kinetic,local_ok)
-    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),nonlocal_rows,rt_nonlocal,local_ok)
-    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),local_rows,rt_local,local_ok)
-    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),sipg_rows,rt_sipg,local_ok)
-    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),hamiltonian_rows,rt_hamiltonian,local_ok)
-    if(.not.local_ok)then;message='v3 RT component projection failed';return;endif
-    j=0
-    do i=1,r
-      if(rt_owner(i)/=rank+1)cycle;j=j+1;payload%rt_space%row_ids(j)=i
-      payload%rt_space%metric_rows(j,:)=rt_metric(i,:)
-      payload%rt_space%kinetic_rows(j,:)=rt_kinetic(i,:)
-      payload%rt_space%nonlocal_rows(j,:)=rt_nonlocal(i,:)
-      payload%rt_space%local_rows(j,:)=rt_local(i,:)
-      payload%rt_space%sipg_rows(j,:)=rt_sipg(i,:)
-      payload%rt_space%hamiltonian_rows(j,:)=rt_hamiltonian(i,:)
-    enddo
+    payload%rt_space%basis_values=basis_values;payload%rt_space%density=density
+    payload%rt_space%row_ids=row_ids
+    payload%rt_space%metric_rows=metric_rows
+    payload%rt_space%kinetic_rows=kinetic_rows
+    payload%rt_space%nonlocal_rows=nonlocal_rows
+    payload%rt_space%local_rows=local_rows
+    payload%rt_space%sipg_rows=sipg_rows
+    payload%rt_space%hamiltonian_rows=hamiltonian_rows
     payload%rt_space%scalar_operator_rows(:,:,1)=payload%rt_space%kinetic_rows
     payload%rt_space%scalar_operator_rows(:,:,2)=payload%rt_space%nonlocal_rows
     payload%rt_space%scalar_operator_rows(:,:,3)=payload%rt_space%local_rows
     payload%rt_space%scalar_operator_rows(:,:,4)=payload%rt_space%sipg_rows
     payload%rt_space%scalar_operator_rows(:,:,5)=payload%rt_space%hamiltonian_rows
     do a=1,3
-      if(allocated(projected))deallocate(projected)
-      allocate(projected(r,r));projected=matmul(conjg(transpose(full_coefficients(:,:r))),&
-        matmul(momentum(a,:,:),full_coefficients(:,:r)))
-      do j=1,nrtrow;payload%rt_space%vector_operator_rows(j,:,a,1)=projected(int(payload%rt_space%row_ids(j)),:);enddo
+      do j=1,nrtrow
+        payload%rt_space%vector_operator_rows(j,:,a,1)=momentum(a,int(payload%rt_space%row_ids(j)),:)
+      enddo
     enddo
 
     payload%electron_count%valid=.true.;payload%electron_count%expected_count=dc%elec_num_tot
@@ -2200,12 +2195,14 @@ contains
     payload%energy_window%compatibility_dynamic_rank=.false.;payload%energy_window%proof_state_present=.true.
     payload%energy_window%construction_rank=n;payload%energy_window%solved_rank=n
     payload%energy_window%occupied_rank=nocc;payload%energy_window%requested_rank=requested_rank
-    payload%energy_window%certified_rank=r;payload%energy_window%extension_states=r-requested_rank
-    payload%energy_window%boundary_cluster_rank=r;payload%energy_window%proof_status=1
+    payload%energy_window%certified_rank=certified_rank
+    payload%energy_window%extension_states=certified_rank-requested_rank
+    payload%energy_window%boundary_cluster_rank=certified_rank;payload%energy_window%proof_status=1
     payload%energy_window%window_size=window;payload%energy_window%e_homo=solved_eigenvalues(nocc)
-    payload%energy_window%requested_cutoff=cutoff;payload%energy_window%certified_cutoff=solved_eigenvalues(r)
-    payload%energy_window%extension_energy=max(0d0,solved_eigenvalues(r)-cutoff)
-    payload%energy_window%proof_energy=solved_eigenvalues(r+1)
+    payload%energy_window%requested_cutoff=cutoff
+    payload%energy_window%certified_cutoff=solved_eigenvalues(certified_rank)
+    payload%energy_window%extension_energy=max(0d0,solved_eigenvalues(certified_rank)-cutoff)
+    payload%energy_window%proof_energy=solved_eigenvalues(certified_rank+1)
     payload%symmetry_receipt%valid=.true.;payload%symmetry_receipt%worst_operation=1
     payload%symmetry_receipt%occupied_subspace_defect=stationarity_defect
     payload%symmetry_receipt%occupied_projector_defect=projector_defect
@@ -2230,25 +2227,12 @@ contains
     call write_rt_dg_hybrid_ground_state_checkpoint(dc%icomm_tot,'./hybrid_dg_ground_state.chk',payload,&
       fingerprint,local_ok,local_message)
     if(.not.local_ok)then;message='v3 write failed: '//trim(local_message);return;endif
-    if(rank==0)write(*,'(a,4(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo',&
-      ' construction_rank=',n,' solved_rank=',n,' certified_rank=',r,' occupied_rank=',nocc,&
+    if(rank==0)write(*,'(a,5(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo',&
+      ' construction_rank=',n,' solved_rank=',n,' certified_rank=',certified_rank,' rt_rank=',r,' occupied_rank=',nocc,&
       ' stationarity=',stationarity_defect,' metric=',metric_defect,' projector=',projector_defect,&
       ' electron=',electron_defect,' writer_count=',1
     ok=.true.;message=''
   end subroutine publish_dg_hybrid_divided_v3
-
-  subroutine project_divided_v3_component(row_ids,coefficients,rows,result,ok)
-    integer(8),intent(in)::row_ids(:)
-    complex(8),intent(in)::coefficients(:,:),rows(:,:)
-    complex(8),allocatable,intent(out)::result(:,:)
-    logical,intent(out)::ok
-    complex(8),allocatable::full_rows(:,:)
-    integer::n,r
-    n=size(rows,2);r=size(coefficients,2)
-    call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,rows,full_rows,ok)
-    if(.not.ok)return
-    allocate(result(r,r));result=matmul(conjg(transpose(coefficients)),matmul(full_rows,coefficients))
-  end subroutine project_divided_v3_component
 
   subroutine solve_dg_hybrid_schwarz_fragments(iteration,callback_ok)
     integer,intent(in)::iteration

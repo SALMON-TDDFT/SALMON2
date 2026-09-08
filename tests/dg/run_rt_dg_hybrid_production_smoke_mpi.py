@@ -16,6 +16,39 @@ root = Path(__file__).resolve().parents[2]
 main_source = (root / "src/rt/main_tddft.f90").read_text()
 main_dft_source = (root / "src/gs/main_dft.f90").read_text()
 
+formal_publisher = main_dft_source.split(
+    "subroutine publish_dg_hybrid_divided_v3", 1
+)[1].split("end subroutine publish_dg_hybrid_divided_v3", 1)[0]
+def require_localized_publisher(body: str) -> None:
+    compact = re.sub(r"\s+", "", body.lower())
+    assert "r=n" in compact, "formal v3 RT representation rank is truncated to spectral rank"
+    assert "payload%rt_space%basis_values=basis_values" in compact, \
+        "formal v3 publisher does not retain the localized WF+PW construction basis"
+    assert "payload%certified_basis%initial_occupied_amplitudes=full_coefficients(:,1:nocc)" in compact, \
+        "terminal LCFO eigenvectors are not stored as initial localized-basis coefficients"
+    assert "callproject_divided_v3_component" not in compact, \
+        "formal publisher spectrally rotates the RT operator and destroys localized support"
+    assert "mpi_allreduce(ppg%nlma,global_projector_count" in compact and \
+        "real(global_projector_count,8)" in compact, \
+        "formal v3 pseudopotential receipt stores a fragment-local projector count"
+
+
+require_localized_publisher(formal_publisher)
+for old, replacement in (
+    ("r=n", "r=certified_rank"),
+    ("payload%rt_space%basis_values=basis_values", "payload%rt_space%basis_values=rt_basis_values"),
+    ("payload%certified_basis%initial_occupied_amplitudes=full_coefficients(:,1:nocc)",
+     "payload%certified_basis%initial_occupied_amplitudes=(0d0,0d0)"),
+):
+    mutated = formal_publisher.replace(old, replacement, 1)
+    assert mutated != formal_publisher, old
+    try:
+        require_localized_publisher(mutated)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"localized-basis mutation survived: {old}")
+
 
 def require_hybrid_route_contract(source: str) -> None:
     continuation = source.split("subroutine run_dg_hybrid_continuation_rt()", 1)[1].split(
@@ -242,11 +275,11 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         assert receipt in gs.stdout, receipt
     handoff = re.findall(
         r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo construction_rank=(\d+) solved_rank=(\d+) "
-        r"certified_rank=(\d+) occupied_rank=(\d+).*writer_count=(\d+)", gs.stdout,
+        r"certified_rank=(\d+) rt_rank=(\d+) occupied_rank=(\d+).*writer_count=(\d+)", gs.stdout,
     )
     assert len(handoff) == 1, gs.stdout
-    construction, solved, certified, occupied, writer_count = map(int, handoff[0])
-    assert construction == solved and construction > certified >= occupied > 0 and writer_count == 1
+    construction, solved, certified, rt_rank, occupied, writer_count = map(int, handoff[0])
+    assert construction == solved == rt_rank and construction > certified >= occupied > 0 and writer_count == 1
     checkpoint = work / "hybrid_dg_ground_state.chk"
     assert checkpoint.is_file() and checkpoint.stat().st_size > 1024, (
         "formal divided terminal LCFO did not publish its v3 Hybrid GS checkpoint",

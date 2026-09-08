@@ -196,7 +196,10 @@ contains
     call MPI_Allreduce(common_hash,minimum_common_hash,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(common_hash,maximum_common_hash,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.minimum_common_hash/=maximum_common_hash)then
-      message='rank-disagreeing named Hybrid ground-state metadata';return
+      call diagnose_ground_state_common_header(comm,payload,message,ierr)
+      if(ierr/=MPI_SUCCESS.or.len_trim(message)==0)&
+        message='rank-disagreeing named Hybrid ground-state array metadata'
+      return
     endif
     call validate_ground_state_global_ownership(comm,payload,global_bad,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
@@ -215,6 +218,91 @@ contains
     ok=.false.;message='named Hybrid ground-state fingerprint requires MPI';fingerprint=0_int64
 #endif
   end subroutine fingerprint_rt_dg_hybrid_ground_state_payload
+
+#ifdef USE_MPI
+  subroutine diagnose_ground_state_common_header(comm,payload,message,ierr)
+    integer,intent(in)::comm
+    type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
+    character(*),intent(out)::message
+    integer,intent(out)::ierr
+    logical::l(ground_state_logical_count)
+    integer::h(ground_state_integer_count),i,lo_i,hi_i
+    integer(int64)::f(ground_state_fingerprint_count),bits,lo_8,hi_8
+    real(real64)::r(ground_state_real_count)
+    message='';call pack_ground_state_header(payload,l,h,f,r);f(20)=0_int64
+    do i=1,size(l)
+      lo_i=merge(1,0,l(i));hi_i=lo_i
+      call MPI_Allreduce(MPI_IN_PLACE,lo_i,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,hi_i,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(lo_i/=hi_i)then;write(message,'(a,i0)')'rank-disagreeing named Hybrid logical header index ',i;return;endif
+    enddo
+    do i=1,size(h)
+      lo_i=h(i);hi_i=h(i);call MPI_Allreduce(MPI_IN_PLACE,lo_i,1,MPI_INTEGER,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,hi_i,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(lo_i/=hi_i)then;write(message,'(a,i0)')'rank-disagreeing named Hybrid integer header index ',i;return;endif
+    enddo
+    do i=1,size(f)
+      lo_8=f(i);hi_8=f(i);call MPI_Allreduce(MPI_IN_PLACE,lo_8,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,hi_8,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(lo_8/=hi_8)then;write(message,'(a,i0)')'rank-disagreeing named Hybrid fingerprint header index ',i;return;endif
+    enddo
+    do i=1,size(r)
+      bits=transfer(r(i),bits);lo_8=bits;hi_8=bits
+      call MPI_Allreduce(MPI_IN_PLACE,lo_8,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,hi_8,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(lo_8/=hi_8)then;write(message,'(a,i0)')'rank-disagreeing named Hybrid real header index ',i;return;endif
+    enddo
+    call check_hash(diagnostic_real_hash(payload%occupations),1);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%eigenvalues),2);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%continuation_receipt),3);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%pseudopotential_receipt),4);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%energy_receipt),5);if(len_trim(message)>0)return
+    call check_hash(diagnostic_integer_hash(payload%requested_ids),6);if(len_trim(message)>0)return
+    call check_hash(diagnostic_integer_hash(payload%effective_ids),7);if(len_trim(message)>0)return
+    call check_hash(diagnostic_integer_hash(payload%construction_catalog%generations),8);if(len_trim(message)>0)return
+    call check_hash(diagnostic_integer_hash(payload%construction_catalog%ordering),9);if(len_trim(message)>0)return
+    call check_hash(diagnostic_integer_hash(payload%construction_catalog%ownership),10);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%certified_basis%certified_eigenvalues),11);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%certified_basis%occupations),12);if(len_trim(message)>0)return
+    call check_hash(diagnostic_complex_hash(payload%certified_basis%initial_occupied_amplitudes),13);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(reshape(payload%certified_basis%centers,[size(payload%certified_basis%centers)])),14)
+    if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%certified_basis%spreads_before),15);if(len_trim(message)>0)return
+    call check_hash(diagnostic_real_hash(payload%certified_basis%spreads_after),16);if(len_trim(message)>0)return
+    call check_hash(diagnostic_integer_hash(payload%rt_space%row_owner_keys),17);if(len_trim(message)>0)return
+  contains
+    subroutine check_hash(value,index)
+      integer(int64),intent(in)::value
+      integer,intent(in)::index
+      lo_8=value;hi_8=value
+      call MPI_Allreduce(MPI_IN_PLACE,lo_8,1,MPI_INTEGER8,MPI_MIN,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      call MPI_Allreduce(MPI_IN_PLACE,hi_8,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS)return
+      if(lo_8/=hi_8)write(message,'(a,i0)')'rank-disagreeing named Hybrid array index ',index
+    end subroutine check_hash
+  end subroutine diagnose_ground_state_common_header
+
+  pure integer(int64) function diagnostic_real_hash(values) result(hash)
+    real(real64),intent(in)::values(:)
+    integer::i
+    hash=int(size(values),int64)
+    do i=1,size(values);hash=ground_state_mix_hash(hash,transfer(values(i),0_int64));enddo
+  end function diagnostic_real_hash
+  pure integer(int64) function diagnostic_integer_hash(values) result(hash)
+    integer,intent(in)::values(:)
+    integer::i
+    hash=int(size(values),int64)
+    do i=1,size(values);hash=ground_state_mix_hash(hash,int(values(i),int64));enddo
+  end function diagnostic_integer_hash
+  pure integer(int64) function diagnostic_complex_hash(values) result(hash)
+    complex(real64),intent(in)::values(:,:)
+    integer::i,j
+    hash=ground_state_mix_hash(int(size(values),int64),int(size(values,2),int64))
+    do j=1,size(values,2);do i=1,size(values,1)
+      hash=ground_state_mix_hash(hash,transfer(real(values(i,j),real64),0_int64))
+      hash=ground_state_mix_hash(hash,transfer(aimag(values(i,j)),0_int64))
+    enddo;enddo
+  end function diagnostic_complex_hash
+#endif
 
   subroutine authenticate_rt_dg_hybrid_ground_state_payload(comm,payload,expected_fingerprint,ok,message)
     integer,intent(in)::comm
@@ -343,7 +431,7 @@ contains
     integer,intent(out)::bad,ierr
     integer::i,row,r,local_bad,global_bad
     real(real64)::safe_limit
-    complex(real64),allocatable::local_u(:,:),full_u(:,:),expected_b(:,:),expected_a(:,:)
+    complex(real64),allocatable::local_u(:,:),full_u(:,:),reconstructed_occupied(:,:)
     r=payload%certified_basis%certified_count;local_bad=0;bad=0;ierr=MPI_SUCCESS
     allocate(local_u(r,r),full_u(r,r));local_u=(0d0,0d0)
     do i=1,size(payload%certified_basis%transformation_row_ids)
@@ -356,13 +444,14 @@ contains
       maximum_complex_component(payload%certified_basis%c_cert)>safe_limit)then
       local_bad=1
     else
-      allocate(expected_b(size(payload%certified_basis%c_cert,1),r),&
-        expected_a(r,payload%noccupied))
-      expected_b=matmul(payload%certified_basis%c_cert,full_u)
-      expected_a=conjg(transpose(full_u(1:payload%noccupied,:)))
-      if(maximum_complex_component(payload%certified_basis%b_rt-expected_b)>1d-11.or.&
-        maximum_complex_component(payload%certified_basis%initial_occupied_amplitudes-expected_a)>1d-11)&
-        local_bad=1
+      ! The RT representation may be the localized construction basis rather
+      ! than a spectral rotation.  Its stored amplitudes must reconstruct the
+      ! occupied LCFO eigenvectors exactly in either representation.
+      allocate(reconstructed_occupied(size(payload%certified_basis%c_cert,1),payload%noccupied))
+      reconstructed_occupied=matmul(payload%certified_basis%b_rt,&
+        payload%certified_basis%initial_occupied_amplitudes)
+      if(maximum_complex_component(reconstructed_occupied-&
+        payload%certified_basis%c_cert(:,1:payload%noccupied))>1d-11)local_bad=1
     endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr==MPI_SUCCESS)bad=global_bad
@@ -3309,7 +3398,7 @@ contains
   subroutine validate_ground_state_payload(payload,bad)
     type(s_rt_dg_hybrid_ground_state_payload),intent(in)::payload
     integer,intent(out)::bad
-    integer::nrow,npoint,nrtrow,r,i
+    integer::nrow,npoint,nrtrow,r,q,i
     real(real64)::hamiltonian_scale,electron_difference,electron_scale
     bad=0;nrow=0;npoint=0
     if(allocated(payload%row_ids))nrow=size(payload%row_ids)
@@ -3658,15 +3747,16 @@ contains
       payload%rt_space%vector_fingerprint,payload%rt_space%tensor_fingerprint,&
       payload%rt_space%representation_fingerprint,payload%rt_space%fingerprint]==0_int64))bad=1
 
+    q=payload%energy_window%certified_rank
     if(.not.payload%energy_window%valid.or.payload%energy_window%fingerprint==0_int64.or.&
       payload%energy_window%construction_rank/=payload%global_count.or.&
       payload%energy_window%solved_rank/=payload%energy_window%construction_rank.or.&
       payload%energy_window%occupied_rank/=payload%noccupied.or.&
       payload%energy_window%requested_rank<payload%noccupied.or.&
-      payload%energy_window%requested_rank>r.or.payload%energy_window%certified_rank/=r.or.&
-      payload%energy_window%boundary_cluster_rank/=r.or.&
-      payload%energy_window%extension_states/=r-payload%energy_window%requested_rank.or.&
-      (payload%energy_window%proof_state_present.neqv.r<payload%energy_window%solved_rank))then
+      payload%energy_window%requested_rank>q.or.q>r.or.&
+      payload%energy_window%boundary_cluster_rank/=q.or.&
+      payload%energy_window%extension_states/=q-payload%energy_window%requested_rank.or.&
+      (payload%energy_window%proof_state_present.neqv.q<payload%energy_window%solved_rank))then
       bad=1;return
     endif
     if(any(.not.ieee_is_finite([payload%energy_window%window_size,payload%energy_window%e_homo,&
@@ -3678,7 +3768,7 @@ contains
       bad=1;return
     endif
     if(payload%energy_window%e_homo/=payload%certified_basis%certified_eigenvalues(payload%noccupied).or.&
-      payload%energy_window%certified_cutoff/=payload%certified_basis%certified_eigenvalues(r).or.&
+      payload%energy_window%certified_cutoff/=payload%certified_basis%certified_eigenvalues(q).or.&
       payload%energy_window%extension_energy/=&
         max(0d0,payload%energy_window%certified_cutoff-payload%energy_window%requested_cutoff))then
       bad=1;return

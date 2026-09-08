@@ -511,14 +511,18 @@ contains
     call MPI_Allreduce(local_value,receipt%orbital_residual,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)goto 900
     scale=max(1d0,maximum_complex_matrix(full_rt_h),maximum_complex_matrix(projected_h))
-    receipt%orbital_residual=max(receipt%orbital_residual,maximum_complex_matrix(projected_h-full_rt_h)/scale,&
-      maximum_complex_matrix(full_rt_h-matmul(conjg(transpose(full_u)),matmul(energy,full_u)))/scale)
+    receipt%orbital_residual=max(receipt%orbital_residual,&
+      maximum_complex_matrix(projected_h-full_rt_h)/scale)
     gram=matmul(conjg(transpose(payload%certified_basis%c_cert)),sc_local)
     call MPI_Allreduce(MPI_IN_PLACE,gram,r*r,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr);if(ierr/=MPI_SUCCESS)goto 900
     receipt%metric_defect=max(maximum_complex_matrix(gram-identity),&
-      maximum_complex_matrix(projected_s-full_rt_s),maximum_complex_matrix(full_rt_s-identity))
-    receipt%embedding_defect=max(receipt%embedding_defect,maximum_complex_matrix(&
-      payload%certified_basis%initial_occupied_amplitudes-conjg(transpose(full_u(1:nocc,:)))))
+      maximum_complex_matrix(projected_s-full_rt_s))
+    sc_local(:,1:nocc)=matmul(payload%certified_basis%b_rt,&
+      payload%certified_basis%initial_occupied_amplitudes)-payload%certified_basis%c_cert(:,1:nocc)
+    local_value=0d0;if(nrow>0)local_value=maximum_complex_matrix(sc_local(:,1:nocc))
+    call MPI_Allreduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)goto 900
+    receipt%embedding_defect=max(receipt%embedding_defect,global_value)
     receipt%unitarity_defect=maximum_complex_matrix(matmul(conjg(transpose(full_u)),full_u)-identity)
 
     receipt%target_closure_defect=0d0;receipt%energy_covariance_defect=0d0
@@ -677,7 +681,15 @@ contains
       receipt%fixed_operator_covariance_defect>tolerances(4))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)goto 900
-    if(global_bad/=0)then;message='certified Hybrid RT startup invariant tolerance exceeded';return;endif
+    if(global_bad/=0)then
+      write(message,'(a,12(1x,es10.2))')&
+        'certified Hybrid RT startup invariant tolerance exceeded [orb met emb uni bas den ele clo eco pro cmp fix]:',&
+        receipt%orbital_residual,receipt%metric_defect,receipt%embedding_defect,receipt%unitarity_defect,&
+        receipt%basis_defect,receipt%density_defect,receipt%electron_defect,receipt%target_closure_defect,&
+        receipt%energy_covariance_defect,receipt%projector_defect,receipt%operator_component_defect,&
+        receipt%fixed_operator_covariance_defect
+      return
+    endif
     receipt%certified_rank=r;receipt%payload_fingerprint=expected_fingerprint
     if(present(cached_projected_position))allocate(cached_projected_position,source=projected_position)
     if(present(cached_projected_basis))allocate(cached_projected_basis,source=projected_basis)
@@ -861,8 +873,9 @@ contains
       projected_components(:,:,component)=local_matrix
     enddo
     local_defect=0d0
-    if(nrow>0)local_defect=maximum_complex_matrix(payload%certified_basis%b_rt-&
-      matmul(payload%certified_basis%c_cert,full_u))
+    if(nrow>0)local_defect=maximum_complex_matrix(&
+      matmul(payload%certified_basis%b_rt,payload%certified_basis%initial_occupied_amplitudes)-&
+      payload%certified_basis%c_cert(:,1:payload%noccupied))
     call MPI_Allreduce(local_defect,embedding_defect,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
   end subroutine compute_construction_projection
 
@@ -914,7 +927,7 @@ contains
       do owner=1,nproc
         count=owner_counts(owner);if(count==0)cycle
         first_column=owner_offsets(owner)+1;last_column=first_column+count-1
-        if(rank==owner-1)c_block(:,1:count)=transpose(payload%certified_basis%c_cert)
+        if(rank==owner-1)c_block(:,1:count)=transpose(payload%certified_basis%b_rt)
         call MPI_Bcast(c_block,count*r,MPI_DOUBLE_COMPLEX,owner-1,comm,ierr)
         if(ierr/=MPI_SUCCESS)return
         do tile_operation=1,operation_count
@@ -929,10 +942,8 @@ contains
       local_defects=0d0
       do tile_operation=1,operation_count
         operation=first_operation+tile_operation-1
-        representation_c=matmul(full_u,matmul(payload%rt_space%representation(:,:,operation),&
-          conjg(transpose(full_u))))
         if(nrow>0)local_defects(tile_operation)=maximum_complex_matrix(action(:,:,tile_operation)-&
-          matmul(payload%certified_basis%c_cert,representation_c))/scale
+          matmul(payload%certified_basis%b_rt,payload%rt_space%representation(:,:,operation)))/scale
       enddo
       call MPI_Allreduce(local_defects,global_defects,operation_count,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
       if(ierr/=MPI_SUCCESS)return

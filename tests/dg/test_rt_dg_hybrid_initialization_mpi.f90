@@ -431,19 +431,13 @@ contains
         if(p%row_ids(i)==1_int64)p%metric_rows(i,1)=p%metric_rows(i,1)+(1d-4,0d0)
       enddo
     case('reject_unitarity_physics')
-      ! The checkpoint writer already enforces B=C*U and A=U^H exactly.
-      ! Preserve those embedding identities while making U nonunitary so the
-      ! independent startup unitarity recomputation is the rejecting gate.
+      ! B*A=C_occ is the physical embedding contract.  Perturb only the
+      ! auxiliary localization transform so startup unitarity remains an
+      ! independently exercised rejecting gate.
       do i=1,size(p%certified_basis%transformation_row_ids)
         if(p%certified_basis%transformation_row_ids(i)==1_int64)&
           p%certified_basis%u_rt(i,1)=p%certified_basis%u_rt(i,1)+(1d-4,0d0)
       enddo
-      do i=1,size(p%certified_basis%construction_row_ids)
-        if(p%certified_basis%construction_row_ids(i)==1_int64)&
-          p%certified_basis%b_rt(i,1)=p%certified_basis%b_rt(i,1)+(1d-4,0d0)
-      enddo
-      p%certified_basis%initial_occupied_amplitudes(1,1)=&
-        p%certified_basis%initial_occupied_amplitudes(1,1)+(1d-4,0d0)
     case('reject_density_physics')
       do i=1,size(p%grid_ids)
         if(p%grid_ids(i)==1_int64)then

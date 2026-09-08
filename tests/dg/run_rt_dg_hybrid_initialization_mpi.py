@@ -65,7 +65,7 @@ assert "callbuild_rt_dg_hybrid_structural_graph" in builder
 assert "entry_tolerance" not in builder and "epsilon(1d0)*entry_scale" not in structural_source, (
   "Hybrid RT structural support must not drop exact basis or fixed-operator pairs by value threshold"
 )
-for token in ("basis_values(i,p)/=(0d0,0d0)","pair_key", "merge_key_sets"):
+for token in ("basis_values(i,p)/=(0d0,0d0)","directed_key", "merge_set", "mpi_alltoallv"):
   assert token in structural_source.replace(" ",""), f"missing exact structural support token: {token}"
 assert "compute_construction_projection" not in builder and \
   "startup_projected_position,startup_projected_basis" in initializer_compact, (
@@ -154,8 +154,8 @@ for forbidden in ("allocate(projected_local(hybrid_state%certified_rank,hybrid_s
 assert "callproject_rt_dg_hybrid_sparse_edges" in local_projection, (
   "SALMON physical callback bypasses the tested sparse projection kernel"
 )
-assert "mpi_reduce_scatter" in projection_source, (
-  "Hybrid local-potential projection does not reduce sparse edge contributions to row owners"
+assert "mpi_alltoallv" in projection_source and "mpi_allgatherv" not in projection_source, (
+  "Hybrid local-potential projection does not route unique sparse contributions directly to row owners"
 )
 density_update=compact_density=density_compact.split("subroutineupdate_rt_dg_hybrid_density",1)[1].split(
   "endsubroutineupdate_rt_dg_hybrid_density",1)[0]
