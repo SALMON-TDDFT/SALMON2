@@ -14,9 +14,10 @@ program test_dg_hybrid_generalized_eigensystem_mpi
   integer::comm,rank,nproc,ierr,nowned,row,i,j,position
   integer(int64),allocatable::row_ids(:)
   complex(real64),allocatable::hrows(:,:),srows(:,:),coefficients(:,:),fixture_coefficients(:,:),&
-    full_fixture_coefficients(:,:)
+    full_fixture_coefficients(:,:),published_coefficients(:,:)
   complex(real64)::s(n,n),h(n,n),u(n,n),phase
   real(real64)::expected(n),eigenvalues(nstate),residual,orthogonality,projector_defect
+  real(real64),allocatable::published_eigenvalues(:)
   real(real64),parameter::boltzmann_hartree_per_kelvin=3.166811563d-6
   real(real64),allocatable::thermal_spectrum(:,:,:),thermal_occupations(:,:,:),thermal_weights(:)
   real(real64)::thermal_mu,thermal_count
@@ -74,8 +75,15 @@ program test_dg_hybrid_generalized_eigensystem_mpi
   solve_invocations=0
   call solve_dg_hybrid_generalized_once_and_publish(comm,n,nstate,row_ids,hrows,srows,1d-11,[1d0,1d0],2d0,&
     101_int64,103_int64,107_int64,109_int64,fixture_solver,published_state,state_workspace,state_fingerprint,&
-    residual,orthogonality,projector_defect,workspace,fingerprint,ok,message)
+    residual,orthogonality,projector_defect,workspace,fingerprint,ok,message,&
+    solved_coefficients=published_coefficients,solved_eigenvalues=published_eigenvalues)
   call require(ok,trim(message));call require(solve_invocations==1,'final LCFO eigensolver was not invoked exactly once')
+  call require(allocated(published_coefficients).and.allocated(published_eigenvalues),&
+    'final LCFO publication did not expose the already-solved eigenpairs')
+  call require(all(shape(published_coefficients)==[nowned,nstate]).and.size(published_eigenvalues)==nstate.and.&
+    maxval(abs(published_coefficients-fixture_coefficients))<1d-14.and.&
+    maxval(abs(published_eigenvalues-expected(:nstate)))<2d-11,&
+    'exposed final LCFO eigenpairs differ from the single backend solve')
   call require(published_state%valid.and.published_state%converged.and.&
     published_state%final_eigensolve_count==1,'final LCFO state was not published')
   allocate(thermal_spectrum(232,1,1),thermal_weights(1));thermal_weights=1d0

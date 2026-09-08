@@ -3,6 +3,7 @@ module rt_dg_hybrid_density_update
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state
+  use rt_dg_hybrid_sparse_projection,only:validate_rt_dg_hybrid_sparse_hermiticity
 #ifdef USE_MPI
   use mpi
 #endif
@@ -28,21 +29,40 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    complex(real64),allocatable::global_coefficients(:,:),orbital_values(:)
-    integer::i,p,ierr,local_bad,global_bad
+    complex(real64),allocatable::basis_batch(:,:),orbital_values(:,:),reduced_orbital_values(:,:)
+    integer,allocatable::point_counts(:)
+    integer::i,p,owner,rank,nproc,point_count,max_point_count,ierr,local_bad,global_bad
     state%density_freshly_reconstructed=.false.
     call validate_certified_rt_state(comm,state,ok,message);if(.not.ok)return
-    allocate(global_coefficients(state%certified_rank,state%noccupied),orbital_values(state%noccupied))
-    global_coefficients=(0d0,0d0)
-    do i=1,size(state%owned_row_ids)
-      global_coefficients(int(state%owned_row_ids(i)),:)=state%coefficients(i,:)
-    enddo
-    call MPI_Allreduce(MPI_IN_PLACE,global_coefficients,state%certified_rank*state%noccupied,&
-      MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT coefficient redistribution failed';return;endif
-    do p=1,size(state%grid_ids)
-      orbital_values=matmul(state%basis_values(:,p),global_coefficients)
-      state%density(p)=sum(state%occupations*abs(orbital_values)**2)
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    allocate(point_counts(nproc));point_count=size(state%grid_ids)
+    call MPI_Allgather(point_count,1,MPI_INTEGER,point_counts,1,MPI_INTEGER,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT grid-count exchange failed';return;endif
+    max_point_count=max(1,maxval(point_counts))
+    allocate(basis_batch(state%certified_rank,max_point_count),&
+      orbital_values(state%noccupied,max_point_count),reduced_orbital_values(state%noccupied,max_point_count))
+    do owner=0,nproc-1
+      point_count=point_counts(owner+1);if(point_count==0)cycle
+      basis_batch(:,1:point_count)=(0d0,0d0)
+      if(rank==owner)basis_batch(:,1:point_count)=state%basis_values
+      call MPI_Bcast(basis_batch,state%certified_rank*point_count,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT basis-slab exchange failed';return;endif
+      orbital_values(:,1:point_count)=(0d0,0d0)
+      do i=1,size(state%owned_row_ids)
+        do p=1,point_count
+          orbital_values(:,p)=orbital_values(:,p)+&
+            basis_batch(int(state%owned_row_ids(i)),p)*state%coefficients(i,:)
+        enddo
+      enddo
+      call MPI_Reduce(orbital_values,reduced_orbital_values,state%noccupied*point_count,&
+        MPI_DOUBLE_COMPLEX,MPI_SUM,owner,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT grid-local orbital reduction failed';return;endif
+      if(rank==owner)then
+        do p=1,point_count
+          state%density(p)=sum(state%occupations*abs(reduced_orbital_values(:,p))**2)
+        enddo
+      endif
     enddo
     local_bad=merge(0,1,all(ieee_is_finite(state%density)))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -98,6 +118,9 @@ contains
     local_bad=merge(0,1,all(ieee_is_finite(real(new_h))).and.all(ieee_is_finite(aimag(new_h))))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonfinite hybrid RT updated Hamiltonian';return;endif
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,state%certified_rank,state%owned_row_ids,&
+      state%operators%row_offsets,state%operators%column_ids,new_h,100d0*epsilon(1d0),ok,message)
+    if(.not.ok)then;message='hybrid RT Hamiltonian Hermiticity failed: '//trim(message);return;endif
     local_hash=0_int64;global_sum=0_int64
     do i=1,size(state%owned_row_ids)
       do edge=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1

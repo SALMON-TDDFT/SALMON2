@@ -1,33 +1,202 @@
 #!/usr/bin/env python3
-"""Exercise the real SALMON PP/Hartree/XC hybrid callback at t=0 and one step."""
+"""Run a real divided-Hybrid GS producer and consume its v3 checkpoint in Exp RT."""
 
 from pathlib import Path
-import os
+import hashlib
 import math
+import os
 import re
-import shlex
 import shutil
+import struct
 import subprocess
 import tempfile
 
 
 root = Path(__file__).resolve().parents[2]
 main_source = (root / "src/rt/main_tddft.f90").read_text()
+main_dft_source = (root / "src/gs/main_dft.f90").read_text()
 
 
 def require_hybrid_route_contract(source: str) -> None:
     continuation = source.split("subroutine run_dg_hybrid_continuation_rt()", 1)[1].split(
-        "end subroutine run_dg_hybrid_continuation_rt", 1)[0]
+        "end subroutine run_dg_hybrid_continuation_rt", 1
+    )[0]
     projection = source.split("subroutine project_salmon_local_rows", 1)[1].split(
-        "end subroutine project_salmon_local_rows", 1)[0]
+        "end subroutine project_salmon_local_rows", 1
+    )[0]
     assert "[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC" in continuation
     assert "[HYBRID-RT-STEP] step=" in continuation and "path=PP+HARTREE+XC" in continuation
+    assert "[HYBRID-RT-STATE]" in continuation
+    assert "[HYBRID-RT-PROJECTION]" in continuation
     assert "call propagate_rt_dg_hybrid_length_gauge" in continuation
     for token in ("call hartree", "call exchange_correlation_density", "call update_vlocal"):
         assert token in projection.lower(), token
 
 
+def h4_gs_input() -> str:
+    return """&calculation
+ theory='dft'
+ yn_dc='y'
+/
+&control
+ sysname='h4_hybrid_smoke'
+ yn_reset_step_restart='y'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&dc
+ num_fragment=1,1,2
+ num_rgrid_buffer=0,0,4
+ nproc_rgrid_tot=1,1,2
+ nstate_frag=20
+ energy_cut=10d0
+ yn_dc_lcfo='n'
+ yn_dc_lcfo_flux='n'
+ yn_dc_lcfo_diag='n'
+ yn_dc_fragment_optimization='n'
+ yn_dg_dc_overlapping_wannier='y'
+ yn_dg_hybrid_scf='n'
+ yn_dg_hybrid_divided_scf='y'
+ dg_hybrid_divided_mixing='pulay'
+ dg_dc_seed_mode='off'
+ dg_fragment_wf_checkpoint_mode='off'
+ dg_fragment_w90_initial_projection='scdm'
+ dg_ow_candidate_states_per_fragment=4
+ dg_ow_target_wanniers_per_fragment=0
+ dg_dc_gs_density_mix_rate=0.2d0
+ dg_dc_gs_maximum_scf_iterations=12
+ dg_dc_gs_final_density_tolerance=1d-4
+ dg_dc_gs_final_orbital_tolerance=1d-4
+ dg_dc_gs_electron_count_tolerance=1d-6
+ dg_ow_boundary_value_tolerance=1d-3
+ dg_ow_boundary_gradient_tolerance=1d-3
+ dg_ow_symmetry_tolerance=1d-8
+ dg_ow_localization_gradient_tolerance=2d-2
+ wannier_num_iter=500
+ wannier_pw_cutoff=0.5d0
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+ yn_eigenexa='n'
+ yn_scalapack='y'
+/
+&system
+ yn_periodic='y'
+ al=12d0,12d0,18d0
+ nelem=1
+ nstate=2
+ nelec=4
+ natom=4
+ temperature_k=300d0
+/
+&pseudo
+ izatom(1)=1
+ file_pseudo(1)='H_rps.dat'
+ lloc_ps(1)=0
+/
+&functional
+ xc='PZ'
+/
+&rgrid
+ num_rgrid=16,16,24
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&scf
+ nscf_init_redistribution=2
+ nscf_init_no_diagonal=0
+ nscf=60
+ ncg=3
+ method_mixing='simple'
+ mixrate=0.2d0
+ threshold=1d-4
+ yn_preconditioning='y'
+/
+&atomic_coor
+ 'H' 0d0 0d0 -4.7d0 1
+ 'H' 0d0 0d0 -3.3d0 1
+ 'H' 0d0 0d0  3.3d0 1
+ 'H' 0d0 0d0  4.7d0 1
+/
+"""
+
+
+def h4_rt_input() -> str:
+    return """&calculation
+ theory='tddft_response'
+/
+&control
+ sysname='h4_hybrid_rt_smoke'
+/
+&units
+ unit_system='a.u.'
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,2
+ yn_eigenexa='n'
+/
+&system
+ yn_periodic='y'
+ al=12d0,12d0,18d0
+ nelem=1
+ nstate=2
+ nelec=4
+ natom=4
+/
+&pseudo
+ izatom(1)=1
+ file_pseudo(1)='H_rps.dat'
+ lloc_ps(1)=0
+/
+&functional
+ xc='PZ'
+/
+&rgrid
+ num_rgrid=16,16,24
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&tgrid
+ dt=0.02d0
+ nt=2
+/
+&propagation
+ yn_rt_dg_hybrid_continuation='y'
+ yn_dg_length_gauge='y'
+/
+&emfield
+ ae_shape1='impulse'
+ e_impulse=1d-4
+ epdir_re1=0d0,0d0,1d0
+/
+&atomic_coor
+ 'H' 0d0 0d0 -4.7d0 1
+ 'H' 0d0 0d0 -3.3d0 1
+ 'H' 0d0 0d0  3.3d0 1
+ 'H' 0d0 0d0  4.7d0 1
+/
+"""
+
+
 require_hybrid_route_contract(main_source)
+divided_route = main_dft_source.split("subroutine run_dg_hybrid_divided_ground_state_for_main", 1)[1].split(
+    "end subroutine run_dg_hybrid_divided_ground_state_for_main", 1
+)[0]
+divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v3", 1)[1].split(
+    "end subroutine publish_dg_hybrid_divided_v3", 1
+)[0]
+assert divided_route.lower().count("call publish_dg_hybrid_divided_v3") == 1
+assert divided_publisher.lower().count("call write_rt_dg_hybrid_ground_state_checkpoint") == 1
+assert "solved_coefficients=final_solved_coefficients" in divided_route.lower()
+assert "solved_eigenvalues=final_solved_eigenvalues" in divided_route.lower()
 for old, replacement in (
     ("[HYBRID-RT-ROUTE]", "[REMOVED-HYBRID-RT-ROUTE]"),
     ("[HYBRID-RT-STEP]", "[REMOVED-HYBRID-RT-STEP]"),
@@ -41,165 +210,91 @@ for old, replacement in (
     else:
         raise AssertionError(f"route contract mutation survived: {old}")
 
-if os.environ.get("SALMON_LAPACK_LIBS"):
-    libs = shlex.split(os.environ["SALMON_LAPACK_LIBS"])
-elif shutil.which("brew") and subprocess.run(
-    ["brew", "--prefix", "openblas"], capture_output=True
-).returncode == 0:
-    prefix = subprocess.check_output(["brew", "--prefix", "openblas"], text=True).strip()
-    libs = [f"-L{prefix}/lib", "-lopenblas"]
-else:
-    libs = ["-llapack", "-lblas"]
-
 env = os.environ.copy()
 env["OMP_NUM_THREADS"] = "1"
 env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")
 mpiexec = shutil.which("mpiexec")
-mpifort = shutil.which("mpifort")
+assert mpiexec, "MPI launcher is required"
+configured_build = os.environ.get("SALMON_DG_PRODUCTION_BUILD")
+assert configured_build, "production smoke requires the current validated SALMON build"
+salmon_build = Path(configured_build).resolve()
+cache = (salmon_build / "CMakeCache.txt").read_text()
+for option in ("USE_MPI:BOOL=ON", "USE_SCALAPACK:BOOL=ON", "USE_SPGLIB:BOOL=ON"):
+    assert option in cache, option
+assert "USE_EIGENEXA:BOOL=OFF" in cache
+salmon = salmon_build / "salmon"
+assert salmon.exists(), "current-source SALMON build did not produce the executable"
+binary_hash = hashlib.sha256(salmon.read_bytes()).hexdigest()
 
 with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     work = Path(name)
-    configured_build = os.environ.get("SALMON_DG_PRODUCTION_BUILD")
-    if configured_build:
-        salmon_build = Path(configured_build).resolve()
-        cache = (salmon_build / "CMakeCache.txt").read_text()
-        assert "USE_MPI:BOOL=ON" in cache and "USE_SCALAPACK:BOOL=ON" in cache
-    else:
-        salmon_build = work / "salmon-build"
-        subprocess.run(
-            [
-                "cmake", "-S", str(root), "-B", str(salmon_build),
-                "-DUSE_MPI=ON", "-DUSE_SCALAPACK=ON", "-DUSE_EIGENEXA=OFF", "-DUSE_WANNIER90=OFF",
-                f"-DCMAKE_Fortran_COMPILER={mpifort}", "-DCMAKE_BUILD_TYPE=Debug",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-        subprocess.run(
-            ["cmake", "--build", str(salmon_build), "-j2"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-    salmon = salmon_build / "salmon"
-    assert salmon.exists(), "current-source SALMON build did not produce the executable"
-    (work / "config.h").write_text("")
-    writer = work / "write_hybrid_checkpoint"
-    sources = [
-        "src/common/dg_hybrid_sparse_metric.f90",
-        "src/common/dg_hybrid_sparse_operators.f90",
-        "src/rt/dg/rt_dg_hybrid_checkpoint.f90",
-        "src/rt/dg/rt_dg_hybrid_initialization.f90",
-        "src/rt/dg/rt_dg_hybrid_density_update.f90",
-        "tests/dg/test_rt_dg_hybrid_initialization_mpi.f90",
-    ]
-    subprocess.run(
-        [
-            mpifort,
-            "-cpp",
-            "-DUSE_MPI",
-            "-I",
-            str(work),
-            "-J",
-            str(work),
-            *[str(root / source) for source in sources],
-            *libs,
-            "-o",
-            str(writer),
-        ],
-        check=True,
+    shutil.copy2(root / "samples/exercise_01_C2H2_gs/H_rps.dat", work / "H_rps.dat")
+    gs = subprocess.run(
+        [mpiexec, "-n", "2", str(salmon)], input=h4_gs_input(), cwd=work, env=env,
+        capture_output=True, text=True, timeout=180,
     )
-    shutil.copy2(root / "testsuites/pseudo/Si.cpi", work / "Si.cpi")
-    (work / "atom.dat").write_text("  'Si' 0.0 0.0 0.0 1\n")
+    assert gs.returncode == 0, (gs.stdout, gs.stderr)
+    assert gs.stdout.count("end SALMON") == 2, gs.stdout
+    for receipt in (
+        "[DG-DC-SEED]", "[DG-FRAGMENT-WF]", "[DG-HYBRID-DIVIDED-SEED]",
+        "[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once",
+    ):
+        assert receipt in gs.stdout, receipt
+    handoff = re.findall(
+        r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo construction_rank=(\d+) solved_rank=(\d+) "
+        r"certified_rank=(\d+) occupied_rank=(\d+).*writer_count=(\d+)", gs.stdout,
+    )
+    assert len(handoff) == 1, gs.stdout
+    construction, solved, certified, occupied, writer_count = map(int, handoff[0])
+    assert construction == solved and construction > certified >= occupied > 0 and writer_count == 1
+    checkpoint = work / "hybrid_dg_ground_state.chk"
+    assert checkpoint.is_file() and checkpoint.stat().st_size > 1024, (
+        "formal divided terminal LCFO did not publish its v3 Hybrid GS checkpoint",
+        gs.stdout[-6000:], gs.stderr,
+    )
+    header = checkpoint.read_bytes()[:24]
+    magic, version, nrank = struct.unpack("=16sii", header)
+    assert magic == b"SALMON_DG_GS001 " and version == 3 and nrank == 2
 
-    for nrank in (1, 2, 4):
-        checkpoint = work / "hybrid_dg_ground_state.chk"
-        written = subprocess.run(
-            [mpiexec, "-n", str(nrank), str(writer), str(checkpoint), "write_production", "2560"],
-            cwd=work,
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-        assert written.returncode == 0, (nrank, written.stdout, written.stderr)
-        input_text = f"""
-&calculation
- theory='tddft_response'
-/
-&control
- sysname='hybrid_production_smoke'
-/
-&units
- unit_system='a.u.'
-/
-&parallel
- nproc_k=1
- nproc_ob=1
- nproc_rgrid={nrank},1,1
- yn_eigenexa='n'
- yn_scalapack='y'
-/
-&system
- yn_periodic='y'
- al=40d0,8d0,8d0
- nelem=1
- nstate=2
- nelec=4
- natom=1
- file_atom_coor='atom.dat'
-/
-&pseudo
- izatom(1)=14
- file_pseudo(1)='Si.cpi'
- lloc_ps(1)=2
-/
-&functional
- xc='PZ'
-/
-&rgrid
- num_rgrid=40,8,8
-/
-&kgrid
- num_kgrid=1,1,1
-/
-&tgrid
- dt=0.02d0
- nt=1
-/
-&propagation
- yn_rt_dg_hybrid_continuation='y'
- yn_dg_length_gauge='y'
-/
-&emfield
- ae_shape1='none'
-/
-"""
-        run = subprocess.run(
-            [mpiexec, "-n", str(nrank), str(salmon)],
-            input=input_text,
-            cwd=work,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        assert run.returncode == 0, (nrank, run.stdout, run.stderr)
-        assert run.stdout.count("[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC") == 1, run.stdout
-        assert run.stdout.count("[HYBRID-RT-HANDOFF]") == 1, run.stdout
-        assert run.stdout.count("[HYBRID-RT-POTENTIAL] update=0 path=PP+HARTREE+XC") == 1, run.stdout
-        steps = re.findall(
-            r"\[HYBRID-RT-STEP\] step=(\d+) metric_norm=\s*([^ ]+) orbital_energy=\s*([^ ]+) "
-            r"polarization_norm=\s*([^ ]+) density_norm=\s*([^ ]+) update_count=(\d+) path=PP\+HARTREE\+XC",
-            run.stdout,
-        )
-        assert len(steps) == 1 and steps[0][0] == "1" and steps[0][5] == "2", run.stdout
-        observables = [float(value) for value in steps[0][1:5]]
-        assert all(math.isfinite(value) for value in observables), observables
-        assert observables[0] > 0.0 and observables[3] >= 0.0, observables
-        assert "hybrid DG RT Hartree/XC update failed" not in run.stdout + run.stderr
-        assert "production DG requires a build with MPI and ScaLAPACK support" not in run.stdout + run.stderr
-        assert "[DG-OW-RT]" not in run.stdout, "wrong coefficient-only RT route"
-        for line in run.stdout.splitlines():
-            if line.startswith("[HYBRID-RT-"):
-                print(f"ranks={nrank} {line}")
+    rt = subprocess.run(
+        [mpiexec, "-n", "2", str(salmon)], input=h4_rt_input(), cwd=work, env=env,
+        capture_output=True, text=True, timeout=180,
+    )
+    assert rt.returncode == 0, (rt.stdout, rt.stderr)
+    assert rt.stdout.count("[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC") == 1
+    assert rt.stdout.count("[HYBRID-RT-HANDOFF]") == 1
+    assert rt.stdout.count("[HYBRID-RT-POTENTIAL] update=0 path=PP+HARTREE+XC") == 1
+    state_match = re.search(
+        r"\[HYBRID-RT-STATE\]\s+basis_norm=\s*([^ ]+)\s+density_norm=\s*([^ ]+)\s+"
+        r"occupation_sum=\s*([^ ]+)\s+hamiltonian_norm=\s*([^ ]+)\s+kinetic_norm=\s*([^ ]+)\s+"
+        r"nonlocal_norm=\s*([^ ]+)\s+local_norm=\s*([^ ]+)\s+sipg_norm=\s*([^ ]+)\s+global_nnz=(\d+)",
+        rt.stdout,
+    )
+    assert state_match, rt.stdout
+    state_values = [float(value) for value in state_match.groups()[:8]]
+    assert all(math.isfinite(value) and value > 0.0 for value in state_values), state_values
+    assert int(state_match.group(9)) > 0
+    projection_match = re.search(
+        r"\[HYBRID-RT-PROJECTION\]\s+local_potential_norm=\s*([^ ]+)\s+"
+        r"hamiltonian_norm=\s*([^ ]+)\s+initial_delta=\s*([^ ]+)\s+path=PP\+HARTREE\+XC", rt.stdout,
+    )
+    assert projection_match, rt.stdout
+    assert all(math.isfinite(float(value)) and float(value) > 0.0 for value in projection_match.groups())
+    steps = re.findall(
+        r"\[HYBRID-RT-STEP\] step=(\d+) metric_norm=\s*([^ ]+) orbital_energy=\s*([^ ]+) "
+        r"polarization_norm=\s*([^ ]+) density_norm=\s*([^ ]+) update_count=(\d+) path=PP\+HARTREE\+XC",
+        rt.stdout,
+    )
+    assert steps and [int(step[0]) for step in steps] == [1, 2], rt.stdout
+    assert all(math.isfinite(float(value)) for step in steps for value in step[1:5])
+    assert all(float(step[1]) > 0.0 and float(step[4]) > 0.0 for step in steps)
+    assert "[DG-OW-RT]" not in rt.stdout
+    assert "production DG requires a build with MPI and ScaLAPACK support" not in rt.stdout + rt.stderr
+    checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    print(f"producer_binary_sha256={binary_hash}")
+    print(f"checkpoint_sha256={checkpoint_hash}")
+    for line in rt.stdout.splitlines():
+        if line.startswith("[HYBRID-RT-"):
+            print(f"ranks=2 {line}")
 
-print("PASS production hybrid GS-to-RT smoke on 1, 2, and 4 ranks")
+print("PASS actual production divided-Hybrid H4 GS-to-Exp-RT smoke on 2 ranks")

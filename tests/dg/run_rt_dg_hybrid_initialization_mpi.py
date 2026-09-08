@@ -5,6 +5,8 @@ import os,re,shlex,shutil,struct,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 initialization_source=(root/"src/rt/dg/rt_dg_hybrid_initialization.f90").read_text().lower()
 density_update_source=(root/"src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
+structural_source=(root/"src/rt/dg/rt_dg_hybrid_structural_graph.f90").read_text().lower()
+projection_source=(root/"src/rt/dg/rt_dg_hybrid_sparse_projection.f90").read_text().lower()
 rt_environment_source=(root/"src/rt/initialization_rt.f90").read_text().lower()
 main_rt_source=(root/"src/rt/main_tddft.f90").read_text().lower()
 main_rt_code="\n".join(line.split("!",1)[0] for line in main_rt_source.splitlines())
@@ -59,12 +61,12 @@ assert "callapply_construction_symmetry" not in compact and \
 builder=compact.split("subroutinebuild_certified_rt_state",1)[1].split(
   "endsubroutinebuild_certified_rt_state",1
 )[0]
-assert builder.count("payload%rt_space%metric_rows(i,j)/=(0d0,0d0)") >= 2, (
-  "Hybrid RT CSR compression must retain every exact nonzero metric entry"
+assert "callbuild_rt_dg_hybrid_structural_graph" in builder
+assert "entry_tolerance" not in builder and "epsilon(1d0)*entry_scale" not in structural_source, (
+  "Hybrid RT structural support must not drop exact basis or fixed-operator pairs by value threshold"
 )
-assert "abs(payload%rt_space%metric_rows(i,j))>entry_tolerance" not in builder, (
-  "Hybrid RT CSR compression must not threshold away metric entries"
-)
+for token in ("basis_values(i,p)/=(0d0,0d0)","pair_key", "merge_key_sets"):
+  assert token in structural_source.replace(" ",""), f"missing exact structural support token: {token}"
 assert "compute_construction_projection" not in builder and \
   "startup_projected_position,startup_projected_basis" in initializer_compact, (
   "RED Task 14: validated construction projections are recomputed while building the RT state"
@@ -81,6 +83,15 @@ for routine in ("reconstruct_rt_dg_hybrid_density","update_rt_dg_hybrid_density"
   assert "callvalidate_certified_rt_state" in body, (
     f"RED Task 14: {routine} does not collectively reject construction-rank state extents"
   )
+reconstruction=density_compact.split("subroutinereconstruct_rt_dg_hybrid_density",1)[1].split(
+  "endsubroutinereconstruct_rt_dg_hybrid_density",1
+)[0]
+assert "global_coefficients(state%certified_rank,state%noccupied)" not in reconstruction, (
+  "RED: Hybrid density reconstruction still replicates an O(rank*occupied) coefficient matrix"
+)
+assert "orbital_values(state%noccupied,max_point_count)" in reconstruction, (
+  "RED: Hybrid density reconstruction does not reduce grid-local orbital amplitudes"
+)
 
 continuation=main_compact.split("subroutinerun_dg_hybrid_continuation_rt()",1)[1].split(
   "endsubroutinerun_dg_hybrid_continuation_rt",1
@@ -140,7 +151,10 @@ assert "row_offsets,column_ids" in local_projection and "local_values(:)" in loc
 for forbidden in ("allocate(projected_local(hybrid_state%certified_rank,hybrid_state%certified_rank))",
                   "mpi_allreduce(mpi_in_place,projected_local", "doj=1,hybrid_state%certified_rank"):
   assert forbidden not in local_projection, f"Hybrid local-potential projection remains dense: {forbidden}"
-assert "mpi_reduce_scatter" in local_projection, (
+assert "callproject_rt_dg_hybrid_sparse_edges" in local_projection, (
+  "SALMON physical callback bypasses the tested sparse projection kernel"
+)
+assert "mpi_reduce_scatter" in projection_source, (
   "Hybrid local-potential projection does not reduce sparse edge contributions to row owners"
 )
 density_update=compact_density=density_compact.split("subroutineupdate_rt_dg_hybrid_density",1)[1].split(
@@ -190,7 +204,8 @@ def replace_all_i64(source,target,old,new,expected_count):
 with tempfile.TemporaryDirectory(prefix="hybrid-rt-v3-init-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_rt_v3_init"
   sources=["src/common/dg_hybrid_sparse_metric.f90","src/common/dg_hybrid_sparse_operators.f90",
-    "src/rt/dg/rt_dg_hybrid_checkpoint.f90","src/rt/dg/rt_dg_hybrid_initialization.f90",
+    "src/rt/dg/rt_dg_hybrid_checkpoint.f90","src/rt/dg/rt_dg_hybrid_structural_graph.f90",
+    "src/rt/dg/rt_dg_hybrid_sparse_projection.f90","src/rt/dg/rt_dg_hybrid_initialization.f90",
     "src/rt/dg/rt_dg_hybrid_density_update.f90",
     "tests/dg/test_rt_dg_hybrid_initialization_mpi.f90"]
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),

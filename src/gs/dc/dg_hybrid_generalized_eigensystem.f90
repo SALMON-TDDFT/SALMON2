@@ -493,7 +493,7 @@ contains
       occupations,expected_electron_count,hybrid_basis_fingerprint,metric_fingerprint,operator_fingerprint,&
       position_fingerprint,solver,state,state_workspace_bytes,state_fingerprint,maximum_residual,&
       orthogonality_defect,projector_defect,solver_workspace_bytes,solver_fingerprint,ok,message,&
-      electronic_temperature,occupation_electron_tolerance)
+      electronic_temperature,occupation_electron_tolerance,solved_coefficients,solved_eigenvalues)
     integer,intent(in)::comm,global_count,nstate
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(in)::hrows(:,:),srows(:,:)
@@ -505,6 +505,8 @@ contains
     real(real64),intent(out)::maximum_residual,orthogonality_defect,projector_defect
     logical,intent(out)::ok;character(*),intent(out)::message
     real(real64),intent(in),optional::electronic_temperature,occupation_electron_tolerance
+    complex(real64),allocatable,intent(out),optional::solved_coefficients(:,:)
+    real(real64),allocatable,intent(out),optional::solved_eigenvalues(:)
     complex(real64),allocatable::coefficients(:,:)
     real(real64),allocatable::eigenvalues(:)
     type(s_dg_hybrid_occupation_result)::occupation_result
@@ -546,6 +548,8 @@ contains
         position_fingerprint,tolerance,state,state_workspace_bytes,state_fingerprint,ok,message)
     endif
     if(.not.ok)return
+    if(present(solved_coefficients))allocate(solved_coefficients,source=coefficients)
+    if(present(solved_eigenvalues))allocate(solved_eigenvalues,source=eigenvalues)
     state%converged=.true.;state%final_eigensolve_count=1
   end subroutine solve_dg_hybrid_generalized_once_and_publish
 end module dg_hybrid_generalized_eigensystem

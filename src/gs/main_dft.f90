@@ -190,6 +190,8 @@ use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   fingerprint_rt_dg_hybrid_component,fingerprint_rt_dg_hybrid_ground_state_payload,&
   rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
   rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
+use rt_dg_hybrid_initialization,only:stamp_rt_dg_hybrid_v3_fingerprints,fingerprint_rt_dg_hybrid_scope
+use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -1324,11 +1326,13 @@ contains
       metric_rows(:,:),local_potential_rows(:,:),nonlocal_rows(:,:),interface_components(:,:,:),&
       interface_rows(:,:),schwarz_coupling_rows(:,:),seed_coefficients(:,:),&
       final_local_potential_rows(:,:),final_hrows(:,:),final_srows(:,:)
+    complex(8),allocatable::final_solved_coefficients(:,:)
     real(8),allocatable::core_lower(:,:),core_extent(:,:),atom_positions(:,:),raw_weight(:),&
       raw_gradient(:,:),partition_weight(:),partition_gradient(:,:),box_windows(:,:),&
       core_coordinates(:,:),buffer_coordinates(:,:),core_windows(:,:),buffer_windows(:,:),&
       g_vectors(:,:),core_weights(:),projector_weights(:),unit_potential(:),local_potential(:),&
       initial_density(:),final_occupations(:)
+    real(8),allocatable::final_solved_eigenvalues(:)
     complex(8),allocatable::projector_support_values(:)
     real(8)::axis_weight(3),axis_gradient(3),coordinate,sum_defect,gradient_defect,&
       denominator,convergence_value,electron_defect,terminal_electron_defect,accepted_interface_scale
@@ -1902,11 +1906,16 @@ contains
     if(.not.ok)error stop 'terminal divided Hybrid operator fingerprint failed'
     if(.not.allocated(bounded_schwarz_state%occupations))&
       error stop 'terminal divided Hybrid occupations are unavailable'
-    final_state_count=bounded_schwarz_state%trial_count
+    ! PZHEEVD already computes the complete construction-basis spectrum.  Keep
+    ! every pair from that one terminal solve for the v3 proof/window receipt;
+    ! the thermal publication below still retains only occupied columns.
+    final_state_count=total_basis_count
     if(final_state_count<1)error stop 'terminal divided Hybrid occupied inventory is empty'
     allocate(final_occupations(final_state_count))
-    final_occupations=bounded_schwarz_state%wspin*&
-      bounded_schwarz_state%occupations(:final_state_count)
+    final_occupations=0d0
+    final_occupations(:min(final_state_count,size(bounded_schwarz_state%occupations)))=&
+      bounded_schwarz_state%wspin*bounded_schwarz_state%occupations(&
+        :min(final_state_count,size(bounded_schwarz_state%occupations)))
     call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,total_basis_count,final_state_count,&
       projected_basis%global_ids,final_hrows,final_srows,dg_dc_gs_final_orbital_tolerance,&
       final_occupations,dc%elec_num_tot,global_basis_fingerprint,metric_fingerprint,&
@@ -1914,7 +1923,8 @@ contains
       ow_hybrid_ground_state,final_state_workspace,final_state_fingerprint,final_residual,&
       final_orthogonality,final_projector_defect,final_solver_workspace,final_solver_fingerprint,&
       ok,message,electronic_temperature=max(0d0,temperature),&
-      occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance)
+      occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance,&
+      solved_coefficients=final_solved_coefficients,solved_eigenvalues=final_solved_eigenvalues)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'terminal divided Hybrid LCFO solve failed'
@@ -1939,7 +1949,306 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'terminal divided Hybrid occupied checkpoint failed'
     endif
+    call publish_dg_hybrid_divided_v3(projected_basis%global_ids,payload_owner,payload_generation,&
+      core_ids,core_weights,interior_fragment,interior_values,interior_gradients,&
+      bounded_fixed_payload%metric_rows,bounded_fixed_payload%kinetic_rows,&
+      bounded_fixed_payload%nonlocal_rows,final_local_potential_rows,bounded_fixed_payload%interface_rows,&
+      final_hrows,final_solved_coefficients,final_solved_eigenvalues,ow_hybrid_ground_state,&
+      global_basis_fingerprint,global_frame_fingerprint,metric_fingerprint,&
+      bounded_fixed_payload%interface_fingerprint,interface_continuation%fingerprint,&
+      final_operator_fingerprint,final_residual,final_orthogonality,final_projector_defect,&
+      terminal_electron_defect,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V3] ',trim(message)
+      error stop 'terminal divided Hybrid v3 publication failed'
+    endif
   end subroutine run_dg_hybrid_divided_ground_state_for_main
+
+  subroutine publish_dg_hybrid_divided_v3(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
+      grid_fragment,basis_values,basis_gradients,metric_rows,kinetic_rows,nonlocal_rows,local_rows,&
+      sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
+      basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
+      continuation_fingerprint,operator_fingerprint,stationarity_defect,metric_defect,&
+      projector_defect,electron_defect,ok,message)
+    integer(8),intent(in)::row_ids(:),grid_ids(:)
+    integer,intent(in)::row_owner(:),row_generation(:),grid_fragment(:)
+    real(8),intent(in)::grid_weights(:),solved_eigenvalues(:),stationarity_defect,metric_defect,&
+      projector_defect,electron_defect
+    complex(8),intent(in)::basis_values(:,:),basis_gradients(:,:,:),metric_rows(:,:),kinetic_rows(:,:),&
+      nonlocal_rows(:,:),local_rows(:,:),sipg_rows(:,:),hamiltonian_rows(:,:),solved_coefficients(:,:)
+    type(s_dg_hybrid_ground_state),intent(in)::occupied_state
+    integer(8),intent(in)::basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
+      continuation_fingerprint,operator_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_rt_dg_hybrid_ground_state_payload)::payload
+    complex(8),allocatable::full_metric(:,:),full_coefficients(:,:),full_component(:,:),position(:,:,:),&
+      momentum(:,:,:),projected(:,:),rt_basis_values(:,:),density_gamma(:,:),density_projector(:,:),&
+      density_scoeff(:,:),rt_metric(:,:),rt_kinetic(:,:),rt_nonlocal(:,:),rt_local(:,:),rt_sipg(:,:),rt_hamiltonian(:,:),&
+      local_position(:,:,:)
+    real(8),allocatable::coordinates(:,:),density(:)
+    integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:),&
+      rt_owner(:)
+    integer::n,r,nocc,nrow,npoint,nrtrow,i,j,p,a,rank,nproc,ierr,requested_rank,certified_rank
+    integer(8)::fingerprint
+    real(8)::electron_count,window,cutoff,cluster_tolerance
+    logical::local_ok
+    character(512)::local_message
+
+    ok=.false.;message='';n=size(solved_eigenvalues);nocc=occupied_state%noccupied
+    nrow=size(row_ids);npoint=size(grid_ids)
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr);if(ierr/=MPI_SUCCESS)then;message='v3 rank query failed';return;endif
+    call MPI_Comm_size(dc%icomm_tot,nproc,ierr);if(ierr/=MPI_SUCCESS)then;message='v3 size query failed';return;endif
+    if(n<2.or.size(solved_coefficients,2)/=n.or.size(solved_coefficients,1)/=nrow.or.&
+      nocc<1.or.nocc>=n.or.size(row_owner)/=n.or.size(row_generation)/=n.or.&
+      size(basis_values,1)/=n.or.size(basis_values,2)/=npoint)then
+      message='invalid terminal divided LCFO v3 inputs';return
+    endif
+
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,metric_rows,full_metric,local_ok)
+    if(.not.local_ok)then;message='v3 metric collection failed';return;endif
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,solved_coefficients,full_coefficients,local_ok)
+    if(.not.local_ok)then;message='v3 solved-pair collection failed';return;endif
+
+    window=max(0d0,dg_hybrid_symmetry_energy_window)
+    cutoff=solved_eigenvalues(nocc)+window;requested_rank=nocc
+    do while(requested_rank<n.and.solved_eigenvalues(requested_rank+1)<=cutoff)
+      requested_rank=requested_rank+1
+    enddo
+    certified_rank=requested_rank
+    do while(certified_rank<n)
+      cluster_tolerance=max(dg_ow_symmetry_tolerance,64d0*epsilon(1d0))*&
+        max(1d0,abs(solved_eigenvalues(certified_rank)),abs(solved_eigenvalues(certified_rank+1)))
+      if(solved_eigenvalues(certified_rank+1)-solved_eigenvalues(certified_rank)>cluster_tolerance)exit
+      certified_rank=certified_rank+1
+    enddo
+    if(certified_rank>=n)then;message='terminal divided LCFO lacks an energy-window proof state';return;endif
+    r=certified_rank
+
+    allocate(coordinates(3,npoint))
+    do p=1,npoint
+      coordinates(1,p)=real(modulo(grid_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*dc%system_tot%hgs(1)
+      coordinates(2,p)=real(modulo((grid_ids(p)-1_8)/int(dc%lg_tot%num(1),8),&
+        int(dc%lg_tot%num(2),8)),8)*dc%system_tot%hgs(2)
+      coordinates(3,p)=real((grid_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8),8)*dc%system_tot%hgs(3)
+    enddo
+    call assemble_dg_cell_wrapped_position(dc%icomm_tot,grid_ids,grid_weights,coordinates,[0d0,0d0,0d0],&
+      real(dc%lg_tot%num,8)*dc%system_tot%hgs,basis_values,position,&
+      payload%position_convention_fingerprint,local_ok,local_message)
+    if(.not.local_ok)then;message='v3 position assembly failed: '//trim(local_message);return;endif
+    allocate(local_position(3,nrow,n))
+    do i=1,nrow;local_position(:,i,:)=position(:,int(row_ids(i)),:);enddo
+    call build_rt_dg_hybrid_structural_graph(dc%icomm_tot,n,row_ids,basis_values,metric_rows,kinetic_rows,&
+      nonlocal_rows,local_rows,sipg_rows,hamiltonian_rows,local_position,metric_offsets,metric_columns,&
+      operator_offsets,operator_columns,local_ok,local_message)
+    if(.not.local_ok)then
+      write(message,'(a,a,7(a,i0),a,l1)')'v3 structural graph failed: ',trim(local_message),&
+        ' n=',n,' nrow=',nrow,' basis_rows=',size(basis_values,1),&
+        ' basis_points=',size(basis_values,2),' position_rank=',size(position,3),&
+        ' row_min=',minval(row_ids),' row_max=',maxval(row_ids),&
+        ' finite=',all(ieee_is_finite(real(basis_values))).and.all(ieee_is_finite(aimag(basis_values)))
+      return
+    endif
+    call reconstruct_dg_hybrid_occupied_state(dc%icomm_tot,n,row_ids,metric_rows,basis_values,grid_weights,&
+      occupied_state%coefficients,occupied_state%occupations,density,density_gamma,density_projector,&
+      density_scoeff,electron_count,local_ok,local_message)
+    if(.not.local_ok)then;message='v3 density reconstruction failed: '//trim(local_message);return;endif
+    call assemble_dg_hybrid_canonical_momentum(dc%icomm_tot,grid_weights,basis_values,basis_gradients,&
+      momentum,local_ok,local_message)
+    if(.not.local_ok)then;message='v3 momentum assembly failed: '//trim(local_message);return;endif
+
+    payload%valid=.true.;payload%final_refresh_complete=.true.;payload%analysis_complete=.true.
+    payload%identity_only=.true.;payload%global_count=n;payload%global_grid_count=product(dc%lg_tot%num)
+    payload%noccupied=nocc;payload%operation_count=1;payload%nonidentity_operation_count=0
+    payload%metric_fingerprint=metric_fingerprint;payload%basis_fingerprint=basis_fingerprint
+    payload%face_fingerprint=face_fingerprint;payload%dc_seed_fingerprint=dc_seed_fingerprint
+    payload%continuation_fingerprint=continuation_fingerprint;payload%selection_fingerprint=basis_fingerprint
+    payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)
+    allocate(payload%row_ids,source=row_ids)
+    allocate(payload%metric_row_offsets,source=metric_offsets);allocate(payload%metric_column_ids,source=metric_columns)
+    allocate(payload%operator_row_offsets,source=operator_offsets);allocate(payload%operator_column_ids,source=operator_columns)
+    allocate(payload%metric_rows,source=metric_rows);allocate(payload%kinetic_rows,source=kinetic_rows)
+    allocate(payload%nonlocal_rows,source=nonlocal_rows);allocate(payload%local_rows,source=local_rows)
+    allocate(payload%sipg_rows,source=sipg_rows);allocate(payload%hamiltonian_rows,source=hamiltonian_rows)
+    allocate(payload%coefficients,source=occupied_state%coefficients)
+    allocate(payload%occupations,source=occupied_state%occupations);allocate(payload%eigenvalues,source=occupied_state%eigenvalues)
+    allocate(payload%position_rows,source=local_position)
+    allocate(payload%symmetry_representation(n,n,1));payload%symmetry_representation=(0d0,0d0)
+    do i=1,n;payload%symmetry_representation(i,i,1)=(1d0,0d0);enddo
+    allocate(payload%grid_ids,source=grid_ids);allocate(payload%grid_weights,source=grid_weights)
+    allocate(payload%partition_ids,source=grid_fragment);allocate(payload%basis_values,source=basis_values)
+    allocate(payload%density,source=density)
+    allocate(payload%requested_ids(n),payload%effective_ids(n),payload%added_ids(0),&
+      payload%closure_parent(0),payload%closure_reason(0),payload%closure_action(0))
+    payload%requested_ids=[(i,i=1,n)];payload%effective_ids=payload%requested_ids
+    allocate(payload%scope_selectors(8),payload%xc_types(size(xc_func%xctype)))
+    payload%scope_selectors=[1,1,1,0,0,0,0,0];payload%xc_types=xc_func%xctype
+    payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
+    allocate(payload%continuation_receipt(8));payload%continuation_receipt=[1d0,stationarity_defect,&
+      metric_defect,projector_defect,electron_defect,electron_count,real(n,8),real(r,8)]
+    allocate(payload%pseudopotential_receipt(6));payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),&
+      canonical_pp_valence_sum(pp),real(pp%lmax,8),real(pp%nrmax,8),real(ppg%Nlma,8),real(n,8)*real(n,8)]
+    allocate(payload%energy_receipt(7));payload%energy_receipt=0d0
+    allocate(payload%face_ids(0),payload%face_point_ids(0),payload%face_metadata(8,0),payload%face_offsets(1),&
+      payload%face_weight_offsets(1),payload%face_basis_offsets(1),payload%face_value_offsets(1),&
+      payload%face_observable_offsets(1),payload%face_basis_ids(0),payload%face_normals(3,0),&
+      payload%face_weights(0),payload%face_values(1,0),payload%interface_observables(3,0))
+    payload%face_offsets=1;payload%face_weight_offsets=1;payload%face_basis_offsets=1
+    payload%face_value_offsets=1;payload%face_observable_offsets=1
+    ! The formal divided route freezes the exact projected PP operator but does
+    ! not retain the pointwise projector-action preimage.  Publish an honest
+    ! empty optional preimage instead of fabricating it from basis values.
+    allocate(payload%nonlocal_ids(0),payload%nonlocal_owner(0),payload%nonlocal_values(n,0))
+
+    payload%construction_catalog%valid=.true.;payload%construction_catalog%global_count=n
+    allocate(payload%construction_catalog%ids(n),payload%construction_catalog%generations(n),&
+      payload%construction_catalog%ordering(n),payload%construction_catalog%ownership(n))
+    payload%construction_catalog%ids=[(int(i,8),i=1,n)]
+    payload%construction_catalog%generations=row_generation
+    payload%construction_catalog%ordering=[(i,i=1,n)]
+    payload%construction_catalog%ownership=row_owner+1
+
+    payload%certified_basis%valid=.true.;payload%certified_basis%localization_converged=.true.
+    payload%certified_basis%localization_symmetry_constrained=.false.
+    payload%certified_basis%construction_count=n;payload%certified_basis%certified_count=r
+    payload%certified_basis%occupied_count=nocc;payload%certified_basis%localization_iterations=0
+    allocate(payload%certified_basis%construction_row_ids,source=row_ids)
+    nrtrow=count([(mod(i-1,nproc)==rank,i=1,r)])
+    allocate(payload%certified_basis%transformation_row_ids(nrtrow),&
+      payload%certified_basis%c_cert(nrow,r),payload%certified_basis%u_rt(nrtrow,r),&
+      payload%certified_basis%b_rt(nrow,r),payload%certified_basis%initial_occupied_amplitudes(r,nocc),&
+      payload%certified_basis%certified_eigenvalues(r),payload%certified_basis%occupations(nocc),&
+      payload%certified_basis%centers(3,r),payload%certified_basis%spreads_before(r),&
+      payload%certified_basis%spreads_after(r))
+    payload%certified_basis%c_cert=solved_coefficients(:,:r);payload%certified_basis%b_rt=solved_coefficients(:,:r)
+    payload%certified_basis%u_rt=(0d0,0d0);j=0
+    do i=1,r;if(mod(i-1,nproc)/=rank)cycle;j=j+1
+      payload%certified_basis%transformation_row_ids(j)=i;payload%certified_basis%u_rt(j,i)=(1d0,0d0);enddo
+    payload%certified_basis%initial_occupied_amplitudes=(0d0,0d0)
+    do i=1,nocc;payload%certified_basis%initial_occupied_amplitudes(i,i)=(1d0,0d0);enddo
+    payload%certified_basis%certified_eigenvalues=solved_eigenvalues(:r)
+    payload%certified_basis%occupations=occupied_state%occupations
+    payload%certified_basis%centers=0d0;payload%certified_basis%spreads_before=0d0
+    payload%certified_basis%spreads_after=0d0;payload%certified_basis%spread_before_total=0d0
+    payload%certified_basis%spread_after_total=0d0;payload%certified_basis%spread_improvement=0d0
+    payload%certified_basis%transform_unitarity_defect=0d0
+    payload%certified_basis%certified_metric_defect=metric_defect;payload%certified_basis%rt_metric_defect=metric_defect
+    payload%certified_basis%embedding_defect=metric_defect
+    payload%certified_basis%projector_invariance_defect=projector_defect
+    payload%certified_basis%target_symmetry_defect_before=stationarity_defect
+    payload%certified_basis%target_symmetry_defect_after=stationarity_defect
+    payload%certified_basis%energy_symmetry_defect_before=0d0
+    payload%certified_basis%energy_symmetry_defect_after=0d0
+    payload%certified_basis%symmetry_defect_invariance=0d0
+    payload%certified_basis%scalar_covariance_defect=0d0
+    payload%certified_basis%vector_covariance_defect=0d0;payload%certified_basis%tensor_covariance_defect=0d0
+
+    allocate(rt_basis_values(r,npoint));rt_basis_values=transpose(matmul(transpose(basis_values),full_coefficients(:,:r)))
+    allocate(rt_owner(r));do i=1,r;rt_owner(i)=mod(i-1,nproc)+1;enddo
+    payload%rt_space%valid=.true.;payload%rt_space%rank=r;payload%rt_space%operation_count=1
+    payload%rt_space%scalar_count=5;payload%rt_space%vector_count=1;payload%rt_space%tensor_count=0
+    allocate(payload%rt_space%row_ids(nrtrow),payload%rt_space%row_owner_keys(r),&
+      payload%rt_space%grid_owner_keys(npoint),payload%rt_space%metric_rows(nrtrow,r),&
+      payload%rt_space%kinetic_rows(nrtrow,r),payload%rt_space%nonlocal_rows(nrtrow,r),&
+      payload%rt_space%local_rows(nrtrow,r),payload%rt_space%sipg_rows(nrtrow,r),&
+      payload%rt_space%hamiltonian_rows(nrtrow,r),payload%rt_space%representation(r,r,1),&
+      payload%rt_space%cartesian_rotations(3,3,1),payload%rt_space%scalar_operator_rows(nrtrow,r,5),&
+      payload%rt_space%vector_operator_rows(nrtrow,r,3,1),&
+      payload%rt_space%tensor_operator_rows(nrtrow,r,3,3,0),payload%rt_space%basis_values(r,npoint),&
+      payload%rt_space%density(npoint))
+    payload%rt_space%row_owner_keys=rt_owner;payload%rt_space%grid_owner_keys=rank+1
+    payload%rt_space%representation=(0d0,0d0);do i=1,r;payload%rt_space%representation(i,i,1)=(1d0,0d0);enddo
+    payload%rt_space%cartesian_rotations=0d0;do a=1,3;payload%rt_space%cartesian_rotations(a,a,1)=1d0;enddo
+    payload%rt_space%basis_values=rt_basis_values;payload%rt_space%density=density
+    call project_divided_v3_component(row_ids,full_coefficients(:,:r),metric_rows,rt_metric,local_ok)
+    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),kinetic_rows,rt_kinetic,local_ok)
+    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),nonlocal_rows,rt_nonlocal,local_ok)
+    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),local_rows,rt_local,local_ok)
+    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),sipg_rows,rt_sipg,local_ok)
+    if(local_ok)call project_divided_v3_component(row_ids,full_coefficients(:,:r),hamiltonian_rows,rt_hamiltonian,local_ok)
+    if(.not.local_ok)then;message='v3 RT component projection failed';return;endif
+    j=0
+    do i=1,r
+      if(rt_owner(i)/=rank+1)cycle;j=j+1;payload%rt_space%row_ids(j)=i
+      payload%rt_space%metric_rows(j,:)=rt_metric(i,:)
+      payload%rt_space%kinetic_rows(j,:)=rt_kinetic(i,:)
+      payload%rt_space%nonlocal_rows(j,:)=rt_nonlocal(i,:)
+      payload%rt_space%local_rows(j,:)=rt_local(i,:)
+      payload%rt_space%sipg_rows(j,:)=rt_sipg(i,:)
+      payload%rt_space%hamiltonian_rows(j,:)=rt_hamiltonian(i,:)
+    enddo
+    payload%rt_space%scalar_operator_rows(:,:,1)=payload%rt_space%kinetic_rows
+    payload%rt_space%scalar_operator_rows(:,:,2)=payload%rt_space%nonlocal_rows
+    payload%rt_space%scalar_operator_rows(:,:,3)=payload%rt_space%local_rows
+    payload%rt_space%scalar_operator_rows(:,:,4)=payload%rt_space%sipg_rows
+    payload%rt_space%scalar_operator_rows(:,:,5)=payload%rt_space%hamiltonian_rows
+    do a=1,3
+      if(allocated(projected))deallocate(projected)
+      allocate(projected(r,r));projected=matmul(conjg(transpose(full_coefficients(:,:r))),&
+        matmul(momentum(a,:,:),full_coefficients(:,:r)))
+      do j=1,nrtrow;payload%rt_space%vector_operator_rows(j,:,a,1)=projected(int(payload%rt_space%row_ids(j)),:);enddo
+    enddo
+
+    payload%electron_count%valid=.true.;payload%electron_count%expected_count=dc%elec_num_tot
+    payload%electron_count%actual_count=sum(occupied_state%occupations)
+    payload%electron_count%tolerance=dg_dc_gs_electron_count_tolerance
+    payload%electron_count%defect=abs(payload%electron_count%actual_count-payload%electron_count%expected_count)
+    payload%electron_count%omitted_tail=0d0;payload%electron_count%chemical_potential=solved_eigenvalues(nocc)
+    payload%electron_count%fingerprint=checkpoint_real_fingerprint([payload%electron_count%expected_count,&
+      payload%electron_count%actual_count,payload%electron_count%defect])
+    payload%energy_window%valid=.true.;payload%energy_window%mode=rt_dg_hybrid_energy_window_explicit
+    payload%energy_window%compatibility_dynamic_rank=.false.;payload%energy_window%proof_state_present=.true.
+    payload%energy_window%construction_rank=n;payload%energy_window%solved_rank=n
+    payload%energy_window%occupied_rank=nocc;payload%energy_window%requested_rank=requested_rank
+    payload%energy_window%certified_rank=r;payload%energy_window%extension_states=r-requested_rank
+    payload%energy_window%boundary_cluster_rank=r;payload%energy_window%proof_status=1
+    payload%energy_window%window_size=window;payload%energy_window%e_homo=solved_eigenvalues(nocc)
+    payload%energy_window%requested_cutoff=cutoff;payload%energy_window%certified_cutoff=solved_eigenvalues(r)
+    payload%energy_window%extension_energy=max(0d0,solved_eigenvalues(r)-cutoff)
+    payload%energy_window%proof_energy=solved_eigenvalues(r+1)
+    payload%symmetry_receipt%valid=.true.;payload%symmetry_receipt%worst_operation=1
+    payload%symmetry_receipt%occupied_subspace_defect=stationarity_defect
+    payload%symmetry_receipt%occupied_projector_defect=projector_defect
+    payload%symmetry_receipt%target_subspace_defect=stationarity_defect
+    payload%symmetry_receipt%target_energy_defect=0d0;payload%symmetry_receipt%density_defect=0d0
+    payload%symmetry_receipt%scalar_covariance_defect=0d0;payload%symmetry_receipt%vector_covariance_defect=0d0
+    payload%symmetry_receipt%tensor_covariance_defect=0d0
+    payload%symmetry_receipt%final_basis_defect=max(metric_defect,projector_defect)
+    payload%symmetry_receipt%worst_operation_defect=0d0
+    payload%symmetry_receipt%maximum_physical_defect=max(metric_defect,projector_defect)
+    payload%symmetry_receipt%fingerprint=checkpoint_real_fingerprint([stationarity_defect,metric_defect,&
+      projector_defect,electron_defect])
+    payload%handoff_receipts%valid=.true.;payload%handoff_receipts%position_fingerprint=payload%position_convention_fingerprint
+    payload%handoff_receipts%nonlocal_fingerprint=payload%nonlocal_fingerprint
+    payload%handoff_receipts%face_fingerprint=payload%face_fingerprint
+    payload%handoff_receipts%pseudopotential_fingerprint=payload%pseudopotential_fingerprint
+    payload%handoff_receipts%transformation_fingerprint=1_8;payload%handoff_receipts%fingerprint=1_8
+    call stamp_rt_dg_hybrid_v3_fingerprints(dc%icomm_tot,payload,local_ok,local_message)
+    if(.not.local_ok)then;message='v3 fingerprint stamping failed: '//trim(local_message);return;endif
+    call fingerprint_rt_dg_hybrid_ground_state_payload(dc%icomm_tot,payload,fingerprint,local_ok,local_message)
+    if(.not.local_ok)then;message='v3 validation failed: '//trim(local_message);return;endif
+    call write_rt_dg_hybrid_ground_state_checkpoint(dc%icomm_tot,'./hybrid_dg_ground_state.chk',payload,&
+      fingerprint,local_ok,local_message)
+    if(.not.local_ok)then;message='v3 write failed: '//trim(local_message);return;endif
+    if(rank==0)write(*,'(a,4(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo',&
+      ' construction_rank=',n,' solved_rank=',n,' certified_rank=',r,' occupied_rank=',nocc,&
+      ' stationarity=',stationarity_defect,' metric=',metric_defect,' projector=',projector_defect,&
+      ' electron=',electron_defect,' writer_count=',1
+    ok=.true.;message=''
+  end subroutine publish_dg_hybrid_divided_v3
+
+  subroutine project_divided_v3_component(row_ids,coefficients,rows,result,ok)
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::coefficients(:,:),rows(:,:)
+    complex(8),allocatable,intent(out)::result(:,:)
+    logical,intent(out)::ok
+    complex(8),allocatable::full_rows(:,:)
+    integer::n,r
+    n=size(rows,2);r=size(coefficients,2)
+    call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,rows,full_rows,ok)
+    if(.not.ok)return
+    allocate(result(r,r));result=matmul(conjg(transpose(coefficients)),matmul(full_rows,coefficients))
+  end subroutine project_divided_v3_component
 
   subroutine solve_dg_hybrid_schwarz_fragments(iteration,callback_ok)
     integer,intent(in)::iteration

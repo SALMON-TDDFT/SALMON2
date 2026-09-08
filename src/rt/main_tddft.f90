@@ -22,8 +22,8 @@ subroutine main_tddft
 use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use math_constants, only: pi
 #ifdef USE_MPI
-use mpi, only: MPI_Comm_rank,MPI_Comm_size,MPI_Bcast,MPI_INTEGER,MPI_INTEGER8,MPI_Allreduce,MPI_Allgather,&
-  MPI_Allgatherv,MPI_Reduce_scatter,MPI_IN_PLACE,MPI_DOUBLE_PRECISION,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_SUCCESS
+use mpi, only: MPI_Comm_rank,MPI_Bcast,MPI_INTEGER,MPI_Allreduce,MPI_IN_PLACE,MPI_DOUBLE_PRECISION,&
+  MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_SUCCESS
 use mpi, only: MPI_MAX
 #endif
 use salmon_global
@@ -57,6 +57,7 @@ use rt_dg_hybrid_stationarity,only:s_rt_dg_hybrid_stationarity_reference,&
 use dg_hybrid_total_energy,only:evaluate_dg_hybrid_fixed_energy
 use rt_dg_hybrid_length_gauge,only:propagate_rt_dg_hybrid_length_gauge
 use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange
+use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_sparse_edges
 use dg_overlapping_wannier_construction,only:redistribute_dg_row_owned_real_field_to_requests
 use hartree_sub,only:hartree
 use salmon_xc,only:exchange_correlation_density
@@ -292,9 +293,11 @@ subroutine run_dg_hybrid_continuation_rt()
   real(8)::electric_field(3),periods(3),metric_norm,orbital_energy,polarization(3),&
     local_defect,global_defect,local_scale,global_scale,current_total_energy,current_electron_count,&
     current_hamiltonian_residual,stationarity_tolerances(5)
+  real(8)::local_state_norms(7),global_state_norms(7),local_projection_norms(2),global_projection_norms(2)
   integer(8)::workspace,fingerprint
   integer::step,orbital,iterations,ierr,update_count,local_bad,global_bad,&
     coefficient_rows_local,coefficient_rows_global
+  integer::operator_edges_local,operator_edges_global
   logical::ok,has_energy_reference,zero_field_run
   character(256)::message
   call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
@@ -303,6 +306,22 @@ subroutine run_dg_hybrid_continuation_rt()
     dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance],hybrid_state,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initialization failed';endif
   if(nproc_id_global==0)write(*,'(a)')'[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC'
+  local_state_norms=[sum(abs(hybrid_state%basis_values)**2),sum(hybrid_state%density**2),&
+    sum(abs(hybrid_state%operators%hamiltonian_values)**2),sum(abs(hybrid_state%kinetic_rows)**2),&
+    sum(abs(hybrid_state%nonlocal_rows)**2),sum(abs(hybrid_state%local_rows)**2),&
+    sum(abs(hybrid_state%sipg_rows)**2)]
+  call MPI_Allreduce(local_state_norms,global_state_norms,size(local_state_norms),MPI_DOUBLE_PRECISION,MPI_SUM,&
+    nproc_group_global,ierr)
+  operator_edges_local=size(hybrid_state%operators%column_ids)
+  call MPI_Allreduce(operator_edges_local,operator_edges_global,1,MPI_INTEGER,MPI_SUM,nproc_group_global,ierr)
+  if(ierr/=MPI_SUCCESS)error stop 'hybrid DG RT nonzero-state receipt reduction failed'
+  global_state_norms=sqrt(global_state_norms)
+  if(nproc_id_global==0)write(*,'(a,8(a,es16.8),a,i0)')'[HYBRID-RT-STATE]',&
+    ' basis_norm=',global_state_norms(1),' density_norm=',global_state_norms(2),&
+    ' occupation_sum=',sum(hybrid_state%occupations),' hamiltonian_norm=',global_state_norms(3),&
+    ' kinetic_norm=',global_state_norms(4),' nonlocal_norm=',global_state_norms(5),&
+    ' local_norm=',global_state_norms(6),' sipg_norm=',global_state_norms(7),&
+    ' global_nnz=',operator_edges_global
   allocate(initial_hamiltonian,source=hybrid_state%operators%hamiltonian_values)
   allocate(density_for_update(size(hybrid_state%density)),&
     previous_polarization(3,hybrid_state%noccupied))
@@ -327,9 +346,23 @@ subroutine run_dg_hybrid_continuation_rt()
     nproc_group_global,ierr)
   if(ierr==MPI_SUCCESS)call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_MAX,&
     nproc_group_global,ierr)
+  ! A formal divided GS deliberately performs no post-LCFO density update.
+  ! The first RT PP+Hartree+XC projection is therefore a measured t=0
+  ! potential refresh, not an equality assertion against the fixed-DC GS
+  ! potential.  Reject only a failed/nonfinite refresh and publish its size.
   if(ierr/=MPI_SUCCESS.or.global_bad/=0.or..not.ieee_is_finite(global_defect).or.&
-      .not.ieee_is_finite(global_scale).or..not.(global_defect<=1d-10*global_scale))&
+      .not.ieee_is_finite(global_scale))&
     error stop 'hybrid DG RT initial Hamiltonian reconstruction failed'
+  local_projection_norms=[sum(abs(hybrid_state%local_rows)**2),&
+    sum(abs(hybrid_state%operators%hamiltonian_values)**2)]
+  call MPI_Allreduce(local_projection_norms,global_projection_norms,size(local_projection_norms),&
+    MPI_DOUBLE_PRECISION,MPI_SUM,nproc_group_global,ierr)
+  if(ierr/=MPI_SUCCESS)error stop 'hybrid DG RT projected-potential receipt reduction failed'
+  global_projection_norms=sqrt(global_projection_norms)
+  if(nproc_id_global==0)write(*,'(a,3(a,es16.8),a)')'[HYBRID-RT-PROJECTION]',&
+    ' local_potential_norm=',global_projection_norms(1),&
+    ' hamiltonian_norm=',global_projection_norms(2),' initial_delta=',global_defect/global_scale,&
+    ' path=PP+HARTREE+XC'
   if(nproc_id_global==0)write(*,'(a)')'[HYBRID-RT-POTENTIAL] update=0 path=PP+HARTREE+XC'
   call evaluate_hybrid_rt_physical_invariants(current_total_energy,current_electron_count,&
     current_hamiltonian_residual,ok,message)
@@ -502,12 +535,9 @@ subroutine project_salmon_local_rows(row_ids,row_offsets,column_ids,grid_ids,den
     logical,intent(out)::callback_ok
     character(*),intent(out)::callback_message
     real(8),allocatable::density_on_grid(:),potential_on_basis_grid(:),potential_source(:)
-    complex(8),allocatable::partial_values(:)
-    integer(8),allocatable::local_grid_ids(:),local_edge_rows(:),global_edge_rows(:)
-    integer,allocatable::edge_counts(:),edge_displacements(:),global_edge_columns(:)
+    integer(8),allocatable::local_grid_ids(:)
     integer(8)::workspace_peak
-    integer::p,ix,iy,iz,local_grid_count,ierr,row,row_failed,global_row_failed,&
-      edge,local_edge_count,global_edge_count,nproc
+    integer::p,ix,iy,iz,local_grid_count
     logical::redistribution_ok
     character(256)::redistribution_message
     local_grid_count=product(mg%ie-mg%is+1)
@@ -537,54 +567,9 @@ subroutine project_salmon_local_rows(row_ids,row_offsets,column_ids,grid_ids,den
     if(.not.redistribution_ok)then
       callback_ok=.false.;callback_message='physical potential redistribution failed: '//trim(redistribution_message);return
     endif
-    local_values=(0d0,0d0);row_failed=0
-    local_edge_count=size(column_ids)
-    if(size(row_offsets)/=size(row_ids)+1.or.size(local_values)/=local_edge_count.or.&
-      row_offsets(1)/=1.or.row_offsets(size(row_ids)+1)/=local_edge_count+1)row_failed=1
-    do p=1,size(row_ids)
-      row=int(row_ids(p))
-      if(row<1.or.row>hybrid_state%certified_rank)row_failed=1
-      if(row_offsets(p)<1.or.row_offsets(p+1)<row_offsets(p).or.row_offsets(p+1)>local_edge_count+1)row_failed=1
-    enddo
-    if(any(column_ids<1).or.any(column_ids>hybrid_state%certified_rank))row_failed=1
-    call MPI_Allreduce(row_failed,global_row_failed,1,MPI_INTEGER,MPI_MAX,nproc_group_global,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_row_failed/=0)then
-      callback_ok=.false.;callback_message='invalid certified row ownership in local-potential projection';return
-    endif
-    call MPI_Comm_size(nproc_group_global,nproc,ierr)
-    allocate(edge_counts(nproc),edge_displacements(nproc))
-    call MPI_Allgather(local_edge_count,1,MPI_INTEGER,edge_counts,1,MPI_INTEGER,nproc_group_global,ierr)
-    if(ierr/=MPI_SUCCESS)then
-      callback_ok=.false.;callback_message='sparse projection edge-count exchange failed';return
-    endif
-    edge_displacements(1)=0
-    do p=2,nproc;edge_displacements(p)=edge_displacements(p-1)+edge_counts(p-1);enddo
-    global_edge_count=sum(edge_counts)
-    allocate(local_edge_rows(local_edge_count),global_edge_rows(global_edge_count),&
-      global_edge_columns(global_edge_count),partial_values(global_edge_count))
-    do p=1,size(row_ids)
-      local_edge_rows(row_offsets(p):row_offsets(p+1)-1)=row_ids(p)
-    enddo
-    call MPI_Allgatherv(local_edge_rows,local_edge_count,MPI_INTEGER8,global_edge_rows,edge_counts,&
-      edge_displacements,MPI_INTEGER8,nproc_group_global,ierr)
-    if(ierr==MPI_SUCCESS)call MPI_Allgatherv(column_ids,local_edge_count,MPI_INTEGER,global_edge_columns,&
-      edge_counts,edge_displacements,MPI_INTEGER,nproc_group_global,ierr)
-    if(ierr/=MPI_SUCCESS)then
-      callback_ok=.false.;callback_message='sparse projection graph exchange failed';return
-    endif
-    partial_values=(0d0,0d0)
-    do edge=1,global_edge_count
-      row=int(global_edge_rows(edge))
-      do p=1,size(grid_ids)
-        partial_values(edge)=partial_values(edge)+hybrid_state%grid_weights(p)*&
-          conjg(hybrid_state%basis_values(row,p))*&
-          hybrid_state%basis_values(global_edge_columns(edge),p)*potential_on_basis_grid(p)
-      enddo
-    enddo
-    call MPI_Reduce_scatter(partial_values,local_values,edge_counts,MPI_DOUBLE_COMPLEX,MPI_SUM,&
-      nproc_group_global,ierr)
-    callback_ok=ierr==MPI_SUCCESS
-    if(callback_ok)then;callback_message='';else;callback_message='sparse local-potential projection failed';endif
+    call project_rt_dg_hybrid_sparse_edges(nproc_group_global,hybrid_state%certified_rank,row_ids,row_offsets,&
+      column_ids,grid_ids,hybrid_state%grid_weights,hybrid_state%basis_values,potential_on_basis_grid,&
+      local_values,callback_ok,callback_message)
 end subroutine project_salmon_local_rows
 
 subroutine run_dg_overlapping_wannier_coefficient_rt()

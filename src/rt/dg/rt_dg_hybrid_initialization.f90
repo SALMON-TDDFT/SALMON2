@@ -4,6 +4,8 @@ module rt_dg_hybrid_initialization
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use dg_hybrid_sparse_metric,only:s_dg_hybrid_sparse_metric
   use dg_hybrid_sparse_operators,only:s_dg_hybrid_sparse_operators
+  use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
+  use rt_dg_hybrid_sparse_projection,only:validate_rt_dg_hybrid_sparse_hermiticity
   use rt_dg_hybrid_checkpoint,only:s_rt_dg_hybrid_ground_state_payload,&
     read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     authenticate_rt_dg_hybrid_ground_state_payload,rt_dg_hybrid_ground_state_checkpoint_version,&
@@ -697,10 +699,11 @@ contains
     type(s_rt_dg_hybrid_state),intent(out)::state
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::r,nocc,nowned,i,j,metric_edge,operator_edge,metric_nnz,operator_nnz,ierr
+    integer::r,nocc,nowned,i,j,edge,ierr
     integer(int64)::structure_fingerprint
-    real(real64)::local_maximum,global_maximum,entry_scale,entry_tolerance
+    real(real64)::local_maximum,global_maximum
     real(real64),allocatable::reconstructed_density(:)
+    integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
     r=payload%rt_space%rank;nocc=payload%certified_basis%occupied_count
     nowned=size(payload%rt_space%row_ids);state=s_rt_dg_hybrid_state();ok=.false.;message=''
 
@@ -715,56 +718,37 @@ contains
     state%nonlocal_rows=payload%rt_space%nonlocal_rows
     state%sipg_rows=payload%rt_space%sipg_rows
 
-    entry_scale=max(1d0,maximum_complex_matrix(payload%rt_space%metric_rows),&
-      maximum_complex_matrix(payload%rt_space%hamiltonian_rows),&
-      maximum_complex_matrix(payload%rt_space%kinetic_rows),&
-      maximum_complex_matrix(payload%rt_space%nonlocal_rows),&
-      maximum_complex_matrix(payload%rt_space%local_rows),&
-      maximum_complex_matrix(payload%rt_space%sipg_rows),maximum_complex_rank3(projected_position))
-    entry_tolerance=100d0*epsilon(1d0)*entry_scale
-    metric_nnz=0;operator_nnz=0
-    do i=1,nowned
-      do j=1,r
-        if(payload%rt_space%metric_rows(i,j)/=(0d0,0d0))metric_nnz=metric_nnz+1
-        if(abs(payload%rt_space%hamiltonian_rows(i,j))>entry_tolerance.or.&
-          payload%rt_space%metric_rows(i,j)/=(0d0,0d0).or.&
-          abs(payload%rt_space%kinetic_rows(i,j))>entry_tolerance.or.&
-          abs(payload%rt_space%nonlocal_rows(i,j))>entry_tolerance.or.&
-          abs(payload%rt_space%local_rows(i,j))>entry_tolerance.or.&
-          abs(payload%rt_space%sipg_rows(i,j))>entry_tolerance.or.&
-          any(abs(projected_position(:,int(state%owned_row_ids(i)),j))>entry_tolerance))operator_nnz=operator_nnz+1
-      enddo
-    enddo
+    call build_rt_dg_hybrid_structural_graph(comm,r,state%owned_row_ids,projected_basis,&
+      payload%rt_space%metric_rows,payload%rt_space%kinetic_rows,payload%rt_space%nonlocal_rows,&
+      payload%rt_space%local_rows,payload%rt_space%sipg_rows,payload%rt_space%hamiltonian_rows,&
+      projected_position(:,int(state%owned_row_ids),:),metric_offsets,metric_columns,&
+      operator_offsets,operator_columns,ok,message)
+    if(.not.ok)then;message='certified Hybrid RT structural support failed: '//trim(message);return;endif
     allocate(state%metric%owned_row_ids(nowned),state%metric%row_offsets(nowned+1),&
-      state%metric%column_ids(metric_nnz),state%metric%values(metric_nnz),state%metric%active_rows(r),&
+      state%metric%column_ids(size(metric_columns)),state%metric%values(size(metric_columns)),state%metric%active_rows(r),&
       state%metric%packet_ids(r),state%operators%owned_row_ids(nowned),state%operators%row_offsets(nowned+1),&
-      state%operators%column_ids(operator_nnz),state%operators%metric_values(operator_nnz),&
-      state%operators%hamiltonian_values(operator_nnz),state%operators%position_values(3,operator_nnz),&
-      state%local_rows(operator_nnz))
-    state%metric%row_offsets(1)=1;state%operators%row_offsets(1)=1
-    metric_edge=0;operator_edge=0
+      state%operators%column_ids(size(operator_columns)),state%operators%metric_values(size(operator_columns)),&
+      state%operators%hamiltonian_values(size(operator_columns)),&
+      state%operators%position_values(3,size(operator_columns)),state%local_rows(size(operator_columns)))
+    state%metric%row_offsets=metric_offsets;state%metric%column_ids=metric_columns
+    state%operators%row_offsets=operator_offsets;state%operators%column_ids=operator_columns
     do i=1,nowned
-      do j=1,r
-        if(payload%rt_space%metric_rows(i,j)/=(0d0,0d0))then
-          metric_edge=metric_edge+1;state%metric%column_ids(metric_edge)=j
-          state%metric%values(metric_edge)=payload%rt_space%metric_rows(i,j)
-        endif
-        if(abs(payload%rt_space%hamiltonian_rows(i,j))>entry_tolerance.or.&
-          payload%rt_space%metric_rows(i,j)/=(0d0,0d0).or.&
-          abs(payload%rt_space%kinetic_rows(i,j))>entry_tolerance.or.&
-          abs(payload%rt_space%nonlocal_rows(i,j))>entry_tolerance.or.&
-          abs(payload%rt_space%local_rows(i,j))>entry_tolerance.or.&
-          abs(payload%rt_space%sipg_rows(i,j))>entry_tolerance.or.&
-          any(abs(projected_position(:,int(state%owned_row_ids(i)),j))>entry_tolerance))then
-          operator_edge=operator_edge+1;state%operators%column_ids(operator_edge)=j
-          state%operators%metric_values(operator_edge)=payload%rt_space%metric_rows(i,j)
-          state%operators%hamiltonian_values(operator_edge)=payload%rt_space%hamiltonian_rows(i,j)
-          state%operators%position_values(:,operator_edge)=projected_position(:,int(state%owned_row_ids(i)),j)
-          state%local_rows(operator_edge)=payload%rt_space%local_rows(i,j)
-        endif
+      do edge=state%metric%row_offsets(i),state%metric%row_offsets(i+1)-1
+        j=state%metric%column_ids(edge);state%metric%values(edge)=payload%rt_space%metric_rows(i,j)
       enddo
-      state%metric%row_offsets(i+1)=metric_edge+1;state%operators%row_offsets(i+1)=operator_edge+1
+      do edge=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1
+        j=state%operators%column_ids(edge);state%operators%metric_values(edge)=payload%rt_space%metric_rows(i,j)
+        state%operators%hamiltonian_values(edge)=payload%rt_space%hamiltonian_rows(i,j)
+        state%operators%position_values(:,edge)=projected_position(:,int(state%owned_row_ids(i)),j)
+        state%local_rows(edge)=payload%rt_space%local_rows(i,j)
+      enddo
     enddo
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,r,state%owned_row_ids,state%metric%row_offsets,&
+      state%metric%column_ids,state%metric%values,100d0*epsilon(1d0),ok,message)
+    if(.not.ok)then;message='certified Hybrid RT metric Hermiticity failed: '//trim(message);return;endif
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,r,state%owned_row_ids,state%operators%row_offsets,&
+      state%operators%column_ids,state%operators%hamiltonian_values,100d0*epsilon(1d0),ok,message)
+    if(.not.ok)then;message='certified Hybrid RT operator Hermiticity failed: '//trim(message);return;endif
     state%metric%owned_row_ids=state%owned_row_ids;state%metric%global_count=r
     state%metric%numerical_rank=r;state%metric%max_row_nnz=0;state%metric%active_rows=.true.
     do i=1,nowned
