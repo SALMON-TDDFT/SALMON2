@@ -121,9 +121,13 @@ for token in (
     "incomplete",
     "--seed-directory",
     "occupied_checkpoint_fingerprint",
-    'incomplete["wannier_wout_count"] != ranks',
+    'incomplete["wannier_fragment_ids"] != expected_fragment_ids',
     "struct.unpack_from",
     "seed_preloaded",
+    "--analyze-existing",
+    "require_mpi_completion",
+    "parse_finite_float",
+    "compare_smoke_runs",
 ):
     assert token in smoke_runner, f"short production smoke omits {token}"
 

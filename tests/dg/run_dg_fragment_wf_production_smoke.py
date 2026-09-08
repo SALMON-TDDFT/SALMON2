@@ -17,7 +17,36 @@ from pathlib import Path
 
 RANKS = 8
 ELECTRON_TOLERANCE = 1.0e-8
+TERMINAL_SOLVER_TOLERANCE = 1.0e-10
 UINT64_MASK = (1 << 64) - 1
+FLOAT_TOKEN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[EeDd][+-]?\d+)?"
+FLOAT_TOKEN_RE = re.compile(rf"{FLOAT_TOKEN}\Z", re.ASCII)
+
+
+def parse_finite_float(
+    token: str, label: str, *, minimum: float | None = None, maximum: float | None = None
+) -> float:
+    """Parse one complete decimal token and reject overflow/nonfinite values."""
+    if FLOAT_TOKEN_RE.fullmatch(token) is None:
+        raise RuntimeError(f"{label} is not a valid finite decimal scalar: {token!r}")
+    value = float(token.replace("D", "E").replace("d", "e"))
+    if not math.isfinite(value):
+        raise RuntimeError(f"{label} is not finite: {token!r}")
+    if minimum is not None and value < minimum:
+        raise RuntimeError(f"{label} is below {minimum}: {value}")
+    if maximum is not None and value > maximum:
+        raise RuntimeError(f"{label} exceeds {maximum}: {value}")
+    return value
+
+
+def require_mpi_completion(text: str, expected_ranks: int, label: str) -> None:
+    """Require the normal SALMON completion receipt from every MPI rank."""
+    completion_count = len(re.findall(r"^\s*end SALMON\s*$", text, re.MULTILINE))
+    if completion_count != expected_ranks:
+        raise RuntimeError(
+            f"{label} has incomplete process completion evidence: "
+            f"expected {expected_ranks} end SALMON receipts, found {completion_count}"
+        )
 
 
 def mix_occupied_hash(seed: int, value: int) -> int:
@@ -133,9 +162,25 @@ def one_match(pattern: str, text: str, label: str) -> re.Match[str]:
     return matches[0]
 
 
-def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int) -> dict:
+def wannier90_fragment_ids(run_dir: Path) -> list[int]:
+    """Return a unique fragment inventory for every Wannier90 output."""
+    fragment_ids = []
+    for path in run_dir.rglob("*.wout"):
+        match = re.search(r"(?:^|/)(?:f|fragment-)(\d{6})(?:/|$)", path.as_posix())
+        if not match:
+            raise RuntimeError(f"cannot identify fragment from Wannier90 output: {path}")
+        fragment_ids.append(int(match.group(1)))
+    if len(fragment_ids) != len(set(fragment_ids)):
+        raise RuntimeError("duplicate Wannier90 fragment output")
+    return sorted(fragment_ids)
+
+
+def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | None) -> dict:
     log_path = run_dir / "run.log"
     text = log_path.read_text(errors="replace")
+    if return_code is not None and return_code != 0:
+        raise RuntimeError(f"{case} exited with {return_code}: {log_path}")
+    require_mpi_completion(text, RANKS, case)
     wf = one_match(
         r"\[DG-FRAGMENT-WF\]\s+mode=auto\s+checkpoint_hit=([TF])\s+"
         r"publication_id=(-?\d+)\s+reason=(.*)$",
@@ -149,8 +194,8 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int) -
     )
     terminal = one_match(
         r"\[OW-GS\]\s+fixed-density/non-self-consistent divided WF\+PW LCFO solved once\s+"
-        r"residual=\s*([0-9Ee+\-.]+)\s+orthogonality=\s*([0-9Ee+\-.]+)\s+"
-        r"projector=\s*([0-9Ee+\-.]+)\s+electron_defect=\s*([0-9Ee+\-.]+)",
+        rf"residual=\s*({FLOAT_TOKEN})\s+orthogonality=\s*({FLOAT_TOKEN})\s+"
+        rf"projector=\s*({FLOAT_TOKEN})\s+electron_defect=\s*({FLOAT_TOKEN})",
         text,
         "terminal LCFO receipt",
     )
@@ -161,17 +206,57 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int) -
         "DC seed receipt",
     )
     schwarz = list(re.finditer(
-        r"\[DG-HYBRID-SCHWARZ\].*?electron_defect=\s*([0-9Ee+\-.]+).*?"
-        r"temperature=\s*([0-9Ee+\-.]+)",
+        rf"\[DG-HYBRID-SCHWARZ\]\s+epoch=(\d+)\s+neighbor_exchanges=(\d+)\s+"
+        rf"accepted_cg_steps=(\d+)\s+common_extensions=(\d+)\s+"
+        rf"residual=\s*({FLOAT_TOKEN})\s+electron_defect=\s*({FLOAT_TOKEN})\s+"
+        rf"temperature=\s*({FLOAT_TOKEN})",
         text,
         re.IGNORECASE,
     ))
     terminal_position = terminal.start()
     occupied = run_dir / "overlapping_wannier_occupied.chk"
     occupied_checkpoint_fingerprint = validate_occupied_checkpoint(occupied)
+    terminal_residual = parse_finite_float(
+        terminal.group(1), f"{case} terminal residual", minimum=0.0,
+        maximum=TERMINAL_SOLVER_TOLERANCE)
+    terminal_orthogonality = parse_finite_float(
+        terminal.group(2), f"{case} terminal orthogonality", minimum=0.0,
+        maximum=TERMINAL_SOLVER_TOLERANCE)
+    terminal_projector = parse_finite_float(
+        terminal.group(3), f"{case} terminal projector", minimum=0.0,
+        maximum=TERMINAL_SOLVER_TOLERANCE)
+    terminal_electron_defect = parse_finite_float(
+        terminal.group(4), f"{case} terminal electron defect", minimum=0.0,
+        maximum=ELECTRON_TOLERANCE)
+    schwarz_receipts = [{
+        "epoch": int(row.group(1)),
+        "neighbor_exchanges": int(row.group(2)),
+        "accepted_cg_steps": int(row.group(3)),
+        "common_extensions": int(row.group(4)),
+        "residual": parse_finite_float(
+            row.group(5), f"{case} Schwarz residual", minimum=0.0),
+        "electron_defect": parse_finite_float(
+            row.group(6), f"{case} Schwarz electron defect", minimum=0.0,
+            maximum=ELECTRON_TOLERANCE),
+        "temperature": parse_finite_float(
+            row.group(7), f"{case} Schwarz temperature", minimum=0.0),
+    } for row in schwarz]
+    if ([item["epoch"] for item in schwarz_receipts] != list(range(1, 7))
+            or any(item["neighbor_exchanges"] != RANKS - 1
+                   or not 1 <= item["accepted_cg_steps"] <= 3
+                   or item["common_extensions"] < 0 for item in schwarz_receipts)):
+        raise RuntimeError(f"{case} did not complete the exact six-stage DG continuation schedule")
+    if not math.isfinite(elapsed) or elapsed < 0.0:
+        raise RuntimeError(f"{case} elapsed time is not finite and nonnegative")
+    publication_values = tuple(int(value) for value in (
+        seed.group(1), seed.group(4), wf.group(2), projected.group(1)))
+    if any(value == 0 for value in publication_values):
+        raise RuntimeError(f"{case} contains a zero publication or fingerprint identity")
+    w90_fragment_ids = wannier90_fragment_ids(run_dir)
     evidence = {
         "case": case,
         "return_code": return_code,
+        "completion_receipts": RANKS,
         "elapsed_seconds": elapsed,
         "dc_publication_id": int(seed.group(1)),
         "dc_scf_skipped": seed.group(2) == "T",
@@ -181,34 +266,60 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int) -
         "wf_publication_id": int(wf.group(2)),
         "wf_reason": wf.group(3).strip(),
         "projected_basis_fingerprint": int(projected.group(1)),
-        "terminal_residual": float(terminal.group(1)),
-        "terminal_orthogonality": float(terminal.group(2)),
-        "terminal_projector": float(terminal.group(3)),
-        "electron_defect": float(terminal.group(4)),
-        "schwarz_temperature_kelvin": float(schwarz[-1].group(2)) if schwarz else None,
+        "terminal_residual": terminal_residual,
+        "terminal_orthogonality": terminal_orthogonality,
+        "terminal_projector": terminal_projector,
+        "electron_defect": terminal_electron_defect,
+        "schwarz_receipts": schwarz_receipts,
+        "schwarz_temperature_kelvin": schwarz_receipts[-1]["temperature"] if schwarz_receipts else None,
         "terminal_lcfo_count": text.count(
             "[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once"
         ),
         "post_lcfo_density_updates": text[terminal_position:].count(
             "[DG-HYBRID-DIVIDED-SCF] iteration="
         ),
-        "wannier_wout_count": len(list(run_dir.rglob("*.wout"))),
+        "wannier_wout_count": len(w90_fragment_ids),
+        "wannier_fragment_ids": w90_fragment_ids,
         "occupied_checkpoint": True,
         "occupied_checkpoint_fingerprint": occupied_checkpoint_fingerprint,
     }
-    if return_code != 0:
-        raise RuntimeError(f"{case} exited with {return_code}: {log_path}")
     if evidence["dc_mpi_size"] != RANKS:
         raise RuntimeError(f"{case} changed the rank/fragment contract")
     if evidence["terminal_lcfo_count"] != 1 or evidence["post_lcfo_density_updates"] != 0:
         raise RuntimeError(f"{case} did not perform exactly one terminal LCFO without density updates")
-    if evidence["electron_defect"] > ELECTRON_TOLERANCE:
-        raise RuntimeError(f"{case} did not reproduce 32 electrons at 300 K")
     if evidence["schwarz_temperature_kelvin"] != 300.0:
         raise RuntimeError(f"{case} changed the 300 K Schwarz temperature contract")
     if not evidence["occupied_checkpoint"]:
         raise RuntimeError(f"{case} did not publish a valid occupied checkpoint")
     return evidence
+
+
+def compare_smoke_runs(miss: dict, hit: dict, incomplete: dict, seed_preloaded: bool) -> None:
+    """Enforce miss/hit/recovery identity and restart decisions."""
+    if miss["checkpoint_hit"] or not hit["checkpoint_hit"] or incomplete["checkpoint_hit"]:
+        raise RuntimeError("fragment-WF miss/hit/incomplete auto decisions are incorrect")
+    if miss["wf_publication_id"] != hit["wf_publication_id"]:
+        raise RuntimeError("cache hit did not retain the published fragment-WF generation")
+    if incomplete["wf_publication_id"] == miss["wf_publication_id"]:
+        raise RuntimeError("incomplete publication was consumed instead of regenerated")
+    fingerprints = {item["projected_basis_fingerprint"] for item in (miss, hit, incomplete)}
+    if len(fingerprints) != 1:
+        raise RuntimeError("projected basis changed across miss/hit/incomplete recovery")
+    if not (miss["schwarz_receipts"] == hit["schwarz_receipts"]
+            == incomplete["schwarz_receipts"]):
+        raise RuntimeError("DG continuation receipts changed across miss/hit/incomplete recovery")
+    expected_fragment_ids = list(range(1, RANKS + 1))
+    if miss["wannier_fragment_ids"] != expected_fragment_ids or hit["wannier_fragment_ids"]:
+        raise RuntimeError("Wannier90 artifacts do not prove miss generation and hit bypass")
+    if incomplete["wannier_fragment_ids"] != expected_fragment_ids:
+        raise RuntimeError("incomplete checkpoint recovery did not regenerate every fragment")
+    expected_dc_skip = (True, True, True) if seed_preloaded else (False, True, True)
+    if tuple(item["dc_scf_skipped"] for item in (miss, hit, incomplete)) != expected_dc_skip:
+        raise RuntimeError("ordinary DC execution/reuse did not match the seed setup")
+    if len({item["dc_publication_id"] for item in (miss, hit, incomplete)}) != 1:
+        raise RuntimeError("ordinary-DC publication changed across the restart smoke")
+    if len({item["mapping_fingerprint"] for item in (miss, hit, incomplete)}) != 1:
+        raise RuntimeError("rank-fragment mapping changed across the restart smoke")
 
 
 def run_case(binary: Path, run_dir: Path, input_text: str, fixture: Path, timeout: int) -> dict:
@@ -235,7 +346,7 @@ def run_case(binary: Path, run_dir: Path, input_text: str, fixture: Path, timeou
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--binary", type=Path)
     parser.add_argument("--result-dir", type=Path)
     parser.add_argument(
         "--seed-directory",
@@ -243,61 +354,63 @@ def main() -> int:
         help="copy an existing authoritative DC seed into the fresh smoke directory",
     )
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--analyze-existing", action="store_true",
+                        help="analyze an already completed smoke result without launching MPI")
     args = parser.parse_args()
-    binary = args.binary.resolve(strict=True)
     result = (args.result_dir or Path("/tmp") /
               f"dg-fragment-wf-smoke-{time.strftime('%Y%m%d-%H%M%S')}").resolve()
-    if result.exists():
+    if result.exists() and not args.analyze_existing:
         raise RuntimeError(f"result directory must be fresh: {result}")
-    result.mkdir(parents=True)
+    if not result.exists() and args.analyze_existing:
+        raise RuntimeError(f"existing result directory is missing: {result}")
+    if args.binary is None and not args.analyze_existing:
+        raise RuntimeError("--binary is required unless --analyze-existing is selected")
+    binary = args.binary.resolve(strict=True) if args.binary is not None else None
+    result.mkdir(parents=True, exist_ok=args.analyze_existing)
     fixture = root / "tests/dg/data/si8_overlapping_wannier"
     template = (fixture / "inputfile.in").read_text()
     dc_seed = result / "dc-seed"
     wf_checkpoint = result / "fragment-wf"
     seed_preloaded = args.seed_directory is not None
-    if seed_preloaded:
+    if seed_preloaded and not args.analyze_existing:
         seed_source = args.seed_directory.resolve(strict=True)
         if not seed_source.is_dir():
             raise RuntimeError(f"DC seed source is not a directory: {seed_source}")
         shutil.copytree(seed_source, dc_seed)
 
-    miss = run_case(binary, result / "01-miss", render_input(template, dc_seed, wf_checkpoint),
-                    fixture, args.timeout)
-    hit = run_case(binary, result / "02-hit", render_input(template, dc_seed, wf_checkpoint),
-                   fixture, args.timeout)
-
     incomplete_checkpoint = result / "fragment-wf-incomplete"
-    shutil.copytree(wf_checkpoint, incomplete_checkpoint)
     incomplete_manifest = incomplete_checkpoint / "dg_fragment_wf.manifest"
-    incomplete_manifest.unlink()
-    incomplete = run_case(
-        binary,
-        result / "03-incomplete-recovery",
-        render_input(template, dc_seed, incomplete_checkpoint),
-        fixture,
-        args.timeout,
-    )
+    if args.analyze_existing:
+        elapsed = lambda directory: max(
+            0.0,
+            (directory / "overlapping_wannier_occupied.chk").stat().st_mtime
+            - (directory / "inputfile").stat().st_mtime,
+        )
+        miss_dir = result / "01-miss"
+        hit_dir = result / "02-hit"
+        incomplete_dir = result / "03-incomplete-recovery"
+        miss = parse_evidence(miss_dir.name, miss_dir, elapsed(miss_dir), None)
+        hit = parse_evidence(hit_dir.name, hit_dir, elapsed(hit_dir), None)
+        incomplete = parse_evidence(
+            incomplete_dir.name, incomplete_dir, elapsed(incomplete_dir), None)
+        seed_preloaded = miss["dc_scf_skipped"]
+    else:
+        assert binary is not None
+        miss = run_case(binary, result / "01-miss", render_input(template, dc_seed, wf_checkpoint),
+                        fixture, args.timeout)
+        hit = run_case(binary, result / "02-hit", render_input(template, dc_seed, wf_checkpoint),
+                       fixture, args.timeout)
+        shutil.copytree(wf_checkpoint, incomplete_checkpoint)
+        incomplete_manifest.unlink()
+        incomplete = run_case(
+            binary,
+            result / "03-incomplete-recovery",
+            render_input(template, dc_seed, incomplete_checkpoint),
+            fixture,
+            args.timeout,
+        )
 
-    if miss["checkpoint_hit"] or not hit["checkpoint_hit"] or incomplete["checkpoint_hit"]:
-        raise RuntimeError("fragment-WF miss/hit/incomplete auto decisions are incorrect")
-    if miss["wf_publication_id"] != hit["wf_publication_id"]:
-        raise RuntimeError("cache hit did not retain the published fragment-WF generation")
-    if incomplete["wf_publication_id"] == miss["wf_publication_id"]:
-        raise RuntimeError("incomplete publication was consumed instead of regenerated")
-    fingerprints = {item["projected_basis_fingerprint"] for item in (miss, hit, incomplete)}
-    if len(fingerprints) != 1:
-        raise RuntimeError("projected basis changed across miss/hit/incomplete recovery")
-    if miss["wannier_wout_count"] != RANKS or hit["wannier_wout_count"] != 0:
-        raise RuntimeError("Wannier90 artifacts do not prove miss generation and hit bypass")
-    if incomplete["wannier_wout_count"] != RANKS:
-        raise RuntimeError("incomplete checkpoint recovery did not regenerate every fragment")
-    expected_dc_skip = (True, True, True) if seed_preloaded else (False, True, True)
-    if tuple(item["dc_scf_skipped"] for item in (miss, hit, incomplete)) != expected_dc_skip:
-        raise RuntimeError("ordinary DC execution/reuse did not match the seed setup")
-    if len({item["dc_publication_id"] for item in (miss, hit, incomplete)}) != 1:
-        raise RuntimeError("ordinary-DC publication changed across the restart smoke")
-    if len({item["mapping_fingerprint"] for item in (miss, hit, incomplete)}) != 1:
-        raise RuntimeError("rank-fragment mapping changed across the restart smoke")
+    compare_smoke_runs(miss, hit, incomplete, seed_preloaded)
 
     evidence = {"mpi_ranks": RANKS, "omp_threads": 1, "seed_preloaded": seed_preloaded,
                 "manifest_removed_for_incomplete_case": str(incomplete_manifest),

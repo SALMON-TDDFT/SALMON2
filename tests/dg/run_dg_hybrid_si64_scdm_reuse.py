@@ -17,7 +17,12 @@ from pathlib import Path
 
 import numpy as np
 
-from run_dg_fragment_wf_production_smoke import validate_occupied_checkpoint
+from run_dg_fragment_wf_production_smoke import (
+    FLOAT_TOKEN,
+    parse_finite_float,
+    require_mpi_completion,
+    validate_occupied_checkpoint,
+)
 
 
 EXPECTED_PUBLICATION_ID = 7047888166118007469
@@ -27,6 +32,7 @@ DEFAULT_SEED_DIRECTORY = Path("/tmp/si64-task8-bounded-smoke-20260905/dc-seed")
 RANDOM_W90_ITERATIONS = [1342, 1192, 2640, 3058, 1927, 1837, 779, 783]
 ELECTRON_TOLERANCE = 1.0e-8
 STATE_NUMERIC_TOLERANCE = 1.0e-9
+TERMINAL_SOLVER_TOLERANCE = 1.0e-10
 SEED_FILE_SHA256 = {
     "dg_dc_seed.manifest": "abf70a65c25a249c8575ed6d3550a7c54ba8f4946e93917046aed9bc96fc11aa",
     "rank00000000": "74bf3fa914879d99f024f64fd53c45a566b0501fefda01d652b0bf59274cba0e",
@@ -132,14 +138,21 @@ def wannier90_receipts(run_dir: Path) -> list[dict[str, int | float]]:
             raise RuntimeError(f"cannot identify fragment from Wannier90 output: {path}")
         text = path.read_text(errors="replace")
         iterations = [int(value) for value in re.findall(r"^\s*(\d+).*?<--\s*CONV\s*$", text, re.M)]
-        wall = re.findall(r"Total Execution Time\s+([0-9Ee+\-.]+)\s*\(sec\)", text)
+        wall = re.findall(rf"Total Execution Time\s+({FLOAT_TOKEN})\s*\(sec\)", text)
         if not iterations or len(wall) != 1 or "Wannierisation convergence criteria satisfied" not in text:
             raise RuntimeError(f"incomplete or unconverged Wannier90 output: {path}")
+        wall_seconds = parse_finite_float(
+            wall[0], f"Wannier90 wall time for fragment {int(match.group(1))}", minimum=0.0)
+        if max(iterations) < 1:
+            raise RuntimeError(f"invalid Wannier90 iteration receipt: {path}")
         receipts.append({
             "fragment_id": int(match.group(1)),
             "iterations": max(iterations),
-            "wall_seconds": float(wall[0]),
+            "wall_seconds": wall_seconds,
         })
+    fragment_ids = [int(item["fragment_id"]) for item in receipts]
+    if len(fragment_ids) != len(set(fragment_ids)):
+        raise RuntimeError("duplicate Wannier90 fragment receipt")
     return sorted(receipts, key=lambda item: int(item["fragment_id"]))
 
 
@@ -177,6 +190,12 @@ def fragment_wf_contract_receipts(
         })
     if len(receipts) != EXPECTED_MPI_SIZE:
         raise RuntimeError("fragment-WF publication does not contain eight gauge contracts")
+    rank_fragment_pairs = {
+        (int(item["rank"]), int(item["fragment_id"])) for item in receipts
+    }
+    expected_pairs = {(rank, rank + 1) for rank in range(EXPECTED_MPI_SIZE)}
+    if rank_fragment_pairs != expected_pairs:
+        raise RuntimeError("fragment-WF rank-fragment gauge contract is not exact and unique")
     if any(item["rank"] + 1 != item["fragment_id"] or item["gauge_mode"] != "scdm"
            or item["gauge_algorithm_version"] != 1
            or item["candidate_rank"] != 400 or item["retained_rank"] != 400
@@ -193,8 +212,15 @@ def occupied_numeric_comparison(clean_path: Path, reuse_path: Path) -> dict[str,
     def read(path: Path) -> tuple[tuple[int, int, int], tuple[int, ...], tuple[float, ...],
                                   tuple[float, ...], tuple[float, ...], memoryview]:
         payload = path.read_bytes()
+        if len(payload) < 28 or payload[:16] != b"SALMON_DG_OCC02 ":
+            raise RuntimeError(f"invalid occupied checkpoint header: {path}")
         version, global_count, occupied_count = struct.unpack_from("=iii", payload, 16)
+        if version != 2 or global_count < 1 or occupied_count < 1:
+            raise RuntimeError(f"invalid occupied checkpoint dimensions: {path}")
         offset = 28
+        minimum_size = offset + 80 + 16 * occupied_count + 40 + 16 * global_count * occupied_count
+        if len(payload) < minimum_size:
+            raise RuntimeError(f"truncated occupied checkpoint numeric payload: {path}")
         fingerprints = struct.unpack_from("=10Q", payload, offset)
         offset += 80
         occupations = struct.unpack_from(f"={occupied_count}d", payload, offset)
@@ -205,6 +231,11 @@ def occupied_numeric_comparison(clean_path: Path, reuse_path: Path) -> dict[str,
         offset += 40
         coefficient_count = 2 * global_count * occupied_count
         coefficients = memoryview(payload)[offset:offset + 8 * coefficient_count].cast("d")
+        if (not all(math.isfinite(value) and value >= 0.0 for value in occupations)
+                or not all(math.isfinite(value) for value in eigenvalues)
+                or not all(math.isfinite(value) and value >= 0.0 for value in receipts)
+                or not all(math.isfinite(value) for value in coefficients)):
+            raise RuntimeError(f"occupied checkpoint numeric payload is not finite: {path}")
         return ((version, global_count, occupied_count), fingerprints, occupations,
                 eigenvalues, receipts, coefficients)
 
@@ -220,6 +251,8 @@ def occupied_numeric_comparison(clean_path: Path, reuse_path: Path) -> dict[str,
         max((abs(a - b) for a, b in zip(clean[index], reuse[index])), default=0.0)
         for index in (2, 3, 4)
     ]
+    if not all(math.isfinite(value) for value in maximums):
+        raise RuntimeError("occupied checkpoint spectral comparison is not finite")
     global_count, occupied_count = clean[0][1:]
     # The writer emits one contiguous row_values(:) vector per global row,
     # rather than writing coefficients(:,:) as one Fortran matrix record.
@@ -229,6 +262,8 @@ def occupied_numeric_comparison(clean_path: Path, reuse_path: Path) -> dict[str,
     reuse_coefficients = np.frombuffer(reuse[5], dtype=np.float64).view(np.complex128).reshape(
         global_count, occupied_count)
     coefficient_difference = float(np.max(np.abs(clean_coefficients - reuse_coefficients), initial=0.0))
+    if not math.isfinite(coefficient_difference):
+        raise RuntimeError("occupied checkpoint coefficient comparison is not finite")
 
     # Compare rho = C diag(f) C^H directly, in bounded row blocks.  This is
     # invariant to phases and to rotations inside equally occupied degenerate
@@ -239,13 +274,19 @@ def occupied_numeric_comparison(clean_path: Path, reuse_path: Path) -> dict[str,
     density_difference_squared = 0.0
     clean_density_squared = 0.0
     reuse_density_squared = 0.0
-    for first in range(0, global_count, 128):
-        last = min(first + 128, global_count)
-        clean_rows = (clean_coefficients[first:last, :] * clean_occupations) @ clean_coefficients.conj().T
-        reuse_rows = (reuse_coefficients[first:last, :] * reuse_occupations) @ reuse_coefficients.conj().T
-        density_difference_squared += float(np.vdot(clean_rows - reuse_rows, clean_rows - reuse_rows).real)
-        clean_density_squared += float(np.vdot(clean_rows, clean_rows).real)
-        reuse_density_squared += float(np.vdot(reuse_rows, reuse_rows).real)
+    with np.errstate(over="ignore", invalid="ignore"):
+        for first in range(0, global_count, 128):
+            last = min(first + 128, global_count)
+            clean_rows = (clean_coefficients[first:last, :] * clean_occupations) @ clean_coefficients.conj().T
+            reuse_rows = (reuse_coefficients[first:last, :] * reuse_occupations) @ reuse_coefficients.conj().T
+            if not np.isfinite(clean_rows).all() or not np.isfinite(reuse_rows).all():
+                raise RuntimeError("occupied checkpoint density comparison is not finite")
+            density_difference_squared += float(np.vdot(clean_rows - reuse_rows, clean_rows - reuse_rows).real)
+            clean_density_squared += float(np.vdot(clean_rows, clean_rows).real)
+            reuse_density_squared += float(np.vdot(reuse_rows, reuse_rows).real)
+    if not all(math.isfinite(value) and value >= 0.0 for value in (
+            density_difference_squared, clean_density_squared, reuse_density_squared)):
+        raise RuntimeError("occupied checkpoint density norm comparison is not finite")
     density_scale = max(math.sqrt(clean_density_squared), math.sqrt(reuse_density_squared), np.finfo(float).tiny)
     density_difference = math.sqrt(max(0.0, density_difference_squared)) / density_scale
     comparison = {
@@ -272,31 +313,41 @@ def occupied_numeric_comparison(clean_path: Path, reuse_path: Path) -> dict[str,
 
 def continuation_receipts(text: str) -> list[dict[str, int | float | str]]:
     pattern = re.compile(
-        r"\[DG-HYBRID-CONTINUATION\]\s+lambda=\s*([0-9Ee+\-.]+)\s+"
-        r"diagnostic_state_lambda=\s*([0-9Ee+\-.]+)\s+accepted_cg_steps=(\d+)\s+"
-        r"residual=\s*([0-9Ee+\-.]+)\s+orthogonality_defect=\s*([0-9Ee+\-.]+)\s+"
-        r"electron_defect=\s*([0-9Ee+\-.]+)\s+rayleigh_energy_trace=\s*([0-9Ee+\-.]+)\s+"
-        r"scaled_interface_action_norm=\s*([0-9Ee+\-.]+)\s+measurement_status=(\w+)\s+"
+        rf"\[DG-HYBRID-CONTINUATION\]\s+lambda=\s*({FLOAT_TOKEN})\s+"
+        rf"diagnostic_state_lambda=\s*({FLOAT_TOKEN})\s+accepted_cg_steps=(\d+)\s+"
+        rf"residual=\s*({FLOAT_TOKEN})\s+orthogonality_defect=\s*({FLOAT_TOKEN})\s+"
+        rf"electron_defect=\s*({FLOAT_TOKEN})\s+rayleigh_energy_trace=\s*({FLOAT_TOKEN})\s+"
+        rf"scaled_interface_action_norm=\s*({FLOAT_TOKEN})\s+measurement_status=(\w+)\s+"
         r"status=(\w+)\s+continuation_fingerprint=(-?\d+)", re.I,
     )
     return [{
-        "lambda": float(row.group(1)),
-        "diagnostic_state_lambda": float(row.group(2)),
+        "lambda": parse_finite_float(row.group(1), "continuation lambda", minimum=0.0, maximum=1.0),
+        "diagnostic_state_lambda": parse_finite_float(
+            row.group(2), "continuation diagnostic lambda", minimum=0.0, maximum=1.0),
         "accepted_cg_steps": int(row.group(3)),
-        "residual": float(row.group(4)),
-        "orthogonality_defect": float(row.group(5)),
-        "electron_defect": float(row.group(6)),
-        "rayleigh_energy_trace": float(row.group(7)),
-        "scaled_interface_action_norm": float(row.group(8)),
+        "residual": parse_finite_float(row.group(4), "continuation residual", minimum=0.0),
+        "orthogonality_defect": parse_finite_float(
+            row.group(5), "continuation orthogonality defect", minimum=0.0,
+            maximum=TERMINAL_SOLVER_TOLERANCE),
+        "electron_defect": parse_finite_float(
+            row.group(6), "continuation electron defect", minimum=0.0,
+            maximum=ELECTRON_TOLERANCE),
+        "rayleigh_energy_trace": parse_finite_float(
+            row.group(7), "continuation Rayleigh energy trace"),
+        "scaled_interface_action_norm": parse_finite_float(
+            row.group(8), "continuation scaled interface action norm", minimum=0.0),
         "measurement_status": row.group(9),
         "status": row.group(10),
         "continuation_fingerprint": int(row.group(11)),
     } for row in pattern.finditer(text)]
 
 
-def parse_run(case: str, run_dir: Path, elapsed: float, return_code: int) -> dict:
+def parse_run(case: str, run_dir: Path, elapsed: float, return_code: int | None) -> dict:
     log_path = run_dir / "run.log"
     text = log_path.read_text(errors="replace")
+    if return_code is not None and return_code != 0:
+        raise RuntimeError(f"{case} exited with {return_code}: {log_path}")
+    require_mpi_completion(text, EXPECTED_MPI_SIZE, case)
     seed = one_match(
         r"\[DG-DC-SEED\]\s+mode=read\s+publication_id=(-?\d+)\s+"
         r"scf_skipped=([TF])\s+mpi_size=(\d+)\s+mapping_fingerprint=(-?\d+)",
@@ -309,18 +360,38 @@ def parse_run(case: str, run_dir: Path, elapsed: float, return_code: int) -> dic
         text, "projected-basis fingerprint")
     terminal = one_match(
         r"\[OW-GS\]\s+fixed-density/non-self-consistent divided WF\+PW LCFO solved once\s+"
-        r"residual=\s*([0-9Ee+\-.]+)\s+orthogonality=\s*([0-9Ee+\-.]+)\s+"
-        r"projector=\s*([0-9Ee+\-.]+)\s+electron_defect=\s*([0-9Ee+\-.]+)",
+        rf"residual=\s*({FLOAT_TOKEN})\s+orthogonality=\s*({FLOAT_TOKEN})\s+"
+        rf"projector=\s*({FLOAT_TOKEN})\s+electron_defect=\s*({FLOAT_TOKEN})",
         text, "terminal fixed-density LCFO receipt")
     continuation = continuation_receipts(text)
-    temperatures = [float(value) for value in re.findall(
-        r"\[DG-HYBRID-SCHWARZ\].*?temperature=\s*([0-9Ee+\-.]+)", text)]
+    temperatures = [parse_finite_float(value, f"{case} Schwarz temperature", minimum=0.0)
+                    for value in re.findall(
+        rf"\[DG-HYBRID-SCHWARZ\].*?temperature=\s*({FLOAT_TOKEN})", text)]
     occupied = run_dir / "overlapping_wannier_occupied.chk"
     if not occupied.is_file():
         raise RuntimeError(f"missing occupied checkpoint: {occupied}")
     w90 = wannier90_receipts(run_dir)
+    terminal_residual = parse_finite_float(
+        terminal.group(1), f"{case} terminal residual", minimum=0.0,
+        maximum=TERMINAL_SOLVER_TOLERANCE)
+    terminal_orthogonality = parse_finite_float(
+        terminal.group(2), f"{case} terminal orthogonality", minimum=0.0,
+        maximum=TERMINAL_SOLVER_TOLERANCE)
+    terminal_projector = parse_finite_float(
+        terminal.group(3), f"{case} terminal projector", minimum=0.0,
+        maximum=TERMINAL_SOLVER_TOLERANCE)
+    terminal_electron_defect = parse_finite_float(
+        terminal.group(4), f"{case} terminal electron defect", minimum=0.0,
+        maximum=ELECTRON_TOLERANCE)
+    if not math.isfinite(elapsed) or elapsed < 0.0:
+        raise RuntimeError(f"{case} elapsed time is not finite and nonnegative")
+    identity_values = tuple(int(value) for value in (
+        seed.group(1), seed.group(4), wf.group(2), projected.group(1)))
+    if any(value == 0 for value in identity_values):
+        raise RuntimeError(f"{case} contains a zero publication or fingerprint identity")
     evidence = {
         "case": case, "return_code": return_code, "elapsed_seconds": elapsed,
+        "completion_receipts": EXPECTED_MPI_SIZE,
         "dc_publication_id": int(seed.group(1)), "dc_scf_skipped": seed.group(2) == "T",
         "dc_mpi_size": int(seed.group(3)), "mapping_fingerprint": int(seed.group(4)),
         "checkpoint_hit": wf.group(1) == "T", "wf_publication_id": int(wf.group(2)),
@@ -329,10 +400,10 @@ def parse_run(case: str, run_dir: Path, elapsed: float, return_code: int) -> dic
         "random_wannier90_iterations": RANDOM_W90_ITERATIONS,
         "continuation": continuation,
         "continuation_fingerprints": [item["continuation_fingerprint"] for item in continuation],
-        "terminal_residual": float(terminal.group(1)),
-        "terminal_orthogonality": float(terminal.group(2)),
-        "terminal_projector": float(terminal.group(3)),
-        "terminal_electron_defect": float(terminal.group(4)),
+        "terminal_residual": terminal_residual,
+        "terminal_orthogonality": terminal_orthogonality,
+        "terminal_projector": terminal_projector,
+        "terminal_electron_defect": terminal_electron_defect,
         "schwarz_temperatures_kelvin": temperatures,
         "occupied_checkpoint_fingerprint": validate_occupied_checkpoint(occupied),
         "occupied_checkpoint_path": str(occupied),
@@ -355,16 +426,12 @@ def parse_run(case: str, run_dir: Path, elapsed: float, return_code: int) -> dic
         and all(item["measurement_status"].lower() == "valid"
                 and item["status"].lower() == "accepted"
                 and 1 <= item["accepted_cg_steps"] <= 3 for item in continuation))
-    if return_code != 0:
-        raise RuntimeError(f"{case} exited with {return_code}: {log_path}")
     if not exact_seed:
         raise RuntimeError(f"{case} did not reuse the exact authoritative DC seed")
     if not valid_schedule:
         raise RuntimeError(f"{case} did not complete the six-point fixed-density DG schedule")
     if not temperatures or any(value != 300.0 for value in temperatures):
         raise RuntimeError(f"{case} changed the 300 K occupation contract")
-    if evidence["terminal_electron_defect"] > ELECTRON_TOLERANCE:
-        raise RuntimeError(f"{case} did not reproduce 256 electrons")
     if evidence["terminal_lcfo_count"] != 1 or evidence["post_lcfo_density_updates"] != 0:
         raise RuntimeError(f"{case} did not perform exactly one terminal LCFO without density updates")
     if evidence["invalid_number_seen"]:
@@ -395,7 +462,9 @@ def run_case(binary: Path, run_dir: Path, input_text: str, fixture: Path, timeou
 def compare_generation_and_reuse(clean: dict, reuse: dict) -> dict:
     if clean["checkpoint_hit"] or not reuse["checkpoint_hit"]:
         raise RuntimeError("clean/reuse fragment-WF cache decisions are incorrect")
-    if len(clean["wannier90"]) != EXPECTED_MPI_SIZE or reuse["wannier90"]:
+    expected_fragments = list(range(1, EXPECTED_MPI_SIZE + 1))
+    if ([int(item["fragment_id"]) for item in clean["wannier90"]] != expected_fragments
+            or reuse["wannier90"]):
         raise RuntimeError("Wannier90 artifacts do not prove eight clean builds and zero reuse calls")
     exact_fields = (
         "dc_publication_id", "mapping_fingerprint", "wf_publication_id",
@@ -406,6 +475,8 @@ def compare_generation_and_reuse(clean: dict, reuse: dict) -> dict:
     float_fields = (
         "terminal_residual", "terminal_orthogonality", "terminal_projector",
         "terminal_electron_defect")
+    if any(not math.isfinite(float(run[field])) for run in (clean, reuse) for field in float_fields):
+        raise RuntimeError("terminal observables are not finite")
     inconsistent = [field for field in float_fields if not math.isclose(
         clean[field], reuse[field], rel_tol=2.0e-10, abs_tol=1.0e-10)]
     if inconsistent:
@@ -454,8 +525,8 @@ def main() -> int:
             0.0,
             (directory / "overlapping_wannier_occupied.chk").stat().st_mtime
             - (directory / "inputfile").stat().st_mtime)
-        clean = parse_run(clean_dir.name, clean_dir, elapsed(clean_dir), 0)
-        reuse = parse_run(reuse_dir.name, reuse_dir, elapsed(reuse_dir), 0)
+        clean = parse_run(clean_dir.name, clean_dir, elapsed(clean_dir), None)
+        reuse = parse_run(reuse_dir.name, reuse_dir, elapsed(reuse_dir), None)
         expected_seed = {
             "publication_id": clean["dc_publication_id"],
             "mpi_size": clean["dc_mpi_size"],
