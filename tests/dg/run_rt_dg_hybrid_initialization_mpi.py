@@ -59,6 +59,12 @@ assert "callapply_construction_symmetry" not in compact and \
 builder=compact.split("subroutinebuild_certified_rt_state",1)[1].split(
   "endsubroutinebuild_certified_rt_state",1
 )[0]
+assert builder.count("payload%rt_space%metric_rows(i,j)/=(0d0,0d0)") >= 2, (
+  "Hybrid RT CSR compression must retain every exact nonzero metric entry"
+)
+assert "abs(payload%rt_space%metric_rows(i,j))>entry_tolerance" not in builder, (
+  "Hybrid RT CSR compression must not threshold away metric entries"
+)
 assert "compute_construction_projection" not in builder and \
   "startup_projected_position,startup_projected_basis" in initializer_compact, (
   "RED Task 14: validated construction projections are recomputed while building the RT state"
@@ -128,9 +134,25 @@ assert "electron_count=sum(hybrid_state%occupations)" not in physical_invariants
 local_projection=main_compact.split("subroutineproject_salmon_local_rows",1)[1].split(
   "endsubroutineproject_salmon_local_rows",1
 )[0]
-assert "mpi_reduce(" not in local_projection and \
-  "mpi_allreduce(mpi_in_place,projected_local" in local_projection, (
-  "RED Task 14: local-potential projection still serializes one collective per certified row"
+assert "row_offsets,column_ids" in local_projection and "local_values(:)" in local_projection, (
+  "Hybrid local-potential callback does not consume the owned frozen CSR graph"
+)
+for forbidden in ("allocate(projected_local(hybrid_state%certified_rank,hybrid_state%certified_rank))",
+                  "mpi_allreduce(mpi_in_place,projected_local", "doj=1,hybrid_state%certified_rank"):
+  assert forbidden not in local_projection, f"Hybrid local-potential projection remains dense: {forbidden}"
+assert "mpi_reduce_scatter" in local_projection, (
+  "Hybrid local-potential projection does not reduce sparse edge contributions to row owners"
+)
+density_update=compact_density=density_compact.split("subroutineupdate_rt_dg_hybrid_density",1)[1].split(
+  "endsubroutineupdate_rt_dg_hybrid_density",1)[0]
+for forbidden in ("new_local(size(state%owned_row_ids),state%certified_rank)",
+                  "new_h(size(state%owned_row_ids),state%certified_rank)",
+                  "size(state%operators%column_ids)/=nowned*r",
+                  "state%operators%row_offsets(nowned+1)/=nowned*r+1"):
+  assert forbidden not in density_compact, f"Hybrid RT density update requires dense rows: {forbidden}"
+assert "project_local(state%owned_row_ids,state%operators%row_offsets," \
+  "state%operators%column_ids,state%grid_ids,density,new_local" in density_update, (
+  "Hybrid RT density update does not request only frozen operator CSR values"
 )
 
 assert "subroutine initialization_rt_dg_hybrid" in rt_environment_source

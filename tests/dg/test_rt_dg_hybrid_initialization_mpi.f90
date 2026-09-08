@@ -15,14 +15,15 @@ program test_rt_dg_hybrid_initialization_mpi
   integer,parameter::construction_rank=3,certified_rank=2,occupied_rank=1,operation_count=2,grid_count=2
   integer(int64),parameter::cell_wrapped_position_fingerprint=int(z'43454C4C57524150',int64)
   real(real64),parameter::startup_tolerances(4)=[1d-11,1d-11,1d-11,1d-11]
-  integer::comm,rank,nproc,ierr
+  integer::comm,rank,nproc,ierr,smoke_grid_count
   integer(int64)::fingerprint
   logical::ok
-  character(256)::message,path,mode
+  character(256)::message,path,mode,grid_count_argument
   type(s_rt_dg_hybrid_ground_state_payload)::payload
   type(s_rt_dg_hybrid_state)::state
   logical::force_callback_failure=.false.
   real(real64)::reference_density_total=0d0
+  complex(real64)::sparse_local_reference(3,3)=(0d0,0d0)
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
@@ -30,12 +31,21 @@ program test_rt_dg_hybrid_initialization_mpi
     'Hybrid RT initialization requires complete ground-state checkpoint version 3')
   call get_command_argument(1,path);call get_command_argument(2,mode)
   if(len_trim(mode)==0)mode='roundtrip'
+  smoke_grid_count=grid_count
+  call get_command_argument(3,grid_count_argument)
+  if(len_trim(grid_count_argument)>0)read(grid_count_argument,*)smoke_grid_count
 
   select case(trim(mode))
   case('write_only')
     call build_v3_payload(payload)
     call write_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),payload,fingerprint,ok,message)
     call require(ok,'valid v3 fixture write failed: '//trim(message))
+    if(rank==0)write(*,'(a,i0)')'HYBRID_RT_V3_FINGERPRINT=',fingerprint
+  case('write_production')
+    call build_v3_payload(payload,smoke_grid_count)
+    call make_production_smoke_payload(payload)
+    call write_rt_dg_hybrid_ground_state_checkpoint(comm,trim(path),payload,fingerprint,ok,message)
+    call require(ok,'production v3 fixture write failed: '//trim(message))
     if(rank==0)write(*,'(a,i0)')'HYBRID_RT_V3_FINGERPRINT=',fingerprint
   case('roundtrip')
     call build_v3_payload(payload)
@@ -144,7 +154,7 @@ contains
     type(s_rt_dg_hybrid_v3_startup_receipt)::receipt
     integer::i,row,column,saved_certified_rank
     integer(int64)::structure_before,value_before
-    logical::extent_ok,coefficient_ok,density_ok,position_ok
+    logical::extent_ok,coefficient_ok,density_ok,position_ok,diagonal_found
     real(real64)::symmetry_defect,expected_position
     complex(real64),allocatable::hamiltonian_before(:)
     real(real64),allocatable::density_for_update(:)
@@ -188,7 +198,7 @@ contains
     call require(size(state%coefficients,1)==size(state%owned_row_ids).and.&
       size(state%coefficients,2)==occupied_rank,'RT coefficient extent is not certified-rank owned')
     call require(size(state%kinetic_rows,2)==certified_rank.and.size(state%nonlocal_rows,2)==certified_rank.and.&
-      size(state%local_rows,2)==certified_rank.and.size(state%sipg_rows,2)==certified_rank,&
+      size(state%local_rows)==size(state%operators%column_ids).and.size(state%sipg_rows,2)==certified_rank,&
       'RT fixed operators retain construction columns')
     call require(size(state%basis_values,1)==certified_rank.and.&
       size(state%basis_values,2)==size(state%grid_ids),'RT basis values are not the localized certified basis')
@@ -214,14 +224,16 @@ contains
     position_ok=.true.
     do i=1,size(state%owned_row_ids)
       row=int(state%owned_row_ids(i))
-      do column=1,certified_rank
+      diagonal_found=.false.
+      do column=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1
         expected_position=0d0
-        if(column==row)expected_position=0.25d0+merge(1d0,-1d0,row==1)
-        if(abs(state%operators%position_values(1,(i-1)*certified_rank+column)-&
-          expected_position)>startup_tolerances(4))position_ok=.false.
-        if(any(abs(state%operators%position_values(2:3,(i-1)*certified_rank+column))>&
-          startup_tolerances(4)))position_ok=.false.
+        if(state%operators%column_ids(column)==row)then
+          diagonal_found=.true.;expected_position=0.25d0+merge(1d0,-1d0,row==1)
+        endif
+        if(abs(state%operators%position_values(1,column)-expected_position)>startup_tolerances(4))position_ok=.false.
+        if(any(abs(state%operators%position_values(2:3,column))>startup_tolerances(4)))position_ok=.false.
       enddo
+      if(.not.diagonal_found)position_ok=.false.
     enddo
     call require(position_ok,'construction position was not projected as B_rt^H X B_rt')
 
@@ -258,7 +270,99 @@ contains
     call update_rt_dg_hybrid_density(comm,state,density_for_update,project_density_local,ok,message)
     call require(.not.ok,'one-rank local-potential callback failure was not rejected collectively')
     force_callback_failure=.false.
+    call exercise_sparse_density_update
   end subroutine verify_v3_startup
+
+  subroutine exercise_sparse_density_update
+    type(s_rt_dg_hybrid_state)::sparse_state
+    integer::owned_count,i,row,edge,nnz,local_degrees(3),global_degrees(3)
+    complex(real64)::expected
+    logical::sparse_values_ok
+    real(real64)::sparse_density(1)
+    owned_count=0
+    do row=1,3;if(mod(row-1,nproc)==rank)owned_count=owned_count+1;enddo
+    allocate(sparse_state%owned_row_ids(owned_count),sparse_state%coefficients(owned_count,1),&
+      sparse_state%kinetic_rows(owned_count,3),sparse_state%nonlocal_rows(owned_count,3),&
+      sparse_state%sipg_rows(owned_count,3))
+    i=0
+    do row=1,3
+      if(mod(row-1,nproc)/=rank)cycle
+      i=i+1;sparse_state%owned_row_ids(i)=row
+    enddo
+    sparse_state%coefficients=(0d0,0d0);sparse_state%kinetic_rows=(0d0,0d0)
+    sparse_state%nonlocal_rows=(0d0,0d0);sparse_state%sipg_rows=(0d0,0d0)
+    if(owned_count>0)then
+      do i=1,owned_count
+        row=int(sparse_state%owned_row_ids(i))
+        if(row==1)then
+          sparse_state%kinetic_rows(i,1)=1d0;sparse_state%kinetic_rows(i,2)=0.2d0
+        else if(row==2)then
+          sparse_state%kinetic_rows(i,1)=0.2d0;sparse_state%kinetic_rows(i,2)=2d0
+        endif
+      enddo
+    endif
+    allocate(sparse_state%metric%owned_row_ids(owned_count),sparse_state%metric%row_offsets(owned_count+1),&
+      sparse_state%metric%column_ids(owned_count),sparse_state%metric%values(owned_count),&
+      sparse_state%metric%active_rows(3),sparse_state%metric%packet_ids(3))
+    sparse_state%metric%owned_row_ids=sparse_state%owned_row_ids;sparse_state%metric%row_offsets(1)=1
+    do i=1,owned_count
+      sparse_state%metric%column_ids(i)=int(sparse_state%owned_row_ids(i));sparse_state%metric%values(i)=1d0
+      sparse_state%metric%row_offsets(i+1)=i+1
+    enddo
+    sparse_state%metric%active_rows=.true.;sparse_state%metric%packet_ids=1
+    sparse_state%metric%global_count=3;sparse_state%metric%numerical_rank=3
+    sparse_state%metric%max_row_nnz=1;sparse_state%metric%fingerprint=901_int64
+    sparse_state%metric%valid=.true.
+    nnz=0
+    do i=1,owned_count
+      row=int(sparse_state%owned_row_ids(i));if(row<3)nnz=nnz+2
+    enddo
+    allocate(sparse_state%operators%owned_row_ids(owned_count),&
+      sparse_state%operators%row_offsets(owned_count+1),sparse_state%operators%column_ids(nnz),&
+      sparse_state%operators%metric_values(nnz),sparse_state%operators%hamiltonian_values(nnz),&
+      sparse_state%operators%position_values(3,nnz),sparse_state%local_rows(nnz))
+    sparse_state%operators%owned_row_ids=sparse_state%owned_row_ids
+    sparse_state%operators%row_offsets(1)=1;edge=0
+    do i=1,owned_count
+      row=int(sparse_state%owned_row_ids(i))
+      if(row<3)then
+        edge=edge+1;sparse_state%operators%column_ids(edge)=1
+        edge=edge+1;sparse_state%operators%column_ids(edge)=2
+      endif
+      sparse_state%operators%row_offsets(i+1)=edge+1
+    enddo
+    sparse_state%operators%metric_values=(0d0,0d0);sparse_state%operators%position_values=(0d0,0d0)
+    sparse_state%operators%hamiltonian_values=(0d0,0d0);sparse_state%local_rows=(0d0,0d0)
+    sparse_state%operators%global_count=3;sparse_state%operators%metric_fingerprint=901_int64
+    sparse_state%operators%fingerprint=902_int64;sparse_state%operators%valid=.true.
+    allocate(sparse_state%grid_ids(1),sparse_state%grid_weights(1),sparse_state%density(1),&
+      sparse_state%basis_values(3,1),sparse_state%occupations(1),sparse_state%eigenvalues(3))
+    sparse_state%grid_ids=rank+1;sparse_state%grid_weights=1d0;sparse_state%density=1d0
+    sparse_state%basis_values=(0d0,0d0);sparse_state%occupations=1d0;sparse_state%eigenvalues=0d0
+    sparse_state%certified_rank=3;sparse_state%global_count=3;sparse_state%noccupied=1
+    sparse_state%operator_structure_fingerprint=902_int64;sparse_state%valid=.true.
+    sparse_local_reference=(0d0,0d0)
+    sparse_local_reference(1,1)=0.3d0;sparse_local_reference(1,2)=cmplx(0.1d0,0.05d0,real64)
+    sparse_local_reference(2,1)=conjg(sparse_local_reference(1,2));sparse_local_reference(2,2)=0.4d0
+    sparse_density=1d0
+    call update_rt_dg_hybrid_density(comm,sparse_state,sparse_density,project_sparse_density_local,ok,message)
+    call require(ok,'unequal sparse density update failed: '//trim(message))
+    local_degrees=0;sparse_values_ok=.true.
+    do i=1,owned_count
+      row=int(sparse_state%owned_row_ids(i))
+      local_degrees(row)=sparse_state%operators%row_offsets(i+1)-sparse_state%operators%row_offsets(i)
+      do edge=sparse_state%operators%row_offsets(i),sparse_state%operators%row_offsets(i+1)-1
+        expected=sparse_state%kinetic_rows(i,sparse_state%operators%column_ids(edge))+&
+          sparse_local_reference(row,sparse_state%operators%column_ids(edge))
+        if(abs(sparse_state%operators%hamiltonian_values(edge)-expected)>=1d-14)sparse_values_ok=.false.
+      enddo
+    enddo
+    call require(sparse_values_ok,'sparse density update differs from dense reference')
+    call MPI_Allreduce(local_degrees,global_degrees,3,MPI_INTEGER,MPI_SUM,comm,ierr)
+    call require(ierr==MPI_SUCCESS.and.all(global_degrees==[2,2,0]),&
+      'unequal sparse/zero-row graph was not preserved')
+    call require(size(sparse_state%local_rows)==nnz,'sparse local potential retained full columns')
+  end subroutine exercise_sparse_density_update
 
   subroutine expect_validator_rejection(tampered,expected_fingerprint)
     type(s_rt_dg_hybrid_ground_state_payload),intent(in)::tampered
@@ -482,14 +586,16 @@ contains
     enddo
   end subroutine perturb_rt_fixed_components
 
-  subroutine build_v3_payload(p)
+  subroutine build_v3_payload(p,requested_grid_count)
     type(s_rt_dg_hybrid_ground_state_payload),intent(out)::p
-    integer::row,point,i,nrow,npoint,nrtrow
+    integer,intent(in),optional::requested_grid_count
+    integer::row,point,i,nrow,npoint,nrtrow,total_grid_count
     real(real64)::a
     complex(real64)::full_u(certified_rank,certified_rank),construction_h(construction_rank,construction_rank),&
       rt_h(certified_rank,certified_rank),construction_rep(construction_rank,construction_rank,operation_count)
     p%valid=.true.;p%final_refresh_complete=.true.;p%analysis_complete=.true.;p%identity_only=.false.
-    p%global_count=construction_rank;p%global_grid_count=grid_count;p%noccupied=occupied_rank
+    total_grid_count=grid_count;if(present(requested_grid_count))total_grid_count=requested_grid_count
+    p%global_count=construction_rank;p%global_grid_count=total_grid_count;p%noccupied=occupied_rank
     p%operation_count=operation_count;p%nonidentity_operation_count=1
     p%catalog_fingerprint=101_int64;p%state_fingerprint=102_int64;p%metric_fingerprint=103_int64
     p%operator_structure_fingerprint=104_int64;p%operator_value_fingerprint=105_int64
@@ -533,11 +639,11 @@ contains
     enddo
     allocate(p%symmetry_representation,source=construction_rep)
 
-    npoint=count([(mod(point-1,nproc)==rank,point=1,grid_count)])
+    npoint=count([(mod(point-1,nproc)==rank,point=1,total_grid_count)])
     allocate(p%grid_ids(npoint),p%grid_weights(npoint),p%partition_ids(npoint),&
       p%basis_values(construction_rank,npoint),p%density(npoint))
     p%grid_weights=1d0;p%partition_ids=1;p%basis_values=(0d0,0d0);i=0
-    do point=1,grid_count
+    do point=1,total_grid_count
       if(mod(point-1,nproc)/=rank)cycle
       i=i+1;p%grid_ids(i)=point;p%density(i)=merge(1d0,0d0,point==1)
       p%basis_values(1,i)=merge((1d0,0d0),(0d0,0d0),point==1)
@@ -564,6 +670,33 @@ contains
     call stamp_rt_dg_hybrid_v3_fingerprints(comm,p,ok,message)
     call require(ok,'certified v3 named fingerprint stamping failed: '//trim(message))
   end subroutine build_v3_payload
+
+  subroutine make_production_smoke_payload(p)
+    type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::p
+    p%kinetic_rows=(0d0,0d0);p%nonlocal_rows=(0d0,0d0);p%local_rows=(0d0,0d0)
+    p%sipg_rows=(0d0,0d0);p%hamiltonian_rows=(0d0,0d0);p%basis_values=(0d0,0d0);p%density=0d0
+    p%occupations=0d0;p%eigenvalues=0d0
+    p%certified_basis%certified_eigenvalues=0d0;p%certified_basis%occupations=0d0
+    p%rt_space%kinetic_rows=(0d0,0d0);p%rt_space%nonlocal_rows=(0d0,0d0)
+    p%rt_space%local_rows=(0d0,0d0);p%rt_space%sipg_rows=(0d0,0d0)
+    p%rt_space%hamiltonian_rows=(0d0,0d0);p%rt_space%basis_values=(0d0,0d0);p%rt_space%density=0d0
+    p%rt_space%scalar_operator_rows=(0d0,0d0)
+    p%electron_count%expected_count=0d0;p%electron_count%actual_count=0d0
+    p%electron_count%defect=0d0;p%electron_count%omitted_tail=0d0
+    p%energy_window%e_homo=0d0;p%energy_window%requested_cutoff=p%energy_window%window_size
+    p%energy_window%certified_cutoff=0d0;p%energy_window%extension_energy=0d0
+    p%energy_receipt=0d0
+    call fingerprint_rt_dg_hybrid_component(comm,p%row_ids,p%kinetic_rows,p%kinetic_fingerprint,ok)
+    call require(ok,'production construction kinetic fingerprint failed')
+    call fingerprint_rt_dg_hybrid_component(comm,p%row_ids,p%nonlocal_rows,p%nonlocal_fingerprint,ok)
+    call require(ok,'production construction nonlocal fingerprint failed')
+    call fingerprint_rt_dg_hybrid_component(comm,p%row_ids,p%local_rows,p%local_fingerprint,ok)
+    call require(ok,'production construction local fingerprint failed')
+    call fingerprint_rt_dg_hybrid_component(comm,p%row_ids,p%sipg_rows,p%sipg_fingerprint,ok)
+    call require(ok,'production construction SIPG fingerprint failed')
+    call stamp_rt_dg_hybrid_v3_fingerprints(comm,p,ok,message)
+    call require(ok,'production v3 named fingerprint stamping failed: '//trim(message))
+  end subroutine make_production_smoke_payload
 
   subroutine build_common_metadata(p)
     type(s_rt_dg_hybrid_ground_state_payload),intent(inout)::p
@@ -739,17 +872,18 @@ contains
     p%handoff_receipts%fingerprint=701_int64
   end subroutine build_named_receipts
 
-  subroutine project_density_local(row_ids,grid_ids,density,local_rows,callback_ok,callback_message)
+  subroutine project_density_local(row_ids,row_offsets,column_ids,grid_ids,density,local_values,callback_ok,callback_message)
     integer(int64),intent(in)::row_ids(:),grid_ids(:)
+    integer,intent(in)::row_offsets(:),column_ids(:)
     real(real64),intent(in)::density(:)
-    complex(real64),intent(out)::local_rows(:,:)
+    complex(real64),intent(out)::local_values(:)
     logical,intent(out)::callback_ok
     character(*),intent(out)::callback_message
-    integer::q,row_position,reduction_ierr
+    integer::q,edge,row_position,reduction_ierr
     real(real64)::local_sum,global_sum
     local_sum=sum(density)
     call MPI_Allreduce(local_sum,global_sum,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,reduction_ierr)
-    local_rows=(0d0,0d0);callback_ok=reduction_ierr==MPI_SUCCESS;callback_message=''
+    local_values=(0d0,0d0);callback_ok=reduction_ierr==MPI_SUCCESS;callback_message=''
     if(.not.callback_ok)then;callback_message='fixture density reduction failed';return;endif
     if(force_callback_failure.and.rank==nproc-1)then
       callback_ok=.false.;callback_message='intentional one-rank callback failure';return
@@ -757,11 +891,32 @@ contains
     do q=1,size(row_ids)
       row_position=findloc(payload%rt_space%row_ids,row_ids(q),dim=1)
       if(row_position<1)then;callback_ok=.false.;callback_message='fixture RT row ownership mismatch';return;endif
-      local_rows(q,:)=payload%rt_space%local_rows(row_position,:)
-      local_rows(q,int(row_ids(q)))=local_rows(q,int(row_ids(q)))+&
-        cmplx(global_sum-reference_density_total,0d0,real64)
+      do edge=row_offsets(q),row_offsets(q+1)-1
+        local_values(edge)=payload%rt_space%local_rows(row_position,column_ids(edge))
+        if(column_ids(edge)==int(row_ids(q)))local_values(edge)=local_values(edge)+&
+          cmplx(global_sum-reference_density_total,0d0,real64)
+      enddo
     enddo
   end subroutine project_density_local
+
+  subroutine project_sparse_density_local(row_ids,row_offsets,column_ids,grid_ids,density,local_values,&
+      callback_ok,callback_message)
+    integer(int64),intent(in)::row_ids(:),grid_ids(:)
+    integer,intent(in)::row_offsets(:),column_ids(:)
+    real(real64),intent(in)::density(:)
+    complex(real64),intent(out)::local_values(:)
+    logical,intent(out)::callback_ok
+    character(*),intent(out)::callback_message
+    integer::i,edge,row
+    local_values=(0d0,0d0)
+    do i=1,size(row_ids)
+      row=int(row_ids(i))
+      do edge=row_offsets(i),row_offsets(i+1)-1
+        local_values(edge)=density(1)*sparse_local_reference(row,column_ids(edge))
+      enddo
+    enddo
+    callback_ok=size(grid_ids)==size(density);callback_message=''
+  end subroutine project_sparse_density_local
 
   logical function any_rank(values)
     logical,intent(in)::values(:)

@@ -28,7 +28,7 @@ module rt_dg_hybrid_initialization
     type(s_dg_hybrid_sparse_operators)::operators
     integer(int64),allocatable::owned_row_ids(:),grid_ids(:)
     complex(real64),allocatable::coefficients(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),&
-      local_rows(:,:),sipg_rows(:,:),basis_values(:,:)
+      local_rows(:),sipg_rows(:,:),basis_values(:,:)
     real(real64),allocatable::density(:),grid_weights(:),occupations(:),eigenvalues(:),energy_receipt(:)
   end type s_rt_dg_hybrid_state
   type,public::s_rt_dg_hybrid_v3_startup_receipt
@@ -697,15 +697,15 @@ contains
     type(s_rt_dg_hybrid_state),intent(out)::state
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::r,nocc,nowned,i,j,edge,ierr
+    integer::r,nocc,nowned,i,j,metric_edge,operator_edge,metric_nnz,operator_nnz,ierr
     integer(int64)::structure_fingerprint
-    real(real64)::local_maximum,global_maximum
+    real(real64)::local_maximum,global_maximum,entry_scale,entry_tolerance
     real(real64),allocatable::reconstructed_density(:)
     r=payload%rt_space%rank;nocc=payload%certified_basis%occupied_count
     nowned=size(payload%rt_space%row_ids);state=s_rt_dg_hybrid_state();ok=.false.;message=''
 
     allocate(state%owned_row_ids(nowned),state%coefficients(nowned,nocc),state%kinetic_rows(nowned,r),&
-      state%nonlocal_rows(nowned,r),state%local_rows(nowned,r),state%sipg_rows(nowned,r))
+      state%nonlocal_rows(nowned,r),state%sipg_rows(nowned,r))
     state%owned_row_ids=payload%rt_space%row_ids
     do i=1,nowned
       state%coefficients(i,:)=payload%certified_basis%initial_occupied_amplitudes(&
@@ -713,27 +713,64 @@ contains
     enddo
     state%kinetic_rows=payload%rt_space%kinetic_rows
     state%nonlocal_rows=payload%rt_space%nonlocal_rows
-    state%local_rows=payload%rt_space%local_rows
     state%sipg_rows=payload%rt_space%sipg_rows
 
-    allocate(state%metric%owned_row_ids(nowned),state%metric%row_offsets(nowned+1),&
-      state%metric%column_ids(nowned*r),state%metric%values(nowned*r),state%metric%active_rows(r),&
-      state%metric%packet_ids(r),state%operators%owned_row_ids(nowned),state%operators%row_offsets(nowned+1),&
-      state%operators%column_ids(nowned*r),state%operators%metric_values(nowned*r),&
-      state%operators%hamiltonian_values(nowned*r),state%operators%position_values(3,nowned*r))
-    state%metric%row_offsets(1)=1;state%operators%row_offsets(1)=1;edge=0
+    entry_scale=max(1d0,maximum_complex_matrix(payload%rt_space%metric_rows),&
+      maximum_complex_matrix(payload%rt_space%hamiltonian_rows),&
+      maximum_complex_matrix(payload%rt_space%kinetic_rows),&
+      maximum_complex_matrix(payload%rt_space%nonlocal_rows),&
+      maximum_complex_matrix(payload%rt_space%local_rows),&
+      maximum_complex_matrix(payload%rt_space%sipg_rows),maximum_complex_rank3(projected_position))
+    entry_tolerance=100d0*epsilon(1d0)*entry_scale
+    metric_nnz=0;operator_nnz=0
     do i=1,nowned
       do j=1,r
-        edge=edge+1;state%metric%column_ids(edge)=j;state%operators%column_ids(edge)=j
-        state%metric%values(edge)=payload%rt_space%metric_rows(i,j)
-        state%operators%metric_values(edge)=payload%rt_space%metric_rows(i,j)
-        state%operators%hamiltonian_values(edge)=payload%rt_space%hamiltonian_rows(i,j)
-        state%operators%position_values(:,edge)=projected_position(:,int(state%owned_row_ids(i)),j)
+        if(payload%rt_space%metric_rows(i,j)/=(0d0,0d0))metric_nnz=metric_nnz+1
+        if(abs(payload%rt_space%hamiltonian_rows(i,j))>entry_tolerance.or.&
+          payload%rt_space%metric_rows(i,j)/=(0d0,0d0).or.&
+          abs(payload%rt_space%kinetic_rows(i,j))>entry_tolerance.or.&
+          abs(payload%rt_space%nonlocal_rows(i,j))>entry_tolerance.or.&
+          abs(payload%rt_space%local_rows(i,j))>entry_tolerance.or.&
+          abs(payload%rt_space%sipg_rows(i,j))>entry_tolerance.or.&
+          any(abs(projected_position(:,int(state%owned_row_ids(i)),j))>entry_tolerance))operator_nnz=operator_nnz+1
       enddo
-      state%metric%row_offsets(i+1)=edge+1;state%operators%row_offsets(i+1)=edge+1
+    enddo
+    allocate(state%metric%owned_row_ids(nowned),state%metric%row_offsets(nowned+1),&
+      state%metric%column_ids(metric_nnz),state%metric%values(metric_nnz),state%metric%active_rows(r),&
+      state%metric%packet_ids(r),state%operators%owned_row_ids(nowned),state%operators%row_offsets(nowned+1),&
+      state%operators%column_ids(operator_nnz),state%operators%metric_values(operator_nnz),&
+      state%operators%hamiltonian_values(operator_nnz),state%operators%position_values(3,operator_nnz),&
+      state%local_rows(operator_nnz))
+    state%metric%row_offsets(1)=1;state%operators%row_offsets(1)=1
+    metric_edge=0;operator_edge=0
+    do i=1,nowned
+      do j=1,r
+        if(payload%rt_space%metric_rows(i,j)/=(0d0,0d0))then
+          metric_edge=metric_edge+1;state%metric%column_ids(metric_edge)=j
+          state%metric%values(metric_edge)=payload%rt_space%metric_rows(i,j)
+        endif
+        if(abs(payload%rt_space%hamiltonian_rows(i,j))>entry_tolerance.or.&
+          payload%rt_space%metric_rows(i,j)/=(0d0,0d0).or.&
+          abs(payload%rt_space%kinetic_rows(i,j))>entry_tolerance.or.&
+          abs(payload%rt_space%nonlocal_rows(i,j))>entry_tolerance.or.&
+          abs(payload%rt_space%local_rows(i,j))>entry_tolerance.or.&
+          abs(payload%rt_space%sipg_rows(i,j))>entry_tolerance.or.&
+          any(abs(projected_position(:,int(state%owned_row_ids(i)),j))>entry_tolerance))then
+          operator_edge=operator_edge+1;state%operators%column_ids(operator_edge)=j
+          state%operators%metric_values(operator_edge)=payload%rt_space%metric_rows(i,j)
+          state%operators%hamiltonian_values(operator_edge)=payload%rt_space%hamiltonian_rows(i,j)
+          state%operators%position_values(:,operator_edge)=projected_position(:,int(state%owned_row_ids(i)),j)
+          state%local_rows(operator_edge)=payload%rt_space%local_rows(i,j)
+        endif
+      enddo
+      state%metric%row_offsets(i+1)=metric_edge+1;state%operators%row_offsets(i+1)=operator_edge+1
     enddo
     state%metric%owned_row_ids=state%owned_row_ids;state%metric%global_count=r
-    state%metric%numerical_rank=r;state%metric%max_row_nnz=r;state%metric%active_rows=.true.
+    state%metric%numerical_rank=r;state%metric%max_row_nnz=0;state%metric%active_rows=.true.
+    do i=1,nowned
+      state%metric%max_row_nnz=max(state%metric%max_row_nnz,&
+        state%metric%row_offsets(i+1)-state%metric%row_offsets(i))
+    enddo
     state%metric%packet_ids=1;state%metric%valid=.true.
     state%metric%fingerprint=payload%rt_space%metric_fingerprint;state%metric%condition_estimate=1d0
     local_maximum=0d0

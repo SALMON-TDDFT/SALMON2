@@ -9,12 +9,13 @@ module rt_dg_hybrid_density_update
   implicit none
   private
   abstract interface
-    subroutine project_rt_density(row_ids,grid_ids,density,local_rows,ok,message)
+    subroutine project_rt_density(row_ids,row_offsets,column_ids,grid_ids,density,local_values,ok,message)
       import::int64,real64
       integer(int64),intent(in)::row_ids(:)
+      integer,intent(in)::row_offsets(:),column_ids(:)
       integer(int64),intent(in)::grid_ids(:)
       real(real64),intent(in)::density(:)
-      complex(real64),intent(out)::local_rows(:,:)
+      complex(real64),intent(out)::local_values(:)
       logical,intent(out)::ok
       character(*),intent(out)::message
     end subroutine project_rt_density
@@ -64,8 +65,8 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    complex(real64),allocatable::new_local(:,:),new_h(:,:)
-    integer::i,j,edge,row,ierr,local_bad,global_bad
+    complex(real64),allocatable::new_local(:),new_h(:)
+    integer::i,j,edge,ierr,local_bad,global_bad
     integer(int64)::local_hash,global_xor,global_sum,bits,pair_hash
     logical::callback_ok
     character(256)::callback_message
@@ -78,35 +79,32 @@ contains
     if(size(density)/=size(state%grid_ids).or..not.all(ieee_is_finite(density)))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid hybrid RT density update';return;endif
-    allocate(new_local(size(state%owned_row_ids),state%certified_rank),&
-      new_h(size(state%owned_row_ids),state%certified_rank))
+    allocate(new_local(size(state%operators%column_ids)),new_h(size(state%operators%column_ids)))
     new_local=(0d0,0d0);callback_ok=.false.;callback_message=''
-    call project_local(state%owned_row_ids,state%grid_ids,density,new_local,callback_ok,callback_message)
+    call project_local(state%owned_row_ids,state%operators%row_offsets,state%operators%column_ids,&
+      state%grid_ids,density,new_local,callback_ok,callback_message)
     local_bad=merge(0,1,callback_ok)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='hybrid RT local projection failed';return;endif
     local_bad=merge(0,1,all(ieee_is_finite(real(new_local))).and.all(ieee_is_finite(aimag(new_local))))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonfinite hybrid RT local projection';return;endif
-    new_h=state%kinetic_rows+state%nonlocal_rows+new_local+state%sipg_rows
+    do i=1,size(state%owned_row_ids)
+      do edge=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1
+        j=state%operators%column_ids(edge)
+        new_h(edge)=state%kinetic_rows(i,j)+state%nonlocal_rows(i,j)+new_local(edge)+state%sipg_rows(i,j)
+      enddo
+    enddo
     local_bad=merge(0,1,all(ieee_is_finite(real(new_h))).and.all(ieee_is_finite(aimag(new_h))))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonfinite hybrid RT updated Hamiltonian';return;endif
-    local_bad=0
-    do i=1,size(state%owned_row_ids)
-      do j=1,state%certified_rank
-        if(new_h(i,j)==(0d0,0d0))cycle
-        if(.not.graph_contains(state,i,j))local_bad=1
-      enddo
-    enddo
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='density update escaped the frozen operator-union envelope';return;endif
     local_hash=0_int64;global_sum=0_int64
     do i=1,size(state%owned_row_ids)
-      do j=1,state%certified_rank
-        bits=transfer(real(new_h(i,j)),bits);pair_hash=ieor(ishftc(state%owned_row_ids(i),17),int(j,int64))
+      do edge=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1
+        j=state%operators%column_ids(edge)
+        bits=transfer(real(new_h(edge)),bits);pair_hash=ieor(ishftc(state%owned_row_ids(i),17),int(j,int64))
         pair_hash=ieor(ishftc(pair_hash,9),bits)
-        bits=transfer(aimag(new_h(i,j)),bits);pair_hash=ieor(ishftc(pair_hash,9),bits)
+        bits=transfer(aimag(new_h(edge)),bits);pair_hash=ieor(ishftc(pair_hash,9),bits)
         local_hash=ieor(local_hash,pair_hash);global_sum=global_sum+pair_hash
       enddo
     enddo
@@ -115,9 +113,8 @@ contains
     if(ierr/=MPI_SUCCESS)then;message='hybrid RT value fingerprint reduction failed';return;endif
     state%local_rows=new_local;state%density=density
     do i=1,size(state%owned_row_ids)
-      row=int(state%owned_row_ids(i))
       do edge=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1
-        j=state%operators%column_ids(edge);state%operators%hamiltonian_values(edge)=new_h(i,j)
+        state%operators%hamiltonian_values(edge)=new_h(edge)
       enddo
     enddo
     state%operator_value_fingerprint=ieor(global_xor,ishftc(global_sum,13))
@@ -127,16 +124,6 @@ contains
 #else
     ok=.false.;message='hybrid RT density update requires MPI'
 #endif
-  contains
-    logical function graph_contains(current,row_position,column)
-      type(s_rt_dg_hybrid_state),intent(in)::current
-      integer,intent(in)::row_position,column
-      integer::q
-      graph_contains=.false.
-      do q=current%operators%row_offsets(row_position),current%operators%row_offsets(row_position+1)-1
-        if(current%operators%column_ids(q)==column)then;graph_contains=.true.;return;endif
-      enddo
-    end function graph_contains
   end subroutine update_rt_dg_hybrid_density
 
   subroutine validate_certified_rt_state(comm,state,ok,message)
@@ -177,22 +164,22 @@ contains
     if(size(state%coefficients,1)/=nowned.or.size(state%coefficients,2)/=nocc)local_bad=1
     if(size(state%kinetic_rows,1)/=nowned.or.size(state%kinetic_rows,2)/=r.or.&
       size(state%nonlocal_rows,1)/=nowned.or.size(state%nonlocal_rows,2)/=r.or.&
-      size(state%local_rows,1)/=nowned.or.size(state%local_rows,2)/=r.or.&
+      size(state%local_rows)/=size(state%operators%column_ids).or.&
       size(state%sipg_rows,1)/=nowned.or.size(state%sipg_rows,2)/=r)local_bad=1
     if(size(state%basis_values,1)/=r.or.size(state%basis_values,2)/=npoint.or.&
       size(state%density)/=npoint.or.size(state%grid_weights)/=npoint.or.&
       size(state%occupations)/=nocc.or.size(state%eigenvalues)/=r)local_bad=1
     if(.not.state%metric%valid.or.state%metric%global_count/=r.or.&
       size(state%metric%owned_row_ids)/=nowned.or.size(state%metric%row_offsets)/=nowned+1.or.&
-      size(state%metric%column_ids)/=nowned*r.or.size(state%metric%values)/=nowned*r.or.&
+      size(state%metric%values)/=size(state%metric%column_ids).or.&
       size(state%metric%active_rows)/=r.or.size(state%metric%packet_ids)/=r)local_bad=1
     if(.not.state%operators%valid.or.state%operators%global_count/=r.or.&
       state%operators%metric_fingerprint/=state%metric%fingerprint.or.&
       size(state%operators%owned_row_ids)/=nowned.or.size(state%operators%row_offsets)/=nowned+1.or.&
-      size(state%operators%column_ids)/=nowned*r.or.size(state%operators%metric_values)/=nowned*r.or.&
-      size(state%operators%hamiltonian_values)/=nowned*r.or.&
+      size(state%operators%metric_values)/=size(state%operators%column_ids).or.&
+      size(state%operators%hamiltonian_values)/=size(state%operators%column_ids).or.&
       size(state%operators%position_values,1)/=3.or.&
-      size(state%operators%position_values,2)/=nowned*r)local_bad=1
+      size(state%operators%position_values,2)/=size(state%operators%column_ids))local_bad=1
     if(size(state%metric%owned_row_ids)==nowned)then
       if(any(state%metric%owned_row_ids/=state%owned_row_ids))local_bad=1
     endif
@@ -231,16 +218,21 @@ contains
 
     local_bad=0
     if(state%metric%row_offsets(1)/=1.or.state%operators%row_offsets(1)/=1.or.&
-      state%metric%row_offsets(nowned+1)/=nowned*r+1.or.&
-      state%operators%row_offsets(nowned+1)/=nowned*r+1)local_bad=1
+      state%metric%row_offsets(nowned+1)/=size(state%metric%column_ids)+1.or.&
+      state%operators%row_offsets(nowned+1)/=size(state%operators%column_ids)+1)local_bad=1
     if(any(state%metric%column_ids<1).or.any(state%metric%column_ids>r).or.&
       any(state%operators%column_ids<1).or.any(state%operators%column_ids>r))local_bad=1
     do i=1,nowned
-      if(state%metric%row_offsets(i)/=(i-1)*r+1.or.state%metric%row_offsets(i+1)/=i*r+1.or.&
-        state%operators%row_offsets(i)/=(i-1)*r+1.or.state%operators%row_offsets(i+1)/=i*r+1)local_bad=1
-      do j=1,r
-        edge=(i-1)*r+j
-        if(state%metric%column_ids(edge)/=j.or.state%operators%column_ids(edge)/=j)local_bad=1
+      if(state%metric%row_offsets(i)<1.or.state%metric%row_offsets(i+1)<state%metric%row_offsets(i).or.&
+        state%metric%row_offsets(i+1)>size(state%metric%column_ids)+1.or.&
+        state%operators%row_offsets(i)<1.or.&
+        state%operators%row_offsets(i+1)<state%operators%row_offsets(i).or.&
+        state%operators%row_offsets(i+1)>size(state%operators%column_ids)+1)local_bad=1
+      do edge=state%metric%row_offsets(i)+1,state%metric%row_offsets(i+1)-1
+        if(state%metric%column_ids(edge)<=state%metric%column_ids(edge-1))local_bad=1
+      enddo
+      do edge=state%operators%row_offsets(i)+1,state%operators%row_offsets(i+1)-1
+        if(state%operators%column_ids(edge)<=state%operators%column_ids(edge-1))local_bad=1
       enddo
     enddo
     if(.not.all(ieee_is_finite(real(state%metric%values))).or.&
