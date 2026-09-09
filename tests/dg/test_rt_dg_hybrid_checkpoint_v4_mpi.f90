@@ -119,8 +119,7 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   call get_environment_variable('SALMON_TEST_V4_MANIFEST_OPEN_FAILURE',test_mode,status=environment_status)
   if(environment_status==0.and.trim(test_mode)=='1')then
     write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-manifest-open-failure-',nproc
-    write(prefix,'(a,i0,a)')'/tmp/salmon-hybrid-v4-manifest-open-parent-',nproc,'/missing/manifest.tmp'
-    call write_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written,ok,message,trim(prefix))
+    call write_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written,ok,message)
     call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 manifest')>0,&
       'v4 manifest OPEN failure was not collectively rejected')
     if(rank==0)write(*,'(a,i0)')'PASS v4 collective manifest OPEN failure ranks=',nproc

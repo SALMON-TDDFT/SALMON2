@@ -143,6 +143,25 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok,trim(message))
   call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,5,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==5,trim(message))
+  if(nproc>1)then
+    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,&
+      3+merge(0,1,id_rank==0),5,5,ok,message)
+    call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
+      'rank-local requested-rank mismatch was accepted')
+    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,&
+      5-merge(0,1,id_rank==0),5,ok,message)
+    call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
+      'rank-local certified-rank mismatch was accepted')
+    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,&
+      merge(-1d0,0d0,id_rank==0),3,5,5,ok,message)
+    call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
+      'rank-local energy-window mismatch was accepted')
+    if(id_rank==0)candidate_acceptance%operator_fingerprint=candidate_acceptance%operator_fingerprint+1_int64
+    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
+    call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
+      'rank-local authorization receipt mismatch was accepted')
+    if(id_rank==0)candidate_acceptance%operator_fingerprint=candidate_acceptance%operator_fingerprint-1_int64
+  endif
   call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
   call require(ok,'authenticated energy_window=-1 full-rank publication was rejected')
   call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,0d0,3,5,5,ok,message)

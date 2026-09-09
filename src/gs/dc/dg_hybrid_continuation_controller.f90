@@ -281,7 +281,18 @@ contains
     character(*),intent(out)::message
     logical::valid,full_rank_legacy
     type(s_dg_hybrid_candidate_acceptance)::candidate,scratch
+    integer::ierr,signature(3),signature_min(3),signature_max(3)
+    integer(int64)::signature64(2),signature64_min(2),signature64_max(2)
     candidate=receipt;scratch=receipt
+    signature=[requested_rank,certified_rank,construction_rank]
+    signature64=[transfer(energy_window,signature64(1)),candidate_acceptance_fingerprint(receipt)]
+    call MPI_Allreduce(signature,signature_min,3,MPI_INTEGER,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(signature,signature_max,3,MPI_INTEGER,MPI_MAX,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(signature64,signature64_min,2,MPI_INTEGER8,MPI_MIN,icomm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(signature64,signature64_max,2,MPI_INTEGER8,MPI_MAX,icomm,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(signature_min/=signature_max).or.any(signature64_min/=signature64_max))then
+      ok=.false.;message='Hybrid v4 publication rank policy arguments disagree across MPI ranks';return
+    endif
     full_rank_legacy=energy_window==-1d0.and.receipt%valid.and.receipt%publication_authorized.and.&
       receipt%legacy_dynamic_rank.and.receipt%legacy_warning_observed.and.receipt%energy_window==-1d0.and.&
       receipt%certified_rank==construction_rank.and.receipt%construction_rank==construction_rank.and.&

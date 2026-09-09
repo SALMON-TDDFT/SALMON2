@@ -67,12 +67,16 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
   for nrank in (1,2,4,8):
     shutil.rmtree(Path(f"/tmp/salmon-hybrid-v4-open-failure-{nrank}"),ignore_errors=True)
-    shutil.rmtree(Path(f"/tmp/salmon-hybrid-v4-manifest-open-parent-{nrank}"),ignore_errors=True)
+    manifest_open_failure=Path(f"/tmp/salmon-hybrid-v4-manifest-open-failure-{nrank}.manifest.temporary")
+    if manifest_open_failure.is_dir(): shutil.rmtree(manifest_open_failure)
+    elif manifest_open_failure.exists(): manifest_open_failure.unlink()
+    manifest_open_failure.mkdir();(manifest_open_failure/"open-must-fail").write_text("sentinel")
     open_failure_env=env.copy();open_failure_env["SALMON_TEST_V4_MANIFEST_OPEN_FAILURE"]="1"
     failed_open=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],
       capture_output=True,text=True,env=open_failure_env,timeout=60)
     assert failed_open.returncode==0,(nrank,failed_open.stdout,failed_open.stderr)
     assert f"PASS v4 collective manifest OPEN failure ranks={nrank}" in failed_open.stdout
+    shutil.rmtree(manifest_open_failure)
     manifest_failure=Path(f"/tmp/salmon-hybrid-v4-manifest-failure-{nrank}.manifest")
     if manifest_failure.is_dir(): shutil.rmtree(manifest_failure)
     elif manifest_failure.exists(): manifest_failure.unlink()
