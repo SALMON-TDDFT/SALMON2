@@ -112,16 +112,17 @@ program test_dg_hybrid_continuation_controller_mpi
     1003_int64,ok,message)
   call require(ok.and.candidate_acceptance%certified_rank==4,trim(message))
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,7,1004_int64,1005_int64,ok,message)
-  call require(.not.ok,'construction rank was published as the certified RT basis rank')
+  call require(ok.and.candidate_acceptance%rt_basis_rank==7.and.candidate_acceptance%certified_rank==4,&
+    'localized v4 construction basis was not retained after low-energy certification')
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,4,1004_int64,1005_int64,ok,message)
-  call require(ok.and.candidate_acceptance%rt_basis_rank==4,trim(message))
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,3,4,.true.,ok,message)
+  call require(.not.ok,'spectral prefix was accepted as the localized v4 propagation basis')
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,3,7,.true.,ok,message)
   call require(.not.ok,'legacy checkpoint version 2 was authorized for certified RT publication')
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,7,.true.,ok,message)
-  call require(.not.ok,'construction-only directions entered the published RT dimensions')
   call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,4,.true.,ok,message)
-  call require(ok.and.candidate_acceptance%published_rt_rank==4.and.&
-    candidate_acceptance%published_rt_rank<candidate_acceptance%construction_rank,trim(message))
+  call require(.not.ok,'spectral prefix was accepted as the localized v4 payload rank')
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,7,.true.,ok,message)
+  call require(ok.and.candidate_acceptance%published_rt_rank==7.and.&
+    candidate_acceptance%certified_rank<candidate_acceptance%published_rt_rank,trim(message))
 
   call initialize_dg_hybrid_candidate_acceptance(icomm,5,-1d0,candidate_acceptance,ok,message)
   call require(ok.and.candidate_acceptance%legacy_dynamic_rank.and.&

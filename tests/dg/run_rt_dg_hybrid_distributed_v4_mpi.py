@@ -4,6 +4,11 @@ import os, shutil, subprocess, tempfile
 
 root=Path(__file__).resolve().parents[2]
 source=(root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90").read_text().lower()
+scalar_body=source.split("subroutine exchange_rt_dg_sparse_values",1)[1].split(
+  "end subroutine exchange_rt_dg_sparse_values",1)[0]
+assert scalar_body.count("mpi_alltoallv")==1,"RED: Krylov matvec halo is not one packed Alltoallv"
+assert "mpi_irecv" not in scalar_body and "mpi_isend" not in scalar_body and "do rank=" not in scalar_body, \
+  "RED: Krylov matvec still posts a rank loop of point-to-point exchanges"
 assert "subroutine exchange_rt_dg_sparse_matrix" in source, "RED: packed coefficient-matrix halo API is absent"
 body=source.split("subroutine exchange_rt_dg_sparse_matrix",1)[1].split(
   "end subroutine exchange_rt_dg_sparse_matrix",1)[0]

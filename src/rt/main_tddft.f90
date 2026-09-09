@@ -314,6 +314,14 @@ subroutine run_dg_hybrid_continuation_rt()
     hybrid_state%operators%owned_row_ids,hybrid_state%operators%column_ids,operator_exchange,ok,message)
   if(.not.ok)error stop 'hybrid DG RT operator exchange setup failed'
   if(nproc_id_global==0)write(*,'(a)')'[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC'
+  if(.not.allocated(hybrid_state%energy_receipt).or.size(hybrid_state%energy_receipt)/=7)&
+    error stop 'hybrid DG RT physical energy receipt is absent'
+  if(any(.not.ieee_is_finite(hybrid_state%energy_receipt)).or.all(hybrid_state%energy_receipt==0d0))&
+    error stop 'hybrid DG RT physical energy receipt is invalid'
+  if(abs(hybrid_state%energy_receipt(1)-sum(hybrid_state%energy_receipt(2:7)))>&
+      100d0*epsilon(1d0)*max(1d0,abs(hybrid_state%energy_receipt(1))))&
+    error stop 'hybrid DG RT physical energy decomposition is inconsistent'
+  energy%E_ion_ion=hybrid_state%energy_receipt(5)
   if(nproc_id_global==0)write(*,'(a,2(a,es16.8))')'[HYBRID-RT-CHECKPOINT-STATIONARITY]',&
     ' orbital_residual=',hybrid_state%startup_orbital_residual,&
     ' metric_defect=',hybrid_state%startup_metric_defect
@@ -377,7 +385,6 @@ subroutine run_dg_hybrid_continuation_rt()
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initial physical invariants failed';endif
   if(nproc_id_global==0)write(*,'(a,2(a,es16.8))')'[HYBRID-RT-REFRESH-STATIONARITY]',&
     ' h_residual=',current_hamiltonian_residual,' hamiltonian_delta=',global_defect/global_scale
-  if(.not.allocated(hybrid_state%energy_receipt))error stop 'hybrid DG RT physical energy receipt is absent'
   coefficient_rows_local=size(hybrid_state%coefficients,1)
   call MPI_Allreduce(coefficient_rows_local,coefficient_rows_global,1,MPI_INTEGER,MPI_SUM,&
     nproc_group_global,ierr)
@@ -390,8 +397,14 @@ subroutine run_dg_hybrid_continuation_rt()
     ' basis_rank=',hybrid_state%global_count,' coefficient_rows=',coefficient_rows_global,&
     ' operation_count=',hybrid_state%operation_count,&
     ' nonidentity_count=',hybrid_state%nonidentity_operation_count
-  has_energy_reference=size(hybrid_state%energy_receipt)==7.and.any(hybrid_state%energy_receipt/=0d0)
+  has_energy_reference=.true.
   if(has_energy_reference)then
+    if(nproc_id_global==0)write(*,'(a,3(a,es16.8))')'[HYBRID-RT-ENERGY-IDENTITY]',&
+      ' checkpoint=',hybrid_state%energy_receipt(1),' refreshed=',current_total_energy,&
+      ' defect=',abs(current_total_energy-hybrid_state%energy_receipt(1))
+    if(nproc_id_global==0)write(*,'(a,7(a,es16.8))')'[HYBRID-RT-ENERGY-COMPONENTS]',&
+      ' total=',energy%E_tot,' kinetic=',energy%E_kin,' hartree=',energy%E_h,' xc=',energy%E_xc,&
+      ' ion_ion=',energy%E_ion_ion,' ion_local=',energy%E_ion_loc,' ion_nonlocal=',energy%E_ion_nloc
     if(abs(current_total_energy-hybrid_state%energy_receipt(1))>&
         1d-10*max(1d0,abs(hybrid_state%energy_receipt(1))))&
       error stop 'hybrid DG RT initial physical energy does not match the checkpoint'

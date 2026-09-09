@@ -236,8 +236,11 @@ contains
     type(s_dg_hybrid_candidate_acceptance)::candidate
     logical::valid
     candidate=receipt
+    ! v4 propagates in the unchanged localized construction basis.  The
+    ! certified rank describes the symmetry-closed low-energy spectral
+    ! prefix represented by that basis; it is not the checkpoint row extent.
     valid=receipt%valid.and.receipt%phase==5.and.receipt%spectral_certified.and.&
-      rt_basis_rank==receipt%certified_rank.and.basis_fingerprint/=0_int64.and.operator_fingerprint/=0_int64
+      rt_basis_rank==receipt%construction_rank.and.basis_fingerprint/=0_int64.and.operator_fingerprint/=0_int64
     if(valid)then
       candidate%certified_basis_ready=.true.;candidate%rt_basis_rank=rt_basis_rank
       candidate%basis_fingerprint=basis_fingerprint;candidate%operator_fingerprint=operator_fingerprint
@@ -258,7 +261,7 @@ contains
     logical::valid
     candidate=receipt
     valid=receipt%valid.and.receipt%phase==6.and.receipt%certified_basis_ready.and.payload_ready.and.&
-      checkpoint_version==4.and.payload_rt_rank==receipt%certified_rank.and.&
+      checkpoint_version==4.and.payload_rt_rank==receipt%construction_rank.and.&
       payload_rt_rank==receipt%rt_basis_rank
     if(valid)then
       candidate%publication_authorized=.true.;candidate%checkpoint_version=checkpoint_version

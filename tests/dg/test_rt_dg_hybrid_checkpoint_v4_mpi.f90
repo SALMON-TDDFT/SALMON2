@@ -4,12 +4,14 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,&
     read_rt_dg_hybrid_checkpoint_v4
-  use rt_dg_hybrid_checkpoint,only:publish_rt_dg_hybrid_checkpoint_v4
+  use rt_dg_hybrid_checkpoint,only:publish_rt_dg_hybrid_checkpoint_v4,&
+    s_rt_dg_hybrid_v4_publication_authorization
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint,&
     fingerprint_rt_dg_hybrid_scope
   implicit none
   type(s_rt_dg_hybrid_v4_shard)::written,loaded
   type(s_rt_dg_hybrid_state)::state
+  type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
   integer::comm,rank,nproc,ierr,i,j
   integer,allocatable::row_owner(:)
   logical::ok
@@ -67,8 +69,24 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   written%acceptance_receipts=[(0.01d0*i,i=1,8)]
   written%pseudopotential_receipt=[(1d0*i,i=1,6)]
   written%energy_receipt=[(2d0*i,i=1,7)]
+  authorization%checkpoint_version=4;authorization%published_rank=written%global_count
+  authorization%basis_fingerprint=written%basis_fingerprint
+  authorization%operator_fingerprint=written%operator_fingerprint
   call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
-    written%row_ids,row_owner,written%row_ids,written,.true.,ok,message)
+    written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+  call require(.not.ok.and.index(message,'authorization')>0,&
+    'common v4 endpoint accepted a payload without formal publication authorization')
+  authorization%valid=.true.
+  if(nproc>1)then
+    written%scope_fingerprint=written%scope_fingerprint+rank
+    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+      written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+    call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
+      'rank-inconsistent common metadata reached shard publication')
+    written%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(written%scope_selectors,written%xc_types)
+  endif
+  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
   call require(ok,'v4 shard publication failed: '//trim(message))
   call read_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),loaded,ok,message)
   call require(ok,'v4 shard reload failed: '//trim(message))

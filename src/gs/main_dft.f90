@@ -156,8 +156,9 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   schedule_dg_hybrid_candidate_checks,complete_dg_hybrid_stage_solve,&
   initialize_dg_hybrid_candidate_acceptance,&
   record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
-  record_dg_hybrid_unconditional_gates
-use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry
+  record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
+  record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication
+use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry,certify_dg_hybrid_energy_window
 use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
   prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
 use dg_hybrid_continuation_state,only:s_dg_hybrid_scope_receipt,build_dg_hybrid_scope_receipt,&
@@ -179,15 +180,19 @@ use dg_hybrid_generalized_eigensystem,only:s_dg_hybrid_complete_eigensystem,&
   solve_dg_hybrid_generalized_complete_once
 use dg_hybrid_occupation_policy,only:s_dg_hybrid_occupation_result,derive_dg_hybrid_occupation_policy
 use dg_hybrid_density,only:reconstruct_dg_hybrid_density,reconstruct_dg_hybrid_occupied_state
-use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,validate_dg_hybrid_ground_state
+use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,s_dg_hybrid_spectral_certification,&
+  validate_dg_hybrid_ground_state
 use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   collective_rt_dg_hybrid_publication_precondition,&
-  collective_rt_dg_hybrid_publication_mapping_precondition,publish_rt_dg_hybrid_checkpoint_v4
+  collective_rt_dg_hybrid_publication_mapping_precondition,publish_rt_dg_hybrid_checkpoint_v4,&
+  s_rt_dg_hybrid_v4_publication_authorization
 use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard
 use rt_dg_hybrid_initialization,only:fingerprint_rt_dg_hybrid_scope,&
   fingerprint_rt_dg_hybrid_sparse_structure
 use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
 use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_point_csr_edges
+use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
+  exchange_rt_dg_sparse_matrix
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -1953,7 +1958,7 @@ contains
       global_basis_fingerprint,global_frame_fingerprint,metric_fingerprint,&
       bounded_fixed_payload%interface_fingerprint,interface_continuation%fingerprint,&
       final_operator_fingerprint,final_residual,final_orthogonality,final_projector_defect,&
-      terminal_electron_defect,ok,message)
+      terminal_electron_defect,0,.true.,ok,message)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V4] ',trim(message)
       error stop 'terminal divided Hybrid v4 publication failed'
@@ -1965,7 +1970,7 @@ contains
       sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
       basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
       continuation_fingerprint,operator_fingerprint,stationarity_defect,metric_defect,&
-      projector_defect,electron_defect,ok,message)
+      projector_defect,electron_defect,certified_rank_receipt,publication_authorized,ok,message)
     integer(8),intent(in)::row_ids(:),grid_ids(:)
     integer,intent(in)::row_owner(:),row_generation(:),grid_fragment(:)
     real(8),intent(in)::grid_weights(:),solved_eigenvalues(:),stationarity_defect,metric_defect,&
@@ -1975,18 +1980,26 @@ contains
     type(s_dg_hybrid_ground_state),intent(in)::occupied_state
     integer(8),intent(in)::basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
       continuation_fingerprint,operator_fingerprint
+    integer,intent(in)::certified_rank_receipt
+    logical,intent(in)::publication_authorized
     logical,intent(out)::ok
     character(*),intent(out)::message
     type(s_rt_dg_hybrid_v4_shard)::payload
     integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
     complex(8),allocatable::empty_position(:,:,:),orbital_values(:)
+    complex(8),allocatable::energy_edge_coefficients(:,:)
     real(8),allocatable::density(:),coordinates(:,:),coordinate_component(:)
     integer::n,nocc,nrow,npoint,rank,nproc,ierr,i,j,p,a,edge,nnz_basis,slot,requested_rank,certified_rank,&
-      global_projector_count
+      global_projector_count,energy_state,energy_gx,energy_gy,energy_gz,energy_ix,energy_iy,energy_iz,&
+      energy_payload_count
     integer(8)::structure_fingerprint
-    real(8)::electron_count,window,cutoff,cluster_tolerance
-    logical::precondition_ok,local_ok
-    character(512)::local_message
+    integer(8)::energy_workspace_peak
+    real(8)::electron_count,window,cutoff,cluster_tolerance,local_energy_parts(3),global_energy_parts(3)
+    logical::precondition_ok,local_ok,energy_exchange_ok
+    character(512)::local_message,energy_exchange_message
+    type(s_rt_dg_sparse_exchange)::energy_exchange
+    type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
+    type(s_dft_energy)::checkpoint_energy
 
     ok=.false.;message='';n=size(solved_eigenvalues);nocc=occupied_state%noccupied
     nrow=size(row_ids);npoint=size(grid_ids)
@@ -2020,6 +2033,12 @@ contains
       if(solved_eigenvalues(certified_rank+1)-solved_eigenvalues(certified_rank)>cluster_tolerance)exit
       certified_rank=certified_rank+1
     enddo
+    if(certified_rank_receipt>0)then
+      if(certified_rank_receipt<requested_rank.or.certified_rank_receipt>=n)then
+        message='terminal divided v4 certified-rank receipt is inconsistent';return
+      endif
+      certified_rank=certified_rank_receipt
+    endif
     if(certified_rank>=n)then;message='terminal divided v4 lacks an energy-window proof state';return;endif
 
     ! Pointwise support supplies every potentially nonzero local-potential and
@@ -2088,6 +2107,12 @@ contains
     enddo
     call MPI_Allreduce(sum(density*grid_weights),electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS)then;message='terminal divided v4 density electron reduction failed';return;endif
+    ! Synchronize only the Hartree/XC potential used for the physical energy
+    ! receipt with the immutable LCFO density being published.  This does not
+    ! update the density, diagonalize again, or alter the localized basis and
+    ! coefficients; RT performs the identical t=0 refresh.
+    call dg_dc_update_potential_from_distributed_density(grid_ids,density,local_ok,local_message)
+    if(.not.local_ok)then;message='terminal divided v4 energy potential refresh failed: '//trim(local_message);return;endif
     allocate(payload%density,source=density)
     allocate(payload%initial_occupied_amplitudes,source=occupied_state%coefficients)
     allocate(payload%occupations,source=occupied_state%occupations)
@@ -2099,7 +2124,65 @@ contains
     global_projector_count=dc%ppg_tot%Nlma
     allocate(payload%pseudopotential_receipt(6));payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),&
       canonical_pp_valence_sum(pp),real(pp%lmax,8),real(pp%nrmax,8),real(global_projector_count,8),real(n,8)]
-    allocate(payload%energy_receipt(7));payload%energy_receipt=0d0
+    ! Evaluate the same physical energy decomposition consumed by RT without
+    ! gathering the distributed occupied coefficient rows.  The sparse halo
+    ! is bounded by the frozen operator graph and is released with this scope.
+    call build_rt_dg_sparse_exchange(dc%icomm_tot,n,structure_fingerprint,row_ids,&
+      operator_columns,energy_exchange,local_ok,local_message)
+    if(.not.local_ok)then;message='terminal divided v4 energy halo construction failed: '//trim(local_message);return;endif
+    allocate(energy_edge_coefficients(size(operator_columns),nocc))
+    call exchange_rt_dg_sparse_matrix(dc%icomm_tot,energy_exchange,occupied_state%coefficients,&
+      energy_edge_coefficients,energy_workspace_peak,energy_payload_count,energy_exchange_ok,energy_exchange_message)
+    if(.not.energy_exchange_ok)then
+      message='terminal divided v4 energy coefficient exchange failed: '//trim(energy_exchange_message);return
+    endif
+    local_energy_parts=0d0
+    do i=1,nrow
+      do edge=operator_offsets(i),operator_offsets(i+1)-1
+        do energy_state=1,nocc
+          local_energy_parts(1)=local_energy_parts(1)+occupied_state%occupations(energy_state)*real(&
+            conjg(occupied_state%coefficients(i,energy_state))*&
+            (payload%kinetic_values(edge)+payload%sipg_values(edge))*&
+            energy_edge_coefficients(edge,energy_state),8)
+          local_energy_parts(2)=local_energy_parts(2)+occupied_state%occupations(energy_state)*real(&
+            conjg(occupied_state%coefficients(i,energy_state))*payload%nonlocal_values(edge)*&
+            energy_edge_coefficients(edge,energy_state),8)
+        enddo
+      enddo
+    enddo
+    do p=1,npoint
+      energy_gx=int(modulo(grid_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      energy_gy=int(modulo((grid_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      energy_gz=int((grid_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8))+1
+      energy_ix=findloc(dc%jxyz_tot(:,1),energy_gx,dim=1)
+      energy_iy=findloc(dc%jxyz_tot(:,2),energy_gy,dim=1)
+      energy_iz=findloc(dc%jxyz_tot(:,3),energy_gz,dim=1)
+      if(energy_ix<1.or.energy_iy<1.or.energy_iz<1)then
+        message='terminal divided v4 energy grid mapping failed';return
+      endif
+      local_energy_parts(3)=local_energy_parts(3)+eexc_tmp(energy_ix,energy_iy,energy_iz)*grid_weights(p)
+    enddo
+    call MPI_Allreduce(local_energy_parts,global_energy_parts,3,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(.not.ieee_is_finite(global_energy_parts)))then
+      message='terminal divided v4 energy decomposition reduction failed';return
+    endif
+    checkpoint_energy%E_kin=global_energy_parts(1);checkpoint_energy%E_ion_nloc=global_energy_parts(2)
+    checkpoint_energy%E_xc=global_energy_parts(3)
+    call calc_Total_Energy_periodic(dc%mg_tot,ewald,dc%system_tot,dc%info_tot,pp,dc%ppg_tot,&
+      dc%fg_tot,dc%poisson_tot,.true.,checkpoint_energy)
+    allocate(payload%energy_receipt(7))
+    payload%energy_receipt=[checkpoint_energy%E_tot,checkpoint_energy%E_kin,checkpoint_energy%E_h,&
+      checkpoint_energy%E_xc,checkpoint_energy%E_ion_ion,checkpoint_energy%E_ion_loc,checkpoint_energy%E_ion_nloc]
+    if(any(.not.ieee_is_finite(payload%energy_receipt)).or.&
+        abs(payload%energy_receipt(1)-sum(payload%energy_receipt(2:7)))>&
+        100d0*epsilon(1d0)*max(1d0,abs(payload%energy_receipt(1))))then
+      message='terminal divided v4 final energy receipt is inconsistent';return
+    endif
+    if(rank==0)write(*,'(a,7(a,es16.8))')'[HYBRID-GS-ENERGY-RECEIPT]',&
+      ' total=',payload%energy_receipt(1),' kinetic=',payload%energy_receipt(2),&
+      ' hartree=',payload%energy_receipt(3),' xc=',payload%energy_receipt(4),&
+      ' ion_ion=',payload%energy_receipt(5),' ion_local=',payload%energy_receipt(6),&
+      ' ion_nonlocal=',payload%energy_receipt(7)
     payload%global_count=n;payload%global_grid_count=product(dc%lg_tot%num);payload%nocc=nocc
     payload%certified_rank=certified_rank;payload%fragment_id=rank+1
     payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
@@ -2108,8 +2191,11 @@ contains
     payload%payload_fingerprint=ieor(ieor(basis_fingerprint,operator_fingerprint),&
       ieor(dc_seed_fingerprint,ieor(face_fingerprint,continuation_fingerprint)))
     if(payload%payload_fingerprint==0_8)payload%payload_fingerprint=1_8
+    authorization%valid=publication_authorized;authorization%checkpoint_version=4
+    authorization%published_rank=n;authorization%basis_fingerprint=basis_fingerprint
+    authorization%operator_fingerprint=operator_fingerprint
     call publish_rt_dg_hybrid_checkpoint_v4(dc%icomm_tot,'./hybrid_dg_ground_state.chk',n,nocc,&
-      row_ids,row_owner,occupied_state%owned_row_ids,payload,precondition_ok,local_ok,local_message)
+      row_ids,row_owner,occupied_state%owned_row_ids,payload,authorization,precondition_ok,local_ok,local_message)
     if(.not.local_ok)then;message='terminal divided v4 write failed: '//trim(local_message);return;endif
     if(rank==0)write(*,'(a,6(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo-v4',&
       ' construction_rank=',n,' solved_rank=',n,' certified_rank=',certified_rank,' rt_rank=',n,&
@@ -6326,6 +6412,7 @@ contains
     type(s_dg_hybrid_stage_report)::stage_report
     type(s_dg_hybrid_controller)::continuation_controller
     type(s_dg_hybrid_candidate_acceptance)::candidate_acceptance
+    type(s_dg_hybrid_spectral_certification)::spectral_certification
     type(s_dg_hybrid_complete_eigensystem)::complete_eigensystem
     type(s_dg_hybrid_occupation_result)::occupation_result
     type(s_dg_hybrid_stage_schedule)::stage_schedule
@@ -6655,6 +6742,25 @@ stage_pass: do
       error stop 'DG final occupied-projector or density gate failed'
     endif
 
+    call certify_dg_hybrid_energy_window(dc%icomm_tot,fixed_payload%metric_rows,basis_representation,&
+      complete_eigensystem%coefficients,complete_eigensystem%eigenvalues,occupation_result%noccupied,&
+      complete_eigensystem%eigenvalues(occupation_result%noccupied),dg_hybrid_symmetry_energy_window,&
+      extended_target_rank,dg_dc_gs_final_orbital_tolerance,dg_ow_symmetry_tolerance,&
+      projector_symmetry_residual,density_symmetry_defect,spectral_certification,local_ok,continuation_message)
+    if(.not.local_ok)then
+      write(0,'(a)')trim(continuation_message)
+      error stop 'DG final low-energy spectral certification failed'
+    endif
+    call record_dg_hybrid_spectral_certification(dc%icomm_tot,candidate_acceptance,&
+      spectral_certification%requested_rank,spectral_certification%certified_rank,&
+      spectral_certification%boundary_cluster_rank,spectral_certification%proof_state_present,&
+      spectral_certification%compatibility_dynamic_rank,spectral_certification%compatibility_dynamic_rank,&
+      spectral_certification%fingerprint,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG final spectral certification receipt failed'
+    call record_dg_hybrid_certified_rt_basis(dc%icomm_tot,candidate_acceptance,size(effective_ids),&
+      fixed_payload%basis_fingerprint,final_operator_fingerprint,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG final localized-v4 basis certification receipt failed'
+
     call checkpoint_grid_real_fingerprint(dc%icomm_tot,ow_core_ids,dc_seed_density,&
       seed_fingerprint,local_ok)
     if(.not.local_ok)error stop 'DG continuation seed checkpoint fingerprint failed'
@@ -6670,6 +6776,9 @@ stage_pass: do
     final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
     allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
     allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
+    call authorize_dg_hybrid_v4_publication(dc%icomm_tot,candidate_acceptance,4,size(effective_ids),&
+      final_ground_state%valid.and.final_ground_state%converged,local_ok,continuation_message)
+    if(.not.local_ok)error stop 'DG continuation distributed-v4 publication authorization failed'
     call publish_dg_hybrid_divided_v4(row_ids,basis_fragment-1,basis_generation_arg,ow_core_ids,&
       interior_weights,interior_fragment,interior_values,interior_gradients,fixed_payload%metric_rows,&
       fixed_payload%kinetic_rows,fixed_payload%nonlocal_rows,iterate%local_rows,&
@@ -6677,7 +6786,8 @@ stage_pass: do
       complete_eigensystem%eigenvalues,final_ground_state,fixed_payload%basis_fingerprint,&
       seed_fingerprint,fixed_payload%metric_fingerprint,fixed_payload%interface_fingerprint,&
       final_state_fingerprint,final_operator_fingerprint,residuals%r_h,residuals%r_s,&
-      projector_symmetry_residual,abs(electron_count-dc%elec_num_tot),local_ok,continuation_message)
+      projector_symmetry_residual,abs(electron_count-dc%elec_num_tot),&
+      spectral_certification%certified_rank,candidate_acceptance%publication_authorized,local_ok,continuation_message)
     if(.not.local_ok)then
       write(0,'(a)')trim(continuation_message)
       error stop 'DG continuation distributed-v4 checkpoint failed'

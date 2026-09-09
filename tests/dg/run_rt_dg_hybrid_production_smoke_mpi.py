@@ -31,6 +31,12 @@ def require_localized_publisher(body: str) -> None:
         "formal v3 pseudopotential receipt does not use the authoritative full-system projector count"
     assert "mpi_allreduce(ppg%nlma,global_projector_count" not in compact, \
         "formal v3 pseudopotential receipt double-counts overlapping fragment-buffer projectors"
+    assert "payload%energy_receipt=[checkpoint_energy%e_tot" in compact, \
+        "formal v4 checkpoint does not contain a physical GS energy decomposition"
+    assert "callcalc_total_energy_periodic" in compact, \
+        "formal v4 energy reference is not produced by SALMON total-energy evaluation"
+    assert "payload%energy_receipt=0d0" not in compact, \
+        "all-zero energy receipt silently disables GS-to-RT energy identity"
 
 
 require_localized_publisher(formal_publisher)
@@ -39,6 +45,7 @@ for old, replacement in (
      "allocate(payload%initial_occupied_amplitudes,source=solved_coefficients)"),
     ("allocate(payload%basis_point_offsets(npoint+1)", "allocate(payload%removed_point_offsets(npoint+1)"),
     ("global_projector_count=dc%ppg_tot%Nlma", "global_projector_count=ppg%Nlma"),
+    ("payload%energy_receipt=[checkpoint_energy%E_tot", "payload%energy_receipt=0d0"),
 ):
     mutated = formal_publisher.replace(old, replacement, 1)
     assert mutated != formal_publisher, old
@@ -64,6 +71,9 @@ def require_hybrid_route_contract(source: str) -> None:
     assert "[HYBRID-RT-CHECKPOINT-STATIONARITY]" in continuation
     assert "[HYBRID-RT-REFRESH-STATIONARITY]" in continuation
     assert "establish_fixed_density_reference=.true." in continuation.lower()
+    assert "all(hybrid_state%energy_receipt==0d0)" in continuation.lower()
+    assert "hybrid dg rt physical energy receipt is invalid" in continuation.lower()
+    assert "energy%e_ion_ion=hybrid_state%energy_receipt(5)" in continuation.lower()
     density_update_source = (root / "src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
     assert "new_h=new_h+state%hamiltonian_reference_correction" in density_update_source
     assert "call propagate_rt_dg_hybrid_length_gauge" in continuation
@@ -323,10 +333,18 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         [mpiexec, "-n", "4", str(salmon)], input=h4_rt_input(), cwd=work, env=env,
         capture_output=True, text=True, timeout=180,
     )
-    assert rt.returncode == 0, (rt.stdout, rt.stderr)
+    assert rt.returncode == 0, (gs.stdout, rt.stdout, rt.stderr)
     assert rt.stdout.count("[HYBRID-RT-ROUTE] propagator=EXP potential=PP+HARTREE+XC") == 1
     assert rt.stdout.count("[HYBRID-RT-HANDOFF]") == 1
     assert rt.stdout.count("[HYBRID-RT-POTENTIAL] update=0 path=PP+HARTREE+XC") == 1
+    energy_identity = re.search(
+        r"\[HYBRID-RT-ENERGY-IDENTITY\]\s+checkpoint=\s*(\S+)\s+refreshed=\s*(\S+)\s+defect=\s*(\S+)",
+        rt.stdout,
+    )
+    assert energy_identity, "GS-to-RT physical energy identity was skipped"
+    energy_values = [float(value) for value in energy_identity.groups()]
+    assert all(math.isfinite(value) for value in energy_values)
+    assert energy_values[2] <= 1e-10 * max(1.0, abs(energy_values[0]))
     state_match = re.search(
         r"\[HYBRID-RT-STATE\]\s+basis_norm=\s*([^ ]+)\s+density_norm=\s*([^ ]+)\s+"
         r"occupation_sum=\s*([^ ]+)\s+hamiltonian_norm=\s*([^ ]+)\s+kinetic_norm=\s*([^ ]+)\s+"

@@ -12,6 +12,11 @@ module rt_dg_hybrid_checkpoint
   character(16),parameter::occupied_magic="SALMON_DG_OCC02 "
   integer,parameter::occupied_version=2
   integer,parameter,public::rt_dg_hybrid_occupied_checkpoint_version=2
+  type,public::s_rt_dg_hybrid_v4_publication_authorization
+    logical::valid=.false.
+    integer::checkpoint_version=0,published_rank=0
+    integer(int64)::basis_fingerprint=0_int64,operator_fingerprint=0_int64
+  end type s_rt_dg_hybrid_v4_publication_authorization
   public::write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint,&
     collective_rt_dg_hybrid_publication_precondition,&
     collective_rt_dg_hybrid_publication_mapping_precondition,&
@@ -91,16 +96,22 @@ contains
   end subroutine collective_rt_dg_hybrid_publication_mapping_precondition
 
   subroutine publish_rt_dg_hybrid_checkpoint_v4(comm,path,global_count,noccupied,row_ids,row_owner,&
-      occupied_row_ids,payload,local_valid,ok,message)
+      occupied_row_ids,payload,authorization,local_valid,ok,message)
     integer,intent(in)::comm,global_count,noccupied,row_owner(:)
     character(*),intent(in)::path
     integer(int64),intent(in)::row_ids(:),occupied_row_ids(:)
     type(s_rt_dg_hybrid_v4_shard),intent(in)::payload
+    type(s_rt_dg_hybrid_v4_publication_authorization),intent(in)::authorization
     logical,intent(in)::local_valid
     logical,intent(out)::ok
     character(*),intent(out)::message
     character(512)::detail
 
+    call collective_rt_dg_hybrid_publication_precondition(comm,authorization%valid.and.&
+      authorization%checkpoint_version==4.and.authorization%published_rank==global_count.and.&
+      authorization%basis_fingerprint==payload%basis_fingerprint.and.&
+      authorization%operator_fingerprint==payload%operator_fingerprint,global_count,noccupied,ok,detail)
+    if(.not.ok)then;message='distributed-v4 endpoint authorization failed: '//trim(detail);return;endif
     call collective_rt_dg_hybrid_publication_precondition(comm,local_valid,global_count,noccupied,ok,detail)
     if(.not.ok)then;message='distributed-v4 endpoint precondition failed: '//trim(detail);return;endif
     call collective_rt_dg_hybrid_publication_mapping_precondition(comm,global_count,row_ids,row_owner,&

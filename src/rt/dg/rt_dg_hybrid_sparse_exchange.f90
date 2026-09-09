@@ -13,7 +13,6 @@ module rt_dg_hybrid_sparse_exchange
     integer,allocatable::send_counts(:),send_displacements(:),receive_counts(:),receive_displacements(:)
     integer,allocatable::send_positions(:),value_slots(:)
     complex(real64),allocatable::send_values(:),receive_values(:)
-    integer,allocatable::requests(:)
   end type s_rt_dg_sparse_exchange
   public::build_rt_dg_sparse_exchange,exchange_rt_dg_sparse_values,exchange_rt_dg_sparse_matrix,&
     clear_rt_dg_sparse_exchange
@@ -160,8 +159,7 @@ contains
     call offsets(plan%send_counts,plan%send_displacements,total_send,local_bad)
     call consensus(local_bad,global_bad,ierr);if(ierr/=MPI_SUCCESS.or.global_bad/=0)goto 900
     allocate(request_ids(total_receive),request_edges(total_receive),received_requests(total_send),&
-      plan%send_positions(total_send),plan%send_values(total_send),plan%receive_values(total_receive),&
-      plan%requests(2*nproc),stat=allocation_status)
+      plan%send_positions(total_send),plan%send_values(total_send),plan%receive_values(total_receive),stat=allocation_status)
     local_bad=merge(0,1,allocation_status==0);call consensus(local_bad,global_bad,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;call cleanup();message='cannot allocate sparse halo payload';return;endif
     cursor=plan%receive_displacements+1
@@ -201,7 +199,6 @@ contains
     call add_size(integer_elements,plan%send_displacements,local_bad);call add_size(integer_elements,plan%receive_counts,local_bad)
     call add_size(integer_elements,plan%receive_displacements,local_bad);call add_size(integer_elements,plan%send_positions,local_bad)
     call add_size(integer_elements,plan%value_slots,local_bad)
-    call add_size(integer_elements,plan%requests,local_bad)
     complex_elements=int(size(plan%send_values),int64)+int(size(plan%receive_values),int64)
     if(integer_elements>huge(plan%workspace_peak_bytes)/4_int64.or.&
       complex_elements>huge(plan%workspace_peak_bytes)/16_int64)local_bad=1
@@ -295,11 +292,11 @@ contains
     complex(real64),intent(out)::needed_values(:)
     integer,intent(out)::ierr
 #ifdef USE_MPI
-    integer::i,rank,local_bad,global_bad,nrequest,comparison,actual_nproc,post_status
+    integer::i,local_bad,global_bad,comparison,actual_nproc
     local_bad=0
     if(.not.plan%valid.or.plan%nproc<1.or.plan%local_count/=size(local_values))local_bad=1
     if(.not.allocated(plan%value_slots).or..not.allocated(plan%send_positions).or.&
-      .not.allocated(plan%send_values).or..not.allocated(plan%receive_values).or..not.allocated(plan%requests))local_bad=1
+      .not.allocated(plan%send_values).or..not.allocated(plan%receive_values))local_bad=1
     if(local_bad==0)then
       call MPI_Comm_compare(comm,plan%comm,comparison,ierr)
       if(ierr/=MPI_SUCCESS.or.(comparison/=MPI_IDENT.and.comparison/=MPI_CONGRUENT))local_bad=1
@@ -312,7 +309,7 @@ contains
       if(size(plan%send_counts)/=plan%nproc.or.size(plan%send_displacements)/=plan%nproc.or.&
         size(plan%receive_counts)/=plan%nproc.or.size(plan%receive_displacements)/=plan%nproc)local_bad=1
       if(size(needed_values)/=size(plan%value_slots).or.size(plan%send_positions)/=size(plan%send_values).or.&
-        size(plan%requests)<2*plan%nproc) local_bad=1
+        size(plan%receive_values)/=sum(plan%receive_counts))local_bad=1
       if(.not.valid_layout(plan%send_counts,plan%send_displacements,size(plan%send_values)).or.&
         .not.valid_layout(plan%receive_counts,plan%receive_displacements,size(plan%receive_values)))local_bad=1
       if(any(plan%send_positions<1).or.any(plan%send_positions>size(local_values)))local_bad=1
@@ -322,24 +319,8 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=MPI_ERR_OTHER;return;endif
     do i=1,size(plan%send_positions);plan%send_values(i)=local_values(plan%send_positions(i));enddo
-    nrequest=0
-    do rank=0,plan%nproc-1
-      if(plan%receive_counts(rank+1)>0)then
-        nrequest=nrequest+1
-        call MPI_Irecv(plan%receive_values(plan%receive_displacements(rank+1)+1),plan%receive_counts(rank+1),&
-          MPI_DOUBLE_COMPLEX,rank,3817,comm,plan%requests(nrequest),post_status)
-        if(post_status/=MPI_SUCCESS)then;call cancel_requests(nrequest-1);ierr=post_status;return;endif
-      endif
-    enddo
-    do rank=0,plan%nproc-1
-      if(plan%send_counts(rank+1)>0)then
-        nrequest=nrequest+1
-        call MPI_Isend(plan%send_values(plan%send_displacements(rank+1)+1),plan%send_counts(rank+1),&
-          MPI_DOUBLE_COMPLEX,rank,3817,comm,plan%requests(nrequest),post_status)
-        if(post_status/=MPI_SUCCESS)then;call cancel_requests(nrequest-1);ierr=post_status;return;endif
-      endif
-    enddo
-    if(nrequest>0)call MPI_Waitall(nrequest,plan%requests,MPI_STATUSES_IGNORE,ierr)
+    call MPI_Alltoallv(plan%send_values,plan%send_counts,plan%send_displacements,MPI_DOUBLE_COMPLEX,&
+      plan%receive_values,plan%receive_counts,plan%receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
     do i=1,size(needed_values)
       if(plan%value_slots(i)>0)then;needed_values(i)=local_values(plan%value_slots(i));else;needed_values(i)=plan%receive_values(-plan%value_slots(i));endif
@@ -358,11 +339,6 @@ contains
       enddo
       valid_layout=expected==total
     end function valid_layout
-    subroutine cancel_requests(count)
-      integer,intent(in)::count;integer::q,cancel_status,wait_status
-      do q=1,count;call MPI_Cancel(plan%requests(q),cancel_status);enddo
-      if(count>0)call MPI_Waitall(count,plan%requests,MPI_STATUSES_IGNORE,wait_status)
-    end subroutine cancel_requests
 #endif
   end subroutine exchange_rt_dg_sparse_values
 
@@ -447,7 +423,6 @@ contains
     if(allocated(plan%value_slots))deallocate(plan%value_slots)
     if(allocated(plan%send_values))deallocate(plan%send_values)
     if(allocated(plan%receive_values))deallocate(plan%receive_values)
-    if(allocated(plan%requests))deallocate(plan%requests)
     plan%valid=.false.
     plan%workspace_peak_bytes=0_int64;plan%catalog_fingerprint=0_int64;plan%local_count=0
   end subroutine clear_rt_dg_sparse_exchange

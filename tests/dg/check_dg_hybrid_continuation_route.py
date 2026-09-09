@@ -42,8 +42,15 @@ for token in (
     "if(.not.final_refresh_performed)errorstop",
     "callow_fingerprint_distributed_matrix",
     "callvalidate_dg_hybrid_ground_state",
+    "callrecord_dg_hybrid_spectral_certification",
+    "callrecord_dg_hybrid_certified_rt_basis",
+    "callauthorize_dg_hybrid_v4_publication",
 ):
     assert continuation_c.index(compact(token)) < publish, token
+authorize = continuation_c.index("callauthorize_dg_hybrid_v4_publication")
+assert continuation_c.index("callrecord_dg_hybrid_spectral_certification") < authorize < publish
+assert continuation_c.index("callrecord_dg_hybrid_certified_rt_basis") < authorize < publish
+assert "spectral_certification%certified_rank,candidate_acceptance%publication_authorized" in continuation_c[publish:]
 assert "callsolve_dg_hybrid_generalized_complete_once" not in continuation_c[publish:]
 assert "calldg_dc_update_potential_from_distributed_density" not in continuation_c[publish:]
 assert "callderive_dg_hybrid_occupation_policy" not in continuation_c[publish:]
@@ -65,6 +72,8 @@ for token in (
     "payload%operator_offsets",
     "payload%operator_columns",
     "dc%ppg_tot%nlma",
+    "payload%energy_receipt=[checkpoint_energy%e_tot",
+    "callcalc_total_energy_periodic",
 ):
     assert token in publisher_c, token
 for forbidden in (
@@ -93,6 +102,8 @@ for forbidden in (
 # call ahead of its guard invalidates the checked invariants.
 mutated = continuation_c.replace("callpublish_dg_hybrid_divided_v4(", "callremoved_v4(", 1)
 assert mutated.count("callpublish_dg_hybrid_divided_v4(") == 0
+mutated = continuation_c.replace("callauthorize_dg_hybrid_v4_publication", "callremoved_authorization", 1)
+assert "callauthorize_dg_hybrid_v4_publication" not in mutated
 mutated = continuation_c[:guard_at] + "callreject_dg_hybrid_trial" + continuation_c[guard_at:]
 assert mutated.index("callreject_dg_hybrid_trial", guard_at) < mutated.index(guard, guard_at)
 

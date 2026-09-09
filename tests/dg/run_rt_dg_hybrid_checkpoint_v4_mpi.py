@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import os, shlex, shutil, subprocess, tempfile
+import os, shlex, shutil, struct, subprocess, tempfile
 
 root=Path(__file__).resolve().parents[2]
 source=root/"src/rt/dg/rt_dg_hybrid_checkpoint_v4.f90"
@@ -15,13 +15,23 @@ for token in ("salmon_hybrid_dg_manifest_v4","salmon_hybrid_dg_rank_shard_v4",
               "initial_occupied_amplitudes","basis_point_offsets","metric_offsets"):
   assert token in text,f"RED: v4 checkpoint is missing {token}"
 assert "full_coefficients" not in text and "full_metric" not in text
+reader=text.split("subroutine read_rt_dg_hybrid_checkpoint_v4",1)[1].split(
+  "end subroutine read_rt_dg_hybrid_checkpoint_v4",1)[0]
+assert "valid_read_dimensions" in reader,"RED: shard dimensions are allocated before checked extent validation"
+assert "unit=-1" in reader,"RED: checkpoint reader may close an uninitialized unit"
+assert "manifest_size<" in reader and "actual_size<" in reader,"RED: fixed headers are read without minimum-size checks"
+for field in ("global_grid_count","certified_rank","operator_structure_fingerprint","scope_fingerprint","payload_fingerprint"):
+  assert f"shard_{field}/={field}" in reader,f"RED: shard {field} is not compared with the manifest"
 assert endpoint_text.count("subroutine publish_rt_dg_hybrid_checkpoint_v4") == 2
 endpoint_body=endpoint_text.split("subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[1].split(
   "end subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[0]
-for token in ("collective_rt_dg_hybrid_publication_precondition",
-              "collective_rt_dg_hybrid_publication_mapping_precondition",
+assert endpoint_body.count("collective_rt_dg_hybrid_publication_precondition")==2
+for token in ("collective_rt_dg_hybrid_publication_mapping_precondition",
               "write_rt_dg_hybrid_checkpoint_v4"):
   assert endpoint_body.count(token)==1,token
+assert "authorization%valid" in endpoint_body and "endpoint authorization failed" in endpoint_body
+for field in ("checkpoint_version","published_rank","basis_fingerprint","operator_fingerprint"):
+  assert f"authorization%{field}" in endpoint_body
 assert publisher.count("call publish_rt_dg_hybrid_checkpoint_v4")==1
 assert "call write_rt_dg_hybrid_checkpoint_v4" not in publisher
 for mutation in (
@@ -53,15 +63,42 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
     assert f"PASS distributed-v4 shard manifest ranks={nrank}" in run.stdout
     prefix=Path(f"/tmp/salmon-hybrid-v4-checkpoint-{nrank}")
+    if nrank==1:
+      shard=sorted(prefix.parent.glob(prefix.name+".v4.*.rank000000.shard"),key=lambda p:p.stat().st_mtime_ns)[-1]
+      original=shard.read_bytes()
+      for label,damaged,diagnostic in (
+        ("truncated",original[:100],"truncated or has an invalid fixed header"),
+        ("negative",bytearray(original),"negative, overflowing, or invalid dimensions"),
+        ("huge",bytearray(original),"negative, overflowing, or invalid dimensions"),
+      ):
+        if label=="negative": struct.pack_into("=i",damaged,120,-1)
+        if label=="huge": struct.pack_into("=i",damaged,120,2**31-1)
+        shard.write_bytes(damaged)
+        rejected=subprocess.run([shutil.which("mpiexec"),"-n","1",str(reject),str(prefix)],
+          capture_output=True,text=True,env=env,timeout=30)
+        assert rejected.returncode==0,(label,rejected.stdout,rejected.stderr)
+        assert diagnostic in rejected.stdout.lower(),(label,rejected.stdout)
+        shard.write_bytes(original)
     if nrank==2:
+      manifest=Path(str(prefix)+".manifest")
+      original_manifest=manifest.read_bytes();damaged_manifest=bytearray(original_manifest)
+      manifest_grid=struct.unpack_from("=i",damaged_manifest,44)[0]
+      struct.pack_into("=i",damaged_manifest,44,manifest_grid+1)
+      manifest.write_bytes(damaged_manifest)
+      rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(reject),str(prefix)],
+        capture_output=True,text=True,env=env,timeout=30)
+      assert rejected.returncode==0,(rejected.stdout,rejected.stderr)
+      assert "disagrees with manifest common metadata" in rejected.stdout.lower(),rejected.stdout
+      manifest.write_bytes(original_manifest)
       shards=sorted(prefix.parent.glob(prefix.name+".v4.*.rank000001.shard"),key=lambda p:p.stat().st_mtime_ns)
       assert shards
-      damaged=bytearray(shards[-1].read_bytes());damaged[-1]^=0x01;shards[-1].write_bytes(damaged)
+      original_shard=shards[-1].read_bytes();damaged=bytearray(original_shard);damaged[-1]^=0x01;shards[-1].write_bytes(damaged)
       rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(reject),str(prefix)],
         capture_output=True,text=True,env=env,timeout=30)
       assert rejected.returncode==0,(rejected.stdout,rejected.stderr)
       assert "PASS v4 collective rejection ranks=2 diagnostic=" in rejected.stdout
       assert "rank shard is partial, stale, or corrupt" in rejected.stdout.lower(),rejected.stdout
+      shards[-1].write_bytes(original_shard)
     if nrank==4:
       rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(reject),str(prefix)],
         capture_output=True,text=True,env=env,timeout=30)
