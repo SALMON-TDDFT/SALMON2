@@ -20,7 +20,8 @@ module rt_dg_hybrid_structural_graph
 contains
   subroutine build_rt_dg_hybrid_structural_graph(comm,global_count,row_ids,basis_values,metric_rows,kinetic_rows,&
       nonlocal_rows,local_rows,sipg_rows,hamiltonian_rows,position_rows,metric_offsets,metric_columns,&
-      operator_offsets,operator_columns,ok,message,local_unique_candidates,peak_workspace_keys)
+      operator_offsets,operator_columns,ok,message,local_unique_candidates,peak_workspace_keys,&
+      basis_owners,local_owner)
     integer,intent(in)::comm,global_count
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(in)::basis_values(:,:),metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),&
@@ -29,12 +30,13 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     integer(int64),intent(out),optional::local_unique_candidates,peak_workspace_keys
+    integer,intent(in),optional::basis_owners(:),local_owner
 #ifdef USE_MPI
     integer::i,j,p,row,nowned,npoint,nactive,ierr,local_bad,global_bad,rank,nproc,metric_requested,operator_requested
     integer,allocatable::active(:),owners(:),owner_marks(:)
     integer(int64)::workspace_peak
     type(key_set)::point_support,metric_support,operator_support,closure_support
-    logical::local_capacity_ok,operator_capacity_ok,square_extent_ok
+    logical::local_capacity_ok,operator_capacity_ok,square_extent_ok,same_element
     ok=.false.;message='';nowned=size(row_ids);npoint=size(basis_values,2);local_bad=0;workspace_peak=0_int64
     if(present(local_unique_candidates))local_unique_candidates=0_int64
     if(present(peak_workspace_keys))peak_workspace_keys=0_int64
@@ -42,7 +44,11 @@ contains
       any(shape(metric_rows)/=[nowned,global_count]).or.any(shape(kinetic_rows)/=[nowned,global_count]).or.&
       any(shape(nonlocal_rows)/=[nowned,global_count]).or.any(shape(local_rows)/=[nowned,global_count]).or.&
       any(shape(sipg_rows)/=[nowned,global_count]).or.any(shape(hamiltonian_rows)/=[nowned,global_count]).or.&
-      any(shape(position_rows)/=[3,nowned,global_count]))local_bad=1
+      .not.(all(shape(position_rows)==[3,nowned,global_count]).or.size(position_rows)==0))local_bad=1
+    if(present(basis_owners).neqv.present(local_owner))local_bad=1
+    if(present(basis_owners))then
+      if(size(basis_owners)/=global_count.or.local_owner<0) local_bad=1
+    endif
     if(any(row_ids<1_int64).or.any(row_ids>int(global_count,int64)))local_bad=1
     if(.not.finite_matrix(basis_values).or..not.finite_matrix(metric_rows).or..not.finite_matrix(kinetic_rows).or.&
       .not.finite_matrix(nonlocal_rows).or..not.finite_matrix(local_rows).or..not.finite_matrix(sipg_rows).or.&
@@ -76,7 +82,13 @@ contains
     do p=1,npoint
       nactive=0
       do i=1,global_count
-        if(basis_values(i,p)/=(0d0,0d0))then;nactive=nactive+1;active(nactive)=i;endif
+        if(present(basis_owners))then
+          if(basis_owners(i)==local_owner.and.basis_values(i,p)/=(0d0,0d0))then
+            nactive=nactive+1;active(nactive)=i
+          endif
+        else
+          if(basis_values(i,p)/=(0d0,0d0))then;nactive=nactive+1;active(nactive)=i;endif
+        endif
       enddo
       do i=1,nactive;do j=1,nactive
         call insert_key(point_support,directed_key(active(i),active(j),global_count))
@@ -91,11 +103,23 @@ contains
     do i=1,nowned
       row=int(row_ids(i))
       do j=1,global_count
-        if(metric_rows(i,j)/=(0d0,0d0))call insert_key(metric_support,directed_key(row,j,global_count))
-        if(metric_rows(i,j)/=(0d0,0d0).or.kinetic_rows(i,j)/=(0d0,0d0).or.&
-          nonlocal_rows(i,j)/=(0d0,0d0).or.local_rows(i,j)/=(0d0,0d0).or.sipg_rows(i,j)/=(0d0,0d0).or.&
-          hamiltonian_rows(i,j)/=(0d0,0d0).or.any(position_rows(:,i,j)/=(0d0,0d0)))&
+        same_element=.true.
+        if(present(basis_owners))same_element=basis_owners(j)==local_owner
+        ! Metric, kinetic and multiplicative-local terms act on the
+        ! discontinuous element copies.  Dense diagnostic rows can retain
+        ! tiny samples of the underlying global WF outside that element;
+        ! those samples are values, not structural support.  Nonlocal and
+        ! SIPG rows are the authoritative fixed cross-element operators.
+        if(same_element.and.metric_rows(i,j)/=(0d0,0d0))&
+          call insert_key(metric_support,directed_key(row,j,global_count))
+        if((same_element.and.(metric_rows(i,j)/=(0d0,0d0).or.kinetic_rows(i,j)/=(0d0,0d0).or.&
+            local_rows(i,j)/=(0d0,0d0))).or.nonlocal_rows(i,j)/=(0d0,0d0).or.&
+            sipg_rows(i,j)/=(0d0,0d0))&
           call insert_key(operator_support,directed_key(row,j,global_count))
+        if(size(position_rows)>0)then
+          if(same_element.and.any(position_rows(:,i,j)/=(0d0,0d0)))&
+            call insert_key(operator_support,directed_key(row,j,global_count))
+        endif
       enddo
     enddo
     local_capacity_ok=.not.metric_support%failed.and..not.operator_support%failed

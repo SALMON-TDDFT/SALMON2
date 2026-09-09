@@ -4,6 +4,7 @@ module rt_dg_hybrid_density_update
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state
   use rt_dg_hybrid_sparse_projection,only:validate_rt_dg_hybrid_sparse_hermiticity
+  use rt_dg_hybrid_point_density,only:reconstruct_rt_dg_point_csr_density
 #ifdef USE_MPI
   use mpi
 #endif
@@ -29,41 +30,16 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    complex(real64),allocatable::basis_batch(:,:),orbital_values(:,:),reduced_orbital_values(:,:)
-    integer,allocatable::point_counts(:)
-    integer::i,p,owner,rank,nproc,point_count,max_point_count,ierr,local_bad,global_bad
+    integer::ierr,local_bad,global_bad,payload_collective_count
+    integer(int64)::workspace_peak_bytes
     state%density_freshly_reconstructed=.false.
     call validate_certified_rt_state(comm,state,ok,message);if(.not.ok)return
-    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    allocate(point_counts(nproc));point_count=size(state%grid_ids)
-    call MPI_Allgather(point_count,1,MPI_INTEGER,point_counts,1,MPI_INTEGER,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT grid-count exchange failed';return;endif
-    max_point_count=max(1,maxval(point_counts))
-    allocate(basis_batch(state%certified_rank,max_point_count),&
-      orbital_values(state%noccupied,max_point_count),reduced_orbital_values(state%noccupied,max_point_count))
-    do owner=0,nproc-1
-      point_count=point_counts(owner+1);if(point_count==0)cycle
-      basis_batch(:,1:point_count)=(0d0,0d0)
-      if(rank==owner)basis_batch(:,1:point_count)=state%basis_values
-      call MPI_Bcast(basis_batch,state%certified_rank*point_count,MPI_DOUBLE_COMPLEX,owner,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT basis-slab exchange failed';return;endif
-      orbital_values(:,1:point_count)=(0d0,0d0)
-      do i=1,size(state%owned_row_ids)
-        do p=1,point_count
-          orbital_values(:,p)=orbital_values(:,p)+&
-            basis_batch(int(state%owned_row_ids(i)),p)*state%coefficients(i,:)
-        enddo
-      enddo
-      call MPI_Reduce(orbital_values,reduced_orbital_values,state%noccupied*point_count,&
-        MPI_DOUBLE_COMPLEX,MPI_SUM,owner,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='hybrid RT grid-local orbital reduction failed';return;endif
-      if(rank==owner)then
-        do p=1,point_count
-          state%density(p)=sum(state%occupations*abs(reduced_orbital_values(:,p))**2)
-        enddo
-      endif
-    enddo
+    call reconstruct_rt_dg_point_csr_density(comm,state%basis_exchange,state%basis_point_offsets,&
+      state%basis_support_slots,state%basis_support_values,state%coefficients,state%occupations,state%density,&
+      workspace_peak_bytes,payload_collective_count,ok,message)
+    if(.not.ok)then;message='hybrid RT local density reconstruction failed: '//trim(message);return;endif
+    state%density_workspace_peak_bytes=workspace_peak_bytes
+    state%density_payload_collective_count=payload_collective_count
     local_bad=merge(0,1,all(ieee_is_finite(state%density)))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     ok=ierr==MPI_SUCCESS.and.global_bad==0
@@ -114,8 +90,7 @@ contains
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonfinite hybrid RT local projection';return;endif
     do i=1,size(state%owned_row_ids)
       do edge=state%operators%row_offsets(i),state%operators%row_offsets(i+1)-1
-        j=state%operators%column_ids(edge)
-        new_h(edge)=state%kinetic_rows(i,j)+state%nonlocal_rows(i,j)+new_local(edge)+state%sipg_rows(i,j)
+        new_h(edge)=state%kinetic_values(edge)+state%nonlocal_values(edge)+new_local(edge)+state%sipg_values(edge)
       enddo
     enddo
     if(establish_reference)then
@@ -191,9 +166,12 @@ contains
     r=minimum_dimensions(1);nocc=minimum_dimensions(3)
     local_bad=merge(0,1,state%valid.and.r>0.and.minimum_dimensions(2)==r.and.nocc>0.and.nocc<=r)
     if(.not.allocated(state%owned_row_ids).or..not.allocated(state%coefficients).or.&
-      .not.allocated(state%kinetic_rows).or..not.allocated(state%nonlocal_rows).or.&
-      .not.allocated(state%local_rows).or..not.allocated(state%sipg_rows).or.&
-      .not.allocated(state%basis_values).or..not.allocated(state%density).or.&
+      .not.allocated(state%kinetic_values).or..not.allocated(state%nonlocal_values).or.&
+      .not.allocated(state%local_rows).or..not.allocated(state%sipg_values).or.&
+      .not.allocated(state%basis_point_offsets).or.&
+      .not.allocated(state%basis_support_ids).or..not.allocated(state%basis_support_slots).or.&
+      .not.allocated(state%basis_halo_ids).or..not.allocated(state%basis_support_values).or.&
+      .not.allocated(state%density).or.&
       .not.allocated(state%grid_ids).or..not.allocated(state%grid_weights).or.&
       .not.allocated(state%occupations).or..not.allocated(state%eigenvalues).or.&
       .not.allocated(state%metric%owned_row_ids).or..not.allocated(state%metric%row_offsets).or.&
@@ -208,13 +186,27 @@ contains
 
     nowned=size(state%owned_row_ids);npoint=size(state%grid_ids);local_bad=0
     if(size(state%coefficients,1)/=nowned.or.size(state%coefficients,2)/=nocc)local_bad=1
-    if(size(state%kinetic_rows,1)/=nowned.or.size(state%kinetic_rows,2)/=r.or.&
-      size(state%nonlocal_rows,1)/=nowned.or.size(state%nonlocal_rows,2)/=r.or.&
+    if(size(state%kinetic_values)/=size(state%operators%column_ids).or.&
+      size(state%nonlocal_values)/=size(state%operators%column_ids).or.&
       size(state%local_rows)/=size(state%operators%column_ids).or.&
-      size(state%sipg_rows,1)/=nowned.or.size(state%sipg_rows,2)/=r)local_bad=1
-    if(size(state%basis_values,1)/=r.or.size(state%basis_values,2)/=npoint.or.&
-      size(state%density)/=npoint.or.size(state%grid_weights)/=npoint.or.&
-      size(state%occupations)/=nocc.or.size(state%eigenvalues)/=r)local_bad=1
+      size(state%sipg_values)/=size(state%operators%column_ids))local_bad=1
+    if(size(state%density)/=npoint.or.size(state%grid_weights)/=npoint.or.&
+      size(state%occupations)/=nocc.or.size(state%eigenvalues)/=nocc)local_bad=1
+    if(size(state%basis_point_offsets)/=npoint+1.or.&
+      size(state%basis_support_ids)/=size(state%basis_support_values).or.&
+      size(state%basis_support_slots)/=size(state%basis_support_ids))local_bad=1
+    if(size(state%basis_point_offsets)==npoint+1)then
+      if(state%basis_point_offsets(1)/=1.or.&
+        state%basis_point_offsets(npoint+1)/=size(state%basis_support_ids)+1)local_bad=1
+      do i=1,npoint
+        if(state%basis_point_offsets(i)<1.or.state%basis_point_offsets(i+1)<state%basis_point_offsets(i).or.&
+          state%basis_point_offsets(i+1)>size(state%basis_support_ids)+1)local_bad=1
+      enddo
+    endif
+    if(any(state%basis_support_ids<1).or.any(state%basis_support_ids>r))local_bad=1
+    if(any(state%basis_halo_ids<1).or.any(state%basis_halo_ids>r).or.&
+      any(state%basis_support_slots<1).or.any(state%basis_support_slots>size(state%basis_halo_ids)))local_bad=1
+    if(.not.state%basis_exchange%valid)local_bad=1
     if(.not.state%metric%valid.or.state%metric%global_count/=r.or.&
       size(state%metric%owned_row_ids)/=nowned.or.size(state%metric%row_offsets)/=nowned+1.or.&
       size(state%metric%values)/=size(state%metric%column_ids).or.&
@@ -234,18 +226,18 @@ contains
     endif
     if(.not.all(ieee_is_finite(real(state%coefficients))).or.&
       .not.all(ieee_is_finite(aimag(state%coefficients))).or.&
-      .not.all(ieee_is_finite(real(state%basis_values))).or.&
-      .not.all(ieee_is_finite(aimag(state%basis_values))).or.&
+      .not.all(ieee_is_finite(real(state%basis_support_values))).or.&
+      .not.all(ieee_is_finite(aimag(state%basis_support_values))).or.&
       .not.all(ieee_is_finite(state%density)).or..not.all(ieee_is_finite(state%grid_weights)).or.&
       .not.all(ieee_is_finite(state%occupations)).or..not.all(ieee_is_finite(state%eigenvalues)))local_bad=1
-    if(.not.all(ieee_is_finite(real(state%kinetic_rows))).or.&
-      .not.all(ieee_is_finite(aimag(state%kinetic_rows))).or.&
-      .not.all(ieee_is_finite(real(state%nonlocal_rows))).or.&
-      .not.all(ieee_is_finite(aimag(state%nonlocal_rows))).or.&
+    if(.not.all(ieee_is_finite(real(state%kinetic_values))).or.&
+      .not.all(ieee_is_finite(aimag(state%kinetic_values))).or.&
+      .not.all(ieee_is_finite(real(state%nonlocal_values))).or.&
+      .not.all(ieee_is_finite(aimag(state%nonlocal_values))).or.&
       .not.all(ieee_is_finite(real(state%local_rows))).or.&
       .not.all(ieee_is_finite(aimag(state%local_rows))).or.&
-      .not.all(ieee_is_finite(real(state%sipg_rows))).or.&
-      .not.all(ieee_is_finite(aimag(state%sipg_rows))))local_bad=1
+      .not.all(ieee_is_finite(real(state%sipg_values))).or.&
+      .not.all(ieee_is_finite(aimag(state%sipg_values))))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid certified hybrid RT state extent';return;endif
 

@@ -17,6 +17,7 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   call exercise_structural_capacity_boundary
   call exercise_zero_global_count
   call exercise_structural_graph
+  call exercise_fragment_restricted_support
   call exercise_repeated_support_scaling
   call exercise_sparse_projection
   call exercise_invalid_projection_contracts
@@ -298,6 +299,60 @@ contains
       1d-14,ok,message)
     call require(.not.ok,'asymmetric near-threshold operator pair was accepted')
   end subroutine exercise_structural_graph
+
+  subroutine exercise_fragment_restricted_support
+    integer,parameter::r=4,g=1
+    integer::row,i,edge,nowned,npoint
+    integer(int64),allocatable::rows(:)
+    integer,allocatable::owners(:),metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
+    complex(real64),allocatable::basis(:,:),metric(:,:),zero(:,:),local(:,:),sipg(:,:),position(:,:,:)
+    logical::remote_tail_edge,fixed_sipg_edge
+    nowned=count([(mod(row-1,nproc)==rank,row=1,r)])
+    npoint=merge(g,0,rank==0)
+    allocate(rows(nowned),owners(r),basis(r,npoint),metric(nowned,r),zero(nowned,r),local(nowned,r),sipg(nowned,r),&
+      position(3,nowned,r))
+    i=0
+    do row=1,r
+      owners(row)=mod(row-1,nproc)
+      if(owners(row)==rank)then;i=i+1;rows(i)=row;endif
+    enddo
+    basis=(0d0,0d0);metric=(0d0,0d0);zero=(0d0,0d0);local=(0d0,0d0);sipg=(0d0,0d0);position=(0d0,0d0)
+    if(rank==0)then
+      basis(1,1)=(1d0,0d0)
+      ! A sampled global-WF tail from another fragment is outside the
+      ! discontinuous element copy and must not enlarge local V(r,t) support.
+      if(nproc>1)then;basis(2,1)=(1d-30,0d0);basis(3,1)=(2d-30,0d0);endif
+    endif
+    do i=1,nowned
+      row=int(rows(i));metric(i,row)=(1d0,0d0)
+      if(row==1.and.nproc>1)sipg(i,2)=(2d-1,3d-2)
+      if(row==2.and.nproc>1)sipg(i,1)=conjg((2d-1,3d-2))
+      ! These tiny cross-fragment entries model global-WF tails in a dense
+      ! diagnostic projection, not structural DG element support.
+      if(row==2.and.nproc>1)local(i,3)=(1d-30,0d0)
+      if(row==3.and.nproc>1)local(i,2)=(1d-30,0d0)
+    enddo
+    call build_rt_dg_hybrid_structural_graph(comm,r,rows,basis,metric,zero,zero,local,sipg,local,position,&
+      metric_offsets,metric_columns,operator_offsets,operator_columns,ok,message,&
+      basis_owners=owners,local_owner=rank)
+    call require(ok,'fragment-restricted structural graph failed: '//trim(message))
+    remote_tail_edge=.false.;fixed_sipg_edge=.false.
+    do i=1,nowned
+      row=int(rows(i))
+      do edge=operator_offsets(i),operator_offsets(i+1)-1
+        if((row==1.and.operator_columns(edge)==2).or.(row==2.and.operator_columns(edge)==1))then
+          fixed_sipg_edge=.true.
+        endif
+        if(nproc>1.and.((row==2.and.operator_columns(edge)==3).or.&
+          (row==3.and.operator_columns(edge)==2)))remote_tail_edge=.true.
+      enddo
+    enddo
+    if(nproc>1)then
+      call require(.not.any_rank(remote_tail_edge),&
+        'tiny remote global-WF tail created a local-potential DG edge')
+      call require(any_rank(fixed_sipg_edge),'authoritative fixed SIPG edge was discarded')
+    endif
+  end subroutine exercise_fragment_restricted_support
 
   subroutine exercise_sparse_projection
     integer,parameter::r=3,g=5

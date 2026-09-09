@@ -16,8 +16,10 @@ if (USE_MPI AND USE_SCALAPACK)
   list(APPEND SOURCES
     dg/rt_dg_overlapping_wannier.f90
     dg/rt_dg_hybrid_sparse_exchange.f90
+    dg/rt_dg_hybrid_point_density.f90
     dg/rt_dg_hybrid_metric_solver.f90
     dg/rt_dg_hybrid_length_gauge.f90
+    dg/rt_dg_hybrid_checkpoint_v4.f90
     dg/rt_dg_hybrid_checkpoint.f90
     dg/rt_dg_hybrid_structural_graph.f90
     dg/rt_dg_hybrid_sparse_projection.f90

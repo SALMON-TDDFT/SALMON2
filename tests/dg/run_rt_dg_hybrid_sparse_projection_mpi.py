@@ -145,5 +145,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
   mutated_graph=build/"graph-zero-global-count.f90"
   mutated_graph.write_text(graph_text.replace(zero_guard_old,"if(global_count<1)then;ok=.true.;return;endif",1))
   compile_and_run(build,projection_source,"graph-zero-global-count",False,mutated_graph)
+  element_old="if(present(basis_owners))same_element=basis_owners(j)==local_owner"
+  assert graph_text.count(element_old)==1
+  mutated_graph=build/"graph-global-wf-tail-support.f90"
+  mutated_graph.write_text(graph_text.replace(element_old,"if(present(basis_owners))same_element=.true.",1))
+  compile_and_run(build,projection_source,"graph-global-wf-tail-support",False,mutated_graph)
 
 print("PASS structural/support and production sparse projection on 1, 2, 4, and 8 ranks; mutations rejected")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a real divided-Hybrid GS producer and consume its v3 checkpoint in Exp RT."""
+"""Run a real divided-Hybrid GS producer and consume its distributed v4 checkpoint in Exp RT."""
 
 from pathlib import Path
 import hashlib
@@ -7,7 +7,6 @@ import math
 import os
 import re
 import shutil
-import struct
 import subprocess
 import tempfile
 
@@ -17,17 +16,16 @@ main_source = (root / "src/rt/main_tddft.f90").read_text()
 main_dft_source = (root / "src/gs/main_dft.f90").read_text()
 
 formal_publisher = main_dft_source.split(
-    "subroutine publish_dg_hybrid_divided_v3", 1
-)[1].split("end subroutine publish_dg_hybrid_divided_v3", 1)[0]
+    "subroutine publish_dg_hybrid_divided_v4", 1
+)[1].split("end subroutine publish_dg_hybrid_divided_v4", 1)[0]
 def require_localized_publisher(body: str) -> None:
     compact = re.sub(r"\s+", "", body.lower())
-    assert "r=n" in compact, "formal v3 RT representation rank is truncated to spectral rank"
-    assert "payload%rt_space%basis_values=basis_values" in compact, \
-        "formal v3 publisher does not retain the localized WF+PW construction basis"
-    assert "payload%certified_basis%initial_occupied_amplitudes=full_coefficients(:,1:nocc)" in compact, \
-        "terminal LCFO eigenvectors are not stored as initial localized-basis coefficients"
-    assert "callproject_divided_v3_component" not in compact, \
-        "formal publisher spectrally rotates the RT operator and destroys localized support"
+    assert "allocate(payload%initial_occupied_amplitudes,source=occupied_state%coefficients)" in compact, \
+        "terminal LCFO eigenvectors are not stored by owned localized-basis rows"
+    assert "full_coefficients" not in compact and "collect_dg_hybrid_full_rows" not in compact, \
+        "formal v4 publisher reconstructs a global coefficient matrix"
+    assert "allocate(payload%basis_point_offsets(npoint+1)" in compact and "payload%basis_support_values(slot)=basis_values(j,p)" in compact, \
+        "formal v4 publisher does not retain the localized construction basis as point CSR"
     assert "global_projector_count=dc%ppg_tot%nlma" in compact and \
         "real(global_projector_count,8)" in compact, \
         "formal v3 pseudopotential receipt does not use the authoritative full-system projector count"
@@ -37,10 +35,9 @@ def require_localized_publisher(body: str) -> None:
 
 require_localized_publisher(formal_publisher)
 for old, replacement in (
-    ("r=n", "r=certified_rank"),
-    ("payload%rt_space%basis_values=basis_values", "payload%rt_space%basis_values=rt_basis_values"),
-    ("payload%certified_basis%initial_occupied_amplitudes=full_coefficients(:,1:nocc)",
-     "payload%certified_basis%initial_occupied_amplitudes=(0d0,0d0)"),
+    ("allocate(payload%initial_occupied_amplitudes,source=occupied_state%coefficients)",
+     "allocate(payload%initial_occupied_amplitudes,source=solved_coefficients)"),
+    ("allocate(payload%basis_point_offsets(npoint+1)", "allocate(payload%removed_point_offsets(npoint+1)"),
     ("global_projector_count=dc%ppg_tot%Nlma", "global_projector_count=ppg%Nlma"),
 ):
     mutated = formal_publisher.replace(old, replacement, 1)
@@ -88,9 +85,9 @@ def h4_gs_input() -> str:
  unit_system='a.u.'
 /
 &dc
- num_fragment=1,1,2
+ num_fragment=1,1,4
  num_rgrid_buffer=0,0,4
- nproc_rgrid_tot=1,1,2
+ nproc_rgrid_tot=1,1,4
  nstate_frag=20
  energy_cut=10d0
  yn_dc_lcfo='n'
@@ -180,7 +177,7 @@ def h4_rt_input() -> str:
 &parallel
  nproc_k=1
  nproc_ob=1
- nproc_rgrid=1,1,2
+ nproc_rgrid=1,1,4
  yn_eigenexa='n'
 /
 &system
@@ -238,8 +235,11 @@ divided_route = main_dft_source.split("subroutine run_dg_hybrid_divided_ground_s
 divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v3", 1)[1].split(
     "end subroutine publish_dg_hybrid_divided_v3", 1
 )[0]
-assert divided_route.lower().count("call publish_dg_hybrid_divided_v3") == 1
-assert divided_publisher.lower().count("call write_rt_dg_hybrid_ground_state_checkpoint") == 1
+divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v4", 1)[1].split(
+    "end subroutine publish_dg_hybrid_divided_v4", 1
+)[0]
+assert divided_route.lower().count("call publish_dg_hybrid_divided_v4") == 1
+assert divided_publisher.lower().count("call write_rt_dg_hybrid_checkpoint_v4") == 1
 assert "solved_coefficients=final_solved_coefficients" in divided_route.lower()
 assert "solved_eigenvalues=final_solved_eigenvalues" in divided_route.lower()
 for old, replacement in (
@@ -278,18 +278,18 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     work = Path(name)
     shutil.copy2(root / "samples/exercise_01_C2H2_gs/H_rps.dat", work / "H_rps.dat")
     gs = subprocess.run(
-        [mpiexec, "-n", "2", str(salmon)], input=h4_gs_input(), cwd=work, env=env,
+        [mpiexec, "-n", "4", str(salmon)], input=h4_gs_input(), cwd=work, env=env,
         capture_output=True, text=True, timeout=180,
     )
     assert gs.returncode == 0, (gs.stdout, gs.stderr)
-    assert gs.stdout.count("end SALMON") == 2, gs.stdout
+    assert gs.stdout.count("end SALMON") == 4, gs.stdout
     for receipt in (
         "[DG-DC-SEED]", "[DG-FRAGMENT-WF]", "[DG-HYBRID-DIVIDED-SEED]",
         "[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once",
     ):
         assert receipt in gs.stdout, receipt
     handoff = re.findall(
-        r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo construction_rank=(\d+) solved_rank=(\d+) "
+        r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo-v4 construction_rank=(\d+) solved_rank=(\d+) "
         r"certified_rank=(\d+) rt_rank=(\d+) occupied_rank=(\d+) projector_count=(\d+).*writer_count=(\d+)", gs.stdout,
     )
     assert len(handoff) == 1, gs.stdout
@@ -299,17 +299,16 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         "two-fragment overlapping buffers did not retain the 12-projector full H4 system identity",
         projector_count,
     )
-    checkpoint = work / "hybrid_dg_ground_state.chk"
-    assert checkpoint.is_file() and checkpoint.stat().st_size > 1024, (
-        "formal divided terminal LCFO did not publish its v3 Hybrid GS checkpoint",
+    checkpoint = work / "hybrid_dg_ground_state.chk.manifest"
+    shards = sorted(work.glob("hybrid_dg_ground_state.chk.v4.*.rank*.shard"))
+    assert checkpoint.is_file() and checkpoint.stat().st_size > 64 and len(shards) == 4, (
+        "formal divided terminal LCFO did not publish its v4 manifest and rank shards",
         gs.stdout[-6000:], gs.stderr,
     )
-    header = checkpoint.read_bytes()[:24]
-    magic, version, nrank = struct.unpack("=16sii", header)
-    assert magic == b"SALMON_DG_GS001 " and version == 3 and nrank == 2
+    assert checkpoint.read_bytes()[:32].rstrip(b" \0") == b"SALMON_HYBRID_DG_MANIFEST_V4"
 
     rt = subprocess.run(
-        [mpiexec, "-n", "2", str(salmon)], input=h4_rt_input(), cwd=work, env=env,
+        [mpiexec, "-n", "4", str(salmon)], input=h4_rt_input(), cwd=work, env=env,
         capture_output=True, text=True, timeout=180,
     )
     assert rt.returncode == 0, (rt.stdout, rt.stderr)
@@ -325,7 +324,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     assert state_match, rt.stdout
     state_values = [float(value) for value in state_match.groups()[:8]]
     assert all(math.isfinite(value) and value > 0.0 for value in state_values), state_values
-    assert int(state_match.group(9)) > 0
+    global_nnz = int(state_match.group(9))
+    assert 0 < global_nnz < construction * construction, (
+        "four-fragment DG operator unexpectedly became globally dense", global_nnz, construction,
+    )
+    assert global_nnz <= 3 * construction * math.ceil(construction / 4), (
+        "DG CSR exceeds the local-plus-two-neighbor block bound", global_nnz, construction,
+    )
     projection_match = re.search(
         r"\[HYBRID-RT-PROJECTION\]\s+local_potential_norm=\s*([^ ]+)\s+"
         r"hamiltonian_norm=\s*([^ ]+)\s+initial_delta=\s*([^ ]+)\s+path=PP\+HARTREE\+XC", rt.stdout,
@@ -344,7 +349,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     assert "production DG requires a build with MPI and ScaLAPACK support" not in rt.stdout + rt.stderr
 
     zero = subprocess.run(
-        [mpiexec, "-n", "2", str(salmon)], input=h4_rt_zero_input(), cwd=work, env=env,
+        [mpiexec, "-n", "4", str(salmon)], input=h4_rt_zero_input(), cwd=work, env=env,
         capture_output=True, text=True, timeout=180,
     )
     assert zero.returncode == 0, (zero.stdout, zero.stderr)
@@ -366,14 +371,14 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     )
     assert [int(step[0]) for step in zero_steps] == [1, 2], zero.stdout
     assert all(math.isfinite(float(value)) and float(value) <= 1e-4 for step in zero_steps for value in step[1:])
-    checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    checkpoint_hash = hashlib.sha256(checkpoint.read_bytes() + b"".join(s.read_bytes() for s in shards)).hexdigest()
     print(f"producer_binary_sha256={binary_hash}")
     print(f"checkpoint_sha256={checkpoint_hash}")
     for line in rt.stdout.splitlines():
         if line.startswith("[HYBRID-RT-"):
-            print(f"ranks=2 {line}")
+            print(f"ranks=4 {line}")
     for line in zero.stdout.splitlines():
         if line.startswith("[HYBRID-RT-STATIONARITY]") or line.startswith("[HYBRID-RT-REFRESH-STATIONARITY]"):
-            print(f"ranks=2 zero-field {line}")
+            print(f"ranks=4 zero-field {line}")
 
-print("PASS actual production divided-Hybrid H4 GS-to-Exp-RT smoke on 2 ranks")
+print("PASS actual production divided-Hybrid H4 GS-to-Exp-RT smoke on 4 ranks")

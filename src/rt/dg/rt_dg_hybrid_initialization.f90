@@ -6,6 +6,10 @@ module rt_dg_hybrid_initialization
   use dg_hybrid_sparse_operators,only:s_dg_hybrid_sparse_operators
   use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
   use rt_dg_hybrid_sparse_projection,only:validate_rt_dg_hybrid_sparse_hermiticity
+  use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
+    exchange_rt_dg_sparse_matrix
+  use rt_dg_hybrid_point_density,only:reconstruct_rt_dg_point_csr_density
+  use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,read_rt_dg_hybrid_checkpoint_v4
   use rt_dg_hybrid_checkpoint,only:s_rt_dg_hybrid_ground_state_payload,&
     read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     authenticate_rt_dg_hybrid_ground_state_payload,rt_dg_hybrid_ground_state_checkpoint_version,&
@@ -28,12 +32,16 @@ module rt_dg_hybrid_initialization
     integer::certified_rank=0,global_count=0,noccupied=0,operation_count=0,&
       nonidentity_operation_count=0
     integer(int64)::payload_fingerprint=0_int64,operator_structure_fingerprint=0_int64,&
-      operator_value_fingerprint=0_int64,scope_fingerprint=0_int64
+      operator_value_fingerprint=0_int64,scope_fingerprint=0_int64,density_workspace_peak_bytes=0_int64
+    integer::density_payload_collective_count=0
     type(s_dg_hybrid_sparse_metric)::metric
     type(s_dg_hybrid_sparse_operators)::operators
+    type(s_rt_dg_sparse_exchange)::basis_exchange
     integer(int64),allocatable::owned_row_ids(:),grid_ids(:)
+    integer,allocatable::basis_point_offsets(:),basis_support_ids(:),basis_support_slots(:),basis_halo_ids(:)
     complex(real64),allocatable::coefficients(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),&
-      local_rows(:),sipg_rows(:,:),basis_values(:,:),local_reference_correction(:),&
+      local_rows(:),sipg_rows(:,:),kinetic_values(:),nonlocal_values(:),sipg_values(:),&
+      basis_values(:,:),basis_support_values(:),local_reference_correction(:),&
       hamiltonian_reference_correction(:)
     real(real64),allocatable::density(:),grid_weights(:),occupations(:),eigenvalues(:),energy_receipt(:)
   end type s_rt_dg_hybrid_state
@@ -65,11 +73,17 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    type(s_rt_dg_hybrid_ground_state_payload)::payload
-    type(s_rt_dg_hybrid_v3_startup_receipt)::receipt
-    integer::i,ierr,local_bad,global_bad,file_nproc,active_xc
-    integer(int64)::payload_fingerprint
-    complex(real64),allocatable::startup_projected_position(:,:,:),startup_projected_basis(:,:)
+    type(s_rt_dg_hybrid_v4_shard)::payload
+    integer::i,j,edge,ierr,local_bad,global_bad,active_xc,nhalo,slot,payload_count
+    integer(int64)::workspace_peak
+    integer,allocatable::temporary_halo(:)
+    complex(real64),allocatable::metric_edge_coefficients(:,:),operator_edge_coefficients(:,:),&
+      s_coefficients(:,:),h_coefficients(:,:)
+    real(real64),allocatable::reconstructed_density(:)
+    real(real64)::local_value,global_value,local_scale,global_scale,local_residual,global_residual
+    complex(real64)::local_inner,global_inner
+    logical::manifest_exists,dense_v3_exists,exchange_ok
+    character(256)::exchange_message
     ok=.false.;message='';state=s_rt_dg_hybrid_state()
     local_bad=0
     if((trim(theory)/='tddft_response'.and.trim(theory)/='tddft_pulse').or..not.periodic.or.nspin/=1.or.&
@@ -84,31 +98,143 @@ contains
     if(active_xc==0)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='unsupported local hybrid RT scope';return;endif
-    call probe_ground_state_rank_count(comm,path,file_nproc,ok,message);if(.not.ok)return
-    call read_rt_dg_hybrid_ground_state_checkpoint_coalesced(comm,path,payload,payload_fingerprint,ok,message)
-    if(.not.ok)return
-    local_bad=merge(0,1,ok);call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;return;endif
-    call validate_rt_dg_hybrid_v3_startup(comm,payload,payload_fingerprint,tolerances,receipt,ok,message,&
-      startup_projected_position,startup_projected_basis)
-    if(.not.ok)return
-    local_bad=merge(0,1,payload%scope_fingerprint/=0_int64.and.allocated(payload%scope_selectors).and.&
-      allocated(payload%xc_types))
-    if(local_bad==0)then
-      if(size(payload%scope_selectors)/=8.or.any(payload%scope_selectors/=[1,1,1,0,0,0,0,0]).or.&
-        size(payload%xc_types)/=size(xctype).or.any(payload%xc_types/=xctype))local_bad=1
-      if(local_bad==0.and.payload%scope_fingerprint/=&
-        fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types))local_bad=1
+    inquire(file=trim(path)//'.manifest',exist=manifest_exists);inquire(file=trim(path),exist=dense_v3_exists)
+    local_bad=merge(0,1,manifest_exists.or..not.dense_v3_exists)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='dense Hybrid v3 checkpoint is unsupported; regenerate distributed-native v4';return
     endif
+    call read_rt_dg_hybrid_checkpoint_v4(comm,path,payload,ok,message);if(.not.ok)return
+    local_bad=0
+    if(size(payload%scope_selectors)/=8.or.any(payload%scope_selectors/=[1,1,1,0,0,0,0,0]).or.&
+      size(payload%xc_types)/=size(xctype).or.any(payload%xc_types/=xctype).or.&
+      payload%scope_fingerprint/=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='checkpoint/local hybrid RT scope mismatch';return;endif
-    call build_certified_rt_state(comm,payload,startup_projected_position,startup_projected_basis,state,ok,message)
+
+    state%global_count=payload%global_count;state%certified_rank=payload%global_count
+    state%noccupied=payload%nocc;state%operation_count=1;state%nonidentity_operation_count=0
+    state%payload_fingerprint=payload%payload_fingerprint
+    state%operator_structure_fingerprint=payload%operator_structure_fingerprint
+    state%operator_value_fingerprint=payload%operator_fingerprint;state%scope_fingerprint=payload%scope_fingerprint
+    allocate(state%owned_row_ids,source=payload%row_ids)
+    allocate(state%coefficients,source=payload%initial_occupied_amplitudes)
+    allocate(state%occupations,source=payload%occupations);allocate(state%eigenvalues,source=payload%eigenvalues)
+    allocate(state%grid_ids,source=payload%grid_ids);allocate(state%grid_weights,source=payload%grid_weights)
+    allocate(state%density,source=payload%density);allocate(state%energy_receipt,source=payload%energy_receipt)
+    allocate(state%metric%owned_row_ids,source=payload%row_ids)
+    allocate(state%metric%row_offsets,source=payload%metric_offsets)
+    allocate(state%metric%column_ids,source=payload%metric_columns)
+    allocate(state%metric%values,source=payload%metric_values)
+    allocate(state%metric%active_rows(payload%global_count),state%metric%packet_ids(payload%global_count))
+    state%metric%active_rows=.true.;state%metric%packet_ids=1;state%metric%global_count=payload%global_count
+    state%metric%numerical_rank=payload%global_count;state%metric%fingerprint=payload%basis_fingerprint
+    state%metric%condition_estimate=1d0;state%metric%maximum_value=0d0;state%metric%max_row_nnz=0
+    if(size(payload%metric_values)>0)state%metric%maximum_value=maxval(abs(payload%metric_values))
+    do i=1,size(payload%row_ids)
+      state%metric%max_row_nnz=max(state%metric%max_row_nnz,payload%metric_offsets(i+1)-payload%metric_offsets(i))
+    enddo
+    state%metric%valid=.true.
+    allocate(state%operators%owned_row_ids,source=payload%row_ids)
+    allocate(state%operators%row_offsets,source=payload%operator_offsets)
+    allocate(state%operators%column_ids,source=payload%operator_columns)
+    allocate(state%operators%metric_values(size(payload%operator_columns)),source=(0d0,0d0))
+    do i=1,size(payload%row_ids)
+      do edge=payload%operator_offsets(i),payload%operator_offsets(i+1)-1
+        do j=payload%metric_offsets(i),payload%metric_offsets(i+1)-1
+          if(payload%metric_columns(j)==payload%operator_columns(edge))then
+            state%operators%metric_values(edge)=payload%metric_values(j);exit
+          endif
+        enddo
+      enddo
+    enddo
+    allocate(state%operators%hamiltonian_values,source=payload%operator_values)
+    allocate(state%operators%position_values,source=payload%position_values)
+    state%operators%global_count=payload%global_count;state%operators%metric_fingerprint=payload%basis_fingerprint
+    state%operators%position_convention_fingerprint=cell_wrapped_position_convention_fingerprint
+    state%operators%fingerprint=payload%operator_fingerprint;state%operators%valid=.true.
+    allocate(state%kinetic_values,source=payload%kinetic_values)
+    allocate(state%nonlocal_values,source=payload%nonlocal_values)
+    allocate(state%local_rows,source=payload%local_values);allocate(state%sipg_values,source=payload%sipg_values)
+    allocate(state%basis_point_offsets,source=payload%basis_point_offsets)
+    allocate(state%basis_support_ids,source=payload%basis_support_ids)
+    allocate(state%basis_support_values,source=payload%basis_support_values)
+
+    allocate(temporary_halo(size(payload%basis_support_ids)),state%basis_support_slots(size(payload%basis_support_ids)))
+    nhalo=0
+    do i=1,size(payload%basis_support_ids)
+      slot=0
+      do j=1,nhalo;if(temporary_halo(j)==payload%basis_support_ids(i))then;slot=j;exit;endif;enddo
+      if(slot==0)then;nhalo=nhalo+1;temporary_halo(nhalo)=payload%basis_support_ids(i);slot=nhalo;endif
+      state%basis_support_slots(i)=slot
+    enddo
+    allocate(state%basis_halo_ids(nhalo));state%basis_halo_ids=temporary_halo(:nhalo)
+    call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
+      state%basis_halo_ids,state%basis_exchange,ok,message)
+    if(.not.ok)then;message='distributed-v4 point-support halo failed: '//trim(message);return;endif
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,payload%global_count,payload%row_ids,&
+      payload%metric_offsets,payload%metric_columns,payload%metric_values,tolerances(1),ok,message)
+    if(.not.ok)then;message='distributed-v4 metric Hermiticity failed: '//trim(message);return;endif
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,payload%global_count,payload%row_ids,&
+      payload%operator_offsets,payload%operator_columns,payload%operator_values,tolerances(1),ok,message)
+    if(.not.ok)then;message='distributed-v4 Hamiltonian Hermiticity failed: '//trim(message);return;endif
+
+    call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
+      payload%metric_columns,state%basis_exchange,ok,message)
     if(.not.ok)return
-    state%payload_fingerprint=payload_fingerprint
-    state%startup_operator_covariance=receipt%fixed_operator_covariance_defect
-    state%startup_projector_covariance=receipt%projector_defect
-    state%startup_orbital_residual=receipt%orbital_residual
-    state%startup_metric_defect=receipt%metric_defect
+    allocate(metric_edge_coefficients(size(payload%metric_columns),payload%nocc))
+    call exchange_rt_dg_sparse_matrix(comm,state%basis_exchange,state%coefficients,metric_edge_coefficients,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
+    if(.not.exchange_ok)then;ok=.false.;message='distributed-v4 metric coefficient halo failed';return;endif
+    allocate(s_coefficients(size(payload%row_ids),payload%nocc));s_coefficients=(0d0,0d0)
+    do i=1,size(payload%row_ids);do edge=payload%metric_offsets(i),payload%metric_offsets(i+1)-1
+      s_coefficients(i,:)=s_coefficients(i,:)+payload%metric_values(edge)*metric_edge_coefficients(edge,:)
+    enddo;enddo
+    local_value=0d0;local_scale=1d0
+    do i=1,payload%nocc;do j=1,payload%nocc
+      local_inner=sum(conjg(state%coefficients(:,i))*s_coefficients(:,j))
+      call MPI_Allreduce(local_inner,global_inner,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      local_value=max(local_value,abs(global_inner-merge((1d0,0d0),(0d0,0d0),i==j)))
+      local_scale=max(local_scale,abs(global_inner))
+    enddo;enddo
+    state%startup_metric_defect=local_value/local_scale
+
+    call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%operator_structure_fingerprint,payload%row_ids,&
+      payload%operator_columns,state%basis_exchange,ok,message)
+    if(.not.ok)return
+    allocate(operator_edge_coefficients(size(payload%operator_columns),payload%nocc))
+    call exchange_rt_dg_sparse_matrix(comm,state%basis_exchange,state%coefficients,operator_edge_coefficients,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
+    if(.not.exchange_ok)then;ok=.false.;message='distributed-v4 operator coefficient halo failed';return;endif
+    allocate(h_coefficients(size(payload%row_ids),payload%nocc));h_coefficients=(0d0,0d0)
+    do i=1,size(payload%row_ids);do edge=payload%operator_offsets(i),payload%operator_offsets(i+1)-1
+      h_coefficients(i,:)=h_coefficients(i,:)+payload%operator_values(edge)*operator_edge_coefficients(edge,:)
+    enddo;enddo
+    local_residual=0d0;local_scale=0d0
+    do i=1,payload%nocc
+      local_residual=local_residual+sum(abs(h_coefficients(:,i)-payload%eigenvalues(i)*s_coefficients(:,i))**2)
+      local_scale=local_scale+sum(abs(h_coefficients(:,i))**2)
+    enddo
+    call MPI_Allreduce(local_residual,global_residual,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    state%startup_orbital_residual=sqrt(global_residual)/max(1d0,sqrt(global_scale))
+    if(state%startup_metric_defect>tolerances(2).or.state%startup_orbital_residual>tolerances(3))then
+      ok=.false.;message='distributed-v4 metric/stationarity certification failed';return
+    endif
+    call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
+      state%basis_halo_ids,state%basis_exchange,ok,message);if(.not.ok)return
+    allocate(reconstructed_density(size(payload%density)))
+    call reconstruct_rt_dg_point_csr_density(comm,state%basis_exchange,state%basis_point_offsets,&
+      state%basis_support_slots,state%basis_support_values,state%coefficients,state%occupations,&
+      reconstructed_density,workspace_peak,payload_count,ok,message)
+    if(.not.ok)return
+    local_value=0d0;if(size(reconstructed_density)>0)local_value=maxval(abs(reconstructed_density-state%density))
+    call MPI_Allreduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_value>tolerances(4))then
+      ok=.false.;message='distributed-v4 checkpoint density reconstruction failed';return
+    endif
+    state%density_workspace_peak_bytes=workspace_peak;state%density_payload_collective_count=payload_count
+    state%startup_operator_covariance=0d0;state%startup_projector_covariance=payload%acceptance_receipts(3)
     state%initial_invariants_valid=.true.;state%valid=.true.;ok=.true.;message=''
 #else
     ok=.false.;message='hybrid RT initialization requires MPI'
@@ -718,7 +844,8 @@ contains
     type(s_rt_dg_hybrid_state),intent(out)::state
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::r,nocc,nowned,i,j,edge,ierr
+    integer::r,nocc,nowned,npoint,nnz,nhalo,i,j,p,edge,ierr
+    integer,allocatable::halo_slot(:)
     integer(int64)::structure_fingerprint
     real(real64)::local_maximum,global_maximum
     real(real64),allocatable::reconstructed_density(:)
@@ -799,6 +926,26 @@ contains
     allocate(state%grid_weights,source=payload%grid_weights)
     allocate(state%density,source=reconstructed_density)
     allocate(state%basis_values,source=projected_basis)
+    npoint=size(payload%grid_ids);nnz=count(abs(projected_basis)>0d0)
+    allocate(state%basis_point_offsets(npoint+1),state%basis_support_ids(nnz),state%basis_support_slots(nnz),&
+      state%basis_support_values(nnz),halo_slot(r))
+    halo_slot=0;nhalo=0
+    edge=1;state%basis_point_offsets(1)=1
+    do p=1,npoint
+      do j=1,r
+        if(abs(projected_basis(j,p))==0d0)cycle
+        state%basis_support_ids(edge)=j;state%basis_support_values(edge)=projected_basis(j,p)
+        if(halo_slot(j)==0)then;nhalo=nhalo+1;halo_slot(j)=nhalo;endif
+        state%basis_support_slots(edge)=halo_slot(j);edge=edge+1
+      enddo
+      state%basis_point_offsets(p+1)=edge
+    enddo
+    allocate(state%basis_halo_ids(nhalo))
+    do j=1,r;if(halo_slot(j)>0)state%basis_halo_ids(halo_slot(j))=j;enddo
+    deallocate(halo_slot)
+    call build_rt_dg_sparse_exchange(comm,r,payload%rt_space%basis_fingerprint,state%owned_row_ids,&
+      state%basis_halo_ids,state%basis_exchange,ok,message)
+    if(.not.ok)then;message='certified Hybrid RT basis-support exchange failed: '//trim(message);return;endif
     allocate(state%occupations,source=payload%certified_basis%occupations)
     allocate(state%eigenvalues,source=payload%certified_basis%certified_eigenvalues)
     allocate(state%energy_receipt,source=payload%energy_receipt)

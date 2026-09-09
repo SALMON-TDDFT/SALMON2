@@ -192,8 +192,11 @@ use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   collective_rt_dg_hybrid_publication_mapping_precondition,&
   rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
   rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
-use rt_dg_hybrid_initialization,only:stamp_rt_dg_hybrid_v3_fingerprints,fingerprint_rt_dg_hybrid_scope
+use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,write_rt_dg_hybrid_checkpoint_v4
+use rt_dg_hybrid_initialization,only:stamp_rt_dg_hybrid_v3_fingerprints,fingerprint_rt_dg_hybrid_scope,&
+  fingerprint_rt_dg_hybrid_sparse_structure
 use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
+use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_point_csr_edges
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -1951,7 +1954,7 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'terminal divided Hybrid occupied checkpoint failed'
     endif
-    call publish_dg_hybrid_divided_v3(projected_basis%global_ids,payload_owner,payload_generation,&
+    call publish_dg_hybrid_divided_v4(projected_basis%global_ids,payload_owner,payload_generation,&
       core_ids,core_weights,interior_fragment,interior_values,interior_gradients,&
       bounded_fixed_payload%metric_rows,bounded_fixed_payload%kinetic_rows,&
       bounded_fixed_payload%nonlocal_rows,final_local_potential_rows,bounded_fixed_payload%interface_rows,&
@@ -1961,12 +1964,169 @@ contains
       final_operator_fingerprint,final_residual,final_orthogonality,final_projector_defect,&
       terminal_electron_defect,ok,message)
     if(.not.ok)then
-      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V3] ',trim(message)
-      error stop 'terminal divided Hybrid v3 publication failed'
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V4] ',trim(message)
+      error stop 'terminal divided Hybrid v4 publication failed'
     endif
   end subroutine run_dg_hybrid_divided_ground_state_for_main
 
-  subroutine publish_dg_hybrid_divided_v3(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
+  subroutine publish_dg_hybrid_divided_v4(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
+      grid_fragment,basis_values,basis_gradients,metric_rows,kinetic_rows,nonlocal_rows,local_rows,&
+      sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
+      basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
+      continuation_fingerprint,operator_fingerprint,stationarity_defect,metric_defect,&
+      projector_defect,electron_defect,ok,message)
+    integer(8),intent(in)::row_ids(:),grid_ids(:)
+    integer,intent(in)::row_owner(:),row_generation(:),grid_fragment(:)
+    real(8),intent(in)::grid_weights(:),solved_eigenvalues(:),stationarity_defect,metric_defect,&
+      projector_defect,electron_defect
+    complex(8),intent(in)::basis_values(:,:),basis_gradients(:,:,:),metric_rows(:,:),kinetic_rows(:,:),&
+      nonlocal_rows(:,:),local_rows(:,:),sipg_rows(:,:),hamiltonian_rows(:,:),solved_coefficients(:,:)
+    type(s_dg_hybrid_ground_state),intent(in)::occupied_state
+    integer(8),intent(in)::basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
+      continuation_fingerprint,operator_fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_rt_dg_hybrid_v4_shard)::payload
+    integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
+    complex(8),allocatable::empty_position(:,:,:),orbital_values(:)
+    real(8),allocatable::density(:),coordinates(:,:),coordinate_component(:)
+    integer::n,nocc,nrow,npoint,rank,nproc,ierr,i,j,p,a,edge,nnz_basis,slot,requested_rank,certified_rank,&
+      global_projector_count
+    integer(8)::structure_fingerprint
+    real(8)::electron_count,window,cutoff,cluster_tolerance
+    logical::precondition_ok,local_ok
+    character(512)::local_message
+
+    ok=.false.;message='';n=size(solved_eigenvalues);nocc=occupied_state%noccupied
+    nrow=size(row_ids);npoint=size(grid_ids)
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
+    precondition_ok=ierr==MPI_SUCCESS.and.n>=2.and.nocc>=1.and.nocc<n.and.nproc==dc%n_frag.and.dc%i_frag==rank+1
+    precondition_ok=precondition_ok.and.size(row_owner)==n.and.size(row_generation)==n.and.&
+      size(grid_weights)==npoint.and.size(grid_fragment)==npoint.and.all(grid_fragment==dc%i_frag)
+    precondition_ok=precondition_ok.and.all(shape(basis_values)==[n,npoint]).and.&
+      all(shape(metric_rows)==[nrow,n]).and.all(shape(kinetic_rows)==[nrow,n]).and.&
+      all(shape(nonlocal_rows)==[nrow,n]).and.all(shape(local_rows)==[nrow,n]).and.&
+      all(shape(sipg_rows)==[nrow,n]).and.all(shape(hamiltonian_rows)==[nrow,n])
+    precondition_ok=precondition_ok.and.occupied_state%valid.and.occupied_state%converged.and.&
+      occupied_state%global_count==n.and.occupied_state%final_eigensolve_count==1.and.&
+      allocated(occupied_state%owned_row_ids).and.allocated(occupied_state%coefficients).and.&
+      allocated(occupied_state%occupations).and.allocated(occupied_state%eigenvalues)
+    if(precondition_ok)precondition_ok=size(occupied_state%owned_row_ids)==nrow.and.&
+      all(shape(occupied_state%coefficients)==[nrow,nocc]).and.size(occupied_state%occupations)==nocc.and.&
+      size(occupied_state%eigenvalues)==nocc
+    call collective_rt_dg_hybrid_publication_precondition(dc%icomm_tot,precondition_ok,n,nocc,local_ok,local_message)
+    if(.not.local_ok)then;message='terminal divided v4 publication precondition failed: '//trim(local_message);return;endif
+    call collective_rt_dg_hybrid_publication_mapping_precondition(dc%icomm_tot,n,row_ids,row_owner,&
+      occupied_state%owned_row_ids,precondition_ok,local_ok,local_message)
+    if(.not.local_ok)then;message='terminal divided v4 row mapping failed: '//trim(local_message);return;endif
+
+    window=max(0d0,dg_hybrid_symmetry_energy_window);cutoff=solved_eigenvalues(nocc)+window;requested_rank=nocc
+    do while(requested_rank<n.and.solved_eigenvalues(requested_rank+1)<=cutoff);requested_rank=requested_rank+1;enddo
+    certified_rank=requested_rank
+    do while(certified_rank<n)
+      cluster_tolerance=max(dg_ow_symmetry_tolerance,64d0*epsilon(1d0))*&
+        max(1d0,abs(solved_eigenvalues(certified_rank)),abs(solved_eigenvalues(certified_rank+1)))
+      if(solved_eigenvalues(certified_rank+1)-solved_eigenvalues(certified_rank)>cluster_tolerance)exit
+      certified_rank=certified_rank+1
+    enddo
+    if(certified_rank>=n)then;message='terminal divided v4 lacks an energy-window proof state';return;endif
+
+    ! Pointwise support supplies every potentially nonzero local-potential and
+    ! position edge.  Fixed matrices add their exact structural support.  No
+    ! spectral rotation and no global R-by-R work array is formed here.
+    allocate(empty_position(3,0,0))
+    call build_rt_dg_hybrid_structural_graph(dc%icomm_tot,n,row_ids,basis_values,metric_rows,kinetic_rows,&
+      nonlocal_rows,local_rows,sipg_rows,hamiltonian_rows,empty_position,metric_offsets,metric_columns,&
+      operator_offsets,operator_columns,local_ok,local_message,basis_owners=row_owner,local_owner=rank)
+    deallocate(empty_position)
+    if(.not.local_ok)then;message='terminal divided v4 structural graph failed: '//trim(local_message);return;endif
+    call fingerprint_rt_dg_hybrid_sparse_structure(dc%icomm_tot,n,row_ids,operator_offsets,operator_columns,&
+      basis_fingerprint,int(z'43454C4C57524150',8),structure_fingerprint,local_ok,local_message)
+    if(.not.local_ok)then;message='terminal divided v4 structure fingerprint failed';return;endif
+
+    allocate(payload%row_ids,source=row_ids);allocate(payload%metric_offsets,source=metric_offsets)
+    allocate(payload%metric_columns,source=metric_columns);allocate(payload%metric_values(size(metric_columns)))
+    allocate(payload%operator_offsets,source=operator_offsets);allocate(payload%operator_columns,source=operator_columns)
+    allocate(payload%operator_values(size(operator_columns)),payload%kinetic_values(size(operator_columns)),&
+      payload%nonlocal_values(size(operator_columns)),payload%local_values(size(operator_columns)),&
+      payload%sipg_values(size(operator_columns)),payload%position_values(3,size(operator_columns)))
+    do i=1,nrow
+      do edge=metric_offsets(i),metric_offsets(i+1)-1
+        j=metric_columns(edge);payload%metric_values(edge)=metric_rows(i,j)
+      enddo
+      do edge=operator_offsets(i),operator_offsets(i+1)-1
+        j=operator_columns(edge);payload%operator_values(edge)=hamiltonian_rows(i,j)
+        payload%kinetic_values(edge)=kinetic_rows(i,j);payload%nonlocal_values(edge)=nonlocal_rows(i,j)
+        payload%local_values(edge)=local_rows(i,j);payload%sipg_values(edge)=sipg_rows(i,j)
+      enddo
+    enddo
+    nnz_basis=count((basis_values/=(0d0,0d0)).and.spread(row_owner==rank,2,npoint))
+    allocate(payload%grid_ids,source=grid_ids);allocate(payload%grid_weights,source=grid_weights)
+    allocate(payload%basis_point_offsets(npoint+1),payload%basis_support_ids(nnz_basis),&
+      payload%basis_support_values(nnz_basis))
+    slot=0;payload%basis_point_offsets(1)=1
+    do p=1,npoint
+      do j=1,n
+        if(row_owner(j)==rank.and.basis_values(j,p)/=(0d0,0d0))then
+          slot=slot+1;payload%basis_support_ids(slot)=j;payload%basis_support_values(slot)=basis_values(j,p)
+        endif
+      enddo
+      payload%basis_point_offsets(p+1)=slot+1
+    enddo
+    allocate(coordinates(3,npoint),coordinate_component(npoint))
+    do p=1,npoint
+      coordinates(1,p)=real(modulo(grid_ids(p)-1_8,int(dc%lg_tot%num(1),8)),8)*dc%system_tot%hgs(1)
+      coordinates(2,p)=real(modulo((grid_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)),8)*&
+        dc%system_tot%hgs(2)
+      coordinates(3,p)=real((grid_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8),8)*dc%system_tot%hgs(3)
+    enddo
+    do a=1,3
+      coordinate_component=coordinates(a,:)
+      call project_rt_dg_hybrid_point_csr_edges(dc%icomm_tot,n,row_ids,operator_offsets,operator_columns,&
+        grid_ids,grid_weights,payload%basis_point_offsets,payload%basis_support_ids,&
+        payload%basis_support_values,coordinate_component,payload%position_values(a,:),local_ok,local_message)
+      if(.not.local_ok)then;message='terminal divided v4 sparse position projection failed: '//trim(local_message);return;endif
+    enddo
+    allocate(density(npoint),orbital_values(nocc));density=0d0
+    do p=1,npoint
+      orbital_values=(0d0,0d0)
+      do i=1,nrow
+        orbital_values=orbital_values+basis_values(int(row_ids(i)),p)*occupied_state%coefficients(i,:)
+      enddo
+      density(p)=sum(occupied_state%occupations*abs(orbital_values)**2)
+    enddo
+    call MPI_Allreduce(sum(density*grid_weights),electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='terminal divided v4 density electron reduction failed';return;endif
+    allocate(payload%density,source=density)
+    allocate(payload%initial_occupied_amplitudes,source=occupied_state%coefficients)
+    allocate(payload%occupations,source=occupied_state%occupations)
+    allocate(payload%eigenvalues,source=occupied_state%eigenvalues)
+    allocate(payload%scope_selectors(8),payload%xc_types(size(xc_func%xctype)))
+    payload%scope_selectors=[1,1,1,0,0,0,0,0];payload%xc_types=xc_func%xctype
+    allocate(payload%acceptance_receipts(8));payload%acceptance_receipts=[stationarity_defect,metric_defect,&
+      projector_defect,electron_defect,electron_count,dc%elec_num_tot,real(requested_rank,8),real(certified_rank,8)]
+    global_projector_count=dc%ppg_tot%Nlma
+    allocate(payload%pseudopotential_receipt(6));payload%pseudopotential_receipt=[real(dc%system_tot%nion,8),&
+      canonical_pp_valence_sum(pp),real(pp%lmax,8),real(pp%nrmax,8),real(global_projector_count,8),real(n,8)]
+    allocate(payload%energy_receipt(7));payload%energy_receipt=0d0
+    payload%global_count=n;payload%global_grid_count=product(dc%lg_tot%num);payload%nocc=nocc
+    payload%certified_rank=certified_rank;payload%fragment_id=rank+1
+    payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
+    payload%operator_structure_fingerprint=structure_fingerprint
+    payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
+    payload%payload_fingerprint=ieor(ieor(basis_fingerprint,operator_fingerprint),&
+      ieor(dc_seed_fingerprint,ieor(face_fingerprint,continuation_fingerprint)))
+    if(payload%payload_fingerprint==0_8)payload%payload_fingerprint=1_8
+    call write_rt_dg_hybrid_checkpoint_v4(dc%icomm_tot,'./hybrid_dg_ground_state.chk',payload,local_ok,local_message)
+    if(.not.local_ok)then;message='terminal divided v4 write failed: '//trim(local_message);return;endif
+    if(rank==0)write(*,'(a,6(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo-v4',&
+      ' construction_rank=',n,' solved_rank=',n,' certified_rank=',certified_rank,' rt_rank=',n,&
+      ' occupied_rank=',nocc,' projector_count=',global_projector_count,' stationarity=',stationarity_defect,&
+      ' metric=',metric_defect,' projector=',projector_defect,' electron=',electron_defect,' writer_count=',1
+    ok=.true.;message=''
+  end subroutine publish_dg_hybrid_divided_v4
+
+  subroutine publish_dg_hybrid_divided_v3_legacy_unreachable(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
       grid_fragment,basis_values,basis_gradients,metric_rows,kinetic_rows,nonlocal_rows,local_rows,&
       sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
       basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
@@ -2255,7 +2415,7 @@ contains
       ' stationarity=',stationarity_defect,' metric=',metric_defect,' projector=',projector_defect,&
       ' electron=',electron_defect,' writer_count=',1
     ok=.true.;message=''
-  end subroutine publish_dg_hybrid_divided_v3
+  end subroutine publish_dg_hybrid_divided_v3_legacy_unreachable
 
   subroutine solve_dg_hybrid_schwarz_fragments(iteration,callback_ok)
     integer,intent(in)::iteration

@@ -7,7 +7,8 @@ module rt_dg_hybrid_sparse_projection
 #endif
   implicit none
   private
-  public::project_rt_dg_hybrid_sparse_edges,validate_rt_dg_hybrid_sparse_hermiticity,&
+  public::project_rt_dg_hybrid_sparse_edges,project_rt_dg_hybrid_point_csr_edges,&
+    validate_rt_dg_hybrid_sparse_hermiticity,&
     checked_rt_dg_hybrid_projection_capacity
 #ifdef USE_MPI
   type::key_value_set
@@ -18,6 +19,61 @@ module rt_dg_hybrid_sparse_projection
   end type key_value_set
 #endif
 contains
+  subroutine project_rt_dg_hybrid_point_csr_edges(comm,global_count,row_ids,row_offsets,column_ids,grid_ids,&
+      grid_weights,point_offsets,support_ids,support_values,potential_values,local_values,ok,message)
+    integer,intent(in)::comm,global_count,row_offsets(:),column_ids(:),point_offsets(:),support_ids(:)
+    integer(int64),intent(in)::row_ids(:),grid_ids(:)
+    real(real64),intent(in)::grid_weights(:),potential_values(:)
+    complex(real64),intent(in)::support_values(:)
+    complex(real64),intent(out)::local_values(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::p,i,j,ierr,local_bad,global_bad
+    integer,allocatable::owners(:)
+    type(key_value_set)::contributions
+    complex(real64)::factor
+    ok=.false.;message='';local_bad=0
+    call validate_sparse_csr_contract(global_count,row_ids,row_offsets,column_ids,size(local_values),local_bad)
+    if(size(point_offsets)/=size(grid_ids)+1.or.size(grid_weights)/=size(grid_ids).or.&
+      size(potential_values)/=size(grid_ids).or.size(support_ids)/=size(support_values))local_bad=1
+    if(local_bad==0)then
+      if(point_offsets(1)/=1.or.point_offsets(size(point_offsets))/=size(support_ids)+1.or.&
+        any(point_offsets(2:)<point_offsets(:size(grid_ids))).or.any(support_ids<1).or.&
+        any(support_ids>global_count).or..not.all(ieee_is_finite(grid_weights)).or.&
+        .not.all(ieee_is_finite(potential_values)).or..not.all(ieee_is_finite(real(support_values))).or.&
+        .not.all(ieee_is_finite(aimag(support_values))))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid point-CSR Hybrid projection contract';return;endif
+    call build_row_owners(comm,global_count,row_ids,owners,ok,ierr)
+    if(ierr/=MPI_SUCCESS.or..not.ok)then;message='point-CSR projection rows do not have unique owners';return;endif
+    ok=.false.;local_values=(0d0,0d0);call reset_map(contributions,64)
+    do p=1,size(grid_ids)
+      factor=cmplx(grid_weights(p)*potential_values(p),0d0,real64)
+      do i=point_offsets(p),point_offsets(p+1)-1
+        do j=point_offsets(p),point_offsets(p+1)-1
+          call add_value(contributions,directed_key(support_ids(i),support_ids(j),global_count),&
+            factor*conjg(support_values(i))*support_values(j))
+        enddo
+      enddo
+    enddo
+    local_bad=merge(1,0,contributions%capacity_overflow)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='point-CSR projection hash capacity exceeds integer extent';return
+    endif
+    call route_contributions_to_row_owners(comm,global_count,owners,contributions,row_ids,row_offsets,&
+      column_ids,local_values,ierr)
+    if(ierr==-1)then;message='point-CSR projection contribution missing from structural CSR';return
+    elseif(ierr==-2)then;message='point-CSR projection owner count exceeds MPI integer extent';return
+    elseif(ierr/=MPI_SUCCESS)then;message='point-CSR projection packed owner exchange failed';return;endif
+    ok=.true.;message=''
+#else
+    ok=.false.;message='point-CSR Hybrid projection requires MPI'
+#endif
+  end subroutine project_rt_dg_hybrid_point_csr_edges
+
   subroutine project_rt_dg_hybrid_sparse_edges(comm,global_count,row_ids,row_offsets,column_ids,grid_ids,&
       grid_weights,basis_values,potential_values,local_values,ok,message)
     integer,intent(in)::comm,global_count,row_offsets(:),column_ids(:)

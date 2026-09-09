@@ -15,7 +15,8 @@ module rt_dg_hybrid_sparse_exchange
     complex(real64),allocatable::send_values(:),receive_values(:)
     integer,allocatable::requests(:)
   end type s_rt_dg_sparse_exchange
-  public::build_rt_dg_sparse_exchange,exchange_rt_dg_sparse_values,clear_rt_dg_sparse_exchange
+  public::build_rt_dg_sparse_exchange,exchange_rt_dg_sparse_values,exchange_rt_dg_sparse_matrix,&
+    clear_rt_dg_sparse_exchange
 contains
   subroutine build_rt_dg_sparse_exchange(comm,global_count,catalog_fingerprint,owned_row_ids,needed_ids,plan,ok,message)
     integer,intent(in)::comm,global_count,needed_ids(:)
@@ -364,6 +365,77 @@ contains
     end subroutine cancel_requests
 #endif
   end subroutine exchange_rt_dg_sparse_values
+
+  subroutine exchange_rt_dg_sparse_matrix(comm,plan,local_values,needed_values,workspace_peak_bytes,&
+      payload_collective_count,ok,message)
+    integer,intent(in)::comm
+    type(s_rt_dg_sparse_exchange),intent(in)::plan
+    complex(real64),intent(in)::local_values(:,:)
+    complex(real64),intent(out)::needed_values(:,:)
+    integer(int64),intent(out)::workspace_peak_bytes
+    integer,intent(out)::payload_collective_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::nrhs,i,j,ierr,local_bad,global_bad,comparison,actual_nproc,allocation_status
+    integer,allocatable::send_counts(:),send_displacements(:),receive_counts(:),receive_displacements(:)
+    complex(real64),allocatable::send_values(:),receive_values(:)
+    ok=.false.;message='';workspace_peak_bytes=0_int64;payload_collective_count=0
+    nrhs=size(local_values,2);local_bad=0
+    if(.not.plan%valid.or.plan%nproc<1.or.plan%local_count/=size(local_values,1).or.nrhs<1.or.&
+      size(needed_values,1)/=size(plan%value_slots).or.size(needed_values,2)/=nrhs)local_bad=1
+    if(.not.allocated(plan%value_slots).or..not.allocated(plan%send_positions).or.&
+      .not.allocated(plan%send_counts).or..not.allocated(plan%send_displacements).or.&
+      .not.allocated(plan%receive_counts).or..not.allocated(plan%receive_displacements))local_bad=1
+    if(local_bad==0)then
+      call MPI_Comm_compare(comm,plan%comm,comparison,ierr)
+      if(ierr/=MPI_SUCCESS.or.(comparison/=MPI_IDENT.and.comparison/=MPI_CONGRUENT))local_bad=1
+      call MPI_Comm_size(comm,actual_nproc,ierr)
+      if(ierr/=MPI_SUCCESS.or.actual_nproc/=plan%nproc)local_bad=1
+      if(size(plan%send_counts)/=plan%nproc.or.size(plan%send_displacements)/=plan%nproc.or.&
+        size(plan%receive_counts)/=plan%nproc.or.size(plan%receive_displacements)/=plan%nproc)local_bad=1
+    endif
+    if(local_bad==0)then
+      if(any(plan%send_counts>huge(0)/nrhs).or.any(plan%send_displacements>huge(0)/nrhs).or.&
+        any(plan%receive_counts>huge(0)/nrhs).or.any(plan%receive_displacements>huge(0)/nrhs))local_bad=1
+      if(any(plan%send_positions<1).or.any(plan%send_positions>size(local_values,1)))local_bad=1
+      if(any(plan%value_slots==0).or.any(plan%value_slots>size(local_values,1)).or.&
+        any(plan%value_slots < -sum(plan%receive_counts)))local_bad=1
+      if(int(size(plan%send_positions),int64)>huge(0_int64)/int(nrhs,int64).or.&
+        int(sum(plan%receive_counts),int64)>huge(0_int64)/int(nrhs,int64))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid sparse coefficient-matrix exchange contract';return;endif
+    allocate(send_counts(plan%nproc),send_displacements(plan%nproc),receive_counts(plan%nproc),&
+      receive_displacements(plan%nproc),send_values(size(plan%send_positions)*nrhs),&
+      receive_values(sum(plan%receive_counts)*nrhs),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='cannot allocate sparse coefficient-matrix exchange';return;endif
+    send_counts=plan%send_counts*nrhs;send_displacements=plan%send_displacements*nrhs
+    receive_counts=plan%receive_counts*nrhs;receive_displacements=plan%receive_displacements*nrhs
+    do i=1,size(plan%send_positions);do j=1,nrhs
+      send_values((i-1)*nrhs+j)=local_values(plan%send_positions(i),j)
+    enddo;enddo
+    call MPI_Alltoallv(send_values,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,&
+      receive_values,receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+    payload_collective_count=1
+    if(ierr/=MPI_SUCCESS)then;message='sparse coefficient-matrix payload exchange failed';return;endif
+    do i=1,size(plan%value_slots);do j=1,nrhs
+      if(plan%value_slots(i)>0)then
+        needed_values(i,j)=local_values(plan%value_slots(i),j)
+      else
+        needed_values(i,j)=receive_values((-plan%value_slots(i)-1)*nrhs+j)
+      endif
+    enddo;enddo
+    workspace_peak_bytes=16_int64*int(nrhs,int64)*&
+      int(size(plan%send_positions)+sum(plan%receive_counts),int64)
+    ok=.true.;message=''
+#else
+    ok=.false.;message='sparse coefficient-matrix exchange requires MPI'
+    workspace_peak_bytes=0_int64;payload_collective_count=0
+#endif
+  end subroutine exchange_rt_dg_sparse_matrix
 
   subroutine clear_rt_dg_sparse_exchange(plan)
     type(s_rt_dg_sparse_exchange),intent(inout)::plan
