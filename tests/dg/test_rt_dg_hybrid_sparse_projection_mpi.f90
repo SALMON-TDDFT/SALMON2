@@ -4,13 +4,14 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
   use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_sparse_edges,&
-    validate_rt_dg_hybrid_sparse_hermiticity
+    validate_rt_dg_hybrid_sparse_hermiticity,checked_rt_dg_hybrid_projection_capacity
   implicit none
   integer::comm,rank,nproc,ierr
   logical::ok
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call exercise_capacity_boundary
   call exercise_structural_graph
   call exercise_repeated_support_scaling
   call exercise_sparse_projection
@@ -18,6 +19,14 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   if(rank==0)write(*,'(a,i0,a)')'PASS structural Hybrid sparse projection on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine exercise_capacity_boundary
+    integer::next_capacity
+    logical::capacity_ok
+    call checked_rt_dg_hybrid_projection_capacity(64,next_capacity,capacity_ok)
+    call require(capacity_ok.and.next_capacity==128,'valid sparse projection hash growth was rejected')
+    call checked_rt_dg_hybrid_projection_capacity(huge(0)/2+1,next_capacity,capacity_ok)
+    call require(.not.capacity_ok,'sparse projection hash capacity overflow was not rejected')
+  end subroutine exercise_capacity_boundary
   subroutine exercise_repeated_support_scaling
     integer,parameter::n=400,np_global=16000
     integer::nowned,npoint,row,point,i,j,k,slot,fragment,first,nactive,owner,local_nnz,min_nnz,max_nnz,edge

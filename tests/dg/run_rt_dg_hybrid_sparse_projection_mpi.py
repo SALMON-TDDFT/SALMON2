@@ -31,6 +31,10 @@ assert "make_checked_displacements" in graph_text and "integer(int64)::running" 
   "RED: structural graph cumulative MPI extents are not checked in int64"
 assert "make_displacements" in projection_text and "integer(int64)::running" in projection_text, \
   "RED: sparse projection cumulative MPI extents are not checked in int64"
+assert "checked_rt_dg_hybrid_projection_capacity" in projection_text and "capacity_overflow" in projection_text, \
+  "RED: sparse projection hash growth can overflow before its MPI extent check"
+assert "sparse projection hash capacity exceeds integer extent" in projection_text, \
+  "RED: sparse projection hash overflow has no collective named diagnostic"
 assert "partial_values(global_edge_count)" not in projection_text.replace(" ",""), \
   "RED: sparse projection allocates a global-edge-sized replicated buffer"
 partner_scan="do edge=1,total" in projection_text and "do i=1,total" in projection_text
@@ -80,6 +84,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
   compile_and_run(build,projection_source,"baseline",True)
   source=projection_text
   mutations={
+    "capacity-overflow":("ok=current_capacity>0.and.current_capacity<=huge(0)/2", "ok=.true."),
     "counts":("words=3_int64*int(counts(p),int64)", "words=4_int64*int(counts(p),int64)"),
     "routing":("row=int((keys(q)-1_int64)/int(n,int64))+1;destination=owners(row)",
       "row=int((keys(q)-1_int64)/int(n,int64))+1;destination=1",2),

@@ -7,12 +7,14 @@ module rt_dg_hybrid_sparse_projection
 #endif
   implicit none
   private
-  public::project_rt_dg_hybrid_sparse_edges,validate_rt_dg_hybrid_sparse_hermiticity
+  public::project_rt_dg_hybrid_sparse_edges,validate_rt_dg_hybrid_sparse_hermiticity,&
+    checked_rt_dg_hybrid_projection_capacity
 #ifdef USE_MPI
   type::key_value_set
     integer(int64),allocatable::keys(:)
     complex(real64),allocatable::values(:)
     integer(int64)::count=0_int64
+    logical::capacity_overflow=.false.
   end type key_value_set
 #endif
 contains
@@ -54,6 +56,11 @@ contains
           factor*conjg(basis_values(active(i),p))*basis_values(active(j),p))
       enddo;enddo
     enddo
+    local_bad=merge(1,0,contributions%capacity_overflow)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='sparse projection hash capacity exceeds integer extent';return
+    endif
     call route_contributions_to_row_owners(comm,global_count,owners,contributions,row_ids,row_offsets,&
       column_ids,local_values,ierr)
     if(ierr==-1)then
@@ -147,6 +154,14 @@ contains
 #endif
   end subroutine validate_rt_dg_hybrid_sparse_hermiticity
 
+  pure subroutine checked_rt_dg_hybrid_projection_capacity(current_capacity,next_capacity,ok)
+    integer,intent(in)::current_capacity
+    integer,intent(out)::next_capacity
+    logical,intent(out)::ok
+    ok=current_capacity>0.and.current_capacity<=huge(0)/2
+    if(ok)then;next_capacity=2*current_capacity;else;next_capacity=0;endif
+  end subroutine checked_rt_dg_hybrid_projection_capacity
+
 #ifdef USE_MPI
   subroutine validate_contract(n,row_ids,offsets,columns,grid_ids,weights,basis,potential,values,bad)
     integer,intent(in)::n,offsets(:),columns(:)
@@ -194,6 +209,7 @@ contains
     integer::capacity
     capacity=64;do while(capacity<requested.and.capacity<=huge(capacity)/2);capacity=capacity*2;enddo
     allocate(map%keys(capacity),map%values(capacity));map%keys=0_int64;map%values=(0d0,0d0);map%count=0_int64
+    map%capacity_overflow=.false.
   end subroutine initialize_map
   subroutine reset_map(map,requested)
     type(key_value_set),intent(inout)::map
@@ -205,9 +221,15 @@ contains
     type(key_value_set),intent(inout)::map
     integer(int64),intent(in)::key
     complex(real64),intent(in)::value
-    integer::position,capacity
+    integer::position,capacity,next_capacity
+    logical::growth_ok
+    if(map%capacity_overflow)return
     capacity=size(map%keys)
-    if(map%count*10_int64>=int(capacity,int64)*7_int64)then;call rehash_map(map,2*capacity);capacity=size(map%keys);endif
+    if(map%count*10_int64>=int(capacity,int64)*7_int64)then
+      call checked_rt_dg_hybrid_projection_capacity(capacity,next_capacity,growth_ok)
+      if(.not.growth_ok)then;map%capacity_overflow=.true.;return;endif
+      call rehash_map(map,next_capacity);capacity=size(map%keys)
+    endif
     position=int(modulo(key-1_int64,int(capacity,int64)))+1
     do
       if(map%keys(position)==0_int64)then
@@ -240,7 +262,7 @@ contains
     integer(int64),allocatable::keys(:),send_payload(:),received_payload(:),received_keys(:)
     complex(real64),allocatable::values(:),received_values(:)
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    local_bad=merge(1,0,map%count>int(huge(0),int64))
+    local_bad=merge(1,0,map%capacity_overflow.or.map%count>int(huge(0),int64))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
     if(global_bad/=0)then;ierr=-2;return;endif
