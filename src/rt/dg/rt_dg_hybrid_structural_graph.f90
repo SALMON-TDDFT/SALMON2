@@ -28,7 +28,7 @@ contains
     character(*),intent(out)::message
     integer(int64),intent(out),optional::local_unique_candidates,peak_workspace_keys
 #ifdef USE_MPI
-    integer::i,j,p,row,nowned,npoint,nactive,ierr,local_bad,global_bad,rank,nproc,destination
+    integer::i,j,p,row,nowned,npoint,nactive,ierr,local_bad,global_bad,rank,nproc
     integer,allocatable::active(:),owners(:),owner_marks(:)
     integer(int64)::workspace_peak
     type(key_set)::point_support,metric_support,operator_support,closure_support
@@ -57,25 +57,24 @@ contains
 
     allocate(active(global_count));call initialize_set(metric_support,max(64,2*nowned))
     call initialize_set(operator_support,max(64,4*nowned))
-    ! Scan one row owner at a time.  A grid rank therefore never stores a
-    ! global edge catalog even when plane waves make the exact graph dense.
-    do destination=1,nproc
-      call reset_set(point_support,64)
-      do p=1,npoint
-        nactive=0
-        do i=1,global_count
-          if(basis_values(i,p)/=(0d0,0d0))then;nactive=nactive+1;active(nactive)=i;endif
-        enddo
-        do i=1,nactive;do j=1,nactive
-          if(owners(active(i))==destination)&
-            call insert_key(point_support,directed_key(active(i),active(j),global_count))
-        enddo;enddo
+    ! Deduplicate the support induced by this rank's local grid once, then
+    ! route each key directly to its row owner in one packed collective.
+    ! Communication count is independent of MPI size and payload remains
+    ! proportional to the locally generated sparse support.
+    call reset_set(point_support,64)
+    do p=1,npoint
+      nactive=0
+      do i=1,global_count
+        if(basis_values(i,p)/=(0d0,0d0))then;nactive=nactive+1;active(nactive)=i;endif
       enddo
-      if(present(local_unique_candidates))local_unique_candidates=local_unique_candidates+point_support%count
-      workspace_peak=max(workspace_peak,point_support%peak_capacity)
-      call route_set_to_single_owner(comm,global_count,destination,point_support,operator_support,ierr,workspace_peak)
-      if(ierr/=MPI_SUCCESS)then;message='Hybrid point-support owner stream failed';return;endif
+      do i=1,nactive;do j=1,nactive
+        call insert_key(point_support,directed_key(active(i),active(j),global_count))
+      enddo;enddo
     enddo
+    if(present(local_unique_candidates))local_unique_candidates=point_support%count
+    workspace_peak=max(workspace_peak,point_support%peak_capacity)
+    call route_set_to_row_owners(comm,global_count,owners,point_support,operator_support,.false.,ierr,workspace_peak)
+    if(ierr/=MPI_SUCCESS)then;message='Hybrid point-support owner exchange failed';return;endif
     do i=1,nowned
       row=int(row_ids(i))
       do j=1,global_count
@@ -210,36 +209,6 @@ contains
     do q=1,total_recv;call insert_key(target,recv_keys(q));enddo
     workspace_peak=max(workspace_peak,int(total_send,int64),int(total_recv,int64))
   end subroutine route_set_to_row_owners
-  subroutine route_set_to_single_owner(comm,n,destination,source,target,ierr,workspace_peak)
-    integer,intent(in)::comm,n,destination
-    type(key_set),intent(in)::source
-    type(key_set),intent(inout)::target
-    integer,intent(out)::ierr
-    integer(int64),intent(inout)::workspace_peak
-    integer::rank,nproc,sender,count,q,status(MPI_STATUS_SIZE),local_bad,global_bad
-    integer(int64),allocatable::keys(:),received(:)
-    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
-    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    local_bad=merge(1,0,source%count>int(huge(0),int64))
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
-    call extract_sorted(source,keys)
-    do sender=0,nproc-1
-      count=merge(size(keys),0,rank==sender)
-      call MPI_Bcast(count,1,MPI_INTEGER,sender,comm,ierr);if(ierr/=MPI_SUCCESS)return
-      workspace_peak=max(workspace_peak,int(count,int64))
-      if(sender==destination-1)then
-        if(rank==destination-1)then;do q=1,count;call insert_key(target,keys(q));enddo;endif
-      elseif(rank==sender)then
-        call MPI_Send(keys,count,MPI_INTEGER8,destination-1,1700+sender,comm,ierr)
-      elseif(rank==destination-1)then
-        allocate(received(count));call MPI_Recv(received,count,MPI_INTEGER8,sender,1700+sender,comm,status,ierr)
-        if(ierr==MPI_SUCCESS)then;do q=1,count;call insert_key(target,received(q));enddo;endif
-        deallocate(received)
-      endif
-      if(ierr/=MPI_SUCCESS)return
-    enddo
-  end subroutine route_set_to_single_owner
   subroutine make_checked_displacements(counts,displacements,total,total64,bad)
     integer,intent(in)::counts(:)
     integer,intent(out)::displacements(:),total,bad

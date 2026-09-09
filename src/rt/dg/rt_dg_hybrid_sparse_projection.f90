@@ -26,7 +26,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::p,i,j,row,nactive,ierr,local_bad,global_bad,destination,nproc
+    integer::p,i,j,row,nactive,ierr,local_bad,global_bad
     integer,allocatable::active(:),owners(:)
     type(key_value_set)::contributions
     complex(real64)::factor
@@ -38,38 +38,31 @@ contains
     call build_row_owners(comm,global_count,row_ids,owners,ok,ierr)
     if(ierr/=MPI_SUCCESS.or..not.ok)then;message='sparse projection rows do not have unique owners';return;endif
     ok=.false.
-    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(active(global_count));local_values=(0d0,0d0)
-    ! Bound the temporary projection map by one owner's rows.  Re-scanning the
-    ! local grid avoids ever materializing a global edge catalog on a rank.
-    do destination=1,nproc
-      call reset_map(contributions,64)
-      do p=1,size(grid_ids)
-        nactive=0
-        do i=1,global_count
-          if(basis_values(i,p)/=(0d0,0d0))then;nactive=nactive+1;active(nactive)=i;endif
-        enddo
-        factor=cmplx(grid_weights(p)*potential_values(p),0d0,real64)
-        do i=1,nactive
-          if(owners(active(i))/=destination)cycle
-          do j=1,nactive
-            call add_value(contributions,directed_key(active(i),active(j),global_count),&
-              factor*conjg(basis_values(active(i),p))*basis_values(active(j),p))
-          enddo
-        enddo
+    ! Deduplicate this grid rank's contributions once and route them directly
+    ! to row owners in one packed exchange.  Collective count is independent
+    ! of MPI size and payload is proportional to local sparse support.
+    call reset_map(contributions,64)
+    do p=1,size(grid_ids)
+      nactive=0
+      do i=1,global_count
+        if(basis_values(i,p)/=(0d0,0d0))then;nactive=nactive+1;active(nactive)=i;endif
       enddo
-      call route_contributions_to_single_owner(comm,global_count,destination,contributions,row_ids,row_offsets,&
-        column_ids,local_values,ierr)
-      if(ierr==-1)then
-        message='sparse projection contribution missing from structural CSR';return
-      endif
-      if(ierr==-2)then
-        message='sparse projection owner count exceeds MPI integer extent';return
-      endif
-      if(ierr/=MPI_SUCCESS)then
-        message='sparse projection exchange failed or contribution missing from structural CSR';return
-      endif
+      factor=cmplx(grid_weights(p)*potential_values(p),0d0,real64)
+      do i=1,nactive;do j=1,nactive
+        call add_value(contributions,directed_key(active(i),active(j),global_count),&
+          factor*conjg(basis_values(active(i),p))*basis_values(active(j),p))
+      enddo;enddo
     enddo
+    call route_contributions_to_row_owners(comm,global_count,owners,contributions,row_ids,row_offsets,&
+      column_ids,local_values,ierr)
+    if(ierr==-1)then
+      message='sparse projection contribution missing from structural CSR';return
+    elseif(ierr==-2)then
+      message='sparse projection owner count exceeds MPI integer extent';return
+    elseif(ierr/=MPI_SUCCESS)then
+      message='sparse projection packed owner exchange failed';return
+    endif
     ok=ierr==MPI_SUCCESS
     if(ok)then;message='';else;message='sparse local-potential owner exchange failed';endif
 #else
@@ -233,55 +226,108 @@ contains
     allocate(map%keys(new_capacity),map%values(new_capacity));map%keys=0_int64;map%values=(0d0,0d0);map%count=0_int64
     do i=1,size(old_keys);if(old_keys(i)>0_int64)call add_value(map,old_keys(i),old_values(i));enddo
   end subroutine rehash_map
-  subroutine route_contributions_to_single_owner(comm,n,destination,map,row_ids,offsets,columns,local_values,ierr)
-    integer,intent(in)::comm,n,destination,offsets(:),columns(:)
+  subroutine route_contributions_to_row_owners(comm,n,owners,map,row_ids,offsets,columns,local_values,ierr)
+    integer,intent(in)::comm,n,owners(:),offsets(:),columns(:)
     type(key_value_set),intent(in)::map
     integer(int64),intent(in)::row_ids(:)
     complex(real64),intent(inout)::local_values(:)
     integer,intent(out)::ierr
-    integer::rank,nproc,sender,count,i,q,status(MPI_STATUS_SIZE),local_bad,global_bad,accumulate_ierr
-    integer(int64),allocatable::keys(:),received_keys(:)
+    integer::nproc,i,q,row,destination,base,local_bad,global_bad,accumulate_ierr,total_send,total_recv,&
+      total_send_words,total_recv_words,send_bad,recv_bad,send_packed_bad,recv_packed_bad
+    integer(int64)::total_send64,total_recv64
+    integer,allocatable::send_counts(:),recv_counts(:),send_displacements(:),recv_displacements(:),cursor(:),&
+      send_word_counts(:),recv_word_counts(:),send_word_displacements(:),recv_word_displacements(:)
+    integer(int64),allocatable::keys(:),send_payload(:),received_payload(:),received_keys(:)
     complex(real64),allocatable::values(:),received_values(:)
-    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
     local_bad=merge(1,0,map%count>int(huge(0),int64))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
     if(global_bad/=0)then;ierr=-2;return;endif
-    allocate(keys(int(map%count)),values(int(map%count)));q=0
-    do i=1,size(map%keys);if(map%keys(i)>0_int64)then;q=q+1;keys(q)=map%keys(i);values(q)=map%values(i);endif;enddo
-    do sender=0,nproc-1
-      local_bad=0
-      count=merge(size(keys),0,rank==sender)
-      call MPI_Bcast(count,1,MPI_INTEGER,sender,comm,ierr);if(ierr/=MPI_SUCCESS)return
-      if(sender==destination-1)then
-        if(rank==destination-1)then
-          call accumulate_owner_values(n,keys,values,row_ids,offsets,columns,local_values,accumulate_ierr)
-          if(accumulate_ierr/=MPI_SUCCESS)local_bad=1
-        endif
-      elseif(rank==sender)then
-        call MPI_Send(keys,count,MPI_INTEGER8,destination-1,1800+sender,comm,ierr)
-        if(ierr==MPI_SUCCESS)call MPI_Send(values,count,MPI_DOUBLE_COMPLEX,destination-1,1900+sender,comm,ierr)
-      elseif(rank==destination-1)then
-        allocate(received_keys(count),received_values(count))
-        call MPI_Recv(received_keys,count,MPI_INTEGER8,sender,1800+sender,comm,status,ierr)
-        if(ierr==MPI_SUCCESS)call MPI_Recv(received_values,count,MPI_DOUBLE_COMPLEX,sender,1900+sender,comm,status,ierr)
-        if(ierr==MPI_SUCCESS)then
-          call accumulate_owner_values(n,received_keys,received_values,row_ids,offsets,columns,local_values,&
-            accumulate_ierr)
-          if(accumulate_ierr/=MPI_SUCCESS)local_bad=1
-        endif
-        deallocate(received_keys,received_values)
+    call extract_sorted_pairs(map,keys,values)
+    allocate(send_counts(nproc),recv_counts(nproc),send_displacements(nproc),recv_displacements(nproc),cursor(nproc))
+    send_counts=0;local_bad=0
+    do q=1,size(keys)
+      row=int((keys(q)-1_int64)/int(n,int64))+1;destination=owners(row)
+      if(destination<1.or.destination>nproc.or.send_counts(destination)==huge(0))then
+        local_bad=1
+      else
+        send_counts(destination)=send_counts(destination)+1
       endif
-      if(ierr/=MPI_SUCCESS)return
-      ! A missing structural edge is detected only by the row owner.  Share it
-      ! before any rank enters the next sender broadcast, otherwise peers can
-      ! wait forever in a different collective.
-      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-      if(ierr/=MPI_SUCCESS)return
-      if(global_bad/=0)then;ierr=-1;return;endif
     enddo
-  end subroutine route_contributions_to_single_owner
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
+    call MPI_Alltoall(send_counts,1,MPI_INTEGER,recv_counts,1,MPI_INTEGER,comm,ierr);if(ierr/=MPI_SUCCESS)return
+    call make_displacements(send_counts,send_displacements,total_send,total_send64,send_bad)
+    call make_displacements(recv_counts,recv_displacements,total_recv,total_recv64,recv_bad)
+    allocate(send_word_counts(nproc),recv_word_counts(nproc),send_word_displacements(nproc),&
+      recv_word_displacements(nproc))
+    call make_packed_displacements(send_counts,send_word_counts,send_word_displacements,total_send_words,&
+      send_packed_bad)
+    call make_packed_displacements(recv_counts,recv_word_counts,recv_word_displacements,total_recv_words,&
+      recv_packed_bad)
+    local_bad=max(send_bad,recv_bad,send_packed_bad,recv_packed_bad)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ierr=-2;return;endif
+    allocate(send_payload(total_send_words),received_payload(total_recv_words),received_keys(total_recv),&
+      received_values(total_recv))
+    cursor=send_displacements
+    do q=1,size(keys)
+      row=int((keys(q)-1_int64)/int(n,int64))+1;destination=owners(row)
+      cursor(destination)=cursor(destination)+1;i=cursor(destination)
+      base=3*(i-1);send_payload(base+1)=keys(q)
+      send_payload(base+2)=transfer(real(values(q),real64),0_int64)
+      send_payload(base+3)=transfer(aimag(values(q)),0_int64)
+    enddo
+    call MPI_Alltoallv(send_payload,send_word_counts,send_word_displacements,MPI_INTEGER8,received_payload,&
+      recv_word_counts,recv_word_displacements,MPI_INTEGER8,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    do q=1,total_recv
+      base=3*(q-1);received_keys(q)=received_payload(base+1)
+      received_values(q)=cmplx(transfer(received_payload(base+2),0d0),&
+        transfer(received_payload(base+3),0d0),real64)
+    enddo
+    call accumulate_owner_values(n,received_keys,received_values,row_ids,offsets,columns,local_values,accumulate_ierr)
+    local_bad=merge(0,1,accumulate_ierr==MPI_SUCCESS)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(global_bad/=0)ierr=-1
+  end subroutine route_contributions_to_row_owners
+
+  subroutine extract_sorted_pairs(map,keys,values)
+    type(key_value_set),intent(in)::map
+    integer(int64),allocatable,intent(out)::keys(:)
+    complex(real64),allocatable,intent(out)::values(:)
+    integer::i,q
+    allocate(keys(int(map%count)),values(int(map%count)));q=0
+    do i=1,size(map%keys)
+      if(map%keys(i)>0_int64)then;q=q+1;keys(q)=map%keys(i);values(q)=map%values(i);endif
+    enddo
+    if(size(keys)>1)call sort_pairs(keys,values,1,size(keys))
+  end subroutine extract_sorted_pairs
+
+  recursive subroutine sort_pairs(keys,values,left,right)
+    integer(int64),intent(inout)::keys(:)
+    complex(real64),intent(inout)::values(:)
+    integer,intent(in)::left,right
+    integer::i,j
+    integer(int64)::pivot,key_temp
+    complex(real64)::value_temp
+    if(left>=right)return
+    i=left;j=right;pivot=keys((left+right)/2)
+    do
+      do while(keys(i)<pivot);i=i+1;enddo
+      do while(keys(j)>pivot);j=j-1;enddo
+      if(i<=j)then
+        key_temp=keys(i);keys(i)=keys(j);keys(j)=key_temp
+        value_temp=values(i);values(i)=values(j);values(j)=value_temp
+        i=i+1;j=j-1
+      endif
+      if(i>j)exit
+    enddo
+    if(left<j)call sort_pairs(keys,values,left,j)
+    if(i<right)call sort_pairs(keys,values,i,right)
+  end subroutine sort_pairs
   subroutine accumulate_owner_values(n,keys,values,row_ids,offsets,columns,local_values,ierr)
     integer,intent(in)::n,offsets(:),columns(:)
     integer(int64),intent(in)::keys(:),row_ids(:)
@@ -312,6 +358,22 @@ contains
     total64=running
     if(running>int(huge(0),int64))then;bad=1;total=0;else;total=int(running);endif
   end subroutine make_displacements
+  subroutine make_packed_displacements(counts,word_counts,word_displacements,total_words,bad)
+    integer,intent(in)::counts(:)
+    integer,intent(out)::word_counts(:),word_displacements(:),total_words,bad
+    integer::p
+    integer(int64)::running,words
+    bad=0;running=0_int64
+    do p=1,size(counts)
+      words=3_int64*int(counts(p),int64)
+      if(words>int(huge(0),int64).or.running>int(huge(0),int64)-words)then
+        bad=1;word_counts(p)=0;word_displacements(p)=0
+      else
+        word_counts(p)=int(words);word_displacements(p)=int(running);running=running+words
+      endif
+    enddo
+    if(bad/=0.or.running>int(huge(0),int64))then;bad=1;total_words=0;else;total_words=int(running);endif
+  end subroutine make_packed_displacements
   pure integer function find_row_position(rows,target) result(location)
     integer(int64),intent(in)::rows(:)
     integer,intent(in)::target

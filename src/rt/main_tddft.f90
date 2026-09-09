@@ -288,7 +288,7 @@ subroutine run_dg_hybrid_continuation_rt()
   type(s_rt_dg_sparse_exchange)::metric_exchange,operator_exchange
   type(s_rt_dg_hybrid_stationarity_reference)::stationarity_reference
   type(s_rt_dg_hybrid_stationarity_receipt)::stationarity_receipt
-  complex(8),allocatable::next(:),initial_hamiltonian(:)
+  complex(8),allocatable::next(:)
   real(8),allocatable::vector_potential_samples(:,:),previous_polarization(:,:),density_for_update(:)
   real(8)::electric_field(3),periods(3),metric_norm,orbital_energy,polarization(3),&
     local_defect,global_defect,local_scale,global_scale,current_total_energy,current_electron_count,&
@@ -325,7 +325,6 @@ subroutine run_dg_hybrid_continuation_rt()
     ' kinetic_norm=',global_state_norms(4),' nonlocal_norm=',global_state_norms(5),&
     ' local_norm=',global_state_norms(6),' sipg_norm=',global_state_norms(7),&
     ' global_nnz=',operator_edges_global
-  allocate(initial_hamiltonian,source=hybrid_state%operators%hamiltonian_values)
   allocate(density_for_update(size(hybrid_state%density)),&
     previous_polarization(3,hybrid_state%noccupied))
   update_count=0
