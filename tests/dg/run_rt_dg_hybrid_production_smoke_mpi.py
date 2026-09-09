@@ -37,6 +37,10 @@ def require_localized_publisher(body: str) -> None:
         "formal v4 energy reference is not produced by SALMON total-energy evaluation"
     assert "payload%energy_receipt=0d0" not in compact, \
         "all-zero energy receipt silently disables GS-to-RT energy identity"
+    assert "payload%system_fingerprint=fingerprint_rt_dg_hybrid_system" in compact, \
+        "formal v4 checkpoint is not bound to the GS physical system"
+    assert "payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)" in compact, \
+        "formal v4 checkpoint is not bound to the canonical GS pseudopotential"
 
 
 require_localized_publisher(formal_publisher)
@@ -46,6 +50,8 @@ for old, replacement in (
     ("allocate(payload%basis_point_offsets(npoint+1)", "allocate(payload%removed_point_offsets(npoint+1)"),
     ("global_projector_count=dc%ppg_tot%Nlma", "global_projector_count=ppg%Nlma"),
     ("payload%energy_receipt=[checkpoint_energy%E_tot", "payload%energy_receipt=0d0"),
+    ("payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)",
+     "payload%pseudopotential_fingerprint=1_8"),
 ):
     mutated = formal_publisher.replace(old, replacement, 1)
     assert mutated != formal_publisher, old
@@ -77,6 +83,8 @@ def require_hybrid_route_contract(source: str) -> None:
     density_update_source = (root / "src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
     assert "new_h=new_h+state%hamiltonian_reference_correction" in density_update_source
     assert "call propagate_rt_dg_hybrid_length_gauge" in continuation
+    assert "canonical_pp_fingerprint(pp)" in continuation.lower()
+    assert "fingerprint_rt_dg_hybrid_system" in continuation.lower()
     for token in ("call hartree", "call exchange_correlation_density", "call update_vlocal"):
         assert token in projection.lower(), token
 

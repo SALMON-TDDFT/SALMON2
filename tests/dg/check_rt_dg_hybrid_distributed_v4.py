@@ -32,7 +32,8 @@ assert "read_rt_dg_hybrid_checkpoint_v4" in initializer,"RED: formal RT initiali
 for forbidden in ("full_u", "full_s", "full_h", "local_matrix(r,r)", "projected_s(r,r)",
                   "global_coefficients(hybrid_state%certified_rank"):
     assert forbidden not in initializer + main_rt, f"RED: formal RT startup/main retains {forbidden}"
-assert "exchange_rt_dg_sparse_matrix" in exchange, "RED: no packed multi-column coefficient halo"
+assert "apply_rt_dg_sparse_rows_tiled" in exchange, "RED: no unique-row tiled sparse multi-RHS action"
+assert "exchange_rt_dg_sparse_matrix" not in exchange, "RED: obsolete edge x Nocc halo remains"
 reconstruction = density.split("subroutine reconstruct_rt_dg_hybrid_density", 1)[1].split(
     "end subroutine reconstruct_rt_dg_hybrid_density", 1)[0]
 for forbidden in ("do owner=0,nproc-1", "mpi_bcast", "mpi_reduce(", "basis_batch(state%certified_rank"):

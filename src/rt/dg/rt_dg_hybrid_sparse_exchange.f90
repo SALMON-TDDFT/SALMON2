@@ -14,8 +14,9 @@ module rt_dg_hybrid_sparse_exchange
     integer,allocatable::send_positions(:),value_slots(:)
     complex(real64),allocatable::send_values(:),receive_values(:)
   end type s_rt_dg_sparse_exchange
-  public::build_rt_dg_sparse_exchange,exchange_rt_dg_sparse_values,exchange_rt_dg_sparse_matrix,&
-    clear_rt_dg_sparse_exchange
+  public::build_rt_dg_sparse_exchange,exchange_rt_dg_sparse_values,&
+    apply_rt_dg_sparse_rows_tiled,accumulate_rt_dg_sparse_density_tiled,clear_rt_dg_sparse_exchange,&
+    checked_rt_dg_sparse_extent_product
 contains
   subroutine build_rt_dg_sparse_exchange(comm,global_count,catalog_fingerprint,owned_row_ids,needed_ids,plan,ok,message)
     integer,intent(in)::comm,global_count,needed_ids(:)
@@ -342,76 +343,197 @@ contains
 #endif
   end subroutine exchange_rt_dg_sparse_values
 
-  subroutine exchange_rt_dg_sparse_matrix(comm,plan,local_values,needed_values,workspace_peak_bytes,&
-      payload_collective_count,ok,message)
-    integer,intent(in)::comm
+  subroutine apply_rt_dg_sparse_rows_tiled(comm,plan,row_offsets,matrix_values,column_slots,&
+      local_values,result,tile_width,workspace_peak_bytes,payload_collective_count,ok,message)
+    integer,intent(in)::comm,row_offsets(:),column_slots(:),tile_width
     type(s_rt_dg_sparse_exchange),intent(in)::plan
-    complex(real64),intent(in)::local_values(:,:)
-    complex(real64),intent(out)::needed_values(:,:)
+    complex(real64),intent(in)::matrix_values(:),local_values(:,:)
+    complex(real64),intent(out)::result(:,:)
     integer(int64),intent(out)::workspace_peak_bytes
     integer,intent(out)::payload_collective_count
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::nrhs,i,j,ierr,local_bad,global_bad,comparison,actual_nproc,allocation_status
-    integer,allocatable::send_counts(:),send_displacements(:),receive_counts(:),receive_displacements(:)
-    complex(real64),allocatable::send_values(:),receive_values(:)
-    ok=.false.;message='';workspace_peak_bytes=0_int64;payload_collective_count=0
-    nrhs=size(local_values,2);local_bad=0
-    if(.not.plan%valid.or.plan%nproc<1.or.plan%local_count/=size(local_values,1).or.nrhs<1.or.&
-      size(needed_values,1)/=size(plan%value_slots).or.size(needed_values,2)/=nrhs)local_bad=1
-    if(.not.allocated(plan%value_slots).or..not.allocated(plan%send_positions).or.&
-      .not.allocated(plan%send_counts).or..not.allocated(plan%send_displacements).or.&
-      .not.allocated(plan%receive_counts).or..not.allocated(plan%receive_displacements))local_bad=1
+    integer::first,width,i,edge,j,ierr,local_bad,global_bad
+    integer(int64)::tile_bytes
+    complex(real64),allocatable::received(:)
+    ok=.false.;message='';workspace_peak_bytes=0_int64;payload_collective_count=0;local_bad=0
+    if(tile_width<1.or.size(row_offsets)/=size(result,1)+1.or.size(matrix_values)/=size(column_slots).or.&
+      size(local_values,1)/=plan%local_count.or.size(result,2)/=size(local_values,2))local_bad=1
     if(local_bad==0)then
-      call MPI_Comm_compare(comm,plan%comm,comparison,ierr)
-      if(ierr/=MPI_SUCCESS.or.(comparison/=MPI_IDENT.and.comparison/=MPI_CONGRUENT))local_bad=1
-      call MPI_Comm_size(comm,actual_nproc,ierr)
-      if(ierr/=MPI_SUCCESS.or.actual_nproc/=plan%nproc)local_bad=1
-      if(size(plan%send_counts)/=plan%nproc.or.size(plan%send_displacements)/=plan%nproc.or.&
-        size(plan%receive_counts)/=plan%nproc.or.size(plan%receive_displacements)/=plan%nproc)local_bad=1
-    endif
-    if(local_bad==0)then
-      if(any(plan%send_counts>huge(0)/nrhs).or.any(plan%send_displacements>huge(0)/nrhs).or.&
-        any(plan%receive_counts>huge(0)/nrhs).or.any(plan%receive_displacements>huge(0)/nrhs))local_bad=1
-      if(any(plan%send_positions<1).or.any(plan%send_positions>size(local_values,1)))local_bad=1
-      if(any(plan%value_slots==0).or.any(plan%value_slots>size(local_values,1)).or.&
-        any(plan%value_slots < -sum(plan%receive_counts)))local_bad=1
-      if(int(size(plan%send_positions),int64)>huge(0_int64)/int(nrhs,int64).or.&
-        int(sum(plan%receive_counts),int64)>huge(0_int64)/int(nrhs,int64))local_bad=1
+      if(row_offsets(1)/=1.or.row_offsets(size(row_offsets))/=size(matrix_values)+1.or.&
+        any(row_offsets(2:)<row_offsets(:size(row_offsets)-1)).or.any(column_slots<1).or.&
+        any(column_slots>size(plan%value_slots)))local_bad=1
     endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid sparse coefficient-matrix exchange contract';return;endif
-    allocate(send_counts(plan%nproc),send_displacements(plan%nproc),receive_counts(plan%nproc),&
-      receive_displacements(plan%nproc),send_values(size(plan%send_positions)*nrhs),&
-      receive_values(sum(plan%receive_counts)*nrhs),stat=allocation_status)
-    local_bad=merge(0,1,allocation_status==0)
-    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='cannot allocate sparse coefficient-matrix exchange';return;endif
-    send_counts=plan%send_counts*nrhs;send_displacements=plan%send_displacements*nrhs
-    receive_counts=plan%receive_counts*nrhs;receive_displacements=plan%receive_displacements*nrhs
-    do i=1,size(plan%send_positions);do j=1,nrhs
-      send_values((i-1)*nrhs+j)=local_values(plan%send_positions(i),j)
-    enddo;enddo
-    call MPI_Alltoallv(send_values,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,&
-      receive_values,receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
-    payload_collective_count=1
-    if(ierr/=MPI_SUCCESS)then;message='sparse coefficient-matrix payload exchange failed';return;endif
-    do i=1,size(plan%value_slots);do j=1,nrhs
-      if(plan%value_slots(i)>0)then
-        needed_values(i,j)=local_values(plan%value_slots(i),j)
-      else
-        needed_values(i,j)=receive_values((-plan%value_slots(i)-1)*nrhs+j)
-      endif
-    enddo;enddo
-    workspace_peak_bytes=16_int64*int(nrhs,int64)*&
-      int(size(plan%send_positions)+sum(plan%receive_counts),int64)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse action validation reduction failed';return;endif
+    if(global_bad/=0)then;message='invalid tiled sparse multi-RHS action contract';return;endif
+    result=(0d0,0d0)
+    do first=1,size(local_values,2),tile_width
+      width=min(tile_width,size(local_values,2)-first+1)
+      call exchange_unique_rows_tile(comm,plan,local_values,first,width,received,tile_bytes,ok,message)
+      if(.not.ok)return
+      workspace_peak_bytes=max(workspace_peak_bytes,tile_bytes)
+      payload_collective_count=payload_collective_count+1
+      do i=1,size(result,1)
+        do edge=row_offsets(i),row_offsets(i+1)-1
+          if(plan%value_slots(column_slots(edge))>0)then
+            do j=1,width
+              result(i,first+j-1)=result(i,first+j-1)+matrix_values(edge)*&
+                local_values(plan%value_slots(column_slots(edge)),first+j-1)
+            enddo
+          else
+            do j=1,width
+              result(i,first+j-1)=result(i,first+j-1)+matrix_values(edge)*&
+                received((-plan%value_slots(column_slots(edge))-1)*width+j)
+            enddo
+          endif
+        enddo
+      enddo
+      deallocate(received)
+    enddo
     ok=.true.;message=''
 #else
-    ok=.false.;message='sparse coefficient-matrix exchange requires MPI'
+    ok=.false.;message='tiled sparse multi-RHS action requires MPI'
     workspace_peak_bytes=0_int64;payload_collective_count=0
 #endif
-  end subroutine exchange_rt_dg_sparse_matrix
+  end subroutine apply_rt_dg_sparse_rows_tiled
+
+  subroutine accumulate_rt_dg_sparse_density_tiled(comm,plan,point_offsets,support_slots,support_values,&
+      local_values,occupations,density,tile_width,workspace_peak_bytes,payload_collective_count,ok,message)
+    integer,intent(in)::comm,point_offsets(:),support_slots(:),tile_width
+    type(s_rt_dg_sparse_exchange),intent(in)::plan
+    complex(real64),intent(in)::support_values(:),local_values(:,:)
+    real(real64),intent(in)::occupations(:)
+    real(real64),intent(out)::density(:)
+    integer(int64),intent(out)::workspace_peak_bytes
+    integer,intent(out)::payload_collective_count
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::first,width,p,edge,j,ierr,local_bad,global_bad
+    integer(int64)::tile_bytes
+    complex(real64),allocatable::received(:),orbitals(:)
+    ok=.false.;message='';workspace_peak_bytes=0_int64;payload_collective_count=0;local_bad=0
+    if(tile_width<1.or.size(point_offsets)/=size(density)+1.or.size(support_slots)/=size(support_values).or.&
+      size(occupations)/=size(local_values,2).or.size(local_values,1)/=plan%local_count)local_bad=1
+    if(local_bad==0)then
+      if(point_offsets(1)/=1.or.point_offsets(size(point_offsets))/=size(support_values)+1.or.&
+        any(point_offsets(2:)<point_offsets(:size(point_offsets)-1)).or.any(support_slots<1).or.&
+        any(support_slots>size(plan%value_slots)))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled point-CSR validation reduction failed';return;endif
+    if(global_bad/=0)then;message='invalid tiled point-CSR density contract';return;endif
+    density=0d0
+    do first=1,size(local_values,2),tile_width
+      width=min(tile_width,size(local_values,2)-first+1)
+      call exchange_unique_rows_tile(comm,plan,local_values,first,width,received,tile_bytes,ok,message)
+      if(.not.ok)return
+      allocate(orbitals(width),stat=local_bad)
+      local_bad=merge(0,1,local_bad==0)
+      call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;message='tiled point-CSR allocation reduction failed';return;endif
+      if(global_bad/=0)then;message='cannot allocate tiled point-CSR orbital workspace';return;endif
+      do p=1,size(density)
+        orbitals=(0d0,0d0)
+        do edge=point_offsets(p),point_offsets(p+1)-1
+          if(plan%value_slots(support_slots(edge))>0)then
+            orbitals=orbitals+support_values(edge)*&
+              local_values(plan%value_slots(support_slots(edge)),first:first+width-1)
+          else
+            do j=1,width
+              orbitals(j)=orbitals(j)+support_values(edge)*&
+                received((-plan%value_slots(support_slots(edge))-1)*width+j)
+            enddo
+          endif
+        enddo
+        do j=1,width;density(p)=density(p)+occupations(first+j-1)*abs(orbitals(j))**2;enddo
+      enddo
+      workspace_peak_bytes=max(workspace_peak_bytes,tile_bytes+16_int64*int(size(orbitals),int64))
+      payload_collective_count=payload_collective_count+1
+      deallocate(received,orbitals)
+    enddo
+    ok=.true.;message=''
+#else
+    ok=.false.;message='tiled point-CSR density requires MPI'
+    workspace_peak_bytes=0_int64;payload_collective_count=0
+#endif
+  end subroutine accumulate_rt_dg_sparse_density_tiled
+
+#ifdef USE_MPI
+  subroutine exchange_unique_rows_tile(comm,plan,local_values,first,width,received,workspace_bytes,ok,message)
+    integer,intent(in)::comm,first,width
+    type(s_rt_dg_sparse_exchange),intent(in)::plan
+    complex(real64),intent(in)::local_values(:,:)
+    complex(real64),allocatable,intent(out)::received(:)
+    integer(int64),intent(out)::workspace_bytes
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::i,j,ierr,local_bad,global_bad,allocation_status,total_send,total_receive
+    integer,allocatable::send_counts(:),send_displacements(:),receive_counts(:),receive_displacements(:)
+    complex(real64),allocatable::send_values(:)
+    ok=.false.;message='';workspace_bytes=0_int64;local_bad=0
+    if(.not.plan%valid.or.width<1.or.first<1.or.first>size(local_values,2)-width+1) local_bad=1
+    call checked_default_product(size(plan%send_positions),width,total_send,local_bad)
+    call checked_default_product(size(plan%receive_values),width,total_receive,local_bad)
+    if(local_bad==0)then
+      if(int(total_send,int64)>huge(0_int64)/16_int64.or.int(total_receive,int64)>huge(0_int64)/16_int64)local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse extent reduction failed';return;endif
+    if(global_bad/=0)then;message='tiled sparse MPI extent overflow';return;endif
+    allocate(send_counts(plan%nproc),send_displacements(plan%nproc),receive_counts(plan%nproc),&
+      receive_displacements(plan%nproc),send_values(total_send),received(total_receive),&
+      stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='unique-row tiled allocation reduction failed';return;endif
+    if(global_bad/=0)then;message='cannot allocate unique-row tiled halo';return;endif
+    do i=1,plan%nproc
+      call checked_default_product(plan%send_counts(i),width,send_counts(i),local_bad)
+      call checked_default_product(plan%send_displacements(i),width,send_displacements(i),local_bad)
+      call checked_default_product(plan%receive_counts(i),width,receive_counts(i),local_bad)
+      call checked_default_product(plan%receive_displacements(i),width,receive_displacements(i),local_bad)
+    enddo
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse count reduction failed';return;endif
+    if(global_bad/=0)then;message='tiled sparse count/displacement overflow';return;endif
+    do i=1,size(plan%send_positions);do j=1,width
+      send_values((i-1)*width+j)=local_values(plan%send_positions(i),first+j-1)
+    enddo;enddo
+    call MPI_Alltoallv(send_values,send_counts,send_displacements,MPI_DOUBLE_COMPLEX,received,&
+      receive_counts,receive_displacements,MPI_DOUBLE_COMPLEX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='unique-row tiled halo payload exchange failed';return;endif
+    workspace_bytes=16_int64*(int(total_send,int64)+int(total_receive,int64))+&
+      16_int64*int(plan%nproc,int64)
+    ok=.true.;message=''
+  end subroutine exchange_unique_rows_tile
+
+  subroutine checked_default_product(left,right,value,bad)
+    integer,intent(in)::left,right
+    integer,intent(out)::value
+    integer,intent(inout)::bad
+    integer(int64)::product64
+    value=0
+    if(bad/=0)return
+    if(left<0.or.right<0)then;bad=1;return;endif
+    if(left/=0.and.int(right,int64)>int(huge(0),int64)/int(left,int64))then;bad=1;return;endif
+    product64=int(left,int64)*int(right,int64)
+    if(product64>int(huge(0),int64))then;bad=1;return;endif
+    value=int(product64)
+  end subroutine checked_default_product
+#endif
+
+  subroutine checked_rt_dg_sparse_extent_product(left,right,value,ok)
+    integer(int64),intent(in)::left,right
+    integer(int64),intent(out)::value
+    logical,intent(out)::ok
+    value=0_int64;ok=left>=0_int64.and.right>=0_int64
+    if(.not.ok)return
+    if(left/=0_int64.and.right>int(huge(0),int64)/left)then;ok=.false.;return;endif
+    value=left*right
+  end subroutine checked_rt_dg_sparse_extent_product
 
   subroutine clear_rt_dg_sparse_exchange(plan)
     type(s_rt_dg_sparse_exchange),intent(inout)::plan

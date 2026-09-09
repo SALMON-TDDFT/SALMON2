@@ -12,7 +12,8 @@ main_text=(root/"src/gs/main_dft.f90").read_text().lower()
 publisher=main_text.split("subroutine publish_dg_hybrid_divided_v4",1)[1].split(
   "end subroutine publish_dg_hybrid_divided_v4",1)[0]
 for token in ("salmon_hybrid_dg_manifest_v4","salmon_hybrid_dg_rank_shard_v4",
-              "initial_occupied_amplitudes","basis_point_offsets","metric_offsets"):
+              "initial_occupied_amplitudes","basis_point_offsets","metric_offsets",
+              "system_fingerprint","pseudopotential_fingerprint"):
   assert token in text,f"RED: v4 checkpoint is missing {token}"
 assert "full_coefficients" not in text and "full_metric" not in text
 reader=text.split("subroutine read_rt_dg_hybrid_checkpoint_v4",1)[1].split(
@@ -23,11 +24,31 @@ writer=text.split("subroutine write_rt_dg_hybrid_checkpoint_v4",1)[1].split(
   "end subroutine write_rt_dg_hybrid_checkpoint_v4",1)[0]
 assert writer.count("unit=-1") >= 2,"RED: writer does not reset its unit before both OPEN operations"
 assert "close_if_open" in writer,"RED: writer closes a failed/uninitialized unit"
+collective_diagnostics=("transaction broadcast failed","shard-size gather failed","shard-digest gather failed",
+                        "fragment-map gather failed","manifest metadata")
+collective_diagnostic_counts={diagnostic:text.count(diagnostic) for diagnostic in collective_diagnostics}
+def require_collective_safety(candidate: str) -> None:
+  assert ";call mpi_" not in candidate, \
+    "RED: v4 transaction starts another MPI phase before checking the preceding collective"
+  assert "ierr/=mpi_success.or." not in candidate, \
+    "RED: v4 I/O reads an undefined collective output when MPI returns an error"
+  for diagnostic in collective_diagnostics:
+    assert candidate.count(diagnostic)>=collective_diagnostic_counts[diagnostic], \
+      f"RED: missing collective-safe v4 diagnostic: {diagnostic}"
+require_collective_safety(text)
+for diagnostic in collective_diagnostics:
+  mutation=text.replace(diagnostic,"removed collective diagnostic",1)
+  try: require_collective_safety(mutation)
+  except AssertionError: pass
+  else: raise AssertionError(f"collective guard mutation survived: {diagnostic}")
 assert "expected_shard_extent" in text and "valid_read_dimensions" in reader, \
   "RED: reader lacks exact overflow-safe serialized extent validation"
-assert "manifest_size<" in reader and "actual_size<" in reader,"RED: fixed headers are read without minimum-size checks"
-for field in ("global_grid_count","certified_rank","operator_structure_fingerprint","scope_fingerprint","payload_fingerprint"):
+assert "manifest_size/=" in reader and "actual_size<" in reader,"RED: fixed headers are read without exact/minimum-size checks"
+for field in ("global_grid_count","certified_rank","operator_structure_fingerprint","scope_fingerprint","payload_fingerprint",
+              "system_fingerprint","pseudopotential_fingerprint"):
   assert f"shard_{field}/={field}" in reader,f"RED: shard {field} is not compared with the manifest"
+mix_body=text.split("subroutine mix(hash,value)",1)[1].split("end subroutine mix",1)[0]
+assert "1099511628211" not in mix_body,"RED: v4 digest relies on undefined signed integer overflow"
 assert endpoint_text.count("subroutine publish_rt_dg_hybrid_checkpoint_v4") == 2
 endpoint_body=endpoint_text.split("subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[1].split(
   "end subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[0]
@@ -103,13 +124,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
         ("coefficient-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
         ("large-consistent-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
       ):
-        if label=="negative": struct.pack_into("=i",damaged,120,-1)
-        if label=="huge": struct.pack_into("=i",damaged,120,2**31-1)
-        if label=="operator-count": struct.pack_into("=i",damaged,136,struct.unpack_from("=i",damaged,136)[0]+1)
-        if label=="point-count": struct.pack_into("=i",damaged,140,struct.unpack_from("=i",damaged,140)[0]+1)
-        if label=="coefficient-product": struct.pack_into("=i",damaged,152,2**31-1)
+        if label=="negative": struct.pack_into("=i",damaged,136,-1)
+        if label=="huge": struct.pack_into("=i",damaged,136,2**31-1)
+        if label=="operator-count": struct.pack_into("=i",damaged,152,struct.unpack_from("=i",damaged,152)[0]+1)
+        if label=="point-count": struct.pack_into("=i",damaged,156,struct.unpack_from("=i",damaged,156)[0]+1)
+        if label=="coefficient-product": struct.pack_into("=i",damaged,168,2**31-1)
         if label=="large-consistent-product":
-          for offset,value in ((120,10**9),(124,10**9+1),(132,10**9+1),(148,10**9)):
+          for offset,value in ((136,10**9),(140,10**9+1),(148,10**9+1),(164,10**9)):
             struct.pack_into("=i",damaged,offset,value)
         shard.write_bytes(damaged)
         rejected=subprocess.run([shutil.which("mpiexec"),"-n","1",str(reject),str(prefix)],
@@ -127,6 +148,12 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
         capture_output=True,text=True,env=env,timeout=30)
       assert rejected.returncode==0,(rejected.stdout,rejected.stderr)
       assert "disagrees with manifest common metadata" in rejected.stdout.lower(),rejected.stdout
+      manifest.write_bytes(original_manifest)
+      manifest.write_bytes(original_manifest+b"X")
+      rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(reject),str(prefix)],
+        capture_output=True,text=True,env=env,timeout=30)
+      assert rejected.returncode==0,(rejected.stdout,rejected.stderr)
+      assert "manifest missing, corrupt" in rejected.stdout.lower(),rejected.stdout
       manifest.write_bytes(original_manifest)
       shards=sorted(prefix.parent.glob(prefix.name+".v4.*.rank000001.shard"),key=lambda p:p.stat().st_mtime_ns)
       assert shards

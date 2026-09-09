@@ -6,7 +6,7 @@ module rt_dg_hybrid_initialization
   use dg_hybrid_sparse_operators,only:s_dg_hybrid_sparse_operators
   use rt_dg_hybrid_sparse_projection,only:validate_rt_dg_hybrid_sparse_hermiticity
   use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
-    exchange_rt_dg_sparse_matrix
+    apply_rt_dg_sparse_rows_tiled
   use rt_dg_hybrid_point_density,only:reconstruct_rt_dg_point_csr_density
   use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,read_rt_dg_hybrid_checkpoint_v4
 #ifdef USE_MPI
@@ -26,7 +26,9 @@ module rt_dg_hybrid_initialization
       reference_refresh_scale=1d0
     integer::certified_rank=0,global_count=0,noccupied=0,operation_count=0,nonidentity_operation_count=0
     integer(int64)::payload_fingerprint=0_int64,operator_structure_fingerprint=0_int64,&
-      operator_value_fingerprint=0_int64,scope_fingerprint=0_int64,density_workspace_peak_bytes=0_int64
+      operator_value_fingerprint=0_int64,scope_fingerprint=0_int64,system_fingerprint=0_int64,&
+      pseudopotential_fingerprint=0_int64,&
+      density_workspace_peak_bytes=0_int64
     integer::density_payload_collective_count=0
     type(s_dg_hybrid_sparse_metric)::metric
     type(s_dg_hybrid_sparse_operators)::operators
@@ -41,11 +43,12 @@ module rt_dg_hybrid_initialization
     fingerprint_rt_dg_hybrid_sparse_structure
 contains
   subroutine initialize_rt_dg_hybrid_from_checkpoint(comm,path,theory,periodic,nspin,spinorbit,plus_u,hse,&
-      fix_func,jm,xctype,tolerances,state,ok,message)
+      fix_func,jm,xctype,current_system_fingerprint,current_pseudopotential_fingerprint,tolerances,state,ok,message)
     integer,intent(in)::comm,nspin,xctype(:)
     character(*),intent(in)::path,theory
     logical,intent(in)::periodic,spinorbit,plus_u,hse,fix_func,jm
     real(real64),intent(in)::tolerances(4)
+    integer(int64),intent(in)::current_system_fingerprint,current_pseudopotential_fingerprint
     type(s_rt_dg_hybrid_state),intent(out)::state
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -53,9 +56,8 @@ contains
     type(s_rt_dg_hybrid_v4_shard)::payload
     integer::i,j,edge,ierr,local_bad,global_bad,active_xc,nhalo,slot,payload_count
     integer(int64)::workspace_peak
-    integer,allocatable::temporary_halo(:)
-    complex(real64),allocatable::metric_edge_coefficients(:,:),operator_edge_coefficients(:,:),&
-      s_coefficients(:,:),h_coefficients(:,:)
+    integer,allocatable::temporary_halo(:),metric_slots(:),operator_slots(:)
+    complex(real64),allocatable::s_coefficients(:,:),h_coefficients(:,:)
     real(real64),allocatable::reconstructed_density(:)
     real(real64)::local_value,global_value,local_scale,global_scale,local_residual,global_residual
     complex(real64)::local_inner,global_inner
@@ -73,26 +75,39 @@ contains
     enddo
     if(active_xc==0)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='unsupported local hybrid RT scope';return;endif
+    if(ierr/=MPI_SUCCESS)then;message='hybrid RT scope reduction failed';return;endif
+    if(global_bad/=0)then;message='unsupported local hybrid RT scope';return;endif
     inquire(file=trim(path)//'.manifest',exist=manifest_exists);inquire(file=trim(path),exist=dense_v3_exists)
     local_bad=merge(0,1,manifest_exists.or..not.dense_v3_exists)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='dense-v3 probe reduction failed';return;endif
+    if(global_bad/=0)then
       message='dense Hybrid v3 checkpoint is unsupported; regenerate distributed-native v4';return
     endif
     call read_rt_dg_hybrid_checkpoint_v4(comm,path,payload,ok,message);if(.not.ok)return
+    local_bad=merge(0,1,current_system_fingerprint/=0_int64.and.&
+      current_system_fingerprint==payload%system_fingerprint.and.current_pseudopotential_fingerprint/=0_int64.and.&
+      current_pseudopotential_fingerprint==payload%pseudopotential_fingerprint)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='system identity reduction failed';return;endif
+    if(global_bad/=0)then
+      ok=.false.;message='checkpoint/current Hybrid system identity mismatch';return
+    endif
     local_bad=0
     if(size(payload%scope_selectors)/=8.or.any(payload%scope_selectors/=[1,1,1,0,0,0,0,0]).or.&
       size(payload%xc_types)/=size(xctype).or.any(payload%xc_types/=xctype).or.&
       payload%scope_fingerprint/=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;ok=.false.;message='checkpoint/local hybrid RT scope mismatch';return;endif
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='checkpoint scope reduction failed';return;endif
+    if(global_bad/=0)then;ok=.false.;message='checkpoint/local hybrid RT scope mismatch';return;endif
 
     state%global_count=payload%global_count;state%certified_rank=payload%global_count
     state%noccupied=payload%nocc;state%operation_count=1;state%nonidentity_operation_count=0
     state%payload_fingerprint=payload%payload_fingerprint
     state%operator_structure_fingerprint=payload%operator_structure_fingerprint
     state%operator_value_fingerprint=payload%operator_fingerprint;state%scope_fingerprint=payload%scope_fingerprint
+    state%system_fingerprint=payload%system_fingerprint
+    state%pseudopotential_fingerprint=payload%pseudopotential_fingerprint
     allocate(state%owned_row_ids,source=payload%row_ids);allocate(state%coefficients,source=payload%initial_occupied_amplitudes)
     allocate(state%occupations,source=payload%occupations);allocate(state%eigenvalues,source=payload%eigenvalues)
     allocate(state%grid_ids,source=payload%grid_ids);allocate(state%grid_weights,source=payload%grid_weights)
@@ -151,18 +166,16 @@ contains
 
     call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
       payload%metric_columns,state%basis_exchange,ok,message);if(.not.ok)return
-    allocate(metric_edge_coefficients(size(payload%metric_columns),payload%nocc))
-    call exchange_rt_dg_sparse_matrix(comm,state%basis_exchange,state%coefficients,metric_edge_coefficients,&
-      workspace_peak,payload_count,exchange_ok,exchange_message)
+    allocate(metric_slots(size(payload%metric_columns)));metric_slots=[(i,i=1,size(metric_slots))]
+    allocate(s_coefficients(size(payload%row_ids),payload%nocc))
+    call apply_rt_dg_sparse_rows_tiled(comm,state%basis_exchange,payload%metric_offsets,payload%metric_values,&
+      metric_slots,state%coefficients,s_coefficients,16,workspace_peak,payload_count,exchange_ok,exchange_message)
     if(.not.exchange_ok)then;ok=.false.;message='distributed-v4 metric coefficient halo failed';return;endif
-    allocate(s_coefficients(size(payload%row_ids),payload%nocc));s_coefficients=(0d0,0d0)
-    do i=1,size(payload%row_ids);do edge=payload%metric_offsets(i),payload%metric_offsets(i+1)-1
-      s_coefficients(i,:)=s_coefficients(i,:)+payload%metric_values(edge)*metric_edge_coefficients(edge,:)
-    enddo;enddo
     local_value=0d0;local_scale=1d0
     do i=1,payload%nocc;do j=1,payload%nocc
       local_inner=sum(conjg(state%coefficients(:,i))*s_coefficients(:,j))
       call MPI_Allreduce(local_inner,global_inner,1,MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
+      if(ierr/=MPI_SUCCESS)then;ok=.false.;message='startup metric Gram reduction failed';return;endif
       local_value=max(local_value,abs(global_inner-merge((1d0,0d0),(0d0,0d0),i==j)))
       local_scale=max(local_scale,abs(global_inner))
     enddo;enddo
@@ -170,21 +183,20 @@ contains
 
     call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%operator_structure_fingerprint,payload%row_ids,&
       payload%operator_columns,state%basis_exchange,ok,message);if(.not.ok)return
-    allocate(operator_edge_coefficients(size(payload%operator_columns),payload%nocc))
-    call exchange_rt_dg_sparse_matrix(comm,state%basis_exchange,state%coefficients,operator_edge_coefficients,&
-      workspace_peak,payload_count,exchange_ok,exchange_message)
+    allocate(operator_slots(size(payload%operator_columns)));operator_slots=[(i,i=1,size(operator_slots))]
+    allocate(h_coefficients(size(payload%row_ids),payload%nocc))
+    call apply_rt_dg_sparse_rows_tiled(comm,state%basis_exchange,payload%operator_offsets,payload%operator_values,&
+      operator_slots,state%coefficients,h_coefficients,16,workspace_peak,payload_count,exchange_ok,exchange_message)
     if(.not.exchange_ok)then;ok=.false.;message='distributed-v4 operator coefficient halo failed';return;endif
-    allocate(h_coefficients(size(payload%row_ids),payload%nocc));h_coefficients=(0d0,0d0)
-    do i=1,size(payload%row_ids);do edge=payload%operator_offsets(i),payload%operator_offsets(i+1)-1
-      h_coefficients(i,:)=h_coefficients(i,:)+payload%operator_values(edge)*operator_edge_coefficients(edge,:)
-    enddo;enddo
     local_residual=0d0;local_scale=0d0
     do i=1,payload%nocc
       local_residual=local_residual+sum(abs(h_coefficients(:,i)-payload%eigenvalues(i)*s_coefficients(:,i))**2)
       local_scale=local_scale+sum(abs(h_coefficients(:,i))**2)
     enddo
     call MPI_Allreduce(local_residual,global_residual,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='startup residual reduction failed';return;endif
     call MPI_Allreduce(local_scale,global_scale,1,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='startup residual scale reduction failed';return;endif
     state%startup_orbital_residual=sqrt(global_residual)/max(1d0,sqrt(global_scale))
     if(state%startup_metric_defect>tolerances(2).or.state%startup_orbital_residual>tolerances(3))then
       ok=.false.;message='distributed-v4 metric/stationarity certification failed';return
@@ -198,7 +210,8 @@ contains
     if(.not.ok)return
     local_value=0d0;if(size(reconstructed_density)>0)local_value=maxval(abs(reconstructed_density-state%density))
     call MPI_Allreduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_value>tolerances(4))then
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='checkpoint density defect reduction failed';return;endif
+    if(global_value>tolerances(4))then
       ok=.false.;message='distributed-v4 checkpoint density reconstruction failed';return
     endif
     state%density_workspace_peak_bytes=workspace_peak;state%density_payload_collective_count=payload_count

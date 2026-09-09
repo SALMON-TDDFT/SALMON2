@@ -9,19 +9,23 @@ scalar_body=source.split("subroutine exchange_rt_dg_sparse_values",1)[1].split(
 assert scalar_body.count("mpi_alltoallv")==1,"RED: Krylov matvec halo is not one packed Alltoallv"
 assert "mpi_irecv" not in scalar_body and "mpi_isend" not in scalar_body and "do rank=" not in scalar_body, \
   "RED: Krylov matvec still posts a rank loop of point-to-point exchanges"
-assert "subroutine exchange_rt_dg_sparse_matrix" in source, "RED: packed coefficient-matrix halo API is absent"
-body=source.split("subroutine exchange_rt_dg_sparse_matrix",1)[1].split(
-  "end subroutine exchange_rt_dg_sparse_matrix",1)[0]
-assert body.count("mpi_alltoallv")==1,"RED: coefficient payload exchange is not one packed Alltoallv"
-assert "mpi_bcast" not in body and "mpi_allreduce(mpi_in_place" not in body
+assert "subroutine exchange_rt_dg_sparse_matrix" not in source, "RED: obsolete edge x Nocc halo API remains reachable"
 main=(root/"src/rt/main_tddft.f90").read_text().lower()
 metric_body=main.split("function apply_hybrid_metric_to_coefficients",1)[1].split(
   "end function apply_hybrid_metric_to_coefficients",1)[0]
 assert "global_coefficients" not in metric_body,"RED: metric action still replicates R x Nocc coefficients"
-assert "exchange_rt_dg_sparse_matrix" in metric_body,"RED: metric action does not use the packed coefficient halo"
+assert "apply_rt_dg_sparse_rows_tiled" in metric_body,"RED: metric action does not use unique-row tiled sparse apply"
 invariant_body=main.split("subroutine evaluate_hybrid_rt_physical_invariants",1)[1].split(
   "end subroutine evaluate_hybrid_rt_physical_invariants",1)[0]
 assert "global_coefficients" not in invariant_body,"RED: invariant evaluation still replicates R x Nocc coefficients"
+point=(root/"src/rt/dg/rt_dg_hybrid_point_density.f90").read_text().lower()
+initialization=(root/"src/rt/dg/rt_dg_hybrid_initialization_v4.f90").read_text().lower()
+assert "coefficients_by_halo" not in point,"RED: point density allocates edge/halo x Nocc"
+assert "exchange_rt_dg_sparse_matrix" not in point,"RED: point density materializes the complete coefficient halo"
+assert "exchange_rt_dg_sparse_matrix" not in initialization,"RED: startup materializes edge x Nocc work arrays"
+assert "exchange_rt_dg_sparse_matrix" not in metric_body,"RED: metric invariant materializes edge x Nocc"
+assert "exchange_rt_dg_sparse_matrix" not in invariant_body,"RED: energy invariant materializes two edge x Nocc arrays"
+assert "apply_rt_dg_sparse_rows_tiled" in source,"RED: no unique-row tiled sparse multi-RHS action exists"
 with tempfile.TemporaryDirectory(prefix="hybrid-v4-distributed-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_v4_distributed"
   flags=[shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
@@ -37,8 +41,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-distributed-") as name:
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
     assert f"PASS distributed-v4 coefficient halo ranks={nrank}" in run.stdout
   mutations=(
-    (exchange_source,"send_values((i-1)*nrhs+j)=local_values(plan%send_positions(i),j)",
-     "send_values((i-1)*nrhs+j)=conjg(local_values(plan%send_positions(i),j))","packed coefficient permutation"),
+    (exchange_source,"send_values((i-1)*width+j)=local_values(plan%send_positions(i),first+j-1)",
+     "send_values((i-1)*width+j)=conjg(local_values(plan%send_positions(i),first+j-1))","packed tiled coefficient permutation"),
     (projection_source,"factor*conjg(support_values(i))*support_values(j)",
      "factor*support_values(i)*support_values(j)","point-CSR bra conjugation"),
   )

@@ -3,22 +3,27 @@ program test_rt_dg_hybrid_distributed_v4_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
-    exchange_rt_dg_sparse_matrix
+    apply_rt_dg_sparse_rows_tiled
+  use rt_dg_hybrid_sparse_exchange,only:checked_rt_dg_sparse_extent_product
   use rt_dg_hybrid_point_density,only:reconstruct_rt_dg_point_csr_density
   use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_point_csr_edges
   implicit none
   type(s_rt_dg_sparse_exchange)::plan
   integer::comm,rank,nproc,ierr,n,nlocal,nrhs,i,j,k,collective_count
-  integer(int64)::fingerprint,workspace_peak
+  integer(int64)::fingerprint,workspace_peak,extent_product
   integer(int64),allocatable::owned(:)
   integer,allocatable::needed(:)
-  complex(real64),allocatable::local_values(:,:),needed_values(:,:)
+  complex(real64),allocatable::local_values(:,:)
   logical::ok
   character(256)::message
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call checked_rt_dg_sparse_extent_product(17_int64,19_int64,extent_product,ok)
+  call require(ok.and.extent_product==323_int64,'checked sparse extent changed finite product')
+  call checked_rt_dg_sparse_extent_product(int(huge(0),int64),2_int64,extent_product,ok)
+  call require(.not.ok.and.extent_product==0_int64,'checked sparse extent accepted default-integer overflow')
   nlocal=50;n=nlocal*nproc;nrhs=7
-  allocate(owned(nlocal),needed(4*nlocal),local_values(nlocal,nrhs),needed_values(4*nlocal,nrhs))
+  allocate(owned(nlocal),needed(4*nlocal),local_values(nlocal,nrhs))
   do i=1,nlocal
     owned(i)=int(rank*nlocal+i,int64)
     do j=1,nrhs;local_values(i,j)=canonical_value(int(owned(i)),j);enddo
@@ -30,19 +35,9 @@ program test_rt_dg_hybrid_distributed_v4_mpi
   fingerprint=7717_int64
   call build_rt_dg_sparse_exchange(comm,n,fingerprint,owned,needed,plan,ok,message)
   call require(ok,'distributed coefficient halo setup failed: '//trim(message))
-  call exchange_rt_dg_sparse_matrix(comm,plan,local_values,needed_values,workspace_peak,collective_count,ok,message)
-  call require(ok,'distributed coefficient matrix exchange failed: '//trim(message))
-  call require(collective_count==1,'coefficient halo did not use exactly one payload collective')
-  call require(workspace_peak<=16_int64*int(nrhs,int64)*&
-    int(size(plan%send_positions)+size(plan%receive_values),int64),&
-    'coefficient halo workspace exceeds local sparse payload')
-  do i=1,size(needed);do j=1,nrhs
-    call require(abs(needed_values(i,j)-canonical_value(needed(i),j))<1d-14,&
-      'packed distributed coefficient halo disagrees with dense oracle')
-  enddo;enddo
   call exercise_point_density
+  call exercise_tiled_action
   call exercise_point_projection
-  call exercise_zero_owned
   if(rank==0)write(*,'(a,i0,a,i0,a,i0)')'PASS distributed-v4 coefficient halo ranks=',nproc,&
     ' local_basis=',nlocal,' repeated_edges=',size(needed)
   call MPI_Finalize(ierr)
@@ -51,6 +46,41 @@ contains
     integer,intent(in)::row,column
     canonical_value=cmplx(0.125d0*row+0.03125d0*column,-0.0625d0*row+0.015625d0*column,real64)
   end function canonical_value
+  subroutine exercise_tiled_action
+    integer,parameter::large_nrhs=257
+    integer::row,column,width,call_count
+    integer,allocatable::offsets(:),slots(:)
+    complex(real64),allocatable::values(:),large_local(:,:),result7(:,:),result19(:,:)
+    integer(int64)::peak
+    logical::action_ok
+    character(256)::action_message
+    allocate(offsets(nlocal+1),slots(size(needed)),values(size(needed)),large_local(nlocal,large_nrhs),&
+      result7(nlocal,large_nrhs),result19(nlocal,large_nrhs))
+    offsets(1)=1
+    do row=1,nlocal
+      offsets(row+1)=4*row+1
+      do k=1,4
+        slots(4*(row-1)+k)=4*(row-1)+k
+        values(4*(row-1)+k)=cmplx(0.05d0*k,-0.0125d0*k,real64)
+      enddo
+      do column=1,large_nrhs;large_local(row,column)=canonical_value(int(owned(row)),column);enddo
+    enddo
+    call apply_rt_dg_sparse_rows_tiled(comm,plan,offsets,values,slots,large_local,result7,7,&
+      peak,call_count,action_ok,action_message)
+    call require(action_ok,'7-column tiled action failed: '//trim(action_message))
+    call require(call_count==(large_nrhs+6)/7,'tiled sparse collective count depends on edge/rank count')
+    call require(peak<=16_int64*7_int64*int(size(plan%send_positions)+size(plan%receive_values)+nlocal,int64)+&
+      16_int64*int(nproc,int64),'tiled sparse workspace is not unique-row/local-row bounded')
+    call apply_rt_dg_sparse_rows_tiled(comm,plan,offsets,values,slots,large_local,result19,19,&
+      peak,call_count,action_ok,action_message)
+    call require(action_ok,'19-column tiled action failed: '//trim(action_message))
+    call require(maxval(abs(result7-result19))<1d-12,'tiled sparse result depends on tile width')
+    do row=1,nlocal;do column=1,large_nrhs
+      call require(abs(result7(row,column)-sum(values(4*(row-1)+1:4*row)*&
+        [(canonical_value(needed(k),column),k=4*(row-1)+1,4*row)]))<1d-12,&
+        'unique-row tiled sparse action disagrees with dense oracle')
+    enddo;enddo
+  end subroutine exercise_tiled_action
   subroutine exercise_point_density
     type(s_rt_dg_sparse_exchange)::density_plan
     integer,parameter::npoint=4000,degree=3
@@ -136,39 +166,6 @@ contains
     call require(maxval(abs(projected-oracle_values))<1d-12,&
       'production point-CSR projection disagrees with dense oracle')
   end subroutine exercise_point_projection
-  subroutine exercise_zero_owned
-    type(s_rt_dg_sparse_exchange)::zero_plan
-    integer::zero_n,zero_local,zero_payload_count
-    integer(int64),allocatable::zero_rows(:)
-    integer,allocatable::zero_needed(:)
-    complex(real64),allocatable::zero_values(:,:),zero_received(:,:)
-    integer(int64)::zero_workspace
-    logical::zero_ok,received_ok
-    character(256)::zero_message
-    if(nproc<2)return
-    zero_n=50*(nproc-1);zero_local=merge(0,50,rank==nproc-1)
-    allocate(zero_rows(zero_local),zero_values(zero_local,nrhs))
-    do i=1,zero_local
-      zero_rows(i)=int(rank*50+i,int64)
-      do j=1,nrhs;zero_values(i,j)=canonical_value(int(zero_rows(i)),j);enddo
-    enddo
-    if(rank==nproc-1)then
-      allocate(zero_needed(1),zero_received(1,nrhs));zero_needed=[1]
-    else
-      allocate(zero_needed(0),zero_received(0,nrhs))
-    endif
-    call build_rt_dg_sparse_exchange(comm,zero_n,8181_int64,zero_rows,zero_needed,zero_plan,zero_ok,zero_message)
-    call require(zero_ok,'zero-owned halo setup failed: '//trim(zero_message))
-    call exchange_rt_dg_sparse_matrix(comm,zero_plan,zero_values,zero_received,zero_workspace,&
-      zero_payload_count,zero_ok,zero_message)
-    call require(zero_ok,'zero-owned halo exchange failed: '//trim(zero_message))
-    received_ok=.true.
-    if(rank==nproc-1)then
-      do j=1,nrhs;received_ok=received_ok.and.&
-        abs(zero_received(1,j)-canonical_value(1,j))<1d-14;enddo
-    endif
-    call require(received_ok,'zero-owned rank did not receive requested coefficient')
-  end subroutine exercise_zero_owned
   pure complex(real64) function projection_point_value(point,row_id,nsize)
     integer,intent(in)::point,row_id,nsize
     if(row_id==point)then

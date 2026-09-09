@@ -13,6 +13,7 @@ module rt_dg_hybrid_checkpoint_v4
     integer::global_count=0,global_grid_count=0,nocc=0,certified_rank=0,fragment_id=0
     integer(int64)::basis_fingerprint=0_int64,operator_fingerprint=0_int64,&
       operator_structure_fingerprint=0_int64,scope_fingerprint=0_int64,payload_fingerprint=0_int64
+    integer(int64)::system_fingerprint=0_int64,pseudopotential_fingerprint=0_int64
     integer(int64),allocatable::row_ids(:),grid_ids(:)
     integer,allocatable::metric_offsets(:),metric_columns(:)
     complex(real64),allocatable::metric_values(:)
@@ -36,16 +37,21 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,ios,unit,local_bad,global_bad,flush_ios
+    integer::rank,nproc,ierr,ios,unit,local_bad,global_bad,flush_ios,allocation_status
     integer(int64)::transaction_id,shard_digest,shard_size
     integer(int64),allocatable::shard_sizes(:),shard_digests(:)
     integer,allocatable::fragment_ids(:)
     character(512)::manifest,manifest_tmp,shard,shard_tmp
     character(256)::iomsg
-    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
-    ok=.false.;message='';local_bad=validate_local(payload,rank)
+    ok=.false.;message=''
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 writer communicator rank failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 writer communicator size failed';return;endif
+    local_bad=validate_local(payload,rank)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 payload validation reduction failed';return;endif
+    if(global_bad/=0)then
       message='invalid distributed-v4 rank shard payload';return
     endif
     call validate_common(comm,payload,local_bad)
@@ -55,6 +61,7 @@ contains
       if(transaction_id<=0_int64)transaction_id=1_int64
     endif
     call MPI_Bcast(transaction_id,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 transaction broadcast failed';return;endif
     call shard_name(prefix,transaction_id,rank,shard)
     write(shard_tmp,'(a,".temporary")')trim(shard)
     shard_digest=digest_payload(payload,rank,nproc,transaction_id)
@@ -65,7 +72,8 @@ contains
       write(unit,iostat=ios,iomsg=iomsg)shard_magic,schema_version,rank,nproc,payload%fragment_id,&
         payload%global_count,payload%global_grid_count,payload%nocc,payload%certified_rank,transaction_id,&
         payload%basis_fingerprint,payload%operator_fingerprint,payload%operator_structure_fingerprint,&
-        payload%scope_fingerprint,payload%payload_fingerprint,&
+        payload%scope_fingerprint,payload%payload_fingerprint,payload%system_fingerprint,&
+        payload%pseudopotential_fingerprint,&
         shard_digest,size(payload%row_ids),size(payload%metric_offsets),size(payload%metric_columns),&
         size(payload%operator_offsets),size(payload%operator_columns),size(payload%basis_point_offsets),&
         size(payload%basis_support_ids),size(payload%initial_occupied_amplitudes,1),&
@@ -89,13 +97,21 @@ contains
     endif
     local_bad=merge(0,1,ios==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard publication reduction failed';return;endif
+    if(global_bad/=0)then
       message='cannot atomically publish distributed-v4 rank shard';return
     endif
-    allocate(shard_sizes(nproc),shard_digests(nproc),fragment_ids(nproc))
+    allocate(shard_sizes(nproc),shard_digests(nproc),fragment_ids(nproc),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 manifest allocation reduction failed';return;endif
+    if(global_bad/=0)then;message='cannot allocate distributed-v4 manifest gathers';return;endif
     call MPI_Gather(shard_size,1,MPI_INTEGER8,shard_sizes,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-size gather failed';return;endif
     call MPI_Gather(shard_digest,1,MPI_INTEGER8,shard_digests,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-digest gather failed';return;endif
     call MPI_Gather(payload%fragment_id,1,MPI_INTEGER,fragment_ids,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 fragment-map gather failed';return;endif
     manifest=trim(prefix)//'.manifest';manifest_tmp=trim(manifest)//'.temporary'
     ios=0;unit=-1
     if(rank==0)then
@@ -104,7 +120,7 @@ contains
       if(ios==0)write(unit,iostat=ios,iomsg=iomsg)manifest_magic,schema_version,nproc,payload%global_count,&
         payload%global_grid_count,payload%nocc,payload%certified_rank,transaction_id,payload%basis_fingerprint,&
         payload%operator_fingerprint,payload%operator_structure_fingerprint,payload%scope_fingerprint,&
-        payload%payload_fingerprint,&
+        payload%payload_fingerprint,payload%system_fingerprint,payload%pseudopotential_fingerprint,&
         shard_sizes,shard_digests,fragment_ids
       flush_ios=0
       if(ios==0)flush(unit,iostat=flush_ios)
@@ -113,7 +129,8 @@ contains
       if(ios==0)call rename(trim(manifest_tmp),trim(manifest),ios)
     endif
     call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.ios/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 manifest status broadcast failed';return;endif
+    if(ios/=0)then
       message='cannot atomically publish distributed-v4 manifest';return
     endif
     ok=.true.
@@ -133,57 +150,87 @@ contains
       shard_rank,shard_nproc,&
       shard_global_count,shard_global_grid_count,shard_nocc,shard_certified_rank,&
       fragment_id,nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,nsupport,ncoeff1,ncoeff2,&
-      nscope,nxc,local_bad,global_bad
+      nscope,nxc,local_bad,global_bad,allocation_status
     integer::failure_kind,global_failure_kind
     integer(int64)::transaction_id,basis_fingerprint,operator_fingerprint,operator_structure_fingerprint,&
-      scope_fingerprint,payload_fingerprint,stored_digest,actual_digest,actual_size,manifest_size,&
+      scope_fingerprint,payload_fingerprint,system_fingerprint,pseudopotential_fingerprint,&
+      stored_digest,actual_digest,actual_size,manifest_size,&
       shard_transaction_id,shard_basis_fingerprint,shard_operator_fingerprint,&
-      shard_operator_structure_fingerprint,shard_scope_fingerprint,shard_payload_fingerprint
+      shard_operator_structure_fingerprint,shard_scope_fingerprint,shard_payload_fingerprint,shard_system_fingerprint,&
+      shard_pseudopotential_fingerprint
     integer(int64),allocatable::shard_sizes(:),shard_digests(:)
     integer,allocatable::fragment_ids(:)
     character(32)::magic
     character(512)::manifest,shard
     character(256)::iomsg
-    call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
-    ok=.false.;message='';payload=s_rt_dg_hybrid_v4_shard();manifest=trim(prefix)//'.manifest';ios=0;unit=-1
-    allocate(shard_sizes(nproc),shard_digests(nproc),fragment_ids(nproc))
+    ok=.false.;message='';payload=s_rt_dg_hybrid_v4_shard()
+    call MPI_Comm_rank(comm,rank,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 reader communicator rank failed';return;endif
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 reader communicator size failed';return;endif
+    manifest=trim(prefix)//'.manifest';ios=0;unit=-1
+    allocate(shard_sizes(nproc),shard_digests(nproc),fragment_ids(nproc),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 reader allocation reduction failed';return;endif
+    if(global_bad/=0)then;message='cannot allocate distributed-v4 manifest metadata';return;endif
     if(rank==0)then
       inquire(file=trim(manifest),size=manifest_size,iostat=ios)
-      if(ios==0.and.manifest_size<104_int64+20_int64*int(nproc,int64))ios=1
+      if(ios==0.and.manifest_size/=120_int64+20_int64*int(nproc,int64))ios=1
       if(ios==0)open(newunit=unit,file=trim(manifest),status='old',access='stream',form='unformatted',&
         action='read',iostat=ios,iomsg=iomsg)
       if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,version,file_nproc,global_count,global_grid_count,nocc,&
         certified_rank,transaction_id,basis_fingerprint,operator_fingerprint,operator_structure_fingerprint,&
-        scope_fingerprint,payload_fingerprint,shard_sizes,shard_digests,fragment_ids
+        scope_fingerprint,payload_fingerprint,system_fingerprint,pseudopotential_fingerprint,&
+        shard_sizes,shard_digests,fragment_ids
       call close_if_open(unit,ios)
       if(ios==0.and.(magic/=manifest_magic.or.version/=schema_version.or.file_nproc/=nproc))ios=1
     endif
     call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.ios/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 manifest status broadcast failed';return;endif
+    if(ios/=0)then
       message='distributed-v4 manifest missing, corrupt, or MPI rank mapping changed';return
     endif
     call MPI_Bcast(global_count,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 global-count broadcast failed';return;endif
     call MPI_Bcast(global_grid_count,1,MPI_INTEGER,0,comm,ierr)
-    call MPI_Bcast(nocc,1,MPI_INTEGER,0,comm,ierr);call MPI_Bcast(certified_rank,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 grid-count broadcast failed';return;endif
+    call MPI_Bcast(nocc,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 occupation-count broadcast failed';return;endif
+    call MPI_Bcast(certified_rank,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 certified-rank broadcast failed';return;endif
     call MPI_Bcast(transaction_id,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 transaction broadcast failed';return;endif
     call MPI_Bcast(basis_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 basis fingerprint broadcast failed';return;endif
     call MPI_Bcast(operator_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 operator fingerprint broadcast failed';return;endif
     call MPI_Bcast(operator_structure_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 structure fingerprint broadcast failed';return;endif
     call MPI_Bcast(scope_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 scope fingerprint broadcast failed';return;endif
     call MPI_Bcast(payload_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 payload fingerprint broadcast failed';return;endif
+    call MPI_Bcast(system_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 system fingerprint broadcast failed';return;endif
+    call MPI_Bcast(pseudopotential_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 pseudopotential fingerprint broadcast failed';return;endif
     call MPI_Bcast(shard_sizes,nproc,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-size broadcast failed';return;endif
     call MPI_Bcast(shard_digests,nproc,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-digest broadcast failed';return;endif
     call MPI_Bcast(fragment_ids,nproc,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 fragment-map broadcast failed';return;endif
     call shard_name(prefix,transaction_id,rank,shard);ios=0;unit=-1;failure_kind=0
     open(newunit=unit,file=trim(shard),status='old',access='stream',form='unformatted',&
       action='read',iostat=ios,iomsg=iomsg)
     if(ios==0)then
       inquire(unit=unit,size=actual_size)
-      if(actual_size<164_int64)then;ios=1;failure_kind=1;endif
+      if(actual_size<180_int64)then;ios=1;failure_kind=1;endif
       if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,version,shard_rank,shard_nproc,fragment_id,shard_global_count,&
         shard_global_grid_count,shard_nocc,shard_certified_rank,shard_transaction_id,shard_basis_fingerprint,&
         shard_operator_fingerprint,shard_operator_structure_fingerprint,shard_scope_fingerprint,&
-        shard_payload_fingerprint,stored_digest,nrow,&
+        shard_payload_fingerprint,shard_system_fingerprint,shard_pseudopotential_fingerprint,stored_digest,nrow,&
         nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,nsupport,ncoeff1,ncoeff2,nscope,nxc
     endif
     if(ios/=0.and.failure_kind==0)failure_kind=1
@@ -195,7 +242,9 @@ contains
         shard_certified_rank/=certified_rank.or.shard_transaction_id/=transaction_id.or.&
         shard_basis_fingerprint/=basis_fingerprint.or.shard_operator_fingerprint/=operator_fingerprint.or.&
         shard_operator_structure_fingerprint/=operator_structure_fingerprint.or.&
-        shard_scope_fingerprint/=scope_fingerprint.or.shard_payload_fingerprint/=payload_fingerprint)then
+        shard_scope_fingerprint/=scope_fingerprint.or.shard_payload_fingerprint/=payload_fingerprint.or.&
+        shard_system_fingerprint/=system_fingerprint.or.&
+        shard_pseudopotential_fingerprint/=pseudopotential_fingerprint)then
         ios=1;failure_kind=2
       endif
     endif
@@ -230,13 +279,16 @@ contains
     payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
     payload%operator_structure_fingerprint=operator_structure_fingerprint
     payload%scope_fingerprint=scope_fingerprint;payload%payload_fingerprint=payload_fingerprint
+    payload%system_fingerprint=system_fingerprint
+    payload%pseudopotential_fingerprint=pseudopotential_fingerprint
     if(ios==0)then
       actual_digest=digest_payload(payload,rank,nproc,transaction_id)
       if(actual_digest/=stored_digest)ios=1
     endif
     if(ios/=0.and.failure_kind==0)failure_kind=4
     call MPI_Allreduce(failure_kind,global_failure_kind,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_failure_kind/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard failure reduction failed';return;endif
+    if(global_failure_kind/=0)then
       select case(global_failure_kind)
       case(1);message='distributed-v4 rank shard is truncated or has an invalid fixed header'
       case(2);message='distributed-v4 rank shard disagrees with manifest common metadata'
@@ -247,7 +299,8 @@ contains
     endif
     local_bad=validate_local(payload,rank)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard validation reduction failed';return;endif
+    if(global_bad/=0)then
       message='invalid distributed-v4 rank shard payload';return
     endif
     call validate_common(comm,payload,local_bad)
@@ -295,7 +348,7 @@ contains
     if(npoint<0_int64)return
     call checked_product(int(ncoeff1,int64),int(ncoeff2,int64),ncoefficient,ok)
     if(.not.ok)return
-    extent=32_int64*character_bytes+19_int64*integer_bytes+7_int64*int64_bytes
+    extent=32_int64*character_bytes+19_int64*integer_bytes+9_int64*int64_bytes
     ok=.true.
     call add_extent(extent,int(nrow,int64),int64_bytes,ok)
     call add_extent(extent,int(nmetric_offsets,int64),integer_bytes,ok)
@@ -364,7 +417,8 @@ contains
     integer,intent(in)::rank
     bad=0
     if(payload%global_count<1.or.payload%global_grid_count<1.or.payload%nocc<1.or.&
-      payload%certified_rank<1.or.payload%certified_rank>payload%global_count.or.payload%fragment_id/=rank+1)bad=1
+      payload%certified_rank<1.or.payload%certified_rank>payload%global_count.or.payload%fragment_id/=rank+1.or.&
+      payload%system_fingerprint==0_int64.or.payload%pseudopotential_fingerprint==0_int64)bad=1
     if(.not.allocated(payload%row_ids).or..not.allocated(payload%metric_offsets).or.&
        .not.allocated(payload%metric_columns).or..not.allocated(payload%metric_values).or.&
        .not.allocated(payload%operator_offsets).or..not.allocated(payload%operator_columns).or.&
@@ -418,27 +472,57 @@ contains
     bad=0
     call MPI_Allreduce(payload%global_count,imin,1,MPI_INTEGER,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
-    call MPI_Allreduce(payload%global_count,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.imin/=imax)bad=1
+    call MPI_Allreduce(payload%global_count,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    if(imin/=imax)bad=1
+    if(bad/=0)return
     call MPI_Allreduce(payload%global_grid_count,imin,1,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(payload%global_grid_count,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.imin/=imax)bad=1
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    call MPI_Allreduce(payload%global_grid_count,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    if(imin/=imax)bad=1
+    if(bad/=0)return
     call MPI_Allreduce(payload%nocc,imin,1,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(payload%nocc,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.imin/=imax)bad=1
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    call MPI_Allreduce(payload%nocc,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    if(imin/=imax)bad=1
+    if(bad/=0)return
     call MPI_Allreduce(payload%certified_rank,imin,1,MPI_INTEGER,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(payload%certified_rank,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.imin/=imax)bad=1
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    call MPI_Allreduce(payload%certified_rank,imax,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    if(imin/=imax)bad=1
+    if(bad/=0)return
     call MPI_Allreduce(payload%basis_fingerprint,lmin,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(payload%basis_fingerprint,lmax,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.lmin/=lmax)bad=1
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    call MPI_Allreduce(payload%basis_fingerprint,lmax,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    if(lmin/=lmax)bad=1
+    if(bad/=0)return
     call MPI_Allreduce(payload%operator_fingerprint,lmin,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
-    call MPI_Allreduce(payload%operator_fingerprint,lmax,1,MPI_INTEGER8,MPI_MAX,comm,ierr);if(ierr/=MPI_SUCCESS.or.lmin/=lmax)bad=1
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    call MPI_Allreduce(payload%operator_fingerprint,lmax,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+    if(lmin/=lmax)bad=1
+    if(bad/=0)return
     call agree_int64(payload%operator_structure_fingerprint)
+    if(bad/=0)return
     call agree_int64(payload%scope_fingerprint)
+    if(bad/=0)return
     call agree_int64(payload%payload_fingerprint)
+    if(bad/=0)return
+    call agree_int64(payload%system_fingerprint)
+    if(bad/=0)return
+    call agree_int64(payload%pseudopotential_fingerprint)
   contains
     subroutine agree_int64(value)
       integer(int64),intent(in)::value
       call MPI_Allreduce(value,lmin,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
       if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
       call MPI_Allreduce(value,lmax,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
-      if(ierr/=MPI_SUCCESS.or.lmin/=lmax)bad=1
+      if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
+      if(lmin/=lmax)bad=1
     end subroutine agree_int64
   end subroutine validate_common
 #endif
@@ -457,6 +541,8 @@ contains
     call mix(hash,payload%operator_fingerprint)
     call mix(hash,payload%operator_structure_fingerprint);call mix(hash,payload%scope_fingerprint)
     call mix(hash,payload%payload_fingerprint)
+    call mix(hash,payload%system_fingerprint)
+    call mix(hash,payload%pseudopotential_fingerprint)
     do i=1,size(payload%row_ids);call mix(hash,payload%row_ids(i));enddo
     do i=1,size(payload%metric_offsets);call mix(hash,int(payload%metric_offsets(i),int64));enddo
     do i=1,size(payload%metric_columns);call mix(hash,int(payload%metric_columns(i),int64));enddo
@@ -492,7 +578,10 @@ contains
   subroutine mix(hash,value)
     integer(int64),intent(inout)::hash
     integer(int64),intent(in)::value
-    hash=ieor(hash,value);hash=hash*1099511628211_int64
+    integer::byte
+    do byte=0,7
+      hash=ieor(ishftc(hash,7),int(ibits(value,8*byte,8),int64))
+    enddo
   end subroutine mix
 
   subroutine shard_name(prefix,transaction_id,rank,name)

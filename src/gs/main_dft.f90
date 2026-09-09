@@ -190,10 +190,11 @@ use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
 use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard
 use rt_dg_hybrid_initialization,only:fingerprint_rt_dg_hybrid_scope,&
   fingerprint_rt_dg_hybrid_sparse_structure
+use rt_dg_hybrid_system_identity,only:fingerprint_rt_dg_hybrid_system
 use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
 use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_point_csr_edges
 use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
-  exchange_rt_dg_sparse_matrix
+  apply_rt_dg_sparse_rows_tiled
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_coefficients
 #ifdef USE_EIGENEXA
 use dg_overlapping_wannier_solver, only: solve_dg_overlapping_wannier_generalized_eigenexa
@@ -1989,11 +1990,12 @@ contains
     type(s_rt_dg_hybrid_v4_shard)::payload
     integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
     complex(8),allocatable::empty_position(:,:,:),orbital_values(:)
-    complex(8),allocatable::energy_edge_coefficients(:,:)
+    complex(8),allocatable::energy_action(:,:),energy_component_values(:)
     real(8),allocatable::density(:),coordinates(:,:),coordinate_component(:)
     integer::n,nocc,nrow,npoint,rank,nproc,ierr,i,j,p,a,edge,nnz_basis,slot,requested_rank,certified_rank,&
       global_projector_count,energy_state,energy_gx,energy_gy,energy_gz,energy_ix,energy_iy,energy_iz,&
       energy_payload_count
+    integer,allocatable::energy_column_slots(:)
     integer(8)::structure_fingerprint
     integer(8)::energy_workspace_peak
     real(8)::electron_count,window,cutoff,cluster_tolerance,local_energy_parts(3),global_energy_parts(3)
@@ -2137,25 +2139,30 @@ contains
     call build_rt_dg_sparse_exchange(dc%icomm_tot,n,structure_fingerprint,row_ids,&
       operator_columns,energy_exchange,local_ok,local_message)
     if(.not.local_ok)then;message='terminal divided v4 energy halo construction failed: '//trim(local_message);return;endif
-    allocate(energy_edge_coefficients(size(operator_columns),nocc))
-    call exchange_rt_dg_sparse_matrix(dc%icomm_tot,energy_exchange,occupied_state%coefficients,&
-      energy_edge_coefficients,energy_workspace_peak,energy_payload_count,energy_exchange_ok,energy_exchange_message)
+    allocate(energy_action(nrow,nocc),energy_component_values(size(operator_columns)),&
+      energy_column_slots(size(operator_columns)))
+    energy_column_slots=[(i,i=1,size(energy_column_slots))]
+    energy_component_values=payload%kinetic_values+payload%sipg_values
+    call apply_rt_dg_sparse_rows_tiled(dc%icomm_tot,energy_exchange,operator_offsets,&
+      energy_component_values,energy_column_slots,occupied_state%coefficients,energy_action,16,&
+      energy_workspace_peak,energy_payload_count,energy_exchange_ok,energy_exchange_message)
     if(.not.energy_exchange_ok)then
       message='terminal divided v4 energy coefficient exchange failed: '//trim(energy_exchange_message);return
     endif
     local_energy_parts=0d0
-    do i=1,nrow
-      do edge=operator_offsets(i),operator_offsets(i+1)-1
-        do energy_state=1,nocc
-          local_energy_parts(1)=local_energy_parts(1)+occupied_state%occupations(energy_state)*real(&
-            conjg(occupied_state%coefficients(i,energy_state))*&
-            (payload%kinetic_values(edge)+payload%sipg_values(edge))*&
-            energy_edge_coefficients(edge,energy_state),8)
-          local_energy_parts(2)=local_energy_parts(2)+occupied_state%occupations(energy_state)*real(&
-            conjg(occupied_state%coefficients(i,energy_state))*payload%nonlocal_values(edge)*&
-            energy_edge_coefficients(edge,energy_state),8)
-        enddo
-      enddo
+    do energy_state=1,nocc
+      local_energy_parts(1)=local_energy_parts(1)+occupied_state%occupations(energy_state)*real(sum(&
+        conjg(occupied_state%coefficients(:,energy_state))*energy_action(:,energy_state)),8)
+    enddo
+    call apply_rt_dg_sparse_rows_tiled(dc%icomm_tot,energy_exchange,operator_offsets,&
+      payload%nonlocal_values,energy_column_slots,occupied_state%coefficients,energy_action,16,&
+      energy_workspace_peak,energy_payload_count,energy_exchange_ok,energy_exchange_message)
+    if(.not.energy_exchange_ok)then
+      message='terminal divided v4 nonlocal energy action failed: '//trim(energy_exchange_message);return
+    endif
+    do energy_state=1,nocc
+      local_energy_parts(2)=local_energy_parts(2)+occupied_state%occupations(energy_state)*real(sum(&
+        conjg(occupied_state%coefficients(:,energy_state))*energy_action(:,energy_state)),8)
     enddo
     do p=1,npoint
       energy_gx=int(modulo(grid_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
@@ -2195,6 +2202,9 @@ contains
     payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
     payload%operator_structure_fingerprint=structure_fingerprint
     payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
+    payload%system_fingerprint=fingerprint_rt_dg_hybrid_system(dc%system_tot,dc%lg_tot%num,.true.,&
+      dc%ppg_tot%Nlma,canonical_pp_fingerprint(pp),xc_func%xctype,.false.,.false.,.false.,.false.,.false.)
+    payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)
     payload%payload_fingerprint=ieor(ieor(basis_fingerprint,operator_fingerprint),&
       ieor(dc_seed_fingerprint,ieor(face_fingerprint,continuation_fingerprint)))
     if(payload%payload_fingerprint==0_8)payload%payload_fingerprint=1_8

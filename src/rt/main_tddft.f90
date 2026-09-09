@@ -50,6 +50,8 @@ use rt_dg_overlapping_wannier, only: s_dg_overlapping_wannier_rt_state, &
   write_dg_overlapping_wannier_rt_observable_sample
 use em_field, only: calc_Ac_ext_t
 use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint
+use rt_dg_hybrid_system_identity,only:fingerprint_rt_dg_hybrid_system
+use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint
 use rt_dg_hybrid_density_update,only:update_rt_dg_hybrid_density,reconstruct_rt_dg_hybrid_density
 use rt_dg_hybrid_stationarity,only:s_rt_dg_hybrid_stationarity_reference,&
   s_rt_dg_hybrid_stationarity_receipt,initialize_rt_dg_hybrid_stationarity,&
@@ -57,7 +59,7 @@ use rt_dg_hybrid_stationarity,only:s_rt_dg_hybrid_stationarity_reference,&
 use dg_hybrid_total_energy,only:evaluate_dg_hybrid_fixed_energy
 use rt_dg_hybrid_length_gauge,only:propagate_rt_dg_hybrid_length_gauge
 use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
-  exchange_rt_dg_sparse_matrix
+  apply_rt_dg_sparse_rows_tiled
 use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_point_csr_edges
 use dg_overlapping_wannier_construction,only:redistribute_dg_row_owned_real_field_to_requests
 use hartree_sub,only:hartree
@@ -303,7 +305,10 @@ subroutine run_dg_hybrid_continuation_rt()
   character(256)::message
   call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
     iperiodic==3,system%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
-    xc_func%xctype,[dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,&
+    xc_func%xctype,fingerprint_rt_dg_hybrid_system(system,lg%num,iperiodic==3,ppg%Nlma,&
+    canonical_pp_fingerprint(pp),xc_func%xctype,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y'),&
+    canonical_pp_fingerprint(pp),&
+    [dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,&
     dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance],hybrid_state,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initialization failed';endif
   call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%certified_rank,hybrid_state%metric%fingerprint,&
@@ -472,33 +477,30 @@ subroutine run_dg_hybrid_continuation_rt()
 end subroutine run_dg_hybrid_continuation_rt
 
 function apply_hybrid_metric_to_coefficients() result(s_coefficients)
-    complex(8),allocatable::s_coefficients(:,:),edge_coefficients(:,:)
-    integer::i,edge,payload_count
+    complex(8),allocatable::s_coefficients(:,:)
+    integer,allocatable::column_slots(:)
+    integer::i,payload_count
     integer(8)::workspace_peak
     logical::exchange_ok
     character(256)::exchange_message
     allocate(s_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied),&
-      edge_coefficients(size(hybrid_state%metric%column_ids),hybrid_state%noccupied))
-    call exchange_rt_dg_sparse_matrix(nproc_group_global,metric_exchange,hybrid_state%coefficients,&
-      edge_coefficients,workspace_peak,payload_count,exchange_ok,exchange_message)
+      column_slots(size(hybrid_state%metric%column_ids)))
+    column_slots=[(i,i=1,size(column_slots))]
+    call apply_rt_dg_sparse_rows_tiled(nproc_group_global,metric_exchange,hybrid_state%metric%row_offsets,&
+      hybrid_state%metric%values,column_slots,hybrid_state%coefficients,s_coefficients,16,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
     if(.not.exchange_ok)error stop 'hybrid DG RT metric coefficient sparse exchange failed'
-    s_coefficients=(0d0,0d0)
-    do i=1,size(hybrid_state%owned_row_ids)
-      do edge=hybrid_state%metric%row_offsets(i),hybrid_state%metric%row_offsets(i+1)-1
-        s_coefficients(i,:)=s_coefficients(i,:)+hybrid_state%metric%values(edge)*edge_coefficients(edge,:)
-      enddo
-    enddo
 end function apply_hybrid_metric_to_coefficients
 
 subroutine evaluate_hybrid_rt_physical_invariants(total,electron_count,h_residual,evaluate_ok,evaluate_message)
     real(8),intent(out)::total,electron_count,h_residual
     logical,intent(out)::evaluate_ok
     character(*),intent(out)::evaluate_message
-    complex(8),allocatable::metric_edge_coefficients(:,:),operator_edge_coefficients(:,:),&
-      s_coefficients(:,:),h_coefficients(:,:)
+    complex(8),allocatable::s_coefficients(:,:),h_coefficients(:,:),component_coefficients(:,:),component_values(:)
     real(8)::kinetic_energy,nonlocal_energy,local_norms(2),global_norms(2),local_electron_count,&
       local_energy(2),global_energy(2)
-    integer::i,edge,state_index,ierr_local,payload_count
+    integer::i,state_index,ierr_local,payload_count
+    integer,allocatable::metric_slots(:),operator_slots(:)
     integer(8)::workspace_peak
     logical::exchange_ok
     character(256)::exchange_message
@@ -510,33 +512,35 @@ subroutine evaluate_hybrid_rt_physical_invariants(total,electron_count,h_residua
     endif
     allocate(s_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied),&
       h_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied),&
-      metric_edge_coefficients(size(hybrid_state%metric%column_ids),hybrid_state%noccupied),&
-      operator_edge_coefficients(size(hybrid_state%operators%column_ids),hybrid_state%noccupied))
-    call exchange_rt_dg_sparse_matrix(nproc_group_global,metric_exchange,hybrid_state%coefficients,&
-      metric_edge_coefficients,workspace_peak,payload_count,exchange_ok,exchange_message)
+      component_coefficients(size(hybrid_state%owned_row_ids),hybrid_state%noccupied),&
+      component_values(size(hybrid_state%operators%column_ids)),&
+      metric_slots(size(hybrid_state%metric%column_ids)),operator_slots(size(hybrid_state%operators%column_ids)))
+    metric_slots=[(i,i=1,size(metric_slots))];operator_slots=[(i,i=1,size(operator_slots))]
+    call apply_rt_dg_sparse_rows_tiled(nproc_group_global,metric_exchange,hybrid_state%metric%row_offsets,&
+      hybrid_state%metric%values,metric_slots,hybrid_state%coefficients,s_coefficients,16,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
     if(.not.exchange_ok)then;evaluate_ok=.false.;evaluate_message='hybrid metric sparse exchange failed';return;endif
-    call exchange_rt_dg_sparse_matrix(nproc_group_global,operator_exchange,hybrid_state%coefficients,&
-      operator_edge_coefficients,workspace_peak,payload_count,exchange_ok,exchange_message)
+    call apply_rt_dg_sparse_rows_tiled(nproc_group_global,operator_exchange,hybrid_state%operators%row_offsets,&
+      hybrid_state%operators%hamiltonian_values,operator_slots,hybrid_state%coefficients,h_coefficients,16,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
     if(.not.exchange_ok)then;evaluate_ok=.false.;evaluate_message='hybrid operator sparse exchange failed';return;endif
-    s_coefficients=(0d0,0d0);h_coefficients=(0d0,0d0)
     local_energy=0d0
-    do i=1,size(hybrid_state%owned_row_ids)
-      do edge=hybrid_state%metric%row_offsets(i),hybrid_state%metric%row_offsets(i+1)-1
-        s_coefficients(i,:)=s_coefficients(i,:)+hybrid_state%metric%values(edge)*metric_edge_coefficients(edge,:)
-      enddo
-      do edge=hybrid_state%operators%row_offsets(i),hybrid_state%operators%row_offsets(i+1)-1
-        h_coefficients(i,:)=h_coefficients(i,:)+&
-          hybrid_state%operators%hamiltonian_values(edge)*operator_edge_coefficients(edge,:)
-        do state_index=1,hybrid_state%noccupied
-          local_energy(1)=local_energy(1)+hybrid_state%occupations(state_index)*real(&
-            conjg(hybrid_state%coefficients(i,state_index))*&
-            (hybrid_state%kinetic_values(edge)+hybrid_state%sipg_values(edge))*&
-            operator_edge_coefficients(edge,state_index),8)
-          local_energy(2)=local_energy(2)+hybrid_state%occupations(state_index)*real(&
-            conjg(hybrid_state%coefficients(i,state_index))*hybrid_state%nonlocal_values(edge)*&
-            operator_edge_coefficients(edge,state_index),8)
-        enddo
-      enddo
+    component_values=hybrid_state%kinetic_values+hybrid_state%sipg_values
+    call apply_rt_dg_sparse_rows_tiled(nproc_group_global,operator_exchange,hybrid_state%operators%row_offsets,&
+      component_values,operator_slots,hybrid_state%coefficients,component_coefficients,16,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
+    if(.not.exchange_ok)then;evaluate_ok=.false.;evaluate_message='hybrid kinetic sparse action failed';return;endif
+    do state_index=1,hybrid_state%noccupied
+      local_energy(1)=local_energy(1)+hybrid_state%occupations(state_index)*real(sum(&
+        conjg(hybrid_state%coefficients(:,state_index))*component_coefficients(:,state_index)),8)
+    enddo
+    call apply_rt_dg_sparse_rows_tiled(nproc_group_global,operator_exchange,hybrid_state%operators%row_offsets,&
+      hybrid_state%nonlocal_values,operator_slots,hybrid_state%coefficients,component_coefficients,16,&
+      workspace_peak,payload_count,exchange_ok,exchange_message)
+    if(.not.exchange_ok)then;evaluate_ok=.false.;evaluate_message='hybrid nonlocal sparse action failed';return;endif
+    do state_index=1,hybrid_state%noccupied
+      local_energy(2)=local_energy(2)+hybrid_state%occupations(state_index)*real(sum(&
+        conjg(hybrid_state%coefficients(:,state_index))*component_coefficients(:,state_index)),8)
     enddo
     call MPI_Allreduce(local_energy,global_energy,2,MPI_DOUBLE_PRECISION,MPI_SUM,nproc_group_global,ierr_local)
     if(ierr_local/=MPI_SUCCESS)then;evaluate_ok=.false.;evaluate_message='hybrid sparse energy reduction failed';return;endif

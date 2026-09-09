@@ -23,7 +23,7 @@ for forbidden in (
   assert forbidden not in body, f"formal initializer retains dense-v3 route: {forbidden}"
 for token in (
   "payload%metric_offsets", "payload%operator_offsets", "payload%basis_point_offsets",
-  "state%coefficients", "exchange_rt_dg_sparse_matrix", "reconstruct_rt_dg_point_csr_density",
+  "state%coefficients", "apply_rt_dg_sparse_rows_tiled", "reconstruct_rt_dg_point_csr_density",
 ):
   assert token in body, f"distributed-v4 initializer omits {token}"
 
