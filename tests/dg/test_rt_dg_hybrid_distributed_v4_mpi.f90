@@ -96,7 +96,7 @@ contains
   end subroutine exercise_zero_owned_and_invalid_plan
   subroutine exercise_tiled_action
     integer,parameter::large_nrhs=257
-    integer::row,column,width,call_count
+    integer::row,column,width,call_count,duplicate_comm
     integer,allocatable::offsets(:),slots(:)
     complex(real64),allocatable::values(:),large_local(:,:),result7(:,:),result19(:,:)
     integer(int64)::peak
@@ -116,6 +116,12 @@ contains
     call apply_rt_dg_sparse_rows_tiled(comm,plan,offsets,values,slots,large_local,result7,7,&
       peak,call_count,action_ok,action_message)
     call require(action_ok,'7-column tiled action failed: '//trim(action_message))
+    call MPI_Comm_dup(comm,duplicate_comm,ierr)
+    call apply_rt_dg_sparse_rows_tiled(duplicate_comm,plan,offsets,values,slots,large_local,result19,7,&
+      peak,call_count,action_ok,action_message)
+    call require(action_ok.and.maxval(abs(result7-result19))<1d-12,&
+      'MPI_CONGRUENT duplicate communicator was rejected or changed the sparse action')
+    call MPI_Comm_free(duplicate_comm,ierr)
     call require(call_count==(large_nrhs+6)/7,'tiled sparse collective count depends on edge/rank count')
     call require(peak<=16_int64*7_int64*int(size(plan%send_positions)+size(plan%receive_values)+nlocal,int64)+&
       16_int64*int(nproc,int64),'tiled sparse workspace is not unique-row/local-row bounded')

@@ -197,31 +197,24 @@ def certify(
     handoff = handoff_matches[-1]
     try:
         rt_fingerprint = int(handoff["payload_fingerprint"])
-        operator_symmetry = float(handoff["operator_symmetry"])
-        projector_symmetry = float(handoff["projector_symmetry"])
+        handoff_lcfo_residual = float(handoff["lcfo_residual"])
+        handoff_metric_defect = float(handoff["metric_defect"])
+        handoff_projector_defect = float(handoff["projector_defect"])
+        occupied_rank = int(handoff["occupied_rank"])
         rt_extents = tuple(int(handoff[name]) for name in (
             "certified_rank", "state_rank", "metric_rank", "operator_rank",
             "basis_rank", "coefficient_rows",
         ))
-        rt_operation_count = int(handoff["operation_count"])
-        rt_nonidentity_count = int(handoff["nonidentity_count"])
     except (KeyError, ValueError) as error:
         raise ValueError("incomplete or invalid certified RT handoff receipt") from error
     if gs_fingerprint == 0 or rt_fingerprint != gs_fingerprint:
         raise ValueError("GS and RT payload identities differ")
-    if any(extent != certified_rank for extent in rt_extents):
-        raise ValueError("RT state or operator extent differs from the certified rank")
-    if (rt_operation_count <= 1
-            or rt_nonidentity_count != rt_operation_count - 1):
-        raise ValueError("Si64 RT payload lacks a nonidentity reciprocal symmetry action")
-    if worst_operation > rt_operation_count:
-        raise ValueError("LCFO worst-operation index exceeds the authenticated RT operation count")
-    if (not math.isfinite(operator_symmetry) or operator_symmetry < 0.0
-            or operator_symmetry > SYMMETRY_TOLERANCE):
-        raise ValueError("invalid zero-field full-operator symmetry diagnostic")
-    if (not math.isfinite(projector_symmetry) or projector_symmetry < 0.0
-            or projector_symmetry > SYMMETRY_TOLERANCE):
-        raise ValueError("invalid zero-field occupied-projector symmetry receipt")
+    if occupied_rank < 1 or rt_extents[0] < occupied_rank or rt_extents[0] != certified_rank or \
+            any(extent != construction_rank for extent in rt_extents[1:]):
+        raise ValueError("RT certification or construction-space extent is inconsistent")
+    if any(not math.isfinite(value) or value < 0.0 or value > FINAL_TOLERANCE for value in (
+            handoff_lcfo_residual, handoff_metric_defect, handoff_projector_defect)):
+        raise ValueError("invalid measured LCFO/metric/projector handoff invariant")
     stationarity_limits = (FINAL_TOLERANCE, FINAL_TOLERANCE, FINAL_TOLERANCE,
                            ELECTRON_TOLERANCE, FINAL_TOLERANCE)
     stationarity_values: list[tuple[float, ...]] = []
@@ -279,16 +272,16 @@ def certify(
         "target_energy_defect": physical_symmetry_defects[2],
         "density_defect": physical_symmetry_defects[3],
         "full_operator_defect": full_operator_defect,
-        "rt_operator_symmetry_defect": operator_symmetry,
-        "rt_projector_symmetry_defect": projector_symmetry,
+        "rt_lcfo_residual": handoff_lcfo_residual,
+        "rt_metric_defect": handoff_metric_defect,
+        "rt_projector_defect": handoff_projector_defect,
         "rt_certified_rank": rt_extents[0],
+        "rt_occupied_rank": occupied_rank,
         "rt_state_rank": rt_extents[1],
         "rt_metric_rank": rt_extents[2],
         "rt_operator_rank": rt_extents[3],
         "rt_basis_rank": rt_extents[4],
         "rt_coefficient_rows": rt_extents[5],
-        "rt_operation_count": rt_operation_count,
-        "rt_nonidentity_count": rt_nonidentity_count,
         "stationarity_steps": expected_steps,
         "density_drift": stationarity[0],
         "energy_drift": stationarity[1],
@@ -316,9 +309,9 @@ def parser_self_test() -> None:
         "density_defect=4e-12 full_operator_defect=2e-2 payload_fingerprint=314159\n"
     )
     complete_rt = (
-        "[HYBRID-RT-HANDOFF] payload_fingerprint=314159 operator_symmetry=2e-12 projector_symmetry=2e-12 "
-        "certified_rank=4 state_rank=4 metric_rank=4 operator_rank=4 basis_rank=4 coefficient_rows=4 "
-        "operation_count=3 nonidentity_count=2\n"
+        "[HYBRID-RT-HANDOFF] payload_fingerprint=314159 lcfo_residual=2e-12 metric_defect=2e-12 "
+        "projector_defect=2e-12 occupied_rank=2 certified_rank=4 state_rank=7 metric_rank=7 operator_rank=7 "
+        "basis_rank=7 coefficient_rows=7\n"
         "[HYBRID-RT-STATIONARITY] step=1 density=1e-12 energy=2e-12 projector=3e-12 "
         "electron=4e-12 h_residual=5e-12\n"
     )
@@ -337,19 +330,12 @@ def parser_self_test() -> None:
     assert evidence["embedding_fingerprint"] == 271828
     assert evidence["operator_covariance"] == 5.0e-12
     assert evidence["rt_certified_rank"] == evidence["certified_rank"]
-    assert evidence["rt_state_rank"] == evidence["certified_rank"]
-    assert evidence["rt_metric_rank"] == evidence["certified_rank"]
-    assert evidence["rt_operator_rank"] == evidence["certified_rank"]
-    assert evidence["rt_basis_rank"] == evidence["certified_rank"]
-    assert evidence["rt_coefficient_rows"] == evidence["certified_rank"]
-    assert evidence["rt_operation_count"] > 1
-    assert 0 < evidence["rt_nonidentity_count"] < evidence["rt_operation_count"]
-    try:
-        certify(complete_gs.replace("worst_operation=2", "worst_operation=999"), complete_rt)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("worst_operation=999 was accepted for operation_count=3")
+    assert evidence["rt_certified_rank"] >= evidence["rt_occupied_rank"]
+    assert evidence["rt_state_rank"] == evidence["construction_rank"]
+    assert evidence["rt_metric_rank"] == evidence["construction_rank"]
+    assert evidence["rt_operator_rank"] == evidence["construction_rank"]
+    assert evidence["rt_basis_rank"] == evidence["construction_rank"]
+    assert evidence["rt_coefficient_rows"] == evidence["construction_rank"]
     fixed_width_evidence = certify(
         complete_gs.replace("=", "=  "),
         complete_rt.replace("=", "=  "),
@@ -393,8 +379,8 @@ def parser_self_test() -> None:
         "construction_rank=7 certified_rank=3 rt_rank=3",
     ).replace("extended_target_rank=4", "extended_target_rank=3")
     between_levels_rt = complete_rt.replace(
-        "certified_rank=4 state_rank=4 metric_rank=4 operator_rank=4 basis_rank=4 coefficient_rows=4",
-        "certified_rank=3 state_rank=3 metric_rank=3 operator_rank=3 basis_rank=3 coefficient_rows=3",
+        "certified_rank=4 state_rank=7 metric_rank=7 operator_rank=7 basis_rank=7 coefficient_rows=7",
+        "certified_rank=3 state_rank=7 metric_rank=7 operator_rank=7 basis_rank=7 coefficient_rows=7",
     )
     between_levels = certify(between_levels_gs, between_levels_rt)
     assert between_levels["certified_cutoff"] < between_levels["requested_cutoff"]
@@ -486,26 +472,24 @@ def parser_self_test() -> None:
             continue
         raise AssertionError("incomplete legacy dynamic-rank evidence was accepted")
     invalid_rt_logs = [
-        complete_rt.replace("projector_symmetry=2e-12", "projector_symmetry=1e-2"),
-        complete_rt.replace("operator_symmetry=2e-12", "operator_symmetry=1e-2"),
-        complete_rt.replace("operator_symmetry=2e-12", "operator_symmetry=-1e-2"),
-        complete_rt.replace("operator_symmetry=2e-12", "operator_symmetry=nan"),
+        complete_rt.replace("projector_defect=2e-12", "projector_defect=1e-2"),
+        complete_rt.replace("lcfo_residual=2e-12", "lcfo_residual=1e-2"),
+        complete_rt.replace("metric_defect=2e-12", "metric_defect=-1e-2"),
+        complete_rt.replace("metric_defect=2e-12", "metric_defect=nan"),
         complete_rt.replace(" certified_rank=4", ""),
-        complete_rt.replace("state_rank=4", "state_rank=7"),
-        complete_rt.replace("metric_rank=4", "metric_rank=7"),
-        complete_rt.replace("operator_rank=4", "operator_rank=7"),
-        complete_rt.replace("basis_rank=4", "basis_rank=7"),
-        complete_rt.replace("coefficient_rows=4", "coefficient_rows=7"),
-        complete_rt.replace("operation_count=3", "operation_count=1"),
-        complete_rt.replace("nonidentity_count=2", "nonidentity_count=0"),
-        complete_rt.replace("nonidentity_count=2", "nonidentity_count=1"),
+        complete_rt.replace("occupied_rank=2", "occupied_rank=5"),
+        complete_rt.replace("state_rank=7", "state_rank=8"),
+        complete_rt.replace("metric_rank=7", "metric_rank=8"),
+        complete_rt.replace("operator_rank=7", "operator_rank=8"),
+        complete_rt.replace("basis_rank=7", "basis_rank=8"),
+        complete_rt.replace("coefficient_rows=7", "coefficient_rows=8"),
     ]
     for invalid in invalid_rt_logs:
         try:
             certify(complete_gs, invalid)
         except ValueError:
             continue
-        raise AssertionError("invalid RT symmetry evidence was accepted")
+        raise AssertionError("invalid measured RT handoff evidence was accepted")
 
 
 def production_rt_receipt_self_test() -> None:
@@ -514,28 +498,20 @@ def production_rt_receipt_self_test() -> None:
         state_source.index("type,public::s_rt_dg_hybrid_state"):
         state_source.index("end type s_rt_dg_hybrid_state")
     ]
-    for field in ("operation_count", "nonidentity_operation_count"):
-        assert field in state_type, f"RT state does not preserve {field} from the authenticated v3 payload"
-    state_builder = state_source[
-        state_source.index("subroutine build_certified_rt_state"):
-        state_source.index("end subroutine build_certified_rt_state")
-    ]
-    for assignment in (
-        "state%operation_count=payload%operation_count",
-        "state%nonidentity_operation_count=payload%nonidentity_operation_count",
-    ):
-        assert re.sub(r"\s+", "", assignment) in re.sub(r"\s+", "", state_builder), (
-            f"authenticated v3 payload field is not retained for the RT receipt: {assignment}"
-        )
+    for field in ("startup_orbital_residual", "startup_metric_defect", "startup_projector_defect"):
+        assert field in state_type, f"RT state does not retain measured {field}"
+    assert "build_certified_rt_state" not in state_source
 
     rt_source = (ROOT / "src/rt/main_tddft.f90").read_text().lower()
     marker = rt_source.index("[hybrid-rt-handoff]")
     receipt = rt_source[marker:marker + 1400]
     for field in (
         "certified_rank=", "state_rank=", "metric_rank=", "operator_rank=", "basis_rank=",
-        "coefficient_rows=", "operation_count=", "nonidentity_count=",
+        "coefficient_rows=", "occupied_rank=", "lcfo_residual=", "metric_defect=", "projector_defect=",
     ):
         assert field in receipt, f"production RT handoff receipt omits {field}"
+    for forbidden in ("operator_symmetry=", "operation_count=", "nonidentity_count="):
+        assert forbidden not in receipt, f"fabricated v4 symmetry evidence remains: {forbidden}"
 
 
 def certify_seed_receipt(log: str, ranks: int, skipped: bool) -> dict[str, int]:

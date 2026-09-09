@@ -11,9 +11,9 @@ endpoint_text=endpoint.read_text().lower()
 main_text=(root/"src/gs/main_dft.f90").read_text().lower()
 publisher=main_text.split("subroutine publish_dg_hybrid_divided_v4",1)[1].split(
   "end subroutine publish_dg_hybrid_divided_v4",1)[0]
-for token in ("salmon_hybrid_dg_manifest_v4","salmon_hybrid_dg_rank_shard_v4",
+for token in ("salmon_hybrid_dg_manifest_v5","salmon_hybrid_dg_rank_shard_v5",
               "initial_occupied_amplitudes","basis_point_offsets","metric_offsets",
-              "system_fingerprint","pseudopotential_fingerprint"):
+              "system_fingerprint","pseudopotential_fingerprint","pseudopotential_digest"):
   assert token in text,f"RED: v4 checkpoint is missing {token}"
 assert "full_coefficients" not in text and "full_metric" not in text
 reader=text.split("subroutine read_rt_dg_hybrid_checkpoint_v4",1)[1].split(
@@ -47,11 +47,9 @@ assert "manifest_size/=" in reader and "actual_size<" in reader,"RED: fixed head
 assert "certified_rank<nocc" in text,"RED: v4 checkpoint permits certification below occupied rank"
 for field in ("global_grid_count","certified_rank","operator_structure_fingerprint","scope_fingerprint","payload_fingerprint",
               "system_fingerprint","pseudopotential_fingerprint"):
-  assert f"shard_{field}/={field}" in reader,f"RED: shard {field} is not compared with the manifest"
-mix_body=text.split("subroutine mix(hash,value)",1)[1].split("end subroutine mix",1)[0]
-assert "1099511628211" not in mix_body,"RED: v4 digest relies on undefined signed integer overflow"
-assert "dg_sha256_mix_int64" in mix_body,"RED: v4 digest lacks portable SHA-256 mixing"
-assert "ieor(ishftc(hash,7)" not in mix_body,"RED: v4 digest retains exact rotate/XOR collision"
+  assert field in reader,f"RED: shard {field} is not compared with the manifest"
+assert "dg_sha256_final(hash,digest)" in text,"RED: checkpoint does not retain a full streaming SHA-256 digest"
+assert "shard_digests(4,nproc)" in text,"RED: manifest truncates shard SHA-256"
 assert endpoint_text.count("subroutine publish_rt_dg_hybrid_checkpoint_v4") == 2
 endpoint_body=endpoint_text.split("subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[1].split(
   "end subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[0]
@@ -114,6 +112,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
     run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],capture_output=True,text=True,env=env,timeout=60)
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
     assert f"PASS distributed-v4 shard manifest ranks={nrank}" in run.stdout
+    old_prefix=Path(f"/tmp/salmon-hybrid-old-v4-{nrank}")
+    Path(str(old_prefix)+".manifest").write_bytes(bytes(120+20*nrank))
+    old_reject=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(reject),str(old_prefix)],
+      capture_output=True,text=True,env=env,timeout=30)
+    assert old_reject.returncode==0,(nrank,old_reject.stdout,old_reject.stderr)
+    assert "unsupported distributed checkpoint schema v4" in old_reject.stdout.lower(),old_reject.stdout
+    Path(str(old_prefix)+".manifest").unlink()
     prefix=Path(f"/tmp/salmon-hybrid-v4-checkpoint-{nrank}")
     if nrank==1:
       shard=sorted(prefix.parent.glob(prefix.name+".v4.*.rank000000.shard"),key=lambda p:p.stat().st_mtime_ns)[-1]
@@ -128,13 +133,13 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
         ("large-consistent-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
         ("certified-below-occupied",bytearray(original),"disagrees with manifest common metadata"),
       ):
-        if label=="negative": struct.pack_into("=i",damaged,136,-1)
-        if label=="huge": struct.pack_into("=i",damaged,136,2**31-1)
-        if label=="operator-count": struct.pack_into("=i",damaged,152,struct.unpack_from("=i",damaged,152)[0]+1)
-        if label=="point-count": struct.pack_into("=i",damaged,156,struct.unpack_from("=i",damaged,156)[0]+1)
-        if label=="coefficient-product": struct.pack_into("=i",damaged,168,2**31-1)
+        if label=="negative": struct.pack_into("=i",damaged,216,-1)
+        if label=="huge": struct.pack_into("=i",damaged,216,2**31-1)
+        if label=="operator-count": struct.pack_into("=i",damaged,232,struct.unpack_from("=i",damaged,232)[0]+1)
+        if label=="point-count": struct.pack_into("=i",damaged,236,struct.unpack_from("=i",damaged,236)[0]+1)
+        if label=="coefficient-product": struct.pack_into("=i",damaged,248,2**31-1)
         if label=="large-consistent-product":
-          for offset,value in ((136,10**9),(140,10**9+1),(148,10**9+1),(164,10**9)):
+          for offset,value in ((216,10**9),(220,10**9+1),(228,10**9+1),(244,10**9)):
             struct.pack_into("=i",damaged,offset,value)
         if label=="certified-below-occupied":
           nocc=struct.unpack_from("=i",damaged,56)[0];struct.pack_into("=i",damaged,60,nocc-1)

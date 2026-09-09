@@ -46,7 +46,9 @@ for reduction in ("MPI_MIN", "MPI_MAX"):
         hybrid_body,
         re.IGNORECASE | re.DOTALL,
     ), f"Hybrid PP provenance lacks collective {reduction} agreement"
-assert "canonical_pp_valence_sum(pp)" in MAIN[hybrid_start:]
+publisher_body = extent(MAIN, "subroutine", "publish_dg_hybrid_divided_v4")
+assert "canonical_pp_valence_sum(pp)" in publisher_body
+assert "canonical_pp_digest(pp)" in publisher_body
 assert "pp%zion" not in MAIN.lower()
 
 print("PASS canonical PP provenance production route contract")

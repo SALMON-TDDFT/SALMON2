@@ -21,14 +21,14 @@ module rt_dg_hybrid_initialization
   type,public::s_rt_dg_hybrid_state
     logical::valid=.false.,initial_invariants_valid=.false.,density_freshly_reconstructed=.false.,&
       fixed_density_reference_valid=.false.
-    real(real64)::startup_operator_covariance=huge(1d0),startup_projector_covariance=huge(1d0),&
-      startup_orbital_residual=huge(1d0),startup_metric_defect=huge(1d0),reference_refresh_defect=0d0,&
+    real(real64)::startup_orbital_residual=huge(1d0),startup_metric_defect=huge(1d0),&
+      startup_projector_defect=huge(1d0),reference_refresh_defect=0d0,&
       reference_refresh_scale=1d0
-    integer::certified_rank=0,global_count=0,noccupied=0,operation_count=0,nonidentity_operation_count=0
+    integer::certified_rank=0,global_count=0,noccupied=0
     integer(int64)::payload_fingerprint=0_int64,operator_structure_fingerprint=0_int64,&
-      operator_value_fingerprint=0_int64,scope_fingerprint=0_int64,system_fingerprint=0_int64,&
-      pseudopotential_fingerprint=0_int64,&
+      operator_value_fingerprint=0_int64,scope_fingerprint=0_int64,pseudopotential_fingerprint=0_int64,&
       density_workspace_peak_bytes=0_int64
+    integer(int64)::system_fingerprint(4)=0_int64,pseudopotential_digest(4)=0_int64
     integer::density_payload_collective_count=0
     type(s_dg_hybrid_sparse_metric)::metric
     type(s_dg_hybrid_sparse_operators)::operators
@@ -43,12 +43,14 @@ module rt_dg_hybrid_initialization
     fingerprint_rt_dg_hybrid_sparse_structure
 contains
   subroutine initialize_rt_dg_hybrid_from_checkpoint(comm,path,theory,periodic,nspin,spinorbit,plus_u,hse,&
-      fix_func,jm,xctype,current_system_fingerprint,current_pseudopotential_fingerprint,tolerances,state,ok,message)
+      fix_func,jm,xctype,current_system_fingerprint,current_pseudopotential_fingerprint,&
+      current_pseudopotential_digest,tolerances,state,ok,message)
     integer,intent(in)::comm,nspin,xctype(:)
     character(*),intent(in)::path,theory
     logical,intent(in)::periodic,spinorbit,plus_u,hse,fix_func,jm
     real(real64),intent(in)::tolerances(4)
-    integer(int64),intent(in)::current_system_fingerprint,current_pseudopotential_fingerprint
+    integer(int64),intent(in)::current_system_fingerprint(4),current_pseudopotential_digest(4)
+    integer(int64),intent(in)::current_pseudopotential_fingerprint
     type(s_rt_dg_hybrid_state),intent(out)::state
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -85,9 +87,11 @@ contains
       message='dense Hybrid v3 checkpoint is unsupported; regenerate distributed-native v4';return
     endif
     call read_rt_dg_hybrid_checkpoint_v4(comm,path,payload,ok,message);if(.not.ok)return
-    local_bad=merge(0,1,current_system_fingerprint/=0_int64.and.&
-      current_system_fingerprint==payload%system_fingerprint.and.current_pseudopotential_fingerprint/=0_int64.and.&
-      current_pseudopotential_fingerprint==payload%pseudopotential_fingerprint)
+    local_bad=merge(0,1,.not.all(current_system_fingerprint==0_int64).and.&
+      all(current_system_fingerprint==payload%system_fingerprint).and.current_pseudopotential_fingerprint/=0_int64.and.&
+      current_pseudopotential_fingerprint==payload%pseudopotential_fingerprint.and.&
+      .not.all(current_pseudopotential_digest==0_int64).and.&
+      all(current_pseudopotential_digest==payload%pseudopotential_digest))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;ok=.false.;message='system identity reduction failed';return;endif
     if(global_bad/=0)then
@@ -102,12 +106,13 @@ contains
     if(global_bad/=0)then;ok=.false.;message='checkpoint/local hybrid RT scope mismatch';return;endif
 
     state%global_count=payload%global_count;state%certified_rank=payload%certified_rank
-    state%noccupied=payload%nocc;state%operation_count=1;state%nonidentity_operation_count=0
+    state%noccupied=payload%nocc
     state%payload_fingerprint=payload%payload_fingerprint
     state%operator_structure_fingerprint=payload%operator_structure_fingerprint
     state%operator_value_fingerprint=payload%operator_fingerprint;state%scope_fingerprint=payload%scope_fingerprint
     state%system_fingerprint=payload%system_fingerprint
     state%pseudopotential_fingerprint=payload%pseudopotential_fingerprint
+    state%pseudopotential_digest=payload%pseudopotential_digest
     allocate(state%owned_row_ids,source=payload%row_ids);allocate(state%coefficients,source=payload%initial_occupied_amplitudes)
     allocate(state%occupations,source=payload%occupations);allocate(state%eigenvalues,source=payload%eigenvalues)
     allocate(state%grid_ids,source=payload%grid_ids);allocate(state%grid_weights,source=payload%grid_weights)
@@ -215,7 +220,7 @@ contains
       ok=.false.;message='distributed-v4 checkpoint density reconstruction failed';return
     endif
     state%density_workspace_peak_bytes=workspace_peak;state%density_payload_collective_count=payload_count
-    state%startup_operator_covariance=0d0;state%startup_projector_covariance=payload%acceptance_receipts(3)
+    state%startup_projector_defect=payload%acceptance_receipts(3)
     state%initial_invariants_valid=.true.;state%valid=.true.;ok=.true.;message=''
 #else
     ok=.false.;message='hybrid RT initialization requires MPI'

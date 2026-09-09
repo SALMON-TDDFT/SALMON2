@@ -3,11 +3,12 @@ program test_dg_canonical_pp_fingerprint_mpi
   use iso_fortran_env,only:int64
   use mpi
   use structures,only:s_pp_info
-  use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint,canonical_pp_valence_sum
+  use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint,canonical_pp_digest,canonical_pp_valence_sum
   implicit none
   type(s_pp_info)::reference,candidate
   integer::ierr,rank,nproc
-  integer(int64)::reference_fingerprint,candidate_fingerprint,minimum_fingerprint,maximum_fingerprint
+  integer(int64)::reference_fingerprint,candidate_fingerprint,minimum_fingerprint,maximum_fingerprint,bits
+  integer(int64)::reference_digest(4)
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
@@ -15,7 +16,18 @@ program test_dg_canonical_pp_fingerprint_mpi
 
   call populate_pp(reference)
   reference_fingerprint=canonical_pp_fingerprint(reference)
+  if(rank==0)write(*,'(a,i0)')'canonical_pp_schema1_golden=',reference_fingerprint
   call require(reference_fingerprint/=0_int64,'valid pseudopotential has a zero fingerprint')
+  call require(reference_fingerprint==4679367759349510615_int64,&
+    'canonical PP schema-1 golden fingerprint changed')
+  reference_digest=canonical_pp_digest(reference)
+  call require(.not.all(reference_digest==0_int64),'valid PP has zero authoritative digest')
+  candidate=reference;bits=transfer(candidate%vloctbl(2,1),bits)
+  candidate%vloctbl(2,1)=transfer(ieor(bits,int(z'8001',int64)),candidate%vloctbl(2,1))
+  call require(canonical_pp_fingerprint(candidate)==reference_fingerprint,&
+    'schema-1 compatibility collision changed unexpectedly')
+  call require(any(canonical_pp_digest(candidate)/=reference_digest),&
+    'authoritative PP SHA-256 preserved schema-1 two-bit collision')
 
   ! zion is root-only scratch for several readers; the per-species zps array is authoritative.
   candidate=reference

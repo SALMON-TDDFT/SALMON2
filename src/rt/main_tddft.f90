@@ -51,7 +51,7 @@ use rt_dg_overlapping_wannier, only: s_dg_overlapping_wannier_rt_state, &
 use em_field, only: calc_Ac_ext_t
 use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint
 use rt_dg_hybrid_system_identity,only:fingerprint_rt_dg_hybrid_system
-use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint
+use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint,canonical_pp_digest
 use rt_dg_hybrid_density_update,only:update_rt_dg_hybrid_density,reconstruct_rt_dg_hybrid_density
 use rt_dg_hybrid_stationarity,only:s_rt_dg_hybrid_stationarity_reference,&
   s_rt_dg_hybrid_stationarity_receipt,initialize_rt_dg_hybrid_stationarity,&
@@ -306,8 +306,8 @@ subroutine run_dg_hybrid_continuation_rt()
   call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
     iperiodic==3,system%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
     xc_func%xctype,fingerprint_rt_dg_hybrid_system(system,lg%num,iperiodic==3,ppg%Nlma,&
-    canonical_pp_fingerprint(pp),xc_func%xctype,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y'),&
-    canonical_pp_fingerprint(pp),&
+    canonical_pp_digest(pp),xc_func%xctype,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y'),&
+    canonical_pp_fingerprint(pp),canonical_pp_digest(pp),&
     [dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,&
     dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance],hybrid_state,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initialization failed';endif
@@ -394,14 +394,14 @@ subroutine run_dg_hybrid_continuation_rt()
   call MPI_Allreduce(coefficient_rows_local,coefficient_rows_global,1,MPI_INTEGER,MPI_SUM,&
     nproc_group_global,ierr)
   if(ierr/=MPI_SUCCESS)error stop 'hybrid DG RT coefficient-extent reduction failed'
-  if(nproc_id_global==0)write(*,'(a,i0,2(a,es16.8),8(a,i0))')'[HYBRID-RT-HANDOFF] payload_fingerprint=',&
-    hybrid_state%payload_fingerprint,' operator_symmetry=',hybrid_state%startup_operator_covariance,&
-    ' projector_symmetry=',hybrid_state%startup_projector_covariance,&
-    ' certified_rank=',hybrid_state%certified_rank,' state_rank=',hybrid_state%global_count,&
+  if(nproc_id_global==0)write(*,'(a,i0,3(a,es16.8),7(a,i0))')'[HYBRID-RT-HANDOFF] payload_fingerprint=',&
+    hybrid_state%payload_fingerprint,' lcfo_residual=',hybrid_state%startup_orbital_residual,&
+    ' metric_defect=',hybrid_state%startup_metric_defect,&
+    ' projector_defect=',hybrid_state%startup_projector_defect,&
+    ' occupied_rank=',hybrid_state%noccupied,' certified_rank=',hybrid_state%certified_rank,&
+    ' state_rank=',hybrid_state%global_count,&
     ' metric_rank=',hybrid_state%metric%global_count,' operator_rank=',hybrid_state%operators%global_count,&
-    ' basis_rank=',hybrid_state%global_count,' coefficient_rows=',coefficient_rows_global,&
-    ' operation_count=',hybrid_state%operation_count,&
-    ' nonidentity_count=',hybrid_state%nonidentity_operation_count
+    ' basis_rank=',hybrid_state%global_count,' coefficient_rows=',coefficient_rows_global
   has_energy_reference=.true.
   if(has_energy_reference)then
     if(nproc_id_global==0)write(*,'(a,3(a,es16.8))')'[HYBRID-RT-ENERGY-IDENTITY]',&

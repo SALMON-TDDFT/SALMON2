@@ -9,7 +9,8 @@ program test_rt_dg_hybrid_v3_rejection_mpi
   character(512)::message
   call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,nproc,ierr)
   call initialize_rt_dg_hybrid_from_checkpoint(MPI_COMM_WORLD,'absent-dense-v3.chk','tddft_response',&
-    .true.,1,.false.,.false.,.false.,.false.,.false.,[1],1_int64,1_int64,&
+    .true.,1,.false.,.false.,.false.,.false.,.false.,[1],[1_int64,2_int64,3_int64,4_int64],1_int64,&
+    [5_int64,6_int64,7_int64,8_int64],&
     [1d-8,1d-8,1d-8,1d-8],state,ok,message)
   if(ok.or.index(message,'dense Hybrid v3 checkpoint is unsupported')==0)then
     write(*,'(a)')trim(message);call MPI_Abort(MPI_COMM_WORLD,1,ierr)

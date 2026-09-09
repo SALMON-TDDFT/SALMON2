@@ -262,7 +262,7 @@ contains
     logical::valid
     candidate=receipt
     valid=receipt%valid.and.receipt%phase==6.and.receipt%certified_basis_ready.and.payload_ready.and.&
-      checkpoint_version==4.and.payload_rt_rank==receipt%construction_rank.and.&
+      checkpoint_version==5.and.payload_rt_rank==receipt%construction_rank.and.&
       payload_rt_rank==receipt%rt_basis_rank
     if(valid)then
       candidate%publication_authorized=.true.;candidate%checkpoint_version=checkpoint_version

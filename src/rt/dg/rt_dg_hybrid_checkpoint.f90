@@ -108,7 +108,7 @@ contains
     character(512)::detail
 
     call collective_rt_dg_hybrid_publication_precondition(comm,authorization%valid.and.&
-      authorization%checkpoint_version==4.and.authorization%published_rank==global_count.and.&
+      authorization%checkpoint_version==5.and.authorization%published_rank==global_count.and.&
       authorization%basis_fingerprint==payload%basis_fingerprint.and.&
       authorization%operator_fingerprint==payload%operator_fingerprint,global_count,noccupied,ok,detail)
     if(.not.ok)then;message='distributed-v4 endpoint authorization failed: '//trim(detail);return;endif

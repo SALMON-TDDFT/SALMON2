@@ -473,12 +473,16 @@ contains
     type(s_rt_dg_sparse_exchange),intent(in)::plan
     logical,intent(out)::ok
     character(*),intent(out)::message
-    integer::nproc,ierr,local_bad,global_bad,minimum_value,maximum_value
+    integer::nproc,ierr,local_bad,global_bad,minimum_value,maximum_value,comm_relation
     integer(int64)::minimum_fingerprint,maximum_fingerprint
     ok=.false.;message='';local_bad=0
     call MPI_Comm_size(comm,nproc,ierr)
     if(ierr/=MPI_SUCCESS)then;message='tiled sparse plan communicator query failed';return;endif
-    if(.not.plan%valid.or.plan%comm/=comm.or.plan%nproc/=nproc.or.plan%local_count/=nlocal.or.&
+    comm_relation=MPI_UNEQUAL
+    if(plan%valid)call MPI_Comm_compare(plan%comm,comm,comm_relation,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse plan communicator comparison failed';return;endif
+    if(.not.plan%valid.or.(comm_relation/=MPI_IDENT.and.comm_relation/=MPI_CONGRUENT).or.&
+      plan%nproc/=nproc.or.plan%local_count/=nlocal.or.&
       nlocal<0.or.nrhs<1.or.tile_width<1.or.plan%catalog_fingerprint==0_int64)local_bad=1
     if(.not.allocated(plan%send_counts).or..not.allocated(plan%send_displacements).or.&
       .not.allocated(plan%receive_counts).or..not.allocated(plan%receive_displacements).or.&

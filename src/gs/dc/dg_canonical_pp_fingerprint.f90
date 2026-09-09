@@ -4,12 +4,13 @@ module dg_canonical_pp_fingerprint
   ! workspaces and inactive padding are deliberately outside this schema.
   use iso_fortran_env,only:int64
   use structures,only:s_pp_info
-  use dg_portable_sha256,only:dg_sha256_mix_int64,dg_sha256_mix_integer,&
-    dg_sha256_mix_real64,dg_sha256_mix_logical,dg_sha256_mix_character
+  use dg_portable_sha256,only:s_dg_sha256_context,dg_sha256_schema,dg_sha256_init,&
+    dg_sha256_update_int64,dg_sha256_update_integer,dg_sha256_update_real64,&
+    dg_sha256_update_logical,dg_sha256_update_character,dg_sha256_final
   implicit none
   private
-  integer(int64),parameter::canonical_pp_schema=2_int64
-  public::canonical_pp_fingerprint,canonical_pp_valence_sum
+  integer(int64),parameter::canonical_pp_schema=1_int64
+  public::canonical_pp_fingerprint,canonical_pp_digest,canonical_pp_valence_sum
 contains
   pure integer(int64) function canonical_pp_fingerprint(pp) result(fingerprint)
     type(s_pp_info),intent(in)::pp
@@ -78,6 +79,61 @@ contains
     enddo
     if(fingerprint==0_int64)fingerprint=1_int64
   end function canonical_pp_fingerprint
+
+  pure function canonical_pp_digest(pp) result(digest)
+    type(s_pp_info),intent(in)::pp
+    integer(int64)::digest(4)
+    type(s_dg_sha256_context)::hash
+    integer::element,radial,channel,angular,nprojector,radial_extent,nlcc_end
+    digest=0_int64;if(.not.valid_canonical_pp(pp))return
+    call dg_sha256_init(hash);call dg_sha256_update_character(hash,'SALMON-DG-CANONICAL-PP-AUTH')
+    call dg_sha256_update_int64(hash,dg_sha256_schema)
+    call dg_sha256_update_integer(hash,size(pp%zps));call dg_sha256_update_integer(hash,pp%lmax)
+    call dg_sha256_update_integer(hash,pp%nrmax);call dg_sha256_update_logical(hash,pp%flag_nlcc)
+    do element=1,size(pp%zps)
+      call dg_sha256_update_character(hash,pp%atom_symbol(element))
+      call dg_sha256_update_integer(hash,pp%zps(element));call dg_sha256_update_integer(hash,pp%mr(element))
+      call dg_sha256_update_integer(hash,pp%lref(element));call dg_sha256_update_integer(hash,pp%mlps(element))
+      call dg_sha256_update_integer(hash,pp%nrps(element));call dg_sha256_update_integer(hash,pp%nrloc(element))
+      call dg_sha256_update_real64(hash,pp%rps(element));call dg_sha256_update_real64(hash,pp%rloc(element))
+      do angular=0,pp%mlps(element);call dg_sha256_update_integer(hash,pp%nproj(angular,element));enddo
+      nprojector=sum(pp%nproj(0:pp%mlps(element),element))
+      do channel=0,nprojector-1
+        call dg_sha256_update_real64(hash,pp%anorm(channel,element))
+        call dg_sha256_update_integer(hash,pp%inorm(channel,element))
+        call dg_sha256_update_integer(hash,pp%inorm_so(channel,element))
+        if(pp%inorm_so(channel,element)/=0)call dg_sha256_update_real64(hash,pp%anorm_so(channel,element))
+      enddo
+      nlcc_end=0;if(pp%flag_nlcc)nlcc_end=nlcc_meaning_end(pp,element)
+      radial_extent=max(pp%mr(element)+1,pp%nrloc(element),pp%nrps(element),pp%nrps_ao(element),nlcc_end)
+      do radial=1,radial_extent;call dg_sha256_update_real64(hash,pp%rad(radial,element));enddo
+      do radial=1,pp%nrloc(element)
+        call dg_sha256_update_real64(hash,pp%vloctbl(radial,element))
+        call dg_sha256_update_real64(hash,pp%dvloctbl(radial,element))
+      enddo
+      do radial=1,pp%nrps(element)
+        call dg_sha256_update_real64(hash,pp%radnl(radial,element))
+        do channel=0,nprojector-1
+          call dg_sha256_update_real64(hash,pp%udvtbl(radial,channel,element))
+          call dg_sha256_update_real64(hash,pp%dudvtbl(radial,channel,element))
+          if(pp%inorm_so(channel,element)/=0)then
+            call dg_sha256_update_real64(hash,pp%udvtbl_so(radial,channel,element))
+            call dg_sha256_update_real64(hash,pp%dudvtbl_so(radial,channel,element))
+          endif
+        enddo
+      enddo
+      call dg_sha256_update_integer(hash,pp%nrps_ao(element));call dg_sha256_update_real64(hash,pp%rps_ao(element))
+      do radial=1,pp%nrps_ao(element);do channel=0,nprojector-1
+        call dg_sha256_update_real64(hash,pp%upptbl_ao(radial,channel,element))
+      enddo;enddo
+      do radial=1,pp%mr(element);call dg_sha256_update_real64(hash,pp%rho_pp_tbl(radial,element));enddo
+      if(pp%flag_nlcc)then;do radial=1,nlcc_end
+        call dg_sha256_update_real64(hash,pp%rho_nlcc_tbl(radial,element))
+        call dg_sha256_update_real64(hash,pp%tau_nlcc_tbl(radial,element))
+      enddo;endif
+    enddo
+    call dg_sha256_final(hash,digest)
+  end function canonical_pp_digest
 
   pure real(8) function canonical_pp_valence_sum(pp) result(valence)
     type(s_pp_info),intent(in)::pp
@@ -180,30 +236,40 @@ contains
   pure subroutine mix_integer(hash,value)
     integer(int64),intent(inout)::hash
     integer,intent(in)::value
-    call dg_sha256_mix_integer(hash,value)
+    call mix_int64(hash,int(value,int64))
   end subroutine mix_integer
 
   pure subroutine mix_int64(hash,value)
     integer(int64),intent(inout)::hash
     integer(int64),intent(in)::value
-    call dg_sha256_mix_int64(hash,value)
+    integer::byte
+    ! This is the bit-exact schema-1 transform.  ISHFTC and IEOR are defined
+    ! bit operations; unlike signed integer multiplication they cannot overflow.
+    do byte=0,7
+      hash=ieor(ishftc(hash,7),int(ibits(value,8*byte,8),int64))
+    enddo
   end subroutine mix_int64
 
   pure subroutine mix_real(hash,value)
     integer(int64),intent(inout)::hash
     real(8),intent(in)::value
-    call dg_sha256_mix_real64(hash,value)
+    integer(int64)::bits
+    bits=transfer(value,bits);call mix_int64(hash,bits)
   end subroutine mix_real
 
   pure subroutine mix_logical(hash,value)
     integer(int64),intent(inout)::hash
     logical,intent(in)::value
-    call dg_sha256_mix_logical(hash,value)
+    call mix_integer(hash,merge(1,0,value))
   end subroutine mix_logical
 
   pure subroutine mix_character(hash,value)
     integer(int64),intent(inout)::hash
     character(*),intent(in)::value
-    call dg_sha256_mix_character(hash,value)
+    integer::position
+    call mix_integer(hash,len(value))
+    do position=1,len(value)
+      hash=ieor(ishftc(hash,7),int(iachar(value(position:position)),int64))
+    enddo
   end subroutine mix_character
 end module dg_canonical_pp_fingerprint

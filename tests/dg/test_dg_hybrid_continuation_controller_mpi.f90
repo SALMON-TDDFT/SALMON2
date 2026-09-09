@@ -103,7 +103,7 @@ program test_dg_hybrid_continuation_controller_mpi
   endif
   call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,1d-12,2d-12,1d-10,ok,message)
   call require(ok.and.candidate_acceptance%occupied_gate.and.candidate_acceptance%density_gate,trim(message))
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,4,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,4,.true.,ok,message)
   call require(.not.ok,'v4 publication was authorized before certification and localization')
   call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,4,4,.false.,.false.,.false.,&
     1003_int64,ok,message)
@@ -116,11 +116,11 @@ program test_dg_hybrid_continuation_controller_mpi
     'localized v4 construction basis was not retained after low-energy certification')
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,4,1004_int64,1005_int64,ok,message)
   call require(.not.ok,'spectral prefix was accepted as the localized v4 propagation basis')
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,3,7,.true.,ok,message)
-  call require(.not.ok,'legacy checkpoint version 2 was authorized for certified RT publication')
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,4,.true.,ok,message)
-  call require(.not.ok,'spectral prefix was accepted as the localized v4 payload rank')
   call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,7,.true.,ok,message)
+  call require(.not.ok,'legacy checkpoint version 2 was authorized for certified RT publication')
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,4,.true.,ok,message)
+  call require(.not.ok,'spectral prefix was accepted as the localized v4 payload rank')
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,7,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==7.and.&
     candidate_acceptance%certified_rank<candidate_acceptance%published_rt_rank,trim(message))
 
@@ -141,7 +141,7 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok.and.candidate_acceptance%legacy_warning_observed,trim(message))
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,5,2004_int64,2005_int64,ok,message)
   call require(ok,trim(message))
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,5,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,5,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==5,trim(message))
   if(nproc>1)then
     call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,&

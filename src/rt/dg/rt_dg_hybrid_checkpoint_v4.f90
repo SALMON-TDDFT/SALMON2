@@ -1,20 +1,22 @@
 #include "config.h"
 module rt_dg_hybrid_checkpoint_v4
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use dg_portable_sha256,only:dg_sha256_schema,dg_sha256_mix_int64
+  use dg_portable_sha256,only:s_dg_sha256_context,dg_sha256_schema,dg_sha256_init,&
+    dg_sha256_update_int64,dg_sha256_final
 #ifdef USE_MPI
   use mpi
 #endif
   implicit none
   private
-  character(32),parameter::manifest_magic='SALMON_HYBRID_DG_MANIFEST_V4'
-  character(32),parameter::shard_magic='SALMON_HYBRID_DG_RANK_SHARD_V4'
-  integer,parameter::schema_version=4
+  character(32),parameter::manifest_magic='SALMON_HYBRID_DG_MANIFEST_V5'
+  character(32),parameter::shard_magic='SALMON_HYBRID_DG_RANK_SHARD_V5'
+  integer,parameter::schema_version=5
   type,public::s_rt_dg_hybrid_v4_shard
     integer::global_count=0,global_grid_count=0,nocc=0,certified_rank=0,fragment_id=0
     integer(int64)::basis_fingerprint=0_int64,operator_fingerprint=0_int64,&
       operator_structure_fingerprint=0_int64,scope_fingerprint=0_int64,payload_fingerprint=0_int64
-    integer(int64)::system_fingerprint=0_int64,pseudopotential_fingerprint=0_int64
+    integer(int64)::system_fingerprint(4)=0_int64,pseudopotential_digest(4)=0_int64
+    integer(int64)::pseudopotential_fingerprint=0_int64
     integer(int64),allocatable::row_ids(:),grid_ids(:)
     integer,allocatable::metric_offsets(:),metric_columns(:)
     complex(real64),allocatable::metric_values(:)
@@ -39,8 +41,8 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer::rank,nproc,ierr,ios,unit,local_bad,global_bad,flush_ios,allocation_status
-    integer(int64)::transaction_id,shard_digest,shard_size
-    integer(int64),allocatable::shard_sizes(:),shard_digests(:)
+    integer(int64)::transaction_id,shard_digest(4),shard_size
+    integer(int64),allocatable::shard_sizes(:),shard_digests(:,:)
     integer,allocatable::fragment_ids(:)
     character(512)::manifest,manifest_tmp,shard,shard_tmp
     character(256)::iomsg
@@ -74,7 +76,7 @@ contains
         payload%global_count,payload%global_grid_count,payload%nocc,payload%certified_rank,transaction_id,&
         payload%basis_fingerprint,payload%operator_fingerprint,payload%operator_structure_fingerprint,&
         payload%scope_fingerprint,payload%payload_fingerprint,payload%system_fingerprint,&
-        payload%pseudopotential_fingerprint,&
+        payload%pseudopotential_fingerprint,payload%pseudopotential_digest,&
         shard_digest,size(payload%row_ids),size(payload%metric_offsets),size(payload%metric_columns),&
         size(payload%operator_offsets),size(payload%operator_columns),size(payload%basis_point_offsets),&
         size(payload%basis_support_ids),size(payload%initial_occupied_amplitudes,1),&
@@ -102,14 +104,14 @@ contains
     if(global_bad/=0)then
       message='cannot atomically publish distributed-v4 rank shard';return
     endif
-    allocate(shard_sizes(nproc),shard_digests(nproc),fragment_ids(nproc),stat=allocation_status)
+    allocate(shard_sizes(nproc),shard_digests(4,nproc),fragment_ids(nproc),stat=allocation_status)
     local_bad=merge(0,1,allocation_status==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 manifest allocation reduction failed';return;endif
     if(global_bad/=0)then;message='cannot allocate distributed-v4 manifest gathers';return;endif
     call MPI_Gather(shard_size,1,MPI_INTEGER8,shard_sizes,1,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-size gather failed';return;endif
-    call MPI_Gather(shard_digest,1,MPI_INTEGER8,shard_digests,1,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Gather(shard_digest,4,MPI_INTEGER8,shard_digests,4,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-digest gather failed';return;endif
     call MPI_Gather(payload%fragment_id,1,MPI_INTEGER,fragment_ids,1,MPI_INTEGER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 fragment-map gather failed';return;endif
@@ -122,6 +124,7 @@ contains
         payload%global_grid_count,payload%nocc,payload%certified_rank,transaction_id,payload%basis_fingerprint,&
         payload%operator_fingerprint,payload%operator_structure_fingerprint,payload%scope_fingerprint,&
         payload%payload_fingerprint,payload%system_fingerprint,payload%pseudopotential_fingerprint,&
+        payload%pseudopotential_digest,&
         shard_sizes,shard_digests,fragment_ids
       flush_ios=0
       if(ios==0)flush(unit,iostat=flush_ios)
@@ -151,15 +154,15 @@ contains
       shard_rank,shard_nproc,&
       shard_global_count,shard_global_grid_count,shard_nocc,shard_certified_rank,&
       fragment_id,nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,nsupport,ncoeff1,ncoeff2,&
-      nscope,nxc,local_bad,global_bad,allocation_status
+      nscope,nxc,local_bad,global_bad,allocation_status,manifest_failure_kind
     integer::failure_kind,global_failure_kind
     integer(int64)::transaction_id,basis_fingerprint,operator_fingerprint,operator_structure_fingerprint,&
-      scope_fingerprint,payload_fingerprint,system_fingerprint,pseudopotential_fingerprint,&
-      stored_digest,actual_digest,actual_size,manifest_size,&
+      scope_fingerprint,payload_fingerprint,system_fingerprint(4),pseudopotential_fingerprint,&
+      pseudopotential_digest(4),stored_digest(4),actual_digest(4),actual_size,manifest_size,&
       shard_transaction_id,shard_basis_fingerprint,shard_operator_fingerprint,&
-      shard_operator_structure_fingerprint,shard_scope_fingerprint,shard_payload_fingerprint,shard_system_fingerprint,&
-      shard_pseudopotential_fingerprint
-    integer(int64),allocatable::shard_sizes(:),shard_digests(:)
+      shard_operator_structure_fingerprint,shard_scope_fingerprint,shard_payload_fingerprint,&
+      shard_system_fingerprint(4),shard_pseudopotential_fingerprint,shard_pseudopotential_digest(4)
+    integer(int64),allocatable::shard_sizes(:),shard_digests(:,:)
     integer,allocatable::fragment_ids(:)
     character(32)::magic
     character(512)::manifest,shard
@@ -169,28 +172,41 @@ contains
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 reader communicator rank failed';return;endif
     call MPI_Comm_size(comm,nproc,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 reader communicator size failed';return;endif
-    manifest=trim(prefix)//'.manifest';ios=0;unit=-1
-    allocate(shard_sizes(nproc),shard_digests(nproc),fragment_ids(nproc),stat=allocation_status)
+    manifest=trim(prefix)//'.manifest';ios=0;unit=-1;manifest_failure_kind=0
+    allocate(shard_sizes(nproc),shard_digests(4,nproc),fragment_ids(nproc),stat=allocation_status)
     local_bad=merge(0,1,allocation_status==0)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 reader allocation reduction failed';return;endif
     if(global_bad/=0)then;message='cannot allocate distributed-v4 manifest metadata';return;endif
     if(rank==0)then
       inquire(file=trim(manifest),size=manifest_size,iostat=ios)
-      if(ios==0.and.manifest_size/=120_int64+20_int64*int(nproc,int64))ios=1
+      if(ios==0.and.manifest_size==120_int64+20_int64*int(nproc,int64))then
+        ios=1;manifest_failure_kind=2
+      endif
+      if(ios==0.and.manifest_size/=176_int64+44_int64*int(nproc,int64))ios=1
       if(ios==0)open(newunit=unit,file=trim(manifest),status='old',access='stream',form='unformatted',&
         action='read',iostat=ios,iomsg=iomsg)
       if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,version,file_nproc,global_count,global_grid_count,nocc,&
         certified_rank,transaction_id,basis_fingerprint,operator_fingerprint,operator_structure_fingerprint,&
-        scope_fingerprint,payload_fingerprint,system_fingerprint,pseudopotential_fingerprint,&
+        scope_fingerprint,payload_fingerprint,system_fingerprint,pseudopotential_fingerprint,pseudopotential_digest,&
         shard_sizes,shard_digests,fragment_ids
       call close_if_open(unit,ios)
-      if(ios==0.and.(magic/=manifest_magic.or.version/=schema_version.or.file_nproc/=nproc))ios=1
+      if(ios==0.and.(magic/=manifest_magic.or.version/=schema_version))then
+        ios=1;manifest_failure_kind=2
+      endif
+      if(ios==0.and.file_nproc/=nproc)ios=1
     endif
     call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 manifest status broadcast failed';return;endif
+    call MPI_Bcast(manifest_failure_kind,1,MPI_INTEGER,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v5 version status broadcast failed';return;endif
     if(ios/=0)then
-      message='distributed-v4 manifest missing, corrupt, or MPI rank mapping changed';return
+      if(manifest_failure_kind==2)then
+        message='unsupported distributed checkpoint schema v4; regenerate authenticated v5'
+      else
+        message='distributed-v5 manifest missing, corrupt, or MPI rank mapping changed'
+      endif
+      return
     endif
     call MPI_Bcast(global_count,1,MPI_INTEGER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 global-count broadcast failed';return;endif
@@ -212,13 +228,15 @@ contains
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 scope fingerprint broadcast failed';return;endif
     call MPI_Bcast(payload_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 payload fingerprint broadcast failed';return;endif
-    call MPI_Bcast(system_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(system_fingerprint,4,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 system fingerprint broadcast failed';return;endif
     call MPI_Bcast(pseudopotential_fingerprint,1,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 pseudopotential fingerprint broadcast failed';return;endif
+    call MPI_Bcast(pseudopotential_digest,4,MPI_INTEGER8,0,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='distributed-v5 pseudopotential digest broadcast failed';return;endif
     call MPI_Bcast(shard_sizes,nproc,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-size broadcast failed';return;endif
-    call MPI_Bcast(shard_digests,nproc,MPI_INTEGER8,0,comm,ierr)
+    call MPI_Bcast(shard_digests,4*nproc,MPI_INTEGER8,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 shard-digest broadcast failed';return;endif
     call MPI_Bcast(fragment_ids,nproc,MPI_INTEGER,0,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='distributed-v4 fragment-map broadcast failed';return;endif
@@ -227,25 +245,27 @@ contains
       action='read',iostat=ios,iomsg=iomsg)
     if(ios==0)then
       inquire(unit=unit,size=actual_size)
-      if(actual_size<180_int64)then;ios=1;failure_kind=1;endif
+      if(actual_size<260_int64)then;ios=1;failure_kind=1;endif
       if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,version,shard_rank,shard_nproc,fragment_id,shard_global_count,&
         shard_global_grid_count,shard_nocc,shard_certified_rank,shard_transaction_id,shard_basis_fingerprint,&
         shard_operator_fingerprint,shard_operator_structure_fingerprint,shard_scope_fingerprint,&
-        shard_payload_fingerprint,shard_system_fingerprint,shard_pseudopotential_fingerprint,stored_digest,nrow,&
+        shard_payload_fingerprint,shard_system_fingerprint,shard_pseudopotential_fingerprint,&
+        shard_pseudopotential_digest,stored_digest,nrow,&
         nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,nsupport,ncoeff1,ncoeff2,nscope,nxc
     endif
     if(ios/=0.and.failure_kind==0)failure_kind=1
     if(ios==0)then
       if(magic/=shard_magic.or.version/=schema_version.or.shard_rank/=rank.or.shard_nproc/=nproc.or.&
         fragment_id/=fragment_ids(rank+1).or.actual_size/=shard_sizes(rank+1).or.&
-        stored_digest/=shard_digests(rank+1).or.shard_global_count/=global_count.or.&
+        any(stored_digest/=shard_digests(:,rank+1)).or.shard_global_count/=global_count.or.&
         shard_global_grid_count/=global_grid_count.or.shard_nocc/=nocc.or.&
         shard_certified_rank/=certified_rank.or.shard_transaction_id/=transaction_id.or.&
         shard_basis_fingerprint/=basis_fingerprint.or.shard_operator_fingerprint/=operator_fingerprint.or.&
         shard_operator_structure_fingerprint/=operator_structure_fingerprint.or.&
         shard_scope_fingerprint/=scope_fingerprint.or.shard_payload_fingerprint/=payload_fingerprint.or.&
-        shard_system_fingerprint/=system_fingerprint.or.&
-        shard_pseudopotential_fingerprint/=pseudopotential_fingerprint)then
+        any(shard_system_fingerprint/=system_fingerprint).or.&
+        shard_pseudopotential_fingerprint/=pseudopotential_fingerprint.or.&
+        any(shard_pseudopotential_digest/=pseudopotential_digest))then
         ios=1;failure_kind=2
       endif
     endif
@@ -282,9 +302,10 @@ contains
     payload%scope_fingerprint=scope_fingerprint;payload%payload_fingerprint=payload_fingerprint
     payload%system_fingerprint=system_fingerprint
     payload%pseudopotential_fingerprint=pseudopotential_fingerprint
+    payload%pseudopotential_digest=pseudopotential_digest
     if(ios==0)then
       actual_digest=digest_payload(payload,rank,nproc,transaction_id)
-      if(actual_digest/=stored_digest)ios=1
+      if(any(actual_digest/=stored_digest))ios=1
     endif
     if(ios/=0.and.failure_kind==0)failure_kind=4
     call MPI_Allreduce(failure_kind,global_failure_kind,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -349,7 +370,7 @@ contains
     if(npoint<0_int64)return
     call checked_product(int(ncoeff1,int64),int(ncoeff2,int64),ncoefficient,ok)
     if(.not.ok)return
-    extent=32_int64*character_bytes+19_int64*integer_bytes+9_int64*int64_bytes
+    extent=32_int64*character_bytes+19_int64*integer_bytes+19_int64*int64_bytes
     ok=.true.
     call add_extent(extent,int(nrow,int64),int64_bytes,ok)
     call add_extent(extent,int(nmetric_offsets,int64),integer_bytes,ok)
@@ -419,7 +440,8 @@ contains
     bad=0
     if(payload%global_count<1.or.payload%global_grid_count<1.or.payload%nocc<1.or.&
       payload%certified_rank<payload%nocc.or.payload%certified_rank>payload%global_count.or.payload%fragment_id/=rank+1.or.&
-      payload%system_fingerprint==0_int64.or.payload%pseudopotential_fingerprint==0_int64)bad=1
+      all(payload%system_fingerprint==0_int64).or.payload%pseudopotential_fingerprint==0_int64.or.&
+      all(payload%pseudopotential_digest==0_int64))bad=1
     if(.not.allocated(payload%row_ids).or..not.allocated(payload%metric_offsets).or.&
        .not.allocated(payload%metric_columns).or..not.allocated(payload%metric_values).or.&
        .not.allocated(payload%operator_offsets).or..not.allocated(payload%operator_columns).or.&
@@ -513,9 +535,11 @@ contains
     if(bad/=0)return
     call agree_int64(payload%payload_fingerprint)
     if(bad/=0)return
-    call agree_int64(payload%system_fingerprint)
+    call agree_digest(payload%system_fingerprint)
     if(bad/=0)return
     call agree_int64(payload%pseudopotential_fingerprint)
+    if(bad/=0)return
+    call agree_digest(payload%pseudopotential_digest)
   contains
     subroutine agree_int64(value)
       integer(int64),intent(in)::value
@@ -525,63 +549,65 @@ contains
       if(ierr/=MPI_SUCCESS)then;bad=1;return;endif
       if(lmin/=lmax)bad=1
     end subroutine agree_int64
+    subroutine agree_digest(value)
+      integer(int64),intent(in)::value(4)
+      integer::word
+      do word=1,4
+        call agree_int64(value(word));if(bad/=0)return
+      enddo
+    end subroutine agree_digest
   end subroutine validate_common
 #endif
 
-  integer(int64) function digest_payload(payload,rank,nproc,transaction_id) result(hash)
+  function digest_payload(payload,rank,nproc,transaction_id) result(digest)
     type(s_rt_dg_hybrid_v4_shard),intent(in)::payload
     integer,intent(in)::rank,nproc
     integer(int64),intent(in)::transaction_id
-    integer::i,j
-    integer(int64)::bits(2)
-    hash=1469598103934665603_int64
-    call mix(hash,dg_sha256_schema)
-    call mix(hash,int(rank,int64));call mix(hash,int(nproc,int64));call mix(hash,transaction_id)
-    call mix(hash,int(payload%fragment_id,int64));call mix(hash,int(payload%global_count,int64))
-    call mix(hash,int(payload%global_grid_count,int64));call mix(hash,int(payload%nocc,int64))
-    call mix(hash,int(payload%certified_rank,int64));call mix(hash,payload%basis_fingerprint)
-    call mix(hash,payload%operator_fingerprint)
-    call mix(hash,payload%operator_structure_fingerprint);call mix(hash,payload%scope_fingerprint)
-    call mix(hash,payload%payload_fingerprint)
-    call mix(hash,payload%system_fingerprint)
-    call mix(hash,payload%pseudopotential_fingerprint)
-    do i=1,size(payload%row_ids);call mix(hash,payload%row_ids(i));enddo
-    do i=1,size(payload%metric_offsets);call mix(hash,int(payload%metric_offsets(i),int64));enddo
-    do i=1,size(payload%metric_columns);call mix(hash,int(payload%metric_columns(i),int64));enddo
-    do i=1,size(payload%metric_values);bits=transfer(payload%metric_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
-    do i=1,size(payload%operator_offsets);call mix(hash,int(payload%operator_offsets(i),int64));enddo
-    do i=1,size(payload%operator_columns);call mix(hash,int(payload%operator_columns(i),int64));enddo
-    do i=1,size(payload%operator_values);bits=transfer(payload%operator_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
-    do i=1,size(payload%kinetic_values);bits=transfer(payload%kinetic_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
-    do i=1,size(payload%nonlocal_values);bits=transfer(payload%nonlocal_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
-    do i=1,size(payload%local_values);bits=transfer(payload%local_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
-    do i=1,size(payload%sipg_values);bits=transfer(payload%sipg_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
+    integer::i,j;integer(int64)::bits(2),digest(4);type(s_dg_sha256_context)::hash
+    call dg_sha256_init(hash);call mix(dg_sha256_schema)
+    call mix(int(rank,int64));call mix(int(nproc,int64));call mix(transaction_id)
+    call mix(int(payload%fragment_id,int64));call mix(int(payload%global_count,int64))
+    call mix(int(payload%global_grid_count,int64));call mix(int(payload%nocc,int64))
+    call mix(int(payload%certified_rank,int64));call mix(payload%basis_fingerprint)
+    call mix(payload%operator_fingerprint);call mix(payload%operator_structure_fingerprint)
+    call mix(payload%scope_fingerprint);call mix(payload%payload_fingerprint)
+    do i=1,4;call mix(payload%system_fingerprint(i));enddo
+    call mix(payload%pseudopotential_fingerprint)
+    do i=1,4;call mix(payload%pseudopotential_digest(i));enddo
+    do i=1,size(payload%row_ids);call mix(payload%row_ids(i));enddo
+    do i=1,size(payload%metric_offsets);call mix(int(payload%metric_offsets(i),int64));enddo
+    do i=1,size(payload%metric_columns);call mix(int(payload%metric_columns(i),int64));enddo
+    do i=1,size(payload%metric_values);bits=transfer(payload%metric_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
+    do i=1,size(payload%operator_offsets);call mix(int(payload%operator_offsets(i),int64));enddo
+    do i=1,size(payload%operator_columns);call mix(int(payload%operator_columns(i),int64));enddo
+    do i=1,size(payload%operator_values);bits=transfer(payload%operator_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
+    do i=1,size(payload%kinetic_values);bits=transfer(payload%kinetic_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
+    do i=1,size(payload%nonlocal_values);bits=transfer(payload%nonlocal_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
+    do i=1,size(payload%local_values);bits=transfer(payload%local_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
+    do i=1,size(payload%sipg_values);bits=transfer(payload%sipg_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
     do j=1,size(payload%position_values,2);do i=1,3
-      bits=transfer(payload%position_values(i,j),bits);call mix(hash,bits(1));call mix(hash,bits(2))
+      bits=transfer(payload%position_values(i,j),bits);call mix(bits(1));call mix(bits(2))
     enddo;enddo
-    do i=1,size(payload%grid_ids);call mix(hash,payload%grid_ids(i));enddo
-    do i=1,size(payload%basis_point_offsets);call mix(hash,int(payload%basis_point_offsets(i),int64));enddo
-    do i=1,size(payload%basis_support_ids);call mix(hash,int(payload%basis_support_ids(i),int64));enddo
-    do i=1,size(payload%basis_support_values);bits=transfer(payload%basis_support_values(i),bits);call mix(hash,bits(1));call mix(hash,bits(2));enddo
-    do i=1,size(payload%grid_weights);call mix(hash,transfer(payload%grid_weights(i),hash));enddo
-    do i=1,size(payload%density);call mix(hash,transfer(payload%density(i),hash));enddo
+    do i=1,size(payload%grid_ids);call mix(payload%grid_ids(i));enddo
+    do i=1,size(payload%basis_point_offsets);call mix(int(payload%basis_point_offsets(i),int64));enddo
+    do i=1,size(payload%basis_support_ids);call mix(int(payload%basis_support_ids(i),int64));enddo
+    do i=1,size(payload%basis_support_values);bits=transfer(payload%basis_support_values(i),bits);call mix(bits(1));call mix(bits(2));enddo
+    do i=1,size(payload%grid_weights);call mix(transfer(payload%grid_weights(i),bits(1)));enddo
+    do i=1,size(payload%density);call mix(transfer(payload%density(i),bits(1)));enddo
     do j=1,size(payload%initial_occupied_amplitudes,2);do i=1,size(payload%initial_occupied_amplitudes,1)
-      bits=transfer(payload%initial_occupied_amplitudes(i,j),bits);call mix(hash,bits(1));call mix(hash,bits(2))
+      bits=transfer(payload%initial_occupied_amplitudes(i,j),bits);call mix(bits(1));call mix(bits(2))
     enddo;enddo
-    do i=1,size(payload%occupations);call mix(hash,transfer(payload%occupations(i),hash));enddo
-    do i=1,size(payload%eigenvalues);call mix(hash,transfer(payload%eigenvalues(i),hash));enddo
-    do i=1,size(payload%scope_selectors);call mix(hash,int(payload%scope_selectors(i),int64));enddo
-    do i=1,size(payload%xc_types);call mix(hash,int(payload%xc_types(i),int64));enddo
-    do i=1,size(payload%acceptance_receipts);call mix(hash,transfer(payload%acceptance_receipts(i),hash));enddo
-    do i=1,size(payload%pseudopotential_receipt);call mix(hash,transfer(payload%pseudopotential_receipt(i),hash));enddo
-    do i=1,size(payload%energy_receipt);call mix(hash,transfer(payload%energy_receipt(i),hash));enddo
+    do i=1,size(payload%occupations);call mix(transfer(payload%occupations(i),bits(1)));enddo
+    do i=1,size(payload%eigenvalues);call mix(transfer(payload%eigenvalues(i),bits(1)));enddo
+    do i=1,size(payload%scope_selectors);call mix(int(payload%scope_selectors(i),int64));enddo
+    do i=1,size(payload%xc_types);call mix(int(payload%xc_types(i),int64));enddo
+    do i=1,size(payload%acceptance_receipts);call mix(transfer(payload%acceptance_receipts(i),bits(1)));enddo
+    do i=1,size(payload%pseudopotential_receipt);call mix(transfer(payload%pseudopotential_receipt(i),bits(1)));enddo
+    do i=1,size(payload%energy_receipt);call mix(transfer(payload%energy_receipt(i),bits(1)));enddo
+    call dg_sha256_final(hash,digest)
+  contains
+    subroutine mix(value);integer(int64),intent(in)::value;call dg_sha256_update_int64(hash,value);end subroutine
   end function digest_payload
-
-  subroutine mix(hash,value)
-    integer(int64),intent(inout)::hash
-    integer(int64),intent(in)::value
-    call dg_sha256_mix_int64(hash,value)
-  end subroutine mix
 
   subroutine shard_name(prefix,transaction_id,rank,name)
     character(*),intent(in)::prefix

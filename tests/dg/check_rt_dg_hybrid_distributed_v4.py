@@ -17,7 +17,13 @@ assert not (root / "src/rt/dg/rt_dg_hybrid_initialization.f90").exists(), (
 assert "publish_dg_hybrid_divided_v3_legacy_unreachable" not in main_gs, (
     "RED: dead dense-v3 divided publisher remains in production source")
 
-assert re.search(r"schema_version\s*=\s*4", checkpoint_v4), "RED: formal Hybrid handoff is not schema v4"
+assert re.search(r"schema_version\s*=\s*5", checkpoint_v4), "RED: authenticated distributed Hybrid handoff is not schema v5"
+assert "salmon_hybrid_dg_manifest_v5" in checkpoint_v4 and "salmon_hybrid_dg_rank_shard_v5" in checkpoint_v4, (
+    "RED: schema-v5 manifest/shard magic is missing")
+assert "unsupported distributed checkpoint schema v4" in checkpoint_v4, (
+    "RED: legacy schema-v4 input is not rejected with a named migration diagnostic")
+for digest in ("system_fingerprint(4)", "pseudopotential_digest(4)", "shard_digest(4)"):
+    assert digest in checkpoint_v4, f"RED: schema-v5 does not retain full SHA-256 {digest}"
 publisher = main_gs.split("subroutine publish_dg_hybrid_divided_v4", 1)[1].split(
     "end subroutine publish_dg_hybrid_divided_v4", 1)[0]
 for forbidden in ("full_coefficients", "collect_dg_hybrid_full_rows", "symmetry_representation(n,n", "real(n,8)*real(n,8)"):

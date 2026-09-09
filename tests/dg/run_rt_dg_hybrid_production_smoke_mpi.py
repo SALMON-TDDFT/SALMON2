@@ -40,11 +40,13 @@ def require_localized_publisher(body: str) -> None:
     assert "payload%system_fingerprint=fingerprint_rt_dg_hybrid_system" in compact, \
         "formal v4 checkpoint is not bound to the GS physical system"
     assert "identity_system=dc%system_tot" in compact and \
-        "identity_system%rocc(:,1,1)=occupied_state%occupations" in compact and \
+        "identity_system%rocc(1:nocc,1,1)=occupied_state%occupations" in compact and \
         "fingerprint_rt_dg_hybrid_system(identity_system," in compact, \
         "formal v4 checkpoint does not rebuild authoritative total-cell electronic identity"
     assert "payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)" in compact, \
         "formal v4 checkpoint is not bound to the canonical GS pseudopotential"
+    assert "payload%pseudopotential_digest=canonical_pp_digest(pp)" in compact, \
+        "formal checkpoint does not independently authenticate all PP tables"
 
 
 require_localized_publisher(formal_publisher)
@@ -56,6 +58,8 @@ for old, replacement in (
     ("payload%energy_receipt=[checkpoint_energy%E_tot", "payload%energy_receipt=0d0"),
     ("payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)",
      "payload%pseudopotential_fingerprint=1_8"),
+    ("payload%pseudopotential_digest=canonical_pp_digest(pp)",
+     "payload%pseudopotential_digest=1_8"),
 ):
     mutated = formal_publisher.replace(old, replacement, 1)
     assert mutated != formal_publisher, old
@@ -339,7 +343,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         "formal divided terminal LCFO did not publish its v4 manifest and rank shards",
         gs.stdout[-6000:], gs.stderr,
     )
-    assert checkpoint.read_bytes()[:32].rstrip(b" \0") == b"SALMON_HYBRID_DG_MANIFEST_V4"
+    assert checkpoint.read_bytes()[:32].rstrip(b" \0") == b"SALMON_HYBRID_DG_MANIFEST_V5"
 
     rt = subprocess.run(
         [mpiexec, "-n", "4", str(salmon)], input=h4_rt_input(), cwd=work, env=env,

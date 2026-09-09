@@ -56,7 +56,7 @@ use dg_dc_seed_checkpoint,only:s_dg_dc_seed_contract,s_dg_dc_seed_payload,&
   DG_DC_SEED_ABSENT,DG_DC_SEED_VALID,DG_DC_SEED_INVALID,&
   build_dg_dc_seed_contract,probe_dg_dc_seed,&
   read_dg_dc_seed,write_dg_dc_seed,restore_dg_dc_seed_payload,resolve_dg_dc_seed_mode
-use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint,canonical_pp_valence_sum
+use dg_canonical_pp_fingerprint,only:canonical_pp_fingerprint,canonical_pp_digest,canonical_pp_valence_sum
 use dg_overlapping_wannier_construction, only: s_dg_overlapping_wannier_construction, &
   construct_dg_overlapping_wannier_basis,verify_dg_overlapping_wannier_periodic_closure,&
   replicate_dg_fragment_wannier_representative,verify_dg_fragment_wannier_streaming_closure,&
@@ -2207,18 +2207,19 @@ contains
     ! that one identity field from the terminal LCFO occupations while keeping
     ! atoms, cell, grid, k vectors and weights from the authoritative total cell.
     identity_system=dc%system_tot
-    if(identity_system%nspin/=1.or.identity_system%nk/=1.or.identity_system%no/=nocc)then
+    if(identity_system%nspin/=1.or.identity_system%nk/=1.or.identity_system%no<nocc)then
       message='terminal divided v4 electronic identity shape is unsupported';return
     endif
     allocate(identity_system%rocc(identity_system%no,identity_system%nk,identity_system%nspin))
-    identity_system%rocc=0d0;identity_system%rocc(:,1,1)=occupied_state%occupations
+    identity_system%rocc=0d0;identity_system%rocc(1:nocc,1,1)=occupied_state%occupations
+    payload%pseudopotential_digest=canonical_pp_digest(pp)
     payload%system_fingerprint=fingerprint_rt_dg_hybrid_system(identity_system,dc%lg_tot%num,.true.,&
-      dc%ppg_tot%Nlma,canonical_pp_fingerprint(pp),xc_func%xctype,.false.,.false.,.false.,.false.,.false.)
+      dc%ppg_tot%Nlma,payload%pseudopotential_digest,xc_func%xctype,.false.,.false.,.false.,.false.,.false.)
     payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)
     payload%payload_fingerprint=ieor(ieor(basis_fingerprint,operator_fingerprint),&
       ieor(dc_seed_fingerprint,ieor(face_fingerprint,continuation_fingerprint)))
     if(payload%payload_fingerprint==0_8)payload%payload_fingerprint=1_8
-    authorization%valid=publication_authorized;authorization%checkpoint_version=4
+    authorization%valid=publication_authorized;authorization%checkpoint_version=5
     authorization%published_rank=n;authorization%basis_fingerprint=basis_fingerprint
     authorization%operator_fingerprint=operator_fingerprint
     call publish_rt_dg_hybrid_checkpoint_v4(dc%icomm_tot,'./hybrid_dg_ground_state.chk',n,nocc,&
@@ -6803,7 +6804,7 @@ stage_pass: do
     final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
     allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
     allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
-    call authorize_dg_hybrid_v4_publication(dc%icomm_tot,candidate_acceptance,4,size(effective_ids),&
+    call authorize_dg_hybrid_v4_publication(dc%icomm_tot,candidate_acceptance,5,size(effective_ids),&
       final_ground_state%valid.and.final_ground_state%converged,local_ok,continuation_message)
     if(.not.local_ok)error stop 'DG continuation distributed-v4 publication authorization failed'
     call publish_dg_hybrid_divided_v4(row_ids,basis_fragment-1,basis_generation_arg,ow_core_ids,&

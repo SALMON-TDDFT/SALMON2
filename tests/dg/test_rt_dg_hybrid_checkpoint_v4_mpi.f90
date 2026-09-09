@@ -38,8 +38,9 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   written%basis_fingerprint=7717_int64;written%operator_fingerprint=9919_int64
   written%operator_structure_fingerprint=1217_int64;written%scope_fingerprint=1811_int64
   written%payload_fingerprint=2027_int64
-  written%system_fingerprint=3037_int64
+  written%system_fingerprint=[3037_int64,3038_int64,3039_int64,3040_int64]
   written%pseudopotential_fingerprint=4049_int64
+  written%pseudopotential_digest=[4049_int64,4050_int64,4051_int64,4052_int64]
   allocate(row_owner(written%global_count))
   do i=1,written%global_count;row_owner(i)=(i-1)/50;enddo
   allocate(written%row_ids(50),written%metric_offsets(51),written%metric_columns(50),&
@@ -84,7 +85,7 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   written%acceptance_receipts=[(0.01d0*i,i=1,8)]
   written%pseudopotential_receipt=[(1d0*i,i=1,6)]
   written%energy_receipt=[(2d0*i,i=1,7)]
-  authorization%checkpoint_version=4;authorization%published_rank=written%global_count
+  authorization%checkpoint_version=5;authorization%published_rank=written%global_count
   authorization%basis_fingerprint=written%basis_fingerprint
   authorization%operator_fingerprint=written%operator_fingerprint
   call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
@@ -106,7 +107,7 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   call record_dg_hybrid_certified_rt_basis(comm,candidate,written%global_count,written%basis_fingerprint,&
     written%operator_fingerprint,ok,message)
   call require(ok,'full-rank certified basis receipt failed: '//trim(message))
-  call authorize_dg_hybrid_v4_publication(comm,candidate,4,written%global_count,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(comm,candidate,5,written%global_count,.true.,ok,message)
   call require(ok.and.candidate%publication_authorized,'full-rank v4 publication authorization failed: '//trim(message))
   authorization%valid=candidate%publication_authorized
   authorization%checkpoint_version=candidate%checkpoint_version
@@ -155,18 +156,24 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent common metadata reached shard publication')
     written%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(written%scope_selectors,written%xc_types)
-    written%system_fingerprint=3037_int64+rank
+    written%system_fingerprint(1)=3037_int64+rank
     call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent system identity reached shard publication')
-    written%system_fingerprint=3037_int64
+    written%system_fingerprint=[3037_int64,3038_int64,3039_int64,3040_int64]
     written%pseudopotential_fingerprint=4049_int64+rank
     call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent canonical PP identity reached shard publication')
     written%pseudopotential_fingerprint=4049_int64
+    written%pseudopotential_digest(1)=4049_int64+rank
+    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+      written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+    call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
+      'rank-inconsistent authoritative PP digest reached shard publication')
+    written%pseudopotential_digest=[4049_int64,4050_int64,4051_int64,4052_int64]
   endif
   call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
@@ -176,7 +183,8 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   call require(loaded%global_count==written%global_count.and.loaded%nocc==written%nocc,&
     'v4 manifest dimensions changed')
   call require(loaded%fragment_id==written%fragment_id,'v4 rank-fragment mapping changed')
-  call require(loaded%system_fingerprint==written%system_fingerprint.and.&
+  call require(all(loaded%system_fingerprint==written%system_fingerprint).and.&
+    all(loaded%pseudopotential_digest==written%pseudopotential_digest).and.&
     loaded%pseudopotential_fingerprint==written%pseudopotential_fingerprint,&
     'v4 physical-system identity changed')
   call require(all(loaded%row_ids==written%row_ids),'v4 owned rows changed')
@@ -196,22 +204,32 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
     .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint,&
     written%pseudopotential_fingerprint,&
+    written%pseudopotential_digest,&
     [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(ok.and.state%valid.and.state%initial_invariants_valid,&
     'common v4 endpoint did not initialize distributed Hybrid RT: '//trim(message))
   call require(state%startup_metric_defect<=1d-12.and.state%startup_orbital_residual<=1d-12,&
     'common v4 endpoint changed metric orthonormality or stationarity')
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
-    .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint+1_int64,&
+    .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint+[1_int64,0_int64,0_int64,0_int64],&
     written%pseudopotential_fingerprint,&
+    written%pseudopotential_digest,&
     [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(.not.ok.and.index(message,'system identity mismatch')>0,&
     'common v4 endpoint accepted a different current physical system')
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
     .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint,&
-    written%pseudopotential_fingerprint+1_int64,[1d-10,1d-10,1d-10,1d-10],state,ok,message)
+    written%pseudopotential_fingerprint+1_int64,written%pseudopotential_digest,&
+    [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(.not.ok.and.index(message,'system identity mismatch')>0,&
     'common v4 endpoint accepted a different current canonical pseudopotential')
+  call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
+    .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint,&
+    written%pseudopotential_fingerprint,&
+    written%pseudopotential_digest+[1_int64,0_int64,0_int64,0_int64],&
+    [1d-10,1d-10,1d-10,1d-10],state,ok,message)
+  call require(.not.ok.and.index(message,'system identity mismatch')>0,&
+    'common endpoint accepted a different authoritative PP digest')
   if(rank==0)write(*,'(a,i0)')'PASS distributed-v4 shard manifest ranks=',nproc
   call MPI_Finalize(ierr)
 contains
