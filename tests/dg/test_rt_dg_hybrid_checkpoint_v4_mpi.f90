@@ -142,6 +142,11 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
   call require(.not.ok.and.index(message,'invalid distributed-v4 rank shard payload')>0,&
     'certified rank greater than construction rank was accepted')
+  written%certified_rank=written%nocc-1
+  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+  call require(.not.ok.and.index(message,'invalid distributed-v4 rank shard payload')>0,&
+    'certified rank below occupied rank was accepted')
   written%certified_rank=written%global_count
   if(nproc>1)then
     written%scope_fingerprint=written%scope_fingerprint+rank

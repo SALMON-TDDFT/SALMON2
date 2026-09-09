@@ -4,9 +4,11 @@ module dg_canonical_pp_fingerprint
   ! workspaces and inactive padding are deliberately outside this schema.
   use iso_fortran_env,only:int64
   use structures,only:s_pp_info
+  use dg_portable_sha256,only:dg_sha256_mix_int64,dg_sha256_mix_integer,&
+    dg_sha256_mix_real64,dg_sha256_mix_logical,dg_sha256_mix_character
   implicit none
   private
-  integer(int64),parameter::canonical_pp_schema=1_int64
+  integer(int64),parameter::canonical_pp_schema=2_int64
   public::canonical_pp_fingerprint,canonical_pp_valence_sum
 contains
   pure integer(int64) function canonical_pp_fingerprint(pp) result(fingerprint)
@@ -178,38 +180,30 @@ contains
   pure subroutine mix_integer(hash,value)
     integer(int64),intent(inout)::hash
     integer,intent(in)::value
-    call mix_int64(hash,int(value,int64))
+    call dg_sha256_mix_integer(hash,value)
   end subroutine mix_integer
 
   pure subroutine mix_int64(hash,value)
     integer(int64),intent(inout)::hash
     integer(int64),intent(in)::value
-    integer::byte
-    do byte=0,7
-      hash=ieor(ishftc(hash,7),int(ibits(value,8*byte,8),int64))
-    enddo
+    call dg_sha256_mix_int64(hash,value)
   end subroutine mix_int64
 
   pure subroutine mix_real(hash,value)
     integer(int64),intent(inout)::hash
     real(8),intent(in)::value
-    integer(int64)::bits
-    bits=transfer(value,bits);call mix_int64(hash,bits)
+    call dg_sha256_mix_real64(hash,value)
   end subroutine mix_real
 
   pure subroutine mix_logical(hash,value)
     integer(int64),intent(inout)::hash
     logical,intent(in)::value
-    call mix_integer(hash,merge(1,0,value))
+    call dg_sha256_mix_logical(hash,value)
   end subroutine mix_logical
 
   pure subroutine mix_character(hash,value)
     integer(int64),intent(inout)::hash
     character(*),intent(in)::value
-    integer::position
-    call mix_integer(hash,len(value))
-    do position=1,len(value)
-      hash=ieor(ishftc(hash,7),int(iachar(value(position:position)),int64))
-    enddo
+    call dg_sha256_mix_character(hash,value)
   end subroutine mix_character
 end module dg_canonical_pp_fingerprint

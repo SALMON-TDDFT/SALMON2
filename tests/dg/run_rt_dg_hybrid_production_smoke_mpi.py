@@ -39,6 +39,10 @@ def require_localized_publisher(body: str) -> None:
         "all-zero energy receipt silently disables GS-to-RT energy identity"
     assert "payload%system_fingerprint=fingerprint_rt_dg_hybrid_system" in compact, \
         "formal v4 checkpoint is not bound to the GS physical system"
+    assert "identity_system=dc%system_tot" in compact and \
+        "identity_system%rocc(:,1,1)=occupied_state%occupations" in compact and \
+        "fingerprint_rt_dg_hybrid_system(identity_system," in compact, \
+        "formal v4 checkpoint does not rebuild authoritative total-cell electronic identity"
     assert "payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)" in compact, \
         "formal v4 checkpoint is not bound to the canonical GS pseudopotential"
 

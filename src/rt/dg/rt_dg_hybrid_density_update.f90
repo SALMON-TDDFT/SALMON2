@@ -116,7 +116,7 @@ contains
     local_bad=merge(0,1,all(ieee_is_finite(real(new_h))).and.all(ieee_is_finite(aimag(new_h))))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='nonfinite hybrid RT updated Hamiltonian';return;endif
-    call validate_rt_dg_hybrid_sparse_hermiticity(comm,state%certified_rank,state%owned_row_ids,&
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,state%global_count,state%owned_row_ids,&
       state%operators%row_offsets,state%operators%column_ids,new_h,100d0*epsilon(1d0),ok,message)
     if(.not.ok)then;message='hybrid RT Hamiltonian Hermiticity failed: '//trim(message);return;endif
     local_hash=0_int64;global_sum=0_int64
@@ -154,7 +154,7 @@ contains
     character(*),intent(out)::message
 #ifdef USE_MPI
     integer::dimensions(3),minimum_dimensions(3),maximum_dimensions(3)
-    integer::r,nocc,nowned,npoint,i,j,edge,ierr,local_bad,global_bad
+    integer::certified_rank,r,nocc,nowned,npoint,i,j,edge,ierr,local_bad,global_bad
     integer,allocatable::local_counts(:),global_counts(:)
     ok=.false.;message=''
     dimensions=[state%certified_rank,state%global_count,state%noccupied]
@@ -163,8 +163,9 @@ contains
     if(ierr/=MPI_SUCCESS.or.any(minimum_dimensions/=maximum_dimensions))then
       message='rank-disagreeing certified hybrid RT dimensions';return
     endif
-    r=minimum_dimensions(1);nocc=minimum_dimensions(3)
-    local_bad=merge(0,1,state%valid.and.r>0.and.minimum_dimensions(2)==r.and.nocc>0.and.nocc<=r)
+    certified_rank=minimum_dimensions(1);r=minimum_dimensions(2);nocc=minimum_dimensions(3)
+    local_bad=merge(0,1,state%valid.and.r>0.and.certified_rank>=nocc.and.certified_rank<=r.and.&
+      nocc>0.and.nocc<=r)
     if(.not.allocated(state%owned_row_ids).or..not.allocated(state%coefficients).or.&
       .not.allocated(state%kinetic_values).or..not.allocated(state%nonlocal_values).or.&
       .not.allocated(state%local_rows).or..not.allocated(state%sipg_values).or.&

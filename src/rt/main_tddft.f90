@@ -311,10 +311,10 @@ subroutine run_dg_hybrid_continuation_rt()
     [dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,&
     dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance],hybrid_state,ok,message)
   if(.not.ok)then;write(0,'(a)')trim(message);error stop 'hybrid DG RT initialization failed';endif
-  call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%certified_rank,hybrid_state%metric%fingerprint,&
+  call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,hybrid_state%metric%fingerprint,&
     hybrid_state%metric%owned_row_ids,hybrid_state%metric%column_ids,metric_exchange,ok,message)
   if(.not.ok)error stop 'hybrid DG RT metric exchange setup failed'
-  call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%certified_rank,&
+  call build_rt_dg_sparse_exchange(nproc_group_global,hybrid_state%global_count,&
     hybrid_state%operator_structure_fingerprint,&
     hybrid_state%operators%owned_row_ids,hybrid_state%operators%column_ids,operator_exchange,ok,message)
   if(.not.ok)error stop 'hybrid DG RT operator exchange setup failed'
@@ -414,7 +414,7 @@ subroutine run_dg_hybrid_continuation_rt()
         1d-10*max(1d0,abs(hybrid_state%energy_receipt(1))))&
       error stop 'hybrid DG RT initial physical energy does not match the checkpoint'
   endif
-  call initialize_rt_dg_hybrid_stationarity(nproc_group_global,hybrid_state%certified_rank,&
+  call initialize_rt_dg_hybrid_stationarity(nproc_group_global,hybrid_state%global_count,&
     hybrid_state%owned_row_ids,&
     hybrid_state%density,current_total_energy,hybrid_state%coefficients,&
     apply_hybrid_metric_to_coefficients(),hybrid_state%occupations,current_electron_count,&
@@ -436,7 +436,7 @@ subroutine run_dg_hybrid_continuation_rt()
     endif
     zero_field_run=zero_field_run.and.maxval(abs(electric_field))<=10d0*epsilon(1d0)
     do orbital=1,hybrid_state%noccupied
-      call propagate_rt_dg_hybrid_length_gauge(nproc_group_global,hybrid_state%certified_rank,&
+      call propagate_rt_dg_hybrid_length_gauge(nproc_group_global,hybrid_state%global_count,&
         hybrid_state%metric,hybrid_state%operators,hybrid_state%coefficients(:,orbital),electric_field,&
         dt,1d-12,24,previous_polarization(:,orbital),periods,next,metric_norm,orbital_energy,&
         polarization,iterations,workspace,fingerprint,ok,message,metric_exchange,operator_exchange)
@@ -460,7 +460,7 @@ subroutine run_dg_hybrid_continuation_rt()
       call evaluate_hybrid_rt_physical_invariants(current_total_energy,current_electron_count,&
         current_hamiltonian_residual,ok,message)
       if(.not.ok)error stop 'hybrid DG RT stationarity invariant evaluation failed'
-      call evaluate_rt_dg_hybrid_stationarity(nproc_group_global,hybrid_state%certified_rank,&
+      call evaluate_rt_dg_hybrid_stationarity(nproc_group_global,hybrid_state%global_count,&
         stationarity_reference,&
         hybrid_state%density,current_total_energy,hybrid_state%coefficients,&
         apply_hybrid_metric_to_coefficients(),current_electron_count,current_hamiltonian_residual,&
@@ -601,7 +601,7 @@ subroutine project_salmon_local_rows(row_ids,row_offsets,column_ids,grid_ids,den
     if(.not.redistribution_ok)then
       callback_ok=.false.;callback_message='physical potential redistribution failed: '//trim(redistribution_message);return
     endif
-    call project_rt_dg_hybrid_point_csr_edges(nproc_group_global,hybrid_state%certified_rank,row_ids,row_offsets,&
+    call project_rt_dg_hybrid_point_csr_edges(nproc_group_global,hybrid_state%global_count,row_ids,row_offsets,&
       column_ids,grid_ids,hybrid_state%grid_weights,hybrid_state%basis_point_offsets,&
       hybrid_state%basis_support_ids,hybrid_state%basis_support_values,potential_on_basis_grid,&
       local_values,callback_ok,callback_message)

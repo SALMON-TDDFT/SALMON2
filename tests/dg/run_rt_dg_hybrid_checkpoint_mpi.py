@@ -38,6 +38,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-publication-") as name:
     precondition=build/"publication";occupied=build/"occupied";checkpoint=build/"occupied.chk"
     common=[shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
             "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+            str(root/"src/common/dg_portable_sha256.f90"),
             str(root/"src/rt/dg/rt_dg_hybrid_checkpoint_v4.f90"),str(source_path)]
     subprocess.run([*common,str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90"),"-o",str(precondition)],check=True)
     subprocess.run([*common,str(root/"tests/dg/test_rt_dg_hybrid_occupied_checkpoint_mpi.f90"),"-o",str(occupied)],check=True)

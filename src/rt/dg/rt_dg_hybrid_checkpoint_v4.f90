@@ -1,6 +1,7 @@
 #include "config.h"
 module rt_dg_hybrid_checkpoint_v4
   use,intrinsic::iso_fortran_env,only:int64,real64
+  use dg_portable_sha256,only:dg_sha256_schema,dg_sha256_mix_int64
 #ifdef USE_MPI
   use mpi
 #endif
@@ -319,7 +320,7 @@ contains
     integer(int64)::expected_size
     logical::extent_ok
     valid_read_dimensions=.false.
-    if(global_count<1.or.global_grid_count<1.or.nocc<1.or.certified_rank<1.or.&
+    if(global_count<1.or.global_grid_count<1.or.nocc<1.or.certified_rank<nocc.or.&
       certified_rank>global_count.or.nrow<0.or.nmetric<0.or.noperator<0.or.npoint_offsets<1.or.&
       nsupport<0.or.ncoeff1<0.or.ncoeff2<0.or.nscope<0.or.nxc<0)return
     if(nrow==huge(0).or.nmetric_offsets/=nrow+1.or.noperator_offsets/=nrow+1.or.&
@@ -417,7 +418,7 @@ contains
     integer,intent(in)::rank
     bad=0
     if(payload%global_count<1.or.payload%global_grid_count<1.or.payload%nocc<1.or.&
-      payload%certified_rank<1.or.payload%certified_rank>payload%global_count.or.payload%fragment_id/=rank+1.or.&
+      payload%certified_rank<payload%nocc.or.payload%certified_rank>payload%global_count.or.payload%fragment_id/=rank+1.or.&
       payload%system_fingerprint==0_int64.or.payload%pseudopotential_fingerprint==0_int64)bad=1
     if(.not.allocated(payload%row_ids).or..not.allocated(payload%metric_offsets).or.&
        .not.allocated(payload%metric_columns).or..not.allocated(payload%metric_values).or.&
@@ -534,6 +535,7 @@ contains
     integer::i,j
     integer(int64)::bits(2)
     hash=1469598103934665603_int64
+    call mix(hash,dg_sha256_schema)
     call mix(hash,int(rank,int64));call mix(hash,int(nproc,int64));call mix(hash,transaction_id)
     call mix(hash,int(payload%fragment_id,int64));call mix(hash,int(payload%global_count,int64))
     call mix(hash,int(payload%global_grid_count,int64));call mix(hash,int(payload%nocc,int64))
@@ -578,10 +580,7 @@ contains
   subroutine mix(hash,value)
     integer(int64),intent(inout)::hash
     integer(int64),intent(in)::value
-    integer::byte
-    do byte=0,7
-      hash=ieor(ishftc(hash,7),int(ibits(value,8*byte,8),int64))
-    enddo
+    call dg_sha256_mix_int64(hash,value)
   end subroutine mix
 
   subroutine shard_name(prefix,transaction_id,rank,name)

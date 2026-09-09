@@ -35,6 +35,7 @@ def main() -> None:
                 "-ffpe-trap=invalid,zero,overflow",
                 "-fbacktrace",
                 str(ROOT / "src/common/structures.f90"),
+                str(ROOT / "src/common/dg_portable_sha256.f90"),
                 str(ROOT / "src/gs/dc/dg_canonical_pp_fingerprint.f90"),
                 str(ROOT / "tests/dg/test_dg_canonical_pp_fingerprint_mpi.f90"),
                 "-o",

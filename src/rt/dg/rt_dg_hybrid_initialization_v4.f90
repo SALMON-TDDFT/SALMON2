@@ -101,7 +101,7 @@ contains
     if(ierr/=MPI_SUCCESS)then;ok=.false.;message='checkpoint scope reduction failed';return;endif
     if(global_bad/=0)then;ok=.false.;message='checkpoint/local hybrid RT scope mismatch';return;endif
 
-    state%global_count=payload%global_count;state%certified_rank=payload%global_count
+    state%global_count=payload%global_count;state%certified_rank=payload%certified_rank
     state%noccupied=payload%nocc;state%operation_count=1;state%nonidentity_operation_count=0
     state%payload_fingerprint=payload%payload_fingerprint
     state%operator_structure_fingerprint=payload%operator_structure_fingerprint

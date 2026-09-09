@@ -6,6 +6,7 @@ set(SOURCES
    stencil.f90
    nonlocal_potential.f90
    structures.f90
+   dg_portable_sha256.f90
    density_matrix.f90
    pack_unpack.f90
    sendrecv_grid.f90

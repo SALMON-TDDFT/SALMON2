@@ -44,11 +44,14 @@ for diagnostic in collective_diagnostics:
 assert "expected_shard_extent" in text and "valid_read_dimensions" in reader, \
   "RED: reader lacks exact overflow-safe serialized extent validation"
 assert "manifest_size/=" in reader and "actual_size<" in reader,"RED: fixed headers are read without exact/minimum-size checks"
+assert "certified_rank<nocc" in text,"RED: v4 checkpoint permits certification below occupied rank"
 for field in ("global_grid_count","certified_rank","operator_structure_fingerprint","scope_fingerprint","payload_fingerprint",
               "system_fingerprint","pseudopotential_fingerprint"):
   assert f"shard_{field}/={field}" in reader,f"RED: shard {field} is not compared with the manifest"
 mix_body=text.split("subroutine mix(hash,value)",1)[1].split("end subroutine mix",1)[0]
 assert "1099511628211" not in mix_body,"RED: v4 digest relies on undefined signed integer overflow"
+assert "dg_sha256_mix_int64" in mix_body,"RED: v4 digest lacks portable SHA-256 mixing"
+assert "ieor(ishftc(hash,7)" not in mix_body,"RED: v4 digest retains exact rotate/XOR collision"
 assert endpoint_text.count("subroutine publish_rt_dg_hybrid_checkpoint_v4") == 2
 endpoint_body=endpoint_text.split("subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[1].split(
   "end subroutine publish_rt_dg_hybrid_checkpoint_v4",1)[0]
@@ -68,7 +71,7 @@ for mutation in (
   assert mutation != endpoint_body
 with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_v4_checkpoint"
-  support=[root/"src/common/dg_hybrid_sparse_metric.f90",root/"src/common/dg_hybrid_sparse_operators.f90",
+  support=[root/"src/common/dg_portable_sha256.f90",root/"src/common/dg_hybrid_sparse_metric.f90",root/"src/common/dg_hybrid_sparse_operators.f90",
     root/"src/gs/dc/dg_hybrid_continuation_controller.f90",
     root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90",root/"src/rt/dg/rt_dg_hybrid_point_density.f90",
     source,endpoint,root/"src/rt/dg/rt_dg_hybrid_structural_graph.f90",
@@ -83,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
     str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_v4_mpi.f90"),*libs,"-o",str(exe)],check=True)
   reject=build/"hybrid_v4_reject"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
-    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",str(source),str(endpoint),
+    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",str(root/"src/common/dg_portable_sha256.f90"),str(source),str(endpoint),
     str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_v4_reject_mpi.f90"),"-o",str(reject)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
   for nrank in (1,2,4,8):
@@ -123,6 +126,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
         ("point-count",bytearray(original),"negative, overflowing, or invalid dimensions"),
         ("coefficient-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
         ("large-consistent-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
+        ("certified-below-occupied",bytearray(original),"disagrees with manifest common metadata"),
       ):
         if label=="negative": struct.pack_into("=i",damaged,136,-1)
         if label=="huge": struct.pack_into("=i",damaged,136,2**31-1)
@@ -132,6 +136,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
         if label=="large-consistent-product":
           for offset,value in ((136,10**9),(140,10**9+1),(148,10**9+1),(164,10**9)):
             struct.pack_into("=i",damaged,offset,value)
+        if label=="certified-below-occupied":
+          nocc=struct.unpack_from("=i",damaged,56)[0];struct.pack_into("=i",damaged,60,nocc-1)
         shard.write_bytes(damaged)
         rejected=subprocess.run([shutil.which("mpiexec"),"-n","1",str(reject),str(prefix)],
           capture_output=True,text=True,env=env,timeout=30)
@@ -143,6 +149,15 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
       original_manifest=manifest.read_bytes();damaged_manifest=bytearray(original_manifest)
       manifest_grid=struct.unpack_from("=i",damaged_manifest,44)[0]
       struct.pack_into("=i",damaged_manifest,44,manifest_grid+1)
+      manifest.write_bytes(damaged_manifest)
+      rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(reject),str(prefix)],
+        capture_output=True,text=True,env=env,timeout=30)
+      assert rejected.returncode==0,(rejected.stdout,rejected.stderr)
+      assert "disagrees with manifest common metadata" in rejected.stdout.lower(),rejected.stdout
+      manifest.write_bytes(original_manifest)
+      damaged_manifest=bytearray(original_manifest)
+      manifest_nocc=struct.unpack_from("=i",damaged_manifest,48)[0]
+      struct.pack_into("=i",damaged_manifest,52,manifest_nocc-1)
       manifest.write_bytes(damaged_manifest)
       rejected=subprocess.run([shutil.which("mpiexec"),"-n","2",str(reject),str(prefix)],
         capture_output=True,text=True,env=env,timeout=30)

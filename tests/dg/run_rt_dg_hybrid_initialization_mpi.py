@@ -26,12 +26,23 @@ for token in (
   "state%coefficients", "apply_rt_dg_sparse_rows_tiled", "reconstruct_rt_dg_point_csr_density",
 ):
   assert token in body, f"distributed-v4 initializer omits {token}"
+assert "state%certified_rank=payload%certified_rank" in body
+density_body=(root/"src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
+assert "certified_rank=minimum_dimensions(1);r=minimum_dimensions(2)" in density_body
+assert "state%global_count,state%owned_row_ids" in density_body
+main_rt=(root/"src/rt/main_tddft.f90").read_text().lower()
+for call in ("build_rt_dg_sparse_exchange", "initialize_rt_dg_hybrid_stationarity",
+             "propagate_rt_dg_hybrid_length_gauge", "evaluate_rt_dg_hybrid_stationarity",
+             "project_rt_dg_hybrid_point_csr_edges"):
+  segments=main_rt.split(f"call {call}")[1:]
+  assert segments and all("hybrid_state%global_count" in segment[:180] for segment in segments), \
+    f"RED: {call} uses certification count as construction-space extent"
 
 with tempfile.TemporaryDirectory(prefix="hybrid-v3-reject-") as name:
   build=Path(name);(build/"config.h").write_text("")
   exe=build/"reject-v3"
   sources=[
-    "src/common/dg_hybrid_sparse_metric.f90", "src/common/dg_hybrid_sparse_operators.f90",
+    "src/common/dg_portable_sha256.f90", "src/common/dg_hybrid_sparse_metric.f90", "src/common/dg_hybrid_sparse_operators.f90",
     "src/rt/dg/rt_dg_hybrid_sparse_exchange.f90", "src/rt/dg/rt_dg_hybrid_point_density.f90",
     "src/rt/dg/rt_dg_hybrid_checkpoint_v4.f90", "src/rt/dg/rt_dg_hybrid_checkpoint.f90",
     "src/rt/dg/rt_dg_hybrid_structural_graph.f90", "src/rt/dg/rt_dg_hybrid_sparse_projection.f90",

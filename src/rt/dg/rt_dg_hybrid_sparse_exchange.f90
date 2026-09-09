@@ -358,6 +358,9 @@ contains
     integer(int64)::tile_bytes
     complex(real64),allocatable::received(:)
     ok=.false.;message='';workspace_peak_bytes=0_int64;payload_collective_count=0;local_bad=0
+    call validate_tiled_plan_collective(comm,plan,size(local_values,1),size(local_values,2),tile_width,&
+      ok,message)
+    if(.not.ok)return
     if(tile_width<1.or.size(row_offsets)/=size(result,1)+1.or.size(matrix_values)/=size(column_slots).or.&
       size(local_values,1)/=plan%local_count.or.size(result,2)/=size(local_values,2))local_bad=1
     if(local_bad==0)then
@@ -415,6 +418,9 @@ contains
     integer(int64)::tile_bytes
     complex(real64),allocatable::received(:),orbitals(:)
     ok=.false.;message='';workspace_peak_bytes=0_int64;payload_collective_count=0;local_bad=0
+    call validate_tiled_plan_collective(comm,plan,size(local_values,1),size(local_values,2),tile_width,&
+      ok,message)
+    if(.not.ok)return
     if(tile_width<1.or.size(point_offsets)/=size(density)+1.or.size(support_slots)/=size(support_values).or.&
       size(occupations)/=size(local_values,2).or.size(local_values,1)/=plan%local_count)local_bad=1
     if(local_bad==0)then
@@ -462,6 +468,70 @@ contains
   end subroutine accumulate_rt_dg_sparse_density_tiled
 
 #ifdef USE_MPI
+  subroutine validate_tiled_plan_collective(comm,plan,nlocal,nrhs,tile_width,ok,message)
+    integer,intent(in)::comm,nlocal,nrhs,tile_width
+    type(s_rt_dg_sparse_exchange),intent(in)::plan
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    integer::nproc,ierr,local_bad,global_bad,minimum_value,maximum_value
+    integer(int64)::minimum_fingerprint,maximum_fingerprint
+    ok=.false.;message='';local_bad=0
+    call MPI_Comm_size(comm,nproc,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse plan communicator query failed';return;endif
+    if(.not.plan%valid.or.plan%comm/=comm.or.plan%nproc/=nproc.or.plan%local_count/=nlocal.or.&
+      nlocal<0.or.nrhs<1.or.tile_width<1.or.plan%catalog_fingerprint==0_int64)local_bad=1
+    if(.not.allocated(plan%send_counts).or..not.allocated(plan%send_displacements).or.&
+      .not.allocated(plan%receive_counts).or..not.allocated(plan%receive_displacements).or.&
+      .not.allocated(plan%send_positions).or..not.allocated(plan%value_slots).or.&
+      .not.allocated(plan%send_values).or..not.allocated(plan%receive_values))then
+      local_bad=1
+    else
+      if(size(plan%send_counts)/=nproc.or.size(plan%send_displacements)/=nproc.or.&
+        size(plan%receive_counts)/=nproc.or.size(plan%receive_displacements)/=nproc)then
+        local_bad=1
+      else
+        if(.not.valid_counts_layout(plan%send_counts,plan%send_displacements,size(plan%send_positions)).or.&
+          .not.valid_counts_layout(plan%receive_counts,plan%receive_displacements,size(plan%receive_values)))local_bad=1
+      endif
+      if(size(plan%send_values)/=size(plan%send_positions))local_bad=1
+      if(any(plan%send_positions<1).or.any(plan%send_positions>nlocal))local_bad=1
+      if(any(plan%value_slots==0).or.any(plan%value_slots>nlocal).or.&
+        any(plan%value_slots < -size(plan%receive_values)))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse plan validation reduction failed';return;endif
+    if(global_bad/=0)then;message='invalid tiled sparse exchange plan';return;endif
+    call MPI_Allreduce(tile_width,minimum_value,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse tile-width agreement failed';return;endif
+    call MPI_Allreduce(tile_width,maximum_value,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse tile-width agreement failed';return;endif
+    if(minimum_value/=maximum_value)then;message='rank-disagreeing tiled sparse tile width';return;endif
+    call MPI_Allreduce(nrhs,minimum_value,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse RHS agreement failed';return;endif
+    call MPI_Allreduce(nrhs,maximum_value,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse RHS agreement failed';return;endif
+    if(minimum_value/=maximum_value)then;message='rank-disagreeing tiled sparse RHS count';return;endif
+    call MPI_Allreduce(plan%catalog_fingerprint,minimum_fingerprint,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse provenance agreement failed';return;endif
+    call MPI_Allreduce(plan%catalog_fingerprint,maximum_fingerprint,1,MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='tiled sparse provenance agreement failed';return;endif
+    if(minimum_fingerprint/=maximum_fingerprint)then
+      message='rank-disagreeing tiled sparse exchange provenance';return
+    endif
+    ok=.true.
+  contains
+    logical function valid_counts_layout(counts,displacements,total)
+      integer,intent(in)::counts(:),displacements(:),total
+      integer::q,expected
+      valid_counts_layout=.false.;expected=0
+      do q=1,size(counts)
+        if(counts(q)<0.or.displacements(q)/=expected.or.counts(q)>huge(0)-expected)return
+        expected=expected+counts(q)
+      enddo
+      valid_counts_layout=expected==total
+    end function valid_counts_layout
+  end subroutine validate_tiled_plan_collective
+
   subroutine exchange_unique_rows_tile(comm,plan,local_values,first,width,received,workspace_bytes,ok,message)
     integer,intent(in)::comm,first,width
     type(s_rt_dg_sparse_exchange),intent(in)::plan

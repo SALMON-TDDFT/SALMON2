@@ -38,6 +38,7 @@ program test_rt_dg_hybrid_distributed_v4_mpi
   call exercise_point_density
   call exercise_tiled_action
   call exercise_point_projection
+  call exercise_zero_owned_and_invalid_plan
   if(rank==0)write(*,'(a,i0,a,i0,a,i0)')'PASS distributed-v4 coefficient halo ranks=',nproc,&
     ' local_basis=',nlocal,' repeated_edges=',size(needed)
   call MPI_Finalize(ierr)
@@ -46,6 +47,53 @@ contains
     integer,intent(in)::row,column
     canonical_value=cmplx(0.125d0*row+0.03125d0*column,-0.0625d0*row+0.015625d0*column,real64)
   end function canonical_value
+  subroutine exercise_zero_owned_and_invalid_plan
+    type(s_rt_dg_sparse_exchange)::zero_plan,bad_plan
+    integer::local_rows,global_rows,row,tile,call_count,oracle_bad
+    integer(int64),allocatable::zero_owned(:)
+    integer,allocatable::zero_needed(:),offsets(:),slots(:)
+    complex(real64),allocatable::values(:),coefficients(:,:),result(:,:)
+    integer(int64)::peak
+    logical::action_ok
+    character(256)::action_message
+    if(nproc==1)then
+      local_rows=3;global_rows=3
+    else
+      local_rows=merge(0,3,rank==nproc-1);global_rows=3*(nproc-1)
+    endif
+    allocate(zero_owned(local_rows),zero_needed(local_rows),offsets(local_rows+1),slots(local_rows),&
+      values(local_rows),coefficients(local_rows,5),result(local_rows,5))
+    do row=1,local_rows
+      zero_owned(row)=int(3*rank+row,int64);zero_needed(row)=int(zero_owned(row))
+      slots(row)=row;values(row)=cmplx(0.5d0,-0.125d0,real64)
+      coefficients(row,:)=[(canonical_value(int(zero_owned(row)),i),i=1,5)]
+    enddo
+    offsets=[(row,row=1,local_rows+1)]
+    call build_rt_dg_sparse_exchange(comm,global_rows,99173_int64,zero_owned,zero_needed,zero_plan,&
+      action_ok,action_message)
+    call require(action_ok,'zero-owned sparse plan setup failed: '//trim(action_message))
+    call apply_rt_dg_sparse_rows_tiled(comm,zero_plan,offsets,values,slots,coefficients,result,2,&
+      peak,call_count,action_ok,action_message)
+    call require(action_ok,'zero-owned tiled action failed: '//trim(action_message))
+    oracle_bad=0
+    do row=1,local_rows
+      if(maxval(abs(result(row,:)-values(row)*coefficients(row,:)))>=1d-12)oracle_bad=1
+    enddo
+    call require(oracle_bad==0,'zero-owned tiled action disagrees with local oracle')
+    bad_plan=zero_plan
+    if(rank==nproc-1)deallocate(bad_plan%value_slots)
+    call apply_rt_dg_sparse_rows_tiled(comm,bad_plan,offsets,values,slots,coefficients,result,2,&
+      peak,call_count,action_ok,action_message)
+    call require(.not.action_ok.and.index(action_message,'invalid tiled sparse exchange plan')>0,&
+      'rank-local malformed tiled plan was not collectively rejected')
+    if(nproc>1)then
+      tile=merge(2,3,rank==0)
+      call apply_rt_dg_sparse_rows_tiled(comm,zero_plan,offsets,values,slots,coefficients,result,tile,&
+        peak,call_count,action_ok,action_message)
+      call require(.not.action_ok.and.index(action_message,'rank-disagreeing tiled sparse tile width')>0,&
+        'rank-disagreeing tile width was accepted')
+    endif
+  end subroutine exercise_zero_owned_and_invalid_plan
   subroutine exercise_tiled_action
     integer,parameter::large_nrhs=257
     integer::row,column,width,call_count

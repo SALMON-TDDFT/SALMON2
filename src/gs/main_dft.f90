@@ -2004,6 +2004,7 @@ contains
     type(s_rt_dg_sparse_exchange)::energy_exchange
     type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
     type(s_dft_energy)::checkpoint_energy
+    type(s_dft_system)::identity_system
     type(s_dg_hybrid_candidate_acceptance)::rank_policy_receipt
 
     ok=.false.;message='';n=size(solved_eigenvalues);nocc=occupied_state%noccupied
@@ -2202,7 +2203,16 @@ contains
     payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
     payload%operator_structure_fingerprint=structure_fingerprint
     payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
-    payload%system_fingerprint=fingerprint_rt_dg_hybrid_system(dc%system_tot,dc%lg_tot%num,.true.,&
+    ! dcdft deliberately releases the conventional occupation array.  Rebuild
+    ! that one identity field from the terminal LCFO occupations while keeping
+    ! atoms, cell, grid, k vectors and weights from the authoritative total cell.
+    identity_system=dc%system_tot
+    if(identity_system%nspin/=1.or.identity_system%nk/=1.or.identity_system%no/=nocc)then
+      message='terminal divided v4 electronic identity shape is unsupported';return
+    endif
+    allocate(identity_system%rocc(identity_system%no,identity_system%nk,identity_system%nspin))
+    identity_system%rocc=0d0;identity_system%rocc(:,1,1)=occupied_state%occupations
+    payload%system_fingerprint=fingerprint_rt_dg_hybrid_system(identity_system,dc%lg_tot%num,.true.,&
       dc%ppg_tot%Nlma,canonical_pp_fingerprint(pp),xc_func%xctype,.false.,.false.,.false.,.false.,.false.)
     payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)
     payload%payload_fingerprint=ieor(ieor(basis_fingerprint,operator_fingerprint),&
