@@ -35,7 +35,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    integer::rank,nproc,ierr,ios,unit,local_bad,global_bad,flush_ios,close_ios
+    integer::rank,nproc,ierr,ios,unit,local_bad,global_bad,flush_ios
     integer(int64)::transaction_id,shard_digest,shard_size
     integer(int64),allocatable::shard_sizes(:),shard_digests(:)
     integer,allocatable::fragment_ids(:)
@@ -57,7 +57,7 @@ contains
     call shard_name(prefix,transaction_id,rank,shard)
     write(shard_tmp,'(a,".temporary")')trim(shard)
     shard_digest=digest_payload(payload,rank,nproc,transaction_id)
-    ios=0
+    ios=0;unit=-1
     open(newunit=unit,file=trim(shard_tmp),status='replace',access='stream',form='unformatted',&
       action='write',iostat=ios,iomsg=iomsg)
     if(ios==0)then
@@ -77,12 +77,11 @@ contains
         payload%initial_occupied_amplitudes,payload%occupations,payload%eigenvalues,&
         payload%scope_selectors,payload%xc_types,payload%acceptance_receipts,&
         payload%pseudopotential_receipt,payload%energy_receipt
-      flush_ios=0;close_ios=0
+      flush_ios=0
       if(ios==0)flush(unit,iostat=flush_ios)
-      close(unit,iostat=close_ios)
       if(ios==0.and.flush_ios/=0)ios=flush_ios
-      if(ios==0.and.close_ios/=0)ios=close_ios
     endif
+    call close_if_open(unit,ios)
     if(ios==0)then
       inquire(file=trim(shard_tmp),size=shard_size,iostat=ios)
       if(ios==0)call rename(trim(shard_tmp),trim(shard),ios)
@@ -97,7 +96,7 @@ contains
     call MPI_Gather(shard_digest,1,MPI_INTEGER8,shard_digests,1,MPI_INTEGER8,0,comm,ierr)
     call MPI_Gather(payload%fragment_id,1,MPI_INTEGER,fragment_ids,1,MPI_INTEGER,0,comm,ierr)
     manifest=trim(prefix)//'.manifest';write(manifest_tmp,'(a,".temporary.",z16.16)')trim(manifest),transaction_id
-    ios=0
+    ios=0;unit=-1
     if(rank==0)then
       open(newunit=unit,file=trim(manifest_tmp),status='replace',access='stream',form='unformatted',&
         action='write',iostat=ios,iomsg=iomsg)
@@ -106,11 +105,10 @@ contains
         payload%operator_fingerprint,payload%operator_structure_fingerprint,payload%scope_fingerprint,&
         payload%payload_fingerprint,&
         shard_sizes,shard_digests,fragment_ids
-      flush_ios=0;close_ios=0
+      flush_ios=0
       if(ios==0)flush(unit,iostat=flush_ios)
-      close(unit,iostat=close_ios)
       if(ios==0.and.flush_ios/=0)ios=flush_ios
-      if(ios==0.and.close_ios/=0)ios=close_ios
+      call close_if_open(unit,ios)
       if(ios==0)call rename(trim(manifest_tmp),trim(manifest),ios)
     endif
     call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
@@ -156,7 +154,7 @@ contains
       if(ios==0)read(unit,iostat=ios,iomsg=iomsg)magic,version,file_nproc,global_count,global_grid_count,nocc,&
         certified_rank,transaction_id,basis_fingerprint,operator_fingerprint,operator_structure_fingerprint,&
         scope_fingerprint,payload_fingerprint,shard_sizes,shard_digests,fragment_ids
-      if(unit/=-1)close(unit,iostat=local_bad)
+      call close_if_open(unit,ios)
       if(ios==0.and.(magic/=manifest_magic.or.version/=schema_version.or.file_nproc/=nproc))ios=1
     endif
     call MPI_Bcast(ios,1,MPI_INTEGER,0,comm,ierr)
@@ -225,7 +223,7 @@ contains
       payload%initial_occupied_amplitudes,payload%occupations,payload%eigenvalues,&
       payload%scope_selectors,payload%xc_types,payload%acceptance_receipts,&
       payload%pseudopotential_receipt,payload%energy_receipt
-    if(unit/=-1)close(unit,iostat=local_bad)
+    call close_if_open(unit,ios)
     payload%global_count=global_count;payload%global_grid_count=global_grid_count
     payload%nocc=nocc;payload%certified_rank=certified_rank;payload%fragment_id=fragment_id
     payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
@@ -264,18 +262,94 @@ contains
     integer(int64),intent(in)::file_size
     integer,intent(in)::global_count,global_grid_count,nocc,certified_rank,nrow,nmetric_offsets,nmetric,&
       noperator_offsets,noperator,npoint_offsets,nsupport,ncoeff1,ncoeff2,nscope,nxc
-    integer::counts(9)
+    integer(int64)::expected_size
+    logical::extent_ok
     valid_read_dimensions=.false.
     if(global_count<1.or.global_grid_count<1.or.nocc<1.or.certified_rank<1.or.&
       certified_rank>global_count.or.nrow<0.or.nmetric<0.or.noperator<0.or.npoint_offsets<1.or.&
       nsupport<0.or.ncoeff1<0.or.ncoeff2<0.or.nscope<0.or.nxc<0)return
     if(nrow==huge(0).or.nmetric_offsets/=nrow+1.or.noperator_offsets/=nrow+1.or.&
       ncoeff1/=nrow.or.ncoeff2/=nocc)return
-    counts=[nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,nsupport,nscope,nxc]
-    if(any(int(counts,int64)>file_size))return
-    if(int(ncoeff1,int64)>file_size/max(1_int64,int(ncoeff2,int64)))return
+    call expected_shard_extent(nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,&
+      nsupport,ncoeff1,ncoeff2,nocc,nscope,nxc,expected_size,extent_ok)
+    if(.not.extent_ok.or.expected_size/=file_size)return
     valid_read_dimensions=.true.
   end function valid_read_dimensions
+
+  subroutine expected_shard_extent(nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,&
+      nsupport,ncoeff1,ncoeff2,nocc,nscope,nxc,extent,ok)
+    integer,intent(in)::nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,&
+      nsupport,ncoeff1,ncoeff2,nocc,nscope,nxc
+    integer(int64),intent(out)::extent
+    logical,intent(out)::ok
+    integer(int64),parameter::integer_bytes=int(storage_size(0)/8,int64),&
+      int64_bytes=int(storage_size(0_int64)/8,int64),real_bytes=int(storage_size(0d0)/8,int64),&
+      complex_bytes=int(storage_size(cmplx(0d0,0d0,real64))/8,int64),&
+      character_bytes=int(storage_size('a')/8,int64)
+    integer(int64)::npoint,ncoefficient
+    ok=.false.;extent=0_int64
+    if(any([nrow,nmetric_offsets,nmetric,noperator_offsets,noperator,npoint_offsets,nsupport,&
+      ncoeff1,ncoeff2,nocc,nscope,nxc]<0))return
+    npoint=int(npoint_offsets,int64)-1_int64
+    if(npoint<0_int64)return
+    call checked_product(int(ncoeff1,int64),int(ncoeff2,int64),ncoefficient,ok)
+    if(.not.ok)return
+    extent=32_int64*character_bytes+19_int64*integer_bytes+7_int64*int64_bytes
+    ok=.true.
+    call add_extent(extent,int(nrow,int64),int64_bytes,ok)
+    call add_extent(extent,int(nmetric_offsets,int64),integer_bytes,ok)
+    call add_extent(extent,int(nmetric,int64),integer_bytes,ok)
+    call add_extent(extent,int(nmetric,int64),complex_bytes,ok)
+    call add_extent(extent,int(noperator_offsets,int64),integer_bytes,ok)
+    call add_extent(extent,int(noperator,int64),integer_bytes,ok)
+    call add_extent(extent,8_int64*int(noperator,int64),complex_bytes,ok)
+    call add_extent(extent,npoint,int64_bytes,ok)
+    call add_extent(extent,int(npoint_offsets,int64),integer_bytes,ok)
+    call add_extent(extent,int(nsupport,int64),integer_bytes,ok)
+    call add_extent(extent,int(nsupport,int64),complex_bytes,ok)
+    call add_extent(extent,2_int64*npoint,real_bytes,ok)
+    call add_extent(extent,ncoefficient,complex_bytes,ok)
+    call add_extent(extent,2_int64*int(nocc,int64),real_bytes,ok)
+    call add_extent(extent,int(nscope,int64)+int(nxc,int64),integer_bytes,ok)
+    call add_extent(extent,21_int64,real_bytes,ok)
+  end subroutine expected_shard_extent
+
+  subroutine checked_product(left,right,value,ok)
+    integer(int64),intent(in)::left,right
+    integer(int64),intent(out)::value
+    logical,intent(out)::ok
+    value=0_int64;ok=left>=0_int64.and.right>=0_int64
+    if(.not.ok)return
+    if(left/=0_int64.and.right>huge(value)/left)then;ok=.false.;return;endif
+    value=left*right
+  end subroutine checked_product
+
+  subroutine add_extent(total,count,element_bytes,ok)
+    integer(int64),intent(inout)::total
+    integer(int64),intent(in)::count,element_bytes
+    logical,intent(inout)::ok
+    integer(int64)::increment
+    if(.not.ok)return
+    call checked_product(count,element_bytes,increment,ok)
+    if(.not.ok)return
+    if(increment>huge(total)-total)then;ok=.false.;return;endif
+    total=total+increment
+  end subroutine add_extent
+
+  subroutine close_if_open(unit,status)
+    integer,intent(inout)::unit,status
+    integer::close_status,inquire_status
+    logical::opened
+    if(unit==-1)return
+    inquire(unit=unit,opened=opened,iostat=inquire_status)
+    if(inquire_status/=0)then
+      if(status==0)status=inquire_status
+    else if(opened)then
+      close(unit,iostat=close_status)
+      if(status==0.and.close_status/=0)status=close_status
+    endif
+    unit=-1
+  end subroutine close_if_open
 
   integer function validate_local(payload,rank) result(bad)
     type(s_rt_dg_hybrid_v4_shard),intent(in)::payload

@@ -2034,12 +2034,11 @@ contains
       certified_rank=certified_rank+1
     enddo
     if(certified_rank_receipt>0)then
-      if(certified_rank_receipt<requested_rank.or.certified_rank_receipt>=n)then
+      if(certified_rank_receipt<requested_rank.or.certified_rank_receipt>n)then
         message='terminal divided v4 certified-rank receipt is inconsistent';return
       endif
       certified_rank=certified_rank_receipt
     endif
-    if(certified_rank>=n)then;message='terminal divided v4 lacks an energy-window proof state';return;endif
 
     ! Pointwise support supplies every potentially nonzero local-potential and
     ! position edge.  Fixed matrices add their exact structural support.  No

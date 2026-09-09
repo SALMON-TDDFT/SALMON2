@@ -8,20 +8,27 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
     s_rt_dg_hybrid_v4_publication_authorization
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint,&
     fingerprint_rt_dg_hybrid_scope
+  use dg_hybrid_continuation_controller,only:s_dg_hybrid_candidate_acceptance,&
+    initialize_dg_hybrid_candidate_acceptance,record_dg_hybrid_complete_lcfo_solve,&
+    record_dg_hybrid_occupation_policy,record_dg_hybrid_unconditional_gates,&
+    record_dg_hybrid_spectral_certification,record_dg_hybrid_certified_rt_basis,&
+    authorize_dg_hybrid_v4_publication
   implicit none
   type(s_rt_dg_hybrid_v4_shard)::written,loaded
   type(s_rt_dg_hybrid_state)::state
   type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
-  integer::comm,rank,nproc,ierr,i,j
+  type(s_dg_hybrid_candidate_acceptance)::candidate
+  integer::comm,rank,nproc,ierr,i,j,environment_status
   integer,allocatable::row_owner(:)
   logical::ok
   character(256)::message
-  character(512)::prefix
+  character(512)::prefix,failure_prefix
+  character(32)::test_mode
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   write(prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-checkpoint-',nproc
   written%global_count=50*nproc;written%global_grid_count=100*nproc;written%nocc=7
-  written%certified_rank=written%global_count-1;written%fragment_id=rank+1
+  written%certified_rank=written%global_count;written%fragment_id=rank+1
   written%basis_fingerprint=7717_int64;written%operator_fingerprint=9919_int64
   written%operator_structure_fingerprint=1217_int64;written%scope_fingerprint=1811_int64
   written%payload_fingerprint=2027_int64
@@ -76,7 +83,49 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
   call require(.not.ok.and.index(message,'authorization')>0,&
     'common v4 endpoint accepted a payload without formal publication authorization')
-  authorization%valid=.true.
+  call initialize_dg_hybrid_candidate_acceptance(comm,written%global_count,-1d0,candidate,ok,message)
+  call require(ok,'full-rank controller initialization failed: '//trim(message))
+  call record_dg_hybrid_complete_lcfo_solve(comm,candidate,written%global_count,1,3001_int64,ok,message)
+  call require(ok,'full-rank complete LCFO receipt failed: '//trim(message))
+  call record_dg_hybrid_occupation_policy(comm,candidate,written%nocc,.true.,3002_int64,ok,message)
+  call require(ok,'full-rank occupation receipt failed: '//trim(message))
+  call record_dg_hybrid_unconditional_gates(comm,candidate,.true.,.true.,1d-13,2d-13,1d-10,ok,message)
+  call require(ok,'full-rank physical gates failed: '//trim(message))
+  call record_dg_hybrid_spectral_certification(comm,candidate,written%nocc,written%global_count,&
+    written%global_count,.false.,.true.,.true.,3003_int64,ok,message)
+  call require(ok.and.candidate%certified_rank==written%global_count,&
+    'energy_window=-1 full-rank certification was rejected: '//trim(message))
+  call record_dg_hybrid_certified_rt_basis(comm,candidate,written%global_count,written%basis_fingerprint,&
+    written%operator_fingerprint,ok,message)
+  call require(ok,'full-rank certified basis receipt failed: '//trim(message))
+  call authorize_dg_hybrid_v4_publication(comm,candidate,4,written%global_count,.true.,ok,message)
+  call require(ok.and.candidate%publication_authorized,'full-rank v4 publication authorization failed: '//trim(message))
+  authorization%valid=candidate%publication_authorized
+  authorization%checkpoint_version=candidate%checkpoint_version
+  authorization%published_rank=candidate%published_rt_rank
+  authorization%basis_fingerprint=candidate%basis_fingerprint
+  authorization%operator_fingerprint=candidate%operator_fingerprint
+  write(failure_prefix,'(a,i0,a)')'/tmp/salmon-hybrid-v4-open-failure-',nproc,'/missing/checkpoint'
+  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written%global_count,written%nocc,&
+    written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+  call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 rank shard')>0,&
+    'v4 writer OPEN failure was not collectively rejected')
+  call get_environment_variable('SALMON_TEST_V4_MANIFEST_FAILURE',test_mode,status=environment_status)
+  if(environment_status==0.and.trim(test_mode)=='1')then
+    write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-manifest-failure-',nproc
+    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written%global_count,written%nocc,&
+      written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+    call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 manifest')>0,&
+      'v4 manifest rename failure was not collectively rejected')
+    if(rank==0)write(*,'(a,i0)')'PASS v4 collective manifest failure ranks=',nproc
+    call MPI_Finalize(ierr);stop
+  endif
+  written%certified_rank=written%global_count+1
+  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
+  call require(.not.ok.and.index(message,'invalid distributed-v4 rank shard payload')>0,&
+    'certified rank greater than construction rank was accepted')
+  written%certified_rank=written%global_count
   if(nproc>1)then
     written%scope_fingerprint=written%scope_fingerprint+rank
     call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
