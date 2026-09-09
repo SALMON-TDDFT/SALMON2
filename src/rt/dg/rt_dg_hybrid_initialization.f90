@@ -832,12 +832,12 @@ contains
       enddo
     enddo
     call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;fingerprint=0_int64;ok=.false.;message='sparse operator structure fingerprint reduction failed';return;endif
     fingerprint=ieor(ishftc(fingerprint,11),ishftc(ownership_fingerprint,7))
     fingerprint=ieor(fingerprint,position_convention_fingerprint)
     fingerprint=ieor(fingerprint,ishftc(int(global_count,int64),37))
     if(fingerprint==0_int64)fingerprint=1_int64
-    ok=ierr==MPI_SUCCESS
-    if(ok)then;message='';else;message='sparse operator structure fingerprint reduction failed';endif
+    ok=.true.;message=''
 #else
     fingerprint=0_int64;ok=.false.;message='sparse structure fingerprint requires MPI'
 #endif

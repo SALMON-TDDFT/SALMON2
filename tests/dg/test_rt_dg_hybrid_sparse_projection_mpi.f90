@@ -3,7 +3,8 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph,&
-    checked_rt_dg_hybrid_structural_capacity,collective_rt_dg_hybrid_structural_capacity_status
+    checked_rt_dg_hybrid_structural_capacity,collective_rt_dg_hybrid_structural_capacity_status,&
+    checked_rt_dg_hybrid_global_square_extent
   use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_sparse_edges,&
     validate_rt_dg_hybrid_sparse_hermiticity,checked_rt_dg_hybrid_projection_capacity
   implicit none
@@ -14,6 +15,7 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call exercise_capacity_boundary
   call exercise_structural_capacity_boundary
+  call exercise_zero_global_count
   call exercise_structural_graph
   call exercise_repeated_support_scaling
   call exercise_sparse_projection
@@ -42,10 +44,24 @@ contains
     call require(.not.capacity_ok,'zero structural capacity multiplier was not rejected safely')
     call checked_rt_dg_hybrid_structural_capacity(-1,50,requested,capacity_ok)
     call require(.not.capacity_ok,'negative structural capacity multiplier was not rejected safely')
+    call checked_rt_dg_hybrid_global_square_extent(0,capacity_ok)
+    call require(.not.capacity_ok,'zero structural global extent was not rejected before division')
     call collective_rt_dg_hybrid_structural_capacity_status(comm,rank/=0,capacity_ok,capacity_message)
     call require(.not.capacity_ok.and.index(capacity_message,'capacity')>0,&
       'one-rank structural capacity failure was not collectively rejected')
   end subroutine exercise_structural_capacity_boundary
+  subroutine exercise_zero_global_count
+    integer(int64)::empty_rows(0)
+    integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
+    complex(real64)::empty_basis(0,0),empty_matrix(0,0),empty_position(3,0,0)
+    logical::graph_ok
+    character(256)::graph_message
+    call build_rt_dg_hybrid_structural_graph(comm,0,empty_rows,empty_basis,empty_matrix,empty_matrix,empty_matrix,&
+      empty_matrix,empty_matrix,empty_matrix,empty_position,metric_offsets,metric_columns,operator_offsets,&
+      operator_columns,graph_ok,graph_message)
+    call require(.not.graph_ok.and.index(graph_message,'invalid Hybrid structural graph inputs')>0,&
+      'zero global_count was not safely rejected before division')
+  end subroutine exercise_zero_global_count
   subroutine exercise_invalid_projection_contracts
     integer::n,owned,row
     integer(int64),allocatable::rows(:),empty_grid(:)

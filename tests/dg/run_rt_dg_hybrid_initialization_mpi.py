@@ -67,6 +67,10 @@ assert "callfingerprint_rt_dg_hybrid_sparse_structure" in builder, (
 for token in ("row_offsets", "column_ids", "ownership_fingerprint", "position_convention_fingerprint"):
   assert token in compact.split("subroutinefingerprint_rt_dg_hybrid_sparse_structure",1)[1].split(
     "endsubroutinefingerprint_rt_dg_hybrid_sparse_structure",1)[0], f"structure fingerprint omits {token}"
+fingerprint_helper=compact.split("subroutinefingerprint_rt_dg_hybrid_sparse_structure",1)[1].split(
+  "endsubroutinefingerprint_rt_dg_hybrid_sparse_structure",1)[0]
+assert "callmpi_allreduce" in fingerprint_helper and "if(ierr/=mpi_success)then" in fingerprint_helper, (
+  "sparse structure fingerprint reads reduction output after MPI failure")
 assert "entry_tolerance" not in builder and "epsilon(1d0)*entry_scale" not in structural_source, (
   "Hybrid RT structural support must not drop exact basis or fixed-operator pairs by value threshold"
 )

@@ -9,6 +9,7 @@ program test_rt_dg_hybrid_checkpoint_mpi
     read_rt_dg_hybrid_ground_state_checkpoint,read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     authenticate_rt_dg_hybrid_ground_state_payload,fingerprint_rt_dg_hybrid_component,&
     collective_rt_dg_hybrid_publication_precondition,&
+    collective_rt_dg_hybrid_publication_mapping_precondition,&
     rt_dg_hybrid_checkpoint_version,rt_dg_hybrid_occupied_checkpoint_version,&
     rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
     rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
@@ -29,11 +30,17 @@ program test_rt_dg_hybrid_checkpoint_mpi
   logical::ok
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call get_command_argument(1,mode,length=mode_length);call get_command_argument(1,mode)
+  if(index(trim(mode),'mapping_')==1)then
+    call exercise_publication_mapping_precondition
+    call MPI_Finalize(ierr)
+    stop
+  endif
   call exercise_publication_precondition
+  call exercise_publication_mapping_precondition
   call require(rt_dg_hybrid_checkpoint_version==2.and.rt_dg_hybrid_occupied_checkpoint_version==2.and.&
     rt_dg_hybrid_ground_state_checkpoint_version==3.and.rt_dg_hybrid_vector_canonical_momentum==1,&
     'checkpoint family versions or canonical-momentum vector slot changed unexpectedly')
-  call get_command_argument(1,mode,length=mode_length);call get_command_argument(1,mode)
   call get_command_argument(2,path)
   if(trim(mode)=='write_complete_legacy_dynamic')then
     call require(nproc==1,'legacy-dynamic full-rank fixture requires one MPI rank')
@@ -286,6 +293,51 @@ contains
       collective_ok,collective_message)
     call require(nproc==1.or..not.collective_ok,'rank-disagreeing v3 publication extent was accepted')
   end subroutine exercise_publication_precondition
+  subroutine exercise_publication_mapping_precondition
+    integer::row,mapping_n
+    integer(int64)::mapping_rows(2),occupied_rows(2)
+    integer,allocatable::mapping_owner(:)
+    logical::collective_ok,locally_valid
+    character(256)::collective_message
+    mapping_n=2*nproc;allocate(mapping_owner(mapping_n))
+    mapping_rows=[int(2*rank+1,int64),int(2*rank+2,int64)];occupied_rows=mapping_rows
+    do row=1,mapping_n;mapping_owner(row)=(row-1)/2;enddo
+    if(index(trim(mode),'mapping_')/=1)then
+      call collective_rt_dg_hybrid_publication_mapping_precondition(comm,mapping_n,mapping_rows,mapping_owner,&
+        occupied_rows,.true.,collective_ok,collective_message)
+      call require(collective_ok,'valid global v3 publication row mapping was rejected')
+    endif
+    if(nproc>1.and.(index(trim(mode),'mapping_')/=1.or.trim(mode)=='mapping_row_contract'))then
+      mapping_rows=[int(2*rank+1,int64),int(2*rank+2,int64)]
+      if(rank==0)mapping_rows=[1_int64,1_int64]
+      occupied_rows=mapping_rows
+      do row=1,mapping_n;mapping_owner(row)=(row-1)/2;enddo
+      call collective_rt_dg_hybrid_publication_mapping_precondition(comm,mapping_n,mapping_rows,mapping_owner,&
+        occupied_rows,.true.,collective_ok,collective_message)
+      call require(.not.collective_ok.and.index(collective_message,'stage=pre-gather')>0,&
+        'duplicate or missing global provider rows were accepted')
+    endif
+    if(nproc>1.and.(index(trim(mode),'mapping_')/=1.or.trim(mode)=='mapping_owner_contract'))then
+      mapping_rows=[int(2*rank+1,int64),int(2*rank+2,int64)];occupied_rows=mapping_rows
+      do row=1,mapping_n;mapping_owner(row)=(row-1)/2;enddo
+      if(rank==0)mapping_owner(3)=0
+      locally_valid=all(mapping_owner(int(mapping_rows))==rank)
+      call require(locally_valid,'owner-disagreement fixture is not locally valid')
+      call collective_rt_dg_hybrid_publication_mapping_precondition(comm,mapping_n,mapping_rows,mapping_owner,&
+        occupied_rows,locally_valid,collective_ok,collective_message)
+      call require(.not.collective_ok.and.index(collective_message,'stage=pre-gather')>0,&
+        'rank-disagreeing global owner map was accepted')
+    endif
+    if(nproc>1.and.(index(trim(mode),'mapping_')/=1.or.trim(mode)=='mapping_occupied_contract'))then
+      mapping_rows=[int(2*rank+1,int64),int(2*rank+2,int64)]
+      do row=1,mapping_n;mapping_owner(row)=(row-1)/2;enddo
+      occupied_rows=[mapping_rows(2),mapping_rows(1)]
+      call collective_rt_dg_hybrid_publication_mapping_precondition(comm,mapping_n,mapping_rows,mapping_owner,&
+        occupied_rows,.true.,collective_ok,collective_message)
+      call require(.not.collective_ok.and.index(collective_message,'stage=pre-gather')>0,&
+        'misaligned occupied coefficient rows were accepted')
+    endif
+  end subroutine exercise_publication_mapping_precondition
   subroutine construct_complete_payload(payload)
     type(s_rt_dg_hybrid_ground_state_payload),intent(out)::payload
     integer::row,point,local_row,local_point,nrow,npoint,face,nface,local_face,projector,nprojector,local_projector,&

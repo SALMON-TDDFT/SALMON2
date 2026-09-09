@@ -82,8 +82,12 @@ divided_publisher=main_source.split("subroutine publish_dg_hybrid_divided_v3",1)
   "end subroutine publish_dg_hybrid_divided_v3",1)[0]
 assert "collective_rt_dg_hybrid_publication_precondition" in divided_publisher, (
   "formal divided v3 publisher lacks a collective precondition before gathers")
+assert "collective_rt_dg_hybrid_publication_mapping_precondition" in divided_publisher, (
+  "formal divided v3 publisher lacks a global row-mapping proof before gathers")
 assert divided_publisher.index("collective_rt_dg_hybrid_publication_precondition") < divided_publisher.index(
   "collect_dg_hybrid_full_rows"), "formal divided v3 publisher gathers before collective validation"
+assert divided_publisher.index("collective_rt_dg_hybrid_publication_mapping_precondition") < divided_publisher.index(
+  "collect_dg_hybrid_full_rows"), "formal divided v3 publisher gathers before global row-mapping proof"
 assert "full_metric" not in divided_publisher, "formal divided v3 publisher retains an unused global dense metric"
 for publication_contract in (
   "occupied_state%valid.and.occupied_state%converged",
@@ -100,6 +104,8 @@ publication_precondition=checkpoint_source.split(
   "end subroutine collective_rt_dg_hybrid_publication_precondition",1)[0]
 assert publication_precondition.replace(" ","").count("if(ierr/=mpi_success)")>=3, (
   "publication precondition reads undefined reduction results after MPI failure")
+assert "stage=pre-gather global row mapping failed" in checkpoint_source, (
+  "global row-mapping rejection lacks a pre-gather stage receipt")
 if os.environ.get("SALMON_LAPACK_LIBS"):
   lapack_libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("pkg-config") and subprocess.run(["pkg-config","--exists","openblas"],check=False).returncode==0:
@@ -136,6 +142,30 @@ end program nonmpi_checkpoint_probe
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
     str(mutated_checkpoint),str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90"),
     *lapack_libs,"-o",str(mutated_exe)],check=True)
+  mapping_accept="ok=global_bad==0.and.all(row_counts==1).and.all(owner_minimum==owner_maximum)"
+  assert checkpoint_source.count(mapping_accept)==1,"global row-mapping acceptance is not uniquely testable"
+  mapping_mutations=(
+    ("missing-row-count",mapping_accept,
+      "ok=global_bad==0.and.all(owner_minimum==owner_maximum)",
+      "mapping_row_contract","duplicate or missing global provider rows were accepted"),
+    ("missing-owner-agreement",mapping_accept,
+      "ok=global_bad==0.and.all(row_counts==1)",
+      "mapping_owner_contract","rank-disagreeing global owner map was accepted"),
+    ("missing-occupied-alignment",".or.any(occupied_row_ids/=row_ids)","",
+      "mapping_occupied_contract","misaligned occupied coefficient rows were accepted"),
+  )
+  mutated_mapping_executables=[]
+  for label,old,new,mode,diagnostic in mapping_mutations:
+    assert checkpoint_source.count(old)==1,(label,"mapping guard is not uniquely testable")
+    mutated_mapping=build/f"rt_dg_hybrid_checkpoint_{label}.f90"
+    mutated_mapping.write_text(checkpoint_source.replace(old,new,1))
+    mutated_mapping_exe=build/f"hybrid_checkpoint_{label}"
+    subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+      "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+      str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
+      str(mutated_mapping),str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90"),
+      *lapack_libs,"-o",str(mutated_mapping_exe)],check=True)
+    mutated_mapping_executables.append((label,mutated_mapping_exe,mode,diagnostic))
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
@@ -147,10 +177,17 @@ end program nonmpi_checkpoint_probe
   assert mutated_run.returncode!=0,(mutated_run.stdout,mutated_run.stderr)
   assert "one-rank malformed v3 publication precondition was not collectively rejected" in (
     mutated_run.stdout+mutated_run.stderr),(mutated_run.stdout,mutated_run.stderr)
+  for label,mutated_mapping_exe,mode,diagnostic in mutated_mapping_executables:
+    for nrank in (2,4,8):
+      mutated_mapping_run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(mutated_mapping_exe),
+        mode],capture_output=True,text=True,env=env,timeout=30)
+      assert mutated_mapping_run.returncode!=0,(label,nrank,mutated_mapping_run.stdout,mutated_mapping_run.stderr)
+      assert diagnostic in (mutated_mapping_run.stdout+mutated_mapping_run.stderr),(
+        label,nrank,mutated_mapping_run.stdout,mutated_mapping_run.stderr)
   complete_fingerprints=[]
   for nrank in (1,2,4,8):
     complete=build/f"complete-{nrank}.chk"
-    complete_write=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_complete",str(complete)],capture_output=True,text=True,env=env)
+    complete_write=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe),"write_complete",str(complete)],capture_output=True,text=True,env=env,timeout=30)
     assert complete_write.returncode==0,(nrank,complete_write.stdout,complete_write.stderr)
     accepted_bytes=complete.read_bytes()
     assert struct.unpack_from("=i",accepted_bytes,16)[0]==3,"complete GS checkpoint is not version 3"

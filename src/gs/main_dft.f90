@@ -189,6 +189,7 @@ use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   s_rt_dg_hybrid_ground_state_payload,write_rt_dg_hybrid_ground_state_checkpoint,&
   fingerprint_rt_dg_hybrid_component,fingerprint_rt_dg_hybrid_ground_state_payload,&
   collective_rt_dg_hybrid_publication_precondition,&
+  collective_rt_dg_hybrid_publication_mapping_precondition,&
   rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
   rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
 use rt_dg_hybrid_initialization,only:stamp_rt_dg_hybrid_v3_fingerprints,fingerprint_rt_dg_hybrid_scope
@@ -2024,6 +2025,9 @@ contains
     if(precondition_ok.and.nrow>0)precondition_ok=all(row_owner(int(row_ids))==rank).and.&
       all(occupied_state%owned_row_ids==row_ids).and.all([(count(row_ids==row_ids(i))==1,i=1,nrow)])
     call collective_rt_dg_hybrid_publication_precondition(dc%icomm_tot,precondition_ok,n,nocc,local_ok,local_message)
+    if(.not.local_ok)then;message=trim(local_message);return;endif
+    call collective_rt_dg_hybrid_publication_mapping_precondition(dc%icomm_tot,n,row_ids,row_owner,&
+      occupied_state%owned_row_ids,precondition_ok,local_ok,local_message)
     if(.not.local_ok)then;message=trim(local_message);return;endif
     call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,solved_coefficients,full_coefficients,local_ok)
     if(.not.local_ok)then;message='v3 solved-pair collection failed';return;endif

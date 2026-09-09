@@ -143,7 +143,8 @@ module rt_dg_hybrid_checkpoint
     write_rt_dg_hybrid_ground_state_checkpoint,read_rt_dg_hybrid_ground_state_checkpoint,&
     read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     fingerprint_rt_dg_hybrid_ground_state_payload,authenticate_rt_dg_hybrid_ground_state_payload,&
-    fingerprint_rt_dg_hybrid_component,collective_rt_dg_hybrid_publication_precondition
+    fingerprint_rt_dg_hybrid_component,collective_rt_dg_hybrid_publication_precondition,&
+    collective_rt_dg_hybrid_publication_mapping_precondition
   interface
     function c_rename(old_path,new_path) bind(C,name='rename') result(status)
       import::c_char,c_int
@@ -172,6 +173,51 @@ contains
     ok=.false.;message='terminal divided v3 publication precondition requires MPI'
 #endif
   end subroutine collective_rt_dg_hybrid_publication_precondition
+
+  subroutine collective_rt_dg_hybrid_publication_mapping_precondition(comm,global_count,row_ids,row_owner,&
+      occupied_row_ids,local_valid,ok,message)
+    integer,intent(in)::comm,global_count,row_owner(:)
+    integer(int64),intent(in)::row_ids(:),occupied_row_ids(:)
+    logical,intent(in)::local_valid
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::rank,i,ierr,local_bad,global_bad,allocation_status
+    integer,allocatable::row_counts(:),owner_minimum(:),owner_maximum(:)
+    ok=.false.;message='terminal divided v3 publication stage=pre-gather global row mapping failed'
+    call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
+    if(local_valid)then;local_bad=0;else;local_bad=1;endif
+    if(global_count<1.or.size(row_owner)/=global_count.or.size(occupied_row_ids)/=size(row_ids))local_bad=1
+    if(local_bad==0)then
+      if(any(row_owner<0).or.any(row_ids<1_int64).or.any(row_ids>int(global_count,int64)).or.&
+        any(occupied_row_ids<1_int64).or.any(occupied_row_ids>int(global_count,int64)))local_bad=1
+    endif
+    if(local_bad==0.and.size(row_ids)>0)then
+      if(any(row_owner(int(row_ids))/=rank).or.any(occupied_row_ids/=row_ids))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(global_bad/=0)return
+    allocate(row_counts(global_count),owner_minimum(global_count),&
+      owner_maximum(global_count),stat=allocation_status)
+    local_bad=merge(0,1,allocation_status==0)
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    if(global_bad/=0)return
+    row_counts=0
+    do i=1,size(row_ids);row_counts(int(row_ids(i)))=row_counts(int(row_ids(i)))+1;enddo
+    call MPI_Allreduce(row_owner,owner_minimum,global_count,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(row_owner,owner_maximum,global_count,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    call MPI_Allreduce(MPI_IN_PLACE,row_counts,global_count,MPI_INTEGER,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)return
+    ok=global_bad==0.and.all(row_counts==1).and.all(owner_minimum==owner_maximum)
+    if(ok)message=''
+#else
+    ok=.false.;message='terminal divided v3 publication mapping precondition requires MPI'
+#endif
+  end subroutine collective_rt_dg_hybrid_publication_mapping_precondition
 
   subroutine fingerprint_rt_dg_hybrid_component(comm,row_ids,values,fingerprint,ok)
     integer,intent(in)::comm

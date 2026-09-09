@@ -27,6 +27,10 @@ assert "operator_raw_count=nactive*(nactive+1)/2" not in graph_text.replace(" ",
   "RED: structural graph accumulates point-by-point duplicate pairs before unique"
 assert "peak_workspace_keys" in graph_text and "integer(int64)" in graph_text, \
   "RED: structural graph has no auditable int64 bounded-workspace receipt"
+global_count_guard=graph_text.split("subroutine checked_rt_dg_hybrid_global_square_extent",1)[1].split(
+  "end subroutine checked_rt_dg_hybrid_global_square_extent",1)[0]
+assert "if(global_count<1)then;ok=.false.;return;endif" in global_count_guard.replace(" ",""), \
+  "RED: invalid zero global_count can reach huge/global_count division"
 assert "checked_rt_dg_hybrid_structural_capacity" in graph_text and \
   "collective_rt_dg_hybrid_structural_capacity_status" in graph_text, \
   "RED: structural hash initial/growth capacity arithmetic is unchecked"
@@ -136,5 +140,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
   mutated_graph=build/"graph-capacity-overflow.f90"
   mutated_graph.write_text(graph_text.replace(capacity_old,"ok=.true.",1))
   compile_and_run(build,projection_source,"graph-capacity-overflow",False,mutated_graph)
+  zero_guard_old="if(global_count<1)then;ok=.false.;return;endif"
+  assert graph_text.count(zero_guard_old)==1
+  mutated_graph=build/"graph-zero-global-count.f90"
+  mutated_graph.write_text(graph_text.replace(zero_guard_old,"if(global_count<1)then;ok=.true.;return;endif",1))
+  compile_and_run(build,projection_source,"graph-zero-global-count",False,mutated_graph)
 
 print("PASS structural/support and production sparse projection on 1, 2, 4, and 8 ranks; mutations rejected")

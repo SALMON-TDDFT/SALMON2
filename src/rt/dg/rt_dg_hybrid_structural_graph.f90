@@ -8,7 +8,7 @@ module rt_dg_hybrid_structural_graph
   implicit none
   private
   public::build_rt_dg_hybrid_structural_graph,checked_rt_dg_hybrid_structural_capacity,&
-    collective_rt_dg_hybrid_structural_capacity_status
+    collective_rt_dg_hybrid_structural_capacity_status,checked_rt_dg_hybrid_global_square_extent
 #ifdef USE_MPI
   type::key_set
     integer(int64),allocatable::slot(:)
@@ -34,7 +34,7 @@ contains
     integer,allocatable::active(:),owners(:),owner_marks(:)
     integer(int64)::workspace_peak
     type(key_set)::point_support,metric_support,operator_support,closure_support
-    logical::local_capacity_ok,operator_capacity_ok
+    logical::local_capacity_ok,operator_capacity_ok,square_extent_ok
     ok=.false.;message='';nowned=size(row_ids);npoint=size(basis_values,2);local_bad=0;workspace_peak=0_int64
     if(present(local_unique_candidates))local_unique_candidates=0_int64
     if(present(peak_workspace_keys))peak_workspace_keys=0_int64
@@ -47,7 +47,8 @@ contains
     if(.not.finite_matrix(basis_values).or..not.finite_matrix(metric_rows).or..not.finite_matrix(kinetic_rows).or.&
       .not.finite_matrix(nonlocal_rows).or..not.finite_matrix(local_rows).or..not.finite_matrix(sipg_rows).or.&
       .not.finite_matrix(hamiltonian_rows).or..not.finite_rank3(position_rows))local_bad=1
-    if(int(global_count,int64)>huge(0_int64)/int(global_count,int64))local_bad=1
+    call checked_rt_dg_hybrid_global_square_extent(global_count,square_extent_ok)
+    if(.not.square_extent_ok)local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid Hybrid structural graph inputs';return;endif
     call checked_rt_dg_hybrid_structural_capacity(2,nowned,metric_requested,local_capacity_ok)
@@ -123,6 +124,13 @@ contains
     ok=.false.;message='Hybrid structural graph requires MPI'
 #endif
   end subroutine build_rt_dg_hybrid_structural_graph
+
+  pure subroutine checked_rt_dg_hybrid_global_square_extent(global_count,ok)
+    integer,intent(in)::global_count
+    logical,intent(out)::ok
+    if(global_count<1)then;ok=.false.;return;endif
+    ok=int(global_count,int64)<=huge(0_int64)/int(global_count,int64)
+  end subroutine checked_rt_dg_hybrid_global_square_extent
 
   pure subroutine checked_rt_dg_hybrid_structural_capacity(multiplier,local_count,requested,ok)
     integer,intent(in)::multiplier,local_count
