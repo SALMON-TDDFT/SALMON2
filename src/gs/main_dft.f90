@@ -188,6 +188,7 @@ use dg_hybrid_certified_rt_basis,only:s_dg_hybrid_certified_rt_basis,build_dg_hy
 use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   s_rt_dg_hybrid_ground_state_payload,write_rt_dg_hybrid_ground_state_checkpoint,&
   fingerprint_rt_dg_hybrid_component,fingerprint_rt_dg_hybrid_ground_state_payload,&
+  collective_rt_dg_hybrid_publication_precondition,&
   rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
   rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
 use rt_dg_hybrid_initialization,only:stamp_rt_dg_hybrid_v3_fingerprints,fingerprint_rt_dg_hybrid_scope
@@ -1982,7 +1983,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
     type(s_rt_dg_hybrid_ground_state_payload)::payload
-    complex(8),allocatable::full_metric(:,:),full_coefficients(:,:),full_component(:,:),position(:,:,:),&
+    complex(8),allocatable::full_coefficients(:,:),full_component(:,:),position(:,:,:),&
       momentum(:,:,:),projected(:,:),rt_basis_values(:,:),density_gamma(:,:),density_projector(:,:),&
       density_scoeff(:,:),rt_metric(:,:),rt_kinetic(:,:),rt_nonlocal(:,:),rt_local(:,:),rt_sipg(:,:),rt_hamiltonian(:,:),&
       local_position(:,:,:)
@@ -1993,21 +1994,37 @@ contains
       global_projector_count
     integer(8)::fingerprint
     real(8)::electron_count,window,cutoff,cluster_tolerance
-    logical::local_ok
+    logical::local_ok,precondition_ok
     character(512)::local_message
 
     ok=.false.;message='';n=size(solved_eigenvalues);nocc=occupied_state%noccupied
     nrow=size(row_ids);npoint=size(grid_ids)
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);if(ierr/=MPI_SUCCESS)then;message='v3 rank query failed';return;endif
     call MPI_Comm_size(dc%icomm_tot,nproc,ierr);if(ierr/=MPI_SUCCESS)then;message='v3 size query failed';return;endif
-    if(n<2.or.size(solved_coefficients,2)/=n.or.size(solved_coefficients,1)/=nrow.or.&
-      nocc<1.or.nocc>=n.or.size(row_owner)/=n.or.size(row_generation)/=n.or.&
-      size(basis_values,1)/=n.or.size(basis_values,2)/=npoint)then
-      message='invalid terminal divided LCFO v3 inputs';return
-    endif
-
-    call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,metric_rows,full_metric,local_ok)
-    if(.not.local_ok)then;message='v3 metric collection failed';return;endif
+    precondition_ok=n>=2.and.nocc>=1.and.nocc<n.and.nproc==dc%n_frag.and.dc%i_frag==rank+1
+    precondition_ok=precondition_ok.and.size(row_owner)==n.and.size(row_generation)==n.and.&
+      size(grid_weights)==npoint.and.size(grid_fragment)==npoint
+    precondition_ok=precondition_ok.and.all(shape(solved_coefficients)==[nrow,n]).and.&
+      all(shape(basis_values)==[n,npoint]).and.all(shape(basis_gradients)==[3,n,npoint])
+    precondition_ok=precondition_ok.and.all(shape(metric_rows)==[nrow,n]).and.&
+      all(shape(kinetic_rows)==[nrow,n]).and.all(shape(nonlocal_rows)==[nrow,n]).and.&
+      all(shape(local_rows)==[nrow,n]).and.all(shape(sipg_rows)==[nrow,n]).and.&
+      all(shape(hamiltonian_rows)==[nrow,n])
+    precondition_ok=precondition_ok.and.occupied_state%valid.and.occupied_state%converged.and.&
+      occupied_state%global_count==n.and.occupied_state%final_eigensolve_count==1.and.&
+      allocated(occupied_state%owned_row_ids).and.&
+      allocated(occupied_state%coefficients).and.allocated(occupied_state%occupations).and.&
+      allocated(occupied_state%eigenvalues)
+    if(precondition_ok)precondition_ok=size(occupied_state%owned_row_ids)==nrow.and.&
+      all(shape(occupied_state%coefficients)==[nrow,nocc]).and.size(occupied_state%occupations)==nocc.and.&
+      size(occupied_state%eigenvalues)==nocc
+    if(precondition_ok.and.nrow>0)precondition_ok=all(row_ids>=1_8).and.all(row_ids<=int(n,8))
+    if(precondition_ok)precondition_ok=all(row_owner>=0).and.all(row_owner<nproc)
+    if(precondition_ok)precondition_ok=nrow==count(row_owner==rank).and.all(grid_fragment==dc%i_frag)
+    if(precondition_ok.and.nrow>0)precondition_ok=all(row_owner(int(row_ids))==rank).and.&
+      all(occupied_state%owned_row_ids==row_ids).and.all([(count(row_ids==row_ids(i))==1,i=1,nrow)])
+    call collective_rt_dg_hybrid_publication_precondition(dc%icomm_tot,precondition_ok,n,nocc,local_ok,local_message)
+    if(.not.local_ok)then;message=trim(local_message);return;endif
     call collect_dg_hybrid_full_rows(dc%icomm_tot,n,row_ids,solved_coefficients,full_coefficients,local_ok)
     if(.not.local_ok)then;message='v3 solved-pair collection failed';return;endif
 

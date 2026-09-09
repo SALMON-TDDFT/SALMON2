@@ -2,7 +2,8 @@
 program test_rt_dg_hybrid_sparse_projection_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph
+  use rt_dg_hybrid_structural_graph,only:build_rt_dg_hybrid_structural_graph,&
+    checked_rt_dg_hybrid_structural_capacity,collective_rt_dg_hybrid_structural_capacity_status
   use rt_dg_hybrid_sparse_projection,only:project_rt_dg_hybrid_sparse_edges,&
     validate_rt_dg_hybrid_sparse_hermiticity,checked_rt_dg_hybrid_projection_capacity
   implicit none
@@ -12,9 +13,11 @@ program test_rt_dg_hybrid_sparse_projection_mpi
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
   call exercise_capacity_boundary
+  call exercise_structural_capacity_boundary
   call exercise_structural_graph
   call exercise_repeated_support_scaling
   call exercise_sparse_projection
+  call exercise_invalid_projection_contracts
   call exercise_missing_edge_collective_failure
   if(rank==0)write(*,'(a,i0,a)')'PASS structural Hybrid sparse projection on ',nproc,' ranks'
   call MPI_Finalize(ierr)
@@ -27,6 +30,80 @@ contains
     call checked_rt_dg_hybrid_projection_capacity(huge(0)/2+1,next_capacity,capacity_ok)
     call require(.not.capacity_ok,'sparse projection hash capacity overflow was not rejected')
   end subroutine exercise_capacity_boundary
+  subroutine exercise_structural_capacity_boundary
+    integer::requested
+    logical::capacity_ok
+    character(256)::capacity_message
+    call checked_rt_dg_hybrid_structural_capacity(4,50,requested,capacity_ok)
+    call require(capacity_ok.and.requested==200,'valid structural hash initial capacity was rejected')
+    call checked_rt_dg_hybrid_structural_capacity(4,huge(0)/4+1,requested,capacity_ok)
+    call require(.not.capacity_ok,'structural hash initial capacity overflow was not rejected')
+    call checked_rt_dg_hybrid_structural_capacity(0,50,requested,capacity_ok)
+    call require(.not.capacity_ok,'zero structural capacity multiplier was not rejected safely')
+    call checked_rt_dg_hybrid_structural_capacity(-1,50,requested,capacity_ok)
+    call require(.not.capacity_ok,'negative structural capacity multiplier was not rejected safely')
+    call collective_rt_dg_hybrid_structural_capacity_status(comm,rank/=0,capacity_ok,capacity_message)
+    call require(.not.capacity_ok.and.index(capacity_message,'capacity')>0,&
+      'one-rank structural capacity failure was not collectively rejected')
+  end subroutine exercise_structural_capacity_boundary
+  subroutine exercise_invalid_projection_contracts
+    integer::n,owned,row
+    integer(int64),allocatable::rows(:),empty_grid(:)
+    integer,allocatable::offsets(:),columns(:)
+    real(real64),allocatable::empty_real(:)
+    complex(real64),allocatable::empty_basis(:,:),values(:)
+    logical::projection_ok
+    character(256)::projection_message
+    n=nproc+1;owned=merge(2,1,rank==0);row=rank+2
+    allocate(rows(owned),offsets(owned+1),columns(owned),values(owned),empty_grid(0),empty_real(0),empty_basis(n,0))
+    if(rank==0)then;rows=[1_int64,2_int64];offsets=[1,2,3];columns=[1,2]
+    else;rows=[int(row,int64)];offsets=[1,2];columns=[row];endif
+    values=(0d0,0d0)
+    if(rank==0)offsets(2)=0
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,n,rows,offsets,columns,values,1d-12,&
+      projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'contract')>0,&
+      'Hermiticity entry accepted one-rank corrupt CSR offset')
+    call project_rt_dg_hybrid_sparse_edges(comm,n,rows,offsets,columns,empty_grid,empty_real,empty_basis,&
+      empty_real,values,projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'contract')>0,&
+      'one-rank corrupt CSR offset was not collectively rejected')
+    if(rank==0)then;offsets=[1,2,3];columns=[1,n+1]
+    else;offsets=[1,2];columns=[row];endif
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,n,rows,offsets,columns,values,1d-12,&
+      projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'contract')>0,&
+      'Hermiticity entry accepted one-rank out-of-range CSR column')
+    call project_rt_dg_hybrid_sparse_edges(comm,n,rows,offsets,columns,empty_grid,empty_real,empty_basis,&
+      empty_real,values,projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'contract')>0,&
+      'one-rank out-of-range CSR column was not collectively rejected')
+    deallocate(rows,offsets,columns,values)
+    owned=merge(3,1,rank==0);allocate(rows(owned),offsets(owned+1),columns(owned),values(owned))
+    if(rank==0)then;rows=[1_int64,1_int64,2_int64];offsets=[1,2,3,4];columns=[1,1,2]
+    else;rows=[int(rank+2,int64)];offsets=[1,2];columns=[rank+2];endif
+    values=(0d0,0d0)
+    call validate_rt_dg_hybrid_sparse_hermiticity(comm,n,rows,offsets,columns,values,1d-12,&
+      projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'unique owners')>0,&
+      'Hermiticity entry accepted duplicate owned CSR row')
+    call project_rt_dg_hybrid_sparse_edges(comm,n,rows,offsets,columns,empty_grid,empty_real,empty_basis,&
+      empty_real,values,projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'unique owners')>0,&
+      'duplicate owned CSR row was not collectively rejected')
+    deallocate(rows,offsets,columns,values)
+    owned=1;allocate(rows(owned),offsets(owned+1),columns(owned),values(owned))
+    offsets=1;values=(0d0,0d0)
+    if(owned>0)then
+      offsets=[1,2]
+      rows(1)=merge(int(n,int64),int(rank+2,int64),rank==0)
+      columns(1)=int(rows(1))
+    endif
+    call project_rt_dg_hybrid_sparse_edges(comm,n,rows,offsets,columns,empty_grid,empty_real,empty_basis,&
+      empty_real,values,projection_ok,projection_message)
+    call require(.not.projection_ok.and.index(projection_message,'unique owners')>0,&
+      'missing/mismatched CSR row owner was not collectively rejected')
+  end subroutine exercise_invalid_projection_contracts
   subroutine exercise_repeated_support_scaling
     integer,parameter::n=400,np_global=16000
     integer::nowned,npoint,row,point,i,j,k,slot,fragment,first,nactive,owner,local_nnz,min_nnz,max_nnz,edge

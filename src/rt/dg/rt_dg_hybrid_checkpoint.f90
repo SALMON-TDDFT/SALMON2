@@ -143,7 +143,7 @@ module rt_dg_hybrid_checkpoint
     write_rt_dg_hybrid_ground_state_checkpoint,read_rt_dg_hybrid_ground_state_checkpoint,&
     read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     fingerprint_rt_dg_hybrid_ground_state_payload,authenticate_rt_dg_hybrid_ground_state_payload,&
-    fingerprint_rt_dg_hybrid_component
+    fingerprint_rt_dg_hybrid_component,collective_rt_dg_hybrid_publication_precondition
   interface
     function c_rename(old_path,new_path) bind(C,name='rename') result(status)
       import::c_char,c_int
@@ -152,6 +152,27 @@ module rt_dg_hybrid_checkpoint
     end function c_rename
   end interface
 contains
+  subroutine collective_rt_dg_hybrid_publication_precondition(comm,local_valid,local_n,local_nocc,ok,message)
+    integer,intent(in)::comm,local_n,local_nocc
+    logical,intent(in)::local_valid
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::ierr,local_bad,global_bad,local_signature(2),minimum_signature(2),maximum_signature(2)
+    local_bad=merge(0,1,local_valid);local_signature=[local_n,local_nocc]
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v3 publication validity reduction failed';return;endif
+    call MPI_Allreduce(local_signature,minimum_signature,2,MPI_INTEGER,MPI_MIN,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v3 publication minimum reduction failed';return;endif
+    call MPI_Allreduce(local_signature,maximum_signature,2,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v3 publication maximum reduction failed';return;endif
+    ok=global_bad==0.and.all(minimum_signature==maximum_signature)
+    if(ok)then;message='';else;message='terminal divided v3 publication collective precondition failed';endif
+#else
+    ok=.false.;message='terminal divided v3 publication precondition requires MPI'
+#endif
+  end subroutine collective_rt_dg_hybrid_publication_precondition
+
   subroutine fingerprint_rt_dg_hybrid_component(comm,row_ids,values,fingerprint,ok)
     integer,intent(in)::comm
     integer(int64),intent(in)::row_ids(:)

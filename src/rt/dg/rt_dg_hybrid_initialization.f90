@@ -52,7 +52,8 @@ module rt_dg_hybrid_initialization
       rt(14)=0_int64,receipts(2)=0_int64,handoff(6)=0_int64
   end type s_rt_dg_hybrid_v3_named_fingerprints
   public::initialize_rt_dg_hybrid_from_checkpoint,validate_rt_dg_hybrid_v3_startup,&
-    fingerprint_rt_dg_hybrid_scope,stamp_rt_dg_hybrid_v3_fingerprints
+    fingerprint_rt_dg_hybrid_scope,stamp_rt_dg_hybrid_v3_fingerprints,&
+    fingerprint_rt_dg_hybrid_sparse_structure
 contains
   subroutine initialize_rt_dg_hybrid_from_checkpoint(comm,path,theory,periodic,nspin,spinorbit,plus_u,hse,&
       fix_func,jm,xctype,tolerances,state,ok,message)
@@ -781,10 +782,9 @@ contains
     if(ierr/=MPI_SUCCESS)then;message='certified Hybrid RT metric reduction failed';return;endif
     state%metric%maximum_value=global_maximum
 
-    structure_fingerprint=ieor(ishftc(payload%rt_space%ownership_fingerprint,7),&
-      payload%position_convention_fingerprint)
-    structure_fingerprint=ieor(ishftc(structure_fingerprint,11),int(r,int64))
-    if(structure_fingerprint==0_int64)structure_fingerprint=1_int64
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,r,state%owned_row_ids,operator_offsets,operator_columns,&
+      payload%rt_space%ownership_fingerprint,payload%position_convention_fingerprint,structure_fingerprint,ok,message)
+    if(.not.ok)return
     state%operators%owned_row_ids=state%owned_row_ids;state%operators%global_count=r
     state%operators%metric_fingerprint=payload%rt_space%metric_fingerprint
     state%operators%selection_fingerprint=payload%selection_fingerprint
@@ -810,6 +810,38 @@ contains
     state%scope_fingerprint=payload%scope_fingerprint
     ok=.true.;message=''
   end subroutine build_certified_rt_state
+
+  subroutine fingerprint_rt_dg_hybrid_sparse_structure(comm,global_count,row_ids,row_offsets,column_ids,&
+      ownership_fingerprint,position_convention_fingerprint,fingerprint,ok,message)
+    integer,intent(in)::comm,global_count,row_offsets(:),column_ids(:)
+    integer(int64),intent(in)::row_ids(:),ownership_fingerprint,position_convention_fingerprint
+    integer(int64),intent(out)::fingerprint
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+#ifdef USE_MPI
+    integer::i,edge,ierr
+    integer(int64)::local_hash,term
+    local_hash=0_int64
+    do i=1,size(row_ids)
+      term=ieor(row_ids(i),ishftc(int(row_offsets(i),int64),17))
+      term=ieor(term,ishftc(int(row_offsets(i+1),int64),29))
+      local_hash=ieor(local_hash,ishftc(term,mod(7*i,63)))
+      do edge=row_offsets(i),row_offsets(i+1)-1
+        term=ieor(ishftc(row_ids(i),13),int(column_ids(edge),int64))
+        local_hash=ieor(local_hash,ishftc(term,mod(11*edge+3*i,63)))
+      enddo
+    enddo
+    call MPI_Allreduce(local_hash,fingerprint,1,MPI_INTEGER8,MPI_BXOR,comm,ierr)
+    fingerprint=ieor(ishftc(fingerprint,11),ishftc(ownership_fingerprint,7))
+    fingerprint=ieor(fingerprint,position_convention_fingerprint)
+    fingerprint=ieor(fingerprint,ishftc(int(global_count,int64),37))
+    if(fingerprint==0_int64)fingerprint=1_int64
+    ok=ierr==MPI_SUCCESS
+    if(ok)then;message='';else;message='sparse operator structure fingerprint reduction failed';endif
+#else
+    fingerprint=0_int64;ok=.false.;message='sparse structure fingerprint requires MPI'
+#endif
+  end subroutine fingerprint_rt_dg_hybrid_sparse_structure
 
   subroutine compute_construction_projection(comm,payload,full_u,sc_local,hc_local,projected_s,projected_h,&
       projected_position,projected_components,projected_basis,embedding_defect,ierr)

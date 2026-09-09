@@ -27,10 +27,29 @@ assert "operator_raw_count=nactive*(nactive+1)/2" not in graph_text.replace(" ",
   "RED: structural graph accumulates point-by-point duplicate pairs before unique"
 assert "peak_workspace_keys" in graph_text and "integer(int64)" in graph_text, \
   "RED: structural graph has no auditable int64 bounded-workspace receipt"
+assert "checked_rt_dg_hybrid_structural_capacity" in graph_text and \
+  "collective_rt_dg_hybrid_structural_capacity_status" in graph_text, \
+  "RED: structural hash initial/growth capacity arithmetic is unchecked"
+capacity_helper=graph_text.split("subroutine checked_rt_dg_hybrid_structural_capacity",1)[1].split(
+  "end subroutine checked_rt_dg_hybrid_structural_capacity",1)[0]
+assert "if(multiplier<=0.or.local_count<0)" in capacity_helper.replace(" ",""), \
+  "RED: structural capacity helper relies on non-short-circuit division guard"
+capacity_status=graph_text.split("subroutine collective_rt_dg_hybrid_structural_capacity_status",1)[1].split(
+  "end subroutine collective_rt_dg_hybrid_structural_capacity_status",1)[0]
+assert "if(ierr/=mpi_success)" in capacity_status.replace(" ","").lower(), \
+  "RED: structural capacity status reads an undefined reduction result after MPI failure"
+assert "error stop 'structural support hash capacity overflow'" not in graph_text.lower(), \
+  "RED: structural hash growth still aborts one rank before collective agreement"
+assert "max(64,2*nowned)" not in graph_text.replace(" ","") and \
+  "max(64,4*nowned)" not in graph_text.replace(" ",""), \
+  "RED: structural initial capacity multiplies in default integer before checking"
 assert "make_checked_displacements" in graph_text and "integer(int64)::running" in graph_text, \
   "RED: structural graph cumulative MPI extents are not checked in int64"
 assert "make_displacements" in projection_text and "integer(int64)::running" in projection_text, \
   "RED: sparse projection cumulative MPI extents are not checked in int64"
+for validation_token in ("any(offsets<1)","any(offsets(2:)<offsets(:size(offsets)-1))",
+  "any(columns<1)","marks(int(row_ids(i)))=marks(int(row_ids(i)))+1", "all(owners<=nproc)"):
+  assert validation_token in projection_text.replace(" ",""), f"RED: incomplete collective CSR validation: {validation_token}"
 assert "checked_rt_dg_hybrid_projection_capacity" in projection_text and "capacity_overflow" in projection_text, \
   "RED: sparse projection hash growth can overflow before its MPI extent check"
 assert "sparse projection hash capacity exceeds integer extent" in projection_text, \
@@ -85,6 +104,11 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
   source=projection_text
   mutations={
     "capacity-overflow":("ok=current_capacity>0.and.current_capacity<=huge(0)/2", "ok=.true."),
+    "csr-offset":("call validate_sparse_csr_contract(n,row_ids,offsets,columns,size(values),bad)", "bad=0"),
+    "hermiticity-csr":("call validate_sparse_csr_contract(global_count,row_ids,row_offsets,column_ids,size(values),local_bad)",
+      "local_bad=0"),
+    "csr-column":(".or.any(columns<1).or.any(columns>n)", ""),
+    "duplicate-owner":("marks(int(row_ids(i)))=marks(int(row_ids(i)))+1", "marks(int(row_ids(i)))=1"),
     "counts":("words=3_int64*int(counts(p),int64)", "words=4_int64*int(counts(p),int64)"),
     "routing":("row=int((keys(q)-1_int64)/int(n,int64))+1;destination=owners(row)",
       "row=int((keys(q)-1_int64)/int(n,int64))+1;destination=1",2),
@@ -107,5 +131,10 @@ with tempfile.TemporaryDirectory(prefix="hybrid-sparse-projection-") as name:
   mutated_graph=build/"graph-duplicate-accumulation.f90"
   mutated_graph.write_text(graph_text.replace(dedup_old,dedup_new,1))
   compile_and_run(build,projection_source,"duplicate-accumulation",False,mutated_graph)
+  capacity_old="if(local_count>huge(0)/multiplier)then;requested=0;ok=.false.;return;endif"
+  assert graph_text.count(capacity_old)==1
+  mutated_graph=build/"graph-capacity-overflow.f90"
+  mutated_graph.write_text(graph_text.replace(capacity_old,"ok=.true.",1))
+  compile_and_run(build,projection_source,"graph-capacity-overflow",False,mutated_graph)
 
 print("PASS structural/support and production sparse projection on 1, 2, 4, and 8 ranks; mutations rejected")

@@ -93,10 +93,7 @@ contains
     real(real64)::local_defect,global_defect,local_scale,global_scale
     integer(int64)::total_send64,total_recv64
     ok=.false.;message='';local_bad=0
-    if(size(row_offsets)/=size(row_ids)+1.or.size(column_ids)/=size(values))local_bad=1
-    if(size(row_offsets)>0)then
-      if(row_offsets(1)/=1.or.row_offsets(size(row_offsets))/=size(values)+1)local_bad=1
-    endif
+    call validate_sparse_csr_contract(global_count,row_ids,row_offsets,column_ids,size(values),local_bad)
     if(.not.ieee_is_finite(tolerance).or.tolerance<0d0.or.&
       .not.all(ieee_is_finite(real(values))).or..not.all(ieee_is_finite(aimag(values))))local_bad=1
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
@@ -171,19 +168,31 @@ contains
     integer,intent(out)::bad
     integer::p
     bad=0
-    if(n<1.or.size(offsets)/=size(row_ids)+1.or.size(values)/=size(columns).or.&
+    call validate_sparse_csr_contract(n,row_ids,offsets,columns,size(values),bad)
+    if(n<1.or.&
       size(weights)/=size(grid_ids).or.size(potential)/=size(grid_ids).or.any(shape(basis)/=[n,size(grid_ids)]))bad=1
-    if(size(offsets)>0)then;if(offsets(1)/=1.or.offsets(size(offsets))/=size(columns)+1)bad=1;endif
-    if(any(row_ids<1_int64).or.any(row_ids>int(n,int64)).or.any(columns<1).or.any(columns>n))bad=1
-    do p=1,size(row_ids)
-      if(offsets(p)<1.or.offsets(p+1)<offsets(p).or.offsets(p+1)>size(columns)+1)bad=1
-      if(offsets(p+1)-offsets(p)>1)then
-        if(any(columns(offsets(p)+1:offsets(p+1)-1)<=columns(offsets(p):offsets(p+1)-2)))bad=1
-      endif
-    enddo
     if(.not.all(ieee_is_finite(weights)).or..not.all(ieee_is_finite(potential)).or.&
       .not.all(ieee_is_finite(real(basis))).or..not.all(ieee_is_finite(aimag(basis))))bad=1
   end subroutine validate_contract
+  subroutine validate_sparse_csr_contract(n,row_ids,offsets,columns,value_count,bad)
+    integer,intent(in)::n,offsets(:),columns(:),value_count
+    integer(int64),intent(in)::row_ids(:)
+    integer,intent(out)::bad
+    integer::p,left,right
+    bad=0
+    if(n<1.or.size(offsets)/=size(row_ids)+1.or.value_count/=size(columns))then;bad=1;return;endif
+    if(any(row_ids<1_int64).or.any(row_ids>int(n,int64)).or.any(columns<1).or.any(columns>n))bad=1
+    if(any(offsets<1).or.any(offsets>size(columns)+1))bad=1
+    if(offsets(1)/=1.or.offsets(size(offsets))/=size(columns)+1)bad=1
+    if(size(offsets)>1)then;if(any(offsets(2:)<offsets(:size(offsets)-1)))bad=1;endif
+    if(bad/=0)return
+    do p=1,size(row_ids)
+      left=offsets(p);right=offsets(p+1)-1
+      if(right-left+1>1)then
+        if(any(columns(left+1:right)<=columns(left:right-1)))bad=1
+      endif
+    enddo
+  end subroutine validate_sparse_csr_contract
   pure integer(int64) function directed_key(row,column,n) result(key)
     integer,intent(in)::row,column,n
     key=int(row-1,int64)*int(n,int64)+int(column,int64)
@@ -194,14 +203,17 @@ contains
     integer,allocatable,intent(out)::owners(:)
     logical,intent(out)::ok
     integer,intent(out)::ierr
-    integer::rank,i
+    integer::rank,nproc,i
     integer,allocatable::marks(:)
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     allocate(owners(n),marks(n));owners=0;marks=0
-    do i=1,size(row_ids);owners(int(row_ids(i)))=rank+1;marks(int(row_ids(i)))=1;enddo
+    call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
+    do i=1,size(row_ids)
+      owners(int(row_ids(i)))=rank+1;marks(int(row_ids(i)))=marks(int(row_ids(i)))+1
+    enddo
     call MPI_Allreduce(MPI_IN_PLACE,owners,n,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(MPI_IN_PLACE,marks,n,MPI_INTEGER,MPI_SUM,comm,ierr)
-    ok=ierr==MPI_SUCCESS.and.all(marks==1)
+    ok=ierr==MPI_SUCCESS.and.size(owners)==n.and.all(owners>=1).and.all(owners<=nproc).and.all(marks==1)
   end subroutine build_row_owners
   subroutine initialize_map(map,requested)
     type(key_value_set),intent(inout)::map
@@ -262,7 +274,8 @@ contains
     integer(int64),allocatable::keys(:),send_payload(:),received_payload(:),received_keys(:)
     complex(real64),allocatable::values(:),received_values(:)
     call MPI_Comm_size(comm,nproc,ierr);if(ierr/=MPI_SUCCESS)return
-    local_bad=merge(1,0,map%capacity_overflow.or.map%count>int(huge(0),int64))
+    local_bad=merge(1,0,map%capacity_overflow.or.map%count>int(huge(0),int64).or.size(owners)/=n)
+    if(size(owners)==n)then;if(any(owners<1).or.any(owners>nproc))local_bad=1;endif
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)return
     if(global_bad/=0)then;ierr=-2;return;endif

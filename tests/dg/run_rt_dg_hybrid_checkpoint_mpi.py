@@ -78,6 +78,28 @@ for component in ("canonical_pp_valence_sum(pp)","pp%lmax","pp%nrmax","ppg%nlma"
 assert continuation.index("if(.not.final_refresh_performed)") < continuation.index(
   "write_rt_dg_hybrid_ground_state_checkpoint")
 assert "write_rt_dg_hybrid_occupied_checkpoint" not in continuation
+divided_publisher=main_source.split("subroutine publish_dg_hybrid_divided_v3",1)[1].split(
+  "end subroutine publish_dg_hybrid_divided_v3",1)[0]
+assert "collective_rt_dg_hybrid_publication_precondition" in divided_publisher, (
+  "formal divided v3 publisher lacks a collective precondition before gathers")
+assert divided_publisher.index("collective_rt_dg_hybrid_publication_precondition") < divided_publisher.index(
+  "collect_dg_hybrid_full_rows"), "formal divided v3 publisher gathers before collective validation"
+assert "full_metric" not in divided_publisher, "formal divided v3 publisher retains an unused global dense metric"
+for publication_contract in (
+  "occupied_state%valid.and.occupied_state%converged",
+  "occupied_state%global_count==n",
+  "all(occupied_state%owned_row_ids==row_ids)",
+  "all(grid_fragment==dc%i_frag)",
+  "dc%i_frag==rank+1",
+  "nrow==count(row_owner==rank)",
+):
+  assert publication_contract in divided_publisher.replace(" ",""), (
+    f"formal divided v3 publisher omits rank-fragment/state contract: {publication_contract}")
+publication_precondition=checkpoint_source.split(
+  "subroutine collective_rt_dg_hybrid_publication_precondition",1)[1].split(
+  "end subroutine collective_rt_dg_hybrid_publication_precondition",1)[0]
+assert publication_precondition.replace(" ","").count("if(ierr/=mpi_success)")>=3, (
+  "publication precondition reads undefined reduction results after MPI failure")
 if os.environ.get("SALMON_LAPACK_LIBS"):
   lapack_libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
 elif shutil.which("pkg-config") and subprocess.run(["pkg-config","--exists","openblas"],check=False).returncode==0:
@@ -103,12 +125,28 @@ end program nonmpi_checkpoint_probe
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
     str(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"),str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90"),
     *lapack_libs,"-o",str(exe)],check=True)
+  publication_guard="local_bad=merge(0,1,local_valid)"
+  assert checkpoint_source.count(publication_guard)==1,"publication precondition guard is not uniquely testable"
+  mutated_checkpoint=build/"rt_dg_hybrid_checkpoint_missing_publication_guard.f90"
+  mutated_checkpoint.write_text((root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().replace(
+    publication_guard,"local_bad=0",1))
+  mutated_exe=build/"hybrid_checkpoint_missing_publication_guard"
+  subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
+    str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
+    str(mutated_checkpoint),str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_mpi.f90"),
+    *lapack_libs,"-o",str(mutated_exe)],check=True)
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",
     str(root/"src/common/dg_hybrid_sparse_metric.f90"),str(root/"src/common/dg_hybrid_sparse_operators.f90"),
     str(root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"),str(root/"tests/dg/test_rt_dg_hybrid_occupied_checkpoint_mpi.f90"),
     *lapack_libs,"-o",str(occupied_exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
+  mutated_run=subprocess.run([shutil.which("mpiexec"),"-n","2",str(mutated_exe),"write",str(build/"mutated.chk")],
+    capture_output=True,text=True,env=env,timeout=30)
+  assert mutated_run.returncode!=0,(mutated_run.stdout,mutated_run.stderr)
+  assert "one-rank malformed v3 publication precondition was not collectively rejected" in (
+    mutated_run.stdout+mutated_run.stderr),(mutated_run.stdout,mutated_run.stderr)
   complete_fingerprints=[]
   for nrank in (1,2,4,8):
     complete=build/f"complete-{nrank}.chk"

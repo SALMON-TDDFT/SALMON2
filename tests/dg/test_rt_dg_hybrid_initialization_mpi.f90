@@ -9,7 +9,8 @@ program test_rt_dg_hybrid_initialization_mpi
     rt_dg_hybrid_energy_window_explicit
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,s_rt_dg_hybrid_v3_startup_receipt,&
     initialize_rt_dg_hybrid_from_checkpoint,validate_rt_dg_hybrid_v3_startup,&
-    fingerprint_rt_dg_hybrid_scope,stamp_rt_dg_hybrid_v3_fingerprints
+    fingerprint_rt_dg_hybrid_scope,stamp_rt_dg_hybrid_v3_fingerprints,&
+    fingerprint_rt_dg_hybrid_sparse_structure
   use rt_dg_hybrid_density_update,only:reconstruct_rt_dg_hybrid_density,update_rt_dg_hybrid_density
   implicit none
   integer,parameter::construction_rank=3,certified_rank=2,occupied_rank=1,operation_count=2,grid_count=2
@@ -28,6 +29,7 @@ program test_rt_dg_hybrid_initialization_mpi
 
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call exercise_sparse_structure_fingerprint
   call require(rt_dg_hybrid_ground_state_checkpoint_version==3,&
     'Hybrid RT initialization requires complete ground-state checkpoint version 3')
   call get_command_argument(1,path);call get_command_argument(2,mode)
@@ -150,6 +152,35 @@ program test_rt_dg_hybrid_initialization_mpi
   if(rank==0)write(*,'(a,i0,a,a)')'PASS hybrid RT v3 initialization contract on ',nproc,' ranks mode=',trim(mode)
   call MPI_Finalize(ierr)
 contains
+  subroutine exercise_sparse_structure_fingerprint
+    integer(int64)::rows(2),reference,changed
+    integer::offsets(3),columns(1),structure_rank
+    logical::fingerprint_ok
+    character(256)::fingerprint_message
+    structure_rank=2*nproc;rows=[int(2*rank+1,int64),int(2*rank+2,int64)];offsets=[1,2,2]
+    columns=[2*rank+1]
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,structure_rank,rows,offsets,columns,101_int64,202_int64,&
+      reference,fingerprint_ok,fingerprint_message)
+    call require(fingerprint_ok,'valid sparse structure fingerprint failed')
+    if(rank==0)columns(1)=2
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,structure_rank,rows,offsets,columns,101_int64,202_int64,&
+      changed,fingerprint_ok,fingerprint_message)
+    call require(fingerprint_ok.and.changed/=reference,'CSR column identity was omitted from fingerprint')
+    columns=[2*rank+1];if(rank==0)offsets=[1,1,2]
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,structure_rank,rows,offsets,columns,101_int64,202_int64,&
+      changed,fingerprint_ok,fingerprint_message)
+    call require(fingerprint_ok.and.changed/=reference,'CSR offsets were omitted from fingerprint')
+    offsets=[1,2,2]
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,structure_rank,rows,offsets,columns,102_int64,202_int64,&
+      changed,fingerprint_ok,fingerprint_message)
+    call require(fingerprint_ok.and.changed/=reference,'ownership identity was omitted from fingerprint')
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,structure_rank,rows,offsets,columns,101_int64,203_int64,&
+      changed,fingerprint_ok,fingerprint_message)
+    call require(fingerprint_ok.and.changed/=reference,'position identity was omitted from fingerprint')
+    call fingerprint_rt_dg_hybrid_sparse_structure(comm,structure_rank+1,rows,offsets,columns,101_int64,202_int64,&
+      changed,fingerprint_ok,fingerprint_message)
+    call require(fingerprint_ok.and.changed/=reference,'operator rank was omitted from fingerprint')
+  end subroutine exercise_sparse_structure_fingerprint
   subroutine verify_v3_startup(checkpoint_path)
     character(*),intent(in)::checkpoint_path
     type(s_rt_dg_hybrid_v3_startup_receipt)::receipt

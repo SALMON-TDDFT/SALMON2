@@ -8,6 +8,7 @@ program test_rt_dg_hybrid_checkpoint_mpi
     s_rt_dg_hybrid_ground_state_payload,write_rt_dg_hybrid_ground_state_checkpoint,&
     read_rt_dg_hybrid_ground_state_checkpoint,read_rt_dg_hybrid_ground_state_checkpoint_coalesced,&
     authenticate_rt_dg_hybrid_ground_state_payload,fingerprint_rt_dg_hybrid_component,&
+    collective_rt_dg_hybrid_publication_precondition,&
     rt_dg_hybrid_checkpoint_version,rt_dg_hybrid_occupied_checkpoint_version,&
     rt_dg_hybrid_ground_state_checkpoint_version,rt_dg_hybrid_energy_window_explicit,&
     rt_dg_hybrid_energy_window_legacy_dynamic,rt_dg_hybrid_vector_canonical_momentum
@@ -28,6 +29,7 @@ program test_rt_dg_hybrid_checkpoint_mpi
   logical::ok
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call exercise_publication_precondition
   call require(rt_dg_hybrid_checkpoint_version==2.and.rt_dg_hybrid_occupied_checkpoint_version==2.and.&
     rt_dg_hybrid_ground_state_checkpoint_version==3.and.rt_dg_hybrid_vector_canonical_momentum==1,&
     'checkpoint family versions or canonical-momentum vector slot changed unexpectedly')
@@ -272,6 +274,18 @@ program test_rt_dg_hybrid_checkpoint_mpi
       trim(mode)=='read_complete_auth'))write(*,'(a,i0,a)')'PASS complete hybrid checkpoint on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine exercise_publication_precondition
+    logical::collective_ok
+    character(256)::collective_message
+    call collective_rt_dg_hybrid_publication_precondition(comm,rank/=0,4,2,collective_ok,collective_message)
+    call require(.not.collective_ok.and.index(collective_message,'precondition')>0,&
+      'one-rank malformed v3 publication precondition was not collectively rejected')
+    call collective_rt_dg_hybrid_publication_precondition(comm,.true.,4,2,collective_ok,collective_message)
+    call require(collective_ok,'valid v3 publication precondition was rejected')
+    call collective_rt_dg_hybrid_publication_precondition(comm,.true.,merge(5,4,nproc>1.and.rank==0),2,&
+      collective_ok,collective_message)
+    call require(nproc==1.or..not.collective_ok,'rank-disagreeing v3 publication extent was accepted')
+  end subroutine exercise_publication_precondition
   subroutine construct_complete_payload(payload)
     type(s_rt_dg_hybrid_ground_state_payload),intent(out)::payload
     integer::row,point,local_row,local_point,nrow,npoint,face,nface,local_face,projector,nprojector,local_projector,&

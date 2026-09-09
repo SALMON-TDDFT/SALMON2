@@ -62,6 +62,11 @@ builder=compact.split("subroutinebuild_certified_rt_state",1)[1].split(
   "endsubroutinebuild_certified_rt_state",1
 )[0]
 assert "callbuild_rt_dg_hybrid_structural_graph" in builder
+assert "callfingerprint_rt_dg_hybrid_sparse_structure" in builder, (
+  "operator structure fingerprint does not bind the constructed CSR")
+for token in ("row_offsets", "column_ids", "ownership_fingerprint", "position_convention_fingerprint"):
+  assert token in compact.split("subroutinefingerprint_rt_dg_hybrid_sparse_structure",1)[1].split(
+    "endsubroutinefingerprint_rt_dg_hybrid_sparse_structure",1)[0], f"structure fingerprint omits {token}"
 assert "entry_tolerance" not in builder and "epsilon(1d0)*entry_scale" not in structural_source, (
   "Hybrid RT structural support must not drop exact basis or fixed-operator pairs by value threshold"
 )
@@ -246,5 +251,20 @@ with tempfile.TemporaryDirectory(prefix="hybrid-rt-v3-init-") as name:
     invalid_version=build/f"invalid-v{version}.chk";invalid_bytes=bytearray(accepted)
     struct.pack_into("=i",invalid_bytes,16,version);invalid_version.write_bytes(invalid_bytes)
     run_mpi(exe,2,invalid_version,"reject_only",env)
+
+  fingerprint_old="int(column_ids(edge),int64)"
+  assert initialization_source.count(fingerprint_old)==1
+  mutated_initialization=build/"initialization-no-csr-column.f90"
+  mutated_initialization.write_text((root/"src/rt/dg/rt_dg_hybrid_initialization.f90").read_text().replace(
+    fingerprint_old,"0_int64",1))
+  mutated_exe=build/"hybrid_rt_v3_init_no_csr_column"
+  mutated_sources=[root/s for s in sources[:-3]]+[mutated_initialization,root/sources[-2],root/sources[-1]]
+  subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
+    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",*[str(s) for s in mutated_sources],
+    *libs,"-o",str(mutated_exe)],check=True)
+  mutation=subprocess.run([shutil.which("mpiexec"),"-n","2",str(mutated_exe),str(build/"mutation.chk"),"roundtrip"],
+    capture_output=True,text=True,env=env,timeout=45)
+  assert mutation.returncode!=0 and "csr column identity was omitted" in (mutation.stdout+mutation.stderr).lower(), (
+    mutation.stdout,mutation.stderr)
 
 print("PASS hybrid RT certified-v3 initialization on 1, 2, and 4 ranks")
