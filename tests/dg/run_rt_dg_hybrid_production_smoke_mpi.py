@@ -235,8 +235,23 @@ divided_route = main_dft_source.split("subroutine run_dg_hybrid_divided_ground_s
 divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v4", 1)[1].split(
     "end subroutine publish_dg_hybrid_divided_v4", 1
 )[0]
+assert "yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y'" in main_dft_source.lower()
+nonlocal_builder = main_dft_source.lower().split(
+    "subroutine assemble_dg_hybrid_divided_nonlocal_rows", 1
+)[1].split("end subroutine assemble_dg_hybrid_divided_nonlocal_rows", 1)[0]
+assert "complex(8),intent(out)::nonlocal_action(:,:)" in nonlocal_builder
+assert "any(shape(nonlocal_action)/=[global_count,size(ow_core_ids)])" in nonlocal_builder
+assert "allocate(dg_hybrid_interior_nonlocal_action(size(divided_effective_ids),size(ow_core_ids)))" in main_dft_source.lower()
+continuation_body = main_dft_source.lower().split(
+    "subroutine run_dg_hybrid_concrete_continuation", 1
+)[1].split("end subroutine run_dg_hybrid_concrete_continuation", 1)[0]
+rollback_guard = "if(.not.continuation_controller%valid.or..not.continuation_controller%trial_active)then"
+assert rollback_guard in continuation_body
+assert continuation_body.index(rollback_guard) < continuation_body.index("call reject_dg_hybrid_trial")
+assert "complete_action_strength(q)*support_projector_values(position)*complete_overlap(basis,q)" in nonlocal_builder
 assert divided_route.lower().count("call publish_dg_hybrid_divided_v4") == 1
-assert divided_publisher.lower().count("call write_rt_dg_hybrid_checkpoint_v4") == 1
+assert divided_publisher.lower().count("call publish_rt_dg_hybrid_checkpoint_v4") == 1
+assert "call write_rt_dg_hybrid_checkpoint_v4" not in divided_publisher.lower()
 assert "solved_coefficients=final_solved_coefficients" in divided_route.lower()
 assert "solved_eigenvalues=final_solved_eigenvalues" in divided_route.lower()
 for old, replacement in (
@@ -378,4 +393,4 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         if line.startswith("[HYBRID-RT-STATIONARITY]") or line.startswith("[HYBRID-RT-REFRESH-STATIONARITY]"):
             print(f"ranks=4 zero-field {line}")
 
-print("PASS actual production divided-Hybrid H4 GS-to-Exp-RT smoke on 4 ranks")
+print("PASS actual production divided H4 GS-to-v4-to-Exp-RT smoke")

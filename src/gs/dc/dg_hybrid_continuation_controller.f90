@@ -73,7 +73,7 @@ module dg_hybrid_continuation_controller
     dg_hybrid_continuation_state_count,initialize_dg_hybrid_candidate_acceptance,&
     record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
     record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
-    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v3_publication
+    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication
 contains
   pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,symmetry_target_rank,solve_count,&
       meaningful_gap,gap_occupied_index,gap_unoccupied_index,ok)
@@ -247,7 +247,7 @@ contains
       'certified Hybrid RT-basis acceptance failed',ok,message)
   end subroutine record_dg_hybrid_certified_rt_basis
 
-  subroutine authorize_dg_hybrid_v3_publication(icomm,receipt,checkpoint_version,payload_rt_rank,&
+  subroutine authorize_dg_hybrid_v4_publication(icomm,receipt,checkpoint_version,payload_rt_rank,&
       payload_ready,ok,message)
     integer,intent(in)::icomm,checkpoint_version,payload_rt_rank
     type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
@@ -258,15 +258,15 @@ contains
     logical::valid
     candidate=receipt
     valid=receipt%valid.and.receipt%phase==6.and.receipt%certified_basis_ready.and.payload_ready.and.&
-      checkpoint_version==3.and.payload_rt_rank==receipt%certified_rank.and.&
+      checkpoint_version==4.and.payload_rt_rank==receipt%certified_rank.and.&
       payload_rt_rank==receipt%rt_basis_rank
     if(valid)then
       candidate%publication_authorized=.true.;candidate%checkpoint_version=checkpoint_version
       candidate%published_rt_rank=payload_rt_rank;candidate%phase=7
     endif
     call commit_candidate_transition(icomm,valid,candidate,receipt,&
-      'Hybrid checkpoint-v3 publication was not authorized',ok,message)
-  end subroutine authorize_dg_hybrid_v3_publication
+      'Hybrid checkpoint-v4 publication was not authorized',ok,message)
+  end subroutine authorize_dg_hybrid_v4_publication
 
   subroutine commit_candidate_transition(icomm,local_valid,candidate,receipt,failure_message,ok,message)
     integer,intent(in)::icomm

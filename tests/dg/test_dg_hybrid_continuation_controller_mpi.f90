@@ -19,6 +19,10 @@ program test_dg_hybrid_continuation_controller_mpi
 
   call MPI_Init(ierr);icomm=MPI_COMM_WORLD
   call MPI_Comm_rank(icomm,id_rank,ierr);call MPI_Comm_size(icomm,nproc,ierr)
+  call fill_state(state,9)
+  call reject_dg_hybrid_trial(icomm,controller,state,'early nonconvergence',ok,message)
+  call require(.not.ok.and.trim(message)=='invalid continuation rollback request',&
+    'uninitialized continuation rollback did not fail collectively with the named diagnostic')
   call default_dg_hybrid_controller_controls(controls)
   call require(controls%initial_step==0.125d0.and.controls%minimum_step==0.015625d0.and.&
     controls%maximum_step==0.5d0.and.controls%growth_factor==1.5d0.and.controls%shrink_factor==0.5d0,&
@@ -99,8 +103,8 @@ program test_dg_hybrid_continuation_controller_mpi
   endif
   call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,1d-12,2d-12,1d-10,ok,message)
   call require(ok.and.candidate_acceptance%occupied_gate.and.candidate_acceptance%density_gate,trim(message))
-  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,4,.true.,ok,message)
-  call require(.not.ok,'v3 publication was authorized before certification and localization')
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,4,.true.,ok,message)
+  call require(.not.ok,'v4 publication was authorized before certification and localization')
   call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,4,4,.false.,.false.,.false.,&
     1003_int64,ok,message)
   call require(.not.ok,'explicit energy window was accepted without a proof state')
@@ -111,11 +115,11 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(.not.ok,'construction rank was published as the certified RT basis rank')
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,4,1004_int64,1005_int64,ok,message)
   call require(ok.and.candidate_acceptance%rt_basis_rank==4,trim(message))
-  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,2,4,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,3,4,.true.,ok,message)
   call require(.not.ok,'legacy checkpoint version 2 was authorized for certified RT publication')
-  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,7,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,7,.true.,ok,message)
   call require(.not.ok,'construction-only directions entered the published RT dimensions')
-  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,4,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,4,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==4.and.&
     candidate_acceptance%published_rt_rank<candidate_acceptance%construction_rank,trim(message))
 
@@ -136,7 +140,7 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok.and.candidate_acceptance%legacy_warning_observed,trim(message))
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,5,2004_int64,2005_int64,ok,message)
   call require(ok,trim(message))
-  call authorize_dg_hybrid_v3_publication(icomm,candidate_acceptance,3,5,.true.,ok,message)
+  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,5,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==5,trim(message))
   call initialize_dg_hybrid_candidate_acceptance(icomm,5,-1d0-epsilon(1d0),candidate_acceptance,ok,message)
   call require(.not.ok,'a negative energy window other than exactly -1 was accepted')
