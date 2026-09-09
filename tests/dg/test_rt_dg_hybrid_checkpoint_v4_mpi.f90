@@ -3,7 +3,8 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,&
-    read_rt_dg_hybrid_checkpoint_v4
+    read_rt_dg_hybrid_checkpoint_v4,write_rt_dg_hybrid_checkpoint_v4,&
+    checked_rt_dg_hybrid_extent_product
   use rt_dg_hybrid_checkpoint,only:publish_rt_dg_hybrid_checkpoint_v4,&
     s_rt_dg_hybrid_v4_publication_authorization
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint,&
@@ -19,6 +20,7 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
   type(s_dg_hybrid_candidate_acceptance)::candidate
   integer::comm,rank,nproc,ierr,i,j,environment_status
+  integer(int64)::extent_product
   integer,allocatable::row_owner(:)
   logical::ok
   character(256)::message
@@ -26,6 +28,10 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   character(32)::test_mode
   call MPI_Init(ierr);comm=MPI_COMM_WORLD
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,nproc,ierr)
+  call checked_rt_dg_hybrid_extent_product(7_int64,9_int64,extent_product,ok)
+  call require(ok.and.extent_product==63_int64,'checked extent product changed a finite product')
+  call checked_rt_dg_hybrid_extent_product(huge(0_int64),2_int64,extent_product,ok)
+  call require(.not.ok.and.extent_product==0_int64,'checked extent product failed to reject int64 overflow')
   write(prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-checkpoint-',nproc
   written%global_count=50*nproc;written%global_grid_count=100*nproc;written%nocc=7
   written%certified_rank=written%global_count;written%fragment_id=rank+1
@@ -110,6 +116,16 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
   call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 rank shard')>0,&
     'v4 writer OPEN failure was not collectively rejected')
+  call get_environment_variable('SALMON_TEST_V4_MANIFEST_OPEN_FAILURE',test_mode,status=environment_status)
+  if(environment_status==0.and.trim(test_mode)=='1')then
+    write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-manifest-open-failure-',nproc
+    write(prefix,'(a,i0,a)')'/tmp/salmon-hybrid-v4-manifest-open-parent-',nproc,'/missing/manifest.tmp'
+    call write_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written,ok,message,trim(prefix))
+    call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 manifest')>0,&
+      'v4 manifest OPEN failure was not collectively rejected')
+    if(rank==0)write(*,'(a,i0)')'PASS v4 collective manifest OPEN failure ranks=',nproc
+    call MPI_Finalize(ierr);stop
+  endif
   call get_environment_variable('SALMON_TEST_V4_MANIFEST_FAILURE',test_mode,status=environment_status)
   if(environment_status==0.and.trim(test_mode)=='1')then
     write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-manifest-failure-',nproc

@@ -25,6 +25,24 @@ route_c = compact(route)
 continuation_c = compact(continuation)
 publisher_c = compact(publisher)
 
+def require_publication_rank_policy(body: str) -> None:
+    assert body.count("callvalidate_dg_hybrid_v4_publication_rank_policy") == 1
+    assert "if(present(publication_receipt))rank_policy_receipt=publication_receipt" in body
+    assert "dg_hybrid_symmetry_energy_window,requested_rank,certified_rank,n" in body
+
+require_publication_rank_policy(publisher_c)
+for old in (
+    "callvalidate_dg_hybrid_v4_publication_rank_policy",
+    "if(present(publication_receipt))rank_policy_receipt=publication_receipt",
+):
+    mutated = publisher_c.replace(old, "removed_rank_policy", 1)
+    try:
+        require_publication_rank_policy(mutated)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"publication-rank policy mutation survived: {old}")
+
 # The formal continuation switch must reach the concrete driver and terminate
 # there, before the non-continuation truncated-occupation route is entered.
 branch = route_c.index("if(yn_dg_hybrid_continuation_scf=='y')then")

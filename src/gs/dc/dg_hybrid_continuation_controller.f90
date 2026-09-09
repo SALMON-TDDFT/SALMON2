@@ -73,7 +73,8 @@ module dg_hybrid_continuation_controller
     dg_hybrid_continuation_state_count,initialize_dg_hybrid_candidate_acceptance,&
     record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
     record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
-    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication
+    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication,&
+    validate_dg_hybrid_v4_publication_rank_policy
 contains
   pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,symmetry_target_rank,solve_count,&
       meaningful_gap,gap_occupied_index,gap_unoccupied_index,ok)
@@ -270,6 +271,28 @@ contains
     call commit_candidate_transition(icomm,valid,candidate,receipt,&
       'Hybrid checkpoint-v4 publication was not authorized',ok,message)
   end subroutine authorize_dg_hybrid_v4_publication
+
+  subroutine validate_dg_hybrid_v4_publication_rank_policy(icomm,receipt,energy_window,&
+      requested_rank,certified_rank,construction_rank,ok,message)
+    integer,intent(in)::icomm,requested_rank,certified_rank,construction_rank
+    type(s_dg_hybrid_candidate_acceptance),intent(in)::receipt
+    real(real64),intent(in)::energy_window
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    logical::valid,full_rank_legacy
+    type(s_dg_hybrid_candidate_acceptance)::candidate,scratch
+    candidate=receipt;scratch=receipt
+    full_rank_legacy=energy_window==-1d0.and.receipt%valid.and.receipt%publication_authorized.and.&
+      receipt%legacy_dynamic_rank.and.receipt%legacy_warning_observed.and.receipt%energy_window==-1d0.and.&
+      receipt%certified_rank==construction_rank.and.receipt%construction_rank==construction_rank.and.&
+      receipt%published_rt_rank==construction_rank
+    valid=construction_rank>0.and.requested_rank>0.and.requested_rank<=certified_rank.and.&
+      certified_rank<=construction_rank.and.ieee_is_finite(energy_window).and.&
+      (energy_window>=0d0.or.energy_window==-1d0).and.&
+      (certified_rank<construction_rank.or.full_rank_legacy)
+    call commit_candidate_transition(icomm,valid,candidate,scratch,&
+      'Hybrid v4 full-rank certification requires authenticated energy_window=-1 authorization',ok,message)
+  end subroutine validate_dg_hybrid_v4_publication_rank_policy
 
   subroutine commit_candidate_transition(icomm,local_valid,candidate,receipt,failure_message,ok,message)
     integer,intent(in)::icomm

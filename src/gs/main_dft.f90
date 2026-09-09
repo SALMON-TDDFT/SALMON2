@@ -157,7 +157,8 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   initialize_dg_hybrid_candidate_acceptance,&
   record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
   record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
-  record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication
+  record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication,&
+  validate_dg_hybrid_v4_publication_rank_policy
 use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry,certify_dg_hybrid_energy_window
 use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
   prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
@@ -1970,7 +1971,7 @@ contains
       sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
       basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
       continuation_fingerprint,operator_fingerprint,stationarity_defect,metric_defect,&
-      projector_defect,electron_defect,certified_rank_receipt,publication_authorized,ok,message)
+      projector_defect,electron_defect,certified_rank_receipt,publication_authorized,ok,message,publication_receipt)
     integer(8),intent(in)::row_ids(:),grid_ids(:)
     integer,intent(in)::row_owner(:),row_generation(:),grid_fragment(:)
     real(8),intent(in)::grid_weights(:),solved_eigenvalues(:),stationarity_defect,metric_defect,&
@@ -1982,6 +1983,7 @@ contains
       continuation_fingerprint,operator_fingerprint
     integer,intent(in)::certified_rank_receipt
     logical,intent(in)::publication_authorized
+    type(s_dg_hybrid_candidate_acceptance),intent(in),optional::publication_receipt
     logical,intent(out)::ok
     character(*),intent(out)::message
     type(s_rt_dg_hybrid_v4_shard)::payload
@@ -2000,6 +2002,7 @@ contains
     type(s_rt_dg_sparse_exchange)::energy_exchange
     type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
     type(s_dft_energy)::checkpoint_energy
+    type(s_dg_hybrid_candidate_acceptance)::rank_policy_receipt
 
     ok=.false.;message='';n=size(solved_eigenvalues);nocc=occupied_state%noccupied
     nrow=size(row_ids);npoint=size(grid_ids)
@@ -2039,6 +2042,11 @@ contains
       endif
       certified_rank=certified_rank_receipt
     endif
+    rank_policy_receipt=s_dg_hybrid_candidate_acceptance()
+    if(present(publication_receipt))rank_policy_receipt=publication_receipt
+    call validate_dg_hybrid_v4_publication_rank_policy(dc%icomm_tot,rank_policy_receipt,&
+      dg_hybrid_symmetry_energy_window,requested_rank,certified_rank,n,local_ok,local_message)
+    if(.not.local_ok)then;message=trim(local_message);return;endif
 
     ! Pointwise support supplies every potentially nonzero local-potential and
     ! position edge.  Fixed matrices add their exact structural support.  No
@@ -6786,7 +6794,8 @@ stage_pass: do
       seed_fingerprint,fixed_payload%metric_fingerprint,fixed_payload%interface_fingerprint,&
       final_state_fingerprint,final_operator_fingerprint,residuals%r_h,residuals%r_s,&
       projector_symmetry_residual,abs(electron_count-dc%elec_num_tot),&
-      spectral_certification%certified_rank,candidate_acceptance%publication_authorized,local_ok,continuation_message)
+      spectral_certification%certified_rank,candidate_acceptance%publication_authorized,local_ok,continuation_message,&
+      candidate_acceptance)
     if(.not.local_ok)then
       write(0,'(a)')trim(continuation_message)
       error stop 'DG continuation distributed-v4 checkpoint failed'

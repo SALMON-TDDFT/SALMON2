@@ -26,14 +26,16 @@ module rt_dg_hybrid_checkpoint_v4
     real(real64),allocatable::grid_weights(:),density(:),occupations(:),eigenvalues(:),&
       acceptance_receipts(:),pseudopotential_receipt(:),energy_receipt(:)
   end type s_rt_dg_hybrid_v4_shard
-  public::write_rt_dg_hybrid_checkpoint_v4,read_rt_dg_hybrid_checkpoint_v4
+  public::write_rt_dg_hybrid_checkpoint_v4,read_rt_dg_hybrid_checkpoint_v4,&
+    checked_rt_dg_hybrid_extent_product
 contains
-  subroutine write_rt_dg_hybrid_checkpoint_v4(comm,prefix,payload,ok,message)
+  subroutine write_rt_dg_hybrid_checkpoint_v4(comm,prefix,payload,ok,message,manifest_temporary_override)
     integer,intent(in)::comm
     character(*),intent(in)::prefix
     type(s_rt_dg_hybrid_v4_shard),intent(in)::payload
     logical,intent(out)::ok
     character(*),intent(out)::message
+    character(*),intent(in),optional::manifest_temporary_override
 #ifdef USE_MPI
     integer::rank,nproc,ierr,ios,unit,local_bad,global_bad,flush_ios
     integer(int64)::transaction_id,shard_digest,shard_size
@@ -96,6 +98,7 @@ contains
     call MPI_Gather(shard_digest,1,MPI_INTEGER8,shard_digests,1,MPI_INTEGER8,0,comm,ierr)
     call MPI_Gather(payload%fragment_id,1,MPI_INTEGER,fragment_ids,1,MPI_INTEGER,0,comm,ierr)
     manifest=trim(prefix)//'.manifest';write(manifest_tmp,'(a,".temporary.",z16.16)')trim(manifest),transaction_id
+    if(present(manifest_temporary_override))manifest_tmp=trim(manifest_temporary_override)
     ios=0;unit=-1
     if(rank==0)then
       open(newunit=unit,file=trim(manifest_tmp),status='replace',access='stream',form='unformatted',&
@@ -313,6 +316,13 @@ contains
     call add_extent(extent,int(nscope,int64)+int(nxc,int64),integer_bytes,ok)
     call add_extent(extent,21_int64,real_bytes,ok)
   end subroutine expected_shard_extent
+
+  subroutine checked_rt_dg_hybrid_extent_product(left,right,value,ok)
+    integer(int64),intent(in)::left,right
+    integer(int64),intent(out)::value
+    logical,intent(out)::ok
+    call checked_product(left,right,value,ok)
+  end subroutine checked_rt_dg_hybrid_extent_product
 
   subroutine checked_product(left,right,value,ok)
     integer(int64),intent(in)::left,right

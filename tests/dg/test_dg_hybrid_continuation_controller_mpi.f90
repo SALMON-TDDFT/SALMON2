@@ -143,6 +143,13 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok,trim(message))
   call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,5,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==5,trim(message))
+  call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
+  call require(ok,'authenticated energy_window=-1 full-rank publication was rejected')
+  call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,0d0,3,5,5,ok,message)
+  call require(.not.ok,'finite energy window published q==construction rank without a proof-above state')
+  candidate_acceptance=s_dg_hybrid_candidate_acceptance()
+  call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
+  call require(.not.ok,'unauthenticated formal divided path published q==construction rank')
   call initialize_dg_hybrid_candidate_acceptance(icomm,5,-1d0-epsilon(1d0),candidate_acceptance,ok,message)
   call require(.not.ok,'a negative energy window other than exactly -1 was accepted')
 

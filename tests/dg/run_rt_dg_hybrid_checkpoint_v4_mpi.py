@@ -67,6 +67,12 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
   for nrank in (1,2,4,8):
     shutil.rmtree(Path(f"/tmp/salmon-hybrid-v4-open-failure-{nrank}"),ignore_errors=True)
+    shutil.rmtree(Path(f"/tmp/salmon-hybrid-v4-manifest-open-parent-{nrank}"),ignore_errors=True)
+    open_failure_env=env.copy();open_failure_env["SALMON_TEST_V4_MANIFEST_OPEN_FAILURE"]="1"
+    failed_open=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],
+      capture_output=True,text=True,env=open_failure_env,timeout=60)
+    assert failed_open.returncode==0,(nrank,failed_open.stdout,failed_open.stderr)
+    assert f"PASS v4 collective manifest OPEN failure ranks={nrank}" in failed_open.stdout
     manifest_failure=Path(f"/tmp/salmon-hybrid-v4-manifest-failure-{nrank}.manifest")
     if manifest_failure.is_dir(): shutil.rmtree(manifest_failure)
     elif manifest_failure.exists(): manifest_failure.unlink()
@@ -91,12 +97,16 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-checkpoint-") as name:
         ("operator-count",bytearray(original),"negative, overflowing, or invalid dimensions"),
         ("point-count",bytearray(original),"negative, overflowing, or invalid dimensions"),
         ("coefficient-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
+        ("large-consistent-product",bytearray(original),"negative, overflowing, or invalid dimensions"),
       ):
         if label=="negative": struct.pack_into("=i",damaged,120,-1)
         if label=="huge": struct.pack_into("=i",damaged,120,2**31-1)
         if label=="operator-count": struct.pack_into("=i",damaged,136,struct.unpack_from("=i",damaged,136)[0]+1)
         if label=="point-count": struct.pack_into("=i",damaged,140,struct.unpack_from("=i",damaged,140)[0]+1)
         if label=="coefficient-product": struct.pack_into("=i",damaged,152,2**31-1)
+        if label=="large-consistent-product":
+          for offset,value in ((120,10**9),(124,10**9+1),(132,10**9+1),(148,10**9)):
+            struct.pack_into("=i",damaged,offset,value)
         shard.write_bytes(damaged)
         rejected=subprocess.run([shutil.which("mpiexec"),"-n","1",str(reject),str(prefix)],
           capture_output=True,text=True,env=env,timeout=30)
