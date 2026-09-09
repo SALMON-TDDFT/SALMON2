@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 
 root=Path(__file__).resolve().parents[2]
-source=(root/"src/rt/dg/rt_dg_hybrid_initialization.f90").read_text()
+source=(root/"src/rt/dg/rt_dg_hybrid_initialization_v4.f90").read_text()
 lower=source.lower()
 body=lower.split("subroutine initialize_rt_dg_hybrid_from_checkpoint",1)[1].split(
   "end subroutine initialize_rt_dg_hybrid_from_checkpoint",1)[0]
@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v3-reject-") as name:
     "src/rt/dg/rt_dg_hybrid_sparse_exchange.f90", "src/rt/dg/rt_dg_hybrid_point_density.f90",
     "src/rt/dg/rt_dg_hybrid_checkpoint_v4.f90", "src/rt/dg/rt_dg_hybrid_checkpoint.f90",
     "src/rt/dg/rt_dg_hybrid_structural_graph.f90", "src/rt/dg/rt_dg_hybrid_sparse_projection.f90",
-    "src/rt/dg/rt_dg_hybrid_initialization.f90", "tests/dg/test_rt_dg_hybrid_v3_rejection_mpi.f90",
+    "src/rt/dg/rt_dg_hybrid_initialization_v4.f90", "tests/dg/test_rt_dg_hybrid_v3_rejection_mpi.f90",
   ]
   if os.environ.get("SALMON_LAPACK_LIBS"):
     libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])

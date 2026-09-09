@@ -232,9 +232,6 @@ require_hybrid_route_contract(main_source)
 divided_route = main_dft_source.split("subroutine run_dg_hybrid_divided_ground_state_for_main", 1)[1].split(
     "end subroutine run_dg_hybrid_divided_ground_state_for_main", 1
 )[0]
-divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v3", 1)[1].split(
-    "end subroutine publish_dg_hybrid_divided_v3", 1
-)[0]
 divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v4", 1)[1].split(
     "end subroutine publish_dg_hybrid_divided_v4", 1
 )[0]

@@ -78,27 +78,26 @@ for component in ("canonical_pp_valence_sum(pp)","pp%lmax","pp%nrmax","ppg%nlma"
 assert continuation.index("if(.not.final_refresh_performed)") < continuation.index(
   "write_rt_dg_hybrid_ground_state_checkpoint")
 assert "write_rt_dg_hybrid_occupied_checkpoint" not in continuation
-divided_publisher=main_source.split("subroutine publish_dg_hybrid_divided_v3",1)[1].split(
-  "end subroutine publish_dg_hybrid_divided_v3",1)[0]
+assert "subroutine publish_dg_hybrid_divided_v3" not in main_source
+divided_publisher=main_source.split("subroutine publish_dg_hybrid_divided_v4",1)[1].split(
+  "end subroutine publish_dg_hybrid_divided_v4",1)[0]
 assert "collective_rt_dg_hybrid_publication_precondition" in divided_publisher, (
-  "formal divided v3 publisher lacks a collective precondition before gathers")
+  "formal divided v4 publisher lacks a collective precondition")
 assert "collective_rt_dg_hybrid_publication_mapping_precondition" in divided_publisher, (
-  "formal divided v3 publisher lacks a global row-mapping proof before gathers")
-assert divided_publisher.index("collective_rt_dg_hybrid_publication_precondition") < divided_publisher.index(
-  "collect_dg_hybrid_full_rows"), "formal divided v3 publisher gathers before collective validation"
-assert divided_publisher.index("collective_rt_dg_hybrid_publication_mapping_precondition") < divided_publisher.index(
-  "collect_dg_hybrid_full_rows"), "formal divided v3 publisher gathers before global row-mapping proof"
-assert "full_metric" not in divided_publisher, "formal divided v3 publisher retains an unused global dense metric"
+  "formal divided v4 publisher lacks a global row-mapping proof")
+assert "collect_dg_hybrid_full_rows" not in divided_publisher
+assert "full_metric" not in divided_publisher
+assert divided_publisher.count("call write_rt_dg_hybrid_checkpoint_v4") == 1
 for publication_contract in (
   "occupied_state%valid.and.occupied_state%converged",
   "occupied_state%global_count==n",
-  "all(occupied_state%owned_row_ids==row_ids)",
   "all(grid_fragment==dc%i_frag)",
   "dc%i_frag==rank+1",
-  "nrow==count(row_owner==rank)",
 ):
   assert publication_contract in divided_publisher.replace(" ",""), (
-    f"formal divided v3 publisher omits rank-fragment/state contract: {publication_contract}")
+    f"formal divided v4 publisher omits rank-fragment/state contract: {publication_contract}")
+assert ("collective_rt_dg_hybrid_publication_mapping_precondition(dc%icomm_tot,n,row_ids,row_owner,"+
+        "occupied_state%owned_row_ids,precondition_ok,local_ok,local_message)") in divided_publisher.replace(" ","").replace("&\n","")
 publication_precondition=checkpoint_source.split(
   "subroutine collective_rt_dg_hybrid_publication_precondition",1)[1].split(
   "end subroutine collective_rt_dg_hybrid_publication_precondition",1)[0]

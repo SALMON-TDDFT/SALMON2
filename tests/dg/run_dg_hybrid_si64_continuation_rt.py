@@ -509,7 +509,7 @@ def parser_self_test() -> None:
 
 
 def production_rt_receipt_self_test() -> None:
-    state_source = (ROOT / "src/rt/dg/rt_dg_hybrid_initialization.f90").read_text().lower()
+    state_source = (ROOT / "src/rt/dg/rt_dg_hybrid_initialization_v4.f90").read_text().lower()
     state_type = state_source[
         state_source.index("type,public::s_rt_dg_hybrid_state"):
         state_source.index("end type s_rt_dg_hybrid_state")

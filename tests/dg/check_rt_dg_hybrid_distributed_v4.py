@@ -6,12 +6,16 @@ import re
 root = Path(__file__).resolve().parents[2]
 checkpoint = (root / "src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().lower()
 checkpoint_v4 = (root / "src/rt/dg/rt_dg_hybrid_checkpoint_v4.f90").read_text().lower()
-initialization = (root / "src/rt/dg/rt_dg_hybrid_initialization.f90").read_text().lower()
+initialization = (root / "src/rt/dg/rt_dg_hybrid_initialization_v4.f90").read_text().lower()
 density = (root / "src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
 exchange = (root / "src/rt/dg/rt_dg_hybrid_sparse_exchange.f90").read_text().lower()
 main_gs = (root / "src/gs/main_dft.f90").read_text().lower()
 main_rt = (root / "src/rt/main_tddft.f90").read_text().lower()
 wf_checkpoint = (root / "src/gs/dc/dg_overlapping_wannier_checkpoint.f90").read_text().lower()
+assert not (root / "src/rt/dg/rt_dg_hybrid_initialization.f90").exists(), (
+    "RED: dense-v3 initializer implementation remains in the production source tree")
+assert "publish_dg_hybrid_divided_v3_legacy_unreachable" not in main_gs, (
+    "RED: dead dense-v3 divided publisher remains in production source")
 
 assert re.search(r"schema_version\s*=\s*4", checkpoint_v4), "RED: formal Hybrid handoff is not schema v4"
 publisher = main_gs.split("subroutine publish_dg_hybrid_divided_v4", 1)[1].split(

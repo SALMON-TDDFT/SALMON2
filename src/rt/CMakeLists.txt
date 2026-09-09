@@ -23,7 +23,7 @@ if (USE_MPI AND USE_SCALAPACK)
     dg/rt_dg_hybrid_checkpoint.f90
     dg/rt_dg_hybrid_structural_graph.f90
     dg/rt_dg_hybrid_sparse_projection.f90
-    dg/rt_dg_hybrid_initialization.f90
+    dg/rt_dg_hybrid_initialization_v4.f90
     dg/rt_dg_hybrid_density_update.f90
     dg/rt_dg_hybrid_stationarity.f90
    )
