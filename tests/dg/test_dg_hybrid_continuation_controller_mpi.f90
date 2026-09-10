@@ -103,8 +103,8 @@ program test_dg_hybrid_continuation_controller_mpi
   endif
   call record_dg_hybrid_unconditional_gates(icomm,candidate_acceptance,.true.,.true.,1d-12,2d-12,1d-10,ok,message)
   call require(ok.and.candidate_acceptance%occupied_gate.and.candidate_acceptance%density_gate,trim(message))
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,4,.true.,ok,message)
-  call require(.not.ok,'v4 publication was authorized before certification and localization')
+  call authorize_dg_hybrid_v5_publication(icomm,candidate_acceptance,5,4,.true.,ok,message)
+  call require(.not.ok,'v5 publication was authorized before certification and localization')
   call record_dg_hybrid_spectral_certification(icomm,candidate_acceptance,3,4,4,.false.,.false.,.false.,&
     1003_int64,ok,message)
   call require(.not.ok,'explicit energy window was accepted without a proof state')
@@ -113,14 +113,14 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok.and.candidate_acceptance%certified_rank==4,trim(message))
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,7,1004_int64,1005_int64,ok,message)
   call require(ok.and.candidate_acceptance%rt_basis_rank==7.and.candidate_acceptance%certified_rank==4,&
-    'localized v4 construction basis was not retained after low-energy certification')
+    'localized v5 construction basis was not retained after low-energy certification')
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,4,1004_int64,1005_int64,ok,message)
-  call require(.not.ok,'spectral prefix was accepted as the localized v4 propagation basis')
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,4,7,.true.,ok,message)
+  call require(.not.ok,'spectral prefix was accepted as the localized v5 propagation basis')
+  call authorize_dg_hybrid_v5_publication(icomm,candidate_acceptance,4,7,.true.,ok,message)
   call require(.not.ok,'legacy checkpoint version 2 was authorized for certified RT publication')
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,4,.true.,ok,message)
-  call require(.not.ok,'spectral prefix was accepted as the localized v4 payload rank')
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,7,.true.,ok,message)
+  call authorize_dg_hybrid_v5_publication(icomm,candidate_acceptance,5,4,.true.,ok,message)
+  call require(.not.ok,'spectral prefix was accepted as the localized v5 payload rank')
+  call authorize_dg_hybrid_v5_publication(icomm,candidate_acceptance,5,7,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==7.and.&
     candidate_acceptance%certified_rank<candidate_acceptance%published_rt_rank,trim(message))
 
@@ -141,33 +141,33 @@ program test_dg_hybrid_continuation_controller_mpi
   call require(ok.and.candidate_acceptance%legacy_warning_observed,trim(message))
   call record_dg_hybrid_certified_rt_basis(icomm,candidate_acceptance,5,2004_int64,2005_int64,ok,message)
   call require(ok,trim(message))
-  call authorize_dg_hybrid_v4_publication(icomm,candidate_acceptance,5,5,.true.,ok,message)
+  call authorize_dg_hybrid_v5_publication(icomm,candidate_acceptance,5,5,.true.,ok,message)
   call require(ok.and.candidate_acceptance%published_rt_rank==5,trim(message))
   if(nproc>1)then
-    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,&
+    call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,-1d0,&
       3+merge(0,1,id_rank==0),5,5,ok,message)
     call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
       'rank-local requested-rank mismatch was accepted')
-    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,&
+    call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,&
       5-merge(0,1,id_rank==0),5,ok,message)
     call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
       'rank-local certified-rank mismatch was accepted')
-    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,&
+    call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,&
       merge(-1d0,0d0,id_rank==0),3,5,5,ok,message)
     call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
       'rank-local energy-window mismatch was accepted')
     if(id_rank==0)candidate_acceptance%operator_fingerprint=candidate_acceptance%operator_fingerprint+1_int64
-    call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
+    call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
     call require(.not.ok.and.index(message,'disagree across MPI ranks')>0,&
       'rank-local authorization receipt mismatch was accepted')
     if(id_rank==0)candidate_acceptance%operator_fingerprint=candidate_acceptance%operator_fingerprint-1_int64
   endif
-  call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
+  call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
   call require(ok,'authenticated energy_window=-1 full-rank publication was rejected')
-  call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,0d0,3,5,5,ok,message)
+  call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,0d0,3,5,5,ok,message)
   call require(.not.ok,'finite energy window published q==construction rank without a proof-above state')
   candidate_acceptance=s_dg_hybrid_candidate_acceptance()
-  call validate_dg_hybrid_v4_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
+  call validate_dg_hybrid_v5_publication_rank_policy(icomm,candidate_acceptance,-1d0,3,5,5,ok,message)
   call require(.not.ok,'unauthenticated formal divided path published q==construction rank')
   call initialize_dg_hybrid_candidate_acceptance(icomm,5,-1d0-epsilon(1d0),candidate_acceptance,ok,message)
   call require(.not.ok,'a negative energy window other than exactly -1 was accepted')

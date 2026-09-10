@@ -3,7 +3,7 @@ module rt_dg_hybrid_checkpoint
   use,intrinsic::iso_fortran_env,only:int64,real64
   use,intrinsic::iso_c_binding,only:c_char,c_int,c_null_char
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
-  use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,write_rt_dg_hybrid_checkpoint_v4
+  use rt_dg_hybrid_checkpoint_v5,only:s_rt_dg_hybrid_v5_shard,write_rt_dg_hybrid_checkpoint_v5
 #ifdef USE_MPI
   use mpi
 #endif
@@ -12,15 +12,15 @@ module rt_dg_hybrid_checkpoint
   character(16),parameter::occupied_magic="SALMON_DG_OCC02 "
   integer,parameter::occupied_version=2
   integer,parameter,public::rt_dg_hybrid_occupied_checkpoint_version=2
-  type,public::s_rt_dg_hybrid_v4_publication_authorization
+  type,public::s_rt_dg_hybrid_v5_publication_authorization
     logical::valid=.false.
     integer::checkpoint_version=0,published_rank=0
     integer(int64)::basis_fingerprint=0_int64,operator_fingerprint=0_int64
-  end type s_rt_dg_hybrid_v4_publication_authorization
+  end type s_rt_dg_hybrid_v5_publication_authorization
   public::write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint,&
     collective_rt_dg_hybrid_publication_precondition,&
     collective_rt_dg_hybrid_publication_mapping_precondition,&
-    publish_rt_dg_hybrid_checkpoint_v4
+    publish_rt_dg_hybrid_checkpoint_v5
   interface
     function c_rename(old_path,new_path) bind(C,name="rename") result(status)
       import::c_char,c_int
@@ -38,15 +38,15 @@ contains
     integer::ierr,local_bad,global_bad,local_signature(2),minimum_signature(2),maximum_signature(2)
     local_bad=merge(0,1,local_valid);local_signature=[local_n,local_nocc]
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v4 publication validity reduction failed';return;endif
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v5 publication validity reduction failed';return;endif
     call MPI_Allreduce(local_signature,minimum_signature,2,MPI_INTEGER,MPI_MIN,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v4 publication minimum reduction failed';return;endif
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v5 publication minimum reduction failed';return;endif
     call MPI_Allreduce(local_signature,maximum_signature,2,MPI_INTEGER,MPI_MAX,comm,ierr)
-    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v4 publication maximum reduction failed';return;endif
+    if(ierr/=MPI_SUCCESS)then;ok=.false.;message='terminal divided v5 publication maximum reduction failed';return;endif
     ok=global_bad==0.and.all(minimum_signature==maximum_signature)
-    if(ok)then;message='';else;message='terminal divided v4 publication collective precondition failed';endif
+    if(ok)then;message='';else;message='terminal divided v5 publication collective precondition failed';endif
 #else
-    ok=.false.;message='terminal divided v4 publication precondition requires MPI'
+    ok=.false.;message='terminal divided v5 publication precondition requires MPI'
 #endif
   end subroutine collective_rt_dg_hybrid_publication_precondition
 
@@ -60,7 +60,7 @@ contains
 #ifdef USE_MPI
     integer::rank,i,ierr,local_bad,global_bad,allocation_status
     integer,allocatable::row_counts(:),owner_minimum(:),owner_maximum(:)
-    ok=.false.;message='terminal divided v4 publication stage=pre-gather global row mapping failed'
+    ok=.false.;message='terminal divided v5 publication stage=pre-gather global row mapping failed'
     call MPI_Comm_rank(comm,rank,ierr);if(ierr/=MPI_SUCCESS)return
     if(local_valid)then;local_bad=0;else;local_bad=1;endif
     if(global_count<1.or.size(row_owner)/=global_count.or.size(occupied_row_ids)/=size(row_ids))local_bad=1
@@ -91,17 +91,17 @@ contains
     ok=global_bad==0.and.all(row_counts==1).and.all(owner_minimum==owner_maximum)
     if(ok)message=''
 #else
-    ok=.false.;message='terminal divided v4 publication mapping precondition requires MPI'
+    ok=.false.;message='terminal divided v5 publication mapping precondition requires MPI'
 #endif
   end subroutine collective_rt_dg_hybrid_publication_mapping_precondition
 
-  subroutine publish_rt_dg_hybrid_checkpoint_v4(comm,path,global_count,noccupied,row_ids,row_owner,&
+  subroutine publish_rt_dg_hybrid_checkpoint_v5(comm,path,global_count,noccupied,row_ids,row_owner,&
       occupied_row_ids,payload,authorization,local_valid,ok,message)
     integer,intent(in)::comm,global_count,noccupied,row_owner(:)
     character(*),intent(in)::path
     integer(int64),intent(in)::row_ids(:),occupied_row_ids(:)
-    type(s_rt_dg_hybrid_v4_shard),intent(in)::payload
-    type(s_rt_dg_hybrid_v4_publication_authorization),intent(in)::authorization
+    type(s_rt_dg_hybrid_v5_shard),intent(in)::payload
+    type(s_rt_dg_hybrid_v5_publication_authorization),intent(in)::authorization
     logical,intent(in)::local_valid
     logical,intent(out)::ok
     character(*),intent(out)::message
@@ -111,16 +111,16 @@ contains
       authorization%checkpoint_version==5.and.authorization%published_rank==global_count.and.&
       authorization%basis_fingerprint==payload%basis_fingerprint.and.&
       authorization%operator_fingerprint==payload%operator_fingerprint,global_count,noccupied,ok,detail)
-    if(.not.ok)then;message='distributed-v4 endpoint authorization failed: '//trim(detail);return;endif
+    if(.not.ok)then;message='distributed-v5 endpoint authorization failed: '//trim(detail);return;endif
     call collective_rt_dg_hybrid_publication_precondition(comm,local_valid,global_count,noccupied,ok,detail)
-    if(.not.ok)then;message='distributed-v4 endpoint precondition failed: '//trim(detail);return;endif
+    if(.not.ok)then;message='distributed-v5 endpoint precondition failed: '//trim(detail);return;endif
     call collective_rt_dg_hybrid_publication_mapping_precondition(comm,global_count,row_ids,row_owner,&
       occupied_row_ids,local_valid,ok,detail)
-    if(.not.ok)then;message='distributed-v4 endpoint row mapping failed: '//trim(detail);return;endif
-    call write_rt_dg_hybrid_checkpoint_v4(comm,path,payload,ok,detail)
-    if(.not.ok)then;message='distributed-v4 endpoint publication failed: '//trim(detail);return;endif
+    if(.not.ok)then;message='distributed-v5 endpoint row mapping failed: '//trim(detail);return;endif
+    call write_rt_dg_hybrid_checkpoint_v5(comm,path,payload,ok,detail)
+    if(.not.ok)then;message='distributed-v5 endpoint publication failed: '//trim(detail);return;endif
     message=''
-  end subroutine publish_rt_dg_hybrid_checkpoint_v4
+  end subroutine publish_rt_dg_hybrid_checkpoint_v5
 
   subroutine write_rt_dg_hybrid_occupied_checkpoint(comm,path,global_count,row_ids,coefficients,occupations,eigenvalues,&
       catalog_fingerprint,basis_fingerprint,provenance_fingerprints,operator_fingerprint,state_fingerprint,scf_receipts,&

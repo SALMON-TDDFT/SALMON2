@@ -21,18 +21,18 @@ program test_rt_dg_hybrid_checkpoint_mpi
   local_valid=.true.;if(trim(mode)=='bad_local'.and.rank==0)local_valid=.false.
   call collective_rt_dg_hybrid_publication_precondition(MPI_COMM_WORLD,local_valid,n,2,ok,message)
   if(trim(mode)=='bad_local')then
-    if(.not.ok)error stop 'PASS named collective v4 publication precondition rejection'
-    error stop 'one-rank malformed v4 publication was accepted'
+    if(.not.ok)error stop 'PASS named collective v5 publication precondition rejection'
+    error stop 'one-rank malformed v5 publication was accepted'
   endif
   if(.not.ok)error stop trim(message)
   if(trim(mode)=='bad_mapping'.and.rank==0)owners(1)=mod(owners(1)+1,nproc)
   call collective_rt_dg_hybrid_publication_mapping_precondition(MPI_COMM_WORLD,n,rows,owners,&
     occupied_rows,.true.,ok,message)
   if(trim(mode)=='bad_mapping')then
-    if(.not.ok)error stop 'PASS named collective v4 mapping rejection before publication'
-    error stop 'rank-disagreeing v4 mapping was accepted'
+    if(.not.ok)error stop 'PASS named collective v5 mapping rejection before publication'
+    error stop 'rank-disagreeing v5 mapping was accepted'
   endif
   if(.not.ok)error stop trim(message)
-  if(rank==0)write(*,'(a,i0,a)')'PASS v4 publication preconditions on ',nproc,' ranks'
+  if(rank==0)write(*,'(a,i0,a)')'PASS v5 publication preconditions on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 end program test_rt_dg_hybrid_checkpoint_mpi

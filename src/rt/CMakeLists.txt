@@ -20,11 +20,11 @@ if (USE_MPI AND USE_SCALAPACK)
     dg/rt_dg_hybrid_metric_solver.f90
     dg/rt_dg_hybrid_length_gauge.f90
     dg/rt_dg_hybrid_system_identity.f90
-    dg/rt_dg_hybrid_checkpoint_v4.f90
+    dg/rt_dg_hybrid_checkpoint_v5.f90
     dg/rt_dg_hybrid_checkpoint.f90
     dg/rt_dg_hybrid_structural_graph.f90
     dg/rt_dg_hybrid_sparse_projection.f90
-    dg/rt_dg_hybrid_initialization_v4.f90
+    dg/rt_dg_hybrid_initialization_v5.f90
     dg/rt_dg_hybrid_density_update.f90
     dg/rt_dg_hybrid_stationarity.f90
    )

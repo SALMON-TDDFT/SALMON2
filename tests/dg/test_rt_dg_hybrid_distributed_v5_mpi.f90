@@ -1,5 +1,5 @@
 #include "config.h"
-program test_rt_dg_hybrid_distributed_v4_mpi
+program test_rt_dg_hybrid_distributed_v5_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
   use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
@@ -39,7 +39,7 @@ program test_rt_dg_hybrid_distributed_v4_mpi
   call exercise_tiled_action
   call exercise_point_projection
   call exercise_zero_owned_and_invalid_plan
-  if(rank==0)write(*,'(a,i0,a,i0,a,i0)')'PASS distributed-v4 coefficient halo ranks=',nproc,&
+  if(rank==0)write(*,'(a,i0,a,i0,a,i0)')'PASS distributed-v5 coefficient halo ranks=',nproc,&
     ' local_basis=',nlocal,' repeated_edges=',size(needed)
   call MPI_Finalize(ierr)
 contains
@@ -243,4 +243,4 @@ contains
       error stop trim(text)
     endif
   end subroutine require
-end program test_rt_dg_hybrid_distributed_v4_mpi
+end program test_rt_dg_hybrid_distributed_v5_mpi

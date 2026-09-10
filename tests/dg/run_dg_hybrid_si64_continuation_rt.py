@@ -493,7 +493,7 @@ def parser_self_test() -> None:
 
 
 def production_rt_receipt_self_test() -> None:
-    state_source = (ROOT / "src/rt/dg/rt_dg_hybrid_initialization_v4.f90").read_text().lower()
+    state_source = (ROOT / "src/rt/dg/rt_dg_hybrid_initialization_v5.f90").read_text().lower()
     state_type = state_source[
         state_source.index("type,public::s_rt_dg_hybrid_state"):
         state_source.index("end type s_rt_dg_hybrid_state")
@@ -511,7 +511,7 @@ def production_rt_receipt_self_test() -> None:
     ):
         assert field in receipt, f"production RT handoff receipt omits {field}"
     for forbidden in ("operator_symmetry=", "operation_count=", "nonidentity_count="):
-        assert forbidden not in receipt, f"fabricated v4 symmetry evidence remains: {forbidden}"
+        assert forbidden not in receipt, f"fabricated v5 symmetry evidence remains: {forbidden}"
 
 
 def certify_seed_receipt(log: str, ranks: int, skipped: bool) -> dict[str, int]:

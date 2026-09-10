@@ -8,7 +8,7 @@ module rt_dg_hybrid_initialization
   use rt_dg_hybrid_sparse_exchange,only:s_rt_dg_sparse_exchange,build_rt_dg_sparse_exchange,&
     apply_rt_dg_sparse_rows_tiled
   use rt_dg_hybrid_point_density,only:reconstruct_rt_dg_point_csr_density
-  use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,read_rt_dg_hybrid_checkpoint_v4
+  use rt_dg_hybrid_checkpoint_v5,only:s_rt_dg_hybrid_v5_shard,read_rt_dg_hybrid_checkpoint_v5
 #ifdef USE_MPI
   use mpi
 #endif
@@ -55,7 +55,7 @@ contains
     logical,intent(out)::ok
     character(*),intent(out)::message
 #ifdef USE_MPI
-    type(s_rt_dg_hybrid_v4_shard)::payload
+    type(s_rt_dg_hybrid_v5_shard)::payload
     integer::i,j,edge,ierr,local_bad,global_bad,active_xc,nhalo,slot,payload_count
     integer(int64)::workspace_peak
     integer,allocatable::temporary_halo(:),metric_slots(:),operator_slots(:)
@@ -84,9 +84,9 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='dense-v3 probe reduction failed';return;endif
     if(global_bad/=0)then
-      message='dense Hybrid v3 checkpoint is unsupported; regenerate distributed-native v4';return
+      message='dense Hybrid v3 checkpoint is unsupported; regenerate distributed-native v5';return
     endif
-    call read_rt_dg_hybrid_checkpoint_v4(comm,path,payload,ok,message);if(.not.ok)return
+    call read_rt_dg_hybrid_checkpoint_v5(comm,path,payload,ok,message);if(.not.ok)return
     local_bad=merge(0,1,.not.all(current_system_fingerprint==0_int64).and.&
       all(current_system_fingerprint==payload%system_fingerprint).and.current_pseudopotential_fingerprint/=0_int64.and.&
       current_pseudopotential_fingerprint==payload%pseudopotential_fingerprint.and.&
@@ -161,13 +161,13 @@ contains
     allocate(state%basis_halo_ids(nhalo));state%basis_halo_ids=temporary_halo(:nhalo)
     call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
       state%basis_halo_ids,state%basis_exchange,ok,message)
-    if(.not.ok)then;message='distributed-v4 point-support halo failed: '//trim(message);return;endif
+    if(.not.ok)then;message='distributed-v5 point-support halo failed: '//trim(message);return;endif
     call validate_rt_dg_hybrid_sparse_hermiticity(comm,payload%global_count,payload%row_ids,&
       payload%metric_offsets,payload%metric_columns,payload%metric_values,tolerances(1),ok,message)
-    if(.not.ok)then;message='distributed-v4 metric Hermiticity failed: '//trim(message);return;endif
+    if(.not.ok)then;message='distributed-v5 metric Hermiticity failed: '//trim(message);return;endif
     call validate_rt_dg_hybrid_sparse_hermiticity(comm,payload%global_count,payload%row_ids,&
       payload%operator_offsets,payload%operator_columns,payload%operator_values,tolerances(1),ok,message)
-    if(.not.ok)then;message='distributed-v4 Hamiltonian Hermiticity failed: '//trim(message);return;endif
+    if(.not.ok)then;message='distributed-v5 Hamiltonian Hermiticity failed: '//trim(message);return;endif
 
     call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
       payload%metric_columns,state%basis_exchange,ok,message);if(.not.ok)return
@@ -175,7 +175,7 @@ contains
     allocate(s_coefficients(size(payload%row_ids),payload%nocc))
     call apply_rt_dg_sparse_rows_tiled(comm,state%basis_exchange,payload%metric_offsets,payload%metric_values,&
       metric_slots,state%coefficients,s_coefficients,16,workspace_peak,payload_count,exchange_ok,exchange_message)
-    if(.not.exchange_ok)then;ok=.false.;message='distributed-v4 metric coefficient halo failed';return;endif
+    if(.not.exchange_ok)then;ok=.false.;message='distributed-v5 metric coefficient halo failed';return;endif
     local_value=0d0;local_scale=1d0
     do i=1,payload%nocc;do j=1,payload%nocc
       local_inner=sum(conjg(state%coefficients(:,i))*s_coefficients(:,j))
@@ -192,7 +192,7 @@ contains
     allocate(h_coefficients(size(payload%row_ids),payload%nocc))
     call apply_rt_dg_sparse_rows_tiled(comm,state%basis_exchange,payload%operator_offsets,payload%operator_values,&
       operator_slots,state%coefficients,h_coefficients,16,workspace_peak,payload_count,exchange_ok,exchange_message)
-    if(.not.exchange_ok)then;ok=.false.;message='distributed-v4 operator coefficient halo failed';return;endif
+    if(.not.exchange_ok)then;ok=.false.;message='distributed-v5 operator coefficient halo failed';return;endif
     local_residual=0d0;local_scale=0d0
     do i=1,payload%nocc
       local_residual=local_residual+sum(abs(h_coefficients(:,i)-payload%eigenvalues(i)*s_coefficients(:,i))**2)
@@ -204,7 +204,7 @@ contains
     if(ierr/=MPI_SUCCESS)then;ok=.false.;message='startup residual scale reduction failed';return;endif
     state%startup_orbital_residual=sqrt(global_residual)/max(1d0,sqrt(global_scale))
     if(state%startup_metric_defect>tolerances(2).or.state%startup_orbital_residual>tolerances(3))then
-      ok=.false.;message='distributed-v4 metric/stationarity certification failed';return
+      ok=.false.;message='distributed-v5 metric/stationarity certification failed';return
     endif
     call build_rt_dg_sparse_exchange(comm,payload%global_count,payload%basis_fingerprint,payload%row_ids,&
       state%basis_halo_ids,state%basis_exchange,ok,message);if(.not.ok)return
@@ -217,7 +217,7 @@ contains
     call MPI_Allreduce(local_value,global_value,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;ok=.false.;message='checkpoint density defect reduction failed';return;endif
     if(global_value>tolerances(4))then
-      ok=.false.;message='distributed-v4 checkpoint density reconstruction failed';return
+      ok=.false.;message='distributed-v5 checkpoint density reconstruction failed';return
     endif
     state%density_workspace_peak_bytes=workspace_peak;state%density_payload_collective_count=payload_count
     state%startup_projector_defect=payload%acceptance_receipts(3)

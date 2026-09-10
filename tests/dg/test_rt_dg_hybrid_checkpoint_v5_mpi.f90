@@ -1,23 +1,23 @@
 #include "config.h"
-program test_rt_dg_hybrid_checkpoint_v4_mpi
+program test_rt_dg_hybrid_checkpoint_v5_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard,&
-    read_rt_dg_hybrid_checkpoint_v4,write_rt_dg_hybrid_checkpoint_v4,&
+  use rt_dg_hybrid_checkpoint_v5,only:s_rt_dg_hybrid_v5_shard,&
+    read_rt_dg_hybrid_checkpoint_v5,write_rt_dg_hybrid_checkpoint_v5,&
     checked_rt_dg_hybrid_extent_product
-  use rt_dg_hybrid_checkpoint,only:publish_rt_dg_hybrid_checkpoint_v4,&
-    s_rt_dg_hybrid_v4_publication_authorization
+  use rt_dg_hybrid_checkpoint,only:publish_rt_dg_hybrid_checkpoint_v5,&
+    s_rt_dg_hybrid_v5_publication_authorization
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint,&
     fingerprint_rt_dg_hybrid_scope
   use dg_hybrid_continuation_controller,only:s_dg_hybrid_candidate_acceptance,&
     initialize_dg_hybrid_candidate_acceptance,record_dg_hybrid_complete_lcfo_solve,&
     record_dg_hybrid_occupation_policy,record_dg_hybrid_unconditional_gates,&
     record_dg_hybrid_spectral_certification,record_dg_hybrid_certified_rt_basis,&
-    authorize_dg_hybrid_v4_publication
+    authorize_dg_hybrid_v5_publication
   implicit none
-  type(s_rt_dg_hybrid_v4_shard)::written,loaded
+  type(s_rt_dg_hybrid_v5_shard)::written,loaded
   type(s_rt_dg_hybrid_state)::state
-  type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
+  type(s_rt_dg_hybrid_v5_publication_authorization)::authorization
   type(s_dg_hybrid_candidate_acceptance)::candidate
   integer::comm,rank,nproc,ierr,i,j,environment_status
   integer(int64)::extent_product
@@ -32,7 +32,7 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   call require(ok.and.extent_product==63_int64,'checked extent product changed a finite product')
   call checked_rt_dg_hybrid_extent_product(huge(0_int64),2_int64,extent_product,ok)
   call require(.not.ok.and.extent_product==0_int64,'checked extent product failed to reject int64 overflow')
-  write(prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-checkpoint-',nproc
+  write(prefix,'(a,i0)')'/tmp/salmon-hybrid-v5-checkpoint-',nproc
   written%global_count=50*nproc;written%global_grid_count=100*nproc;written%nocc=7
   written%certified_rank=written%global_count;written%fragment_id=rank+1
   written%basis_fingerprint=7717_int64;written%operator_fingerprint=9919_int64
@@ -88,10 +88,10 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   authorization%checkpoint_version=5;authorization%published_rank=written%global_count
   authorization%basis_fingerprint=written%basis_fingerprint
   authorization%operator_fingerprint=written%operator_fingerprint
-  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+  call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
   call require(.not.ok.and.index(message,'authorization')>0,&
-    'common v4 endpoint accepted a payload without formal publication authorization')
+    'common v5 endpoint accepted a payload without formal publication authorization')
   call initialize_dg_hybrid_candidate_acceptance(comm,written%global_count,-1d0,candidate,ok,message)
   call require(ok,'full-rank controller initialization failed: '//trim(message))
   call record_dg_hybrid_complete_lcfo_solve(comm,candidate,written%global_count,1,3001_int64,ok,message)
@@ -107,122 +107,122 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
   call record_dg_hybrid_certified_rt_basis(comm,candidate,written%global_count,written%basis_fingerprint,&
     written%operator_fingerprint,ok,message)
   call require(ok,'full-rank certified basis receipt failed: '//trim(message))
-  call authorize_dg_hybrid_v4_publication(comm,candidate,5,written%global_count,.true.,ok,message)
-  call require(ok.and.candidate%publication_authorized,'full-rank v4 publication authorization failed: '//trim(message))
+  call authorize_dg_hybrid_v5_publication(comm,candidate,5,written%global_count,.true.,ok,message)
+  call require(ok.and.candidate%publication_authorized,'full-rank v5 publication authorization failed: '//trim(message))
   authorization%valid=candidate%publication_authorized
   authorization%checkpoint_version=candidate%checkpoint_version
   authorization%published_rank=candidate%published_rt_rank
   authorization%basis_fingerprint=candidate%basis_fingerprint
   authorization%operator_fingerprint=candidate%operator_fingerprint
-  write(failure_prefix,'(a,i0,a)')'/tmp/salmon-hybrid-v4-open-failure-',nproc,'/missing/checkpoint'
-  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written%global_count,written%nocc,&
+  write(failure_prefix,'(a,i0,a)')'/tmp/salmon-hybrid-v5-open-failure-',nproc,'/missing/checkpoint'
+  call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(failure_prefix),written%global_count,written%nocc,&
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
-  call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 rank shard')>0,&
-    'v4 writer OPEN failure was not collectively rejected')
-  call get_environment_variable('SALMON_TEST_V4_MANIFEST_OPEN_FAILURE',test_mode,status=environment_status)
+  call require(.not.ok.and.index(message,'cannot atomically publish distributed-v5 rank shard')>0,&
+    'v5 writer OPEN failure was not collectively rejected')
+  call get_environment_variable('SALMON_TEST_V5_MANIFEST_OPEN_FAILURE',test_mode,status=environment_status)
   if(environment_status==0.and.trim(test_mode)=='1')then
-    write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-manifest-open-failure-',nproc
-    call write_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written,ok,message)
-    call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 manifest')>0,&
-      'v4 manifest OPEN failure was not collectively rejected')
-    if(rank==0)write(*,'(a,i0)')'PASS v4 collective manifest OPEN failure ranks=',nproc
+    write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v5-manifest-open-failure-',nproc
+    call write_rt_dg_hybrid_checkpoint_v5(comm,trim(failure_prefix),written,ok,message)
+    call require(.not.ok.and.index(message,'cannot atomically publish distributed-v5 manifest')>0,&
+      'v5 manifest OPEN failure was not collectively rejected')
+    if(rank==0)write(*,'(a,i0)')'PASS v5 collective manifest OPEN failure ranks=',nproc
     call MPI_Finalize(ierr);stop
   endif
-  call get_environment_variable('SALMON_TEST_V4_MANIFEST_FAILURE',test_mode,status=environment_status)
+  call get_environment_variable('SALMON_TEST_V5_MANIFEST_FAILURE',test_mode,status=environment_status)
   if(environment_status==0.and.trim(test_mode)=='1')then
-    write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v4-manifest-failure-',nproc
-    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(failure_prefix),written%global_count,written%nocc,&
+    write(failure_prefix,'(a,i0)')'/tmp/salmon-hybrid-v5-manifest-failure-',nproc
+    call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(failure_prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
-    call require(.not.ok.and.index(message,'cannot atomically publish distributed-v4 manifest')>0,&
-      'v4 manifest rename failure was not collectively rejected')
-    if(rank==0)write(*,'(a,i0)')'PASS v4 collective manifest failure ranks=',nproc
+    call require(.not.ok.and.index(message,'cannot atomically publish distributed-v5 manifest')>0,&
+      'v5 manifest rename failure was not collectively rejected')
+    if(rank==0)write(*,'(a,i0)')'PASS v5 collective manifest failure ranks=',nproc
     call MPI_Finalize(ierr);stop
   endif
   written%certified_rank=written%global_count+1
-  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+  call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
-  call require(.not.ok.and.index(message,'invalid distributed-v4 rank shard payload')>0,&
+  call require(.not.ok.and.index(message,'invalid distributed-v5 rank shard payload')>0,&
     'certified rank greater than construction rank was accepted')
   written%certified_rank=written%nocc-1
-  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+  call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
-  call require(.not.ok.and.index(message,'invalid distributed-v4 rank shard payload')>0,&
+  call require(.not.ok.and.index(message,'invalid distributed-v5 rank shard payload')>0,&
     'certified rank below occupied rank was accepted')
   written%certified_rank=written%global_count
   if(nproc>1)then
     written%scope_fingerprint=written%scope_fingerprint+rank
-    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent common metadata reached shard publication')
     written%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(written%scope_selectors,written%xc_types)
     written%system_fingerprint(1)=3037_int64+rank
-    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent system identity reached shard publication')
     written%system_fingerprint=[3037_int64,3038_int64,3039_int64,3040_int64]
     written%pseudopotential_fingerprint=4049_int64+rank
-    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent canonical PP identity reached shard publication')
     written%pseudopotential_fingerprint=4049_int64
     written%pseudopotential_digest(1)=4049_int64+rank
-    call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+    call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
       written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
     call require(.not.ok.and.index(message,'rank-inconsistent')>0,&
       'rank-inconsistent authoritative PP digest reached shard publication')
     written%pseudopotential_digest=[4049_int64,4050_int64,4051_int64,4052_int64]
   endif
-  call publish_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),written%global_count,written%nocc,&
+  call publish_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),written%global_count,written%nocc,&
     written%row_ids,row_owner,written%row_ids,written,authorization,.true.,ok,message)
-  call require(ok,'v4 shard publication failed: '//trim(message))
-  call read_rt_dg_hybrid_checkpoint_v4(comm,trim(prefix),loaded,ok,message)
-  call require(ok,'v4 shard reload failed: '//trim(message))
+  call require(ok,'v5 shard publication failed: '//trim(message))
+  call read_rt_dg_hybrid_checkpoint_v5(comm,trim(prefix),loaded,ok,message)
+  call require(ok,'v5 shard reload failed: '//trim(message))
   call require(loaded%global_count==written%global_count.and.loaded%nocc==written%nocc,&
-    'v4 manifest dimensions changed')
-  call require(loaded%fragment_id==written%fragment_id,'v4 rank-fragment mapping changed')
+    'v5 manifest dimensions changed')
+  call require(loaded%fragment_id==written%fragment_id,'v5 rank-fragment mapping changed')
   call require(all(loaded%system_fingerprint==written%system_fingerprint).and.&
     all(loaded%pseudopotential_digest==written%pseudopotential_digest).and.&
     loaded%pseudopotential_fingerprint==written%pseudopotential_fingerprint,&
-    'v4 physical-system identity changed')
-  call require(all(loaded%row_ids==written%row_ids),'v4 owned rows changed')
+    'v5 physical-system identity changed')
+  call require(all(loaded%row_ids==written%row_ids),'v5 owned rows changed')
   call require(all(loaded%metric_offsets==written%metric_offsets).and.&
     all(loaded%metric_columns==written%metric_columns).and.&
-    maxval(abs(loaded%metric_values-written%metric_values))==0d0,'v4 metric CSR changed')
+    maxval(abs(loaded%metric_values-written%metric_values))==0d0,'v5 metric CSR changed')
   call require(all(loaded%operator_offsets==written%operator_offsets).and.&
     all(loaded%operator_columns==written%operator_columns).and.&
-    maxval(abs(loaded%operator_values-written%operator_values))==0d0,'v4 operator CSR changed')
+    maxval(abs(loaded%operator_values-written%operator_values))==0d0,'v5 operator CSR changed')
   call require(maxval(abs(loaded%position_values-written%position_values))==0d0.and.&
-    maxval(abs(loaded%local_values-written%local_values))==0d0,'v4 component CSR changed')
+    maxval(abs(loaded%local_values-written%local_values))==0d0,'v5 component CSR changed')
   call require(all(loaded%basis_point_offsets==written%basis_point_offsets).and.&
     all(loaded%basis_support_ids==written%basis_support_ids).and.&
-    maxval(abs(loaded%basis_support_values-written%basis_support_values))==0d0,'v4 point CSR changed')
+    maxval(abs(loaded%basis_support_values-written%basis_support_values))==0d0,'v5 point CSR changed')
   call require(maxval(abs(loaded%initial_occupied_amplitudes-written%initial_occupied_amplitudes))==0d0,&
-    'v4 distributed occupied coefficients changed')
+    'v5 distributed occupied coefficients changed')
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
     .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint,&
     written%pseudopotential_fingerprint,&
     written%pseudopotential_digest,&
     [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(ok.and.state%valid.and.state%initial_invariants_valid,&
-    'common v4 endpoint did not initialize distributed Hybrid RT: '//trim(message))
+    'common v5 endpoint did not initialize distributed Hybrid RT: '//trim(message))
   call require(state%startup_metric_defect<=1d-12.and.state%startup_orbital_residual<=1d-12,&
-    'common v4 endpoint changed metric orthonormality or stationarity')
+    'common v5 endpoint changed metric orthonormality or stationarity')
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
     .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint+[1_int64,0_int64,0_int64,0_int64],&
     written%pseudopotential_fingerprint,&
     written%pseudopotential_digest,&
     [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(.not.ok.and.index(message,'system identity mismatch')>0,&
-    'common v4 endpoint accepted a different current physical system')
+    'common v5 endpoint accepted a different current physical system')
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
     .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint,&
     written%pseudopotential_fingerprint+1_int64,written%pseudopotential_digest,&
     [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(.not.ok.and.index(message,'system identity mismatch')>0,&
-    'common v4 endpoint accepted a different current canonical pseudopotential')
+    'common v5 endpoint accepted a different current canonical pseudopotential')
   call initialize_rt_dg_hybrid_from_checkpoint(comm,trim(prefix),'tddft_response',.true.,1,&
     .false.,.false.,.false.,.false.,.false.,[1],written%system_fingerprint,&
     written%pseudopotential_fingerprint,&
@@ -230,7 +230,7 @@ program test_rt_dg_hybrid_checkpoint_v4_mpi
     [1d-10,1d-10,1d-10,1d-10],state,ok,message)
   call require(.not.ok.and.index(message,'system identity mismatch')>0,&
     'common endpoint accepted a different authoritative PP digest')
-  if(rank==0)write(*,'(a,i0)')'PASS distributed-v4 shard manifest ranks=',nproc
+  if(rank==0)write(*,'(a,i0)')'PASS distributed-v5 shard manifest ranks=',nproc
   call MPI_Finalize(ierr)
 contains
   subroutine require(condition,text)
@@ -242,4 +242,4 @@ contains
       call MPI_Abort(comm,1,status)
     endif
   end subroutine require
-end program test_rt_dg_hybrid_checkpoint_v4_mpi
+end program test_rt_dg_hybrid_checkpoint_v5_mpi

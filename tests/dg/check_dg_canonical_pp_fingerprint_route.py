@@ -46,7 +46,7 @@ for reduction in ("MPI_MIN", "MPI_MAX"):
         hybrid_body,
         re.IGNORECASE | re.DOTALL,
     ), f"Hybrid PP provenance lacks collective {reduction} agreement"
-publisher_body = extent(MAIN, "subroutine", "publish_dg_hybrid_divided_v4")
+publisher_body = extent(MAIN, "subroutine", "publish_dg_hybrid_divided_v5")
 assert "canonical_pp_valence_sum(pp)" in publisher_body
 assert "canonical_pp_digest(pp)" in publisher_body
 assert "pp%zion" not in MAIN.lower()

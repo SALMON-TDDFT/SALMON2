@@ -439,8 +439,16 @@ contains
       allocate(orbitals(width),stat=local_bad)
       local_bad=merge(0,1,local_bad==0)
       call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-      if(ierr/=MPI_SUCCESS)then;message='tiled point-CSR allocation reduction failed';return;endif
-      if(global_bad/=0)then;message='cannot allocate tiled point-CSR orbital workspace';return;endif
+      if(ierr/=MPI_SUCCESS)then
+        if(allocated(received))deallocate(received)
+        if(allocated(orbitals))deallocate(orbitals)
+        message='tiled point-CSR allocation reduction failed';return
+      endif
+      if(global_bad/=0)then
+        if(allocated(received))deallocate(received)
+        if(allocated(orbitals))deallocate(orbitals)
+        message='cannot allocate tiled point-CSR orbital workspace';return
+      endif
       do p=1,size(density)
         orbitals=(0d0,0d0)
         do edge=point_offsets(p),point_offsets(p+1)-1

@@ -73,8 +73,8 @@ module dg_hybrid_continuation_controller
     dg_hybrid_continuation_state_count,initialize_dg_hybrid_candidate_acceptance,&
     record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
     record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
-    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication,&
-    validate_dg_hybrid_v4_publication_rank_policy
+    record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v5_publication,&
+    validate_dg_hybrid_v5_publication_rank_policy
 contains
   pure subroutine dg_hybrid_continuation_state_count(occupations,basis_count,symmetry_target_rank,solve_count,&
       meaningful_gap,gap_occupied_index,gap_unoccupied_index,ok)
@@ -237,7 +237,7 @@ contains
     type(s_dg_hybrid_candidate_acceptance)::candidate
     logical::valid
     candidate=receipt
-    ! v4 propagates in the unchanged localized construction basis.  The
+    ! v5 propagates in the unchanged localized construction basis.  The
     ! certified rank describes the symmetry-closed low-energy spectral
     ! prefix represented by that basis; it is not the checkpoint row extent.
     valid=receipt%valid.and.receipt%phase==5.and.receipt%spectral_certified.and.&
@@ -251,7 +251,7 @@ contains
       'certified Hybrid RT-basis acceptance failed',ok,message)
   end subroutine record_dg_hybrid_certified_rt_basis
 
-  subroutine authorize_dg_hybrid_v4_publication(icomm,receipt,checkpoint_version,payload_rt_rank,&
+  subroutine authorize_dg_hybrid_v5_publication(icomm,receipt,checkpoint_version,payload_rt_rank,&
       payload_ready,ok,message)
     integer,intent(in)::icomm,checkpoint_version,payload_rt_rank
     type(s_dg_hybrid_candidate_acceptance),intent(inout)::receipt
@@ -269,10 +269,10 @@ contains
       candidate%published_rt_rank=payload_rt_rank;candidate%phase=7
     endif
     call commit_candidate_transition(icomm,valid,candidate,receipt,&
-      'Hybrid checkpoint-v4 publication was not authorized',ok,message)
-  end subroutine authorize_dg_hybrid_v4_publication
+      'Hybrid checkpoint-v5 publication was not authorized',ok,message)
+  end subroutine authorize_dg_hybrid_v5_publication
 
-  subroutine validate_dg_hybrid_v4_publication_rank_policy(icomm,receipt,energy_window,&
+  subroutine validate_dg_hybrid_v5_publication_rank_policy(icomm,receipt,energy_window,&
       requested_rank,certified_rank,construction_rank,ok,message)
     integer,intent(in)::icomm,requested_rank,certified_rank,construction_rank
     type(s_dg_hybrid_candidate_acceptance),intent(in)::receipt
@@ -291,7 +291,7 @@ contains
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(signature64,signature64_min,2,MPI_INTEGER8,MPI_MIN,icomm,ierr)
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(signature64,signature64_max,2,MPI_INTEGER8,MPI_MAX,icomm,ierr)
     if(ierr/=MPI_SUCCESS.or.any(signature_min/=signature_max).or.any(signature64_min/=signature64_max))then
-      ok=.false.;message='Hybrid v4 publication rank policy arguments disagree across MPI ranks';return
+      ok=.false.;message='Hybrid v5 publication rank policy arguments disagree across MPI ranks';return
     endif
     full_rank_legacy=energy_window==-1d0.and.receipt%valid.and.receipt%publication_authorized.and.&
       receipt%legacy_dynamic_rank.and.receipt%legacy_warning_observed.and.receipt%energy_window==-1d0.and.&
@@ -302,8 +302,8 @@ contains
       (energy_window>=0d0.or.energy_window==-1d0).and.&
       (certified_rank<construction_rank.or.full_rank_legacy)
     call commit_candidate_transition(icomm,valid,candidate,scratch,&
-      'Hybrid v4 full-rank certification requires authenticated energy_window=-1 authorization',ok,message)
-  end subroutine validate_dg_hybrid_v4_publication_rank_policy
+      'Hybrid v5 full-rank certification requires authenticated energy_window=-1 authorization',ok,message)
+  end subroutine validate_dg_hybrid_v5_publication_rank_policy
 
   subroutine commit_candidate_transition(icomm,local_valid,candidate,receipt,failure_message,ok,message)
     integer,intent(in)::icomm

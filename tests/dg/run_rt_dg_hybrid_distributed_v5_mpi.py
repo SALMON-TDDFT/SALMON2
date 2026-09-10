@@ -19,18 +19,26 @@ invariant_body=main.split("subroutine evaluate_hybrid_rt_physical_invariants",1)
   "end subroutine evaluate_hybrid_rt_physical_invariants",1)[0]
 assert "global_coefficients" not in invariant_body,"RED: invariant evaluation still replicates R x Nocc coefficients"
 point=(root/"src/rt/dg/rt_dg_hybrid_point_density.f90").read_text().lower()
-initialization=(root/"src/rt/dg/rt_dg_hybrid_initialization_v4.f90").read_text().lower()
+initialization=(root/"src/rt/dg/rt_dg_hybrid_initialization_v5.f90").read_text().lower()
 assert "coefficients_by_halo" not in point,"RED: point density allocates edge/halo x Nocc"
 assert "exchange_rt_dg_sparse_matrix" not in point,"RED: point density materializes the complete coefficient halo"
 assert "exchange_rt_dg_sparse_matrix" not in initialization,"RED: startup materializes edge x Nocc work arrays"
 assert "exchange_rt_dg_sparse_matrix" not in metric_body,"RED: metric invariant materializes edge x Nocc"
 assert "exchange_rt_dg_sparse_matrix" not in invariant_body,"RED: energy invariant materializes two edge x Nocc arrays"
 assert "apply_rt_dg_sparse_rows_tiled" in source,"RED: no unique-row tiled sparse multi-RHS action exists"
-with tempfile.TemporaryDirectory(prefix="hybrid-v4-distributed-") as name:
-  build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_v4_distributed"
+density_tiled=source.split("subroutine accumulate_rt_dg_sparse_density_tiled",1)[1].split(
+  "end subroutine accumulate_rt_dg_sparse_density_tiled",1)[0]
+for failure in ("tiled point-csr allocation reduction failed", "cannot allocate tiled point-csr orbital workspace"):
+  marker=density_tiled.index(failure)
+  branch=density_tiled[max(0,marker-320):marker]
+  assert "if(allocated(received))deallocate(received)" in branch and \
+    "if(allocated(orbitals))deallocate(orbitals)" in branch, \
+    f"RED: {failure} leaks rank-local tiled density workspace"
+with tempfile.TemporaryDirectory(prefix="hybrid-v5-distributed-") as name:
+  build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_v5_distributed"
   flags=[shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
     "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace"]
-  test_source=str(root/"tests/dg/test_rt_dg_hybrid_distributed_v4_mpi.f90")
+  test_source=str(root/"tests/dg/test_rt_dg_hybrid_distributed_v5_mpi.f90")
   projection_source=root/"src/rt/dg/rt_dg_hybrid_sparse_projection.f90"
   exchange_source=root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90"
   density_source=str(root/"src/rt/dg/rt_dg_hybrid_point_density.f90")
@@ -39,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-distributed-") as name:
   for nrank in (1,2,4,8):
     run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],capture_output=True,text=True,env=env,timeout=60)
     assert run.returncode==0,(nrank,run.stdout,run.stderr)
-    assert f"PASS distributed-v4 coefficient halo ranks={nrank}" in run.stdout
+    assert f"PASS distributed-v5 coefficient halo ranks={nrank}" in run.stdout
   mutations=(
     (exchange_source,"send_values((i-1)*width+j)=local_values(plan%send_positions(i),first+j-1)",
      "send_values((i-1)*width+j)=conjg(local_values(plan%send_positions(i),first+j-1))","packed tiled coefficient permutation"),
@@ -55,6 +63,6 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v4-distributed-") as name:
     sources[0 if target==exchange_source else 2]=str(mutated_path)
     subprocess.run(flags+sources+["-o",str(mutation_exe)],check=True)
     run=subprocess.run([shutil.which("mpiexec"),"-n","2",str(mutation_exe)],capture_output=True,text=True,env=env,timeout=30)
-    assert run.returncode!=0 or "PASS distributed-v4 coefficient halo ranks=2" not in run.stdout, \
+    assert run.returncode!=0 or "PASS distributed-v5 coefficient halo ranks=2" not in run.stdout, \
       f"mutation survived: {label}"
-print("PASS distributed-v4 packed coefficient halo on 1, 2, 4, and 8 ranks")
+print("PASS distributed-v5 packed coefficient halo on 1, 2, 4, and 8 ranks")

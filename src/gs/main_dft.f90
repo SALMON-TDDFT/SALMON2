@@ -157,8 +157,8 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   initialize_dg_hybrid_candidate_acceptance,&
   record_dg_hybrid_complete_lcfo_solve,record_dg_hybrid_occupation_policy,&
   record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
-  record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v4_publication,&
-  validate_dg_hybrid_v4_publication_rank_policy
+  record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v5_publication,&
+  validate_dg_hybrid_v5_publication_rank_policy
 use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry,certify_dg_hybrid_energy_window
 use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
   prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
@@ -185,9 +185,9 @@ use dg_hybrid_ground_state_types,only:s_dg_hybrid_ground_state,s_dg_hybrid_spect
   validate_dg_hybrid_ground_state
 use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   collective_rt_dg_hybrid_publication_precondition,&
-  collective_rt_dg_hybrid_publication_mapping_precondition,publish_rt_dg_hybrid_checkpoint_v4,&
-  s_rt_dg_hybrid_v4_publication_authorization
-use rt_dg_hybrid_checkpoint_v4,only:s_rt_dg_hybrid_v4_shard
+  collective_rt_dg_hybrid_publication_mapping_precondition,publish_rt_dg_hybrid_checkpoint_v5,&
+  s_rt_dg_hybrid_v5_publication_authorization
+use rt_dg_hybrid_checkpoint_v5,only:s_rt_dg_hybrid_v5_shard
 use rt_dg_hybrid_initialization,only:fingerprint_rt_dg_hybrid_scope,&
   fingerprint_rt_dg_hybrid_sparse_structure
 use rt_dg_hybrid_system_identity,only:fingerprint_rt_dg_hybrid_system
@@ -1910,7 +1910,7 @@ contains
     if(.not.allocated(bounded_schwarz_state%occupations))&
       error stop 'terminal divided Hybrid occupations are unavailable'
     ! PZHEEVD already computes the complete construction-basis spectrum.  Keep
-    ! every pair from that one terminal solve for the v4 proof/window receipt;
+    ! every pair from that one terminal solve for the v5 proof/window receipt;
     ! the thermal publication below still retains only occupied columns.
     final_state_count=total_basis_count
     if(final_state_count<1)error stop 'terminal divided Hybrid occupied inventory is empty'
@@ -1952,7 +1952,7 @@ contains
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'terminal divided Hybrid occupied checkpoint failed'
     endif
-    call publish_dg_hybrid_divided_v4(projected_basis%global_ids,payload_owner,payload_generation,&
+    call publish_dg_hybrid_divided_v5(projected_basis%global_ids,payload_owner,payload_generation,&
       core_ids,core_weights,interior_fragment,interior_values,interior_gradients,&
       bounded_fixed_payload%metric_rows,bounded_fixed_payload%kinetic_rows,&
       bounded_fixed_payload%nonlocal_rows,final_local_potential_rows,bounded_fixed_payload%interface_rows,&
@@ -1962,12 +1962,12 @@ contains
       final_operator_fingerprint,final_residual,final_orthogonality,final_projector_defect,&
       terminal_electron_defect,0,.true.,ok,message)
     if(.not.ok)then
-      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V4] ',trim(message)
-      error stop 'terminal divided Hybrid v4 publication failed'
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V5] ',trim(message)
+      error stop 'terminal divided Hybrid v5 publication failed'
     endif
   end subroutine run_dg_hybrid_divided_ground_state_for_main
 
-  subroutine publish_dg_hybrid_divided_v4(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
+  subroutine publish_dg_hybrid_divided_v5(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
       grid_fragment,basis_values,basis_gradients,metric_rows,kinetic_rows,nonlocal_rows,local_rows,&
       sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
       basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
@@ -1987,7 +1987,7 @@ contains
     type(s_dg_hybrid_candidate_acceptance),intent(in),optional::publication_receipt
     logical,intent(out)::ok
     character(*),intent(out)::message
-    type(s_rt_dg_hybrid_v4_shard)::payload
+    type(s_rt_dg_hybrid_v5_shard)::payload
     integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
     complex(8),allocatable::empty_position(:,:,:),orbital_values(:)
     complex(8),allocatable::energy_action(:,:),energy_component_values(:)
@@ -2002,7 +2002,7 @@ contains
     logical::precondition_ok,local_ok,energy_exchange_ok
     character(512)::local_message,energy_exchange_message
     type(s_rt_dg_sparse_exchange)::energy_exchange
-    type(s_rt_dg_hybrid_v4_publication_authorization)::authorization
+    type(s_rt_dg_hybrid_v5_publication_authorization)::authorization
     type(s_dft_energy)::checkpoint_energy
     type(s_dft_system)::identity_system
     type(s_dg_hybrid_candidate_acceptance)::rank_policy_receipt
@@ -2025,10 +2025,10 @@ contains
       all(shape(occupied_state%coefficients)==[nrow,nocc]).and.size(occupied_state%occupations)==nocc.and.&
       size(occupied_state%eigenvalues)==nocc
     call collective_rt_dg_hybrid_publication_precondition(dc%icomm_tot,precondition_ok,n,nocc,local_ok,local_message)
-    if(.not.local_ok)then;message='terminal divided v4 publication precondition failed: '//trim(local_message);return;endif
+    if(.not.local_ok)then;message='terminal divided v5 publication precondition failed: '//trim(local_message);return;endif
     call collective_rt_dg_hybrid_publication_mapping_precondition(dc%icomm_tot,n,row_ids,row_owner,&
       occupied_state%owned_row_ids,precondition_ok,local_ok,local_message)
-    if(.not.local_ok)then;message='terminal divided v4 row mapping failed: '//trim(local_message);return;endif
+    if(.not.local_ok)then;message='terminal divided v5 row mapping failed: '//trim(local_message);return;endif
 
     window=max(0d0,dg_hybrid_symmetry_energy_window);cutoff=solved_eigenvalues(nocc)+window;requested_rank=nocc
     do while(requested_rank<n.and.solved_eigenvalues(requested_rank+1)<=cutoff);requested_rank=requested_rank+1;enddo
@@ -2041,13 +2041,13 @@ contains
     enddo
     if(certified_rank_receipt>0)then
       if(certified_rank_receipt<requested_rank.or.certified_rank_receipt>n)then
-        message='terminal divided v4 certified-rank receipt is inconsistent';return
+        message='terminal divided v5 certified-rank receipt is inconsistent';return
       endif
       certified_rank=certified_rank_receipt
     endif
     rank_policy_receipt=s_dg_hybrid_candidate_acceptance()
     if(present(publication_receipt))rank_policy_receipt=publication_receipt
-    call validate_dg_hybrid_v4_publication_rank_policy(dc%icomm_tot,rank_policy_receipt,&
+    call validate_dg_hybrid_v5_publication_rank_policy(dc%icomm_tot,rank_policy_receipt,&
       dg_hybrid_symmetry_energy_window,requested_rank,certified_rank,n,local_ok,local_message)
     if(.not.local_ok)then;message=trim(local_message);return;endif
 
@@ -2059,10 +2059,10 @@ contains
       nonlocal_rows,local_rows,sipg_rows,hamiltonian_rows,empty_position,metric_offsets,metric_columns,&
       operator_offsets,operator_columns,local_ok,local_message,basis_owners=row_owner,local_owner=rank)
     deallocate(empty_position)
-    if(.not.local_ok)then;message='terminal divided v4 structural graph failed: '//trim(local_message);return;endif
+    if(.not.local_ok)then;message='terminal divided v5 structural graph failed: '//trim(local_message);return;endif
     call fingerprint_rt_dg_hybrid_sparse_structure(dc%icomm_tot,n,row_ids,operator_offsets,operator_columns,&
       basis_fingerprint,int(z'43454C4C57524150',8),structure_fingerprint,local_ok,local_message)
-    if(.not.local_ok)then;message='terminal divided v4 structure fingerprint failed';return;endif
+    if(.not.local_ok)then;message='terminal divided v5 structure fingerprint failed';return;endif
 
     allocate(payload%row_ids,source=row_ids);allocate(payload%metric_offsets,source=metric_offsets)
     allocate(payload%metric_columns,source=metric_columns);allocate(payload%metric_values(size(metric_columns)))
@@ -2105,7 +2105,7 @@ contains
       call project_rt_dg_hybrid_point_csr_edges(dc%icomm_tot,n,row_ids,operator_offsets,operator_columns,&
         grid_ids,grid_weights,payload%basis_point_offsets,payload%basis_support_ids,&
         payload%basis_support_values,coordinate_component,payload%position_values(a,:),local_ok,local_message)
-      if(.not.local_ok)then;message='terminal divided v4 sparse position projection failed: '//trim(local_message);return;endif
+      if(.not.local_ok)then;message='terminal divided v5 sparse position projection failed: '//trim(local_message);return;endif
     enddo
     allocate(density(npoint),orbital_values(nocc));density=0d0
     do p=1,npoint
@@ -2116,13 +2116,13 @@ contains
       density(p)=sum(occupied_state%occupations*abs(orbital_values)**2)
     enddo
     call MPI_Allreduce(sum(density*grid_weights),electron_count,1,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
-    if(ierr/=MPI_SUCCESS)then;message='terminal divided v4 density electron reduction failed';return;endif
+    if(ierr/=MPI_SUCCESS)then;message='terminal divided v5 density electron reduction failed';return;endif
     ! Synchronize only the Hartree/XC potential used for the physical energy
     ! receipt with the immutable LCFO density being published.  This does not
     ! update the density, diagonalize again, or alter the localized basis and
     ! coefficients; RT performs the identical t=0 refresh.
     call dg_dc_update_potential_from_distributed_density(grid_ids,density,local_ok,local_message)
-    if(.not.local_ok)then;message='terminal divided v4 energy potential refresh failed: '//trim(local_message);return;endif
+    if(.not.local_ok)then;message='terminal divided v5 energy potential refresh failed: '//trim(local_message);return;endif
     allocate(payload%density,source=density)
     allocate(payload%initial_occupied_amplitudes,source=occupied_state%coefficients)
     allocate(payload%occupations,source=occupied_state%occupations)
@@ -2139,7 +2139,7 @@ contains
     ! is bounded by the frozen operator graph and is released with this scope.
     call build_rt_dg_sparse_exchange(dc%icomm_tot,n,structure_fingerprint,row_ids,&
       operator_columns,energy_exchange,local_ok,local_message)
-    if(.not.local_ok)then;message='terminal divided v4 energy halo construction failed: '//trim(local_message);return;endif
+    if(.not.local_ok)then;message='terminal divided v5 energy halo construction failed: '//trim(local_message);return;endif
     allocate(energy_action(nrow,nocc),energy_component_values(size(operator_columns)),&
       energy_column_slots(size(operator_columns)))
     energy_column_slots=[(i,i=1,size(energy_column_slots))]
@@ -2148,7 +2148,7 @@ contains
       energy_component_values,energy_column_slots,occupied_state%coefficients,energy_action,16,&
       energy_workspace_peak,energy_payload_count,energy_exchange_ok,energy_exchange_message)
     if(.not.energy_exchange_ok)then
-      message='terminal divided v4 energy coefficient exchange failed: '//trim(energy_exchange_message);return
+      message='terminal divided v5 energy coefficient exchange failed: '//trim(energy_exchange_message);return
     endif
     local_energy_parts=0d0
     do energy_state=1,nocc
@@ -2159,7 +2159,7 @@ contains
       payload%nonlocal_values,energy_column_slots,occupied_state%coefficients,energy_action,16,&
       energy_workspace_peak,energy_payload_count,energy_exchange_ok,energy_exchange_message)
     if(.not.energy_exchange_ok)then
-      message='terminal divided v4 nonlocal energy action failed: '//trim(energy_exchange_message);return
+      message='terminal divided v5 nonlocal energy action failed: '//trim(energy_exchange_message);return
     endif
     do energy_state=1,nocc
       local_energy_parts(2)=local_energy_parts(2)+occupied_state%occupations(energy_state)*real(sum(&
@@ -2173,13 +2173,13 @@ contains
       energy_iy=findloc(dc%jxyz_tot(:,2),energy_gy,dim=1)
       energy_iz=findloc(dc%jxyz_tot(:,3),energy_gz,dim=1)
       if(energy_ix<1.or.energy_iy<1.or.energy_iz<1)then
-        message='terminal divided v4 energy grid mapping failed';return
+        message='terminal divided v5 energy grid mapping failed';return
       endif
       local_energy_parts(3)=local_energy_parts(3)+eexc_tmp(energy_ix,energy_iy,energy_iz)*grid_weights(p)
     enddo
     call MPI_Allreduce(local_energy_parts,global_energy_parts,3,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
     if(ierr/=MPI_SUCCESS.or.any(.not.ieee_is_finite(global_energy_parts)))then
-      message='terminal divided v4 energy decomposition reduction failed';return
+      message='terminal divided v5 energy decomposition reduction failed';return
     endif
     checkpoint_energy%E_kin=global_energy_parts(1);checkpoint_energy%E_ion_nloc=global_energy_parts(2)
     checkpoint_energy%E_xc=global_energy_parts(3)
@@ -2191,7 +2191,7 @@ contains
     if(any(.not.ieee_is_finite(payload%energy_receipt)).or.&
         abs(payload%energy_receipt(1)-sum(payload%energy_receipt(2:7)))>&
         100d0*epsilon(1d0)*max(1d0,abs(payload%energy_receipt(1))))then
-      message='terminal divided v4 final energy receipt is inconsistent';return
+      message='terminal divided v5 final energy receipt is inconsistent';return
     endif
     if(rank==0)write(*,'(a,7(a,es16.8))')'[HYBRID-GS-ENERGY-RECEIPT]',&
       ' total=',payload%energy_receipt(1),' kinetic=',payload%energy_receipt(2),&
@@ -2203,18 +2203,16 @@ contains
     payload%basis_fingerprint=basis_fingerprint;payload%operator_fingerprint=operator_fingerprint
     payload%operator_structure_fingerprint=structure_fingerprint
     payload%scope_fingerprint=fingerprint_rt_dg_hybrid_scope(payload%scope_selectors,payload%xc_types)
-    ! dcdft deliberately releases the conventional occupation array.  Rebuild
-    ! that one identity field from the terminal LCFO occupations while keeping
-    ! atoms, cell, grid, k vectors and weights from the authoritative total cell.
+    ! Physical system identity is independent of solver state count and thermal
+    ! redistribution; LCFO occupations remain authenticated in the payload.
     identity_system=dc%system_tot
-    if(identity_system%nspin/=1.or.identity_system%nk/=1.or.identity_system%no<nocc)then
-      message='terminal divided v4 electronic identity shape is unsupported';return
+    if(identity_system%nspin/=1.or.identity_system%nk/=1)then
+      message='terminal divided v5 electronic identity shape is unsupported';return
     endif
-    allocate(identity_system%rocc(identity_system%no,identity_system%nk,identity_system%nspin))
-    identity_system%rocc=0d0;identity_system%rocc(1:nocc,1,1)=occupied_state%occupations
     payload%pseudopotential_digest=canonical_pp_digest(pp)
     payload%system_fingerprint=fingerprint_rt_dg_hybrid_system(identity_system,dc%lg_tot%num,.true.,&
-      dc%ppg_tot%Nlma,payload%pseudopotential_digest,xc_func%xctype,.false.,.false.,.false.,.false.,.false.)
+      dc%ppg_tot%Nlma,payload%pseudopotential_digest,xc_func%xctype,.false.,.false.,.false.,.false.,.false.,&
+      nint(sum(occupied_state%occupations)),[0,0])
     payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)
     payload%payload_fingerprint=ieor(ieor(basis_fingerprint,operator_fingerprint),&
       ieor(dc_seed_fingerprint,ieor(face_fingerprint,continuation_fingerprint)))
@@ -2222,15 +2220,15 @@ contains
     authorization%valid=publication_authorized;authorization%checkpoint_version=5
     authorization%published_rank=n;authorization%basis_fingerprint=basis_fingerprint
     authorization%operator_fingerprint=operator_fingerprint
-    call publish_rt_dg_hybrid_checkpoint_v4(dc%icomm_tot,'./hybrid_dg_ground_state.chk',n,nocc,&
+    call publish_rt_dg_hybrid_checkpoint_v5(dc%icomm_tot,'./hybrid_dg_ground_state.chk',n,nocc,&
       row_ids,row_owner,occupied_state%owned_row_ids,payload,authorization,precondition_ok,local_ok,local_message)
-    if(.not.local_ok)then;message='terminal divided v4 write failed: '//trim(local_message);return;endif
-    if(rank==0)write(*,'(a,6(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo-v4',&
+    if(.not.local_ok)then;message='terminal divided v5 write failed: '//trim(local_message);return;endif
+    if(rank==0)write(*,'(a,6(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo-v5',&
       ' construction_rank=',n,' solved_rank=',n,' certified_rank=',certified_rank,' rt_rank=',n,&
       ' occupied_rank=',nocc,' projector_count=',global_projector_count,' stationarity=',stationarity_defect,&
       ' metric=',metric_defect,' projector=',projector_defect,' electron=',electron_defect,' writer_count=',1
     ok=.true.;message=''
-  end subroutine publish_dg_hybrid_divided_v4
+  end subroutine publish_dg_hybrid_divided_v5
 
 
   subroutine solve_dg_hybrid_schwarz_fragments(iteration,callback_ok)
@@ -6787,7 +6785,7 @@ stage_pass: do
     if(.not.local_ok)error stop 'DG final spectral certification receipt failed'
     call record_dg_hybrid_certified_rt_basis(dc%icomm_tot,candidate_acceptance,size(effective_ids),&
       fixed_payload%basis_fingerprint,final_operator_fingerprint,local_ok,continuation_message)
-    if(.not.local_ok)error stop 'DG final localized-v4 basis certification receipt failed'
+    if(.not.local_ok)error stop 'DG final localized-v5 basis certification receipt failed'
 
     call checkpoint_grid_real_fingerprint(dc%icomm_tot,ow_core_ids,dc_seed_density,&
       seed_fingerprint,local_ok)
@@ -6804,10 +6802,10 @@ stage_pass: do
     final_ground_state%converged=.true.;final_ground_state%final_eigensolve_count=1
     allocate(final_density,source=rho_in);allocate(final_trace,source=interface_state)
     allocate(final_hamiltonian_rows,source=iterate%hamiltonian_rows)
-    call authorize_dg_hybrid_v4_publication(dc%icomm_tot,candidate_acceptance,5,size(effective_ids),&
+    call authorize_dg_hybrid_v5_publication(dc%icomm_tot,candidate_acceptance,5,size(effective_ids),&
       final_ground_state%valid.and.final_ground_state%converged,local_ok,continuation_message)
-    if(.not.local_ok)error stop 'DG continuation distributed-v4 publication authorization failed'
-    call publish_dg_hybrid_divided_v4(row_ids,basis_fragment-1,basis_generation_arg,ow_core_ids,&
+    if(.not.local_ok)error stop 'DG continuation distributed-v5 publication authorization failed'
+    call publish_dg_hybrid_divided_v5(row_ids,basis_fragment-1,basis_generation_arg,ow_core_ids,&
       interior_weights,interior_fragment,interior_values,interior_gradients,fixed_payload%metric_rows,&
       fixed_payload%kinetic_rows,fixed_payload%nonlocal_rows,iterate%local_rows,&
       fixed_payload%interface_rows,iterate%hamiltonian_rows,complete_eigensystem%coefficients,&
@@ -6819,7 +6817,7 @@ stage_pass: do
       candidate_acceptance)
     if(.not.local_ok)then
       write(0,'(a)')trim(continuation_message)
-      error stop 'DG continuation distributed-v4 checkpoint failed'
+      error stop 'DG continuation distributed-v5 checkpoint failed'
     endif
     return
 

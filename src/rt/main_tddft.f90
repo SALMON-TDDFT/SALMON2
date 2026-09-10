@@ -306,7 +306,8 @@ subroutine run_dg_hybrid_continuation_rt()
   call initialize_rt_dg_hybrid_from_checkpoint(nproc_group_global,'./hybrid_dg_ground_state.chk',theory,&
     iperiodic==3,system%nspin,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
     xc_func%xctype,fingerprint_rt_dg_hybrid_system(system,lg%num,iperiodic==3,ppg%Nlma,&
-    canonical_pp_digest(pp),xc_func%xctype,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y'),&
+    canonical_pp_digest(pp),xc_func%xctype,yn_spinorbit=='y',PLUS_U_ON,yn_hse=='y',yn_fix_func=='y',yn_jm=='y',&
+    nelec,nelec_spin),&
     canonical_pp_fingerprint(pp),canonical_pp_digest(pp),&
     [dg_dc_gs_final_orbital_tolerance,dg_dc_gs_final_density_tolerance,&
     dg_dc_gs_electron_count_tolerance,dg_ow_symmetry_tolerance],hybrid_state,ok,message)

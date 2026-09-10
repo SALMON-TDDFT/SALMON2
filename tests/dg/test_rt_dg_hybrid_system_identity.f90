@@ -18,29 +18,33 @@ program test_rt_dg_hybrid_system_identity
   system%vec_k=reshape([0d0,0d0,0d0,0.25d0,0d0,0d0],[3,2])
   system%wtk=[0.5d0,0.5d0];system%rocc=reshape([2d0,2d0,0d0,2d0,1d0,0d0],[3,2,1])
   pp_digest=[9919_int64,9920_int64,9921_int64,9922_int64]
-  reference=value(system,pp_digest,[1])
+  reference=value(system,pp_digest,[1],5,[0,0])
   call require(.not.all(reference==0_int64),'valid physical system has zero identity')
   changed=system;changed%Rion(1,2)=changed%Rion(1,2)+1d-12
-  call require(any(value(changed,pp_digest,[1])/=reference),'atom position omitted')
+  call require(any(value(changed,pp_digest,[1],5,[0,0])/=reference),'atom position omitted')
   changed=system;changed%kion(2)=1
-  call require(any(value(changed,pp_digest,[1])/=reference),'species omitted')
-  call require(any(value(system,pp_digest+[1_int64,0_int64,0_int64,0_int64],[1])/=reference),'pseudopotential omitted')
+  call require(any(value(changed,pp_digest,[1],5,[0,0])/=reference),'species omitted')
+  call require(any(value(system,pp_digest+[1_int64,0_int64,0_int64,0_int64],[1],5,[0,0])/=reference),'pseudopotential omitted')
   changed=system;changed%primitive_a(1,1)=4.1d0
-  call require(any(value(changed,pp_digest,[1])/=reference),'lattice omitted')
+  call require(any(value(changed,pp_digest,[1],5,[0,0])/=reference),'lattice omitted')
   call require(any(fingerprint_rt_dg_hybrid_system(system,[4,5,7],.true.,9,pp_digest,[1],&
-    .false.,.false.,.false.,.false.,.false.)/=reference),'grid omitted')
-  call require(any(value(system,pp_digest,[2])/=reference),'XC identity omitted')
+    .false.,.false.,.false.,.false.,.false.,5,[0,0])/=reference),'grid omitted')
+  call require(any(value(system,pp_digest,[2],5,[0,0])/=reference),'XC identity omitted')
   changed=system;changed%no=4;deallocate(changed%rocc);allocate(changed%rocc(4,2,1))
   changed%rocc=0d0;changed%rocc(1:3,:,:)=system%rocc
-  call require(all(value(changed,pp_digest,[1])==reference),'trailing unoccupied solver state changed physical identity')
+  call require(all(value(changed,pp_digest,[1],5,[0,0])==reference),'trailing unoccupied solver state changed physical identity')
   changed=system;changed%vec_k(1,2)=changed%vec_k(1,2)+1d-12
-  call require(any(value(changed,pp_digest,[1])/=reference),'k-vector omitted')
+  call require(any(value(changed,pp_digest,[1],5,[0,0])/=reference),'k-vector omitted')
   changed=system;changed%wtk(1)=0.4d0;changed%wtk(2)=0.6d0
-  call require(any(value(changed,pp_digest,[1])/=reference),'k weights omitted')
-  changed=system;changed%rocc(2,2,1)=changed%rocc(2,2,1)+1d-12
-  call require(any(value(changed,pp_digest,[1])/=reference),'occupations/electron count omitted')
+  call require(any(value(changed,pp_digest,[1],5,[0,0])/=reference),'k weights omitted')
+  changed=system;changed%rocc=0d0;changed%rocc(1,1,1)=1.45d0;changed%rocc(2,1,1)=1.05d0
+  changed%rocc(1,2,1)=1.55d0;changed%rocc(2,2,1)=0.95d0
+  call require(all(value(changed,pp_digest,[1],5,[0,0])==reference),&
+    '300K fractional occupations changed the physical electron identity')
+  call require(any(value(system,pp_digest,[1],4,[0,0])/=reference),'total electron count omitted')
+  call require(any(value(system,pp_digest,[1],5,[3,2])/=reference),'spin-resolved electron specification omitted')
   malformed%nion=0;malformed%nspin=0;malformed%no=0;malformed%nk=0
-  call require(all(value(malformed,pp_digest,[1])==0_int64),'unallocated malformed system did not return invalid digest')
+  call require(all(value(malformed,pp_digest,[1],5,[0,0])==0_int64),'unallocated malformed system did not return invalid digest')
   abc=[97_int64,98_int64,99_int64];call dg_sha256_init(sha)
   call dg_sha256_update_bytes(sha,abc);call dg_sha256_final(sha,digest)
   call require(all(digest==[int(z'BA7816BF8F01CFEA',int64),int(z'414140DE5DAE2223',int64),&
@@ -51,13 +55,14 @@ program test_rt_dg_hybrid_system_identity
   if(rank==0)print '(a,i0)','PASS authoritative Hybrid system identity mutations ranks=',nproc
   call MPI_Finalize(ierr)
 contains
-  function value(candidate,pp,xctype) result(result_digest)
+  function value(candidate,pp,xctype,electrons,spin_electrons) result(result_digest)
     type(s_dft_system),intent(in)::candidate
     integer(int64),intent(in)::pp(4)
     integer,intent(in)::xctype(:)
+    integer,intent(in)::electrons,spin_electrons(2)
     integer(int64)::result_digest(4)
     result_digest=fingerprint_rt_dg_hybrid_system(candidate,[4,5,6],.true.,9,pp,xctype,&
-      .false.,.false.,.false.,.false.,.false.)
+      .false.,.false.,.false.,.false.,.false.,electrons,spin_electrons)
   end function value
   subroutine require(condition,message)
     logical,intent(in)::condition;character(*),intent(in)::message

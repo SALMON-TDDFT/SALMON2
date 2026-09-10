@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static reachability contract for the formal Hybrid continuation -> v4 route."""
+"""Static reachability contract for the formal Hybrid continuation -> v5 route."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,19 +20,19 @@ def routine(text: str, name: str) -> str:
 
 route = routine(SOURCE, "run_dg_overlapping_wannier_ground_state_for_main")
 continuation = routine(SOURCE, "run_dg_hybrid_concrete_continuation")
-publisher = routine(SOURCE, "publish_dg_hybrid_divided_v4")
+publisher = routine(SOURCE, "publish_dg_hybrid_divided_v5")
 route_c = compact(route)
 continuation_c = compact(continuation)
 publisher_c = compact(publisher)
 
 def require_publication_rank_policy(body: str) -> None:
-    assert body.count("callvalidate_dg_hybrid_v4_publication_rank_policy") == 1
+    assert body.count("callvalidate_dg_hybrid_v5_publication_rank_policy") == 1
     assert "if(present(publication_receipt))rank_policy_receipt=publication_receipt" in body
     assert "dg_hybrid_symmetry_energy_window,requested_rank,certified_rank,n" in body
 
 require_publication_rank_policy(publisher_c)
 for old in (
-    "callvalidate_dg_hybrid_v4_publication_rank_policy",
+    "callvalidate_dg_hybrid_v5_publication_rank_policy",
     "if(present(publication_receipt))rank_policy_receipt=publication_receipt",
 ):
     mutated = publisher_c.replace(old, "removed_rank_policy", 1)
@@ -52,20 +52,20 @@ legacy_occupation = route_c.index("allocate(occupations(nstate))", ret)
 assert branch < call < ret < legacy_occupation
 
 # A terminal accepted state is published exactly once by the same distributed
-# v4 publisher as the divided route. Publication follows final refresh,
+# v5 publisher as the divided route. Publication follows final refresh,
 # final row-state validation and the authoritative final operator fingerprint.
-assert continuation_c.count("callpublish_dg_hybrid_divided_v4(") == 1
-publish = continuation_c.index("callpublish_dg_hybrid_divided_v4(")
+assert continuation_c.count("callpublish_dg_hybrid_divided_v5(") == 1
+publish = continuation_c.index("callpublish_dg_hybrid_divided_v5(")
 for token in (
     "if(.not.final_refresh_performed)errorstop",
     "callow_fingerprint_distributed_matrix",
     "callvalidate_dg_hybrid_ground_state",
     "callrecord_dg_hybrid_spectral_certification",
     "callrecord_dg_hybrid_certified_rt_basis",
-    "callauthorize_dg_hybrid_v4_publication",
+    "callauthorize_dg_hybrid_v5_publication",
 ):
     assert continuation_c.index(compact(token)) < publish, token
-authorize = continuation_c.index("callauthorize_dg_hybrid_v4_publication")
+authorize = continuation_c.index("callauthorize_dg_hybrid_v5_publication")
 assert continuation_c.index("callrecord_dg_hybrid_spectral_certification") < authorize < publish
 assert continuation_c.index("callrecord_dg_hybrid_certified_rt_basis") < authorize < publish
 assert "spectral_certification%certified_rank,candidate_acceptance%publication_authorized" in continuation_c[publish:]
@@ -80,10 +80,10 @@ reject_at = continuation_c.index("callreject_dg_hybrid_trial", guard_at)
 assert guard_at < reject_at
 assert "dgcontinuationinitialfixedpointfailedbeforerollback" in continuation_c[guard_at:reject_at]
 
-# v4 preserves localized construction rows and occupied LCFO amplitudes; it
+# v5 preserves localized construction rows and occupied LCFO amplitudes; it
 # never rotates them into replicated spectral basis state.
 for token in (
-    "publish_rt_dg_hybrid_checkpoint_v4",
+    "publish_rt_dg_hybrid_checkpoint_v5",
     "payload%initial_occupied_amplitudes",
     "payload%basis_point_offsets",
     "payload%basis_support_ids",
@@ -116,13 +116,13 @@ for forbidden in (
 ):
     assert forbidden not in checkpoint_c
 
-# Mutation receipts: removing the reachable v4 call or moving the rollback
+# Mutation receipts: removing the reachable v5 call or moving the rollback
 # call ahead of its guard invalidates the checked invariants.
-mutated = continuation_c.replace("callpublish_dg_hybrid_divided_v4(", "callremoved_v4(", 1)
-assert mutated.count("callpublish_dg_hybrid_divided_v4(") == 0
-mutated = continuation_c.replace("callauthorize_dg_hybrid_v4_publication", "callremoved_authorization", 1)
-assert "callauthorize_dg_hybrid_v4_publication" not in mutated
+mutated = continuation_c.replace("callpublish_dg_hybrid_divided_v5(", "callremoved_v5(", 1)
+assert mutated.count("callpublish_dg_hybrid_divided_v5(") == 0
+mutated = continuation_c.replace("callauthorize_dg_hybrid_v5_publication", "callremoved_authorization", 1)
+assert "callauthorize_dg_hybrid_v5_publication" not in mutated
 mutated = continuation_c[:guard_at] + "callreject_dg_hybrid_trial" + continuation_c[guard_at:]
 assert mutated.index("callreject_dg_hybrid_trial", guard_at) < mutated.index(guard, guard_at)
 
-print("PASS formal Hybrid continuation reaches distributed v4 publication")
+print("PASS formal Hybrid continuation reaches distributed v5 publication")

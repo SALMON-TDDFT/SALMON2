@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a real divided-Hybrid GS producer and consume its distributed v4 checkpoint in Exp RT."""
+"""Run a real divided-Hybrid GS producer and consume its distributed v5 checkpoint in Exp RT."""
 
 from pathlib import Path
 import hashlib
@@ -16,35 +16,35 @@ main_source = (root / "src/rt/main_tddft.f90").read_text()
 main_dft_source = (root / "src/gs/main_dft.f90").read_text()
 
 formal_publisher = main_dft_source.split(
-    "subroutine publish_dg_hybrid_divided_v4", 1
-)[1].split("end subroutine publish_dg_hybrid_divided_v4", 1)[0]
+    "subroutine publish_dg_hybrid_divided_v5", 1
+)[1].split("end subroutine publish_dg_hybrid_divided_v5", 1)[0]
 def require_localized_publisher(body: str) -> None:
     compact = re.sub(r"\s+", "", body.lower())
     assert "allocate(payload%initial_occupied_amplitudes,source=occupied_state%coefficients)" in compact, \
         "terminal LCFO eigenvectors are not stored by owned localized-basis rows"
     assert "full_coefficients" not in compact and "collect_dg_hybrid_full_rows" not in compact, \
-        "formal v4 publisher reconstructs a global coefficient matrix"
+        "formal v5 publisher reconstructs a global coefficient matrix"
     assert "allocate(payload%basis_point_offsets(npoint+1)" in compact and "payload%basis_support_values(slot)=basis_values(j,p)" in compact, \
-        "formal v4 publisher does not retain the localized construction basis as point CSR"
+        "formal v5 publisher does not retain the localized construction basis as point CSR"
     assert "global_projector_count=dc%ppg_tot%nlma" in compact and \
         "real(global_projector_count,8)" in compact, \
         "formal v3 pseudopotential receipt does not use the authoritative full-system projector count"
     assert "mpi_allreduce(ppg%nlma,global_projector_count" not in compact, \
         "formal v3 pseudopotential receipt double-counts overlapping fragment-buffer projectors"
     assert "payload%energy_receipt=[checkpoint_energy%e_tot" in compact, \
-        "formal v4 checkpoint does not contain a physical GS energy decomposition"
+        "formal v5 checkpoint does not contain a physical GS energy decomposition"
     assert "callcalc_total_energy_periodic" in compact, \
-        "formal v4 energy reference is not produced by SALMON total-energy evaluation"
+        "formal v5 energy reference is not produced by SALMON total-energy evaluation"
     assert "payload%energy_receipt=0d0" not in compact, \
         "all-zero energy receipt silently disables GS-to-RT energy identity"
     assert "payload%system_fingerprint=fingerprint_rt_dg_hybrid_system" in compact, \
-        "formal v4 checkpoint is not bound to the GS physical system"
+        "formal v5 checkpoint is not bound to the GS physical system"
     assert "identity_system=dc%system_tot" in compact and \
-        "identity_system%rocc(1:nocc,1,1)=occupied_state%occupations" in compact and \
-        "fingerprint_rt_dg_hybrid_system(identity_system," in compact, \
-        "formal v4 checkpoint does not rebuild authoritative total-cell electronic identity"
+        "fingerprint_rt_dg_hybrid_system(identity_system," in compact and \
+        "nint(sum(occupied_state%occupations)),[0,0]" in compact and "identity_system%rocc" not in compact, \
+        "formal checkpoint does not use the common physical electronic specification"
     assert "payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)" in compact, \
-        "formal v4 checkpoint is not bound to the canonical GS pseudopotential"
+        "formal v5 checkpoint is not bound to the canonical GS pseudopotential"
     assert "payload%pseudopotential_digest=canonical_pp_digest(pp)" in compact, \
         "formal checkpoint does not independently authenticate all PP tables"
 
@@ -258,8 +258,8 @@ require_hybrid_route_contract(main_source)
 divided_route = main_dft_source.split("subroutine run_dg_hybrid_divided_ground_state_for_main", 1)[1].split(
     "end subroutine run_dg_hybrid_divided_ground_state_for_main", 1
 )[0]
-divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v4", 1)[1].split(
-    "end subroutine publish_dg_hybrid_divided_v4", 1
+divided_publisher = main_dft_source.split("subroutine publish_dg_hybrid_divided_v5", 1)[1].split(
+    "end subroutine publish_dg_hybrid_divided_v5", 1
 )[0]
 assert "yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y'" in main_dft_source.lower()
 nonlocal_builder = main_dft_source.lower().split(
@@ -275,9 +275,9 @@ rollback_guard = "if(.not.continuation_controller%valid.or..not.continuation_con
 assert rollback_guard in continuation_body
 assert continuation_body.index(rollback_guard) < continuation_body.index("call reject_dg_hybrid_trial")
 assert "complete_action_strength(q)*support_projector_values(position)*complete_overlap(basis,q)" in nonlocal_builder
-assert divided_route.lower().count("call publish_dg_hybrid_divided_v4") == 1
-assert divided_publisher.lower().count("call publish_rt_dg_hybrid_checkpoint_v4") == 1
-assert "call write_rt_dg_hybrid_checkpoint_v4" not in divided_publisher.lower()
+assert divided_route.lower().count("call publish_dg_hybrid_divided_v5") == 1
+assert divided_publisher.lower().count("call publish_rt_dg_hybrid_checkpoint_v5") == 1
+assert "call write_rt_dg_hybrid_checkpoint_v5" not in divided_publisher.lower()
 assert "solved_coefficients=final_solved_coefficients" in divided_route.lower()
 assert "solved_eigenvalues=final_solved_eigenvalues" in divided_route.lower()
 for old, replacement in (
@@ -327,7 +327,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
     ):
         assert receipt in gs.stdout, receipt
     handoff = re.findall(
-        r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo-v4 construction_rank=(\d+) solved_rank=(\d+) "
+        r"\[HYBRID-GS-HANDOFF\] route=divided-terminal-lcfo-v5 construction_rank=(\d+) solved_rank=(\d+) "
         r"certified_rank=(\d+) rt_rank=(\d+) occupied_rank=(\d+) projector_count=(\d+).*writer_count=(\d+)", gs.stdout,
     )
     assert len(handoff) == 1, gs.stdout
@@ -338,9 +338,9 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         projector_count,
     )
     checkpoint = work / "hybrid_dg_ground_state.chk.manifest"
-    shards = sorted(work.glob("hybrid_dg_ground_state.chk.v4.*.rank*.shard"))
+    shards = sorted(work.glob("hybrid_dg_ground_state.chk.v5.*.rank*.shard"))
     assert checkpoint.is_file() and checkpoint.stat().st_size > 64 and len(shards) == 4, (
-        "formal divided terminal LCFO did not publish its v4 manifest and rank shards",
+        "formal divided terminal LCFO did not publish its v5 manifest and rank shards",
         gs.stdout[-6000:], gs.stderr,
     )
     assert checkpoint.read_bytes()[:32].rstrip(b" \0") == b"SALMON_HYBRID_DG_MANIFEST_V5"
@@ -427,4 +427,4 @@ with tempfile.TemporaryDirectory(prefix="hybrid-production-smoke-") as name:
         if line.startswith("[HYBRID-RT-STATIONARITY]") or line.startswith("[HYBRID-RT-REFRESH-STATIONARITY]"):
             print(f"ranks=4 zero-field {line}")
 
-print("PASS actual production divided H4 GS-to-v4-to-Exp-RT smoke")
+print("PASS actual production divided H4 GS-to-v5-to-Exp-RT smoke")

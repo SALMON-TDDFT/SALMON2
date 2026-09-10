@@ -11,8 +11,9 @@ for text,label in ((gs,'GS publisher'),(rt,'RT initializer')):
     assert 'fingerprint_rt_dg_hybrid_system' in text,f'RED: {label} does not bind current system identity'
 assert 'canonical_pp_fingerprint(pp)' in rt,'RED: RT does not compare current canonical PP identity'
 identity_text=identity.read_text().lower()
-for token in ('system%no','system%nk','system%vec_k','system%wtk','system%rocc','dg_sha256_final'):
+for token in ('system%nk','system%vec_k','system%wtk','electron_count','spin_electron_count','dg_sha256_final'):
     assert token in identity_text,f'RED: system identity omits {token}'
+assert 'system%rocc' not in identity_text,'RED: system identity still binds thermal/solver occupations'
 assert 'dg_sha256_update_int64' in identity_text
 assert "canonical_pp_schema=1_int64" in (root/'src/gs/dc/dg_canonical_pp_fingerprint.f90').read_text().replace(' ','').lower()
 with tempfile.TemporaryDirectory(prefix='hybrid-system-identity-') as name:
