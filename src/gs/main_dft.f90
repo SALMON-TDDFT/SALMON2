@@ -1285,7 +1285,9 @@ contains
   end subroutine hash_alloc_real_rank3
 
   subroutine run_dg_hybrid_continuation_ground_state_for_main
-    call run_dg_overlapping_wannier_ground_state_for_main
+    if(dc%id_tot==0)write(*,'(a)')&
+      '[DG-HYBRID-ROUTE] continuation selector uses divided local-plus-terminal LCFO route'
+    call run_dg_hybrid_divided_ground_state_for_main
   end subroutine run_dg_hybrid_continuation_ground_state_for_main
 
   subroutine run_dg_hybrid_divided_ground_state_for_main
