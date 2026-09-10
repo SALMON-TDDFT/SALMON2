@@ -76,13 +76,20 @@ not invent a second independent user tolerance if an established one exists.
 
 Failure to satisfy the density or energy criterion after three additional
 solves is nonfatal by explicit policy.  The last finite, contract-valid LCFO
-state is published.  The v5 acceptance receipt records:
+state is published.  The terminal acceptance receipt records:
 
 - total global eigensolve count;
 - additional refinement count;
 - final density and energy changes;
 - orbital, metric, projector and electron defects; and
 - `refinement_converged=false`.
+
+The distributed-v5 shard format itself remains byte-compatible: its fixed
+eight-element `acceptance_receipts` array is already fully assigned to the
+orbital/metric/projector/electron and spectral-rank contracts.  Refinement
+metadata is therefore written to a separately authenticated versioned receipt
+whose digest is bound to the v5 publication fingerprint.  Changing the v5
+array extent or overloading one of its existing fields is forbidden.
 
 A named warning is printed once by rank zero.  RT does not reject a checkpoint
 solely because this flag is false, but all existing v5 validation, metric,
