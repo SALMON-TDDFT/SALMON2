@@ -243,12 +243,19 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
         "projected-basis fingerprint",
     )
     terminal = one_match(
-        r"\[OW-GS\]\s+fixed-density/non-self-consistent divided WF\+PW LCFO solved once\s+"
+        r"\[OW-GS\]\s+divided WF\+PW terminal LCFO total_solve_count=(\d+)\s+"
         rf"residual=\s*({FLOAT_TOKEN})\s+orthogonality=\s*({FLOAT_TOKEN})\s+"
         rf"projector=\s*({FLOAT_TOKEN})\s+electron_defect=\s*({FLOAT_TOKEN})",
         text,
         "terminal LCFO receipt",
     )
+    refinement_rows = list(re.finditer(
+        rf"\[OW-GS\]\s+terminal LCFO solve=(\d+)\s+density_change=\s*({FLOAT_TOKEN})\s+"
+        rf"total_energy_change=\s*({FLOAT_TOKEN})\s+total_energy=\s*({FLOAT_TOKEN})\s+"
+        r"converged=([TF])",
+        text,
+        re.IGNORECASE,
+    ))
     seed = one_match(
         r"\[DG-DC-SEED\]\s+mode=auto\s+publication_id=(-?\d+)\s+"
         r"scf_skipped=([TF])\s+mpi_size=(\d+)\s+mapping_fingerprint=(-?\d+)",
@@ -268,17 +275,32 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
     occupied = run_dir / "overlapping_wannier_occupied.chk"
     occupied_checkpoint_fingerprint = validate_occupied_checkpoint(occupied)
     terminal_residual = parse_finite_float(
-        terminal.group(1), f"{case} terminal residual", minimum=0.0,
+        terminal.group(2), f"{case} terminal residual", minimum=0.0,
         maximum=TERMINAL_SOLVER_TOLERANCE)
     terminal_orthogonality = parse_finite_float(
-        terminal.group(2), f"{case} terminal orthogonality", minimum=0.0,
+        terminal.group(3), f"{case} terminal orthogonality", minimum=0.0,
         maximum=TERMINAL_SOLVER_TOLERANCE)
     terminal_projector = parse_finite_float(
-        terminal.group(3), f"{case} terminal projector", minimum=0.0,
+        terminal.group(4), f"{case} terminal projector", minimum=0.0,
         maximum=TERMINAL_SOLVER_TOLERANCE)
     terminal_electron_defect = parse_finite_float(
-        terminal.group(4), f"{case} terminal electron defect", minimum=0.0,
+        terminal.group(5), f"{case} terminal electron defect", minimum=0.0,
         maximum=ELECTRON_TOLERANCE)
+    terminal_solve_count = int(terminal.group(1))
+    refinement_receipts = [{
+        "solve": int(row.group(1)),
+        "density_change": parse_finite_float(
+            row.group(2), f"{case} terminal density change", minimum=0.0),
+        "total_energy_change": parse_finite_float(
+            row.group(3), f"{case} terminal energy change", minimum=0.0),
+        "total_energy": parse_finite_float(row.group(4), f"{case} terminal total energy"),
+        "converged": row.group(5).upper() == "T",
+    } for row in refinement_rows]
+    if not 1 <= terminal_solve_count <= 4:
+        raise RuntimeError(f"{case} terminal solve count is outside [1,4]")
+    if ([item["solve"] for item in refinement_receipts]
+            != list(range(1, terminal_solve_count + 1))):
+        raise RuntimeError(f"{case} terminal refinement receipts are incomplete")
     schwarz_receipts = [{
         "epoch": int(row.group(1)),
         "neighbor_exchanges": int(row.group(2)),
@@ -326,9 +348,8 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
         "continuation_fingerprints": [
             item["continuation_fingerprint"] for item in continuation],
         "schwarz_temperature_kelvin": schwarz_receipts[-1]["temperature"] if schwarz_receipts else None,
-        "terminal_lcfo_count": text.count(
-            "[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once"
-        ),
+        "terminal_lcfo_count": terminal_solve_count,
+        "terminal_refinement_receipts": refinement_receipts,
         "post_lcfo_density_updates": text[terminal_position:].count(
             "[DG-HYBRID-DIVIDED-SCF] iteration="
         ),
@@ -339,8 +360,8 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
     }
     if evidence["dc_mpi_size"] != RANKS:
         raise RuntimeError(f"{case} changed the rank/fragment contract")
-    if evidence["terminal_lcfo_count"] != 1 or evidence["post_lcfo_density_updates"] != 0:
-        raise RuntimeError(f"{case} did not perform exactly one terminal LCFO without density updates")
+    if not 1 <= evidence["terminal_lcfo_count"] <= 4 or evidence["post_lcfo_density_updates"] != 0:
+        raise RuntimeError(f"{case} violated the bounded terminal LCFO refinement contract")
     if evidence["schwarz_temperature_kelvin"] != 300.0:
         raise RuntimeError(f"{case} changed the 300 K Schwarz temperature contract")
     if not evidence["occupied_checkpoint"]:

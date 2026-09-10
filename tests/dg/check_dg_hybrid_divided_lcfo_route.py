@@ -67,29 +67,23 @@ fingerprint_position = terminal.find("call ow_fingerprint_distributed_matrix")
 assert 0 < potential_position < projection_position < fingerprint_position, (
     "terminal LCFO must project the once-refreshed converged potential"
 )
-assert terminal.count("call assemble_dg_hybrid_local_potential_rows") == 1, (
-    "terminal density-independent and converged-potential rows must be composed once"
+assert terminal.count("call assemble_dg_hybrid_local_potential_rows") == 2, (
+    "terminal route needs one initial projection and one reusable refinement projection call"
 )
 assert "bounded_fixed_payload%kinetic_rows+bounded_fixed_payload%nonlocal_rows+&" in terminal
 assert "bounded_fixed_payload%interface_rows+final_local_potential_rows" in terminal
 assert "final_srows=bounded_fixed_payload%metric_rows" in terminal
-assert "fixed-density/non-self-consistent" in entry[solve_position:], (
-    "terminal output must label the LCFO result as fixed-density/non-self-consistent"
-)
+assert "terminal lcfo total_solve_count=" in entry[solve_position:]
 
 checkpoint_position = entry.find("call write_rt_dg_hybrid_occupied_checkpoint")
 assert checkpoint_position > solve_position, "occupied checkpoint must follow terminal LCFO"
 assert entry.count("call write_rt_dg_hybrid_occupied_checkpoint") == 1
 post_lcfo = entry[solve_position:]
-for forbidden in (
-    "call run_dg_hybrid_divided_scf",
-    "call mix_dg_hybrid_divided_density",
-    "call update_dg_hybrid_divided_potential",
-    "call dg_dc_update_potential_from_distributed_density",
-    "reconstruct_dg_hybrid_density",
-    "post_lcfo_density",
-):
-    assert forbidden not in post_lcfo, f"post-LCFO density work is forbidden: {forbidden}"
+assert "call run_dg_hybrid_divided_scf" not in post_lcfo
+assert "call reconstruct_dg_hybrid_terminal_density" in post_lcfo
+assert "call mix_dg_overlapping_wannier_density_history" in post_lcfo
+assert "call dg_dc_update_potential_from_distributed_density" in post_lcfo
+assert "maximum_additional_solves=3" in terminal
 
 SOLVER_NAME = "subroutine solve_dg_hybrid_schwarz_fragments"
 SOLVER_END = "end subroutine solve_dg_hybrid_schwarz_fragments"

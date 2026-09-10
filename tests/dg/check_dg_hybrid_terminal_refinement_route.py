@@ -54,6 +54,33 @@ assert terminal_phase.count("call solve_dg_hybrid_generalized_once_and_publish")
 assert "final_hrows=bounded_fixed_payload%kinetic_rows+bounded_fixed_payload%nonlocal_rows+&" in terminal_phase
 assert "bounded_fixed_payload%interface_rows+final_local_potential_rows" in terminal_phase
 assert "final_srows=bounded_fixed_payload%metric_rows" in terminal_phase
+assert "call initialize_dg_hybrid_terminal_refinement" in terminal_phase, (
+    "terminal LCFO refinement policy is not initialized"
+)
+assert "terminal_lcfo_refinement: do" in terminal_phase
+refinement_loop = terminal_phase[terminal_phase.index("terminal_lcfo_refinement: do") :]
+assert refinement_loop.count("call solve_dg_hybrid_generalized_once_and_publish") == 1, (
+    "one syntactic eigensolve call must serve all one-to-four terminal solves"
+)
+assert "call reconstruct_dg_hybrid_terminal_density" in refinement_loop
+assert "call mix_dg_overlapping_wannier_density_history" in refinement_loop
+assert "call observe_dg_hybrid_terminal_refinement" in refinement_loop
+assert "if(.not.terminal_request_another)exit terminal_lcfo_refinement" in refinement_loop
+assert "dg_dc_gs_final_density_tolerance" in terminal_phase
+assert "ow_hybrid_divided_threshold" in terminal_phase, (
+    "terminal energy convergence must reuse the conventional DC threshold"
+)
+for field in (
+    "final_eigensolve_count",
+    "additional_refinement_count",
+    "refinement_converged",
+    "refinement_exhausted",
+    "terminal_density_change",
+    "terminal_energy_change",
+):
+    assert f"ow_hybrid_ground_state%{field}" in terminal_phase, (
+        f"terminal ground-state audit omits {field}"
+    )
 
 fragment_solver = subroutine("solve_dg_hybrid_schwarz_fragments")
 assert "solve_dg_hybrid_generalized" not in fragment_solver

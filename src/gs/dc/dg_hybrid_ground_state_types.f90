@@ -20,11 +20,12 @@ module dg_hybrid_ground_state_types
   end type s_dg_hybrid_spectral_certification
   type,public::s_dg_hybrid_ground_state
     logical::valid=.false.,converged=.false.
-    integer::global_count=0,noccupied=0,final_eigensolve_count=0
+    logical::refinement_converged=.false.,refinement_exhausted=.false.
+    integer::global_count=0,noccupied=0,final_eigensolve_count=0,additional_refinement_count=0
     integer(int64)::hybrid_basis_fingerprint=0_int64,metric_fingerprint=0_int64
     integer(int64)::operator_fingerprint=0_int64,position_fingerprint=0_int64
     integer(int64)::fingerprint=0_int64,workspace_peak_bytes=0_int64
-    real(real64)::e_homo=0d0
+    real(real64)::e_homo=0d0,terminal_density_change=huge(0d0),terminal_energy_change=huge(0d0)
     type(s_dg_hybrid_spectral_certification)::spectral_certification
     integer(int64),allocatable::owned_row_ids(:)
     complex(real64),allocatable::coefficients(:,:)

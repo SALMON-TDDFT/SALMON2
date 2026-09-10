@@ -159,6 +159,9 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   record_dg_hybrid_unconditional_gates,record_dg_hybrid_spectral_certification,&
   record_dg_hybrid_certified_rt_basis,authorize_dg_hybrid_v5_publication,&
   validate_dg_hybrid_v5_publication_rank_policy
+use dg_hybrid_terminal_refinement,only:s_dg_hybrid_terminal_refinement_controls,&
+  s_dg_hybrid_terminal_refinement_state,s_dg_hybrid_terminal_refinement_receipt,&
+  initialize_dg_hybrid_terminal_refinement,observe_dg_hybrid_terminal_refinement
 use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry,certify_dg_hybrid_energy_window
 use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
   prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
@@ -1310,6 +1313,9 @@ contains
     type(s_dg_hybrid_fixed_payload)::fixed_payload
     type(s_dg_hybrid_interface_continuation)::interface_continuation
     type(s_dg_hybrid_schwarz_state)::accepted_schwarz_state
+    type(s_dg_hybrid_terminal_refinement_controls)::terminal_refinement_controls
+    type(s_dg_hybrid_terminal_refinement_state)::terminal_refinement_state
+    type(s_dg_hybrid_terminal_refinement_receipt)::terminal_refinement_receipt
     integer::nproc,rank,ierr,status,p,q,axis,index3(3),raw_grid(3),core_grid(3),global_point_count,&
       local_basis_count,total_basis_count,face_count,initial_count,guard_count,candidate_count,&
       pw_candidate_count,global_column
@@ -1337,19 +1343,23 @@ contains
       core_coordinates(:,:),buffer_coordinates(:,:),core_windows(:,:),buffer_windows(:,:),&
       g_vectors(:,:),core_weights(:),projector_weights(:),unit_potential(:),local_potential(:),&
       initial_density(:),final_occupations(:)
+    real(8),allocatable::terminal_density_input(:),terminal_density_output(:),terminal_density_mixed(:),&
+      terminal_density_history(:,:),terminal_density_new_history(:,:),terminal_solve_local_potential(:)
     real(8),allocatable::final_solved_eigenvalues(:)
     complex(8),allocatable::projector_support_values(:)
     real(8)::axis_weight(3),axis_gradient(3),coordinate,sum_defect,gradient_defect,&
-      denominator,convergence_value,electron_defect,terminal_electron_defect,accepted_interface_scale
+      denominator,convergence_value,electron_defect,terminal_electron_defect,accepted_interface_scale,&
+      terminal_density_change,terminal_total_energy,terminal_previous_total_energy,terminal_energy_change
     real(8)::volume_diagnostics(4),local_potential_diagnostics(2),final_scf_receipts(5),&
       final_residual,final_orthogonality,final_projector_defect
     real(8)::reciprocal_rotation(3,3,1),fragment_lattice(3,3),fragment_reciprocal_lattice(3,3)
     integer,allocatable::payload_owner(:),payload_fragment(:),payload_local_slot(:),payload_generation(:),&
       interior_fragment(:)
     character(8),allocatable::atom_symbols(:)
-    integer::scf_iterations,final_state_count
+    integer::scf_iterations,final_state_count,terminal_history_count,terminal_new_history_count
     integer(int64)::continuation_point,continuation_point_limit
-    logical::ok,collective_ok,point_ok,diagnostic_ok,terminal_state_ok,fragment_wf_checkpoint_hit
+    logical::ok,collective_ok,point_ok,diagnostic_ok,terminal_state_ok,fragment_wf_checkpoint_hit,&
+      terminal_request_another,terminal_have_previous_energy
     character(512)::message,fragment_wf_checkpoint_reason
 
     call MPI_Comm_rank(dc%icomm_tot,rank,ierr);call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
@@ -1911,9 +1921,9 @@ contains
     if(.not.ok)error stop 'terminal divided Hybrid operator fingerprint failed'
     if(.not.allocated(bounded_schwarz_state%occupations))&
       error stop 'terminal divided Hybrid occupations are unavailable'
-    ! PZHEEVD already computes the complete construction-basis spectrum.  Keep
-    ! every pair from that one terminal solve for the v5 proof/window receipt;
-    ! the thermal publication below still retains only occupied columns.
+    ! PZHEEVD computes the complete construction-basis spectrum.  The normal
+    ! path executes this loop once.  Only a density/energy mismatch requests
+    ! one of at most three additional local-potential refinements.
     final_state_count=total_basis_count
     if(final_state_count<1)error stop 'terminal divided Hybrid occupied inventory is empty'
     allocate(final_occupations(final_state_count))
@@ -1921,22 +1931,105 @@ contains
     final_occupations(:min(final_state_count,size(bounded_schwarz_state%occupations)))=&
       bounded_schwarz_state%wspin*bounded_schwarz_state%occupations(&
         :min(final_state_count,size(bounded_schwarz_state%occupations)))
-    call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,total_basis_count,final_state_count,&
-      projected_basis%global_ids,final_hrows,final_srows,dg_dc_gs_final_orbital_tolerance,&
-      final_occupations,dc%elec_num_tot,global_basis_fingerprint,metric_fingerprint,&
-      final_operator_fingerprint,global_frame_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
-      ow_hybrid_ground_state,final_state_workspace,final_state_fingerprint,final_residual,&
-      final_orthogonality,final_projector_defect,final_solver_workspace,final_solver_fingerprint,&
-      ok,message,electronic_temperature=max(0d0,temperature),&
-      occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance,&
-      solved_coefficients=final_solved_coefficients,solved_eigenvalues=final_solved_eigenvalues)
-    if(.not.ok)then
-      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
-      error stop 'terminal divided Hybrid LCFO solve failed'
-    endif
+    allocate(terminal_density_input,source=initial_density)
+    allocate(terminal_density_output(size(initial_density)),terminal_density_mixed(size(initial_density)),&
+      terminal_density_history(size(initial_density),2),terminal_density_new_history(size(initial_density),2),&
+      terminal_solve_local_potential(size(initial_density)))
+    terminal_density_history(:,1)=initial_density;terminal_density_history(:,2)=initial_density
+    terminal_density_new_history=terminal_density_history;terminal_history_count=0
+    terminal_have_previous_energy=.false.;terminal_previous_total_energy=0d0
+    terminal_refinement_controls%maximum_additional_solves=3
+    terminal_refinement_controls%density_tolerance=dg_dc_gs_final_density_tolerance
+    terminal_refinement_controls%energy_tolerance=ow_hybrid_divided_threshold
+    call initialize_dg_hybrid_terminal_refinement(dc%icomm_tot,terminal_refinement_controls,&
+      terminal_refinement_state,ok,message)
+    if(.not.ok)error stop 'terminal divided Hybrid refinement initialization failed'
+terminal_lcfo_refinement: do
+      terminal_solve_local_potential=local_potential
+      call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,total_basis_count,final_state_count,&
+        projected_basis%global_ids,final_hrows,final_srows,dg_dc_gs_final_orbital_tolerance,&
+        final_occupations,dc%elec_num_tot,global_basis_fingerprint,metric_fingerprint,&
+        final_operator_fingerprint,global_frame_fingerprint,solve_final_dg_hybrid_divided_lcfo,&
+        ow_hybrid_ground_state,final_state_workspace,final_state_fingerprint,final_residual,&
+        final_orthogonality,final_projector_defect,final_solver_workspace,final_solver_fingerprint,&
+        ok,message,electronic_temperature=max(0d0,temperature),&
+        occupation_electron_tolerance=dg_dc_gs_electron_count_tolerance,&
+        solved_coefficients=final_solved_coefficients,solved_eigenvalues=final_solved_eigenvalues)
+      if(.not.ok)then
+        if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+        error stop 'terminal divided Hybrid LCFO solve failed'
+      endif
+      call reconstruct_dg_hybrid_terminal_density(projected_basis%global_ids,interior_values,&
+        ow_hybrid_ground_state,terminal_density_output,ok,message)
+      if(.not.ok)error stop 'terminal divided Hybrid density reconstruction failed'
+      call measure_dg_hybrid_terminal_density_change(dc%icomm_tot,core_weights,terminal_density_input,&
+        terminal_density_output,terminal_density_change,ok,message)
+      if(.not.ok)error stop 'terminal divided Hybrid density-change measurement failed'
+      call evaluate_dg_hybrid_terminal_total_energy(core_ids,core_weights,terminal_density_output,&
+        terminal_solve_local_potential,ow_hybrid_ground_state,terminal_total_energy,ok,message)
+      if(.not.ok)error stop 'terminal divided Hybrid total-energy evaluation failed'
+      if(terminal_have_previous_energy)then
+        terminal_energy_change=abs(terminal_total_energy-terminal_previous_total_energy)
+      else
+        ! A good DC seed may legitimately terminate after its first LCFO solve;
+        ! there is no preceding terminal energy against which to form a change.
+        terminal_energy_change=0d0
+      endif
+      call observe_dg_hybrid_terminal_refinement(dc%icomm_tot,terminal_refinement_state,&
+        terminal_density_change,terminal_energy_change,.true.,terminal_request_another,&
+        terminal_refinement_receipt,ok,message)
+      if(.not.ok)error stop 'terminal divided Hybrid refinement observation failed'
+      if(rank==0)write(*,'(a,i0,3(a,es16.8),a,l1)')'[OW-GS] terminal LCFO solve=',&
+        terminal_refinement_receipt%total_solve_count,' density_change=',terminal_density_change,&
+        ' total_energy_change=',terminal_energy_change,' total_energy=',terminal_total_energy,&
+        ' converged=',terminal_refinement_receipt%converged
+      if(.not.terminal_request_another)exit terminal_lcfo_refinement
+      if(dg_dc_gs_density_mix_rate==1d0)then
+        terminal_density_mixed=terminal_density_output
+        terminal_density_new_history=terminal_density_history
+        terminal_density_new_history(:,1)=terminal_density_output;terminal_new_history_count=1;ok=.true.
+      else
+        call mix_dg_overlapping_wannier_density_history(dc%icomm_tot,dg_dc_gs_density_mix_rate,&
+          terminal_density_input,terminal_density_output,terminal_density_history,terminal_history_count,&
+          terminal_density_mixed,terminal_density_new_history,terminal_new_history_count,ok,message)
+      endif
+      if(.not.ok)error stop 'terminal divided Hybrid density-history mixing failed'
+      terminal_density_history=terminal_density_new_history
+      terminal_history_count=terminal_new_history_count
+      terminal_density_input=terminal_density_mixed
+      terminal_previous_total_energy=terminal_total_energy;terminal_have_previous_energy=.true.
+      call dg_dc_update_potential_from_distributed_density(core_ids,terminal_density_input,ok,message)
+      if(.not.ok)error stop 'terminal divided Hybrid refined potential update failed'
+      call extract_dg_hybrid_core_local_potential(core_ids,local_potential,ok)
+      if(.not.ok)error stop 'terminal divided Hybrid refined potential extraction failed'
+      call assemble_dg_hybrid_local_potential_rows(dc%icomm_tot,total_basis_count,&
+        projected_basis%global_ids,payload_fragment,core_ids,interior_fragment,core_weights,&
+        interior_values,local_potential,final_local_potential_rows,local_potential_diagnostics,ok,message)
+      if(.not.ok)error stop 'terminal divided Hybrid refined potential projection failed'
+      final_hrows=bounded_fixed_payload%kinetic_rows+bounded_fixed_payload%nonlocal_rows+&
+        bounded_fixed_payload%interface_rows+final_local_potential_rows
+      call ow_fingerprint_distributed_matrix(dc%icomm_tot,projected_basis%global_ids,final_hrows,&
+        final_operator_fingerprint,ok)
+      if(.not.ok)error stop 'terminal divided Hybrid refined operator fingerprint failed'
+    enddo terminal_lcfo_refinement
+    if(.not.terminal_refinement_receipt%converged.and.&
+       .not.terminal_refinement_receipt%publish_last_valid)&
+      error stop 'terminal divided Hybrid refinement ended without a publishable state'
+    ow_hybrid_ground_state%final_eigensolve_count=terminal_refinement_receipt%total_solve_count
+    ow_hybrid_ground_state%additional_refinement_count=&
+      terminal_refinement_receipt%additional_refinement_count
+    ow_hybrid_ground_state%refinement_converged=terminal_refinement_receipt%converged
+    ow_hybrid_ground_state%refinement_exhausted=terminal_refinement_receipt%exhausted
+    ow_hybrid_ground_state%terminal_density_change=terminal_refinement_receipt%density_change
+    ow_hybrid_ground_state%terminal_energy_change=terminal_refinement_receipt%energy_change
     terminal_electron_defect=abs(sum(ow_hybrid_ground_state%occupations)-dc%elec_num_tot)
-    if(rank==0)write(*,'(a,4(a,es16.8))')&
+    if(rank==0.and.ow_hybrid_ground_state%final_eigensolve_count==1)write(*,'(a,4(a,es16.8))')&
       '[OW-GS] fixed-density/non-self-consistent divided WF+PW LCFO solved once',&
+      ' residual=',final_residual,' orthogonality=',final_orthogonality,&
+      ' projector=',final_projector_defect,' electron_defect=',terminal_electron_defect
+    if(rank==0)write(*,'(a,i0,4(a,es16.8))')&
+      '[OW-GS] divided WF+PW terminal LCFO total_solve_count=',&
+      ow_hybrid_ground_state%final_eigensolve_count,&
       ' residual=',final_residual,' orthogonality=',final_orthogonality,&
       ' projector=',final_projector_defect,' electron_defect=',terminal_electron_defect
     final_provenance=[pw_fingerprint,window_fingerprint,global_basis_fingerprint,&
@@ -1968,6 +2061,117 @@ contains
       error stop 'terminal divided Hybrid v5 publication failed'
     endif
   end subroutine run_dg_hybrid_divided_ground_state_for_main
+
+  subroutine reconstruct_dg_hybrid_terminal_density(row_ids,basis_values,state,density,ok,message)
+    integer(8),intent(in)::row_ids(:)
+    complex(8),intent(in)::basis_values(:,:)
+    type(s_dg_hybrid_ground_state),intent(in)::state
+    real(8),intent(out)::density(:)
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    complex(8),allocatable::orbital_values(:)
+    integer::i,p
+    logical::local_ok,collective_ok
+
+    ok=.false.;message='';density=0d0
+    local_ok=state%valid.and.allocated(state%coefficients).and.allocated(state%occupations)
+    if(local_ok)local_ok=size(density)==size(basis_values,2).and.&
+      size(row_ids)==size(state%coefficients,1).and.&
+      size(state%coefficients,2)==size(state%occupations)
+    if(local_ok)local_ok=all(row_ids>=1_8).and.all(row_ids<=int(size(basis_values,1),8))
+    call comm_logical_and(local_ok,collective_ok,dc%icomm_tot)
+    if(.not.collective_ok)then;message='invalid terminal density reconstruction contract';return;endif
+    allocate(orbital_values(size(state%occupations)))
+    do p=1,size(density)
+      orbital_values=(0d0,0d0)
+      do i=1,size(row_ids)
+        orbital_values=orbital_values+basis_values(int(row_ids(i)),p)*state%coefficients(i,:)
+      enddo
+      density(p)=sum(state%occupations*abs(orbital_values)**2)
+    enddo
+    local_ok=all(ieee_is_finite(density)).and.all(density>=0d0)
+    call comm_logical_and(local_ok,collective_ok,dc%icomm_tot)
+    if(.not.collective_ok)then;message='nonfinite terminal reconstructed density';return;endif
+    ok=.true.;message=''
+  end subroutine reconstruct_dg_hybrid_terminal_density
+
+  subroutine measure_dg_hybrid_terminal_density_change(comm,weights,input_density,output_density,&
+      density_change,ok,message)
+    integer,intent(in)::comm
+    real(8),intent(in)::weights(:),input_density(:),output_density(:)
+    real(8),intent(out)::density_change
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    real(8)::local_values(2),global_values(2)
+    integer::ierr,local_bad,global_bad
+
+    density_change=huge(1d0);ok=.false.;message=''
+    local_bad=merge(0,1,size(weights)==size(input_density).and.&
+      size(output_density)==size(input_density).and.all(ieee_is_finite(weights)).and.&
+      all(weights>0d0).and.all(ieee_is_finite(input_density)).and.&
+      all(ieee_is_finite(output_density)).and.all(input_density>=0d0).and.all(output_density>=0d0))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then;message='invalid terminal density-change contract';return;endif
+    local_values(1)=sum(weights*(output_density-input_density)**2)
+    local_values(2)=max(sum(weights*input_density**2),sum(weights*output_density**2))
+    call MPI_Allreduce(local_values,global_values,2,MPI_DOUBLE_PRECISION,MPI_SUM,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then;message='terminal density-change reduction failed';return;endif
+    density_change=sqrt(max(0d0,global_values(1))/max(tiny(1d0),global_values(2)))
+    ok=ieee_is_finite(density_change)
+    if(ok)then;message='';else;message='nonfinite terminal density change';endif
+  end subroutine measure_dg_hybrid_terminal_density_change
+
+  subroutine evaluate_dg_hybrid_terminal_total_energy(grid_ids,grid_weights,density,solve_local_potential,&
+      state,total_energy,ok,message)
+    integer(8),intent(in)::grid_ids(:)
+    real(8),intent(in)::grid_weights(:),density(:),solve_local_potential(:)
+    type(s_dg_hybrid_ground_state),intent(in)::state
+    real(8),intent(out)::total_energy
+    logical,intent(out)::ok
+    character(*),intent(out)::message
+    type(s_dft_energy)::trial_energy
+    real(8)::band_energy,local_parts(2),global_parts(2)
+    integer::p,gx,gy,gz,ix,iy,iz,ierr
+
+    total_energy=huge(1d0);ok=.false.;message=''
+    if(size(grid_ids)/=size(density).or.size(grid_weights)/=size(density).or.&
+       size(solve_local_potential)/=size(density).or..not.state%valid.or.&
+       .not.allocated(state%occupations).or..not.allocated(state%eigenvalues))then
+      message='invalid terminal total-energy contract';return
+    endif
+    if(size(state%occupations)/=size(state%eigenvalues))then
+      message='terminal total-energy occupation/eigenvalue shape mismatch';return
+    endif
+    if(any(.not.ieee_is_finite(density)).or.any(.not.ieee_is_finite(solve_local_potential)).or.&
+       any(.not.ieee_is_finite(grid_weights)))then;message='nonfinite terminal total-energy input';return;endif
+    band_energy=sum(state%occupations*state%eigenvalues)
+    local_parts=0d0
+    local_parts(1)=sum(grid_weights*density*solve_local_potential)
+    call dg_dc_update_potential_from_distributed_density(grid_ids,density,ok,message)
+    if(.not.ok)return
+    do p=1,size(grid_ids)
+      gx=int(modulo(grid_ids(p)-1_8,int(dc%lg_tot%num(1),8)))+1
+      gy=int(modulo((grid_ids(p)-1_8)/int(dc%lg_tot%num(1),8),int(dc%lg_tot%num(2),8)))+1
+      gz=int((grid_ids(p)-1_8)/int(dc%lg_tot%num(1)*dc%lg_tot%num(2),8))+1
+      ix=findloc(dc%jxyz_tot(:,1),gx,dim=1);iy=findloc(dc%jxyz_tot(:,2),gy,dim=1)
+      iz=findloc(dc%jxyz_tot(:,3),gz,dim=1)
+      if(ix<1.or.iy<1.or.iz<1)then;message='terminal total-energy grid mapping failed';ok=.false.;return;endif
+      local_parts(2)=local_parts(2)+eexc_tmp(ix,iy,iz)*grid_weights(p)
+    enddo
+    call MPI_Allreduce(local_parts,global_parts,2,MPI_DOUBLE_PRECISION,MPI_SUM,dc%icomm_tot,ierr)
+    if(ierr/=MPI_SUCCESS.or.any(.not.ieee_is_finite(global_parts)).or..not.ieee_is_finite(band_energy))then
+      message='terminal total-energy reduction failed';ok=.false.;return
+    endif
+    trial_energy%E_tot=0d0;trial_energy%E_kin=band_energy-global_parts(1)
+    trial_energy%E_h=0d0;trial_energy%E_xc=global_parts(2);trial_energy%E_ion_ion=0d0
+    trial_energy%E_ion_loc=0d0;trial_energy%E_ion_nloc=0d0;trial_energy%E_U=0d0
+    trial_energy%E_tot0=0d0;trial_energy%elec_num=sum(state%occupations)
+    trial_energy%elec_num_raw=trial_energy%elec_num;trial_energy%pw_weight_raw=0d0
+    call calc_Total_Energy_periodic(dc%mg_tot,ewald,dc%system_tot,dc%info_tot,pp,dc%ppg_tot,&
+      dc%fg_tot,dc%poisson_tot,.true.,trial_energy)
+    total_energy=trial_energy%E_tot;ok=ieee_is_finite(total_energy)
+    if(ok)then;message='';else;message='nonfinite terminal total energy';endif
+  end subroutine evaluate_dg_hybrid_terminal_total_energy
 
   subroutine publish_dg_hybrid_divided_v5(row_ids,row_owner,row_generation,grid_ids,grid_weights,&
       grid_fragment,basis_values,basis_gradients,metric_rows,kinetic_rows,nonlocal_rows,local_rows,&
@@ -2020,7 +2224,8 @@ contains
       all(shape(nonlocal_rows)==[nrow,n]).and.all(shape(local_rows)==[nrow,n]).and.&
       all(shape(sipg_rows)==[nrow,n]).and.all(shape(hamiltonian_rows)==[nrow,n])
     precondition_ok=precondition_ok.and.occupied_state%valid.and.occupied_state%converged.and.&
-      occupied_state%global_count==n.and.occupied_state%final_eigensolve_count==1.and.&
+      occupied_state%global_count==n.and.occupied_state%final_eigensolve_count>=1.and.&
+      occupied_state%final_eigensolve_count<=4.and.&
       allocated(occupied_state%owned_row_ids).and.allocated(occupied_state%coefficients).and.&
       allocated(occupied_state%occupations).and.allocated(occupied_state%eigenvalues)
     if(precondition_ok)precondition_ok=size(occupied_state%owned_row_ids)==nrow.and.&
