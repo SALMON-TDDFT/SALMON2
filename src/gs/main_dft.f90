@@ -193,6 +193,8 @@ use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,&
   collective_rt_dg_hybrid_publication_mapping_precondition,publish_rt_dg_hybrid_checkpoint_v5,&
   s_rt_dg_hybrid_v5_publication_authorization
 use rt_dg_hybrid_checkpoint_v5,only:s_rt_dg_hybrid_v5_shard
+use rt_dg_hybrid_refinement_receipt,only:s_rt_dg_hybrid_refinement_receipt,&
+  write_rt_dg_hybrid_refinement_receipt
 use rt_dg_hybrid_initialization,only:fingerprint_rt_dg_hybrid_scope,&
   fingerprint_rt_dg_hybrid_sparse_structure
 use rt_dg_hybrid_system_identity,only:fingerprint_rt_dg_hybrid_system
@@ -2082,7 +2084,7 @@ terminal_lcfo_refinement: do
       global_basis_fingerprint,global_frame_fingerprint,metric_fingerprint,&
       bounded_fixed_payload%interface_fingerprint,interface_continuation%fingerprint,&
       final_operator_fingerprint,final_residual,final_orthogonality,final_projector_defect,&
-      terminal_electron_defect,0,.true.,ok,message)
+      terminal_electron_defect,0,.true.,ok,message,terminal_refinement=terminal_refinement_receipt)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED-V5] ',trim(message)
       error stop 'terminal divided Hybrid v5 publication failed'
@@ -2205,7 +2207,8 @@ terminal_lcfo_refinement: do
       sipg_rows,hamiltonian_rows,solved_coefficients,solved_eigenvalues,occupied_state,&
       basis_fingerprint,dc_seed_fingerprint,metric_fingerprint,face_fingerprint,&
       continuation_fingerprint,operator_fingerprint,stationarity_defect,metric_defect,&
-      projector_defect,electron_defect,certified_rank_receipt,publication_authorized,ok,message,publication_receipt)
+      projector_defect,electron_defect,certified_rank_receipt,publication_authorized,ok,message,&
+      publication_receipt,terminal_refinement)
     integer(8),intent(in)::row_ids(:),grid_ids(:)
     integer,intent(in)::row_owner(:),row_generation(:),grid_fragment(:)
     real(8),intent(in)::grid_weights(:),solved_eigenvalues(:),stationarity_defect,metric_defect,&
@@ -2218,9 +2221,11 @@ terminal_lcfo_refinement: do
     integer,intent(in)::certified_rank_receipt
     logical,intent(in)::publication_authorized
     type(s_dg_hybrid_candidate_acceptance),intent(in),optional::publication_receipt
+    type(s_dg_hybrid_terminal_refinement_receipt),intent(in),optional::terminal_refinement
     logical,intent(out)::ok
     character(*),intent(out)::message
     type(s_rt_dg_hybrid_v5_shard)::payload
+    type(s_rt_dg_hybrid_refinement_receipt)::companion_receipt
     integer,allocatable::metric_offsets(:),metric_columns(:),operator_offsets(:),operator_columns(:)
     complex(8),allocatable::empty_position(:,:,:),orbital_values(:)
     complex(8),allocatable::energy_action(:,:),energy_component_values(:)
@@ -2457,6 +2462,28 @@ terminal_lcfo_refinement: do
     call publish_rt_dg_hybrid_checkpoint_v5(dc%icomm_tot,'./hybrid_dg_ground_state.chk',n,nocc,&
       row_ids,row_owner,occupied_state%owned_row_ids,payload,authorization,precondition_ok,local_ok,local_message)
     if(.not.local_ok)then;message='terminal divided v5 write failed: '//trim(local_message);return;endif
+    if(present(terminal_refinement))then
+      companion_receipt%version=1;companion_receipt%fragment_id=rank+1
+      companion_receipt%v5_publication_fingerprint=payload%payload_fingerprint
+      companion_receipt%total_solve_count=terminal_refinement%total_solve_count
+      companion_receipt%additional_refinement_count=terminal_refinement%additional_refinement_count
+      companion_receipt%density_change=terminal_refinement%density_change
+      companion_receipt%energy_change=terminal_refinement%energy_change
+      companion_receipt%converged=terminal_refinement%converged
+      companion_receipt%exhausted=terminal_refinement%exhausted
+      if(terminal_refinement%exhausted)then
+        companion_receipt%exit_reason='maximum-additional-solves-exhausted'
+      else if(terminal_refinement%total_solve_count==1)then
+        companion_receipt%exit_reason='initial-lcfo-converged'
+      else
+        companion_receipt%exit_reason='refined-lcfo-converged'
+      endif
+      call write_rt_dg_hybrid_refinement_receipt(dc%icomm_tot,&
+        './hybrid_dg_ground_state.chk.refinement',companion_receipt,local_ok,local_message)
+      if(.not.local_ok)then;message='terminal refinement receipt write failed: '//trim(local_message);return;endif
+      if(rank==0.and.terminal_refinement%exhausted)write(error_unit,'(a)')&
+        '[DG-HYBRID-REFINEMENT-WARNING] maximum additional LCFO solves exhausted; publishing last finite valid state'
+    endif
     if(rank==0)write(*,'(a,6(a,i0),4(a,es16.8),a,i0)')'[HYBRID-GS-HANDOFF] route=divided-terminal-lcfo-v5',&
       ' construction_rank=',n,' solved_rank=',n,' certified_rank=',certified_rank,' rt_rank=',n,&
       ' occupied_rank=',nocc,' projector_count=',global_projector_count,' stationarity=',stationarity_defect,&

@@ -76,6 +76,9 @@ assert "dg_dc_gs_final_density_tolerance" in terminal_phase
 assert "ow_hybrid_divided_threshold" in terminal_phase, (
     "terminal energy convergence must reuse the conventional DC threshold"
 )
+assert SOURCE.count("[dg-hybrid-refinement-warning] maximum additional lcfo solves exhausted; publishing last finite valid state") == 1, (
+    "terminal exhaustion warning must be emitted exactly once"
+)
 for field in (
     "final_eigensolve_count",
     "additional_refinement_count",

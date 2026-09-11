@@ -6,6 +6,7 @@ import re
 root = Path(__file__).resolve().parents[2]
 checkpoint = (root / "src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().lower()
 checkpoint_v5 = (root / "src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90").read_text().lower()
+refinement_receipt_path = root / "src/rt/dg/rt_dg_hybrid_refinement_receipt.f90"
 initialization = (root / "src/rt/dg/rt_dg_hybrid_initialization_v5.f90").read_text().lower()
 density = (root / "src/rt/dg/rt_dg_hybrid_density_update.f90").read_text().lower()
 exchange = (root / "src/rt/dg/rt_dg_hybrid_sparse_exchange.f90").read_text().lower()
@@ -24,6 +25,12 @@ assert "unsupported distributed checkpoint schema v4" in checkpoint_v5, (
     "RED: legacy schema-v4 input is not rejected with a named migration diagnostic")
 assert "distributed-v5 manifest magic/schema/extent is corrupt" in checkpoint_v5, (
     "RED: corrupt/new schema-v5 input is mislabeled as a legacy checkpoint")
+assert refinement_receipt_path.exists(), "RED: terminal refinement companion receipt is absent"
+refinement_receipt = refinement_receipt_path.read_text().lower()
+for token in ("sha256", "v5_publication_fingerprint", "total_solve_count", "density_change", "exit_reason"):
+    assert token in refinement_receipt, f"RED: refinement companion omits {token}"
+assert "acceptance_receipts(8)" in main_gs, (
+    "RED: companion receipt changed the eight-field v5 acceptance payload")
 for digest in ("system_fingerprint(4)", "pseudopotential_digest(4)", "shard_digest(4)"):
     assert digest in checkpoint_v5, f"RED: schema-v5 does not retain full SHA-256 {digest}"
 publisher = main_gs.split("subroutine publish_dg_hybrid_divided_v5", 1)[1].split(
