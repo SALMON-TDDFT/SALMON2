@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-scf-") as name:
     str(root/"src/gs/dc/dg_hybrid_occupation_policy.f90"),
     str(root/"src/gs/dc/dg_hybrid_ground_state_types.f90"),
     str(root/"src/gs/dc/dg_hybrid_generalized_eigensystem.f90"),str(root/"src/gs/dc/dg_hybrid_block_cg.f90"),
-    str(root/"src/gs/dc/dg_hybrid_scf.f90"),str(root/"tests/dg/test_dg_hybrid_scf_mpi.f90"),*libraries,"-o",str(exe)],check=True)
+    str(root/"tests/dg/legacy_support/dg_hybrid_scf.f90"),str(root/"tests/dg/test_dg_hybrid_scf_mpi.f90"),*libraries,"-o",str(exe)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1");fingerprints=[]
   for nrank in (1,2,4,8):
     run=subprocess.run([shutil.which("mpiexec"),"-n",str(nrank),str(exe)],capture_output=True,text=True,env=env)

@@ -65,7 +65,8 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
       allocate(ppg%jxyz_min(1:3,natom))
       allocate(ppg%jxyz_changed(natom))
       ppg%jxyz_max = 0
-      ppg%jxyz_min = ppg%nps
+      ! calc_nps has not run yet: fresh bound metadata must not read nps.
+      ppg%jxyz_min = 0
       ppg%jxyz_changed = .false.
     end if
     n=maxval(pp%nproj)*(pp%lmax+1)**2

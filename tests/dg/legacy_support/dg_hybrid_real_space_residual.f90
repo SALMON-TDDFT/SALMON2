@@ -1,3 +1,4 @@
+! Test-only legacy reference; excluded from the SALMON production build.
 #include "config.h"
 module dg_hybrid_real_space_residual
   use,intrinsic::iso_fortran_env,only:int64,real64

@@ -142,7 +142,7 @@ FORBIDDEN_ASSET_GLOBS = (
 REQUIRED_SOURCES = {
     "src/gs/dc/dg_overlapping_wannier_checkpoint.f90",
     "src/gs/dc/dg_overlapping_wannier_construction.f90",
-    "src/rt/dg/rt_dg_overlapping_wannier.f90",
+    "tests/dg/legacy_support/rt_dg_overlapping_wannier.f90",
 }
 
 # These test names contain WPW but target the retained Hybrid implementation,

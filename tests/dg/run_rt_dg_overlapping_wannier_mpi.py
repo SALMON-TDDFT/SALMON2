@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix="ow-coefficient-rt-") as name:
             "-fcheck=all",
             "-ffpe-trap=invalid,zero,overflow",
             "-fbacktrace",
-            str(root / "src/rt/dg/rt_dg_overlapping_wannier.f90"),
+            str(root / "tests/dg/legacy_support/rt_dg_overlapping_wannier.f90"),
             str(root / "tests/dg/test_rt_dg_overlapping_wannier_mpi.f90"),
             "-L/opt/homebrew/opt/openblas/lib",
             "-lopenblas",

@@ -1,3 +1,4 @@
+! Test-only legacy reference; excluded from the SALMON production build.
 #include "config.h"
 module rt_dg_overlapping_wannier
   use iso_fortran_env,only:int64,real64

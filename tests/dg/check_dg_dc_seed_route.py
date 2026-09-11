@@ -264,7 +264,7 @@ dispatch_positions = [
     position
     for token in (
         "call run_dg_hybrid_continuation_ground_state_for_main",
-        "call run_dg_overlapping_wannier_ground_state_for_main",
+        "call run_dg_hybrid_divided_ground_state_for_main",
         "call dc_lcfo_flux",
         "call dc_lcfo(",
     )

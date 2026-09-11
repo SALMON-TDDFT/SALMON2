@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-continuation-state-") as name:
         shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-std=f2008",
         "-I", str(build), "-J", str(build), "-fcheck=all",
         "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
-        str(root / "src/gs/dc/dg_hybrid_continuation_state.f90"),
+        str(root / "tests/dg/legacy_support/dg_hybrid_continuation_state.f90"),
         str(root / "tests/dg/test_dg_hybrid_continuation_state_mpi.f90"),
         "-o", str(exe),
     ], check=True)

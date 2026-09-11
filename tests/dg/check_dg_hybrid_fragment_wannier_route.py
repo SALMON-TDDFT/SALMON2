@@ -15,9 +15,7 @@ entry = "run_dg_hybrid_divided_ground_state_for_main"
 assert re.search(r"if\s*\(\s*yn_dg_hybrid_divided_scf\s*==\s*'y'\s*\)\s*then\s*call\s+" + entry, source), (
     "Task 8 incomplete: divided main must dispatch to its own DC-seed construction entry"
 )
-assert "divided hybrid scf must dispatch to the schwarz production entry" in source, (
-    "the legacy overlapping-Wannier entry must reject accidental divided-SCF routing"
-)
+assert "bare overlapping-wannier gs is retired" in source
 match = re.search(r"\bsubroutine\s+" + entry + r"\b(.*?)\bend subroutine\s+" + entry, source, re.S)
 assert match, "missing separated divided production routine"
 route = match.group(1)
@@ -89,7 +87,16 @@ ordered = (
 )
 for before, after in zip(ordered, ordered[1:]):
     assert route.index(before) < route.index(after), f"production order must keep {before} before {after}"
-for name in ("dc_lcfo", "run_dg_overlapping_wannier_ground_state_for_main",
+diagnostic_begin = route.index("if(density_diagnostic)then")
+diagnostic_end = route.index("call initialize_dg_hybrid_interface_continuation", diagnostic_begin)
+diagnostic = route[diagnostic_begin:diagnostic_end]
+assert diagnostic.count("call dc_lcfo(") == 1
+assert "retained_core_density=diagnostic_core" in diagnostic
+assert "write_files=.false." in diagnostic
+assert "call dc_lcfo(" not in route[:diagnostic_begin] + route[diagnostic_end:], (
+    "ordinary LCFO is allowed only in the optional fixed-density comparison"
+)
+for name in ("run_dg_overlapping_wannier_ground_state_for_main",
              "setup_dg_w90_gamma_library", "run_dg_w90_gamma_library",
              "apply_dg_hybrid_divided_fragment_hpsi", "solve_dg_hybrid_fragment_spectrum"):
     assert not re.search(r"\bcall\s+" + name + r"\b", route), f"legacy production fallback: {name}"

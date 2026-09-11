@@ -14,7 +14,6 @@ set(SOURCES
 
 if (USE_MPI AND USE_SCALAPACK)
   list(APPEND SOURCES
-    dg/rt_dg_overlapping_wannier.f90
     dg/rt_dg_hybrid_sparse_exchange.f90
     dg/rt_dg_hybrid_point_density.f90
     dg/rt_dg_hybrid_metric_solver.f90

@@ -12,7 +12,7 @@ DCDTF = (ROOT / "src/gs/dc/dcdft.f90").read_text(errors="replace").lower()
 MAIN = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 BROKEN = (ROOT / "src/gs/dc/dg_hybrid_broken_volume.f90").read_text(errors="replace").lower()
 MIXING = (ROOT / "src/gs/dc/dg_hybrid_divided_mixing.f90").read_text(errors="replace").lower()
-DIVIDED_SCF = (ROOT / "src/gs/dc/dg_hybrid_divided_scf.f90").read_text(errors="replace").lower()
+DIVIDED_SCF = (ROOT / "tests/dg/legacy_support/dg_hybrid_divided_scf.f90").read_text(errors="replace").lower()
 
 assert "character(1)   :: yn_dg_hybrid_divided_scf" in GLOBAL
 assert "yn_dg_hybrid_divided_scf = 'n'" in INPUT, "divided route must default off"
@@ -63,72 +63,22 @@ assert "subroutine mu2ne" not in dc_occupation
 assert "subroutine ne2mu_core" not in dc_occupation
 
 assert "yn_dg_hybrid_divided_scf" in MAIN
-assert "ok=nproc==dc%n_frag.and..not.dc%optimized_fragment_geometry" in MAIN, (
+assert "nproc==dc%n_frag.and.dc%isize_frag==1" in MAIN, (
     "production DC handoff must retain exactly one MPI rank per fragment"
 )
-rank_guard = MAIN.index("ok=nproc==dc%n_frag.and..not.dc%optimized_fragment_geometry")
-assert "call comm_logical_and(ok,reusable,dc%icomm_tot)" in MAIN[rank_guard : rank_guard + 300]
-assert "requires one rank per valid dc fragment" in MAIN[rank_guard : rank_guard + 400]
+rank_guard = MAIN.index("nproc==dc%n_frag.and.dc%isize_frag==1")
+assert "call comm_logical_and(ok,collective_ok,dc%icomm_tot)" in MAIN[rank_guard : rank_guard + 400]
+assert "requires one rank per uniform dc fragment" in MAIN[rank_guard : rank_guard + 500]
 branch_start = "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then"
-assert branch_start in MAIN, "missing default-off divided DC preparation branch"
-branch = MAIN[MAIN.index(branch_start) :].split("endif", 1)[0]
-assert "prepare_dg_hybrid_divided_dc_controls" in branch
-assert "call prepare_dg_hybrid_divided_production_basis" in branch
-production_call = MAIN.index("call prepare_dg_hybrid_divided_production_basis")
-assert "subroutine prepare_dg_hybrid_divided_production_basis" in MAIN
-main_end = MAIN.index("end subroutine main_dft")
-prep_start = MAIN.index("subroutine prepare_dg_hybrid_divided_production_basis")
-assert prep_start > main_end, (
-    "production-basis preparation must not be an internal procedure of the giant "
-    "main_dft frame"
-)
-prep = MAIN[MAIN.index("subroutine prepare_dg_hybrid_divided_production_basis") :].split(
-    "end subroutine", 1
+assert branch_start not in MAIN, "unreachable divided preparation branch remains"
+assert "prepare_dg_hybrid_divided_production_basis" not in MAIN
+active = MAIN.split("subroutine run_dg_hybrid_divided_ground_state_for_main", 1)[1].split(
+    "end subroutine run_dg_hybrid_divided_ground_state_for_main", 1
 )[0]
-for token in (
-    "analyze_dg_hybrid_lcfo_selection",
-    "freeze_dg_hybrid_production_selection",
-    "redistribute_dg_hybrid_fragment_windows",
-    "build_dg_hybrid_projected_fragment_basis",
-):
-    assert token in prep, f"divided route is missing production WF+PW construction: {token}"
-assert prep.index("analyze_dg_hybrid_lcfo_selection") < prep.index(
-    "freeze_dg_hybrid_production_selection"
-)
-lcfo_call = prep[prep.index("call analyze_dg_hybrid_lcfo_selection") :]
-assert "basis_fingerprint_arg" in lcfo_call.split("if(.not.callback_ok)return", 1)[0], (
-    "LCFO-deferred production preparation omits authoritative Wannier provenance"
-)
-assert prep.index("freeze_dg_hybrid_production_selection") < prep.index(
-    "build_dg_hybrid_projected_fragment_basis"
-)
-assert "build_dg_hybrid_production_pw_basis" not in prep
-assert "core_fragment_ids=dc%i_frag" not in prep, (
-    "pencil-owned core points must not inherit one rank-local fragment id"
-)
-for token in (
-    "fragment_origin_arg",
-    "fragment_size_arg",
-    "do fragment=1,fragment_count_arg",
-):
-    assert token in prep, f"missing physical-point fragment ownership reconstruction: {token}"
-assert "row_action(size(ow_pencil_generator_maps,1)" not in prep, (
-    "production row action must cover global physical points, not local pencil rows"
-)
-for token in (
-    "row_action(ncore_arg,size(pencil_maps_arg,2))",
-    "row_action=int(pencil_maps_arg)",
-):
-    assert token in prep, f"missing physical-ID row-action preservation: {token}"
-assert "all_core_ids_arg" not in prep, (
-    "global physical point IDs must not be reinterpreted as gathered-row ordinals"
-)
-assert "row_action=0" not in prep, (
-    "the fully populated local row action must not use the crashing redundant bulk memset"
-)
-assert "core_fragment_ids=0" not in prep
-assert "do point=1,ncore_arg" in prep
-assert "core_fragment_ids(point)=0" in prep
+for call in ("prepare_dg_hybrid_divided_dc_controls",
+             "build_dg_hybrid_projected_local_fragment_basis",
+             "prepare_dg_hybrid_selected_trial"):
+    assert f"call {call}" in active, f"missing active production call: {call}"
 assert "dc%rho_tot" in DCDTF
 density_loader = DCDTF[DCDTF.index("subroutine load_dg_hybrid_distributed_dc_density") :]
 density_loader = density_loader.split("end subroutine load_dg_hybrid_distributed_dc_density", 1)[0]
@@ -240,7 +190,10 @@ for forbidden in (
     "dg_dc_gs_final_density_tolerance",
     "post_lcfo_density",
 ):
-    assert forbidden not in branch, f"divided route introduced a new density gate: {forbidden}"
+    local_phase = active.split("call initialize_dg_hybrid_interface_continuation", 1)[1].split(
+        "call validate_dg_hybrid_schwarz_dynamic_receipt", 1
+    )[0]
+    assert forbidden not in local_phase, f"local divided route introduced a new density gate: {forbidden}"
 
 potential_name = "subroutine finish_dg_dc_potential_update"
 potential = MAIN[MAIN.index(potential_name) :].split(

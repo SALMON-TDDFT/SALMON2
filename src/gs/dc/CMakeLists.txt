@@ -21,8 +21,7 @@ if (USE_MPI AND USE_SCALAPACK)
     dg_hybrid_full_cell_operator_adapter.f90
     dg_hybrid_occupation_policy.f90
     dg_hybrid_ground_state_types.f90
-    dg_hybrid_continuation_state.f90
-    dg_hybrid_continuation_controller.f90
+    dg_hybrid_publication_policy.f90
     dg_hybrid_terminal_refinement.f90
     dg_hybrid_low_energy_symmetry.f90
     dg_hybrid_sipg_operator.f90
@@ -34,18 +33,15 @@ if (USE_MPI AND USE_SCALAPACK)
     dg_hybrid_schwarz_operator.f90
     dg_hybrid_schwarz_solver.f90
     dg_hybrid_divided_mixing.f90
-    dg_hybrid_real_space_residual.f90
     dg_hybrid_variational_potential.f90
     dg_hybrid_generalized_eigensystem.f90
     dg_hybrid_density.f90
-    dg_hybrid_scf.f90
     dg_hybrid_fragment_basis.f90
     dg_hybrid_production_face_traces.f90
     dg_hybrid_fragment_basis_stream.f90
     dg_hybrid_projected_fragment_pipeline.f90
     dg_hybrid_production_fragment_basis.f90
     dg_hybrid_fragment_solver.f90
-    dg_hybrid_divided_scf.f90
     dg_hybrid_lcfo_support_redistribution.f90
     dg_hybrid_lcfo.f90
     dg_hybrid_block_cg.f90

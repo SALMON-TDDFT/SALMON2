@@ -15,7 +15,8 @@ with tempfile.TemporaryDirectory(prefix="hybrid-continuation-controller-") as na
         shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-std=f2008", "-ffree-line-length-none",
         "-I", str(build), "-J", str(build), "-fcheck=all",
         "-ffpe-trap=invalid,zero,overflow", "-fbacktrace",
-        str(root / "src/gs/dc/dg_hybrid_continuation_controller.f90"),
+        str(root / "src/gs/dc/dg_hybrid_publication_policy.f90"),
+        str(root / "tests/dg/legacy_support/dg_hybrid_continuation_controller.f90"),
         str(root / "tests/dg/test_dg_hybrid_continuation_controller_mpi.f90"),
         "-o", str(exe),
     ], check=True)

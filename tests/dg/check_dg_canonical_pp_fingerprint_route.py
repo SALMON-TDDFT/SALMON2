@@ -36,17 +36,9 @@ assert re.search(
 assert "pp%zion" not in seed_body.lower()
 assert "hash_pp_info_for_dg_dc_seed" not in MAIN.lower()
 
-hybrid_start = MAIN.lower().index("subroutine run_dg_overlapping_wannier_ground_state_for_main")
-hybrid_end = MAIN.lower().index("subroutine build_ow_complete_sp_projectors", hybrid_start)
-hybrid_body = MAIN[hybrid_start:hybrid_end]
-assert "pseudopotential_fingerprint=canonical_pp_fingerprint(pp)" in hybrid_body.replace(" ", "").lower()
-for reduction in ("MPI_MIN", "MPI_MAX"):
-    assert re.search(
-        rf"MPI_Allreduce\s*\(\s*pseudopotential_fingerprint\s*,.*?{reduction}",
-        hybrid_body,
-        re.IGNORECASE | re.DOTALL,
-    ), f"Hybrid PP provenance lacks collective {reduction} agreement"
 publisher_body = extent(MAIN, "subroutine", "publish_dg_hybrid_divided_v5")
+assert "payload%pseudopotential_fingerprint=canonical_pp_fingerprint(pp)" in publisher_body.replace(" ", "").lower()
+assert "call publish_rt_dg_hybrid_checkpoint_v5" in publisher_body.lower()
 assert "canonical_pp_valence_sum(pp)" in publisher_body
 assert "canonical_pp_digest(pp)" in publisher_body
 assert "pp%zion" not in MAIN.lower()

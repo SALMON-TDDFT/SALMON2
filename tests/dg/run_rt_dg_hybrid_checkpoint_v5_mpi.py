@@ -70,7 +70,8 @@ for mutation in (
 with tempfile.TemporaryDirectory(prefix="hybrid-v5-checkpoint-") as name:
   build=Path(name);(build/"config.h").write_text("");exe=build/"hybrid_v5_checkpoint"
   support=[root/"src/common/dg_portable_sha256.f90",root/"src/common/dg_hybrid_sparse_metric.f90",root/"src/common/dg_hybrid_sparse_operators.f90",
-    root/"src/gs/dc/dg_hybrid_continuation_controller.f90",
+    root/"src/gs/dc/dg_hybrid_publication_policy.f90",
+    root/"tests/dg/legacy_support/dg_hybrid_continuation_controller.f90",
     root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90",root/"src/rt/dg/rt_dg_hybrid_point_density.f90",
     source,root/"src/rt/dg/rt_dg_hybrid_structural_graph.f90",
     root/"src/rt/dg/rt_dg_hybrid_sparse_projection.f90",root/"src/rt/dg/rt_dg_hybrid_initialization_v5.f90"]

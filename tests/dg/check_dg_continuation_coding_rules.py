@@ -7,9 +7,9 @@ ROOT = Path(__file__).resolve().parents[2]
 FILES = [
     "src/common/dg_hybrid_continuation_residuals.f90",
     "src/common/dg_hybrid_sparse_operators.f90",
-    "src/gs/dc/dg_hybrid_continuation_controller.f90",
+    "tests/dg/legacy_support/dg_hybrid_continuation_controller.f90",
     "src/gs/dc/dg_hybrid_continuation_scf.f90",
-    "src/gs/dc/dg_hybrid_continuation_state.f90",
+    "tests/dg/legacy_support/dg_hybrid_continuation_state.f90",
     "src/gs/dc/dg_hybrid_sipg_operator.f90",
     "tests/dg/test_dg_hybrid_continuation_controller_mpi.f90",
     "tests/dg/test_dg_hybrid_continuation_residuals_mpi.f90",

@@ -57,7 +57,8 @@ end program test_schedule
     exe = build / "test_schedule"
     subprocess.run([
         shutil.which("mpifort"), "-cpp", "-DUSE_MPI", "-I", str(build), "-J", str(build),
-        str(root / "src/gs/dc/dg_hybrid_continuation_controller.f90"), str(fixture), "-o", str(exe),
+        str(root / "src/gs/dc/dg_hybrid_publication_policy.f90"),
+        str(root / "tests/dg/legacy_support/dg_hybrid_continuation_controller.f90"), str(fixture), "-o", str(exe),
     ], check=True)
     env = os.environ.copy()
     env.setdefault("OMPI_MCA_rmaps_base_oversubscribe", "1")

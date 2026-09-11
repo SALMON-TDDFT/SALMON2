@@ -1,3 +1,4 @@
+! Test-only legacy reference; excluded from the SALMON production build.
 module dg_hybrid_divided_scf
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64

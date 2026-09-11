@@ -3410,12 +3410,9 @@ contains
        yn_dg_overlapping_wannier_rt=='y' .or. yn_rt_dg_hybrid_continuation=='y') &
       call sawf_input_fatal("production DG requires a build with MPI and ScaLAPACK support")
 #endif
-#if defined(USE_MPI) && defined(USE_SCALAPACK) && !defined(USE_EIGENEXA)
     if(yn_dg_dc_overlapping_wannier=='y' .and. &
-       yn_dg_hybrid_divided_scf/='y' .and. yn_dg_hybrid_continuation_scf/='y' .and. &
-       yn_dg_hybrid_scf/='y') &
-      call sawf_input_fatal("bare overlapping-Wannier one-shot arm requires a build with EigenExa support")
-#endif
+       yn_dg_hybrid_divided_scf/='y' .and. yn_dg_hybrid_continuation_scf/='y') &
+      call sawf_input_fatal("bare overlapping-Wannier GS is retired; select yn_dg_hybrid_divided_scf='y'")
     if((yn_dg_dc_overlapping_wannier=='y' .or. yn_dg_hybrid_divided_scf=='y' .or. &
         yn_dg_hybrid_continuation_scf=='y' .or. yn_dg_hybrid_scf=='y') .and. &
        any(num_fragment<=0)) &
@@ -3435,6 +3432,12 @@ contains
     case default
       call sawf_input_fatal("dg_hybrid_divided_mixing must be inherit, simple, pulay, or broyden")
     end select
+    if(yn_dg_hybrid_scf=='y') &
+      call sawf_input_fatal("yn_dg_hybrid_scf is retired; use yn_dg_hybrid_divided_scf for local Hybrid GS")
+    if(yn_dg_overlapping_wannier_rt=='y') &
+      call sawf_input_fatal("yn_dg_overlapping_wannier_rt is retired; use yn_rt_dg_hybrid_continuation with a v5 checkpoint")
+    if(yn_dg_overlapping_wannier_rt_restart=='y') &
+      call sawf_input_fatal("yn_dg_overlapping_wannier_rt_restart is retired; V3 RT restart is unsupported")
     if(count([yn_dg_hybrid_divided_scf=='y',yn_dg_hybrid_continuation_scf=='y',yn_dg_hybrid_scf=='y'])>1) &
       call sawf_input_fatal("Hybrid SCF routes are mutually exclusive")
     if(.not.ieee_is_finite(dg_hybrid_symmetry_energy_window) .or. &
@@ -3485,10 +3488,6 @@ contains
       call sawf_input_fatal("fragment-WF checkpoint reuse requires DG DC seed checkpoint provenance")
     if(yn_dg_hybrid_divided_scf=='y' .and. yn_scalapack/='y') &
       call sawf_input_fatal("divided hybrid LCFO requires yn_scalapack='y'")
-    if(yn_dg_hybrid_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
-      call sawf_input_fatal("hybrid SCF requires yn_dg_dc_overlapping_wannier='y'")
-    if(yn_dg_hybrid_scf=='y' .and. yn_scalapack/='y') &
-      call sawf_input_fatal("hybrid SCF reference route requires yn_scalapack='y'")
     if(yn_dg_hybrid_continuation_scf=='y' .and. yn_dg_dc_overlapping_wannier/='y') &
       call sawf_input_fatal("DG continuation requires yn_dg_dc_overlapping_wannier='y'")
     if(yn_dg_hybrid_continuation_scf=='y' .and. yn_scalapack/='y') &
@@ -3996,22 +3995,8 @@ contains
       & stop "DC-LCFO local Wannier PW augmentation requires wannier_pw_max >= 0."
     end if
 
-    if(yn_dg_overlapping_wannier_rt=='y')then
-      if(theory/='tddft_pulse'.and.theory/='tddft_response')&
-        stop 'overlapping-Wannier coefficient RT requires TDDFT pulse or response theory.'
-      if(yn_self_checkpoint=='y'.or.checkpoint_interval>=1)&
-        stop 'overlapping-Wannier coefficient RT forbids conventional checkpoint publication.'
-      if(yn_restart=='y')stop 'overlapping-Wannier coefficient RT forbids conventional yn_restart.'
-      if(yn_dc_lcfo=='y'.or.yn_eigenexa=='y')&
-        stop 'overlapping-Wannier coefficient RT forbids LCFO and EigenExa routes.'
-      if(yn_dg_length_gauge/='y')&
-        stop 'overlapping-Wannier coefficient RT currently requires the validated length gauge.'
-      if(nt<1.or.dt<=0d0)stop 'overlapping-Wannier coefficient RT requires positive nt and dt.'
-    endif
-    if(yn_dg_overlapping_wannier_rt_restart=='y'.and.yn_dg_overlapping_wannier_rt/='y')&
-      stop 'overlapping-Wannier RT restart requires its dedicated coefficient RT route.'
-    if(yn_dg_length_gauge=='y' .and. yn_dg_overlapping_wannier_rt/='y'.and.yn_rt_dg_hybrid_continuation/='y') &
-      stop "DG length gauge requires the overlapping-Wannier coefficient RT route."
+    if(yn_dg_length_gauge=='y' .and. yn_rt_dg_hybrid_continuation/='y') &
+      stop "DG length gauge requires yn_rt_dg_hybrid_continuation='y'."
     if(yn_dg_length_gauge=='y' .and. yn_spinorbit=='y') &
       stop "DG length gauge is not connected to the SOI DG-Fragment RT path yet."
     call yn_argument_check(yn_dg_overlapping_wannier_rt)

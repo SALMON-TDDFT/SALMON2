@@ -7,6 +7,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 INPUT = (ROOT / "src/io/inputoutput.f90").read_text(errors="replace").lower()
+assert "if(yn_dg_hybrid_divided_scf=='y'.or.yn_dg_hybrid_continuation_scf=='y')then" not in SOURCE, (
+    "unreachable legacy divided/continuation preparation remains"
+)
+for obsolete_helper in (
+    "form_dg_hybrid_coefficient_actions",
+    "measure_dg_hybrid_operator_covariance",
+    "measure_dg_hybrid_projector_covariance",
+    "evaluate_dg_hybrid_distributed_low_energy_symmetry",
+    "measure_dg_hybrid_core_density_covariance",
+    "ow_hybrid_density_to_dc",
+    "ow_hybrid_density_from_dc",
+):
+    assert obsolete_helper not in SOURCE, f"unused legacy helper remains: {obsolete_helper}"
 assert "run_dg_hybrid_concrete_continuation" not in SOURCE, (
     "unreachable repeated-global-diagonalization driver remains"
 )

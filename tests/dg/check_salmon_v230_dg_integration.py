@@ -190,7 +190,7 @@ def require_task7_entrypoint_contracts():
             "divided GS dispatch is not exactly once")
     require(gs_text.count("call run_dg_hybrid_continuation_ground_state_for_main") == 1,
             "continuation GS dispatch is not exactly once")
-    require(rt_text.count("call run_dg_overlapping_wannier_coefficient_rt") == 1,
+    require(rt_text.count("call run_dg_hybrid_continuation_rt") == 1,
             "coefficient RT dispatch is not exactly once")
     require("384" not in gs_text and "384" not in input_text, "hard-coded 384-state policy is forbidden")
 
@@ -206,12 +206,11 @@ def require_task7_entrypoint_contracts():
 
 def require_task7_old_arm_eigenexa_contract():
     relative = "src/io/inputoutput.f90"
-    message = "bare overlapping-wannier one-shot arm requires a build with eigenexa support"
+    message = "bare overlapping-wannier gs is retired"
     predicate = (
         "if(yn_dg_dc_overlapping_wannier=='y'.and."
         "yn_dg_hybrid_divided_scf/='y'.and."
-        "yn_dg_hybrid_continuation_scf/='y'.and."
-        "yn_dg_hybrid_scf/='y')"
+        "yn_dg_hybrid_continuation_scf/='y')"
     )
     production_off = task7_preprocess(relative, ("USE_MPI", "USE_SCALAPACK"))
     production_on = task7_preprocess(relative, ("USE_MPI", "USE_SCALAPACK", "USE_EIGENEXA"))
@@ -219,8 +218,8 @@ def require_task7_old_arm_eigenexa_contract():
     off_compact = re.sub(r"\s+|&", "", production_off.casefold())
     require(predicate in off_compact, "EigenExa-OFF input validation lacks the exact bare-arm predicate")
     require(message in production_off.casefold(), "EigenExa-OFF input validation lacks its early diagnostic")
-    require(message not in production_on.casefold(), "EigenExa-ON must permit the bare one-shot arm")
-    require(message not in conventional.casefold(), "conventional preprocessing must remain unaffected")
+    require(message in production_on.casefold(), "EigenExa-ON must reject the retired bare arm")
+    require(message in conventional.casefold(), "retired input must be rejected in every build")
 
 
 run_self_tests()
@@ -264,7 +263,7 @@ required = {
         "run_dg_hybrid_divided_ground_state_for_main",
         "dg_fragment_wf_checkpoint_mode",
     ),
-    "src/rt/main_tddft.f90": ("run_dg_overlapping_wannier_coefficient_rt",),
+    "src/rt/main_tddft.f90": ("run_dg_hybrid_continuation_rt",),
 }
 for relative, tokens in required.items():
     require_tokens(relative, tokens)
