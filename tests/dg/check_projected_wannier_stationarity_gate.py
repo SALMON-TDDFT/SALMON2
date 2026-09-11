@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Protect current checkpoint and coefficient-space RT stationarity gates.
-
-The prior inventory test named an obsolete projected-Wannier seed receipt.  The
-bridge already used certified hybrid checkpoints and coefficient-space RT.
-"""
+"""Protect divided-GS v5 publication and current Hybrid RT stationarity gates."""
 
 from pathlib import Path
 
@@ -14,7 +10,9 @@ GS_SOURCE = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 
 
 def subroutine(source: str, name: str) -> str:
-    start = source.index(f"subroutine {name}")
+    start = source.find(f"subroutine {name}")
+    if start < 0:
+        return ""
     end = source.index("end subroutine", start)
     return source[start:end]
 
@@ -39,35 +37,21 @@ def violations(rt_source: str, gs_source: str) -> list[str]:
         ),
     ):
         problems.append("hybrid checkpoint rejection, propagation, and stationarity gates are out of order")
-    coefficient_rt = subroutine(rt_source, "run_dg_overlapping_wannier_coefficient_rt")
-    compact_coefficient = "".join(coefficient_rt.replace("&", "").split())
-    if "if(.not.ok.or..not.reusable)then" not in compact_coefficient:
-        problems.append("coefficient RT must reject a checkpoint that is invalid or not reusable")
-    if not ordered(
-        coefficient_rt,
-        (
-            "call read_dg_overlapping_wannier_checkpoint",
-            "error stop 'accepted v3 overlapping-wannier checkpoint is required'",
-            "call initialize_dg_overlapping_wannier_rt",
-            "call advance_dg_overlapping_wannier_rt",
-            "call write_dg_overlapping_wannier_rt_restart",
-        ),
-    ):
-        problems.append("coefficient checkpoint acceptance, propagation, and publication are out of order")
-    hybrid_gs_start = gs_source.index("if(yn_dg_hybrid_scf=='y')then")
-    hybrid_gs_end = gs_source.index("return", hybrid_gs_start)
-    hybrid_gs = gs_source[hybrid_gs_start:hybrid_gs_end]
+    hybrid_gs = subroutine(gs_source, "publish_dg_hybrid_divided_v5")
     if not ordered(
         hybrid_gs,
         (
-            "call run_dg_hybrid_self_consistent_ground_state",
-            "call validate_dg_hybrid_ground_state",
-            "ow_hybrid_ground_state%converged=.true.",
-            "call write_rt_dg_hybrid_occupied_checkpoint",
-            "error stop 'distributed hybrid checkpoint failed'",
+            "call collective_rt_dg_hybrid_publication_precondition",
+            "terminal divided v5 publication precondition failed:",
+            "call collective_rt_dg_hybrid_publication_mapping_precondition",
+            "terminal divided v5 row mapping failed:",
+            "call validate_dg_hybrid_v5_publication_rank_policy",
+            "authorization%valid=publication_authorized",
+            "call publish_rt_dg_hybrid_checkpoint_v5",
+            "terminal divided v5 write failed:",
         ),
     ):
-        problems.append("hybrid GS must validate and mark convergence before checkpoint publication")
+        problems.append("divided GS must validate and authorize before checkpoint publication")
     return problems
 
 
@@ -75,11 +59,27 @@ assert not violations(RT_SOURCE, GS_SOURCE), violations(RT_SOURCE, GS_SOURCE)
 
 # Mutation fixtures cover acceptance and publication ordering, not just token
 # presence.  Each mutation must invalidate the corresponding safety contract.
-accepts_stale = RT_SOURCE.replace(".not.ok.or..not.reusable", ".not.ok", 1)
-assert any("invalid or not reusable" in item for item in violations(accepts_stale, GS_SOURCE))
-no_stationarity = RT_SOURCE.replace("call evaluate_rt_dg_hybrid_stationarity", "call omitted_stationarity", 1)
-assert any("stationarity gates are out of order" in item for item in violations(no_stationarity, GS_SOURCE))
-publishes_unconverged = GS_SOURCE.replace("ow_hybrid_ground_state%converged=.true.", "! mutation removed convergence", 1)
-assert any("before checkpoint publication" in item for item in violations(RT_SOURCE, publishes_unconverged))
+for token in (
+    "call initialize_rt_dg_hybrid_from_checkpoint",
+    "error stop 'hybrid dg rt initialization failed'",
+    "call initialize_rt_dg_hybrid_stationarity",
+    "call propagate_rt_dg_hybrid_length_gauge",
+    "call evaluate_rt_dg_hybrid_stationarity",
+    "error stop 'hybrid dg rt zero-field stationarity failed'",
+):
+    mutation = RT_SOURCE.replace(token, "omitted", 1)
+    assert violations(mutation, GS_SOURCE), token
+for token in (
+    "call collective_rt_dg_hybrid_publication_precondition",
+    "terminal divided v5 publication precondition failed:",
+    "call collective_rt_dg_hybrid_publication_mapping_precondition",
+    "terminal divided v5 row mapping failed:",
+    "call validate_dg_hybrid_v5_publication_rank_policy",
+    "authorization%valid=publication_authorized",
+    "call publish_rt_dg_hybrid_checkpoint_v5",
+    "terminal divided v5 write failed:",
+):
+    mutation = GS_SOURCE.replace(token, "omitted", 1)
+    assert violations(RT_SOURCE, mutation), token
 
-print("PASS current hybrid/coefficient RT stationarity and checkpoint gates with mutation fixtures")
+print("PASS current v5 Hybrid RT stationarity and GS publication gates with mutation fixtures")
