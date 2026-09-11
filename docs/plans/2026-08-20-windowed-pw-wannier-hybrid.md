@@ -1,5 +1,8 @@
 # Windowed-PW/Wannier Hybrid Implementation Plan
 
+> Historical/removed references below identify the superseded monolithic WPW
+> implementation only; they are not instructions to restore that route.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a symmetry-complete windowed-PW complement to retained Wanniers, retain a sparse PW metric, and propagate the hybrid basis in the length gauge without any global `N_W x N_P` projection matrix.

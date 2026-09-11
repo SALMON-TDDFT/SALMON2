@@ -7,6 +7,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 INPUT = (ROOT / "src/io/inputoutput.f90").read_text(errors="replace").lower()
+assert "run_dg_hybrid_concrete_continuation" not in SOURCE, (
+    "unreachable repeated-global-diagonalization driver remains"
+)
 
 
 def subroutine(name: str) -> str:

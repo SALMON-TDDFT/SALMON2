@@ -145,6 +145,14 @@ REQUIRED_SOURCES = {
     "src/rt/dg/rt_dg_overlapping_wannier.f90",
 }
 
+# These test names contain WPW but target the retained Hybrid implementation,
+# not the removed monolithic dg_wpw production route.
+RETAINED_HYBRID_ASSETS = {
+    "tests/dg/check_wpw_lcfo_implementation_note.py",
+    "tests/dg/run_dg_hybrid_wpw_projection_tile_mpi.py",
+    "tests/dg/test_dg_hybrid_wpw_projection_tile_mpi.f90",
+}
+
 REQUIRED_INPUTS = {
     "yn_dg_dc_overlapping_wannier",
     "yn_dg_length_gauge",
@@ -223,6 +231,8 @@ def main() -> int:
     global_source = (ROOT / "src/io/salmon_global.f90").read_text().lower()
     input_source = (ROOT / "src/io/inputoutput.f90").read_text().lower()
     gs_dispatch_source = (ROOT / "src/gs/main_dft.f90").read_text().lower()
+    if "run_dg_hybrid_concrete_continuation" in gs_dispatch_source:
+        failures.append("superseded repeated-global-diagonalization driver remains")
     rt_dispatch_source = (ROOT / "src/rt/main_tddft.f90").read_text().lower()
 
     for required_input in sorted(REQUIRED_INPUTS):
@@ -265,7 +275,7 @@ def main() -> int:
             failures.append(f"forbidden source file: {rel}")
         if any(rel.startswith(prefix) for prefix in FORBIDDEN_SOURCE_PREFIXES):
             failures.append(f"forbidden source prefix: {rel}")
-        if any(fnmatch.fnmatch(rel, pattern) for pattern in FORBIDDEN_ASSET_GLOBS):
+        if rel not in RETAINED_HYBRID_ASSETS and any(fnmatch.fnmatch(rel, pattern) for pattern in FORBIDDEN_ASSET_GLOBS):
             failures.append(f"forbidden focused asset: {rel}")
 
     for path, text in texts:

@@ -18,8 +18,8 @@ def routine(text: str, name: str) -> str:
     return text[start:end]
 
 
-route = routine(SOURCE, "run_dg_overlapping_wannier_ground_state_for_main")
-continuation = routine(SOURCE, "run_dg_hybrid_concrete_continuation")
+route = routine(SOURCE, "run_dg_hybrid_continuation_ground_state_for_main")
+continuation = routine(SOURCE, "run_dg_hybrid_divided_ground_state_for_main")
 publisher = routine(SOURCE, "publish_dg_hybrid_divided_v5")
 route_c = compact(route)
 continuation_c = compact(continuation)
@@ -43,42 +43,17 @@ for old in (
     else:
         raise AssertionError(f"publication-rank policy mutation survived: {old}")
 
-# The formal continuation switch must reach the concrete driver and terminate
-# there, before the non-continuation truncated-occupation route is entered.
-branch = route_c.index("if(yn_dg_hybrid_continuation_scf=='y')then")
-call = route_c.index("callrun_dg_hybrid_concrete_continuation", branch)
-ret = route_c.index("return", call)
-legacy_occupation = route_c.index("allocate(occupations(nstate))", ret)
-assert branch < call < ret < legacy_occupation
-
-# A terminal accepted state is published exactly once by the same distributed
-# v5 publisher as the divided route. Publication follows final refresh,
-# final row-state validation and the authoritative final operator fingerprint.
+# The compatibility selector enters the same local-plus-terminal production driver.
+assert "callrun_dg_hybrid_divided_ground_state_for_main" in route_c
+assert "run_dg_hybrid_concrete_continuation" not in SOURCE.lower()
 assert continuation_c.count("callpublish_dg_hybrid_divided_v5(") == 1
 publish = continuation_c.index("callpublish_dg_hybrid_divided_v5(")
-for token in (
-    "if(.not.final_refresh_performed)errorstop",
-    "callow_fingerprint_distributed_matrix",
-    "callvalidate_dg_hybrid_ground_state",
-    "callrecord_dg_hybrid_spectral_certification",
-    "callrecord_dg_hybrid_certified_rt_basis",
-    "callauthorize_dg_hybrid_v5_publication",
-):
-    assert continuation_c.index(compact(token)) < publish, token
-authorize = continuation_c.index("callauthorize_dg_hybrid_v5_publication")
-assert continuation_c.index("callrecord_dg_hybrid_spectral_certification") < authorize < publish
-assert continuation_c.index("callrecord_dg_hybrid_certified_rt_basis") < authorize < publish
-assert "spectral_certification%certified_rank,candidate_acceptance%publication_authorized" in continuation_c[publish:]
-assert "callsolve_dg_hybrid_generalized_complete_once" not in continuation_c[publish:]
+for token in ("enddoterminal_lcfo_refinement", "callwrite_rt_dg_hybrid_occupied_checkpoint",
+              "callobserve_dg_hybrid_terminal_refinement"):
+    assert continuation_c.index(token) < publish
+assert "terminal_refinement=terminal_refinement_receipt" in continuation_c[publish:]
+assert "callsolve_dg_hybrid_generalized_once_and_publish" not in continuation_c[publish:]
 assert "calldg_dc_update_potential_from_distributed_density" not in continuation_c[publish:]
-assert "callderive_dg_hybrid_occupation_policy" not in continuation_c[publish:]
-
-# Early lambda-zero failure may not roll back an uninitialized controller.
-guard = compact("if(.not.continuation_controller%valid.or..not.continuation_controller%trial_active)then")
-guard_at = continuation_c.index(guard)
-reject_at = continuation_c.index("callreject_dg_hybrid_trial", guard_at)
-assert guard_at < reject_at
-assert "dgcontinuationinitialfixedpointfailedbeforerollback" in continuation_c[guard_at:reject_at]
 
 # v5 preserves localized construction rows and occupied LCFO amplitudes; it
 # never rotates them into replicated spectral basis state.
@@ -116,13 +91,7 @@ for forbidden in (
 ):
     assert forbidden not in checkpoint_c
 
-# Mutation receipts: removing the reachable v5 call or moving the rollback
-# call ahead of its guard invalidates the checked invariants.
+# Removing the reachable publication must invalidate the publication count.
 mutated = continuation_c.replace("callpublish_dg_hybrid_divided_v5(", "callremoved_v5(", 1)
 assert mutated.count("callpublish_dg_hybrid_divided_v5(") == 0
-mutated = continuation_c.replace("callauthorize_dg_hybrid_v5_publication", "callremoved_authorization", 1)
-assert "callauthorize_dg_hybrid_v5_publication" not in mutated
-mutated = continuation_c[:guard_at] + "callreject_dg_hybrid_trial" + continuation_c[guard_at:]
-assert mutated.index("callreject_dg_hybrid_trial", guard_at) < mutated.index(guard, guard_at)
-
-print("PASS formal Hybrid continuation reaches distributed v5 publication")
+print("PASS Hybrid compatibility selector reaches terminal distributed v5 publication")

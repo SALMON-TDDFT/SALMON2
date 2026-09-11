@@ -16,29 +16,9 @@ assert "use dg_hybrid_continuation_scf" not in source, (
 assert "run_dg_hybrid_continuation_scf_fixture" not in source, (
     "production still calls the obsolete fixture-only continuation entry point"
 )
-driver = source.split("subroutine run_dg_hybrid_concrete_continuation", 1)[1].split(
-    "end subroutine run_dg_hybrid_concrete_continuation", 1
-)[0]
-assert "real(8),parameter::density_damping" not in driver
-assert "continuation_controller%controls%density_damping" in driver
-assert "assemble_dg_hybrid_local_potential_rows" in driver
-assert "schedule_dg_hybrid_candidate_checks(stage_schedule,cheap_candidate,run_expensive)" in driver
-cheap_gate = driver.split("if(run_expensive)then", 1)[1].split(
-    "stage_converged=cheap_candidate", 1
-)[0]
-for expensive in (
-    "evaluate_dg_hybrid_real_space_residual",
-    "measure_dg_hybrid_operator_covariance",
-    "measure_dg_hybrid_projector_covariance",
-    "ow_distributed_hermiticity",
-):
-    assert expensive in cheap_gate, expensive + " is not gated by the cheap candidate boundary"
-assert "allocate(density4" not in driver
-assert "dg_dc_update_potential_from_distributed_density" in driver
-assert driver.index("allocate(full_action_values") < driver.index("stage_pass: do")
-assert "final_refresh_performed=.true.;stage_converged=.false.;cycle" not in driver
-for token in ("begin_dg_hybrid_stage_solve", "complete_dg_hybrid_stage_solve", "refresh_scheduled"):
-    assert token in driver
+# Production no longer uses the global continuation driver. Retain the
+# standalone schedule tests while its shared controller module is supported.
+assert "run_dg_hybrid_concrete_continuation" not in source
 
 with tempfile.TemporaryDirectory(prefix="dg-continuation-schedule-") as name:
     build = Path(name)

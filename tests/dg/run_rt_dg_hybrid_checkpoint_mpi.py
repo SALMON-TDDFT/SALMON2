@@ -7,8 +7,8 @@ root=Path(__file__).resolve().parents[2]
 source_path=root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"
 source=source_path.read_text().lower()
 main=(root/"src/gs/main_dft.f90").read_text().lower()
-continuation=main.split("subroutine run_dg_hybrid_concrete_continuation",1)[1].split(
-    "end subroutine run_dg_hybrid_concrete_continuation",1)[0]
+continuation=main.split("subroutine run_dg_hybrid_divided_ground_state_for_main",1)[1].split(
+    "end subroutine run_dg_hybrid_divided_ground_state_for_main",1)[0]
 publisher=main.split("subroutine publish_dg_hybrid_divided_v5",1)[1].split(
     "end subroutine publish_dg_hybrid_divided_v5",1)[0]
 
@@ -20,7 +20,7 @@ for forbidden in (
 assert "call publish_dg_hybrid_divided_v5" in continuation
 assert "collect_dg_hybrid_full_rows" not in continuation
 assert "write_rt_dg_hybrid_ground_state_checkpoint" not in continuation
-assert continuation.index("if(.not.final_refresh_performed)") < continuation.index(
+assert continuation.index("enddo terminal_lcfo_refinement") < continuation.index(
     "call publish_dg_hybrid_divided_v5")
 assert continuation.count("call publish_dg_hybrid_divided_v5")==1
 assert publisher.count("call publish_rt_dg_hybrid_checkpoint_v5")==1

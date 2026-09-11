@@ -268,12 +268,8 @@ nonlocal_builder = main_dft_source.lower().split(
 assert "complex(8),intent(out)::nonlocal_action(:,:)" in nonlocal_builder
 assert "any(shape(nonlocal_action)/=[global_count,size(ow_core_ids)])" in nonlocal_builder
 assert "allocate(dg_hybrid_interior_nonlocal_action(size(divided_effective_ids),size(ow_core_ids)))" in main_dft_source.lower()
-continuation_body = main_dft_source.lower().split(
-    "subroutine run_dg_hybrid_concrete_continuation", 1
-)[1].split("end subroutine run_dg_hybrid_concrete_continuation", 1)[0]
-rollback_guard = "if(.not.continuation_controller%valid.or..not.continuation_controller%trial_active)then"
-assert rollback_guard in continuation_body
-assert continuation_body.index(rollback_guard) < continuation_body.index("call reject_dg_hybrid_trial")
+assert "run_dg_hybrid_concrete_continuation" not in main_dft_source.lower()
+assert "enddo terminal_lcfo_refinement" in divided_route.lower()
 assert "complete_action_strength(q)*support_projector_values(position)*complete_overlap(basis,q)" in nonlocal_builder
 assert divided_route.lower().count("call publish_dg_hybrid_divided_v5") == 1
 assert divided_publisher.lower().count("call publish_rt_dg_hybrid_checkpoint_v5") == 1

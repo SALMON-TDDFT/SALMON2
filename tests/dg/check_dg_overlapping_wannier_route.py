@@ -885,10 +885,10 @@ assert re.search(
 assert re.search(
     r"subroutine\s+dc_lcfo\s*\(.*?retained_count\s*,\s*"
     r"retained_box_contribution\s*,\s*retained_occupations\s*,\s*write_files\s*,\s*&?\s*"
-    r"retained_box_count\s*,\s*&?\s*retained_eigenvalues\s*\)",
+    r"retained_box_count\s*,\s*&?\s*retained_eigenvalues\s*,\s*retained_core_density\s*\)",
     lcfo_source,
     re.I | re.S,
-), "optional LCFO spectrum output must follow the appended buffer-row count"
+), "LCFO spectrum/core-density outputs must preserve preceding optional argument order"
 assert re.search(
     r"translation_lcfo_values\s*\(\s*io\s*\)\s*=\s*lcfo_retained_eigenvalues\s*\(\s*io\s*\)",
     adapter_body,
