@@ -232,17 +232,39 @@ conventional DC+LCFO reference, reusable only with the same MPI size and exact
 rank-fragment mapping, and report three independently evaluated weighted norms:
 
 1. ordinary-DC baseline correction, `||rho_DC+LCFO-rho_DC||`;
-2. DG incremental error, `||rho_DG+LCFO-rho_DC+LCFO||`;
+2. DG incremental difference, `||rho_DG+LCFO-rho_DC+LCFO||`;
 3. total density displacement, `||rho_DG+LCFO-rho_DC||`.
 
-Apply the same separation to total energies.  Do not infer the DG error by
+Both LCFO snapshots must use the same frozen potential `H[rho_DC]`, before
+any terminal density feedback. Match grid and point ordering, pseudopotentials,
+electron count, 300 K occupations, and a converged retained-state window. Use
+one common denominator `||rho_DC||` for all relative density norms. Report the
+subsequent relaxed-DG minus frozen-DG density separately; it must not replace
+the frozen-DG snapshot in item 2. The conventional LCFO correction is not the
+absolute DC error, and item 2 includes basis truncation as well as DG operator
+differences. Absolute accuracy needs an independently converged full-system
+reference; it cannot be certified from these three snapshots alone.
+
+Apply the same separation to consistently evaluated total energies (not merely
+band-energy sums). Do not infer the DG error by
 subtracting two scalar error estimates because cancellation can hide a spatial
 error.  Terminal refinement stopping continues to use the fixed-point density
 residual and the inter-iteration energy change; the production accuracy gate
-uses the DG incremental error.  A legacy seed without the DC+LCFO reference may
+uses the matched DG incremental difference as a relative regression measure,
+not a certificate of absolute physical accuracy. A legacy seed without the DC+LCFO reference may
 run, but must label the decomposition unavailable and cannot pass the formal
 DG-accuracy gate.  Generate the reference once from the reusable DC result and
 never rerun the ordinary DC SCF merely to obtain this diagnostic.
+
+Checkpoint (2026-09-11): the read-only numerical kernel
+`tests/dg/density_error_decomposition.py` and its test now cover spatial
+cancellation, a common weighted normalization, grid subdivision invariance,
+optional relaxation, and invalid inputs. The missing-module test failed first;
+the implemented test passes. Production snapshot export and a standalone
+read-only analyzer are now connected and exercised on eight-rank Si8 (see
+`2026-09-11-density-decomposition-results.md`). Provenance-bound reference
+cache reuse and integration into the formal accuracy gate remain unfinished. Existing terminal
+SCF density changes must not be relabeled as measured DG increments.
 
 **Files:**
 

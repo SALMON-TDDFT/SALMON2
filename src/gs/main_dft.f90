@@ -1298,6 +1298,12 @@ contains
   end subroutine run_dg_hybrid_continuation_ground_state_for_main
 
   subroutine run_dg_hybrid_divided_ground_state_for_main
+    character(1024)::diagnostic_prefix,diagnostic_root_prefix
+    integer::diagnostic_status,diagnostic_length
+    logical::density_diagnostic
+    complex(8),allocatable::diagnostic_box(:,:)
+    real(8),allocatable::diagnostic_core(:,:,:),diagnostic_occupations(:),diagnostic_conventional(:),&
+      diagnostic_frozen_density(:),diagnostic_frozen_potential(:)
     integer(int64),parameter::dg_hybrid_max_interface_points=1000000_int64
     type(s_dg_hybrid_fragment_wannier_cache)::fragment_cache
     type(s_dg_hybrid_core_selection)::core_selection
@@ -1820,6 +1826,36 @@ contains
     enddo
     call update_dg_hybrid_divided_potential(initial_density,ok)
     if(.not.ok)error stop 'fixed ordinary-DC density potential update failed'
+    diagnostic_prefix=''
+    call get_environment_variable('SALMON_DG_DENSITY_DIAGNOSTIC_PREFIX',diagnostic_prefix,&
+      length=diagnostic_length,status=diagnostic_status)
+    call comm_logical_and(diagnostic_status==0.or.diagnostic_status==1,ok,dc%icomm_tot)
+    if(.not.ok)error stop 'density diagnostic environment is invalid or truncated'
+    diagnostic_root_prefix=diagnostic_prefix
+    call comm_bcast(diagnostic_root_prefix,dc%icomm_tot,0)
+    call comm_logical_and(diagnostic_prefix==diagnostic_root_prefix,ok,dc%icomm_tot)
+    if(.not.ok)error stop 'density diagnostic prefix differs across ranks'
+    density_diagnostic=diagnostic_status==0.and.diagnostic_length>0
+    call comm_logical_and(density_diagnostic,collective_ok,dc%icomm_tot)
+    call comm_logical_and(.not.density_diagnostic,ok,dc%icomm_tot)
+    if(.not.collective_ok.and..not.ok)error stop 'density diagnostic must be enabled on every rank'
+    if(density_diagnostic)then
+      ! Same V_local as the first DG solve; no density feedback in DC-LCFO.
+      call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
+        retained_count=dc%nstate_tot,retained_box_contribution=diagnostic_box,&
+        retained_occupations=diagnostic_occupations,write_files=.false.,&
+        retained_core_density=diagnostic_core)
+      allocate(diagnostic_conventional(size(core_ids)),diagnostic_frozen_potential(size(core_ids)))
+      do p=1,size(core_ids)
+        q=core_selection%core_row_slots(p)-1
+        index3(1)=modulo(q,raw_grid(1))+1;q=q/raw_grid(1)
+        index3(2)=modulo(q,raw_grid(2))+1;index3(3)=q/raw_grid(2)+1
+        diagnostic_conventional(p)=diagnostic_core(index3(1),index3(2),index3(3))
+      enddo
+      deallocate(diagnostic_core,diagnostic_box,diagnostic_occupations)
+      call extract_dg_hybrid_core_local_potential(core_ids,diagnostic_frozen_potential,ok)
+      if(.not.ok)error stop 'density diagnostic fixed potential extraction failed'
+    endif
     call initialize_dg_hybrid_interface_continuation(dc%icomm_tot,projected_basis%generation,&
       bounded_mapping_fingerprint,mixing%mixrate,interface_continuation,ok,message,full_from_start=.true.)
     if(.not.ok)then
@@ -1991,6 +2027,11 @@ terminal_lcfo_refinement: do
       call reconstruct_dg_hybrid_terminal_density(projected_basis%global_ids,interior_values,&
         ow_hybrid_ground_state,terminal_density_output,ok,message)
       if(.not.ok)error stop 'terminal divided Hybrid density reconstruction failed'
+      if(density_diagnostic.and..not.allocated(diagnostic_frozen_density))then
+        if(any(local_potential/=diagnostic_frozen_potential))&
+          error stop 'density diagnostic potential changed before first DG solve'
+        allocate(diagnostic_frozen_density,source=terminal_density_output)
+      endif
       call measure_dg_hybrid_terminal_density_change(dc%icomm_tot,core_weights,terminal_density_input,&
         terminal_density_output,terminal_density_change,ok,message)
       if(.not.ok)error stop 'terminal divided Hybrid density-change measurement failed'
@@ -2041,6 +2082,9 @@ terminal_lcfo_refinement: do
         final_operator_fingerprint,ok)
       if(.not.ok)error stop 'terminal divided Hybrid refined operator fingerprint failed'
     enddo terminal_lcfo_refinement
+    if(density_diagnostic)call write_dg_density_diagnostic(diagnostic_prefix,core_ids,core_weights,&
+      initial_density,diagnostic_conventional,diagnostic_frozen_density,terminal_density_output,&
+      diagnostic_frozen_potential)
     if(.not.terminal_refinement_receipt%converged.and.&
        .not.terminal_refinement_receipt%publish_last_valid)&
       error stop 'terminal divided Hybrid refinement ended without a publishable state'
@@ -2090,6 +2134,39 @@ terminal_lcfo_refinement: do
       error stop 'terminal divided Hybrid v5 publication failed'
     endif
   end subroutine run_dg_hybrid_divided_ground_state_for_main
+
+  subroutine write_dg_density_diagnostic(prefix,ids,weights,seed,conventional,frozen,relaxed,potential)
+    character(*),intent(in)::prefix
+    integer(8),intent(in)::ids(:)
+    real(8),intent(in)::weights(:),seed(:),conventional(:),frozen(:),relaxed(:),potential(:)
+    integer::rank,nproc,ierr,unit,status,close_status,p
+    logical::ok,all_ok
+    character(1200)::filename
+    call MPI_Comm_rank(dc%icomm_tot,rank,ierr)
+    call MPI_Comm_size(dc%icomm_tot,nproc,ierr)
+    write(filename,'(a,a,i8.8)')trim(prefix),'.rank-',rank
+    ! Diagnostic-only export, not a restart cache. Never overwrite evidence.
+    open(newunit=unit,file=trim(filename),status='new',action='write',iostat=status)
+    ok=status==0
+    if(ok)then
+      write(unit,'(a)',iostat=status)'SALMON_DG_DENSITY_DIAGNOSTIC_V1'
+      if(status==0)write(unit,*,iostat=status)nproc,rank,dc%i_frag,size(ids),product(dc%lg_tot%num)
+      if(status==0)write(unit,*,iostat=status)dg_dc_seed_publication_id,&
+        dg_dc_seed_contract%ownership_fingerprint,dg_dc_seed_contract%immutable_fingerprint
+      if(status==0)write(unit,*,iostat=status)dc%elec_num_tot,temperature
+      do p=1,size(ids)
+        if(status/=0)exit
+        write(unit,'(i0,6(1x,es26.17e3))',iostat=status)ids(p),weights(p),seed(p),conventional(p),&
+          frozen(p),relaxed(p),potential(p)
+      enddo
+      if(status==0)write(unit,'(a)',iostat=status)'END_DENSITY_DIAGNOSTIC'
+      close(unit,iostat=close_status)
+      ok=status==0.and.close_status==0
+    endif
+    call comm_logical_and(ok,all_ok,dc%icomm_tot)
+    if(.not.all_ok)error stop 'density diagnostic export failed; partial files are not reusable'
+    if(rank==0)write(*,'(a)')'[DG-DENSITY-DIAGNOSTIC] exported; absolute DC error unavailable'
+  end subroutine write_dg_density_diagnostic
 
   subroutine reconstruct_dg_hybrid_terminal_density(row_ids,basis_values,state,density,ok,message)
     integer(8),intent(in)::row_ids(:)

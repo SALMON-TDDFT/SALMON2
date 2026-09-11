@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Si64 divided WF+PW SCF followed by exactly one distributed LCFO solve."""
+"""Run Si64 divided WF+PW local solve followed by bounded terminal LCFO refinement."""
 
 from __future__ import annotations
 
@@ -182,10 +182,11 @@ def main() -> int:
 
     text = log_path.read_text(errors="replace")
     divided = re.findall(
-        r"\[OW-GS\] divided WF\+PW SCF converged iterations=(\d+)\s+density=\s*([0-9Ee+\-.]+)", text
+        r"\[OW-GS\] fixed-density DG continuation points=(\d+)\s+residual=\s*([0-9Ee+\-.]+)\s+"
+        r"electron_defect=\s*([0-9Ee+\-.]+)", text
     )
     final = re.findall(
-        r"\[OW-GS\] divided WF\+PW LCFO solved once\s+residual=\s*([0-9Ee+\-.]+)\s+"
+        r"\[OW-GS\] divided WF\+PW terminal LCFO total_solve_count=(\d+)\s+residual=\s*([0-9Ee+\-.]+)\s+"
         r"orthogonality=\s*([0-9Ee+\-.]+)\s+projector=\s*([0-9Ee+\-.]+)", text
     )
     schwarz = re.findall(
@@ -206,8 +207,8 @@ def main() -> int:
     has_rollback_or_fallback = (
         re.search(r"\b(?:rolled_back|rollback|fallback)\b", text, re.IGNORECASE) is not None
     )
-    scf_log_position = text.rfind("[OW-GS] divided WF+PW SCF converged")
-    lcfo_log_position = text.find("[OW-GS] divided WF+PW LCFO solved once")
+    scf_log_position = text.rfind("[OW-GS] fixed-density DG continuation points=")
+    lcfo_log_position = text.find("[OW-GS] divided WF+PW terminal LCFO total_solve_count=")
     post_lcfo_text = text[lcfo_log_position:] if lcfo_log_position >= 0 else ""
     evidence = {
         "return_code": return_code,
@@ -223,7 +224,8 @@ def main() -> int:
         "schwarz_epochs": schwarz,
         "density_convergence_history": convergence_history,
         "full_neighbor_dg_from_epoch_1": bool(
-            schwarz and int(schwarz[0][0]) == 1 and int(schwarz[0][1]) > 0
+            len(schwarz) == 1 and int(schwarz[0][0]) == 1 and int(schwarz[0][1]) > 0
+            and float(schwarz[0][6]) == 300.0
         ),
         "cg_steps_within_1_to_3": bool(cg_steps) and all(1 <= step <= 3 for step in cg_steps),
         "neighbor_exchange_minimum": min(neighbor_exchanges) if neighbor_exchanges else None,
@@ -232,7 +234,9 @@ def main() -> int:
         "repeated_full_diagonalization": len(final) > 1,
         "divided_scf": divided[-1] if divided else None,
         "final_lcfo": final[-1] if final else None,
-        "final_lcfo_count": text.count("[OW-GS] divided WF+PW LCFO solved once"),
+        "final_lcfo_count": int(final[-1][0]) if final else 0,
+        "refinement_companion_manifest": (
+            result_dir / "hybrid_dg_ground_state.chk.refinement.manifest").is_file(),
         "lcfo_after_divided_scf": 0 <= scf_log_position < lcfo_log_position,
         "post_lcfo_density_updates": post_lcfo_text.count("[DG-HYBRID-DIVIDED-SCF] iteration="),
         "occupied_checkpoint": (result_dir / "overlapping_wannier_occupied.chk").is_file(),
@@ -249,20 +253,23 @@ def main() -> int:
         or evidence["post_lcfo_density_updates"] != 0
     ):
         raise RuntimeError("Si64 Schwarz invariants failed; see divided_lcfo_evidence.json")
-    if divided and (len(final) != 1 or not evidence["lcfo_after_divided_scf"]):
-        raise RuntimeError("converged divided SCF did not perform exactly one terminal LCFO solve")
+    if divided and (len(final) != 1 or not 1 <= evidence["final_lcfo_count"] <= 4
+                    or not evidence["lcfo_after_divided_scf"]):
+        raise RuntimeError("fixed-density local solve violated the bounded terminal LCFO contract")
     if return_code != 0:
         raise RuntimeError(f"Si64 divided LCFO failed with exit {return_code}; see {log_path}")
     if (
         not divided
         or len(final) != 1
-        or evidence["final_lcfo_count"] != 1
+        or not 1 <= evidence["final_lcfo_count"] <= 4
         or not evidence["lcfo_after_divided_scf"]
         or evidence["post_lcfo_density_updates"] != 0
     ):
-        raise RuntimeError("Si64 run did not complete one divided SCF followed by exactly one LCFO solve")
+        raise RuntimeError("Si64 run did not complete one local solve followed by bounded terminal LCFO")
     if not evidence["occupied_checkpoint"]:
         raise RuntimeError("Si64 divided LCFO checkpoint was not published")
+    if not evidence["refinement_companion_manifest"]:
+        raise RuntimeError("Si64 terminal refinement companion was not published")
     print(result_dir)
     return 0
 

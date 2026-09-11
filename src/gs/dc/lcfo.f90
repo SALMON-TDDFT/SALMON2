@@ -37,7 +37,7 @@ contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc,&
       retained_count,retained_box_contribution,retained_occupations,write_files,retained_box_count,&
-      retained_eigenvalues)
+      retained_eigenvalues,retained_core_density)
     use communication, only: comm_summation,comm_bcast
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use salmon_global, only: yn_dc_lcfo_diag, lcfo_eigensolver, temperature
@@ -58,6 +58,7 @@ contains
     complex(8), allocatable, intent(out), optional :: retained_box_contribution(:,:)
     real(8), allocatable, intent(out), optional :: retained_occupations(:)
     real(8), allocatable, intent(out), optional :: retained_eigenvalues(:)
+    real(8), allocatable, intent(out), optional :: retained_core_density(:,:,:)
     logical, intent(in), optional :: write_files
     integer, intent(in), optional :: retained_box_count
     !
@@ -93,6 +94,8 @@ contains
       error stop 'DC-LCFO: retained buffer count requires retained outputs'
     if(present(retained_eigenvalues).and..not.present(retained_count))&
       error stop 'DC-LCFO: retained eigenvalues require retained count'
+    if(present(retained_core_density).and..not.present(retained_count))&
+      error stop 'DC-LCFO: core density requires retained occupations'
     if(present(retained_count))then
       if(retained_count<1) &
         error stop 'DC-LCFO: invalid retained contribution count'
@@ -148,6 +151,7 @@ contains
         error stop 'DC-LCFO: retained eigenvalues are not finite'
     endif
     if(present(retained_box_contribution)) call build_retained_box_contribution
+    if(present(retained_core_density)) call build_retained_core_density
     if(emit_files) call output
 
     if(allocated(coef_wf)) deallocate(coef_wf)
@@ -701,6 +705,28 @@ contains
           1d3*epsilon(1d0)*max(1d0,electron_count)) &
         error stop 'DC-LCFO: retained occupations do not conserve electron count'
     end subroutine build_retained_occupations
+
+    subroutine build_retained_core_density
+      ! Reconstruct the actual core-supported LCFO state, not the buffered
+      ! Wannier-localization extension. Each spatial core is owned once.
+      integer :: extent(3),istate,ibasis
+      real(8),allocatable :: orbital(:,:,:)
+      call get_fragment_domain(dc,dc%i_frag,extent)
+      allocate(retained_core_density(extent(1),extent(2),extent(3)),&
+        orbital(extent(1),extent(2),extent(3)))
+      retained_core_density=0d0
+      if(dc%id_frag==0)then
+        do istate=1,retained_count
+          orbital=0d0
+          do ibasis=1,n_basis(dc%i_frag,1)
+            orbital=orbital+f_basis(:,:,:,1,ibasis)*coef_wf(ibasis,istate,1)
+          enddo
+          retained_core_density=retained_core_density+retained_occupations(istate)*orbital**2
+        enddo
+      endif
+      call comm_bcast(retained_core_density,dc%icomm_frag,0)
+      if(any(.not.ieee_is_finite(retained_core_density)))error stop 'DC-LCFO: nonfinite core density'
+    end subroutine build_retained_core_density
 
     subroutine build_retained_box_contribution
       implicit none

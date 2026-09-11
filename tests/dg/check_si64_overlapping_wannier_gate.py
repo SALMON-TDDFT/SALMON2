@@ -122,6 +122,20 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
+def validate_optional_refinement_companion(row: Path) -> None:
+    """Legacy evidence has no companion; new v5 evidence must have a valid v1 header."""
+    manifest = row / "hybrid_dg_ground_state.chk.refinement.manifest"
+    if not manifest.exists():
+        return
+    payload = manifest.read_bytes()
+    if len(payload) < 40 or payload[:32].rstrip(b" \x00") != b"SALMON_DG_REFINEMENT_MANIFEST_V1":
+        fail(f"{row.name}: malformed optional terminal refinement companion")
+    version = int.from_bytes(payload[32:36],sys.byteorder,signed=True)
+    mpi_ranks = int.from_bytes(payload[36:40],sys.byteorder,signed=True)
+    if version != 1 or mpi_ranks != 8:
+        fail(f"{row.name}: incompatible terminal refinement companion identity")
+
+
 def parse_evidence(log_path: Path) -> tuple[dict[str, float], dict[str, int], dict[str, str]]:
     if not log_path.is_file():
         fail(f"missing raw log: {log_path}")
@@ -176,6 +190,7 @@ def validate_fixed_decomposition(variables: str, context: str) -> None:
 def validate_row(root: Path, decomposition: str, box_profile: str, window: str) -> dict[str, float]:
     row_name = f"decomp-{decomposition}_box-{box_profile}_window-{window}"
     row = root / row_name
+    validate_optional_refinement_companion(row)
     metrics, integers, raw = parse_evidence(row / "run.log")
     variables = (row / "variables.log").read_text(errors="replace")
     validate_fixed_decomposition(variables, row_name)

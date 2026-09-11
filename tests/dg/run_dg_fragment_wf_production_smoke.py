@@ -163,7 +163,7 @@ def one_match(pattern: str, text: str, label: str) -> re.Match[str]:
 
 
 def continuation_receipts(text: str, case: str) -> list[dict[str, int | float | str]]:
-    """Parse and validate the actual six DG continuation identity receipts."""
+    """Parse and validate the full-DG-from-first-step identity receipt."""
     pattern = re.compile(
         rf"\[DG-HYBRID-CONTINUATION\]\s+lambda=\s*({FLOAT_TOKEN})\s+"
         rf"diagnostic_state_lambda=\s*({FLOAT_TOKEN})\s+accepted_cg_steps=(\d+)\s+"
@@ -197,8 +197,8 @@ def continuation_receipts(text: str, case: str) -> list[dict[str, int | float | 
         "continuation_fingerprint": int(row.group(11)),
     } for row in pattern.finditer(text)]
     valid_schedule = (
-        len(receipts) == 6
-        and all(math.isclose(item["lambda"], 0.2 * index, rel_tol=0.0, abs_tol=1.0e-14)
+        len(receipts) == 1
+        and all(math.isclose(item["lambda"], 1.0, rel_tol=0.0, abs_tol=1.0e-14)
                 and math.isclose(item["diagnostic_state_lambda"], item["lambda"],
                                  rel_tol=0.0, abs_tol=1.0e-14)
                 for index, item in enumerate(receipts))
@@ -208,7 +208,7 @@ def continuation_receipts(text: str, case: str) -> list[dict[str, int | float | 
                 and item["continuation_fingerprint"] != 0 for item in receipts)
     )
     if not valid_schedule:
-        raise RuntimeError(f"{case} did not complete the exact six-record DG continuation contract")
+        raise RuntimeError(f"{case} did not apply the full DG interface in one local stage")
     return receipts
 
 
@@ -223,6 +223,57 @@ def wannier90_fragment_ids(run_dir: Path) -> list[int]:
     if len(fragment_ids) != len(set(fragment_ids)):
         raise RuntimeError("duplicate Wannier90 fragment output")
     return sorted(fragment_ids)
+
+
+def validate_refinement_companion(run_dir: Path, solve_count: int, final_row: dict) -> dict:
+    """Match the authenticated companion metadata to v5 and the terminal log."""
+    prefix = run_dir / "hybrid_dg_ground_state.chk.refinement"
+    manifest = Path(str(prefix) + ".manifest").read_bytes()
+    header_format = "=32siiqq4Q"
+    header_size = struct.calcsize(header_format)
+    if len(manifest) < header_size:
+        raise RuntimeError("truncated refinement companion manifest")
+    magic, version, ranks, transaction, v5_fingerprint, *_ = struct.unpack_from(
+        header_format, manifest, 0)
+    if magic.rstrip(b" \x00") != b"SALMON_DG_REFINEMENT_MANIFEST_V1" or version != 1 or ranks != RANKS:
+        raise RuntimeError("invalid refinement companion manifest identity")
+    expected_extent = header_size + 8 * ranks + 32 * ranks + 4 * ranks
+    if len(manifest) != expected_extent:
+        raise RuntimeError("invalid refinement companion manifest extent")
+    offset = header_size
+    sizes = struct.unpack_from(f"={ranks}Q", manifest, offset); offset += 8 * ranks
+    digests = struct.unpack_from(f"={4 * ranks}Q", manifest, offset); offset += 32 * ranks
+    fragments = struct.unpack_from(f"={ranks}i", manifest, offset)
+    if fragments != tuple(range(1, ranks + 1)):
+        raise RuntimeError("refinement companion rank-fragment mapping changed")
+    shard_format = "=32s6iqqddii64s4Q"
+    shard_extent = struct.calcsize(shard_format)
+    rank_zero = None
+    for rank in range(ranks):
+        shard = Path(f"{prefix}.transaction-{transaction}.rank-{rank:08d}")
+        payload = shard.read_bytes()
+        if len(payload) != sizes[rank] or len(payload) != shard_extent:
+            raise RuntimeError(f"invalid refinement companion shard extent on rank {rank}")
+        fields = struct.unpack(shard_format, payload)
+        if tuple(fields[-4:]) != tuple(digests[4 * rank:4 * rank + 4]):
+            raise RuntimeError(f"refinement companion digest binding changed on rank {rank}")
+        if rank == 0:
+            rank_zero = fields
+    assert rank_zero is not None
+    v5_manifest = (run_dir / "hybrid_dg_ground_state.chk.manifest").read_bytes()
+    v5_header = struct.unpack_from("=32s6i6q", v5_manifest, 0)
+    if v5_header[-1] != v5_fingerprint:
+        raise RuntimeError("refinement companion does not bind the published v5 payload")
+    density_change, energy_change = rank_zero[9], rank_zero[10]
+    converged, exhausted = bool(rank_zero[11]), bool(rank_zero[12])
+    if (rank_zero[5] != solve_count or rank_zero[6] != solve_count - 1
+            or not math.isclose(density_change, final_row["density_change"], rel_tol=1e-8)
+            or not math.isclose(energy_change, final_row["total_energy_change"], rel_tol=1e-8)
+            or converged != final_row["converged"] or exhausted == converged):
+        raise RuntimeError("refinement companion does not match the terminal LCFO log")
+    return {"v5_publication_fingerprint": v5_fingerprint, "total_solve_count": solve_count,
+            "density_change": density_change, "energy_change": energy_change,
+            "converged": converged, "exhausted": exhausted}
 
 
 def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | None) -> dict:
@@ -301,6 +352,8 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
     if ([item["solve"] for item in refinement_receipts]
             != list(range(1, terminal_solve_count + 1))):
         raise RuntimeError(f"{case} terminal refinement receipts are incomplete")
+    refinement_companion = validate_refinement_companion(
+        run_dir, terminal_solve_count, refinement_receipts[-1])
     schwarz_receipts = [{
         "epoch": int(row.group(1)),
         "neighbor_exchanges": int(row.group(2)),
@@ -314,11 +367,11 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
         "temperature": parse_finite_float(
             row.group(7), f"{case} Schwarz temperature", minimum=0.0),
     } for row in schwarz]
-    if ([item["epoch"] for item in schwarz_receipts] != list(range(1, 7))
+    if ([item["epoch"] for item in schwarz_receipts] != [1]
             or any(item["neighbor_exchanges"] != RANKS - 1
                    or not 1 <= item["accepted_cg_steps"] <= 3
                    or item["common_extensions"] < 0 for item in schwarz_receipts)):
-        raise RuntimeError(f"{case} did not complete the exact six-stage DG continuation schedule")
+        raise RuntimeError(f"{case} did not complete the one-stage full-DG local solve")
     if not math.isfinite(elapsed) or elapsed < 0.0:
         raise RuntimeError(f"{case} elapsed time is not finite and nonnegative")
     publication_values = tuple(int(value) for value in (
@@ -357,6 +410,7 @@ def parse_evidence(case: str, run_dir: Path, elapsed: float, return_code: int | 
         "wannier_fragment_ids": w90_fragment_ids,
         "occupied_checkpoint": True,
         "occupied_checkpoint_fingerprint": occupied_checkpoint_fingerprint,
+        "refinement_companion": refinement_companion,
     }
     if evidence["dc_mpi_size"] != RANKS:
         raise RuntimeError(f"{case} changed the rank/fragment contract")
