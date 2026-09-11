@@ -57,6 +57,9 @@ assert "final_srows=bounded_fixed_payload%metric_rows" in terminal_phase
 assert "call initialize_dg_hybrid_terminal_refinement" in terminal_phase, (
     "terminal LCFO refinement policy is not initialized"
 )
+assert "full_from_start=.true." in local_phase, (
+    "the fragment-local phase still ramps the DG interface instead of applying it fully from step one"
+)
 assert "call initialize_dg_hybrid_terminal_operator_guard" in terminal_phase, (
     "terminal LCFO immutable components are not fingerprinted"
 )

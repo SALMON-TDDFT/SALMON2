@@ -1821,7 +1821,7 @@ contains
     call update_dg_hybrid_divided_potential(initial_density,ok)
     if(.not.ok)error stop 'fixed ordinary-DC density potential update failed'
     call initialize_dg_hybrid_interface_continuation(dc%icomm_tot,projected_basis%generation,&
-      bounded_mapping_fingerprint,mixing%mixrate,interface_continuation,ok,message)
+      bounded_mapping_fingerprint,mixing%mixrate,interface_continuation,ok,message,full_from_start=.true.)
     if(.not.ok)then
       if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
       error stop 'DG interface continuation initialization failed'

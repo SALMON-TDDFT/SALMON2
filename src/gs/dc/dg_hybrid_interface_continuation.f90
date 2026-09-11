@@ -20,20 +20,22 @@ module dg_hybrid_interface_continuation
   public::initialize_dg_hybrid_interface_continuation,accept_dg_hybrid_interface_point
 contains
   subroutine initialize_dg_hybrid_interface_continuation(comm,basis_generation,mapping_fingerprint,&
-      rate,state,ok,message)
+      rate,state,ok,message,full_from_start)
     integer,intent(in)::comm,basis_generation
     integer(int64),intent(in)::mapping_fingerprint
     real(real64),intent(in)::rate
     type(s_dg_hybrid_interface_continuation),intent(inout)::state
     logical,intent(out)::ok
     character(*),intent(out)::message
+    logical,optional,intent(in)::full_from_start
     type(s_dg_hybrid_interface_continuation)::candidate
-    integer::controls(1),minimum_controls(1),maximum_controls(1),ierr,local_bad,global_bad
+    integer::controls(2),minimum_controls(2),maximum_controls(2),ierr,local_bad,global_bad
     integer(int64)::fingerprints(1),minimum_fingerprints(1),maximum_fingerprints(1)
     real(real64)::rates(1),minimum_rates(1),maximum_rates(1)
+    logical::full
 
-    ok=.false.;message=''
-    controls=[basis_generation];fingerprints=[mapping_fingerprint];rates=[rate]
+    ok=.false.;message='';full=.false.;if(present(full_from_start))full=full_from_start
+    controls=[basis_generation,merge(1,0,full)];fingerprints=[mapping_fingerprint];rates=[rate]
     local_bad=merge(0,1,ieee_is_finite(rate))
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation validation reduction failed';return;endif
@@ -42,9 +44,9 @@ contains
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation validation reduction failed';return;endif
     if(global_bad/=0)then;message='invalid DG interface continuation controls';return;endif
-    call MPI_Allreduce(controls,minimum_controls,1,MPI_INTEGER,MPI_MIN,comm,ierr)
+    call MPI_Allreduce(controls,minimum_controls,2,MPI_INTEGER,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation control reduction failed';return;endif
-    call MPI_Allreduce(controls,maximum_controls,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    call MPI_Allreduce(controls,maximum_controls,2,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation control reduction failed';return;endif
     call MPI_Allreduce(fingerprints,minimum_fingerprints,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
     if(ierr/=MPI_SUCCESS)then;message='DG interface continuation fingerprint reduction failed';return;endif
@@ -63,7 +65,7 @@ contains
     candidate%basis_generation=basis_generation
     candidate%mapping_fingerprint=mapping_fingerprint
     candidate%rate=rate
-    candidate%lambda=0d0
+    candidate%lambda=merge(1d0,0d0,full)
     candidate%step_index=0
     candidate%accepted_steps=0
     candidate%finished=.false.

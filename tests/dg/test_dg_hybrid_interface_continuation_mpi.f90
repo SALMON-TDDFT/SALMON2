@@ -12,6 +12,7 @@ program test_dg_hybrid_interface_continuation_mpi
   call MPI_Comm_size(MPI_COMM_WORLD,nproc,ierr)
   call check_schedule(0.2_real64,6)
   call check_schedule(0.3_real64,5)
+  call check_full_from_start
   call check_initialization_rejections
   call check_acceptance_rejections
   call check_nonfinite_rejections
@@ -19,6 +20,19 @@ program test_dg_hybrid_interface_continuation_mpi
   if(rank==0)write(*,'(a,i0,a)')'PASS DG interface continuation on ',nproc,' ranks'
   call MPI_Finalize(ierr)
 contains
+  subroutine check_full_from_start
+    type(s_dg_hybrid_interface_continuation)::state
+    logical::ok
+    character(512)::message
+    call initialize_dg_hybrid_interface_continuation(MPI_COMM_WORLD,7,73491_int64,0.2d0,state,ok,message,&
+      full_from_start=.true.)
+    call require(ok.and.state%lambda==1d0.and..not.state%finished,&
+      'full DG interface was not active at the first local solve')
+    call accept_dg_hybrid_interface_point(MPI_COMM_WORLD,7,73491_int64,.true.,state,ok,message)
+    call require(ok.and.state%finished.and.state%accepted_steps==1,&
+      'full-from-start DG interface required more than one accepted point')
+  end subroutine check_full_from_start
+
   subroutine check_schedule(rate,expected_acceptances)
     real(real64),intent(in)::rate
     integer,intent(in)::expected_acceptances
