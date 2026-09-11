@@ -159,11 +159,12 @@ contains
     integer(int64) :: minimum_fixed,maximum_fixed
 
     guard=s_dg_hybrid_terminal_operator_guard();ok=.false.;message=''
-    local_bad=merge(0,1,valid_operator_guard_payload(metric_rows,kinetic_rows,nonlocal_rows,&
-      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density))
+    local_bad=operator_guard_payload_failure(metric_rows,kinetic_rows,nonlocal_rows,&
+      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density)
     call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
     if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
-      message='invalid terminal LCFO immutable operator payload';return
+      write(message,'(a,i0)')'invalid terminal LCFO immutable operator payload; failure_code=',global_bad
+      return
     endif
     call MPI_Allreduce(fixed_payload_fingerprint,minimum_fixed,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
     if(ierr==MPI_SUCCESS)call MPI_Allreduce(fixed_payload_fingerprint,maximum_fixed,1,&
@@ -228,18 +229,38 @@ contains
     integer(int64),intent(in) :: fixed_payload_fingerprint
     real(real64),intent(in) :: immutable_seed_density(:)
 
-    valid_operator_guard_payload=size(metric_rows,1)>0.and.size(metric_rows,2)>0.and.&
-      all(shape(kinetic_rows)==shape(metric_rows)).and.all(shape(nonlocal_rows)==shape(metric_rows)).and.&
-      all(shape(sipg_rows)==shape(metric_rows)).and.size(basis_generations)==size(metric_rows,1).and.&
-      size(row_owners)==size(metric_rows,1).and.size(immutable_seed_density)>0.and.&
-      fixed_payload_fingerprint/=0_int64
-    if(.not.valid_operator_guard_payload)return
-    valid_operator_guard_payload=all(ieee_is_finite(real(metric_rows))).and.&
-      all(ieee_is_finite(aimag(metric_rows))).and.all(ieee_is_finite(real(kinetic_rows))).and.&
-      all(ieee_is_finite(aimag(kinetic_rows))).and.all(ieee_is_finite(real(nonlocal_rows))).and.&
-      all(ieee_is_finite(aimag(nonlocal_rows))).and.all(ieee_is_finite(real(sipg_rows))).and.&
-      all(ieee_is_finite(aimag(sipg_rows))).and.all(ieee_is_finite(immutable_seed_density))
+    valid_operator_guard_payload=operator_guard_payload_failure(metric_rows,kinetic_rows,nonlocal_rows,&
+      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density)==0
   end function valid_operator_guard_payload
+
+  integer function operator_guard_payload_failure(metric_rows,kinetic_rows,nonlocal_rows,&
+      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density) result(code)
+    complex(real64),intent(in) :: metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),sipg_rows(:,:)
+    integer,intent(in) :: basis_generations(:),row_owners(:)
+    integer(int64),intent(in) :: fixed_payload_fingerprint
+    real(real64),intent(in) :: immutable_seed_density(:)
+    code=0
+    if(size(metric_rows,1)<1.or.size(metric_rows,2)<1)then;code=1;return;endif
+    if(.not.all(shape(kinetic_rows)==shape(metric_rows)).or.&
+       .not.all(shape(nonlocal_rows)==shape(metric_rows)).or.&
+       .not.all(shape(sipg_rows)==shape(metric_rows)))then;code=2;return;endif
+    ! Generation/owner metadata describe the global basis directory, whereas
+    ! the matrices contain only this rank's owned rows.  Guard both complete
+    ! metadata vectors independently instead of imposing a false shape match.
+    if(size(basis_generations)<1)then;code=3;return;endif
+    if(size(row_owners)<1)then;code=4;return;endif
+    if(size(immutable_seed_density)<1)then;code=5;return;endif
+    if(fixed_payload_fingerprint==0_int64)then;code=6;return;endif
+    if(.not.all(ieee_is_finite(real(metric_rows))).or.&
+       .not.all(ieee_is_finite(aimag(metric_rows))))then;code=7;return;endif
+    if(.not.all(ieee_is_finite(real(kinetic_rows))).or.&
+       .not.all(ieee_is_finite(aimag(kinetic_rows))))then;code=8;return;endif
+    if(.not.all(ieee_is_finite(real(nonlocal_rows))).or.&
+       .not.all(ieee_is_finite(aimag(nonlocal_rows))))then;code=9;return;endif
+    if(.not.all(ieee_is_finite(real(sipg_rows))).or.&
+       .not.all(ieee_is_finite(aimag(sipg_rows))))then;code=10;return;endif
+    if(.not.all(ieee_is_finite(immutable_seed_density)))code=11
+  end function operator_guard_payload_failure
 
   subroutine compute_operator_guard_fingerprints(metric_rows,kinetic_rows,nonlocal_rows,&
       sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density,&

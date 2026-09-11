@@ -7,7 +7,7 @@ program test_dg_hybrid_terminal_operator_guard_mpi
 
   integer :: ierr,rank,nproc,mutation
   integer,parameter :: nrow=2,ncol=3
-  integer :: generations(nrow),owners(nrow)
+  integer :: generations(nrow+1),owners(nrow+1)
   integer(int64) :: fixed_payload_fingerprint
   complex(real64) :: metric(nrow,ncol),kinetic(nrow,ncol),nonlocal(nrow,ncol),sipg(nrow,ncol)
   real(real64) :: seed_density(4)
@@ -60,7 +60,8 @@ contains
         sipg(i,j)=cmplx(0.4_real64*i+0.04_real64*j,0.004_real64*(i+j),real64)
       enddo
     enddo
-    generations=[11+rank,12+rank];owners=[rank,modulo(rank+1,max(1,nproc))]
+    generations=[11+rank,12+rank,13+rank]
+    owners=[rank,modulo(rank+1,max(1,nproc)),modulo(rank+2,max(1,nproc))]
     fixed_payload_fingerprint=7001_int64
     seed_density=[0.11_real64,0.22_real64,0.33_real64,0.44_real64]+real(rank,real64)
   end subroutine reset_payload
