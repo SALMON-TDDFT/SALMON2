@@ -161,7 +161,9 @@ use dg_hybrid_continuation_controller,only:s_dg_hybrid_controller_controls,s_dg_
   validate_dg_hybrid_v5_publication_rank_policy
 use dg_hybrid_terminal_refinement,only:s_dg_hybrid_terminal_refinement_controls,&
   s_dg_hybrid_terminal_refinement_state,s_dg_hybrid_terminal_refinement_receipt,&
-  initialize_dg_hybrid_terminal_refinement,observe_dg_hybrid_terminal_refinement
+  s_dg_hybrid_terminal_operator_guard,initialize_dg_hybrid_terminal_refinement,&
+  observe_dg_hybrid_terminal_refinement,initialize_dg_hybrid_terminal_operator_guard,&
+  validate_dg_hybrid_terminal_operator_guard
 use dg_hybrid_low_energy_symmetry,only:evaluate_dg_hybrid_low_energy_symmetry,certify_dg_hybrid_energy_window
 use dg_hybrid_localization_first,only:s_dg_hybrid_localization_receipt,&
   prepare_dg_hybrid_localization_first_seed,build_dg_hybrid_localization_receipt
@@ -1316,6 +1318,7 @@ contains
     type(s_dg_hybrid_terminal_refinement_controls)::terminal_refinement_controls
     type(s_dg_hybrid_terminal_refinement_state)::terminal_refinement_state
     type(s_dg_hybrid_terminal_refinement_receipt)::terminal_refinement_receipt
+    type(s_dg_hybrid_terminal_operator_guard)::terminal_operator_guard
     integer::nproc,rank,ierr,status,p,q,axis,index3(3),raw_grid(3),core_grid(3),global_point_count,&
       local_basis_count,total_basis_count,face_count,initial_count,guard_count,candidate_count,&
       pw_candidate_count,global_column
@@ -1944,7 +1947,23 @@ contains
     call initialize_dg_hybrid_terminal_refinement(dc%icomm_tot,terminal_refinement_controls,&
       terminal_refinement_state,ok,message)
     if(.not.ok)error stop 'terminal divided Hybrid refinement initialization failed'
+    call initialize_dg_hybrid_terminal_operator_guard(dc%icomm_tot,bounded_fixed_payload%metric_rows,&
+      bounded_fixed_payload%kinetic_rows,bounded_fixed_payload%nonlocal_rows,&
+      bounded_fixed_payload%interface_rows,payload_generation,payload_owner,&
+      bounded_fixed_payload%fingerprint,initial_density,terminal_operator_guard,ok,message)
+    if(.not.ok)then
+      if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+      error stop 'terminal divided Hybrid immutable operator guard initialization failed'
+    endif
 terminal_lcfo_refinement: do
+      call validate_dg_hybrid_terminal_operator_guard(dc%icomm_tot,bounded_fixed_payload%metric_rows,&
+        bounded_fixed_payload%kinetic_rows,bounded_fixed_payload%nonlocal_rows,&
+        bounded_fixed_payload%interface_rows,payload_generation,payload_owner,&
+        bounded_fixed_payload%fingerprint,initial_density,terminal_operator_guard,ok,message)
+      if(.not.ok)then
+        if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+        error stop 'terminal divided Hybrid immutable operator changed before solve'
+      endif
       terminal_solve_local_potential=local_potential
       call solve_dg_hybrid_generalized_once_and_publish(dc%icomm_tot,total_basis_count,final_state_count,&
         projected_basis%global_ids,final_hrows,final_srows,dg_dc_gs_final_orbital_tolerance,&
@@ -1958,6 +1977,14 @@ terminal_lcfo_refinement: do
       if(.not.ok)then
         if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
         error stop 'terminal divided Hybrid LCFO solve failed'
+      endif
+      call validate_dg_hybrid_terminal_operator_guard(dc%icomm_tot,bounded_fixed_payload%metric_rows,&
+        bounded_fixed_payload%kinetic_rows,bounded_fixed_payload%nonlocal_rows,&
+        bounded_fixed_payload%interface_rows,payload_generation,payload_owner,&
+        bounded_fixed_payload%fingerprint,initial_density,terminal_operator_guard,ok,message)
+      if(.not.ok)then
+        if(rank==0)write(error_unit,'(a,a)')'[DG-HYBRID-DIVIDED] ',trim(message)
+        error stop 'terminal divided Hybrid immutable operator changed during solve'
       endif
       call reconstruct_dg_hybrid_terminal_density(projected_basis%global_ids,interior_values,&
         ow_hybrid_ground_state,terminal_density_output,ok,message)

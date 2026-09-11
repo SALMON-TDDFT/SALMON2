@@ -29,8 +29,15 @@ module dg_hybrid_terminal_refinement
     integer(int64) :: fingerprint=0_int64
   end type s_dg_hybrid_terminal_refinement_receipt
 
+  type,public :: s_dg_hybrid_terminal_operator_guard
+    logical :: valid=.false.
+    integer(int64) :: local_fingerprints(8)=0_int64
+  end type s_dg_hybrid_terminal_operator_guard
+
   public :: initialize_dg_hybrid_terminal_refinement
   public :: observe_dg_hybrid_terminal_refinement
+  public :: initialize_dg_hybrid_terminal_operator_guard
+  public :: validate_dg_hybrid_terminal_operator_guard
 
 contains
 
@@ -135,6 +142,173 @@ contains
     ok=.false.;message='terminal LCFO refinement requires MPI'
 #endif
   end subroutine observe_dg_hybrid_terminal_refinement
+
+  subroutine initialize_dg_hybrid_terminal_operator_guard(comm,metric_rows,kinetic_rows,&
+      nonlocal_rows,sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,&
+      immutable_seed_density,guard,ok,message)
+    integer,intent(in) :: comm
+    complex(real64),intent(in) :: metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),sipg_rows(:,:)
+    integer,intent(in) :: basis_generations(:),row_owners(:)
+    integer(int64),intent(in) :: fixed_payload_fingerprint
+    real(real64),intent(in) :: immutable_seed_density(:)
+    type(s_dg_hybrid_terminal_operator_guard),intent(out) :: guard
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+#ifdef USE_MPI
+    integer :: ierr,local_bad,global_bad
+    integer(int64) :: minimum_fixed,maximum_fixed
+
+    guard=s_dg_hybrid_terminal_operator_guard();ok=.false.;message=''
+    local_bad=merge(0,1,valid_operator_guard_payload(metric_rows,kinetic_rows,nonlocal_rows,&
+      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density))
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS.or.global_bad/=0)then
+      message='invalid terminal LCFO immutable operator payload';return
+    endif
+    call MPI_Allreduce(fixed_payload_fingerprint,minimum_fixed,1,MPI_INTEGER8,MPI_MIN,comm,ierr)
+    if(ierr==MPI_SUCCESS)call MPI_Allreduce(fixed_payload_fingerprint,maximum_fixed,1,&
+      MPI_INTEGER8,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      message='terminal LCFO immutable fingerprint agreement failed';return
+    endif
+    if(minimum_fixed/=maximum_fixed)then
+      message='rank-disagreeing terminal LCFO fixed-payload fingerprint';return
+    endif
+    call compute_operator_guard_fingerprints(metric_rows,kinetic_rows,nonlocal_rows,sipg_rows,&
+      basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density,&
+      guard%local_fingerprints)
+    guard%valid=.true.;ok=.true.;message=''
+#else
+    guard=s_dg_hybrid_terminal_operator_guard();ok=.false.
+    message='terminal LCFO immutable operator guard requires MPI'
+#endif
+  end subroutine initialize_dg_hybrid_terminal_operator_guard
+
+  subroutine validate_dg_hybrid_terminal_operator_guard(comm,metric_rows,kinetic_rows,&
+      nonlocal_rows,sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,&
+      immutable_seed_density,guard,ok,message)
+    integer,intent(in) :: comm
+    complex(real64),intent(in) :: metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),sipg_rows(:,:)
+    integer,intent(in) :: basis_generations(:),row_owners(:)
+    integer(int64),intent(in) :: fixed_payload_fingerprint
+    real(real64),intent(in) :: immutable_seed_density(:)
+    type(s_dg_hybrid_terminal_operator_guard),intent(in) :: guard
+    logical,intent(out) :: ok
+    character(*),intent(out) :: message
+#ifdef USE_MPI
+    integer :: ierr,local_bad,global_bad
+    integer(int64) :: current(8)
+
+    ok=.false.;message=''
+    local_bad=merge(0,1,guard%valid.and.valid_operator_guard_payload(metric_rows,kinetic_rows,&
+      nonlocal_rows,sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,&
+      immutable_seed_density))
+    if(local_bad==0)then
+      call compute_operator_guard_fingerprints(metric_rows,kinetic_rows,nonlocal_rows,sipg_rows,&
+        basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density,current)
+      if(any(current/=guard%local_fingerprints))local_bad=1
+    endif
+    call MPI_Allreduce(local_bad,global_bad,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)then
+      message='terminal LCFO immutable operator guard reduction failed';return
+    endif
+    if(global_bad/=0)then
+      message='terminal LCFO immutable operator payload changed';return
+    endif
+    ok=.true.;message=''
+#else
+    ok=.false.;message='terminal LCFO immutable operator guard requires MPI'
+#endif
+  end subroutine validate_dg_hybrid_terminal_operator_guard
+
+  logical function valid_operator_guard_payload(metric_rows,kinetic_rows,nonlocal_rows,&
+      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density)
+    complex(real64),intent(in) :: metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),sipg_rows(:,:)
+    integer,intent(in) :: basis_generations(:),row_owners(:)
+    integer(int64),intent(in) :: fixed_payload_fingerprint
+    real(real64),intent(in) :: immutable_seed_density(:)
+
+    valid_operator_guard_payload=size(metric_rows,1)>0.and.size(metric_rows,2)>0.and.&
+      all(shape(kinetic_rows)==shape(metric_rows)).and.all(shape(nonlocal_rows)==shape(metric_rows)).and.&
+      all(shape(sipg_rows)==shape(metric_rows)).and.size(basis_generations)==size(metric_rows,1).and.&
+      size(row_owners)==size(metric_rows,1).and.size(immutable_seed_density)>0.and.&
+      fixed_payload_fingerprint/=0_int64
+    if(.not.valid_operator_guard_payload)return
+    valid_operator_guard_payload=all(ieee_is_finite(real(metric_rows))).and.&
+      all(ieee_is_finite(aimag(metric_rows))).and.all(ieee_is_finite(real(kinetic_rows))).and.&
+      all(ieee_is_finite(aimag(kinetic_rows))).and.all(ieee_is_finite(real(nonlocal_rows))).and.&
+      all(ieee_is_finite(aimag(nonlocal_rows))).and.all(ieee_is_finite(real(sipg_rows))).and.&
+      all(ieee_is_finite(aimag(sipg_rows))).and.all(ieee_is_finite(immutable_seed_density))
+  end function valid_operator_guard_payload
+
+  subroutine compute_operator_guard_fingerprints(metric_rows,kinetic_rows,nonlocal_rows,&
+      sipg_rows,basis_generations,row_owners,fixed_payload_fingerprint,immutable_seed_density,&
+      fingerprints)
+    complex(real64),intent(in) :: metric_rows(:,:),kinetic_rows(:,:),nonlocal_rows(:,:),sipg_rows(:,:)
+    integer,intent(in) :: basis_generations(:),row_owners(:)
+    integer(int64),intent(in) :: fixed_payload_fingerprint
+    real(real64),intent(in) :: immutable_seed_density(:)
+    integer(int64),intent(out) :: fingerprints(8)
+
+    fingerprints(1)=complex_matrix_fingerprint(metric_rows,101_int64)
+    fingerprints(2)=complex_matrix_fingerprint(kinetic_rows,103_int64)
+    fingerprints(3)=complex_matrix_fingerprint(nonlocal_rows,107_int64)
+    fingerprints(4)=complex_matrix_fingerprint(sipg_rows,109_int64)
+    fingerprints(5)=integer_vector_fingerprint(basis_generations,113_int64)
+    fingerprints(6)=integer_vector_fingerprint(row_owners,127_int64)
+    fingerprints(7)=mix_guard_word(131_int64,fixed_payload_fingerprint,1)
+    fingerprints(8)=real_vector_fingerprint(immutable_seed_density,137_int64)
+  end subroutine compute_operator_guard_fingerprints
+
+  pure integer(int64) function complex_matrix_fingerprint(values,seed) result(hash)
+    complex(real64),intent(in) :: values(:,:)
+    integer(int64),intent(in) :: seed
+    integer :: i,j,index
+    integer(int64) :: word
+
+    hash=mix_guard_word(seed,int(size(values,1),int64),1)
+    hash=mix_guard_word(hash,int(size(values,2),int64),2);index=2
+    do j=1,size(values,2);do i=1,size(values,1)
+      index=index+1;word=transfer(real(values(i,j),real64),word)
+      hash=mix_guard_word(hash,word,index)
+      index=index+1;word=transfer(aimag(values(i,j)),word)
+      hash=mix_guard_word(hash,word,index)
+    enddo;enddo
+    if(hash==0_int64)hash=seed
+  end function complex_matrix_fingerprint
+
+  pure integer(int64) function real_vector_fingerprint(values,seed) result(hash)
+    real(real64),intent(in) :: values(:)
+    integer(int64),intent(in) :: seed
+    integer :: i
+    integer(int64) :: word
+
+    hash=mix_guard_word(seed,int(size(values),int64),1)
+    do i=1,size(values)
+      word=transfer(values(i),word);hash=mix_guard_word(hash,word,i+1)
+    enddo
+    if(hash==0_int64)hash=seed
+  end function real_vector_fingerprint
+
+  pure integer(int64) function integer_vector_fingerprint(values,seed) result(hash)
+    integer,intent(in) :: values(:)
+    integer(int64),intent(in) :: seed
+    integer :: i
+
+    hash=mix_guard_word(seed,int(size(values),int64),1)
+    do i=1,size(values)
+      hash=mix_guard_word(hash,int(values(i),int64),i+1)
+    enddo
+    if(hash==0_int64)hash=seed
+  end function integer_vector_fingerprint
+
+  pure integer(int64) function mix_guard_word(hash_in,word,index) result(hash)
+    integer(int64),intent(in) :: hash_in,word
+    integer,intent(in) :: index
+
+    hash=ieor(ishftc(hash_in,7),ishftc(word,modulo(11*index,63)))
+    hash=ieor(hash,ishftc(int(index,int64),modulo(17*index,63)))
+  end function mix_guard_word
 
   pure integer(int64) function receipt_fingerprint(controls,receipt) result(hash)
     type(s_dg_hybrid_terminal_refinement_controls),intent(in) :: controls

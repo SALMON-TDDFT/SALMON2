@@ -57,6 +57,9 @@ assert "final_srows=bounded_fixed_payload%metric_rows" in terminal_phase
 assert "call initialize_dg_hybrid_terminal_refinement" in terminal_phase, (
     "terminal LCFO refinement policy is not initialized"
 )
+assert "call initialize_dg_hybrid_terminal_operator_guard" in terminal_phase, (
+    "terminal LCFO immutable components are not fingerprinted"
+)
 assert "terminal_lcfo_refinement: do" in terminal_phase
 refinement_loop = terminal_phase[terminal_phase.index("terminal_lcfo_refinement: do") :]
 assert refinement_loop.count("call solve_dg_hybrid_generalized_once_and_publish") == 1, (
@@ -65,6 +68,9 @@ assert refinement_loop.count("call solve_dg_hybrid_generalized_once_and_publish"
 assert "call reconstruct_dg_hybrid_terminal_density" in refinement_loop
 assert "call mix_dg_overlapping_wannier_density_history" in refinement_loop
 assert "call observe_dg_hybrid_terminal_refinement" in refinement_loop
+assert refinement_loop.count("call validate_dg_hybrid_terminal_operator_guard") >= 2, (
+    "immutable components must be checked before and after each terminal solve"
+)
 assert "if(.not.terminal_request_another)exit terminal_lcfo_refinement" in refinement_loop
 assert "dg_dc_gs_final_density_tolerance" in terminal_phase
 assert "ow_hybrid_divided_threshold" in terminal_phase, (
