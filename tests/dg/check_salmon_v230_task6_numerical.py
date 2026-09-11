@@ -75,7 +75,7 @@ def auto_merged_kernels():
             "system%rmatrix_B",
         ),
         "src/common/total_energy.f90": ("use nvtx_wrapper", "xc_payload%use_tau_operator", "yn_fix_func"),
-        "src/io/write.f90": ("MPI_File_write_all", "write_dg_polarization_data", "write_dg_polarization_response_3d"),
+        "src/io/write.f90": ("MPI_File_write_all", "write_response_0d", "write_response_3d"),
         "src/poisson/poisson_periodic.f90": (
             "use nvtx_wrapper",
             "set_poisson_contract_context",

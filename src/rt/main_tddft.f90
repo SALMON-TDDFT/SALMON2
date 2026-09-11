@@ -32,8 +32,7 @@ use parallelization, only: adjust_elapse_time, nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast, comm_summation
 use salmon_xc, only: finalize_xc
 use timer
-use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d, &
-  write_dg_polarization_data, write_dg_polarization_response_3d
+use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
 use initialization_rt_sub
 use checkpoint_restart_sub
 use jellium, only: check_condition_jm
@@ -266,7 +265,6 @@ case(0)
 case(3)
   if(theory=="tddft_response")then
     call write_response_3d(ofl,rt)
-    if (yn_dg_length_gauge == 'y') call write_dg_polarization_response_3d(ofl)
   else
     call write_pulse_3d(ofl,rt)
   end if
