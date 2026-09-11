@@ -2,7 +2,7 @@
 program test_rt_dg_hybrid_occupied_checkpoint_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64,real64
-  use rt_dg_hybrid_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint
+  use rt_dg_hybrid_occupied_checkpoint,only:write_rt_dg_hybrid_occupied_checkpoint,read_rt_dg_hybrid_occupied_checkpoint
   implicit none
   integer,parameter::n=5,m=2
   integer::comm,rank,nproc,ierr,row,position,nlocal,global_count,coefficient_bad

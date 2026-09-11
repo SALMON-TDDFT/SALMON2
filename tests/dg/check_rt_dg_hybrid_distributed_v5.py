@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 
 root = Path(__file__).resolve().parents[2]
-checkpoint = (root / "src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text().lower()
+checkpoint = (root / "src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90").read_text().lower()
 checkpoint_v5 = (root / "src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90").read_text().lower()
 refinement_receipt_path = root / "src/rt/dg/rt_dg_hybrid_refinement_receipt.f90"
 initialization = (root / "src/rt/dg/rt_dg_hybrid_initialization_v5.f90").read_text().lower()

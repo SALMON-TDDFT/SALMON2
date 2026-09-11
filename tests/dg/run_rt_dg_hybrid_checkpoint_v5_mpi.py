@@ -4,7 +4,7 @@ import os, shlex, shutil, struct, subprocess, tempfile
 
 root=Path(__file__).resolve().parents[2]
 source=root/"src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90"
-endpoint=root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"
+endpoint=source
 assert source.exists(),"RED: distributed-native v5 checkpoint module is absent"
 text=source.read_text().lower()
 endpoint_text=endpoint.read_text().lower()
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v5-checkpoint-") as name:
   support=[root/"src/common/dg_portable_sha256.f90",root/"src/common/dg_hybrid_sparse_metric.f90",root/"src/common/dg_hybrid_sparse_operators.f90",
     root/"src/gs/dc/dg_hybrid_continuation_controller.f90",
     root/"src/rt/dg/rt_dg_hybrid_sparse_exchange.f90",root/"src/rt/dg/rt_dg_hybrid_point_density.f90",
-    source,endpoint,root/"src/rt/dg/rt_dg_hybrid_structural_graph.f90",
+    source,root/"src/rt/dg/rt_dg_hybrid_structural_graph.f90",
     root/"src/rt/dg/rt_dg_hybrid_sparse_projection.f90",root/"src/rt/dg/rt_dg_hybrid_initialization_v5.f90"]
   if os.environ.get("SALMON_LAPACK_LIBS"):
     libs=shlex.split(os.environ["SALMON_LAPACK_LIBS"])
@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v5-checkpoint-") as name:
     str(root/"tests/dg/test_rt_dg_hybrid_checkpoint_v5_mpi.f90"),*libs,"-o",str(exe)],check=True)
   reject=build/"hybrid_v5_reject"
   subprocess.run([shutil.which("mpifort"),"-cpp","-DUSE_MPI","-I",str(build),"-J",str(build),
-    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",str(root/"src/common/dg_portable_sha256.f90"),str(source),str(endpoint),
+    "-fcheck=all","-ffpe-trap=invalid,zero,overflow","-fbacktrace",str(root/"src/common/dg_portable_sha256.f90"),str(source),
     str(root/"tests/dg/test_rt_dg_hybrid_v5_reader_legacy_v4_reject_mpi.f90"),"-o",str(reject)],check=True)
   env=os.environ.copy();env["OMP_NUM_THREADS"]="1";env.setdefault("OMPI_MCA_rmaps_base_oversubscribe","1")
   for nrank in (1,2,4,8):

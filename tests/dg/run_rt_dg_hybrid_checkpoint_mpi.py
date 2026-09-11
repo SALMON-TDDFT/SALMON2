@@ -4,8 +4,9 @@ from pathlib import Path
 import os, re, shutil, subprocess, tempfile
 
 root=Path(__file__).resolve().parents[2]
-source_path=root/"src/rt/dg/rt_dg_hybrid_checkpoint.f90"
+source_path=root/"src/rt/dg/rt_dg_hybrid_occupied_checkpoint.f90"
 source=source_path.read_text().lower()
+v5_source=(root/"src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90").read_text().lower()
 main=(root/"src/gs/main_dft.f90").read_text().lower()
 continuation=main.split("subroutine run_dg_hybrid_divided_ground_state_for_main",1)[1].split(
     "end subroutine run_dg_hybrid_divided_ground_state_for_main",1)[0]
@@ -31,7 +32,7 @@ for required in ("collective_rt_dg_hybrid_publication_precondition",
                  "collective_rt_dg_hybrid_publication_mapping_precondition",
                  "write_rt_dg_hybrid_occupied_checkpoint",
                  "read_rt_dg_hybrid_occupied_checkpoint"):
-    assert required in source
+    assert required in (source + v5_source)
 
 with tempfile.TemporaryDirectory(prefix="hybrid-v5-publication-") as name:
     build=Path(name);(build/"config.h").write_text("")

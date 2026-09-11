@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/gs/main_dft.f90").read_text()
-CHECKPOINT = (ROOT / "src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text()
+CHECKPOINT = (ROOT / "src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90").read_text()
 
 
 def compact(text: str) -> str:

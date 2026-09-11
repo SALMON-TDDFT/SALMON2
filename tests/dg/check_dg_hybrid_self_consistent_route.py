@@ -11,7 +11,7 @@ MAIN = (ROOT / "src/gs/main_dft.f90").read_text(errors="replace").lower()
 MAIN_COMPACT = "".join(MAIN.replace("&", "").split())
 SCF_PATH = ROOT / "src/gs/dc/dg_hybrid_scf.f90"
 STATE_PATH = ROOT / "src/gs/dc/dg_hybrid_ground_state_types.f90"
-CHECKPOINT = (ROOT / "src/rt/dg/rt_dg_hybrid_checkpoint.f90").read_text(
+CHECKPOINT = (ROOT / "src/rt/dg/rt_dg_hybrid_occupied_checkpoint.f90").read_text(
     errors="replace"
 ).lower()
 

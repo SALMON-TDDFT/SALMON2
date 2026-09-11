@@ -5,7 +5,7 @@ program test_rt_dg_hybrid_checkpoint_v5_mpi
   use rt_dg_hybrid_checkpoint_v5,only:s_rt_dg_hybrid_v5_shard,&
     read_rt_dg_hybrid_checkpoint_v5,write_rt_dg_hybrid_checkpoint_v5,&
     checked_rt_dg_hybrid_extent_product
-  use rt_dg_hybrid_checkpoint,only:publish_rt_dg_hybrid_checkpoint_v5,&
+  use rt_dg_hybrid_checkpoint_v5,only:publish_rt_dg_hybrid_checkpoint_v5,&
     s_rt_dg_hybrid_v5_publication_authorization
   use rt_dg_hybrid_initialization,only:s_rt_dg_hybrid_state,initialize_rt_dg_hybrid_from_checkpoint,&
     fingerprint_rt_dg_hybrid_scope

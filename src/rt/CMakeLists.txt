@@ -22,7 +22,7 @@ if (USE_MPI AND USE_SCALAPACK)
     dg/rt_dg_hybrid_system_identity.f90
     dg/rt_dg_hybrid_checkpoint_v5.f90
     dg/rt_dg_hybrid_refinement_receipt.f90
-    dg/rt_dg_hybrid_checkpoint.f90
+    dg/rt_dg_hybrid_occupied_checkpoint.f90
     dg/rt_dg_hybrid_structural_graph.f90
     dg/rt_dg_hybrid_sparse_projection.f90
     dg/rt_dg_hybrid_initialization_v5.f90

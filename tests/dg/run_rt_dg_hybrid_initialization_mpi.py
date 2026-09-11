@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix="hybrid-v3-reject-") as name:
   sources=[
     "src/common/dg_portable_sha256.f90", "src/common/dg_hybrid_sparse_metric.f90", "src/common/dg_hybrid_sparse_operators.f90",
     "src/rt/dg/rt_dg_hybrid_sparse_exchange.f90", "src/rt/dg/rt_dg_hybrid_point_density.f90",
-    "src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90", "src/rt/dg/rt_dg_hybrid_checkpoint.f90",
+    "src/rt/dg/rt_dg_hybrid_checkpoint_v5.f90", "src/rt/dg/rt_dg_hybrid_occupied_checkpoint.f90",
     "src/rt/dg/rt_dg_hybrid_structural_graph.f90", "src/rt/dg/rt_dg_hybrid_sparse_projection.f90",
     "src/rt/dg/rt_dg_hybrid_initialization_v5.f90", "tests/dg/test_rt_dg_hybrid_v3_rejection_mpi.f90",
   ]

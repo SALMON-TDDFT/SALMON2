@@ -2,7 +2,7 @@
 program test_rt_dg_hybrid_checkpoint_mpi
   use mpi
   use,intrinsic::iso_fortran_env,only:int64
-  use rt_dg_hybrid_checkpoint,only:collective_rt_dg_hybrid_publication_precondition,&
+  use rt_dg_hybrid_checkpoint_v5,only:collective_rt_dg_hybrid_publication_precondition,&
     collective_rt_dg_hybrid_publication_mapping_precondition
   implicit none
   integer::rank,nproc,ierr,n,i,row_count
