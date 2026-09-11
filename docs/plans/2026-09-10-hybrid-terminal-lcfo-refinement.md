@@ -223,6 +223,27 @@ git commit -m "feat(dg): authenticate terminal refinement receipt"
 
 ## Task 6: Build and run focused production checks
 
+### Required error decomposition before the production gate
+
+Do not interpret the terminal density-change sample as a DG accuracy error.  It
+is a fixed-point residual of the terminal self-consistency iteration and may
+contain the correction of the ordinary DC seed.  Preserve a checksum-bound
+conventional DC+LCFO reference, reusable only with the same MPI size and exact
+rank-fragment mapping, and report three independently evaluated weighted norms:
+
+1. ordinary-DC baseline correction, `||rho_DC+LCFO-rho_DC||`;
+2. DG incremental error, `||rho_DG+LCFO-rho_DC+LCFO||`;
+3. total density displacement, `||rho_DG+LCFO-rho_DC||`.
+
+Apply the same separation to total energies.  Do not infer the DG error by
+subtracting two scalar error estimates because cancellation can hide a spatial
+error.  Terminal refinement stopping continues to use the fixed-point density
+residual and the inter-iteration energy change; the production accuracy gate
+uses the DG incremental error.  A legacy seed without the DC+LCFO reference may
+run, but must label the decomposition unavailable and cannot pass the formal
+DG-accuracy gate.  Generate the reference once from the reusable DC result and
+never rerun the ordinary DC SCF merely to obtain this diagnostic.
+
 **Files:**
 
 - Modify: `tests/dg/run_dg_fragment_wf_production_smoke.py`
@@ -231,10 +252,12 @@ git commit -m "feat(dg): authenticate terminal refinement receipt"
 
 **Step 1: Add log and receipt assertions**
 
-Require the good-seed H4 smoke to report exactly one global solve. Require all
-production runs to report a count in `[1,4]`, 300 K occupation, and a matching
-receipt. Keep the Si64 analyzer read-only and accept both legacy v5 without the
-companion and new v5 with it.
+Require all production runs to report a count in `[1,4]`, 300 K occupation, a
+matching refinement receipt, and the separated DC-baseline/DG-incremental
+diagnostics.  A converged DC seed is not by itself evidence that the terminal
+DG fixed-point solve will exit after one diagonalization.  Keep the Si64
+analyzer read-only and accept both legacy v5 without the companion and new v5
+with it.
 
 **Step 2: Build and run focused checks**
 
