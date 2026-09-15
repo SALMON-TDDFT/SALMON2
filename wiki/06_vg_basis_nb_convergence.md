@@ -384,3 +384,143 @@ unlike silicon's — with no carriers at zero field the ring has no sources, and
 1.42 eV gap puts an across-gap transfer at $7.1\sigma$ rather than silicon's $5.3\sigma$.
 That is not a clean bill of health for GaAs: it means the dark control cannot test it,
 and the thermal-gas criterion (wiki/12) is what does.
+
+## Addendum (2026-09-15): read the plateau, and check it against the solver's own floor
+
+The **absorbed-work** columns of the two 2026-09 addenda above, and the $n_b$ and mesh
+steps quoted from them in `samples/exercise_x15_.../README.md`, report series that refuse
+to settle. They share one measurement recipe, and that recipe is wrong twice over. Both
+faults are identified below; neither is a convergence failure.
+
+This does **not** touch §6. That study converged a *carrier density* (`nex_proj`, falling
+×40 with `dt` to $1.3$–$1.4\times10^{16}$ cm$^{-3}$ against a theory bound of
+$10^{16}$), which is five orders above the floor of Fault 2 and is not an integral over
+the drive at all, so Fault 1 cannot reach it either. §6's conclusion — that the apparent
+over-generation was a `dt` artifact and that $n_b \gtrsim 8$ suffices at 100 kV/cm —
+stands as measured. The contrast is the point: **the same solver gave a clean,
+convergent series the moment the observable was one it could actually resolve.**
+
+### Fault 1: the absorbed work was read before the drive stopped
+
+The work done on the crystal,
+
+$$W(t) \;=\; -\int_0^{t}\! \mathbf{E}(t')\cdot\mathbf{J}(t')\,V_{\rm cell}\,{\rm d}t',$$
+
+is the absorbed energy only once $\mathbf{E}$ has switched off. While the pulse is on,
+$W(t)$ is dominated by the polarisation the field has *lent* the crystal and not yet
+taken back — energy that is on its way out, not in. Those runs used the measured DAST
+field file, whose support runs to 3274 fs, inside windows that ended at 129 fs and
+491.7 fs. Both are mid-pulse. On the 129 fs window the instantaneous power
+$-\mathbf{E}\cdot\mathbf{J}$ changed sign **1554 times** and $W$ was still rising at the
+edge.
+
+A difference of two such numbers is a difference of two quantities that are not yet
+defined, so it has no reason to converge in anything. Refining `dt`, adding bands or
+refining the mesh each shifts *where in its swing* the integral is truncated, which is
+why the steps changed sign and size at random and why refining one knob appeared to make
+another knob worse.
+
+**Rule.** Use a drive with compact support, run past its end, and read the plateau. The
+analytic `Acos2` pulse of `samples/exercise_x15_.../` has $\mathbf{E} \equiv 0$ for
+$t > $ `tw1` exactly, to the last bit; $W(t)$ then goes flat and *is* the absorbed
+energy. A field *file* generally does not have this property — check its support before
+you trust any energy taken from it.
+
+### Fault 2: the residue was below the propagator's own noise floor
+
+`_sbe_nex.data` writes two columns that are equal when the propagator is exact:
+
+| column | expression | |
+|---|---|---|
+| 2 | $(\mathrm{tr}\,\rho - \mathrm{tr}_{\rm vb}\,\rho)/V$ | conduction population |
+| 3 | $(n_{\rm elec} - \mathrm{tr}_{\rm vb}\,\rho)/V$ | valence depletion |
+
+Their **difference is $(\mathrm{tr}\,\rho - n_{\rm elec})/V$, the drift of the total
+trace** — and it is free. It is the error bar on either column, so quoting column 2
+alone hides it. A run whose excitation is smaller than this difference has measured
+nothing.
+
+Measured on Si, $5^3$, $n_b = 28$, `dt` = 0.05 fs, 6600 steps, 1000 kV/cm single cycle,
+all dissipators off: the drift grows with $|A(t)|$, peaks at $4.56\times10^{-12}$
+electrons per cell and freezes at $3.71\times10^{-12}$ (i.e. $4.6\times10^{-13}$ of
+$n_{\rm elec} = 8$) the moment the field stops. That is the double-precision floor of a
+matrix-exponential chain — $\approx 2000\,\varepsilon$ over 6600 steps — not a leak:
+with the ring off every step is the exponential of an anti-Hermitian matrix and
+conserves the trace exactly in exact arithmetic.
+
+$$\boxed{\text{floor} \;\approx\; 1\times10^{11}\ {\rm cm^{-3}}\ \text{in carrier
+density},\quad \approx 1\times10^{-12}\ {\rm eV/cell}\ \text{in } W_{\rm plateau}}$$
+
+for a run of this length. Nothing below it is resolvable, at any mesh or band count.
+
+### The mesh question, answered on the plateau
+
+Si, single-cycle 1000 kV/cm, `tw` = 273 fs, run to 330 fs, coherent, sum rule on:
+
+| mesh | $k$-points | $W_{\rm plateau}$ [eV/cell] | tail drift | $n_{\rm ex}$ post-pulse [cm$^{-3}$] | own floor [cm$^{-3}$] |
+|---|---|---|---|---|---|
+| $5^3$ | 125 | $1.7795\times10^{-12}$ | 0.00e+00 | $4.88\times10^{8}$ | $9.28\times10^{10}$ |
+| $7^3$ | 343 | $5.8159\times10^{-13}$ | 0.00e+00 | $2.66\times10^{8}$ | $6.90\times10^{10}$ |
+
+Both sit ~200× **below** their own floor. Refining the mesh does not raise the absorbed
+energy; it lowers it, and lowers the floor with it. The $k$-resolved check agrees: at
+$t = 300$ fs the diabatic conduction population summed over all 125 points of the $5^3$
+mesh is $3.0\times10^{-12}$ electrons, max $1.7\times10^{-13}$ at any single point — the
+trace drift and nothing else.
+
+`_sbe_nex.data` is the *diabatic* measure and carries the reversible $A^2(t)$ dressing
+(it peaks at $7.7\times10^{23}$ cm$^{-3}$ mid-pulse and comes back down), so the real
+carriers must be read from `_sbe_nex_nonad.data` — column 3, `nex_dref`, is the
+Option-A dressed-reference density **the ring dissipators actually see**. Post-pulse it
+gives $1.21\times10^{9}$ cm$^{-3}$ at $5^3$ and $9.69\times10^{8}$ at $7^3$: the same
+verdict, one order higher, still two orders under the floor.
+
+**Independent check that this null is physics and not a dead solver.** At this working
+point — $E_{\rm peak}$ = 1000 kV/cm, $\hbar\omega = \hbar\pi/t_w$ = 7.57 meV — the
+Keldysh parameter is $\gamma_K \approx 0.13$–$0.20$, i.e. deep *tunnelling*, so the
+Zener rate applies:
+$G = \frac{e^2E^2\sqrt{m_r}}{18\pi\hbar^2\sqrt{E_g}}
+\exp\!\big[-\tfrac{\pi\sqrt{m_r}E_g^{3/2}}{2\sqrt{2}\,e\hbar E}\big]$.
+With $E_g$ = 1.07 eV this gives $\sim\!9\times10^{10}$ cm$^{-3}$ over the pulse for
+$m_r = 0.2\,m_e$ and $\sim\!1\times10^{6}$ for $m_r = 0.5\,m_e$ — the exponent is
+$\approx 20$–$32$, so the estimate is order-of-magnitude at best. But it brackets the
+measured $10^{9}$ and, decisively, **it lands on the floor itself.** The signal this
+scan was trying to converge is genuinely of the same size as the arithmetic noise. No
+mesh and no band count can fix that; only a longer-lived observable or a stronger field
+can.
+
+*Noted in passing, not yet diagnosed:* the $7^3$ `nex_dref` trace carries a single
+out-of-family sample at $t$ = 180 fs ($2.8\times10^{13}$ cm$^{-3}$, eight orders above
+its neighbours at 160 and 200 fs). That column is exactly what the ring dissipators
+read, so with dissipators **on** such a spike would inject real carriers. It does not
+affect anything here (this scan is coherent) but it should be chased before the
+production runs.
+
+So **the mesh was never the problem.** In the coherent below-gap regime silicon absorbs
+nothing measurable at this field, the two meshes agree on that zero, and every series
+built on top of it was a series of ratios of noise. Note that the formal step here is
+$-67\,\%$ — as uncitable as the $+33\,\%$ it replaces, and for the same reason. **When
+both endpoints are at the floor, quote the absolute values and the floor, never the
+percentage.**
+
+This floor is a property of the run length, not of the physics: with dissipators on, the
+carrier densities the induced-transparency experiment is about are 6–7 orders above it.
+The floor only ever obstructed what these scans were doing — comparing zeros.
+
+### Does this retract the dark-control mesh table (wiki/12)?
+
+No, and the check is the one above. The signature of a noise-limited reading is
+$n_{\rm elec} \neq n_{\rm hole}$. In that table the $7^3$ row reads $8.31$ vs
+$8.55\times10^{10}$ cm$^{-3}$ — a mismatch 36× smaller than the signal — and the $9^3$
+row agrees to three digits at $1.32\times10^{12}$. Those are real pairs across the gap.
+The table stands.
+
+### Procedure, amended
+
+Add to §5, before anything else:
+
+0. **Check the support of the drive.** If it is a file, find where it actually ends.
+   Read energies only after it does, and confirm the tail drift of $W$ is zero.
+1. **Take the floor from column 2 minus column 3** of `_sbe_nex.data`. If the residue
+   you are about to converge is not several times that difference, stop: the series will
+   be noise, and refining anything will make it look worse or better at random.

@@ -117,6 +117,17 @@ to the last bit. W(t) therefore goes flat and its plateau *is* the absorbed ener
 Run to `tw1` + a field-free tail (the defaults give 273 fs + 57 fs) and read the
 plateau. Only then are dt, nstate and mesh comparable.
 
+**And check the plateau against the solver's own floor before you converge it.** In
+`*_sbe_nex.data`, column 2 is (tr - tr_vb)/V and column 3 is (nelec - tr_vb)/V, so
+their *difference* is the drift of the total trace. That difference is the error bar on
+either column. Measured here — Si, 5³, nstate 28, dt 0.05, 6600 steps, 1000 kV/cm,
+dissipators off — it is 3.7e-12 electrons/cell, i.e. ~1e11 cm^-3, while the post-pulse
+excitation is 4.9e8 cm^-3. Coherent below-gap Si at this field absorbs nothing this run
+length can resolve, on 5³ *or* 7³ (W_plateau 1.78e-12 vs 5.82e-13 eV/cell, both ~200x
+under the floor). Turning the dissipators on puts the densities this exercise is about
+6-7 orders above the floor, so this is a caveat for the convergence scans, not for the
+experiment. `wiki/06`, addendum 2026-09-15, has the numbers.
+
 ## 5. What to measure
 
 `../exercise_x11_full_dissipation_showcase/thz_permittivity.py` reads

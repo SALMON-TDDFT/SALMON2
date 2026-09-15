@@ -1397,6 +1397,16 @@ The lesson generalises past this bug: **a dark control run on a cheap mesh is no
 evidence of health**, because the very threshold that makes it cheap also makes it
 silent. Run the control on the production mesh.
 
+*How to know these three rows are signal and not roundoff.* The columns of
+`_sbe_nex.data` are $(\mathrm{tr}\,\rho - \mathrm{tr}_{\rm vb}\,\rho)/V$ and
+$(n_{\rm elec} - \mathrm{tr}_{\rm vb}\,\rho)/V$, so their difference is the drift of
+the total trace — the solver's own noise floor, free with every run. Here the $7^3$ row
+misses by $2.4\times10^{9}$ cm$^{-3}$ against a signal of $8.6\times10^{10}$ (36×) and
+the $9^3$ row agrees to three digits, so both are real pairs across the gap. That test
+is not optional: in a *driven* 6600-step Si run the same floor reaches
+$\sim10^{11}$ cm$^{-3}$ and swallows the whole signal. See `wiki/06`, addendum
+2026-09-15.
+
 **What the widened gate does to it.** The same $9^3$ control, same input, rebuilt with
 `eph_db_realized = .true.`:
 
