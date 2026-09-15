@@ -102,10 +102,18 @@ composition leaks there. The default here is therefore `dt = 0.05 fs`, and `wiki
 **Measured, and it is worse than §7 suggests.** Si $5^3$, 1000 kV/cm, coherent,
 post-pulse plateau:
 
-| nstate | dt = 0.05 fs | dt = 0.025 fs | |
+| nstate | dt = 0.05 fs | dt = 0.025 fs | step in dt |
 |---|---|---|---|
-| 28 | 1.7795e-12 eV/cell | *(running)* | at the noise floor |
-| 36 | **1.2306e-08** | **1.9897e-12** | **×6185 inflated at 0.05** |
+| 28 | 1.7795e-12 eV/cell | 1.6945e-12 | −4.8 % |
+| 36 | **1.2306e-08** | **1.9897e-12** | **−99.98 %** |
+| step in nstate | **×6914** | +17 % | |
+
+Three corners agree at the noise floor; only (36, 0.05) escapes it. Sweep nstate at
+dt = 0.05 and you walk into that corner and see a band-count dependence that never
+flattens; sweep dt at nstate = 28 and you walk along the safe edge and conclude dt is
+already converged. **Neither one-knob scan can see this**, which is why every earlier
+series here refused to settle. At dt = 0.025 the nstate dependence is gone (+17 %,
+floor to floor).
 
 At nstate = 36 a 0.05 fs step manufactures 4.5e12 cm⁻³ of carriers out of nothing;
 halving the step removes 99.98 % of them and lands on the same floor nstate = 28

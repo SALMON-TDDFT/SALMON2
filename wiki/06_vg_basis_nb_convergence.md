@@ -515,10 +515,11 @@ The two rows above are both `nstate` = 28. Raising the basis to 36 at the *same*
 and the *same* step changes the answer by a factor of 7000 — and then halving the step
 takes it all back:
 
-| $n_b$ | `dt` = 0.05 fs | `dt` = 0.025 fs | |
+| $n_b$ | `dt` = 0.05 fs | `dt` = 0.025 fs | step in `dt` |
 |---|---|---|---|
-| 28 | $1.7795\times10^{-12}$ | — | at the floor |
-| 36 | $\mathbf{1.2306\times10^{-8}}$ | $1.9897\times10^{-12}$ | **×6185 inflated at 0.05** |
+| 28 | $1.7795\times10^{-12}$ | $1.6945\times10^{-12}$ | $-4.8\,\%$ |
+| 36 | $\mathbf{1.2306\times10^{-8}}$ | $1.9897\times10^{-12}$ | $\mathbf{-99.98\,\%}$ |
+| step in $n_b$ | $\mathbf{\times 6914}$ | $+17\,\%$ | |
 
 (Si, $5^3$, coherent, $W_{\rm plateau}$ in eV/cell.) At `dt` = 0.05 fs and $n_b$ = 36 the
 solver reports $4.53\times10^{12}$ cm$^{-3}$ of carriers; at 0.025 fs it reports
@@ -529,6 +530,17 @@ This is §6's mechanism — "the dt-error was filling each newly-available band,
 basis-insufficiency" — at 10× the field §6 used, where it amplifies ×6185 instead of
 ×40. The step a run needs falls as the band ceiling and the field rise, so a `dt` that
 was adequate at 100 kV/cm and $n_b$ = 8 is not adequate at 1000 kV/cm and $n_b$ = 36.
+
+**Why the series looked divergent: the artifact needs BOTH knobs at once.** Three of the
+four corners agree at $1.7$–$2.0\times10^{-12}$ eV/cell — the floor. Only $(n_b = 36,\,
+{\rm d}t = 0.05)$ escapes it. So a scan along either edge of that table is misleading on
+its own: sweeping $n_b$ at $\rm{d}t = 0.05$ walks into the bad corner and reports a
+band-count dependence that never flattens (this is the withdrawn "~10 % per 8 bands"),
+while sweeping `dt` at $n_b = 28$ walks along the safe edge and reports $-4.8\,\%$,
+i.e. "`dt` is already converged". Both readings are real and both are wrong, because
+each holds the *other* knob where the artifact is dormant. **One-knob-at-a-time
+convergence testing cannot see this class of error.** At ${\rm d}t = 0.025$ the
+band-count dependence is gone: $+17\,\%$ between two numbers that are both floor.
 
 **The physics conclusion survives, now by two independent routes.** $(n_b = 28,\,
 {\rm d}t = 0.05)$ and $(n_b = 36,\, {\rm d}t = 0.025)$ give $1.78\times10^{-12}$ and
