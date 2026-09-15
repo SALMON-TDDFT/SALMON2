@@ -531,6 +531,14 @@ basis-insufficiency" — at 10× the field §6 used, where it amplifies ×6185 i
 ×40. The step a run needs falls as the band ceiling and the field rise, so a `dt` that
 was adequate at 100 kV/cm and $n_b$ = 8 is not adequate at 1000 kV/cm and $n_b$ = 36.
 
+**It is the integrator, not the mesh.** The same configuration on $7^3$ gives
+$W_{\rm plateau} = 6.476\times10^{-9}$ eV/cell ($2.40\times10^{12}$ cm$^{-3}$,
+$n_{\rm elec}$ vs $n_{\rm hole}$ matched to 1 %), so the artifact reproduces on the finer
+mesh. Refining the mesh scales it by $0.53$; halving the step scales it by $1/6185$.
+A quantity that moves two-fold under one knob and four orders under another belongs to
+the second — and note the trap: taken alone, that $-47\,\%$ mesh step looks like
+ordinary convergence.
+
 **Why the series looked divergent: the artifact needs BOTH knobs at once.** Three of the
 four corners agree at $1.7$–$2.0\times10^{-12}$ eV/cell — the floor. Only $(n_b = 36,\,
 {\rm d}t = 0.05)$ escapes it. So a scan along either edge of that table is misleading on
