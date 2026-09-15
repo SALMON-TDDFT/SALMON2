@@ -513,17 +513,17 @@ contains
             if (info%if_divide_rspace) then
               ! icomm_r reduces the unweighted projection across grid ranks;
               ! the caller's icomm_rko reduction reduces the weighted one.
-              ! CUDA-Fortran device buffers keep the reduction on the GPU --
-              ! managed memory would migrate the payload through host memory.
+              ! The unweighted slab is strided inside cur_out_all's leading
+              ! dimension, so MPI needs it packed into a contiguous buffer.
 !$acc wait
-!$acc kernels
+!$acc kernels present(cur_out_all) deviceptr(cur_dev_g)
               cur_dev_g(1:cur_max_nproj,1:cur_norb,1:cur_natom) = &
                   cur_out_all(1:cur_max_nproj,1:cur_norb,1:cur_natom)
 !$acc end kernels
               call MPI_Allreduce(cur_dev_g, cur_dev_g2, int(cur_max_nproj*cur_norb*cur_natom), &
                                  MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, cur_mpierr)
               call comm_show_error(cur_mpierr)
-!$acc kernels
+!$acc kernels present(cur_out_all) deviceptr(cur_dev_g2)
               cur_out_all(1:cur_max_nproj,1:cur_norb,1:cur_natom) = &
                   cur_dev_g2(1:cur_max_nproj,1:cur_norb,1:cur_natom)
 !$acc end kernels
