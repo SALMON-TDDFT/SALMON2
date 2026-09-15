@@ -99,12 +99,23 @@ Si levels reach 54 eV, which is 8.2 rad of phase per 0.1 fs step, and the S4
 composition leaks there. The default here is therefore `dt = 0.05 fs`, and `wiki/06`
 §7 asks for ≤0.02–0.05 fs at this field strength.
 
-**Open question, stated honestly:** at dt = 0.1 fs the absorbed work still grows
-~10 % per 8 bands through nstate = 36 with no flattening, and refining the mesh from
-5³ to 7³ makes that step *larger*, not smaller (+33 % vs +8 % for 28→36). Whether
-that survives a converged dt is exactly what `--dt-scan` is for. Until it is
-settled, `nstate = 32` is a budget choice with a known systematic, not a converged
-value.
+### Read the absorbed work only AFTER the drive stops
+
+The earlier version of this section reported that the absorbed work grows ~10 % per
+8 bands with no flattening, and that refining 5³ → 7³ makes that step larger. **Both
+numbers are withdrawn.** They were measured on the DAST field file, whose support
+runs to 3274 fs, inside a window that ended at 129 fs — i.e. *mid-pulse*. Before the
+drive ends, W(t) = -∫E·J dt is not absorbed energy at all: it is dominated by the
+reversible polarization the field has lent the crystal and not yet taken back. On
+that window the instantaneous power changed sign 1554 times and W was still rising
+at the edge. Differences of such a quantity do not converge in dt, in nstate, or in
+the mesh, because the quantity itself is not yet defined. That, and not a basis or
+mesh insufficiency, is why every series in the old text refused to settle.
+
+The analytic drive used here has **compact support**: E ≡ 0 for t > `tw1`, exactly,
+to the last bit. W(t) therefore goes flat and its plateau *is* the absorbed energy.
+Run to `tw1` + a field-free tail (the defaults give 273 fs + 57 fs) and read the
+plateau. Only then are dt, nstate and mesh comparable.
 
 ## 5. What to measure
 
