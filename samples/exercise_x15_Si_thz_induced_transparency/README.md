@@ -27,6 +27,13 @@ and they can all be submitted at once.
 `make_runs.py --help` lists the knobs (`--fields`, `--nk`, `--nstate`, `--dt-fs`,
 `--t-end-fs`, `--no-ring`, `--dt-scan`).
 
+**If a job is killed, restart with `Si_prim_sbe_rt_resume.inp`, not the original.**
+Every run checkpoints each 200 steps, but the plain input reopens the outputs with
+`status='replace'`, so restarting with it begins again from t = 0 — the checkpoint
+gets written and never read, which is the worst of both worlds. The resume twin adds
+`yn_sbe_checkpoint_restart='y'` and continues; `run_lomonosov.sbatch` picks it
+automatically when output and a checkpoint are both already present.
+
 ## 2. The drive: no field file
 
 The DAST transient used throughout this fork is a single cycle of E at ≈3.5 THz,

@@ -155,10 +155,18 @@ def write_run(outdir, tag, title, drive, emfield, ekv, a0, nk, nstate, dt, nt, r
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, 'Si_prim_epm_gs.inp'), 'w') as fh:
         fh.write(GS.format(nk=nk, nstate=nstate))
+    body = RT.format(title=title, drive=drive, emfield=emfield, ekv=ekv, a0=a0,
+                     a0au=a0 * 0.0241888 / 0.0529177 / 10.0,
+                     nk=nk, nstate=nstate, dt=dt, nt=nt, ring=ring, proj=proj)
     with open(os.path.join(d, 'Si_prim_sbe_rt.inp'), 'w') as fh:
-        fh.write(RT.format(title=title, drive=drive, emfield=emfield, ekv=ekv, a0=a0,
-                           a0au=a0 * 0.0241888 / 0.0529177 / 10.0,
-                           nk=nk, nstate=nstate, dt=dt, nt=nt, ring=ring, proj=proj))
+        fh.write(body)
+    # Resume twin. A wall-clock kill is normal on a cluster, and without this the
+    # restart begins from t = 0 (the solver opens the outputs with status='replace')
+    # -- the checkpoint is then written but never read, which is the worst of both.
+    with open(os.path.join(d, 'Si_prim_sbe_rt_resume.inp'), 'w') as fh:
+        fh.write(body.replace("  sbe_checkpoint_step      = 200",
+                              "  sbe_checkpoint_step      = 200\n"
+                              "  yn_sbe_checkpoint_restart = 'y'   ! continue from the checkpoint"))
     return d
 
 

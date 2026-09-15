@@ -13,5 +13,13 @@ RUNDIR="${1:?usage: sbatch run_lomonosov.sbatch <run-directory>}"
 SALMON="${SALMON:-salmon}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 cd "$RUNDIR"
-"$SALMON" < Si_prim_epm_gs.inp  > gs.log 2>&1
-"$SALMON" < Si_prim_sbe_rt.inp  > rt.log 2>&1
+[ -f Si_prim_tm.data ] || "$SALMON" < Si_prim_epm_gs.inp > gs.log 2>&1
+
+# Resume from the B4 checkpoint if this job is a requeue: without the resume input
+# the solver reopens the outputs with status='replace' and silently restarts from
+# t = 0, so a wall-clock kill would cost the whole run rather than <= 200 steps.
+INP=Si_prim_sbe_rt.inp
+if [ -s Si_prim_sbe_rt.data ] && ls ./*ckpt* >/dev/null 2>&1; then
+    INP=Si_prim_sbe_rt_resume.inp
+fi
+"$SALMON" < "$INP" >> rt.log 2>&1
