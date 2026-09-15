@@ -1342,6 +1342,42 @@ T(E₀) stand; only absolute conductances move.
   §8.7 logic) and by the T_e-consistent balance.
 - Reflection stays ≪ absorption (R ~ (Z₀σ/2)² — a few 10⁻³ even for σ ~ 5 σ_univ).
 
+## 8a. Why the energy in this exercise is read where it is (2026-09-15)
+
+`wiki/06` (addendum 2026-09-15) records three faults that made every Si convergence
+series in this repo diverge. Two of them are about *where* and *whether* an absorbed
+energy can be read at all, so they are worth stating here — this exercise is safe from
+both, but by construction rather than by luck.
+
+**Compact support, checked.** $W(t) = -\int \mathbf{E}\cdot\mathbf{J}\,V\,{\rm d}t$ is
+the absorbed energy only after the drive stops; before that it is mostly polarisation the
+field has lent the crystal and will take back. The DAST proxy used here
+(`DAST_E*kVcm.txt`) has support **0 → 284.4 fs** (|E| under 1e-4 of peak past 282.6 fs)
+against a run window of **0 → 384.4 fs** (`nt = 3844`, `dt = 0.1`). That leaves a 100 fs
+field-free tail, `transmission.py` takes the **final** `Eall - Eall0` from
+`*_sbe_rt_energy.data`, and its fluence integral and energy ledger are cross-checked to
+25 %. All correct.
+
+*What would break it:* regenerating or extending the field file. The Si exercise (x15)
+was fighting a DAST file whose support ran to **3274 fs** inside windows that ended at
+129 and 491.7 fs — every energy taken there was mid-pulse and none of the resulting
+series could converge. If you swap the drive, check its support against `nt*dt` first.
+
+**The resolution floor.** In `*_sbe_nex.data`, column 2 minus column 3 is the drift of
+the total trace — the solver's own noise floor, free with every run. On a driven
+6600-step Si run it reaches $\sim10^{11}$ cm$^{-3}$. Any residue below it has measured
+nothing. Use it on the `dark` control in particular.
+
+**The `dt` × basis artifact does not apply here — but only because `nstate` is 4.**
+Measured on Si: at `nstate` = 36 a 0.05 fs step manufactures $4.5\times10^{12}$ cm$^{-3}$
+of carriers, and halving the step removes 99.98 % of them, while at `nstate` = 28 the
+same `dt` change moves nothing ($-4.8\,\%$). The artifact needs a large basis *and* a
+coarse step together, which is why a one-knob-at-a-time scan cannot see it. The 4-band
+Dirac basis here has no stiff high manifold to leak into. **If you raise `nstate`, redo
+the `dt` check** — and redo it at the highest field, not the lowest, since the required
+step falls as the field rises. `dt` = 0.1 fs here has not been verified against 0.05 at
+100 kV/cm.
+
 ## 9. Limits recorded (not blockers for this study)
 
 1. **Initial state at T = 0, undoped** (`gs%occup` = integer filling): no thermal

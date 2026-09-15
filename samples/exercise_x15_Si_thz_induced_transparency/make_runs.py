@@ -196,8 +196,8 @@ def main():
     ring = 'n' if a.no_ring else 'y'
     made = []
 
-    def emit(tag, title, ekv, dt, ring_):
-        nt = int(round(a.t_end_fs / dt))
+    def emit(tag, title, ekv, dt, ring_, t_end=None):
+        nt = int(round((t_end if t_end is not None else a.t_end_fs) / dt))
         proj = max(1, int(round(20.0 / dt)))
         if ekv > 0:
             amp = (ekv / 1e5) / PEAK_OVER_F0
@@ -218,8 +218,13 @@ def main():
         emit('E%gkVcm' % ekv, 'Si THz induced transparency, %g kV/cm' % ekv, ekv, a.dt_fs, ring)
     emit('dark', 'Si zero-field control (ring on, no drive)', 0.0, a.dt_fs, ring)
     if a.dt_scan:
+        # The dt set only has to reach the plateau and hold it, so it runs on a short
+        # window (tw + 60 fs) instead of the field scan's 600 fs. At dt = 0.0125 that is
+        # 26640 steps rather than 48000 -- the check is the point, not the tail length.
+        t_dt = a.tw_fs + 60.0
         for dt in (0.1, 0.05, 0.025, 0.0125):
-            emit('dtscan_%g_E1000' % dt, 'dt convergence at 1000 kV/cm', 1000.0, dt, ring)
+            emit('dtscan_%g_E1000' % dt, 'dt convergence at 1000 kV/cm', 1000.0, dt, ring,
+                 t_end=t_dt)
 
     with open(os.path.join(a.outdir, 'MANIFEST.txt'), 'w') as fh:
         fh.write('\n'.join(made) + '\n')

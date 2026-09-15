@@ -89,7 +89,9 @@ is identically zero. See `wiki/12` §6a scope note.
 
 ## 4. Converge dt before you converge nstate
 
-`--dt-scan` emits `dtscan_{0.1,0.05,0.025,0.0125}_E1000`. Run those **first**.
+`--dt-scan` emits `dtscan_{0.1,0.05,0.025,0.0125}_E1000`. Run those **first**. They use a
+short window (`tw1` + 60 fs) because all they have to do is reach the plateau and hold
+it — 3330 to 26640 steps instead of 24000 to 192000.
 
 This ordering is not pedantry. `wiki/06` §6(i) measured, on this same material and
 this same drive, that at an unconverged dt the carrier density *climbs* with the
@@ -107,6 +109,11 @@ post-pulse plateau:
 | 28 | 1.7795e-12 eV/cell | 1.6945e-12 | −4.8 % |
 | 36 | **1.2306e-08** | **1.9897e-12** | **−99.98 %** |
 | step in nstate | **×6914** | +17 % | |
+
+The artifact is **not** a mesh effect: the same (36, 0.05) run on 7³ gives 6.476e-09
+eV/cell against 1.2306e-08 on 5³. Refining the mesh scales it by 0.53; halving the step
+scales it by 1/6185. Note the trap in that mesh column — taken alone, −47 % from 5³ to
+7³ is exactly what ordinary convergence looks like.
 
 Three corners agree at the noise floor; only (36, 0.05) escapes it. Sweep nstate at
 dt = 0.05 and you walk into that corner and see a band-count dependence that never
@@ -163,6 +170,18 @@ experiment. `wiki/06`, addendum 2026-09-15, has the numbers.
 `*_sbe_rt.data` and reports the transmission and the absorbed energy; point it at a
 run directory. The `dark` run is the control — subtract it, and if it is not
 identically zero, stop and find out why before reading anything else.
+
+**Read the absorbed energy on the plateau, past `tw1` = 273 fs, and check its drift
+across the field-free tail is zero.** With the defaults (`--t-end-fs 600`) that tail is
+327 fs, so the plateau is unmissable — but it only exists because this drive has compact
+support. The number to trust is the flat one; a W still moving at the window edge is not
+an absorbed energy, whatever else it is (§4).
+
+**Then check it against the floor.** In `*_sbe_nex.data`, column 2 minus column 3 is the
+drift of the total trace, which is the solver's own resolution limit — about 1e11 cm⁻³
+over a 6600-step run. A residue under that has measured nothing. At 1000 kV/cm with the
+dissipators **on** the densities are orders above it, so this bites the convergence
+scans, not the field scan; the `dark` control is where it matters most.
 
 | directory | what it is for |
 |---|---|
