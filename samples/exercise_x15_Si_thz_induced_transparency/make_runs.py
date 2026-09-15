@@ -2,7 +2,7 @@
 """Generate the x15 run tree: one SELF-CONTAINED directory per run.
 
     python3 make_runs.py [--fields 100,300,1000,3000] [--nk 9] [--nstate 32]
-                         [--dt-fs 0.05] [--t-end-fs 600] [--dt-scan] [--outdir runs]
+                         [--dt-fs 0.025] [--t-end-fs 600] [--dt-scan] [--outdir runs]
 
 WHY SUBDIRECTORIES.  The EPM ground state writes `Si_prim_k.data`,
 `Si_prim_eigen.data` and `Si_prim_tm.data` into the CURRENT directory, and the SBE
@@ -176,7 +176,14 @@ def main():
     ap.add_argument('--fields', default='100,300,1000,3000', help='peak |E| [kV/cm]')
     ap.add_argument('--nk', type=int, default=9)
     ap.add_argument('--nstate', type=int, default=32)
-    ap.add_argument('--dt-fs', type=float, default=0.05)
+    # 0.025, not 0.05. Measured on Si 5^3 at 1000 kV/cm, coherent: at nstate = 36
+    # a 0.05 fs step manufactures 4.5e12 cm^-3 of carriers out of nothing, and
+    # halving the step removes 99.98 % of them (W_plateau 1.23e-8 -> 1.99e-12
+    # eV/cell, a factor 6185). The fake pairs are e/h-balanced to three digits, so
+    # they pass every check except this one. nstate = 28 shows no such inflation at
+    # 0.05 fs -- the step a run needs falls as the band ceiling and the field rise,
+    # and the default nstate = 32 sits between the two measured points.
+    ap.add_argument('--dt-fs', type=float, default=0.025)
     ap.add_argument('--t-end-fs', type=float, default=600.0)
     ap.add_argument('--tw-fs', type=float, default=273.0)
     ap.add_argument('--dt-scan', action='store_true',
@@ -211,7 +218,7 @@ def main():
         emit('E%gkVcm' % ekv, 'Si THz induced transparency, %g kV/cm' % ekv, ekv, a.dt_fs, ring)
     emit('dark', 'Si zero-field control (ring on, no drive)', 0.0, a.dt_fs, ring)
     if a.dt_scan:
-        for dt in (0.1, 0.05, 0.025):
+        for dt in (0.1, 0.05, 0.025, 0.0125):
             emit('dtscan_%g_E1000' % dt, 'dt convergence at 1000 kV/cm', 1000.0, dt, ring)
 
     with open(os.path.join(a.outdir, 'MANIFEST.txt'), 'w') as fh:

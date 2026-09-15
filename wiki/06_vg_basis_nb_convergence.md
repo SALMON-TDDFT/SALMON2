@@ -496,9 +496,11 @@ read, so with dissipators **on** such a spike would inject real carriers. It doe
 affect anything here (this scan is coherent) but it should be chased before the
 production runs.
 
-So **the mesh was never the problem.** In the coherent below-gap regime silicon absorbs
-nothing measurable at this field, the two meshes agree on that zero, and every series
-built on top of it was a series of ratios of noise. Note that the formal step here is
+So **the mesh was never the problem** *at this band count*. In the coherent below-gap
+regime silicon absorbs nothing measurable at this field, the two meshes agree on that
+zero, and every series built on top of it was a series of ratios of noise. (At
+$n_b$ = 36 the $5^3$ run does leave the floor — but only at `dt` = 0.05 fs, and Fault 3
+below shows that is the step error, not the mesh.) Note that the formal step here is
 $-67\,\%$ — as uncitable as the $+33\,\%$ it replaces, and for the same reason. **When
 both endpoints are at the floor, quote the absolute values and the floor, never the
 percentage.**
@@ -506,6 +508,48 @@ percentage.**
 This floor is a property of the run length, not of the physics: with dissipators on, the
 carrier densities the induced-transparency experiment is about are 6–7 orders above it.
 The floor only ever obstructed what these scans were doing — comparing zeros.
+
+### Fault 3: at 1000 kV/cm, `dt` = 0.05 fs invents carriers once the basis is large
+
+The two rows above are both `nstate` = 28. Raising the basis to 36 at the *same* mesh
+and the *same* step changes the answer by a factor of 7000 — and then halving the step
+takes it all back:
+
+| $n_b$ | `dt` = 0.05 fs | `dt` = 0.025 fs | |
+|---|---|---|---|
+| 28 | $1.7795\times10^{-12}$ | — | at the floor |
+| 36 | $\mathbf{1.2306\times10^{-8}}$ | $1.9897\times10^{-12}$ | **×6185 inflated at 0.05** |
+
+(Si, $5^3$, coherent, $W_{\rm plateau}$ in eV/cell.) At `dt` = 0.05 fs and $n_b$ = 36 the
+solver reports $4.53\times10^{12}$ cm$^{-3}$ of carriers; at 0.025 fs it reports
+$8.4\times10^{8}$ with $n_{\rm hole}$ back to $-2.5\times10^{10}$, i.e. the floor that
+$n_b$ = 28 was already on. **99.98 % of that population was the step error.**
+
+This is §6's mechanism — "the dt-error was filling each newly-available band, *faking* a
+basis-insufficiency" — at 10× the field §6 used, where it amplifies ×6185 instead of
+×40. The step a run needs falls as the band ceiling and the field rise, so a `dt` that
+was adequate at 100 kV/cm and $n_b$ = 8 is not adequate at 1000 kV/cm and $n_b$ = 36.
+
+**The physics conclusion survives, now by two independent routes.** $(n_b = 28,\,
+{\rm d}t = 0.05)$ and $(n_b = 36,\, {\rm d}t = 0.025)$ give $1.78\times10^{-12}$ and
+$1.99\times10^{-12}$ eV/cell — the same floor, from opposite corners. Coherent Si at
+1 MV/cm and 1.8 THz promotes nothing above $\sim10^{11}$ cm$^{-3}$, as the Zener
+estimate said. And the `nstate` dependence that wrecked every earlier scan was never a
+basis insufficiency; it was this.
+
+### The e/h test is necessary but NOT sufficient — three checks, all required
+
+The fake $4.5\times10^{12}$ cm$^{-3}$ came with $n_{\rm elec} = 4.527\times10^{12}$ and
+$n_{\rm hole} = 4.509\times10^{12}$ — **balanced to three digits**, because a step error
+drives a coherent valence→conduction transfer exactly as a real excitation does. Matched
+pairs prove the transfer is not trace drift; they do not prove it is physical. Before
+believing any residue:
+
+1. $n_{\rm elec} \approx n_{\rm hole}$ — separates real transfer from trace drift;
+2. the residue exceeds the trace drift (column 2 − column 3) — Fault 2;
+3. **it survives halving `dt`** — Fault 3, and the only check that catches this one.
+
+Criterion 3 is not optional and not expensive relative to being wrong by 6185×.
 
 ### Does this retract the dark-control mesh table (wiki/12)?
 

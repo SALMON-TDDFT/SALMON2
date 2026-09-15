@@ -89,7 +89,7 @@ is identically zero. See `wiki/12` §6a scope note.
 
 ## 4. Converge dt before you converge nstate
 
-`--dt-scan` emits `dtscan_{0.1,0.05,0.025}_E1000`. Run those **first**.
+`--dt-scan` emits `dtscan_{0.1,0.05,0.025,0.0125}_E1000`. Run those **first**.
 
 This ordering is not pedantry. `wiki/06` §6(i) measured, on this same material and
 this same drive, that at an unconverged dt the carrier density *climbs* with the
@@ -98,6 +98,27 @@ each newly-available band, **faking** a basis-insufficiency". At nstate = 28…3
 Si levels reach 54 eV, which is 8.2 rad of phase per 0.1 fs step, and the S4
 composition leaks there. The default here is therefore `dt = 0.05 fs`, and `wiki/06`
 §7 asks for ≤0.02–0.05 fs at this field strength.
+
+**Measured, and it is worse than §7 suggests.** Si $5^3$, 1000 kV/cm, coherent,
+post-pulse plateau:
+
+| nstate | dt = 0.05 fs | dt = 0.025 fs | |
+|---|---|---|---|
+| 28 | 1.7795e-12 eV/cell | *(running)* | at the noise floor |
+| 36 | **1.2306e-08** | **1.9897e-12** | **×6185 inflated at 0.05** |
+
+At nstate = 36 a 0.05 fs step manufactures 4.5e12 cm⁻³ of carriers out of nothing;
+halving the step removes 99.98 % of them and lands on the same floor nstate = 28
+already sat on. The default is therefore `dt = 0.025 fs`, not 0.05.
+
+The fake carriers are **electron–hole balanced to three digits** (4.527e12 vs
+4.509e12), because the step error drives a coherent valence→conduction transfer like a
+real one. So e/h agreement does not prove a residue is physical. Three checks, all
+required:
+
+1. `nelec` ≈ `nhole` — separates population transfer from trace drift;
+2. the residue exceeds the trace drift (column 2 − column 3 of `_sbe_nex.data`);
+3. **it survives halving `dt`** — the only one that catches this failure.
 
 ### Read the absorbed work only AFTER the drive stops
 
