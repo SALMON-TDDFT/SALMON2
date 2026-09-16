@@ -244,7 +244,7 @@ contains
         call chebyshev_filter(s,layout_natural,layout_dense,x, &
         & eigenvalue(1),lambda_cut,lambda_upper, &
         & gershgorin_upper,nlocked,workspace)
-        call orthonormalize(layout_natural,layout_dense, &
+        call orthonormalize(s,layout_natural,layout_dense, &
         & layout_small,x,nlocked,workspace)
         call rayleigh_ritz(s,layout_natural,layout_dense, &
         & layout_small,x,eigenvalue,nlocked,workspace)
@@ -605,6 +605,7 @@ contains
         end if
         upper = fallback_upper
         call redistribute_to_natural(layout_d,workspace%xrot,layout_n,x)
+        call zero_padding_rows(s,layout_n,x)
         can_retry = .false.
         if(dc%id_tot==0) write(*,*) &
         & "CheFSI filter fallback to Gershgorin upper bound:",upper
@@ -612,12 +613,12 @@ contains
       call timer_end(LOG_CHEFSI_FILTER)
     end subroutine chebyshev_filter
 
-    subroutine orthonormalize(layout_n,layout_d,layout_g,x,nlocked, &
+    subroutine orthonormalize(s,layout_n,layout_d,layout_g,x,nlocked, &
     & workspace)
       use timer, only: LOG_CHEFSI_ORTHO,timer_begin,timer_end
       implicit none
       type(s_matrix_layout), intent(in) :: layout_n,layout_d,layout_g
-      integer, intent(in) :: nlocked
+      integer, intent(in) :: s,nlocked
       real(8), intent(inout) :: x(:,:)
       type(s_chefsi_workspace), intent(inout) :: workspace
       type(s_matrix_layout) :: layout_active,layout_active_small
@@ -660,6 +661,7 @@ contains
       end do
       call redistribute_active_to_natural(layout_active,workspace%xrot, &
       & layout_n,x,nlocked,nactive)
+      call zero_padding_rows(s,layout_n,x)
       call timer_end(LOG_CHEFSI_ORTHO)
     end subroutine orthonormalize
 
@@ -741,8 +743,22 @@ contains
       call timer_end(LOG_CHEFSI_ROTATE)
       call redistribute_active_to_natural(layout_active,workspace%xrot, &
       & layout_n,x,nlocked,nactive)
+      call zero_padding_rows(s,layout_n,x)
       call timer_end(LOG_CHEFSI_RAYLEIGH_RITZ)
     end subroutine rayleigh_ritz
+
+    subroutine zero_padding_rows(s,layout,x)
+      implicit none
+      integer, intent(in) :: s
+      type(s_matrix_layout), intent(in) :: layout
+      real(8), intent(inout) :: x(:,:)
+      integer :: nb
+
+      nb = n_basis(dc%i_frag,s)
+      if(nb<max_basis .and. layout%ncol_local>0) then
+        x(nb+1:max_basis,1:layout%ncol_local) = 0d0
+      end if
+    end subroutine zero_padding_rows
 
     subroutine diagonalize_projected(layout,projected,nactive,eigenvalue, &
     & vector,work,iwork)
