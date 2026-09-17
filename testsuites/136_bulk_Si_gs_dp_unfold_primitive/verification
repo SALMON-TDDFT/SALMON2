@@ -9,8 +9,8 @@
 # same al/natom/nstate/nelec/xc/rgrid/num_kgrid/scf settings as
 # 111_bulk_Si_gs_dp, its Si_eigen.data would use the same k-point grid, and
 # copied 111's own reference values verbatim. This was WRONG. Setting
-# dm_unfold_option='primitive' makes src/common/lattice.f90's init_kvector
-# take a different branch (case('primitive') instead of case('no')), which
+# dm_unfold_option='reference' makes src/common/lattice.f90's init_kvector
+# take a different branch (case('reference') instead of case('no')), which
 # builds k-points from num_kgrid/num_lkgrid with a boundary-inclusive
 # scheme (like yn_gamma_centered='y'), not the ordinary grid 111 uses. For
 # num_kgrid=2,2,2 and num_lkgrid=1,1,1 this produces 27 k-points, not 8

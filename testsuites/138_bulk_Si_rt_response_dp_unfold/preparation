@@ -11,7 +11,7 @@ cp ../pseudo/Si_rps.dat ./
 # supercell ground state -> normal RT restart (directory_read_data default: restart/)
 ln -s ../137_bulk_Si_gs_dp_unfold_super/data_for_restart ./restart
 
-# primitive-cell ground state -> consumed via the hardcoded relative path
-# 'primitive/wfn.bin', 'primitive/occupation.bin', 'primitive/tm.bin'
+# reference-cell ground state -> consumed via the hardcoded relative path
+# 'reference/wfn.bin', 'reference/occupation.bin', 'reference/tm.bin'
 # in src/analysis/dm_unfold.f90 (init_dm_unfold)
-ln -s ../136_bulk_Si_gs_dp_unfold_primitive/data_for_restart ./primitive
+ln -s ../136_bulk_Si_gs_dp_unfold_primitive/data_for_restart ./reference

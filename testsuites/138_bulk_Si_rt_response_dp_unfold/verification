@@ -12,26 +12,27 @@
 #
 # NOTE: an earlier version of this script checked column 11
 # ("Jz:<u[r,V]u>-d[a.u.]") against reference values measured with
-# &unfolding/no_pr=16 in this test's inputfile. That was WRONG: no_pr is the
-# number of primitive-cell bands used to expand the supercell orbitals
-# (see unfolding.tex, the C_{n k-hat;mK} expansion), and needs to span the
-# primitive-cell run's full band set (136's nstate=32), not just its
-# occupied bands (16). With the too-small no_pr=16, the expansion basis was
-# incomplete and "Tr[rho(t)]" (column 5) came out as ~14.6 instead of the
-# physically-required ~32 (the primitive 8-atom cell's electron count) -
+# &unfolding/no_pr=16 in this test's inputfile (no_pr was later renamed
+# no_ref). That was WRONG: no_ref is the number of reference-cell bands
+# used to expand the supercell orbitals (see unfolding.tex, the
+# C_{n k-hat;mK} expansion), and needs to span the reference-cell run's
+# full band set (136's nstate=32), not just its occupied bands (16). With
+# the too-small no_ref=16, the expansion basis was incomplete and
+# "Tr[rho(t)]" (column 5) came out as ~14.6 instead of the
+# physically-required ~32 (the reference 8-atom cell's electron count) -
 # caught by comparing against the expected electron count, not by a
-# build-to-build CI mismatch. With no_pr corrected to 32, Tr[rho(t)] comes
+# build-to-build CI mismatch. With no_ref corrected to 32, Tr[rho(t)] comes
 # out right (~32), but column 11 itself turns out to be ~1e-11 - essentially
 # numerical noise for this system - so it is no longer a suitable
 # regression-check quantity. This version instead checks:
 #   - Tr[rho(t)] (column 5): should stay close to 32, which directly guards
-#     against a future no_pr misconfiguration reintroducing this bug.
+#     against a future no_ref misconfiguration reintroducing this bug.
 #   - Jz:rho (column 29, "J:rho(t)<unk|i[h,r]|unk>" z-component printed to
 #     stdout): the full physical current response, which is a well-behaved,
 #     non-near-zero, meaningfully time-varying quantity for this system.
 #
 # Reference values below are taken from an actual run (1 node, 4 MPI
-# processes) with &unfolding/no_pr=32.
+# processes) with &unfolding/no_ref=32.
 
 import sys
 import os
@@ -67,9 +68,9 @@ tr2 = float(data_lines[1].split()[tr_column])    # itt=10 (t=1.6)
 v1 = float(data_lines[0].split()[jzrho_column])  # itt=1  (t=0.16)
 v2 = float(data_lines[1].split()[jzrho_column])  # itt=10 (t=1.6)
 
-# Tr[rho(t)] should stay close to the primitive-cell electron count (32).
-# This is the check that catches a no_pr misconfiguration (an incomplete
-# primitive-cell expansion basis systematically undercounts this trace).
+# Tr[rho(t)] should stay close to the reference-cell electron count (32).
+# This is the check that catches a no_ref misconfiguration (an incomplete
+# reference-cell expansion basis systematically undercounts this trace).
 reference_value_tr = 32.0
 permissible_error_tr = 0.01
 

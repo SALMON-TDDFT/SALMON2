@@ -431,13 +431,13 @@ module structures
   end type s_md
 
   type s_unfold
-    complex(8),allocatable :: psi_pr(:,:,:,:,:,:,:), psi_prG(:,:,:,:,:,:,:)
+    complex(8),allocatable :: psi_ref(:,:,:,:,:,:,:), psi_refG(:,:,:,:,:,:,:)
     integer :: nhk, nsk, num_hkgrid(3)
     integer,allocatable :: isk_tbl(:,:)
-    real(8),allocatable :: vec_hk(:,:), wtk_pr(:)
+    real(8),allocatable :: vec_hk(:,:), wtk_ref(:)
     complex(8),allocatable :: eihkr_tbl(:,:,:,:)
-    real(8),allocatable :: rocc_pr(:,:,:), nq_gs(:,:,:)
-    complex(8),allocatable :: upu_pr(:,:,:,:), u_rVnl_Vnlr_u_pr(:,:,:,:)
+    real(8),allocatable :: rocc_ref(:,:,:), nq_gs(:,:,:)
+    complex(8),allocatable :: upu_ref(:,:,:,:), u_rVnl_Vnlr_u_ref(:,:,:,:)
   end type s_unfold
 
 ! output files

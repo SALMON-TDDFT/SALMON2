@@ -49,7 +49,7 @@
 /
 
 &unfolding
-  dm_unfold_option = 'primitive'
+  dm_unfold_option = 'reference'
   num_lkgrid = 1, 1, 1
 /
 

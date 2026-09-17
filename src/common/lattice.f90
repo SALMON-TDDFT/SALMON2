@@ -208,11 +208,11 @@ SUBROUTINE init_kvector(system,unfold)
 
       end if
 
-    case('primitive') ! preparation for dm_unfold calculation
+    case('reference') ! preparation for dm_unfold calculation
 
       num_sk(:) = num_kgrid(:)
       num_lk(:) = num_lkgrid(:)
-      if( sum(mod(num_sk(:),num_lk(:))) /= 0) stop 'mod(num_sk,num_lk) /= 0 in dm_unfold, primitive'
+      if( sum(mod(num_sk(:),num_lk(:))) /= 0) stop 'mod(num_sk,num_lk) /= 0 in dm_unfold, reference'
       num_hk(:) = num_sk(:)/num_lk(:) 
       nsk0 = num_sk(1)*num_sk(2)*num_sk(3)
       eo_lk(:) = mod(num_lk(:),2)
@@ -256,7 +256,7 @@ SUBROUTINE init_kvector(system,unfold)
       enddo
       enddo
       if (comm_is_root(nproc_id_global)) then
-        write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'dm_unfold_option=primitive, nk=', nk, 'sum(wtk)=', sum(wtk)
+        write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'dm_unfold_option=reference, nk=', nk, 'sum(wtk)=', sum(wtk)
       end if
 
     case('super') ! dm_unfold calculation
@@ -300,7 +300,7 @@ SUBROUTINE init_kvector(system,unfold)
       unfold%num_hkgrid(1:3) = num_hk(:)
       unfold%nsk = nsk
       allocate( hks(3,nhk) )
-      allocate( unfold%vec_hk(3, nhk), unfold%isk_tbl(nlk, nhk), unfold%wtk_pr(nsk) )
+      allocate( unfold%vec_hk(3, nhk), unfold%isk_tbl(nlk, nhk), unfold%wtk_ref(nsk) )
 
       ihk = 0
       do ihk3 = eo_hk(3),num_hk(3)
@@ -321,7 +321,7 @@ SUBROUTINE init_kvector(system,unfold)
       end do
 
       nsk0 = num_sk(1)*num_sk(2)*num_sk(3)
-      unfold%wtk_pr(:) = 1d0/dble(nsk0)
+      unfold%wtk_ref(:) = 1d0/dble(nsk0)
       isk = 0
       ilk=0
       do ilk3 = eo_lk(3),num_lk(3)
@@ -335,12 +335,12 @@ SUBROUTINE init_kvector(system,unfold)
         isk = isk + 1
         ihk = ihk + 1
         unfold%isk_tbl(ilk,ihk) = isk
-        if(eo_lk(1) == 0 .and. (ilk1 == 0 .or. ilk1 == num_lk(1))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
-        if(eo_lk(2) == 0 .and. (ilk2 == 0 .or. ilk2 == num_lk(2))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
-        if(eo_lk(3) == 0 .and. (ilk3 == 0 .or. ilk3 == num_lk(3))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
-        if(eo_hk(1) == 0 .and. (ihk1 == 0 .or. ihk1 == num_hk(1))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
-        if(eo_hk(2) == 0 .and. (ihk2 == 0 .or. ihk2 == num_hk(2))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
-        if(eo_hk(3) == 0 .and. (ihk3 == 0 .or. ihk3 == num_hk(3))) unfold%wtk_pr(isk) = unfold%wtk_pr(isk)/2d0
+        if(eo_lk(1) == 0 .and. (ilk1 == 0 .or. ilk1 == num_lk(1))) unfold%wtk_ref(isk) = unfold%wtk_ref(isk)/2d0
+        if(eo_lk(2) == 0 .and. (ilk2 == 0 .or. ilk2 == num_lk(2))) unfold%wtk_ref(isk) = unfold%wtk_ref(isk)/2d0
+        if(eo_lk(3) == 0 .and. (ilk3 == 0 .or. ilk3 == num_lk(3))) unfold%wtk_ref(isk) = unfold%wtk_ref(isk)/2d0
+        if(eo_hk(1) == 0 .and. (ihk1 == 0 .or. ihk1 == num_hk(1))) unfold%wtk_ref(isk) = unfold%wtk_ref(isk)/2d0
+        if(eo_hk(2) == 0 .and. (ihk2 == 0 .or. ihk2 == num_hk(2))) unfold%wtk_ref(isk) = unfold%wtk_ref(isk)/2d0
+        if(eo_hk(3) == 0 .and. (ihk3 == 0 .or. ihk3 == num_hk(3))) unfold%wtk_ref(isk) = unfold%wtk_ref(isk)/2d0
       enddo
       enddo
       enddo

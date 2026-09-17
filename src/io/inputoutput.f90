@@ -617,7 +617,7 @@ contains
       & dm_unfold_option, &
       & num_lkgrid, &
       & num_skgrid, &
-      & no_pr, &
+      & no_ref, &
       & out_dm_unfold_step, &
       & yn_out_mom_distr_gs, &
       & yn_out_mom_distr_rt, &
@@ -1064,7 +1064,7 @@ contains
     dm_unfold_option = 'no'
     num_lkgrid = 1
     num_skgrid = 1
-    no_pr = 0
+    no_ref = 0
     out_dm_unfold_step = 100
     yn_out_mom_distr_gs = 'n'
     yn_out_mom_distr_rt = 'n'
@@ -1717,7 +1717,7 @@ contains
     call comm_bcast(dm_unfold_option, nproc_group_global)
     call comm_bcast(num_lkgrid, nproc_group_global)
     call comm_bcast(num_skgrid, nproc_group_global)
-    call comm_bcast(no_pr, nproc_group_global)
+    call comm_bcast(no_ref, nproc_group_global)
     call comm_bcast(out_dm_unfold_step, nproc_group_global)
     call comm_bcast(yn_out_mom_distr_gs, nproc_group_global)
     call comm_bcast(yn_out_mom_distr_rt, nproc_group_global)
@@ -2726,7 +2726,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(1)', num_skgrid(1)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(2)', num_skgrid(2)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
-      write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_pr', no_pr
+      write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_ref', no_ref
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
