@@ -28,10 +28,12 @@ contains
   use communication, only: comm_is_root, comm_bcast, comm_summation
   use parallelization, only: nproc_id_global, nproc_group_global, end_parallel
   use salmon_global, only: dm_unfold_option, no_ref, base_directory, sysname, natom, izatom, kion, &
-                         & yn_out_mom_distr_gs, dq_mom, nq_mom, num_kgrid
+                         & yn_out_mom_distr_gs, dq_mom, nq_mom, num_kgrid, &
+                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
   use math_constants, only: zI,pi
+  use lattice, only: calc_inverse
 #ifdef USE_MPI
   use mpi
 #endif
@@ -58,6 +60,10 @@ contains
   complex(8) :: zsum
   real(8),allocatable :: reta_uu(:,:,:,:),nq_l(:,:,:),nq_l_private(:,:,:)
   logical :: exists, e_occupation, e_wfn, e_tm
+  integer :: i
+  real(8) :: a_pr(3,3), ainv_pr(3,3), detA_pr, pmat_r(3,3), pmat_resid
+  real(8) :: norm_pr(3), A_ref(3,3)
+  integer :: pmat_i(3,3)
 
   if( dm_unfold_option /= 'super' ) then
     if (comm_is_root(nproc_id_global)) then
@@ -77,6 +83,101 @@ contains
 
   if(comm_is_root(nproc_id_global)) then
     write(*,*) 'Entering init_dm_unfold'
+  end if
+
+  ! reference-cell lattice vectors: the 'super'-stage run's own cell
+  ! (system%primitive_a) divided by unfold%num_hkgrid along each direction
+  ! -- the same integer ratio already used to build B_ref/omega_ref below.
+  ! This keeps al_pr/al_vec1-3_pr expressed at the natural (small) size of
+  ! the reference cell, matching the 'reference'-stage run, rather than
+  ! forcing the user to specify them at the much larger supercell scale.
+  A_ref(:,1) = system%primitive_a(:,1) / dble(unfold%num_hkgrid(1))
+  A_ref(:,2) = system%primitive_a(:,2) / dble(unfold%num_hkgrid(2))
+  A_ref(:,3) = system%primitive_a(:,3) / dble(unfold%num_hkgrid(3))
+
+  ! primitive-to-reference correspondence: build a^P from al_pr/al_vec1-3_pr
+  ! (same orthogonal-vs-general convention as al/al_vec1-3 in init_dft_system),
+  ! then compute the integer matrix P from a^R = A_ref (the reference cell,
+  ! see above) and a^P. The note stores lattice vectors as matrix ROWS, but
+  ! this code stores them as matrix COLUMNS (a_pr(1:3,j) = a^P_j), so here
+  ! A_R = A_P * P and P = (A_P)^{-1} A_R. A diagonal/orthogonal test cell
+  ! cannot distinguish this from the note's own row-convention formula; a
+  ! non-diagonal example is needed.
+  ! al_pr/al_vec1-3_pr are optional: only when ALL of them are exactly
+  ! zero is this cell treated as its own primitive cell (a^P = a^R, P = I)
+  ! -- this is a "no R->P decomposition performed" default, not a claim
+  ! that the cell is physically primitive. Any other partial/incomplete
+  ! specification is rejected as an error, never silently defaulted.
+  if( sum(abs(al_pr))==0d0 .and. &
+      sum(abs(al_vec1_pr))+sum(abs(al_vec2_pr))+sum(abs(al_vec3_pr))==0d0 ) then
+
+    a_pr = A_ref
+    pmat_i = 0
+    pmat_i(1,1) = 1 ; pmat_i(2,2) = 1 ; pmat_i(3,3) = 1
+
+  else
+
+    if(al_vec1_pr(2)==0d0 .and. al_vec1_pr(3)==0d0 .and. al_vec2_pr(1)==0d0 .and. &
+       al_vec2_pr(3)==0d0 .and. al_vec3_pr(1)==0d0 .and. al_vec3_pr(2)==0d0) then
+      ! orthogonal case: accept al_pr, or else a diagonal-only al_vec1-3_pr
+      ! (mirrors the al/al_vec1(1),al_vec2(2),al_vec3(3) fallback in
+      ! init_dft_system) -- anything less complete than that is an error.
+      if( al_pr(1)*al_pr(2)*al_pr(3) /= 0d0 ) then
+        a_pr = 0d0
+        a_pr(1,1) = al_pr(1)
+        a_pr(2,2) = al_pr(2)
+        a_pr(3,3) = al_pr(3)
+      else if( al_vec1_pr(1)*al_vec2_pr(2)*al_vec3_pr(3) /= 0d0 ) then
+        a_pr = 0d0
+        a_pr(1,1) = al_vec1_pr(1)
+        a_pr(2,2) = al_vec2_pr(2)
+        a_pr(3,3) = al_vec3_pr(3)
+      else
+        stop 'incomplete primitive-cell lattice vectors (al_pr/al_vec1-3_pr) in dm_unfold, super'
+      end if
+    else
+      a_pr(1:3,1) = al_vec1_pr
+      a_pr(1:3,2) = al_vec2_pr
+      a_pr(1:3,3) = al_vec3_pr
+    end if
+
+    ! reject a zero-length vector, and a degenerate/near-singular cell,
+    ! BEFORE calc_inverse (which divides by det unconditionally). The
+    ! degeneracy test is the dimensionless |det(A_P)|/(|a1||a2||a3|),
+    ! not a bare |det(A_P)| threshold, so it does not depend on the
+    ! overall size of the primitive cell.
+    norm_pr(1) = sqrt(sum(a_pr(1:3,1)**2))
+    norm_pr(2) = sqrt(sum(a_pr(1:3,2)**2))
+    norm_pr(3) = sqrt(sum(a_pr(1:3,3)**2))
+    if( any(norm_pr(:) < 1d-12) ) then
+      stop 'zero-length primitive-cell lattice vector (al_pr/al_vec1-3_pr) in dm_unfold, super'
+    end if
+
+    detA_pr = a_pr(1,1)*a_pr(2,2)*a_pr(3,3) + a_pr(2,1)*a_pr(3,2)*a_pr(1,3) + a_pr(3,1)*a_pr(1,2)*a_pr(2,3) &
+            - a_pr(1,3)*a_pr(2,2)*a_pr(3,1) - a_pr(2,3)*a_pr(3,2)*a_pr(1,1) - a_pr(3,3)*a_pr(1,2)*a_pr(2,1)
+    if( abs(detA_pr)/(norm_pr(1)*norm_pr(2)*norm_pr(3)) < 1d-8 ) then
+      stop 'degenerate primitive-cell lattice vectors (al_pr/al_vec1-3_pr) in dm_unfold, super'
+    end if
+
+    call calc_inverse(a_pr, ainv_pr, detA_pr)
+    pmat_r = matmul(ainv_pr, A_ref)
+    pmat_i = nint(pmat_r)
+    pmat_resid = maxval(abs(pmat_r - dble(pmat_i)))
+    if( pmat_resid > 1d-6 ) then
+      stop 'reference-cell lattice vectors (derived from al/al_vec1-3 and num_skgrid/num_kgrid) are not &
+        &an integer multiple of al_pr/al_vec1-3_pr (P is not an integer matrix) in dm_unfold, super'
+    end if
+
+  end if
+
+  unfold%a_pr = a_pr
+  unfold%pmat = pmat_i
+
+  if (comm_is_root(nproc_id_global)) then
+    write(*,"(A)") 'dm_unfold_option=super: primitive-to-reference matrix P (A_R = A_P * P, a^R_i = sum_j P(j,i) a^P_j):'
+    do i = 1,3
+      write(*,"(3I6)") pmat_i(i,1:3)
+    end do
   end if
 
   if (comm_is_root(nproc_id_global)) then

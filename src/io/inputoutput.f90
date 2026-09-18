@@ -619,6 +619,8 @@ contains
       & num_skgrid, &
       & no_ref, &
       & out_dm_unfold_step, &
+      & al_pr, &
+      & al_vec1_pr,al_vec2_pr,al_vec3_pr, &
       & yn_out_mom_distr_gs, &
       & yn_out_mom_distr_rt, &
       & out_mom_distr_rt_step, &
@@ -1066,6 +1068,10 @@ contains
     num_skgrid = 1
     no_ref = 0
     out_dm_unfold_step = 100
+    al_pr             = 0d0
+    al_vec1_pr        = 0d0
+    al_vec2_pr        = 0d0
+    al_vec3_pr        = 0d0
     yn_out_mom_distr_gs = 'n'
     yn_out_mom_distr_rt = 'n'
     out_mom_distr_rt_step = 100
@@ -1719,6 +1725,14 @@ contains
     call comm_bcast(num_skgrid, nproc_group_global)
     call comm_bcast(no_ref, nproc_group_global)
     call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(al_pr, nproc_group_global)
+    al_pr = al_pr * ulength_to_au
+    call comm_bcast(al_vec1_pr, nproc_group_global)
+    call comm_bcast(al_vec2_pr, nproc_group_global)
+    call comm_bcast(al_vec3_pr, nproc_group_global)
+    al_vec1_pr = al_vec1_pr * ulength_to_au
+    al_vec2_pr = al_vec2_pr * ulength_to_au
+    al_vec3_pr = al_vec3_pr * ulength_to_au
     call comm_bcast(yn_out_mom_distr_gs, nproc_group_global)
     call comm_bcast(yn_out_mom_distr_rt, nproc_group_global)
     call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
@@ -2728,6 +2742,12 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_ref', no_ref
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(1)', al_pr(1)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(2)', al_pr(2)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(3)', al_pr(3)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec1_pr(1:3)', al_vec1_pr(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec2_pr(1:3)', al_vec2_pr(1:3)
+      write(fh_variables_log, '("#",4X,A,"=",3ES12.5)') 'al_vec3_pr(1:3)', al_vec3_pr(1:3)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_gs', yn_out_mom_distr_gs
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_mom_distr_rt', yn_out_mom_distr_rt
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_mom_distr_rt_step', out_mom_distr_rt_step

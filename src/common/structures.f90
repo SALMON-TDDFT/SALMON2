@@ -438,6 +438,15 @@ module structures
     complex(8),allocatable :: eihkr_tbl(:,:,:,:)
     real(8),allocatable :: rocc_ref(:,:,:), nq_gs(:,:,:)
     complex(8),allocatable :: upu_ref(:,:,:,:), u_rVnl_Vnlr_u_ref(:,:,:,:)
+    ! primitive-to-reference correspondence (dm_unfold_option='super' only):
+    ! a_pr(3,3) = [a^P_1,a^P_2,a^P_3], the true primitive-cell lattice vectors;
+    ! pmat(3,3) = P, with a^R_i = sum_j pmat(j,i)*a^P_j (a^R = A_ref, the
+    ! reference cell's own lattice: this 'super'-stage run's own
+    ! system%primitive_a divided, per axis, by unfold%num_hkgrid -- NOT
+    ! system%primitive_a of a separate 'reference'-stage run).
+    ! See unfolding.tex sec.1.2, 10.6.
+    real(8) :: a_pr(3,3)
+    integer :: pmat(3,3)
   end type s_unfold
 
 ! output files
