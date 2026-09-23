@@ -25,3 +25,5 @@ python3 -m unittest discover -s samples/hse_mlwf_reference -p 'test_*.py'
 The RT state requires the adjacent SCF `result.json` to certify convergence with no pair truncation. Results must be checked for the requested duration; a short pilot is not a long-time stability or spectral validation. Export binaries are same-machine native-endian streams, with metadata guards. Large restart data are not versioned.
 
 Accuracy, timing, and scope of the current experiment are recorded in `docs/results/si-hse-mlwf/README.md`.
+
+The optional ACE extension and self-consistent implicit-midpoint pilot are described in [README_ACE.md](README_ACE.md). They retain fresh full-exchange residual checks; they do not enable native SALMON hybrid dynamics or implement PT-CN yet.

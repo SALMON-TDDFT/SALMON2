@@ -1,0 +1,416 @@
+{
+  "cases": {
+    "plus": {
+      "result": {
+        "steps": 1,
+        "dt_au": 0.08,
+        "amplitude": 0.0001,
+        "method": "ACE self-consistent implicit midpoint in original Bloch gauge (not PT-CN)",
+        "full_exchange_seconds": 11.080189333006274,
+        "compression_seconds": 0.007847417029552162,
+        "apply_seconds": [
+          0.0036600420135073364,
+          0.0037538750329986215,
+          0.0036393330083228648,
+          0.003675333980936557,
+          0.003758082981221378,
+          0.0037099579931236804,
+          0.003772833035327494
+        ],
+        "median_apply_seconds": 0.0037099579931236804,
+        "interpolation_relative_error": 1.9542677695122375e-15,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.166251624992583,
+            "compression_seconds": 0.007862833037506789,
+            "interpolation_relative_error": 1.9542677695122375e-15,
+            "metric_condition": 1.430469353369125
+          },
+          {
+            "full_exchange_seconds": 11.19921637501102,
+            "compression_seconds": 0.008000041998457164,
+            "interpolation_relative_error": 2.010721291227242e-15,
+            "metric_condition": 1.4303952293676274
+          },
+          {
+            "full_exchange_seconds": 11.177877040987369,
+            "compression_seconds": 0.008024832990486175,
+            "interpolation_relative_error": 1.9369914578612988e-15,
+            "metric_condition": 1.4303952375962368
+          }
+        ],
+        "energy_change_Ha": 2.440714297335944e-12,
+        "wall_seconds": 68.73762425000314,
+        "mean_step_seconds": 35.138092959008645,
+        "threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.08,
+          "current": [
+            -2.88907759424009e-13,
+            2.3361135889165422e-12,
+            2.7901474329826847e-06
+          ],
+          "electron_number": 31.999999999999734,
+          "gram_error": 3.164135620181696e-14,
+          "step_wall_seconds": 35.138092959008645,
+          "builds": 3,
+          "inner_applications": 17,
+          "full_residual": 8.799781342832156e-11,
+          "residual_history": [
+            1.142736131870279e-07,
+            8.799781342832156e-11
+          ],
+          "build_seconds": 33.58662641601404,
+          "inner_seconds": 1.396675750031136,
+          "wall_seconds": 35.08231679099845
+        }
+      ]
+    },
+    "halfdt": {
+      "result": {
+        "steps": 2,
+        "dt_au": 0.04,
+        "amplitude": 0.0001,
+        "method": "ACE self-consistent implicit midpoint in original Bloch gauge (not PT-CN)",
+        "full_exchange_seconds": 11.680507957993541,
+        "compression_seconds": 0.007973291969392449,
+        "apply_seconds": [
+          0.0037912919651716948,
+          0.0037223330000415444,
+          0.003710915974806994,
+          0.003788249974604696,
+          0.0037339170230552554,
+          0.003743375011254102,
+          0.003745792026165873
+        ],
+        "median_apply_seconds": 0.003743375011254102,
+        "interpolation_relative_error": 1.9415764811815773e-15,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.652498624986038,
+            "compression_seconds": 0.00801699998555705,
+            "interpolation_relative_error": 1.9415764811815773e-15,
+            "metric_condition": 1.4304693533691255
+          },
+          {
+            "full_exchange_seconds": 11.63588749995688,
+            "compression_seconds": 0.00805404200218618,
+            "interpolation_relative_error": 1.9938593916840987e-15,
+            "metric_condition": 1.4304508216981697
+          },
+          {
+            "full_exchange_seconds": 11.651750290999189,
+            "compression_seconds": 0.0075770000112243,
+            "interpolation_relative_error": 2.0002564138446475e-15,
+            "metric_condition": 1.4304508221947987
+          },
+          {
+            "full_exchange_seconds": 11.656256166985258,
+            "compression_seconds": 0.008293458027765155,
+            "interpolation_relative_error": 2.025707832543615e-15,
+            "metric_condition": 1.430469355059587
+          },
+          {
+            "full_exchange_seconds": 11.648628792027012,
+            "compression_seconds": 0.007915500027593225,
+            "interpolation_relative_error": 2.0090848836587785e-15,
+            "metric_condition": 1.4304508250494952
+          },
+          {
+            "full_exchange_seconds": 11.646399916964583,
+            "compression_seconds": 0.00811416597571224,
+            "interpolation_relative_error": 2.026739922447703e-15,
+            "metric_condition": 1.4304508255464694
+          }
+        ],
+        "energy_change_Ha": 2.4868995751603507e-14,
+        "wall_seconds": 107.37915566598531,
+        "mean_step_seconds": 36.11258931297925,
+        "threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.04,
+          "current": [
+            -1.4557372274784668e-13,
+            1.1812193053764917e-12,
+            2.7940081891353823e-06
+          ],
+          "electron_number": 32.00000000000156,
+          "gram_error": 1.212363542890671e-13,
+          "step_wall_seconds": 36.10842566698557,
+          "builds": 3,
+          "inner_applications": 12,
+          "full_residual": 6.7714308107724176e-12,
+          "residual_history": [
+            1.4415364652416535e-08,
+            6.7714308107724176e-12
+          ],
+          "build_seconds": 34.983321250008885,
+          "inner_seconds": 0.9705966250039637,
+          "wall_seconds": 36.05285274999915
+        },
+        {
+          "step": 2,
+          "time_au": 0.08,
+          "current": [
+            -2.8972761437044e-13,
+            2.345531619808726e-12,
+            2.7900868445091857e-06
+          ],
+          "electron_number": 32.00000000000312,
+          "gram_error": 2.4136248555350903e-13,
+          "step_wall_seconds": 36.11675295897294,
+          "builds": 3,
+          "inner_applications": 12,
+          "full_residual": 6.771299875180735e-12,
+          "residual_history": [
+            1.4414014580799312e-08,
+            6.771299875180735e-12
+          ],
+          "build_seconds": 34.99508150102338,
+          "inner_seconds": 0.9680712500121444,
+          "wall_seconds": 36.061905707989354
+        }
+      ]
+    },
+    "seeded": {
+      "result": {
+        "steps": 3,
+        "dt_au": 0.08,
+        "amplitude": 0.0001,
+        "method": "ACE self-consistent implicit midpoint in original Bloch gauge (not PT-CN)",
+        "full_exchange_seconds": 11.430488916987088,
+        "compression_seconds": 0.00791216699872166,
+        "apply_seconds": [
+          0.0037762499996460974,
+          0.0038360420148819685,
+          0.003728582989424467,
+          0.0037822500453330576,
+          0.003874792018905282,
+          0.0038016249891370535,
+          0.00374324998119846
+        ],
+        "median_apply_seconds": 0.0037822500453330576,
+        "interpolation_relative_error": 1.993674874267283e-15,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.444334874977358,
+            "compression_seconds": 0.007998791988939047,
+            "interpolation_relative_error": 1.993674874267283e-15,
+            "metric_condition": 1.430469353369125
+          },
+          {
+            "full_exchange_seconds": 11.397306750004645,
+            "compression_seconds": 0.008123792009428144,
+            "interpolation_relative_error": 2.038185802551399e-15,
+            "metric_condition": 1.4303952293676279
+          },
+          {
+            "full_exchange_seconds": 11.393873125023674,
+            "compression_seconds": 0.008341541979461908,
+            "interpolation_relative_error": 1.9735870084171738e-15,
+            "metric_condition": 1.4303952375962365
+          },
+          {
+            "full_exchange_seconds": 11.399199292005505,
+            "compression_seconds": 0.008271874976344407,
+            "interpolation_relative_error": 2.003892418614641e-15,
+            "metric_condition": 1.430395247804195
+          },
+          {
+            "full_exchange_seconds": 11.388355417002458,
+            "compression_seconds": 0.008115084026940167,
+            "interpolation_relative_error": 2.0398814205656544e-15,
+            "metric_condition": 1.4303952477462265
+          },
+          {
+            "full_exchange_seconds": 11.378751625015866,
+            "compression_seconds": 0.008225707977544516,
+            "interpolation_relative_error": 2.0291001029317276e-15,
+            "metric_condition": 1.4303952666506334
+          },
+          {
+            "full_exchange_seconds": 11.384790708019864,
+            "compression_seconds": 0.008257166016846895,
+            "interpolation_relative_error": 1.9784385088470957e-15,
+            "metric_condition": 1.4303952666027142
+          }
+        ],
+        "energy_change_Ha": 2.163247359021625e-11,
+        "wall_seconds": 118.75593649997609,
+        "mean_step_seconds": 28.117106000330143,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.08,
+          "current": [
+            -2.8890668711300063e-13,
+            2.3361139039242135e-12,
+            2.7901474330425945e-06
+          ],
+          "electron_number": 31.999999999999734,
+          "gram_error": 3.197442310920451e-14,
+          "step_wall_seconds": 35.82216670899652,
+          "builds": 3,
+          "inner_applications": 17,
+          "full_residual": 8.799769570403022e-11,
+          "residual_history": [
+            1.1427361315361965e-07,
+            8.799769570403022e-11
+          ],
+          "build_seconds": 34.27954062499339,
+          "inner_seconds": 1.3895557920332067,
+          "wall_seconds": 35.767037333978806
+        },
+        {
+          "step": 2,
+          "time_au": 0.16,
+          "current": [
+            -5.649572568543283e-13,
+            4.525035911573484e-12,
+            2.7750823284242095e-06
+          ],
+          "electron_number": 31.999999999999734,
+          "gram_error": 5.639932965095795e-14,
+          "step_wall_seconds": 24.277388709015213,
+          "builds": 2,
+          "inner_applications": 16,
+          "full_residual": 7.339685238132552e-11,
+          "residual_history": [
+            1.7630520907966436e-08,
+            7.339685238132552e-11
+          ],
+          "build_seconds": 22.81694745796267,
+          "inner_seconds": 1.304848000057973,
+          "wall_seconds": 24.222257665998768
+        },
+        {
+          "step": 3,
+          "time_au": 0.24,
+          "current": [
+            -8.117503212520989e-13,
+            6.39659529420227e-12,
+            2.7514331684184847e-06
+          ],
+          "electron_number": 31.99999999999974,
+          "gram_error": 8.548717289613705e-14,
+          "step_wall_seconds": 24.2517625829787,
+          "builds": 2,
+          "inner_applications": 16,
+          "full_residual": 7.343069808310703e-11,
+          "residual_history": [
+            1.7442921706315116e-08,
+            7.343069808310703e-11
+          ],
+          "build_seconds": 22.793084290984552,
+          "inner_seconds": 1.3055987910483964,
+          "wall_seconds": 24.196704583999235
+        }
+      ]
+    },
+    "zero": {
+      "result": {
+        "steps": 1,
+        "dt_au": 0.08,
+        "amplitude": 0.0,
+        "method": "ACE self-consistent implicit midpoint in original Bloch gauge (not PT-CN)",
+        "full_exchange_seconds": 11.522089791018516,
+        "compression_seconds": 0.00791962502989918,
+        "apply_seconds": [
+          0.0037018339498899877,
+          0.003802624996751547,
+          0.00376362499082461,
+          0.0037647499702870846,
+          0.0036877079983241856,
+          0.0036585829802788794,
+          0.0036437090020626783
+        ],
+        "median_apply_seconds": 0.0037018339498899877,
+        "interpolation_relative_error": 1.984559195654423e-15,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.520115457999054,
+            "compression_seconds": 0.007976124994456768,
+            "interpolation_relative_error": 1.984559195654423e-15,
+            "metric_condition": 1.4304693533691257
+          },
+          {
+            "full_exchange_seconds": 11.492352875007782,
+            "compression_seconds": 0.008300042012706399,
+            "interpolation_relative_error": 1.9766718351057794e-15,
+            "metric_condition": 1.4303952253851762
+          },
+          {
+            "full_exchange_seconds": 11.48414616601076,
+            "compression_seconds": 0.008089457987807691,
+            "interpolation_relative_error": 2.003635491280442e-15,
+            "metric_condition": 1.4303952336948953
+          }
+        ],
+        "energy_change_Ha": 2.4229507289419416e-12,
+        "wall_seconds": 71.78028725000331,
+        "mean_step_seconds": 37.03533033299027,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.08,
+          "current": [
+            -2.901942911080535e-13,
+            2.3368866281817836e-12,
+            -1.258088383787057e-12
+          ],
+          "electron_number": 32.0,
+          "gram_error": 1.0445830678673903e-14,
+          "step_wall_seconds": 37.03533033299027,
+          "builds": 3,
+          "inner_applications": 28,
+          "full_residual": 7.997552052858696e-11,
+          "residual_history": [
+            1.1392988926870323e-07,
+            7.997552052858696e-11
+          ],
+          "build_seconds": 34.54044895799598,
+          "inner_seconds": 2.3413065840140916,
+          "wall_seconds": 36.97988337499555
+        }
+      ]
+    }
+  },
+  "comparisons": {
+    "plus": {
+      "current_relative_difference_vs_RK4_halfdt": 2.926755054546569e-05,
+      "orbital_relative_difference_vs_RK4_halfdt": 3.847409091440469e-07,
+      "density_relative_difference_vs_RK4_halfdt": 4.057735238626346e-08
+    },
+    "halfdt": {
+      "current_relative_difference_vs_RK4_halfdt": 7.5517634902510375e-06,
+      "orbital_relative_difference_vs_RK4_halfdt": 9.62183392798361e-08,
+      "density_relative_difference_vs_RK4_halfdt": 1.031291787476021e-08
+    }
+  },
+  "reference_current": [
+    -2.901763834539834e-13,
+    2.3482760318907008e-12,
+    2.7900657745925172e-06
+  ],
+  "scope": "Short ACE/midpoint pilots, not PT-CN or spectra; exact full exchange gate at every accepted midpoint"
+}

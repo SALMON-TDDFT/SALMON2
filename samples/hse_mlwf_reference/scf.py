@@ -28,17 +28,23 @@ class HSEFunctional:
   if np.max(abs(m.nlcc))>0:raise ValueError('This initial reference requires no NLCC')
   vxc,esl=semilocal_potential(rho,m.nab,self.xc,m.dv)
   core=m.core(u);hu=core+(vh+vxc)*u;local_seconds=time.perf_counter()-start
+  ku,stats=self.exchange(u,gauge,pair_tolerance);ex=.5*m.expectation(u,ku)
+  hu+=.25*ku
+  energy=dict(core=m.expectation(u,core),hartree=eh,semilocal=esl,screened_fock=ex,hse_fock=.25*ex,ion_ion=float(m.native_energies[4]))
+  energy['total']=sum(energy[n] for n in ['core','hartree','semilocal','hse_fock','ion_ion'])
+  stats.update(local_seconds=local_seconds)
+  return hu,energy,stats
+
+ def exchange(self,u,gauge,pair_tolerance=0.):
+  m=self.model
   start=time.perf_counter();localized=np.einsum('knxyz,knm->kmxyz',u,gauge,optimize=True)
   w,twist=bloch_to_wannier(localized,m.k,m.h);transform_seconds=time.perf_counter()-start
   action,stats=symmetric_exchange(w,self.shifts,self.kernel,pair_tolerance)
   start=time.perf_counter();vaction=wannier_to_bloch(action,m.k,m.h,twist)
   ku=np.einsum('kmxyz,knm->knxyz',vaction,gauge.conj(),optimize=True)
-  transform_seconds+=time.perf_counter()-start;ex=.5*m.expectation(u,ku)
-  hu+=.25*ku
-  energy=dict(core=m.expectation(u,core),hartree=eh,semilocal=esl,screened_fock=ex,hse_fock=.25*ex,ion_ion=float(m.native_energies[4]))
-  energy['total']=sum(energy[n] for n in ['core','hartree','semilocal','hse_fock','ion_ion'])
-  stats.update(local_seconds=local_seconds,transform_seconds=transform_seconds)
-  return hu,energy,stats
+  transform_seconds+=time.perf_counter()-start
+  stats.update(transform_seconds=transform_seconds)
+  return ku,stats
 
 
 def tangent(u,v,dv):
