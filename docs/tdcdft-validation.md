@@ -100,3 +100,10 @@ Before interpreting pump-induced peaks, verify a no-pump delayed probe against e
 probe-amplitude convergence, pump-only subtraction, observation-window convergence and coefficient
 sensitivity. Fixed alpha does not describe dynamically evolving screening. Test against literature
 or BSE with consistent quasiparticle-gap treatment before drawing quantitative conclusions.
+
+
+## Follow-up: fixed 4³ k grid
+
+The user removed the k-point convergence requirement. The examples now use 4³ k points,
+and completed 12000-step ALDA/LRC runs and their initial analysis are recorded in
+`docs/results/si-k4/README.md`. The earlier 2³-grid entries above remain the implementation-test record.

@@ -1,4 +1,4 @@
-! Coarse smoke-test grid; converge before physical interpretation.
+! Fixed 4^3 k grid for initial analysis; no k-point convergence scan.
 &calculation
   theory='dft'
 /
@@ -36,7 +36,7 @@
 /
 
 &kgrid
-  num_kgrid = 2, 2, 2
+  num_kgrid = 4, 4, 4
 /
 
 &tgrid

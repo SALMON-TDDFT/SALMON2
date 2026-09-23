@@ -1,0 +1,60 @@
+{
+  "alda": [
+    {
+      "duration_fs": 11.610644767224,
+      "peak_2_to_4_eV": {
+        "peak_eV": 3.5700000000000003,
+        "height": 81.18078542368505,
+        "area_eV": 47.093108133908125,
+        "boundary_peak": false
+      }
+    },
+    {
+      "duration_fs": 17.415967150836,
+      "peak_2_to_4_eV": {
+        "peak_eV": 3.56,
+        "height": 99.0579603315066,
+        "area_eV": 47.287036940844665,
+        "boundary_peak": false
+      }
+    },
+    {
+      "duration_fs": 23.221289534448,
+      "peak_2_to_4_eV": {
+        "peak_eV": 3.54,
+        "height": 110.56649623380562,
+        "area_eV": 47.28917704660006,
+        "boundary_peak": false
+      }
+    }
+  ],
+  "lrc": [
+    {
+      "duration_fs": 11.610644767224,
+      "peak_2_to_4_eV": {
+        "peak_eV": 3.34,
+        "height": 80.0224798863803,
+        "area_eV": 62.632060472655965,
+        "boundary_peak": false
+      }
+    },
+    {
+      "duration_fs": 17.415967150836,
+      "peak_2_to_4_eV": {
+        "peak_eV": 3.35,
+        "height": 104.4199138478289,
+        "area_eV": 62.61692053821207,
+        "boundary_peak": false
+      }
+    },
+    {
+      "duration_fs": 23.221289534448,
+      "peak_2_to_4_eV": {
+        "peak_eV": 3.36,
+        "height": 126.77742085582653,
+        "area_eV": 62.61084377299605,
+        "boundary_peak": false
+      }
+    }
+  ]
+}

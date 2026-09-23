@@ -67,3 +67,6 @@ alpha=0でもXC有効経路内で端点位相を更新し、レーザーのゼ�
 レーザーでは従来の中点非局所位相と異なるため、XC有効alpha=0を比較基準とする。
 
 入力条件、例、解析法、既知の限界は `samples/exercise_si_tdcdft/README.md` を参照。
+
+
+2026-09-23 user update: Fix the k grid at 4x4x4 for the initial Si analysis. Do not perform a k-point convergence scan. This overrides the earlier k-convergence requirement.

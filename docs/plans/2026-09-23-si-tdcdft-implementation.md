@@ -43,3 +43,6 @@ Add pump-only and delayed weak-probe examples using ae_shape2='impulse', documen
 ## Task 8: Review and completion
 
 Check formatting and diff, build with gfortran, run existing and new relevant tests, and review effective-potential consistency and restart compatibility. Document tested options and untested accelerator/library paths. Commit approved changes on TDCDFT; do not push unless requested. Distinguish working implementation/smoke tests from converged scientific results in the final report.
+
+
+2026-09-23 user update: Fix the k grid at 4x4x4 for the initial Si analysis. Do not perform a k-point convergence scan. This overrides the earlier k-convergence requirement.

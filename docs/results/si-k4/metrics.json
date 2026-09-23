@@ -1,0 +1,108 @@
+{
+  "alda": {
+    "local_maxima_1p5_to_6_eV": [
+      {
+        "energy_eV": 3.54,
+        "height": 110.56649623380562
+      },
+      {
+        "energy_eV": 2.98,
+        "height": 33.96568686869386
+      },
+      {
+        "energy_eV": 5.37,
+        "height": 33.05471328558584
+      },
+      {
+        "energy_eV": 4.29,
+        "height": 20.24548295873196
+      },
+      {
+        "energy_eV": 5.71,
+        "height": 15.450955507743007
+      },
+      {
+        "energy_eV": 4.73,
+        "height": 12.575045301767801
+      }
+    ],
+    "peak_2_to_4_eV": {
+      "peak_eV": 3.54,
+      "height": 110.56649623380562,
+      "area_eV": 47.28917704660006,
+      "boundary_peak": false
+    },
+    "peak_4_to_6_eV": {
+      "peak_eV": 5.37,
+      "height": 33.05471328558584,
+      "area_eV": 21.196507546229213,
+      "boundary_peak": false
+    },
+    "area_2_to_6_eV": 68.48568459282927,
+    "max_abs_current_au": 2.79104406228008e-05
+  },
+  "lrc": {
+    "local_maxima_1p5_to_6_eV": [
+      {
+        "energy_eV": 3.36,
+        "height": 126.77742085582653
+      },
+      {
+        "energy_eV": 2.87,
+        "height": 105.7410070212719
+      },
+      {
+        "energy_eV": 5.33,
+        "height": 27.84254855906861
+      },
+      {
+        "energy_eV": 4.28,
+        "height": 15.043665286538664
+      },
+      {
+        "energy_eV": 4.72,
+        "height": 11.311575408650814
+      },
+      {
+        "energy_eV": 5.69,
+        "height": 10.914103222459284
+      }
+    ],
+    "peak_2_to_4_eV": {
+      "peak_eV": 3.36,
+      "height": 126.77742085582653,
+      "area_eV": 62.61084377299605,
+      "boundary_peak": false
+    },
+    "peak_4_to_6_eV": {
+      "peak_eV": 5.33,
+      "height": 27.84254855906861,
+      "area_eV": 17.230657039113776,
+      "boundary_peak": false
+    },
+    "area_2_to_6_eV": 79.84150081210983,
+    "max_abs_current_au": 2.79109405338219e-05
+  },
+  "settings": {
+    "kgrid": [
+      4,
+      4,
+      4
+    ],
+    "rgrid": [
+      12,
+      12,
+      12
+    ],
+    "alpha": 0.2,
+    "dt_au": 0.08,
+    "nt": 12000,
+    "duration_fs": 23.221289534448,
+    "kick_au": 0.001,
+    "polarization": "z",
+    "window": "1-3(t/T)^2+2(t/T)^3",
+    "energy_shift_eV": 0,
+    "additional_broadening_eV": 0
+  },
+  "max_abs_Axc_over_c_au": 0.002354702175058942
+}
