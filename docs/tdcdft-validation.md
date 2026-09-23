@@ -176,3 +176,7 @@ any new nonlinear trajectory. A common relative floor removes this scaling artif
 Optical-response and field-weighted K0 candidates instead alter even the weak response.
 No new calibrated K0 or production model change was adopted from this audit. Previous numerical
 stabilization must not be taken as independent evidence of physical carrier screening.
+
+### alpha0=1, K0=0 trial
+
+See [bare-K trial](results/si-bare-k/README.md). The existing polarization closure completed the strong-pulse trajectory through 23.22 fs with alpha0=1 and reference=0. Residual A and mean current decreased relative to the previous parameters, but the terminal alpha changed by about 103 times when matching the weak/strong relative field gates. This is a numerical comparison, not a validated carrier-screening calibration. No production code changes.
