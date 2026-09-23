@@ -1,0 +1,107 @@
+{
+  "state": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/calculations/si_hse_reference/scf/state.npz",
+  "state_fingerprint": "4ada634dccb7b80ae97a968d384d0b11e47fefa3c30fe0a238b4f067e54a7c93",
+  "shape": [
+    16,
+    48,
+    48,
+    48
+  ],
+  "spacing_bohr": 0.855,
+  "repeats": 2,
+  "rows": [
+    {
+      "side_bohr": 10.26,
+      "setup_seconds": 0.07080516702262685,
+      "seconds": [
+        0.1278579590143636,
+        0.13171237503411248
+      ],
+      "median_seconds": 0.12978516702423804,
+      "source_tail_norm_max": 0.03079200444227881,
+      "action_relative_error": 0.09616068838867854,
+      "hse_exchange_error_meV_per_atom": 164.4679116381351,
+      "convolutions": 688,
+      "possible_directed_pairs": 16384,
+      "width": 12,
+      "fft_width": 24,
+      "exchange_seconds": 0.13047933304915205,
+      "max_relative_metric_antihermiticity": 0.06228861598267581,
+      "ace_accepted": false,
+      "ace_error": "Exchange metric must be nonzero Hermitian"
+    },
+    {
+      "side_bohr": 13.68,
+      "setup_seconds": 0.1067583339754492,
+      "seconds": [
+        0.9614345830050297,
+        0.988309666980058
+      ],
+      "median_seconds": 0.9748721249925438,
+      "source_tail_norm_max": 0.012063384449651937,
+      "action_relative_error": 0.06047528836664381,
+      "hse_exchange_error_meV_per_atom": 67.10929205536974,
+      "convolutions": 2672,
+      "possible_directed_pairs": 16384,
+      "width": 16,
+      "fft_width": 32,
+      "exchange_seconds": 0.9877142909681424,
+      "max_relative_metric_antihermiticity": 0.04041186471498926,
+      "ace_accepted": false,
+      "ace_error": "Exchange metric must be nonzero Hermitian"
+    },
+    {
+      "side_bohr": 17.1,
+      "setup_seconds": 0.12178183300420642,
+      "seconds": [
+        3.5311208330094814,
+        3.56471587496344
+      ],
+      "median_seconds": 3.5479183539864607,
+      "source_tail_norm_max": 0.005181263533342917,
+      "action_relative_error": 0.038886371414809516,
+      "hse_exchange_error_meV_per_atom": 28.55668905010842,
+      "convolutions": 4400,
+      "possible_directed_pairs": 16384,
+      "width": 20,
+      "fft_width": 40,
+      "exchange_seconds": 3.564089875028003,
+      "max_relative_metric_antihermiticity": 0.021037982651746896,
+      "ace_accepted": false,
+      "ace_error": "Exchange metric must be nonzero Hermitian"
+    },
+    {
+      "side_bohr": 20.52,
+      "setup_seconds": 0.1269083750084974,
+      "seconds": [
+        9.581839875027072,
+        9.461527333012782
+      ],
+      "median_seconds": 9.521683604019927,
+      "source_tail_norm_max": 0.0024335027861487335,
+      "action_relative_error": 0.02664815701720545,
+      "hse_exchange_error_meV_per_atom": 14.410548561753812,
+      "convolutions": 6752,
+      "possible_directed_pairs": 16384,
+      "width": 24,
+      "fft_width": 48,
+      "exchange_seconds": 9.460924124985468,
+      "max_relative_metric_antihermiticity": 0.017437211551242122,
+      "ace_accepted": false,
+      "ace_error": "Exchange metric must be nonzero Hermitian"
+    }
+  ],
+  "scope": "Fixed gauge and supports; variational orbital functional, not an RT implementation",
+  "timing_caveat": "Single-thread FFTW/BLAS; full-support RT job may run concurrently",
+  "reference": {
+    "seconds": [
+      12.360284333990421,
+      12.339629624970257
+    ],
+    "median_seconds": 12.34995697948034,
+    "hse_exchange_Ha": -1.6529388246135859,
+    "max_relative_metric_antihermiticity": 1.8655682358583757e-15,
+    "ace_accepted": true,
+    "ace_span_relative_error": 1.9863804538066933e-15
+  }
+}

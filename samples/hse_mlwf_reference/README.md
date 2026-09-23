@@ -31,3 +31,5 @@ The optional ACE extension and self-consistent implicit-midpoint pilot are descr
 Parallel-transport Crank–Nicolson with ACE is a separate option documented in [README_PTCN.md](README_PTCN.md). It preserves the full-exchange endpoint residual gate and reports its norm drift without renormalizing the solution.
 
 For longer constant-A response runs with validated restart and live status, see [README_EXTENDED.md](README_EXTENDED.md). The authoritative checkpoint embeds both wavefunctions and history; failed trial endpoints are not saved as accepted states.
+
+The fixed spatial-support experiment is documented in [local-support results](../../docs/results/si-hse-local-support/README.md). It has a consistent fixed-gauge energy gradient, but its orbital-specific cutoffs fail the common-Hermitian ACE gate. It is not integrated into the propagation driver.

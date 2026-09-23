@@ -1,0 +1,67 @@
+{
+  "state": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/calculations/si_hse_reference/scf/state.npz",
+  "state_sha256": "4ea614e148d82ec6dab61ccc2da7301ed850bf51cfef0dc9dced99d94e084184",
+  "shape": [
+    16,
+    48,
+    48,
+    48
+  ],
+  "spacing_bohr": 0.855,
+  "repeats": 2,
+  "rows": [
+    {
+      "side_bohr": 27.36,
+      "setup_seconds": 0.183230290946085,
+      "seconds": [
+        13.773428250045981,
+        13.539935917011462
+      ],
+      "median_seconds": 13.656682083528722,
+      "source_tail_norm_max": 0.0005865826088862214,
+      "action_relative_error": 0.013855256869343541,
+      "hse_exchange_error_meV_per_atom": 3.6438784218734455,
+      "convolutions": 8256,
+      "possible_directed_pairs": 16384,
+      "width": 32,
+      "fft_width": 48,
+      "exchange_seconds": 13.539338083995972,
+      "max_relative_metric_antihermiticity": 0.007766271383666334,
+      "ace_accepted": false,
+      "ace_error": "Exchange metric must be nonzero Hermitian"
+    },
+    {
+      "side_bohr": 41.04,
+      "setup_seconds": 0.31441062496742234,
+      "seconds": [
+        24.315268750011455,
+        24.25825466599781
+      ],
+      "median_seconds": 24.286761708004633,
+      "source_tail_norm_max": 2.220446049250313e-16,
+      "action_relative_error": 1.7536063278394022e-16,
+      "hse_exchange_error_meV_per_atom": 7.552676885566045e-13,
+      "convolutions": 8256,
+      "possible_directed_pairs": 16384,
+      "width": 48,
+      "fft_width": 48,
+      "exchange_seconds": 24.257637000002433,
+      "max_relative_metric_antihermiticity": 1.845401618391555e-15,
+      "ace_accepted": true,
+      "ace_span_relative_error": 1.986009462742733e-15
+    }
+  ],
+  "scope": "Fixed gauge and supports; variational orbital functional, not an RT implementation",
+  "timing_caveat": "Single-thread FFTW/BLAS; full-support RT job may run concurrently",
+  "reference": {
+    "seconds": [
+      11.704058457980864,
+      11.792529041005764
+    ],
+    "median_seconds": 11.748293749493314,
+    "hse_exchange_Ha": -1.6529388246135859,
+    "max_relative_metric_antihermiticity": 1.8492398434708354e-15,
+    "ace_accepted": true,
+    "ace_span_relative_error": 1.9883479356416098e-15
+  }
+}
