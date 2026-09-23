@@ -1,0 +1,43 @@
+{
+  "omega_au": 0.2,
+  "pulse_end_fs": 1.451330595903,
+  "absolute_floor": 2e-05,
+  "relative_floor": 0.1,
+  "weak_peak_field_norm": 0.00026688392962199715,
+  "strong_equivalent_peak_field_norm": 0.08439610885015918,
+  "weak_last_valid_fs": 1.381666727299656,
+  "scaled_linear_last_valid_fs": 1.449395488441796,
+  "weak_alpha_final": 0.2,
+  "scaled_linear_alpha_final": 2.7677077488812038e-05,
+  "scaled_linear_first_correction_fs": 1.38360183476086,
+  "relative_gate_alpha_max_rescaling_difference": 0.0,
+  "weak_max_K_relative_gate": 0.1432462813343249,
+  "strong_max_K_relative_gate": 0.12022967249678727,
+  "weak_weighted_K": 0.021808720604187027,
+  "strong_weighted_K": 0.021375928912918958,
+  "equilibrium_energy_eV": 5.442277010000001,
+  "equilibrium_Re_epsilon": -19.34969503755348,
+  "equilibrium_Im_epsilon": 14.393513739896227,
+  "candidate_reference_checks": {
+    "old_maximum_absolute_gate": {
+      "K0": 0.19591042214256474,
+      "weak_min_alpha": 0.2,
+      "strong_fixed_offline_min_alpha": 0.2
+    },
+    "weak_field_weighted_fit_relative_gate": {
+      "K0": 0.021808720604187027,
+      "weak_min_alpha": 0.005108460944212278,
+      "strong_fixed_offline_min_alpha": 0.006265692830556496
+    },
+    "equilibrium_optical_real_response": {
+      "K0": 0.064775091112785,
+      "weak_min_alpha": 0.007796525810389755,
+      "strong_fixed_offline_min_alpha": 0.010856837611899628
+    },
+    "weak_maximum_relative_gate": {
+      "K0": 0.1432462813343249,
+      "weak_min_alpha": 0.2,
+      "strong_fixed_offline_min_alpha": 0.2
+    }
+  }
+}

@@ -166,3 +166,13 @@ compared with 3.90e-4 in the former closure. Half-dt comparison through 5.805 fs
 relative current difference but a factor-of-two difference in held alpha. Thus field consistency
 is fixed, but the estimator remains threshold/time-step sensitive. Detailed results are in
 `docs/results/si-polarization-screening/README.md`. No k-grid scan or precision claim was added.
+
+## K0 and estimator-gate audit
+
+`docs/results/si-k0-audit/README.md` records an amplitude-homogeneity counterexample:
+scaling the weak A,E,J,P data uniformly by 316.23 leaves K unchanged but moves the absolute-floor
+cutoff closer to the pulse end; the old closure then reduces alpha from 0.2 to 2.77e-5 without
+any new nonlinear trajectory. A common relative floor removes this scaling artifact offline.
+Optical-response and field-weighted K0 candidates instead alter even the weak response.
+No new calibrated K0 or production model change was adopted from this audit. Previous numerical
+stabilization must not be taken as independent evidence of physical carrier screening.
