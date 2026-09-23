@@ -222,3 +222,15 @@ All3 x161 MLWF snapshots converge at gradient norm <1e-6, preserving orbital lab
 Final mean MV spreads are2.057679,2.057711,4.936765 Å² for none/weak/strong.
 No-pump polar transport eliminates additional localization iterations; a final strong
 initial-gauge start agrees with the sequential result within2.4e-13 Å².
+
+### Unclipped UEG-distance alpha diagnostic
+
+[UEG-distance record](results/si-ueg-distance/README.md) evaluates alpha=.2D with no upper
+clip on all3 x161 existing snapshots. Seven tests and independent review verify FFT
+normalization, full momentum coverage, HS distances, ensemble/current conservation,
+unitary invariance and the fixed-rank bound. No production feedback changes.
+Weak final alpha=.1999489; strong range .1877118–.2185561, final .2024486. D>1 occurs
+with larger MLWF and invariant spreads, so D is not a pure localization measure.
+Reference purity/occupation changes matter. A rank16-per-k constraint gives a positive
+rest-reference alpha lower bound .013298: the abstract zero endpoint is not reachable
+within this finite-grid trajectory class. Physical screening validation remains open.

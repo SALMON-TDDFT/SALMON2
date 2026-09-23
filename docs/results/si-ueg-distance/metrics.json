@@ -1,0 +1,159 @@
+{
+  "initial_distance_one_spin_per_cell": 7.049937711295758,
+  "initial_distances_by_reference": {
+    "flow": 7.049937711295758,
+    "rest": 7.049937711295758,
+    "spectral": 7.042546954595281
+  },
+  "reference": {
+    "number_one_spin_supercell": 1024.0,
+    "purity_ratio": 0.9772135416666667,
+    "fractional_states": 96,
+    "per_k_number_min": 14.5,
+    "per_k_number_max": 17.0,
+    "fixed_rank_distance_lower_bound": 0.46875,
+    "fixed_rank_alpha_lower_bound": 0.013297989831851865
+  },
+  "model": "alpha=.2*HS_squared_distance/initial; unclipped; offline only",
+  "sampling": {
+    "stride": 10,
+    "dt_au": 0.08,
+    "dt_fs": 0.001935107461204
+  },
+  "none": {
+    "final": {
+      "flow": {
+        "distance": 7.0499376266036045,
+        "D": 0.9999999879868224,
+        "alpha": 0.1999999975973645,
+        "occupied_purity": 15.999999998111734,
+        "reference_purity_per_cell": 15.63541653588248,
+        "overlap_per_cell": 12.292739453695306,
+        "reference_purity": 0.977213533492655,
+        "flow_match_error": 2.0580098419877383e-16,
+        "rank_bound_alpha": 0.013297989202999056
+      },
+      "spectral": {
+        "distance": 7.042546870225518,
+        "D": 0.9999999880199929,
+        "alpha": 0.19999999760399859,
+        "occupied_purity": 15.999999998111734,
+        "reference_purity_per_cell": 15.623996846676697,
+        "overlap_per_cell": 12.290724987281457,
+        "reference_purity": 0.9764998029172935,
+        "flow_match_error": 7.432205892388133e-17,
+        "rank_bound_alpha": 0.013276692161710053
+      },
+      "rest": {
+        "distance": 7.049937711346992,
+        "D": 1.0000000000072673,
+        "alpha": 0.20000000000145346,
+        "occupied_purity": 15.999999998111734,
+        "reference_purity_per_cell": 15.635416666666668,
+        "overlap_per_cell": 12.292739476715706,
+        "reference_purity": 0.9772135416666667,
+        "flow_match_error": 8.429671891074797e-18,
+        "rank_bound_alpha": 0.013297989831851865
+      }
+    },
+    "alpha_min": 0.1999999975973645,
+    "alpha_max": 0.20000000003806961,
+    "max_flow_vs_spectral_alpha_difference": 1.176857195028802e-09,
+    "max_flow_vs_rest_alpha_difference": 2.4040889556875555e-09,
+    "max_flow_match_error": 5.81329207239657e-16,
+    "max_current_vs_spectral_velocity_error": 0.0003349446108888283,
+    "density_relative_rms_initial": 0.6682972136004279,
+    "density_relative_rms_final": 0.6682972133469479
+  },
+  "weak": {
+    "final": {
+      "flow": {
+        "distance": 7.048136598455919,
+        "D": 0.9997445207442112,
+        "alpha": 0.19994890414884225,
+        "occupied_purity": 15.999999998111502,
+        "reference_purity_per_cell": 15.632629697851915,
+        "overlap_per_cell": 12.292246548753749,
+        "reference_purity": 0.9770393561157447,
+        "flow_match_error": 1.3024970686066428e-16,
+        "rank_bound_alpha": 0.013282235568191374
+      },
+      "spectral": {
+        "distance": 7.040558338159997,
+        "D": 0.9997176282319301,
+        "alpha": 0.19994352564638604,
+        "occupied_purity": 15.999999998111502,
+        "reference_purity_per_cell": 15.620918620741655,
+        "overlap_per_cell": 12.290180140346582,
+        "reference_purity": 0.9763074137963534,
+        "flow_match_error": 7.58128369110489e-17,
+        "rank_bound_alpha": 0.013259535699625338
+      },
+      "rest": {
+        "distance": 7.049944017313859,
+        "D": 1.0000008944785554,
+        "alpha": 0.20000017889571112,
+        "occupied_purity": 15.999999998111502,
+        "reference_purity_per_cell": 15.635416666666668,
+        "overlap_per_cell": 12.292736323732155,
+        "reference_purity": 0.9772135416666667,
+        "flow_match_error": 8.429671891074797e-18,
+        "rank_bound_alpha": 0.013297989831851865
+      }
+    },
+    "alpha_min": 0.1999173428783035,
+    "alpha_max": 0.2,
+    "max_flow_vs_spectral_alpha_difference": 0.000134120377116409,
+    "max_flow_vs_rest_alpha_difference": 8.27499094797346e-05,
+    "max_flow_match_error": 5.665935013305644e-16,
+    "max_current_vs_spectral_velocity_error": 0.0003557566285444077,
+    "density_relative_rms_initial": 0.6682972136004279,
+    "density_relative_rms_final": 0.6682969756001333
+  },
+  "strong": {
+    "final": {
+      "flow": {
+        "distance": 7.1362502478177525,
+        "D": 1.0122430211523288,
+        "alpha": 0.20244860423046576,
+        "occupied_purity": 15.999999966949522,
+        "reference_purity_per_cell": 15.0961687765137,
+        "overlap_per_cell": 11.979959247822736,
+        "reference_purity": 0.9435105485321063,
+        "flow_match_error": 3.3691017014423627e-16,
+        "rank_bound_alpha": 0.013948345675802522
+      },
+      "spectral": {
+        "distance": 7.093383745768829,
+        "D": 1.0072185235684339,
+        "alpha": 0.2014437047136868,
+        "occupied_purity": 15.999999966949522,
+        "reference_purity_per_cell": 15.044790108719408,
+        "overlap_per_cell": 11.97570316495005,
+        "reference_purity": 0.940299381794963,
+        "flow_match_error": 1.8393489856216583e-16,
+        "rank_bound_alpha": 0.01467366238843363
+      },
+      "rest": {
+        "distance": 7.631874889100956,
+        "D": 1.0825450098477876,
+        "alpha": 0.21650900196955755,
+        "occupied_purity": 15.999999966949522,
+        "reference_purity_per_cell": 15.635416666666668,
+        "overlap_per_cell": 12.001770872257616,
+        "reference_purity": 0.9772135416666667,
+        "flow_match_error": 8.429671891074797e-18,
+        "rank_bound_alpha": 0.013297989831851865
+      }
+    },
+    "alpha_min": 0.18771175673435622,
+    "alpha_max": 0.21855606811021006,
+    "max_flow_vs_spectral_alpha_difference": 0.003241588929546513,
+    "max_flow_vs_rest_alpha_difference": 0.022245243934351427,
+    "max_flow_match_error": 5.859259596407547e-16,
+    "max_current_vs_spectral_velocity_error": 0.0107963422589872,
+    "density_relative_rms_initial": 0.6682972136004279,
+    "density_relative_rms_final": 0.6464688496098948
+  },
+  "elapsed_seconds": 25.647023999947123
+}
