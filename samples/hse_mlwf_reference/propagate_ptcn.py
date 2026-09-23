@@ -14,8 +14,10 @@ from rt import validate_request
 from checkpoint import FORMAT,fingerprint,save_checkpoint,load_checkpoint,write_json
 from distance_exchange import DistanceExchange
 
-def run(export,state,output,target_steps,dt=.32,amplitude=1e-4,resume=False,checkpoint_every=5,exchange_method='mlwf'):
+def run(export,state,output,target_steps,dt=.32,amplitude=1e-4,resume=False,checkpoint_every=5,exchange_method='mlwf',exchange_backend=None):
  if exchange_method not in ('mlwf','blocked'):raise ValueError('Unknown exchange method')
+ if exchange_backend is not None and exchange_method!='blocked':raise ValueError('Supplied backend requires blocked exchange method')
+ if exchange_backend is not None and getattr(exchange_backend,'radius',None) is not None:raise ValueError('Resumable reference requires the full exchange kernel')
  validate_request(target_steps,dt,amplitude,0.)
  if not isinstance(checkpoint_every,int) or checkpoint_every<1:raise ValueError('Positive checkpoint interval required')
  export=Path(export);state=Path(state);out=Path(output)
@@ -23,9 +25,9 @@ def run(export,state,output,target_steps,dt=.32,amplitude=1e-4,resume=False,chec
  out.mkdir(parents=True,exist_ok=True)
  with (out/'.lock').open('a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-  return _run(export,state,out,target_steps,dt,amplitude,resume,checkpoint_every,exchange_method)
+  return _run(export,state,out,target_steps,dt,amplitude,resume,checkpoint_every,exchange_method,exchange_backend)
 
-def _run(export,state,out,target,dt,amplitude,resume,interval,exchange_method='mlwf'):
+def _run(export,state,out,target,dt,amplitude,resume,interval,exchange_method='mlwf',exchange_backend=None):
  provenance=json.loads((state.parent/'result.json').read_text())
  if not provenance.get('converged') or provenance.get('final_pair_tolerance')!=0:raise ValueError('Full-pair converged SCF required')
  expected=dict(dt=dt,amplitude=amplitude,export_hash=fingerprint([*export.glob('*.bin'),export/'metadata.txt',export/'complete.txt']),initial_hash=fingerprint([state,state.parent/'result.json']))
@@ -53,14 +55,15 @@ def _run(export,state,out,target,dt,amplitude,resume,interval,exchange_method='m
   value=dict(status=phase,pid=os.getpid(),accepted_step=saved_step,target_steps=target,dt_au=dt,
    time_fs=saved_step*dt*.024188843265857,amplitude=amplitude,checkpoint=str(checkpoint.resolve()),
    elapsed_this_run_seconds=time.perf_counter()-start,error=error,exchange_method=exchange_method,
-   exchange_kernel='full_periodic_hse06')
+   exchange_kernel='full_periodic_hse06',mpi_ranks=getattr(exchange_backend,'size',1))
   write_json(out/'status.json',value);return value
  def save():save_checkpoint(checkpoint,*accepted)
  status('running')
  functional=None;xc=None
  try:
   xc=Semilocal('hse06')
-  backend=DistanceExchange(m.shape,m.h,m.k,radius=None) if exchange_method=='blocked' else None
+  backend=exchange_backend
+  if backend is None and exchange_method=='blocked':backend=DistanceExchange(m.shape,m.h,m.k,radius=None)
   functional=HSEFunctional(m,xc,fftw=True,exchange_backend=backend)
   def local(x,energy=False):
    rho=m.density(x);vh,eh=hartree(rho,m.h);vsl,esl=semilocal_potential(rho,m.nab,xc,m.dv);core=m.core(x)
@@ -87,7 +90,8 @@ def _run(export,state,out,target,dt,amplitude,resume,interval,exchange_method='m
    next_action=local(candidate)+cache['full']
    row=dict(step=index+1,time_au=(index+1)*dt,current=current.tolist(),electron_number=ne,gram_error=ge,
      energy_Ha=energy,energy_change_Ha=energy-metadata['initial_energy'],localization=localization,
-     step_wall_seconds=time.perf_counter()-tick,exchange_method=exchange_method,**info)
+     step_wall_seconds=time.perf_counter()-tick,exchange_method=exchange_method,
+     mpi_ranks=getattr(exchange_backend,'size',1),**info)
    # One accepted snapshot owns state, history and the localization seed.
    previous=loc.previous if loc is not None else to_matrix(candidate)@g
    accepted=(candidate,g,dict(metadata,step=index+1),rows+[row],previous)

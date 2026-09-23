@@ -16,12 +16,13 @@ from propagate_ptcn import run
 from compare_linear import analyze
 
 
-def execute(export,state,hse_directory,tdcdft_directory,output,target_steps=2750,dt=.32,amplitude=1e-4):
+def execute(export,state,hse_directory,tdcdft_directory,output,target_steps=2750,dt=.32,amplitude=1e-4,exchange_backend=None):
  hse=Path(hse_directory)
  with (hse/'.comparison.lock').open('a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   job=dict(pid=os.getpid(),target_steps=target_steps,end_time_au=target_steps*dt,
-           hse_directory=str(hse.resolve()),comparison_directory=str(Path(output).resolve()))
+           hse_directory=str(hse.resolve()),comparison_directory=str(Path(output).resolve()),
+           mpi_ranks=getattr(exchange_backend,'size',1))
   try:
    write_json(hse/'job_status.json',dict(job,status='running',stage='propagation'))
    saved=json.loads((hse/'status.json').read_text()) if (hse/'status.json').exists() else {}
@@ -35,7 +36,7 @@ def execute(export,state,hse_directory,tdcdft_directory,output,target_steps=2750
      initial_hash=fingerprint([state_path,state_path.parent/'result.json']))
     load_checkpoint(hse/'restart.npz',expected)
    else:
-    run(export,state,hse_directory,target_steps,dt=dt,amplitude=amplitude,resume=True,exchange_method='blocked')
+    run(export,state,hse_directory,target_steps,dt=dt,amplitude=amplitude,resume=True,exchange_method='blocked',exchange_backend=exchange_backend)
    write_json(hse/'job_status.json',dict(job,status='running',stage='analysis'))
    analyze(hse_directory,tdcdft_directory,output,end_time=target_steps*dt)
    write_json(hse/'job_status.json',dict(job,status='completed',stage='analysis'))

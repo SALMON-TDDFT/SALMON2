@@ -92,4 +92,14 @@ class DistanceExchangeTests(unittest.TestCase):
    ref=localized_exchange(w,cell_shifts(mesh,n),kernel,0.)[0]
    np.testing.assert_allclose(op.apply(u,u)[0],wannier_to_bloch(ref,k,self.h,twist),atol=2e-12)
 
+ def test_disjoint_row_partitions_recover_full_action(self):
+  for radius in (None,1.7):
+   op=DistanceExchange((3,3,3),self.h,self.k,.3,radius=radius,block_rows=4)
+   reference=op.apply(self.u,self.u)[0]
+   for size in (3,10):
+    parts=[op.apply(self.u,self.u,row_rank=rank,row_size=size)[0] for rank in range(size)]
+    np.testing.assert_allclose(sum(parts),reference,atol=0,rtol=0)
+   for rank,size in ((-1,2),(2,2),(0,0),(0,1.5)):
+    with self.assertRaises(ValueError):op.apply(self.u,self.u,row_rank=rank,row_size=size)
+
 if __name__=='__main__':unittest.main()

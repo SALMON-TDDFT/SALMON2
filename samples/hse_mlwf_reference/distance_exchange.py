@@ -46,7 +46,9 @@ class DistanceExchange:
   if np.min(self.multiplier)<-1e-12*np.max(abs(self.multiplier)):
    raise ValueError('HSE distance kernel must be positive semidefinite on the active grid')
 
- def apply(self,sources,targets):
+ def apply(self,sources,targets,row_rank=0,row_size=1):
+  if not isinstance(row_rank,(int,np.integer)) or not isinstance(row_size,(int,np.integer)) or row_size<1 or not 0<=row_rank<row_size:
+   raise ValueError('Valid integer row rank and size required')
   start=time.perf_counter();sources=np.asarray(sources);targets=np.asarray(targets)
   for a in (sources,targets):
    if a.ndim!=5 or a.shape[0]!=self.nk or a.shape[2:]!=self.shape or a.shape[1]<1 or not np.isfinite(a).all():
@@ -55,7 +57,7 @@ class DistanceExchange:
   t=targets.reshape(self.nk,targets.shape[1],-1)*self.phase[:,None,:]
   out=np.zeros_like(t,dtype=complex);ng=len(self.points);workspace=0;columns_total=0
   formation=transform=application=0.;nonzero=total_entries=0
-  for lo in range(0,ng,self.block_rows):
+  for lo in range(row_rank*self.block_rows,ng,row_size*self.block_rows):
    hi=min(lo+self.block_rows,ng);points=self.points[lo:hi]
    delta=points[:,None,:]-self.points[None,:,:]
    columns=np.arange(ng)
@@ -87,4 +89,5 @@ class DistanceExchange:
    density_seconds=formation,transform_seconds=transform,application_seconds=application,
    workspace_bytes=int(workspace+s.nbytes+t.nbytes+out.nbytes),
    primitive_pair_fraction=columns_total/ng**2,nonzero_kernel_fraction=nonzero/max(1,total_entries),
-   radius_bohr=self.radius,block_rows=self.block_rows)
+   kernel_entries=total_entries,nonzero_kernel_entries=nonzero,
+   radius_bohr=self.radius,block_rows=self.block_rows,row_rank=int(row_rank),row_size=int(row_size))

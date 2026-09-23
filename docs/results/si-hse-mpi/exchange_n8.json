@@ -1,0 +1,101 @@
+{
+  "mpi_ranks": 8,
+  "mpi_library": "Open MPI v5.0.9, package: Open MPI brew@Tahoe-arm64.local Distribution, ident: 5.0.9, repo rev: v5.0.9, Oct 30, 2025\u0000",
+  "state_sha256": "4ea614e148d82ec6dab61ccc2da7301ed850bf51cfef0dc9dced99d94e084184",
+  "serial_seconds": 9.036957249976695,
+  "mpi_seconds": [
+    1.450637292000465,
+    1.4873110419721343,
+    1.4250212499755435
+  ],
+  "mpi_median_seconds": 1.450637292000465,
+  "speedup": 6.229646307737274,
+  "relative_error": 0.0,
+  "runs": [
+    {
+      "exchange_seconds": 1.4506282500224188,
+      "mpi_ranks": 8,
+      "rank_exchange_seconds": [
+        1.4369522919878364,
+        1.4240054169786163,
+        1.4216319170081988,
+        1.3973921670112759,
+        1.3494095000205562,
+        1.2774131670012139,
+        1.3451134579954669,
+        1.3497257080161944
+      ],
+      "workspace_bytes_per_rank": [
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968
+      ],
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16
+    },
+    {
+      "exchange_seconds": 1.4873035410419106,
+      "mpi_ranks": 8,
+      "rank_exchange_seconds": [
+        1.4656681249616668,
+        1.4747364160139114,
+        1.4110862920060754,
+        1.4713368330267258,
+        1.3705116670462303,
+        1.3891015409608372,
+        1.3382553340052254,
+        1.388962958008051
+      ],
+      "workspace_bytes_per_rank": [
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968
+      ],
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16
+    },
+    {
+      "exchange_seconds": 1.4250154169858433,
+      "mpi_ranks": 8,
+      "rank_exchange_seconds": [
+        1.317193417053204,
+        1.4118656250066124,
+        1.4076120419776998,
+        1.2885130000067875,
+        1.3032251250115223,
+        1.2947569999960251,
+        1.312375332985539,
+        1.2916302499943413
+      ],
+      "workspace_bytes_per_rank": [
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968,
+        254803968
+      ],
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16
+    }
+  ],
+  "scope": "Exchange only; communication included; one serial reference timing, three MPI repetitions; serial production job remains active"
+}

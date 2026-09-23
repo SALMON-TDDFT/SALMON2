@@ -10,6 +10,8 @@ class DriverFailureTests(unittest.TestCase):
  def test_unknown_exchange_method_rejected(self):
   with self.assertRaisesRegex(ValueError,'exchange method'):
    driver.run('missing','missing','missing',1,exchange_method='wrong')
+  with self.assertRaisesRegex(ValueError,'blocked'):
+   driver.run('missing','missing','missing',1,exchange_backend=object())
  def test_endpoint_failure_keeps_coherent_accepted_checkpoint(self):
   with tempfile.TemporaryDirectory() as folder:
    p=Path(folder);export=p/'export';export.mkdir();(export/'metadata.txt').write_text('fixture');(export/'complete.txt').write_text('fixture')
@@ -49,6 +51,9 @@ class DriverFailureTests(unittest.TestCase):
      with patch.object(driver,'DistanceExchange',create=True,return_value=object()):
       with self.assertRaisesRegex(RuntimeError,'injected endpoint-action failure'):
        driver.run(export,gs/'state.npz',p/'blocked',1,exchange_method='blocked')
+    with patch.object(driver,'DistanceExchange',side_effect=AssertionError('supplied backend must be used')):
+     with self.assertRaisesRegex(RuntimeError,'injected endpoint-action failure'):
+      driver.run(export,gs/'state.npz',p/'supplied',1,exchange_method='blocked',exchange_backend=object())
     original_save=driver.save_checkpoint;writes=[0]
     def fail_second_save(*args,**kw):
      writes[0]+=1

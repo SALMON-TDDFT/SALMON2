@@ -1,0 +1,77 @@
+{
+  "mpi_ranks": 4,
+  "mpi_library": "Open MPI v5.0.9, package: Open MPI brew@Tahoe-arm64.local Distribution, ident: 5.0.9, repo rev: v5.0.9, Oct 30, 2025\u0000",
+  "state_sha256": "4ea614e148d82ec6dab61ccc2da7301ed850bf51cfef0dc9dced99d94e084184",
+  "serial_seconds": 8.335483541944996,
+  "mpi_seconds": [
+    2.257317875046283,
+    2.3278630419517867,
+    2.3361697910004295
+  ],
+  "mpi_median_seconds": 2.3278630419517867,
+  "speedup": 3.58074482550148,
+  "relative_error": 0.0,
+  "runs": [
+    {
+      "exchange_seconds": 2.2573085409821942,
+      "mpi_ranks": 4,
+      "rank_exchange_seconds": [
+        2.18961483304156,
+        2.061420915997587,
+        2.2491937500308268,
+        2.237173500005156
+      ],
+      "workspace_bytes_per_rank": [
+        254803968,
+        254803968,
+        254803968,
+        254803968
+      ],
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16
+    },
+    {
+      "exchange_seconds": 2.327856000047177,
+      "mpi_ranks": 4,
+      "rank_exchange_seconds": [
+        2.3091106670326553,
+        2.321393582969904,
+        2.0433930410072207,
+        2.239781500014942
+      ],
+      "workspace_bytes_per_rank": [
+        254803968,
+        254803968,
+        254803968,
+        254803968
+      ],
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16
+    },
+    {
+      "exchange_seconds": 2.33616429095855,
+      "mpi_ranks": 4,
+      "rank_exchange_seconds": [
+        2.0468071249779314,
+        2.3149731250014156,
+        2.3283949160249904,
+        2.2380859169643372
+      ],
+      "workspace_bytes_per_rank": [
+        254803968,
+        254803968,
+        254803968,
+        254803968
+      ],
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16
+    }
+  ],
+  "scope": "Exchange only; communication included; one serial reference timing, three MPI repetitions; serial production job remains active"
+}
