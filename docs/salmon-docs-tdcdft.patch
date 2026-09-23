@@ -2,7 +2,7 @@ diff --git a/source/input_keyword_list.rst b/source/input_keyword_list.rst
 index ae4831f..3f13a6d 100644
 --- a/source/input_keyword_list.rst
 +++ b/source/input_keyword_list.rst
-@@ -744,6 +744,132 @@ character, default='none'
+@@ -744,6 +744,134 @@ character, default='none'
     |   ``'TBmBJ'``: Tran-Blaha meta-GGA exchange with Perdew-Wang correlation. :Fabien Tran and Peter Blaha, Phys. Rev. Lett. 102, 226401 (2008). John P. Perdew and Yue Wang, Phys. Rev. B 45, 13244 (1992). This potential is known to provide a reasonable description for the bandgap of various insulators. For this choice, the additional mixing parameter 'cval' may be specified. See below.
     |   ``'r2scan'``:  r2SCAN meta-GGA functional [J. W. Furness, A. D. Kaplan, J. Ning, J. P. Perdew, J. Sun, J. Phys. Chem. Lett. 11, 8208 (2020)].
  
@@ -120,13 +120,15 @@ index ae4831f..3f13a6d 100644
 +^^^^^^^^^^^^^^^^^^^
 +
 +   | ``tdcdft_screening='elf'`` uses Q=integral n*(ELF-1/2)^2 / integral n and alpha=alpha0*Q/Q_initial.
-+   | Requires tdcdft='lrc' in atomic units. Both pulse and impulse calculations are supported.
++   | Requires normalized tdcdft='lrc' or 'proca' in atomic units; pulse and impulse are supported.
 +   | ``tdcdft_elf_stride`` (integer, default10) evaluates current-corrected ELF every this many steps.
 +   | Q_initial is measured from the initial state; alpha is held between evaluations, without time averaging.
 +   | Native finite-difference Bloch gradients, occupation/k weights and summed local orbital current are used.
 +   | Alpha starts at alpha0 and vanishes at the continuum cold uniform-gas ELF=1/2 limit; no upper clipping.
 +   | This is an empirical localization closure, not a dielectric derivation or proof of metallic transport.
-+   | Integrates a_xc'=-alpha*P with held alpha; damping and restoring must be zero.
++   | LRC integrates a_xc'=-alpha*P with beta=gamma=0; Proca uses a_xc''+beta*a_xc'+gamma*a_xc=alpha(t)*j.
++   | For time-varying alpha these are distinct closures; Proca has no -alpha'*P driving term.
++   | Direct a2/a0 input is unsupported with ELF.
 +   | No external-field threshold is used. Existing tdcdft_screen_stop can freeze Q after a specified time.
 +   | The 13 output columns are time, a_xc_xyz, E_xc_xyz, alpha, Q, P_xyz and Q_initial.
 +   | ELF restart requires version4 and matching stride; old modes remain compatible with their old checkpoints.

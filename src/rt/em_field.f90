@@ -28,7 +28,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
   use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em, &
-    tdcdft_alpha,tdcdft_damping,tdcdft_restoring,tdcdft_screening,tdcdft_screen_omega, &
+    tdcdft,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,tdcdft_screening,tdcdft_screen_omega, &
     tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor,tdcdft_screen_stop
   use nvtx_wrapper
   implicit none
@@ -77,7 +77,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
         error stop 'TDCDFT: screening state is nonfinite'
       alpha_now=rt%xc_alpha
     end if
-    if(tdcdft_screening=='elf') then
+    if(tdcdft_screening=='elf'.and.tdcdft=='lrc') then
       ! Piecewise-constant alpha: integrate a'=-alpha*P over the next interval.
       call advance_polarization_field(dt,alpha_now,alpha_now,rt%xc_polarization,rt%curr(:,itt), &
                                       rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
@@ -85,6 +85,8 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
       call advance_polarization_field(dt,alpha_old,alpha_now,rt%xc_polarization,rt%curr(:,itt), &
                                       rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
     else
+    ! Proca + ELF uses alpha(t)*j in the oscillator equation, not the
+    ! polarization closure. The saved tdcdft mode distinguishes the models.
     call advance_xc_field(dt,alpha_now,tdcdft_damping,tdcdft_restoring,rt%curr(:,itt), &
                          rt%Ac_xc(:,itt-1),rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
     end if

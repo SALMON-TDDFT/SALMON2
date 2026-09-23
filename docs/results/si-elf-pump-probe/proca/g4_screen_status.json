@@ -1,0 +1,10 @@
+{
+  "case": "g4_screen",
+  "gamma": 0.0004,
+  "beta": 0.0,
+  "probe_amplitude": 0.0,
+  "requested_steps": 5000,
+  "exit_code": 0,
+  "completed": true,
+  "elapsed_seconds": 307.39624354202533
+}

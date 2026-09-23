@@ -1,0 +1,46 @@
+{
+  "trajectories": {
+    "pump": {
+      "case": "pump",
+      "exit_code": 1,
+      "completed": false,
+      "elapsed_seconds": 191.15602258295985,
+      "rows": 3357,
+      "end_time_fs": 6.496155747261828,
+      "max_norm_error": 0.3750075200000005,
+      "alpha_min": 0.1252768787894824,
+      "alpha_max": 0.32784680215488327,
+      "alpha_final": 0.32784041846425654,
+      "max_abs_Axc": 5.928696895991223,
+      "max_abs_J": 0.361501697298297,
+      "valid_trajectory": false,
+      "first_logged_norm_error_over_1e_4_fs": 6.21169495,
+      "failure_step": 3358,
+      "failure_time_fs": 6.498090854723032,
+      "fatal_electron_counts": [
+        409.8247560157114
+      ]
+    },
+    "plus": {
+      "case": "plus",
+      "exit_code": 1,
+      "completed": false,
+      "elapsed_seconds": 191.44765337498393,
+      "rows": 3359,
+      "end_time_fs": 6.500025962184237,
+      "max_norm_error": 3082.6618974,
+      "alpha_min": 0.12543004716558653,
+      "alpha_max": 0.32778238847382707,
+      "alpha_final": 0.32778238847382707,
+      "max_abs_Axc": 5.9550425731914896,
+      "max_abs_J": 2.03529063221235,
+      "valid_trajectory": false,
+      "first_logged_norm_error_over_1e_4_fs": 6.21169495,
+      "failure_step": 3360,
+      "failure_time_fs": 6.50196106964544,
+      "fatal_electron_counts": [
+        3114.661897399776
+      ]
+    }
+  }
+}

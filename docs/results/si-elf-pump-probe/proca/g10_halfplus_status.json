@@ -1,0 +1,10 @@
+{
+  "case": "g10_halfplus",
+  "gamma": 0.001,
+  "beta": 0.0,
+  "probe_amplitude": 5e-05,
+  "requested_steps": 12000,
+  "exit_code": 0,
+  "completed": true,
+  "elapsed_seconds": 785.1435947080026
+}

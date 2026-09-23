@@ -179,3 +179,13 @@ The initial CTest invocation could not locate an executable named `python` for
 two legacy verification scripts. With a local alias to the installed Python3,
 the final complete 10-test run passes; no simulation or reference data was changed
 for that environment issue.
+
+## Follow-up: Proca stabilization
+
+The historical results above used lrc+elf with beta=gamma=0. Following the
+long-time pump-probe check, ELF also supports `tdcdft='proca'` with normalized
+nonnegative alpha/beta/gamma. This uses a''+beta*a'+gamma*a=alpha(t)*J, while
+lrc+elf retains a'=-alpha*P. The two time-dependent-alpha closures are distinct;
+no -alpha'*P term is added to Proca. Direct a2/a0 input is rejected for ELF.
+See [stabilized pump-probe](../si-elf-pump-probe/proca/README.md) for validation
+and the common-coefficient unpumped reference.

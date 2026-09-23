@@ -266,3 +266,28 @@ checkpoint postprocessing matches native Q within3e-14. The cold finite-mesh
 electron gas leaves alpha3.42e-8 versus the exact continuum endpoint zero.
 This is an empirical localization model; residual current remains and neither
 long-time stability nor improved exciton peaks is established by this short run.
+
+### ELF-Proca connection for pump-probe stabilization
+
+The user identified beta/gamma stabilization as necessary after extending the
+beta=gamma=0 ELF experiment. `tdcdft='proca',tdcdft_screening='elf'` now routes
+the measured alpha(t) into the existing oscillator equation
+`a''+beta*a'+gamma*a=alpha(t)*J`; `lrc+elf` retains `a'=-alpha*P`.
+These are distinct variable-alpha closures, explicitly documented. No derivative
+of alpha times P is added to Proca. The normalized coefficient input is required;
+direct a2/a0 is rejected with ELF. Existing v4 mode/parameter metadata rejects
+incompatible restarts without changing the format.
+
+Serial and MPI4 ELF-Proca tests verify the variable-alpha recurrence, odd restart,
+normalization, freeze and parameter guards. Legacy ELF tests, ten selected CTest
+checks and the existing full regression suite pass. The failed unstabilized
+control and completed common-coefficient stabilized comparison are documented in
+[ELF pump-probe](results/si-elf-pump-probe/README.md) and its Proca subdirectory.
+
+With beta=0,gamma=.001, all pump and central +/-probe and half-probe trajectories
+reach23.2213 fs with maximum logged norm error1.142e-5 electrons. The2–4 eV
+central spectra differ by0.2122% on halving the probe (unwindowed current3.235%).
+However, large positive/negative structures and observation-window dependence
+prevent identifying a converged exciton peak change. The same-coefficient
+unpumped maximum is3.34 eV versus3.36 without stabilization. A pumped local
+maximum at3.39 eV is only a diagnostic extremum, not an established exciton shift.

@@ -1,0 +1,191 @@
+{
+  "pump": {
+    "case": "pump",
+    "exit_code": 1,
+    "completed": false,
+    "elapsed_seconds": 191.15602258295985,
+    "rows": 3357,
+    "end_time_fs": 6.496155747261828,
+    "max_norm_error": 0.3750075200000005,
+    "alpha_min": 0.1252768787894824,
+    "alpha_max": 0.32784680215488327,
+    "alpha_final": 0.32784041846425654,
+    "max_abs_Axc": 5.928696895991223,
+    "max_abs_J": 0.361501697298297,
+    "valid_trajectory": false,
+    "first_logged_norm_error_over_1e_4_fs": 6.21169495,
+    "failure_step": 3358,
+    "failure_time_fs": 6.498090854723032,
+    "fatal_electron_counts": [
+      409.8247560157114
+    ]
+  },
+  "plus": {
+    "case": "plus",
+    "exit_code": 1,
+    "completed": false,
+    "elapsed_seconds": 191.44765337498393,
+    "rows": 3359,
+    "end_time_fs": 6.500025962184237,
+    "max_norm_error": 3082.6618974,
+    "alpha_min": 0.12543004716558653,
+    "alpha_max": 0.32778238847382707,
+    "alpha_final": 0.32778238847382707,
+    "max_abs_Axc": 5.9550425731914896,
+    "max_abs_J": 2.03529063221235,
+    "valid_trajectory": false,
+    "first_logged_norm_error_over_1e_4_fs": 6.21169495,
+    "failure_step": 3360,
+    "failure_time_fs": 6.50196106964544,
+    "fatal_electron_counts": [
+      3114.661897399776
+    ]
+  },
+  "ground": {
+    "case": "ground",
+    "exit_code": 0,
+    "completed": true,
+    "elapsed_seconds": 653.7835806660005,
+    "rows": 12000,
+    "end_time_fs": 23.221289534448,
+    "max_norm_error": 1.000000082740371e-08,
+    "alpha_min": 0.19999993906356234,
+    "alpha_max": 0.20000003074264078,
+    "alpha_final": 0.19999998451197917,
+    "max_abs_Axc": 0.00023523552470789932,
+    "max_abs_J": 2.7935725347367e-06,
+    "valid_trajectory": true,
+    "first_logged_norm_error_over_1e_4_fs": null,
+    "failure_step": null,
+    "failure_time_fs": null,
+    "fatal_electron_counts": []
+  },
+  "diagnostic_halfdt": {
+    "case": "diagnostic_halfdt",
+    "exit_code": 0,
+    "completed": true,
+    "elapsed_seconds": 354.54052504198626,
+    "rows": 6240,
+    "end_time_fs": 6.03753527895648,
+    "max_norm_error": 5.499999993219262e-07,
+    "alpha_min": 0.12530503493444725,
+    "alpha_max": 0.20000182002544473,
+    "alpha_final": 0.13982573712336602,
+    "max_abs_Axc": 2.264906927202159,
+    "max_abs_J": 0.0211166008033162,
+    "valid_trajectory": true,
+    "first_logged_norm_error_over_1e_4_fs": null,
+    "failure_step": null,
+    "failure_time_fs": null,
+    "fatal_electron_counts": [],
+    "comparison_to_dt008_stride10": {
+      "end_time_fs": 6.03753527895648,
+      "current_relative_l2": 0.0014729834202143,
+      "Axc_relative_l2": 0.000592070313992375,
+      "max_alpha_difference": 0.00010107123576283406,
+      "final_Axc": -2.264906927202159,
+      "reference_final_Axc": -2.266708305718616,
+      "final_current": -0.0211166008033162,
+      "reference_final_current": -0.0211549087332345
+    }
+  },
+  "diagnostic_stride1": {
+    "case": "diagnostic_stride1",
+    "exit_code": 0,
+    "completed": true,
+    "elapsed_seconds": 221.09216458303854,
+    "rows": 3120,
+    "end_time_fs": 6.03753527895648,
+    "max_norm_error": 1.671000000058598e-05,
+    "alpha_min": 0.12529661503077918,
+    "alpha_max": 0.20000191396960465,
+    "alpha_final": 0.13948004688361637,
+    "max_abs_Axc": 2.252452650828068,
+    "max_abs_J": 0.0208585576400444,
+    "valid_trajectory": true,
+    "first_logged_norm_error_over_1e_4_fs": null,
+    "failure_step": null,
+    "failure_time_fs": null,
+    "fatal_electron_counts": [],
+    "comparison_to_dt008_stride10": {
+      "end_time_fs": 6.03753527895648,
+      "current_relative_l2": 0.01266798862686899,
+      "Axc_relative_l2": 0.005225270769268286,
+      "max_alpha_difference": 0.0028276555676086668,
+      "final_Axc": -2.252452650828068,
+      "reference_final_Axc": -2.266708305718616,
+      "final_current": -0.0208585576400444,
+      "reference_final_current": -0.0211549087332345
+    }
+  },
+  "checks": {
+    "pre_probe_current_difference": 0.0,
+    "max_external_field_after_pulse": 0.0,
+    "available_post_probe_before_abort_fs": 4.5629833935190325,
+    "clean_post_probe_before_norm_threshold_fs": 4.276587488796,
+    "approximate_clean_window_resolution_eV": 0.9670485420524685
+  },
+  "ground_spectrum": {
+    "peak_eV": 3.36,
+    "height": 119.29845249694999,
+    "area_eV": 62.954736526906515,
+    "boundary_peak": false,
+    "apparent_FWHM_eV": 0.2491556452984245,
+    "windows": {
+      "600.0": {
+        "peak_eV": 3.35,
+        "height": 93.0861227573973,
+        "area_eV": 62.96252614722171,
+        "boundary_peak": false
+      },
+      "720.0": {
+        "peak_eV": 3.35,
+        "height": 104.49837339324725,
+        "area_eV": 62.950573658060435,
+        "boundary_peak": false
+      },
+      "880.0": {
+        "peak_eV": 3.36,
+        "height": 119.29845249694999,
+        "area_eV": 62.954736526906515,
+        "boundary_peak": false
+      }
+    }
+  },
+  "pumped_spectrum": {
+    "valid": false,
+    "reason": "Both pump-only and pump+probe fail norm before the required observation window; no pumped peak extracted."
+  },
+  "pump_at_3.0fs": {
+    "time_fs": 2.9994165648662,
+    "alpha": 0.18047690559549628,
+    "Axc": -0.1011951874446395,
+    "current": -0.000665745419235031,
+    "Exc": 0.002489037397441704,
+    "P": 0.013762275107317496
+  },
+  "pump_at_4.0fs": {
+    "time_fs": 3.9998671223086686,
+    "alpha": 0.16559139296026196,
+    "Axc": -0.33330501365821075,
+    "current": -0.000822898188046718,
+    "Exc": 0.008307237078115232,
+    "P": 0.05016708253736877
+  },
+  "pump_at_5.0fs": {
+    "time_fs": 5.000317679751136,
+    "alpha": 0.15137036512949567,
+    "Axc": -0.8713765528558209,
+    "current": -0.00285059226553424,
+    "Exc": 0.018373816930954134,
+    "P": 0.12138318431904013
+  },
+  "pump_at_6.0fs": {
+    "time_fs": 6.000768237193604,
+    "alpha": 0.13857326707988968,
+    "Axc": -2.168976050950094,
+    "current": -0.0191616430841807,
+    "Exc": 0.062107522379217794,
+    "P": 0.4481926686726199
+  }
+}

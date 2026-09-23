@@ -2895,7 +2895,10 @@ contains
         tdcdft_screen_strength,tdcdft_screen_floor]))) error stop 'TDCDFT: screening parameters must be finite'
     if(tdcdft_screening=='elf') then
       if(tdcdft_elf_stride<1) error stop 'TDCDFT ELF: stride must be positive'
-      if(tdcdft/='lrc'.or.unit_system/='a.u.') error stop 'TDCDFT ELF: requires lrc and atomic units'
+      if((tdcdft/='lrc'.and.tdcdft/='proca').or.unit_system/='a.u.') &
+        error stop 'TDCDFT ELF: requires lrc or proca in atomic units'
+      if(tdcdft_alpha<0d0.or.tdcdft_a2/=0d0.or.tdcdft_a0/=0d0) &
+        error stop 'TDCDFT ELF: requires normalized nonnegative alpha'
     else if (tdcdft_screening/='none') then
       if (tdcdft_screening=='polarization'.and.(tdcdft_damping/=0d0.or.tdcdft_restoring/=0d0)) &
         error stop 'TDCDFT: polarization screening requires zero damping and restoring'
