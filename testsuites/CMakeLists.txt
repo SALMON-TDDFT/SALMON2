@@ -58,6 +58,7 @@ if (USE_OPENACC)
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/602_bulk_Si_gs_gramschmidt_blas_n")
 else () 
 ### Testsuites for CPU ###
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/142_Si_tdcdft")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/101_C2H2_gs")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/102_C2H2_rt_response")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/103_C2H2_rt_pulse")

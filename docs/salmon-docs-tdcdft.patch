@@ -1,0 +1,64 @@
+diff --git a/source/input_keyword_list.rst b/source/input_keyword_list.rst
+index ae4831f..e57aa25 100644
+--- a/source/input_keyword_list.rst
++++ b/source/input_keyword_list.rst
+@@ -744,6 +744,59 @@ character, default='none'
+    |   ``'TBmBJ'``: Tran-Blaha meta-GGA exchange with Perdew-Wang correlation. :Fabien Tran and Peter Blaha, Phys. Rev. Lett. 102, 226401 (2008). John P. Perdew and Yue Wang, Phys. Rev. B 45, 13244 (1992). This potential is known to provide a reasonable description for the bandgap of various insulators. For this choice, the additional mixing parameter 'cval' may be specified. See below.
+    |   ``'r2scan'``:  r2SCAN meta-GGA functional [J. W. Furness, A. D. Kaplan, J. Ning, J. P. Perdew, J. Sun, J. Phys. Chem. Lett. 11, 8208 (2020)].
+ 
++.. _tdcdft:
++
++tdcdft
++^^^^^^
++
++character, default='none'
++
++   | Experimental macroscopic xc vector potential, added to the PZ scalar potential.
++   | Options: ``'none'``, ``'lrc'``, ``'proca'``.
++   | In atomic units the normalized field a=Axc/c satisfies a'' + beta*a' + gamma*a = alpha*j,
++     where j is SALMON's volume-averaged electron-number current density.
++   | ``'lrc'`` requires beta=gamma=0. ``'proca'`` requires gamma>0 and allows beta>=0.
++   | CPU only: theory='tddft_response' or 'tddft_pulse', periodic transverse response,
++     unpolarized PZ, fixed ions, middlepoint propagation, no symmetry reduction.
++   | Maxwell coupling, spin-orbit, DC, jellium, self-checkpoint and restart-time reset are unsupported.
++   | The classical field output is unchanged; the additional sysname_rt_xc.data contains Axc/c and Exc.
++   | RT restart requires tdcdft.bin with the same mode, time step and parameters.
++   | Fixed coefficients do not model carrier-dependent screening. Parameters require material-specific validation.
++
++.. _tdcdft_alpha:
++
++tdcdft_alpha
++^^^^^^^^^^^^
++
++real(8), default=0d0
++
++   | Nonnegative dimensionless alpha in the above atomic-unit equation.
++   | Zero removes the xc feedback. Enabled TDCDFT evaluates nonlocal current phases at the endpoint,
++     including at alpha=0; for time-dependent lasers use this enabled zero-coupling reference.
++
++.. _tdcdft_damping:
++
++tdcdft_damping
++^^^^^^^^^^^^^^
++
++real(8), default=0d0
++
++   | Nonnegative beta. Input unit: inverse time (fs^-1 for unit_system='A_eV_fs').
++   | Available with tdcdft='proca'. This model damping is not a calibrated physical lifetime.
++
++.. _tdcdft_restoring:
++
++tdcdft_restoring
++^^^^^^^^^^^^^^^^
++
++real(8), default=0d0
++
++   | Nonnegative gamma. Input unit: inverse time squared (fs^-2 for unit_system='A_eV_fs').
++   | Must be positive with tdcdft='proca'; requires gamma*dt**2<4.
++   | This bound only concerns the uncoupled discrete oscillator, not full electronic stability.
++   | beta and gamma are logged after conversion to atomic units. They are normalized equation
++     coefficients, not the unnormalized a0/a2 parameters of the Kohn-Sham-Proca literature.
++
+ .. _cval:
+ 
+ cval

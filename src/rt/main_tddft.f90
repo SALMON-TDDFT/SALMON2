@@ -177,6 +177,7 @@ end select
 
 if(comm_is_root(nproc_id_global))then
   close(ofl%fh_rt)  ! Close _rt.data file
+  if (allocated(rt%Ac_xc)) close(ofl%fh_rt_xc)
 end if
 
 call timer_end(LOG_WRITE_RT_RESULTS)

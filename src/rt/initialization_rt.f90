@@ -39,12 +39,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use timer
   use write_sub, only: write_xyz,write_rt_data_0d,write_rt_data_3d,write_rt_energy_data, &
                        write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d,&
-                       init_projection,write_rt_spin,write_current_decomposed
+                       init_projection,write_rt_spin,write_current_decomposed,write_rt_xc
   use dm_unfold_sub, only: init_dm_unfold
   use code_optimization
   use initialization_sub
   use prep_pp_sub
-  use density_matrix, only: calc_density,calc_microscopic_current
+  use density_matrix, only: calc_density,calc_microscopic_current,calc_current
   use writefield
   use salmon_pp, only: calc_nlcc, read_pslfile
   use force_sub, only: calc_force
@@ -172,6 +172,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   allocate( rt%Ac_ind(3,0:nt+1) )
   allocate( rt%Ac_tot(3,0:nt+1) )
   
+  if (tdcdft/='none') then
+    allocate(rt%Ac_xc(3,0:nt+1))
+    rt%Ac_xc=0d0
+  end if
   rt%curr  = 0d0
   rt%E_ext = 0d0
   rt%E_ind = 0d0
@@ -346,6 +350,17 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
+
+  ! Axc(0)=dAxc(0)/dt=0. The kick is already present in Ac_tot(:,0).
+  ! Seed the centered update with the initial endpoint electron-number current.
+  if (allocated(rt%Ac_xc).and.yn_restart=='n') then
+    system%vec_Ac=rt%Ac_tot(:,0)
+    call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+    call calc_current(system,mg,stencil,info,srg,spsi_in,ppg,curr_e_tmp(:,1:system%nspin))
+    spsi_in%update_zwf_overlap=.true.
+    rt%curr(:,0)=sum(curr_e_tmp(:,1:system%nspin),dim=2)
+    rt%Ac_xc(:,1)=0.5d0*tdcdft_alpha*dt**2*rt%curr(:,0)
+  end if
   
   call timer_begin(LOG_INIT_RT)
   
@@ -376,6 +391,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end select
 
   !(header of SYSname_rt_energy.data)
+  if (allocated(rt%Ac_xc)) call write_rt_xc(-1,ofl,dt,rt)
   call write_rt_energy_data(-1,ofl,dt,energy,md)
   
   if(yn_spinorbit=='y') then

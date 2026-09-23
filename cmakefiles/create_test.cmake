@@ -34,7 +34,8 @@ function(create_test)
   add_test(NAME "verify_${TEST_NAME}" COMMAND verification)
 
   set_tests_properties("prep_${TEST_NAME}"   PROPERTIES FIXTURES_SETUP    "setup_${TEST_NAME}")
-  set_tests_properties("run_${TEST_NAME}"    PROPERTIES RUN_SERIAL ENABLE)
+  set_tests_properties("run_${TEST_NAME}"    PROPERTIES RUN_SERIAL ENABLE
+    FIXTURES_SETUP "run_${TEST_NAME}")
   set_tests_properties("verify_${TEST_NAME}" PROPERTIES FIXTURES_CLEANUP  "cleanup_${TEST_NAME}")
 
   set_tests_properties("run_${TEST_NAME}"    PROPERTIES FIXTURES_REQUIRED "setup_${TEST_NAME}")

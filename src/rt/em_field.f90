@@ -22,10 +22,13 @@ contains
 !===================================================================================================================================
 
 subroutine calc_emfields(itt,nspin,curr_in,rt)
+  use tdcdft_lrc, only: advance_xc_field
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures, only : s_rt
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em
+  use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em, &
+    tdcdft_alpha,tdcdft_damping,tdcdft_restoring
   use nvtx_wrapper
   implicit none
   integer   ,intent(in)    :: itt,nspin
@@ -49,6 +52,12 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
     rt%curr(1:3,itt) = curr_in(1:3,1) + curr_in(1:3,2)
   end if
 
+! SALMON current is electron-number current: Axc'' = +alpha*j in A/c units.
+  if (allocated(rt%Ac_xc)) then
+    call advance_xc_field(dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,rt%curr(:,itt), &
+                         rt%Ac_xc(:,itt-1),rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
+    if (.not.all(ieee_is_finite(rt%Ac_xc(:,itt+1)))) error stop 'TDCDFT: xc field is nonfinite'
+  end if
 ! vector potential for next step
   if(trans_longi=="lo")then
     rt%Ac_ind(:,itt+1) = 2d0*rt%Ac_ind(:,itt) -rt%Ac_ind(:,itt-1) -4d0*Pi*rt%curr(:,itt)*dt**2

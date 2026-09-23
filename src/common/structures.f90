@@ -444,6 +444,7 @@ module structures
   type s_ofile
     integer :: fh_eigen
     integer :: fh_rt
+    integer :: fh_rt_xc
     integer :: fh_rt_energy
     integer :: fh_response
     integer :: fh_pulse
@@ -540,6 +541,7 @@ module structures
     real(8), allocatable :: rIe(:)    !rename later
     real(8), allocatable :: curr(:,:), E_ext(:,:), E_ind(:,:), E_tot(:,:)
     real(8), allocatable :: Ac_ext(:,:), Ac_ind(:,:), Ac_tot(:,:)
+    real(8), allocatable :: Ac_xc(:,:) ! separate xc A/c, never included in classical fields
     complex(8), allocatable :: zc(:)
     type(s_scalar),allocatable :: vloc_t(:), vloc_new(:)
     type(s_scalar),allocatable :: vloc_old(:,:)  ! vloc_old(spin,iteration)

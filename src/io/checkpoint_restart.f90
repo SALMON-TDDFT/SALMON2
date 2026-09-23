@@ -2086,6 +2086,7 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
     end if
   end if
   
+  call checkpoint_xc_field(wdir,itt,info,rt)
 end subroutine write_rtdata
 
 subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
@@ -2124,8 +2125,90 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
     call comm_bcast(rt%Ac_ind,comm)
   end if
 
+  call restore_xc_field(wdir,itt,info,rt)
   call nvtxEndRange
 end subroutine read_rtdata
+
+! A separate versioned file leaves legacy rtdata.bin unchanged.
+subroutine checkpoint_xc_field(wdir,itt,info,rt)
+  use structures, only: s_parallel_info,s_rt
+  use salmon_global, only: tdcdft,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,dt
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root,comm_bcast
+  implicit none
+  character(*),intent(in) :: wdir
+  integer,intent(in) :: itt
+  type(s_parallel_info),intent(in) :: info
+  type(s_rt),intent(in) :: rt
+  integer :: unit,ios
+  logical :: exists
+  ios=0
+  if (comm_is_root(nproc_id_global)) then
+    if (allocated(rt%Ac_xc)) then
+      open(newunit=unit,file=trim(wdir)//'tdcdft.bin',form='unformatted',status='replace',iostat=ios)
+      if (ios==0) then
+        write(unit,iostat=ios) 1,itt,tdcdft,dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring
+        if (ios==0) write(unit,iostat=ios) rt%Ac_xc(:,itt:itt+1),rt%curr(:,0:itt)
+        close(unit)
+      end if
+    else
+      inquire(file=trim(wdir)//'tdcdft.bin',exist=exists)
+      if (exists) then
+        open(newunit=unit,file=trim(wdir)//'tdcdft.bin',status='old',iostat=ios)
+        if (ios==0) close(unit,status='delete',iostat=ios)
+      end if
+    end if
+  end if
+  call comm_bcast(ios,info%icomm_rko)
+  if (ios/=0) error stop 'TDCDFT: cannot write checkpoint'
+end subroutine checkpoint_xc_field
+
+subroutine restore_xc_field(wdir,itt,info,rt)
+  use structures, only: s_parallel_info,s_rt
+  use salmon_global, only: tdcdft,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,dt
+  use parallelization, only: nproc_id_global
+  use communication, only: comm_is_root,comm_bcast
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  character(*),intent(in) :: wdir
+  integer,intent(in) :: itt
+  type(s_parallel_info),intent(in) :: info
+  type(s_rt),intent(inout) :: rt
+  integer :: unit,ios,version,saved_step
+  character(16) :: saved_mode
+  real(8) :: parameters(4)
+  logical :: exists
+  ios=0
+  if (comm_is_root(nproc_id_global)) then
+    inquire(file=trim(wdir)//'tdcdft.bin',exist=exists)
+    if (exists.neqv.allocated(rt%Ac_xc)) then
+      ios=1
+    else if (exists) then
+      open(newunit=unit,file=trim(wdir)//'tdcdft.bin',form='unformatted',status='old',iostat=ios)
+      if (ios==0) then
+        read(unit,iostat=ios) version,saved_step,saved_mode,parameters
+        if (ios==0) then
+          if (version/=1.or.saved_step/=itt.or.saved_mode/=tdcdft) ios=1
+          if (.not.all(ieee_is_finite(parameters))) ios=1
+          if (any(abs(parameters-[dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring]) &
+              >1d-13*max(1d0,abs(parameters)))) ios=1
+        end if
+        if (ios==0) read(unit,iostat=ios) rt%Ac_xc(:,itt:itt+1),rt%curr(:,0:itt)
+        close(unit)
+        if (ios==0) then
+          if (.not.all(ieee_is_finite(rt%Ac_xc(:,itt:itt+1)))) ios=1
+          if (.not.all(ieee_is_finite(rt%curr(:,0:itt)))) ios=1
+        end if
+      end if
+    end if
+  end if
+  call comm_bcast(ios,info%icomm_rko)
+  if (ios/=0) error stop 'TDCDFT: missing, invalid or incompatible checkpoint'
+  if (allocated(rt%Ac_xc)) then
+    call comm_bcast(rt%Ac_xc,info%icomm_rko)
+    call comm_bcast(rt%curr,info%icomm_rko)
+  end if
+end subroutine restore_xc_field
 
 !===================================================================================================================================
 

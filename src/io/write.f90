@@ -722,20 +722,21 @@ contains
 
   end subroutine
 !===================================================================================================================================
-  subroutine write_rt_data_3d(it,ofl,dt,system,curr_e,curr_i)
-    use structures, only: s_ofile, s_dft_system
+  subroutine write_rt_data_3d(it,ofl,dt,system,curr_e,curr_i,rt)
+    use structures, only: s_ofile, s_dft_system, s_rt
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: open_filehandle
     use inputoutput, only: t_unit_time,t_unit_current,t_unit_ac,t_unit_elec
     use salmon_global, only: spin,yn_md
     implicit none
+    type(s_rt),optional,intent(in) :: rt
     type(s_ofile) :: ofl
     integer, intent(in) :: it
     type(s_dft_system), intent(in) :: system
     real(8),intent(in) :: curr_e(3,2), curr_i(3)
     integer :: uid
-    real(8) :: dt
+    real(8) :: dt, ac_classical(3)
 
     if (comm_is_root(nproc_id_global)) then
 
@@ -803,11 +804,15 @@ contains
 
     else  !it>=0
        uid = ofl%fh_rt
+       ac_classical=system%vec_Ac
+       if (present(rt)) then
+         if (allocated(rt%Ac_xc)) ac_classical=rt%Ac_tot(:,it)
+       end if
        write(uid, "(F16.8,99(1X,E23.15E3))",advance='no') &
           & it * dt * t_unit_time%conv,    &
           & system%vec_Ac_ext(1:3) * t_unit_ac%conv, &
           & system%vec_E_ext(1:3) * t_unit_elec%conv, &
-          & system%vec_Ac(1:3) * t_unit_ac%conv, &
+          & ac_classical(1:3) * t_unit_ac%conv, &
           & system%vec_E(1:3) * t_unit_elec%conv
        if(spin=='unpolarized') then
           write(uid, "(99(1X,E23.15E3))",advance='no') &
@@ -1061,6 +1066,34 @@ contains
   end subroutine
 
 !===================================================================================================================================
+  subroutine write_rt_xc(it,ofl,dt,rt)
+    use structures, only: s_ofile,s_rt
+    use salmon_global, only: base_directory,sysname
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root
+    use filesystem, only: open_filehandle
+    use inputoutput, only: t_unit_time,t_unit_ac,t_unit_elec
+    implicit none
+    integer,intent(in) :: it
+    type(s_ofile),intent(inout) :: ofl
+    type(s_rt),intent(in) :: rt
+    real(8),intent(in) :: dt
+    real(8) :: exc(3)
+    if (.not.comm_is_root(nproc_id_global)) return
+    if (it<0) then
+      ofl%fh_rt_xc=open_filehandle(trim(base_directory)//trim(sysname)//'_rt_xc.data')
+      write(ofl%fh_rt_xc,'(a)') '# xc field only; Ac_tot and E_tot in rt.data remain classical'
+      write(ofl%fh_rt_xc,'(a)') '# time ['//trim(t_unit_time%name)//'] Axc/c xyz [' &
+        //trim(t_unit_ac%name)//'] Exc xyz ['//trim(t_unit_elec%name)//']'
+    else
+      ! Centered derivative at the same time as Axc; next step is already available.
+      exc=-(rt%Ac_xc(:,it+1)-rt%Ac_xc(:,it-1))/(2d0*dt)
+      write(ofl%fh_rt_xc,'(7(1x,es24.16e3))') it*dt*t_unit_time%conv, &
+        rt%Ac_xc(:,it)*t_unit_ac%conv,exc*t_unit_elec%conv
+      flush(ofl%fh_rt_xc)
+    end if
+  end subroutine write_rt_xc
+
   subroutine write_response_3d(ofl,rt)
     use salmon_global, only: e_impulse, trans_longi, nt, dt, nenergy, de, temperature, yn_lr_w0_correction
     use inputoutput, only: t_unit_energy,t_unit_conductivity

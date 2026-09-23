@@ -285,7 +285,7 @@ contains
       & alibc, &
       & alibxc, &
 #endif
-      & cval
+      & cval, tdcdft, tdcdft_alpha, tdcdft_damping, tdcdft_restoring
 
     namelist/rgrid/ &
       & dl, &
@@ -732,6 +732,10 @@ contains
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
+    tdcdft = 'none'
+    tdcdft_alpha = 0d0
+    tdcdft_damping = 0d0
+    tdcdft_restoring = 0d0
     cval  = -1d0
 !! == default for &rgrid
     dl        = 0d0
@@ -1161,6 +1165,7 @@ contains
 !! convert lowercase
     call string_lowercase(theory)
     call string_lowercase(spin)
+    call string_lowercase(tdcdft)
     call string_lowercase(xc)
     call string_lowercase(cname)
     call string_lowercase(xname)
@@ -1300,6 +1305,12 @@ contains
     call comm_bcast(alibc        ,nproc_group_global)
 #endif
     call comm_bcast(cval         ,nproc_group_global)
+    call comm_bcast(tdcdft, nproc_group_global)
+    call comm_bcast(tdcdft_alpha, nproc_group_global)
+    call comm_bcast(tdcdft_damping, nproc_group_global)
+    call comm_bcast(tdcdft_restoring, nproc_group_global)
+    tdcdft_damping = tdcdft_damping / utime_to_au
+    tdcdft_restoring = tdcdft_restoring / utime_to_au**2
 !! == bcast for &rgrid
     call comm_bcast(dl,nproc_group_global)
     dl = dl * ulength_to_au
@@ -2219,6 +2230,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibc', trim(alibc)
 #endif
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cval', cval
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'tdcdft', trim(tdcdft)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_alpha', tdcdft_alpha
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_damping [a.u.]', tdcdft_damping
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_restoring [a.u.]', tdcdft_restoring
 
       if(inml_rgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'rgrid', inml_rgrid
@@ -2753,6 +2768,7 @@ contains
   end subroutine dump_input_common
 
   subroutine check_bad_input
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use parallelization
     use communication
     implicit none
@@ -2834,6 +2850,39 @@ contains
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+
+    if (.not.all(ieee_is_finite([tdcdft_alpha,tdcdft_damping,tdcdft_restoring]))) &
+      error stop 'TDCDFT: parameters must be finite'
+    if (min(tdcdft_alpha,tdcdft_damping,tdcdft_restoring)<0d0) &
+      error stop 'TDCDFT: parameters must be nonnegative'
+    select case(tdcdft)
+    case('none')
+      if (max(tdcdft_alpha,tdcdft_damping,tdcdft_restoring)>0d0) &
+        error stop 'TDCDFT: select lrc or proca to use xc-field parameters'
+    case('lrc')
+      if (tdcdft_damping/=0d0.or.tdcdft_restoring/=0d0) &
+        error stop 'TDCDFT: lrc requires zero damping and restoring parameters'
+    case('proca')
+      if (tdcdft_restoring<=0d0) error stop 'TDCDFT: proca requires positive tdcdft_restoring'
+    case default
+      error stop 'TDCDFT: tdcdft must be none, lrc, or proca'
+    end select
+    if (tdcdft/='none') then
+      if (theory/='tddft_pulse'.and.theory/='tddft_response') &
+        error stop 'TDCDFT: requires tddft_response or tddft_pulse'
+      if (yn_periodic/='y'.or.trans_longi/='tr') error stop 'TDCDFT: requires periodic transverse response'
+      if (spin/='unpolarized'.or.yn_spinorbit/='n') error stop 'TDCDFT: requires unpolarized, no spin-orbit'
+      if (yn_md/='n'.or.yn_dc/='n'.or.yn_jm/='n') error stop 'TDCDFT: MD, DC and jellium unsupported'
+      if (propagator/='middlepoint') error stop 'TDCDFT: requires middlepoint propagator'
+      if (yn_symmetry/='n'.and.yn_symmetry/='nnn') error stop 'TDCDFT: disable symmetry reduction'
+      if (yn_reset_step_restart=='y') error stop 'TDCDFT: resetting restart time is unsupported'
+      if (yn_self_checkpoint=='y') error stop 'TDCDFT: use shared checkpoint files'
+      if (xc/='pz') error stop 'TDCDFT: initial implementation requires xc=pz'
+      if (dt<=0d0.or.tdcdft_restoring*dt**2>=4d0) error stop 'TDCDFT: invalid or unstable time step'
+#ifdef USE_OPENACC
+      error stop 'TDCDFT: accelerator path is not yet supported'
+#endif
+    end if
 
 #ifndef USE_MPI
     if(trim(dm_unfold_option)/='no') then

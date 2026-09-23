@@ -114,6 +114,7 @@ F90_SRCS = \
 ./gs/scf_iteration_dft.f90 \
 ./gs/structure_opt.f90 \
 ./rt/dip.f90 \
+./rt/tdcdft_lrc.f90 \
 ./rt/em_field.f90 \
 ./maxwell/fdtd_coulomb_gauge.f90 \
 ./rt/md.f90 \

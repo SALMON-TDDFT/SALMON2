@@ -127,6 +127,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       else
         stop 'invalid propagator'
       end if
+      if (allocated(rt%Ac_xc)) then
+        system%vec_Ac=system%vec_Ac+0.5d0*(rt%Ac_xc(:,itt)+rt%Ac_xc(:,itt-1))
+      end if
       if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
     end if
   end select
@@ -283,6 +286,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     else
       call timer_begin(LOG_CALC_CURRENT)
       system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
+      if (allocated(rt%Ac_xc)) then
+        system%vec_Ac=system%vec_Ac+rt%Ac_xc(:,itt)
+        ! Use endpoint phases for the nonlocal current, consistently with the kinetic current.
+        call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      end if
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
       spsi_out%update_zwf_overlap = .true.
       call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
@@ -342,7 +350,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      case(0)
         call write_rt_data_0d(itt,ofl,dt,system,rt)
      case(3)
-        call write_rt_data_3d(itt,ofl,dt,system,curr_e_tmp,curr_i_tmp)
+        call write_rt_data_3d(itt,ofl,dt,system,curr_e_tmp,curr_i_tmp,rt)
+        if (allocated(rt%Ac_xc)) call write_rt_xc(itt,ofl,dt,rt)
      end select
 
      !(Export to SYSname_rt_energy.data)
