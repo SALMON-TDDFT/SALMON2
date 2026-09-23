@@ -1,5 +1,6 @@
 set(SOURCES
     dcdft.f90
+    lcfo_complex.f90
     lcfo.f90
    )
 

@@ -3085,14 +3085,29 @@ contains
       & stop "DC method (yn_dc=y): num_fragment must be specified."
       if(yn_periodic=='n') stop "DC method (yn_dc=y): yn_periodic=y must be specified."
       if(.not.if_orthogonal_tmp) stop "DC method (yn_dc=y): use orthogonal coordinate."
-      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) &
-      & stop "DC method (yn_dc=y): # of k-points must be 1."
+      if(trim(file_kw) /= 'none') stop "DC method (yn_dc=y): file_kw must be 'none' for the common standard k-point grid."
+      if(any((num_fragment > 1) .and. (num_kgrid /= 1))) &
+      & stop "DC method (yn_dc=y): num_kgrid must be one on partitioned directions."
+      if(any((num_fragment > 1) .and. (abs(dk_shift) > 1d-12))) &
+      & stop "DC method (yn_dc=y): dk_shift must be zero on partitioned directions."
+      if(any((num_fragment == 1) .and. (num_rgrid_buffer /= 0))) &
+      & stop "DC method (yn_dc=y): num_rgrid_buffer must be zero on non-partitioned directions."
+      if(product(num_kgrid) == 1 .and. any(abs(dk_shift) > 1d-12)) &
+      & stop "DC method (yn_dc=y): a single non-Gamma k point is unsupported."
+      if(index(yn_symmetry,'y') > 0) &
+      & stop "DC method (yn_dc=y): symmetry-reduced k-point lists are unsupported."
+      if(product(num_kgrid) > 1) then
+        if(temperature < 0d0) stop "DC complex k-point path: temperature must be non-negative."
+        if(any(nelec_spin /= 0)) stop "DC complex k-point path: fixed spin electron counts are unsupported."
+        if(yn_spinorbit == 'y') stop "DC complex k-point path: spin-orbit and noncollinear calculations are unsupported."
+        if(yn_opt == 'y') stop "DC complex k-point path: structure optimization is unsupported."
+        if(dm_unfold_option /= 'no') stop "DC complex k-point path: dm_unfold_option must be 'no'."
+      end if
       if(dl(1)*dl(2)*dl(3)/=0) stop "DC method (yn_dc=y): use al & num_rgrid."
       if(yn_restart=='y') stop "DC method (yn_dc=y): yn_restart=y is not supported."
       if(nscf_init_mix_zero.gt.1) stop "DC method (yn_dc=y): nscf_init_mix_zero is not supported."
       if(yn_jm=='y') stop "DC method (yn_dc=y): yn_jm=y is not supported."
       if(base_directory /= './') stop "DC method (yn_dc=y): base_directory must be default."
-      if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
       if(write_gs_restart_data /= 'no') then
         if (comm_is_root(nproc_id_global)) then
           write(*,*) "WARNING(yn_dc=y): write_gs_restart_data is internally set to 'no'"
