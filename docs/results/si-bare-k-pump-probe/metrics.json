@@ -1,0 +1,185 @@
+{
+  "pumped": {
+    "peak_eV": 3.5100000000000002,
+    "height": 74.97577499917527,
+    "area_eV": 34.80628397076422,
+    "boundary_peak": false,
+    "alpha": 0.0002062912827269998,
+    "max_norm_error": 2.9999999995311555e-07,
+    "pre_probe_max_difference": 9.974659986866641e-18,
+    "observation_fs": 21.286182073244,
+    "FWHM_eV": 0.3270533450387365,
+    "window_checks_au": {
+      "600.0": {
+        "peak_eV": 3.54,
+        "height": 61.80567880085611,
+        "area_eV": 34.813301273071076,
+        "boundary_peak": false
+      },
+      "720.0": {
+        "peak_eV": 3.5300000000000002,
+        "height": 68.05339396251823,
+        "area_eV": 34.856065201799666,
+        "boundary_peak": false
+      },
+      "880.0": {
+        "peak_eV": 3.5100000000000002,
+        "height": 74.97577499917527,
+        "area_eV": 34.80628397076422,
+        "boundary_peak": false
+      }
+    }
+  },
+  "pumped_half": {
+    "peak_eV": 3.52,
+    "height": 72.99860270125629,
+    "area_eV": 34.690945267102286,
+    "boundary_peak": false,
+    "alpha": 0.0002062912827269998,
+    "max_norm_error": 2.8999999912571184e-07,
+    "pre_probe_max_difference": 9.974659986866641e-18,
+    "observation_fs": 21.286182073244,
+    "FWHM_eV": 0.33311833276950287,
+    "window_checks_au": {
+      "600.0": {
+        "peak_eV": 3.5500000000000003,
+        "height": 60.7501590980993,
+        "area_eV": 34.67046264115791,
+        "boundary_peak": false
+      },
+      "720.0": {
+        "peak_eV": 3.54,
+        "height": 66.5243073329156,
+        "area_eV": 34.732612346737966,
+        "boundary_peak": false
+      },
+      "880.0": {
+        "peak_eV": 3.52,
+        "height": 72.99860270125629,
+        "area_eV": 34.690945267102286,
+        "boundary_peak": false
+      }
+    }
+  },
+  "pumped_small": {
+    "peak_eV": 3.5300000000000002,
+    "height": 71.86089575362271,
+    "area_eV": 34.59744619422122,
+    "boundary_peak": false,
+    "alpha": 0.0002062912827269998,
+    "max_norm_error": 2.8999999912571184e-07,
+    "pre_probe_max_difference": 9.974659986866641e-18,
+    "observation_fs": 21.286182073244,
+    "FWHM_eV": 0.335629326507747,
+    "window_checks_au": {
+      "600.0": {
+        "peak_eV": 3.5500000000000003,
+        "height": 59.957446808184194,
+        "area_eV": 34.55436421922958,
+        "boundary_peak": false
+      },
+      "720.0": {
+        "peak_eV": 3.54,
+        "height": 65.49452446211195,
+        "area_eV": 34.63103810856785,
+        "boundary_peak": false
+      },
+      "880.0": {
+        "peak_eV": 3.5300000000000002,
+        "height": 71.86089575362271,
+        "area_eV": 34.59744619422122,
+        "boundary_peak": false
+      }
+    }
+  },
+  "ground_one": {
+    "valid_spectrum": false,
+    "status": {
+      "case": "ground_one",
+      "exit_code": 1,
+      "requested_steps": 12000,
+      "completed": false
+    },
+    "reason": "Confirmed norm breakdown; no peak extracted"
+  },
+  "ground_screened": {
+    "peak_eV": 3.54,
+    "height": 107.51521062556796,
+    "area_eV": 47.6996705346065,
+    "boundary_peak": false,
+    "alpha": 0.0002062912827269997,
+    "max_norm_error": 2.999999892949745e-08,
+    "pre_probe_max_difference": 3.77018929514813e-13,
+    "observation_fs": 21.286182073244,
+    "FWHM_eV": 0.32771382552360206,
+    "window_checks_au": {
+      "600.0": {
+        "peak_eV": 3.56,
+        "height": 91.54560766688536,
+        "area_eV": 47.62178722588405,
+        "boundary_peak": false
+      },
+      "720.0": {
+        "peak_eV": 3.5500000000000003,
+        "height": 99.22676243548335,
+        "area_eV": 47.68852535579993,
+        "boundary_peak": false
+      },
+      "880.0": {
+        "peak_eV": 3.54,
+        "height": 107.51521062556796,
+        "area_eV": 47.6996705346065,
+        "boundary_peak": false
+      }
+    }
+  },
+  "linearity": {
+    "normalized_current_relative_l2": 0.486500024643643,
+    "spectrum_relative_l2_2_4eV": 0.049850691849124704
+  },
+  "small_probe_check": {
+    "normalized_current_relative_l2": 0.4869081917267827,
+    "spectrum_relative_l2_2_4eV": 0.04185207642877531
+  },
+  "old_alpha02": {
+    "peak_eV": 3.36,
+    "height": 119.25010377925778,
+    "area_eV": 62.621285155562916,
+    "boundary_peak": false,
+    "FWHM_eV": 0.2489197779919876,
+    "window_checks_au": {
+      "600.0": {
+        "peak_eV": 3.35,
+        "height": 93.01750507246736,
+        "area_eV": 62.62845567961395,
+        "boundary_peak": false
+      },
+      "720.0": {
+        "peak_eV": 3.35,
+        "height": 104.4199138478289,
+        "area_eV": 62.61692053821207,
+        "boundary_peak": false
+      },
+      "880.0": {
+        "peak_eV": 3.36,
+        "height": 119.25010377925778,
+        "area_eV": 62.621285155562916,
+        "boundary_peak": false
+      }
+    }
+  },
+  "comparisons": {
+    "ground_screened": {
+      "primary": "pumped_small",
+      "peak_shift_eV": -0.009999999999999787,
+      "height_change_percent": -33.16211228578142,
+      "area_change_percent": -27.468165279840896
+    },
+    "old_alpha02": {
+      "primary": "pumped_small",
+      "peak_shift_eV": 0.17000000000000037,
+      "height_change_percent": -39.73934321546301,
+      "area_change_percent": -44.75129964472187
+    }
+  }
+}

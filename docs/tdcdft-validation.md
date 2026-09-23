@@ -193,3 +193,11 @@ three Fourier-analysis tests pass. Read-only code review found no blocking issue
 The full-feedback alpha0=1/K0=0 probe diagnostic returned alpha to 1 after the kick;
 normalized differential currents differed by 50.6% on halving the probe. Production
 spectra therefore use frozen pump screening and are not the full model's linear response.
+
+Frozen bare-K pump-probe results are in [the result record](results/si-bare-k-pump-probe/README.md).
+Probe80 au, observation880 au, same4³ grid. At probe1e-4 and frozen alpha=.000206291,
+pumped vs unexcited same-alpha peak3.53 vs3.54 eV; peak height -33.16%, signed2–4 eV
+integral -27.47%. Probe5e-4 vs1e-4 spectral L2 difference4.19% in2–4 eV, but full time
+current difference48.69%; no claim of globally converged linear response. Ground alpha1
+frozen propagation failed norm atstep3064 and is excluded. The earlier alpha.2 comparison
+includes both changed screening and excitation. See record for common-window and amplitude checks.

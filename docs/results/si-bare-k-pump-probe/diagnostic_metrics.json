@@ -1,0 +1,17 @@
+{
+  "diagnostic_full": {
+    "pre_current_difference": 0.0,
+    "alpha_before_probe": 0.0002062912827269997,
+    "alpha_min_after": 1.0,
+    "alpha_max_after": 1.0,
+    "differential_current_norm": 10.471543567244744
+  },
+  "diagnostic_half": {
+    "pre_current_difference": 0.0,
+    "alpha_before_probe": 0.0002062912827269997,
+    "alpha_min_after": 1.0,
+    "alpha_max_after": 1.0,
+    "differential_current_norm": 21.200140658377165
+  },
+  "normalized_current_relative_difference": 0.5061071085316575
+}
