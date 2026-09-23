@@ -94,3 +94,20 @@ Taylor/PT-CN time-step validation is recorded in
 unstable on the tested Si grid; use the validated smaller steps for Taylor.
 The PT-CN dt=0.32 example is stable but has measurable time-discretization
 error; dt=0.08 is preferable for stricter current/density comparisons.
+
+## What ACE does
+
+At an exchange refresh, the full screened Fock operator is applied to the
+current occupied orbitals U to obtain W=K[U]U. ACE constructs low-rank factors
+from the occupied metric -U^dagger W (with grid weights). Repeated actions on
+trial vectors then use two BLAS products, -B(B^dagger X), instead of another
+full exchange calculation. This reproduces K[U] on the construction subspace;
+it is approximate for general trial directions. It is neither a local
+potential nor a Wannier localization/support-cutoff approximation.
+
+Taylor keeps the initial ACE for its predictor and averages initial/predicted
+ACE operators for its corrector, then refreshes at the accepted state. PT-CN
+freezes ACE in inner iterations and rebuilds it from full exchange in outer
+iterations before checking the endpoint residual. Only exactly identical
+source arrays bypass refresh through the cache. See the
+[explicit ACE construction and update schedule](../../docs/hse-implementation-notes.md#aceで実際に行っている処理).
