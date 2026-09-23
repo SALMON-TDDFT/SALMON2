@@ -19,3 +19,10 @@ Only a candidate that passes solver, norm and observable checks enters the singl
 `status.json` describes the current run. `result.json` describes the last completed requested segment and may remain from an earlier target during a resumed run. `trajectory.json` is a convenience copy and may be ahead of the last periodic checkpoint after a hard kill. On resume the archive's embedded history is authoritative. Large arrays stay local under the ignored calculation directory; compact verification reports are stored in docs/results.
 
 This driver currently handles constant A after an impulse only. It does not implement a laser waveform, nor does reaching1fs constitute a resolved exciton spectrum. The full impulse spectrum and subsequent pump–probe comparison need a longer validated time record.
+
+`--exchange-method blocked` selects the density-matrix implementation of the
+same full periodic HSE kernel, without a radius cutoff or MLWF optimization.
+It may resume an existing full-MLWF trajectory because the physical kernel is
+unchanged. Method selection is recorded in new trajectory rows and status.
+The default remains `mlwf`. See the [HSE–TDCDFT comparison](../../docs/results/si-hse-tdcdft-linear/README.md)
+for the sequential long-run/analysis worker and matched observation windows.

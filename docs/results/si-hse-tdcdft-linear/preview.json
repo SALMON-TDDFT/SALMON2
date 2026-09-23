@@ -1,0 +1,84 @@
+{
+  "hse_status": {
+    "status": "completed",
+    "pid": 96840,
+    "accepted_step": 131,
+    "target_steps": 131,
+    "dt_au": 0.32,
+    "time_fs": 1.0139963097047255,
+    "amplitude": 0.0001,
+    "checkpoint": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/calculations/si_hse_reference/linear_response/restart.npz",
+    "elapsed_this_run_seconds": 34.18844804196851,
+    "error": null,
+    "exchange_method": "blocked",
+    "exchange_kernel": "full_periodic_hse06"
+  },
+  "tdcdft_status": {
+    "case": "g10_ground",
+    "gamma": 0.001,
+    "beta": 0.0,
+    "probe_amplitude": 0.0001,
+    "requested_steps": 12000,
+    "exit_code": 0,
+    "completed": true,
+    "elapsed_seconds": 869.0598704580334
+  },
+  "tdcdft_provenance": {
+    "source_directory": "/private/tmp/salmon-si-elf-proca-probe/g10_ground",
+    "method": "PZ + ELF-Proca",
+    "alpha0": 0.2,
+    "beta": 0.0,
+    "gamma": 0.001,
+    "elf_stride": 10,
+    "kgrid": [
+      4,
+      4,
+      4
+    ],
+    "primitive_grid": [
+      12,
+      12,
+      12
+    ],
+    "spacing_bohr": 0.855,
+    "cell_bohr": [
+      [
+        10.26,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        10.26,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        10.26
+      ]
+    ],
+    "electrons": 32,
+    "impulse_au": 0.0001,
+    "probe_origin_au": 80.0,
+    "duration_au": 880.0,
+    "pseudopotential_sha256": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
+    "same_pseudopotential_verified": true,
+    "tdcdft_input_sha256": "c3daa313fc1c0295c70df283c10aa5f13b2b7a18cc640b3ef42aadb1158ad490",
+    "hse_export_input_sha256": "6cc6465ab25d09f3b606fcc2b0653d0565c70ea1450b52e5829445ace072de13"
+  },
+  "impulse_au": 0.0001,
+  "tdcdft_probe_origin_au": 80.0,
+  "hse_dt_au": 0.32,
+  "tdcdft_dt_au": 0.0799999999999983,
+  "energy_shift_eV": 0.0,
+  "additional_broadening_eV": 0.0,
+  "window": "1-3(t/T)^2+2(t/T)^3",
+  "source_hashes": {
+    "hse": "6244ef3ddc8140fede557c995468637dbf759bca2d7f3828760ba58ea0b9d727",
+    "tdcdft": "28b4b23308982b360aa7c1f5ba7a2737ebfc4dafff1dc0f7976b0f14f74c70c4"
+  },
+  "status": "transient_only",
+  "available_time_fs": 1.0139963097047255,
+  "scope": "No spectrum or peak claim from this short preview"
+}

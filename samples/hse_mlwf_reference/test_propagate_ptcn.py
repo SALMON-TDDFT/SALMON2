@@ -7,6 +7,9 @@ import propagate_ptcn as driver
 from checkpoint import load_checkpoint
 
 class DriverFailureTests(unittest.TestCase):
+ def test_unknown_exchange_method_rejected(self):
+  with self.assertRaisesRegex(ValueError,'exchange method'):
+   driver.run('missing','missing','missing',1,exchange_method='wrong')
  def test_endpoint_failure_keeps_coherent_accepted_checkpoint(self):
   with tempfile.TemporaryDirectory() as folder:
    p=Path(folder);export=p/'export';export.mkdir();(export/'metadata.txt').write_text('fixture');(export/'complete.txt').write_text('fixture')
@@ -15,6 +18,7 @@ class DriverFailureTests(unittest.TestCase):
    g=np.broadcast_to(np.eye(16),(64,16,16)).copy();np.savez_compressed(gs/'state.npz',u=u,gauge=g)
    (gs/'result.json').write_text(json.dumps(dict(converged=True,final_pair_tolerance=0.)))
    class Model:
+    shape=(12,12,12);nk=64;k=np.zeros((64,3))
     dv=1.;nlcc=np.zeros((12,)*3);native_energies=np.zeros(7);tsymbol=np.zeros((64,12,12,12));h=1.;nab=np.zeros((4,3))
     def __init__(self,*a):self.calls=0
     def set_field(self,a):pass
@@ -41,6 +45,10 @@ class DriverFailureTests(unittest.TestCase):
    with patch.object(driver,'NativeModel',Model),patch.object(driver,'Localizer',Localizer),patch.object(driver,'Semilocal',XC),patch.object(driver,'HSEFunctional',Functional),patch.object(driver,'ptcn_step',step),patch.object(driver,'hartree',lambda rho,h:(rho*0,0.)),patch.object(driver,'semilocal_potential',lambda rho,*a:(rho*0,0.)):
     with self.assertRaisesRegex(RuntimeError,'injected endpoint-action failure'):
      driver.run(export,gs/'state.npz',p/'out',1)
+    with patch.object(driver,'Localizer',side_effect=AssertionError('blocked exchange must not localize')):
+     with patch.object(driver,'DistanceExchange',create=True,return_value=object()):
+      with self.assertRaisesRegex(RuntimeError,'injected endpoint-action failure'):
+       driver.run(export,gs/'state.npz',p/'blocked',1,exchange_method='blocked')
     original_save=driver.save_checkpoint;writes=[0]
     def fail_second_save(*args,**kw):
      writes[0]+=1

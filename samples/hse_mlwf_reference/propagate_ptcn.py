@@ -12,8 +12,10 @@ from ace import ACE
 from ptcn import ptcn_step
 from rt import validate_request
 from checkpoint import FORMAT,fingerprint,save_checkpoint,load_checkpoint,write_json
+from distance_exchange import DistanceExchange
 
-def run(export,state,output,target_steps,dt=.32,amplitude=1e-4,resume=False,checkpoint_every=5):
+def run(export,state,output,target_steps,dt=.32,amplitude=1e-4,resume=False,checkpoint_every=5,exchange_method='mlwf'):
+ if exchange_method not in ('mlwf','blocked'):raise ValueError('Unknown exchange method')
  validate_request(target_steps,dt,amplitude,0.)
  if not isinstance(checkpoint_every,int) or checkpoint_every<1:raise ValueError('Positive checkpoint interval required')
  export=Path(export);state=Path(state);out=Path(output)
@@ -21,9 +23,9 @@ def run(export,state,output,target_steps,dt=.32,amplitude=1e-4,resume=False,chec
  out.mkdir(parents=True,exist_ok=True)
  with (out/'.lock').open('a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-  return _run(export,state,out,target_steps,dt,amplitude,resume,checkpoint_every)
+  return _run(export,state,out,target_steps,dt,amplitude,resume,checkpoint_every,exchange_method)
 
-def _run(export,state,out,target,dt,amplitude,resume,interval):
+def _run(export,state,out,target,dt,amplitude,resume,interval,exchange_method='mlwf'):
  provenance=json.loads((state.parent/'result.json').read_text())
  if not provenance.get('converged') or provenance.get('final_pair_tolerance')!=0:raise ValueError('Full-pair converged SCF required')
  expected=dict(dt=dt,amplitude=amplitude,export_hash=fingerprint([*export.glob('*.bin'),export/'metadata.txt',export/'complete.txt']),initial_hash=fingerprint([state,state.parent/'result.json']))
@@ -42,19 +44,24 @@ def _run(export,state,out,target,dt,amplitude,resume,interval):
   if not np.isfinite([ne,ge]).all() or abs(ne-32)>1e-7 or ge>1e-8:raise RuntimeError('PT-CN norm/orthogonality gate exceeded')
   return ne,ge
  norm_errors(u)
- m.set_field(np.array([0.,0.,amplitude]));loc=Localizer(m);loc.previous=previous
+ m.set_field(np.array([0.,0.,amplitude]));loc=None
+ if exchange_method=='mlwf':
+  loc=Localizer(m);loc.previous=previous
  cache={};start=time.perf_counter();start_step=metadata['step'];bootstrap_ready=False;builds=0;accepted=None
  def status(phase,error=None):
   saved_step=accepted[2]['step'] if accepted is not None else metadata['step']
   value=dict(status=phase,pid=os.getpid(),accepted_step=saved_step,target_steps=target,dt_au=dt,
    time_fs=saved_step*dt*.024188843265857,amplitude=amplitude,checkpoint=str(checkpoint.resolve()),
-   elapsed_this_run_seconds=time.perf_counter()-start,error=error)
+   elapsed_this_run_seconds=time.perf_counter()-start,error=error,exchange_method=exchange_method,
+   exchange_kernel='full_periodic_hse06')
   write_json(out/'status.json',value);return value
  def save():save_checkpoint(checkpoint,*accepted)
  status('running')
  functional=None;xc=None
  try:
-  xc=Semilocal('hse06');functional=HSEFunctional(m,xc,fftw=True)
+  xc=Semilocal('hse06')
+  backend=DistanceExchange(m.shape,m.h,m.k,radius=None) if exchange_method=='blocked' else None
+  functional=HSEFunctional(m,xc,fftw=True,exchange_backend=backend)
   def local(x,energy=False):
    rho=m.density(x);vh,eh=hartree(rho,m.h);vsl,esl=semilocal_potential(rho,m.nab,xc,m.dv);core=m.core(x)
    if energy:return m.expectation(x,core)+eh+esl+.5*m.expectation(x,cache['full'])+float(m.native_energies[4])
@@ -68,10 +75,10 @@ def _run(export,state,out,target,dt,amplitude,resume,interval):
   build(u);initial_action=local(u)+cache['full'];start_energy=local(u,energy=True)
   if metadata['initial_energy'] is None:metadata['initial_energy']=start_energy
   if not np.isfinite(start_energy):raise RuntimeError('Nonfinite energy')
-  accepted=(u,g,metadata,rows,loc.previous);bootstrap_ready=True;save()
+  accepted=(u,g,metadata,rows,previous);bootstrap_ready=True;save()
   for index in range(start_step,target):
    tick=time.perf_counter();localization=None
-   if index and index%10==0:g,localization=loc.update(u,minimize=True)
+   if loc is not None and index and index%10==0:g,localization=loc.update(u,minimize=True)
    def precondition(r):return ifftn(fftn(r,axes=(-3,-2,-1))/(1+.5j*dt*m.tsymbol[:,None]),axes=(-3,-2,-1))
    candidate,info=ptcn_step(u,dt,local,build,m.dv,precondition=precondition,
      initial_action=initial_action,initial_exchange=cache['apply'])
@@ -80,9 +87,10 @@ def _run(export,state,out,target,dt,amplitude,resume,interval):
    next_action=local(candidate)+cache['full']
    row=dict(step=index+1,time_au=(index+1)*dt,current=current.tolist(),electron_number=ne,gram_error=ge,
      energy_Ha=energy,energy_change_Ha=energy-metadata['initial_energy'],localization=localization,
-     step_wall_seconds=time.perf_counter()-tick,**info)
+     step_wall_seconds=time.perf_counter()-tick,exchange_method=exchange_method,**info)
    # One accepted snapshot owns state, history and the localization seed.
-   accepted=(candidate,g,dict(metadata,step=index+1),rows+[row],loc.previous)
+   previous=loc.previous if loc is not None else to_matrix(candidate)@g
+   accepted=(candidate,g,dict(metadata,step=index+1),rows+[row],previous)
    u,g,metadata,rows,_=accepted;initial_action=next_action
    write_json(out/'trajectory.json',rows)
    if (index+1)%interval==0:save()
@@ -107,4 +115,5 @@ def _run(export,state,out,target,dt,amplitude,resume,interval):
 if __name__=='__main__':
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('export');p.add_argument('state');p.add_argument('output');p.add_argument('target_steps',type=int)
  p.add_argument('--dt',type=float,default=.32);p.add_argument('--amplitude',type=float,default=1e-4);p.add_argument('--resume',action='store_true');p.add_argument('--checkpoint-every',type=int,default=5)
+ p.add_argument('--exchange-method',choices=['mlwf','blocked'],default='mlwf',help='Two algorithms for the same untruncated HSE kernel')
  a=p.parse_args();print(json.dumps(run(**vars(a)),indent=2))
