@@ -1,9 +1,38 @@
 program test_update
-  use tdcdft_lrc, only: advance_xc_field,proca_coefficients,instant_screening
+  use tdcdft_lrc, only: advance_xc_field,proca_coefficients,instant_screening,advance_polarization_field
   implicit none
   real(8) :: old(3),now(3),next(3),j(3),dt,t,err(2),exact,alpha,gamma
   real(8) :: a(3),e(3),pol(3),response,coupling
   integer :: n,k,steps
+  ! Known integral of a'=-(0.2+0.1*t)*sin(t), j=-cos(t).
+  do k=1,2
+    steps=100*2**(k-1); dt=1d0/steps
+    now=0.2d0*(cos(dt)-1d0)+0.1d0*(dt*cos(dt)-sin(dt))
+    do n=1,steps-1
+      t=n*dt; pol=sin(t); j=-cos(t)
+      call advance_polarization_field(dt,0.2d0+0.1d0*(t-dt),0.2d0+0.1d0*t,pol,j,now,next)
+      now=next
+    end do
+    exact=0.2d0*(cos(1d0)-1d0)+0.1d0*(cos(1d0)-sin(1d0))
+    err(k)=maxval(abs(now-exact))
+  end do
+  if(err(1)/err(2)<3.8d0.or.err(1)/err(2)>4.2d0) error stop 'varying alpha second order'
+  ! Once the new alpha is held, the centered electric field is alpha*P, without an offset.
+  dt=0.01d0; pol=0.3d0; j=0d0; now=1d0
+  call advance_polarization_field(dt,0.2d0,0.01d0,pol,j,now,next)
+  old=next
+  call advance_polarization_field(dt,0.01d0,0.01d0,pol,j,old,now)
+  call advance_polarization_field(dt,0.01d0,0.01d0,pol,j,now,next)
+  if(maxval(abs(-(next-old)/(2d0*dt)-0.01d0*pol))>1d-12) error stop 'no residual field offset'
+  ! Constant alpha is identical to the second-order acceleration update.
+  pol=0d0; j=[1d0,-2d0,0d0]; old=0d0; now=0.5d0*0.2d0*dt**2*j
+  do n=1,100
+    pol=pol-dt*j
+    call advance_polarization_field(dt,0.2d0,0.2d0,pol,j,now,a)
+    call advance_xc_field(dt,0.2d0,0d0,0d0,j,old,now,next)
+    if(maxval(abs(a-next))>1d-13) error stop 'polarization fixed-alpha limit'
+    old=now; now=next
+  end do
   response=0d0
   coupling=0.2d0
   do n=0,100

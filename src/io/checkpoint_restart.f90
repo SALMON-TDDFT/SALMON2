@@ -2204,7 +2204,7 @@ subroutine restore_xc_field(wdir,itt,info,rt)
           if(ios==0) then
             if(saved_screening/=tdcdft_screening) ios=1
             if(.not.all(ieee_is_finite([screen_parameters,rt%xc_polarization,rt%xc_response,rt%xc_alpha]))) ios=1
-            if(tdcdft_screening=='instant') then
+            if(tdcdft_screening/='none') then
               if(any(abs(screen_parameters-[tdcdft_screen_omega,tdcdft_screen_reference, &
                 tdcdft_screen_strength,tdcdft_screen_floor])>1d-13*max(1d0,abs(screen_parameters)))) ios=1
               if(rt%xc_alpha<0d0.or.rt%xc_alpha>tdcdft_alpha) ios=1

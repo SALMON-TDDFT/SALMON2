@@ -22,7 +22,7 @@ contains
 !===================================================================================================================================
 
 subroutine calc_emfields(itt,nspin,curr_in,rt)
-  use tdcdft_lrc, only: advance_xc_field,instant_screening
+  use tdcdft_lrc, only: advance_xc_field,instant_screening,advance_polarization_field
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures, only : s_rt
   use math_constants, only : pi
@@ -37,7 +37,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   type(s_rt),intent(inout) :: rt
   !
   integer :: j
-  real(8) :: n1,n2,alpha_now,screen_e(3),screen_a(3)
+  real(8) :: n1,n2,alpha_now,alpha_old,screen_e(3),screen_a(3)
   integer,parameter :: m=100
   call nvtxStartRange('calc_emfield', __LINE__)
   
@@ -53,10 +53,12 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
     rt%curr(1:3,itt) = curr_in(1:3,1) + curr_in(1:3,2)
   end if
 
-! SALMON current is electron-number current: Axc'' = +alpha*j in A/c units.
+! SALMON uses electron-number current; fixed-alpha LRC has Axc''=+alpha*j in A/c units.
+! The polarization closure below also includes the effect of changing alpha.
   if (allocated(rt%Ac_xc)) then
     alpha_now=tdcdft_alpha
-    if(tdcdft_screening=='instant') then
+    alpha_old=rt%xc_alpha
+    if(tdcdft_screening/='none') then
       rt%xc_polarization=rt%xc_polarization-0.5d0*dt*(rt%curr(:,itt)+rt%curr(:,itt-1))
       ! Transverse classical field; external waveform is known, so its centered derivative is causal.
       screen_a=rt%Ac_ext(:,itt)-rt%Ac_ext(:,0)
@@ -68,8 +70,13 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
         error stop 'TDCDFT: screening state is nonfinite'
       alpha_now=rt%xc_alpha
     end if
+    if(tdcdft_screening=='polarization') then
+      call advance_polarization_field(dt,alpha_old,alpha_now,rt%xc_polarization,rt%curr(:,itt), &
+                                      rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
+    else
     call advance_xc_field(dt,alpha_now,tdcdft_damping,tdcdft_restoring,rt%curr(:,itt), &
                          rt%Ac_xc(:,itt-1),rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
+    end if
     if (.not.all(ieee_is_finite(rt%Ac_xc(:,itt+1)))) error stop 'TDCDFT: xc field is nonfinite'
   end if
 ! vector potential for next step

@@ -1,0 +1,56 @@
+{
+  "old": {
+    "electronic_energy_change_after_pulse_au": 0.1022136771379003,
+    "final_time_fs": 23.221289534448,
+    "A_final": 0.341650517858342,
+    "Exc_final": -0.00041387988264224296,
+    "J_final": 0.000386960540786506,
+    "alpha_final": 0.00010053253406361137,
+    "offset_max_abs": 0.0003901367668120571,
+    "max_norm_error": 3.500000005374204e-07,
+    "post_Exc_rms": 0.00039911061345507113,
+    "final_window_mean_J": 0.00036638371029238987,
+    "final_window_rms_J": 0.0004005302767698562,
+    "final_window_mean_Exc": -0.0004115876545648364,
+    "final_window_A_slope_au": 0.00041159160802519876
+  },
+  "polarization": {
+    "electronic_energy_change_after_pulse_au": 0.0007958681650030996,
+    "final_time_fs": 23.221289534448,
+    "A_final": -0.021656223621006204,
+    "Exc_final": 8.122068603875349e-06,
+    "J_final": -0.000149317819103762,
+    "alpha_final": 0.00010098164262775449,
+    "offset_max_abs": 3.988254632146873e-17,
+    "max_norm_error": 2.499999993688107e-07,
+    "post_Exc_rms": 4.657402988860319e-06,
+    "final_window_mean_J": -0.0001202073400002802,
+    "final_window_rms_J": 0.00022757161368556244,
+    "final_window_mean_Exc": 7.402404579253255e-06,
+    "final_window_A_slope_au": -7.400128395244444e-06
+  },
+  "fine": {
+    "electronic_energy_change_after_pulse_au": 8.038737870208479e-05,
+    "final_time_fs": 5.805322383612,
+    "A_final": -0.01805773393863317,
+    "Exc_final": 9.854822444199662e-07,
+    "J_final": 0.000251069682279707,
+    "alpha_final": 4.730265554570208e-05,
+    "offset_max_abs": 7.696273707650581e-17,
+    "max_norm_error": 0.0,
+    "post_Exc_rms": 5.794726193245806e-07,
+    "final_window_mean_J": -0.0001535782499684448,
+    "final_window_rms_J": 0.00042560823550330133,
+    "final_window_mean_Exc": 6.189574267706611e-07,
+    "final_window_A_slope_au": -6.104831305286112e-07
+  },
+  "timestep_comparison": {
+    "overlap_time_fs": 5.805322383612,
+    "relative_current_l2": 0.0005473162267698597,
+    "relative_postpulse_current_l2": 0.0009607277269516445,
+    "max_A_difference": 0.00010064609371513919,
+    "max_Exc_difference": 0.00011420335077662064,
+    "coarse_alpha_at_overlap": 0.00010098164262775449,
+    "fine_alpha_at_overlap": 4.730265554570208e-05
+  }
+}

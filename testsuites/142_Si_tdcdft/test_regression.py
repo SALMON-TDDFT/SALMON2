@@ -155,3 +155,24 @@ _,legacy_resume=run('version1_resume',proca,restart=legacy,control="yn_restart='
 np.testing.assert_allclose(legacy_resume[:,13:16],full[90:,13:16],atol=1e-11,rtol=1e-8)
 run('version1_screening',proca+screen,pulse=True,restart=legacy,control="yn_restart='y'",fail='TDCDFT')
 print('PASS version-1 fixed restart and rejection of missing screening state',flush=True)
+
+# Polarization closure: same estimator, a'=-alpha P, no damping/restoring.
+polar=screen.replace("'instant'","'polarization'")
+_,lrc_pulse=run('polar_fixed_reference',lrc,pulse=True)
+_,polar_zero=run('polar_zero',lrc+polar+'\n tdcdft_screen_strength=0',pulse=True)
+np.testing.assert_allclose(polar_zero,lrc_pulse,atol=1e-12,rtol=1e-9)
+pp,polar_current=run('polar_active',lrc+polar,pulse=True,control='checkpoint_interval=90')
+xp=np.loadtxt(pp/'Si_rt_xc.data')
+assert np.isfinite(xp).all() and xp.shape[1]==12
+post=xp[:,0]>20.5
+assert np.ptp(xp[post,7])==0
+np.testing.assert_allclose(xp[post,4:7],xp[post,7,None]*xp[post,9:12],atol=1e-12,rtol=1e-9)
+assert np.max(abs(polar_current[:,15]-lrc_pulse[:,15]))>1e-10
+_,polar_resume=run('polar_resume',lrc+polar,pulse=True,restart=pp/'checkpoint_rt_000090',
+                   control="yn_restart='y'")
+np.testing.assert_allclose(polar_resume[:,13:16],polar_current[90:,13:16],atol=1e-11,rtol=1e-8)
+np.testing.assert_allclose(np.loadtxt(work/'polar_resume/Si_rt_xc.data'),xp[90:],atol=1e-11,rtol=1e-8)
+run('polar_changed_closure',lrc+screen,pulse=True,restart=pp/'checkpoint_rt_000090',
+    control="yn_restart='y'",fail='TDCDFT')
+run('polar_restoring',proca+polar,pulse=True,fail='polarization screening requires zero damping and restoring')
+print('PASS polarization closure, constant-alpha limit, no post-pulse field offset, restart and guards',flush=True)

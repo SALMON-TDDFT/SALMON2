@@ -9,8 +9,18 @@
 module tdcdft_lrc
   implicit none
   private
-  public :: advance_xc_field,proca_coefficients,instant_screening
+  public :: advance_xc_field,proca_coefficients,instant_screening,advance_polarization_field
 contains
+  pure subroutine advance_polarization_field(dt,alpha_old,alpha_now,polarization,current,a_now,a_next)
+    implicit none
+    real(8),intent(in) :: dt,alpha_old,alpha_now,polarization(3),current(3),a_now(3)
+    real(8),intent(out) :: a_next(3)
+    ! Second-order explicit integral of a'=-alpha*P, with P'=-j.
+    ! Backward alpha derivative enters only the dt**2 term. No damping/restoring.
+    a_next=a_now-dt*alpha_now*polarization+0.5d0*dt**2*alpha_now*current &
+           -0.5d0*dt*(alpha_now-alpha_old)*polarization
+  end subroutine advance_polarization_field
+
   pure subroutine instant_screening(a,e,j,p,omega,reference,strength,field_floor,alpha0,response,alpha)
     implicit none
     real(8),intent(in) :: a(3),e(3),j(3),p(3),omega,reference,strength,field_floor,alpha0

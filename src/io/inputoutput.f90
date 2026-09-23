@@ -2879,11 +2879,13 @@ contains
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
-    if (tdcdft_screening/='none'.and.tdcdft_screening/='instant') &
-      error stop 'TDCDFT: screening must be none or instant'
+    if (tdcdft_screening/='none'.and.tdcdft_screening/='instant'.and.tdcdft_screening/='polarization') &
+      error stop 'TDCDFT: screening must be none, instant or polarization'
     if (.not.all(ieee_is_finite([tdcdft_screen_omega,tdcdft_screen_reference, &
         tdcdft_screen_strength,tdcdft_screen_floor]))) error stop 'TDCDFT: screening parameters must be finite'
-    if (tdcdft_screening=='instant') then
+    if (tdcdft_screening/='none') then
+      if (tdcdft_screening=='polarization'.and.(tdcdft_damping/=0d0.or.tdcdft_restoring/=0d0)) &
+        error stop 'TDCDFT: polarization screening requires zero damping and restoring'
       if (tdcdft=='none'.or.theory/='tddft_pulse'.or.unit_system/='a.u.') &
         error stop 'TDCDFT: instant screening requires enabled tddft_pulse in atomic units'
       if (tdcdft_alpha<0d0.or.tdcdft_a2/=0d0.or.tdcdft_a0/=0d0) &

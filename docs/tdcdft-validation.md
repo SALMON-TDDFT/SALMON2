@@ -151,3 +151,18 @@ fixed alpha fails normalization near 5.85 fs; instantaneous mode reaches 23.22 f
 error below 3.5e-7 but exhibits residual XC electric field and Axc drift. Initial 1200-step output
 prefixes match exactly. The post-pulse external fields are zero. The residual field is largely a
 constant E_xc-alpha*P offset from the time variation of alpha; no constitutive-law change was made.
+
+## Polarization-consistent closure
+
+Added `tdcdft_screening='polarization'` while retaining the earlier 'instant' acceleration closure.
+The new mode integrates a'=-alpha P at beta=gamma=0 using a second-order explicit Taylor step.
+Smooth variable-alpha analytic convergence, fixed-alpha equivalence, and removal of the post-switch
+field offset pass. Serial CTest 10/10 and full serial/2-process MPI regression suites pass, including
+coupled fixed-alpha limit, active restart and incompatible closure/restoring guards. Independent
+read-only review found no blocking sign/order/restart problem.
+
+The same 4³-k pulse completes 23.22 fs; E_xc-alpha P after the pulse is below 4e-17 a.u.,
+compared with 3.90e-4 in the former closure. Half-dt comparison through 5.805 fs gives 0.055%
+relative current difference but a factor-of-two difference in held alpha. Thus field consistency
+is fixed, but the estimator remains threshold/time-step sensitive. Detailed results are in
+`docs/results/si-polarization-screening/README.md`. No k-grid scan or precision claim was added.

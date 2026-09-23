@@ -1085,12 +1085,12 @@ contains
       write(ofl%fh_rt_xc,'(a)') '# xc field only; Ac_tot and E_tot in rt.data remain classical'
       write(ofl%fh_rt_xc,'(a)') '# time ['//trim(t_unit_time%name)//'] Axc/c xyz [' &
         //trim(t_unit_ac%name)//'] Exc xyz ['//trim(t_unit_elec%name)//']'
-      if(tdcdft_screening=='instant') write(ofl%fh_rt_xc,'(a)') &
+      if(tdcdft_screening/='none') write(ofl%fh_rt_xc,'(a)') &
         '# extra columns: alpha_used K_estimate P_xyz (all atomic units); K held below field floor'
     else
       ! Centered derivative at the same time as Axc; next step is already available.
       exc=-(rt%Ac_xc(:,it+1)-rt%Ac_xc(:,it-1))/(2d0*dt)
-      if(tdcdft_screening=='instant') then
+      if(tdcdft_screening/='none') then
         write(ofl%fh_rt_xc,'(12(1x,es24.16e3))') it*dt*t_unit_time%conv, &
           rt%Ac_xc(:,it)*t_unit_ac%conv,exc*t_unit_elec%conv,rt%xc_alpha,rt%xc_response,rt%xc_polarization
       else
