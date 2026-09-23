@@ -1,0 +1,32 @@
+{
+  "bad_dt": {
+    "rejected": true,
+    "exit_code": 1,
+    "expected_reason": "restart physics"
+  },
+  "bad_impulse": {
+    "rejected": true,
+    "exit_code": 1,
+    "expected_reason": "restart physics"
+  },
+  "bad_metadata": {
+    "rejected": true,
+    "exit_code": 1,
+    "expected_reason": "restart physics"
+  },
+  "bad_missing_metadata": {
+    "rejected": true,
+    "exit_code": 1,
+    "expected_reason": "restart physics"
+  },
+  "bad_pseudo": {
+    "rejected": true,
+    "exit_code": 1,
+    "expected_reason": "restart physics"
+  },
+  "bad_frozen": {
+    "rejected": true,
+    "exit_code": 1,
+    "expected_reason": "self-consistent functional"
+  }
+}

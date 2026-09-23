@@ -16,10 +16,14 @@
 !=======================================================================
 !=======================================================================
 
+#include "config.h"
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
+#ifdef USE_HSE
+  use hse_ptcn, only: native_hse_step
+#endif
   use tdcdft_elf, only: measure_elf
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -121,7 +125,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   case(3)
     if(.not.singlescale%flag_use) then
-      if(propagator == 'middlepoint') then
+      if(propagator == 'middlepoint'.or.propagator == 'hse_ptcn') then
         system%vec_Ac(1:3) = 0.5d0* (rt%Ac_tot(1:3,itt)+rt%Ac_tot(1:3,itt-1))
       else if(propagator == 'aetrs') then
         system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
@@ -145,6 +149,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
+#ifdef USE_HSE
+  if(propagator=='hse_ptcn')then
+    call native_hse_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
+      spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
+  else
+#endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
   else if(yn_predictor_corrector=='y' .or. xc_func%xctype(1)==salmon_xctype_tbmbj) then
@@ -156,6 +166,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
   end if
     
+#ifdef USE_HSE
+  endif
+#endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
   
   ! Gram Schmidt orghonormalization

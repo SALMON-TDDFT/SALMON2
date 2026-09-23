@@ -103,3 +103,7 @@ CTestTestfile.cmake
 # Executables
 
 # End of https://www.gitignore.io/api/c,cmake,fortran
+
+# Native HSE validation working data (reports are versioned under docs/results).
+/calculations/si_hse_native/
+/samples/hse_mlwf_reference/__pycache__/

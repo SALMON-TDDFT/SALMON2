@@ -3182,6 +3182,31 @@ contains
       stop "either yn_ffte or yn_fftw can be specified"
     end if
 
+    if(xc=='hse06')then
+      if(xname/='none'.or.cname/='none')error stop 'HSE06 must not be combined with extra xname/cname'
+#ifndef USE_HSE
+      error stop 'HSE06 requires USE_HSE=ON'
+#endif
+      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n') &
+        error stop 'HSE06 requires fixed-ion unpolarized periodic system'
+      if(nstate*2/=nelec.or.temperature>=0d0) &
+        error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
+      if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
+        if(propagator/='hse_ptcn')error stop 'HSE06 real time requires propagator=hse_ptcn'
+        if(yn_out_rvf_rt=='y')error stop 'HSE06: RT force output not yet certified'
+        if(yn_fix_func/='n')error stop 'HSE06 PT-CN requires self-consistent functional updates'
+        if(trans_longi/='tr')error stop 'HSE06 native impulse currently requires transverse constant A'
+        if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
+        if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06 native RT initially supports impulse only'
+        if(gram_schmidt_interval>0.or.yn_predictor_corrector=='y') &
+          error stop 'HSE06 PT-CN requires no Gram-Schmidt or external predictor-corrector'
+      else if(theory/='dft')then
+        error stop 'HSE06 initial support: dft or tddft only'
+      endif
+    else if(propagator=='hse_ptcn')then
+      error stop 'propagator=hse_ptcn requires xc=hse06'
+    endif
+
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if

@@ -1,0 +1,11 @@
+{
+  "steps": 100,
+  "dt_au": 0.32,
+  "time_fs": 0.774042984507424,
+  "max_full_exchange_residual": 9.47436e-11,
+  "final_electron_number": 31.999999999942126,
+  "final_gram_max_error": 7.401103052391392e-11,
+  "post_impulse_energy_range_Ha": 2.6005864128819667e-12,
+  "energy_sample_interval_steps": 10,
+  "energy_increase_from_ground_state_Ha": 1.5094733640808e-07
+}

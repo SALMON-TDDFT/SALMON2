@@ -14,7 +14,11 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+#include "config.h"
 MODULE Total_Energy
+#ifdef USE_HSE
+  use hse_native, only: hse_enabled,hse_refresh,hse_exchange_energy
+#endif
 implicit none
 
 CONTAINS
@@ -502,6 +506,7 @@ CONTAINS
   ! total energy
     energy%E_tot = energy%E_kin + energy%E_h + energy%E_ion_loc + energy%E_ion_nloc + energy%E_xc + energy%E_ion_ion
 
+
 !    if ( comm_is_root(nproc_id_global) ) then
 !      write(*,*) "E_tot     =",energy%E_tot
 !      write(*,*) "E_kin     =",energy%E_kin
@@ -557,6 +562,11 @@ CONTAINS
     call timer_end(LOG_EIGEN_ENERGY_CALC)
 
     call timer_begin(LOG_EIGEN_ENERGY_HPSI)
+#ifdef USE_HSE
+    if(hse_enabled())energy%E_xc=energy%E_xc-hse_exchange_energy
+    call hse_refresh(system,mg,info,tpsi)
+    if(hse_enabled())energy%E_xc=energy%E_xc+hse_exchange_energy
+#endif
     call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_EIGEN_ENERGY_HPSI)
 
@@ -787,6 +797,9 @@ CONTAINS
     call comm_summation(E_local,E_sum,2,info%icomm_rko)
     energy%E_kin      = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
+#ifdef USE_HSE
+    if(hse_enabled())energy%E_ion_nloc=energy%E_ion_nloc-2d0*hse_exchange_energy
+#endif
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 
     ! meta-GGA: e_tau correction to E_ion_nloc

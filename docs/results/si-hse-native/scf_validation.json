@@ -1,0 +1,12 @@
+{
+  "gs_scf_reset_n8": {
+    "energy_Ha": -31.314746714939123,
+    "energy_difference_reference_Ha": -2.447819724693545e-12,
+    "projected_residual_Ha": 9.518952999331861e-08
+  },
+  "gs_fresh_n8": {
+    "energy_Ha": -31.314746714935243,
+    "energy_difference_reference_Ha": 1.4317436125566019e-12,
+    "projected_residual_Ha": 9.816529849493852e-07
+  }
+}

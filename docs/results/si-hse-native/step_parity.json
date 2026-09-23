@@ -1,0 +1,17 @@
+{
+  "native_mpi1": {
+    "step": 3,
+    "wavefunction_relative_error": 5.6968533994507745e-12,
+    "current_max_abs_error": 3.6673676350243694e-15
+  },
+  "native_mpi4": {
+    "step": 3,
+    "wavefunction_relative_error": 4.483217717680254e-12,
+    "current_max_abs_error": 1.8387416698569977e-15
+  },
+  "native_mpi8": {
+    "step": 3,
+    "wavefunction_relative_error": 4.6027567632338944e-12,
+    "current_max_abs_error": 1.3633520350103372e-15
+  }
+}

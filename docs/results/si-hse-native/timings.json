@@ -1,0 +1,134 @@
+{
+  "native_mpi1": {
+    "steps": [
+      14.577,
+      15.021,
+      14.488
+    ],
+    "median_seconds": 14.577,
+    "timing_components_seconds": [
+      [
+        9.750776,
+        0.073913,
+        0.798663,
+        0.012081,
+        2.438495,
+        0.436006
+      ],
+      [
+        10.08529,
+        0.071576,
+        0.825349,
+        0.004098,
+        2.493756,
+        0.450101
+      ],
+      [
+        9.765502,
+        0.070422,
+        0.785766,
+        0.003895,
+        2.408116,
+        0.430125
+      ]
+    ]
+  },
+  "native_mpi4": {
+    "steps": [
+      4.628,
+      4.402,
+      4.937
+    ],
+    "median_seconds": 4.628,
+    "timing_components_seconds": [
+      [
+        2.979189,
+        0.020859,
+        0.246665,
+        0.048708,
+        0.842496,
+        0.13472
+      ],
+      [
+        2.86799,
+        0.020188,
+        0.230111,
+        0.048068,
+        0.769613,
+        0.125445
+      ],
+      [
+        3.229106,
+        0.022761,
+        0.248917,
+        0.054842,
+        0.857754,
+        0.139462
+      ]
+    ]
+  },
+  "native_mpi8": {
+    "steps": [
+      2.93,
+      3.042,
+      2.947
+    ],
+    "median_seconds": 2.947,
+    "timing_components_seconds": [
+      [
+        1.749469,
+        0.012771,
+        0.138051,
+        0.075522,
+        0.593912,
+        0.081006
+      ],
+      [
+        1.87531,
+        0.011594,
+        0.143857,
+        0.083663,
+        0.57801,
+        0.07799
+      ],
+      [
+        1.868354,
+        0.011838,
+        0.138709,
+        0.078995,
+        0.511642,
+        0.073906
+      ]
+    ]
+  },
+  "python_mpi8": {
+    "steps": [
+      13.801835749996826,
+      14.141904707998037,
+      13.58619441598421
+    ],
+    "median_seconds": 13.80183575
+  },
+  "python8_over_native8": 4.68335111978283,
+  "native1_over_native8": 4.946386155412283,
+  "components_order": [
+    "full_exchange",
+    "ACE_build",
+    "ACE_apply",
+    "EXX_collectives",
+    "local_H",
+    "preconditioner"
+  ],
+  "context": "First three matched steps, BLAS/OpenMP threads 1; background Python8 production job active. Excludes checkpoint I/O.",
+  "rss_snapshot_KiB_per_native_RT_rank": [
+    305024,
+    303584,
+    303392,
+    303216,
+    301792,
+    303168,
+    302608,
+    302288
+  ],
+  "rss_note": "ps snapshot during separate native MPI8 stability run, not a peak or unique physical-memory measurement; shared pages may be counted more than once."
+}

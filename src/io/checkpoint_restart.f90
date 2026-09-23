@@ -2087,6 +2087,7 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   end if
   
   call checkpoint_xc_field(wdir,itt,info,rt)
+  call hse_checkpoint_metadata(wdir,system,info,.true.)
 end subroutine write_rtdata
 
 subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
@@ -2125,9 +2126,113 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
     call comm_bcast(rt%Ac_ind,comm)
   end if
 
+  call hse_checkpoint_metadata(wdir,system,info,.false.)
   call restore_xc_field(wdir,itt,info,rt)
   call nvtxEndRange
 end subroutine read_rtdata
+
+! Versioned HSE-only restart guard; caches are rebuilt from accepted orbitals.
+subroutine hse_checkpoint_metadata(wdir,system,info,writing)
+  use structures
+  use communication, only: comm_is_root,comm_bcast
+  use salmon_global, only: xc,dt,e_impulse,epdir_re1,propagator,trans_longi,file_pseudo,nelem
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  character(*),intent(in) :: wdir
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  logical,intent(in) :: writing
+  integer :: unit,status,version,dims(4),j,pu,nbytes,saved_bytes,ios
+  real(8),allocatable :: values(:),saved(:)
+  character(:),allocatable :: bytes,saved_text
+  logical :: exists,opened
+  character(32) :: method,field_mode
+  status=0;opened=.false.
+  if(comm_is_root(info%id_rko))then
+    inquire(file=trim(wdir)//'hse_restart.bin',exist=exists)
+    if(writing)then
+      if(xc=='hse06')then
+        open(newunit=unit,file=trim(wdir)//'hse_restart.bin',form='unformatted',status='replace',iostat=status)
+        opened=status==0
+      endif
+    else
+      if(exists.neqv.(xc=='hse06'))status=1
+      if(status==0.and.exists)then
+        open(newunit=unit,file=trim(wdir)//'hse_restart.bin',form='unformatted',status='old',iostat=status)
+        opened=status==0
+      endif
+    endif
+    if(opened)then
+      values=[dt,e_impulse,epdir_re1,.11d0,.25d0,system%hgs,reshape(system%primitive_a,[9]), &
+        reshape(system%vec_k,[3*system%nk]),reshape(system%rocc,[system%no*system%nk]), &
+        reshape(system%Rion,[3*system%nion]),real(system%kion,8)]
+      allocate(saved(size(values)))
+      if(writing)then
+        write(unit,iostat=status)1,[system%nk,system%no,system%nion,nelem]
+        if(status==0)write(unit,iostat=status)propagator,trans_longi
+        if(status==0)write(unit,iostat=status)values
+      else
+        read(unit,iostat=status)version,dims
+        if(status==0)then
+          if(version/=1.or.any(dims/=[system%nk,system%no,system%nion,nelem]))status=1
+        endif
+        ! Strings are written with their declared SALMON lengths; read matching lengths below.
+        if(status==0)call read_methods(unit,status)
+        if(status==0)read(unit,iostat=status)saved
+        if(status==0)then
+          if(.not.all(ieee_is_finite(saved)))status=1
+          if(any(abs(saved-values)>1d-13))status=1
+        endif
+      endif
+      do j=1,nelem
+        if(status/=0)exit
+        inquire(file=trim(file_pseudo(j)),size=nbytes,iostat=status)
+        if(status/=0.or.nbytes<1)then
+          status=1;exit
+        endif
+        allocate(character(nbytes)::bytes)
+        open(newunit=pu,file=trim(file_pseudo(j)),form='unformatted',access='stream',status='old',iostat=status)
+        if(status==0)then
+          read(pu,iostat=status)bytes
+          close(pu)
+        endif
+        if(status==0)then
+          if(writing)then
+            write(unit,iostat=status)nbytes
+            if(status==0)write(unit,iostat=status)bytes
+          else
+            read(unit,iostat=status)saved_bytes
+            if(status==0)then
+              if(saved_bytes/=nbytes)status=1
+            endif
+            if(status==0)then
+              allocate(character(nbytes)::saved_text)
+              read(unit,iostat=status)saved_text
+              if(status==0.and.saved_text/=bytes)status=1
+              deallocate(saved_text)
+            endif
+          endif
+        endif
+        deallocate(bytes)
+      enddo
+      close(unit,iostat=ios)
+      if(ios/=0)status=1
+    endif
+  endif
+  call comm_bcast(status,info%icomm_rko)
+  if(status/=0)error stop 'HSE06 restart physics/pseudopotential mismatch or incomplete metadata'
+contains
+  subroutine read_methods(unit,status)
+    integer,intent(in) :: unit
+    integer,intent(out) :: status
+    character(len(propagator)) :: old_method
+    character(len(trans_longi)) :: old_field
+    read(unit,iostat=status)old_method,old_field
+    if(status==0)then
+      if(old_method/=propagator.or.old_field/=trans_longi)status=1
+    endif
+  end subroutine
+end subroutine hse_checkpoint_metadata
 
 ! A separate versioned file leaves legacy rtdata.bin unchanged.
 subroutine checkpoint_xc_field(wdir,itt,info,rt)
