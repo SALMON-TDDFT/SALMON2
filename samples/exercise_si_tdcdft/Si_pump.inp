@@ -1,3 +1,4 @@
+! Williams-Ullrich Eq. (26); gamma=1e-4 a.u. is an unvalidated Si sensitivity trial.
 ! Illustrative pump: 1.6 eV, 10 fs full envelope duration. Not calibrated.
 &calculation
   theory='tddft_pulse'
@@ -31,7 +32,8 @@
   xc = 'PZ'
   tdcdft='proca'
   tdcdft_alpha=0.2
-  tdcdft_restoring=0.01
+  tdcdft_damping=0.0
+  tdcdft_restoring=0.0001
 /
 
 &rgrid

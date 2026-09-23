@@ -110,11 +110,18 @@ module inputoutput
 
 contains
   subroutine read_input
+    use tdcdft_lrc, only: proca_coefficients
     implicit none
 
     call read_stdin
     call read_input_common ! Should be renamed properly later
     call read_atomic_coordinates
+    if (tdcdft_a2/=0d0.or.tdcdft_a0/=0d0) then
+      if (tdcdft/='proca') error stop 'TDCDFT: a2/a0 require tdcdft=proca'
+      if (tdcdft_alpha/=0d0.or.tdcdft_restoring/=0d0) &
+        error stop 'TDCDFT: do not mix a2/a0 with alpha/restoring'
+      call proca_coefficients(tdcdft_a2,tdcdft_a0,tdcdft_alpha,tdcdft_restoring)
+    end if
     call dump_input_common ! Should be renamed properly later
     call check_bad_input
 
@@ -285,7 +292,7 @@ contains
       & alibc, &
       & alibxc, &
 #endif
-      & cval, tdcdft, tdcdft_alpha, tdcdft_damping, tdcdft_restoring
+      & cval, tdcdft, tdcdft_alpha, tdcdft_damping, tdcdft_restoring, tdcdft_a2, tdcdft_a0
 
     namelist/rgrid/ &
       & dl, &
@@ -736,6 +743,8 @@ contains
     tdcdft_alpha = 0d0
     tdcdft_damping = 0d0
     tdcdft_restoring = 0d0
+    tdcdft_a2 = 0d0
+    tdcdft_a0 = 0d0
     cval  = -1d0
 !! == default for &rgrid
     dl        = 0d0
@@ -1309,6 +1318,9 @@ contains
     call comm_bcast(tdcdft_alpha, nproc_group_global)
     call comm_bcast(tdcdft_damping, nproc_group_global)
     call comm_bcast(tdcdft_restoring, nproc_group_global)
+    call comm_bcast(tdcdft_a2, nproc_group_global)
+    call comm_bcast(tdcdft_a0, nproc_group_global)
+    tdcdft_a0 = tdcdft_a0 / utime_to_au**2
     tdcdft_damping = tdcdft_damping / utime_to_au
     tdcdft_restoring = tdcdft_restoring / utime_to_au**2
 !! == bcast for &rgrid
@@ -2231,7 +2243,9 @@ contains
 #endif
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'cval', cval
       write(fh_variables_log, '("#",4X,A,"=",A)') 'tdcdft', trim(tdcdft)
-      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_alpha', tdcdft_alpha
+      write(fh_variables_log, '("#",4X,A,"=",ES24.16)') 'tdcdft_a2', tdcdft_a2
+      write(fh_variables_log, '("#",4X,A,"=",ES24.16)') 'tdcdft_a0 [a.u.]', tdcdft_a0
+      write(fh_variables_log, '("#",4X,A,"=",ES24.16)') 'tdcdft_alpha', tdcdft_alpha
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_damping [a.u.]', tdcdft_damping
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_restoring [a.u.]', tdcdft_restoring
 
@@ -2853,7 +2867,7 @@ contains
 
     if (.not.all(ieee_is_finite([tdcdft_alpha,tdcdft_damping,tdcdft_restoring]))) &
       error stop 'TDCDFT: parameters must be finite'
-    if (min(tdcdft_alpha,tdcdft_damping,tdcdft_restoring)<0d0) &
+    if (min(tdcdft_damping,tdcdft_restoring)<0d0.or.(tdcdft_a2==0d0.and.tdcdft_alpha<0d0)) &
       error stop 'TDCDFT: parameters must be nonnegative'
     select case(tdcdft)
     case('none')
@@ -2863,7 +2877,8 @@ contains
       if (tdcdft_damping/=0d0.or.tdcdft_restoring/=0d0) &
         error stop 'TDCDFT: lrc requires zero damping and restoring parameters'
     case('proca')
-      if (tdcdft_restoring<=0d0) error stop 'TDCDFT: proca requires positive tdcdft_restoring'
+      if (tdcdft_a2==0d0.and.tdcdft_restoring<=0d0) &
+        error stop 'TDCDFT: proca requires a2/a0 or positive tdcdft_restoring'
     case default
       error stop 'TDCDFT: tdcdft must be none, lrc, or proca'
     end select

@@ -5,7 +5,20 @@
 
 ## モデルと入力
 
-`&functional` に以下を指定します。既定値は `tdcdft='none'`、各係数はゼロです。
+基準は [Williams–Ullrich, arXiv:2501.13290v2](https://arxiv.org/html/2501.13290v2)
+の式(26)です。SALMON内部の `a=Axc/c` とセル平均電子数電流密度 `j` に対し
+
+```
+a'' + beta*a' + gamma*a = alpha*j
+```
+
+を伝播します。`tdcdft_alpha` がalpha、`tdcdft_damping` がbeta、
+`tdcdft_restoring` がgammaです。alphaは無次元、betaは逆時間、gammaは逆時間の二乗。
+`A_eV_fs` の場合はそれぞれfs^-1、fs^-2で入力します。
+論文のAはHamiltonian内で直接運動量に加わり、SALMON内部のaに対応します。
+ただし論文の電場記号は +dA/dt、SALMONのXC電場出力は `Exc=-da/dt` です。
+
+Siの既存結果と結合強度を揃え、alpha=0.2を維持します。無質量の参照は
 
 ```fortran
 xc = 'PZ'
@@ -13,21 +26,38 @@ tdcdft = 'lrc'
 tdcdft_alpha = 0.2
 ```
 
-SALMON内部の `a=Axc/c` と電子数電流密度 `j`（電荷電流は `-j`）に対し、原子単位で
+です。安定化項の影響を調べるProca入力例（原子単位）は
 
+```fortran
+xc = 'PZ'
+tdcdft = 'proca'
+tdcdft_alpha = 0.2
+tdcdft_damping = 0.0
+tdcdft_restoring = 0.0001
 ```
-a'' + beta*a' + gamma*a = alpha*j
-```
 
-を伝播します。`lrc` は beta=gamma=0。`proca` は正の `tdcdft_restoring=gamma` を要求し、
-`tdcdft_damping=beta` は任意の非負値です。alphaは原子単位の無次元係数で、betaとgammaの入力単位は
-選択した時間単位の逆数、逆数の二乗です。`A_eV_fs` なら fs^-1、fs^-2。
-`variables.log` には変換後の原子単位を記録します。
+です。**gamma=1e-4はSi用に検証済みの値ではなく、感度比較の開始値です。**
+論文の2次元モデルで使われたgamma=0.01等をSiへ直接移植しません。
+本例のbeta=0では自由振動の尺度sqrt(gamma)=0.01 a.u.、約0.272 eVです。
+以前の例のgamma=0.01は約2.72 eVとなり、今回調べたい光学構造と近すぎるため変更しました。
+これは結合した電子系の実際の余分な共鳴位置を保証する値ではありません。
 
-alpha=0.2 は Sun et al. のSiに使われたLRC値を開始点にしたものです。
-例の **gamma=0.01 a.u. は安定化の動作確認用で、Siに合わせた物理パラメータではありません**。
-LRCの長時間不安定性を、減衰を大きくするだけで解決したと解釈しないでください。
-固定alphaによる計算は励起キャリア依存の遮蔽を自己無撞着に記述しません。
+同論文の式(27)では有効カーネルが周波数依存となるため、gammaは単なる数値的な
+発散止めではありません。まずbeta=0、alpha固定でgamma=0（LRC）、1e-4、4e-4を比較し、
+電流・XC場の長時間挙動と2–4 eVのスペクトル感度を確認します。最後の値の自由振動尺度は
+約0.544 eVです。この比較は今後の検証項目で、安定性や最適値を確認した結果ではありません。
+
+式(62)のgamma_thrは平均的なcounter forceから説明されますが、論文自体も
+普遍的に予測できる閾値とはしていません。時刻ごとにXC力を打ち消す操作や、
+密度からgammaを自動決定する処理は実装していません。既存出力から
+`[a(t2)-a(t1)]/(t2-t1)` を複数の時間窓で調べれば平均のda/dtを診断できますが、
+有限時間で小さいことだけではゼロ力定理や長時間安定性の証明にはなりません。
+また、この論文は全電子モデルであり、SALMONの非局所擬ポテンシャルを含めた
+厳密な力の検証とは区別します。
+
+既定は `tdcdft='none'`、すべての係数ゼロです。正規化したProca入力ではgamma>0、
+beta>=0を要求し、gamma=0の比較には `tdcdft='lrc'` を使います。
+固定係数による計算は励起キャリア依存の遮蔽を自己無撞着に記述しません。
 
 CPU、周期系、横応答、固定イオン、非スピン偏極、PZ、middlepoint、対称性縮約なしに限定しています。
 理論の指定は `tddft_response` または `tddft_pulse`。GPU、Maxwell結合、MD、DC、jellium、
@@ -69,7 +99,8 @@ PZのバンドギャップ誤差も別に評価する必要があります。
 
 `Si_pump.inp` と `Si_pump_probe.inp` は同一GSから別々に実行するテンプレートです。
 例は1.6 eV、全包絡長10 fsのAcos2、強度10^10 W/cm²。`tw1` は強度FWHMではありません。
-`tdcdft='proca'` の係数は上記の未較正の例です。
+`tdcdft='proca'` の係数は上記と同じalpha=0.2、beta=0、gamma=1e-4です。
+安定性とgamma感度を確認してからレーザー励起による変化を解釈してください。
 
 Acos2の場合、プローブの閾値は `t1_start + tw1/2 + T1_T2`。本例は約20 fs
 （826.827466原子時間）です。SALMONはこの閾値より**後**の格子点でAのステップを適用します。
@@ -103,4 +134,33 @@ python3 analyze.py pump_probe/Si_rt.data --subtract pump/Si_rt.data \
 - Williams and Ullrich, JCTC 21, 4753 (2025), https://arxiv.org/abs/2501.13290
 - Dewhurst et al., PRB 111, L060302 (2025), https://arxiv.org/abs/2401.16140
 
-本実装の係数は正規化した運動方程式の係数です。Kohn–Sham–Proca論文のa0/a2を直接入力するものではありません。
+## 補助的なDewhurst係数による入力
+
+主入力は上記のalpha/beta/gammaです。前段で追加した `tdcdft_a2` と `tdcdft_a0` も
+比較用の別表現として利用できます。alpha/restoringとの混在は拒否します。
+
+a2=-85はDewhurst et al., PRB 111 L060302 (2025) の
+[補足資料Table 1](https://journals.aps.org/prb/supplemental/10.1103/PhysRevB.111.L060302/SI.pdf)、
+a0=-0.2は本文の弱束縛励起子の指定です。図1のa0=+0.25はLiFの安定化例で、Si共通値ではありません。
+元のSiスペクトルには0.75 eVのscissor補正と0.22 eVのsmearingが使われていますが、
+このサンプルには自動で適用していません。
+
+論文のHamiltonianは(p-A/c)^2/2、SALMONは(p+A/c)^2/2です。
+SALMON内部の `a=Axc/c` とセル平均電子数電流密度 `j` では
+
+```
+a2*a'' + a0*a = -4*pi*j
+alpha = -4*pi/a2
+restoring = a0/a2
+```
+
+に変換します。Siの値はalpha=0.1478396543、restoring=0.002352941176 a.u.に対応します。
+`variables.log` にa2/a0と有効係数を記録します。
+a2は無次元、a0は選択した時間単位の逆数の二乗です。`A_eV_fs` ならfs^-2なので、
+論文の原子単位のa0=-0.2を入力する際は `-0.2/(0.02418884326505**2)` に換算します。
+
+a2は有限の非ゼロ値で、正負とも指定可能。a0/a2>=0を要求します。
+a0=0は質量項なしの比較用に許可します。正の比で得られる自由振動は、結合した電子系の
+長時間安定性を保証するものではありません。離散時間刻みには `(a0/a2)*dt**2<4` を要求します。
+`tdcdft_damping` は任意の非負の**正規化済み**減衰係数（逆時間）として併用できます。
+論文のa1を直接入力するものではありません。

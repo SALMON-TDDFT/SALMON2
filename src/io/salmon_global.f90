@@ -125,6 +125,7 @@ module salmon_global
   character(64)  :: alibxc
   character(16) :: tdcdft
   real(8) :: tdcdft_alpha, tdcdft_damping, tdcdft_restoring
+  real(8) :: tdcdft_a2, tdcdft_a0
   real(8)        :: cval
 
 !! &rgrid

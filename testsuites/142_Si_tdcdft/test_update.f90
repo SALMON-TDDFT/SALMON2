@@ -1,8 +1,15 @@
 program test_update
-  use tdcdft_lrc, only: advance_xc_field
+  use tdcdft_lrc, only: advance_xc_field,proca_coefficients
   implicit none
-  real(8) :: old(3),now(3),next(3),j(3),dt,t,err(2),exact
+  real(8) :: old(3),now(3),next(3),j(3),dt,t,err(2),exact,alpha,gamma
   integer :: n,k,steps
+  call proca_coefficients(-20d0*acos(-1d0),-0.2d0,alpha,gamma)
+  if(abs(alpha-0.2d0)>1d-14) error stop 'Si sign and normalization'
+  if(abs(gamma-0.01d0/acos(-1d0))>1d-14) error stop 'Si restoring term'
+  call proca_coefficients(4d0*acos(-1d0),1d0,alpha,gamma)
+  if(abs(alpha+1d0)>1d-14.or.gamma<=0d0) error stop 'positive a2 convention'
+  call proca_coefficients(-20d0*acos(-1d0),0d0,alpha,gamma)
+  if(abs(gamma)>tiny(1d0)) error stop 'massless reference'
   dt=0.01d0
   j=[1d0,-2d0,0d0]
   old=0d0

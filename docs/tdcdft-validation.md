@@ -87,9 +87,9 @@ by a temporary shim to python3. The new field-unit test only needs Python and gf
 ## Limits and next scientific work
 
 No fitted Si Proca parameter set, converged absorption curve, E1/E2 shift, bleaching, or exciton
-binding energy has been established. The sample gamma=0.01 a.u. is a numerical demonstration.
+binding energy has been established. The original sample gamma=0.01 a.u. was a numerical demonstration; see the reference update below.
 The small 12³ real-space / 2³ k grid and 180-step tests cannot support such claims.
-Full sample-duration runs and systematic k/grid/dt/time scans remain to be performed.
+At this initial test stage, full-duration and grid/dt/time checks remained; see subsequent records below.
 
 For lasers, enabled alpha=0 is the comparison baseline: the new path uses endpoint nonlocal phases,
 whereas the legacy path uses midpoint phases in that part of the current. Impulse comparisons are
@@ -107,3 +107,24 @@ or BSE with consistent quasiparticle-gap treatment before drawing quantitative c
 The user removed the k-point convergence requirement. The examples now use 4³ k points,
 and completed 12000-step ALDA/LRC runs and their initial analysis are recorded in
 `docs/results/si-k4/README.md`. The earlier 2³-grid entries above remain the implementation-test record.
+
+## Williams–Ullrich reference update
+
+Primary reference: https://arxiv.org/html/2501.13290v2, Eq. (26), Sections IV.4 and IV.5.
+The existing normalized integrator already propagates this field equation. Si samples now use
+alpha=0.2, beta=0 and gamma=1e-4 a.u.; gamma is an unvalidated sensitivity trial, not a Si fit.
+Its free-oscillator energy scale is 0.272 eV, compared with 2.72 eV for the old gamma=0.01 example.
+No full-duration result for the new gamma is reported. The earlier Dewhurst full run was stopped
+when the user changed the reference; its partial output is retained separately.
+
+The optional direct a2/a0 conversion remains available. Serial and MPI builds passed; ten
+serial CTest checks passed. Extended serial and two-process MPI regressions passed for direct/
+normalized equivalence, old normalized restart, massless limit, both coefficient signs, invalid
+inputs, and atomic-unit versus A_eV_fs equivalence. No checkpoint format change was needed.
+The unit-test module include directory is prioritized to avoid stale module interfaces in parallel builds.
+
+The paper motivates stabilization through time-averaged forces, not cancellation of the xc force
+at each instant. No automatic gamma prescription or spatial counter field has been implemented.
+The all-electron 2D model's numerical thresholds are not transferred to pseudopotential Si.
+Before pump interpretation, compare gamma=0, 1e-4, 4e-4 at fixed alpha and fixed 4³ k grid,
+including observation-window dependence, spurious low-frequency response and secular field drift.

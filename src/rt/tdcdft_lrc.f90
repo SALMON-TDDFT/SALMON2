@@ -9,8 +9,22 @@
 module tdcdft_lrc
   implicit none
   private
-  public :: advance_xc_field
+  public :: advance_xc_field,proca_coefficients
 contains
+  subroutine proca_coefficients(a2,a0,alpha,restoring)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: a2,a0
+    real(8),intent(out) :: alpha,restoring
+    ! Paper uses (p-A/c)^2/2; SALMON uses (p+A/c)^2/2 and number-current density.
+    if (.not.all(ieee_is_finite([a2,a0]))) error stop 'TDCDFT: a2 and a0 must be finite'
+    if (abs(a2)<tiny(1d0)) error stop 'TDCDFT: a2 must be nonzero'
+    alpha=-4d0*acos(-1d0)/a2
+    restoring=a0/a2
+    if (.not.all(ieee_is_finite([alpha,restoring]))) error stop 'TDCDFT: Proca coefficients overflow'
+    if (restoring<0d0) error stop 'TDCDFT: require a0/a2 >= 0'
+  end subroutine proca_coefficients
+
   pure subroutine advance_xc_field(dt,alpha,damping,restoring,current,a_old,a_now,a_next)
     implicit none
     real(8),intent(in) :: dt,alpha,damping,restoring,current(3),a_old(3),a_now(3)

@@ -1,4 +1,4 @@
-! Atomic units. Proca restoring=0.01 is a numerical example, not a Si fit.
+! Williams-Ullrich Eq. (26); gamma=1e-4 a.u. is an unvalidated Si sensitivity trial.
 &calculation
   theory='tddft_response'
 /
@@ -31,7 +31,8 @@
   xc = 'PZ'
   tdcdft='proca'
   tdcdft_alpha=0.2
-  tdcdft_restoring=0.01
+  tdcdft_damping=0.0
+  tdcdft_restoring=0.0001
 /
 
 &rgrid

@@ -1,3 +1,4 @@
+! Williams-Ullrich Eq. (26); gamma=1e-4 a.u. is an unvalidated Si sensitivity trial.
 ! Probe threshold = tw1/2+T1_T2 = 20 fs; SALMON applies at t > threshold.
 &calculation
   theory='tddft_pulse'
@@ -31,7 +32,8 @@
   xc = 'PZ'
   tdcdft='proca'
   tdcdft_alpha=0.2
-  tdcdft_restoring=0.01
+  tdcdft_damping=0.0
+  tdcdft_restoring=0.0001
 /
 
 &rgrid

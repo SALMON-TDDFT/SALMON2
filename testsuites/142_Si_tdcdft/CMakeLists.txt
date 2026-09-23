@@ -6,5 +6,5 @@ add_executable(test_tdcdft_field ${CMAKE_SOURCE_DIR}/src/rt/tdcdft_lrc.f90 test_
 set_target_properties(test_tdcdft_field PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test_bins
   Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/unit_modules)
-target_include_directories(test_tdcdft_field PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/unit_modules)
+target_include_directories(test_tdcdft_field BEFORE PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/unit_modules)
 add_test(NAME unit_tdcdft_field COMMAND test_tdcdft_field)
