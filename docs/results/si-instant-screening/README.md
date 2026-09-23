@@ -64,3 +64,11 @@ this repository and the previously generated `calculations/si_tdcdft_k4/gs/data_
 
 Input and raw data are under `calculations/si_tdcdft_k4/instant_smoke/` (ignored generated data).
 `metrics.json` and `floor_sensitivity.json` preserve the numerical summaries.
+
+## Extended propagation
+
+The same two strong-pulse inputs were extended to 12000 steps (23.22 fs), changing nt only.
+Fixed alpha failed near 5.85 fs; instantaneous correction completed but retained a nearly constant
+XC electric field and an approximately linear Axc drift. See [long-run analysis](LONG_RUN.md).
+The residual field was traced to the integration offset generated when alpha changes in
+`a_xc''=alpha(t)*j`, not to a nonzero external field after the pulse.

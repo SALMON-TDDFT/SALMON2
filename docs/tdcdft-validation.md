@@ -145,3 +145,9 @@ contamination of the estimator, which was reproduced, tested and documented.
 Six short 4³-k laser runs and the field-threshold sensitivity are recorded in
 `docs/results/si-instant-screening/README.md`. They demonstrate numerical operation, not improved
 physical screening. In particular, post-pulse alpha depends on the field threshold.
+
+The same-pulse long extension is recorded in `docs/results/si-instant-screening/LONG_RUN.md`:
+fixed alpha fails normalization near 5.85 fs; instantaneous mode reaches 23.22 fs with electron-count
+error below 3.5e-7 but exhibits residual XC electric field and Axc drift. Initial 1200-step output
+prefixes match exactly. The post-pulse external fields are zero. The residual field is largely a
+constant E_xc-alpha*P offset from the time variation of alpha; no constitutive-law change was made.

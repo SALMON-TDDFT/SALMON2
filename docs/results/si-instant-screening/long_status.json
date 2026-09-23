@@ -1,0 +1,14 @@
+{
+  "strong_fixed": {
+    "exit_code": 1,
+    "rows": 3024,
+    "finite": true,
+    "short_prefix_max_difference": 0.0
+  },
+  "strong_screened": {
+    "exit_code": 0,
+    "rows": 12000,
+    "finite": true,
+    "short_prefix_max_difference": 0.0
+  }
+}
