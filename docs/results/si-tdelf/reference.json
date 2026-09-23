@@ -1,0 +1,8 @@
+{
+  "one_spin_density": 0.014814189656011332,
+  "tau": 0.008143735336950942,
+  "continuum_reference": 0.008145449986754873,
+  "finite_mesh_elf": 0.5001052630779783,
+  "continuum_cold_ueg_elf": 0.5,
+  "note": "Finite k-grid quadrature is not exact continuum Fermi sphere; no normalization adjustment applied."
+}

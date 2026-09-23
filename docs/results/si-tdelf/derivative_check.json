@@ -1,0 +1,58 @@
+{
+  "initial": {
+    "False": {
+      "mean": 0.5989494851728752,
+      "bond": 0.9249037835470304,
+      "squared_deviation": 0.07494970054652025,
+      "max_current_correction": 0.00118612315039196
+    },
+    "True": {
+      "mean": 0.5996930177148034,
+      "bond": 0.9250459178816625,
+      "squared_deviation": 0.07489880286709966,
+      "max_current_correction": 0.0
+    }
+  },
+  "none": {
+    "False": {
+      "mean": 0.5989494851999699,
+      "bond": 0.9249037835471311,
+      "squared_deviation": 0.07494970057771434,
+      "max_current_correction": 0.0011861230398699796
+    },
+    "True": {
+      "mean": 0.599693017747619,
+      "bond": 0.9250459178778886,
+      "squared_deviation": 0.07489880289787632,
+      "max_current_correction": 2.220446049250313e-16
+    }
+  },
+  "weak": {
+    "False": {
+      "mean": 0.598949303662452,
+      "bond": 0.9249036126248705,
+      "squared_deviation": 0.07494950757975283,
+      "max_current_correction": 0.0011861590200832883
+    },
+    "True": {
+      "mean": 0.5996927478141308,
+      "bond": 0.9250456149623372,
+      "squared_deviation": 0.07489870257646379,
+      "max_current_correction": 3.763718459115495e-08
+    }
+  },
+  "strong": {
+    "False": {
+      "mean": 0.5730222234549567,
+      "bond": 0.8937082870653205,
+      "squared_deviation": 0.06625526584262341,
+      "max_current_correction": 0.004319402890359703
+    },
+    "True": {
+      "mean": 0.5741071039081769,
+      "bond": 0.893902159342868,
+      "squared_deviation": 0.0661725896634181,
+      "max_current_correction": 0.0025024010573146405
+    }
+  }
+}

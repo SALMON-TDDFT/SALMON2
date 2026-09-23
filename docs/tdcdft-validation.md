@@ -234,3 +234,16 @@ with larger MLWF and invariant spreads, so D is not a pure localization measure.
 Reference purity/occupation changes matter. A rank16-per-k constraint gives a positive
 rest-reference alpha lower bound .013298: the abstract zero endpoint is not reachable
 within this finite-grid trajectory class. Physical screening validation remains open.
+
+
+### Time-dependent ELF
+
+[ELF diagnostics](results/si-tdelf/README.md) evaluate the current-corrected one-spin
+ELF on483 stored snapshots. Five analytic/unitary/boost/derivative tests pass;
+independent review confirmed weights, Bloch gradients and summed local current.
+The symmetric even-grid derivative is checked against signed FFT Nyquist derivatives.
+The finite-mesh cold electron gas yields ELF=.500105. Strong-pump mean ELF changes
+.599693→.574107, bond-region ELF .925046→.893902; weak changes are negligible.
+High-ELF bond regions remain. These are localization diagnostics, not proof of a
+metallic response or a new alpha law. Existing write_elf was not used: its current
+orbital/k sums do not implement the required periodic current-corrected expression.
