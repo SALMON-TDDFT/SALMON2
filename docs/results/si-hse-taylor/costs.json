@@ -1,0 +1,157 @@
+{
+  "context": "Si8 12^3 grid 4^3 k, MPI8, OMP/BLAS threads1, same initial state; 5 steps twice, forward/reverse case order; separate Python MPI8 production job still active; RT iteration max-rank time includes output, excludes startup. Projections assume constant step cost, not measured long trajectories.",
+  "runs": [
+    {
+      "case": "hse_taylor4_dt0.16",
+      "repeat": 0,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 7.882,
+      "total_seconds": 8.510968,
+      "seconds_per_step": 1.5764
+    },
+    {
+      "case": "hse_ptcn_dt0.32",
+      "repeat": 0,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 16.348,
+      "total_seconds": 17.084858,
+      "seconds_per_step": 3.2695999999999996
+    },
+    {
+      "case": "hse_taylor4_dt0.08",
+      "repeat": 0,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 7.519,
+      "total_seconds": 8.328695,
+      "seconds_per_step": 1.5038
+    },
+    {
+      "case": "hse_ptcn_dt0.16",
+      "repeat": 0,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 13.625,
+      "total_seconds": 14.399991,
+      "seconds_per_step": 2.725
+    },
+    {
+      "case": "hse_ptcn_dt0.08",
+      "repeat": 0,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 8.9342,
+      "total_seconds": 9.734386,
+      "seconds_per_step": 1.7868400000000002
+    },
+    {
+      "case": "hse_ptcn_dt0.08",
+      "repeat": 1,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 8.5371,
+      "total_seconds": 9.28005,
+      "seconds_per_step": 1.7074200000000002
+    },
+    {
+      "case": "hse_ptcn_dt0.16",
+      "repeat": 1,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 13.746,
+      "total_seconds": 14.545273,
+      "seconds_per_step": 2.7492
+    },
+    {
+      "case": "hse_taylor4_dt0.08",
+      "repeat": 1,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 7.5767,
+      "total_seconds": 8.421804,
+      "seconds_per_step": 1.51534
+    },
+    {
+      "case": "hse_ptcn_dt0.32",
+      "repeat": 1,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 15.516,
+      "total_seconds": 16.237919,
+      "seconds_per_step": 3.1032
+    },
+    {
+      "case": "hse_taylor4_dt0.16",
+      "repeat": 1,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 7.4311,
+      "total_seconds": 8.218152,
+      "seconds_per_step": 1.4862199999999999
+    },
+    {
+      "case": "hse_taylor4_full_dt0.16",
+      "repeat": 0,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 37.212,
+      "total_seconds": 37.854835,
+      "seconds_per_step": 7.442400000000001
+    },
+    {
+      "case": "hse_taylor4_full_dt0.16",
+      "repeat": 1,
+      "nt": 5,
+      "mpi": 8,
+      "rt_seconds": 36.885,
+      "total_seconds": 37.648689,
+      "seconds_per_step": 7.377
+    }
+  ],
+  "summary": {
+    "hse_taylor4_dt0.16": {
+      "mean_seconds_per_step": 1.53131,
+      "min_seconds_per_step": 1.4862199999999999,
+      "max_seconds_per_step": 1.5764,
+      "estimated_minutes_per_fs": 6.594422750197679,
+      "estimated_hours_per_20fs": 2.1981409167325596
+    },
+    "hse_ptcn_dt0.32": {
+      "mean_seconds_per_step": 3.1864,
+      "min_seconds_per_step": 3.1032,
+      "max_seconds_per_step": 3.2695999999999996,
+      "estimated_minutes_per_fs": 6.860945416417931,
+      "estimated_hours_per_20fs": 2.2869818054726436
+    },
+    "hse_taylor4_dt0.08": {
+      "mean_seconds_per_step": 1.50957,
+      "min_seconds_per_step": 1.5038,
+      "max_seconds_per_step": 1.51534,
+      "estimated_minutes_per_fs": 13.00160353033143,
+      "estimated_hours_per_20fs": 4.33386784344381
+    },
+    "hse_ptcn_dt0.16": {
+      "mean_seconds_per_step": 2.7371,
+      "min_seconds_per_step": 2.725,
+      "max_seconds_per_step": 2.7492,
+      "estimated_minutes_per_fs": 11.787028432888224,
+      "estimated_hours_per_20fs": 3.9290094776294078
+    },
+    "hse_ptcn_dt0.08": {
+      "mean_seconds_per_step": 1.7471300000000003,
+      "min_seconds_per_step": 1.7074200000000002,
+      "max_seconds_per_step": 1.7868400000000002,
+      "estimated_minutes_per_fs": 15.047656998978486,
+      "estimated_hours_per_20fs": 5.015885666326161
+    },
+    "hse_taylor4_full_dt0.16": {
+      "mean_seconds_per_step": 7.409700000000001,
+      "min_seconds_per_step": 7.377,
+      "max_seconds_per_step": 7.442400000000001,
+      "estimated_minutes_per_fs": 31.90908062517697,
+      "estimated_hours_per_20fs": 10.636360208392324
+    }
+  }
+}

@@ -23,6 +23,9 @@ Taylor modes do not inherit that CN residual test; assess their dt convergence,
 electron count and overlaps. No HSE mode renormalizes orbitals during the run.
 See `docs/results/si-hse-taylor/` for the direct comparison.
 
+See the [implementation and efficiency note](../../docs/hse-implementation-notes.md)
+for the current Taylor+ACE baseline, algorithm details, and measured tradeoffs.
+
 ## Build
 
 Enable `-DUSE_HSE=ON -DUSE_MPI=ON` in a normal SALMON CPU CMake build.
@@ -67,7 +70,7 @@ point `directory_read_data` to an accepted `checkpoint_rt_XXXXXX/`, and increase
 `nt` to the desired total step count. Keep `hse_restart.bin` with the checkpoint.
 The code verifies dt, impulse, geometry, k points, occupations and exact
 pseudopotential bytes, then rebuilds ACE and FFT caches. Resetting the time or
-freezing the functional is rejected. Accepted steps must satisfy the fresh
+freezing the functional is rejected. Accepted PT-CN steps must satisfy the fresh
 full-exchange endpoint residual (<10^-10), electron count and overlap gates;
 the propagator does not renormalize accepted wavefunctions.
 

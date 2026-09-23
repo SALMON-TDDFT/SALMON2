@@ -129,3 +129,6 @@ be treated as clean performance benchmarks.
 These sub-femtosecond tests assess propagation and physical-observable
 agreement. They do not resolve the Si exciton peak or replace the separately
 running long optical-spectrum comparison.
+
+Implementation overview: [Japanese technical note](../../hse-implementation-notes.md).
+Performance: [cost versus accuracy](COSTS.md), with raw data in [costs.json](costs.json).
