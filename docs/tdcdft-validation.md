@@ -180,3 +180,16 @@ stabilization must not be taken as independent evidence of physical carrier scre
 ### alpha0=1, K0=0 trial
 
 See [bare-K trial](results/si-bare-k/README.md). The existing polarization closure completed the strong-pulse trajectory through 23.22 fs with alpha0=1 and reference=0. Residual A and mean current decreased relative to the previous parameters, but the terminal alpha changed by about 103 times when matching the weak/strong relative field gates. This is a numerical comparison, not a validated carrier-screening calibration. No production code changes.
+
+### Frozen-screening pump-probe support
+
+Added `tdcdft_screen_stop` (default -1): freeze K/alpha after an absolute atomic-unit time;
+continue P, current and XC field. Checkpoint v3 adds the cutoff, accepts earlier v1/v2
+with cutoff disabled, and rejects changed cutoff on restart. Dedicated serial and 2-rank
+MPI integration checks pass for frozen K/alpha, evolving P, pre-cutoff equivalence,
+restart, parameter mismatch and v2 compatibility. Full serial TDCDFT regression and
+three Fourier-analysis tests pass. Read-only code review found no blocking issues.
+
+The full-feedback alpha0=1/K0=0 probe diagnostic returned alpha to 1 after the kick;
+normalized differential currents differed by 50.6% on halving the probe. Production
+spectra therefore use frozen pump screening and are not the full model's linear response.

@@ -125,6 +125,7 @@ module salmon_global
   character(64)  :: alibxc
   character(16) :: tdcdft
   character(16) :: tdcdft_screening
+  real(8) :: tdcdft_screen_stop
   real(8) :: tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
   real(8) :: tdcdft_alpha, tdcdft_damping, tdcdft_restoring
   real(8) :: tdcdft_a2, tdcdft_a0

@@ -233,3 +233,21 @@ alphaが一定になった後は、この差は丸め誤差の範囲で消えま
 これは残留電場の積分定数を避けるための**モデル定義の変更**であり、K推定のパルス終端感度や
 遮蔽補正式そのものの物理的正しさを保証する修正ではありません。alphaの校正、しきい値感度、
 強励起スペクトルの検証は引き続き必要です。外場終了時にA、J、Pをゼロへ強制する処理はありません。
+
+### Frozen-screening probe diagnostic
+
+For `tdcdft_screening='polarization'` (or `'instant'`), optional
+`tdcdft_screen_stop` freezes the instantaneous K and alpha estimates after the
+specified absolute simulation time in atomic units. The default `-1` leaves
+updates enabled. P and the XC field continue evolving. For a post-pump probe,
+set this time after the pump has ended and before the probe. This computes a
+partial response at the pump-prepared screening, excluding the probe-induced
+variation of alpha; it is not the full dynamic-screening linear response.
+The cutoff is saved in checkpoint version 3 and cannot change on restart.
+Versions 1/2 are accepted only with the cutoff disabled, subject to the existing
+mode compatibility checks.
+
+An impulse probe leaves a step in A/c. In the instantaneous estimator this can
+reactivate alpha updates after the pump. Check probe-amplitude linearity before
+interpreting a full-feedback differential spectrum. See
+`docs/results/si-bare-k-pump-probe` for the alpha0=1, K0=0 trial.

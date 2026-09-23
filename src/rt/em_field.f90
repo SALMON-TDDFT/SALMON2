@@ -29,7 +29,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   use phys_constants, only: cspeed_au
   use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em, &
     tdcdft_alpha,tdcdft_damping,tdcdft_restoring,tdcdft_screening,tdcdft_screen_omega, &
-    tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
+    tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor,tdcdft_screen_stop
   use nvtx_wrapper
   implicit none
   integer   ,intent(in)    :: itt,nspin
@@ -63,9 +63,12 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
       ! Transverse classical field; external waveform is known, so its centered derivative is causal.
       screen_a=rt%Ac_ext(:,itt)-rt%Ac_ext(:,0)
       screen_e=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
+      ! Optional frozen-screening probe: keep integrating P and the XC field after this time.
+      if(tdcdft_screen_stop<0d0.or.itt*dt<=tdcdft_screen_stop) then
       call instant_screening(screen_a,screen_e,rt%curr(:,itt),rt%xc_polarization, &
         tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor, &
         tdcdft_alpha,rt%xc_response,rt%xc_alpha)
+      end if
       if(.not.all(ieee_is_finite([rt%xc_polarization,rt%xc_response,rt%xc_alpha]))) &
         error stop 'TDCDFT: screening state is nonfinite'
       alpha_now=rt%xc_alpha
