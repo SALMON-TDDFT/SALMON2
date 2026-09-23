@@ -1,8 +1,8 @@
 diff --git a/source/input_keyword_list.rst b/source/input_keyword_list.rst
-index ae4831f..7bb33c7 100644
+index ae4831f..2dc6948 100644
 --- a/source/input_keyword_list.rst
 +++ b/source/input_keyword_list.rst
-@@ -744,6 +744,89 @@ character, default='none'
+@@ -744,6 +744,111 @@ character, default='none'
     |   ``'TBmBJ'``: Tran-Blaha meta-GGA exchange with Perdew-Wang correlation. :Fabien Tran and Peter Blaha, Phys. Rev. Lett. 102, 226401 (2008). John P. Perdew and Yue Wang, Phys. Rev. B 45, 13244 (1992). This potential is known to provide a reasonable description for the bandgap of various insulators. For this choice, the additional mixing parameter 'cval' may be specified. See below.
     |   ``'r2scan'``:  r2SCAN meta-GGA functional [J. W. Furness, A. D. Kaplan, J. Ning, J. P. Perdew, J. Sun, J. Phys. Chem. Lett. 11, 8208 (2020)].
  
@@ -88,6 +88,28 @@ index ae4831f..7bb33c7 100644
 +   | gamma introduces a low-frequency resonance and changes the frequency-dependent kernel.
 +   | Validate stability and spectral sensitivity for the target material; 2D-model values are not Si presets.
 +   | No instantaneous zero-force correction or automatic gamma threshold is implemented.
++
++.. _tdcdft_screening:
++
++tdcdft_screening and instantaneous-screening parameters
++^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++
++``tdcdft_screening``: character, default='none'; experimental option='instant'.
++
++   | Instantaneous A,J,E,P estimator without time averaging. Only atomic-unit tddft_pulse input,
++     transverse periodic response, a non-impulse first pulse and normalized alpha are supported.
++   | Uses classical a=Ac_ext(t)-Ac_ext(0), E=-da/dt and integrated charge polarization P=-integral j dt.
++   | K=(a.j-E.P)/(a.a+E.E/omega**2); alpha_eff=alpha/[1+s*4*pi*max(K-K0,0)/omega**2].
++   | This is a phenomenological closure, not an inversion of the Drude dielectric function.
++   | tdcdft_screen_omega (real, default 0): positive representative angular frequency in atomic units.
++   | tdcdft_screen_reference (real, default 0): K0; calibrate with a weak laser at the same frequency.
++   | tdcdft_screen_strength (real, default 1): nonnegative s; zero gives fixed-alpha propagation and diagnostics.
++   | tdcdft_screen_floor (real, default 1e-8): positive threshold for sqrt(a.a+E.E/omega**2), in A/c units.
++   | Below the threshold, K and alpha are held; P continues to evolve. Pulse tails with residual P can
++     contaminate K before this threshold, so check threshold sensitivity before physical interpretation.
++   | Extra rt_xc.data columns are alpha_eff, K and P_xyz, all in atomic units.
++   | Version-2 checkpoints preserve the screening state. Version-1 files support fixed screening only.
++   | Weak-response recovery requires calibration; strong-field accuracy and stability are not established.
 +
  .. _cval:
  

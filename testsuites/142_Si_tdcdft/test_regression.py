@@ -117,3 +117,41 @@ _,paper_fs_data=run('paper_fs',paper_fs,unit_fs=True)
 np.testing.assert_allclose(paper_fs_data[:,13:16]*.02418884326505*.52917721067**2,
     paper_au[:,13:16],atol=1e-11,rtol=1e-8)
 print('PASS atomic-unit / A_eV_fs Proca equivalence',flush=True)
+
+# Instantaneous screening: no temporal averaging, zero-strength reference, active restart.
+screen="\n tdcdft_screening='instant'\n tdcdft_screen_omega=0.2\n tdcdft_screen_reference=0"
+_,fixed_pulse=run('screen_fixed',proca,pulse=True)
+p0,screen_zero=run('screen_zero',proca+screen+'\n tdcdft_screen_strength=0',pulse=True)
+np.testing.assert_array_equal(screen_zero,fixed_pulse)
+ps,screened=run('screen_active',proca+screen,pulse=True,control='checkpoint_interval=90')
+xs=np.loadtxt(ps/'Si_rt_xc.data')
+assert xs.shape[1]==12 and np.isfinite(xs).all()
+assert np.min(xs[:,7])<0.2 and np.all((xs[:,7]>=0)&(xs[:,7]<=0.2))
+assert np.max(abs(screened[:,15]-fixed_pulse[:,15]))>1e-10
+_,screen_resume=run('screen_resume',proca+screen,pulse=True,restart=ps/'checkpoint_rt_000090',
+                   control="yn_restart='y'")
+np.testing.assert_allclose(screen_resume[:,13:16],screened[90:,13:16],atol=1e-11,rtol=1e-8)
+np.testing.assert_allclose(np.loadtxt(work/'screen_resume/Si_rt_xc.data'),xs[90:],atol=1e-11,rtol=1e-8)
+run('screen_changed',proca+screen+'\n tdcdft_screen_strength=2',pulse=True,
+    restart=ps/'checkpoint_rt_000090',control="yn_restart='y'",fail='TDCDFT')
+run('screen_removed',proca,pulse=True,restart=ps/'checkpoint_rt_000090',control="yn_restart='y'",fail='TDCDFT')
+run('screen_bad_omega',proca+screen.replace('omega=0.2','omega=0'),pulse=True,fail='TDCDFT')
+run('screen_impulse',proca+screen,fail='TDCDFT')
+print('PASS instantaneous screening, zero strength, bounded active feedback, restart and guards',flush=True)
+
+# Build an actual version-1 file from the unchanged first two Fortran records.
+import shutil,struct
+legacy=work/'version1_checkpoint'
+shutil.copytree(p/'checkpoint_rt_000090',legacy)
+raw=(legacy/'tdcdft.bin').read_bytes()
+endian='<' if struct.unpack('<i',raw[:4])[0]==56 else '>'
+first=struct.unpack(endian+'i',raw[:4])[0]
+assert first==56
+second_offset=first+8
+second=struct.unpack(endian+'i',raw[second_offset:second_offset+4])[0]
+raw=raw[:4]+struct.pack(endian+'i',1)+raw[8:second_offset+second+8]
+(legacy/'tdcdft.bin').write_bytes(raw)
+_,legacy_resume=run('version1_resume',proca,restart=legacy,control="yn_restart='y'")
+np.testing.assert_allclose(legacy_resume[:,13:16],full[90:,13:16],atol=1e-11,rtol=1e-8)
+run('version1_screening',proca+screen,pulse=True,restart=legacy,control="yn_restart='y'",fail='TDCDFT')
+print('PASS version-1 fixed restart and rejection of missing screening state',flush=True)

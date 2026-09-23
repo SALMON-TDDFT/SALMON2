@@ -128,3 +128,20 @@ at each instant. No automatic gamma prescription or spatial counter field has be
 The all-electron 2D model's numerical thresholds are not transferred to pseudopotential Si.
 Before pump interpretation, compare gamma=0, 1e-4, 4e-4 at fixed alpha and fixed 4³ k grid,
 including observation-window dependence, spurious low-frequency response and secular field drift.
+
+## Instantaneous screening implementation
+
+Opt-in `tdcdft_screening='instant'`: instantaneous vector A,J,E,P estimator, scalar positive
+screening closure, field-floor hold, trapezoidal P, 12-column diagnostics and version-2 restart.
+No temporal averaging. Fixed mode and strength=0 retain the existing propagation.
+
+Analytic tests cover both quadrature zero crossings, calibrated Drude reference, positive bounded
+correction, zero-strength limit, field-off hold and pulse tails with remanent polarization.
+Serial CTest: 10/10 passed. Extended serial and 2-process MPI regressions passed for active feedback,
+zero-strength equality, active restart, state/parameter guards and existing baseline checks.
+Read-only independent review found no definite indexing/restart defect; it identified pulse-tail
+contamination of the estimator, which was reproduced, tested and documented.
+
+Six short 4³-k laser runs and the field-threshold sensitivity are recorded in
+`docs/results/si-instant-screening/README.md`. They demonstrate numerical operation, not improved
+physical screening. In particular, post-pulse alpha depends on the field threshold.

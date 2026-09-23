@@ -164,3 +164,51 @@ a0=0は質量項なしの比較用に許可します。正の比で得られる�
 長時間安定性を保証するものではありません。離散時間刻みには `(a0/a2)*dt**2<4` を要求します。
 `tdcdft_damping` は任意の非負の**正規化済み**減衰係数（逆時間）として併用できます。
 論文のa1を直接入力するものではありません。
+
+## 強レーザー用の瞬時遮蔽（試験モデル）
+
+`Si_pump_instant.inp` は時間平均なしの推定を試す入力です。追加パラメータは原子単位限定。
+`tdcdft_screening='none'` が既定で、従来のimpulse入力と固定alpha伝播は変わりません。
+新モデルは `tddft_pulse`、非impulseの第一パルス、正規化alpha入力のみ対応します。
+
+```
+tdcdft_screening='instant'
+tdcdft_screen_omega=0.05879892  ! representative angular frequency in atomic units
+tdcdft_screen_reference=0.0   ! K0: placeholder; calibrate with weak laser response
+tdcdft_screen_strength=1.0    ! s; zero is diagnostic-only, same propagation as fixed alpha
+tdcdft_screen_floor=1e-8      ! threshold for sqrt(a.a + E.E/omega**2), atomic A/c units
+```
+
+横応答の古典場（XC場を含めない）を使い、a(t)=Ac_ext(t)-Ac_ext(0)、
+E=-da/dt、P=-integral j dt とします。Pは台形積分で更新する3成分の状態で、
+新たな時間履歴バッファはありません。既知の外場Eは中心差分、jとPは同じ端点で評価します。
+
+```
+K = (a.j - E.P) / (a.a + E.E/omega**2)
+alpha_eff = alpha0 / [1 + s*4*pi*max(K-K0,0)/omega**2]
+a_xc'' + beta*a_xc' + gamma*a_xc = alpha_eff*j
+```
+
+ベクトルの内積を使うスカラー縮約で、異方的な遮蔽テンソルではありません。
+これは利用者の提案に基づく**現象論的な閉じ方**であり、Williams–Ullrich論文にある式ではありません。
+実周波数のDrude誘電関数の逆数でも、有限qの電子–正孔相互作用から導出した式でもありません。
+4*pi*Kの単位をプラズマ周波数の二乗に合わせていますが、分母を正に保つ形と強度sはモデル仮定です。
+alphaを電流駆動項に掛ける定義を採用し、Exc=alpha(t)*Pを課す定義とは区別します。
+後者から導けばalphaの時間微分が必要ですが、この実装はその式を採用していません。
+
+最初は同じ周波数・包絡形状の弱レーザーでs=0の診断計算を行い、Kの基準を調べます。
+単一K0ではバンド間応答の全時刻を再現できない場合があります。K0=0がSiの平衡応答という
+意味ではありません。弱励起でalpha0を回復することは**校正して検証する条件**であり、
+未校正のこの入力で自動的に保証されません。s=0では固定alphaと同じ伝播になります。
+
+場のノルムがfloor以下ならKとalphaを保持し、Pの積分は継続します。
+滑らかなパルス終端でも残留PがあるとKはfloor到達前に大きくなり得るため、
+floorは単なる丸め誤差対策ではなくモデル結果に影響します。特にパルス後に保持されるalphaを
+キャリア遮蔽の確定値と解釈してはいけません。floor、代表周波数、K0、sへの感度を調べてください。
+広帯域・多色・遅延プローブでは単一周波数近似が弱くなります。プローブが推定値も変えるため、
+過渡スペクトルの解釈は別途検証が必要です。精度改善や長時間安定性はまだ実証していません。
+
+instantモードの `Si_rt_xc.data` は従来の7列に、alpha_eff、K、Pの3成分を追加した12列です。
+追加列は原子単位。alpha_effはその時刻の電流から次のXC場を計算する際に使った値です。
+checkpointはバージョン2でP,K,alphaと設定を保存します。旧バージョン1は固定alphaのみ再開可能。
+instantの有無や係数変更での再開は拒否します。

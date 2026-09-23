@@ -9,8 +9,21 @@
 module tdcdft_lrc
   implicit none
   private
-  public :: advance_xc_field,proca_coefficients
+  public :: advance_xc_field,proca_coefficients,instant_screening
 contains
+  pure subroutine instant_screening(a,e,j,p,omega,reference,strength,field_floor,alpha0,response,alpha)
+    implicit none
+    real(8),intent(in) :: a(3),e(3),j(3),p(3),omega,reference,strength,field_floor,alpha0
+    real(8),intent(inout) :: response,alpha
+    real(8) :: norm2,increment
+    ! Instantaneous vector least squares, not a time average or a dielectric inversion.
+    norm2=sum(a*a)+sum((e/omega)**2)
+    if(norm2<=field_floor**2) return
+    response=(sum(a*j)-sum(e*p))/norm2
+    increment=max(response-reference,0d0)
+    alpha=alpha0/(1d0+strength*4d0*acos(-1d0)*increment/omega**2)
+  end subroutine instant_screening
+
   subroutine proca_coefficients(a2,a0,alpha,restoring)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none

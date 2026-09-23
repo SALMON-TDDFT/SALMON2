@@ -292,7 +292,8 @@ contains
       & alibc, &
       & alibxc, &
 #endif
-      & cval, tdcdft, tdcdft_alpha, tdcdft_damping, tdcdft_restoring, tdcdft_a2, tdcdft_a0
+      & cval, tdcdft, tdcdft_alpha, tdcdft_damping, tdcdft_restoring, tdcdft_a2, tdcdft_a0, &
+      & tdcdft_screening,tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
 
     namelist/rgrid/ &
       & dl, &
@@ -739,6 +740,11 @@ contains
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
+    tdcdft_screening = 'none'
+    tdcdft_screen_omega = 0d0
+    tdcdft_screen_reference = 0d0
+    tdcdft_screen_strength = 1d0
+    tdcdft_screen_floor = 1d-8
     tdcdft = 'none'
     tdcdft_alpha = 0d0
     tdcdft_damping = 0d0
@@ -1314,6 +1320,11 @@ contains
     call comm_bcast(alibc        ,nproc_group_global)
 #endif
     call comm_bcast(cval         ,nproc_group_global)
+    call comm_bcast(tdcdft_screening, nproc_group_global)
+    call comm_bcast(tdcdft_screen_omega, nproc_group_global)
+    call comm_bcast(tdcdft_screen_reference, nproc_group_global)
+    call comm_bcast(tdcdft_screen_strength, nproc_group_global)
+    call comm_bcast(tdcdft_screen_floor, nproc_group_global)
     call comm_bcast(tdcdft, nproc_group_global)
     call comm_bcast(tdcdft_alpha, nproc_group_global)
     call comm_bcast(tdcdft_damping, nproc_group_global)
@@ -2249,6 +2260,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_damping [a.u.]', tdcdft_damping
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'tdcdft_restoring [a.u.]', tdcdft_restoring
 
+      write(fh_variables_log,*) '# tdcdft_screening = ',tdcdft_screening
+      write(fh_variables_log,*) '# screening omega, reference, strength, floor [a.u.] = ', &
+        tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
       if(inml_rgrid >0)ierr_nml = ierr_nml +1
       write(fh_variables_log, '("#namelist: ",A,", status=",I3)') 'rgrid', inml_rgrid
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'dl(1)', dl(1)
@@ -2864,6 +2878,20 @@ contains
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
+
+    if (tdcdft_screening/='none'.and.tdcdft_screening/='instant') &
+      error stop 'TDCDFT: screening must be none or instant'
+    if (.not.all(ieee_is_finite([tdcdft_screen_omega,tdcdft_screen_reference, &
+        tdcdft_screen_strength,tdcdft_screen_floor]))) error stop 'TDCDFT: screening parameters must be finite'
+    if (tdcdft_screening=='instant') then
+      if (tdcdft=='none'.or.theory/='tddft_pulse'.or.unit_system/='a.u.') &
+        error stop 'TDCDFT: instant screening requires enabled tddft_pulse in atomic units'
+      if (tdcdft_alpha<0d0.or.tdcdft_a2/=0d0.or.tdcdft_a0/=0d0) &
+        error stop 'TDCDFT: instant screening requires normalized nonnegative alpha'
+      if (tdcdft_screen_omega<=0d0.or.tdcdft_screen_floor<=0d0.or.tdcdft_screen_strength<0d0) &
+        error stop 'TDCDFT: invalid screening frequency, floor or strength'
+      if (ae_shape1=='impulse') error stop 'TDCDFT: instant screening requires a laser pump'
+    end if
 
     if (.not.all(ieee_is_finite([tdcdft_alpha,tdcdft_damping,tdcdft_restoring]))) &
       error stop 'TDCDFT: parameters must be finite'

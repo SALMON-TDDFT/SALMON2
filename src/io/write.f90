@@ -1068,7 +1068,7 @@ contains
 !===================================================================================================================================
   subroutine write_rt_xc(it,ofl,dt,rt)
     use structures, only: s_ofile,s_rt
-    use salmon_global, only: base_directory,sysname
+    use salmon_global, only: base_directory,sysname,tdcdft_screening
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: open_filehandle
@@ -1085,11 +1085,18 @@ contains
       write(ofl%fh_rt_xc,'(a)') '# xc field only; Ac_tot and E_tot in rt.data remain classical'
       write(ofl%fh_rt_xc,'(a)') '# time ['//trim(t_unit_time%name)//'] Axc/c xyz [' &
         //trim(t_unit_ac%name)//'] Exc xyz ['//trim(t_unit_elec%name)//']'
+      if(tdcdft_screening=='instant') write(ofl%fh_rt_xc,'(a)') &
+        '# extra columns: alpha_used K_estimate P_xyz (all atomic units); K held below field floor'
     else
       ! Centered derivative at the same time as Axc; next step is already available.
       exc=-(rt%Ac_xc(:,it+1)-rt%Ac_xc(:,it-1))/(2d0*dt)
-      write(ofl%fh_rt_xc,'(7(1x,es24.16e3))') it*dt*t_unit_time%conv, &
-        rt%Ac_xc(:,it)*t_unit_ac%conv,exc*t_unit_elec%conv
+      if(tdcdft_screening=='instant') then
+        write(ofl%fh_rt_xc,'(12(1x,es24.16e3))') it*dt*t_unit_time%conv, &
+          rt%Ac_xc(:,it)*t_unit_ac%conv,exc*t_unit_elec%conv,rt%xc_alpha,rt%xc_response,rt%xc_polarization
+      else
+        write(ofl%fh_rt_xc,'(7(1x,es24.16e3))') it*dt*t_unit_time%conv, &
+          rt%Ac_xc(:,it)*t_unit_ac%conv,exc*t_unit_elec%conv
+      end if
       flush(ofl%fh_rt_xc)
     end if
   end subroutine write_rt_xc

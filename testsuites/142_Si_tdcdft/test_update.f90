@@ -1,8 +1,42 @@
 program test_update
-  use tdcdft_lrc, only: advance_xc_field,proca_coefficients
+  use tdcdft_lrc, only: advance_xc_field,proca_coefficients,instant_screening
   implicit none
   real(8) :: old(3),now(3),next(3),j(3),dt,t,err(2),exact,alpha,gamma
+  real(8) :: a(3),e(3),pol(3),response,coupling
   integer :: n,k,steps
+  response=0d0
+  coupling=0.2d0
+  do n=0,100
+    t=n*acos(-1d0)/50d0
+    a=[sin(t),0d0,0d0]
+    e=[-0.2d0*cos(t),0d0,0d0]
+    j=0.03d0*a
+    pol=-0.03d0*e/0.2d0**2
+    call instant_screening(a,e,j,pol,0.2d0,0.01d0,1d0,1d-10,0.2d0,response,coupling)
+    if(abs(response-0.03d0)>1d-14) error stop 'instant Drude quadratures'
+    if(abs(coupling-0.2d0/(1d0+4d0*acos(-1d0)*0.02d0/0.04d0))>1d-14) &
+      error stop 'screening closure'
+  end do
+  a=0d0; e=0d0
+  call instant_screening(a,e,j,pol,0.2d0,0.01d0,1d0,1d-10,0.2d0,response,coupling)
+  if(abs(response-0.03d0)>1d-14) error stop 'hold without field'
+  a=[1d0,0d0,0d0]; j=-a
+  call instant_screening(a,e,j,pol,0.2d0,0.01d0,1d0,1d-10,0.2d0,response,coupling)
+  if(coupling/=0.2d0) error stop 'no antiscreening'
+  j=0.01d0*a
+  call instant_screening(a,e,j,pol,0.2d0,0.01d0,1d0,1d-10,0.2d0,response,coupling)
+  if(coupling/=0.2d0) error stop 'calibrated weak reference'
+  j=a
+  call instant_screening(a,e,j,pol,0.2d0,0.01d0,0d0,1d-10,0.2d0,response,coupling)
+  if(coupling/=0.2d0) error stop 'zero screening strength'
+  ! A pulse tail with remanent P is not a stationary Drude response.
+  ! Confirm bounded alpha and floor hold, not physical accuracy of the tail estimate.
+  a=0d0; e=[-1d-6,0d0,0d0]; pol=[1d-3,0d0,0d0]; j=0d0
+  call instant_screening(a,e,j,pol,0.2d0,0d0,1d0,1d-8,0.2d0,response,coupling)
+  if(abs(response-40d0)>1d-10.or.coupling<=0d0.or.coupling>=0.2d0) error stop 'residual polarization tail'
+  e=0d0
+  call instant_screening(a,e,j,pol,0.2d0,0d0,1d0,1d-8,0.2d0,response,coupling)
+  if(abs(response-40d0)>1d-10) error stop 'tail freeze'
   call proca_coefficients(-20d0*acos(-1d0),-0.2d0,alpha,gamma)
   if(abs(alpha-0.2d0)>1d-14) error stop 'Si sign and normalization'
   if(abs(gamma-0.01d0/acos(-1d0))>1d-14) error stop 'Si restoring term'

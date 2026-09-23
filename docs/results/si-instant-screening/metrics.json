@@ -1,0 +1,22 @@
+{
+  "k_grid": [
+    4,
+    4,
+    4
+  ],
+  "dt_au": 0.08,
+  "nt": 1200,
+  "pulse_duration_au": 60,
+  "omega_au": 0.2,
+  "reference_K": 0.19591042214256474,
+  "field_floor_au": 2e-05,
+  "weak_intensity": 100000000.0,
+  "strong_intensity": 10000000000000.0,
+  "weak_max_current_difference": 0.0,
+  "strong_relative_current_change": 0.07594004999680175,
+  "alpha_min": 0.00010053253406361137,
+  "alpha_max": 0.2,
+  "fraction_screened": 0.38916666666666666,
+  "max_Axc_fixed": 0.050519543370832115,
+  "max_Axc_screened": 0.019328097649181575
+}

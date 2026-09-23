@@ -1,0 +1,14 @@
+[
+  {
+    "floor": 1e-05,
+    "alpha_min": 2.3419857766586384e-05,
+    "alpha_end": 2.3419857766586384e-05,
+    "relative_current_change_from_default": 2.4564233085791767e-05
+  },
+  {
+    "floor": 4e-05,
+    "alpha_min": 0.00010053253406361137,
+    "alpha_end": 0.00010053253406361137,
+    "relative_current_change_from_default": 0.0
+  }
+]

@@ -22,13 +22,14 @@ contains
 !===================================================================================================================================
 
 subroutine calc_emfields(itt,nspin,curr_in,rt)
-  use tdcdft_lrc, only: advance_xc_field
+  use tdcdft_lrc, only: advance_xc_field,instant_screening
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures, only : s_rt
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
   use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em, &
-    tdcdft_alpha,tdcdft_damping,tdcdft_restoring
+    tdcdft_alpha,tdcdft_damping,tdcdft_restoring,tdcdft_screening,tdcdft_screen_omega, &
+    tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
   use nvtx_wrapper
   implicit none
   integer   ,intent(in)    :: itt,nspin
@@ -36,7 +37,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   type(s_rt),intent(inout) :: rt
   !
   integer :: j
-  real(8) :: n1,n2
+  real(8) :: n1,n2,alpha_now,screen_e(3),screen_a(3)
   integer,parameter :: m=100
   call nvtxStartRange('calc_emfield', __LINE__)
   
@@ -54,7 +55,20 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
 
 ! SALMON current is electron-number current: Axc'' = +alpha*j in A/c units.
   if (allocated(rt%Ac_xc)) then
-    call advance_xc_field(dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,rt%curr(:,itt), &
+    alpha_now=tdcdft_alpha
+    if(tdcdft_screening=='instant') then
+      rt%xc_polarization=rt%xc_polarization-0.5d0*dt*(rt%curr(:,itt)+rt%curr(:,itt-1))
+      ! Transverse classical field; external waveform is known, so its centered derivative is causal.
+      screen_a=rt%Ac_ext(:,itt)-rt%Ac_ext(:,0)
+      screen_e=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
+      call instant_screening(screen_a,screen_e,rt%curr(:,itt),rt%xc_polarization, &
+        tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor, &
+        tdcdft_alpha,rt%xc_response,rt%xc_alpha)
+      if(.not.all(ieee_is_finite([rt%xc_polarization,rt%xc_response,rt%xc_alpha]))) &
+        error stop 'TDCDFT: screening state is nonfinite'
+      alpha_now=rt%xc_alpha
+    end if
+    call advance_xc_field(dt,alpha_now,tdcdft_damping,tdcdft_restoring,rt%curr(:,itt), &
                          rt%Ac_xc(:,itt-1),rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
     if (.not.all(ieee_is_finite(rt%Ac_xc(:,itt+1)))) error stop 'TDCDFT: xc field is nonfinite'
   end if

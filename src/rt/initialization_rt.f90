@@ -175,6 +175,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   if (tdcdft/='none') then
     allocate(rt%Ac_xc(3,0:nt+1))
     rt%Ac_xc=0d0
+    rt%xc_polarization=0d0
+    rt%xc_response=tdcdft_screen_reference
+    rt%xc_alpha=tdcdft_alpha
   end if
   rt%curr  = 0d0
   rt%E_ext = 0d0
