@@ -2,6 +2,7 @@ set(SOURCES
    broyden.f90
    const.f90
    hamiltonian.f90
+   hse_reference_export.f90
    initialization.f90
    stencil.f90
    nonlocal_potential.f90

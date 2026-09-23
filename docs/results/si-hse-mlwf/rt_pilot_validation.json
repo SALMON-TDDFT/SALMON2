@@ -1,0 +1,386 @@
+{
+  "zero": {
+    "result": {
+      "completed": true,
+      "steps": 1,
+      "dt_au": 0.08,
+      "amplitude": 0.0,
+      "pair_tolerance": 0.0,
+      "initial_current": [
+        7.41643299904865e-19,
+        -1.6240261648431113e-18,
+        -2.08117878906709e-18
+      ],
+      "energy_change_Ha": 1.7408297026122455e-13,
+      "wall_seconds": 57.61512124998262,
+      "rhs_timings": [
+        {
+          "seconds": 11.520998791966122,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20828995801275596,
+          "exchange_seconds": 11.185430250014178,
+          "local_seconds": 0.04903474997263402,
+          "transform_seconds": 0.07034929195651785
+        },
+        {
+          "seconds": 11.476382249966264,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.2063656669924967,
+          "exchange_seconds": 11.155415749992244,
+          "local_seconds": 0.047683834040071815,
+          "transform_seconds": 0.06047837605001405
+        },
+        {
+          "seconds": 11.47536362503888,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20704395900247619,
+          "exchange_seconds": 11.156153207994066,
+          "local_seconds": 0.04714054201031104,
+          "transform_seconds": 0.058724000002257526
+        },
+        {
+          "seconds": 11.484111541998573,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20582562498748302,
+          "exchange_seconds": 11.166962957999203,
+          "local_seconds": 0.04578404204221442,
+          "transform_seconds": 0.059018875064793974
+        }
+      ],
+      "mean_step_seconds": 46.02371862495784,
+      "scope": "Short RT-HSE pilot; not an optical spectrum"
+    },
+    "trajectory": [
+      {
+        "step": 1,
+        "time_au": 0.08,
+        "electron_number": 31.999999999999257,
+        "max_gram_error": 1.3939800500096714e-12,
+        "current": [
+          -2.9103369259167783e-13,
+          2.3505181498858532e-12,
+          -1.2691724768008446e-12
+        ],
+        "wall_seconds": 46.02371862495784
+      }
+    ]
+  },
+  "plus": {
+    "result": {
+      "completed": true,
+      "steps": 1,
+      "dt_au": 0.08,
+      "amplitude": 0.0001,
+      "pair_tolerance": 0.0,
+      "initial_current": [
+        -1.238066478937017e-17,
+        1.465418095832596e-18,
+        2.7953264413479593e-06
+      ],
+      "energy_change_Ha": -2.4868995751603507e-14,
+      "wall_seconds": 57.56605562497862,
+      "rhs_timings": [
+        {
+          "seconds": 11.55332583404379,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20747387496521696,
+          "exchange_seconds": 11.220055667043198,
+          "local_seconds": 0.04889150004601106,
+          "transform_seconds": 0.06760499998927116
+        },
+        {
+          "seconds": 11.459298458998092,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20917962497333065,
+          "exchange_seconds": 11.138129208004102,
+          "local_seconds": 0.04749837500276044,
+          "transform_seconds": 0.05816295900149271
+        },
+        {
+          "seconds": 11.461619958980009,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20941075001610443,
+          "exchange_seconds": 11.138967457984108,
+          "local_seconds": 0.04682958300691098,
+          "transform_seconds": 0.05959608301054686
+        },
+        {
+          "seconds": 11.476398541999515,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20621916698291898,
+          "exchange_seconds": 11.158495749987196,
+          "local_seconds": 0.046017165994271636,
+          "transform_seconds": 0.05918066599406302
+        }
+      ],
+      "mean_step_seconds": 46.01755716698244,
+      "scope": "Short RT-HSE pilot; not an optical spectrum"
+    },
+    "trajectory": [
+      {
+        "step": 1,
+        "time_au": 0.08,
+        "electron_number": 31.999999999999226,
+        "max_gram_error": 1.397472758850195e-12,
+        "current": [
+          -2.904014569370067e-13,
+          2.3482785451259006e-12,
+          2.79006608156323e-06
+        ],
+        "wall_seconds": 46.01755716698244
+      }
+    ]
+  },
+  "minus": {
+    "result": {
+      "completed": true,
+      "steps": 1,
+      "dt_au": 0.08,
+      "amplitude": -0.0001,
+      "pair_tolerance": 0.0,
+      "initial_current": [
+        1.3831025157132147e-17,
+        -4.697810388325375e-18,
+        -2.7953264413522313e-06
+      ],
+      "energy_change_Ha": -3.197442310920451e-14,
+      "wall_seconds": 56.98971191700548,
+      "rhs_timings": [
+        {
+          "seconds": 11.404896166990511,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21287120901979506,
+          "exchange_seconds": 11.06775954196928,
+          "local_seconds": 0.04840316699119285,
+          "transform_seconds": 0.06901329202810302
+        },
+        {
+          "seconds": 11.379007125040516,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21164233301533386,
+          "exchange_seconds": 11.055915458011441,
+          "local_seconds": 0.046950832998845726,
+          "transform_seconds": 0.05780783301452175
+        },
+        {
+          "seconds": 11.345468708022963,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.2098974579712376,
+          "exchange_seconds": 11.025301332992967,
+          "local_seconds": 0.04579262499464676,
+          "transform_seconds": 0.05818912497488782
+        },
+        {
+          "seconds": 11.34471662499709,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21329812495969236,
+          "exchange_seconds": 11.02113929198822,
+          "local_seconds": 0.04583204200025648,
+          "transform_seconds": 0.0581968339974992
+        }
+      ],
+      "mean_step_seconds": 45.54302845901111,
+      "scope": "Short RT-HSE pilot; not an optical spectrum"
+    },
+    "trajectory": [
+      {
+        "step": 1,
+        "time_au": 0.08,
+        "electron_number": 31.999999999999222,
+        "max_gram_error": 1.397125009385868e-12,
+        "current": [
+          -2.9038308731183937e-13,
+          2.348274325348186e-12,
+          -2.7900686187927475e-06
+        ],
+        "wall_seconds": 45.54302845901111
+      }
+    ]
+  },
+  "halfdt": {
+    "result": {
+      "completed": true,
+      "steps": 2,
+      "dt_au": 0.04,
+      "amplitude": 0.0001,
+      "pair_tolerance": 0.0,
+      "initial_current": [
+        -1.238066478937017e-17,
+        1.465418095832596e-18,
+        2.7953264413479593e-06
+      ],
+      "energy_change_Ha": 1.4210854715202004e-14,
+      "wall_seconds": 103.34639095899183,
+      "rhs_timings": [
+        {
+          "seconds": 11.466925125045236,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21057720901444554,
+          "exchange_seconds": 11.127757792011835,
+          "local_seconds": 0.05249283404555172,
+          "transform_seconds": 0.06899295898620039
+        },
+        {
+          "seconds": 11.435883875004947,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21315637498628348,
+          "exchange_seconds": 11.104202874994371,
+          "local_seconds": 0.052888541016727686,
+          "transform_seconds": 0.05878441606182605
+        },
+        {
+          "seconds": 11.459062833047938,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20945483300602064,
+          "exchange_seconds": 11.13394316699123,
+          "local_seconds": 0.05070104100741446,
+          "transform_seconds": 0.058532458962872624
+        },
+        {
+          "seconds": 11.483450833009556,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21259120799368247,
+          "exchange_seconds": 11.15599633398233,
+          "local_seconds": 0.0511192079866305,
+          "transform_seconds": 0.05743937595980242
+        },
+        {
+          "seconds": 11.429347792000044,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21071824996033683,
+          "exchange_seconds": 11.106225166004151,
+          "local_seconds": 0.05064695799956098,
+          "transform_seconds": 0.05643666599644348
+        },
+        {
+          "seconds": 11.455431541020516,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20973666600184515,
+          "exchange_seconds": 11.131705415959004,
+          "local_seconds": 0.050918833003379405,
+          "transform_seconds": 0.057120957993902266
+        },
+        {
+          "seconds": 11.43935916700866,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21381741599179804,
+          "exchange_seconds": 11.108240458008368,
+          "local_seconds": 0.05237804201897234,
+          "transform_seconds": 0.0584321659989655
+        },
+        {
+          "seconds": 11.476751499983948,
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20988570799818262,
+          "exchange_seconds": 11.151312790985685,
+          "local_seconds": 0.05040612496668473,
+          "transform_seconds": 0.05855008296202868
+        }
+      ],
+      "mean_step_seconds": 45.89274447900243,
+      "scope": "Short RT-HSE pilot; not an optical spectrum"
+    },
+    "trajectory": [
+      {
+        "step": 1,
+        "time_au": 0.04,
+        "electron_number": 31.99999999999999,
+        "max_gram_error": 4.4071064783469993e-14,
+        "current": [
+          -1.4585171571271051e-13,
+          1.182235970851897e-12,
+          2.794002735247324e-06
+        ],
+        "wall_seconds": 45.9150432079914
+      },
+      {
+        "step": 2,
+        "time_au": 0.08,
+        "electron_number": 31.999999999999975,
+        "max_gram_error": 8.791265673658857e-14,
+        "current": [
+          -2.901763834539834e-13,
+          2.3482760318907008e-12,
+          2.7900657745925172e-06
+        ],
+        "wall_seconds": 45.87044575001346
+      }
+    ]
+  },
+  "comparisons": {
+    "halfdt_orbital_relative_difference": 9.460211473460472e-10,
+    "halfdt_current_relative_difference": 1.1002278091657577e-07,
+    "signed_probe_even_current": [
+      6.414204672547664e-16,
+      -2.2417146488100292e-15,
+      5.577181344385277e-16
+    ],
+    "central_probe_current": [
+      -9.184812583669156e-18,
+      2.1098888573858296e-18,
+      2.790067350177989e-06
+    ],
+    "duration_fs": 0.0019351074612685602,
+    "estimated_12000_step_days": 6.391327384303117
+  }
+}

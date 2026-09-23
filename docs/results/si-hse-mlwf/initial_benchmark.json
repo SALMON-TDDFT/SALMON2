@@ -1,0 +1,280 @@
+{
+  "case": "initial",
+  "provenance": "PZ GS",
+  "numpy": "2.4.6",
+  "python": "3.14.5 (main, May 10 2026, 10:21:34) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "threads": "1",
+  "conversion_seconds": 1.0065372080425732,
+  "mixing": 0.25,
+  "omega": 0.11,
+  "runs": [
+    {
+      "pair_tolerance": 1e-06,
+      "timings": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 10176,
+          "pair_tolerance": 1e-06,
+          "screening_seconds": 0.21442941698478535,
+          "exchange_seconds": 16.275108458008617,
+          "convolution_seconds": 14.706595695053693,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 16.489979082951322
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 10176,
+          "pair_tolerance": 1e-06,
+          "screening_seconds": 0.21424391603795812,
+          "exchange_seconds": 16.723770625016186,
+          "convolution_seconds": 15.123517991101835,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 16.938457541982643
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 10176,
+          "pair_tolerance": 1e-06,
+          "screening_seconds": 0.2178073750110343,
+          "exchange_seconds": 16.638258832972497,
+          "convolution_seconds": 15.034827513620257,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 16.856505124946125
+        }
+      ],
+      "exchange_energy_Ha": -6.5402204919258,
+      "hse_energy_error_meV_per_atom": 0.3008896552172874,
+      "action_relative_error": 0.0029308645418985265,
+      "median_wall_seconds": 16.856505124946125
+    },
+    {
+      "pair_tolerance": 1e-05,
+      "timings": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 4288,
+          "pair_tolerance": 1e-05,
+          "screening_seconds": 0.2140417500049807,
+          "exchange_seconds": 6.915089000016451,
+          "convolution_seconds": 6.229003085754812,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 7.129570040968247
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 4288,
+          "pair_tolerance": 1e-05,
+          "screening_seconds": 0.2142309169867076,
+          "exchange_seconds": 6.884323708014563,
+          "convolution_seconds": 6.201783208933193,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 7.098994958039839
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 4288,
+          "pair_tolerance": 1e-05,
+          "screening_seconds": 0.21285404195077717,
+          "exchange_seconds": 7.009579167002812,
+          "convolution_seconds": 6.3167578731663525,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 7.222871750011109
+        }
+      ],
+      "exchange_energy_Ha": -6.537822322422126,
+      "hse_energy_error_meV_per_atom": 2.3401870504622115,
+      "action_relative_error": 0.008684329122903955,
+      "median_wall_seconds": 7.129570040968247
+    },
+    {
+      "pair_tolerance": 0.0001,
+      "timings": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 1360,
+          "pair_tolerance": 0.0001,
+          "screening_seconds": 0.21378987497882918,
+          "exchange_seconds": 2.238292708992958,
+          "convolution_seconds": 2.015130201005377,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 2.4525202920194715
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 1360,
+          "pair_tolerance": 0.0001,
+          "screening_seconds": 0.21798862499417737,
+          "exchange_seconds": 2.2449497500201687,
+          "convolution_seconds": 2.021723615936935,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 2.463378499960527
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 1360,
+          "pair_tolerance": 0.0001,
+          "screening_seconds": 0.2147191249532625,
+          "exchange_seconds": 2.182066625042353,
+          "convolution_seconds": 1.964026304834988,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 2.3972233749809675
+        }
+      ],
+      "exchange_energy_Ha": -6.52447908427963,
+      "hse_energy_error_meV_per_atom": 13.68668726507638,
+      "action_relative_error": 0.021284963950375366,
+      "median_wall_seconds": 2.4525202920194715
+    },
+    {
+      "pair_tolerance": 0.001,
+      "timings": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 496,
+          "pair_tolerance": 0.001,
+          "screening_seconds": 0.21748508303426206,
+          "exchange_seconds": 0.8094734590267763,
+          "convolution_seconds": 0.7259571995236911,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 1.0274010840221308
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 496,
+          "pair_tolerance": 0.001,
+          "screening_seconds": 0.21424458298133686,
+          "exchange_seconds": 0.7947617919999175,
+          "convolution_seconds": 0.712513875507284,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 1.0094417500076815
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 496,
+          "pair_tolerance": 0.001,
+          "screening_seconds": 0.21139408298768103,
+          "exchange_seconds": 0.7981312919873744,
+          "convolution_seconds": 0.7156718750484288,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 1.009962666023057
+        }
+      ],
+      "exchange_energy_Ha": -6.485858844431225,
+      "hse_energy_error_meV_per_atom": 46.52763299719032,
+      "action_relative_error": 0.03890924569486616,
+      "median_wall_seconds": 1.009962666023057
+    },
+    {
+      "pair_tolerance": 0.01,
+      "timings": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 112,
+          "pair_tolerance": 0.01,
+          "screening_seconds": 0.21446612500585616,
+          "exchange_seconds": 0.19119079201482236,
+          "convolution_seconds": 0.17123529769014567,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 0.40610058401944116
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 112,
+          "pair_tolerance": 0.01,
+          "screening_seconds": 0.21656895900378004,
+          "exchange_seconds": 0.18445087497821078,
+          "convolution_seconds": 0.16513966210186481,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 0.401455957966391
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 112,
+          "pair_tolerance": 0.01,
+          "screening_seconds": 0.2125396659830585,
+          "exchange_seconds": 0.19211345800431445,
+          "convolution_seconds": 0.17211553890956566,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 0.40509933402063325
+        }
+      ],
+      "exchange_energy_Ha": -6.2654867223344946,
+      "hse_energy_error_meV_per_atom": 233.92234962913264,
+      "action_relative_error": 0.09280489527108114,
+      "median_wall_seconds": 0.40509933402063325
+    },
+    {
+      "pair_tolerance": 0.05,
+      "timings": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 112,
+          "pair_tolerance": 0.05,
+          "screening_seconds": 0.21396500000264496,
+          "exchange_seconds": 0.18192416604142636,
+          "convolution_seconds": 0.16269271686905995,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 0.39634204196045175
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 112,
+          "pair_tolerance": 0.05,
+          "screening_seconds": 0.21113170898752287,
+          "exchange_seconds": 0.1836763329920359,
+          "convolution_seconds": 0.16441533440956846,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 0.3952407079632394
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 112,
+          "pair_tolerance": 0.05,
+          "screening_seconds": 0.21234654204454273,
+          "exchange_seconds": 0.17970741703175008,
+          "convolution_seconds": 0.16084600862814113,
+          "grid_points": 110592,
+          "wavefunction_bytes": 28311552,
+          "wall_seconds": 0.3924952080124058
+        }
+      ],
+      "exchange_energy_Ha": -6.2654867223344946,
+      "hse_energy_error_meV_per_atom": 233.92234962913264,
+      "action_relative_error": 0.09280489527108114,
+      "median_wall_seconds": 0.3952407079632394
+    }
+  ],
+  "full": {
+    "total_pairs": 16384,
+    "retained_pairs": 16384,
+    "pair_tolerance": 0.0,
+    "screening_seconds": 0.21700624999357387,
+    "exchange_seconds": 25.823918125010096,
+    "convolution_seconds": 23.378371543309186,
+    "grid_points": 110592,
+    "wavefunction_bytes": 28311552,
+    "wall_seconds": 26.041413499973714,
+    "exchange_energy_Ha": -6.540574331633925,
+    "hse_exchange_Ha": -1.6351435829084813
+  },
+  "bloch_seconds": 35.56981054198695,
+  "bloch_action_relative_error": 1.6676934153540537e-15
+}

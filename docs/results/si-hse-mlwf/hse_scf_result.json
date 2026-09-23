@@ -1,0 +1,23 @@
+{
+  "converged": true,
+  "parity": {
+    "hpsi_relative_error": 4.39333002200313e-15,
+    "hartree_potential_max_error": 2.282896094385478e-15,
+    "hartree_energy_error_Ha": -2.220446049250313e-15,
+    "nonlocal_energy_error_Ha": -1.7763568394002505e-15
+  },
+  "energy": {
+    "core": 9.792314021127641,
+    "hartree": 2.1159995793704813,
+    "semilocal": -7.96504080438822,
+    "screened_fock": -6.611755298454539,
+    "hse_fock": -1.6529388246136347,
+    "ion_ion": -33.60508068643294,
+    "total": -31.314746714936675
+  },
+  "residual_Ha": 7.930350625220151e-07,
+  "iterations": 61,
+  "wall_seconds": 476.5119611249538,
+  "scope": "Self-consistent HSE06 ground state on exported SALMON Si grid; no RT spectrum yet",
+  "final_pair_tolerance": 0.0
+}

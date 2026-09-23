@@ -1,0 +1,422 @@
+[
+  {
+    "width": 12,
+    "pair_threshold": 0.0,
+    "retained_pairs": 16384,
+    "timings": [
+      3.3546605419833213,
+      3.3625940419733524,
+      3.414546000014525
+    ],
+    "median_seconds": 3.3625940419733524,
+    "source_tail_norm_max": 0.035810216368881376,
+    "action_relative_error": 0.03142406111041176,
+    "hse_exchange_trace_error_meV_per_atom": 117.2647183665895
+  },
+  {
+    "width": 12,
+    "pair_threshold": 1e-06,
+    "retained_pairs": 10176,
+    "timings": [
+      2.1109513330156915,
+      2.148101750004571,
+      2.1192199580254965
+    ],
+    "median_seconds": 2.1192199580254965,
+    "source_tail_norm_max": 0.035810216368881376,
+    "action_relative_error": 0.031578914840768545,
+    "hse_exchange_trace_error_meV_per_atom": 117.39116364340457
+  },
+  {
+    "width": 12,
+    "pair_threshold": 1e-05,
+    "retained_pairs": 4288,
+    "timings": [
+      0.9114807500154711,
+      0.9024481249507517,
+      0.9004903750028461
+    ],
+    "median_seconds": 0.9024481249507517,
+    "source_tail_norm_max": 0.035810216368881376,
+    "action_relative_error": 0.03269543181650424,
+    "hse_exchange_trace_error_meV_per_atom": 118.23375802388742
+  },
+  {
+    "width": 12,
+    "pair_threshold": 0.0001,
+    "retained_pairs": 1360,
+    "timings": [
+      0.28476041700923815,
+      0.29200416698586196,
+      0.28622129099676386
+    ],
+    "median_seconds": 0.28622129099676386,
+    "source_tail_norm_max": 0.035810216368881376,
+    "action_relative_error": 0.03868952810207772,
+    "hse_exchange_trace_error_meV_per_atom": 123.3811209096038
+  },
+  {
+    "width": 12,
+    "pair_threshold": 0.001,
+    "retained_pairs": 496,
+    "timings": [
+      0.10443558299448341,
+      0.10387637501116842,
+      0.10589616699144244
+    ],
+    "median_seconds": 0.10443558299448341,
+    "source_tail_norm_max": 0.035810216368881376,
+    "action_relative_error": 0.05323626214073497,
+    "hse_exchange_trace_error_meV_per_atom": 140.9538156095352
+  },
+  {
+    "width": 16,
+    "pair_threshold": 0.0,
+    "retained_pairs": 16384,
+    "timings": [
+      9.487602541979868,
+      9.520404416020028,
+      9.519465040997602
+    ],
+    "median_seconds": 9.519465040997602,
+    "source_tail_norm_max": 0.014915092222720583,
+    "action_relative_error": 0.010583790911644922,
+    "hse_exchange_trace_error_meV_per_atom": 45.44369308279094
+  },
+  {
+    "width": 16,
+    "pair_threshold": 1e-06,
+    "retained_pairs": 10176,
+    "timings": [
+      5.9066864579799585,
+      5.919080916966777,
+      5.917419542034622
+    ],
+    "median_seconds": 5.917419542034622,
+    "source_tail_norm_max": 0.014915092222720583,
+    "action_relative_error": 0.011011941647035636,
+    "hse_exchange_trace_error_meV_per_atom": 45.57886831021561
+  },
+  {
+    "width": 16,
+    "pair_threshold": 1e-05,
+    "retained_pairs": 4288,
+    "timings": [
+      2.5019172499887645,
+      2.5000410840148106,
+      2.500669958011713
+    ],
+    "median_seconds": 2.500669958011713,
+    "source_tail_norm_max": 0.014915092222720583,
+    "action_relative_error": 0.013839049472395422,
+    "hse_exchange_trace_error_meV_per_atom": 46.51722692311549
+  },
+  {
+    "width": 16,
+    "pair_threshold": 0.0001,
+    "retained_pairs": 1360,
+    "timings": [
+      0.7971332909655757,
+      0.8013667089981027,
+      0.8038518329849467
+    ],
+    "median_seconds": 0.8013667089981027,
+    "source_tail_norm_max": 0.014915092222720583,
+    "action_relative_error": 0.02461115318301729,
+    "hse_exchange_trace_error_meV_per_atom": 52.31667407120825
+  },
+  {
+    "width": 16,
+    "pair_threshold": 0.001,
+    "retained_pairs": 496,
+    "timings": [
+      0.2944897499983199,
+      0.2936999580124393,
+      0.29377649998059496
+    ],
+    "median_seconds": 0.29377649998059496,
+    "source_tail_norm_max": 0.014915092222720583,
+    "action_relative_error": 0.042435835106236906,
+    "hse_exchange_trace_error_meV_per_atom": 74.2026808709222
+  },
+  {
+    "width": 20,
+    "pair_threshold": 0.0,
+    "retained_pairs": 16384,
+    "timings": [
+      11.913330292038154,
+      11.990956207970157,
+      11.92958658299176
+    ],
+    "median_seconds": 11.92958658299176,
+    "source_tail_norm_max": 0.006788268717852763,
+    "action_relative_error": 0.004030834170697717,
+    "hse_exchange_trace_error_meV_per_atom": 19.536304842954717
+  },
+  {
+    "width": 20,
+    "pair_threshold": 1e-06,
+    "retained_pairs": 10176,
+    "timings": [
+      7.402701125014573,
+      7.450882499979343,
+      7.449448625033256
+    ],
+    "median_seconds": 7.449448625033256,
+    "source_tail_norm_max": 0.006788268717852763,
+    "action_relative_error": 0.0050184486307864535,
+    "hse_exchange_trace_error_meV_per_atom": 19.67811761260176
+  },
+  {
+    "width": 20,
+    "pair_threshold": 1e-05,
+    "retained_pairs": 4288,
+    "timings": [
+      3.1517712919740006,
+      3.1248185409931466,
+      3.12617775000399
+    ],
+    "median_seconds": 3.12617775000399,
+    "source_tail_norm_max": 0.006788268717852763,
+    "action_relative_error": 0.00970781658290094,
+    "hse_exchange_trace_error_meV_per_atom": 20.710079709696565
+  },
+  {
+    "width": 20,
+    "pair_threshold": 0.0001,
+    "retained_pairs": 1360,
+    "timings": [
+      0.9924834999837913,
+      0.9975992919644341,
+      0.9931136250379495
+    ],
+    "median_seconds": 0.9931136250379495,
+    "source_tail_norm_max": 0.006788268717852763,
+    "action_relative_error": 0.022217328765975392,
+    "hse_exchange_trace_error_meV_per_atom": 27.376570541037587
+  },
+  {
+    "width": 20,
+    "pair_threshold": 0.001,
+    "retained_pairs": 496,
+    "timings": [
+      0.3624260419746861,
+      0.3659910830319859,
+      0.3637844590120949
+    ],
+    "median_seconds": 0.3637844590120949,
+    "source_tail_norm_max": 0.006788268717852763,
+    "action_relative_error": 0.03989005838731822,
+    "hse_exchange_trace_error_meV_per_atom": 53.48208464509158
+  },
+  {
+    "width": 24,
+    "pair_threshold": 0.0,
+    "retained_pairs": 16384,
+    "timings": [
+      25.636955750000197,
+      25.566804874979425,
+      25.561984375002794
+    ],
+    "median_seconds": 25.566804874979425,
+    "source_tail_norm_max": 0.0033661362117939353,
+    "action_relative_error": 0.0019727811045278792,
+    "hse_exchange_trace_error_meV_per_atom": 10.149953090329507
+  },
+  {
+    "width": 24,
+    "pair_threshold": 1e-06,
+    "retained_pairs": 10176,
+    "timings": [
+      15.898596415994689,
+      15.94526012497954,
+      15.911556500010192
+    ],
+    "median_seconds": 15.911556500010192,
+    "source_tail_norm_max": 0.0033661362117939353,
+    "action_relative_error": 0.0035611244294825447,
+    "hse_exchange_trace_error_meV_per_atom": 10.296974142124874
+  },
+  {
+    "width": 24,
+    "pair_threshold": 1e-05,
+    "retained_pairs": 4288,
+    "timings": [
+      6.690812042041216,
+      6.751776583027095,
+      6.704272375034634
+    ],
+    "median_seconds": 6.704272375034634,
+    "source_tail_norm_max": 0.0033661362117939353,
+    "action_relative_error": 0.008994657108920603,
+    "hse_exchange_trace_error_meV_per_atom": 11.423803449535106
+  },
+  {
+    "width": 24,
+    "pair_threshold": 0.0001,
+    "retained_pairs": 1360,
+    "timings": [
+      2.1326698750490323,
+      2.129011457960587,
+      2.129720291995909
+    ],
+    "median_seconds": 2.129720291995909,
+    "source_tail_norm_max": 0.0033661362117939353,
+    "action_relative_error": 0.021661173946188,
+    "hse_exchange_trace_error_meV_per_atom": 19.481377762017484
+  },
+  {
+    "width": 24,
+    "pair_threshold": 0.001,
+    "retained_pairs": 496,
+    "timings": [
+      0.7835504580289125,
+      0.7817817920004018,
+      0.7762551250052638
+    ],
+    "median_seconds": 0.7817817920004018,
+    "source_tail_norm_max": 0.0033661362117939353,
+    "action_relative_error": 0.039266817082664746,
+    "hse_exchange_trace_error_meV_per_atom": 48.66499956499381
+  },
+  {
+    "width": 32,
+    "pair_threshold": 0.0,
+    "retained_pairs": 16384,
+    "timings": [
+      74.66549612500239,
+      74.86013049999019,
+      74.71949787496123
+    ],
+    "median_seconds": 74.71949787496123,
+    "source_tail_norm_max": 0.0008992130449378966,
+    "action_relative_error": 0.0005193217650033313,
+    "hse_exchange_trace_error_meV_per_atom": 2.8150679049433722
+  },
+  {
+    "width": 32,
+    "pair_threshold": 1e-06,
+    "retained_pairs": 10176,
+    "timings": [
+      46.35774120799033,
+      46.38083066599211,
+      46.31203320802888
+    ],
+    "median_seconds": 46.35774120799033,
+    "source_tail_norm_max": 0.0008992130449378966,
+    "action_relative_error": 0.002986702201060023,
+    "hse_exchange_trace_error_meV_per_atom": 2.986984469194658
+  },
+  {
+    "width": 32,
+    "pair_threshold": 1e-05,
+    "retained_pairs": 4288,
+    "timings": [
+      19.579944957979023,
+      19.63606616598554,
+      20.147088249970693
+    ],
+    "median_seconds": 19.63606616598554,
+    "source_tail_norm_max": 0.0008992130449378966,
+    "action_relative_error": 0.008726111551767599,
+    "hse_exchange_trace_error_meV_per_atom": 4.357872763164465
+  },
+  {
+    "width": 32,
+    "pair_threshold": 0.0001,
+    "retained_pairs": 1360,
+    "timings": [
+      6.533594957960304,
+      6.613938208960462,
+      6.658823707955889
+    ],
+    "median_seconds": 6.613938208960462,
+    "source_tail_norm_max": 0.0008992130449378966,
+    "action_relative_error": 0.02133281843737128,
+    "hse_exchange_trace_error_meV_per_atom": 14.552254004808763
+  },
+  {
+    "width": 32,
+    "pair_threshold": 0.001,
+    "retained_pairs": 496,
+    "timings": [
+      2.4387565000215545,
+      2.4743977079633623,
+      2.4151296250056475
+    ],
+    "median_seconds": 2.4387565000215545,
+    "source_tail_norm_max": 0.0008992130449378966,
+    "action_relative_error": 0.038956386018973936,
+    "hse_exchange_trace_error_meV_per_atom": 46.62099061375106
+  },
+  {
+    "width": 48,
+    "pair_threshold": 0.0,
+    "retained_pairs": 16384,
+    "timings": [
+      43.94671504199505,
+      44.00548687495757,
+      43.975073874986265
+    ],
+    "median_seconds": 43.975073874986265,
+    "source_tail_norm_max": 6.661338147750939e-16,
+    "action_relative_error": 2.072102695669285e-16,
+    "hse_exchange_trace_error_meV_per_atom": 7.552676885566045e-13
+  },
+  {
+    "width": 48,
+    "pair_threshold": 1e-06,
+    "retained_pairs": 10176,
+    "timings": [
+      27.277108790993225,
+      27.568633334012702,
+      27.380495582998265
+    ],
+    "median_seconds": 27.380495582998265,
+    "source_tail_norm_max": 6.661338147750939e-16,
+    "action_relative_error": 0.002930864541898527,
+    "hse_exchange_trace_error_meV_per_atom": 0.3008896552180426
+  },
+  {
+    "width": 48,
+    "pair_threshold": 1e-05,
+    "retained_pairs": 4288,
+    "timings": [
+      11.516947790980339,
+      11.437143291987013,
+      11.427367124997545
+    ],
+    "median_seconds": 11.437143291987013,
+    "source_tail_norm_max": 6.661338147750939e-16,
+    "action_relative_error": 0.008684329122903957,
+    "hse_exchange_trace_error_meV_per_atom": 2.3401870504622115
+  },
+  {
+    "width": 48,
+    "pair_threshold": 0.0001,
+    "retained_pairs": 1360,
+    "timings": [
+      3.665596542006824,
+      3.6734925829805434,
+      3.6185553749674
+    ],
+    "median_seconds": 3.665596542006824,
+    "source_tail_norm_max": 6.661338147750939e-16,
+    "action_relative_error": 0.02128496395037537,
+    "hse_exchange_trace_error_meV_per_atom": 13.686687265077891
+  },
+  {
+    "width": 48,
+    "pair_threshold": 0.001,
+    "retained_pairs": 496,
+    "timings": [
+      1.3292032500030473,
+      1.4089125000173226,
+      1.3305279170162976
+    ],
+    "median_seconds": 1.3305279170162976,
+    "source_tail_norm_max": 6.661338147750939e-16,
+    "action_relative_error": 0.038909245694866174,
+    "hse_exchange_trace_error_meV_per_atom": 46.52763299719032
+  }
+]

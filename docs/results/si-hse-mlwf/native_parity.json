@@ -1,0 +1,9 @@
+{
+  "hpsi_relative_error": 4.393284059000578e-15,
+  "hartree_potential_max_error": 2.282896094385478e-15,
+  "hartree_energy_error_Ha": -2.220446049250313e-15,
+  "nonlocal_energy_error_Ha": -1.7763568394002505e-15,
+  "raw_projector_max_error": 2.7755575615628914e-17,
+  "checked_binary_files": 22,
+  "rho_semantics": "scf_mixed_potential_density"
+}

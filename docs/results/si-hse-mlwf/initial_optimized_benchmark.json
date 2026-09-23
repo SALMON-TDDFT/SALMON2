@@ -1,0 +1,237 @@
+{
+  "case": "initial",
+  "implementation": "Python NumPy + single-thread FFTW, reciprocal pair reuse",
+  "conversion_seconds": 0.032913582981564105,
+  "shape": [
+    16,
+    48,
+    48,
+    48
+  ],
+  "orbital_bytes": 28311552,
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "numpy": "2.4.6",
+  "threads": "1",
+  "rows": [
+    {
+      "pair_tolerance": 0.0,
+      "runs": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.2129467079648748,
+          "exchange_seconds": 11.162899666989688,
+          "wall_seconds": 11.376302541990299
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.21070749999489635,
+          "exchange_seconds": 11.152226999984123,
+          "wall_seconds": 11.363361415977124
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 16384,
+          "convolutions": 8256,
+          "pair_tolerance": 0.0,
+          "screening_seconds": 0.20474150002701208,
+          "exchange_seconds": 11.168137667002156,
+          "wall_seconds": 11.373301665997133
+        }
+      ],
+      "median_seconds": 11.373301665997133,
+      "action_relative_error": 0.0,
+      "hse_energy_error_meV_per_atom": 0.0,
+      "hse_exchange_energy_Ha": -1.635143582908481
+    },
+    {
+      "pair_tolerance": 1e-07,
+      "runs": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 15696,
+          "convolutions": 7904,
+          "pair_tolerance": 1e-07,
+          "screening_seconds": 0.21065225003985688,
+          "exchange_seconds": 10.866372667020187,
+          "wall_seconds": 11.077450665994547
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 15696,
+          "convolutions": 7904,
+          "pair_tolerance": 1e-07,
+          "screening_seconds": 0.20871083298698068,
+          "exchange_seconds": 10.729221582994796,
+          "wall_seconds": 10.93836187501438
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 15696,
+          "convolutions": 7904,
+          "pair_tolerance": 1e-07,
+          "screening_seconds": 0.20785891701234505,
+          "exchange_seconds": 10.67853804200422,
+          "wall_seconds": 10.886821208987385
+        }
+      ],
+      "median_seconds": 10.93836187501438,
+      "action_relative_error": 0.0003487887069755669,
+      "hse_energy_error_meV_per_atom": 0.004287371575479748,
+      "hse_exchange_energy_Ha": -1.6351423224444865
+    },
+    {
+      "pair_tolerance": 1e-06,
+      "runs": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 10176,
+          "convolutions": 5120,
+          "pair_tolerance": 1e-06,
+          "screening_seconds": 0.20739516703179106,
+          "exchange_seconds": 6.891742917010561,
+          "wall_seconds": 7.0995835840003565
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 10176,
+          "convolutions": 5120,
+          "pair_tolerance": 1e-06,
+          "screening_seconds": 0.20902870799181983,
+          "exchange_seconds": 6.8825144590227865,
+          "wall_seconds": 7.091963374987245
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 10176,
+          "convolutions": 5120,
+          "pair_tolerance": 1e-06,
+          "screening_seconds": 0.2067914999788627,
+          "exchange_seconds": 6.890228707983624,
+          "wall_seconds": 7.09744275000412
+        }
+      ],
+      "median_seconds": 7.09744275000412,
+      "action_relative_error": 0.0029308645418985265,
+      "hse_energy_error_meV_per_atom": 0.3008896552172874,
+      "hse_exchange_energy_Ha": -1.6350551229814498
+    },
+    {
+      "pair_tolerance": 1e-05,
+      "runs": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 4288,
+          "convolutions": 2176,
+          "pair_tolerance": 1e-05,
+          "screening_seconds": 0.2085625000181608,
+          "exchange_seconds": 2.915241083013825,
+          "wall_seconds": 3.1242485829861835
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 4288,
+          "convolutions": 2176,
+          "pair_tolerance": 1e-05,
+          "screening_seconds": 0.20980920898728073,
+          "exchange_seconds": 2.9036473750020377,
+          "wall_seconds": 3.113880250020884
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 4288,
+          "convolutions": 2176,
+          "pair_tolerance": 1e-05,
+          "screening_seconds": 0.20592970901634544,
+          "exchange_seconds": 2.911690000037197,
+          "wall_seconds": 3.118044833012391
+        }
+      ],
+      "median_seconds": 3.118044833012391,
+      "action_relative_error": 0.008684329122903954,
+      "hse_energy_error_meV_per_atom": 2.340187050461456,
+      "hse_exchange_energy_Ha": -1.6344555806055314
+    },
+    {
+      "pair_tolerance": 0.0001,
+      "runs": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 1360,
+          "convolutions": 688,
+          "pair_tolerance": 0.0001,
+          "screening_seconds": 0.20595066697569564,
+          "exchange_seconds": 0.9182558750035241,
+          "wall_seconds": 1.1246295829769224
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 1360,
+          "convolutions": 688,
+          "pair_tolerance": 0.0001,
+          "screening_seconds": 0.20702095801243559,
+          "exchange_seconds": 0.915480708994437,
+          "wall_seconds": 1.122926499985624
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 1360,
+          "convolutions": 688,
+          "pair_tolerance": 0.0001,
+          "screening_seconds": 0.20692216703901067,
+          "exchange_seconds": 0.9200222090003081,
+          "wall_seconds": 1.1273672090028413
+        }
+      ],
+      "median_seconds": 1.1246295829769224,
+      "action_relative_error": 0.021284963950375362,
+      "hse_energy_error_meV_per_atom": 13.686687265075626,
+      "hse_exchange_energy_Ha": -1.6311197710699075
+    },
+    {
+      "pair_tolerance": 0.001,
+      "runs": [
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 496,
+          "convolutions": 256,
+          "pair_tolerance": 0.001,
+          "screening_seconds": 0.20840387500356883,
+          "exchange_seconds": 0.3380280419951305,
+          "wall_seconds": 0.5468507909681648
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 496,
+          "convolutions": 256,
+          "pair_tolerance": 0.001,
+          "screening_seconds": 0.20561683300184086,
+          "exchange_seconds": 0.3398859169683419,
+          "wall_seconds": 0.5459437080426142
+        },
+        {
+          "total_pairs": 16384,
+          "retained_pairs": 496,
+          "convolutions": 256,
+          "pair_tolerance": 0.001,
+          "screening_seconds": 0.20674350002082065,
+          "exchange_seconds": 0.33849537500645965,
+          "wall_seconds": 0.5456614160211757
+        }
+      ],
+      "median_seconds": 0.5459437080426142,
+      "action_relative_error": 0.03890924569486616,
+      "hse_energy_error_meV_per_atom": 46.527632997189556,
+      "hse_exchange_energy_Ha": -1.6214647111078062
+    }
+  ],
+  "fftw_plan_seconds": 0.03434491704683751,
+  "bloch_reference_seconds": 37.95481054199627,
+  "bloch_action_relative_error": 1.3848138352739116e-15,
+  "peak_rss_bytes": 312639488
+}
