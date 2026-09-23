@@ -32,6 +32,31 @@ module lcfo
 contains
 
   subroutine dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+    use structures
+    use salmon_global, only: yn_spinorbit
+    use lcfo_complex, only: dc_lcfo_complex
+    implicit none
+    type(s_rgrid),        intent(in) :: lg,mg
+    type(s_dft_system),   intent(in) :: system
+    type(s_parallel_info),intent(in) :: info
+    type(s_stencil),      intent(in) :: stencil
+    type(s_pp_grid),      intent(in) :: ppg
+    type(s_dft_energy),   intent(in) :: energy
+    type(s_scalar),       intent(in) :: V_local(system%nspin)
+    type(s_orbital),      intent(in) :: spsi
+    type(s_orbital)                  :: shpsi,sttpsi
+    type(s_sendrecv_grid)            :: srg
+    type(s_dcdft)                    :: dc
+
+    if (yn_spinorbit == 'y') stop "DC-LCFO: spin-orbit and noncollinear LCFO are unsupported."
+    if (system%if_real_orbital) then
+      call dc_lcfo_real(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+    else
+      call dc_lcfo_complex(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
+    end if
+  end subroutine dc_lcfo
+
+  subroutine dc_lcfo_real(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     use communication, only: comm_summation
     use salmon_global, only: yn_dc_lcfo_diag, lcfo_eigensolver
     use structures
@@ -721,7 +746,7 @@ contains
     end subroutine test_write_psi
 !++++++++++++++++
   
-  end subroutine dc_lcfo
+  end subroutine dc_lcfo_real
 
 !===================================================================================================================================
 
@@ -729,7 +754,7 @@ contains
   subroutine init_conventional_from_dcdft(lg,mg,system,info,spsi)
     use communication, only: comm_is_root, comm_summation, comm_bcast
     use filesystem, only: get_filehandle
-    use salmon_global,only: num_fragment
+    use salmon_global,only: num_fragment,yn_spinorbit
     use structures
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
@@ -745,6 +770,9 @@ contains
     !
     integer,allocatable :: n_mat(:),n_basis(:,:),index_basis(:,:,:),jxyz_tot(:,:)
     real(8),allocatable :: f_basis(:,:,:,:,:),coef_wf(:,:,:),wrk1(:,:,:),wrk2(:,:,:)
+
+    if (.not.system%if_real_orbital .or. yn_spinorbit == 'y') &
+      stop "yn_conventional_from_dcdft: complex LCFO reconstruction is unsupported."
     
     nspin = system%nspin
     n_frag = product(num_fragment)

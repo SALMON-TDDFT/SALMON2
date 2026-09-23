@@ -28,21 +28,25 @@ contains
     type(s_mixing)       ,intent(inout) :: mixing
     type(s_ewald_ion_ion),intent(inout) :: ewald
     !
-    integer :: nproc_ob_tmp, nproc_rgrid_tmp(3)
+    integer :: nproc_k_tmp,nproc_ob_tmp, nproc_rgrid_tmp(3)
+
+    call check_dcdft_complex_options
     
-    if(nproc_k/=1) stop "DC method (yn_dc=y): nproc_k must be 1 for both the total system and fragments."
+    nproc_k_tmp = nproc_k
     nproc_ob_tmp = nproc_ob
     nproc_rgrid_tmp = nproc_rgrid
     dc%nstate_tot = nstate
     dc%nstate_frag = nstate_frag
     
   ! total system
+    nproc_k = 1 ! total system owns the complete k-point list
     nproc_ob = 1 ! override
     nproc_rgrid = nproc_rgrid_tot ! override
     yn_dc = 't' ! override !!!!!! future work: remove
     call init_total
     
   ! fragment
+    nproc_k = nproc_k_tmp ! override
     nproc_ob = nproc_ob_tmp ! override
     nproc_rgrid = nproc_rgrid_tmp ! override
     nstate = dc%nstate_frag ! override
@@ -51,7 +55,7 @@ contains
     call init_fragment
     
   contains
-  
+
     subroutine init_total
       use parallelization, only: nproc_group_global, nproc_id_global, nproc_size_global
       use initialization_sub, only: init_dft, init_nion_div
@@ -119,7 +123,7 @@ contains
       call init_ewald(dc%system_tot,dc%info_tot,ewald)
     
     end subroutine init_total
-  
+
     subroutine init_comm_frag
       use parallelization, only: nproc_group_global, nproc_id_global, nproc_size_global
       use communication, only: comm_create_group,comm_get_groupinfo
@@ -182,7 +186,6 @@ contains
     
     ! length of domain
       ldomain(1:3) = al(1:3) / dble(num_fragment(1:3))
-      
       do n=1,3 ! x,y,z
       ! rion --> rion = [0:al] (total system)
         do i=1,natom
@@ -253,7 +256,6 @@ contains
       end do
       end do
       end do
-    
     ! set variables for own fragment
     
     ! nelec (total system) --> nelec (fragment)
@@ -295,7 +297,7 @@ contains
       if(dc%id_frag==0) then
         write(*,'(a,6i10)') "fragment, natom, nelec, ixyz_frag: ",dc%i_frag, natom, nelec, dc%ixyz_frag(1:3,dc%i_frag)
       end if
-    
+
     end subroutine init_fragment
 
     subroutine write_atom_frag
@@ -376,6 +378,22 @@ contains
       call comm_bcast(kion,dc%icomm_frag)
       
     end subroutine read_atom_frag
+
+    subroutine check_dcdft_complex_options
+      use plusU_global, only: PLUS_U_ON
+      use salmon_global, only: num_kgrid, temperature, yn_spinorbit
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      implicit none
+      logical :: complex_path
+
+      complex_path = product(num_kgrid) > 1
+      if (.not.complex_path) return
+      if (.not.ieee_is_finite(temperature) .or. temperature < 0d0) &
+        stop "DC complex k-point path: temperature must be non-negative and finite."
+      if (yn_spinorbit == 'y') &
+        stop "DC complex k-point path: spin-orbit and noncollinear calculations are unsupported."
+      if (PLUS_U_ON) stop "DC complex k-point path: DFT+U is unsupported."
+    end subroutine check_dcdft_complex_options
 
   end subroutine init_dcdft
   
@@ -559,57 +577,77 @@ contains
     type(s_dft_energy),   intent(in) :: energy
     type(s_orbital),      intent(in) :: spsi
     type(s_dcdft),        intent(in) :: dc
-    type(s_dft_system)               :: system
+    type(s_dft_system),intent(inout) :: system
     !
     real(8) :: wspin,emax,emin
-    real(8) :: ne_each(system%no,system%nspin)
-    real(8),dimension(system%no,system%nspin,dc%n_frag) :: rocc,esp,ne_frag_orb,wrk1,wrk2
-
+    real(8) :: ne_each(system%no,system%nk,system%nspin)
+    real(8),dimension(system%no,system%nk,system%nspin,dc%n_frag) :: &
+      rocc,esp,ne_frag_orb,wrk1,wrk2
+    !
     if(system%nspin==1) then
       wspin = 2d0
     else if(system%nspin==2) then
       wspin = 1d0
     end if
-    
+
     call calc_ne_each
     wrk1 = 0d0
     wrk2 = 0d0
     if(info%id_rko==0) then ! info%id_rko == 0 : representative process of each fragment
-      wrk1(1:system%no,1:system%nspin,dc%i_frag) = energy%esp(1:system%no,1,1:system%nspin)
-      wrk2(1:system%no,1:system%nspin,dc%i_frag) = ne_each(1:system%no,1:system%nspin)
+      wrk1(:,:,:,dc%i_frag) = energy%esp(:,:,:)
+      wrk2(:,:,:,dc%i_frag) = ne_each(:,:,:)
     end if
-    call comm_summation(wrk1,esp,        system%no*system%nspin*dc%n_frag,dc%icomm_tot)
-    call comm_summation(wrk2,ne_frag_orb,system%no*system%nspin*dc%n_frag,dc%icomm_tot)
+    call comm_summation(wrk1,esp,system%no*system%nk*system%nspin*dc%n_frag,dc%icomm_tot)
+    call comm_summation(wrk2,ne_frag_orb,system%no*system%nk*system%nspin*dc%n_frag,dc%icomm_tot)
 
     emin = minval(esp)
     emax = maxval(esp)
     call ne2mu_core(dc%elec_num_tot,emax,emin,system%mu)
 
-    system%rocc(1:system%no,1,1:system%nspin) = rocc(1:system%no,1:system%nspin,dc%i_frag)
+    system%rocc(:,:,:) = rocc(:,:,:,dc%i_frag)
 
     return
-    
+
   contains
-  
+
     subroutine calc_ne_each
       implicit none
-      integer :: io,ispin,ix,iy,iz
-      real(8) :: wrk(system%no,system%nspin)
-      
+      integer :: io,ik,ispin,ix,iy,iz
+      real(8) :: wrk(system%no,system%nk,system%nspin)
+
       wrk = 0d0
+      if (allocated(spsi%rwf)) then
+        do ispin=1,system%nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3)) ! core region only
+          do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2)) ! core region only
+          do ix=mg%is(1),min(mg%ie(1),dc%nxyz_domain(1)) ! core region only
+            wrk(io,ik,ispin) = wrk(io,ik,ispin) + &
+              spsi%rwf(ix,iy,iz,ispin,io,ik,1)**2 * system%hvol
+          end do
+          end do
+          end do
+        end do
+        end do
+        end do
+      else
       do ispin=1,system%nspin
+      do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         do iz=mg%is(3),min(mg%ie(3),dc%nxyz_domain(3)) ! core region only
         do iy=mg%is(2),min(mg%ie(2),dc%nxyz_domain(2)) ! core region only
         do ix=mg%is(1),min(mg%ie(1),dc%nxyz_domain(1)) ! core region only
-          wrk(io,ispin) = wrk(io,ispin) + (abs(spsi%rwf(ix,iy,iz,ispin,io,1,1))**2) * system%hvol
+          wrk(io,ik,ispin) = wrk(io,ik,ispin) + &
+            abs(spsi%zwf(ix,iy,iz,ispin,io,ik,1))**2 * system%hvol
         end do
         end do
         end do
       end do
       end do
-      call comm_summation(wrk,ne_each,system%no*system%nspin,info%icomm_rko)
-      
+      end do
+      end if
+      call comm_summation(wrk,ne_each,system%no*system%nk*system%nspin,info%icomm_rko)
     end subroutine calc_ne_each
 
     SUBROUTINE mu2ne(muin,neout)
@@ -617,48 +655,51 @@ contains
       implicit none
       real(8), intent(in)  :: muin
       real(8), intent(out) :: neout
-      !
-      integer :: i_frag,ispin,io
+      integer :: i_frag,ispin,ik,io
       real(8) :: fact
-      
-      neout=0d0
 
+      neout=0d0
       if(temperature==0d0) then
         do i_frag=1,dc%n_frag
         do ispin=1,system%nspin
+        do ik=1,system%nk
         do io=1,system%no
-           fact = esp(io,ispin,i_frag) - muin
-           if(fact > 0d0) then
-              rocc(io,ispin,i_frag) = 0d0
-           else
-              rocc(io,ispin,i_frag) = wspin
-           endif
-           neout = neout + rocc(io,ispin,i_frag) * ne_frag_orb(io,ispin,i_frag)
+          fact = esp(io,ik,ispin,i_frag) - muin
+          if(fact > 0d0) then
+            rocc(io,ik,ispin,i_frag) = 0d0
+          else
+            rocc(io,ik,ispin,i_frag) = wspin
+          end if
+          neout = neout + system%wtk(ik)*rocc(io,ik,ispin,i_frag) &
+            * ne_frag_orb(io,ik,ispin,i_frag)
+        end do
         end do
         end do
         end do
       else
         do i_frag=1,dc%n_frag
         do ispin=1,system%nspin
+        do ik=1,system%nk
         do io=1,system%no
-           fact = (esp(io,ispin,i_frag)-muin)/temperature
-           if(fact.ge.40.d0) then
-              rocc(io,ispin,i_frag) = 0d0
-           else
-              rocc(io,ispin,i_frag) = wspin/( 1d0 + exp( fact ) )
-           endif
-           neout = neout + rocc(io,ispin,i_frag) * ne_frag_orb(io,ispin,i_frag)
+          fact = (esp(io,ik,ispin,i_frag)-muin)/temperature
+          if(fact.ge.40.d0) then
+            rocc(io,ik,ispin,i_frag) = 0d0
+          else
+            rocc(io,ik,ispin,i_frag) = wspin/( 1d0 + exp( fact ) )
+          endif
+          neout = neout + system%wtk(ik)*rocc(io,ik,ispin,i_frag) &
+            * ne_frag_orb(io,ik,ispin,i_frag)
+        end do
         end do
         end do
         end do
       end if
-      
+
       if(yn_spinorbit=='y') then
         neout = neout*0.5d0 !!! For the SO mode, ispin=2 components are duplicate copy of jspin=1.
       end if
-
     END SUBROUTINE mu2ne
-    
+
     subroutine ne2mu_core(nein,emax,emin,muout)
       implicit none
       real(8),intent(in)  :: nein,emax,emin
@@ -666,7 +707,7 @@ contains
       !
       integer :: iter,ii,p5,p1,p2,nc
       real(8) :: mu1,mu2,mu3,ne1,ne3,ne3o,diff_ne,diff_mu,muo,diff_ne2,wspin
-      
+
       mu1 = emin
       mu2 = emax
       nc=0
@@ -720,18 +761,21 @@ contains
 
       muout = mu3
       call mu2ne(muout,ne3)
-    
+
     end subroutine ne2mu_core
-    
+
   END SUBROUTINE ne2mu_dcdft
   
+!===================================================================================================================================
+
+
 !===================================================================================================================================
 
   subroutine calc_total_energy_dcdft(mg,system,info,stencil,srg,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
     use structures
     use communication, only: comm_summation
     use hamiltonian, only: add_xc_tau_operator
-    use sendrecv_grid, only: update_overlap_real8
+    use sendrecv_grid, only: update_overlap_real8, update_overlap_complex8
     use Total_Energy, only: calc_Total_Energy_periodic
     use salmon_global, only: kion !!!!!! future work: remove (kion --> system%kion)
     implicit none
@@ -750,14 +794,16 @@ contains
     type(s_dcdft),        intent(in) :: dc
     type(s_dft_energy)               :: energy
     !
-    integer :: ispin,io
+    integer :: ispin,io,ik
     integer,dimension(3) :: is,ie
     real(8) :: E_tmp,E_local(2),E_sum(2)
     type(s_orbital) :: staupsi
-    
+
     is(1:3) = mg%is(1:3)
     ie(1:3) = min(mg%ie(1:3),dc%nxyz_domain(1:3)) ! core region only
     
+    if (allocated(spsi%rwf)) then ! real wavefunctions
+
   ! kinetic energy (E_kin)
     E_tmp = 0d0
     do ispin=1,system%Nspin
@@ -803,6 +849,57 @@ contains
       end do
       E_local(2) = E_local(2) - E_tmp
       call deallocate_orbital(staupsi)
+    end if
+
+    else ! complex wavefunctions
+
+      E_tmp = 0d0
+      do ispin=1,system%nspin
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+        E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik)*system%hvol &
+          * real(sum(conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)) &
+            * sttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)),kind=8)
+      end do
+      end do
+      end do
+      E_local(1) = E_tmp
+
+      E_tmp = 0d0
+      do ispin=1,system%nspin
+      do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+        E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik)*system%hvol &
+          * real(sum(conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)) &
+            * (shpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) &
+            - sttpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1) &
+            - v_local(ispin)%f(is(1):ie(1),is(2):ie(2),is(3):ie(3)) &
+            * spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1))),kind=8)
+      end do
+      end do
+      end do
+      E_local(2) = E_tmp
+
+  ! meta-GGA: remove the core-region expectation value of the tau operator
+  ! already contained in shpsi from the nonlocal-energy contribution.
+      if (system%xc_payload%use_tau_operator) then
+        if(info%if_divide_rspace) call update_overlap_complex8(srg, mg, spsi%zwf)
+        call allocate_orbital_complex(system%nspin,mg,info,staupsi)
+        call add_xc_tau_operator(staupsi,spsi,info,mg,system,stencil,srg)
+        E_tmp = 0d0
+        do ispin=1,system%nspin
+        do ik=info%ik_s,info%ik_e
+        do io=info%io_s,info%io_e
+          E_tmp = E_tmp + system%rocc(io,ik,ispin)*system%wtk(ik)*system%hvol &
+            * real(sum(conjg(spsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)) &
+              * staupsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),ispin,io,ik,1)),kind=8)
+        end do
+        end do
+        end do
+        E_local(2) = E_local(2) - E_tmp
+        call deallocate_orbital(staupsi)
+      end if
+
     end if
 
   ! summation in each fragment
