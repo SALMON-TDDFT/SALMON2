@@ -24,4 +24,8 @@
 
 ## Ledger
 
-- User approved MPI switch. OpenMPI available, mpi4py installation in progress. Initial active serial state was step1135.
+- Implemented and validated with OpenMPI5.0.9 / mpi4py4.1.2 in an isolated environment sharing NumPy2.4.6.
+- 75 unit tests pass; four/eight-rank smoke tests verify parity and recoverable worker/root allocation errors.
+- Exchange speedups:4 ranks3.58×,8 ranks6.23×. Identical checkpoint step1150→1151: serial28.457s,4 ranks11.557s,8 ranks8.774s. Wavefunctions and observables bitwise identical.
+- Independent review found and resolved root reduction-result allocation deadlock; no remaining blocker.
+- Production serial PID98314 interrupted cooperatively at accepted step1172. Checkpoint/history agreed and both locks were released. MPI8 launcher PID52467, root PID52468, started2026-09-23T21:12:51UTC at code b4f36fbd, same target2750. Live acceptance verification follows in results report.

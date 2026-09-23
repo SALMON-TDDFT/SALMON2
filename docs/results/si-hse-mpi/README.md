@@ -30,3 +30,7 @@ mpiexec -n 8 python samples/hse_mlwf_reference/mpi_run.py \
 ```
 
 The default target is2750 total steps. This resumes a validated checkpoint and then runs the existing matched-window spectral comparison. Use --propagation-only and a separate copied checkpoint for pilots. Only rank0 writes files; existing advisory locks reject concurrent writers. Graceful service shutdown follows coordinated computation errors; a hard MPI abort relies on the latest atomic periodic checkpoint.
+
+## Production cutover
+
+Serial PID98314 saved accepted step1172 on SIGINT and released both locks. MPI8 resumed that exact archive (SHA256 recorded in cutover.json), using code b4f36fbd, launcher PID52467/root PID52468. Live verification reached step1179 (9.1260fs), and the new atomic checkpoint contains step1175. No accepted step was lost. The new full-exchange residuals and norm diagnostics remain within the original gates. Target remains2750 steps /21.2862fs, followed automatically by the existing TDCDFT comparison. At roughly8–9 seconds per step the remaining propagation is approximately4 hours; this is a rate-based estimate, not a completed spectrum.

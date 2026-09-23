@@ -1,0 +1,43 @@
+{
+  "launch": {
+    "pid": 52467,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "-n",
+      "8",
+      "/private/tmp/salmon-hse-mpi-env/bin/python",
+      "samples/hse_mlwf_reference/mpi_run.py",
+      "calculations/si_hse_reference/export",
+      "calculations/si_hse_reference/scf/state.npz",
+      "calculations/si_hse_reference/linear_response",
+      "calculations/si_hse_reference/comparison_tdcdft",
+      "docs/results/si-hse-tdcdft-linear"
+    ],
+    "started_utc": "2026-09-23T21:12:51.543606+00:00",
+    "code_revision": "b4f36fbd",
+    "resume_step": 1172,
+    "resume_checkpoint_sha256": "9f2a74c9276d6b4f0c1abe2e3735f94bd3a5c8a622c4d7dad89128c5ec984120",
+    "mpi_ranks": 8,
+    "previous_serial_pid": 98314
+  },
+  "verified_status": {
+    "status": "running",
+    "pid": 52468,
+    "accepted_step": 1179,
+    "target_steps": 2750,
+    "dt_au": 0.32,
+    "time_fs": 9.12596678734253,
+    "amplitude": 0.0001,
+    "checkpoint": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/calculations/si_hse_reference/linear_response/restart.npz",
+    "elapsed_this_run_seconds": 62.15740366600221,
+    "error": null,
+    "exchange_method": "blocked",
+    "exchange_kernel": "full_periodic_hse06",
+    "mpi_ranks": 8
+  },
+  "checkpoint_step": 1175,
+  "new_accepted_steps": 7,
+  "mean_step_seconds": 8.293364166714516,
+  "max_new_full_residual": 1.3446763377485393e-11,
+  "max_new_gram_error": 2.5136003218755248e-09
+}
