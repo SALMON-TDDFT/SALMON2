@@ -763,48 +763,11 @@ contains
 
     if (yn_spinorbit == 'y') stop "DC-LCFO reconstruction: spin-orbit is unsupported."
     if (system%if_real_orbital) then
-      call reject_complex_lcfo_files(info)
       call init_conventional_from_dcdft_real(lg,mg,system,info,spsi)
     else
       call init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
     end if
   end subroutine init_conventional_from_dcdft
-
-  subroutine reject_complex_lcfo_files(info)
-    use communication, only: comm_summation
-    use filesystem, only: get_filehandle
-    use salmon_global, only: num_fragment
-    use structures, only: s_parallel_info
-    implicit none
-    type(s_parallel_info), intent(in) :: info
-    character(32), parameter :: bdir='./data_dcdft/fragments/'
-    character(16), parameter :: complex_magic='SLCFO_COMPLEX_V1'
-    character(256) :: filename
-    character(16) :: magic
-    integer :: f,iu,ios,local_status,total_status,kind
-
-    local_status = 0
-    do f=1,product(num_fragment)
-      if (mod(f-1,info%isize_rko) /= info%id_rko) cycle
-      do kind=1,2
-        iu = get_filehandle()
-        if (kind == 1) then
-          write(filename,'(a,i6.6,a,a)') trim(bdir),f,'/','basis_functions.bin'
-        else
-          write(filename,'(a,i6.6,a,a)') trim(bdir),f,'/','wavefunctions.bin'
-        end if
-        open(iu,file=trim(filename),status='old',form='unformatted', &
-             access='stream',action='read',iostat=ios)
-        if (ios /= 0) cycle
-        read(iu,iostat=ios) magic
-        close(iu)
-        if (ios == 0 .and. magic == complex_magic) local_status = 1
-      end do
-    end do
-    call comm_summation(local_status,total_status,info%icomm_rko)
-    if (total_status /= 0) &
-      stop "DC-LCFO reconstruction: complex file format cannot be read as real data."
-  end subroutine reject_complex_lcfo_files
 
   subroutine init_conventional_from_dcdft_real(lg,mg,system,info,spsi)
     use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -828,6 +791,8 @@ contains
 
     if (.not.system%if_real_orbital .or. yn_spinorbit == 'y') &
       stop "yn_conventional_from_dcdft: complex LCFO reconstruction is unsupported."
+
+    call reject_complex_lcfo_files()
     
     nspin = system%nspin
     n_frag = product(num_fragment)
@@ -937,6 +902,40 @@ contains
     
     if(jfrag > 0) deallocate(n_mat,n_basis,index_basis,jxyz_tot,coef_wf,f_basis)
     deallocate(wrk1,wrk2)
+
+  contains
+
+    subroutine reject_complex_lcfo_files()
+      implicit none
+      character(32), parameter :: bdir='./data_dcdft/fragments/'
+      character(16), parameter :: complex_magic='SLCFO_COMPLEX_V1'
+      character(256) :: filename
+      character(16) :: magic
+      integer :: f,iu,ios,local_status,total_status,kind
+
+      local_status = 0
+      do f=1,product(num_fragment)
+        if (mod(f-1,info%isize_rko) /= info%id_rko) cycle
+        do kind=1,2
+          iu = get_filehandle()
+          if (kind == 1) then
+            write(filename,'(a,i6.6,a,a)') trim(bdir),f,'/','basis_functions.bin'
+          else
+            write(filename,'(a,i6.6,a,a)') trim(bdir),f,'/','wavefunctions.bin'
+          end if
+          open(iu,file=trim(filename),status='old',form='unformatted', &
+               access='stream',action='read',iostat=ios)
+          if (ios /= 0) cycle
+          read(iu,iostat=ios) magic
+          close(iu)
+          if (ios == 0 .and. magic == complex_magic) local_status = 1
+        end do
+      end do
+      call comm_summation(local_status,total_status,info%icomm_rko)
+      if (total_status /= 0) &
+        stop "DC-LCFO reconstruction: complex file format cannot be read as real data."
+    end subroutine reject_complex_lcfo_files
+
   end subroutine init_conventional_from_dcdft_real
   
 end module lcfo
