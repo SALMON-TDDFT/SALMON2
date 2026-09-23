@@ -40,11 +40,14 @@ module lcfo_complex
   type :: s_complex_lcfo_writer
     integer :: unit_basis = -1
     integer :: unit_coeff = -1
+    integer :: unit_hamiltonian = -1
     integer(8) :: bytes_basis = 0
     integer(8) :: bytes_coeff = 0
+    integer(8) :: bytes_hamiltonian = 0
     character(96) :: run_id = ''
     character(256) :: file_basis = ''
     character(256) :: file_coeff = ''
+    character(256) :: file_hamiltonian = ''
   end type s_complex_lcfo_writer
 
   type :: s_complex_lcfo_fragment
@@ -54,7 +57,7 @@ module lcfo_complex
 
 contains
 
-  subroutine open_complex_lcfo_files(lg,dc,writer,local_status)
+  subroutine open_complex_lcfo_files(lg,dc,writer,do_diag,local_status)
     use communication, only: comm_bcast
     use filesystem, only: get_filehandle
     use ieee_arithmetic, only: ieee_support_datatype
@@ -65,10 +68,11 @@ contains
     type(s_rgrid), intent(in) :: lg
     type(s_dcdft), intent(in) :: dc
     type(s_complex_lcfo_writer), intent(out) :: writer
+    logical, intent(in) :: do_diag
     integer, intent(out) :: local_status
     integer :: clock_values(8),ios,iu_rgrid,n,close_status
     integer(int64) :: clock_count,clock_rate
-    logical :: rgrid_open
+    logical :: rgrid_open,coeff_open,h_open
 
     local_status = 0
     if (storage_size(0) /= 32 .or. storage_size(0d0) /= 64 .or. &
@@ -92,6 +96,7 @@ contains
     if (dc%id_frag /= 0) return
     writer%file_basis = trim(base_directory)//'basis_functions.bin'
     writer%file_coeff = trim(base_directory)//'wavefunctions.bin'
+    writer%file_hamiltonian = trim(base_directory)//'hamiltonian_local.bin'
     writer%unit_basis = get_filehandle()
     open(writer%unit_basis,file=trim(writer%file_basis),status='replace', &
          form='unformatted',access='stream',action='write',iostat=ios)
@@ -106,26 +111,47 @@ contains
       writer%unit_basis = -1
       return
     end if
-    writer%unit_coeff = get_filehandle()
-    open(writer%unit_coeff,file=trim(writer%file_coeff),status='replace', &
-         form='unformatted',access='stream',action='write',iostat=ios)
-    if (ios /= 0) then
-      local_status = 1
-      close(writer%unit_basis,iostat=ios)
-      writer%unit_basis = -1
-      return
+    coeff_open = .false.
+    h_open = .false.
+    if (do_diag) then
+      writer%unit_coeff = get_filehandle()
+      open(writer%unit_coeff,file=trim(writer%file_coeff),status='replace', &
+           form='unformatted',access='stream',action='write',iostat=ios)
+      if (ios == 0) then
+        coeff_open = .true.
+        call write_complex_lcfo_header(writer%unit_coeff,2_int32,writer%run_id,lg,dc,ios)
+      end if
+      if (ios /= 0) then
+        local_status = 1
+        close(writer%unit_basis,iostat=close_status)
+        if (coeff_open) close(writer%unit_coeff,iostat=close_status)
+        writer%unit_basis = -1
+        writer%unit_coeff = -1
+        return
+      end if
     end if
-    call write_complex_lcfo_header(writer%unit_coeff,2_int32,writer%run_id,lg,dc,ios)
+    writer%unit_hamiltonian = get_filehandle()
+    open(writer%unit_hamiltonian,file=trim(writer%file_hamiltonian),status='replace', &
+         form='unformatted',access='stream',action='write',iostat=ios)
+    if (ios == 0) then
+      h_open = .true.
+      call write_complex_lcfo_header(writer%unit_hamiltonian,3_int32,writer%run_id,lg,dc,ios)
+    end if
     if (ios /= 0) then
       local_status = 1
-      close(writer%unit_basis,iostat=ios)
-      close(writer%unit_coeff,iostat=ios)
+      close(writer%unit_basis,iostat=close_status)
       writer%unit_basis = -1
-      writer%unit_coeff = -1
+      if (h_open) close(writer%unit_hamiltonian,iostat=close_status)
+      writer%unit_hamiltonian = -1
+      if (do_diag) then
+        close(writer%unit_coeff,iostat=close_status)
+        writer%unit_coeff = -1
+      end if
       return
     end if
     writer%bytes_basis = 304_int64 + 32_int64*int(dc%system_tot%nk,int64)
     writer%bytes_coeff = writer%bytes_basis
+    writer%bytes_hamiltonian = writer%bytes_basis
 
     iu_rgrid = get_filehandle()
     rgrid_open = .false.
@@ -181,7 +207,7 @@ contains
     if (ios == 0) write(iu,iostat=ios) real(dc%system_tot%wtk,real64)
   end subroutine write_complex_lcfo_header
 
-  subroutine write_complex_lcfo_k_record(writer,ik,dc,n_basis,n_mat,index_basis,basis,coef,local_status)
+  subroutine write_complex_lcfo_k_record(writer,ik,dc,n_basis,n_mat,index_basis,basis,coef,do_diag,local_status)
     use iso_fortran_env, only: int32,int64
     use structures, only: s_dcdft
     implicit none
@@ -190,6 +216,7 @@ contains
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: n_basis(:,:,:),n_mat(:,:),index_basis(:,:,:,:)
     complex(8), intent(in) :: basis(:,:,:,:,:),coef(:,:,:)
+    logical, intent(in) :: do_diag
     integer, intent(out) :: local_status
     integer(int32) :: ik_wire,ispin_wire,nb_wire,nmat_wire
     integer(int32), allocatable :: meta_basis(:),rows(:)
@@ -198,11 +225,11 @@ contains
 
     local_status = 0
     if (dc%id_frag /= 0) return
-    call complex_lcfo_payload_sizes(dc,ik,n_basis,n_mat,basis_payload,coeff_payload,local_status)
+    call complex_lcfo_payload_sizes(dc,ik,n_basis,n_mat,do_diag,basis_payload,coeff_payload,local_status)
     if (local_status /= 0) return
     ik_wire = int(ik,int32)
     write(writer%unit_basis,iostat=ios) ik_wire,basis_payload
-    if (ios == 0) write(writer%unit_coeff,iostat=ios) ik_wire,coeff_payload
+    if (ios == 0 .and. do_diag) write(writer%unit_coeff,iostat=ios) ik_wire,coeff_payload
     do ispin=1,dc%system_tot%nspin
       nb = n_basis(dc%i_frag,ispin,ik)
       nb_wire = int(nb,int32)
@@ -213,15 +240,15 @@ contains
              reshape(basis(:,:,:,ispin,1:nb),[size(basis,1)*size(basis,2)*size(basis,3)*nb]),ios)
       end if
       nmat_wire = int(n_mat(ispin,ik),int32)
-      if (ios == 0) write(writer%unit_coeff,iostat=ios) ispin_wire,nb_wire,nmat_wire
-      if (ios == 0) write(writer%unit_coeff,iostat=ios) int(n_basis(:,ispin,ik),int32)
-      if (ios == 0 .and. nb > 0) then
+      if (ios == 0 .and. do_diag) write(writer%unit_coeff,iostat=ios) ispin_wire,nb_wire,nmat_wire
+      if (ios == 0 .and. do_diag) write(writer%unit_coeff,iostat=ios) int(n_basis(:,ispin,ik),int32)
+      if (ios == 0 .and. do_diag .and. nb > 0) then
         allocate(rows(nb))
         rows = int(index_basis(1:nb,dc%i_frag,ispin,ik),int32)
         write(writer%unit_coeff,iostat=ios) rows
         deallocate(rows)
       end if
-      if (ios == 0 .and. nb > 0) then
+      if (ios == 0 .and. do_diag .and. nb > 0) then
         call write_wire_complex_array(writer%unit_coeff, &
              reshape(coef(1:nb,1:dc%nstate_tot,ispin),[nb*dc%nstate_tot]),ios)
       end if
@@ -232,20 +259,21 @@ contains
       return
     end if
     if (writer%bytes_basis > huge(writer%bytes_basis)-12_int64-basis_payload .or. &
-        writer%bytes_coeff > huge(writer%bytes_coeff)-12_int64-coeff_payload) then
+        (do_diag .and. writer%bytes_coeff > huge(writer%bytes_coeff)-12_int64-coeff_payload)) then
       local_status = 1
       return
     end if
     writer%bytes_basis = writer%bytes_basis+12_int64+basis_payload
-    writer%bytes_coeff = writer%bytes_coeff+12_int64+coeff_payload
+    if (do_diag) writer%bytes_coeff = writer%bytes_coeff+12_int64+coeff_payload
   end subroutine write_complex_lcfo_k_record
 
-  subroutine complex_lcfo_payload_sizes(dc,ik,n_basis,n_mat,basis_payload,coeff_payload,status)
+  subroutine complex_lcfo_payload_sizes(dc,ik,n_basis,n_mat,do_diag,basis_payload,coeff_payload,status)
     use iso_fortran_env, only: int64
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
     integer, intent(in) :: ik,n_basis(:,:,:),n_mat(:,:)
+    logical, intent(in) :: do_diag
     integer(int64), intent(out) :: basis_payload,coeff_payload
     integer, intent(out) :: status
     integer(int64) :: factors(5)
@@ -256,7 +284,8 @@ contains
     status = 0
     do ispin=1,dc%system_tot%nspin
       nb = n_basis(dc%i_frag,ispin,ik)
-      if (nb < 0 .or. nb > dc%nstate_frag .or. n_mat(ispin,ik) < dc%nstate_tot) then
+      if (nb < 0 .or. nb > dc%nstate_frag .or. &
+          (do_diag .and. n_mat(ispin,ik) < dc%nstate_tot)) then
         status = 1
         return
       end if
@@ -264,11 +293,13 @@ contains
       factors = [int(dc%nxyz_domain(1),int64),int(dc%nxyz_domain(2),int64), &
            int(dc%nxyz_domain(3),int64),int(nb,int64),16_int64]
       call safe_add_factors(basis_payload,factors,status)
-      call safe_add_factors(coeff_payload,[12_int64],status)
-      call safe_add_factors(coeff_payload,[4_int64,int(dc%n_frag,int64)],status)
-      factors = [int(nb,int64),int(dc%nstate_tot,int64),16_int64,1_int64,1_int64]
-      call safe_add_factors(coeff_payload,factors,status)
-      call safe_add_factors(coeff_payload,[4_int64,int(nb,int64)],status)
+      if (do_diag) then
+        call safe_add_factors(coeff_payload,[12_int64],status)
+        call safe_add_factors(coeff_payload,[4_int64,int(dc%n_frag,int64)],status)
+        factors = [int(nb,int64),int(dc%nstate_tot,int64),16_int64,1_int64,1_int64]
+        call safe_add_factors(coeff_payload,factors,status)
+        call safe_add_factors(coeff_payload,[4_int64,int(nb,int64)],status)
+      end if
       if (status /= 0) return
     end do
     if (basis_payload > huge(basis_payload)-12_int64 .or. &
@@ -330,12 +361,76 @@ contains
     deallocate(wire)
   end subroutine write_wire_complex_array
 
-  subroutine finish_complex_lcfo_files(dc,writer,local_status)
+  subroutine write_complex_hamiltonian_k_record(writer,dc,ik,n_basis,n_mat,self_h,halo,n_halo,local_status)
+    use iso_fortran_env, only: int32,int64
+    use structures, only: s_dcdft
+    implicit none
+    type(s_complex_lcfo_writer), intent(inout) :: writer
+    type(s_dcdft), intent(in) :: dc
+    integer, intent(in) :: ik,n_basis(:,:,:),n_mat(:,:),n_halo
+    complex(8), intent(in) :: self_h(:,:,:)
+    type(s_lcfo_complex_halo), intent(in) :: halo(:)
+    integer, intent(out) :: local_status
+    integer(int64) :: payload
+    integer :: ispin,nb,nsrc,h,nh_active,ios
+
+    local_status = 0
+    if (dc%id_frag /= 0) return
+    payload = 0_int64
+    do ispin=1,dc%system_tot%nspin
+      nb = n_basis(dc%i_frag,ispin,ik)
+      call safe_add_factors(payload,[16_int64],local_status)
+      call safe_add_factors(payload,[4_int64,int(dc%n_frag,int64)],local_status)
+      call safe_add_factors(payload,[16_int64,int(nb,int64),int(nb,int64)],local_status)
+      do h=1,n_halo
+        if (.not.allocated(halo(h)%mat_h_local)) cycle
+        nsrc = n_basis(halo(h)%ifrag_src,ispin,ik)
+        call safe_add_factors(payload,[20_int64],local_status)
+        call safe_add_factors(payload,[16_int64,int(nsrc,int64),int(nb,int64)],local_status)
+      end do
+      if (local_status /= 0) return
+    end do
+    if (writer%bytes_hamiltonian > huge(payload)-12_int64-payload) then
+      local_status = 1
+      return
+    end if
+    write(writer%unit_hamiltonian,iostat=ios) int(ik,int32),payload
+    do ispin=1,dc%system_tot%nspin
+      nb = n_basis(dc%i_frag,ispin,ik)
+      nh_active = 0
+      do h=1,n_halo
+        if (allocated(halo(h)%mat_h_local)) nh_active = nh_active+1
+      end do
+      if (ios == 0) write(writer%unit_hamiltonian,iostat=ios) &
+           int(ispin,int32),int(nb,int32),int(n_mat(ispin,ik),int32), &
+           int(n_basis(:,ispin,ik),int32)
+      if (ios == 0 .and. nb > 0) call write_wire_complex_array(writer%unit_hamiltonian, &
+           reshape(self_h(1:nb,1:nb,ispin),[nb*nb]),ios)
+      if (ios == 0) write(writer%unit_hamiltonian,iostat=ios) int(nh_active,int32)
+      do h=1,n_halo
+        if (.not.allocated(halo(h)%mat_h_local)) cycle
+        nsrc = n_basis(halo(h)%ifrag_src,ispin,ik)
+        if (ios == 0) write(writer%unit_hamiltonian,iostat=ios) &
+             int(halo(h)%ifrag_src,int32),int(halo(h)%dvec,int32),int(nsrc,int32)
+        if (ios == 0 .and. nsrc > 0 .and. nb > 0) &
+             call write_wire_complex_array(writer%unit_hamiltonian, &
+             reshape(halo(h)%mat_h_local(1:nsrc,1:nb,ispin),[nsrc*nb]),ios)
+      end do
+    end do
+    if (ios /= 0) then
+      local_status = 1
+      return
+    end if
+    writer%bytes_hamiltonian = writer%bytes_hamiltonian+12_int64+payload
+  end subroutine write_complex_hamiltonian_k_record
+
+  subroutine finish_complex_lcfo_files(dc,writer,do_diag,local_status)
     use iso_fortran_env, only: int32,int64
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
     type(s_complex_lcfo_writer), intent(inout) :: writer
+    logical, intent(in) :: do_diag
     integer, intent(out) :: local_status
     character(16), parameter :: footer_magic='SLCFO_DONE_V1'
     integer(int32) :: completed_k
@@ -357,18 +452,33 @@ contains
       inquire(file=trim(writer%file_basis),size=actual_bytes,iostat=ios)
       if (ios == 0 .and. actual_bytes /= writer%bytes_basis) ios = 1
     end if
-    file_bytes = writer%bytes_coeff+124_int64
-    if (ios == 0) write(writer%unit_coeff,iostat=ios) &
+    if (do_diag) then
+      file_bytes = writer%bytes_coeff+124_int64
+      if (ios == 0) write(writer%unit_coeff,iostat=ios) &
+           footer_magic,writer%run_id,completed_k,file_bytes
+      if (ios == 0) then
+        writer%bytes_coeff = file_bytes
+        close(writer%unit_coeff,iostat=close_status)
+        if (close_status /= 0) ios = close_status
+        writer%unit_coeff = -1
+      end if
+      if (ios == 0) then
+        inquire(file=trim(writer%file_coeff),size=actual_bytes,iostat=ios)
+        if (ios == 0 .and. actual_bytes /= writer%bytes_coeff) ios = 1
+      end if
+    end if
+    file_bytes = writer%bytes_hamiltonian+124_int64
+    if (ios == 0) write(writer%unit_hamiltonian,iostat=ios) &
          footer_magic,writer%run_id,completed_k,file_bytes
     if (ios == 0) then
-      writer%bytes_coeff = file_bytes
-      close(writer%unit_coeff,iostat=close_status)
+      writer%bytes_hamiltonian = file_bytes
+      close(writer%unit_hamiltonian,iostat=close_status)
       if (close_status /= 0) ios = close_status
-      writer%unit_coeff = -1
+      writer%unit_hamiltonian = -1
     end if
     if (ios == 0) then
-      inquire(file=trim(writer%file_coeff),size=actual_bytes,iostat=ios)
-      if (ios == 0 .and. actual_bytes /= writer%bytes_coeff) ios = 1
+      inquire(file=trim(writer%file_hamiltonian),size=actual_bytes,iostat=ios)
+      if (ios == 0 .and. actual_bytes /= writer%bytes_hamiltonian) ios = 1
     end if
     if (ios /= 0) local_status = 1
     if (writer%unit_basis >= 0) then
@@ -379,6 +489,11 @@ contains
     if (writer%unit_coeff >= 0) then
       close(writer%unit_coeff,iostat=close_status)
       writer%unit_coeff = -1
+      if (close_status /= 0) local_status = 1
+    end if
+    if (writer%unit_hamiltonian >= 0) then
+      close(writer%unit_hamiltonian,iostat=close_status)
+      writer%unit_hamiltonian = -1
       if (close_status /= 0) local_status = 1
     end if
   end subroutine finish_complex_lcfo_files
@@ -399,17 +514,17 @@ contains
 #endif
     if (yn_spinorbit == 'y') stop "DC-LCFO complex: spin-orbit and noncollinear calculations are unsupported."
     if (trim(theory) /= 'dft') stop "DC-LCFO complex: theory must be dft."
-    select case(trim(lcfo_eigensolver))
-    case('lapack')
-    case('chefsi')
+    if (yn_dc_lcfo_diag == 'y') then
+      select case(trim(lcfo_eigensolver))
+      case('lapack')
+      case('chefsi')
 #ifndef USE_SCALAPACK
-      stop "DC-LCFO complex: lcfo_eigensolver='chefsi' requires ScaLAPACK."
+        stop "DC-LCFO complex: lcfo_eigensolver='chefsi' requires ScaLAPACK."
 #endif
-    case default
-      stop "DC-LCFO complex: supported eigensolvers are 'lapack' and 'chefsi'."
-    end select
-    if (yn_dc_lcfo_diag /= 'y') &
-      stop "DC-LCFO complex: yn_dc_lcfo_diag='y' is required."
+      case default
+        stop "DC-LCFO complex: supported eigensolvers are 'lapack' and 'chefsi'."
+      end select
+    end if
     if (system%if_real_orbital) stop "DC-LCFO complex: complex orbitals are required."
     if (system%nspin < 1 .or. system%nspin > 2) stop "DC-LCFO complex: unsupported spin count."
     if (.not.ieee_is_finite(system%hvol) .or. system%hvol <= 0d0) &
@@ -517,10 +632,8 @@ contains
     index_basis = 0
     esp_tot = 0d0
     coef_frag = (0d0,0d0)
-    if (yn_dc_lcfo_diag == 'y') then
-      call open_complex_lcfo_files(lg,dc,writer,istat)
-      call check_collective_status(istat,"open complex LCFO output",0,0)
-    end if
+    call open_complex_lcfo_files(lg,dc,writer,yn_dc_lcfo_diag == 'y',istat)
+    call check_collective_status(istat,"open complex LCFO output",0,0)
 
     do ik=1,nk
       owns_ik = (info%ik_s <= ik .and. ik <= info%ik_e)
@@ -528,7 +641,7 @@ contains
       allocate(nb(nspin))
       call build_basis(ik,f_basis,nb,basis_err)
       call collect_basis_dimensions(ik,nb)
-      if (any(n_mat(:,ik) < dc%nstate_tot)) &
+      if (yn_dc_lcfo_diag == 'y' .and. any(n_mat(:,ik) < dc%nstate_tot)) &
         stop "DC-LCFO complex: nstate_tot exceeds a k-dependent Hamiltonian dimension."
 
       sttpsi%zwf = (0d0,0d0)
@@ -576,7 +689,11 @@ contains
            req_send,req_recv)
       deallocate(hf)
       coef_frag = (0d0,0d0)
+      call write_complex_hamiltonian_k_record(writer,dc,ik,n_basis,n_mat, &
+           mat_h_local,halo,n_halo,istat)
+      call check_collective_status(istat,"write complex LCFO Hamiltonian",ik,0)
 
+      if (yn_dc_lcfo_diag == 'y') then
       if (trim(lcfo_eigensolver) == 'chefsi') then
 #ifdef USE_SCALAPACK
         call diag_chefsi_complex_driver(ik)
@@ -644,23 +761,20 @@ contains
         deallocate(hsend,hmat,vmat,eval)
       end do
       end if
-      if (yn_dc_lcfo_diag == 'y') then
-        call write_complex_lcfo_k_record(writer,ik,dc,n_basis,n_mat,index_basis, &
-             f_basis,coef_frag,istat)
-        call check_collective_status(istat,"write complex LCFO k record",ik,0)
       end if
+      call write_complex_lcfo_k_record(writer,ik,dc,n_basis,n_mat,index_basis, &
+           f_basis,coef_frag,yn_dc_lcfo_diag == 'y',istat)
+      call check_collective_status(istat,"write complex LCFO k record",ik,0)
       deallocate(f_basis)
       deallocate(mat_h_local)
       call deallocate_halo_buffers(n_halo,halo)
       deallocate(nb)
     end do
 
-    if (yn_dc_lcfo_diag == 'y') then
-      call finish_complex_lcfo_files(dc,writer,istat)
-      call check_collective_status(istat,"finish complex LCFO output",nk,0)
-    end if
+    call finish_complex_lcfo_files(dc,writer,yn_dc_lcfo_diag == 'y',istat)
+    call check_collective_status(istat,"finish complex LCFO output",nk,0)
 
-    call write_complex_eigenvalues(esp_tot,n_basis,n_mat)
+    if (yn_dc_lcfo_diag == 'y') call write_complex_eigenvalues(esp_tot,n_basis,n_mat)
     deallocate(coef_frag,esp_tot,index_basis,n_mat,n_basis,id_array)
     if (dc%id_tot == 0) write(*,*) "end DC-LCFO complex"
 
