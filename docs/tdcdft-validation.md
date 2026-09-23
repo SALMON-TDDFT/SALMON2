@@ -201,3 +201,24 @@ integral -27.47%. Probe5e-4 vs1e-4 spectral L2 difference4.19% in2–4 eV, but f
 current difference48.69%; no claim of globally converged linear response. Ground alpha1
 frozen propagation failed norm atstep3064 and is excluded. The earlier alpha.2 comparison
 includes both changed screening and excitation. See record for common-window and amplitude checks.
+
+
+### Time-dependent occupied Wannier diagnostics
+
+[Result record](results/si-time-wannier/README.md) adds offline checkpoint readers,
+projected bond-centered Wannier controls and discrete Marzari–Vanderbilt localization.
+The MLWF analysis transports the preceding U into the current Bloch basis as an initial guess every10 RT steps; it does
+not yet change the production alpha cadence or define a Wannier-to-alpha feedback.
+Nine numerical tests pass, including normalization/density, gauge covariance,
+periodic boundary phases, analytic spread gradients and invariant/variable spread
+separation. Independent review confirmed the Fourier normalization, boundary phases,
+gradient and gauge-dependent Armijo objective. No production Fortran changed.
+
+The same 4³-mesh strong pulse projects about1.79 electrons/cell into the finite
+reference conduction window by3.096 fs (1.84 holes/cell). This contradicts a
+small-excitation assumption but does not validate the original screening estimator.
+
+All3 x161 MLWF snapshots converge at gradient norm <1e-6, preserving orbital labels.
+Final mean MV spreads are2.057679,2.057711,4.936765 Å² for none/weak/strong.
+No-pump polar transport eliminates additional localization iterations; a final strong
+initial-gauge start agrees with the sequential result within2.4e-13 Å².

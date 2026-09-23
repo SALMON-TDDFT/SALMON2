@@ -1,0 +1,121 @@
+{
+  "gauge": "Bond-Gaussian projection and symmetric orthonormalization; not MLWF",
+  "trial_sigma_bohr": 1.2,
+  "min_projection_singular_value": 0.6793916183738631,
+  "supercell_length_A": 21.7174327258968,
+  "cases": {
+    "none": {
+      "quality": {
+        "max_orthogonality_error": 6.035714150698368e-10,
+        "max_density_reconstruction_error": 1.249000902703301e-16,
+        "max_norm_error": 5.904365885101015e-11
+      },
+      "excited_electrons_final": 3.24457742204462e-15,
+      "excited_holes_final": 1.88823828101148e-09,
+      "excited_electrons_cm3": 20272749.82931593,
+      "projection_missing_electrons": 1.8882350364340582e-09,
+      "fixed_initial": {
+        "initial_mean_spread_A2": 2.258563467320985,
+        "final_mean_spread_A2": 93.98812294623858,
+        "final_rms_radius_A": 9.694747183203829,
+        "final_mean_center_shift_A": [
+          2.0485618774311115e-09,
+          1.0652326617072858e-09,
+          7.988198440640865e-09
+        ],
+        "final_rms_center_shift_A": 1.069618854337999e-08,
+        "max_boundary_weight": 0.2715651170224651,
+        "min_circular_concentration": 0.14186065884774804
+      },
+      "field_free_aligned": {
+        "initial_mean_spread_A2": 2.258563467320985,
+        "final_mean_spread_A2": 2.2585634663409215,
+        "final_rms_radius_A": 1.502851777901241,
+        "final_mean_center_shift_A": [
+          1.3175387976862516e-09,
+          3.4833578053357056e-10,
+          4.906507862110374e-09
+        ],
+        "final_rms_center_shift_A": 5.902875351514642e-09,
+        "max_boundary_weight": 0.00035650248456083115,
+        "min_circular_concentration": 0.9705082435526103
+      }
+    },
+    "weak": {
+      "quality": {
+        "max_orthogonality_error": 6.036596778002945e-10,
+        "max_density_reconstruction_error": 1.1102230246251565e-16,
+        "max_norm_error": 5.903633137904762e-11
+      },
+      "excited_electrons_final": 2.01406224073673e-05,
+      "excited_holes_final": 2.02093286186672e-05,
+      "excited_electrons_cm3": 1.2584252010666214e+17,
+      "projection_missing_electrons": 6.870621129989842e-08,
+      "max_current_difference_from_existing_run": 9.878286460311291e-19,
+      "fixed_initial": {
+        "initial_mean_spread_A2": 2.258563467320985,
+        "final_mean_spread_A2": 93.98813611883334,
+        "final_rms_radius_A": 9.694747862571433,
+        "final_mean_center_shift_A": [
+          1.0561020157991497e-10,
+          2.775723641131945e-10,
+          0.0001426269229341445
+        ],
+        "final_rms_center_shift_A": 0.00034947474966508517,
+        "max_boundary_weight": 0.2715652424479408,
+        "min_circular_concentration": 0.14186055402641762
+      },
+      "field_free_aligned": {
+        "initial_mean_spread_A2": 2.258563467320985,
+        "final_mean_spread_A2": 2.258642333199796,
+        "final_rms_radius_A": 1.5028780167398137,
+        "final_mean_center_shift_A": [
+          1.8765746871966154e-10,
+          -2.862388812898503e-10,
+          -8.369402034743531e-05
+        ],
+        "final_rms_center_shift_A": 9.06537912032185e-05,
+        "max_boundary_weight": 0.0003567929557740348,
+        "min_circular_concentration": 0.9705075575518707
+      }
+    },
+    "strong": {
+      "quality": {
+        "max_orthogonality_error": 1.3626172412628534e-08,
+        "max_density_reconstruction_error": 1.1796119636642288e-16,
+        "max_norm_error": 1.0328465860354186e-09
+      },
+      "excited_electrons_final": 1.78873653629165,
+      "excited_holes_final": 1.83997429262997,
+      "excited_electrons_cm3": 1.1176373251080039e+22,
+      "projection_missing_electrons": 0.05123775633831995,
+      "max_current_difference_from_existing_run": 1.0191500421363742e-17,
+      "fixed_initial": {
+        "initial_mean_spread_A2": 2.258563467320985,
+        "final_mean_spread_A2": 95.21550240117415,
+        "final_rms_radius_A": 9.757843122390016,
+        "final_mean_center_shift_A": [
+          -1.7596071968069058e-10,
+          1.8027664687967842e-10,
+          0.0645551908341367
+        ],
+        "final_rms_center_shift_A": 0.14703204017440194,
+        "max_boundary_weight": 0.2834089528836752,
+        "min_circular_concentration": 0.13237710094093294
+      },
+      "field_free_aligned": {
+        "initial_mean_spread_A2": 2.258563467320985,
+        "final_mean_spread_A2": 9.69603464293927,
+        "final_rms_radius_A": 3.1138456356953967,
+        "final_mean_center_shift_A": [
+          2.824930686744428e-10,
+          -4.1770692826045046e-10,
+          -0.036376812256867286
+        ],
+        "final_rms_center_shift_A": 0.03678258141747062,
+        "max_boundary_weight": 0.027990560120616573,
+        "min_circular_concentration": 0.9058135295878988
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "none": {
+    "initial_mean_spread_A2": 2.0576788763806078,
+    "final_mean_spread_A2": 2.057678879698114,
+    "final_mean_invariant_A2": 1.88560551994075,
+    "max_iterations": 0,
+    "mean_iterations": 0.0,
+    "max_gradient_norm": 9.247153685320732e-07,
+    "min_orbital_overlap": 0.9999999999411691,
+    "max_center_step_A": 7.074157953781172e-10,
+    "min_temporal_singular": 0.9999999993983157,
+    "snapshots": 161,
+    "all_converged": true,
+    "existing_alpha_final": 1.0
+  },
+  "weak": {
+    "initial_mean_spread_A2": 2.0576788763806078,
+    "final_mean_spread_A2": 2.0577108903099868,
+    "final_mean_invariant_A2": 1.8856348014842876,
+    "max_iterations": 130,
+    "mean_iterations": 103.3,
+    "max_gradient_norm": 9.99486135999721e-07,
+    "min_orbital_overlap": 0.9999999893794044,
+    "max_center_step_A": 0.00012540661226973952,
+    "min_temporal_singular": 0.9999999397926775,
+    "snapshots": 161,
+    "all_converged": true,
+    "existing_alpha_final": 0.012991212401076915
+  },
+  "strong": {
+    "initial_mean_spread_A2": 2.0576788763806078,
+    "final_mean_spread_A2": 4.936764687210605,
+    "final_mean_invariant_A2": 4.350974642893219,
+    "max_iterations": 286,
+    "mean_iterations": 240.3625,
+    "max_gradient_norm": 9.993065916175419e-07,
+    "min_orbital_overlap": 0.9989424621300449,
+    "max_center_step_A": 0.04002280083784115,
+    "min_temporal_singular": 0.9956479151343478,
+    "snapshots": 161,
+    "all_converged": true,
+    "existing_alpha_final": 0.0002062912827269998
+  },
+  "final_cold_start": {
+    "converged": true,
+    "iterations": 489,
+    "mean_spread_A2": 4.936764687210366,
+    "difference_from_warm_A2": -2.389199948993337e-13
+  },
+  "initialization": "Previous U transported into current occupied basis via polar overlap, then spread minimized.",
+  "alpha_policy": "Original alpha logged every10 steps. No Wannier-derived alpha formula or feedback has been introduced.",
+  "sampling": {
+    "dt_au": 0.08,
+    "stride": 10,
+    "interval_fs": 0.01935107461204,
+    "observation_fs": 3.0961719379264
+  }
+}
