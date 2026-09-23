@@ -1,0 +1,194 @@
+{
+  "none": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.2000000000805398,
+    "alpha_min": 0.19999999986275402,
+    "alpha_max": 0.2000000001710473,
+    "max_alpha_deviation": 1.7104728744499198e-10,
+    "Q_initial": 0.07518597504650243,
+    "Q_final": 0.07518597507677974,
+    "current_rms_post": 1.4264715469246988e-13,
+    "current_final": 4.66428633435222e-14,
+    "xc_potential_final": -3.2936202807593496e-11,
+    "max_abs_current": 3.89847372249988e-13
+  },
+  "weak": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.19999971600431304,
+    "alpha_min": 0.19999966545377093,
+    "alpha_max": 0.20000000017104316,
+    "max_alpha_deviation": 3.3454622908046794e-07,
+    "Q_initial": 0.07518597504650243,
+    "Q_final": 0.07518586828403927,
+    "current_rms_post": 2.4323800387285174e-06,
+    "current_final": -3.12614613210729e-06,
+    "xc_potential_final": 2.4012179939335763e-05,
+    "max_abs_current": 8.4887798118638e-06
+  },
+  "strong": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.17875525469767348,
+    "alpha_min": 0.16768872173698218,
+    "alpha_max": 0.20000181419802054,
+    "max_alpha_deviation": 0.03231127826301783,
+    "Q_initial": 0.07518597504650243,
+    "Q_final": 0.06719944059565232,
+    "current_rms_post": 0.0005069488982896234,
+    "current_final": -0.000814564538808902,
+    "xc_potential_final": -0.11210272543092217,
+    "max_abs_current": 0.00261508117389266,
+    "current_relative_l2_vs_fixed_strong": 0.10691024174356384
+  },
+  "fixed_strong": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.2,
+    "alpha_min": 0.2,
+    "alpha_max": 0.2,
+    "max_alpha_deviation": 0.0,
+    "Q_initial": null,
+    "Q_final": null,
+    "current_rms_post": 0.00047900004605463503,
+    "current_final": -0.000677745971349301,
+    "xc_potential_final": -0.15582657642266268,
+    "max_abs_current": 0.00261158491890416
+  },
+  "impulse": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.19999997353192164,
+    "alpha_min": 0.199999951739659,
+    "alpha_max": 0.2000000258280518,
+    "max_alpha_deviation": 4.826034100124943e-08,
+    "Q_initial": 0.07518597504650243,
+    "Q_final": 0.07518596509636104,
+    "current_rms_post": 6.236001055628978e-07,
+    "current_final": -2.68683742526443e-07,
+    "xc_potential_final": -4.9145941743501464e-05,
+    "max_abs_current": 2.79109416753715e-06,
+    "current_relative_l2_vs_fixed_impulse": 7.280321669137613e-08
+  },
+  "fixed_impulse": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.2,
+    "alpha_min": 0.2,
+    "alpha_max": 0.2,
+    "max_alpha_deviation": 0.0,
+    "Q_initial": null,
+    "Q_final": null,
+    "current_rms_post": 6.236001056467803e-07,
+    "current_final": -2.68683667068135e-07,
+    "xc_potential_final": -4.9145945745316884e-05,
+    "max_abs_current": 2.79109416753715e-06
+  },
+  "strong_stride1": {
+    "alpha_initial": 0.2,
+    "alpha_final": 0.17873666059567822,
+    "alpha_min": 0.16769865735863412,
+    "alpha_max": 0.20000191396960465,
+    "max_alpha_deviation": 0.03230134264136589,
+    "Q_initial": 0.07518597504650243,
+    "Q_final": 0.06719245051720918,
+    "current_rms_post": 0.0005074349249779383,
+    "current_final": -0.000815473855409044,
+    "xc_potential_final": -0.11162934012288525,
+    "max_abs_current": 0.00261522282138299,
+    "current_relative_l2_vs_strong": 0.0013032591645023835,
+    "max_alpha_difference_vs_strong": 0.0013168729450040995
+  },
+  "derivative_check": {
+    "initial_fd": 0.07518597504650248,
+    "initial_fft": 0.07489880286709964,
+    "snapshots": [
+      {
+        "case": "none",
+        "step": 200,
+        "native_Q": 0.07518597507670458,
+        "offline_fd_Q": 0.07518597507670469,
+        "offline_fft_Q": 0.0748988028970068,
+        "alpha_if_fft_normalized": 0.2000000000798602
+      },
+      {
+        "case": "none",
+        "step": 800,
+        "native_Q": 0.07518597502628446,
+        "offline_fd_Q": 0.07518597502628455,
+        "offline_fft_Q": 0.07489880284785276,
+        "alpha_if_fft_normalized": 0.19999999994860562
+      },
+      {
+        "case": "none",
+        "step": 1600,
+        "native_Q": 0.07518597507677974,
+        "offline_fd_Q": 0.07518597507677993,
+        "offline_fft_Q": 0.07489880289787633,
+        "alpha_if_fft_normalized": 0.20000000008218205
+      },
+      {
+        "case": "weak",
+        "step": 200,
+        "native_Q": 0.07518597424890172,
+        "offline_fd_Q": 0.07518597424890144,
+        "offline_fft_Q": 0.07489880210200443,
+        "alpha_if_fft_normalized": 0.1999999979569895
+      },
+      {
+        "case": "weak",
+        "step": 800,
+        "native_Q": 0.07518587532496057,
+        "offline_fd_Q": 0.0751858753249606,
+        "offline_fft_Q": 0.07489870653469868,
+        "alpha_if_fft_normalized": 0.19999974276651356
+      },
+      {
+        "case": "weak",
+        "step": 1600,
+        "native_Q": 0.07518586828403927,
+        "offline_fd_Q": 0.07518586828403923,
+        "offline_fft_Q": 0.07489869934418769,
+        "alpha_if_fft_normalized": 0.1999997235659103
+      },
+      {
+        "case": "strong",
+        "step": 200,
+        "native_Q": 0.07510326827888908,
+        "offline_fd_Q": 0.07510326827888918,
+        "offline_fft_Q": 0.0748193780467781,
+        "alpha_if_fft_normalized": 0.19978791431296314
+      },
+      {
+        "case": "strong",
+        "step": 800,
+        "native_Q": 0.06655843287115838,
+        "offline_fd_Q": 0.06655843287115837,
+        "offline_fft_Q": 0.0666342665152217,
+        "alpha_if_fft_normalized": 0.17793145942120722
+      },
+      {
+        "case": "strong",
+        "step": 1600,
+        "native_Q": 0.06719944059565232,
+        "offline_fd_Q": 0.0671994405956524,
+        "offline_fft_Q": 0.06723150888979035,
+        "alpha_if_fft_normalized": 0.1795262576067761
+      }
+    ]
+  },
+  "finite_mesh_cold_gas": {
+    "elf": 0.5001133481244748,
+    "alpha_on_Si_normalization": 3.417604763126568e-08,
+    "note": "Continuum endpoint remains .5; no finite-mesh offset was fitted."
+  },
+  "conditions": {
+    "k_grid": [
+      4,
+      4,
+      4
+    ],
+    "dt_au": 0.08,
+    "nt": 1600,
+    "pulse_width_au": 60,
+    "omega_au": 0.2,
+    "alpha0": 0.2,
+    "elf_stride": 10,
+    "model": "alpha0 * density-weighted (ELF-0.5)^2 / initial value; no upper clipping"
+  }
+}

@@ -1,9 +1,17 @@
 program test_update
-  use tdcdft_lrc, only: advance_xc_field,proca_coefficients,instant_screening,advance_polarization_field
+  use tdcdft_lrc, only: advance_xc_field,proca_coefficients,instant_screening,advance_polarization_field,elf_value,elf_alpha
   implicit none
   real(8) :: old(3),now(3),next(3),j(3),dt,t,err(2),exact,alpha,gamma
   real(8) :: a(3),e(3),pol(3),response,coupling
   integer :: n,k,steps
+  ! Current-corrected local ELF, HEG endpoint and unbounded normalized coupling.
+  exact=3d0/5d0*(6d0*acos(-1d0)**2)**(2d0/3d0)
+  if(abs(elf_value(1d0,exact,[0d0,0d0,0d0],[0d0,0d0,0d0])-.5d0)>1d-14) error stop 'ELF HEG'
+  if(abs(elf_value(1d0,exact+4d0,[0d0,0d0,0d0],[2d0,0d0,0d0])-.5d0)>1d-14) error stop 'ELF boost'
+  if(abs(elf_value(1d0,5d0,[1d0,0d0,0d0],[2d0,0d0,0d0])-1d0)>1d-14) error stop 'ELF single orbital'
+  if(abs(elf_alpha(.2d0,.07d0,.07d0)-.2d0)>1d-14) error stop 'ELF initial'
+  if(elf_alpha(.2d0,0d0,.07d0)/=0d0) error stop 'ELF zero'
+  if(abs(elf_alpha(.2d0,.14d0,.07d0)-.4d0)>1d-14) error stop 'ELF no upper clip'
   ! Known integral of a'=-(0.2+0.1*t)*sin(t), j=-cos(t).
   do k=1,2
     steps=100*2**(k-1); dt=1d0/steps

@@ -247,3 +247,22 @@ The finite-mesh cold electron gas yields ELF=.500105. Strong-pump mean ELF chang
 High-ELF bond regions remain. These are localization diagnostics, not proof of a
 metallic response or a new alpha law. Existing write_elf was not used: its current
 orbital/k sums do not implement the required periodic current-corrected expression.
+
+### Native ELF-dependent alpha feedback
+
+[ELF feedback](results/si-elf-feedback/README.md) adds opt-in `tdcdft_screening='elf'`,
+with Q=<n(ELF-.5)^2>/<n> and alpha=alpha0*Q/Q_initial, no upper clipping.
+Occupation/k-weighted, current-corrected ELF uses native finite-difference Bloch
+gradients and is sampled every10 steps by default. Held alpha drives the
+polarization closure; no external-field gate or temporal averaging is used.
+Version4 checkpoints retain the initial normalization and stride. A pre-existing
+odd-step restart parity error was exposed and fixed in the main RT loop.
+
+Same4³ Si self-consistent runs with alpha0=.2 give strong alpha minimum.167689,
+final.178755 at3.09617 fs. Weak-pulse final alpha=.199999716; no-pump change<1.72e-10.
+Small-impulse current differs from fixed alpha by7.28e-8 in relative L2 norm.
+Every-step ELF changes strong current by0.1303% versus stride10. Independent
+checkpoint postprocessing matches native Q within3e-14. The cold finite-mesh
+electron gas leaves alpha3.42e-8 versus the exact continuum endpoint zero.
+This is an empirical localization model; residual current remains and neither
+long-time stability nor improved exciton peaks is established by this short run.

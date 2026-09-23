@@ -20,6 +20,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
+  use tdcdft_elf, only: measure_elf
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
   use writefield
@@ -293,6 +294,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       end if
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
       spsi_out%update_zwf_overlap = .true.
+      if(tdcdft_screening=='elf') then
+        if(mod(itt,tdcdft_elf_stride)==0) then
+          if(tdcdft_screen_stop<0d0.or.itt*dt<=tdcdft_screen_stop) &
+            call measure_elf(system,mg,info,stencil,srg,spsi_out,rt%xc_response)
+        end if
+      end if
       call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
       system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt)
       system%vec_E_ext(1:3)  = rt%E_ext (1:3,itt)
@@ -556,4 +563,3 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
 
   call nvtxEndRange
 end subroutine calc_current_ion
-

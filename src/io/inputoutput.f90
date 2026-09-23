@@ -293,7 +293,7 @@ contains
       & alibxc, &
 #endif
       & cval, tdcdft, tdcdft_alpha, tdcdft_damping, tdcdft_restoring, tdcdft_a2, tdcdft_a0, &
-      & tdcdft_screen_stop,tdcdft_screening,tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
+      & tdcdft_elf_stride,tdcdft_screen_stop,tdcdft_screening,tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
 
     namelist/rgrid/ &
       & dl, &
@@ -740,6 +740,7 @@ contains
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
+    tdcdft_elf_stride = 10
     tdcdft_screen_stop = -1d0
     tdcdft_screening = 'none'
     tdcdft_screen_omega = 0d0
@@ -1321,6 +1322,7 @@ contains
     call comm_bcast(alibc        ,nproc_group_global)
 #endif
     call comm_bcast(cval         ,nproc_group_global)
+    call comm_bcast(tdcdft_elf_stride, nproc_group_global)
     call comm_bcast(tdcdft_screen_stop, nproc_group_global)
     call comm_bcast(tdcdft_screening, nproc_group_global)
     call comm_bcast(tdcdft_screen_omega, nproc_group_global)
@@ -2264,6 +2266,7 @@ contains
 
       write(fh_variables_log,*) '# tdcdft_screen_stop [a.u.; -1 disables] = ',tdcdft_screen_stop
       write(fh_variables_log,*) '# tdcdft_screening = ',tdcdft_screening
+      write(fh_variables_log,*) '# tdcdft_elf_stride = ',tdcdft_elf_stride
       write(fh_variables_log,*) '# screening omega, reference, strength, floor [a.u.] = ', &
         tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor
       if(inml_rgrid >0)ierr_nml = ierr_nml +1
@@ -2885,11 +2888,15 @@ contains
     if (.not.ieee_is_finite(tdcdft_screen_stop)) error stop 'TDCDFT: nonfinite screening stop'
     if (tdcdft_screen_stop<0d0.and.tdcdft_screen_stop/=-1d0) error stop 'TDCDFT: invalid screening stop'
     if (tdcdft_screen_stop>=0d0.and.tdcdft_screening=='none') error stop 'TDCDFT: stop needs screening'
-    if (tdcdft_screening/='none'.and.tdcdft_screening/='instant'.and.tdcdft_screening/='polarization') &
-      error stop 'TDCDFT: screening must be none, instant or polarization'
+    if (tdcdft_screening/='none'.and.tdcdft_screening/='instant'.and.tdcdft_screening/='polarization' &
+        .and.tdcdft_screening/='elf') &
+      error stop 'TDCDFT: screening must be none, instant, polarization or elf'
     if (.not.all(ieee_is_finite([tdcdft_screen_omega,tdcdft_screen_reference, &
         tdcdft_screen_strength,tdcdft_screen_floor]))) error stop 'TDCDFT: screening parameters must be finite'
-    if (tdcdft_screening/='none') then
+    if(tdcdft_screening=='elf') then
+      if(tdcdft_elf_stride<1) error stop 'TDCDFT ELF: stride must be positive'
+      if(tdcdft/='lrc'.or.unit_system/='a.u.') error stop 'TDCDFT ELF: requires lrc and atomic units'
+    else if (tdcdft_screening/='none') then
       if (tdcdft_screening=='polarization'.and.(tdcdft_damping/=0d0.or.tdcdft_restoring/=0d0)) &
         error stop 'TDCDFT: polarization screening requires zero damping and restoring'
       if (tdcdft=='none'.or.theory/='tddft_pulse'.or.unit_system/='a.u.') &

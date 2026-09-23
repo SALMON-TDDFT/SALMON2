@@ -541,6 +541,7 @@ module structures
     real(8), allocatable :: rIe(:)    !rename later
     real(8), allocatable :: curr(:,:), E_ext(:,:), E_ind(:,:), E_tot(:,:)
     real(8), allocatable :: Ac_ext(:,:), Ac_ind(:,:), Ac_tot(:,:)
+    real(8) :: xc_elf_reference=0d0
     real(8) :: xc_polarization(3)=0d0, xc_response=0d0, xc_alpha=0d0
     real(8), allocatable :: Ac_xc(:,:) ! separate xc A/c, never included in classical fields
     complex(8), allocatable :: zc(:)

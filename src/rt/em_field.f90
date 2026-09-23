@@ -22,7 +22,7 @@ contains
 !===================================================================================================================================
 
 subroutine calc_emfields(itt,nspin,curr_in,rt)
-  use tdcdft_lrc, only: advance_xc_field,instant_screening,advance_polarization_field
+  use tdcdft_lrc, only: advance_xc_field,instant_screening,advance_polarization_field,elf_alpha
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures, only : s_rt
   use math_constants, only : pi
@@ -60,20 +60,28 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
     alpha_old=rt%xc_alpha
     if(tdcdft_screening/='none') then
       rt%xc_polarization=rt%xc_polarization-0.5d0*dt*(rt%curr(:,itt)+rt%curr(:,itt-1))
-      ! Transverse classical field; external waveform is known, so its centered derivative is causal.
-      screen_a=rt%Ac_ext(:,itt)-rt%Ac_ext(:,0)
-      screen_e=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
-      ! Optional frozen-screening probe: keep integrating P and the XC field after this time.
-      if(tdcdft_screen_stop<0d0.or.itt*dt<=tdcdft_screen_stop) then
-      call instant_screening(screen_a,screen_e,rt%curr(:,itt),rt%xc_polarization, &
-        tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor, &
-        tdcdft_alpha,rt%xc_response,rt%xc_alpha)
+      if(tdcdft_screening=='elf') then
+        rt%xc_alpha=elf_alpha(tdcdft_alpha,rt%xc_response,rt%xc_elf_reference)
+      else
+        ! Transverse classical field; its centered derivative is known and causal.
+        screen_a=rt%Ac_ext(:,itt)-rt%Ac_ext(:,0)
+        screen_e=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
+        ! Frozen-screening probe: P and the XC field continue to evolve.
+        if(tdcdft_screen_stop<0d0.or.itt*dt<=tdcdft_screen_stop) then
+          call instant_screening(screen_a,screen_e,rt%curr(:,itt),rt%xc_polarization, &
+            tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor, &
+            tdcdft_alpha,rt%xc_response,rt%xc_alpha)
+        end if
       end if
       if(.not.all(ieee_is_finite([rt%xc_polarization,rt%xc_response,rt%xc_alpha]))) &
         error stop 'TDCDFT: screening state is nonfinite'
       alpha_now=rt%xc_alpha
     end if
-    if(tdcdft_screening=='polarization') then
+    if(tdcdft_screening=='elf') then
+      ! Piecewise-constant alpha: integrate a'=-alpha*P over the next interval.
+      call advance_polarization_field(dt,alpha_now,alpha_now,rt%xc_polarization,rt%curr(:,itt), &
+                                      rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
+    else if(tdcdft_screening=='polarization') then
       call advance_polarization_field(dt,alpha_old,alpha_now,rt%xc_polarization,rt%curr(:,itt), &
                                       rt%Ac_xc(:,itt),rt%Ac_xc(:,itt+1))
     else

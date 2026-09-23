@@ -124,6 +124,7 @@ module salmon_global
   character(64)  :: alibc
   character(64)  :: alibxc
   character(16) :: tdcdft
+  integer :: tdcdft_elf_stride
   character(16) :: tdcdft_screening
   real(8) :: tdcdft_screen_stop
   real(8) :: tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor

@@ -31,6 +31,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                      pp, ppg, ppn, unfold  )
   use inputoutput
+  use tdcdft_elf, only: measure_elf
   use math_constants, only: pi, zi
   use structures
   use parallelization, only: nproc_id_global, nproc_group_global
@@ -363,6 +364,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     spsi_in%update_zwf_overlap=.true.
     rt%curr(:,0)=sum(curr_e_tmp(:,1:system%nspin),dim=2)
     rt%Ac_xc(:,1)=0.5d0*tdcdft_alpha*dt**2*rt%curr(:,0)
+    if(tdcdft_screening=='elf') then
+      call measure_elf(system,mg,info,stencil,srg,spsi_in,rt%xc_elf_reference)
+      if(rt%xc_elf_reference<=1d-14) error stop 'TDCDFT ELF: initial state too close to uniform limit'
+      rt%xc_response=rt%xc_elf_reference
+    end if
   end if
   
   call timer_begin(LOG_INIT_RT)

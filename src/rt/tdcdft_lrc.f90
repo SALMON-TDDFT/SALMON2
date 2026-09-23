@@ -9,8 +9,29 @@
 module tdcdft_lrc
   implicit none
   private
-  public :: advance_xc_field,proca_coefficients,instant_screening,advance_polarization_field
+  public :: advance_xc_field,proca_coefficients,instant_screening,advance_polarization_field,elf_value,elf_alpha
 contains
+  pure real(8) function elf_value(density,tau,real_overlap,current) result(value)
+    real(8),intent(in) :: density,tau,real_overlap(3),current(3)
+    real(8) :: curvature,reference
+    ! One-spin tau has no factor1/2; real_overlap=grad(n)/2.
+    if(density<=1d-14) then
+      value=0.5d0
+      return
+    end if
+    curvature=max(0d0,tau-(sum(real_overlap**2)+sum(current**2))/density)
+    reference=0.6d0*(6d0*acos(-1d0)**2)**(2d0/3d0)*density**(5d0/3d0)
+    value=1d0/(1d0+(curvature/reference)**2)
+  end function elf_value
+
+  real(8) function elf_alpha(alpha0,measure,initial) result(alpha)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(8),intent(in) :: alpha0,measure,initial
+    if(.not.all(ieee_is_finite([alpha0,measure,initial]))) error stop 'TDCDFT ELF: nonfinite measure'
+    if(initial<=1d-14.or.measure<0d0.or.alpha0<0d0) error stop 'TDCDFT ELF: invalid normalization'
+    alpha=alpha0*measure/initial ! Intentionally no upper clipping.
+  end function elf_alpha
+
   pure subroutine advance_polarization_field(dt,alpha_old,alpha_now,polarization,current,a_now,a_next)
     implicit none
     real(8),intent(in) :: dt,alpha_old,alpha_now,polarization(3),current(3),a_now(3)

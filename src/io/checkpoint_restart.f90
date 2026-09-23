@@ -2133,7 +2133,7 @@ end subroutine read_rtdata
 subroutine checkpoint_xc_field(wdir,itt,info,rt)
   use structures, only: s_parallel_info,s_rt
   use salmon_global, only: tdcdft,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,dt,tdcdft_screening, &
-    tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor,tdcdft_screen_stop
+    tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor,tdcdft_screen_stop,tdcdft_elf_stride
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root,comm_bcast
   implicit none
@@ -2148,11 +2148,12 @@ subroutine checkpoint_xc_field(wdir,itt,info,rt)
     if (allocated(rt%Ac_xc)) then
       open(newunit=unit,file=trim(wdir)//'tdcdft.bin',form='unformatted',status='replace',iostat=ios)
       if (ios==0) then
-        write(unit,iostat=ios) 3,itt,tdcdft,dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring
+        write(unit,iostat=ios) 4,itt,tdcdft,dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring
         if (ios==0) write(unit,iostat=ios) rt%Ac_xc(:,itt:itt+1),rt%curr(:,0:itt)
         if (ios==0) write(unit,iostat=ios) tdcdft_screening,tdcdft_screen_omega,tdcdft_screen_reference, &
           tdcdft_screen_strength,tdcdft_screen_floor,rt%xc_polarization,rt%xc_response,rt%xc_alpha
         if (ios==0) write(unit,iostat=ios) tdcdft_screen_stop
+        if (ios==0) write(unit,iostat=ios) tdcdft_elf_stride,rt%xc_elf_reference
         close(unit)
       end if
     else
@@ -2170,7 +2171,7 @@ end subroutine checkpoint_xc_field
 subroutine restore_xc_field(wdir,itt,info,rt)
   use structures, only: s_parallel_info,s_rt
   use salmon_global, only: tdcdft,tdcdft_alpha,tdcdft_damping,tdcdft_restoring,dt,tdcdft_screening, &
-    tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor,tdcdft_screen_stop
+    tdcdft_screen_omega,tdcdft_screen_reference,tdcdft_screen_strength,tdcdft_screen_floor,tdcdft_screen_stop,tdcdft_elf_stride
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root,comm_bcast
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -2179,7 +2180,7 @@ subroutine restore_xc_field(wdir,itt,info,rt)
   integer,intent(in) :: itt
   type(s_parallel_info),intent(in) :: info
   type(s_rt),intent(inout) :: rt
-  integer :: unit,ios,version,saved_step
+  integer :: unit,ios,version,saved_step,saved_stride
   character(16) :: saved_mode,saved_screening
   real(8) :: parameters(4),screen_parameters(4),saved_stop
   logical :: exists
@@ -2193,7 +2194,7 @@ subroutine restore_xc_field(wdir,itt,info,rt)
       if (ios==0) then
         read(unit,iostat=ios) version,saved_step,saved_mode,parameters
         if (ios==0) then
-          if ((version<1.or.version>3).or.saved_step/=itt.or.saved_mode/=tdcdft) ios=1
+          if ((version<1.or.version>4).or.saved_step/=itt.or.saved_mode/=tdcdft) ios=1
           if (version==1.and.tdcdft_screening/='none') ios=1
           if (.not.all(ieee_is_finite(parameters))) ios=1
           if (any(abs(parameters-[dt,tdcdft_alpha,tdcdft_damping,tdcdft_restoring]) &
@@ -2208,7 +2209,8 @@ subroutine restore_xc_field(wdir,itt,info,rt)
             if(tdcdft_screening/='none') then
               if(any(abs(screen_parameters-[tdcdft_screen_omega,tdcdft_screen_reference, &
                 tdcdft_screen_strength,tdcdft_screen_floor])>1d-13*max(1d0,abs(screen_parameters)))) ios=1
-              if(rt%xc_alpha<0d0.or.rt%xc_alpha>tdcdft_alpha) ios=1
+              if(rt%xc_alpha<0d0) ios=1
+              if(tdcdft_screening/='elf'.and.rt%xc_alpha>tdcdft_alpha) ios=1
             end if
           end if
         end if
@@ -2217,6 +2219,20 @@ subroutine restore_xc_field(wdir,itt,info,rt)
         if (ios==0) then
           if (.not.ieee_is_finite(saved_stop)) ios=1
           if (abs(saved_stop-tdcdft_screen_stop)>1d-13*max(1d0,abs(saved_stop))) ios=1
+        end if
+        if(ios==0.and.version>=4) read(unit,iostat=ios) saved_stride,rt%xc_elf_reference
+        if(ios==0.and.tdcdft_screening=='elf') then
+          if(version<4) then
+            ios=1
+          else
+            if(saved_stride/=tdcdft_elf_stride) ios=1
+            if(.not.ieee_is_finite(rt%xc_elf_reference)) ios=1
+            if(rt%xc_elf_reference<=1d-14.or.rt%xc_response<0d0) ios=1
+            if(ios==0) then
+              if(abs(rt%xc_alpha-tdcdft_alpha*rt%xc_response/rt%xc_elf_reference)> &
+                  1d-12*max(1d0,abs(rt%xc_alpha))) ios=1
+            end if
+          end if
         end if
         close(unit)
         if (ios==0) then
@@ -2234,6 +2250,7 @@ subroutine restore_xc_field(wdir,itt,info,rt)
     call comm_bcast(rt%xc_polarization,info%icomm_rko)
     call comm_bcast(rt%xc_response,info%icomm_rko)
     call comm_bcast(rt%xc_alpha,info%icomm_rko)
+    call comm_bcast(rt%xc_elf_reference,info%icomm_rko)
   end if
 end subroutine restore_xc_field
 
