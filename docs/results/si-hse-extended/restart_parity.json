@@ -1,0 +1,9 @@
+{
+  "steps": 2,
+  "dt_au": 0.16,
+  "orbital_relative_difference": 9.615853049032735e-15,
+  "current_relative_difference": 8.03664304517623e-12,
+  "density_relative_difference": 6.5533701043014055e-15,
+  "reference": "Uninterrupted PT-CN dt0.16, two steps",
+  "restart": "Saved after step1, rebuilt ACE, resumed tostep2"
+}

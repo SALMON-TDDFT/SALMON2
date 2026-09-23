@@ -1,0 +1,17 @@
+{
+  "final_time_fs": 0.10062558798596513,
+  "steps": 13,
+  "max_energy_change_Ha": 7.105427357601002e-15,
+  "max_electron_number_error": 4.618527782440651e-14,
+  "max_gram_error": 2.3889770971236855e-12,
+  "max_current_norm": 8.694108263030472e-12,
+  "max_full_residual": 4.882927133944509e-11,
+  "localization_updates": [
+    {
+      "step": 11,
+      "seconds": 0.05210066703148186,
+      "iterations": 4,
+      "converged": true
+    }
+  ]
+}

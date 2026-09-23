@@ -29,3 +29,5 @@ Accuracy, timing, and scope of the current experiment are recorded in `docs/resu
 The optional ACE extension and self-consistent implicit-midpoint pilot are described in [README_ACE.md](README_ACE.md). They retain fresh full-exchange residual checks; they do not enable native SALMON hybrid dynamics or implement PT-CN yet.
 
 Parallel-transport Crank–Nicolson with ACE is a separate option documented in [README_PTCN.md](README_PTCN.md). It preserves the full-exchange endpoint residual gate and reports its norm drift without renormalizing the solution.
+
+For longer constant-A response runs with validated restart and live status, see [README_EXTENDED.md](README_EXTENDED.md). The authoritative checkpoint embeds both wavefunctions and history; failed trial endpoints are not saved as accepted states.
