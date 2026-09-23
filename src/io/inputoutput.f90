@@ -3192,19 +3192,25 @@ contains
       if(nstate*2/=nelec.or.temperature>=0d0) &
         error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
       if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
-        if(propagator/='hse_ptcn')error stop 'HSE06 real time requires propagator=hse_ptcn'
+        if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+          error stop 'HSE06 requires hse_ptcn or a certified HSE Taylor4 mode'
         if(yn_out_rvf_rt=='y')error stop 'HSE06: RT force output not yet certified'
         if(yn_fix_func/='n')error stop 'HSE06 PT-CN requires self-consistent functional updates'
         if(trans_longi/='tr')error stop 'HSE06 native impulse currently requires transverse constant A'
         if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
         if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06 native RT initially supports impulse only'
-        if(gram_schmidt_interval>0.or.yn_predictor_corrector=='y') &
-          error stop 'HSE06 PT-CN requires no Gram-Schmidt or external predictor-corrector'
+        if(gram_schmidt_interval>0)error stop 'HSE06 requires no Gram-Schmidt rescaling'
+        if(propagator=='hse_ptcn')then
+          if(yn_predictor_corrector=='y')error stop 'HSE06 PT-CN requires no external predictor-corrector'
+        else
+          if(n_hamil/=4.or.yn_predictor_corrector/='y') &
+            error stop 'HSE Taylor4 requires n_hamil=4 and predictor-corrector'
+        endif
       else if(theory/='dft')then
         error stop 'HSE06 initial support: dft or tddft only'
       endif
-    else if(propagator=='hse_ptcn')then
-      error stop 'propagator=hse_ptcn requires xc=hse06'
+    else if(propagator=='hse_ptcn'.or.propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')then
+      error stop 'HSE propagation modes require xc=hse06'
     endif
 
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then

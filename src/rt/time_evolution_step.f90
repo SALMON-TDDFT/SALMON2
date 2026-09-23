@@ -23,6 +23,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use structures
 #ifdef USE_HSE
   use hse_ptcn, only: native_hse_step
+  use hse_native, only: hse_taylor_stage
 #endif
   use tdcdft_elf, only: measure_elf
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -125,7 +126,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   case(3)
     if(.not.singlescale%flag_use) then
-      if(propagator == 'middlepoint'.or.propagator == 'hse_ptcn') then
+      if(propagator == 'middlepoint'.or.propagator == 'hse_ptcn'.or. &
+         propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
         system%vec_Ac(1:3) = 0.5d0* (rt%Ac_tot(1:3,itt)+rt%Ac_tot(1:3,itt-1))
       else if(propagator == 'aetrs') then
         system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
@@ -154,6 +156,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call native_hse_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
       spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
   else
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(0)
 #endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
@@ -167,6 +170,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
     
 #ifdef USE_HSE
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(2)
   endif
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
@@ -482,6 +486,10 @@ contains
     !$omp workshare
     spsi_in%zwf = psi_tmp
     !$omp end workshare
+
+#ifdef USE_HSE
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(1)
+#endif
 
 !  if(functional == 'VS98' .or. functional == 'TPSS')then
 !    tmass=0.5d0*(tmass+tmass_t)

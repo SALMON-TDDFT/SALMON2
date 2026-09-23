@@ -9,6 +9,20 @@ spatial/orbital MPI decomposition, finite-temperature occupations and ionic
 dynamics are rejected. The RT path currently supports a transverse impulse;
 laser pulses and pump-probe HSE are not yet enabled.
 
+For comparison with SALMON's original Taylor routine, use
+`propagator='hse_taylor4'`, `n_hamil=4`, and `yn_predictor_corrector='y'` in
+the propagation namelist. This retains the original fourth-order exponential
+polynomial and averages both the local and exchange operators between the
+initial state and predicted endpoint. With a time-dependent self-consistent
+Hamiltonian, this predictor/corrector has generally second-order global time
+accuracy; the polynomial order does not imply fourth-order nonlinear dynamics.
+`hse_taylor4_full` applies the full Fock operator to every Taylor trial vector
+and is the more expensive audit mode. Ordinary `hse_taylor4` uses the averaged
+ACE operators. PT-CN still uses fresh full-exchange endpoint residual checks.
+Taylor modes do not inherit that CN residual test; assess their dt convergence,
+electron count and overlaps. No HSE mode renormalizes orbitals during the run.
+See `docs/results/si-hse-taylor/` for the direct comparison.
+
 ## Build
 
 Enable `-DUSE_HSE=ON -DUSE_MPI=ON` in a normal SALMON CPU CMake build.
@@ -71,3 +85,9 @@ The runtime prints `HSE_PT_CN` for residual/iteration/whole-step timing and
 `HSE_TIMING` for exchange, ACE, exchange communication, local Hamiltonian and
 preconditioner costs. The full sampled exchange kernel is retained: these
 speedups do not rely on a new MLWF support cutoff.
+
+Taylor/PT-CN time-step validation is recorded in
+`docs/results/si-hse-taylor/README.md`. Taylor4 + ACE at dt=0.32 au was
+unstable on the tested Si grid; use the validated smaller steps for Taylor.
+The PT-CN dt=0.32 example is stable but has measurable time-discretization
+error; dt=0.08 is preferable for stricter current/density comparisons.

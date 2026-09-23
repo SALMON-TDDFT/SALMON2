@@ -1,0 +1,47 @@
+{
+  "reference": "calculations/si_hse_native/compare_long_hse_taylor4_dt0.08",
+  "results": {
+    "compare_long_hse_taylor4_dt0.08": {
+      "final_time_au": 32.0,
+      "common_current_samples": 100,
+      "current_max_abs_error_au": 0.0,
+      "current_relative_rms_error": 0.0,
+      "current_max_error_over_reference_peak": 0.0,
+      "density_relative_error": 0.0,
+      "density_error_over_induced_density": 0.0,
+      "gauge_aligned_wavefunction_relative_error": 2.5655555281573777e-15,
+      "electron_number": 31.999999999269377,
+      "gram_max_error": 3.7440639477637205e-10,
+      "post_impulse_energy_range_Ha": 6.700417998217745e-12,
+      "final_energy_Ha": -31.3147465639789
+    },
+    "rt_stability_n8": {
+      "final_time_au": 32.0,
+      "common_current_samples": 100,
+      "current_max_abs_error_au": 1.336763137932015e-08,
+      "current_relative_rms_error": 0.004729750670690095,
+      "current_max_error_over_reference_peak": 0.004913986375268027,
+      "density_relative_error": 1.003057248547751e-06,
+      "density_error_over_induced_density": 0.043100186819817164,
+      "gauge_aligned_wavefunction_relative_error": 1.7533513655677704e-05,
+      "electron_number": 31.999999999942133,
+      "gram_max_error": 7.401103052391393e-11,
+      "post_impulse_energy_range_Ha": 2.6005864128819667e-12,
+      "final_energy_Ha": -31.3147465639893
+    },
+    "compare_long_hse_ptcn_dt0.16": {
+      "final_time_au": 32.0,
+      "common_current_samples": 100,
+      "current_max_abs_error_au": 4.043503302941019e-09,
+      "current_relative_rms_error": 0.0014932585213479714,
+      "current_max_error_over_reference_peak": 0.0014864054502387069,
+      "density_relative_error": 6.810513535775436e-07,
+      "density_error_over_induced_density": 0.029263973333107415,
+      "gauge_aligned_wavefunction_relative_error": 9.656299177902452e-06,
+      "electron_number": 31.999999999985544,
+      "gram_max_error": 1.9594163034707606e-11,
+      "post_impulse_energy_range_Ha": 1.900701818158268e-12,
+      "final_energy_Ha": -31.3147465639846
+    }
+  }
+}

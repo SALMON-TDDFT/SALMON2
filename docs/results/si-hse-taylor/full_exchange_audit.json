@@ -1,0 +1,33 @@
+{
+  "reference": "calculations/si_hse_native/compare_hse_taylor4_full_dt0.16",
+  "results": {
+    "compare_hse_taylor4_full_dt0.16": {
+      "final_time_au": 8.0,
+      "common_current_samples": 50,
+      "current_max_abs_error_au": 0.0,
+      "current_relative_rms_error": 0.0,
+      "current_max_error_over_reference_peak": 0.0,
+      "density_relative_error": 0.0,
+      "density_error_over_induced_density": 0.0,
+      "gauge_aligned_wavefunction_relative_error": 2.3922786404263006e-15,
+      "electron_number": 31.999999994182872,
+      "gram_max_error": 2.994030245950796e-09,
+      "post_impulse_energy_range_Ha": 2.551985289755976e-10,
+      "final_energy_Ha": -31.3147465637299
+    },
+    "compare_hse_taylor4_dt0.16": {
+      "final_time_au": 8.0,
+      "common_current_samples": 50,
+      "current_max_abs_error_au": 1.72603192309037e-10,
+      "current_relative_rms_error": 7.109014734851436e-05,
+      "current_max_error_over_reference_peak": 6.220497679394659e-05,
+      "density_relative_error": 1.7149378283686265e-09,
+      "density_error_over_induced_density": 3.575236956612982e-05,
+      "gauge_aligned_wavefunction_relative_error": 2.963763933399541e-08,
+      "electron_number": 31.999999994182637,
+      "gram_max_error": 2.994035241954407e-09,
+      "post_impulse_energy_range_Ha": 2.5340085585412453e-10,
+      "final_energy_Ha": -31.3147465637318
+    }
+  }
+}

@@ -266,7 +266,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
 
-  if(gram_schmidt_interval==0.and.propagator/='hse_ptcn')then
+  if(gram_schmidt_interval==0.and.xc/='hse06')then
     call gram_schmidt(system, mg, info, spsi_in)
   end if
 

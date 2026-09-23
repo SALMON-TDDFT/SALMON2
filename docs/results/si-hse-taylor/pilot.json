@@ -1,0 +1,44 @@
+{
+  "reference": "calculations/si_hse_native/hse_taylor4_full_pilot",
+  "results": {
+    "hse_taylor4_full_pilot": {
+      "final_time_au": 0.32,
+      "common_current_samples": 4,
+      "current_max_abs_error_au": 0.0,
+      "current_relative_rms_error": 0.0,
+      "current_max_error_over_reference_peak": 0.0,
+      "density_relative_error": 0.0,
+      "density_error_over_induced_density": 0.0,
+      "electron_number": 31.99999999999266,
+      "gram_max_error": 3.746336574295128e-12,
+      "post_impulse_energy_range_Ha": 1.9895196601282805e-13,
+      "final_energy_Ha": -31.314746563983
+    },
+    "hse_taylor4_pilot": {
+      "final_time_au": 0.32,
+      "common_current_samples": 4,
+      "current_max_abs_error_au": 4.4397384696961354e-12,
+      "current_relative_rms_error": 9.886060680058544e-07,
+      "current_max_error_over_reference_peak": 1.5912693123509835e-06,
+      "density_relative_error": 5.75611448512494e-10,
+      "density_error_over_induced_density": 3.029341655356057e-05,
+      "electron_number": 31.999999999992664,
+      "gram_max_error": 3.7462255519926916e-12,
+      "post_impulse_energy_range_Ha": 1.9895196601282805e-13,
+      "final_energy_Ha": -31.314746563983
+    },
+    "hse_ptcn_pilot": {
+      "final_time_au": 0.32,
+      "common_current_samples": 4,
+      "current_max_abs_error_au": 7.112139314200511e-10,
+      "current_relative_rms_error": 0.00017081482797743407,
+      "current_max_error_over_reference_peak": 0.00025490981311398787,
+      "density_relative_error": 9.194645054392282e-08,
+      "density_error_over_induced_density": 0.004838979721731422,
+      "electron_number": 31.999999999999677,
+      "gram_max_error": 1.023625628712338e-13,
+      "post_impulse_energy_range_Ha": 0.0,
+      "final_energy_Ha": -31.3147465639827
+    }
+  }
+}

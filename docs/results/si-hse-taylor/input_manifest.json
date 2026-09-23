@@ -1,0 +1,38 @@
+{
+  "compare_hse_ptcn_dt0.04": {
+    "input_sha256": "9936bb96487c904f5b7d564366fc4d1c42754aa0eb1ccf907d51bc775448d0c4"
+  },
+  "compare_hse_ptcn_dt0.08": {
+    "input_sha256": "0e5dd648a76f80b481c728cb7823390dfebf5a86f61c50760d7387b3d572a920"
+  },
+  "compare_hse_ptcn_dt0.16": {
+    "input_sha256": "89b74993bd5d94d120e876d7df99e80f5799ebb9f794416d03f295eb77ac2d54"
+  },
+  "compare_hse_ptcn_dt0.32": {
+    "input_sha256": "62eb9462f1889ae8d210d817337706ada8041c3b29ce655553482a4d0c890f1f"
+  },
+  "compare_hse_taylor4_dt0.04": {
+    "input_sha256": "a52793e5d3d361f568664509665c0da638ed4a6b326643df6495f45f9ac99249"
+  },
+  "compare_hse_taylor4_dt0.08": {
+    "input_sha256": "8da618349ef3e95208809ca2bcfb52f9900a00e7b4aba17f74d3b71cd2206c62"
+  },
+  "compare_hse_taylor4_dt0.16": {
+    "input_sha256": "0fdf31dddf98045ac923c005f29a62cbec1eb8a90b828d8b5646ddd359d2611c"
+  },
+  "compare_hse_taylor4_dt0.32": {
+    "input_sha256": "31bbd3b62e1f2e686c406dd433b3c24028b39915c5d6532501118188a9a9d181"
+  },
+  "compare_hse_taylor4_full_dt0.16": {
+    "input_sha256": "dff40a4a1d2baedf541698250842d80bdcbe767c58cdfb0b284a8e5fc76893ba"
+  },
+  "compare_long_hse_ptcn_dt0.16": {
+    "input_sha256": "1dbff543187f0edba3131436cdcbd6dcf30b064c7f9a5491d6209b4b52e51054"
+  },
+  "compare_long_hse_taylor4_dt0.08": {
+    "input_sha256": "d68b0486f6de11fb2a0de6a51ebaabc6dcc89494fffa654c5bd4475f7c983a5a"
+  },
+  "rt_stability_n8": {
+    "input_sha256": "e469b70fcdfbfeac66d64eaa0ef4b7d42406fdaea5cf20516ce668ca6225f8a0"
+  }
+}

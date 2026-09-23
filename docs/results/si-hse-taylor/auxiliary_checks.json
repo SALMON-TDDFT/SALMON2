@@ -1,0 +1,9 @@
+{
+  "old_PT_CN_vs_fresh_prefix_max_current_difference": 0.0,
+  "coarse_Taylor_ACE": {
+    "dt_au": 0.32,
+    "outcome": "stopped at step 9 by electron-count check",
+    "electron_count_step9": 47534.98047958029,
+    "full_Fock_at_this_dt_tested": false
+  }
+}

@@ -7,18 +7,48 @@ module hse_native
   use hse_exchange
   use hse_ace
   use communication, only: comm_summation
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator
   implicit none
   private
   public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
   public :: hse_pack,hse_unpack,hse_timings,hse_walltime
+  public :: hse_taylor_stage
   type(hse_kernel),save :: kernel
   type(hse_ace_state),save :: ace
+  type(hse_ace_state),save :: initial_ace,midpoint_ace
+  complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
+  logical,save :: taylor_active=.false.,taylor_midpoint=.false.
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:),output_work(:,:,:)
   real(8),save :: hse_exchange_energy=0d0
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.
 contains
+  subroutine hse_taylor_stage(stage)
+    integer,intent(in) :: stage
+    integer :: ierr,no
+    select case(stage)
+    case(0)
+      taylor_active=.true.;taylor_midpoint=.false.
+      initial_ace=ace
+      if(propagator=='hse_taylor4_full')initial_source=full_source
+    case(1)
+      call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
+      if(ierr/=0)error stop 'HSE Taylor midpoint ACE failed'
+      if(propagator=='hse_taylor4_full')then
+        no=size(full_source,2)
+        if(allocated(midpoint_source))deallocate(midpoint_source)
+        allocate(midpoint_source(size(full_source,1),2*no,size(full_source,3)))
+        midpoint_source(:,:no,:)=initial_source/sqrt(2d0)
+        midpoint_source(:,no+1:,:)=full_source/sqrt(2d0)
+      endif
+      taylor_midpoint=.true.
+    case(2)
+      taylor_active=.false.;taylor_midpoint=.false.
+    case default
+      error stop 'Invalid HSE Taylor stage'
+    end select
+  end subroutine
+
   real(8) function hse_walltime()
     integer(int64) :: count,rate
     call system_clock(count,rate)
@@ -101,6 +131,7 @@ contains
     part=0;part(:,:,info%ik_s:info%ik_e)=local
     tick=hse_walltime()
     call comm_summation(part,source,size(source),info%icomm_k)
+    if(propagator=='hse_taylor4_full')full_source=source
     hse_timings(4)=hse_timings(4)+hse_walltime()-tick
     tick=hse_walltime()
     call hse_kernel_apply(kernel,source,source,part,info%id_k,info%isize_k,ierr)
@@ -126,8 +157,9 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
-    integer :: ierr,ng
+    integer :: ierr,ng,total_error
     real(8) :: tick
+    complex(8),allocatable :: gathered(:,:,:),partial(:,:,:),full_action(:,:,:)
     if(.not.hse_enabled())return
     if(.not.allocated(ace%factors))error stop 'HSE06: occupied exchange source is not initialized'
     ng=product(mg%num)
@@ -138,8 +170,29 @@ contains
       action_work(ng,info%numo,info%numk),output_work(ng,info%numo,info%numk))
     call hse_pack(psi,mg,info,target_work)
     tick=hse_walltime()
-    call hse_ace_apply(ace,target_work,action_work,ierr)
-    hse_timings(3)=hse_timings(3)+hse_walltime()-tick
+    if(taylor_active.and.propagator=='hse_taylor4_full')then
+      allocate(gathered(ng,info%numo,system%nk),partial(ng,info%numo,system%nk), &
+        full_action(ng,info%numo,system%nk))
+      partial=0;partial(:,:,info%ik_s:info%ik_e)=target_work
+      call comm_summation(partial,gathered,size(gathered),info%icomm_k)
+      if(taylor_midpoint)then
+        call hse_kernel_apply(kernel,midpoint_source,gathered,partial,info%id_k,info%isize_k,ierr)
+      else
+        call hse_kernel_apply(kernel,initial_source,gathered,partial,info%id_k,info%isize_k,ierr)
+      endif
+      call comm_summation(ierr,total_error,info%icomm_k)
+      if(total_error/=0)error stop 'HSE Taylor full target action failed'
+      call comm_summation(partial,full_action,size(full_action),info%icomm_k)
+      action_work=full_action(:,:,info%ik_s:info%ik_e)
+      hse_timings(1)=hse_timings(1)+hse_walltime()-tick
+    else
+      if(taylor_active.and.taylor_midpoint)then
+        call hse_ace_apply(midpoint_ace,target_work,action_work,ierr)
+      else
+        call hse_ace_apply(ace,target_work,action_work,ierr)
+      endif
+      hse_timings(3)=hse_timings(3)+hse_walltime()-tick
+    endif
     if(ierr/=0)error stop 'HSE06: ACE application failed'
     call hse_pack(hpsi,mg,info,output_work)
     output_work=output_work+.25d0*action_work

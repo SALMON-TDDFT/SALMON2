@@ -78,5 +78,10 @@ class NativeExchangeTest(unittest.TestCase):
     np.testing.assert_allclose(ace_out,ace_ref,rtol=3e-12,atol=3e-12)
     interpolation=np.fromfile(str(out)+'.occupied',np.complex128).reshape(packed(u).shape,order='F')
     np.testing.assert_allclose(interpolation,packed(w),rtol=3e-12,atol=3e-12)
+    midpoint=np.fromfile(str(out)+'.midpoint',np.complex128).reshape(ref.shape,order='F')
+    np.testing.assert_allclose(midpoint,.5*(1+abs(.7+.2j)**2)*ace_ref,rtol=3e-12,atol=3e-12)
+    mixed=np.fromfile(str(out)+'.full_midpoint',np.complex128).reshape(ref.shape,order='F')
+    mixed_ref=.5*(ref+packed(DistanceExchange((n,)*3,h,k).apply(t,t)[0]))
+    np.testing.assert_allclose(mixed,mixed_ref,rtol=3e-12,atol=3e-12)
 
 if __name__=='__main__':unittest.main()

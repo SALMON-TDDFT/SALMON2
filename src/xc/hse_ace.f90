@@ -4,12 +4,30 @@ module hse_ace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: hse_ace_state,hse_ace_build,hse_ace_apply
+  public :: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average
   type hse_ace_state
     complex(c_double_complex),allocatable :: factors(:,:,:)
     real(c_double) :: dv=0d0,condition=0d0
   end type
 contains
+  subroutine hse_ace_average(left,right,average,ierr)
+    type(hse_ace_state),intent(in) :: left,right
+    type(hse_ace_state),intent(out) :: average
+    integer,intent(out) :: ierr
+    integer :: ng,nl,nr,nk
+    ierr=1
+    if(.not.allocated(left%factors).or..not.allocated(right%factors))return
+    ng=size(left%factors,1);nl=size(left%factors,2);nk=size(left%factors,3);nr=size(right%factors,2)
+    if(size(right%factors,1)/=ng.or.size(right%factors,3)/=nk.or.left%dv/=right%dv)return
+    allocate(average%factors(ng,nl+nr,nk))
+    average%factors(:,:nl,:)=left%factors/sqrt(2d0)
+    average%factors(:,nl+1:,:)=right%factors/sqrt(2d0)
+    average%dv=left%dv
+    ! This representation applies (K_left+K_right)/2, not an average of orbitals.
+    average%condition=max(left%condition,right%condition)
+    ierr=0
+  end subroutine
+
   subroutine hse_ace_build(ace,u,w,dv,ierr)
     type(hse_ace_state),intent(inout) :: ace
     complex(c_double_complex),intent(in) :: u(:,:,:),w(:,:,:)
