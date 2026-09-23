@@ -33,3 +33,5 @@ Parallel-transport Crank–Nicolson with ACE is a separate option documented in 
 For longer constant-A response runs with validated restart and live status, see [README_EXTENDED.md](README_EXTENDED.md). The authoritative checkpoint embeds both wavefunctions and history; failed trial endpoints are not saved as accepted states.
 
 The fixed spatial-support experiment is documented in [local-support results](../../docs/results/si-hse-local-support/README.md). It has a consistent fixed-gauge energy gradient, but its orbital-specific cutoffs fail the common-Hermitian ACE gate. It is not integrated into the propagation driver.
+
+The alternative [common distance-kernel backend](../../docs/results/si-hse-distance-kernel/README.md) retains Hermiticity and energy-gradient consistency, supports ACE, and has a short Rc16 PT-CN pilot. It streams density-matrix blocks without MLWF optimization. Finite cutoffs change the HSE kernel; the integration rejects indefinite kernels and does not silently screen orbital pairs.

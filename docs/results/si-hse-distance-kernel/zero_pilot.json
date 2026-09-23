@@ -1,0 +1,80 @@
+{
+  "result": {
+    "completed": true,
+    "steps": 1,
+    "dt_au": 0.32,
+    "amplitude": 0.0,
+    "method": "PT-CN-ACE, Jia/Lin Eq.12",
+    "bootstrap_seconds": 7.443937125033699,
+    "builds": [
+      {
+        "full_exchange_seconds": 7.336493166978471,
+        "compression_seconds": 0.007625834026839584,
+        "interpolation_error": 1.9301966173288514e-15
+      },
+      {
+        "full_exchange_seconds": 7.369219874963164,
+        "compression_seconds": 0.007499874976929277,
+        "interpolation_error": 1.9136812185849726e-15
+      },
+      {
+        "full_exchange_seconds": 7.328996625030413,
+        "compression_seconds": 0.007509417016990483,
+        "interpolation_error": 1.90124324402547e-15
+      }
+    ],
+    "total_full_builds": 3,
+    "initial_pt_to_schrodinger_derivative_norm": 1.9079069491252797e-05,
+    "initial_pt_residual_Ha": 9.627975750686715e-06,
+    "exchange_backend": "DistanceExchange",
+    "radius_bohr": 16.0,
+    "energy_change_Ha": 0.0,
+    "propagation_seconds": 16.937525791989174,
+    "mean_step_seconds": 16.937525791989174,
+    "wall_seconds": 24.44041987496894,
+    "blas_threads": "1",
+    "fftw_threads": 0,
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "scope": "Short constant-A pilot only; no optical spectrum or long-time stability claim",
+    "metadata_note": "DistanceExchange uses NumPy FFT; corrected inactive FFTW label inherited by initial pilot driver."
+  },
+  "trajectory": [
+    {
+      "step": 1,
+      "time_au": 0.32,
+      "current": [
+        -9.584620753659092e-13,
+        7.277830766686166e-12,
+        -3.9288341727371896e-12
+      ],
+      "electron_number": 32.000000000000014,
+      "gram_error": 2.4934824181570765e-13,
+      "step_wall_seconds": 16.937525791989174,
+      "builds": 2,
+      "inner_applications": 23,
+      "full_residual": 4.2131359365806774e-11,
+      "residual_history": [
+        4.515821972980488e-09,
+        4.2131359365806774e-11
+      ],
+      "build_seconds": 14.72599300002912,
+      "inner_seconds": 1.9995445840177126,
+      "inexact_inner_exits": 2,
+      "inexact_events": [
+        {
+          "outer_iteration": 0,
+          "inner_iteration": 13,
+          "inner_residual": 1.8687586150280446e-11,
+          "full_residual": 4.515821972980488e-09
+        },
+        {
+          "outer_iteration": 1,
+          "inner_iteration": 8,
+          "inner_residual": 1.2213547058730993e-11,
+          "full_residual": 4.2131359365806774e-11
+        }
+      ],
+      "wall_seconds": 16.83748775004642
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "state_sha256": "4ea614e148d82ec6dab61ccc2da7301ed850bf51cfef0dc9dced99d94e084184",
+  "nk": 64,
+  "primitive_shape": [
+    12,
+    12,
+    12
+  ],
+  "occupied": 16,
+  "timing_scope": "One BLAS/FFTW thread, two methods on identical state. Reference RT may run concurrently.",
+  "rows": [
+    {
+      "exchange_seconds": 7.6658333750092424,
+      "density_seconds": 0.7156315416796133,
+      "transform_seconds": 6.227315832977183,
+      "application_seconds": 0.6880427513387986,
+      "workspace_bytes": 254803968,
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 1.0,
+      "radius_bohr": null,
+      "block_rows": 16,
+      "setup_seconds": 0.0037720410036854446,
+      "seconds": [
+        7.717559832963161,
+        7.665843666996807
+      ],
+      "median_seconds": 7.691701749979984,
+      "action_relative_error": 7.554315241699428e-15,
+      "hse_exchange_error_meV_per_atom": 0.0,
+      "metric_antihermiticity": 1.2053756961978968e-15,
+      "minimum_kernel_multiplier": 0.3102566460633406,
+      "ace_accepted": true,
+      "ace_compression_seconds": 0.00805079098790884,
+      "ace_apply_seconds": 0.003845791972707957,
+      "ace_span_relative_error": 1.8948079548379736e-15,
+      "ace_condition_max": 1.4304693533691224,
+      "break_even_uses": 1.001547451334364
+    },
+    {
+      "exchange_seconds": 7.158305999997538,
+      "density_seconds": 0.6756925440276973,
+      "transform_seconds": 5.778144867741503,
+      "application_seconds": 0.6407196240616031,
+      "workspace_bytes": 245366784,
+      "primitive_pair_fraction": 0.9367283950617284,
+      "nonzero_kernel_fraction": 0.013697616350906095,
+      "radius_bohr": 6.0,
+      "block_rows": 16,
+      "setup_seconds": 0.004124084021896124,
+      "seconds": [
+        7.116850249993149,
+        7.158315750013571
+      ],
+      "median_seconds": 7.13758300000336,
+      "action_relative_error": 0.013164354975610219,
+      "hse_exchange_error_meV_per_atom": 32.92962059061615,
+      "metric_antihermiticity": 1.1995794199015998e-15,
+      "minimum_kernel_multiplier": -1.6296595718383293,
+      "ace_accepted": true,
+      "ace_compression_seconds": 0.00871733296662569,
+      "ace_apply_seconds": 0.003983540984336287,
+      "ace_span_relative_error": 1.928801495481385e-15,
+      "ace_condition_max": 1.4751360370903879,
+      "break_even_uses": 1.0017804299251627
+    },
+    {
+      "exchange_seconds": 7.188727499975357,
+      "density_seconds": 0.6863992504077032,
+      "transform_seconds": 5.8464462015545,
+      "application_seconds": 0.5939661650918424,
+      "workspace_bytes": 254803968,
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 0.06028464988425926,
+      "radius_bohr": 10.0,
+      "block_rows": 16,
+      "setup_seconds": 0.0043355419766157866,
+      "seconds": [
+        7.237663500010967,
+        7.188737208023667
+      ],
+      "median_seconds": 7.213200354017317,
+      "action_relative_error": 0.001055039130794882,
+      "hse_exchange_error_meV_per_atom": 1.3292780923107226,
+      "metric_antihermiticity": 1.4144751864959701e-15,
+      "minimum_kernel_multiplier": 0.10248196744199028,
+      "ace_accepted": true,
+      "ace_compression_seconds": 0.007572249975055456,
+      "ace_apply_seconds": 0.0037733749486505985,
+      "ace_span_relative_error": 1.9568281136363737e-15,
+      "ace_condition_max": 1.4315307437678086,
+      "break_even_uses": 1.0015737207626412
+    },
+    {
+      "exchange_seconds": 7.224009333003778,
+      "density_seconds": 0.6873565824935213,
+      "transform_seconds": 5.852411414904054,
+      "application_seconds": 0.6222208812250756,
+      "workspace_bytes": 254803968,
+      "primitive_pair_fraction": 1.0,
+      "nonzero_kernel_fraction": 0.24964735243055555,
+      "radius_bohr": 16.0,
+      "block_rows": 16,
+      "setup_seconds": 0.003708000003825873,
+      "seconds": [
+        7.22036170901265,
+        7.224020165973343
+      ],
+      "median_seconds": 7.2221909374929965,
+      "action_relative_error": 3.2528954911455706e-05,
+      "hse_exchange_error_meV_per_atom": 0.01601700527418817,
+      "metric_antihermiticity": 1.212186587558481e-15,
+      "minimum_kernel_multiplier": 0.3171176635414277,
+      "ace_accepted": true,
+      "ace_compression_seconds": 0.007612582994624972,
+      "ace_apply_seconds": 0.0037575840251520276,
+      "ace_span_relative_error": 1.9301966173288514e-15,
+      "ace_condition_max": 1.4305112714646053,
+      "break_even_uses": 1.001575157165414
+    }
+  ],
+  "mlwf_reference": {
+    "seconds": [
+      12.141667750023771,
+      12.282178374996874
+    ],
+    "median_seconds": 12.211923062510323,
+    "transform_and_localization_included": false
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "result": {
+    "completed": true,
+    "steps": 1,
+    "dt_au": 0.32,
+    "amplitude": 0.0001,
+    "method": "PT-CN-ACE, Jia/Lin Eq.12",
+    "bootstrap_seconds": 7.536253124999348,
+    "builds": [
+      {
+        "full_exchange_seconds": 7.428639332996681,
+        "compression_seconds": 0.007653082953765988,
+        "interpolation_error": 1.9301966173288514e-15
+      },
+      {
+        "full_exchange_seconds": 7.358130709035322,
+        "compression_seconds": 0.0075638340204022825,
+        "interpolation_error": 1.92640775682504e-15
+      },
+      {
+        "full_exchange_seconds": 7.316776208986994,
+        "compression_seconds": 0.00759008398745209,
+        "interpolation_error": 1.9037983319988877e-15
+      },
+      {
+        "full_exchange_seconds": 7.295998541987501,
+        "compression_seconds": 0.0075714580016210675,
+        "interpolation_error": 1.9431548570625304e-15
+      }
+    ],
+    "total_full_builds": 4,
+    "initial_pt_to_schrodinger_derivative_norm": 0.00033968801765219074,
+    "initial_pt_residual_Ha": 0.0001714186474413998,
+    "exchange_backend": "DistanceExchange",
+    "radius_bohr": 16.0,
+    "energy_change_Ha": -7.105427357601002e-14,
+    "propagation_seconds": 25.687849208014086,
+    "mean_step_seconds": 25.687849208014086,
+    "wall_seconds": 33.280894625000656,
+    "blas_threads": "1",
+    "fftw_threads": 0,
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "scope": "Short constant-A pilot only; no optical spectrum or long-time stability claim",
+    "metadata_note": "DistanceExchange uses NumPy FFT; corrected inactive FFTW label inherited by initial pilot driver."
+  },
+  "trajectory": [
+    {
+      "step": 1,
+      "time_au": 0.32,
+      "current": [
+        -9.49701798359773e-13,
+        7.2687803917071855e-12,
+        2.7293815362357636e-06
+      ],
+      "electron_number": 31.999999999995826,
+      "gram_error": 6.822159097109323e-13,
+      "step_wall_seconds": 25.687849208014086,
+      "builds": 3,
+      "inner_applications": 39,
+      "full_residual": 9.47441173517607e-11,
+      "residual_history": [
+        2.666642512291579e-07,
+        4.372980751520787e-09,
+        9.47441173517607e-11
+      ],
+      "build_seconds": 22.01289216702571,
+      "inner_seconds": 3.409777208988089,
+      "inexact_inner_exits": 0,
+      "inexact_events": [],
+      "wall_seconds": 25.586952499987092
+    }
+  ]
+}

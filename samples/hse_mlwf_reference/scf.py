@@ -1,7 +1,9 @@
 """Self-consistent occupied-orbital HSE reference on an exported SALMON grid.
 
-Full support is used for the energy and gradient. Pair screening is a controlled
-intermediate approximation, disabled for final residual/energy verification.
+The default backend uses full support for the energy and gradient. Pair screening
+is a controlled intermediate approximation, disabled for final verification.
+An optional common-kernel backend uses its own (possibly modified) exchange
+kernel consistently for energy and gradient; its residual is not a full-HSE test.
 """
 import os
 os.environ.setdefault('OPENBLAS_NUM_THREADS','1')
@@ -14,11 +16,13 @@ from semilocal import Semilocal
 from exchange import ScreenedKernel,cell_shifts,bloch_to_wannier,wannier_to_bloch,symmetric_exchange
 
 class HSEFunctional:
- def __init__(self,model,xc,fftw=False):
+ def __init__(self,model,xc,fftw=False,exchange_backend=None):
+  if exchange_backend is not None and hasattr(exchange_backend,'validate_for_hse'):
+   exchange_backend.validate_for_hse()
   self.model=model;self.xc=xc;mesh=round(model.nk**(1/3));n=model.shape[0]
   self.kernel=ScreenedKernel((n*mesh,)*3,model.h,.11);self.shifts=cell_shifts(mesh,n)
-  self.backend=None
-  if fftw:
+  self.backend=None;self.exchange_backend=exchange_backend
+  if fftw and exchange_backend is None:
    from fftw_backend import FFTWConvolution
    self.backend=FFTWConvolution(self.kernel.multiplier);self.kernel.convolve=self.backend.convolve
  def close(self):
@@ -36,6 +40,9 @@ class HSEFunctional:
   return hu,energy,stats
 
  def exchange(self,u,gauge,pair_tolerance=0.):
+  if self.exchange_backend is not None:
+   if pair_tolerance!=0.:raise ValueError('Pair screening is not supported by the common-kernel backend')
+   return self.exchange_backend.apply(u,u)
   m=self.model
   start=time.perf_counter();localized=np.einsum('knxyz,knm->kmxyz',u,gauge,optimize=True)
   w,twist=bloch_to_wannier(localized,m.k,m.h);transform_seconds=time.perf_counter()-start

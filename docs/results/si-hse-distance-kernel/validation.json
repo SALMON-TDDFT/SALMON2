@@ -1,0 +1,62 @@
+{
+  "zero": {
+    "density_relative_error": 4.417279860745822e-09,
+    "orbital_relative_error": 7.641757788060739e-07,
+    "current_difference": [
+      -1.9784556909402845e-14,
+      1.2808411276829808e-14,
+      1.046509691671219e-15
+    ],
+    "current_relative_error": null,
+    "amplitude": 0.0,
+    "current": [
+      -9.584620753659092e-13,
+      7.277830766686166e-12,
+      -3.9288341727371896e-12
+    ],
+    "reference_current": [
+      -9.386775184565064e-13,
+      7.2650223554093365e-12,
+      -3.929880682428861e-12
+    ]
+  },
+  "plus": {
+    "density_relative_error": 4.409109823695881e-09,
+    "orbital_relative_error": 7.641466376503809e-07,
+    "current_difference": [
+      4.226804654263027e-18,
+      3.538967636533524e-18,
+      -2.595944225097617e-16
+    ],
+    "current_relative_error": 9.513252228785285e-11,
+    "amplitude": 0.0001,
+    "current": [
+      -9.49701798359773e-13,
+      7.2687803917071855e-12,
+      2.7293815362357636e-06
+    ],
+    "reference_current": [
+      -9.497060251644273e-13,
+      7.268776852739549e-12,
+      2.729381536495358e-06
+    ]
+  },
+  "reference_1fs": {
+    "status": "completed",
+    "pid": 83829,
+    "accepted_step": 130,
+    "target_steps": 130,
+    "dt_au": 0.32,
+    "time_fs": 1.0062558798596513,
+    "amplitude": 0.0001,
+    "checkpoint": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/calculations/si_hse_reference/linear_response/restart.npz",
+    "elapsed_this_run_seconds": 4919.754164959013,
+    "error": null,
+    "total_full_builds_this_run": 391,
+    "start_step": 0,
+    "energy_change_Ha": -6.266986929404084e-12,
+    "max_gram_error": 9.550368685524848e-11,
+    "max_electron_error": 8.635225867692498e-11,
+    "scope": "Constant-A trajectory; no spectral claim until adequate duration/analysis"
+  }
+}
