@@ -27,3 +27,5 @@ The RT state requires the adjacent SCF `result.json` to certify convergence with
 Accuracy, timing, and scope of the current experiment are recorded in `docs/results/si-hse-mlwf/README.md`.
 
 The optional ACE extension and self-consistent implicit-midpoint pilot are described in [README_ACE.md](README_ACE.md). They retain fresh full-exchange residual checks; they do not enable native SALMON hybrid dynamics or implement PT-CN yet.
+
+Parallel-transport Crank–Nicolson with ACE is a separate option documented in [README_PTCN.md](README_PTCN.md). It preserves the full-exchange endpoint residual gate and reports its norm drift without renormalizing the solution.

@@ -1,0 +1,775 @@
+{
+  "cases": {
+    "dt032": {
+      "result": {
+        "completed": true,
+        "steps": 1,
+        "dt_au": 0.32,
+        "amplitude": 0.0001,
+        "method": "PT-CN-ACE, Jia/Lin Eq.12",
+        "bootstrap_seconds": 11.35545304196421,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.245237041031942,
+            "compression_seconds": 0.007790457981172949,
+            "interpolation_error": 1.9561745354647207e-15
+          },
+          {
+            "full_exchange_seconds": 11.35387074999744,
+            "compression_seconds": 0.00801395799499005,
+            "interpolation_error": 2.007718368043271e-15
+          },
+          {
+            "full_exchange_seconds": 11.3320148329949,
+            "compression_seconds": 0.008005999960005283,
+            "interpolation_error": 2.021315118363168e-15
+          },
+          {
+            "full_exchange_seconds": 11.379850541998167,
+            "compression_seconds": 0.008054874953813851,
+            "interpolation_error": 1.9622046118672055e-15
+          }
+        ],
+        "total_full_builds": 4,
+        "initial_pt_to_schrodinger_derivative_norm": 0.00033915683738063225,
+        "energy_change_Ha": -7.460698725481052e-14,
+        "propagation_seconds": 37.82251179101877,
+        "mean_step_seconds": 37.82251179101877,
+        "wall_seconds": 49.26736950001214,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short constant-A pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.32,
+          "current": [
+            -9.497060251644273e-13,
+            7.268776852739549e-12,
+            2.729381536495358e-06
+          ],
+          "electron_number": 31.999999999995826,
+          "gram_error": 5.466177593265691e-13,
+          "step_wall_seconds": 37.82251179101877,
+          "builds": 3,
+          "inner_applications": 39,
+          "full_residual": 9.474311039829673e-11,
+          "residual_history": [
+            2.6662599713118204e-07,
+            4.372809713653544e-09,
+            9.474311039829673e-11
+          ],
+          "build_seconds": 34.109242083039135,
+          "inner_seconds": 3.4466588759678416,
+          "wall_seconds": 37.72238341596676
+        }
+      ]
+    },
+    "dt016": {
+      "result": {
+        "completed": true,
+        "steps": 2,
+        "dt_au": 0.16,
+        "amplitude": 0.0001,
+        "method": "PT-CN-ACE, Jia/Lin Eq.12",
+        "bootstrap_seconds": 11.254541083995719,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.145408708951436,
+            "compression_seconds": 0.007627625018358231,
+            "interpolation_error": 1.921720327137443e-15
+          },
+          {
+            "full_exchange_seconds": 11.155039167031646,
+            "compression_seconds": 0.007838457997422665,
+            "interpolation_error": 1.9687329456024596e-15
+          },
+          {
+            "full_exchange_seconds": 11.170442415983416,
+            "compression_seconds": 0.008025999995879829,
+            "interpolation_error": 2.0113635373552103e-15
+          },
+          {
+            "full_exchange_seconds": 11.18034662498394,
+            "compression_seconds": 0.0080751670175232,
+            "interpolation_error": 2.027968298003074e-15
+          },
+          {
+            "full_exchange_seconds": 11.199388250010088,
+            "compression_seconds": 0.007584665960166603,
+            "interpolation_error": 2.0052029350200806e-15
+          },
+          {
+            "full_exchange_seconds": 11.216052915959153,
+            "compression_seconds": 0.007692457991652191,
+            "interpolation_error": 2.027878424562553e-15
+          },
+          {
+            "full_exchange_seconds": 11.19281845795922,
+            "compression_seconds": 0.008119957987219095,
+            "interpolation_error": 2.0172657514152458e-15
+          }
+        ],
+        "total_full_builds": 7,
+        "initial_pt_to_schrodinger_derivative_norm": 0.0003391568373806299,
+        "energy_change_Ha": -2.842170943040401e-14,
+        "propagation_seconds": 72.05219929199666,
+        "mean_step_seconds": 36.02609964599833,
+        "wall_seconds": 83.39748200000031,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short constant-A pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.16,
+          "current": [
+            -5.582212342012914e-13,
+            4.434888815115362e-12,
+            2.7758273014047793e-06
+          ],
+          "electron_number": 31.999999999999954,
+          "gram_error": 6.834308314146452e-14,
+          "step_wall_seconds": 35.97652795899194,
+          "builds": 3,
+          "inner_applications": 25,
+          "full_residual": 6.7555071220534386e-12,
+          "residual_history": [
+            6.936452570007326e-08,
+            5.732716156576047e-10,
+            6.7555071220534386e-12
+          ],
+          "build_seconds": 33.549183708033524,
+          "inner_seconds": 2.161589957016986,
+          "wall_seconds": 35.876547584019136
+        },
+        {
+          "step": 2,
+          "time_au": 0.32,
+          "current": [
+            -9.933914423996782e-13,
+            7.625989973134827e-12,
+            2.723008797796372e-06
+          ],
+          "electron_number": 31.999999999998856,
+          "gram_error": 1.367551938366534e-13,
+          "step_wall_seconds": 36.07567133300472,
+          "builds": 3,
+          "inner_applications": 25,
+          "full_residual": 6.565024563473944e-12,
+          "residual_history": [
+            6.766159254852835e-08,
+            5.732716939795927e-10,
+            6.565024563473944e-12
+          ],
+          "build_seconds": 33.65113116701832,
+          "inner_seconds": 2.1588060400099494,
+          "wall_seconds": 35.97517599997809
+        }
+      ]
+    },
+    "dt008": {
+      "result": {
+        "completed": true,
+        "steps": 4,
+        "dt_au": 0.08,
+        "amplitude": 0.0001,
+        "method": "PT-CN-ACE, Jia/Lin Eq.12",
+        "bootstrap_seconds": 11.646429166023154,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.53742291702656,
+            "compression_seconds": 0.008022458001505584,
+            "interpolation_error": 1.9741964882774057e-15
+          },
+          {
+            "full_exchange_seconds": 11.491740082972683,
+            "compression_seconds": 0.008141459024045616,
+            "interpolation_error": 1.9830239823703224e-15
+          },
+          {
+            "full_exchange_seconds": 11.46778499998618,
+            "compression_seconds": 0.0081626670435071,
+            "interpolation_error": 1.9910137759702355e-15
+          },
+          {
+            "full_exchange_seconds": 11.487563291972037,
+            "compression_seconds": 0.008041499997489154,
+            "interpolation_error": 1.9902089994937022e-15
+          },
+          {
+            "full_exchange_seconds": 11.461815542017575,
+            "compression_seconds": 0.008079457969870418,
+            "interpolation_error": 2.0018947719694116e-15
+          },
+          {
+            "full_exchange_seconds": 11.476042333000805,
+            "compression_seconds": 0.00812037498690188,
+            "interpolation_error": 2.0029759866342125e-15
+          },
+          {
+            "full_exchange_seconds": 11.483734000008553,
+            "compression_seconds": 0.008233500004280359,
+            "interpolation_error": 2.046593842684389e-15
+          },
+          {
+            "full_exchange_seconds": 11.476468707958702,
+            "compression_seconds": 0.008307416981551796,
+            "interpolation_error": 2.0444419163034587e-15
+          },
+          {
+            "full_exchange_seconds": 11.470107041997835,
+            "compression_seconds": 0.008115041942801327,
+            "interpolation_error": 1.9969296290043806e-15
+          }
+        ],
+        "total_full_builds": 9,
+        "initial_pt_to_schrodinger_derivative_norm": 0.00033915683738063317,
+        "energy_change_Ha": -7.105427357601002e-14,
+        "propagation_seconds": 97.17777829192346,
+        "mean_step_seconds": 24.294444572980865,
+        "wall_seconds": 108.91540583298774,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short constant-A pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.08,
+          "current": [
+            -2.89901309078359e-13,
+            2.3335007872002263e-12,
+            2.7901461467976946e-06
+          ],
+          "electron_number": 32.0,
+          "gram_error": 4.196643033083092e-14,
+          "step_wall_seconds": 24.301592583942693,
+          "builds": 2,
+          "inner_applications": 13,
+          "full_residual": 7.26431745878829e-11,
+          "residual_history": [
+            1.7570600330801598e-08,
+            7.26431745878829e-11
+          ],
+          "build_seconds": 22.988667333032936,
+          "inner_seconds": 1.1004624579800293,
+          "wall_seconds": 24.201352625037543
+        },
+        {
+          "step": 2,
+          "time_au": 0.16,
+          "current": [
+            -5.659000709997172e-13,
+            4.522251072703955e-12,
+            2.7750776580469087e-06
+          ],
+          "electron_number": 31.999999999999982,
+          "gram_error": 6.750155989720952e-14,
+          "step_wall_seconds": 24.287225499982014,
+          "builds": 2,
+          "inner_applications": 13,
+          "full_residual": 7.278319682779173e-11,
+          "residual_history": [
+            1.7435819872481215e-08,
+            7.278319682779173e-11
+          ],
+          "build_seconds": 22.978495207964443,
+          "inner_seconds": 1.095065999950748,
+          "wall_seconds": 24.186547291988973
+        },
+        {
+          "step": 3,
+          "time_au": 0.24,
+          "current": [
+            -8.126492792625579e-13,
+            6.393974752010647e-12,
+            2.75142345810156e-06
+          ],
+          "electron_number": 31.99999999999988,
+          "gram_error": 9.037215420448774e-14,
+          "step_wall_seconds": 24.298945707967505,
+          "builds": 2,
+          "inner_applications": 13,
+          "full_residual": 7.267783202960827e-11,
+          "residual_history": [
+            1.720484570830954e-08,
+            7.267783202960827e-11
+          ],
+          "build_seconds": 22.989203625940718,
+          "inner_seconds": 1.0982165000168607,
+          "wall_seconds": 24.19879012502497
+        },
+        {
+          "step": 4,
+          "time_au": 0.32,
+          "current": [
+            -1.0096480493123148e-12,
+            7.75872617360055e-12,
+            2.7210389011935392e-06
+          ],
+          "electron_number": 31.99999999999968,
+          "gram_error": 1.0180745135812685e-13,
+          "step_wall_seconds": 24.290014500031248,
+          "builds": 2,
+          "inner_applications": 13,
+          "full_residual": 7.235093241475552e-11,
+          "residual_history": [
+            1.6924958232489895e-08,
+            7.235093241475552e-11
+          ],
+          "build_seconds": 22.975991833896842,
+          "inner_seconds": 1.1016118329716846,
+          "wall_seconds": 24.18929524999112
+        }
+      ]
+    },
+    "rk4_032": {
+      "result": {
+        "completed": true,
+        "steps": 4,
+        "dt_au": 0.08,
+        "amplitude": 0.0001,
+        "pair_tolerance": 0.0,
+        "initial_current": [
+          -1.238066478937017e-17,
+          1.465418095832596e-18,
+          2.7953264413479593e-06
+        ],
+        "energy_change_Ha": -1.3145040611561853e-13,
+        "wall_seconds": 192.68377141695237,
+        "rhs_timings": [
+          {
+            "seconds": 11.34021545900032,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21031612495426089,
+            "exchange_seconds": 11.01248645799933,
+            "transform_seconds": 0.06503504200372845,
+            "local_seconds": 0.04718654201133177
+          },
+          {
+            "seconds": 11.32012033299543,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.2105441250023432,
+            "exchange_seconds": 11.000014249992091,
+            "transform_seconds": 0.05866704095387831,
+            "local_seconds": 0.045694416970945895
+          },
+          {
+            "seconds": 11.3028027919936,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.20916058297734708,
+            "exchange_seconds": 10.985954875010066,
+            "transform_seconds": 0.0572156670386903,
+            "local_seconds": 0.045251292001921684
+          },
+          {
+            "seconds": 11.293169874988962,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21295845799613744,
+            "exchange_seconds": 10.972956833022181,
+            "transform_seconds": 0.05704916705144569,
+            "local_seconds": 0.044991749979089946
+          },
+          {
+            "seconds": 11.311350999982096,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21377520798705518,
+            "exchange_seconds": 10.990407791978214,
+            "transform_seconds": 0.056691500009037554,
+            "local_seconds": 0.04541029199026525
+          },
+          {
+            "seconds": 11.332471249974333,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21106825000606477,
+            "exchange_seconds": 11.014708917005919,
+            "transform_seconds": 0.05686341697582975,
+            "local_seconds": 0.044967624999117106
+          },
+          {
+            "seconds": 11.309793874970637,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21187862497754395,
+            "exchange_seconds": 10.989781167008914,
+            "transform_seconds": 0.057180624979082495,
+            "local_seconds": 0.04576795798493549
+          },
+          {
+            "seconds": 11.315934540994931,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.210651290952228,
+            "exchange_seconds": 10.998318917001598,
+            "transform_seconds": 0.05678412498673424,
+            "local_seconds": 0.04501629201695323
+          },
+          {
+            "seconds": 11.302093542006332,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.2091332499985583,
+            "exchange_seconds": 10.984898084017914,
+            "transform_seconds": 0.057653750001918525,
+            "local_seconds": 0.045251375006046146
+          },
+          {
+            "seconds": 11.373642333957832,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21178212499944493,
+            "exchange_seconds": 11.053123832971323,
+            "transform_seconds": 0.058206499030347914,
+            "local_seconds": 0.0453656250028871
+          },
+          {
+            "seconds": 11.31206258299062,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.2191900000325404,
+            "exchange_seconds": 10.982542874990031,
+            "transform_seconds": 0.058350250008516014,
+            "local_seconds": 0.046888082986697555
+          },
+          {
+            "seconds": 11.295420292008203,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.20998058299301192,
+            "exchange_seconds": 10.977546250040177,
+            "transform_seconds": 0.057507499994244426,
+            "local_seconds": 0.0452555840020068
+          },
+          {
+            "seconds": 11.312306250038091,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21078670799033716,
+            "exchange_seconds": 10.994454750034492,
+            "transform_seconds": 0.05643337598303333,
+            "local_seconds": 0.045345791964791715
+          },
+          {
+            "seconds": 11.293983749987092,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.21064916701288894,
+            "exchange_seconds": 10.977290708979126,
+            "transform_seconds": 0.055876541999168694,
+            "local_seconds": 0.044852874998468906
+          },
+          {
+            "seconds": 11.293283124978188,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.20936450001318008,
+            "exchange_seconds": 10.97747416695347,
+            "transform_seconds": 0.0561233339831233,
+            "local_seconds": 0.04507812496740371
+          },
+          {
+            "seconds": 11.30546633299673,
+            "total_pairs": 16384,
+            "retained_pairs": 16384,
+            "convolutions": 8256,
+            "pair_tolerance": 0.0,
+            "screening_seconds": 0.20968804199947044,
+            "exchange_seconds": 10.989188125007786,
+            "transform_seconds": 0.05627395794726908,
+            "local_seconds": 0.0449945000000298
+          }
+        ],
+        "mean_step_seconds": 45.32001803124149,
+        "scope": "Short RT-HSE pilot; not an optical spectrum"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.08,
+          "electron_number": 31.999999999999226,
+          "max_gram_error": 1.3974773582412636e-12,
+          "current": [
+            -2.904013005374045e-13,
+            2.348278019510806e-12,
+            2.790066081551153e-06
+          ],
+          "wall_seconds": 45.32225629099412
+        },
+        {
+          "step": 2,
+          "time_au": 0.16,
+          "electron_number": 31.999999999998447,
+          "max_gram_error": 2.7942952512160504e-12,
+          "current": [
+            -5.684831003753223e-13,
+            4.5558626965957045e-12,
+            2.7747988853785227e-06
+          ],
+          "wall_seconds": 45.33578841702547
+        },
+        {
+          "step": 3,
+          "time_au": 0.24,
+          "electron_number": 31.999999999997677,
+          "max_gram_error": 4.191060847209583e-12,
+          "current": [
+            -8.176690742702297e-13,
+            6.4452946210819844e-12,
+            2.7509172777229224e-06
+          ],
+          "wall_seconds": 45.350306874956004
+        },
+        {
+          "step": 4,
+          "time_au": 0.32,
+          "electron_number": 31.9999999999969,
+          "max_gram_error": 5.587298632140905e-12,
+          "current": [
+            -1.0155786856886692e-12,
+            7.809183836158715e-12,
+            2.7203685887638753e-06
+          ],
+          "wall_seconds": 45.27172054199036
+        }
+      ]
+    },
+    "zero032": {
+      "result": {
+        "completed": true,
+        "steps": 1,
+        "dt_au": 0.32,
+        "amplitude": 0.0,
+        "method": "PT-CN-ACE, Jia/Lin Eq.12",
+        "bootstrap_seconds": 11.117444334027823,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.006492083019111,
+            "compression_seconds": 0.007600459037348628,
+            "interpolation_error": 2.0041212501022656e-15
+          },
+          {
+            "full_exchange_seconds": 11.045238667051308,
+            "compression_seconds": 0.008132417045999318,
+            "interpolation_error": 1.9778968342009626e-15
+          },
+          {
+            "full_exchange_seconds": 11.04880604101345,
+            "compression_seconds": 0.008057625032961369,
+            "interpolation_error": 1.980194642680412e-15
+          }
+        ],
+        "total_full_builds": 3,
+        "initial_pt_to_schrodinger_derivative_norm": 1.571507300505788e-06,
+        "energy_change_Ha": -3.552713678800501e-15,
+        "propagation_seconds": 24.184023833018728,
+        "mean_step_seconds": 24.184023833018728,
+        "wall_seconds": 35.39356820797548,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short constant-A pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.32,
+          "current": [
+            -9.386775184565064e-13,
+            7.2650223554093365e-12,
+            -3.929880682428861e-12
+          ],
+          "electron_number": 32.0,
+          "gram_error": 1.1181885308884077e-13,
+          "step_wall_seconds": 24.184023833018728,
+          "builds": 2,
+          "inner_applications": 21,
+          "full_residual": 1.5373843542932958e-11,
+          "residual_history": [
+            3.1402130607209777e-10,
+            1.5373843542932958e-11
+          ],
+          "build_seconds": 22.12321754201548,
+          "inner_seconds": 1.846013541042339,
+          "inexact_inner_exits": 2,
+          "inexact_events": [
+            {
+              "outer_iteration": 0,
+              "inner_iteration": 11,
+              "inner_residual": 1.423496737902011e-11,
+              "full_residual": 3.1402130607209777e-10
+            },
+            {
+              "outer_iteration": 1,
+              "inner_iteration": 8,
+              "inner_residual": 1.505599009103618e-11,
+              "full_residual": 1.5373843542932958e-11
+            }
+          ],
+          "wall_seconds": 24.081856500008143
+        }
+      ]
+    },
+    "midpoint032": {
+      "result": {
+        "steps": 1,
+        "dt_au": 0.32,
+        "amplitude": 0.0001,
+        "method": "ACE self-consistent implicit midpoint in original Bloch gauge (not PT-CN)",
+        "full_exchange_seconds": 11.48880354204448,
+        "compression_seconds": 0.007962916977703571,
+        "apply_seconds": [
+          0.0037807500339113176,
+          0.003867708030156791,
+          0.0038182500284165144,
+          0.0037914999993517995,
+          0.0036812920006923378,
+          0.0037016249843873084,
+          0.0036964999744668603
+        ],
+        "median_apply_seconds": 0.0037807500339113176,
+        "interpolation_relative_error": 1.9835929589615926e-15,
+        "builds": [
+          {
+            "full_exchange_seconds": 11.468240917020012,
+            "compression_seconds": 0.007952957996167243,
+            "interpolation_relative_error": 1.9835929589615926e-15,
+            "metric_condition": 1.4304693533691266
+          },
+          {
+            "full_exchange_seconds": 11.482513333961833,
+            "compression_seconds": 0.00834595796186477,
+            "interpolation_relative_error": 2.012886452289375e-15,
+            "metric_condition": 1.4292842994538648
+          },
+          {
+            "full_exchange_seconds": 11.480761291983072,
+            "compression_seconds": 0.00825941702350974,
+            "interpolation_relative_error": 1.9846962779733323e-15,
+            "metric_condition": 1.4292864051850764
+          },
+          {
+            "full_exchange_seconds": 11.463731208990794,
+            "compression_seconds": 0.008299542008899152,
+            "interpolation_relative_error": 2.044082384521826e-15,
+            "metric_condition": 1.429286396591416
+          },
+          {
+            "full_exchange_seconds": 11.526247250032611,
+            "compression_seconds": 0.0077600000076927245,
+            "interpolation_relative_error": 2.0123233547916647e-15,
+            "metric_condition": 1.429286396470972
+          }
+        ],
+        "energy_change_Ha": 9.423580138445686e-09,
+        "wall_seconds": 97.18678258295404,
+        "mean_step_seconds": 62.577428916003555,
+        "blas_threads": "1",
+        "fftw_threads": 1,
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "scope": "Short pilot only; no optical spectrum or long-time stability claim"
+      },
+      "trajectory": [
+        {
+          "step": 1,
+          "time_au": 0.32,
+          "current": [
+            -9.47001298829016e-13,
+            7.278380691177652e-12,
+            2.7295860022646837e-06
+          ],
+          "electron_number": 31.99999999999864,
+          "gram_error": 1.5087930904655877e-13,
+          "step_wall_seconds": 62.577428916003555,
+          "builds": 5,
+          "inner_applications": 57,
+          "full_residual": 9.215657529037825e-12,
+          "residual_history": [
+            7.275097989013208e-06,
+            2.0429056711623685e-08,
+            4.688563997759908e-10,
+            9.215657529037825e-12
+          ],
+          "build_seconds": 57.49449779296992,
+          "inner_seconds": 4.829267168010119,
+          "wall_seconds": 62.52262449997943
+        }
+      ]
+    }
+  },
+  "comparisons": {
+    "dt032": {
+      "current_relative_difference": 0.0033131347660436874,
+      "current_absolute_difference": 9.012947747924561e-09,
+      "density_relative_difference": 6.854172464225981e-07,
+      "gauge_aligned_orbital_relative_difference": 8.594411132168723e-07,
+      "propagation_seconds": 37.82251179101877
+    },
+    "dt016": {
+      "current_relative_difference": 0.0009705335702814069,
+      "current_absolute_difference": 2.6402090389454587e-09,
+      "density_relative_difference": 2.9142739597841346e-07,
+      "gauge_aligned_orbital_relative_difference": 2.9004506251549177e-07,
+      "propagation_seconds": 72.05219929199666
+    },
+    "dt008": {
+      "current_relative_difference": 0.00024640500348192546,
+      "current_absolute_difference": 6.703124315892919e-10,
+      "density_relative_difference": 8.675585759558108e-08,
+      "gauge_aligned_orbital_relative_difference": 8.013244123797455e-08,
+      "propagation_seconds": 97.17777829192346
+    },
+    "midpoint032": {
+      "current_relative_difference": 0.00338829581931652,
+      "current_absolute_difference": 9.21741351634724e-09,
+      "density_relative_difference": 5.148099127451047e-06,
+      "gauge_aligned_orbital_relative_difference": 1.748761888886168e-05,
+      "propagation_seconds": 62.577428916003555
+    }
+  },
+  "reference": "Full self-consistent RK4, 4 steps of 0.08 au",
+  "final_time_au": 0.32,
+  "final_time_fs": 0.007740429845074241,
+  "scope": "Short-pilot errors relative to stated finite-step RK4; not converged spectra"
+}
