@@ -1,5 +1,6 @@
+#include "config.h"
 ! SALMON adapter: initial certified layout is complete grid/orbitals per rank,
-! distributed k points. Exchange builds share sources; ACE applications stay local.
+! distributed k points. Exchange transfers density tiles; ACE applications stay local.
 module hse_native
   use iso_fortran_env, only: int64
   use structures
@@ -21,7 +22,7 @@ module hse_native
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:),output_work(:,:,:)
   real(8),save :: hse_exchange_energy=0d0
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
-  logical,save :: hse_freeze=.false.
+  logical,save :: hse_freeze=.false.,reported_team=.false.
 contains
   subroutine hse_taylor_stage(stage)
     integer,intent(in) :: stage
@@ -144,6 +145,8 @@ contains
     hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
+    if(.not.reported_team.and.info%id_k==0)write(*,'(a,i0)')'HSE_OPENMP threads=',kernel%threads_used
+    reported_team=.true.
     tick=hse_walltime()
     call hse_ace_build(ace,local,w,system%hvol,ierr)
     hse_timings(2)=hse_timings(2)+hse_walltime()-tick

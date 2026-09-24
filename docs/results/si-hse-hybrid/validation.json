@@ -1,0 +1,5 @@
+{
+  "restart_bitwise_equal": true,
+  "ptcn_omp2_relative_error": 3.1061141904629343e-12,
+  "ptcn_omp4_relative_error": 1.8974220221431873e-12
+}

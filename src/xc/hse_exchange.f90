@@ -1,6 +1,7 @@
 ! Full periodic sampled HSE kernel. Unit one-spin source occupations;
 ! neither the hybrid mixing fraction nor a second spin factor is included.
 module hse_exchange
+!$ use omp_lib, only: omp_get_num_threads
   use iso_c_binding
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -9,7 +10,7 @@ module hse_exchange
   public :: hse_kernel, hse_kernel_init, hse_kernel_apply, hse_kernel_destroy
   public :: hse_kernel_apply_distributed
   type hse_kernel
-    integer :: n=0, mesh=0, ng=0, nk=0, block=0, phase_start=1
+    integer :: n=0, mesh=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1
     integer, allocatable :: order(:), point(:,:),shift(:,:)
     complex(c_double_complex), allocatable :: phase(:,:),work(:,:,:)
     real(c_double), allocatable :: kernel(:,:,:)
@@ -188,12 +189,21 @@ contains
     allocate(send(nmsg*np),recv(nmsg*np),s(ng,no,nlocal),t(ng,nt,nlocal),inverse(nk))
     sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
     do ki=1,nk;inverse(op%order(ki))=ki;enddo
+    op%threads_used=1
+    !$omp parallel private(j,g)
+    !$omp single
+!$  op%threads_used=omp_get_num_threads()
+    !$omp end single
+    !$omp do schedule(static)
     do j=1,nlocal
       do g=1,no;s(:,g,j)=source(:,g,j)*op%phase(:,j);enddo
       do g=1,nt;t(:,g,j)=target(:,g,j)*op%phase(:,j);enddo
     enddo
+    !$omp end do
+    !$omp end parallel
     do base=1,ng,np*b
       send=zero
+      ! BLAS owns threading here; call only outside application OpenMP regions.
       do p=0,np-1
         lo=base+p*b;rows=min(b,ng-lo+1)
         if(rows<=0)cycle
@@ -203,21 +213,28 @@ contains
       enddo
       call transpose_tiles(send,recv,nmsg)
       op%work=zero
+      !$omp parallel do private(j,ki) schedule(static)
       do p=1,np;do j=1,counts(p)
         ki=inverse(starts(p)+j-1);op%work(:,:,ki)=rb(:,:,j,p)
       enddo;enddo
+      !$omp end parallel do
       call fftw_execute_dft(op%forward,op%work,op%work)
       lo=base+rank*b;rows=min(b,ng-lo+1)
+      !$omp parallel do collapse(2) private(r,offset) schedule(static)
       do ki=1,nk;do g=1,ng;do r=1,max(0,rows)
         offset=modulo(op%point(:,lo+r-1)-op%point(:,g)-op%shift(:,ki),ns)
         op%work(r,g,ki)=op%work(r,g,ki)*op%kernel(offset(1),offset(2),offset(3))
       enddo;enddo;enddo
+      !$omp end parallel do
       call fftw_execute_dft(op%backward,op%work,op%work)
       send=zero
+      !$omp parallel do private(j,ki) schedule(static)
       do p=1,np;do j=1,counts(p)
         ki=inverse(starts(p)+j-1);sb(:,:,j,p)=op%work(:,:,ki)
       enddo;enddo
+      !$omp end parallel do
       call transpose_tiles(send,recv,nmsg)
+      ! BLAS owns threading here; call only outside application OpenMP regions.
       do p=0,np-1
         lo=base+p*b;rows=min(b,ng-lo+1)
         if(rows<=0)cycle

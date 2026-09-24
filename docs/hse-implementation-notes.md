@@ -149,3 +149,9 @@ TDCDFT・ELFなどの既存機能は[別の検証ノート](tdcdft-validation.md
 ## 固定Si系の強スケーリング
 
 [競合する参照ジョブを停止したMPI1/2/4/8/16測定](results/si-hse-strong-scaling/README.md)を追加した。Taylor＋ACEは1→16並列で5.05→1.27秒/step（3.96倍）、最大ランクRSSは597→175 MiB、合計RSSは0.583→2.500 GiB。この小系では8並列が速度と合計メモリのバランスを取りやすい。
+
+## BLAS内部OpenMPとTaylor4＋ACE
+
+[BLAS内部OpenMP計測](results/si-hse-blas-hybrid/README.md)を追加。HSEのBLAS呼び出しはSALMONのOpenMP領域外で行い、BLAS内部の並列化に委ねる。ACE適用は各k点について `overlap = dv * factors† * target`、`action = -factors * overlap` の二つのZGEMMであり、k点ループ自体は直列。交換カーネルの要素積・転置用整形にはSALMON側OpenMPを使う。MPIとFFTWは並列領域外。スレッドごとの巨大な軌道複製は行わない。
+
+富岳でOMP約12を使う構成を想定し、OpenBLAS固有の1スレッド強制を廃止した。リンクするBLASの並列版と実行時設定が必要。ローカルOMP12の数値一致と富岳実機の性能検証は区別する。

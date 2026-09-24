@@ -1,16 +1,18 @@
 program probe
   use, intrinsic :: ieee_arithmetic
+  use omp_lib, only: omp_get_max_threads
   use mpi
   use hse_exchange
   implicit none
   type(hse_kernel) :: op
-  integer :: rank,np,status,n,m,no,nt,nk,ng,ik0,nloc,iu,ierr,p
+  integer :: rank,np,status,n,m,no,nt,nk,ng,ik0,nloc,iu,ierr,p,provided
   integer,allocatable :: starts(:),counts(:)
   real(8) :: h,omega
   real(8),allocatable :: k(:,:)
   complex(8),allocatable :: u(:,:,:),t(:,:,:),a(:,:,:),local_u(:,:,:),local_t(:,:,:),local_a(:,:,:)
   character(1024) :: input,output,invalid
-  call MPI_Init(status)
+  call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,status)
+  if(provided<MPI_THREAD_FUNNELED)call MPI_Abort(MPI_COMM_WORLD,7,status)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,status)
   call MPI_Comm_size(MPI_COMM_WORLD,np,status)
   call get_command_argument(1,input);call get_command_argument(2,output)
@@ -41,6 +43,7 @@ program probe
     stop
   endif
   if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,3,status)
+  if(op%threads_used/=omp_get_max_threads())call MPI_Abort(MPI_COMM_WORLD,6,status)
   t=0;t(:,:,ik0:ik0+nloc-1)=local_a
   call MPI_Reduce(t,a,size(t),MPI_DOUBLE_COMPLEX,MPI_SUM,0,MPI_COMM_WORLD,status)
   if(rank==0)then

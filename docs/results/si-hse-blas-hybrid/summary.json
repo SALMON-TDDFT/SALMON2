@@ -1,0 +1,26 @@
+[
+  {
+    "threads": 1,
+    "seconds_per_step": 5.046200000000001,
+    "peak_rss_MiB": 597.03125,
+    "max_relative_error": 0.0
+  },
+  {
+    "threads": 2,
+    "seconds_per_step": 3.6481000000000003,
+    "peak_rss_MiB": 597.609375,
+    "max_relative_error": 2.9539531034375846e-12
+  },
+  {
+    "threads": 4,
+    "seconds_per_step": 3.1933,
+    "peak_rss_MiB": 597.875,
+    "max_relative_error": 4.171565583980142e-12
+  },
+  {
+    "threads": 12,
+    "seconds_per_step": 4.6873000000000005,
+    "peak_rss_MiB": 599.09375,
+    "max_relative_error": 2.815657187923833e-12
+  }
+]

@@ -27,11 +27,19 @@ class NativeExchangeTest(unittest.TestCase):
   if not shutil.which(os.environ.get('FC','gfortran')) or not (fftw/'include/fftw3.f03').exists():
    raise unittest.SkipTest('Native kernel tests require gfortran and FFTW_ROOT')
   blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-  cmd=[os.environ.get('FC','gfortran'),'-O2','-fcheck=all','-I'+str(fftw/'include'),str(source),str(ROOT/'src/xc/hse_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
+  cmd=[os.environ.get('FC','gfortran'),'-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(source),str(ROOT/'src/xc/hse_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
   result=subprocess.run(cmd,cwd=cls.directory,capture_output=True,text=True)
   if result.returncode:raise AssertionError(result.stderr)
  @classmethod
  def tearDownClass(cls):cls.tmp.cleanup()
+ def test_production_sized_ace_with_openmp_environment(self):
+  exe=self.directory/'ace_omp'
+  blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
+  result=subprocess.run([os.environ.get('FC','gfortran'),'-O3','-fopenmp',str(ROOT/'src/xc/hse_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_ace_omp_probe.f90'),'-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)],cwd=self.directory,capture_output=True,text=True)
+  self.assertEqual(result.returncode,0,result.stderr)
+  for threads in (1,2,4,12):
+   result=subprocess.run([str(exe)],env=dict(os.environ,OMP_NUM_THREADS=str(threads),OMP_DYNAMIC='FALSE',OPENBLAS_NUM_THREADS=str(threads)),capture_output=True,text=True)
+   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
  def test_ptcn_matches_reference(self):
   from ptcn import ptcn_step
   source=ROOT/'src/rt/hse_ptcn_core.f90'
@@ -68,7 +76,8 @@ class NativeExchangeTest(unittest.TestCase):
    total=np.zeros_like(ref)
    for rank in range(size):
     out=self.directory/'output.bin'
-    subprocess.run([str(self.exe),str(path),str(out),str(rank),str(size)],check=True,capture_output=True)
+    subprocess.run([str(self.exe),str(path),str(out),str(rank),str(size)],check=True,capture_output=True,
+     env=dict(os.environ,OMP_NUM_THREADS='4',OMP_DYNAMIC='FALSE',OPENBLAS_NUM_THREADS='1'))
     total+=np.fromfile(out,np.complex128).reshape(ref.shape,order='F')
    np.testing.assert_allclose(total,ref,rtol=2e-12,atol=2e-12)
    if size==1:

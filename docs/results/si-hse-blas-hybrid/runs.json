@@ -1,0 +1,138 @@
+[
+  {
+    "case": "blas_hybrid_taylor_n1_t1_r0",
+    "ranks": 1,
+    "threads": 1,
+    "repeat": 0,
+    "steps": 5,
+    "rt_seconds": 25.048,
+    "total_seconds": 27.463663,
+    "seconds_per_step": 5.0096,
+    "sampled_peak_sum_rss_KiB": 611360,
+    "sampled_peak_rank_rss_KiB": 611360,
+    "rss_vector_at_sum_peak_KiB": [
+      611360
+    ],
+    "samples": 202,
+    "orbital_relative_difference": 0.0
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t2_r0",
+    "ranks": 1,
+    "threads": 2,
+    "repeat": 0,
+    "steps": 5,
+    "rt_seconds": 18.061,
+    "total_seconds": 19.828786,
+    "seconds_per_step": 3.6122,
+    "sampled_peak_sum_rss_KiB": 611952,
+    "sampled_peak_rank_rss_KiB": 611952,
+    "rss_vector_at_sum_peak_KiB": [
+      611952
+    ],
+    "samples": 142,
+    "orbital_relative_difference": 2.9539531034375846e-12
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t4_r0",
+    "ranks": 1,
+    "threads": 4,
+    "repeat": 0,
+    "steps": 5,
+    "rt_seconds": 15.578,
+    "total_seconds": 17.090922,
+    "seconds_per_step": 3.1155999999999997,
+    "sampled_peak_sum_rss_KiB": 612144,
+    "sampled_peak_rank_rss_KiB": 612144,
+    "rss_vector_at_sum_peak_KiB": [
+      612144
+    ],
+    "samples": 122,
+    "orbital_relative_difference": 4.171565583980142e-12
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t12_r0",
+    "ranks": 1,
+    "threads": 12,
+    "repeat": 0,
+    "steps": 5,
+    "rt_seconds": 23.239,
+    "total_seconds": 25.385212,
+    "seconds_per_step": 4.6478,
+    "sampled_peak_sum_rss_KiB": 613440,
+    "sampled_peak_rank_rss_KiB": 613440,
+    "rss_vector_at_sum_peak_KiB": [
+      613440
+    ],
+    "samples": 181,
+    "orbital_relative_difference": 2.815657187923833e-12
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t12_r1",
+    "ranks": 1,
+    "threads": 12,
+    "repeat": 1,
+    "steps": 5,
+    "rt_seconds": 23.634,
+    "total_seconds": 25.9622,
+    "seconds_per_step": 4.7268,
+    "sampled_peak_sum_rss_KiB": 613472,
+    "sampled_peak_rank_rss_KiB": 613472,
+    "rss_vector_at_sum_peak_KiB": [
+      613472
+    ],
+    "samples": 184,
+    "orbital_relative_difference": 2.815657187923833e-12
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t4_r1",
+    "ranks": 1,
+    "threads": 4,
+    "repeat": 1,
+    "steps": 5,
+    "rt_seconds": 16.355,
+    "total_seconds": 17.951168,
+    "seconds_per_step": 3.271,
+    "sampled_peak_sum_rss_KiB": 612224,
+    "sampled_peak_rank_rss_KiB": 612224,
+    "rss_vector_at_sum_peak_KiB": [
+      612224
+    ],
+    "samples": 127,
+    "orbital_relative_difference": 4.171565583980142e-12
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t2_r1",
+    "ranks": 1,
+    "threads": 2,
+    "repeat": 1,
+    "steps": 5,
+    "rt_seconds": 18.42,
+    "total_seconds": 20.218489,
+    "seconds_per_step": 3.684,
+    "sampled_peak_sum_rss_KiB": 611952,
+    "sampled_peak_rank_rss_KiB": 611952,
+    "rss_vector_at_sum_peak_KiB": [
+      611952
+    ],
+    "samples": 145,
+    "orbital_relative_difference": 2.9539531034375846e-12
+  },
+  {
+    "case": "blas_hybrid_taylor_n1_t1_r1",
+    "ranks": 1,
+    "threads": 1,
+    "repeat": 1,
+    "steps": 5,
+    "rt_seconds": 25.414,
+    "total_seconds": 27.824277,
+    "seconds_per_step": 5.082800000000001,
+    "sampled_peak_sum_rss_KiB": 611088,
+    "sampled_peak_rank_rss_KiB": 611088,
+    "rss_vector_at_sum_peak_KiB": [
+      611088
+    ],
+    "samples": 202,
+    "orbital_relative_difference": 0.0
+  }
+]

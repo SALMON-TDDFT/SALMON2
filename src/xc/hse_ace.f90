@@ -82,6 +82,7 @@ contains
       call zgemm('C','N',no,nt,ng,one*ace%dv,ace%factors(1,1,ik),ng,target(1,1,ik),ng,zero,overlap(1,1),no)
       call zgemm('N','N',ng,nt,no,-one,ace%factors(1,1,ik),ng,overlap(1,1),no,zero,action(1,1,ik),ng)
     enddo
+    deallocate(overlap)
     ierr=0
   end subroutine
 end module

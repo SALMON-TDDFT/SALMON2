@@ -12,7 +12,7 @@ class DistributedExchangeTest(unittest.TestCase):
    d=Path(tmp); exe=d/'probe'
    fftw=Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))
    blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-   cmd=['mpifort','-O2','-fcheck=all','-I'+str(fftw/'include'),str(ROOT/'src/xc/hse_exchange.f90'),str(ROOT/'samples/hse_mlwf_reference/native_distributed_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)]
+   cmd=['mpifort','-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(ROOT/'src/xc/hse_exchange.f90'),str(ROOT/'samples/hse_mlwf_reference/native_distributed_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)]
    result=subprocess.run(cmd,cwd=d,capture_output=True,text=True)
    self.assertEqual(result.returncode,0,result.stderr)
    rng=np.random.default_rng(804)
@@ -22,8 +22,8 @@ class DistributedExchangeTest(unittest.TestCase):
     u=rng.normal(size=(8,2,n,n,n))+1j*rng.normal(size=(8,2,n,n,n))
     t=rng.normal(size=(8,3,n,n,n))+1j*rng.normal(size=(8,3,n,n,n))
     ref=packed(DistanceExchange((n,)*3,h,k).apply(u,t)[0]);write_fixture(d/'in',u,t,k,h)
-    for np_ in (1,3,8):
-     env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
+    for np_,threads in ((1,1),(3,1),(8,1),(3,2),(3,4),(1,12)):
+     env=dict(os.environ,OMP_NUM_THREADS=str(threads),OMP_DYNAMIC='FALSE',OPENBLAS_NUM_THREADS=str(threads))
      r=subprocess.run(['mpiexec','-n',str(np_),str(exe),str(d/'in'),str(d/'out')],env=env,capture_output=True,text=True,timeout=90)
      self.assertEqual(r.returncode,0,r.stderr)
      out=np.fromfile(d/'out',np.complex128).reshape(ref.shape,order='F')

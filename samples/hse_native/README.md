@@ -118,3 +118,12 @@ Source, target, action, phase and ACE factors now remain on their owning k
 ranks. Only density-matrix row tiles are transposed for the exchange FFT.
 Taylor snapshots are freed after use. This reduces memory but adds communication;
 see the [measured memory/time tradeoff](../../docs/results/si-hse-distributed-memory/README.md).
+
+### Internally threaded BLAS
+
+HSE calls BLAS outside application OpenMP regions. Link a threaded BLAS and
+configure its runtime (for the tested OpenMP OpenBLAS: `OMP_NUM_THREADS=12`,
+`OMP_DYNAMIC=FALSE`, `OPENBLAS_NUM_THREADS=12`). HSE does not override the vendor
+thread count. These are local OpenBLAS settings, not a certified Fugaku job script.
+MPI/FFTW calls remain outside OpenMP; no per-thread orbital replicas are allocated.
+See `docs/results/si-hse-blas-hybrid/README.md` for Taylor4+ACE measurements.
