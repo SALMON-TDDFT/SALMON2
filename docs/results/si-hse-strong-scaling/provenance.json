@@ -1,0 +1,8 @@
+{
+  "source_commit": "4a962f4cfdf6e1232c268461ff1c8945752cb02c",
+  "binary_sha256": "86c4e901ef8c13e96d4fffd008be674b20f7220ffe02f08b1836735cde31cff9",
+  "cpu_cores": 18,
+  "super_cores": 6,
+  "performance_cores": 12,
+  "memory_bytes": 68719476736
+}

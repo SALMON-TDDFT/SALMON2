@@ -1,0 +1,117 @@
+##############################################################################
+# SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience
+#
+#                             Version 2.3.0
+##############################################################################
+  Libxc: [disabled]
+   theory= tddft_response
+
+ Total time step      =           5
+ Time step[fs]        =   3.8702149224080001E-003
+ Energy range         =        1000
+ Energy resolution[eV]=   2.7211385050000002E-002
+ Field strength[a.u.] =   1.0000000000000000E-004
+   use of real value orbitals =  F
+ r-space parallelization: off
+ ======
+ MPI distribution:
+   nproc_k     :          16
+   nproc_ob    :           1
+   nproc_rgrid :           1           1           1
+ OpenMP parallelization:
+   number of threads :           1
+ hpsi stencil:
+   enables hand-coding vectorization : F
+   enables openmp parallelization    : F
+ current:
+   k,orbital parallelized of openmp  : T
+ force:
+   k,orbital parallelized of openmp  : T
+ ===================pseudopotential data===================
+ ik ,atom_symbol=           1 Si
+ ps_format =KY              
+ ps_file =/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/testsuites/pseudo/Si_rps.dat
+ Zps(ik), Mlps(ik) =           4           2
+ Rps(ik), NRps(ik) =   2.2676713505493935              122
+ Lref(ik) =           2
+ nproj(ik,l) =           1           1           1
+ anorm(ik,l) =  0.619321823      0.364655107       0.00000000    
+ inorm(ik,l) =           1           1           0
+ Mass(ik) =   28.000000000000000     
+ flag_nlcc_element(ik) = F
+ ==========================================================
+ flag_nlcc =  F
+ 
+ ============init_ps==============
+ end init_ps
+ Maximal rho_NLCC= 0.000000000000000E+000
+ Maximal tau_NLCC= 0.000000000000000E+000
+ == Ewald ==
+ cutoff length in real-space in ewald =  4.00 [A]
+ (buffer length in bookkeeping =  1.06 [A])
+ cutoff length in G-space in ewald =  0.1870828864+102 [1/A]
+ number of ion-ion pair(/atom) used for allocation of bookkeeping=    42
+ ===========
+   Static dipole moment(xyz) =   -0.8744364841E+02   -0.8744364832E+02   -0.8744364835E+02
+
+
+  time-step  time[fs]                               Current(xyz)[a.u.]      electrons Total energy[eV] 
+#----------------------------------------------------------------------
+       1    0.00387021 -0.57063400E-12  0.45846652E-11  0.27747433E-05    32.00000000     -852.11762650
+       2    0.00774043 -0.10141961E-11  0.77982167E-11  0.27204216E-05    32.00000000     -852.11762650
+       3    0.01161064 -0.11648686E-11  0.82210854E-11  0.26474949E-05    32.00000000     -852.11762650
+       4    0.01548086 -0.97335040E-12  0.58068982E-11  0.25695786E-05    32.00000000     -852.11762650
+       5    0.01935107 -0.56299934E-12  0.20716547E-11  0.24945863E-05    32.00000000     -852.11762650
+=== application breakdown [s] ===
+total calculation time,7.16672600
+rt calculation                         min         max     average   std. dev.  difference    relative
+rt initialization              0.10000E-04 0.30000E-04 0.17188E-04 0.63168E-05 0.20000E-04 0.30000E+01
+reading lda data               0.76496E+00 0.76542E+00 0.76508E+00 0.10138E-03 0.46400E-03 0.10006E+01
+reading rt data                0.40000E-05 0.27000E-04 0.90000E-05 0.60519E-05 0.23000E-04 0.67501E+01
+prep. time prop.               0.12000E-04 0.32000E-04 0.14813E-04 0.45030E-05 0.20000E-04 0.26667E+01
+rt iterations                  0.63845E+01 0.63845E+01 0.63845E+01 0.95425E-05 0.22000E-04 0.10000E+01
+after writing rt data          0.00000E+00 0.77460E-02 0.48506E-03 0.18748E-02 0.77460E-02    Infinity
+in rt iterations                       min         max     average   std. dev.  difference    relative
+Vbox                           0.64000E-03 0.12890E-02 0.75450E-03 0.15517E-03 0.64900E-03 0.20141E+01
+time propagation               0.33341E+01 0.33417E+01 0.33375E+01 0.22363E-02 0.76070E-02 0.10023E+01
+calculating rho                0.11204E-01 0.19735E-01 0.15621E-01 0.22929E-02 0.85310E-02 0.17614E+01
+Hartree routine                0.56300E-03 0.24490E-02 0.70162E-03 0.45188E-03 0.18860E-02 0.43499E+01
+Exc_Cor routine                0.29338E+01 0.29364E+01 0.29353E+01 0.66697E-03 0.25380E-02 0.10009E+01
+calculating curr               0.16611E-01 0.18027E-01 0.16974E-01 0.39292E-03 0.14160E-02 0.10852E+01
+calc. projection               0.00000E+00 0.20000E-05 0.74999E-06 0.82915E-06 0.20000E-05    Infinity
+writing energies               0.47000E-04 0.20900E-03 0.62063E-04 0.38025E-04 0.16200E-03 0.44468E+01
+calc_eigen_energy              0.53121E-01 0.58682E-01 0.55006E-01 0.15260E-02 0.55610E-02 0.11047E+01
+calc_total_energy_periodic     0.35300E-03 0.52350E-02 0.42184E-02 0.14894E-02 0.48820E-02 0.14830E+02
+writing info etc.              0.00000E+00 0.26400E-03 0.18125E-04 0.63491E-04 0.26400E-03    Infinity
+total_energy module                    min         max     average   std. dev.  difference    relative
+periodic calc.                 0.44000E-04 0.23200E-03 0.12438E-03 0.79954E-04 0.18800E-03 0.52727E+01
+periodic comm. coll.           0.13200E-03 0.51400E-02 0.40926E-02 0.15180E-02 0.50080E-02 0.38939E+02
+eigen_energy calc.             0.20840E-02 0.32320E-02 0.23949E-02 0.24812E-03 0.11480E-02 0.15509E+01
+eigen_energy comm. coll.       0.11584E-01 0.19573E-01 0.15620E-01 0.20312E-02 0.79890E-02 0.16897E+01
+eigen_energy hpsi              0.33682E-01 0.37962E-01 0.35512E-01 0.11161E-02 0.42800E-02 0.11271E+01
+density_matrix module                  min         max     average   std. dev.  difference    relative
+density calc.                  0.28220E-02 0.65760E-02 0.32181E-02 0.88669E-03 0.37540E-02 0.23303E+01
+density comm. coll.            0.28668E-01 0.40936E-01 0.35227E-01 0.31408E-02 0.12268E-01 0.14279E+01
+current calc.                  0.12047E-01 0.14609E-01 0.12897E-01 0.74879E-03 0.25620E-02 0.12127E+01
+current rDivided uVpsi calc.   0.00000E+00 0.29999E-05 0.24999E-06 0.74998E-06 0.29999E-05    Infinity
+current comm. coll.            0.25550E-02 0.54760E-02 0.40670E-02 0.76235E-03 0.29210E-02 0.21432E+01
+current comm. halo.            0.00000E+00 0.10000E-05 0.12500E-06 0.33072E-06 0.10000E-05    Infinity
+conjugate_gradient module              min         max     average   std. dev.  difference    relative
+subspace_diag module                   min         max     average   std. dev.  difference    relative
+subspace_diag so module                min         max     average   std. dev.  difference    relative
+force module                           min         max     average   std. dev.  difference    relative
+init_ps                                min         max     average   std. dev.  difference    relative
+hamiltonian module                     min         max     average   std. dev.  difference    relative
+total                          0.27093E+00 0.28121E+00 0.27769E+00 0.28507E-02 0.10277E-01 0.10379E+01
+update overlap (comm.)         0.00000E+00 0.60000E-05 0.25625E-05 0.18698E-05 0.60000E-05    Infinity
+stencil                        0.12226E+00 0.12823E+00 0.12509E+00 0.17059E-02 0.59710E-02 0.10488E+01
+subtraction                    0.12810E-02 0.23520E-02 0.16129E-02 0.33293E-03 0.10710E-02 0.18361E+01
+pseudo-pt                      0.24130E-01 0.29776E-01 0.25713E-01 0.14232E-02 0.56460E-02 0.12340E+01
+hpsi-overlapped                        min         max     average   std. dev.  difference    relative
+checkpoint/restart                     min         max     average   std. dev.  difference    relative
+restart self                   0.61329E-01 0.67982E-01 0.67132E-01 0.16546E-02 0.66530E-02 0.11085E+01
+restart sync                   0.61347E-01 0.68008E-01 0.67148E-01 0.16522E-02 0.66610E-02 0.11086E+01
+checkpoint self                0.16587E-01 0.16898E-01 0.16643E-01 0.10330E-03 0.31100E-03 0.10187E+01
+checkpoint sync                0.17960E-01 0.17966E-01 0.17963E-01 0.18666E-05 0.60000E-05 0.10003E+01
+=== performance [GFLOPS] ===
+end SALMON

@@ -1,0 +1,57 @@
+[
+  {
+    "ranks": 1,
+    "seconds_per_step": 5.0476,
+    "min_seconds_per_step": 5.0456,
+    "max_seconds_per_step": 5.0496,
+    "max_rank_rss_MiB": 597.0,
+    "max_sum_rss_GiB": 0.5830078125,
+    "orbital_relative_difference": 0.0,
+    "speedup": 1.0,
+    "parallel_efficiency": 1.0
+  },
+  {
+    "ranks": 2,
+    "seconds_per_step": 2.907,
+    "min_seconds_per_step": 2.8207999999999998,
+    "max_seconds_per_step": 2.9932,
+    "max_rank_rss_MiB": 360.5,
+    "max_sum_rss_GiB": 0.703887939453125,
+    "orbital_relative_difference": 2.9532510930071807e-12,
+    "speedup": 1.736360509115927,
+    "parallel_efficiency": 0.8681802545579635
+  },
+  {
+    "ranks": 4,
+    "seconds_per_step": 1.92888,
+    "min_seconds_per_step": 1.91448,
+    "max_seconds_per_step": 1.9432800000000001,
+    "max_rank_rss_MiB": 267.09375,
+    "max_sum_rss_GiB": 1.0411224365234375,
+    "orbital_relative_difference": 3.1152161795340834e-12,
+    "speedup": 2.61685537721372,
+    "parallel_efficiency": 0.65421384430343
+  },
+  {
+    "ranks": 8,
+    "seconds_per_step": 1.4834299999999998,
+    "min_seconds_per_step": 1.47114,
+    "max_seconds_per_step": 1.49572,
+    "max_rank_rss_MiB": 202.609375,
+    "max_sum_rss_GiB": 1.39044189453125,
+    "orbital_relative_difference": 4.930904217331589e-12,
+    "speedup": 3.4026546584604604,
+    "parallel_efficiency": 0.42533183230755756
+  },
+  {
+    "ranks": 16,
+    "seconds_per_step": 1.2747099999999998,
+    "min_seconds_per_step": 1.2725199999999999,
+    "max_seconds_per_step": 1.2769,
+    "max_rank_rss_MiB": 174.921875,
+    "max_sum_rss_GiB": 2.499755859375,
+    "orbital_relative_difference": 3.6215632620271027e-12,
+    "speedup": 3.959802621772796,
+    "parallel_efficiency": 0.24748766386079976
+  }
+]

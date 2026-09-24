@@ -145,3 +145,7 @@ CPU、固定イオン、非磁性・完全占有スピン対、立方等間隔�
 `USE_HSE=ON`, `USE_MPI=ON`、FFTW、Libxc Cライブラリ、BLAS/LAPACKが必要。HSE無効ビルドに新しい依存を課さない。[ビルド・入力・再開手順](../samples/hse_native/README.md)から再現できる。
 
 TDCDFT・ELFなどの既存機能は[別の検証ノート](tdcdft-validation.md)を参照。このノートのHSE性能測定を、MLWF局所打ち切りやTDCDFTの速度評価と解釈しない。
+
+## 固定Si系の強スケーリング
+
+[競合する参照ジョブを停止したMPI1/2/4/8/16測定](results/si-hse-strong-scaling/README.md)を追加した。Taylor＋ACEは1→16並列で5.05→1.27秒/step（3.96倍）、最大ランクRSSは597→175 MiB、合計RSSは0.583→2.500 GiB。この小系では8並列が速度と合計メモリのバランスを取りやすい。

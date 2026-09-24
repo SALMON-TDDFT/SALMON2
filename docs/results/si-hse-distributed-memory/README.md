@@ -49,3 +49,7 @@ SALMON_TEST_MPI=1 python3 -m unittest discover \
 ```
 
 計測スクリプトはmacOSの `ps`、MPI8、5ステップを使い、対象プロセスの子孫のみを集計する。`memory_old_*` / `memory_new_*` は計測用ディレクトリとして出力を更新する。測定データと実行ファイルのSHA256は [measurements.json](measurements.json) に保存した。
+
+## 固定Si系の強スケーリング
+
+[競合する参照ジョブを停止したMPI1/2/4/8/16測定](../si-hse-strong-scaling/README.md)を追加した。Taylor＋ACEは1→16並列で5.05→1.27秒/step（3.96倍）、最大ランクRSSは597→175 MiB、合計RSSは0.583→2.500 GiB。この小系では8並列が速度と合計メモリのバランスを取りやすい。
