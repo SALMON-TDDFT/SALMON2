@@ -1,0 +1,127 @@
+{
+  "context": "MPI8, five RT steps; sequential old/new; 0.1s requested ps sampling interval plus ps overhead; background Python MPI8 reference active; summed RSS is not unique memory or guaranteed peak. Times include output and exclude initialization.",
+  "initial_block2_runs": [
+    {
+      "case": "hse_taylor4_dt0.16",
+      "version": "old",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 7.5564,
+      "seconds_per_step": 1.51128,
+      "sampled_peak_sum_rss_KiB": 2308736,
+      "sampled_peak_rank_rss_KiB": 290480,
+      "samples": 47
+    },
+    {
+      "case": "hse_taylor4_dt0.16",
+      "version": "new",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 14.952,
+      "seconds_per_step": 2.9904,
+      "sampled_peak_sum_rss_KiB": 1210880,
+      "sampled_peak_rank_rss_KiB": 176896,
+      "samples": 91
+    },
+    {
+      "case": "hse_ptcn_dt0.32",
+      "version": "old",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 15.985,
+      "seconds_per_step": 3.197,
+      "sampled_peak_sum_rss_KiB": 2423776,
+      "sampled_peak_rank_rss_KiB": 304000,
+      "samples": 91
+    },
+    {
+      "case": "hse_ptcn_dt0.32",
+      "version": "new",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 26.367,
+      "seconds_per_step": 5.2734000000000005,
+      "sampled_peak_sum_rss_KiB": 1325408,
+      "sampled_peak_rank_rss_KiB": 191264,
+      "samples": 147
+    },
+    {
+      "case": "hse_taylor4_full_dt0.16",
+      "version": "old",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 38.723,
+      "seconds_per_step": 7.7446,
+      "sampled_peak_sum_rss_KiB": 3634960,
+      "sampled_peak_rank_rss_KiB": 455088,
+      "samples": 208
+    },
+    {
+      "case": "hse_taylor4_full_dt0.16",
+      "version": "new",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 77.692,
+      "seconds_per_step": 15.5384,
+      "sampled_peak_sum_rss_KiB": 1373440,
+      "sampled_peak_rank_rss_KiB": 196976,
+      "samples": 432
+    }
+  ],
+  "final_block8_runs": [
+    {
+      "case": "hse_taylor4_dt0.16",
+      "version": "tuned",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 10.469,
+      "seconds_per_step": 2.0938,
+      "sampled_peak_sum_rss_KiB": 1458240,
+      "sampled_peak_rank_rss_KiB": 207488,
+      "samples": 63
+    },
+    {
+      "case": "hse_ptcn_dt0.32",
+      "version": "tuned",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 19.535,
+      "seconds_per_step": 3.907,
+      "sampled_peak_sum_rss_KiB": 1576672,
+      "sampled_peak_rank_rss_KiB": 222144,
+      "samples": 109
+    },
+    {
+      "case": "hse_taylor4_full_dt0.16",
+      "version": "tuned",
+      "mpi": 8,
+      "steps": 5,
+      "rt_seconds": 50.559,
+      "seconds_per_step": 10.111799999999999,
+      "sampled_peak_sum_rss_KiB": 1540032,
+      "sampled_peak_rank_rss_KiB": 217552,
+      "samples": 289
+    }
+  ],
+  "parity": {
+    "hse_taylor4_dt0.16": {
+      "wavefunction_relative_error": 1.294618903545675e-14,
+      "wavefunction_bitwise_equal": false,
+      "current_max_abs_difference": 2.1400287412379898e-17
+    },
+    "hse_ptcn_dt0.32": {
+      "wavefunction_relative_error": 1.771148626235589e-14,
+      "wavefunction_bitwise_equal": false,
+      "current_max_abs_difference": 4.220976934404992e-17
+    },
+    "hse_taylor4_full_dt0.16": {
+      "wavefunction_relative_error": 1.053723101130209e-14,
+      "wavefunction_bitwise_equal": false,
+      "current_max_abs_difference": 1.1680160826163175e-17
+    }
+  },
+  "binary_sha256": {
+    "before": "51dfd6380edfeba66e788ec28065bb21c0e36c673974fb03594b8f29fb323fb1",
+    "after": "86c4e901ef8c13e96d4fffd008be674b20f7220ffe02f08b1836735cde31cff9"
+  }
+}

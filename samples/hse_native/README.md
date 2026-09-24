@@ -111,3 +111,10 @@ freezes ACE in inner iterations and rebuilds it from full exchange in outer
 iterations before checking the endpoint residual. Only exactly identical
 source arrays bypass refresh through the cache. See the
 [explicit ACE construction and update schedule](../../docs/hse-implementation-notes.md#aceで実際に行っている処理).
+
+## Distributed exchange memory
+
+Source, target, action, phase and ACE factors now remain on their owning k
+ranks. Only density-matrix row tiles are transposed for the exchange FFT.
+Taylor snapshots are freed after use. This reduces memory but adds communication;
+see the [measured memory/time tradeoff](../../docs/results/si-hse-distributed-memory/README.md).

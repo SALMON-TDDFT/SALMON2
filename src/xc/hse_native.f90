@@ -6,7 +6,7 @@ module hse_native
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
   use hse_ace
-  use communication, only: comm_summation
+  use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator
   implicit none
   private
@@ -29,21 +29,29 @@ contains
     select case(stage)
     case(0)
       taylor_active=.true.;taylor_midpoint=.false.
-      initial_ace=ace
-      if(propagator=='hse_taylor4_full')initial_source=full_source
+      if(propagator=='hse_taylor4_full')then
+        initial_source=full_source
+      else
+        initial_ace=ace
+      endif
     case(1)
-      call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
-      if(ierr/=0)error stop 'HSE Taylor midpoint ACE failed'
       if(propagator=='hse_taylor4_full')then
         no=size(full_source,2)
         if(allocated(midpoint_source))deallocate(midpoint_source)
         allocate(midpoint_source(size(full_source,1),2*no,size(full_source,3)))
         midpoint_source(:,:no,:)=initial_source/sqrt(2d0)
         midpoint_source(:,no+1:,:)=full_source/sqrt(2d0)
+      else
+        call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
+        if(ierr/=0)error stop 'HSE Taylor midpoint ACE failed'
       endif
       taylor_midpoint=.true.
     case(2)
       taylor_active=.false.;taylor_midpoint=.false.
+      if(allocated(initial_ace%factors))deallocate(initial_ace%factors)
+      if(allocated(midpoint_ace%factors))deallocate(midpoint_ace%factors)
+      if(allocated(initial_source))deallocate(initial_source)
+      if(allocated(midpoint_source))deallocate(midpoint_source)
     case default
       error stop 'Invalid HSE Taylor stage'
     end select
@@ -91,8 +99,8 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(in) :: psi
-    complex(8),allocatable :: part(:,:,:),source(:,:,:),w(:,:,:),local(:,:,:)
-    real(8) :: ex,offdiag(3,3),tick
+    complex(8),allocatable :: w(:,:,:),local(:,:,:)
+    real(8) :: ex,offdiag(3,3),tick,communication_before
     integer :: ierr,total_error,ng,nk,no,n,mesh,j
     if(.not.hse_enabled().or.hse_freeze)return
     if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
@@ -113,7 +121,9 @@ contains
       error stop 'HSE06: uniform k weights and fully occupied spin pairs required'
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE06: unsupported orbital layout'
     if(kernel%n==0)then
-      call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,.11d0,16,ierr)
+      ! Up to 64 rows per collective round, at most 16 per rank; bound tile memory.
+      call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,.11d0, &
+        max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk)
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
     endif
@@ -127,28 +137,45 @@ contains
     endif
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error==0)return
-    allocate(part(ng,no,nk),source(ng,no,nk),w(ng,no,nk))
-    part=0;part(:,:,info%ik_s:info%ik_e)=local
-    tick=hse_walltime()
-    call comm_summation(part,source,size(source),info%icomm_k)
-    if(propagator=='hse_taylor4_full')full_source=source
-    hse_timings(4)=hse_timings(4)+hse_walltime()-tick
-    tick=hse_walltime()
-    call hse_kernel_apply(kernel,source,source,part,info%id_k,info%isize_k,ierr)
-    hse_timings(1)=hse_timings(1)+hse_walltime()-tick
+    allocate(w(ng,no,info%numk))
+    if(propagator=='hse_taylor4_full')full_source=local
+    tick=hse_walltime();communication_before=hse_timings(4)
+    call apply_distributed(local,local,w,info,ierr)
+    hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
     call comm_summation(ierr,total_error,info%icomm_k)
-    if(total_error/=0)error stop 'HSE06: full exchange action failed'
+    if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
     tick=hse_walltime()
-    call comm_summation(part,w,size(w),info%icomm_k)
-    hse_timings(4)=hse_timings(4)+hse_walltime()-tick
-    tick=hse_walltime()
-    call hse_ace_build(ace,local,w(:,:,info%ik_s:info%ik_e),system%hvol,ierr)
+    call hse_ace_build(ace,local,w,system%hvol,ierr)
     hse_timings(2)=hse_timings(2)+hse_walltime()-tick
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: ACE metric failed'
     cached_source=local
-    ex=.25d0*real(sum(conjg(local)*w(:,:,info%ik_s:info%ik_e)),8)*system%hvol/nk
+    ex=.25d0*real(sum(conjg(local)*w),8)*system%hvol/nk
     call comm_summation(ex,hse_exchange_energy,info%icomm_k)
+  end subroutine
+
+  subroutine apply_distributed(source,target,action,info,ierr)
+    complex(8),intent(in) :: source(:,:,:),target(:,:,:)
+    complex(8),intent(out) :: action(:,:,:)
+    type(s_parallel_info),intent(in) :: info
+    integer,intent(out) :: ierr
+    integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np
+    np=info%isize_k;local_layout=0
+    local_layout(info%id_k+1)=info%ik_s
+    local_layout(np+info%id_k+1)=info%numk
+    call comm_summation(local_layout,layout,size(layout),info%icomm_k)
+    call hse_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
+      info%id_k,transpose_tiles,ierr)
+  contains
+    subroutine transpose_tiles(send,recv,count)
+      complex(8),intent(in) :: send(:)
+      complex(8),intent(out) :: recv(:)
+      integer,intent(in) :: count
+      real(8) :: start
+      start=hse_walltime()
+      call comm_alltoall(send,recv,info%icomm_k,count)
+      hse_timings(4)=hse_timings(4)+hse_walltime()-start
+    end subroutine
   end subroutine
 
   subroutine hse_add_action(psi,hpsi,system,mg,info)
@@ -158,8 +185,7 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     integer :: ierr,ng,total_error
-    real(8) :: tick
-    complex(8),allocatable :: gathered(:,:,:),partial(:,:,:),full_action(:,:,:)
+    real(8) :: tick,communication_before
     if(.not.hse_enabled())return
     if(.not.allocated(ace%factors))error stop 'HSE06: occupied exchange source is not initialized'
     ng=product(mg%num)
@@ -171,20 +197,15 @@ contains
     call hse_pack(psi,mg,info,target_work)
     tick=hse_walltime()
     if(taylor_active.and.propagator=='hse_taylor4_full')then
-      allocate(gathered(ng,info%numo,system%nk),partial(ng,info%numo,system%nk), &
-        full_action(ng,info%numo,system%nk))
-      partial=0;partial(:,:,info%ik_s:info%ik_e)=target_work
-      call comm_summation(partial,gathered,size(gathered),info%icomm_k)
+      communication_before=hse_timings(4)
       if(taylor_midpoint)then
-        call hse_kernel_apply(kernel,midpoint_source,gathered,partial,info%id_k,info%isize_k,ierr)
+        call apply_distributed(midpoint_source,target_work,action_work,info,ierr)
       else
-        call hse_kernel_apply(kernel,initial_source,gathered,partial,info%id_k,info%isize_k,ierr)
+        call apply_distributed(initial_source,target_work,action_work,info,ierr)
       endif
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE Taylor full target action failed'
-      call comm_summation(partial,full_action,size(full_action),info%icomm_k)
-      action_work=full_action(:,:,info%ik_s:info%ik_e)
-      hse_timings(1)=hse_timings(1)+hse_walltime()-tick
+      hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
     else
       if(taylor_active.and.taylor_midpoint)then
         call hse_ace_apply(midpoint_ace,target_work,action_work,ierr)

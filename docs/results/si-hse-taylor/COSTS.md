@@ -1,5 +1,9 @@
 # Cost versus accuracy: native HSE propagation
 
+Historical pre-distribution timings. The subsequent memory-distributed kernel
+reduces RSS but increases communication time; see the
+[new memory/time measurements](../si-hse-distributed-memory/README.md).
+
 Si8, 12³ grid, 4³ k points, Apple M5 Pro, MPI8, one OpenMP/BLAS thread
 per rank. Re-measured each case for five steps twice, reversing case order
 on the second pass. Runs execute sequentially; the separate Python MPI8
