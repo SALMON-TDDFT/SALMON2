@@ -21,7 +21,7 @@ contains
 
 !===================================================================================================================================
 
-  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald)
+  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald,Vxc)
     use structures
     use math_constants,only : zi,pi
     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
@@ -47,8 +47,13 @@ contains
     type(s_pp_grid)         ,intent(in)    :: ppg
     type(s_orbital)         ,intent(inout) :: tpsi
     type(s_ewald_ion_ion)   ,intent(in)    :: ewald
+    type(s_scalar)          ,intent(in)    :: Vxc(system%nspin)
     !
     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
+    ! --- NLCC (non-linear core correction) force ---
+    integer :: nl_i,nl_i1,nl_i2,nl_i3,nl_j1,nl_j2,nl_j3,nl_ir,nl_intr,nl_ik,nl_irmin,nl_irmax
+    real(8) :: nl_rc,nl_u,nl_v,nl_w,nl_s1,nl_s2,nl_s3,nl_rr,nl_drhodr,nl_vxceff,nl_Rrep(3)
+    logical :: nl_cuboid
     integer :: m1,m2,jlma,n,l,Nproj_pairs,iprj,Nlma_ao
     real(8) :: kAc(3), rtmp,rtmp2(3),g(3),r(3),G2,Gd
     complex(8) :: rho_i, rho_e, egd, VG
@@ -417,6 +422,93 @@ contains
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(2,ia)),aimag(zF_tmp(2,ia))
     !  write(*,'(1x,4x,2f20.10)')    real(zF_tmp(3,ia)),aimag(zF_tmp(3,ia))
     !end do
+
+    ! Non-linear core correction (NLCC) contribution to the force.
+    ! The partial core density rho_core enters only the exchange-correlation
+    ! functional (added to the electron density), so
+    !   F_a = + \int Vxc_eff(r) * grad_r rho_core^a(r-R_a) dr
+    !       = + \int Vxc_eff(r) * (d rho_core/dr) * (r-R_a)/|r-R_a| dr .
+    ! rho_core is added to each spin channel as 0.5*rho_core, hence the
+    ! effective XC potential is Vxc(1) for nspin=1 and 0.5*(Vxc(1)+Vxc(2)) for
+    ! nspin=2. The grid point and the periodic replicas of the ion are built
+    ! exactly as in calc_nlcc (full lattice vectors; rmatrix_a for non-cuboid
+    ! cells). Only the rho_core term is included here; the meta-GGA core kinetic
+    ! energy density (tau_nlcc) contribution is not.
+    if( pp%flag_nlcc )then
+      if(yn_periodic=='n')then
+        nl_irmin=0 ; nl_irmax=0
+      else
+        nl_irmin=-2 ; nl_irmax=2
+      end if
+      ! cuboid only if all six off-diagonal lattice-vector components vanish
+      ! (match calc_nlcc); a lower-triangular skew must also go through rmatrix_a.
+      nl_cuboid = .true.
+      if( abs(system%primitive_a(1,2)).ge.1d-10 .or. &
+          abs(system%primitive_a(1,3)).ge.1d-10 .or. &
+          abs(system%primitive_a(2,3)).ge.1d-10 .or. &
+          abs(system%primitive_a(2,1)).ge.1d-10 .or. &
+          abs(system%primitive_a(3,1)).ge.1d-10 .or. &
+          abs(system%primitive_a(3,2)).ge.1d-10 ) nl_cuboid=.false.
+!$omp parallel do private(ia,nl_ik,nl_rc,nl_i,nl_i1,nl_i2,nl_i3,nl_j1,nl_j2,nl_j3, &
+!$omp                     nl_u,nl_v,nl_w,nl_s1,nl_s2,nl_s3,nl_rr,nl_ir,nl_intr,     &
+!$omp                     nl_drhodr,nl_vxceff,nl_Rrep)
+      do ia=1,nion
+        nl_ik = Kion(ia)
+        nl_rc = 15d0
+        do nl_i=1,pp%nrmax
+          if( pp%rho_nlcc_tbl(nl_i,nl_ik)+pp%tau_nlcc_tbl(nl_i,nl_ik) < 1d-6 )then
+            nl_rc = pp%rad(nl_i,nl_ik) ; exit
+          end if
+        end do
+        do nl_i1=nl_irmin,nl_irmax
+        do nl_i2=nl_irmin,nl_irmax
+        do nl_i3=nl_irmin,nl_irmax
+          nl_Rrep(1:3) = system%Rion(1:3,ia)            &
+                       + nl_i1*system%primitive_a(1:3,1) &
+                       + nl_i2*system%primitive_a(1:3,2) &
+                       + nl_i3*system%primitive_a(1:3,3)
+          do nl_j3=mg%is(3),mg%ie(3)
+            nl_w=(nl_j3-1)*system%hgs(3)
+          do nl_j2=mg%is(2),mg%ie(2)
+            nl_v=(nl_j2-1)*system%hgs(2)
+          do nl_j1=mg%is(1),mg%ie(1)
+            nl_u=(nl_j1-1)*system%hgs(1)
+            if(nl_cuboid)then
+              nl_s1=nl_u-nl_Rrep(1)
+              nl_s2=nl_v-nl_Rrep(2)
+              nl_s3=nl_w-nl_Rrep(3)
+            else
+              nl_s1=nl_u*system%rmatrix_a(1,1)+nl_v*system%rmatrix_a(1,2)+nl_w*system%rmatrix_a(1,3)-nl_Rrep(1)
+              nl_s2=nl_u*system%rmatrix_a(2,1)+nl_v*system%rmatrix_a(2,2)+nl_w*system%rmatrix_a(2,3)-nl_Rrep(2)
+              nl_s3=nl_u*system%rmatrix_a(3,1)+nl_v*system%rmatrix_a(3,2)+nl_w*system%rmatrix_a(3,3)-nl_Rrep(3)
+            end if
+            nl_rr=sqrt(nl_s1**2+nl_s2**2+nl_s3**2)
+            if(nl_rr<=nl_rc .and. nl_rr>1d-6)then
+              do nl_ir=1,pp%nrmax
+                if(pp%rad(nl_ir,nl_ik) > nl_rr) exit
+              end do
+              nl_intr=nl_ir-1
+              if(nl_intr<1 .or. nl_intr>=pp%nrmax) cycle
+              nl_drhodr=( pp%rho_nlcc_tbl(nl_intr+1,nl_ik)-pp%rho_nlcc_tbl(nl_intr,nl_ik) ) &
+                       /( pp%rad(nl_intr+1,nl_ik)-pp%rad(nl_intr,nl_ik) )
+              if(system%nspin==1)then
+                nl_vxceff = Vxc(1)%f(nl_j1,nl_j2,nl_j3)
+              else
+                nl_vxceff = 0.5d0*( Vxc(1)%f(nl_j1,nl_j2,nl_j3)+Vxc(2)%f(nl_j1,nl_j2,nl_j3) )
+              end if
+              F_tmp(1,ia)=F_tmp(1,ia)+nl_vxceff*nl_drhodr*(nl_s1/nl_rr)*system%Hvol
+              F_tmp(2,ia)=F_tmp(2,ia)+nl_vxceff*nl_drhodr*(nl_s2/nl_rr)*system%Hvol
+              F_tmp(3,ia)=F_tmp(3,ia)+nl_vxceff*nl_drhodr*(nl_s3/nl_rr)*system%Hvol
+            end if
+          end do
+          end do
+          end do
+        end do
+        end do
+        end do
+      end do
+!$omp end parallel do
+    end if
 
     call comm_summation(F_tmp,F_sum,3*nion,info%icomm_rko)
 
