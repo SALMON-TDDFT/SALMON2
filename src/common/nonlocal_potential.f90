@@ -220,6 +220,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 #endif
 #ifdef USE_OPENACC
   real(8),allocatable,save :: htpsi_zwf_r(:,:,:,:,:,:,:), htpsi_zwf_i(:,:,:,:,:,:,:)
+  complex(8),allocatable,save :: uVpsibox_acc(:,:,:,:,:)
   integer :: i1, i2, i3, i4, i5, i6, i7
   integer :: mps_max
   real(8) :: wrk_r
@@ -289,6 +290,21 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   io_e = info%io_e
 
   Nlma = ppg%Nlma
+
+#ifdef USE_OPENACC
+  ! Projection coefficients, shared between the projection and back-projection
+  ! loop nests and, under domain decomposition, across the icomm_r reduce.
+  if (allocated(uVpsibox_acc)) then
+    if (size(uVpsibox_acc) /= Nlma*Nspin*(io_e-io_s+1)*(ik_e-ik_s+1)*(im_e-im_s+1)) then
+!$acc exit data delete(uVpsibox_acc)
+      deallocate(uVpsibox_acc)
+    end if
+  end if
+  if (.not. allocated(uVpsibox_acc)) then
+    allocate(uVpsibox_acc(Nlma,Nspin,io_s:io_e,ik_s:ik_e,im_s:im_e))
+!$acc enter data create(uVpsibox_acc)
+  end if
+#endif
 
 #if defined(USE_OPENACC) && defined(USE_GEMM)
   ! GEMM path, both domain and non-domain decomposition: ppg%jxyz/mps are already local,
@@ -383,12 +399,12 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
           gemm_natom)
 !$acc end host_data
 
-!$acc parallel loop collapse(3) present(ppg,gemm_out_packed,gemm_rinv_packed,gemm_l2g,gemm_nproj_atom)
+!$acc parallel loop collapse(3) present(ppg,gemm_out_packed,gemm_rinv_packed,gemm_l2g,gemm_nproj_atom,uVpsibox_acc)
       do gemm_ia = 1, gemm_natom
       do gemm_io_local = 1, gemm_this_block
       do gemm_p = 1, gemm_max_nproj
         if (gemm_p <= gemm_nproj_atom(gemm_ia)) then
-          ppg%uVpsibox(gemm_l2g(gemm_p,gemm_ia), ispin, gemm_io_blk_s+gemm_io_local-1, ik, im) = &
+          uVpsibox_acc(gemm_l2g(gemm_p,gemm_ia), ispin, gemm_io_blk_s+gemm_io_local-1, ik, im) = &
               gemm_out_packed(gemm_p, gemm_io_local, gemm_ia) * gemm_rinv_packed(gemm_p, gemm_ia)
         end if
       end do
@@ -415,13 +431,13 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       d_reduce_allocated = Nlma*norb
     end if
 
-    !$acc parallel loop collapse(5) deviceptr(d_reduce) present(ppg)
+    !$acc parallel loop collapse(5) deviceptr(d_reduce) present(ppg,uVpsibox_acc)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
     do ilma=1,Nlma
-      d_reduce(ilma,ispin,io-io_s+1,ik-ik_s+1,im-im_s+1) = ppg%uVpsibox(ilma,ispin,io,ik,im)
+      d_reduce(ilma,ispin,io-io_s+1,ik-ik_s+1,im-im_s+1) = uVpsibox_acc(ilma,ispin,io,ik,im)
     end do
     end do
     end do
@@ -454,13 +470,13 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     call MPI_Allreduce(MPI_IN_PLACE, d_reduce, int(Nlma*norb), MPI_DOUBLE_COMPLEX, MPI_SUM, info%icomm_r, mpi_ierr)
 #endif
 
-    !$acc parallel loop collapse(5) deviceptr(d_reduce) present(ppg)
+    !$acc parallel loop collapse(5) deviceptr(d_reduce) present(ppg,uVpsibox_acc)
     do im=im_s,im_e
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,Nspin
     do ilma=1,Nlma
-      ppg%uVpsibox(ilma,ispin,io,ik,im) = d_reduce(ilma,ispin,io-io_s+1,ik-ik_s+1,im-im_s+1)
+      uVpsibox_acc(ilma,ispin,io,ik,im) = d_reduce(ilma,ispin,io-io_s+1,ik-ik_s+1,im-im_s+1)
     end do
     end do
     end do
@@ -473,7 +489,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   end if
 
   ! Phase 2 (back-projection): v2j-based scatter, no atomics.
-!$acc kernels present(ppg,tpsi,htpsi)
+!$acc kernels present(ppg,tpsi,htpsi,uVpsibox_acc)
 !$acc loop collapse(5) independent private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
   do im=im_s,im_e
   do ik=ik_s,ik_e
@@ -488,7 +504,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       do k=1,my_nlma
         ilma = ppg%k2ilma(vi,k)
         j    = ppg%k2j(vi,k)
-        wrk  = wrk + ppg%uVpsibox(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
+        wrk  = wrk + uVpsibox_acc(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
       end do
 
       ix = ppg%v2j(1,vi)
@@ -657,7 +673,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         ppg%rinv_uvu,&
         tpsi%zwf)
 #else
-!$acc kernels present(ppg,tpsi,htpsi)
+!$acc kernels present(ppg,tpsi,htpsi,uVpsibox_acc)
 !$acc loop collapse(5) independent gang private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
     do im=im_s,im_e
     do ik=ik_s,ik_e
@@ -673,7 +689,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
           iz = ppg%jxyz(3,j,ia)
           uVpsi = uVpsi + conjg(ppg%zekr_uV(j,ilma,ik)) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
         end do
-        ppg%uVpsibox(ilma,ispin,io,ik,im) = uVpsi * ppg%rinv_uvu(ilma)
+        uVpsibox_acc(ilma,ispin,io,ik,im) = uVpsi * ppg%rinv_uvu(ilma)
       end do
 #ifdef USE_OPENACC
     end do
@@ -695,7 +711,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
         do k=1,my_nlma
           ilma = ppg%k2ilma(vi,k)
           j    = ppg%k2j(vi,k)
-          wrk  = wrk + ppg%uVpsibox(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
+          wrk  = wrk + uVpsibox_acc(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
         end do
 
         ix = ppg%v2j(1,vi)
