@@ -170,11 +170,6 @@ subroutine init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
   call timer_end(LOG_INIT_PS_UVPSI)
 
 #ifdef USE_OPENACC
-  allocate(ppg%uVpsibox(ppg%nlma, &
-                        system%nspin, &
-                        info%io_s:info%io_e, &
-                        info%ik_s:info%ik_e, &
-                        info%im_s:info%im_e))
   call init_uvpsi_blocking(ppg,mg)
 #endif
 
@@ -541,7 +536,6 @@ SUBROUTINE dealloc_init_ps(ppg)
   if (allocated(ppg%ireferred_atom)) deallocate(ppg%ireferred_atom)
   if (allocated(ppg%ilocal_nlma2ilma)) deallocate(ppg%ilocal_nlma2ilma)
   if (allocated(ppg%ilocal_nlma2ia))   deallocate(ppg%ilocal_nlma2ia)
-  if (allocated(ppg%uVpsibox))       deallocate(ppg%uVpsibox)
   
   return
 END SUBROUTINE dealloc_init_ps
