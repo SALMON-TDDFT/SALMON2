@@ -1,0 +1,92 @@
+{
+  "440": {
+    "HSE06": {
+      "2-4eV": {
+        "peak_eV": 3.81,
+        "height": 43.45491424906839,
+        "area_eV": 18.472934808009256,
+        "boundary_peak": false
+      },
+      "4-6eV": {
+        "peak_eV": 4.29,
+        "height": 58.456197776745164,
+        "area_eV": 37.36999549525315,
+        "boundary_peak": false
+      }
+    },
+    "TDCDFT alpha=0.2": {
+      "2-4eV": {
+        "peak_eV": 3.3200000000000003,
+        "height": 74.56091000960005,
+        "area_eV": 65.27999611597284,
+        "boundary_peak": false
+      },
+      "4-6eV": {
+        "peak_eV": 5.32,
+        "height": 17.45375288291341,
+        "area_eV": 17.34554936874774,
+        "boundary_peak": false
+      }
+    }
+  },
+  "660": {
+    "HSE06": {
+      "2-4eV": {
+        "peak_eV": 3.84,
+        "height": 51.9615187957751,
+        "area_eV": 18.891626638124002,
+        "boundary_peak": false
+      },
+      "4-6eV": {
+        "peak_eV": 4.3,
+        "height": 76.4471023908991,
+        "area_eV": 36.8423162859674,
+        "boundary_peak": false
+      }
+    },
+    "TDCDFT alpha=0.2": {
+      "2-4eV": {
+        "peak_eV": 3.34,
+        "height": 97.18848195821819,
+        "area_eV": 65.23947643163788,
+        "boundary_peak": false
+      },
+      "4-6eV": {
+        "peak_eV": 5.32,
+        "height": 22.39370483698961,
+        "area_eV": 17.261662921560685,
+        "boundary_peak": false
+      }
+    }
+  },
+  "880": {
+    "HSE06": {
+      "2-4eV": {
+        "peak_eV": 3.88,
+        "height": 60.56558983044895,
+        "area_eV": 19.549812557067167,
+        "boundary_peak": false
+      },
+      "4-6eV": {
+        "peak_eV": 4.3,
+        "height": 86.8315910542137,
+        "area_eV": 36.262619237231085,
+        "boundary_peak": false
+      }
+    },
+    "TDCDFT alpha=0.2": {
+      "2-4eV": {
+        "peak_eV": 3.35,
+        "height": 116.67505978829668,
+        "area_eV": 65.24536612885399,
+        "boundary_peak": false
+      },
+      "4-6eV": {
+        "peak_eV": 5.32,
+        "height": 26.597327886023063,
+        "area_eV": 17.139097901807652,
+        "boundary_peak": false
+      }
+    }
+  }
+}

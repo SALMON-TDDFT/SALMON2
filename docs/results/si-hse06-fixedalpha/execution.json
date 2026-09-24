@@ -1,0 +1,11 @@
+{
+  "status": "completed_and_plot_inspected",
+  "hse_session": 14075,
+  "tdcdft_session": 12505,
+  "analysis_session": 31447,
+  "alpha": 0.2,
+  "beta": 0,
+  "gamma": 0.001,
+  "screening": "none",
+  "end_time_au": 880
+}

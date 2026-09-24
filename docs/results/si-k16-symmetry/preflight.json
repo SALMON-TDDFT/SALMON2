@@ -1,0 +1,13 @@
+{
+  "nk_full": 4096,
+  "nk_irreducible": 576,
+  "mpi": 4,
+  "omp": 4,
+  "physical_memory_GiB": 64,
+  "observed_free_percent": 90,
+  "exchange_three_tile_arrays_GiB": 20.25,
+  "full_orbital_set_GiB": 1.6875,
+  "reduced_orbital_set_GiB": 0.2373046875,
+  "rss_abort_limit_GiB": 48,
+  "comment": "Estimates are not total memory. Stream one symmetry operation at a time. HSE pilot SCF=1 is not converged and no HSE RT scheduled yet."
+}

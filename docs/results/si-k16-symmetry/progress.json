@@ -1,0 +1,29 @@
+{
+  "stage": "hse_scf_pilot",
+  "status": "running",
+  "results": [
+    {
+      "case": "pz_gs",
+      "exit_code": 0,
+      "wall_seconds": 119.08114454196766,
+      "peak_sum_rss_KiB": 1963504,
+      "peak_rank_rss_KiB": 491792,
+      "converged": true,
+      "reason": null
+    },
+    {
+      "case": "td_pilot",
+      "exit_code": 0,
+      "wall_seconds": 2.0932585000409745,
+      "peak_sum_rss_KiB": 1432624,
+      "peak_rank_rss_KiB": 383536,
+      "converged": false,
+      "reason": null,
+      "seconds_per_step": 0.3171
+    }
+  ],
+  "pid": 52009,
+  "elapsed_seconds": 54.92092020902783,
+  "peak_sum_rss_KiB": 25625920,
+  "peak_rank_rss_KiB": 6407312
+}
