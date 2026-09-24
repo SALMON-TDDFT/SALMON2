@@ -46,6 +46,7 @@ subroutine input_pp(pp,hx,hy,hz)
   real(8),allocatable :: rhor_nlcc(:,:)   !zero in radial index for taking derivative
   character(256) :: ps_file
   logical,allocatable :: flag_nlcc_element(:)
+  logical :: flag_rho_pp_missing
 
   allocate(rhor_nlcc(0:pp%nrmax0,0:2))
   rhor_nlcc=0d0
@@ -66,16 +67,22 @@ subroutine input_pp(pp,hx,hy,hz)
       select case (ps_format(ik))
       case('KY')
         call read_ps_ky(pp,rrc,ik,ps_file)
+        pp%has_wf_pp(ik)=.true.
       case('ABINIT')
         call read_ps_abinit(pp,rrc,ik,ps_file)
+        pp%has_wf_pp(ik)=.true.
       case('ABINITFHI')
         call read_ps_abinitfhi(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        pp%has_wf_pp(ik)=.true.
       case('ABINITPSP8')
         call read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        pp%has_proj_pp(ik)=.true.
       case('FHI')
         call read_ps_fhi(pp,rrc,ik,ps_file)
+        pp%has_wf_pp(ik)=.true.
       case('ADPACK')
         call read_ps_adpack(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+        pp%has_proj_pp(ik)=.true.
       case('UPF')
         if( index(ps_file,'paw')>0 .or. index(ps_file,'PAW')>0 )then
           open(4,file=ps_file,status='old')
@@ -84,6 +91,7 @@ subroutine input_pp(pp,hx,hy,hz)
         else
           call read_ps_upf(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
         end if
+        pp%has_proj_pp(ik)=.true.
         flag_beta_proj_is_given =.true.
 !      case('ATOM')      ; call read_ps_ATOM
       case default ; stop 'Unprepared ps_format is required input_pseudopotential_YS'
@@ -91,9 +99,6 @@ subroutine input_pp(pp,hx,hy,hz)
 
       if ( flag_beta_proj_is_given ) then
         flag_potential_is_given=.false.
-        if(method_init_density/='read_dns_cube' .and. method_init_density/='wf' .and. ps_format(ik)/='UPF') then
-          stop "radial density is not available (method_init_density=pp...)"
-        end if
       end if
       if ( any(pp%vpp_so/=0.0d0) ) flag_so=.true.
 
@@ -245,6 +250,19 @@ subroutine input_pp(pp,hx,hy,hz)
       close(4)
 
     enddo
+
+! radial density for method_init_density=pp/pp_magdir must be available for all elements
+    if(method_init_density=='pp' .or. method_init_density=='pp_magdir') then
+      flag_rho_pp_missing=.false.
+      do ik=1,nelem
+        if(.not. pp%has_rho_pp(ik)) then
+          write(*,*) "radial density is not available: ik=",ik," ps_format=",trim(ps_format(ik)), &
+            & " file=",trim(file_pseudo(ik))
+          flag_rho_pp_missing=.true.
+        end if
+      end do
+      if(flag_rho_pp_missing) stop "radial density is not available (method_init_density=pp...)"
+    end if
   endif
 
   call comm_bcast(pp%mr,nproc_group_global)
@@ -267,6 +285,11 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%upp_f,nproc_group_global)
   call comm_bcast(pp%vpp_f,nproc_group_global)
   call comm_bcast(pp%rho_pp_tbl,nproc_group_global)
+  do ik=1,nelem
+    call comm_bcast(pp%has_rho_pp(ik),nproc_group_global)
+    call comm_bcast(pp%has_wf_pp(ik),nproc_group_global)
+    call comm_bcast(pp%has_proj_pp(ik),nproc_group_global)
+  end do
   call comm_bcast(pp%rho_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%tau_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%flag_nlcc,nproc_group_global)
@@ -526,6 +549,7 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   if (lloc /= pp%lref(ik)) write(*,*) "Warning! Lref(ik=",ik,") is different from intended one in ",ps_file
   pp%mr(ik) = mmax - 1
   if ( pp%mr(ik)   > pp%nrmax0) stop 'Mr>Nrmax0 at Read_PS_ABINIT'
+  if ( pp%mr(ik)+1 > pp%nrmax ) stop 'Mr+1>Nrmax at Read_PS_ABINITPSP8'
   if ( pp%mlps(ik) > pp%lmax0 ) stop 'Mlps(ik)>Lmax0 at Read_PS_ABINIT'
   if ( pp%mlps(ik) > pp%lmax  ) stop 'Mlps(ik)>Lmax at Read_PS_ABINIT'
   read(4,*) rchrg,fchrg,qchrg
@@ -578,8 +602,11 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   sum_rho_pp=0.0d0
   do i=1,pp%mr(ik)+1
     read(4,*) dummy_text, r_tmp, rho_tmp
+    pp%rho_pp_tbl(i,ik)=rho_tmp*r_tmp**2 ! file value 4*pi*n(r) is assumed; rho_pp_tbl(i) <-> rad(i)
     sum_rho_pp=sum_rho_pp+rho_tmp*r_tmp**2
+    write(101, *) r_tmp, rho_tmp, sum_rho_pp*dr
   end do
+  pp%has_rho_pp(ik)=.true.
   write(*,*) "sum(rho_pp)=",sum_rho_pp*dr
   close(4)
 ! extend radial grid data
@@ -1120,24 +1147,23 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   integer :: i,l,l0,ll
   real(8) :: r1,r2,r3,r4,const,u
   
-  if(method_init_density/='wf' .and. (.not. flag_beta_proj_is_given)) then
-    pp%rho_pp_tbl(:,ik) = 0d0
-    u = 0d0
-    loop_l: do l = 0, pp%mlps(ik)
-      loop_i: do i = 1, pp%mr(ik)
-        pp%rho_pp_tbl(i,ik) = pp%rho_pp_tbl(i,ik) + dble(2*l+1)* pp%upp(i,l)**2
-        u = u + dble(2*l+1)* pp%upp(i,l)**2 * (pp%rad(i+1,ik)-pp%rad(i,ik))
-        if( u > pp%zps(ik) ) then
-          exit loop_l
-          exit loop_i
+  if(method_init_density/='wf') then
+      if (.not. pp%has_rho_pp(ik)) then
+        if (pp%has_wf_pp(ik)) then
+          call estimate_rho_pp_tbl(pp%mlps(ik),pp%mr(ik),pp%zps(ik),pp%upp,pp%rho_pp_tbl(:,ik))
+        else
+          write(*,*) "Invalid pseudopotential for method_init_density = pp"
+          stop
         end if
-      end do loop_i
-    end do loop_l
-    u = 0d0
-    do i = 1, pp%mr(ik)
-      u = u + pp%rho_pp_tbl(i,ik)*(pp%rad(i+1,ik)-pp%rad(i,ik))
-    end do
-    write(*,*) "Int(rho)= ",u, " (for method_init_density=pp...)"
+      end if
+
+      u = 0d0
+      do i = 1, pp%mr(ik)
+        u = u + pp%rho_pp_tbl(i,ik)*(pp%rad(i+1,ik)-pp%rad(i,ik))
+      end do
+      write(*,*) "Int(rho_ik)=",u, " for ik=", ik,  " (method_init_density=pp)"
+
+      if (u > 0d0) pp%has_rho_pp(ik) = .true.
   end if
 
 ! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
@@ -1246,6 +1272,40 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 
   return
 end subroutine making_ps_without_masking
+!====
+! Estimate the radial valence density 4*pi*r^2*n(r) from the pseudo wavefunctions.
+! Occupations are filled from low angular momentum with at most 2*(2l+1) electrons per channel.
+! upp1(i,l) is the value at rad(i+1) while rho_pp_tbl(i) is the value at rad(i).
+subroutine estimate_rho_pp_tbl(mlps1,mr1,zps1,upp1,rho_pp_tbl)
+  implicit none
+  integer,intent(in) :: mlps1,mr1,zps1
+  real(8),intent(in) :: upp1(0:,0:)
+  real(8),intent(out) :: rho_pp_tbl(:)
+  integer :: i,l
+  real(8) :: occ(0:mlps1),nelec_tmp
+
+! estimate occupations
+  occ(:) = 0d0
+  nelec_tmp = dble(zps1)
+  do l = 0, mlps1
+    occ(l) = min(nelec_tmp, dble(2*(2*l+1)))
+    nelec_tmp = nelec_tmp - occ(l)
+    if (nelec_tmp < 1d0) exit
+  end do
+  if (nelec_tmp >= 1d0) write(*,*) "Warning: electrons not assigned to any channel in estimate_rho_pp_tbl:",nelec_tmp
+  write(*, *) "DEBUG", "occ", occ
+  write(*, *) "DEBUG", "sum(occ)", sum(occ)
+  write(*, *) "DEBUG", "zps1", zps1
+
+  rho_pp_tbl(:) = 0d0
+  do l = 0, mlps1
+    do i = 1, mr1
+      rho_pp_tbl(i) = rho_pp_tbl(i) + occ(l) * upp1(i-1,l)**2
+    end do
+  end do
+
+  return
+end subroutine estimate_rho_pp_tbl
 
 subroutine making_ps_without_masking_so( pp, ik )
   use structures,only : s_pp_info
