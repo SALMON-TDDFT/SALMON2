@@ -25,19 +25,19 @@
    k,orbital parallelized of openmp  : T
  ===================pseudopotential data===================
  ik ,atom_symbol=           1 Si
- ps_format =KY              
+ ps_format =KY
  ps_file =/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2/testsuites/pseudo/Si_rps.dat
  Zps(ik), Mlps(ik) =           4           2
  Rps(ik), NRps(ik) =   2.2676713505493935              122
  Lref(ik) =           2
  nproj(ik,l) =           1           1           1
- anorm(ik,l) =  0.619321823      0.364655107       0.00000000    
+ anorm(ik,l) =  0.619321823      0.364655107       0.00000000
  inorm(ik,l) =           1           1           0
- Mass(ik) =   28.000000000000000     
+ Mass(ik) =   28.000000000000000
  flag_nlcc_element(ik) = F
  ==========================================================
  flag_nlcc =  F
- 
+
  ============init_ps==============
  end init_ps
  Maximal rho_NLCC= 0.000000000000000E+000
@@ -52,7 +52,7 @@ HSE_OPENMP threads=4
    Static dipole moment(xyz) =   -0.8744364841E+02   -0.8744364832E+02   -0.8744364835E+02
 
 
-  time-step  time[fs]                               Current(xyz)[a.u.]      electrons Total energy[eV] 
+  time-step  time[fs]                               Current(xyz)[a.u.]      electrons Total energy[eV]
 #----------------------------------------------------------------------
        1    0.00387021 -0.57734005E-12  0.45808473E-11  0.27747433E-05    32.00000000     -852.11762650
        2    0.00774043 -0.10202957E-11  0.77947428E-11  0.27204216E-05    32.00000000     -852.11762650
