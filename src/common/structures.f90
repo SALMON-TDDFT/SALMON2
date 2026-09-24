@@ -231,6 +231,9 @@ module structures
     integer :: lmax,lmax0
     integer :: nrmax,nrmax0
     logical :: flag_nlcc
+    logical,allocatable :: has_rho_pp(:) ! rho_pp_tbl is populated for this element
+    logical,allocatable :: has_wf_pp(:)  ! upp contains input pseudo wavefunctions
+    logical,allocatable :: has_proj_pp(:) ! projectors (and KB coefficients) are given by the input file
     character(2),allocatable :: atom_symbol(:)
     real(8),allocatable :: rmass(:)
     integer,allocatable :: mr(:)
@@ -253,7 +256,7 @@ module structures
     real(8),allocatable :: dvloctbl(:,:)
     real(8),allocatable :: udvtbl(:,:,:)
     real(8),allocatable :: dudvtbl(:,:,:)
-    real(8),allocatable :: rho_pp_tbl(:,:)
+    real(8),allocatable :: rho_pp_tbl(:,:) ! radial valence density 4*pi*r^2*n(r) at rad(i,ik) for method_init_density=pp
     real(8),allocatable :: rho_nlcc_tbl(:,:)
     real(8),allocatable :: tau_nlcc_tbl(:,:)
     real(8),allocatable :: upp_f(:,:,:)
