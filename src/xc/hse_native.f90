@@ -3,17 +3,21 @@
 ! distributed k points. Exchange transfers density tiles; ACE applications stay local.
 module hse_native
   use iso_fortran_env, only: int64
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
   use hse_ace
+  use hse_symmetry
+  use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid
   implicit none
   private
   public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
   public :: hse_pack,hse_unpack,hse_timings,hse_walltime
   public :: hse_taylor_stage
+  type(hse_symmetry_map),save :: symmetry_map
   type(hse_kernel),save :: kernel
   type(hse_ace_state),save :: ace
   type(hse_ace_state),save :: initial_ace,midpoint_ace
@@ -102,7 +106,7 @@ contains
     type(s_orbital),intent(in) :: psi
     complex(8),allocatable :: w(:,:,:),local(:,:,:)
     real(8) :: ex,offdiag(3,3),tick,communication_before
-    integer :: ierr,total_error,ng,nk,no,n,mesh,j
+    integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
     if(.not.hse_enabled().or.hse_freeze)return
     if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
       error stop 'HSE06: initial native support requires k-only MPI distribution'
@@ -113,18 +117,36 @@ contains
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
-    if(any(mg%num/=n).or.mesh**3/=nk.or.maxval(abs(system%hgs-system%hgs(1)))>1d-12) &
+    if(use_symmetry)mesh=num_kgrid(1)
+    if(any(mg%num/=n).or.(.not.use_symmetry.and.mesh**3/=nk).or. &
+      maxval(abs(system%hgs-system%hgs(1)))>1d-12) &
       error stop 'HSE06: cubic grid and full cubic k mesh required'
     offdiag=system%primitive_a
     do j=1,3;offdiag(j,j)=0;enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'HSE06: orthogonal cell required'
-    if(maxval(abs(system%wtk-1d0/nk))>1d-12.or.maxval(abs(system%rocc-2d0))>1d-12) &
+    if((.not.use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12).or. &
+      maxval(abs(system%rocc-2d0))>1d-12) &
       error stop 'HSE06: uniform k weights and fully occupied spin pairs required'
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE06: unsupported orbital layout'
     if(kernel%n==0)then
-      ! Up to 64 rows per collective round, at most 16 per rank; bound tile memory.
-      call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,.11d0, &
-        max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk)
+      ! Keep representatives persistent; expand only rank-local stars for EXX.
+      if(use_symmetry)then
+        if(any(num_kgrid/=mesh))error stop 'HSE symmetry: cubic full mesh required'
+        call symmetry_init(symmetry_map,mg%num,system%hgs,system%vec_k(:,:nk),system%wtk(:nk), &
+          SymMatA,SymMatB,mesh,ierr)
+        call comm_summation(ierr,total_error,info%icomm_rko)
+        if(total_error/=0)error stop 'HSE symmetry: invalid grid, stars or weights'
+        call symmetry_validate_atoms(symmetry_map,system%Rion,system%kion,ierr)
+        call comm_summation(ierr,total_error,info%icomm_rko)
+        if(total_error/=0)error stop 'HSE symmetry: operation does not preserve atoms'
+        first_full=symmetry_map%first(info%ik_s)
+        count_full=symmetry_map%first(info%ik_e+1)-first_full
+        call hse_kernel_init(kernel,n,mesh,system%hgs(1),symmetry_map%full_k,.11d0, &
+          max(1,min(16,64/info%isize_k)),ierr,first_full,count_full)
+      else
+        call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,.11d0, &
+          max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk)
+      endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
     endif
@@ -153,7 +175,10 @@ contains
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: ACE metric failed'
     cached_source=local
-    ex=.25d0*real(sum(conjg(local)*w),8)*system%hvol/nk
+    ex=0d0
+    do j=1,info%numk
+      ex=ex+.25d0*real(sum(conjg(local(:,:,j))*w(:,:,j)),8)*system%hvol*system%wtk(info%ik_s+j-1)
+    enddo
     call comm_summation(ex,hse_exchange_energy,info%icomm_k)
   end subroutine
 
@@ -162,14 +187,68 @@ contains
     complex(8),intent(out) :: action(:,:,:)
     type(s_parallel_info),intent(in) :: info
     integer,intent(out) :: ierr
-    integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np
+    integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np,j,index,total_error
+    complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:)
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
+    if(use_symmetry)then
+      local_layout(info%id_k+1)=symmetry_map%first(info%ik_s)
+      local_layout(np+info%id_k+1)=symmetry_map%first(info%ik_e+1)-symmetry_map%first(info%ik_s)
+    endif
     call comm_summation(local_layout,layout,size(layout),info%icomm_k)
+    if(use_symmetry)then
+      ierr=0
+      if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))ierr=1
+      call comm_summation(ierr,total_error,info%icomm_k)
+      if(total_error/=0)then
+        ierr=1;return
+      endif
+      allocate(expanded_target(size(target,1),size(target,2),layout(np+info%id_k+1)))
+      allocate(rotated(size(source,1),size(source,2)))
+      do j=1,size(expanded_target,3)
+        index=layout(info%id_k+1)+j-1
+        call symmetry_transform(symmetry_map,index,1,target(:,:,symmetry_map%owner(index)-info%ik_s+1), &
+          expanded_target(:,:,j),ierr)
+        if(ierr/=0)error stop 'HSE symmetry target transformation failed'
+      enddo
+      allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
+      ! Source argument is only a valid layout placeholder when the density callback is supplied.
+      call hse_kernel_apply_distributed(kernel,expanded_target,expanded_target,expanded_action,layout(:np), &
+        layout(np+1:),info%id_k,transpose_tiles,ierr,fill_density)
+      if(ierr==0)then
+        do j=1,info%numk
+          index=symmetry_map%first(info%ik_s+j-1)-symmetry_map%first(info%ik_s)+1
+          action(:,:,j)=expanded_action(:,:,index)
+        enddo
+      endif
+      return
+    endif
     call hse_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
       info%id_k,transpose_tiles,ierr)
   contains
+    subroutine fill_density(j,lo,rows,density)
+      integer,intent(in) :: j,lo,rows
+      complex(8),intent(out) :: density(:,:)
+      integer :: full_index,rep,op,g,stat,ng,no
+      complex(8) :: coefficient
+      external :: zgemm
+      ng=size(source,1);no=size(source,2)
+      full_index=layout(info%id_k+1)+j-1
+      rep=symmetry_map%owner(full_index)-info%ik_s+1
+      coefficient=cmplx(1d0/symmetry_map%multiplicity(full_index),0d0,8)
+      density=0d0
+      ! Average little-group projectors one orbital block at a time, not copies of all orbitals.
+      do op=1,symmetry_map%multiplicity(full_index)
+        call symmetry_transform(symmetry_map,full_index,op,source(:,:,rep),rotated,stat)
+        if(stat/=0)error stop 'HSE symmetry source transformation failed'
+        do g=1,no
+          rotated(:,g)=rotated(:,g)*kernel%phase(:,j)
+        enddo
+        call zgemm('N','C',rows,ng,no,coefficient,rotated(lo,1),ng,rotated(1,1),ng, &
+          (1d0,0d0),density(1,1),size(density,1))
+      enddo
+    end subroutine
     subroutine transpose_tiles(send,recv,count)
       complex(8),intent(in) :: send(:)
       complex(8),intent(out) :: recv(:)

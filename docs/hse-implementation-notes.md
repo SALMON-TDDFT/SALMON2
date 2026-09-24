@@ -155,3 +155,7 @@ TDCDFT・ELFなどの既存機能は[別の検証ノート](tdcdft-validation.md
 [BLAS内部OpenMP計測](results/si-hse-blas-hybrid/README.md)を追加。HSEのBLAS呼び出しはSALMONのOpenMP領域外で行い、BLAS内部の並列化に委ねる。ACE適用は各k点について `overlap = dv * factors† * target`、`action = -factors * overlap` の二つのZGEMMであり、k点ループ自体は直列。交換カーネルの要素積・転置用整形にはSALMON側OpenMPを使う。MPIとFFTWは並列領域外。スレッドごとの巨大な軌道複製は行わない。
 
 富岳でOMP約12を使う構成を想定し、OpenBLAS固有の1スレッド強制を廃止した。リンクするBLASの並列版と実行時設定が必要。ローカルOMP12の数値一致と富岳実機の性能検証は区別する。
+
+## Siのz偏光対称性
+
+[対称性縮約の実装と検証](results/si-hse-symmetry/README.md)を追加。波動関数・ACEを既約点で保持し、交換用の密度タイルを対称操作から再構成する。16³の既定シフト格子は4096→576点。完全格子FFT・一時配列が残るため、総メモリや交換時間の一律1/8削減は主張しない。TDCDFTは固定α・z偏光に限定。対称性を含めたcheckpoint整合性を検査する。

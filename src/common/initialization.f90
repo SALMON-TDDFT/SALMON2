@@ -27,12 +27,13 @@ contains
 subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile,unfold)
   use structures
   use salmon_global, only: iperiodic,layout_multipole, &
-                           nproc_k,nproc_ob,nproc_rgrid,method_poisson
+                           nproc_k,nproc_ob,nproc_rgrid,method_poisson,xc,tdcdft
   use sendrecv_grid
   use init_communicator
   use init_poisson_sub
   use checkpoint_restart_sub, only: init_dir_out_restart
   use sym_rho_sub, only: init_sym_rho
+  use sym_sub, only: use_symmetry,symmetry_validate_atoms_cartesian
   use nvtx_wrapper
   implicit none
   integer      ,intent(in) :: comm
@@ -51,6 +52,8 @@ subroutine init_dft(comm,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofi
 
 ! electron system
   call init_dft_system(lg,system,stencil,unfold)
+  if(use_symmetry.and.(xc=='hse06'.or.tdcdft/='none')) &
+    call symmetry_validate_atoms_cartesian(system%Rion,system%kion)
 
 ! process distribution
   info%npk       = nproc_k

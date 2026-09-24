@@ -1,0 +1,10 @@
+{
+  "hse": {
+    "bitwise_equal": true,
+    "relative_orbital_error": 0.0
+  },
+  "td": {
+    "bitwise_equal": true,
+    "relative_orbital_error": 0.0
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "hse_full": {
+    "rt_seconds": 20.149,
+    "ranks": 4
+  },
+  "hse_reduced": {
+    "rt_seconds": 58.497,
+    "ranks": 3
+  },
+  "td_full": {
+    "rt_seconds": 0.96559,
+    "ranks": 4
+  },
+  "td_reduced": {
+    "rt_seconds": 0.18543,
+    "ranks": 3
+  },
+  "hse_relative_current_error": 1.603193194529548e-08,
+  "td_relative_current_error": 3.281458983003607e-07
+}

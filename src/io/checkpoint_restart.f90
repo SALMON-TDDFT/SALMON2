@@ -2088,6 +2088,7 @@ subroutine write_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   
   call checkpoint_xc_field(wdir,itt,info,rt)
   call hse_checkpoint_metadata(wdir,system,info,.true.)
+  call symmetry_checkpoint_metadata(wdir,system,info,.true.)
 end subroutine write_rtdata
 
 subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
@@ -2127,13 +2128,77 @@ subroutine read_rtdata(wdir,itt,lg,mg,system,info,iself,rt)
   end if
 
   call hse_checkpoint_metadata(wdir,system,info,.false.)
+  call symmetry_checkpoint_metadata(wdir,system,info,.false.)
   call restore_xc_field(wdir,itt,info,rt)
   call nvtxEndRange
 end subroutine read_rtdata
 
+! Shared symmetry guard also protects fixed-alpha TDCDFT restarts.
+subroutine symmetry_checkpoint_metadata(wdir,system,info,writing)
+  use structures, only: s_dft_system,s_parallel_info
+  use sym_sub, only: use_symmetry,SymMatA,SymMatB
+  use communication, only: comm_is_root,comm_bcast
+  use salmon_global, only: xc,tdcdft
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  character(*),intent(in) :: wdir
+  type(s_dft_system),intent(in) :: system
+  type(s_parallel_info),intent(in) :: info
+  logical,intent(in) :: writing
+  integer :: unit,status,ios,version,nk,nsym
+  real(8),allocatable :: values(:),saved(:)
+  logical :: required,exists,opened
+  required=use_symmetry.and.(xc=='hse06'.or.tdcdft/='none')
+  status=0;opened=.false.
+  if(comm_is_root(info%id_rko))then
+    inquire(file=trim(wdir)//'symmetry_restart.bin',exist=exists)
+    if(writing)then
+      if(required)then
+        open(newunit=unit,file=trim(wdir)//'symmetry_restart.bin',form='unformatted',status='replace',iostat=status)
+        opened=status==0
+      else if(exists)then
+        ! Avoid retaining a stale symmetry guard in a reused output directory.
+        open(newunit=unit,file=trim(wdir)//'symmetry_restart.bin',status='old',iostat=status)
+        if(status==0)close(unit,status='delete',iostat=status)
+      endif
+    else
+      if(exists.neqv.required)status=1
+      if(status==0.and.exists)then
+        open(newunit=unit,file=trim(wdir)//'symmetry_restart.bin',form='unformatted',status='old',iostat=status)
+        opened=status==0
+      endif
+    endif
+    if(opened)then
+      values=[reshape(system%vec_k(:,:system%nk),[3*system%nk]),system%wtk(:system%nk), &
+        reshape(SymMatA,[size(SymMatA)]),reshape(SymMatB,[size(SymMatB)])]
+      if(writing)then
+        write(unit,iostat=status)1,system%nk,size(SymMatA,3)
+        if(status==0)write(unit,iostat=status)values
+      else
+        read(unit,iostat=status)version,nk,nsym
+        if(status==0)then
+          if(version/=1.or.nk/=system%nk.or.nsym/=size(SymMatA,3))status=1
+        endif
+        if(status==0)then
+          allocate(saved(size(values)))
+          read(unit,iostat=status)saved
+          if(status==0)then
+            if(.not.all(ieee_is_finite(saved)).or.any(abs(saved-values)>1d-13))status=1
+          endif
+        endif
+      endif
+      close(unit,iostat=ios)
+      if(ios/=0)status=1
+    endif
+  endif
+  call comm_bcast(status,info%icomm_rko)
+  if(status/=0)error stop 'Symmetry restart mismatch or incomplete metadata'
+end subroutine symmetry_checkpoint_metadata
+
 ! Versioned HSE-only restart guard; caches are rebuilt from accepted orbitals.
 subroutine hse_checkpoint_metadata(wdir,system,info,writing)
   use structures
+  use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_is_root,comm_bcast
   use salmon_global, only: xc,dt,e_impulse,epdir_re1,propagator,trans_longi,file_pseudo,nelem
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -2166,15 +2231,17 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
       values=[dt,e_impulse,epdir_re1,.11d0,.25d0,system%hgs,reshape(system%primitive_a,[9]), &
         reshape(system%vec_k,[3*system%nk]),reshape(system%rocc,[system%no*system%nk]), &
         reshape(system%Rion,[3*system%nion]),real(system%kion,8)]
+      if(use_symmetry)values=[values,system%wtk(:system%nk), &
+        reshape(SymMatA,[size(SymMatA)]),reshape(SymMatB,[size(SymMatB)])]
       allocate(saved(size(values)))
       if(writing)then
-        write(unit,iostat=status)1,[system%nk,system%no,system%nion,nelem]
+        write(unit,iostat=status)merge(2,1,use_symmetry),[system%nk,system%no,system%nion,nelem]
         if(status==0)write(unit,iostat=status)propagator,trans_longi
         if(status==0)write(unit,iostat=status)values
       else
         read(unit,iostat=status)version,dims
         if(status==0)then
-          if(version/=1.or.any(dims/=[system%nk,system%no,system%nion,nelem]))status=1
+          if(version/=merge(2,1,use_symmetry).or.any(dims/=[system%nk,system%no,system%nion,nelem]))status=1
         endif
         ! Strings are written with their declared SALMON lengths; read matching lengths below.
         if(status==0)call read_methods(unit,status)

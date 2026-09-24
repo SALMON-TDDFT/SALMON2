@@ -2935,7 +2935,18 @@ contains
       if (spin/='unpolarized'.or.yn_spinorbit/='n') error stop 'TDCDFT: requires unpolarized, no spin-orbit'
       if (yn_md/='n'.or.yn_dc/='n'.or.yn_jm/='n') error stop 'TDCDFT: MD, DC and jellium unsupported'
       if (propagator/='middlepoint') error stop 'TDCDFT: requires middlepoint propagator'
-      if (yn_symmetry/='n'.and.yn_symmetry/='nnn') error stop 'TDCDFT: disable symmetry reduction'
+      if (index(yn_symmetry,'y')/=0) then
+        if (tdcdft_screening/='none') error stop 'TDCDFT symmetry: fixed alpha only'
+        if (ae_shape1=='input'.or.ae_shape2=='input') error stop 'TDCDFT symmetry: file fields unsupported'
+        if (ae_shape1/='none') then
+          if (maxval(abs(epdir_re1(1:2)))>1d-12.or.maxval(abs(epdir_im1(1:2)))>1d-12) &
+            error stop 'TDCDFT symmetry: first pulse must be z polarized'
+        end if
+        if (ae_shape2/='none') then
+          if (maxval(abs(epdir_re2(1:2)))>1d-12.or.maxval(abs(epdir_im2(1:2)))>1d-12) &
+            error stop 'TDCDFT symmetry: second pulse must be z polarized'
+        end if
+      end if
       if (yn_reset_step_restart=='y') error stop 'TDCDFT: resetting restart time is unsupported'
       if (yn_self_checkpoint=='y') error stop 'TDCDFT: use shared checkpoint files'
       if (xc/='pz') error stop 'TDCDFT: initial implementation requires xc=pz'
@@ -3199,6 +3210,8 @@ contains
         if(trans_longi/='tr')error stop 'HSE06 native impulse currently requires transverse constant A'
         if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
         if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06 native RT initially supports impulse only'
+        if(index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
+          error stop 'HSE symmetry: impulse must be z polarized'
         if(gram_schmidt_interval>0)error stop 'HSE06 requires no Gram-Schmidt rescaling'
         if(propagator=='hse_ptcn')then
           if(yn_predictor_corrector=='y')error stop 'HSE06 PT-CN requires no external predictor-corrector'

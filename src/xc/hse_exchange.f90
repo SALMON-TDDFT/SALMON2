@@ -138,7 +138,7 @@ contains
 
   ! K-distributed source/target/action; transpose density tiles, never orbitals.
   ! Caller supplies identical layout/kernel metadata and communicator size on all ranks.
-  subroutine hse_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr)
+  subroutine hse_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr,fill_density)
     type(hse_kernel),intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
@@ -151,7 +151,13 @@ contains
         complex(c_double_complex),intent(out) :: recv(:)
         integer,intent(in) :: count
       end subroutine
+      subroutine fill_density(j,lo,rows,density)
+        import c_double_complex
+        integer,intent(in) :: j,lo,rows
+        complex(c_double_complex),intent(out) :: density(:,:)
+      end subroutine
     end interface
+    optional :: fill_density
     complex(c_double_complex),allocatable :: s(:,:,:),t(:,:,:)
     complex(c_double_complex),allocatable,target :: send(:),recv(:)
     complex(c_double_complex),pointer :: sb(:,:,:,:),rb(:,:,:,:)
@@ -186,7 +192,12 @@ contains
     call transpose_tiles(valid_send,valid_recv,1)
     if(any(valid_recv/=zero))return
     km=maxval(counts);nmsg=b*ng*km
-    allocate(send(nmsg*np),recv(nmsg*np),s(ng,no,nlocal),t(ng,nt,nlocal),inverse(nk))
+    allocate(send(nmsg*np),recv(nmsg*np),t(ng,nt,nlocal),inverse(nk))
+    if(present(fill_density))then
+      allocate(s(ng,0,nlocal))
+    else
+      allocate(s(ng,no,nlocal))
+    endif
     sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
     do ki=1,nk;inverse(op%order(ki))=ki;enddo
     op%threads_used=1
@@ -196,7 +207,9 @@ contains
     !$omp end single
     !$omp do schedule(static)
     do j=1,nlocal
-      do g=1,no;s(:,g,j)=source(:,g,j)*op%phase(:,j);enddo
+      if(.not.present(fill_density))then
+        do g=1,no;s(:,g,j)=source(:,g,j)*op%phase(:,j);enddo
+      endif
       do g=1,nt;t(:,g,j)=target(:,g,j)*op%phase(:,j);enddo
     enddo
     !$omp end do
@@ -208,7 +221,11 @@ contains
         lo=base+p*b;rows=min(b,ng-lo+1)
         if(rows<=0)cycle
         do j=1,nlocal
-          call zgemm('N','C',rows,ng,no,one,s(lo,1,j),ng,s(1,1,j),ng,zero,sb(1,1,j,p+1),b)
+          if(present(fill_density))then
+            call fill_density(j,lo,rows,sb(:,:,j,p+1))
+          else
+            call zgemm('N','C',rows,ng,no,one,s(lo,1,j),ng,s(1,1,j),ng,zero,sb(1,1,j,p+1),b)
+          endif
         enddo
       enddo
       call transpose_tiles(send,recv,nmsg)

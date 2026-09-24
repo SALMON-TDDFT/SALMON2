@@ -10,7 +10,7 @@ set(SOURCES
    )
 
 if(USE_HSE)
-  list(APPEND SOURCES hse_exchange.f90 hse_ace.f90 hse_semilocal.f90 hse_native.f90)
+  list(APPEND SOURCES hse_symmetry.f90 hse_exchange.f90 hse_ace.f90 hse_semilocal.f90 hse_native.f90)
 endif()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
