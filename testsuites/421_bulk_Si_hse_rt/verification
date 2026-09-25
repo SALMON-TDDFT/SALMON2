@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import math
+text=Path('outputfile').read_text()
+assert 'end SALMON' in text
+assert 'hse_omega' in Path('variables.log').read_text()
+variables=Path('variables.log').read_text()
+assert 'propagator=hse_taylor4' in variables.replace(' ','')
+for filename in ('Si_rt.data','Si_rt_energy.data'):
+ rows=[list(map(float,line.split())) for line in Path(filename).read_text().splitlines() if line.strip() and not line.startswith('#')]
+ assert len(rows)>=2 and all(math.isfinite(x) for row in rows for x in row)
+assert abs(rows[-1][0]-.32)<1e-8

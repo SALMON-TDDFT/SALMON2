@@ -18,6 +18,9 @@
 
 module hamiltonian
   use nvtx_wrapper
+#ifdef USE_HSE
+  use hse_native, only: hse_add_action
+#endif
   implicit none
   integer,private,parameter :: Nd = 4
 
@@ -466,6 +469,9 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
   end if
 
+#ifdef USE_HSE
+  call hse_add_action(tpsi,htpsi,system,mg,info)
+#endif
   call timer_end(LOG_UHPSI_ALL)
   call nvtxEndRange()
 

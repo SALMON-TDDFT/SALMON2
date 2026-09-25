@@ -140,3 +140,9 @@ else ()
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/724_Si_diamond_bloch_ms")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/725_Si_bloch_3rd_order")
 endif ()
+
+# Native CPU HSE integration: bounded GS producer and Taylor+ACE RT consumer.
+if(USE_HSE AND USE_MPI AND NOT USE_OPENACC)
+  add_subdirectory(420_bulk_Si_hse_gs)
+  add_subdirectory(421_bulk_Si_hse_rt)
+endif()

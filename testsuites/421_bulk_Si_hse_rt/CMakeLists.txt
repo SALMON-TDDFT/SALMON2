@@ -1,0 +1,3 @@
+create_mpi_test()
+set_tests_properties(run_421_bulk_Si_hse_rt PROPERTIES FIXTURES_SETUP run_421_bulk_Si_hse_rt)
+set_tests_properties(prep_421_bulk_Si_hse_rt PROPERTIES FIXTURES_REQUIRED run_420_bulk_Si_hse_gs)
