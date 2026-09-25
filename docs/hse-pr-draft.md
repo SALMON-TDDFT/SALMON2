@@ -12,8 +12,15 @@ full-k linear Acos2 pulses with optional impulse probes. Unsupported configurati
 are rejected; pulse RT restart remains intentionally unavailable. Developer CN
 and full-action Taylor paths remain available only by explicit selection.
 
+Ordinary CPU CMake builds enable HSE and discover compatible libraries or build
+hash-pinned Libxc, FFTW and BLAS/LAPACK automatically. Existing vendor toolchains
+retain their compiler and numerical-library settings.
+
 Validation on Apple Silicon/GNU Fortran 15: HSE-enabled MPI and HSE-disabled serial
 builds; eight native numerical tests; thirteen bounded input/restart cases; short
-laser+probe and two negative restart checks; six CTest stages for new GS→RT cases.
+laser+probe and two negative restart checks; seven CTest checks for a converged
+Si Nk=4^3 GS and 64-step impulse response with MPI4 × OpenMP2. Automatically built dependencies also passed the Nk=4^3
+GS/impulse tests with MPI4 × OpenMP1. An eigenvector regression guards the
+selected LAPACK; a GNU 15/AArch64 workaround is confined to the Netlib fallback.
 See docs/merge-preparation.md for reproduction, exact scope and remaining CI/manual
 work. This candidate is for review, not a claim of cross-platform certification.

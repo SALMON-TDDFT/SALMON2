@@ -31,9 +31,12 @@ The HSE metadata writer now removes stale metadata on non-HSE checkpoint writes.
   two-step run. Stale HSE metadata removal passed.
 - Full-k short Acos2 + impulse-probe: 16 steps completed. Both direct pulse restart
   and reopening its checkpoint as an impulse were rejected as intended.
-- Standard CTest cases 420 and 421: all six prep/run/verify stages passed on MPI4.
-  These use a one-iteration GS producer and two-step RT consumer for integration
-  coverage; they are deliberately not convergence or physical-spectrum tests.
+- Standard CTest cases 420 and 421 now require a converged fresh Si Nk=4^3 GS
+  and 64-step impulse response. All seven LAPACK/prep/run/verify checks passed
+  with installed libraries on MPI4 × OpenMP2. Automatically built dependencies
+  also passed GS and RT on MPI4 × OpenMP1. See [platform validation](hse-platforms.md)
+  for timings and the Netlib eigenvector correction. The short RT trajectory is
+  a regression test, not a resolved optical spectrum.
 - `git diff --check` passed. Read-only review of both pending HSE changes and
   extracted source found no remaining concrete source correctness blocker.
 
