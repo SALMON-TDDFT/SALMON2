@@ -103,3 +103,7 @@ CTestTestfile.cmake
 # Executables
 
 # End of https://www.gitignore.io/api/c,cmake,fortran
+
+# Python test caches
+__pycache__/
+*.pyc

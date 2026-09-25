@@ -119,6 +119,7 @@ module salmon_global
 !! &functional
   character(64)  :: xc !, xcname
   character(64)  :: xname
+  real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc
