@@ -69,9 +69,9 @@ class NativeExchangeTest(unittest.TestCase):
   for omega in (.06,.2):
    values=np.loadtxt(subprocess.run([str(exe),str(omega)],check=True,capture_output=True,text=True).stdout.splitlines())
    with Semilocal() as xc:
-    setter=xc.lib.xc_func_set_ext_params_name
-    setter.argtypes=[ct.c_void_p,ct.c_char_p,ct.c_double]
-    for name in (b'_omega_HF',b'_omega_PBE'):setter(xc._funcs[0],name,omega)
+    setter=xc.lib.xc_func_set_ext_params
+    setter.argtypes=[ct.c_void_p,ct.POINTER(ct.c_double)]
+    setter(xc._funcs[0],(ct.c_double*3)(.25,omega,omega))
     changed=np.array(xc.evaluate([0,1e-4,.1,2],[0,.001,.2,3])).T
    np.testing.assert_allclose(values,changed,rtol=2e-14,atol=1e-14)
    self.assertGreater(np.max(np.abs(values-ref)),1e-5)

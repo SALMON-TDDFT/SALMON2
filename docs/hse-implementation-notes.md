@@ -6,7 +6,8 @@ or the accumulated material-specific calculation outputs.
 
 ## Functional and input
 
-`USE_HSE=ON` adds CPU FFTW, Libxc C ABI, BLAS and LAPACK dependencies.
+HSE is enabled by default for CPU builds. CMake finds or builds FFTW, Libxc
+(C ABI), BLAS and LAPACK automatically; see [build details](hse-build.md).
 The option defaults to OFF. See [input settings](inputs/hse.md) and the
 [Si example](../samples/hse_native/README.md).
 

@@ -40,12 +40,10 @@ The HSE metadata writer now removes stale metadata on non-HSE checkpoint writes.
 The pre-extraction branch's broader 83-test reference suite also passed, but
 that result is not substituted for tests on the extracted tree.
 
-Build reproduction (adjust dependency paths for your platform):
+Build reproduction:
 
 ```sh
-cmake -S . -B /tmp/salmon-hse-build -DUSE_HSE=ON -DUSE_MPI=ON \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_Fortran_COMPILER=mpifort \
-  -DCMAKE_PREFIX_PATH='/path/openblas;/path/fftw;/path/libxc'
+cmake -S . -B /tmp/salmon-hse-build -DUSE_MPI=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/salmon-hse-build -j 8
 OMP_NUM_THREADS=1 ctest --test-dir /tmp/salmon-hse-build \
   -R '(420_bulk_Si_hse_gs|421_bulk_Si_hse_rt)' --output-on-failure
@@ -53,9 +51,9 @@ SALMON_TEST_MPI=1 OMP_NUM_THREADS=1 python3 -m unittest discover \
   -s samples/hse_mlwf_reference -p 'test_native*.py'
 ```
 
-This Mac build additionally used existing toolchain workarounds
-`CMAKE_C_FLAGS=-include stdio.h` and
-`CMAKE_Fortran_FLAGS=-fallow-argument-mismatch`, with gcc-15 as C compiler.
+Dependency detection/build and GNU Fortran compatibility flags are now automatic.
+See [build details](hse-build.md). The native Python reference tests have their
+own dependency discovery; the ordinary CMake build does not require Python.
 Compiler warnings in legacy MPI argument interfaces remain; no new warning-free
 or cross-platform claim is made.
 

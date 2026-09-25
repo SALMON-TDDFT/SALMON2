@@ -15,6 +15,7 @@
  */
 
 #include "config.h"
+#include <stdio.h> /* snprintf and remove in independently guarded helpers */
 
 
 #if defined(SYSTEM_HAS_POSIX) \

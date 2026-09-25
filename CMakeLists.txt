@@ -28,7 +28,6 @@ message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
 message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
-include(cmakefiles/check_build_environments.cmake)
 
 if(USE_OPENACC)
   if(USE_CUDA)
@@ -51,6 +50,8 @@ option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil
 option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
 
 
+include(cmakefiles/check_build_environments.cmake)
+
 # variables
 set(TARGET_NAME "salmon")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -60,19 +61,14 @@ include_directories(${CMAKE_BINARY_DIR})
 include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 
 
-option(USE_HSE "Enable experimental native HSE06 (FFTW and Libxc C libraries)" OFF)
-if(USE_HSE)
-  if(USE_OPENACC)
-    message(FATAL_ERROR "Native HSE06 currently requires a CPU build")
-  endif()
-  find_path(HSE_FFTW_INCLUDE fftw3.f03 HINTS ${FFTW_INSTALLDIR}/include)
-  find_library(HSE_FFTW_LIBRARY fftw3 HINTS ${FFTW_INSTALLDIR}/lib)
-  find_library(HSE_LIBXC_LIBRARY xc HINTS ${LIBXC_INSTALLDIR}/lib)
-  if(NOT HSE_FFTW_INCLUDE OR NOT HSE_FFTW_LIBRARY OR NOT HSE_LIBXC_LIBRARY)
-    message(FATAL_ERROR "USE_HSE requires FFTW3 and Libxc; set FFTW_INSTALLDIR/LIBXC_INSTALLDIR")
-  endif()
-  include_directories(${HSE_FFTW_INCLUDE})
-  list(APPEND EXTERNAL_LIBS ${HSE_FFTW_LIBRARY} ${HSE_LIBXC_LIBRARY})
+if(USE_OPENACC)
+  set(_hse_default OFF)
+else()
+  set(_hse_default ON)
+endif()
+option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)" ${_hse_default})
+if(USE_HSE AND USE_OPENACC)
+  message(FATAL_ERROR "Native HSE requires a CPU build; use USE_HSE=OFF for accelerators")
 endif()
 
 # for third party libraries

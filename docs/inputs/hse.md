@@ -1,6 +1,8 @@
 # Native HSE input
 
-Build with `USE_HSE=ON` (Libxc, FFTW, BLAS and LAPACK required).
+HSE is enabled by default in ordinary CPU CMake builds. Compatible installed
+Libxc, FFTW and BLAS/LAPACK are selected automatically; missing dependencies
+are downloaded and built locally. See [build instructions](../hse-build.md).
 The ordinary system, pseudopotential, real-space/k-space grid, SCF and parallel
 namelists remain necessary. The HSE-specific functional selection for both GS
 and RT is:

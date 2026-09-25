@@ -21,12 +21,18 @@ for the current Taylor+ACE baseline, algorithm details, and measured tradeoffs.
 
 ## Build
 
-Enable `-DUSE_HSE=ON -DUSE_MPI=ON` in a normal SALMON CPU CMake build.
-Supply `-DFFTW_INSTALLDIR=/path/to/fftw` and
-`-DLIBXC_INSTALLDIR=/path/to/libxc` if these libraries are not on the search path.
-FFTW's `fftw3.f03` and the Libxc C library are required; Libxc's compiler-specific
-Fortran modules are not required. Use a BLAS/LAPACK library such as OpenBLAS.
-The default `USE_HSE=OFF` build has no new dependency.
+HSE is enabled by default in a normal SALMON CPU CMake build:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON
+cmake --build build -j 8
+```
+
+Compatible installed libraries are used automatically. Missing FFTW, Libxc or
+BLAS/LAPACK are downloaded and built in the build directory. No dependency paths
+or compiler workaround flags are normally needed. MPI itself must be installed
+when `USE_MPI=ON`; omit that option for serial execution.
+See [dependency details](../../docs/hse-build.md).
 
 ## Si example
 

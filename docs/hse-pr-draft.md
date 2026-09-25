@@ -12,10 +12,6 @@ full-k linear Acos2 pulses with optional impulse probes. Unsupported configurati
 are rejected; pulse RT restart remains intentionally unavailable. Developer CN
 and full-action Taylor paths remain available only by explicit selection.
 
-This is an HSE-only extraction. TDCDFT/ELF experimentation and accumulated material
-calculation outputs remain outside this change. A generic odd-step restart buffer
-fix is included and checked with HSE-disabled serial PZ.
-
 Validation on Apple Silicon/GNU Fortran 15: HSE-enabled MPI and HSE-disabled serial
 builds; eight native numerical tests; thirteen bounded input/restart cases; short
 laser+probe and two negative restart checks; six CTest stages for new GS→RT cases.

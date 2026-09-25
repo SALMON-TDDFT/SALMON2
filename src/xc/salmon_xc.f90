@@ -1775,13 +1775,13 @@ contains
 
          case(XC_FAMILY_LDA)
            call xc_f90_lda_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), &
+             & xc%func(ii), np, rho_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1) &
              & )
 
          case(XC_FAMILY_GGA)
            call xc_f90_gga_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), sigma_1d(1), &
+             & xc%func(ii), np, rho_1d(1), sigma_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1), gvxc_tmp_1d(1) &
              & )
 

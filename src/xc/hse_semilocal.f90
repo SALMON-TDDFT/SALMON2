@@ -24,11 +24,10 @@ module hse_semilocal
       import c_ptr
       type(c_ptr),value :: p
     end subroutine
-    subroutine xc_func_set_ext_params_name(p,name,value) bind(C)
-      import c_ptr,c_char,c_double
+    subroutine xc_func_set_ext_params(p,values) bind(C)
+      import c_ptr,c_double
       type(c_ptr),value :: p
-      character(c_char) :: name(*)
-      real(c_double),value :: value
+      real(c_double),intent(in) :: values(*)
     end subroutine
     subroutine xc_hyb_cam_coef(p,omega,alpha,beta) bind(C)
       import c_ptr,c_double
@@ -64,8 +63,9 @@ contains
     if(ierr/=0)then
       call xc_func_free(func);return
     endif
-    call xc_func_set_ext_params_name(func,'_omega_HF'//c_null_char,requested)
-    call xc_func_set_ext_params_name(func,'_omega_PBE'//c_null_char,requested)
+    ! Set beta, omega_HF and omega_PBE together: old Libxc named setters
+    ! restore the other parameters to their defaults on each call.
+    call xc_func_set_ext_params(func,[.25d0,requested,requested])
     call xc_hyb_cam_coef(func,omega,alpha,beta)
     if(abs(omega-requested)>1d-12.or.abs(alpha)>1d-12.or.abs(alpha+beta-.25d0)>1d-12)then
       ierr=1
