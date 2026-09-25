@@ -613,6 +613,7 @@ subroutine write_wavefunction(odir,lg,mg,system,info,spsi,is_self_checkpoint)
     select case(method_wf_distributor)
     case('single') ; call write_all    ! create single shared file
     case('slice')  ; call write_sliced ! sliced shared file
+    case('block')  ; call write_block  ! per-process block shared files
     case default   ; stop 'write_wavefunction: fatal error'
     end select
 #endif
@@ -690,6 +691,34 @@ contains
         end if
       end do
 
+      close(iu2_w)
+    end do
+    end do
+  end subroutine
+
+  subroutine write_block
+    use salmon_global, only: nblock_wf_distribute
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,io_blk_s,io_blk_e,is
+
+    nblock_orbital = min(info%io_e-info%io_s+1, nblock_wf_distribute)
+    if (nblock_orbital < 1) nblock_orbital = 1
+
+    do ik=info%ik_s,info%ik_e
+    do io_blk_s=info%io_s,info%io_e,nblock_orbital
+      io_blk_e = min(io_blk_s + nblock_orbital - 1, info%io_e)
+      write (dir_file_out,'(A,I6.6,A,I6.6,A)') trim(odir)//'k_',ik,'_ob_',io_blk_s,'.dat'
+      open(iu2_w,file=dir_file_out,form='unformatted',access='stream')
+      do io=io_blk_s,io_blk_e
+      do is=1,system%nspin
+        if(allocated(spsi%rwf))then
+          write (iu2_w) spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1)
+        else if(allocated(spsi%zwf))then
+          write (iu2_w) spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1)
+        end if
+      end do
+      end do
       close(iu2_w)
     end do
     end do
@@ -1336,6 +1365,7 @@ subroutine read_wavefunction(idir,lg,mg,system,info,spsi,mk,mo,if_real_orbital,i
     select case(method_wf_distributor)
     case('single') ; call read_all    ! create single shared file
     case('slice')  ; call read_sliced ! sliced shared file
+    case('block')  ; call read_block  ! per-process block shared files
     case default   ; stop 'read_wavefunction: fatal error'
     end select
 #endif
@@ -1434,6 +1464,51 @@ contains
       close(iu2_r)
     end do
     end do
+  end subroutine
+
+  subroutine read_block
+    use salmon_global, only: nblock_wf_distribute
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io,io_blk_s,io_blk_e,is
+
+    nblock_orbital = min(info%io_e-info%io_s+1,nblock_wf_distribute)
+    if (nblock_orbital < 1) nblock_orbital = 1
+
+    if (if_real_orbital) then
+      allocate(ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    else
+      allocate(zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3)))
+    end if
+
+    do ik=info%ik_s,info%ik_e
+    do io_blk_s=info%io_s,info%io_e,nblock_orbital
+      io_blk_e = min(io_blk_s + nblock_orbital - 1, info%io_e)
+      write (dir_file_in,'(A,I6.6,A,I6.6,A)') trim(idir)//'k_',ik,'_ob_',io_blk_s,'.dat'
+      open(iu2_r,file=dir_file_in,form='unformatted',access='stream')
+
+      do io=io_blk_s,io_blk_e
+      do is=1,system%nspin
+        if (if_real_orbital) then
+          read (iu2_r) ddummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+          if (allocated(spsi%rwf)) then
+            spsi%rwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = ddummy(:,:,:)
+          else
+            spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = dcmplx(ddummy(:,:,:))
+          end if
+        else
+          read (iu2_r) zdummy(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3))
+          spsi%zwf(lg%is(1):lg%ie(1),lg%is(2):lg%ie(2),lg%is(3):lg%ie(3),is,io,ik,1) = zdummy(:,:,:)
+        end if
+      end do
+      end do
+
+      close(iu2_r)
+    end do
+    end do
+
+    if (allocated(ddummy)) deallocate(ddummy)
+    if (allocated(zdummy)) deallocate(zdummy)
   end subroutine
 #endif
 end subroutine read_wavefunction
@@ -2171,6 +2246,7 @@ subroutine distributed_rw_wavefunction(iodir,lg,mg,system,info,spsi,mk,mo,if_rea
   select case(method_wf_distributor)
   case('single') ; call rw_all    ! create single shared file
   case('slice')  ; call rw_sliced ! sliced shared file
+  case('block')  ; call rw_block  ! per-process block shared files (fewer inodes than slice)
   case default   ; stop 'rw_wavefunction: fatal error'
   end select
 
@@ -2354,6 +2430,151 @@ contains
     MPI_CHECK(MPI_Type_free(global_type, ierr))
     MPI_CHECK(MPI_Type_free( local_type, ierr))
   end subroutine rw_sliced
+
+  subroutine rw_block
+    ! Per-process block wavefunction I/O. Each orbital process writes its own
+    ! contiguous orbital range [io_s,io_e] in chunks of nblock_wf_distribute,
+    ! storing a whole chunk in ONE shared file (collective over the real-space
+    ! ranks). Compared with 'slice' (one file per (k,orbital)) this divides the
+    ! number of files by ~nblock_wf_distribute, which avoids inode/metadata
+    ! pressure on large parallel runs. Orbital ranges are disjoint across
+    ! orbital ranks, so blocks never cross a process boundary and the flat file
+    ! name k_<ik>_ob_<io_block_head>.dat is unique (no per-block directory).
+    use filesystem
+    use communication, only: comm_is_root, comm_bcast
+    use parallelization, only: nproc_id_global, nproc_group_global
+    implicit none
+    integer :: nblock_orbital
+    integer :: ik,io_blk_s,io_blk_e,nbl
+    integer :: local_type_d
+    integer :: iu_lay, lay(3), ibad
+    logical :: lay_exists
+    character(256) :: layfile
+    type(s_parallel_info) :: dummy_info
+
+    icomm = info%icomm_r
+    nblock_orbital = min(info%io_e-info%io_s+1,nblock_wf_distribute)
+    if (nblock_orbital < 1) nblock_orbital = 1
+
+    ! Layout-compatibility guard: the 'block' file names k_<ik>_ob_<io_blk_s>.dat
+    ! and the block boundaries depend on the ORBITAL decomposition only - the total
+    ! orbital count (mo), the number of orbital ranks (info%nporbital, which sets
+    ! info%io_s), and nblock_wf_distribute. (The k index in the name is global, so
+    ! k-parallelization may differ on restart.) Record the layout on write and
+    ! reject an incompatible restart on read, which would otherwise read the wrong
+    ! files (or silently wrong data).
+    iu_lay = 90
+    layfile = trim(iodir)//"wf_block_layout.dat"
+    ibad = 0
+    if (rw_mode == write_mode) then
+      if (comm_is_root(nproc_id_global)) then
+        open(iu_lay,file=layfile,form='unformatted',access='stream')
+        write(iu_lay) mo, info%nporbital, nblock_wf_distribute
+        close(iu_lay)
+      end if
+    else
+      if (comm_is_root(nproc_id_global)) then
+        inquire(file=layfile,exist=lay_exists)
+        if (lay_exists) then
+          open(iu_lay,file=layfile,form='unformatted',access='stream')
+          read(iu_lay) lay(1),lay(2),lay(3)
+          close(iu_lay)
+          if ( lay(1)/=mo .or. lay(2)/=info%nporbital .or. lay(3)/=nblock_wf_distribute ) then
+            ibad = 1
+            write(*,*) "error: method_wf_distributor='block' restart layout mismatch."
+            write(*,*) "  checkpoint no,nproc_ob,nblock =",lay(1),lay(2),lay(3)
+            write(*,*) "  current    no,nproc_ob,nblock =",mo,info%nporbital,nblock_wf_distribute
+            write(*,*) "  restart with the same orbital decomposition, or rewrite the &
+                       &checkpoint with method_wf_distributor='single' or 'slice'."
+          end if
+        else
+          write(*,*) "warning: wf_block_layout.dat not found; cannot verify the 'block' &
+                     &restart orbital layout matches the checkpoint."
+        end if
+      end if
+      call comm_bcast(ibad, nproc_group_global)
+      if (ibad /= 0) stop "checkpoint_restart: 'block' restart orbital-layout mismatch"
+    end if
+
+    ! buffer for real-orbital -> complex conversion on read (one full block)
+    if (rw_mode == read_mode .and. if_real_orbital) then
+      dummy_info%io_s = 1 ; dummy_info%io_e = nblock_orbital
+      dummy_info%ik_s = 1 ; dummy_info%ik_e = 1
+      dummy_info%im_s = 1 ; dummy_info%im_e = 1
+      call allocate_orbital_real(system%nspin,mg,dummy_info,dummy)
+    end if
+
+    do ik=info%ik_s,info%ik_e
+    do io_blk_s=info%io_s,info%io_e,nblock_orbital
+      io_blk_e = min(io_blk_s + nblock_orbital - 1, info%io_e)
+      nbl      = io_blk_e - io_blk_s + 1
+
+      write (iofile,'(A,I6.6,A,I6.6,A)') trim(iodir)//'k_',ik,'_ob_',io_blk_s,'.dat'
+
+      ! global (file) subarray: the file stores nbl orbitals, full grid each
+      gsize  = [lg%ie(1:3) - lg%is(1:3) + 1, system%nspin, nbl, 1, 1]
+      lsize  = [mg%ie(1:3) - mg%is(1:3) + 1, system%nspin, nbl, 1, 1]
+      lstart = [mg%is(1:3)                 , 1,            1,   1, 1] - 1
+      if (yn_periodic == 'n') then
+        lstart(1:3) = lstart(1:3) + lg%num(1:3)/2
+      end if
+      MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, global_type, ierr))
+      MPI_CHECK(MPI_Type_commit(global_type, ierr))
+
+      ! process-local subarray addressing the block inside the full spsi array
+      ! (the whole array is passed to MPI, so no array-section copy is made and
+      !  the block of nbl orbitals at this k is selected via lstart).
+      gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, info%numo, info%numk, 1]
+      lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, nbl,       1,         1]
+      lstart = [mg%is(1:3) - mg%is_array(1:3), 0, io_blk_s - info%io_s, ik - info%ik_s, 0]
+      MPI_CHECK(MPI_Type_create_subarray(7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, source_type, local_type, ierr))
+      MPI_CHECK(MPI_Type_commit(local_type, ierr))
+
+      MPI_CHECK(MPI_File_open(icomm, iofile, iopen_flag, minfo, mfile, ierr))
+      MPI_CHECK(MPI_File_set_view(mfile, 0_MPI_OFFSET_KIND, local_type, global_type, 'native', MPI_INFO_NULL, ierr))
+
+      select case(rw_mode)
+        case (write_mode)
+          if (allocated(spsi%rwf)) then
+            MPI_CHECK(MPI_File_write_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+          else if (allocated(spsi%zwf)) then
+            MPI_CHECK(MPI_File_write_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+          end if
+        case (read_mode)
+          if (allocated(spsi%rwf)) then
+            if (source_type /= MPI_DOUBLE) stop 'source_type /= MPI_DOUBLE'
+            MPI_CHECK(MPI_File_read_all(mfile, spsi%rwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+          else if (allocated(spsi%zwf)) then
+            if (source_type == MPI_DOUBLE) then
+              ! real orbitals on disk -> complex in memory: read into dummy, convert
+              gsize  = [mg%ie_array(1:3) - mg%is_array(1:3) + 1, system%nspin, nblock_orbital, 1, 1]
+              lsize  = [mg%ie(1:3)       - mg%is(1:3)       + 1, system%nspin, nbl,            1, 1]
+              lstart = [mg%is(1:3) - mg%is_array(1:3), 0, 0, 0, 0]
+              call MPI_Type_create_subarray( &
+              & 7, gsize, lsize, lstart, MPI_ORDER_FORTRAN, &
+              & source_type, local_type_d, ierr)
+              call errcheck(ierr)
+              MPI_CHECK(MPI_Type_commit(local_type_d, ierr))
+              call MPI_File_set_view( &
+              & mfile, 0_MPI_OFFSET_KIND, local_type_d, global_type, &
+              & 'native', MPI_INFO_NULL, ierr)
+              call errcheck(ierr)
+              MPI_CHECK(MPI_File_read_all(mfile, dummy%rwf, 1, local_type_d, MPI_STATUS_IGNORE, ierr))
+              spsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,io_blk_s:io_blk_e,ik,1) &
+                = dcmplx(dummy%rwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),:,1:nbl,1,1))
+              MPI_CHECK(MPI_Type_free(local_type_d, ierr))
+            else
+              MPI_CHECK(MPI_File_read_all(mfile, spsi%zwf, 1, local_type, MPI_STATUS_IGNORE, ierr))
+            end if
+          end if
+      end select
+
+      MPI_CHECK(MPI_File_close(mfile, ierr))
+      MPI_CHECK(MPI_Type_free(global_type, ierr))
+      MPI_CHECK(MPI_Type_free( local_type, ierr))
+    end do
+    end do
+  end subroutine rw_block
 
   subroutine set_mpi_info
     implicit none
