@@ -432,9 +432,13 @@ module structures
 
   type s_unfold
     complex(8),allocatable :: psi_ref(:,:,:,:,:,:,:), psi_refG(:,:,:,:,:,:,:)
-    integer :: nhk, nsk, num_hkgrid(3)
+    ! vec_hrsk/nhrsk: reference-to-super-reference hat-kappa offset (note's
+    ! \hat\bmkappa; formerly named vec_hk/nhk). small k (isk, reference-cell
+    ! own k-point) = large k (ilk, this run's own vec_k) + vec_hrsk(:,ihk),
+    ! ihk = 1..nhrsk. See unfolding.tex sec.9 (reference<->super-reference).
+    integer :: nhrsk, nsk, num_hkgrid(3)
     integer,allocatable :: isk_tbl(:,:)
-    real(8),allocatable :: vec_hk(:,:), wtk_ref(:)
+    real(8),allocatable :: vec_hrsk(:,:), wtk_ref(:)
     complex(8),allocatable :: eihkr_tbl(:,:,:,:)
     real(8),allocatable :: rocc_ref(:,:,:), nq_gs(:,:,:)
     complex(8),allocatable :: upu_ref(:,:,:,:), u_rVnl_Vnlr_u_ref(:,:,:,:)
@@ -447,6 +451,22 @@ module structures
     ! See unfolding.tex sec.1.2, 10.6.
     real(8) :: a_pr(3,3)
     integer :: pmat(3,3)
+    ! vec_hprk/nhprk: primitive-to-reference hat-k offset (note's \hat\bmk),
+    ! the new quantity computed by the translation-phase-labeling algorithm
+    ! (unfolding.tex sec.9.5). nhprk = |det(pmat)|, the number of candidate
+    ! primitive-cell unfolding vectors per reference-cell band. vec_hprk(:,c)
+    ! is the Cartesian reciprocal-lattice vector (a point of the reference
+    ! cell's own reciprocal lattice, B_ref) for candidate c=1..nhprk.
+    ! hprk_label(io_ref,isk) is the assigned candidate index (1..nhprk) for
+    ! reference-cell band (io_ref,isk); a value of 0 is the sentinel used
+    ! when the per-band match quality falls below the threshold (see
+    ! init_dm_unfold) -- the job continues with the sentinel rather than
+    ! stopping, and hprk_score(io_ref,isk) records the match quality
+    ! (ideally 1) actually achieved for that band, for diagnostics.
+    integer :: nhprk
+    real(8),allocatable :: vec_hprk(:,:)
+    integer,allocatable :: hprk_label(:,:)
+    real(8),allocatable :: hprk_score(:,:)
   end type s_unfold
 
 ! output files

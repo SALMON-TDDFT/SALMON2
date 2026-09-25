@@ -65,6 +65,21 @@ contains
   real(8) :: norm_pr(3), A_ref(3,3)
   integer :: pmat_i(3,3)
 
+  ! -- primitive-to-reference translation-phase labeling (Phase A; unfolding.tex sec.9.5) --
+  integer,parameter :: nhprk_max = 4096
+  real(8),parameter :: hprk_thresh = 1d-2
+  integer :: nhprk, ibox_c, n1c, n2c, n3c, nfound_c, jshift, icand, ibest_c, nbad_l, nbad
+  integer :: nvec_pr(3,nhprk_max), hvec_pr(3,nhprk_max)
+  real(8) :: fcoset_n(3,nhprk_max), fcoset_h(3,nhprk_max), fc3(3)
+  real(8) :: pinv(3,3), pinvT(3,3), detP_r, tol_coset, pmat_r8(3,3)
+  real(8) :: tc_cart(3,nhprk_max)
+  complex(8),allocatable :: phi_pred(:,:), phase_gj(:,:,:,:)
+  complex(8) :: cscore, phi_meas(nhprk_max)
+  real(8) :: score_abs, csum_g2
+  integer,allocatable :: hprk_label_l(:,:)
+  real(8),allocatable :: hprk_score_l(:,:)
+  logical :: found_dup
+
   if( dm_unfold_option /= 'super' ) then
     if (comm_is_root(nproc_id_global)) then
       write(*,"(A)") "dm_unfold_option /= 'super' at init_dm_unfold"
@@ -196,8 +211,8 @@ contains
   end if
 
   nspin = 1
-  isk_s = (info%ik_s-1) * unfold%nhk + 1
-  isk_e = info%ik_e * unfold%nhk
+  isk_s = (info%ik_s-1) * unfold%nhrsk + 1
+  isk_e = info%ik_e * unfold%nhrsk
   nsk_se = isk_e - isk_s + 1
 
   if( any(mod(lg%ie(:), unfold%num_hkgrid(:)) /= 0) ) then
@@ -296,9 +311,9 @@ contains
   end if
 
 ! exp(i hat_k r) table
-  allocate( unfold%eihkr_tbl(lg%ie(1),lg%ie(2),lg%ie(3),unfold%nhk) )
+  allocate( unfold%eihkr_tbl(lg%ie(1),lg%ie(2),lg%ie(3),unfold%nhrsk) )
   !$omp parallel do private(ihk,ih1,ih2,ih3,ir1_ref,ir2_ref,ir3_ref,ir1,ir2,ir3) collapse(4)
-  do ihk = 1, unfold%nhk
+  do ihk = 1, unfold%nhrsk
   do ih1 = 1, unfold%num_hkgrid(1)
   do ih2 = 1, unfold%num_hkgrid(2)
   do ih3 = 1, unfold%num_hkgrid(3)
@@ -308,8 +323,8 @@ contains
     ir1 = ir1_ref + (ih1-1) * ie_ref(1)
     ir2 = ir2_ref + (ih2-1) * ie_ref(2)
     ir3 = ir3_ref + (ih3-1) * ie_ref(3)
-    unfold%eihkr_tbl(ir1,ir2,ir3,ihk) = exp( zI * (unfold%vec_hk(1,ihk)*(ir1-1)*system%hgs(1) &
-    &  + unfold%vec_hk(2,ihk)*(ir2-1)*system%hgs(2) + unfold%vec_hk(3,ihk)*(ir3-1)*system%hgs(3) ) )
+    unfold%eihkr_tbl(ir1,ir2,ir3,ihk) = exp( zI * (unfold%vec_hrsk(1,ihk)*(ir1-1)*system%hgs(1) &
+    &  + unfold%vec_hrsk(2,ihk)*(ir2-1)*system%hgs(2) + unfold%vec_hrsk(3,ihk)*(ir3-1)*system%hgs(3) ) )
   end do
   end do
   end do
@@ -389,7 +404,7 @@ contains
 
   !$omp parallel do private(ilk,ihk,isk,io_ref,ig1_ref,ig2_ref,ig3_ref,zsum,ir1_ref,ir2_ref,ir3_ref) collapse(2)
   do ilk = info%ik_s, info%ik_e ! large k
-  do ihk = 1, unfold%nhk   ! hat k
+  do ihk = 1, unfold%nhrsk   ! hat k
     isk = unfold%isk_tbl(ilk,ihk) !small k = large k + hat k
   do io_ref = 1, no_ref
   do ig1_ref = 1, ie_ref(1)
@@ -417,7 +432,7 @@ contains
   allocate( reta_uu(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),isk_s:isk_e) )
 !$omp parallel do private(ilk,ihk,isk,ig1_ref,ig2_ref,ig3_ref,io_ref,rsum) collapse(2)
   do ilk = info%ik_s, info%ik_e
-  do ihk = 1, unfold%nhk
+  do ihk = 1, unfold%nhrsk
     isk = unfold%isk_tbl(ilk,ihk)
   do ig1_ref = 1, ie_ref(1)
   do ig2_ref = 1, ie_ref(2)
@@ -442,7 +457,7 @@ contains
   rj_l(1:3) = 0d0
 !$omp parallel do private(ilk,ihk,isk,ig1_ref,ig2_ref,ig3_ref,ig1,ig2,ig3,gx,gy,gz) reduction(+:rsum_l,rj_l) collapse(2)
   do ilk = info%ik_s, info%ik_e
-  do ihk = 1, unfold%nhk
+  do ihk = 1, unfold%nhrsk
     isk = unfold%isk_tbl(ilk,ihk)
   do ig1_ref = 1, ie_ref(1)
   do ig2_ref = 1, ie_ref(2)
@@ -458,11 +473,11 @@ contains
     gz = ig1*B_ref(3,1) + ig2*B_ref(3,2) + ig3*B_ref(3,3)
     rsum_l = rsum_l + unfold%wtk_ref(isk) * reta_uu(ig1_ref,ig2_ref,ig3_ref,isk)
     rj_l(1) = rj_l(1) + unfold%wtk_ref(isk) * reta_uu(ig1_ref,ig2_ref,ig3_ref,isk) &
-    & * (gx + system%vec_k(1,ilk) + unfold%vec_hk(1,ihk))
+    & * (gx + system%vec_k(1,ilk) + unfold%vec_hrsk(1,ihk))
     rj_l(2) = rj_l(2) + unfold%wtk_ref(isk) * reta_uu(ig1_ref,ig2_ref,ig3_ref,isk) &
-    & * (gy + system%vec_k(2,ilk) + unfold%vec_hk(2,ihk))
+    & * (gy + system%vec_k(2,ilk) + unfold%vec_hrsk(2,ihk))
     rj_l(3) = rj_l(3) + unfold%wtk_ref(isk) * reta_uu(ig1_ref,ig2_ref,ig3_ref,isk) &
-    & * (gz + system%vec_k(3,ilk) + unfold%vec_hk(3,ihk))
+    & * (gz + system%vec_k(3,ilk) + unfold%vec_hrsk(3,ihk))
   end do
   end do
   end do
@@ -482,6 +497,277 @@ contains
     write(*,'(A,7x,6f17.12)') 'J:sum rho_uu(k,G)(G+k)  ',rj(1:3)
   end if
 
+! ===================================================================
+! Primitive-to-reference translation-phase labeling (Phase A).
+! See unfolding.tex sec.9.5 (eq:tc-overlap-G) for the underlying
+! algorithm; only the labeling step is implemented here -- the
+! energy-eigenbasis-recovery step for same-hat_k mixing (sec.9.5,
+! "Recovering the energy eigenbasis within a shared-hat_k block") is
+! a separate, later step and is NOT performed by this block.
+!
+! unfold%nhprk = |det(pmat)|, the number of candidate primitive-cell
+! unfolding vectors hat_k per reference-cell band. Both the candidates
+! vec_hprk(:,c) = B_ref*h_c (h_c integer, c=1..nhprk) and the
+! coset-representative real-space shifts t_c(j) = a_pr*n_j (n_j
+! integer, j=1..nhprk) enumerate the same finite abelian group
+! Z^3/(pmat)Z^3 (order nhprk): n,n' give the same real-space coset
+! (mod the reference lattice) iff pinv*n == pinv*n' (mod 1,
+! componentwise, pinv = pmat^{-1}); h,h' give the same reciprocal
+! coset (mod the primitive reciprocal lattice) iff
+! transpose(pinv)*h == transpose(pinv)*h' (mod 1). With this,
+! hat_k(h_c).t_c(n_j) = 2*pi * dot_product(transpose(pinv)*h_c, n_j)
+! exactly (unfolding.tex sec.9.5 derivation), so the nhprk x nhprk
+! predicted-phase table phi_pred(c,j) = exp(i*hat_k(h_c).t_c(n_j)) is
+! built from integers and pinv alone -- no Cartesian hat_k/t_c dot
+! products are needed for it (Cartesian vectors are only needed for
+! vec_hprk itself and for the measured side, via the G-grid, below).
+!
+! Enumeration uses an adaptive search box (doubled until nhprk
+! distinct cosets are found, via floor()-based wrapping to [0,1) --
+! NOT round()-based, which is ambiguous exactly on the half-integer
+! coset values that occur whenever |det(pmat)| is even) rather than a
+! fixed a priori bound, since a safe bound in terms of pmat's entries
+! is not simple to state for a general integer matrix; nhprk_max is a
+! generous sanity cap, not a physical limit.
+!
+! Per band (io_ref,isk), the measured phase for shift j is the
+! G-space overlap (eq:tc-overlap-G):
+!   phi_meas(j) = sum_g |c_g|^2 exp(i G_g.t_c(j)) / sum_g |c_g|^2,
+! c_g = psi_refG(...,io_ref,isk,1); this is exact for the finite
+! trigonometric interpolant psi_refG defines (see unfolding.tex
+! sec.9.5 for the scope of this exactness statement). The band's
+! best-matching candidate and match quality come from
+!   score(c) = (1/nhprk) * sum_j phi_meas(j) * conjg(phi_pred(c,j)),
+! using character orthogonality of the nhprk phi_pred(c,:) rows
+! (distinct candidates are exactly orthogonal over the full coset
+! set): |score(c)| <= 1 always, with equality only when phi_meas
+! matches phi_pred(c,:) exactly. hprk_label is the score-maximizing
+! c; when 1-|score| exceeds hprk_thresh the job does NOT stop -- it
+! warns, stores the sentinel label 0, and continues (per the
+! 2026-09-18 design discussion: a runtime degeneracy/near-degeneracy
+! must never halt the job).
+! ===================================================================
+
+  pmat_r8 = dble(pmat_i)
+  call calc_inverse(pmat_r8, pinv, detP_r)
+  nhprk = nint(abs(detP_r))
+  if( nhprk < 1 ) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,"(A)") 'Error: det(pmat) rounds to < 1 in dm_unfold primitive-to-reference labeling'
+    end if
+    call end_parallel
+    stop
+  end if
+  if( nhprk > nhprk_max ) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,"(A,I0)") 'Error: |det(pmat)| exceeds the coset-enumeration cap in dm_unfold, nhprk=', nhprk
+    end if
+    call end_parallel
+    stop
+  end if
+  unfold%nhprk = nhprk
+  pinvT = transpose(pinv)
+  tol_coset = 1d-6
+
+! -- enumerate nhprk distinct real-space cosets (n -> t_c(n) = a_pr*n) --
+  ibox_c = nhprk
+  do
+    nfound_c = 0
+    coset_n_search: do n1c = 0, ibox_c-1
+    do n2c = 0, ibox_c-1
+    do n3c = 0, ibox_c-1
+      fc3(:) = pinv(:,1)*n1c + pinv(:,2)*n2c + pinv(:,3)*n3c
+      fc3(:) = fc3(:) - dble(floor(fc3(:)))
+      found_dup = .false.
+      do j = 1, nfound_c
+        if( sum(abs(fc3(:)-fcoset_n(:,j))) < tol_coset ) then
+          found_dup = .true.
+          exit
+        end if
+      end do
+      if( .not. found_dup ) then
+        nfound_c = nfound_c + 1
+        nvec_pr(1,nfound_c) = n1c
+        nvec_pr(2,nfound_c) = n2c
+        nvec_pr(3,nfound_c) = n3c
+        fcoset_n(:,nfound_c) = fc3(:)
+        if( nfound_c >= nhprk ) exit coset_n_search
+      end if
+    end do
+    end do
+    end do coset_n_search
+    if( nfound_c >= nhprk ) exit
+    ibox_c = ibox_c * 2
+    if( ibox_c > 64*nhprk+64 ) then
+      if (comm_is_root(nproc_id_global)) then
+        write(*,"(A)") 'Error: could not enumerate a full set of real-space cosets in dm_unfold primitive-to-reference labeling'
+      end if
+      call end_parallel
+      stop
+    end if
+  end do
+
+! -- enumerate nhprk distinct reciprocal cosets (h -> hat_k(h) = B_ref*h) --
+  ibox_c = nhprk
+  do
+    nfound_c = 0
+    coset_h_search: do n1c = 0, ibox_c-1
+    do n2c = 0, ibox_c-1
+    do n3c = 0, ibox_c-1
+      fc3(:) = pinvT(:,1)*n1c + pinvT(:,2)*n2c + pinvT(:,3)*n3c
+      fc3(:) = fc3(:) - dble(floor(fc3(:)))
+      found_dup = .false.
+      do j = 1, nfound_c
+        if( sum(abs(fc3(:)-fcoset_h(:,j))) < tol_coset ) then
+          found_dup = .true.
+          exit
+        end if
+      end do
+      if( .not. found_dup ) then
+        nfound_c = nfound_c + 1
+        hvec_pr(1,nfound_c) = n1c
+        hvec_pr(2,nfound_c) = n2c
+        hvec_pr(3,nfound_c) = n3c
+        fcoset_h(:,nfound_c) = fc3(:)
+        if( nfound_c >= nhprk ) exit coset_h_search
+      end if
+    end do
+    end do
+    end do coset_h_search
+    if( nfound_c >= nhprk ) exit
+    ibox_c = ibox_c * 2
+    if( ibox_c > 64*nhprk+64 ) then
+      if (comm_is_root(nproc_id_global)) then
+        write(*,"(A)") 'Error: could not enumerate a full set of reciprocal cosets in dm_unfold primitive-to-reference labeling'
+      end if
+      call end_parallel
+      stop
+    end if
+  end do
+
+  allocate( unfold%vec_hprk(3,nhprk) )
+  allocate( phi_pred(nhprk,nhprk) )
+  do icand = 1, nhprk
+    unfold%vec_hprk(1,icand) = B_ref(1,1)*hvec_pr(1,icand) + B_ref(1,2)*hvec_pr(2,icand) + B_ref(1,3)*hvec_pr(3,icand)
+    unfold%vec_hprk(2,icand) = B_ref(2,1)*hvec_pr(1,icand) + B_ref(2,2)*hvec_pr(2,icand) + B_ref(2,3)*hvec_pr(3,icand)
+    unfold%vec_hprk(3,icand) = B_ref(3,1)*hvec_pr(1,icand) + B_ref(3,2)*hvec_pr(2,icand) + B_ref(3,3)*hvec_pr(3,icand)
+    do jshift = 1, nhprk
+      phi_pred(icand,jshift) = exp( zI * (2d0*pi) * dot_product(fcoset_h(:,icand), dble(nvec_pr(:,jshift))) )
+    end do
+  end do
+
+  do jshift = 1, nhprk
+    tc_cart(1,jshift) = a_pr(1,1)*nvec_pr(1,jshift) + a_pr(1,2)*nvec_pr(2,jshift) + a_pr(1,3)*nvec_pr(3,jshift)
+    tc_cart(2,jshift) = a_pr(2,1)*nvec_pr(1,jshift) + a_pr(2,2)*nvec_pr(2,jshift) + a_pr(2,3)*nvec_pr(3,jshift)
+    tc_cart(3,jshift) = a_pr(3,1)*nvec_pr(1,jshift) + a_pr(3,2)*nvec_pr(2,jshift) + a_pr(3,3)*nvec_pr(3,jshift)
+  end do
+
+! -- precompute the G-grid phase table exp(i G_g.t_c(j)), shared by all bands --
+  allocate( phase_gj(ie_ref(1),ie_ref(2),ie_ref(3),nhprk) )
+  !$omp parallel do private(ig1_ref,ig2_ref,ig3_ref,ig1,ig2,ig3,gx,gy,gz,jshift) collapse(3)
+  do ig1_ref = 1, ie_ref(1)
+  do ig2_ref = 1, ie_ref(2)
+  do ig3_ref = 1, ie_ref(3)
+    ig1 = ig1_ref - 1
+    ig2 = ig2_ref - 1
+    ig3 = ig3_ref - 1
+    if( ig1 > ie_ref(1)/2 ) ig1 = ig1 - ie_ref(1)
+    if( ig2 > ie_ref(2)/2 ) ig2 = ig2 - ie_ref(2)
+    if( ig3 > ie_ref(3)/2 ) ig3 = ig3 - ie_ref(3)
+    gx = ig1*B_ref(1,1) + ig2*B_ref(1,2) + ig3*B_ref(1,3)
+    gy = ig1*B_ref(2,1) + ig2*B_ref(2,2) + ig3*B_ref(2,3)
+    gz = ig1*B_ref(3,1) + ig2*B_ref(3,2) + ig3*B_ref(3,3)
+    do jshift = 1, nhprk
+      phase_gj(ig1_ref,ig2_ref,ig3_ref,jshift) = &
+        & exp( zI * (gx*tc_cart(1,jshift) + gy*tc_cart(2,jshift) + gz*tc_cart(3,jshift)) )
+    end do
+  end do
+  end do
+  end do
+
+! -- per-band labeling --
+  allocate( hprk_label_l(no_ref,unfold%nsk), hprk_score_l(no_ref,unfold%nsk) )
+  hprk_label_l = 0
+  hprk_score_l = 0d0
+  nbad_l = 0
+
+  ! isk (the reference-cell k-point index that indexes psi_refG) ranges over
+  ! exactly the contiguous block isk_s:isk_e for this rank -- see isk_s/isk_e
+  ! above, and unfold%isk_tbl's construction in lattice.f90 (isk is a plain
+  ! running count over the ilk-outer/ihk-inner loop there). Phase A's own
+  ! computation below only ever uses isk and io_ref; it does not depend on
+  ! the reference-to-super-reference decomposition (ilk,ihk) at all, so we
+  ! loop directly over isk rather than reconstructing it via isk_tbl(ilk,ihk).
+  !$omp parallel do private(isk,io_ref,csum_g2,ig1_ref,ig2_ref,ig3_ref,jshift,icand,cscore, &
+  !$omp   score_abs,ibest_c,phi_meas) reduction(+:nbad_l)
+  do isk = isk_s, isk_e
+  do io_ref = 1, no_ref
+    csum_g2 = 0d0
+    do ig1_ref = 1, ie_ref(1)
+    do ig2_ref = 1, ie_ref(2)
+    do ig3_ref = 1, ie_ref(3)
+      csum_g2 = csum_g2 + abs( unfold%psi_refG(ig1_ref,ig2_ref,ig3_ref,1,io_ref,isk,1) )**2
+    end do
+    end do
+    end do
+
+    do jshift = 1, nhprk
+      phi_meas(jshift) = 0d0
+      do ig1_ref = 1, ie_ref(1)
+      do ig2_ref = 1, ie_ref(2)
+      do ig3_ref = 1, ie_ref(3)
+        phi_meas(jshift) = phi_meas(jshift) + abs( unfold%psi_refG(ig1_ref,ig2_ref,ig3_ref,1,io_ref,isk,1) )**2 &
+          & * phase_gj(ig1_ref,ig2_ref,ig3_ref,jshift)
+      end do
+      end do
+      end do
+      if( csum_g2 > 0d0 ) phi_meas(jshift) = phi_meas(jshift) / csum_g2
+    end do
+
+    ibest_c = 0
+    score_abs = -1d0
+    do icand = 1, nhprk
+      cscore = sum( phi_meas(1:nhprk) * conjg(phi_pred(icand,1:nhprk)) ) / dble(nhprk)
+      if( abs(cscore) > score_abs ) then
+        score_abs = abs(cscore)
+        ibest_c = icand
+      end if
+    end do
+
+    if( 1d0 - score_abs > hprk_thresh ) then
+      nbad_l = nbad_l + 1
+      hprk_label_l(io_ref,isk) = 0   ! sentinel: no confident label; job continues
+    else
+      hprk_label_l(io_ref,isk) = ibest_c
+    end if
+    hprk_score_l(io_ref,isk) = score_abs
+  end do
+  end do
+
+  allocate( unfold%hprk_label(no_ref,unfold%nsk), unfold%hprk_score(no_ref,unfold%nsk) )
+  call comm_summation(hprk_label_l, unfold%hprk_label, no_ref*unfold%nsk, info%icomm_k)
+  call comm_summation(hprk_score_l, unfold%hprk_score, no_ref*unfold%nsk, info%icomm_k)
+  call comm_summation(nbad_l, nbad, info%icomm_k)
+
+  deallocate( phase_gj, phi_pred, hprk_label_l, hprk_score_l )
+
+  if(comm_is_root(nproc_id_global)) then
+    write(*,"(A,I0)") 'primitive-to-reference labeling (Phase A): nhprk = ', nhprk
+    if( nbad > 0 ) then
+      write(*,"(A,I0,A,ES10.3,A)") 'Warning: ', nbad, ' reference-cell band(s) had 1-|score| above ', &
+        & hprk_thresh, '; hat_k label set to the sentinel value 0 for these bands (job continues). Detail:'
+      do isk = 1, unfold%nsk
+      do io_ref = 1, no_ref
+        if( unfold%hprk_label(io_ref,isk) == 0 ) then
+          write(*,"(A,I0,A,I0,A,F10.6)") '  isk=', isk, '  io_ref=', io_ref, '  |score|=', unfold%hprk_score(io_ref,isk)
+        end if
+      end do
+      end do
+    else
+      write(*,"(A)") 'primitive-to-reference labeling (Phase A): all reference-cell bands matched a single hat_k candidate cleanly.'
+    end if
+  end if
+
   if( yn_out_mom_distr_gs == 'y' ) then
 
 !   grid for momentum distribution, -nq_mom < iq < nq_mom with dq spacing
@@ -498,7 +784,7 @@ contains
 
 !$omp do collapse(2) 
     do ilk = info%ik_s, info%ik_e
-    do ihk = 1, unfold%nhk
+    do ihk = 1, unfold%nhrsk
       isk = unfold%isk_tbl(ilk,ihk)
     do ig1_ref = 1, ie_ref(1)
     do ig2_ref = 1, ie_ref(2)
@@ -512,9 +798,9 @@ contains
       gx = ig1*B_ref(1,1) + ig2*B_ref(1,2) + ig3*B_ref(1,3)
       gy = ig1*B_ref(2,1) + ig2*B_ref(2,2) + ig3*B_ref(2,3)
       gz = ig1*B_ref(3,1) + ig2*B_ref(3,2) + ig3*B_ref(3,3)
-      qx = system%vec_k(1,ilk) + unfold%vec_hk(1,ihk) + gx
-      qy = system%vec_k(2,ilk) + unfold%vec_hk(2,ihk) + gy
-      qz = system%vec_k(3,ilk) + unfold%vec_hk(3,ihk) + gz
+      qx = system%vec_k(1,ilk) + unfold%vec_hrsk(1,ihk) + gx
+      qy = system%vec_k(2,ilk) + unfold%vec_hrsk(2,ihk) + gy
+      qz = system%vec_k(3,ilk) + unfold%vec_hrsk(3,ihk) + gz
       iqx = floor( qx/dq_mom )
       iqy = floor( qy/dq_mom )
       iqz = floor( qz/dq_mom )
@@ -633,18 +919,18 @@ contains
     complex(8) :: zj1(3),zj2(3),zj3(3),zj4(3),zj5(3),zj6(3),zj1_uu(3),zj2_uu(3),zj3_uu(3),zj4_uu(3),zj_d(3),zj_nd(3)
     complex(8) :: zj1_l(3),zj2_l(3),zj3_l(3),zj4_l(3),zj5_l(3),zj6_l(3),zsum,zsum_d,zsum_nd,zsum_l,zsum_uu
       
-    allocate( mat(no_ref,unfold%nhk,info%io_s:info%io_e,info%ik_s:info%ik_e))
+    allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
     omega_ref = system%hvol * system%ngrid / dble(unfold%num_hkgrid(1)*unfold%num_hkgrid(2)*unfold%num_hkgrid(3))
 
     ispin = 1
-    isk_s = (info%ik_s-1) * unfold%nhk + 1
-    isk_e = info%ik_e * unfold%nhk
+    isk_s = (info%ik_s-1) * unfold%nhrsk + 1
+    isk_e = info%ik_e * unfold%nhrsk
     nsk_se = isk_e - isk_s + 1
 
   !$omp parallel do private(ilk,ihk,isk,io,io_ref,zsum,ih1,ih2,ih3,ir1_ref,ir2_ref,ir3_ref,ir1,ir2,ir3) collapse(2)
     do ilk = info%ik_s, info%ik_e ! large k
-    do ihk = 1, unfold%nhk   ! hat k
+    do ihk = 1, unfold%nhrsk   ! hat k
       isk = unfold%isk_tbl(ilk,ihk) !small k = large k + hat k
     do io = info%io_s, info%io_e     ! m, supercell
     do io_ref = 1, no_ref   ! n, reference
@@ -678,7 +964,7 @@ contains
     eta_l = 0.0d0
   !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,zsum,io) collapse(2)
     do ilk = info%ik_s, info%ik_e
-    do ihk = 1, unfold%nhk
+    do ihk = 1, unfold%nhrsk
       isk = unfold%isk_tbl(ilk,ihk)
       do io_ref1 = 1, no_ref
       do io_ref2 = 1, no_ref
@@ -704,7 +990,7 @@ contains
     zj6_l(1:3) = 0d0
   !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2) reduction(+:zsum_l,zj1_l,zj2_l,zj3_l,zj4_l,zj5_l,zj6_l) collapse(2)
     do ilk = info%ik_s, info%ik_e
-    do ihk = 1, unfold%nhk
+    do ihk = 1, unfold%nhrsk
        isk = unfold%isk_tbl(ilk,ihk)
     do io_ref1 = 1, no_ref
        zsum_l = zsum_l + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk)
@@ -713,7 +999,7 @@ contains
        zj2_l(:) = zj2_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
         & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref1, isk)
        zj5_l(:) = zj5_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
-        & * (system%vec_k(:,ilk) + unfold%vec_hk(:,ihk))
+        & * (system%vec_k(:,ilk) + unfold%vec_hrsk(:,ihk))
        zj6_l(:) = zj6_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
         & * system%vec_Ac(:)
     do io_ref2 = 1, no_ref
@@ -761,7 +1047,7 @@ contains
   allocate( eta_uu_nd(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),isk_s:isk_e) )
 !$omp parallel do private(ilk,ihk,isk,ig1_ref,ig2_ref,ig3_ref,io_ref1,io_ref2,zsum_d,zsum_nd) collapse(2)
   do ilk = info%ik_s, info%ik_e
-  do ihk = 1, unfold%nhk
+  do ihk = 1, unfold%nhrsk
     isk = unfold%isk_tbl(ilk,ihk)
   do ig1_ref = 1, ie_ref(1)
   do ig2_ref = 1, ie_ref(2)
@@ -800,7 +1086,7 @@ contains
 !$omp parallel do private(ilk,ihk,isk,ig1_ref,ig2_ref,ig3_ref,ig1,ig2,ig3,gx,gy,gz) &
 !$omp reduction(+:zsum_l,zj1_l,zj2_l,zj3_l,zj4_l) collapse(2)
   do ilk = info%ik_s, info%ik_e
-  do ihk = 1, unfold%nhk
+  do ihk = 1, unfold%nhrsk
     isk = unfold%isk_tbl(ilk,ihk)
   do ig1_ref = 1, ie_ref(1)
   do ig2_ref = 1, ie_ref(2)
@@ -822,7 +1108,7 @@ contains
     zj2_l(2) = zj2_l(2) + unfold%wtk_ref(isk) * eta_uu_nd(ig1_ref,ig2_ref,ig3_ref,isk) * gy
     zj2_l(3) = zj2_l(3) + unfold%wtk_ref(isk) * eta_uu_nd(ig1_ref,ig2_ref,ig3_ref,isk) * gz
     zj3_l(:) = zj3_l(:) + unfold%wtk_ref(isk) * eta_uu_d(ig1_ref,ig2_ref,ig3_ref,isk) &
-        & * (system%vec_k(:,ilk) + unfold%vec_hk(:,ihk))
+        & * (system%vec_k(:,ilk) + unfold%vec_hrsk(:,ihk))
     zj4_l(:) = zj4_l(:) + unfold%wtk_ref(isk) * eta_uu_d(ig1_ref,ig2_ref,ig3_ref,isk) * system%vec_Ac(:)
   end do
   end do
@@ -871,7 +1157,7 @@ contains
 
 !$omp do collapse(2) 
     do ilk = info%ik_s, info%ik_e
-    do ihk = 1, unfold%nhk
+    do ihk = 1, unfold%nhrsk
       isk = unfold%isk_tbl(ilk,ihk)
     do ig1_ref = 1, ie_ref(1)
     do ig2_ref = 1, ie_ref(2)
@@ -885,9 +1171,9 @@ contains
       gx = ig1*B_ref(1,1) + ig2*B_ref(1,2) + ig3*B_ref(1,3)
       gy = ig1*B_ref(2,1) + ig2*B_ref(2,2) + ig3*B_ref(2,3)
       gz = ig1*B_ref(3,1) + ig2*B_ref(3,2) + ig3*B_ref(3,3)
-      qx = system%vec_Ac(1) + system%vec_k(1,ilk) + unfold%vec_hk(1,ihk) + gx
-      qy = system%vec_Ac(2) + system%vec_k(2,ilk) + unfold%vec_hk(2,ihk) + gy
-      qz = system%vec_Ac(3) + system%vec_k(3,ilk) + unfold%vec_hk(3,ihk) + gz
+      qx = system%vec_Ac(1) + system%vec_k(1,ilk) + unfold%vec_hrsk(1,ihk) + gx
+      qy = system%vec_Ac(2) + system%vec_k(2,ilk) + unfold%vec_hrsk(2,ihk) + gy
+      qz = system%vec_Ac(3) + system%vec_k(3,ilk) + unfold%vec_hrsk(3,ihk) + gz
       iqx = floor( qx/dq_mom )
       iqy = floor( qy/dq_mom )
       iqz = floor( qz/dq_mom )

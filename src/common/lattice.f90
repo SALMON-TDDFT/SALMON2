@@ -296,11 +296,11 @@ SUBROUTINE init_kvector(system,unfold)
       nhk = (num_hk(1)+1-eo_hk(1))*(num_hk(2)+1-eo_hk(2))*(num_hk(3)+1-eo_hk(3))
       nsk = nlk * nhk
 
-      unfold%nhk = nhk
+      unfold%nhrsk = nhk
       unfold%num_hkgrid(1:3) = num_hk(:)
       unfold%nsk = nsk
       allocate( hks(3,nhk) )
-      allocate( unfold%vec_hk(3, nhk), unfold%isk_tbl(nlk, nhk), unfold%wtk_ref(nsk) )
+      allocate( unfold%vec_hrsk(3, nhk), unfold%isk_tbl(nlk, nhk), unfold%wtk_ref(nsk) )
 
       ihk = 0
       do ihk3 = eo_hk(3),num_hk(3)
@@ -315,9 +315,9 @@ SUBROUTINE init_kvector(system,unfold)
       enddo
       enddo
       do ihk = 1,nhk
-        unfold%vec_hk(1,ihk) = hks(1,ihk)*B(1,1) + hks(2,ihk)*B(1,2) + hks(3,ihk)*B(1,3)
-        unfold%vec_hk(2,ihk) = hks(1,ihk)*B(2,1) + hks(2,ihk)*B(2,2) + hks(3,ihk)*B(2,3)
-        unfold%vec_hk(3,ihk) = hks(1,ihk)*B(3,1) + hks(2,ihk)*B(3,2) + hks(3,ihk)*B(3,3)
+        unfold%vec_hrsk(1,ihk) = hks(1,ihk)*B(1,1) + hks(2,ihk)*B(1,2) + hks(3,ihk)*B(1,3)
+        unfold%vec_hrsk(2,ihk) = hks(1,ihk)*B(2,1) + hks(2,ihk)*B(2,2) + hks(3,ihk)*B(2,3)
+        unfold%vec_hrsk(3,ihk) = hks(1,ihk)*B(3,1) + hks(2,ihk)*B(3,2) + hks(3,ihk)*B(3,3)
       end do
 
       nsk0 = num_sk(1)*num_sk(2)*num_sk(3)
