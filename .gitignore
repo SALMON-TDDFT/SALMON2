@@ -103,3 +103,9 @@ CTestTestfile.cmake
 # Executables
 
 # End of https://www.gitignore.io/api/c,cmake,fortran
+
+# macOS Finder metadata
+.DS_Store
+
+# Build directory
+/build/
