@@ -1,4 +1,4 @@
-! One SCF iteration for native HSE integration coverage; not a converged GS.
+! Fresh converged HSE GS for the Nk=4^3 impulse regression.
 &calculation
   theory='dft'
 /
@@ -37,7 +37,7 @@
 /
 
 &kgrid
-  num_kgrid = 2, 2, 2
+  num_kgrid = 4, 4, 4
 /
 
 &tgrid
@@ -48,7 +48,7 @@
 &scf
   nscf_init_no_diagonal=0
   ncg = 4
-  nscf = 1
+  nscf = 160
   threshold = 1.d-8
 /
 

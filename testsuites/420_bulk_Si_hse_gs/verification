@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-from pathlib import Path
+"""Require a converged, finite HSE GS before the impulse fixture may run."""
 import math
-text=Path('outputfile').read_text()
-assert 'end SALMON' in text
-assert 'hse_omega' in Path('variables.log').read_text()
-assert Path('data_for_restart/wfn.bin').is_file()
-rows=[line.split() for line in Path('Si_eigen.data').read_text().splitlines() if line.strip() and line.split()[0].isdigit()]
+import re
+from pathlib import Path
+
+text = Path('outputfile').read_text()
+assert 'end SALMON' in text, 'GS did not finish normally'
+match = re.search(r'#GS converged at\s+(\d+)\s+:\s*(\S+)', text)
+assert match, 'HSE GS did not converge'
+assert float(match[2]) < 1e-8, 'GS density residual exceeds input tolerance'
+variables = Path('variables.log').read_text().replace(' ', '')
+omega = re.search(r'hse_omega\(bohr\^-1\)=(\S+)', variables)
+assert omega and abs(float(omega[1]) - .11) < 1e-12
+assert Path('data_for_restart/wfn.bin').stat().st_size > 0
+rows = [line.split() for line in Path('Si_eigen.data').read_text().splitlines()
+        if line.strip() and line.split()[0].isdigit()]
 assert rows and all(math.isfinite(float(row[1])) for row in rows)
+krows = [line.split() for line in Path('Si_k.data').read_text().splitlines()
+         if len(line.split()) == 5 and line.split()[0].isdigit()]
+assert len(krows) == 64
+assert abs(sum(float(row[4]) for row in krows) - 1) < 1e-12
+print('Converged HSE GS ready for Nk=4^3 impulse response')

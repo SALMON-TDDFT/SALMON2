@@ -41,6 +41,17 @@ else ()
     set(LAPACK_VERSION "3.12.1")
     message(STATUS "Build Netlib LAPACK library version ${LAPACK_VERSION}")
 
+    # GNU 15/AArch64 testing found incorrect ZLARF1L eigenvectors when loop
+    # vectorization was enabled, despite correct eigenvalues. Keep the
+    # workaround local to the fallback, leaving SALMON/vendor BLAS optimized.
+    set(_lapack_fortran_flags "${CMAKE_Fortran_FLAGS}")
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_Fortran_COMPILER_VERSION VERSION_GREATER_EQUAL 15
+       AND CMAKE_Fortran_COMPILER_VERSION VERSION_LESS 16
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|AARCH64)$")
+      string(APPEND _lapack_fortran_flags " -fno-tree-loop-vectorize")
+    endif()
+
     # old URL "http://www.netlib.org/lapack/lapack-${LAPACK_VERSION}.tgz"
     ExternalProject_Add(lapack-project
       URL              "https://github.com/Reference-LAPACK/lapack/archive/refs/tags/v${LAPACK_VERSION}.tar.gz"
@@ -52,7 +63,7 @@ else ()
                        -D CMAKE_INSTALL_LIBDIR=lib -D CMAKE_POLICY_VERSION_MINIMUM=3.5
                        -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
                        -D CMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
-                       -D CMAKE_Fortran_FLAGS=${CMAKE_Fortran_FLAGS}
+                       -D CMAKE_Fortran_FLAGS=${_lapack_fortran_flags}
                        -D CMAKE_Fortran_FLAGS_DEBUG=${CMAKE_Fortran_FLAGS_DEBUG}
                        -D CMAKE_Fortran_FLAGS_RELEASE=${CMAKE_Fortran_FLAGS_RELEASE}
       STEP_TARGETS     install

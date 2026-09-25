@@ -1,12 +1,45 @@
 #!/usr/bin/env python3
-from pathlib import Path
+"""Short impulse regression; the observation time does not resolve optical peaks."""
 import math
-text=Path('outputfile').read_text()
-assert 'end SALMON' in text
-assert 'hse_omega' in Path('variables.log').read_text()
-variables=Path('variables.log').read_text()
-assert 'propagator=hse_taylor4' in variables.replace(' ','')
-for filename in ('Si_rt.data','Si_rt_energy.data'):
- rows=[list(map(float,line.split())) for line in Path(filename).read_text().splitlines() if line.strip() and not line.startswith('#')]
- assert len(rows)>=2 and all(math.isfinite(x) for row in rows for x in row)
-assert abs(rows[-1][0]-.32)<1e-8
+import re
+from pathlib import Path
+
+
+def table(filename):
+    rows = [list(map(float, line.split()))
+            for line in Path(filename).read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith('#')]
+    assert rows and all(math.isfinite(x) for row in rows for x in row), filename
+    return rows
+
+
+text = Path('outputfile').read_text()
+assert 'end SALMON' in text, 'RT did not finish normally'
+variables = Path('variables.log').read_text().replace(' ', '')
+assert 'propagator=hse_taylor4' in variables, 'default HSE propagator changed'
+rt = table('Si_rt.data')
+assert len(rt) == 64 and all(len(row) == 16 for row in rt)
+for step, row in enumerate(rt, 1):
+    assert abs(row[0] - step * .16) < 1e-8
+    assert abs(row[3] - 1e-4) < 1e-12, 'incorrect impulse amplitude'
+assert max(abs(row[15]) for row in rt) > 1e-8, 'vanishing impulse response'
+assert max(abs(row[15]) for row in rt) < 1e-4, 'unbounded current response'
+electrons = []
+for line in text.splitlines():
+    if re.match(r'^\s*\d+\s+\d+\.\d+\s+', line):
+        fields = line.split()
+        if len(fields) == 7:
+            electrons.append(float(fields[5]))
+assert electrons and all(math.isfinite(x) and abs(x - 32) < 1e-4 for x in electrons)
+energy = table('Si_rt_energy.data')
+assert len(energy) == 65 and abs(energy[-1][0] - 10.24) < 1e-8
+assert max(abs(row[1] - energy[1][1]) for row in energy[1:]) < 1e-5, 'post-kick energy drift'
+spectrum = table('Si_response.data')
+assert len(spectrum) == 1000 and all(len(row) == 13 for row in spectrum)
+assert all(abs(row[0] - i * .001) < 1e-8 for i, row in enumerate(spectrum, 1))
+# The native response output must obey eps = 1 + 4*pi*i*sigma/omega.
+for row in spectrum:
+    factor = 4 * math.pi / row[0]
+    assert math.isclose(row[9], 1 - factor * row[6], rel_tol=1e-9, abs_tol=1e-9)
+    assert math.isclose(row[12], factor * row[3], rel_tol=1e-9, abs_tol=1e-9)
+print('Nk=4^3 HSE Taylor4+ACE impulse current, energy and dielectric output passed')

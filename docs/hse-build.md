@@ -43,3 +43,5 @@ and Netlib LAPACK modified BSD. See `LICENSE.THIRD-PARTY` and upstream `COPYING`
 files in the downloaded sources.
 
 The executed build and regression matrix is recorded in [validation](hse-build-validation.md).
+
+Fugaku/Linux audit and Nk=4^3 regressions: [platform notes](hse-platforms.md).

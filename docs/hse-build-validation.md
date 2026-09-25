@@ -12,7 +12,7 @@ regressions, not new physical spectra or convergence studies.
   and `CMAKE_IGNORE_PREFIX_PATH=/opt/homebrew`, plus `USE_MPI=ON USE_LIBXC=ON`:
   downloaded and built FFTW 3.3.10, Libxc 5.2.3 including the legacy Fortran
   interface, and Netlib BLAS/LAPACK 3.12.1; linked one MPI executable.
-- MPI HSE GS → RT CTest cases 420/421: all six preparation/run/verification
+- Earlier Nk=2^3 one-SCF-iteration GS → RT smoke cases 420/421: all six preparation/run/verification
   stages passed with the automatically built dependencies.
 - Eight native numerical tests passed using the automatically built Libxc.
 - Thirteen bounded input/restart checks passed, including default/explicit
@@ -30,3 +30,7 @@ and passing the correctly sized point count to the legacy spin interfaces.
 Cross-platform CI and accelerator configurations have not been executed here.
 Dependency source archives are hash pinned; generated libraries are confined to
 the build tree. Existing vendor-specific LAPACK flags remain supported.
+
+The earlier smoke cases did not establish SCF convergence. The stronger Nk=4^3
+convergence tests subsequently exposed a separate Netlib eigenvector problem;
+see [the updated portability and numerical test record](hse-platforms.md).
