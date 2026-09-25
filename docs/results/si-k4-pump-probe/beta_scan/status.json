@@ -1,0 +1,32 @@
+{
+  "status": "completed",
+  "results": [
+    {
+      "case": "td_g40_b001_ground",
+      "beta": 0.001,
+      "exit_code": 0,
+      "completed": true,
+      "wall_seconds": 487.1081488749478,
+      "peak_RSS_KiB": 455136,
+      "stop_reason": null
+    },
+    {
+      "case": "td_g40_b004_ground",
+      "beta": 0.004,
+      "exit_code": 0,
+      "completed": true,
+      "wall_seconds": 497.2405259589432,
+      "peak_RSS_KiB": 454688,
+      "stop_reason": null
+    },
+    {
+      "case": "td_g40_b016_ground",
+      "beta": 0.016,
+      "exit_code": 0,
+      "completed": true,
+      "wall_seconds": 497.42858266690746,
+      "peak_RSS_KiB": 454976,
+      "stop_reason": null
+    }
+  ]
+}

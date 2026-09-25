@@ -1,0 +1,7 @@
+{
+  "ace_full_relative_J": 1.939673894032598e-06,
+  "dt_coarse_half_J_L2": 1.1316294322272334e-07,
+  "dt_half_quarter_J_L2": 2.8669782776334176e-08,
+  "dt_error_ratio": 3.9471154736524574,
+  "passed": true
+}

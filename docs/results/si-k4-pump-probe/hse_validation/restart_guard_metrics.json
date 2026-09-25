@@ -1,0 +1,12 @@
+{
+  "pulse_restart": {
+    "exit_code": 1,
+    "expected": "laser RT restart",
+    "passed": true
+  },
+  "pulse_as_impulse": {
+    "exit_code": 1,
+    "expected": "restart physics",
+    "passed": true
+  }
+}

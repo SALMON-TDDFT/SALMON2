@@ -1,0 +1,21 @@
+{
+  "ace": {
+    "energy_change_Ha": 1.3847687799994901e-05,
+    "field_work_Ha": 1.3332497240840554e-05,
+    "residual_Ha": 5.151905591543471e-07
+  },
+  "half": {
+    "energy_change_Ha": 1.3741763499552917e-05,
+    "field_work_Ha": 1.3698209454669095e-05,
+    "residual_Ha": 4.3554044883821754e-08
+  },
+  "quarter": {
+    "energy_change_Ha": 1.3795854901132998e-05,
+    "field_work_Ha": 1.3791428932941114e-05,
+    "residual_Ha": 4.425968191883964e-09
+  },
+  "zero": {
+    "max_abs_J": 8.48907085175575e-12,
+    "energy_drift_Ha": 2.7995383788947947e-12
+  }
+}

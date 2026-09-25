@@ -1,0 +1,62 @@
+{
+  "HSE06": {
+    "pump_max_norm_error": 1.3129999999250686e-05,
+    "plus_max_norm_error": 1.3129999999250686e-05,
+    "minus_max_norm_error": 1.3129999999250686e-05,
+    "ground_max_norm_error": 6.900000002474371e-07,
+    "even_over_odd_current": 0.04621336341764041,
+    "windows": {
+      "600": {
+        "ground_max_eV": 4.3,
+        "ground_height": 71.92297383855835,
+        "pumped_at_ground_max": 37.822844893071796,
+        "signed_area_ground": 45.26184776575401,
+        "signed_area_pumped": 16.611517978403477
+      },
+      "720": {
+        "ground_max_eV": 4.3,
+        "ground_height": 80.35858452813244,
+        "pumped_at_ground_max": 45.043547107691815,
+        "signed_area_ground": 45.61962158923255,
+        "signed_area_pumped": 16.233168214545564
+      },
+      "880": {
+        "ground_max_eV": 4.3,
+        "ground_height": 86.91826459693151,
+        "pumped_at_ground_max": 52.17696127311427,
+        "signed_area_ground": 45.915707417886495,
+        "signed_area_pumped": 15.960956955674284
+      }
+    }
+  },
+  "TDCDFT": {
+    "pump_max_norm_error": 2.600000001962144e-07,
+    "plus_max_norm_error": 2.600000001962144e-07,
+    "minus_max_norm_error": 2.600000001962144e-07,
+    "ground_max_norm_error": 1.000000082740371e-08,
+    "even_over_odd_current": 0.027434377253210445,
+    "windows": {
+      "600": {
+        "ground_max_eV": 2.7600000000000002,
+        "ground_height": 183.37299507205063,
+        "pumped_at_ground_max": 13.397529612471374,
+        "signed_area_ground": 93.3608124573889,
+        "signed_area_pumped": 25.102157075710828
+      },
+      "720": {
+        "ground_max_eV": 2.7600000000000002,
+        "ground_height": 215.58577548968327,
+        "pumped_at_ground_max": 21.354890455650015,
+        "signed_area_ground": 93.49424094059475,
+        "signed_area_pumped": 25.38447592498921
+      },
+      "880": {
+        "ground_max_eV": 2.7600000000000002,
+        "ground_height": 259.50720138716304,
+        "pumped_at_ground_max": 27.32172643401304,
+        "signed_area_ground": 93.20806244286868,
+        "signed_area_pumped": 26.39756858395554
+      }
+    }
+  }
+}

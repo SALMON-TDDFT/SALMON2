@@ -291,3 +291,123 @@ However, large positive/negative structures and observation-window dependence
 prevent identifying a converged exciton peak change. The same-coefficient
 unpumped maximum is3.34 eV versus3.36 without stabilization. A pumped local
 maximum at3.39 eV is only a diagnostic extremum, not an established exciton shift.
+
+## 2026-09-25 update: fixed-alpha strong excitation and equilibrium-response failure
+
+**Current conclusion:** successful finite-time propagation is not sufficient validation
+of the TDCDFT response. Increasing gamma from .001 to .004 prevents the observed
+strong-pump breakdown over the tested interval, but introduces a substantial negative
+unpumped optical response. Adding beta does not resolve this in the tested range.
+Physical interpretation of the gamma=.004 pump-induced changes as exciton bleaching
+or shifts is therefore suspended. This supersedes any interpretation of earlier
+successful completion as physical validation; it does not invalidate the implementation
+checks listed above.
+
+### Matched calculation conditions
+
+Si conventional cell (8 atoms, 32 electrons), lattice length10.26 bohr,12³ real-space
+grid, full shifted4³ k mesh. Fixed-alpha Proca uses PZ ground-state orbitals,
+alpha=.2 and screening='none'; these tests are distinct from the earlier ELF-dependent
+alpha runs. The normalized equation is
+
+```
+Axc'' + beta Axc' + gamma Axc = alpha J
+```
+
+Beta (`tdcdft_damping`) is a damping coefficient (inverse atomic time); gamma
+(`tdcdft_restoring`) is a restoring coefficient (inverse atomic time squared).
+Gamma does not by itself relax Axc monotonically to zero.
+
+Pump: z-polarized Acos2, omega=.2 au (5.44 eV), width60 au, peak intensity
+1e13 W/cm². Impulse probe at80 au with signed amplitude±1e-4. Total duration960 au
+(23.22 fs); TDCDFT timestep.08 au. Pump, pump+probe, pump−probe and unpumped probe
+references use matched conditions. Signed spectra use common post-probe cubic windows
+600/720/880 au. No k-point convergence claim is made.
+
+### Gamma and finite-time numerical checks
+
+With beta=0, gamma=.001 pumped trajectories fail around17.2 fs with catastrophic
+electron-number loss; halving the timestep still fails around17.5 fs. Their failed
+trajectories are excluded from physical spectra. Gamma=.004 completes the full
+interval. Halving its pump timestep changes the current by0.0829% in relative L2;
+halving probe amplitude changes the central probe current by0.0338% and the2–6 eV
+spectrum by0.0122%. These checks establish limited numerical sensitivity, not a
+physically acceptable equilibrium response or arbitrary-time stability.
+
+The earlier impulse comparison used gamma=.001, not .004. There is no comparably
+large negative structure near2 eV in the tested gamma=.001 unpumped trace; this is
+not a proof of passivity over the entire spectrum.
+
+### Negative equilibrium response at gamma=.004
+
+The user identified the negative peak in the **unpumped impulse** reference.
+At the880 au window it lies at2.06 eV with Im epsilon=−173.38. It persists near
+2.04–2.06 eV over440/600/720/880 au windows (minima−85.81/−118.54/−141.98/−173.38),
+and under exponential diagnostic windows with eta=.1/.2/.4 eV. Thus a simple
+cubic-window sidelobe explanation is disfavored. Exponential windowing is an analysis
+operation, not physical damping. Peak-height growth as a window lengthens is not,
+by itself, evidence of unstable time evolution.
+
+The auxiliary frequency sqrt(gamma) is1.721 eV for gamma=.004 (.8605 eV for .001).
+A diagnostic three-mode fit gives a low coupled component near2.068 eV with Axc/J
+magnitude113.20 and phase177.57 degrees, consistent with the equation's ratio−112.77.
+The fit residual is25%, so it is not a precision eigenmode decomposition. The recorded
+traces satisfy the discrete auxiliary-field recurrence to relative residuals below
+5e-12. This supports a gamma-dependent coupled-response issue but does not uniquely
+identify its cause or exclude other model/current-convention errors. Opposite phase
+alone does not establish negative oscillator strength.
+
+See [diagnostic record](results/si-k4-pump-probe/gamma_diagnostic/README.md),
+[metrics](results/si-k4-pump-probe/gamma_diagnostic/metrics.json), and
+[window/field figure](results/si-k4-pump-probe/gamma_diagnostic/diagnostic.png).
+
+### Beta scan: unpumped impulse only
+
+Alpha=.2 and gamma=.004 were held fixed. Three additional runs, beta=.001/.004/.016,
+completed normally in487–497 s each (MPI4, OMP1); beta=0 reused the existing run.
+The same880 au window gives the following minima across1.5–4 eV:
+
+| beta (au) | Minimum Im epsilon | Energy (eV) |
+| --- | ---: | ---: |
+| 0 | −173.38 | 2.06 |
+| .001 | −139.21 | 2.06 |
+| .004 | −82.28 | 2.09 |
+| .016 | −211.16 | 2.67 |
+
+Small beta weakens but does not eliminate the original negative peak. At beta=.016,
+a new, stronger negative structure appears near2.67 eV, the positive maximum grows,
+and the late-time Axc envelope increases. The maximum absolute Axc rises from
+9.83e-5 (beta=0) to1.91e-4 (beta=.016). Damping of the auxiliary equation alone
+therefore does not demonstrate damping of the self-consistent coupled system.
+No half-timestep check of these beta runs was performed, so the origin of the growth
+is not yet isolated between model and numerical effects.
+
+The original1.7–2.4 eV minimum alone would misleadingly suggest improvement: it misses
+the new negative structure outside that band. Do not select beta using that scalar
+metric alone. Spectra of the growing trace are finite-window diagnostics, not
+validated stationary absorption spectra. No new strong-pump beta calculations were run.
+
+See [beta record](results/si-k4-pump-probe/beta_scan/README.md),
+[comparison figure](results/si-k4-pump-probe/beta_scan/comparison.png), and
+[reproduction script](results/si-k4-pump-probe/beta_scan/analyze.py).
+
+### HSE comparison and limits of interpretation
+
+The matched4³ HSE06 Taylor4+ACE pump/±probe/unpumped trajectories completed, using
+method-specific converged ground states and dt=.16 au. At the880 au window the
+response at the HSE unpumped maximum's energy4.30 eV decreases86.92→52.18; the
+local maximum in4.1–4.5 eV changes4.30 eV/86.92→4.26 eV/59.30. These finite-window
+features support a qualitative redistribution/reduction, not a precise exciton shift.
+The TDCDFT response at its own unpumped maximum2.76 eV changes259.51→27.32, with
+additional increased structures elsewhere. Its problematic equilibrium reference
+precludes treating this reduction as established exciton bleaching.
+
+HSE is the more credible comparison reference in the present tests, not an exact
+solution. Coarse k sampling, discretization and finite observation windows remain;
+the two methods' peaks are not established to be the same exciton. Equal pump does
+not imply equal excited carrier density, which has not been measured here. Additional
+HSE half-probe runs were stopped at the user's request; partial data are excluded.
+No additional delay scan was performed. The paused heartbeat remains paused.
+
+Full comparison data and historical progress are in
+[the pump–probe record](results/si-k4-pump-probe/README.md).

@@ -1,0 +1,8 @@
+{
+  "completed": true,
+  "steps": 6000,
+  "max_electron_error": 1.3129999999250686e-05,
+  "post_probe_energy_range_eV": 0.0021686946747306026,
+  "final_electron_count": 31.99998687,
+  "finite": true
+}
