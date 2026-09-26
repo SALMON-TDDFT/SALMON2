@@ -84,3 +84,70 @@ WF support.
   activity, not a controlled runtime speedup measurement. No concurrent jobs.
 - Full-support DC SCF remains unconfirmed; the observed mixed-density residual
   is not an unmixed fixed-point residual and does not replace eigenstate checks.
+
+## DC fragment boundary correction (2026-09-26)
+
+The first MPI8 full-support baseline stopped normally at iteration 545 after
+600.868 s without convergence (mixed density residual 1.5019237e-3). Final-current-H
+occupied RMS eigen residuals were 0.604--2.347 Ha despite orthogonality within
+2.721e-13. These are not frozen-H inner-solver diagnostics.
+
+Inspection found a separate, reproducible geometry defect: equivalent fragments
+had atom counts [16,16,18,14,16,16,16,16], giving initial electron counts 72 and
+56 in fragments 3 and 4 instead of 64. The direct binary floating-point boundary
+comparison reproduced those counts, while decimal arithmetic gave all 16.
+
+Use a shared per-axis roundoff allowance 32*epsilon*total-cell-length on both
+faces of each half-open fragment box, including lower and excluding upper
+boundary atoms without modifying coordinates. It is a numerical boundary
+convention, not a physical buffer expansion. The actual MPI8 one-iteration
+regression in testsuites/dc_fragment_boundary/check.py failed on the old binary
+with the observed 18/14 atom counts and passed after recompilation. Complex
+LCFO130, HSE422 and LAPACK eigenvector CTest checks: 7/7 passed serially.
+
+A single unchanged-input baseline is rerunning in dc-full-boundary-fixed with
+MPI8/OMP2/BLAS1, full support and no pair pruning. Geometry correctness is proven;
+SCF convergence and a valid WF cutoff remain to be established separately.
+
+## Literature-guided next convergence investigation
+
+- Lin, Adaptively Compressed Exchange Operator, JCTC 12, 2242--2249
+  (2016), DOI 10.1021/acs.jctc.6b00092.
+  https://math.berkeley.edu/~linlin/publications/ACE.pdf
+  Distinguish a fixed-ACE linear eigensolver from nested density SCF with
+  fixed exchange followed by an outer exchange update.
+- Hu, Lin, Yang, Projected Commutator DIIS Method for Accelerating Hybrid
+  Functional Electronic Structure Calculations, JCTC 13, 5458--5467
+  (2017), DOI 10.1021/acs.jctc.7b00892.
+  https://math.berkeley.edu/~linlin/publications/PCDIIS.pdf
+  Gauge-invariant projected density-matrix/commutator mixing; compatible
+  with ACE, demonstrated for HSE06 silicon. Adaptation to DC with global
+  chemical potential and fractional occupations needs separate derivation
+  and validation; the projector formulas cannot be copied unmodified.
+- Kudin, Scuseria, Cances, A black-box self-consistent field convergence
+  algorithm: One step closer, JCP 116, 8255--8261 (2002),
+  DOI 10.1063/1.1470195. EDIIS followed by DIIS is a broader robustness
+  reference, not direct validation of this DC implementation.
+
+Actual current call path: CG -> hpsi -> hse_add_action -> hse_ace_apply;
+refresh_wannier builds ACE outside CG after density/occupation updates.
+There is no explicit converged inner density SCF at fixed ACE. Proposed
+next diagnostic: measure fixed-H residual immediately after solve_orbitals,
+then after occupation, local-potential and exchange updates. Do not attribute
+all nonconvergence to a particular update until those stages are measured.
+No new mixing scheme has been implemented in this boundary-fix change.
+
+## Boundary-fixed baseline outcome
+
+Completed normally by native time shutdown after 601.339 s, iteration 573.
+Final mixed density residual: 9.8743525e-4 (target 1e-7), NOT converged.
+Final-current-H occupied RMS eigen residual across fragments: 0.449--1.358 Ha;
+maximum orthogonality error: 1.077e-13. This does not establish a CG inner
+failure because the Hamiltonian is refreshed after the solve. The corrected
+geometry alone does not resolve SCF instability. No WF cutoff sweep certified.
+
+The expanded one-iteration MPI regression also verified all 16 periodic atom
+sites are distinct and equal across the eight fragments. It passed after the
+baseline finished; no concurrent simulations were run. Original input, output,
+executable/source/input SHA256 provenance and per-fragment binary diagnostics
+are retained under work/si64-chain/dc-full-boundary-fixed (workspace root).

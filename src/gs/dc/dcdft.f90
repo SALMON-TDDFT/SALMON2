@@ -181,12 +181,16 @@ contains
       integer :: iatom,iatom_frag
       integer :: kion_frag(natom,dc%n_frag),natom_frag(dc%n_frag)
       real(8) :: dr
-      real(8) :: r1(3),r2(3),r(3)
+      real(8) :: r1(3),r2(3),r(3),boundary_tol(3)
       real(8) :: ldomain(3),lbuffer(3)
       real(8) :: rion_frag(3,natom,dc%n_frag)
     
     ! length of domain
       ldomain(1:3) = al(1:3) / dble(num_fragment(1:3))
+      ! Use the same roundoff allowance on every fragment boundary, including
+      ! periodic images. Treat near-boundary atoms as lying on the boundary:
+      ! include the lower face and exclude the upper face. Do not move atoms.
+      boundary_tol = 32d0 * epsilon(1d0) * al
       do n=1,3 ! x,y,z
       ! rion --> rion = [0:al] (total system)
         do i=1,natom
@@ -241,9 +245,7 @@ contains
             r(1) = r(1) + dble(ii)*al(1)
             r(2) = r(2) + dble(jj)*al(2)
             r(3) = r(3) + dble(kk)*al(3)
-            if( r1(1) <= r(1) .and. r(1) < r2(1)  .and. &
-            &   r1(2) <= r(2) .and. r(2) < r2(2)  .and. &
-            &   r1(3) <= r(3) .and. r(3) < r2(3)  ) then
+            if( all(r1-boundary_tol <= r) .and. all(r < r2-boundary_tol) ) then
               iatom_frag = iatom_frag + 1
               rion_frag(1:3,iatom_frag,i_frag) = r(1:3) - dc%rxyz_frag(1:3,i_frag)
               kion_frag(iatom_frag,i_frag) = kion(iatom)

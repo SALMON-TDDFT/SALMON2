@@ -1,0 +1,73 @@
+{
+  "status": {
+    "seconds": 601.3391595419962,
+    "returncode": 0,
+    "timeout": false
+  },
+  "scf_iterations": 573,
+  "scf_residual": 0.00098743525,
+  "scf_converged": false,
+  "atom_counts": [
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16
+  ],
+  "mpi": 8,
+  "openmp": 2,
+  "blas_threads": 1,
+  "eigen_diagnostics": {
+    "000001": {
+      "max_residual_Ha": 7.382685025416498,
+      "occupied_rms_residual_Ha": 1.0079006875965575,
+      "max_orthogonality_error": 6.537877874794443e-14,
+      "max_rayleigh_imaginary_Ha": 4.96297546668975e-17
+    },
+    "000002": {
+      "max_residual_Ha": 7.403886782670087,
+      "occupied_rms_residual_Ha": 1.1509043313844203,
+      "max_orthogonality_error": 3.020989735318134e-14,
+      "max_rayleigh_imaginary_Ha": 6.657562856021748e-17
+    },
+    "000003": {
+      "max_residual_Ha": 7.233275157991204,
+      "occupied_rms_residual_Ha": 1.357933264942794,
+      "max_orthogonality_error": 4.8886382877912404e-14,
+      "max_rayleigh_imaginary_Ha": 6.380968457172535e-17
+    },
+    "000004": {
+      "max_residual_Ha": 7.340602311448271,
+      "occupied_rms_residual_Ha": 0.5100990159329406,
+      "max_orthogonality_error": 3.3455164784520545e-14,
+      "max_rayleigh_imaginary_Ha": 3.979528715225883e-17
+    },
+    "000005": {
+      "max_residual_Ha": 7.278850675348421,
+      "occupied_rms_residual_Ha": 0.7108188532102059,
+      "max_orthogonality_error": 1.0508628468315812e-13,
+      "max_rayleigh_imaginary_Ha": 3.9938229994041327e-17
+    },
+    "000006": {
+      "max_residual_Ha": 7.3529425666796975,
+      "occupied_rms_residual_Ha": 1.046955283141308,
+      "max_orthogonality_error": 6.911883579798805e-14,
+      "max_rayleigh_imaginary_Ha": 4.5026995161499715e-17
+    },
+    "000007": {
+      "max_residual_Ha": 7.2203682516427765,
+      "occupied_rms_residual_Ha": 0.5647266427219826,
+      "max_orthogonality_error": 9.140859785612616e-14,
+      "max_rayleigh_imaginary_Ha": 5.5104465507168686e-17
+    },
+    "000008": {
+      "max_residual_Ha": 7.385725599728363,
+      "occupied_rms_residual_Ha": 0.4490942007592426,
+      "max_orthogonality_error": 1.0768538101067378e-13,
+      "max_rayleigh_imaginary_Ha": 5.671971961931146e-17
+    }
+  }
+}
