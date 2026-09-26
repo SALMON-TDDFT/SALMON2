@@ -1,5 +1,6 @@
 ! Fixed periodic support masks. Omit exactly zero columns before reconstruction.
 module lcfo_wf_support
+ use iso_fortran_env, only: int64
  implicit none
  private
  public :: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
@@ -9,7 +10,92 @@ module lcfo_wf_support
   integer,allocatable :: columns(:)
   logical,allocatable :: keep(:,:)
  end type
+ public :: s_lcfo_wf_kernel,lcfo_wf_kernel_init,lcfo_wf_kernel_apply
+ type :: s_wf_block
+  integer,allocatable :: rows(:),columns(:),basis_columns(:)
+  complex(8),allocatable :: basis(:,:)
+ end type
+ type :: s_lcfo_wf_kernel
+  integer :: npoints=0,ncolumns=0,nbasis=0
+  integer(int64) :: products=0
+  logical :: ready=.false.
+  type(s_wf_block),allocatable :: blocks(:)
+ end type
 contains
+ subroutine lcfo_wf_kernel_init(kernel,plan,basis)
+  type(s_lcfo_wf_kernel),intent(out) :: kernel
+  type(s_lcfo_wf_plan),intent(in) :: plan
+  complex(8),intent(in) :: basis(:,:)
+  logical,allocatable :: keep(:,:),nonzero(:,:)
+  integer,allocatable :: groups(:),representative(:)
+  integer(int64),allocatable :: hashes(:)
+  integer(int64) :: hash
+  integer :: ng,nc,nb,g,j,k,n,match,r
+  if(.not.plan%ready.or.size(basis,1)/=plan%npoints)error stop 'LCFO WF kernel: invalid basis'
+  ng=size(basis,1);nb=size(basis,2);nc=size(plan%columns)
+  kernel%npoints=ng;kernel%ncolumns=nc;kernel%nbasis=nb
+  allocate(keep(nc,ng),nonzero(nb,ng),groups(ng),representative(ng),hashes(ng))
+  keep=.true.
+  if(plan%masked)keep=transpose(plan%keep)
+  nonzero=transpose(basis/=(0d0,0d0))
+  groups=0;n=0
+  ! Rows with identical WF masks AND exact basis support form disjoint blocks.
+  ! Each basis row is stored at most once; no per-WF duplication of the basis.
+  do g=1,ng
+   if(.not.any(keep(:,g)).or..not.any(nonzero(:,g)))cycle
+   hash=0_int64
+   do j=1,nc
+    hash=ieor(ishftc(hash,1),int(merge(j,0,keep(j,g)),int64))
+   enddo
+   do j=1,nb
+    hash=ieor(ishftc(hash,1),int(merge(j,0,nonzero(j,g)),int64))
+   enddo
+   match=0
+   do k=1,n
+    if(hashes(k)/=hash)cycle
+    r=representative(k)
+    if(.not.all(keep(:,r).eqv.keep(:,g)))cycle
+    if(.not.all(nonzero(:,r).eqv.nonzero(:,g)))cycle
+    match=k;exit
+   enddo
+   if(match==0)then
+    n=n+1;match=n;representative(n)=g;hashes(n)=hash
+   endif
+   groups(g)=match
+  enddo
+  allocate(kernel%blocks(n))
+  do k=1,n
+   r=representative(k)
+   associate(b=>kernel%blocks(k))
+    b%rows=pack([(g,g=1,ng)],groups==k)
+    b%columns=pack([(j,j=1,nc)],keep(:,r))
+    b%basis_columns=pack([(j,j=1,nb)],nonzero(:,r))
+    b%basis=basis(b%rows,b%basis_columns)
+    kernel%products=kernel%products+int(size(b%rows),int64)*size(b%columns)*size(b%basis_columns)
+   end associate
+  enddo
+  kernel%ready=.true.
+ end subroutine
+ subroutine lcfo_wf_kernel_apply(kernel,frame,wf)
+  type(s_lcfo_wf_kernel),intent(in) :: kernel
+  complex(8),intent(in) :: frame(:,:)
+  complex(8),allocatable,intent(out) :: wf(:,:)
+  complex(8),allocatable :: local_frame(:,:),result(:,:)
+  integer :: k,j,i
+  if(.not.kernel%ready.or.size(frame,1)/=kernel%nbasis.or.size(frame,2)/=kernel%ncolumns) &
+   error stop 'LCFO WF kernel: incompatible frame'
+  allocate(wf(kernel%npoints,kernel%ncolumns));wf=0d0
+  do k=1,size(kernel%blocks)
+   associate(b=>kernel%blocks(k))
+    local_frame=frame(b%basis_columns,b%columns)
+    ! Keep the BLAS result contiguous (indexed MATMUL LHS miscompiled on GNU15/AArch64).
+    result=matmul(b%basis,local_frame)
+    do j=1,size(b%columns);do i=1,size(b%rows)
+     wf(b%rows(i),b%columns(j))=result(i,j)
+    enddo;enddo
+   end associate
+  enddo
+ end subroutine
  subroutine lcfo_wf_plan_init(plan,positions,centers,length,radius,protected)
   type(s_lcfo_wf_plan),intent(inout) :: plan
   real(8),intent(in) :: positions(:,:),centers(:,:),length(3),radius

@@ -10,6 +10,7 @@ module lcfo_rt_wannier
   use lcfo_dist_rows, only: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get
   use lcfo_dist_dense, only: lcfo_distributed_polar
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
+  use lcfo_wf_support, only: s_lcfo_wf_kernel,lcfo_wf_kernel_init,lcfo_wf_kernel_apply
   use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -25,6 +26,7 @@ module lcfo_rt_wannier
   logical,save :: step_active=.false.
   type(s_lcfo_wf_plan),save :: fragment_support,core_support
   type(s_lcfo_column_halo),save :: source_halo
+  type(s_lcfo_wf_kernel),save :: fragment_kernel,core_kernel
   complex(8),allocatable,save :: core_gram(:,:)
 contains
   subroutine lcfo_mlwf_configure()
@@ -211,13 +213,19 @@ contains
       if(size(lcfo_counts)/=1)error stop 'LCFO MLWF: distributed source requires halo plan'
       near_frame=current_frame(selected,fragment_support%columns)
     endif
-    call lcfo_wf_reconstruct(fragment_support,basis,near_frame,fragment_wf,compact=.true.)
+    if(.not.fragment_kernel%ready)then
+      call lcfo_wf_kernel_init(fragment_kernel,fragment_support,basis)
+      write(*,'(a,i6,2i14)')'LCFO WF local kernel rank/blocks/products:', &
+        lcfo_rank,size(fragment_kernel%blocks),fragment_kernel%products
+    endif
+    call lcfo_wf_kernel_apply(fragment_kernel,near_frame,fragment_wf)
     allocate(source(size(basis,1),size(fragment_wf,2),1));source(:,:,1)=fragment_wf
     local_loss=0d0
     if(cut)then
       local_loss(2)=lcfo_wf_total_norm(core_gram,current_frame)
       if(core_support%masked)then
-        call lcfo_wf_reconstruct(core_support,lcfo_basis,current_frame,core_wf)
+        if(.not.core_kernel%ready)call lcfo_wf_kernel_init(core_kernel,core_support,lcfo_basis)
+        call lcfo_wf_kernel_apply(core_kernel,current_frame(:,core_support%columns),core_wf)
         local_loss(1)=max(0d0,local_loss(2)-sum(abs(core_wf)**2))
       endif
     endif
