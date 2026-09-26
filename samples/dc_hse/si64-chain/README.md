@@ -34,3 +34,11 @@ with no support truncation and no pair pruning. An undivided MPI1 Si64 trial was
 a mistaken interpretation and must not be presented as the requested baseline.
 The current requested baseline uses MPI8, OpenMP2 and BLAS1, with a single job.
 Its convergence must be established before reducing support.
+
+
+Converged full-support baseline (2026-09-26): `inputfile.reference` now uses
+MPI8/OMP2/BLAS1, ncg=1 and simple mixing .01. After the final-Ritz/current-spectrum
+occupation correction it converged in1148 iterations/595.927s. See
+`converged-status.json`. Occupied RMS eigen residual is below1.11e-8Ha in every
+fragment. This certifies the recorded SCF criteria, not MLWF convergence or
+any spatial cutoff. MLWF maxiter remains1; localize the saved state separately.

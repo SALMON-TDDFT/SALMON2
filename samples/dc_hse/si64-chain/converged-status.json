@@ -1,0 +1,121 @@
+{
+  "status": {
+    "seconds": 595.9267349169822,
+    "returncode": 0,
+    "timeout": false
+  },
+  "scf_iterations": 1148,
+  "mixed_density_residual": 9.98214788711446e-08,
+  "unmixed_density_residual_from_simple_mixing": 9.98214788711446e-06,
+  "mixrate": 0.01,
+  "mpi": 8,
+  "openmp": 2,
+  "blas_threads": 1,
+  "ncg": 1,
+  "ncg_init": 4,
+  "scf_converged": true,
+  "mlwf_converged": false,
+  "spatial_truncation": false,
+  "pair_pruning": false,
+  "ace_enabled": true,
+  "total_core_electrons": 256.0000000005075,
+  "fragments": {
+    "000001": {
+      "max_residual_Ha": 2.2991030646454936e-06,
+      "occupied_rms_residual_Ha": 1.1004181984264398e-08,
+      "max_orthogonality_error": 7.993605777301127e-15,
+      "max_rayleigh_imaginary_Ha": 1.188466093392124e-21,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 32.000000000585615,
+      "localization_status": 2
+    },
+    "000002": {
+      "max_residual_Ha": 1.624174391262988e-06,
+      "occupied_rms_residual_Ha": 7.044522966777707e-09,
+      "max_orthogonality_error": 1.354472090042691e-14,
+      "max_rayleigh_imaginary_Ha": 2.4500992681012475e-21,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 31.99999999993106,
+      "localization_status": 2
+    },
+    "000003": {
+      "max_residual_Ha": 1.719846415556686e-06,
+      "occupied_rms_residual_Ha": 6.46824600590141e-09,
+      "max_orthogonality_error": 9.769962616701378e-15,
+      "max_rayleigh_imaginary_Ha": 1.2404658959234784e-21,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 32.00000000102939,
+      "localization_status": 2
+    },
+    "000004": {
+      "max_residual_Ha": 1.4692858341468765e-06,
+      "occupied_rms_residual_Ha": 9.87310030503113e-09,
+      "max_orthogonality_error": 9.769962616701378e-15,
+      "max_rayleigh_imaginary_Ha": 1.7505025707343214e-21,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 31.99999999703288,
+      "localization_status": 2
+    },
+    "000005": {
+      "max_residual_Ha": 1.5094898007502389e-06,
+      "occupied_rms_residual_Ha": 6.662921383378657e-09,
+      "max_orthogonality_error": 8.659739592076221e-15,
+      "max_rayleigh_imaginary_Ha": 5.773488048410333e-22,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 32.000000003832184,
+      "localization_status": 2
+    },
+    "000006": {
+      "max_residual_Ha": 1.90966017485521e-06,
+      "occupied_rms_residual_Ha": 7.1844138608839445e-09,
+      "max_orthogonality_error": 1.099120794378905e-14,
+      "max_rayleigh_imaginary_Ha": 1.2077076316143886e-21,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 31.99999999815801,
+      "localization_status": 2
+    },
+    "000007": {
+      "max_residual_Ha": 1.619677776597245e-06,
+      "occupied_rms_residual_Ha": 6.426726619930593e-09,
+      "max_orthogonality_error": 8.770761894538737e-15,
+      "max_rayleigh_imaginary_Ha": 9.085790934220258e-22,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 32.00000000022765,
+      "localization_status": 2
+    },
+    "000008": {
+      "max_residual_Ha": 1.5390320146777721e-06,
+      "occupied_rms_residual_Ha": 6.790056190612454e-09,
+      "max_orthogonality_error": 1.6542323066914832e-14,
+      "max_rayleigh_imaginary_Ha": 3.868335239833772e-21,
+      "scf_converged": true,
+      "scf_iterations": 1148,
+      "scf_residual": 9.98214788711446e-08,
+      "core_electrons": 31.999999999710685,
+      "localization_status": 2
+    }
+  },
+  "sha256": {
+    "work/si64-chain/ritz-cg1-reference/inputfile": "a8a67dd824c43e060e847f2ddd08993de7c837c6662b212a8ac26425477c82bf",
+    "work/si64-chain/ritz-cg1-reference/atom.dat": "dc643949119dad473b20e67129e52ee36b2ab7a6414c80fa1e4fad5669b499ab",
+    "work/si64-chain/ritz-cg1-reference/Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
+    "work/dc-hse-noloop-build/salmon": "2b636a5391976eb37c1f5e4bbfbae1495f191f4f1d89049b3349b802485855d9",
+    "work/SALMON2-dc-hse/src/gs/scf_iteration.f90": "eb13b4bee274b9c0effc8734eb6fe1f001d98f8cf5ab732b89609542cc7a7896",
+    "work/SALMON2-dc-hse/src/gs/scf_iteration_dft.f90": "ebca9ec0be607a17714cf1a729bb632a9f0c75273e7e56e2e05167c14d96fcdb",
+    "work/SALMON2-dc-hse/src/xc/hse_native.f90": "69aeff339536502c4b0e874642ab6d79b44b34fd4ba325b514280d6e6c632013"
+  }
+}

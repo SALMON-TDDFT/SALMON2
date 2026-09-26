@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 !=======================================================================
+#include "config.h"
 module scf_iteration_sub
   implicit none
 
@@ -21,12 +22,16 @@ contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
             &   miter,nscf_init_no_diagonal)
-  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
+  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,yn_dc
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
   use subspace_diagonalization, only: ssdg
+#ifdef USE_HSE
+  use hse_native, only: hse_eigen_diagnostic_enabled,hse_export_eigen_pair,hse_enabled
+  use hamiltonian, only: hpsi
+#endif
   implicit none
   type(s_rgrid),          intent(in)    :: mg
   type(s_dft_system),     intent(in)    :: system
@@ -41,6 +46,14 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   integer,                intent(in)    :: nscf_init_no_diagonal
   !
   integer :: nncg
+#ifdef USE_HSE
+  logical :: diagnose
+  diagnose=hse_eigen_diagnostic_enabled(info,'SALMON_HSE_SOLVER_DIAGNOSTIC')
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'before_subspace')
+  endif
+#endif
 
   if(miter==1) then
     nncg = ncg_init
@@ -56,6 +69,12 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     end if
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)
+#ifdef USE_HSE
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'after_subspace')
+  endif
+#endif
 
 ! conjugate gradient method
   call timer_begin(LOG_CALC_MINIMIZATION)
@@ -65,9 +84,28 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
+#ifdef USE_HSE
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'after_cg')
+  endif
+#endif
 
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
+#ifdef USE_HSE
+  ! CG minimizes bands independently; orthogonalization can rotate them away
+  ! from the eigenbasis. Return sorted Ritz states before DC assigns occupations.
+  if(yn_dc=='y'.and.hse_enabled())then
+    call timer_begin(LOG_CALC_SUBSPACE_DIAG)
+    call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    call timer_end(LOG_CALC_SUBSPACE_DIAG)
+  endif
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'after_orthogonalization')
+  endif
+#endif
 
 end subroutine solve_orbitals
 

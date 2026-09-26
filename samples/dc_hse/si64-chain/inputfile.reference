@@ -6,7 +6,7 @@
  sysname='si64_dc_hse'
  write_gs_restart_data='yes'
  time_shutdown=600d0
- checkpoint_interval=10
+ checkpoint_interval=100
 /
 &units
  unit_system='a.u.'
@@ -54,8 +54,8 @@
 &scf
  nscf_init_redistribution=10
  nscf_init_no_diagonal=0
- nscf=1000
- ncg=20
+ nscf=1800
+ ncg=1
  method_mixing='simple'
  alpha_mb=0.5d0
  mixrate=0.01d0

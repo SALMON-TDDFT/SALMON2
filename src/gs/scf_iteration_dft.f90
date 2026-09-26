@@ -15,6 +15,7 @@
 !
 !=======================================================================
 
+#include "config.h"
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,ewald,  &
                               lg,mg,  &
@@ -53,6 +54,9 @@ use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_pl
 use noncollinear_module, only: calc_magnetization
 use dcdft
 use hse_reference_export, only: export_hse_reference
+#ifdef USE_HSE
+use hse_native, only: hse_enabled,hse_freeze
+#endif
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -94,6 +98,9 @@ real(8) :: rNe
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
+#ifdef USE_HSE
+logical :: saved_hse_freeze
+#endif
 
 call init_convergence_check
 
@@ -187,6 +194,17 @@ DFT_Iteration : do iter=Miter+1,nscf
      call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
+#ifdef USE_HSE
+       if(hse_enabled())then
+         ! Occupations must use the current Ritz states and their fixed-H
+         ! energies, not the previous iteration's spectrum. Do not rebuild
+         ! exchange with old occupations after rotating the states.
+         saved_hse_freeze=hse_freeze
+         hse_freeze=.true.
+         call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+         hse_freeze=saved_hse_freeze
+       endif
+#endif
        call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
      end if
      ! rho_s for fragments

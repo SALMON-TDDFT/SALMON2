@@ -36,29 +36,36 @@ module hse_native
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
-  logical function hse_eigen_diagnostic_enabled(info) result(enabled)
+  logical function hse_eigen_diagnostic_enabled(info,variable) result(enabled)
     use communication, only: comm_bcast
     type(s_parallel_info),intent(in) :: info
+    character(*),optional,intent(in) :: variable
     integer :: flag,status
     character(8) :: setting
     enabled=.false.
     if(.not.hse_enabled())return
     flag=0
     if(info%id_rko==0)then
-      call get_environment_variable('SALMON_HSE_EIGEN_DIAGNOSTIC',setting,status=status)
+      if(present(variable))then
+        call get_environment_variable(variable,setting,status=status)
+      else
+        call get_environment_variable('SALMON_HSE_EIGEN_DIAGNOSTIC',setting,status=status)
+      endif
       if(status==0.and.trim(setting)=='1')flag=1
     endif
     call comm_bcast(flag,info%icomm_rko,0)
     enabled=flag==1
   end function
 
-  subroutine hse_export_eigen_pair(system,mg,info,psi,hpsi)
+  subroutine hse_export_eigen_pair(system,mg,info,psi,hpsi,tag)
     use iso_fortran_env, only: int32
     use salmon_global, only: base_directory
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(in) :: psi,hpsi
+    character(*),optional,intent(in) :: tag
+    character(:),allocatable :: filename
     complex(8),allocatable :: p(:,:,:),hp(:,:,:)
     integer :: iu,status,closed,total,ng,no
     ! Diagnostic format deliberately supports only a full Gamma fragment.
@@ -67,7 +74,9 @@ contains
     ng=product(mg%num);no=system%no
     allocate(p(ng,no,1),hp(ng,no,1))
     call hse_pack(psi,mg,info,p);call hse_pack(hpsi,mg,info,hp)
-    open(newunit=iu,file=trim(base_directory)//'hse_eigen_pair.bin', &
+    filename=trim(base_directory)//'hse_eigen_pair.bin'
+    if(present(tag))filename=trim(base_directory)//'hse_eigen_'//tag//'.bin'
+    open(newunit=iu,file=filename, &
       status='replace',access='stream',form='unformatted',iostat=status)
     if(status==0)then
       write(iu,iostat=status)int([16909060,1,ng,no,1],int32)
