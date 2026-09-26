@@ -44,3 +44,18 @@ controlled locality approximations, not a demonstrated linear-scaling HSE
 implementation. Some coarse-mesh/extra-state fixtures do not converge the MLWF
 gradient within 200 iterations; exact full-support exchange remains valid and
 this is printed explicitly.
+
+## Si64 locality diagnostic
+
+`si64/` contains the historical DG Si64 geometry/grid/buffer adapted to HSE06,
+with file hashes and its 400-state cost implications documented. The full HSE
+baseline must be converged before comparing physical SCF results.
+
+`pair_screening.py` analyzes frozen **Gamma** density factors exported as NPZ.
+It screens symmetric pairs by an L2 overlap bound using max(V_G)=pi/omega^2,
+keeps all self pairs, and compares exact and screened column actions. Reported
+energy is spin-summed fragment-periodic short-range HSE exchange; it is not the
+DC core-weighted total energy. The script calculates full pair potentials for
+verification, so its runtime is not a production screening speedup benchmark.
+Its metric gate is only necessary for ACE, not an SCF correctness certificate.
+No screening switch has been enabled in the Fortran SCF/LCFO path by this script.

@@ -1,0 +1,43 @@
+{
+  "source_thread": "01a05225-e1ab-7af1-a50c-06e6a0944892",
+  "sources": [
+    {
+      "path": "/Users/otobetoshihito/SALMON-dev/SALMON2_RTDG/.worktrees/wpw-s-orthogonal-complement/tests/dg/data/si64_overlapping_wannier_rt/input_hybrid_divided_lcfo.in",
+      "sha256": "fa860e11da0e17d948e0a67d224850386d18fdbfddd901977c9d46bb00c7c2b8"
+    },
+    {
+      "path": "/Users/otobetoshihito/SALMON-dev/SALMON2_RTDG/.worktrees/wpw-s-orthogonal-complement/tests/dg/data/si64_overlapping_wannier_rt/atom.dat",
+      "sha256": "dedaaef586743274882eee53db3d2504fef3bfe15dd7bb90981d2f8f7404618e"
+    },
+    {
+      "path": "/Users/otobetoshihito/SALMON-dev/SALMON2_RTDG/.worktrees/wpw-s-orthogonal-complement/samples/exercise_04_bulkSi_gs/Si_rps.dat",
+      "sha256": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c"
+    }
+  ],
+  "changes": [
+    "PZ -> HSE06",
+    "removed unsupported DG controls",
+    "disabled ScaLAPACK (fragment k-only baseline)",
+    "LCFO kept disabled for exchange-focused baseline"
+  ],
+  "parameters": {
+    "total_grid": [
+      32,
+      32,
+      32
+    ],
+    "fragment_grid": [
+      28,
+      28,
+      28
+    ],
+    "buffer": [
+      6,
+      6,
+      6
+    ],
+    "nstate_frag": 400,
+    "atoms": 64,
+    "mpi_ranks": 8
+  }
+}
