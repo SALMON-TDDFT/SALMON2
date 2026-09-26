@@ -3,7 +3,7 @@ module lcfo_ace_local
  use communication,only:comm_summation
  implicit none
  private
- public :: lcfo_ace_local_action,lcfo_ace_half_trace
+ public :: lcfo_ace_local_action,lcfo_ace_half_trace,lcfo_ace_coefficient_action
 contains
  subroutine lcfo_ace_half_trace(coeff,factors,occupation,ace_dv,comm,energy)
   complex(8),intent(in),contiguous :: coeff(:,:),factors(:,:)
@@ -24,6 +24,23 @@ contains
   do j=1,no
     energy=energy-.5d0*ace_dv*occupation(j)*sum(abs(total(:,j))**2)
   enddo
+ end subroutine
+ subroutine lcfo_ace_coefficient_action(coeff,action,factors,ace_dv,comm)
+  implicit none
+  complex(8),intent(in),contiguous :: coeff(:,:),factors(:,:)
+  complex(8),intent(inout),contiguous :: action(:,:)
+  real(8),intent(in) :: ace_dv
+  integer,intent(in) :: comm
+  complex(8),allocatable :: overlap(:,:),total(:,:)
+  integer :: n,no,nf
+  external :: zgemm
+  n=size(coeff,1);no=size(coeff,2);nf=size(factors,2)
+  if(any(shape(action)/=shape(coeff)).or.size(factors,1)/=n.or.min(n,no,nf)<1.or.ace_dv<=0d0) &
+    error stop 'LCFO coefficient ACE: incompatible dimensions/weight'
+  allocate(overlap(nf,no),total(nf,no))
+  call zgemm('C','N',nf,no,n,cmplx(ace_dv,0d0,8),factors,n,coeff,n,(0d0,0d0),overlap,nf)
+  call comm_summation(overlap,total,size(total),comm)
+  call zgemm('N','N',n,no,nf,(-1d0,0d0),factors,n,total,nf,(1d0,0d0),action,n)
  end subroutine
  subroutine lcfo_ace_local_action(basis,psi,hpsi,factors,grid_dv,ace_dv,comm)
   complex(8),intent(in),contiguous :: basis(:,:),psi(:,:)

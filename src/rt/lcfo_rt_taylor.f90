@@ -19,7 +19,7 @@ contains
     type(s_pp_grid),intent(in) :: ppg
     type(s_scalar),intent(in) :: vlocal(system%nspin)
     type(s_rt),intent(in) :: rt
-    complex(8),allocatable :: power(:,:),result(:,:),grid(:,:)
+    complex(8),allocatable :: power(:,:),result(:,:),grid(:,:),next_power(:,:)
     integer :: n,j,io,ng,is(3),ie(3)
     if(n_hamil/=4)error stop 'LCFO direct WF requires Taylor4'
     ng=product(mg%num);is=mg%is;ie=mg%ie
@@ -30,6 +30,7 @@ contains
     enddo
     power=matmul(conjg(transpose(lcfo_basis)),grid)*lcfo_dv
     result=power
+    allocate(next_power(size(power,1),size(power,2)))
     do n=1,4
       grid=matmul(lcfo_basis,power)
       do j=1,info%numo
@@ -37,12 +38,8 @@ contains
         input%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)=reshape(grid(:,j),mg%num)
       enddo
       input%update_zwf_overlap=.false.
-      call hpsi(input,work,info,mg,vlocal,system,stencil,srg,ppg)
-      do j=1,info%numo
-        io=info%io_s+j-1
-        grid(:,j)=reshape(work%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
-      enddo
-      power=matmul(conjg(transpose(lcfo_basis)),grid)*lcfo_dv
+      call hpsi(input,work,info,mg,vlocal,system,stencil,srg,ppg,lcfo_coeff=power,lcfo_action=next_power)
+      power=next_power
       result=result+rt%zc(n)*power
     enddo
     grid=matmul(lcfo_basis,result)

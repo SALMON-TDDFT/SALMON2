@@ -375,17 +375,19 @@ contains
     end subroutine
   end subroutine
 
-  subroutine hse_add_action(psi,hpsi,system,mg,info)
+  subroutine hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
     type(s_orbital),intent(in) :: psi
     type(s_orbital),intent(inout) :: hpsi
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
+    complex(8),intent(in),optional :: lcfo_coeff(:,:)
+    complex(8),intent(out),optional :: lcfo_action(:,:)
     integer :: ierr,ng,total_error
     real(8) :: tick,communication_before
     if(.not.hse_enabled())return
     if(lcfo_rt_active)then
-      call lcfo_hse_add_action(psi,hpsi,system,mg,info)
+      call lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
       return
     endif
     if(.not.allocated(ace%factors))error stop 'HSE06: occupied exchange source is not initialized'

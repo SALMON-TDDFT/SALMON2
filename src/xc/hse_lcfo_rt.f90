@@ -9,7 +9,7 @@ module hse_lcfo_rt
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track,lcfo_mlwf_rebase
   use hse_wannier, only: s_hse_wannier,wannier_init,wannier_apply,wannier_forward
-  use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace
+  use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace,lcfo_ace_coefficient_action
   use hse_ace, only: hse_ace_state,hse_ace_average
   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_halo_init,lcfo_halo_get,lcfo_halo_sum
   use lcfo_projection, only: s_lcfo_projection,lcfo_projection_init,lcfo_projection_apply
@@ -433,7 +433,10 @@ contains
     end select
   end subroutine
 
-  subroutine lcfo_hse_add_action(psi,hpsi,system,mg,info)
+  subroutine lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+    implicit none
+    complex(8),intent(in),optional :: lcfo_coeff(:,:)
+    complex(8),intent(out),optional :: lcfo_action(:,:)
     type(s_orbital),intent(in) :: psi
     type(s_orbital),intent(inout) :: hpsi
     type(s_dft_system),intent(in) :: system
@@ -443,6 +446,32 @@ contains
     integer :: ng,no,io,j,is(3),ie(3)
     if(.not.allocated(hx))error stop 'LCFO HSE: refresh required before action'
     no=info%numo;ng=product(mg%num);is=mg%is;ie=mg%ie
+    if(present(lcfo_coeff).neqv.present(lcfo_action))error stop 'LCFO action: paired coefficients required'
+    if(present(lcfo_coeff))then
+      if(any(shape(lcfo_coeff)/=[size(lcfo_basis,2),no]).or. &
+         any(shape(lcfo_action)/=shape(lcfo_coeff)))error stop 'LCFO action: incompatible coefficient dimensions'
+      allocate(hgrid(ng,no))
+      do j=1,no
+        io=info%io_s+j-1
+        hgrid(:,j)=reshape(hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
+      enddo
+      lcfo_action=matmul(conjg(transpose(lcfo_basis)),hgrid)*lcfo_dv
+      if(use_midpoint.and.midpoint_ace_valid)then
+        call lcfo_ace_coefficient_action(lcfo_coeff,lcfo_action,midpoint_ace%factors(:,:,1),midpoint_ace%dv,lcfo_comm)
+      else if(.not.use_midpoint.and.ace_valid)then
+        call lcfo_ace_coefficient_action(lcfo_coeff,lcfo_action,ace%factors(:,:,1),ace%dv,lcfo_comm)
+      else
+        call lcfo_halo_get(exchange_plan,lcfo_coeff,near_coeff)
+        if(use_midpoint)then
+          contribution=matmul(midpoint_hx,near_coeff)
+        else
+          contribution=matmul(hx,near_coeff)
+        endif
+        call lcfo_halo_sum(exchange_plan,contribution,local_action)
+        lcfo_action=lcfo_action+local_action
+      endif
+      return
+    endif
     allocate(grid(ng,no),hgrid(ng,no))
     do j=1,no
       io=info%io_s+j-1

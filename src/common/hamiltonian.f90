@@ -29,7 +29,7 @@ contains
 
 !===================================================================================================================================
 
-SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
+SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,lcfo_coeff,lcfo_action)
   use structures
   use stencil_sub
   use nonlocal_potential
@@ -56,6 +56,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   type(s_sendrecv_grid),intent(inout) :: srg
   type(s_pp_grid),intent(in) :: ppg
   type(s_orbital)            :: tpsi,htpsi
+  ! Paired coefficient handoff: htpsi remains the unprojected non-exchange grid;
+  ! the complete projected Hamiltonian action is returned only in lcfo_action.
+  complex(8),intent(in),optional :: lcfo_coeff(:,:)
+  complex(8),intent(out),optional :: lcfo_action(:,:)
   type(s_orbital),optional   :: ttpsi
   !
   integer :: nspin,ispin,io,ik,im,im_s,im_e,ik_s,ik_e,io_s,io_e,norb,ix,iy,iz
@@ -65,6 +69,15 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   !real(8) :: tmp,tmp1
   real(8) :: kAc0(3)
 
+  if(present(lcfo_coeff).neqv.present(lcfo_action))error stop 'hpsi: paired LCFO coefficients required'
+  if(present(lcfo_coeff))then
+#ifdef USE_HSE
+    if(.not.lcfo_rt_active.or..not.hse_enabled())error stop 'hpsi: coefficient action requires LCFO HSE'
+    if(present(ttpsi))error stop 'hpsi: coefficient action with ttpsi is unsupported'
+#else
+    error stop 'hpsi: coefficient action requires USE_HSE'
+#endif
+  endif
   call nvtxStartRange('hpsi', __LINE__)
   call timer_begin(LOG_UHPSI_ALL)
 
@@ -471,7 +484,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   end if
 
 #ifdef USE_HSE
-  call hse_add_action(tpsi,htpsi,system,mg,info)
+  call hse_add_action(tpsi,htpsi,system,mg,info,lcfo_coeff,lcfo_action)
   if(.not.(lcfo_rt_active.and.hse_enabled()))call lcfo_project_orbital(htpsi,mg,info)
 #else
   call lcfo_project_orbital(htpsi,mg,info)

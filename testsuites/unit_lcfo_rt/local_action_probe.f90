@@ -1,11 +1,12 @@
 program local_action_probe
  use mpi
- use lcfo_ace_local,only:lcfo_ace_local_action,lcfo_ace_half_trace
+ use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+ use lcfo_ace_local,only:lcfo_ace_local_action,lcfo_ace_half_trace,lcfo_ace_coefficient_action
  use hse_ace,only:hse_ace_state,hse_ace_apply
  implicit none
  type(hse_ace_state) :: ace
  integer :: rank,nproc,ierr,n,lo,hi,i,j,k,nf
- complex(8),allocatable :: b(:,:),psi(:,:),h(:,:),old(:,:),expected(:,:),c(:,:),global(:,:),w(:,:,:)
+ complex(8),allocatable :: b(:,:),psi(:,:),h(:,:),old(:,:),expected(:,:),c(:,:),global(:,:),w(:,:,:),coefficient_action(:,:)
  real(8) :: dv,pi,error,allerror,trace,reference_trace,occupation(2)
  call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,nproc,ierr)
  if(nproc/=2)error stop 'run with 2 ranks'
@@ -37,6 +38,13 @@ program local_action_probe
  if(rank==0)write(*,*)'half trace error:',abs(trace-reference_trace)
  expected=old+matmul(b,w(lo:hi,:,1))
  expected=matmul(b,matmul(conjg(transpose(b)),expected))*dv
+ coefficient_action=matmul(conjg(transpose(b)),old)*dv
+ call lcfo_ace_coefficient_action(global(lo:hi,:),coefficient_action,ace%factors(lo:hi,:,1),ace%dv,MPI_COMM_WORLD)
+ error=maxval(abs(coefficient_action-(matmul(conjg(transpose(b)),old)*dv+w(lo:hi,:,1))))
+ if(.not.all(ieee_is_finite(real(coefficient_action))).or. &
+    .not.all(ieee_is_finite(aimag(coefficient_action))))error stop 'nonfinite coefficient ACE'
+ if(error>2d-12)error stop 'coefficient ACE differs from dense action'
+ if(rank==0)write(*,*)'coefficient ACE error:',error
  h=old
  call lcfo_ace_local_action(b,psi,h,ace%factors(lo:hi,:,1),dv,ace%dv,MPI_COMM_WORLD)
  error=maxval(abs(h-expected))
