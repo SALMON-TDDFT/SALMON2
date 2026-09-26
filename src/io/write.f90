@@ -111,7 +111,7 @@ contains
                        base_directory,sysname, de,nenergy,nelec,xc
     use parallelization, only: nproc_id_global, end_parallel
     use communication, only: comm_is_root,comm_summation,comm_sync_all
-    use filesystem, only: open_filehandle
+    use filesystem, only: open_filehandle, get_filehandle
     use inputoutput, only: t_unit_energy
 #ifdef USE_MPI
     use mpi
@@ -447,6 +447,26 @@ contains
 
     end if  !flag_print_tm_bin
 #endif
+
+    ! Reference-cell eigenvalues, needed by dm_unfold.f90's Phase B (energy-
+    ! eigenbasis recovery within a shared-hat_k block; unfolding.tex sec.9.5).
+    ! Written as a small, separate binary file alongside tm.bin (same
+    ! yn_out_tm_bin flag, same data_for_restart/ directory) rather than as a
+    ! new block inside tm.bin itself: energy%esp is already fully available
+    ! on every process at this point (no MPI gather needed, unlike upu/
+    ! u_rVnl_Vnlr_u above), so a plain rank-0 sequential write suffices, and
+    ! there is no old-format file whose layout this could disturb.
+    if(flag_print_tm_bin) then
+       if (comm_is_root(nproc_id_global)) then
+          write(*,*) "  printing eigenvalues (binary) ....."
+          file_tm_data = trim(base_directory)//'data_for_restart/eigen.bin'
+          fh_tm = get_filehandle()
+          open(fh_tm, file=file_tm_data, form='unformatted', status='replace')
+          write(fh_tm) energy%esp(1:NB,1:NK,1:system%nspin)
+          close(fh_tm)
+       end if
+       call comm_sync_all
+    end if
 
     if (flag_print_eps) then
        ! taken from tm2sigma.f90 in utility directory

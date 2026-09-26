@@ -441,6 +441,12 @@ module structures
     real(8),allocatable :: vec_hrsk(:,:), wtk_ref(:)
     complex(8),allocatable :: eihkr_tbl(:,:,:,:)
     real(8),allocatable :: rocc_ref(:,:,:), nq_gs(:,:,:)
+    ! esp_ref(io_ref,isk,ispin): reference-cell single-particle energies
+    ! (eigenvalues), in a.u., read from reference/eigen.bin. Needed for the
+    ! energy-eigenbasis recovery within a shared-hat-k block (unfolding.tex
+    ! sec.9.5, "Recovering the energy eigenbasis within a shared-hat_k
+    ! block"); not used by the translation-phase labeling itself.
+    real(8),allocatable :: esp_ref(:,:,:)
     complex(8),allocatable :: upu_ref(:,:,:,:), u_rVnl_Vnlr_u_ref(:,:,:,:)
     ! primitive-to-reference correspondence (dm_unfold_option='super' only):
     ! a_pr(3,3) = [a^P_1,a^P_2,a^P_3], the true primitive-cell lattice vectors;

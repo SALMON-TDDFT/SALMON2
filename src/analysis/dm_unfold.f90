@@ -59,7 +59,7 @@ contains
   real(8) :: qx,qy,qz,dqx,dqy,dqz,value,nq_sum
   complex(8) :: zsum
   real(8),allocatable :: reta_uu(:,:,:,:),nq_l(:,:,:),nq_l_private(:,:,:)
-  logical :: exists, e_occupation, e_wfn, e_tm
+  logical :: exists, e_occupation, e_wfn, e_tm, e_eigen
   integer :: i
   real(8) :: a_pr(3,3), ainv_pr(3,3), detA_pr, pmat_r(3,3), pmat_resid
   real(8) :: norm_pr(3), A_ref(3,3)
@@ -200,12 +200,13 @@ contains
     inquire(file='reference/wfn.bin', exist = e_wfn)
     inquire(file='reference/occupation.bin', exist = e_occupation)
     inquire(file='reference/tm.bin', exist = e_tm)
+    inquire(file='reference/eigen.bin', exist = e_eigen)
   end if
-  exists = e_wfn .and. e_occupation .and. e_tm
+  exists = e_wfn .and. e_occupation .and. e_tm .and. e_eigen
   call comm_bcast(exists, nproc_group_global)
   if( .not. exists ) then
     if (comm_is_root(nproc_id_global)) then
-      write(*,"(A)") 'Error: file not found, reference/wfn.bin, occupation.bin, tm.bin'
+      write(*,"(A)") 'Error: file not found, reference/wfn.bin, occupation.bin, tm.bin, eigen.bin'
     end if
     call end_parallel
     stop
@@ -276,6 +277,28 @@ contains
 
   if(comm_is_root(nproc_id_global))then
     write(*,*) 'End reading reference/occupation.bin'
+  end if
+
+! read reference-cell eigenvalues (single-particle energies), a.u.
+! Needed by Phase B (energy-eigenbasis recovery within a shared-hat_k
+! block, unfolding.tex sec.9.5); not used by Phase A's translation-phase
+! labeling itself. Written by write_tm_data (src/io/write.f90) as a plain
+! rank-0 sequential binary file, so it is read the same simple way here
+! (unlike tm.bin/wfn.bin, which are genuinely MPI-distributed and need the
+! MPI_File_set_view machinery below).
+
+  allocate( unfold%esp_ref(no_ref, unfold%nsk, nspin) )
+
+  if(comm_is_root(nproc_id_global)) then
+     iofile = "reference/eigen.bin"
+     open(889,file=iofile,form='unformatted')
+     read(889) unfold%esp_ref(1:no_ref,1:unfold%nsk,1:nspin)
+     close(889)
+  end if
+  call comm_bcast(unfold%esp_ref,nproc_group_global)
+
+  if(comm_is_root(nproc_id_global))then
+    write(*,*) 'End reading reference/eigen.bin'
   end if
 
 ! read transition dipole matrix elements
