@@ -12,6 +12,7 @@ module hse_lcfo_rt
   use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace
   use hse_ace, only: hse_ace_state,hse_ace_average
   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_halo_init,lcfo_halo_get,lcfo_halo_sum
+  use lcfo_projection, only: s_lcfo_projection,lcfo_projection_init,lcfo_projection_apply
   use lcfo_dist_dense, only: lcfo_distributed_ace_build
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -23,6 +24,7 @@ module hse_lcfo_rt
   logical,save :: measure_continuity=.false.
   type(s_hse_wannier),save :: fragment_operator
   type(s_lcfo_halo),save :: exchange_plan
+  type(s_lcfo_projection),save :: projection_plan
   type(hse_ace_state),save :: ace,initial_ace,midpoint_ace
   logical,save :: ace_valid=.false.,initial_ace_valid=.false.,midpoint_ace_valid=.false.,use_midpoint=.false.
   integer,save :: refresh_count=0,ace_interval=1,rt_step=0,step_start_builds=0,refresh_origin=0
@@ -33,7 +35,7 @@ contains
   subroutine initialize_fragment()
     complex(8),allocatable :: block(:,:)
     integer,allocatable :: mapping(:,:),first(:)
-    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status,ios,bad
+    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status,ios,bad,fft_batch
     character(16) :: value
     nf=size(lcfo_counts);ns=lcfo_core+2*lcfo_buffer;ng=product(ns)
     if(any(ns>lcfo_grid))error stop 'LCFO HSE: fragment exceeds global periodic grid'
@@ -59,6 +61,20 @@ contains
     call comm_bcast(refresh_origin,lcfo_comm,0)
     if(lcfo_rank==0)write(*,'(a,2i8)')'LCFO HSE ACE interval/refresh origin: ',ace_interval,refresh_origin
     call comm_bcast(measure_continuity,lcfo_comm,0)
+    fft_batch=1;bad=0
+    if(lcfo_rank==0)then
+      call get_environment_variable('SALMON_LCFO_RT_FFT_BATCH',value,status=env_status)
+      if(env_status==0.and.len_trim(value)>0)then
+        read(value,*,iostat=ios)fft_batch
+        if(ios/=0)bad=1
+      else if(env_status/=1.and.env_status/=0)then
+        bad=1
+      endif
+      if(fft_batch<1.or.fft_batch>32)bad=1
+    endif
+    call comm_bcast(bad,lcfo_comm,0)
+    if(bad/=0)error stop 'LCFO HSE: FFT batch must be an integer from 1 to 32'
+    call comm_bcast(fft_batch,lcfo_comm,0)
     ! FFT order is core/right-buffer then the periodic left buffer.
     g=0
     do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
@@ -99,8 +115,12 @@ contains
       g=g+1
       if(any([x,y,z]>=lcfo_core))core_basis(g,:)=0d0
     enddo;enddo;enddo
+    call lcfo_projection_init(projection_plan,core_basis,.25d0*lcfo_dv)
     call wannier_init(fragment_operator,ns,[1,1,1],lcfo_h,reshape([0d0,0d0,0d0],[3,1]),hse_omega,ierr)
     if(ierr/=0)error stop 'LCFO HSE: fragment periodic exchange initialization failed'
+    fragment_operator%fft_batch_size=fft_batch
+    write(*,'(a,5i10)')'LCFO compact projection rank/rows/columns/fullrows/fullcolumns:', &
+      lcfo_rank,size(projection_plan%rows),size(projection_plan%columns),ng,nsel
     call lcfo_mlwf_configure()
     if(lcfo_rank==0)write(*,'(a,3i6)')'LCFO HSE fragment grid:',ns
   end subroutine
@@ -192,6 +212,7 @@ contains
     real(8),allocatable :: eigenvalues(:),rwork(:)
     real(8),intent(in) :: pack_seconds
     real(8) :: threshold,discarded,local_energy,started,source_seconds,exchange_seconds
+    real(8) :: action_seconds,projection_seconds,projection_started
     integer :: nsel,ng,no,j,ierr,nrank,first,changed,total_changed
     external :: zheev
     started=wall_seconds()
@@ -255,11 +276,15 @@ contains
     allocate(action(ng,nsel,1))
     call wannier_apply(fragment_operator,reshape(fragment_basis,[ng,nsel,1]),action,ierr)
     if(ierr/=0)error stop 'LCFO HSE: fragment exchange action failed'
+    action_seconds=wall_seconds()-started
     write(*,'(a,i6,2i14)')'LCFO exchange FFT pairs rank/executed/possible:', &
       lcfo_rank,fragment_operator%fft_pairs_executed,fragment_operator%fft_pairs_total
+    write(*,'(a,i6,i6,i14)')'LCFO exchange FFT batches rank/width/calls:', &
+      lcfo_rank,fragment_operator%worker_batch,fragment_operator%fft_batches_executed
     if(measure_continuity)call exchange_continuity(near_coeff,system%rocc(:,1,1),action)
-    projected=.25d0*lcfo_dv*matmul(transpose(conjg(core_basis)),action(:,:,1))
-    projected=.5d0*(projected+transpose(conjg(projected)))
+    projection_started=wall_seconds()
+    call lcfo_projection_apply(projection_plan,action(:,:,1),projected)
+    projection_seconds=wall_seconds()-projection_started
     ! Retain this fragment's Hermitian contribution, not a replicated global Hx.
     hx=projected
     if(.not.all(ieee_is_finite(real(hx))).or..not.all(ieee_is_finite(aimag(hx)))) &
@@ -273,7 +298,8 @@ contains
     call comm_summation(local_energy,exchange_energy,lcfo_comm)
     exchange_seconds=wall_seconds()-started;started=wall_seconds()
     call lcfo_distributed_ace_build(ace,coeff,w,1d0,lcfo_comm,ierr);ace_valid=ierr==0
-    call report_timings('build',pack_seconds,source_seconds,exchange_seconds,wall_seconds()-started)
+    call report_timings('build',pack_seconds,source_seconds,exchange_seconds,wall_seconds()-started, &
+      action_seconds,projection_seconds)
     cached_coeff=coeff;cached_occupation=system%rocc(:,1,1);cached_energy=exchange_energy
     refresh_count=refresh_count+1
     if(lcfo_rank==0)write(*,'(a,i8)')'LCFO HSE exchange rebuilt at step ',rt_step
@@ -408,12 +434,18 @@ contains
     seconds=dble(tick)/dble(rate)
   end function
 
-  subroutine report_timings(label,pack,source,exchange,build)
+  subroutine report_timings(label,pack,source,exchange,build,action,projection)
     character(*),intent(in) :: label
     real(8),intent(in) :: pack,source,exchange,build
-    real(8) :: local(4),maximum(4)
-    local=[pack,source,exchange,build]
-    call comm_get_max(local,maximum,4,lcfo_comm)
-    if(lcfo_rank==0)write(*,'(a,a,4es16.7)')'LCFO timing pack/source/exchange/ACE ',trim(label),maximum
+    real(8),intent(in),optional :: action,projection
+    real(8) :: local(6),maximum(6)
+    local=0d0;local(1:4)=[pack,source,exchange,build]
+    if(present(action))local(5)=action
+    if(present(projection))local(6)=projection
+    call comm_get_max(local,maximum,6,lcfo_comm)
+    if(lcfo_rank==0)then
+      write(*,'(a,a,4es16.7)')'LCFO timing pack/source/exchange/ACE ',trim(label),maximum(1:4)
+      if(present(action))write(*,'(a,2es16.7)')'LCFO exchange detail action/projection ',maximum(5:6)
+    endif
   end subroutine
 end module

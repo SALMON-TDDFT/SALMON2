@@ -80,7 +80,7 @@ class WannierTest(unittest.TestCase):
             f.write(k.T.tobytes(order='F'));f.write(occ.T.tobytes(order='F'))
             f.write(wire(source));f.write(wire(target))
         p=subprocess.run([str(self.exe),str(inp),str(out)],capture_output=True,text=True,
-                         env=dict(os.environ,OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS=str(getattr(self,'threads',1)),WANNIER_EXPECT_WORKERS=str(getattr(self,'threads',1))))
+                         env=dict(os.environ,OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS=str(getattr(self,'threads',1)),WANNIER_EXPECT_WORKERS=str(getattr(self,'threads',1)),WANNIER_TEST_BATCH=str(getattr(self,'batch',1))))
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         a=np.fromfile(out,np.complex128).reshape(shape+(nt,len(k)),order='F').transpose(4,3,0,1,2)
         np.testing.assert_allclose(a,reference(source,target,k,h,occ,omega),rtol=2e-11,atol=2e-11)
@@ -138,6 +138,13 @@ class WannierTest(unittest.TestCase):
         self.threads=2;self.run_case((1,2,2))
         parallel=np.fromfile(self.path/'out.bin',np.complex128)
         np.testing.assert_allclose(parallel,serial,atol=1e-13,rtol=1e-13)
+
+    def test_batched_shifted_mesh(self):
+        self.batch=1;self.run_case((1,2,2))
+        serial=np.fromfile(self.path/'out.bin',np.complex128)
+        self.batch=4;self.run_case((1,2,2))
+        batched=np.fromfile(self.path/'out.bin',np.complex128)
+        np.testing.assert_allclose(batched,serial,atol=1e-13,rtol=1e-13)
 
     def test_equal_occupations(self):
         self.run_case((2,1,1),False)

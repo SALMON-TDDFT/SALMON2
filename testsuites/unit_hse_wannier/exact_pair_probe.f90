@@ -3,9 +3,10 @@ program exact_pair_probe
  use hse_wannier
  implicit none
  type(s_hse_wannier) :: op
- complex(8) :: target(24,4,1),action(24,4,1),ref(24,4),kernel(24),metric(4,4)
+ complex(8) :: target(24,12,1),action(24,12,1),ref(24,12),kernel(24),metric(12,12)
  complex(8) :: density(24),potential(24),v
  real(8) :: h(3),k(3,1),angle,pi
+ integer :: batch
  integer :: n(3),p(3),q(3),d(3),g,a,b,c,j,i,idx,status,trial
  integer(int64) :: expected
  n=[4,3,2];h=[.6d0,.8d0,.9d0];k=0d0;pi=acos(-1d0)
@@ -24,15 +25,23 @@ program exact_pair_probe
   enddo;enddo;enddo
   kernel(g)=v
  enddo
- do trial=1,3
-  target(:,:,1)=op%source
+ do batch=1,8
+ op%fft_batch_size=batch
+ do trial=1,5
+  target=0d0;target(:,1:4,1)=op%source
   if(trial==2)then
    target=0d0;target(1,1,1)=(.3d0,.2d0);target(15,2,1)=(.5d0,.6d0)
    target(20,3,1)=(.7d0,-.1d0);target(2,4,1)=(1d-100,-1d-100)
   endif
   if(trial==3)target=0d0
+  if(trial>=4)then
+   do j=1,12;do g=1,24
+    target(g,j,1)=cmplx(sin(.2d0*g*j),cos(.3d0*(g+j)),8)
+   enddo;enddo
+   if(trial==5)target(:,6:,1)=0d0
+  endif
   ref=0d0;expected=0
-  do i=1,4;do j=1,4
+  do i=1,4;do j=1,12
    density=conjg(op%source(:,i))*target(:,j,1)
    if(any(density/=(0d0,0d0)))expected=expected+1
    potential=0d0
@@ -45,10 +54,13 @@ program exact_pair_probe
   enddo;enddo
   call wannier_apply(op,target,action,status)
   if(status/=0)error stop 'apply'
-  if(op%fft_pairs_total/=16_int64.or.op%fft_pairs_executed/=expected)error stop 'pair count'
+  if(op%fft_pairs_total/=48_int64.or.op%fft_pairs_executed/=expected)error stop 'pair count'
+  if(trial==4.and.op%worker_batch==8.and.op%fft_batches_executed/=6)error stop 'full and tail batches'
+  if(op%fft_batches_executed>expected)error stop 'padded empty FFTs'
+  if(expected==0.and.op%fft_batches_executed/=0)error stop 'empty tile executed'
   if(trial==1.and.expected/=5_int64)error stop 'tiny nonzero pair discarded'
   if(maxval(abs(action(:,:,1)-ref))>1d-11*max(1d0,maxval(abs(ref))))error stop 'direct action'
-  do j=1,4
+  do j=1,12
    if(maxval(abs(ref(:,j)))>0d0)then
     if(maxval(abs(action(:,j,1)-ref(:,j)))/maxval(abs(ref(:,j)))>1d-11)error stop 'relative tiny action'
    endif
@@ -57,6 +69,7 @@ program exact_pair_probe
    metric=matmul(conjg(transpose(target(:,:,1))),action(:,:,1))
    if(maxval(abs(metric-conjg(transpose(metric))))>1d-11)error stop 'Hermiticity'
   endif
+ enddo
  enddo
  call wannier_destroy(op)
  print *, 'Exact pair FFT screening and direct convolution passed'

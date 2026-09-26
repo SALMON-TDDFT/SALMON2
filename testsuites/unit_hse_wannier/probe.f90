@@ -23,6 +23,8 @@ program probe
   close(iu)
   call wannier_init(op,n,mesh,h,k,omega,ierr)
   if(ierr/=0)error stop 'init'
+  call get_environment_variable('WANNIER_TEST_BATCH',worker_setting,status=ierr)
+  if(ierr==0)read(worker_setting,*)op%fft_batch_size
   allocate(gauge(no,no,nk),rot(no,no,nk),previous(ng,no,nk),transported(no,no,nk))
   gauge=0d0
   do ik=1,nk

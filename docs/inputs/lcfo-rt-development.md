@@ -489,3 +489,24 @@ Fresh sequential pairs against35d1d38e: same diamond GS, R6, core16^3, dt=.02, n
 | C128 / MPI16 | 72.939666→46.705659 | 96.865→71.234 | 1.360 |
 
 Both sizes execute7424 of11520 candidate pairs per fragment per build (35.56% omitted), over35 builds. Initial MLWF dumps byte-identical; current max difference4.20e-18, density2.00e-15, printed energy and discarded norm identical. Weak efficiency is 57.65%→60.26%; this single-pair measurement does not establish variability. Multi-node work is deferred by user request. Full results and definitions are in the diamond notebook exchange-exact-pair-summary.json.
+
+## Batched FFT and compact core projection (2026-09-26)
+
+Wannier exchange now supports a bounded per-worker target tile. Nonzero pair densities are compacted; FFTW plan_many plans for every actual count (including tails) are cached. No padded FFTs, magnitude threshold, normalization change or source accumulation reordering is introduced. The general default remains1. LCFO exposes SALMON_LCFO_RT_FFT_BATCH=1..32 with collective validation; effective width may shrink for a small target/thread ratio. A batches count represents a forward/backward pair of calls.
+
+The fixed core projection caches exact nonzero rows/columns and the scaled conjugate basis. Diamond's left basis shrinks from8192x192 to4096x64, reducing the main multiply to1/6 of its old work while retaining all192 target columns and the192x192 Hermitian result. A contiguous temporary product is scattered before the original Hermitian average. GNU15/AArch64 O2+external BLAS crashed with an indexed-LHS MATMUL in the reduced-column test; O0/no-external-BLAS passed. Contiguous operands and result followed by explicit scatter passes at O2/O3 with BLAS and -fno-tree-loop-vectorize retained.
+
+Validation: direct-DFT convolution with12 overlapping target columns, actual8-column execution and4-column tail, empty/tiny complex pairs, requested widths1..8 and OMP1/2/4; six existing/extended Wannier tests including fractional shifted multi-k; complex nonorthogonal projection with irregular zero support and all-zero support; native MPI2/4, ACE1/2/4, impulse/laser, unequal orbital split, batch4 trajectory parity and invalid width rejection. Static review checked FFT layout/cache teardown, thread separation and Hermitian projection. All passed.
+
+Synthetic32x16x16/60source/192target FFT action: width1 median0.437293s, width4 median0.445675s, width8 median0.444030s. Action difference0 in this fixture;7424 executed pairs and calls7424/1856/928. Batching did not improve time here, so width1 remains default. Projection-only8192x192 fixture: dense0.050966s versus compact0.008296s (medians; three trials each averaging10 calls), individual speedups6.11–6.27; max element difference7.11e-14. These are synthetic microbenchmarks, not full-RT speedups.
+
+Paired R6/ACE1/core16^3/dt=.02/nt16/OMP1/BLAS1 diamond runs against beccb272 completed sequentially:
+
+| Case | RT before→after seconds | Performance interpretation |
+|---|---:|---|
+| C64/MPI8 |113.040→110.360| Not accepted as a speedup measurement: background activity observed |
+| C128/MPI16 |285.550→57.364| Not comparable: unchanged U/ACE phases changed dramatically |
+
+C128 baseline initially showed U transport ~12–14s/build and ACE ~8s/build, while subsequent after-run showed subsecond times in these unchanged phases. Baseline binary SHA256 matches the previous verified beccb272 binary. No other SALMON job or memory shortage was observed; background OneDrive/FileProvider activity was seen, but the detailed cause is unresolved. Do not use the apparent4.98x ratio or the cross-size times as code speedup/weak scaling. No repeated production measurements were added under changing load.
+
+Numerical comparison is valid: C64/C128 initial MLWF dumps byte-identical, max current difference5.77e-18, density2.00e-15, printed energy and discarded norm unchanged. Each fragment retained7424/11520 pairs and the compact projection shapes above. The diamond notebook contains batch-projection-summary.json with performance-comparison-invalid flags, separate action/projection timers and the raw microbenchmark logs. Multi-node work remains deferred.

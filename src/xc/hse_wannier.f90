@@ -16,15 +16,16 @@ module hse_wannier
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
   type s_hse_wannier
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
-    integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64
+    integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64,fft_batches_executed=0_int64
+    integer :: fft_batch_size=1,worker_batch=0
     integer :: localization_iterations=0,localization_status=1,workers=0
     real(8) :: h(3)=0d0,dv=0d0,spread=0d0,gradient=huge(1d0),min_singular=0d0
     real(8),allocatable :: k(:,:),position(:,:),multiplier(:,:,:),source_occupation(:,:)
     integer,allocatable :: source_indices(:)
     integer,allocatable :: point(:,:),primitive_point(:),cell(:,:),neighbors(:,:)
     complex(8),allocatable :: phase(:,:),source(:,:),previous(:,:,:),gauge(:,:,:),work(:,:,:)
-    complex(8),allocatable :: worker_work(:,:,:,:)
-    type(c_ptr),allocatable :: worker_forward(:),worker_backward(:)
+    complex(8),allocatable :: worker_work(:,:,:,:,:)
+    type(c_ptr),allocatable :: worker_forward(:,:),worker_backward(:,:)
     type(c_ptr) :: forward=c_null_ptr,backward=c_null_ptr
   end type
 contains
@@ -316,39 +317,41 @@ contains
 
   subroutine clear_workers(op)
     type(s_hse_wannier),intent(inout) :: op
-    integer :: t
+    integer :: t,b
     if(allocated(op%worker_forward))then
-      do t=1,size(op%worker_forward)
-        if(c_associated(op%worker_forward(t)))call fftw_destroy_plan(op%worker_forward(t))
-        if(c_associated(op%worker_backward(t)))call fftw_destroy_plan(op%worker_backward(t))
-      enddo
+      do t=1,size(op%worker_forward,2);do b=1,size(op%worker_forward,1)
+        if(c_associated(op%worker_forward(b,t)))call fftw_destroy_plan(op%worker_forward(b,t))
+        if(c_associated(op%worker_backward(b,t)))call fftw_destroy_plan(op%worker_backward(b,t))
+      enddo;enddo
       deallocate(op%worker_forward,op%worker_backward,op%worker_work)
     endif
-    op%workers=0
+    op%workers=0;op%worker_batch=0
   end subroutine
 
-  subroutine prepare_workers(op,count,status)
+  subroutine prepare_workers(op,count,batch,status)
     type(s_hse_wannier),intent(inout) :: op
-    integer,intent(in) :: count
+    integer,intent(in) :: count,batch
     integer,intent(out) :: status
-    integer :: t
+    integer :: t,b,dims(3)
     status=0
-    if(op%workers==count)return
+    if(op%workers==count.and.op%worker_batch==batch)return
     call clear_workers(op)
-    allocate(op%worker_work(op%ns(1),op%ns(2),op%ns(3),count))
-    allocate(op%worker_forward(count),op%worker_backward(count))
+    allocate(op%worker_work(op%ns(1),op%ns(2),op%ns(3),batch,count))
+    allocate(op%worker_forward(batch,count),op%worker_backward(batch,count))
     op%worker_forward=c_null_ptr;op%worker_backward=c_null_ptr
-    ! Plan creation/destruction stays serial. Each executing thread owns its buffer.
-    do t=1,count
-      op%worker_forward(t)=fftw_plan_dft_3d(op%ns(3),op%ns(2),op%ns(1), &
-        op%worker_work(:,:,:,t),op%worker_work(:,:,:,t),FFTW_FORWARD,FFTW_ESTIMATE)
-      op%worker_backward(t)=fftw_plan_dft_3d(op%ns(3),op%ns(2),op%ns(1), &
-        op%worker_work(:,:,:,t),op%worker_work(:,:,:,t),FFTW_BACKWARD,FFTW_ESTIMATE)
-      if(.not.c_associated(op%worker_forward(t)).or..not.c_associated(op%worker_backward(t)))then
+    dims=op%ns(3:1:-1)
+    ! Serial planning, one buffer per worker. Cache every possible compact tail
+    ! so a partly filled tile never performs padded zero-density FFTs.
+    do t=1,count;do b=1,batch
+      op%worker_forward(b,t)=fftw_plan_many_dft(3,dims,b,op%worker_work(:,:,:,:,t),dims,1,op%ngs, &
+        op%worker_work(:,:,:,:,t),dims,1,op%ngs,FFTW_FORWARD,FFTW_ESTIMATE)
+      op%worker_backward(b,t)=fftw_plan_many_dft(3,dims,b,op%worker_work(:,:,:,:,t),dims,1,op%ngs, &
+        op%worker_work(:,:,:,:,t),dims,1,op%ngs,FFTW_BACKWARD,FFTW_ESTIMATE)
+      if(.not.c_associated(op%worker_forward(b,t)).or..not.c_associated(op%worker_backward(b,t)))then
         status=1;call clear_workers(op);return
       endif
-    enddo
-    op%workers=count
+    enddo;enddo
+    op%workers=count;op%worker_batch=batch
   end subroutine
 
   subroutine wannier_apply(op,target,action,status)
@@ -358,20 +361,23 @@ contains
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
     complex(8),allocatable :: home(:,:),result(:,:),source(:)
-    integer :: i,j,ic,g,p(3),index,nt,t,nworkers
-    integer(int64) :: executed
+    integer :: i,j,ic,g,p(3),index,nt,t,nworkers,batch,lo,nb,k
+    integer :: columns(32)
+    integer(int64) :: executed,batches
     status=1;action=0d0
-    op%fft_pairs_total=0_int64;op%fft_pairs_executed=0_int64
+    op%fft_pairs_total=0_int64;op%fft_pairs_executed=0_int64;op%fft_batches_executed=0_int64
     if(.not.allocated(op%source))return
     if(size(target,1)/=op%ng.or.size(target,3)/=op%nk.or.any(shape(action)/=shape(target)))return
     nt=size(target,2)
     if(nt<1)return
     op%fft_pairs_total=int(op%nk,int64)*int(size(op%source,2),int64)*int(nt,int64)
-    executed=0_int64
+    executed=0_int64;batches=0_int64
+    if(op%fft_batch_size<1.or.op%fft_batch_size>size(columns))return
     allocate(home(op%ngs,nt),result(op%ngs,nt),source(op%ngs))
     nworkers=1
     !$ nworkers=min(nt,omp_get_max_threads())
-    call prepare_workers(op,nworkers,status)
+    batch=min(op%fft_batch_size,max(1,nt/nworkers))
+    call prepare_workers(op,nworkers,batch,status)
     if(status/=0)return
     call wannier_forward(op,target,home);result=0d0
     do ic=1,op%nk
@@ -383,24 +389,33 @@ contains
         enddo
         if(all(source==(0d0,0d0)))cycle
         !$omp parallel do default(none) schedule(static) num_threads(nworkers) &
-        !$omp shared(op,home,result,source,nt) private(j,t) reduction(+:executed)
-        do j=1,nt
+        !$omp shared(op,home,result,source,nt,batch) private(lo,j,t,nb,k,columns) reduction(+:executed,batches)
+        do lo=1,nt,batch
           t=1
           !$ t=omp_get_thread_num()+1
-          op%worker_work(:,:,:,t)=reshape(conjg(source)*home(:,j),op%ns)
-          ! Exact zero pair density contributes no exchange, regardless of the
-          ! nonlocal range of the convolution. No magnitude threshold is used.
-          if(all(op%worker_work(:,:,:,t)==(0d0,0d0)))cycle
-          executed=executed+1_int64
-          call fftw_execute_dft(op%worker_forward(t),op%worker_work(:,:,:,t),op%worker_work(:,:,:,t))
-          op%worker_work(:,:,:,t)=op%worker_work(:,:,:,t)*op%multiplier
-          call fftw_execute_dft(op%worker_backward(t),op%worker_work(:,:,:,t),op%worker_work(:,:,:,t))
-          result(:,j)=result(:,j)-source*reshape(op%worker_work(:,:,:,t),[op%ngs])/op%ngs
+          nb=0
+          do j=lo,min(nt,lo+batch-1)
+            op%worker_work(:,:,:,nb+1,t)=reshape(conjg(source)*home(:,j),op%ns)
+            ! Compact only exact nonzero pair densities; no magnitude threshold.
+            if(all(op%worker_work(:,:,:,nb+1,t)==(0d0,0d0)))cycle
+            nb=nb+1;columns(nb)=j
+          enddo
+          if(nb==0)cycle
+          executed=executed+int(nb,int64);batches=batches+1_int64
+          call fftw_execute_dft(op%worker_forward(nb,t),op%worker_work(:,:,:,:,t),op%worker_work(:,:,:,:,t))
+          do k=1,nb
+            op%worker_work(:,:,:,k,t)=op%worker_work(:,:,:,k,t)*op%multiplier
+          enddo
+          call fftw_execute_dft(op%worker_backward(nb,t),op%worker_work(:,:,:,:,t),op%worker_work(:,:,:,:,t))
+          do k=1,nb
+            j=columns(k)
+            result(:,j)=result(:,j)-source*reshape(op%worker_work(:,:,:,k,t),[op%ngs])/op%ngs
+          enddo
         enddo
         !$omp end parallel do
       enddo
     enddo
-    op%fft_pairs_executed=executed
+    op%fft_pairs_executed=executed;op%fft_batches_executed=batches
     call wannier_backward(op,result,action)
     status=0
   end subroutine

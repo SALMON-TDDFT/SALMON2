@@ -128,6 +128,20 @@ print(json.dumps(dict(mlwf_full_current_parity=full_error, large_radius_identity
 assert (mlwf/'lcfo_mlwf_initial.bin').read_bytes()==(large/'lcfo_mlwf_initial.bin').read_bytes()
 assert (mlwf/'lcfo_mlwf_initial.bin').read_bytes()==(small/'lcfo_mlwf_initial.bin').read_bytes()
 print("Identical initial U, centers and occupied coefficients across support cases")
+for width in (4,):
+    batched=run(f'rt_fft_batch{width}',mlwf_input,rt=True,
+                extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_RADIUS':'3',
+                           'SALMON_LCFO_RT_FFT_BATCH':str(width)})
+    batch_rows=rows(batched/'H_dc_hse_rt.data')
+    batch_error=max(abs(x-y) for a,b in zip(batch_rows,small_rows) for x,y in zip(a,b))
+    assert batch_error<1e-12,batch_error
+    stats=re.findall(r'LCFO exchange FFT batches rank/width/calls:\s+(\d+)\s+(\d+)\s+(\d+)',
+                     (batched/'run.log').read_text())
+    assert stats and all(int(x[1])==width for x in stats),stats
+    print('Native batch parity',width,batch_error)
+run('reject_fft_batch',mlwf_input,rt=True,reject='LCFO HSE: FFT batch must be an integer from 1 to 32',
+    extra_env={'SALMON_LCFO_RT_FFT_BATCH':'0'})
+
 
 def continuity(folder):
     return [[float(x) for x in line.split(":",1)[1].split()[1:]]
