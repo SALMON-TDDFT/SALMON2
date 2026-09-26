@@ -24,7 +24,7 @@ env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", VECLIB_MAX
 env.pop("SALMON_LCFO_RT", None)
 command = [args.mpirun, "-np", "2", str(args.binary.resolve())]
 
-def run(name, text, rt=False, reject=False):
+def run(name, text, rt=False, reject=False, extra_env=None):
     folder = root / name
     folder.mkdir()
     (folder / "inputfile").write_text(text)
@@ -34,6 +34,8 @@ def run(name, text, rt=False, reject=False):
     local_env = dict(env)
     if rt:
         local_env["SALMON_LCFO_RT"] = "1"
+        local_env["SALMON_LCFO_RT_CONTINUITY"] = "1"
+    local_env.update(extra_env or {})
     with (folder / "inputfile").open("rb") as inp, (folder / "run.log").open("wb") as log:
         status = subprocess.run(command, cwd=folder, env=local_env, stdin=inp,
                                 stdout=log, stderr=subprocess.STDOUT, timeout=120)
@@ -91,3 +93,38 @@ assert energy_width < 1e-9, energy_width
 run("reject_restart", rt.replace("&control", "&control\n yn_restart='y'"), rt=True, reject=True)
 print(json.dumps(dict(work=str(root), steps=4, half_dt_current_error=current_error,
                       post_impulse_energy_width=energy_width, restart_guard="passed"), indent=2))
+
+mlwf_input = rt.replace("xc='hse06'", "xc='hse06'\n hse_mlwf_maxiter=200")
+mlwf = run("rt_mlwf_full", mlwf_input, rt=True, extra_env={"SALMON_LCFO_RT_MLWF": "1"})
+assert "LCFO MLWF initial" in (mlwf / "run.log").read_text(), "MLWF path was not used"
+assert "LCFO MLWF reuse" in (mlwf / "run.log").read_text(), "U was not reused"
+mlwf_rows = rows(mlwf / "H_dc_hse_rt.data")
+full_error = max(abs(x-y) for ra, rb in zip(a,mlwf_rows) for x,y in zip(ra,rb))
+assert full_error < 1e-10, full_error
+large = run("rt_mlwf_large_radius", mlwf_input, rt=True,
+            extra_env={"SALMON_LCFO_RT_MLWF":"1", "SALMON_LCFO_RT_RADIUS":"8"})
+large_rows = rows(large / "H_dc_hse_rt.data")
+assert max(abs(x-y) for ra,rb in zip(mlwf_rows,large_rows) for x,y in zip(ra,rb)) < 1e-12
+small = run("rt_mlwf_small_radius", mlwf_input, rt=True,
+            extra_env={"SALMON_LCFO_RT_MLWF":"1", "SALMON_LCFO_RT_RADIUS":"3"})
+small_rows = rows(small / "H_dc_hse_rt.data")
+assert len(small_rows)==4 and "source-mask approximation" in (small / "run.log").read_text()
+assert max(abs(ra[13]-rb[13]) for ra,rb in zip(small_rows,mlwf_rows)) > 1e-18
+print(json.dumps(dict(mlwf_full_current_parity=full_error, large_radius_identity="passed",
+                      small_radius="finite evolving response"),indent=2))
+
+assert (mlwf/'lcfo_mlwf_initial.bin').read_bytes()==(large/'lcfo_mlwf_initial.bin').read_bytes()
+assert (mlwf/'lcfo_mlwf_initial.bin').read_bytes()==(small/'lcfo_mlwf_initial.bin').read_bytes()
+print("Identical initial U, centers and occupied coefficients across support cases")
+
+def continuity(folder):
+    return [[float(x) for x in line.split(":",1)[1].split()[1:]]
+            for line in (folder/'run.log').read_text().splitlines()
+            if line.startswith('LCFO EXX continuity build/')]
+full_c=continuity(mlwf);small_c=continuity(small)
+assert full_c and small_c
+assert max(row[1] for row in full_c) < 1e-10, full_c
+assert max(abs(row[0]) for row in small_c) < 1e-10, small_c
+assert max(row[1] for row in small_c) > 1e-18, small_c
+print(json.dumps(dict(full_continuity_L1_max=max(row[1] for row in full_c),
+                      masked_continuity_L1_max=max(row[1] for row in small_c)),indent=2))

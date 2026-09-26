@@ -4,7 +4,7 @@ module hse_wannier_gauge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed
+  public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
 contains
   subroutine gauge_seed(psi,position,k,u,status)
     implicit none
@@ -174,6 +174,74 @@ contains
       enddo
       if(backtrack>35)return
       u=candidate;phases=trialphases;step=min(1.5d0*step,1000d0)
+    enddo
+  end subroutine
+  subroutine gauge_minimize_gamma(u,raw,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status)
+    ! At Gamma, the +/- link center residual cancels exactly. Minimizing MV
+    ! spread is simultaneous maximization of the squared link diagonals.
+    ! Each complex two-column SU(2) rotation maximizes n^T G n on |n|=1,
+    ! G_ab=sum_link weight*Re(conjg(v_a)*v_b), A=a0 I+v.sigma.
+    ! Unlike global steepest descent, distant centers do not limit every step.
+    complex(8),intent(inout) :: u(:,:,:)
+    complex(8),intent(in) :: raw(:,:,:,:)
+    real(8),intent(in) :: b(:,:),weights(:),tolerance
+    integer,intent(in) :: maxiter
+    real(8),intent(out) :: spread,gradnorm
+    integer,intent(out) :: iterations,status
+    complex(8),allocatable :: links(:,:,:),tmp(:),direction(:,:,:)
+    complex(8) :: v(3),sine
+    real(8) :: metric(3,3),original(3,3),eval(3),work(32),axis(3),cosine,variable,scale
+    integer :: n,nb,l,i,j,a,c,istat,neighbors(size(weights),1)
+    n=size(u,1);nb=size(weights);status=1;iterations=0
+    spread=huge(1d0);gradnorm=huge(1d0)
+    if(size(u,3)/=1.or.size(raw,4)/=1.or.nb/=6)return
+    if(maxval(abs(b(:,1:3)+b(:,4:6)))>1d-12)return
+    if(maxval(abs(weights(1:3)-weights(4:6)))>1d-12)return
+    allocate(links(n,n,nb),tmp(n),direction(n,n,1));neighbors=1
+    do l=1,nb
+      links(:,:,l)=matmul(conjg(transpose(u(:,:,1))),matmul(raw(:,:,l,1),u(:,:,1)))
+    enddo
+    do iterations=0,maxiter
+      call gauge_functional(u,raw,neighbors,b,weights,spread,variable,direction,istat)
+      if(istat/=0)return
+      gradnorm=sqrt(sum(abs(direction)**2))
+      if(gradnorm<tolerance.and.iterations>0)then
+        status=0;return
+      endif
+      if(iterations==maxiter)return
+      do j=2,n;do i=1,j-1
+        metric=0d0
+        do l=1,nb
+          v(1)=.5d0*(links(i,j,l)+links(j,i,l))
+          v(2)=cmplx(0d0,.5d0,8)*(links(i,j,l)-links(j,i,l))
+          v(3)=.5d0*(links(i,i,l)-links(j,j,l))
+          do c=1,3;do a=1,3
+            metric(a,c)=metric(a,c)+weights(l)*real(conjg(v(a))*v(c),8)
+          enddo;enddo
+        enddo
+        original=metric
+        call dsyev('V','U',3,metric,3,eval,work,size(work),istat)
+        if(istat/=0)return
+        scale=maxval(abs(original))
+        if(eval(3)<=original(3,3)+32*epsilon(1d0)*scale.and. &
+           maxval(abs(original(1:2,3)))<tolerance/(16*n))cycle
+        axis=metric(:,3)
+        if(axis(3)<0d0)axis=-axis
+        cosine=sqrt(.5d0*(1d0+axis(3)))
+        sine=cmplx(axis(1),axis(2),8)/(2*cosine)
+        if(abs(sine)<1d-15)cycle
+        do l=1,nb
+          tmp=links(:,i,l)
+          links(:,i,l)=cosine*tmp+sine*links(:,j,l)
+          links(:,j,l)=-conjg(sine)*tmp+cosine*links(:,j,l)
+          tmp=links(i,:,l)
+          links(i,:,l)=cosine*tmp+conjg(sine)*links(j,:,l)
+          links(j,:,l)=-sine*tmp+cosine*links(j,:,l)
+        enddo
+        tmp=u(:,i,1)
+        u(:,i,1)=cosine*tmp+sine*u(:,j,1)
+        u(:,j,1)=-conjg(sine)*tmp+cosine*u(:,j,1)
+      enddo;enddo
     enddo
   end subroutine
 end module

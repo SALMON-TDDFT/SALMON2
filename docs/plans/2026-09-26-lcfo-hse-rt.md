@@ -53,3 +53,24 @@ restart rejection. Si128 MPI16/OMP1/BLAS1, no re-SCF, full-support exchange,
 4 steps at dt0.02 a.u. completed in61.94s; electron count512 and all14 ACE builds
 valid. This is not a dielectric spectrum. MLWF U transport, integration-range
 controls and full/9/8/7bohr spectral comparisons remain pending.
+
+### Transported MLWF integration
+
+Initial global occupied-space localization and periodic x support controls are
+implemented in the native exchange adapter. The initial fixed-numeric-U pilot
+exposed unwanted phase spreading in a stationary-density test (source error0.844);
+polar temporal transport reduces this to1.18e-16. Accepted-step reference rollback
+and exact-cache acceptance are separately tested. Initial U/centers/coefficients
+are saved and match byte-for-byte across small-system support cases.
+
+The original steepest-descent optimizer did not converge for the anisotropic
+Si128 cell (200 iterations, gradient67.8). A Gamma SU(2) Jacobi optimizer for the
+same MV functional converged in9 sweeps to1.24e-7 with unitary error3.35e-14.
+Full-support Si128 current agrees with the earlier reference to6.9e-19 a.u.
+
+Review identified a source-mask continuity issue, so native current is retained
+as a diagnostic and pre-projection exchange continuity is measured explicitly.
+Small-system full L1~2.5e-17 e/a.u.; a3bohr mask yields a nonzero local source
+while the signed total remains zero. No physical cutoff acceptance is inferred
+from Hermiticity alone. The next support pilot uses full/9/8/7bohr with this
+additional diagnostic before long spectra. Only one MPI simulation runs at once.

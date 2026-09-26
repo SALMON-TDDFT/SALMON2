@@ -30,9 +30,58 @@ the projected exchange, and sums contributions once across spatial ranks.
 The global trace energy is passed to the existing native energy bookkeeping.
 Existing ACE is built in coefficient space; a rejected indefinite/singular
 metric falls back explicitly to the full projected operator without clipping.
-The predictor/corrector averages endpoint operators. Full support is used:
-density eigenfactors are NOT MLWFs. A relative density eigenvalue threshold of
+The predictor/corrector averages endpoint operators. By default, full support
+uses density eigenfactors (not MLWFs). Its relative density eigenvalue threshold
 1e-14 only removes numerical null modes, with discarded trace logged.
+
+### Opt-in transported MLWF sources
+
+Set `SALMON_LCFO_RT_MLWF=1`. Initial localization uses global occupied states in
+the distributed fixed LCFO basis, not independently diagonalized fragment density
+factors. A Gamma-specific SU(2) Jacobi optimizer minimizes the same six-link MV
+functional as the existing gauge code. `hse_mlwf_maxiter` is the maximum sweep
+count and `hse_mlwf_tolerance` the gradient tolerance; Si128 uses200 and1e-6.
+The original general-k optimizer is unchanged. A coefficient-space pivoted trial
+seed avoids gathering the complete real-space wavefunctions on one rank.
+
+After this one localization, polar overlap transport aligns each new occupied
+frame with the previous accepted WFs. This removes band dynamical phases;
+merely holding the numerical U fixed would spread WFs even at stationary density.
+Predictor and corrected endpoint frames share the accepted step-start reference;
+trial updates are rolled back before accepting the corrected frame. Cache keys
+include both coefficients and occupations. No repeated MV minimization occurs.
+
+`SALMON_LCFO_RT_RADIUS=0` (default) retains full support. A positive value is a
+halfwidth in bohr along global periodic x, around fixed INITIAL WF centers.
+Distances use the whole Si128 cell, not the shorter fragment period. Centers with
+circular reliability below0.1 are protected at full support. No source
+renormalization, occupation cutoff or density/Hartree truncation is introduced.
+Initial localization must converge before a finite-width test proceeds.
+
+Diagnostics `lcfo_mlwf_initial.bin` and `lcfo_mlwf_links.bin` preserve the initial
+occupied coefficients, unitary/centers and optimizer inputs. They are not restart
+files. The active fragment-source count and global discarded source norm fraction
+are logged. Existing zero-source skipping avoids unnecessary FFTs after masking;
+no estimated speedup is inferred from source counts alone.
+
+### Optical and continuity interpretation
+
+Source-only masks are explicitly nonvariational. Hermitian assembly and ACE do
+not by themselves restore local charge continuity. Set
+`SALMON_LCFO_RT_CONTINUITY=1` to evaluate the exchange density source before LCFO
+output projection, including both core-weighted adjoint halves and summing the
+overlapping fragment buffers. Logs contain the signed integral and L1 integral
+(electrons per atomic time) and maximum density-rate magnitude. Full-support Fock
+cancellation should hold to roundoff; a masked case can conserve total charge
+while producing a nonzero local defect. The additional diagnostic FFT work must
+be held equal when comparing runtimes.
+
+Native kinetic-plus-pseudopotential current remains the recorded observable.
+Its masked transformed spectrum is an approximate-model diagnostic, not yet a
+certified dielectric function: cutoff acceptance requires assessing the
+continuity defect/field-current consistency as well as current and spectral
+errors. Do not add an unwrapped-position exchange commutator in this periodic
+fragment model as an ad hoc correction.
 
 The environment switch is a development opt-in, not a new production input.
 Without it the ordinary reconstruction and native RT paths are unchanged.
@@ -65,8 +114,8 @@ raw-directed anti-Hermitian diagnostic. Basis arrays use Fortran grid ordering.
 The `lcfo_frozen_probe.f90` helper tests real saved LCFO eigenstates against exact
 Cayley phases and time reversal; this is deliberately NOT a TDHSE driver.
 
-Still required: MLWF U transport and integration-support controls in this native
-adapter, longer-time/dt/LCFO-basis convergence, and dielectric comparisons.
+Still required: longer-time/dt/LCFO-basis convergence, zero-field subtraction,
+field-current assessment of the source-mask approximation, and dielectric comparisons.
 The accepted initial density mismatch is retained; stationarity is not a gate
 for starting RT.
 A Hermitian matrix alone establishes neither energy-functional consistency nor
@@ -84,3 +133,11 @@ It runs MPI2 jobs sequentially in a fresh temporary directory: Gamma DC-SCF,
 LCFO RT, half-dt RT, and rejection of unsupported restart. It checks normal
 completion, finite output, endpoint-current agreement and post-impulse energy
 width. This small integration test is not a production convergence criterion.
+
+Additional regressions: `testsuites/unit_hse_wannier/test_gamma.py` (known
+anisotropic Gamma solution and noncommuting links), and
+`testsuites/unit_lcfo_rt/test_transport.py` (stationary-density phase invariance,
+predictor rollback and corrected-state cache acceptance). These standalone tests
+currently use the local Homebrew BLAS path. `test_native.py` also checks full
+source parity, large-radius identity, initial-U identity across support cases,
+and full/masked exchange continuity diagnostics with MPI2 jobs run sequentially.
