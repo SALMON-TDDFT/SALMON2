@@ -106,3 +106,10 @@ attempt was rejected by the existing `yn_restart` guard; it is not a supported
 continuation path. A subsequent pilot uses the supported `read_dns_cube` total
 density initialization, explicit `alpha_mb=0.1`, and `ncg=20`; it reinitializes
 orbitals and must not be described as a wavefunction restart.
+
+The density-seeded pilot ended normally after 43 iterations in
+610.3 seconds, still unconverged (residual
+1.13426719e-03 versus 1e-7). Its input and summary are stored as
+`inputfile.n128-densityseed` and `density-seed-pilot.json`. The seed density cube
+is an intermediate checkpoint-derived file; its hash is recorded. This bounded
+attempt did not improve convergence and is not the recommended production input.

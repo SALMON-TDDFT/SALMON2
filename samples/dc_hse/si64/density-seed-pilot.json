@@ -1,0 +1,16 @@
+{
+  "scf_iterations": 43,
+  "scf_residual": 0.001134267191915798,
+  "converged": false,
+  "native_exchange_Ha": -8.467868609637534,
+  "localization_status": 2,
+  "positive_source_count": 88,
+  "execution": {
+    "seconds": 610.3275786249433,
+    "returncode": 0,
+    "timeout": false
+  },
+  "input_sha256": "4fa747226c26e17c28b5884e14429491d4e10b14566432c65b80831fbc7cf3ca",
+  "density_seed_sha256": "3ef4609f5804a8730164962c201272284472f8f966640e3f9856647253130e60",
+  "scope": "Unconverged Si64 HSE, total-density initialization, alpha_mb=.1, ncg=20; not a wavefunction restart or scaling benchmark."
+}
