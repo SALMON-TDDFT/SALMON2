@@ -21,4 +21,7 @@ One numerical job or heavy analysis at a time; MPI16/OMP1/BLAS1 for the sixteen-
 ## Progress
 - Design approved by user (2026-09-26).
 - Task 1 running: si128-chain/lcfo-reference, MPI16/OMP1/BLAS1.
-- Tasks 2–7 pending. No RT spectrum exists yet.
+- Task 2 core implemented and standalone probe passes analytic phases, complex-density feedback, time-dependent callback, conservation, reversal, second-order convergence and rejection checks. Grid-density/potential projection expectation parity passes.
+- Task 3 reader implemented: 9 tests pass for valid complex data, corrupted payload/footer/basis/coefficients, stale runs, native final symmetrization and three-fragment periodic halo geometry. Real Si128 validation awaits Task 1.
+- Read-only review found missing native final symmetrization and missing geometric halo checks; both reproduced by failing tests then fixed (9/9 reader tests pass). No integration/TDHSE correctness is inferred from algebra tests.
+- CTest/build wiring added; native build validation pending while the single SCF job runs. Tasks 4–7 remain pending apart from local density/potential projection algebra. No RT spectrum exists yet.
