@@ -36,18 +36,29 @@ contains
   endif
   plan%ready=.true.
  end subroutine
- subroutine lcfo_wf_reconstruct(plan,basis,frame,wf)
+ subroutine lcfo_wf_reconstruct(plan,basis,frame,wf,compact)
   type(s_lcfo_wf_plan),intent(in) :: plan
   complex(8),intent(in) :: basis(:,:),frame(:,:)
   complex(8),allocatable,intent(out) :: wf(:,:)
-  if(.not.plan%ready.or.size(basis,1)/=plan%npoints.or.size(frame,2)/=plan%ncolumns) &
+  logical,intent(in),optional :: compact
+  logical :: selected
+  integer :: nc
+  selected=.false.
+  if(present(compact))selected=compact
+  nc=plan%ncolumns
+  if(selected)nc=size(plan%columns)
+  if(.not.plan%ready.or.size(basis,1)/=plan%npoints.or.size(frame,2)/=nc) &
     error stop 'LCFO WF support: incompatible reconstruction'
   if(.not.plan%masked)then
    wf=matmul(basis,frame)
   else
    allocate(wf(plan%npoints,size(plan%columns)))
    if(size(plan%columns)==0)return
-   wf=matmul(basis,frame(:,plan%columns))
+   if(selected)then
+    wf=matmul(basis,frame)
+   else
+    wf=matmul(basis,frame(:,plan%columns))
+   endif
    where(.not.plan%keep)wf=0d0
   endif
  end subroutine

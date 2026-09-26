@@ -7,6 +7,14 @@ module lcfo_dist_rows
  implicit none
  private
  public :: s_lcfo_halo,lcfo_halo_init,lcfo_halo_get,lcfo_halo_sum,lcfo_halo_free,lcfo_gather_root
+ public :: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get
+ type :: s_lcfo_column_halo
+  logical :: ready=.false.
+  integer :: ncolumns=0,nactive=0
+  integer,allocatable :: columns(:),column_count(:),column_disp(:)
+  integer,allocatable :: send_count(:),recv_count(:),send_disp(:),recv_disp(:)
+  complex(8),allocatable :: send(:),recv(:)
+ end type
  type :: s_lcfo_halo
   logical :: ready=.false.
   integer :: comm=0,rank=0,nproc=1,nlocal=0,nselected=0
@@ -83,6 +91,85 @@ contains
   recv=send
 #endif
   do k=1,plan%nselected;do j=1,nc;selected(plan%slots(k),j)=recv((k-1)*nc+j);enddo;enddo
+ end subroutine
+
+ subroutine lcfo_column_halo_init(plan,rows,columns,ncolumns)
+  ! Each requester asks its row owners for its own ordered set of WF columns.
+  ! Row topology and column sets must remain fixed until this plan is rebuilt.
+  type(s_lcfo_column_halo),intent(inout) :: plan
+  type(s_lcfo_halo),intent(in) :: rows
+  integer,intent(in) :: columns(:),ncolumns
+  type(s_lcfo_column_halo) :: empty
+  integer,allocatable :: counts(:),disps(:),requests(:)
+  integer :: p,n,ierr
+  plan=empty
+  if(.not.rows%ready.or.any(columns<1).or.any(columns>ncolumns))error stop 'LCFO column halo: invalid plan'
+  plan%ncolumns=ncolumns;plan%nactive=size(columns);n=rows%nproc
+  allocate(counts(n),disps(n),plan%column_count(n),plan%column_disp(n))
+  counts=0
+  where(rows%need_count>0)counts=plan%nactive
+#ifdef USE_MPI
+  call MPI_Alltoall(counts,1,MPI_INTEGER,plan%column_count,1,MPI_INTEGER,rows%comm,ierr)
+  if(ierr/=MPI_SUCCESS)error stop 'LCFO column halo: count exchange failed'
+#else
+  plan%column_count=counts
+#endif
+  disps(1)=0;plan%column_disp(1)=0
+  do p=2,n
+   disps(p)=disps(p-1)+counts(p-1)
+   plan%column_disp(p)=plan%column_disp(p-1)+plan%column_count(p-1)
+  enddo
+  allocate(requests(max(1,sum(counts))),plan%columns(max(1,sum(plan%column_count))))
+  do p=1,n
+   if(counts(p)>0)requests(disps(p)+1:disps(p)+counts(p))=columns
+  enddo
+#ifdef USE_MPI
+  call MPI_Alltoallv(requests,counts,disps,MPI_INTEGER,plan%columns, &
+    plan%column_count,plan%column_disp,MPI_INTEGER,rows%comm,ierr)
+  if(ierr/=MPI_SUCCESS)error stop 'LCFO column halo: column exchange failed'
+#else
+  plan%columns=requests
+#endif
+  plan%send_count=rows%give_count*plan%column_count
+  plan%recv_count=rows%need_count*plan%nactive
+  allocate(plan%send_disp(n),plan%recv_disp(n))
+  plan%send_disp(1)=0;plan%recv_disp(1)=0
+  do p=2,n
+   plan%send_disp(p)=plan%send_disp(p-1)+plan%send_count(p-1)
+   plan%recv_disp(p)=plan%recv_disp(p-1)+plan%recv_count(p-1)
+  enddo
+  allocate(plan%send(max(1,sum(plan%send_count))),plan%recv(max(1,sum(plan%recv_count))))
+  plan%ready=.true.
+ end subroutine
+
+ subroutine lcfo_column_halo_get(plan,rows,local,selected)
+  type(s_lcfo_column_halo),intent(inout) :: plan
+  type(s_lcfo_halo),intent(in) :: rows
+  complex(8),intent(in) :: local(:,:)
+  complex(8),allocatable,intent(out) :: selected(:,:)
+  integer :: p,k,j,c,nc,offset,ierr
+  if(.not.plan%ready.or..not.rows%ready)error stop 'LCFO column halo: uninitialized plan'
+  if(size(local,1)/=rows%nlocal.or.size(local,2)/=plan%ncolumns) &
+    error stop 'LCFO column halo: incompatible frame'
+  do p=1,rows%nproc
+   nc=plan%column_count(p);offset=plan%send_disp(p)
+   do k=1,rows%give_count(p);do j=1,nc
+    c=plan%columns(plan%column_disp(p)+j)
+    plan%send(offset+(k-1)*nc+j)=local(rows%rows(rows%give_disp(p)+k),c)
+   enddo;enddo
+  enddo
+#ifdef USE_MPI
+  call MPI_Alltoallv(plan%send,plan%send_count,plan%send_disp,MPI_DOUBLE_COMPLEX, &
+    plan%recv,plan%recv_count,plan%recv_disp,MPI_DOUBLE_COMPLEX,rows%comm,ierr)
+  if(ierr/=MPI_SUCCESS)error stop 'LCFO column halo: value exchange failed'
+#else
+  plan%recv=plan%send
+#endif
+  nc=plan%nactive
+  allocate(selected(rows%nselected,nc))
+  do k=1,rows%nselected;do j=1,nc
+   selected(rows%slots(k),j)=plan%recv((k-1)*nc+j)
+  enddo;enddo
  end subroutine
 
  subroutine lcfo_halo_sum(plan,selected,local)

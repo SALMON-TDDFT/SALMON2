@@ -6,7 +6,8 @@ module lcfo_rt_wannier
   use lcfo_rt_basis
   use communication, only: comm_summation,comm_bcast
   use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma
-  use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root,lcfo_halo_get
+  use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root
+  use lcfo_dist_rows, only: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get
   use lcfo_dist_dense, only: lcfo_distributed_polar
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
   use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance
@@ -23,6 +24,7 @@ module lcfo_rt_wannier
   complex(8),allocatable,save :: previous_wf(:,:),current_frame(:,:),step_reference(:,:)
   logical,save :: step_active=.false.
   type(s_lcfo_wf_plan),save :: fragment_support,core_support
+  type(s_lcfo_column_halo),save :: source_halo
   complex(8),allocatable,save :: core_gram(:,:)
 contains
   subroutine lcfo_mlwf_configure()
@@ -199,12 +201,17 @@ contains
         lcfo_rank,size(fragment_support%columns),ncore,no
     endif
     if(present(halo))then
-      call lcfo_halo_get(halo,current_frame,near_frame)
+      if(.not.source_halo%ready)then
+        call lcfo_column_halo_init(source_halo,halo,fragment_support%columns,no)
+        write(*,'(a,3i12)')'LCFO WF halo rank/selected/full values:', &
+          lcfo_rank,sum(source_halo%recv_count),halo%nselected*no
+      endif
+      call lcfo_column_halo_get(source_halo,halo,current_frame,near_frame)
     else
       if(size(lcfo_counts)/=1)error stop 'LCFO MLWF: distributed source requires halo plan'
-      near_frame=current_frame(selected,:)
+      near_frame=current_frame(selected,fragment_support%columns)
     endif
-    call lcfo_wf_reconstruct(fragment_support,basis,near_frame,fragment_wf)
+    call lcfo_wf_reconstruct(fragment_support,basis,near_frame,fragment_wf,compact=.true.)
     allocate(source(size(basis,1),size(fragment_wf,2),1));source(:,:,1)=fragment_wf
     local_loss=0d0
     if(cut)then

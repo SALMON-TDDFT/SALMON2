@@ -3,7 +3,7 @@ program active_wf_probe
  implicit none
  type(s_lcfo_wf_plan) :: plan
  complex(8) :: basis(12,3),frame(3,4),dense(12,4),gram(3,3)
- complex(8),allocatable :: compact(:,:)
+ complex(8),allocatable :: compact(:,:),selected(:,:)
  real(8) :: positions(3,12),centers(3,4),length(3),radius,d(3),total,inside,reference,loss
  logical :: protected(4),keep(12,4)
  integer :: i,j,k,trial,g
@@ -37,6 +37,9 @@ program active_wf_probe
     if(abs(compact(i,j)-merge(dense(i,k),(0d0,0d0),keep(i,k)))>1d-12)error stop 'masked WF differs'
    enddo
   enddo
+  call lcfo_wf_reconstruct(plan,basis,frame(:,plan%columns),selected,compact=.true.)
+  if(any(shape(selected)/=shape(compact)))error stop 'compact input shape'
+  if(any(abs(selected-compact)>1d-12))error stop 'compact input reconstruction'
   total=lcfo_wf_total_norm(gram,frame);reference=sum(abs(dense)**2)
   if(abs(total-reference)>1d-12*reference)error stop 'nonorthogonal total norm'
   inside=sum(abs(compact)**2);loss=sum(abs(dense)**2,mask=.not.keep)

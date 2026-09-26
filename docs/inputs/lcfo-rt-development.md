@@ -459,3 +459,18 @@ difference3.90e-18, density2.00e-15; printed energy and norm-loss logs agree.
 These are single-run measurements and short-trajectory implementation parity,
 not a long-time dielectric accuracy certificate. Raw benchmark data and the
 expanded Japanese notebook include both measured versions separately.
+
+## Selected WF column halo (2026-09-26)
+
+The fixed source support now seeds a cached column-request plan on the row halo. Each owner packs the requester’s ordered WF columns; the compact frame feeds reconstruction directly. Zero requests and zero owned rows are supported. The row topology, support columns and occupied dimension must remain fixed for the cache lifetime. Dense U transport and core Gram diagnostics remain unchanged; no physical approximation is added.
+
+Validation: standalone MPI2/4 includes a row-owning rank with no local column requests that still sends to peers, duplicate/reordered requests, empty rows, full columns and repeated gets. Compact reconstruction, transport/sphere OMP1/2/4, and native fragment x orbital MPI2/4 tests pass. Static review found no blocking issue.
+
+Paired sequential diamond R6 benchmarks, same GS, core16^3, dt=.02, nt=16, ACE1, OMP1/BLAS1, GNU loop vectorization disabled, baseline c9abacb9:
+
+| Case | Halo receive complex values/rank before→after | Repeated WF seconds before→after | RT seconds before→after |
+|---|---:|---:|---:|
+| C64 / MPI8 | 24576→11520 | 1.206884→1.223684 | 56.062→57.873 |
+| C128 / MPI16 | 49152→11520 | 2.637532→2.594449 | 100.290→99.992 |
+
+Receive counts include self transfers, not measured network-only bytes. Current max difference 4.31e-18, density 2.00e-15, printed energy/loss identical, initial dump byte-identical. No clear speed benefit on this shared-memory host in one sample per case; exchange remains dominant. Weak efficiency changes 55.90%→57.88%, not statistically established improvement. The objective achieved is bounded WF halo payload for fixed-radius fixed-size fragments; dense U and initial root localization still scale with total occupied states. Raw results are in the diamond notebook output wf-column-summary.json.
