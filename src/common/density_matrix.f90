@@ -246,7 +246,7 @@ contains
         real(c_double), intent(inout) :: jy
         real(c_double), intent(inout) :: jz
         ! Input (ptr)
-        real(c_double), intent(in) :: vec_k(3:ik_e-ik_e+1)
+        real(c_double), intent(in) :: vec_k(3,ik_e-ik_s+1)
         real(c_double), intent(in) :: vec_Ac(3)
         integer(c_int), intent(in) :: is_array(3)
         integer(c_int), intent(in) :: ie_array(3)
@@ -256,7 +256,7 @@ contains
         integer(c_int), intent(in) :: idy(is(2)-Nd:ie(2)+Nd)
         integer(c_int), intent(in) :: idz(is(3)-Nd:ie(3)+Nd)
         real(c_double), intent(in) :: nabt(Nd,3)
-        complex(c_double_complex), intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_arary(3))
+        complex(c_double_complex), intent(in) :: psi(is_array(1):ie_array(1),is_array(2):ie_array(2),is_array(3):ie_array(3))
         real(c_double), intent(in) :: BT(3,3)
         real(c_double), intent(in) :: rocc(io_e-io_s+1,ik_e-ik_s+1)
         real(c_double), intent(in) :: wtk(ik_e-ik_s+1)
