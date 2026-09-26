@@ -16,7 +16,7 @@ module communication
   module procedure b_i,b_r,b_l,b_c3
  end interface
  interface comm_summation
-  module procedure s_r1,s_c1,s_c4,s_i
+  module procedure s_r1,s_c1,s_c2,s_c4,s_i
  end interface
 contains
  subroutine b_i(a,comm,root)
@@ -44,6 +44,12 @@ contains
  subroutine s_c1(a,b,n,comm)
  complex(8),intent(in)::a(:)
  complex(8),intent(out)::b(:)
+ integer::n,comm
+ b=a
+ end subroutine
+ subroutine s_c2(a,b,n,comm)
+ complex(8),intent(in)::a(:,:)
+ complex(8),intent(out)::b(:,:)
  integer::n,comm
  b=a
  end subroutine

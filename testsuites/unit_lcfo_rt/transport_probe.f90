@@ -6,7 +6,7 @@ program transport_probe
  complex(8) :: c(4,2),changed(4,2)
  complex(8),allocatable :: first(:,:,:),next(:,:,:)
  integer :: j,g,iu,header(7),status
- real(8) :: h(3),centers(2),minimum_overlap,distance
+ real(8) :: h(3),centers(3,2),minimum_overlap,distance,delta(3),position(3)
  complex(8) :: stored_c(4,2),initial_u(2,2),reference(4,2,1),up(2,2,1),predicted(4,2),corrected(4,2)
  complex(8) :: v1(4),v2(4),expected(32,2,1)
  allocate(lcfo_basis(32,4),lcfo_counts(1),lcfo_offsets(2),lcfo_origins(3,1))
@@ -25,6 +25,7 @@ program transport_probe
  open(newunit=iu,file='lcfo_mlwf_initial.bin',form='unformatted',access='stream')
  read(iu)header,h,stored_c,initial_u,centers
  close(iu)
+ if(header(2)/=2)error stop 'expected xyz center format version 2'
  reference(:,:,1)=matmul(c,initial_u)
  v1=[.5d0,-.5d0,.5d0,-.5d0];v2=[.5d0,-.5d0,-.5d0,.5d0]
  predicted(:,1)=cos(.2d0)*c(:,1)+sin(.2d0)*v1;predicted(:,2)=c(:,2)
@@ -42,7 +43,9 @@ program transport_probe
  if(status/=0)error stop 'expected corrected transport'
  expected(:,:,1)=matmul(lcfo_basis,matmul(corrected,up(:,:,1)))
  do j=1,2;do g=1,32
-   distance=abs(modulo(real(mod(g-1,8),8)-centers(j)+4d0,8d0)-4d0)
+   position=real([mod(g-1,8),mod((g-1)/8,2),(g-1)/16],8)
+   delta=modulo(position-centers(:,j)+.5d0*lcfo_grid,real(lcfo_grid,8))-.5d0*lcfo_grid
+   distance=sqrt(sum(delta**2))
    if(distance>1d0)expected(g,j,1)=0d0
  enddo;enddo
  call lcfo_mlwf_stage(0)
@@ -57,7 +60,9 @@ program transport_probe
  call gauge_transport(reshape(predicted,[4,2,1]),reference,1d0,up,minimum_overlap,status)
  expected(:,:,1)=matmul(lcfo_basis,matmul(predicted,up(:,:,1)))
  do j=1,2;do g=1,32
-   distance=abs(modulo(real(mod(g-1,8),8)-centers(j)+4d0,8d0)-4d0)
+   position=real([mod(g-1,8),mod((g-1)/8,2),(g-1)/16],8)
+   delta=modulo(position-centers(:,j)+.5d0*lcfo_grid,real(lcfo_grid,8))-.5d0*lcfo_grid
+   distance=sqrt(sum(delta**2))
    if(distance>1d0)expected(g,j,1)=0d0
  enddo;enddo
  call lcfo_mlwf_source(predicted,lcfo_basis,[1,2,3,4],next)

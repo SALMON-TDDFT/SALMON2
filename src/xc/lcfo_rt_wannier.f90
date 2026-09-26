@@ -1,5 +1,5 @@
 ! Initial distributed MV gauge, then polar transport of U against prior WFs.
-! Positive axial radius is an explicit source-mask approximation, not a
+! Positive spherical radius is an explicit source-mask approximation, not a
 ! variational energy functional. Global density/Hartree are never masked.
 module lcfo_rt_wannier
   use iso_fortran_env, only: int32
@@ -14,7 +14,7 @@ module lcfo_rt_wannier
   logical,save :: lcfo_mlwf_enabled=.false.
   real(8),save :: radius=0d0
   complex(8),allocatable,save :: rotation(:,:)
-  real(8),allocatable,save :: centers(:)
+  real(8),allocatable,save :: centers(:,:)
   logical,allocatable,save :: protected(:)
   integer,save :: uses=0
   complex(8),allocatable,save :: previous_wf(:,:),current_frame(:,:),step_reference(:,:)
@@ -40,8 +40,8 @@ contains
     call comm_bcast(lcfo_mlwf_enabled,lcfo_comm,0)
     call comm_bcast(radius,lcfo_comm,0)
     if(lcfo_mlwf_enabled.and.lcfo_rank==0)then
-      write(*,*) 'LCFO MLWF: initial U with polar temporal transport; global periodic x halfwidth (0=full) =',radius
-      if(radius>0d0.and.radius<.5d0*lcfo_grid(1)*lcfo_h(1)) &
+      write(*,*) 'LCFO MLWF: initial U with polar temporal transport; global periodic 3D radius (0=full) =',radius
+      if(radius>0d0.and.radius<.5d0*sqrt(sum((lcfo_grid*lcfo_h)**2))) &
         write(*,*) 'LCFO MLWF source-mask approximation: no renormalization; trace energy is diagnostic'
     endif
   end subroutine
@@ -49,9 +49,9 @@ contains
   subroutine initialize_rotation(coeff)
     complex(8),intent(in) :: coeff(:,:)
     complex(8),allocatable :: grid(:,:),shifted(:,:),raw_local(:,:,:,:),raw(:,:,:,:),u(:,:,:),overlap(:,:)
-    complex(8),allocatable :: moment_local(:),moment(:)
+    complex(8),allocatable :: moment_local(:,:),moment(:,:)
     real(8),allocatable :: position(:,:),norm_local(:),norms(:),seed_position(:,:)
-    real(8) :: b(3,6),weights(6),pi,length(3),spread,gradient,delta,unitary_error
+    real(8) :: b(3,6),weights(6),pi,length(3),wf_spread,gradient,delta,unitary_error
     integer :: no,ng,lo,hi,g,x,y,z,a,j,status,iterations,neighbors(6,1),seed_status,iu
     no=size(coeff,2);ng=product(lcfo_core);pi=acos(-1d0);length=lcfo_grid*lcfo_h
     lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
@@ -86,12 +86,12 @@ contains
       write(iu)int([16909060,1,no],int32),b,weights,u,raw
       close(iu)
       call gauge_minimize_gamma(u,raw,b,weights,hse_mlwf_maxiter,hse_mlwf_tolerance, &
-                          spread,gradient,iterations,status)
+                          wf_spread,gradient,iterations,status)
       write(*,'(a,3i7,2es17.8)') 'LCFO MLWF initial iterations/status/seed/spread/gradient:', &
-        iterations,status,seed_status,spread,gradient
+        iterations,status,seed_status,wf_spread,gradient
     endif
     call comm_bcast(status,lcfo_comm,0)
-    if(status/=0.and.radius>0d0.and.radius<.5d0*length(1)) &
+    if(status/=0.and.radius>0d0.and.radius<.5d0*sqrt(sum(length**2))) &
       error stop 'LCFO MLWF: initial localization unconverged; support comparison requires converged U'
     call comm_bcast(u,lcfo_comm,0)
     rotation=u(:,:,1)
@@ -101,25 +101,30 @@ contains
     if(.not.all(ieee_is_finite(real(rotation))).or..not.all(ieee_is_finite(aimag(rotation))).or. &
        unitary_error>1d-10)error stop 'LCFO MLWF: invalid initial U'
     grid=matmul(grid,rotation)
-    allocate(moment_local(no),moment(no),norm_local(no),norms(no),centers(no),protected(no))
+    allocate(moment_local(3,no),moment(3,no),norm_local(no),norms(no),centers(3,no),protected(no))
     do j=1,no
       norm_local(j)=sum(abs(grid(:,j))**2)*lcfo_dv
-      moment_local(j)=sum(abs(grid(:,j))**2*exp(cmplx(0d0,2*pi*position(1,:)/length(1),8)))*lcfo_dv
+      do a=1,3
+        moment_local(a,j)=sum(abs(grid(:,j))**2*exp(cmplx(0d0,2*pi*position(a,:)/length(a),8)))*lcfo_dv
+      enddo
     enddo
     call comm_summation(norm_local,norms,no,lcfo_comm)
-    call comm_summation(moment_local,moment,no,lcfo_comm)
+    call comm_summation(moment_local,moment,size(moment),lcfo_comm)
     if(any(norms<=0d0))error stop 'LCFO MLWF: empty occupied orbital'
-    centers=modulo(atan2(aimag(moment),real(moment))*length(1)/(2*pi),length(1))
-    protected=abs(moment)/norms<.1d0
+    do a=1,3
+      centers(a,:)=modulo(atan2(aimag(moment(a,:)),real(moment(a,:)))*length(a)/(2*pi),length(a))
+    enddo
+    ! A poorly defined center on any axis makes a spherical cut unreliable.
+    protected=any(abs(moment)/spread(norms,1,3)<.1d0,dim=1)
     previous_wf=matmul(coeff,rotation);current_frame=previous_wf
     if(lcfo_rank==0)then
       open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
-      write(iu)int([16909060,1,no,size(coeff,1),lcfo_grid],int32),lcfo_h,coeff,rotation,centers,norms
-      write(iu)int(merge(1,0,protected),int32),int([iterations,status],int32),spread,gradient
+      write(iu)int([16909060,2,no,size(coeff,1),lcfo_grid],int32),lcfo_h,coeff,rotation,centers,norms
+      write(iu)int(merge(1,0,protected),int32),int([iterations,status],int32),wf_spread,gradient
       close(iu)
     endif
     if(lcfo_rank==0)write(*,'(a,es12.4,a,i6,a,es12.4)')'LCFO MLWF U error ',unitary_error, &
-      ' protected factors ',count(protected),' minimum x center reliability ',minval(abs(moment)/norms)
+      ' protected factors ',count(protected),' minimum xyz center reliability ',minval(abs(moment)/spread(norms,1,3))
   end subroutine
 
   subroutine lcfo_mlwf_track(coeff)
@@ -158,33 +163,35 @@ contains
     integer,intent(in) :: selected(:)
     complex(8),allocatable,intent(out) :: source(:,:,:)
     complex(8),allocatable :: core_wf(:,:)
-    real(8) :: length,distance,xx,local_loss(2),loss(2)
+    real(8) :: length(3),distance2,position(3),delta(3),local_loss(2),loss(2)
     integer :: ns(3),p(3),point(3),g,x,y,z,j,no,lo,hi,active_sources,active_sum
     logical :: cut
     call lcfo_mlwf_track(coeff)
     no=size(coeff,2)
     allocate(source(size(basis,1),no,1));source(:,:,1)=matmul(basis,current_frame(selected,:))
-    length=lcfo_grid(1)*lcfo_h(1);cut=radius>0d0.and.radius<.5d0*length
+    length=lcfo_grid*lcfo_h;cut=radius>0d0.and.radius<.5d0*sqrt(sum(length**2))
     local_loss=0d0
     if(cut)then
       ns=lcfo_core+2*lcfo_buffer;g=0
       do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
         g=g+1;p=[x,y,z]
         where(p>=lcfo_core+lcfo_buffer)p=p-ns
-        point=modulo(lcfo_origins(:,lcfo_rank+1)+p,lcfo_grid);xx=point(1)*lcfo_h(1)
+        point=modulo(lcfo_origins(:,lcfo_rank+1)+p,lcfo_grid);position=point*lcfo_h
         do j=1,no
-          distance=abs(modulo(xx-centers(j)+.5d0*length,length)-.5d0*length)
-          if(distance>radius.and..not.protected(j))source(g,j,1)=0d0
+          delta=modulo(position-centers(:,j)+.5d0*length,length)-.5d0*length
+          distance2=sum(delta**2)
+          if(distance2>radius**2.and..not.protected(j))source(g,j,1)=0d0
         enddo
       enddo;enddo;enddo
       lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
       core_wf=matmul(lcfo_basis,current_frame(lo:hi,:));g=0
       do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
-        g=g+1;xx=(lcfo_origins(1,lcfo_rank+1)+x)*lcfo_h(1)
+        g=g+1;position=(lcfo_origins(:,lcfo_rank+1)+[x,y,z])*lcfo_h
         do j=1,no
           local_loss(2)=local_loss(2)+abs(core_wf(g,j))**2
-          distance=abs(modulo(xx-centers(j)+.5d0*length,length)-.5d0*length)
-          if(distance>radius.and..not.protected(j))local_loss(1)=local_loss(1)+abs(core_wf(g,j))**2
+          delta=modulo(position-centers(:,j)+.5d0*length,length)-.5d0*length
+          distance2=sum(delta**2)
+          if(distance2>radius**2.and..not.protected(j))local_loss(1)=local_loss(1)+abs(core_wf(g,j))**2
         enddo
       enddo;enddo;enddo
     endif

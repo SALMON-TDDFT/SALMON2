@@ -52,15 +52,21 @@ trial updates are rolled back before accepting the corrected frame. Cache keys
 include both coefficients and occupations. No repeated MV minimization occurs.
 
 `SALMON_LCFO_RT_RADIUS=0` (default) retains full support. A positive value is a
-halfwidth in bohr along global periodic x, around fixed INITIAL WF centers.
+three-dimensional sphere radius in bohr around fixed INITIAL WF centers.
+Each xyz displacement uses the minimum image of the orthorhombic global cell.
+A radius at least half the box diagonal retains full support.
 Distances use the whole Si128 cell, not the shorter fragment period. Centers with
-circular reliability below0.1 are protected at full support. No source
+circular reliability below 0.1 on ANY axis are protected at full support. No source
 renormalization, occupation cutoff or density/Hartree truncation is introduced.
-Initial localization must converge before a finite-width test proceeds.
+Initial localization must converge before a truncated-support test proceeds.
+Historical benchmark tables below used the former x-only halfwidth; they do not
+measure the current spherical support.
 
 Diagnostics `lcfo_mlwf_initial.bin` and `lcfo_mlwf_links.bin` preserve the initial
 occupied coefficients, unitary/centers and optimizer inputs. They are not restart
-files. The active fragment-source count and global discarded source norm fraction
+files. The initial dump is now version 2 with centers(3,no) in Fortran order;
+version 1 stored centers(no) for x only. The links dump remains version 1.
+The active fragment-source count and global discarded source norm fraction
 are logged. Existing zero-source skipping avoids unnecessary FFTs after masking;
 no estimated speedup is inferred from source counts alone.
 
@@ -298,3 +304,16 @@ ACE適用1回のMPI集約要素数は旧1024×256複素数から、通常256×25
 検証：不均等2+3行分割の複素数ACE試験（ACEランク2/4/6）は従来の密行列作用＋射影と約4e-16で一致。MLWFの位相不変性、予測子巻き戻し、保持中のフレーム追跡、native LCFO RTの間隔1/2/4、impulse/laser再構築規則の回帰試験を通過した。短時間の演算同等性と速度を検証したもので、長時間の誘電関数精度の検証は別途継続する。
 
 追加のCTest 7件（LCFO core、複素DC-LCFO、DC-HSE）も全件成功。コードレビューで重大な指摘はなく、初期化直後の不要な位相輸送は除去した。測定と検証の終了後、停止していた長時間スペクトル計算を元のプロセス・元のバイナリで再開した。長時間計算には今回の最適化はまだ適用していない。
+
+<!-- MLWF_SPHERICAL_SUPPORT_20260926 -->
+## WF積分範囲を三次元球状カットへ変更（2026-09-26）
+
+`SALMON_LCFO_RT_RADIUS=R` は、ここから初期WF中心からの三次元周期距離の半径R（bohr）を表す。直交セルで各軸の最小像変位を求め、dx²+dy²+dz² > R² のソースWFをゼロにする。y,z方向も判定に含む。半径0は全範囲、半径がセルの半対角長以上でも全範囲になる。中心はxyzの周期的モーメントから求め、時間発展中は初期中心に固定する。いずれかの軸で中心信頼度が0.1未満なら、そのWF全体を切らずに保持する。
+
+ソースWFと破棄ノルムの診断には同じ三次元判定を使う。密度・Hartreeの範囲、交換カーネル、初期Uの局在化と位相追跡、ACE更新スケジュールは従来どおり。初期診断ファイル `lcfo_mlwf_initial.bin` はversion 2へ更新し、centers(3,no)をFortran配列順で記録する。旧version 1はx中心のみ。linksファイルはversion 1のまま。
+
+検証：異方的な格子間隔を持つセルで、周期境界をまたぐWF、R=1.51、x半セル長を超えるR=4.1、R=0と十分大きなR=9、弱いy中心の保護を確認した。xyz中心と保護フラグのバイナリ保存も検証した。既存の位相不変性、予測子巻き戻し、ACE保持中のWF追跡試験は成功。
+
+MPI2のnative LCFO RT回帰試験も成功。全範囲MLWF経路と基準の最大差は約9.0e-21、十分大きな半径は全範囲と一致し、有限半径では異なる有限応答を確認した。ACE間隔1/2/4、impulse第1予測子前の再構築、レーザー初期ACE再利用も検証した。この試験の16×8×8 bohrセルの半対角長は約9.80 bohrのため、全範囲試験の半径は旧8から10へ変更した。
+
+**これより前のSi128の9/8/7 bohrの表はx方向だけのカットであり、三次元球状カットの速度・精度を表さない。** 三次元版のSi128の速度・電流差・誘電関数はまだ再測定していない。既存の長時間計算は旧バイナリによるx方向カットの比較として保持し、試験終了後に元のプロセスを再開した。

@@ -102,8 +102,9 @@ assert "LCFO MLWF reuse" in (mlwf / "run.log").read_text(), "U was not reused"
 mlwf_rows = rows(mlwf / "H_dc_hse_rt.data")
 full_error = max(abs(x-y) for ra, rb in zip(a,mlwf_rows) for x,y in zip(ra,rb))
 assert full_error < 1e-10, full_error
+# Half box diagonal is sqrt(8**2+4**2+4**2) = 9.798 bohr.
 large = run("rt_mlwf_large_radius", mlwf_input, rt=True,
-            extra_env={"SALMON_LCFO_RT_MLWF":"1", "SALMON_LCFO_RT_RADIUS":"8"})
+            extra_env={"SALMON_LCFO_RT_MLWF":"1", "SALMON_LCFO_RT_RADIUS":"10"})
 large_rows = rows(large / "H_dc_hse_rt.data")
 assert max(abs(x-y) for ra,rb in zip(mlwf_rows,large_rows) for x,y in zip(ra,rb)) < 1e-12
 small = run("rt_mlwf_small_radius", mlwf_input, rt=True,
