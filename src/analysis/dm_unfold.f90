@@ -70,8 +70,9 @@ contains
   real(8),parameter :: hprk_thresh = 1d-2
   integer :: nhprk, ibox_c, n1c, n2c, n3c, nfound_c, jshift, icand, ibest_c, nbad_l, nbad
   integer :: nvec_pr(3,nhprk_max), hvec_pr(3,nhprk_max)
-  real(8) :: fcoset_n(3,nhprk_max), fcoset_h(3,nhprk_max), fc3(3)
-  real(8) :: pinv(3,3), pinvT(3,3), detP_r, tol_coset, pmat_r8(3,3)
+  integer :: adjP_i(3,3), detP_i, ikey_n(3,nhprk_max), ikey_h(3,nhprk_max), key3(3)
+  real(8) :: fcoset_n(3,nhprk_max), fcoset_h(3,nhprk_max)
+  real(8) :: pinv(3,3), pinvT(3,3), detP_r, pmat_r8(3,3)
   real(8) :: tc_cart(3,nhprk_max)
   complex(8),allocatable :: phi_pred(:,:), phase_gj(:,:,:,:)
   complex(8) :: cscore, phi_meas(nhprk_max)
@@ -567,7 +568,18 @@ contains
   end if
   unfold%nhprk = nhprk
   pinvT = transpose(pinv)
-  tol_coset = 1d-6
+
+! adj(P) = det(P)*P^{-1}. P is an integer matrix, so adj(P) and det(P) are
+! exact integers (the double-precision round-trip through pinv/detP_r is
+! lossless here: every entry of adj(P) is a sum of products of P's own
+! entries, always tiny compared to the exact-integer range of a double).
+! Used below for an exact, floating-point-free coset duplicate test: the
+! previous floor()/tolerance comparison could misclassify a coset whose
+! true fractional coordinate is exactly 0 as "just below 1" under
+! floating-point rounding, silently undercounting distinct cosets for some
+! P (found via an independent Codex review, det(P)=9 counterexample).
+  detP_i = nint(detP_r)
+  adjP_i = nint(pinv * detP_r)
 
 ! -- enumerate nhprk distinct real-space cosets (n -> t_c(n) = a_pr*n) --
   ibox_c = nhprk
@@ -576,11 +588,14 @@ contains
     coset_n_search: do n1c = 0, ibox_c-1
     do n2c = 0, ibox_c-1
     do n3c = 0, ibox_c-1
-      fc3(:) = pinv(:,1)*n1c + pinv(:,2)*n2c + pinv(:,3)*n3c
-      fc3(:) = fc3(:) - dble(floor(fc3(:)))
+      ! exact integer coset key: adj(P).n reduced modulo det(P) (each
+      ! component in [0,detP_i)); replaces the old floor()/tolerance test.
+      key3(1) = modulo( adjP_i(1,1)*n1c + adjP_i(1,2)*n2c + adjP_i(1,3)*n3c, detP_i )
+      key3(2) = modulo( adjP_i(2,1)*n1c + adjP_i(2,2)*n2c + adjP_i(2,3)*n3c, detP_i )
+      key3(3) = modulo( adjP_i(3,1)*n1c + adjP_i(3,2)*n2c + adjP_i(3,3)*n3c, detP_i )
       found_dup = .false.
       do j = 1, nfound_c
-        if( sum(abs(fc3(:)-fcoset_n(:,j))) < tol_coset ) then
+        if( all( key3(:) == ikey_n(:,j) ) ) then
           found_dup = .true.
           exit
         end if
@@ -590,7 +605,8 @@ contains
         nvec_pr(1,nfound_c) = n1c
         nvec_pr(2,nfound_c) = n2c
         nvec_pr(3,nfound_c) = n3c
-        fcoset_n(:,nfound_c) = fc3(:)
+        ikey_n(:,nfound_c) = key3(:)
+        fcoset_n(:,nfound_c) = dble(key3(:)) / dble(detP_i)
         if( nfound_c >= nhprk ) exit coset_n_search
       end if
     end do
@@ -614,11 +630,15 @@ contains
     coset_h_search: do n1c = 0, ibox_c-1
     do n2c = 0, ibox_c-1
     do n3c = 0, ibox_c-1
-      fc3(:) = pinvT(:,1)*n1c + pinvT(:,2)*n2c + pinvT(:,3)*n3c
-      fc3(:) = fc3(:) - dble(floor(fc3(:)))
+      ! exact integer coset key: adj(P)^T.h reduced modulo det(P); replaces
+      ! the old floor()/tolerance test (same rationale as the real-space
+      ! search above).
+      key3(1) = modulo( adjP_i(1,1)*n1c + adjP_i(2,1)*n2c + adjP_i(3,1)*n3c, detP_i )
+      key3(2) = modulo( adjP_i(1,2)*n1c + adjP_i(2,2)*n2c + adjP_i(3,2)*n3c, detP_i )
+      key3(3) = modulo( adjP_i(1,3)*n1c + adjP_i(2,3)*n2c + adjP_i(3,3)*n3c, detP_i )
       found_dup = .false.
       do j = 1, nfound_c
-        if( sum(abs(fc3(:)-fcoset_h(:,j))) < tol_coset ) then
+        if( all( key3(:) == ikey_h(:,j) ) ) then
           found_dup = .true.
           exit
         end if
@@ -628,7 +648,8 @@ contains
         hvec_pr(1,nfound_c) = n1c
         hvec_pr(2,nfound_c) = n2c
         hvec_pr(3,nfound_c) = n3c
-        fcoset_h(:,nfound_c) = fc3(:)
+        ikey_h(:,nfound_c) = key3(:)
+        fcoset_h(:,nfound_c) = dble(key3(:)) / dble(detP_i)
         if( nfound_c >= nhprk ) exit coset_h_search
       end if
     end do

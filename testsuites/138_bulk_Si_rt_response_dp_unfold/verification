@@ -10,26 +10,12 @@
 # itt==1 .or. itt==itotNtime .or. mod(itt,out_dm_unfold_step)==0), so
 # Si_dm_unfold.data should contain exactly 2 data rows.
 #
-# NOTE: an earlier version of this script checked column 11
-# ("Jz:<u[r,V]u>-d[a.u.]") against reference values measured with
-# &unfolding/no_pr=16 in this test's inputfile (no_pr was later renamed
-# no_ref). That was WRONG: no_ref is the number of reference-cell bands
-# used to expand the supercell orbitals (see unfolding.tex, the
-# C_{n k-hat;mK} expansion), and needs to span the reference-cell run's
-# full band set (136's nstate=32), not just its occupied bands (16). With
-# the too-small no_ref=16, the expansion basis was incomplete and
-# "Tr[rho(t)]" (column 5) came out as ~14.6 instead of the
-# physically-required ~32 (the reference 8-atom cell's electron count) -
-# caught by comparing against the expected electron count, not by a
-# build-to-build CI mismatch. With no_ref corrected to 32, Tr[rho(t)] comes
-# out right (~32), but column 11 itself turns out to be ~1e-11 - essentially
-# numerical noise for this system - so it is no longer a suitable
-# regression-check quantity. This version instead checks:
-#   - Tr[rho(t)] (column 5): should stay close to 32, which directly guards
-#     against a future no_ref misconfiguration reintroducing this bug.
-#   - Jz:rho (column 29, "J:rho(t)<unk|i[h,r]|unk>" z-component printed to
-#     stdout): the full physical current response, which is a well-behaved,
-#     non-near-zero, meaningfully time-varying quantity for this system.
+# NOTE: no_ref must span the reference-cell run's full band set (136's
+# nstate=32), not just its occupied bands -- an under-sized no_ref gives an
+# incomplete expansion basis and Tr[rho(t)] comes out too low (e.g. ~14.6
+# instead of ~32). Column 11 ("Jz:<u[r,V]u>-d[a.u.]") was previously used
+# as a regression-check quantity but is ~1e-11 here, essentially numerical
+# noise, so Tr[rho(t)] and Jz:rho are checked instead.
 #
 # Reference values below are taken from an actual run (1 node, 4 MPI
 # processes) with &unfolding/no_ref=32.
