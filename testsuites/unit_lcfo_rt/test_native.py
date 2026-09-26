@@ -17,10 +17,12 @@ parser.add_argument("--binary", type=Path, required=True)
 parser.add_argument("--pseudo", type=Path, required=True)
 parser.add_argument("--mpirun", default="mpirun")
 parser.add_argument("--work-root", type=Path, default=Path(tempfile.gettempdir()))
+parser.add_argument("--omp", type=int, default=1)
 args = parser.parse_args()
+assert args.omp > 0
 root = Path(tempfile.mkdtemp(prefix="lcfo-native-test-", dir=args.work_root))
 repo = Path(__file__).resolve().parents[2]
-env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", VECLIB_MAXIMUM_THREADS="1")
+env = dict(os.environ, OMP_NUM_THREADS=str(args.omp), OPENBLAS_NUM_THREADS="1", VECLIB_MAXIMUM_THREADS="1")
 env.pop("SALMON_LCFO_RT", None)
 command = [args.mpirun, "-np", "2", str(args.binary.resolve())]
 

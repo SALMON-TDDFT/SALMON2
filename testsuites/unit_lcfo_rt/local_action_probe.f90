@@ -1,12 +1,12 @@
 program local_action_probe
  use mpi
- use lcfo_ace_local,only:lcfo_ace_local_action
+ use lcfo_ace_local,only:lcfo_ace_local_action,lcfo_ace_half_trace
  use hse_ace,only:hse_ace_state,hse_ace_apply
  implicit none
  type(hse_ace_state) :: ace
  integer :: rank,nproc,ierr,n,lo,hi,i,j,k,nf
  complex(8),allocatable :: b(:,:),psi(:,:),h(:,:),old(:,:),expected(:,:),c(:,:),global(:,:),w(:,:,:)
- real(8) :: dv,pi,error,allerror
+ real(8) :: dv,pi,error,allerror,trace,reference_trace,occupation(2)
  call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,nproc,ierr)
  if(nproc/=2)error stop 'run with 2 ranks'
  n=rank+2;lo=1+2*rank;hi=lo+n-1;dv=.5d0;pi=acos(-1d0)
@@ -27,6 +27,14 @@ program local_action_probe
  enddo;enddo
  call hse_ace_apply(ace,reshape(global,[5,2,1]),w,ierr)
  if(ierr/=0)error stop 'dense ACE reference'
+ occupation=[2d0,.37d0]
+ reference_trace=0d0
+ do j=1,2
+  reference_trace=reference_trace+.5d0*occupation(j)*real(sum(conjg(global(:,j))*w(:,j,1)),8)
+ enddo
+ call lcfo_ace_half_trace(global(lo:hi,:),ace%factors(lo:hi,:,1),occupation,ace%dv,MPI_COMM_WORLD,trace)
+ if(abs(trace-reference_trace)>2d-12)error stop 'distributed ACE half trace mismatch'
+ if(rank==0)write(*,*)'half trace error:',abs(trace-reference_trace)
  expected=old+matmul(b,w(lo:hi,:,1))
  expected=matmul(b,matmul(conjg(transpose(b)),expected))*dv
  h=old

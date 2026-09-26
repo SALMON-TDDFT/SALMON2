@@ -9,7 +9,7 @@ module hse_lcfo_rt
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track
   use hse_wannier, only: s_hse_wannier,wannier_init,wannier_apply,wannier_forward
-  use lcfo_ace_local, only: lcfo_ace_local_action
+  use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace
   use hse_ace, only: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -133,7 +133,7 @@ contains
     complex(8),allocatable :: projected(:,:),local_hx(:,:),u(:,:,:),w(:,:,:)
     real(8),allocatable :: eigenvalues(:),rwork(:)
     real(8) :: threshold,discarded
-    integer :: nb,nsel,ng,no,j,k,ierr,nrank,first
+    integer :: nb,nsel,ng,no,j,k,ierr,nrank,first,lo,hi
     external :: zheev
     call pack_coefficients(psi,system,mg,info,coeff)
     if(.not.allocated(fragment_basis))call initialize_fragment()
@@ -145,13 +145,9 @@ contains
     if(ace_interval>1.and.rt_step>0.and.ace_valid.and.allocated(cached_occupation))then
       if(mod(rt_step-refresh_origin,ace_interval)/=0.and.all(system%rocc(:,1,1)==cached_occupation))then
         if(lcfo_mlwf_enabled)call lcfo_mlwf_track(coeff)
-        allocate(u(nb,no,1),w(nb,no,1));u(:,:,1)=coeff
-        call hse_ace_apply(ace,u,w,ierr)
-        if(ierr/=0)error stop 'LCFO HSE: retained ACE energy action failed'
-        exchange_energy=0d0
-        do j=1,no
-          exchange_energy=exchange_energy+.5d0*system%rocc(j,1,1)*real(sum(conjg(coeff(:,j))*w(:,j,1)),8)
-        enddo
+        lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
+        call lcfo_ace_half_trace(coeff(lo:hi,:),ace%factors(lo:hi,:,1),system%rocc(:,1,1), &
+          ace%dv,lcfo_comm,exchange_energy)
         ! A transported current_frame no longer belongs to the exact cache key.
         if(allocated(cached_coeff))deallocate(cached_coeff)
         if(lcfo_rank==0)write(*,'(a,i8,a,es20.10)')'LCFO HSE ACE retained at step ',rt_step, &
