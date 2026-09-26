@@ -151,3 +151,27 @@ sites are distinct and equal across the eight fragments. It passed after the
 baseline finished; no concurrent simulations were run. Original input, output,
 executable/source/input SHA256 provenance and per-fragment binary diagnostics
 are retained under work/si64-chain/dc-full-boundary-fixed (workspace root).
+
+
+## Locality measurements on the converged reference
+
+Offline localization retained all38 positive-occupation states (no occupation
+cutoff). A1e-6 gradient target stalled near1e-5 in line search; it is NOT
+claimed reached. At a declared2e-5 target all8 fragments converged and exchange
+was invariant to rounding. A1e-4 comparison gives the same spread to about1e-9.
+
+Six Q factors have circular x-center reliability of order1e-7, versus about.91
+for the other32. Cropping all38 gives arbitrary-center sensitivity up to1.06
+meV/atom when changing localization tolerance. The diagnostic now optionally
+retains factors below reliability.1 in full support. A regression with a
+uniform factor and a localized factor failed before the option and passes
+afterward. With these six factors protected, tolerance sensitivity is below
+5.1e-9meV/atom and all8 fragments agree closely.16 unit tests pass.
+
+Worst whole-fragment exchange errors at axial halfwidths9,8,7bohr are2.3833,
+6.4016,20.6859meV/atom; corresponding discarded norm fractions are.0004311,
+.0008825,.0029261. These are fixed-density full-periodic-16-atom-fragment
+exchange differences, NOT DC-core total-energy errors or truncated-SCF results.
+No certified support cutoff or production pair-pruning speedup is claimed.
+Data: samples/dc_hse/si64-chain/locality-results.json. Full snapshots and raw
+sweeps: workspace work/si64-chain/localized. No production solver changes.

@@ -58,7 +58,7 @@ def fock_action(source,target,spacing,omega,batch=8):
     return result
 
 
-def support_sweep(q,spacing,omega,radii,natom):
+def support_sweep(q,spacing,omega,radii,natom,min_center_reliability=0.):
     """Frozen density diagnostic. No renormalization and no SCF certification."""
     q=np.asarray(q,dtype=complex);spacing=np.asarray(spacing,dtype=float)
     radii=np.asarray(radii,dtype=float)
@@ -68,7 +68,10 @@ def support_sweep(q,spacing,omega,radii,natom):
         raise ValueError('positive finite spacing required')
     if omega<=0 or not np.isfinite(omega) or natom<1 or not np.isfinite(radii).all() or np.any(radii<0):
         raise ValueError('invalid sweep controls')
+    if not np.isfinite(min_center_reliability) or not 0<=min_center_reliability<=1:
+        raise ValueError('center reliability threshold must lie in [0,1]')
     tail=axial_tail(q,spacing,radii)
+    protected=tail['center_reliability']<min_center_reliability
     x=np.arange(q.shape[1])*spacing[0];length=q.shape[1]*spacing[0]
     distance=abs((x[None,:]-tail['center_bohr'][:,None]+length/2)%length-length/2)
     dv=float(np.prod(spacing));alpha=.25
@@ -76,7 +79,8 @@ def support_sweep(q,spacing,omega,radii,natom):
     energy=alpha*dv*np.vdot(q,reference).real
     reports=[]
     for i,radius in enumerate(radii):
-        candidate=q if radius>=length/2 else q*(distance<=radius)[:,:,None,None]
+        mask=(distance<=radius)|protected[:,None]
+        candidate=q if radius>=length/2 else q*mask[:,:,None,None]
         if np.array_equal(candidate,q):
             action=reference;self_action=reference
         else:
@@ -86,7 +90,10 @@ def support_sweep(q,spacing,omega,radii,natom):
         self_energy=alpha*dv*np.vdot(candidate,self_action).real
         metric=dv*q.reshape(len(q),-1).conj()@action.reshape(len(q),-1).T
         reports.append(dict(radius_bohr=float(radius),radius_angstrom=float(radius*.529177210903),
+            center_reliability_threshold=float(min_center_reliability),
+            full_support_factor_count=int(protected.sum()),
             minimum_center_reliability=float(tail['center_reliability'].min()),
+            max_truncated_factor_tail_fraction=float(tail['tail_fraction'][i,~protected].max()) if np.any(~protected) else 0.,
             max_tail_fraction=float(tail['tail_fraction'][i].max()),
             discarded_norm_fraction=float(1-np.vdot(candidate,candidate).real/np.vdot(q,q).real),
             full_exchange_Ha=float(energy),truncated_density_exchange_Ha=float(self_energy),
@@ -105,6 +112,7 @@ def main():
     p.add_argument('snapshot',type=Path);p.add_argument('--output',required=True,type=Path)
     p.add_argument('--radii',nargs='+',type=float,required=True)
     p.add_argument('--natom',type=int,required=True);p.add_argument('--allow-unconverged',action='store_true')
+    p.add_argument('--min-center-reliability',type=float,default=0.)
     a=p.parse_args();s=read_snapshot(a.snapshot)
     if np.prod(s['mesh'])!=1:raise ValueError('Gamma required')
     if (not s['converged'] or s['localization_status']!=0) and not a.allow_unconverged:
@@ -112,7 +120,7 @@ def main():
     q=s['q'].reshape(tuple(s['n'])+(s['q'].shape[1],),order='F').transpose(3,0,1,2)
     result=dict(scope='Frozen whole-periodic-cell density; axial x support, no renormalization. Not a total-SCF-energy or force certificate.',
         snapshot=str(a.snapshot.resolve()),scf_converged=s['converged'],localization_status=s['localization_status'],
-        reports=support_sweep(q,s['spacing'],s['omega'],a.radii,a.natom))
+        reports=support_sweep(q,s['spacing'],s['omega'],a.radii,a.natom,a.min_center_reliability))
     a.output.write_text(json.dumps(result,indent=2)+'\n')
 
 if __name__=='__main__':main()

@@ -137,3 +137,14 @@ operator is preserved, but this remains a frozen-density test, not a variational
 SCF/force/RT accuracy certificate. The minimum circular-center reliability is
 reported because an almost uniform axial density has no well-defined center.
 A support radius of at least half the periodic x length is the uncut reference.
+
+
+Axial support diagnostics can keep factors with undefined circular centers
+in full support: `locality.py ... --min-center-reliability 0.1`. The threshold
+is a dimensionless magnitude of the normalized first circular density moment,
+not a WF amplitude cutoff. The same mask defines the exchange operator on all
+targets. `full_support_factor_count` reports protected factors;
+`max_tail_fraction` is the geometric tail before protection, whereas
+`max_truncated_factor_tail_fraction` excludes protected factors and
+`discarded_norm_fraction` measures the actual discarded total norm.
+No support-sweep result certifies truncated SCF, forces or propagation.

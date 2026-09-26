@@ -34,4 +34,15 @@ class LocalityTest(unittest.TestCase):
         self.assertLess(reports[1]['target_metric_antihermitian_relative'],1e-12)
         self.assertFalse(reports[1]['certified_for_scf'])
 
+class ProtectedCenterTest(unittest.TestCase):
+    def test_delocalized_factor_stays_full(self):
+        q=np.zeros((2,8,2,2),complex)
+        q[0]=1/np.sqrt(32)
+        q[1,0,0,0]=1
+        result=support_sweep(q,[1.,1.,1.],.11,[.1],2,min_center_reliability=.1)[0]
+        self.assertEqual(result['full_support_factor_count'],1)
+        self.assertAlmostEqual(result['discarded_norm_fraction'],0.,places=14)
+        self.assertAlmostEqual(result['exchange_error_Ha'],0.,places=14)
+        self.assertAlmostEqual(result['relative_action_error'],0.,places=14)
+
 if __name__=='__main__':unittest.main()

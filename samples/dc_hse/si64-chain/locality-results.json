@@ -1,0 +1,127 @@
+{
+  "scope": "Fixed-density full periodic 16-atom fragment exchange; axial hard support masks on 32 well-centered density factors, six factors kept full. Not DC core total energy, SCF, force, RT, or speedup certification.",
+  "scf_commit": "13f4986",
+  "localization_tolerance": 2e-05,
+  "tighter_tolerance_1e_6_reached": false,
+  "localization_gradient_max": 1.996139563193345e-05,
+  "exchange_invariance_error_max_Ha": 7.194245199571014e-14,
+  "center_reliability_threshold": 0.1,
+  "full_support_factors_per_fragment": 6,
+  "cropped_factors_per_fragment": 32,
+  "occupation_discarded": 0,
+  "tolerance_sensitivity_max_meV_per_atom": 5.073886200079869e-09,
+  "rows": [
+    {
+      "half_width_bohr": 10.26,
+      "half_width_angstrom": 5.429358183864779,
+      "max_exchange_error_meV_per_fragment_atom": 0.0,
+      "max_discarded_norm_fraction": 0.0,
+      "max_single_truncated_factor_tail_fraction": 0.0,
+      "max_relative_exchange_action_error": 0.0
+    },
+    {
+      "half_width_bohr": 10.1,
+      "half_width_angstrom": 5.344689830120299,
+      "max_exchange_error_meV_per_fragment_atom": 1.92433329438617,
+      "max_discarded_norm_fraction": 0.00017814181294062426,
+      "max_single_truncated_factor_tail_fraction": 0.00017914703671372586,
+      "max_relative_exchange_action_error": 0.0014686398915059293
+    },
+    {
+      "half_width_bohr": 10.0,
+      "half_width_angstrom": 5.291772109029999,
+      "max_exchange_error_meV_per_fragment_atom": 1.92433329438617,
+      "max_discarded_norm_fraction": 0.00017814181294062426,
+      "max_single_truncated_factor_tail_fraction": 0.00017914703671372586,
+      "max_relative_exchange_action_error": 0.0014686398915059293
+    },
+    {
+      "half_width_bohr": 9.8,
+      "half_width_angstrom": 5.1859366668494,
+      "max_exchange_error_meV_per_fragment_atom": 1.92433329438617,
+      "max_discarded_norm_fraction": 0.00017814181294062426,
+      "max_single_truncated_factor_tail_fraction": 0.00017914703671372586,
+      "max_relative_exchange_action_error": 0.0014686398915059293
+    },
+    {
+      "half_width_bohr": 9.6,
+      "half_width_angstrom": 5.080101224668799,
+      "max_exchange_error_meV_per_fragment_atom": 2.3832729760180764,
+      "max_discarded_norm_fraction": 0.00043109482014125344,
+      "max_single_truncated_factor_tail_fraction": 0.0004333174241818491,
+      "max_relative_exchange_action_error": 0.002822125299013223
+    },
+    {
+      "half_width_bohr": 9.4,
+      "half_width_angstrom": 4.9742657824881995,
+      "max_exchange_error_meV_per_fragment_atom": 2.3832729760180764,
+      "max_discarded_norm_fraction": 0.00043109482014125344,
+      "max_single_truncated_factor_tail_fraction": 0.0004333174241818491,
+      "max_relative_exchange_action_error": 0.002822125299013223
+    },
+    {
+      "half_width_bohr": 9.2,
+      "half_width_angstrom": 4.868430340307599,
+      "max_exchange_error_meV_per_fragment_atom": 2.3832729760180764,
+      "max_discarded_norm_fraction": 0.00043109482014125344,
+      "max_single_truncated_factor_tail_fraction": 0.0004333174241818491,
+      "max_relative_exchange_action_error": 0.002822125299013223
+    },
+    {
+      "half_width_bohr": 9.0,
+      "half_width_angstrom": 4.762594898126999,
+      "max_exchange_error_meV_per_fragment_atom": 2.3832729760180764,
+      "max_discarded_norm_fraction": 0.00043109482014125344,
+      "max_single_truncated_factor_tail_fraction": 0.0004333174241818491,
+      "max_relative_exchange_action_error": 0.002822125299013223
+    },
+    {
+      "half_width_bohr": 8.0,
+      "half_width_angstrom": 4.233417687224,
+      "max_exchange_error_meV_per_fragment_atom": 6.4016096718784254,
+      "max_discarded_norm_fraction": 0.000882459881371922,
+      "max_single_truncated_factor_tail_fraction": 0.0008854991098920775,
+      "max_relative_exchange_action_error": 0.003823939192914265
+    },
+    {
+      "half_width_bohr": 7.0,
+      "half_width_angstrom": 3.704240476321,
+      "max_exchange_error_meV_per_fragment_atom": 20.6859453389232,
+      "max_discarded_norm_fraction": 0.0029261229961472512,
+      "max_single_truncated_factor_tail_fraction": 0.002935633465163467,
+      "max_relative_exchange_action_error": 0.007914169553362408
+    },
+    {
+      "half_width_bohr": 6.0,
+      "half_width_angstrom": 3.1750632654179998,
+      "max_exchange_error_meV_per_fragment_atom": 32.464428198610854,
+      "max_discarded_norm_fraction": 0.004979003422704853,
+      "max_single_truncated_factor_tail_fraction": 0.004986184104981983,
+      "max_relative_exchange_action_error": 0.011538850948645764
+    },
+    {
+      "half_width_bohr": 5.0,
+      "half_width_angstrom": 2.6458860545149996,
+      "max_exchange_error_meV_per_fragment_atom": 66.78559018963772,
+      "max_discarded_norm_fraction": 0.0120407119442405,
+      "max_single_truncated_factor_tail_fraction": 0.012079386720616845,
+      "max_relative_exchange_action_error": 0.023600005997117684
+    },
+    {
+      "half_width_bohr": 4.0,
+      "half_width_angstrom": 2.116708843612,
+      "max_exchange_error_meV_per_fragment_atom": 107.77242482322497,
+      "max_discarded_norm_fraction": 0.01863106916455537,
+      "max_single_truncated_factor_tail_fraction": 0.018703444203075733,
+      "max_relative_exchange_action_error": 0.03411547493464058
+    },
+    {
+      "half_width_bohr": 3.0,
+      "half_width_angstrom": 1.5875316327089999,
+      "max_exchange_error_meV_per_fragment_atom": 329.4308375536343,
+      "max_discarded_norm_fraction": 0.05016504079295714,
+      "max_single_truncated_factor_tail_fraction": 0.050358441331764474,
+      "max_relative_exchange_action_error": 0.08721545923435302
+    }
+  ]
+}
