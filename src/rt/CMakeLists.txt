@@ -1,4 +1,5 @@
 set(SOURCES
+    lcfo_rt_basis.f90
     lcfo_rt_core.f90
     dip.f90
     em_field.f90

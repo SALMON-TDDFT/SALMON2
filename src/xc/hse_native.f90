@@ -4,6 +4,8 @@
 ! baseline gathers a fragment on its k root. ACE applications stay local.
 module hse_native
   use iso_fortran_env, only: int64
+  use lcfo_rt_basis, only: lcfo_rt_active
+  use hse_lcfo_rt, only: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures
   use plusU_global, only: PLUS_U_ON
@@ -119,6 +121,10 @@ contains
   subroutine hse_taylor_stage(stage)
     integer,intent(in) :: stage
     integer :: ierr,no
+    if(lcfo_rt_active)then
+      call lcfo_hse_stage(stage)
+      return
+    endif
     select case(stage)
     case(0)
       taylor_active=.true.;taylor_midpoint=.false.
@@ -196,14 +202,19 @@ contains
     real(8) :: ex,offdiag(3,3),tick,communication_before
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
     if(.not.hse_enabled().or.hse_freeze)return
-    if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
-      error stop 'HSE06: initial native support requires k-only MPI distribution'
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_md/='n'.or.yn_symmetrized_stencil=='y') &
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
+    if(lcfo_rt_active)then
+      call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
+      return
+    endif
+    if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
+      error stop 'HSE06: initial native support requires k-only MPI distribution'
+
     if(use_wannier_exchange())then
       call refresh_wannier(system,mg,info,psi)
       return
@@ -369,6 +380,10 @@ contains
     integer :: ierr,ng,total_error
     real(8) :: tick,communication_before
     if(.not.hse_enabled())return
+    if(lcfo_rt_active)then
+      call lcfo_hse_add_action(psi,hpsi,system,mg,info)
+      return
+    endif
     if(.not.allocated(ace%factors))error stop 'HSE06: occupied exchange source is not initialized'
     ng=product(mg%num)
     if(allocated(target_work))then

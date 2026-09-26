@@ -27,3 +27,29 @@ One numerical job or heavy analysis at a time; MPI16/OMP1/BLAS1 for the sixteen-
 - SALMON native build and CTest lcfo_rt_core pass. Actual Si128 frozen-H probe (4 forward + 4 backward steps, dt=0.02 au) passes: Cayley eigenphase error 6.6743e-16, orthogonality 9.3259e-15, reverse error 1.0550e-15. This is not self-consistent RT. Tasks 4–7 remain pending apart from local density/potential projection algebra. No RT spectrum exists yet.
 
 - User steering: DC-to-LCFO density mismatch is accepted. Use the same saved initial LCFO state for all support cases; record zero-field response as a control, not an admission criterion. Remaining implementation gates concern the missing self-consistent Hamiltonian and field/current connection, not initial-density mismatch.
+
+## Revised integration after user direction
+Reuse the existing native RT initialization, density, Hartree, semilocal XC,
+ionic pseudopotential, field and current/output routines. Do not maintain a
+separate Python/FFTW local-field/current implementation. Use the existing
+complex DC-LCFO reconstruction and preserve its local basis, project native
+Hamiltonian actions back into that fixed basis, and add only the distributed
+fragment HSE/MLWF/ACE backend. MPI16 maps one real-space core to one fragment.
+The preparatory standalone core/reader remain validation tools; the native
+Taylor4 predictor/corrector is the production propagation path. Initial density
+difference is accepted and no reconvergence is required.
+
+### Native integration checkpoint
+
+Implemented fixed-core LCFO basis retention and projection at the native hpsi
+endpoint. Hartree, semilocal XC, ionic terms, current and Taylor4 propagation
+remain native. Added the full-support fragment screened-exchange adapter with
+coefficient-space ACE and endpoint operator averaging. Unsupported layouts,
+restart/checkpoint and propagators are rejected.
+
+Validation: build passed; targeted CTest7/7 passed. MPI2 native integration and
+half-dt endpoint-current comparison passed (1.04e-14 a.u. difference), as did
+restart rejection. Si128 MPI16/OMP1/BLAS1, no re-SCF, full-support exchange,
+4 steps at dt0.02 a.u. completed in61.94s; electron count512 and all14 ACE builds
+valid. This is not a dielectric spectrum. MLWF U transport, integration-range
+controls and full/9/8/7bohr spectral comparisons remain pending.

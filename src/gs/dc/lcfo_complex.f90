@@ -1236,6 +1236,7 @@ contains
   end subroutine dc_lcfo_complex
 
   subroutine init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
+    use lcfo_rt_basis, only: lcfo_rt_requested,lcfo_rt_configure
     use communication, only: comm_summation,comm_bcast
     use salmon_global, only: num_fragment
     use structures, only: s_dft_system,s_orbital,s_parallel_info,s_rgrid
@@ -1330,6 +1331,12 @@ contains
       end do
       call comm_summation(local_status,total_status,info%icomm_ro)
       if (total_status /= 0) stop "DC-LCFO complex reconstruction: k-record read failed."
+      if(lcfo_rt_requested())then
+        f=info%id_ro+1
+        if(nfrag/=info%isize_ro)error stop 'LCFO RT requires one rank per fragment'
+        call lcfo_rt_configure(reshape(frag(f)%basis(:,:,:,1,1:n_basis_all(f,1,ik)), &
+          [product(meta(7:9)),n_basis_all(f,1,ik)]),frag(f)%jxyz,meta,n_basis_all(:,1,ik),system,mg,info)
+      endif
       do ispin=1,nspin
         do io=1,system%no
           wrk_local = (0d0,0d0)

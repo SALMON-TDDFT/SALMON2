@@ -62,6 +62,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
+  use lcfo_rt_basis, only: lcfo_rt_requested
   implicit none
   integer,parameter :: Nd = 4
 
@@ -103,6 +104,14 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
   logical :: rion_update
+
+  if(lcfo_rt_requested())then
+    if(yn_dc/='n'.or.yn_conventional_from_dcdft/='y'.or.xc/='hse06'.or. &
+       theory/='tddft_response'.or.propagator/='hse_taylor4') &
+      error stop 'LCFO RT: requires conventional-from-DC HSE tddft_response with Taylor4+ACE'
+    if(yn_restart=='y'.or.write_rt_wfn_k=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
+      error stop 'LCFO RT: restart/checkpoint output is not supported yet'
+  endif
 
   call nvtxStartRange('initialization_rt', __LINE__)
 
