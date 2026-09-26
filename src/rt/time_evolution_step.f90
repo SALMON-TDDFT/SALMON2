@@ -24,6 +24,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #ifdef USE_HSE
   use hse_ptcn, only: native_hse_step
   use hse_native, only: hse_taylor_stage
+  use hse_lcfo_rt, only: lcfo_hse_direct_rotate
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -254,6 +255,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+    call lcfo_hse_direct_rotate(system,mg,info,spsi_out)
+#endif
     call timer_end(LOG_CALC_EXC_COR)
     
   end if

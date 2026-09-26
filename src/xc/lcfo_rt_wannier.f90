@@ -16,6 +16,7 @@ module lcfo_rt_wannier
   implicit none
   private
   public :: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source,lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track
+  public :: lcfo_mlwf_rebase
   logical,save :: lcfo_mlwf_enabled=.false.
   real(8),save :: radius=0d0
   complex(8),allocatable,save :: rotation(:,:)
@@ -52,6 +53,7 @@ contains
       if(u_interval<1.or.(u_interval>1.and..not.lcfo_mlwf_enabled))bad=1
       if(.not.ieee_is_finite(radius).or.radius<0d0)bad=1
       if(radius>0d0.and..not.lcfo_mlwf_enabled)bad=1
+      if(lcfo_direct_wf.and..not.lcfo_mlwf_enabled)bad=1
     endif
     call comm_bcast(bad,lcfo_comm,0)
     if(bad/=0)error stop 'LCFO MLWF: invalid radius or U interval (requires MLWF, finite radius >=0, integer interval >=1)'
@@ -263,6 +265,21 @@ contains
     if(lcfo_rank==0)write(*,'(a,i8,a,es14.6)')'LCFO MLWF reuse ',uses, &
       ' discarded global source norm fraction ',loss(1)/max(loss(2),tiny(1d0))
   end subroutine
+  subroutine lcfo_mlwf_rebase(coeff)
+    implicit none
+    ! Change the native occupied-orbital coordinates, not the physical WF frame.
+    complex(8),intent(inout) :: coeff(:,:)
+    integer :: j
+    if(.not.lcfo_mlwf_enabled.or..not.allocated(rotation).or.step_active) &
+      error stop 'LCFO direct WF: rebase requires an accepted MLWF frame'
+    coeff=matmul(coeff,rotation)
+    current_frame=coeff;previous_wf=coeff
+    if(frame_transported)transport_anchor=coeff
+    rotation=0d0
+    do j=1,size(rotation,1);rotation(j,j)=1d0;enddo
+    frame_rotation=rotation
+  end subroutine
+
   subroutine lcfo_mlwf_stage(stage)
     integer,intent(in) :: stage
     if(.not.lcfo_mlwf_enabled)return

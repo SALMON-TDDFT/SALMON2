@@ -1,3 +1,4 @@
+#include "config.h"
 !
 !  Copyright 2019-2020 SALMON developers
 !
@@ -21,6 +22,10 @@ contains
 subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
                   ppg,V_local,rt)
   use inputoutput, only: n_hamil
+#ifdef USE_HSE
+  use lcfo_rt_basis, only: lcfo_direct_wf
+  use lcfo_rt_taylor, only: lcfo_coefficient_taylor
+#endif
   use structures
   use hamiltonian, only: hpsi
   use sendrecv_grid, only: s_sendrecv_grid
@@ -39,6 +44,12 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   type(s_rt),     intent(in) :: rt
   integer :: nn,ix,iy,iz
   integer :: ik,io,is,nspin
+#ifdef USE_HSE
+  if(lcfo_direct_wf)then
+    call lcfo_coefficient_taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,ppg,V_local,rt)
+    return
+  endif
+#endif
   call nvtxStartRange('taylor', __LINE__)
 
   nspin = system%nspin

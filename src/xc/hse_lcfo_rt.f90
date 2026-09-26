@@ -7,7 +7,7 @@ module hse_lcfo_rt
   use salmon_global, only: hse_omega,ae_shape1
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
-    lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track
+    lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track,lcfo_mlwf_rebase
   use hse_wannier, only: s_hse_wannier,wannier_init,wannier_apply,wannier_forward
   use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace
   use hse_ace, only: hse_ace_state,hse_ace_average
@@ -17,7 +17,7 @@ module hse_lcfo_rt
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage
+  public :: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage,lcfo_hse_direct_rotate
   complex(8),allocatable,save :: fragment_basis(:,:),core_basis(:,:),hx(:,:),initial_hx(:,:),midpoint_hx(:,:)
   integer,allocatable,save :: selected(:),fragment_global_index(:)
   real(8),allocatable,save :: core_weight(:)
@@ -151,6 +151,49 @@ contains
     else
       allocate(coeff(0,0))
     endif
+  end subroutine
+
+  subroutine lcfo_hse_direct_rotate(system,mg,info,psi)
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),intent(inout) :: psi
+    complex(8),allocatable :: coeff(:,:),grid(:,:),local_gram(:,:),gram(:,:)
+    integer :: j,io,bad,is(3),ie(3)
+    real(8) :: gram_error
+    if(.not.lcfo_rt_active.or..not.lcfo_direct_wf)return
+    call pack_coefficients(psi,system,mg,info,coeff)
+    bad=0
+    if(lcfo_orb_rank==0)then
+      call lcfo_mlwf_rebase(coeff)
+      local_gram=matmul(conjg(transpose(coeff)),coeff)
+      allocate(gram(system%no,system%no))
+      call comm_summation(local_gram,gram,size(gram),lcfo_comm)
+      do j=1,system%no;gram(j,j)=gram(j,j)-1d0;enddo
+      gram_error=maxval(abs(gram))
+      if(.not.all(ieee_is_finite(real(gram))).or..not.all(ieee_is_finite(aimag(gram))))bad=1
+      if(.not.ieee_is_finite(gram_error).or.gram_error>1d-8)bad=1
+      if(lcfo_rank==0)write(*,'(a,es16.7)')'LCFO direct WF accepted Gram error:',gram_error
+      ! ACE/Hx live in LCFO basis coordinates and are invariant under this rebase.
+    else
+      deallocate(coeff);allocate(coeff(size(lcfo_basis,2),system%no))
+    endif
+    call comm_bcast(bad,lcfo_orb_comm,0)
+    if(bad/=0)error stop 'LCFO direct WF: orthogonality gate exceeded'
+    call comm_bcast(coeff,lcfo_orb_comm,0)
+    grid=matmul(lcfo_basis,coeff(:,info%io_s:info%io_e))
+    is=mg%is;ie=mg%ie
+    do j=1,info%numo
+      io=info%io_s+j-1
+      psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)=reshape(grid(:,j),mg%num)
+    enddo
+    psi%update_zwf_overlap=.false.
+    ! Refresh the cache key in the new orbital coordinates, using the exact
+    ! same distributed projection as subsequent refresh calls. Hx/ACE/source
+    ! physics is unchanged by the unitary rebase; retained-ACE absent keys stay absent.
+    call pack_coefficients(psi,system,mg,info,coeff)
+    if(lcfo_orb_rank==0.and.allocated(cached_coeff))cached_coeff=coeff
   end subroutine
 
   subroutine lcfo_hse_refresh(system,mg,info,psi,exchange_energy)

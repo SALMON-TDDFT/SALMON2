@@ -1,3 +1,4 @@
+#include "config.h"
 !
 !  Copyright 2019-2020 SALMON developers
 !
@@ -63,6 +64,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
   use lcfo_rt_basis, only: lcfo_rt_requested
+#ifdef USE_HSE
+  use hse_lcfo_rt, only: lcfo_hse_direct_rotate
+#endif
   implicit none
   integer,parameter :: Nd = 4
 
@@ -303,6 +307,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+  call lcfo_hse_direct_rotate(system,mg,info,spsi_in)
+#endif
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f

@@ -5,6 +5,7 @@ module salmon_global
 end module
 module lcfo_rt_basis
  implicit none
+ logical :: lcfo_direct_wf=.false.
  complex(8),allocatable :: lcfo_basis(:,:)
  integer,allocatable :: lcfo_counts(:),lcfo_offsets(:),lcfo_origins(:,:)
  integer :: lcfo_grid(3)=[8,2,2],lcfo_core(3)=[8,2,2],lcfo_buffer(3)=0,lcfo_rank=0,lcfo_comm=0

@@ -1,9 +1,9 @@
 ! Fixed LCFO subspace adapter for native real-space RT routines.
 module lcfo_rt_basis
   use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
-  use communication, only: comm_summation
+  use communication, only: comm_summation,comm_bcast
   implicit none
-  logical,save :: lcfo_rt_active=.false.
+  logical,save :: lcfo_rt_active=.false.,lcfo_direct_wf=.false.
   complex(8),allocatable :: lcfo_basis(:,:)
   integer,allocatable :: lcfo_counts(:),lcfo_offsets(:),lcfo_origins(:,:)
   integer :: lcfo_grid(3),lcfo_core(3),lcfo_buffer(3),lcfo_rank,lcfo_comm,lcfo_orb_rank,lcfo_orb_comm
@@ -17,13 +17,15 @@ contains
   end function
 
   subroutine lcfo_rt_configure(basis,jxyz,meta,counts,system,mg,info)
-    use salmon_global, only: yn_restart,write_rt_wfn_k,checkpoint_interval,time_shutdown
+    use salmon_global, only: yn_restart,write_rt_wfn_k,checkpoint_interval,time_shutdown,propagator
     complex(8),intent(in) :: basis(:,:)
     integer,intent(in) :: jxyz(:,:),meta(20),counts(:)
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     integer :: f,a,j,n,origins(3,size(counts)),bad,total_bad
+    character(32) :: direct_value
+    integer :: direct_flag,env_status
     complex(8),allocatable :: overlap(:,:)
     real(8) :: offdiag(3,3)
     if(yn_restart=='y'.or.write_rt_wfn_k=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
@@ -71,6 +73,21 @@ contains
     if(maxval(abs(overlap))>1d-10)bad=1
     call comm_summation(bad,total_bad,lcfo_comm)
     if(total_bad/=0)error stop 'LCFO RT: core basis is not orthonormal'
+    direct_flag=0
+    if(info%id_rko==0)then
+      call get_environment_variable('SALMON_LCFO_RT_DIRECT_WF',direct_value,status=env_status)
+      if(env_status/=1.and.len_trim(direct_value)>0)then
+        select case(trim(direct_value))
+        case('1');direct_flag=1
+        case('0');direct_flag=0
+        case default;direct_flag=-1
+        end select
+      endif
+    endif
+    call comm_bcast(direct_flag,info%icomm_rko,0)
+    if(direct_flag<0)error stop 'LCFO direct WF: flag must be 0 or 1'
+    lcfo_direct_wf=direct_flag==1
+    if(lcfo_direct_wf.and.propagator/='hse_taylor4')error stop 'LCFO direct WF requires Taylor4'
     lcfo_rt_active=.true.
     if(lcfo_rank==0.and.lcfo_orb_rank==0)write(*,*) &
       'Native LCFO RT active: fragments, basis, orbital groups =',size(counts),sum(counts),info%isize_o
