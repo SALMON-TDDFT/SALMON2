@@ -59,3 +59,53 @@ DC core-weighted total energy. The script calculates full pair potentials for
 verification, so its runtime is not a production screening speedup benchmark.
 Its metric gate is only necessary for ACE, not an SCF correctness certificate.
 No screening switch has been enabled in the Fortran SCF/LCFO path by this script.
+
+
+## Snapshot and post-SCF localization
+
+Set `SALMON_HSE_WANNIER_SNAPSHOT=1` for a native final density-factor snapshot.
+For DC it is written separately under `data_dcdft/fragments/NNNNNN/`. A normal
+time-limit shutdown can write an **unconverged** snapshot; successful process
+exit does not establish SCF convergence. Preserve the input and output log.
+
+```sh
+python3 samples/dc_hse/read_snapshot.py hse_wannier_snapshot.bin factors.npz
+```
+
+The converter refuses an unconverged SCF reference unless explicitly given
+`--allow-unconverged`. Such data may diagnose pair locality at a frozen density,
+but must not be presented as converged HSE observables. The converter currently
+accepts Gamma only. `highest_source_occupation` is not the occupation of the
+highest originally retained eigenstate: exactly empty bands have been removed.
+
+The optional `localize_snapshot.f90` program rebuilds a Gamma gauge offline,
+without rerunning SCF. Compile it together with `hse_wannier_gauge.f90` and
+`hse_wannier.f90`, linking FFTW3 and BLAS/LAPACK; then run:
+
+```sh
+localize_snapshot input.bin localized.bin 0 3000 1e-6
+```
+
+The last three arguments are occupation cutoff, maximum localization iterations,
+and gradient tolerance. Cutoff 0 removes only exact zeros and preserves the
+density. A positive cutoff is an additional approximation; discarded occupation
+is printed and a changed density cannot inherit the SCF-converged flag. Check
+localization status and original/relocalized exchange before screening. A unitary
+gauge that has not met the localization criterion still gives exact full-support
+exchange but must not be called a converged MLWF set.
+
+Binary version 1 uses a native-endian marker and 14 int32 entries: marker,
+version, grid(3), k mesh(3), source count, refresh count, localization iterations,
+localization status, SCF iteration, SCF-converged flag. These are followed by 9
+real64 entries: spacing(3), omega, spread, gradient, minimum transport singular
+value, periodic exchange energy, SCF residual; then occupation, U, Phi and Q in
+Fortran order. The reader detects endian order. The format is diagnostic, not a
+restart format: it omits original band indices/retained-state count, actual k
+vectors, and the SCF criterion/threshold. Preserve the generating input/log and
+do not use reduced U rows as original band indices. Transport-only refreshes
+record localization status 2 and spread/gradient -1 (not evaluated).
+
+The multi-budget pair diagnostic shares pair FFTs across budgets. It still
+computes the full pair reference, so its wall time does not measure production
+screening performance. Empty-state source reduction and polar-only refreshes
+are implemented acceleration steps; spatial pair pruning remains diagnostic.

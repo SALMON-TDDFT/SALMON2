@@ -112,14 +112,15 @@ The refresh count includes predictor and corrected states in RT, and is **not**
 a count of physical time steps. Unchanged orbitals *and* occupations reuse the
 cached exchange. Occupation changes invalidate the cache. `status=0` in
 `HSE_WANNIER` diagnostics means the gradient criterion was met; `status=1` means
-it was not. A finite iteration limit does not guarantee an MLWF minimum.
+it was not. `status=2` denotes transport only (spread and gradient are -1, not
+evaluated). A finite iteration limit does not guarantee an MLWF minimum.
 Unconverged localization retains full-support exact exchange with an explicit
 message. The first refresh has no previous overlap (reported as zero).
 
 For DC, provide a nonnegative electronic `temperature` or `temperature_k` and
 enough `nstate_frag` to hold the occupied fragment space. Fractional occupations
-and extra states are supported. All retained states define the localization
-frame `Phi=Psi U`. The density factors used for exchange are
+and extra states are supported. States with positive occupation at any k define
+the localization frame `Phi=Psi U`. The density factors used for exchange are
 `Q=Psi sqrt(f/2) U`, **not** `Phi` with artificially equal occupations. Q need not
 be orthonormal and is not itself an occupied-only MLWF basis. This preserves
 `Psi (f/2) Psi†` exactly for unitary U. No disentanglement is implemented.
@@ -154,3 +155,17 @@ all k owners. DC and ACE are active, but pair pruning, local Poisson boxes,
 distributed Wannier-pair scheduling and large-system speedup are not yet
 implemented or demonstrated. Source-only truncation from the reference scripts
 is deliberately not used as a variational SCF approximation.
+
+
+Exactly empty bands (zero occupation at every k) are omitted from the exchange
+source. No positive occupation, however small, is discarded. The band union is
+common to all k points. Changes to this set reset the localization gauge/history;
+all retained states remain targets of the full action and ACE construction.
+This is an exact density-rank reduction, not spatial pair screening. For a zero
+density, one zero-weight source is retained to represent the zero operator.
+
+For diagnostic export set the environment variable
+`SALMON_HSE_WANNIER_SNAPSHOT=1`. A collective final refresh writes
+`hse_wannier_snapshot.bin` in each fragment directory before LCFO processing.
+See `samples/dc_hse/README.md` for the binary version, conversion, and provenance
+limitations. The export records SCF and localization convergence separately.

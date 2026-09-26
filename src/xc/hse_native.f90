@@ -17,6 +17,7 @@ module hse_native
     yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance
   implicit none
   private
+  public :: hse_export_snapshot
   public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
   public :: hse_pack,hse_unpack,hse_timings,hse_walltime
   public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
@@ -35,6 +36,34 @@ module hse_native
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
+  subroutine hse_export_snapshot(system,mg,info,psi,iteration,residual,converged)
+    use salmon_global, only: base_directory
+    use communication, only: comm_bcast
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),intent(in) :: psi
+    integer,intent(in) :: iteration
+    real(8),intent(in) :: residual
+    logical,intent(in) :: converged
+    character(8) :: setting
+    integer :: status,enabled
+    if(.not.hse_enabled().or..not.use_wannier_exchange())return
+    enabled=0
+    if(info%id_k==0)then
+      call get_environment_variable('SALMON_HSE_WANNIER_SNAPSHOT',setting,status=status)
+      if(status==0.and.trim(setting)=='1')enabled=1
+    endif
+    call comm_bcast(enabled,info%icomm_k,0)
+    if(enabled==0)return
+    call hse_refresh(system,mg,info,psi)
+    status=0
+    if(info%id_k==0)call wannier_snapshot(wannier,wannier%source_occupation,hse_omega,hse_exchange_energy, &
+      residual,iteration,converged,trim(base_directory)//'hse_wannier_snapshot.bin',status)
+    call comm_bcast(status,info%icomm_k,0)
+    if(status/=0)error stop 'HSE Wannier snapshot: write failed'
+  end subroutine
   subroutine hse_taylor_stage(stage)
     integer,intent(in) :: stage
     integer :: ierr,no
@@ -366,9 +395,8 @@ contains
       if(status==0)then
         maxiter=0
         if(mod(wannier%updates,hse_mlwf_interval)==0)maxiter=hse_mlwf_maxiter
-        call wannier_localize(wannier,allpsi,maxiter,hse_mlwf_tolerance,status)
+        call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,hse_mlwf_tolerance,status)
       endif
-      if(status==0)call wannier_set_source(wannier,allpsi,system%rocc(:,:,1),wannier%gauge,status)
       if(status==0)call wannier_apply(wannier,allpsi,allw,status)
       if(status==0.and.(wannier%updates==1.or.maxiter>0))then
         write(*,'(a,3i7,3es16.7)')'HSE_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &

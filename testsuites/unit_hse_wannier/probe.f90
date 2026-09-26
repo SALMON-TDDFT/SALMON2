@@ -7,8 +7,9 @@ program probe
   type(hse_ace_state) :: ace
   integer :: n(3),mesh(3),no,nt,ng,nk,iu,ierr,i,j,ik
   real(8) :: h(3),omega,checks(5),spread,gradient,smin
-  real(8),allocatable :: k(:,:),occ(:,:),eval(:),rwork(:)
+  real(8),allocatable :: k(:,:),occ(:,:),trial_occ(:,:),eval(:),rwork(:)
   complex(8),allocatable :: psi(:,:,:),target(:,:,:),action(:,:,:),w(:,:,:),wa(:,:,:),back(:,:,:)
+  complex(8),allocatable :: transported_action(:,:,:)
   complex(8),allocatable :: gauge(:,:,:),rot(:,:,:),previous(:,:,:),transported(:,:,:),metric(:,:),work(:)
   character(1024) :: path,out
   call check_gauge_minimizer()
@@ -80,6 +81,44 @@ program probe
   open(newunit=iu,file=trim(out)//'.localized',form='unformatted',access='stream',status='replace')
   write(iu)action
   close(iu)
+  call wannier_snapshot(op,occ,omega,0d0,1d-9,7,.true.,trim(out)//'.snapshot',ierr)
+  if(ierr/=0)error stop 'snapshot write'
+  call wannier_localize(op,psi,0,1d-7,ierr)
+  if(ierr/=0.or.op%localization_status/=2)error stop 'transport-only gauge status'
+  call wannier_set_source(op,psi,occ,op%gauge,ierr)
+  if(ierr/=0)error stop 'transport-only source'
+  allocate(transported_action,mold=action)
+  call wannier_apply(op,target,transported_action,ierr)
+  if(ierr/=0.or.maxval(abs(transported_action-action))>1d-10)error stop 'transport-only action changed'
+  call wannier_refresh_source(op,psi,occ,0,1d-7,ierr)
+  if(ierr/=0)error stop 'active source refresh'
+  if(size(op%source,2)/=max(1,count(any(occ>0d0,dim=2))))error stop 'active source count'
+  call wannier_apply(op,target,transported_action,ierr)
+  if(ierr/=0.or.maxval(abs(transported_action-action))>1d-10)error stop 'active source action changed'
+  ! Exercise source-set changes with and without a change in source count.
+  trial_occ=occ
+  do j=1,no
+    trial_occ=0d0;trial_occ(j,:)=1d0
+    call wannier_refresh_source(op,psi,trial_occ,0,1d-7,ierr)
+    if(ierr/=0.or.size(op%source,2)/=1)error stop 'changed source set'
+    call wannier_apply(op,target,transported_action,ierr)
+    if(ierr/=0)error stop 'changed source action'
+    call wannier_set_source(op,psi,trial_occ,gauge,ierr)
+    if(ierr/=0)error stop 'full reference source'
+    call wannier_apply(op,target,action,ierr)
+    if(ierr/=0.or.maxval(abs(transported_action-action))>1d-10)error stop 'changed source mismatch'
+  enddo
+  trial_occ=0d0
+  call wannier_refresh_source(op,psi,trial_occ,0,1d-7,ierr)
+  if(ierr/=0)error stop 'zero source refresh'
+  call wannier_apply(op,target,transported_action,ierr)
+  if(ierr/=0.or.maxval(abs(transported_action))>0d0)error stop 'zero source action'
+  call wannier_refresh_source(op,psi,occ,0,1d-7,ierr)
+  if(ierr/=0)error stop 'source reactivation'
+  call wannier_apply(op,target,transported_action,ierr)
+  call wannier_set_source(op,psi,occ,gauge,ierr)
+  call wannier_apply(op,target,action,ierr)
+  if(ierr/=0.or.maxval(abs(transported_action-action))>1d-10)error stop 'reactivated source mismatch'
   w=0d0
   call hse_ace_build(ace,psi,w,product(h),ierr)
   if(ierr/=0)error stop 'zero exchange ACE build'

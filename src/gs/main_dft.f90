@@ -48,6 +48,9 @@ use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
 use lcfo
+#ifdef USE_HSE
+use hse_native, only: hse_export_snapshot
+#endif
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -306,6 +309,9 @@ call fipp_stop ! performance profiling
 #endif
 
 
+#ifdef USE_HSE
+call hse_export_snapshot(system,mg,info,spsi,Miter,sum1,sum1<threshold)
+#endif
 !------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
 

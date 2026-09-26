@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'samples/dc_hse'))
-from pair_screening import analyze
+from pair_screening import analyze,analyze_budgets
 
 class PairScreening(unittest.TestCase):
     def fixture(self):
@@ -55,6 +55,16 @@ class PairScreening(unittest.TestCase):
         u=np.linalg.qr(rng.normal(size=(3,3))+1j*rng.normal(size=(3,3)))[0]
         rotated=(flat@u).T.reshape(q.shape)
         self.assertAlmostEqual(analyze(rotated,spacing,omega,0)['full_exchange_Ha'],reference,places=12)
+
+    def test_shared_potentials_budget_sweep(self):
+        budgets=[0.,.001,.01,.1,10.]
+        rows=analyze_budgets(self.fixture(),np.ones(3),.11,budgets)
+        self.assertTrue(all(a['kept_ordered_pairs']>=b['kept_ordered_pairs'] for a,b in zip(rows,rows[1:])))
+        self.assertTrue(all(a['exchange_error_Ha']<=b['exchange_error_Ha']+1e-12 for a,b in zip(rows,rows[1:])))
+        for row,budget in zip(rows,budgets):
+            self.assertLessEqual(row['exchange_error_Ha'],row['discarded_energy_bound_Ha']+1e-12)
+            self.assertLessEqual(row['discarded_energy_bound_Ha'],budget)
+            self.assertEqual(row['full_exchange_Ha'],rows[0]['full_exchange_Ha'])
 
     def test_invalid_parameters(self):
         for omega,budget in [(0,0),(.11,-1),(float('nan'),0),(.11,float('nan'))]:

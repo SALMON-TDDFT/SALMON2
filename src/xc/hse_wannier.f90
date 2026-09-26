@@ -9,18 +9,42 @@ module hse_wannier
   implicit none
   private
   include 'fftw3.f03'
+  public :: wannier_snapshot,wannier_refresh_source
   public :: s_hse_wannier,wannier_init,wannier_destroy,wannier_localize
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
   type s_hse_wannier
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
     integer :: localization_iterations=0,localization_status=1
     real(8) :: h(3)=0d0,dv=0d0,spread=0d0,gradient=huge(1d0),min_singular=0d0
-    real(8),allocatable :: k(:,:),position(:,:),multiplier(:,:,:)
+    real(8),allocatable :: k(:,:),position(:,:),multiplier(:,:,:),source_occupation(:,:)
+    integer,allocatable :: source_indices(:)
     integer,allocatable :: point(:,:),primitive_point(:),cell(:,:),neighbors(:,:)
     complex(8),allocatable :: phase(:,:),source(:,:),previous(:,:,:),gauge(:,:,:),work(:,:,:)
     type(c_ptr) :: forward=c_null_ptr,backward=c_null_ptr
   end type
 contains
+  subroutine wannier_snapshot(op,occupation,omega,exchange,residual,iteration,converged,path,status)
+    use iso_fortran_env, only: int32
+    implicit none
+    type(s_hse_wannier),intent(in) :: op
+    real(8),intent(in) :: occupation(:,:),omega,exchange,residual
+    integer,intent(in) :: iteration
+    logical,intent(in) :: converged
+    character(*),intent(in) :: path
+    integer,intent(out) :: status
+    integer :: iu,close_status
+    status=1
+    if(.not.allocated(op%source).or..not.allocated(op%previous).or..not.allocated(op%gauge))return
+    if(any(shape(occupation)/=[size(op%gauge,1),op%nk]))return
+    open(newunit=iu,file=path,status='replace',access='stream',form='unformatted',iostat=status)
+    if(status/=0)return
+    write(iu,iostat=status)int([16909060,1,op%n,op%mesh,size(op%gauge,1),op%updates, &
+      op%localization_iterations,op%localization_status,iteration,merge(1,0,converged)],int32)
+    if(status==0)write(iu,iostat=status)op%h,omega,op%spread,op%gradient,op%min_singular,exchange,residual
+    if(status==0)write(iu,iostat=status)occupation,op%gauge,op%previous,op%source
+    close(iu,iostat=close_status)
+    if(status==0)status=close_status
+  end subroutine
   subroutine wannier_destroy(op)
     implicit none
     type(s_hse_wannier),intent(inout) :: op
@@ -135,6 +159,36 @@ contains
     enddo
   end subroutine
 
+  subroutine wannier_refresh_source(op,psi,occupation,maxiter,tolerance,status)
+    type(s_hse_wannier),intent(inout) :: op
+    complex(8),intent(in) :: psi(:,:,:)
+    real(8),intent(in) :: occupation(:,:),tolerance
+    integer,intent(in) :: maxiter
+    integer,intent(out) :: status
+    integer,allocatable :: indices(:)
+    integer :: j
+    logical :: reset
+    status=1
+    if(size(psi,2)<1.or.size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
+    if(any(shape(occupation)/=[size(psi,2),op%nk]))return
+    if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))return
+    ! Keep a common band set over k; never discard a positive occupation.
+    indices=pack([(j,j=1,size(psi,2))],any(occupation>0d0,dim=2))
+    if(size(indices)==0)indices=[1] ! zero-density operator still has a valid frame
+    reset=.true.
+    if(allocated(op%source_indices))then
+      if(size(op%source_indices)==size(indices))reset=any(op%source_indices/=indices)
+    endif
+    if(reset)then
+      if(allocated(op%gauge))deallocate(op%gauge)
+      if(allocated(op%previous))deallocate(op%previous)
+      op%min_singular=0d0
+    endif
+    op%source_indices=indices
+    call wannier_localize(op,psi(:,indices,:),maxiter,tolerance,status)
+    if(status==0)call wannier_set_source(op,psi(:,indices,:),occupation(indices,:),op%gauge,status)
+  end subroutine
+
   subroutine wannier_localize(op,psi,maxiter,tolerance,status)
     implicit none
     type(s_hse_wannier),intent(inout) :: op
@@ -147,6 +201,13 @@ contains
     integer :: n,ik,axis,next,j,g,transport_status
     status=1;n=size(psi,2)
     if(size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
+    if(allocated(op%gauge))then
+      if(size(op%gauge,1)/=n)then
+        deallocate(op%gauge)
+        if(allocated(op%previous))deallocate(op%previous)
+        op%min_singular=0d0
+      endif
+    endif
     if(.not.allocated(op%gauge))then
       allocate(op%gauge(n,n,op%nk));op%gauge=0d0
       do ik=1,op%nk
@@ -177,6 +238,18 @@ contains
           enddo
         enddo
       endif
+    endif
+    if(maxiter==0)then
+      ! Polar transport already supplies U. Avoid six grid-by-band overlap
+      ! products when no spread minimization is requested for this refresh.
+      op%localization_iterations=0;op%localization_status=2
+      op%spread=-1d0;op%gradient=-1d0 ! not evaluated for the current source
+      if(.not.allocated(op%previous))allocate(op%previous(op%ng,n,op%nk))
+      do ik=1,op%nk
+        op%previous(:,:,ik)=matmul(psi(:,:,ik),op%gauge(:,:,ik))
+      enddo
+      op%updates=op%updates+1
+      status=0;return
     endif
     allocate(raw(n,n,6,op%nk),shifted(op%ng,n))
     b=0d0;pi=acos(-1d0);length=op%n*op%h
@@ -231,6 +304,7 @@ contains
     if(allocated(op%source))deallocate(op%source)
     allocate(op%source(op%ngs,n))
     call wannier_forward(op,weighted,op%source)
+    op%source_occupation=occupation
     status=0
   end subroutine
 
