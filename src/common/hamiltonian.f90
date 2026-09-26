@@ -905,16 +905,19 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
   ! grid loop below, where kvec_u = k - u(r).
   complex(8), allocatable :: gpsi(:,:,:,:)         ! (3, grid), one orbital at a time
   complex(8), allocatable :: uloc(:,:,:,:)         ! (grid, 3)                    no r-space division
-  complex(8), allocatable :: uorb(:,:,:,:,:,:,:,:) ! (grid, nspin,io,ik,im, 3)    r-space division
   ! real (Gamma-only) path
   real(8),    allocatable :: rgpsi(:,:,:,:)
   real(8),    allocatable :: rgw(:,:,:,:)
   real(8),    allocatable :: rwvec(:,:,:,:)         ! (grid, 3)                    no r-space division
+#ifndef USE_OPENACC
+  ! 8-dim arrays exceed nvfortran's dimension limit; unused on the abort path below.
+  complex(8), allocatable :: uorb(:,:,:,:,:,:,:,:)  ! (grid, nspin,io,ik,im, 3)    r-space division
   real(8),    allocatable :: ruorb(:,:,:,:,:,:,:,:) ! (grid, nspin,io,ik,im, 3)    r-space division
+#endif
 
 #ifdef USE_OPENACC
   call fail_tau_operator("support is unavailable for OpenACC builds")
-#endif
+#else
   if (.not. system%xc_payload%use_tau_operator) return
   if (.not. allocated(system%xc_payload%vtau%f)) then
     call fail_tau_operator("payload is enabled without a vtau field")
@@ -1183,6 +1186,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
   end do
   end do
   deallocate(gpsi,uorb)
+#endif
 
 end subroutine add_xc_tau_operator
 

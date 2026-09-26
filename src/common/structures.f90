@@ -328,7 +328,6 @@ module structures
     integer,allocatable :: ilocal_nlma2ilma(:) ! ilocal_nlma to global nlma
     integer,allocatable :: ilocal_nlma2ia(:)   ! ilocal_nlma to atom number (ia_tbl)
     ! for optimizing OpenACC
-    complex(8),allocatable :: uVpsibox(:,:,:,:,:)
     integer                :: max_vi
     integer,allocatable    :: v2nlma(:)
     integer,allocatable    :: k2ilma(:,:)
