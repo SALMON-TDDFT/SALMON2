@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sequential MPI2 native integration test. Needs a USE_HSE binary and H_rps.dat.
+"""Sequential fragment x orbital MPI native integration test. Needs a USE_HSE binary and H_rps.dat.
 Usage: python3 test_native.py --binary /abs/salmon --pseudo /abs/H_rps.dat
 Each run owns a fresh temporary directory; no production data is modified.
 """
@@ -26,7 +26,7 @@ env = dict(os.environ, OMP_NUM_THREADS=str(args.omp), OPENBLAS_NUM_THREADS="1", 
 env.pop("SALMON_LCFO_RT", None)
 command = [args.mpirun, "-np", "2", str(args.binary.resolve())]
 
-def run(name, text, rt=False, reject=False, extra_env=None):
+def run(name, text, rt=False, reject=False, extra_env=None, orbital_groups=1):
     folder = root / name
     folder.mkdir()
     (folder / "inputfile").write_text(text)
@@ -38,8 +38,9 @@ def run(name, text, rt=False, reject=False, extra_env=None):
         local_env["SALMON_LCFO_RT"] = "1"
         local_env["SALMON_LCFO_RT_CONTINUITY"] = "1"
     local_env.update(extra_env or {})
+    local_command=command.copy();local_command[2]=str(2*orbital_groups)
     with (folder / "inputfile").open("rb") as inp, (folder / "run.log").open("wb") as log:
-        status = subprocess.run(command, cwd=folder, env=local_env, stdin=inp,
+        status = subprocess.run(local_command, cwd=folder, env=local_env, stdin=inp,
                                 stdout=log, stderr=subprocess.STDOUT, timeout=120)
     log = (folder / "run.log").read_text()
     if reject:
@@ -77,6 +78,8 @@ rt += """
  epdir_re1=1d0,0d0,0d0
 /
 &analysis
+ yn_out_dns_rt='y'
+ out_dns_rt_step=4
  out_rt_energy_step=1
  nenergy=20
  de=0.01d0
@@ -166,3 +169,54 @@ assert 'LCFO HSE ACE retained at step        1' in laser_log
 laser_steps=[int(line.split()[-1]) for line in laser_log.splitlines() if line.startswith('LCFO HSE exchange rebuilt at step')]
 assert 1 not in laser_steps and 4 in laser_steps,laser_steps
 print('Impulse first step refresh and smooth laser initial ACE reuse passed')
+
+# Same GS and physics; compare complete trajectories, not truncated zip pairs.
+def compare_tables(a, b, columns, tolerance):
+    assert len(a) == len(b) and a, (len(a), len(b))
+    assert all(len(x) == len(y) for x,y in zip(a,b))
+    assert all(abs(x[0]-y[0]) < 1e-12 for x,y in zip(a,b))
+    error=max(abs(x[j]-y[j]) for x,y in zip(a,b) for j in columns)
+    assert error < tolerance, error
+    return error
+
+def density(folder):
+    lines=(folder/'H_dc_hse_dns_000004.cube').read_text().splitlines()
+    natom=abs(int(lines[2].split()[0]))
+    data=[float(x) for line in lines[6+natom:] for x in line.split()]
+    assert data and all(math.isfinite(x) for x in data)
+    return data
+
+def compare_split(name, baseline, text, extra_env):
+    split=run(name,text.replace('nproc_ob=1','nproc_ob=2'),rt=True,
+              orbital_groups=2,extra_env=extra_env)
+    error=compare_tables(rows(baseline/'H_dc_hse_rt.data'),
+                         rows(split/'H_dc_hse_rt.data'),range(13,16),1e-11)
+    energy_error=compare_tables(rows(baseline/'H_dc_hse_rt_energy.data'),
+                                rows(split/'H_dc_hse_rt_energy.data'),[1],1e-9)
+    da,db=density(baseline),density(split)
+    assert len(da)==len(db)
+    density_error=max(abs(x-y) for x,y in zip(da,db))
+    assert density_error < 1e-11,density_error
+    assert builds(split)==builds(baseline)
+    def schedule(folder):
+        return [line for line in (folder/'run.log').read_text().splitlines()
+                if line.startswith('LCFO HSE exchange rebuilt at step')]
+    assert schedule(split)==schedule(baseline)
+    print(json.dumps(dict(case=name,max_current_difference=error,
+                          max_energy_difference=energy_error,
+                          max_density_difference=density_error)))
+    return split
+
+for interval,baseline in [(1,mlwf),(4,root/'rt_ace_interval4')]:
+    compare_split(f'rt_orbital2_ace{interval}',baseline,mlwf_input,
+                  {'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':str(interval)})
+compare_split('rt_orbital2_small_radius',small,
+              mlwf_input.replace('&parallel',"&parallel\n process_allocation='orbital_sequential'"),
+              {'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_RADIUS':'3'})
+compare_split('rt_orbital2_laser',laser,laser_input,
+              {'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':'4'})
+# Three occupied target states split 2+1. Reoccupy the same saved basis in
+# both runs; this is an algebraic distribution test, not a GS accuracy test.
+unequal_input=rt.replace(' nstate=2',' nstate=3').replace(' nelec=4',' nelec=6')
+unequal=run('rt_unequal_reference',unequal_input,rt=True)
+compare_split('rt_orbital2_unequal',unequal,unequal_input,{})

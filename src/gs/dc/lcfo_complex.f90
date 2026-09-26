@@ -1253,7 +1253,8 @@ contains
     character(96) :: run_id
     character(32), parameter :: bdir='./data_dcdft/fragments/'
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
-    complex(8), allocatable :: wrk_local(:,:,:),wrk_sum(:,:,:)
+    complex(8), allocatable :: wrk_local(:,:,:),wrk_sum(:,:,:),rt_basis(:,:)
+    integer,allocatable :: rt_jxyz(:,:)
 
 #if defined(USE_OPENACC) || defined(USE_CUDA)
     stop "DC-LCFO complex reconstruction: GPU/OpenACC/CUDA is unsupported."
@@ -1332,10 +1333,18 @@ contains
       call comm_summation(local_status,total_status,info%icomm_ro)
       if (total_status /= 0) stop "DC-LCFO complex reconstruction: k-record read failed."
       if(lcfo_rt_requested())then
-        f=info%id_ro+1
-        if(nfrag/=info%isize_ro)error stop 'LCFO RT requires one rank per fragment'
-        call lcfo_rt_configure(reshape(frag(f)%basis(:,:,:,1,1:n_basis_all(f,1,ik)), &
-          [product(meta(7:9)),n_basis_all(f,1,ik)]),frag(f)%jxyz,meta,n_basis_all(:,1,ik),system,mg,info)
+        if(nfrag/=info%isize_r)error stop 'LCFO RT requires one spatial rank per fragment'
+        f=info%id_r+1
+        allocate(rt_basis(product(meta(7:9)),n_basis_all(f,1,ik)),rt_jxyz(maxval(meta(4:6)),3))
+        if(info%id_o==0)then
+          if(.not.allocated(frag(f)%basis))error stop 'LCFO RT: fragment owner mismatch'
+          rt_basis=reshape(frag(f)%basis(:,:,:,1,1:n_basis_all(f,1,ik)),shape(rt_basis))
+          rt_jxyz=frag(f)%jxyz
+        endif
+        call comm_bcast(rt_basis,info%icomm_o,0)
+        call comm_bcast(rt_jxyz,info%icomm_o,0)
+        call lcfo_rt_configure(rt_basis,rt_jxyz,meta,n_basis_all(:,1,ik),system,mg,info)
+        deallocate(rt_basis,rt_jxyz)
       endif
       do ispin=1,nspin
         do io=1,system%no

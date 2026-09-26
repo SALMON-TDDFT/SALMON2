@@ -6,7 +6,7 @@ module lcfo_rt_basis
   logical,save :: lcfo_rt_active=.false.
   complex(8),allocatable :: lcfo_basis(:,:)
   integer,allocatable :: lcfo_counts(:),lcfo_offsets(:),lcfo_origins(:,:)
-  integer :: lcfo_grid(3),lcfo_core(3),lcfo_buffer(3),lcfo_rank,lcfo_comm
+  integer :: lcfo_grid(3),lcfo_core(3),lcfo_buffer(3),lcfo_rank,lcfo_comm,lcfo_orb_rank,lcfo_orb_comm
   real(8) :: lcfo_h(3),lcfo_dv
 contains
   logical function lcfo_rt_requested()
@@ -30,12 +30,13 @@ contains
       error stop 'LCFO RT: restart/checkpoint is not supported yet; disable restart, checkpoint and shutdown output'
     if(system%nspin/=1.or.system%nk/=1.or.maxval(abs(system%vec_k))>1d-12) &
       error stop 'LCFO RT: currently requires Gamma and one spin'
-    if(info%isize_o/=1.or.info%isize_r/=size(counts).or.info%isize_ro/=size(counts).or.info%numm/=1) &
-      error stop 'LCFO RT: one real-space rank per fragment, no orbital distribution required'
+    if(info%isize_r/=size(counts).or.info%isize_ro/=size(counts)*info%isize_o.or.info%numm/=1) &
+      error stop 'LCFO RT: one real-space rank per fragment required'
     if(any(mg%num/=meta(7:9)).or.any(mod(meta(4:6)-meta(7:9),2)/=0)) &
       error stop 'LCFO RT: incompatible core or buffer mesh'
     lcfo_rank=info%id_r;lcfo_comm=info%icomm_r
-    if(info%id_ro/=lcfo_rank)error stop 'LCFO RT: rank ordering mismatch'
+    lcfo_orb_rank=info%id_o;lcfo_orb_comm=info%icomm_o
+    if(info%id_ro/=lcfo_rank+info%isize_r*lcfo_orb_rank)error stop 'LCFO RT: rank ordering mismatch'
     lcfo_grid=meta(1:3);lcfo_core=meta(7:9);lcfo_buffer=(meta(4:6)-lcfo_core)/2
     lcfo_h=system%hgs;lcfo_dv=system%hvol
     offdiag=system%primitive_a
@@ -71,7 +72,8 @@ contains
     call comm_summation(bad,total_bad,lcfo_comm)
     if(total_bad/=0)error stop 'LCFO RT: core basis is not orthonormal'
     lcfo_rt_active=.true.
-    if(lcfo_rank==0)write(*,*) 'Native LCFO RT active: fragments, basis =',size(counts),sum(counts)
+    if(lcfo_rank==0.and.lcfo_orb_rank==0)write(*,*) &
+      'Native LCFO RT active: fragments, basis, orbital groups =',size(counts),sum(counts),info%isize_o
   end subroutine
 
   subroutine lcfo_collect_coefficients(local_grid,global)

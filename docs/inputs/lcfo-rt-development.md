@@ -12,7 +12,9 @@ there is still no converged dielectric spectrum.
 Set environment `SALMON_LCFO_RT=1` and use `theory='tddft_response'`,
 `yn_dc='n'`, `yn_conventional_from_dcdft='y'` in `&calculation`.
 Use Gamma, unpolarized HSE06, `yn_hse_wannier='n'`, default `hse_taylor4`,
-one real-space MPI rank per fragment, and no orbital/k distribution.
+one real-space MPI rank per fragment, and `nproc_k=1`. Orbital groups are
+allowed: e.g. eight fragments use `nproc_rgrid=8,1,1`, `nproc_ob=2`, MPI16.
+This support applies to LCFO RT; the DC-HSE GS orbital-MPI restriction is unchanged.
 Each rank's grid must coincide exactly with its fragment core. The existing
 `./data_dcdft/fragments` LCFO records provide both the initial orbitals and fixed
 orthonormal core bases. Native `hpsi` is projected after all Hamiltonian terms;
@@ -341,3 +343,34 @@ E∞とD_Tは既存の16ステップ窓・全範囲N=1のx電流ピークで規�
 別々のOMP設定でGSから作り直す比較では、中心の微小差で鋭い半径境界のマスクが変わり、有限半径の電流に最大1.19e-7 a.u.の差が生じた。同じGSを用いた比較では解消したため、今後もスレッド数や速度の比較には同じGS・初期U・中心を使う。マスクは現時点で鋭い切断のままである。
 
 短時間試験終了後、元の長時間計算を旧バイナリのまま再開した。今回の計算は逐次実行し、数値ジョブの同時実行は行っていない。
+
+
+<!-- LCFO_TWO_LEVEL_MPI_20260926 -->
+## フラグメント×軌道の2段階MPI（2026-09-26）
+
+LCFO RTで既存の `icomm_r`（同じ軌道群を持つフラグメント間）と `icomm_o`（同じフラグメント内の軌道群間）を利用する。native波動関数、Hamiltonian作用、時間発展は `io_s:io_e` の担当軌道だけを保持・処理し、密度・Hartree・半局所XC・電流の更新は既存ルーチンを使う。軌道グループ0が各フラグメントの全軌道係数を受け取り、MLWF・交換行列・ACEを一度構築する。構築時だけ交換行列とACE因子を同じフラグメントの他軌道群へ配布する。保持ステップでは因子を再配布しない。
+
+Gamma点・非スピン分極・直交セル・1空間ランク/フラグメントという条件は維持する。全体の交換行列とACE係数因子は各ランクに複製され、再構築担当には全ソースWFが残る。したがって全交換処理の完全分散ではない。DC-HSE基底状態計算のフラグメント内部の軌道MPI制限は今回変更していない。
+
+### Si64・8×1×1比較
+
+通常セル8個を直列配置したSi64、82.08×10.26×10.26 bohr、格子128×16×16、8フラグメント、buffer=8,0,0、LCFO基底64/フラグメント、占有128軌道。共通のDC-HSE基底状態は1148回、密度差9.9821446e-8で収束し、複素LCFO固有方程式残差は2.1988e-16。共通の保存LCFOデータを使い、追加SCFなしでRTを開始した。
+
+三次元球R=9 bohr、ACE間隔4、impulse=1e-4 a.u.、16ステップ、dt=0.16 a.u.、energy出力間隔10。両ケースOMP1/BLAS1、GNU Fortran15/AArch64のループベクトル化無効。数値ジョブは常に1本ずつ実行した。以前キャンセルした長時間Si128計算は再開していない。
+
+MPI8は `nproc_rgrid=8,1,1; nproc_ob=1`、MPI16は `nproc_rgrid=8,1,1; nproc_ob=2`、両方 `nproc_k=1`。MPI16でも `num_fragment` と `nproc_rgrid_tot` は8,1,1のままとする。
+
+| フラグメント×軌道 | MPI | 全実測秒 | RT部分秒 | 全時間高速化 | 最大ランクRSS MiB | ランク別ピーク平均 MiB | 同時合計RSS最大 MiB | E∞ (%) | D_T (%) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8×1 | 8 | 24.46 | 21.545 | 1.000倍 | 451.4 | 444.7 | 3557.5 | 0 | 0 |
+| 8×2 | 16 | 26.93 | 23.602 | 0.908倍 | 402.9 | 284.6 | 4553.2 | 1.734e-10 | +1.734e-10 |
+
+ここでのE∞ = 100 max_t|Jx_MPI16−Jx_MPI8|/max_t|Jx_MPI8|、D_T = 100(Jx_MPI16(T)−Jx_MPI8(T))/max_t|Jx_MPI8|。**比較基準は同じR=9・ACE4のMPI8であり、全範囲ACE1に対する物理近似誤差ではない。** 電流3成分の最大差7.943e-18 a.u.、出力時刻のエネルギー差0（出力精度内）、16ステップ目の密度最大差2.102e-15 a.u.。初期U・中心・占有係数の診断ファイルはバイト一致し、ACE構築11回と全更新時刻も一致した。impulse第1予測子前の再構築を維持している。
+
+RSSは約0.5秒間隔の観測値で、厳密な瞬間ピークではない。ランクごとに複製されるライブラリ・格子配列なども含む。MPI16では8ランクが約397–403 MiB、残る8ランクが約169–171 MiBのピークだったが、PIDだけからランク役割を同定してはいない。最大ランクは約11%減、ピークのランク平均は約36%減、同時合計は約28%増。波動関数1配列のコア部分だけなら、4096点×128軌道×16 byte=8 MiBから4 MiBへ半減する（haloや作業配列を除く）。
+
+この系では全時間は約10%増え、高速化は得られなかった。Hamiltonian全体の最大ランク時間は5.7582→4.0236秒（約1.43倍）へ改善した一方、RT全体は21.545→23.602秒。伝播作用の軌道分割には効果があるが、ソース・ACE再構築を8つの軌道グループ0で行う部分と、新たな群間通信は残る。再構築と通信の寄与の個別計測は未実施で、今回の全時間差の原因割合は断定しない。各条件1回の短時間測定であり、大系・長時間のスケーリングや誘電関数精度は未検証。
+
+### 回帰試験
+
+2フラグメントのMPI2対MPI4を、ACE間隔1/4、有限球R=3、`process_allocation='orbital_sequential'`、滑らかなレーザーで比較した。電流・エネルギー・最終密度・更新時刻を確認し、行数と時刻も照合した。3占有軌道を2+1へ不均等分割する試験では、共通の保存基底を両側で同じように再占有して演算同等性を確認した（この試験はGSの物理精度の評価ではない）。最大差は電流9.632e-15、エネルギー1.022e-14、密度4.902e-14。既存の半時間刻み、全範囲・大半径一致、有限半径応答、連続性診断、restart拒否、impulse/laser更新規則も成功した。2段階MPIでのACE棄却→全交換行列へのフォールバックを意図的に誘発する統合試験は未実施。

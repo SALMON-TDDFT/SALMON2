@@ -108,19 +108,29 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     complex(8),allocatable,intent(out) :: coeff(:,:)
-    complex(8),allocatable :: grid(:,:)
-    integer :: io,is(3),ie(3)
+    complex(8),allocatable :: grid(:,:),local(:,:),full_local(:,:),work(:,:)
+    integer :: io,is(3),ie(3),lo,hi,nb,n
     if(.not.lcfo_rt_active)error stop 'LCFO HSE: inactive LCFO basis'
-    if(system%nk/=1.or.system%nspin/=1.or.info%io_s/=1.or.info%io_e/=system%no.or. &
-       info%ik_s/=1.or.info%ik_e/=1.or.info%numm/=1)error stop 'LCFO HSE: requires Gamma/all orbitals per core'
+    if(system%nk/=1.or.system%nspin/=1.or.info%numo<1.or. &
+       info%ik_s/=1.or.info%ik_e/=1.or.info%numm/=1)error stop 'LCFO HSE: requires Gamma/local orbital block'
     if(any(mg%num/=lcfo_core))error stop 'LCFO HSE: native grid does not match LCFO core'
     if(.not.allocated(psi%zwf))error stop 'LCFO HSE: complex wavefunctions required'
-    is=mg%is;ie=mg%ie
-    allocate(grid(product(mg%num),system%no),coeff(sum(lcfo_counts),system%no))
-    do io=1,system%no
-      grid(:,io)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[product(mg%num)])
+    is=mg%is;ie=mg%ie;nb=sum(lcfo_counts);n=size(lcfo_basis,2)
+    allocate(grid(product(mg%num),info%numo),local(n,system%no),full_local(n,system%no));local=0d0
+    do io=info%io_s,info%io_e
+      grid(:,io-info%io_s+1)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[product(mg%num)])
     enddo
-    call lcfo_collect_coefficients(grid,coeff)
+    local(:,info%io_s:info%io_e)=matmul(conjg(transpose(lcfo_basis)),grid)*lcfo_dv
+    ! Refresh masters alone receive all orbital columns. Real-space WFs stay local.
+    call comm_summation(local,full_local,size(local),lcfo_orb_comm,0)
+    if(lcfo_orb_rank==0)then
+      allocate(work(nb,system%no),coeff(nb,system%no));work=0d0
+      lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
+      work(lo:hi,:)=full_local
+      call comm_summation(work,coeff,size(work),lcfo_comm)
+    else
+      allocate(coeff(0,0))
+    endif
   end subroutine
 
   subroutine lcfo_hse_refresh(system,mg,info,psi,exchange_energy)
@@ -129,13 +139,47 @@ contains
     type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(in) :: psi
     real(8),intent(out) :: exchange_energy
-    complex(8),allocatable :: coeff(:,:),weighted(:,:),density(:,:),work(:),source(:,:,:),action(:,:,:)
+    complex(8),allocatable :: coeff(:,:)
+    integer :: old_count,nb,factor_shape(3)
+    old_count=refresh_count;nb=sum(lcfo_counts)
+    call pack_coefficients(psi,system,mg,info,coeff)
+    if(lcfo_orb_rank==0)call refresh_master(system,mg,info,coeff,exchange_energy)
+    call comm_bcast(exchange_energy,lcfo_orb_comm,0)
+    call comm_bcast(refresh_count,lcfo_orb_comm,0)
+    call comm_bcast(refresh_origin,lcfo_orb_comm,0)
+    call comm_bcast(ace_interval,lcfo_orb_comm,0)
+    call comm_bcast(ace_valid,lcfo_orb_comm,0)
+    if(refresh_count/=old_count)then
+      if(.not.allocated(hx))allocate(hx(nb,nb))
+      call comm_bcast(hx,lcfo_orb_comm,0)
+      if(ace_valid)then
+        if(lcfo_orb_rank==0)factor_shape=shape(ace%factors)
+        call comm_bcast(factor_shape,lcfo_orb_comm,0)
+        if(lcfo_orb_rank/=0)then
+          if(allocated(ace%factors))deallocate(ace%factors)
+          allocate(ace%factors(factor_shape(1),factor_shape(2),factor_shape(3)))
+        endif
+        call comm_bcast(ace%factors,lcfo_orb_comm,0)
+        call comm_bcast(ace%dv,lcfo_orb_comm,0)
+        call comm_bcast(ace%condition,lcfo_orb_comm,0)
+      else
+        if(allocated(ace%factors))deallocate(ace%factors)
+      endif
+    endif
+  end subroutine
+
+  subroutine refresh_master(system,mg,info,coeff,exchange_energy)
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    complex(8),intent(in) :: coeff(:,:)
+    real(8),intent(out) :: exchange_energy
+    complex(8),allocatable :: weighted(:,:),density(:,:),work(:),source(:,:,:),action(:,:,:)
     complex(8),allocatable :: projected(:,:),local_hx(:,:),u(:,:,:),w(:,:,:)
     real(8),allocatable :: eigenvalues(:),rwork(:)
     real(8) :: threshold,discarded
     integer :: nb,nsel,ng,no,j,k,ierr,nrank,first,lo,hi
     external :: zheev
-    call pack_coefficients(psi,system,mg,info,coeff)
     if(.not.allocated(fragment_basis))call initialize_fragment()
     nb=size(coeff,1);no=size(coeff,2);nsel=size(selected);ng=size(fragment_basis,1)
     if(any(system%rocc(:,1,1)<0d0).or.any(system%rocc(:,1,1)>2d0).or. &
@@ -265,10 +309,10 @@ contains
         if(.not.(present(system).and.present(mg).and.present(info).and.present(psi))) &
           error stop 'LCFO HSE: impulse initial refresh requires current orbitals'
         call lcfo_hse_refresh(system,mg,info,psi,rebuilt_energy)
-        if(lcfo_rank==0)write(*,'(a)')'LCFO HSE impulse ACE rebuilt before first predictor'
+        if(lcfo_rank==0.and.lcfo_orb_rank==0)write(*,'(a)')'LCFO HSE impulse ACE rebuilt before first predictor'
       endif
     endif
-    call lcfo_mlwf_stage(stage)
+    if(lcfo_orb_rank==0)call lcfo_mlwf_stage(stage)
     select case(stage)
     case(0)
       step_start_builds=refresh_count
@@ -305,13 +349,14 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     complex(8),allocatable :: coeff(:,:),grid(:,:),hgrid(:,:),local_action(:,:)
-    integer :: ng,no,lo,hi,io,is(3),ie(3)
+    integer :: ng,no,lo,hi,io,j,is(3),ie(3)
     if(.not.allocated(hx))error stop 'LCFO HSE: refresh required before action'
-    no=system%no;ng=product(mg%num);is=mg%is;ie=mg%ie
+    no=info%numo;ng=product(mg%num);is=mg%is;ie=mg%ie
     allocate(grid(ng,no),hgrid(ng,no))
-    do io=1,no
-      grid(:,io)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
-      hgrid(:,io)=reshape(hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
+    do j=1,no
+      io=info%io_s+j-1
+      grid(:,j)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
+      hgrid(:,j)=reshape(hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
     enddo
     lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
     if(use_midpoint.and.midpoint_ace_valid)then
@@ -329,8 +374,9 @@ contains
       endif
       hgrid=matmul(lcfo_basis,matmul(conjg(transpose(lcfo_basis)),hgrid)*lcfo_dv+local_action)
     endif
-    do io=1,no
-      hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)=reshape(hgrid(:,io),mg%num)
+    do j=1,no
+      io=info%io_s+j-1
+      hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)=reshape(hgrid(:,j),mg%num)
     enddo
     hpsi%update_zwf_overlap=.false.
   end subroutine
