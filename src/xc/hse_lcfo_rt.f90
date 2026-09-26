@@ -7,8 +7,9 @@ module hse_lcfo_rt
   use salmon_global, only: hse_omega,ae_shape1
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
-    lcfo_mlwf_stage,lcfo_mlwf_accept_cached
+    lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track
   use hse_wannier, only: s_hse_wannier,wannier_init,wannier_apply,wannier_forward
+  use lcfo_ace_local, only: lcfo_ace_local_action
   use hse_ace, only: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -143,7 +144,7 @@ contains
     ! zero-field initial operator; subsequent refreshes are physical-step based.
     if(ace_interval>1.and.rt_step>0.and.ace_valid.and.allocated(cached_occupation))then
       if(mod(rt_step-refresh_origin,ace_interval)/=0.and.all(system%rocc(:,1,1)==cached_occupation))then
-        if(lcfo_mlwf_enabled)call lcfo_mlwf_source(coeff,fragment_basis,selected,source)
+        if(lcfo_mlwf_enabled)call lcfo_mlwf_track(coeff)
         allocate(u(nb,no,1),w(nb,no,1));u(:,:,1)=coeff
         call hse_ace_apply(ace,u,w,ierr)
         if(ierr/=0)error stop 'LCFO HSE: retained ACE energy action failed'
@@ -307,31 +308,33 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
-    complex(8),allocatable :: coeff(:,:),u(:,:,:),w(:,:,:),grid(:,:)
-    integer :: nb,no,ierr,lo,hi,io,is(3),ie(3)
+    complex(8),allocatable :: coeff(:,:),grid(:,:),hgrid(:,:),local_action(:,:)
+    integer :: ng,no,lo,hi,io,is(3),ie(3)
     if(.not.allocated(hx))error stop 'LCFO HSE: refresh required before action'
-    call pack_coefficients(psi,system,mg,info,coeff)
-    nb=size(coeff,1);no=size(coeff,2);allocate(u(nb,no,1),w(nb,no,1));u(:,:,1)=coeff
-    ierr=0
-    if(use_midpoint)then
-      if(midpoint_ace_valid)then
-        call hse_ace_apply(midpoint_ace,u,w,ierr)
-      else
-        w(:,:,1)=matmul(midpoint_hx,coeff)
-      endif
-    else
-      if(ace_valid)then
-        call hse_ace_apply(ace,u,w,ierr)
-      else
-        w(:,:,1)=matmul(hx,coeff)
-      endif
-    endif
-    if(ierr/=0)error stop 'LCFO HSE: ACE application failed'
-    lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
-    grid=matmul(lcfo_basis,w(lo:hi,:,1));is=mg%is;ie=mg%ie
+    no=system%no;ng=product(mg%num);is=mg%is;ie=mg%ie
+    allocate(grid(ng,no),hgrid(ng,no))
     do io=1,no
-      hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)= &
-        hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)+reshape(grid(:,io),mg%num)
+      grid(:,io)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
+      hgrid(:,io)=reshape(hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
+    enddo
+    lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
+    if(use_midpoint.and.midpoint_ace_valid)then
+      call lcfo_ace_local_action(lcfo_basis,grid,hgrid,midpoint_ace%factors(lo:hi,:,1), &
+        lcfo_dv,midpoint_ace%dv,lcfo_comm)
+    else if(.not.use_midpoint.and.ace_valid)then
+      call lcfo_ace_local_action(lcfo_basis,grid,hgrid,ace%factors(lo:hi,:,1),lcfo_dv,ace%dv,lcfo_comm)
+    else
+      allocate(coeff(size(hx,1),no))
+      call lcfo_collect_coefficients(grid,coeff)
+      if(use_midpoint)then
+        local_action=matmul(midpoint_hx(lo:hi,:),coeff)
+      else
+        local_action=matmul(hx(lo:hi,:),coeff)
+      endif
+      hgrid=matmul(lcfo_basis,matmul(conjg(transpose(lcfo_basis)),hgrid)*lcfo_dv+local_action)
+    endif
+    do io=1,no
+      hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)=reshape(hgrid(:,io),mg%num)
     enddo
     hpsi%update_zwf_overlap=.false.
   end subroutine

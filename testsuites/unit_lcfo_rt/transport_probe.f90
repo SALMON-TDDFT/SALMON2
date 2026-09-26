@@ -50,4 +50,17 @@ program transport_probe
  if(maxval(abs(next-expected))>1d-12)error stop 'Predictor rollback/cache reference contamination'
  call lcfo_mlwf_stage(2)
  write(*,*) 'Predictor rollback and cached acceptance passed'
+ ! No real-space source is required on a retained-ACE step. Transport through
+ ! a nontrivial occupied subspace, then compare the next actual source.
+ call lcfo_mlwf_track(corrected)
+ reference(:,:,1)=matmul(corrected,up(:,:,1))
+ call gauge_transport(reshape(predicted,[4,2,1]),reference,1d0,up,minimum_overlap,status)
+ expected(:,:,1)=matmul(lcfo_basis,matmul(predicted,up(:,:,1)))
+ do j=1,2;do g=1,32
+   distance=abs(modulo(real(mod(g-1,8),8)-centers(j)+4d0,8d0)-4d0)
+   if(distance>1d0)expected(g,j,1)=0d0
+ enddo;enddo
+ call lcfo_mlwf_source(predicted,lcfo_basis,[1,2,3,4],next)
+ if(maxval(abs(next-expected))>1d-12)error stop 'Transport-only frame lost'
+ write(*,*) 'Transport-only retained-ACE frame passed'
 end program

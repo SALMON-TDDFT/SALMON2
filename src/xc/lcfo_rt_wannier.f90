@@ -10,7 +10,7 @@ module lcfo_rt_wannier
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source,lcfo_mlwf_stage,lcfo_mlwf_accept_cached
+  public :: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source,lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track
   logical,save :: lcfo_mlwf_enabled=.false.
   real(8),save :: radius=0d0
   complex(8),allocatable,save :: rotation(:,:)
@@ -122,17 +122,17 @@ contains
       ' protected factors ',count(protected),' minimum x center reliability ',minval(abs(moment)/norms)
   end subroutine
 
-  subroutine lcfo_mlwf_source(coeff,basis,selected,source)
-    complex(8),intent(in) :: coeff(:,:),basis(:,:)
-    integer,intent(in) :: selected(:)
-    complex(8),allocatable,intent(out) :: source(:,:,:)
-    complex(8),allocatable :: rotated(:,:),core_wf(:,:),new_u(:,:,:)
-    real(8) :: length,distance,xx,local_loss(2),loss(2),minimum_overlap
-    integer :: ns(3),p(3),point(3),g,x,y,z,j,no,lo,hi,active_sources,active_sum,status
-    logical :: cut
-    if(.not.allocated(rotation))call initialize_rotation(coeff)
+  subroutine lcfo_mlwf_track(coeff)
+    complex(8),intent(in) :: coeff(:,:)
+    complex(8),allocatable :: new_u(:,:,:)
+    real(8) :: minimum_overlap
+    integer :: no,status
+    if(.not.allocated(rotation))then
+      call initialize_rotation(coeff)
+      return
+    endif
     no=size(coeff,2)
-    if(uses>0)then
+    if(allocated(current_frame))then
       allocate(new_u(no,no,1))
       if(lcfo_rank==0)then
         if(step_active)then
@@ -149,9 +149,21 @@ contains
       rotation=new_u(:,:,1)
       if(lcfo_rank==0)write(*,'(a,es14.6)')'LCFO MLWF transport minimum overlap ',minimum_overlap
     endif
-    rotated=matmul(coeff,rotation)
-    previous_wf=rotated;current_frame=rotated
-    allocate(source(size(basis,1),no,1));source(:,:,1)=matmul(basis,rotated(selected,:))
+    current_frame=matmul(coeff,rotation)
+    previous_wf=current_frame
+  end subroutine
+
+  subroutine lcfo_mlwf_source(coeff,basis,selected,source)
+    complex(8),intent(in) :: coeff(:,:),basis(:,:)
+    integer,intent(in) :: selected(:)
+    complex(8),allocatable,intent(out) :: source(:,:,:)
+    complex(8),allocatable :: core_wf(:,:)
+    real(8) :: length,distance,xx,local_loss(2),loss(2)
+    integer :: ns(3),p(3),point(3),g,x,y,z,j,no,lo,hi,active_sources,active_sum
+    logical :: cut
+    call lcfo_mlwf_track(coeff)
+    no=size(coeff,2)
+    allocate(source(size(basis,1),no,1));source(:,:,1)=matmul(basis,current_frame(selected,:))
     length=lcfo_grid(1)*lcfo_h(1);cut=radius>0d0.and.radius<.5d0*length
     local_loss=0d0
     if(cut)then
@@ -166,7 +178,7 @@ contains
         enddo
       enddo;enddo;enddo
       lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
-      core_wf=matmul(lcfo_basis,rotated(lo:hi,:));g=0
+      core_wf=matmul(lcfo_basis,current_frame(lo:hi,:));g=0
       do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
         g=g+1;xx=(lcfo_origins(1,lcfo_rank+1)+x)*lcfo_h(1)
         do j=1,no

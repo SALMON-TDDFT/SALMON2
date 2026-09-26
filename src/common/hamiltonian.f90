@@ -18,9 +18,9 @@
 
 module hamiltonian
   use nvtx_wrapper
-  use lcfo_rt_basis, only: lcfo_project_orbital
+  use lcfo_rt_basis, only: lcfo_project_orbital,lcfo_rt_active
 #ifdef USE_HSE
-  use hse_native, only: hse_add_action
+  use hse_native, only: hse_add_action,hse_enabled
 #endif
   implicit none
   integer,private,parameter :: Nd = 4
@@ -472,8 +472,10 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
 #ifdef USE_HSE
   call hse_add_action(tpsi,htpsi,system,mg,info)
-#endif
+  if(.not.(lcfo_rt_active.and.hse_enabled()))call lcfo_project_orbital(htpsi,mg,info)
+#else
   call lcfo_project_orbital(htpsi,mg,info)
+#endif
   call timer_end(LOG_UHPSI_ALL)
   call nvtxEndRange()
 
