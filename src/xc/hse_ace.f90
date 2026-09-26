@@ -49,6 +49,11 @@ contains
     allocate(metric(n,n),work(max(1,2*n)),e(n),rwork(max(1,3*n-2)),ace%factors(ng,n,nk))
     ace%dv=dv;ace%condition=0
     do ik=1,nk
+      ! A fragment without electrons has exactly zero exchange, a valid operator.
+      if(all(w(:,:,ik)==zero))then
+        ace%factors(:,:,ik)=zero
+        cycle
+      endif
       call zgemm('C','N',n,n,ng,-one*dv,u(1,1,ik),ng,w(1,1,ik),ng,zero,metric(1,1),n)
       scale=sqrt(sum(abs(metric)**2))
       if(scale==0d0.or.sqrt(sum(abs(metric-transpose(conjg(metric)))**2))>1d-10*scale)goto 900

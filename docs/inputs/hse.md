@@ -91,3 +91,66 @@ Default-propagator validation: MPI8 one-step Si calculations with omitted
 and energy files. Explicitly disabling predictor/corrector is rejected. The
 non-HSE PZ default remains middlepoint without predictor/corrector. Developer
 propagation paths remain available for historical validation.
+
+## Fragment-periodic DC-HSE and the Wannier backend
+
+This branch adds `yn_dc='y'` with `xc='hse06'`. Each fragment **including its
+buffer** has periodic screened exchange and its own ACE. Hartree/density assembly
+retains the existing DC implementation. Complex orbitals are used at Gamma too.
+See the runnable [small example and validation](../../samples/dc_hse/README.md).
+
+The following `&functional` inputs select/control the new backend:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `yn_hse_wannier` | `'n'` | Select the rectangular full-mesh Wannier backend. Automatically enabled for DC-HSE. |
+| `hse_mlwf_interval` | `10` | Positive number of exchange refreshes between spread minimizations. Polar transport/reconstruction is performed on every changed source. |
+| `hse_mlwf_maxiter` | `200` | Positive maximum number of unitary spread-descent iterations per minimization. |
+| `hse_mlwf_tolerance` | `1d-6` | Positive finite spread-gradient norm tolerance, always in atomic units (bohr squared), independent of `unit_system`. |
+
+The refresh count includes predictor and corrected states in RT, and is **not**
+a count of physical time steps. Unchanged orbitals *and* occupations reuse the
+cached exchange. Occupation changes invalidate the cache. `status=0` in
+`HSE_WANNIER` diagnostics means the gradient criterion was met; `status=1` means
+it was not. A finite iteration limit does not guarantee an MLWF minimum.
+Unconverged localization retains full-support exact exchange with an explicit
+message. The first refresh has no previous overlap (reported as zero).
+
+For DC, provide a nonnegative electronic `temperature` or `temperature_k` and
+enough `nstate_frag` to hold the occupied fragment space. Fractional occupations
+and extra states are supported. All retained states define the localization
+frame `Phi=Psi U`. The density factors used for exchange are
+`Q=Psi sqrt(f/2) U`, **not** `Phi` with artificially equal occupations. Q need not
+be orthonormal and is not itself an occupied-only MLWF basis. This preserves
+`Psi (f/2) Psi†` exactly for unitary U. No disentanglement is implemented.
+
+Requirements: orthogonal periodic cells, full uniformly weighted standard
+rectangular k meshes, CPU, unpolarized fixed ions, `nproc_ob=1`, and
+`nproc_rgrid=1,1,1` within each fragment. Fragments and their k points can run in
+parallel. Existing DC restrictions on split-axis k points and buffer directions
+still apply. Symmetry-reduced/custom k meshes, GPU, orbital/grid decomposition,
+DFT+U, spin-orbit and microscopic vector potentials are unsupported.
+
+Ordinary (non-DC) GS may explicitly select this backend, including fractional
+occupations and extra states. Its RT path currently requires occupied-only fixed
+occupations and default Taylor4+ACE. Polar temporal transport uses the previous
+localized orbitals: `U=polar(Psi_current† Phi_previous dv)`, followed by occasional
+spread minimization. Accepted link phases are continued through ±pi during the
+line search. U/history are held in memory; they are reinitialized after restart,
+which leaves the full-support exchange operator invariant. No new checkpoint
+format or DC-to-global-RT projection is supplied.
+
+DC energy uses core-weighted exchange: the full core expectation is removed from
+the inferred ionic nonlocal term and half is added to XC once. LCFO applies the
+full retained-fragment exchange to its basis, rather than extrapolating the ACE
+operator outside its construction space. Buffer-size convergence remains a
+required physical convergence study; small smoke tests do not establish it.
+
+**Current performance boundary:** this is the exact full-support Wannier
+baseline. It transforms a fragment's full k mesh to its Born–von Karman
+supercell and evaluates all source/target pairs without spatial or distance
+cutoffs. Each fragment's k root performs full exchange; ACE applies locally on
+all k owners. DC and ACE are active, but pair pruning, local Poisson boxes,
+distributed Wannier-pair scheduling and large-system speedup are not yet
+implemented or demonstrated. Source-only truncation from the reference scripts
+is deliberately not used as a variational SCF approximation.

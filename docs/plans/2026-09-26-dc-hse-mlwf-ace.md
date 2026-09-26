@@ -30,4 +30,12 @@
 
 ## Progress
 
-- Branch/worktree created. No production code changed yet.
+- Implemented rectangular fractional-occupation fragment exchange, polar/MV gauge optimization, ACE, DC core energy accounting and full LCFO action.
+- Added phase continuation through the complex ±pi cut, with a compiled regression. Independent review found no remaining blocker for the full-support baseline.
+- Four new compiled unit tests pass; eight legacy native tests including MPI pass.
+- MPI DC-HSE case 422 and existing complex PZ-LCFO case 130 pass.
+- Six fresh GS/DC comparisons pass, including genuinely smaller fragments, Gamma, decomposition parity and one-fragment equivalence.
+- Four-step RT comparisons with intervals 1/10 and a step-2 restart pass.
+- HSE-enabled MPI and HSE-disabled serial builds pass. Serial C2H2 calculation and Python3 verification pass (the legacy CTest launcher expects a missing `python` alias).
+- Updated local input documentation and SALMON-DOCS on its own dc-hse-mlwf-ace branch (290af91).
+- Scope remains the exact full-support baseline: no spatial pair pruning/local Poisson/distributed pair scheduler or large-system scaling claim. Some retained-subspace fixtures reach the localization iteration limit; diagnostics expose this, while exchange remains gauge invariant.

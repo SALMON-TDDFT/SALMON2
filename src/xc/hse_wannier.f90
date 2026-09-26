@@ -1,0 +1,273 @@
+! Rectangular fragment-periodic screened exchange in a Wannier representation.
+! Q = Psi sqrt(f/2) U preserves fractional occupations; Phi = Psi U is the
+! orthonormal localization frame. Neither the HSE fraction nor spin doubling
+! is included in this module's action. Full periodic support is retained.
+module hse_wannier
+  use iso_c_binding
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use hse_wannier_gauge, only: gauge_transport,gauge_minimize,gauge_seed
+  implicit none
+  private
+  include 'fftw3.f03'
+  public :: s_hse_wannier,wannier_init,wannier_destroy,wannier_localize
+  public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
+  type s_hse_wannier
+    integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
+    integer :: localization_iterations=0,localization_status=1
+    real(8) :: h(3)=0d0,dv=0d0,spread=0d0,gradient=huge(1d0),min_singular=0d0
+    real(8),allocatable :: k(:,:),position(:,:),multiplier(:,:,:)
+    integer,allocatable :: point(:,:),primitive_point(:),cell(:,:),neighbors(:,:)
+    complex(8),allocatable :: phase(:,:),source(:,:),previous(:,:,:),gauge(:,:,:),work(:,:,:)
+    type(c_ptr) :: forward=c_null_ptr,backward=c_null_ptr
+  end type
+contains
+  subroutine wannier_destroy(op)
+    implicit none
+    type(s_hse_wannier),intent(inout) :: op
+    type(s_hse_wannier) :: empty
+    if(c_associated(op%forward))call fftw_destroy_plan(op%forward)
+    if(c_associated(op%backward))call fftw_destroy_plan(op%backward)
+    op=empty
+  end subroutine
+
+  subroutine wannier_init(op,n,mesh,h,k,omega,status)
+    implicit none
+    type(s_hse_wannier),intent(inout) :: op
+    integer,intent(in) :: n(3),mesh(3)
+    real(8),intent(in) :: h(3),k(:,:),omega
+    integer,intent(out) :: status
+    integer :: x,y,z,g,ik,j,axis,offset(3),index(3),flat,ns(3),p(3),r(3),ic
+    integer,allocatable :: order(:)
+    real(8) :: pi,scaled(3),length(3),q(3),q2,delta(3)
+    call wannier_destroy(op)
+    status=1
+    if(any(n<1).or.any(mesh<1).or.any(h<=0d0).or.omega<=0d0)return
+    if(.not.all(ieee_is_finite(h)).or..not.ieee_is_finite(omega))return
+    if(size(k,1)/=3.or.size(k,2)/=product(mesh).or..not.all(ieee_is_finite(k)))return
+    op%n=n;op%mesh=mesh;op%ns=n*mesh;op%ng=product(n);op%nk=product(mesh);op%ngs=product(op%ns)
+    op%h=h;op%dv=product(h);op%k=k;ns=op%ns;pi=acos(-1d0);length=n*h
+    allocate(order(op%nk),op%neighbors(6,op%nk));order=0
+    do ik=1,op%nk
+      scaled=(k(:,ik)-k(:,1))*length*mesh/(2*pi)
+      if(maxval(abs(scaled-anint(scaled)))>1d-8)goto 900
+      index=modulo(nint(scaled),mesh)
+      flat=1+index(1)+mesh(1)*(index(2)+mesh(2)*index(3))
+      if(order(flat)/=0)goto 900
+      order(flat)=ik
+    enddo
+    do ik=1,op%nk
+      index=modulo(nint((k(:,ik)-k(:,1))*length*mesh/(2*pi)),mesh)
+      do axis=1,3
+        offset=0;offset(axis)=1
+        p=modulo(index+offset,mesh)
+        op%neighbors(axis,ik)=order(1+p(1)+mesh(1)*(p(2)+mesh(2)*p(3)))
+        p=modulo(index-offset,mesh)
+        op%neighbors(axis+3,ik)=order(1+p(1)+mesh(1)*(p(2)+mesh(2)*p(3)))
+      enddo
+    enddo
+    allocate(op%point(3,op%ngs),op%primitive_point(op%ngs),op%position(3,op%ng))
+    allocate(op%cell(3,op%nk),op%phase(op%ngs,op%nk))
+    g=0
+    do z=0,n(3)-1;do y=0,n(2)-1;do x=0,n(1)-1
+      g=g+1;op%position(:,g)=[x,y,z]*h
+    enddo;enddo;enddo
+    g=0
+    do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
+      g=g+1;op%point(:,g)=[x,y,z];p=modulo([x,y,z],n)
+      op%primitive_point(g)=1+p(1)+n(1)*(p(2)+n(2)*p(3))
+      do ik=1,op%nk
+        op%phase(g,ik)=exp(cmplx(0d0,sum((k(:,ik)-k(:,1))*[x,y,z]*h),8))
+      enddo
+    enddo;enddo;enddo
+    ic=0
+    do z=0,mesh(3)-1;do y=0,mesh(2)-1;do x=0,mesh(1)-1
+      ic=ic+1;op%cell(:,ic)=[x,y,z]*n
+    enddo;enddo;enddo
+    allocate(op%multiplier(ns(1),ns(2),ns(3)),op%work(ns(1),ns(2),ns(3)))
+    do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
+      p=[x,y,z]
+      where(p>=(ns+1)/2)p=p-ns
+      q=2*pi*p/(ns*h);q2=sum(q*q)
+      if(q2<1d-24)then
+        op%multiplier(x+1,y+1,z+1)=pi/omega**2
+      else
+        op%multiplier(x+1,y+1,z+1)=4*pi*(1-exp(-q2/(4*omega**2)))/q2
+      endif
+    enddo;enddo;enddo
+    op%forward=fftw_plan_dft_3d(ns(3),ns(2),ns(1),op%work,op%work,FFTW_FORWARD,FFTW_ESTIMATE)
+    op%backward=fftw_plan_dft_3d(ns(3),ns(2),ns(1),op%work,op%work,FFTW_BACKWARD,FFTW_ESTIMATE)
+    if(.not.c_associated(op%forward).or..not.c_associated(op%backward))goto 900
+    status=0;return
+900 call wannier_destroy(op)
+  end subroutine
+
+  subroutine wannier_forward(op,bloch,home)
+    implicit none
+    type(s_hse_wannier),intent(in) :: op
+    complex(8),intent(in) :: bloch(:,:,:)
+    complex(8),intent(out) :: home(:,:)
+    integer :: ik,j,g,p
+    home=0d0
+    do ik=1,op%nk
+      do j=1,size(bloch,2)
+        do g=1,op%ngs
+          p=op%primitive_point(g)
+          home(g,j)=home(g,j)+bloch(p,j,ik)*op%phase(g,ik)/op%nk
+        enddo
+      enddo
+    enddo
+  end subroutine
+
+  subroutine wannier_backward(op,home,bloch)
+    implicit none
+    type(s_hse_wannier),intent(in) :: op
+    complex(8),intent(in) :: home(:,:)
+    complex(8),intent(out) :: bloch(:,:,:)
+    integer :: ik,j,g,p
+    bloch=0d0
+    do ik=1,op%nk
+      do j=1,size(home,2)
+        do g=1,op%ngs
+          p=op%primitive_point(g)
+          bloch(p,j,ik)=bloch(p,j,ik)+home(g,j)*conjg(op%phase(g,ik))
+        enddo
+      enddo
+    enddo
+  end subroutine
+
+  subroutine wannier_localize(op,psi,maxiter,tolerance,status)
+    implicit none
+    type(s_hse_wannier),intent(inout) :: op
+    complex(8),intent(in) :: psi(:,:,:)
+    integer,intent(in) :: maxiter
+    real(8),intent(in) :: tolerance
+    integer,intent(out) :: status
+    complex(8),allocatable :: raw(:,:,:,:),shifted(:,:)
+    real(8) :: b(3,6),weights(6),length(3),gvec(3),pi,delta
+    integer :: n,ik,axis,next,j,g,transport_status
+    status=1;n=size(psi,2)
+    if(size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
+    if(.not.allocated(op%gauge))then
+      allocate(op%gauge(n,n,op%nk));op%gauge=0d0
+      do ik=1,op%nk
+        do j=1,n
+          op%gauge(j,j,ik)=1d0
+        enddo
+      enddo
+    endif
+    if(.not.allocated(op%previous))then
+      call gauge_seed(psi,op%position,op%k,op%gauge,transport_status)
+      if(transport_status/=0)then
+        op%gauge=0d0
+        do ik=1,op%nk
+          do j=1,n
+            op%gauge(j,j,ik)=1d0
+          enddo
+        enddo
+      endif
+    endif
+    if(allocated(op%previous))then
+      call gauge_transport(psi,op%previous,op%dv,op%gauge,op%min_singular,transport_status)
+      if(transport_status/=0)then
+        ! Overlap loss: restart the gauge, never project away current states.
+        op%gauge=0d0
+        do ik=1,op%nk
+          do j=1,n
+            op%gauge(j,j,ik)=1d0
+          enddo
+        enddo
+      endif
+    endif
+    allocate(raw(n,n,6,op%nk),shifted(op%ng,n))
+    b=0d0;pi=acos(-1d0);length=op%n*op%h
+    do axis=1,3
+      delta=2*pi/(length(axis)*op%mesh(axis))
+      b(axis,axis)=delta;b(axis,axis+3)=-delta
+      weights(axis)=1d0/(2*delta**2);weights(axis+3)=weights(axis)
+    enddo
+    do ik=1,op%nk
+      do axis=1,3
+        next=op%neighbors(axis,ik)
+        gvec=op%k(:,ik)+b(:,axis)-op%k(:,next)
+        do j=1,n
+          do g=1,op%ng
+            shifted(g,j)=psi(g,j,next)*exp(cmplx(0d0,-sum(op%position(:,g)*gvec),8))
+          enddo
+        enddo
+        raw(:,:,axis,ik)=matmul(conjg(transpose(psi(:,:,ik))),shifted)*op%dv
+        raw(:,:,axis+3,next)=conjg(transpose(raw(:,:,axis,ik)))
+      enddo
+    enddo
+    call gauge_minimize(op%gauge,raw,op%neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
+                        op%localization_iterations,op%localization_status)
+    if(.not.allocated(op%previous))allocate(op%previous(op%ng,n,op%nk))
+    do ik=1,op%nk
+      op%previous(:,:,ik)=matmul(psi(:,:,ik),op%gauge(:,:,ik))
+    enddo
+    op%updates=op%updates+1
+    ! A valid but not converged gauge changes cost/locality, not full-support EXX.
+    status=0
+  end subroutine
+
+  subroutine wannier_set_source(op,psi,occupation,gauge,status)
+    implicit none
+    type(s_hse_wannier),intent(inout) :: op
+    complex(8),intent(in) :: psi(:,:,:),gauge(:,:,:)
+    real(8),intent(in) :: occupation(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: weighted(:,:,:),tmp(:,:)
+    integer :: n,j,ik
+    status=1;n=size(psi,2)
+    if(size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
+    if(any(shape(occupation)/=[n,op%nk]).or.any(shape(gauge)/=[n,n,op%nk]))return
+    if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))return
+    allocate(weighted(op%ng,n,op%nk),tmp(op%ng,n))
+    do ik=1,op%nk
+      do j=1,n
+        tmp(:,j)=psi(:,j,ik)*sqrt(occupation(j,ik)/2d0)
+      enddo
+      weighted(:,:,ik)=matmul(tmp,gauge(:,:,ik))
+    enddo
+    if(allocated(op%source))deallocate(op%source)
+    allocate(op%source(op%ngs,n))
+    call wannier_forward(op,weighted,op%source)
+    status=0
+  end subroutine
+
+  subroutine wannier_apply(op,target,action,status)
+    implicit none
+    type(s_hse_wannier),intent(inout) :: op
+    complex(8),intent(in) :: target(:,:,:)
+    complex(8),intent(out) :: action(:,:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: home(:,:),result(:,:),source(:),potential(:)
+    integer :: i,j,ic,g,p(3),index,nt
+    status=1;action=0d0
+    if(.not.allocated(op%source))return
+    if(size(target,1)/=op%ng.or.size(target,3)/=op%nk.or.any(shape(action)/=shape(target)))return
+    nt=size(target,2)
+    allocate(home(op%ngs,nt),result(op%ngs,nt),source(op%ngs),potential(op%ngs))
+    call wannier_forward(op,target,home);result=0d0
+    do ic=1,op%nk
+      do i=1,size(op%source,2)
+        do g=1,op%ngs
+          p=modulo(op%point(:,g)-op%cell(:,ic),op%ns)
+          index=1+p(1)+op%ns(1)*(p(2)+op%ns(2)*p(3))
+          source(g)=op%source(index,i)
+        enddo
+        if(maxval(abs(source))==0d0)cycle
+        do j=1,nt
+          if(maxval(abs(home(:,j)))==0d0)cycle
+          op%work=reshape(conjg(source)*home(:,j),op%ns)
+          call fftw_execute_dft(op%forward,op%work,op%work)
+          op%work=op%work*op%multiplier
+          call fftw_execute_dft(op%backward,op%work,op%work)
+          potential=reshape(op%work,[op%ngs])/op%ngs
+          result(:,j)=result(:,j)-source*potential
+        enddo
+      enddo
+    enddo
+    call wannier_backward(op,result,action)
+    status=0
+  end subroutine
+end module

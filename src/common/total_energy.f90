@@ -530,7 +530,7 @@ CONTAINS
     use communication, only: comm_summation
     use hamiltonian, only: hpsi
     use pseudo_pt_so_sub, only: pseudo_so
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit,yn_dc
     use timer
     use nvtx_wrapper
     implicit none
@@ -563,9 +563,9 @@ CONTAINS
 
     call timer_begin(LOG_EIGEN_ENERGY_HPSI)
 #ifdef USE_HSE
-    if(hse_enabled())energy%E_xc=energy%E_xc-hse_exchange_energy
+    if(hse_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc-hse_exchange_energy
     call hse_refresh(system,mg,info,tpsi)
-    if(hse_enabled())energy%E_xc=energy%E_xc+hse_exchange_energy
+    if(hse_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc+hse_exchange_energy
 #endif
     call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_EIGEN_ENERGY_HPSI)

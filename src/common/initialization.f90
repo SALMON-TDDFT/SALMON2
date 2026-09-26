@@ -106,7 +106,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   use structures
   use lattice
   use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & Rion,Rion_red,kion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
+  & Rion,Rion_red,kion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit,xc, &
   & iflag_atom_coor,ntype_atom_coor_reduced,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
@@ -175,7 +175,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
         system%if_real_orbital = .false.
       end if
     end select
-    if ( yn_spinorbit=='y' ) system%if_real_orbital=.false.
+    if ( yn_spinorbit=='y' .or. xc=='hse06' ) system%if_real_orbital=.false.
   end if
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital

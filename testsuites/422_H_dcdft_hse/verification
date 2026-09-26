@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+import math
+from pathlib import Path
+text=Path('outputfile').read_text()
+assert 'end SALMON' in text, 'Calculation did not complete'
+assert 'HSE_WANNIER' in text, 'Fragment Wannier exchange was not used'
+assert 'DC_HSE_CORE' in text, 'Core exchange accounting missing'
+# Match independent of whitespace in the legacy DC output.
+records=[line.split() for line in text.splitlines() if line.split()[:3]==['DC','#SCF','=']]
+assert records and float(records[-1][10])<=1e-8, 'DC SCF did not converge'
+assert math.isfinite(float(records[-1][7])), 'Nonfinite total energy'
+f=Path('data_dcdft/total/H_dc_hse_lcfo_complex_eigen.data')
+values=[float(line.split()[3]) for line in f.read_text().splitlines() if line.strip() and not line.startswith('#')]
+assert len(values)==8 and all(map(math.isfinite,values)), 'LCFO eigenvalues missing/nonfinite'
+print('DC-HSE converged; two k points, complex LCFO, core exchange accounting present')

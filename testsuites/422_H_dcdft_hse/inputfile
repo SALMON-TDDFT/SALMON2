@@ -1,0 +1,62 @@
+&calculation
+ theory='dft'
+ yn_dc='y'
+/
+&dc
+ num_fragment=2,1,1
+ num_rgrid_buffer=4,0,0
+ nproc_rgrid_tot=4,1,1
+ nstate_frag=4
+ yn_dc_lcfo='y'
+ energy_cut=100d0
+ lambda_cut=1d-7
+/
+&parallel
+ nproc_k=2
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+/
+&control
+ sysname='H_dc_hse'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&system
+ yn_periodic='y'
+ al=16d0,8d0,8d0
+ nstate=4
+ nelec=4
+ nelem=1
+ natom=4
+ temperature_k=300d0
+/
+&pseudo
+ izatom(1)=1
+ file_pseudo(1)='H_rps.dat'
+ lmax_ps(1)=0
+ lloc_ps(1)=0
+/
+&functional
+ xc='hse06'
+/
+&rgrid
+ num_rgrid=16,8,8
+/
+&kgrid
+ num_kgrid=1,2,1
+/
+&scf
+ nscf=200
+ ncg=4
+ threshold=1d-8
+ nscf_init_redistribution=0
+ nscf_init_no_diagonal=0
+/
+&atomic_coor
+ 'H' 3.3d0 4d0 4d0 1
+ 'H' 4.7d0 4d0 4d0 1
+ 'H' 11.3d0 4d0 4d0 1
+ 'H' 12.7d0 4d0 4d0 1
+/

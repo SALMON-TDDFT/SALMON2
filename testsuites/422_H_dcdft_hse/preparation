@@ -1,0 +1,2 @@
+#!/bin/sh
+cp ../pseudo/H_rps.dat ./

@@ -1,6 +1,7 @@
 #include "config.h"
 ! SALMON adapter: initial certified layout is complete grid/orbitals per rank,
-! distributed k points. Exchange transfers density tiles; ACE applications stay local.
+! distributed k points. The legacy backend transfers density tiles; the Wannier
+! baseline gathers a fragment on its k root. ACE applications stay local.
 module hse_native
   use iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -8,17 +9,23 @@ module hse_native
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
   use hse_ace
+  use hse_wannier
   use hse_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+    yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance
   implicit none
   private
   public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
   public :: hse_pack,hse_unpack,hse_timings,hse_walltime
-  public :: hse_taylor_stage
+  public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
   type(hse_symmetry_map),save :: symmetry_map
   type(hse_kernel),save :: kernel
+  type(s_hse_wannier),save :: wannier
+  real(8),allocatable,save :: cached_occupation(:,:)
+  complex(8),allocatable,save :: cached_action(:,:,:)
+  logical,save :: hse_force_full_action=.false.
   type(hse_ace_state),save :: ace
   type(hse_ace_state),save :: initial_ace,midpoint_ace
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
@@ -112,10 +119,14 @@ contains
       error stop 'HSE06: initial native support requires k-only MPI distribution'
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
-    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_dc/='n'.or.yn_md/='n'.or.yn_symmetrized_stencil=='y') &
+    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_md/='n'.or.yn_symmetrized_stencil=='y') &
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
+    if(use_wannier_exchange())then
+      call refresh_wannier(system,mg,info,psi)
+      return
+    endif
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
     if(use_symmetry)mesh=num_kgrid(1)
     if(any(mg%num/=n).or.(.not.use_symmetry.and.mesh**3/=nk).or. &
@@ -286,7 +297,10 @@ contains
       action_work(ng,info%numo,info%numk),output_work(ng,info%numo,info%numk))
     call hse_pack(psi,mg,info,target_work)
     if(timing_enabled)tick=hse_walltime()
-    if(taylor_active.and.propagator=='hse_taylor4_full')then
+    if(use_wannier_exchange().and.hse_force_full_action)then
+      call apply_wannier_collective(target_work,action_work,info)
+      ierr=0
+    else if(taylor_active.and.propagator=='hse_taylor4_full')then
       communication_before=hse_timings(4)
       if(taylor_midpoint)then
         call apply_distributed(midpoint_source,target_work,action_work,info,ierr)
@@ -308,5 +322,125 @@ contains
     call hse_pack(hpsi,mg,info,output_work)
     output_work=output_work+.25d0*action_work
     call hse_unpack(output_work,hpsi,mg,info)
+  end subroutine
+  logical function use_wannier_exchange()
+    implicit none
+    use_wannier_exchange=yn_dc=='y'.or.yn_hse_wannier=='y'
+  end function
+
+  subroutine refresh_wannier(system,mg,info,psi)
+    use communication, only: comm_bcast
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),intent(in) :: psi
+    complex(8),allocatable :: local(:,:,:),send(:,:,:),allpsi(:,:,:),allw(:,:,:),w(:,:,:)
+    real(8) :: ex,offdiag(3,3)
+    integer :: ng,no,nk,ik,j,status,changed,total_changed,maxiter
+    ng=product(mg%num);no=system%no;nk=system%nk
+    if(use_symmetry.or.nk/=product(num_kgrid))error stop 'HSE Wannier: full k mesh required'
+    if(maxval(abs(system%wtk-1d0/nk))>1d-12)error stop 'HSE Wannier: uniform k weights required'
+    offdiag=system%primitive_a
+    do j=1,3
+      offdiag(j,j)=0d0
+    enddo
+    if(maxval(abs(offdiag))>1d-12)error stop 'HSE Wannier: orthogonal cell required'
+    if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE Wannier: invalid orbital layout'
+    allocate(local(ng,no,info%numk))
+    call hse_pack(psi,mg,info,local)
+    changed=1
+    if(allocated(cached_source).and.allocated(cached_occupation))then
+      if(all(shape(cached_source)==shape(local)).and.all(shape(cached_occupation)==shape(system%rocc(:,:,1))))then
+        if(all(cached_source==local).and.all(cached_occupation==system%rocc(:,:,1)))changed=0
+      endif
+    endif
+    call comm_summation(changed,total_changed,info%icomm_k)
+    if(total_changed==0)return
+    allocate(send(ng,no,nk),allpsi(ng,no,nk),allw(ng,no,nk),w(ng,no,info%numk))
+    send=0d0;send(:,:,info%ik_s:info%ik_e)=local
+    call comm_summation(send,allpsi,size(send),info%icomm_k)
+    status=0
+    if(info%id_k==0)then
+      if(wannier%ng==0)call wannier_init(wannier,mg%num,num_kgrid,system%hgs,system%vec_k,hse_omega,status)
+      if(status==0)then
+        maxiter=0
+        if(mod(wannier%updates,hse_mlwf_interval)==0)maxiter=hse_mlwf_maxiter
+        call wannier_localize(wannier,allpsi,maxiter,hse_mlwf_tolerance,status)
+      endif
+      if(status==0)call wannier_set_source(wannier,allpsi,system%rocc(:,:,1),wannier%gauge,status)
+      if(status==0)call wannier_apply(wannier,allpsi,allw,status)
+      if(status==0.and.(wannier%updates==1.or.maxiter>0))then
+        write(*,'(a,3i7,3es16.7)')'HSE_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &
+        wannier%updates,wannier%localization_iterations,wannier%localization_status, &
+        wannier%spread,wannier%gradient,wannier%min_singular
+        if(wannier%localization_status/=0) &
+          write(*,'(a)')'HSE_WANNIER: localization not converged; retaining full-support exact exchange.'
+      endif
+    endif
+    call comm_bcast(status,info%icomm_k,0)
+    if(status/=0)error stop 'HSE Wannier: collective exchange refresh failed'
+    call comm_bcast(allw,info%icomm_k,0)
+    w=allw(:,:,info%ik_s:info%ik_e)
+    call hse_ace_build(ace,local,w,system%hvol,status)
+    call comm_summation(status,total_changed,info%icomm_k)
+    if(total_changed/=0)error stop 'HSE Wannier: ACE construction metric failed'
+    cached_source=local;cached_occupation=system%rocc(:,:,1);cached_action=w
+    ex=0d0
+    do ik=1,info%numk
+      do j=1,no
+        ex=ex+.125d0*system%rocc(j,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1)*system%hvol &
+          *real(sum(conjg(local(:,j,ik))*w(:,j,ik)),8)
+      enddo
+    enddo
+    call comm_summation(ex,hse_exchange_energy,info%icomm_k)
+  end subroutine
+
+  subroutine apply_wannier_collective(target,action,info)
+    use communication, only: comm_bcast
+    implicit none
+    complex(8),intent(in) :: target(:,:,:)
+    complex(8),intent(out) :: action(:,:,:)
+    type(s_parallel_info),intent(in) :: info
+    complex(8),allocatable :: send(:,:,:),alltarget(:,:,:),allaction(:,:,:)
+    integer :: ng,nt,nk,status
+    ng=size(target,1);nt=size(target,2);nk=product(num_kgrid)
+    allocate(send(ng,nt,nk),alltarget(ng,nt,nk),allaction(ng,nt,nk))
+    send=0d0;send(:,:,info%ik_s:info%ik_e)=target
+    call comm_summation(send,alltarget,size(send),info%icomm_k)
+    status=0
+    if(info%id_k==0)call wannier_apply(wannier,alltarget,allaction,status)
+    call comm_bcast(status,info%icomm_k,0)
+    if(status/=0)error stop 'HSE Wannier: full trial action failed'
+    call comm_bcast(allaction,info%icomm_k,0)
+    action=allaction(:,:,info%ik_s:info%ik_e)
+  end subroutine
+
+  subroutine hse_core_exchange(system,mg,info,psi,core,energy)
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),intent(in) :: psi
+    integer,intent(in) :: core(3)
+    real(8),intent(out) :: energy
+    real(8) :: local
+    integer :: ix,iy,iz,io,ik,g
+    if(.not.allocated(cached_action))error stop 'DC HSE: refreshed exchange action missing'
+    local=0d0
+    do ik=info%ik_s,info%ik_e
+      do io=info%io_s,info%io_e
+        do iz=mg%is(3),min(mg%ie(3),core(3))
+          do iy=mg%is(2),min(mg%ie(2),core(2))
+            do ix=mg%is(1),min(mg%ie(1),core(1))
+              g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
+              local=local+.125d0*system%rocc(io,ik,1)*system%wtk(ik)*system%hvol &
+                *real(conjg(psi%zwf(ix,iy,iz,1,io,ik,1))*cached_action(g,io,ik-info%ik_s+1),8)
+            enddo
+          enddo
+        enddo
+      enddo
+    enddo
+    call comm_summation(local,energy,info%icomm_k)
   end subroutine
 end module

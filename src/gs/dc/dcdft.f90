@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+#include "config.h"
 module dcdft
   implicit none
 contains
@@ -777,6 +778,9 @@ contains
     use hamiltonian, only: add_xc_tau_operator
     use sendrecv_grid, only: update_overlap_real8, update_overlap_complex8
     use Total_Energy, only: calc_Total_Energy_periodic
+#ifdef USE_HSE
+    use hse_native, only: hse_enabled,hse_core_exchange
+#endif
     use salmon_global, only: kion !!!!!! future work: remove (kion --> system%kion)
     implicit none
     type(s_rgrid),        intent(in) :: mg
@@ -796,7 +800,7 @@ contains
     !
     integer :: ispin,io,ik
     integer,dimension(3) :: is,ie
-    real(8) :: E_tmp,E_local(2),E_sum(2)
+    real(8) :: E_tmp,E_local(2),E_sum(2),exchange_core,exchange_total
     type(s_orbital) :: staupsi
 
     is(1:3) = mg%is(1:3)
@@ -912,6 +916,17 @@ contains
       
     energy%E_kin = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
+#ifdef USE_HSE
+    if(hse_enabled())then
+      call hse_core_exchange(system,mg,info,spsi,dc%nxyz_domain,exchange_core)
+      E_tmp=0d0
+      if(info%id_rko==0)E_tmp=exchange_core
+      call comm_summation(E_tmp,exchange_total,dc%icomm_tot)
+      energy%E_ion_nloc=energy%E_ion_nloc-2d0*exchange_total
+      energy%E_xc=energy%E_xc+exchange_total
+      if(dc%id_tot==0)write(*,'(a,es24.15)')'DC_HSE_CORE exchange Ha = ',exchange_total
+    endif
+#endif
     
   ! override (fragment --> total)
     deallocate(kion)

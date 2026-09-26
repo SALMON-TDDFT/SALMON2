@@ -120,6 +120,9 @@ module salmon_global
   character(64)  :: xc !, xcname
   character(64)  :: xname
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
+  character(1) :: yn_hse_wannier
+  integer :: hse_mlwf_interval,hse_mlwf_maxiter
+  real(8) :: hse_mlwf_tolerance
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc

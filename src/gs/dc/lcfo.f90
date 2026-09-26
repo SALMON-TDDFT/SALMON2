@@ -35,6 +35,9 @@ contains
     use structures
     use salmon_global, only: yn_spinorbit
     use lcfo_complex, only: dc_lcfo_complex
+#ifdef USE_HSE
+    use hse_native, only: hse_force_full_action
+#endif
     implicit none
     type(s_rgrid),        intent(in) :: lg,mg
     type(s_dft_system),   intent(in) :: system
@@ -49,11 +52,17 @@ contains
     type(s_dcdft)                    :: dc
 
     if (yn_spinorbit == 'y') stop "DC-LCFO: spin-orbit and noncollinear LCFO are unsupported."
+#ifdef USE_HSE
+    hse_force_full_action=.true.
+#endif
     if (system%if_real_orbital) then
       call dc_lcfo_real(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     else
       call dc_lcfo_complex(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
     end if
+#ifdef USE_HSE
+    hse_force_full_action=.false.
+#endif
   end subroutine dc_lcfo
 
   subroutine dc_lcfo_real(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)

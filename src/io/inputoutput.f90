@@ -278,7 +278,7 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, hse_omega, &
+      & cname, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -730,6 +730,10 @@ contains
     xname = 'none'
     cname = 'none'
     hse_omega = .11d0 / ulength_from_au ! inverse input length
+    yn_hse_wannier = 'n'
+    hse_mlwf_interval = 10
+    hse_mlwf_maxiter = 200
+    hse_mlwf_tolerance = 1d-6
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
@@ -1294,6 +1298,10 @@ contains
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(yn_hse_wannier,nproc_group_global)
+    call comm_bcast(hse_mlwf_interval,nproc_group_global)
+    call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
+    call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
@@ -2230,6 +2238,10 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
+      write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
+      write(fh_variables_log, *) "# hse_mlwf_interval=",hse_mlwf_interval
+      write(fh_variables_log, *) "# hse_mlwf_maxiter=",hse_mlwf_maxiter
+      write(fh_variables_log, *) "# hse_mlwf_tolerance=",hse_mlwf_tolerance
 #ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
@@ -2850,6 +2862,7 @@ contains
     call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
+    call yn_argument_check(yn_hse_wannier)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
@@ -3099,8 +3112,24 @@ contains
 #endif
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n') &
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
-      if(nstate*2/=nelec.or.temperature>=0d0) &
-        error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
+      if(yn_dc=='y')yn_hse_wannier='y'
+      if(yn_hse_wannier=='y')then
+        if(hse_mlwf_interval<1.or.hse_mlwf_maxiter<1.or. &
+          .not.ieee_is_finite(hse_mlwf_tolerance).or.hse_mlwf_tolerance<=0d0) &
+          error stop 'HSE Wannier: invalid localization controls'
+        if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
+          error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
+        if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
+          error stop 'HSE Wannier: only k parallelism within each fragment is supported'
+        if(propagator=='hse_taylor4_full'.or.propagator=='hse_ptcn') &
+          error stop 'HSE Wannier RT: use the default Taylor4+ACE propagator'
+        if(yn_dc=='y'.and.temperature<0d0) &
+          error stop 'DC HSE: a nonnegative electronic temperature is required'
+      endif
+      if(yn_dc/='y'.and.(yn_hse_wannier/='y'.or.theory/='dft'))then
+        if(nstate*2/=nelec.or.temperature>=0d0) &
+          error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
+      endif
       if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
         if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
           error stop 'HSE06: omit propagator to use Taylor4 + ACE'

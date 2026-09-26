@@ -82,7 +82,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit,yn_dc
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
     implicit none
@@ -476,7 +476,7 @@ contains
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
 #ifdef USE_HSE
-    if(hse_enabled())E_xc=E_xc+hse_exchange_energy
+    if(hse_enabled().and.yn_dc/='y')E_xc=E_xc+hse_exchange_energy
 #endif
     
     if(present(eexc)) then
