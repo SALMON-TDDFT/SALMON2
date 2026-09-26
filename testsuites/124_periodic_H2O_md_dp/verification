@@ -44,7 +44,7 @@ for line in open("H2O_rt_energy.data"):
 
 for name, [resval, refval, error] in checklist.items():
     if name not in result: 
-        print("Result %s (%s) is not found" % (name, ptn)) 
+        print("Result %s is not found" % name) 
         sys.exit(-1)  # Failure 
     else:
         print("Result %s = %e (Reference = %e)" % (name, result[name], refval)) 

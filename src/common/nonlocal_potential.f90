@@ -265,6 +265,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   ! Batched-GEMM reformulation of phase 1 (projection); phase 2 (back-projection) is unchanged below.
   integer, parameter :: gemm_io_block = 64
   integer,save :: gemm_max_nproj = -1
+  integer,save :: gemm_nps = -1
   integer,allocatable,save :: gemm_nproj_atom(:), gemm_l2g(:,:)
   complex(8),allocatable,save :: gemm_zekr_packed(:,:,:)
   real(8),allocatable,save :: gemm_rinv_packed(:,:)
@@ -350,6 +351,20 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 !$acc enter data copyin(gemm_wf_packed) create(gemm_out_packed)
 
     gemm_stat = cublasCreate(gemm_handle)
+    gemm_nps = ppg%nps
+  end if
+
+  ! init_ps can grow ppg%nps under MD, leaving the nps-sized caches too small;
+  ! finalize drops the device copies whatever their reference count.
+  if (gemm_nps /= ppg%nps) then
+!$acc exit data delete(gemm_zekr_packed, gemm_wf_packed) finalize
+    deallocate(gemm_zekr_packed, gemm_wf_packed)
+    allocate(gemm_zekr_packed(ppg%nps, gemm_max_nproj, gemm_natom))
+    allocate(gemm_wf_packed(ppg%nps, gemm_io_block, gemm_natom))
+    gemm_zekr_packed = (0.d0,0.d0)
+    gemm_wf_packed   = (0.d0,0.d0)
+!$acc enter data copyin(gemm_zekr_packed, gemm_wf_packed)
+    gemm_nps = ppg%nps
   end if
 
   ! cublas must share OpenACC's stream, or the scatter kernel may read the GEMM output early.
@@ -367,6 +382,10 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       if (gemm_p <= gemm_nproj_atom(gemm_ia) .and. gemm_j <= ppg%mps(gemm_ia)) then
         gemm_zekr_packed(gemm_j, gemm_p, gemm_ia) = &
             ppg%zekr_uV(gemm_j, gemm_l2g(gemm_p, gemm_ia), ik)
+      else
+        ! mps shrinks as ions move, and the GEMM contracts over all of nps, so
+        ! the padding must be re-zeroed rather than left at the previous step's.
+        gemm_zekr_packed(gemm_j, gemm_p, gemm_ia) = (0.d0, 0.d0)
       end if
     end do
     end do

@@ -367,9 +367,17 @@ subroutine update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
 
   !update pseudopotential
   if (mod(itt,step_update_ps)==0 ) then
+#ifdef USE_OPENACC
+     ! init_ps reallocates ppg's arrays, so the device copy's descriptors would
+     ! dangle; finalize drops it whatever its reference count, so the re-copy lands.
+!$acc exit data delete(ppg) finalize
+#endif
      call dealloc_init_ps(ppg)
      call calc_nlcc(pp, system, mg, ppn)
      call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
+#ifdef USE_OPENACC
+!$acc enter data copyin(ppg)
+#endif
   !else if (mod(itt,step_update_ps2)==0 ) then
   !   !xxxxxxx this option is not yet made xxxxxx
   !   call dealloc_init_ps(ppg)
