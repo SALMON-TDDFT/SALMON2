@@ -109,3 +109,31 @@ The multi-budget pair diagnostic shares pair FFTs across budgets. It still
 computes the full pair reference, so its wall time does not measure production
 screening performance. Empty-state source reduction and polar-only refreshes
 are implemented acceleration steps; spatial pair pruning remains diagnostic.
+
+## CPU execution and full-support reference
+
+Run one simulation at a time. Eight DC fragments require eight MPI ranks with
+the current one-rank-per-fragment Gamma layout. MPI8 x OpenMP2 / BLAS1 bounds
+the active computational threads at 16 on the development machine. This is not
+a measured optimal configuration for other hardware. OpenMP parallelism now
+distributes independent target-column FFTs within each fragment. FFTW plans and
+buffers are private to each worker; planning/destruction is serial, following
+https://www.fftw.org/fftw3_doc/Thread-safety.html . Each target retains the same
+source accumulation order. The serial build remains supported.
+
+`SALMON_HSE_EIGEN_DIAGNOSTIC=1` exports the final Psi and refreshed-Hamiltonian
+Hpsi on a single-k, full-grid/full-orbital layout before LCFO. The diagnostic
+reader in locality.py computes eigen-residuals and orthogonality independently.
+The v1 export does not contain actual k coordinates or convergence flags; keep
+the input and matching Wannier snapshot. Its single-k guard does not itself
+prove the point is Gamma. Use the documented Gamma inputs for locality studies.
+
+`locality.py snapshot.bin --radii ... --natom 64 --output report.json` requires
+both SCF and localization convergence by default. It applies an axial x mask to
+every source factor consistently, without renormalizing. It reports discarded
+norm, self-exchange of the changed density, exchange expectation on the original
+density, and Fock-action error on the original factors. A common Hermitian Fock
+operator is preserved, but this remains a frozen-density test, not a variational
+SCF/force/RT accuracy certificate. The minimum circular-center reliability is
+reported because an almost uniform axial density has no well-defined center.
+A support radius of at least half the periodic x length is the uncut reference.

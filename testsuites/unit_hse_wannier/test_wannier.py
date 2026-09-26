@@ -48,7 +48,7 @@ class WannierTest(unittest.TestCase):
             raise AssertionError('Rectangular fractional-occupation Wannier backend is missing')
         fftw = Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))
         blas = Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-        cmd = [os.environ.get('FC','gfortran'),'-O0','-g','-fcheck=all',
+        cmd = [os.environ.get('FC','gfortran'),'-O0','-g','-fcheck=all','-fopenmp',
                '-I'+str(fftw/'include'),str(ROOT/'src/xc/hse_wannier_gauge.f90'),str(module),
                str(ROOT/'src/xc/hse_ace.f90'),str(Path(__file__).with_name('probe.f90')),
                '-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
@@ -80,7 +80,7 @@ class WannierTest(unittest.TestCase):
             f.write(k.T.tobytes(order='F'));f.write(occ.T.tobytes(order='F'))
             f.write(wire(source));f.write(wire(target))
         p=subprocess.run([str(self.exe),str(inp),str(out)],capture_output=True,text=True,
-                         env=dict(os.environ,OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS='1'))
+                         env=dict(os.environ,OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS=str(getattr(self,'threads',1)),WANNIER_EXPECT_WORKERS=str(getattr(self,'threads',1))))
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         a=np.fromfile(out,np.complex128).reshape(shape+(nt,len(k)),order='F').transpose(4,3,0,1,2)
         np.testing.assert_allclose(a,reference(source,target,k,h,occ,omega),rtol=2e-11,atol=2e-11)
@@ -131,6 +131,13 @@ class WannierTest(unittest.TestCase):
 
     def test_gamma_fractional(self):
         self.run_case((1,1,1))
+
+    def test_threaded_action(self):
+        self.threads=1;self.run_case((1,2,2))
+        serial=np.fromfile(self.path/'out.bin',np.complex128)
+        self.threads=2;self.run_case((1,2,2))
+        parallel=np.fromfile(self.path/'out.bin',np.complex128)
+        np.testing.assert_allclose(parallel,serial,atol=1e-13,rtol=1e-13)
 
     def test_equal_occupations(self):
         self.run_case((2,1,1),False)

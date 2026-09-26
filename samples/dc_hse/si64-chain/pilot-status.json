@@ -1,0 +1,70 @@
+{
+  "vector": {
+    "execution": {
+      "seconds": 17.888235416961834,
+      "returncode": 0,
+      "timeout": false
+    },
+    "last_iteration": 20,
+    "last_density_residual": 0.16314625,
+    "converged": false
+  },
+  "noloop": {
+    "execution": {
+      "seconds": 18.069777750060894,
+      "returncode": 0,
+      "timeout": false
+    },
+    "last_iteration": 20,
+    "last_density_residual": 0.16592275,
+    "converged": false
+  },
+  "vector-converge": {
+    "execution": {
+      "seconds": 238.65168200002518,
+      "returncode": 1,
+      "timeout": false,
+      "termination_reason": "Manually stopped to eliminate competing MPI jobs after user feedback; not a numerical failure."
+    },
+    "last_iteration": 90,
+    "last_density_residual": 0.091971424,
+    "converged": false
+  },
+  "noloop-converge": {
+    "execution": {
+      "seconds": 237.12592975003645,
+      "returncode": 1,
+      "timeout": false,
+      "termination_reason": "Manually stopped to eliminate competing MPI jobs after user feedback; not a numerical failure."
+    },
+    "last_iteration": 88,
+    "last_density_residual": 0.10598131,
+    "converged": false
+  },
+  "pz-control": {
+    "execution": {
+      "seconds": 81.62288558296859,
+      "returncode": 1,
+      "timeout": false,
+      "termination_reason": "Manually stopped to eliminate competing MPI jobs after user feedback; not a numerical failure."
+    },
+    "last_iteration": 72,
+    "last_density_residual": 0.059593484,
+    "converged": false
+  },
+  "pz-damped": {
+    "execution": {
+      "seconds": 121.08179700002074,
+      "returncode": 0,
+      "timeout": false
+    },
+    "last_iteration": 342,
+    "last_density_residual": 0.0016891983,
+    "converged": false
+  },
+  "lapack_reproducer": {
+    "library": "Homebrew OpenBLAS",
+    "both_builds_relative_residual": 2.051258606278259e-15
+  },
+  "execution_policy": "One simulation at a time. All simulations have ended; no background queue."
+}

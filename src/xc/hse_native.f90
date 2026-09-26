@@ -17,7 +17,7 @@ module hse_native
     yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance
   implicit none
   private
-  public :: hse_export_snapshot
+  public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
   public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
   public :: hse_pack,hse_unpack,hse_timings,hse_walltime
   public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
@@ -36,6 +36,49 @@ module hse_native
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
+  logical function hse_eigen_diagnostic_enabled(info) result(enabled)
+    use communication, only: comm_bcast
+    type(s_parallel_info),intent(in) :: info
+    integer :: flag,status
+    character(8) :: setting
+    enabled=.false.
+    if(.not.hse_enabled())return
+    flag=0
+    if(info%id_rko==0)then
+      call get_environment_variable('SALMON_HSE_EIGEN_DIAGNOSTIC',setting,status=status)
+      if(status==0.and.trim(setting)=='1')flag=1
+    endif
+    call comm_bcast(flag,info%icomm_rko,0)
+    enabled=flag==1
+  end function
+
+  subroutine hse_export_eigen_pair(system,mg,info,psi,hpsi)
+    use iso_fortran_env, only: int32
+    use salmon_global, only: base_directory
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),intent(in) :: psi,hpsi
+    complex(8),allocatable :: p(:,:,:),hp(:,:,:)
+    integer :: iu,status,closed,total,ng,no
+    ! Diagnostic format deliberately supports only a full Gamma fragment.
+    if(system%nk/=1.or.info%isize_r/=1.or.info%isize_o/=1) &
+      error stop 'HSE eigen diagnostic requires Gamma and full grid/orbitals'
+    ng=product(mg%num);no=system%no
+    allocate(p(ng,no,1),hp(ng,no,1))
+    call hse_pack(psi,mg,info,p);call hse_pack(hpsi,mg,info,hp)
+    open(newunit=iu,file=trim(base_directory)//'hse_eigen_pair.bin', &
+      status='replace',access='stream',form='unformatted',iostat=status)
+    if(status==0)then
+      write(iu,iostat=status)int([16909060,1,ng,no,1],int32)
+      if(status==0)write(iu,iostat=status)system%hvol,system%rocc(:,:,1),p,hp
+      close(iu,iostat=closed)
+      if(status==0)status=closed
+    endif
+    call comm_summation(abs(status),total,info%icomm_rko)
+    if(total/=0)error stop 'HSE eigen diagnostic write failed'
+  end subroutine
+
   subroutine hse_export_snapshot(system,mg,info,psi,iteration,residual,converged)
     use salmon_global, only: base_directory
     use communication, only: comm_bcast

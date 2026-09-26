@@ -5,13 +5,13 @@ program probe
   implicit none
   type(s_hse_wannier) :: op
   type(hse_ace_state) :: ace
-  integer :: n(3),mesh(3),no,nt,ng,nk,iu,ierr,i,j,ik
+  integer :: n(3),mesh(3),no,nt,ng,nk,iu,ierr,i,j,ik,expected_workers
   real(8) :: h(3),omega,checks(5),spread,gradient,smin
   real(8),allocatable :: k(:,:),occ(:,:),trial_occ(:,:),eval(:),rwork(:)
   complex(8),allocatable :: psi(:,:,:),target(:,:,:),action(:,:,:),w(:,:,:),wa(:,:,:),back(:,:,:)
   complex(8),allocatable :: transported_action(:,:,:)
   complex(8),allocatable :: gauge(:,:,:),rot(:,:,:),previous(:,:,:),transported(:,:,:),metric(:,:),work(:)
-  character(1024) :: path,out
+  character(1024) :: path,out,worker_setting
   call check_gauge_minimizer()
   call get_command_argument(1,path)
   call get_command_argument(2,out)
@@ -46,6 +46,11 @@ program probe
   if(ierr/=0)error stop 'source'
   call wannier_apply(op,target,action,ierr)
   if(ierr/=0)error stop 'action'
+  call get_environment_variable('WANNIER_EXPECT_WORKERS',worker_setting,status=ierr)
+  if(ierr==0)then
+    read(worker_setting,*)expected_workers
+    if(op%workers/=expected_workers)error stop 'wrong FFT worker count'
+  endif
   call wannier_apply(op,psi,w,ierr)
   if(ierr/=0)error stop 'construction action'
   allocate(metric(no,no),eval(no),work(4*no),rwork(3*no))
@@ -88,6 +93,8 @@ program probe
   call wannier_set_source(op,psi,occ,op%gauge,ierr)
   if(ierr/=0)error stop 'transport-only source'
   allocate(transported_action,mold=action)
+  call wannier_apply(op,target(:,1:0,:),transported_action(:,1:0,:),ierr)
+  if(ierr==0)error stop 'empty target accepted'
   call wannier_apply(op,target,transported_action,ierr)
   if(ierr/=0.or.maxval(abs(transported_action-action))>1d-10)error stop 'transport-only action changed'
   call wannier_refresh_source(op,psi,occ,0,1d-7,ierr)

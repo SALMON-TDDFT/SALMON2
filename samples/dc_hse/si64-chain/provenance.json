@@ -1,0 +1,8 @@
+{
+  "construction": "first 8 atoms of historical Si64 conventional cell, translated by i*10.26 bohr along x for i=0..7",
+  "files": {
+    "atom.dat": "dc643949119dad473b20e67129e52ee36b2ab7a6414c80fa1e4fad5669b499ab",
+    "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
+    "inputfile": "4be0f44b7513f0ad2effd1af8547a1c2a71bd464f1fa011433cd6573f77b1edf"
+  }
+}
