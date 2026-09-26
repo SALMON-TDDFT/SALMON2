@@ -21,7 +21,10 @@ module lcfo_rt_wannier
   complex(8),allocatable,save :: rotation(:,:)
   real(8),allocatable,save :: centers(:,:)
   logical,allocatable,save :: protected(:)
-  integer,save :: uses=0
+  integer,save :: uses=0,u_interval=1,physical_step=0
+  complex(8),allocatable,save :: step_rotation(:,:),frame_rotation(:,:)
+  complex(8),allocatable,save :: transport_anchor(:,:),step_anchor(:,:)
+  logical,save :: frame_transported=.false.
   complex(8),allocatable,save :: previous_wf(:,:),current_frame(:,:),step_reference(:,:)
   logical,save :: step_active=.false.
   type(s_lcfo_wf_plan),save :: fragment_support,core_support
@@ -41,13 +44,20 @@ contains
         read(value,*,iostat=ios)radius
         if(ios/=0)bad=1
       endif
+      call get_environment_variable('SALMON_LCFO_RT_U_INTERVAL',value,status=status)
+      if(status==0.and.len_trim(value)>0)then
+        read(value,*,iostat=ios)u_interval
+        if(ios/=0)bad=1
+      endif
+      if(u_interval<1.or.(u_interval>1.and..not.lcfo_mlwf_enabled))bad=1
       if(.not.ieee_is_finite(radius).or.radius<0d0)bad=1
       if(radius>0d0.and..not.lcfo_mlwf_enabled)bad=1
     endif
     call comm_bcast(bad,lcfo_comm,0)
-    if(bad/=0)error stop 'LCFO MLWF: finite nonnegative radius requires SALMON_LCFO_RT_MLWF=1'
+    if(bad/=0)error stop 'LCFO MLWF: invalid radius or U interval (requires MLWF, finite radius >=0, integer interval >=1)'
     call comm_bcast(lcfo_mlwf_enabled,lcfo_comm,0)
     call comm_bcast(radius,lcfo_comm,0)
+    call comm_bcast(u_interval,lcfo_comm,0)
     if(lcfo_mlwf_enabled.and.lcfo_rank==0)then
       write(*,*) 'LCFO MLWF: initial U with polar temporal transport; global periodic 3D radius (0=full) =',radius
       if(radius>0d0.and.radius<.5d0*sqrt(sum((lcfo_grid*lcfo_h)**2))) &
@@ -125,7 +135,8 @@ contains
     enddo
     ! A poorly defined center on any axis makes a spherical cut unreliable.
     protected=any(abs(moment)/spread(norms,1,3)<.1d0,dim=1)
-    previous_wf=matmul(coeff,rotation);current_frame=previous_wf
+    previous_wf=matmul(coeff,rotation);current_frame=previous_wf;frame_rotation=rotation
+    transport_anchor=current_frame;frame_transported=.true.
     if(lcfo_rank==0)then
       open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
       write(iu)int([16909060,2,no,size(full_coeff,1),lcfo_grid],int32),lcfo_h,full_coeff,rotation,centers,norms
@@ -145,19 +156,33 @@ contains
       call initialize_rotation(coeff)
       return
     endif
-    no=size(coeff,2)
-    if(allocated(current_frame))then
+    no=size(coeff,2);frame_transported=.false.
+    if(allocated(current_frame).and.(physical_step<=1.or.mod(physical_step-1,u_interval)==0))then
       allocate(new_u(no,no,1))
-      if(step_active)then
+      if(u_interval>1)then
+        ! Do not turn held-U dephasing into permanent motion of the gauge anchor.
+        if(step_active)then
+          call lcfo_distributed_polar(coeff,step_anchor,lcfo_comm,new_u(:,:,1),minimum_overlap,status)
+        else
+          call lcfo_distributed_polar(coeff,transport_anchor,lcfo_comm,new_u(:,:,1),minimum_overlap,status)
+        endif
+      else if(step_active)then
         call lcfo_distributed_polar(coeff,step_reference,lcfo_comm,new_u(:,:,1),minimum_overlap,status)
       else
         call lcfo_distributed_polar(coeff,previous_wf,lcfo_comm,new_u(:,:,1),minimum_overlap,status)
       endif
       if(status/=0)error stop 'LCFO MLWF: occupied subspace overlap lost; relocalization required'
-      rotation=new_u(:,:,1)
-      if(lcfo_rank==0)write(*,'(a,es14.6)')'LCFO MLWF transport minimum overlap ',minimum_overlap
+      rotation=new_u(:,:,1);frame_transported=.true.
+      if(lcfo_rank==0)then
+        write(*,'(a,es14.6)')'LCFO MLWF transport minimum overlap ',minimum_overlap
+        write(*,'(a,2i8)')'LCFO MLWF U refreshed step/interval:',physical_step,u_interval
+      endif
     endif
+    if(physical_step>1.and.mod(physical_step-1,u_interval)/=0.and.lcfo_rank==0) &
+      write(*,'(a,2i8)')'LCFO MLWF U held step/interval:',physical_step,u_interval
     current_frame=matmul(coeff,rotation)
+    frame_rotation=rotation
+    if(frame_transported)transport_anchor=current_frame
     previous_wf=current_frame
   end subroutine
 
@@ -243,11 +268,14 @@ contains
     if(.not.lcfo_mlwf_enabled)return
     select case(stage)
     case(0)
-      step_reference=previous_wf;step_active=.true.
+      physical_step=physical_step+1
+      step_reference=previous_wf;step_rotation=rotation;step_anchor=transport_anchor;step_active=.true.
     case(1)
       ! Predictor and corrected orbitals must use the same accepted reference.
     case(2)
-      previous_wf=step_reference;step_active=.false.
+      previous_wf=step_reference;rotation=step_rotation;transport_anchor=step_anchor;step_active=.false.
+      if(allocated(step_anchor))deallocate(step_anchor)
+      if(allocated(step_rotation))deallocate(step_rotation)
       if(allocated(step_reference))deallocate(step_reference)
     case default
       error stop 'LCFO MLWF: invalid Taylor stage'
@@ -258,6 +286,10 @@ contains
     if(.not.lcfo_mlwf_enabled)return
     ! A cache hit after predictor rollback still accepts the frame corresponding
     ! to those exact coefficients, without repeating FFT exchange or localization.
-    if(allocated(current_frame))previous_wf=current_frame
+    if(allocated(current_frame))then
+      previous_wf=current_frame
+      rotation=frame_rotation
+      if(frame_transported)transport_anchor=current_frame
+    endif
   end subroutine
 end module

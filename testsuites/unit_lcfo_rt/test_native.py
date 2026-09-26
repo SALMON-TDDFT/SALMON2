@@ -239,3 +239,28 @@ compare_split('rt_orbital2_laser',laser,laser_input,
 unequal_input=rt.replace(' nstate=2',' nstate=3').replace(' nelec=4',' nelec=6')
 unequal=run('rt_unequal_reference',unequal_input,rt=True)
 compare_split('rt_orbital2_unequal',unequal,unequal_input,{})
+
+# U cadence is independent of ACE cadence. Full support is gauge invariant.
+uone=run('rt_u_interval1',mlwf_input,rt=True,
+         extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_U_INTERVAL':'1'})
+assert rows(uone/'H_dc_hse_rt.data')==mlwf_rows
+for interval in (2,4):
+    uenv={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_U_INTERVAL':str(interval)}
+    uheld=run(f'rt_u_interval{interval}',mlwf_input,rt=True,extra_env=uenv)
+    log=(uheld/'run.log').read_text()
+    held=[int(m[0]) for m in re.findall(r'U held step/interval:\s+(\d+)\s+(\d+)',log)]
+    refreshed=[int(m[0]) for m in re.findall(r'U refreshed step/interval:\s+(\d+)\s+(\d+)',log)]
+    assert held and all(step>1 and (step-1)%interval!=0 for step in held),held
+    assert refreshed and all(step<=1 or (step-1)%interval==0 for step in refreshed),refreshed
+    assert 'impulse ACE rebuilt before first predictor' in log
+    assert len(refreshed)<(uone/'run.log').read_text().count('U refreshed step/interval')
+    compare_tables(rows(uheld/'H_dc_hse_rt.data'),mlwf_rows,range(13,16),1e-11)
+    assert builds(uheld)==builds(mlwf)
+    compare_split(f'rt_u_interval{interval}_orbital2',uheld,mlwf_input,uenv)
+    uenv.update(SALMON_LCFO_RT_ACE_INTERVAL='4',SALMON_LCFO_RT_RADIUS='3')
+    combined=run(f'rt_u_interval{interval}_ace4',mlwf_input,rt=True,extra_env=uenv)
+    compare_split(f'rt_u_interval{interval}_ace4_orbital2',combined,mlwf_input,uenv)
+for invalid in ('0','-1','bad'):
+    run('reject_u_interval_'+invalid,mlwf_input,rt=True,reject='LCFO MLWF: invalid radius or U interval',
+        extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_U_INTERVAL':invalid})
+print('U cadence, full-support invariance, impulse, ACE independence and two-level MPI passed')
