@@ -118,11 +118,15 @@ contains
     call comm_bcast(status,info%icomm_k,0)
     if(status/=0)error stop 'HSE Wannier snapshot: write failed'
   end subroutine
-  subroutine hse_taylor_stage(stage)
+  subroutine hse_taylor_stage(stage,system,mg,info,psi)
     integer,intent(in) :: stage
+    type(s_dft_system),intent(in),optional :: system
+    type(s_rgrid),intent(in),optional :: mg
+    type(s_parallel_info),intent(in),optional :: info
+    type(s_orbital),intent(in),optional :: psi
     integer :: ierr,no
     if(lcfo_rt_active)then
-      call lcfo_hse_stage(stage)
+      call lcfo_hse_stage(stage,system,mg,info,psi)
       return
     endif
     select case(stage)

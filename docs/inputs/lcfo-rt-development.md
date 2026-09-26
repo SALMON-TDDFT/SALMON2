@@ -141,3 +141,32 @@ predictor rollback and corrected-state cache acceptance). These standalone tests
 currently use the local Homebrew BLAS path. `test_native.py` also checks full
 source parity, large-radius identity, initial-U identity across support cases,
 and full/masked exchange continuity diagnostics with MPI2 jobs run sequentially.
+
+### ACE reuse across physical time steps (2026-09-26)
+
+`SALMON_LCFO_RT_ACE_INTERVAL=N` accepts a positive integer (default1).
+For an impulse, step1 always rebuilds ACE **before the first predictor**, as
+well as at predicted/corrected endpoints; later refresh steps are1+N,1+2N,….
+For a smooth laser starting at zero field, initial ACE is retained and endpoint
+refreshes occur at N,2N,… . The present LCFO path constructs initial ACE from
+loaded GS orbitals; it does not deserialize fragment GS ACE factors.
+
+Between refresh steps, only the nonlocal exchange operator is frozen. Density,
+Hartree and semilocal XC continue to update through native routines. MLWF frames
+still undergo polar transport for each predictor/corrected state. An invalid ACE
+or changed occupations bypass reuse. Unchanged endpoint operators retain a
+single set of ACE factors instead of doubling their rank by averaging duplicates.
+Exact-coefficient cache keys are invalidated when a retained step transports WFs.
+
+The skipped-refresh exchange energy is evaluated as0.5 sum f<C|K_ACE|C> at current
+orbitals, explicitly logged as a frozen-operator trace diagnostic. It is neither
+the instantaneous self-consistent HSE energy nor a conserved frozen-Hamiltonian
+energy; compare its width only as a diagnostic. Local-field updates are not skipped.
+The existing continuity diagnostic evaluates rebuilt exchange only and cannot
+certify continuity of a retained ACE at evolving orbitals.
+
+MPI2 regression checks default/interval1 identity, fewer builds at2/4, identical
+initial MLWF data, finite output, invalid-interval rejection, impulse pre-predictor
+rebuild and smooth-laser first-step reuse. Si128 wall-time/current comparisons
+are recorded below once measured; a short pilot does not certify dielectric
+accuracy or select a production refresh interval.

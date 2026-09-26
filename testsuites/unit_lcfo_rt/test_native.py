@@ -41,8 +41,9 @@ def run(name, text, rt=False, reject=False, extra_env=None):
                                 stdout=log, stderr=subprocess.STDOUT, timeout=120)
     log = (folder / "run.log").read_text()
     if reject:
-        assert "LCFO RT: restart/checkpoint output is not supported yet" in log, folder
-        assert "Native LCFO RT active" not in log, folder
+        assert (reject if isinstance(reject,str) else "LCFO RT: restart/checkpoint output is not supported yet") in log, folder
+        if reject is True:
+            assert "Native LCFO RT active" not in log, folder
     else:
         assert status.returncode == 0 and "end SALMON" in log, folder
         if rt:
@@ -128,3 +129,37 @@ assert max(abs(row[0]) for row in small_c) < 1e-10, small_c
 assert max(row[1] for row in small_c) > 1e-18, small_c
 print(json.dumps(dict(full_continuity_L1_max=max(row[1] for row in full_c),
                       masked_continuity_L1_max=max(row[1] for row in small_c)),indent=2))
+
+# A physical-step interval must reduce expensive exchange builds, not merely
+# relabel a cache hit. Interval1 must reproduce the default trajectory.
+def builds(folder):
+    return (folder/'run.log').read_text().count('LCFO HSE ACE build')
+one=run('rt_ace_interval1',mlwf_input,rt=True,
+        extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':'1'})
+assert rows(one/'H_dc_hse_rt.data')==mlwf_rows
+assert builds(one)==builds(mlwf)
+for interval in (2,4):
+    reused=run(f'rt_ace_interval{interval}',mlwf_input,rt=True,
+        extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':str(interval)})
+    log=(reused/'run.log').read_text()
+    assert 'LCFO HSE ACE retained at step' in log, 'Missing physical-step ACE reuse'
+    assert 'LCFO HSE impulse ACE rebuilt before first predictor' in log
+    steps=[int(line.split()[-1]) for line in log.splitlines() if line.startswith('LCFO HSE exchange rebuilt at step')]
+    assert 1 in steps and all(step==0 or (step-1)%interval==0 for step in steps), steps
+    assert builds(reused)<builds(mlwf), (builds(reused),builds(mlwf))
+    assert len(rows(reused/'H_dc_hse_rt.data'))==4
+    assert len(rows(reused/'H_dc_hse_rt_energy.data'))==5
+    assert (reused/'lcfo_mlwf_initial.bin').read_bytes()==(mlwf/'lcfo_mlwf_initial.bin').read_bytes()
+    print(json.dumps({'ACE_interval':interval,'builds':builds(reused),'default_builds':builds(mlwf)}))
+
+run('reject_ace_interval',mlwf_input,rt=True,reject='LCFO HSE: ACE interval must be a positive integer',
+    extra_env={'SALMON_LCFO_RT_ACE_INTERVAL':'0'})
+
+laser_input=mlwf_input.replace("ae_shape1='impulse'","ae_shape1='Acos2'\n I_wcm2_1=1d8\n omega1=0.5d0\n tw1=100d0").replace('nenergy=20','nenergy=0')
+laser=run('rt_ace_laser',laser_input,rt=True,
+          extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':'4'})
+laser_log=(laser/'run.log').read_text()
+assert 'LCFO HSE ACE retained at step        1' in laser_log
+laser_steps=[int(line.split()[-1]) for line in laser_log.splitlines() if line.startswith('LCFO HSE exchange rebuilt at step')]
+assert 1 not in laser_steps and 4 in laser_steps,laser_steps
+print('Impulse first step refresh and smooth laser initial ACE reuse passed')

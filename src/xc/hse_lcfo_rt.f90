@@ -4,7 +4,7 @@
 module hse_lcfo_rt
   use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
   use communication, only: comm_bcast,comm_summation
-  use salmon_global, only: hse_omega
+  use salmon_global, only: hse_omega,ae_shape1
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached
@@ -21,7 +21,7 @@ module hse_lcfo_rt
   type(s_hse_wannier),save :: fragment_operator
   type(hse_ace_state),save :: ace,initial_ace,midpoint_ace
   logical,save :: ace_valid=.false.,initial_ace_valid=.false.,midpoint_ace_valid=.false.,use_midpoint=.false.
-  integer,save :: refresh_count=0
+  integer,save :: refresh_count=0,ace_interval=1,rt_step=0,step_start_builds=0,refresh_origin=0
   complex(8),allocatable,save :: cached_coeff(:,:)
   real(8),save :: cached_energy=0d0
   real(8),allocatable,save :: cached_occupation(:)
@@ -29,16 +29,31 @@ contains
   subroutine initialize_fragment()
     complex(8),allocatable :: block(:,:)
     integer,allocatable :: mapping(:,:),first(:)
-    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status
+    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status,ios,bad
     character(16) :: value
     nf=size(lcfo_counts);ns=lcfo_core+2*lcfo_buffer;ng=product(ns)
     if(any(ns>lcfo_grid))error stop 'LCFO HSE: fragment exceeds global periodic grid'
     allocate(mapping(ng,nf),first(nf),fragment_global_index(ng),core_weight(ng));mapping=0;first=0
     core_weight=0d0
+    bad=0
     if(lcfo_rank==0)then
       call get_environment_variable('SALMON_LCFO_RT_CONTINUITY',value,status=env_status)
       measure_continuity=env_status==0.and.trim(value)=='1'
+      call get_environment_variable('SALMON_LCFO_RT_ACE_INTERVAL',value,status=env_status)
+      if(env_status==0.and.len_trim(value)>0)then
+        read(value,*,iostat=ios)ace_interval
+        if(ios/=0)bad=1
+      else if(env_status/=1.and.env_status/=0)then
+        bad=1
+      endif
+      if(ace_interval<1)bad=1
+      if(ae_shape1=='impulse')refresh_origin=1
     endif
+    call comm_bcast(bad,lcfo_comm,0)
+    if(bad/=0)error stop 'LCFO HSE: ACE interval must be a positive integer'
+    call comm_bcast(ace_interval,lcfo_comm,0)
+    call comm_bcast(refresh_origin,lcfo_comm,0)
+    if(lcfo_rank==0)write(*,'(a,2i8)')'LCFO HSE ACE interval/refresh origin: ',ace_interval,refresh_origin
     call comm_bcast(measure_continuity,lcfo_comm,0)
     ! FFT order is core/right-buffer then the periodic left buffer.
     g=0
@@ -124,7 +139,26 @@ contains
     nb=size(coeff,1);no=size(coeff,2);nsel=size(selected);ng=size(fragment_basis,1)
     if(any(system%rocc(:,1,1)<0d0).or.any(system%rocc(:,1,1)>2d0).or. &
        .not.all(ieee_is_finite(system%rocc(:,1,1))))error stop 'LCFO HSE: invalid occupations'
-    if(allocated(cached_coeff))then
+    ! On impulse step1 rebuild both endpoints. Smooth fields can retain the
+    ! zero-field initial operator; subsequent refreshes are physical-step based.
+    if(ace_interval>1.and.rt_step>0.and.ace_valid.and.allocated(cached_occupation))then
+      if(mod(rt_step-refresh_origin,ace_interval)/=0.and.all(system%rocc(:,1,1)==cached_occupation))then
+        if(lcfo_mlwf_enabled)call lcfo_mlwf_source(coeff,fragment_basis,selected,source)
+        allocate(u(nb,no,1),w(nb,no,1));u(:,:,1)=coeff
+        call hse_ace_apply(ace,u,w,ierr)
+        if(ierr/=0)error stop 'LCFO HSE: retained ACE energy action failed'
+        exchange_energy=0d0
+        do j=1,no
+          exchange_energy=exchange_energy+.5d0*system%rocc(j,1,1)*real(sum(conjg(coeff(:,j))*w(:,j,1)),8)
+        enddo
+        ! A transported current_frame no longer belongs to the exact cache key.
+        if(allocated(cached_coeff))deallocate(cached_coeff)
+        if(lcfo_rank==0)write(*,'(a,i8,a,es20.10)')'LCFO HSE ACE retained at step ',rt_step, &
+          ' frozen-operator trace energy ',exchange_energy
+        return
+      endif
+    endif
+    if(allocated(cached_coeff).and..not.(rt_step==1.and.refresh_origin==1))then
       if(all(coeff==cached_coeff).and.all(system%rocc(:,1,1)==cached_occupation))then
         exchange_energy=cached_energy
         call lcfo_mlwf_accept_cached()
@@ -179,6 +213,7 @@ contains
     call hse_ace_build(ace,u,w,1d0,ierr);ace_valid=ierr==0
     cached_coeff=coeff;cached_occupation=system%rocc(:,1,1);cached_energy=exchange_energy
     refresh_count=refresh_count+1
+    if(lcfo_rank==0)write(*,'(a,i8)')'LCFO HSE exchange rebuilt at step ',rt_step
     ! Every rank reports its actual source rank and discarded density weight.
     write(*,'(a,i6,a,i6,a,i6,a,es12.4,a,es12.4)')'LCFO HSE rank ',lcfo_rank,' refresh ',refresh_count, &
       ' density factors ',nrank,' eig threshold ',threshold,' discarded trace ',discarded
@@ -219,12 +254,27 @@ contains
       refresh_count+1,sum(global)*lcfo_dv,sum(abs(global))*lcfo_dv,maxval(abs(global))
   end subroutine
 
-  subroutine lcfo_hse_stage(stage)
+  subroutine lcfo_hse_stage(stage,system,mg,info,psi)
     integer,intent(in) :: stage
+    type(s_dft_system),intent(in),optional :: system
+    type(s_rgrid),intent(in),optional :: mg
+    type(s_parallel_info),intent(in),optional :: info
+    type(s_orbital),intent(in),optional :: psi
+    real(8) :: rebuilt_energy
     integer :: ierr
+    if(stage==0)then
+      rt_step=rt_step+1
+      if(rt_step==1.and.refresh_origin==1)then
+        if(.not.(present(system).and.present(mg).and.present(info).and.present(psi))) &
+          error stop 'LCFO HSE: impulse initial refresh requires current orbitals'
+        call lcfo_hse_refresh(system,mg,info,psi,rebuilt_energy)
+        if(lcfo_rank==0)write(*,'(a)')'LCFO HSE impulse ACE rebuilt before first predictor'
+      endif
+    endif
     call lcfo_mlwf_stage(stage)
     select case(stage)
     case(0)
+      step_start_builds=refresh_count
       if(.not.allocated(hx))error stop 'LCFO HSE: initial operator missing'
       initial_hx=hx;initial_ace=ace;initial_ace_valid=ace_valid;use_midpoint=.false.
     case(1)
@@ -232,8 +282,12 @@ contains
       midpoint_hx=.5d0*(initial_hx+hx)
       midpoint_ace_valid=initial_ace_valid.and.ace_valid
       if(midpoint_ace_valid)then
-        call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
-        midpoint_ace_valid=ierr==0
+        if(step_start_builds==refresh_count)then
+          midpoint_ace=ace
+        else
+          call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
+          midpoint_ace_valid=ierr==0
+        endif
       endif
       use_midpoint=.true.
     case(2)

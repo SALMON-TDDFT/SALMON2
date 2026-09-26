@@ -152,7 +152,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call native_hse_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
       spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
   else
-    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(0)
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') &
+      call hse_taylor_stage(0,system,mg,info,spsi_in)
 #endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
