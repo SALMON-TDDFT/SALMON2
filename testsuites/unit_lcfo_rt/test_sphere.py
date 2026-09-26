@@ -3,9 +3,10 @@ import os,subprocess,tempfile,struct
 root=Path(__file__).resolve().parents[2];here=Path(__file__).parent
 with tempfile.TemporaryDirectory() as folder:
  exe=Path(folder)/'probe'
- subprocess.run(['gfortran','-fopenmp','-O2','-fexternal-blas','-fno-tree-loop-vectorize','-fcheck=all',
+ (Path(folder)/'config.h').write_text('')
+ subprocess.run(['gfortran','-I',folder,'-cpp','-fopenmp','-O2','-fexternal-blas','-fno-tree-loop-vectorize','-fcheck=all',
   str(here/'transport_stubs.f90'),str(root/'src/xc/hse_wannier_gauge.f90'),
-  str(root/'src/xc/lcfo_rt_wannier.f90'),str(here/'sphere_probe.f90'),
+  *[str(root/'src/xc'/name) for name in ['hse_ace.f90','lcfo_dist_rows.f90','lcfo_dist_dense.f90','lcfo_rt_wannier.f90']],str(here/'sphere_probe.f90'),
   '-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(exe)],cwd=folder,check=True)
  for threads in ['1','2','4']:
   for radius,mode in [('1.51','normal'),('4.1','normal'),('0','normal'),('9','normal'),('1.51','weak')]:

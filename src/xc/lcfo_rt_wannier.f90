@@ -5,7 +5,9 @@ module lcfo_rt_wannier
   use iso_fortran_env, only: int32
   use lcfo_rt_basis
   use communication, only: comm_summation,comm_bcast
-  use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma,gauge_transport
+  use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma
+  use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root,lcfo_halo_get
+  use lcfo_dist_dense, only: lcfo_distributed_polar
   use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -49,13 +51,12 @@ contains
   subroutine initialize_rotation(coeff)
     complex(8),intent(in) :: coeff(:,:)
     complex(8),allocatable :: grid(:,:),shifted(:,:),raw_local(:,:,:,:),raw(:,:,:,:),u(:,:,:),overlap(:,:)
-    complex(8),allocatable :: moment_local(:,:),moment(:,:)
+    complex(8),allocatable :: moment_local(:,:),moment(:,:),full_coeff(:,:)
     real(8),allocatable :: position(:,:),norm_local(:),norms(:),seed_position(:,:)
     real(8) :: b(3,6),weights(6),pi,length(3),wf_spread,gradient,delta,unitary_error
-    integer :: no,ng,lo,hi,g,x,y,z,a,j,status,iterations,neighbors(6,1),seed_status,iu
+    integer :: no,ng,g,x,y,z,a,j,status,iterations,neighbors(6,1),seed_status,iu
     no=size(coeff,2);ng=product(lcfo_core);pi=acos(-1d0);length=lcfo_grid*lcfo_h
-    lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
-    grid=matmul(lcfo_basis,coeff(lo:hi,:))
+    grid=matmul(lcfo_basis,coeff)
     allocate(position(3,ng));g=0
     do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
       g=g+1;position(:,g)=(lcfo_origins(:,lcfo_rank+1)+[x,y,z])*lcfo_h
@@ -72,11 +73,12 @@ contains
       raw_local(:,:,a+3,1)=conjg(transpose(raw_local(:,:,a,1)))
     enddo
     call comm_summation(raw_local,raw,size(raw),lcfo_comm)
+    call lcfo_gather_root(coeff,lcfo_counts,lcfo_comm,full_coeff)
     if(lcfo_rank==0)then
       ! LCFO functions have disjoint compact cores. Pivoted coefficient rows
       ! supply localized trial functions without gathering the global grid.
-      allocate(seed_position(3,size(coeff,1)));seed_position=0d0
-      call gauge_seed(reshape(coeff,[size(coeff,1),no,1]),seed_position,reshape([0d0,0d0,0d0],[3,1]), &
+      allocate(seed_position(3,size(full_coeff,1)));seed_position=0d0
+      call gauge_seed(reshape(full_coeff,[size(full_coeff,1),no,1]),seed_position,reshape([0d0,0d0,0d0],[3,1]), &
                       u,seed_status)
       if(seed_status/=0)then
         u=0d0
@@ -119,7 +121,7 @@ contains
     previous_wf=matmul(coeff,rotation);current_frame=previous_wf
     if(lcfo_rank==0)then
       open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
-      write(iu)int([16909060,2,no,size(coeff,1),lcfo_grid],int32),lcfo_h,coeff,rotation,centers,norms
+      write(iu)int([16909060,2,no,size(full_coeff,1),lcfo_grid],int32),lcfo_h,full_coeff,rotation,centers,norms
       write(iu)int(merge(1,0,protected),int32),int([iterations,status],int32),wf_spread,gradient
       close(iu)
     endif
@@ -139,18 +141,12 @@ contains
     no=size(coeff,2)
     if(allocated(current_frame))then
       allocate(new_u(no,no,1))
-      if(lcfo_rank==0)then
-        if(step_active)then
-          call gauge_transport(reshape(coeff,[size(coeff,1),no,1]), &
-            reshape(step_reference,[size(coeff,1),no,1]),1d0,new_u,minimum_overlap,status)
-        else
-          call gauge_transport(reshape(coeff,[size(coeff,1),no,1]), &
-            reshape(previous_wf,[size(coeff,1),no,1]),1d0,new_u,minimum_overlap,status)
-        endif
+      if(step_active)then
+        call lcfo_distributed_polar(coeff,step_reference,lcfo_comm,new_u(:,:,1),minimum_overlap,status)
+      else
+        call lcfo_distributed_polar(coeff,previous_wf,lcfo_comm,new_u(:,:,1),minimum_overlap,status)
       endif
-      call comm_bcast(status,lcfo_comm,0)
       if(status/=0)error stop 'LCFO MLWF: occupied subspace overlap lost; relocalization required'
-      call comm_bcast(new_u,lcfo_comm,0)
       rotation=new_u(:,:,1)
       if(lcfo_rank==0)write(*,'(a,es14.6)')'LCFO MLWF transport minimum overlap ',minimum_overlap
     endif
@@ -158,18 +154,25 @@ contains
     previous_wf=current_frame
   end subroutine
 
-  subroutine lcfo_mlwf_source(coeff,basis,selected,source)
+  subroutine lcfo_mlwf_source(coeff,basis,selected,source,halo)
     complex(8),intent(in) :: coeff(:,:),basis(:,:)
     integer,intent(in) :: selected(:)
     complex(8),allocatable,intent(out) :: source(:,:,:)
-    complex(8),allocatable :: core_wf(:,:)
+    type(s_lcfo_halo),intent(in),optional :: halo
+    complex(8),allocatable :: core_wf(:,:),near_frame(:,:)
     real(8) :: length(3),distance2,delta(3),local_loss(2),loss(2)
     real(8),allocatable :: wf_loss(:,:),source_position(:,:),core_position(:,:)
-    integer :: ns(3),p(3),point(3),g,x,y,z,j,no,lo,hi,active_sources,active_sum
+    integer :: ns(3),p(3),point(3),g,x,y,z,j,no,active_sources,active_sum
     logical :: cut
     call lcfo_mlwf_track(coeff)
     no=size(coeff,2)
-    allocate(source(size(basis,1),no,1));source(:,:,1)=matmul(basis,current_frame(selected,:))
+    if(present(halo))then
+      call lcfo_halo_get(halo,current_frame,near_frame)
+    else
+      if(size(lcfo_counts)/=1)error stop 'LCFO MLWF: distributed source requires halo plan'
+      near_frame=current_frame(selected,:)
+    endif
+    allocate(source(size(basis,1),no,1));source(:,:,1)=matmul(basis,near_frame)
     length=lcfo_grid*lcfo_h;cut=radius>0d0.and.radius<.5d0*sqrt(sum(length**2))
     local_loss=0d0
     if(cut)then
@@ -193,8 +196,7 @@ contains
         enddo
       enddo
       !$omp end parallel do
-      lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
-      core_wf=matmul(lcfo_basis,current_frame(lo:hi,:))
+      core_wf=matmul(lcfo_basis,current_frame)
       allocate(wf_loss(2,no),core_position(3,product(lcfo_core)));wf_loss=0d0;g=0
       do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
         g=g+1;core_position(:,g)=(lcfo_origins(:,lcfo_rank+1)+[x,y,z])*lcfo_h

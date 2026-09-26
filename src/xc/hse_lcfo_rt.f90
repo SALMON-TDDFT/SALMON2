@@ -3,14 +3,16 @@
 ! Full density-factor reference or opt-in initial-MLWF U reuse and source masks.
 module hse_lcfo_rt
   use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
-  use communication, only: comm_bcast,comm_summation
+  use communication, only: comm_bcast,comm_summation,comm_get_max
   use salmon_global, only: hse_omega,ae_shape1
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track
   use hse_wannier, only: s_hse_wannier,wannier_init,wannier_apply,wannier_forward
   use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace
-  use hse_ace, only: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average
+  use hse_ace, only: hse_ace_state,hse_ace_average
+  use lcfo_dist_rows, only: s_lcfo_halo,lcfo_halo_init,lcfo_halo_get,lcfo_halo_sum
+  use lcfo_dist_dense, only: lcfo_distributed_ace_build
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -20,6 +22,7 @@ module hse_lcfo_rt
   real(8),allocatable,save :: core_weight(:)
   logical,save :: measure_continuity=.false.
   type(s_hse_wannier),save :: fragment_operator
+  type(s_lcfo_halo),save :: exchange_plan
   type(hse_ace_state),save :: ace,initial_ace,midpoint_ace
   logical,save :: ace_valid=.false.,initial_ace_valid=.false.,midpoint_ace_valid=.false.,use_midpoint=.false.
   integer,save :: refresh_count=0,ace_interval=1,rt_step=0,step_start_builds=0,refresh_origin=0
@@ -108,14 +111,14 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     complex(8),allocatable,intent(out) :: coeff(:,:)
-    complex(8),allocatable :: grid(:,:),local(:,:),full_local(:,:),work(:,:)
-    integer :: io,is(3),ie(3),lo,hi,nb,n
+    complex(8),allocatable :: grid(:,:),local(:,:),full_local(:,:)
+    integer :: io,is(3),ie(3),n
     if(.not.lcfo_rt_active)error stop 'LCFO HSE: inactive LCFO basis'
     if(system%nk/=1.or.system%nspin/=1.or.info%numo<1.or. &
        info%ik_s/=1.or.info%ik_e/=1.or.info%numm/=1)error stop 'LCFO HSE: requires Gamma/local orbital block'
     if(any(mg%num/=lcfo_core))error stop 'LCFO HSE: native grid does not match LCFO core'
     if(.not.allocated(psi%zwf))error stop 'LCFO HSE: complex wavefunctions required'
-    is=mg%is;ie=mg%ie;nb=sum(lcfo_counts);n=size(lcfo_basis,2)
+    is=mg%is;ie=mg%ie;n=size(lcfo_basis,2)
     allocate(grid(product(mg%num),info%numo),local(n,system%no),full_local(n,system%no));local=0d0
     do io=info%io_s,info%io_e
       grid(:,io-info%io_s+1)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[product(mg%num)])
@@ -124,10 +127,7 @@ contains
     ! Refresh masters alone receive all orbital columns. Real-space WFs stay local.
     call comm_summation(local,full_local,size(local),lcfo_orb_comm,0)
     if(lcfo_orb_rank==0)then
-      allocate(work(nb,system%no),coeff(nb,system%no));work=0d0
-      lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
-      work(lo:hi,:)=full_local
-      call comm_summation(work,coeff,size(work),lcfo_comm)
+      call move_alloc(full_local,coeff)
     else
       allocate(coeff(0,0))
     endif
@@ -140,17 +140,30 @@ contains
     type(s_orbital),intent(in) :: psi
     real(8),intent(out) :: exchange_energy
     complex(8),allocatable :: coeff(:,:)
-    integer :: old_count,nb,factor_shape(3)
-    old_count=refresh_count;nb=sum(lcfo_counts)
+    integer :: old_count,nb,factor_shape(3),nsel
+    real(8) :: started,pack_seconds
+    started=wall_seconds();old_count=refresh_count;nb=sum(lcfo_counts)
     call pack_coefficients(psi,system,mg,info,coeff)
-    if(lcfo_orb_rank==0)call refresh_master(system,mg,info,coeff,exchange_energy)
+    pack_seconds=wall_seconds()-started
+    if(.not.exchange_plan%ready)then
+      if(lcfo_orb_rank==0)call initialize_fragment()
+      nsel=0
+      if(lcfo_orb_rank==0)nsel=size(selected)
+      call comm_bcast(nsel,lcfo_orb_comm,0)
+      if(lcfo_orb_rank/=0)allocate(selected(nsel))
+      call comm_bcast(selected,lcfo_orb_comm,0)
+      call lcfo_halo_init(exchange_plan,lcfo_counts,selected,lcfo_comm)
+      if(lcfo_orb_rank==0)write(*,'(a,4i8)')'LCFO distributed storage rank/local/global/halo rows:', &
+        lcfo_rank,size(coeff,1),nb,nsel
+    endif
+    if(lcfo_orb_rank==0)call refresh_master(system,mg,info,coeff,exchange_energy,pack_seconds)
     call comm_bcast(exchange_energy,lcfo_orb_comm,0)
     call comm_bcast(refresh_count,lcfo_orb_comm,0)
     call comm_bcast(refresh_origin,lcfo_orb_comm,0)
     call comm_bcast(ace_interval,lcfo_orb_comm,0)
     call comm_bcast(ace_valid,lcfo_orb_comm,0)
     if(refresh_count/=old_count)then
-      if(.not.allocated(hx))allocate(hx(nb,nb))
+      if(.not.allocated(hx))allocate(hx(size(selected),size(selected)))
       call comm_bcast(hx,lcfo_orb_comm,0)
       if(ace_valid)then
         if(lcfo_orb_rank==0)factor_shape=shape(ace%factors)
@@ -168,20 +181,21 @@ contains
     endif
   end subroutine
 
-  subroutine refresh_master(system,mg,info,coeff,exchange_energy)
+  subroutine refresh_master(system,mg,info,coeff,exchange_energy,pack_seconds)
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     complex(8),intent(in) :: coeff(:,:)
     real(8),intent(out) :: exchange_energy
     complex(8),allocatable :: weighted(:,:),density(:,:),work(:),source(:,:,:),action(:,:,:)
-    complex(8),allocatable :: projected(:,:),local_hx(:,:),u(:,:,:),w(:,:,:)
+    complex(8),allocatable :: projected(:,:),near_coeff(:,:),w(:,:),contribution(:,:)
     real(8),allocatable :: eigenvalues(:),rwork(:)
-    real(8) :: threshold,discarded
-    integer :: nb,nsel,ng,no,j,k,ierr,nrank,first,lo,hi
+    real(8),intent(in) :: pack_seconds
+    real(8) :: threshold,discarded,local_energy,started,source_seconds,exchange_seconds
+    integer :: nsel,ng,no,j,ierr,nrank,first,changed,total_changed
     external :: zheev
-    if(.not.allocated(fragment_basis))call initialize_fragment()
-    nb=size(coeff,1);no=size(coeff,2);nsel=size(selected);ng=size(fragment_basis,1)
+    started=wall_seconds()
+    no=size(coeff,2);nsel=size(selected);ng=size(fragment_basis,1)
     if(any(system%rocc(:,1,1)<0d0).or.any(system%rocc(:,1,1)>2d0).or. &
        .not.all(ieee_is_finite(system%rocc(:,1,1))))error stop 'LCFO HSE: invalid occupations'
     ! On impulse step1 rebuild both endpoints. Smooth fields can retain the
@@ -189,31 +203,36 @@ contains
     if(ace_interval>1.and.rt_step>0.and.ace_valid.and.allocated(cached_occupation))then
       if(mod(rt_step-refresh_origin,ace_interval)/=0.and.all(system%rocc(:,1,1)==cached_occupation))then
         if(lcfo_mlwf_enabled)call lcfo_mlwf_track(coeff)
-        lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
-        call lcfo_ace_half_trace(coeff(lo:hi,:),ace%factors(lo:hi,:,1),system%rocc(:,1,1), &
+        call lcfo_ace_half_trace(coeff,ace%factors(:,:,1),system%rocc(:,1,1), &
           ace%dv,lcfo_comm,exchange_energy)
         ! A transported current_frame no longer belongs to the exact cache key.
         if(allocated(cached_coeff))deallocate(cached_coeff)
         if(lcfo_rank==0)write(*,'(a,i8,a,es20.10)')'LCFO HSE ACE retained at step ',rt_step, &
           ' frozen-operator trace energy ',exchange_energy
+        call report_timings('retained',pack_seconds,wall_seconds()-started,0d0,0d0)
         return
       endif
     endif
+    changed=1
     if(allocated(cached_coeff).and..not.(rt_step==1.and.refresh_origin==1))then
-      if(all(coeff==cached_coeff).and.all(system%rocc(:,1,1)==cached_occupation))then
-        exchange_energy=cached_energy
-        call lcfo_mlwf_accept_cached()
-        return
-      endif
+      if(all(coeff==cached_coeff).and.all(system%rocc(:,1,1)==cached_occupation))changed=0
     endif
+    ! A local cache hit is insufficient: every core must agree before returning.
+    call comm_summation(changed,total_changed,lcfo_comm)
+    if(total_changed==0)then
+      exchange_energy=cached_energy
+      call lcfo_mlwf_accept_cached()
+      return
+    endif
+    call lcfo_halo_get(exchange_plan,coeff,near_coeff)
     if(lcfo_mlwf_enabled)then
       if(any(system%rocc(:,1,1)/=2d0))error stop 'LCFO MLWF reuse: fixed fully occupied states required'
-      call lcfo_mlwf_source(coeff,fragment_basis,selected,source)
+      call lcfo_mlwf_source(coeff,fragment_basis,selected,source,exchange_plan)
       nrank=size(source,2);threshold=0d0;discarded=0d0
     else
     allocate(weighted(nsel,no),density(nsel,nsel),eigenvalues(nsel),work(max(1,2*nsel)),rwork(max(1,3*nsel-2)))
     do j=1,no
-      weighted(:,j)=coeff(selected,j)*sqrt(system%rocc(j,1,1)/2d0)
+      weighted(:,j)=near_coeff(:,j)*sqrt(system%rocc(j,1,1)/2d0)
     enddo
     density=matmul(weighted,transpose(conjg(weighted)))
     density=.5d0*(density+transpose(conjg(density)))
@@ -229,29 +248,30 @@ contains
       source(:,j,1)=matmul(fragment_basis,density(:,first+j-1))*sqrt(eigenvalues(first+j-1))
     enddo
     endif
+    source_seconds=wall_seconds()-started;started=wall_seconds()
     if(allocated(fragment_operator%source))deallocate(fragment_operator%source)
     allocate(fragment_operator%source(ng,nrank))
     call wannier_forward(fragment_operator,source,fragment_operator%source)
     allocate(action(ng,nsel,1))
     call wannier_apply(fragment_operator,reshape(fragment_basis,[ng,nsel,1]),action,ierr)
     if(ierr/=0)error stop 'LCFO HSE: fragment exchange action failed'
-    if(measure_continuity)call exchange_continuity(coeff,system%rocc(:,1,1),action)
+    if(measure_continuity)call exchange_continuity(near_coeff,system%rocc(:,1,1),action)
     projected=.25d0*lcfo_dv*matmul(transpose(conjg(core_basis)),action(:,:,1))
     projected=.5d0*(projected+transpose(conjg(projected)))
-    allocate(local_hx(nb,nb));local_hx=0d0
-    do k=1,nsel;do j=1,nsel
-      local_hx(selected(j),selected(k))=projected(j,k)
-    enddo;enddo
-    if(.not.allocated(hx))allocate(hx(nb,nb))
-    call comm_summation(local_hx,hx,size(hx),lcfo_comm)
+    ! Retain this fragment's Hermitian contribution, not a replicated global Hx.
+    hx=projected
     if(.not.all(ieee_is_finite(real(hx))).or..not.all(ieee_is_finite(aimag(hx)))) &
       error stop 'LCFO HSE: nonfinite projected exchange'
-    allocate(u(nb,no,1),w(nb,no,1));u(:,:,1)=coeff;w(:,:,1)=matmul(hx,coeff)
-    exchange_energy=0d0
+    contribution=matmul(hx,near_coeff)
+    call lcfo_halo_sum(exchange_plan,contribution,w)
+    local_energy=0d0
     do j=1,no
-      exchange_energy=exchange_energy+.5d0*system%rocc(j,1,1)*real(sum(conjg(coeff(:,j))*w(:,j,1)),8)
+      local_energy=local_energy+.5d0*system%rocc(j,1,1)*real(sum(conjg(coeff(:,j))*w(:,j)),8)
     enddo
-    call hse_ace_build(ace,u,w,1d0,ierr);ace_valid=ierr==0
+    call comm_summation(local_energy,exchange_energy,lcfo_comm)
+    exchange_seconds=wall_seconds()-started;started=wall_seconds()
+    call lcfo_distributed_ace_build(ace,coeff,w,1d0,lcfo_comm,ierr);ace_valid=ierr==0
+    call report_timings('build',pack_seconds,source_seconds,exchange_seconds,wall_seconds()-started)
     cached_coeff=coeff;cached_occupation=system%rocc(:,1,1);cached_energy=exchange_energy
     refresh_count=refresh_count+1
     if(lcfo_rank==0)write(*,'(a,i8)')'LCFO HSE exchange rebuilt at step ',rt_step
@@ -282,9 +302,9 @@ contains
     allocate(core_action(ng,ns,1))
     call wannier_apply(fragment_operator,reshape(core_basis,[ng,ns,1]),core_action,ierr)
     if(ierr/=0)error stop 'LCFO HSE: continuity diagnostic action failed'
-    psi=matmul(fragment_basis,coeff(selected,:))
-    left=matmul(action(:,:,1),coeff(selected,:))
-    right=matmul(core_action(:,:,1),coeff(selected,:))
+    psi=matmul(fragment_basis,coeff)
+    left=matmul(action(:,:,1),coeff)
+    right=matmul(core_action(:,:,1),coeff)
     allocate(local(product(lcfo_grid)),global(product(lcfo_grid)));local=0d0
     do j=1,size(coeff,2);do g=1,ng
       local(fragment_global_index(g))=local(fragment_global_index(g))+ &
@@ -348,8 +368,8 @@ contains
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
-    complex(8),allocatable :: coeff(:,:),grid(:,:),hgrid(:,:),local_action(:,:)
-    integer :: ng,no,lo,hi,io,j,is(3),ie(3)
+    complex(8),allocatable :: coeff(:,:),grid(:,:),hgrid(:,:),local_action(:,:),near_coeff(:,:),contribution(:,:)
+    integer :: ng,no,io,j,is(3),ie(3)
     if(.not.allocated(hx))error stop 'LCFO HSE: refresh required before action'
     no=info%numo;ng=product(mg%num);is=mg%is;ie=mg%ie
     allocate(grid(ng,no),hgrid(ng,no))
@@ -358,20 +378,20 @@ contains
       grid(:,j)=reshape(psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
       hgrid(:,j)=reshape(hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1),[ng])
     enddo
-    lo=lcfo_offsets(lcfo_rank+1)+1;hi=lcfo_offsets(lcfo_rank+2)
     if(use_midpoint.and.midpoint_ace_valid)then
-      call lcfo_ace_local_action(lcfo_basis,grid,hgrid,midpoint_ace%factors(lo:hi,:,1), &
+      call lcfo_ace_local_action(lcfo_basis,grid,hgrid,midpoint_ace%factors(:,:,1), &
         lcfo_dv,midpoint_ace%dv,lcfo_comm)
     else if(.not.use_midpoint.and.ace_valid)then
-      call lcfo_ace_local_action(lcfo_basis,grid,hgrid,ace%factors(lo:hi,:,1),lcfo_dv,ace%dv,lcfo_comm)
+      call lcfo_ace_local_action(lcfo_basis,grid,hgrid,ace%factors(:,:,1),lcfo_dv,ace%dv,lcfo_comm)
     else
-      allocate(coeff(size(hx,1),no))
-      call lcfo_collect_coefficients(grid,coeff)
+      coeff=matmul(conjg(transpose(lcfo_basis)),grid)*lcfo_dv
+      call lcfo_halo_get(exchange_plan,coeff,near_coeff)
       if(use_midpoint)then
-        local_action=matmul(midpoint_hx(lo:hi,:),coeff)
+        contribution=matmul(midpoint_hx,near_coeff)
       else
-        local_action=matmul(hx(lo:hi,:),coeff)
+        contribution=matmul(hx,near_coeff)
       endif
+      call lcfo_halo_sum(exchange_plan,contribution,local_action)
       hgrid=matmul(lcfo_basis,matmul(conjg(transpose(lcfo_basis)),hgrid)*lcfo_dv+local_action)
     endif
     do j=1,no
@@ -379,5 +399,19 @@ contains
       hpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)=reshape(hgrid(:,j),mg%num)
     enddo
     hpsi%update_zwf_overlap=.false.
+  end subroutine
+  real(8) function wall_seconds() result(seconds)
+    integer(8) :: tick,rate
+    call system_clock(tick,rate)
+    seconds=dble(tick)/dble(rate)
+  end function
+
+  subroutine report_timings(label,pack,source,exchange,build)
+    character(*),intent(in) :: label
+    real(8),intent(in) :: pack,source,exchange,build
+    real(8) :: local(4),maximum(4)
+    local=[pack,source,exchange,build]
+    call comm_get_max(local,maximum,4,lcfo_comm)
+    if(lcfo_rank==0)write(*,'(a,a,4es16.7)')'LCFO timing pack/source/exchange/ACE ',trim(label),maximum
   end subroutine
 end module

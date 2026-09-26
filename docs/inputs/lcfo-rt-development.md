@@ -374,3 +374,49 @@ RSSは約0.5秒間隔の観測値で、厳密な瞬間ピークではない。�
 ### 回帰試験
 
 2フラグメントのMPI2対MPI4を、ACE間隔1/4、有限球R=3、`process_allocation='orbital_sequential'`、滑らかなレーザーで比較した。電流・エネルギー・最終密度・更新時刻を確認し、行数と時刻も照合した。3占有軌道を2+1へ不均等分割する試験では、共通の保存基底を両側で同じように再占有して演算同等性を確認した（この試験はGSの物理精度の評価ではない）。最大差は電流9.632e-15、エネルギー1.022e-14、密度4.902e-14。既存の半時間刻み、全範囲・大半径一致、有限半径応答、連続性診断、restart拒否、impulse/laser更新規則も成功した。2段階MPIでのACE棄却→全交換行列へのフォールバックを意図的に誘発する統合試験は未実施。
+
+### Distributed exchange construction (2026-09-26)
+
+The LCFO coefficient rows now remain on their spatial/core owner. Transported
+WF frames, W=Hx C, and ACE factors have the same row distribution. Each fragment
+requests only the coefficient rows touched by its core+buffer basis; the adjoint
+exchange sums overlapping fragment contributions back onto their owners. The
+exchange matrix is retained as a Hermitian fragment block, including both
+midpoint endpoints. Rejected ACE therefore uses the same distributed fragment
+operator instead of collecting a dense global Hx. Every orbital group owns a
+matching halo plan for its target columns. Exact-cache decisions are collective
+across spatial ranks.
+
+Polar overlap and ACE metrics are sums of local-row products. Small SVD/EVDs are
+computed once on spatial rank zero. A build with `USE_SCALAPACK=ON` uses a BLACS
+process grid and block-cyclic PZGESVD/PZHEEV for >=128 occupied states and multiple
+spatial ranks. This LCFO backend selection is automatic at compile-time/size;
+`yn_scalapack` still controls the original SALMON eigensolver and does not toggle
+this new backend. Without ScaLAPACK the root LAPACK path remains available.
+
+Remaining limits are explicit: orbital-space metric/U/transform arrays are
+replicated; initial MLWF gauge optimization and its coefficient gather run once
+on the root. Per-fragment exchange construction still runs on orbital group zero,
+while target application is shared across orbital groups. Real-space WF arrays
+still contain all occupied source columns locally. Thus this removes global-row
+replication and redundant dense decompositions, but does not establish linear
+scaling or fully distribute all orbital-space storage.
+
+`LCFO distributed storage rank/local/global/halo rows` reports the actual retained
+coefficient rows and requested halo rows. `LCFO timing pack/source/exchange/ACE`
+reports the spatial maximum per phase (seconds); maxima for separate phases may
+belong to different ranks and their sum is not the total wall time. The source
+phase includes gauge transport and reconstruction; retained-step source time
+also includes the frozen exchange trace. Initial MLWF work belongs to the first
+source phase. These diagnostics supplement the native `rt iterations` timer.
+
+The standalone `testsuites/unit_lcfo_rt/test_distributed_build.py` accepts
+`--scalapack` and `--ranks 2|4`. It covers unequal local rows, arbitrary halo row
+order, the sum of overlapping Hermitian fragment operators versus a dense
+reference, root-only gather, dense-unitary polar transport, local ACE factors and
+action, globally/locally zero exchange, and positive/singular metric rejection.
+The large case uses129 states to exercise partial block-cyclic tiles, including
+a2x2 BLACS grid with MPI4. Native tests also assert local storage and compare
+fragment-only versus fragment x orbital parallel trajectories.
+
+Validation/measurement: all seven sequential standalone/native suites passed. MPI4/129-state ACE action error was6.36e-16. Same-GS Si64/128 R9 ACE4 MPI8/16 OMP1 BLAS1 comparisons against b1773c78 preserved the initial dump byte-for-byte, with current differences <=7.26e-18, density <=2.51e-15, and no difference in printed total energy. RT times old→new:20.780→19.847s and48.339→43.238s (single runs). Maximum sampled rank RSS:448.1→438.3MiB and662.0→652.1MiB. The change improves RT time by1.047x/1.118x here; it does not remove the inverse weak-scaling trend. Native forced ACE-invalid fallback was not added; direct fragment action and rejection are covered at the algebra level.
