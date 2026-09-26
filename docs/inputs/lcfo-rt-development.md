@@ -420,3 +420,42 @@ a2x2 BLACS grid with MPI4. Native tests also assert local storage and compare
 fragment-only versus fragment x orbital parallel trajectories.
 
 Validation/measurement: all seven sequential standalone/native suites passed. MPI4/129-state ACE action error was6.36e-16. Same-GS Si64/128 R9 ACE4 MPI8/16 OMP1 BLAS1 comparisons against b1773c78 preserved the initial dump byte-for-byte, with current differences <=7.26e-18, density <=2.51e-15, and no difference in printed total energy. RT times old→new:20.780→19.847s and48.339→43.238s (single runs). Maximum sampled rank RSS:448.1→438.3MiB and662.0→652.1MiB. The change improves RT time by1.047x/1.118x here; it does not remove the inverse weak-scaling trend. Native forced ACE-invalid fallback was not added; direct fragment action and rejection are covered at the algebra level.
+
+### Select active WF columns before reconstruction (2026-09-26)
+
+`lcfo_wf_support` caches the original minimum-image point mask because the initial
+centers, radius, grid and protected flags remain fixed during polar transport.
+Only columns with at least one retained point are reconstructed. Protected WFs
+remain unmasked. Compact sources preserve their original order; the HSE source
+sum is unchanged and an empty source list produces zero exchange. The core
+loss diagnostic uses `trace(F^H (B^H B) F) - ||(BF)_retained||^2`; the basis Gram
+matrix is cached once. This identity also holds for a nonorthogonal complex B.
+Near-zero loss can suffer subtraction roundoff and is not a meaningful measure
+below floating-point accuracy. This diagnostic does not modify exchange sources.
+
+The optimization adds no mask approximation and leaves polar transport, initial
+MLWF optimization, ACE scheduling and native fields unchanged. Dense full-column
+coefficient frames and halo communication remain; orbital metrics/U and initial
+root localization still limit large systems. Support preparation uses a temporary
+point-by-all-WF boolean mask, while only active masks are retained afterward.
+
+Tests: `test_active_wf.py` verifies dense reconstruction/mask equivalence for a
+complex nonorthogonal basis, periodic edges, protected WFs, empty/full support,
+and the norm identity. Existing transport and sphere fixtures pass at OMP1/2/4;
+native MPI2/MPI4 tests pass including unequal orbital blocks and impulse/laser
+ACE schedules. Static review found no blocking defect.
+
+Diamond weak scaling at33dbea5a: C64/8 MPI versus C128/16 MPI, core16^3,
+buffer8,0,0, dt0.02, nt16, ACE1, OMP1/BLAS1 on one18-core host. Full RT:
+104.530→304.010s (34.38% weak efficiency). R6 RT:57.684→100.370s (57.47%).
+Both R6 cases retain60 active source WFs per fragment. Native target orbital
+columns still increase128→256 per rank because nproc_ob=1.
+
+Same-GS R6 active-WF optimization: repeated WF phase2.6216→1.2369s for C64 and
+7.8446→2.7070s for C128 (2.12x and2.90x). RT57.684→56.595s and100.370→94.138s
+(1.019x and1.066x); new R6 weak efficiency60.12%. Reconstructed source/core
+columns are60/44 for both sizes. Initial dumps match byte-for-byte; max current
+difference3.90e-18, density2.00e-15; printed energy and norm-loss logs agree.
+These are single-run measurements and short-trajectory implementation parity,
+not a long-time dielectric accuracy certificate. Raw benchmark data and the
+expanded Japanese notebook include both measured versions separately.

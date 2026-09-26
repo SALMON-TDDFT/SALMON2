@@ -8,6 +8,7 @@ module lcfo_rt_wannier
   use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma
   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root,lcfo_halo_get
   use lcfo_dist_dense, only: lcfo_distributed_polar
+  use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
   use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -21,6 +22,8 @@ module lcfo_rt_wannier
   integer,save :: uses=0
   complex(8),allocatable,save :: previous_wf(:,:),current_frame(:,:),step_reference(:,:)
   logical,save :: step_active=.false.
+  type(s_lcfo_wf_plan),save :: fragment_support,core_support
+  complex(8),allocatable,save :: core_gram(:,:)
 contains
   subroutine lcfo_mlwf_configure()
     character(64) :: value
@@ -159,61 +162,57 @@ contains
     integer,intent(in) :: selected(:)
     complex(8),allocatable,intent(out) :: source(:,:,:)
     type(s_lcfo_halo),intent(in),optional :: halo
-    complex(8),allocatable :: core_wf(:,:),near_frame(:,:)
-    real(8) :: length(3),distance2,delta(3),local_loss(2),loss(2)
-    real(8),allocatable :: wf_loss(:,:),source_position(:,:),core_position(:,:)
-    integer :: ns(3),p(3),point(3),g,x,y,z,j,no,active_sources,active_sum
+    complex(8),allocatable :: core_wf(:,:),near_frame(:,:),fragment_wf(:,:)
+    real(8) :: length(3),local_loss(2),loss(2),mask_radius
+    real(8),allocatable :: positions(:,:)
+    integer :: ns(3),p(3),point(3),g,x,y,z,no,active_sources,active_sum,ncore
     logical :: cut
     call lcfo_mlwf_track(coeff)
-    no=size(coeff,2)
+    no=size(coeff,2);length=lcfo_grid*lcfo_h
+    cut=radius>0d0.and.radius<.5d0*sqrt(sum(length**2))
+    if(.not.fragment_support%ready)then
+      ! Centers and support geometry are fixed during polar transport.
+      ns=lcfo_core+2*lcfo_buffer
+      allocate(positions(3,size(basis,1)));positions=0d0;mask_radius=0d0
+      if(cut)then
+        if(size(basis,1)/=product(ns))error stop 'LCFO WF support: fragment grid mismatch'
+        mask_radius=radius;g=0
+        do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
+          g=g+1;p=[x,y,z]
+          where(p>=lcfo_core+lcfo_buffer)p=p-ns
+          point=modulo(lcfo_origins(:,lcfo_rank+1)+p,lcfo_grid)
+          positions(:,g)=point*lcfo_h
+        enddo;enddo;enddo
+      endif
+      call lcfo_wf_plan_init(fragment_support,positions,centers,length,mask_radius,protected)
+      deallocate(positions);ncore=no
+      if(cut)then
+        allocate(positions(3,product(lcfo_core)));g=0
+        do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
+          g=g+1;positions(:,g)=(lcfo_origins(:,lcfo_rank+1)+[x,y,z])*lcfo_h
+        enddo;enddo;enddo
+        call lcfo_wf_plan_init(core_support,positions,centers,length,radius,protected)
+        core_gram=matmul(conjg(transpose(lcfo_basis)),lcfo_basis)
+        ncore=size(core_support%columns)
+      endif
+      write(*,'(a,4i8)')'LCFO WF reconstruction rank/fragment/core/total columns:', &
+        lcfo_rank,size(fragment_support%columns),ncore,no
+    endif
     if(present(halo))then
       call lcfo_halo_get(halo,current_frame,near_frame)
     else
       if(size(lcfo_counts)/=1)error stop 'LCFO MLWF: distributed source requires halo plan'
       near_frame=current_frame(selected,:)
     endif
-    allocate(source(size(basis,1),no,1));source(:,:,1)=matmul(basis,near_frame)
-    length=lcfo_grid*lcfo_h;cut=radius>0d0.and.radius<.5d0*sqrt(sum(length**2))
+    call lcfo_wf_reconstruct(fragment_support,basis,near_frame,fragment_wf)
+    allocate(source(size(basis,1),size(fragment_wf,2),1));source(:,:,1)=fragment_wf
     local_loss=0d0
     if(cut)then
-      ns=lcfo_core+2*lcfo_buffer
-      allocate(source_position(3,product(ns)));g=0
-      do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
-        g=g+1;p=[x,y,z]
-        where(p>=lcfo_core+lcfo_buffer)p=p-ns
-        point=modulo(lcfo_origins(:,lcfo_rank+1)+p,lcfo_grid)
-        source_position(:,g)=point*lcfo_h
-      enddo;enddo;enddo
-      ! A WF occupies a contiguous column. Give each column to one worker.
-      !$omp parallel do default(none) schedule(static) &
-      !$omp shared(source,source_position,no,length,centers,radius,protected) private(g,delta,distance2)
-      do j=1,no
-        if(protected(j))cycle
-        do g=1,size(source,1)
-          delta=modulo(source_position(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
-          distance2=sum(delta**2)
-          if(distance2>radius**2)source(g,j,1)=0d0
-        enddo
-      enddo
-      !$omp end parallel do
-      core_wf=matmul(lcfo_basis,current_frame)
-      allocate(wf_loss(2,no),core_position(3,product(lcfo_core)));wf_loss=0d0;g=0
-      do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
-        g=g+1;core_position(:,g)=(lcfo_origins(:,lcfo_rank+1)+[x,y,z])*lcfo_h
-      enddo;enddo;enddo
-      !$omp parallel do default(none) schedule(static) &
-      !$omp shared(core_wf,core_position,wf_loss,no,length,centers,radius,protected) private(g,delta,distance2)
-      do j=1,no
-        do g=1,size(core_wf,1)
-          wf_loss(2,j)=wf_loss(2,j)+abs(core_wf(g,j))**2
-          delta=modulo(core_position(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
-          distance2=sum(delta**2)
-          if(distance2>radius**2.and..not.protected(j))wf_loss(1,j)=wf_loss(1,j)+abs(core_wf(g,j))**2
-        enddo
-      enddo
-      !$omp end parallel do
-      ! Fixed WF order keeps diagnostic sums independent of thread count.
-      local_loss=sum(wf_loss,dim=2)
+      local_loss(2)=lcfo_wf_total_norm(core_gram,current_frame)
+      if(core_support%masked)then
+        call lcfo_wf_reconstruct(core_support,lcfo_basis,current_frame,core_wf)
+        local_loss(1)=max(0d0,local_loss(2)-sum(abs(core_wf)**2))
+      endif
     endif
     call comm_summation(local_loss,loss,2,lcfo_comm)
     active_sources=count(any(abs(source(:,:,1))>0d0,dim=1))
