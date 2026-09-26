@@ -4,6 +4,7 @@
 ! is included in this module's action. Full periodic support is retained.
 module hse_wannier
   use iso_c_binding
+  use iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use hse_wannier_gauge, only: gauge_transport,gauge_minimize,gauge_seed
   !$ use omp_lib, only: omp_get_max_threads,omp_get_thread_num
@@ -15,6 +16,7 @@ module hse_wannier
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
   type s_hse_wannier
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
+    integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64
     integer :: localization_iterations=0,localization_status=1,workers=0
     real(8) :: h(3)=0d0,dv=0d0,spread=0d0,gradient=huge(1d0),min_singular=0d0
     real(8),allocatable :: k(:,:),position(:,:),multiplier(:,:,:),source_occupation(:,:)
@@ -357,11 +359,15 @@ contains
     integer,intent(out) :: status
     complex(8),allocatable :: home(:,:),result(:,:),source(:)
     integer :: i,j,ic,g,p(3),index,nt,t,nworkers
+    integer(int64) :: executed
     status=1;action=0d0
+    op%fft_pairs_total=0_int64;op%fft_pairs_executed=0_int64
     if(.not.allocated(op%source))return
     if(size(target,1)/=op%ng.or.size(target,3)/=op%nk.or.any(shape(action)/=shape(target)))return
     nt=size(target,2)
     if(nt<1)return
+    op%fft_pairs_total=int(op%nk,int64)*int(size(op%source,2),int64)*int(nt,int64)
+    executed=0_int64
     allocate(home(op%ngs,nt),result(op%ngs,nt),source(op%ngs))
     nworkers=1
     !$ nworkers=min(nt,omp_get_max_threads())
@@ -375,14 +381,17 @@ contains
           index=1+p(1)+op%ns(1)*(p(2)+op%ns(2)*p(3))
           source(g)=op%source(index,i)
         enddo
-        if(maxval(abs(source))==0d0)cycle
+        if(all(source==(0d0,0d0)))cycle
         !$omp parallel do default(none) schedule(static) num_threads(nworkers) &
-        !$omp shared(op,home,result,source,nt) private(j,t)
+        !$omp shared(op,home,result,source,nt) private(j,t) reduction(+:executed)
         do j=1,nt
-          if(maxval(abs(home(:,j)))==0d0)cycle
           t=1
           !$ t=omp_get_thread_num()+1
           op%worker_work(:,:,:,t)=reshape(conjg(source)*home(:,j),op%ns)
+          ! Exact zero pair density contributes no exchange, regardless of the
+          ! nonlocal range of the convolution. No magnitude threshold is used.
+          if(all(op%worker_work(:,:,:,t)==(0d0,0d0)))cycle
+          executed=executed+1_int64
           call fftw_execute_dft(op%worker_forward(t),op%worker_work(:,:,:,t),op%worker_work(:,:,:,t))
           op%worker_work(:,:,:,t)=op%worker_work(:,:,:,t)*op%multiplier
           call fftw_execute_dft(op%worker_backward(t),op%worker_work(:,:,:,t),op%worker_work(:,:,:,t))
@@ -391,6 +400,7 @@ contains
         !$omp end parallel do
       enddo
     enddo
+    op%fft_pairs_executed=executed
     call wannier_backward(op,result,action)
     status=0
   end subroutine

@@ -474,3 +474,18 @@ Paired sequential diamond R6 benchmarks, same GS, core16^3, dt=.02, nt=16, ACE1,
 | C128 / MPI16 | 49152→11520 | 2.637532→2.594449 | 100.290→99.992 |
 
 Receive counts include self transfers, not measured network-only bytes. Current max difference 4.31e-18, density 2.00e-15, printed energy/loss identical, initial dump byte-identical. No clear speed benefit on this shared-memory host in one sample per case; exchange remains dominant. Weak efficiency changes 55.90%→57.88%, not statistically established improvement. The objective achieved is bounded WF halo payload for fixed-radius fixed-size fragments; dense U and initial root localization still scale with total occupied states. Raw results are in the diamond notebook output wf-column-summary.json.
+
+## Exact-zero exchange pair FFT screening (2026-09-26)
+
+After forming each thread-local pair density, wannier_apply skips its forward/backward FFT only when every complex element is exactly zero. No tolerance, distance cutoff or new physical approximation is added. The redundant per-pair scan of target magnitudes is removed. Source accumulation order, screened kernel, normalization, U transport and ACE refresh schedule are preserved. An int64 OpenMP reduction counts executed pairs; one pair means two FFTs. The possible count includes pre-existing zero-source/zero-target exclusions and must not generally be equated to the old executed count.
+
+Validation: direct periodic convolution from an independent inverse DFT, complex disjoint/overlapping/zero/tiny nonzero support, Hermiticity and OMP1/2/4; existing 5 Wannier tests (multi-k, fractional occupations, localization, ACE, threading); native LCFO fragment x orbital MPI2/4, ACE1/2/4, impulse, laser and unequal orbital partitions all pass. Read-only review found no blocking issue.
+
+Fresh sequential pairs against35d1d38e: same diamond GS, R6, core16^3, dt=.02, nt16, ACE1, OMP1/BLAS1, GNU loop vectorization disabled. Each condition measured once. Exchange is the sum of per-build rank maxima excluding the first build, not an exact walltime partition.
+
+| Case | Exchange seconds before→after | RT seconds before→after | RT speedup |
+|---|---:|---:|---:|
+| C64 / MPI8 | 47.320610→34.273655 | 55.846→42.923 | 1.301 |
+| C128 / MPI16 | 72.939666→46.705659 | 96.865→71.234 | 1.360 |
+
+Both sizes execute7424 of11520 candidate pairs per fragment per build (35.56% omitted), over35 builds. Initial MLWF dumps byte-identical; current max difference4.20e-18, density2.00e-15, printed energy and discarded norm identical. Weak efficiency is 57.65%→60.26%; this single-pair measurement does not establish variability. Multi-node work is deferred by user request. Full results and definitions are in the diamond notebook exchange-exact-pair-summary.json.

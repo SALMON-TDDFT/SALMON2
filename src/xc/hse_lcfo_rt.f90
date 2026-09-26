@@ -255,6 +255,8 @@ contains
     allocate(action(ng,nsel,1))
     call wannier_apply(fragment_operator,reshape(fragment_basis,[ng,nsel,1]),action,ierr)
     if(ierr/=0)error stop 'LCFO HSE: fragment exchange action failed'
+    write(*,'(a,i6,2i14)')'LCFO exchange FFT pairs rank/executed/possible:', &
+      lcfo_rank,fragment_operator%fft_pairs_executed,fragment_operator%fft_pairs_total
     if(measure_continuity)call exchange_continuity(near_coeff,system%rocc(:,1,1),action)
     projected=.25d0*lcfo_dv*matmul(transpose(conjg(core_basis)),action(:,:,1))
     projected=.5d0*(projected+transpose(conjg(projected)))
