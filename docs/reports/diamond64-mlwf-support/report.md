@@ -739,3 +739,29 @@ export SALMON_LCFO_SEED_DISTRIBUTED=1
 ```
 
 以前のroot経路は`SALMON_LCFO_SEED_DISTRIBUTED=0`で選択。新経路は通常ビルドに含まれるが、富岳のPZGEQPFリンク・コンパイル・数値は実機検証待ち。
+
+### 富岳の旧ソースで最初のseedパッチが失敗する場合（2026-09-27追記）
+
+`gamma-seed-memory.patch`のdry-runで`hse_wannier_gauge.f90`が1/2、
+`lcfo_rt_wannier.f90`が2/4 hunk失敗した報告があった。root削減
+`bee87f63`の直前のソースで同じ失敗個数を再現した。POSIX修正後に
+ビルドが成功したことだけでは、rootメモリ削減まで適用済みとは判断できない。
+以前の3枚の適用案内はこの前提確認が不足していた。
+
+この旧版用に[累積パッチ](../../../tools/patches/gamma-memory-from-pre-root.patch)
+を用意。rootリンク/集約の削減、Gamma seed 2D化、streamed seed、分散QRの
+4段階を含む。変更対象5ファイルを旧版から更新し、`133e8b37`の内容と
+byte一致することを確認した。コンパイラ/POSIX修正のファイルは変更しない。
+初期リンクのタイル化`b743e8b3`は適用済みであることが前提。
+
+```sh
+patch --batch --forward --fuzz=0 --dry-run -p1 < gamma-memory-from-pre-root.patch
+# 上が全て成功した場合のみ
+patch --batch --forward --fuzz=0 -p1 < gamma-memory-from-pre-root.patch
+cmake -S . -B build
+cmake --build build -j 8
+```
+
+先の3枚と重ねて適用しない。dry-run失敗時は元ソースは変更されていないので
+復元操作は不要。累積パッチのdry-runも失敗する場合は現物の版を確認する。
+これはパッチ配布の修正のみで、数値コードは`133e8b37`から変更していない。

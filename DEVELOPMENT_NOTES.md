@@ -90,6 +90,8 @@ MPI1/2/3/4、空のroot・不均等行分割・端数ブロック・特異行列
 
 [詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/distributed-seed-memory-results.json) ／ [適用用差分](tools/patches/distributed-gamma-seed.patch)
 
+富岳側で前提のroot削減が未適用の場合は、[旧版からの累積パッチ](tools/patches/gamma-memory-from-pre-root.patch)を使用。最初のseedパッチのdry-run失敗だけではソースは変更されません。適用対象と確認手順は詳細ノート末尾に追記しました。
+
 <a id="streamed-seed"></a>
 
 ## 前段：root係数の二重保持を除去
