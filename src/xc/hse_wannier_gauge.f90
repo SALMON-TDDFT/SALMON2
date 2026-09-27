@@ -4,6 +4,7 @@ module hse_wannier_gauge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
+  public :: gauge_seed_select,gauge_seed_finish
   public :: gauge_seed_gamma,gauge_minimize_gamma_inplace
   public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
 contains
@@ -70,6 +71,45 @@ contains
     endif
     u=matmul(left,right)
     status=0
+  end subroutine
+
+  subroutine gauge_seed_select(columns,chosen,status)
+    ! Destructive pivoted QR on a directly gathered conjugate transpose.
+    implicit none
+    complex(8),intent(inout) :: columns(:,:)
+    integer,intent(out) :: chosen(:),status
+    complex(8),allocatable :: tau(:),work(:)
+    real(8),allocatable :: rwork(:)
+    integer,allocatable :: pivots(:)
+    integer :: n,ng
+    n=size(columns,1);ng=size(columns,2);status=1;chosen=0
+    if(n<1.or.n>ng.or.size(chosen)/=n)return
+    allocate(pivots(ng),tau(n),work(max(8*n,34*ng+32)),rwork(max(2*ng,5*n)))
+    pivots=0
+    call zgeqp3(n,ng,columns,n,pivots,tau,work,size(work),rwork,status)
+    if(status==0)chosen=pivots(:n)
+  end subroutine
+
+  subroutine gauge_seed_finish(overlap,nbasis,u,status)
+    ! Recovered original selected rows; preserve reference SVD workspace.
+    implicit none
+    complex(8),intent(inout) :: overlap(:,:)
+    integer,intent(in) :: nbasis
+    complex(8),intent(out) :: u(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: left(:,:),right(:,:),work(:)
+    real(8),allocatable :: singular(:),rwork(:)
+    integer :: n
+    n=size(overlap,1);status=1
+    if(n<1.or.nbasis<n.or.size(overlap,2)/=n.or.any(shape(u)/=[n,n]))return
+    allocate(left(n,n),right(n,n),work(max(8*n,34*nbasis+32)))
+    allocate(singular(n),rwork(max(2*nbasis,5*n)))
+    call zgesvd('A','A',n,n,overlap,n,singular,left,n,right,n,work,size(work),rwork,status)
+    if(status/=0)return
+    if(minval(singular)<1d-10*maxval(singular))then
+      status=1;return
+    endif
+    u=matmul(left,right);status=0
   end subroutine
 
   subroutine gauge_transport(current,previous,dv,u,min_singular,status)
