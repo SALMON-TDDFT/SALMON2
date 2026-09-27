@@ -33,4 +33,12 @@ class InputTest(unittest.TestCase):
         self.run_input(self.base().replace('rvv10_nq=32','rvv10_nq=3'),'invalid rVV10 parameters')
     def test_hse_md_stays_rejected(self):
         self.run_input(self.base().replace("theory='dft'","theory='dft_md'").replace("xc ='pbeh40_rvv10'","xc ='hse06'"),'unsupported calculation theory')
+    def test_dc_force_diagnostic_guards(self):
+        diagnostic="\n&dc\n yn_dc_force_diagnostic='y'\n num_fragment=1,1,1\n num_rgrid_buffer=0,0,0\n nstate_frag=4\n yn_dc_lcfo='n'\n/\n"
+        self.run_input(self.base()+diagnostic,'DC force diagnostic requires static DC PBEh')
+        base=self.base().replace("theory='dft'","theory='dft'\n yn_dc='y'")
+        base=base.replace('natom  = 3','natom  = 3\n temperature_k=300d0')
+        self.run_input(base.replace('exx_mlwf_radius=0d0','exx_mlwf_radius=1d0')+diagnostic,
+            'DC force diagnostic requires full MLWF support')
+        self.run_input(base+diagnostic,'DC force diagnostic: SCF not converged')
 if __name__=='__main__':unittest.main()

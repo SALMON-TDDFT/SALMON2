@@ -199,3 +199,39 @@ reuse pass. The native 25-test suite and y/z DC-LCFO response fixtures pass.
 Independent review found no critical or important defects. Phase maxima may
 come from different ranks and must not be added as an exact breakdown.
 These remain local, small-system measurements, not production-water scaling.
+
+## DC-MD force gate (not yet MD support)
+
+The opt-in static `yn_dc_force_diagnostic` prints the explicit nuclear derivative
+at fixed fragment orbitals and occupations. Global atom IDs/images are preserved;
+total-grid electrostatics and core-weighted nonlocal projector terms are
+assembled with the same rank ownership as DC energy. It does not write these
+uncertified values into the ordinary ionic force field.
+
+`dc-md-force-audit.json` records the initial energy-only reference;
+`dc-force-response-audit.json` adds the explicit-force comparison;
+`dc-force-thermal-audit.json` also compares the diagnostic core-weighted E-TS.
+At 300 K, buffer2/1 leave approximately0.05/0.08 eV/angstrom force discrepancies
+after converged SCF and displacement-step refinement. The entropy term changes
+but does not remove them. These are electronic-response residuals, not solely
+orbital response. The full-cell buffer limit agrees within~8e-6 eV/angstrom.
+
+Independent review found no explicit-force formula or reduction defect, but
+identified the need to isolate the asymmetric projector derivative and thermal
+response. The production projector contraction is now tested against frozen
+complex s/p/d-channel energy finite differences with asymmetric, full and empty
+core masks; the thermal audit measures both E and E-TS. This synthetic test does
+not replace a native truncated-oxygen force certification. Periodic wrapping
+checks do not certify moving atom-list updates or fragment-face crossings.
+
+The force gate is not passed for truncated DC. No DC-MD integrator is enabled.
+The next response formulation and outstanding validation are described in
+[the response plan](../../plans/2026-09-27-dc-force-response.md).
+
+The final force-gate validation has32 passing tests (31 regressions plus the
+separately run24x24x24 water one-fragment limit); HSE-enabled MPI and HSE-disabled
+serial builds pass. The water limit covers the actual H/O radial projectors,
+while the asymmetric contraction is isolated by the synthetic frozen-state
+test. Earlier16x16x16 water settings did not meet the requested SCF tolerance
+and were rejected; those runs are not force certifications. See
+`dc-force-validation.json` for measured water parity and log hashes.

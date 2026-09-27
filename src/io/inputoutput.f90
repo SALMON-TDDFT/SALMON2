@@ -612,7 +612,7 @@ contains
       & file_atom_coor_frag, &
       & yn_out_dc_fragment_coor, &
       & xi_dc, &
-      & yn_dc_lcfo, &
+      & yn_dc_lcfo, yn_dc_force_diagnostic, &
       & yn_dc_lcfo_diag, &
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
@@ -1085,6 +1085,7 @@ contains
     file_atom_coor_frag = 'none'
     yn_out_dc_fragment_coor = 'n'
     xi_dc = -1d0
+    yn_dc_force_diagnostic = 'n'
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
 #ifdef USE_EIGENEXA
@@ -1807,6 +1808,7 @@ contains
     call comm_bcast(file_atom_coor_frag, nproc_group_global)
     call comm_bcast(yn_out_dc_fragment_coor, nproc_group_global)
     call comm_bcast(xi_dc, nproc_group_global)
+    call comm_bcast(yn_dc_force_diagnostic, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
@@ -2832,6 +2834,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_out_dc_fragment_coor", yn_out_dc_fragment_coor
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
+      write(fh_variables_log, *) "# yn_dc_force_diagnostic=",yn_dc_force_diagnostic
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
@@ -2974,6 +2977,7 @@ contains
     call yn_argument_check(yn_hse_eigen_diagnostic)
     call yn_argument_check(yn_hse_solver_diagnostic)
     call yn_argument_check(yn_hse_wannier_snapshot)
+    call yn_argument_check(yn_dc_force_diagnostic)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
@@ -3337,6 +3341,12 @@ contains
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if
     
+    if(yn_dc_force_diagnostic=='y')then
+      if(yn_dc/='y'.or.theory/='dft'.or.(xc/='pbeh40'.and.xc/='pbeh40_rvv10')) &
+        error stop 'DC force diagnostic requires static DC PBEh'
+      if(exx_mlwf_radius/=0d0.or.file_atom_coor_frag/='none') &
+        error stop 'DC force diagnostic requires full MLWF support and automatic atom maps'
+    endif
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"

@@ -179,6 +179,7 @@ contains
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag
+      integer :: own_id(natom),own_image(3,natom)
       integer :: kion_frag(natom,dc%n_frag),natom_frag(dc%n_frag)
       real(8) :: dr
       real(8) :: r1(3),r2(3),r(3),boundary_tol(3)
@@ -247,6 +248,11 @@ contains
             r(3) = r(3) + dble(kk)*al(3)
             if( all(r1-boundary_tol <= r) .and. all(r < r2-boundary_tol) ) then
               iatom_frag = iatom_frag + 1
+              if(iatom_frag>natom)error stop 'DC fragment atom image capacity exceeded'
+              if(i_frag==dc%i_frag)then
+                own_id(iatom_frag)=iatom
+                own_image(:,iatom_frag)=[ii,jj,kk]
+              endif
               rion_frag(1:3,iatom_frag,i_frag) = r(1:3) - dc%rxyz_frag(1:3,i_frag)
               kion_frag(iatom_frag,i_frag) = kion(iatom)
             end if
@@ -259,6 +265,12 @@ contains
       end do
       end do
       end do
+    ! Preserve global identity before global atom arrays become fragment arrays.
+      if(file_atom_coor_frag=='none')then
+        allocate(dc%atom_global(natom_frag(dc%i_frag)),dc%atom_image(3,natom_frag(dc%i_frag)))
+        dc%atom_global=own_id(:natom_frag(dc%i_frag))
+        dc%atom_image=own_image(:,:natom_frag(dc%i_frag))
+      endif
     ! set variables for own fragment
     
     ! nelec (total system) --> nelec (fragment)

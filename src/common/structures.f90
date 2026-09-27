@@ -526,6 +526,7 @@ module structures
   ! own fragment
     integer :: i_frag       ! fragment index
     integer :: icomm_frag, id_frag, isize_frag ! MPI communicator, process ID, & # of processes
+    integer,allocatable :: atom_global(:),atom_image(:,:) ! local atom -> global ID and lattice image
     integer :: nstate_frag  ! nstate for the fragment
     integer,allocatable :: jxyz_tot(:,:)  ! r-grid (fragment) --> r-grid (total)
   end type s_dcdft

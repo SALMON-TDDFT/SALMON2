@@ -187,3 +187,31 @@ The grids are 32x24x16 and 64x48x32, with 32 channels, 2/4 MPI ranks and one
 OpenMP thread. FFTE timings include its current per-transform private-table
 initialization; these compare implemented paths, not isolated library speed.
 Use `--fft-backend fftw` with the LCFO integration fixture to check that route.
+
+## DC force diagnostics (MD remains disabled)
+
+For static PBEh DC calculations, `yn_dc_force_diagnostic='y'` in `&dc` prints
+a separately labelled frozen-orbital nuclear derivative in Hartree/bohr. It
+requires a converged SCF, full MLWF support, and automatic fragment atom lists.
+It sums total-grid electrostatics and the two derivatives of each
+core-restricted nonlocal projector product, with global atom identities.
+It does not populate the regular ionic force or advance any ion.
+
+The diagnostic also reports total electron residual, core-weighted occupation
+`TS`, and `E-TS`. These are diagnostic quantities; stationarity of `E-TS` for
+truncated fragments has not been established. Fragment orbital and occupation
+response terms are absent from the printed force. Periodic-image bookkeeping
+is present, but moving atom-list updates and boundary-crossing MD are not.
+
+Run the reproducible small H4 audit with:
+
+```
+python3 testsuites/unit_pbeh_rvv10/audit_dc_force.py \
+  --binary /path/to/salmon --mpiexec mpiexec --output /path/to/results.json
+```
+
+At 300 K electronic temperature, full-cell buffers agree with energy finite
+differences. Truncated buffers leave about 0.05–0.08 eV/angstrom disagreement
+even after the tested core-weighted entropy term is subtracted. Therefore
+`theory='dft_md', yn_dc='y'` is still rejected. This diagnostic is preparation
+for an energy-consistent DC force, not production MD support.

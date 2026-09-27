@@ -47,6 +47,7 @@ use init_gs, only: init_wf
 use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
+use dc_force, only: report_dc_frozen_force
 use lcfo
 #ifdef USE_HSE
 use hse_native, only: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair,hse_refresh
@@ -225,6 +226,10 @@ if(yn_out_tm  == 'y'.or. yn_out_tm_bin == 'y'.or.yn_out_gs_sgm_eps=='y') then
   end select
 end if
 
+   if(yn_dc_force_diagnostic=='y')then
+     if(.not.(sum1<threshold))error stop 'DC force diagnostic: SCF not converged'
+     call report_dc_frozen_force(dc,system,info,mg,pp,ppg,spsi,ewald,energy)
+   endif
    ! force
    if(yn_jm=='n' .and. yn_dc=="n")then
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)

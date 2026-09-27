@@ -473,6 +473,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_out_dc_fragment_coor
   real(8)        :: xi_dc
   character(1)   :: yn_dc_lcfo
+  character(1)   :: yn_dc_force_diagnostic
   character(1)   :: yn_dc_lcfo_diag
   character(16)  :: lcfo_eigensolver
   integer        :: lcfo_diag_chefsi_filter_degree

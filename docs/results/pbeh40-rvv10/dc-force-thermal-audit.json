@@ -1,0 +1,56 @@
+[
+  {
+    "buffer": 4,
+    "energy_Ha": -2.3789592316137416,
+    "TS_Ha": 1.2040910136527593e-12,
+    "force_Ha_bohr": 0.08454650345601261,
+    "finite_difference": [
+      {
+        "step_bohr": 0.002,
+        "internal_energy_force": 0.08454616868658338,
+        "E_minus_TS_force": 0.08454617268049969
+      },
+      {
+        "step_bohr": 0.001,
+        "internal_energy_force": 0.08454634795751481,
+        "E_minus_TS_force": 0.08454635167343127
+      }
+    ]
+  },
+  {
+    "buffer": 2,
+    "energy_Ha": -2.3766268081104487,
+    "TS_Ha": 3.274672064901076e-05,
+    "force_Ha_bohr": 0.0844836900257861,
+    "finite_difference": [
+      {
+        "step_bohr": 0.002,
+        "internal_energy_force": 0.08546337559800499,
+        "E_minus_TS_force": 0.0854475974050306
+      },
+      {
+        "step_bohr": 0.001,
+        "internal_energy_force": 0.08546320746538605,
+        "E_minus_TS_force": 0.08544743332428162
+      }
+    ]
+  },
+  {
+    "buffer": 1,
+    "energy_Ha": -2.3768238881103687,
+    "TS_Ha": 4.271208075423562e-05,
+    "force_Ha_bohr": 0.08367554802883209,
+    "finite_difference": [
+      {
+        "step_bohr": 0.002,
+        "internal_energy_force": 0.08521602180611154,
+        "E_minus_TS_force": 0.08519185233557547
+      },
+      {
+        "step_bohr": 0.001,
+        "internal_energy_force": 0.08521611368594861,
+        "E_minus_TS_force": 0.08519195031597704
+      }
+    ]
+  }
+]

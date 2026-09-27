@@ -1,0 +1,34 @@
+{
+  "status": "explicit-force diagnostic implemented; truncated-DC force response and MD remain incomplete",
+  "base": "db8841d2",
+  "validated": {
+    "regression_tests_excluding_water": 31,
+    "synthetic_projector_cases": "complex s/p/d; full/empty/asymmetric core; independent energy finite differences",
+    "mpi": "one/two/four ranks and periodic atom wrapping",
+    "builds": [
+      "HSE ON MPI",
+      "HSE OFF serial"
+    ],
+    "regression_tests_total": 32,
+    "water_one_fragment_grid": [
+      24,
+      24,
+      24
+    ],
+    "water_max_force_difference_Ha_bohr": 6.8373709380647584e-09
+  },
+  "pending": [
+    "native truncated oxygen frozen-state certification",
+    "thermodynamic potential choice and response solver",
+    "moving atom lists, crossings, velocity Verlet and NVE validation"
+  ],
+  "log_sha256": {
+    "dc-force-red.log": "093a5bba3b6bfc3b185ff2eefd29346774eec158f913ce602fe376e7a7f8d80d",
+    "dc-projector-red.log": "cad905e0916b580c97e8450d82888889b9bb643d67d54369f91a3fd2a538e041",
+    "dc-projector-green.log": "a9e29f235cd99cfe5470a1ce41459e9be1ebcdc4b514ec2d4b921dc2c294d15f",
+    "dc-force-regressions.log": "14b304a154cf526f4de662c4a33a6410f256b8574f387407758b29bce9c1b0d0",
+    "dc-force-final-build.log": "11fc2c64af36bc3962dd3c2aaa5b6f80469f735bbc65ff478ce233055f8d163f",
+    "dc-force-off-final.log": "7b6c07da7fe5f611a1e999051cb1e6fa31eefba9f258fa7871d4bf45df22d68f",
+    "dc-force-water-24.log": "f29a202b953b59687d055673d2ef94fb90aa22a5b466cdb218c5bb947699eee5"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "status": "design-stage static energy audit, not an implemented DC force or MD integrator",
+  "fixture": "unit_pbeh_rvv10/dc_hydrogen.inp; 2 ranks, nproc_k=1, threshold=1e-10, nscf=500; first H x displaced",
+  "runs": [
+    {
+      "buffer": 4,
+      "delta_bohr": 0.002,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.73938072394756
+    },
+    {
+      "buffer": 4,
+      "delta_bohr": -0.002,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.73017825014057
+    },
+    {
+      "buffer": 4,
+      "delta_bohr": 0.001,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.73707937860502
+    },
+    {
+      "buffer": 4,
+      "delta_bohr": -0.001,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.7324781319451
+    },
+    {
+      "buffer": 2,
+      "delta_bohr": 0.002,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.67595974062581
+    },
+    {
+      "buffer": 2,
+      "delta_bohr": -0.002,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.66665743293268
+    },
+    {
+      "buffer": 2,
+      "delta_bohr": 0.001,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.67363462633529
+    },
+    {
+      "buffer": 2,
+      "delta_bohr": -0.001,
+      "exit": 0,
+      "converged": true,
+      "energy_eV": -64.66898348163896
+    }
+  ],
+  "finite_difference": [
+    {
+      "buffer_grid": 4,
+      "estimates": [
+        {
+          "delta_bohr": 0.002,
+          "force_eV_per_bohr": 2.3006184517484485
+        },
+        {
+          "delta_bohr": 0.001,
+          "force_eV_per_bohr": 2.3006233299582846
+        }
+      ],
+      "step_difference_eV_per_bohr": 4.878209836078895e-06
+    },
+    {
+      "buffer_grid": 2,
+      "estimates": [
+        {
+          "delta_bohr": 0.002,
+          "force_eV_per_bohr": 2.325576923283279
+        },
+        {
+          "delta_bohr": 0.001,
+          "force_eV_per_bohr": 2.3255723481625523
+        }
+      ],
+      "step_difference_eV_per_bohr": 4.575120726713067e-06
+    }
+  ]
+}
