@@ -17,6 +17,8 @@ module hse_wannier
   type s_hse_wannier
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
     integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64,fft_batches_executed=0_int64
+    integer(int64) :: pair_product_points=0_int64,pair_accumulation_points=0_int64
+    logical :: compact_source_support=.true.
     integer :: fft_batch_size=1,worker_batch=0
     integer :: localization_iterations=0,localization_status=1,workers=0
     real(8) :: h(3)=0d0,dv=0d0,spread=0d0,gradient=huge(1d0),min_singular=0d0
@@ -356,22 +358,27 @@ contains
 
   subroutine wannier_apply(op,target,action,status)
     implicit none
-    type(s_hse_wannier),intent(inout) :: op
+    type(s_hse_wannier),intent(inout),target :: op
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
     complex(8),allocatable :: home(:,:),result(:,:),source(:)
     integer :: i,j,ic,g,p(3),index,nt,t,nworkers,batch,lo,nb,k
-    integer :: columns(32)
-    integer(int64) :: executed,batches
+    integer :: columns(32),nsupport,ig,row
+    integer,allocatable :: support(:)
+    complex(8),pointer :: flat_work(:,:,:)
+    complex(8) :: value
+    logical :: compact,nonzero
+    integer(int64) :: executed,batches,products,accumulations
     status=1;action=0d0
+    op%pair_product_points=0_int64;op%pair_accumulation_points=0_int64
     op%fft_pairs_total=0_int64;op%fft_pairs_executed=0_int64;op%fft_batches_executed=0_int64
     if(.not.allocated(op%source))return
     if(size(target,1)/=op%ng.or.size(target,3)/=op%nk.or.any(shape(action)/=shape(target)))return
     nt=size(target,2)
     if(nt<1)return
     op%fft_pairs_total=int(op%nk,int64)*int(size(op%source,2),int64)*int(nt,int64)
-    executed=0_int64;batches=0_int64
+    executed=0_int64;batches=0_int64;products=0_int64;accumulations=0_int64
     if(op%fft_batch_size<1.or.op%fft_batch_size>size(columns))return
     allocate(home(op%ngs,nt),result(op%ngs,nt),source(op%ngs))
     nworkers=1
@@ -379,6 +386,8 @@ contains
     batch=min(op%fft_batch_size,max(1,nt/nworkers))
     call prepare_workers(op,nworkers,batch,status)
     if(status/=0)return
+    flat_work(1:op%ngs,1:op%worker_batch,1:op%workers)=>op%worker_work
+    allocate(support(op%ngs))
     call wannier_forward(op,target,home);result=0d0
     do ic=1,op%nk
       do i=1,size(op%source,2)
@@ -387,17 +396,35 @@ contains
           index=1+p(1)+op%ns(1)*(p(2)+op%ns(2)*p(3))
           source(g)=op%source(index,i)
         enddo
-        if(all(source==(0d0,0d0)))cycle
+        nsupport=0
+        do g=1,op%ngs
+          if(source(g)==(0d0,0d0))cycle
+          nsupport=nsupport+1;support(nsupport)=g
+        enddo
+        if(nsupport==0)cycle
+        compact=op%compact_source_support.and.nsupport<op%ngs/2
+        products=products+int(nt,int64)*int(merge(nsupport,op%ngs,compact),int64)
         !$omp parallel do default(none) schedule(static) num_threads(nworkers) &
-        !$omp shared(op,home,result,source,nt,batch) private(lo,j,t,nb,k,columns) reduction(+:executed,batches)
+        !$omp shared(op,home,result,source,nt,batch,compact,support,nsupport,flat_work) &
+        !$omp private(lo,j,t,nb,k,columns,ig,row,value,nonzero) reduction(+:executed,batches,accumulations)
         do lo=1,nt,batch
           t=1
           !$ t=omp_get_thread_num()+1
           nb=0
           do j=lo,min(nt,lo+batch-1)
-            op%worker_work(:,:,:,nb+1,t)=reshape(conjg(source)*home(:,j),op%ns)
-            ! Compact only exact nonzero pair densities; no magnitude threshold.
-            if(all(op%worker_work(:,:,:,nb+1,t)==(0d0,0d0)))cycle
+            if(compact)then
+              flat_work(:,nb+1,t)=0d0;nonzero=.false.
+              do ig=1,nsupport
+                row=support(ig);value=conjg(source(row))*home(row,j)
+                flat_work(row,nb+1,t)=value
+                if(value/=(0d0,0d0))nonzero=.true.
+              enddo
+              if(.not.nonzero)cycle
+            else
+              op%worker_work(:,:,:,nb+1,t)=reshape(conjg(source)*home(:,j),op%ns)
+              ! Compact only exact nonzero pair densities; no magnitude threshold.
+              if(all(op%worker_work(:,:,:,nb+1,t)==(0d0,0d0)))cycle
+            endif
             nb=nb+1;columns(nb)=j
           enddo
           if(nb==0)cycle
@@ -409,12 +436,22 @@ contains
           call fftw_execute_dft(op%worker_backward(nb,t),op%worker_work(:,:,:,:,t),op%worker_work(:,:,:,:,t))
           do k=1,nb
             j=columns(k)
-            result(:,j)=result(:,j)-source*reshape(op%worker_work(:,:,:,k,t),[op%ngs])/op%ngs
+            if(compact)then
+              do ig=1,nsupport
+                row=support(ig)
+                result(row,j)=result(row,j)-source(row)*flat_work(row,k,t)/op%ngs
+              enddo
+              accumulations=accumulations+int(nsupport,int64)
+            else
+              result(:,j)=result(:,j)-source*reshape(op%worker_work(:,:,:,k,t),[op%ngs])/op%ngs
+              accumulations=accumulations+int(op%ngs,int64)
+            endif
           enddo
         enddo
         !$omp end parallel do
       enddo
     enddo
+    op%pair_product_points=products;op%pair_accumulation_points=accumulations
     op%fft_pairs_executed=executed;op%fft_batches_executed=batches
     call wannier_backward(op,result,action)
     status=0

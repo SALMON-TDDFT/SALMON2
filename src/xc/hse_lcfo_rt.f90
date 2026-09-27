@@ -324,6 +324,8 @@ contains
       lcfo_rank,fragment_operator%fft_pairs_executed,fragment_operator%fft_pairs_total
     write(*,'(a,i6,i6,i14)')'LCFO exchange FFT batches rank/width/calls:', &
       lcfo_rank,fragment_operator%worker_batch,fragment_operator%fft_batches_executed
+    write(*,'(a,i6,2i14)')'LCFO exchange support product/accumulation points rank:', &
+      lcfo_rank,fragment_operator%pair_product_points,fragment_operator%pair_accumulation_points
     if(measure_continuity)call exchange_continuity(near_coeff,system%rocc(:,1,1),action)
     projection_started=wall_seconds()
     call lcfo_projection_apply(projection_plan,action(:,:,1),projected)
