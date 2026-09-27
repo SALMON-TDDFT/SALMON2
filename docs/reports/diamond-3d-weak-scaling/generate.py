@@ -47,7 +47,8 @@ for n in (4,6,8,10):
   'tiled_links_root_storage_GiB':6*16*occupied**2/2**30,
   'tiled_links_nonroot_storage_GiB':0,
   'tiled_links_scratch_GiB_per_rank':16*((4096+2*occupied)*min(64,occupied)+4096)/2**30,
-  'root_gamma_link_arrays_lower_bound_GiB':18*16*occupied**2/2**30})
+  'baseline_root_gamma_link_arrays_lower_bound_GiB':18*16*occupied**2/2**30,
+  'root_gamma_link_arrays_lower_bound_GiB':6*16*occupied**2/2**30})
 manifest['sha256']={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
  for p in sorted(root.rglob('*')) if p.is_file() and p.name in ('inputfile','atom.dat','C_rps.dat')}
 (root/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

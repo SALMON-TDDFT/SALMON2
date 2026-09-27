@@ -1,6 +1,6 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`b743e8b3`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`bee87f63`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
@@ -62,11 +62,17 @@ make -j 8
 
 ## 最新：初期MLWFのメモリ削減と本番制約
 
-`b743e8b3`で初期リンク構築を64列タイル化し、6方向のリンクはrootだけで保持。非rootの12N²複素数の複製を除去しました。独立試験（占有1024・MPI2）のpeak RSSはroot471→182 MiB、非root471→85 MiB。C128の電流差9.30e-18 a.u.、密度差4.05e-15、出力エネルギー差0。
+`bee87f63`ではrootのGamma局在化を更新済みリンクの直接評価に変更し、リンク関連の保持量を18 N²→6 N²複素数へ削減。係数のroot集約バッファは64列に制限し、全係数もリンク生成前に解放します。占有1024のGamma初期評価単独でpeak RSS **364→156 MiB（57%減）**。これはRT全体のピークではありません。
 
-**大規模本番はまだ保留。** root側の初期MV/seedとRTの密U/ACEは未解消で、10³のrootリンク関連だけでも約68.7 GiBが残ります。今回のRSSはリンク構築単独であり、RT全体のメモリではありません。3D入力のメモリ表も更新しました。
+| C128/MPI16、同一GS・16step | 変更前→後 | 検証 |
+|---|---:|---|
+| RT秒 | 52.222→54.895（速度比0.951） | 各1回・負荷変動あり、速度改善の主張なし |
+| 最大電流差 | 1.32e-17 a.u. | E∞=1.25e-10%（基準ピーク規格化） |
+| 密度／出力エネルギー差 | 3.00e-15／0 | 初期U・WF中心も丸め差の範囲 |
 
-[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/initial-links-memory-results.json)
+**大規模本番はまだ保留。** 8³のリンク容量は18→6 GiB、10³は68.7→22.9 GiB。ただしseedの全係数集約・QR/SVDとRTの密U/ACEが残るため、root全体のピークを保証しません。前回の非rootリンク削減と今回のroot削減を分けて記録しています。
+
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [root測定データ](docs/reports/diamond64-mlwf-support/root-gamma-memory-results.json) ／ [前回のリンク構築測定](docs/reports/diamond64-mlwf-support/initial-links-memory-results.json)
 
 <a id="fft-measure"></a>
 

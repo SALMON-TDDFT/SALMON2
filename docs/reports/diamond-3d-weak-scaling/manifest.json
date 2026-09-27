@@ -48,7 +48,8 @@
       "tiled_links_root_storage_GiB": 0.09375,
       "tiled_links_nonroot_storage_GiB": 0,
       "tiled_links_scratch_GiB_per_rank": 0.00592041015625,
-      "root_gamma_link_arrays_lower_bound_GiB": 0.28125
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 0.28125,
+      "root_gamma_link_arrays_lower_bound_GiB": 0.09375
     },
     {
       "case": "6x6x6",
@@ -74,7 +75,8 @@
       "tiled_links_root_storage_GiB": 1.06787109375,
       "tiled_links_nonroot_storage_GiB": 0,
       "tiled_links_scratch_GiB_per_rank": 0.01055908203125,
-      "root_gamma_link_arrays_lower_bound_GiB": 3.20361328125
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 3.20361328125,
+      "root_gamma_link_arrays_lower_bound_GiB": 1.06787109375
     },
     {
       "case": "8x8x8",
@@ -100,7 +102,8 @@
       "tiled_links_root_storage_GiB": 6.0,
       "tiled_links_nonroot_storage_GiB": 0,
       "tiled_links_scratch_GiB_per_rank": 0.01959228515625,
-      "root_gamma_link_arrays_lower_bound_GiB": 18.0
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 18.0,
+      "root_gamma_link_arrays_lower_bound_GiB": 6.0
     },
     {
       "case": "10x10x10",
@@ -126,7 +129,8 @@
       "tiled_links_root_storage_GiB": 22.88818359375,
       "tiled_links_nonroot_storage_GiB": 0,
       "tiled_links_scratch_GiB_per_rank": 0.03448486328125,
-      "root_gamma_link_arrays_lower_bound_GiB": 68.66455078125
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 68.66455078125,
+      "root_gamma_link_arrays_lower_bound_GiB": 22.88818359375
     }
   ],
   "sha256": {
