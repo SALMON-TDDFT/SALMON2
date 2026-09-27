@@ -43,7 +43,11 @@ for n in (4,6,8,10):
  manifest['cases'].append({'case':case.name,'fragments':nf,'mpi_ranks_gs':nf,'mpi_ranks_rt':nf,
   'atoms':na,'electrons':ne,'gs_states':ne,'rt_states':occupied,'grid':[16*n]*3,
   'cell_bohr':[round(a*n,8)]*3,'one_dense_complex_matrix_GiB':16*occupied**2/2**30,
-  'initial_raw_local_plus_raw_GiB_per_rank':12*16*occupied**2/2**30})
+  'baseline_initial_raw_local_plus_raw_GiB_per_rank':12*16*occupied**2/2**30,
+  'tiled_links_root_storage_GiB':6*16*occupied**2/2**30,
+  'tiled_links_nonroot_storage_GiB':0,
+  'tiled_links_scratch_GiB_per_rank':16*((4096+2*occupied)*min(64,occupied)+4096)/2**30,
+  'root_gamma_link_arrays_lower_bound_GiB':18*16*occupied**2/2**30})
 manifest['sha256']={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
  for p in sorted(root.rglob('*')) if p.is_file() and p.name in ('inputfile','atom.dat','C_rps.dat')}
 (root/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

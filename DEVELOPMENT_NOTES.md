@@ -1,13 +1,14 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`2c996869`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`b743e8b3`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
-- [最新：交換FFTの計画最適化](#fft-measure)
+- [最新：初期MLWFのメモリ削減と本番制約](#initial-memory)
+- [交換FFTの計画最適化](#fft-measure)
 - [Gram検査の演算・通信削減](#packed-gram)
 - [交換ソースの支持領域処理](#source-support)
 - [前回：Diamond 32・64・128原子の弱スケーリング](#weak-scaling)
@@ -57,9 +58,19 @@ make -j 8
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="initial-memory"></a>
+
+## 最新：初期MLWFのメモリ削減と本番制約
+
+`b743e8b3`で初期リンク構築を64列タイル化し、6方向のリンクはrootだけで保持。非rootの12N²複素数の複製を除去しました。独立試験（占有1024・MPI2）のpeak RSSはroot471→182 MiB、非root471→85 MiB。C128の電流差9.30e-18 a.u.、密度差4.05e-15、出力エネルギー差0。
+
+**大規模本番はまだ保留。** root側の初期MV/seedとRTの密U/ACEは未解消で、10³のrootリンク関連だけでも約68.7 GiBが残ります。今回のRSSはリンク構築単独であり、RT全体のメモリではありません。3D入力のメモリ表も更新しました。
+
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/initial-links-memory-results.json)
+
 <a id="fft-measure"></a>
 
-## 最新：交換FFTの計画最適化
+## 交換FFTの計画最適化
 
 `2c996869`では `SALMON_LCFO_RT_FFT_MEASURE=1` でFFTの実測計画を選択可能。初回に専用scratchで計画を作り、反復中は再利用。物理近似は追加していません。既定0（ESTIMATE）を維持します。
 

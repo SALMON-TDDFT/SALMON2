@@ -44,7 +44,11 @@
         26.88
       ],
       "one_dense_complex_matrix_GiB": 0.015625,
-      "initial_raw_local_plus_raw_GiB_per_rank": 0.1875
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 0.1875,
+      "tiled_links_root_storage_GiB": 0.09375,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.00592041015625,
+      "root_gamma_link_arrays_lower_bound_GiB": 0.28125
     },
     {
       "case": "6x6x6",
@@ -66,7 +70,11 @@
         40.32
       ],
       "one_dense_complex_matrix_GiB": 0.177978515625,
-      "initial_raw_local_plus_raw_GiB_per_rank": 2.1357421875
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 2.1357421875,
+      "tiled_links_root_storage_GiB": 1.06787109375,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.01055908203125,
+      "root_gamma_link_arrays_lower_bound_GiB": 3.20361328125
     },
     {
       "case": "8x8x8",
@@ -88,7 +96,11 @@
         53.76
       ],
       "one_dense_complex_matrix_GiB": 1.0,
-      "initial_raw_local_plus_raw_GiB_per_rank": 12.0
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 12.0,
+      "tiled_links_root_storage_GiB": 6.0,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.01959228515625,
+      "root_gamma_link_arrays_lower_bound_GiB": 18.0
     },
     {
       "case": "10x10x10",
@@ -110,7 +122,11 @@
         67.2
       ],
       "one_dense_complex_matrix_GiB": 3.814697265625,
-      "initial_raw_local_plus_raw_GiB_per_rank": 45.7763671875
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 45.7763671875,
+      "tiled_links_root_storage_GiB": 22.88818359375,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.03448486328125,
+      "root_gamma_link_arrays_lower_bound_GiB": 68.66455078125
     }
   ],
   "sha256": {
