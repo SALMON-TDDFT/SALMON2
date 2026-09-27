@@ -3203,8 +3203,8 @@ contains
       if(yn_hse_wannier_snapshot=='y') &
         error stop 'PBEh40: legacy HSE Wannier snapshot cannot encode Coulomb cutoff'
       if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
-      if(yn_dc=='y'.and.(theory=='dft_md'.or.xc=='pbeh40_rvv10')) &
-        error stop 'PBEh40: DC MD and total-density DC rVV10 are not yet supported'
+      if(yn_dc=='y'.and.theory=='dft_md') &
+        error stop 'PBEh40: DC MD is not yet supported'
       if(yn_conventional_from_dcdft=='y'.or.yn_hse_lcfo_rt=='y') &
         error stop 'PBEh40: LCFO projection not yet supported'
       if(xname/='none'.or.cname/='none')error stop 'PBEh40: extra xname/cname unsupported'

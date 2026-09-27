@@ -1,0 +1,23 @@
+{
+  "conventional": {
+    "energy_eV": -64.73477861790082,
+    "stdout_sha256": "42bfedd2091f0064ea278934da9e3d7e0949bbe44ffb3a2f3e53a85ec3997858"
+  },
+  "dc-one": {
+    "energy_eV": -64.73477858010348,
+    "stdout_sha256": "8b0c21ae641098847a702fd636b9847f09fb85996e6f05e61d54f6f67b0aed90",
+    "final_density_difference": 1.6739558e-09
+  },
+  "dc-two": {
+    "energy_eV": -64.7347784404863,
+    "stdout_sha256": "c406957f7fb491fd4bd0bfef3c6700a84841ca3a925c1539c80f4838be046ac5",
+    "final_density_difference": 4.1079754e-09
+  },
+  "dc-four": {
+    "energy_eV": -64.73477843364837,
+    "stdout_sha256": "09ea722e4ef364e4afc89e16bee3e9edd1b050df018c239c2d367ab2ef906691",
+    "final_density_difference": 4.0981045e-09
+  },
+  "one_fragment_minus_conventional_eV": 3.7797335039613245e-08,
+  "two_minus_four_ranks_eV": -6.837922228442039e-09
+}

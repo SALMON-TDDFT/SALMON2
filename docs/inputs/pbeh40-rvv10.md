@@ -47,7 +47,7 @@ In Hartree atomic units:
 
 The implementation uses natural cubic spline channels, a logarithmic q grid from 1e-4 to 0.5, and the usual 12-term smooth q saturation. Increase `rvv10_nq` (8–128) to check interpolation convergence. Values below the lower q bound are clamped with zero q derivative. Points at density <=1e-18 bohr^-3 contribute only the beta term. The energy and potential differentiate this same regularized discrete functional.
 
-The rational kernel's analytic three-dimensional Fourier transform is used, including its G=0 value and equal-q limit. No radial table or image cutoff is needed. Periodic convolution costs O(nq^2*G+nq*G*log G), with O(nq*G) arrays, not a G-by-G pair matrix. The present implementation uses a full grid on each k rank; it is not a distributed real-space rVV10 solver.
+The rational kernel's analytic three-dimensional Fourier transform is used, including its G=0 value and equal-q limit. No radial table or image cutoff is needed. Periodic convolution costs O(nq^2*G+nq*G*log G), with O(nq*G) arrays, not a G-by-G pair matrix. The conventional implementation uses a full grid on each k rank. In DC, owned portions of the mixed total density are gathered, the total-communicator root evaluates rVV10, and its potential is broadcast and mapped to every fragment (including buffers). The global nonlocal energy is added once, after semilocal core accumulation. This is not a distributed real-space rVV10 solver: the root uses O(nq*G) storage and all ranks hold full scalar grids.
 
 `vrho` and `vsigma` are added before SALMON's GGA divergence. Density gradients and the corresponding negative divergence therefore use the same finite-difference operator. The formula follows [Sabatini, Gorni and de Gironcoli, PRB 87, 041108(R) (2013)](https://doi.org/10.1103/PhysRevB.87.041108).
 
@@ -60,9 +60,9 @@ PBEh forces differentiate the same cubic radial projector and solid spherical ha
 ## Supported and rejected combinations
 
 - Periodic, orthorhombic, unpolarized conventional DFT and fixed-cell BOMD, CPU, k-only MPI; uniform full k meshes.
-- Static `pbeh40` can use the inherited DC exchange path; DC convergence against fragment/buffer size is still needed.
-- **Not supported:** DC+rVV10, DC MD, LCFO projection/RT, Ehrenfest/RT, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
-- DC+rVV10 requires convolution of the **total density**, not a sum of independent fragment dispersion energies. This extension is not implemented.
+- Static `pbeh40` and `pbeh40_rvv10` use the inherited DC MLWF+ACE exchange path; DC convergence against fragment/buffer size is still needed.
+- **Not supported:** DC MD, LCFO projection/RT, Ehrenfest/RT, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
+- DC+rVV10 convolves the **total density**. The initial fragment orbital preparation omits this term until the first regular total-density SCF update. DC-MD remains disabled: this static integration does not establish variational forces for truncated fragments.
 - No production scaling, long liquid trajectory, diffusivity, RDF, density, or exchange-cutoff convergence claim follows from the bounded tests below.
 
 ## Build and verification

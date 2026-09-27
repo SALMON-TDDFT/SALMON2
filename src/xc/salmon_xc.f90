@@ -346,7 +346,7 @@ contains
     end if
 
 #ifdef USE_HSE
-    if(xc_name=='pbeh40_rvv10')then
+    if(xc_name=='pbeh40_rvv10'.and.yn_dc/='y')then
       if(info%isize_r/=1.or.nspin/=1.or.yn_dc=='y')error stop 'rVV10: full conventional density grid required'
       rv_ng=product(mg%num)
       allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))

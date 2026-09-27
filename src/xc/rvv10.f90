@@ -8,9 +8,47 @@ module rvv10
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: rvv10_evaluate,rvv10_kernel_fourier
+  public :: rvv10_evaluate,rvv10_kernel_fourier,rvv10_periodic
   include 'fftw3.f03'
 contains
+  ! Full periodic density functional, using the same skew-adjoint central
+  ! differences as SALMON. Small grids intentionally wrap multiple times.
+  subroutine rvv10_periodic(n,h,coef,matrix_b,rho,b,c,nq,energy,potential,status)
+    integer,intent(in) :: n(3),nq
+    real(8),intent(in) :: h(3),coef(4,3),matrix_b(3,3),rho(n(1),n(2),n(3)),b,c
+    real(8),intent(out) :: energy(n(1),n(2),n(3)),potential(n(1),n(2),n(3))
+    integer,intent(out) :: status
+    real(8),allocatable :: grad(:,:,:,:),der(:,:,:,:),flux(:,:,:),sigma(:),e(:),v(:),w(:)
+    integer :: a,d,j,ng
+    ng=product(n)
+    allocate(grad(n(1),n(2),n(3),3),der(n(1),n(2),n(3),3),flux(n(1),n(2),n(3)))
+    allocate(sigma(ng),e(ng),v(ng),w(ng))
+    der=0;grad=0
+    do a=1,3
+      do j=1,4
+        der(:,:,:,a)=der(:,:,:,a)+coef(j,a)*(cshift(rho,j,a)-cshift(rho,-j,a))
+      enddo
+    enddo
+    do d=1,3
+      do a=1,3
+        grad(:,:,:,d)=grad(:,:,:,d)+matrix_b(a,d)*der(:,:,:,a)
+      enddo
+    enddo
+    sigma=reshape(sum(grad**2,dim=4),[ng])
+    call rvv10_evaluate(n,h,reshape(rho,[ng]),sigma,b,c,nq,e,v,w,status)
+    if(status/=0)return
+    energy=reshape(e,n);potential=reshape(v,n)
+    do a=1,3
+      flux=0
+      do d=1,3
+        flux=flux+2*reshape(w,n)*matrix_b(a,d)*grad(:,:,:,d)
+      enddo
+      do j=1,4
+        potential=potential-coef(j,a)*(cshift(flux,j,a)-cshift(flux,-j,a))
+      enddo
+    enddo
+  end subroutine rvv10_periodic
+
   real(8) function rvv10_kernel_fourier(q1,q2,g) result(value)
     real(8),intent(in) :: q1,q2,g
     real(8) :: a,b,c,pi,coef(3),r(3)

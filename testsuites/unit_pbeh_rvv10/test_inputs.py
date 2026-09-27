@@ -25,8 +25,8 @@ class InputTest(unittest.TestCase):
     def test_legacy_snapshot_is_rejected(self):
         inp=self.base().replace('rvv10_nq=32',"rvv10_nq=32\n yn_hse_wannier_snapshot='y'")
         self.run_input(inp,'PBEh40: legacy HSE Wannier snapshot cannot encode Coulomb cutoff')
-    def test_dc_rvv10_is_rejected(self):
-        self.run_input(self.base().replace("theory='dft'","theory='dft'\n yn_dc='y'"),'DC MD and total-density DC rVV10')
+    def test_dc_md_is_rejected(self):
+        self.run_input(self.base().replace("theory='dft'","theory='dft_md'\n yn_dc='y'"),'DC MD is not yet supported')
     def test_restart_is_rejected(self):
         self.run_input(self.base().replace("sysname = 'H2O'","sysname = 'H2O'\n yn_restart='y'"),'checkpoint parameter validation')
     def test_invalid_rvv10_parameters_are_rejected(self):

@@ -38,3 +38,24 @@ The inherited BOMD path also advanced with deliberately unconverged `nscf=1`. PB
 ## Remaining work
 
 Total-density DC+rVV10, DC-MD forces, restart metadata, real-space distribution, controlled pair pruning, large-water-cell scaling, and physical cell/radius/grid/time convergence remain unimplemented or unvalidated as detailed in the [input documentation](../../inputs/pbeh40-rvv10.md). The inherited MLWF/ACE path is retained; no linear-scaling claim is made.
+
+## Static DC total-density rVV10
+
+`dc-static.json` records the 16x8x8 hydrogen-cell integration check from
+`testsuites/unit_pbeh_rvv10/dc_hydrogen.inp`. The two-fragment buffers cover the
+full cell, so this checks communication and energy accounting, not convergence
+of a genuinely truncated fragment approximation. One-fragment DC agrees with
+conventional PBEh40+rVV10 within 2e-6 eV; two/four-rank calculations also agree
+within that tolerance. The regression additionally checks a nonzero energy
+change when rVV10 is removed. The periodic wrapper's complete density derivative
+(including density gradients) passes the 2e-8 atomic-unit tolerance.
+
+Reproduce with an HSE-enabled executable and a local MPI launcher:
+
+```
+SALMON_TEST_EXE=/absolute/path/salmon SALMON_TEST_MPIEXEC=/absolute/path/mpiexec \
+  python3 -m unittest discover -s testsuites/unit_pbeh_rvv10
+```
+
+This validates static DC only. Root-only nonlocal FFT performance, realistic
+water fragment/buffer convergence, DC forces, and checkpoint restart remain open.

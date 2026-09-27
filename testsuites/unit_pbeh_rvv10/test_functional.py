@@ -50,6 +50,10 @@ class FunctionalTest(unittest.TestCase):
                 expected.append(val)
         np.testing.assert_allclose(actual,expected,rtol=1e-9,atol=1e-7)
 
+    def test_periodic_density_derivative(self):
+        exe=self.compile(["rvv10.f90"],"periodic_probe.f90")
+        subprocess.run([exe],capture_output=True,text=True,check=True)
+
     def test_pbeh_semilocal(self):
         exe=self.compile(['hse_semilocal.f90'],'semilocal_probe.f90')
         p=subprocess.run([exe],capture_output=True,text=True,check=True)
