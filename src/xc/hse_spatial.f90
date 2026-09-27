@@ -1,6 +1,6 @@
 ! Full-support Gamma exchange on x-complete y/z pencils.
 ! All band matrices are replicated, but orbital grid rows and FFT work are local.
-! Collective contract: n/h/dims/band counts/radius/maxiter and call order agree;
+! Collective contract: n/h/dims/band counts/radius/omega/maxiter and call order agree;
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module hse_spatial
   use communication, only: comm_summation,comm_get_max
@@ -92,21 +92,27 @@ contains
     end subroutine
   end subroutine
 
-  subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status)
+  subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega)
     type(spatial_exx_state),intent(in) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r
     real(8),intent(in) :: h(3),radius_input
+    real(8),intent(in),optional :: omega
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
     complex(8),allocatable :: density(:,:),spectrum(:,:),potential(:,:)
     real(8),allocatable :: multiplier(:)
-    real(8) :: radius,pi,q(3),q2
+    real(8) :: radius,pi,q(3),q2,screening
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad
     status=1;action=0d0;bad=0
+    screening=0d0
+    if(present(omega))screening=omega
+    if(.not.ieee_is_finite(screening).or.screening<0d0)bad=1
     if(.not.allocated(op%source))bad=1
     if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
-    if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
+    if(screening==0d0)then
+      if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
+    endif
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
@@ -116,7 +122,7 @@ contains
     if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
     radius=.5d0*minval(n*h)
     if(radius_input>0d0)radius=radius_input
-    if(radius>.5d0*minval(n*h)*(1d0+1d-12))bad=1
+    if(screening==0d0.and.radius>.5d0*minval(n*h)*(1d0+1d-12))bad=1
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     allocate(multiplier(ng));pi=acos(-1d0);g=0
@@ -125,7 +131,13 @@ contains
       g=g+1;p=[x,y,z]+lo
       where(p>=(n+1)/2)p=p-n
       q=2*pi*p/(n*h);q2=sum(q*q)
-      if(q2<1d-24)then
+      if(screening>0d0)then
+        if(q2<1d-24)then
+          multiplier(g)=pi/screening**2
+        else
+          multiplier(g)=4*pi*(1d0-exp(-q2/(4*screening**2)))/q2
+        endif
+      else if(q2<1d-24)then
         multiplier(g)=2*pi*radius**2
       else
         multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2

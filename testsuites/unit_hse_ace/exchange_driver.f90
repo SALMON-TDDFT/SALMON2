@@ -11,8 +11,11 @@ program exchange_driver
   type(spatial_exx_state) :: spatial,full_spatial
   type(s_hse_wannier) :: serial
   integer :: np,rank,err,status,dims(2),coords(2),comm(2),m(3),lo(3),g,l,x,y,z,j,k,stage
-  real(8) :: error,global_error,dv,bad_dv,minimum
+  real(8) :: error,global_error,dv,bad_dv,minimum,omega
+  character(32) :: argument
   complex(8) :: transported(no,no,1)
+  call get_command_argument(1,argument)
+  read(argument,*)omega
   call MPI_Init(err)
   call MPI_Comm_size(MPI_COMM_WORLD,np,err)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,err)
@@ -38,7 +41,7 @@ program exchange_driver
     enddo
   enddo
   allocate(local(product(m),no,1),trial(product(m),nt,1),action(product(m),nt,1))
-  call wannier_init(serial,n,[1,1,1],h,reshape([0d0,0d0,0d0],[3,1]),0d0,status,2.5d0)
+  call wannier_init(serial,n,[1,1,1],h,reshape([0d0,0d0,0d0],[3,1]),omega,status,2.5d0)
   if(status/=0)error stop 'serial init'
   do stage=1,2
     if(stage==2)psi=psi*cmplx(cos(.13d0),sin(.13d0),8)
@@ -68,7 +71,7 @@ program exchange_driver
       if(abs(spatial%min_singular-1d0)>1d-10)error stop 'transport overlap mismatch'
       if(maxval(abs(spatial%previous-previous_saved))>1d-10)error stop 'transport gauge mismatch'
     endif
-    call spatial_exx_apply(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,2.5d0,trial,action,status)
+    call spatial_exx_apply(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,2.5d0,trial,action,status,omega=omega)
     if(status/=0)error stop 'spatial action'
     error=0d0;l=0
     do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1
@@ -77,8 +80,10 @@ program exchange_driver
     enddo;enddo;enddo
     call MPI_Allreduce(error,global_error,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,err)
     if(global_error>1d-10)error stop 'exchange mismatch'
-    if(rank==0)print *, 'PASS spatial exchange ranks/stage/error ',np,stage,global_error
+    if(rank==0)print *, 'PASS spatial exchange ranks/stage/error ',np,stage,global_error,omega
   enddo
+  call spatial_exx_apply(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,2.5d0,trial,action,status,omega=-.1d0)
+  if(status==0)error stop 'negative screening accepted'
   bad_dv=dv
   if(rank==0)bad_dv=-1d0
   call gauge_transport(local,spatial%previous,bad_dv,transported,minimum,status,sum_grid)

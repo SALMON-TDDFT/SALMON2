@@ -13,13 +13,14 @@ ROOT=Path(__file__).resolve().parents[2]
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE') and os.environ.get('SALMON_TEST_MPIEXEC'),
                      'SALMON_TEST_EXE and SALMON_TEST_MPIEXEC required')
 class RealspaceEhrenfest(unittest.TestCase):
+    functional="pbeh40_rvv10"
     @classmethod
     def setUpClass(cls):
         cls.temp=tempfile.TemporaryDirectory(prefix='realspace-ehrenfest-')
         cls.root=Path(cls.temp.name)
         cls.addClassCleanup(cls.temp.cleanup)
         cls.base=(ROOT/'testsuites/422_H_dcdft_hse/inputfile').read_text()
-        cls.base=cls.base.replace("xc='hse06'","xc='pbeh40_rvv10'\n exx_mlwf_interval=5\n exx_mlwf_maxiter=100")
+        cls.base=cls.base.replace("xc='hse06'",f"xc='{cls.functional}'\n exx_mlwf_interval=5\n exx_mlwf_maxiter=100")
         cls.base=cls.base.replace('nproc_k=2','nproc_k=1').replace('nproc_rgrid_tot=4,1,1','nproc_rgrid_tot=2,1,1')
         cls.base=cls.base.replace('num_kgrid=1,2,1','num_kgrid=1,1,1')
         cls.base=cls.base.replace('lmax_ps(1)=0','lmax_ps(1)=1').replace('lloc_ps(1)=0','lloc_ps(1)=1')

@@ -83,16 +83,17 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   character(100) :: comment_line
-  logical :: rion_update,pbeh_mesh_md,pbeh_mesh_rt
+  logical :: rion_update,pbeh_mesh_md,hybrid_mesh_rt
   real(8) :: rion_endpoint(3,system%nion)
   integer :: ihpsieff
   call nvtxStartRange('time_evolution_step', __LINE__)
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
-  pbeh_mesh_rt=(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n' &
+  hybrid_mesh_rt=((xc=='hse06'.and.yn_hse_wannier=='y').or.xc=='pbeh40'.or.xc=='pbeh40_rvv10') &
+    .and.yn_hse_lcfo_rt=='n' &
     .and.yn_conventional_from_dcdft=='y'
-  pbeh_mesh_md=pbeh_mesh_rt.and.yn_md=='y'
+  pbeh_mesh_md=hybrid_mesh_rt.and.xc/='hse06'.and.yn_md=='y'
 
   call timer_begin(LOG_CALC_VBOX)
   
@@ -285,7 +286,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 ! result
 
-  if(pbeh_mesh_rt)then
+  if(hybrid_mesh_rt)then
     ! Propagation uses midpoint A, but energy/current/force describe t_{n+1}.
     system%vec_Ac=rt%Ac_tot(:,itt)
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)

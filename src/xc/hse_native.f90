@@ -1,6 +1,6 @@
 #include "config.h"
 ! SALMON adapter: legacy full-grid/orbital layout distributes k points.
-! Gamma DC-initialized PBEh mesh RT also supports spatial y/z FFTW pencils.
+! Gamma DC-initialized hybrid mesh RT also supports spatial y/z FFTW pencils.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module hse_native
   use exx_functional, only: exchange_fraction
@@ -235,7 +235,7 @@ contains
       return
     endif
     if(info%isize_r>1.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
-       (xc=='pbeh40'.or.xc=='pbeh40_rvv10').and. &
+       (xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and. &
        (theory=='tddft_response'.or.theory=='tddft_pulse'))then
       call refresh_spatial(system,mg,info,psi)
       return
@@ -429,7 +429,7 @@ contains
       if(info%isize_r>1)then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
           [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,target_work,action_work,info_error)
+          pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'))
         if(info_error/=0)error stop 'Spatial EXX: full action failed'
       else
         call apply_wannier_collective(target_work,action_work,info)
@@ -519,7 +519,7 @@ contains
     if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
     call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-      pbeh_coulomb_radius,local,w,status)
+      pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'))
     if(status/=0)error stop 'Spatial EXX: exchange action failed'
     call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
     if(status/=0)error stop 'Spatial EXX: ACE build failed'

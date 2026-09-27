@@ -177,3 +177,34 @@ For diagnostic export set the environment variable
 `hse_wannier_snapshot.bin` in each fragment directory before LCFO processing.
 See `samples/dc_hse/README.md` for the binary version, conversion, and provenance
 limitations. The export records SCF and localization convergence separately.
+
+## Spatial mesh RT from DC initialization
+
+HSE now shares the PBEh Gamma spatial MLWF/FFTW/ACE implementation for
+`theory='tddft_response'` and `theory='tddft_pulse'` with
+`yn_dc='n'`, `yn_conventional_from_dcdft='y'`, `yn_hse_lcfo_rt='n'`.
+DC initializes the mesh orbitals; time propagation acts directly on those
+orbitals, without an LCFO projection. `yn_hse_wannier` is enabled automatically
+for spatial layouts; use `yn_hse_wannier='y'` for the serial reference.
+
+Use `nproc_ob=1`, `nproc_k=1`, `num_kgrid=1,1,1`, and y/z spatial layouts such
+as `nproc_rgrid=1,2,1` or `1,2,2`. The x grid must divide by Py; y by both
+Py and Pz; z by Pz. Cells must be orthogonal, the k point unshifted Gamma,
+occupations fixed at two per orbital, and `exx_mlwf_radius=0` (full support).
+The existing `exx_mlwf_interval/maxiter/tolerance` controls apply.
+
+The HSE reciprocal kernel is `4*pi*(1-exp(-G^2/(4*omega^2)))/G^2`, with
+zero mode `pi/omega^2`; the PBEh Coulomb cutoff does not affect this kernel.
+The HSE mixing fraction remains 0.25. Distributed FFT and ACE store only
+local grid rows. Supported fields are impulse and Acos2 without a second
+field, using Taylor4+ACE. Checkpoints and snapshots are not supported here.
+
+This migration currently covers fixed-ion RT. HSE MD remains disabled until
+its forces are validated. Legacy SCF, multi-k, finite-support and projected
+routes remain available under their existing restrictions; they will be
+removed only after their replacements are implemented and verified.
+
+Validation: `testsuites/unit_hse_ace/validate_exchange.py` compares screened
+and Coulomb exchange against serial Wannier on 1/2/4 ranks;
+`testsuites/unit_pbeh_rvv10/test_hse_spatial.py` compares HSE DC-initialized
+impulse and pulse histories against the serial route.

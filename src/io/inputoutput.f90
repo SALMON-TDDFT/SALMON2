@@ -2893,7 +2893,7 @@ contains
     implicit none
     integer :: i,round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
-    logical :: if_orthogonal_tmp,pbeh_mesh_rt
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -3249,19 +3249,26 @@ contains
     pbeh_mesh_rt=(xc=='pbeh40'.or.xc=='pbeh40_rvv10') &
       .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
       .and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n'
-    if(pbeh_mesh_rt)then
+    hybrid_mesh_rt=pbeh_mesh_rt.or.(xc=='hse06'.and. &
+      (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1).and. &
+      (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
+      yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
+    if(hybrid_mesh_rt)then
+      yn_hse_wannier='y'
+      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
+        error stop 'Hybrid mesh RT: restart/snapshot unsupported'
       if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
-        error stop 'PBEh40 mesh RT: impulse or Acos2 without a second field required'
+        error stop 'Hybrid mesh RT: impulse or Acos2 without a second field required'
       if(.not.ieee_is_finite(dt).or.dt<=0d0.or.nt<1) &
-        error stop 'PBEh40 mesh RT: positive finite dt and nt required'
+        error stop 'Hybrid mesh RT: positive finite dt and nt required'
       if(ae_shape1=='Acos2')then
         if(.not.all(ieee_is_finite([omega1,tw1,t1_start,E_amplitude1,I_wcm2_1,phi_CEP1]))) &
-          error stop 'PBEh40 mesh RT: finite pulse parameters required'
+          error stop 'Hybrid mesh RT: finite pulse parameters required'
         if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
-          error stop 'PBEh40 mesh RT: positive frequency/width and nonnegative pulse start required'
+          error stop 'Hybrid mesh RT: positive frequency/width and nonnegative pulse start required'
       endif
       if(checkpoint_interval>0.or.time_shutdown>0d0.or.write_rt_wfn_k=='y') &
-        error stop 'PBEh40 mesh RT: checkpoint output not supported'
+        error stop 'Hybrid mesh RT: checkpoint output not supported'
       if(yn_md=='y')then
         if(ensemble/='NVE'.or.step_velocity_scaling>=1.or.yn_stop_system_momt=='y') &
           error stop 'PBEh40 mesh Ehrenfest: unmodified NVE velocities required'
@@ -3315,7 +3322,7 @@ contains
       if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
-        if(pbeh_mesh_rt.and.product(nproc_rgrid)>1)then
+        if(hybrid_mesh_rt.and.product(nproc_rgrid)>1)then
           if(nproc_ob/=1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
             error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
           if(modulo(num_rgrid(1),nproc_rgrid(2))/=0.or.modulo(num_rgrid(2),nproc_rgrid(2))/=0.or. &
