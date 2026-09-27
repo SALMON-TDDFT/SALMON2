@@ -1,23 +1,28 @@
 ! Rectangular fragment-periodic screened exchange in a Wannier representation.
 ! Q = Psi sqrt(f/2) U preserves fractional occupations; Phi = Psi U is the
 ! orthonormal localization frame. Neither the HSE fraction nor spin doubling
-! is included in this module's action. Full periodic support is retained.
+! is included in this module's action. Full support is the default; an explicit
+! spherical source approximation can reuse the LCFO periodic support mask.
 module hse_wannier
   use iso_c_binding
   use iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init
   use hse_wannier_gauge, only: gauge_transport,gauge_minimize,gauge_seed
   !$ use omp_lib, only: omp_get_max_threads,omp_get_thread_num
   implicit none
   private
   include 'fftw3.f03'
-  public :: wannier_snapshot,wannier_refresh_source
+  public :: wannier_snapshot,wannier_refresh_source,wannier_truncate_source
   public :: s_hse_wannier,wannier_init,wannier_destroy,wannier_localize
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
   type s_hse_wannier
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
     integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64,fft_batches_executed=0_int64
     integer(int64) :: pair_product_points=0_int64,pair_accumulation_points=0_int64
+    integer :: last_localization_status=1
+    integer :: protected_sources=0
+    real(8) :: discarded_norm_fraction=0d0,max_discarded_norm_fraction=0d0
     logical :: compact_source_support=.true.
     logical :: fft_measure=.false.,worker_measure=.false.
     integer :: fft_batch_size=1,worker_batch=0
@@ -206,6 +211,7 @@ contains
       if(size(op%source_indices)==size(indices))reset=any(op%source_indices/=indices)
     endif
     if(reset)then
+      op%last_localization_status=1
       if(allocated(op%gauge))deallocate(op%gauge)
       if(allocated(op%previous))deallocate(op%previous)
       op%min_singular=0d0
@@ -235,6 +241,7 @@ contains
       endif
     endif
     if(.not.allocated(op%gauge))then
+      op%last_localization_status=1
       allocate(op%gauge(n,n,op%nk));op%gauge=0d0
       do ik=1,op%nk
         do j=1,n
@@ -243,6 +250,7 @@ contains
       enddo
     endif
     if(.not.allocated(op%previous))then
+      op%last_localization_status=1
       call gauge_seed(psi,op%position,op%k,op%gauge,transport_status)
       if(transport_status/=0)then
         op%gauge=0d0
@@ -257,6 +265,7 @@ contains
       call gauge_transport(psi,op%previous,op%dv,op%gauge,op%min_singular,transport_status)
       if(transport_status/=0)then
         ! Overlap loss: restart the gauge, never project away current states.
+        op%last_localization_status=1
         op%gauge=0d0
         do ik=1,op%nk
           do j=1,n
@@ -299,6 +308,7 @@ contains
     enddo
     call gauge_minimize(op%gauge,raw,op%neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
                         op%localization_iterations,op%localization_status)
+    op%last_localization_status=op%localization_status
     if(.not.allocated(op%previous))allocate(op%previous(op%ng,n,op%nk))
     do ik=1,op%nk
       op%previous(:,:,ik)=matmul(psi(:,:,ik),op%gauge(:,:,ik))
@@ -307,6 +317,51 @@ contains
     ! A valid but not converged gauge changes cost/locality, not full-support EXX.
     status=0
   end subroutine
+
+  ! Apply once to a freshly built source. This is a gauge-dependent source
+  ! approximation, not a Coulomb-kernel cutoff or a variational-force model.
+  ! Both source factors in wannier_apply see the same mask (Hermitian action).
+  subroutine wannier_truncate_source(op,radius,status)
+    type(s_hse_wannier),intent(inout) :: op
+    real(8),intent(in) :: radius
+    integer,intent(out) :: status
+    type(s_lcfo_wf_plan) :: support
+    real(8),allocatable :: positions(:,:),centers(:,:),norms(:),loss(:)
+    complex(8),allocatable :: moment(:,:),masked(:,:)
+    logical,allocatable :: protected(:)
+    real(8) :: length(3),pi
+    integer :: a,j,n
+    status=1
+    if(.not.ieee_is_finite(radius).or.radius<0d0.or..not.allocated(op%source))return
+    op%protected_sources=0;op%discarded_norm_fraction=0d0;op%max_discarded_norm_fraction=0d0
+    status=0
+    if(radius==0d0)return
+    n=size(op%source,2);length=op%ns*op%h;pi=acos(-1d0)
+    allocate(positions(3,op%ngs),centers(3,n),norms(n),loss(n),moment(3,n),protected(n))
+    do a=1,3
+      positions(a,:)=op%point(a,:)*op%h(a)
+    enddo
+    norms=sum(abs(op%source)**2,dim=1)
+    do j=1,n
+      do a=1,3
+        moment(a,j)=sum(abs(op%source(:,j))**2*exp(cmplx(0d0,2*pi*positions(a,:)/length(a),8)))
+        centers(a,j)=modulo(atan2(aimag(moment(a,j)),real(moment(a,j)))*length(a)/(2*pi),length(a))
+      enddo
+      ! Same reliability threshold as LCFO MLWF: never cut ambiguous centers.
+      protected(j)=norms(j)<=tiny(1d0).or.any(abs(moment(:,j))<.1d0*norms(j))
+    enddo
+    op%protected_sources=count(protected)
+    call lcfo_wf_plan_init(support,positions,centers,length,radius,protected)
+    if(.not.support%masked)return
+    allocate(masked(op%ngs,n));masked=0d0
+    do j=1,size(support%columns)
+      where(support%keep(:,j))masked(:,support%columns(j))=op%source(:,support%columns(j))
+    enddo
+    loss=max(0d0,norms-sum(abs(masked)**2,dim=1))
+    if(sum(norms)>tiny(1d0))op%discarded_norm_fraction=sum(loss)/sum(norms)
+    if(n>0)op%max_discarded_norm_fraction=maxval(loss/max(norms,tiny(1d0)))
+    op%source=masked
+  end subroutine wannier_truncate_source
 
   subroutine wannier_set_source(op,psi,occupation,gauge,status)
     implicit none

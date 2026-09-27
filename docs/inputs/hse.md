@@ -104,9 +104,13 @@ The following `&functional` inputs select/control the new backend:
 | Variable | Default | Meaning |
 |---|---|---|
 | `yn_hse_wannier` | `'n'` | Select the rectangular full-mesh Wannier backend. Automatically enabled for DC-HSE. |
-| `hse_mlwf_interval` | `10` | Positive number of exchange refreshes between spread minimizations. Polar transport/reconstruction is performed on every changed source. |
-| `hse_mlwf_maxiter` | `200` | Positive maximum number of unitary spread-descent iterations per minimization. |
-| `hse_mlwf_tolerance` | `1d-6` | Positive finite spread-gradient norm tolerance, always in atomic units (bohr squared), independent of `unit_system`. |
+| `exx_mlwf_interval` | `10` | Positive number of exchange refreshes between spread minimizations. Polar transport/reconstruction is performed on every changed source. |
+| `exx_mlwf_maxiter` | `200` | Positive maximum number of unitary spread-descent iterations per minimization. |
+| `exx_mlwf_tolerance` | `1d-6` | Positive finite spread-gradient norm tolerance, always in atomic units (bohr squared), independent of `unit_system`. |
+| `exx_mlwf_radius` | `0` | Periodic spherical source support, in input length units; 0 is full support. Positive values automatically enable the Wannier backend and support static DFT only. |
+
+The three old `hse_mlwf_*` control names remain input aliases. See
+[shared EXX controls and radius limitations](exx-mlwf.md).
 
 The refresh count includes predictor and corrected states in RT, and is **not**
 a count of physical time steps. Unchanged orbitals *and* occupations reuse the
@@ -114,7 +118,7 @@ cached exchange. Occupation changes invalidate the cache. `status=0` in
 `HSE_WANNIER` diagnostics means the gradient criterion was met; `status=1` means
 it was not. `status=2` denotes transport only (spread and gradient are -1, not
 evaluated). A finite iteration limit does not guarantee an MLWF minimum.
-Unconverged localization retains full-support exact exchange with an explicit
+At the default `exx_mlwf_radius=0`, unconverged localization retains full-support exact exchange with an explicit
 message. The first refresh has no previous overlap (reported as zero).
 
 For DC, provide a nonnegative electronic `temperature` or `temperature_k` and
@@ -147,7 +151,7 @@ full retained-fragment exchange to its basis, rather than extrapolating the ACE
 operator outside its construction space. Buffer-size convergence remains a
 required physical convergence study; small smoke tests do not establish it.
 
-**Current performance boundary:** this is the exact full-support Wannier
+**Default performance boundary (`exx_mlwf_radius=0`):** this is the exact full-support Wannier
 baseline. It transforms a fragment's full k mesh to its Born–von Karman
 supercell and evaluates all source/target pairs without spatial or distance
 cutoffs. Each fragment's k root performs full exchange; ACE applies locally on

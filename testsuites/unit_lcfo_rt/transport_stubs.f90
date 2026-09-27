@@ -1,9 +1,9 @@
 ! Single-rank communication fixture; production localization/transport is linked unchanged.
 module salmon_global
  implicit none
- integer :: hse_mlwf_maxiter=100,hse_lcfo_u_interval=1
+ integer :: exx_mlwf_maxiter=100,hse_lcfo_u_interval=1
  character(1) :: yn_hse_wannier='y',yn_hse_lcfo_seed_distributed='n'
- real(8) :: hse_mlwf_tolerance=1d-7,hse_lcfo_wf_radius=0d0
+ real(8) :: exx_mlwf_tolerance=1d-7,hse_lcfo_wf_radius=0d0
 end module
 module lcfo_rt_basis
  implicit none

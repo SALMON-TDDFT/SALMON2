@@ -55,7 +55,7 @@ def main():
 '''
     traces=[]
     for interval in [1,10]:
-        text=rt.replace("yn_hse_wannier='y'",f"yn_hse_wannier='y'\n hse_mlwf_interval={interval}")
+        text=rt.replace("yn_hse_wannier='y'",f"yn_hse_wannier='y'\n exx_mlwf_interval={interval}")
         path=work/f'rt_interval{interval}'
         output=launch(exe,path,text)
         assert 'HSE_WANNIER' in output

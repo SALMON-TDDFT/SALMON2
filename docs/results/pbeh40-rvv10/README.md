@@ -59,3 +59,22 @@ SALMON_TEST_EXE=/absolute/path/salmon SALMON_TEST_MPIEXEC=/absolute/path/mpiexec
 
 This validates static DC only. Root-only nonlocal FFT performance, realistic
 water fragment/buffer convergence, DC forces, and checkpoint restart remain open.
+
+## Shared EXX controls and spherical source support
+
+The canonical controls are now `exx_mlwf_interval/maxiter/tolerance`, with legacy
+HSE input aliases, and `exx_mlwf_radius` in input length units. See
+[the input contract and approximation limits](../../inputs/exx-mlwf.md).
+Standalone probes cover HSE and PBEh kernels, zero/full limits, periodic masks,
+protected ambiguous centers, Hermiticity, compact/dense action agreement and
+loss of overlap during gauge transport. Input tests cover alias equality,
+conflicts, units and rejected modes, as well as a converged small conventional
+finite-radius HSE/PBEh SCF.
+
+Finite-radius DC is not certified by the previous full-support numbers. A new
+check exposed MPI-dependent initial seeds and unconverged MLWF gauges. The
+seeds now use physical k indices for finite support. The same first DC update
+agrees across two/four ranks for Gaussian and random starts. A truncated SCF
+result is rejected if the last MLWF minimization did not converge, including
+a failed gauge transport that invalidates earlier convergence. This prevents a
+small density residual from being mistaken for localization convergence.

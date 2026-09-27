@@ -55,7 +55,7 @@ use noncollinear_module, only: calc_magnetization
 use dcdft
 use hse_reference_export, only: export_hse_reference
 #ifdef USE_HSE
-use hse_native, only: hse_enabled,hse_freeze
+use hse_native, only: hse_enabled,hse_freeze,hse_check_localization
 #endif
 implicit none
 integer :: ix,iy,iz,ik,is
@@ -158,6 +158,9 @@ sum1=1d9
 DFT_Iteration : do iter=Miter+1,nscf
 
    if( sum1 < threshold ) then
+#ifdef USE_HSE
+      call hse_check_localization()
+#endif
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
@@ -420,6 +423,9 @@ DFT_Iteration : do iter=Miter+1,nscf
    endif
 
 end do DFT_Iteration
+#ifdef USE_HSE
+call hse_check_localization()
+#endif
 
 ! A BOMD step is not valid without a self-consistent electronic ground state.
 if(theory=='dft_md'.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then

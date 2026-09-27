@@ -33,8 +33,10 @@
 &functional
   xc ='pbeh40_rvv10'
   rvv10_nq=32
-  hse_mlwf_maxiter=20
-  hse_mlwf_interval=5
+  exx_mlwf_maxiter=100
+  exx_mlwf_interval=5
+  exx_mlwf_tolerance=1d-7
+  exx_mlwf_radius=0d0 ! full support; required for MD
 /
 
 &rgrid

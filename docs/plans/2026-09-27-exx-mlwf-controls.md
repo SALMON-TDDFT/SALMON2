@@ -45,3 +45,48 @@ positive radius. Keep the separate legacy LCFO-RT radius unchanged (bohr).
 - Check finite-radius native SCF on a small periodic fixture and radius-zero
   parity. Update samples to canonical names and document radius convergence.
 - Obtain independent review, address findings, and commit on the existing branch.
+
+Ruling: finite-radius initialization must be independent of k-rank layout.
+The new two/four-rank regression found a 0.112 eV difference. Existing Gaussian
+initialization visits every global k but seeds by the first locally owned k;
+that changes the initial occupied subspace and localization trajectory when
+ranks change. For positive EXX radius only, seed the global Gaussian traversal
+identically, and reseed random wavefunctions by physical k. Radius-zero behavior
+is preserved. This touches `src/gs/init_gs.f90` beyond the original input/mask
+files and is required for a reproducible finite-radius operator trajectory.
+
+
+Ruling: reject a finite-support SCF result if the last MLWF minimization failed.
+After fixing the initial seed, the DC fixture retained a 2.9e-4 eV difference
+between layouts while both MLWF gradients remained far above tolerance. The
+ordinary density convergence test cannot certify this gauge-dependent model.
+Keep the requested mask during iteration, track the last spread-minimization
+status through transport-only refreshes, and check it collectively at the SCF
+exit before accepting a result. Radius-zero and masks that discard no norm are
+exempt. The MPI regression now checks the same initial finite-mask update for
+Gaussian/random seeds and rejects the known unconverged localization, rather
+than treating those final energies as valid. A separate conventional test checks
+converged finite-radius HSE/PBEh SCF. This is not a converged finite-radius DC
+validation; its gauge/radius convergence remains to be established.
+
+## Verification and review ledger
+
+- Canonical and legacy inputs produce identical energies; matching dual values
+  are accepted and conflicting values rejected. Input-length conversion, invalid
+  controls, finite-radius MD/restart/snapshot guards are covered.
+- Compiled sphere probe checks periodic boundary wrapping, ambiguous-center
+  protection, norm diagnostics, compact/dense equivalence and Hermiticity for
+  HSE/PBEh and one/two k points. Zero/large support radii reproduce full support.
+- Conventional finite-radius HSE and PBEh+rVV10 converge in the small hydrogen
+  fixture, with the new final-localization guard enabled. No finite-radius force
+  or production-water convergence claim is made.
+- MPI regression checks Gaussian and random initialization at the same first
+  truncated DC update on two/four ranks, and rejects unconverged localization.
+  The existing full-support one-fragment and multi-rank DC checks remain intact.
+- HSE-enabled and HSE-disabled builds pass. Legacy exact-pair, LCFO transport,
+  LCFO sphere and sphere-norm probes pass after updating the internal test stub
+  names. Old input fixtures remain to exercise compatibility aliases.
+- Independent review caught the LCFO test stub rename and stale localization
+  status after failed polar transport. Both were fixed. A compiled regression
+  first reproduced the stale status, then passed after invalidating the status
+  when a new gauge is seeded or the overlap is lost.

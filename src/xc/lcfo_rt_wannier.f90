@@ -14,7 +14,7 @@ module lcfo_rt_wannier
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
   use lcfo_wf_support, only: s_lcfo_wf_kernel,lcfo_wf_kernel_init,lcfo_wf_kernel_apply
   use lcfo_wf_support, only: lcfo_wf_sphere_norm
-  use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance,hse_lcfo_wf_radius, &
+  use salmon_global, only: exx_mlwf_maxiter,exx_mlwf_tolerance,hse_lcfo_wf_radius, &
     yn_hse_wannier,hse_lcfo_u_interval,yn_hse_lcfo_seed_distributed
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -106,7 +106,7 @@ contains
       open(newunit=iu,file='lcfo_mlwf_links.bin',access='stream',form='unformatted',status='replace')
       write(iu)int([16909060,1,no],int32),b,weights,u,raw
       close(iu)
-      call gauge_minimize_gamma_inplace(u,raw,b,weights,hse_mlwf_maxiter,hse_mlwf_tolerance, &
+      call gauge_minimize_gamma_inplace(u,raw,b,weights,exx_mlwf_maxiter,exx_mlwf_tolerance, &
                           wf_spread,gradient,iterations,status)
       write(*,'(a,3i7,2es17.8)') 'LCFO MLWF initial iterations/status/seed/spread/gradient:', &
         iterations,status,seed_status,wf_spread,gradient

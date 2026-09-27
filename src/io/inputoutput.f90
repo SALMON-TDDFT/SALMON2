@@ -207,6 +207,9 @@ contains
     implicit none
     integer :: ii
     real(8) :: norm
+    ! Read-only compatibility aliases; computational modules use EXX names.
+    integer :: hse_mlwf_interval,hse_mlwf_maxiter
+    real(8) :: hse_mlwf_tolerance
 
     namelist/calculation/ &
       & theory, &
@@ -278,7 +281,8 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
+      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
+      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -739,9 +743,13 @@ contains
     rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
     yn_hse_wannier = 'n'
-    hse_mlwf_interval = 10
-    hse_mlwf_maxiter = 200
-    hse_mlwf_tolerance = 1d-6
+    exx_mlwf_interval = -huge(1)
+    hse_mlwf_interval = -huge(1)
+    exx_mlwf_maxiter = -huge(1)
+    hse_mlwf_maxiter = -huge(1)
+    exx_mlwf_tolerance = -huge(1d0)
+    hse_mlwf_tolerance = -huge(1d0)
+    exx_mlwf_radius = 0d0
     hse_lcfo_wf_radius = 0d0
     yn_hse_lcfo_rt = 'n'
     yn_hse_lcfo_direct_wf = 'n'
@@ -1324,8 +1332,31 @@ contains
     call comm_bcast(cname        ,nproc_group_global)
     call comm_bcast(yn_hse_wannier,nproc_group_global)
     call comm_bcast(hse_mlwf_interval,nproc_group_global)
+    call comm_bcast(exx_mlwf_interval,nproc_group_global)
+    if(hse_mlwf_interval/=-huge(1))then
+      if(exx_mlwf_interval/=-huge(1).and.exx_mlwf_interval/=hse_mlwf_interval) &
+        error stop 'conflicting EXX/legacy MLWF interval'
+      exx_mlwf_interval=hse_mlwf_interval
+    endif
+    if(exx_mlwf_interval==-huge(1))exx_mlwf_interval=10
     call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
+    call comm_bcast(exx_mlwf_maxiter,nproc_group_global)
+    if(hse_mlwf_maxiter/=-huge(1))then
+      if(exx_mlwf_maxiter/=-huge(1).and.exx_mlwf_maxiter/=hse_mlwf_maxiter) &
+        error stop 'conflicting EXX/legacy MLWF maxiter'
+      exx_mlwf_maxiter=hse_mlwf_maxiter
+    endif
+    if(exx_mlwf_maxiter==-huge(1))exx_mlwf_maxiter=200
     call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
+    call comm_bcast(exx_mlwf_tolerance,nproc_group_global)
+    if(hse_mlwf_tolerance/=-huge(1d0))then
+      if(exx_mlwf_tolerance/=-huge(1d0).and.exx_mlwf_tolerance/=hse_mlwf_tolerance) &
+        error stop 'conflicting EXX/legacy MLWF tolerance'
+      exx_mlwf_tolerance=hse_mlwf_tolerance
+    endif
+    if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
+    call comm_bcast(exx_mlwf_radius,nproc_group_global)
+    exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
     call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_rt,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_direct_wf,nproc_group_global)
@@ -2286,9 +2317,10 @@ contains
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
-      write(fh_variables_log, *) "# hse_mlwf_interval=",hse_mlwf_interval
-      write(fh_variables_log, *) "# hse_mlwf_maxiter=",hse_mlwf_maxiter
-      write(fh_variables_log, *) "# hse_mlwf_tolerance=",hse_mlwf_tolerance
+      write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
+      write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
+      write(fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
+      write(fh_variables_log, *) "# exx_mlwf_tolerance=",exx_mlwf_tolerance
       write(fh_variables_log, *) "# hse_lcfo_wf_radius (bohr; 0=full)=",hse_lcfo_wf_radius
       write(fh_variables_log, *) "# yn_hse_lcfo_rt=",yn_hse_lcfo_rt
       write(fh_variables_log, *) "# yn_hse_lcfo_direct_wf=",yn_hse_lcfo_direct_wf
@@ -3189,6 +3221,17 @@ contains
         error stop 'LCFO RT requires HSE06 tddft_response with Taylor4'
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
+    if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
+      error stop 'exx_mlwf_radius must be finite and nonnegative'
+    if(exx_mlwf_radius>0d0)then
+      if(theory/='dft'.or.yn_md=='y'.or.yn_opt=='y') &
+        error stop 'finite EXX MLWF radius supports static DFT only'
+      if(xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10') &
+        error stop 'EXX MLWF radius requires HSE06 or PBEh40'
+      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
+        error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
+      yn_hse_wannier='y'
+    endif
     if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')then
 #ifndef USE_HSE
       error stop 'PBEh40 requires USE_HSE=ON'
@@ -3225,8 +3268,8 @@ contains
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
       if(yn_dc=='y')yn_hse_wannier='y'
       if(yn_hse_wannier=='y')then
-        if(hse_mlwf_interval<1.or.hse_mlwf_maxiter<1.or. &
-          .not.ieee_is_finite(hse_mlwf_tolerance).or.hse_mlwf_tolerance<=0d0) &
+        if(exx_mlwf_interval<1.or.exx_mlwf_maxiter<1.or. &
+          .not.ieee_is_finite(exx_mlwf_tolerance).or.exx_mlwf_tolerance<=0d0) &
           error stop 'HSE Wannier: invalid localization controls'
       endif
       if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then

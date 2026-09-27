@@ -80,7 +80,7 @@ highest originally retained eigenstate: exactly empty bands have been removed.
 
 The optional `localize_snapshot.f90` program rebuilds a Gamma gauge offline,
 without rerunning SCF. Compile it together with `hse_wannier_gauge.f90` and
-`hse_wannier.f90`, linking FFTW3 and BLAS/LAPACK; then run:
+`lcfo_wf_support.f90` and `hse_wannier.f90`, linking FFTW3 and BLAS/LAPACK; then run:
 
 ```sh
 localize_snapshot input.bin localized.bin 0 3000 1e-6

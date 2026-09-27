@@ -123,8 +123,9 @@ module salmon_global
   integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
-  integer :: hse_mlwf_interval,hse_mlwf_maxiter
-  real(8) :: hse_mlwf_tolerance
+  integer :: exx_mlwf_interval,exx_mlwf_maxiter
+  real(8) :: exx_mlwf_radius ! input length, converted to bohr; 0=full support
+  real(8) :: exx_mlwf_tolerance
   real(8) :: hse_lcfo_wf_radius ! Always bohr; 0 means full support
   character(1) :: yn_hse_lcfo_rt
   character(1) :: yn_hse_lcfo_direct_wf

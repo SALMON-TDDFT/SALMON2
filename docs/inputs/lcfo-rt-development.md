@@ -68,8 +68,8 @@ uses density eigenfactors (not MLWFs). Its relative density eigenvalue threshold
 Set `yn_hse_wannier='y'`. Initial localization uses global occupied states in
 the distributed fixed LCFO basis, not independently diagonalized fragment density
 factors. A Gamma-specific SU(2) Jacobi optimizer minimizes the same six-link MV
-functional as the existing gauge code. `hse_mlwf_maxiter` is the maximum sweep
-count and `hse_mlwf_tolerance` the gradient tolerance; Si128 uses200 and1e-6.
+functional as the existing gauge code. `exx_mlwf_maxiter` is the maximum sweep
+count and `exx_mlwf_tolerance` the gradient tolerance; Si128 uses200 and1e-6.
 The original general-k optimizer is unchanged. A coefficient-space pivoted trial
 seed avoids gathering the complete real-space wavefunctions on one rank.
 

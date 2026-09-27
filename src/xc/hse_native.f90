@@ -17,11 +17,12 @@ module hse_native
   use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory, &
-    yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance, &
+    yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius, &
     hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
   public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
+  public :: hse_check_localization
   public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
   public :: hse_pack,hse_unpack,hse_timings,hse_walltime
   public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
@@ -30,6 +31,7 @@ module hse_native
   type(s_hse_wannier),save :: wannier
   real(8),allocatable,save :: cached_occupation(:,:)
   complex(8),allocatable,save :: cached_action(:,:,:)
+  logical,save :: finite_support_localized=.true.
   logical,save :: hse_force_full_action=.false.
   type(hse_ace_state),save :: ace
   type(hse_ace_state),save :: initial_ace,midpoint_ace
@@ -40,6 +42,12 @@ module hse_native
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
+  subroutine hse_check_localization()
+    ! A density criterion cannot certify a gauge-dependent truncated operator.
+    if(exx_mlwf_radius>0d0.and..not.finite_support_localized) &
+      error stop 'EXX MLWF finite support: localization not converged; SCF result rejected'
+  end subroutine hse_check_localization
+
   real(8) function exchange_fraction()
     exchange_fraction=.25d0
     if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')exchange_fraction=.4d0
@@ -483,20 +491,31 @@ contains
       endif
       if(status==0)then
         maxiter=0
-        if(mod(wannier%updates,hse_mlwf_interval)==0)maxiter=hse_mlwf_maxiter
-        call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,hse_mlwf_tolerance,status)
+        if(mod(wannier%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
+        call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,exx_mlwf_tolerance,status)
+      endif
+      if(status==0)then
+        call wannier_truncate_source(wannier,exx_mlwf_radius,status)
+        finite_support_localized=wannier%discarded_norm_fraction==0d0.or.wannier%last_localization_status==0
       endif
       if(status==0)call wannier_apply(wannier,allpsi,allw,status)
       if(status==0.and.(wannier%updates==1.or.maxiter>0))then
         write(*,'(a,3i7,3es16.7)')'HSE_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &
         wannier%updates,wannier%localization_iterations,wannier%localization_status, &
         wannier%spread,wannier%gradient,wannier%min_singular
-        if(wannier%localization_status/=0) &
+        if(exx_mlwf_radius>0d0)then
+          write(*,'(a,es16.7,i8,2es16.7)')'EXX_MLWF radius (bohr)/protected/total loss/max factor loss: ', &
+            exx_mlwf_radius,wannier%protected_sources,wannier%discarded_norm_fraction,wannier%max_discarded_norm_fraction
+          if(wannier%localization_status/=0) &
+            write(*,'(a)')'EXX_MLWF: localization not converged; finite-radius source approximation is gauge dependent.'
+        else if(wannier%localization_status/=0)then
           write(*,'(a)')'HSE_WANNIER: localization not converged; retaining full-support exact exchange.'
+        endif
       endif
     endif
     call comm_bcast(status,info%icomm_k,0)
     if(status/=0)error stop 'HSE Wannier: collective exchange refresh failed'
+    call comm_bcast(finite_support_localized,info%icomm_k,0)
     call comm_bcast(allw,info%icomm_k,0)
     w=allw(:,:,info%ik_s:info%ik_e)
     call hse_ace_build(ace,local,w,system%hvol,status)

@@ -55,7 +55,7 @@ asymptotic scaling; this fixture alone cannot prove it.
 ## Initial bounded cost pilot (2026-09-26)
 
 The previous 3f81de4 MPI executable accepted this case with nscf=1 and
-hse_mlwf_maxiter=1 (explicitly not a localization/convergence test). All eight
+exx_mlwf_maxiter=1 (explicitly not a localization/convergence test). All eight
 fragments reached their first HSE_WANNIER exchange refresh. The process group was
 stopped at the 120-second limit before SCF completion. No Si64 screening rate,
 converged HSE energy or speedup is claimed. Before extending the run, assess

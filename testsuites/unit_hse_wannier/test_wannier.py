@@ -54,7 +54,7 @@ class WannierTest(unittest.TestCase):
         fftw = Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))
         blas = Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
         cmd = [os.environ.get('FC','gfortran'),'-O0','-g','-fcheck=all','-fopenmp',
-               '-I'+str(fftw/'include'),str(ROOT/'src/xc/hse_wannier_gauge.f90'),str(module),
+               '-I'+str(fftw/'include'),str(ROOT/'src/xc/lcfo_wf_support.f90'),str(ROOT/'src/xc/hse_wannier_gauge.f90'),str(module),
                str(ROOT/'src/xc/hse_ace.f90'),str(Path(__file__).with_name('probe.f90')),
                '-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
         p = subprocess.run(cmd,cwd=cls.path,capture_output=True,text=True)
@@ -131,7 +131,7 @@ class WannierTest(unittest.TestCase):
         fftw=Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))
         blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
         cmd=[os.environ.get('FC','gfortran'),'-O2','-fcheck=all','-I'+str(fftw/'include'),
-             str(ROOT/'src/xc/hse_wannier_gauge.f90'),str(ROOT/'src/xc/hse_wannier.f90'),
+             str(ROOT/'src/xc/lcfo_wf_support.f90'),str(ROOT/'src/xc/hse_wannier_gauge.f90'),str(ROOT/'src/xc/hse_wannier.f90'),
              str(ROOT/'samples/dc_hse/localize_snapshot.f90'),'-L'+str(fftw/'lib'),'-lfftw3',
              '-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)]
         p=subprocess.run(cmd,cwd=self.path,capture_output=True,text=True)

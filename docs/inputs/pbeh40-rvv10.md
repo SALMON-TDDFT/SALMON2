@@ -11,9 +11,10 @@ Experimental implementation on `pbeh40-rvv10-water-md`, based on `dc-hse-mlwf-ac
   rvv10_b=5.3
   rvv10_c=0.0093
   rvv10_nq=32
-  hse_mlwf_interval=5
-  hse_mlwf_maxiter=100
-  hse_mlwf_tolerance=1d-7
+  exx_mlwf_interval=5
+  exx_mlwf_maxiter=100
+  exx_mlwf_tolerance=1d-7
+  exx_mlwf_radius=0        ! input length; 0 retains full orbital support
 /
 &parallel
   nproc_rgrid=1,1,1
@@ -34,7 +35,14 @@ The unscreened Coulomb interaction is spherically truncated at R:
 
 R must not exceed half the shortest side of the Born–von Karman supercell (`num_rgrid*num_kgrid*hgs`). The default is that upper bound, printed in bohr. Positive input radii are converted from the selected input length unit. The kernel includes Coulomb within R without HSE screening. A finite R is still an approximation to the infinite periodic global hybrid: converge **cell/k mesh and radius together**. Never interpret this cutoff as evidence for converged full-range exchange in a small cell. No arbitrary zeroing of the G=0 exchange term occurs.
 
-MLWF gauge localization does not itself truncate orbital support here. No new distance/pair pruning is enabled. Exact occupied-space reproduction by ACE is checked independently of localization convergence. Localization iteration-limit messages therefore do not invalidate full-support exchange, but do indicate that locality is not fully optimized.
+MLWF gauge localization by itself retains full support. `exx_mlwf_radius>0`
+selects the shared [EXX spherical source approximation](exx-mlwf.md) for static
+DFT. This radius truncates occupation-weighted Wannier sources; it is distinct
+from `pbeh_coulomb_radius`, which changes the interaction kernel. At radius 0,
+localization iteration-limit messages do not invalidate full-support exchange.
+Finite-radius results depend on localization and must be converged against the
+support radius. ACE reproduces the chosen (possibly masked) operator on its
+reference subspace; it does not remove the truncation error.
 
 ### rVV10 evaluation
 
@@ -53,9 +61,9 @@ The rational kernel's analytic three-dimensional Fourier transform is used, incl
 
 ## Fixed-cell water dynamics
 
-Set `theory='dft_md'` for Born–Oppenheimer MD. A fresh calculation performs its initial SCF; restart input is currently rejected. The supplied [water_md.inp](../../samples/pbeh40_rvv10/water_md.inp) is a **small consistency fixture**, not an equilibrated liquid or a converged production setting. Copy `H_rps.dat` and `O_rps.dat` from `testsuites/pseudo` to its run directory. For scientific water simulations, choose and validate appropriate pseudopotentials, grid, supercell, exchange cutoff, SCF tolerance and timestep.
+Keep `exx_mlwf_radius=0` and set `theory='dft_md'` for Born–Oppenheimer MD. A fresh calculation performs its initial SCF; restart input is currently rejected. The supplied [water_md.inp](../../samples/pbeh40_rvv10/water_md.inp) is a **small consistency fixture**, not an equilibrated liquid or a converged production setting. Copy `H_rps.dat` and `O_rps.dat` from `testsuites/pseudo` to its run directory. For scientific water simulations, choose and validate appropriate pseudopotentials, grid, supercell, exchange cutoff, SCF tolerance and timestep.
 
-PBEh forces differentiate the same cubic radial projector and solid spherical harmonics used in the Hamiltonian. This avoids the finite-grid inconsistency of moving the nonlocal projector derivative onto a finite-difference orbital gradient. All other functionals retain their existing force path. No explicit ionic derivative of exchange/rVV10 is needed for fixed-cell, fixed-grid, fully self-consistent orbitals without NLCC. A PBEh BOMD run stops if an SCF does not converge, before accepting an ionic step.
+PBEh forces differentiate the same cubic radial projector and solid spherical harmonics used in the Hamiltonian. This avoids the finite-grid inconsistency of moving the nonlocal projector derivative onto a finite-difference orbital gradient. All other functionals retain their existing force path. At full support (`exx_mlwf_radius=0`), no explicit ionic derivative of exchange/rVV10 is needed for fixed-cell, fixed-grid, fully self-consistent orbitals without NLCC. A PBEh BOMD run stops if an SCF does not converge, before accepting an ionic step.
 
 ## Supported and rejected combinations
 
