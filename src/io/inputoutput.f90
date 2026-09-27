@@ -273,6 +273,7 @@ contains
       & lloc_ps, &
       & izatom, &
       & yn_psmask, &
+      & yn_pseudo_atomic_orbital, &
       & alpha_mask, &
       & gamma_mask, &
       & eta_mask
@@ -723,6 +724,7 @@ contains
     lloc_ps     = -1
     izatom      = -1
     yn_psmask   = 'n'
+    yn_pseudo_atomic_orbital = 'n'
     alpha_mask  = 0.8d0
     gamma_mask  = 1.8d0
     eta_mask    = 15d0
@@ -1179,6 +1181,7 @@ contains
     call string_lowercase(method_mixing)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
+    call string_lowercase(yn_pseudo_atomic_orbital)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
     call string_lowercase(boundary_em(1,1))
@@ -1285,6 +1288,7 @@ contains
     call comm_bcast(lloc_ps      ,nproc_group_global)
     call comm_bcast(izatom       ,nproc_group_global)
     call comm_bcast(yn_psmask,nproc_group_global)
+    call comm_bcast(yn_pseudo_atomic_orbital,nproc_group_global)
     call comm_bcast(alpha_mask   ,nproc_group_global)
     call comm_bcast(gamma_mask   ,nproc_group_global)
     call comm_bcast(eta_mask     ,nproc_group_global)
@@ -2224,6 +2228,7 @@ contains
         write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'izatom(',i,')', izatom(i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_psmask', yn_psmask
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_pseudo_atomic_orbital', yn_pseudo_atomic_orbital
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
@@ -2802,6 +2807,7 @@ contains
     call yn_argument_check(yn_nccl_reduction)
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
+    call yn_argument_check(yn_pseudo_atomic_orbital)
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)

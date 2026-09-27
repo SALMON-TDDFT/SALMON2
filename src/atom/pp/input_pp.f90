@@ -30,12 +30,13 @@ subroutine input_pp(pp,hx,hy,hz)
   use salmon_global,only : file_pseudo, quiet, method_init_density
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
-    & yn_psmask
+    & yn_psmask, yn_pseudo_atomic_orbital
   use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
   use read_ps_upf_module, only: read_ps_upf
   use read_paw_upf_module, only: read_paw_upf
+  use pseudo_wf, only: calc_pseudo_wf
   implicit none
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
@@ -235,6 +236,10 @@ subroutine input_pp(pp,hx,hy,hz)
       else
         stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
+
+! vloctbl and udvtbl are ready after the masking and SO preprocessing above.
+! calc_pseudo_wf overwrites upp only when has_wf_pp(ik) is false, before copying to upp_f.
+      if (yn_pseudo_atomic_orbital == 'y') call calc_pseudo_wf(pp,ik)
 
       pp%upp_f(:,:,ik)=pp%upp(:,:)
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
