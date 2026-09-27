@@ -11,6 +11,7 @@ program probe
   real(8),allocatable :: density(:,:,:),grad(:,:,:,:),ep(:,:,:),vp(:,:,:),flux(:,:,:),potential(:,:,:)
   real(8),allocatable :: local_parts(:,:),parts(:,:)
   complex(8),allocatable :: batch_input(:,:),batch_output(:,:),batch_back(:,:),fft_a(:),fft_b(:)
+  complex(8),allocatable :: spectrum(:,:,:),spectrum_y(:,:,:),spectrum_global(:,:,:)
   complex(8),allocatable :: old_input(:),old_a(:),old_b(:),old_reference(:)
   real(8),allocatable :: rho(:),sigma(:),e(:),v(:),w(:),lr(:),ls(:),le(:),lv(:),lw(:)
   call MPI_Init(ierr)
@@ -69,6 +70,7 @@ program probe
     allocate(batch_input(n(1)*local_n(2)*local_n(3),5), &
       batch_output(n(1)*local_n(2)*local_n(3),5),batch_back(n(1)*local_n(2)*local_n(3),5), &
       fft_a(n(1)*local_n(2)*local_n(3)),fft_b(n(1)*local_n(2)*local_n(3)))
+    allocate(spectrum(n(1),n(2),n(3)),spectrum_y(n(1),n(2),n(3)),spectrum_global(n(1),n(2),n(3)))
     do channel=1,5;do i=1,size(batch_input,1)
       batch_input(i,channel)=cmplx(sin(.17d0*i+channel+rank),cos(.09d0*i-channel+rank),8)
     enddo;enddo
@@ -85,6 +87,33 @@ program probe
       if(maxval(abs(fft_b-batch_output(:,channel)))>1d-10)error stop 'FFTW vs FFTE transform'
     enddo
     enddo
+    do batch_count=2,5
+      call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3), &
+        batch_input(:,:batch_count),batch_output(:,:batch_count),-1,status,spectral_z=.true.)
+      if(status/=0)error stop 'Z spectrum forward'
+      plans_before=fftw_pencil_plans_created
+      do channel=1,batch_count
+        fft_a=batch_input(:,channel)
+        call pzfft3dv_rvv10(fft_a,fft_b,n(1),n(2),n(3),dims(2),dims(3),-1,comm(2),comm(3))
+        spectrum=0d0
+        spectrum(:,lo(2):lo(2)+local_n(2)-1,lo(3):lo(3)+local_n(3)-1)= &
+          reshape(fft_b,[n(1),local_n(2),local_n(3)])
+        call MPI_Allreduce(spectrum,spectrum_y,product(n),MPI_DOUBLE_COMPLEX,MPI_SUM,comm(2),ierr)
+        call MPI_Allreduce(spectrum_y,spectrum_global,product(n),MPI_DOUBLE_COMPLEX,MPI_SUM,comm(3),ierr)
+        l=0
+        do j=0,n(2)/dims(3)-1;do i=0,n(1)/dims(2)-1;do k=0,n(3)-1
+          l=l+1
+          if(abs(batch_output(l,channel)-spectrum_global(i+coords(2)*n(1)/dims(2)+1, &
+            j+coords(3)*n(2)/dims(3)+1,k+1))>1d-10)error stop 'Z spectrum differs from FFTE'
+        enddo;enddo;enddo
+      enddo
+      call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3), &
+        batch_output(:,:batch_count),batch_back(:,:batch_count),1,status,spectral_z=.true.)
+      if(status/=0.or.maxval(abs(batch_back(:,:batch_count)-batch_input(:,:batch_count)))>1d-11) &
+        error stop 'Z spectrum roundtrip'
+      if(plans_before/=fftw_pencil_plans_created)error stop 'Z spectrum did not reuse plans'
+    enddo
+    deallocate(spectrum,spectrum_y,spectrum_global)
     deallocate(batch_input,batch_output,batch_back,fft_a,fft_b)
 
     allocate(lr(product(local_n)),ls(product(local_n)),le(product(local_n)),lv(product(local_n)),lw(product(local_n)))

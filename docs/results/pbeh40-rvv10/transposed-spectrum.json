@@ -1,0 +1,400 @@
+{
+  "date": "2026-09-27",
+  "base": "fcb5f1a3",
+  "environment": "local macOS arm64, GNU Fortran 15.2.0, Release build, serial FFTW per MPI rank",
+  "nq": 32,
+  "omp_threads": 1,
+  "trials_per_grid": 3,
+  "warm_pairs_per_trial": 20,
+  "functional_evaluations_per_trial": 3,
+  "redistributions_per_pair": {
+    "old_x": 8,
+    "new_z": 4
+  },
+  "benchmarks": [
+    {
+      "grid": [
+        32,
+        24,
+        16
+      ],
+      "mpi_ranks": 2,
+      "yz_ranks": [
+        1,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.016359,
+          "setup_s": 0.012489080429,
+          "ffte_pair_s": 0.005059,
+          "fftw_x_pair_s": 0.0055322,
+          "x_local_fft_s": 0.0017397165298,
+          "x_mpi_s": 0.0010318160057,
+          "x_packing_s": 0.0028077960014,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.00375215,
+          "z_local_fft_s": 0.0017101407051,
+          "z_mpi_s": 0.00045694112778,
+          "z_packing_s": 0.0016146063805,
+          "ffte_rvv10_s": 0.063337666667,
+          "fftw_z_rvv10_s": 0.063955666667
+        },
+        {
+          "first_forward_s": 0.022245,
+          "setup_s": 0.01785993576,
+          "ffte_pair_s": 0.00573365,
+          "fftw_x_pair_s": 0.0062699,
+          "x_local_fft_s": 0.0019451737404,
+          "x_mpi_s": 0.0012038946152,
+          "x_packing_s": 0.0032147169113,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.0044092,
+          "z_local_fft_s": 0.0019438624382,
+          "z_mpi_s": 0.00070575475693,
+          "z_packing_s": 0.001901113987,
+          "ffte_rvv10_s": 0.071391666667,
+          "fftw_z_rvv10_s": 0.06913
+        },
+        {
+          "first_forward_s": 0.017565,
+          "setup_s": 0.012969017029,
+          "ffte_pair_s": 0.0060351,
+          "fftw_x_pair_s": 0.0062541,
+          "x_local_fft_s": 0.001981151104,
+          "x_mpi_s": 0.0013661384583,
+          "x_packing_s": 0.003088414669,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.0044146,
+          "z_local_fft_s": 0.0019740223885,
+          "z_mpi_s": 0.000765812397,
+          "z_packing_s": 0.001896250248,
+          "ffte_rvv10_s": 0.065878333333,
+          "fftw_z_rvv10_s": 0.064104333333
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.017565,
+        "setup_s": 0.012969017029,
+        "ffte_pair_s": 0.00573365,
+        "fftw_x_pair_s": 0.0062541,
+        "x_local_fft_s": 0.0019451737404,
+        "x_mpi_s": 0.0012038946152,
+        "x_packing_s": 0.003088414669,
+        "plans_created": 6.0,
+        "fftw_z_pair_s": 0.0044092,
+        "z_local_fft_s": 0.0019438624382,
+        "z_mpi_s": 0.00070575475693,
+        "z_packing_s": 0.001896250248,
+        "ffte_rvv10_s": 0.065878333333,
+        "fftw_z_rvv10_s": 0.064104333333
+      },
+      "median_pair_reduction": 0.29499048624102586
+    },
+    {
+      "grid": [
+        32,
+        24,
+        16
+      ],
+      "mpi_ranks": 4,
+      "yz_ranks": [
+        2,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.014515,
+          "setup_s": 0.0092380046844,
+          "ffte_pair_s": 0.0035995,
+          "fftw_x_pair_s": 0.0034765,
+          "x_local_fft_s": 0.0009751200676,
+          "x_mpi_s": 0.0010178565979,
+          "x_packing_s": 0.0015485525131,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.0024913,
+          "z_local_fft_s": 0.00098682641983,
+          "z_mpi_s": 0.00064512491226,
+          "z_packing_s": 0.00093027353287,
+          "ffte_rvv10_s": 0.036781333333,
+          "fftw_z_rvv10_s": 0.037096333333
+        },
+        {
+          "first_forward_s": 0.018123,
+          "setup_s": 0.010138750076,
+          "ffte_pair_s": 0.00366095,
+          "fftw_x_pair_s": 0.00329935,
+          "x_local_fft_s": 0.00095777511597,
+          "x_mpi_s": 0.00090537071228,
+          "x_packing_s": 0.0014991283417,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.00225105,
+          "z_local_fft_s": 0.00093764066696,
+          "z_mpi_s": 0.00045077800751,
+          "z_packing_s": 0.00090796947479,
+          "ffte_rvv10_s": 0.037379666667,
+          "fftw_z_rvv10_s": 0.036785
+        },
+        {
+          "first_forward_s": 0.020883,
+          "setup_s": 0.0088119506836,
+          "ffte_pair_s": 0.0036002,
+          "fftw_x_pair_s": 0.00332005,
+          "x_local_fft_s": 0.0009606719017,
+          "x_mpi_s": 0.00093253850937,
+          "x_packing_s": 0.0014782905579,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.00229665,
+          "z_local_fft_s": 0.00097624063492,
+          "z_mpi_s": 0.00050127506256,
+          "z_packing_s": 0.00089061260223,
+          "ffte_rvv10_s": 0.036660666667,
+          "fftw_z_rvv10_s": 0.034185
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.018123,
+        "setup_s": 0.0092380046844,
+        "ffte_pair_s": 0.0036002,
+        "fftw_x_pair_s": 0.00332005,
+        "x_local_fft_s": 0.0009606719017,
+        "x_mpi_s": 0.00093253850937,
+        "x_packing_s": 0.0014991283417,
+        "plans_created": 6.0,
+        "fftw_z_pair_s": 0.00229665,
+        "z_local_fft_s": 0.00097624063492,
+        "z_mpi_s": 0.00050127506256,
+        "z_packing_s": 0.00090796947479,
+        "ffte_rvv10_s": 0.036781333333,
+        "fftw_z_rvv10_s": 0.036785
+      },
+      "median_pair_reduction": 0.3082483697534676
+    },
+    {
+      "grid": [
+        64,
+        48,
+        32
+      ],
+      "mpi_ranks": 2,
+      "yz_ranks": [
+        1,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.120294,
+          "setup_s": 0.081196069717,
+          "ffte_pair_s": 0.0493485,
+          "fftw_x_pair_s": 0.0813076,
+          "x_local_fft_s": 0.018631803989,
+          "x_mpi_s": 0.010884439945,
+          "x_packing_s": 0.052270293236,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.05518995,
+          "z_local_fft_s": 0.019193351269,
+          "z_mpi_s": 0.0064669251442,
+          "z_packing_s": 0.030090630054,
+          "ffte_rvv10_s": 0.557142,
+          "fftw_z_rvv10_s": 0.511438
+        },
+        {
+          "first_forward_s": 0.118747,
+          "setup_s": 0.081722974777,
+          "ffte_pair_s": 0.04910615,
+          "fftw_x_pair_s": 0.0759494,
+          "x_local_fft_s": 0.017805922031,
+          "x_mpi_s": 0.010037827492,
+          "x_packing_s": 0.04832187891,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.05300735,
+          "z_local_fft_s": 0.018741762638,
+          "z_mpi_s": 0.0059523701668,
+          "z_packing_s": 0.029039406776,
+          "ffte_rvv10_s": 0.61180033333,
+          "fftw_z_rvv10_s": 0.60264666667
+        },
+        {
+          "first_forward_s": 0.123647,
+          "setup_s": 0.082070112228,
+          "ffte_pair_s": 0.05121195,
+          "fftw_x_pair_s": 0.07827275,
+          "x_local_fft_s": 0.017710673809,
+          "x_mpi_s": 0.010723912716,
+          "x_packing_s": 0.050211918354,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.0533723,
+          "z_local_fft_s": 0.018642032146,
+          "z_mpi_s": 0.0059478163719,
+          "z_packing_s": 0.028921484947,
+          "ffte_rvv10_s": 0.64149833333,
+          "fftw_z_rvv10_s": 0.63446033333
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.120294,
+        "setup_s": 0.081722974777,
+        "ffte_pair_s": 0.0493485,
+        "fftw_x_pair_s": 0.07827275,
+        "x_local_fft_s": 0.017805922031,
+        "x_mpi_s": 0.010723912716,
+        "x_packing_s": 0.050211918354,
+        "plans_created": 6.0,
+        "fftw_z_pair_s": 0.0533723,
+        "z_local_fft_s": 0.018741762638,
+        "z_mpi_s": 0.0059523701668,
+        "z_packing_s": 0.029039406776,
+        "ffte_rvv10_s": 0.61180033333,
+        "fftw_z_rvv10_s": 0.60264666667
+      },
+      "median_pair_reduction": 0.31812412365733933
+    },
+    {
+      "grid": [
+        64,
+        48,
+        32
+      ],
+      "mpi_ranks": 4,
+      "yz_ranks": [
+        2,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.082457,
+          "setup_s": 0.052884101868,
+          "ffte_pair_s": 0.02951775,
+          "fftw_x_pair_s": 0.0403634,
+          "x_local_fft_s": 0.0095445394516,
+          "x_mpi_s": 0.010565698147,
+          "x_packing_s": 0.020922529697,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.02601645,
+          "z_local_fft_s": 0.009798681736,
+          "z_mpi_s": 0.0053109526634,
+          "z_packing_s": 0.012003707886,
+          "ffte_rvv10_s": 0.29153433333,
+          "fftw_z_rvv10_s": 0.29428733333
+        },
+        {
+          "first_forward_s": 0.072353,
+          "setup_s": 0.046077013016,
+          "ffte_pair_s": 0.02944235,
+          "fftw_x_pair_s": 0.0406112,
+          "x_local_fft_s": 0.0093766570091,
+          "x_mpi_s": 0.010670340061,
+          "x_packing_s": 0.021199178696,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.03056015,
+          "z_local_fft_s": 0.010199570656,
+          "z_mpi_s": 0.0079169511795,
+          "z_packing_s": 0.012900078297,
+          "ffte_rvv10_s": 0.31724766667,
+          "fftw_z_rvv10_s": 0.310503
+        },
+        {
+          "first_forward_s": 0.07133,
+          "setup_s": 0.049629926682,
+          "ffte_pair_s": 0.03012425,
+          "fftw_x_pair_s": 0.04092845,
+          "x_local_fft_s": 0.0091630220413,
+          "x_mpi_s": 0.01141320467,
+          "x_packing_s": 0.020899152756,
+          "plans_created": 6.0,
+          "fftw_z_pair_s": 0.0277601,
+          "z_local_fft_s": 0.0095070838928,
+          "z_mpi_s": 0.0058283567429,
+          "z_packing_s": 0.012717020512,
+          "ffte_rvv10_s": 0.34788033333,
+          "fftw_z_rvv10_s": 0.34323466667
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.072353,
+        "setup_s": 0.049629926682,
+        "ffte_pair_s": 0.02951775,
+        "fftw_x_pair_s": 0.0406112,
+        "x_local_fft_s": 0.0093766570091,
+        "x_mpi_s": 0.010670340061,
+        "x_packing_s": 0.020922529697,
+        "plans_created": 6.0,
+        "fftw_z_pair_s": 0.0277601,
+        "z_local_fft_s": 0.009798681736,
+        "z_mpi_s": 0.0058283567429,
+        "z_packing_s": 0.012717020512,
+        "ffte_rvv10_s": 0.31724766667,
+        "fftw_z_rvv10_s": 0.310503
+      },
+      "median_pair_reduction": 0.3164422622330786
+    }
+  ],
+  "validation": {
+    "direct_cases": 54,
+    "grid": [
+      16,
+      12,
+      8
+    ],
+    "q_channels": [
+      8,
+      16,
+      32
+    ],
+    "mpi_ranks": [
+      2,
+      4
+    ],
+    "omp_threads": [
+      1,
+      2
+    ],
+    "primitive_channel_counts": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "fourier_coefficients": "passed against assembled FFTE spectrum (absolute tolerance 1e-10)",
+    "inverse_and_plan_reuse": "passed (absolute inverse tolerance 1e-11)",
+    "max_full_potential_difference": 1.1901590823981678e-13,
+    "native_tests": "25 passed",
+    "lcfo_trajectories": [
+      {
+        "axis": "y",
+        "max_current_difference": 1.644239201026943e-12,
+        "max_energy_difference": 1.021405182655144e-14
+      },
+      {
+        "axis": "z",
+        "max_current_difference": 7.61031890056976e-14,
+        "max_energy_difference": 1.021405182655144e-14
+      }
+    ],
+    "build": "USE_HSE/MPI Release passed",
+    "review": "independent read-only review: no critical or important findings"
+  },
+  "decision": "Use retained Z spectra whenever rvv10_fft=fftw. Keep rvv10_fft=ffte as default.",
+  "limitations": [
+    "Per-rank phase maxima need not sum to the total maximum.",
+    "Old X and new Z transform timings share the same process and plans; whole-functional timings compare FFTE and new Z FFTW only, not old versus new FFTW.",
+    "Fixed benchmark order and local-machine variation limit speedup interpretation; no multinode or production-water measurement.",
+    "FFTE timing includes private-table initialization per transform and is not a library-only comparison.",
+    "Previous cache, allocation and supported-layout constraints remain; this change does not enable DC-MD."
+  ],
+  "log_sha256": {
+    "fftw-z-scale1-trial1.log": "ac2899da400e92d6a16a06b7626f5fa523b1ba35c9b55f5f9acff4f1dbbc5202",
+    "fftw-z-scale1-trial2.log": "7aa4fc44d3066bd2a8d1c289381701ffb35a3e7ebfdc5559d760f67a48ae15a1",
+    "fftw-z-scale1-trial3.log": "aefdbcaa8942c8fe3e375af6993b67ed8e06dfe4e404a1dd9fa30e513a00f5e5",
+    "fftw-z-scale2-trial1.log": "b01e25b2ad033df83bf9f7c2c6b8953ee21aa6ffa17ce628bbc64eb0fa1aebd9",
+    "fftw-z-scale2-trial2.log": "3ac660eb0846bcd2e7435b303423a97a49de7db173d7bd78c7d8ef9b96b82b97",
+    "fftw-z-scale2-trial3.log": "bfdcbd5e439eb2622bef8c60b71c12852bbb02a10d9471a0cebab06e267537ca",
+    "fftw-z-lcfo-y.log": "aa9fba6655886079d93baaea5522b5772325907efab7066197d36b8622646a6d",
+    "fftw-z-lcfo-z.log": "606ca62609941daba777a9e353032fc5ff065abb5c74d4289d033a935e765098",
+    "fftw-z-build.log": "1501a84f273091e6eb903d6358f05cde72c59af9b74b337b1c09add536d851c8",
+    "fftw-z-direct.log": "d2a1117f9e951c74d9c2731fd78077806d8a683754538835ef5d617fcb83f78d",
+    "fftw-z-native.log": "be1e4a9f771e735c31713b8c8393d30ff12cc9ed39df586575afce824ff8788d",
+    "fftw-z-red.log": "aea7d08058ee5e0f1c2750e8b18eb3e034b18dadfb52f8aca08965626be45ba8",
+    "fftw-z-final-build.log": "de9ebd4d3c806f7e014d068dda5bc9eef93f96741939ba488f795a355b482b46"
+  }
+}

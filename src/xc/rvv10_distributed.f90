@@ -73,13 +73,19 @@ contains
       real(8),intent(in) :: mesh(:)
       integer,intent(out) :: ierr
       complex(8),allocatable :: transformed(:,:),a(:),bb(:)
-      integer :: q,d,x,y,z,p(3),gidx
+      integer :: q,d,x,y,z,p(3),gidx,spectral_shape(3),spectral_origin(3),physical_axis(3)
       real(8) :: g,phi,pi
-      allocate(transformed(nt,nq),a(nt),bb(nt));pi=acos(-1d0)
+      allocate(transformed(nt,nq));pi=acos(-1d0)
+      spectral_shape=tile;spectral_origin=[0,lo(2)-1,lo(3)-1];physical_axis=[1,2,3]
       if(fftw_backend)then
-        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),theta,transformed,-1,ierr)
+        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),theta,transformed,-1,ierr,spectral_z=.true.)
         if(ierr/=0)return
+        ! Z pencil memory axes are z,x,y; kernel wavevectors remain physical xyz.
+        spectral_shape=[n(3),n(1)/dims(2),n(2)/dims(3)]
+        spectral_origin=[0,coords(2)*spectral_shape(2),coords(3)*spectral_shape(3)]
+        physical_axis=[3,1,2]
       else
+      allocate(a(nt),bb(nt))
       do q=1,nq
         a=theta(:,q)
         call pzfft3dv_rvv10(a,bb,n(1),n(2),n(3),dims(2),dims(3),-1,comm(2),comm(3))
@@ -88,9 +94,9 @@ contains
       endif
       u=0d0
 !$omp parallel do collapse(3) private(x,y,z,p,gidx,g,q,d,phi)
-      do z=0,tile(3)-1;do y=0,tile(2)-1;do x=0,tile(1)-1
-        p=[x,y+lo(2)-1,z+lo(3)-1];where(p>=(n+1)/2)p=p-n
-        gidx=1+x+tile(1)*(y+tile(2)*z);g=sqrt(sum((2*pi*p/(n*h))**2))
+      do z=0,spectral_shape(3)-1;do y=0,spectral_shape(2)-1;do x=0,spectral_shape(1)-1
+        p(physical_axis)=[x,y,z]+spectral_origin;where(p>=(n+1)/2)p=p-n
+        gidx=1+x+spectral_shape(1)*(y+spectral_shape(2)*z);g=sqrt(sum((2*pi*p/(n*h))**2))
         do q=1,nq;do d=1,q
           phi=rvv10_kernel_fourier(mesh(q),mesh(d),g)
           u(gidx,q)=u(gidx,q)+phi*transformed(gidx,d)
@@ -99,7 +105,7 @@ contains
       enddo;enddo;enddo
 !$omp end parallel do
       if(fftw_backend)then
-        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),u,transformed,1,ierr)
+        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),u,transformed,1,ierr,spectral_z=.true.)
         if(ierr/=0)return
         u=transformed
       else

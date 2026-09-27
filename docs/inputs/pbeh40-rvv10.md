@@ -164,11 +164,17 @@ SCF, static DC and the supported LCFO response route. FFTW uses measured
 Plans and packing maps are reused until the grid, process coordinates or batch
 size changes. Calls must enter serially per rank; axis communicators must be
 coordinate ordered and collective dimensions/channel counts must agree.
+The forward transform now retains Z pencils with contiguous z lines and
+local shape `(Nz,Nx/Py,Ny/Pz)` in z,x,y order. The rVV10 kernel uses the
+corresponding physical wavevectors; inverse FFTs run in z,y,x order and
+return the original real-space layout. This halves redistribution calls
+from eight to four per forward/inverse pair. The generic transform still
+supports its original X-to-X layout for reference comparisons.
 No FFTW MPI or FFTW threads library is required. The backend does not change
 the functional metadata or enable DC-MD.
 
-FFTE remains the default: current local benchmarks show packing costs can
-outweigh the FFTW transform savings. Measure the complete functional on the
+FFTE remains the default. Benchmark the selected adapter: transform speed
+and complete-functional speed can differ, and packing/communication still matter. Measure the complete functional on the
 target machine before selecting a backend. Setup, warm forward/inverse pairs,
 local FFT, communication, packing and full rVV10 timings are separated by:
 

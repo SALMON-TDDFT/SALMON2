@@ -169,3 +169,33 @@ consistent whole-functional advantage; FFTE remains the default. These local
 OMP=1 measurements compare current adapters, including FFTE's per-transform
 table initialization, and do not establish production scaling. Setup and
 component timings, all trials, ranges and log hashes are retained in the JSON.
+
+## Retained Z spectra
+
+`transposed-spectrum.json` records the subsequent FFTW layout optimization.
+Forward spectra stay in z,x,y memory order for the rVV10 kernel; inverse FFTs
+run z,y,x and return the original real-space layout. Each pair now requires
+four redistributions instead of eight. The same-process, same-plan comparison
+uses three trials, 32 channels and OMP=1. Median warm pair times (ms):
+
+| Grid | MPI ranks | Old FFTW X | New FFTW Z | Reduction |
+|---|---:|---:|---:|---:|
+| 32x24x16 | 2 | 6.25 | 4.41 | 29.5% |
+| 32x24x16 | 4 | 3.32 | 2.30 | 30.8% |
+| 64x48x32 | 2 | 78.27 | 53.37 | 31.8% |
+| 64x48x32 | 4 | 40.61 | 27.76 | 31.6% |
+
+Complete-functional medians on 64x48x32 are 0.612/0.603 s
+(FFTE/new FFTW, 2 ranks) and 0.317/0.311 s (4 ranks). These are small
+differences relative to trial variation; FFTE stays the default. This does
+not measure old-versus-new FFTW whole-functional speedup. The generic FFTW
+X-to-X API remains available as a reference; `rvv10_fft='fftw'` automatically
+uses retained Z spectra in SCF/DC/LCFO.
+
+All 54 direct functional/potential cases pass, including full-potential
+differences below 1.20e-13. Individual Z-layout Fourier coefficients agree
+with assembled FFTE spectra; 2/3/4/5-channel inverse normalization and plan
+reuse pass. The native 25-test suite and y/z DC-LCFO response fixtures pass.
+Independent review found no critical or important defects. Phase maxima may
+come from different ranks and must not be added as an exact breakdown.
+These remain local, small-system measurements, not production-water scaling.

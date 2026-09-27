@@ -50,6 +50,18 @@ program benchmark
   totals=[first,fftw_pencil_seconds(1),warm,fftw_pencil_seconds(2:4)/reps,real(fftw_pencil_plans_created,8)]
   call MPI_Allreduce(totals,maximum,8,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
   if(rank==0)write(*,'(a,8es20.10)')'FFT first/setup/FFTE/FFTW/localFFT/MPI/packing/plans: ',maximum
+  fftw_pencil_seconds(2:4)=0d0
+  call MPI_Barrier(MPI_COMM_WORLD,ierr);start=MPI_Wtime()
+  do j=1,reps
+    call pencil_transform(n,dims,coords,comm,input,output,-1,status,spectral_z=.true.)
+    if(status/=0)error stop 'FFTW Z forward failed'
+    call pencil_transform(n,dims,coords,comm,output,back,1,status,spectral_z=.true.)
+    if(status/=0)error stop 'FFTW Z inverse failed'
+  enddo
+  totals(1:4)=[(MPI_Wtime()-start)/reps,fftw_pencil_seconds(2:4)/reps]
+  if(maxval(abs(back-input))>1d-11)error stop 'Z benchmark roundtrip'
+  call MPI_Allreduce(totals,maximum,4,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+  if(rank==0)write(*,'(a,4es20.10)')'FFT Z pair/localFFT/MPI/packing: ',maximum(1:4)
   do q=1,2
     call MPI_Barrier(MPI_COMM_WORLD,ierr);start=MPI_Wtime()
     do j=1,3

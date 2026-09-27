@@ -1,6 +1,7 @@
 ! Reusable FFTW transforms with native y/z pencil communicators.
 ! Local FFTW is serial within each MPI rank; channel batches bound workspace.
-! Collective caller contract: identical grid, process dimensions and channel count;
+! Collective caller contract: identical grid, process dimensions, channel count,
+! sign and spectral_z selection;
 ! axis communicators ordered by coordinates. Saved caches require serial entry per rank.
 module fftw_pencils
   use iso_c_binding
@@ -141,12 +142,16 @@ contains
     enddo;enddo
     fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
   end subroutine
-  subroutine pencil_transform(n,dims,coords,comm,input,output,sgn,status)
+  subroutine pencil_transform(n,dims,coords,comm,input,output,sgn,status,spectral_z)
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),sgn
     complex(8),intent(in) :: input(:,:)
     complex(8),intent(out) :: output(:,:)
     integer,intent(out) :: status
-    integer :: first,batch,a,direction,nt,bad
+    ! With spectral_z, forward outputs Z pencils in (z,x,y) order; inverse
+    ! consumes that layout and returns X pencils. Default remains X-to-X.
+    logical,intent(in),optional :: spectral_z
+    logical :: keep_z
+    integer :: first,batch,a,direction,nt,bad,axis_first,axis_last,axis_step
     integer(int64) :: wide_nt
     real(8) :: start
     status=0
@@ -166,6 +171,12 @@ contains
     if(status/=0)return
     direction=1
     if(sgn==1)direction=2
+    keep_z=.false.
+    if(present(spectral_z))keep_z=spectral_z
+    axis_first=1;axis_last=3;axis_step=1
+    if(keep_z.and.sgn==1)then
+      axis_first=3;axis_last=1;axis_step=-1
+    endif
     batch=min(max_batch,size(input,2))
     call prepare(cache(batch),n,dims,coords,batch,status)
     batch=modulo(size(input,2),max_batch)
@@ -181,13 +192,20 @@ contains
       batch=min(max_batch,size(input,2)-first+1)
       start=stamp();cache(batch)%work=reshape(input(:,first:first+batch-1),[nt*batch])
       fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
-      do a=1,3
+      do a=axis_first,axis_last,axis_step
         start=stamp()
         call fftw_execute_dft(cache(batch)%plans(a,direction),cache(batch)%work,cache(batch)%work)
         fftw_pencil_seconds(2)=fftw_pencil_seconds(2)+stamp()-start
-        if(a<3)call redistribute(cache(batch),a,comm)
+        if(keep_z.and.sgn==1)then
+          ! Reverse sequence: Z->Y (step3), then Y->X (step4).
+          if(a>1)call redistribute(cache(batch),6-a,comm)
+        else
+          if(a<3)call redistribute(cache(batch),a,comm)
+        endif
       enddo
-      call redistribute(cache(batch),3,comm);call redistribute(cache(batch),4,comm)
+      if(.not.keep_z)then
+        call redistribute(cache(batch),3,comm);call redistribute(cache(batch),4,comm)
+      endif
       start=stamp()
       if(sgn==1)cache(batch)%work=cache(batch)%work/product(real(n,8))
       output(:,first:first+batch-1)=reshape(cache(batch)%work,[nt,batch])
