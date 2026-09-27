@@ -111,3 +111,18 @@ nonzero densities. Operator checks cover HSE/PBEh, translated multi-k sources,
 Hermiticity and extended-source fallback. This engine does not activate PBEh
 LCFO optical propagation or DC-MD; those adapters and force consistency remain
 separate requirements.
+
+
+## DC-LCFO response integration
+
+`lcfo-response.json` records the H4 impulse fixture for PBEh40 and PBEh40+rVV10,
+with x/y/z spatial partitions and 2 versus 4 ranks (orbital groups). At 0.08 au,
+0.02/0.01-au step refinement gives current differences around 1e-15 au and
+post-impulse energy widths around 5e-14 Hartree. Integrated electron count is
+4 within 2e-13. Grid-spacing input parity and per-fragment functional/run-ID
+mismatch rejection are also covered by `test_pbeh_response.py`.
+These tiny, short tests establish plumbing consistency, not water spectra or
+production scaling. The rVV10 FFT still runs on the spatial communicator root.
+A direct distributed-potential comparison against a single-grid evaluation is
+not part of this integration fixture; the standalone periodic derivative test
+and native spatial halo path provide the current derivative coverage.

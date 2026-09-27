@@ -6,6 +6,7 @@ set(SOURCES
     builtin_pw92.f90
     builtin_r2scan.f90
     builtin_tbmbj.f90
+    exx_functional.f90
     salmon_xc.f90
    )
 

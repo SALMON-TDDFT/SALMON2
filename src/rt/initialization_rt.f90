@@ -110,9 +110,10 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   logical :: rion_update
 
   if(lcfo_rt_requested())then
-    if(yn_dc/='n'.or.yn_conventional_from_dcdft/='y'.or.xc/='hse06'.or. &
+    if(yn_dc/='n'.or.yn_conventional_from_dcdft/='y'.or. &
+       (xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10').or. &
        theory/='tddft_response'.or.propagator/='hse_taylor4') &
-      error stop 'LCFO RT: requires conventional-from-DC HSE tddft_response with Taylor4+ACE'
+      error stop 'LCFO RT: requires conventional-from-DC hybrid tddft_response with Taylor4+ACE'
     if(yn_restart=='y'.or.write_rt_wfn_k=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
       error stop 'LCFO RT: restart/checkpoint output is not supported yet'
   endif
@@ -271,7 +272,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
 
-  if(gram_schmidt_interval==0.and.xc/='hse06')then
+  if(gram_schmidt_interval==0.and.xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10')then
     call gram_schmidt(system, mg, info, spsi_in)
   end if
 

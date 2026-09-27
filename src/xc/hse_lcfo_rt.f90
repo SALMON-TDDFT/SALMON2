@@ -2,9 +2,10 @@
 ! Each rank owns one core. Hartree, XC, propagation and current stay native.
 ! Full density-factor reference or opt-in initial-MLWF U reuse and source masks.
 module hse_lcfo_rt
+  use exx_functional, only: exchange_fraction,exchange_screening
   use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
   use communication, only: comm_bcast,comm_summation,comm_get_max
-  use salmon_global, only: hse_omega,ae_shape1,hse_lcfo_ace_interval,hse_lcfo_fft_batch, &
+  use salmon_global, only: pbeh_coulomb_radius,exx_local_fft,ae_shape1,hse_lcfo_ace_interval,hse_lcfo_fft_batch, &
     yn_hse_lcfo_continuity,yn_hse_lcfo_fft_measure
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
@@ -92,9 +93,16 @@ contains
       g=g+1
       if(any([x,y,z]>=lcfo_core))core_basis(g,:)=0d0
     enddo;enddo;enddo
-    call lcfo_projection_init(projection_plan,core_basis,.25d0*lcfo_dv)
-    call wannier_init(fragment_operator,ns,[1,1,1],lcfo_h,reshape([0d0,0d0,0d0],[3,1]),hse_omega,ierr)
+    call lcfo_projection_init(projection_plan,core_basis,exchange_fraction()*lcfo_dv)
+    if(exchange_screening()==0d0)then
+      call wannier_init(fragment_operator,ns,[1,1,1],lcfo_h,reshape([0d0,0d0,0d0],[3,1]), &
+        0d0,ierr,pbeh_coulomb_radius)
+    else
+      call wannier_init(fragment_operator,ns,[1,1,1],lcfo_h,reshape([0d0,0d0,0d0],[3,1]), &
+        exchange_screening(),ierr)
+    endif
     if(ierr/=0)error stop 'LCFO HSE: fragment periodic exchange initialization failed'
+    fragment_operator%use_local_fft=exx_local_fft=='auto'
     fragment_operator%fft_batch_size=fft_batch
     fragment_operator%fft_measure=fft_measure==1
     write(*,'(a,5i10)')'LCFO compact projection rank/rows/columns/fullrows/fullcolumns:', &
@@ -361,7 +369,7 @@ contains
     allocate(local(product(lcfo_grid)),global(product(lcfo_grid)));local=0d0
     do j=1,size(coeff,2);do g=1,ng
       local(fragment_global_index(g))=local(fragment_global_index(g))+ &
-        .25d0*occupation(j)*aimag(conjg(psi(g,j))*(core_weight(g)*left(g,j)+right(g,j)))
+        exchange_fraction()*occupation(j)*aimag(conjg(psi(g,j))*(core_weight(g)*left(g,j)+right(g,j)))
     enddo;enddo
     call comm_summation(local,global,size(local),lcfo_comm)
     if(lcfo_rank==0)write(*,'(a,i8,3es19.10)')'LCFO EXX continuity build/signed/L1/max: ', &

@@ -1414,12 +1414,12 @@ contains
     ! to validation rather than being silently overwritten.
     if(propagator=='')then
       propagator='middlepoint'
-      if(xc=='hse06'.and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
+      if((xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
         propagator='hse_taylor4'
     endif
     if(yn_predictor_corrector=='')then
       yn_predictor_corrector='n'
-      if(xc=='hse06'.and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
+      if((xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
         yn_predictor_corrector='y'
     endif
 !! == bcast for &scf
@@ -3221,8 +3221,9 @@ contains
       error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
     if(yn_hse_lcfo_rt=='y')then
       if(yn_dc=='y'.or.yn_conventional_from_dcdft/='y')error stop 'LCFO RT requires conventional_from_dcdft'
-      if(xc/='hse06'.or.theory/='tddft_response'.or.propagator/='hse_taylor4') &
-        error stop 'LCFO RT requires HSE06 tddft_response with Taylor4'
+      if((xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10').or. &
+         theory/='tddft_response'.or.propagator/='hse_taylor4') &
+        error stop 'LCFO RT requires hybrid tddft_response with Taylor4'
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
@@ -3245,7 +3246,8 @@ contains
       error stop 'PBEh40: OpenACC force/potential path not yet supported'
 #endif
       yn_hse_wannier='y'
-      if(theory/='dft'.and.theory/='dft_md')error stop 'PBEh40: only DFT and fixed-cell BOMD supported'
+      if(theory/='dft'.and.theory/='dft_md'.and.yn_hse_lcfo_rt/='y') &
+        error stop 'PBEh40: only DFT, fixed-cell BOMD and LCFO response supported'
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
         error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
       if(yn_hse_wannier_snapshot=='y') &
@@ -3253,8 +3255,10 @@ contains
       if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
       if(yn_dc=='y'.and.theory=='dft_md') &
         error stop 'PBEh40: DC MD is not yet supported'
-      if(yn_conventional_from_dcdft=='y'.or.yn_hse_lcfo_rt=='y') &
-        error stop 'PBEh40: LCFO projection not yet supported'
+      if(yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt/='y') &
+        error stop 'PBEh40: reconstruction requires LCFO response'
+      if(yn_hse_lcfo_rt=='y'.and.(yn_md=='y'.or.ae_shape1/='impulse'.or.hse_lcfo_wf_radius>0d0)) &
+        error stop 'PBEh40 LCFO: fixed nuclei, impulse and full source support required'
       if(xname/='none'.or.cname/='none')error stop 'PBEh40: extra xname/cname unsupported'
       if(.not.ieee_is_finite(pbeh_coulomb_radius).or.pbeh_coulomb_radius<0d0) &
         error stop 'PBEh40: invalid Coulomb radius'

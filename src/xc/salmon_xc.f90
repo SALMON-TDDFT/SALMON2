@@ -79,7 +79,7 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
-    use communication, only: comm_summation
+    use communication, only: comm_summation,comm_bcast,comm_get_max
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
@@ -106,8 +106,9 @@ contains
     !
     integer :: ix,iy,iz,is,nspin,idir
 #ifdef USE_HSE
-    integer :: rv_status,rv_ng
+    integer :: rv_status,rv_ng,rv_shape(3),rv_lo(3),rv_hi(3)
     real(8),allocatable :: rv_r(:),rv_s(:),rv_e(:),rv_v(:),rv_w(:)
+    real(8),allocatable :: rv_local(:,:,:),rv_global(:,:,:)
 #endif
     real(8) :: tot_exc
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
@@ -347,16 +348,38 @@ contains
 
 #ifdef USE_HSE
     if(xc_name=='pbeh40_rvv10'.and.yn_dc/='y')then
-      if(info%isize_r/=1.or.nspin/=1.or.yn_dc=='y')error stop 'rVV10: full conventional density grid required'
-      rv_ng=product(mg%num)
-      allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
-      rv_r=reshape(rho_tmp,[rv_ng]);rv_s=reshape(sum(delr**2,dim=4),[rv_ng])
-      call rvv10_evaluate(mg%num,system%hgs,rv_r,rv_s,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_status)
-      if(rv_status/=0)error stop 'rVV10: nonlocal evaluation failed'
-      eexc_tmp=eexc_tmp+reshape(rv_e,mg%num)
-      vxc_tmp=vxc_tmp+reshape(rv_v,mg%num)
+      if(nspin/=1)error stop 'rVV10: unpolarized density required'
+      ! Each orbital group has one complete real-space communicator. Do not
+      ! sum over orbitals: that would multiply the density and nonlocal energy.
+      rv_shape=mg%ie
       do idir=1,3
-        rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir)-2*reshape(rv_w,mg%num)*delr(:,:,:,idir)
+        call comm_get_max(rv_shape(idir),info%icomm_r)
+      enddo
+      rv_lo=mg%is;rv_hi=mg%ie;rv_ng=product(rv_shape)
+      allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
+      allocate(rv_local(rv_shape(1),rv_shape(2),rv_shape(3)),rv_global(rv_shape(1),rv_shape(2),rv_shape(3)))
+      rv_local=0d0
+      rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=rho_tmp
+      call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
+      rv_r=reshape(rv_global,[rv_ng]);rv_local=0d0
+      rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=sum(delr**2,dim=4)
+      call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
+      rv_s=reshape(rv_global,[rv_ng]);rv_status=0
+      if(info%id_r==0) &
+        call rvv10_evaluate(rv_shape,system%hgs,rv_r,rv_s,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_status)
+      call comm_bcast(rv_status,info%icomm_r,0)
+      if(rv_status/=0)error stop 'rVV10: nonlocal evaluation failed'
+      call comm_bcast(rv_e,info%icomm_r,0)
+      call comm_bcast(rv_v,info%icomm_r,0)
+      call comm_bcast(rv_w,info%icomm_r,0)
+      rv_global=reshape(rv_e,rv_shape)
+      eexc_tmp=eexc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+      rv_global=reshape(rv_v,rv_shape)
+      vxc_tmp=vxc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+      rv_global=reshape(rv_w,rv_shape)
+      do idir=1,3
+        rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir) &
+          -2*rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))*delr(:,:,:,idir)
       enddo
     endif
 #endif

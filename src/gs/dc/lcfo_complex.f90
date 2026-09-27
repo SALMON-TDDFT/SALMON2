@@ -62,6 +62,7 @@ contains
     use filesystem, only: get_filehandle
     use ieee_arithmetic, only: ieee_support_datatype
     use iso_fortran_env, only: int32,int64,real64,file_storage_size
+    use exx_functional, only: lcfo_write_functional
     use salmon_global, only: base_directory,num_fragment
     use structures, only: s_dcdft,s_rgrid
     implicit none
@@ -94,6 +95,8 @@ contains
     call comm_bcast(writer%run_id,dc%icomm_tot,0)
 
     if (dc%id_frag /= 0) return
+    call lcfo_write_functional(trim(base_directory)//'functional.txt',writer%run_id,local_status)
+    if(local_status/=0)return
     writer%file_basis = trim(base_directory)//'basis_functions.bin'
     writer%file_coeff = trim(base_directory)//'wavefunctions.bin'
     writer%file_hamiltonian = trim(base_directory)//'hamiltonian_local.bin'
@@ -1625,6 +1628,7 @@ contains
 
   subroutine validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,ref_meta,ref_geom,ref_k, &
        ref_wtk,ref_run,n_basis_all,jxyz,coverage,status)
+    use exx_functional, only: lcfo_check_functional
     use filesystem, only: get_filehandle
     use iso_fortran_env, only: int32,int64,real64
     use structures, only: s_dft_system,s_rgrid
@@ -1650,6 +1654,9 @@ contains
     real(real64) :: w_b(size(ref_wtk)),w_c(size(ref_wtk))
     integer(int64) :: footer_bytes_b,footer_bytes_c
 
+    write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','functional.txt'
+    call lcfo_check_functional(filename,ref_run,status)
+    if(status/=0)return
     status = 1
     write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','basis_functions.bin'
     call open_complex_lcfo_read(filename,1,system,lg,ub,meta_b,geom_b,vk_b,w_b, &

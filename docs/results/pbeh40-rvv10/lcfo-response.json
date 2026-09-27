@@ -1,0 +1,45 @@
+{
+  "description": "H4 integration fixture, dt=0.02 vs 0.01 au to t=0.08 au; energies in Hartree, currents in atomic units. Not a converged optical spectrum.",
+  "cases": [
+    {
+      "steps": 4,
+      "half_dt_current_error": 1.120971978604932e-15,
+      "post_impulse_energy_width": 5.0182080713057076e-14,
+      "restart_guard": "passed",
+      "case": "pbeh40",
+      "orbital_layout_current_difference": 3.398551302472036e-21,
+      "orbital_layout_energy_difference": 0.0,
+      "integrated_electrons": 3.999999999999866
+    },
+    {
+      "steps": 4,
+      "half_dt_current_error": 9.321690228762181e-16,
+      "post_impulse_energy_width": 5.0182080713057076e-14,
+      "restart_guard": "passed",
+      "case": "pbeh40_rvv10_x",
+      "orbital_layout_current_difference": 2.503497504925801e-21,
+      "orbital_layout_energy_difference": 0.0,
+      "integrated_electrons": 3.9999999999998774
+    },
+    {
+      "steps": 4,
+      "half_dt_current_error": 9.273869924933756e-16,
+      "post_impulse_energy_width": 5.0182080713057076e-14,
+      "restart_guard": "passed",
+      "case": "pbeh40_rvv10_y",
+      "orbital_layout_current_difference": 2.0117032497289633e-21,
+      "orbital_layout_energy_difference": 0.0,
+      "integrated_electrons": 3.999999999999873
+    },
+    {
+      "steps": 4,
+      "half_dt_current_error": 9.323580171025742e-16,
+      "post_impulse_energy_width": 5.0182080713057076e-14,
+      "restart_guard": "passed",
+      "case": "pbeh40_rvv10_z",
+      "orbital_layout_current_difference": 2.0117032497289633e-21,
+      "orbital_layout_energy_difference": 0.0,
+      "integrated_electrons": 3.9999999999998774
+    }
+  ]
+}

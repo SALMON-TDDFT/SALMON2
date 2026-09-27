@@ -3,6 +3,7 @@
 ! distributed k points. The legacy backend transfers density tiles; the Wannier
 ! baseline gathers a fragment on its k root. ACE applications stay local.
 module hse_native
+  use exx_functional, only: exchange_fraction
   use iso_fortran_env, only: int64
   use lcfo_rt_basis, only: lcfo_rt_active
   use hse_lcfo_rt, only: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage
@@ -48,10 +49,6 @@ contains
       error stop 'EXX MLWF finite support: localization not converged; SCF result rejected'
   end subroutine hse_check_localization
 
-  real(8) function exchange_fraction()
-    exchange_fraction=.25d0
-    if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')exchange_fraction=.4d0
-  end function
   logical function hse_eigen_diagnostic_enabled(info,solver) result(enabled)
     use communication, only: comm_bcast
     implicit none

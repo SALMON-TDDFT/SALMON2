@@ -11,6 +11,10 @@ predictor/corrector and current routines. No additional SCF is performed.
 Si128/16-fragment self-consistent RT has passed a four-step integration check;
 there is still no converged dielectric spectrum.
 
+PBEh40 and PBEh40+rVV10 now use this adapter for fixed-nuclei Gamma impulse
+response with full source support. See [PBEh constraints and tests](pbeh40-rvv10.md#dc-lcfo-electronic-response).
+HSE retains its existing finite-support and laser options.
+
 ## Namelist controls
 
 All entries below belong to `&functional`; flags accept `'y'` or `'n'`.

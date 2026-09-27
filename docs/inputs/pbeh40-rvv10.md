@@ -70,9 +70,56 @@ PBEh forces differentiate the same cubic radial projector and solid spherical ha
 
 - Periodic, orthorhombic, unpolarized conventional DFT and fixed-cell BOMD, CPU, k-only MPI; uniform full k meshes.
 - Static `pbeh40` and `pbeh40_rvv10` use the inherited DC MLWF+ACE exchange path; DC convergence against fragment/buffer size is still needed.
-- **Not supported:** DC MD, LCFO projection/RT, Ehrenfest/RT, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
+- **Not supported:** DC MD, conventional RT/Ehrenfest, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
 - DC+rVV10 convolves the **total density**. The initial fragment orbital preparation omits this term until the first regular total-density SCF update. DC-MD remains disabled: this static integration does not establish variational forces for truncated fragments.
 - No production scaling, long liquid trajectory, diffusivity, RDF, density, or exchange-cutoff convergence claim follows from the bounded tests below.
+
+## DC-LCFO electronic response
+
+A fixed-nuclei, Gamma-point, occupied-only response can now start from the
+complex LCFO files of a static DC calculation with the same `xc`. Set
+`theory='tddft_response'`, `yn_dc='n'`, `yn_conventional_from_dcdft='y'`,
+and `yn_hse_lcfo_rt='y'`. The historical LCFO flag name is retained.
+Omit electronic temperature and use `nstate=nelec/2`. Each spatial rank must
+match one saved fragment core; orbital MPI groups are supported. The default
+propagator is `hse_taylor4` with predictor/corrector. Use an impulse field.
+This is electronic response in a fixed LCFO subspace, with no initial SCF
+reconvergence; it does not enable DC-MD.
+
+Both the projected exchange and its continuity diagnostic use 40% unscreened
+spherical-cutoff Coulomb exchange. Automatic Coulomb radius is half the shortest
+**fragment plus buffer** side. Transported MLWF sources and coefficient-space
+ACE use the existing LCFO algorithms. This first PBEh RT route requires
+`exx_mlwf_radius=0` in the generating GS and `hse_lcfo_wf_radius=0` in RT.
+A finite-source-radius RT model needs separate convergence/energy validation.
+
+For rVV10, the density gradient and potential divergence use the same halo
+exchange and finite-difference stencils as the spatially decomposed Laplacian.
+Density and sigma are collected once per real-space communicator; its root
+performs the global nonlocal convolution. Derivatives return to each owned
+core and enter the existing halo divergence. Orbital groups do not multiply
+nonlocal energy. This reference implementation still replicates global scalar
+arrays and uses a root FFT; it is **not** a scalable distributed rVV10 FFT.
+
+New complex LCFO exports include a `functional.txt` per fragment, bound to the
+binary run ID. Reconstruction checks the functional, relevant exchange/rVV10
+parameters and source radius for every fragment. PBEh requires these files;
+legacy HSE data without them retain their previous route. Radius input values
+are compared after unit conversion (automatic zero and an explicit equivalent
+radius are deliberately distinct input settings). RT restart/checkpoint output
+remains unsupported.
+
+Run the integration fixture with:
+
+```
+python3 testsuites/unit_lcfo_rt/test_pbeh_response.py \
+  --binary /absolute/path/to/salmon --pseudo /absolute/path/to/H_rps.dat
+```
+
+Use `--xc pbeh40` for exchange-only hybrid coverage and `--axis y` or `--axis z`
+to exercise the corresponding domain boundaries. The fixture checks time-step
+refinement, orbital decomposition and functional metadata rejection, not a
+converged water absorption spectrum.
 
 ## Build and verification
 
