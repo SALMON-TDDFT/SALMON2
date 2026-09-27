@@ -278,7 +278,7 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
+      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -735,6 +735,8 @@ contains
     ! xcname = 'PZ'
     xname = 'none'
     cname = 'none'
+    pbeh_coulomb_radius=0d0
+    rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
     yn_hse_wannier = 'n'
     hse_mlwf_interval = 10
@@ -1340,6 +1342,11 @@ contains
     call comm_bcast(hse_block_rows,nproc_group_global)
     call comm_bcast(hse_fft_layout,nproc_group_global)
     call comm_bcast(hse_reference_export_directory,nproc_group_global)
+    call comm_bcast(pbeh_coulomb_radius,nproc_group_global)
+    pbeh_coulomb_radius=pbeh_coulomb_radius*ulength_to_au
+    call comm_bcast(rvv10_b,nproc_group_global)
+    call comm_bcast(rvv10_c,nproc_group_global)
+    call comm_bcast(rvv10_nq,nproc_group_global)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
@@ -2275,6 +2282,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
+      write(fh_variables_log, *) "# pbeh_coulomb_radius (bohr; 0=auto)=",pbeh_coulomb_radius
+      write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
       write(fh_variables_log, *) "# hse_mlwf_interval=",hse_mlwf_interval
@@ -3180,14 +3189,39 @@ contains
         error stop 'LCFO RT requires HSE06 tddft_response with Taylor4'
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
-    if(xc=='hse06')then
+    if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')then
+#ifndef USE_HSE
+      error stop 'PBEh40 requires USE_HSE=ON'
+#endif
+#ifdef USE_OPENACC
+      error stop 'PBEh40: OpenACC force/potential path not yet supported'
+#endif
+      yn_hse_wannier='y'
+      if(theory/='dft'.and.theory/='dft_md')error stop 'PBEh40: only DFT and fixed-cell BOMD supported'
+      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
+        error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
+      if(yn_hse_wannier_snapshot=='y') &
+        error stop 'PBEh40: legacy HSE Wannier snapshot cannot encode Coulomb cutoff'
+      if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
+      if(yn_dc=='y'.and.(theory=='dft_md'.or.xc=='pbeh40_rvv10')) &
+        error stop 'PBEh40: DC MD and total-density DC rVV10 are not yet supported'
+      if(yn_conventional_from_dcdft=='y'.or.yn_hse_lcfo_rt=='y') &
+        error stop 'PBEh40: LCFO projection not yet supported'
+      if(xname/='none'.or.cname/='none')error stop 'PBEh40: extra xname/cname unsupported'
+      if(.not.ieee_is_finite(pbeh_coulomb_radius).or.pbeh_coulomb_radius<0d0) &
+        error stop 'PBEh40: invalid Coulomb radius'
+      if(.not.ieee_is_finite(rvv10_b).or.rvv10_b<=0d0.or. &
+         .not.ieee_is_finite(rvv10_c).or.rvv10_c<0d0.or.rvv10_nq<8.or.rvv10_nq>128) &
+        error stop 'PBEh40: invalid rVV10 parameters'
+    endif
+    if(xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10')then
       if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
         error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'
       if(xname/='none'.or.cname/='none')error stop 'HSE06 must not be combined with extra xname/cname'
 #ifndef USE_HSE
       error stop 'HSE06 requires USE_HSE=ON'
 #endif
-      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n') &
+      if(xc=='hse06'.and.(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n')) &
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
       if(yn_dc=='y')yn_hse_wannier='y'
       if(yn_hse_wannier=='y')then
@@ -3205,7 +3239,7 @@ contains
         if(yn_dc=='y'.and.temperature<0d0) &
           error stop 'DC HSE: a nonnegative electronic temperature is required'
       endif
-      if(yn_dc/='y'.and.(yn_hse_wannier/='y'.or.theory/='dft'))then
+      if(yn_dc/='y'.and.(yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
         if(nstate*2/=nelec.or.temperature>=0d0) &
           error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
       endif
@@ -3236,8 +3270,8 @@ contains
           if(n_hamil/=4.or.yn_predictor_corrector/='y') &
             error stop 'HSE Taylor4 requires n_hamil=4 and predictor-corrector'
         endif
-      else if(theory/='dft')then
-        error stop 'HSE06 initial support: dft or tddft only'
+      else if(theory/='dft'.and..not.(theory=='dft_md'.and.xc/='hse06'))then
+        error stop 'Hybrid: unsupported calculation theory'
       endif
     else if(propagator=='hse_ptcn'.or.propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')then
       error stop 'HSE propagation modes require xc=hse06'

@@ -31,7 +31,7 @@ contains
     use sym_sub, only: use_symmetry
     use pseudo_pt_so_sub, only: calc_uVpsi_so
     use plusU_global, only: PLUS_U_ON, dm_mms_nla, U_eff
-    use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit
+    use salmon_global, only: kion,cutoff_g,yn_periodic,yn_spinorbit,xc
     use code_optimization, only: force_omp_mode
     use stencil_sub, only: calc_gradient_psi
     use timer
@@ -63,6 +63,8 @@ contains
     complex(8),allocatable :: zF_tmp(:,:)
     complex(8) :: ztmp
     integer :: Norb,iorb,ilocal
+    logical :: variational_projector_force
+    real(8),allocatable :: projector_grad(:,:,:)
 #ifdef USE_OPENACC
     real(8),allocatable :: F_tmp_local(:,:)
 
@@ -85,6 +87,11 @@ contains
     io_e = info%io_e
     Norb = system%Nspin*info%numo*info%numk
 
+    variational_projector_force=(xc=='pbeh40'.or.xc=='pbeh40_rvv10')
+    if(variational_projector_force)then
+      allocate(projector_grad(3,ppg%nps,ppg%nlma))
+      call differentiate_projectors(pp,ppg,kion,projector_grad)
+    endif
     Nlma = ppg%Nlma
 
   ! Ewald sum
@@ -205,7 +212,7 @@ contains
 !$omp   shared(im,ik_s,ik_e,io_s,io_e,nspin,tpsi,mg,stencil,system,ppg,uVpsibox2,yn_periodic) &
 !$omp   shared(PLUS_U_ON,Nlma_ao,phipsibox2,iorb,zF_tmp,U_eff,dm_mms_nla) &
 !$omp   shared(yn_spinorbit,ztmp) &
-!$omp   shared(dden) &
+!$omp   shared(dden,variational_projector_force,projector_grad) &
 !$omp   reduction(+:F_tmp) &
 !$omp   if(force_omp_mode)
 #endif
@@ -317,12 +324,20 @@ contains
              ix = ppg%jxyz(1,j,ia)
              iy = ppg%jxyz(2,j,ia)
              iz = ppg%jxyz(3,j,ia)
+             if(variational_projector_force)then
+               ! Differentiate the interpolated projector at fixed grid points.
+               ! The atomic-center derivative of its Bloch phase is purely
+               ! imaginary in d|<beta|psi>|**2 and cancels exactly.
+               duVpsi=duVpsi-projector_grad(:,j,ilma)*exp(zi*sum(kAc*ppg%rxyz(:,j,ia))) &
+                 *tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+             else
              w(1) = gtpsi(1,ix,iy,iz) + zI* kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
              w(2) = gtpsi(2,ix,iy,iz) + zI* kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
              w(3) = gtpsi(3,ix,iy,iz) + zI* kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
              duVpsi(1) = duVpsi(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(1) ! < uV | exp(ikr) (nabla) | psi >
              duVpsi(2) = duVpsi(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(2) ! < uV | exp(ikr) (nabla) | psi >
              duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(3) ! < uV | exp(ikr) (nabla) | psi >
+             endif
           end do
           F_tmp(1,ia) = F_tmp(1,ia) - rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) )
           F_tmp(2,ia) = F_tmp(2,ia) - rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) )
@@ -456,6 +471,50 @@ contains
   end subroutine calc_force
   
 !===================================================================================================================================
+
+  subroutine differentiate_projectors(pp,ppg,kion,gradient)
+    use structures, only: s_pp_info,s_pp_grid
+    use salmon_math, only: ylm,dylm
+    implicit none
+    type(s_pp_info),intent(in) :: pp
+    type(s_pp_grid),intent(in) :: ppg
+    integer,intent(in) :: kion(:)
+    real(8),intent(out) :: gradient(:,:,:)
+    integer :: ia,ik,j,ir,intr,ll,l,l0,m,lm,ilma,d
+    real(8) :: xyz(3),radius,dx,value,slope,harmonic
+    gradient=0d0
+    do ia=1,size(ppg%mps)
+      ik=kion(ia)
+      if(pp%mlps(ik)>3)error stop 'PBEh40 force: projector angular momentum above f unsupported'
+      do j=1,ppg%mps(ia)
+        xyz=ppg%rxyz(:,j,ia);radius=sqrt(sum(xyz**2))+1d-50
+        do ir=1,pp%nrps(ik)
+          if(pp%radnl(ir,ik)>radius)exit
+        enddo
+        intr=ir-1
+        if(intr<1.or.intr>=pp%nrps(ik))error stop 'PBEh40 force: radial projector domain'
+        dx=radius-pp%radnl(intr,ik);l0=0;lm=0
+        do ll=0,pp%mlps(ik)
+          do l=l0,l0+pp%nproj(ll,ik)-1
+            if(pp%inorm(l,ik)==0)cycle
+            value=((ppg%save_udvtbl_a(intr,l,ik)*dx+ppg%save_udvtbl_b(intr,l,ik))*dx &
+              +ppg%save_udvtbl_c(intr,l,ik))*dx+ppg%save_udvtbl_d(intr,l,ik)
+            slope=(3*ppg%save_udvtbl_a(intr,l,ik)*dx+2*ppg%save_udvtbl_b(intr,l,ik))*dx &
+              +ppg%save_udvtbl_c(intr,l,ik)
+            do m=-ll,ll
+              lm=lm+1;ilma=ppg%lma_tbl(lm,ia)
+              harmonic=ylm(xyz(1),xyz(2),xyz(3),ll,m)
+              do d=1,3
+                gradient(d,j,ilma)=slope*xyz(d)/radius*harmonic &
+                  +value*dylm(xyz(1),xyz(2),xyz(3),ll,m,d)
+              enddo
+            enddo
+          enddo
+          l0=l
+        enddo
+      enddo
+    enddo
+  end subroutine differentiate_projectors
 
   subroutine force_ewald_rspace(F_sum,F_tmp,system,info,ewald,pp,nion,comm)
     use structures

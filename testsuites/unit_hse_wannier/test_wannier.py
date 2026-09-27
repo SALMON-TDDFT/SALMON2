@@ -10,22 +10,27 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def multiplier(shape, spacing, omega, shift):
+def multiplier(shape, spacing, omega, shift, radius=None):
     axes = [2*np.pi*np.fft.fftfreq(n, d=h) for n, h in zip(shape, spacing)]
     q = np.stack(np.meshgrid(*axes, indexing='ij'), axis=-1)
     nyquist = np.pi/np.array(spacing)
     q = (q+shift+nyquist) % (2*nyquist)-nyquist
     q2 = np.sum(q*q, axis=-1)
+    if omega == 0:
+        radius = radius if radius is not None else .5*min(np.array(shape)*spacing)
+        result = np.full(shape, 2*np.pi*radius**2)
+        np.divide(8*np.pi*np.sin(.5*np.sqrt(q2)*radius)**2, q2, out=result, where=q2>1e-24)
+        return result
     result = np.full(shape, np.pi/omega**2)
     np.divide(4*np.pi*(-np.expm1(-q2/(4*omega**2))), q2, out=result, where=q2>1e-24)
     return result
 
 
-def reference(source, target, k, spacing, occ, omega):
+def reference(source, target, k, spacing, occ, omega, radius=None):
     result = np.zeros_like(target)
     for ik, kv in enumerate(k):
         for iq, qv in enumerate(k):
-            v = multiplier(source.shape[2:], spacing, omega, kv-qv)
+            v = multiplier(source.shape[2:], spacing, omega, kv-qv, radius)
             for j, phi in enumerate(source[iq]):
                 pairs = phi.conj()*target[ik]
                 potential = np.fft.ifftn(np.fft.fftn(pairs, axes=(-3,-2,-1))*v, axes=(-3,-2,-1))
@@ -61,7 +66,7 @@ class WannierTest(unittest.TestCase):
         cls.tmp.cleanup()
 
     def run_case(self, mesh, fractional=True, empty=False):
-        shape = (4,3,2); h=np.array([.6,.8,.9]); omega=.11; no=2; nt=3
+        shape = (4,3,2); h=np.array([.6,.8,.9]); omega=getattr(self,'omega',.11); no=2; nt=3
         rng=np.random.default_rng(573)
         k=np.array(list(np.ndindex(*mesh)))*2*np.pi/(np.array(mesh)*shape*h)+[.017,-.021,.003]
         k=k[rng.permutation(len(k))]
@@ -80,10 +85,14 @@ class WannierTest(unittest.TestCase):
             f.write(k.T.tobytes(order='F'));f.write(occ.T.tobytes(order='F'))
             f.write(wire(source));f.write(wire(target))
         p=subprocess.run([str(self.exe),str(inp),str(out)],capture_output=True,text=True,
-                         env=dict(os.environ,OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS=str(getattr(self,'threads',1)),WANNIER_EXPECT_WORKERS=str(getattr(self,'threads',1)),WANNIER_TEST_BATCH=str(getattr(self,'batch',1))))
+                         env=dict(os.environ,OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS=str(getattr(self,'threads',1)),WANNIER_EXPECT_WORKERS=str(getattr(self,'threads',1)),WANNIER_TEST_BATCH=str(getattr(self,'batch',1)),WANNIER_COULOMB_RADIUS=str(getattr(self,'radius',0))))
+        if getattr(self,'reject_radius',False):
+            self.assertNotEqual(p.returncode,0)
+            self.assertIn('ERROR STOP init',p.stderr)
+            return
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         a=np.fromfile(out,np.complex128).reshape(shape+(nt,len(k)),order='F').transpose(4,3,0,1,2)
-        np.testing.assert_allclose(a,reference(source,target,k,h,occ,omega),rtol=2e-11,atol=2e-11)
+        np.testing.assert_allclose(a,reference(source,target,k,h,occ,omega,getattr(self,'radius',.5*min(np.array(shape)*h*mesh))),rtol=2e-11,atol=2e-11)
         localized=np.fromfile(str(out)+'.localized',np.complex128).reshape(a.transpose(2,3,4,1,0).shape,order='F').transpose(4,3,0,1,2)
         np.testing.assert_allclose(localized,a,rtol=2e-11,atol=2e-11)
         sys.path.insert(0,str(ROOT/'samples/dc_hse'))
@@ -99,6 +108,22 @@ class WannierTest(unittest.TestCase):
         checks=np.loadtxt(str(out)+'.checks')
         self.assertLess(np.max(checks[:4]),1e-10,p.stdout)
         self.assertLessEqual(checks[4],1e-10)  # largest exchange-metric eigenvalue
+
+    def test_pbeh40_unscreened_gamma(self):
+        self.omega=0.
+        self.run_case((1,1,1))
+
+    def test_pbeh40_unscreened_multik(self):
+        self.omega=0.
+        self.run_case((1,2,2))
+
+    def test_pbeh40_explicit_radius(self):
+        self.omega=0.;self.radius=.7
+        self.run_case((1,2,2))
+
+    def test_pbeh40_radius_larger_than_cell_rejected(self):
+        self.omega=0.;self.radius=2.;self.reject_radius=True
+        self.run_case((1,1,1))
 
     def test_post_scf_localization(self):
         self.run_case((1,1,1),empty=True)

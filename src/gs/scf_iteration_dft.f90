@@ -421,6 +421,11 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 end do DFT_Iteration
 
+! A BOMD step is not valid without a self-consistent electronic ground state.
+if(theory=='dft_md'.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+  if(.not.(sum1<threshold))error stop 'PBEh40 BOMD: SCF not converged; ionic step rejected'
+endif
+
 if(calc_mode/='DFT_BAND')then
 if(.not.flag_conv) then
    if( ilevel_print.ge.1 .and. comm_is_root(nproc_id_global)) then

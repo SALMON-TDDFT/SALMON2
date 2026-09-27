@@ -6,7 +6,7 @@ program probe
   type(s_hse_wannier) :: op
   type(hse_ace_state) :: ace
   integer :: n(3),mesh(3),no,nt,ng,nk,iu,ierr,i,j,ik,expected_workers
-  real(8) :: h(3),omega,checks(5),spread,gradient,smin
+  real(8) :: h(3),omega,checks(5),spread,gradient,smin,coulomb_radius
   real(8),allocatable :: k(:,:),occ(:,:),trial_occ(:,:),eval(:),rwork(:)
   complex(8),allocatable :: psi(:,:,:),target(:,:,:),action(:,:,:),w(:,:,:),wa(:,:,:),back(:,:,:)
   complex(8),allocatable :: transported_action(:,:,:)
@@ -21,7 +21,10 @@ program probe
   allocate(k(3,nk),occ(no,nk),psi(ng,no,nk),target(ng,nt,nk),action(ng,nt,nk),w(ng,no,nk),wa(ng,no,nk))
   read(iu)h,omega,k,occ,psi,target
   close(iu)
-  call wannier_init(op,n,mesh,h,k,omega,ierr)
+  coulomb_radius=0d0
+  call get_environment_variable('WANNIER_COULOMB_RADIUS',worker_setting,status=ierr)
+  if(ierr==0)read(worker_setting,*)coulomb_radius
+  call wannier_init(op,n,mesh,h,k,omega,ierr,coulomb_radius)
   if(ierr/=0)error stop 'init'
   call get_environment_variable('WANNIER_TEST_BATCH',worker_setting,status=ierr)
   if(ierr==0)read(worker_setting,*)op%fft_batch_size

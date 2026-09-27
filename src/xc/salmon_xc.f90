@@ -25,7 +25,8 @@ module salmon_xc
   use structures, only: s_xc_functional, s_xc_operator_payload
 #ifdef USE_HSE
   use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
-  use hse_semilocal, only: hse_semilocal_evaluate
+  use hse_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate
+  use rvv10, only: rvv10_evaluate
 #endif
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
@@ -82,7 +83,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit,yn_dc
+    use salmon_global, only: yn_spinorbit,yn_dc,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
     implicit none
@@ -104,6 +105,10 @@ contains
     type(s_scalar)          ,optional   :: eexc
     !
     integer :: ix,iy,iz,is,nspin,idir
+#ifdef USE_HSE
+    integer :: rv_status,rv_ng
+    real(8),allocatable :: rv_r(:),rv_s(:),rv_e(:),rv_v(:),rv_w(:)
+#endif
     real(8) :: tot_exc
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
@@ -339,6 +344,22 @@ contains
         call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
     end if
+
+#ifdef USE_HSE
+    if(xc_name=='pbeh40_rvv10')then
+      if(info%isize_r/=1.or.nspin/=1.or.yn_dc=='y')error stop 'rVV10: full conventional density grid required'
+      rv_ng=product(mg%num)
+      allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
+      rv_r=reshape(rho_tmp,[rv_ng]);rv_s=reshape(sum(delr**2,dim=4),[rv_ng])
+      call rvv10_evaluate(mg%num,system%hgs,rv_r,rv_s,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_status)
+      if(rv_status/=0)error stop 'rVV10: nonlocal evaluation failed'
+      eexc_tmp=eexc_tmp+reshape(rv_e,mg%num)
+      vxc_tmp=vxc_tmp+reshape(rv_v,mg%num)
+      do idir=1,3
+        rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir)-2*reshape(rv_w,mg%num)*delr(:,:,:,idir)
+      enddo
+    endif
+#endif
 
 !!!!To include the sigma contribution to GGA Vxc potential !!!!!!!
     if (xc_func%use_gradient) then
@@ -784,7 +805,7 @@ contains
 #endif         
         return
       
-      case ('hse06')
+      case ('hse06','pbeh40','pbeh40_rvv10')
 #ifdef USE_HSE
         if(spin/='unpolarized')error stop 'HSE06: unpolarized only'
         xc%xctype(1)=salmon_xctype_hse06
@@ -1245,13 +1266,17 @@ contains
 
 #ifdef USE_HSE
     subroutine exec_hse_semilocal()
-      use salmon_global, only: hse_omega
+      use salmon_global, only: hse_omega,xc_name=>xc
       real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
       integer :: status,j
       if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
         error stop 'HSE06: unpolarized gradient inputs required'
       r=reshape(rho,[nl]);grad=reshape(grho,[nl,3]);sigma=sum(grad**2,dim=2)
-      call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
+      if(xc_name=='hse06')then
+        call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
+      else
+        call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status)
+      endif
       if(status/=0)error stop 'HSE06: Libxc semilocal evaluation failed'
       if(present(exc))exc=reshape(ep,[nx,ny,nz])
       if(present(eexc))eexc=reshape(r*ep,[nx,ny,nz])

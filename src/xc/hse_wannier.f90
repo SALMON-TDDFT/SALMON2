@@ -64,22 +64,30 @@ contains
     op=empty
   end subroutine
 
-  subroutine wannier_init(op,n,mesh,h,k,omega,status)
+  subroutine wannier_init(op,n,mesh,h,k,omega,status,coulomb_radius)
     implicit none
     type(s_hse_wannier),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3)
     real(8),intent(in) :: h(3),k(:,:),omega
     integer,intent(out) :: status
+    real(8),intent(in),optional :: coulomb_radius
+    real(8) :: radius
     integer :: x,y,z,g,ik,j,axis,offset(3),index(3),flat,ns(3),p(3),r(3),ic
     integer,allocatable :: order(:)
     real(8) :: pi,scaled(3),length(3),q(3),q2,delta(3)
     call wannier_destroy(op)
     status=1
-    if(any(n<1).or.any(mesh<1).or.any(h<=0d0).or.omega<=0d0)return
+    if(any(n<1).or.any(mesh<1).or.any(h<=0d0).or.omega<0d0)return
     if(.not.all(ieee_is_finite(h)).or..not.ieee_is_finite(omega))return
     if(size(k,1)/=3.or.size(k,2)/=product(mesh).or..not.all(ieee_is_finite(k)))return
     op%n=n;op%mesh=mesh;op%ns=n*mesh;op%ng=product(n);op%nk=product(mesh);op%ngs=product(op%ns)
     op%h=h;op%dv=product(h);op%k=k;ns=op%ns;pi=acos(-1d0);length=n*h
+    radius=.5d0*minval(ns*h)
+    if(present(coulomb_radius))then
+      if(.not.ieee_is_finite(coulomb_radius).or.coulomb_radius<0d0)goto 900
+      if(coulomb_radius>0d0)radius=coulomb_radius
+    endif
+    if(omega==0d0.and.radius>.5d0*minval(ns*h)*(1d0+1d-12))goto 900
     allocate(order(op%nk),op%neighbors(6,op%nk));order=0
     do ik=1,op%nk
       scaled=(k(:,ik)-k(:,1))*length*mesh/(2*pi)
@@ -122,7 +130,15 @@ contains
       p=[x,y,z]
       where(p>=(ns+1)/2)p=p-ns
       q=2*pi*p/(ns*h);q2=sum(q*q)
-      if(q2<1d-24)then
+      if(omega==0d0)then
+        ! Spherical Coulomb cutoff: analytic G=0, no artificial HSE screening.
+        ! Radius and supercell convergence are required for global-hybrid results.
+        if(q2<1d-24)then
+          op%multiplier(x+1,y+1,z+1)=2*pi*radius**2
+        else
+          op%multiplier(x+1,y+1,z+1)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
+        endif
+      else if(q2<1d-24)then
         op%multiplier(x+1,y+1,z+1)=pi/omega**2
       else
         op%multiplier(x+1,y+1,z+1)=4*pi*(1-exp(-q2/(4*omega**2)))/q2

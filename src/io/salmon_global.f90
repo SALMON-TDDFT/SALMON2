@@ -119,6 +119,8 @@ module salmon_global
 !! &functional
   character(64)  :: xc !, xcname
   character(64)  :: xname
+  real(8) :: pbeh_coulomb_radius,rvv10_b,rvv10_c
+  integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
   integer :: hse_mlwf_interval,hse_mlwf_maxiter

@@ -4,7 +4,7 @@ module hse_semilocal
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: hse_semilocal_evaluate
+  public :: hse_semilocal_evaluate,pbeh_semilocal_evaluate
   interface
     function xc_func_alloc() bind(C) result(p)
       import c_ptr
@@ -42,6 +42,39 @@ module hse_semilocal
     end subroutine
   end interface
 contains
+  subroutine pbeh_semilocal_evaluate(rho,sigma,eps,vrho,vsigma,ierr)
+    real(c_double),intent(in) :: rho(:),sigma(:)
+    real(c_double),intent(out) :: eps(:),vrho(:),vsigma(:)
+    integer,intent(out) :: ierr
+    type(c_ptr) :: func
+    real(c_double) :: e(size(rho)),v(size(rho)),s(size(rho)),weight
+    integer(c_int) :: ids(2)=[101_c_int,130_c_int]
+    integer :: n,j
+    ierr=1;n=size(rho)
+    if(size(sigma)/=n.or.size(eps)/=n.or.size(vrho)/=n.or.size(vsigma)/=n)return
+    if(any(rho<0d0).or.any(sigma<0d0))return
+    if(.not.all(ieee_is_finite(rho)).or..not.all(ieee_is_finite(sigma)))return
+    eps=0d0;vrho=0d0;vsigma=0d0
+    do j=1,2
+      ierr=1
+      func=xc_func_alloc();if(.not.c_associated(func))return
+      ierr=xc_func_init(func,ids(j),1_c_int)
+      if(ierr/=0)then
+        call xc_func_free(func);return
+      endif
+      call xc_gga_exc_vxc(func,int(n,c_size_t),rho,sigma,e,v,s)
+      call xc_func_end(func);call xc_func_free(func)
+      weight=1d0
+      if(j==1)weight=.6d0
+      eps=eps+weight*e;vrho=vrho+weight*v;vsigma=vsigma+weight*s
+    enddo
+    where(rho==0d0)
+      eps=0d0;vrho=0d0;vsigma=0d0
+    endwhere
+    ierr=0
+    if(.not.all(ieee_is_finite(eps)).or..not.all(ieee_is_finite(vrho)).or. &
+       .not.all(ieee_is_finite(vsigma)))ierr=1
+  end subroutine
   subroutine hse_semilocal_evaluate(rho,sigma,eps,vrho,vsigma,ierr,screening)
     real(c_double),intent(in) :: rho(:),sigma(:)
     real(c_double),intent(out) :: eps(:),vrho(:),vsigma(:)

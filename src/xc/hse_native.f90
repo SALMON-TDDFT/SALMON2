@@ -16,6 +16,7 @@ module hse_native
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+    pbeh_coulomb_radius,theory, &
     yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance, &
     hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
@@ -39,6 +40,10 @@ module hse_native
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
+  real(8) function exchange_fraction()
+    exchange_fraction=.25d0
+    if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')exchange_fraction=.4d0
+  end function
   logical function hse_eigen_diagnostic_enabled(info,solver) result(enabled)
     use communication, only: comm_bcast
     implicit none
@@ -167,7 +172,7 @@ contains
   end function
 
   logical function hse_enabled()
-    hse_enabled=trim(xc)=='hse06'
+    hse_enabled=trim(xc)=='hse06'.or.trim(xc)=='pbeh40'.or.trim(xc)=='pbeh40_rvv10'
   end function
 
   subroutine hse_pack(psi,mg,info,a)
@@ -209,7 +214,7 @@ contains
     if(.not.hse_enabled().or.hse_freeze)return
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
-    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_md/='n'.or.yn_symmetrized_stencil=='y') &
+    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.(yn_md/='n'.and.theory/='dft_md').or.yn_symmetrized_stencil=='y') &
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
@@ -295,7 +300,7 @@ contains
     cached_source=local
     ex=0d0
     do j=1,info%numk
-      ex=ex+.25d0*real(sum(conjg(local(:,:,j))*w(:,:,j)),8)*system%hvol*system%wtk(info%ik_s+j-1)
+      ex=ex+exchange_fraction()*real(sum(conjg(local(:,:,j))*w(:,:,j)),8)*system%hvol*system%wtk(info%ik_s+j-1)
     enddo
     call comm_summation(ex,hse_exchange_energy,info%icomm_k)
   end subroutine
@@ -425,7 +430,7 @@ contains
     endif
     if(ierr/=0)error stop 'HSE06: ACE application failed'
     call hse_pack(hpsi,mg,info,output_work)
-    output_work=output_work+.25d0*action_work
+    output_work=output_work+exchange_fraction()*action_work
     call hse_unpack(output_work,hpsi,mg,info)
   end subroutine
   logical function use_wannier_exchange()
@@ -467,7 +472,15 @@ contains
     call comm_summation(send,allpsi,size(send),info%icomm_k)
     status=0
     if(info%id_k==0)then
-      if(wannier%ng==0)call wannier_init(wannier,mg%num,num_kgrid,system%hgs,system%vec_k,hse_omega,status)
+      if(wannier%ng==0)then
+        if(xc=='hse06')then
+          call wannier_init(wannier,mg%num,num_kgrid,system%hgs,system%vec_k,hse_omega,status)
+        else
+          call wannier_init(wannier,mg%num,num_kgrid,system%hgs,system%vec_k,0d0,status,pbeh_coulomb_radius)
+          write(*,*)'PBEh40 Coulomb radius (bohr): ', &
+            merge(pbeh_coulomb_radius,.5d0*minval(mg%num*num_kgrid*system%hgs),pbeh_coulomb_radius>0d0)
+        endif
+      endif
       if(status==0)then
         maxiter=0
         if(mod(wannier%updates,hse_mlwf_interval)==0)maxiter=hse_mlwf_maxiter
@@ -493,7 +506,7 @@ contains
     ex=0d0
     do ik=1,info%numk
       do j=1,no
-        ex=ex+.125d0*system%rocc(j,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1)*system%hvol &
+        ex=ex+.5d0*exchange_fraction()*system%rocc(j,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1)*system%hvol &
           *real(sum(conjg(local(:,j,ik))*w(:,j,ik)),8)
       enddo
     enddo
@@ -538,7 +551,7 @@ contains
           do iy=mg%is(2),min(mg%ie(2),core(2))
             do ix=mg%is(1),min(mg%ie(1),core(1))
               g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
-              local=local+.125d0*system%rocc(io,ik,1)*system%wtk(ik)*system%hvol &
+              local=local+.5d0*exchange_fraction()*system%rocc(io,ik,1)*system%wtk(ik)*system%hvol &
                 *real(conjg(psi%zwf(ix,iy,iz,1,io,ik,1))*cached_action(g,io,ik-info%ik_s+1),8)
             enddo
           enddo
