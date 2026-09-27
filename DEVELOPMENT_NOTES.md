@@ -1,11 +1,12 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`9508f8e9`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`2c996869`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [現在の実装と制約](#implementation)
-- [最新：Gram検査の演算・通信削減](#packed-gram)
+- [最新：交換FFTの計画最適化](#fft-measure)
+- [Gram検査の演算・通信削減](#packed-gram)
 - [交換ソースの支持領域処理](#source-support)
 - [前回：Diamond 32・64・128原子の弱スケーリング](#weak-scaling)
 - [局所積分半径と精度](#radius)
@@ -37,9 +38,24 @@
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="fft-measure"></a>
+
+## 最新：交換FFTの計画最適化
+
+`2c996869`では `SALMON_LCFO_RT_FFT_MEASURE=1` でFFTの実測計画を選択可能。初回に専用scratchで計画を作り、反復中は再利用。物理近似は追加していません。既定0（ESTIMATE）を維持します。
+
+| 系 | 通常→実測計画 RT秒 | 速度比 | 最大電流差 a.u. |
+|---|---:|---:|---:|
+| C64/MPI8 | 33.140→33.096 | 1.001 | 3.48e-17 |
+| C128/MPI16 | 52.831→51.472 | 1.026 | 1.91e-17 |
+
+同一GS・同一バイナリ、R6/ACE1/U1/16steps、各1回・逐次実行。密度差最大5.00e-15、出力エネルギー差0。C64基準の弱効率62.73→64.30%は参考値。負荷変動があり、大幅・確定的な改善は確認できません。計画方式の選択だけでは残る全占有軌道処理を解決しません。
+
+[初期費用を含む詳細記録](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/fft-measure-results.json)
+
 <a id="packed-gram"></a>
 
-## 最新：Gram検査の演算・通信削減
+## Gram検査の演算・通信削減
 
 `9508f8e9`では、直接WFの直交性検査をHermitian上三角に限定。C128で通信要素65536→32896、単独検査1.792→0.936 ms（約1.9倍）。検査頻度・閾値は同じで新しい近似はない。漸近次数と作業メモリ全体はほぼ変わらない。
 
