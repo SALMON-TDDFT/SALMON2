@@ -154,12 +154,13 @@ contains
   end subroutine
 
   subroutine lcfo_hse_direct_rotate(system,mg,info,psi)
+    use lcfo_gram, only:lcfo_gram_error
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(inout) :: psi
-    complex(8),allocatable :: coeff(:,:),grid(:,:),local_gram(:,:),gram(:,:)
+    complex(8),allocatable :: coeff(:,:),grid(:,:)
     integer :: j,io,bad,is(3),ie(3)
     real(8) :: gram_error
     if(.not.lcfo_rt_active.or..not.lcfo_direct_wf)return
@@ -167,12 +168,7 @@ contains
     bad=0
     if(lcfo_orb_rank==0)then
       call lcfo_mlwf_rebase(coeff)
-      local_gram=matmul(conjg(transpose(coeff)),coeff)
-      allocate(gram(system%no,system%no))
-      call comm_summation(local_gram,gram,size(gram),lcfo_comm)
-      do j=1,system%no;gram(j,j)=gram(j,j)-1d0;enddo
-      gram_error=maxval(abs(gram))
-      if(.not.all(ieee_is_finite(real(gram))).or..not.all(ieee_is_finite(aimag(gram))))bad=1
+      call lcfo_gram_error(coeff,lcfo_comm,gram_error)
       if(.not.ieee_is_finite(gram_error).or.gram_error>1d-8)bad=1
       if(lcfo_rank==0)write(*,'(a,es16.7)')'LCFO direct WF accepted Gram error:',gram_error
       ! ACE/Hx live in LCFO basis coordinates and are invariant under this rebase.
