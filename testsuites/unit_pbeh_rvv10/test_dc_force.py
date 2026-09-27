@@ -8,6 +8,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+# Match the constants used by SALMON output (src/io/inputoutput.f90).
+AU_ENERGY_EV = 27.21138505
+AU_LENGTH_AA = .52917721067
 
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE'), 'SALMON_TEST_EXE is required')
 class DCForceTest(unittest.TestCase):
@@ -41,7 +44,7 @@ class DCForceTest(unittest.TestCase):
             self.assertEqual(run.returncode,0,run.stdout[-2000:]+run.stderr)
             self.assertIn('end SALMON',run.stdout)
             info=next(Path(tmp).rglob('*_info.data')).read_text()
-            energy=float(re.search(r'Total energy \(eV\) =\s*(\S+)',info)[1])/27.211386245988
+            energy=float(re.search(r'Total energy \(eV\) =\s*(\S+)',info)[1])/AU_ENERGY_EV
             if conventional:
                 self.assertTrue('#GS converged' in run.stdout,'\n'.join(line for line in run.stdout.splitlines() if 'iter=' in line or '|rho_i' in line or '#GS' in line)[-3000:])
                 lines=run.stdout.split('===== force =====')[1].strip().splitlines()[:natom]
@@ -56,7 +59,7 @@ class DCForceTest(unittest.TestCase):
                 lines=run.stdout.split('DC frozen-orbital force diagnostic (Ha/bohr)')[1].strip().splitlines()[:natom]
             forces=[[float(x) for x in line.split()[1:4]] for line in lines]
             if conventional and "unit_system='A_eV_fs'" in inp:
-                forces=[[x*.529177210903/27.211386245988 for x in row] for row in forces]
+                forces=[[x*AU_LENGTH_AA/AU_ENERGY_EV for x in row] for row in forces]
             return energy,forces
 
     def test_one_fragment_limit(self):
@@ -83,6 +86,18 @@ class DCForceTest(unittest.TestCase):
         _,base=self.run_case(ranks=2)
         _,wrapped=self.run_case(ranks=2,delta=16.)
         self.assertLess(max(abs(a-b) for ra,rb in zip(base,wrapped) for a,b in zip(ra,rb)),2e-7)
+
+    @unittest.skipUnless(os.environ.get('SALMON_TEST_MPIEXEC'),'MPI launcher required')
+    def test_truncated_thermal_rank_parity(self):
+        energy,two=self.run_case(ranks=2,buffer=2)
+        ts=self.last_ts
+        free=self.last_free_energy
+        self.assertGreater(ts,1e-6)
+        self.assertAlmostEqual(free,energy-ts,places=9)
+        other,four=self.run_case(ranks=4,buffer=2)
+        self.assertLess(abs(energy-other),1e-8)
+        self.assertLess(abs(ts-self.last_ts),1e-9)
+        self.assertLess(max(abs(a-b) for ra,rb in zip(two,four) for a,b in zip(ra,rb)),2e-7)
 
     def test_water_projector_one_fragment(self):
         base=(ROOT/'samples/pbeh40_rvv10/water.inp').read_text()

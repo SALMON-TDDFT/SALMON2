@@ -215,3 +215,12 @@ differences. Truncated buffers leave about 0.05–0.08 eV/angstrom disagreement
 even after the tested core-weighted entropy term is subtracted. Therefore
 `theory='dft_md', yn_dc='y'` is still rejected. This diagnostic is preparation
 for an energy-consistent DC force, not production MD support.
+
+For positive `temperature_k`, PBEh DC occupations now enforce the core-weighted
+electron count with a bounded chemical-potential solve. Insufficient weighted
+state capacity stops with a request to increase `nstate_frag`; failure is no
+longer silently accepted. The finite-temperature response formulation keeps
+electronic temperature fixed and differentiates E-TS at fixed total electron
+count. Occupation/entropy derivative kernels are available internally, but the
+coupled orbital/density force correction and ionic integration are still pending.
+The existing zero-temperature and non-PBEh occupation paths are unchanged.

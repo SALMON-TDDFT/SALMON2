@@ -22,7 +22,7 @@ contains
   subroutine init_dcdft(dc,pp,mixing,ewald)
     use structures
     use salmon_global, only: nproc_k, nproc_ob, nproc_rgrid, nproc_rgrid_tot &
-    & , nstate, nelec, yn_dc, nstate_frag
+    & , nstate, nelec, yn_dc, nstate_frag, temperature, xc, num_fragment
     implicit none
     type(s_dcdft)        ,intent(inout) :: dc
     type(s_pp_info)      ,intent(inout) :: pp
@@ -32,6 +32,11 @@ contains
     integer :: nproc_k_tmp,nproc_ob_tmp, nproc_rgrid_tmp(3)
 
     call check_dcdft_complex_options
+    ! Catch impossible capacity before fragment initialization fills occupations.
+    if(temperature>0d0.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+      if(2d0*dble(nstate_frag)*dble(product(num_fragment))<dble(nelec)) &
+        error stop 'DC thermal occupations: insufficient weighted state capacity; increase nstate_frag'
+    endif
     
     nproc_k_tmp = nproc_k
     nproc_ob_tmp = nproc_ob
@@ -660,6 +665,8 @@ contains
   SUBROUTINE ne2mu_dcdft(mg,info,energy,spsi,dc,system)
     use structures
     use communication, only: comm_summation
+    use salmon_global, only: temperature,xc
+    use dc_thermal, only: solve_dc_thermal,dc_thermal_capacity
     implicit none
     type(s_rgrid),        intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -668,7 +675,9 @@ contains
     type(s_dcdft),        intent(in) :: dc
     type(s_dft_system),intent(inout) :: system
     !
-    real(8) :: wspin,emax,emin
+    real(8) :: wspin,emax,emin,thermal_ts
+    integer :: ik,thermal_status
+    real(8) :: thermal_f(system%no*system%nk*system%nspin*dc%n_frag)
     real(8) :: ne_each(system%no,system%nk,system%nspin)
     real(8),dimension(system%no,system%nk,system%nspin,dc%n_frag) :: &
       rocc,esp,ne_frag_orb,wrk1,wrk2
@@ -691,7 +700,21 @@ contains
 
     emin = minval(esp)
     emax = maxval(esp)
-    call ne2mu_core(dc%elec_num_tot,emax,emin,system%mu)
+    if(temperature>0d0.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+      wrk1=ne_frag_orb
+      do ik=1,system%nk
+        wrk1(:,ik,:,:)=wrk1(:,ik,:,:)*system%wtk(ik)
+      enddo
+      call solve_dc_thermal(reshape(esp,[size(esp)]),reshape(wrk1,[size(wrk1)]), &
+        temperature,wspin,dc%elec_num_tot,system%mu,thermal_f,thermal_ts,thermal_status)
+      ! All ranks hold identical global arrays and take the same failure path.
+      if(thermal_status==dc_thermal_capacity) &
+        error stop 'DC thermal occupations: insufficient weighted state capacity; increase nstate_frag'
+      if(thermal_status/=0)error stop 'DC thermal occupations: invalid input or chemical potential not converged'
+      rocc=wspin*reshape(thermal_f,shape(rocc))
+    else
+      call ne2mu_core(dc%elec_num_tot,emax,emin,system%mu)
+    endif
 
     system%rocc(:,:,:) = rocc(:,:,:,dc%i_frag)
 

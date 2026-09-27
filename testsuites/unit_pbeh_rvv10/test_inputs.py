@@ -33,6 +33,14 @@ class InputTest(unittest.TestCase):
         self.run_input(self.base().replace('rvv10_nq=32','rvv10_nq=3'),'invalid rVV10 parameters')
     def test_hse_md_stays_rejected(self):
         self.run_input(self.base().replace("theory='dft'","theory='dft_md'").replace("xc ='pbeh40_rvv10'","xc ='hse06'"),'unsupported calculation theory')
+    def test_dc_thermal_capacity_is_rejected(self):
+        inp=Path(__file__).with_name('dc_hydrogen.inp').read_text()
+        inp=inp.replace('num_fragment=2,1,1','num_fragment=1,1,1')
+        inp=inp.replace('num_rgrid_buffer=4,0,0','num_rgrid_buffer=0,0,0')
+        inp=inp.replace('nproc_rgrid_tot=4,1,1','nproc_rgrid_tot=1,1,1')
+        inp=inp.replace('nproc_k=2','nproc_k=1').replace('nstate_frag=4','nstate_frag=1')
+        inp=inp.replace('nscf=200','nscf=1')
+        self.run_input(inp,'DC thermal occupations: insufficient weighted state capacity')
     def test_dc_force_diagnostic_guards(self):
         diagnostic="\n&dc\n yn_dc_force_diagnostic='y'\n num_fragment=1,1,1\n num_rgrid_buffer=0,0,0\n nstate_frag=4\n yn_dc_lcfo='n'\n/\n"
         self.run_input(self.base()+diagnostic,'DC force diagnostic requires static DC PBEh')

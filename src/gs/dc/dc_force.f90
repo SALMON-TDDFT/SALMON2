@@ -12,6 +12,7 @@ contains
     use salmon_global, only: kion,cutoff_g,temperature
     use math_constants, only: zi
     use dc_projector_force, only: core_projector_force
+    use dc_thermal, only: fermi_entropy
     type(s_dcdft),intent(in) :: dc
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -98,8 +99,7 @@ contains
         *system%hvol*system%wtk(ik)
       f=system%rocc(io,ik,spin)/2d0
       occupation_local(1)=occupation_local(1)+core_norm*system%rocc(io,ik,spin)
-      if(f>0d0.and.f<1d0)occupation_local(2)=occupation_local(2) &
-        -2d0*core_norm*(f*log(f)+(1d0-f)*log(1d0-f))*max(temperature,0d0)
+      occupation_local(2)=occupation_local(2)+2d0*core_norm*fermi_entropy(f)*max(temperature,0d0)
     enddo;enddo;enddo
     call comm_summation(occupation_local,occupation_frag,2,info%icomm_rko)
     occupation_local=0d0
@@ -111,9 +111,9 @@ contains
         write(*,'(i8,3es25.16)')ia,assembled(:,ia)
       enddo
       write(*,'(a)')'DC force diagnostic excludes fragment response; not certified for MD'
-      write(*,'(a,es25.16)')'DC occupation electron residual: ',occupation_total(1)-dc%elec_num_tot
-      write(*,'(a,es25.16)')'DC occupation TS diagnostic (Ha): ',occupation_total(2)
-      write(*,'(a,es25.16)')'DC E-minus-TS diagnostic (Ha): ',energy%E_tot-occupation_total(2)
+      write(*,'(a,es26.16e3)')'DC occupation electron residual: ',occupation_total(1)-dc%elec_num_tot
+      write(*,'(a,es26.16e3)')'DC occupation TS diagnostic (Ha): ',occupation_total(2)
+      write(*,'(a,es26.16e3)')'DC E-minus-TS diagnostic (Ha): ',energy%E_tot-occupation_total(2)
     endif
   end subroutine
 end module

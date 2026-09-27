@@ -32,6 +32,6 @@ and thermal-attribution concerns led to separate contraction FD tests and E-TS
 audits. Native truncated-oxygen and moving-boundary certification remain open.
 
 Truncated buffers fail the force/energy gate by~0.05–0.08eV/angstrom. MD remains
-disabled. User choice of finite-temperature/free-energy versus zero-temperature
-occupations is pending before implementing the dependent response equations;
+disabled. On 2026-09-28 the user selected fixed finite temperature and free
+energy; the occupation response block is the next implemented milestone;
 see2026-09-27-dc-force-response.md. This milestone is not DC-MD completion.

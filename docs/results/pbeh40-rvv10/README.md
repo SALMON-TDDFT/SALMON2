@@ -235,3 +235,29 @@ while the asymmetric contraction is isolated by the synthetic frozen-state
 test. Earlier16x16x16 water settings did not meet the requested SCF tolerance
 and were rejected; those runs are not force certifications. See
 `dc-force-validation.json` for measured water parity and log hashes.
+
+## Fixed-temperature occupation response
+
+The user selected Phi=E-TS at fixed finite electronic temperature. Positive-T
+PBEh DC now uses charge-checked weighted Fermi occupations, stable tails, and
+explicit capacity/convergence failures. The response kernel differentiates both
+eigenvalues and core/k weights at fixed N,T. It checks charge susceptibility
+before dividing; an occupied-only saturated calculation is not evidence that
+an MD response can be computed.
+
+`dc-thermal-validation.json` records 16 passing tests without skips and successful
+HSE ON/MPI and OFF/serial builds. Coverage includes independent central
+finite differences of mu, occupations and TS, energy-shift invariance, a small
+resolvable hole population, capacity rejection, real water projectors and
+truncated-fragment 2/4-rank parity. Independent review identified the near-full
+interior-target error; a failing regression preceded its fix.
+
+`dc-thermal-response-audit.json` repeats the 300 K H4 audit with the new solver
+and the actual SALMON output conversion constants. At delta=.001 bohr, the
+free-energy derivative minus frozen force is approximately1.51e-7,9.64e-4 and
+1.52e-3 Ha/bohr for buffer4,2,1, respectively (the first is negative).
+The truncated-fragment discrepancy remains approximately0.050/0.078 eV/angstrom.
+These derivatives validate the diagnostic baseline, not a completed nuclear
+response: the new directional occupation routine is not yet coupled to orbital
+and density response, and DC-MD remains disabled. Earlier JSON files retain
+their historical conversion constants and results.

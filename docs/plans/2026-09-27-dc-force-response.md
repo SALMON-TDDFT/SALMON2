@@ -10,9 +10,9 @@ This is evidence against using the frozen-orbital force as the MD force.
 
 Collect independent real components of fragment orbitals, occupations, mixed
 total density and chemical-potential variables into q. Include normalization
-and gauge constraints in the converged DC equations C(q,R)=0. Choose the ionic
-potential Phi explicitly: zero-temperature ground-state energy with fixed
-integer occupations, or a defined finite-temperature free-energy functional.
+and gauge constraints in the converged DC equations C(q,R)=0. The selected ionic
+potential is Phi=E-T*S at fixed finite electronic temperature and electron count.
+Here T denotes kBT in Hartree; S is the dimensionless core-weighted Fermi entropy.
 The existing core-weighted TS diagnostic alone does not prove stationarity.
 
 Along the self-consistent solution,
@@ -40,13 +40,42 @@ the smaller displacement. Buffer2 leaves~0.0504 eV/angstrom against E, and
 ~0.0780 eV/angstrom respectively. These are combined electronic-response
 residuals; they are not uniquely orbital response and are not a water benchmark.
 
-## Pending choice and implementation
+## Accepted choice and implementation
 
-The user has been asked whether to prioritize fixed finite electronic temperature
-with a free-energy formulation or strict zero-temperature integer occupations.
-This selects Phi and the occupation constraints in C. No further permission is
-needed to continue the approved force validation. Implementing the dependent
-occupation/response model awaits that scientific choice.
+On 2026-09-28 the user selected fixed finite electronic temperature and free
+energy. Occupations obey a common chemical potential and weighted total charge.
+Both occupations and core weights contribute to the entropy derivative.
+The occupation block is implemented first; the coupled orbital/density adjoint
+and moving partition response remain required before MD can be certified.
 
 Moving atom lists, Verlet integration, boundary-crossing tests and production
 DC-MD remain unimplemented. The native DC-MD guard remains intentional.
+
+## Fixed-temperature occupation block
+
+`dc_thermal` uses f_i=1/(1+exp((epsilon_i-mu)/T)), weights
+w_i=kweight_i*integral_core(|psi_i|^2), spin degeneracy g and
+N=g*sum(w_i*f_i). Phi uses TS=-g*T*sum(w_i*[f_i log(f_i)+(1-f_i)log(1-f_i)]).
+At fixed T,N, write b_i=f_i*(1-f_i). The implemented directional response is
+
+    dmu = [sum(w*b*depsilon) - T*sum(f*dw)] / sum(w*b)
+    df = b*(dmu-depsilon)/T
+    dTS = g*sum(T*s(f)*dw + (epsilon-mu)*w*df).
+
+Both terms in dTS are required. Tests separately perturb eigenvalues and core
+weights, then both, and compare against independently reconverged occupations.
+The response routine is not yet called by a nuclear-force calculation: obtaining
+depsilon and dw requires the coupled SCF response described above.
+
+Positive-temperature PBEh DC now uses a bounded, charge-checked chemical solve.
+Other functionals and the zero-temperature legacy path are unchanged. A capacity
+overshoot within 1e-10+64*epsilon*capacity is accepted only as normalization
+roundoff; interior targets are solved normally. Numerically saturated states can
+pass the charge solve, but response returns an explicit singular status when
+sum(w*b)<=128*epsilon*sum(w). Occupied-only fixtures therefore do not certify
+finite-temperature response for MD. No arbitrary zero response is substituted.
+
+The stable entropy calculation retains minority tails even if f rounds to one.
+The existing static diagnostic computes the same Fermi entropy from stored
+occupations; it can lose sub-roundoff minority tails. This does not establish
+stationarity or replace the full force gate.

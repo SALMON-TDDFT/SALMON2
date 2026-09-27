@@ -1,0 +1,30 @@
+{
+  "base_commit": "51d9b70c",
+  "scope": "Fixed-temperature weighted DC occupation solve and directional entropy response; coupled electronic force and MD remain unimplemented",
+  "tests": {
+    "passed": 16,
+    "skipped": 0,
+    "suite": "test_dc_thermal test_dc_projector test_inputs test_dc_force",
+    "includes": [
+      "weighted charge and entropy finite differences",
+      "near-full capacity response",
+      "invalid and insufficient capacity rejection",
+      "water 24^3 one-fragment force limit",
+      "truncated H4 entropy/free-energy 2/4 MPI rank parity"
+    ]
+  },
+  "builds": {
+    "HSE_ON_MPI": "passed",
+    "HSE_OFF_serial": "passed"
+  },
+  "review": {
+    "important_finding": "Interior near-capacity target was incorrectly saturated",
+    "resolution": "Regression failed before fix; restrict normalization allowance to capacity overshoot; final suite passes"
+  },
+  "logs": {
+    "dc-thermal-regressions-final.log": "7bd2ed7a70eaa5b13b7aa2190479cfb67dc4e1f0392e6803cee3db3ded0b99d8",
+    "dc-thermal-build.log": "696d24e427d94e8c93a73091dbc0262d30defb9185d259575f7fe0d28af8c1a0",
+    "dc-thermal-off-build.log": "bc97f3fc968279a95fa56324d0978ec94732791fe4d7bcfa0f12b7e24fb5c08b",
+    "dc-thermal-response-audit.log": "b9ac6271073c392d37079ed498fe0069581d8d05b94a6673cb67fd5c4068b361"
+  }
+}

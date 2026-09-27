@@ -1,4 +1,5 @@
 set(SOURCES
+    dc_thermal.f90
     dcdft.f90
     dc_force.f90
     dc_projector_force.f90
