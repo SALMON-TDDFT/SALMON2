@@ -182,3 +182,14 @@ if args.xc=='hse06':
     finally:
         for p,data in metadata.items():p.write_bytes(data)
     print('Legacy HSE metadata compatibility passed')
+
+if args.xc=='pbeh40_rvv10':
+    reference=json.loads(Path(__file__).with_name('pbeh_root_reference.json').read_text())
+    current_index={'x':13,'y':14,'z':15}[args.axis]
+    assert len(a)==len(reference['current']) and len(energy)==len(reference['energy'])
+    current_delta=max(abs(row[current_index]-ref[0]) for row,ref in zip(a,reference['current']))
+    energy_delta=max(abs(row[1]-ref) for row,ref in zip(energy,reference['energy']))
+    assert current_delta<1e-11 and energy_delta<1e-9, (current_delta,energy_delta)
+    assert 'rVV10 FFT: native pencils' in (coarse/'run.log').read_text()
+    assert 'DC rVV10 FFT: native pencils' in (root/'gs/run.log').read_text()
+    print('Root-reference trajectory parity:',current_delta,energy_delta)

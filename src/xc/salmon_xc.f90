@@ -27,6 +27,7 @@ module salmon_xc
   use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
   use hse_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate
   use rvv10, only: rvv10_evaluate
+  use rvv10_distributed, only: rvv10_evaluate_distributed
 #endif
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
@@ -107,6 +108,8 @@ contains
     integer :: ix,iy,iz,is,nspin,idir
 #ifdef USE_HSE
     integer :: rv_status,rv_ng,rv_shape(3),rv_lo(3),rv_hi(3)
+    logical :: rv_used
+    logical,save :: rv_reported=.false.
     real(8),allocatable :: rv_r(:),rv_s(:),rv_e(:),rv_v(:),rv_w(:)
     real(8),allocatable :: rv_local(:,:,:),rv_global(:,:,:)
 #endif
@@ -355,32 +358,58 @@ contains
       do idir=1,3
         call comm_get_max(rv_shape(idir),info%icomm_r)
       enddo
-      rv_lo=mg%is;rv_hi=mg%ie;rv_ng=product(rv_shape)
+      rv_ng=product(mg%num)
       allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
-      allocate(rv_local(rv_shape(1),rv_shape(2),rv_shape(3)),rv_global(rv_shape(1),rv_shape(2),rv_shape(3)))
-      rv_local=0d0
-      rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=rho_tmp
-      call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
-      rv_r=reshape(rv_global,[rv_ng]);rv_local=0d0
-      rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=sum(delr**2,dim=4)
-      call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
-      rv_s=reshape(rv_global,[rv_ng]);rv_status=0
-      if(info%id_r==0) &
-        call rvv10_evaluate(rv_shape,system%hgs,rv_r,rv_s,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_status)
-      call comm_bcast(rv_status,info%icomm_r,0)
-      if(rv_status/=0)error stop 'rVV10: nonlocal evaluation failed'
-      call comm_bcast(rv_e,info%icomm_r,0)
-      call comm_bcast(rv_v,info%icomm_r,0)
-      call comm_bcast(rv_w,info%icomm_r,0)
-      rv_global=reshape(rv_e,rv_shape)
-      eexc_tmp=eexc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
-      rv_global=reshape(rv_v,rv_shape)
-      vxc_tmp=vxc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
-      rv_global=reshape(rv_w,rv_shape)
-      do idir=1,3
-        rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir) &
-          -2*rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))*delr(:,:,:,idir)
-      enddo
+      rv_r=reshape(rho_tmp,[rv_ng]);rv_s=reshape(sum(delr**2,dim=4),[rv_ng])
+      call rvv10_evaluate_distributed(rv_shape,mg%is,mg%num, &
+        [info%isize_x,info%isize_y,info%isize_z],[info%id_x,info%id_y,info%id_z], &
+        [info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,system%hgs,rv_r,rv_s, &
+        rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_used,rv_status)
+      if(rv_used)then
+        if(rv_status/=0)error stop 'rVV10: distributed evaluation failed'
+        eexc_tmp=eexc_tmp+reshape(rv_e,mg%num)
+        vxc_tmp=vxc_tmp+reshape(rv_v,mg%num)
+        do idir=1,3
+          rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir)-2*reshape(rv_w,mg%num)*delr(:,:,:,idir)
+        enddo
+      else
+        deallocate(rv_r,rv_s,rv_e,rv_v,rv_w)
+        rv_lo=mg%is;rv_hi=mg%ie;rv_ng=product(rv_shape)
+        allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
+        allocate(rv_local(rv_shape(1),rv_shape(2),rv_shape(3)),rv_global(rv_shape(1),rv_shape(2),rv_shape(3)))
+        rv_local=0d0
+        rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=rho_tmp
+        call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
+        rv_r=reshape(rv_global,[rv_ng]);rv_local=0d0
+        rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=sum(delr**2,dim=4)
+        call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
+        rv_s=reshape(rv_global,[rv_ng]);rv_status=0
+        if(info%id_r==0) &
+          call rvv10_evaluate(rv_shape,system%hgs,rv_r,rv_s,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_status)
+        call comm_bcast(rv_status,info%icomm_r,0)
+        if(rv_status/=0)error stop 'rVV10: nonlocal evaluation failed'
+        call comm_bcast(rv_e,info%icomm_r,0)
+        call comm_bcast(rv_v,info%icomm_r,0)
+        call comm_bcast(rv_w,info%icomm_r,0)
+        rv_global=reshape(rv_e,rv_shape)
+        eexc_tmp=eexc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+        rv_global=reshape(rv_v,rv_shape)
+        vxc_tmp=vxc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+        rv_global=reshape(rv_w,rv_shape)
+        do idir=1,3
+          rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir) &
+            -2*rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))*delr(:,:,:,idir)
+        enddo
+      endif
+      if(.not.rv_reported.and.info%id_rko==0)then
+        if(rv_used)then
+          write(*,'(a,3i6)')'rVV10 FFT: native pencils, x replication/y/z ranks:', &
+            info%isize_x,info%isize_y,info%isize_z
+        else
+          write(*,'(a)')'rVV10 FFT: root reference fallback (grid/layout unsupported by FFTE)'
+        endif
+        rv_reported=.true.
+      endif
     endif
 #endif
 

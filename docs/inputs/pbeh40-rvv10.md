@@ -56,7 +56,13 @@ In Hartree atomic units:
 
 The implementation uses natural cubic spline channels, a logarithmic q grid from 1e-4 to 0.5, and the usual 12-term smooth q saturation. Increase `rvv10_nq` (8–128) to check interpolation convergence. Values below the lower q bound are clamped with zero q derivative. Points at density <=1e-18 bohr^-3 contribute only the beta term. The energy and potential differentiate this same regularized discrete functional.
 
-The rational kernel's analytic three-dimensional Fourier transform is used, including its G=0 value and equal-q limit. No radial table or image cutoff is needed. Periodic convolution costs O(nq^2*G+nq*G*log G), with O(nq*G) arrays, not a G-by-G pair matrix. The conventional implementation uses a full grid on each k rank. In DC, owned portions of the mixed total density are gathered, the total-communicator root evaluates rVV10, and its potential is broadcast and mapped to every fragment (including buffers). The global nonlocal energy is added once, after semilocal core accumulation. This is not a distributed real-space rVV10 solver: the root uses O(nq*G) storage and all ranks hold full scalar grids.
+The rational kernel's analytic three-dimensional Fourier transform is used, including its G=0 value and equal-q limit. No radial table or image cutoff is needed. Periodic convolution costs O(nq^2*G+nq*G*log G), not a G-by-G pair matrix.
+
+Compatible grids now use the native Poisson FFTE layout: full x lines and distributed y/z pencils. Density and sigma are collected only within the x communicator. Channel storage per rank is O(nq*G/(Py*Pz)); the work is replicated across Px. **Use y and/or z decomposition to reduce per-rank FFT memory.** An x-only decomposition retains full channel storage on each rank. FFT tables are private to rVV10 and do not alter the Poisson solver's saved tables.
+
+The automatic path requires uniform block decomposition, 2/3/5-smooth grid dimensions from 2 through 4096, and FFTE transpose divisibility (Nx divisible by Py, Ny divisible by Pz, in addition to each dimension's own process count). Incompatible grids retain the root FFTW reference path. The chosen backend and x/y/z process counts are logged. No additional namelist switch is required.
+
+DC evaluates the mixed **total** density with native halo gradients and divergence; the global nonlocal energy is summed once. Its scalar potential is still assembled globally for fragment/buffer mapping. Thus DC still holds full scalar grids, while the nq-channel convolution is distributed. This does not by itself establish whole-program weak scaling.
 
 `vrho` and `vsigma` are added before SALMON's GGA divergence. Density gradients and the corresponding negative divergence therefore use the same finite-difference operator. The formula follows [Sabatini, Gorni and de Gironcoli, PRB 87, 041108(R) (2013)](https://doi.org/10.1103/PhysRevB.87.041108).
 
@@ -95,11 +101,10 @@ A finite-source-radius RT model needs separate convergence/energy validation.
 
 For rVV10, the density gradient and potential divergence use the same halo
 exchange and finite-difference stencils as the spatially decomposed Laplacian.
-Density and sigma are collected once per real-space communicator; its root
-performs the global nonlocal convolution. Derivatives return to each owned
-core and enter the existing halo divergence. Orbital groups do not multiply
-nonlocal energy. This reference implementation still replicates global scalar
-arrays and uses a root FFT; it is **not** a scalable distributed rVV10 FFT.
+The convolution uses the same native FFTE pencil adapter as SCF/DC on compatible
+grids. Derivatives return to each owned core and enter the existing halo
+divergence. Orbital groups do not multiply nonlocal energy. The reference
+root FFT remains a compatibility fallback, as described above.
 
 New complex LCFO exports include a `functional.txt` per fragment, bound to the
 binary run ID. Reconstruction checks the functional, relevant exchange/rVV10
@@ -115,6 +120,17 @@ Run the integration fixture with:
 python3 testsuites/unit_lcfo_rt/test_pbeh_response.py \
   --binary /absolute/path/to/salmon --pseudo /absolute/path/to/H_rps.dat
 ```
+
+Direct distributed energy, density derivatives and full-potential comparisons
+against serial FFTW are available with:
+
+```
+python3 testsuites/unit_pbeh_rvv10/test_distributed.py --build /absolute/path/to/build
+```
+
+This uses the configured MPI/HSE build objects and tests 2/4 ranks, individual
+and combined spatial axes, q grids of 8/16/32, OpenMP 1/2, collective rejection,
+fallback and preservation of independent Poisson FFT tables.
 
 Use `--xc pbeh40` for exchange-only hybrid coverage and `--axis y` or `--axis z`
 to exercise the corresponding domain boundaries. The fixture checks time-step

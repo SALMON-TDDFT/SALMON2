@@ -122,7 +122,22 @@ post-impulse energy widths around 5e-14 Hartree. Integrated electron count is
 4 within 2e-13. Grid-spacing input parity and per-fragment functional/run-ID
 mismatch rejection are also covered by `test_pbeh_response.py`.
 These tiny, short tests establish plumbing consistency, not water spectra or
-production scaling. The rVV10 FFT still runs on the spatial communicator root.
-A direct distributed-potential comparison against a single-grid evaluation is
-not part of this integration fixture; the standalone periodic derivative test
-and native spatial halo path provide the current derivative coverage.
+production scaling. Those measurements used the original root FFT backend.
+The subsequent distributed FFT tests below add direct single-grid potential comparisons.
+
+
+## Distributed rVV10 convolution
+
+The native FFTE adapter compares local energy, vrho and vsigma against serial
+FFTW, then assembles the complete discrete potential for comparison with
+`rvv10_periodic`. Tests cover a rectangular 16x12x8 grid, axis and combined
+layouts, 2/4 ranks, 1/2 OpenMP threads, and q grids 8/16/32. They also verify
+collective rejection of a density invalid on one rank, unsupported-grid
+fallback, and preservation of Poisson FFT tables for a different grid size.
+
+Native DC→LCFO response is compared with the committed root-backend trajectory
+fixture; gradient/divergence use the production halo routines. The exact
+measured bounds and validation status are recorded in `distributed-fft.json`.
+The FFT channel storage is divided by Py*Pz, with replication across Px.
+DC still assembles the scalar potential globally for fragment mapping. No
+large-water timing or end-to-end scaling claim is made by these small tests.

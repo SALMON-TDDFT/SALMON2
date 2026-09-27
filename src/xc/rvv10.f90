@@ -10,6 +10,14 @@ module rvv10
   private
   public :: rvv10_evaluate,rvv10_kernel_fourier,rvv10_periodic
   include 'fftw3.f03'
+  abstract interface
+    subroutine convolution_interface(theta,u,mesh,status)
+      complex(8),intent(in) :: theta(:,:)
+      complex(8),intent(out) :: u(:,:)
+      real(8),intent(in) :: mesh(:)
+      integer,intent(out) :: status
+    end subroutine
+  end interface
 contains
   ! Full periodic density functional, using the same skew-adjoint central
   ! differences as SALMON. Small grids intentionally wrap multiple times.
@@ -69,11 +77,12 @@ contains
 
   ! Return energy per volume, partial dE/d(rho) and dE/d(sigma).
   ! Caller adds -div(2*vsigma*grad rho) using the adjoint of its density gradient.
-  subroutine rvv10_evaluate(n,h,rho,sigma,b,c,nq,energy,vrho,vsigma,status)
+  subroutine rvv10_evaluate(n,h,rho,sigma,b,c,nq,energy,vrho,vsigma,status,convolution)
     integer,intent(in) :: n(3),nq
     real(8),intent(in) :: h(3),rho(:),sigma(:),b,c
     real(8),intent(out) :: energy(:),vrho(:),vsigma(:)
     integer,intent(out) :: status
+    procedure(convolution_interface),optional :: convolution
     integer :: ng,i,j,a,d,x,y,z,ig,p(3)
     real(8) :: pi,beta,q,qn,qs,amp,fac,v1,v2,kappa,w,wg,exponent,ds,t,power,g,phi
     real(8),allocatable :: mesh(:),second(:,:),basis(:,:),deriv(:,:),qn_all(:),qs_all(:),amplitude(:)
@@ -122,35 +131,41 @@ contains
       amplitude(i)=amp;qn_all(i)=qn;qs_all(i)=qs
       theta(i,:)=amp*basis(i,:)
     enddo
-    forward=fftw_plan_dft_3d(n(3),n(2),n(1),work,work,FFTW_FORWARD,FFTW_ESTIMATE)
-    backward=fftw_plan_dft_3d(n(3),n(2),n(1),work,work,FFTW_BACKWARD,FFTW_ESTIMATE)
-    if(.not.c_associated(forward).or..not.c_associated(backward))then
-      if(c_associated(forward))call fftw_destroy_plan(forward)
-      if(c_associated(backward))call fftw_destroy_plan(backward)
-      return
-    endif
-    do a=1,nq
-      work=theta(:,a);call fftw_execute_dft(forward,work,work);theta(:,a)=work
-    enddo
-    u=0d0
-    ! O(nq**2 * ng) work, O(nq * ng) storage; no ng**2 pair matrix.
-!$omp parallel do collapse(3) private(x,y,z,p,ig,g,a,d,phi)
-    do z=0,n(3)-1;do y=0,n(2)-1;do x=0,n(1)-1
-      p=[x,y,z];where(p>=(n+1)/2)p=p-n
-      ig=1+x+n(1)*(y+n(2)*z);g=sqrt(sum((2*pi*p/(n*h))**2))
+    if(present(convolution))then
+      call convolution(theta,u,mesh,status)
+      if(status/=0)return
+      status=1
+    else
+      forward=fftw_plan_dft_3d(n(3),n(2),n(1),work,work,FFTW_FORWARD,FFTW_ESTIMATE)
+      backward=fftw_plan_dft_3d(n(3),n(2),n(1),work,work,FFTW_BACKWARD,FFTW_ESTIMATE)
+      if(.not.c_associated(forward).or..not.c_associated(backward))then
+        if(c_associated(forward))call fftw_destroy_plan(forward)
+        if(c_associated(backward))call fftw_destroy_plan(backward)
+        return
+      endif
       do a=1,nq
-        do d=1,a
-          phi=rvv10_kernel_fourier(mesh(a),mesh(d),g)
-          u(ig,a)=u(ig,a)+phi*theta(ig,d)
-          if(a/=d)u(ig,d)=u(ig,d)+phi*theta(ig,a)
-        enddo
+        work=theta(:,a);call fftw_execute_dft(forward,work,work);theta(:,a)=work
       enddo
-    enddo;enddo;enddo
+      u=0d0
+      ! O(nq**2 * ng) work, O(nq * ng) storage; no ng**2 pair matrix.
+!$omp parallel do collapse(3) private(x,y,z,p,ig,g,a,d,phi)
+      do z=0,n(3)-1;do y=0,n(2)-1;do x=0,n(1)-1
+        p=[x,y,z];where(p>=(n+1)/2)p=p-n
+        ig=1+x+n(1)*(y+n(2)*z);g=sqrt(sum((2*pi*p/(n*h))**2))
+        do a=1,nq
+          do d=1,a
+            phi=rvv10_kernel_fourier(mesh(a),mesh(d),g)
+            u(ig,a)=u(ig,a)+phi*theta(ig,d)
+            if(a/=d)u(ig,d)=u(ig,d)+phi*theta(ig,a)
+          enddo
+        enddo
+      enddo;enddo;enddo
 !$omp end parallel do
-    do a=1,nq
-      work=u(:,a);call fftw_execute_dft(backward,work,work);u(:,a)=work/ng
-    enddo
-    call fftw_destroy_plan(forward);call fftw_destroy_plan(backward)
+      do a=1,nq
+        work=u(:,a);call fftw_execute_dft(backward,work,work);u(:,a)=work/ng
+      enddo
+      call fftw_destroy_plan(forward);call fftw_destroy_plan(backward)
+    endif
     energy=beta*rho;vrho=beta;vsigma=0d0
     do i=1,ng
       if(rho(i)<=1d-18)cycle

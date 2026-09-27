@@ -1,0 +1,44 @@
+{
+  "grid": [
+    16,
+    12,
+    8
+  ],
+  "density": "mixed xyz periodic modes",
+  "mpi_ranks": [
+    2,
+    4
+  ],
+  "omp_threads": [
+    1,
+    2
+  ],
+  "nq": [
+    8,
+    16,
+    32
+  ],
+  "layout_channel_cases": 54,
+  "max_energy_or_density_derivative_difference": 3.637978807091713e-12,
+  "max_full_potential_difference": 1.1013412404281553e-13,
+  "native_root_reference_trajectories": [
+    {
+      "axis": "y",
+      "max_current_difference": 1.6442390319909304e-12,
+      "max_energy_difference": 1.021405182655144e-14
+    },
+    {
+      "axis": "z",
+      "max_current_difference": 7.610316899454422e-14,
+      "max_energy_difference": 1.021405182655144e-14
+    }
+  ],
+  "poisson_table_preservation": "passed for different 8x8x8 grid",
+  "collective_invalid_density": "passed",
+  "unsupported_layout": "fallback passed",
+  "channel_storage": "O(nq*Nx*Ny*Nz/(Py*Pz)); replicated over Px",
+  "limitations": [
+    "Direct probe assembles derivatives with global periodic shifts; native halo path is covered by DC/LCFO integration.",
+    "DC scalar potential still collected for fragment mapping; no large-water scaling benchmark."
+  ]
+}

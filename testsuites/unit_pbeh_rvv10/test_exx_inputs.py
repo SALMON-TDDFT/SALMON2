@@ -62,6 +62,10 @@ class ExxInputs(unittest.TestCase):
         self.assertGreater(local_pairs,0)
         self.assertLess(actual,baseline)
 
+    def test_rvv10_non_ffte_grid_fallback(self):
+        result=self.run_case('exx_mlwf_maxiter=20',lambda s:s.replace('num_rgrid=16,8,8','num_rgrid=14,8,8'))
+        self.assertIn('rVV10 FFT: root reference fallback',result[2])
+
     def test_radius_invalid(self):
         self.run_case('exx_mlwf_radius=-1',error='exx_mlwf_radius must be finite and nonnegative')
 
