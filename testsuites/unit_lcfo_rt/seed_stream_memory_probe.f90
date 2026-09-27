@@ -16,7 +16,7 @@ program seed_stream_memory_probe
  integer(c_int64_t) :: rss
  integer(c_int64_t),allocatable :: peaks(:)
  complex(8),allocatable :: local(:,:),full(:,:),u(:,:),gram(:,:)
- real(8) :: error
+ real(8) :: error,started,seed_seconds
  character(32) :: mode,arg
  call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
  call get_command_argument(1,mode);call get_command_argument(2,arg);read(arg,*) n
@@ -27,6 +27,7 @@ program seed_stream_memory_probe
  enddo;enddo
  iu=0;status=0
  if(rank==0)open(newunit=iu,file='seed-coeff.bin',access='stream',form='unformatted',status='replace')
+ started=MPI_Wtime()
  select case(trim(mode))
  case('reference')
   call lcfo_gather_root(local,counts,MPI_COMM_WORLD,full)
@@ -40,6 +41,7 @@ program seed_stream_memory_probe
  case default
   stop 2
  end select
+ seed_seconds=MPI_Wtime()-started
  if(status/=0)stop 3
  if(rank==0)then
   close(iu);allocate(gram(n,n));gram=matmul(conjg(transpose(u)),u)
@@ -51,7 +53,7 @@ program seed_stream_memory_probe
  call MPI_Gather(rss,1,MPI_INTEGER8,peaks,1,MPI_INTEGER8,0,MPI_COMM_WORLD,ierr)
  if(rank==0)then
   do p=1,np
-   write(*,'(a,3(1x,i0),1x,es24.16)')trim(mode),n,p-1,peaks(p),error
+   write(*,'(a,3(1x,i0),2(1x,es24.16))')trim(mode),n,p-1,peaks(p),error,seed_seconds
   enddo
  endif
  call MPI_Finalize(ierr)
