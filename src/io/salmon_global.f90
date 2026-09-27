@@ -123,6 +123,7 @@ module salmon_global
   character(1) :: yn_hse_wannier
   integer :: hse_mlwf_interval,hse_mlwf_maxiter
   real(8) :: hse_mlwf_tolerance
+  real(8) :: hse_lcfo_wf_radius ! Always bohr; -1 selects legacy environment/default
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc

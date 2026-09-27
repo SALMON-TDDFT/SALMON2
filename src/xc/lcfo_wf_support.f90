@@ -3,6 +3,7 @@ module lcfo_wf_support
  use iso_fortran_env, only: int64
  implicit none
  private
+ public :: lcfo_wf_sphere_norm
  public :: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
  type :: s_lcfo_wf_plan
   logical :: ready=.false.,masked=.false.
@@ -22,6 +23,31 @@ module lcfo_wf_support
   type(s_wf_block),allocatable :: blocks(:)
  end type
 contains
+ subroutine lcfo_wf_sphere_norm(wf,positions,centers,length,dv,radius,norm)
+  ! Geometric sphere coverage, including protected WFs (which remain uncut in RT).
+  implicit none
+  complex(8),intent(in) :: wf(:,:)
+  real(8),intent(in) :: positions(:,:),centers(:,:),length(3),dv,radius
+  real(8),intent(out) :: norm(:)
+  real(8) :: delta(3)
+  integer :: j,g
+  if(any(shape(positions)/=[3,size(wf,1)]).or.any(shape(centers)/=[3,size(wf,2)]).or. &
+     size(norm)/=size(wf,2))error stop 'LCFO sphere norm: incompatible dimensions'
+  if(any(length<=0d0).or.dv<=0d0.or.radius<0d0)error stop 'LCFO sphere norm: invalid geometry'
+  norm=0d0
+!$omp parallel do private(g,delta) schedule(static)
+  do j=1,size(wf,2)
+   do g=1,size(wf,1)
+    if(radius>0d0)then
+     delta=modulo(positions(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
+     if(sum(delta**2)>radius**2)cycle
+    endif
+    norm(j)=norm(j)+abs(wf(g,j))**2*dv
+   enddo
+  enddo
+!$omp end parallel do
+ end subroutine
+
  subroutine lcfo_wf_kernel_init(kernel,plan,basis)
   type(s_lcfo_wf_kernel),intent(out) :: kernel
   type(s_lcfo_wf_plan),intent(in) :: plan

@@ -171,3 +171,25 @@ for flag in ('2','bad','1 trailing','12345678901234567'):
         reject='LCFO HSE: FFT measure must be 0 or 1',
         extra_env={**pt_env,'SALMON_LCFO_RT_FFT_MEASURE':flag})
 print('Direct coefficient Taylor4 regression passed')
+
+# Explicit radius namelist takes precedence over an inherited legacy environment.
+for radius,legacy,reference in ((3,'1',root/'direct_r3'),(0,'3',pt)):
+    text=pt_input.replace("xc='hse06'",f"xc='hse06'\n hse_lcfo_wf_radius={radius}d0")
+    named=run('named_radius_'+str(radius),text,rt=True,
+              extra_env={**pt_env,'SALMON_LCFO_RT_RADIUS':legacy})
+    assert 'SALMON_LCFO_RT_RADIUS ignored' in (named/'run.log').read_text()
+    aa,bb=rows(named/'H_dc_hse_rt.data'),rows(reference/'H_dc_hse_rt.data')
+    err=max(abs(x[j]-y[j]) for x,y in zip(aa,bb) for j in (13,14,15));assert err<1e-11,err
+    compare_density_energy(named,reference,4)
+    report=rows(named/'lcfo_mlwf_radius.dat');assert len(report)==2
+    assert all(0<=x[3]<=1+1e-12 for x in report)
+    warning='WARNING LCFO MLWF radius: sphere norm below 99.9%'
+    assert (warning in (named/'run.log').read_text()) == any(x[3]<0.999 for x in report)
+    if radius==0:assert all(abs(x[3]-1)<1e-12 for x in report)
+    else:
+        assert min(x[3] for x in report)<0.999, 'Fixture must exercise the warning'
+        assert warning in (named/'run.log').read_text()
+    print(json.dumps({'namelist_radius':radius,'current_difference':err,'minimum_sphere_fraction':min(x[3] for x in report)}))
+run('reject_named_radius',pt_input.replace("xc='hse06'","xc='hse06'\n hse_lcfo_wf_radius=-2d0"),rt=True,
+    reject='HSE: hse_lcfo_wf_radius',extra_env=pt_env)
+print('Radius namelist precedence, full support, warning and validation passed')

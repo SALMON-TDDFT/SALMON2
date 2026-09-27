@@ -279,6 +279,7 @@ contains
     namelist/functional/ &
       & xc, &
       & cname, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
+      & hse_lcfo_wf_radius, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -734,6 +735,7 @@ contains
     hse_mlwf_interval = 10
     hse_mlwf_maxiter = 200
     hse_mlwf_tolerance = 1d-6
+    hse_lcfo_wf_radius = -1d0
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
@@ -1302,6 +1304,7 @@ contains
     call comm_bcast(hse_mlwf_interval,nproc_group_global)
     call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
     call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
+    call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
@@ -2242,6 +2245,7 @@ contains
       write(fh_variables_log, *) "# hse_mlwf_interval=",hse_mlwf_interval
       write(fh_variables_log, *) "# hse_mlwf_maxiter=",hse_mlwf_maxiter
       write(fh_variables_log, *) "# hse_mlwf_tolerance=",hse_mlwf_tolerance
+      write(fh_variables_log, *) "# hse_lcfo_wf_radius (bohr; -1=legacy)=",hse_lcfo_wf_radius
 #ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
@@ -3103,6 +3107,9 @@ contains
       stop "either yn_ffte or yn_fftw can be specified"
     end if
 
+    if(.not.ieee_is_finite(hse_lcfo_wf_radius))error stop 'HSE: hse_lcfo_wf_radius must be finite'
+    if(hse_lcfo_wf_radius<0d0.and.hse_lcfo_wf_radius/=-1d0) &
+      error stop 'HSE: hse_lcfo_wf_radius must be >=0 bohr, or -1 for legacy default'
     if(xc=='hse06')then
       if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
         error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'

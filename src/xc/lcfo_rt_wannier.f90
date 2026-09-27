@@ -13,7 +13,8 @@ module lcfo_rt_wannier
   use lcfo_dist_dense, only: lcfo_distributed_polar
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
   use lcfo_wf_support, only: s_lcfo_wf_kernel,lcfo_wf_kernel_init,lcfo_wf_kernel_apply
-  use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance
+  use lcfo_wf_support, only: lcfo_wf_sphere_norm
+  use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance,hse_lcfo_wf_radius
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -36,16 +37,23 @@ module lcfo_rt_wannier
   complex(8),allocatable,save :: core_gram(:,:)
 contains
   subroutine lcfo_mlwf_configure()
+    implicit none
     character(64) :: value
     integer :: status,ios,bad
-    bad=0
+    bad=0;radius=0d0
     if(lcfo_rank==0)then
       call get_environment_variable('SALMON_LCFO_RT_MLWF',value,status=status)
       lcfo_mlwf_enabled=status==0.and.trim(value)=='1'
       call get_environment_variable('SALMON_LCFO_RT_RADIUS',value,status=status)
-      if(status==0.and.len_trim(value)>0)then
+      if(hse_lcfo_wf_radius>=0d0)then
+        radius=hse_lcfo_wf_radius
+        if(status==0.and.len_trim(value)>0) &
+          write(*,'(a)')'LCFO MLWF: SALMON_LCFO_RT_RADIUS ignored; explicit hse_lcfo_wf_radius takes precedence'
+      else if(status==0.and.len_trim(value)>0)then
         read(value,*,iostat=ios)radius
         if(ios/=0)bad=1
+      else if(status==-1)then
+        bad=1
       endif
       call get_environment_variable('SALMON_LCFO_RT_U_INTERVAL',value,status=status)
       if(status==0.and.len_trim(value)>0)then
@@ -146,6 +154,7 @@ contains
     enddo
     ! A poorly defined center on any axis makes a spherical cut unreliable.
     protected=any(abs(moment)/spread(norms,1,3)<.1d0,dim=1)
+    call report_radius_coverage(grid,position,length,norms)
     previous_wf=matmul(coeff,rotation);current_frame=previous_wf;frame_rotation=rotation
     transport_anchor=current_frame;frame_transported=.true.
     if(lcfo_rank==0)then
@@ -156,6 +165,34 @@ contains
     endif
     if(lcfo_rank==0)write(*,'(a,es12.4,a,i6,a,es12.4)')'LCFO MLWF U error ',unitary_error, &
       ' protected factors ',count(protected),' minimum xyz center reliability ',minval(abs(moment)/spread(norms,1,3))
+  end subroutine
+
+  subroutine report_radius_coverage(grid,position,length,norms)
+    implicit none
+    complex(8),intent(in) :: grid(:,:)
+    real(8),intent(in) :: position(:,:),length(3),norms(:)
+    real(8),allocatable :: local_norm(:),inside(:),fraction(:)
+    integer :: n,j,iu,worst(1),below
+    n=size(norms);allocate(local_norm(n),inside(n),fraction(n))
+    call lcfo_wf_sphere_norm(grid,position,centers,length,lcfo_dv,radius,local_norm)
+    call comm_summation(local_norm,inside,n,lcfo_comm)
+    fraction=inside/norms
+    if(lcfo_rank/=0)return
+    open(newunit=iu,file='lcfo_mlwf_radius.dat',status='replace')
+    write(iu,'(a,es24.16)')'# Initial WF geometric sphere coverage; radius_bohr (0=full): ',radius
+    write(iu,'(a)')'# wf  total_norm  sphere_norm  sphere_fraction  protected_uncut'
+    do j=1,n
+      write(iu,'(i10,3es25.16,i4)')j,norms(j),inside(j),fraction(j),merge(1,0,protected(j))
+    enddo
+    close(iu)
+    worst=minloc(fraction);below=count(fraction<.999d0)
+    write(*,'(a,es16.8,a,i8)')'LCFO MLWF initial minimum sphere norm fraction: ', &
+      fraction(worst(1)),' WF ',worst(1)
+    if(below>0)then
+      write(*,'(a,i8,a,i8)')'WARNING LCFO MLWF radius: sphere norm below 99.9% for ',below,' of ',n
+      write(*,'(a,es16.8,a,i8)')'WARNING LCFO MLWF radius unchanged (bohr): ',radius, &
+        '; protected WFs remain uncut: ',count(protected)
+    endif
   end subroutine
 
   subroutine lcfo_mlwf_track(coeff)
