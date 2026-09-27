@@ -42,6 +42,26 @@ class ExxInputs(unittest.TestCase):
         for key,a,b in [('interval','5','6'),('maxiter','100','101'),('tolerance','1d-7','2d-7')]:
             self.run_case(f'exx_mlwf_{key}={a}\n hse_mlwf_{key}={b}',error='conflicting EXX/legacy MLWF '+key)
 
+    def test_local_fft_controls(self):
+        controls='exx_mlwf_maxiter=20\n exx_mlwf_radius=0'
+        a=self.run_case(controls+"\n exx_local_fft='auto'")
+        b=self.run_case(controls+"\n exx_local_fft='off'")
+        self.assertAlmostEqual(a[0],b[0],places=11)
+        self.run_case("exx_local_fft='invalid'",error='exx_local_fft must be auto or off')
+
+    def test_local_fft_native_scf(self):
+        def larger_cell(s):
+            return s.replace('al=16d0,8d0,8d0','al=32d0,16d0,16d0').replace('num_rgrid=16,8,8','num_rgrid=32,16,16')
+        controls='exx_mlwf_maxiter=100\n exx_mlwf_interval=5\n exx_mlwf_tolerance=1d-7\n exx_mlwf_radius=4'
+        local=self.run_case(controls+"\n exx_local_fft='auto'",larger_cell)
+        full=self.run_case(controls+"\n exx_local_fft='off'",larger_cell)
+        self.assertLess(abs(local[0]-full[0]),1e-8)
+        rows=re.findall(r'EXX_FFT .*?:\s*([0-9 ]+)',local[2])
+        self.assertTrue(rows)
+        local_pairs,global_pairs,actual,baseline=map(int,rows[-1].split())
+        self.assertGreater(local_pairs,0)
+        self.assertLess(actual,baseline)
+
     def test_radius_invalid(self):
         self.run_case('exx_mlwf_radius=-1',error='exx_mlwf_radius must be finite and nonnegative')
 

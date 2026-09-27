@@ -7,6 +7,7 @@ module hse_wannier
   use iso_c_binding
   use iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use exx_local_fft, only: s_exx_local_fft,exx_local_init,exx_local_prepare,exx_local_apply,exx_local_destroy
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init
   use hse_wannier_gauge, only: gauge_transport,gauge_minimize,gauge_seed
   !$ use omp_lib, only: omp_get_max_threads,omp_get_thread_num
@@ -23,6 +24,9 @@ module hse_wannier
     integer :: last_localization_status=1
     integer :: protected_sources=0
     real(8) :: discarded_norm_fraction=0d0,max_discarded_norm_fraction=0d0
+    type(s_exx_local_fft) :: local_fft
+    logical :: use_local_fft=.false. ! native adapter selects auto/off; standalone default preserves old probes
+    integer(int64) :: local_fft_pairs_executed=0_int64,fft_pair_grid_points=0_int64
     logical :: compact_source_support=.true.
     logical :: fft_measure=.false.,worker_measure=.false.
     integer :: fft_batch_size=1,worker_batch=0
@@ -64,6 +68,7 @@ contains
     type(s_hse_wannier),intent(inout) :: op
     type(s_hse_wannier) :: empty
     call clear_workers(op)
+    call exx_local_destroy(op%local_fft)
     if(c_associated(op%forward))call fftw_destroy_plan(op%forward)
     if(c_associated(op%backward))call fftw_destroy_plan(op%backward)
     op=empty
@@ -437,15 +442,16 @@ contains
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
-    complex(8),allocatable :: home(:,:),result(:,:),source(:)
+    complex(8),allocatable :: home(:,:),result(:,:),source(:),local_density(:),local_potential(:)
     integer :: i,j,ic,g,p(3),index,nt,t,nworkers,batch,lo,nb,k
     integer :: columns(32),nsupport,ig,row
     integer,allocatable :: support(:)
     complex(8),pointer :: flat_work(:,:,:)
     complex(8) :: value
-    logical :: compact,nonzero
+    logical :: compact,nonzero,use_local
     integer(int64) :: executed,batches,products,accumulations
     status=1;action=0d0
+    op%local_fft_pairs_executed=0_int64;op%fft_pair_grid_points=0_int64
     op%pair_product_points=0_int64;op%pair_accumulation_points=0_int64
     op%fft_pairs_total=0_int64;op%fft_pairs_executed=0_int64;op%fft_batches_executed=0_int64
     if(.not.allocated(op%source))return
@@ -459,9 +465,6 @@ contains
     nworkers=1
     !$ nworkers=min(nt,omp_get_max_threads())
     batch=min(op%fft_batch_size,max(1,nt/nworkers))
-    call prepare_workers(op,nworkers,batch,status)
-    if(status/=0)return
-    flat_work(1:op%ngs,1:op%worker_batch,1:op%workers)=>op%worker_work
     allocate(support(op%ngs))
     call wannier_forward(op,target,home);result=0d0
     do ic=1,op%nk
@@ -477,6 +480,35 @@ contains
           nsupport=nsupport+1;support(nsupport)=g
         enddo
         if(nsupport==0)cycle
+        use_local=.false.
+        if(op%use_local_fft.and.nsupport<op%ngs/2)then
+          if(.not.allocated(op%local_fft%kernel))then
+            call exx_local_init(op%local_fft,op%multiplier,status)
+            if(status/=0)return
+          endif
+          call exx_local_prepare(op%local_fft,op%point(:,support(:nsupport)),use_local,status)
+          if(status/=0)return
+        endif
+        if(use_local)then
+          allocate(local_density(nsupport),local_potential(nsupport))
+          products=products+int(nt,int64)*nsupport
+          do j=1,nt
+            local_density=conjg(source(support(:nsupport)))*home(support(:nsupport),j)
+            if(all(local_density==(0d0,0d0)))cycle
+            call exx_local_apply(op%local_fft,local_density,local_potential,status)
+            if(status/=0)return
+            result(support(:nsupport),j)=result(support(:nsupport),j)-source(support(:nsupport))*local_potential
+            executed=executed+1_int64;batches=batches+1_int64
+            accumulations=accumulations+nsupport
+            op%local_fft_pairs_executed=op%local_fft_pairs_executed+1_int64
+            op%fft_pair_grid_points=op%fft_pair_grid_points+op%local_fft%fft_points
+          enddo
+          deallocate(local_density,local_potential)
+          cycle
+        endif
+        call prepare_workers(op,nworkers,batch,status)
+        if(status/=0)return
+        flat_work(1:op%ngs,1:op%worker_batch,1:op%workers)=>op%worker_work
         compact=op%compact_source_support.and.nsupport<op%ngs/2
         products=products+int(nt,int64)*int(merge(nsupport,op%ngs,compact),int64)
         !$omp parallel do default(none) schedule(static) num_threads(nworkers) &
@@ -528,6 +560,7 @@ contains
     enddo
     op%pair_product_points=products;op%pair_accumulation_points=accumulations
     op%fft_pairs_executed=executed;op%fft_batches_executed=batches
+    op%fft_pair_grid_points=op%fft_pair_grid_points+(executed-op%local_fft_pairs_executed)*op%ngs
     call wannier_backward(op,result,action)
     status=0
   end subroutine

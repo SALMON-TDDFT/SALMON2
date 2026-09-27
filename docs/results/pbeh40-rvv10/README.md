@@ -78,3 +78,36 @@ agrees across two/four ranks for Gaussian and random starts. A truncated SCF
 result is rejected if the last MLWF minimization did not converge, including
 a failed gauge transport that invalidates earlier convergence. This prevents a
 small density residual from being mistaken for localization convergence.
+
+## Exact local-box exchange FFT
+
+`local-fft.json` compares `exx_local_fft='auto'` and `'off'` at the **same**
+finite source radius (4 bohr). This is an implementation-parity check, not a
+physical cutoff-convergence result. The native four-H fixture uses a 32x16x16
+bohr cell/grid and 1x2x1 k mesh. Both runs converge at step 30; the last exchange
+refresh uses 54,000 local pair-grid points instead of 262,144 global points.
+The regression `test_local_fft_native_scf` reconstructs both inputs and checks
+the final energy difference below 1e-8 eV and actual local-path use.
+
+The fixed-source benchmark on a 32x24x20 grid compares the whole PBEh Wannier
+exchange action, including gather/scatter, with four compact sources and eight
+targets (one identically zero). The relative action difference is 2.94e-16.
+28 pairs use 20,412 padded-grid points instead of 430,080; one-thread warm
+exchange actions took approximately 1.24 ms locally versus 5.92 ms globally in
+this run. These are five-action averages excluding kernel/plan setup, not a
+production-water or end-to-end SCF scaling result. Local pairs currently execute
+serially, and dense targets may still require every source-target pair.
+
+Reproduce the standalone correctness and bounded benchmark checks:
+
+```
+python3 -m unittest discover -s testsuites/unit_hse_wannier -p test_local_fft.py
+python3 -m unittest discover -s testsuites/unit_hse_wannier -p test_local_fft_benchmark.py
+```
+
+The standalone direct sum includes complex kernels, wrapped support, moving box
+origins, full-grid fallback then local cache reuse, singleton support and tiny
+nonzero densities. Operator checks cover HSE/PBEh, translated multi-k sources,
+Hermiticity and extended-source fallback. This engine does not activate PBEh
+LCFO optical propagation or DC-MD; those adapters and force consistency remain
+separate requirements.

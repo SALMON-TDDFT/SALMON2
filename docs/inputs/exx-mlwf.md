@@ -7,6 +7,7 @@ HSE06 and PBEh40 use the same localization controls in `&functional`:
   exx_mlwf_maxiter=100
   exx_mlwf_tolerance=1d-7
   exx_mlwf_radius=0d0
+  exx_local_fft='auto'
 ```
 
 The unchanged defaults are interval 10, maximum iterations 200, tolerance
@@ -26,8 +27,22 @@ in the Born–von Karman supercell (fragment supercell for DC). Both source
 appearances in the Fock action use this mask. Targets are not masked and sources
 are not renormalized. Exactly zero pair densities are skipped, and compact
 support accelerates pair formation and output accumulation through the existing
-Wannier backend. The FFT domain remains the full supercell; this does not yet
-provide local-box FFTs or prove large-system scaling.
+Wannier backend. With `exx_local_fft='auto'` (default), compact sources use a padded local-box
+FFT whenever its volume is smaller than the global grid. `'off'` retains the
+full-grid FFT for comparison. The local kernel is sampled from the inverse FFT
+of the original global multiplier, including G=0; it is not a new local periodic
+Coulomb model. Padding at least 2*m-1 along every occupied box axis makes the
+restricted convolution equal to the global discrete action, up to roundoff.
+The source mask remains the only additional approximation in this comparison.
+
+Periodic boxes are unwrapped across the largest empty gap on each axis. Broad
+sources fall back to the global FFT. The local path currently runs serially per
+pair and caches one box shape; the global path keeps its OpenMP/batched FFTs.
+`EXX_FFT` logs local/global pair counts and actual/full pair-grid points. Those
+counts exclude kernel/plan setup, source gathering and other SCF work. Global
+source/target arrays and an O(G) periodic kernel are still stored. Dense target
+states can still overlap every source: this does not establish overall linear
+scaling, nor does it enable the missing PBEh optical/DC-MD adapters.
 
 Centers use circular density moments. As in the existing LCFO path, a source
 with normalized moment below 0.1 on any axis stays uncut because its center is

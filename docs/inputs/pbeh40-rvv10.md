@@ -15,6 +15,7 @@ Experimental implementation on `pbeh40-rvv10-water-md`, based on `dc-hse-mlwf-ac
   exx_mlwf_maxiter=100
   exx_mlwf_tolerance=1d-7
   exx_mlwf_radius=0        ! input length; 0 retains full orbital support
+  exx_local_fft='auto'    ! exact local convolution when compact support is cheaper
 /
 &parallel
   nproc_rgrid=1,1,1

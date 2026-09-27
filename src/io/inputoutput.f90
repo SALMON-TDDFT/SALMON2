@@ -282,7 +282,7 @@ contains
     namelist/functional/ &
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
-      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius, &
+      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -750,6 +750,7 @@ contains
     exx_mlwf_tolerance = -huge(1d0)
     hse_mlwf_tolerance = -huge(1d0)
     exx_mlwf_radius = 0d0
+    exx_local_fft = 'auto'
     hse_lcfo_wf_radius = 0d0
     yn_hse_lcfo_rt = 'n'
     yn_hse_lcfo_direct_wf = 'n'
@@ -1355,6 +1356,8 @@ contains
       exx_mlwf_tolerance=hse_mlwf_tolerance
     endif
     if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
+    call comm_bcast(exx_local_fft,nproc_group_global)
+    call string_lowercase(exx_local_fft)
     call comm_bcast(exx_mlwf_radius,nproc_group_global)
     exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
     call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
@@ -2317,6 +2320,7 @@ contains
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
+      write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
       write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
       write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
       write(fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
@@ -3221,6 +3225,7 @@ contains
         error stop 'LCFO RT requires HSE06 tddft_response with Taylor4'
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
+    if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'
     if(exx_mlwf_radius>0d0)then

@@ -109,6 +109,10 @@ The following `&functional` inputs select/control the new backend:
 | `exx_mlwf_tolerance` | `1d-6` | Positive finite spread-gradient norm tolerance, always in atomic units (bohr squared), independent of `unit_system`. |
 | `exx_mlwf_radius` | `0` | Periodic spherical source support, in input length units; 0 is full support. Positive values automatically enable the Wannier backend and support static DFT only. |
 
+`exx_local_fft='auto'` selects a reduced padded FFT for compact sources when its
+volume is smaller; `'off'` retains the global reference path. Both use the same
+discrete global interaction kernel.
+
 The three old `hse_mlwf_*` control names remain input aliases. See
 [shared EXX controls and radius limitations](exx-mlwf.md).
 

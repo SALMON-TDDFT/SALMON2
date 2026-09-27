@@ -1,0 +1,28 @@
+{
+  "auto": {
+    "energy_eV": -64.98414487132892,
+    "convergence_step": 30,
+    "output_sha256": "fe0f50c54b0d2cca2c7944ba497bca72fec21d89a11faba8297976fe4202f01d",
+    "last_exchange_counts": {
+      "local_pairs": 16,
+      "global_pairs": 0,
+      "actual_pair_grid_points": 54000,
+      "full_pair_grid_points": 262144
+    }
+  },
+  "off": {
+    "energy_eV": -64.9841448713293,
+    "convergence_step": 30,
+    "output_sha256": "03e1509f014da1394fe443758abb557a3e15bf584b89906e9623d4beab60324f"
+  },
+  "energy_difference_eV": 3.836930773104541e-13,
+  "fixed_source_benchmark": {
+    "relative_action_error": 2.935737461436442e-16,
+    "local_pairs": 28.0,
+    "local_pair_grid_points": 20412.0,
+    "full_pair_grid_points": 430080.0,
+    "full_wall_seconds_per_action": 0.0059182,
+    "local_wall_seconds_per_action": 0.0012432,
+    "scope": "32x24x20 grid, four fixed compact sources, eight targets (one zero), single thread, five warm actions; excludes plan/kernel setup"
+  }
+}

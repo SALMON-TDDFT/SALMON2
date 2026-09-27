@@ -53,9 +53,13 @@ program probe
  before=sum(abs(saved)**2)
  expected_loss=(before-sum(abs(op%source)**2))/before
  if(abs(op%discarded_norm_fraction-expected_loss)>1d-13.or.expected_loss<=0)error stop 'norm loss'
+ op%use_local_fft=.true.
  op%compact_source_support=.true.
  call wannier_apply(op,target,action,status)
  if(status/=0)error stop 'compact apply'
+ if(op%local_fft_pairs_executed==0)error stop 'local FFT was not exercised'
+ if(op%fft_pair_grid_points>=op%fft_pairs_executed*op%ngs)error stop 'FFT grid volume not reduced'
+ op%use_local_fft=.false.
  op%compact_source_support=.false.
  call wannier_apply(op,target,dense,status)
  if(status/=0.or.maxval(abs(action-dense))>1d-11)error stop 'compact/dense'

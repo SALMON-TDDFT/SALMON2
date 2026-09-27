@@ -37,6 +37,7 @@
   exx_mlwf_interval=5
   exx_mlwf_tolerance=1d-7
   exx_mlwf_radius=0d0 ! full support; required for MD
+  exx_local_fft='auto' ! exact convolution optimization; no extra truncation
 /
 
 &rgrid

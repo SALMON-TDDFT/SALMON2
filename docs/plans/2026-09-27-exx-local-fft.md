@@ -50,3 +50,25 @@ FFT volume and avoid claiming overall linear scaling from FFT-volume reduction.
   reduction and wall time; do not extrapolate a production scaling claim.
 - Update the input contract and plan ledger. Request independent review before
   committing. Preserve all existing finite-radius MD/convergence restrictions.
+
+## Execution ledger
+
+- Implemented the standalone module, exact cyclic-box embedding and fallback.
+  A missing-module test was observed first; independent inverse-DFT/direct-sum
+  tests now pass, including complex kernels and 1e-100 nonzero densities.
+- Connected the native Wannier/ACE adapter with auto/off selection and pair-grid
+  accounting. Full-domain worker FFT buffers are allocated only on fallback;
+  local plans run serially outside OpenMP. One local box shape is cached.
+- Whole-operator HSE/PBEh tests pass for Gamma and multiple k points with compact
+  and extended sources. Legacy 10-case Wannier and exact-pair probes pass.
+- Native SCF auto/off parity converges at step 30 on the larger hydrogen fixture;
+  local pair-grid volume is 54,000 versus 262,144. Measured results are stored in
+  docs/results/pbeh40-rvv10/local-fft.json.
+- HSE-enabled and HSE-disabled builds succeed. Existing MPI/input/functional
+  regressions pass; a further native-local-path regression was added afterwards.
+- Independent review found no blocker in normalization, wrapping, lifetimes or
+  threading. Its evidence suggestions were addressed: system_clock wall timing,
+  changed-origin/cache-reuse tests, and tiny nonzero local densities.
+- Remaining scope: local-batch/OpenMP optimization, distributed source storage,
+  pair reduction for localized reference states, PBEh optical adapters, and
+  moving-fragment/force consistency for DC-MD. No production scaling claim.

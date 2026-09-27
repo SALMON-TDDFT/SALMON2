@@ -17,7 +17,7 @@ module hse_native
   use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory, &
-    yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius, &
+    yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
     hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
@@ -495,6 +495,7 @@ contains
         call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,exx_mlwf_tolerance,status)
       endif
       if(status==0)then
+        wannier%use_local_fft=exx_local_fft=='auto'
         call wannier_truncate_source(wannier,exx_mlwf_radius,status)
         finite_support_localized=wannier%discarded_norm_fraction==0d0.or.wannier%last_localization_status==0
       endif
@@ -503,6 +504,11 @@ contains
         write(*,'(a,3i7,3es16.7)')'HSE_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &
         wannier%updates,wannier%localization_iterations,wannier%localization_status, &
         wannier%spread,wannier%gradient,wannier%min_singular
+        if(wannier%use_local_fft)then
+          write(*,'(a,4i18)')'EXX_FFT local/global pairs/actual/full pair grid points: ', &
+            wannier%local_fft_pairs_executed,wannier%fft_pairs_executed-wannier%local_fft_pairs_executed, &
+            wannier%fft_pair_grid_points,wannier%fft_pairs_executed*int(wannier%ngs,int64)
+        endif
         if(exx_mlwf_radius>0d0)then
           write(*,'(a,es16.7,i8,2es16.7)')'EXX_MLWF radius (bohr)/protected/total loss/max factor loss: ', &
             exx_mlwf_radius,wannier%protected_sources,wannier%discarded_norm_fraction,wannier%max_discarded_norm_fraction
