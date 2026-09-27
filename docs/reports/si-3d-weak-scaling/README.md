@@ -126,3 +126,13 @@ extracted input set, run the following in a subshell (failure stops later steps)
 If the pre-update hashes differ, stop and inspect the source version instead of
 forcing the patch. The new namelist is not accepted by an older executable.
 The radius update has been built/tested locally; Fugaku build/run is unverified.
+
+## Subsequent diagnostic loop cleanup
+
+`3c4ff577` removes a redundant full-support WF norm scan/collective and hoists
+constant radius checks out of the inner loop. It preserves radius and Warning
+semantics. The input archive's bundled radius patch targets `e6c54a87`; apply
+[the incremental cleanup patch](https://github.com/SALMON-TDDFT/SALMON2/blob/3c4ff577ae3efdd7d648b7edca8900432c2c9a35/tools/patches/lcfo-radius-loop-cleanup.patch)
+after that patch and its after-hash check. Full latest status and validation limits:
+[DEVELOPMENT_NOTES](https://github.com/SALMON-TDDFT/SALMON2/blob/dc-hse-mlwf-ace/DEVELOPMENT_NOTES.md#latest-status).
+The cleanup has local OMP/MPI regression coverage, but no new speed/RSS measurement.

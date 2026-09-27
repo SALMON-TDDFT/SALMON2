@@ -1,9 +1,10 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の機能検証：`e6c54a87`（半径namelist）。分散seedのメモリ測定：`133e8b37`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の実装・回帰検証：`3c4ff577`（半径診断のループ整理）。半径namelist：`e6c54a87`。分散seedのメモリ測定：`133e8b37`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
+- [最新状況・検証範囲・富岳パッチ](#latest-status)
 - [Si 3D弱スケーリング入力・半径namelist](docs/reports/si-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行）
 - [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
@@ -20,6 +21,49 @@
 - [ACE・U輸送と高速化](#reuse)
 - [検証と残る課題](#remaining)
 - [入力・再実行・詳細記録](#records)
+
+<a id="latest-status"></a>
+
+## 最新状況：2026-09-27
+
+| 項目 | 最新の状態 | 確認範囲 |
+|---|---|---|
+| 半径指定 | `&functional hse_lcfo_wf_radius`、常にbohr。0=全範囲、正値=固定半径、未指定=-1で旧環境変数にfallback | 小規模MPIで旧指定と電流・密度・エネルギー差0 |
+| 99.9% Warning | 初期MLWFの各球内ノルム/全ノルムが0.999未満なら通知。自動半径変更・再規格化なし | 3 bohrの試験で最小0.9440599349375678、Warning発生。全範囲1、Warningなし |
+| 診断出力 | `lcfo_mlwf_radius.dat`に各WFの保持率とprotectedフラグ。protected WFは従来どおり切らない | 初期時点のみ。RT全時刻や電流精度を保証する指標ではない |
+| 不要処理の削減 | 全範囲時のWF再走査・追加MPI集計を削除。半径判定/二乗をループ外へ移し、非rootの保持率計算も省略 | OMP1/2/4、ビルド、Taylor4・フラグメント×軌道MPI・ACE/U再利用の回帰試験成功。速度/RSSの追加実測なし |
+| Si 3D入力 | 4³/6³/8³/10³のGS/RT、座標、Si擬ポテンシャル、設定・適用パッチ | 静的検証・アーカイブ展開後の再生成に成功。大規模ジョブ未投入 |
+| 富岳 | 累積seedメモリ版のコンパイル・リンク成功を利用者ログで確認 | `-Nalloc_assign`修正後、半径namelist、今回のループ整理の実機ビルド/数値は未確認 |
+
+Si入力はa=10.26 bohr、core16³、buffer各方向8点、RT dt=0.02、16step、
+半径9 bohr、ACE1/U1。原子数512/1728/4096/8000、MPI64/216/512/1000。
+9 bohrで初期Si3D-WFの99.9%を満たすか、SCFが収束するかはまだ測定していません。
+短時間の性能・動作確認用で、収束した誘電関数の計算ではありません。
+
+**Si 8³のメモリは未実測。** 占有8192軌道で複素密行列1枚は1 GiB。
+初期局在化rootのリンク6枚＋U＋勾配＋勾配作業配列＋ローカル全占有WFの
+既知容量小計は約9.5 GiB。基底、他の軌道配列、Hamiltonian、一時配列、MPI領域は
+この外側にあるため、全体ピークの上限ではありません。GS/RTの別段階でさらに増える
+可能性があり、同一ノードの他rank分も加算されます。交換半径の縮小や今回の診断整理では、
+この密な初期局在化配列は小さくなりません。
+
+### 富岳のGit管理されていないソースへの適用
+
+| ソースの状態 | 適用する差分 |
+|---|---|
+| 初期リンク削減前（利用者の4ファイルSHAと照合済み） | [累積メモリパッチ](tools/patches/gamma-memory-fugaku-verified.patch)。[before](tools/patches/gamma-memory-fugaku-before.sha256)→[after](tools/patches/gamma-memory-fugaku-after.sha256)を確認 |
+| allocatable代入の自動確保が無効 | [富岳設定](tools/patches/fugaku-alloc-assign.patch)。正確なオプションは`-Nalloc_assign`（アスタリスクなし） |
+| 累積メモリ版まで適用済み | [半径namelist](tools/patches/lcfo-radius-namelist.patch)。[before](tools/patches/lcfo-radius-before.sha256)→[after](tools/patches/lcfo-radius-after.sha256)を確認 |
+| 半径namelist適用済み（e6c54a87/6e07618d相当） | [今回のループ整理](tools/patches/lcfo-radius-loop-cleanup.patch) |
+
+各差分はソース直下で`patch --batch --forward --fuzz=0 --dry-run -p1`に成功した場合だけ
+本適用します。失敗したら後続を実行しません。半径パッチのafter照合はループ整理を適用する
+**前**に行います（同じ2ファイルが次段で変わるため）。適用後はCMake再設定・再ビルド。
+古い`gamma-memory-from-pre-root.patch`や3枚の手順は、SHAで特定した富岳旧版には使用しません。
+
+[Si入力・再実行手順](docs/reports/si-3d-weak-scaling/README.md) ／
+[半径機能の検証データ](docs/reports/si-3d-weak-scaling/verification.json) ／
+[全測定と変更の時系列](docs/reports/diamond64-mlwf-support/report.md)
 
 ## 半径namelistと初期保持率のWarning
 
