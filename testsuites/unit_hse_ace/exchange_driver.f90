@@ -11,7 +11,7 @@ program exchange_driver
   type(spatial_exx_state) :: spatial,full_spatial
   type(s_hse_wannier) :: serial
   integer :: np,rank,err,status,dims(2),coords(2),comm(2),m(3),lo(3),g,l,x,y,z,j,k,stage
-  real(8) :: error,global_error,dv,bad_dv,minimum,omega
+  real(8) :: error,global_error,dv,bad_dv,minimum,omega,occupation(no,1)
   character(32) :: argument
   complex(8) :: transported(no,no,1)
   call get_command_argument(1,argument)
@@ -43,9 +43,13 @@ program exchange_driver
   allocate(local(product(m),no,1),trial(product(m),nt,1),action(product(m),nt,1))
   call wannier_init(serial,n,[1,1,1],h,reshape([0d0,0d0,0d0],[3,1]),omega,status,2.5d0)
   if(status/=0)error stop 'serial init'
-  do stage=1,2
+  do stage=1,4
+    occupation=2d0
+    if(stage==2)occupation(:,1)=[2d0,.7d0,0d0]
+    if(stage==3)occupation(:,1)=[1.3d0,.2d0,.1d0]
+    if(stage==4)occupation=0d0
     if(stage==2)psi=psi*cmplx(cos(.13d0),sin(.13d0),8)
-    call wannier_refresh_source(serial,psi,reshape([2d0,2d0,2d0],[no,1]),3,1d-7,status)
+    call wannier_refresh_source(serial,psi,occupation,3,1d-7,status)
     if(status/=0)error stop 'serial refresh'
     call wannier_apply(serial,target,reference,status)
     if(status/=0)error stop 'serial action'
@@ -55,10 +59,10 @@ program exchange_driver
       local(l,:,1)=psi(g,:,1);trial(l,:,1)=target(g,:,1)
     enddo;enddo;enddo
     call spatial_exx_refresh(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,local, &
-      merge(3,0,stage==1),1d-7,status)
+      merge(3,0,stage==1),1d-7,status,occupation=occupation)
     if(status/=0)error stop 'spatial refresh'
     call spatial_exx_refresh(full_spatial,n,h,[1,1],[0,0],[MPI_COMM_SELF,MPI_COMM_SELF], &
-      MPI_COMM_SELF,psi,merge(3,0,stage==1),1d-7,status)
+      MPI_COMM_SELF,psi,merge(3,0,stage==1),1d-7,status,occupation=occupation)
     if(status/=0)error stop 'full grid localization'
     l=0
     do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1

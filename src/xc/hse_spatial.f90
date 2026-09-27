@@ -16,10 +16,11 @@ module hse_spatial
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
 contains
-  subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status)
+  subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation)
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r,maxiter
     real(8),intent(in) :: h(3),tolerance
+    real(8),intent(in),optional :: occupation(:,:)
     complex(8),intent(in) :: psi(:,:,:)
     integer,intent(out) :: status
     complex(8),allocatable :: raw(:,:,:,:),shifted(:,:),phase(:)
@@ -30,6 +31,10 @@ contains
     if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
     if(.not.all(ieee_is_finite(real(psi))).or..not.all(ieee_is_finite(aimag(psi))))bad=1
     if(maxiter<0.or.tolerance<=0d0.or..not.ieee_is_finite(tolerance))bad=1
+    if(present(occupation))then
+      if(any(shape(occupation)/=[no,1]))bad=1
+      if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))bad=1
+    endif
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
@@ -82,7 +87,15 @@ contains
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     op%source=matmul(psi(:,:,1),op%gauge(:,:,1))
-    op%previous=reshape(op%source,[ng,no,1]);op%updates=op%updates+1;status=0
+    op%previous=reshape(op%source,[ng,no,1])
+    if(present(occupation))then
+      if(.not.allocated(shifted))allocate(shifted(ng,no))
+      do j=1,no
+        shifted(:,j)=psi(:,j,1)*sqrt(occupation(j,1)/2d0)
+      enddo
+      op%source=matmul(shifted,op%gauge(:,:,1))
+    endif
+    op%updates=op%updates+1;status=0
   contains
     subroutine sum_grid(a)
       complex(8),intent(inout) :: a(:,:)

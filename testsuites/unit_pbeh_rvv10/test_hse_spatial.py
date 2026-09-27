@@ -99,3 +99,57 @@ class HSESpatial(unittest.TestCase):
                 _,run=self.execute('scf_guard_'+name,base.replace(old,new),ranks=2)
                 self.assertNotEqual(run.returncode,0)
                 self.assertIn(message,run.stdout+run.stderr)
+
+    def test_dc_spatial_fractional(self):
+        results=[]
+        for per_fragment,layout,total_layout in [(1,'1,1,1','2,1,1'),
+                                                 (2,'1,2,1','2,2,1'),
+                                                 (4,'1,2,2','2,2,2')]:
+            inp=self.base.replace('temperature_k=300d0','temperature_k=10000d0')
+            inp=inp.replace('nstate_frag=4','nstate_frag=6').replace('nscf=500','nscf=2000')
+            inp=inp.replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            inp=inp.replace('nproc_rgrid_tot=2,1,1','nproc_rgrid_tot='+total_layout)
+            folder,run=self.execute('dc_fractional'+str(per_fragment),inp,ranks=2*per_fragment)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            self.assertIn('end SALMON',run.stdout)
+            if per_fragment>1:self.assertIn('EXX_SPATIAL',run.stdout)
+            scf=re.findall(r'DC #SCF.*Total Energy =\s*(\S+)\s+diff =\s*(\S+)',run.stdout)
+            self.assertTrue(scf)
+            self.assertLess(float(scf[-1][1]),1e-10)
+            charge=float(re.findall(r'integral\(rho_tot\)=\s*(\S+)',run.stdout)[-1])
+            self.assertLess(abs(charge-4.),1e-8)
+            energy=float(scf[-1][0])
+            exchange=float(re.findall(r'DC_HSE_CORE exchange Ha =\s*(\S+)',run.stdout)[-1])
+            results.append((energy,exchange))
+            self.assertLess(abs(energy-results[0][0]),2e-6)
+            self.assertLess(abs(exchange-results[0][1]),1e-7)
+            occupations=np.loadtxt(next((folder/'data_dcdft/fragments/000001').glob('*_eigen.data')),skiprows=4)[:,2]
+            self.assertTrue(np.any((occupations>1e-5)&(occupations<1.99)))
+            if per_fragment==1:first_energy=float(scf[0][0])
+            self.assertLess(abs(float(scf[0][0])-first_energy),2e-6)
+            rt=self.rt_input(nt=2,moving=False).replace('nproc_rgrid=1,1,1','nproc_rgrid=1,2,1')
+            rt=rt.replace('nstate_frag=4','nstate_frag=6')
+            rt_folder,rt_run=self.execute('from_dc_fractional'+str(per_fragment),rt,ranks=2,
+                                         rt='dc_fractional'+str(per_fragment))
+            self.assertEqual(rt_run.returncode,0,rt_run.stdout[-3000:]+rt_run.stderr)
+            self.assertIn('end SALMON',rt_run.stdout)
+            self.assertIn('end complex DC-LCFO wavefunction reconstruction',rt_run.stdout)
+            rt_energy=np.loadtxt(next(rt_folder.glob('*_rt_energy.data')))
+            self.assertTrue(np.isfinite(rt_energy).all())
+            if per_fragment==1:reference_rt=rt_energy
+            self.assertLess(np.max(abs(rt_energy-reference_rt)),1e-7)
+            print('HSE DC ranks per fragment/energy eV/core exchange Ha/charge:',per_fragment,energy,exchange,charge)
+
+    def test_legacy_multik_thermal_charge(self):
+        inp=self.base.replace('temperature_k=300d0','temperature_k=10000d0')
+        inp=inp.replace('nstate_frag=4','nstate_frag=6').replace('nscf=500','nscf=2000')
+        inp=inp.replace('nproc_k=1','nproc_k=2').replace('num_kgrid=1,1,1','num_kgrid=1,2,1')
+        inp=inp.replace('nproc_rgrid_tot=2,1,1','nproc_rgrid_tot=4,1,1')
+        _,run=self.execute('legacy_multik_thermal',inp,ranks=4)
+        self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+        self.assertIn('end SALMON',run.stdout)
+        self.assertNotIn('EXX_SPATIAL',run.stdout)
+        charge=float(re.findall(r'integral\(rho_tot\)=\s*(\S+)',run.stdout)[-1])
+        self.assertLess(abs(charge-4.),1e-10)
+        differences=re.findall(r'DC #SCF.*diff =\s*(\S+)',run.stdout)
+        self.assertLess(float(differences[-1]),1e-10)

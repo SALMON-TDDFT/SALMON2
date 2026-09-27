@@ -234,9 +234,9 @@ contains
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
     endif
-    if(info%isize_r>1.and.yn_dc=='n'.and. &
+    if(info%isize_r>1.and. &
        ((xc=='hse06'.and.theory=='dft').or. &
-        (yn_conventional_from_dcdft=='y'.and. &
+        (yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
       call refresh_spatial(system,mg,info,psi)
       return
@@ -491,7 +491,7 @@ contains
       error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
     if(any(num_kgrid/=1).or.maxval(abs(system%vec_k))>1d-12.or.use_symmetry) &
       error stop 'Spatial EXX: unshifted Gamma required'
-    if(exx_mlwf_radius/=0d0.or.maxval(abs(system%rocc-2d0))>1d-12) &
+    if(exx_mlwf_radius/=0d0.or.(theory/='dft'.and.maxval(abs(system%rocc-2d0))>1d-12)) &
       error stop 'Spatial EXX: full support and occupied spin pairs required'
     if(theory/='dft'.and.propagator/='hse_taylor4')error stop 'Spatial EXX: Taylor4 ACE required'
     if(any(mg%num/=num_rgrid/[1,info%isize_y,info%isize_z]).or. &
@@ -505,9 +505,9 @@ contains
     allocate(local(product(mg%num),system%no,1),w(product(mg%num),system%no,1))
     call hse_pack(psi,mg,info,local)
     changed=1
-    if(allocated(cached_source))then
-      if(all(shape(cached_source)==shape(local)))then
-        if(all(cached_source==local))changed=0
+    if(allocated(cached_source).and.allocated(cached_occupation))then
+      if(all(shape(cached_source)==shape(local)).and.all(shape(cached_occupation)==shape(system%rocc(:,:,1))))then
+        if(all(cached_source==local).and.all(cached_occupation==system%rocc(:,:,1)))changed=0
       endif
     endif
     call comm_summation(changed,total,info%icomm_r)
@@ -516,7 +516,7 @@ contains
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
-      maxiter,exx_mlwf_tolerance,status)
+      maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(:,:,1))
     if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
     call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
@@ -524,8 +524,12 @@ contains
     if(status/=0)error stop 'Spatial EXX: exchange action failed'
     call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
     if(status/=0)error stop 'Spatial EXX: ACE build failed'
-    cached_source=local;cached_action=w
-    ex=exchange_fraction()*system%hvol*real(sum(conjg(local)*w),8)
+    cached_source=local;cached_action=w;cached_occupation=system%rocc(:,:,1)
+    ex=0d0
+    do j=1,system%no
+      ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(j,1,1)*system%wtk(1) &
+        *real(sum(conjg(local(:,j,1))*w(:,j,1)),8)
+    enddo
     call comm_summation(ex,hse_exchange_energy,info%icomm_r)
     if(info%id_r==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
@@ -676,6 +680,6 @@ contains
         enddo
       enddo
     enddo
-    call comm_summation(local,energy,info%icomm_k)
+    call comm_summation(local,energy,info%icomm_rko)
   end subroutine
 end module

@@ -24,7 +24,7 @@ contains
 SUBROUTINE init_wf(lg,mg,system,info,spsi)
   use structures
   use inputoutput, only: au_length_aa, method_init_wf
-  use salmon_global, only: yn_periodic,natom,Rion,yn_jm,exx_mlwf_radius
+  use salmon_global, only: yn_periodic,natom,Rion,yn_jm,exx_mlwf_radius,xc
   use gram_schmidt_orth
   implicit none
 
@@ -207,6 +207,13 @@ CONTAINS
              + (mg%is(3) - lg%is(3) + 1) * lg%num(2) * lg%num(1) &
              + (mg%is(2) - lg%is(2) + 1) * lg%num(1) &
              + (mg%is(1) - lg%is(1) + 1) + iseed_number_change
+    ! Gaussian centers describe global orbitals, not independent local tiles.
+    ! Keep the serial seed on every spatial rank for hybrid exchange.
+    if(index(method_init_wf,'gauss')==1.and.info%isize_r>1.and. &
+       (xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+      iseed(:)=(seed_k*system%no+info%io_s-1)*llen &
+        +lg%num(2)*lg%num(1)+lg%num(1)+1+iseed_number_change
+    endif
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine

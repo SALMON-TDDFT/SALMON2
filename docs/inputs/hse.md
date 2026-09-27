@@ -200,8 +200,7 @@ local grid rows. Supported fields are impulse and Acos2 without a second
 field, using Taylor4+ACE. Checkpoints and snapshots are not supported here.
 
 This migration covers fixed-ion RT and the conventional Gamma SCF scope below.
-HSE MD remains disabled until its forces are validated. Legacy fractional-occupation
-SCF, multi-k, finite-support and projected routes remain available under their
+HSE MD remains disabled until its forces are validated. Legacy multi-k, finite-support and projected routes remain available under their
 existing restrictions; they will be removed only after their replacements are
 implemented and verified.
 
@@ -230,5 +229,39 @@ H4 comparisons at density threshold 1e-10 gave a maximum energy difference
 of 1.57e-9 eV and occupied eigenvalue difference of 2.09e-11 Ha against the
 serial MLWF route. Iteration counts were 109, 49 and 476 on 1, 2 and 4 ranks,
 respectively: this establishes final-state agreement, not parallel speedup or
-identical SCF trajectories. Finite-temperature DC fragment SCF is still on
-its existing implementation.
+identical SCF trajectories. Finite-temperature Gamma DC fragment SCF is supported as described below.
+
+## Spatial HSE DC SCF with partial occupations
+
+`yn_dc='y'`, `theory='dft'`, `xc='hse06'` can now use y/z spatial pencils
+inside each fragment. The same unshifted Gamma, full-support and output
+restrictions apply. FFT divisibility is checked on the **fragment** grid
+`num_rgrid/num_fragment + 2*num_rgrid_buffer`, not the total grid.
+`nproc_rgrid` describes each fragment; `nproc_rgrid_tot` describes the total
+DC system. The total MPI count must accommodate both fragment and intra-fragment
+parallelism. See `samples/hse_spatial/h4_dc_scf.inp` for two fragments with
+two spatial ranks each.
+
+Exchange factors are `Psi sqrt(f/2) U`, while temporal localization uses the
+unweighted `Psi U` frame. This preserves the fractional density matrix;
+zero occupations contribute no exchange, and an occupation-only update
+invalidates cached exchange and ACE. DC core exchange includes spatial
+reductions within each fragment. All positive-temperature HSE DC calculations,
+including the legacy multi-k route, now use the same charge-converged Fermi
+solver as PBEh. Insufficient weighted orbital capacity is explicitly rejected.
+Gaussian centers are shared across hybrid spatial ranks, using the serial
+initialization seed. Pure random initialization is unchanged.
+
+Validation uses H4 at 10,000 K with six states per fragment on 1/2/4 spatial
+ranks per fragment. Final printed total energies agree; core exchange differs
+by at most 1.86e-11 Ha, and electron number errors are below 7e-14.
+DC-LCFO output from every layout reconstructs mesh orbitals and runs fixed-ion
+RT, with matching energy histories. The electronic SCF temperature is not
+fitted or propagated during RT; the RT regression uses fixed occupations.
+
+Convergence remains sensitive: the strict 1e-10 density test requires over
+1,000 iterations in one layout. A 30,000 K stress case did not consistently
+converge within 500 iterations, even on the legacy route; it is not certified
+by these results. No speedup or general high-temperature convergence is claimed.
+Legacy multi-k, finite-radius and projected implementations remain until their
+spatial replacements are validated. HSE MD forces remain a separate task.

@@ -2891,7 +2891,7 @@ contains
     use parallelization
     use communication
     implicit none
-    integer :: i,round_phi
+    integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hse_spatial_scf
 
@@ -3253,11 +3253,11 @@ contains
       (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1).and. &
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
       yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
-    hse_spatial_scf=xc=='hse06'.and.theory=='dft'.and.yn_dc=='n'.and. &
+    hse_spatial_scf=xc=='hse06'.and.theory=='dft'.and. &
       yn_hse_lcfo_rt=='n'.and.product(nproc_rgrid)>1
     if(hse_spatial_scf)then
       yn_hse_wannier='y'
-      if(nstate*2/=nelec.or.temperature>=0d0.or.exx_mlwf_radius/=0d0) &
+      if((yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)).or.exx_mlwf_radius/=0d0) &
         error stop 'Spatial HSE SCF: occupied spin pairs and full support required'
       if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
         error stop 'Spatial HSE SCF: restart/snapshot/checkpoint unsupported'
@@ -3338,8 +3338,13 @@ contains
         if((hybrid_mesh_rt.or.hse_spatial_scf).and.product(nproc_rgrid)>1)then
           if(nproc_ob/=1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
             error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
-          if(modulo(num_rgrid(1),nproc_rgrid(2))/=0.or.modulo(num_rgrid(2),nproc_rgrid(2))/=0.or. &
-             modulo(num_rgrid(2),nproc_rgrid(3))/=0.or.modulo(num_rgrid(3),nproc_rgrid(3))/=0) &
+          exx_grid=num_rgrid
+          if(yn_dc=='y')then
+            if(any(num_fragment<1))error stop 'Spatial EXX: positive fragment counts required'
+            exx_grid=num_rgrid/num_fragment+2*num_rgrid_buffer
+          endif
+          if(modulo(exx_grid(1),nproc_rgrid(2))/=0.or.modulo(exx_grid(2),nproc_rgrid(2))/=0.or. &
+             modulo(exx_grid(2),nproc_rgrid(3))/=0.or.modulo(exx_grid(3),nproc_rgrid(3))/=0) &
             error stop 'Spatial EXX: incompatible FFTW pencil grid'
         else
           if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
