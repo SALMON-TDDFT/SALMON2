@@ -1,0 +1,94 @@
+diff --git a/src/xc/hse_wannier_gauge.f90 b/src/xc/hse_wannier_gauge.f90
+index 662b3960..0cb8924f 100644
+--- a/src/xc/hse_wannier_gauge.f90
++++ b/src/xc/hse_wannier_gauge.f90
+@@ -4,7 +4,7 @@ module hse_wannier_gauge
+   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+   implicit none
+   private
+-  public :: gauge_minimize_gamma_inplace
++  public :: gauge_seed_gamma,gauge_minimize_gamma_inplace
+   public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
+ contains
+   subroutine gauge_seed(psi,position,k,u,status)
+@@ -39,6 +39,39 @@ contains
+     enddo
+     status=0
+   end subroutine
++  subroutine gauge_seed_gamma(coeff,u,status)
++    ! Gamma LCFO seed: no rank-changing copy of the global coefficients.
++    ! Keep QR pivoting and SVD options/workspace identical to gauge_seed.
++    implicit none
++    complex(8),intent(in) :: coeff(:,:)
++    complex(8),intent(out) :: u(:,:)
++    integer,intent(out) :: status
++    complex(8),allocatable :: columns(:,:),tau(:),work(:),overlap(:,:),left(:,:),right(:,:)
++    real(8),allocatable :: rwork(:),singular(:)
++    integer,allocatable :: pivots(:)
++    integer :: n,ng,j
++    n=size(coeff,2);ng=size(coeff,1);status=1
++    if(n<1.or.n>ng.or.any(shape(u)/=[n,n]))return
++    allocate(columns(n,ng),pivots(ng),tau(n),work(max(8*n,34*ng+32)))
++    allocate(rwork(max(2*ng,5*n)))
++    columns=conjg(transpose(coeff));pivots=0
++    call zgeqp3(n,ng,columns,n,pivots,tau,work,size(work),rwork,status)
++    if(status/=0)return
++    ! Large QR columns are no longer needed once the pivots are known.
++    deallocate(columns,tau)
++    allocate(overlap(n,n),left(n,n),right(n,n),singular(n))
++    do j=1,n
++      overlap(:,j)=conjg(coeff(pivots(j),:))
++    enddo
++    call zgesvd('A','A',n,n,overlap,n,singular,left,n,right,n,work,size(work),rwork,status)
++    if(status/=0)return
++    if(minval(singular)<1d-10*maxval(singular))then
++      status=1;return
++    endif
++    u=matmul(left,right)
++    status=0
++  end subroutine
++
+   subroutine gauge_transport(current,previous,dv,u,min_singular,status)
+     implicit none
+     complex(8),intent(in) :: current(:,:,:),previous(:,:,:)
+diff --git a/src/xc/lcfo_rt_wannier.f90 b/src/xc/lcfo_rt_wannier.f90
+index b5f218b1..7ebfa626 100644
+--- a/src/xc/lcfo_rt_wannier.f90
++++ b/src/xc/lcfo_rt_wannier.f90
+@@ -6,7 +6,7 @@ module lcfo_rt_wannier
+   use lcfo_mlwf_links, only: lcfo_initial_links
+   use lcfo_rt_basis
+   use communication, only: comm_summation,comm_bcast
+-  use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma_inplace
++  use hse_wannier_gauge, only: gauge_seed_gamma,gauge_minimize_gamma_inplace
+   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root
+   use lcfo_dist_rows, only: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get
+   use lcfo_dist_dense, only: lcfo_distributed_polar
+@@ -72,7 +72,7 @@ contains
+     complex(8),intent(in) :: coeff(:,:)
+     complex(8),allocatable :: grid(:,:),raw(:,:,:,:),u(:,:,:),overlap(:,:)
+     complex(8),allocatable :: moment_local(:,:),moment(:,:),full_coeff(:,:)
+-    real(8),allocatable :: position(:,:),norm_local(:),norms(:),seed_position(:,:)
++    real(8),allocatable :: position(:,:),norm_local(:),norms(:)
+     real(8) :: b(3,6),weights(6),pi,length(3),wf_spread,gradient,delta,unitary_error
+     integer :: no,ng,g,x,y,z,a,j,status,iterations,seed_status,iu
+     integer(int64) :: link_scratch
+@@ -92,9 +92,7 @@ contains
+     if(lcfo_rank==0)then
+       ! LCFO functions have disjoint compact cores. Pivoted coefficient rows
+       ! supply localized trial functions without gathering the global grid.
+-      allocate(seed_position(3,size(full_coeff,1)));seed_position=0d0
+-      call gauge_seed(reshape(full_coeff,[size(full_coeff,1),no,1]),seed_position,reshape([0d0,0d0,0d0],[3,1]), &
+-                      u,seed_status)
++      call gauge_seed_gamma(full_coeff,u(:,:,1),seed_status)
+       if(seed_status/=0)then
+         u=0d0
+         do j=1,no;u(j,j,1)=1d0;enddo
+@@ -104,7 +102,6 @@ contains
+       open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
+       write(iu)int([16909060,2,no,size(full_coeff,1),lcfo_grid],int32),lcfo_h,full_coeff
+       close(iu)
+-      deallocate(seed_position)
+     endif
+     deallocate(full_coeff)
+     call lcfo_initial_links(grid,position,length,lcfo_dv,lcfo_comm,raw,scratch_elements=link_scratch)

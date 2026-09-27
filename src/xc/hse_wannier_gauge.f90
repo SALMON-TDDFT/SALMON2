@@ -4,7 +4,7 @@ module hse_wannier_gauge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: gauge_minimize_gamma_inplace
+  public :: gauge_seed_gamma,gauge_minimize_gamma_inplace
   public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
 contains
   subroutine gauge_seed(psi,position,k,u,status)
@@ -39,6 +39,39 @@ contains
     enddo
     status=0
   end subroutine
+  subroutine gauge_seed_gamma(coeff,u,status)
+    ! Gamma LCFO seed: no rank-changing copy of the global coefficients.
+    ! Keep QR pivoting and SVD options/workspace identical to gauge_seed.
+    implicit none
+    complex(8),intent(in) :: coeff(:,:)
+    complex(8),intent(out) :: u(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: columns(:,:),tau(:),work(:),overlap(:,:),left(:,:),right(:,:)
+    real(8),allocatable :: rwork(:),singular(:)
+    integer,allocatable :: pivots(:)
+    integer :: n,ng,j
+    n=size(coeff,2);ng=size(coeff,1);status=1
+    if(n<1.or.n>ng.or.any(shape(u)/=[n,n]))return
+    allocate(columns(n,ng),pivots(ng),tau(n),work(max(8*n,34*ng+32)))
+    allocate(rwork(max(2*ng,5*n)))
+    columns=conjg(transpose(coeff));pivots=0
+    call zgeqp3(n,ng,columns,n,pivots,tau,work,size(work),rwork,status)
+    if(status/=0)return
+    ! Large QR columns are no longer needed once the pivots are known.
+    deallocate(columns,tau)
+    allocate(overlap(n,n),left(n,n),right(n,n),singular(n))
+    do j=1,n
+      overlap(:,j)=conjg(coeff(pivots(j),:))
+    enddo
+    call zgesvd('A','A',n,n,overlap,n,singular,left,n,right,n,work,size(work),rwork,status)
+    if(status/=0)return
+    if(minval(singular)<1d-10*maxval(singular))then
+      status=1;return
+    endif
+    u=matmul(left,right)
+    status=0
+  end subroutine
+
   subroutine gauge_transport(current,previous,dv,u,min_singular,status)
     implicit none
     complex(8),intent(in) :: current(:,:,:),previous(:,:,:)

@@ -6,7 +6,7 @@ module lcfo_rt_wannier
   use lcfo_mlwf_links, only: lcfo_initial_links
   use lcfo_rt_basis
   use communication, only: comm_summation,comm_bcast
-  use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma_inplace
+  use hse_wannier_gauge, only: gauge_seed_gamma,gauge_minimize_gamma_inplace
   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root
   use lcfo_dist_rows, only: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get
   use lcfo_dist_dense, only: lcfo_distributed_polar
@@ -72,7 +72,7 @@ contains
     complex(8),intent(in) :: coeff(:,:)
     complex(8),allocatable :: grid(:,:),raw(:,:,:,:),u(:,:,:),overlap(:,:)
     complex(8),allocatable :: moment_local(:,:),moment(:,:),full_coeff(:,:)
-    real(8),allocatable :: position(:,:),norm_local(:),norms(:),seed_position(:,:)
+    real(8),allocatable :: position(:,:),norm_local(:),norms(:)
     real(8) :: b(3,6),weights(6),pi,length(3),wf_spread,gradient,delta,unitary_error
     integer :: no,ng,g,x,y,z,a,j,status,iterations,seed_status,iu
     integer(int64) :: link_scratch
@@ -92,9 +92,7 @@ contains
     if(lcfo_rank==0)then
       ! LCFO functions have disjoint compact cores. Pivoted coefficient rows
       ! supply localized trial functions without gathering the global grid.
-      allocate(seed_position(3,size(full_coeff,1)));seed_position=0d0
-      call gauge_seed(reshape(full_coeff,[size(full_coeff,1),no,1]),seed_position,reshape([0d0,0d0,0d0],[3,1]), &
-                      u,seed_status)
+      call gauge_seed_gamma(full_coeff,u(:,:,1),seed_status)
       if(seed_status/=0)then
         u=0d0
         do j=1,no;u(j,j,1)=1d0;enddo
@@ -104,7 +102,6 @@ contains
       open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
       write(iu)int([16909060,2,no,size(full_coeff,1),lcfo_grid],int32),lcfo_h,full_coeff
       close(iu)
-      deallocate(seed_position)
     endif
     deallocate(full_coeff)
     call lcfo_initial_links(grid,position,length,lcfo_dv,lcfo_comm,raw,scratch_elements=link_scratch)
