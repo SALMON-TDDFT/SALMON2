@@ -227,53 +227,59 @@ module structures
 
 ! pseudopotential
   type s_pp_info
-    real(8) :: zion
-    integer :: lmax,lmax0
-    integer :: nrmax,nrmax0
-    logical :: flag_nlcc
+    real(8) :: zion ! ionic charge read from the pseudopotential file
+    integer :: lmax,lmax0 ! angular-momentum capacities: element tables and work arrays
+    integer :: nrmax,nrmax0 ! radial capacities: element tables and work arrays
+    logical :: flag_nlcc ! true if any element has nonlinear core correction
     logical,allocatable :: has_rho_pp(:) ! rho_pp_tbl is populated for this element
     logical,allocatable :: has_wf_pp(:)  ! upp contains input pseudo wavefunctions
     logical,allocatable :: has_proj_pp(:) ! projectors (and KB coefficients) are given by the input file
-    character(2),allocatable :: atom_symbol(:)
-    real(8),allocatable :: rmass(:)
-    integer,allocatable :: mr(:)
-    integer,allocatable :: lref(:)
-    integer,allocatable :: nrps(:)
-    integer,allocatable :: mlps(:)
-    integer,allocatable :: nproj(:,:)
-    integer,allocatable :: num_orb(:)
-    integer,allocatable :: zps(:)
-    integer,allocatable :: nrloc(:)
-    real(8),allocatable :: rloc(:)
-    real(8),allocatable :: rps(:)
-    real(8),allocatable :: anorm(:,:)
-    integer,allocatable :: inorm(:,:)
+    logical,allocatable :: has_pseudo_wf(:) ! rough has_pseudo_wf is calculated for this element
+    character(2),allocatable :: atom_symbol(:) ! chemical symbol for each element
+    real(8),allocatable :: rmass(:) ! atomic mass for each element
+    integer,allocatable :: mr(:) ! last radial index containing input data
+    integer,allocatable :: lref(:) ! vpp column containing the local potential
+    integer,allocatable :: nrps(:) ! radial endpoint of the nonlocal projectors
+    integer,allocatable :: mlps(:) ! maximum angular momentum for each element
+    integer,allocatable :: nproj(:,:) ! number of projectors for each angular momentum and element
+    integer,allocatable :: num_orb(:) ! number of PAW orbitals for each element
+    integer,allocatable :: zps(:) ! ionic valence charge for each element
+    integer,allocatable :: nrloc(:) ! local-potential integration endpoint before masking
+    real(8),allocatable :: rloc(:) ! local-potential cutoff before masking
+    real(8),allocatable :: rps(:) ! nonlocal-projector cutoff; may be enlarged by masking
+    real(8),allocatable :: anorm(:,:) ! magnitude of the KB coefficient after square root
+    integer,allocatable :: inorm(:,:) ! sign of the KB coefficient; zero disables projector
     real(8),allocatable :: anorm_so(:,:) ! '*_so' means what is used in
     integer,allocatable :: inorm_so(:,:) !   spin-orbit calculation
-    real(8),allocatable :: rad(:,:)
-    real(8),allocatable :: radnl(:,:)
-    real(8),allocatable :: vloctbl(:,:)
-    real(8),allocatable :: dvloctbl(:,:)
-    real(8),allocatable :: udvtbl(:,:,:)
-    real(8),allocatable :: dudvtbl(:,:,:)
+    real(8),allocatable :: rad(:,:) ! radial grid for each element
+    real(8),allocatable :: radnl(:,:) ! radial grid used to interpolate nonlocal projectors
+    real(8),allocatable :: vloctbl(:,:) ! local-potential radial table
+    real(8),allocatable :: dvloctbl(:,:) ! radial derivative of vloctbl
+    real(8),allocatable :: udvtbl(:,:,:) ! KB projector radial tables, including coefficient magnitude
+    real(8),allocatable :: dudvtbl(:,:,:) ! radial derivatives of udvtbl
     real(8),allocatable :: rho_pp_tbl(:,:) ! radial valence density 4*pi*r^2*n(r) at rad(i,ik) for method_init_density=pp
-    real(8),allocatable :: rho_nlcc_tbl(:,:)
-    real(8),allocatable :: tau_nlcc_tbl(:,:)
-    real(8),allocatable :: upp_f(:,:,:)
-    real(8),allocatable :: vpp_f(:,:,:)
-    real(8),allocatable :: vpp_f_so(:,:,:)
-    real(8),allocatable :: upp(:,:)
-    real(8),allocatable :: dupp(:,:)
-    real(8),allocatable :: vpp(:,:)
-    real(8),allocatable :: dvpp(:,:)
-    real(8),allocatable :: vpp_so(:,:)
-    real(8),allocatable :: dvpp_so(:,:)
-    real(8),allocatable :: udvtbl_so(:,:,:)
-    real(8),allocatable :: dudvtbl_so(:,:,:)
-    real(8),allocatable :: rps_ao(:)
-    integer,allocatable :: nrps_ao(:)
-    real(8),allocatable :: upptbl_ao(:,:,:)
-    real(8),allocatable :: dupptbl_ao(:,:,:)
+    real(8),allocatable :: pseudo_wf_rad(:,:) ! radial grid r(j) of the pseudo wavefunction solver (calc_pseudo_wf)
+    real(8),allocatable :: pseudo_wf(:,:,:)  ! radial pseudo wavefunction u_l(r)=r*R_l(r), indexed by pseudo_wf_rad
+    real(8),allocatable :: pseudo_wf_eigval(:,:) ! eigenvalue of pseudo_wf(:,l,ik)
+    real(8),allocatable :: pseudo_wf_occup(:,:)  ! occupation number of pseudo_wf(:,l,ik)
+    real(8),allocatable :: pseudo_wf_rho(:,:)  ! charge density pseudo_wf(:,l,ik)
+    real(8),allocatable :: rho_nlcc_tbl(:,:) ! nonlinear core charge density for each element
+    real(8),allocatable :: tau_nlcc_tbl(:,:) ! NLCC kinetic-energy density correction, (rho_c')^2/(4*rho_c)
+    real(8),allocatable :: upp_f(:,:,:) ! per-element copy of upp used by PDOS
+    real(8),allocatable :: vpp_f(:,:,:) ! per-element copy of vpp used for isolated-system local potentials
+    real(8),allocatable :: vpp_f_so(:,:,:) ! spin-orbit potential copy (currently unused)
+    real(8),allocatable :: upp(:,:) ! working pseudo wavefunctions u_l(r)=r*R_l(r)
+    real(8),allocatable :: dupp(:,:) ! radial derivatives of upp
+    real(8),allocatable :: vpp(:,:) ! working potential or projector data, depending on input format
+    real(8),allocatable :: dvpp(:,:) ! radial derivatives of vpp
+    real(8),allocatable :: vpp_so(:,:) ! spin-orbit projector data during input processing
+    real(8),allocatable :: dvpp_so(:,:) ! radial derivatives of vpp_so
+    real(8),allocatable :: udvtbl_so(:,:,:) ! spin-orbit KB projector radial tables
+    real(8),allocatable :: dudvtbl_so(:,:,:) ! radial derivatives of udvtbl_so
+    real(8),allocatable :: rps_ao(:) ! radial cutoff for DFT+U atomic orbitals
+    integer,allocatable :: nrps_ao(:) ! radial endpoint for DFT+U atomic orbitals
+    real(8),allocatable :: upptbl_ao(:,:,:) ! pseudo wavefunctions tabulated for DFT+U
+    real(8),allocatable :: dupptbl_ao(:,:,:) ! derivatives of the DFT+U pseudo-wavefunction table (unused)
   end type s_pp_info
 
 ! pseudopotential on r-space grid

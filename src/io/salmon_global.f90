@@ -112,6 +112,7 @@ module salmon_global
   integer        :: lloc_ps(maxmki)
   integer        :: izatom(maxmki)
   character(1)   :: yn_psmask
+  character(1)   :: yn_pseudo_atomic_orbital ! calculate approximate pseudo atomic orbitals
   real(8)        :: alpha_mask
   real(8)        :: gamma_mask
   real(8)        :: eta_mask
