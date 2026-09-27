@@ -765,3 +765,37 @@ cmake --build build -j 8
 先の3枚と重ねて適用しない。dry-run失敗時は元ソースは変更されていないので
 復元操作は不要。累積パッチのdry-runも失敗する場合は現物の版を確認する。
 これはパッチ配布の修正のみで、数値コードは`133e8b37`から変更していない。
+
+### 富岳の実ファイルをハッシュで特定（2026-09-27、配布手順の訂正）
+
+利用者から提示された4ファイルのSHA-256は、`b743e8b3`の直前の内容に
+すべて完全一致した。初期リンクのタイル化も未適用だったため、前節の
+`gamma-memory-from-pre-root.patch`では不足した。2回ともdry-runで止まり、
+本適用やビルドは実行されていない。失敗hunk数だけで版を推定した案内を訂正する。
+
+この実ファイル用は[gamma-memory-fugaku-verified.patch](../../../tools/patches/gamma-memory-fugaku-verified.patch)。
+初期リンク削減、rootリンク削減、Gamma seed 2D化、streamed seed、分散seedまでを含む。
+既存4ファイルの変更と`lcfo_mlwf_links.f90`・`lcfo_seed.f90`の新設で計6ファイル。
+富岳で直した`hse_lcfo_rt.f90`・`posix.c`には触れない。
+
+適用前4ファイル・適用後6ファイルのSHA-256照合表も同梱：
+[before](../../../tools/patches/gamma-memory-fugaku-before.sha256)／
+[after](../../../tools/patches/gamma-memory-fugaku-after.sha256)／
+[版情報](../../../tools/patches/gamma-memory-fugaku-verified.json)。
+特定した旧版からfuzz=0でdry-run・本適用を行い、全6ファイルが数値実装
+`133e8b37`とbyte一致すること、二重適用を拒否することをローカルで検証済み。
+この配布修正で数値コードは変更していない。富岳でのビルド成功はまだ未確認。
+
+ソース直下に上記patchとbefore/afterをダウンロード後：
+
+```sh
+# いずれか失敗したら後続処理を実行しない
+sha256sum -c gamma-memory-fugaku-before.sha256
+patch --batch --forward --fuzz=0 --dry-run -p1 < gamma-memory-fugaku-verified.patch
+patch --batch --forward --fuzz=0 -p1 < gamma-memory-fugaku-verified.patch
+sha256sum -c gamma-memory-fugaku-after.sha256
+cmake -S . -B build
+cmake --build build -j 8
+```
+
+先に案内した3枚やpre-rootパッチは、この版には適用しない。
