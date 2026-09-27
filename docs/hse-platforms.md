@@ -10,29 +10,56 @@ not replace tests with Fujitsu, Intel or a Linux GNU toolchain.
 
 ## Fugaku
 
-Use the repository's existing toolchain rather than host compiler detection:
+On a Fugaku login host with `mpifrtpx` and `mpifccpx` on PATH and no explicit
+compiler/toolchain override, ordinary CMake selects the target toolchain:
 
 ```sh
-cmake -S . -B build-fugaku -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/platforms/fujitsu-a64fx-ea.cmake"
+cmake -S . -B build
+cmake --build build -j 8
+```
+
+The automatic selection defaults to Release, MPI, native HSE and vendor
+ScaLAPACK. CMake prints `SALMON: selecting Fugaku MPI/HSE toolchain` and records
+`platforms/fugaku.cmake` in `CMakeCache.txt`. `USE_MPI=OFF` also disables the
+ScaLAPACK default; explicit `USE_SCALAPACK=OFF` is respected. The old
+`platforms/fujitsu-a64fx-ea.cmake` remains a compatibility alias.
+
+If your shell sets CC/FC or a package manager specifies compilers, automatic
+selection deliberately leaves those choices alone. For a Fugaku cross build,
+use a fresh build directory and explicitly select the toolchain:
+
+```sh
+cmake -S . -B build-fugaku \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/platforms/fugaku.cmake"
 cmake --build build-fugaku -j 8
 ```
 
-It selects mpifrtpx/mpifccpx, Fujitsu OpenMP, Linux/A64FX cross compilation and
-SSL II (`-SSL2BLAMP`). The SSL II/OpenMP combination matches the
-[RIKEN/RIST usage guide](https://www.r-ccs.riken.jp/fugaku/docs/workshop/2024/ja/introduction_to_fugaku_usage_seminar_ja_202410.pdf).
-Those vendor BLAS flags bypass the Netlib fallback.
-The dependency projects receive the selected compilers and the absolute toolchain
-file. GNU-only compatibility/workaround flags are guarded by compiler identity.
-The HSE library probes compile/link; they do not execute target programs on the
-login host. Libxc native-host optimization is disabled, and FFTW is built serially
-because SALMON calls its FFTs outside OpenMP regions.
+`SALMON_PLATFORM=generic` disables automatic detection.
+`SALMON_PLATFORM=fugaku` requires the two compiler wrappers and rejects
+conflicting compiler overrides. An explicit toolchain always takes precedence.
+Do not reuse a build directory configured for another compiler/architecture.
 
-Build-time source downloads require network access if compatible dependencies
-are not already installed. A compute node is not required for these HSE library
-probes, but MPI execution/CTest belongs inside the site's compute allocation.
-Use the configured site's MPI launcher, four ranks and OMP_NUM_THREADS=12 for a
-48-core node. That hybrid configuration still needs execution on Fugaku.
+The toolchain selects Fujitsu OpenMP and SSL II / ScaLAPACK
+(`-Kopenmp -Nfjomplib`, `-SCALAPACK -SSL2BLAMP`). Vendor library selection follows
+the [RIKEN/RIST usage guide](https://www.r-ccs.riken.jp/fugaku/docs/workshop/2025/en/seminar_for_fugaku_users_beginner_course_en_202511.pdf).
+Dependencies receive the selected compilers and absolute target toolchain.
+HSE library probes compile/link and do not execute target programs on the login
+host. Libxc native-host optimization is disabled; FFTW itself is serial, with
+independent per-worker plans when SALMON uses OpenMP.
+
+Compatible installed FFTW and Libxc are used when detected. Otherwise CMake's
+build downloads hash-pinned sources and builds them automatically with the target
+toolchain. First-time fallback builds require network access; for offline sites,
+provide compatible installed libraries through CMAKE_PREFIX_PATH or the documented
+LIBXC_INSTALLDIR / FFTW_INSTALLDIR hints. No manual dependency build is needed when
+the downloads are available. Do not run MPI/CTest target executables on the login
+host: submit execution in the site's compute allocation.
+
+The new platform-selection tests use fake compiler paths to check configuration
+logic only. Fresh generic MPI/HSE and HSE-off builds are tested on Apple Silicon.
+Actual Fujitsu compilation, linking against SSL II/ScaLAPACK, and 3D numerical
+execution on Fugaku remain to be verified by the user; these are not certified by
+local tests.
 
 ## Linux
 

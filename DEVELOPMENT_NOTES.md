@@ -4,6 +4,7 @@
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
+- [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
 - [最新：交換FFTの計画最適化](#fft-measure)
 - [Gram検査の演算・通信削減](#packed-gram)
@@ -13,6 +14,21 @@
 - [ACE・U輸送と高速化](#reuse)
 - [検証と残る課題](#remaining)
 - [入力・再実行・詳細記録](#records)
+
+<a id="fugaku-build"></a>
+
+## 富岳：通常のCMakeビルド
+
+富岳ログイン環境で `mpifrtpx` / `mpifccpx` がPATH上にあり、他のコンパイラ・toolchain指定がなければ、次だけで富岳設定を自動選択します。
+
+```sh
+cmake -S . -B build
+cmake --build build -j 8
+```
+
+Release・MPI・ScaLAPACK・HSEが既定で有効。FFTW/Libxcは利用可能なものをリンク検査し、なければ対象コンパイラで自動ビルドします（初回ダウンロードにはネットワークが必要）。CC/FCを設定した環境では明示toolchainを使ってください。`SALMON_PLATFORM=generic`で自動選択を無効にできます。
+
+ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳実機のコンパイル・リンク・3次元計算は未検証**です。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
 
 <a id="implementation"></a>
 

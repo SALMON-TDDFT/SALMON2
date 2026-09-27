@@ -34,3 +34,14 @@ the build tree. Existing vendor-specific LAPACK flags remain supported.
 The earlier smoke cases did not establish SCF convergence. The stronger Nk=4^3
 convergence tests subsequently exposed a separate Netlib eigenvector problem;
 see [the updated portability and numerical test record](hse-platforms.md).
+
+## Fugaku automatic selection preparation — 2026-09-27
+
+Executed locally on Apple Silicon / GNU Fortran15, not on Fugaku:
+
+- `python3 testsuites/unit_cmake/test_platform.py`: platform selection with fake compiler paths, overrides, compatibility alias, Release/Debug defaults, MPI/ScaLAPACK defaults, repeated inclusion, and dependency toolchain forwarding passed. No fake compiler was invoked as a real compiler.
+- Fresh `cmake -S . -B <new-build> -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON`, then `cmake --build <new-build> -j4`: HSE enabled by default; installed OpenBLAS, Libxc and FFTW detected; full binary built. No manual compiler/library paths or extra compiler flags.
+- Fresh `USE_HSE=OFF` Release configure and complete build passed.
+- The newly built MPI/HSE executable passed `hse_lapack_eigenvectors` and `test_direct_wf.py` (MPI2/4, density/current/energy, finite support, ACE/U reuse, half dt, measured FFT and flag rejection).
+
+The canonical `platforms/fugaku.cmake` is selected before `project()` on a Linux host with both Fujitsu MPI cross compiler wrappers available and no compiler/toolchain overrides. Legacy `fujitsu-a64fx-ea.cmake` remains an alias. Both default to vendor ScaLAPACK with MPI, with explicit OFF options respected. Target dependency configuration is compile/link only. Fujitsu compilation and vendor-library linkage still require testing on Fugaku; no remote test was executed in this session.

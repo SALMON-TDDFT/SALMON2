@@ -8,7 +8,10 @@ cmake --build build -j 8
 ```
 
 HSE is enabled by default. Add `-DUSE_MPI=ON` to configure an MPI build;
-CMake uses the installed MPI implementation. No additional HSE dependency paths,
+CMake uses the installed MPI implementation. On a Fugaku login host with
+`mpifrtpx`/`mpifccpx` available and no explicit compiler overrides, plain CMake
+automatically selects the Fugaku Release/MPI/ScaLAPACK toolchain. See
+[platform selection and overrides](hse-platforms.md#fugaku). No additional HSE dependency paths,
 separate library build commands, or compiler workaround flags are needed.
 
 CMake first checks installed dependencies, including their required interfaces.

@@ -2,6 +2,7 @@
 
 > **DC-HSE / MLWF / ACE 開発ノート（2026-09-27）**
 > [実装状況・精度と速度・Diamond 32/64/128弱スケーリング・再実行入力](DEVELOPMENT_NOTES.md)
+> [富岳での通常CMakeビルド](docs/hse-platforms.md#fugaku)（新しいHSE経路の富岳実機検証は未実施）
 > 対象：`dc-hse-mlwf-ace` ブランチ。実験的LCFO RTの制約と未実装事項を含みます。
 
 

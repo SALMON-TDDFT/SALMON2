@@ -15,6 +15,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Modules)
 include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
 
 
+include(${CMAKE_SOURCE_DIR}/cmakefiles/select_platform.cmake)
+
 ### Project settings
 enable_testing()
 set(CMAKE_C_STANDARD_REQUIRED ON)
