@@ -1,13 +1,14 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`841bafe6`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`64d147d8`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
-- [最新：Gamma seedのピークメモリ削減](#seed-memory)
+- [最新：root係数の二重保持を除去](#streamed-seed)
+- [Gamma seedの2次元化](#seed-memory)
 - [初期MLWFのリンクメモリ削減と本番制約](#initial-memory)
 - [交換FFTの計画最適化](#fft-measure)
 - [Gram検査の演算・通信削減](#packed-gram)
@@ -59,9 +60,27 @@ make -j 8
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="streamed-seed"></a>
+
+## 最新：root係数の二重保持を除去
+
+`64d147d8`で全係数をQR配置へ直接集約し、元配置の`full_coeff`を廃止。snapshotは列ごとに書き出し、QR後は選択行だけを各rankから回収してSVDへ渡します。QR行列は行回収前に解放します。
+
+MPI2・占有512/基底8192のseed単独peak RSSは **root204.25→141.27 MiB（30.8%減）**、非root50.19→50.64 MiB。Uと係数snapshotは一致。前段の1プロセス測定とは条件が異なり、削減率は合算しません。
+
+| C128/MPI16、同一GS・16step | 結果 |
+|---|---|
+| 初期snapshot／リンクsnapshot | byte単位で一致 |
+| 最大電流差／密度差／出力エネルギー差 | 1.46e-17 a.u.／4.00e-15／0 |
+| RT秒・速度比（旧/新） | 52.042→56.467、0.922（各1回・背景負荷差あり） |
+
+rootにQR行列1枚は残り、QR自体は未分散。密SVD/U/ACEも残るため、RT全体や8³のピーク削減率・本番可否を保証する結果ではありません。今回の変更は富岳では未検証です。
+
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/streamed-seed-memory-results.json) ／ [適用用差分](tools/patches/streamed-gamma-seed.patch)
+
 <a id="seed-memory"></a>
 
-## 最新：Gamma seedのピークメモリ削減
+## 前段：Gamma seedの2次元化
 
 `841bafe6`で全係数のreshapeコピーを除去し、QRの大配列を解放してからSVD行列を確保。seed単独のpeak RSSは占有512・基底8192で **220.78→156.55 MiB（29.1%減）**。Uは全要素一致しました。これは合成係数の単独測定で、RT全体や富岳8³のピークではありません。
 
