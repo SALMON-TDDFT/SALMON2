@@ -149,3 +149,27 @@ outputs, the default HSE screening and Taylor propagator, electron count 32,
 nonzero bounded impulse current, post-kick energy drift, and the dielectric/
 conductivity identity. The original failing Netlib eigenvector path was reproduced
 before applying the workaround. No new Fugaku or Linux execution is claimed.
+
+### frtpxがhse_lcfo_rt.f90でSIGSEGVになる場合（2026-09-27調査中）
+
+利用者のtcsds-1.2.43環境で、直列ビルドでも`hse_lcfo_rt.f90`の翻訳中に
+`Compilation abnormally ended due to SIGSEGV`、続いて`flist: Invalid format`が発生。
+`-Kfast`を`-O0`へ置換してもstatus=11で再現した。最適化レベル低下による
+回避は未成立。現在の情報では、原因となる構文・処理段階は特定していない。
+
+既存のbuildを使い、ソース直下で次を実行する：
+
+```sh
+python3 tools/diagnose_frtpx_lcfo.py --build build --compiler mpifrtpx
+```
+
+診断はコンパイルのみ。元コードのO0、OpenMP指定を外した対照、すべての手続きの
+実行文をstub化した対照、および各手続きの実行文だけを復元した10ケースを逐次実行する。
+宣言と手続きのインターフェースは保持する。全生成物と既存moduleのコピーは新規の
+一時ディレクトリに隔離し、本番object/moduleの置換・リンク・数値計算は行わない。
+各ケースのstatus、コンパイラ版、コマンド、ログを保存する。非ゼロstatusが構文エラーか
+SIGSEGVかはログで区別する。一手続きだけで再現しない場合は手続き間の組合せや
+module宣言/import処理も候補に残るため、単一の原因を断定しない。
+
+ローカルGNU Fortran 15で13ケースすべての構文・コンパイルを確認した。
+富士通コンパイラでの診断結果・回避策は未確認。診断用stubは実行してはならない。
