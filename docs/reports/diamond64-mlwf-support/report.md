@@ -692,3 +692,50 @@ rootにはQR配置の全係数1枚（16×基底数×占有数byte）、集約タ
 今回のコードは富岳でのビルド・数値実行未確認。Git管理のないソース向けに`tools/patches/streamed-gamma-seed.patch`を用意した。前段のGamma seed 2D化を含む版に対してdry-runを確認してから適用する。新モジュール`lcfo_seed.f90`とCMakeのソース登録変更を含む。差分が一致しない場合に強制適用しない。
 
 [測定データ](streamed-seed-memory-results.json)
+
+<a id="distributed-seed"></a>
+
+## 2026-09-27：seed QRのMPI分散（133e8b37）
+
+`133e8b37`で`SALMON_LCFO_SEED_DISTRIBUTED=1`を追加。ScaLAPACKのピボット付きQRを使い、係数を所有rankからQR所有rankへ直接転送します。rootに全体QR配列を置かず、snapshotも列ごとに保存。**既定値は0（従来経路）**で、MPI＋ScaLAPACKが必要です。
+
+seed単独、合成複素係数・基底数=16×占有数、OMP/BLAS各1。各条件は独立プロセスで1回ずつ測定。rootのピークを分散する変更であり、全rank合計の削減率ではありません。
+
+| 占有数・MPI | root peak RSS MiB（旧→新） | 非root peak RSS MiB（旧→新） | seed秒（旧→新）／速度比 | U最大差 |
+|---|---:|---:|---:|---:|
+| 256・2 | 49.17→38.42 | 23.44→32.70 | 0.261→0.221／1.182 | 0 |
+| 512・2 | 141.27→102.55（27.4%減） | 50.78→83.81 | 2.120→1.848／1.147 | 0 |
+| 512・4 | 126.31→71.84（43.1%減） | 34.91–35.58→52.36–52.92 | 2.215→1.614／1.372 | 0 |
+
+| C128/MPI16、同一GS・R6・ACE1/U1・dt0.02・16step | 結果 |
+|---|---|
+| 初期snapshot／リンクsnapshot | byte単位で一致。U・中心・norm・広がり・勾配差0 |
+| 最大電流差／E∞（基準ピーク規格化） | 1.97e-17 a.u.／1.87e-10% |
+| 終端電流差DT（基準ピーク規格化） | −1.01e-10% |
+| 最大密度差／出力エネルギー差 | 5.00e-15／0 |
+| RT秒・速度比（旧/新） | 53.377→55.984、0.953 |
+| 背景CPU平均（%） | 242.3→228.7 |
+
+RTは各1回で負荷差があり、速度改善の主張はしません。QRは初期化時だけです。一般には同率pivotの選択順が変わる可能性があるため、今回の一致を全入力へ一般化せず選択式を維持します。
+
+MPI1/2/3/4、空のroot・不均等行分割・端数ブロック・特異行列、非対応ビルドの拒否を検証。分散seedを有効にしたnative Taylor4、フラグメント×軌道MPI、局所半径、ACE/U再利用も通過。**富岳での新経路のビルドと数値計算は未検証**です。密SVD/U/ACEとrootの6リンクは残り、8³・10³本番の保留は継続します。
+
+[詳細](../../../DEVELOPMENT_NOTES.md#distributed-seed) ／ [測定データ](distributed-seed-memory-results.json) ／ [適用用差分](../../../tools/patches/distributed-gamma-seed.patch)
+
+
+### 実装と再実行
+
+QRの各rank保持量は`Nocc × max(1,NUMROC(Nbasis,32,rank,0,np))`複素数。転送は最大`32×Nocc`、snapshot用のroot scratchは`Nbasis`。QR後は分散配列を解放し、既存の選択行回収・root SVDを使う。MPI1ではQR行列自体の分散効果はない。
+
+検証コマンドは`testsuites/unit_lcfo_rt/test_seed_distributed.py`、`test_seed_stream.py`、`benchmark_seed_distributed.py`。native試験は`SALMON_LCFO_SEED_DISTRIBUTED=1`を設定して`test_direct_wf.py`を実行。テストのScaLAPACK/OpenBLASパスは今回のMac環境用。
+
+Git管理されていないソース用差分は`distributed-gamma-seed.patch`。**64d147d8/8cca5430相当のstreamed seedが適用済みであること**が前提。古い富岳ソースへ直接適用しない。ソース直下でdry-run後に適用し再ビルド：
+
+```sh
+patch --dry-run -p1 < distributed-gamma-seed.patch
+patch -p1 < distributed-gamma-seed.patch
+cmake --build build -j 8
+export SALMON_LCFO_SEED_DISTRIBUTED=1
+```
+
+以前のroot経路は`SALMON_LCFO_SEED_DISTRIBUTED=0`で選択。新経路は通常ビルドに含まれるが、富岳のPZGEQPFリンク・コンパイル・数値は実機検証待ち。

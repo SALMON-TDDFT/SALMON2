@@ -560,3 +560,31 @@ Measured planning adds startup latency and selects a machine/load-dependent FFT 
 ### Initial MLWF link memory
 
 `lcfo_mlwf_links.f90` constructs positive Gamma link overlaps in at most64-column ZGEMM tiles and reduces to spatial root only; negative links are the adjoints. The full six-link array is empty on non-root and freed immediately after root localization. Scratch is `(ng+2N)*min(64,N)+ng` complex elements per rank. The MV optimizer, coefficient seed gather and replicated U/ACE arrays are not distributed by this change. Large3D production remains held pending those remaining peak-memory reductions. Snapshot layout and numerical tolerances are unchanged.
+
+### Optional distributed Gamma seed QR (2026-09-27)
+
+`SALMON_LCFO_SEED_DISTRIBUTED=1` selects ScaLAPACK `PZGEQPF` for the initial
+coefficient seed. Default `0` retains root `ZGEQP3`. Both MPI and ScaLAPACK are
+required; an explicit request in an unsupported build is rejected. The setting
+is read on the seed communicator root and shared with its other ranks.
+
+The conjugate-transposed coefficient matrix has shape `(Noccupied,Nbasis)`.
+A one-row BLACS grid distributes 32-column cyclic blocks over all ranks of the
+existing row communicator. Each original coefficient owner sends directly to
+its QR owner; no complete coefficient matrix is gathered on root. Per-rank QR
+storage is `Noccupied * max(1,NUMROC(Nbasis,32,rank,0,nproc))` complex values,
+plus at most `32*Noccupied` transfer values and linear workspace. The snapshot
+is gathered and written one occupied column at a time with `Nbasis` root scratch.
+After QR storage is released, the existing bounded selected-row recovery and
+root SVD produce U. The coefficient snapshot layout is unchanged.
+
+This is opt-in: parallel pivot tie-breaking can produce a different valid seed,
+and a finite-radius exchange mask is sensitive to the localized frame. Do not
+assume equivalence from unitarity alone. Tests compare root-reference U, saved
+coefficients, and a short C128/MPI16 RT calculation. No extra physical truncation
+is introduced. Root dense SVD, six localization links, and replicated U/ACE
+remain; this change does not establish feasibility of the large 3D production
+inputs. Fujitsu compilation and numerical behavior of this backend remain to
+be checked on Fugaku.
+
+Routine contract: [Netlib PZGEQPF](https://www.netlib.org/scalapack/explore-html/de/dbc/pzgeqpf_8f_a3109fb670aa8063cd76c95b5a27b1177.html).

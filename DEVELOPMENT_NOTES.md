@@ -1,13 +1,14 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`64d147d8`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`133e8b37`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
-- [最新：root係数の二重保持を除去](#streamed-seed)
+- [最新：seed QRのMPI分散](#distributed-seed)
+- [root係数の二重保持を除去](#streamed-seed)
 - [Gamma seedの2次元化](#seed-memory)
 - [初期MLWFのリンクメモリ削減と本番制約](#initial-memory)
 - [交換FFTの計画最適化](#fft-measure)
@@ -60,9 +61,38 @@ make -j 8
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="distributed-seed"></a>
+
+## 最新：seed QRのMPI分散
+
+`133e8b37`で`SALMON_LCFO_SEED_DISTRIBUTED=1`を追加。ScaLAPACKのピボット付きQRを使い、係数を所有rankからQR所有rankへ直接転送します。rootに全体QR配列を置かず、snapshotも列ごとに保存。**既定値は0（従来経路）**で、MPI＋ScaLAPACKが必要です。
+
+seed単独、合成複素係数・基底数=16×占有数、OMP/BLAS各1。各条件は独立プロセスで1回ずつ測定。rootのピークを分散する変更であり、全rank合計の削減率ではありません。
+
+| 占有数・MPI | root peak RSS MiB（旧→新） | 非root peak RSS MiB（旧→新） | seed秒（旧→新）／速度比 | U最大差 |
+|---|---:|---:|---:|---:|
+| 256・2 | 49.17→38.42 | 23.44→32.70 | 0.261→0.221／1.182 | 0 |
+| 512・2 | 141.27→102.55（27.4%減） | 50.78→83.81 | 2.120→1.848／1.147 | 0 |
+| 512・4 | 126.31→71.84（43.1%減） | 34.91–35.58→52.36–52.92 | 2.215→1.614／1.372 | 0 |
+
+| C128/MPI16、同一GS・R6・ACE1/U1・dt0.02・16step | 結果 |
+|---|---|
+| 初期snapshot／リンクsnapshot | byte単位で一致。U・中心・norm・広がり・勾配差0 |
+| 最大電流差／E∞（基準ピーク規格化） | 1.97e-17 a.u.／1.87e-10% |
+| 終端電流差DT（基準ピーク規格化） | −1.01e-10% |
+| 最大密度差／出力エネルギー差 | 5.00e-15／0 |
+| RT秒・速度比（旧/新） | 53.377→55.984、0.953 |
+| 背景CPU平均（%） | 242.3→228.7 |
+
+RTは各1回で負荷差があり、速度改善の主張はしません。QRは初期化時だけです。一般には同率pivotの選択順が変わる可能性があるため、今回の一致を全入力へ一般化せず選択式を維持します。
+
+MPI1/2/3/4、空のroot・不均等行分割・端数ブロック・特異行列、非対応ビルドの拒否を検証。分散seedを有効にしたnative Taylor4、フラグメント×軌道MPI、局所半径、ACE/U再利用も通過。**富岳での新経路のビルドと数値計算は未検証**です。密SVD/U/ACEとrootの6リンクは残り、8³・10³本番の保留は継続します。
+
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/distributed-seed-memory-results.json) ／ [適用用差分](tools/patches/distributed-gamma-seed.patch)
+
 <a id="streamed-seed"></a>
 
-## 最新：root係数の二重保持を除去
+## 前段：root係数の二重保持を除去
 
 `64d147d8`で全係数をQR配置へ直接集約し、元配置の`full_coeff`を廃止。snapshotは列ごとに書き出し、QR後は選択行だけを各rankから回収してSVDへ渡します。QR行列は行回収前に解放します。
 
@@ -74,7 +104,7 @@ MPI2・占有512/基底8192のseed単独peak RSSは **root204.25→141.27 MiB（
 | 最大電流差／密度差／出力エネルギー差 | 1.46e-17 a.u.／4.00e-15／0 |
 | RT秒・速度比（旧/新） | 52.042→56.467、0.922（各1回・背景負荷差あり） |
 
-rootにQR行列1枚は残り、QR自体は未分散。密SVD/U/ACEも残るため、RT全体や8³のピーク削減率・本番可否を保証する結果ではありません。今回の変更は富岳では未検証です。
+この標準経路ではrootにQR行列1枚は残り、QR自体は未分散。密SVD/U/ACEも残るため、RT全体や8³のピーク削減率・本番可否を保証する結果ではありません。今回の変更は富岳では未検証です。
 
 [詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/streamed-seed-memory-results.json) ／ [適用用差分](tools/patches/streamed-gamma-seed.patch)
 
