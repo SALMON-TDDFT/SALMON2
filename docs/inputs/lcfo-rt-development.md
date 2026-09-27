@@ -1,3 +1,7 @@
+> Historical fixed-basis RT documentation. The production flags described below
+> are retired and rejected. Use [real-space HSE RT](realspace-hse-rt.md).
+> Prior timing/spectral comparisons do not certify full mesh time propagation.
+
 # LCFO RT development status
 
 Current control interface: all LCFO HSE algorithm settings use `&functional`.

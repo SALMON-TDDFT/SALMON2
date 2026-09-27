@@ -1,0 +1,31 @@
+{
+  "full_wf_parity": 3.963634839990911e-21,
+  "native_reference_current": 1.3023131564034868e-20,
+  "native_reference_density": 3.0357660829594124e-18,
+  "native_reference_energy": 9.769962616701378e-15,
+  "orbital_mpi_parity": 6.670897973351888e-17,
+  "outside_full_initial_lcfo_span": 3.0604066880141976e-06,
+  "date": "2026-09-28",
+  "implementation": "full mesh Taylor4; no fixed LCFO projection",
+  "kernel_max_difference": 2.8609792490763984e-17,
+  "kernel_hermiticity_error": 2.2887833992611187e-16,
+  "tested": [
+    "GNU15 CPU/MPI build",
+    "native HSE reference",
+    "spatial2/orbital1,2",
+    "mesh MLWF full/local",
+    "ACE2/U2",
+    "distributed seed,FFT batch2,measured planning",
+    "MPI1/2/4 exchange arbitrary targets",
+    "MPI2/4 U4 101-step source transport",
+    "source-only analytic masks",
+    "full initial LCFO span escape",
+    "final checkpoint wavefunction norm/density"
+  ],
+  "unverified": [
+    "Fugaku compiler/runtime",
+    "large 3D jobs",
+    "speed/RSS",
+    "converged high-energy dielectric spectra"
+  ]
+}

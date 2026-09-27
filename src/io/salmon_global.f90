@@ -124,6 +124,13 @@ module salmon_global
   integer :: hse_mlwf_interval,hse_mlwf_maxiter
   real(8) :: hse_mlwf_tolerance
   real(8) :: hse_lcfo_wf_radius ! Always bohr; 0 means full support
+  character(1) :: yn_hse_realspace_rt
+  character(1) :: yn_hse_rt_fft_measure
+  character(1) :: yn_hse_rt_seed_distributed
+  integer :: hse_rt_ace_interval
+  integer :: hse_rt_u_interval
+  integer :: hse_rt_fft_batch
+  real(8) :: hse_rt_wf_radius ! bohr; 0=full periodic support
   character(1) :: yn_hse_lcfo_rt
   character(1) :: yn_hse_lcfo_direct_wf
   character(1) :: yn_hse_lcfo_continuity

@@ -1,120 +1,62 @@
-# Diamond：3次元弱スケーリング入力
+# Diamond 3D DC-HSE / real-space RT inputs
 
-既存の1次元Diamond系列を3次元に展開した **未実行の入力セット**。
-[開発ノート](../../../DEVELOPMENT_NOTES.md) / [富岳ビルド](../../hse-platforms.md#fugaku)
+These active inputs now propagate the wavefunctions on the full real-space mesh
+with SALMON Taylor4. DC/LCFO supplies the initial orbitals only. There is no
+fixed LCFO basis projection during RT, so the initial LCFO basis does not limit
+accessible excited states. This requires the new real-space HSE RT implementation;
+the older namelist-only and radius patches are insufficient.
 
-## ケース一覧
+**All earlier LCFO RT timings, memory estimates and weak-scaling results are
+historical fixed-basis results. They do not validate this route or its spectra.**
+This implementation prioritizes correctness. Full-domain exchange FFTs and
+collectives remain, and no new large-system performance claim is made.
 
-1フラグメント＝Diamond通常立方晶セル8原子、1 MPI/fragment、軌道MPI1。
+| Cells | Atoms | MPI ranks | RT occupied orbitals |
+|---|---:|---:|---:|
+| 4×4×4 | 512 | 64 | 1024 |
+| 6×6×6 | 1728 | 216 | 3456 |
+| 8×8×8 | 4096 | 512 | 8192 |
+| 10×10×10 | 8000 | 1000 | 16000 |
 
-| ケース | 原子数 | 電子数 | MPI（GS/RT共通） | 全格子 | セル辺長 bohr | GS / RT nstate |
-|---|---:|---:|---:|---|---:|---:|
-| [4×4×4](4x4x4) | 512 | 2048 | 64 | 64³ | 26.88 | 2048 / 1024 |
-| [6×6×6](6x6x6) | 1728 | 6912 | 216 | 96³ | 40.32 | 6912 / 3456 |
-| [8×8×8](8x8x8) | 4096 | 16384 | 512 | 128³ | 53.76 | 16384 / 8192 |
-| [10×10×10](10x10x10) | 8000 | 32000 | 1000 | 160³ | 67.20 | 32000 / 16000 |
+Core mesh is 16³ per cell; GS fragment mesh including buffers is 32³.
+GS inputs are unchanged physically. RT uses dt=0.02 a.u., 16 steps and an x impulse.
+Each RT directory reads ../gs/data_dcdft. Check GS/LCFO convergence first.
 
-各ケースに `gs/inputfile`、`rt/inputfile`、`atom.dat`。共通の `C_rps.dat` はリポジトリの `testsuites/pseudo/C_rps.dat` と同一。実行時の相対パスを使うため、このディレクトリ構成を維持してください。生成条件・SHA256は `manifest.json`。
-
-## 固定条件
-
-- 格子定数6.72 bohr、コア16³、格子間隔0.42 bohr、Gammaのみ。
-- **バッファーは8,8,8格子**。フラグメント周期セルは32³格子・辺長13.44 bohr・64原子。従来1Dの8,0,0と異なるので、1Dの実行時間との直接比較はしない。
-- `nstate_frag=256`（局所128占有＋128空状態）。全体GSは4状態/原子、RTは2占有状態/原子。DC密度由来のGS→LCFOの差は従来どおり受け入れる。
-- HSE06、SCF閾値1e-7、最大1800反復、従来のmixrate0.01等を継承。収束はこの新しい3D入力では未検証。
-- `lcfo_eigensolver='chefsi'`、filter degree60、最大200cycle、残差許容1e-7。ScaLAPACK有効ビルドが必要。`yn_scalapack='n'`は各fragmentの通常SALMON対角化の設定であり、LCFO CheFSIやRTの自動分散線形代数を無効にしない。
-- RTは直接WF係数Taylor4、dt0.02 a.u.、16steps、x方向impulse1e-4。MLWF局所積分R6 bohr、ACE1/U1、FFT batch1、実測FFT計画OFF。`&functional` namelistで全て指定する。旧環境変数は不要。
-- エネルギー出力間隔40、最終密度出力16。16stepsは速度比較の短時間試験であり、収束した誘電関数を得る長さではない。
-
-## namelistによる制御
-
-最新のLCFO namelist対応コードが必要。旧radius-only版では以下の入力を読めない。
-GSは`yn_hse_lcfo_rt='n'`、RTは次を`&functional`に指定済み。
+All algorithm controls are in &functional:
 
 ```fortran
- yn_hse_lcfo_rt='y'
+ yn_hse_realspace_rt='y'
  yn_hse_wannier='y'
- yn_hse_lcfo_direct_wf='y'
- yn_hse_lcfo_seed_distributed='y'
- yn_hse_lcfo_continuity='n'
- yn_hse_lcfo_fft_measure='n'
- hse_lcfo_ace_interval=1
- hse_lcfo_u_interval=1
- hse_lcfo_fft_batch=1
- hse_lcfo_wf_radius=6d0
+ hse_rt_wf_radius=6d0
+ hse_rt_ace_interval=1
+ hse_rt_u_interval=1
+ hse_rt_fft_batch=1
+ yn_hse_rt_fft_measure='n'
+ yn_hse_rt_seed_distributed='y'
 ```
 
-半径は常にbohr、既定0は全範囲。負値は不可。初期WFの球内ノルム保持率が
-99.9%未満ならWarningを出すが、半径は自動変更しない。
-`gs-env.sh`/`rt-env.sh`は互換用の空ファイルでsource不要。旧`SALMON_LCFO_*`
-環境変数で計算条件を指定しない。過去の1D入力アーカイブを使う場合も、旧環境変数を
-対応するnamelistへ移してから使う。MPI/OMP配置は実行環境側で引き続き指定する。
+The WF radius is in bohr. Zero means full support; positive values mask exchange
+sources and are an additional approximation. 6 bohr is a comparison setting,
+not a certified 99.9% radius. Initial coverage below 99.9% produces a warning.
+The radius does not truncate the propagated mesh wavefunction. MLWF U transports
+only the occupied source representation. ACE is stored on mesh rows.
+The old yn_hse_lcfo_rt / yn_hse_lcfo_direct_wf flags must not be enabled.
+No SALMON_LCFO environment settings are used; gs-env.sh and rt-env.sh are inert.
 
-## 現実装のメモリ制約：大きい入力を直ちに投入しない
-
-b743e8b3で初期リンク構築を列タイル化し、非rootの `raw_local(no,no,6,1)` / `raw(no,no,6,1)` を廃止。rootだけが6方向のリンクを保持し、局在化直後に解放する。全rankの構築scratchは最大64列分に制限する。complex(8)=16byte、コア4096点で以下の容量になる（他の配列を含まない）。
-
-| ケース | 初期版リンク2組 GiB/rank | 現リンク GiB/root | scratch GiB/rank | root局在化リンク：直前版→現版 GiB |
-|---|---:|---:|---:|---:|
-| 4³ | 0.188 | 0.094 | 0.00592 | 0.281 → 0.094 |
-| 6³ | 2.136 | 1.068 | 0.01056 | 3.204 → 1.068 |
-| 8³ | 12.000 | 6.000 | 0.01959 | 18.000 → 6.000 |
-| 10³ | 45.776 | 22.888 | 0.03448 | 68.665 → 22.888 |
-
-非rootのリンク保存容量はゼロ。2026-09-27のroot削減では、Gamma局在化を更新済みリンクの直接評価へ変更し、入力raw・作業links・評価用mの計18枚を6枚へ削減した。係数集約の受信バッファも64列に制限し、集約係数はseed生成・診断出力後、リンク生成前に解放する。
-
-**最右列はリンク配列のみで、root全体のピークではない。** 標準経路ではrootに保持するQR配置の全係数1枚・SVD、U、勾配、ACE、WF、基底が別に必要。8³では密な複素行列1枚が1 GiB、10³では3.815 GiBになる。**8³・10³はroot seed/QRとRT全体のピークを検証するまで本番投入しない。** MPI数を増やすだけでは複製/集約行列は小さくならない。
-
-直前のリンク構築削減の実測（MPI2・占有1024・格子4096/ランク）はroot peak RSS471→182 MiB、非root471→85 MiB。今回のGamma初期評価単独（占有1024、1プロセス、0 sweep）は364→156 MiBだった。**異なる処理の単独測定であり、削減量を足したり、3D計算全体のピークと解釈してはいけない。** 富岳実機の3Dジョブは未実行。
-
-追加のseed削減では、Gamma専用2次元APIで全係数のreshapeコピーを除去し、QR転置配列をSVD行列の確保前に解放した。合成係数・占有512本/基底8192本のseed単独実測は220.8→156.5 MiB（約29%減）、Uは一致。この段階では全係数と転置QR配列の二重保持が残っていた（次段の変更は下記）。この単独測定は全体のピークや8³の実行可能性を保証しない。上表のリンク容量は今回のseed変更では変わらない。
-
-## 実行例：4×4×4
-
-計算資源の確保はサイトの手順に従う。以下の `mpiexec -n 64` はランチャーの例で、Slurm環境ならサイト指定の `srun -n 64` などへ置き換える。ログインノードで数値計算を走らせない。MPI/ノード・OMPスレッド・CPU配置は全ケースで固定し、メモリ要件を満たす設定を選ぶ。ここではジョブスクリプトや課金グループを仮定しない。
+Generate and statically validate (no numerical jobs):
 
 ```sh
-# このREADMEのあるディレクトリから。実行ファイルには絶対パスを設定。
-export SALMON_EXE=/absolute/path/to/SALMON2/build/salmon
-# OMP_NUM_THREADSやランク配置は確保した資源に合わせて全ケース同一に設定。
-export OMP_DYNAMIC=FALSE
-(cd 4x4x4/gs && mpiexec -n 64 "$SALMON_EXE" < inputfile > run.log 2>&1)
-```
-
-`end SALMON`、最終DC-SCF残差<1e-7、CheFSI対角化完了と `data_dcdft` 出力を確認してからRTへ進む。未収束/失敗GSをそのまま再利用しない。
-
-```sh
-(cd 4x4x4/rt && ln -s ../gs/data_dcdft data_dcdft)
-(cd 4x4x4/rt && mpiexec -n 64 "$SALMON_EXE" < inputfile > run.log 2>&1)
-```
-
-他のケースはディレクトリとMPI数を表の値へ変更する。GS/RTはそれぞれ対応するサイズの初期状態を使用し、古い出力を混ぜない。同じ計算機・バイナリ・環境設定で逐次測定する。
-
-## 記録と静的検証
-
-RTループの `rt iterations` 最大時間を取り、弱効率は **100×T(4³)/T(N³)** とする。GS・初期MLWF・出力時間は別集計。実時間、最大メモリ、MPI/ノード、OMP数、配置、ACE/U/FFT設定、コンパイラ、バイナリ版を保存する。ACE35構築・Taylor32呼び出し・Gram17検査と有限値を確認。最終密度積分の目標は電子数の列。サイズ間の電流差には有限サイズと異なるGSの影響があるため、実装誤差とは呼ばない。
-
-```sh
+python3 generate.py
 python3 validate.py
 ```
 
-原子数・一意性・セル内配置・8原子/core・格子/MPI/状態数・参照パス・ハッシュの静的チェック済み。SALMONの実入力読込、SCF収束、3D RTの安定性、富岳の実行と速度測定は未実施。`generate.py` は入力を再生成するので、手編集後に実行すると上書きされる。
+Run GS and RT sequentially, e.g. use 64 MPI ranks for 4×4×4. On Fugaku, use
+the allocation's launcher and set OMP_NUM_THREADS to the cores per rank.
+Do not assume old fixed-basis memory estimates bound new real-space RT memory.
+The manifest retains old LCFO memory quantities only as historical reference.
+Bundled older patches are historical; build the complete real-space RT revision.
 
-
-### 次段：QR配置への直接集約
-
-全係数を初めから共役転置配置で集約し、元配置の全係数配列を廃止。snapshotの係数部分は集約中に元の列順で書き出す。rootの全体QRで選んだ行番号を共有し、各rankの元係数から必要な行だけを最大64列タイルで回収してSVDへ渡す。QR配列は行回収前に解放する。
-
-MPI2・占有512/基底8192のseed単独測定はroot204.25→141.27 MiB（30.8%減）、非root50.19→50.64 MiB。係数snapshotとUは一致。前節の測定は1プロセス、今回は2プロセスでlocal係数も保持するため、絶対値を直接つなげた比較や削減率の合算はしない。rootのQR配列1枚と密SVD/U/ACEは残り、QR自体の分散化ではない。
-
-### 分散seed QR（選択式）
-
-`&functional`の`yn_hse_lcfo_seed_distributed='y'`で、rootに残った全体QR配列をMPIランクへ
-32列ブロックで分散する経路を追加。MPI＋ScaLAPACKが必要。指定しなければ
-従来のroot QRを使う。この入力セットは`'y'`を明示して分散QRを使う。
-
-合成係数・占有512/基底8192のseed単独測定で、MPI4のrootピークRSSは
-126.31→71.84 MiB、非rootは34.91–35.58→52.36–52.92 MiB。
-これはrootへの集中の削減であり、全ランク合計メモリを同じ割合で減らす変更ではない。
-QR配列自体はランク数で小さくなるが、rootの密SVD・6リンクとU/ACEは残る。
-**8³・10³の本番保留は継続**。富岳での新経路のビルド・実測は未確認。
+The matching `patches/realspace-hse-rt.patch` plus before/after SHA256 lists are
+bundled here too. They require the namelist-only source (`9d2ebc27`, compatible
+with the separate Tofu fix). Use the same hash→dry-run→apply→hash→CMake procedure
+as [Si's input guide](../si-3d-weak-scaling/README.md). Fugaku is untested.

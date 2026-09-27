@@ -280,6 +280,8 @@ contains
       & xc, &
       & cname, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
       & hse_lcfo_wf_radius, &
+      & yn_hse_realspace_rt, yn_hse_rt_fft_measure, yn_hse_rt_seed_distributed, &
+      & hse_rt_ace_interval, hse_rt_u_interval, hse_rt_fft_batch, hse_rt_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
       & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
@@ -741,6 +743,13 @@ contains
     hse_mlwf_maxiter = 200
     hse_mlwf_tolerance = 1d-6
     hse_lcfo_wf_radius = 0d0
+    yn_hse_realspace_rt = 'n'
+    yn_hse_rt_fft_measure = 'n'
+    yn_hse_rt_seed_distributed = 'n'
+    hse_rt_ace_interval = 1
+    hse_rt_u_interval = 1
+    hse_rt_fft_batch = 1
+    hse_rt_wf_radius = 0d0
     yn_hse_lcfo_rt = 'n'
     yn_hse_lcfo_direct_wf = 'n'
     yn_hse_lcfo_continuity = 'n'
@@ -1325,6 +1334,13 @@ contains
     call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
     call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
     call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
+    call comm_bcast(yn_hse_realspace_rt,nproc_group_global)
+    call comm_bcast(yn_hse_rt_fft_measure,nproc_group_global)
+    call comm_bcast(yn_hse_rt_seed_distributed,nproc_group_global)
+    call comm_bcast(hse_rt_ace_interval,nproc_group_global)
+    call comm_bcast(hse_rt_u_interval,nproc_group_global)
+    call comm_bcast(hse_rt_fft_batch,nproc_group_global)
+    call comm_bcast(hse_rt_wf_radius,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_rt,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_direct_wf,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_continuity,nproc_group_global)
@@ -2281,6 +2297,13 @@ contains
       write(fh_variables_log, *) "# hse_mlwf_maxiter=",hse_mlwf_maxiter
       write(fh_variables_log, *) "# hse_mlwf_tolerance=",hse_mlwf_tolerance
       write(fh_variables_log, *) "# hse_lcfo_wf_radius (bohr; 0=full)=",hse_lcfo_wf_radius
+      write(fh_variables_log, *) "# yn_hse_realspace_rt=",yn_hse_realspace_rt
+      write(fh_variables_log, *) "# yn_hse_rt_fft_measure=",yn_hse_rt_fft_measure
+      write(fh_variables_log, *) "# yn_hse_rt_seed_distributed=",yn_hse_rt_seed_distributed
+      write(fh_variables_log, *) "# hse_rt_ace_interval=",hse_rt_ace_interval
+      write(fh_variables_log, *) "# hse_rt_u_interval=",hse_rt_u_interval
+      write(fh_variables_log, *) "# hse_rt_fft_batch=",hse_rt_fft_batch
+      write(fh_variables_log, *) "# hse_rt_wf_radius=",hse_rt_wf_radius
       write(fh_variables_log, *) "# yn_hse_lcfo_rt=",yn_hse_lcfo_rt
       write(fh_variables_log, *) "# yn_hse_lcfo_direct_wf=",yn_hse_lcfo_direct_wf
       write(fh_variables_log, *) "# yn_hse_lcfo_continuity=",yn_hse_lcfo_continuity
@@ -2917,6 +2940,9 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_hse_wannier)
+    call yn_argument_check(yn_hse_realspace_rt)
+    call yn_argument_check(yn_hse_rt_fft_measure)
+    call yn_argument_check(yn_hse_rt_seed_distributed)
     call yn_argument_check(yn_hse_lcfo_rt)
     call yn_argument_check(yn_hse_lcfo_direct_wf)
     call yn_argument_check(yn_hse_lcfo_continuity)
@@ -3166,6 +3192,23 @@ contains
       stop "either yn_ffte or yn_fftw can be specified"
     end if
 
+    if(yn_hse_lcfo_rt=='y'.or.yn_hse_lcfo_direct_wf=='y') &
+      error stop 'Fixed-basis LCFO RT retired: use yn_hse_realspace_rt=y and mesh Taylor4'
+    if(.not.ieee_is_finite(hse_rt_wf_radius))error stop 'HSE RT radius must be finite'
+    if(hse_rt_wf_radius<0d0)error stop 'HSE RT radius must be nonnegative bohr'
+    if(hse_rt_ace_interval<1.or.hse_rt_u_interval<1)error stop 'HSE RT intervals must be positive'
+    if(hse_rt_fft_batch<1.or.hse_rt_fft_batch>32)error stop 'HSE RT FFT batch must be 1 to 32'
+    if(yn_hse_realspace_rt=='y')then
+      if(xc/='hse06'.or.yn_dc/='n'.or.propagator/='hse_taylor4'.or. &
+         (theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'Real-space HSE RT requires non-DC HSE Taylor4 time propagation'
+      if(any(num_kgrid/=1).or.nproc_k/=1.or.index(yn_symmetry,'y')>0.or.file_kw/='none') &
+        error stop 'Real-space HSE RT currently requires Gamma without symmetry reduction'
+      if(yn_hse_wannier/='y'.and.(hse_rt_wf_radius>0d0.or.hse_rt_u_interval/=1)) &
+        error stop 'HSE RT radius/U interval require yn_hse_wannier=y'
+      if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
+        error stop 'Real-space HSE RT restart metadata is not yet supported'
+    endif
     if(.not.ieee_is_finite(hse_lcfo_wf_radius))error stop 'HSE: hse_lcfo_wf_radius must be finite'
     if(hse_lcfo_wf_radius<0d0)error stop 'HSE: hse_lcfo_wf_radius must be >=0 bohr'
     if(hse_lcfo_ace_interval<1.or.hse_lcfo_u_interval<1) &
@@ -3195,7 +3238,7 @@ contains
           .not.ieee_is_finite(hse_mlwf_tolerance).or.hse_mlwf_tolerance<=0d0) &
           error stop 'HSE Wannier: invalid localization controls'
       endif
-      if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
+      if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y'.and.yn_hse_realspace_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
         if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &

@@ -95,7 +95,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   type(s_pp_grid) :: ppg
   type(s_pp_nlcc) :: ppn
   type(s_singlescale) :: singlescale
-  type(s_ofile) :: ofile
   type(s_unfold) :: unfold
   
   integer :: iob, i1,iik,jspin, Mit, m, n
@@ -209,7 +208,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_begin(LOG_READ_GS_DATA)
   call nvtxStartRange('READ_GS_DATA', __LINE__)
   
-  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofile,unfold)
+  call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl,unfold)
   
   call init_code_optimization
   

@@ -4,6 +4,7 @@
 ! baseline gathers a fragment on its k root. ACE applications stay local.
 module hse_native
   use iso_fortran_env, only: int64
+  use hse_grid_rt, only: grid_rt_enabled,grid_rt_refresh,grid_rt_add_action,grid_rt_stage
   use lcfo_rt_basis, only: lcfo_rt_active
   use hse_lcfo_rt, only: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -125,6 +126,10 @@ contains
     type(s_parallel_info),intent(in),optional :: info
     type(s_orbital),intent(in),optional :: psi
     integer :: ierr,no
+    if(grid_rt_enabled())then
+      call grid_rt_stage(stage,system,mg,info,psi)
+      return
+    endif
     if(lcfo_rt_active)then
       call lcfo_hse_stage(stage,system,mg,info,psi)
       return
@@ -213,6 +218,10 @@ contains
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
+    if(grid_rt_enabled())then
+      call grid_rt_refresh(system,mg,info,psi,hse_exchange_energy)
+      return
+    endif
     if(lcfo_rt_active)then
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
@@ -389,6 +398,10 @@ contains
     integer :: ierr,ng,total_error
     real(8) :: tick,communication_before
     if(.not.hse_enabled())return
+    if(grid_rt_enabled())then
+      call grid_rt_add_action(psi,hpsi,system,mg,info)
+      return
+    endif
     if(lcfo_rt_active)then
       call lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
       return

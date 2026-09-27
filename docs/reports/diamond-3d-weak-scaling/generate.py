@@ -13,6 +13,8 @@ manifest={'lattice_bohr':a,'core_grid':[16]*3,'buffer_grid':[8]*3,
  'radius_bohr':6,'dt_au':0.02,'nt':16,'ace_interval':1,'u_interval':1,
  'algorithm_control':'&functional namelist only; no SALMON_LCFO environment controls',
  'seed_distributed':True,
+ 'rt_representation':'full real-space mesh; no retained LCFO projector',
+ 'scaling_status':'new correctness-first route; historical LCFO timings do not apply',
  'status':'generated and statically validated; not run on Fugaku','cases':[]}
 shutil.copy2(repo/'testsuites/pseudo/C_rps.dat',root/'C_rps.dat')
 for n in (4,6,8,10):
@@ -43,11 +45,11 @@ for n in (4,6,8,10):
   s=s.replace('num_rgrid=128,16,16','num_rgrid='+','.join([str(16*n)]*3))
   # Algorithm choices belong to the input, not shell environment variables.
   s=s.replace(" yn_hse_wannier='n'\n",'')
-  controls="\n yn_hse_lcfo_rt='{}'\n yn_hse_wannier='y'".format('y' if stage=='rt' else 'n')
+  controls="\n yn_hse_realspace_rt='{}'\n yn_hse_wannier='y'".format('y' if stage=='rt' else 'n')
   if stage=='rt':
-   controls+="\n yn_hse_lcfo_direct_wf='y'\n yn_hse_lcfo_continuity='n'\n yn_hse_lcfo_fft_measure='n'"
-   controls+="\n yn_hse_lcfo_seed_distributed='y'\n hse_lcfo_ace_interval=1\n hse_lcfo_u_interval=1"
-   controls+="\n hse_lcfo_fft_batch=1\n hse_lcfo_wf_radius=6d0"
+   controls+="\n yn_hse_rt_fft_measure='n'"
+   controls+="\n yn_hse_rt_seed_distributed='y'\n hse_rt_ace_interval=1\n hse_rt_u_interval=1"
+   controls+="\n hse_rt_fft_batch=1\n hse_rt_wf_radius=6d0"
   s=s.replace("xc='hse06'","xc='hse06'"+controls)
   (folder/'inputfile').write_text(s)
  manifest['cases'].append({'case':case.name,'fragments':nf,'mpi_ranks_gs':nf,'mpi_ranks_rt':nf,

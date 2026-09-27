@@ -59,7 +59,7 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
-integer :: Mit, itt
+integer :: Mit, itt, last_completed
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
 !check condition for using jellium model
@@ -97,6 +97,7 @@ call print_header()
 call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
+last_completed=Mit
 TE : do itt=Mit+1,nt
   call nvtxStartRange('main loop', itt)
 
@@ -110,6 +111,8 @@ TE : do itt=Mit+1,nt
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
+
+  last_completed=itt
 
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -184,7 +187,13 @@ call timer_end(LOG_WRITE_RT_RESULTS)
 call timer_end(LOG_TOTAL)
 
 if(write_rt_wfn_k=='y')then
-  call checkpoint_rt(lg,mg,system,info,spsi_out,Mit,rt,Vh_stock1,Vh_stock2,singlescale,ofl%dir_out_restart)
+  ! The accepted state alternates buffers; energy evaluation may overwrite
+  ! the other buffer. Also record the completed step rather than restart Mit.
+  if(mod(last_completed-Mit,2)==1)then
+    call checkpoint_rt(lg,mg,system,info,spsi_out,last_completed,rt,Vh_stock1,Vh_stock2,singlescale,ofl%dir_out_restart)
+  else
+    call checkpoint_rt(lg,mg,system,info,spsi_in,last_completed,rt,Vh_stock1,Vh_stock2,singlescale,ofl%dir_out_restart)
+  endif
 end if
 
 call finalize_xc(xc_func)

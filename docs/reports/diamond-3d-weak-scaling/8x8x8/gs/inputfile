@@ -46,7 +46,7 @@
 /
 &functional
  xc='hse06'
- yn_hse_lcfo_rt='n'
+ yn_hse_realspace_rt='n'
  yn_hse_wannier='y'
  hse_mlwf_maxiter=1
  hse_mlwf_interval=10000

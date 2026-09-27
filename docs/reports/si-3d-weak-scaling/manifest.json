@@ -22,11 +22,13 @@
   "nt": 16,
   "ace_interval": 1,
   "u_interval": 1,
-  "radius_control": "&functional hse_lcfo_wf_radius, fixed bohr",
+  "radius_control": "&functional hse_rt_wf_radius, fixed bohr",
   "initial_norm_warning_threshold": 0.999,
   "pseudo_source": "samples/dc_hse/si64-chain/Si_rps.dat",
   "algorithm_control": "&functional namelist only; no SALMON_LCFO environment controls",
   "seed_distributed": true,
+  "rt_representation": "full real-space mesh; no retained LCFO projector",
+  "scaling_status": "new correctness-first route; historical LCFO timings do not apply",
   "status": "generated and statically validated; not run on Fugaku",
   "cases": [
     {
@@ -140,17 +142,17 @@
   ],
   "sha256": {
     "10x10x10/atom.dat": "efbd511084ce5a13615469427b2f98171759caba809b8b2c15ead9ddde8fe195",
-    "10x10x10/gs/inputfile": "fb8da94e0068ce73a402fe9d6f9031edececbd25c0facefa004626be0fedb220",
-    "10x10x10/rt/inputfile": "516de7e265138ca4237291d4973924a385d913b863104c0208792c74bedae7d4",
+    "10x10x10/gs/inputfile": "5a22f57a1dace18ed60886f0c6f707ada57756c2e8370d0c687d8557206029ea",
+    "10x10x10/rt/inputfile": "6798793a4cc99c31fda41e5d8934d605d4e384c983c93de45cbf979ae3f49c88",
     "4x4x4/atom.dat": "9fafee241177398b59c6c7d8d7b82531548328533b27308ade9d8aed7cb70cd9",
-    "4x4x4/gs/inputfile": "80dabafb1937780f58e721433c0aff0c148bcd737d36e677f0fe1f56d3d0b442",
-    "4x4x4/rt/inputfile": "98405b2828cae90c27a15b261ab86559549e5df8668bb59f9a020054159b561f",
+    "4x4x4/gs/inputfile": "0a2b598a974e66a1d73feb84577f62d649b145edd81eccd6ae45a0efec599e37",
+    "4x4x4/rt/inputfile": "d3361f46e39b8a124c6611be64712cc342745587a910de0ce98876ea077addfb",
     "6x6x6/atom.dat": "19c21025437823e8cc8316a856e6594695fd32d04bb833b1b2616a1e55c6f7b8",
-    "6x6x6/gs/inputfile": "44b7ff713fcc7b62ce4e53869159b5928ca7110cbbbbfb580e90f778525d10d9",
-    "6x6x6/rt/inputfile": "e5d2998dbee93291c65877e9fc6bd7e2a20cb7edbfda65fdfb1416e987ef295d",
+    "6x6x6/gs/inputfile": "4e2ea62fd2eff6124e093642d00b7f3bb218fd52bd6e0fc70ab6226d92bddba5",
+    "6x6x6/rt/inputfile": "d25389ad5443abe77a729e476d2b2dde4cef74a9e89ce03c90c75a8fdb1a5ba6",
     "8x8x8/atom.dat": "210a8a3812b0e8ca7a1122966d4e6d2b64b043983f5f49776786d3ef9068e57c",
-    "8x8x8/gs/inputfile": "35e4519bc9fd4220dce432046f86c59661ae9962e35cfe3cfa7d5c1741888b80",
-    "8x8x8/rt/inputfile": "2aa61899d3ad84b3915b97fa7f471b1566a28e95914ec47f3b64004b215e4a38",
+    "8x8x8/gs/inputfile": "9ac04798eb31d99b698d9d3ec1187ae594f4123a2c671666ba4d279577290e87",
+    "8x8x8/rt/inputfile": "e7eb2d232c8dcfd0aa2eca72e47d0e5e4375e768277b962af29a1c5898874618",
     "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c"
   }
 }

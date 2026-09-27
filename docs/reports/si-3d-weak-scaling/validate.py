@@ -27,19 +27,19 @@ for c in m['cases']:
   assert int(value('nstate'))==(32*nf if stage=='gs' else 16*nf)
   assert int(value('nstate_frag'))==256 and value('lcfo_eigensolver')=="'chefsi'"
   for key in ('file_atom_coor','file_pseudo(1)'):assert (folder/value(key).strip("'")).is_file()
-  assert value('yn_hse_lcfo_rt')==("'y'" if stage=='rt' else "'n'")
+  assert value('yn_hse_realspace_rt')==("'y'" if stage=='rt' else "'n'")
   assert value('yn_hse_wannier')=="'y'"
   if stage=='rt':
-   for key in ('yn_hse_lcfo_direct_wf','yn_hse_lcfo_seed_distributed'):
+   for key in ('yn_hse_rt_seed_distributed',):
     assert value(key)=="'y'"
-   for key in ('yn_hse_lcfo_continuity','yn_hse_lcfo_fft_measure'):
+   for key in ('yn_hse_rt_fft_measure',):
     assert value(key)=="'n'"
-   for key in ('hse_lcfo_ace_interval','hse_lcfo_u_interval','hse_lcfo_fft_batch'):
+   for key in ('hse_rt_ace_interval','hse_rt_u_interval','hse_rt_fft_batch'):
     assert value(key)=='1'
-   assert value('hse_lcfo_wf_radius')=='9d0'
+   assert value('hse_rt_wf_radius')=='9d0'
   if stage=='rt':
    assert value('dt')=='0.02d0' and value('nt')=='16'
-   assert value('hse_lcfo_wf_radius')=='9d0'
+   assert value('hse_rt_wf_radius')=='9d0'
   assert value('izatom(1)')=='14' and value('lloc_ps(1)')=='2'
   assert value('sysname')==f"'si{8*nf}_hse'"
   assert value('file_pseudo(1)')=="'../../Si_rps.dat'"
