@@ -1,0 +1,28 @@
+{
+  "scope": "spatial ACE algebra, not native RT integration",
+  "mpi_ranks": [
+    1,
+    2,
+    4
+  ],
+  "dv": 0.37,
+  "native_rt_spatial_enabled": false,
+  "logs": {
+    "spatial-ace-final.log": {
+      "sha256": "7c51bc301f11911bb64dcc4e5d0650222788bd30dc7cdd4ad9af6a00daa2f1e3",
+      "summary": ".\n----------------------------------------------------------------------\nRan 1 test in 1.277s\n\nOK\nPASS spatial ACE ranks=           1  error=   6.9368952146101872E-015\nPASS spatial ACE ranks=           2  error=   1.5148413778161814E-014\nPASS spatial ACE ranks=           4  error=   3.2098046264603115E-014\n"
+    },
+    "spatial-ace-wannier.log": {
+      "sha256": "6839633a278df1fb503ba4e1cc182c8cfe790367b7319af9330cac7f2beceab9",
+      "summary": "test_batched_shifted_mesh (test_wannier.WannierTest.test_batched_shifted_mesh) ... ok\ntest_equal_occupations (test_wannier.WannierTest.test_equal_occupations) ... ok\ntest_gamma_fractional (test_wannier.WannierTest.test_gamma_fractional) ... ok\ntest_pbeh40_explicit_radius (test_wannier.WannierTest.test_pbeh40_explicit_radius) ... ok\ntest_pbeh40_radius_larger_than_cell_rejected (test_wannier.WannierTest.test_pbeh40_radius_larger_than_cell_rejected) ... ok\ntest_pbeh40_unscreened_gamma (test_wannier.WannierTest.test_pbeh40_unscreened_gamma) ... ok\ntest_pbeh40_unscreened_multik (test_wannier.WannierTest.test_pbeh40_unscreened_multik) ... ok\ntest_post_scf_localization (test_wannier.WannierTest.test_post_scf_localization) ... ok\ntest_rectangular_fractional_shifted_mesh (test_wannier.WannierTest.test_rectangular_fractional_shifted_mesh) ... ok\ntest_threaded_action (test_wannier.WannierTest.test_threaded_action) ... ok\n\n----------------------------------------------------------------------\nRan 10 tests in 9.259s\n\nOK\n"
+    },
+    "spatial-ace-build.log": {
+      "sha256": "98c15fe08e56a2d98cfaee4ec5816131655cb8170a1e0c1f7b6a2b4142bf45c7",
+      "summary": "%] Built target gen_502_bulk_Au_spin-orbit_rt\n[ 39%] Built target gen_511_isolated_Au_spin-orbit_gs\n[ 40%] Built target gen_601_C2H2_gs_gramschmidt_blas_n\n[ 41%] Built target gen_603_bulk_Au_spin-orbit_gs_gramschmidt_blas_n\n[ 41%] Built target gen_602_bulk_Si_gs_gramschmidt_blas_n\n[ 41%] Built target gen_701_C2H2_gs_dirichlet\n[ 42%] Built target gen_604_isolated_Au_spin-orbit_gs_gramschmidt_blas_n\n[ 43%] Built target gen_702_C2H2_rt_response_dirichlet\n[ 44%] Built target gen_711_bulk_gs_pre_dp\n[ 44%] Built target gen_712_bulk_Si_nonorthogonal_lattice_pre\n[ 45%] Built target gen_721_Si_gs\n[ 46%] Built target gen_723_Si_bloch_ms\n[ 46%] Built target gen_722_diamond_gs\n[ 47%] Built target gen_724_Si_diamond_bloch_ms\n[ 47%] Built target gen_725_Si_bloch_3rd_order\n[ 47%] Built target gen_420_bulk_Si_hse_gs\n[ 47%] Built target check_hse_lapack\n[ 48%] Built target gen_421_bulk_Si_hse_rt\n[ 49%] Building Fortran object src/CMakeFiles/salmon.dir/xc/lcfo_dist_dense.f90.o\n[ 49%] Building Fortran object src/CMakeFiles/salmon.dir/xc/hse_lcfo_rt.f90.o\n[ 50%] Building Fortran object src/CMakeFiles/salmon.dir/xc/hse_native.f90.o\n[ 51%] Linking Fortran executable ../salmon\n[100%] Built target salmon\n"
+    },
+    "spatial-ace-off-build.log": {
+      "sha256": "794afbee36f35df87d12cd10bd09c86e5cffbce89bbaf4507617cf8679b4babd",
+      "summary": "uilt target gen_207_rt_wf_slice\n[ 25%] Built target gen_301_classicEM_isolated_lr\n[ 26%] Built target gen_302_classicEM_periodic_lr\n[ 27%] Built target gen_303_classicEM_isolated_pulse_ttm\n[ 28%] Built target gen_410_bulk_Si_gs_initial_density\n[ 29%] Built target gen_411_bulk_Si_gs_symmetry\n[ 30%] Built target gen_413_bulk_Si_rt_response_symmetry_yyn\n[ 30%] Built target gen_412_bulk_Si_gs_symmetry_yyn\n[ 31%] Built target gen_502_bulk_Au_spin-orbit_rt\n[ 32%] Built target gen_501_bulk_Au_spin-orbit_gs\n[ 33%] Built target gen_511_isolated_Au_spin-orbit_gs\n[ 33%] Built target gen_602_bulk_Si_gs_gramschmidt_blas_n\n[ 34%] Built target gen_603_bulk_Au_spin-orbit_gs_gramschmidt_blas_n\n[ 35%] Built target gen_604_isolated_Au_spin-orbit_gs_gramschmidt_blas_n\n[ 56%] Built target gen_701_C2H2_gs_dirichlet\n[ 94%] Built target salmon\n[ 94%] Built target gen_711_bulk_gs_pre_dp\n[ 95%] Built target gen_702_C2H2_rt_response_dirichlet\n[ 96%] Built target gen_712_bulk_Si_nonorthogonal_lattice_pre\n[ 97%] Built target gen_721_Si_gs\n[ 98%] Built target gen_722_diamond_gs\n[ 99%] Built target gen_723_Si_bloch_ms\n[ 99%] Built target gen_724_Si_diamond_bloch_ms\n[100%] Built target gen_725_Si_bloch_3rd_order\n"
+    }
+  }
+}

@@ -265,3 +265,23 @@ completed Verlet velocities. Independently integrate
 No electronic temperature is assigned during excitation. The H4 pulse fixture
 shows second-order energy/work and final-current convergence; this does not
 establish long-time or liquid-water accuracy.
+
+
+### Spatial ACE algebra (development stage)
+
+`hse_ace_build` and `hse_ace_apply` accept an optional `sum_grid` callback,
+which sums a complex matrix over the spatial communicator in place. Each rank
+stores only its local grid rows of factors, sources and targets. Construction
+reduces the occupied-state metric before factorization; application reduces
+factor/target overlaps before the local action. No full-grid array is gathered.
+Peers must use matching orbital/k dimensions, grid volume and call order;
+local row counts may differ and may be zero. Average ACE combines local factor
+columns and retains the same spatial partition. Memory is O(local_grid *
+ACE_rank * local_k), with small replicated metric/overlap matrices; all occupied
+columns remain present locally, so this does not provide orbital decomposition.
+
+This API is verified independently with MPI1/2/4, complex states, non-unit grid
+volume, unequal/empty partitions, midpoint operators, zero exchange and bad
+local data. It is not yet wired into native distributed mesh RT: the k-only
+admission guard remains until MLWF localization and exchange-action generation
+are distributed as well. No force/current MPI trajectory parity is claimed yet.

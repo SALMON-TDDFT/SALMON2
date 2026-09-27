@@ -303,3 +303,16 @@ endpoint E against sampled analytic A, ionic current against completed XYZ
 velocities, and zero-amplitude pulse against zero impulse. Invalid frequency,
 width and start are rejected. These are small-system numerical checks, not
 validation of giant-system scaling or liquid-water trajectories.
+
+
+## Spatial ACE algebra
+
+The optional reduction API in hse_ace stores local factor rows. The independent
+MPI driver `testsuites/unit_hse_ace/spatial_driver.f90` checks a complex negative
+operator against direct dense multiplication, plus source interpolation,
+non-unit dv, multiple k points/targets, midpoint factors, zero exchange and
+collective rejection of a NaN on one rank. MPI1/2/4 pass, including an empty
+rank in the four-rank partition. Existing 10 Wannier/ACE tests and HSE ON/OFF
+builds pass. Read-only review found no blocking issue under the documented
+collective contract. Native spatial RT remains guarded pending distributed
+MLWF and exchange generation; this is an algebra-stage result.
