@@ -1,6 +1,6 @@
 #include "config.h"
 ! SALMON adapter: legacy full-grid/orbital layout distributes k points.
-! Gamma DC-initialized hybrid mesh RT also supports spatial y/z FFTW pencils.
+! Gamma HSE SCF and DC-initialized hybrid mesh RT support spatial y/z FFTW pencils.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module hse_native
   use exx_functional, only: exchange_fraction
@@ -234,9 +234,10 @@ contains
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
     endif
-    if(info%isize_r>1.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
-       (xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and. &
-       (theory=='tddft_response'.or.theory=='tddft_pulse'))then
+    if(info%isize_r>1.and.yn_dc=='n'.and. &
+       ((xc=='hse06'.and.theory=='dft').or. &
+        (yn_conventional_from_dcdft=='y'.and. &
+         (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
       call refresh_spatial(system,mg,info,psi)
       return
     endif
@@ -492,7 +493,7 @@ contains
       error stop 'Spatial EXX: unshifted Gamma required'
     if(exx_mlwf_radius/=0d0.or.maxval(abs(system%rocc-2d0))>1d-12) &
       error stop 'Spatial EXX: full support and occupied spin pairs required'
-    if(propagator/='hse_taylor4')error stop 'Spatial EXX: Taylor4 ACE required'
+    if(theory/='dft'.and.propagator/='hse_taylor4')error stop 'Spatial EXX: Taylor4 ACE required'
     if(any(mg%num/=num_rgrid/[1,info%isize_y,info%isize_z]).or. &
        any(mg%is/=[1,info%id_y*mg%num(2)+1,info%id_z*mg%num(3)+1])) &
       error stop 'Spatial EXX: mesh pencil layout mismatch'

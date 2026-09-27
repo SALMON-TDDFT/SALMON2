@@ -199,12 +199,36 @@ The HSE mixing fraction remains 0.25. Distributed FFT and ACE store only
 local grid rows. Supported fields are impulse and Acos2 without a second
 field, using Taylor4+ACE. Checkpoints and snapshots are not supported here.
 
-This migration currently covers fixed-ion RT. HSE MD remains disabled until
-its forces are validated. Legacy SCF, multi-k, finite-support and projected
-routes remain available under their existing restrictions; they will be
-removed only after their replacements are implemented and verified.
+This migration covers fixed-ion RT and the conventional Gamma SCF scope below.
+HSE MD remains disabled until its forces are validated. Legacy fractional-occupation
+SCF, multi-k, finite-support and projected routes remain available under their
+existing restrictions; they will be removed only after their replacements are
+implemented and verified.
 
 Validation: `testsuites/unit_hse_ace/validate_exchange.py` compares screened
 and Coulomb exchange against serial Wannier on 1/2/4 ranks;
 `testsuites/unit_pbeh_rvv10/test_hse_spatial.py` compares HSE DC-initialized
 impulse and pulse histories against the serial route.
+
+## Conventional spatial HSE SCF
+
+For `xc='hse06'`, `theory='dft'`, `yn_dc='n'`, y/z spatial layouts now use
+the same screened-exchange, MLWF and ACE implementation. Wannier activation
+is automatic when the spatial process count exceeds one. The Gamma,
+orthogonal-cell, FFT divisibility and full-support restrictions above apply.
+Use occupied-only states (`2*nstate=nelec`), fixed occupations (omit electronic
+temperature), fixed ions, and `yn_hse_lcfo_rt='n'`.
+
+During this migration use `write_gs_restart_data='no'` and
+`yn_self_checkpoint='n'`. Restart, checkpoints, Wannier snapshots and the
+full-grid eigen/solver diagnostic exporters are not supported by this route.
+Final SCF energy and eigenvalue text outputs remain available.
+A four-process H4 example is `samples/hse_spatial/h4_scf.inp`; copy
+`testsuites/pseudo/H_rps.dat` to its working directory.
+
+H4 comparisons at density threshold 1e-10 gave a maximum energy difference
+of 1.57e-9 eV and occupied eigenvalue difference of 2.09e-11 Ha against the
+serial MLWF route. Iteration counts were 109, 49 and 476 on 1, 2 and 4 ranks,
+respectively: this establishes final-state agreement, not parallel speedup or
+identical SCF trajectories. Finite-temperature DC fragment SCF is still on
+its existing implementation.
