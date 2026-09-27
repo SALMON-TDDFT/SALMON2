@@ -1,0 +1,104 @@
+! Run after water_ehrenfest_gs.inp in the same directory.
+! Four mesh Ehrenfest steps after an electronic impulse; dt is fs.
+&calculation
+  theory='tddft_response'
+ yn_md='y'
+ yn_dc='n'
+ yn_conventional_from_dcdft='y'
+/
+
+&control
+  sysname = 'H2O'
+  write_gs_restart_data='no'
+/
+
+&units
+  unit_system='A_eV_fs'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 5.0d0, 5.0d0, 5.0d0
+  nstate = 4
+
+  nelec  = 8
+  nelem  = 2
+  natom  = 3
+/
+
+
+&pseudo
+  iZatom(1)=1
+  file_pseudo(1) = './H_rps.dat'
+  Lloc_ps(1)=1
+  iZatom(2)=8
+  file_pseudo(2) = './O_rps.dat'
+  Lloc_ps(2)=1
+/
+
+&functional
+  xc ='pbeh40_rvv10'
+  yn_hse_lcfo_rt='n' ! reconstruct once, then propagate mesh orbitals
+  rvv10_nq=32
+  exx_mlwf_maxiter=100
+  exx_mlwf_interval=5
+  exx_mlwf_tolerance=1d-7
+  exx_mlwf_radius=0d0 ! full support; required for MD
+  exx_local_fft='auto' ! exact convolution optimization; no extra truncation
+/
+
+&rgrid
+  num_rgrid = 24,24,24
+/
+
+&kgrid
+  num_kgrid=1,1,1
+/
+
+
+&scf
+  nscf = 500
+  threshold=1d-10
+/
+
+&atomic_coor
+  'H'      3.55908403      2.48190608      2.50003451  1
+  'H'      2.48189998      3.55908246      2.50002600  1
+  'O'      2.61768087      2.61768023      2.49992927  2
+/
+
+
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+/
+
+&dc
+ num_fragment=1,1,1
+ num_rgrid_buffer=0,0,0
+ nstate_frag=4
+ yn_dc_lcfo='y'
+/
+
+&tgrid
+ dt=.0005
+ nt=4
+/
+&emfield
+ ae_shape1='impulse'
+ e_impulse=.01
+ epdir_re1=1,0,0
+/
+
+&md
+ ensemble='NVE'
+ file_ini_velocity='water_ehrenfest_velocity.dat'
+ step_update_ps=1
+/
+&analysis
+ out_rt_energy_step=1
+ out_rvf_rt_step=1
+ nenergy=10
+ de=.01
+/

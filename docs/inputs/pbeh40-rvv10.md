@@ -76,7 +76,7 @@ PBEh forces differentiate the same cubic radial projector and solid spherical ha
 
 - Periodic, orthorhombic, unpolarized conventional DFT and fixed-cell BOMD, CPU, k-only MPI; uniform full k meshes.
 - Static `pbeh40` and `pbeh40_rvv10` use the inherited DC MLWF+ACE exchange path; DC convergence against fragment/buffer size is still needed.
-- **Not supported:** DC MD, conventional RT/Ehrenfest, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
+- **Not supported:** direct truncated-fragment MD, unrestricted conventional RT/Ehrenfest, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
 - DC+rVV10 convolves the **total density**. The initial fragment orbital preparation omits this term until the first regular total-density SCF update. DC-MD remains disabled: this static integration does not establish variational forces for truncated fragments.
 - No production scaling, long liquid trajectory, diffusivity, RDF, density, or exchange-cutoff convergence claim follows from the bounded tests below.
 
@@ -188,7 +188,7 @@ OpenMP thread. FFTE timings include its current per-transform private-table
 initialization; these compare implemented paths, not isolated library speed.
 Use `--fft-backend fftw` with the LCFO integration fixture to check that route.
 
-## DC force diagnostics (MD remains disabled)
+## Static DC force diagnostics (direct fragment MD remains disabled)
 
 For static PBEh DC calculations, `yn_dc_force_diagnostic='y'` in `&dc` prints
 a separately labelled frozen-orbital nuclear derivative in Hartree/bohr. It
@@ -224,3 +224,34 @@ electronic temperature fixed and differentiates E-TS at fixed total electron
 count. Occupation/entropy derivative kernels are available internally, but the
 coupled orbital/density force correction and ionic integration are still pending.
 The existing zero-temperature and non-PBEh occupation paths are unchanged.
+
+## DC initial state to real-space Ehrenfest
+
+A bounded native route now uses `theory='tddft_response'`, `yn_md='y'`,
+`yn_dc='n'`, `yn_conventional_from_dcdft='y'`, and `yn_hse_lcfo_rt='n'`.
+The existing reader reconstructs DC-LCFO initial states onto the real-space
+mesh and checks functional/run metadata. Thereafter the wavefunction is the
+ordinary `spsi%zwf` mesh array; it is never projected back to the LCFO subspace.
+MLWF/ACE accelerates the time-dependent exchange action. Initial integer
+occupations stay fixed; no electronic-temperature fitting or SCF occurs in RT.
+
+Use `ensemble='NVE'`, `step_update_ps=1`, `out_rt_energy_step=1`, full EXX support,
+occupied-only states, the default hybrid Taylor4 predictor/corrector, and
+`ae_shape1='impulse'` without a second field. Supply initial velocities normally.
+Finite-duration pulses and checkpoint continuation/output remain rejected in
+this route. Initial force uses the post-impulse nonlocal phases. The initial
+energy output retains SALMON's pre-impulse electronic reference; evaluate
+post-excitation conservation using Eall+Tion after the kick. E_work in the RT
+file is ionic mechanical work, not laser work.
+
+Ionic positions are advanced by the existing Verlet steps. During electronic
+propagation, local/nonlocal pseudopotentials use midpoint positions; endpoint
+pseudopotentials are rebuilt before energy and force evaluation. There are no
+moving-basis terms in this fixed real-space mesh representation.
+
+See `samples/pbeh40_rvv10/water_ehrenfest_gs.inp` and
+`water_ehrenfest_rt.inp` for a verified small water setup. Native exchange remains
+k-only parallel with complete grid/orbitals per rank; giant-system spatial/
+orbital distribution, finite EXX support and long trajectories are not certified.
+This is DC preparation followed by total-grid Ehrenfest, not propagation of
+independent truncated-fragment forces. The old direct DC-BOMD guard remains.

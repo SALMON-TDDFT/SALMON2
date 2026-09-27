@@ -261,3 +261,33 @@ These derivatives validate the diagnostic baseline, not a completed nuclear
 response: the new directional occupation routine is not yet coupled to orbital
 and density response, and DC-MD remains disabled. Earlier JSON files retain
 their historical conversion constants and results.
+
+## Real-space Ehrenfest from DC initialization
+
+SALMON's mesh wavefunctions now have a bounded native PBEh Ehrenfest connection
+from DC-LCFO initial-state reconstruction. No LCFO basis projection is retained
+in RT. The separately supported fixed-nuclei projected optical-response path
+is unchanged. An attempted dense-basis midpoint kernel was discarded before
+commit after the user's explicit representation correction.
+
+`realspace-ehrenfest-validation.json` records 15 native/input tests, HSE ON/OFF
+builds, and the existing projected-LCFO response regression. H4 tests include
+active nonlocal s projectors, frozen-mesh force differences (4.97e-8 Ha/bohr),
+initial post-kick force, supplied initial ionic kinetic energy, charge, actual
+ionic displacement and timestep refinement. For dt=.08,.04,.02 au over1.6 au,
+post-kick Eall+Tion drift is3.22e-9,4.13e-10,5.19e-11 Ha; final-current differences
+have ratio3.999. A24³ single-water case with actual H/O projectors completes four
+0.0005 fs steps. These short checks do not certify a long liquid trajectory.
+
+The first force incorrectly used the pre-kick vector potential; both the
+independent review and a failing initial-force test exposed it. Initial
+nonlocal phases now use the post-kick field, while the energy file intentionally
+keeps its pre-kick electronic reference. A second regression exposed initial
+ionic kinetic energy printed before velocities were initialized; ordering was
+corrected for this route.
+
+Electron propagation uses midpoint nuclear pseudopotentials and evaluates
+forces/energy with endpoint pseudopotentials. Full EXX support, fixed integer
+occupations, impulse excitation and NVE are required. Native exchange still
+stores full grid/orbitals per k rank; real-space/orbital distributed exchange for
+giant systems is outstanding. Direct truncated-fragment MD remains disabled.

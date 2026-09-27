@@ -50,7 +50,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use salmon_pp, only: calc_nlcc, read_pslfile
   use force_sub, only: calc_force
   use hamiltonian
-  use md_sub, only: init_md
+  use md_sub, only: init_md,cal_Tion_Temperature_ion
   use fdtd_coulomb_gauge, only: init_singlescale
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
@@ -107,7 +107,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   character(100):: comment_line
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
   integer :: itt
-  logical :: rion_update
+  logical :: rion_update,pbeh_mesh_md
+
+  pbeh_mesh_md=yn_md=='y'.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n'
 
   if(lcfo_rt_requested())then
     if(yn_dc/='n'.or.yn_conventional_from_dcdft/='y'.or. &
@@ -392,6 +394,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
   end select
 
+  if(pbeh_mesh_md)then
+    ! Include supplied velocities in the initial energy output, not only t>0.
+    call init_md(system,md)
+    call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
+  endif
   !(header of SYSname_rt_energy.data)
   call write_rt_energy_data(-1,ofl,dt,energy,md)
   
@@ -478,7 +485,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
       end if
     end do
   
-  if(yn_md=='y') call init_md(system,md)
+  if(yn_md=='y'.and..not.pbeh_mesh_md) call init_md(system,md)
   
   ! preparation for projection
   if(projection_option/='no') then
@@ -511,6 +518,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
+     if((xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n')then
+       ! The reported GS energy remains the pre-kick reference, but the first
+       ! nuclear half-kick must use the post-impulse electronic Hamiltonian.
+       system%vec_Ac=rt%Ac_tot(:,0)
+       call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+     endif
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format

@@ -83,12 +83,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   character(100) :: comment_line
-  logical :: rion_update
+  logical :: rion_update,pbeh_mesh_md
+  real(8) :: rion_endpoint(3,system%nion)
   integer :: ihpsieff
   call nvtxStartRange('time_evolution_step', __LINE__)
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
+  pbeh_mesh_md=yn_md=='y'.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n'
 
   call timer_begin(LOG_CALC_VBOX)
   
@@ -143,7 +145,17 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   !(MD:part1 & update of pseudopotential)
   if(yn_md=='y') then
      call time_evolution_step_md_part1(itt,system,md)
+     if(pbeh_mesh_md)then
+       ! Mesh orbitals do not move with atoms. Propagate them with the nuclear
+       ! Hamiltonian at the midpoint; endpoint projectors are rebuilt below.
+       rion_endpoint=system%Rion
+       system%Rion=.5d0*(md%Rion_last+rion_endpoint)
+     endif
      call update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
+     if(pbeh_mesh_md)then
+       call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+       call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+     endif
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
@@ -172,6 +184,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   endif
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
+  if(pbeh_mesh_md)then
+    system%Rion=rion_endpoint
+    call update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
+    call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+  endif
   
   ! Gram Schmidt orghonormalization
   if((gram_schmidt_interval >= 1) .and. (mod(itt,gram_schmidt_interval) == 0)) then

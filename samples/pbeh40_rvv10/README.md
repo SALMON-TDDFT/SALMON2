@@ -7,3 +7,18 @@ Both use the inherited MLWF+ACE exchange path with 40% Coulomb exchange. The exa
 [Model, parameters, cutoff convention, limitations and validation](../../docs/inputs/pbeh40-rvv10.md).
 
 `validate.py` repeats SCF at small H/O displacements and checks force against the energy derivative, or checks short NVE energy drift at two timesteps. Set `--atom O` for the oxygen displacement; `--xc pbeh40` omits rVV10. It refuses existing case directories and fails on unconverged SCF or failed numerical checks.
+
+## Real-space Ehrenfest from a DC initial state
+
+Run `salmon < water_ehrenfest_gs.inp` first, then
+`salmon < water_ehrenfest_rt.inp` in the same fresh directory, containing the
+H/O pseudopotentials and `water_ehrenfest_velocity.dat`. The GS stage writes
+`data_dcdft`; the RT reader verifies its functional/run metadata and reconstructs
+occupied mesh wavefunctions once. RT uses `yn_hse_lcfo_rt='n'`: no LCFO projection
+or basis propagation occurs. MLWF/ACE accelerates exchange only.
+
+This is a one-water, one-rank, 24³-grid smoke fixture: four 0.0005 fs steps after
+an electronic impulse with NVE ions. It does not validate liquid-water dynamics
+or a finite-duration laser. The current native exchange layout keeps the full
+real-space grid and occupied orbitals on each k rank; spatial/orbital distributed
+exchange for giant systems remains a separate extension.

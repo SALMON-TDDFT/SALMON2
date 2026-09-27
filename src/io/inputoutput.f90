@@ -2893,7 +2893,7 @@ contains
     implicit none
     integer :: i,round_phi
     real(8) :: udp_phi  ! udp: under dicimal point
-    logical :: if_orthogonal_tmp
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -3246,6 +3246,20 @@ contains
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
+    pbeh_mesh_rt=(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.theory=='tddft_response' &
+      .and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n'
+    if(pbeh_mesh_rt)then
+      if(ae_shape1/='impulse'.or.ae_shape2/='none') &
+        error stop 'PBEh40 mesh RT: only impulse excitation validated'
+      if(checkpoint_interval>0.or.time_shutdown>0d0.or.write_rt_wfn_k=='y') &
+        error stop 'PBEh40 mesh RT: checkpoint output not supported'
+      if(yn_md=='y')then
+        if(ensemble/='NVE'.or.step_velocity_scaling>=1.or.yn_stop_system_momt=='y') &
+          error stop 'PBEh40 mesh Ehrenfest: unmodified NVE velocities required'
+        if(step_update_ps/=1.or.out_rt_energy_step/=1) &
+          error stop 'PBEh40 mesh Ehrenfest: update pseudopotentials and energy every step'
+      endif
+    endif
     if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')then
 #ifndef USE_HSE
       error stop 'PBEh40 requires USE_HSE=ON'
@@ -3254,7 +3268,7 @@ contains
       error stop 'PBEh40: OpenACC force/potential path not yet supported'
 #endif
       yn_hse_wannier='y'
-      if(theory/='dft'.and.theory/='dft_md'.and.yn_hse_lcfo_rt/='y') &
+      if(theory/='dft'.and.theory/='dft_md'.and.yn_hse_lcfo_rt/='y'.and..not.pbeh_mesh_rt) &
         error stop 'PBEh40: only DFT, fixed-cell BOMD and LCFO response supported'
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
         error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
@@ -3263,7 +3277,7 @@ contains
       if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
       if(yn_dc=='y'.and.theory=='dft_md') &
         error stop 'PBEh40: DC MD is not yet supported'
-      if(yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt/='y') &
+      if(yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt/='y'.and..not.pbeh_mesh_rt) &
         error stop 'PBEh40: reconstruction requires LCFO response'
       if(yn_hse_lcfo_rt=='y'.and.(yn_md=='y'.or.ae_shape1/='impulse'.or.hse_lcfo_wf_radius>0d0)) &
         error stop 'PBEh40 LCFO: fixed nuclei, impulse and full source support required'
@@ -3306,7 +3320,7 @@ contains
       if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
         if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
           error stop 'HSE06: omit propagator to use Taylor4 + ACE'
-        if(yn_out_rvf_rt=='y')error stop 'HSE06: RT force output not yet certified'
+        if(yn_out_rvf_rt=='y'.and..not.pbeh_mesh_rt)error stop 'HSE06: RT force output not yet certified'
         if(yn_fix_func/='n')error stop 'HSE06 requires self-consistent functional updates'
         if(trans_longi/='tr')error stop 'HSE06 native RT requires transverse fields'
         if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'

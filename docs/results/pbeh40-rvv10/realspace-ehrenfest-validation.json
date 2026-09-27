@@ -1,0 +1,53 @@
+{
+  "base_commit": "ecf04267",
+  "representation": "real-space mesh wavefunctions, initial reconstruction only; no LCFO projection during RT",
+  "tests": {
+    "native_and_input_passed": 15,
+    "skipped": 0,
+    "water_grid": [
+      24,
+      24,
+      24
+    ],
+    "water_steps": 4,
+    "water_dt_fs": 0.0005,
+    "frozen_mesh_force_error_Ha_bohr": 4.970215550237356e-08,
+    "H4_dt_au": [
+      0.08,
+      0.04,
+      0.02
+    ],
+    "H4_duration_au": 1.6,
+    "H4_energy_drift_Ha": [
+      3.2226505908283798e-09,
+      4.1276537743328845e-10,
+      5.1944670786951974e-11
+    ],
+    "H4_current_refinement_ratio": 3.999012095887498,
+    "charge_tolerance_electrons": 1e-07
+  },
+  "builds": {
+    "HSE_ON_MPI": "passed",
+    "HSE_OFF_serial": "passed"
+  },
+  "existing_projected_LCFO_response": "passed",
+  "review": {
+    "finding": "Initial ionic force used pre-impulse vector potential",
+    "fix": "Set initial A and refresh nonlocal phases; regression failed before fix and passed after"
+  },
+  "limits": [
+    "impulse only",
+    "full EXX support",
+    "occupied-only fixed occupations",
+    "NVE",
+    "initial DC reconstruction required",
+    "native mesh RT tested at one rank; current exchange layout only supports k parallelism",
+    "no long liquid trajectory or giant-system certification"
+  ],
+  "logs": {
+    "realspace-ehrenfest-regressions.log": "0eda3d2c79bfa6835a03da3b16ebc074d073c8c0d8770f063447a5ec4d057685",
+    "realspace-ehrenfest-build.log": "b39bd1a8eb46e17e70012ef6baa886596fd71676573ae967e3f0218c87b1f2fc",
+    "realspace-ehrenfest-off-build.log": "23f9d7025fe6c6cd665d1428f77ceb5a3618e898876a63b264cee38fd8229f57",
+    "realspace-ehrenfest-lcfo-regression.log": "4e16628b1aaadfe6d058aca074f2c07932295dfb84df54dae09075f11a439de2"
+  }
+}

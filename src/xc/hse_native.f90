@@ -17,7 +17,7 @@ module hse_native
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
-    pbeh_coulomb_radius,theory, &
+    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
     hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
@@ -219,7 +219,12 @@ contains
     if(.not.hse_enabled().or.hse_freeze)return
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
-    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.(yn_md/='n'.and.theory/='dft_md').or.yn_symmetrized_stencil=='y') &
+    if(yn_md=='y'.and.theory/='dft_md')then
+      if((xc/='pbeh40'.and.xc/='pbeh40_rvv10').or.theory/='tddft_response'.or. &
+         yn_conventional_from_dcdft/='y'.or.lcfo_rt_active) &
+        error stop 'Hybrid: unsupported real-time ionic extension'
+    endif
+    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_symmetrized_stencil=='y') &
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
