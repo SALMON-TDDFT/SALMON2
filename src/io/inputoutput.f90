@@ -281,7 +281,7 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
+      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
@@ -740,6 +740,7 @@ contains
     xname = 'none'
     cname = 'none'
     pbeh_coulomb_radius=0d0
+    rvv10_fft='ffte'
     rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
     yn_hse_wannier = 'n'
@@ -1381,6 +1382,7 @@ contains
     call comm_bcast(rvv10_b,nproc_group_global)
     call comm_bcast(rvv10_c,nproc_group_global)
     call comm_bcast(rvv10_nq,nproc_group_global)
+    call comm_bcast(rvv10_fft,nproc_group_global)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
@@ -2317,6 +2319,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
       write(fh_variables_log, *) "# pbeh_coulomb_radius (bohr; 0=auto)=",pbeh_coulomb_radius
+      write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
@@ -3226,6 +3229,7 @@ contains
         error stop 'LCFO RT requires hybrid tddft_response with Taylor4'
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
+    if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'

@@ -84,7 +84,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit,yn_dc,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq
+    use salmon_global, only: yn_spinorbit,yn_dc,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
     implicit none
@@ -364,7 +364,7 @@ contains
       call rvv10_evaluate_distributed(rv_shape,mg%is,mg%num, &
         [info%isize_x,info%isize_y,info%isize_z],[info%id_x,info%id_y,info%id_z], &
         [info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,system%hgs,rv_r,rv_s, &
-        rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_used,rv_status)
+        rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_used,rv_status,rvv10_fft=='fftw')
       if(rv_used)then
         if(rv_status/=0)error stop 'rVV10: distributed evaluation failed'
         eexc_tmp=eexc_tmp+reshape(rv_e,mg%num)
@@ -403,6 +403,7 @@ contains
       endif
       if(.not.rv_reported.and.info%id_rko==0)then
         if(rv_used)then
+          write(*,'(2a)')'rVV10 backend: ',trim(rvv10_fft)
           write(*,'(a,3i6)')'rVV10 FFT: native pencils, x replication/y/z ranks:', &
             info%isize_x,info%isize_y,info%isize_z
         else

@@ -1,0 +1,501 @@
+{
+  "date": "2026-09-27",
+  "environment": "local macOS arm64, GNU Fortran 15.2.0, Release build; serial FFTW within each MPI rank",
+  "nq": 32,
+  "omp_threads": 1,
+  "benchmark_trials": 3,
+  "warm_pairs_per_trial": 20,
+  "whole_functional_repetitions_per_trial": 3,
+  "timing_convention": "per-rank maximum; independent phases need not sum to the maximum total",
+  "benchmarks": [
+    {
+      "grid": [
+        32,
+        24,
+        16
+      ],
+      "mpi_ranks": 2,
+      "yz_ranks": [
+        1,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.020459,
+          "setup_s": 0.016488075256,
+          "ffte_pair_s": 0.00514715,
+          "fftw_pair_s": 0.00545945,
+          "local_fft_s": 0.0017613887787,
+          "mpi_s": 0.0010056138039,
+          "packing_s": 0.0027243375778,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.064647333333,
+          "fftw_rvv10_s": 0.063406666667
+        },
+        {
+          "first_forward_s": 0.019576,
+          "setup_s": 0.013115167618,
+          "ffte_pair_s": 0.00514735,
+          "fftw_pair_s": 0.00559375,
+          "local_fft_s": 0.0017336606979,
+          "mpi_s": 0.0010419726372,
+          "packing_s": 0.0028424620628,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.063318,
+          "fftw_rvv10_s": 0.065078
+        },
+        {
+          "first_forward_s": 0.016436,
+          "setup_s": 0.012616872787,
+          "ffte_pair_s": 0.0060506,
+          "fftw_pair_s": 0.00633265,
+          "local_fft_s": 0.0019815206528,
+          "mpi_s": 0.0012183785439,
+          "packing_s": 0.0031490802765,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.071033666667,
+          "fftw_rvv10_s": 0.071839666667
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.019576,
+        "setup_s": 0.013115167618,
+        "ffte_pair_s": 0.00514735,
+        "fftw_pair_s": 0.00559375,
+        "local_fft_s": 0.0017613887787,
+        "mpi_s": 0.0010419726372,
+        "packing_s": 0.0028424620628,
+        "plans_created": 6.0,
+        "ffte_rvv10_s": 0.064647333333,
+        "fftw_rvv10_s": 0.065078
+      },
+      "range": {
+        "first_forward_s": [
+          0.016436,
+          0.020459
+        ],
+        "setup_s": [
+          0.012616872787,
+          0.016488075256
+        ],
+        "ffte_pair_s": [
+          0.00514715,
+          0.0060506
+        ],
+        "fftw_pair_s": [
+          0.00545945,
+          0.00633265
+        ],
+        "local_fft_s": [
+          0.0017336606979,
+          0.0019815206528
+        ],
+        "mpi_s": [
+          0.0010056138039,
+          0.0012183785439
+        ],
+        "packing_s": [
+          0.0027243375778,
+          0.0031490802765
+        ],
+        "plans_created": [
+          6.0,
+          6.0
+        ],
+        "ffte_rvv10_s": [
+          0.063318,
+          0.071033666667
+        ],
+        "fftw_rvv10_s": [
+          0.063406666667,
+          0.071839666667
+        ]
+      }
+    },
+    {
+      "grid": [
+        32,
+        24,
+        16
+      ],
+      "mpi_ranks": 4,
+      "yz_ranks": [
+        2,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.012719,
+          "setup_s": 0.0094602108002,
+          "ffte_pair_s": 0.00375415,
+          "fftw_pair_s": 0.00350585,
+          "local_fft_s": 0.00097855329514,
+          "mpi_s": 0.0010434150696,
+          "packing_s": 0.0015279173851,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.036437333333,
+          "fftw_rvv10_s": 0.037655
+        },
+        {
+          "first_forward_s": 0.016834,
+          "setup_s": 0.0085623264313,
+          "ffte_pair_s": 0.00349665,
+          "fftw_pair_s": 0.0033756,
+          "local_fft_s": 0.00091036558151,
+          "mpi_s": 0.0011206030846,
+          "packing_s": 0.0014295816422,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.035414,
+          "fftw_rvv10_s": 0.03564
+        },
+        {
+          "first_forward_s": 0.015062,
+          "setup_s": 0.0084919929504,
+          "ffte_pair_s": 0.0036137,
+          "fftw_pair_s": 0.00321785,
+          "local_fft_s": 0.00096269845963,
+          "mpi_s": 0.00087416172028,
+          "packing_s": 0.0014306306839,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.035588666667,
+          "fftw_rvv10_s": 0.033942666667
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.015062,
+        "setup_s": 0.0085623264313,
+        "ffte_pair_s": 0.0036137,
+        "fftw_pair_s": 0.0033756,
+        "local_fft_s": 0.00096269845963,
+        "mpi_s": 0.0010434150696,
+        "packing_s": 0.0014306306839,
+        "plans_created": 6.0,
+        "ffte_rvv10_s": 0.035588666667,
+        "fftw_rvv10_s": 0.03564
+      },
+      "range": {
+        "first_forward_s": [
+          0.012719,
+          0.016834
+        ],
+        "setup_s": [
+          0.0084919929504,
+          0.0094602108002
+        ],
+        "ffte_pair_s": [
+          0.00349665,
+          0.00375415
+        ],
+        "fftw_pair_s": [
+          0.00321785,
+          0.00350585
+        ],
+        "local_fft_s": [
+          0.00091036558151,
+          0.00097855329514
+        ],
+        "mpi_s": [
+          0.00087416172028,
+          0.0011206030846
+        ],
+        "packing_s": [
+          0.0014295816422,
+          0.0015279173851
+        ],
+        "plans_created": [
+          6.0,
+          6.0
+        ],
+        "ffte_rvv10_s": [
+          0.035414,
+          0.036437333333
+        ],
+        "fftw_rvv10_s": [
+          0.033942666667,
+          0.037655
+        ]
+      }
+    },
+    {
+      "grid": [
+        64,
+        48,
+        32
+      ],
+      "mpi_ranks": 2,
+      "yz_ranks": [
+        1,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.124906,
+          "setup_s": 0.08579993248,
+          "ffte_pair_s": 0.04720715,
+          "fftw_pair_s": 0.07952195,
+          "local_fft_s": 0.017907595634,
+          "mpi_s": 0.011206805706,
+          "packing_s": 0.050804257393,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.79533866667,
+          "fftw_rvv10_s": 0.80955866667
+        },
+        {
+          "first_forward_s": 0.123431,
+          "setup_s": 0.080461740494,
+          "ffte_pair_s": 0.04952995,
+          "fftw_pair_s": 0.0756652,
+          "local_fft_s": 0.017677938938,
+          "mpi_s": 0.010508275032,
+          "packing_s": 0.048221838474,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.60850466667,
+          "fftw_rvv10_s": 0.60470666667
+        },
+        {
+          "first_forward_s": 0.128554,
+          "setup_s": 0.082281827927,
+          "ffte_pair_s": 0.0472376,
+          "fftw_pair_s": 0.0799516,
+          "local_fft_s": 0.018394899368,
+          "mpi_s": 0.011921656132,
+          "packing_s": 0.050558567047,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.63884766667,
+          "fftw_rvv10_s": 0.63067566667
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.124906,
+        "setup_s": 0.082281827927,
+        "ffte_pair_s": 0.0472376,
+        "fftw_pair_s": 0.07952195,
+        "local_fft_s": 0.017907595634,
+        "mpi_s": 0.011206805706,
+        "packing_s": 0.050558567047,
+        "plans_created": 6.0,
+        "ffte_rvv10_s": 0.63884766667,
+        "fftw_rvv10_s": 0.63067566667
+      },
+      "range": {
+        "first_forward_s": [
+          0.123431,
+          0.128554
+        ],
+        "setup_s": [
+          0.080461740494,
+          0.08579993248
+        ],
+        "ffte_pair_s": [
+          0.04720715,
+          0.04952995
+        ],
+        "fftw_pair_s": [
+          0.0756652,
+          0.0799516
+        ],
+        "local_fft_s": [
+          0.017677938938,
+          0.018394899368
+        ],
+        "mpi_s": [
+          0.010508275032,
+          0.011921656132
+        ],
+        "packing_s": [
+          0.048221838474,
+          0.050804257393
+        ],
+        "plans_created": [
+          6.0,
+          6.0
+        ],
+        "ffte_rvv10_s": [
+          0.60850466667,
+          0.79533866667
+        ],
+        "fftw_rvv10_s": [
+          0.60470666667,
+          0.80955866667
+        ]
+      }
+    },
+    {
+      "grid": [
+        64,
+        48,
+        32
+      ],
+      "mpi_ranks": 4,
+      "yz_ranks": [
+        2,
+        2
+      ],
+      "trials": [
+        {
+          "first_forward_s": 0.076269,
+          "setup_s": 0.053218841553,
+          "ffte_pair_s": 0.0321657,
+          "fftw_pair_s": 0.0432914,
+          "local_fft_s": 0.0095433712006,
+          "mpi_s": 0.012130665779,
+          "packing_s": 0.022027134895,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.36053033333,
+          "fftw_rvv10_s": 0.37715933333
+        },
+        {
+          "first_forward_s": 0.075596,
+          "setup_s": 0.051934242249,
+          "ffte_pair_s": 0.02781415,
+          "fftw_pair_s": 0.0435755,
+          "local_fft_s": 0.0097378969193,
+          "mpi_s": 0.013379967213,
+          "packing_s": 0.021398556232,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.31185366667,
+          "fftw_rvv10_s": 0.318437
+        },
+        {
+          "first_forward_s": 0.076626,
+          "setup_s": 0.052691936493,
+          "ffte_pair_s": 0.0305214,
+          "fftw_pair_s": 0.0399011,
+          "local_fft_s": 0.0093627929688,
+          "mpi_s": 0.010262000561,
+          "packing_s": 0.020603787899,
+          "plans_created": 6.0,
+          "ffte_rvv10_s": 0.29222833333,
+          "fftw_rvv10_s": 0.30704033333
+        }
+      ],
+      "median": {
+        "first_forward_s": 0.076269,
+        "setup_s": 0.052691936493,
+        "ffte_pair_s": 0.0305214,
+        "fftw_pair_s": 0.0432914,
+        "local_fft_s": 0.0095433712006,
+        "mpi_s": 0.012130665779,
+        "packing_s": 0.021398556232,
+        "plans_created": 6.0,
+        "ffte_rvv10_s": 0.31185366667,
+        "fftw_rvv10_s": 0.318437
+      },
+      "range": {
+        "first_forward_s": [
+          0.075596,
+          0.076626
+        ],
+        "setup_s": [
+          0.051934242249,
+          0.053218841553
+        ],
+        "ffte_pair_s": [
+          0.02781415,
+          0.0321657
+        ],
+        "fftw_pair_s": [
+          0.0399011,
+          0.0435755
+        ],
+        "local_fft_s": [
+          0.0093627929688,
+          0.0097378969193
+        ],
+        "mpi_s": [
+          0.010262000561,
+          0.013379967213
+        ],
+        "packing_s": [
+          0.020603787899,
+          0.022027134895
+        ],
+        "plans_created": [
+          6.0,
+          6.0
+        ],
+        "ffte_rvv10_s": [
+          0.29222833333,
+          0.36053033333
+        ],
+        "fftw_rvv10_s": [
+          0.30704033333,
+          0.37715933333
+        ]
+      }
+    }
+  ],
+  "validation": {
+    "native_tests": 25,
+    "native_tests_status": "passed",
+    "hse_on_build": "passed",
+    "hse_off_build": "passed",
+    "direct_layout_channel_cases": 54,
+    "grid": [
+      16,
+      12,
+      8
+    ],
+    "mpi_ranks": [
+      2,
+      4
+    ],
+    "omp_threads": [
+      1,
+      2
+    ],
+    "q_channels": [
+      8,
+      16,
+      32
+    ],
+    "primitive_batch_channel_counts": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "max_full_potential_difference": 1.1723955140041653e-13,
+    "native_root_reference_trajectories": [
+      {
+        "axis": "y",
+        "max_current_difference": 2.2200851630280806e-12,
+        "max_energy_difference": 1.021405182655144e-14
+      },
+      {
+        "axis": "z",
+        "max_current_difference": 7.610329499069512e-14,
+        "max_energy_difference": 1.021405182655144e-14
+      }
+    ],
+    "collective_invalid_density": "passed",
+    "unsupported_layout_fallback": "passed",
+    "poisson_table_preservation": "passed",
+    "plan_reuse": "passed",
+    "independent_review": "no critical or important findings"
+  },
+  "decision": "Keep FFTE default; optional rvv10_fft=fftw. Current FFTW packing dominates the larger-grid transform and provides no consistent whole-functional speedup.",
+  "limitations": [
+    "Single local machine, 2/4 ranks; no production water or multinode scaling measurement.",
+    "FFTE includes per-transform private-table initialization; this is an implemented-path comparison, not an intrinsic FFT library comparison.",
+    "Backend order is fixed in each timing trial; timing variation can affect whole-functional comparisons.",
+    "FFTW cache calls are nonreentrant and require consistent collective arguments and coordinate-ordered communicators.",
+    "Fortran allocations do not recover collectively from allocation failure. Existing distributed allocations precede the new transform size guard; there is no end-to-end huge-grid overflow guarantee.",
+    "Direct potential assembly uses periodic shifts; native halo derivatives are covered by the LCFO fixtures.",
+    "DC-MD remains unsupported."
+  ],
+  "log_sha256": {
+    "fftw-benchmark-scale1-trial1.log": "21b1dbd8af0bc636845b7733a58707ddfc35d8cd365855406c196bc6f8f22582",
+    "fftw-benchmark-scale1-trial2.log": "38e0b750f170b5f274303d390c8c05737cbf9d745c8aba9d20414a0d8755037c",
+    "fftw-benchmark-scale1-trial3.log": "41fd68a7cee8266ef47d005855b0c0ad1193786031b0ef68eec398e8930a4447",
+    "fftw-benchmark-scale2-trial1.log": "7b411eb1e48f205709c80c761ff0298eb540e961c50882c335ac74586d10918f",
+    "fftw-benchmark-scale2-trial2.log": "daa73fa80582572b411aac135e87ff9f64e7f7b1bd49d9ef6eb886c69ad670b0",
+    "fftw-benchmark-scale2-trial3.log": "1a4ff6b2bf2eaa1281f07f94e41227bec2fc11fee4b45f636f5f749af756af35",
+    "fftw-lcfo-y.log": "4abf893d286baf1a8d1f9417f9c4096d89101be6b0516f7113578f6c2ec54c5e",
+    "fftw-lcfo-z.log": "f797953383ab7ed3aa3641a045aad27ff8c5e031fe1ad684a4dfca6a46aa281a",
+    "fftw-pencil-direct.log": "409985a1c0d2ef1aea02891df020894d8d78e462153e8b27f5c626ece880c400",
+    "fftw-native-tests.log": "2196627de6eeac9bd5b541498498b5d680ada1295f20a2b729f1a5b4c98004d6",
+    "fftw-pencil-build.log": "5b6035d038f0f07272af7c330e43e08ab76f1e334edab87671a639a253eb94b6",
+    "fftw-off-build.log": "d5dd861f1ff273b1d91fff507d61ca5ed4786d6bf04d6bca07ec6747c7376a40"
+  }
+}

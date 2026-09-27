@@ -60,7 +60,7 @@ The rational kernel's analytic three-dimensional Fourier transform is used, incl
 
 Compatible grids now use the native Poisson FFTE layout: full x lines and distributed y/z pencils. Density and sigma are collected only within the x communicator. Channel storage per rank is O(nq*G/(Py*Pz)); the work is replicated across Px. **Use y and/or z decomposition to reduce per-rank FFT memory.** An x-only decomposition retains full channel storage on each rank. FFT tables are private to rVV10 and do not alter the Poisson solver's saved tables.
 
-The automatic path requires uniform block decomposition, 2/3/5-smooth grid dimensions from 2 through 4096, and FFTE transpose divisibility (Nx divisible by Py, Ny divisible by Pz, in addition to each dimension's own process count). Incompatible grids retain the root FFTW reference path. The chosen backend and x/y/z process counts are logged. No additional namelist switch is required.
+The automatic path requires uniform block decomposition, 2/3/5-smooth grid dimensions from 2 through 4096, and FFTE transpose divisibility (Nx divisible by Py, Ny divisible by Pz, in addition to each dimension's own process count). Incompatible grids retain the root FFTW reference path. The chosen backend and x/y/z process counts are logged. The optional `rvv10_fft='ffte'|'fftw'` selects the compatible-grid backend; the default is `ffte`. Both choices preserve this fallback contract.
 
 DC evaluates the mixed **total** density with native halo gradients and divergence; the global nonlocal energy is summed once. Its scalar potential is still assembled globally for fragment/buffer mapping. Thus DC still holds full scalar grids, while the nq-channel convolution is distributed. This does not by itself establish whole-program weak scaling.
 
@@ -101,7 +101,7 @@ A finite-source-radius RT model needs separate convergence/energy validation.
 
 For rVV10, the density gradient and potential divergence use the same halo
 exchange and finite-difference stencils as the spatially decomposed Laplacian.
-The convolution uses the same native FFTE pencil adapter as SCF/DC on compatible
+The convolution uses the same native pencil adapter as SCF/DC on compatible
 grids. Derivatives return to each owned core and enter the existing halo
 divergence. Orbital groups do not multiply nonlocal energy. The reference
 root FFT remains a compatibility fallback, as described above.
@@ -155,3 +155,29 @@ python3 samples/pbeh40_rvv10/validate.py build/salmon /fresh/nve --grid 24 --md
 ```
 
 The standalone kernel tests currently use the same macOS Homebrew toolchain layout as existing native HSE tests. Run directories must be fresh. Results and limitations are recorded in [validation results](../results/pbeh40-rvv10/README.md).
+
+## Reusable FFTW pencil backend
+
+Set `rvv10_fft='fftw'` in `&functional` to select cached FFTW transforms for
+SCF, static DC and the supported LCFO response route. FFTW uses measured
+`plan_many` plans, serial FFTs per MPI rank, and batches of at most four channels.
+Plans and packing maps are reused until the grid, process coordinates or batch
+size changes. Calls must enter serially per rank; axis communicators must be
+coordinate ordered and collective dimensions/channel counts must agree.
+No FFTW MPI or FFTW threads library is required. The backend does not change
+the functional metadata or enable DC-MD.
+
+FFTE remains the default: current local benchmarks show packing costs can
+outweigh the FFTW transform savings. Measure the complete functional on the
+target machine before selecting a backend. Setup, warm forward/inverse pairs,
+local FFT, communication, packing and full rVV10 timings are separated by:
+
+```
+python3 testsuites/unit_pbeh_rvv10/test_distributed.py --build /path/to/build --benchmark --scale 1
+python3 testsuites/unit_pbeh_rvv10/test_distributed.py --build /path/to/build --benchmark --scale 2
+```
+
+The grids are 32x24x16 and 64x48x32, with 32 channels, 2/4 MPI ranks and one
+OpenMP thread. FFTE timings include its current per-transform private-table
+initialization; these compare implemented paths, not isolated library speed.
+Use `--fft-backend fftw` with the LCFO integration fixture to check that route.

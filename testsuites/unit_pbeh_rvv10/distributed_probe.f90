@@ -1,14 +1,16 @@
 program probe
+  use fftw_pencils, only: pencil_transform,fftw_pencil_plans_created
   use mpi
   use rvv10, only: rvv10_evaluate,rvv10_periodic
   use rvv10_distributed, only: rvv10_evaluate_distributed
   implicit none
-  integer :: ierr,rank,nproc,axis,comm(3),coords(3),dims(3),n(3),lo(3),local_n(3),i,j,k,g,l,status,color,key,nq
+  integer :: ierr,rank,nproc,axis,comm(3),coords(3),dims(3),n(3),lo(3),local_n(3),i,j,k,g,l,status,color,key,nq,channel,plans_before,batch_count
   character(16) :: argument
   logical :: used
   real(8) :: err,total_err,h(3),coef(4,3),matrix(3,3)
   real(8),allocatable :: density(:,:,:),grad(:,:,:,:),ep(:,:,:),vp(:,:,:),flux(:,:,:),potential(:,:,:)
   real(8),allocatable :: local_parts(:,:),parts(:,:)
+  complex(8),allocatable :: batch_input(:,:),batch_output(:,:),batch_back(:,:),fft_a(:),fft_b(:)
   complex(8),allocatable :: old_input(:),old_a(:),old_b(:),old_reference(:)
   real(8),allocatable :: rho(:),sigma(:),e(:),v(:),w(:),lr(:),ls(:),le(:),lv(:),lw(:)
   call MPI_Init(ierr)
@@ -64,6 +66,27 @@ program probe
       call MPI_Comm_split(MPI_COMM_WORLD,color,key,comm(i),ierr)
     enddo
     local_n=n/dims;lo=coords*local_n+1
+    allocate(batch_input(n(1)*local_n(2)*local_n(3),5), &
+      batch_output(n(1)*local_n(2)*local_n(3),5),batch_back(n(1)*local_n(2)*local_n(3),5), &
+      fft_a(n(1)*local_n(2)*local_n(3)),fft_b(n(1)*local_n(2)*local_n(3)))
+    do channel=1,5;do i=1,size(batch_input,1)
+      batch_input(i,channel)=cmplx(sin(.17d0*i+channel+rank),cos(.09d0*i-channel+rank),8)
+    enddo;enddo
+    do batch_count=2,5
+    call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),batch_input(:,:batch_count),batch_output(:,:batch_count),-1,status)
+    if(status/=0)error stop 'FFTW pencils failed'
+    plans_before=fftw_pencil_plans_created
+    call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),batch_output(:,:batch_count),batch_back(:,:batch_count),1,status)
+    if(status/=0.or.maxval(abs(batch_back(:,:batch_count)-batch_input(:,:batch_count)))>1d-11)error stop 'FFTW pencil round trip'
+    if(plans_before/=fftw_pencil_plans_created)error stop 'plans were not reused'
+    do channel=1,batch_count
+      fft_a=batch_input(:,channel)
+      call pzfft3dv_rvv10(fft_a,fft_b,n(1),n(2),n(3),dims(2),dims(3),-1,comm(2),comm(3))
+      if(maxval(abs(fft_b-batch_output(:,channel)))>1d-10)error stop 'FFTW vs FFTE transform'
+    enddo
+    enddo
+    deallocate(batch_input,batch_output,batch_back,fft_a,fft_b)
+
     allocate(lr(product(local_n)),ls(product(local_n)),le(product(local_n)),lv(product(local_n)),lw(product(local_n)))
     l=0
     do k=lo(3),lo(3)+local_n(3)-1;do j=lo(2),lo(2)+local_n(2)-1;do i=lo(1),lo(1)+local_n(1)-1
@@ -79,7 +102,7 @@ program probe
     call pzfft3dv_mod(old_a,old_b,8,8,8,dims(2),dims(3),-1,comm(2),comm(3))
     old_reference=old_b
     call rvv10_evaluate_distributed(n,lo,local_n,dims,coords,comm,MPI_COMM_WORLD,h,lr,ls, &
-      5.3d0,.0093d0,nq,le,lv,lw,used,status)
+      5.3d0,.0093d0,nq,le,lv,lw,used,status,.true.)
     if(.not.used.or.status/=0)error stop 'distributed unavailable'
     err=0;l=0
     do k=lo(3),lo(3)+local_n(3)-1;do j=lo(2),lo(2)+local_n(2)-1;do i=lo(1),lo(1)+local_n(1)-1
@@ -110,12 +133,12 @@ program probe
     deallocate(old_input,old_a,old_b,old_reference)
     ! Unsupported geometry must return consistently before collective FFTs.
     call rvv10_evaluate_distributed([14,12,8],lo,local_n,dims,coords,comm,MPI_COMM_WORLD,h,lr,ls, &
-      5.3d0,.0093d0,nq,le,lv,lw,used,status)
+      5.3d0,.0093d0,nq,le,lv,lw,used,status,.true.)
     if(used.or.status/=0)error stop 'unsupported layout did not fall back'
     ! An invalid density on one rank must fail on all ranks without deadlock.
     if(rank==0)lr(1)=-1d0
     call rvv10_evaluate_distributed(n,lo,local_n,dims,coords,comm,MPI_COMM_WORLD,h,lr,ls, &
-      5.3d0,.0093d0,nq,le,lv,lw,used,status)
+      5.3d0,.0093d0,nq,le,lv,lw,used,status,.true.)
     if(.not.used.or.status==0)error stop 'invalid density accepted'
     do i=1,3
       call MPI_Comm_free(comm(i),ierr)

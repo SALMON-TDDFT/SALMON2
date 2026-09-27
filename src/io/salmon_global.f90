@@ -120,6 +120,7 @@ module salmon_global
   character(64)  :: xc !, xcname
   character(64)  :: xname
   real(8) :: pbeh_coulomb_radius,rvv10_b,rvv10_c
+  character(8) :: rvv10_fft
   integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier

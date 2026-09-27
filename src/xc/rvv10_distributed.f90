@@ -2,6 +2,7 @@
 ! x-only grid decomposition replicates pencils; use y/z decomposition to scale.
 module rvv10_distributed
   use communication, only: comm_summation,comm_get_max
+  use fftw_pencils, only: pencil_transform
   use rvv10, only: rvv10_evaluate,rvv10_kernel_fourier
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -9,14 +10,18 @@ module rvv10_distributed
   public :: rvv10_evaluate_distributed
 contains
   subroutine rvv10_evaluate_distributed(n,lo,m,dims,coords,comm,comm_r,h,rho,sigma,b,c,nq, &
-      energy,vrho,vsigma,used,status)
+      energy,vrho,vsigma,used,status,use_fftw)
     integer,intent(in) :: n(3),lo(3),m(3),dims(3),coords(3),comm(3),comm_r,nq
     real(8),intent(in) :: h(3),rho(:),sigma(:),b,c
     real(8),intent(out) :: energy(:),vrho(:),vsigma(:)
     logical,intent(out) :: used
     integer,intent(out) :: status
+    logical,intent(in),optional :: use_fftw
+    logical :: fftw_backend
     integer :: bad,i,j,t,tile(3),nt
     real(8),allocatable :: part(:,:,:),whole(:,:,:),r(:),s(:),e(:),v(:),w(:)
+    fftw_backend=.false.
+    if(present(use_fftw))fftw_backend=use_fftw
     used=.false.;status=0;bad=0
     ! FFTE fixed workspace and transpose divisibility constraints. Fall back
     ! collectively before entering any axis-communicator operation.
@@ -71,11 +76,16 @@ contains
       integer :: q,d,x,y,z,p(3),gidx
       real(8) :: g,phi,pi
       allocate(transformed(nt,nq),a(nt),bb(nt));pi=acos(-1d0)
+      if(fftw_backend)then
+        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),theta,transformed,-1,ierr)
+        if(ierr/=0)return
+      else
       do q=1,nq
         a=theta(:,q)
         call pzfft3dv_rvv10(a,bb,n(1),n(2),n(3),dims(2),dims(3),-1,comm(2),comm(3))
         transformed(:,q)=bb
       enddo
+      endif
       u=0d0
 !$omp parallel do collapse(3) private(x,y,z,p,gidx,g,q,d,phi)
       do z=0,tile(3)-1;do y=0,tile(2)-1;do x=0,tile(1)-1
@@ -88,12 +98,18 @@ contains
         enddo;enddo
       enddo;enddo;enddo
 !$omp end parallel do
+      if(fftw_backend)then
+        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),u,transformed,1,ierr)
+        if(ierr/=0)return
+        u=transformed
+      else
       do q=1,nq
         a=u(:,q)
         ! Native FFTE inverse already divides by the GLOBAL number of points.
         call pzfft3dv_rvv10(a,bb,n(1),n(2),n(3),dims(2),dims(3),1,comm(2),comm(3))
         u(:,q)=bb
       enddo
+      endif
       ierr=0
     end subroutine
   end subroutine

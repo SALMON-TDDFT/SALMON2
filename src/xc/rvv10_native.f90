@@ -1,5 +1,6 @@
 ! Total-grid rVV10 potential with native spatial halo derivatives.
 module rvv10_native
+  use salmon_global, only: rvv10_fft
   use structures, only: s_rgrid,s_parallel_info,s_sendrecv_grid,s_stencil,s_dft_system,s_scalar
   use sendrecv_grid, only: update_overlap_real8
   use stencil_sub, only: calc_gradient_field
@@ -34,7 +35,7 @@ contains
     r=reshape(rho%f(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),[ng]);s=reshape(sum(grad**2,dim=1),[ng])
     call rvv10_evaluate_distributed(n,lo,mg%num, &
       [info%isize_x,info%isize_y,info%isize_z],[info%id_x,info%id_y,info%id_z], &
-      [info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,system%hgs,r,s,b,c,nq,e,v,w,used,status)
+      [info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,system%hgs,r,s,b,c,nq,e,v,w,used,status,rvv10_fft=='fftw')
     if(.not.used.or.status/=0)return
     energy=reshape(e,mg%num);potential=reshape(v,mg%num)
     do d=1,3

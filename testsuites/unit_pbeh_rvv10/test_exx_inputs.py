@@ -62,6 +62,13 @@ class ExxInputs(unittest.TestCase):
         self.assertGreater(local_pairs,0)
         self.assertLess(actual,baseline)
 
+    def test_rvv10_backends(self):
+        a=self.run_case("exx_mlwf_maxiter=20\n rvv10_fft='ffte'")
+        b=self.run_case("exx_mlwf_maxiter=20\n rvv10_fft='fftw'")
+        self.assertLess(abs(a[0]-b[0]),1e-8)
+        self.assertIn('rVV10 backend: fftw',b[2])
+        self.run_case("rvv10_fft='invalid'",error='rvv10_fft must be ffte or fftw')
+
     def test_rvv10_non_ffte_grid_fallback(self):
         result=self.run_case('exx_mlwf_maxiter=20',lambda s:s.replace('num_rgrid=16,8,8','num_rgrid=14,8,8'))
         self.assertIn('rVV10 FFT: root reference fallback',result[2])

@@ -141,3 +141,31 @@ measured bounds and validation status are recorded in `distributed-fft.json`.
 The FFT channel storage is divided by Py*Pz, with replication across Px.
 DC still assembles the scalar potential globally for fragment mapping. No
 large-water timing or end-to-end scaling claim is made by these small tests.
+
+## Cached FFTW pencils
+
+`fftw-pencils.json` records three trials per grid for the optional
+`rvv10_fft='fftw'` backend. Six measured FFTW plans per batch size are reused
+across forward/inverse calls. Direct tests include 2/3/4/5 channels (including
+a 4+1 tail), changing spatial layouts, comparison with FFTE and inverse
+normalization. All 54 distributed functional/potential cases pass; the maximum
+full-potential difference from the serial reference is 1.18e-13. Native SCF
+backend selection, 25 unit tests, y/z DC-LCFO trajectories, and HSE ON/OFF builds
+pass. Independent review found no critical or important defects.
+
+Median warm forward/inverse times for 32 channels, in milliseconds:
+
+| Grid | MPI ranks | FFTE | FFTW |
+|---|---:|---:|---:|
+| 32x24x16 | 2 | 5.15 | 5.59 |
+| 32x24x16 | 4 | 3.61 | 3.38 |
+| 64x48x32 | 2 | 47.24 | 79.52 |
+| 64x48x32 | 4 | 30.52 | 43.29 |
+
+The current FFTW packing dominates on the larger grid. Whole-functional
+medians for that grid are 0.639/0.631 s (FFTE/FFTW, 2 ranks) and
+0.312/0.318 s (4 ranks), with appreciable run-to-run variation. There is no
+consistent whole-functional advantage; FFTE remains the default. These local
+OMP=1 measurements compare current adapters, including FFTE's per-transform
+table initialization, and do not establish production scaling. Setup and
+component timings, all trials, ranges and log hashes are retained in the JSON.

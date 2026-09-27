@@ -469,7 +469,7 @@ contains
     use timer
     use salmon_global, only: xi_dc
 #ifdef USE_HSE
-    use salmon_global, only: xc,rvv10_b,rvv10_c,rvv10_nq
+    use salmon_global, only: xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft
     use rvv10, only: rvv10_periodic
     use rvv10_native, only: rvv10_native_periodic
 #endif
@@ -563,6 +563,7 @@ contains
       deallocate(rv_local_e,rv_local_v)
       if(.not.rv_reported.and.dc%id_tot==0)then
         if(rv_used)then
+          write(*,'(2a)')'DC rVV10 backend: ',trim(rvv10_fft)
           write(*,'(a,3i6)')'DC rVV10 FFT: native pencils, x replication/y/z ranks:', &
             dc%info_tot%isize_x,dc%info_tot%isize_y,dc%info_tot%isize_z
         else

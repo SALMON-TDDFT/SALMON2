@@ -11,7 +11,7 @@ set(SOURCES
    )
 
 if(USE_HSE)
-  list(APPEND SOURCES exx_local_fft.f90 rvv10.f90 rvv10_distributed.f90 rvv10_native.f90 rvv10_ffte.f hse_wannier_gauge.f90 hse_wannier.f90 hse_symmetry.f90 hse_exchange.f90 hse_ace.f90 hse_semilocal.f90 hse_native.f90 hse_lcfo_rt.f90 lcfo_wf_support.f90 lcfo_projection.f90 lcfo_rt_wannier.f90 lcfo_ace_local.f90 lcfo_gram.f90 lcfo_mlwf_links.f90 lcfo_seed.f90 lcfo_dist_rows.f90 lcfo_dist_dense.f90)
+  list(APPEND SOURCES exx_local_fft.f90 rvv10.f90 fftw_pencils.f90 rvv10_distributed.f90 rvv10_native.f90 rvv10_ffte.f hse_wannier_gauge.f90 hse_wannier.f90 hse_symmetry.f90 hse_exchange.f90 hse_ace.f90 hse_semilocal.f90 hse_native.f90 hse_lcfo_rt.f90 lcfo_wf_support.f90 lcfo_projection.f90 lcfo_rt_wannier.f90 lcfo_ace_local.f90 lcfo_gram.f90 lcfo_mlwf_links.f90 lcfo_seed.f90 lcfo_dist_rows.f90 lcfo_dist_dense.f90)
 endif()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
