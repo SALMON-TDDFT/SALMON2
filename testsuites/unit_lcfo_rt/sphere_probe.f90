@@ -1,5 +1,6 @@
 program sphere_probe
  use lcfo_rt_wannier
+ use salmon_global, only: hse_lcfo_wf_radius
  use lcfo_rt_basis
  implicit none
  complex(8) :: c(1,1)
@@ -22,6 +23,7 @@ program sphere_probe
   if(weak)lcfo_basis(g,1)=lcfo_basis(g,1)*sqrt(1d0+.1d0*cos(2*acos(-1d0)*(pos(2)-center(2))/10d0))
  enddo;enddo;enddo
  norm=sqrt(sum(abs(lcfo_basis)**2)*lcfo_dv);lcfo_basis=lcfo_basis/norm;c=1d0
+ hse_lcfo_wf_radius=r
  call lcfo_mlwf_configure();call lcfo_mlwf_source(c,lcfo_basis,[1],source)
  err=0;g=0
  do z=0,7;do y=0,7;do x=0,7

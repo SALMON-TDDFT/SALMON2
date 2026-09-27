@@ -5,12 +5,13 @@ program probe
   use hse_exchange
   implicit none
   type(hse_kernel) :: op
-  integer :: rank,np,status,n,m,no,nt,nk,ng,ik0,nloc,iu,ierr,p,provided,expected_block,env_status,chosen_block,old_levels,callback_count
+  integer :: rank,np,status,n,m,no,nt,nk,ng,ik0,nloc,iu,ierr,p,provided,expected_block,chosen_block,old_levels,callback_count
   integer,allocatable :: starts(:),counts(:)
   real(8) :: h,omega
   real(8),allocatable :: k(:,:)
   complex(8),allocatable :: u(:,:,:),t(:,:,:),a(:,:,:),local_u(:,:,:),local_t(:,:,:),local_a(:,:,:),callback_a(:,:,:)
-  character(1024) :: input,output,invalid
+  character(1024) :: input,output,invalid,setting
+  character(64) :: layout
   call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,status)
   if(provided<MPI_THREAD_FUNNELED)call MPI_Abort(MPI_COMM_WORLD,7,status)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,status)
@@ -30,21 +31,24 @@ program probe
   call get_command_argument(3,invalid)
   chosen_block=2
   if(trim(invalid)=='block'.and.rank==0)chosen_block=3
-  call hse_kernel_init(op,n,m,h,k,omega,chosen_block,ierr,ik0,nloc)
+  expected_block=0
+  call get_command_argument(4,setting)
+  if(len_trim(setting)>0)then
+    read(setting,*,iostat=status)expected_block
+    if(status/=0)call MPI_Abort(MPI_COMM_WORLD,20,status)
+  endif
+  layout='auto'
+  call get_command_argument(5,setting)
+  if(len_trim(setting)>0)layout=trim(setting)
+  call hse_kernel_init(op,n,m,h,k,omega,chosen_block,ierr,ik0,nloc, &
+    block_rows=expected_block,profile=.true.,fft_layout=layout)
   if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,1,status)
-  call get_environment_variable('SALMON_HSE_BLOCK_ROWS',invalid,status=env_status)
-  if(env_status==0)then
-    read(invalid,*)expected_block
-    if(op%block/=expected_block)call MPI_Abort(MPI_COMM_WORLD,8,status)
-  endif
-  call get_environment_variable('SALMON_HSE_FFT_LAYOUT',invalid,status=env_status)
-  if(env_status==1.or.trim(invalid)=='auto')then
-    if(.not.op%auto_fft)call MPI_Abort(MPI_COMM_WORLD,14,status)
-  else
-    if(op%auto_fft)call MPI_Abort(MPI_COMM_WORLD,14,status)
-  endif
-  if(env_status==0.and.trim(invalid)/='auto')then
-    if(op%contiguous_fft.neqv.(trim(invalid)=='contiguous'))call MPI_Abort(MPI_COMM_WORLD,11,status)
+  if(expected_block==0)expected_block=chosen_block
+  if(op%block/=expected_block)call MPI_Abort(MPI_COMM_WORLD,8,status)
+  if(.not.op%profile)call MPI_Abort(MPI_COMM_WORLD,21,status)
+  if(op%auto_fft.neqv.(trim(layout)=='auto'))call MPI_Abort(MPI_COMM_WORLD,14,status)
+  if(trim(layout)/='auto')then
+    if(op%contiguous_fft.neqv.(trim(layout)=='contiguous'))call MPI_Abort(MPI_COMM_WORLD,11,status)
   endif
   if(op%auto_fft)then
     if(any(op%fft_trial_seconds<0d0).or..not.all(ieee_is_finite(op%fft_trial_seconds)))then

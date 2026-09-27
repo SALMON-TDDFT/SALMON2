@@ -10,7 +10,7 @@ module lcfo_seed
  private
  public :: lcfo_seed_gamma
 contains
- subroutine lcfo_seed_gamma(local,counts,comm,u,status,snapshot_unit)
+ subroutine lcfo_seed_gamma(local,counts,comm,u,status,snapshot_unit,distributed)
   implicit none
   complex(8),intent(in) :: local(:,:)
   integer,intent(in) :: counts(:),comm
@@ -19,8 +19,8 @@ contains
   integer,optional,intent(in) :: snapshot_unit
   complex(8),allocatable :: columns(:,:),overlap(:,:),send(:,:),receive(:,:)
   integer,allocatable :: chosen(:)
-  integer :: rank,np,ierr,n,nb,lo,first,width,j,row,tile,backend,env_status
-  character(16) :: value
+  logical,optional,intent(in) :: distributed
+  integer :: rank,np,ierr,n,nb,lo,first,width,j,row,tile,backend
   rank=0;np=1
 #ifdef USE_MPI
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,np,ierr)
@@ -31,17 +31,8 @@ contains
    error stop 'LCFO seed: incompatible dimensions'
   allocate(chosen(n));chosen=0;status=1
   backend=0
-  if(rank==0)then
-   call get_environment_variable('SALMON_LCFO_SEED_DISTRIBUTED',value,status=env_status)
-   if(env_status==0)then
-    select case(trim(value))
-    case('','0')
-    case('1');backend=1
-    case default;error stop 'LCFO seed: SALMON_LCFO_SEED_DISTRIBUTED must be 0 or 1'
-    end select
-   else if(env_status==-1)then
-    error stop 'LCFO seed: invalid distributed backend setting'
-   endif
+  if(rank==0.and.present(distributed))then
+   if(distributed)backend=1
   endif
 #ifdef USE_MPI
   call MPI_Bcast(backend,1,MPI_INTEGER,0,comm,ierr)

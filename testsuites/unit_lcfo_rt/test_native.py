@@ -24,21 +24,26 @@ assert args.omp > 0
 root = Path(tempfile.mkdtemp(prefix="lcfo-native-test-", dir=args.work_root))
 repo = Path(__file__).resolve().parents[2]
 env = dict(os.environ, OMP_NUM_THREADS=str(args.omp), OPENBLAS_NUM_THREADS="1", VECLIB_MAXIMUM_THREADS="1")
-env.pop("SALMON_LCFO_RT", None)
 command = [args.mpirun, "-np", "2", str(args.binary.resolve())]
 
-def run(name, text, rt=False, reject=False, extra_env=None, orbital_groups=1):
+def run(name, text, rt=False, reject=False, settings=None, orbital_groups=1):
     folder = root / name
     folder.mkdir()
-    (folder / "inputfile").write_text(text)
     shutil.copy(args.pseudo, folder / "H_rps.dat")
     if rt:
         (folder / "data_dcdft").symlink_to(root / "gs/data_dcdft", target_is_directory=True)
     local_env = dict(env)
+    controls = dict(settings or {})
     if rt:
-        local_env["SALMON_LCFO_RT"] = "1"
-        local_env["SALMON_LCFO_RT_CONTINUITY"] = "1"
-    local_env.update(extra_env or {})
+        controls.update(yn_hse_lcfo_rt='y', yn_hse_lcfo_continuity='y')
+    for key, value in controls.items():
+        literal = "'" + value + "'" if key.startswith('yn_') else str(value)
+        pattern = r"(?i)(\b" + re.escape(key) + r"\s*=\s*)(?:'[^']*'|[^,\s/]+)"
+        if re.search(pattern, text):
+            text = re.sub(pattern, lambda match: match[1] + literal, text)
+        else:
+            text = text.replace('&functional', '&functional\n ' + key + '=' + literal, 1)
+    (folder / "inputfile").write_text(text)
     local_command=command.copy();local_command[2]=str(2*orbital_groups)
     with (folder / "inputfile").open("rb") as inp, (folder / "run.log").open("wb") as log:
         status = subprocess.run(local_command, cwd=folder, env=local_env, stdin=inp,
@@ -106,7 +111,7 @@ print(json.dumps(dict(work=str(root), steps=4, half_dt_current_error=current_err
                       post_impulse_energy_width=energy_width, restart_guard="passed"), indent=2))
 
 mlwf_input = rt.replace("xc='hse06'", "xc='hse06'\n hse_mlwf_maxiter=200")
-mlwf = run("rt_mlwf_full", mlwf_input, rt=True, extra_env={"SALMON_LCFO_RT_MLWF": "1"})
+mlwf = run("rt_mlwf_full", mlwf_input, rt=True, settings={"yn_hse_wannier": "y"})
 assert "LCFO MLWF initial" in (mlwf / "run.log").read_text(), "MLWF path was not used"
 assert "LCFO MLWF reuse" in (mlwf / "run.log").read_text(), "U was not reused"
 mlwf_rows = rows(mlwf / "H_dc_hse_rt.data")
@@ -114,11 +119,11 @@ full_error = max(abs(x-y) for ra, rb in zip(a,mlwf_rows) for x,y in zip(ra,rb))
 assert full_error < 1e-10, full_error
 # Half box diagonal is sqrt(8**2+4**2+4**2) = 9.798 bohr.
 large = run("rt_mlwf_large_radius", mlwf_input, rt=True,
-            extra_env={"SALMON_LCFO_RT_MLWF":"1", "SALMON_LCFO_RT_RADIUS":"10"})
+            settings={"yn_hse_wannier":"y", "hse_lcfo_wf_radius":"10"})
 large_rows = rows(large / "H_dc_hse_rt.data")
 assert max(abs(x-y) for ra,rb in zip(mlwf_rows,large_rows) for x,y in zip(ra,rb)) < 1e-12
 small = run("rt_mlwf_small_radius", mlwf_input, rt=True,
-            extra_env={"SALMON_LCFO_RT_MLWF":"1", "SALMON_LCFO_RT_RADIUS":"3"})
+            settings={"yn_hse_wannier":"y", "hse_lcfo_wf_radius":"3"})
 small_rows = rows(small / "H_dc_hse_rt.data")
 assert len(small_rows)==4 and "source-mask approximation" in (small / "run.log").read_text()
 assert max(abs(ra[13]-rb[13]) for ra,rb in zip(small_rows,mlwf_rows)) > 1e-18
@@ -130,8 +135,8 @@ assert (mlwf/'lcfo_mlwf_initial.bin').read_bytes()==(small/'lcfo_mlwf_initial.bi
 print("Identical initial U, centers and occupied coefficients across support cases")
 for width in (4,):
     batched=run(f'rt_fft_batch{width}',mlwf_input,rt=True,
-                extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_RADIUS':'3',
-                           'SALMON_LCFO_RT_FFT_BATCH':str(width)})
+                settings={'yn_hse_wannier':'y','hse_lcfo_wf_radius':'3',
+                           'hse_lcfo_fft_batch':str(width)})
     batch_rows=rows(batched/'H_dc_hse_rt.data')
     batch_error=max(abs(x-y) for a,b in zip(batch_rows,small_rows) for x,y in zip(a,b))
     assert batch_error<1e-12,batch_error
@@ -139,8 +144,8 @@ for width in (4,):
                      (batched/'run.log').read_text())
     assert stats and all(int(x[1])==width for x in stats),stats
     print('Native batch parity',width,batch_error)
-run('reject_fft_batch',mlwf_input,rt=True,reject='LCFO HSE: FFT batch must be an integer from 1 to 32',
-    extra_env={'SALMON_LCFO_RT_FFT_BATCH':'0'})
+run('reject_fft_batch',mlwf_input,rt=True,reject='HSE: LCFO FFT batch must be 1 to 32',
+    settings={'hse_lcfo_fft_batch':'0'})
 
 
 def continuity(folder):
@@ -160,12 +165,12 @@ print(json.dumps(dict(full_continuity_L1_max=max(row[1] for row in full_c),
 def builds(folder):
     return (folder/'run.log').read_text().count('LCFO HSE ACE build')
 one=run('rt_ace_interval1',mlwf_input,rt=True,
-        extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':'1'})
+        settings={'yn_hse_wannier':'y','hse_lcfo_ace_interval':'1'})
 assert rows(one/'H_dc_hse_rt.data')==mlwf_rows
 assert builds(one)==builds(mlwf)
 for interval in (2,4):
     reused=run(f'rt_ace_interval{interval}',mlwf_input,rt=True,
-        extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':str(interval)})
+        settings={'yn_hse_wannier':'y','hse_lcfo_ace_interval':str(interval)})
     log=(reused/'run.log').read_text()
     assert 'LCFO HSE ACE retained at step' in log, 'Missing physical-step ACE reuse'
     assert 'LCFO HSE impulse ACE rebuilt before first predictor' in log
@@ -177,12 +182,12 @@ for interval in (2,4):
     assert (reused/'lcfo_mlwf_initial.bin').read_bytes()==(mlwf/'lcfo_mlwf_initial.bin').read_bytes()
     print(json.dumps({'ACE_interval':interval,'builds':builds(reused),'default_builds':builds(mlwf)}))
 
-run('reject_ace_interval',mlwf_input,rt=True,reject='LCFO HSE: ACE interval must be a positive integer',
-    extra_env={'SALMON_LCFO_RT_ACE_INTERVAL':'0'})
+run('reject_ace_interval',mlwf_input,rt=True,reject='HSE: LCFO ACE and U intervals must be positive',
+    settings={'hse_lcfo_ace_interval':'0'})
 
 laser_input=mlwf_input.replace("ae_shape1='impulse'","ae_shape1='Acos2'\n I_wcm2_1=1d8\n omega1=0.5d0\n tw1=100d0").replace('nenergy=20','nenergy=0')
 laser=run('rt_ace_laser',laser_input,rt=True,
-          extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':'4'})
+          settings={'yn_hse_wannier':'y','hse_lcfo_ace_interval':'4'})
 laser_log=(laser/'run.log').read_text()
 assert 'LCFO HSE ACE retained at step        1' in laser_log
 laser_steps=[int(line.split()[-1]) for line in laser_log.splitlines() if line.startswith('LCFO HSE exchange rebuilt at step')]
@@ -205,9 +210,9 @@ def density(folder):
     assert data and all(math.isfinite(x) for x in data)
     return data
 
-def compare_split(name, baseline, text, extra_env):
+def compare_split(name, baseline, text, settings):
     split=run(name,text.replace('nproc_ob=1','nproc_ob=2'),rt=True,
-              orbital_groups=2,extra_env=extra_env)
+              orbital_groups=2,settings=settings)
     error=compare_tables(rows(baseline/'H_dc_hse_rt.data'),
                          rows(split/'H_dc_hse_rt.data'),range(13,16),1e-11)
     energy_error=compare_tables(rows(baseline/'H_dc_hse_rt_energy.data'),
@@ -228,12 +233,12 @@ def compare_split(name, baseline, text, extra_env):
 
 for interval,baseline in [(1,mlwf),(4,root/'rt_ace_interval4')]:
     compare_split(f'rt_orbital2_ace{interval}',baseline,mlwf_input,
-                  {'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':str(interval)})
+                  {'yn_hse_wannier':'y','hse_lcfo_ace_interval':str(interval)})
 compare_split('rt_orbital2_small_radius',small,
               mlwf_input.replace('&parallel',"&parallel\n process_allocation='orbital_sequential'"),
-              {'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_RADIUS':'3'})
+              {'yn_hse_wannier':'y','hse_lcfo_wf_radius':'3'})
 compare_split('rt_orbital2_laser',laser,laser_input,
-              {'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_ACE_INTERVAL':'4'})
+              {'yn_hse_wannier':'y','hse_lcfo_ace_interval':'4'})
 # Three occupied target states split 2+1. Reoccupy the same saved basis in
 # both runs; this is an algebraic distribution test, not a GS accuracy test.
 unequal_input=rt.replace(' nstate=2',' nstate=3').replace(' nelec=4',' nelec=6')
@@ -242,11 +247,11 @@ compare_split('rt_orbital2_unequal',unequal,unequal_input,{})
 
 # U cadence is independent of ACE cadence. Full support is gauge invariant.
 uone=run('rt_u_interval1',mlwf_input,rt=True,
-         extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_U_INTERVAL':'1'})
+         settings={'yn_hse_wannier':'y','hse_lcfo_u_interval':'1'})
 assert rows(uone/'H_dc_hse_rt.data')==mlwf_rows
 for interval in (2,4):
-    uenv={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_U_INTERVAL':str(interval)}
-    uheld=run(f'rt_u_interval{interval}',mlwf_input,rt=True,extra_env=uenv)
+    usettings={'yn_hse_wannier':'y','hse_lcfo_u_interval':str(interval)}
+    uheld=run(f'rt_u_interval{interval}',mlwf_input,rt=True,settings=usettings)
     log=(uheld/'run.log').read_text()
     held=[int(m[0]) for m in re.findall(r'U held step/interval:\s+(\d+)\s+(\d+)',log)]
     refreshed=[int(m[0]) for m in re.findall(r'U refreshed step/interval:\s+(\d+)\s+(\d+)',log)]
@@ -256,11 +261,11 @@ for interval in (2,4):
     assert len(refreshed)<(uone/'run.log').read_text().count('U refreshed step/interval')
     compare_tables(rows(uheld/'H_dc_hse_rt.data'),mlwf_rows,range(13,16),1e-11)
     assert builds(uheld)==builds(mlwf)
-    compare_split(f'rt_u_interval{interval}_orbital2',uheld,mlwf_input,uenv)
-    uenv.update(SALMON_LCFO_RT_ACE_INTERVAL='4',SALMON_LCFO_RT_RADIUS='3')
-    combined=run(f'rt_u_interval{interval}_ace4',mlwf_input,rt=True,extra_env=uenv)
-    compare_split(f'rt_u_interval{interval}_ace4_orbital2',combined,mlwf_input,uenv)
-for invalid in ('0','-1','bad'):
-    run('reject_u_interval_'+invalid,mlwf_input,rt=True,reject='LCFO MLWF: invalid radius or U interval',
-        extra_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_U_INTERVAL':invalid})
+    compare_split(f'rt_u_interval{interval}_orbital2',uheld,mlwf_input,usettings)
+    usettings.update(hse_lcfo_ace_interval='4',hse_lcfo_wf_radius='3')
+    combined=run(f'rt_u_interval{interval}_ace4',mlwf_input,rt=True,settings=usettings)
+    compare_split(f'rt_u_interval{interval}_ace4_orbital2',combined,mlwf_input,usettings)
+for invalid in ('0','-1'):
+    run('reject_u_interval_'+invalid,mlwf_input,rt=True,reject='HSE: LCFO ACE and U intervals must be positive',
+        settings={'yn_hse_wannier':'y','hse_lcfo_u_interval':invalid})
 print('U cadence, full-support invariance, impulse, ACE independence and two-level MPI passed')

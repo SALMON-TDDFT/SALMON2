@@ -1,5 +1,6 @@
 program transport_probe
  use lcfo_rt_wannier
+ use salmon_global, only: hse_lcfo_wf_radius
  use lcfo_rt_basis
  use hse_wannier_gauge, only: gauge_transport
  implicit none
@@ -13,6 +14,7 @@ program transport_probe
  lcfo_basis=0d0;lcfo_counts=4;lcfo_offsets=[0,4];lcfo_origins=0
  lcfo_basis(1,1)=1d0;lcfo_basis(2,2)=1d0;lcfo_basis(5,3)=1d0;lcfo_basis(6,4)=1d0
  c(:,1)=.5d0;c(:,2)=[.5d0,.5d0,-.5d0,-.5d0]
+ hse_lcfo_wf_radius=1d0
  call lcfo_mlwf_configure()
  call lcfo_mlwf_source(c,lcfo_basis,[1,2,3,4],first)
  do j=1,2

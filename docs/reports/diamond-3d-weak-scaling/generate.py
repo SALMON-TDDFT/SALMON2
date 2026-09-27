@@ -11,6 +11,8 @@ a=6.72
 manifest={'lattice_bohr':a,'core_grid':[16]*3,'buffer_grid':[8]*3,
  'fragment_grid':[32]*3,'fragment_atoms':64,'fragment_states':256,
  'radius_bohr':6,'dt_au':0.02,'nt':16,'ace_interval':1,'u_interval':1,
+ 'algorithm_control':'&functional namelist only; no SALMON_LCFO environment controls',
+ 'seed_distributed':True,
  'status':'generated and statically validated; not run on Fugaku','cases':[]}
 shutil.copy2(repo/'testsuites/pseudo/C_rps.dat',root/'C_rps.dat')
 for n in (4,6,8,10):
@@ -39,6 +41,14 @@ for n in (4,6,8,10):
   s=s.replace("file_atom_coor='atom.dat'","file_atom_coor='../atom.dat'")
   s=s.replace("file_pseudo(1)='C_rps.dat'","file_pseudo(1)='../../C_rps.dat'")
   s=s.replace('num_rgrid=128,16,16','num_rgrid='+','.join([str(16*n)]*3))
+  # Algorithm choices belong to the input, not shell environment variables.
+  s=s.replace(" yn_hse_wannier='n'\n",'')
+  controls="\n yn_hse_lcfo_rt='{}'\n yn_hse_wannier='y'".format('y' if stage=='rt' else 'n')
+  if stage=='rt':
+   controls+="\n yn_hse_lcfo_direct_wf='y'\n yn_hse_lcfo_continuity='n'\n yn_hse_lcfo_fft_measure='n'"
+   controls+="\n yn_hse_lcfo_seed_distributed='y'\n hse_lcfo_ace_interval=1\n hse_lcfo_u_interval=1"
+   controls+="\n hse_lcfo_fft_batch=1\n hse_lcfo_wf_radius=6d0"
+  s=s.replace("xc='hse06'","xc='hse06'"+controls)
   (folder/'inputfile').write_text(s)
  manifest['cases'].append({'case':case.name,'fragments':nf,'mpi_ranks_gs':nf,'mpi_ranks_rt':nf,
   'atoms':na,'electrons':ne,'gs_states':ne,'rt_states':occupied,'grid':[16*n]*3,

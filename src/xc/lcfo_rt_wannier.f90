@@ -14,7 +14,8 @@ module lcfo_rt_wannier
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init,lcfo_wf_reconstruct,lcfo_wf_total_norm
   use lcfo_wf_support, only: s_lcfo_wf_kernel,lcfo_wf_kernel_init,lcfo_wf_kernel_apply
   use lcfo_wf_support, only: lcfo_wf_sphere_norm
-  use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance,hse_lcfo_wf_radius
+  use salmon_global, only: hse_mlwf_maxiter,hse_mlwf_tolerance,hse_lcfo_wf_radius, &
+    yn_hse_wannier,hse_lcfo_u_interval,yn_hse_lcfo_seed_distributed
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -38,28 +39,12 @@ module lcfo_rt_wannier
 contains
   subroutine lcfo_mlwf_configure()
     implicit none
-    character(64) :: value
-    integer :: status,ios,bad
-    bad=0;radius=0d0
+    integer :: bad
+    bad=0
     if(lcfo_rank==0)then
-      call get_environment_variable('SALMON_LCFO_RT_MLWF',value,status=status)
-      lcfo_mlwf_enabled=status==0.and.trim(value)=='1'
-      call get_environment_variable('SALMON_LCFO_RT_RADIUS',value,status=status)
-      if(hse_lcfo_wf_radius>=0d0)then
-        radius=hse_lcfo_wf_radius
-        if(status==0.and.len_trim(value)>0) &
-          write(*,'(a)')'LCFO MLWF: SALMON_LCFO_RT_RADIUS ignored; explicit hse_lcfo_wf_radius takes precedence'
-      else if(status==0.and.len_trim(value)>0)then
-        read(value,*,iostat=ios)radius
-        if(ios/=0)bad=1
-      else if(status==-1)then
-        bad=1
-      endif
-      call get_environment_variable('SALMON_LCFO_RT_U_INTERVAL',value,status=status)
-      if(status==0.and.len_trim(value)>0)then
-        read(value,*,iostat=ios)u_interval
-        if(ios/=0)bad=1
-      endif
+      lcfo_mlwf_enabled=yn_hse_wannier=='y'
+      radius=hse_lcfo_wf_radius
+      u_interval=hse_lcfo_u_interval
       if(u_interval<1.or.(u_interval>1.and..not.lcfo_mlwf_enabled))bad=1
       if(.not.ieee_is_finite(radius).or.radius<0d0)bad=1
       if(radius>0d0.and..not.lcfo_mlwf_enabled)bad=1
@@ -105,7 +90,8 @@ contains
       open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
       write(iu)int([16909060,2,no,sum(lcfo_counts),lcfo_grid],int32),lcfo_h
     endif
-    call lcfo_seed_gamma(coeff,lcfo_counts,lcfo_comm,u(:,:,1),seed_status,snapshot_unit=iu)
+    call lcfo_seed_gamma(coeff,lcfo_counts,lcfo_comm,u(:,:,1),seed_status,snapshot_unit=iu, &
+      distributed=yn_hse_lcfo_seed_distributed=='y')
     if(lcfo_rank==0)then
       close(iu)
       if(seed_status/=0)then

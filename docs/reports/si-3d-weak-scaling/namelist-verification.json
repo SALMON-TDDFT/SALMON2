@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-27",
+  "build": "GNU Fortran 15 AArch64; MPI/HSE/ScaLAPACK; no loop vectorization",
+  "controls": "functional namelist only; no custom algorithm environment reads",
+  "passed": [
+    "test_no_env_controls",
+    "test_direct_wf (including namelist distributed seed)",
+    "test_native",
+    "test_seed_distributed MPI1/2/3/4",
+    "test_transport",
+    "test_sphere",
+    "test_cadence",
+    "native distributed exchange smoke: MPI1/3, auto/contiguous, block2/5, invalid arguments"
+  ],
+  "baseline_comparison": {
+    "baseline_current_max_abs_difference": 0.0,
+    "baseline_binary": "3c4ff577",
+    "case": "radius3 ACE4 U2 direct WF",
+    "baseline_energy_max_abs_difference": 0.0
+  },
+  "legacy_environment_conflict_current_difference": 0.0,
+  "initial_minimum_norm_fraction": {
+    "radius3": 0.9440599349375678,
+    "full": 1.0
+  },
+  "not_tested": [
+    "Fugaku compiler/runtime",
+    "3D numerical calculations",
+    "new speed or peak RSS measurements"
+  ]
+}

@@ -123,7 +123,22 @@ module salmon_global
   character(1) :: yn_hse_wannier
   integer :: hse_mlwf_interval,hse_mlwf_maxiter
   real(8) :: hse_mlwf_tolerance
-  real(8) :: hse_lcfo_wf_radius ! Always bohr; -1 selects legacy environment/default
+  real(8) :: hse_lcfo_wf_radius ! Always bohr; 0 means full support
+  character(1) :: yn_hse_lcfo_rt
+  character(1) :: yn_hse_lcfo_direct_wf
+  character(1) :: yn_hse_lcfo_continuity
+  character(1) :: yn_hse_lcfo_fft_measure
+  character(1) :: yn_hse_lcfo_seed_distributed
+  character(1) :: yn_hse_profile
+  character(1) :: yn_hse_eigen_diagnostic
+  character(1) :: yn_hse_solver_diagnostic
+  character(1) :: yn_hse_wannier_snapshot
+  integer :: hse_lcfo_ace_interval
+  integer :: hse_lcfo_u_interval
+  integer :: hse_lcfo_fft_batch
+  integer :: hse_block_rows
+  character(64) :: hse_fft_layout
+  character(256) :: hse_reference_export_directory
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc

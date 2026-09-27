@@ -4,10 +4,12 @@ program seed_stream_probe
  use lcfo_seed, only: lcfo_seed_gamma
  use hse_wannier_gauge, only: gauge_seed_gamma
  implicit none
+ character(32) :: backend
  integer :: rank,np,ierr,n,lo,i,j,iu,status,reference,a,lowest,highest
  integer,allocatable :: counts(:)
  complex(8),allocatable :: local(:,:),full(:,:),u(:,:),v(:,:),stream(:,:),saved(:,:)
  call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
+ call get_command_argument(1,backend)
  allocate(counts(np))
  do a=1,5
   n=5;if(a==2)n=65
@@ -28,7 +30,7 @@ program seed_stream_probe
    call gauge_seed_gamma(full,v,reference)
    open(newunit=iu,file='seed-stream.bin',access='stream',form='unformatted',status='replace')
   endif
-  call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status,snapshot_unit=iu)
+  call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status,snapshot_unit=iu,distributed=backend=='distributed')
   call MPI_Allreduce(status,lowest,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
   call MPI_Allreduce(status,highest,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
   if(lowest/=highest)error stop 'Inconsistent seed status across ranks'
@@ -48,7 +50,7 @@ program seed_stream_probe
    deallocate(stream)
   endif
   if(a==1)then
-   call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status)
+   call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status,distributed=backend=='distributed')
    if(status/=0)error stop 'Seed without snapshot failed'
    if(rank==0)then
     if(maxval(abs(u-v))>1d-11)error stop 'Seed without snapshot mismatch'

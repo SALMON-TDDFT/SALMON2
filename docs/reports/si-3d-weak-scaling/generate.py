@@ -13,6 +13,8 @@ manifest={'lattice_bohr':a,'core_grid':[16]*3,'buffer_grid':[8]*3,
  'radius_control':'&functional hse_lcfo_wf_radius, fixed bohr',
  'initial_norm_warning_threshold':0.999,
  'pseudo_source':'samples/dc_hse/si64-chain/Si_rps.dat',
+ 'algorithm_control':'&functional namelist only; no SALMON_LCFO environment controls',
+ 'seed_distributed':True,
  'status':'generated and statically validated; not run on Fugaku','cases':[]}
 assert (root/'Si_rps.dat').is_file(), 'Bundled Si pseudopotential is required'
 for n in (4,6,8,10):
@@ -42,7 +44,14 @@ for n in (4,6,8,10):
   s=s.replace("file_pseudo(1)='C_rps.dat'","file_pseudo(1)='../../Si_rps.dat'")
   s=s.replace('izatom(1)=6','izatom(1)=14').replace('lloc_ps(1)=1','lloc_ps(1)=2')
   s=s.replace('num_rgrid=128,16,16','num_rgrid='+','.join([str(16*n)]*3))
-  if stage=='rt':s=s.replace("xc='hse06'","xc='hse06'\n hse_lcfo_wf_radius=9d0")
+  # Algorithm choices belong to the input, not shell environment variables.
+  s=s.replace(" yn_hse_wannier='n'\n",'')
+  controls="\n yn_hse_lcfo_rt='{}'\n yn_hse_wannier='y'".format('y' if stage=='rt' else 'n')
+  if stage=='rt':
+   controls+="\n yn_hse_lcfo_direct_wf='y'\n yn_hse_lcfo_continuity='n'\n yn_hse_lcfo_fft_measure='n'"
+   controls+="\n yn_hse_lcfo_seed_distributed='y'\n hse_lcfo_ace_interval=1\n hse_lcfo_u_interval=1"
+   controls+="\n hse_lcfo_fft_batch=1\n hse_lcfo_wf_radius=9d0"
+  s=s.replace("xc='hse06'","xc='hse06'"+controls)
   (folder/'inputfile').write_text(s)
  link=case/'rt/data_dcdft'
  if not link.is_symlink() and not link.exists():link.symlink_to('../gs/data_dcdft',target_is_directory=True)

@@ -15,9 +15,8 @@ with tempfile.TemporaryDirectory() as folder:
     for ranks,n in ((2,256),(2,512),(4,512)):
         reference = None;checksum = None
         for mode in ('root','distributed'):
-            output = subprocess.check_output(['mpirun','-np',str(ranks),str(p/'probe'),'streamed',str(n)], cwd=p,
-                universal_newlines=True,env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',
-                SALMON_LCFO_SEED_DISTRIBUTED='1' if mode=='distributed' else '0'))
+            output = subprocess.check_output(['mpirun','-np',str(ranks),str(p/'probe'),'streamed',str(n),mode], cwd=p,
+                universal_newlines=True,env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
             data = array.array('d');data.frombytes((p/'seed-u.bin').read_bytes())
             digest = hashlib.sha256((p/'seed-coeff.bin').read_bytes()).hexdigest()
             if reference is None:reference=data;checksum=digest

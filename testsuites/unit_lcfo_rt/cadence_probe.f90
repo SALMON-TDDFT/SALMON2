@@ -1,5 +1,6 @@
 program cadence_probe
  use lcfo_rt_wannier
+ use salmon_global, only: hse_lcfo_wf_radius,hse_lcfo_u_interval
  use lcfo_rt_basis
  implicit none
  complex(8) :: c(4,2),changed(4,2),stored_c(4,2),u(2,2),expected(32,2)
@@ -12,13 +13,13 @@ program cadence_probe
  lcfo_basis=0d0;lcfo_counts=4;lcfo_offsets=[0,4];lcfo_origins=0
  lcfo_basis(1,1)=1d0;lcfo_basis(2,2)=1d0;lcfo_basis(5,3)=1d0;lcfo_basis(6,4)=1d0
  c(:,1)=.5d0;c(:,2)=[.5d0,.5d0,-.5d0,-.5d0]
+ call get_command_argument(1,value);read(value,*)radius
+ hse_lcfo_wf_radius=radius;hse_lcfo_u_interval=2
  call lcfo_mlwf_configure()
  call lcfo_mlwf_source(c,lcfo_basis,[1,2,3,4],first)
  open(newunit=iu,file='lcfo_mlwf_initial.bin',form='unformatted',access='stream')
  read(iu)header,h,stored_c,u,centers
  close(iu)
- call get_environment_variable('SALMON_LCFO_RT_RADIUS',value)
- read(value,*)radius
  ! Step1 always transports, both predictor and accepted endpoint.
  call lcfo_mlwf_stage(0)
  call lcfo_mlwf_source(c,lcfo_basis,[1,2,3,4],source)

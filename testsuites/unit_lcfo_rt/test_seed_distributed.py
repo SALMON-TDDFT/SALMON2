@@ -12,10 +12,9 @@ with tempfile.TemporaryDirectory() as folder:
                     '-L/opt/homebrew/opt/scalapack/lib', '-lscalapack',
                     '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)
     for ranks in (1, 2, 3, 4):
-        result = subprocess.run(['mpirun', '-np', str(ranks), str(p/'probe')], cwd=p,
+        result = subprocess.run(['mpirun', '-np', str(ranks), str(p/'probe'), 'distributed'], cwd=p,
             check=True, timeout=120, stdout=subprocess.PIPE, universal_newlines=True,
-            env=dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
-                     SALMON_LCFO_SEED_DISTRIBUTED='1'))
+            env=dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1'))
         assert 'LCFO seed: distributed pivoted QR' in result.stdout, 'Distributed backend not used'
         print(ranks, result.stdout.strip())
 
@@ -38,10 +37,10 @@ with tempfile.TemporaryDirectory() as folder:
 #endif
  allocate(counts(np));counts=2;local=1d0
 #ifdef USE_MPI
- call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status)
+ call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status,distributed=.true.)
  call MPI_Finalize(ierr)
 #else
- call lcfo_seed_gamma(local,counts,0,u,status)
+ call lcfo_seed_gamma(local,counts,0,u,status,distributed=.true.)
 #endif
 end program
 ''')
@@ -54,6 +53,6 @@ end program
         subprocess.run(command,cwd=p,check=True)
         result = subprocess.run((['mpirun','-np','2'] if mpi else [])+[str(p/'probe')],
             cwd=p,timeout=30,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,universal_newlines=True,
-            env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',SALMON_LCFO_SEED_DISTRIBUTED='1'))
+            env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
         assert result.returncode != 0 and 'requires MPI and ScaLAPACK' in result.stdout, result.stdout
         print('Unsupported backend rejected:', 'MPI-only' if mpi else 'serial')

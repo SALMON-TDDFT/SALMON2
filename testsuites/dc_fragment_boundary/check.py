@@ -19,6 +19,8 @@ for name in ('atom.dat', 'Si_rps.dat'):
 input_text = (fixture / 'inputfile.reference').read_text()
 input_text = re.sub(r'\bnscf\s*=\s*1000\b', 'nscf=1', input_text)
 input_text = re.sub(r'\bcheckpoint_interval\s*=\s*10\b', 'checkpoint_interval=1', input_text)
+if globals().get('solver_diagnostic', False):
+    input_text = input_text.replace('&functional', "&functional\n yn_hse_solver_diagnostic='y'", 1)
 (run / 'inputfile').write_text(input_text)
 env = dict(os.environ, OMP_NUM_THREADS='2', OMP_MAX_ACTIVE_LEVELS='1', OPENBLAS_NUM_THREADS='1')
 with (run / 'inputfile').open('rb') as inp, (run / 'outputfile').open('wb') as out:

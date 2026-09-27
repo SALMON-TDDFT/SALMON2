@@ -23,8 +23,32 @@
 - `nstate_frag=256`（局所128占有＋128空状態）。全体GSは4状態/原子、RTは2占有状態/原子。DC密度由来のGS→LCFOの差は従来どおり受け入れる。
 - HSE06、SCF閾値1e-7、最大1800反復、従来のmixrate0.01等を継承。収束はこの新しい3D入力では未検証。
 - `lcfo_eigensolver='chefsi'`、filter degree60、最大200cycle、残差許容1e-7。ScaLAPACK有効ビルドが必要。`yn_scalapack='n'`は各fragmentの通常SALMON対角化の設定であり、LCFO CheFSIやRTの自動分散線形代数を無効にしない。
-- RTは直接WF係数Taylor4、dt0.02 a.u.、16steps、x方向impulse1e-4。MLWF局所積分R6 bohr、ACE1/U1、FFT batch1、実測FFT計画OFF。`rt-env.sh`で設定する（namelistだけでは実験的LCFO RTにならない）。
+- RTは直接WF係数Taylor4、dt0.02 a.u.、16steps、x方向impulse1e-4。MLWF局所積分R6 bohr、ACE1/U1、FFT batch1、実測FFT計画OFF。`&functional` namelistで全て指定する。旧環境変数は不要。
 - エネルギー出力間隔40、最終密度出力16。16stepsは速度比較の短時間試験であり、収束した誘電関数を得る長さではない。
+
+## namelistによる制御
+
+最新のLCFO namelist対応コードが必要。旧radius-only版では以下の入力を読めない。
+GSは`yn_hse_lcfo_rt='n'`、RTは次を`&functional`に指定済み。
+
+```fortran
+ yn_hse_lcfo_rt='y'
+ yn_hse_wannier='y'
+ yn_hse_lcfo_direct_wf='y'
+ yn_hse_lcfo_seed_distributed='y'
+ yn_hse_lcfo_continuity='n'
+ yn_hse_lcfo_fft_measure='n'
+ hse_lcfo_ace_interval=1
+ hse_lcfo_u_interval=1
+ hse_lcfo_fft_batch=1
+ hse_lcfo_wf_radius=6d0
+```
+
+半径は常にbohr、既定0は全範囲。負値は不可。初期WFの球内ノルム保持率が
+99.9%未満ならWarningを出すが、半径は自動変更しない。
+`gs-env.sh`/`rt-env.sh`は互換用の空ファイルでsource不要。旧`SALMON_LCFO_*`
+環境変数で計算条件を指定しない。過去の1D入力アーカイブを使う場合も、旧環境変数を
+対応するnamelistへ移してから使う。MPI/OMP配置は実行環境側で引き続き指定する。
 
 ## 現実装のメモリ制約：大きい入力を直ちに投入しない
 
@@ -54,7 +78,6 @@ b743e8b3で初期リンク構築を列タイル化し、非rootの `raw_local(no
 export SALMON_EXE=/absolute/path/to/SALMON2/build/salmon
 # OMP_NUM_THREADSやランク配置は確保した資源に合わせて全ケース同一に設定。
 export OMP_DYNAMIC=FALSE
-. ./gs-env.sh
 (cd 4x4x4/gs && mpiexec -n 64 "$SALMON_EXE" < inputfile > run.log 2>&1)
 ```
 
@@ -62,7 +85,6 @@ export OMP_DYNAMIC=FALSE
 
 ```sh
 (cd 4x4x4/rt && ln -s ../gs/data_dcdft data_dcdft)
-. ./rt-env.sh
 (cd 4x4x4/rt && mpiexec -n 64 "$SALMON_EXE" < inputfile > run.log 2>&1)
 ```
 
@@ -87,9 +109,9 @@ MPI2・占有512/基底8192のseed単独測定はroot204.25→141.27 MiB（30.8%
 
 ### 分散seed QR（選択式）
 
-`SALMON_LCFO_SEED_DISTRIBUTED=1`で、rootに残った全体QR配列をMPIランクへ
+`&functional`の`yn_hse_lcfo_seed_distributed='y'`で、rootに残った全体QR配列をMPIランクへ
 32列ブロックで分散する経路を追加。MPI＋ScaLAPACKが必要。指定しなければ
-従来のroot QRを使う。入力セットの標準設定は変更していない。
+従来のroot QRを使う。この入力セットは`'y'`を明示して分散QRを使う。
 
 合成係数・占有512/基底8192のseed単独測定で、MPI4のrootピークRSSは
 126.31→71.84 MiB、非rootは34.91–35.58→52.36–52.92 MiB。

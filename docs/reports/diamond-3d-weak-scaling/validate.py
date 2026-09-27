@@ -26,8 +26,20 @@ for c in m['cases']:
   assert int(value('nstate'))==(32*nf if stage=='gs' else 16*nf)
   assert int(value('nstate_frag'))==256 and value('lcfo_eigensolver')=="'chefsi'"
   for key in ('file_atom_coor','file_pseudo(1)'):assert (folder/value(key).strip("'")).is_file()
+  assert value('yn_hse_lcfo_rt')==("'y'" if stage=='rt' else "'n'")
+  assert value('yn_hse_wannier')=="'y'"
+  if stage=='rt':
+   for key in ('yn_hse_lcfo_direct_wf','yn_hse_lcfo_seed_distributed'):
+    assert value(key)=="'y'"
+   for key in ('yn_hse_lcfo_continuity','yn_hse_lcfo_fft_measure'):
+    assert value(key)=="'n'"
+   for key in ('hse_lcfo_ace_interval','hse_lcfo_u_interval','hse_lcfo_fft_batch'):
+    assert value(key)=='1'
+   assert value('hse_lcfo_wf_radius')=='6d0'
   if stage=='rt':assert value('dt')=='0.02d0' and value('nt')=='16'
  for k in ('one_dense_complex_matrix_GiB','baseline_initial_raw_local_plus_raw_GiB_per_rank'):assert c[k]>0
  print(c['case'],c['atoms'],'atoms /',nf,'MPI; OLD replicated links alone',round(c['baseline_initial_raw_local_plus_raw_GiB_per_rank'],3),'GiB/rank')
+for stage in ('gs','rt'):
+ assert not re.search(r'^\s*(export|unset)\s+SALMON_LCFO', (root/f'{stage}-env.sh').read_text(), re.M)
 for name,digest in m['sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
 print('Static geometry, input, path and hash checks passed; no numerical jobs run')

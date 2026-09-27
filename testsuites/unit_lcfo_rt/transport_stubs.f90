@@ -1,7 +1,9 @@
 ! Single-rank communication fixture; production localization/transport is linked unchanged.
 module salmon_global
- integer :: hse_mlwf_maxiter=100
- real(8) :: hse_mlwf_tolerance=1d-7,hse_lcfo_wf_radius=-1d0
+ implicit none
+ integer :: hse_mlwf_maxiter=100,hse_lcfo_u_interval=1
+ character(1) :: yn_hse_wannier='y',yn_hse_lcfo_seed_distributed='n'
+ real(8) :: hse_mlwf_tolerance=1d-7,hse_lcfo_wf_radius=0d0
 end module
 module lcfo_rt_basis
  implicit none
@@ -20,6 +22,11 @@ module communication
   module procedure s_r1,s_c1,s_c2,s_c4,s_i
  end interface
 contains
+ subroutine comm_get_groupinfo(comm,rank,np)
+ integer,intent(in)::comm
+ integer,intent(out)::rank,np
+ rank=0;np=1
+ end subroutine
  subroutine b_i(a,comm,root)
  integer,intent(inout)::a
  integer::comm,root
@@ -48,10 +55,11 @@ contains
  integer::n,comm
  b=a
  end subroutine
- subroutine s_c2(a,b,n,comm)
+ subroutine s_c2(a,b,n,comm,root)
  complex(8),intent(in)::a(:,:)
  complex(8),intent(out)::b(:,:)
  integer::n,comm
+ integer,optional::root
  b=a
  end subroutine
  subroutine s_c4(a,b,n,comm)

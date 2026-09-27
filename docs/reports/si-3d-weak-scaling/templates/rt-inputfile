@@ -43,7 +43,6 @@
 /
 &functional
  xc='hse06'
- yn_hse_wannier='n'
  hse_mlwf_maxiter=200
  hse_mlwf_interval=10000
 /

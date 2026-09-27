@@ -16,7 +16,8 @@ module hse_native
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
-    yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance
+    yn_hse_wannier,hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance, &
+    hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
   public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
@@ -38,22 +39,23 @@ module hse_native
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
-  logical function hse_eigen_diagnostic_enabled(info,variable) result(enabled)
+  logical function hse_eigen_diagnostic_enabled(info,solver) result(enabled)
     use communication, only: comm_bcast
+    implicit none
     type(s_parallel_info),intent(in) :: info
-    character(*),optional,intent(in) :: variable
-    integer :: flag,status
-    character(8) :: setting
+    logical,optional,intent(in) :: solver
+    integer :: flag
     enabled=.false.
     if(.not.hse_enabled())return
     flag=0
     if(info%id_rko==0)then
-      if(present(variable))then
-        call get_environment_variable(variable,setting,status=status)
-      else
-        call get_environment_variable('SALMON_HSE_EIGEN_DIAGNOSTIC',setting,status=status)
+      if(yn_hse_eigen_diagnostic=='y')flag=1
+      if(present(solver))then
+        if(solver)then
+          flag=0
+          if(yn_hse_solver_diagnostic=='y')flag=1
+        endif
       endif
-      if(status==0.and.trim(setting)=='1')flag=1
     endif
     call comm_bcast(flag,info%icomm_rko,0)
     enabled=flag==1
@@ -101,13 +103,11 @@ contains
     integer,intent(in) :: iteration
     real(8),intent(in) :: residual
     logical,intent(in) :: converged
-    character(8) :: setting
     integer :: status,enabled
     if(.not.hse_enabled().or..not.use_wannier_exchange())return
     enabled=0
     if(info%id_k==0)then
-      call get_environment_variable('SALMON_HSE_WANNIER_SNAPSHOT',setting,status=status)
-      if(status==0.and.trim(setting)=='1')enabled=1
+      if(yn_hse_wannier_snapshot=='y')enabled=1
     endif
     call comm_bcast(enabled,info%icomm_k,0)
     if(enabled==0)return
@@ -198,6 +198,7 @@ contains
   end subroutine
 
   subroutine hse_refresh(system,mg,info,psi)
+    implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -249,10 +250,12 @@ contains
         first_full=symmetry_map%first(info%ik_s)
         count_full=symmetry_map%first(info%ik_e+1)-first_full
         call hse_kernel_init(kernel,n,mesh,system%hgs(1),symmetry_map%full_k,hse_omega, &
-          max(1,min(16,64/info%isize_k)),ierr,first_full,count_full)
+          max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
+          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout)
       else
         call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,hse_omega, &
-          max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk)
+          max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
+          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout)
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'

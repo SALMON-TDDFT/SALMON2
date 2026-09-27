@@ -1,10 +1,8 @@
 """One-step actual-solver diagnostic export smoke test; arguments match check.py."""
-import os
 import runpy
 import sys
 from pathlib import Path
-os.environ['SALMON_HSE_SOLVER_DIAGNOSTIC'] = '1'
-runpy.run_path(str(Path(__file__).with_name('check.py')), run_name='__main__')
+runpy.run_path(str(Path(__file__).with_name('check.py')), run_name='__main__', init_globals={'solver_diagnostic': True})
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'samples/dc_hse'))
 from locality import read_eigen_pair, eigen_diagnostics
 for frag in range(1, 9):

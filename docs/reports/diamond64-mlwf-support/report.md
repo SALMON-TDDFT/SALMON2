@@ -855,3 +855,22 @@ MPIのTaylor4・ACE/U再利用・軌道並列・namelist/Warning回帰試験が�
 富岳向け差分は`tools/patches/lcfo-radius-loop-cleanup.patch`。
 半径namelist追加済みのe6c54a87/6e07618d相当が前提。fuzz=0で旧版へのdry-run・
 本適用と変更後2ファイルの一致を検証。富岳での今回のビルド・数値実行は未確認。
+
+
+## 2026-09-27: HSE/LCFO制御をnamelistに統一
+
+利用者の「namelist以外の制御はしない」規則に合わせ、独自環境変数
+`SALMON_LCFO_*` / `SALMON_HSE_*`の読み取りを全削除した。旧測定記録に
+記載された変数は当時の条件であり、現版では無効。
+`yn_hse_lcfo_rt='y'`でLCFO、`yn_hse_wannier='y'`でMLWFを選択する。
+直接WF、ACE/U間隔、FFT batch/plan、分散seed、各診断も`&functional`に移動。
+半径の既定値は0（全範囲）、負値は拒否、旧環境変数へのfallbackなし。
+[全設定一覧](../../inputs/lcfo-rt-development.md)。Si/diamond 3D入力も更新。
+
+GNU15/MPIのビルドと小規模Taylor4回帰で、直接WF/通常係数、軌道MPI1/2、
+ACE4/U2、FFT計画、球半径のWarningを確認。保存済み旧バイナリ3c4ff577と
+半径3・ACE4/U2の電流・エネルギー差は0。矛盾する旧環境変数を混入しても
+namelist結果は不変。球保持率最小は半径3で0.9440599349375678、全範囲で1。
+分散seedのMPI1/2/3/4、snapshot、空root、不正入力、未対応ビルド拒否も成功。
+standalone輸送・球支持・U間隔テストも成功。大規模性能/RSSの新測定なし。
+富岳で今回の版のビルド・実行は未確認。

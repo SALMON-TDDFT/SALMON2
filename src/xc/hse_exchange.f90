@@ -20,14 +20,18 @@ module hse_exchange
     type(c_ptr) :: forward=c_null_ptr, backward=c_null_ptr
   end type
 contains
-  subroutine hse_kernel_init(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count)
+  subroutine hse_kernel_init(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
+                             block_rows,profile,fft_layout)
+    implicit none
     type(hse_kernel),intent(inout) :: op
     integer,intent(in) :: n,mesh,block
     real(c_double),intent(in) :: h,omega,k(:,:)
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count
-    integer :: ns,nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen,env_status,env_length
-    character(64) :: setting
+    integer,optional,intent(in) :: block_rows
+    logical,optional,intent(in) :: profile
+    character(*),optional,intent(in) :: fft_layout
+    integer :: ns,nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen
     real(c_double) :: pi,q2,q(3),scaled(3)
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
     type(c_ptr) :: plan
@@ -36,21 +40,16 @@ contains
     if(n<1.or.mesh<1.or.block<1.or.h<=0.or.omega<=0) return
     if(.not.ieee_is_finite(h).or..not.ieee_is_finite(omega))return
     chosen=block
-    call get_environment_variable('SALMON_HSE_BLOCK_ROWS',setting,length=env_length,status=env_status)
-    if(env_status/=1)then
-      if(env_status/=0.or.env_length<1.or.env_length>len(setting))return
-      if(verify(trim(setting),'0123456789')/=0)return
-      read(setting,*,iostat=env_status)chosen
-      if(env_status/=0.or.chosen<1.or.chosen>n**3)return
+    if(present(block_rows))then
+      if(block_rows<0.or.block_rows>n**3)return
+      if(block_rows>0)chosen=block_rows
     endif
-    call get_environment_variable('SALMON_HSE_PROFILE',setting,status=env_status)
-    op%profile=env_status==0.and.trim(setting)=='1'
+    op%profile=.false.
+    if(present(profile))op%profile=profile
     op%seconds=0d0
     op%contiguous_fft=.false.;op%auto_fft=.true.;op%fft_trial_seconds=0d0
-    call get_environment_variable('SALMON_HSE_FFT_LAYOUT',setting,status=env_status)
-    if(env_status/=1)then
-      if(env_status/=0)return
-      select case(trim(setting))
+    if(present(fft_layout))then
+      select case(trim(fft_layout))
       case('auto')
       case('strided')
         op%auto_fft=.false.

@@ -1,5 +1,9 @@
 # LCFO RT development status
 
+Current control interface: all LCFO HSE algorithm settings use `&functional`.
+Earlier benchmark measurements below describe the same numerical algorithms;
+old input archives with shell switches must be migrated before use.
+
 The DC input guard remains unchanged: `yn_dc=y` currently accepts `theory=dft`
 only. An experimental fixed-LCFO-subspace RT adapter now reuses native
 `initialization_rt`, density, Hartree, semilocal XC, pseudopotential, Taylor4
@@ -7,11 +11,34 @@ predictor/corrector and current routines. No additional SCF is performed.
 Si128/16-fragment self-consistent RT has passed a four-step integration check;
 there is still no converged dielectric spectrum.
 
+## Namelist controls
+
+All entries below belong to `&functional`; flags accept `'y'` or `'n'`.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `yn_hse_lcfo_rt` | `'n'` | Select fixed-LCFO native HSE RT |
+| `yn_hse_wannier` | `'n'` | Use MLWF sources in LCFO RT; selects Wannier HSE in the other path |
+| `yn_hse_lcfo_direct_wf` | `'n'` | Propagate WF coefficients with Taylor4 |
+| `yn_hse_lcfo_continuity` | `'n'` | Evaluate exchange continuity diagnostic |
+| `yn_hse_lcfo_fft_measure` | `'n'` | Use measured FFT planning |
+| `yn_hse_lcfo_seed_distributed` | `'n'` | Distributed seed QR; requires MPI and ScaLAPACK |
+| `hse_lcfo_ace_interval` | `1` | ACE refresh cadence in physical steps |
+| `hse_lcfo_u_interval` | `1` | Independent U transport cadence |
+| `hse_lcfo_fft_batch` | `1` | Exchange FFT tile width, 1–32 |
+| `hse_lcfo_wf_radius` | `0d0` | Fixed source radius in bohr; zero means full support |
+
+DC-SCF continues to enable Wannier exchange internally. For LCFO RT, set both
+`yn_hse_lcfo_rt='y'` and `yn_hse_wannier='y'` to use MLWFs. Direct-WF mode also
+requires MLWFs. Radius and cadence parameters do not activate either mode themselves.
+The current Si/diamond 3D input sets specify these choices explicitly. Their old
+`gs-env.sh`/`rt-env.sh` files are no-op compatibility placeholders.
+
 ## Experimental native path
 
-Set environment `SALMON_LCFO_RT=1` and use `theory='tddft_response'`,
+Set `&functional` namelist `yn_hse_lcfo_rt='y'` and use `theory='tddft_response'`,
 `yn_dc='n'`, `yn_conventional_from_dcdft='y'` in `&calculation`.
-Use Gamma, unpolarized HSE06, `yn_hse_wannier='n'`, default `hse_taylor4`,
+Use Gamma, unpolarized HSE06, `yn_hse_wannier='y'` for MLWF sources, default `hse_taylor4`,
 one real-space MPI rank per fragment, and `nproc_k=1`. Orbital groups are
 allowed: e.g. eight fragments use `nproc_rgrid=8,1,1`, `nproc_ob=2`, MPI16.
 This support applies to LCFO RT; the DC-HSE GS orbital-MPI restriction is unchanged.
@@ -38,7 +65,7 @@ uses density eigenfactors (not MLWFs). Its relative density eigenvalue threshold
 
 ### Opt-in transported MLWF sources
 
-Set `SALMON_LCFO_RT_MLWF=1`. Initial localization uses global occupied states in
+Set `yn_hse_wannier='y'`. Initial localization uses global occupied states in
 the distributed fixed LCFO basis, not independently diagonalized fragment density
 factors. A Gamma-specific SU(2) Jacobi optimizer minimizes the same six-link MV
 functional as the existing gauge code. `hse_mlwf_maxiter` is the maximum sweep
@@ -53,7 +80,7 @@ Predictor and corrected endpoint frames share the accepted step-start reference;
 trial updates are rolled back before accepting the corrected frame. Cache keys
 include both coefficients and occupations. No repeated MV minimization occurs.
 
-`SALMON_LCFO_RT_RADIUS=0` (default) retains full support. A positive value is a
+`hse_lcfo_wf_radius=0` (default) retains full support. A positive value is a
 three-dimensional sphere radius in bohr around fixed INITIAL WF centers.
 Each xyz displacement uses the minimum image of the orthorhombic global cell.
 A radius at least half the box diagonal retains full support.
@@ -76,7 +103,7 @@ no estimated speedup is inferred from source counts alone.
 
 Source-only masks are explicitly nonvariational. Hermitian assembly and ACE do
 not by themselves restore local charge continuity. Set
-`SALMON_LCFO_RT_CONTINUITY=1` to evaluate the exchange density source before LCFO
+`yn_hse_lcfo_continuity='y'` to evaluate the exchange density source before LCFO
 output projection, including both core-weighted adjoint halves and summing the
 overlapping fragment buffers. Logs contain the signed integral and L1 integral
 (electrons per atomic time) and maximum density-rate magnitude. Full-support Fock
@@ -91,8 +118,10 @@ continuity defect/field-current consistency as well as current and spectral
 errors. Do not add an unwrapped-position exchange commutator in this periodic
 fragment model as an ad hoc correction.
 
-The environment switch is a development opt-in, not a new production input.
+`yn_hse_lcfo_rt` is a namelist opt-in (default `'n'`).
 Without it the ordinary reconstruction and native RT paths are unchanged.
+All LCFO algorithm controls belong to `&functional`; legacy environment switches
+are obsolete. MPI/OMP runtime placement remains an execution-environment setting.
 
 
 `src/rt/lcfo_rt_core.f90` supplies a fixed orthonormal complex basis kernel:
@@ -152,7 +181,7 @@ and full/masked exchange continuity diagnostics with MPI2 jobs run sequentially.
 
 ### ACE reuse across physical time steps (2026-09-26)
 
-`SALMON_LCFO_RT_ACE_INTERVAL=N` accepts a positive integer (default1).
+`hse_lcfo_ace_interval=N` accepts a positive integer (default1).
 For an impulse, step1 always rebuilds ACE **before the first predictor**, as
 well as at predicted/corrected endpoints; later refresh steps are1+N,1+2N,….
 For a smooth laser starting at zero field, initial ACE is retained and endpoint
@@ -310,7 +339,7 @@ ACE適用1回のMPI集約要素数は旧1024×256複素数から、通常256×25
 <!-- MLWF_SPHERICAL_SUPPORT_20260926 -->
 ## WF積分範囲を三次元球状カットへ変更（2026-09-26）
 
-`SALMON_LCFO_RT_RADIUS=R` は、ここから初期WF中心からの三次元周期距離の半径R（bohr）を表す。直交セルで各軸の最小像変位を求め、dx²+dy²+dz² > R² のソースWFをゼロにする。y,z方向も判定に含む。半径0は全範囲、半径がセルの半対角長以上でも全範囲になる。中心はxyzの周期的モーメントから求め、時間発展中は初期中心に固定する。いずれかの軸で中心信頼度が0.1未満なら、そのWF全体を切らずに保持する。
+`hse_lcfo_wf_radius=R` は、ここから初期WF中心からの三次元周期距離の半径R（bohr）を表す。直交セルで各軸の最小像変位を求め、dx²+dy²+dz² > R² のソースWFをゼロにする。y,z方向も判定に含む。半径0は全範囲、半径がセルの半対角長以上でも全範囲になる。中心はxyzの周期的モーメントから求め、時間発展中は初期中心に固定する。いずれかの軸で中心信頼度が0.1未満なら、そのWF全体を切らずに保持する。
 
 ソースWFと破棄ノルムの診断には同じ三次元判定を使う。密度・Hartreeの範囲、交換カーネル、初期Uの局在化と位相追跡、ACE更新スケジュールは従来どおり。初期診断ファイル `lcfo_mlwf_initial.bin` はversion 2へ更新し、centers(3,no)をFortran配列順で記録する。旧version 1はx中心のみ。linksファイルはversion 1のまま。
 
@@ -492,7 +521,7 @@ Both sizes execute7424 of11520 candidate pairs per fragment per build (35.56% om
 
 ## Batched FFT and compact core projection (2026-09-26)
 
-Wannier exchange now supports a bounded per-worker target tile. Nonzero pair densities are compacted; FFTW plan_many plans for every actual count (including tails) are cached. No padded FFTs, magnitude threshold, normalization change or source accumulation reordering is introduced. The general default remains1. LCFO exposes SALMON_LCFO_RT_FFT_BATCH=1..32 with collective validation; effective width may shrink for a small target/thread ratio. A batches count represents a forward/backward pair of calls.
+Wannier exchange now supports a bounded per-worker target tile. Nonzero pair densities are compacted; FFTW plan_many plans for every actual count (including tails) are cached. No padded FFTs, magnitude threshold, normalization change or source accumulation reordering is introduced. The general default remains1. LCFO exposes hse_lcfo_fft_batch=1..32 with collective validation; effective width may shrink for a small target/thread ratio. A batches count represents a forward/backward pair of calls.
 
 The fixed core projection caches exact nonzero rows/columns and the scaled conjugate basis. Diamond's left basis shrinks from8192x192 to4096x64, reducing the main multiply to1/6 of its old work while retaining all192 target columns and the192x192 Hermitian result. A contiguous temporary product is scattered before the original Hermitian average. GNU15/AArch64 O2+external BLAS crashed with an indexed-LHS MATMUL in the reduced-column test; O0/no-external-BLAS passed. Contiguous operands and result followed by explicit scatter passes at O2/O3 with BLAS and -fno-tree-loop-vectorize retained.
 
@@ -515,13 +544,13 @@ Numerical comparison is valid: C64/C128 initial MLWF dumps byte-identical, max c
 
 Masked WF reconstruction caches disjoint grid-row groups with identical retained-WF masks and exactly nonzero LCFO basis support. Only those products are evaluated. No magnitude threshold is used; protected WFs, empty supports and full range are retained. Cached basis rows are not duplicated per WF. Diamond R6 fragment reconstruction uses1069 groups and13,238,272 products instead of94,371,840; this work reduction alone does not imply a corresponding RT speedup. Same-GS single paired measurements: C64 source1.1524→0.8155s, RT39.443→41.387s; C128 source2.5339→1.8273s, RT60.640→56.949s. Source includes transport, halo and diagnostics. Background-load variation and single repetitions limit timing conclusions. Max current difference5.21e-18, initial MLWF identical. Isolated1e-25 and all-zero basis rows, complex nonorthogonal basis, 3D masks, transport and MPI regression tests pass.
 
-`SALMON_LCFO_RT_U_INTERVAL` is a development environment parameter, a positive integer requiring MLWF when greater than1. Default1 preserves the existing cadence. It is independent of `SALMON_LCFO_RT_ACE_INTERVAL`. U is refreshed in initialization and physical steps1,1+interval,1+2*interval,...; the impulse pre-predictor ACE rebuild remains mandatory. Both predictor and corrected evaluations of a refresh step transport against the same accepted reference. Between refreshes, U is held while C U and the sources are still updated.
+`hse_lcfo_u_interval` is a `&functional` namelist parameter, a positive integer requiring MLWF when greater than1. Default1 preserves the existing cadence. It is independent of `hse_lcfo_ace_interval`. U is refreshed in initialization and physical steps1,1+interval,1+2*interval,...; the impulse pre-predictor ACE rebuild remains mandatory. Both predictor and corrected evaluations of a refresh step transport against the same accepted reference. Between refreshes, U is held while C U and the sources are still updated.
 
 For intervals greater than1, the reference is the last *transported* WF frame, not a frame computed while holding U. Accepting held-U frames as transport anchors causes secular orbital-phase spreading even in a stationary occupied subspace; the separate anchor prevents that specific accumulation. Predictor rollback restores both rotation and anchor; an exact corrected cache hit accepts the rotation and anchor corresponding to its cached frame. A101-step stationary-density regression checks reset of phase deformation at refreshes for full and finite supports, including nontrivial cached U after rollback. Held steps can still deform finite-radius sources, so interval choice is an additional approximation; short-run speed/error comparisons do not establish long-time optical accuracy.
 
 ## Opt-in direct-WF coefficient Taylor4 reference (2026-09-27)
 
-`SALMON_LCFO_RT_DIRECT_WF=1` enables an **untruncated reference**, requiring native LCFO RT, MLWF and the existing `hse_taylor4` propagator. Default is0. Integration remains the four-term Taylor polynomial with the existing predictor/corrector and native Hamiltonian. No PT-CN nonlinear iteration is added. Taylor powers and the result are accumulated in fragment-local LCFO coefficient rows; native grid reconstruction/projection connects each Hamiltonian application.
+`yn_hse_lcfo_direct_wf='y'` enables an **untruncated reference**, requiring native LCFO RT, MLWF and the existing `hse_taylor4` propagator. Default is `'n'`. Integration remains the four-term Taylor polynomial with the existing predictor/corrector and native Hamiltonian. No PT-CN nonlinear iteration is added. Taylor powers and the result are accumulated in fragment-local LCFO coefficient rows; native grid reconstruction/projection connects each Hamiltonian application.
 
 After initial field construction and accepted endpoint exchange refreshes, occupied native orbitals are rotated into the current WF frame. The physical WF references remain in LCFO basis coordinates; U is reset to identity in the new occupied coordinates. Existing dense polar gauge corrections and U cadence remain present. Hx and ACE are invariant under this unitary coordinate change. Existing cache keys are updated by repacking the actual rebased grid, while absent retained-ACE keys remain absent; rebasing alone must not trigger fresh exchange. A collective Gram-error gate of1e-8 rejects drift; there is no normalization repair. Orbital-indexed output now describes WFs rather than the original GS band labels; total density/current/energy are the invariant comparison targets.
 
@@ -539,7 +568,7 @@ The optional `hpsi` coefficient arguments must be paired and require active LCFO
 
 Validation includes a complex coefficient ACE comparison against the dense reference with unequal MPI row partitions and factor ranks2/4/6, finite-value checks, native direct-WF MPI2/4/full/R3/ACE4/U2/half-dt comparisons, and default-path native regressions. HSE and non-HSE MPI builds were checked with GNU15 and loop vectorization disabled. The direct halo fallback when ACE construction fails has been reviewed but has not been forced in this validation; accelerator configurations were not tested.
 
-Paired direct-path Diamond measurements (R6,16steps,dt.02): C64/MPI8 RT42.083→40.527s, Hamiltonian5.6648→3.5785s; C128/MPI16 RT64.000→52.698s, Hamiltonian15.1540→9.2638s. Max current difference1.13e-17, density5.00e-15, printed energy difference0; ACE build counts unchanged. Single samples with background CPU58.7→52.0% and73.4→54.4%; whole-run ratios are provisional, not isolated code speedup. Default direct flag remains0.
+Paired direct-path Diamond measurements (R6,16steps,dt.02): C64/MPI8 RT42.083→40.527s, Hamiltonian5.6648→3.5785s; C128/MPI16 RT64.000→52.698s, Hamiltonian15.1540→9.2638s. Max current difference1.13e-17, density5.00e-15, printed energy difference0; ACE build counts unchanged. Single samples with background CPU58.7→52.0% and73.4→54.4%; whole-run ratios are provisional, not isolated code speedup. Default direct flag remains `'n'`.
 
 ## Exact source-support pair loops (2026-09-27)
 
@@ -553,7 +582,7 @@ The accepted-state orthogonality check uses ZHERK and a packed upper-triangle re
 
 ### Opt-in measured exchange FFT planning
 
-`SALMON_LCFO_RT_FFT_MEASURE=1` selects FFTW_MEASURE for the cached per-worker pair-density transforms. Default0 uses FFTW_ESTIMATE. The LCFO root validates the exact flag0/1 (truncation is rejected) and broadcasts it over the existing communicator. This does not change FFT batch width, dimensions, kernel, pair screening, source support or normalization. Planning is serial on disposable scratch before filling pair densities. Worker count, batch width and planning mode are all part of the cache identity. Changing them rebuilds the plans.
+`yn_hse_lcfo_fft_measure='y'` selects FFTW_MEASURE for the cached per-worker pair-density transforms. Default `'n'` uses FFTW_ESTIMATE. The input reader validates the y/n flag and broadcasts it with the other namelist values. This does not change FFT batch width, dimensions, kernel, pair screening, source support or normalization. Planning is serial on disposable scratch before filling pair densities. Worker count, batch width and planning mode are all part of the cache identity. Changing them rebuilds the plans.
 
 Measured planning adds startup latency and selects a machine/load-dependent FFT algorithm; roundoff can differ. It has no persistent on-disk wisdom and each MPI process plans independently. The existing single-grid forward/backward plans are unaffected. Test both startup-inclusive elapsed time and repeated exchange/RT time before enabling in production; there is no guaranteed gain. Exact-pair tests cover both modes and cache toggles, OMP1/2/4, nonzero/tiny/empty support, tails and translated multi-k sources; direct RT tests cover MPI2/4, trajectory/density/energy parity and invalid flags.
 
@@ -563,10 +592,10 @@ Measured planning adds startup latency and selects a machine/load-dependent FFT 
 
 ### Optional distributed Gamma seed QR (2026-09-27)
 
-`SALMON_LCFO_SEED_DISTRIBUTED=1` selects ScaLAPACK `PZGEQPF` for the initial
-coefficient seed. Default `0` retains root `ZGEQP3`. Both MPI and ScaLAPACK are
+`yn_hse_lcfo_seed_distributed='y'` selects ScaLAPACK `PZGEQPF` for the initial
+coefficient seed. Default `'n'` retains root `ZGEQP3`. Both MPI and ScaLAPACK are
 required; an explicit request in an unsupported build is rejected. The setting
-is read on the seed communicator root and shared with its other ranks.
+is read and shared by the standard namelist input reader.
 
 The conjugate-transposed coefficient matrix has shape `(Noccupied,Nbasis)`.
 A one-row BLACS grid distributes 32-column cyclic blocks over all ranks of the
@@ -593,10 +622,9 @@ Routine contract: [Netlib PZGEQPF](https://www.netlib.org/scalapack/explore-html
 
 `&functional hse_lcfo_wf_radius` specifies the LCFO RT source sphere in **bohr**,
 independent of `unit_system`. Positive means fixed radius; zero means full support.
-The default -1 uses `SALMON_LCFO_RT_RADIUS` if set, otherwise full support. Explicit
-nonnegative namelist values override the environment, with a log notice. Other
-negative or nonfinite values are rejected. LCFO/MLWF activation still uses the
-existing experimental switches; this parameter does not control DC-SCF exchange.
+The default is 0 (full support). Negative or nonfinite values are rejected.
+LCFO activation is `yn_hse_lcfo_rt='y'`; MLWF activation is `yn_hse_wannier='y'`.
+This radius parameter does not control DC-SCF exchange.
 
 At initial localization, each WF's geometric sphere norm is divided by its total
 norm on disjoint cores, reduced over the LCFO communicator. The inclusive boundary
@@ -611,8 +639,9 @@ renormalization or physical parameter change is introduced.
 The warning concerns initial WFs only, not every transported RT frame. The existing
 RT aggregate discarded-source-norm diagnostic is unchanged. Norm retention does
 not guarantee current/dielectric accuracy. Full support produces no coverage
-warning. Small MPI integration tests verify namelist/environment equivalence,
-explicit full-support precedence, warning emission, and invalid input rejection.
+warning. The original radius-only tests checked equivalence to the then-existing environment
+control. That interface is now obsolete; current inputs use namelist controls only.
+Warning emission and invalid-input rejection remain part of the regression coverage.
 
 Full-support coverage reuses the already reduced initial norms without another
 WF scan or collective. Finite-radius loops hoist the constant radius condition

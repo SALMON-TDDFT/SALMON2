@@ -46,8 +46,16 @@
 /
 &functional
  xc='hse06'
+ yn_hse_lcfo_rt='y'
+ yn_hse_wannier='y'
+ yn_hse_lcfo_direct_wf='y'
+ yn_hse_lcfo_continuity='n'
+ yn_hse_lcfo_fft_measure='n'
+ yn_hse_lcfo_seed_distributed='y'
+ hse_lcfo_ace_interval=1
+ hse_lcfo_u_interval=1
+ hse_lcfo_fft_batch=1
  hse_lcfo_wf_radius=9d0
- yn_hse_wannier='n'
  hse_mlwf_maxiter=200
  hse_mlwf_interval=10000
 /

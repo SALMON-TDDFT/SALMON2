@@ -11,8 +11,10 @@ contains
   subroutine export_hse_reference(lg,mg,system,info,stencil,srg,ppg,ppn,spsi,shpsi, &
                                   rho,vlocal,vh,vxc,vpsl,energy,iteration,converged)
     use hamiltonian, only: hpsi
-    use salmon_global, only: yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_symmetrized_stencil,xc
+    use salmon_global, only: yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_symmetrized_stencil,xc, &
+      hse_reference_export_directory
     use pseudo_pt_plusU_sub, only: PLUS_U_ON
+    implicit none
     type(s_rgrid),intent(in) :: lg,mg
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -26,17 +28,14 @@ contains
     integer,intent(in) :: iteration
     logical,intent(in) :: converged
     character(:),allocatable :: directory
-    integer :: n,status,u,ios,ik,io,ilma,ia,j,ix,iy,iz,a,b,c,d,e,f
+    integer :: n,u,ios,ik,io,ilma,ia,j,ix,iy,iz,a,b,c,d,e,f
     complex(8),allocatable :: projectors(:,:,:,:)
     real(8),allocatable :: raw_uv(:,:),raw_xyz(:,:,:)
     integer,allocatable :: raw_idx(:,:,:),raw_count(:)
     integer(int8) :: endian_bytes(4)
     logical :: marker_exists
-    call get_environment_variable('SALMON_HSE_REFERENCE_EXPORT',length=n,status=status)
-    if(status/=0.or.n==0) return
-    allocate(character(n)::directory)
-    call get_environment_variable('SALMON_HSE_REFERENCE_EXPORT',value=directory,status=status)
-    if(status/=0) error stop 'HSE reference export: cannot read directory'
+    if(trim(hse_reference_export_directory)=='none'.or.len_trim(hse_reference_export_directory)==0)return
+    directory=trim(hse_reference_export_directory)
     ! Invalidate an old snapshot before any validation or output. Only rank zero
     ! touches the marker; unsupported MPI export is rejected below on all ranks.
     if(info%id_rko==0) then

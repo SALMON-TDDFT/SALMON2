@@ -1,4 +1,2 @@
-# Source for DC-SCF; do not carry experimental RT switches into GS.
-unset SALMON_LCFO_RT SALMON_LCFO_RT_MLWF SALMON_LCFO_RT_DIRECT_WF
-unset SALMON_LCFO_RT_RADIUS SALMON_LCFO_RT_ACE_INTERVAL SALMON_LCFO_RT_U_INTERVAL
-unset SALMON_LCFO_RT_FFT_BATCH SALMON_LCFO_RT_FFT_MEASURE SALMON_LCFO_RT_CONTINUITY
+# Compatibility placeholder; no algorithm environment variables are set.
+# All GS/RT choices are in inputfile (&functional). Sourcing this file is unnecessary.

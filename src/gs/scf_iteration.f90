@@ -48,7 +48,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   integer :: nncg
 #ifdef USE_HSE
   logical :: diagnose
-  diagnose=hse_eigen_diagnostic_enabled(info,'SALMON_HSE_SOLVER_DIAGNOSTIC')
+  diagnose=hse_eigen_diagnostic_enabled(info,solver=.true.)
   if(diagnose)then
     call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
     call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'before_subspace')

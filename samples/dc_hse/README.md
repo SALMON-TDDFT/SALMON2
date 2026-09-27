@@ -63,7 +63,7 @@ No screening switch has been enabled in the Fortran SCF/LCFO path by this script
 
 ## Snapshot and post-SCF localization
 
-Set `SALMON_HSE_WANNIER_SNAPSHOT=1` for a native final density-factor snapshot.
+Set `&functional yn_hse_wannier_snapshot='y'` for a native final density-factor snapshot.
 For DC it is written separately under `data_dcdft/fragments/NNNNNN/`. A normal
 time-limit shutdown can write an **unconverged** snapshot; successful process
 exit does not establish SCF convergence. Preserve the input and output log.
@@ -121,7 +121,7 @@ buffers are private to each worker; planning/destruction is serial, following
 https://www.fftw.org/fftw3_doc/Thread-safety.html . Each target retains the same
 source accumulation order. The serial build remains supported.
 
-`SALMON_HSE_EIGEN_DIAGNOSTIC=1` exports the final Psi and refreshed-Hamiltonian
+`&functional yn_hse_eigen_diagnostic='y'` exports the final Psi and refreshed-Hamiltonian
 Hpsi on a single-k, full-grid/full-orbital layout before LCFO. The diagnostic
 reader in locality.py computes eigen-residuals and orthogonality independently.
 The v1 export does not contain actual k coordinates or convergence flags; keep

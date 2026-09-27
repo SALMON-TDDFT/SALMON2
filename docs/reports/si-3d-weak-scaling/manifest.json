@@ -25,6 +25,8 @@
   "radius_control": "&functional hse_lcfo_wf_radius, fixed bohr",
   "initial_norm_warning_threshold": 0.999,
   "pseudo_source": "samples/dc_hse/si64-chain/Si_rps.dat",
+  "algorithm_control": "&functional namelist only; no SALMON_LCFO environment controls",
+  "seed_distributed": true,
   "status": "generated and statically validated; not run on Fugaku",
   "cases": [
     {
@@ -138,17 +140,17 @@
   ],
   "sha256": {
     "10x10x10/atom.dat": "efbd511084ce5a13615469427b2f98171759caba809b8b2c15ead9ddde8fe195",
-    "10x10x10/gs/inputfile": "21f7aff9ae628d2a9f49745127fd9b7f2bcb4e16dfac42d7e2c17f4bae073a8f",
-    "10x10x10/rt/inputfile": "9953b6e56296d8ab4099e1d28eaba75f309372ec9834413fe792f5ef03c00dcf",
+    "10x10x10/gs/inputfile": "fb8da94e0068ce73a402fe9d6f9031edececbd25c0facefa004626be0fedb220",
+    "10x10x10/rt/inputfile": "516de7e265138ca4237291d4973924a385d913b863104c0208792c74bedae7d4",
     "4x4x4/atom.dat": "9fafee241177398b59c6c7d8d7b82531548328533b27308ade9d8aed7cb70cd9",
-    "4x4x4/gs/inputfile": "e01ad4bc1e89e6fc0769715327da0df04d2821945d373722eec676bb2194ed7c",
-    "4x4x4/rt/inputfile": "b4d67a3b7bac0ebfb98c6a7f6f361641216370d186512e94ec62f507a24531fb",
+    "4x4x4/gs/inputfile": "80dabafb1937780f58e721433c0aff0c148bcd737d36e677f0fe1f56d3d0b442",
+    "4x4x4/rt/inputfile": "98405b2828cae90c27a15b261ab86559549e5df8668bb59f9a020054159b561f",
     "6x6x6/atom.dat": "19c21025437823e8cc8316a856e6594695fd32d04bb833b1b2616a1e55c6f7b8",
-    "6x6x6/gs/inputfile": "71ff8e4b65dcce0eaa6c4dd6fd60e617d9a95be4ae6edfbd3dec1a614ee19944",
-    "6x6x6/rt/inputfile": "c31b437ad3229a2c83a6c5af62a5a87beef0e7c63c26f93ff379cb017224eb67",
+    "6x6x6/gs/inputfile": "44b7ff713fcc7b62ce4e53869159b5928ca7110cbbbbfb580e90f778525d10d9",
+    "6x6x6/rt/inputfile": "e5d2998dbee93291c65877e9fc6bd7e2a20cb7edbfda65fdfb1416e987ef295d",
     "8x8x8/atom.dat": "210a8a3812b0e8ca7a1122966d4e6d2b64b043983f5f49776786d3ef9068e57c",
-    "8x8x8/gs/inputfile": "b7fe8d59c80b450ec3fd1e6fd0cbe940a7b43d16476d56e6560cdaf33de066fd",
-    "8x8x8/rt/inputfile": "0caca61cb76901ecc74338ea057d433d69e6593ad5f15c2e48ea1707dd88d8e1",
+    "8x8x8/gs/inputfile": "35e4519bc9fd4220dce432046f86c59661ae9962e35cfe3cfa7d5c1741888b80",
+    "8x8x8/rt/inputfile": "2aa61899d3ad84b3915b97fa7f471b1566a28e95914ec47f3b64004b215e4a38",
     "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c"
   }
 }

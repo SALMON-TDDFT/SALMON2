@@ -4,7 +4,8 @@
 module hse_lcfo_rt
   use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
   use communication, only: comm_bcast,comm_summation,comm_get_max
-  use salmon_global, only: hse_omega,ae_shape1
+  use salmon_global, only: hse_omega,ae_shape1,hse_lcfo_ace_interval,hse_lcfo_fft_batch, &
+    yn_hse_lcfo_continuity,yn_hse_lcfo_fft_measure
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track,lcfo_mlwf_rebase
@@ -33,65 +34,24 @@ module hse_lcfo_rt
   real(8),allocatable,save :: cached_occupation(:)
 contains
   subroutine initialize_fragment()
+    implicit none
     complex(8),allocatable :: block(:,:)
     integer,allocatable :: mapping(:,:),first(:)
-    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status,ios,bad,fft_batch,fft_measure
-    character(16) :: value
+    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,fft_batch,fft_measure
     nf=size(lcfo_counts);ns=lcfo_core+2*lcfo_buffer;ng=product(ns)
     if(any(ns>lcfo_grid))error stop 'LCFO HSE: fragment exceeds global periodic grid'
     allocate(mapping(ng,nf),first(nf),fragment_global_index(ng),core_weight(ng));mapping=0;first=0
     core_weight=0d0
-    bad=0
+    measure_continuity=yn_hse_lcfo_continuity=='y'
+    ace_interval=hse_lcfo_ace_interval
+    refresh_origin=0
+    if(ae_shape1=='impulse')refresh_origin=1
+    fft_batch=hse_lcfo_fft_batch
+    fft_measure=merge(1,0,yn_hse_lcfo_fft_measure=='y')
     if(lcfo_rank==0)then
-      call get_environment_variable('SALMON_LCFO_RT_CONTINUITY',value,status=env_status)
-      measure_continuity=env_status==0.and.trim(value)=='1'
-      call get_environment_variable('SALMON_LCFO_RT_ACE_INTERVAL',value,status=env_status)
-      if(env_status==0.and.len_trim(value)>0)then
-        read(value,*,iostat=ios)ace_interval
-        if(ios/=0)bad=1
-      else if(env_status/=1.and.env_status/=0)then
-        bad=1
-      endif
-      if(ace_interval<1)bad=1
-      if(ae_shape1=='impulse')refresh_origin=1
+      write(*,'(a,2i8)')'LCFO HSE ACE interval/refresh origin: ',ace_interval,refresh_origin
+      write(*,'(a,i2)')'LCFO HSE FFT measured planning: ',fft_measure
     endif
-    call comm_bcast(bad,lcfo_comm,0)
-    if(bad/=0)error stop 'LCFO HSE: ACE interval must be a positive integer'
-    call comm_bcast(ace_interval,lcfo_comm,0)
-    call comm_bcast(refresh_origin,lcfo_comm,0)
-    if(lcfo_rank==0)write(*,'(a,2i8)')'LCFO HSE ACE interval/refresh origin: ',ace_interval,refresh_origin
-    call comm_bcast(measure_continuity,lcfo_comm,0)
-    fft_batch=1;bad=0
-    if(lcfo_rank==0)then
-      call get_environment_variable('SALMON_LCFO_RT_FFT_BATCH',value,status=env_status)
-      if(env_status==0.and.len_trim(value)>0)then
-        read(value,*,iostat=ios)fft_batch
-        if(ios/=0)bad=1
-      else if(env_status/=1.and.env_status/=0)then
-        bad=1
-      endif
-      if(fft_batch<1.or.fft_batch>32)bad=1
-    endif
-    call comm_bcast(bad,lcfo_comm,0)
-    if(bad/=0)error stop 'LCFO HSE: FFT batch must be an integer from 1 to 32'
-    call comm_bcast(fft_batch,lcfo_comm,0)
-    fft_measure=0;bad=0
-    if(lcfo_rank==0)then
-      call get_environment_variable('SALMON_LCFO_RT_FFT_MEASURE',value,status=env_status)
-      if(env_status==0.and.len_trim(value)>0)then
-        select case(trim(value))
-        case('0');fft_measure=0
-        case('1');fft_measure=1
-        case default;bad=1
-        end select
-      else if(env_status/=1.and.env_status/=0)then
-        bad=1
-      endif
-    endif
-    call comm_bcast(bad,lcfo_comm,0)
-    if(bad/=0)error stop 'LCFO HSE: FFT measure must be 0 or 1'
-    call comm_bcast(fft_measure,lcfo_comm,0)
-    if(lcfo_rank==0)write(*,'(a,i2)')'LCFO HSE FFT measured planning: ',fft_measure
     ! FFT order is core/right-buffer then the periodic left buffer.
     g=0
     do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1

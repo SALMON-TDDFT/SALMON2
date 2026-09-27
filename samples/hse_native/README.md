@@ -82,7 +82,7 @@ SALMON_TEST_MPI=1 python3 -m unittest discover -s samples/hse_mlwf_reference -p 
 
 The native tests use a Fortran compiler, FFTW, OpenBLAS and Libxc, with paths
 configurable through `FC`, `FFTW_ROOT`, `OPENBLAS_ROOT`, and `LIBXC_ROOT`.
-Optional profiling uses `SALMON_HSE_PROFILE=1`. The full sampled exchange
+Optional profiling uses `&functional yn_hse_profile='y'`. The full sampled exchange
 kernel is retained; these speedups do not rely on a new MLWF support cutoff.
 Taylor4 + ACE at dt=0.32 au was unstable on the tested Si grid. Use a smaller step and check time-step convergence for your system.
 

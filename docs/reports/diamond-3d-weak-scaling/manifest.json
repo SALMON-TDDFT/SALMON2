@@ -22,6 +22,8 @@
   "nt": 16,
   "ace_interval": 1,
   "u_interval": 1,
+  "algorithm_control": "&functional namelist only; no SALMON_LCFO environment controls",
+  "seed_distributed": true,
   "status": "generated and statically validated; not run on Fugaku",
   "cases": [
     {
@@ -135,17 +137,17 @@
   ],
   "sha256": {
     "10x10x10/atom.dat": "47efd85b5b66ba2270541480d5262bfc3f787a67e2909a6765c44631fcbe7baf",
-    "10x10x10/gs/inputfile": "2acefef1b2d50ef3c689546ea00538f45132494c479add61ba6511aa6356503a",
-    "10x10x10/rt/inputfile": "d4bd90e97e48890750ec215749b829536d7642d23a889d5f7ff5a3df00879648",
+    "10x10x10/gs/inputfile": "601db742ab8b9193da4fd46e590c1b54227c2841916734c28af3d693dd5a1d8d",
+    "10x10x10/rt/inputfile": "5dca2defe8d7f983e8f58e11dd854c535b5daa815ca69956a1b2a1d6ceabf0c7",
     "4x4x4/atom.dat": "1f6d6e90087424ba36c4f1359be86b13c0bd77df02e763503802609abe2eec04",
-    "4x4x4/gs/inputfile": "257a12c8934d54ebbef82d953e2cf189817097629bf6c67b5e9895a9dff84d49",
-    "4x4x4/rt/inputfile": "ef49dc3e62abac377cc4733d2652883b9488b7fa3ab68cd193d532a2b4644221",
+    "4x4x4/gs/inputfile": "8bcb7a5dd89b7d84d9d445ad063c6bd486474274bc1a04b45b3d24eb997cc425",
+    "4x4x4/rt/inputfile": "176f017e53a9075a55099d9671ba6c742b2ee556163e4db2bb1bfc497493d0dd",
     "6x6x6/atom.dat": "95301c8a00b56f9c503027bb1be08b3b494a6b81cfcdd6fcf0a1ef109de9b660",
-    "6x6x6/gs/inputfile": "698ad4d985d38ca45e831730f6992f46329602600a8acb08a1c42a1f1c331f62",
-    "6x6x6/rt/inputfile": "e383435e6f8b0d6ea4744d9fc84896d66f77f6aef0d4f58a71bb2cad90f45c88",
+    "6x6x6/gs/inputfile": "0c64f7f4992f401ba3c728b84a6796805c9d70ef925abac1382761590b9dc6c1",
+    "6x6x6/rt/inputfile": "01683ecd1827217e93a92b5de22f56e19a38ec63761b473cefe05df98ce56489",
     "8x8x8/atom.dat": "cbcc2d4da2425a576997963b31a3e98dfbd5e80f399f4aa38ccaeea03f759d9c",
-    "8x8x8/gs/inputfile": "73d2c7dc4a50299e616fb633a5b7c3d476197ee3cd1d8042bfc8520d3898c627",
-    "8x8x8/rt/inputfile": "6ebb06e0fec8e6d07133b3b9f1a049200a9327845798c899821b707ed74a305b",
+    "8x8x8/gs/inputfile": "52df0abcef6c4c908163050eef50e174bd1408002ca8fd65a04fc5f9376069a5",
+    "8x8x8/rt/inputfile": "a89a9c65da81d78afb31ffe14840359477983a4d3f1a350d6e86a3fa30c43c4d",
     "C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1"
   }
 }

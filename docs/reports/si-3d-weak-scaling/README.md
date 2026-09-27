@@ -17,8 +17,8 @@ not converged numerical results. No large jobs have been submitted.
 
 Each case contains `atom.dat`, `gs/inputfile`, `rt/inputfile`, and an RT restart
 symlink `rt/data_dcdft -> ../gs/data_dcdft` (initially dangling, populated by GS).
-The root contains `Si_rps.dat`, `gs-env.sh`, `rt-env.sh`, generator, validator and
-manifest. Preserve this directory layout when extracting/copying.
+The root contains `Si_rps.dat`, generator, validator and manifest.
+`gs-env.sh` and `rt-env.sh` are no-op compatibility files; do not source them. Preserve this directory layout when extracting/copying.
 
 Common settings: 8 atoms per core, 16³ core mesh; buffer 8 grid points per side,
 so each periodic DC fragment has 32³ mesh and 64 atoms. `nstate_frag=256`,
@@ -42,16 +42,25 @@ The RT input now includes:
 ```fortran
 &functional
  xc='hse06'
+ yn_hse_lcfo_rt='y'
+ yn_hse_wannier='y'
+ yn_hse_lcfo_direct_wf='y'
+ yn_hse_lcfo_seed_distributed='y'
+ yn_hse_lcfo_continuity='n'
+ yn_hse_lcfo_fft_measure='n'
+ hse_lcfo_ace_interval=1
+ hse_lcfo_u_interval=1
+ hse_lcfo_fft_batch=1
  hse_lcfo_wf_radius=9d0
- ...
 /
 ```
 
 `hse_lcfo_wf_radius` is always in **bohr**, independent of `unit_system`.
 0 means full support; positive values specify the fixed global periodic sphere.
-Default -1 uses the old `SALMON_LCFO_RT_RADIUS` environment value (or full if absent).
-An explicit namelist value takes precedence over that environment variable.
-The supplied `rt-env.sh` unsets the legacy radius variable.
+The default is 0 (full support); negative values are rejected. Algorithm settings
+are read only from the namelist. The former `SALMON_LCFO_*` variables are obsolete.
+`yn_hse_wannier='y'` enables MLWF sources for LCFO RT; the same flag also
+selects Wannier exchange in the non-LCFO HSE path. DC-SCF enables it internally.
 
 Initial sphere coverage is evaluated separately for each WF using |w|² on disjoint
 core grids and 3D minimum-image distances. If any WF has sphere norm / total norm
@@ -69,25 +78,23 @@ Do not change radius between sizes if measuring fixed-work weak scaling.
 
 ## Run order
 
-Requires the HSE/MPI/ScaLAPACK build with the radius namelist update. On Fugaku,
+Requires the HSE/MPI/ScaLAPACK build with the complete LCFO namelist-control update (the earlier radius-only patch is insufficient). On Fugaku,
 include the `-Nalloc_assign` toolchain correction before numerical tests.
 Use the existing batch allocation/launcher; the commands below describe working
-directories and environment, not a new scheduler submission script:
+directories, not a new scheduler submission script:
 
 ```sh
 # For example, in 4x4x4/gs:
-. ../../gs-env.sh
 # Launch SALMON with 64 MPI ranks and inputfile as standard input.
 # Check SCF and LCFO eigensolver convergence and GS output before proceeding.
 
 # Then in 4x4x4/rt:
-. ../../rt-env.sh
 # Launch SALMON with 64 MPI ranks and inputfile as standard input.
 ```
 
-Repeat with 216, 512 and 1000 MPI ranks for the other sizes. `rt-env.sh` enables
-`SALMON_LCFO_SEED_DISTRIBUTED=1`; requires MPI+ScaLAPACK. Source env files in the
-corresponding stage, so experimental RT settings do not leak into GS.
+Repeat with 216, 512 and 1000 MPI ranks for the other sizes. Distributed seed QR
+is enabled in each RT input and requires MPI+ScaLAPACK. GS explicitly selects
+`yn_hse_lcfo_rt='n'`; RT selects `'y'`. No algorithm environment setup is needed.
 
 ## Remaining memory limits
 
@@ -103,36 +110,39 @@ python3 generate.py
 python3 validate.py
 ```
 
-## Update an archive-based Fugaku source
+## Fugaku archive-source update
 
-Implementation: `e6c54a87`. The included `patches/` update assumes the cumulative
-Gamma memory patch has already been applied. It does not change the Fujitsu
-compiler/POSIX fixes. From the SALMON source root, using an absolute path to the
-extracted input set, run the following in a subshell (failure stops later steps):
+The bundled patches bring the cumulative Gamma-memory source to the current
+namelist-only version. Preserve the existing compiler/POSIX fixes and apply
+`-Nalloc_assign` separately if not already present. Back up the source first.
+Choose the starting step matching the source; do not apply an earlier patch twice.
+
+1. If only the cumulative Gamma-memory patch is installed, check
+   `patches/lcfo-radius-before.sha256`, apply `lcfo-radius-namelist.patch`, then
+   check `lcfo-radius-after.sha256`.
+2. If the radius namelist patch is installed but the loop cleanup is not, apply
+   `lcfo-radius-loop-cleanup.patch`.
+3. After the loop cleanup (`3c4ff577` / `eb23bfea` equivalent), apply the new
+   namelist migration below. Its hashes check all 10 affected source files.
+
+Each earlier patch also requires a successful `--dry-run --fuzz=0` before applying.
+For step 3, from the SALMON source root:
 
 ```sh
 (
   set -e
   si_inputs=/absolute/path/to/si-3d-weak-scaling
-  sha256sum -c "$si_inputs/patches/lcfo-radius-before.sha256"
-  patch --batch --forward --fuzz=0 --dry-run -p1 < "$si_inputs/patches/lcfo-radius-namelist.patch"
-  patch --batch --forward --fuzz=0 -p1 < "$si_inputs/patches/lcfo-radius-namelist.patch"
-  sha256sum -c "$si_inputs/patches/lcfo-radius-after.sha256"
+  sha256sum -c "$si_inputs/patches/lcfo-namelist-only-before.sha256"
+  patch --batch --forward --fuzz=0 --dry-run -p1 < "$si_inputs/patches/lcfo-namelist-only.patch"
+  patch --batch --forward --fuzz=0 -p1 < "$si_inputs/patches/lcfo-namelist-only.patch"
+  sha256sum -c "$si_inputs/patches/lcfo-namelist-only-after.sha256"
   cmake -S . -B build
   cmake --build build -j 8
 )
 ```
 
-If the pre-update hashes differ, stop and inspect the source version instead of
-forcing the patch. The new namelist is not accepted by an older executable.
-The radius update has been built/tested locally; Fugaku build/run is unverified.
-
-## Subsequent diagnostic loop cleanup
-
-`3c4ff577` removes a redundant full-support WF norm scan/collective and hoists
-constant radius checks out of the inner loop. It preserves radius and Warning
-semantics. The input archive's bundled radius patch targets `e6c54a87`; apply
-[the incremental cleanup patch](https://github.com/SALMON-TDDFT/SALMON2/blob/3c4ff577ae3efdd7d648b7edca8900432c2c9a35/tools/patches/lcfo-radius-loop-cleanup.patch)
-after that patch and its after-hash check. Full latest status and validation limits:
-[DEVELOPMENT_NOTES](https://github.com/SALMON-TDDFT/SALMON2/blob/dc-hse-mlwf-ace/DEVELOPMENT_NOTES.md#latest-status).
-The cleanup has local OMP/MPI regression coverage, but no new speed/RSS measurement.
+If a hash or dry-run differs, stop; do not force the patch. The complete patch
+was applied to clean copies and the resulting files matched the expected hashes.
+Local GNU/MPI build and small-system regressions pass. Fugaku compilation and
+3D numerical runs of this version remain unverified. Older executables cannot
+read these new namelist entries.

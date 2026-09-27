@@ -280,6 +280,11 @@ contains
       & xc, &
       & cname, hse_omega, yn_hse_wannier, hse_mlwf_interval, hse_mlwf_maxiter, hse_mlwf_tolerance, &
       & hse_lcfo_wf_radius, &
+      & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
+      & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
+      & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
+      & hse_lcfo_ace_interval, hse_lcfo_u_interval, hse_lcfo_fft_batch, &
+      & hse_block_rows, hse_fft_layout, hse_reference_export_directory, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -735,7 +740,22 @@ contains
     hse_mlwf_interval = 10
     hse_mlwf_maxiter = 200
     hse_mlwf_tolerance = 1d-6
-    hse_lcfo_wf_radius = -1d0
+    hse_lcfo_wf_radius = 0d0
+    yn_hse_lcfo_rt = 'n'
+    yn_hse_lcfo_direct_wf = 'n'
+    yn_hse_lcfo_continuity = 'n'
+    yn_hse_lcfo_fft_measure = 'n'
+    yn_hse_lcfo_seed_distributed = 'n'
+    yn_hse_profile = 'n'
+    yn_hse_eigen_diagnostic = 'n'
+    yn_hse_solver_diagnostic = 'n'
+    yn_hse_wannier_snapshot = 'n'
+    hse_lcfo_ace_interval = 1
+    hse_lcfo_u_interval = 1
+    hse_lcfo_fft_batch = 1
+    hse_block_rows = 0
+    hse_fft_layout = 'auto'
+    hse_reference_export_directory = 'none'
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
@@ -1305,6 +1325,21 @@ contains
     call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
     call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
     call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
+    call comm_bcast(yn_hse_lcfo_rt,nproc_group_global)
+    call comm_bcast(yn_hse_lcfo_direct_wf,nproc_group_global)
+    call comm_bcast(yn_hse_lcfo_continuity,nproc_group_global)
+    call comm_bcast(yn_hse_lcfo_fft_measure,nproc_group_global)
+    call comm_bcast(yn_hse_lcfo_seed_distributed,nproc_group_global)
+    call comm_bcast(yn_hse_profile,nproc_group_global)
+    call comm_bcast(yn_hse_eigen_diagnostic,nproc_group_global)
+    call comm_bcast(yn_hse_solver_diagnostic,nproc_group_global)
+    call comm_bcast(yn_hse_wannier_snapshot,nproc_group_global)
+    call comm_bcast(hse_lcfo_ace_interval,nproc_group_global)
+    call comm_bcast(hse_lcfo_u_interval,nproc_group_global)
+    call comm_bcast(hse_lcfo_fft_batch,nproc_group_global)
+    call comm_bcast(hse_block_rows,nproc_group_global)
+    call comm_bcast(hse_fft_layout,nproc_group_global)
+    call comm_bcast(hse_reference_export_directory,nproc_group_global)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
@@ -2245,7 +2280,22 @@ contains
       write(fh_variables_log, *) "# hse_mlwf_interval=",hse_mlwf_interval
       write(fh_variables_log, *) "# hse_mlwf_maxiter=",hse_mlwf_maxiter
       write(fh_variables_log, *) "# hse_mlwf_tolerance=",hse_mlwf_tolerance
-      write(fh_variables_log, *) "# hse_lcfo_wf_radius (bohr; -1=legacy)=",hse_lcfo_wf_radius
+      write(fh_variables_log, *) "# hse_lcfo_wf_radius (bohr; 0=full)=",hse_lcfo_wf_radius
+      write(fh_variables_log, *) "# yn_hse_lcfo_rt=",yn_hse_lcfo_rt
+      write(fh_variables_log, *) "# yn_hse_lcfo_direct_wf=",yn_hse_lcfo_direct_wf
+      write(fh_variables_log, *) "# yn_hse_lcfo_continuity=",yn_hse_lcfo_continuity
+      write(fh_variables_log, *) "# yn_hse_lcfo_fft_measure=",yn_hse_lcfo_fft_measure
+      write(fh_variables_log, *) "# yn_hse_lcfo_seed_distributed=",yn_hse_lcfo_seed_distributed
+      write(fh_variables_log, *) "# yn_hse_profile=",yn_hse_profile
+      write(fh_variables_log, *) "# yn_hse_eigen_diagnostic=",yn_hse_eigen_diagnostic
+      write(fh_variables_log, *) "# yn_hse_solver_diagnostic=",yn_hse_solver_diagnostic
+      write(fh_variables_log, *) "# yn_hse_wannier_snapshot=",yn_hse_wannier_snapshot
+      write(fh_variables_log, *) "# hse_lcfo_ace_interval=",hse_lcfo_ace_interval
+      write(fh_variables_log, *) "# hse_lcfo_u_interval=",hse_lcfo_u_interval
+      write(fh_variables_log, *) "# hse_lcfo_fft_batch=",hse_lcfo_fft_batch
+      write(fh_variables_log, *) "# hse_block_rows=",hse_block_rows
+      write(fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
+      write(fh_variables_log, *) "# hse_reference_export_directory=",hse_reference_export_directory
 #ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
@@ -2867,6 +2917,15 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_hse_wannier)
+    call yn_argument_check(yn_hse_lcfo_rt)
+    call yn_argument_check(yn_hse_lcfo_direct_wf)
+    call yn_argument_check(yn_hse_lcfo_continuity)
+    call yn_argument_check(yn_hse_lcfo_fft_measure)
+    call yn_argument_check(yn_hse_lcfo_seed_distributed)
+    call yn_argument_check(yn_hse_profile)
+    call yn_argument_check(yn_hse_eigen_diagnostic)
+    call yn_argument_check(yn_hse_solver_diagnostic)
+    call yn_argument_check(yn_hse_wannier_snapshot)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
@@ -3108,8 +3167,19 @@ contains
     end if
 
     if(.not.ieee_is_finite(hse_lcfo_wf_radius))error stop 'HSE: hse_lcfo_wf_radius must be finite'
-    if(hse_lcfo_wf_radius<0d0.and.hse_lcfo_wf_radius/=-1d0) &
-      error stop 'HSE: hse_lcfo_wf_radius must be >=0 bohr, or -1 for legacy default'
+    if(hse_lcfo_wf_radius<0d0)error stop 'HSE: hse_lcfo_wf_radius must be >=0 bohr'
+    if(hse_lcfo_ace_interval<1.or.hse_lcfo_u_interval<1) &
+      error stop 'HSE: LCFO ACE and U intervals must be positive'
+    if(hse_lcfo_fft_batch<1.or.hse_lcfo_fft_batch>32)error stop 'HSE: LCFO FFT batch must be 1 to 32'
+    if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
+    if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
+      error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
+    if(yn_hse_lcfo_rt=='y')then
+      if(yn_dc=='y'.or.yn_conventional_from_dcdft/='y')error stop 'LCFO RT requires conventional_from_dcdft'
+      if(xc/='hse06'.or.theory/='tddft_response'.or.propagator/='hse_taylor4') &
+        error stop 'LCFO RT requires HSE06 tddft_response with Taylor4'
+    endif
+    if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
     if(xc=='hse06')then
       if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
         error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'
@@ -3124,6 +3194,8 @@ contains
         if(hse_mlwf_interval<1.or.hse_mlwf_maxiter<1.or. &
           .not.ieee_is_finite(hse_mlwf_tolerance).or.hse_mlwf_tolerance<=0d0) &
           error stop 'HSE Wannier: invalid localization controls'
+      endif
+      if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
         if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &

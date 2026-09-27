@@ -1,6 +1,6 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の実装・回帰検証：`3c4ff577`（半径診断のループ整理）。半径namelist：`e6c54a87`。分散seedのメモリ測定：`133e8b37`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新変更：HSE/LCFOの制御をnamelistへ統一。前版：`3c4ff577`（半径診断のループ整理）。半径namelist：`e6c54a87`。分散seedのメモリ測定：`133e8b37`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
@@ -26,14 +26,24 @@
 
 ## 最新状況：2026-09-27
 
+**HSE/LCFOの追加制御はすべて`&functional`へ統一しました。**
+`SALMON_LCFO_RT_MLWF=1`などを設定する必要はありません。環境変数による
+アルゴリズム制御は削除し、`yn_hse_wannier='y'`をGS・LCFO RT共通の有効化にしました。
+LCFO RTでは併せて`yn_hse_lcfo_rt='y'`を指定します。
+ACE/U間隔、直接WF伝播、FFT、分散seed、診断出力もnamelistです。
+[設定一覧](docs/inputs/lcfo-rt-development.md)。OMP/MPI/BLASの標準実行環境設定は別です。
+旧測定記録中の環境変数名は当時の条件であり、現在の実行手順ではありません。
+
+
 | 項目 | 最新の状態 | 確認範囲 |
 |---|---|---|
-| 半径指定 | `&functional hse_lcfo_wf_radius`、常にbohr。0=全範囲、正値=固定半径、未指定=-1で旧環境変数にfallback | 小規模MPIで旧指定と電流・密度・エネルギー差0 |
+| 制御方法 | HSE/LCFOの追加設定をnamelistに統一。旧カスタム環境変数は読まない | 小規模MPIで旧バイナリと半径3/ACE4/U2の電流・エネルギー差0。旧環境変数混入の影響なし |
+| 半径指定 | `&functional hse_lcfo_wf_radius`、常にbohr。0=全範囲（既定）、正値=固定半径、負値は拒否。環境変数fallbackなし | 小規模MPIで旧指定と電流・密度・エネルギー差0 |
 | 99.9% Warning | 初期MLWFの各球内ノルム/全ノルムが0.999未満なら通知。自動半径変更・再規格化なし | 3 bohrの試験で最小0.9440599349375678、Warning発生。全範囲1、Warningなし |
 | 診断出力 | `lcfo_mlwf_radius.dat`に各WFの保持率とprotectedフラグ。protected WFは従来どおり切らない | 初期時点のみ。RT全時刻や電流精度を保証する指標ではない |
 | 不要処理の削減 | 全範囲時のWF再走査・追加MPI集計を削除。半径判定/二乗をループ外へ移し、非rootの保持率計算も省略 | OMP1/2/4、ビルド、Taylor4・フラグメント×軌道MPI・ACE/U再利用の回帰試験成功。速度/RSSの追加実測なし |
 | Si 3D入力 | 4³/6³/8³/10³のGS/RT、座標、Si擬ポテンシャル、設定・適用パッチ | 静的検証・アーカイブ展開後の再生成に成功。大規模ジョブ未投入 |
-| 富岳 | 累積seedメモリ版のコンパイル・リンク成功を利用者ログで確認 | `-Nalloc_assign`修正後、半径namelist、今回のループ整理の実機ビルド/数値は未確認 |
+| 富岳 | 累積seedメモリ版のコンパイル・リンク成功を利用者ログで確認 | `-Nalloc_assign`修正後、半径namelist、ループ整理、namelist統一の実機ビルド/数値は未確認 |
 
 Si入力はa=10.26 bohr、core16³、buffer各方向8点、RT dt=0.02、16step、
 半径9 bohr、ACE1/U1。原子数512/1728/4096/8000、MPI64/216/512/1000。
@@ -54,11 +64,12 @@ Si入力はa=10.26 bohr、core16³、buffer各方向8点、RT dt=0.02、16step�
 | 初期リンク削減前（利用者の4ファイルSHAと照合済み） | [累積メモリパッチ](tools/patches/gamma-memory-fugaku-verified.patch)。[before](tools/patches/gamma-memory-fugaku-before.sha256)→[after](tools/patches/gamma-memory-fugaku-after.sha256)を確認 |
 | allocatable代入の自動確保が無効 | [富岳設定](tools/patches/fugaku-alloc-assign.patch)。正確なオプションは`-Nalloc_assign`（アスタリスクなし） |
 | 累積メモリ版まで適用済み | [半径namelist](tools/patches/lcfo-radius-namelist.patch)。[before](tools/patches/lcfo-radius-before.sha256)→[after](tools/patches/lcfo-radius-after.sha256)を確認 |
-| 半径namelist適用済み（e6c54a87/6e07618d相当） | [今回のループ整理](tools/patches/lcfo-radius-loop-cleanup.patch) |
+| 半径namelist適用済み（e6c54a87/6e07618d相当） | [ループ整理](tools/patches/lcfo-radius-loop-cleanup.patch) |
+| ループ整理適用済み（3c4ff577/eb23bfea相当） | [namelist統一](tools/patches/lcfo-namelist-only.patch)。[before](tools/patches/lcfo-namelist-only-before.sha256)→[after](tools/patches/lcfo-namelist-only-after.sha256)を確認 |
 
 各差分はソース直下で`patch --batch --forward --fuzz=0 --dry-run -p1`に成功した場合だけ
 本適用します。失敗したら後続を実行しません。半径パッチのafter照合はループ整理を適用する
-**前**に行います（同じ2ファイルが次段で変わるため）。適用後はCMake再設定・再ビルド。
+**前**に行います（同じ2ファイルが次段で変わるため）。namelist統一はその後です。適用後はCMake再設定・再ビルド。
 古い`gamma-memory-from-pre-root.patch`や3枚の手順は、SHAで特定した富岳旧版には使用しません。
 
 [Si入力・再実行手順](docs/reports/si-3d-weak-scaling/README.md) ／
@@ -68,7 +79,7 @@ Si入力はa=10.26 bohr、core16³、buffer各方向8点、RT dt=0.02、16step�
 ## 半径namelistと初期保持率のWarning
 
 `e6c54a87`で`&functional hse_lcfo_wf_radius=9d0`を追加（常にbohr）。
-0は全範囲。明示したnamelist値が従来の環境変数より優先されます。
+0は全範囲（現在の既定値）。旧環境変数による指定は廃止しました。
 初期MLWFで球内ノルム/全ノルムが99.9%未満のWFがあればWarningを出し、
 `lcfo_mlwf_radius.dat`へ各WFの保持率を保存。半径は自動変更しません。
 小規模MPIでnamelist/旧指定の電流・密度・エネルギーが一致し、Warning分岐を検証。
@@ -107,7 +118,7 @@ make -j 8
 | MPI | LCFO RTはフラグメント×軌道の2段階MPI。1フラグメントあたり空間1ランク。DC-HSE GSの軌道MPI制約とは別 |
 | 分散処理 | 交換・ACEの局所基底行、必要なWF列のhalo通信。U輸送にはなお全占有軌道依存が残る |
 | 厳密な仕事量削減 | 必要なWF列・球内格子・厳密に非ゼロの基底ブロックだけ再構築。厳密ゼロの交換ペアFFTを省略 |
-| 直接WF係数Taylor4 | `SALMON_LCFO_RT_DIRECT_WF=1`で試験可能。係数を保持してTaylor多項式を蓄積し、受理時にWFへ回転。伝播範囲の切断はまだない |
+| 直接WF係数Taylor4 | `&functional yn_hse_lcfo_direct_wf='y'`で試験可能。係数を保持してTaylor多項式を蓄積し、受理時にWFへ回転。伝播範囲の切断はまだない |
 | 係数の直接受け渡し | ACE入力の再射影・出力の再構築・Taylor側の再射影を省略。予測・修正込み1ステップで24回の格子/基底行列積を削減 |
 
 実験的LCFO RTは**Gamma・非スピン分極・直交セル・完全占有の固定占有数**に限定。一般のk点RT、restart/checkpoint、フラグメント内の追加空間分割はこの経路で未対応です。通常SALMONやDC-SCFの対応範囲と混同しないでください。
@@ -120,7 +131,7 @@ make -j 8
 
 ## 最新：seed QRのMPI分散
 
-`133e8b37`で`SALMON_LCFO_SEED_DISTRIBUTED=1`を追加。ScaLAPACKのピボット付きQRを使い、係数を所有rankからQR所有rankへ直接転送します。rootに全体QR配列を置かず、snapshotも列ごとに保存。**既定値は0（従来経路）**で、MPI＋ScaLAPACKが必要です。
+`133e8b37`で分散seed QR（現在は`yn_hse_lcfo_seed_distributed='y'`）を追加。ScaLAPACKのピボット付きQRを使い、係数を所有rankからQR所有rankへ直接転送します。rootに全体QR配列を置かず、snapshotも列ごとに保存。**既定値は'n'（従来経路）**で、MPI＋ScaLAPACKが必要です。
 
 seed単独、合成複素係数・基底数=16×占有数、OMP/BLAS各1。各条件は独立プロセスで1回ずつ測定。rootのピークを分散する変更であり、全rank合計の削減率ではありません。
 
@@ -201,7 +212,7 @@ MPI2・占有512/基底8192のseed単独peak RSSは **root204.25→141.27 MiB（
 
 ## 交換FFTの計画最適化
 
-`2c996869`では `SALMON_LCFO_RT_FFT_MEASURE=1` でFFTの実測計画を選択可能。初回に専用scratchで計画を作り、反復中は再利用。物理近似は追加していません。既定0（ESTIMATE）を維持します。
+`2c996869`では `yn_hse_lcfo_fft_measure='y'` でFFTの実測計画を選択可能。初回に専用scratchで計画を作り、反復中は再利用。物理近似は追加していません。既定0（ESTIMATE）を維持します。
 
 | 系 | 通常→実測計画 RT秒 | 速度比 | 最大電流差 a.u. |
 |---|---:|---:|---:|

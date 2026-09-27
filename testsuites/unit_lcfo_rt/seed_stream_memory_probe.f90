@@ -17,9 +17,10 @@ program seed_stream_memory_probe
  integer(c_int64_t),allocatable :: peaks(:)
  complex(8),allocatable :: local(:,:),full(:,:),u(:,:),gram(:,:)
  real(8) :: error,started,seed_seconds
- character(32) :: mode,arg
+ character(32) :: mode,arg,backend
  call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
  call get_command_argument(1,mode);call get_command_argument(2,arg);read(arg,*) n
+ call get_command_argument(3,backend)
  nb=16*n;allocate(counts(np),peaks(np));counts=nb/np;counts(np)=nb-sum(counts(:np-1))
  lo=sum(counts(:rank));allocate(local(counts(rank+1),n),u(n,n));u=0d0
  do j=1,n;do i=1,size(local,1)
@@ -37,7 +38,7 @@ program seed_stream_memory_probe
   endif
   deallocate(full)
  case('streamed')
-  call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status,snapshot_unit=iu)
+  call lcfo_seed_gamma(local,counts,MPI_COMM_WORLD,u,status,snapshot_unit=iu,distributed=backend=='distributed')
  case default
   stop 2
  end select

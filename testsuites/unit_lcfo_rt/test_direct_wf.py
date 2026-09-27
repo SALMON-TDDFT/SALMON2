@@ -27,18 +27,24 @@ env = dict(os.environ, OMP_NUM_THREADS=str(args.omp), OPENBLAS_NUM_THREADS="1", 
 env.pop("SALMON_LCFO_RT", None)
 command = [args.mpirun, "-np", "2", str(args.binary.resolve())]
 
-def run(name, text, rt=False, reject=False, extra_env=None, orbital_groups=1):
+def run(name, text, rt=False, reject=False, controls=None, orbital_groups=1):
     folder = root / name
     folder.mkdir()
-    (folder / "inputfile").write_text(text)
     shutil.copy(args.pseudo, folder / "H_rps.dat")
     if rt:
         (folder / "data_dcdft").symlink_to(root / "gs/data_dcdft", target_is_directory=True)
     local_env = dict(env)
+    settings = dict(controls or {})
     if rt:
-        local_env["SALMON_LCFO_RT"] = "1"
-        local_env["SALMON_LCFO_RT_CONTINUITY"] = "1"
-    local_env.update(extra_env or {})
+        settings.update(yn_hse_lcfo_rt='y', yn_hse_lcfo_continuity='y')
+    entries=[]
+    for key,value in settings.items():
+        if key.startswith('yn_'):
+            value={'1':'y','0':'n'}.get(value,value)
+            value="'"+value+"'"
+        entries.append(key+'='+value)
+    text=text.replace('&functional', '&functional\n '+ '\n '.join(entries))
+    (folder / "inputfile").write_text(text)
     local_command=command.copy();local_command[2]=str(2*orbital_groups)
     with (folder / "inputfile").open("rb") as inp, (folder / "run.log").open("wb") as log:
         status = subprocess.run(local_command, cwd=folder, env=local_env, stdin=inp,
@@ -106,7 +112,7 @@ print(json.dumps(dict(work=str(root), steps=4, half_dt_current_error=current_err
                       post_impulse_energy_width=energy_width, restart_guard="passed"), indent=2))
 
 mlwf_input = rt.replace("xc='hse06'", "xc='hse06'\n hse_mlwf_maxiter=200")
-mlwf = run("rt_mlwf_full", mlwf_input, rt=True, extra_env={"SALMON_LCFO_RT_MLWF": "1"})
+mlwf = run("rt_mlwf_full", mlwf_input, rt=True, controls={"yn_hse_wannier": "1"})
 assert "LCFO MLWF initial" in (mlwf / "run.log").read_text(), "MLWF path was not used"
 assert "LCFO MLWF reuse" in (mlwf / "run.log").read_text(), "U was not reused"
 mlwf_rows = rows(mlwf / "H_dc_hse_rt.data")
@@ -114,8 +120,8 @@ full_error = max(abs(x-y) for ra, rb in zip(a,mlwf_rows) for x,y in zip(ra,rb))
 assert full_error < 1e-10, full_error
 
 pt_input=mlwf_input
-pt_env={'SALMON_LCFO_RT_MLWF':'1','SALMON_LCFO_RT_DIRECT_WF':'1'}
-pt=run('direct_wf',pt_input,rt=True,extra_env=pt_env)
+pt_env={'yn_hse_wannier':'1','yn_hse_lcfo_direct_wf':'1'}
+pt=run('direct_wf',pt_input,rt=True,controls=pt_env)
 log=(pt/'run.log').read_text()
 assert 'LCFO direct WF coefficient Taylor4' in log
 assert log.count('LCFO direct WF accepted Gram error:')==5, 'initial and four accepted frames required'
@@ -123,7 +129,7 @@ assert log.count('LCFO HSE ACE build')==(mlwf/'run.log').read_text().count('LCFO
 ptrows=rows(pt/'H_dc_hse_rt.data');assert len(ptrows)==4
 error=max(abs(x[j]-y[j]) for x,y in zip(ptrows,mlwf_rows) for j in (13,14,15))
 assert error<1e-11,error
-split=run('direct_wf_orbital2',pt_input.replace('nproc_ob=1','nproc_ob=2'),rt=True,extra_env=pt_env,orbital_groups=2)
+split=run('direct_wf_orbital2',pt_input.replace('nproc_ob=1','nproc_ob=2'),rt=True,controls=pt_env,orbital_groups=2)
 splitrows=rows(split/'H_dc_hse_rt.data');assert len(splitrows)==4
 spliterror=max(abs(x[j]-y[j]) for x,y in zip(ptrows,splitrows) for j in (13,14,15))
 assert spliterror<1e-11,spliterror
@@ -141,43 +147,50 @@ def compare_density_energy(a,b,step):
     print(json.dumps({'direct_case':a.name,'max_density_difference':density_error,'max_energy_difference':energy_error}))
 compare_density_energy(pt,mlwf,4)
 compare_density_energy(split,pt,4)
-for label,extra in [('r3',{'SALMON_LCFO_RT_RADIUS':'3'}),
-                    ('r3_ace4_u2',{'SALMON_LCFO_RT_RADIUS':'3','SALMON_LCFO_RT_ACE_INTERVAL':'4','SALMON_LCFO_RT_U_INTERVAL':'2'})]:
-    baseline_env={'SALMON_LCFO_RT_MLWF':'1',**extra}
-    base=run('baseline_'+label,mlwf_input,rt=True,extra_env=baseline_env)
-    direct=run('direct_'+label,pt_input,rt=True,extra_env={**baseline_env,'SALMON_LCFO_RT_DIRECT_WF':'1'})
+for label,extra in [('r3',{'hse_lcfo_wf_radius':'3'}),
+                    ('r3_ace4_u2',{'hse_lcfo_wf_radius':'3','hse_lcfo_ace_interval':'4','hse_lcfo_u_interval':'2'})]:
+    baseline_env={'yn_hse_wannier':'1',**extra}
+    base=run('baseline_'+label,mlwf_input,rt=True,controls=baseline_env)
+    direct=run('direct_'+label,pt_input,rt=True,controls={**baseline_env,'yn_hse_lcfo_direct_wf':'1'})
     aa,bb=rows(base/'H_dc_hse_rt.data'),rows(direct/'H_dc_hse_rt.data');assert len(aa)==len(bb)==4
     err=max(abs(x[j]-y[j]) for x,y in zip(aa,bb) for j in (13,14,15));assert err<1e-11,err
     compare_density_energy(direct,base,4)
     assert (direct/'run.log').read_text().count('LCFO HSE ACE build')==(base/'run.log').read_text().count('LCFO HSE ACE build')
     print(json.dumps({'direct_case':label,'current_difference':err}))
-ptfine=run('direct_half_dt',pt_input.replace('nt=4','nt=8').replace('dt=0.02d0','dt=0.01d0'),rt=True,extra_env=pt_env)
+ptfine=run('direct_half_dt',pt_input.replace('nt=4','nt=8').replace('dt=0.02d0','dt=0.01d0'),rt=True,controls=pt_env)
 fr=rows(ptfine/'H_dc_hse_rt.data');assert len(fr)==8
 assert max(abs(fr[-1][j]-ptrows[-1][j]) for j in (13,14,15))<1e-10
 run('reject_direct_without_mlwf',pt_input,rt=True,reject='LCFO MLWF: invalid radius or U interval',
-    extra_env={'SALMON_LCFO_RT_DIRECT_WF':'1','SALMON_LCFO_RT_MLWF':'0'})
-run('reject_direct_flag',pt_input,rt=True,reject='LCFO direct WF: flag must be 0 or 1',
-    extra_env={'SALMON_LCFO_RT_DIRECT_WF':'bad'})
+    controls={'yn_hse_lcfo_direct_wf':'1','yn_hse_wannier':'0'})
+run('reject_direct_flag',pt_input,rt=True,reject="Bad input: yn_* option only accepts",
+    controls={'yn_hse_lcfo_direct_wf':'bad'})
 for groups in (1,2):
     measured=run('direct_measured_'+str(groups),pt_input.replace('nproc_ob=1',f'nproc_ob={groups}'),
-                 rt=True,extra_env={**pt_env,'SALMON_LCFO_RT_FFT_MEASURE':'1'},orbital_groups=groups)
+                 rt=True,controls={**pt_env,'yn_hse_lcfo_fft_measure':'1'},orbital_groups=groups)
     measured_rows=rows(measured/'H_dc_hse_rt.data')
     err=max(abs(x[j]-y[j]) for x,y in zip(ptrows,measured_rows) for j in (13,14,15))
     assert err<1e-11,err
     assert 'LCFO HSE FFT measured planning:  1' in (measured/'run.log').read_text()
     compare_density_energy(measured,pt,4)
-for flag in ('2','bad','1 trailing','12345678901234567'):
+for flag in ('2','bad'):
     run('reject_measure_'+flag.replace(' ','_'),pt_input,rt=True,
-        reject='LCFO HSE: FFT measure must be 0 or 1',
-        extra_env={**pt_env,'SALMON_LCFO_RT_FFT_MEASURE':flag})
+        reject="Bad input: yn_* option only accepts",
+        controls={**pt_env,'yn_hse_lcfo_fft_measure':flag})
+distributed=run('direct_distributed_seed',pt_input,rt=True,
+                controls={**pt_env,'yn_hse_lcfo_seed_distributed':'y'})
+assert 'LCFO seed: distributed pivoted QR' in (distributed/'run.log').read_text()
+distrows=rows(distributed/'H_dc_hse_rt.data')
+assert max(abs(x[j]-y[j]) for x,y in zip(distrows,ptrows) for j in (13,14,15))<1e-11
+compare_density_energy(distributed,pt,4)
 print('Direct coefficient Taylor4 regression passed')
 
-# Explicit radius namelist takes precedence over an inherited legacy environment.
+# Removed legacy environment variables cannot override the namelist.
 for radius,legacy,reference in ((3,'1',root/'direct_r3'),(0,'3',pt)):
     text=pt_input.replace("xc='hse06'",f"xc='hse06'\n hse_lcfo_wf_radius={radius}d0")
+    env['SALMON_LCFO_RT_RADIUS']=legacy
+    env['SALMON_LCFO_RT_MLWF']='0'
     named=run('named_radius_'+str(radius),text,rt=True,
-              extra_env={**pt_env,'SALMON_LCFO_RT_RADIUS':legacy})
-    assert 'SALMON_LCFO_RT_RADIUS ignored' in (named/'run.log').read_text()
+              controls=pt_env)
     aa,bb=rows(named/'H_dc_hse_rt.data'),rows(reference/'H_dc_hse_rt.data')
     err=max(abs(x[j]-y[j]) for x,y in zip(aa,bb) for j in (13,14,15));assert err<1e-11,err
     compare_density_energy(named,reference,4)
@@ -191,5 +204,5 @@ for radius,legacy,reference in ((3,'1',root/'direct_r3'),(0,'3',pt)):
         assert warning in (named/'run.log').read_text()
     print(json.dumps({'namelist_radius':radius,'current_difference':err,'minimum_sphere_fraction':min(x[3] for x in report)}))
 run('reject_named_radius',pt_input.replace("xc='hse06'","xc='hse06'\n hse_lcfo_wf_radius=-2d0"),rt=True,
-    reject='HSE: hse_lcfo_wf_radius',extra_env=pt_env)
-print('Radius namelist precedence, full support, warning and validation passed')
+    reject='HSE: hse_lcfo_wf_radius',controls=pt_env)
+print('Namelist-only radius, full support, warning and validation passed')
