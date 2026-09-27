@@ -1,5 +1,10 @@
 # SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience
 
+> **DC-HSE / MLWF / ACE 開発ノート（2026-09-27）**
+> [実装状況・精度と速度・Diamond 32/64/128弱スケーリング・再実行入力](DEVELOPMENT_NOTES.md)
+> 対象：`dc-hse-mlwf-ace` ブランチ。実験的LCFO RTの制約と未実装事項を含みます。
+
+
 SALMON is an open-source software based on first-principles time-dependent density functional theory
 to describe optical responses and electron dynamics in matters induced by light electromagnetic fields.
 

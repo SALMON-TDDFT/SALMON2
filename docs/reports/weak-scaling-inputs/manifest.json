@@ -1,0 +1,49 @@
+{
+  "temporary_root": "<local>/diamond-32-64-128-ok515djh",
+  "date": "2026-09-27T08:24:18.394308",
+  "commit": "88385397",
+  "binary_sha256": "6924b73a186af63cfffb150c92765d357dd376c853216e5192783859033a02eb",
+  "atoms": [
+    32,
+    64,
+    128
+  ],
+  "ranks": [
+    4,
+    8,
+    16
+  ],
+  "core_mesh": [
+    16,
+    16,
+    16
+  ],
+  "buffer_mesh": [
+    8,
+    0,
+    0
+  ],
+  "dt": 0.02,
+  "nt": 16,
+  "radius_bohr": 6,
+  "ACE_interval": 1,
+  "U_interval": 1,
+  "direct_wf": 1,
+  "OMP": 1,
+  "BLAS": 1,
+  "repetitions": 1,
+  "files": {
+    "c32-gs/inputfile": "f8a11c9752d4dfb0b4ec7514c777f82e89ab8f6fdffb21ebf447a3b38275feba",
+    "c32-gs/atom.dat": "321141eac5ae4b7bb8722042f5c9067b308df7b66a5d7b6f3ee10d30eb89d965",
+    "c32-gs/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+    "c32-input/inputfile": "28323eed7a3948e4bed72b69f7526e65405410a4f9f00ccfa05f97d77e2130dc",
+    "c32-input/atom.dat": "321141eac5ae4b7bb8722042f5c9067b308df7b66a5d7b6f3ee10d30eb89d965",
+    "c32-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+    "c64-input/inputfile": "bd86e8ba5183d543200f908229d08e7b5e07dc6362f0891d4cc9ca4314458542",
+    "c64-input/atom.dat": "a60281c107107053737fd9e81b893800a3034383eb917389a6e60f6a3ec62798",
+    "c64-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+    "c128-input/inputfile": "11cf4851996f9c559f53600bfa6a61d569a6f671a6fe4dab66fab24a6245f32d",
+    "c128-input/atom.dat": "15a367141899b3e740447568b998c74852eeeddf30bc51fa00ed1858fb967082",
+    "c128-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1"
+  }
+}

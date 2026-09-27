@@ -1,0 +1,1765 @@
+{
+  "protocol": {
+    "temporary_root": "<local>/salmon-uanchor-m0zkzqtx",
+    "date": "2026-09-26T22:44:22.532974",
+    "before_commit": "eb13fdc6 plus anchored U cadence",
+    "after_commit": "same binary anchored U intervals 1/2/4",
+    "cpu_binding_supported": false,
+    "logical_cpus": 18,
+    "ranks": [
+      8,
+      16
+    ],
+    "threads": 1,
+    "nt": 16,
+    "dt": 0.02,
+    "radius": 6,
+    "ACE_interval": 1,
+    "repetitions": 1,
+    "schedule": [
+      [
+        64,
+        "before",
+        1
+      ],
+      [
+        64,
+        "u2",
+        1
+      ],
+      [
+        64,
+        "u4",
+        1
+      ],
+      [
+        128,
+        "u4",
+        1
+      ],
+      [
+        128,
+        "u2",
+        1
+      ],
+      [
+        128,
+        "before",
+        1
+      ]
+    ],
+    "files": {
+      "bin/before": "f707e6b823bbcc75fbc5aa728396179e049ea4a951afa448b5921cec257595e1",
+      "bin/after": "f87420bde09581d9ad18d148e02e5a2adc1562b54b5675026aa95c1c003d9d31",
+      "c64-input/inputfile": "bd86e8ba5183d543200f908229d08e7b5e07dc6362f0891d4cc9ca4314458542",
+      "c64-input/atom.dat": "a60281c107107053737fd9e81b893800a3034383eb917389a6e60f6a3ec62798",
+      "c64-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c64-input/data_dcdft/total/PS_C_KY_n.dat": "7b6ca7d2f7b514c1116d45aec608be2939dd6e0f76e513248df2daa3615bf38b",
+      "c64-input/data_dcdft/total/diamond64_hse_lcfo_complex_eigen.data": "b6bbf3ec409eeaddc65e2686305745738d6f1028e2a702f9d7df45267d60ad32",
+      "c64-input/data_dcdft/fragments/000005/basis_functions.bin": "fad97f4db1b964f8d0d78de3e287a2a72273bcbb7b3660a81a20501f17cc6948",
+      "c64-input/data_dcdft/fragments/000005/wavefunctions.bin": "96b520c05a9d5011f8bfa2bb30391bf8b5e92eafba98604d7b00b28e4cf4cb51",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_eigen.data": "1815f8a4ff0be6dbdb3cc0862281a02b16e6b1ff5e5656793d7ac1afe483d9d1",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000005/hamiltonian_local.bin": "be4880af7318f4388e35fcab2a40c79259523bfcbdc2b24ed31880079107bf44",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000005/rgrid_index.bin": "d9bbb85a2eb6ed1d88af2da0e6bde15bf67e67a3cc72ad2ae6b854ce944d1859",
+      "c64-input/data_dcdft/fragments/000002/basis_functions.bin": "5e08204a6f59ef943b70ed51aed67b02f42125d943eac57bd52dddc8a303aa2b",
+      "c64-input/data_dcdft/fragments/000002/wavefunctions.bin": "f2e2a0128f3b6f888b3a9785bea9234bf362187299160f2d8d2c41acb4e47b4e",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_eigen.data": "c9710ff40bab6d1825c56c39f707534420e45776366a279b3d9e0b572d37bae6",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000002/hamiltonian_local.bin": "f2946a499b30406d32887cba74be9c3e88de11b5ffac503cf4f2382b7f4d1a1d",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000002/rgrid_index.bin": "0d191270b22f60452a4a503952e23b094e8f16e6bdc4dcb29f548b61f8207ba9",
+      "c64-input/data_dcdft/fragments/000003/basis_functions.bin": "1f5ae55c90d6db8a0d537961f06d7daaf5d952bbdd705babb28136f33344b0e9",
+      "c64-input/data_dcdft/fragments/000003/wavefunctions.bin": "e10af6a9d315f295290c1b64ffd9b0b9a2504f3511d616868d179487e0f43442",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_eigen.data": "f6633a759e1e54f864fedd8035520a48211f3eec99760a03ea01f3833f3dbb1c",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000003/hamiltonian_local.bin": "ff1898328df0af60cac261644047ecba06c1c3408be48b555c19ec784754a85b",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000003/rgrid_index.bin": "49b18a6dd06c2c4103052b7e7a9c8e5692fca614bb74e69fe15b1d5b73298078",
+      "c64-input/data_dcdft/fragments/000004/basis_functions.bin": "09df12dbc7f5361a9540d756dff4f8bf3095226afd1481352a063ae2815f2beb",
+      "c64-input/data_dcdft/fragments/000004/wavefunctions.bin": "5e22f8ca39aaff4060d22cadb92c28dd0793cb0da7c2f2f51a232201b718d6b1",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_eigen.data": "77dabb0b0067bdbcda3dc92ee31b5d13d2cacf1eeded043ca13a68abb837f5b7",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000004/hamiltonian_local.bin": "4900d4da4ef2ec5e3f75ebfe15e53b6dac83f015598b078701f1aeaeede0e8f3",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000004/rgrid_index.bin": "1003aec533f67aff0f14580a7ac7316762dc235aabe489065059edabb8373e15",
+      "c64-input/data_dcdft/fragments/000008/basis_functions.bin": "ddd695162a998e89ee09567a953cf42ae5acb82562fd62be38c4d5ab92b32982",
+      "c64-input/data_dcdft/fragments/000008/wavefunctions.bin": "f800308728830cf612d28ea7636c1d95e88430cc342f3c67de586f73b09086ef",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_eigen.data": "e5ec1b6fbad2091c9d06d1842f297970a79d0b58cf33dfd920d2372398277706",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000008/hamiltonian_local.bin": "664260bb66ea43a07e556e115d65dba81c1fbae3c2990040cc6452463427436d",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000008/rgrid_index.bin": "41700c5546676d62bdf758ce2da0b647e87339cbec6cfee381b22e660c100b4b",
+      "c64-input/data_dcdft/fragments/000001/basis_functions.bin": "8c3973abd39c469ae527f9354ff30ba4adafab531b4739d5894e8373e959e733",
+      "c64-input/data_dcdft/fragments/000001/wavefunctions.bin": "ae8f4ff3e4a840002f641a87565433a6afa69a48775f51b72ad2ccbff32ab5f6",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_eigen.data": "63f8abeb2fa9c30a5baba2883969f55192e17c90fa4febbc6ca767e776767316",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000001/hamiltonian_local.bin": "d183e286f5d62100b4bad877d9fcf68f187d3d5955fd66002cd27b229dc68542",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000001/rgrid_index.bin": "1af0c06fb128398ad29163628392c87811c6f3999ed90260b2cdb246197d164e",
+      "c64-input/data_dcdft/fragments/000006/basis_functions.bin": "1c0621bed2eff56017137393de1c55ea60346fa6e5a8865e8a9bdd871251b5f2",
+      "c64-input/data_dcdft/fragments/000006/wavefunctions.bin": "8cb1d11cd316377b714c8d8cb8e6241faa2d7fa1f8cca22d2254e31b742194c9",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_eigen.data": "63723848a3e884a436d63e13a4c72579a77d1c89d92de385b3ce2ea6eca8f907",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000006/hamiltonian_local.bin": "5b5f65c03bf14537a43f0c299c25a6160c3963ca0dac3cb768dd16b21bd06bd9",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000006/rgrid_index.bin": "83db059723f02e2121986577146f9e648749a80cbbc65bfc83646a76d30fa0de",
+      "c64-input/data_dcdft/fragments/000007/basis_functions.bin": "4809d3f8f4ba618d3c79bc2e6edf65e371fb765e8d56339742573cfb83f566da",
+      "c64-input/data_dcdft/fragments/000007/wavefunctions.bin": "5c39dcafe1cb05b750c0d73a2f78ed7d2e28e552bb91cc3ed34fe20f40dc4807",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_eigen.data": "973d620ba06c5b37a8493a3ae4b3b400a34ebb7d955b4176686daedf2f81cd43",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000007/hamiltonian_local.bin": "f5ea193b1a4fbe10157844f16ddba1265f96ff83552260adcd4f99205814bfd3",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000007/rgrid_index.bin": "3654f434a5aa9c54986e264bdd62a60a341696605670b6cfdd622ba4197fec94",
+      "c128-input/inputfile": "11cf4851996f9c559f53600bfa6a61d569a6f671a6fe4dab66fab24a6245f32d",
+      "c128-input/atom.dat": "15a367141899b3e740447568b998c74852eeeddf30bc51fa00ed1858fb967082",
+      "c128-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c128-input/data_dcdft/total/PS_C_KY_n.dat": "7b6ca7d2f7b514c1116d45aec608be2939dd6e0f76e513248df2daa3615bf38b",
+      "c128-input/data_dcdft/total/diamond128_hse_lcfo_complex_eigen.data": "c20d98cf43df12fcf34c6ca232077b0702bbc0606938830ee03e982618af95d5",
+      "c128-input/data_dcdft/fragments/000005/basis_functions.bin": "d0682a3de02efad686c67425ca617d9a56a63bf144206081397f92ed9ee2034b",
+      "c128-input/data_dcdft/fragments/000005/wavefunctions.bin": "0dc730ff6d2912922ed05954b73ed5a9397266002dd10dff9fce50346c2686a2",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_eigen.data": "ae70e73aebd31af0cb28a9f3f07b82b5cdab5ed9f7043d161b4025e5c2823d3f",
+      "c128-input/data_dcdft/fragments/000005/hamiltonian_local.bin": "f6113010ad1684225a84a8b3ae90202a900f001f928385d29f734f2ed8e605f8",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000005/rgrid_index.bin": "2168e8efbcda21f35f20774d4927d64cbe8cb6399ff85f4b9f158baad2efd27b",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000002/basis_functions.bin": "0997d09f46ff28b75bccb495d4bb2b9a397b607c21bb47b0d2f31e50be238243",
+      "c128-input/data_dcdft/fragments/000002/wavefunctions.bin": "0e2f01bd1b2a74729a88587974f2bf5412948b98b4190c07f8f0370048ee2875",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_eigen.data": "7473edb9124bd541054df6acf18b464aa6f7218bf9ecadb277617c2c99af7814",
+      "c128-input/data_dcdft/fragments/000002/hamiltonian_local.bin": "06d666bfb5a29a44f2d035f42ff846f9c2b8f64e7a5e6aaa3912fec6cf97d5c2",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000002/rgrid_index.bin": "d596cb7c7a148e13a0ffa0d2c3a2eaafab172405bcf9d6bd5d3ea123ec6b615f",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000003/basis_functions.bin": "744490a6a5dd5b9e2ac06d7bb25e1f49a37d3a851e72b2abbf408fa3339f108b",
+      "c128-input/data_dcdft/fragments/000003/wavefunctions.bin": "d81240932691f495d35e8803b8a29c3b2b78f989aa49e6a4ab631f12cda8d84f",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_eigen.data": "a569938b5a0f84cf8cd310e19876b4be5714af8955c6eb10efc743836d9a46e4",
+      "c128-input/data_dcdft/fragments/000003/hamiltonian_local.bin": "ddb9375b414517bf185dae83355644a47a2a1b186778d5a3434080419b8a5529",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000003/rgrid_index.bin": "fba45554a8329a3a5a82a4d9bde88e2574a837ec41f7cc89e0bc78cfaa3fdd63",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000004/basis_functions.bin": "50f8f420b9d1463a0cdc900be5cf932006cdee4bc3314e13d0c352ff14746c7f",
+      "c128-input/data_dcdft/fragments/000004/wavefunctions.bin": "a7da4478a42d7bd7dcb8ea5ee5c533ccee9d6830c693519a43faaab0b0730889",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_eigen.data": "de0394e6c83ca451770f484a964622a0c422c9261d597a3d221062e71a7e1c27",
+      "c128-input/data_dcdft/fragments/000004/hamiltonian_local.bin": "3b8bc009036f2a33736ed738c14a61ef0f0e1a71352c65ae83f1c2d0fe66ba6b",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000004/rgrid_index.bin": "e497b6d28e04fe38c1093853383ad4b4277542883c2147b18038cafc6e3e726a",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000010/basis_functions.bin": "8a1fd29aa50ee48c93bea2fd25b7efb0a81846be49d7721c56990d614189d65a",
+      "c128-input/data_dcdft/fragments/000010/wavefunctions.bin": "2458841a0235a22f78071d814257ce18623d8c30f2e516d2b92761950a74c864",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_eigen.data": "b1b2e8d573cd83a11116e694e479501120da21d474070f99217db03a9e6ff973",
+      "c128-input/data_dcdft/fragments/000010/hamiltonian_local.bin": "f1b79fda8c482dec7892838a99952d91acc675280b6a5812f76635c088a7ef6b",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000010/rgrid_index.bin": "967f1842305109e080a6ac9b9264e1b659488c459993a14c8f6775c548bf7862",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000011/basis_functions.bin": "ee615b11f7995c08c79feee94eaff106936b53f07aa2ce640e2b8815a5abe591",
+      "c128-input/data_dcdft/fragments/000011/wavefunctions.bin": "062d6be7179eb5eab818f21a6cea7f1ca04c809d62ea6354b8e4104e8d54e638",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_eigen.data": "641a1454ef65b258dfa97f24df02b0c13e2db6b71ff62b25848b22375b8bf18a",
+      "c128-input/data_dcdft/fragments/000011/hamiltonian_local.bin": "2d06dcf7a47955e8bc01b75cd5fb1b282af465e9a5900b0b16e319a6e4c6dff9",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000011/rgrid_index.bin": "44cb9ef4b3c2d377799e21beb76f3d053801f0a020b0da8facfc96a5ec8fd338",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000016/basis_functions.bin": "06e0981df9dfc53fdc963dbdbf119648519791a8a8180cc45f7d1f03e3a50ab7",
+      "c128-input/data_dcdft/fragments/000016/wavefunctions.bin": "de15d8cf4dc7c45d8f3aa34d287fc12664fe8e5c1f3c798641ffaf96a6991201",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_eigen.data": "a9b98b3f29951172826b5f0dea7267650f25dc9db3985d016c4c578fa6d97039",
+      "c128-input/data_dcdft/fragments/000016/hamiltonian_local.bin": "861dc3d30cdad38bcffdd3bbb4c7841109af0bc580bcdc4e264b54d68d18b221",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000016/rgrid_index.bin": "60f5f70ea45199e6cfe8f2b265a2220136226cae803ee57f85e59b6136d70c2d",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000008/basis_functions.bin": "b3039703ef533a93d0e1d6d1a894f23b81f75e0e418251e630ad4483d6e10a0f",
+      "c128-input/data_dcdft/fragments/000008/wavefunctions.bin": "74deba0cec85a29154d4fd61831538c4668157387ad1dba4ebcff8802394736a",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_eigen.data": "9cd9584cc995a1af7355767168c6792be94fe0545f29d0f1a06d49de8e0313a8",
+      "c128-input/data_dcdft/fragments/000008/hamiltonian_local.bin": "8feaaeeef7075316ff9abb83b41a2f86d65b13a64fa906bc5078ab07e121bf5e",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000008/rgrid_index.bin": "c85649bac5a54b733cbad419540df6c968c96e7a3b21327c53840078aacb3cc2",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000001/basis_functions.bin": "c9af88c13d7dcac61bf1ab1424e14aa95952e64e47be27ff88fb91f36c7ea02b",
+      "c128-input/data_dcdft/fragments/000001/wavefunctions.bin": "07276cedd2d2a15f8e0011316150d958223c067d9b701632037b6cda2d7c77d9",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_eigen.data": "3e5d1487ee25105377d0f0c88b6a5caee212084ae88cbd5f4941c1cc6259cd23",
+      "c128-input/data_dcdft/fragments/000001/hamiltonian_local.bin": "dc3580dd9885939005e47d36f3678c283938f4013eba1c0c085f8ee60dc22a6d",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000001/rgrid_index.bin": "88039c4d9cc924b1f6405b6f52401ccdacd6d700ac4f3cd6e4b3e505b4f8dfd7",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000006/basis_functions.bin": "127821c0dbdc09bb105613fc2bd41ca44c8e05f16621c1f5db280352a0fa1d3d",
+      "c128-input/data_dcdft/fragments/000006/wavefunctions.bin": "1a6ac7bbcc14a731566297c60e7a63ceb5bcbfad27ebb12b19ff2d7ef38e83ff",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_eigen.data": "3d570ac8e2f0aba4eedf1cbcdce5c10fb3e5e565c1de5e68385414a3d7bd2278",
+      "c128-input/data_dcdft/fragments/000006/hamiltonian_local.bin": "e73f4119eeb36928dccc9e60c6ea31715042f0c235a6c8cb6ef1b53b99b2f1da",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000006/rgrid_index.bin": "bfd38871466b66e7b3282ea1b2b49b726f8f88bf56d25156e21ba7dea2d94957",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000007/basis_functions.bin": "5c5607571da5f26ccb75fafced4b96249d15e1d8929bb53d31970b65eeea0ae6",
+      "c128-input/data_dcdft/fragments/000007/wavefunctions.bin": "e71d09c6a27cc1427db6952626862efadd2c57fb313890b46982295d8d62efc7",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_eigen.data": "d3a28061915af8c10d8f6c081541119f84e53861405faa48ca68917fecd12d3c",
+      "c128-input/data_dcdft/fragments/000007/hamiltonian_local.bin": "3b550edfff120e4dc7441dcb4295342fcf480a55e41ffe516e151bd466e7cf7e",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000007/rgrid_index.bin": "f5a550113c99c81b942d19ddf3123a225550566f9e5409138633b07a3c1e3a5e",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000009/basis_functions.bin": "d6e121af0ec34bdf75b672f00bf48769f797b1f15dec43c6ed67c1a41ef96a87",
+      "c128-input/data_dcdft/fragments/000009/wavefunctions.bin": "95b060f94ceb900c20d60ead079c1787dd10c89474bcdeabdf34dd5e561d9083",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_eigen.data": "d45fd1e172c9e1b952aad69816175c4aa240c5b964a6e6a60f573714c11c88ac",
+      "c128-input/data_dcdft/fragments/000009/hamiltonian_local.bin": "e7a33b430e5cfe74aae1102f8171a744dee273e23f7ad18f5b76ac022ffa8631",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000009/rgrid_index.bin": "18bedd3c0abdc62cbbcde6870b98c6accc8a0bf70cdfdc6a72800555eb6581a4",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000013/basis_functions.bin": "e172237b663a3ed0f52cccdc60be79dc1a6fd49aaadbe9fed3aea6bb78f16cdc",
+      "c128-input/data_dcdft/fragments/000013/wavefunctions.bin": "886086f70a2652e0e5be689c88d7c54101c3f598fee120b318852cd625cd0169",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_eigen.data": "abcb097a63683bc6094f0f146ac7a16ca66f5971377c06ee1e7e4701d3ca6040",
+      "c128-input/data_dcdft/fragments/000013/hamiltonian_local.bin": "f82028dac831ba334cdbbed0bf7a28fa6803fdb9ade38723a62ad810c7bfff0c",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000013/rgrid_index.bin": "6ca0fe7511f478ec2eb0be9e9476aec10b43561078836b2ef1afa0e4ce6fcd22",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000014/basis_functions.bin": "4e925b0db44a36a08c5d1a2efe45b674fd4cb5bdc43115878fa0f934c1ff02f5",
+      "c128-input/data_dcdft/fragments/000014/wavefunctions.bin": "e38ba2fa7349880b79b52bae10d55d637e2fdf1f3ca42303b9d46906f917f721",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_eigen.data": "21e5f7d605afa24eff500906005266bb1faeb144a5af1b6b43b9a1f757997349",
+      "c128-input/data_dcdft/fragments/000014/hamiltonian_local.bin": "a3faa53cafdb93416dc4514adc2b25310180260da79372dd5ee8683548d04378",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000014/rgrid_index.bin": "cdb00f025b570811c9ab87ba7fb8430df2313b7eeaa522050df4ab3d7a5d237a",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000015/basis_functions.bin": "bb3e18c2acddf23861f5a41910572faae01977d2e5ca4659da58884b1434c80c",
+      "c128-input/data_dcdft/fragments/000015/wavefunctions.bin": "c3de467968f6f3a6ca04e9a8cbe6dd2e2392ab818b4b8a5b535c40eb9416fdfb",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_eigen.data": "6f0ec1433daf9b40acddfadc4bea49843a9c049da939e330b49c03d5074ba03d",
+      "c128-input/data_dcdft/fragments/000015/hamiltonian_local.bin": "1e0dc302fb0f955c2fb05ac53a413066e8d23d18683c398c55a858c2b68539fa",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000015/rgrid_index.bin": "6dbe53fe74630ef611182b7f043d881ee11ff7276cb7a30b25f2a2321688ab0f",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000012/basis_functions.bin": "0dcaeb5aba2c5548fcb53369e8171f5ee78742b88363c584be8e45aa12440443",
+      "c128-input/data_dcdft/fragments/000012/wavefunctions.bin": "3e6147e924a24ddb0571f481fa425945a95c8de36177d338f5ac7337b2cea5c0",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_eigen.data": "01df6074dbd433a4b56e5467872927395be7fdeafba49a0b8da2e2e305474900",
+      "c128-input/data_dcdft/fragments/000012/hamiltonian_local.bin": "d26e853b3ae9546de9f5d5d17ee44615bc35a1ed93bef00d08b486d801ddf2c2",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000012/rgrid_index.bin": "13132a033fcf6ee27b1eb4d90e889c5801c3c6ebf10d34f3e805bfbbaa4ead24",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "bin/u2": "f707e6b823bbcc75fbc5aa728396179e049ea4a951afa448b5921cec257595e1",
+      "bin/u4": "f707e6b823bbcc75fbc5aa728396179e049ea4a951afa448b5921cec257595e1"
+    },
+    "restored_date": "2026-09-27",
+    "background_gate_cpu_percent": 200,
+    "background_median_matching_tolerance_percent": 50,
+    "gate_revision_reason": "Before any numerical sample: 18 logical CPUs minus16 ranks leaves2 CPU equivalents; require background below200% and subsequently matched background between variants.",
+    "background_policy": "No quiet-load gate; record background load; run all samples without censoring slow phases. User direction 2026-09-27."
+  },
+  "samples": [
+    {
+      "atoms": 64,
+      "variant": "before",
+      "repetition": 1,
+      "folder": "<local>/c64-before-1",
+      "wall_seconds": 41.50665875000004,
+      "rt_seconds": 39.299,
+      "phase_seconds": [
+        [
+          0.0099117756,
+          0.68228602,
+          0.96560216,
+          0.013460875
+        ],
+        [
+          0.0095858574,
+          0.023823977,
+          0.6582222,
+          0.003816843
+        ],
+        [
+          0.0095973015,
+          0.02422905,
+          1.0043509,
+          0.0037600994
+        ],
+        [
+          0.0097620487,
+          0.024600983,
+          0.96911907,
+          0.0040009022
+        ],
+        [
+          0.010346174,
+          0.021313906,
+          1.0331311,
+          0.0040919781
+        ],
+        [
+          0.0096571445,
+          0.02443099,
+          0.94707108,
+          0.0041079521
+        ],
+        [
+          0.009624958,
+          0.023614883,
+          0.90948915,
+          0.0036790371
+        ],
+        [
+          0.0095350742,
+          0.023908138,
+          1.0139489,
+          0.0039629936
+        ],
+        [
+          0.0096330643,
+          0.023448944,
+          1.0029991,
+          0.0039360523
+        ],
+        [
+          0.0096187592,
+          0.02322197,
+          1.0152709,
+          0.003944397
+        ],
+        [
+          0.0096180439,
+          0.023550034,
+          0.87397599,
+          0.0043120384
+        ],
+        [
+          0.0096871853,
+          0.023376226,
+          0.90409398,
+          0.0046350956
+        ],
+        [
+          0.011021137,
+          0.036128998,
+          0.74516797,
+          0.0046579838
+        ],
+        [
+          0.0096988678,
+          0.023914099,
+          1.0193021,
+          0.0041570663
+        ],
+        [
+          0.010184288,
+          0.025623083,
+          0.68383908,
+          0.0041708946
+        ],
+        [
+          0.0099961758,
+          0.024902821,
+          1.060607,
+          0.004183054
+        ],
+        [
+          0.010043144,
+          0.02461791,
+          1.0297961,
+          0.0042338371
+        ],
+        [
+          0.0098958015,
+          0.024030924,
+          0.75662494,
+          0.0042791367
+        ],
+        [
+          0.0095832348,
+          0.023330212,
+          0.7524941,
+          0.0045785904
+        ],
+        [
+          0.009898901,
+          0.023663998,
+          1.0570741,
+          0.0041298866
+        ],
+        [
+          0.0098259449,
+          0.024327278,
+          0.92922282,
+          0.0042660236
+        ],
+        [
+          0.0096559525,
+          0.024230003,
+          0.75533009,
+          0.003978014
+        ],
+        [
+          0.009270668,
+          0.022703171,
+          0.71381497,
+          0.0039570332
+        ],
+        [
+          0.010195971,
+          0.024029255,
+          0.97425079,
+          0.0042307377
+        ],
+        [
+          0.010270119,
+          0.024834871,
+          1.0348313,
+          0.0040330887
+        ],
+        [
+          0.0096588135,
+          0.023464918,
+          0.94900513,
+          0.004021883
+        ],
+        [
+          0.0098917484,
+          0.023715734,
+          0.79960322,
+          0.0040700436
+        ],
+        [
+          0.0098509789,
+          0.024618149,
+          1.044512,
+          0.0041959286
+        ],
+        [
+          0.0097408295,
+          0.023678064,
+          1.040997,
+          0.0043392181
+        ],
+        [
+          0.010288,
+          0.025058031,
+          1.038516,
+          0.0042209625
+        ],
+        [
+          0.0097601414,
+          0.023433924,
+          1.0051551,
+          0.0043151379
+        ],
+        [
+          0.010145903,
+          0.024592161,
+          1.0749917,
+          0.0042688847
+        ],
+        [
+          0.0099520683,
+          0.024343014,
+          0.93873119,
+          0.0039880276
+        ],
+        [
+          0.010327101,
+          0.024435997,
+          1.0632424,
+          0.004185915
+        ],
+        [
+          0.010030746,
+          0.024416924,
+          0.77358103,
+          0.0042088032
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3358521463,
+        0.82761264,
+        31.5723625,
+        0.1409175397
+      ],
+      "late_phase_seconds": [
+        0.2388737206,
+        0.591469765,
+        22.14478411,
+        0.1013052465
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 174.46666666666667,
+      "background_cpu_max": 370.3,
+      "compute_cpu_mean": 756.5857142857143,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "u2",
+      "repetition": 1,
+      "folder": "<local>/c64-u2-1",
+      "wall_seconds": 40.95501670800013,
+      "rt_seconds": 38.835,
+      "phase_seconds": [
+        [
+          0.011827946,
+          0.76015997,
+          0.70908618,
+          0.0048000813
+        ],
+        [
+          0.0097157955,
+          0.023155928,
+          0.77752709,
+          0.0048670769
+        ],
+        [
+          0.0097150803,
+          0.024816036,
+          0.86548305,
+          0.0045750141
+        ],
+        [
+          0.010195971,
+          0.024752855,
+          0.99060893,
+          0.0044398308
+        ],
+        [
+          0.011434078,
+          0.023884058,
+          0.783921,
+          0.0043280125
+        ],
+        [
+          0.009308815,
+          0.01768589,
+          0.90259409,
+          0.0044679642
+        ],
+        [
+          0.0093119144,
+          0.017755032,
+          1.024122,
+          0.0045180321
+        ],
+        [
+          0.0096580982,
+          0.023494959,
+          0.99409318,
+          0.0048351288
+        ],
+        [
+          0.0096449852,
+          0.022553921,
+          0.76780009,
+          0.0042159557
+        ],
+        [
+          0.0095329285,
+          0.018492937,
+          0.93773007,
+          0.0048971176
+        ],
+        [
+          0.0097637177,
+          0.018556118,
+          1.017153,
+          0.004570961
+        ],
+        [
+          0.010058165,
+          0.024055958,
+          0.82736301,
+          0.004226923
+        ],
+        [
+          0.0098671913,
+          0.023881912,
+          1.0166383,
+          0.0047078133
+        ],
+        [
+          0.010162115,
+          0.01915884,
+          1.0122991,
+          0.0042278767
+        ],
+        [
+          0.010422945,
+          0.019420862,
+          1.0141423,
+          0.0040640831
+        ],
+        [
+          0.009510994,
+          0.024290085,
+          0.80539274,
+          0.0044400692
+        ],
+        [
+          0.010090113,
+          0.023728848,
+          0.75448489,
+          0.0045230389
+        ],
+        [
+          0.010079861,
+          0.019047022,
+          1.017679,
+          0.0049409866
+        ],
+        [
+          0.0090441704,
+          0.017643213,
+          1.0244699,
+          0.0040659904
+        ],
+        [
+          0.0098838806,
+          0.023640156,
+          0.92747784,
+          0.0038509369
+        ],
+        [
+          0.0094261169,
+          0.022512197,
+          1.0102429,
+          0.0039072037
+        ],
+        [
+          0.010192156,
+          0.019114256,
+          0.78481889,
+          0.004171133
+        ],
+        [
+          0.01009202,
+          0.019386768,
+          1.01491,
+          0.0041868687
+        ],
+        [
+          0.0098800659,
+          0.023607016,
+          0.83669996,
+          0.0041351318
+        ],
+        [
+          0.0092051029,
+          0.022435904,
+          0.98452711,
+          0.0045518875
+        ],
+        [
+          0.0096108913,
+          0.018410921,
+          0.9753871,
+          0.004281044
+        ],
+        [
+          0.0095453262,
+          0.018336058,
+          0.82687187,
+          0.0042359829
+        ],
+        [
+          0.0092389584,
+          0.023802996,
+          0.78784299,
+          0.0041790009
+        ],
+        [
+          0.0097119808,
+          0.023961067,
+          0.96402812,
+          0.0049610138
+        ],
+        [
+          0.009677887,
+          0.018347979,
+          1.015924,
+          0.0040991306
+        ],
+        [
+          0.0094249249,
+          0.018281221,
+          0.94346666,
+          0.0044081211
+        ],
+        [
+          0.010335207,
+          0.033493042,
+          0.97940302,
+          0.0043561459
+        ],
+        [
+          0.0099341869,
+          0.023699999,
+          0.93601108,
+          0.0044131279
+        ],
+        [
+          0.010094881,
+          0.019073009,
+          0.76121378,
+          0.0039999485
+        ],
+        [
+          0.0098741055,
+          0.018698215,
+          0.9097631,
+          0.0046160221
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3336446298,
+        0.733175278,
+        31.19209016,
+        0.1492645742
+      ],
+      "late_phase_seconds": [
+        0.235363246,
+        0.518027544,
+        22.13105766,
+        0.1035494805
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 55.36190476190476,
+      "background_cpu_max": 163.4,
+      "compute_cpu_mean": 758.3809523809524,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "u4",
+      "repetition": 1,
+      "folder": "<local>/c64-u4-1",
+      "wall_seconds": 41.64122687500003,
+      "rt_seconds": 39.511,
+      "phase_seconds": [
+        [
+          0.012896061,
+          0.77000904,
+          0.71209788,
+          0.0047910213
+        ],
+        [
+          0.010230064,
+          0.023927212,
+          0.7273519,
+          0.0046970844
+        ],
+        [
+          0.0098669529,
+          0.023768187,
+          0.70877099,
+          0.0041890144
+        ],
+        [
+          0.0096480846,
+          0.024154902,
+          1.0080051,
+          0.0047080517
+        ],
+        [
+          0.012513876,
+          0.023884058,
+          0.76599503,
+          0.0044550896
+        ],
+        [
+          0.0096530914,
+          0.018333197,
+          1.0156429,
+          0.0046679974
+        ],
+        [
+          0.0098562241,
+          0.018909216,
+          1.0195589,
+          0.0046451092
+        ],
+        [
+          0.0098061562,
+          0.018797159,
+          0.83319497,
+          0.0041849613
+        ],
+        [
+          0.009868145,
+          0.018372059,
+          0.94946909,
+          0.0044300556
+        ],
+        [
+          0.0097179413,
+          0.018512964,
+          0.90032816,
+          0.004139185
+        ],
+        [
+          0.0092852116,
+          0.018218994,
+          0.95102024,
+          0.0044600964
+        ],
+        [
+          0.010066986,
+          0.024862051,
+          0.80504704,
+          0.0043678284
+        ],
+        [
+          0.0097110271,
+          0.024090052,
+          1.046932,
+          0.0045580864
+        ],
+        [
+          0.0097930431,
+          0.019148827,
+          1.0109489,
+          0.0040669441
+        ],
+        [
+          0.0098280907,
+          0.018877983,
+          0.98063087,
+          0.0041799545
+        ],
+        [
+          0.0096521378,
+          0.018427849,
+          1.019381,
+          0.0041561127
+        ],
+        [
+          0.0097208023,
+          0.018239021,
+          0.94333005,
+          0.0040969849
+        ],
+        [
+          0.0098540783,
+          0.018172026,
+          1.0136182,
+          0.004160881
+        ],
+        [
+          0.0096900463,
+          0.018453836,
+          0.97649479,
+          0.0043590069
+        ],
+        [
+          0.0098791122,
+          0.023747921,
+          0.9700861,
+          0.0040318966
+        ],
+        [
+          0.0098688602,
+          0.023526907,
+          1.0178397,
+          0.0043189526
+        ],
+        [
+          0.01017499,
+          0.018718958,
+          1.0209842,
+          0.0040688515
+        ],
+        [
+          0.010277033,
+          0.019628048,
+          1.0274179,
+          0.0043320656
+        ],
+        [
+          0.0097720623,
+          0.018551826,
+          0.74793386,
+          0.0042879581
+        ],
+        [
+          0.0098838806,
+          0.018546104,
+          1.0107198,
+          0.0041949749
+        ],
+        [
+          0.0098390579,
+          0.018118858,
+          1.008539,
+          0.004057169
+        ],
+        [
+          0.010373116,
+          0.019264936,
+          1.0141671,
+          0.004267931
+        ],
+        [
+          0.0099728107,
+          0.024511099,
+          1.0222528,
+          0.0041918755
+        ],
+        [
+          0.0098690987,
+          0.023809195,
+          0.95394421,
+          0.0041630268
+        ],
+        [
+          0.010025263,
+          0.019441128,
+          0.86975074,
+          0.0039420128
+        ],
+        [
+          0.010231256,
+          0.019829988,
+          0.71440911,
+          0.0045511723
+        ],
+        [
+          0.0098931789,
+          0.018843174,
+          1.0162063,
+          0.0040540695
+        ],
+        [
+          0.0096139908,
+          0.018023014,
+          1.0207918,
+          0.0040271282
+        ],
+        [
+          0.0098969936,
+          0.018688917,
+          0.826087,
+          0.0041151047
+        ],
+        [
+          0.0096859932,
+          0.018548012,
+          0.97981405,
+          0.0044639111
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3380186558,
+        0.688947678,
+        31.8966638,
+        0.1455905441
+      ],
+      "late_phase_seconds": [
+        0.2375729087,
+        0.48206973000000003,
+        23.01732652,
+        0.1010138991
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 51.095238095238095,
+      "background_cpu_max": 126.8,
+      "compute_cpu_mean": 756.8428571428572,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "u4",
+      "repetition": 1,
+      "folder": "<local>/c128-u4-1",
+      "wall_seconds": 61.828373290999934,
+      "rt_seconds": 54.03,
+      "phase_seconds": [
+        [
+          0.023824215,
+          6.0143991,
+          0.92577004,
+          0.020307064
+        ],
+        [
+          0.024687052,
+          0.040097952,
+          0.93540192,
+          0.016694069
+        ],
+        [
+          0.023445129,
+          0.044950008,
+          0.93667722,
+          0.016165018
+        ],
+        [
+          0.024091005,
+          0.046535969,
+          0.94537377,
+          0.017332315
+        ],
+        [
+          0.023878813,
+          0.038645029,
+          0.98091507,
+          0.018396854
+        ],
+        [
+          0.023010015,
+          0.025675058,
+          0.9482789,
+          0.017982006
+        ],
+        [
+          0.023426056,
+          0.024478912,
+          0.97285509,
+          0.018010139
+        ],
+        [
+          0.023830175,
+          0.025418997,
+          0.97103286,
+          0.018183947
+        ],
+        [
+          0.023829937,
+          0.026363134,
+          0.9640131,
+          0.018594742
+        ],
+        [
+          0.023659945,
+          0.025555849,
+          1.002775,
+          0.021995068
+        ],
+        [
+          0.024004936,
+          0.026628733,
+          0.98072124,
+          0.024019003
+        ],
+        [
+          0.023108006,
+          0.044250965,
+          0.99640203,
+          0.021151066
+        ],
+        [
+          0.022806883,
+          0.043643236,
+          0.989259,
+          0.019076109
+        ],
+        [
+          0.023766041,
+          0.025114059,
+          0.99538112,
+          0.018856049
+        ],
+        [
+          0.023993969,
+          0.025822163,
+          0.98837686,
+          0.019436121
+        ],
+        [
+          0.023551941,
+          0.02532506,
+          0.98797798,
+          0.020014048
+        ],
+        [
+          0.02332902,
+          0.024199963,
+          1.0121231,
+          0.019290924
+        ],
+        [
+          0.025034189,
+          0.026301861,
+          0.99645495,
+          0.019940853
+        ],
+        [
+          0.02447319,
+          0.026048183,
+          1.0405049,
+          0.018807173
+        ],
+        [
+          0.023391008,
+          0.04467988,
+          1.0281329,
+          0.018911123
+        ],
+        [
+          0.024538994,
+          0.045667171,
+          1.0165882,
+          0.019238234
+        ],
+        [
+          0.023840904,
+          0.025560856,
+          1.014853,
+          0.019566059
+        ],
+        [
+          0.024052858,
+          0.025123835,
+          1.0381179,
+          0.019383907
+        ],
+        [
+          0.024008036,
+          0.025286913,
+          1.015785,
+          0.020714045
+        ],
+        [
+          0.023698092,
+          0.025050879,
+          1.03054,
+          0.022412062
+        ],
+        [
+          0.024471045,
+          0.025886059,
+          1.0457463,
+          0.019591808
+        ],
+        [
+          0.024209261,
+          0.025546074,
+          1.0181098,
+          0.019051075
+        ],
+        [
+          0.024355173,
+          0.045014143,
+          1.0097589,
+          0.01886487
+        ],
+        [
+          0.023817062,
+          0.044601917,
+          1.2531049,
+          0.018309116
+        ],
+        [
+          0.023437023,
+          0.025080681,
+          1.057173,
+          0.019448042
+        ],
+        [
+          0.024016857,
+          0.02581811,
+          1.0484779,
+          0.025902033
+        ],
+        [
+          0.023633003,
+          0.025091171,
+          1.0335391,
+          0.019377947
+        ],
+        [
+          0.02453208,
+          0.025906086,
+          1.038238,
+          0.019439936
+        ],
+        [
+          0.023607969,
+          0.025398731,
+          1.0475101,
+          0.018793106
+        ],
+        [
+          0.023884058,
+          0.025720119,
+          1.0234432,
+          0.019871235
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.811419725,
+        1.0504877559999999,
+        34.36364231,
+        0.662820102
+      ],
+      "late_phase_seconds": [
+        0.573556662,
+        0.726138115,
+        24.72559814,
+        0.475446941
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 50.05483870967742,
+      "background_cpu_max": 120.3,
+      "compute_cpu_mean": 1535.0096774193548,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "u2",
+      "repetition": 1,
+      "folder": "<local>/c128-u2-1",
+      "wall_seconds": 66.11863737499971,
+      "rt_seconds": 57.708,
+      "phase_seconds": [
+        [
+          0.025650024,
+          6.4871519,
+          1.0143342,
+          0.023908138
+        ],
+        [
+          0.024817228,
+          0.045229912,
+          1.0912981,
+          0.019325972
+        ],
+        [
+          0.024303198,
+          0.049659252,
+          1.073597,
+          0.019951105
+        ],
+        [
+          0.023893118,
+          0.049423218,
+          1.0764558,
+          0.019740105
+        ],
+        [
+          0.025156736,
+          0.049216032,
+          1.0513461,
+          0.019874096
+        ],
+        [
+          0.024029255,
+          0.024850845,
+          1.0583863,
+          0.018666983
+        ],
+        [
+          0.024209976,
+          0.025022984,
+          1.0200379,
+          0.018810034
+        ],
+        [
+          0.023813248,
+          0.044572115,
+          1.0430269,
+          0.019361973
+        ],
+        [
+          0.023574114,
+          0.043870926,
+          1.0421062,
+          0.019392967
+        ],
+        [
+          0.024401903,
+          0.0277493,
+          1.0881767,
+          0.020486832
+        ],
+        [
+          0.025532007,
+          0.028507948,
+          1.0692821,
+          0.019350052
+        ],
+        [
+          0.023364067,
+          0.043774128,
+          1.05181,
+          0.019527912
+        ],
+        [
+          0.023988247,
+          0.04638505,
+          1.0425229,
+          0.019777775
+        ],
+        [
+          0.023972034,
+          0.024560213,
+          1.0631669,
+          0.020091057
+        ],
+        [
+          0.02464819,
+          0.027123928,
+          1.0482719,
+          0.020131826
+        ],
+        [
+          0.024040222,
+          0.046627045,
+          1.0515258,
+          0.020739079
+        ],
+        [
+          0.02526021,
+          0.054097891,
+          1.0580151,
+          0.019441128
+        ],
+        [
+          0.024348736,
+          0.025875807,
+          1.062351,
+          0.019140005
+        ],
+        [
+          0.023820877,
+          0.026753664,
+          1.0626311,
+          0.019218922
+        ],
+        [
+          0.024029016,
+          0.047446012,
+          1.1043789,
+          0.019715309
+        ],
+        [
+          0.023858786,
+          0.047308922,
+          1.066155,
+          0.020017147
+        ],
+        [
+          0.025787354,
+          0.034264088,
+          1.1545942,
+          0.032533884
+        ],
+        [
+          0.02582407,
+          0.037192106,
+          1.1743791,
+          0.019804239
+        ],
+        [
+          0.026032209,
+          0.065037012,
+          1.2222028,
+          0.023797989
+        ],
+        [
+          0.026534319,
+          0.081273079,
+          1.265898,
+          0.03255105
+        ],
+        [
+          0.026527882,
+          0.032975197,
+          1.2445891,
+          0.018827915
+        ],
+        [
+          0.024206877,
+          0.025719881,
+          1.0982242,
+          0.018975973
+        ],
+        [
+          0.024189949,
+          0.047863007,
+          1.104171,
+          0.019429684
+        ],
+        [
+          0.024105072,
+          0.046607971,
+          1.1081281,
+          0.019611835
+        ],
+        [
+          0.024260044,
+          0.025607109,
+          1.0931602,
+          0.019500017
+        ],
+        [
+          0.024286985,
+          0.0259161,
+          1.1034467,
+          0.019294977
+        ],
+        [
+          0.024430037,
+          0.046323061,
+          1.0828223,
+          0.019637108
+        ],
+        [
+          0.024372101,
+          0.047668934,
+          1.08655,
+          0.020097971
+        ],
+        [
+          0.025069952,
+          0.028209925,
+          1.1090901,
+          0.020163059
+        ],
+        [
+          0.024739027,
+          0.025581837,
+          1.0923791,
+          0.021263838
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.835427046,
+        1.348294499,
+        37.1641766,
+        0.698249818
+      ],
+      "late_phase_seconds": [
+        0.591696263,
+        0.960191967,
+        26.5504635,
+        0.503289699
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 74.04848484848485,
+      "background_cpu_max": 274.1,
+      "compute_cpu_mean": 1531.4727272727273,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "before",
+      "repetition": 1,
+      "folder": "<local>/c128-before-1",
+      "wall_seconds": 69.66724299999987,
+      "rt_seconds": 60.551,
+      "phase_seconds": [
+        [
+          0.026443958,
+          6.9104819,
+          1.1732311,
+          0.020576954
+        ],
+        [
+          0.025734186,
+          0.043370008,
+          1.1175518,
+          0.019923925
+        ],
+        [
+          0.025806904,
+          0.062790155,
+          1.1327078,
+          0.020738125
+        ],
+        [
+          0.025145769,
+          0.049555063,
+          1.137064,
+          0.020164251
+        ],
+        [
+          0.026772976,
+          0.045171976,
+          1.1552954,
+          0.020360947
+        ],
+        [
+          0.025706053,
+          0.048979044,
+          1.157294,
+          0.020808935
+        ],
+        [
+          0.025214195,
+          0.048974037,
+          1.1574228,
+          0.019860029
+        ],
+        [
+          0.02626276,
+          0.054940939,
+          1.1251361,
+          0.019701004
+        ],
+        [
+          0.029985189,
+          0.056154966,
+          1.132551,
+          0.020028353
+        ],
+        [
+          0.025054932,
+          0.048441887,
+          1.1297121,
+          0.020419121
+        ],
+        [
+          0.025395155,
+          0.048567057,
+          1.1526859,
+          0.020328045
+        ],
+        [
+          0.025859118,
+          0.048712969,
+          1.156724,
+          0.019944191
+        ],
+        [
+          0.024894953,
+          0.047401428,
+          1.1355019,
+          0.019711971
+        ],
+        [
+          0.025387049,
+          0.048795938,
+          1.1371469,
+          0.029160976
+        ],
+        [
+          0.025226831,
+          0.050103664,
+          1.1374509,
+          0.020611048
+        ],
+        [
+          0.025064945,
+          0.04688096,
+          1.1348009,
+          0.021574259
+        ],
+        [
+          0.026121855,
+          0.049937725,
+          1.1590581,
+          0.021444082
+        ],
+        [
+          0.024909973,
+          0.046305895,
+          1.1471021,
+          0.02025795
+        ],
+        [
+          0.026225805,
+          0.049665928,
+          1.157515,
+          0.020636082
+        ],
+        [
+          0.025365114,
+          0.053171873,
+          1.1559892,
+          0.021609306
+        ],
+        [
+          0.02563715,
+          0.048994064,
+          1.1432478,
+          0.021392345
+        ],
+        [
+          0.024919987,
+          0.048421144,
+          1.140255,
+          0.020724058
+        ],
+        [
+          0.026262999,
+          0.049859047,
+          1.147872,
+          0.021179199
+        ],
+        [
+          0.026101112,
+          0.049387217,
+          1.13291,
+          0.020814896
+        ],
+        [
+          0.026455879,
+          0.050256252,
+          1.1475899,
+          0.021154881
+        ],
+        [
+          0.026161909,
+          0.049113274,
+          1.1552069,
+          0.020992994
+        ],
+        [
+          0.026382923,
+          0.049979925,
+          1.1637621,
+          0.021463156
+        ],
+        [
+          0.025895119,
+          0.050676107,
+          1.1489921,
+          0.022196054
+        ],
+        [
+          0.025808811,
+          0.049422026,
+          1.1568191,
+          0.021332979
+        ],
+        [
+          0.026227236,
+          0.04974699,
+          1.1551681,
+          0.021586895
+        ],
+        [
+          0.02656579,
+          0.050700188,
+          1.1568739,
+          0.022259951
+        ],
+        [
+          0.026428938,
+          0.050249815,
+          1.1805391,
+          0.021661997
+        ],
+        [
+          0.026767015,
+          0.051023722,
+          1.1558468,
+          0.023532152
+        ],
+        [
+          0.026142836,
+          0.049363852,
+          1.172163,
+          0.022274017
+        ],
+        [
+          0.026344061,
+          0.04976511,
+          1.16557,
+          0.020446301
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.882235527,
+        1.694880245,
+        39.0415257,
+        0.720294475
+      ],
+      "late_phase_seconds": [
+        0.621157408,
+        1.187935113,
+        27.6441048,
+        0.51796174
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 58.92941176470588,
+      "background_cpu_max": 154.1,
+      "compute_cpu_mean": 1540.2911764705882,
+      "slow_unchanged_phase": false
+    }
+  ],
+  "comparisons": [
+    {
+      "atoms": 64,
+      "U_interval": 1,
+      "rt_seconds": 39.299,
+      "source_seconds": 0.82761264,
+      "rt_ratio": 1.0,
+      "polar_calls": 34,
+      "held_calls": 0,
+      "Einf_percent": 0.0,
+      "DT_percent": 0.0,
+      "max_current_difference": 0.0,
+      "max_density_difference": 0.0,
+      "max_energy_difference": 0.0,
+      "background_cpu": 174.46666666666667
+    },
+    {
+      "atoms": 64,
+      "U_interval": 2,
+      "rt_seconds": 38.835,
+      "source_seconds": 0.733175278,
+      "rt_ratio": 1.0119479850650186,
+      "polar_calls": 18,
+      "held_calls": 16,
+      "Einf_percent": 0.009740342824970718,
+      "DT_percent": 0.009740342824970718,
+      "max_current_difference": 1.0285110010997152e-09,
+      "max_density_difference": 1.2536300403320766e-07,
+      "max_energy_difference": 0.0,
+      "background_cpu": 55.36190476190476
+    },
+    {
+      "atoms": 64,
+      "U_interval": 4,
+      "rt_seconds": 39.511,
+      "source_seconds": 0.688947678,
+      "rt_ratio": 0.9946344056085646,
+      "polar_calls": 10,
+      "held_calls": 24,
+      "Einf_percent": 0.028630880724332897,
+      "DT_percent": 0.028630880724332897,
+      "max_current_difference": 3.023217593600325e-09,
+      "max_density_difference": 3.729209160363567e-07,
+      "max_energy_difference": 0.0,
+      "background_cpu": 51.095238095238095
+    },
+    {
+      "atoms": 128,
+      "U_interval": 1,
+      "rt_seconds": 60.551,
+      "source_seconds": 1.694880245,
+      "rt_ratio": 1.0,
+      "polar_calls": 34,
+      "held_calls": 0,
+      "Einf_percent": 0.0,
+      "DT_percent": 0.0,
+      "max_current_difference": 0.0,
+      "max_density_difference": 0.0,
+      "max_energy_difference": 0.0,
+      "background_cpu": 58.92941176470588
+    },
+    {
+      "atoms": 128,
+      "U_interval": 2,
+      "rt_seconds": 57.708,
+      "source_seconds": 1.348294499,
+      "rt_ratio": 1.0492652665141748,
+      "polar_calls": 18,
+      "held_calls": 16,
+      "Einf_percent": 0.009739671622881604,
+      "DT_percent": 0.009739671622881604,
+      "max_current_difference": 1.0284397318000493e-09,
+      "max_density_difference": 1.253090869957063e-07,
+      "max_energy_difference": 0.0,
+      "background_cpu": 74.04848484848485
+    },
+    {
+      "atoms": 128,
+      "U_interval": 4,
+      "rt_seconds": 54.03,
+      "source_seconds": 1.0504877559999999,
+      "rt_ratio": 1.1206922080325745,
+      "polar_calls": 10,
+      "held_calls": 24,
+      "Einf_percent": 0.028628821557754522,
+      "DT_percent": 0.028628821557754522,
+      "max_current_difference": 3.022998998799658e-09,
+      "max_density_difference": 3.727595400127015e-07,
+      "max_energy_difference": 0.0,
+      "background_cpu": 50.05483870967742
+    }
+  ],
+  "timing_repetitions": 1,
+  "performance_ratios_are_reference_only": true
+}

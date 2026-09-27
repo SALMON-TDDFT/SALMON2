@@ -1,0 +1,453 @@
+{
+  "complete": true,
+  "protocol": {
+    "temporary_root": "<local>/diamond-32-64-128-ok515djh",
+    "date": "2026-09-27T08:24:18.394308",
+    "commit": "88385397",
+    "binary_sha256": "6924b73a186af63cfffb150c92765d357dd376c853216e5192783859033a02eb",
+    "atoms": [
+      32,
+      64,
+      128
+    ],
+    "ranks": [
+      4,
+      8,
+      16
+    ],
+    "core_mesh": [
+      16,
+      16,
+      16
+    ],
+    "buffer_mesh": [
+      8,
+      0,
+      0
+    ],
+    "dt": 0.02,
+    "nt": 16,
+    "radius_bohr": 6,
+    "ACE_interval": 1,
+    "U_interval": 1,
+    "direct_wf": 1,
+    "OMP": 1,
+    "BLAS": 1,
+    "repetitions": 1,
+    "files": {
+      "c32-gs/inputfile": "f8a11c9752d4dfb0b4ec7514c777f82e89ab8f6fdffb21ebf447a3b38275feba",
+      "c32-gs/atom.dat": "321141eac5ae4b7bb8722042f5c9067b308df7b66a5d7b6f3ee10d30eb89d965",
+      "c32-gs/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c32-input/inputfile": "28323eed7a3948e4bed72b69f7526e65405410a4f9f00ccfa05f97d77e2130dc",
+      "c32-input/atom.dat": "321141eac5ae4b7bb8722042f5c9067b308df7b66a5d7b6f3ee10d30eb89d965",
+      "c32-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c64-input/inputfile": "bd86e8ba5183d543200f908229d08e7b5e07dc6362f0891d4cc9ca4314458542",
+      "c64-input/atom.dat": "a60281c107107053737fd9e81b893800a3034383eb917389a6e60f6a3ec62798",
+      "c64-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c128-input/inputfile": "11cf4851996f9c559f53600bfa6a61d569a6f671a6fe4dab66fab24a6245f32d",
+      "c128-input/atom.dat": "15a367141899b3e740447568b998c74852eeeddf30bc51fa00ed1858fb967082",
+      "c128-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1"
+    }
+  },
+  "samples": [
+    {
+      "atoms": 32,
+      "ranks": 4,
+      "folder": "<local>/c32-rt",
+      "rt_seconds": 22.856,
+      "hamiltonian_seconds": 1.3788,
+      "wall_seconds": 23.709958917000222,
+      "phase_seconds": [
+        0.1369426252,
+        0.557576894,
+        19.64953207,
+        0.02618789671
+      ],
+      "ACE_builds": 35,
+      "maximum_gram_error": 2.5823788e-13,
+      "background_cpu_mean": 66.08,
+      "weak_efficiency_percent": 100.00000000000001,
+      "relative_time": 1.0,
+      "time_per_step": 1.4285,
+      "occupied_orbitals": 64,
+      "basis_storage": [
+        [
+          3,
+          64,
+          256,
+          192
+        ],
+        [
+          0,
+          64,
+          256,
+          192
+        ],
+        [
+          1,
+          64,
+          256,
+          192
+        ],
+        [
+          2,
+          64,
+          256,
+          192
+        ]
+      ],
+      "active_sources_per_fragment": [
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0
+      ],
+      "kernel_products_per_rank": [
+        13238272,
+        13238272,
+        13238272,
+        13238272
+      ],
+      "density_integral": 128.0000000000153,
+      "FFT_pairs_per_fragment": 7424,
+      "possible_FFT_pairs_per_fragment": 11520
+    },
+    {
+      "atoms": 64,
+      "ranks": 8,
+      "folder": "<local>/c64-rt",
+      "rt_seconds": 39.193,
+      "hamiltonian_seconds": 3.5878,
+      "wall_seconds": 41.242221916000744,
+      "phase_seconds": [
+        0.3304009445,
+        0.807784795,
+        31.74424406,
+        0.1553966999
+      ],
+      "ACE_builds": 35,
+      "maximum_gram_error": 3.6792791e-13,
+      "background_cpu_mean": 87.24444444444445,
+      "weak_efficiency_percent": 58.316536116143205,
+      "relative_time": 1.7147794889744485,
+      "time_per_step": 2.4495625,
+      "occupied_orbitals": 128,
+      "basis_storage": [
+        [
+          0,
+          64,
+          512,
+          192
+        ],
+        [
+          7,
+          64,
+          512,
+          192
+        ],
+        [
+          5,
+          64,
+          512,
+          192
+        ],
+        [
+          4,
+          64,
+          512,
+          192
+        ],
+        [
+          6,
+          64,
+          512,
+          192
+        ],
+        [
+          1,
+          64,
+          512,
+          192
+        ],
+        [
+          3,
+          64,
+          512,
+          192
+        ],
+        [
+          2,
+          64,
+          512,
+          192
+        ]
+      ],
+      "active_sources_per_fragment": [
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0
+      ],
+      "kernel_products_per_rank": [
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272
+      ],
+      "density_integral": 256.0000000000511,
+      "FFT_pairs_per_fragment": 7424,
+      "possible_FFT_pairs_per_fragment": 11520
+    },
+    {
+      "atoms": 128,
+      "ranks": 16,
+      "folder": "<local>/c128-rt",
+      "rt_seconds": 53.758,
+      "hamiltonian_seconds": 9.4981,
+      "wall_seconds": 61.877731999999924,
+      "phase_seconds": [
+        0.848090649,
+        1.546401737,
+        34.31966665,
+        0.641654967
+      ],
+      "ACE_builds": 35,
+      "maximum_gram_error": 5.8264504e-13,
+      "background_cpu_mean": 84.10000000000001,
+      "weak_efficiency_percent": 42.51646266602181,
+      "relative_time": 2.352030101505075,
+      "time_per_step": 3.359875,
+      "occupied_orbitals": 256,
+      "basis_storage": [
+        [
+          15,
+          64,
+          1024,
+          192
+        ],
+        [
+          0,
+          64,
+          1024,
+          192
+        ],
+        [
+          8,
+          64,
+          1024,
+          192
+        ],
+        [
+          6,
+          64,
+          1024,
+          192
+        ],
+        [
+          10,
+          64,
+          1024,
+          192
+        ],
+        [
+          9,
+          64,
+          1024,
+          192
+        ],
+        [
+          2,
+          64,
+          1024,
+          192
+        ],
+        [
+          7,
+          64,
+          1024,
+          192
+        ],
+        [
+          1,
+          64,
+          1024,
+          192
+        ],
+        [
+          14,
+          64,
+          1024,
+          192
+        ],
+        [
+          5,
+          64,
+          1024,
+          192
+        ],
+        [
+          4,
+          64,
+          1024,
+          192
+        ],
+        [
+          3,
+          64,
+          1024,
+          192
+        ],
+        [
+          12,
+          64,
+          1024,
+          192
+        ],
+        [
+          13,
+          64,
+          1024,
+          192
+        ],
+        [
+          11,
+          64,
+          1024,
+          192
+        ]
+      ],
+      "active_sources_per_fragment": [
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0
+      ],
+      "kernel_products_per_rank": [
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272,
+        13238272
+      ],
+      "density_integral": 512.0000000001869,
+      "FFT_pairs_per_fragment": 7424,
+      "possible_FFT_pairs_per_fragment": 11520
+    }
+  ],
+  "gs32": {
+    "seconds": null,
+    "iterations": 1147,
+    "difference": 9.9556585e-08
+  },
+  "status": "completed",
+  "comparison": "same latest direct Taylor4 binary, C32/C64/C128, one sequential sample each",
+  "timing_conclusive": false
+}

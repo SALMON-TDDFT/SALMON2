@@ -1,0 +1,83 @@
+&calculation
+ theory='tddft_response'
+ yn_dc='n'
+ yn_conventional_from_dcdft='y'
+/
+&control
+ sysname='diamond64_hse'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&dc
+ num_fragment=8,1,1
+ num_rgrid_buffer=8,0,0
+ nproc_rgrid_tot=8,1,1
+ nstate_frag=64
+ yn_dc_lcfo='y'
+ lcfo_eigensolver='lapack'
+ energy_cut=100d0
+ lambda_cut=1d-7
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=8,1,1
+ yn_eigenexa='n'
+ yn_scalapack='n'
+/
+&system
+ yn_periodic='y'
+ al=53.76d0,6.72d0,6.72d0
+ nelem=1
+ nstate=128
+ nelec=256
+ natom=64
+ file_atom_coor='atom.dat'
+/
+&pseudo
+ izatom(1)=6
+ file_pseudo(1)='C_rps.dat'
+ lloc_ps(1)=1
+/
+&functional
+ xc='hse06'
+ yn_hse_wannier='n'
+ hse_mlwf_maxiter=200
+ hse_mlwf_interval=10000
+/
+&rgrid
+ num_rgrid=128,16,16
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&scf
+ nscf_init_redistribution=10
+ nscf_init_no_diagonal=0
+ nscf=1800
+ ncg=1
+ method_mixing='simple'
+ alpha_mb=0.5d0
+ mixrate=0.01d0
+ threshold=1d-7
+ yn_preconditioning='y'
+/
+
+&tgrid
+ nt=16
+ dt=0.02d0
+/
+&emfield
+ ae_shape1="impulse"
+ e_impulse=0.0001d0
+ epdir_re1=1d0,0d0,0d0
+/
+&analysis
+ out_rt_energy_step=40
+ yn_out_dns_rt='y'
+ out_dns_rt_step=16
+ nenergy=100
+ de=0.01d0
+/

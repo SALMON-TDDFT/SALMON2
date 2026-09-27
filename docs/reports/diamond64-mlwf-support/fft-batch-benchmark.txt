@@ -1,0 +1,7 @@
+batch/time/error/pairs/calls   1    0.435057   0.00000E+00        7424        7424
+batch/time/error/pairs/calls   4    0.442243   0.00000E+00        7424        1856
+batch/time/error/pairs/calls   8    0.443672   0.00000E+00        7424         928
+batch/time/error/pairs/calls   8    0.444388   0.00000E+00        7424         928
+batch/time/error/pairs/calls   4    0.445675   0.00000E+00        7424        1856
+batch/time/error/pairs/calls   1    0.439528   0.00000E+00        7424        7424
+batch/time/error/pairs/calls   4    0.446069   0.00000E+00        7424        1856

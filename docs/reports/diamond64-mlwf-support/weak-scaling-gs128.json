@@ -1,0 +1,9 @@
+{
+  "seconds": 979.9849603329785,
+  "returncode": 0,
+  "last_scf_difference": 9.9557075e-08,
+  "validated": true,
+  "mpi": 16,
+  "omp": 1,
+  "blas": 1
+}

@@ -1,0 +1,1444 @@
+{
+  "complete": true,
+  "protocol": {
+    "temporary_root": "<local>/salmon-sphere-e8gx2i81",
+    "date": "2026-09-26T22:44:22.532974",
+    "before_commit": "19b9333c",
+    "after_commit": "uncommitted spherical reconstruction stage1",
+    "cpu_binding_supported": false,
+    "logical_cpus": 18,
+    "ranks": [
+      8,
+      16
+    ],
+    "threads": 1,
+    "nt": 16,
+    "dt": 0.02,
+    "radius": 6,
+    "ACE_interval": 1,
+    "repetitions": 1,
+    "schedule": [
+      [
+        64,
+        "before",
+        1
+      ],
+      [
+        64,
+        "after",
+        1
+      ],
+      [
+        128,
+        "after",
+        1
+      ],
+      [
+        128,
+        "before",
+        1
+      ]
+    ],
+    "files": {
+      "bin/before": "f87420bde09581d9ad18d148e02e5a2adc1562b54b5675026aa95c1c003d9d31",
+      "bin/after": "b0ea5eb825411549a512b146a7de563f1bc4f6c82b6579b14cbc4bbfa7685902",
+      "c64-input/inputfile": "bd86e8ba5183d543200f908229d08e7b5e07dc6362f0891d4cc9ca4314458542",
+      "c64-input/atom.dat": "a60281c107107053737fd9e81b893800a3034383eb917389a6e60f6a3ec62798",
+      "c64-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c64-input/data_dcdft/total/PS_C_KY_n.dat": "7b6ca7d2f7b514c1116d45aec608be2939dd6e0f76e513248df2daa3615bf38b",
+      "c64-input/data_dcdft/total/diamond64_hse_lcfo_complex_eigen.data": "b6bbf3ec409eeaddc65e2686305745738d6f1028e2a702f9d7df45267d60ad32",
+      "c64-input/data_dcdft/fragments/000005/basis_functions.bin": "fad97f4db1b964f8d0d78de3e287a2a72273bcbb7b3660a81a20501f17cc6948",
+      "c64-input/data_dcdft/fragments/000005/wavefunctions.bin": "96b520c05a9d5011f8bfa2bb30391bf8b5e92eafba98604d7b00b28e4cf4cb51",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_eigen.data": "1815f8a4ff0be6dbdb3cc0862281a02b16e6b1ff5e5656793d7ac1afe483d9d1",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000005/hamiltonian_local.bin": "be4880af7318f4388e35fcab2a40c79259523bfcbdc2b24ed31880079107bf44",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000005/rgrid_index.bin": "d9bbb85a2eb6ed1d88af2da0e6bde15bf67e67a3cc72ad2ae6b854ce944d1859",
+      "c64-input/data_dcdft/fragments/000002/basis_functions.bin": "5e08204a6f59ef943b70ed51aed67b02f42125d943eac57bd52dddc8a303aa2b",
+      "c64-input/data_dcdft/fragments/000002/wavefunctions.bin": "f2e2a0128f3b6f888b3a9785bea9234bf362187299160f2d8d2c41acb4e47b4e",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_eigen.data": "c9710ff40bab6d1825c56c39f707534420e45776366a279b3d9e0b572d37bae6",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000002/hamiltonian_local.bin": "f2946a499b30406d32887cba74be9c3e88de11b5ffac503cf4f2382b7f4d1a1d",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000002/rgrid_index.bin": "0d191270b22f60452a4a503952e23b094e8f16e6bdc4dcb29f548b61f8207ba9",
+      "c64-input/data_dcdft/fragments/000003/basis_functions.bin": "1f5ae55c90d6db8a0d537961f06d7daaf5d952bbdd705babb28136f33344b0e9",
+      "c64-input/data_dcdft/fragments/000003/wavefunctions.bin": "e10af6a9d315f295290c1b64ffd9b0b9a2504f3511d616868d179487e0f43442",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_eigen.data": "f6633a759e1e54f864fedd8035520a48211f3eec99760a03ea01f3833f3dbb1c",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000003/hamiltonian_local.bin": "ff1898328df0af60cac261644047ecba06c1c3408be48b555c19ec784754a85b",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000003/rgrid_index.bin": "49b18a6dd06c2c4103052b7e7a9c8e5692fca614bb74e69fe15b1d5b73298078",
+      "c64-input/data_dcdft/fragments/000004/basis_functions.bin": "09df12dbc7f5361a9540d756dff4f8bf3095226afd1481352a063ae2815f2beb",
+      "c64-input/data_dcdft/fragments/000004/wavefunctions.bin": "5e22f8ca39aaff4060d22cadb92c28dd0793cb0da7c2f2f51a232201b718d6b1",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_eigen.data": "77dabb0b0067bdbcda3dc92ee31b5d13d2cacf1eeded043ca13a68abb837f5b7",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000004/hamiltonian_local.bin": "4900d4da4ef2ec5e3f75ebfe15e53b6dac83f015598b078701f1aeaeede0e8f3",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000004/rgrid_index.bin": "1003aec533f67aff0f14580a7ac7316762dc235aabe489065059edabb8373e15",
+      "c64-input/data_dcdft/fragments/000008/basis_functions.bin": "ddd695162a998e89ee09567a953cf42ae5acb82562fd62be38c4d5ab92b32982",
+      "c64-input/data_dcdft/fragments/000008/wavefunctions.bin": "f800308728830cf612d28ea7636c1d95e88430cc342f3c67de586f73b09086ef",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_eigen.data": "e5ec1b6fbad2091c9d06d1842f297970a79d0b58cf33dfd920d2372398277706",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000008/hamiltonian_local.bin": "664260bb66ea43a07e556e115d65dba81c1fbae3c2990040cc6452463427436d",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000008/rgrid_index.bin": "41700c5546676d62bdf758ce2da0b647e87339cbec6cfee381b22e660c100b4b",
+      "c64-input/data_dcdft/fragments/000001/basis_functions.bin": "8c3973abd39c469ae527f9354ff30ba4adafab531b4739d5894e8373e959e733",
+      "c64-input/data_dcdft/fragments/000001/wavefunctions.bin": "ae8f4ff3e4a840002f641a87565433a6afa69a48775f51b72ad2ccbff32ab5f6",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_eigen.data": "63f8abeb2fa9c30a5baba2883969f55192e17c90fa4febbc6ca767e776767316",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000001/hamiltonian_local.bin": "d183e286f5d62100b4bad877d9fcf68f187d3d5955fd66002cd27b229dc68542",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000001/rgrid_index.bin": "1af0c06fb128398ad29163628392c87811c6f3999ed90260b2cdb246197d164e",
+      "c64-input/data_dcdft/fragments/000006/basis_functions.bin": "1c0621bed2eff56017137393de1c55ea60346fa6e5a8865e8a9bdd871251b5f2",
+      "c64-input/data_dcdft/fragments/000006/wavefunctions.bin": "8cb1d11cd316377b714c8d8cb8e6241faa2d7fa1f8cca22d2254e31b742194c9",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_eigen.data": "63723848a3e884a436d63e13a4c72579a77d1c89d92de385b3ce2ea6eca8f907",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000006/hamiltonian_local.bin": "5b5f65c03bf14537a43f0c299c25a6160c3963ca0dac3cb768dd16b21bd06bd9",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000006/rgrid_index.bin": "83db059723f02e2121986577146f9e648749a80cbbc65bfc83646a76d30fa0de",
+      "c64-input/data_dcdft/fragments/000007/basis_functions.bin": "4809d3f8f4ba618d3c79bc2e6edf65e371fb765e8d56339742573cfb83f566da",
+      "c64-input/data_dcdft/fragments/000007/wavefunctions.bin": "5c39dcafe1cb05b750c0d73a2f78ed7d2e28e552bb91cc3ed34fe20f40dc4807",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_eigen.data": "973d620ba06c5b37a8493a3ae4b3b400a34ebb7d955b4176686daedf2f81cd43",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000007/hamiltonian_local.bin": "f5ea193b1a4fbe10157844f16ddba1265f96ff83552260adcd4f99205814bfd3",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000007/rgrid_index.bin": "3654f434a5aa9c54986e264bdd62a60a341696605670b6cfdd622ba4197fec94",
+      "c128-input/inputfile": "11cf4851996f9c559f53600bfa6a61d569a6f671a6fe4dab66fab24a6245f32d",
+      "c128-input/atom.dat": "15a367141899b3e740447568b998c74852eeeddf30bc51fa00ed1858fb967082",
+      "c128-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c128-input/data_dcdft/total/PS_C_KY_n.dat": "7b6ca7d2f7b514c1116d45aec608be2939dd6e0f76e513248df2daa3615bf38b",
+      "c128-input/data_dcdft/total/diamond128_hse_lcfo_complex_eigen.data": "c20d98cf43df12fcf34c6ca232077b0702bbc0606938830ee03e982618af95d5",
+      "c128-input/data_dcdft/fragments/000005/basis_functions.bin": "d0682a3de02efad686c67425ca617d9a56a63bf144206081397f92ed9ee2034b",
+      "c128-input/data_dcdft/fragments/000005/wavefunctions.bin": "0dc730ff6d2912922ed05954b73ed5a9397266002dd10dff9fce50346c2686a2",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_eigen.data": "ae70e73aebd31af0cb28a9f3f07b82b5cdab5ed9f7043d161b4025e5c2823d3f",
+      "c128-input/data_dcdft/fragments/000005/hamiltonian_local.bin": "f6113010ad1684225a84a8b3ae90202a900f001f928385d29f734f2ed8e605f8",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000005/rgrid_index.bin": "2168e8efbcda21f35f20774d4927d64cbe8cb6399ff85f4b9f158baad2efd27b",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000002/basis_functions.bin": "0997d09f46ff28b75bccb495d4bb2b9a397b607c21bb47b0d2f31e50be238243",
+      "c128-input/data_dcdft/fragments/000002/wavefunctions.bin": "0e2f01bd1b2a74729a88587974f2bf5412948b98b4190c07f8f0370048ee2875",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_eigen.data": "7473edb9124bd541054df6acf18b464aa6f7218bf9ecadb277617c2c99af7814",
+      "c128-input/data_dcdft/fragments/000002/hamiltonian_local.bin": "06d666bfb5a29a44f2d035f42ff846f9c2b8f64e7a5e6aaa3912fec6cf97d5c2",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000002/rgrid_index.bin": "d596cb7c7a148e13a0ffa0d2c3a2eaafab172405bcf9d6bd5d3ea123ec6b615f",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000003/basis_functions.bin": "744490a6a5dd5b9e2ac06d7bb25e1f49a37d3a851e72b2abbf408fa3339f108b",
+      "c128-input/data_dcdft/fragments/000003/wavefunctions.bin": "d81240932691f495d35e8803b8a29c3b2b78f989aa49e6a4ab631f12cda8d84f",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_eigen.data": "a569938b5a0f84cf8cd310e19876b4be5714af8955c6eb10efc743836d9a46e4",
+      "c128-input/data_dcdft/fragments/000003/hamiltonian_local.bin": "ddb9375b414517bf185dae83355644a47a2a1b186778d5a3434080419b8a5529",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000003/rgrid_index.bin": "fba45554a8329a3a5a82a4d9bde88e2574a837ec41f7cc89e0bc78cfaa3fdd63",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000004/basis_functions.bin": "50f8f420b9d1463a0cdc900be5cf932006cdee4bc3314e13d0c352ff14746c7f",
+      "c128-input/data_dcdft/fragments/000004/wavefunctions.bin": "a7da4478a42d7bd7dcb8ea5ee5c533ccee9d6830c693519a43faaab0b0730889",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_eigen.data": "de0394e6c83ca451770f484a964622a0c422c9261d597a3d221062e71a7e1c27",
+      "c128-input/data_dcdft/fragments/000004/hamiltonian_local.bin": "3b8bc009036f2a33736ed738c14a61ef0f0e1a71352c65ae83f1c2d0fe66ba6b",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000004/rgrid_index.bin": "e497b6d28e04fe38c1093853383ad4b4277542883c2147b18038cafc6e3e726a",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000010/basis_functions.bin": "8a1fd29aa50ee48c93bea2fd25b7efb0a81846be49d7721c56990d614189d65a",
+      "c128-input/data_dcdft/fragments/000010/wavefunctions.bin": "2458841a0235a22f78071d814257ce18623d8c30f2e516d2b92761950a74c864",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_eigen.data": "b1b2e8d573cd83a11116e694e479501120da21d474070f99217db03a9e6ff973",
+      "c128-input/data_dcdft/fragments/000010/hamiltonian_local.bin": "f1b79fda8c482dec7892838a99952d91acc675280b6a5812f76635c088a7ef6b",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000010/rgrid_index.bin": "967f1842305109e080a6ac9b9264e1b659488c459993a14c8f6775c548bf7862",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000011/basis_functions.bin": "ee615b11f7995c08c79feee94eaff106936b53f07aa2ce640e2b8815a5abe591",
+      "c128-input/data_dcdft/fragments/000011/wavefunctions.bin": "062d6be7179eb5eab818f21a6cea7f1ca04c809d62ea6354b8e4104e8d54e638",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_eigen.data": "641a1454ef65b258dfa97f24df02b0c13e2db6b71ff62b25848b22375b8bf18a",
+      "c128-input/data_dcdft/fragments/000011/hamiltonian_local.bin": "2d06dcf7a47955e8bc01b75cd5fb1b282af465e9a5900b0b16e319a6e4c6dff9",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000011/rgrid_index.bin": "44cb9ef4b3c2d377799e21beb76f3d053801f0a020b0da8facfc96a5ec8fd338",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000016/basis_functions.bin": "06e0981df9dfc53fdc963dbdbf119648519791a8a8180cc45f7d1f03e3a50ab7",
+      "c128-input/data_dcdft/fragments/000016/wavefunctions.bin": "de15d8cf4dc7c45d8f3aa34d287fc12664fe8e5c1f3c798641ffaf96a6991201",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_eigen.data": "a9b98b3f29951172826b5f0dea7267650f25dc9db3985d016c4c578fa6d97039",
+      "c128-input/data_dcdft/fragments/000016/hamiltonian_local.bin": "861dc3d30cdad38bcffdd3bbb4c7841109af0bc580bcdc4e264b54d68d18b221",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000016/rgrid_index.bin": "60f5f70ea45199e6cfe8f2b265a2220136226cae803ee57f85e59b6136d70c2d",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000008/basis_functions.bin": "b3039703ef533a93d0e1d6d1a894f23b81f75e0e418251e630ad4483d6e10a0f",
+      "c128-input/data_dcdft/fragments/000008/wavefunctions.bin": "74deba0cec85a29154d4fd61831538c4668157387ad1dba4ebcff8802394736a",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_eigen.data": "9cd9584cc995a1af7355767168c6792be94fe0545f29d0f1a06d49de8e0313a8",
+      "c128-input/data_dcdft/fragments/000008/hamiltonian_local.bin": "8feaaeeef7075316ff9abb83b41a2f86d65b13a64fa906bc5078ab07e121bf5e",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000008/rgrid_index.bin": "c85649bac5a54b733cbad419540df6c968c96e7a3b21327c53840078aacb3cc2",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000001/basis_functions.bin": "c9af88c13d7dcac61bf1ab1424e14aa95952e64e47be27ff88fb91f36c7ea02b",
+      "c128-input/data_dcdft/fragments/000001/wavefunctions.bin": "07276cedd2d2a15f8e0011316150d958223c067d9b701632037b6cda2d7c77d9",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_eigen.data": "3e5d1487ee25105377d0f0c88b6a5caee212084ae88cbd5f4941c1cc6259cd23",
+      "c128-input/data_dcdft/fragments/000001/hamiltonian_local.bin": "dc3580dd9885939005e47d36f3678c283938f4013eba1c0c085f8ee60dc22a6d",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000001/rgrid_index.bin": "88039c4d9cc924b1f6405b6f52401ccdacd6d700ac4f3cd6e4b3e505b4f8dfd7",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000006/basis_functions.bin": "127821c0dbdc09bb105613fc2bd41ca44c8e05f16621c1f5db280352a0fa1d3d",
+      "c128-input/data_dcdft/fragments/000006/wavefunctions.bin": "1a6ac7bbcc14a731566297c60e7a63ceb5bcbfad27ebb12b19ff2d7ef38e83ff",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_eigen.data": "3d570ac8e2f0aba4eedf1cbcdce5c10fb3e5e565c1de5e68385414a3d7bd2278",
+      "c128-input/data_dcdft/fragments/000006/hamiltonian_local.bin": "e73f4119eeb36928dccc9e60c6ea31715042f0c235a6c8cb6ef1b53b99b2f1da",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000006/rgrid_index.bin": "bfd38871466b66e7b3282ea1b2b49b726f8f88bf56d25156e21ba7dea2d94957",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000007/basis_functions.bin": "5c5607571da5f26ccb75fafced4b96249d15e1d8929bb53d31970b65eeea0ae6",
+      "c128-input/data_dcdft/fragments/000007/wavefunctions.bin": "e71d09c6a27cc1427db6952626862efadd2c57fb313890b46982295d8d62efc7",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_eigen.data": "d3a28061915af8c10d8f6c081541119f84e53861405faa48ca68917fecd12d3c",
+      "c128-input/data_dcdft/fragments/000007/hamiltonian_local.bin": "3b550edfff120e4dc7441dcb4295342fcf480a55e41ffe516e151bd466e7cf7e",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000007/rgrid_index.bin": "f5a550113c99c81b942d19ddf3123a225550566f9e5409138633b07a3c1e3a5e",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000009/basis_functions.bin": "d6e121af0ec34bdf75b672f00bf48769f797b1f15dec43c6ed67c1a41ef96a87",
+      "c128-input/data_dcdft/fragments/000009/wavefunctions.bin": "95b060f94ceb900c20d60ead079c1787dd10c89474bcdeabdf34dd5e561d9083",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_eigen.data": "d45fd1e172c9e1b952aad69816175c4aa240c5b964a6e6a60f573714c11c88ac",
+      "c128-input/data_dcdft/fragments/000009/hamiltonian_local.bin": "e7a33b430e5cfe74aae1102f8171a744dee273e23f7ad18f5b76ac022ffa8631",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000009/rgrid_index.bin": "18bedd3c0abdc62cbbcde6870b98c6accc8a0bf70cdfdc6a72800555eb6581a4",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000013/basis_functions.bin": "e172237b663a3ed0f52cccdc60be79dc1a6fd49aaadbe9fed3aea6bb78f16cdc",
+      "c128-input/data_dcdft/fragments/000013/wavefunctions.bin": "886086f70a2652e0e5be689c88d7c54101c3f598fee120b318852cd625cd0169",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_eigen.data": "abcb097a63683bc6094f0f146ac7a16ca66f5971377c06ee1e7e4701d3ca6040",
+      "c128-input/data_dcdft/fragments/000013/hamiltonian_local.bin": "f82028dac831ba334cdbbed0bf7a28fa6803fdb9ade38723a62ad810c7bfff0c",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000013/rgrid_index.bin": "6ca0fe7511f478ec2eb0be9e9476aec10b43561078836b2ef1afa0e4ce6fcd22",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000014/basis_functions.bin": "4e925b0db44a36a08c5d1a2efe45b674fd4cb5bdc43115878fa0f934c1ff02f5",
+      "c128-input/data_dcdft/fragments/000014/wavefunctions.bin": "e38ba2fa7349880b79b52bae10d55d637e2fdf1f3ca42303b9d46906f917f721",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_eigen.data": "21e5f7d605afa24eff500906005266bb1faeb144a5af1b6b43b9a1f757997349",
+      "c128-input/data_dcdft/fragments/000014/hamiltonian_local.bin": "a3faa53cafdb93416dc4514adc2b25310180260da79372dd5ee8683548d04378",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000014/rgrid_index.bin": "cdb00f025b570811c9ab87ba7fb8430df2313b7eeaa522050df4ab3d7a5d237a",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000015/basis_functions.bin": "bb3e18c2acddf23861f5a41910572faae01977d2e5ca4659da58884b1434c80c",
+      "c128-input/data_dcdft/fragments/000015/wavefunctions.bin": "c3de467968f6f3a6ca04e9a8cbe6dd2e2392ab818b4b8a5b535c40eb9416fdfb",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_eigen.data": "6f0ec1433daf9b40acddfadc4bea49843a9c049da939e330b49c03d5074ba03d",
+      "c128-input/data_dcdft/fragments/000015/hamiltonian_local.bin": "1e0dc302fb0f955c2fb05ac53a413066e8d23d18683c398c55a858c2b68539fa",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000015/rgrid_index.bin": "6dbe53fe74630ef611182b7f043d881ee11ff7276cb7a30b25f2a2321688ab0f",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000012/basis_functions.bin": "0dcaeb5aba2c5548fcb53369e8171f5ee78742b88363c584be8e45aa12440443",
+      "c128-input/data_dcdft/fragments/000012/wavefunctions.bin": "3e6147e924a24ddb0571f481fa425945a95c8de36177d338f5ac7337b2cea5c0",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_eigen.data": "01df6074dbd433a4b56e5467872927395be7fdeafba49a0b8da2e2e305474900",
+      "c128-input/data_dcdft/fragments/000012/hamiltonian_local.bin": "d26e853b3ae9546de9f5d5d17ee44615bc35a1ed93bef00d08b486d801ddf2c2",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000012/rgrid_index.bin": "13132a033fcf6ee27b1eb4d90e889c5801c3c6ebf10d34f3e805bfbbaa4ead24",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77"
+    },
+    "restored_date": "2026-09-27",
+    "background_gate_cpu_percent": 200,
+    "background_median_matching_tolerance_percent": 50,
+    "gate_revision_reason": "Before any numerical sample: 18 logical CPUs minus16 ranks leaves2 CPU equivalents; require background below200% and subsequently matched background between variants.",
+    "background_policy": "No quiet-load gate; record background load; run all samples without censoring slow phases. User direction 2026-09-27."
+  },
+  "sizes": [
+    {
+      "atoms": 64,
+      "variants": {
+        "before": {
+          "rt": {
+            "values": [
+              39.443
+            ],
+            "median": 39.443,
+            "minimum": 39.443,
+            "maximum": 39.443,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "exchange": {
+            "values": [
+              31.509718069999998
+            ],
+            "median": 31.509718069999998,
+            "minimum": 31.509718069999998,
+            "maximum": 31.509718069999998,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "WF": {
+            "values": [
+              1.15241313
+            ],
+            "median": 1.15241313,
+            "minimum": 1.15241313,
+            "maximum": 1.15241313,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "ACE": {
+            "values": [
+              0.13830328
+            ],
+            "median": 0.13830328,
+            "minimum": 0.13830328,
+            "maximum": 0.13830328,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "background_cpu": {
+            "values": [
+              49.34761904761905
+            ],
+            "median": 49.34761904761905,
+            "minimum": 49.34761904761905,
+            "maximum": 49.34761904761905,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          }
+        },
+        "after": {
+          "rt": {
+            "values": [
+              41.387
+            ],
+            "median": 41.387,
+            "minimum": 41.387,
+            "maximum": 41.387,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "exchange": {
+            "values": [
+              33.60610192
+            ],
+            "median": 33.60610192,
+            "minimum": 33.60610192,
+            "maximum": 33.60610192,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "WF": {
+            "values": [
+              0.815525054
+            ],
+            "median": 0.815525054,
+            "minimum": 0.815525054,
+            "maximum": 0.815525054,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "ACE": {
+            "values": [
+              0.1489071849
+            ],
+            "median": 0.1489071849,
+            "minimum": 0.1489071849,
+            "maximum": 0.1489071849,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "background_cpu": {
+            "values": [
+              49.1
+            ],
+            "median": 49.1,
+            "minimum": 49.1,
+            "maximum": 49.1,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          }
+        }
+      },
+      "paired_rt_ratios": [
+        0.9530287288278928
+      ],
+      "errors": [
+        {
+          "repeat": 1,
+          "current_abs": 5.200782296141404e-18,
+          "Einf_percent": 4.9253146022056375e-11,
+          "DT_percent": 2.273345534633677e-11,
+          "density_abs": 1.0547118733938987e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        }
+      ],
+      "median_rt_speedup": 0.9530287288278928,
+      "median_exchange_speedup": 0.9376189522072365,
+      "unchanged_WF_ratio": 0.7076672703303892,
+      "background_median_difference": 0.24761904761904674,
+      "timing_stable": false
+    },
+    {
+      "atoms": 128,
+      "variants": {
+        "before": {
+          "rt": {
+            "values": [
+              60.64
+            ],
+            "median": 60.64,
+            "minimum": 60.64,
+            "maximum": 60.64,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "exchange": {
+            "values": [
+              37.798912800000004
+            ],
+            "median": 37.798912800000004,
+            "minimum": 37.798912800000004,
+            "maximum": 37.798912800000004,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "WF": {
+            "values": [
+              2.533908841
+            ],
+            "median": 2.533908841,
+            "minimum": 2.533908841,
+            "maximum": 2.533908841,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "ACE": {
+            "values": [
+              0.9023780809999999
+            ],
+            "median": 0.9023780809999999,
+            "minimum": 0.9023780809999999,
+            "maximum": 0.9023780809999999,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "background_cpu": {
+            "values": [
+              190.43529411764706
+            ],
+            "median": 190.43529411764706,
+            "minimum": 190.43529411764706,
+            "maximum": 190.43529411764706,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          }
+        },
+        "after": {
+          "rt": {
+            "values": [
+              56.949
+            ],
+            "median": 56.949,
+            "minimum": 56.949,
+            "maximum": 56.949,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "exchange": {
+            "values": [
+              35.46198506
+            ],
+            "median": 35.46198506,
+            "minimum": 35.46198506,
+            "maximum": 35.46198506,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "WF": {
+            "values": [
+              1.827324868
+            ],
+            "median": 1.827324868,
+            "minimum": 1.827324868,
+            "maximum": 1.827324868,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "ACE": {
+            "values": [
+              0.882197855
+            ],
+            "median": 0.882197855,
+            "minimum": 0.882197855,
+            "maximum": 0.882197855,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          },
+          "background_cpu": {
+            "values": [
+              140.8375
+            ],
+            "median": 140.8375,
+            "minimum": 140.8375,
+            "maximum": 140.8375,
+            "range_percent": 0.0,
+            "cv_percent": 0.0
+          }
+        }
+      },
+      "paired_rt_ratios": [
+        1.064812375985531
+      ],
+      "errors": [
+        {
+          "repeat": 1,
+          "current_abs": 3.901433755053307e-18,
+          "Einf_percent": 3.6947895396979116e-11,
+          "DT_percent": 5.679355176087975e-12,
+          "density_abs": 1.9984014443252818e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        }
+      ],
+      "median_rt_speedup": 1.064812375985531,
+      "median_exchange_speedup": 1.0658995184856694,
+      "unchanged_WF_ratio": 0.7211486216208359,
+      "background_median_difference": 49.597794117647055,
+      "timing_stable": false
+    }
+  ],
+  "samples": [
+    {
+      "atoms": 64,
+      "variant": "before",
+      "repetition": 1,
+      "folder": "<local>/c64-before-1",
+      "wall_seconds": 41.80537041699972,
+      "rt_seconds": 39.443,
+      "phase_seconds": [
+        [
+          0.0094912052,
+          0.65107417,
+          0.987149,
+          0.004570961
+        ],
+        [
+          0.0096299648,
+          0.033365011,
+          0.96605229,
+          0.0039212704
+        ],
+        [
+          0.0095508099,
+          0.03431201,
+          0.95966911,
+          0.0040922165
+        ],
+        [
+          0.0093979836,
+          0.03412509,
+          0.96505809,
+          0.0039079189
+        ],
+        [
+          0.010518789,
+          0.031790018,
+          0.80185413,
+          0.0039041042
+        ],
+        [
+          0.0095610619,
+          0.034948111,
+          0.71808314,
+          0.003921032
+        ],
+        [
+          0.0095617771,
+          0.034439087,
+          0.96287704,
+          0.0039460659
+        ],
+        [
+          0.009608984,
+          0.034499884,
+          0.91612983,
+          0.0039100647
+        ],
+        [
+          0.0090889931,
+          0.033201933,
+          0.99611115,
+          0.0038540363
+        ],
+        [
+          0.0096170902,
+          0.034703016,
+          0.88534498,
+          0.0038530827
+        ],
+        [
+          0.010067225,
+          0.031500101,
+          0.63448882,
+          0.0039889812
+        ],
+        [
+          0.0095658302,
+          0.034075022,
+          0.77243018,
+          0.003811121
+        ],
+        [
+          0.0092561245,
+          0.033179998,
+          0.92585182,
+          0.0040073395
+        ],
+        [
+          0.0097341537,
+          0.03417325,
+          0.72466993,
+          0.0041422844
+        ],
+        [
+          0.0096440315,
+          0.034204245,
+          0.90310192,
+          0.0037550926
+        ],
+        [
+          0.009540081,
+          0.034029007,
+          0.8515141,
+          0.0039789677
+        ],
+        [
+          0.009649992,
+          0.034393787,
+          0.93851805,
+          0.0040860176
+        ],
+        [
+          0.0096199512,
+          0.034078836,
+          1.0336661,
+          0.0045249462
+        ],
+        [
+          0.0096149445,
+          0.034137011,
+          1.0290849,
+          0.0040500164
+        ],
+        [
+          0.0092499256,
+          0.032810926,
+          0.96893883,
+          0.003991127
+        ],
+        [
+          0.0097789764,
+          0.034653187,
+          1.0125391,
+          0.0038928986
+        ],
+        [
+          0.0096287727,
+          0.033746004,
+          1.0140862,
+          0.0039658546
+        ],
+        [
+          0.0095291138,
+          0.033927917,
+          1.0000389,
+          0.0041761398
+        ],
+        [
+          0.0096449852,
+          0.03408885,
+          0.76649714,
+          0.0041489601
+        ],
+        [
+          0.009665966,
+          0.033989191,
+          0.81514502,
+          0.0040309429
+        ],
+        [
+          0.0098218918,
+          0.034472942,
+          1.0289369,
+          0.0040078163
+        ],
+        [
+          0.0095801353,
+          0.03373313,
+          1.0086727,
+          0.004390955
+        ],
+        [
+          0.0096218586,
+          0.034296036,
+          1.001251,
+          0.004390955
+        ],
+        [
+          0.0097100735,
+          0.033457994,
+          1.0214813,
+          0.0044088364
+        ],
+        [
+          0.0096719265,
+          0.033741236,
+          1.0244298,
+          0.0043289661
+        ],
+        [
+          0.010008812,
+          0.033957958,
+          1.0153551,
+          0.0046038628
+        ],
+        [
+          0.0097250938,
+          0.034172297,
+          1.0124826,
+          0.0043280125
+        ],
+        [
+          0.009608984,
+          0.033707142,
+          0.7977879,
+          0.0039789677
+        ],
+        [
+          0.0097711086,
+          0.034153938,
+          1.0147538,
+          0.0040931702
+        ],
+        [
+          0.0097391605,
+          0.034348965,
+          1.0228162,
+          0.0039112568
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3279845715,
+        1.15241313,
+        31.509718069999998,
+        0.13830328
+      ],
+      "late_phase_seconds": [
+        0.2313818929,
+        0.815528869,
+        22.70404949,
+        0.0990045072
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 49.34761904761905,
+      "background_cpu_max": 125.6,
+      "compute_cpu_mean": 758.9285714285714,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "after",
+      "repetition": 1,
+      "folder": "<local>/c64-after-1",
+      "wall_seconds": 43.491995417,
+      "rt_seconds": 41.387,
+      "phase_seconds": [
+        [
+          0.013145208,
+          0.75304794,
+          0.69578815,
+          0.0052511692
+        ],
+        [
+          0.0096290112,
+          0.022926092,
+          0.89934278,
+          0.0040261745
+        ],
+        [
+          0.0093312263,
+          0.023226738,
+          0.97204208,
+          0.0041360855
+        ],
+        [
+          0.0097031593,
+          0.024374008,
+          1.0168891,
+          0.0041868687
+        ],
+        [
+          0.015720129,
+          0.027793884,
+          1.021724,
+          0.004117012
+        ],
+        [
+          0.009881258,
+          0.024298191,
+          1.0154071,
+          0.0046021938
+        ],
+        [
+          0.009472847,
+          0.023091078,
+          0.90314388,
+          0.004336834
+        ],
+        [
+          0.0095276833,
+          0.023378849,
+          1.025876,
+          0.0043830872
+        ],
+        [
+          0.0099000931,
+          0.024379015,
+          1.0149341,
+          0.0045900345
+        ],
+        [
+          0.010390997,
+          0.02504015,
+          1.0199637,
+          0.0040330887
+        ],
+        [
+          0.0097761154,
+          0.023478985,
+          1.0201113,
+          0.0049579144
+        ],
+        [
+          0.0098638535,
+          0.023161888,
+          0.95246196,
+          0.0045807362
+        ],
+        [
+          0.0098819733,
+          0.023689032,
+          1.014713,
+          0.0042579174
+        ],
+        [
+          0.0098149776,
+          0.023318052,
+          1.0226014,
+          0.0042307377
+        ],
+        [
+          0.010047436,
+          0.024093151,
+          1.013468,
+          0.0047581196
+        ],
+        [
+          0.0095880032,
+          0.023617029,
+          0.98442197,
+          0.0046620369
+        ],
+        [
+          0.010160208,
+          0.024445057,
+          0.98313689,
+          0.0042271614
+        ],
+        [
+          0.0095450878,
+          0.022988081,
+          0.95106697,
+          0.0046977997
+        ],
+        [
+          0.0092680454,
+          0.022758961,
+          0.99819875,
+          0.0045850277
+        ],
+        [
+          0.0094721317,
+          0.023271084,
+          0.98032999,
+          0.0042362213
+        ],
+        [
+          0.010809183,
+          0.025575161,
+          1.0195289,
+          0.0040450096
+        ],
+        [
+          0.010008812,
+          0.023537159,
+          1.0096772,
+          0.0043318272
+        ],
+        [
+          0.0096299648,
+          0.024236917,
+          1.0083599,
+          0.004196167
+        ],
+        [
+          0.0093741417,
+          0.023335218,
+          0.9365468,
+          0.0042419434
+        ],
+        [
+          0.010068893,
+          0.023237944,
+          1.020081,
+          0.0040330887
+        ],
+        [
+          0.0090630054,
+          0.024282932,
+          1.013267,
+          0.0047130585
+        ],
+        [
+          0.0098650455,
+          0.024062872,
+          1.0181239,
+          0.0041501522
+        ],
+        [
+          0.0096461773,
+          0.024010897,
+          1.0183511,
+          0.0043141842
+        ],
+        [
+          0.009581089,
+          0.024288893,
+          0.9049871,
+          0.0044560432
+        ],
+        [
+          0.011415005,
+          0.024964809,
+          0.76199675,
+          0.0042579174
+        ],
+        [
+          0.0099811554,
+          0.023082972,
+          1.0171561,
+          0.0043599606
+        ],
+        [
+          0.010131121,
+          0.024704933,
+          1.0128732,
+          0.0042800903
+        ],
+        [
+          0.0094430447,
+          0.023430109,
+          1.0111918,
+          0.0045590401
+        ],
+        [
+          0.0097329617,
+          0.024359941,
+          1.02337,
+          0.0046577454
+        ],
+        [
+          0.01079917,
+          0.025084972,
+          1.0207582,
+          0.0047059059
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3405230056,
+        0.815525054,
+        33.60610192,
+        0.1489071849
+      ],
+      "late_phase_seconds": [
+        0.237190486,
+        0.573538064,
+        23.69666788,
+        0.1055378916
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 49.1,
+      "background_cpu_max": 161.9,
+      "compute_cpu_mean": 759.709090909091,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "after",
+      "repetition": 1,
+      "folder": "<local>/c128-after-1",
+      "wall_seconds": 64.97892675000003,
+      "rt_seconds": 56.949,
+      "phase_seconds": [
+        [
+          0.025981188,
+          6.168489,
+          0.95903897,
+          0.019572973
+        ],
+        [
+          0.026818991,
+          0.040729046,
+          0.95947003,
+          0.017640114
+        ],
+        [
+          0.024823189,
+          0.043680906,
+          0.96265316,
+          0.016828775
+        ],
+        [
+          0.025505066,
+          0.046979904,
+          0.95169902,
+          0.016752005
+        ],
+        [
+          0.024243116,
+          0.038232803,
+          0.96566772,
+          0.016107082
+        ],
+        [
+          0.024541855,
+          0.04402113,
+          0.97605515,
+          0.017024755
+        ],
+        [
+          0.023984671,
+          0.045461893,
+          0.96415281,
+          0.016940832
+        ],
+        [
+          0.023882866,
+          0.043373108,
+          0.99353909,
+          0.017874241
+        ],
+        [
+          0.026531696,
+          0.05012989,
+          0.97050405,
+          0.017837048
+        ],
+        [
+          0.024321795,
+          0.043912888,
+          0.98218799,
+          0.018978834
+        ],
+        [
+          0.024553299,
+          0.04538393,
+          0.99174404,
+          0.018668652
+        ],
+        [
+          0.026315212,
+          0.048911095,
+          1.0133219,
+          0.042786121
+        ],
+        [
+          0.024361134,
+          0.045603037,
+          1.0302989,
+          0.020368099
+        ],
+        [
+          0.024867773,
+          0.04635787,
+          1.0140963,
+          0.018987179
+        ],
+        [
+          0.023413897,
+          0.045655251,
+          1.037236,
+          0.032683849
+        ],
+        [
+          0.025208712,
+          0.045615911,
+          1.0070271,
+          0.019108772
+        ],
+        [
+          0.024886131,
+          0.044696093,
+          1.0720048,
+          0.046723127
+        ],
+        [
+          0.027425766,
+          0.052249908,
+          1.1084921,
+          0.034381628
+        ],
+        [
+          0.024950981,
+          0.056659937,
+          1.067487,
+          0.020689726
+        ],
+        [
+          0.025660992,
+          0.09507513,
+          1.0678151,
+          0.02873373
+        ],
+        [
+          0.025088072,
+          0.058492899,
+          1.089886,
+          0.049168348
+        ],
+        [
+          0.026268244,
+          0.052778959,
+          1.0717547,
+          0.02196312
+        ],
+        [
+          0.024811983,
+          0.049834013,
+          1.0828309,
+          0.020961046
+        ],
+        [
+          0.024539232,
+          0.054448128,
+          1.087297,
+          0.027689934
+        ],
+        [
+          0.02978611,
+          0.061203957,
+          1.0918131,
+          0.036580801
+        ],
+        [
+          0.025990009,
+          0.061329842,
+          1.0752392,
+          0.029363871
+        ],
+        [
+          0.026109934,
+          0.071635962,
+          1.084717,
+          0.022290945
+        ],
+        [
+          0.024540901,
+          0.053385019,
+          1.0782659,
+          0.026874065
+        ],
+        [
+          0.024392843,
+          0.068092823,
+          1.1248841,
+          0.035336256
+        ],
+        [
+          0.024348974,
+          0.056154013,
+          1.091228,
+          0.022633791
+        ],
+        [
+          0.0261271,
+          0.064348936,
+          1.0856829,
+          0.024759054
+        ],
+        [
+          0.025709867,
+          0.055190802,
+          1.104506,
+          0.057485104
+        ],
+        [
+          0.027519941,
+          0.067389011,
+          1.0818722,
+          0.024915218
+        ],
+        [
+          0.023986101,
+          0.061841726,
+          1.092936,
+          0.022598982
+        ],
+        [
+          0.026171923,
+          0.068469048,
+          1.0836198,
+          0.020462751
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.861688376,
+        1.827324868,
+        35.46198506,
+        0.882197855
+      ],
+      "late_phase_seconds": [
+        0.6124818320000001,
+        1.38541937,
+        25.744312,
+        0.707545517
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 140.8375,
+      "background_cpu_max": 250.8,
+      "compute_cpu_mean": 1511.80625,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "before",
+      "repetition": 1,
+      "folder": "<local>/c128-before-1",
+      "wall_seconds": 69.59109016599996,
+      "rt_seconds": 60.64,
+      "phase_seconds": [
+        [
+          0.027273178,
+          6.7458131,
+          1.083827,
+          0.034568071
+        ],
+        [
+          0.028557777,
+          0.068109035,
+          1.1654747,
+          0.023108959
+        ],
+        [
+          0.02602005,
+          0.068108082,
+          1.1525083,
+          0.039981127
+        ],
+        [
+          0.027902365,
+          0.10068011,
+          1.1149571,
+          0.028696775
+        ],
+        [
+          0.026904106,
+          0.070832014,
+          1.0959952,
+          0.033730984
+        ],
+        [
+          0.02660799,
+          0.073221922,
+          1.0836959,
+          0.024173021
+        ],
+        [
+          0.026613951,
+          0.070328236,
+          1.076901,
+          0.021241188
+        ],
+        [
+          0.024611235,
+          0.06605792,
+          1.0807872,
+          0.02088213
+        ],
+        [
+          0.024989843,
+          0.066446781,
+          1.085835,
+          0.026803017
+        ],
+        [
+          0.025650024,
+          0.12313986,
+          1.082278,
+          0.021803141
+        ],
+        [
+          0.025165081,
+          0.063561201,
+          1.0883069,
+          0.021739006
+        ],
+        [
+          0.024730921,
+          0.055929899,
+          1.0218289,
+          0.019314289
+        ],
+        [
+          0.024821997,
+          0.058115721,
+          1.0295639,
+          0.019070148
+        ],
+        [
+          0.024476767,
+          0.056691885,
+          1.0271118,
+          0.01909399
+        ],
+        [
+          0.024182081,
+          0.058201075,
+          1.0599771,
+          0.019834995
+        ],
+        [
+          0.024194002,
+          0.057260036,
+          1.0513079,
+          0.01971221
+        ],
+        [
+          0.024096966,
+          0.058035851,
+          1.0535629,
+          0.019564629
+        ],
+        [
+          0.023949862,
+          0.057692051,
+          1.0359008,
+          0.019878149
+        ],
+        [
+          0.024129152,
+          0.058256149,
+          1.0340078,
+          0.019052982
+        ],
+        [
+          0.024543047,
+          0.057438135,
+          1.0877619,
+          0.020691156
+        ],
+        [
+          0.025739193,
+          0.067420959,
+          1.1142712,
+          0.025080681
+        ],
+        [
+          0.024473667,
+          0.058873177,
+          1.1639187,
+          0.022953987
+        ],
+        [
+          0.024077177,
+          0.057116747,
+          1.1487942,
+          0.022788286
+        ],
+        [
+          0.025134087,
+          0.10779285,
+          1.1576498,
+          0.020447969
+        ],
+        [
+          0.025377035,
+          0.064286947,
+          1.1228051,
+          0.031194925
+        ],
+        [
+          0.026178122,
+          0.06692791,
+          1.1306827,
+          0.026537895
+        ],
+        [
+          0.027566671,
+          0.083180189,
+          1.1520889,
+          0.088294744
+        ],
+        [
+          0.027433157,
+          0.19930506,
+          1.1815491,
+          0.035169125
+        ],
+        [
+          0.026784897,
+          0.077315092,
+          1.1687009,
+          0.034673691
+        ],
+        [
+          0.026472807,
+          0.078999996,
+          1.14941,
+          0.033123732
+        ],
+        [
+          0.025585175,
+          0.068699837,
+          1.1495731,
+          0.02364707
+        ],
+        [
+          0.029307842,
+          0.083430052,
+          1.1864929,
+          0.022282839
+        ],
+        [
+          0.025712013,
+          0.084064007,
+          1.1853549,
+          0.032666206
+        ],
+        [
+          0.026514292,
+          0.076139212,
+          1.181695,
+          0.022402048
+        ],
+        [
+          0.026212931,
+          0.072250843,
+          1.178164,
+          0.022742987
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.874716283,
+        2.533908841,
+        37.798912800000004,
+        0.9023780809999999
+      ],
+      "late_phase_seconds": [
+        0.611693861,
+        1.76342368,
+        26.7721735,
+        0.640218733
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 190.43529411764706,
+      "background_cpu_max": 321.3,
+      "compute_cpu_mean": 1501.7882352941176,
+      "slow_unchanged_phase": false
+    }
+  ],
+  "comparison": "19b9333c versus spherical reconstruction stage1, FFT batch1 on both",
+  "all_timings_stable": false
+}

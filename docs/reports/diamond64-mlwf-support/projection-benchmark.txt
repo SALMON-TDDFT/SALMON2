@@ -1,0 +1,3 @@
+trial/dense/compact/speedup/error   1     0.0523985     0.0083539     6.2723399   7.10546E-14
+trial/dense/compact/speedup/error   2     0.0507277     0.0082957     6.1149391   7.10546E-14
+trial/dense/compact/speedup/error   3     0.0509657     0.0081341     6.2656840   7.10546E-14

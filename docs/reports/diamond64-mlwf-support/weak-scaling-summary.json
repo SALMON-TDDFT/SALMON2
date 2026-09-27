@@ -1,0 +1,477 @@
+{
+  "complete": true,
+  "source_commit": "33dbea5a256a6960f664cc53a6b7b416dcae6225",
+  "hardware": "Mac17,9; 18 physical/logical cores; perflevel0=6, perflevel1=12",
+  "nt": 16,
+  "dt": 0.02,
+  "omp": 1,
+  "blas": 1,
+  "ACE_interval": 1,
+  "binary_sha256": "c9245415c7c63e94f20e8ec1dd90923d0d1088355dd884d776930dca93de8f61",
+  "cases": [
+    {
+      "label": "c64-full",
+      "atoms": 64,
+      "cells": 8,
+      "mpi": 8,
+      "radius": 0,
+      "seconds": 108.28329299995676,
+      "rt_seconds": 104.53,
+      "validated": true,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "ace_builds": 35,
+      "max_discarded_norm_fraction": 0.0,
+      "active_sources_initial": 1024,
+      "possible_sources": 1024,
+      "mlwf_iterations": 9,
+      "mlwf_spread": 251.9496,
+      "mlwf_gradient": 9.40916524e-07,
+      "sampled_max_rank_MiB": 437.71875,
+      "sampled_total_MiB": 3465.265625,
+      "phase_seconds": [
+        0.3481721852,
+        2.572398902,
+        98.1427399,
+        0.1661672593
+      ],
+      "first_refresh_phase_seconds": [
+        0.010714769,
+        0.71336389,
+        2.458818,
+        0.0046761036
+      ],
+      "remaining_phase_seconds": [
+        0.3374574162,
+        1.859035012,
+        95.6839219,
+        0.1614911557
+      ],
+      "storage": [
+        [
+          0,
+          64,
+          512,
+          192
+        ],
+        [
+          1,
+          64,
+          512,
+          192
+        ],
+        [
+          2,
+          64,
+          512,
+          192
+        ],
+        [
+          3,
+          64,
+          512,
+          192
+        ],
+        [
+          6,
+          64,
+          512,
+          192
+        ],
+        [
+          5,
+          64,
+          512,
+          192
+        ],
+        [
+          4,
+          64,
+          512,
+          192
+        ],
+        [
+          7,
+          64,
+          512,
+          192
+        ]
+      ]
+    },
+    {
+      "label": "c64-r6",
+      "atoms": 64,
+      "cells": 8,
+      "mpi": 8,
+      "radius": 6,
+      "seconds": 60.43895104108378,
+      "rt_seconds": 57.684,
+      "validated": true,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "ace_builds": 35,
+      "max_discarded_norm_fraction": 0.001069665,
+      "active_sources_initial": 480,
+      "possible_sources": 1024,
+      "mlwf_iterations": 9,
+      "mlwf_spread": 251.9496,
+      "mlwf_gradient": 9.40916524e-07,
+      "sampled_max_rank_MiB": 438.203125,
+      "sampled_total_MiB": 3468.046875,
+      "phase_seconds": [
+        0.3711352332,
+        3.364460232,
+        49.3303614,
+        0.1720063688
+      ],
+      "first_refresh_phase_seconds": [
+        0.011200905,
+        0.74290681,
+        1.3638122,
+        0.0055730343
+      ],
+      "remaining_phase_seconds": [
+        0.3599343282,
+        2.621553422,
+        47.9665492,
+        0.1664333345
+      ],
+      "storage": [
+        [
+          0,
+          64,
+          512,
+          192
+        ],
+        [
+          6,
+          64,
+          512,
+          192
+        ],
+        [
+          2,
+          64,
+          512,
+          192
+        ],
+        [
+          7,
+          64,
+          512,
+          192
+        ],
+        [
+          5,
+          64,
+          512,
+          192
+        ],
+        [
+          4,
+          64,
+          512,
+          192
+        ],
+        [
+          1,
+          64,
+          512,
+          192
+        ],
+        [
+          3,
+          64,
+          512,
+          192
+        ]
+      ]
+    },
+    {
+      "label": "c128-full",
+      "atoms": 128,
+      "cells": 16,
+      "mpi": 16,
+      "radius": 0,
+      "seconds": 321.269466000027,
+      "rt_seconds": 304.01,
+      "validated": true,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "ace_builds": 35,
+      "max_discarded_norm_fraction": 0.0,
+      "active_sources_initial": 4096,
+      "possible_sources": 4096,
+      "mlwf_iterations": 10,
+      "mlwf_spread": 506.089812,
+      "mlwf_gradient": 2.0456132e-07,
+      "sampled_max_rank_MiB": 644.921875,
+      "sampled_total_MiB": 10154.5,
+      "phase_seconds": [
+        0.947036741,
+        12.968810770000001,
+        286.9279242,
+        0.806784866
+      ],
+      "first_refresh_phase_seconds": [
+        0.031661987,
+        7.654562,
+        8.3451719,
+        0.030083895
+      ],
+      "remaining_phase_seconds": [
+        0.915374754,
+        5.31424877,
+        278.5827523,
+        0.776700971
+      ],
+      "storage": [
+        [
+          9,
+          64,
+          1024,
+          192
+        ],
+        [
+          10,
+          64,
+          1024,
+          192
+        ],
+        [
+          14,
+          64,
+          1024,
+          192
+        ],
+        [
+          12,
+          64,
+          1024,
+          192
+        ],
+        [
+          8,
+          64,
+          1024,
+          192
+        ],
+        [
+          15,
+          64,
+          1024,
+          192
+        ],
+        [
+          2,
+          64,
+          1024,
+          192
+        ],
+        [
+          1,
+          64,
+          1024,
+          192
+        ],
+        [
+          11,
+          64,
+          1024,
+          192
+        ],
+        [
+          7,
+          64,
+          1024,
+          192
+        ],
+        [
+          0,
+          64,
+          1024,
+          192
+        ],
+        [
+          6,
+          64,
+          1024,
+          192
+        ],
+        [
+          13,
+          64,
+          1024,
+          192
+        ],
+        [
+          3,
+          64,
+          1024,
+          192
+        ],
+        [
+          5,
+          64,
+          1024,
+          192
+        ],
+        [
+          4,
+          64,
+          1024,
+          192
+        ]
+      ]
+    },
+    {
+      "label": "c128-r6",
+      "atoms": 128,
+      "cells": 16,
+      "mpi": 16,
+      "radius": 6,
+      "seconds": 111.49714337498881,
+      "rt_seconds": 100.37,
+      "validated": true,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "ace_builds": 35,
+      "max_discarded_norm_fraction": 0.001070107,
+      "active_sources_initial": 960,
+      "possible_sources": 4096,
+      "mlwf_iterations": 10,
+      "mlwf_spread": 506.089812,
+      "mlwf_gradient": 2.0456132e-07,
+      "sampled_max_rank_MiB": 650.234375,
+      "sampled_total_MiB": 10227.96875,
+      "phase_seconds": [
+        1.004879475,
+        15.567460070000001,
+        73.5261628,
+        1.102176667
+      ],
+      "first_refresh_phase_seconds": [
+        0.027766943,
+        7.7228532,
+        2.049202,
+        0.034061909
+      ],
+      "remaining_phase_seconds": [
+        0.977112532,
+        7.84460687,
+        71.4769608,
+        1.068114758
+      ],
+      "storage": [
+        [
+          0,
+          64,
+          1024,
+          192
+        ],
+        [
+          14,
+          64,
+          1024,
+          192
+        ],
+        [
+          1,
+          64,
+          1024,
+          192
+        ],
+        [
+          15,
+          64,
+          1024,
+          192
+        ],
+        [
+          8,
+          64,
+          1024,
+          192
+        ],
+        [
+          9,
+          64,
+          1024,
+          192
+        ],
+        [
+          6,
+          64,
+          1024,
+          192
+        ],
+        [
+          5,
+          64,
+          1024,
+          192
+        ],
+        [
+          7,
+          64,
+          1024,
+          192
+        ],
+        [
+          2,
+          64,
+          1024,
+          192
+        ],
+        [
+          13,
+          64,
+          1024,
+          192
+        ],
+        [
+          3,
+          64,
+          1024,
+          192
+        ],
+        [
+          12,
+          64,
+          1024,
+          192
+        ],
+        [
+          4,
+          64,
+          1024,
+          192
+        ],
+        [
+          10,
+          64,
+          1024,
+          192
+        ],
+        [
+          11,
+          64,
+          1024,
+          192
+        ]
+      ]
+    }
+  ],
+  "scaling": [
+    {
+      "radius": 0,
+      "rt_time_ratio": 2.908351669377212,
+      "weak_efficiency_percent": 34.383737377059965,
+      "throughput_speedup": 0.6876747475411993,
+      "wall_time_ratio": 2.966934760657448
+    },
+    {
+      "radius": 6,
+      "rt_time_ratio": 1.7399972262672494,
+      "weak_efficiency_percent": 57.4713559828634,
+      "throughput_speedup": 1.149427119657268,
+      "wall_time_ratio": 1.8447895182561636
+    }
+  ]
+}

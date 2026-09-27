@@ -1,0 +1,65 @@
+&calculation
+ theory='dft'
+ yn_dc='y'
+/
+&control
+ sysname='diamond128_hse'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&dc
+ num_fragment=16,1,1
+ num_rgrid_buffer=8,0,0
+ nproc_rgrid_tot=16,1,1
+ nstate_frag=64
+ yn_dc_lcfo='y'
+ lcfo_eigensolver='lapack'
+ energy_cut=100d0
+ lambda_cut=1d-7
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+ yn_eigenexa='n'
+ yn_scalapack='n'
+/
+&system
+ yn_periodic='y'
+ al=107.52d0,6.72d0,6.72d0
+ nelem=1
+ nstate=512
+ nelec=512
+ natom=128
+ file_atom_coor='atom.dat'
+ temperature_k=300d0
+/
+&pseudo
+ izatom(1)=6
+ file_pseudo(1)='C_rps.dat'
+ lloc_ps(1)=1
+/
+&functional
+ xc='hse06'
+ hse_mlwf_maxiter=1
+ hse_mlwf_interval=10000
+/
+&rgrid
+ num_rgrid=256,16,16
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&scf
+ nscf_init_redistribution=10
+ nscf_init_no_diagonal=0
+ nscf=1800
+ ncg=1
+ method_mixing='simple'
+ alpha_mb=0.5d0
+ mixrate=0.01d0
+ threshold=1d-7
+ yn_preconditioning='y'
+/

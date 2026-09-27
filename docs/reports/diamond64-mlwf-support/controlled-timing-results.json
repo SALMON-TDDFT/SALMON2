@@ -1,0 +1,3468 @@
+{
+  "complete": true,
+  "protocol": {
+    "temporary_root": "<local>/salmon-controlled-8t7s71vm",
+    "date": "2026-09-26T22:44:22.532974",
+    "before_commit": "beccb2724fc5477940ff94a0ef6efcdbcd4aa971",
+    "after_commit": "19b9333c53fe6eb8f23670714409bc481b8f05bd",
+    "cpu_binding_supported": false,
+    "logical_cpus": 18,
+    "ranks": [
+      8,
+      16
+    ],
+    "threads": 1,
+    "nt": 16,
+    "dt": 0.02,
+    "radius": 6,
+    "ACE_interval": 1,
+    "repetitions": 3,
+    "schedule": [
+      [
+        64,
+        "before",
+        1
+      ],
+      [
+        64,
+        "after",
+        1
+      ],
+      [
+        128,
+        "after",
+        1
+      ],
+      [
+        128,
+        "before",
+        1
+      ],
+      [
+        64,
+        "after",
+        2
+      ],
+      [
+        64,
+        "before",
+        2
+      ],
+      [
+        128,
+        "before",
+        2
+      ],
+      [
+        128,
+        "after",
+        2
+      ],
+      [
+        64,
+        "before",
+        3
+      ],
+      [
+        64,
+        "after",
+        3
+      ],
+      [
+        128,
+        "after",
+        3
+      ],
+      [
+        128,
+        "before",
+        3
+      ]
+    ],
+    "files": {
+      "bin/before": "782c0885813a4681aebc3c8c2d17c294c0caf0b5bcba2b37bd38f8805bedb4ba",
+      "bin/after": "f87420bde09581d9ad18d148e02e5a2adc1562b54b5675026aa95c1c003d9d31",
+      "c64-input/inputfile": "bd86e8ba5183d543200f908229d08e7b5e07dc6362f0891d4cc9ca4314458542",
+      "c64-input/atom.dat": "a60281c107107053737fd9e81b893800a3034383eb917389a6e60f6a3ec62798",
+      "c64-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c64-input/data_dcdft/total/PS_C_KY_n.dat": "7b6ca7d2f7b514c1116d45aec608be2939dd6e0f76e513248df2daa3615bf38b",
+      "c64-input/data_dcdft/total/diamond64_hse_lcfo_complex_eigen.data": "b6bbf3ec409eeaddc65e2686305745738d6f1028e2a702f9d7df45267d60ad32",
+      "c64-input/data_dcdft/fragments/000005/basis_functions.bin": "fad97f4db1b964f8d0d78de3e287a2a72273bcbb7b3660a81a20501f17cc6948",
+      "c64-input/data_dcdft/fragments/000005/wavefunctions.bin": "96b520c05a9d5011f8bfa2bb30391bf8b5e92eafba98604d7b00b28e4cf4cb51",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_eigen.data": "1815f8a4ff0be6dbdb3cc0862281a02b16e6b1ff5e5656793d7ac1afe483d9d1",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000005/hamiltonian_local.bin": "be4880af7318f4388e35fcab2a40c79259523bfcbdc2b24ed31880079107bf44",
+      "c64-input/data_dcdft/fragments/000005/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000005/rgrid_index.bin": "d9bbb85a2eb6ed1d88af2da0e6bde15bf67e67a3cc72ad2ae6b854ce944d1859",
+      "c64-input/data_dcdft/fragments/000002/basis_functions.bin": "5e08204a6f59ef943b70ed51aed67b02f42125d943eac57bd52dddc8a303aa2b",
+      "c64-input/data_dcdft/fragments/000002/wavefunctions.bin": "f2e2a0128f3b6f888b3a9785bea9234bf362187299160f2d8d2c41acb4e47b4e",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_eigen.data": "c9710ff40bab6d1825c56c39f707534420e45776366a279b3d9e0b572d37bae6",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000002/hamiltonian_local.bin": "f2946a499b30406d32887cba74be9c3e88de11b5ffac503cf4f2382b7f4d1a1d",
+      "c64-input/data_dcdft/fragments/000002/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000002/rgrid_index.bin": "0d191270b22f60452a4a503952e23b094e8f16e6bdc4dcb29f548b61f8207ba9",
+      "c64-input/data_dcdft/fragments/000003/basis_functions.bin": "1f5ae55c90d6db8a0d537961f06d7daaf5d952bbdd705babb28136f33344b0e9",
+      "c64-input/data_dcdft/fragments/000003/wavefunctions.bin": "e10af6a9d315f295290c1b64ffd9b0b9a2504f3511d616868d179487e0f43442",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_eigen.data": "f6633a759e1e54f864fedd8035520a48211f3eec99760a03ea01f3833f3dbb1c",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000003/hamiltonian_local.bin": "ff1898328df0af60cac261644047ecba06c1c3408be48b555c19ec784754a85b",
+      "c64-input/data_dcdft/fragments/000003/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000003/rgrid_index.bin": "49b18a6dd06c2c4103052b7e7a9c8e5692fca614bb74e69fe15b1d5b73298078",
+      "c64-input/data_dcdft/fragments/000004/basis_functions.bin": "09df12dbc7f5361a9540d756dff4f8bf3095226afd1481352a063ae2815f2beb",
+      "c64-input/data_dcdft/fragments/000004/wavefunctions.bin": "5e22f8ca39aaff4060d22cadb92c28dd0793cb0da7c2f2f51a232201b718d6b1",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_eigen.data": "77dabb0b0067bdbcda3dc92ee31b5d13d2cacf1eeded043ca13a68abb837f5b7",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000004/hamiltonian_local.bin": "4900d4da4ef2ec5e3f75ebfe15e53b6dac83f015598b078701f1aeaeede0e8f3",
+      "c64-input/data_dcdft/fragments/000004/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000004/rgrid_index.bin": "1003aec533f67aff0f14580a7ac7316762dc235aabe489065059edabb8373e15",
+      "c64-input/data_dcdft/fragments/000008/basis_functions.bin": "ddd695162a998e89ee09567a953cf42ae5acb82562fd62be38c4d5ab92b32982",
+      "c64-input/data_dcdft/fragments/000008/wavefunctions.bin": "f800308728830cf612d28ea7636c1d95e88430cc342f3c67de586f73b09086ef",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_eigen.data": "e5ec1b6fbad2091c9d06d1842f297970a79d0b58cf33dfd920d2372398277706",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000008/hamiltonian_local.bin": "664260bb66ea43a07e556e115d65dba81c1fbae3c2990040cc6452463427436d",
+      "c64-input/data_dcdft/fragments/000008/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000008/rgrid_index.bin": "41700c5546676d62bdf758ce2da0b647e87339cbec6cfee381b22e660c100b4b",
+      "c64-input/data_dcdft/fragments/000001/basis_functions.bin": "8c3973abd39c469ae527f9354ff30ba4adafab531b4739d5894e8373e959e733",
+      "c64-input/data_dcdft/fragments/000001/wavefunctions.bin": "ae8f4ff3e4a840002f641a87565433a6afa69a48775f51b72ad2ccbff32ab5f6",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_eigen.data": "63f8abeb2fa9c30a5baba2883969f55192e17c90fa4febbc6ca767e776767316",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000001/hamiltonian_local.bin": "d183e286f5d62100b4bad877d9fcf68f187d3d5955fd66002cd27b229dc68542",
+      "c64-input/data_dcdft/fragments/000001/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000001/rgrid_index.bin": "1af0c06fb128398ad29163628392c87811c6f3999ed90260b2cdb246197d164e",
+      "c64-input/data_dcdft/fragments/000006/basis_functions.bin": "1c0621bed2eff56017137393de1c55ea60346fa6e5a8865e8a9bdd871251b5f2",
+      "c64-input/data_dcdft/fragments/000006/wavefunctions.bin": "8cb1d11cd316377b714c8d8cb8e6241faa2d7fa1f8cca22d2254e31b742194c9",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_eigen.data": "63723848a3e884a436d63e13a4c72579a77d1c89d92de385b3ce2ea6eca8f907",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000006/hamiltonian_local.bin": "5b5f65c03bf14537a43f0c299c25a6160c3963ca0dac3cb768dd16b21bd06bd9",
+      "c64-input/data_dcdft/fragments/000006/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000006/rgrid_index.bin": "83db059723f02e2121986577146f9e648749a80cbbc65bfc83646a76d30fa0de",
+      "c64-input/data_dcdft/fragments/000007/basis_functions.bin": "4809d3f8f4ba618d3c79bc2e6edf65e371fb765e8d56339742573cfb83f566da",
+      "c64-input/data_dcdft/fragments/000007/wavefunctions.bin": "5c39dcafe1cb05b750c0d73a2f78ed7d2e28e552bb91cc3ed34fe20f40dc4807",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_eigen.data": "973d620ba06c5b37a8493a3ae4b3b400a34ebb7d955b4176686daedf2f81cd43",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c64-input/data_dcdft/fragments/000007/hamiltonian_local.bin": "f5ea193b1a4fbe10157844f16ddba1265f96ff83552260adcd4f99205814bfd3",
+      "c64-input/data_dcdft/fragments/000007/diamond64_hse_info.data": "fd5d1970e189539c7c75b922e36adb0575f035ee57a1e36d56a46e9f4a36e721",
+      "c64-input/data_dcdft/fragments/000007/rgrid_index.bin": "3654f434a5aa9c54986e264bdd62a60a341696605670b6cfdd622ba4197fec94",
+      "c128-input/inputfile": "11cf4851996f9c559f53600bfa6a61d569a6f671a6fe4dab66fab24a6245f32d",
+      "c128-input/atom.dat": "15a367141899b3e740447568b998c74852eeeddf30bc51fa00ed1858fb967082",
+      "c128-input/C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1",
+      "c128-input/data_dcdft/total/PS_C_KY_n.dat": "7b6ca7d2f7b514c1116d45aec608be2939dd6e0f76e513248df2daa3615bf38b",
+      "c128-input/data_dcdft/total/diamond128_hse_lcfo_complex_eigen.data": "c20d98cf43df12fcf34c6ca232077b0702bbc0606938830ee03e982618af95d5",
+      "c128-input/data_dcdft/fragments/000005/basis_functions.bin": "d0682a3de02efad686c67425ca617d9a56a63bf144206081397f92ed9ee2034b",
+      "c128-input/data_dcdft/fragments/000005/wavefunctions.bin": "0dc730ff6d2912922ed05954b73ed5a9397266002dd10dff9fce50346c2686a2",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_eigen.data": "ae70e73aebd31af0cb28a9f3f07b82b5cdab5ed9f7043d161b4025e5c2823d3f",
+      "c128-input/data_dcdft/fragments/000005/hamiltonian_local.bin": "f6113010ad1684225a84a8b3ae90202a900f001f928385d29f734f2ed8e605f8",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000005/rgrid_index.bin": "2168e8efbcda21f35f20774d4927d64cbe8cb6399ff85f4b9f158baad2efd27b",
+      "c128-input/data_dcdft/fragments/000005/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000002/basis_functions.bin": "0997d09f46ff28b75bccb495d4bb2b9a397b607c21bb47b0d2f31e50be238243",
+      "c128-input/data_dcdft/fragments/000002/wavefunctions.bin": "0e2f01bd1b2a74729a88587974f2bf5412948b98b4190c07f8f0370048ee2875",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_eigen.data": "7473edb9124bd541054df6acf18b464aa6f7218bf9ecadb277617c2c99af7814",
+      "c128-input/data_dcdft/fragments/000002/hamiltonian_local.bin": "06d666bfb5a29a44f2d035f42ff846f9c2b8f64e7a5e6aaa3912fec6cf97d5c2",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000002/rgrid_index.bin": "d596cb7c7a148e13a0ffa0d2c3a2eaafab172405bcf9d6bd5d3ea123ec6b615f",
+      "c128-input/data_dcdft/fragments/000002/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000003/basis_functions.bin": "744490a6a5dd5b9e2ac06d7bb25e1f49a37d3a851e72b2abbf408fa3339f108b",
+      "c128-input/data_dcdft/fragments/000003/wavefunctions.bin": "d81240932691f495d35e8803b8a29c3b2b78f989aa49e6a4ab631f12cda8d84f",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_eigen.data": "a569938b5a0f84cf8cd310e19876b4be5714af8955c6eb10efc743836d9a46e4",
+      "c128-input/data_dcdft/fragments/000003/hamiltonian_local.bin": "ddb9375b414517bf185dae83355644a47a2a1b186778d5a3434080419b8a5529",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000003/rgrid_index.bin": "fba45554a8329a3a5a82a4d9bde88e2574a837ec41f7cc89e0bc78cfaa3fdd63",
+      "c128-input/data_dcdft/fragments/000003/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000004/basis_functions.bin": "50f8f420b9d1463a0cdc900be5cf932006cdee4bc3314e13d0c352ff14746c7f",
+      "c128-input/data_dcdft/fragments/000004/wavefunctions.bin": "a7da4478a42d7bd7dcb8ea5ee5c533ccee9d6830c693519a43faaab0b0730889",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_eigen.data": "de0394e6c83ca451770f484a964622a0c422c9261d597a3d221062e71a7e1c27",
+      "c128-input/data_dcdft/fragments/000004/hamiltonian_local.bin": "3b8bc009036f2a33736ed738c14a61ef0f0e1a71352c65ae83f1c2d0fe66ba6b",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000004/rgrid_index.bin": "e497b6d28e04fe38c1093853383ad4b4277542883c2147b18038cafc6e3e726a",
+      "c128-input/data_dcdft/fragments/000004/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000010/basis_functions.bin": "8a1fd29aa50ee48c93bea2fd25b7efb0a81846be49d7721c56990d614189d65a",
+      "c128-input/data_dcdft/fragments/000010/wavefunctions.bin": "2458841a0235a22f78071d814257ce18623d8c30f2e516d2b92761950a74c864",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_eigen.data": "b1b2e8d573cd83a11116e694e479501120da21d474070f99217db03a9e6ff973",
+      "c128-input/data_dcdft/fragments/000010/hamiltonian_local.bin": "f1b79fda8c482dec7892838a99952d91acc675280b6a5812f76635c088a7ef6b",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000010/rgrid_index.bin": "967f1842305109e080a6ac9b9264e1b659488c459993a14c8f6775c548bf7862",
+      "c128-input/data_dcdft/fragments/000010/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000011/basis_functions.bin": "ee615b11f7995c08c79feee94eaff106936b53f07aa2ce640e2b8815a5abe591",
+      "c128-input/data_dcdft/fragments/000011/wavefunctions.bin": "062d6be7179eb5eab818f21a6cea7f1ca04c809d62ea6354b8e4104e8d54e638",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_eigen.data": "641a1454ef65b258dfa97f24df02b0c13e2db6b71ff62b25848b22375b8bf18a",
+      "c128-input/data_dcdft/fragments/000011/hamiltonian_local.bin": "2d06dcf7a47955e8bc01b75cd5fb1b282af465e9a5900b0b16e319a6e4c6dff9",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000011/rgrid_index.bin": "44cb9ef4b3c2d377799e21beb76f3d053801f0a020b0da8facfc96a5ec8fd338",
+      "c128-input/data_dcdft/fragments/000011/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000016/basis_functions.bin": "06e0981df9dfc53fdc963dbdbf119648519791a8a8180cc45f7d1f03e3a50ab7",
+      "c128-input/data_dcdft/fragments/000016/wavefunctions.bin": "de15d8cf4dc7c45d8f3aa34d287fc12664fe8e5c1f3c798641ffaf96a6991201",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_eigen.data": "a9b98b3f29951172826b5f0dea7267650f25dc9db3985d016c4c578fa6d97039",
+      "c128-input/data_dcdft/fragments/000016/hamiltonian_local.bin": "861dc3d30cdad38bcffdd3bbb4c7841109af0bc580bcdc4e264b54d68d18b221",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000016/rgrid_index.bin": "60f5f70ea45199e6cfe8f2b265a2220136226cae803ee57f85e59b6136d70c2d",
+      "c128-input/data_dcdft/fragments/000016/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000008/basis_functions.bin": "b3039703ef533a93d0e1d6d1a894f23b81f75e0e418251e630ad4483d6e10a0f",
+      "c128-input/data_dcdft/fragments/000008/wavefunctions.bin": "74deba0cec85a29154d4fd61831538c4668157387ad1dba4ebcff8802394736a",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_eigen.data": "9cd9584cc995a1af7355767168c6792be94fe0545f29d0f1a06d49de8e0313a8",
+      "c128-input/data_dcdft/fragments/000008/hamiltonian_local.bin": "8feaaeeef7075316ff9abb83b41a2f86d65b13a64fa906bc5078ab07e121bf5e",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000008/rgrid_index.bin": "c85649bac5a54b733cbad419540df6c968c96e7a3b21327c53840078aacb3cc2",
+      "c128-input/data_dcdft/fragments/000008/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000001/basis_functions.bin": "c9af88c13d7dcac61bf1ab1424e14aa95952e64e47be27ff88fb91f36c7ea02b",
+      "c128-input/data_dcdft/fragments/000001/wavefunctions.bin": "07276cedd2d2a15f8e0011316150d958223c067d9b701632037b6cda2d7c77d9",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_eigen.data": "3e5d1487ee25105377d0f0c88b6a5caee212084ae88cbd5f4941c1cc6259cd23",
+      "c128-input/data_dcdft/fragments/000001/hamiltonian_local.bin": "dc3580dd9885939005e47d36f3678c283938f4013eba1c0c085f8ee60dc22a6d",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000001/rgrid_index.bin": "88039c4d9cc924b1f6405b6f52401ccdacd6d700ac4f3cd6e4b3e505b4f8dfd7",
+      "c128-input/data_dcdft/fragments/000001/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000006/basis_functions.bin": "127821c0dbdc09bb105613fc2bd41ca44c8e05f16621c1f5db280352a0fa1d3d",
+      "c128-input/data_dcdft/fragments/000006/wavefunctions.bin": "1a6ac7bbcc14a731566297c60e7a63ceb5bcbfad27ebb12b19ff2d7ef38e83ff",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_eigen.data": "3d570ac8e2f0aba4eedf1cbcdce5c10fb3e5e565c1de5e68385414a3d7bd2278",
+      "c128-input/data_dcdft/fragments/000006/hamiltonian_local.bin": "e73f4119eeb36928dccc9e60c6ea31715042f0c235a6c8cb6ef1b53b99b2f1da",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000006/rgrid_index.bin": "bfd38871466b66e7b3282ea1b2b49b726f8f88bf56d25156e21ba7dea2d94957",
+      "c128-input/data_dcdft/fragments/000006/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000007/basis_functions.bin": "5c5607571da5f26ccb75fafced4b96249d15e1d8929bb53d31970b65eeea0ae6",
+      "c128-input/data_dcdft/fragments/000007/wavefunctions.bin": "e71d09c6a27cc1427db6952626862efadd2c57fb313890b46982295d8d62efc7",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_eigen.data": "d3a28061915af8c10d8f6c081541119f84e53861405faa48ca68917fecd12d3c",
+      "c128-input/data_dcdft/fragments/000007/hamiltonian_local.bin": "3b550edfff120e4dc7441dcb4295342fcf480a55e41ffe516e151bd466e7cf7e",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000007/rgrid_index.bin": "f5a550113c99c81b942d19ddf3123a225550566f9e5409138633b07a3c1e3a5e",
+      "c128-input/data_dcdft/fragments/000007/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000009/basis_functions.bin": "d6e121af0ec34bdf75b672f00bf48769f797b1f15dec43c6ed67c1a41ef96a87",
+      "c128-input/data_dcdft/fragments/000009/wavefunctions.bin": "95b060f94ceb900c20d60ead079c1787dd10c89474bcdeabdf34dd5e561d9083",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_eigen.data": "d45fd1e172c9e1b952aad69816175c4aa240c5b964a6e6a60f573714c11c88ac",
+      "c128-input/data_dcdft/fragments/000009/hamiltonian_local.bin": "e7a33b430e5cfe74aae1102f8171a744dee273e23f7ad18f5b76ac022ffa8631",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000009/rgrid_index.bin": "18bedd3c0abdc62cbbcde6870b98c6accc8a0bf70cdfdc6a72800555eb6581a4",
+      "c128-input/data_dcdft/fragments/000009/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000013/basis_functions.bin": "e172237b663a3ed0f52cccdc60be79dc1a6fd49aaadbe9fed3aea6bb78f16cdc",
+      "c128-input/data_dcdft/fragments/000013/wavefunctions.bin": "886086f70a2652e0e5be689c88d7c54101c3f598fee120b318852cd625cd0169",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_eigen.data": "abcb097a63683bc6094f0f146ac7a16ca66f5971377c06ee1e7e4701d3ca6040",
+      "c128-input/data_dcdft/fragments/000013/hamiltonian_local.bin": "f82028dac831ba334cdbbed0bf7a28fa6803fdb9ade38723a62ad810c7bfff0c",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000013/rgrid_index.bin": "6ca0fe7511f478ec2eb0be9e9476aec10b43561078836b2ef1afa0e4ce6fcd22",
+      "c128-input/data_dcdft/fragments/000013/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000014/basis_functions.bin": "4e925b0db44a36a08c5d1a2efe45b674fd4cb5bdc43115878fa0f934c1ff02f5",
+      "c128-input/data_dcdft/fragments/000014/wavefunctions.bin": "e38ba2fa7349880b79b52bae10d55d637e2fdf1f3ca42303b9d46906f917f721",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_eigen.data": "21e5f7d605afa24eff500906005266bb1faeb144a5af1b6b43b9a1f757997349",
+      "c128-input/data_dcdft/fragments/000014/hamiltonian_local.bin": "a3faa53cafdb93416dc4514adc2b25310180260da79372dd5ee8683548d04378",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000014/rgrid_index.bin": "cdb00f025b570811c9ab87ba7fb8430df2313b7eeaa522050df4ab3d7a5d237a",
+      "c128-input/data_dcdft/fragments/000014/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000015/basis_functions.bin": "bb3e18c2acddf23861f5a41910572faae01977d2e5ca4659da58884b1434c80c",
+      "c128-input/data_dcdft/fragments/000015/wavefunctions.bin": "c3de467968f6f3a6ca04e9a8cbe6dd2e2392ab818b4b8a5b535c40eb9416fdfb",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_eigen.data": "6f0ec1433daf9b40acddfadc4bea49843a9c049da939e330b49c03d5074ba03d",
+      "c128-input/data_dcdft/fragments/000015/hamiltonian_local.bin": "1e0dc302fb0f955c2fb05ac53a413066e8d23d18683c398c55a858c2b68539fa",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000015/rgrid_index.bin": "6dbe53fe74630ef611182b7f043d881ee11ff7276cb7a30b25f2a2321688ab0f",
+      "c128-input/data_dcdft/fragments/000015/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77",
+      "c128-input/data_dcdft/fragments/000012/basis_functions.bin": "0dcaeb5aba2c5548fcb53369e8171f5ee78742b88363c584be8e45aa12440443",
+      "c128-input/data_dcdft/fragments/000012/wavefunctions.bin": "3e6147e924a24ddb0571f481fa425945a95c8de36177d338f5ac7337b2cea5c0",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_eigen.data": "01df6074dbd433a4b56e5467872927395be7fdeafba49a0b8da2e2e305474900",
+      "c128-input/data_dcdft/fragments/000012/hamiltonian_local.bin": "d26e853b3ae9546de9f5d5d17ee44615bc35a1ed93bef00d08b486d801ddf2c2",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_info.data": "9b56d521b12ceb29f856445b3bcc327959f60fbdeca910e8b38d81b88cbcc8ac",
+      "c128-input/data_dcdft/fragments/000012/rgrid_index.bin": "13132a033fcf6ee27b1eb4d90e889c5801c3c6ebf10d34f3e805bfbbaa4ead24",
+      "c128-input/data_dcdft/fragments/000012/diamond128_hse_k.data": "965a7026a3ad1c1822806de867c789c41fe0954fef706cf1a0572f50af6eaa77"
+    },
+    "restored_date": "2026-09-27",
+    "background_gate_cpu_percent": 200,
+    "background_median_matching_tolerance_percent": 50,
+    "gate_revision_reason": "Before any numerical sample: 18 logical CPUs minus16 ranks leaves2 CPU equivalents; require background below200% and subsequently matched background between variants.",
+    "background_policy": "No quiet-load gate; record background load; run all samples without censoring slow phases. User direction 2026-09-27."
+  },
+  "sizes": [
+    {
+      "atoms": 64,
+      "variants": {
+        "before": {
+          "rt": {
+            "values": [
+              42.98,
+              47.326,
+              41.729
+            ],
+            "median": 42.98,
+            "minimum": 41.729,
+            "maximum": 47.326,
+            "range_percent": 13.02233597021871,
+            "cv_percent": 6.674733301292972
+          },
+          "exchange": {
+            "values": [
+              34.99737981,
+              38.81628031,
+              33.36599135
+            ],
+            "median": 34.99737981,
+            "minimum": 33.36599135,
+            "maximum": 38.81628031,
+            "range_percent": 15.573420037698536,
+            "cv_percent": 7.8298975242375946
+          },
+          "WF": {
+            "values": [
+              1.168053629,
+              1.217953207,
+              1.201639416
+            ],
+            "median": 1.201639416,
+            "minimum": 1.168053629,
+            "maximum": 1.217953207,
+            "range_percent": 4.1526249335349705,
+            "cv_percent": 2.127560552434761
+          },
+          "ACE": {
+            "values": [
+              0.1379308702,
+              0.1747486592,
+              0.1696877478
+            ],
+            "median": 0.1696877478,
+            "minimum": 0.1379308702,
+            "maximum": 0.1747486592,
+            "range_percent": 21.697376196774524,
+            "cv_percent": 12.411835221018851
+          },
+          "background_cpu": {
+            "values": [
+              183.6,
+              187.836,
+              183.15454545454546
+            ],
+            "median": 183.6,
+            "minimum": 183.15454545454546,
+            "maximum": 187.836,
+            "range_percent": 2.549811843929497,
+            "cv_percent": 1.3977148234205583
+          }
+        },
+        "after": {
+          "rt": {
+            "values": [
+              41.956,
+              45.073,
+              40.557
+            ],
+            "median": 41.956,
+            "minimum": 40.557,
+            "maximum": 45.073,
+            "range_percent": 10.763657164648674,
+            "cv_percent": 5.435916314450262
+          },
+          "exchange": {
+            "values": [
+              33.62397813,
+              36.44840839,
+              32.04392714
+            ],
+            "median": 33.62397813,
+            "minimum": 32.04392714,
+            "maximum": 36.44840839,
+            "range_percent": 13.09922708422841,
+            "cv_percent": 6.555306335965939
+          },
+          "WF": {
+            "values": [
+              1.2121105189999999,
+              1.246691941,
+              1.214159014
+            ],
+            "median": 1.214159014,
+            "minimum": 1.2121105189999999,
+            "maximum": 1.246691941,
+            "range_percent": 2.8481789947819824,
+            "cv_percent": 1.584658522205797
+          },
+          "ACE": {
+            "values": [
+              0.1549515724,
+              0.1767933366,
+              0.1714243888
+            ],
+            "median": 0.1714243888,
+            "minimum": 0.1549515724,
+            "maximum": 0.1767933366,
+            "range_percent": 12.74133998837393,
+            "cv_percent": 6.785933674857995
+          },
+          "background_cpu": {
+            "values": [
+              185.3181818181818,
+              204.99166666666667,
+              194.57619047619048
+            ],
+            "median": 194.57619047619048,
+            "minimum": 185.3181818181818,
+            "maximum": 204.99166666666667,
+            "range_percent": 10.110941529041925,
+            "cv_percent": 5.048376089634594
+          }
+        }
+      },
+      "paired_rt_ratios": [
+        1.024406521117361,
+        1.049985578949704,
+        1.028897600907365
+      ],
+      "errors": [
+        {
+          "repeat": 1,
+          "current_abs": 8.001073219764121e-18,
+          "Einf_percent": 7.57728366977767e-11,
+          "DT_percent": -6.250496967489689e-11,
+          "density_abs": 1.0547118733938987e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        },
+        {
+          "repeat": 2,
+          "current_abs": 7.199780051661553e-18,
+          "Einf_percent": 6.818432266897055e-11,
+          "DT_percent": -3.030592600510244e-11,
+          "density_abs": 1.0547118733938987e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        },
+        {
+          "repeat": 3,
+          "current_abs": 2.467920889983997e-18,
+          "Einf_percent": 1.9877735479259886e-11,
+          "DT_percent": 0.0,
+          "density_abs": 1.0547118733938987e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        }
+      ],
+      "median_rt_speedup": 1.024406521117361,
+      "median_exchange_speedup": 1.0408459009427746,
+      "unchanged_WF_ratio": 1.0104187644257503,
+      "background_median_difference": 10.976190476190482,
+      "timing_stable": false
+    },
+    {
+      "atoms": 128,
+      "variants": {
+        "before": {
+          "rt": {
+            "values": [
+              64.313,
+              69.033,
+              70.668
+            ],
+            "median": 69.033,
+            "minimum": 64.313,
+            "maximum": 70.668,
+            "range_percent": 9.205742181275628,
+            "cv_percent": 4.852520889790013
+          },
+          "exchange": {
+            "values": [
+              42.1151451,
+              45.5915947,
+              46.4557026
+            ],
+            "median": 45.5915947,
+            "minimum": 42.1151451,
+            "maximum": 46.4557026,
+            "range_percent": 9.520521334166016,
+            "cv_percent": 5.1375737030804665
+          },
+          "WF": {
+            "values": [
+              2.291260957,
+              2.453555585,
+              2.536088942
+            ],
+            "median": 2.453555585,
+            "minimum": 2.291260957,
+            "maximum": 2.536088942,
+            "range_percent": 9.978497593320272,
+            "cv_percent": 5.132352987094141
+          },
+          "ACE": {
+            "values": [
+              0.796848058,
+              0.88203478,
+              1.116118197
+            ],
+            "median": 0.88203478,
+            "minimum": 0.796848058,
+            "maximum": 1.116118197,
+            "range_percent": 36.19700109784787,
+            "cv_percent": 17.744593037678143
+          },
+          "background_cpu": {
+            "values": [
+              173.09444444444443,
+              168.4025641025641,
+              171.9625
+            ],
+            "median": 171.9625,
+            "minimum": 168.4025641025641,
+            "maximum": 173.09444444444443,
+            "range_percent": 2.7284322697566825,
+            "cv_percent": 1.4305356265470126
+          }
+        },
+        "after": {
+          "rt": {
+            "values": [
+              57.666,
+              66.004,
+              66.629
+            ],
+            "median": 66.004,
+            "minimum": 57.666,
+            "maximum": 66.629,
+            "range_percent": 13.579480031513254,
+            "cv_percent": 7.888852158481857
+          },
+          "exchange": {
+            "values": [
+              36.156402,
+              42.6980232,
+              42.9785238
+            ],
+            "median": 42.6980232,
+            "minimum": 36.156402,
+            "maximum": 42.9785238,
+            "range_percent": 15.977605726721318,
+            "cv_percent": 9.505627775319036
+          },
+          "WF": {
+            "values": [
+              2.187640666,
+              2.350198266,
+              2.451978206
+            ],
+            "median": 2.350198266,
+            "minimum": 2.187640666,
+            "maximum": 2.451978206,
+            "range_percent": 11.24745702624904,
+            "cv_percent": 5.722390340871631
+          },
+          "ACE": {
+            "values": [
+              0.768338679,
+              0.875953433,
+              0.857328654
+            ],
+            "median": 0.857328654,
+            "minimum": 0.768338679,
+            "maximum": 0.875953433,
+            "range_percent": 12.552333751812286,
+            "cv_percent": 6.897186279853001
+          },
+          "background_cpu": {
+            "values": [
+              177.9,
+              184.3864864864865,
+              166.17368421052632
+            ],
+            "median": 177.9,
+            "minimum": 166.17368421052632,
+            "maximum": 184.3864864864865,
+            "range_percent": 10.237662886992789,
+            "cv_percent": 5.240416557712275
+          }
+        }
+      },
+      "paired_rt_ratios": [
+        1.1152672285228733,
+        1.0458911581116295,
+        1.0606192498761802
+      ],
+      "errors": [
+        {
+          "repeat": 1,
+          "current_abs": 1.9989977555201488e-18,
+          "Einf_percent": 1.8931183920292713e-11,
+          "DT_percent": 1.5160990512437807e-11,
+          "density_abs": 1.9984014443252818e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        },
+        {
+          "repeat": 2,
+          "current_abs": 3.300040362502754e-18,
+          "Einf_percent": 3.125249684468721e-11,
+          "DT_percent": -9.465591960146536e-12,
+          "density_abs": 1.0547118733938987e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        },
+        {
+          "repeat": 3,
+          "current_abs": 9.100521985300203e-18,
+          "Einf_percent": 8.618501696594439e-11,
+          "DT_percent": -8.429189857391508e-11,
+          "density_abs": 1.9984014443252818e-15,
+          "energy_abs": 0.0,
+          "initial_identical": true
+        }
+      ],
+      "median_rt_speedup": 1.0458911581116295,
+      "median_exchange_speedup": 1.0677682778532005,
+      "unchanged_WF_ratio": 0.9578744742398,
+      "background_median_difference": 5.9375,
+      "timing_stable": false
+    }
+  ],
+  "samples": [
+    {
+      "atoms": 64,
+      "variant": "before",
+      "repetition": 1,
+      "folder": "<local>/c64-before-1",
+      "wall_seconds": 46.028217625000025,
+      "rt_seconds": 42.98,
+      "phase_seconds": [
+        [
+          0.010431051,
+          0.65234089,
+          0.70826983,
+          0.0052111149
+        ],
+        [
+          0.0094678402,
+          0.033914089,
+          0.94554591,
+          0.0038690567
+        ],
+        [
+          0.0093967915,
+          0.034702778,
+          1.004339,
+          0.0038647652
+        ],
+        [
+          0.009390831,
+          0.034466028,
+          1.0437589,
+          0.0040581226
+        ],
+        [
+          0.010536909,
+          0.030804873,
+          0.93498611,
+          0.0038428307
+        ],
+        [
+          0.0094370842,
+          0.034615755,
+          0.93216205,
+          0.003660202
+        ],
+        [
+          0.0096521378,
+          0.035005093,
+          1.0585642,
+          0.0038280487
+        ],
+        [
+          0.009398222,
+          0.034319878,
+          1.0155699,
+          0.0042061806
+        ],
+        [
+          0.0094521046,
+          0.034362078,
+          1.0788062,
+          0.003713131
+        ],
+        [
+          0.0095150471,
+          0.034409046,
+          1.0830708,
+          0.0041041374
+        ],
+        [
+          0.0094280243,
+          0.034597874,
+          1.065171,
+          0.0036511421
+        ],
+        [
+          0.0094909668,
+          0.034270048,
+          1.0724752,
+          0.0040032864
+        ],
+        [
+          0.0094070435,
+          0.03408885,
+          1.0710421,
+          0.0040709972
+        ],
+        [
+          0.0088090897,
+          0.032205105,
+          1.0732532,
+          0.0041809082
+        ],
+        [
+          0.0093939304,
+          0.033816099,
+          1.0628359,
+          0.0042450428
+        ],
+        [
+          0.0094001293,
+          0.033765078,
+          1.0674009,
+          0.0042161942
+        ],
+        [
+          0.0094509125,
+          0.034101009,
+          1.0836101,
+          0.0039498806
+        ],
+        [
+          0.0096971989,
+          0.035208941,
+          1.071209,
+          0.0042009354
+        ],
+        [
+          0.0094509125,
+          0.033365965,
+          1.074573,
+          0.0043570995
+        ],
+        [
+          0.0095608234,
+          0.033833981,
+          0.97503996,
+          0.0042722225
+        ],
+        [
+          0.009483099,
+          0.034404755,
+          1.0185919,
+          0.0038459301
+        ],
+        [
+          0.0097048283,
+          0.035384178,
+          1.0171201,
+          0.0039770603
+        ],
+        [
+          0.0098588467,
+          0.035035849,
+          1.0753808,
+          0.0041410923
+        ],
+        [
+          0.0099129677,
+          0.03471899,
+          1.0510178,
+          0.0040369034
+        ],
+        [
+          0.0095589161,
+          0.034488916,
+          1.06953,
+          0.0039279461
+        ],
+        [
+          0.0095858574,
+          0.034237862,
+          1.0857122,
+          0.0041079521
+        ],
+        [
+          0.010066986,
+          0.035782099,
+          1.058537,
+          0.0041930676
+        ],
+        [
+          0.010429859,
+          0.036590099,
+          1.0788722,
+          0.0041162968
+        ],
+        [
+          0.0099751949,
+          0.035534143,
+          0.9613688,
+          0.0041220188
+        ],
+        [
+          0.0094788074,
+          0.032291889,
+          0.76897526,
+          0.0041868687
+        ],
+        [
+          0.0099198818,
+          0.034851074,
+          0.99896407,
+          0.0042097569
+        ],
+        [
+          0.0099139214,
+          0.034817934,
+          1.054883,
+          0.0041451454
+        ],
+        [
+          0.010469198,
+          0.03541708,
+          0.94641805,
+          0.0043568611
+        ],
+        [
+          0.0098361969,
+          0.033493042,
+          1.0046952,
+          0.0041480064
+        ],
+        [
+          0.0097830296,
+          0.035153151,
+          1.0939,
+          0.0041217804
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3283135889,
+        1.168053629,
+        34.99737981,
+        0.1379308702
+      ],
+      "late_phase_seconds": [
+        0.2326385972,
+        0.826856137,
+        24.83540574,
+        0.09913325320000001
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 183.6,
+      "background_cpu_max": 243.5,
+      "compute_cpu_mean": 756.9391304347827,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "after",
+      "repetition": 1,
+      "folder": "<local>/c64-after-1",
+      "wall_seconds": 44.306003291000025,
+      "rt_seconds": 41.956,
+      "phase_seconds": [
+        [
+          0.01222086,
+          0.75053,
+          0.75862908,
+          0.0048148632
+        ],
+        [
+          0.01055479,
+          0.034719944,
+          0.78506017,
+          0.0042538643
+        ],
+        [
+          0.0095889568,
+          0.034551144,
+          1.0165641,
+          0.0042591095
+        ],
+        [
+          0.010195017,
+          0.036184072,
+          0.94552994,
+          0.0045518875
+        ],
+        [
+          0.010730028,
+          0.033542156,
+          0.87483501,
+          0.0039258003
+        ],
+        [
+          0.01030612,
+          0.037537098,
+          0.97535205,
+          0.0047068596
+        ],
+        [
+          0.01042366,
+          0.035742998,
+          0.9960413,
+          0.0042338371
+        ],
+        [
+          0.010106802,
+          0.035953999,
+          1.0136828,
+          0.0043032169
+        ],
+        [
+          0.0099089146,
+          0.034103155,
+          1.02493,
+          0.0043210983
+        ],
+        [
+          0.010528088,
+          0.036333084,
+          1.0032229,
+          0.0052139759
+        ],
+        [
+          0.010354042,
+          0.035588026,
+          1.0270219,
+          0.0042712688
+        ],
+        [
+          0.010750055,
+          0.037702084,
+          1.0402479,
+          0.004119873
+        ],
+        [
+          0.0097689629,
+          0.033751965,
+          1.0405481,
+          0.0043468475
+        ],
+        [
+          0.010706902,
+          0.036733866,
+          0.98443007,
+          0.0043618679
+        ],
+        [
+          0.010220766,
+          0.035318851,
+          1.0181119,
+          0.0045378208
+        ],
+        [
+          0.010174036,
+          0.036155939,
+          0.98453712,
+          0.0042359829
+        ],
+        [
+          0.010049105,
+          0.034867764,
+          1.0383942,
+          0.0050632954
+        ],
+        [
+          0.010103941,
+          0.035154819,
+          1.018611,
+          0.0045742989
+        ],
+        [
+          0.010331154,
+          0.036235809,
+          1.0123422,
+          0.004650116
+        ],
+        [
+          0.0098068714,
+          0.034574986,
+          1.0320902,
+          0.0049307346
+        ],
+        [
+          0.010289907,
+          0.036525726,
+          1.0287559,
+          0.0073101521
+        ],
+        [
+          0.010066986,
+          0.034827232,
+          1.0275061,
+          0.0046463013
+        ],
+        [
+          0.010584116,
+          0.037086964,
+          1.0444751,
+          0.0043120384
+        ],
+        [
+          0.010817051,
+          0.036594152,
+          0.89382768,
+          0.0048091412
+        ],
+        [
+          0.010150194,
+          0.035767794,
+          1.0238416,
+          0.0046100616
+        ],
+        [
+          0.01132679,
+          0.036771774,
+          1.0193052,
+          0.0041821003
+        ],
+        [
+          0.009950161,
+          0.035778046,
+          1.0383649,
+          0.0045487881
+        ],
+        [
+          0.010313034,
+          0.035323858,
+          1.02704,
+          0.0043647289
+        ],
+        [
+          0.010324955,
+          0.035573006,
+          1.0264041,
+          0.004609108
+        ],
+        [
+          0.010337114,
+          0.035526037,
+          1.0280089,
+          0.0043859482
+        ],
+        [
+          0.010372162,
+          0.036410093,
+          0.79790807,
+          0.0042009354
+        ],
+        [
+          0.010625839,
+          0.03528285,
+          0.86310792,
+          0.0042591095
+        ],
+        [
+          0.010170221,
+          0.03555131,
+          0.95884705,
+          0.0048582554
+        ],
+        [
+          0.011281967,
+          0.036070824,
+          0.97942185,
+          0.0044691563
+        ],
+        [
+          0.0096681118,
+          0.034269094,
+          1.0356109,
+          0.0045239925
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3508868205,
+        1.2121105189999999,
+        33.62397813,
+        0.1549515724
+      ],
+      "late_phase_seconds": [
+        0.24819040209999998,
+        0.857854843,
+        23.96173796,
+        0.1109106542
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 185.3181818181818,
+      "background_cpu_max": 301.2,
+      "compute_cpu_mean": 758.7136363636364,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "after",
+      "repetition": 1,
+      "folder": "<local>/c128-after-1",
+      "wall_seconds": 66.11474912499989,
+      "rt_seconds": 57.666,
+      "phase_seconds": [
+        [
+          0.025656223,
+          6.5868981,
+          0.98410177,
+          0.019544125
+        ],
+        [
+          0.024815083,
+          0.056762934,
+          1.0190952,
+          0.019054174
+        ],
+        [
+          0.023595095,
+          0.056238174,
+          1.0246677,
+          0.022068977
+        ],
+        [
+          0.02334094,
+          0.061108112,
+          1.082227,
+          0.021707058
+        ],
+        [
+          0.024060965,
+          0.057566881,
+          1.0410202,
+          0.018970013
+        ],
+        [
+          0.024561882,
+          0.060170174,
+          1.0441351,
+          0.032452106
+        ],
+        [
+          0.023375988,
+          0.054769278,
+          1.0203779,
+          0.018682003
+        ],
+        [
+          0.024058104,
+          0.055942297,
+          1.0633378,
+          0.019932985
+        ],
+        [
+          0.023560286,
+          0.054549932,
+          1.019752,
+          0.018912077
+        ],
+        [
+          0.0236938,
+          0.061478138,
+          1.0553319,
+          0.022617102
+        ],
+        [
+          0.024171829,
+          0.055614948,
+          1.0169749,
+          0.020133734
+        ],
+        [
+          0.027830124,
+          0.07623601,
+          1.0677419,
+          0.019382715
+        ],
+        [
+          0.023466825,
+          0.054495096,
+          1.0335121,
+          0.018778086
+        ],
+        [
+          0.02698493,
+          0.061755896,
+          1.0679181,
+          0.019199133
+        ],
+        [
+          0.023741007,
+          0.055639982,
+          1.043694,
+          0.031851053
+        ],
+        [
+          0.023571014,
+          0.055054188,
+          1.0671339,
+          0.027338982
+        ],
+        [
+          0.023854017,
+          0.055064917,
+          1.0376458,
+          0.019195795
+        ],
+        [
+          0.02504611,
+          0.06786418,
+          1.0623548,
+          0.022855043
+        ],
+        [
+          0.024012804,
+          0.056488991,
+          1.0626068,
+          0.020701885
+        ],
+        [
+          0.025640965,
+          0.080148935,
+          1.0666161,
+          0.01930666
+        ],
+        [
+          0.024047136,
+          0.055765867,
+          1.0474219,
+          0.02235508
+        ],
+        [
+          0.03046298,
+          0.12813091,
+          1.0645173,
+          0.02078414
+        ],
+        [
+          0.024452209,
+          0.055960894,
+          1.057004,
+          0.02656126
+        ],
+        [
+          0.025664091,
+          0.066663027,
+          1.069931,
+          0.018914938
+        ],
+        [
+          0.026047945,
+          0.065213919,
+          1.0626681,
+          0.020918131
+        ],
+        [
+          0.024310112,
+          0.066031218,
+          1.0669308,
+          0.01969099
+        ],
+        [
+          0.024523735,
+          0.057865143,
+          1.0713351,
+          0.033222914
+        ],
+        [
+          0.026329279,
+          0.082453966,
+          1.0700233,
+          0.023849964
+        ],
+        [
+          0.026430845,
+          0.071732044,
+          1.1165152,
+          0.02841711
+        ],
+        [
+          0.025131941,
+          0.05888629,
+          1.0719781,
+          0.024474144
+        ],
+        [
+          0.025644064,
+          0.063643932,
+          1.1012752,
+          0.029210091
+        ],
+        [
+          0.024280071,
+          0.057031155,
+          1.1220078,
+          0.027189016
+        ],
+        [
+          0.026370049,
+          0.076546192,
+          1.1709819,
+          0.020180225
+        ],
+        [
+          0.02617383,
+          0.059213877,
+          1.0775471,
+          0.019775867
+        ],
+        [
+          0.025779963,
+          0.085553169,
+          1.090122,
+          0.019655228
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.849030018,
+        2.187640666,
+        36.156402,
+        0.768338679
+      ],
+      "late_phase_seconds": [
+        0.609796046,
+        1.613439798,
+        25.7694823,
+        0.55380845
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 177.9,
+      "background_cpu_max": 245.2,
+      "compute_cpu_mean": 1517.5727272727272,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "before",
+      "repetition": 1,
+      "folder": "<local>/c128-before-1",
+      "wall_seconds": 73.17845154199995,
+      "rt_seconds": 64.313,
+      "phase_seconds": [
+        [
+          0.026750088,
+          6.66817,
+          1.158637,
+          0.036822081
+        ],
+        [
+          0.02499938,
+          0.055321932,
+          1.2004311,
+          0.029238939
+        ],
+        [
+          0.02542901,
+          0.067691803,
+          1.2128849,
+          0.019291878
+        ],
+        [
+          0.024523973,
+          0.060709953,
+          1.1610291,
+          0.019575834
+        ],
+        [
+          0.025624037,
+          0.076246023,
+          1.1760311,
+          0.019011021
+        ],
+        [
+          0.024971962,
+          0.057821989,
+          1.1548321,
+          0.0268538
+        ],
+        [
+          0.025559902,
+          0.063557148,
+          1.1827307,
+          0.019525051
+        ],
+        [
+          0.024453163,
+          0.063524961,
+          1.2035582,
+          0.035273075
+        ],
+        [
+          0.023732901,
+          0.070402145,
+          1.1911077,
+          0.029360294
+        ],
+        [
+          0.02773571,
+          0.068813086,
+          1.1882141,
+          0.019804239
+        ],
+        [
+          0.024232864,
+          0.064916849,
+          1.2280829,
+          0.022933006
+        ],
+        [
+          0.02571702,
+          0.061389208,
+          1.1858759,
+          0.020684004
+        ],
+        [
+          0.025920868,
+          0.065943956,
+          1.210191,
+          0.023403168
+        ],
+        [
+          0.024777889,
+          0.059338093,
+          1.168189,
+          0.020186901
+        ],
+        [
+          0.025686979,
+          0.060114145,
+          1.1820791,
+          0.020030022
+        ],
+        [
+          0.024499893,
+          0.058399916,
+          1.191714,
+          0.019882917
+        ],
+        [
+          0.02480197,
+          0.059378862,
+          1.1918309,
+          0.01942277
+        ],
+        [
+          0.024501324,
+          0.059253931,
+          1.2119012,
+          0.020140171
+        ],
+        [
+          0.024282932,
+          0.059082031,
+          1.2150569,
+          0.020868778
+        ],
+        [
+          0.025540829,
+          0.085749865,
+          1.235919,
+          0.02021718
+        ],
+        [
+          0.025808811,
+          0.065585852,
+          1.2406678,
+          0.035259962
+        ],
+        [
+          0.024862051,
+          0.060573816,
+          1.2341797,
+          0.02115202
+        ],
+        [
+          0.0260818,
+          0.062567234,
+          1.2783079,
+          0.021241903
+        ],
+        [
+          0.026671886,
+          0.071130991,
+          1.252645,
+          0.025090933
+        ],
+        [
+          0.029695988,
+          0.080458879,
+          1.2596271,
+          0.021391153
+        ],
+        [
+          0.025323153,
+          0.06268096,
+          1.2861321,
+          0.027332067
+        ],
+        [
+          0.025497675,
+          0.061664104,
+          1.3651409,
+          0.033282995
+        ],
+        [
+          0.03062892,
+          0.074623823,
+          1.3831742,
+          0.020846128
+        ],
+        [
+          0.028287888,
+          0.074164152,
+          1.2961581,
+          0.026024342
+        ],
+        [
+          0.026321888,
+          0.072402954,
+          1.3031881,
+          0.021627903
+        ],
+        [
+          0.026789188,
+          0.066739798,
+          1.313201,
+          0.026053667
+        ],
+        [
+          0.026835918,
+          0.075576782,
+          1.2773008,
+          0.021621943
+        ],
+        [
+          0.029793024,
+          0.10474682,
+          1.327184,
+          0.021709919
+        ],
+        [
+          0.025928974,
+          0.064850092,
+          1.3019652,
+          0.025494099
+        ],
+        [
+          0.026913881,
+          0.075838804,
+          1.3046143,
+          0.023015976
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.882433651,
+        2.291260957,
+        42.1151451,
+        0.796848058
+      ],
+      "late_phase_seconds": [
+        0.631170749,
+        1.642255068,
+        30.2162432,
+        0.555980921
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 173.09444444444443,
+      "background_cpu_max": 256.2,
+      "compute_cpu_mean": 1526.7944444444445,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "after",
+      "repetition": 2,
+      "folder": "<local>/c64-after-2",
+      "wall_seconds": 47.31012620799993,
+      "rt_seconds": 45.073,
+      "phase_seconds": [
+        [
+          0.011507988,
+          0.78468299,
+          0.94750381,
+          0.0054721832
+        ],
+        [
+          0.01058197,
+          0.035694838,
+          0.77811027,
+          0.005079031
+        ],
+        [
+          0.010115862,
+          0.03610611,
+          1.0905039,
+          0.0052702427
+        ],
+        [
+          0.010066986,
+          0.035829067,
+          1.0640171,
+          0.0049948692
+        ],
+        [
+          0.011136055,
+          0.035576105,
+          1.0307729,
+          0.0048060417
+        ],
+        [
+          0.010143042,
+          0.035874128,
+          1.1106391,
+          0.004720211
+        ],
+        [
+          0.0099298954,
+          0.035573006,
+          1.0458272,
+          0.0049500465
+        ],
+        [
+          0.010035753,
+          0.035725117,
+          1.0826361,
+          0.0048959255
+        ],
+        [
+          0.010179043,
+          0.03594923,
+          1.073859,
+          0.0048191547
+        ],
+        [
+          0.0099821091,
+          0.035936117,
+          1.043262,
+          0.005065918
+        ],
+        [
+          0.0098018646,
+          0.03536582,
+          1.0935071,
+          0.0051980019
+        ],
+        [
+          0.010154009,
+          0.03613615,
+          1.0826807,
+          0.0049300194
+        ],
+        [
+          0.0099439621,
+          0.035617113,
+          1.1000352,
+          0.0053422451
+        ],
+        [
+          0.010196924,
+          0.03593111,
+          1.0444429,
+          0.0050621033
+        ],
+        [
+          0.0099840164,
+          0.035015345,
+          1.109612,
+          0.0049841404
+        ],
+        [
+          0.010216951,
+          0.035701036,
+          1.1278031,
+          0.0052831173
+        ],
+        [
+          0.010122061,
+          0.035485983,
+          1.0552382,
+          0.0053100586
+        ],
+        [
+          0.0099589825,
+          0.035437822,
+          1.1155131,
+          0.004956007
+        ],
+        [
+          0.010150909,
+          0.035610199,
+          1.1480451,
+          0.010076046
+        ],
+        [
+          0.013407946,
+          0.053986073,
+          0.93538404,
+          0.0049731731
+        ],
+        [
+          0.010503769,
+          0.036922216,
+          1.1451657,
+          0.0049769878
+        ],
+        [
+          0.0099899769,
+          0.035819054,
+          1.0965502,
+          0.0051131248
+        ],
+        [
+          0.010241985,
+          0.035880089,
+          1.1325529,
+          0.0049901009
+        ],
+        [
+          0.010289907,
+          0.035693884,
+          0.97246814,
+          0.0049097538
+        ],
+        [
+          0.010338068,
+          0.036743879,
+          1.1681631,
+          0.0051960945
+        ],
+        [
+          0.010167122,
+          0.035884142,
+          1.0924442,
+          0.0050911903
+        ],
+        [
+          0.010200024,
+          0.036045074,
+          1.0182457,
+          0.0050909519
+        ],
+        [
+          0.010514975,
+          0.037356853,
+          1.1281841,
+          0.005038023
+        ],
+        [
+          0.0099608898,
+          0.035377979,
+          1.011405,
+          0.0049672127
+        ],
+        [
+          0.010407925,
+          0.03588891,
+          1.1410921,
+          0.0049090385
+        ],
+        [
+          0.010170698,
+          0.035920858,
+          1.1074641,
+          0.005480051
+        ],
+        [
+          0.011837959,
+          0.04310298,
+          0.99858904,
+          0.0050432682
+        ],
+        [
+          0.010705233,
+          0.037456036,
+          1.05057,
+          0.004953146
+        ],
+        [
+          0.010737181,
+          0.036536694,
+          1.1342382,
+          0.0053081512
+        ],
+        [
+          0.010133743,
+          0.035512924,
+          1.1193869,
+          0.0050098896
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3523077968,
+        1.246691941,
+        36.44840839,
+        0.1767933366
+      ],
+      "late_phase_seconds": [
+        0.25033521670000003,
+        0.8890624030000001,
+        26.03527372,
+        0.1269938944
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 204.99166666666667,
+      "background_cpu_max": 420.9,
+      "compute_cpu_mean": 761.3333333333334,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "before",
+      "repetition": 2,
+      "folder": "<local>/c64-before-2",
+      "wall_seconds": 49.47186241600002,
+      "rt_seconds": 47.326,
+      "phase_seconds": [
+        [
+          0.012838125,
+          0.80203009,
+          0.89611602,
+          0.0054180622
+        ],
+        [
+          0.0098397732,
+          0.034070015,
+          1.09285,
+          0.0054416656
+        ],
+        [
+          0.010071993,
+          0.035921097,
+          1.2068691,
+          0.0049910545
+        ],
+        [
+          0.010143995,
+          0.035462141,
+          1.1797037,
+          0.0051248074
+        ],
+        [
+          0.011090994,
+          0.03586483,
+          1.099937,
+          0.005048275
+        ],
+        [
+          0.010106325,
+          0.035737276,
+          1.1949539,
+          0.0053231716
+        ],
+        [
+          0.010057926,
+          0.035581827,
+          1.2102871,
+          0.0050191879
+        ],
+        [
+          0.010560989,
+          0.036309004,
+          1.0564849,
+          0.0049171448
+        ],
+        [
+          0.0099320412,
+          0.03552103,
+          1.1991241,
+          0.0051867962
+        ],
+        [
+          0.010046959,
+          0.035648823,
+          1.137877,
+          0.0049850941
+        ],
+        [
+          0.0099840164,
+          0.035648108,
+          1.1770811,
+          0.0051627159
+        ],
+        [
+          0.0096917152,
+          0.03540206,
+          1.2066069,
+          0.0051848888
+        ],
+        [
+          0.010004282,
+          0.035706043,
+          1.2023733,
+          0.0052690506
+        ],
+        [
+          0.0099749565,
+          0.035485268,
+          1.2096889,
+          0.0050837994
+        ],
+        [
+          0.0099921227,
+          0.03557086,
+          1.0527308,
+          0.0050201416
+        ],
+        [
+          0.010116816,
+          0.035590172,
+          1.206332,
+          0.0050458908
+        ],
+        [
+          0.010435104,
+          0.036984205,
+          1.193378,
+          0.0065190792
+        ],
+        [
+          0.0099630356,
+          0.035601139,
+          0.98263693,
+          0.0050768852
+        ],
+        [
+          0.010535002,
+          0.036891937,
+          1.2142751,
+          0.0051040649
+        ],
+        [
+          0.010195971,
+          0.035939217,
+          1.1177139,
+          0.0051949024
+        ],
+        [
+          0.010198116,
+          0.037086964,
+          1.2152121,
+          0.0052242279
+        ],
+        [
+          0.0098307133,
+          0.03539896,
+          1.1512282,
+          0.0048770905
+        ],
+        [
+          0.0099208355,
+          0.035580158,
+          0.9329648,
+          0.0049710274
+        ],
+        [
+          0.01041007,
+          0.03711915,
+          1.0243261,
+          0.005202055
+        ],
+        [
+          0.009980917,
+          0.035392046,
+          1.1203337,
+          0.0047369003
+        ],
+        [
+          0.010297298,
+          0.036771774,
+          1.2036569,
+          0.0051352978
+        ],
+        [
+          0.0097551346,
+          0.035611868,
+          0.94710898,
+          0.0050859451
+        ],
+        [
+          0.010334015,
+          0.036749125,
+          1.2102153,
+          0.0049290657
+        ],
+        [
+          0.010024786,
+          0.035192966,
+          1.200691,
+          0.0050609112
+        ],
+        [
+          0.010077953,
+          0.035650969,
+          1.1814742,
+          0.0053610802
+        ],
+        [
+          0.010164022,
+          0.035609245,
+          1.2041299,
+          0.0049340725
+        ],
+        [
+          0.010382175,
+          0.036202908,
+          1.2125692,
+          0.0054550171
+        ],
+        [
+          0.0098648071,
+          0.035064936,
+          1.1601951,
+          0.0050611496
+        ],
+        [
+          0.0099821091,
+          0.035938025,
+          1.042145,
+          0.0050671101
+        ],
+        [
+          0.0099878311,
+          0.035649061,
+          1.0691261,
+          0.0049490929
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3439547995,
+        1.217953207,
+        38.81628031,
+        0.1747486592
+      ],
+      "late_phase_seconds": [
+        0.2421197877,
+        0.862189056,
+        27.26111241,
+        0.1235487462
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 187.836,
+      "background_cpu_max": 253.20000000000002,
+      "compute_cpu_mean": 762.556,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "before",
+      "repetition": 2,
+      "folder": "<local>/c128-before-2",
+      "wall_seconds": 79.10080566600004,
+      "rt_seconds": 69.033,
+      "phase_seconds": [
+        [
+          0.026827097,
+          7.7280419,
+          1.2639761,
+          0.028913975
+        ],
+        [
+          0.027552128,
+          0.069292068,
+          1.299952,
+          0.022156715
+        ],
+        [
+          0.027522087,
+          0.066190243,
+          1.3686941,
+          0.034843922
+        ],
+        [
+          0.026262999,
+          0.067922115,
+          1.3416419,
+          0.021913052
+        ],
+        [
+          0.027034044,
+          0.066261053,
+          1.3182261,
+          0.031702995
+        ],
+        [
+          0.02846694,
+          0.083483934,
+          1.3508179,
+          0.022928715
+        ],
+        [
+          0.026475906,
+          0.066022158,
+          1.3491468,
+          0.023380041
+        ],
+        [
+          0.026200771,
+          0.065512896,
+          1.3138947,
+          0.021813869
+        ],
+        [
+          0.027568817,
+          0.067119122,
+          1.323559,
+          0.021720886
+        ],
+        [
+          0.026287794,
+          0.064470053,
+          1.3158209,
+          0.022988081
+        ],
+        [
+          0.026299,
+          0.064429045,
+          1.347918,
+          0.022485018
+        ],
+        [
+          0.026122093,
+          0.062844276,
+          1.3108578,
+          0.023335934
+        ],
+        [
+          0.026275158,
+          0.065403938,
+          1.3725629,
+          0.041651011
+        ],
+        [
+          0.026128054,
+          0.067954779,
+          1.3412333,
+          0.03567791
+        ],
+        [
+          0.028069973,
+          0.082864761,
+          1.3151093,
+          0.022204876
+        ],
+        [
+          0.026922941,
+          0.081521034,
+          1.3621342,
+          0.028832912
+        ],
+        [
+          0.026309013,
+          0.063647032,
+          1.3120902,
+          0.025736094
+        ],
+        [
+          0.027259827,
+          0.073446751,
+          1.365768,
+          0.021567822
+        ],
+        [
+          0.027512074,
+          0.078831196,
+          1.3274679,
+          0.022572041
+        ],
+        [
+          0.028660297,
+          0.09679985,
+          1.3266881,
+          0.022520065
+        ],
+        [
+          0.028118134,
+          0.073857069,
+          1.3491001,
+          0.028251171
+        ],
+        [
+          0.026772976,
+          0.065063238,
+          1.3315961,
+          0.026971102
+        ],
+        [
+          0.02836895,
+          0.07653904,
+          1.334254,
+          0.02314496
+        ],
+        [
+          0.026273012,
+          0.062964916,
+          1.3350463,
+          0.025727034
+        ],
+        [
+          0.027986288,
+          0.07565093,
+          1.3498371,
+          0.022299767
+        ],
+        [
+          0.028231382,
+          0.078537941,
+          1.4028602,
+          0.037171125
+        ],
+        [
+          0.027732849,
+          0.069665909,
+          1.4289348,
+          0.036200047
+        ],
+        [
+          0.026509762,
+          0.06493187,
+          1.3365018,
+          0.028259754
+        ],
+        [
+          0.029649019,
+          0.080303192,
+          1.3386579,
+          0.022284031
+        ],
+        [
+          0.029828072,
+          0.089506865,
+          1.3500981,
+          0.023179054
+        ],
+        [
+          0.026222229,
+          0.063352108,
+          1.3182352,
+          0.022054911
+        ],
+        [
+          0.029127359,
+          0.073083162,
+          1.3536341,
+          0.023637056
+        ],
+        [
+          0.026257753,
+          0.065085173,
+          1.3178699,
+          0.021702766
+        ],
+        [
+          0.028954268,
+          0.084303856,
+          1.350559,
+          0.022103071
+        ],
+        [
+          0.028324842,
+          0.076694012,
+          1.330827,
+          0.029016972
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.931286811,
+        2.453555585,
+        45.5915947,
+        0.88203478
+      ],
+      "late_phase_seconds": [
+        0.661616325,
+        1.772852898,
+        32.2619233,
+        0.636101486
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 168.4025641025641,
+      "background_cpu_max": 249.7,
+      "compute_cpu_mean": 1534.2102564102563,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "after",
+      "repetition": 2,
+      "folder": "<local>/c128-after-2",
+      "wall_seconds": 75.83502958399981,
+      "rt_seconds": 66.004,
+      "phase_seconds": [
+        [
+          0.027348042,
+          7.5924022,
+          1.2246952,
+          0.033220053
+        ],
+        [
+          0.027020931,
+          0.059958935,
+          1.202522,
+          0.021064043
+        ],
+        [
+          0.026673317,
+          0.065821886,
+          1.26596,
+          0.025588989
+        ],
+        [
+          0.026754141,
+          0.071990728,
+          1.2833273,
+          0.023859024
+        ],
+        [
+          0.027742863,
+          0.060191154,
+          1.2337329,
+          0.036896944
+        ],
+        [
+          0.02657032,
+          0.063768148,
+          1.2201641,
+          0.02208209
+        ],
+        [
+          0.028543949,
+          0.081376076,
+          1.248466,
+          0.021440983
+        ],
+        [
+          0.026752949,
+          0.067572117,
+          1.247421,
+          0.024610996
+        ],
+        [
+          0.026711226,
+          0.063780069,
+          1.2461631,
+          0.027039289
+        ],
+        [
+          0.026631832,
+          0.065762043,
+          1.2392168,
+          0.0219841
+        ],
+        [
+          0.026647091,
+          0.06323576,
+          1.2560382,
+          0.02164793
+        ],
+        [
+          0.026889324,
+          0.070101976,
+          1.2707281,
+          0.021333933
+        ],
+        [
+          0.026528835,
+          0.063812017,
+          1.2378812,
+          0.021970987
+        ],
+        [
+          0.030231953,
+          0.090685844,
+          1.235991,
+          0.059076071
+        ],
+        [
+          0.026915073,
+          0.069241047,
+          1.257601,
+          0.021725893
+        ],
+        [
+          0.026046038,
+          0.062863111,
+          1.2928352,
+          0.027765989
+        ],
+        [
+          0.027930021,
+          0.076969862,
+          1.321975,
+          0.022450209
+        ],
+        [
+          0.02882576,
+          0.081202984,
+          1.2736409,
+          0.024367094
+        ],
+        [
+          0.027438164,
+          0.064918041,
+          1.2608519,
+          0.023724079
+        ],
+        [
+          0.027256727,
+          0.072707891,
+          1.2734981,
+          0.022644043
+        ],
+        [
+          0.027019978,
+          0.070027113,
+          1.2634029,
+          0.021855116
+        ],
+        [
+          0.02995801,
+          0.071455002,
+          1.2543387,
+          0.02214241
+        ],
+        [
+          0.026916027,
+          0.070266962,
+          1.2584,
+          0.027645111
+        ],
+        [
+          0.029178143,
+          0.070360184,
+          1.2441349,
+          0.025783062
+        ],
+        [
+          0.02721715,
+          0.064954042,
+          1.2759109,
+          0.025714874
+        ],
+        [
+          0.026421785,
+          0.064455986,
+          1.245626,
+          0.021798849
+        ],
+        [
+          0.028067827,
+          0.066804171,
+          1.265727,
+          0.021443129
+        ],
+        [
+          0.028004169,
+          0.074960232,
+          1.2450538,
+          0.02426219
+        ],
+        [
+          0.028850079,
+          0.068571091,
+          1.2230451,
+          0.024914026
+        ],
+        [
+          0.026617765,
+          0.063783884,
+          1.2646072,
+          0.022276878
+        ],
+        [
+          0.026708841,
+          0.064125061,
+          1.272608,
+          0.022438765
+        ],
+        [
+          0.027392149,
+          0.075875044,
+          1.251708,
+          0.021282911
+        ],
+        [
+          0.027552128,
+          0.076084852,
+          1.2581582,
+          0.050000191
+        ],
+        [
+          0.02805829,
+          0.067414045,
+          1.2367117,
+          0.023299217
+        ],
+        [
+          0.026976109,
+          0.065100908,
+          1.270577,
+          0.029824018
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.933048964,
+        2.350198266,
+        42.6980232,
+        0.875953433
+      ],
+      "late_phase_seconds": [
+        0.663000345,
+        1.68674135,
+        30.2550118,
+        0.629739045
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 184.3864864864865,
+      "background_cpu_max": 395.2,
+      "compute_cpu_mean": 1525.8756756756757,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "before",
+      "repetition": 3,
+      "folder": "<local>/c64-before-3",
+      "wall_seconds": 43.77988170799995,
+      "rt_seconds": 41.729,
+      "phase_seconds": [
+        [
+          0.011263132,
+          0.76906896,
+          0.79869914,
+          0.0054671764
+        ],
+        [
+          0.0099050999,
+          0.034366846,
+          1.1062212,
+          0.0048577785
+        ],
+        [
+          0.0096309185,
+          0.035414696,
+          0.89305115,
+          0.0050890446
+        ],
+        [
+          0.0097670555,
+          0.035002947,
+          0.88421988,
+          0.0050029755
+        ],
+        [
+          0.011057138,
+          0.035696268,
+          1.066345,
+          0.0050320625
+        ],
+        [
+          0.0097579956,
+          0.035037994,
+          0.85531402,
+          0.0050489902
+        ],
+        [
+          0.0097279549,
+          0.03523922,
+          1.111418,
+          0.0049307346
+        ],
+        [
+          0.0096917152,
+          0.034955025,
+          0.89368391,
+          0.0049021244
+        ],
+        [
+          0.010004997,
+          0.035805941,
+          1.0462079,
+          0.00477314
+        ],
+        [
+          0.0098211765,
+          0.035001755,
+          0.88630199,
+          0.0047309399
+        ],
+        [
+          0.0099508762,
+          0.035595179,
+          0.89910507,
+          0.005120039
+        ],
+        [
+          0.010296822,
+          0.03715086,
+          0.94815612,
+          0.0046918392
+        ],
+        [
+          0.0096797943,
+          0.035199881,
+          0.89229083,
+          0.0050191879
+        ],
+        [
+          0.010076046,
+          0.035564899,
+          1.139924,
+          0.0050568581
+        ],
+        [
+          0.010138988,
+          0.036017895,
+          0.91249824,
+          0.0049068928
+        ],
+        [
+          0.0097122192,
+          0.034927845,
+          0.90514302,
+          0.0048930645
+        ],
+        [
+          0.0099360943,
+          0.035483122,
+          1.197211,
+          0.0069429874
+        ],
+        [
+          0.0098137856,
+          0.034996986,
+          0.87021875,
+          0.0049068928
+        ],
+        [
+          0.010019064,
+          0.035804033,
+          1.2292039,
+          0.0049228668
+        ],
+        [
+          0.010157824,
+          0.036594391,
+          1.1462719,
+          0.0050668716
+        ],
+        [
+          0.0097222328,
+          0.035033941,
+          1.052731,
+          0.0044469833
+        ],
+        [
+          0.0096709728,
+          0.033756971,
+          0.8770721,
+          0.0049269199
+        ],
+        [
+          0.009480238,
+          0.034961939,
+          1.0241921,
+          0.0050399303
+        ],
+        [
+          0.0096638203,
+          0.034925938,
+          1.1406269,
+          0.0048220158
+        ],
+        [
+          0.0096490383,
+          0.035378933,
+          0.90059471,
+          0.0047929287
+        ],
+        [
+          0.0095632076,
+          0.035403967,
+          0.88750601,
+          0.0049891472
+        ],
+        [
+          0.0094890594,
+          0.034760952,
+          0.90853024,
+          0.0049300194
+        ],
+        [
+          0.0097410679,
+          0.035263062,
+          0.9418118,
+          0.0050597191
+        ],
+        [
+          0.0098719597,
+          0.035420895,
+          1.1041789,
+          0.0051357746
+        ],
+        [
+          0.0097401142,
+          0.035228014,
+          1.112184,
+          0.004817009
+        ],
+        [
+          0.0095739365,
+          0.035226107,
+          0.88674092,
+          0.0049450397
+        ],
+        [
+          0.010025978,
+          0.035665035,
+          0.89682794,
+          0.0049550533
+        ],
+        [
+          0.0097379684,
+          0.035146952,
+          0.92539692,
+          0.005012989
+        ],
+        [
+          0.0097780228,
+          0.035233974,
+          0.91429996,
+          0.004983902
+        ],
+        [
+          0.010364771,
+          0.036376953,
+          0.91051197,
+          0.0049350262
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3352179524,
+        1.201639416,
+        33.36599135,
+        0.1696877478
+      ],
+      "late_phase_seconds": [
+        0.2359030251,
+        0.8495235449999999,
+        23.72412323,
+        0.1201999186
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 183.15454545454546,
+      "background_cpu_max": 281.4,
+      "compute_cpu_mean": 759.2045454545455,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 64,
+      "variant": "after",
+      "repetition": 3,
+      "folder": "<local>/c64-after-3",
+      "wall_seconds": 42.48657270800004,
+      "rt_seconds": 40.557,
+      "phase_seconds": [
+        [
+          0.010469198,
+          0.74167299,
+          0.75639987,
+          0.0057621002
+        ],
+        [
+          0.010309935,
+          0.034961224,
+          0.89742112,
+          0.0050041676
+        ],
+        [
+          0.0099499226,
+          0.035399199,
+          0.81683397,
+          0.0048382282
+        ],
+        [
+          0.01028204,
+          0.035813093,
+          1.1771393,
+          0.0048930645
+        ],
+        [
+          0.011670113,
+          0.035428047,
+          0.86116886,
+          0.0050299168
+        ],
+        [
+          0.010259867,
+          0.035779953,
+          1.0348721,
+          0.004860878
+        ],
+        [
+          0.010209799,
+          0.035533905,
+          0.88091421,
+          0.0049059391
+        ],
+        [
+          0.0099248886,
+          0.035263777,
+          0.80350709,
+          0.0050899982
+        ],
+        [
+          0.010179996,
+          0.035488129,
+          1.1370108,
+          0.0049538612
+        ],
+        [
+          0.010164022,
+          0.03588891,
+          0.80951905,
+          0.0049378872
+        ],
+        [
+          0.010182142,
+          0.035112858,
+          0.9058001,
+          0.0048320293
+        ],
+        [
+          0.010355949,
+          0.035789013,
+          1.1968381,
+          0.0060310364
+        ],
+        [
+          0.010211229,
+          0.035876036,
+          0.82049203,
+          0.0049440861
+        ],
+        [
+          0.01099205,
+          0.03654623,
+          0.84010983,
+          0.0049948692
+        ],
+        [
+          0.010798931,
+          0.037572145,
+          0.90869498,
+          0.0049929619
+        ],
+        [
+          0.0099430084,
+          0.035167933,
+          0.83161712,
+          0.0050930977
+        ],
+        [
+          0.010236979,
+          0.035552979,
+          1.081506,
+          0.0058829784
+        ],
+        [
+          0.010242939,
+          0.035335064,
+          1.0384409,
+          0.0056450367
+        ],
+        [
+          0.010185242,
+          0.035742998,
+          1.0807018,
+          0.0050449371
+        ],
+        [
+          0.010207891,
+          0.035630226,
+          0.88514781,
+          0.0048336983
+        ],
+        [
+          0.010258913,
+          0.0352211,
+          1.0890758,
+          0.0048997402
+        ],
+        [
+          0.0099239349,
+          0.03501296,
+          0.88133025,
+          0.0050170422
+        ],
+        [
+          0.010282993,
+          0.035326958,
+          1.0324221,
+          0.0048289299
+        ],
+        [
+          0.0098969936,
+          0.03561902,
+          0.83043098,
+          0.0051128864
+        ],
+        [
+          0.010212898,
+          0.035447121,
+          1.1417849,
+          0.0049760342
+        ],
+        [
+          0.0099439621,
+          0.03514719,
+          0.82118559,
+          0.0047821999
+        ],
+        [
+          0.010924816,
+          0.036906958,
+          0.76782107,
+          0.0050289631
+        ],
+        [
+          0.010218143,
+          0.035548925,
+          0.88861418,
+          0.0049378872
+        ],
+        [
+          0.010239124,
+          0.03570509,
+          0.80026484,
+          0.0049650669
+        ],
+        [
+          0.010509253,
+          0.036826134,
+          0.86975908,
+          0.0050742626
+        ],
+        [
+          0.010492802,
+          0.036728859,
+          0.91697526,
+          0.0050399303
+        ],
+        [
+          0.010195971,
+          0.035521984,
+          0.82810688,
+          0.0048530102
+        ],
+        [
+          0.010234118,
+          0.035540104,
+          1.128201,
+          0.0051438808
+        ],
+        [
+          0.010450125,
+          0.036740065,
+          0.88911104,
+          0.0049328804
+        ],
+        [
+          0.0099511147,
+          0.034984827,
+          1.151109,
+          0.0050230026
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.3500421049,
+        1.214159014,
+        32.04392714,
+        0.1714243888
+      ],
+      "late_phase_seconds": [
+        0.24690937970000001,
+        0.859489919,
+        22.71974054,
+        0.1220784187
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "13673d48f0e510c2b976c350a64ea9127da8b5c423d27ec2bd33e4565ec3fed9",
+      "background_cpu_mean": 194.57619047619048,
+      "background_cpu_max": 281.2,
+      "compute_cpu_mean": 756.7666666666667,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "after",
+      "repetition": 3,
+      "folder": "<local>/c128-after-3",
+      "wall_seconds": 76.34152816699998,
+      "rt_seconds": 66.629,
+      "phase_seconds": [
+        [
+          0.028020859,
+          7.5361631,
+          1.1791689,
+          0.02718997
+        ],
+        [
+          0.028258801,
+          0.061551809,
+          1.2165751,
+          0.021691799
+        ],
+        [
+          0.027454138,
+          0.067651987,
+          1.2751791,
+          0.037316084
+        ],
+        [
+          0.027424097,
+          0.067058802,
+          1.242357,
+          0.027962923
+        ],
+        [
+          0.027734995,
+          0.059845209,
+          1.2539489,
+          0.021934748
+        ],
+        [
+          0.027179956,
+          0.067886114,
+          1.2405939,
+          0.021187067
+        ],
+        [
+          0.02816987,
+          0.072784185,
+          1.2650561,
+          0.021867752
+        ],
+        [
+          0.027122021,
+          0.064949989,
+          1.2636709,
+          0.021945
+        ],
+        [
+          0.030001163,
+          0.071537018,
+          1.256336,
+          0.021382093
+        ],
+        [
+          0.029739141,
+          0.071557999,
+          1.2587259,
+          0.0235672
+        ],
+        [
+          0.029221058,
+          0.076528072,
+          1.266758,
+          0.028462887
+        ],
+        [
+          0.030892134,
+          0.085939884,
+          1.2802002,
+          0.022086143
+        ],
+        [
+          0.027995825,
+          0.083570004,
+          1.2566152,
+          0.022689104
+        ],
+        [
+          0.029876947,
+          0.077070951,
+          1.2861903,
+          0.037214041
+        ],
+        [
+          0.028552055,
+          0.072495699,
+          1.2786682,
+          0.021676064
+        ],
+        [
+          0.027266264,
+          0.067664862,
+          1.2486641,
+          0.028856039
+        ],
+        [
+          0.027431011,
+          0.069970846,
+          1.2548141,
+          0.021867037
+        ],
+        [
+          0.027922392,
+          0.067605019,
+          1.2806327,
+          0.023478985
+        ],
+        [
+          0.02655077,
+          0.064945936,
+          1.2723,
+          0.021372795
+        ],
+        [
+          0.029747963,
+          0.073718786,
+          1.2625499,
+          0.02199316
+        ],
+        [
+          0.030511141,
+          0.085031033,
+          1.2654169,
+          0.022083998
+        ],
+        [
+          0.029382944,
+          0.069083929,
+          1.2588651,
+          0.02748394
+        ],
+        [
+          0.027106047,
+          0.065227985,
+          1.2687249,
+          0.026067019
+        ],
+        [
+          0.028067112,
+          0.067274094,
+          1.2715249,
+          0.021788836
+        ],
+        [
+          0.028788805,
+          0.083160877,
+          1.3033078,
+          0.046336889
+        ],
+        [
+          0.029205084,
+          0.097419024,
+          1.2738717,
+          0.035330057
+        ],
+        [
+          0.026878119,
+          0.072437048,
+          1.2630568,
+          0.023387909
+        ],
+        [
+          0.026567221,
+          0.065760851,
+          1.2512481,
+          0.021934032
+        ],
+        [
+          0.028529167,
+          0.069482803,
+          1.2645619,
+          0.021355629
+        ],
+        [
+          0.027061939,
+          0.065574884,
+          1.2792709,
+          0.02312088
+        ],
+        [
+          0.028804064,
+          0.07618475,
+          1.2573078,
+          0.025970221
+        ],
+        [
+          0.031761885,
+          0.084444046,
+          1.2693973,
+          0.022006035
+        ],
+        [
+          0.027586937,
+          0.073833942,
+          1.2579141,
+          0.028022051
+        ],
+        [
+          0.027363062,
+          0.065424919,
+          1.2465389,
+          0.022000074
+        ],
+        [
+          0.02754879,
+          0.06730485,
+          1.2876811,
+          0.021890163
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.963702918,
+        2.451978206,
+        42.9785238,
+        0.857328654
+      ],
+      "late_phase_seconds": [
+        0.681397678,
+        1.770627022,
+        30.4393229,
+        0.610011101
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 166.17368421052632,
+      "background_cpu_max": 220.8,
+      "compute_cpu_mean": 1537.8236842105264,
+      "slow_unchanged_phase": false
+    },
+    {
+      "atoms": 128,
+      "variant": "before",
+      "repetition": 3,
+      "folder": "<local>/c128-before-3",
+      "wall_seconds": 80.63868433400012,
+      "rt_seconds": 70.668,
+      "phase_seconds": [
+        [
+          0.026967049,
+          7.5231528,
+          1.2913961,
+          0.038597107
+        ],
+        [
+          0.028456211,
+          0.064571857,
+          1.324862,
+          0.022007942
+        ],
+        [
+          0.02939105,
+          0.078572035,
+          1.3596151,
+          0.022294998
+        ],
+        [
+          0.026620865,
+          0.067325115,
+          1.3444321,
+          0.030094862
+        ],
+        [
+          0.029317856,
+          0.061904907,
+          1.4308572,
+          0.096791983
+        ],
+        [
+          0.029910564,
+          0.076411247,
+          1.418613,
+          0.028106928
+        ],
+        [
+          0.030167103,
+          0.092680931,
+          1.4097452,
+          0.022013903
+        ],
+        [
+          0.030168056,
+          0.06895709,
+          1.3554401,
+          0.021564245
+        ],
+        [
+          0.02674365,
+          0.067794085,
+          1.366431,
+          0.022864103
+        ],
+        [
+          0.027192116,
+          0.064483166,
+          1.3686211,
+          0.022253036
+        ],
+        [
+          0.026370049,
+          0.065032959,
+          1.3401389,
+          0.02195406
+        ],
+        [
+          0.028889894,
+          0.083144903,
+          1.3416839,
+          0.022520065
+        ],
+        [
+          0.028273106,
+          0.071953773,
+          1.3589349,
+          0.022115946
+        ],
+        [
+          0.028239965,
+          0.06727314,
+          1.34635,
+          0.02922225
+        ],
+        [
+          0.027026892,
+          0.065178871,
+          1.3603818,
+          0.026846886
+        ],
+        [
+          0.029214382,
+          0.073684931,
+          1.355583,
+          0.028348923
+        ],
+        [
+          0.028529882,
+          0.077565908,
+          1.411737,
+          0.027437687
+        ],
+        [
+          0.03243804,
+          0.073581934,
+          1.347985,
+          0.021835089
+        ],
+        [
+          0.028815031,
+          0.076071024,
+          1.4157341,
+          0.220397
+        ],
+        [
+          0.02726078,
+          0.068439007,
+          1.3473101,
+          0.023092985
+        ],
+        [
+          0.02980113,
+          0.071178198,
+          1.3436439,
+          0.022078037
+        ],
+        [
+          0.027529001,
+          0.078710079,
+          1.3512192,
+          0.023180008
+        ],
+        [
+          0.027249098,
+          0.066984892,
+          1.358906,
+          0.023293972
+        ],
+        [
+          0.02857089,
+          0.072363138,
+          1.363241,
+          0.027754068
+        ],
+        [
+          0.027196169,
+          0.065109015,
+          1.375947,
+          0.022253752
+        ],
+        [
+          0.026971817,
+          0.067654133,
+          1.3610477,
+          0.02226305
+        ],
+        [
+          0.028990984,
+          0.070543051,
+          1.3502429,
+          0.022975922
+        ],
+        [
+          0.027385712,
+          0.06698823,
+          1.3414409,
+          0.024491072
+        ],
+        [
+          0.028653622,
+          0.080716848,
+          1.3551979,
+          0.02243185
+        ],
+        [
+          0.028136015,
+          0.076025963,
+          1.36058,
+          0.022415161
+        ],
+        [
+          0.029402971,
+          0.084373236,
+          1.354578,
+          0.021723032
+        ],
+        [
+          0.026991129,
+          0.065514088,
+          1.3540471,
+          0.022507906
+        ],
+        [
+          0.028896809,
+          0.067658186,
+          1.3747971,
+          0.022161722
+        ],
+        [
+          0.032093048,
+          0.17180085,
+          1.4610863,
+          0.031571865
+        ],
+        [
+          0.026808023,
+          0.065842152,
+          1.3452721,
+          0.053253889
+        ]
+      ],
+      "repeated_phase_seconds": [
+        0.9677019099999999,
+        2.536088942,
+        46.4557026,
+        1.116118197
+      ],
+      "late_phase_seconds": [
+        0.68336439,
+        1.82835555,
+        32.7369469,
+        0.806172137
+      ],
+      "ACE_builds": 35,
+      "initial_sha256": "c40634ea085c3022e3afa976cdecede1ac4fafceac927acb2b6ef98c511e390c",
+      "background_cpu_mean": 171.9625,
+      "background_cpu_max": 303.9,
+      "compute_cpu_mean": 1529.72,
+      "slow_unchanged_phase": false
+    }
+  ],
+  "comparison": "beccb272 versus19b9333c, FFT batch1 on both",
+  "all_timings_stable": false
+}
