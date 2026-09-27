@@ -1,0 +1,82 @@
+{
+  "scope": "Gamma PBEh mesh RT: distributed MLWF refresh, FFTW full-support exchange, spatial ACE",
+  "mpi_ranks": [
+    1,
+    2,
+    4
+  ],
+  "layouts": [
+    [
+      1,
+      1,
+      1
+    ],
+    [
+      1,
+      2,
+      1
+    ],
+    [
+      1,
+      2,
+      2
+    ]
+  ],
+  "exchange_oracle_max_abs_error": 1.4488835837920474e-15,
+  "rt_parity": {
+    "2": {
+      "max_data_error": 5.598887781350925e-19,
+      "max_energy_file_error": 1.0231815394945443e-12,
+      "final_velocity_force_file_error": 0.0
+    },
+    "4": {
+      "max_data_error": 5.014435047745458e-19,
+      "max_energy_file_error": 1.000444171950221e-11,
+      "final_velocity_force_file_error": 0.0
+    }
+  },
+  "mpi4_work": {
+    "dt_au": [
+      0.08,
+      0.04,
+      0.02
+    ],
+    "max_error_Ha": [
+      8.116474631252556e-06,
+      2.0374785083316803e-06,
+      5.101434812516265e-07
+    ]
+  },
+  "water_mpi2_max_energy_file_error_eV": 8.410660189139829e-12,
+  "verification": {
+    "ehrenfest_tests": 14,
+    "input_tests": 8,
+    "wannier_tests": 10,
+    "gauge_tests": 1,
+    "builds": [
+      "HSE ON MPI",
+      "HSE OFF serial"
+    ],
+    "projected_lcfo": "passed",
+    "post_review": "Invalid single-rank dv transport timeout reproduced then corrected using collective validation. Exchange/frame/transport oracle and native full-pulse rank parity rerun passed."
+  },
+  "limitations": [
+    "unshifted Gamma",
+    "occupied-only full EXX support",
+    "y/z pencils only",
+    "all occupied columns per spatial rank",
+    "DC initializer still has global single-orbital scratch",
+    "no giant-system timing or long-time accuracy claim"
+  ],
+  "logs_sha256": {
+    "spatial-mesh-final.log": "d3394f85dca443b0e8e2abda6a4a7d733969f0cd8c60835af7b813af55d45b56",
+    "spatial-exchange-final.log": "2398e554d74030936f782a9b8684a7252715cfa8a1da06a1a0cf823e75edaa89",
+    "spatial-mesh-reviewed-parity.log": "87b037dac520ec9f55888809c567cdd3ca35e82fd7865d91479cf2bfac712924",
+    "spatial-mesh-inputs.log": "6a85a4d3f487d43a3a4477f967df65a5ff0f7afb2ba740a008023b6a81f25a37",
+    "spatial-mesh-gauge.log": "207dd4907dfc736186564633071dc1f5a5fb8766bde1d9ed9bd5fb5e4d71b169",
+    "spatial-mesh-wannier.log": "9c9102f5211dfb70f05abdcaaf3ab46842b2cd8eb419124c3e421d4e9a41c429",
+    "spatial-mesh-reviewed-build.log": "ea6500fc600543758be4227e818aa878d63dd19926fd4485ad6e50c7108bad16",
+    "spatial-mesh-off-build.log": "2b7cb9ee83cb02379795b8166633206a83a9f6b8f081d47415f7b50560c52a4a",
+    "spatial-mesh-lcfo-regression.log": "9d1e5bf1711da4abc1187154a052614d5a78f2154c1d76fd5dced5f2b055f4e4"
+  }
+}

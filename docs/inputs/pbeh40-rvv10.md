@@ -251,9 +251,8 @@ pseudopotentials are rebuilt before energy and force evaluation. There are no
 moving-basis terms in this fixed real-space mesh representation.
 
 See `samples/pbeh40_rvv10/water_ehrenfest_gs.inp` and
-`water_ehrenfest_rt.inp` for a verified small water setup. Native exchange remains
-k-only parallel with complete grid/orbitals per rank; giant-system spatial/
-orbital distribution, finite EXX support and long trajectories are not certified.
+`water_ehrenfest_rt.inp` for a verified small water setup. Native exchange now supports the Gamma y/z spatial layout described below.
+Orbital distribution, finite EXX support and long trajectories are not certified.
 This is DC preparation followed by total-grid Ehrenfest, not propagation of
 independent truncated-fragment forces. The old direct DC-BOMD guard remains.
 
@@ -282,6 +281,34 @@ columns remain present locally, so this does not provide orbital decomposition.
 
 This API is verified independently with MPI1/2/4, complex states, non-unit grid
 volume, unequal/empty partitions, midpoint operators, zero exchange and bad
-local data. It is not yet wired into native distributed mesh RT: the k-only
-admission guard remains until MLWF localization and exchange-action generation
-are distributed as well. No force/current MPI trajectory parity is claimed yet.
+local data. It is also used by the Gamma spatial mesh RT route below; other layouts
+retain their existing admission restrictions.
+
+
+### Gamma spatial mesh Ehrenfest RT
+
+For DC-initialized PBEh40/PBEh40+rVV10 native mesh RT, set `nproc_k=1`,
+`nproc_ob=1`, and for example `nproc_rgrid=1,2,2` with four MPI ranks.
+The path requires an unshifted Gamma point, orthorhombic periodic cell,
+fully occupied spin pairs, `exx_mlwf_radius=0`, and the default Taylor4+ACE.
+The x dimension is complete on each pencil; y/z are distributed. Grid sizes
+must satisfy the FFTW pencil divisibility constraints. Static DC fragments,
+projected LCFO RT and multi-k calculations retain their prior layout support.
+
+MLWF localization reduces six band-overlap matrices; polar transport reduces
+the temporal overlap matrix. Each rank retains only local grid rows of the
+localized source and previous frame. An identity initial gauge replaces the
+serial pivoted seed; at full support this changes localization history but not
+the exchange operator. The usual exx_mlwf_interval/maxiter/tolerance apply.
+The full-support pair convolution uses the existing distributed FFTW backend,
+with up to four target columns per batch and the same spherical Coulomb cutoff
+as the serial path. ACE construction and action reduce only small band matrices.
+No full wavefunction-grid gather occurs during these exchange RT operations.
+`exx_local_fft` does not select compact source convolutions on this path.
+
+Initial DC-to-mesh reconstruction still uses global scratch for one orbital
+and fragment input data; it is not yet a fully distributed-memory initializer.
+All occupied columns remain local to each spatial rank, and small band matrices
+are replicated. The verified MPI1/2/4 H4 pulse and MPI1/2 water smoke cases are
+correctness checks, not evidence for giant-system timing or long-time accuracy.
+Use `samples/pbeh40_rvv10/h4_ehrenfest_pulse_spatial.inp` after its matching GS.

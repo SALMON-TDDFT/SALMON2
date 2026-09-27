@@ -3315,8 +3315,16 @@ contains
       if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
-        if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
-          error stop 'HSE Wannier: only k parallelism within each fragment is supported'
+        if(pbeh_mesh_rt.and.product(nproc_rgrid)>1)then
+          if(nproc_ob/=1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
+            error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
+          if(modulo(num_rgrid(1),nproc_rgrid(2))/=0.or.modulo(num_rgrid(2),nproc_rgrid(2))/=0.or. &
+             modulo(num_rgrid(2),nproc_rgrid(3))/=0.or.modulo(num_rgrid(3),nproc_rgrid(3))/=0) &
+            error stop 'Spatial EXX: incompatible FFTW pencil grid'
+        else
+          if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
+            error stop 'HSE Wannier: only k parallelism within each fragment is supported'
+        endif
         if(propagator=='hse_taylor4_full'.or.propagator=='hse_ptcn') &
           error stop 'HSE Wannier RT: use the default Taylor4+ACE propagator'
         if(yn_dc=='y'.and.temperature<0d0) &

@@ -288,9 +288,8 @@ corrected for this route.
 
 Electron propagation uses midpoint nuclear pseudopotentials and evaluates
 forces/energy with endpoint pseudopotentials. Full EXX support, fixed integer
-occupations and NVE are required; impulse and Acos2 excitation are supported. Native exchange still
-stores full grid/orbitals per k rank; real-space/orbital distributed exchange for
-giant systems is outstanding. Direct truncated-fragment MD remains disabled.
+occupations and NVE are required; impulse and Acos2 excitation are supported. At this initial validation stage, native exchange retained full grid/orbitals
+per k rank; the later Gamma spatial implementation is recorded below. Direct truncated-fragment MD remains disabled.
 
 
 ## Finite Acos2 real-space Ehrenfest pulse
@@ -314,5 +313,33 @@ non-unit dv, multiple k points/targets, midpoint factors, zero exchange and
 collective rejection of a NaN on one rank. MPI1/2/4 pass, including an empty
 rank in the four-rank partition. Existing 10 Wannier/ACE tests and HSE ON/OFF
 builds pass. Read-only review found no blocking issue under the documented
-collective contract. Native spatial RT remains guarded pending distributed
-MLWF and exchange generation; this is an algebra-stage result.
+collective contract. This was the algebra-stage result; native Gamma spatial RT was connected
+in the following implementation.
+
+
+## Gamma spatial mesh RT integration
+
+`hse_spatial.f90` distributes MLWF link/transport formation, full-support Coulomb
+pair convolution through FFTW pencils, and native ACE construction/application.
+The independent serial-Wannier oracle with complex orbitals, five targets
+(including a batch tail), explicit cutoff and transported gauge gives maximum
+exchange-action difference 1.45e-15 at MPI1/2/4. Localized frames also agree with
+full-grid localization, and temporal overlap/frame checks pass. A single-rank
+invalid transport volume originally stranded peers; a failing timeout test
+preceded collective validation, and the corrected MPI test completes.
+
+All 14 Ehrenfest tests passed, including complete H4 pulses at MPI1/2/4 and
+MPI4 time-step refinement. Maximum output differences from MPI1 are:
+
+| ranks | field/current data (au) | energy file (au) | final velocity/force output |
+|---|---:|---:|---:|
+| 2 | 5.60e-19 | 1.03e-12 | 0 at file precision |
+| 4 | 5.02e-19 | 1.01e-11 | 0 at file precision |
+
+MPI4 energy-minus-external-work errors for dt=.08,.04,.02 au are
+8.11647e-6, 2.03748e-6, 5.10143e-7 Ha. The single-water MPI2 energy-file difference
+from MPI1 is8.41e-12 eV. HSE ON/OFF builds and existing gauge/Wannier/input
+regressions pass. The reviewed correction was followed by exchange/localization
+and full-pulse parity reruns. Initial DC reconstruction still has global
+single-orbital scratch; orbital MPI, finite-radius MD and production scaling
+remain outside this result.

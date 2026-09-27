@@ -19,9 +19,8 @@ or basis propagation occurs. MLWF/ACE accelerates exchange only.
 
 This is a one-water, one-rank, 24³-grid smoke fixture: four 0.0005 fs steps after
 an electronic impulse with NVE ions. It does not validate liquid-water dynamics
-with a finite-duration laser. The current native exchange layout keeps the full
-real-space grid and occupied orbitals on each k rank; spatial/orbital distributed
-exchange for giant systems remains a separate extension.
+with a finite-duration laser. The Gamma native RT exchange now supports y/z spatial decomposition.
+Orbital decomposition and giant-system performance validation remain outstanding.
 
 
 For a finite pulse, use theory='tddft_pulse' and ae_shape1='Acos2', with positive
@@ -35,3 +34,12 @@ The saved H4 inputs are `h4_ehrenfest_gs.inp` (two MPI ranks), followed by
 `h4_ehrenfest_pulse.inp` (one rank) in the same directory with H_rps.dat and
 `h4_ehrenfest_velocity.dat`. They reproduce the finest pulse test in atomic
 units: dt=.02, 480 steps, width6.4, omega1=1.9634954084936207 and amplitude.03.
+
+
+`h4_ehrenfest_pulse_spatial.inp` uses four MPI ranks with `nproc_rgrid=1,2,2`.
+Prepare the same `data_dcdft` with `h4_ehrenfest_gs.inp` (two ranks), then run
+`mpiexec -n 4 salmon < h4_ehrenfest_pulse_spatial.inp`. The RT stage stores local
+wavefunction, MLWF-source and ACE rows; it uses distributed FFTW exchange.
+When comparing serial and spatial outputs, use separate run directories with
+the same GS data and pseudopotential/velocity files to preserve both outputs.
+This full-support route does not yet support finite-radius MD or orbital MPI.

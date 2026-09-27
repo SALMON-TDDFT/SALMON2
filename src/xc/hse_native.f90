@@ -1,7 +1,7 @@
 #include "config.h"
-! SALMON adapter: initial certified layout is complete grid/orbitals per rank,
-! distributed k points. The legacy backend transfers density tiles; the Wannier
-! baseline gathers a fragment on its k root. ACE applications stay local.
+! SALMON adapter: legacy full-grid/orbital layout distributes k points.
+! Gamma DC-initialized PBEh mesh RT also supports spatial y/z FFTW pencils.
+! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module hse_native
   use exx_functional, only: exchange_fraction
   use iso_fortran_env, only: int64
@@ -12,12 +12,13 @@ module hse_native
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
   use hse_ace
+  use hse_spatial
   use hse_wannier
   use hse_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
-    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft, &
+    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
     hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
@@ -29,6 +30,7 @@ module hse_native
   public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
   type(hse_symmetry_map),save :: symmetry_map
   type(hse_kernel),save :: kernel
+  type(spatial_exx_state),save :: spatial
   type(s_hse_wannier),save :: wannier
   real(8),allocatable,save :: cached_occupation(:,:)
   complex(8),allocatable,save :: cached_action(:,:,:)
@@ -232,6 +234,12 @@ contains
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
     endif
+    if(info%isize_r>1.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
+       (xc=='pbeh40'.or.xc=='pbeh40_rvv10').and. &
+       (theory=='tddft_response'.or.theory=='tddft_pulse'))then
+      call refresh_spatial(system,mg,info,psi)
+      return
+    endif
     if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
       error stop 'HSE06: initial native support requires k-only MPI distribution'
 
@@ -401,7 +409,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     complex(8),intent(in),optional :: lcfo_coeff(:,:)
     complex(8),intent(out),optional :: lcfo_action(:,:)
-    integer :: ierr,ng,total_error
+    integer :: ierr,ng,total_error,info_error
     real(8) :: tick,communication_before
     if(.not.hse_enabled())return
     if(lcfo_rt_active)then
@@ -418,7 +426,14 @@ contains
     call hse_pack(psi,mg,info,target_work)
     if(timing_enabled)tick=hse_walltime()
     if(use_wannier_exchange().and.hse_force_full_action)then
-      call apply_wannier_collective(target_work,action_work,info)
+      if(info%isize_r>1)then
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
+          [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,target_work,action_work,info_error)
+        if(info_error/=0)error stop 'Spatial EXX: full action failed'
+      else
+        call apply_wannier_collective(target_work,action_work,info)
+      endif
       ierr=0
     else if(taylor_active.and.propagator=='hse_taylor4_full')then
       communication_before=hse_timings(4)
@@ -432,9 +447,17 @@ contains
       if(timing_enabled)hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
     else
       if(taylor_active.and.taylor_midpoint)then
-        call hse_ace_apply(midpoint_ace,target_work,action_work,ierr)
+        if(info%isize_r>1)then
+          call hse_ace_apply(midpoint_ace,target_work,action_work,ierr,sum_spatial)
+        else
+          call hse_ace_apply(midpoint_ace,target_work,action_work,ierr)
+        endif
       else
-        call hse_ace_apply(ace,target_work,action_work,ierr)
+        if(info%isize_r>1)then
+          call hse_ace_apply(ace,target_work,action_work,ierr,sum_spatial)
+        else
+          call hse_ace_apply(ace,target_work,action_work,ierr)
+        endif
       endif
       if(timing_enabled)hse_timings(3)=hse_timings(3)+hse_walltime()-tick
     endif
@@ -442,11 +465,78 @@ contains
     call hse_pack(hpsi,mg,info,output_work)
     output_work=output_work+exchange_fraction()*action_work
     call hse_unpack(output_work,hpsi,mg,info)
+  contains
+    subroutine sum_spatial(a)
+      complex(8),intent(inout) :: a(:,:)
+      complex(8) :: total(size(a,1),size(a,2))
+      call comm_summation(a,total,size(a),info%icomm_r)
+      a=total
+    end subroutine
   end subroutine
   logical function use_wannier_exchange()
     implicit none
     use_wannier_exchange=yn_dc=='y'.or.yn_hse_wannier=='y'
   end function
+
+  subroutine refresh_spatial(system,mg,info,psi)
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: mg
+    type(s_parallel_info),intent(in) :: info
+    type(s_orbital),intent(in) :: psi
+    complex(8),allocatable :: local(:,:,:),w(:,:,:)
+    real(8) :: ex,offdiag(3,3)
+    integer :: status,total,changed,maxiter,j
+    if(info%isize_x/=1.or.info%isize_o/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
+      error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
+    if(any(num_kgrid/=1).or.maxval(abs(system%vec_k))>1d-12.or.use_symmetry) &
+      error stop 'Spatial EXX: unshifted Gamma required'
+    if(exx_mlwf_radius/=0d0.or.maxval(abs(system%rocc-2d0))>1d-12) &
+      error stop 'Spatial EXX: full support and occupied spin pairs required'
+    if(propagator/='hse_taylor4')error stop 'Spatial EXX: Taylor4 ACE required'
+    if(any(mg%num/=num_rgrid/[1,info%isize_y,info%isize_z]).or. &
+       any(mg%is/=[1,info%id_y*mg%num(2)+1,info%id_z*mg%num(3)+1])) &
+      error stop 'Spatial EXX: mesh pencil layout mismatch'
+    offdiag=system%primitive_a
+    do j=1,3
+      offdiag(j,j)=0d0
+    enddo
+    if(maxval(abs(offdiag))>1d-12)error stop 'Spatial EXX: orthogonal cell required'
+    allocate(local(product(mg%num),system%no,1),w(product(mg%num),system%no,1))
+    call hse_pack(psi,mg,info,local)
+    changed=1
+    if(allocated(cached_source))then
+      if(all(shape(cached_source)==shape(local)))then
+        if(all(cached_source==local))changed=0
+      endif
+    endif
+    call comm_summation(changed,total,info%icomm_r)
+    if(total==0)return
+    maxiter=0
+    if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
+    call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
+      [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
+      maxiter,exx_mlwf_tolerance,status)
+    if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
+    call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
+      [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+      pbeh_coulomb_radius,local,w,status)
+    if(status/=0)error stop 'Spatial EXX: exchange action failed'
+    call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
+    if(status/=0)error stop 'Spatial EXX: ACE build failed'
+    cached_source=local;cached_action=w
+    ex=exchange_fraction()*system%hvol*real(sum(conjg(local)*w),8)
+    call comm_summation(ex,hse_exchange_energy,info%icomm_r)
+    if(info%id_r==0.and.(spatial%updates==1.or.maxiter>0)) &
+      write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
+      spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
+  contains
+    subroutine sum_spatial(a)
+      complex(8),intent(inout) :: a(:,:)
+      complex(8) :: total(size(a,1),size(a,2))
+      call comm_summation(a,total,size(a),info%icomm_r)
+      a=total
+    end subroutine
+  end subroutine
 
   subroutine refresh_wannier(system,mg,info,psi)
     use communication, only: comm_bcast

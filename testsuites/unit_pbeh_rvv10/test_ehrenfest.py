@@ -172,6 +172,14 @@ class RealspaceEhrenfest(unittest.TestCase):
         self.assertTrue(np.isfinite(energy).all())
         self.assertGreater(energy[-1,3],0.)
         print('water mesh final ionic kinetic energy eV:',energy[-1,3])
+        folder2,run2=self.execute('water_rt_spatial',rt.replace('nproc_rgrid=1,1,1','nproc_rgrid=1,2,1'),
+                                  ranks=2,rt='water_gs')
+        self.assertEqual(run2.returncode,0,run2.stdout[-2000:]+run2.stderr)
+        self.assertIn('EXX_SPATIAL',run2.stdout)
+        energy2=np.loadtxt(next(folder2.glob('*_rt_energy.data')))
+        np.testing.assert_allclose(energy2,energy,atol=1e-7,rtol=1e-7)
+        print('water spatial energy parity eV:',np.max(abs(energy2-energy)))
+
 
     def pulse_input(self,dt=.08,nt=120,amplitude=.03,moving=True):
         inp=self.rt_input(dt=dt,nt=nt,moving=moving)
@@ -241,6 +249,53 @@ class RealspaceEhrenfest(unittest.TestCase):
                 _,run=self.execute('invalid_'+name,self.pulse_input().replace(old,new),rt=True)
                 self.assertNotEqual(run.returncode,0)
                 self.assertIn('positive frequency/width and nonnegative pulse start',run.stdout+run.stderr)
+
+    def test_spatial_mesh_pulse(self):
+        reference=None
+        for ranks,layout in [(1,'1,1,1'),(2,'1,2,1'),(4,'1,2,2')]:
+            inp=self.pulse_input(dt=.08,nt=120)
+            inp=inp.replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            folder,run=self.execute('spatial_'+str(ranks),inp,ranks=ranks,rt=True)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            self.assertIn('end SALMON',run.stdout)
+            self.assertNotIn('Native LCFO RT active',run.stdout)
+            data=np.loadtxt(next(folder.glob('*_rt.data')))
+            energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
+            xyz=next(folder.glob('*_trj.xyz')).read_text().splitlines()[-4:]
+            vf=np.array([[float(x) for x in line.split('#v=')[1].replace('#f=','').split()] for line in xyz])
+            if reference is None:reference=(data,energy,vf)
+            else:
+                self.assertIn('EXX_SPATIAL',run.stdout)
+                np.testing.assert_allclose(data,reference[0],atol=2e-10,rtol=2e-7)
+                np.testing.assert_allclose(energy,reference[1],atol=2e-9,rtol=2e-7)
+                np.testing.assert_allclose(vf,reference[2],atol=2e-9,rtol=2e-6)
+                print('spatial pulse ranks/data/energy/vf differences:',ranks,
+                      np.max(abs(data-reference[0])),np.max(abs(energy-reference[1])),np.max(abs(vf-reference[2])))
+
+    def test_spatial_work_refinement(self):
+        errors=[]
+        for dt,nt in ((.08,120),(.04,240),(.02,480)):
+            inp=self.pulse_input(dt=dt,nt=nt).replace('nproc_rgrid=1,1,1','nproc_rgrid=1,2,2')
+            folder,run=self.execute('spatial_work_'+str(nt),inp,ranks=4,rt=True)
+            self.assertEqual(run.returncode,0,run.stdout[-2000:]+run.stderr)
+            data=np.loadtxt(next(folder.glob('*_rt.data')))
+            energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
+            power=1024*np.sum((data[:,16:19]-data[:,13:16])*data[:,10:13],axis=1)
+            work=np.cumsum(.5*dt*(np.r_[0.,power[:-1]]+power))
+            total=energy[:,1]+energy[:,3]
+            errors.append(float(np.max(abs(total[1:]-total[0]-work))))
+        print('spatial MPI4 work errors Ha:',errors)
+        self.assertGreater(errors[0]/errors[1],3.3)
+        self.assertGreater(errors[1]/errors[2],3.3)
+        self.assertLess(errors[-1],1e-5)
+
+    def test_spatial_layout_guards(self):
+        for name,layout in [('x','2,1,1'),('orbital','1,2,1')]:
+            inp=self.rt_input().replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            if name=='orbital':inp=inp.replace('nproc_ob=1','nproc_ob=2')
+            _,run=self.execute('bad_layout_'+name,inp,rt=True)
+            self.assertNotEqual(run.returncode,0)
+            self.assertIn('Gamma y/z pencils with all orbitals required',run.stdout+run.stderr)
 
     def test_forbidden_modes(self):
         cases=[('pulse',self.rt_input().replace("ae_shape1='impulse'","ae_shape1='Ecos2'\n phi_CEP1=.25"),'impulse or Acos2'),

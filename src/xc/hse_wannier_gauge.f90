@@ -7,6 +7,11 @@ module hse_wannier_gauge
   public :: gauge_seed_select,gauge_seed_finish
   public :: gauge_seed_gamma,gauge_minimize_gamma_inplace
   public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
+  abstract interface
+    subroutine spatial_sum(matrix)
+      complex(8),intent(inout) :: matrix(:,:)
+    end subroutine
+  end interface
 contains
   subroutine gauge_seed(psi,position,k,u,status)
     implicit none
@@ -112,24 +117,34 @@ contains
     u=matmul(left,right);status=0
   end subroutine
 
-  subroutine gauge_transport(current,previous,dv,u,min_singular,status)
+  subroutine gauge_transport(current,previous,dv,u,min_singular,status,sum_grid)
     implicit none
     complex(8),intent(in) :: current(:,:,:),previous(:,:,:)
     real(8),intent(in) :: dv
     complex(8),intent(out) :: u(:,:,:)
     real(8),intent(out) :: min_singular
     integer,intent(out) :: status
+    procedure(spatial_sum),optional :: sum_grid
     complex(8),allocatable :: overlap(:,:),left(:,:),right(:,:),work(:)
     real(8),allocatable :: singular(:),rwork(:)
     integer :: n,ik
+    complex(8) :: check(1,1)
     status=1;min_singular=0d0
-    if(any(shape(current)/=shape(previous)).or.dv<=0d0)return
+    check=0d0
+    if(any(shape(current)/=shape(previous)).or.dv<=0d0.or..not.ieee_is_finite(dv))check=1d0
     n=size(current,2)
-    if(any(shape(u)/=[n,n,size(current,3)]))return
+    if(n<1.or.size(current,3)<1.or.any(shape(u)/=[n,n,size(current,3)]))check=1d0
+    if(.not.all(ieee_is_finite(real(current))).or..not.all(ieee_is_finite(aimag(current))))check=1d0
+    if(.not.all(ieee_is_finite(real(previous))).or..not.all(ieee_is_finite(aimag(previous))))check=1d0
+    ! Every spatial peer must take the same branch before overlap collectives.
+    ! Band/k dimensions and callback call order are a collective caller contract.
+    if(present(sum_grid))call sum_grid(check)
+    if(real(check(1,1))/=0d0)return
     allocate(overlap(n,n),left(n,n),right(n,n),work(8*n),singular(n),rwork(5*n))
     min_singular=huge(1d0)
     do ik=1,size(current,3)
       overlap=matmul(conjg(transpose(current(:,:,ik))),previous(:,:,ik))*dv
+      if(present(sum_grid))call sum_grid(overlap)
       call zgesvd('A','A',n,n,overlap,n,singular,left,n,right,n,work,size(work),rwork,status)
       if(status/=0)return
       min_singular=min(min_singular,minval(singular))
