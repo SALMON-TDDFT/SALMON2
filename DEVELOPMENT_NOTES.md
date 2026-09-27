@@ -1,13 +1,14 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`bee87f63`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`841bafe6`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
-- [最新：初期MLWFのメモリ削減と本番制約](#initial-memory)
+- [最新：Gamma seedのピークメモリ削減](#seed-memory)
+- [初期MLWFのリンクメモリ削減と本番制約](#initial-memory)
 - [交換FFTの計画最適化](#fft-measure)
 - [Gram検査の演算・通信削減](#packed-gram)
 - [交換ソースの支持領域処理](#source-support)
@@ -32,7 +33,7 @@ make -j 8
 
 実行ファイルは `build/salmon`。インストール先を指定する場合はconfigure.pyに `--prefix=/absolute/path/to/install` を追加し、続けて `make install`。今回追加したHSE・MLWF・ACEも同じ手順で組み込まれます。FFTW/Libxcは利用可能なものをリンク検査し、なければ対象コンパイラで自動ビルドします（初回ダウンロードにはネットワークが必要）。直接CMakeを呼ぶ場合の富岳自動選択も残しています。
 
-ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳実機のコンパイル・リンク・3次元計算は未検証**です。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
+ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳では占有数検査とPOSIXヘッダの修正後、ビルド完了を利用者ログで確認。今回追加したseed削減版の富岳ビルドと、GS/RT・3次元計算は未検証**です。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
 
 <a id="implementation"></a>
 
@@ -58,9 +59,25 @@ make -j 8
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="seed-memory"></a>
+
+## 最新：Gamma seedのピークメモリ削減
+
+`841bafe6`で全係数のreshapeコピーを除去し、QRの大配列を解放してからSVD行列を確保。seed単独のpeak RSSは占有512・基底8192で **220.78→156.55 MiB（29.1%減）**。Uは全要素一致しました。これは合成係数の単独測定で、RT全体や富岳8³のピークではありません。
+
+| C128/MPI16、同一GS・16step | 結果 |
+|---|---|
+| 初期snapshot／リンクsnapshot | byte単位で一致 |
+| 最大電流差／密度差／出力エネルギー差 | 2.12e-17 a.u.／3.00e-15／0 |
+| RT秒・速度比（旧/新） | 53.122→55.642、0.955（各1回・負荷変動あり） |
+
+初期化のメモリ削減であり、RT速度改善の主張はしません。rootの全係数＋転置QR配列、全体ピボット選択、密U/ACEは残るため、8³・10³の本番は引き続きピーク検証待ちです。
+
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/gamma-seed-memory-results.json) ／ [適用用差分](tools/patches/gamma-seed-memory.patch)
+
 <a id="initial-memory"></a>
 
-## 最新：初期MLWFのメモリ削減と本番制約
+## 初期MLWFのリンクメモリ削減と本番制約
 
 `bee87f63`ではrootのGamma局在化を更新済みリンクの直接評価に変更し、リンク関連の保持量を18 N²→6 N²複素数へ削減。係数のroot集約バッファは64列に制限し、全係数もリンク生成前に解放します。占有1024のGamma初期評価単独でpeak RSS **364→156 MiB（57%減）**。これはRT全体のピークではありません。
 
