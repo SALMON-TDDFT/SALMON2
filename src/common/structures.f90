@@ -448,6 +448,14 @@ module structures
     ! block"); not used by the translation-phase labeling itself.
     real(8),allocatable :: esp_ref(:,:,:)
     complex(8),allocatable :: upu_ref(:,:,:,:), u_rVnl_Vnlr_u_ref(:,:,:,:)
+    ! egap_threshold: the energy-gap clustering threshold for Phase B
+    ! (unfolding.tex sec.9.5), a.u., from the input parameter
+    ! unfold_egap_threshold. Required (checked in init_dm_unfold) to be a
+    ! positive value whenever |det(pmat)|>1; carries the -1d0 unset
+    ! sentinel when |det(pmat)|=1, where Phase B's clustering never runs so
+    ! no value is needed. Phase B (init_dm_unfold, src/analysis/dm_unfold.f90)
+    ! reads this field to drive its energy-gap clustering.
+    real(8) :: egap_threshold
     ! primitive-to-reference correspondence (dm_unfold_option='super' only):
     ! a_pr(3,3) = [a^P_1,a^P_2,a^P_3], the true primitive-cell lattice vectors;
     ! pmat(3,3) = P, with a^R_i = sum_j pmat(j,i)*a^P_j (a^R = A_ref, the

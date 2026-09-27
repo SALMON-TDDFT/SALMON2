@@ -29,11 +29,13 @@ contains
   use parallelization, only: nproc_id_global, nproc_group_global, end_parallel
   use salmon_global, only: dm_unfold_option, no_ref, base_directory, sysname, natom, izatom, kion, &
                          & yn_out_mom_distr_gs, dq_mom, nq_mom, num_kgrid, &
-                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr
+                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr, unfold_egap_threshold
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
   use math_constants, only: zI,pi
   use lattice, only: calc_inverse
+  use eigen_lapack, only: eigen_zheev
+  use eigen_unitary_sub, only: diagonalize_commuting_unitary_family
 #ifdef USE_MPI
   use mpi
 #endif
@@ -64,6 +66,7 @@ contains
   real(8) :: a_pr(3,3), ainv_pr(3,3), detA_pr, pmat_r(3,3), pmat_resid
   real(8) :: norm_pr(3), A_ref(3,3)
   integer :: pmat_i(3,3)
+  integer :: q_pmat
 
   ! -- primitive-to-reference translation-phase labeling (Phase A; unfolding.tex sec.9.5) --
   integer,parameter :: nhprk_max = 4096
@@ -80,6 +83,25 @@ contains
   integer,allocatable :: hprk_label_l(:,:)
   real(8),allocatable :: hprk_score_l(:,:)
   logical :: found_dup
+
+  ! -- energy-eigenbasis recovery within a shared-hat_k block (Phase B;
+  ! unfolding.tex sec.9.5, "Recovering the energy eigenbasis within a
+  ! shared-hat_k block" and "Practical evaluation via the reciprocal-space
+  ! representation"). See the large comment block at the point of use
+  ! below for the algorithm; these are just its working variables. --
+  integer :: ntot_ref, ig, kk, ii, jj2, ib2, i1b, gb, slot, col, kcol
+  integer :: n_clusters_l, n_clusters, n_resid_warn_l, n_resid_warn, n_score_warn_l, n_score_warn
+  integer :: i0_cl, i1_cl, g_cl, ibest_c2
+  real(8) :: resid, resid_tol, score_abs2
+  complex(8) :: cscore2
+  complex(8),allocatable :: phase_gj_flat(:,:), cvec(:,:), dvec(:), Tc_list(:,:,:)
+  complex(8),allocatable :: w_family(:,:), Wfinal(:,:), Hs(:,:), Vs(:,:), phi_meas_blk(:)
+  complex(8),allocatable :: psi_ref_tmp(:,:,:,:), psi_refG_tmp(:,:,:,:)
+  real(8),allocatable :: cnorm(:), original_eps(:), e_final(:), score_final(:), Es(:)
+  integer,allocatable :: order_l(:), family_block_id(:), label_final(:), memb(:), memb_sorted(:)
+  integer,allocatable :: sort_perm(:), iord_memb(:)
+  complex(8),allocatable :: R_total(:,:)
+  real(8),allocatable :: esp_resync_l(:,:)
 
   if( dm_unfold_option /= 'super' ) then
     if (comm_is_root(nproc_id_global)) then
@@ -195,6 +217,36 @@ contains
       write(*,"(3I6)") pmat_i(i,1:3)
     end do
   end if
+
+! q_pmat = |det(pmat_i)|, computed here as an exact integer determinant
+! (pmat_i's entries are already exact integers, so this needs none of the
+! floating-point calc_inverse/nint route used for nhprk below -- it is
+! purely a cheap, independent check of whether Phase B's clustering can
+! ever be invoked at all, and is not otherwise used or reused as unfold%nhprk).
+! |det(pmat)|=1 (which includes, but is not limited to, pmat_i=I: any
+! integer unimodular matrix represents the same lattice) means there is no
+! coset structure at all, so Phase B's energy-gap clustering never runs;
+! unfold_egap_threshold is then allowed to be left at its unset (-1d0)
+! sentinel. Otherwise it must be set to a positive value by the user, in
+! whatever unit_energy the run's unit_system implies -- inputoutput.f90
+! already converts it to a.u. (like energy_cut) before dm_unfold.f90 ever
+! sees it here, so by this point it is directly comparable to esp_ref
+! (also a.u.). This is the ordinary unit_system-following convention, NOT
+! the fixed-unit exception eigen.bin itself uses (eigen.bin is always raw
+! a.u., regardless of unit_energy, because it is an internal restart file
+! the user never types a number into).
+  q_pmat = pmat_i(1,1)*(pmat_i(2,2)*pmat_i(3,3)-pmat_i(2,3)*pmat_i(3,2)) &
+         - pmat_i(1,2)*(pmat_i(2,1)*pmat_i(3,3)-pmat_i(2,3)*pmat_i(3,1)) &
+         + pmat_i(1,3)*(pmat_i(2,1)*pmat_i(3,2)-pmat_i(2,2)*pmat_i(3,1))
+  if( abs(q_pmat) > 1 .and. unfold_egap_threshold <= 0d0 ) then
+    if (comm_is_root(nproc_id_global)) then
+      write(*,"(A)") 'Error: unfold_egap_threshold must be set to a positive value in dm_unfold_option=super &
+        &whenever |det(pmat)|>1'
+    end if
+    call end_parallel
+    stop
+  end if
+  unfold%egap_threshold = unfold_egap_threshold
 
   if (comm_is_root(nproc_id_global)) then
     inquire(file='reference/wfn.bin', exist = e_wfn)
@@ -788,15 +840,394 @@ contains
   end do
   end do
 
+! ===================================================================
+! Phase B: energy-eigenbasis recovery within a shared-hat_k block.
+! unfolding.tex sec.9.5, "Recovering the energy eigenbasis within a
+! shared-hat_k block" and "Practical evaluation via the reciprocal-space
+! representation". Only runs when nhprk=|det(pmat)|>1 -- otherwise there
+! is no coset structure to mix bands across, unfold%egap_threshold may be
+! left at its unset sentinel (checked above), and nothing here applies.
+!
+! For each of THIS RANK's local reference-cell k-points (isk = isk_s..
+! isk_e; a cluster never crosses isk, and isk is uniquely rank-owned, so
+! this whole block needs no cross-rank communication except the esp_ref
+! resync noted below), bands are grouped into clusters by chaining
+! adjacent sorted-energy gaps below unfold%egap_threshold: a gap EQUAL to
+! the threshold still merges (the code below only starts a new cluster
+! when the gap strictly EXCEEDS it), so e.g. three bands at 0, 0.9d, 1.8d
+! all end up in one cluster for threshold d (Codex review, note 030,
+! confirmed this boundary behavior is intended, not accidental). This
+! chain-adjacent rule is the provisional clustering DEFINITION discussed
+! with the user (as opposed to e.g. bounding a cluster's total energy
+! width); it is not yet their final confirmed choice (Codex note 026
+! point 5), though note 030 found nothing wrong with it as a definition.
+! Bands are re-sorted by esp_ref here rather than assumed already
+! ascending in io_ref, so the result is correct regardless of the
+! reference-cell eigensolver's own band-output order.
+!
+! Within a cluster of size g>1: (1) build [T_c] (eq. in "Practical
+! evaluation..." above) for every one of the nhprk coset shifts from
+! psi_refG, reusing phase_gj/phi_pred already computed for Phase A
+! above (all nhprk shifts are used, including the always-trivial t_c=0
+! shift, which contributes an exact identity matrix and is therefore
+! harmless to include -- this avoids relying on that shift always being
+! enumerated first); (2) jointly diagonalize this commuting family
+! (eigen_unitary_sub), resolving the cluster into blocks that share one
+! hat_k; (3) for every resulting block, diagonalize
+! H_s = W_s^dagger diag(original cluster eigenvalues) W_s (built from
+! the FULL original cluster, not a reduced index set -- see the note's
+! derivation for why) to recover a genuine energy eigenbasis within it.
+! This is applied uniformly to every block, including a singleton one:
+! there it is a trivial 1x1 "diagonalization" (eigenvalue = expectation
+! value, in the ORIGINAL diag(esp_ref) sense, of whatever combination the
+! T_c diagonalization settled on, eigenvector = 1), which is still the
+! mathematically correct energy for that combination -- not necessarily
+! equal to any single original esp_ref value -- so no special case is
+! needed for it. This value is exactly what the label says: an
+! expectation value computed FROM diag(original_eps), not an independent
+! confirmation that it equals the true, fully-converged eigenvalue --
+! that further claim is only as good as diag(original_eps) itself was
+! (see the residual check below, which is exactly the diagnostic for
+! this) (Codex review, note 030, section 3).
+!
+! The resulting rotation is applied in place to psi_ref/psi_refG (this
+! rank's local isk only), to esp_ref and to hprk_label_l/hprk_score_l
+! (feeding the comm_summation below, so Phase A's initial per-band
+! labels are transparently superseded within resolved clusters), and --
+! since upu_ref/u_rVnl_Vnlr_u_ref have off-diagonal matrix elements
+! between ANY pair of bands, including bands in two DIFFERENT rotated
+! clusters (Codex note 026 point 3) -- via a dense no_ref x no_ref
+! rotation matrix R_total (identity outside touched clusters) applied
+! to the whole isk slice of both arrays at once, once per isk.
+!
+! esp_ref itself is allocated over the FULL unfold%nsk range and
+! bcast-replicated to every rank (unlike psi_ref/psi_refG/upu_ref/
+! u_rVnl_Vnlr_u_ref, which are genuinely rank-local over isk_s:isk_e);
+! only this rank's local isk range is updated by this loop, so the
+! replicated copies of those isk's on OTHER ranks are stale until the
+! comm_summation resync following this block.
+!
+! A cheap post-hoc safety net (per the note's "As a cheap safety net...
+! should be verified for every band after labeling is complete") is
+! folded into two checks that are already computed here rather than
+! added separately: hprk_score_l IS the |[T_c]_ii|-style match quality
+! for the final rotated bands (identical formula to Phase A's own,
+! recomputed per FINAL column of Wfinal, not from a single block
+! representative -- see the score-computation loop below), and resid
+! below directly checks max_ij |diag(original_eps).Wfinal - &
+! Wfinal.diag(e_final)|_ij ~ 0 (a.u.; resid_tol below is compared against
+! this same quantity), i.e. how well the blocks found above actually
+! decouple the original cluster's H. Neither check ever halts the job
+! (matching the project's established policy for a runtime
+! near-degeneracy finding, e.g. hprk_thresh above): both only warn.
+!
+! A large residual here can come from more than one cause, and this code
+! cannot distinguish between them automatically (Codex review, note 030,
+! section 3, correcting an earlier, too-narrow version of this comment
+! that named only the first two): unfold_egap_threshold was too tight at
+! that energy (widen it); a multiplet was split by the no_ref cutoff
+! (increase no_ref instead -- widening the threshold cannot fix that
+! case); the ORIGINAL reference-cell eigenstates that fed esp_ref/psi_refG
+! were themselves insufficiently converged (see "Practical convergence of
+! the reference-cell eigenvalues" above -- no amount of care in Phase B
+! can recover information the reference-cell eigensolver did not actually
+! converge to); or an accidental near-symmetry/near-degeneracy with
+! states OUTSIDE this cluster (which Phase B, by construction, never
+! looks at) is genuinely present. A large residual is a prompt to check
+! all of these, not just the first two.
+! ===================================================================
+
+  if( nhprk > 1 ) then
+
+    ntot_ref = ie_ref(1)*ie_ref(2)*ie_ref(3)
+    allocate( phase_gj_flat(ntot_ref,nhprk) )
+    ig = 0
+    do ig3_ref = 1, ie_ref(3)
+    do ig2_ref = 1, ie_ref(2)
+    do ig1_ref = 1, ie_ref(1)
+      ig = ig + 1
+      phase_gj_flat(ig,1:nhprk) = phase_gj(ig1_ref,ig2_ref,ig3_ref,1:nhprk)
+    end do
+    end do
+    end do
+
+    n_clusters_l = 0
+    n_resid_warn_l = 0
+    n_score_warn_l = 0
+    resid_tol = 0.1d0 * unfold%egap_threshold   ! see design note above; not yet user-confirmed
+
+    do isk = isk_s, isk_e
+
+      allocate( order_l(no_ref) )
+      call argsort_real( no_ref, unfold%esp_ref(1:no_ref,isk,1), order_l )
+
+      allocate( R_total(no_ref,no_ref) )
+      R_total = (0d0,0d0)
+      do io_ref = 1, no_ref
+        R_total(io_ref,io_ref) = (1d0,0d0)
+      end do
+
+      i0_cl = 1
+      do while( i0_cl <= no_ref )
+        i1_cl = i0_cl
+        do while( i1_cl < no_ref )
+          if( unfold%esp_ref(order_l(i1_cl+1),isk,1) - unfold%esp_ref(order_l(i1_cl),isk,1) &
+            & > unfold%egap_threshold ) exit
+          i1_cl = i1_cl + 1
+        end do
+        g_cl = i1_cl - i0_cl + 1
+
+        if( g_cl > 1 ) then
+          n_clusters_l = n_clusters_l + 1
+
+          allocate( memb(g_cl), original_eps(g_cl) )
+          memb(1:g_cl) = order_l(i0_cl:i1_cl)
+          original_eps(1:g_cl) = unfold%esp_ref(memb(1:g_cl),isk,1)
+
+          ! -- build [T_c] for every shift, from psi_refG (flattened over the
+          ! reference-cell G-grid), reusing phase_gj_flat above --
+          allocate( cvec(ntot_ref,g_cl), cnorm(g_cl) )
+          do kk = 1, g_cl
+            ig = 0
+            do ig3_ref = 1, ie_ref(3)
+            do ig2_ref = 1, ie_ref(2)
+            do ig1_ref = 1, ie_ref(1)
+              ig = ig + 1
+              cvec(ig,kk) = unfold%psi_refG(ig1_ref,ig2_ref,ig3_ref,1,memb(kk),isk,1)
+            end do
+            end do
+            end do
+            cnorm(kk) = sqrt( sum( abs(cvec(1:ntot_ref,kk))**2 ) )
+          end do
+
+          allocate( Tc_list(g_cl,g_cl,nhprk), dvec(ntot_ref) )
+          do jshift = 1, nhprk
+            do jj2 = 1, g_cl
+              dvec(1:ntot_ref) = cvec(1:ntot_ref,jj2) * phase_gj_flat(1:ntot_ref,jshift)
+              do ii = 1, g_cl
+                Tc_list(ii,jj2,jshift) = dot_product( cvec(1:ntot_ref,ii), dvec(1:ntot_ref) ) &
+                  & / ( cnorm(ii)*cnorm(jj2) )
+              end do
+            end do
+          end do
+          deallocate( dvec )
+
+          ! -- jointly diagonalize the commuting family, then recover the
+          ! energy eigenbasis within each resulting shared-hat_k block --
+          allocate( w_family(g_cl,g_cl), family_block_id(g_cl) )
+          call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id )
+
+          allocate( Wfinal(g_cl,g_cl), e_final(g_cl), label_final(g_cl), score_final(g_cl) )
+
+          ib2 = 1
+          do while( ib2 <= g_cl )
+            i1b = ib2
+            do while( i1b < g_cl )
+              if( family_block_id(i1b+1) /= family_block_id(ib2) ) exit
+              i1b = i1b + 1
+            end do
+            gb = i1b - ib2 + 1
+
+            allocate( Hs(gb,gb), Vs(gb,gb), Es(gb) )
+            do jj2 = 1, gb
+            do ii = 1, gb
+              Hs(ii,jj2) = sum( conjg(w_family(1:g_cl,ib2+ii-1)) * original_eps(1:g_cl) * w_family(1:g_cl,ib2+jj2-1) )
+            end do
+            end do
+            call eigen_zheev( Hs, Es, Vs )
+
+            Wfinal(:,ib2:i1b) = matmul( w_family(:,ib2:i1b), Vs )
+            e_final(ib2:i1b) = Es(1:gb)
+
+            ! hat_k label/score, per FINAL column of this block: every
+            ! column shares one eigenvalue under every T_c by construction
+            ! (that is exactly what "one block" means here), so this is
+            ! mathematically guaranteed to give the same |score| and label
+            ! for every column of the block regardless of which one is
+            ! used -- but computing it from each actual Wfinal column
+            ! (rather than once from a single w_family representative,
+            ! before the H_s rotation) is a genuine post-hoc check against
+            ! the states actually being written back below, and would
+            ! also catch it (by disagreeing across columns of what should
+            ! be one block) if some upstream tol had lumped together
+            ! eigenvalues that were not really equal (Codex review, note
+            ! 030, section 4).
+            do kcol = ib2, i1b
+              allocate( phi_meas_blk(nhprk) )
+              do jshift = 1, nhprk
+                phi_meas_blk(jshift) = sum( conjg(Wfinal(1:g_cl,kcol)) &
+                  & * matmul( Tc_list(1:g_cl,1:g_cl,jshift), Wfinal(1:g_cl,kcol) ) )
+              end do
+              ibest_c2 = 0
+              score_abs2 = -1d0
+              do icand = 1, nhprk
+                cscore2 = sum( phi_meas_blk(1:nhprk) * conjg(phi_pred(icand,1:nhprk)) ) / dble(nhprk)
+                if( abs(cscore2) > score_abs2 ) then
+                  score_abs2 = abs(cscore2)
+                  ibest_c2 = icand
+                end if
+              end do
+              if( 1d0 - score_abs2 > hprk_thresh ) then
+                n_score_warn_l = n_score_warn_l + 1
+                if( comm_is_root(info%id_o) ) then   ! avoid nproc_ob-fold duplicate prints for one isk (Codex note 030, section 6)
+                  write(*,"(A,I0,A,I0,A,F10.6)") 'Warning (Phase B): unresolved hat_k after full T_c family, isk=', &
+                    & isk, ' io_ref=', memb(kcol), '  |score|=', score_abs2
+                end if
+                label_final(kcol) = 0
+              else
+                label_final(kcol) = ibest_c2
+              end if
+              score_final(kcol) = score_abs2
+              deallocate( phi_meas_blk )
+            end do
+
+            deallocate( Hs, Vs, Es )
+            ib2 = i1b + 1
+          end do
+
+          ! post-hoc residual check (see design note above): resid is the
+          ! max absolute matrix element (a.u.) of
+          ! diag(original_eps).Wfinal - Wfinal.diag(e_final); resid_tol
+          ! (= 0.1*unfold%egap_threshold, itself a.u., printed below for
+          ! reference -- Codex review, note 030, section 3) is only a
+          ! provisional warning cutoff, not a physically justified error
+          ! bound, and widening unfold%egap_threshold makes the same
+          ! absolute resid less likely to trigger this warning.
+          resid = 0d0
+          do jj2 = 1, g_cl
+          do ii = 1, g_cl
+            resid = max( resid, abs( original_eps(ii)*Wfinal(ii,jj2) - Wfinal(ii,jj2)*e_final(jj2) ) )
+          end do
+          end do
+          if( resid > resid_tol ) then
+            n_resid_warn_l = n_resid_warn_l + 1
+            if( comm_is_root(info%id_o) ) then   ! avoid nproc_ob-fold duplicate prints for one isk (Codex note 030, section 6)
+              write(*,"(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A)") 'Warning (Phase B): large post-hoc residual, isk=', isk, &
+                & ' io_ref=', memb(1), '..', memb(g_cl), '  resid=', resid, ' a.u. (resid_tol=', resid_tol, ' a.u.)'
+            end if
+          end if
+
+          deallocate( Tc_list, w_family, family_block_id )
+
+          ! -- write the rotated states back into the SAME set of io_ref
+          ! slots this cluster occupied (memb), assigned in ascending
+          ! numerical io_ref order to ascending final energy, so the
+          ! result is fully determined regardless of memb's original
+          ! order; R_total(memb(ii),slot) records the same rotation for
+          ! upu_ref/u_rVnl_Vnlr_u_ref below. --
+          allocate( sort_perm(g_cl), iord_memb(g_cl), memb_sorted(g_cl) )
+          call argsort_real( g_cl, e_final, sort_perm )
+          call argsort_real( g_cl, dble(memb), iord_memb )
+          memb_sorted(1:g_cl) = memb(iord_memb(1:g_cl))
+
+          allocate( psi_ref_tmp(ie_ref(1),ie_ref(2),ie_ref(3),g_cl) )
+          allocate( psi_refG_tmp(ie_ref(1),ie_ref(2),ie_ref(3),g_cl) )
+          do kk = 1, g_cl
+            psi_ref_tmp(:,:,:,kk)  = unfold%psi_ref (1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,memb(kk),isk,1)
+            psi_refG_tmp(:,:,:,kk) = unfold%psi_refG(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,memb(kk),isk,1)
+          end do
+
+          do kk = 1, g_cl
+            slot = memb_sorted(kk)
+            col  = sort_perm(kk)
+            unfold%esp_ref(slot,isk,1) = e_final(col)
+            hprk_label_l(slot,isk) = label_final(col)
+            hprk_score_l(slot,isk) = score_final(col)
+            unfold%psi_ref (1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,slot,isk,1) = (0d0,0d0)
+            unfold%psi_refG(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,slot,isk,1) = (0d0,0d0)
+            do ii = 1, g_cl
+              unfold%psi_ref (1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,slot,isk,1) = &
+                & unfold%psi_ref (1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,slot,isk,1) &
+                & + Wfinal(ii,col) * psi_ref_tmp (:,:,:,ii)
+              unfold%psi_refG(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,slot,isk,1) = &
+                & unfold%psi_refG(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,slot,isk,1) &
+                & + Wfinal(ii,col) * psi_refG_tmp(:,:,:,ii)
+              R_total(memb(ii),slot) = Wfinal(ii,col)
+            end do
+          end do
+          ! the double loop above (kk outer, ii inner) writes every entry
+          ! R_total(memb(ii),memb_sorted(kk)) for ii,kk=1..g_cl, i.e. the
+          ! full g_cl x g_cl submatrix on this cluster's rows/columns --
+          ! since memb_sorted is exactly memb reordered, this completely
+          ! overwrites the identity sub-block R_total started with there;
+          ! no separate clearing step is needed or correct here.
+
+          deallocate( memb, original_eps, cvec, cnorm, Wfinal, e_final, label_final, score_final )
+          deallocate( sort_perm, iord_memb, memb_sorted, psi_ref_tmp, psi_refG_tmp )
+
+        end if
+
+        i0_cl = i1_cl + 1
+      end do
+
+      deallocate( order_l )
+
+      ! -- apply R_total (identity outside touched clusters) to the whole
+      ! isk slice of upu_ref/u_rVnl_Vnlr_u_ref at once, so that off-
+      ! diagonal matrix elements BETWEEN two different rotated clusters
+      ! (not just within one) are correctly transformed --
+      do j = 1, 3
+        unfold%upu_ref(j,1:no_ref,1:no_ref,isk) = &
+          & matmul( conjg(transpose(R_total)), matmul(unfold%upu_ref(j,1:no_ref,1:no_ref,isk), R_total) )
+        unfold%u_rVnl_Vnlr_u_ref(j,1:no_ref,1:no_ref,isk) = &
+          & matmul( conjg(transpose(R_total)), matmul(unfold%u_rVnl_Vnlr_u_ref(j,1:no_ref,1:no_ref,isk), R_total) )
+      end do
+
+      deallocate( R_total )
+
+    end do
+
+    deallocate( phase_gj_flat )
+
+    ! recompute nbad_l: Phase B may have both resolved previously-sentinel
+    ! bands and, rarely, produced a new sentinel of its own (label_final=0
+    ! above), so Phase A's original count is no longer accurate.
+    nbad_l = 0
+    do isk = isk_s, isk_e
+    do io_ref = 1, no_ref
+      if( hprk_label_l(io_ref,isk) == 0 ) nbad_l = nbad_l + 1
+    end do
+    end do
+
+  end if
+
   allocate( unfold%hprk_label(no_ref,unfold%nsk), unfold%hprk_score(no_ref,unfold%nsk) )
   call comm_summation(hprk_label_l, unfold%hprk_label, no_ref*unfold%nsk, info%icomm_k)
   call comm_summation(hprk_score_l, unfold%hprk_score, no_ref*unfold%nsk, info%icomm_k)
   call comm_summation(nbad_l, nbad, info%icomm_k)
 
+  if( nhprk > 1 ) then
+    ! esp_ref is replicated (bcast) to every rank over the FULL unfold%nsk
+    ! range, but Phase B above only updated this rank's local isk_s:isk_e
+    ! slice in place; reconstruct a fully-resynced copy the same way
+    ! hprk_label/hprk_score already are, by summing each rank's own local
+    ! slice (zero elsewhere) over icomm_k.
+    allocate( esp_resync_l(no_ref,unfold%nsk) )
+    esp_resync_l = 0d0
+    esp_resync_l(1:no_ref,isk_s:isk_e) = unfold%esp_ref(1:no_ref,isk_s:isk_e,1)
+    call comm_summation(esp_resync_l, unfold%esp_ref(1:no_ref,1:unfold%nsk,1), no_ref*unfold%nsk, info%icomm_k)
+    deallocate( esp_resync_l )
+
+    call comm_summation(n_clusters_l, n_clusters, info%icomm_k)
+    call comm_summation(n_resid_warn_l, n_resid_warn, info%icomm_k)
+    call comm_summation(n_score_warn_l, n_score_warn, info%icomm_k)
+    if (comm_is_root(nproc_id_global)) then
+      write(*,"(A,I0,A,I0,A,I0,A)") 'Phase B (energy-eigenbasis recovery): ', n_clusters, &
+        & ' cluster(s) processed; ', n_resid_warn, ' residual-check warning(s), ', &
+        & n_score_warn, ' unresolved-hat_k warning(s) (see above for detail; job continues regardless).'
+    end if
+  end if
+
   deallocate( phase_gj, phi_pred, hprk_label_l, hprk_score_l )
 
   if(comm_is_root(nproc_id_global)) then
-    write(*,"(A,I0)") 'primitive-to-reference labeling (Phase A): nhprk = ', nhprk
+    ! This tally is printed AFTER Phase B (above) has had a chance to update
+    ! hprk_label/hprk_score, so -- whenever nhprk>1 -- it reports the FINAL,
+    ! post-Phase-B result, not Phase A's own labeling in isolation; the
+    ! header wording says so explicitly to avoid the misleading impression
+    ! (raised in Codex's review, note 030 section 6) that this is still
+    ! only Phase A's count.
+    write(*,"(A,I0)") 'final hat_k labeling (Phase A, refined by Phase B when |det P|>1): nhprk = ', nhprk
     if( nbad > 0 ) then
       write(*,"(A,I0,A,ES10.3,A)") 'Warning: ', nbad, ' reference-cell band(s) had 1-|score| above ', &
         & hprk_thresh, '; hat_k label set to the sentinel value 0 for these bands (job continues). Detail:'
@@ -808,7 +1239,7 @@ contains
       end do
       end do
     else
-      write(*,"(A)") 'primitive-to-reference labeling (Phase A): all reference-cell bands matched a single hat_k candidate cleanly.'
+      write(*,"(A)") 'final hat_k labeling (Phase A, refined by Phase B when |det P|>1): all reference-cell bands matched a single hat_k candidate cleanly.'
     end if
   end if
 
@@ -1341,5 +1772,43 @@ contains
   return
            
   end subroutine dm_unfold
+
+  !> Stable-ish ascending selection sort, returning a permutation iord such
+  !> that key(iord(1)) <= key(iord(2)) <= ... <= key(iord(n)), rather than
+  !> sorting key itself in place. Used by Phase B (energy-eigenbasis
+  !> recovery within a shared-hat_k block, unfolding.tex sec.9.5) above to
+  !> sort bands by reference-cell energy, to sort a cluster's resolved
+  !> states by their recovered energy, and (by passing dble() of an
+  !> integer array as key) to sort a cluster's io_ref index set into
+  !> ascending numerical order. n is expected to be modest (no more than
+  !> no_ref), so the O(n^2) cost here is not a concern; this file has no
+  !> other need, so far, for a general-purpose sort.
+  subroutine argsort_real(n, key, iord)
+    implicit none
+    integer,intent(in)  :: n
+    real(8),intent(in)  :: key(n)
+    integer,intent(out) :: iord(n)
+    integer :: i, j, imin, itmp
+    real(8) :: kmin
+
+    do i = 1, n
+      iord(i) = i
+    end do
+    do i = 1, n-1
+      imin = i
+      kmin = key(iord(i))
+      do j = i+1, n
+        if( key(iord(j)) < kmin ) then
+          imin = j
+          kmin = key(iord(j))
+        end if
+      end do
+      if( imin /= i ) then
+        itmp = iord(i)
+        iord(i) = iord(imin)
+        iord(imin) = itmp
+      end if
+    end do
+  end subroutine argsort_real
 
 end module dm_unfold_sub

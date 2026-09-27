@@ -2,6 +2,7 @@ set(SOURCES
     math_constants.f90
     phys_constants.f90
     salmon_math.f90
+    eigen_unitary.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

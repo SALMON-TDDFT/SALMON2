@@ -619,6 +619,7 @@ contains
       & num_skgrid, &
       & no_ref, &
       & out_dm_unfold_step, &
+      & unfold_egap_threshold, &
       & al_pr, &
       & al_vec1_pr,al_vec2_pr,al_vec3_pr, &
       & yn_out_mom_distr_gs, &
@@ -1068,6 +1069,18 @@ contains
     num_skgrid = 1
     no_ref = 0
     out_dm_unfold_step = 100
+    unfold_egap_threshold = -1d0  ! sentinel: unset. Given in whatever
+                                  ! unit_energy the run's unit_system
+                                  ! implies (converted to a.u. below, like
+                                  ! energy_cut), NOT always raw a.u. --
+                                  ! unlike eigen.bin, which is always raw
+                                  ! a.u. regardless of unit_energy. Required
+                                  ! to be set to a positive value whenever
+                                  ! |det(pmat)|>1 in dm_unfold_option='super'
+                                  ! (checked in dm_unfold.f90, since pmat is
+                                  ! not known here); left unset is fine when
+                                  ! |det(pmat)|=1 (no coset structure, so
+                                  ! Phase B's clustering never runs).
     al_pr             = 0d0
     al_vec1_pr        = 0d0
     al_vec2_pr        = 0d0
@@ -1725,6 +1738,8 @@ contains
     call comm_bcast(num_skgrid, nproc_group_global)
     call comm_bcast(no_ref, nproc_group_global)
     call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(unfold_egap_threshold, nproc_group_global)
+    if( unfold_egap_threshold > 0d0 ) unfold_egap_threshold = unfold_egap_threshold * uenergy_to_au
     call comm_bcast(al_pr, nproc_group_global)
     al_pr = al_pr * ulength_to_au
     call comm_bcast(al_vec1_pr, nproc_group_global)
@@ -2742,6 +2757,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_ref', no_ref
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_egap_threshold', unfold_egap_threshold
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(1)', al_pr(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(2)', al_pr(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(3)', al_pr(3)

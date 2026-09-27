@@ -464,6 +464,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: num_skgrid(3)
   integer        :: no_ref
   integer        :: out_dm_unfold_step
+  real(8)        :: unfold_egap_threshold
   real(8)        :: al_pr(3)
   real(8)        :: al_vec1_pr(3),al_vec2_pr(3),al_vec3_pr(3)
   character(1)   :: yn_out_mom_distr_gs

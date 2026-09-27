@@ -73,6 +73,7 @@
   al_vec1_pr = 0.00d0, 5.13d0, 5.13d0
   al_vec2_pr = 5.13d0, 0.00d0, 5.13d0
   al_vec3_pr = 5.13d0, 5.13d0, 0.00d0
+  unfold_egap_threshold = 1.d-4
 /
 
 &atomic_red_coor
