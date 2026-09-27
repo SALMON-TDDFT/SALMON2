@@ -1,6 +1,8 @@
 # DC-BOMD design proposal
 
-Status: approved by user continuation. Force certification precedes MD guard removal.
+Status: historical equilibrium BOMD design. On 2026-09-28 the user redirected
+the laser-excited MD priority to real-time TDDFT/Ehrenfest dynamics; see
+2026-09-28-dc-ehrenfest-design.md. Force certification still precedes guard removal.
 Branch: pbeh40-rvv10-water-md at db8841d2.
 
 ## Initial scope

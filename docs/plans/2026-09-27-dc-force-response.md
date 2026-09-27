@@ -1,5 +1,10 @@
 # DC force response gate
 
+Scope update, 2026-09-28: this is the equilibrium SCF/BOMD response analysis.
+The primary laser-excited route is now Ehrenfest dynamics, described in
+2026-09-28-dc-ehrenfest-design.md. Its instantaneous-state force is not obtained
+by automatically adding the BO adjoint correction derived here.
+
 The approved BOMD design requires force/energy consistency before ionic motion.
 The new explicit-force diagnostic passes one-fragment/full-buffer H4 limits but
 fails that gate for genuinely truncated fragments. Two displacement sizes
