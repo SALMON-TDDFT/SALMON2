@@ -261,6 +261,7 @@ class RealspaceEhrenfest(unittest.TestCase):
             self.assertNotIn('Native LCFO RT active',run.stdout)
             scratch=re.search(r'DC_LCFO_TILE scratch_points/global_points:\s*(\d+)\s+(\d+)',run.stdout)
             self.assertIsNotNone(scratch,'bounded reconstruction diagnostic missing')
+            self.assertIn('DC_LCFO_STREAM native payload buffers',run.stdout)
             self.assertEqual(int(scratch[2]),1024)
             self.assertEqual(int(scratch[1]),1024//ranks)
             data=np.loadtxt(next(folder.glob('*_rt.data')))
@@ -312,6 +313,24 @@ class RealspaceEhrenfest(unittest.TestCase):
         _,run=self.execute('bad_coverage_rt',inp,ranks=2,rt='bad_coverage_gs')
         self.assertIn('invalid rgrid coverage',run.stdout+run.stderr)
         self.assertNotIn('start complex DC-LCFO wavefunction reconstruction',run.stdout)
+
+    def test_reconstruction_nonfinite_payload(self):
+        import struct
+        folder=self.root/'bad_payload_gs'
+        shutil.copytree(self.root/'gs'/'data_dcdft',folder/'data_dcdft')
+        path=folder/'data_dcdft/fragments/000001/wavefunctions.bin'
+        wire=bytearray(path.read_bytes())
+        header=struct.unpack_from('=q',wire,40)[0]
+        nb=struct.unpack_from('=i',wire,header+12+4)[0]
+        # Header, k-record header, spin header, two fragment counts, row labels.
+        payload=header+12+12+2*4+nb*4
+        # Last saved orbital is unused by the occupied-only RT reader.
+        struct.pack_into('=d',wire,payload+16*(nb*4-1),float('nan'))
+        path.write_bytes(wire)
+        inp=self.rt_input(nt=1).replace('nproc_rgrid=1,1,1','nproc_rgrid=1,2,1')
+        _,run=self.execute('bad_payload_rt',inp,ranks=2,rt='bad_payload_gs')
+        self.assertNotIn('start complex DC-LCFO wavefunction reconstruction',run.stdout)
+        self.assertIn('invalid',run.stdout+run.stderr)
 
     def test_forbidden_modes(self):
         cases=[('pulse',self.rt_input().replace("ae_shape1='impulse'","ae_shape1='Ecos2'\n phi_CEP1=.25"),'impulse or Acos2'),

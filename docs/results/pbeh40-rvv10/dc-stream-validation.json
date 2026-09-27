@@ -1,0 +1,46 @@
+{
+  "scope": "Native DC payload streaming with domain-sized scratch; projected LCFO resident loader retained",
+  "fixed_reconstruction_point_cap": null,
+  "fixed_total_memory_cap": null,
+  "storage": "Two destination reduction vectors, destination source/target maps, one retained-band coefficient column, actual-run complex/real buffers; metadata and simulation arrays additional",
+  "tests": {
+    "unit": 2,
+    "native": 16,
+    "inputs": 8,
+    "HSE_ON": "passed",
+    "HSE_OFF": "passed",
+    "projected_LCFO": "passed",
+    "largest_contiguous_unit_request": 70000,
+    "review": "no blocking findings"
+  },
+  "before_after": {
+    "spatial_1": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0
+    },
+    "spatial_2": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0
+    },
+    "spatial_4": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0
+    },
+    "water_rt": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0
+    },
+    "water_rt_spatial": {
+      "*_rt.data": 4.668569326941111e-18,
+      "*_rt_energy.data": 9.667006778402154e-14
+    }
+  },
+  "logs_sha256": {
+    "dc-stream-unit-final.log": "883e6c155567980b0752ef01d2a135831c1ae3413403888634ec85d4d2478b4f",
+    "dc-stream-ehrenfest.log": "5b918f10f40fdfa7234d865e81f352889ab37f600a89a1f7e31a2fcf013bbd31",
+    "dc-stream-inputs.log": "827700ab75b5dbcd58919d038bb408689e4a45bcf273120ceffec1e720aa76ac",
+    "dc-stream-lcfo.log": "6aa895cd9866904216a4b10dd20d5b1b16e64606997008c99d68ce2ba25bdbd0",
+    "dc-stream-build.log": "51eae0d91f49287aade5ca5199b6bb03f8d958fa951597b21454813fb8071f0c",
+    "dc-stream-off-build.log": "24ccba19ebc73d509c556d19d3e5ada1b47827821f102a0b5cf0069f49aacf8e"
+  }
+}

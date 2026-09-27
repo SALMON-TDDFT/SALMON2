@@ -16,6 +16,7 @@
 
 #include "config.h"
 module lcfo_complex
+  use iso_fortran_env, only: int64
   implicit none
 
   private
@@ -53,6 +54,7 @@ module lcfo_complex
   type :: s_complex_lcfo_fragment
     integer, allocatable :: n_basis(:), jxyz(:,:)
     complex(8), allocatable :: basis(:,:,:,:,:), coef(:,:,:)
+    integer(int64),allocatable :: basis_pos(:,:),coef_pos(:,:)
   end type s_complex_lcfo_fragment
 
 contains
@@ -1239,7 +1241,7 @@ contains
   end subroutine dc_lcfo_complex
 
   subroutine init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
-    use lcfo_mesh_tile, only: lcfo_tile_coverage,lcfo_tile_contract,lcfo_reconstruction_tile_points
+    use lcfo_mesh_tile, only: lcfo_tile_coverage,lcfo_tile_contract
     use lcfo_rt_basis, only: lcfo_rt_requested,lcfo_rt_configure
     use communication, only: comm_summation,comm_bcast
     use salmon_global, only: num_fragment
@@ -1259,6 +1261,7 @@ contains
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
     complex(8), allocatable :: wrk_local(:),wrk_sum(:),rt_basis(:,:)
     integer,allocatable :: rt_jxyz(:,:)
+    logical :: stream_payload
 
 #if defined(USE_OPENACC) || defined(USE_CUDA)
     stop "DC-LCFO complex reconstruction: GPU/OpenACC/CUDA is unsupported."
@@ -1269,6 +1272,7 @@ contains
       stop "DC-LCFO complex reconstruction: k-point data is not allocated."
     if (info%isize_ro < 1 .or. info%id_ro < 0 .or. info%id_ro >= info%isize_ro) &
       stop "DC-LCFO complex reconstruction: invalid r/o communicator."
+    stream_payload=.not.lcfo_rt_requested()
     nfrag = product(num_fragment)
     nspin = system%nspin
     nk = system%nk
@@ -1307,13 +1311,13 @@ contains
     do f=1,nfrag
       if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
       call validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
-           run_id,n_basis_all,frag(f)%jxyz,local_status)
+           run_id,n_basis_all,frag(f)%jxyz,local_status,frag(f)%basis_pos,frag(f)%coef_pos)
       if (local_status /= 0) exit
     end do
     call comm_summation(local_status,total_status,info%icomm_ro)
     if (total_status /= 0) stop "DC-LCFO complex reconstruction: fragment preflight failed."
     ! Each destination advertises only its grid bounds and owned orbital range.
-    ! Stream at most one bounded destination chunk; never gather a full orbital.
+    ! Size work to one destination domain; no fixed grid-point or memory cap.
     allocate(tiles(8,0:info%isize_ro-1));tiles=0;scratch_points=0
     do dest=0,info%isize_ro-1
       if(info%id_ro==dest)tiles(:,dest)=[mg%is,mg%num,info%io_s,info%io_e]
@@ -1321,23 +1325,21 @@ contains
       lo=tiles(1:3,dest);m=tiles(4:6,dest)
       if(any(m<1).or.any(lo<1).or.any(lo+m-1>lg%num)) &
         error stop 'DC-LCFO complex reconstruction: invalid destination grid'
-      scratch_points=max(scratch_points,min(product(m),lcfo_reconstruction_tile_points))
+      scratch_points=max(scratch_points,product(m))
     enddo
     allocate(coverage(scratch_points),coverage_sum(scratch_points))
     local_status=0
     do dest=0,info%isize_ro-1
-      lo=tiles(1:3,dest);m=tiles(4:6,dest);points=product(m)
-      do first=1,points,lcfo_reconstruction_tile_points
-        count=min(lcfo_reconstruction_tile_points,points-first+1);coverage(:count)=0
-        do f=1,nfrag
-          if(.not.allocated(frag(f)%jxyz))cycle
-          call lcfo_tile_coverage(meta(7:9),frag(f)%jxyz,lo,m,first,coverage(:count))
-        enddo
-        call comm_summation(coverage(:count),coverage_sum(:count),count,info%icomm_ro,dest)
-        if(info%id_ro==dest)then
-          if(any(coverage_sum(:count)/=1))local_status=1
-        endif
+      lo=tiles(1:3,dest);m=tiles(4:6,dest);count=product(m);first=1
+      coverage(:count)=0
+      do f=1,nfrag
+        if(.not.allocated(frag(f)%jxyz))cycle
+        call lcfo_tile_coverage(meta(7:9),frag(f)%jxyz,lo,m,first,coverage(:count))
       enddo
+      call comm_summation(coverage(:count),coverage_sum(:count),count,info%icomm_ro,dest)
+      if(info%id_ro==dest)then
+        if(any(coverage_sum(:count)/=1))local_status=1
+      endif
     enddo
     call comm_summation(local_status,total_status,info%icomm_ro)
     if(total_status/=0)then
@@ -1352,16 +1354,19 @@ contains
     if (info%id_ro == 0) then
       write(*,*) "start complex DC-LCFO wavefunction reconstruction"
       write(*,*) "complex LCFO format v1; fragments/k/spins:",nfrag,nk,nspin
+      if(stream_payload)write(*,*) 'DC_LCFO_STREAM native payload buffers follow domain and coefficient-column sizes'
     end if
     do ik=info%ik_s,info%ik_e
-      do f=1,nfrag
-        if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
-        call load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
-             run_id,n_basis_all,frag(f),local_status)
-        if (local_status /= 0) exit
-      end do
-      call comm_summation(local_status,total_status,info%icomm_ro)
-      if (total_status /= 0) stop "DC-LCFO complex reconstruction: k-record read failed."
+      if(.not.stream_payload)then
+        do f=1,nfrag
+          if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
+          call load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
+               run_id,n_basis_all,frag(f),local_status)
+          if (local_status /= 0) exit
+        end do
+        call comm_summation(local_status,total_status,info%icomm_ro)
+        if (total_status /= 0) stop "DC-LCFO complex reconstruction: k-record read failed."
+      endif
       if(lcfo_rt_requested())then
         if(nfrag/=info%isize_r)error stop 'LCFO RT requires one spatial rank per fragment'
         f=info%id_r+1
@@ -1380,26 +1385,36 @@ contains
         lo=tiles(1:3,dest);m=tiles(4:6,dest);points=product(m)
         do ispin=1,nspin
           do io=tiles(7,dest),tiles(8,dest)
-            do first=1,points,lcfo_reconstruction_tile_points
-              count=min(lcfo_reconstruction_tile_points,points-first+1)
-              wrk_local(:count)=(0d0,0d0)
-              do f=1,nfrag
+            first=1
+            count=points
+            wrk_local(:count)=(0d0,0d0)
+            local_status=0
+            do f=1,nfrag
+              if(stream_payload)then
+                if(.not.allocated(frag(f)%jxyz))cycle
+                call stream_complex_lcfo_tile(f,ik,ispin,io,bdir,system,lg,meta,geom,vec_k,wtk, &
+                  run_id,n_basis_all,frag(f),lo,m,first,wrk_local(:count),local_status)
+                if(local_status/=0)exit
+              else
                 if(.not.allocated(frag(f)%basis))cycle
                 nb=frag(f)%n_basis(ispin)
                 call lcfo_tile_contract(frag(f)%jxyz,lo,m,first, &
                   frag(f)%basis(:,:,:,ispin,:nb),frag(f)%coef(:nb,io,ispin),wrk_local(:count))
-              enddo
-              call comm_summation(wrk_local(:count),wrk_sum(:count),count,info%icomm_ro,dest)
-              if(info%id_ro==dest)then
-                do t=1,count
-                  g=first+t-1
-                  ix=modulo(g-1,m(1))+lo(1)
-                  iy=modulo((g-1)/m(1),m(2))+lo(2)
-                  iz=(g-1)/(m(1)*m(2))+lo(3)
-                  spsi%zwf(ix,iy,iz,ispin,io,ik,1)=wrk_sum(t)
-                enddo
               endif
             enddo
+            call comm_summation(local_status,total_status,info%icomm_ro)
+            if(total_status/=0)error stop 'DC-LCFO complex reconstruction: streamed payload read failed'
+
+            call comm_summation(wrk_local(:count),wrk_sum(:count),count,info%icomm_ro,dest)
+            if(info%id_ro==dest)then
+              do t=1,count
+                g=first+t-1
+                ix=modulo(g-1,m(1))+lo(1)
+                iy=modulo((g-1)/m(1),m(2))+lo(2)
+                iz=(g-1)/(m(1)*m(2))+lo(3)
+                spsi%zwf(ix,iy,iz,ispin,io,ik,1)=wrk_sum(t)
+              enddo
+            endif
           enddo
         enddo
       enddo
@@ -1471,6 +1486,7 @@ contains
 
   subroutine skip_complex_lcfo_reals(unit,nreal,status)
     use iso_fortran_env, only: real64,int64
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     integer, intent(in) :: unit
     integer(int64), intent(in) :: nreal
@@ -1491,6 +1507,9 @@ contains
         status = 1
         return
       end if
+      if(.not.all(ieee_is_finite(buffer(:n))))then
+        status=1;return
+      endif
       remain = remain-int(n,int64)
     end do
   end subroutine skip_complex_lcfo_reals
@@ -1652,7 +1671,7 @@ contains
   end subroutine read_complex_lcfo_reference
 
   subroutine validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,ref_meta,ref_geom,ref_k, &
-       ref_wtk,ref_run,n_basis_all,jxyz,status)
+       ref_wtk,ref_run,n_basis_all,jxyz,status,basis_pos,coef_pos)
     use exx_functional, only: lcfo_check_functional
     use filesystem, only: get_filehandle
     use iso_fortran_env, only: int32,int64,real64
@@ -1665,6 +1684,7 @@ contains
     real(real64), intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
     character(96), intent(in) :: ref_run
     integer, allocatable, intent(out) :: jxyz(:,:)
+    integer(int64),allocatable,intent(out) :: basis_pos(:,:),coef_pos(:,:)
     integer, intent(out) :: status
     character(256) :: filename
     character(16) :: footer_basis,footer_coeff
@@ -1725,6 +1745,8 @@ contains
     close(ur,iostat=close_ios)
     if (ios /= 0 .or. close_ios /= 0) goto 900
 
+    allocate(basis_pos(system%nspin,system%nk),coef_pos(system%nspin,system%nk))
+    basis_pos=0;coef_pos=0
     do ik=1,system%nk
       read(ub,iostat=ios) ikb,payload_b
       if (ios /= 0) exit
@@ -1737,6 +1759,8 @@ contains
           ios = 1
           exit
         end if
+        inquire(unit=ub,pos=basis_pos(ispin,ik),iostat=ios)
+        if(ios/=0)exit
         nreal = 2_int64
         do d=7,9
           if (int(meta_b(d),int64) > huge(nreal)/nreal) then
@@ -1786,6 +1810,8 @@ contains
           end if
         end do
         if (ios /= 0) exit
+        inquire(unit=uc,pos=coef_pos(ispin,ik),iostat=ios)
+        if(ios/=0)exit
         call skip_complex_lcfo_reals(uc,2_int64*int(nb_wire,int64)* &
              int(meta_c(20),int64),ios)
         if (ios /= 0) exit
@@ -1875,6 +1901,45 @@ contains
       first=first+n
     end do
   end subroutine read_wire_complex_values
+
+  subroutine stream_complex_lcfo_tile(f,ik,ispin,io,bdir,system,lg,ref_meta,ref_geom, &
+      ref_k,ref_wtk,ref_run,n_basis_all,fragment,lo,m,first,tile,status)
+    use lcfo_mesh_stream, only: lcfo_stream_contract
+    use structures, only: s_dft_system,s_rgrid
+    integer,intent(in) :: f,ik,ispin,io,ref_meta(20),n_basis_all(:,:,:),lo(3),m(3),first
+    character(*),intent(in) :: bdir
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: lg
+    real(8),intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
+    character(96),intent(in) :: ref_run
+    type(s_complex_lcfo_fragment),intent(in) :: fragment
+    complex(8),intent(inout) :: tile(:)
+    integer,intent(out) :: status
+    character(256) :: filename
+    character(96) :: run_b,run_c
+    integer :: ub,uc,ios,meta_b(20),meta_c(20)
+    integer(int64) :: size_b,size_c
+    real(8) :: geom_b(10),geom_c(10),vk_b(3,size(ref_k,2)),vk_c(3,size(ref_k,2))
+    real(8) :: w_b(size(ref_wtk)),w_c(size(ref_wtk))
+    status=1
+    write(filename,'(a,i6.6,2a)')trim(bdir),f,'/','basis_functions.bin'
+    call open_complex_lcfo_read(filename,1,system,lg,ub,meta_b,geom_b,vk_b,w_b,run_b,size_b,ios)
+    if(ios/=0)return
+    write(filename,'(a,i6.6,2a)')trim(bdir),f,'/','wavefunctions.bin'
+    call open_complex_lcfo_read(filename,2,system,lg,uc,meta_c,geom_c,vk_c,w_c,run_c,size_c,ios)
+    if(ios/=0)then
+      close(ub);return
+    endif
+    if(complex_lcfo_headers_match(meta_b,geom_b,vk_b,w_b,run_b, &
+      meta_c,geom_c,vk_c,w_c,run_c,ref_meta,ref_geom,ref_k,ref_wtk,ref_run).and.meta_b(16)==f)then
+      call lcfo_stream_contract(ub,uc,fragment%basis_pos(ispin,ik),fragment%coef_pos(ispin,ik), &
+        ref_meta(7:9),n_basis_all(f,ispin,ik),io,fragment%jxyz,lo,m,first,tile,status)
+    endif
+    close(ub,iostat=ios)
+    if(ios/=0)status=1
+    close(uc,iostat=ios)
+    if(ios/=0)status=1
+  end subroutine
 
   subroutine load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,ref_meta,ref_geom, &
        ref_k,ref_wtk,ref_run,n_basis_all,fragment,status)

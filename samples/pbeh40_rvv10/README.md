@@ -43,3 +43,9 @@ wavefunction, MLWF-source and ACE rows; it uses distributed FFTW exchange.
 When comparing serial and spatial outputs, use separate run directories with
 the same GS data and pseudopotential/velocity files to preserve both outputs.
 This full-support route does not yet support finite-radius MD or orbital MPI.
+
+
+Native DC initialization streams fragment payloads without retaining their full
+basis/coefficient matrices. Buffer sizes follow the destination grid and actual
+read intervals; no fixed reconstruction-memory cap or additional input setting
+is used. `DC_LCFO_STREAM` identifies this initializer in the output.

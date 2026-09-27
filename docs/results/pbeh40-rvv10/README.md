@@ -345,7 +345,10 @@ single-orbital scratch; the following change removes it. Orbital MPI,
 finite-radius MD and production scaling remain outside this result.
 
 
-## Bounded DC reconstruction scratch
+## Bounded DC reconstruction scratch (historical stage)
+
+The65,536-point default in this stage was subsequently removed at the user's
+request; see the demand-sized streaming result below.
 
 Complex DC-to-mesh initialization now validates coverage and reconstructs
 orbitals in chunks of at most65,536 destination points, using rooted reductions.
@@ -373,3 +376,23 @@ memory reduction; the small-grid tile oracle exercises multi-chunk indexing.
 Independent review found no blocking issue. Repeated intersection scans across
 chunks remain a performance limitation; no large-system startup timing is
 claimed. See `dc-tile-validation.json` for measured parity and log hashes.
+
+
+## Demand-sized native DC input streaming
+
+The arbitrary reconstruction point cap was removed. Native DC-to-mesh reads
+one requested coefficient column and actual contiguous grid runs, rather than
+retaining complete fragment basis/coefficient matrices. Buffer sizes follow
+destination, retained-band and run dimensions; source/target index arrays and
+simultaneous real-wire/complex buffers are included in this description. There
+is no fixed total-memory bound. The projected LCFO reader retains its basis.
+
+Two independent unit tests pass, including a70,000-point contiguous request,
+complex offsets, sparse/wrapped mapping and zero-band input. All16 Ehrenfest
+tests and8 input regressions pass, as do HSE ON/OFF builds and projected LCFO
+response/provenance/orbital-layout regressions. A NaN in an unused saved orbital
+is rejected during preflight before reconstruction. Read-only review found no
+blocking issue. Before/after H4 MPI1/2/4 and water MPI1 outputs are identical at
+file precision; water MPI2 energy changes by9.67e-14 eV. Measured evidence is in
+`dc-stream-validation.json`. These checks do not establish peak RSS or startup
+performance for production systems.

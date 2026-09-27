@@ -306,31 +306,33 @@ as the serial path. ACE construction and action reduce only small band matrices.
 No full wavefunction-grid gather occurs during these exchange RT operations.
 `exx_local_fft` does not select compact source convolutions on this path.
 
-Initial DC-to-mesh reconstruction now streams bounded destination-grid chunks
-as described below. Validated fragment basis and coefficient records remain resident.
+Native DC-to-mesh reconstruction streams the required payload into destination
+domains as described below; fragment basis/coefficient matrices are not retained.
 All occupied columns remain local to each spatial rank, and small band matrices
 are replicated. The verified MPI1/2/4 H4 pulse and MPI1/2 water smoke cases are
 correctness checks, not evidence for giant-system timing or long-time accuracy.
 Use `samples/pbeh40_rvv10/h4_ehrenfest_pulse_spatial.inp` after its matching GS.
 
 
-### Bounded DC-to-mesh reconstruction
+### Domain-sized DC-to-mesh reconstruction
 
-Complex DC initialization validates all input metadata and fragment core
-coverage before reconstructing orbitals. Coverage and complex contributions
-are processed in flat destination-grid chunks of at most65,536 points. Each
-chunk is reduced only to its owning spatial/orbital rank. No global coverage
-array or global single-orbital reduction buffer is allocated by reconstruction.
-The complex scratch consists of two buffers (at most2 MiB combined with the
-tested 16-byte complex representation). Two integer coverage buffers are freed
-before these complex buffers are allocated. Small index/metadata arrays and
-resident fragment basis/coefficient records are additional memory.
+Native complex DC initialization first validates metadata, finite payloads and
+fragment coverage, recording per-spin/k file offsets. It then reads one needed
+coefficient column and contiguous source-grid runs into the destination domain.
+It does not retain fragment grid-by-band or band-by-orbital matrices. Projected
+LCFO RT still retains its basis and uses the existing resident loader.
 
-The diagnostic `DC_LCFO_TILE scratch_points/global_points` reports buffer
-capacity in grid points and the global grid size. This is not total process
-memory. File metadata/provenance validation and projected LCFO configuration
-remain unchanged. Wrapped grid maps are preserved, and missing or duplicated
-core coverage is rejected collectively. Each destination/chunk is handled in
-sequence; fragment intersections are rescanned across chunks, so this memory
-change is not a claim of faster initialization. Streaming fragment input and
-more efficient sparse routing remain separate work.
+There is no fixed65,536-point cap,2 MiB cap or new memory-control input. The prior
+point cap was an arbitrary implementation choice and was removed at the user's
+request. Two reduction vectors follow the largest destination grid size in the
+r/o communicator. Source/target index arrays follow the current destination;
+the coefficient vector follows the fragment's retained-band count; complex and
+real-wire read buffers follow the actual contiguous run. These are temporary
+arrays, not a total-process memory budget. The wavefunctions, index metadata,
+MPI buffers and the rest of the simulation use additional memory.
+
+`DC_LCFO_TILE scratch_points/global_points` reports reduction-vector capacity
+and global grid size. `DC_LCFO_STREAM` identifies native payload streaming.
+Complete preflight rejects NaNs even in saved orbitals not requested by RT.
+No new parameter is needed. Repeated file opens and seeks can cost I/O time;
+no universal optimal read size or large-system startup speed is claimed.

@@ -1,9 +1,8 @@
-! Bounded destination-grid pieces for validated complex DC reconstruction.
+! Destination-grid pieces for validated complex DC reconstruction.
 module lcfo_mesh_tile
   implicit none
   private
-  public :: lcfo_tile_coverage,lcfo_tile_contract,lcfo_reconstruction_tile_points
-  integer,parameter :: lcfo_reconstruction_tile_points=65536
+  public :: lcfo_tile_coverage,lcfo_tile_contract
 contains
   pure subroutine intersect_axes(core,jxyz,lo,m,indices,counts)
     integer,intent(in) :: core(3),jxyz(:,:),lo(3),m(3)
