@@ -1,0 +1,66 @@
+diff --git a/src/xc/lcfo_rt_wannier.f90 b/src/xc/lcfo_rt_wannier.f90
+index 2dd8bcc0..a1283d1b 100644
+--- a/src/xc/lcfo_rt_wannier.f90
++++ b/src/xc/lcfo_rt_wannier.f90
+@@ -173,11 +173,18 @@ contains
+     real(8),intent(in) :: position(:,:),length(3),norms(:)
+     real(8),allocatable :: local_norm(:),inside(:),fraction(:)
+     integer :: n,j,iu,worst(1),below
+-    n=size(norms);allocate(local_norm(n),inside(n),fraction(n))
+-    call lcfo_wf_sphere_norm(grid,position,centers,length,lcfo_dv,radius,local_norm)
+-    call comm_summation(local_norm,inside,n,lcfo_comm)
+-    fraction=inside/norms
+-    if(lcfo_rank/=0)return
++    n=size(norms)
++    if(radius==0d0)then
++      ! Full support already has a globally reduced norm; no grid scan or MPI needed.
++      if(lcfo_rank/=0)return
++      allocate(inside(n));inside=norms
++    else
++      allocate(local_norm(n),inside(n))
++      call lcfo_wf_sphere_norm(grid,position,centers,length,lcfo_dv,radius,local_norm)
++      call comm_summation(local_norm,inside,n,lcfo_comm)
++      if(lcfo_rank/=0)return
++    endif
++    allocate(fraction(n));fraction=inside/norms
+     open(newunit=iu,file='lcfo_mlwf_radius.dat',status='replace')
+     write(iu,'(a,es24.16)')'# Initial WF geometric sphere coverage; radius_bohr (0=full): ',radius
+     write(iu,'(a)')'# wf  total_norm  sphere_norm  sphere_fraction  protected_uncut'
+diff --git a/src/xc/lcfo_wf_support.f90 b/src/xc/lcfo_wf_support.f90
+index 03c72b23..1715ce6e 100644
+--- a/src/xc/lcfo_wf_support.f90
++++ b/src/xc/lcfo_wf_support.f90
+@@ -29,19 +29,28 @@ contains
+   complex(8),intent(in) :: wf(:,:)
+   real(8),intent(in) :: positions(:,:),centers(:,:),length(3),dv,radius
+   real(8),intent(out) :: norm(:)
+-  real(8) :: delta(3)
++  real(8) :: delta(3),radius2
+   integer :: j,g
+   if(any(shape(positions)/=[3,size(wf,1)]).or.any(shape(centers)/=[3,size(wf,2)]).or. &
+      size(norm)/=size(wf,2))error stop 'LCFO sphere norm: incompatible dimensions'
+   if(any(length<=0d0).or.dv<=0d0.or.radius<0d0)error stop 'LCFO sphere norm: invalid geometry'
+   norm=0d0
++  if(radius==0d0)then
++!$omp parallel do private(g) schedule(static)
++   do j=1,size(wf,2)
++    do g=1,size(wf,1)
++     norm(j)=norm(j)+abs(wf(g,j))**2*dv
++    enddo
++   enddo
++!$omp end parallel do
++   return
++  endif
++  radius2=radius**2
+ !$omp parallel do private(g,delta) schedule(static)
+   do j=1,size(wf,2)
+    do g=1,size(wf,1)
+-    if(radius>0d0)then
+-     delta=modulo(positions(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
+-     if(sum(delta**2)>radius**2)cycle
+-    endif
++    delta=modulo(positions(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
++    if(sum(delta**2)>radius2)cycle
+     norm(j)=norm(j)+abs(wf(g,j))**2*dv
+    enddo
+   enddo

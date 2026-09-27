@@ -173,11 +173,18 @@ contains
     real(8),intent(in) :: position(:,:),length(3),norms(:)
     real(8),allocatable :: local_norm(:),inside(:),fraction(:)
     integer :: n,j,iu,worst(1),below
-    n=size(norms);allocate(local_norm(n),inside(n),fraction(n))
-    call lcfo_wf_sphere_norm(grid,position,centers,length,lcfo_dv,radius,local_norm)
-    call comm_summation(local_norm,inside,n,lcfo_comm)
-    fraction=inside/norms
-    if(lcfo_rank/=0)return
+    n=size(norms)
+    if(radius==0d0)then
+      ! Full support already has a globally reduced norm; no grid scan or MPI needed.
+      if(lcfo_rank/=0)return
+      allocate(inside(n));inside=norms
+    else
+      allocate(local_norm(n),inside(n))
+      call lcfo_wf_sphere_norm(grid,position,centers,length,lcfo_dv,radius,local_norm)
+      call comm_summation(local_norm,inside,n,lcfo_comm)
+      if(lcfo_rank/=0)return
+    endif
+    allocate(fraction(n));fraction=inside/norms
     open(newunit=iu,file='lcfo_mlwf_radius.dat',status='replace')
     write(iu,'(a,es24.16)')'# Initial WF geometric sphere coverage; radius_bohr (0=full): ',radius
     write(iu,'(a)')'# wf  total_norm  sphere_norm  sphere_fraction  protected_uncut'

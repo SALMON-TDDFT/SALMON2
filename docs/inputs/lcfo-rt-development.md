@@ -613,3 +613,8 @@ RT aggregate discarded-source-norm diagnostic is unchanged. Norm retention does
 not guarantee current/dielectric accuracy. Full support produces no coverage
 warning. Small MPI integration tests verify namelist/environment equivalence,
 explicit full-support precedence, warning emission, and invalid input rejection.
+
+Full-support coverage reuses the already reduced initial norms without another
+WF scan or collective. Finite-radius loops hoist the constant radius condition
+and radius squared; fractions are computed only on root. Coverage semantics and
+warning thresholds are unchanged.

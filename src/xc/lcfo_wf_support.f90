@@ -29,19 +29,28 @@ contains
   complex(8),intent(in) :: wf(:,:)
   real(8),intent(in) :: positions(:,:),centers(:,:),length(3),dv,radius
   real(8),intent(out) :: norm(:)
-  real(8) :: delta(3)
+  real(8) :: delta(3),radius2
   integer :: j,g
   if(any(shape(positions)/=[3,size(wf,1)]).or.any(shape(centers)/=[3,size(wf,2)]).or. &
      size(norm)/=size(wf,2))error stop 'LCFO sphere norm: incompatible dimensions'
   if(any(length<=0d0).or.dv<=0d0.or.radius<0d0)error stop 'LCFO sphere norm: invalid geometry'
   norm=0d0
+  if(radius==0d0)then
+!$omp parallel do private(g) schedule(static)
+   do j=1,size(wf,2)
+    do g=1,size(wf,1)
+     norm(j)=norm(j)+abs(wf(g,j))**2*dv
+    enddo
+   enddo
+!$omp end parallel do
+   return
+  endif
+  radius2=radius**2
 !$omp parallel do private(g,delta) schedule(static)
   do j=1,size(wf,2)
    do g=1,size(wf,1)
-    if(radius>0d0)then
-     delta=modulo(positions(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
-     if(sum(delta**2)>radius**2)cycle
-    endif
+    delta=modulo(positions(:,g)-centers(:,j)+.5d0*length,length)-.5d0*length
+    if(sum(delta**2)>radius2)cycle
     norm(j)=norm(j)+abs(wf(g,j))**2*dv
    enddo
   enddo
