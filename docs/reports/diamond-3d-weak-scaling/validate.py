@@ -28,6 +28,6 @@ for c in m['cases']:
   for key in ('file_atom_coor','file_pseudo(1)'):assert (folder/value(key).strip("'")).is_file()
   if stage=='rt':assert value('dt')=='0.02d0' and value('nt')=='16'
  for k in ('one_dense_complex_matrix_GiB','baseline_initial_raw_local_plus_raw_GiB_per_rank'):assert c[k]>0
- print(c['case'],c['atoms'],'atoms /',nf,'MPI; initial link matrices alone',round(c['baseline_initial_raw_local_plus_raw_GiB_per_rank'],3),'GiB/rank')
+ print(c['case'],c['atoms'],'atoms /',nf,'MPI; OLD replicated links alone',round(c['baseline_initial_raw_local_plus_raw_GiB_per_rank'],3),'GiB/rank')
 for name,digest in m['sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
 print('Static geometry, input, path and hash checks passed; no numerical jobs run')
