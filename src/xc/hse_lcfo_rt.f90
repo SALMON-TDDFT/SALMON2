@@ -35,7 +35,7 @@ contains
   subroutine initialize_fragment()
     complex(8),allocatable :: block(:,:)
     integer,allocatable :: mapping(:,:),first(:)
-    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status,ios,bad,fft_batch
+    integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,env_status,ios,bad,fft_batch,fft_measure
     character(16) :: value
     nf=size(lcfo_counts);ns=lcfo_core+2*lcfo_buffer;ng=product(ns)
     if(any(ns>lcfo_grid))error stop 'LCFO HSE: fragment exceeds global periodic grid'
@@ -75,6 +75,23 @@ contains
     call comm_bcast(bad,lcfo_comm,0)
     if(bad/=0)error stop 'LCFO HSE: FFT batch must be an integer from 1 to 32'
     call comm_bcast(fft_batch,lcfo_comm,0)
+    fft_measure=0;bad=0
+    if(lcfo_rank==0)then
+      call get_environment_variable('SALMON_LCFO_RT_FFT_MEASURE',value,status=env_status)
+      if(env_status==0.and.len_trim(value)>0)then
+        select case(trim(value))
+        case('0');fft_measure=0
+        case('1');fft_measure=1
+        case default;bad=1
+        end select
+      else if(env_status/=1.and.env_status/=0)then
+        bad=1
+      endif
+    endif
+    call comm_bcast(bad,lcfo_comm,0)
+    if(bad/=0)error stop 'LCFO HSE: FFT measure must be 0 or 1'
+    call comm_bcast(fft_measure,lcfo_comm,0)
+    if(lcfo_rank==0)write(*,'(a,i2)')'LCFO HSE FFT measured planning: ',fft_measure
     ! FFT order is core/right-buffer then the periodic left buffer.
     g=0
     do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
@@ -119,6 +136,7 @@ contains
     call wannier_init(fragment_operator,ns,[1,1,1],lcfo_h,reshape([0d0,0d0,0d0],[3,1]),hse_omega,ierr)
     if(ierr/=0)error stop 'LCFO HSE: fragment periodic exchange initialization failed'
     fragment_operator%fft_batch_size=fft_batch
+    fragment_operator%fft_measure=fft_measure==1
     write(*,'(a,5i10)')'LCFO compact projection rank/rows/columns/fullrows/fullcolumns:', &
       lcfo_rank,size(projection_plan%rows),size(projection_plan%columns),ng,nsel
     call lcfo_mlwf_configure()

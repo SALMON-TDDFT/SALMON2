@@ -7,7 +7,7 @@ program exact_pair_probe
  complex(8) :: target(24,12,1),action(24,12,1),dense_action(24,12,1),ref(24,12),kernel(24),metric(12,12)
  complex(8) :: density(24),potential(24),v
  real(8) :: h(3),k(3,1),angle,pi
- integer :: batch
+ integer :: batch,mode
  integer :: n(3),p(3),q(3),d(3),g,a,b,c,j,i,idx,status,trial
  integer(int64) :: expected,expected_accum
  n=[4,3,2];h=[.6d0,.8d0,.9d0];k=0d0;pi=acos(-1d0)
@@ -27,6 +27,8 @@ program exact_pair_probe
   kernel(g)=v
  enddo
  do batch=1,8
+ do mode=0,2
+ op%fft_measure=mode==1
  op%fft_batch_size=batch
  do trial=1,5
   target=0d0;target(:,1:4,1)=op%source
@@ -59,6 +61,7 @@ program exact_pair_probe
   op%compact_source_support=.false.
   call wannier_apply(op,target,dense_action,status)
   if(status/=0)error stop 'dense apply'
+  if(op%worker_measure.neqv.op%fft_measure)error stop 'planning mode cache mismatch'
   op%compact_source_support=.true.
   call wannier_apply(op,target,action,status)
   if(op%pair_accumulation_points/=expected_accum)error stop 'compact accumulation count'
@@ -83,6 +86,7 @@ program exact_pair_probe
   endif
  enddo
  enddo
+ enddo
  call wannier_destroy(op)
  call translated_support()
  print *, 'Exact pair FFT screening and direct convolution passed'
@@ -93,7 +97,7 @@ contains
   complex(8) :: targets(24,3,2),out(24,3,2),dense(24,3,2),expected_out(24,3,2)
   complex(8) :: home(48,3),result(48,3),src(48),rho(48),pot(48),kern(48),z
   real(8) :: kv(3,2),theta
-  integer :: ii,jj,gg,hh,cell,ix,iy,iz,status2,rr(3),qq(3),dd(3),index2,ww
+  integer :: ii,jj,gg,hh,cell,ix,iy,iz,status2,rr(3),qq(3),dd(3),index2,ww,mm
   kv=0d0;kv(1,2)=pi/(n(1)*h(1))
   call wannier_init(multi,n,[2,1,1],h,kv,.11d0,status2)
   if(status2/=0)error stop 'multi init'
@@ -131,14 +135,18 @@ contains
   enddo;enddo
   call wannier_backward(multi,result,expected_out)
   do ww=1,3
+   do mm=0,2
+   multi%fft_measure=mm==1
    multi%fft_batch_size=ww;multi%compact_source_support=.false.
    call wannier_apply(multi,targets,dense,status2)
    if(status2/=0)error stop 'multi dense'
+   if(multi%worker_measure.neqv.multi%fft_measure)error stop 'multi planning cache'
    multi%compact_source_support=.true.
    call wannier_apply(multi,targets,out,status2)
    if(status2/=0.or.multi%pair_product_points/=18_int64)error stop 'multi compact'
    if(.not.all(ieee_is_finite(real(out))).or..not.all(ieee_is_finite(aimag(out))))error stop 'multi finite'
    if(maxval(abs(out-dense))>1d-11.or.maxval(abs(out-expected_out))>1d-11)error stop 'multi convolution'
+   enddo
   enddo
   call wannier_destroy(multi)
  end subroutine

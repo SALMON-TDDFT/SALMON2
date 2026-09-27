@@ -19,6 +19,7 @@ module hse_wannier
     integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64,fft_batches_executed=0_int64
     integer(int64) :: pair_product_points=0_int64,pair_accumulation_points=0_int64
     logical :: compact_source_support=.true.
+    logical :: fft_measure=.false.,worker_measure=.false.
     integer :: fft_batch_size=1,worker_batch=0
     integer :: localization_iterations=0,localization_status=1,workers=0
     real(8) :: h(3)=0d0,dv=0d0,spread=0d0,gradient=huge(1d0),min_singular=0d0
@@ -327,33 +328,36 @@ contains
       enddo;enddo
       deallocate(op%worker_forward,op%worker_backward,op%worker_work)
     endif
-    op%workers=0;op%worker_batch=0
+    op%workers=0;op%worker_batch=0;op%worker_measure=.false.
   end subroutine
 
   subroutine prepare_workers(op,count,batch,status)
     type(s_hse_wannier),intent(inout) :: op
     integer,intent(in) :: count,batch
     integer,intent(out) :: status
-    integer :: t,b,dims(3)
+    integer :: t,b,dims(3),flags
     status=0
-    if(op%workers==count.and.op%worker_batch==batch)return
+    if(op%workers==count.and.op%worker_batch==batch.and.(op%worker_measure.eqv.op%fft_measure))return
     call clear_workers(op)
     allocate(op%worker_work(op%ns(1),op%ns(2),op%ns(3),batch,count))
     allocate(op%worker_forward(batch,count),op%worker_backward(batch,count))
     op%worker_forward=c_null_ptr;op%worker_backward=c_null_ptr
     dims=op%ns(3:1:-1)
+    flags=FFTW_ESTIMATE
+    if(op%fft_measure)flags=FFTW_MEASURE
+    ! MEASURE may overwrite these disposable buffers; no pair data exist yet.
     ! Serial planning, one buffer per worker. Cache every possible compact tail
     ! so a partly filled tile never performs padded zero-density FFTs.
     do t=1,count;do b=1,batch
       op%worker_forward(b,t)=fftw_plan_many_dft(3,dims,b,op%worker_work(:,:,:,:,t),dims,1,op%ngs, &
-        op%worker_work(:,:,:,:,t),dims,1,op%ngs,FFTW_FORWARD,FFTW_ESTIMATE)
+        op%worker_work(:,:,:,:,t),dims,1,op%ngs,FFTW_FORWARD,flags)
       op%worker_backward(b,t)=fftw_plan_many_dft(3,dims,b,op%worker_work(:,:,:,:,t),dims,1,op%ngs, &
-        op%worker_work(:,:,:,:,t),dims,1,op%ngs,FFTW_BACKWARD,FFTW_ESTIMATE)
+        op%worker_work(:,:,:,:,t),dims,1,op%ngs,FFTW_BACKWARD,flags)
       if(.not.c_associated(op%worker_forward(b,t)).or..not.c_associated(op%worker_backward(b,t)))then
         status=1;call clear_workers(op);return
       endif
     enddo;enddo
-    op%workers=count;op%worker_batch=batch
+    op%workers=count;op%worker_batch=batch;op%worker_measure=op%fft_measure
   end subroutine
 
   subroutine wannier_apply(op,target,action,status)

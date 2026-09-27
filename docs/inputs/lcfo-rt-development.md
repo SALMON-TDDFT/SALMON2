@@ -550,3 +550,9 @@ Diamond R6 reduces product points94,371,840→51,339,264 and accumulation60,817,
 ### Direct-WF Gram validation
 
 The accepted-state orthogonality check uses ZHERK and a packed upper-triangle reduction over the existing spatial communicator (`lcfo_gram.f90`). The check frequency and 1e-8 tolerance are unchanged. All independent entries are checked for finiteness before the maximum norm. This reduces arithmetic and collective payload, but retains dense occupied-column dependence and approximately 2n² complex scratch entries. Regression: `testsuites/unit_lcfo_rt/test_gram.py`; isolated timing: `benchmark_gram.py`.
+
+### Opt-in measured exchange FFT planning
+
+`SALMON_LCFO_RT_FFT_MEASURE=1` selects FFTW_MEASURE for the cached per-worker pair-density transforms. Default0 uses FFTW_ESTIMATE. The LCFO root validates the exact flag0/1 (truncation is rejected) and broadcasts it over the existing communicator. This does not change FFT batch width, dimensions, kernel, pair screening, source support or normalization. Planning is serial on disposable scratch before filling pair densities. Worker count, batch width and planning mode are all part of the cache identity. Changing them rebuilds the plans.
+
+Measured planning adds startup latency and selects a machine/load-dependent FFT algorithm; roundoff can differ. It has no persistent on-disk wisdom and each MPI process plans independently. The existing single-grid forward/backward plans are unaffected. Test both startup-inclusive elapsed time and repeated exchange/RT time before enabling in production; there is no guaranteed gain. Exact-pair tests cover both modes and cache toggles, OMP1/2/4, nonzero/tiny/empty support, tails and translated multi-k sources; direct RT tests cover MPI2/4, trajectory/density/energy parity and invalid flags.

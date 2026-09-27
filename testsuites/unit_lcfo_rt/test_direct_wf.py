@@ -158,4 +158,16 @@ run('reject_direct_without_mlwf',pt_input,rt=True,reject='LCFO MLWF: invalid rad
     extra_env={'SALMON_LCFO_RT_DIRECT_WF':'1','SALMON_LCFO_RT_MLWF':'0'})
 run('reject_direct_flag',pt_input,rt=True,reject='LCFO direct WF: flag must be 0 or 1',
     extra_env={'SALMON_LCFO_RT_DIRECT_WF':'bad'})
+for groups in (1,2):
+    measured=run('direct_measured_'+str(groups),pt_input.replace('nproc_ob=1',f'nproc_ob={groups}'),
+                 rt=True,extra_env={**pt_env,'SALMON_LCFO_RT_FFT_MEASURE':'1'},orbital_groups=groups)
+    measured_rows=rows(measured/'H_dc_hse_rt.data')
+    err=max(abs(x[j]-y[j]) for x,y in zip(ptrows,measured_rows) for j in (13,14,15))
+    assert err<1e-11,err
+    assert 'LCFO HSE FFT measured planning:  1' in (measured/'run.log').read_text()
+    compare_density_energy(measured,pt,4)
+for flag in ('2','bad','1 trailing','12345678901234567'):
+    run('reject_measure_'+flag.replace(' ','_'),pt_input,rt=True,
+        reject='LCFO HSE: FFT measure must be 0 or 1',
+        extra_env={**pt_env,'SALMON_LCFO_RT_FFT_MEASURE':flag})
 print('Direct coefficient Taylor4 regression passed')
