@@ -26,6 +26,23 @@
 
 ## 最新状況：2026-09-27
 
+### 富岳DC初期化のTofuマッピングSTOP
+
+4×4×4/MPI64/OMP12で報告された`logical error: get # of process/node`は、
+フラグメント内通信グループのノード内rank数を全体Tofu形状から求めた値と
+比較して停止する処理に対応する。未対応Tofu次元のfallback判定もこの比較の後だった。
+[修正パッチ](tools/patches/fugaku-dc-tofu-fallback.patch)は、1D/2D等の未対応次元と
+DCフラグメントを既存の通常マッピングへ戻す。MPI64/OMP12を変更する対策ではない。
+全体系のDC初期化（内部`yn_dc='t'`）と通常3Dの最適化は維持する。
+
+Fujitsu APIを模擬して実際のマッピング手続きをコンパイルするテストで、旧版の同一STOPを
+再現。修正後はDCの1D/3D、全体系の1D、通常3Dの4ケース成功。GNU通常ビルド成功。
+富岳実機でのビルド・再実行は未確認。適用は
+[before](tools/patches/fugaku-dc-tofu-fallback-before.sha256)照合→dry-run→適用→
+[after](tools/patches/fugaku-dc-tofu-fallback-after.sha256)照合→再ビルド。
+この1ファイルの修正はnamelist移行と独立して適用できる。
+
+
 **HSE/LCFOの追加制御はすべて`&functional`へ統一しました。**
 `SALMON_LCFO_RT_MLWF=1`などを設定する必要はありません。環境変数による
 アルゴリズム制御は削除し、`yn_hse_wannier='y'`をGS・LCFO RT共通の有効化にしました。
