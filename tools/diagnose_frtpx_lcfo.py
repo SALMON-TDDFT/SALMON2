@@ -87,7 +87,8 @@ def main():
                "compiler": compiler, "output": str(output), "cases": []}
     try:
         version = subprocess.run([compiler, "--version" if args.gnu_check else "-V"],
-                                 capture_output=True, text=True, timeout=30)
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 universal_newlines=True, timeout=30)
         results["version"] = version.stdout + version.stderr
     except subprocess.TimeoutExpired:
         results["version"] = "version command timed out"
