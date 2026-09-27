@@ -2,7 +2,8 @@
 ! Positive spherical radius is an explicit source-mask approximation, not a
 ! variational energy functional. Global density/Hartree are never masked.
 module lcfo_rt_wannier
-  use iso_fortran_env, only: int32
+  use iso_fortran_env, only: int32,int64
+  use lcfo_mlwf_links, only: lcfo_initial_links
   use lcfo_rt_basis
   use communication, only: comm_summation,comm_bcast
   use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma
@@ -69,29 +70,27 @@ contains
 
   subroutine initialize_rotation(coeff)
     complex(8),intent(in) :: coeff(:,:)
-    complex(8),allocatable :: grid(:,:),shifted(:,:),raw_local(:,:,:,:),raw(:,:,:,:),u(:,:,:),overlap(:,:)
+    complex(8),allocatable :: grid(:,:),raw(:,:,:,:),u(:,:,:),overlap(:,:)
     complex(8),allocatable :: moment_local(:,:),moment(:,:),full_coeff(:,:)
     real(8),allocatable :: position(:,:),norm_local(:),norms(:),seed_position(:,:)
     real(8) :: b(3,6),weights(6),pi,length(3),wf_spread,gradient,delta,unitary_error
-    integer :: no,ng,g,x,y,z,a,j,status,iterations,neighbors(6,1),seed_status,iu
+    integer :: no,ng,g,x,y,z,a,j,status,iterations,seed_status,iu
+    integer(int64) :: link_scratch
     no=size(coeff,2);ng=product(lcfo_core);pi=acos(-1d0);length=lcfo_grid*lcfo_h
     grid=matmul(lcfo_basis,coeff)
     allocate(position(3,ng));g=0
     do z=0,lcfo_core(3)-1;do y=0,lcfo_core(2)-1;do x=0,lcfo_core(1)-1
       g=g+1;position(:,g)=(lcfo_origins(:,lcfo_rank+1)+[x,y,z])*lcfo_h
     enddo;enddo;enddo
-    allocate(raw_local(no,no,6,1),raw(no,no,6,1),shifted(ng,no),u(no,no,1))
-    b=0d0;neighbors=1
+    allocate(u(no,no,1))
+    b=0d0
     do a=1,3
       delta=2*pi/length(a);b(a,a)=delta;b(a,a+3)=-delta
       weights(a)=1d0/(2*delta**2);weights(a+3)=weights(a)
-      do j=1,no
-        shifted(:,j)=grid(:,j)*exp(cmplx(0d0,-delta*position(a,:),8))
-      enddo
-      raw_local(:,:,a,1)=matmul(conjg(transpose(grid)),shifted)*lcfo_dv
-      raw_local(:,:,a+3,1)=conjg(transpose(raw_local(:,:,a,1)))
     enddo
-    call comm_summation(raw_local,raw,size(raw),lcfo_comm)
+    call lcfo_initial_links(grid,position,length,lcfo_dv,lcfo_comm,raw,scratch_elements=link_scratch)
+    if(lcfo_rank==0)write(*,'(a,2i18)')'LCFO initial links root/scratch complex elements: ' , &
+      size(raw,kind=int64),link_scratch
     call lcfo_gather_root(coeff,lcfo_counts,lcfo_comm,full_coeff)
     if(lcfo_rank==0)then
       ! LCFO functions have disjoint compact cores. Pivoted coefficient rows
@@ -111,16 +110,19 @@ contains
       write(*,'(a,3i7,2es17.8)') 'LCFO MLWF initial iterations/status/seed/spread/gradient:', &
         iterations,status,seed_status,wf_spread,gradient
     endif
+    deallocate(raw)
     call comm_bcast(status,lcfo_comm,0)
     if(status/=0.and.radius>0d0.and.radius<.5d0*sqrt(sum(length**2))) &
       error stop 'LCFO MLWF: initial localization unconverged; support comparison requires converged U'
     call comm_bcast(u,lcfo_comm,0)
     rotation=u(:,:,1)
+    deallocate(u)
     overlap=matmul(conjg(transpose(rotation)),rotation)
     do j=1,no;overlap(j,j)=overlap(j,j)-1d0;enddo
     unitary_error=maxval(abs(overlap))
     if(.not.all(ieee_is_finite(real(rotation))).or..not.all(ieee_is_finite(aimag(rotation))).or. &
        unitary_error>1d-10)error stop 'LCFO MLWF: invalid initial U'
+    deallocate(overlap)
     grid=matmul(grid,rotation)
     allocate(moment_local(3,no),moment(3,no),norm_local(no),norms(no),centers(3,no),protected(no))
     do j=1,no
