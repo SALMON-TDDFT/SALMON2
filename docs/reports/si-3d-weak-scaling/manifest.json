@@ -1,0 +1,154 @@
+{
+  "lattice_bohr": 10.26,
+  "core_grid": [
+    16,
+    16,
+    16
+  ],
+  "buffer_grid": [
+    8,
+    8,
+    8
+  ],
+  "fragment_grid": [
+    32,
+    32,
+    32
+  ],
+  "fragment_atoms": 64,
+  "fragment_states": 256,
+  "radius_bohr": 9,
+  "dt_au": 0.02,
+  "nt": 16,
+  "ace_interval": 1,
+  "u_interval": 1,
+  "radius_control": "&functional hse_lcfo_wf_radius, fixed bohr",
+  "initial_norm_warning_threshold": 0.999,
+  "pseudo_source": "samples/dc_hse/si64-chain/Si_rps.dat",
+  "status": "generated and statically validated; not run on Fugaku",
+  "cases": [
+    {
+      "case": "4x4x4",
+      "fragments": 64,
+      "mpi_ranks_gs": 64,
+      "mpi_ranks_rt": 64,
+      "atoms": 512,
+      "electrons": 2048,
+      "gs_states": 2048,
+      "rt_states": 1024,
+      "grid": [
+        64,
+        64,
+        64
+      ],
+      "cell_bohr": [
+        41.04,
+        41.04,
+        41.04
+      ],
+      "one_dense_complex_matrix_GiB": 0.015625,
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 0.1875,
+      "tiled_links_root_storage_GiB": 0.09375,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.00592041015625,
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 0.28125,
+      "root_gamma_link_arrays_lower_bound_GiB": 0.09375
+    },
+    {
+      "case": "6x6x6",
+      "fragments": 216,
+      "mpi_ranks_gs": 216,
+      "mpi_ranks_rt": 216,
+      "atoms": 1728,
+      "electrons": 6912,
+      "gs_states": 6912,
+      "rt_states": 3456,
+      "grid": [
+        96,
+        96,
+        96
+      ],
+      "cell_bohr": [
+        61.56,
+        61.56,
+        61.56
+      ],
+      "one_dense_complex_matrix_GiB": 0.177978515625,
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 2.1357421875,
+      "tiled_links_root_storage_GiB": 1.06787109375,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.01055908203125,
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 3.20361328125,
+      "root_gamma_link_arrays_lower_bound_GiB": 1.06787109375
+    },
+    {
+      "case": "8x8x8",
+      "fragments": 512,
+      "mpi_ranks_gs": 512,
+      "mpi_ranks_rt": 512,
+      "atoms": 4096,
+      "electrons": 16384,
+      "gs_states": 16384,
+      "rt_states": 8192,
+      "grid": [
+        128,
+        128,
+        128
+      ],
+      "cell_bohr": [
+        82.08,
+        82.08,
+        82.08
+      ],
+      "one_dense_complex_matrix_GiB": 1.0,
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 12.0,
+      "tiled_links_root_storage_GiB": 6.0,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.01959228515625,
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 18.0,
+      "root_gamma_link_arrays_lower_bound_GiB": 6.0
+    },
+    {
+      "case": "10x10x10",
+      "fragments": 1000,
+      "mpi_ranks_gs": 1000,
+      "mpi_ranks_rt": 1000,
+      "atoms": 8000,
+      "electrons": 32000,
+      "gs_states": 32000,
+      "rt_states": 16000,
+      "grid": [
+        160,
+        160,
+        160
+      ],
+      "cell_bohr": [
+        102.6,
+        102.6,
+        102.6
+      ],
+      "one_dense_complex_matrix_GiB": 3.814697265625,
+      "baseline_initial_raw_local_plus_raw_GiB_per_rank": 45.7763671875,
+      "tiled_links_root_storage_GiB": 22.88818359375,
+      "tiled_links_nonroot_storage_GiB": 0,
+      "tiled_links_scratch_GiB_per_rank": 0.03448486328125,
+      "baseline_root_gamma_link_arrays_lower_bound_GiB": 68.66455078125,
+      "root_gamma_link_arrays_lower_bound_GiB": 22.88818359375
+    }
+  ],
+  "sha256": {
+    "10x10x10/atom.dat": "efbd511084ce5a13615469427b2f98171759caba809b8b2c15ead9ddde8fe195",
+    "10x10x10/gs/inputfile": "21f7aff9ae628d2a9f49745127fd9b7f2bcb4e16dfac42d7e2c17f4bae073a8f",
+    "10x10x10/rt/inputfile": "9953b6e56296d8ab4099e1d28eaba75f309372ec9834413fe792f5ef03c00dcf",
+    "4x4x4/atom.dat": "9fafee241177398b59c6c7d8d7b82531548328533b27308ade9d8aed7cb70cd9",
+    "4x4x4/gs/inputfile": "e01ad4bc1e89e6fc0769715327da0df04d2821945d373722eec676bb2194ed7c",
+    "4x4x4/rt/inputfile": "b4d67a3b7bac0ebfb98c6a7f6f361641216370d186512e94ec62f507a24531fb",
+    "6x6x6/atom.dat": "19c21025437823e8cc8316a856e6594695fd32d04bb833b1b2616a1e55c6f7b8",
+    "6x6x6/gs/inputfile": "71ff8e4b65dcce0eaa6c4dd6fd60e617d9a95be4ae6edfbd3dec1a614ee19944",
+    "6x6x6/rt/inputfile": "c31b437ad3229a2c83a6c5af62a5a87beef0e7c63c26f93ff379cb017224eb67",
+    "8x8x8/atom.dat": "210a8a3812b0e8ca7a1122966d4e6d2b64b043983f5f49776786d3ef9068e57c",
+    "8x8x8/gs/inputfile": "b7fe8d59c80b450ec3fd1e6fd0cbe940a7b43d16476d56e6560cdaf33de066fd",
+    "8x8x8/rt/inputfile": "0caca61cb76901ecc74338ea057d433d69e6593ad5f15c2e48ea1707dd88d8e1",
+    "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c"
+  }
+}

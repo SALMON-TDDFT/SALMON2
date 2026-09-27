@@ -1,0 +1,68 @@
+&calculation
+ theory='dft'
+ yn_dc='y'
+/
+&control
+ sysname='si8000_hse'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&dc
+ num_fragment=10,10,10
+ num_rgrid_buffer=8,8,8
+ nproc_rgrid_tot=10,10,10
+ nstate_frag=256
+ yn_dc_lcfo='y'
+ lcfo_eigensolver='chefsi'
+ lcfo_diag_chefsi_filter_degree=60
+ lcfo_diag_chefsi_max_cycle=200
+ lcfo_diag_chefsi_residual_tolerance=1d-7
+ energy_cut=100d0
+ lambda_cut=1d-7
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+ yn_eigenexa='n'
+ yn_scalapack='n'
+/
+&system
+ yn_periodic='y'
+ al=102.60000000d0,102.60000000d0,102.60000000d0
+ nelem=1
+ nstate=32000
+ nelec=32000
+ natom=8000
+ file_atom_coor='../atom.dat'
+ temperature_k=300d0
+/
+&pseudo
+ izatom(1)=14
+ file_pseudo(1)='../../Si_rps.dat'
+ lloc_ps(1)=2
+/
+&functional
+ xc='hse06'
+ hse_mlwf_maxiter=1
+ hse_mlwf_interval=10000
+/
+&rgrid
+ num_rgrid=160,160,160
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&scf
+ nscf_init_redistribution=10
+ nscf_init_no_diagonal=0
+ nscf=1800
+ ncg=1
+ method_mixing='simple'
+ alpha_mb=0.5d0
+ mixrate=0.01d0
+ threshold=1d-7
+ yn_preconditioning='y'
+/

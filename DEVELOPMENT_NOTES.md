@@ -1,9 +1,10 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`133e8b37`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の機能検証：`e6c54a87`（半径namelist）。分散seedのメモリ測定：`133e8b37`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
+- [Si 3D弱スケーリング入力・半径namelist](docs/reports/si-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行）
 - [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
@@ -19,6 +20,16 @@
 - [ACE・U輸送と高速化](#reuse)
 - [検証と残る課題](#remaining)
 - [入力・再実行・詳細記録](#records)
+
+## 半径namelistと初期保持率のWarning
+
+`e6c54a87`で`&functional hse_lcfo_wf_radius=9d0`を追加（常にbohr）。
+0は全範囲。明示したnamelist値が従来の環境変数より優先されます。
+初期MLWFで球内ノルム/全ノルムが99.9%未満のWFがあればWarningを出し、
+`lcfo_mlwf_radius.dat`へ各WFの保持率を保存。半径は自動変更しません。
+小規模MPIでnamelist/旧指定の電流・密度・エネルギーが一致し、Warning分岐を検証。
+[Si入力一式・適用手順](docs/reports/si-3d-weak-scaling/README.md)／
+[検証結果](docs/reports/si-3d-weak-scaling/verification.json)。富岳でのこの追加機能は未検証。
 
 <a id="fugaku-build"></a>
 

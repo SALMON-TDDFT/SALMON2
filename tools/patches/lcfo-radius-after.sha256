@@ -1,0 +1,4 @@
+bebb4cc53320b58f5dad9ba21479e19138546277b6d3bf3a4af8fc8964f418db  src/io/inputoutput.f90
+a83b66f314e3511c26782002b3b895ebccb3d746fb49b32e016469d22bccd6bb  src/io/salmon_global.f90
+a1f49ac19e4a68f24d0a34af1371673707e1779661759d6a716f9c5d0b6e4c5f  src/xc/lcfo_rt_wannier.f90
+e724681080e2a360b310536ae031a6f84d465e18d118ccb0e5ba9872a95acbdd  src/xc/lcfo_wf_support.f90

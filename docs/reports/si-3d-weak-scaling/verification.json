@@ -1,0 +1,30 @@
+{
+  "implementation": "e6c54a87",
+  "norm_warning_threshold": 0.999,
+  "coverage_stage": "initial MLWF only",
+  "geometry_unit_test": "3D periodic, inclusive boundary, full support, empty local domain passed",
+  "native_MPI_regression": "direct Taylor4, fragment x orbital MPI, local radius, ACE/U reuse passed",
+  "cases": [
+    {
+      "radius_bohr": 3,
+      "legacy_env_bohr": 1,
+      "minimum_fraction": 0.9440599349375678,
+      "warning": true,
+      "current_difference_vs_legacy_radius3": 0,
+      "density_difference": 0,
+      "energy_difference": 0
+    },
+    {
+      "radius_bohr": 0,
+      "legacy_env_bohr": 3,
+      "minimum_fraction": 1,
+      "warning": false,
+      "current_difference_vs_full": 0,
+      "density_difference": 0,
+      "energy_difference": 0
+    }
+  ],
+  "negative_input": "rejected",
+  "large_Si_cases": "static validation only; no jobs submitted",
+  "Fugaku": "unverified new radius code"
+}

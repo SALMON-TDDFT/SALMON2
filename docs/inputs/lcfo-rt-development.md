@@ -588,3 +588,28 @@ inputs. Fujitsu compilation and numerical behavior of this backend remain to
 be checked on Fugaku.
 
 Routine contract: [Netlib PZGEQPF](https://www.netlib.org/scalapack/explore-html/de/dbc/pzgeqpf_8f_a3109fb670aa8063cd76c95b5a27b1177.html).
+
+### Radius namelist and initial per-WF norm warning (2026-09-27)
+
+`&functional hse_lcfo_wf_radius` specifies the LCFO RT source sphere in **bohr**,
+independent of `unit_system`. Positive means fixed radius; zero means full support.
+The default -1 uses `SALMON_LCFO_RT_RADIUS` if set, otherwise full support. Explicit
+nonnegative namelist values override the environment, with a log notice. Other
+negative or nonfinite values are rejected. LCFO/MLWF activation still uses the
+existing experimental switches; this parameter does not control DC-SCF exchange.
+
+At initial localization, each WF's geometric sphere norm is divided by its total
+norm on disjoint cores, reduced over the LCFO communicator. The inclusive boundary
+and 3D periodic minimum-image distance match the source mask. Below0.999 triggers
+one root warning with the count; minimum fraction and WF index are also printed.
+`lcfo_mlwf_radius.dat` contains per-WF total norm, sphere norm, fraction and
+protected flag. Protected WFs remain uncut even if geometric coverage is small.
+The calculation reuses the initial unmasked grid; scratch and reduction scale
+as O(Nwf). No extra complete WF reconstruction/copy, automatic radius adjustment,
+renormalization or physical parameter change is introduced.
+
+The warning concerns initial WFs only, not every transported RT frame. The existing
+RT aggregate discarded-source-norm diagnostic is unchanged. Norm retention does
+not guarantee current/dielectric accuracy. Full support produces no coverage
+warning. Small MPI integration tests verify namelist/environment equivalence,
+explicit full-support precedence, warning emission, and invalid input rejection.
