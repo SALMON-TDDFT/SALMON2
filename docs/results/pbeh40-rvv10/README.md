@@ -340,6 +340,36 @@ MPI4 energy-minus-external-work errors for dt=.08,.04,.02 au are
 8.11647e-6, 2.03748e-6, 5.10143e-7 Ha. The single-water MPI2 energy-file difference
 from MPI1 is8.41e-12 eV. HSE ON/OFF builds and existing gauge/Wannier/input
 regressions pass. The reviewed correction was followed by exchange/localization
-and full-pulse parity reruns. Initial DC reconstruction still has global
-single-orbital scratch; orbital MPI, finite-radius MD and production scaling
-remain outside this result.
+and full-pulse parity reruns. At this validation stage, initial DC reconstruction still had global
+single-orbital scratch; the following change removes it. Orbital MPI,
+finite-radius MD and production scaling remain outside this result.
+
+
+## Bounded DC reconstruction scratch
+
+Complex DC-to-mesh initialization now validates coverage and reconstructs
+orbitals in chunks of at most65,536 destination points, using rooted reductions.
+The full-grid complex and integer scratch arrays were removed. The unit oracle
+checks complex coefficients, periodic/nonmonotone maps, unequal destination
+slabs, chunks crossing row/plane boundaries, zero-band fragments and duplicate/
+missing coverage. The native MPI2 malformed-map test rejects duplicate coverage
+before wavefunction reconstruction begins.
+
+All 15 Ehrenfest tests, 8 input regressions, the tile oracle, HSE ON/OFF builds
+and projected LCFO response/provenance/orbital-layout regressions passed.
+Before/after output comparison against the preceding implementation gives:
+
+| case | scratch points per buffer | global points | max energy-file change |
+|---|---:|---:|---:|
+| H4 MPI1 | 1024 | 1024 | 0 at output precision |
+| H4 MPI2 | 512 | 1024 | 0 at output precision |
+| H4 MPI4 | 256 | 1024 | 0 at output precision |
+| Water MPI1 | 13824 | 13824 | 0 at output precision |
+| Water MPI2 | 6912 | 13824 | 1.03e-12 eV |
+
+The complex buffers total at most2 MiB by construction, excluding resident
+fragment data and other program memory. Native fixtures above exercise spatial
+memory reduction; the small-grid tile oracle exercises multi-chunk indexing.
+Independent review found no blocking issue. Repeated intersection scans across
+chunks remain a performance limitation; no large-system startup timing is
+claimed. See `dc-tile-validation.json` for measured parity and log hashes.

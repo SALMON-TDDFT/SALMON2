@@ -1,0 +1,60 @@
+{
+  "scope": "Bounded complex DC-to-mesh reconstruction and coverage scratch",
+  "tile_point_limit": 65536,
+  "complex_scratch_buffers": 2,
+  "max_complex_scratch_bytes": 2097152,
+  "before_after": {
+    "spatial_1": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0,
+      "scratch_points": 1024,
+      "global_points": 1024
+    },
+    "spatial_2": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0,
+      "scratch_points": 512,
+      "global_points": 1024
+    },
+    "spatial_4": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0,
+      "scratch_points": 256,
+      "global_points": 1024
+    },
+    "water_rt": {
+      "*_rt.data": 0.0,
+      "*_rt_energy.data": 0.0,
+      "scratch_points": 13824,
+      "global_points": 13824
+    },
+    "water_rt_spatial": {
+      "*_rt.data": 1.347880881987808e-18,
+      "*_rt_energy.data": 1.0231815394945443e-12,
+      "scratch_points": 6912,
+      "global_points": 13824
+    }
+  },
+  "tests": {
+    "ehrenfest": 15,
+    "inputs": 8,
+    "tile_oracle": "passed",
+    "projected_lcfo": "passed including orbital decomposition and functional provenance",
+    "HSE_ON_build": "passed",
+    "HSE_OFF_build": "passed",
+    "review": "no blocking findings"
+  },
+  "limitations": [
+    "resident fragment basis and coefficient input unchanged",
+    "repeated fragment intersection scans per destination chunk",
+    "no large-system timing or total-RSS claim"
+  ],
+  "logs_sha256": {
+    "dc-tile-unit-final.log": "fe3f3018901fc8cbde229459b0a7842193e5ce36c47ea2814eb583a6511604c8",
+    "dc-tile-ehrenfest.log": "d9270cab23c174ddb780d924038a3967d63224509812dec951fc641c3f863e48",
+    "dc-tile-lcfo-regression.log": "a6739443b980665d0d282682eabf150d832e097c0b4dcb57635843bbd3bb5c0f",
+    "dc-tile-inputs.log": "9237c340832f15f38872226224a31b557ee9aac419ccd3b24815803730cec5d0",
+    "dc-tile-build.log": "91f776ce882afa59b46d118e00c34f7f64c0a8d980a555d944adca7ab76eacb8",
+    "dc-tile-off-build.log": "9d85761dcfeabd52ffb24d3173d8503ce3b106fc83c0b4f0294e2019e1fe3e46"
+  }
+}

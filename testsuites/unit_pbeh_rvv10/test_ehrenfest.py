@@ -259,6 +259,10 @@ class RealspaceEhrenfest(unittest.TestCase):
             self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
             self.assertIn('end SALMON',run.stdout)
             self.assertNotIn('Native LCFO RT active',run.stdout)
+            scratch=re.search(r'DC_LCFO_TILE scratch_points/global_points:\s*(\d+)\s+(\d+)',run.stdout)
+            self.assertIsNotNone(scratch,'bounded reconstruction diagnostic missing')
+            self.assertEqual(int(scratch[2]),1024)
+            self.assertEqual(int(scratch[1]),1024//ranks)
             data=np.loadtxt(next(folder.glob('*_rt.data')))
             energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
             xyz=next(folder.glob('*_trj.xyz')).read_text().splitlines()[-4:]
@@ -296,6 +300,18 @@ class RealspaceEhrenfest(unittest.TestCase):
             _,run=self.execute('bad_layout_'+name,inp,rt=True)
             self.assertNotEqual(run.returncode,0)
             self.assertIn('Gamma y/z pencils with all orbitals required',run.stdout+run.stderr)
+
+    def test_reconstruction_bad_coverage(self):
+        folder=self.root/'bad_coverage_gs'
+        shutil.copytree(self.root/'gs'/'data_dcdft',folder/'data_dcdft')
+        path=folder/'data_dcdft/fragments/000001/rgrid_index.bin'
+        mapping=np.frombuffer(path.read_bytes(),dtype=np.int32).copy()
+        mapping[7]=mapping[6]  # duplicate core point; preserve first-coordinate header
+        path.write_bytes(mapping.tobytes())
+        inp=self.rt_input(nt=1).replace('nproc_rgrid=1,1,1','nproc_rgrid=1,2,1')
+        _,run=self.execute('bad_coverage_rt',inp,ranks=2,rt='bad_coverage_gs')
+        self.assertIn('invalid rgrid coverage',run.stdout+run.stderr)
+        self.assertNotIn('start complex DC-LCFO wavefunction reconstruction',run.stdout)
 
     def test_forbidden_modes(self):
         cases=[('pulse',self.rt_input().replace("ae_shape1='impulse'","ae_shape1='Ecos2'\n phi_CEP1=.25"),'impulse or Acos2'),

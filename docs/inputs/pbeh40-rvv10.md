@@ -306,9 +306,31 @@ as the serial path. ACE construction and action reduce only small band matrices.
 No full wavefunction-grid gather occurs during these exchange RT operations.
 `exx_local_fft` does not select compact source convolutions on this path.
 
-Initial DC-to-mesh reconstruction still uses global scratch for one orbital
-and fragment input data; it is not yet a fully distributed-memory initializer.
+Initial DC-to-mesh reconstruction now streams bounded destination-grid chunks
+as described below. Validated fragment basis and coefficient records remain resident.
 All occupied columns remain local to each spatial rank, and small band matrices
 are replicated. The verified MPI1/2/4 H4 pulse and MPI1/2 water smoke cases are
 correctness checks, not evidence for giant-system timing or long-time accuracy.
 Use `samples/pbeh40_rvv10/h4_ehrenfest_pulse_spatial.inp` after its matching GS.
+
+
+### Bounded DC-to-mesh reconstruction
+
+Complex DC initialization validates all input metadata and fragment core
+coverage before reconstructing orbitals. Coverage and complex contributions
+are processed in flat destination-grid chunks of at most65,536 points. Each
+chunk is reduced only to its owning spatial/orbital rank. No global coverage
+array or global single-orbital reduction buffer is allocated by reconstruction.
+The complex scratch consists of two buffers (at most2 MiB combined with the
+tested 16-byte complex representation). Two integer coverage buffers are freed
+before these complex buffers are allocated. Small index/metadata arrays and
+resident fragment basis/coefficient records are additional memory.
+
+The diagnostic `DC_LCFO_TILE scratch_points/global_points` reports buffer
+capacity in grid points and the global grid size. This is not total process
+memory. File metadata/provenance validation and projected LCFO configuration
+remain unchanged. Wrapped grid maps are preserved, and missing or duplicated
+core coverage is rejected collectively. Each destination/chunk is handled in
+sequence; fragment intersections are rescanned across chunks, so this memory
+change is not a claim of faster initialization. Streaming fragment input and
+more efficient sparse routing remain separate work.

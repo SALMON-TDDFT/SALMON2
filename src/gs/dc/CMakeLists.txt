@@ -3,6 +3,7 @@ set(SOURCES
     dcdft.f90
     dc_force.f90
     dc_projector_force.f90
+    lcfo_mesh_tile.f90
     lcfo_complex.f90
     lcfo.f90
    )

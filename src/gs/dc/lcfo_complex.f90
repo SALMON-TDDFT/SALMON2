@@ -1239,6 +1239,7 @@ contains
   end subroutine dc_lcfo_complex
 
   subroutine init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
+    use lcfo_mesh_tile, only: lcfo_tile_coverage,lcfo_tile_contract,lcfo_reconstruction_tile_points
     use lcfo_rt_basis, only: lcfo_rt_requested,lcfo_rt_configure
     use communication, only: comm_summation,comm_bcast
     use salmon_global, only: num_fragment
@@ -1248,15 +1249,15 @@ contains
     type(s_dft_system), intent(in) :: system
     type(s_parallel_info), intent(in) :: info
     type(s_orbital), intent(inout) :: spsi
-    integer, allocatable :: n_basis_all(:,:,:),n_basis_wire(:),coverage(:,:,:),coverage_sum(:,:,:)
+    integer, allocatable :: n_basis_all(:,:,:),n_basis_wire(:),coverage(:),coverage_sum(:),tiles(:,:)
     integer :: meta(20),local_status,total_status,f,ik,ispin,io,j,ix,iy,iz
-    integer :: nfrag,nspin,nk,ngrid
+    integer :: nfrag,nspin,nk,ngrid,dest,lo(3),m(3),first,count,points,scratch_points,g,t,nb
     real(8) :: geom(10)
     real(8), allocatable :: vec_k(:,:),wtk(:)
     character(96) :: run_id
     character(32), parameter :: bdir='./data_dcdft/fragments/'
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
-    complex(8), allocatable :: wrk_local(:,:,:),wrk_sum(:,:,:),rt_basis(:,:)
+    complex(8), allocatable :: wrk_local(:),wrk_sum(:),rt_basis(:,:)
     integer,allocatable :: rt_jxyz(:,:)
 
 #if defined(USE_OPENACC) || defined(USE_CUDA)
@@ -1301,27 +1302,53 @@ contains
     call comm_bcast(n_basis_wire,info%icomm_ro,0)
     n_basis_all = reshape(n_basis_wire,shape(n_basis_all))
 
-    allocate(frag(nfrag),coverage(lg%num(1),lg%num(2),lg%num(3)))
-    allocate(coverage_sum(lg%num(1),lg%num(2),lg%num(3)))
-    coverage = 0
+    allocate(frag(nfrag))
     local_status = 0
     do f=1,nfrag
       if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
       call validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
-           run_id,n_basis_all,frag(f)%jxyz,coverage,local_status)
+           run_id,n_basis_all,frag(f)%jxyz,local_status)
       if (local_status /= 0) exit
     end do
     call comm_summation(local_status,total_status,info%icomm_ro)
     if (total_status /= 0) stop "DC-LCFO complex reconstruction: fragment preflight failed."
-    call comm_summation(coverage,coverage_sum,ngrid,info%icomm_ro)
-    if (any(coverage_sum /= 1)) then
-      if (info%id_ro == 0) write(*,*) &
-           "DC-LCFO complex reconstruction: fragment cores do not cover the total grid exactly once."
-      stop "DC-LCFO complex reconstruction: invalid rgrid coverage."
-    end if
-
-    allocate(wrk_local(lg%num(1),lg%num(2),lg%num(3)))
-    allocate(wrk_sum(lg%num(1),lg%num(2),lg%num(3)))
+    ! Each destination advertises only its grid bounds and owned orbital range.
+    ! Stream at most one bounded destination chunk; never gather a full orbital.
+    allocate(tiles(8,0:info%isize_ro-1));tiles=0;scratch_points=0
+    do dest=0,info%isize_ro-1
+      if(info%id_ro==dest)tiles(:,dest)=[mg%is,mg%num,info%io_s,info%io_e]
+      call comm_bcast(tiles(:,dest),info%icomm_ro,dest)
+      lo=tiles(1:3,dest);m=tiles(4:6,dest)
+      if(any(m<1).or.any(lo<1).or.any(lo+m-1>lg%num)) &
+        error stop 'DC-LCFO complex reconstruction: invalid destination grid'
+      scratch_points=max(scratch_points,min(product(m),lcfo_reconstruction_tile_points))
+    enddo
+    allocate(coverage(scratch_points),coverage_sum(scratch_points))
+    local_status=0
+    do dest=0,info%isize_ro-1
+      lo=tiles(1:3,dest);m=tiles(4:6,dest);points=product(m)
+      do first=1,points,lcfo_reconstruction_tile_points
+        count=min(lcfo_reconstruction_tile_points,points-first+1);coverage(:count)=0
+        do f=1,nfrag
+          if(.not.allocated(frag(f)%jxyz))cycle
+          call lcfo_tile_coverage(meta(7:9),frag(f)%jxyz,lo,m,first,coverage(:count))
+        enddo
+        call comm_summation(coverage(:count),coverage_sum(:count),count,info%icomm_ro,dest)
+        if(info%id_ro==dest)then
+          if(any(coverage_sum(:count)/=1))local_status=1
+        endif
+      enddo
+    enddo
+    call comm_summation(local_status,total_status,info%icomm_ro)
+    if(total_status/=0)then
+      if(info%id_ro==0)write(*,*) &
+        'DC-LCFO complex reconstruction: fragment cores do not cover the total grid exactly once.'
+      error stop 'DC-LCFO complex reconstruction: invalid rgrid coverage.'
+    endif
+    deallocate(coverage,coverage_sum)
+    allocate(wrk_local(scratch_points),wrk_sum(scratch_points))
+    if(info%id_ro==0)write(*,'(a,2i14)') &
+      'DC_LCFO_TILE scratch_points/global_points: ',scratch_points,ngrid
     if (info%id_ro == 0) then
       write(*,*) "start complex DC-LCFO wavefunction reconstruction"
       write(*,*) "complex LCFO format v1; fragments/k/spins:",nfrag,nk,nspin
@@ -1349,41 +1376,39 @@ contains
         call lcfo_rt_configure(rt_basis,rt_jxyz,meta,n_basis_all(:,1,ik),system,mg,info)
         deallocate(rt_basis,rt_jxyz)
       endif
-      do ispin=1,nspin
-        do io=1,system%no
-          wrk_local = (0d0,0d0)
-          do f=1,nfrag
-            if (.not.allocated(frag(f)%basis)) cycle
-            do j=1,frag(f)%n_basis(ispin)
-              do iz=1,meta(9)
-              do iy=1,meta(8)
-              do ix=1,meta(7)
-                wrk_local(frag(f)%jxyz(ix,1),frag(f)%jxyz(iy,2),frag(f)%jxyz(iz,3)) = &
-                     wrk_local(frag(f)%jxyz(ix,1),frag(f)%jxyz(iy,2),frag(f)%jxyz(iz,3)) + &
-                     frag(f)%basis(ix,iy,iz,ispin,j)*frag(f)%coef(j,io,ispin)
-              end do
-              end do
-              end do
-            end do
-          end do
-          call comm_summation(wrk_local,wrk_sum,ngrid,info%icomm_ro)
-          if (info%io_s <= io .and. io <= info%io_e) then
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,ispin,io,ik,1) = wrk_sum(ix,iy,iz)
-            end do
-            end do
-            end do
-          end if
-        end do
-      end do
+      do dest=0,info%isize_ro-1
+        lo=tiles(1:3,dest);m=tiles(4:6,dest);points=product(m)
+        do ispin=1,nspin
+          do io=tiles(7,dest),tiles(8,dest)
+            do first=1,points,lcfo_reconstruction_tile_points
+              count=min(lcfo_reconstruction_tile_points,points-first+1)
+              wrk_local(:count)=(0d0,0d0)
+              do f=1,nfrag
+                if(.not.allocated(frag(f)%basis))cycle
+                nb=frag(f)%n_basis(ispin)
+                call lcfo_tile_contract(frag(f)%jxyz,lo,m,first, &
+                  frag(f)%basis(:,:,:,ispin,:nb),frag(f)%coef(:nb,io,ispin),wrk_local(:count))
+              enddo
+              call comm_summation(wrk_local(:count),wrk_sum(:count),count,info%icomm_ro,dest)
+              if(info%id_ro==dest)then
+                do t=1,count
+                  g=first+t-1
+                  ix=modulo(g-1,m(1))+lo(1)
+                  iy=modulo((g-1)/m(1),m(2))+lo(2)
+                  iz=(g-1)/(m(1)*m(2))+lo(3)
+                  spsi%zwf(ix,iy,iz,ispin,io,ik,1)=wrk_sum(t)
+                enddo
+              endif
+            enddo
+          enddo
+        enddo
+      enddo
       do f=1,nfrag
         if (allocated(frag(f)%basis)) deallocate(frag(f)%basis,frag(f)%coef,frag(f)%n_basis)
       end do
     end do
     if (info%id_ro == 0) write(*,*) "end complex DC-LCFO wavefunction reconstruction"
-    deallocate(wrk_sum,wrk_local,coverage_sum,coverage,frag,n_basis_wire,n_basis_all,wtk,vec_k)
+    deallocate(wrk_sum,wrk_local,tiles,frag,n_basis_wire,n_basis_all,wtk,vec_k)
   end subroutine init_conventional_from_dcdft_complex
 
   subroutine open_complex_lcfo_read(path,file_kind,system,lg,unit,meta,geom,vec_k,wtk,run_id,file_size,status)
@@ -1627,7 +1652,7 @@ contains
   end subroutine read_complex_lcfo_reference
 
   subroutine validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,ref_meta,ref_geom,ref_k, &
-       ref_wtk,ref_run,n_basis_all,jxyz,coverage,status)
+       ref_wtk,ref_run,n_basis_all,jxyz,status)
     use exx_functional, only: lcfo_check_functional
     use filesystem, only: get_filehandle
     use iso_fortran_env, only: int32,int64,real64
@@ -1640,7 +1665,6 @@ contains
     real(real64), intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
     character(96), intent(in) :: ref_run
     integer, allocatable, intent(out) :: jxyz(:,:)
-    integer, intent(inout) :: coverage(:,:,:)
     integer, intent(out) :: status
     character(256) :: filename
     character(16) :: footer_basis,footer_coeff
@@ -1784,14 +1808,6 @@ contains
     inquire(unit=uc,pos=end_c,iostat=ios)
     if (ios /= 0 .or. footer_coeff /= 'SLCFO_DONE_V1' .or. run_coeff /= ref_run .or. &
         footer_kc /= system%nk .or. footer_bytes_c /= size_c .or. end_c-1_int64 /= size_c) goto 900
-    do iz=1,meta_b(9)
-    do iy=1,meta_b(8)
-    do ix=1,meta_b(7)
-      coverage(jxyz(ix,1),jxyz(iy,2),jxyz(iz,3)) = &
-           coverage(jxyz(ix,1),jxyz(iy,2),jxyz(iz,3))+1
-    end do
-    end do
-    end do
     status = 0
 900 continue
     close(ub,iostat=close_ios)
