@@ -1,0 +1,131 @@
+{
+  "lattice_bohr": 6.72,
+  "core_grid": [
+    16,
+    16,
+    16
+  ],
+  "buffer_grid": [
+    8,
+    8,
+    8
+  ],
+  "fragment_grid": [
+    32,
+    32,
+    32
+  ],
+  "fragment_atoms": 64,
+  "fragment_states": 256,
+  "radius_bohr": 6,
+  "dt_au": 0.02,
+  "nt": 16,
+  "ace_interval": 1,
+  "u_interval": 1,
+  "status": "generated and statically validated; not run on Fugaku",
+  "cases": [
+    {
+      "case": "4x4x4",
+      "fragments": 64,
+      "mpi_ranks_gs": 64,
+      "mpi_ranks_rt": 64,
+      "atoms": 512,
+      "electrons": 2048,
+      "gs_states": 2048,
+      "rt_states": 1024,
+      "grid": [
+        64,
+        64,
+        64
+      ],
+      "cell_bohr": [
+        26.88,
+        26.88,
+        26.88
+      ],
+      "one_dense_complex_matrix_GiB": 0.015625,
+      "initial_raw_local_plus_raw_GiB_per_rank": 0.1875
+    },
+    {
+      "case": "6x6x6",
+      "fragments": 216,
+      "mpi_ranks_gs": 216,
+      "mpi_ranks_rt": 216,
+      "atoms": 1728,
+      "electrons": 6912,
+      "gs_states": 6912,
+      "rt_states": 3456,
+      "grid": [
+        96,
+        96,
+        96
+      ],
+      "cell_bohr": [
+        40.32,
+        40.32,
+        40.32
+      ],
+      "one_dense_complex_matrix_GiB": 0.177978515625,
+      "initial_raw_local_plus_raw_GiB_per_rank": 2.1357421875
+    },
+    {
+      "case": "8x8x8",
+      "fragments": 512,
+      "mpi_ranks_gs": 512,
+      "mpi_ranks_rt": 512,
+      "atoms": 4096,
+      "electrons": 16384,
+      "gs_states": 16384,
+      "rt_states": 8192,
+      "grid": [
+        128,
+        128,
+        128
+      ],
+      "cell_bohr": [
+        53.76,
+        53.76,
+        53.76
+      ],
+      "one_dense_complex_matrix_GiB": 1.0,
+      "initial_raw_local_plus_raw_GiB_per_rank": 12.0
+    },
+    {
+      "case": "10x10x10",
+      "fragments": 1000,
+      "mpi_ranks_gs": 1000,
+      "mpi_ranks_rt": 1000,
+      "atoms": 8000,
+      "electrons": 32000,
+      "gs_states": 32000,
+      "rt_states": 16000,
+      "grid": [
+        160,
+        160,
+        160
+      ],
+      "cell_bohr": [
+        67.2,
+        67.2,
+        67.2
+      ],
+      "one_dense_complex_matrix_GiB": 3.814697265625,
+      "initial_raw_local_plus_raw_GiB_per_rank": 45.7763671875
+    }
+  ],
+  "sha256": {
+    "10x10x10/atom.dat": "47efd85b5b66ba2270541480d5262bfc3f787a67e2909a6765c44631fcbe7baf",
+    "10x10x10/gs/inputfile": "2acefef1b2d50ef3c689546ea00538f45132494c479add61ba6511aa6356503a",
+    "10x10x10/rt/inputfile": "d4bd90e97e48890750ec215749b829536d7642d23a889d5f7ff5a3df00879648",
+    "4x4x4/atom.dat": "1f6d6e90087424ba36c4f1359be86b13c0bd77df02e763503802609abe2eec04",
+    "4x4x4/gs/inputfile": "257a12c8934d54ebbef82d953e2cf189817097629bf6c67b5e9895a9dff84d49",
+    "4x4x4/rt/inputfile": "ef49dc3e62abac377cc4733d2652883b9488b7fa3ab68cd193d532a2b4644221",
+    "6x6x6/atom.dat": "95301c8a00b56f9c503027bb1be08b3b494a6b81cfcdd6fcf0a1ef109de9b660",
+    "6x6x6/gs/inputfile": "698ad4d985d38ca45e831730f6992f46329602600a8acb08a1c42a1f1c331f62",
+    "6x6x6/rt/inputfile": "e383435e6f8b0d6ea4744d9fc84896d66f77f6aef0d4f58a71bb2cad90f45c88",
+    "8x8x8/atom.dat": "cbcc2d4da2425a576997963b31a3e98dfbd5e80f399f4aa38ccaeea03f759d9c",
+    "8x8x8/gs/inputfile": "73d2c7dc4a50299e616fb633a5b7c3d476197ee3cd1d8042bfc8520d3898c627",
+    "8x8x8/rt/inputfile": "6ebb06e0fec8e6d07133b3b9f1a049200a9327845798c899821b707ed74a305b",
+    "C_rps.dat": "7093e8202534d6e2ad059436b096c6741ae1713c14a59a9562d7f70848a78ab1"
+  }
+}

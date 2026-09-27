@@ -4,6 +4,7 @@
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
+- [Diamond 3D弱スケーリング入力](docs/reports/diamond-3d-weak-scaling/README.md)（4³/6³/8³/10³、未実行・大規模メモリ制約あり）
 - [富岳：通常のCMakeビルド](#fugaku-build)
 - [現在の実装と制約](#implementation)
 - [最新：交換FFTの計画最適化](#fft-measure)
