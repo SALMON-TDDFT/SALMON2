@@ -259,6 +259,7 @@ contains
   end subroutine
 
   subroutine refresh_master(system,mg,info,coeff,exchange_energy,pack_seconds)
+    implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -269,13 +270,18 @@ contains
     real(8),allocatable :: eigenvalues(:),rwork(:)
     real(8),intent(in) :: pack_seconds
     real(8) :: threshold,discarded,local_energy,started,source_seconds,exchange_seconds
-    real(8) :: action_seconds,projection_seconds,projection_started
+    real(8) :: action_seconds,projection_seconds,projection_started,occupation_value
     integer :: nsel,ng,no,j,ierr,nrank,first,changed,total_changed
     external :: zheev
     started=wall_seconds()
     no=size(coeff,2);nsel=size(selected);ng=size(fragment_basis,1)
-    if(any(system%rocc(:,1,1)<0d0).or.any(system%rocc(:,1,1)>2d0).or. &
-       .not.all(ieee_is_finite(system%rocc(:,1,1))))error stop 'LCFO HSE: invalid occupations'
+    ! Fujitsu 4.12.2 crashes while compiling the combined ANY/ALL/IEEE test
+    ! on this derived-type array section, even at O0. Check scalar values.
+    do j=1,size(system%rocc,1)
+      occupation_value=system%rocc(j,1,1)
+      if(.not.ieee_is_finite(occupation_value))error stop 'LCFO HSE: invalid occupations'
+      if(occupation_value<0d0.or.occupation_value>2d0)error stop 'LCFO HSE: invalid occupations'
+    enddo
     ! On impulse step1 rebuild both endpoints. Smooth fields can retain the
     ! zero-field initial operator; subsequent refreshes are physical-step based.
     if(ace_interval>1.and.rt_step>0.and.ace_valid.and.allocated(cached_occupation))then
