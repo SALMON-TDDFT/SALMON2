@@ -6,7 +6,7 @@ module lcfo_rt_wannier
   use lcfo_mlwf_links, only: lcfo_initial_links
   use lcfo_rt_basis
   use communication, only: comm_summation,comm_bcast
-  use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma
+  use hse_wannier_gauge, only: gauge_seed,gauge_minimize_gamma_inplace
   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_gather_root
   use lcfo_dist_rows, only: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get
   use lcfo_dist_dense, only: lcfo_distributed_polar
@@ -88,9 +88,6 @@ contains
       delta=2*pi/length(a);b(a,a)=delta;b(a,a+3)=-delta
       weights(a)=1d0/(2*delta**2);weights(a+3)=weights(a)
     enddo
-    call lcfo_initial_links(grid,position,length,lcfo_dv,lcfo_comm,raw,scratch_elements=link_scratch)
-    if(lcfo_rank==0)write(*,'(a,2i18)')'LCFO initial links root/scratch complex elements: ' , &
-      size(raw,kind=int64),link_scratch
     call lcfo_gather_root(coeff,lcfo_counts,lcfo_comm,full_coeff)
     if(lcfo_rank==0)then
       ! LCFO functions have disjoint compact cores. Pivoted coefficient rows
@@ -102,10 +99,22 @@ contains
         u=0d0
         do j=1,no;u(j,j,1)=1d0;enddo
       endif
+      ! Stream the coefficient prefix before releasing the root gather.
+      ! A failed initialization leaves an incomplete diagnostic, not a restart.
+      open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
+      write(iu)int([16909060,2,no,size(full_coeff,1),lcfo_grid],int32),lcfo_h,full_coeff
+      close(iu)
+      deallocate(seed_position)
+    endif
+    deallocate(full_coeff)
+    call lcfo_initial_links(grid,position,length,lcfo_dv,lcfo_comm,raw,scratch_elements=link_scratch)
+    if(lcfo_rank==0)write(*,'(a,2i18)')'LCFO initial links root/scratch complex elements: ' , &
+      size(raw,kind=int64),link_scratch
+    if(lcfo_rank==0)then
       open(newunit=iu,file='lcfo_mlwf_links.bin',access='stream',form='unformatted',status='replace')
       write(iu)int([16909060,1,no],int32),b,weights,u,raw
       close(iu)
-      call gauge_minimize_gamma(u,raw,b,weights,hse_mlwf_maxiter,hse_mlwf_tolerance, &
+      call gauge_minimize_gamma_inplace(u,raw,b,weights,hse_mlwf_maxiter,hse_mlwf_tolerance, &
                           wf_spread,gradient,iterations,status)
       write(*,'(a,3i7,2es17.8)') 'LCFO MLWF initial iterations/status/seed/spread/gradient:', &
         iterations,status,seed_status,wf_spread,gradient
@@ -142,8 +151,8 @@ contains
     previous_wf=matmul(coeff,rotation);current_frame=previous_wf;frame_rotation=rotation
     transport_anchor=current_frame;frame_transported=.true.
     if(lcfo_rank==0)then
-      open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='replace')
-      write(iu)int([16909060,2,no,size(full_coeff,1),lcfo_grid],int32),lcfo_h,full_coeff,rotation,centers,norms
+      open(newunit=iu,file='lcfo_mlwf_initial.bin',access='stream',form='unformatted',status='old',position='append')
+      write(iu)rotation,centers,norms
       write(iu)int(merge(1,0,protected),int32),int([iterations,status],int32),wf_spread,gradient
       close(iu)
     endif

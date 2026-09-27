@@ -4,6 +4,7 @@ module hse_wannier_gauge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
+  public :: gauge_minimize_gamma_inplace
   public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
 contains
   subroutine gauge_seed(psi,position,k,u,status)
@@ -68,7 +69,6 @@ contains
   end subroutine
 
   subroutine gauge_functional(u,raw,neighbors,b,weights,spread,variable,gradient,status,phase_reference,phase_out)
-    implicit none
     complex(8),intent(in) :: u(:,:,:),raw(:,:,:,:)
     integer,intent(in) :: neighbors(:,:)
     real(8),intent(in) :: b(:,:),weights(:)
@@ -77,17 +77,36 @@ contains
     real(8),intent(out),optional :: phase_out(:,:,:)
     complex(8),intent(out) :: gradient(:,:,:)
     integer,intent(out) :: status
-    complex(8),allocatable :: m(:,:,:,:),back(:,:,:),q(:)
+    complex(8),allocatable :: m(:,:,:,:)
+    integer :: n,nk,nb,k,l
+    n=size(u,1);nk=size(u,3);nb=size(weights)
+    allocate(m(n,n,nb,nk))
+    do k=1,nk;do l=1,nb
+      m(:,:,l,k)=matmul(conjg(transpose(u(:,:,k))),matmul(raw(:,:,l,k),u(:,:,neighbors(l,k))))
+    enddo;enddo
+    call gauge_link_functional(m,neighbors,b,weights,spread,variable,gradient,status,phase_reference,phase_out)
+  end subroutine
+
+  subroutine gauge_link_functional(m,neighbors,b,weights,spread,variable,gradient,status,phase_reference,phase_out)
+    implicit none
+    complex(8),intent(in) :: m(:,:,:,:)
+    integer,intent(in) :: neighbors(:,:)
+    real(8),intent(in) :: b(:,:),weights(:)
+    real(8),intent(out) :: spread,variable
+    real(8),intent(in),optional :: phase_reference(:,:,:)
+    real(8),intent(out),optional :: phase_out(:,:,:)
+    complex(8),intent(out) :: gradient(:,:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: back(:,:,:),q(:)
     real(8),allocatable :: theta(:,:,:),center(:,:)
     real(8) :: residual,weight
     integer :: n,nk,nb,k,l,j,i,next
-    n=size(u,1);nk=size(u,3);nb=size(weights)
-    allocate(m(n,n,nb,nk),back(n,n,nk),q(n),theta(n,nb,nk),center(3,n))
+    n=size(m,1);nk=size(m,4);nb=size(weights)
+    allocate(back(n,n,nk),q(n),theta(n,nb,nk),center(3,n))
     center=0d0;back=0d0;spread=0d0;variable=0d0;gradient=0d0;status=1
     do k=1,nk
       do l=1,nb
         next=neighbors(l,k)
-        m(:,:,l,k)=matmul(conjg(transpose(u(:,:,k))),matmul(raw(:,:,l,k),u(:,:,next)))
         do i=1,n
           if(abs(m(i,i,l,k))<1d-12)return
           theta(i,l,k)=atan2(aimag(m(i,i,l,k)),real(m(i,i,l,k),8))
@@ -177,32 +196,72 @@ contains
     enddo
   end subroutine
   subroutine gauge_minimize_gamma(u,raw,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status)
-    ! At Gamma, the +/- link center residual cancels exactly. Minimizing MV
-    ! spread is simultaneous maximization of the squared link diagonals.
-    ! Each complex two-column SU(2) rotation maximizes n^T G n on |n|=1,
-    ! G_ab=sum_link weight*Re(conjg(v_a)*v_b), A=a0 I+v.sigma.
-    ! Unlike global steepest descent, distant centers do not limit every step.
     complex(8),intent(inout) :: u(:,:,:)
     complex(8),intent(in) :: raw(:,:,:,:)
     real(8),intent(in) :: b(:,:),weights(:),tolerance
     integer,intent(in) :: maxiter
     real(8),intent(out) :: spread,gradnorm
     integer,intent(out) :: iterations,status
-    complex(8),allocatable :: links(:,:,:),tmp(:),direction(:,:,:)
+    complex(8),allocatable :: links(:,:,:,:)
+    integer :: l,n
+    n=size(u,1);status=1;iterations=0;spread=huge(1d0);gradnorm=huge(1d0)
+    if(size(u,3)/=1.or.any(shape(raw)/=[n,n,6,1]).or.size(weights)/=6)return
+    allocate(links(n,n,6,1))
+    do l=1,6
+      links(:,:,l,1)=matmul(conjg(transpose(u(:,:,1))),matmul(raw(:,:,l,1),u(:,:,1)))
+    enddo
+    call gamma_sweeps(u,links,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status,raw)
+  end subroutine
+
+  subroutine gauge_minimize_gamma_inplace(u,links,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status)
+    ! Consumes input links; snapshots must be written before this call.
+    ! Jacobi rotations update this representation, so no second six-link copy
+    ! or reconstructed functional array is needed.
+    complex(8),intent(inout) :: u(:,:,:),links(:,:,:,:)
+    real(8),intent(in) :: b(:,:),weights(:),tolerance
+    integer,intent(in) :: maxiter
+    real(8),intent(out) :: spread,gradnorm
+    integer,intent(out) :: iterations,status
+    integer :: l,n
+    n=size(u,1);status=1;iterations=0;spread=huge(1d0);gradnorm=huge(1d0)
+    if(size(u,3)/=1.or.any(shape(links)/=[n,n,6,1]).or.size(weights)/=6)return
+    if(maxval(abs(b(:,1:3)+b(:,4:6)))>1d-12)return
+    if(maxval(abs(weights(1:3)-weights(4:6)))>1d-12)return
+    do l=1,6
+      links(:,:,l,1)=matmul(conjg(transpose(u(:,:,1))),matmul(links(:,:,l,1),u(:,:,1)))
+    enddo
+    call gamma_sweeps(u,links,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status)
+  end subroutine
+
+  subroutine gamma_sweeps(u,links,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status,raw)
+    ! At Gamma, the +/- link center residual cancels exactly. Minimizing MV
+    ! spread is simultaneous maximization of the squared link diagonals.
+    ! Each complex two-column SU(2) rotation maximizes n^T G n on |n|=1,
+    ! G_ab=sum_link weight*Re(conjg(v_a)*v_b), A=a0 I+v.sigma.
+    ! Unlike global steepest descent, distant centers do not limit every step.
+    complex(8),intent(inout) :: u(:,:,:)
+    complex(8),intent(inout) :: links(:,:,:,:)
+    complex(8),intent(in),optional :: raw(:,:,:,:)
+    real(8),intent(in) :: b(:,:),weights(:),tolerance
+    integer,intent(in) :: maxiter
+    real(8),intent(out) :: spread,gradnorm
+    integer,intent(out) :: iterations,status
+    complex(8),allocatable :: tmp(:),direction(:,:,:)
     complex(8) :: v(3),sine
     real(8) :: metric(3,3),original(3,3),eval(3),work(32),axis(3),cosine,variable,scale
     integer :: n,nb,l,i,j,a,c,istat,neighbors(size(weights),1)
     n=size(u,1);nb=size(weights);status=1;iterations=0
     spread=huge(1d0);gradnorm=huge(1d0)
-    if(size(u,3)/=1.or.size(raw,4)/=1.or.nb/=6)return
+    if(size(u,3)/=1.or.size(links,4)/=1.or.nb/=6)return
     if(maxval(abs(b(:,1:3)+b(:,4:6)))>1d-12)return
     if(maxval(abs(weights(1:3)-weights(4:6)))>1d-12)return
-    allocate(links(n,n,nb),tmp(n),direction(n,n,1));neighbors=1
-    do l=1,nb
-      links(:,:,l)=matmul(conjg(transpose(u(:,:,1))),matmul(raw(:,:,l,1),u(:,:,1)))
-    enddo
+    allocate(tmp(n),direction(n,n,1));neighbors=1
     do iterations=0,maxiter
-      call gauge_functional(u,raw,neighbors,b,weights,spread,variable,direction,istat)
+      if(present(raw))then
+        call gauge_functional(u,raw,neighbors,b,weights,spread,variable,direction,istat)
+      else
+        call gauge_link_functional(links,neighbors,b,weights,spread,variable,direction,istat)
+      endif
       if(istat/=0)return
       gradnorm=sqrt(sum(abs(direction)**2))
       if(gradnorm<tolerance.and.iterations>0)then
@@ -212,9 +271,9 @@ contains
       do j=2,n;do i=1,j-1
         metric=0d0
         do l=1,nb
-          v(1)=.5d0*(links(i,j,l)+links(j,i,l))
-          v(2)=cmplx(0d0,.5d0,8)*(links(i,j,l)-links(j,i,l))
-          v(3)=.5d0*(links(i,i,l)-links(j,j,l))
+          v(1)=.5d0*(links(i,j,l,1)+links(j,i,l,1))
+          v(2)=cmplx(0d0,.5d0,8)*(links(i,j,l,1)-links(j,i,l,1))
+          v(3)=.5d0*(links(i,i,l,1)-links(j,j,l,1))
           do c=1,3;do a=1,3
             metric(a,c)=metric(a,c)+weights(l)*real(conjg(v(a))*v(c),8)
           enddo;enddo
@@ -231,12 +290,12 @@ contains
         sine=cmplx(axis(1),axis(2),8)/(2*cosine)
         if(abs(sine)<1d-15)cycle
         do l=1,nb
-          tmp=links(:,i,l)
-          links(:,i,l)=cosine*tmp+sine*links(:,j,l)
-          links(:,j,l)=-conjg(sine)*tmp+cosine*links(:,j,l)
-          tmp=links(i,:,l)
-          links(i,:,l)=cosine*tmp+conjg(sine)*links(j,:,l)
-          links(j,:,l)=-sine*tmp+cosine*links(j,:,l)
+          tmp=links(:,i,l,1)
+          links(:,i,l,1)=cosine*tmp+sine*links(:,j,l,1)
+          links(:,j,l,1)=-conjg(sine)*tmp+cosine*links(:,j,l,1)
+          tmp=links(i,:,l,1)
+          links(i,:,l,1)=cosine*tmp+conjg(sine)*links(j,:,l,1)
+          links(j,:,l,1)=-sine*tmp+cosine*links(j,:,l,1)
         enddo
         tmp=u(:,i,1)
         u(:,i,1)=cosine*tmp+sine*u(:,j,1)

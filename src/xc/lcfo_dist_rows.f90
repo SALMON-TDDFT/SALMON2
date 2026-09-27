@@ -201,38 +201,46 @@ contains
   plan=empty
  end subroutine
 
- subroutine lcfo_gather_root(local,counts,comm,global)
-  ! One-time MLWF seeding/diagnostic output only. Non-root receives no global rows.
+ subroutine lcfo_gather_root(local,counts,comm,global,buffer_elements)
+  ! One-time seed/snapshot gather. Bound the receive buffer to 64 columns.
   complex(8),intent(in) :: local(:,:)
   integer,intent(in) :: counts(:),comm
   complex(8),allocatable,intent(out) :: global(:,:)
+  integer,optional,intent(out) :: buffer_elements
   complex(8),allocatable :: buffer(:)
   integer,allocatable :: disps(:)
-  integer :: rank,np,ierr,p,nc,lo
+  integer :: rank,np,ierr,p,nc,lo,first,width,tile
   rank=0;np=1
 #ifdef USE_MPI
   call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,np,ierr)
 #endif
   if(size(counts)/=np.or.size(local,1)/=counts(rank+1))error stop 'LCFO gather: incompatible rows'
-  nc=size(local,2);allocate(disps(np));disps(1)=0
-  do p=2,np;disps(p)=disps(p-1)+counts(p-1)*nc;enddo
+  nc=size(local,2);tile=min(64,max(1,nc));allocate(disps(np))
+  if(sum(counts)>huge(1)/tile)error stop 'LCFO gather: tile exceeds MPI count'
   if(rank==0)then
-   allocate(buffer(max(1,sum(counts)*nc)),global(sum(counts),nc))
+   allocate(buffer(max(1,sum(counts)*tile)),global(sum(counts),nc))
   else
    allocate(buffer(1),global(0,0))
   endif
+  if(present(buffer_elements))buffer_elements=size(buffer)
+  do first=1,nc,tile
+   width=min(tile,nc-first+1);disps(1)=0
+   do p=2,np;disps(p)=disps(p-1)+counts(p-1)*width;enddo
 #ifdef USE_MPI
-  call MPI_Gatherv(local,size(local),MPI_DOUBLE_COMPLEX,buffer,counts*nc,disps,MPI_DOUBLE_COMPLEX,0,comm,ierr)
-  if(ierr/=MPI_SUCCESS)error stop 'LCFO gather: initial gather failed'
+   call MPI_Gatherv(local(:,first:first+width-1),size(local,1)*width,MPI_DOUBLE_COMPLEX, &
+    buffer,counts*width,disps,MPI_DOUBLE_COMPLEX,0,comm,ierr)
+   if(ierr/=MPI_SUCCESS)error stop 'LCFO gather: initial gather failed'
 #else
-  buffer=reshape(local,[size(local)])
+   buffer(1:size(local,1)*width)=reshape(local(:,first:first+width-1),[size(local,1)*width])
 #endif
-  if(rank==0)then
-   lo=0
-   do p=1,np
-    global(lo+1:lo+counts(p),:)=reshape(buffer(disps(p)+1:disps(p)+counts(p)*nc),[counts(p),nc])
-    lo=lo+counts(p)
-   enddo
-  endif
+   if(rank==0)then
+    lo=0
+    do p=1,np
+     global(lo+1:lo+counts(p),first:first+width-1)= &
+      reshape(buffer(disps(p)+1:disps(p)+counts(p)*width),[counts(p),width])
+     lo=lo+counts(p)
+    enddo
+   endif
+  enddo
  end subroutine
 end module
