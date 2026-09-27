@@ -1,11 +1,12 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`88385397`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`8fa826da`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [現在の実装と制約](#implementation)
-- [最新：Diamond 32・64・128原子の弱スケーリング](#weak-scaling)
+- [最新：交換ソースの支持領域処理](#source-support)
+- [前回：Diamond 32・64・128原子の弱スケーリング](#weak-scaling)
 - [局所積分半径と精度](#radius)
 - [ACE・U輸送と高速化](#reuse)
 - [検証と残る課題](#remaining)
@@ -35,9 +36,25 @@
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="source-support"></a>
+
+## 最新：交換ソースの支持領域処理
+
+`8fa826da`では、厳密に非ゼロのソース格子点だけでペア密度の積と交換結果の加算を行います。広い支持領域は従来演算を維持。積の格子点数45.6%、加算34.6%減。FFT格子・実行ペア7424・R6・Taylor4は変更せず、新しい切断近似は加えていません。
+
+| 系 | 旧→新RT秒 | 旧/新比 | 旧→新弱効率 % |
+|---|---:|---:|---:|
+| C32/MPI4 | 21.388→20.506 | 1.043 | 100→100 |
+| C64/MPI8 | 40.171→32.216 | 1.247 | 53.2→63.7 |
+| C128/MPI16 | 52.892→52.032 | 1.017 | 40.4→39.4 |
+
+同一GS、直接係数Taylor4、R6、16steps、ACE1/U1、OMP1/BLAS1。各1回、各バージョンのC32時間で効率を規格化。背景負荷の変動があり速度比は参考値。**C64では改善した一方、C128の弱効率改善は確認できません。** 電流差最大4.36e-17 a.u.、密度差最大4.00e-15、出力エネルギー差0。全占有軌道の伝播・密なU・FFT本体の課題は残ります。
+
+[図](docs/reports/diamond64-mlwf-support/source-support-scaling.png) ／ [条件・測定データ](docs/reports/diamond64-mlwf-support/source-support-results.json) ／ [詳細記録](docs/reports/diamond64-mlwf-support/report.md)
+
 <a id="weak-scaling"></a>
 
-## 最新：Diamondの弱スケーリング
+## 前回：Diamondの弱スケーリング
 
 `88385397`、直接WF係数Taylor4。各ランク8原子、コア16³、バッファー8×0×0、R=6 bohr、dt=0.02 a.u.、16ステップ、ACE1/U1、OMP1/BLAS1、FFT batch1。4×1×1→8×1×1→16×1×1の**1次元拡張**です。MPI4→8→16、軌道MPI分割なし。C32は新規DC-HSE GS（1147反復、残差9.9556585e-8）、C64/C128は収束済みGSを再利用しました。
 
