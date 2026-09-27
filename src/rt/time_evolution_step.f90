@@ -83,14 +83,16 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   real(8) :: rNe  !, FionE(3,system%nion)
   real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)  !??curr_e_tmp(3,nspin) ?
   character(100) :: comment_line
-  logical :: rion_update,pbeh_mesh_md
+  logical :: rion_update,pbeh_mesh_md,pbeh_mesh_rt
   real(8) :: rion_endpoint(3,system%nion)
   integer :: ihpsieff
   call nvtxStartRange('time_evolution_step', __LINE__)
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
-  pbeh_mesh_md=yn_md=='y'.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n'
+  pbeh_mesh_rt=(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n' &
+    .and.yn_conventional_from_dcdft=='y'
+  pbeh_mesh_md=pbeh_mesh_rt.and.yn_md=='y'
 
   call timer_begin(LOG_CALC_VBOX)
   
@@ -283,6 +285,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 ! result
 
+  if(pbeh_mesh_rt)then
+    ! Propagation uses midpoint A, but energy/current/force describe t_{n+1}.
+    system%vec_Ac=rt%Ac_tot(:,itt)
+    call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+  endif
+
   call timer_begin(LOG_CALC_PROJECTION)
   if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
     call projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
@@ -363,6 +371,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   !(MD: part2)
   if(yn_md=='y') call time_evolution_step_md_part2(system,md)
+  if(pbeh_mesh_md)then
+    ! The earlier ionic current used the half-step velocity. Output the same
+    ! endpoint velocity as Tion and the trajectory for external-work accounting.
+    call calc_current_ion(lg,system,pp,curr_i_tmp)
+  endif
 
   call timer_begin(LOG_WRITE_RT_INFOS)
   ! Output 

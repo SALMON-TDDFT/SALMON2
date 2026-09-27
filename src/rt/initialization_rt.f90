@@ -105,7 +105,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
-  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
+  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3),prior_ac(3,0:0)
   integer :: itt
   logical :: rion_update,pbeh_mesh_md
 
@@ -201,6 +201,15 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   do itt = 0, nt
     rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
   end do
+  if((xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_conventional_from_dcdft=='y' &
+     .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2')then
+    ! Endpoint E for the imposed transverse pulse, including the initial force.
+    call calc_Ac_ext_t(-dt,0d0,0,0,prior_ac)
+    rt%E_ext(:,0)=-(rt%Ac_ext(:,1)-prior_ac(:,0))/(2d0*dt)
+    do itt=1,nt
+      rt%E_ext(:,itt)=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
+    enddo
+  endif
   rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
   
   rt%Ac_tot(1:3, 0:nt+1) = rt%Ac_ext(1:3, 0:nt+1)
@@ -525,6 +534,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
        call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
      endif
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
+     if(pbeh_mesh_md.and.ae_shape1=='Acos2')then
+       do jj=1,system%nion
+         system%Force(:,jj)=system%Force(:,jj)+pp%Zps(system%kion(jj))*rt%E_tot(:,0)
+       enddo
+     endif
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0

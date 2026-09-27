@@ -288,6 +288,18 @@ corrected for this route.
 
 Electron propagation uses midpoint nuclear pseudopotentials and evaluates
 forces/energy with endpoint pseudopotentials. Full EXX support, fixed integer
-occupations, impulse excitation and NVE are required. Native exchange still
+occupations and NVE are required; impulse and Acos2 excitation are supported. Native exchange still
 stores full grid/orbitals per k rank; real-space/orbital distributed exchange for
 giant systems is outstanding. Direct truncated-fragment MD remains disabled.
+
+
+## Finite Acos2 real-space Ehrenfest pulse
+
+The H4 fixture uses a 6.4 au pulse followed by a field-free tail through 9.6 au.
+At dt=.08,.04,.02 au, maximum differences between Eall+Tion change and integrated
+external work are 8.1164746e-6, 2.0374785e-6, 5.1014346e-7 Ha. Final electronic
+current differences have refinement ratio 4.0722. Independent checks compare
+endpoint E against sampled analytic A, ionic current against completed XYZ
+velocities, and zero-amplitude pulse against zero impulse. Invalid frequency,
+width and start are rejected. These are small-system numerical checks, not
+validation of giant-system scaling or liquid-water trajectories.

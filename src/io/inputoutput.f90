@@ -3246,11 +3246,20 @@ contains
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
-    pbeh_mesh_rt=(xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.theory=='tddft_response' &
+    pbeh_mesh_rt=(xc=='pbeh40'.or.xc=='pbeh40_rvv10') &
+      .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
       .and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n'
     if(pbeh_mesh_rt)then
-      if(ae_shape1/='impulse'.or.ae_shape2/='none') &
-        error stop 'PBEh40 mesh RT: only impulse excitation validated'
+      if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
+        error stop 'PBEh40 mesh RT: impulse or Acos2 without a second field required'
+      if(.not.ieee_is_finite(dt).or.dt<=0d0.or.nt<1) &
+        error stop 'PBEh40 mesh RT: positive finite dt and nt required'
+      if(ae_shape1=='Acos2')then
+        if(.not.all(ieee_is_finite([omega1,tw1,t1_start,E_amplitude1,I_wcm2_1,phi_CEP1]))) &
+          error stop 'PBEh40 mesh RT: finite pulse parameters required'
+        if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
+          error stop 'PBEh40 mesh RT: positive frequency/width and nonnegative pulse start required'
+      endif
       if(checkpoint_interval>0.or.time_shutdown>0d0.or.write_rt_wfn_k=='y') &
         error stop 'PBEh40 mesh RT: checkpoint output not supported'
       if(yn_md=='y')then

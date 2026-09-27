@@ -19,6 +19,19 @@ or basis propagation occurs. MLWF/ACE accelerates exchange only.
 
 This is a one-water, one-rank, 24³-grid smoke fixture: four 0.0005 fs steps after
 an electronic impulse with NVE ions. It does not validate liquid-water dynamics
-or a finite-duration laser. The current native exchange layout keeps the full
+with a finite-duration laser. The current native exchange layout keeps the full
 real-space grid and occupied orbitals on each k rank; spatial/orbital distributed
 exchange for giant systems remains a separate extension.
+
+
+For a finite pulse, use theory='tddft_pulse' and ae_shape1='Acos2', with positive
+omega1/tw1, nonnegative t1_start, and linear epdir_re1. Frequency, duration and
+amplitude follow the selected unit system. The executable H4 regression
+`testsuites/unit_pbeh_rvv10/test_ehrenfest.py` contains the validated pulse input
+and independent external-work integration; the water file above remains an
+impulse smoke test.
+
+The saved H4 inputs are `h4_ehrenfest_gs.inp` (two MPI ranks), followed by
+`h4_ehrenfest_pulse.inp` (one rank) in the same directory with H_rps.dat and
+`h4_ehrenfest_velocity.dat`. They reproduce the finest pulse test in atomic
+units: dt=.02, 480 steps, width6.4, omega1=1.9634954084936207 and amplitude.03.

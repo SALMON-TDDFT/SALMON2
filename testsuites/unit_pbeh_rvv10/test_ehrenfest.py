@@ -173,8 +173,77 @@ class RealspaceEhrenfest(unittest.TestCase):
         self.assertGreater(energy[-1,3],0.)
         print('water mesh final ionic kinetic energy eV:',energy[-1,3])
 
+    def pulse_input(self,dt=.08,nt=120,amplitude=.03,moving=True):
+        inp=self.rt_input(dt=dt,nt=nt,moving=moving)
+        inp=inp.replace("theory='tddft_response'","theory='tddft_pulse'")
+        inp=inp.replace("ae_shape1='impulse'",f"ae_shape1='Acos2'\n E_amplitude1={amplitude}\n omega1=1.9634954084936207\n tw1=6.4\n t1_start=0\n phi_CEP1=0")
+        return inp
+
+    def test_finite_pulse_work_balance(self):
+        errors=[];end_currents=[]
+        for dt,nt in ((.08,120),(.04,240),(.02,480)):
+            folder,run=self.execute('pulse_'+str(nt),self.pulse_input(dt,nt),rt=True)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            self.assertIn('end SALMON',run.stdout)
+            self.assertNotIn('Native LCFO RT active',run.stdout)
+            data=np.loadtxt(next(folder.glob('*_rt.data')))
+            energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
+            self.assertTrue(np.isfinite(data).all() and np.isfinite(energy).all())
+            # SALMON reports electron matter current: electric current has opposite sign.
+            power=16*8*8*np.sum((data[:,16:19]-data[:,13:16])*data[:,10:13],axis=1)
+            work=np.cumsum(.5*dt*(np.r_[0.,power[:-1]]+power))
+            total=energy[:,1]+energy[:,3]
+            error=np.max(abs(total[1:]-total[0]-work))
+            errors.append(float(error));end_currents.append(data[-1,13:16])
+            self.assertGreater(abs(work[-1]),1e-6,'finite field must transfer energy')
+            self.assertLess(np.max(abs(data[-10:,1:13])),1e-13,'field-free tail required')
+        ratio=np.linalg.norm(end_currents[0]-end_currents[1])/np.linalg.norm(end_currents[1]-end_currents[2])
+        print('pulse energy-work errors Ha:',errors,'current refinement ratio:',ratio)
+        self.assertGreater(errors[0]/errors[1],3.3)
+        self.assertGreater(errors[1]/errors[2],3.3)
+        self.assertLess(errors[-1],1e-5)
+        self.assertGreater(ratio,3.3)
+        self.assertLess(ratio,4.7)
+
+    def test_pulse_endpoint_observables(self):
+        dt=.08
+        folder,run=self.execute('pulse_endpoints',self.pulse_input(dt,80),rt=True)
+        self.assertEqual(run.returncode,0,run.stdout[-2000:]+run.stderr)
+        data=np.loadtxt(next(folder.glob('*_rt.data')))
+        # Independent A(t), sampled symmetrically around the reported endpoint.
+        def potential(t):
+            x=t-3.2
+            return np.where(abs(x)<3.2,-.03/1.9634954084936207*np.cos(np.pi*x/6.4)**2*np.sin(1.9634954084936207*x),0.)
+        expected=-(potential(data[:,0]+dt)-potential(data[:,0]-dt))/(2*dt)
+        np.testing.assert_allclose(data[:,10],expected,atol=2e-12,rtol=2e-10)
+        lines=next(folder.glob('*_trj.xyz')).read_text().splitlines()
+        velocities=[]
+        for i,line in enumerate(lines):
+            if line.strip()=='4':
+                velocities.append(np.array([[float(x) for x in row.split('#v=')[1].split('#f=')[0].split()] for row in lines[i+2:i+6]]))
+        expected_current=np.array([v.sum(axis=0)/1024 for v in velocities[1:]])
+        np.testing.assert_allclose(data[:,16:19],expected_current,atol=2e-13,rtol=2e-8)
+
+    def test_zero_pulse(self):
+        results=[]
+        for name,inp in [('zero_pulse',self.pulse_input(nt=4,amplitude=0.)),
+                         ('zero_impulse',self.rt_input(dt=.08,nt=4,impulse=0.))]:
+            folder,run=self.execute(name,inp,rt=True)
+            self.assertEqual(run.returncode,0,run.stdout[-2000:]+run.stderr)
+            results.append(np.loadtxt(next(folder.glob('*_rt_energy.data'))))
+        np.testing.assert_allclose(results[0],results[1],atol=1e-12,rtol=1e-10)
+
+    def test_invalid_pulse(self):
+        for name,old,new in [('frequency','omega1=1.9634954084936207','omega1=0'),
+                             ('width','tw1=6.4','tw1=-1'),
+                             ('start','t1_start=0','t1_start=-1')]:
+            with self.subTest(name=name):
+                _,run=self.execute('invalid_'+name,self.pulse_input().replace(old,new),rt=True)
+                self.assertNotEqual(run.returncode,0)
+                self.assertIn('positive frequency/width and nonnegative pulse start',run.stdout+run.stderr)
+
     def test_forbidden_modes(self):
-        cases=[('pulse',self.rt_input().replace("ae_shape1='impulse'","ae_shape1='Acos2'"),'only impulse'),
+        cases=[('pulse',self.rt_input().replace("ae_shape1='impulse'","ae_shape1='Ecos2'\n phi_CEP1=.25"),'impulse or Acos2'),
                ('skip_ps',self.rt_input().replace('step_update_ps=1','step_update_ps=2'),'every step'),
                ('finite_support',self.rt_input().replace('exx_mlwf_interval=5','exx_mlwf_radius=2'),'static DFT only'),
                ('thermal',self.rt_input().replace(' nstate=2',' nstate=2\n temperature_k=300'),'fixed occupations')]

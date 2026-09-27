@@ -1,0 +1,28 @@
+{
+  "dt_au": [
+    0.08,
+    0.04,
+    0.02
+  ],
+  "max_energy_minus_external_work_Ha": [
+    8.116474611711872e-06,
+    2.0374784985578145e-06,
+    5.101434612690215e-07
+  ],
+  "final_current_refinement_ratio": 4.072165601805866,
+  "verification": "10 of 11 Ehrenfest tests passed together; remaining forbidden-mode fixture corrected to valid Ecos2 CEP then passed targeted rerun. All 8 input tests passed. HSE ON/OFF builds passed. Independent read-only review had no blocking findings; requested endpoint and zero-amplitude checks added and passed.",
+  "logs_sha256": {
+    "ehrenfest-pulse-final.log": "37a06879df9d1269df2f80bfae17c22f2a2476158f1661479faed32602432794",
+    "ehrenfest-pulse-guard.log": "becf9d66048b68cc2660f18ebe1e03fb9e8000cb0464fb06f4cf82b9c6c75f71",
+    "ehrenfest-pulse-inputs.log": "47515ac8aeb2263543b12b25284a189fd892f78cd9ed72a2c82ce167f629c852",
+    "ehrenfest-pulse-build.log": "b0163858760bbf8222e7f7ffb62bed4ad2fdb39268d0b5430f510635b7fc387d",
+    "ehrenfest-pulse-off-build.log": "ac2d42a6c3b226cc5a17b4511c2df8d77dc6c5a86c6931816eb4036bebb14dc9"
+  },
+  "limitations": [
+    "small H4 pulse",
+    "water impulse smoke only",
+    "full EXX support",
+    "k-only native EXX layout",
+    "no checkpoint continuation"
+  ]
+}

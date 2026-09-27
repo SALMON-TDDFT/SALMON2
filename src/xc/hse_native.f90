@@ -220,8 +220,8 @@ contains
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
-      if((xc/='pbeh40'.and.xc/='pbeh40_rvv10').or.theory/='tddft_response'.or. &
-         yn_conventional_from_dcdft/='y'.or.lcfo_rt_active) &
+      if((xc/='pbeh40'.and.xc/='pbeh40_rvv10').or. &
+         (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y'.or.lcfo_rt_active) &
         error stop 'Hybrid: unsupported real-time ionic extension'
     endif
     if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_symmetrized_stencil=='y') &

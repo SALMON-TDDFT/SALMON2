@@ -237,9 +237,10 @@ occupations stay fixed; no electronic-temperature fitting or SCF occurs in RT.
 
 Use `ensemble='NVE'`, `step_update_ps=1`, `out_rt_energy_step=1`, full EXX support,
 occupied-only states, the default hybrid Taylor4 predictor/corrector, and
-`ae_shape1='impulse'` without a second field. Supply initial velocities normally.
-Finite-duration pulses and checkpoint continuation/output remain rejected in
-this route. Initial force uses the post-impulse nonlocal phases. The initial
+`ae_shape1='impulse'` or `ae_shape1='Acos2'` without a second field. For Acos2,
+use `theory='tddft_pulse'`, positive `omega1` and `tw1`, nonnegative `t1_start`,
+and linear transverse polarization. Supply initial velocities normally.
+Checkpoint continuation/output remain rejected in this route. Initial force uses the post-impulse nonlocal phases. The initial
 energy output retains SALMON's pre-impulse electronic reference; evaluate
 post-excitation conservation using Eall+Tion after the kick. E_work in the RT
 file is ionic mechanical work, not laser work.
@@ -255,3 +256,12 @@ k-only parallel with complete grid/orbitals per rank; giant-system spatial/
 orbital distribution, finite EXX support and long trajectories are not certified.
 This is DC preparation followed by total-grid Ehrenfest, not propagation of
 independent truncated-fragment forces. The old direct DC-BOMD guard remains.
+
+For Acos2, propagation uses midpoint A and nuclear positions; energy, current
+and forces use endpoint A. The ionic electric field is the centered difference
+`E(t)=-(A(t+dt)-A(t-dt))/(2*dt)`, including initialization. Ionic current uses
+completed Verlet velocities. Independently integrate
+`volume*(Jion-Jmatter) dot E` to compare external work against Eall+Tion.
+No electronic temperature is assigned during excitation. The H4 pulse fixture
+shows second-order energy/work and final-current convergence; this does not
+establish long-time or liquid-water accuracy.

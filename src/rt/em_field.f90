@@ -25,7 +25,8 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   use structures, only : s_rt
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
-  use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em
+  use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em,xc, &
+    yn_conventional_from_dcdft,yn_hse_lcfo_rt,ae_shape1
   use nvtx_wrapper
   implicit none
   integer   ,intent(in)    :: itt,nspin
@@ -41,6 +42,15 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   rt%E_ext(:,itt) = -( rt%Ac_ext(:,itt) - rt%Ac_ext(:,itt-1) )/dt
   rt%E_ind(:,itt) = -( rt%Ac_ind(:,itt) - rt%Ac_ind(:,itt-1) )/dt
   rt%E_tot(:,itt) = -( rt%Ac_tot(:,itt) - rt%Ac_tot(:,itt-1) )/dt
+
+  if((xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.yn_conventional_from_dcdft=='y' &
+     .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2'.and.trans_longi=='tr')then
+    ! The imposed A is known at all times. Center E at the same endpoint as
+    ! force and current; keep the inherited convention on all other routes.
+    rt%E_ext(:,itt)=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
+    rt%E_ind(:,itt)=0d0
+    rt%E_tot(:,itt)=rt%E_ext(:,itt)
+  endif
 
 ! current density
   if(nspin==1) then
