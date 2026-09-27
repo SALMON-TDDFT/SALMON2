@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 
+# Use extraction time so changed dependency archives trigger rebuilds.
+# Guard the policy to retain support for CMake 3.14 through 3.23.
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 if ("${CMAKE_CURRENT_SOURCE_DIR}" MATCHES "${CMAKE_CURRENT_BINARY_DIR}")
   message(FATAL_ERROR
   [[in-source build does not support

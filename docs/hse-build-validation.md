@@ -47,3 +47,9 @@ Executed locally on Apple Silicon / GNU Fortran15, not on Fugaku:
 The canonical `platforms/fugaku.cmake` is selected before `project()` on a Linux host with both Fujitsu MPI cross compiler wrappers available and no compiler/toolchain overrides. Legacy `fujitsu-a64fx-ea.cmake` remains an alias. Both default to vendor ScaLAPACK with MPI, with explicit OFF options respected. Target dependency configuration is compile/link only. Fujitsu compilation and vendor-library linkage still require testing on Fugaku; no remote test was executed in this session.
 
 The official `configure.py --arch=fujitsu-a64fx-ea --enable-scalapack --prefix=...` entry point was additionally checked using a recording CMake stub. The resulting CMake arguments, Release setting, install prefix, and short architecture-name resolution were verified. This checks wrapper compatibility only, not a Fujitsu compile.
+
+## Dependency extraction warning — 2026-09-27
+
+A user configure log reached `Configuring done` / `Generating done` with the Fujitsu MPI/ScaLAPACK flags, but CMake 3.24+ emitted CMP0135 warnings for the Libxc and FFTW fallback projects. This is a configuration warning, not evidence of a failed or completed compilation. The top-level project now selects CMP0135 NEW when that policy exists, using extraction-time timestamps for correct dependency rebuilds while retaining the CMake 3.14 minimum. See [CMake policy documentation](https://cmake.org/cmake/help/latest/policy/CMP0135.html).
+
+`testsuites/unit_cmake/test_extract_timestamp.py` reproduced the warning as an error before the change. After the change it configures with `-Werror=dev`, extracts/builds an offline local archive and verifies that its old archived timestamp is not retained (CMake 3.24+). The platform-selection tests also pass. CMake 3.14–3.23 are guarded in source but were not executed locally.
