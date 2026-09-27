@@ -1,11 +1,12 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
-更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`8fa826da`。
+更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新の数値測定に使用した実装：`9508f8e9`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
 
 - [現在の実装と制約](#implementation)
-- [最新：交換ソースの支持領域処理](#source-support)
+- [最新：Gram検査の演算・通信削減](#packed-gram)
+- [交換ソースの支持領域処理](#source-support)
 - [前回：Diamond 32・64・128原子の弱スケーリング](#weak-scaling)
 - [局所積分半径と精度](#radius)
 - [ACE・U輸送と高速化](#reuse)
@@ -36,9 +37,19 @@
 
 実装詳細：[LCFO RT開発仕様](docs/inputs/lcfo-rt-development.md)、[HSE入力](docs/inputs/hse.md)、[ビルド](docs/hse-build.md)。
 
+<a id="packed-gram"></a>
+
+## 最新：Gram検査の演算・通信削減
+
+`9508f8e9`では、直接WFの直交性検査をHermitian上三角に限定。C128で通信要素65536→32896、単独検査1.792→0.936 ms（約1.9倍）。検査頻度・閾値は同じで新しい近似はない。漸近次数と作業メモリ全体はほぼ変わらない。
+
+同じGS・R6・ACE1/U1・16steps・MPI16のRT比較は47.113→50.944秒（各1回）、電流差最大6.60e-18 a.u.、密度差5.00e-15、出力エネルギー差0。**全体の高速化は未確認。** Gram削減は17検査で約0.015秒の規模で、背景負荷も変動した。主要な弱スケーリング課題は全占有列の伝播・U輸送・交換FFTに残る。
+
+[詳細記録](docs/reports/diamond64-mlwf-support/report.md) ／ [単独検査・C128比較データ](docs/reports/diamond64-mlwf-support/packed-gram-results.json)
+
 <a id="source-support"></a>
 
-## 最新：交換ソースの支持領域処理
+## 交換ソースの支持領域処理
 
 `8fa826da`では、厳密に非ゼロのソース格子点だけでペア密度の積と交換結果の加算を行います。広い支持領域は従来演算を維持。積の格子点数45.6%、加算34.6%減。FFT格子・実行ペア7424・R6・Taylor4は変更せず、新しい切断近似は加えていません。
 
