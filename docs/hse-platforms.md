@@ -10,7 +10,29 @@ not replace tests with Fujitsu, Intel or a Linux GNU toolchain.
 
 ## Fugaku
 
-On a Fugaku login host with `mpifrtpx` and `mpifccpx` on PATH and no explicit
+The recommended entry point follows the [official SALMON build instructions](https://salmon-tddft.jp/webmanual/current/html/install_and_run.html#build-and-install):
+
+```sh
+mkdir build
+cd build
+python3 ../configure.py --arch=fujitsu-a64fx-ea --enable-scalapack
+make -j 8
+```
+
+The executable is `build/salmon`. To install it elsewhere, add
+`--prefix=/absolute/path/to/install` to configure.py, then run `make install`;
+the executable is installed under that prefix's `bin/`. Use CMake 3.14 or later
+and a fresh build directory. The existing architecture name resolves through
+the compatibility alias to the updated Fugaku toolchain. MPI and HSE are enabled;
+`--enable-scalapack` states the distributed-linear-algebra requirement explicitly.
+No HSE-specific library flags or separate dependency builds are required when
+compatible libraries or source downloads are available. `--enable-libxc` is not
+required for native HSE: its C-library dependency is handled automatically.
+
+The configure.py command construction and short architecture-name resolution
+are tested locally; this does not execute the Fujitsu compiler.
+
+Direct CMake is also supported. On a Fugaku login host with `mpifrtpx` and `mpifccpx` on PATH and no explicit
 compiler/toolchain override, ordinary CMake selects the target toolchain:
 
 ```sh

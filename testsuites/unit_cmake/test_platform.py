@@ -53,4 +53,21 @@ with tempfile.TemporaryDirectory() as td:
  toolchain=str(repo/'platforms/fugaku.cmake')
  script.write_text('cmake_minimum_required(VERSION 3.14)\nset(CMAKE_TOOLCHAIN_FILE "'+toolchain+'")\ninclude("'+toolchain+'")\ninclude("'+str(repo/'cmakefiles/Builder/hse_external_options.cmake')+'")\nlist(FIND SALMON_EXTERNAL_CMAKE_ARGS "-DCMAKE_TOOLCHAIN_FILE:STRING='+toolchain+'" found)\nif(found LESS 0)\nmessage(FATAL_ERROR "lost target toolchain")\nendif()\n')
  subprocess.run(['cmake','-P',str(script)],env=env,check=True)
+ # Official configure.py entry point: capture its CMake invocation without
+ # invoking unavailable Fujitsu compilers, then resolve the short toolchain name.
+ capture=root/'configure-args.txt'
+ fake=binpath/'cmake'
+ fake.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "'+str(capture)+'"\n')
+ fake.chmod(0o755)
+ import sys
+ subprocess.run([sys.executable,str(repo/'configure.py'),'--arch=fujitsu-a64fx-ea',
+                 '--enable-scalapack','--prefix='+str(root/'install')],cwd=root,env=env,check=True)
+ args=capture.read_text().splitlines()
+ assert 'CMAKE_TOOLCHAIN_FILE=fujitsu-a64fx-ea' in args,args
+ assert 'USE_SCALAPACK=on' in args and 'CMAKE_BUILD_TYPE=Release' in args,args
+ assert 'CMAKE_INSTALL_PREFIX='+str(root/'install') in args,args
+ fake.unlink()
+ script=root/'official-toolchain.cmake'
+ script.write_text('cmake_minimum_required(VERSION 3.14)\nlist(APPEND CMAKE_MODULE_PATH "'+str(repo/'platforms')+'")\ninclude(fujitsu-a64fx-ea RESULT_VARIABLE resolved)\nif(NOT resolved MATCHES "fujitsu-a64fx-ea.cmake$")\nmessage(FATAL_ERROR "official arch not resolved")\nendif()\nif(NOT USE_MPI_DEFAULT OR NOT USE_SCALAPACK_DEFAULT)\nmessage(FATAL_ERROR "official arch defaults lost")\nendif()\n')
+ subprocess.run(['cmake','-P',str(script)],env=env,check=True)
 print('Platform selection and toolchain default tests passed')

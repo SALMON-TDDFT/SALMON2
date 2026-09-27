@@ -1,5 +1,17 @@
 # Building HSE
 
+For Fugaku, use the standard SALMON entry point from a fresh build directory:
+
+```sh
+mkdir build
+cd build
+python3 ../configure.py --arch=fujitsu-a64fx-ea --enable-scalapack
+make -j 8
+```
+
+This includes native HSE/MLWF/ACE in the same executable. See the
+[platform instructions](hse-platforms.md#fugaku) for installation and validation scope.
+
 A C/Fortran compiler and CMake are required. For a normal CPU build:
 
 ```sh

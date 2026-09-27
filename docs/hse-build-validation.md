@@ -45,3 +45,5 @@ Executed locally on Apple Silicon / GNU Fortran15, not on Fugaku:
 - The newly built MPI/HSE executable passed `hse_lapack_eigenvectors` and `test_direct_wf.py` (MPI2/4, density/current/energy, finite support, ACE/U reuse, half dt, measured FFT and flag rejection).
 
 The canonical `platforms/fugaku.cmake` is selected before `project()` on a Linux host with both Fujitsu MPI cross compiler wrappers available and no compiler/toolchain overrides. Legacy `fujitsu-a64fx-ea.cmake` remains an alias. Both default to vendor ScaLAPACK with MPI, with explicit OFF options respected. Target dependency configuration is compile/link only. Fujitsu compilation and vendor-library linkage still require testing on Fugaku; no remote test was executed in this session.
+
+The official `configure.py --arch=fujitsu-a64fx-ea --enable-scalapack --prefix=...` entry point was additionally checked using a recording CMake stub. The resulting CMake arguments, Release setting, install prefix, and short architecture-name resolution were verified. This checks wrapper compatibility only, not a Fujitsu compile.

@@ -19,14 +19,16 @@
 
 ## 富岳：通常のCMakeビルド
 
-富岳ログイン環境で `mpifrtpx` / `mpifccpx` がPATH上にあり、他のコンパイラ・toolchain指定がなければ、次だけで富岳設定を自動選択します。
+[公式マニュアル](https://salmon-tddft.jp/webmanual/current/html/install_and_run.html#build-and-install)と同じ入口を使えます。ソース直下から：
 
 ```sh
-cmake -S . -B build
-cmake --build build -j 8
+mkdir build
+cd build
+python3 ../configure.py --arch=fujitsu-a64fx-ea --enable-scalapack
+make -j 8
 ```
 
-Release・MPI・ScaLAPACK・HSEが既定で有効。FFTW/Libxcは利用可能なものをリンク検査し、なければ対象コンパイラで自動ビルドします（初回ダウンロードにはネットワークが必要）。CC/FCを設定した環境では明示toolchainを使ってください。`SALMON_PLATFORM=generic`で自動選択を無効にできます。
+実行ファイルは `build/salmon`。インストール先を指定する場合はconfigure.pyに `--prefix=/absolute/path/to/install` を追加し、続けて `make install`。今回追加したHSE・MLWF・ACEも同じ手順で組み込まれます。FFTW/Libxcは利用可能なものをリンク検査し、なければ対象コンパイラで自動ビルドします（初回ダウンロードにはネットワークが必要）。直接CMakeを呼ぶ場合の富岳自動選択も残しています。
 
 ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳実機のコンパイル・リンク・3次元計算は未検証**です。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
 
