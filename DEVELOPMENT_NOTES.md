@@ -35,7 +35,7 @@ make -j 8
 
 実行ファイルは `build/salmon`。インストール先を指定する場合はconfigure.pyに `--prefix=/absolute/path/to/install` を追加し、続けて `make install`。今回追加したHSE・MLWF・ACEも同じ手順で組み込まれます。FFTW/Libxcは利用可能なものをリンク検査し、なければ対象コンパイラで自動ビルドします（初回ダウンロードにはネットワークが必要）。直接CMakeを呼ぶ場合の富岳自動選択も残しています。
 
-ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳では占有数検査とPOSIXヘッダの修正後、ビルド完了を利用者ログで確認。今回追加したseed削減版の富岳ビルドと、GS/RT・3次元計算は未検証**です。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
+ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳では累積seedメモリ削減版までコンパイル・リンク完了を利用者ログで確認。GS/RT・3次元の数値実行は未確認**です。ログでallocatable代入の自動確保が無効と判明したため、実行前に[Fortran設定の追加パッチ](tools/patches/fugaku-alloc-assign.patch)を適用し再ビルドします。この追加設定の実機確認はまだです。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
 
 <a id="implementation"></a>
 

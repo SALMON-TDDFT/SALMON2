@@ -8,7 +8,8 @@ set(Fortran_PP_FLAGS            "-Cpp")
 set(CMAKE_Fortran_COMPILER      "mpifrtpx")
 set(CMAKE_C_COMPILER            "mpifccpx")
 
-set(General_Fortran_FLAGS       "-Kocl -Nlst=t -Koptmsg=2 -Ncheck_std=03s")
+# HSE caches use allocation/reallocation on intrinsic assignment.
+set(General_Fortran_FLAGS       "-Kocl -Nlst=t -Koptmsg=2 -Ncheck_std=03s -Nalloc_assign")
 set(General_C_FLAGS             "-Kocl -Nlst=t -Koptmsg=2 -Xg -std=gnu99")
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g ${General_Fortran_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g ${General_C_FLAGS}")

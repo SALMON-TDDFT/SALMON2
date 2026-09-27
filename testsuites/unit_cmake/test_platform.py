@@ -70,4 +70,14 @@ with tempfile.TemporaryDirectory() as td:
  script=root/'official-toolchain.cmake'
  script.write_text('cmake_minimum_required(VERSION 3.14)\nlist(APPEND CMAKE_MODULE_PATH "'+str(repo/'platforms')+'")\ninclude(fujitsu-a64fx-ea RESULT_VARIABLE resolved)\nif(NOT resolved MATCHES "fujitsu-a64fx-ea.cmake$")\nmessage(FATAL_ERROR "official arch not resolved")\nendif()\nif(NOT USE_MPI_DEFAULT OR NOT USE_SCALAPACK_DEFAULT)\nmessage(FATAL_ERROR "official arch defaults lost")\nendif()\n')
  subprocess.run(['cmake','-P',str(script)],env=env,check=True)
+ # HSE cache assignments require Fortran allocatable assignment semantics.
+ for filename in ('fugaku.cmake','fujitsu-a64fx-ea.cmake'):
+  script=root/'alloc-assign.cmake'
+  script.write_text('cmake_minimum_required(VERSION 3.14)\ninclude("'+str(repo/'platforms'/filename)+'")\n'+
+   'foreach(mode DEBUG RELEASE)\n'+
+   'if(NOT CMAKE_Fortran_FLAGS_${mode} MATCHES "(^| )-Nalloc_assign( |$)")\n'+
+   'message(FATAL_ERROR "Missing allocatable assignment semantics")\nendif()\n'+
+   'if(CMAKE_C_FLAGS_${mode} MATCHES "-Nalloc_assign")\n'+
+   'message(FATAL_ERROR "Fortran flag leaked to C")\nendif()\nendforeach()\n')
+  subprocess.run(['cmake','-P',str(script)],env=env,check=True)
 print('Platform selection and toolchain default tests passed')

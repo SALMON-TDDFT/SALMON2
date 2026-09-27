@@ -799,3 +799,21 @@ cmake --build build -j 8
 ```
 
 先に案内した3枚やpre-rootパッチは、この版には適用しない。
+
+### 富岳の累積メモリ版：リンク成功とallocatable代入設定（2026-09-27）
+
+利用者のログで`Linking Fortran executable ../salmon`と`[100%] Built target salmon`
+を確認。ハッシュ照合済み累積メモリ版は富岳でコンパイル・リンク成功。
+数値実行はまだ確認していない。
+
+同ログの`jwd2754i-i`は`-Nalloc_assign`なしではallocatable代入の自動確保が
+有効でないとの通知。`hse_native.f90`の`cached_source=local`などには
+事前allocateがなく、自動確保に依存する。単なる最適化通知として無視せず、
+`platforms/fugaku.cmake`のFortran共通設定に`-Nalloc_assign`を追加した。
+Release/Debugと公式aliasの両方を設定テストし、Cフラグには混入しないことを確認。
+フラグ欠落でテストが失敗し、追加後に成功することを確認した。
+
+[適用用パッチ](../../../tools/patches/fugaku-alloc-assign.patch)をソース直下で
+dry-run後に適用し、CMake再設定・再ビルドする。既存数値バイナリのリンク成功と、
+この追加設定の富岳実機ビルド・実行確認は区別する。パッチは既存toolchainへ
+fuzz=0で適用して変更後ファイルと一致することを検証済み。
