@@ -63,12 +63,70 @@ def variants(source):
     return [("all_stubs", retain(set()))] + [("only_" + name, retain({name})) for name in spans]
 
 
+def refresh_blocks(source):
+    """Split this known procedure into balanced top-level executable units.
+
+    This is not a general Fortran parser. Reject unmatched constructs rather
+    than emitting a misleading probe. Continued statements stay together.
+    """
+    lines = source.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines) if line.startswith("  subroutine refresh_master("))
+    begin = next(i for i in range(start, len(lines)) if lines[i].strip() == "started=wall_seconds()")
+    end = next(i for i in range(begin, len(lines)) if lines[i].strip() == "end subroutine")
+    groups, unit, logical, depth = [], [], "", 0
+    for line in lines[begin:end]:
+        unit.append(line)
+        code = line.strip()
+        if not code or code.startswith("!"):
+            continue
+        logical += " " + code.lstrip("&").rstrip("&").strip()
+        if code.endswith("&"):
+            continue
+        statement = logical.strip().lower()
+        logical = ""
+        if statement in ("endif", "enddo"):
+            depth -= 1
+        elif re.match(r"if\s*\(.*\)\s*then$", statement) or re.match(r"do\s+\w+\s*=", statement):
+            depth += 1
+        if depth < 0:
+            raise ValueError("Unbalanced refresh_master block")
+        if depth == 0:
+            groups.append("".join(unit))
+            unit = []
+    if depth or logical:
+        raise ValueError("Unbalanced/continued refresh_master block")
+    if unit:
+        groups[-1] += "".join(unit)
+    return "".join(lines[:begin]), groups, "".join(lines[end:])
+
+
+def reduce_indices(items, crashes):
+    """Delta-debug balanced units; predicate must distinguish crashes from errors."""
+    current, divisions = list(items), 2
+    while len(current) >= 2:
+        width = (len(current) + divisions - 1) // divisions
+        reduced = False
+        for first in range(0, len(current), width):
+            candidate = current[:first] + current[first + width:]
+            if crashes(candidate):
+                current = candidate
+                divisions = max(2, divisions - 1)
+                reduced = True
+                break
+        if not reduced:
+            if divisions >= len(current):
+                break
+            divisions = min(len(current), divisions * 2)
+    return current
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument("--compiler", default="mpifrtpx")
     parser.add_argument("--gnu-check", action="store_true", help="Local probe syntax check with matching GNU build modules")
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--reduce-refresh", action="store_true", help="Automatically isolate crashing refresh_master statement blocks")
     args = parser.parse_args()
     build = args.build.resolve()
     repo = Path(__file__).resolve().parents[1]
@@ -96,7 +154,7 @@ def main():
     print(results["version"], flush=True)
     cases = [("full_O0", text, False), ("full_O0_no_openmp", text, True)]
     cases += [(label, body, False) for label, body in probes]
-    for label, body, no_openmp in cases:
+    def compile_case(label, body, no_openmp=False):
         folder = output / label
         folder.mkdir()
         # Each probe has its own module copies: no diagnostic .mod can replace
@@ -131,6 +189,49 @@ def main():
         print("{}: status={}".format(label, status), flush=True)
         if status != 0:
             print("\n".join((folder / "compile.log").read_text(errors="replace").splitlines()[-8:]), flush=True)
+        log_text = (folder / "compile.log").read_text(errors="replace")
+        return status, "SIGSEGV" in log_text and status != 0
+
+    if args.reduce_refresh:
+        isolated = dict(probes)["only_refresh_master"]
+        prefix, blocks, suffix = refresh_blocks(isolated)
+        def make_source(indices):
+            return prefix + "".join(blocks[i] for i in indices) + suffix
+        full_status, full_crash = compile_case("refresh_full", isolated)
+        empty_status, empty_crash = compile_case("refresh_empty", make_source([]))
+        if args.gnu_check:
+            for i in range(len(blocks)):
+                compile_case("block_{:03d}".format(i), make_source([i]))
+        elif not full_crash or empty_status != 0:
+            print("Cannot reduce: full case must SIGSEGV and empty case must compile.", flush=True)
+        else:
+            cache = {}
+            def crashes(indices):
+                key = tuple(indices)
+                if key not in cache:
+                    if len(cache) >= 80:
+                        raise RuntimeError("80-probe limit reached; inspect saved logs")
+                    label = "reduce_{:03d}".format(len(cache))
+                    status, crash = compile_case(label, make_source(indices))
+                    cache[key] = crash
+                return cache[key]
+            remaining = reduce_indices(range(len(blocks)), crashes)
+            final_source = make_source(remaining)
+            # Recheck the result in a fresh folder to detect unstable reproduction.
+            final_status, final_crash = compile_case("reduced_confirm", final_source)
+            if not final_crash:
+                raise RuntimeError("Reduced crash did not reproduce; inspect logs")
+            (output / "reduced.f90").write_text(final_source)
+            results["retained_blocks"] = remaining
+            (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n")
+            print("BEGIN RETAINED EXECUTABLE BLOCKS (declarations/imports unchanged)", flush=True)
+            for i in remaining:
+                print(blocks[i], flush=True)
+            print("END RETAINED EXECUTABLE BLOCKS", flush=True)
+            print("Reduced reproducer: " + str(output / "reduced.f90"), flush=True)
+    else:
+        for label, body, no_openmp in cases:
+            compile_case(label, body, no_openmp)
     print("Compile-only diagnostics complete; no production objects changed.", flush=True)
     print("Please return the above statuses and compiler version; full logs: " + str(output), flush=True)
     if args.gnu_check and any(case["status"] != 0 for case in results["cases"]):

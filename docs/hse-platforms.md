@@ -173,3 +173,18 @@ module宣言/import処理も候補に残るため、単一の原因を断定し�
 
 ローカルGNU Fortran 15で13ケースすべての構文・コンパイルを確認した。
 富士通コンパイラでの診断結果・回避策は未確認。診断用stubは実行してはならない。
+
+追加の富岳実測：Compiler 4.12.2 tcsds-1.2.43では、O0・OpenMP指定なしでもSIGSEGV。
+全stubおよび`refresh_master`以外の9手続き単独はstatus=0、`refresh_master`単独のみ
+status=11となった。宣言/importだけでは再現せず、この手続きの実行文を含めると再現する。
+次の診断で、SIGSEGVを維持する文ブロックの組合せを自動的に縮小できる：
+
+```sh
+python3 tools/diagnose_frtpx_lcfo.py --build build --compiler mpifrtpx --reduce-refresh
+```
+
+IF/DOと継続行を保った単位で削除し、普通のコンパイルエラーやtimeoutをSIGSEGVと
+混同しない。最後の再現を再確認し、残った文を画面表示して`reduced.f90`を保存する。
+宣言は保持するため、完全な最小再現コードとは限らない。最大80候補、各120秒で打ち切る。
+GNUで全40ブロック単独・元手続き・空手続きの42コンパイルと縮小アルゴリズムを確認した。
+この段階でも本体の数値処理・コンパイル設定は変更していない。
