@@ -110,3 +110,5 @@ MLWFの制御名は `exx_mlwf_interval`、`exx_mlwf_maxiter`、
 `1c4e6795`（複素LCFOのScaLAPACK全体対角化）。
 
 ローカルの合成系での時間・RSS測定は [分散性能の測定ノート](hybrid-distribution-measurements-ja.md) にまとめました。
+
+周期H₂超格子の通常PBEh(40) SCFについて、[弱・強スケーリングの実測](h2-pbeh-scaling-ja.md) も追加しました。
