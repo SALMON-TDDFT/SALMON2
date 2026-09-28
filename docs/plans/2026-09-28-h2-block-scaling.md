@@ -20,3 +20,6 @@ Weak arrays: 1x1x1, 2x1x1, 4x1x1, 8x1x1, 16x1x1, 2x2x1, 4x4x1, 2x2x2; one rank p
 - Fixed R remains static-only; RT comparison uses automatic .999 support as approved.
 
 - Pilot ruling: gauss10 initialization failed the actual core-weighted state-capacity check before SCF in the buffered two-fragment cell. Gaussian centers concentrate in part of the periodic fragment; use random initial orbitals with broadly uniform core weights for all GS seeds. Preserve the failed pilot in work/h2-block-pilot. No occupation guard or solver code is relaxed.
+
+- Initial 32-H2 adaptive RT failed to obtain a converged gauge at tolerance 1e-7, including a diagnostic rerun with maxiter=1000. A controlled rerun at the existing default tolerance 1e-6 and maxiter=1000 completed. Ruling: use 5/1000/1e-6 for every final RT case/mode; retain failed 1e-7 experiment separately, reuse only input/hash-identical GS preparations. No solver convergence guard is bypassed.
+- Independent script review: fixed resume validation to include launcher, MPI version, pseudopotential and thread settings; current comparisons use columns 14–16 only.

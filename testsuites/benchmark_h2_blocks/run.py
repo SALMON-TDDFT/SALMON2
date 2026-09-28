@@ -32,7 +32,7 @@ def gs_input(shape):
     return s
 
 def rt_block(shape,ranks,fraction):
-    s=rt_input(geometry(shape),ranks)
+    s=rt_input(geometry(shape),ranks).replace('exx_mlwf_tolerance=1d-7','exx_mlwf_tolerance=1d-6').replace('exx_mlwf_maxiter=100','exx_mlwf_maxiter=1000')
     s=s.replace('num_fragment=1,1,1','num_fragment='+','.join(map(str,shape)))
     s=s.replace('num_rgrid_buffer=0,0,0','num_rgrid_buffer='+','.join('8' if n>1 else '0' for n in shape))
     s=s.replace(f'nstate_frag={8*math.prod(shape)}',f'nstate_frag={fragment_states(shape)}')
@@ -43,7 +43,7 @@ def main():
     p.add_argument('--binary',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
     p.add_argument('--mpiexec',default='/opt/homebrew/bin/mpiexec --bind-to none')
-    p.add_argument('--resume',action='store_true');p.add_argument('--generate-only',action='store_true')
+    p.add_argument('--seed-source',type=Path);p.add_argument('--resume',action='store_true');p.add_argument('--generate-only',action='store_true')
     a=p.parse_args();a.binary=a.binary.resolve();a.output=a.output.resolve()
     if a.repeat<1:p.error('repeat must be positive')
     shapes=SHAPES[:2] if a.pilot else SHAPES
@@ -75,7 +75,7 @@ def main():
           pseudo_sha256=digest(ROOT/'testsuites/pseudo/H_rps.dat'),repeats=a.repeat,cases=cases,
           conditions=dict(core_bohr=[16]*3,spacing_bohr=.5,H2_per_core=8,buffer_split_bohr=4,coulomb_radius_bohr=4,functional='pbeh40',
             gs_temperature_k=300,dc_mlwf=False,pre_scf_threshold=1e-4,gs_threshold=1e-10,dt=.02,steps=16,impulse=1e-4,fractions=[1.,.999],
-            mlwf_interval=5,mlwf_maxiter=100,mlwf_tolerance=1e-7,threads={k:env[k] for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS')}),
+            mlwf_interval=5,mlwf_maxiter=1000,mlwf_tolerance=1e-6,threads={k:env[k] for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS')}),
           preparations=[],runs=[])
     def save():
         tmp=result_file.with_suffix('.tmp');tmp.write_text(json.dumps(data,indent=2)+'\n');tmp.replace(result_file)
@@ -95,6 +95,18 @@ def main():
     def verify(prep):
         for f,h in prep['payload_sha256'].items():
             if digest(a.output/prep['folder']/f)!=h:raise RuntimeError('seed changed')
+    if a.seed_source and not data['preparations']:
+        origin=a.seed_source.resolve();old=json.loads((origin/'results.json').read_text())
+        if old['binary_sha256']!=binary_hash or old['pseudo_sha256']!=data['pseudo_sha256']:raise RuntimeError('imported GS configuration mismatch')
+        for prep in old['preparations']:
+            if prep['shape'] not in [list(s) for s in shapes]:continue
+            folder=origin/prep['folder']
+            if (folder/'inputfile').read_text()!=gs_input(prep['shape']):raise RuntimeError('imported GS input mismatch')
+            for name,sha in prep['payload_sha256'].items():
+                if digest(folder/name)!=sha:raise RuntimeError('imported GS hash mismatch')
+            (a.output/prep['folder']).symlink_to(folder,target_is_directory=True)
+            data['preparations'].append(prep)
+        data['imported_seed_source']=str(origin);data['imported_seed_results_sha256']=digest(origin/'results.json')
     save()
     for shape in shapes:
         tag='x'.join(map(str,shape));name='gs-'+tag;ranks=math.prod(shape)

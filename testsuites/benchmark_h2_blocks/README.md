@@ -12,7 +12,7 @@ comparison, not claimed physically converged.
 ScaLAPACK LCFO output is reconstructed onto the real-space mesh. RT propagates
 the occupied states, with no assigned electronic temperature and no retained
 LCFO basis. Compare full support (fraction=1) and automatic .999 support on
-the same seeds: impulse 1e-4, dt=.02, 16 steps, fixed ions, MLWF 5/100/1e-7.
+the same seeds: impulse 1e-4, dt=.02, 16 steps, fixed ions, MLWF 5/1000/1e-6.
 Positive fixed R is currently static-only and is not used here.
 
 ```sh
