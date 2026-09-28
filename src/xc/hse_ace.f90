@@ -4,7 +4,7 @@ module hse_ace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average
+  public :: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average,hse_ace_clear,hse_ace_ready
   ! Spatial peers must share orbital/k dimensions, dv and collective call order.
   ! The callback sums a small matrix in place; grid rows are never gathered.
   abstract interface
@@ -16,8 +16,26 @@ module hse_ace
   type hse_ace_state
     complex(c_double_complex),allocatable :: factors(:,:,:)
     real(c_double) :: dv=0d0,condition=0d0
+    ! Exact-nonzero unwhitened W and (-U^H W dv)^-1, native Gamma only.
+    logical :: packed=.false.
+    integer :: grid_rows=0
+    integer,allocatable :: offset(:),row(:)
+    complex(c_double_complex),allocatable :: values(:),inverse(:,:)
   end type
 contains
+  subroutine hse_ace_clear(ace)
+    type(hse_ace_state),intent(inout) :: ace
+    type(hse_ace_state) :: empty
+    ace=empty
+  end subroutine
+
+  logical function hse_ace_ready(ace)
+    type(hse_ace_state),intent(in) :: ace
+    hse_ace_ready=allocated(ace%factors)
+    if(ace%packed)hse_ace_ready=allocated(ace%values).and.allocated(ace%inverse).and. &
+      allocated(ace%offset).and.allocated(ace%row)
+  end function
+
   subroutine hse_ace_average(left,right,average,ierr)
     type(hse_ace_state),intent(in) :: left,right
     type(hse_ace_state),intent(out) :: average
@@ -50,7 +68,7 @@ contains
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     external :: zgemm,zheev
     ierr=1
-    if(allocated(ace%factors))deallocate(ace%factors)
+    call hse_ace_clear(ace)
     check=0d0
     if(any(shape(u)/=shape(w)).or.dv<=0.or..not.ieee_is_finite(dv))check=1d0
     if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))check=1d0

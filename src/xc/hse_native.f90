@@ -168,8 +168,8 @@ contains
       taylor_midpoint=.true.
     case(2)
       taylor_active=.false.;taylor_midpoint=.false.
-      if(allocated(initial_ace%factors))deallocate(initial_ace%factors)
-      if(allocated(midpoint_ace%factors))deallocate(midpoint_ace%factors)
+      call hse_ace_clear(initial_ace)
+      call hse_ace_clear(midpoint_ace)
       if(allocated(initial_source))deallocate(initial_source)
       if(allocated(midpoint_source))deallocate(midpoint_source)
     case default
@@ -438,7 +438,7 @@ contains
       call lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
       return
     endif
-    if(.not.allocated(ace%factors))error stop 'HSE06: occupied exchange source is not initialized'
+    if(.not.hse_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
     if(allocated(target_work))then
@@ -484,7 +484,7 @@ contains
   contains
     subroutine apply_endpoint(state)
       type(hse_ace_state),intent(in) :: state
-      if(info%isize_o>1)then
+      if(info%isize_o>1.or.state%packed)then
         call orbital_ace_apply(state,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
       else if(info%isize_r>1)then
         call hse_ace_apply(state,target_work,action_work,ierr,sum_spatial)
@@ -629,6 +629,9 @@ contains
     if(exx_ace_support=='source')then
       if(.not.adaptive_active)error stop 'Source-support ACE requires active MLWF support'
       call build_source_support_ace(support_accepted)
+      ! Fixed-ion source ACE never uses the full-action DC route. Its next
+      ! refresh regenerates source from the mesh; only transport previous persists.
+      if(support_accepted)deallocate(spatial%source)
       if(info%id_ro==0)write(*,'(a,l1,a)')'EXX_SUPPORT_ACE accepted: ',support_accepted, &
         ' (failure falls back to occupied-vector ACE)'
     endif
@@ -703,18 +706,10 @@ contains
         spatial%pair_products,spatial%screen_skipped,spatial%pair_catalog_entries,spatial%pair_product_points
       ! The ACE metric is -S^H K_S S. S need not be orthonormal; the existing
       ! Hermitian/positive metric checks and conditioning threshold still apply.
-      if(info%isize_o>1)then
-        call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status)
-      else
-        call hse_ace_build(ace,training,w,system%hvol,status,sum_spatial)
-      endif
+      call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true.)
       call comm_summation(status,adaptive_bad,info%icomm_ro)
       if(adaptive_bad/=0)return
-      if(info%isize_o>1)then
-        call orbital_ace_apply(ace,local,w,info%icomm_r,info%icomm_o,status)
-      else
-        call hse_ace_apply(ace,local,w,status,sum_spatial)
-      endif
+      call orbital_ace_apply(ace,local,w,info%icomm_r,info%icomm_o,status)
       if(status/=0)error stop 'Source-support ACE: occupied mesh action failed'
       accepted=.true.
     end subroutine

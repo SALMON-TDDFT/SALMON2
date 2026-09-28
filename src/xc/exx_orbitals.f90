@@ -2,7 +2,7 @@
 ! Only band matrices are replicated; mesh arrays contain local orbital columns.
 module exx_orbitals
   use communication, only: comm_get_groupinfo,comm_get_max,comm_summation,comm_bcast
-  use hse_ace, only: hse_ace_state
+  use hse_ace, only: hse_ace_state,hse_ace_clear
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -142,19 +142,23 @@ contains
     status=0
   end subroutine
 
-  subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status)
+  subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed)
     type(hse_ace_state),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:,:),w(:,:,:)
     real(8),intent(in) :: dv
     integer,intent(in) :: comm_r,comm_o
     integer,intent(out) :: status
+    logical,intent(in),optional :: packed
+    logical :: store_packed
     integer,allocatable :: counts(:)
     complex(8),allocatable :: metric(:,:),work(:)
     real(8),allocatable :: e(:),rwork(:)
     integer :: first,n,j,bad,nonzero
     real(8) :: scale
     status=1;bad=0
-    if(allocated(ace%factors))deallocate(ace%factors)
+    call hse_ace_clear(ace)
+    store_packed=.false.
+    if(present(packed))store_packed=packed
     if(any(shape(u)/=shape(w)).or.size(u,3)/=1.or.dv<=0d0.or..not.ieee_is_finite(dv))bad=1
     if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))bad=1
     if(.not.all(ieee_is_finite(real(w))).or..not.all(ieee_is_finite(aimag(w))))bad=1
@@ -169,7 +173,13 @@ contains
     call orbital_check(nonzero,comm_r,comm_o)
     ace%dv=dv;ace%condition=0d0
     if(nonzero==0)then
-      allocate(ace%factors(size(u,1),size(u,2),1));ace%factors=0d0;status=0;return
+      if(store_packed)then
+        allocate(ace%inverse(n,n));ace%inverse=0d0
+        call pack_action()
+      else
+        allocate(ace%factors(size(u,1),size(u,2),1));ace%factors=0d0
+      endif
+      status=0;return
     endif
     call orbital_overlap(u(:,:,1),w(:,:,1),-dv,comm_r,comm_o,counts,first,metric)
     if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))bad=1
@@ -189,9 +199,28 @@ contains
     do j=1,n
       metric(:,j)=metric(:,j)/sqrt(e(j))
     enddo
-    allocate(ace%factors(size(u,1),size(u,2),1))
-    call orbital_rotate(w(:,:,1),metric,comm_o,counts,first,ace%factors(:,:,1))
+    if(store_packed)then
+      ace%inverse=matmul(metric,conjg(transpose(metric)))
+      call pack_action()
+    else
+      allocate(ace%factors(size(u,1),size(u,2),1))
+      call orbital_rotate(w(:,:,1),metric,comm_o,counts,first,ace%factors(:,:,1))
+    endif
     status=0
+  contains
+    subroutine pack_action()
+      integer :: column,g,k
+      allocate(ace%offset(size(w,2)+1),ace%row(count(w/=(0d0,0d0))),ace%values(count(w/=(0d0,0d0))))
+      k=1
+      do column=1,size(w,2)
+        ace%offset(column)=k
+        do g=1,size(w,1)
+          if(w(g,column,1)==(0d0,0d0))cycle
+          ace%row(k)=g;ace%values(k)=w(g,column,1);k=k+1
+        enddo
+      enddo
+      ace%offset(size(w,2)+1)=k;ace%grid_rows=size(w,1);ace%packed=.true.
+    end subroutine
   end subroutine
 
   subroutine orbital_ace_apply(ace,target,action,comm_r,comm_o,status)
@@ -202,8 +231,17 @@ contains
     integer,intent(out) :: status
     integer,allocatable :: counts(:),target_counts(:)
     complex(8),allocatable :: column(:),overlap(:),total(:)
-    integer :: first,rank,np,owner,i,j,bad
+    integer :: first,rank,np,owner,i,j,bad,packed_mode
     status=1;action=0d0;bad=0
+    packed_mode=merge(1,0,ace%packed)
+    call comm_get_max(packed_mode,comm_r);call comm_get_max(packed_mode,comm_o)
+    if((packed_mode==1).neqv.ace%packed)bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    if(ace%packed)then
+      call packed_ace_apply(ace,target,action,comm_r,comm_o,status)
+      return
+    endif
     if(.not.allocated(ace%factors))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
@@ -228,6 +266,68 @@ contains
         do j=1,size(target,2)
           action(:,j,1)=action(:,j,1)-column*total(j)
         enddo
+      enddo
+    enddo
+    status=0
+  end subroutine
+  subroutine packed_ace_apply(ace,target,action,comm_r,comm_o,status)
+    type(hse_ace_state),intent(in) :: ace
+    complex(8),intent(in) :: target(:,:,:)
+    complex(8),intent(out) :: action(:,:,:)
+    integer,intent(in) :: comm_r,comm_o
+    integer,intent(out) :: status
+    integer,allocatable :: counts(:),target_counts(:)
+    complex(8),allocatable :: column(:),partial_action(:),total_action(:),overlap(:),overlap_o(:),overlap_r(:),coeff(:)
+    integer :: bad,ng,n,first,target_first,rank,np,owner,i,j,k,start,finish
+    status=1;action=0d0;bad=0;ng=size(target,1)
+    if(.not.allocated(ace%offset).or..not.allocated(ace%row).or. &
+       .not.allocated(ace%values).or..not.allocated(ace%inverse))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    if(ng/=ace%grid_rows.or.size(target,3)/=1.or.any(shape(target)/=shape(action)))bad=1
+    if(ace%dv<=0d0.or..not.ieee_is_finite(ace%dv))bad=1
+    if(size(ace%offset)<1.or.size(ace%row)/=size(ace%values))bad=1
+    if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
+    if(.not.all(ieee_is_finite(real(ace%values))).or..not.all(ieee_is_finite(aimag(ace%values))))bad=1
+    if(.not.all(ieee_is_finite(real(ace%inverse))).or..not.all(ieee_is_finite(aimag(ace%inverse))))bad=1
+    if(any(ace%row<1).or.any(ace%row>ng))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    if(ace%offset(1)/=1.or.ace%offset(size(ace%offset))/=size(ace%values)+1)bad=1
+    if(any(ace%offset(2:)<ace%offset(:size(ace%offset)-1)))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    call orbital_layout(size(ace%offset)-1,comm_r,comm_o,counts,first,bad)
+    if(bad/=0)return
+    n=sum(counts)
+    if(n<1.or.any(shape(ace%inverse)/=[n,n]))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    call orbital_layout(size(target,2),comm_r,comm_o,target_counts,target_first,bad)
+    if(bad/=0)return
+    call comm_get_groupinfo(comm_o,rank,np)
+    allocate(column(ng),partial_action(ng),total_action(ng),overlap(n),overlap_o(n),overlap_r(n),coeff(n))
+    ! Stream each target; only a column and band vectors are communicated.
+    do owner=0,np-1
+      do i=1,target_counts(owner)
+        if(rank==owner)column=target(:,i,1)
+        call comm_bcast(column,comm_o,owner)
+        overlap=0d0
+        do j=1,size(ace%offset)-1
+          start=ace%offset(j);finish=ace%offset(j+1)-1
+          overlap(first+j-1)=sum(conjg(ace%values(start:finish))*column(ace%row(start:finish)))*ace%dv
+        enddo
+        call comm_summation(overlap,overlap_o,n,comm_o)
+        call comm_summation(overlap_o,overlap_r,n,comm_r)
+        coeff=matmul(ace%inverse,overlap_r)
+        partial_action=0d0
+        do j=1,size(ace%offset)-1
+          do k=ace%offset(j),ace%offset(j+1)-1
+            partial_action(ace%row(k))=partial_action(ace%row(k))-ace%values(k)*coeff(first+j-1)
+          enddo
+        enddo
+        call comm_summation(partial_action,total_action,ng,comm_o)
+        if(rank==owner)action(:,i,1)=total_action
       enddo
     enddo
     status=0

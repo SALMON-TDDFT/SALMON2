@@ -208,7 +208,7 @@ program exchange_driver
     if(rank==0)print *, 'PASS pair screening orbital/empty layouts ',np,orb_size,omega
   end block
   block
-    complex(8),allocatable :: support(:,:,:),exact(:,:,:),pruned(:,:,:),interpolated(:,:,:)
+    complex(8),allocatable :: support(:,:,:),exact(:,:,:),pruned(:,:,:),interpolated(:,:,:),packed_action(:,:,:)
     integer :: count_o
     count_o=last_o-first_o+1
     allocate(support(product(m),count_o,1),exact(product(m),count_o,1), &
@@ -235,6 +235,26 @@ program exchange_driver
     if(status/=0)error stop 'independent nonorthogonal ACE build'
     call orbital_ace_apply(distributed_ace,support,interpolated,comm_r,comm_o,status)
     if(status/=0.or.any(abs(interpolated-exact)>1d-11))error stop 'independent nonorthogonal interpolation'
+    call orbital_ace_apply(distributed_ace,trial(:,first_t:last_t,:),ace_result,comm_r,comm_o,status)
+    if(status/=0)error stop 'dense arbitrary reference'
+    call orbital_ace_build(distributed_ace,support,exact,dv,comm_r,comm_o,status,packed=.true.)
+    if(status/=0.or..not.distributed_ace%packed)error stop 'packed nonorthogonal build'
+    if(allocated(distributed_ace%factors))error stop 'packed ACE expanded dense factors'
+    if(size(distributed_ace%values)/=count(exact/=(0d0,0d0)))error stop 'packed ACE exact support count'
+    allocate(packed_action(product(m),last_t-first_t+1,1))
+    call orbital_ace_apply(distributed_ace,trial(:,first_t:last_t,:),packed_action,comm_r,comm_o,status)
+    if(status/=0.or.any(abs(packed_action-ace_result)>1d-10))error stop 'packed arbitrary action mismatch'
+    call orbital_ace_apply(distributed_ace,support,interpolated,comm_r,comm_o,status)
+    if(status/=0.or.any(abs(interpolated-exact)>1d-11))error stop 'packed interpolation'
+    pruned=0d0
+    call orbital_ace_build(distributed_ace,support,pruned,dv,comm_r,comm_o,status,packed=.true.)
+    if(status/=0.or.size(distributed_ace%values)/=0)error stop 'packed zero build'
+    call orbital_ace_apply(distributed_ace,support,interpolated,comm_r,comm_o,status)
+    if(status/=0.or.any(interpolated/=(0d0,0d0)))error stop 'packed zero action'
+    call orbital_ace_build(distributed_ace,pruned,exact,dv,comm_r,comm_o,status,packed=.true.)
+    if(status==0)error stop 'packed inadmissible metric accepted'
+    call orbital_ace_apply(distributed_ace,support,interpolated,comm_r,comm_o,status)
+    if(status==0)error stop 'failed packed build retained old action'
     if(rank==0)print *, 'PASS nonorthogonal source ACE ',np,orb_size,omega
   end block
   call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=-.1d0)
