@@ -24,6 +24,7 @@ module fftw_pencils
   end type
   type(pencil_cache),save :: cache(max_batch)
   integer,save,public :: fftw_pencil_plans_created=0
+  integer(int64),save,public :: fftw_pencil_transposes=0
   real(8),save,public :: fftw_pencil_seconds(4)=0d0 ! setup, FFT, MPI, packing/copies
   public :: pencil_transform,pencil_clear
 contains
@@ -131,6 +132,7 @@ contains
     integer :: i,q,block
     real(8) :: start
     block=p%nt/p%steps(step)%peers;start=stamp()
+    fftw_pencil_transposes=fftw_pencil_transposes+1_int64
     do q=1,p%batch;do i=1,p%nt
       p%send(p%steps(step)%pack(i)+(q-1)*block)=p%work(i+(q-1)*p%nt)
     enddo;enddo

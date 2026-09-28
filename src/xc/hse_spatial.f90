@@ -113,7 +113,7 @@ contains
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
-    complex(8),allocatable :: density(:,:),spectrum(:,:),potential(:,:)
+    complex(8),allocatable :: density(:,:),spectrum(:,:)
     real(8),allocatable :: multiplier(:)
     real(8) :: radius,pi,q(3),q2,screening
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad
@@ -139,8 +139,10 @@ contains
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     allocate(multiplier(ng));pi=acos(-1d0);g=0
-    ! X-pencil spectral output has the same local ordering as real-space input.
-    do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1
+    ! Keep the forward FFT in Z pencils: local storage order is (z,x,y).
+    m=[n(1)/dims(1),n(2)/dims(2),n(3)]
+    lo=[coords(1)*m(1),coords(2)*m(2),0]
+    do y=0,m(2)-1;do x=0,m(1)-1;do z=0,m(3)-1
       g=g+1;p=[x,y,z]+lo
       where(p>=(n+1)/2)p=p-n
       q=2*pi*p/(n*h);q2=sum(q*q)
@@ -156,23 +158,23 @@ contains
         multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
       endif
     enddo;enddo;enddo
-    allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)),potential(ng,min(4,nt)))
+    allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
     do i=1,size(op%source,2)
       do first=1,nt,4
         nb=min(4,nt-first+1)
         do j=1,nb
           density(:,j)=conjg(op%source(:,i))*target(:,first+j-1,1)
         enddo
-        call pencil_transform(n,dims,coords,comm,density(:,:nb),spectrum(:,:nb),-1,status)
+        call pencil_transform(n,dims,coords,comm,density(:,:nb),spectrum(:,:nb),-1,status,spectral_z=.true.)
         if(status/=0)return
         do j=1,nb
           spectrum(:,j)=spectrum(:,j)*multiplier
         enddo
         ! Inverse pencil_transform already includes 1/product(n).
-        call pencil_transform(n,dims,coords,comm,spectrum(:,:nb),potential(:,:nb),1,status)
+        call pencil_transform(n,dims,coords,comm,spectrum(:,:nb),density(:,:nb),1,status,spectral_z=.true.)
         if(status/=0)return
         do j=1,nb
-          action(:,first+j-1,1)=action(:,first+j-1,1)-op%source(:,i)*potential(:,j)
+          action(:,first+j-1,1)=action(:,first+j-1,1)-op%source(:,i)*density(:,j)
         enddo
       enddo
     enddo

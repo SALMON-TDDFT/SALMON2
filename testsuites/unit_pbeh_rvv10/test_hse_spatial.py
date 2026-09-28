@@ -113,6 +113,10 @@ class HSESpatial(unittest.TestCase):
             self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
             self.assertIn('end SALMON',run.stdout)
             if per_fragment>1:self.assertIn('EXX_SPATIAL',run.stdout)
+            workspaces=re.findall(r'DC_LCFO_HPSI local/global grid points:\s*(\d+)\s+(\d+)',run.stdout)
+            self.assertTrue(workspaces)
+            for local,global_points in workspaces:
+                self.assertEqual(int(local)*per_fragment,int(global_points))
             scf=re.findall(r'DC #SCF.*Total Energy =\s*(\S+)\s+diff =\s*(\S+)',run.stdout)
             self.assertTrue(scf)
             self.assertLess(float(scf[-1][1]),1e-10)
@@ -123,6 +127,9 @@ class HSESpatial(unittest.TestCase):
             results.append((energy,exchange))
             self.assertLess(abs(energy-results[0][0]),2e-6)
             self.assertLess(abs(exchange-results[0][1]),1e-7)
+            lcfo_eigen=np.loadtxt(next((folder/'data_dcdft/total').glob('*_eigen.data')))[:,3]
+            if per_fragment==1:reference_eigen=lcfo_eigen
+            self.assertLess(np.max(abs(lcfo_eigen-reference_eigen)),1e-7)
             occupations=np.loadtxt(next((folder/'data_dcdft/fragments/000001').glob('*_eigen.data')),skiprows=4)[:,2]
             self.assertTrue(np.any((occupations>1e-5)&(occupations<1.99)))
             if per_fragment==1:first_energy=float(scf[0][0])

@@ -265,3 +265,27 @@ converge within 500 iterations, even on the legacy route; it is not certified
 by these results. No speedup or general high-temperature convergence is claimed.
 Legacy multi-k, finite-radius and projected implementations remain until their
 spatial replacements are validated. HSE MD forces remain a separate task.
+
+## Distribution of FFT and DC-LCFO projection work
+
+Spatial exchange now keeps the forward FFT in Z pencils and applies the
+reciprocal kernel there. The inverse returns directly to X pencils. Each
+forward/inverse pair uses four pencil transposes instead of eight, and the
+pair-density buffer is reused for the inverse result. This removes one local
+complex FFT batch buffer without changing exchange normalization.
+
+Complex DC-LCFO Hamiltonian projection no longer replicates two full-fragment
+H-times-basis buffers on every rank. A single local-grid buffer replaces them;
+each rank integrates its owned orbital columns and intersecting grid rows.
+Only the small projected matrices are summed within the fragment. The
+`DC_LCFO_HPSI local/global grid points` diagnostic exposes this layout.
+For a fragment with N grid points, m states and s spins, these particular
+buffers change from `32*N*m*s` bytes per rank to `16*Nlocal*m*s` bytes.
+For the H4 test (N=1024, m=6, s=1), four spatial ranks reduce this workspace
+from 192 KiB to 24 KiB per rank. This is not a claim about total process memory.
+
+Remaining replication includes the core basis, received halo basis, dense
+LCFO diagonalization matrices, and all orbital columns in the spatial
+MLWF/ACE representation. Halo data is still exchanged by fragment
+representatives and broadcast within each fragment. Further orbital and
+matrix distribution is needed for those parts; no fixed memory cap is imposed.

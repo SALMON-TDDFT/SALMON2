@@ -1,5 +1,7 @@
 program exchange_driver
   use mpi
+  use iso_fortran_env, only: int64
+  use fftw_pencils, only: fftw_pencil_transposes
   use hse_spatial
   use hse_wannier
   use hse_wannier_gauge, only: gauge_transport
@@ -10,6 +12,7 @@ program exchange_driver
   complex(8),allocatable :: local(:,:,:),trial(:,:,:),action(:,:,:),previous_saved(:,:,:)
   type(spatial_exx_state) :: spatial,full_spatial
   type(s_hse_wannier) :: serial
+  integer(int64) :: before_transposes
   integer :: np,rank,err,status,dims(2),coords(2),comm(2),m(3),lo(3),g,l,x,y,z,j,k,stage
   real(8) :: error,global_error,dv,bad_dv,minimum,omega,occupation(no,1)
   character(32) :: argument
@@ -75,7 +78,9 @@ program exchange_driver
       if(abs(spatial%min_singular-1d0)>1d-10)error stop 'transport overlap mismatch'
       if(maxval(abs(spatial%previous-previous_saved))>1d-10)error stop 'transport gauge mismatch'
     endif
+    before_transposes=fftw_pencil_transposes
     call spatial_exx_apply(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,2.5d0,trial,action,status,omega=omega)
+    if(fftw_pencil_transposes-before_transposes/=4*no*((nt+3)/4))error stop 'redundant FFT transpose'
     if(status/=0)error stop 'spatial action'
     error=0d0;l=0
     do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1

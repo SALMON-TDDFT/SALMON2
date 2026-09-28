@@ -599,7 +599,7 @@ contains
     integer, allocatable :: req_send(:),req_recv(:)
     real(8), allocatable :: esp_tot(:,:,:)
     complex(8), allocatable :: f_basis(:,:,:,:,:),work_basis(:,:,:,:,:)
-    complex(8), allocatable :: hf(:,:,:,:,:),work_hf(:,:,:,:,:)
+    complex(8), allocatable :: hf(:,:,:,:,:)
     complex(8), allocatable :: mat_h_local(:,:,:)
     complex(8), allocatable :: hsend(:,:),hmat(:,:),vmat(:,:)
     complex(8), allocatable :: coef_frag(:,:,:)
@@ -667,27 +667,18 @@ contains
         end do
       end if
 
-      allocate(hf(lg%num(1),lg%num(2),lg%num(3),nspin,m))
-      allocate(work_hf(lg%num(1),lg%num(2),lg%num(3),nspin,m))
+      ! Retain H times basis only on this rank's real-space grid.
+      allocate(hf(mg%num(1),mg%num(2),mg%num(3),nspin,m))
       call hpsi(sttpsi,shpsi,info,mg,v_local,system,stencil,srg,ppg)
-      work_hf = (0d0,0d0)
+      hf = (0d0,0d0)
       if (owns_ik) then
-        do io=info%io_s,info%io_e
-          if (io <= m) then
-            do ispin=1,nspin
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              work_hf(ix,iy,iz,ispin,io) = shpsi%zwf(ix,iy,iz,ispin,io,ik,1)
-            end do
-            end do
-            end do
-            end do
-          end if
+        do io=info%io_s,min(info%io_e,m)
+          hf(:,:,:,:,io)=shpsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
+                                  mg%is(3):mg%ie(3),1:nspin,io,ik,1)
         end do
       end if
-      call comm_summation(work_hf,hf,size(hf),info%icomm_rko)
-      deallocate(work_hf)
+      if(dc%id_frag==0.and.ik==1)write(*,'(a,2i18)') &
+        'DC_LCFO_HPSI local/global grid points: ',product(mg%num),product(lg%num)
 
       allocate(mat_h_local(m,m,nspin))
       call assemble_halo_hamiltonian(ik,f_basis,hf,mat_h_local,n_halo,halo,nactive, &
@@ -995,7 +986,7 @@ contains
     end subroutine collect_basis_dimensions
 
     subroutine assemble_halo_hamiltonian(ik0,basis,hf0,diag_h,nh,halos,nact,rs,rr)
-      use communication, only: comm_irecv,comm_isend,comm_wait_all
+      use communication, only: comm_irecv,comm_isend,comm_wait_all,comm_bcast,comm_summation
       implicit none
       integer, intent(in) :: ik0,nh
       complex(8), intent(in) :: basis(:,:,:,:,:),hf0(:,:,:,:,:)
@@ -1003,20 +994,29 @@ contains
       type(s_lcfo_complex_halo), intent(inout) :: halos(:)
       integer, intent(out) :: nact
       integer, allocatable, intent(out) :: rs(:),rr(:)
-      integer :: h,ia,ib,ic,isp0,io0,jo0,jj0,k0,tag_send,tag_recv
-      integer :: l(3),d(3),nreq
+      integer :: h,ia,ib,ic,isp0,io0,jo0,tag_send,tag_recv
+      integer :: l(3),d(3),nreq,lo(3),hi(3),ix0,iy0,iz0
+      complex(8) :: local_h(m,m,nspin)
 
-      diag_h = (0d0,0d0)
-      if (dc%id_frag == 0) then
+      local_h = (0d0,0d0)
+      if (owns_ik) then
+        hi=min(mg%ie,dc%nxyz_domain)
         do isp0=1,nspin
+        do jo0=max(1,info%io_s),min(info%io_e,n_basis(dc%i_frag,isp0,ik0))
         do io0=1,n_basis(dc%i_frag,isp0,ik0)
-        do jo0=1,n_basis(dc%i_frag,isp0,ik0)
-          diag_h(io0,jo0,isp0) = hvol*sum(conjg(basis(:,:,:,isp0,io0))* &
-               hf0(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3),isp0,jo0))
+          do ic=mg%is(3),hi(3)
+          do ib=mg%is(2),hi(2)
+          do ia=mg%is(1),hi(1)
+            local_h(io0,jo0,isp0)=local_h(io0,jo0,isp0)+hvol*conjg(basis(ia,ib,ic,isp0,io0))* &
+              hf0(ia-mg%is(1)+1,ib-mg%is(2)+1,ic-mg%is(3)+1,isp0,jo0)
+          end do
+          end do
+          end do
         end do
         end do
         end do
       end if
+      call comm_summation(local_h,diag_h,size(diag_h),info%icomm_rko)
 
       nact = 0
       do h=1,nh
@@ -1048,32 +1048,38 @@ contains
           call comm_wait_all(rr(1:nreq))
           call comm_wait_all(rs(1:nreq))
         end if
-        nreq = 0
-        do h=1,nh
-          if (.not.all(halos(h)%length > 0)) cycle
-          nreq = nreq + 1
-          l = halos(h)%length
-          d = halos(h)%dsp_recv
-          allocate(halos(h)%mat_h_local(m,m,nspin))
-          halos(h)%mat_h_local = (0d0,0d0)
-          do isp0=1,nspin
-          do jo0=1,m
-          do io0=1,m
-            do ic=1,l(3)
-            do ib=1,l(2)
-            do ia=1,l(1)
-              halos(h)%mat_h_local(jo0,io0,isp0) = halos(h)%mat_h_local(jo0,io0,isp0) + &
-                   hvol*conjg(halos(h)%buf_recv(ia,ib,ic,isp0,jo0))* &
-                   hf0(d(1)+ia,d(2)+ib,d(3)+ic,isp0,io0)
-            end do
-            end do
-            end do
-          end do
-          end do
-          end do
-          deallocate(halos(h)%buf_send,halos(h)%buf_recv)
-        end do
       end if
+      do h=1,nh
+        if (.not.all(halos(h)%length > 0)) cycle
+        l=halos(h)%length;d=halos(h)%dsp_recv
+        if(dc%id_frag/=0)allocate(halos(h)%buf_recv(l(1),l(2),l(3),nspin,m))
+        call comm_bcast(halos(h)%buf_recv,info%icomm_rko,0)
+        local_h=(0d0,0d0)
+        ! Only intersecting spatial rows and locally owned ket columns contribute.
+        lo=max(mg%is,d+1);hi=min(mg%ie,d+l)
+        if(owns_ik)then
+          do isp0=1,nspin
+          do io0=max(1,info%io_s),min(info%io_e,m)
+          do jo0=1,m
+            do ic=lo(3),hi(3)
+            do ib=lo(2),hi(2)
+            do ia=lo(1),hi(1)
+              ix0=ia-mg%is(1)+1;iy0=ib-mg%is(2)+1;iz0=ic-mg%is(3)+1
+              local_h(jo0,io0,isp0)=local_h(jo0,io0,isp0)+ &
+                hvol*conjg(halos(h)%buf_recv(ia-d(1),ib-d(2),ic-d(3),isp0,jo0))* &
+                hf0(ix0,iy0,iz0,isp0,io0)
+            end do
+            end do
+            end do
+          end do
+          end do
+          end do
+        endif
+        allocate(halos(h)%mat_h_local(m,m,nspin))
+        call comm_summation(local_h,halos(h)%mat_h_local,size(local_h),info%icomm_rko)
+        deallocate(halos(h)%buf_recv)
+        if(allocated(halos(h)%buf_send))deallocate(halos(h)%buf_send)
+      end do
       deallocate(rs,rr)
     end subroutine assemble_halo_hamiltonian
 
