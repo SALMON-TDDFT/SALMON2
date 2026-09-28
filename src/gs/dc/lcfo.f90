@@ -121,6 +121,8 @@ contains
       select case(trim(lcfo_eigensolver))
       case('lapack')
         call diag_lapack
+      case('scalapack')
+        error stop 'DC-LCFO: scalapack currently requires complex orbitals.'
       case('eigenexa')
 #ifdef USE_EIGENEXA
         call diag_eigenexa

@@ -10,6 +10,7 @@ set(SOURCES
    )
 
 if (USE_SCALAPACK)
+  list(APPEND SOURCES lcfo_scalapack.f90)
   list(INSERT SOURCES 1 lcfo_diag_chefsi.f90)
   list(INSERT SOURCES 2 lcfo_diag_chefsi_complex.f90)
 endif ()

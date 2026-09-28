@@ -374,3 +374,34 @@ or production-scale peak-memory reduction.
 
 Examples: `samples/hse_spatial/h4_orbital_scf.inp` (4 ranks) and
 `h4_orbital_dc_scf.inp` (16 ranks, 6 states over 4 orbital groups per fragment).
+
+## Distributed complex LCFO full diagonalization
+
+Set `lcfo_eigensolver='scalapack'` in `&dc` with `yn_dc_lcfo='y'` and
+`yn_dc_lcfo_diag='y'` (the usual diagonalization setting). This requires a
+`USE_SCALAPACK=ON` MPI build and complex orbitals. The default LAPACK and the
+existing CheFSI paths remain available; real-orbital LCFO does not use this new
+option. Γ-point HSE/PBEh and ordinary complex multi-k LCFO are supported.
+
+Fragment diagonal/halo blocks stream into a two-dimensional block-cyclic
+Hamiltonian, preserving periodic-image accumulation and Hermitian conjugation.
+PZHEEV computes the full spectrum. Hermiticity, orthogonality and residuals are
+checked with distributed matrix operations at the existing 1e-10 tolerance.
+Only the coefficient rows for a fragment are reduced to its representative,
+then shared within that fragment for the existing output format. Native mesh
+reconstruction and time propagation retain their existing format and behavior.
+
+`LCFO_DENSE rank/local_rows/local_cols/global` reports local matrix dimensions;
+`LCFO_SCALAPACK` marks the usual eigensystem diagnostic. Full Hamiltonian and
+eigenvector matrices are not gathered or replicated globally in this route.
+The solver still computes all eigenpairs, with quadratic total matrix storage
+and cubic arithmetic; eigenvalues, streamed fragment blocks, and fragment
+coefficient buffers remain replicated where needed. There is no fixed memory
+ceiling, and numerical tests do not establish production speedup.
+
+The matrix oracle exercises 1/2/3/7/13/19 dimensions on 1/2/4/6 ranks, reordered
+rank mappings, empty tiles, partial-row recovery and non-Hermitian rejection.
+DC regression compares HSE/PBEh eigenvalues and reconstructed response to
+LAPACK on 2/8 ranks. The complex Si reference covers four k points.
+
+Example: `samples/hse_spatial/h4_scalapack_dc_scf.inp` uses four MPI ranks.

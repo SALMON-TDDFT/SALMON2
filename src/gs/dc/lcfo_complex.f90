@@ -522,12 +522,12 @@ contains
     if (yn_dc_lcfo_diag == 'y') then
       select case(trim(lcfo_eigensolver))
       case('lapack')
-      case('chefsi')
+      case('chefsi','scalapack')
 #ifndef USE_SCALAPACK
-        stop "DC-LCFO complex: lcfo_eigensolver='chefsi' requires ScaLAPACK."
+        stop "DC-LCFO complex: distributed eigensolver requires ScaLAPACK."
 #endif
       case default
-        stop "DC-LCFO complex: supported eigensolvers are 'lapack' and 'chefsi'."
+        stop "DC-LCFO complex: supported eigensolvers are 'lapack', 'scalapack' and 'chefsi'."
       end select
     end if
     if (system%if_real_orbital) stop "DC-LCFO complex: complex orbitals are required."
@@ -696,7 +696,13 @@ contains
       call check_collective_status(istat,"write complex LCFO Hamiltonian",ik,0)
 
       if (yn_dc_lcfo_diag == 'y') then
-      if (trim(lcfo_eigensolver) == 'chefsi') then
+      if (trim(lcfo_eigensolver) == 'scalapack') then
+#ifdef USE_SCALAPACK
+        call diag_scalapack_complex_driver(ik)
+#else
+        stop 'DC-LCFO complex: ScaLAPACK build required.'
+#endif
+      else if (trim(lcfo_eigensolver) == 'chefsi') then
 #ifdef USE_SCALAPACK
         call diag_chefsi_complex_driver(ik)
 #else
@@ -781,6 +787,61 @@ contains
     if (dc%id_tot == 0) write(*,*) "end DC-LCFO complex"
 
   contains
+
+#ifdef USE_SCALAPACK
+    subroutine diag_scalapack_complex_driver(ik0)
+      use lcfo_scalapack
+      implicit none
+      integer,intent(in) :: ik0
+      type(lcfo_dense_state) :: dense
+      complex(8),allocatable :: block(:,:),coeff(:,:)
+      integer :: spin0,f,h,source,nh,nbf,nbs,start_f,start_s,status0
+      real(8) :: he,oe,re
+      allocate(block(m,m))
+      do spin0=1,nspin
+        call lcfo_dense_init(dense,n_mat(spin0,ik0),dc%icomm_tot,status0)
+        call check_collective_status(status0,'ScaLAPACK layout',ik0,spin0)
+        do f=1,dc%n_frag
+          nbf=n_basis(f,spin0,ik0)
+          start_f=1+sum(n_basis(:f-1,spin0,ik0))
+          block=0d0
+          if(dc%id_tot==id_array(f))block=mat_h_local(:,:,spin0)
+          call comm_bcast(block,dc%icomm_tot,id_array(f))
+          call lcfo_dense_add(dense,start_f,start_f,block(:nbf,:nbf))
+          nh=n_halo
+          call comm_bcast(nh,dc%icomm_tot,id_array(f))
+          do h=1,nh
+            source=0;block=0d0
+            if(dc%id_tot==id_array(f))then
+              source=halo(h)%ifrag_src
+              if(allocated(halo(h)%mat_h_local))block=halo(h)%mat_h_local(:,:,spin0)
+            endif
+            call comm_bcast(source,dc%icomm_tot,id_array(f))
+            call comm_bcast(block,dc%icomm_tot,id_array(f))
+            nbs=n_basis(source,spin0,ik0)
+            start_s=1+sum(n_basis(:source-1,spin0,ik0))
+            call lcfo_dense_add(dense,start_s,start_f,.5d0*block(:nbs,:nbf))
+            call lcfo_dense_add(dense,start_f,start_s,.5d0*conjg(transpose(block(:nbs,:nbf))))
+          enddo
+        enddo
+        call lcfo_dense_solve(dense,dc%nstate_tot,he,oe,re,status0)
+        call check_collective_status(status0,'PZHEEV/residual',ik0,spin0)
+        if(dc%id_tot==0)write(*,'(a,2i6,4es16.7,a)') &
+          'complex LCFO k/spin, hermitian/basis/eigen/residual: ',ik0,spin0,he,basis_err,oe,re,' LCFO_SCALAPACK'
+        esp_tot(:,spin0,ik0)=dense%values(:dc%nstate_tot)
+        do f=1,dc%n_frag
+          nbf=n_basis(f,spin0,ik0);start_f=1+sum(n_basis(:f-1,spin0,ik0))
+          allocate(coeff(nbf,dc%nstate_tot))
+          call lcfo_dense_rows(dense,start_f,nbf,dc%nstate_tot,id_array(f),coeff)
+          if(dc%id_tot==id_array(f))coef_frag(:nbf,:,spin0)=coeff
+          deallocate(coeff)
+        enddo
+        ! Only the own-fragment coefficient rows are shared inside that fragment.
+        call comm_bcast(coef_frag(:,:,spin0),info%icomm_rko,0)
+        call lcfo_dense_free(dense)
+      enddo
+    end subroutine
+#endif
 
     subroutine init_fragment_roots(ids)
       use communication, only: comm_summation
