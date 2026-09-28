@@ -16,10 +16,15 @@
 !=======================================================================
 !=======================================================================
 
+#include "config.h"
 SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc_func,srg,srg_scalar, &
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
+#ifdef USE_HSE
+  use hse_ptcn, only: native_hse_step
+  use hse_native, only: hse_taylor_stage
+#endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
   use writefield
@@ -120,7 +125,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   case(3)
     if(.not.singlescale%flag_use) then
-      if(propagator == 'middlepoint') then
+      if(propagator == 'middlepoint'.or.propagator == 'hse_ptcn'.or. &
+         propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
         system%vec_Ac(1:3) = 0.5d0* (rt%Ac_tot(1:3,itt)+rt%Ac_tot(1:3,itt-1))
       else if(propagator == 'aetrs') then
         system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
@@ -141,6 +147,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 
+#ifdef USE_HSE
+  if(propagator=='hse_ptcn')then
+    call native_hse_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
+      spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
+  else
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(0)
+#endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
   else if(yn_predictor_corrector=='y' .or. xc_func%xctype(1)==salmon_xctype_tbmbj) then
@@ -152,6 +165,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
   end if
     
+#ifdef USE_HSE
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(2)
+  endif
+#endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
   
   ! Gram Schmidt orghonormalization
@@ -283,6 +300,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     else
       call timer_begin(LOG_CALC_CURRENT)
       system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
+      ! Propagation uses midpoint A; current uses endpoint A. Refresh both
+      ! kinetic and nonlocal phases for the validated HSE laser path as well.
+      if (propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
+        if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+      end if
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
       spsi_out%update_zwf_overlap = .true.
       call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
@@ -454,6 +476,10 @@ contains
     spsi_in%zwf = psi_tmp
     !$omp end workshare
 
+#ifdef USE_HSE
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(1)
+#endif
+
 !  if(functional == 'VS98' .or. functional == 'TPSS')then
 !    tmass=0.5d0*(tmass+tmass_t)
 !    tjr=0.5d0*(tjr+tjr_t)
@@ -547,4 +573,3 @@ subroutine calc_current_ion(lg,system,pp,curr_i)
 
   call nvtxEndRange
 end subroutine calc_current_ion
-

@@ -52,6 +52,7 @@ use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 use noncollinear_module, only: calc_magnetization
 use dcdft
+use hse_reference_export, only: export_hse_reference
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -409,6 +410,9 @@ if(.not.flag_conv) then
    endif
 endif
 endif
+
+call export_hse_reference(lg,mg,system,info,stencil,srg,ppg,ppn,spsi,shpsi, &
+                          rho,V_local,Vh,Vxc,Vpsl,energy,Miter,flag_conv)
 
 contains
 

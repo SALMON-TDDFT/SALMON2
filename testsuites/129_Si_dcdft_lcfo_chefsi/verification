@@ -10,7 +10,7 @@ def read_lines(filename):
         with open(filename) as handle:
             return handle.read().splitlines()
     except OSError:
-        fail("CheFSI output files were not created")
+        fail("DC-LCFO output files were not created")
 
 
 def is_finite(value):
@@ -20,29 +20,50 @@ def is_finite(value):
 eigen_lines = read_lines("data_dcdft/total/Si_eigen.data")
 output_lines = read_lines("outputfile")
 
-# With only one SCF iteration, the fragment orbitals and LCFO Hamiltonian
-# can depend on the initialization and build environment. Check the output
-# structure and CheFSI convergence instead of fixed reference eigenvalues.
-indices = []
-values = []
+eigenvalues = {}
 for line in eigen_lines:
     if line.lstrip().startswith("#") or not line.strip():
         continue
     try:
         fields = line.split()
-        indices.append(int(fields[0]))
-        values.append(float(fields[1]))
+        index = int(fields[0])
+        value = float(fields[1])
     except (ValueError, IndexError):
         fail("invalid CheFSI eigenvalue record: %s" % line)
+    if not is_finite(value):
+        fail("CheFSI eigenvalue output contains a non-finite value")
+    eigenvalues[index] = value
 
-if indices != list(range(1, 67)):
+if sorted(eigenvalues) != list(range(1, 67)):
     fail("CheFSI eigenvalue output must contain states 1 through 66")
-if not all(is_finite(value) for value in values):
-    fail("CheFSI eigenvalue output contains non-finite values")
+
+# The reference values are DC-LCFO eigenvalues in a.u. for the converged
+# 4x1x1 Si system with all atoms shifted by +0.01 a.u. along x. The
+# tolerance permits small platform-dependent changes.
+reference_eigenvalues = {
+    1: -0.1997182961,
+    8: -0.04542507571,
+    25: -0.03789661523,
+    26: 0.03123561295,
+    40: 0.1122554328,
+    42: 0.1240134227,
+    43: 0.1240134228,
+    44: 0.1240134235,
+    45: 0.1240134258,
+    46: 0.1243798737,
+    47: 0.1243798737,
+    66: 0.2481420191,
+}
+permissible_eigenvalue_error = 1.0e-4
+for index, reference in reference_eigenvalues.items():
+    value = eigenvalues[index]
+    if abs(value - reference) > permissible_eigenvalue_error:
+        fail("eigenvalue %d differs from reference: %.10e" % (index, value))
 
 if not any(line.strip() == "end SALMON" for line in output_lines):
     fail("SALMON did not finish normally")
 
+scf_records = []
 residuals = []
 subspace = None
 degree = None
@@ -54,7 +75,14 @@ locked_counts = []
 for line in output_lines:
     fields = line.split()
     try:
-        if (fields[:2] == ["CheFSI", "subspace:"] and
+        if (fields[:3] == ["DC", "#SCF", "="] and
+                fields[4:7] == ["Total", "Energy", "="] and
+                fields[8:10] == ["diff", "="]):
+            scf_records.append((int(fields[3]), float(fields[7]), float(fields[10])))
+        elif line.strip() == "start DC-LCFO":
+            residuals = []
+            locked_counts = []
+        elif (fields[:2] == ["CheFSI", "subspace:"] and
                 fields[3:4] == ["target:"]):
             subspace = (int(fields[2]), int(fields[4]))
         elif fields[:3] == ["CheFSI", "polynomial", "degree:"]:
@@ -74,7 +102,18 @@ for line in output_lines:
             int(fields[2])
             residuals.append(float(fields[5]))
     except (ValueError, IndexError):
-        fail("invalid CheFSI output record: %s" % line)
+        fail("invalid output record: %s" % line)
+
+if not scf_records:
+    fail("DC SCF convergence history is missing")
+scf_iteration, total_energy, scf_residual = scf_records[-1]
+if scf_residual > 1.0e-9:
+    fail("DC SCF did not reach the requested threshold: %.6e" % scf_residual)
+if abs(total_energy - (-3390.6646)) > 2.0e-2:
+    fail("DC total energy differs from reference: %.10f eV" % total_energy)
+
+if any(eigenvalues[index] <= 1.0e-3 for index in range(42, 48)):
+    fail("CheFSI output contains a spurious near-zero eigenvalue")
 
 if not residuals or not all(is_finite(value) and value >= 0.0 for value in residuals):
     fail("CheFSI residual history is missing or invalid")
@@ -96,5 +135,7 @@ if not locked_counts or locked_counts != sorted(set(locked_counts)):
 if locked_counts[-1] != 66:
     fail("CheFSI did not lock all target eigenpairs: %s" % locked_counts)
 
+print("DC SCF converged in %d iterations" % scf_iteration)
+print("DC total energy = %.10f eV" % total_energy)
 print("final CheFSI residual = %.6e" % residuals[-1])
 print("CheFSI locking sequence = %s" % locked_counts)

@@ -1,0 +1,76 @@
+&calculation
+  theory='dft'
+  yn_dc='y'
+/
+&dc
+  num_fragment=2,1,1
+  nproc_rgrid_tot=4,1,1
+  nstate_frag=48
+  num_rgrid_buffer=6,0,0
+  yn_dc_lcfo='y'
+  lcfo_eigensolver='lapack'
+  energy_cut=100d0
+  lambda_cut=1d-7
+/
+&parallel
+  nproc_k=2
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+&control
+  sysname='Si_2x1x1_dc_lcfo_complex'
+  write_gs_restart_data='no'
+/
+&units
+  unit_system='a.u.'
+/
+&system
+  yn_periodic='y'
+  al=20.52d0,10.26d0,10.26d0
+  nstate=48
+  nelec=64
+  nelem=1
+  natom=16
+  temperature_k=300d0
+/
+&pseudo
+  izatom(1)=14
+  file_pseudo(1)='./Si_rps.dat'
+  lmax_ps(1)=2
+  lloc_ps(1)=2
+/
+&functional
+  xc='PZ'
+/
+&rgrid
+  num_rgrid=24,12,12
+/
+&kgrid
+  num_kgrid=1,2,2
+/
+&scf
+  yn_preconditioning='y'
+  ncg=3
+  nscf=500
+  threshold=1d-9
+  nscf_init_redistribution=0
+  nscf_init_no_diagonal=0
+/
+&atomic_coor
+  'Si'  0.010  0.000  0.000  1
+  'Si'  2.575  2.565  2.565  1
+  'Si'  5.140  0.000  5.130  1
+  'Si'  0.010  5.130  5.130  1
+  'Si'  5.140  5.130  0.000  1
+  'Si'  7.705  2.565  7.695  1
+  'Si'  2.575  7.695  7.695  1
+  'Si'  7.705  7.695  2.565  1
+  'Si' 10.270  0.000  0.000  1
+  'Si' 12.835  2.565  2.565  1
+  'Si' 15.400  0.000  5.130  1
+  'Si' 10.270  5.130  5.130  1
+  'Si' 15.400  5.130  0.000  1
+  'Si' 17.965  2.565  7.695  1
+  'Si' 12.835  7.695  7.695  1
+  'Si' 17.965  7.695  2.565  1
+/

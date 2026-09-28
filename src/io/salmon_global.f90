@@ -120,6 +120,7 @@ module salmon_global
 !! &functional
   character(64)  :: xc !, xcname
   character(64)  :: xname
+  real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc
@@ -446,6 +447,7 @@ character(256),allocatable :: atom_name(:)
   integer        :: num_rgrid_buffer(3)
   integer        :: nproc_rgrid_tot(3)
   character(256) :: file_atom_coor_frag
+  character(1)   :: yn_out_dc_fragment_coor
   real(8)        :: xi_dc
   character(1)   :: yn_dc_lcfo
   character(1)   :: yn_dc_lcfo_diag

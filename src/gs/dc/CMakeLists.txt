@@ -1,10 +1,12 @@
 set(SOURCES
     dcdft.f90
+    lcfo_complex.f90
     lcfo.f90
    )
 
 if (USE_SCALAPACK)
   list(INSERT SOURCES 1 lcfo_diag_chefsi.f90)
+  list(INSERT SOURCES 2 lcfo_diag_chefsi_complex.f90)
 endif ()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
