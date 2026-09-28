@@ -485,12 +485,7 @@ contains
     use structures
     use timer
     use salmon_global, only: xi_dc
-#ifdef USE_HSE
-    use salmon_global, only: xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft
-    use rvv10, only: rvv10_periodic
-    use rvv10_native, only: rvv10_native_periodic
-#endif
-    use communication, only: comm_summation,comm_bcast
+    use communication, only: comm_summation
     use salmon_xc, only: exchange_correlation
     implicit none
     ! intent(inout): exchange_correlation leaves a meta-GGA's
@@ -513,13 +508,6 @@ contains
     !
     integer :: ix,iy,iz,ispin,ix_tot,iy_tot,iz_tot
     real(8) :: sum_exc
-#ifdef USE_HSE
-    integer :: rv_status
-    logical :: rv_used
-    logical,save :: rv_reported=.false.
-    real(8) :: rv_energy
-    real(8),allocatable :: rv_e(:,:,:),rv_v(:,:,:),rv_local_e(:,:,:),rv_local_v(:,:,:)
-#endif
     real(8),dimension(dc%lg_tot%num(1),dc%lg_tot%num(2),dc%lg_tot%num(3)) :: tot_tmp,tot
     
     call timer_begin(LOG_CALC_EXC_COR)
@@ -537,68 +525,7 @@ contains
     sum_exc = 0d0
     if(info%id_rko==0) sum_exc = energy%E_xc ! info%id_rko == 0 : representative process of each fragment
     call comm_summation(sum_exc,energy%E_xc,dc%icomm_tot) ! total system
-#ifdef USE_HSE
-    if(xc=='pbeh40_rvv10')then
-      allocate(rv_v(size(tot,1),size(tot,2),size(tot,3)))
-      allocate(rv_local_e(dc%mg_tot%num(1),dc%mg_tot%num(2),dc%mg_tot%num(3)), &
-        rv_local_v(dc%mg_tot%num(1),dc%mg_tot%num(2),dc%mg_tot%num(3)))
-      call rvv10_native_periodic(dc%lg_tot%num,dc%mg_tot,dc%info_tot,dc%srg_scalar_tot, &
-        dc%system_tot,stencil,dc%rho_tot_s(1),rvv10_b,rvv10_c,rvv10_nq,rv_local_e,rv_local_v,rv_used,rv_status)
-      if(rv_used)then
-        if(rv_status/=0)error stop 'DC rVV10: distributed total-density evaluation failed'
-        sum_exc=sum(rv_local_e)*dc%system_tot%hvol
-        call comm_summation(sum_exc,rv_energy,dc%icomm_tot)
-        tot_tmp=0d0
-        tot_tmp(dc%mg_tot%is(1):dc%mg_tot%ie(1),dc%mg_tot%is(2):dc%mg_tot%ie(2), &
-          dc%mg_tot%is(3):dc%mg_tot%ie(3))=rv_local_v
-        call comm_summation(tot_tmp,rv_v,size(tot_tmp),dc%icomm_tot)
-      else
-        ! Each total-grid point belongs to exactly one total-communicator rank.
-        ! Evaluate the mixed total density, never independent buffer densities.
-        tot_tmp=0d0
-        do iz=dc%mg_tot%is(3),dc%mg_tot%ie(3)
-        do iy=dc%mg_tot%is(2),dc%mg_tot%ie(2)
-        do ix=dc%mg_tot%is(1),dc%mg_tot%ie(1)
-          tot_tmp(ix,iy,iz)=dc%rho_tot_s(1)%f(ix,iy,iz)
-        enddo
-        enddo
-        enddo
-        call comm_summation(tot_tmp,tot,size(tot),dc%icomm_tot)
-        rv_status=0;rv_energy=0d0
-        if(dc%id_tot==0)then
-          allocate(rv_e(size(tot,1),size(tot,2),size(tot,3)))
-          call rvv10_periodic(dc%lg_tot%num,dc%system_tot%hgs,stencil%coef_nab, &
-            dc%system_tot%rmatrix_B,tot,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_status)
-          if(rv_status==0)rv_energy=sum(rv_e)*dc%system_tot%hvol
-          deallocate(rv_e)
-        endif
-        call comm_bcast(rv_status,dc%icomm_tot)
-        if(rv_status/=0)error stop 'DC rVV10: total density evaluation failed'
-        call comm_bcast(rv_energy,dc%icomm_tot)
-        call comm_bcast(rv_v,dc%icomm_tot)
-      endif
-      deallocate(rv_local_e,rv_local_v)
-      if(.not.rv_reported.and.dc%id_tot==0)then
-        if(rv_used)then
-          write(*,'(2a)')'DC rVV10 backend: ',trim(rvv10_fft)
-          write(*,'(a,3i6)')'DC rVV10 FFT: native pencils, x replication/y/z ranks:', &
-            dc%info_tot%isize_x,dc%info_tot%isize_y,dc%info_tot%isize_z
-        else
-          write(*,'(a)')'DC rVV10 FFT: root reference fallback (grid/layout unsupported by FFTE)'
-        endif
-        rv_reported=.true.
-      endif
-      energy%E_xc=energy%E_xc+rv_energy
-      do iz=mg%is(3),mg%ie(3);iz_tot=dc%jxyz_tot(iz,3)
-      do iy=mg%is(2),mg%ie(2);iy_tot=dc%jxyz_tot(iy,2)
-      do ix=mg%is(1),mg%ie(1);ix_tot=dc%jxyz_tot(ix,1)
-        Vxc(1)%f(ix,iy,iz)=Vxc(1)%f(ix,iy,iz)+rv_v(ix_tot,iy_tot,iz_tot)
-      enddo
-      enddo
-      enddo
-      deallocate(rv_v)
-    endif
-#endif
+
     call timer_end(LOG_CALC_EXC_COR)
     
   ! v_h + v_psl (total)

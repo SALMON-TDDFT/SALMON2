@@ -1,4 +1,4 @@
-"""DC total-density integration; SALMON_TEST_MPIEXEC enables 2/4-rank checks."""
+"""DC fragment-density integration; SALMON_TEST_MPIEXEC enables 2/4-rank checks."""
 import os
 from pathlib import Path
 import re
@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE'), 'SALMON_TEST_EXE is required')
 class DCTest(unittest.TestCase):
-    def run_case(self, ranks=1, conventional=False, xc='pbeh40_rvv10', radius=0, initial_only=False, method='gauss'):
+    def run_case(self, ranks=1, conventional=False, xc='pbeh40_rvv10', radius=0, initial_only=False, method='gauss', buffer=4, fragment_scope=False):
         inp = Path(__file__).with_name('dc_hydrogen.inp').read_text()
         inp = inp.replace("xc='pbeh40_rvv10'", f"xc='{xc}'")
         if radius>0:
@@ -22,6 +22,7 @@ class DCTest(unittest.TestCase):
         if ranks == 1:
             inp = inp.replace('num_fragment=2,1,1', 'num_fragment=1,1,1')
             inp = inp.replace('num_rgrid_buffer=4,0,0', 'num_rgrid_buffer=0,0,0')
+        inp = inp.replace('num_rgrid_buffer=4,0,0', f'num_rgrid_buffer={buffer},0,0')
         if conventional:
             inp = inp.replace("yn_dc='y'", "yn_dc='n'")
         if initial_only:
@@ -46,9 +47,20 @@ class DCTest(unittest.TestCase):
                 differences = re.findall(r'DC #SCF.*diff =\s*([\d.E+-]+)', run.stdout)
                 self.assertTrue(differences)
                 self.assertLess(float(differences[-1]), 1e-8)
+            if fragment_scope:
+                grids = re.findall(r'DC rVV10 fragment periodic grid:\s*(\d+)\s+(\d+)\s+(\d+)', run.stdout)
+                self.assertTrue(grids, run.stdout[-2000:])
+                self.assertTrue(all(tuple(map(int, g)) == (8+2*buffer,8,8) for g in grids))
+                self.assertNotIn('DC rVV10 FFT:', run.stdout)
             info = next(Path(tmp).rglob('*_info.data')).read_text()
             energy = float(re.search(r'Total energy \(eV\) =\s*([\d.E+-]+)', info)[1])
             return energy
+
+    @unittest.skipUnless(os.environ.get('SALMON_TEST_MPIEXEC'), 'MPI launcher is required')
+    def test_finite_buffer_fragment_scope(self):
+        two = self.run_case(ranks=2, buffer=2, fragment_scope=True)
+        four = self.run_case(ranks=4, buffer=2, fragment_scope=True)
+        self.assertLess(abs(two-four), 2e-6)
 
     def test_one_fragment_matches_conventional(self):
         # Exercise both dispersion energy accounting and its SCF potential.

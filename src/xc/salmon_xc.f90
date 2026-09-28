@@ -350,8 +350,10 @@ contains
     end if
 
 #ifdef USE_HSE
-    if(xc_name=='pbeh40_rvv10'.and.yn_dc/='y')then
+    if(xc_name=='pbeh40_rvv10')then
       if(nspin/=1)error stop 'rVV10: unpolarized density required'
+      ! In DC these are the buffered fragment density, cell and communicator.
+      ! The caller integrates eexc over its core only for global DC energy.
       ! Each orbital group has one complete real-space communicator. Do not
       ! sum over orbitals: that would multiply the density and nonlocal energy.
       rv_shape=mg%ie
@@ -402,6 +404,7 @@ contains
         enddo
       endif
       if(.not.rv_reported.and.info%id_rko==0)then
+        if(yn_dc=='y')write(*,'(a,3i8)')'DC rVV10 fragment periodic grid: ',rv_shape
         if(rv_used)then
           write(*,'(2a)')'rVV10 backend: ',trim(rvv10_fft)
           write(*,'(a,3i6)')'rVV10 FFT: native pencils, x replication/y/z ranks:', &
