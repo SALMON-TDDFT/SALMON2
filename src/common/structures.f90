@@ -456,6 +456,15 @@ module structures
     ! no value is needed. Phase B (init_dm_unfold, src/analysis/dm_unfold.f90)
     ! reads this field to drive its energy-gap clustering.
     real(8) :: egap_threshold
+    ! tc_tol: the joint-diagonalization block-splitting tolerance for
+    ! Phase B, dimensionless, from the input parameter unfold_tc_tol
+    ! (default 1d-8; see its declaration comment in inputoutput.f90 for the
+    ! full rationale). Passed as the optional tol= argument to
+    ! diagonalize_commuting_unitary_family (src/math/eigen_unitary.f90)
+    ! when jointly diagonalizing the compressed translation-operator family
+    ! Tc_list within a Phase B cluster (unfolding.tex sec.9.5). Always a
+    ! positive value; distinct from egap_threshold above.
+    real(8) :: tc_tol
     ! primitive-to-reference correspondence (dm_unfold_option='super' only):
     ! a_pr(3,3) = [a^P_1,a^P_2,a^P_3], the true primitive-cell lattice vectors;
     ! pmat(3,3) = P, with a^R_i = sum_j pmat(j,i)*a^P_j (a^R = A_ref, the

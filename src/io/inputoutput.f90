@@ -620,6 +620,7 @@ contains
       & no_ref, &
       & out_dm_unfold_step, &
       & unfold_egap_threshold, &
+      & unfold_tc_tol, &
       & al_pr, &
       & al_vec1_pr,al_vec2_pr,al_vec3_pr, &
       & yn_out_mom_distr_gs, &
@@ -1081,6 +1082,38 @@ contains
                                   ! not known here); left unset is fine when
                                   ! |det(pmat)|=1 (no coset structure, so
                                   ! Phase B's clustering never runs).
+    unfold_tc_tol = 1d-8  ! Phase B (dm_unfold.f90) joint-diagonalization
+                          ! block-splitting tolerance: the optional tol=
+                          ! argument passed to
+                          ! diagonalize_commuting_unitary_family
+                          ! (src/math/eigen_unitary.f90) when jointly
+                          ! diagonalizing the family of compressed
+                          ! translation operators Tc_list within a Phase B
+                          ! cluster. Dimensionless (a threshold on
+                          ! translation-phase eigenvalue gaps of Tc_list,
+                          ! not an energy scale) -- distinct from both
+                          ! unfold_egap_threshold (energy-gap clustering,
+                          ! a.u.) and hprk_thresh (final accept/reject
+                          ! threshold, in dm_unfold.f90). The library's own
+                          ! internal default (100*epsilon(1d0) =~ 2.22d-14)
+                          ! is tuned for numerically-exact unitary input and
+                          ! is too tight for this application: Tc_list
+                          ! typically carries ~1d-11 to ~1d-5 -scale
+                          ! numerical noise from imperfect SCF convergence
+                          ! of near-degenerate reference-cell states, and an
+                          ! unnecessarily tight tol can misidentify that
+                          ! noise as a genuine translation-phase split,
+                          ! permanently fragmenting a block that should stay
+                          ! joined. 1d-8 is a default with margin above the
+                          ! observed noise floor and far below genuine
+                          ! (typically O(1)) phase separations; always a
+                          ! positive value (no unset sentinel), always
+                          ! passed explicitly to
+                          ! diagonalize_commuting_unitary_family, and
+                          ! user-overridable. Only meaningful when the coset
+                          ! structure actually requires joint
+                          ! diagonalization (|det(pmat)|>1 in
+                          ! dm_unfold_option='super').
     al_pr             = 0d0
     al_vec1_pr        = 0d0
     al_vec2_pr        = 0d0
@@ -1740,6 +1773,7 @@ contains
     call comm_bcast(out_dm_unfold_step, nproc_group_global)
     call comm_bcast(unfold_egap_threshold, nproc_group_global)
     if( unfold_egap_threshold > 0d0 ) unfold_egap_threshold = unfold_egap_threshold * uenergy_to_au
+    call comm_bcast(unfold_tc_tol, nproc_group_global)
     call comm_bcast(al_pr, nproc_group_global)
     al_pr = al_pr * ulength_to_au
     call comm_bcast(al_vec1_pr, nproc_group_global)
@@ -2758,6 +2792,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_ref', no_ref
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_egap_threshold', unfold_egap_threshold
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_tc_tol', unfold_tc_tol
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(1)', al_pr(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(2)', al_pr(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(3)', al_pr(3)

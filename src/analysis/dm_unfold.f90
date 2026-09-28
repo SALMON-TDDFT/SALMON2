@@ -29,7 +29,8 @@ contains
   use parallelization, only: nproc_id_global, nproc_group_global, end_parallel
   use salmon_global, only: dm_unfold_option, no_ref, base_directory, sysname, natom, izatom, kion, &
                          & yn_out_mom_distr_gs, dq_mom, nq_mom, num_kgrid, &
-                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr, unfold_egap_threshold
+                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr, unfold_egap_threshold, &
+                         & unfold_tc_tol
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
   use math_constants, only: zI,pi
@@ -247,6 +248,7 @@ contains
     stop
   end if
   unfold%egap_threshold = unfold_egap_threshold
+  unfold%tc_tol = unfold_tc_tol
 
   if (comm_is_root(nproc_id_global)) then
     inquire(file='reference/wfn.bin', exist = e_wfn)
@@ -1015,7 +1017,8 @@ contains
           ! -- jointly diagonalize the commuting family, then recover the
           ! energy eigenbasis within each resulting shared-hat_k block --
           allocate( w_family(g_cl,g_cl), family_block_id(g_cl) )
-          call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id )
+          call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id, &
+            & tol=unfold%tc_tol )
 
           allocate( Wfinal(g_cl,g_cl), e_final(g_cl), label_final(g_cl), score_final(g_cl) )
 
