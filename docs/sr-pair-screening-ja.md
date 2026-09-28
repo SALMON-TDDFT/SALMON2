@@ -94,3 +94,25 @@ SCFの初期全支持期間は維持しています。支持半径の毎更新�
 
 波動関数の局所性とSRを計算量削減へつなぐ第一段階です。厳しい予算では上限が保守的で候補が出ない場合もあり、
 FFTの削減より診断・補正の費用が大きい可能性があります。高速化・弱スケーリングの改善はまだ結論していません。
+
+## 保存した検証データ
+
+- [実行ファイル・ソースのハッシュ、試験数、数値結果](reports/sr-pair-screening/validation.json)
+- [最終入力・ログ・軌跡・小系GS保存データ・実装ソース](reports/sr-pair-screening/validation.tar.gz)
+- [4×4×1再検証で共用した以前の初期状態](benchmarks/2026-09-28-h2-rt/seeds-and-preparation.tar.gz)
+- [入力パラメータの説明](inputs/exx-mlwf.md)
+
+実装コミットは `6c697e0f`。最終検証はnative pair 3、既存adaptive RT 3、EXX入力15、adaptive SCF/DC 4テストが全て成功しました。
+これに加え、誤差上限・Hermitian補正・U保持・空間/軌道分散のMPIプローブを実行しています。
+独立レビューの指摘（省略の実採用を確認する試験、極小誤差ノルムのアンダーフロー）を修正し、再検証済みです。
+SCFへU保持を広げた途中版ではDC-rVV10の収束回帰が出たため、保持はRTだけに限定し、同じ条件の収束と最終SCF全試験を確認しました。
+
+主要な再実行コマンドは次の通りです。ビルドはMPI/HSE/ScaLAPACKを有効にしてください。
+
+```sh
+python3 testsuites/unit_hse_wannier/test_pair_screen.py --build /path/to/build
+python3 testsuites/unit_hse_wannier/test_projected_seed.py --build /path/to/build
+python3 testsuites/unit_hse_ace/validate_exchange.py --build /path/to/build
+SALMON_TEST_EXE=/path/to/build/salmon SALMON_TEST_MPIEXEC=mpiexec \
+  python3 -m unittest discover -s testsuites/unit_pbeh_rvv10 -p test_pair_screen.py
+```
