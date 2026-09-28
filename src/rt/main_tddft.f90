@@ -100,8 +100,7 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,nt
   call nvtxStartRange('main loop', itt)
 
-  ! Initialization always loads spsi_in, also for an odd restart step Mit.
-  if(mod(itt-Mit,2)==1)then
+  if(mod(itt,2)==1)then
     call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
@@ -127,7 +126,7 @@ TE : do itt=Mit+1,nt
 
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
-    if (mod(itt-Mit,2)==1) then
+    if (mod(itt,2)==1) then
       call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale)
     else
       call checkpoint_rt(lg,mg,system,info,spsi_in, itt,rt,Vh_stock1,Vh_stock2,singlescale)
