@@ -174,7 +174,7 @@ contains
     ace%dv=dv;ace%condition=0d0
     if(nonzero==0)then
       if(store_packed)then
-        allocate(ace%inverse(n,n));ace%inverse=0d0
+        allocate(ace%metric_factor(n,n));ace%metric_factor=0d0
         call pack_action()
       else
         allocate(ace%factors(size(u,1),size(u,2),1));ace%factors=0d0
@@ -200,7 +200,7 @@ contains
       metric(:,j)=metric(:,j)/sqrt(e(j))
     enddo
     if(store_packed)then
-      ace%inverse=matmul(metric,conjg(transpose(metric)))
+      ace%metric_factor=metric
       call pack_action()
     else
       allocate(ace%factors(size(u,1),size(u,2),1))
@@ -277,11 +277,11 @@ contains
     integer,intent(in) :: comm_r,comm_o
     integer,intent(out) :: status
     integer,allocatable :: counts(:),target_counts(:)
-    complex(8),allocatable :: column(:),partial_action(:),total_action(:),overlap(:),overlap_o(:),overlap_r(:),coeff(:)
+    complex(8),allocatable :: column(:),partial_action(:),total_action(:),overlap(:),overlap_o(:),overlap_r(:),coeff(:),rotated(:)
     integer :: bad,ng,n,first,target_first,rank,np,owner,i,j,k,start,finish
     status=1;action=0d0;bad=0;ng=size(target,1)
     if(.not.allocated(ace%offset).or..not.allocated(ace%row).or. &
-       .not.allocated(ace%values).or..not.allocated(ace%inverse))bad=1
+       .not.allocated(ace%values).or..not.allocated(ace%metric_factor))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     if(ng/=ace%grid_rows.or.size(target,3)/=1.or.any(shape(target)/=shape(action)))bad=1
@@ -289,7 +289,7 @@ contains
     if(size(ace%offset)<1.or.size(ace%row)/=size(ace%values))bad=1
     if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
     if(.not.all(ieee_is_finite(real(ace%values))).or..not.all(ieee_is_finite(aimag(ace%values))))bad=1
-    if(.not.all(ieee_is_finite(real(ace%inverse))).or..not.all(ieee_is_finite(aimag(ace%inverse))))bad=1
+    if(.not.all(ieee_is_finite(real(ace%metric_factor))).or..not.all(ieee_is_finite(aimag(ace%metric_factor))))bad=1
     if(any(ace%row<1).or.any(ace%row>ng))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
@@ -300,13 +300,13 @@ contains
     call orbital_layout(size(ace%offset)-1,comm_r,comm_o,counts,first,bad)
     if(bad/=0)return
     n=sum(counts)
-    if(n<1.or.any(shape(ace%inverse)/=[n,n]))bad=1
+    if(n<1.or.any(shape(ace%metric_factor)/=[n,n]))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(size(target,2),comm_r,comm_o,target_counts,target_first,bad)
     if(bad/=0)return
     call comm_get_groupinfo(comm_o,rank,np)
-    allocate(column(ng),partial_action(ng),total_action(ng),overlap(n),overlap_o(n),overlap_r(n),coeff(n))
+    allocate(column(ng),partial_action(ng),total_action(ng),overlap(n),overlap_o(n),overlap_r(n),coeff(n),rotated(n))
     ! Stream each target; only a column and band vectors are communicated.
     do owner=0,np-1
       do i=1,target_counts(owner)
@@ -319,7 +319,10 @@ contains
         enddo
         call comm_summation(overlap,overlap_o,n,comm_o)
         call comm_summation(overlap_o,overlap_r,n,comm_r)
-        coeff=matmul(ace%inverse,overlap_r)
+        ! Do not form A A^H explicitly: near the accepted conditioning limit,
+        ! that inverse loses cancellation accuracy relative to dense ACE factors.
+        call zgemv('C',n,n,(1d0,0d0),ace%metric_factor,n,overlap_r,1,(0d0,0d0),rotated,1)
+        call zgemv('N',n,n,(1d0,0d0),ace%metric_factor,n,rotated,1,(0d0,0d0),coeff,1)
         partial_action=0d0
         do j=1,size(ace%offset)-1
           do k=ace%offset(j),ace%offset(j+1)-1
