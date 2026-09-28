@@ -764,7 +764,9 @@ contains
 ! yn_conventional_from_dcdft==y : conventional calculation but wavefunctions are reconstructed from DC-LCFO data
   subroutine init_conventional_from_dcdft(lg,mg,system,info,spsi)
     use lcfo_complex, only: init_conventional_from_dcdft_complex
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit,num_fragment
+    use communication, only: comm_summation
+    use filesystem, only: get_filehandle
     use structures
     implicit none
     type(s_rgrid),         intent(in) :: lg,mg
@@ -772,8 +774,60 @@ contains
     type(s_parallel_info), intent(in) :: info
     type(s_orbital)                   :: spsi
 
+    integer :: counts(3),totals(3),f,kind,iu,ios,header(5)
+    character(256) :: filename
+    character(16) :: magic
+
     if (yn_spinorbit == 'y') stop "DC-LCFO reconstruction: spin-orbit is unsupported."
-    if (system%if_real_orbital) then
+    ! Select the on-disk representation, not the (always complex) RT destination.
+    counts=0
+    do f=1,product(num_fragment)
+      if(mod(f-1,info%isize_rko)/=info%id_rko)cycle
+      do kind=1,2
+        if(kind==1)then
+          write(filename,'(a,i6.6,a)') './data_dcdft/fragments/',f,'/basis_functions.bin'
+        else
+          write(filename,'(a,i6.6,a)') './data_dcdft/fragments/',f,'/wavefunctions.bin'
+        endif
+        iu=get_filehandle()
+        open(iu,file=trim(filename),status='old',form='unformatted',access='stream',action='read',iostat=ios)
+        if(ios/=0)then
+          counts(3)=counts(3)+1
+          cycle
+        endif
+        read(iu,iostat=ios)magic
+        if(ios/=0)then
+          counts(3)=counts(3)+1
+        else if(magic=='SLCFO_COMPLEX_V1')then
+          counts(2)=counts(2)+1
+        else
+          header=0
+          if(kind==1)then
+            read(iu,pos=1,iostat=ios)header
+            if(ios==0)then
+              if(any(header(1:3)<=0).or. &
+                 header(4)/=system%nspin.or.header(5)<=0)ios=1
+            endif
+          else
+            read(iu,pos=1,iostat=ios)header(1:4)
+            if(ios==0)then
+              if(header(1)/=product(num_fragment).or.header(2)/=system%nspin.or. &
+                 header(3)<=0.or.header(4)<system%no)ios=1
+            endif
+          endif
+          if(ios==0)then
+            counts(1)=counts(1)+1
+          else
+            counts(3)=counts(3)+1
+          endif
+        endif
+        close(iu)
+      enddo
+    enddo
+    call comm_summation(counts,totals,3,info%icomm_rko)
+    if(totals(3)/=0.or.(totals(1)>0.and.totals(2)>0)) &
+      error stop 'DC-LCFO reconstruction: invalid or mixed file headers'
+    if (totals(1)>0) then
       call init_conventional_from_dcdft_real(lg,mg,system,info,spsi)
     else
       call init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
@@ -800,8 +854,10 @@ contains
     integer,allocatable :: n_mat(:),n_basis(:,:),index_basis(:,:,:),jxyz_tot(:,:)
     real(8),allocatable :: f_basis(:,:,:,:,:),coef_wf(:,:,:),wrk1(:,:,:),wrk2(:,:,:)
 
-    if (.not.system%if_real_orbital .or. yn_spinorbit == 'y') &
-      stop "yn_conventional_from_dcdft: complex LCFO reconstruction is unsupported."
+    if (yn_spinorbit == 'y'.or.system%nk/=1) &
+      stop "DC-LCFO real reconstruction requires scalar Gamma orbitals."
+    if(any(abs(system%vec_k)>1d-12)) &
+      stop "DC-LCFO real reconstruction requires scalar Gamma orbitals."
 
     call reject_complex_lcfo_files()
     
