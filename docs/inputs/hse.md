@@ -284,10 +284,10 @@ buffers change from `32*N*m*s` bytes per rank to `16*Nlocal*m*s` bytes.
 For the H4 test (N=1024, m=6, s=1), four spatial ranks reduce this workspace
 from 192 KiB to 24 KiB per rank. This is not a claim about total process memory.
 
-Remaining replication includes the representative rank's core basis, received
-halo basis, dense LCFO diagonalization matrices, and all orbital columns in the spatial
-MLWF/ACE representation. Halo data is still exchanged by fragment
-representatives and broadcast within each fragment. Further orbital and
+Remaining replication includes the representative rank's core and halo bases,
+dense LCFO diagonalization matrices, and all orbital columns in the spatial
+MLWF/ACE representation. Halo data is exchanged by fragment representatives and then sent only to
+intersecting spatial domains with active k-point/orbital ownership. Further orbital and
 matrix distribution is needed for those parts; no fixed memory cap is imposed.
 
 ## Distributed core-basis construction
@@ -312,9 +312,25 @@ maximum receive workspace (not total process memory).
 
 The former full-core scratch columns on every process are gone. Root still
 holds the complete output basis, so this is not a fully distributed I/O solution.
-Received halo bases and global dense eigensolver matrices are unchanged.
+The fragment representative still receives full halos; other ranks receive only
+their intersecting tile. Global dense eigensolver matrices are unchanged.
 
 Validation includes spatial HSE DC eigenvalues and reconstructed RT, a rotated
 fragment geometry with ranks outside the core, and the existing four-k-point
 Si LCFO references with k-point/orbital decomposition. No new memory cap or
 input parameter is required.
+
+## LCFO halo tiles
+
+During LCFO Hamiltonian assembly, each fragment representative receives
+neighboring bases and sends only the intersection with each worker's grid.
+Ranks without the current k point, orbital columns, or a spatial intersection
+receive nothing. Workers project their local tile against local H-times-basis
+rows; only projected matrices are summed. Explicit send tiles are retained
+until completion, avoiding noncontiguous temporary-buffer lifetime issues.
+
+`DC_LCFO_HALO rank/tile/full grid points` reports the largest local integration
+tile and full halo for that rank. The representative still stores the complete
+inter-fragment receive buffers and one outgoing tile, so this diagnostic is
+not its total peak memory. The global LCFO eigensolver and the orbital-column
+layout of native MLWF/ACE exchange are unchanged by this assembly optimization.

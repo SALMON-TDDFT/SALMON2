@@ -1026,7 +1026,7 @@ contains
     end subroutine collect_basis_dimensions
 
     subroutine assemble_halo_hamiltonian(ik0,basis,hf0,diag_h,nh,halos,nact,rs,rr)
-      use communication, only: comm_irecv,comm_isend,comm_wait_all,comm_bcast,comm_summation
+      use communication, only: comm_irecv,comm_isend,comm_wait_all,comm_wait,comm_summation
       implicit none
       integer, intent(in) :: ik0,nh
       complex(8), intent(in) :: basis(:,:,:,:,:),hf0(:,:,:,:,:)
@@ -1036,6 +1036,9 @@ contains
       integer, allocatable, intent(out) :: rs(:),rr(:)
       integer :: h,ia,ib,ic,isp0,io0,jo0,tag_send,tag_recv
       integer :: l(3),d(3),nreq,lo(3),hi(3),ix0,iy0,iz0
+      integer :: peer,request,peer_lo(3),peer_hi(3),tile_extent(3),max_tile,max_halo
+      integer,allocatable :: local_domains(:,:),domains(:,:)
+      complex(8),allocatable :: tile(:,:,:,:,:),send_tile(:,:,:,:,:)
       complex(8) :: local_h(m,m,nspin)
 
       local_h = (0d0,0d0)
@@ -1058,6 +1061,13 @@ contains
       end if
       call comm_summation(local_h,diag_h,size(diag_h),info%icomm_rko)
 
+      allocate(local_domains(7,0:info%isize_rko-1),domains(7,0:info%isize_rko-1))
+      local_domains=0
+      local_domains(1:3,info%id_rko)=mg%is
+      local_domains(4:6,info%id_rko)=mg%ie
+      if(owns_ik.and.info%io_s<=m.and.info%io_e>=info%io_s)local_domains(7,info%id_rko)=1
+      call comm_summation(local_domains,domains,size(domains),info%icomm_rko)
+      max_tile=0;max_halo=0
       nact = 0
       do h=1,nh
         if (all(halos(h)%length > 0)) nact = nact + 1
@@ -1092,12 +1102,35 @@ contains
       do h=1,nh
         if (.not.all(halos(h)%length > 0)) cycle
         l=halos(h)%length;d=halos(h)%dsp_recv
-        if(dc%id_frag/=0)allocate(halos(h)%buf_recv(l(1),l(2),l(3),nspin,m))
-        call comm_bcast(halos(h)%buf_recv,info%icomm_rko,0)
-        local_h=(0d0,0d0)
-        ! Only intersecting spatial rows and locally owned ket columns contribute.
+        max_halo=max(max_halo,product(l))
         lo=max(mg%is,d+1);hi=min(mg%ie,d+l)
-        if(owns_ik)then
+        if(domains(7,info%id_rko)==1.and.all(hi>=lo))then
+          tile_extent=hi-lo+1
+          allocate(tile(tile_extent(1),tile_extent(2),tile_extent(3),nspin,m))
+          max_tile=max(max_tile,product(tile_extent))
+          if(dc%id_frag==0)tile=halos(h)%buf_recv(lo(1)-d(1):hi(1)-d(1), &
+            lo(2)-d(2):hi(2)-d(2),lo(3)-d(3):hi(3)-d(3),:,:)
+        endif
+        do peer=1,info%isize_rko-1
+          if(domains(7,peer)==0)cycle
+          peer_lo=max(domains(1:3,peer),d+1);peer_hi=min(domains(4:6,peer),d+l)
+          if(any(peer_hi<peer_lo))cycle
+          if(dc%id_frag==0)then
+            tile_extent=peer_hi-peer_lo+1
+            allocate(send_tile(tile_extent(1),tile_extent(2),tile_extent(3),nspin,m))
+            send_tile=halos(h)%buf_recv(peer_lo(1)-d(1):peer_hi(1)-d(1), &
+              peer_lo(2)-d(2):peer_hi(2)-d(2),peer_lo(3)-d(3):peer_hi(3)-d(3),:,:)
+            request=comm_isend(send_tile,peer,19002,info%icomm_rko)
+            call comm_wait(request)
+            deallocate(send_tile)
+          else if(info%id_rko==peer)then
+            request=comm_irecv(tile,0,19002,info%icomm_rko)
+            call comm_wait(request)
+          endif
+        enddo
+        local_h=(0d0,0d0)
+        ! Integrate only the local intersection received above.
+        if(allocated(tile))then
           do isp0=1,nspin
           do io0=max(1,info%io_s),min(info%io_e,m)
           do jo0=1,m
@@ -1106,7 +1139,7 @@ contains
             do ia=lo(1),hi(1)
               ix0=ia-mg%is(1)+1;iy0=ib-mg%is(2)+1;iz0=ic-mg%is(3)+1
               local_h(jo0,io0,isp0)=local_h(jo0,io0,isp0)+ &
-                hvol*conjg(halos(h)%buf_recv(ia-d(1),ib-d(2),ic-d(3),isp0,jo0))* &
+                hvol*conjg(tile(ia-lo(1)+1,ib-lo(2)+1,ic-lo(3)+1,isp0,jo0))* &
                 hf0(ix0,iy0,iz0,isp0,io0)
             end do
             end do
@@ -1117,10 +1150,12 @@ contains
         endif
         allocate(halos(h)%mat_h_local(m,m,nspin))
         call comm_summation(local_h,halos(h)%mat_h_local,size(local_h),info%icomm_rko)
-        deallocate(halos(h)%buf_recv)
+        if(allocated(tile))deallocate(tile)
+        if(allocated(halos(h)%buf_recv))deallocate(halos(h)%buf_recv)
         if(allocated(halos(h)%buf_send))deallocate(halos(h)%buf_send)
       end do
-      deallocate(rs,rr)
+      if(ik0==1)write(*,'(a,3i18)')'DC_LCFO_HALO rank/tile/full grid points: ',dc%id_frag,max_tile,max_halo
+      deallocate(rs,rr,local_domains,domains)
     end subroutine assemble_halo_hamiltonian
 
     integer function halo_tag(ifg,dvec) result(tag0)

@@ -129,6 +129,11 @@ class HSESpatial(unittest.TestCase):
                     self.assertEqual(int(received),0)
             for rank,local,stored in basis_rows:
                 if int(rank)!=0:self.assertEqual(int(local),int(stored))
+            halos=re.findall(r'DC_LCFO_HALO rank/tile/full grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
+            self.assertTrue(halos)
+            for rank,tile,full in halos:
+                self.assertGreater(int(full),0)
+                self.assertLessEqual(int(tile)*per_fragment,int(full))
             self.assertTrue(workspaces)
             for local,global_points in workspaces:
                 self.assertEqual(int(local)*per_fragment,int(global_points))
@@ -171,6 +176,8 @@ class HSESpatial(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
         self.assertIn('end SALMON',run.stdout)
         self.assertNotIn('EXX_SPATIAL',run.stdout)
+        halos=re.findall(r'DC_LCFO_HALO rank/tile/full grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
+        self.assertTrue(any(int(rank)>0 and int(tile)==0 and int(full)>0 for rank,tile,full in halos))
         charge=float(re.findall(r'integral\(rho_tot\)=\s*(\S+)',run.stdout)[-1])
         self.assertLess(abs(charge-4.),1e-10)
         differences=re.findall(r'DC #SCF.*diff =\s*(\S+)',run.stdout)
