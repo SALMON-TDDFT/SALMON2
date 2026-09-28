@@ -1,0 +1,553 @@
+{
+  "complete": false,
+  "summary": [
+    {
+      "shape": [
+        1,
+        1,
+        1
+      ],
+      "ranks": 1,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 3,
+      "full": {
+        "rt_max_seconds": {
+          "min": 2.3447,
+          "median": 2.3537,
+          "max": 2.359
+        },
+        "peak_rank_bytes": {
+          "min": 179306496,
+          "median": 179339264,
+          "max": 179404800
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 1.149302875091962e-12,
+          "median": 1.149302875091962e-12,
+          "max": 1.149302875091962e-12
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 2.7256,
+          "median": 2.7285,
+          "max": 2.7349
+        },
+        "peak_rank_bytes": {
+          "min": 179191808,
+          "median": 179208192,
+          "max": 179322880
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 2.2328991100550866e-07,
+          "median": 2.2328991100550866e-07,
+          "max": 2.2328991100550866e-07
+        }
+      },
+      "speedup": 0.8602509539184032,
+      "local_pairs": 0,
+      "global_pairs": 6336,
+      "local_fft_grid_ratio": null,
+      "max_radius": 4.949773157,
+      "max_loss": 0.0009999602327,
+      "active_updates": [
+        33,
+        33,
+        33
+      ],
+      "retained_gauge_updates": [
+        0,
+        0,
+        0
+      ],
+      "max_current_difference": 3.995490637310059e-10,
+      "max_energy_difference_ha": 0.00014397640106089682
+    },
+    {
+      "shape": [
+        2,
+        1,
+        1
+      ],
+      "ranks": 2,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 3,
+      "full": {
+        "rt_max_seconds": {
+          "min": 7.9622,
+          "median": 7.9867,
+          "max": 7.9997
+        },
+        "peak_rank_bytes": {
+          "min": 312393728,
+          "median": 312426496,
+          "max": 314589184
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 9.264163018940508e-07,
+          "median": 9.264163018940508e-07,
+          "max": 9.264163018940508e-07
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 6.4952,
+          "median": 6.515,
+          "max": 6.5835
+        },
+        "peak_rank_bytes": {
+          "min": 305512448,
+          "median": 305643520,
+          "max": 310788096
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 6.419757799136505e-06,
+          "median": 6.419757799136505e-06,
+          "max": 6.419757799136505e-06
+        }
+      },
+      "speedup": 1.2258590959477769,
+      "local_pairs": 25344,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.7119140625,
+      "max_radius": 4.18665202,
+      "max_loss": 0.0009999852317,
+      "active_updates": [
+        33,
+        33,
+        33
+      ],
+      "retained_gauge_updates": [
+        0,
+        0,
+        0
+      ],
+      "max_current_difference": 2.8173443338068123e-09,
+      "max_energy_difference_ha": 0.000708612854399604
+    },
+    {
+      "shape": [
+        4,
+        1,
+        1
+      ],
+      "ranks": 4,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 3,
+      "full": {
+        "rt_max_seconds": {
+          "min": 37.51,
+          "median": 37.588,
+          "max": 37.704
+        },
+        "peak_rank_bytes": {
+          "min": 582451200,
+          "median": 582680576,
+          "max": 582762496
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 1.4533619463463765e-07,
+          "median": 1.4533630121604801e-07,
+          "max": 1.4533630121604801e-07
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 26.982,
+          "median": 27.188,
+          "max": 27.248
+        },
+        "peak_rank_bytes": {
+          "min": 592510976,
+          "median": 592658432,
+          "max": 595623936
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 3.3232348002343315e-06,
+          "median": 3.3232348002343315e-06,
+          "max": 3.3232348002343315e-06
+        }
+      },
+      "speedup": 1.390186049959232,
+      "local_pairs": 101376,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.5917549133300781,
+      "max_radius": 5.032896063,
+      "max_loss": 0.0009999986616,
+      "active_updates": [
+        33,
+        33,
+        33
+      ],
+      "retained_gauge_updates": [
+        0,
+        0,
+        0
+      ],
+      "max_current_difference": 1.2327281128495787e-09,
+      "max_energy_difference_ha": 0.0005159601075988007
+    },
+    {
+      "shape": [
+        8,
+        1,
+        1
+      ],
+      "ranks": 8,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 1,
+      "full": {
+        "rt_max_seconds": {
+          "min": 220.51,
+          "median": 220.51,
+          "max": 220.51
+        },
+        "peak_rank_bytes": {
+          "min": 1185316864,
+          "median": 1185316864,
+          "max": 1185316864
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 2.600127970708854e-07,
+          "median": 2.600127970708854e-07,
+          "max": 2.600127970708854e-07
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 109.03,
+          "median": 109.03,
+          "max": 109.03
+        },
+        "peak_rank_bytes": {
+          "min": 1190658048,
+          "median": 1190658048,
+          "max": 1190658048
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 5.8256142949630885e-06,
+          "median": 5.8256142949630885e-06,
+          "max": 5.8256142949630885e-06
+        }
+      },
+      "speedup": 2.022470879574429,
+      "local_pairs": 135168,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.29587745666503906,
+      "max_radius": 5.030937828,
+      "max_loss": 0.0009999994028,
+      "active_updates": [
+        33
+      ],
+      "retained_gauge_updates": [
+        0
+      ],
+      "max_current_difference": 1.137263903400495e-09,
+      "max_energy_difference_ha": 0.0010299848111969823
+    },
+    {
+      "shape": [
+        16,
+        1,
+        1
+      ],
+      "ranks": 16,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 1,
+      "full": {
+        "rt_max_seconds": {
+          "min": 1878.0,
+          "median": 1878.0,
+          "max": 1878.0
+        },
+        "peak_rank_bytes": {
+          "min": 2432712704,
+          "median": 2432712704,
+          "max": 2432712704
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 5.188780107800994e-07,
+          "median": 5.188780107800994e-07,
+          "max": 5.188780107800994e-07
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 624.66,
+          "median": 624.66,
+          "max": 624.66
+        },
+        "peak_rank_bytes": {
+          "min": 2457731072,
+          "median": 2457731072,
+          "max": 2457731072
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 1.1637792994179108e-05,
+          "median": 1.1637792994179108e-05,
+          "max": 1.1637792994179108e-05
+        }
+      },
+      "speedup": 3.0064355009124966,
+      "local_pairs": 540672,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.14793872833251953,
+      "max_radius": 5.03061304,
+      "max_loss": 0.000999995548,
+      "active_updates": [
+        33
+      ],
+      "retained_gauge_updates": [
+        0
+      ],
+      "max_current_difference": 1.0984188285293622e-09,
+      "max_energy_difference_ha": 0.0020622468229873903
+    },
+    {
+      "shape": [
+        2,
+        2,
+        1
+      ],
+      "ranks": 4,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 3,
+      "full": {
+        "rt_max_seconds": {
+          "min": 37.499,
+          "median": 37.61,
+          "max": 39.001
+        },
+        "peak_rank_bytes": {
+          "min": 551927808,
+          "median": 551927808,
+          "max": 551960576
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 3.839116097026363e-06,
+          "median": 3.839116097026363e-06,
+          "max": 3.839116097026363e-06
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 18.699,
+          "median": 18.838,
+          "max": 19.004
+        },
+        "peak_rank_bytes": {
+          "min": 541245440,
+          "median": 541474816,
+          "max": 541786112
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 7.8608875000441e-06,
+          "median": 7.8608875000441e-06,
+          "max": 7.8608875000441e-06
+        }
+      },
+      "speedup": 2.00540135836141,
+      "local_pairs": 101376,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.20599365234375,
+      "max_radius": 3.843714955,
+      "max_loss": 0.0009999728327,
+      "active_updates": [
+        33,
+        33,
+        33
+      ],
+      "retained_gauge_updates": [
+        0,
+        0,
+        0
+      ],
+      "max_current_difference": 3.2424853677021732e-09,
+      "max_energy_difference_ha": 0.0025673474769973836
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 16,
+      "suites": [
+        "weak",
+        "strong"
+      ],
+      "repeats": 1,
+      "full": {
+        "rt_max_seconds": {
+          "min": 1851.5,
+          "median": 1851.5,
+          "max": 1851.5
+        },
+        "peak_rank_bytes": {
+          "min": 2049916928,
+          "median": 2049916928,
+          "max": 2049916928
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 1.0730880148912547e-06,
+          "median": 1.0730880148912547e-06,
+          "max": 1.0730880148912547e-06
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 545.64,
+          "median": 545.64,
+          "max": 545.64
+        },
+        "peak_rank_bytes": {
+          "min": 2066432000,
+          "median": 2066432000,
+          "max": 2066432000
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 2.838174498265289e-05,
+          "median": 2.838174498265289e-05,
+          "max": 2.838174498265289e-05
+        }
+      },
+      "speedup": 3.393262957261198,
+      "local_pairs": 540672,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.13500452041625977,
+      "max_radius": 5.089207556,
+      "max_loss": 0.0009999994949,
+      "active_updates": [
+        33
+      ],
+      "retained_gauge_updates": [
+        0
+      ],
+      "max_current_difference": 1.1875147912891873e-09,
+      "max_energy_difference_ha": 0.0019433070569903066
+    },
+    {
+      "shape": [
+        2,
+        2,
+        2
+      ],
+      "ranks": 8,
+      "suites": [
+        "weak"
+      ],
+      "repeats": 1,
+      "full": {
+        "rt_max_seconds": {
+          "min": 196.09,
+          "median": 196.09,
+          "max": 196.09
+        },
+        "peak_rank_bytes": {
+          "min": 986578944,
+          "median": 986578944,
+          "max": 986578944
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 1.200644420862318e-05,
+          "median": 1.200644420862318e-05,
+          "max": 1.200644420862318e-05
+        }
+      },
+      "adaptive": {
+        "rt_max_seconds": {
+          "min": 69.096,
+          "median": 69.096,
+          "max": 69.096
+        },
+        "peak_rank_bytes": {
+          "min": 974602240,
+          "median": 974602240,
+          "max": 974602240
+        },
+        "post_impulse_energy_width_ha": {
+          "min": 9.519094881227375e-05,
+          "median": 9.519094881227375e-05,
+          "max": 9.519094881227375e-05
+        }
+      },
+      "speedup": 2.837935625795994,
+      "local_pairs": 135168,
+      "global_pairs": 0,
+      "local_fft_grid_ratio": 0.09277517145330255,
+      "max_radius": 3.647258089,
+      "max_loss": 0.0009999958178,
+      "active_updates": [
+        33
+      ],
+      "retained_gauge_updates": [
+        0
+      ],
+      "max_current_difference": 2.146502916790206e-08,
+      "max_energy_difference_ha": 0.006934071995601698
+    }
+  ],
+  "strong_differences": {},
+  "missing_cases": [
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 8,
+      "suites": [
+        "strong"
+      ],
+      "repeats": 1
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 4,
+      "suites": [
+        "strong"
+      ],
+      "repeats": 1
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 2,
+      "suites": [
+        "strong"
+      ],
+      "repeats": 1
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 1,
+      "suites": [
+        "strong"
+      ],
+      "repeats": 1
+    }
+  ]
+}

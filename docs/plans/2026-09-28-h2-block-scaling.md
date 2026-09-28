@@ -40,3 +40,8 @@ Weak arrays: 1x1x1, 2x1x1, 4x1x1, 8x1x1, 16x1x1, 2x2x1, 4x4x1, 2x2x2; one rank p
 - Explain the measured/local-code bottlenecks: source localization reduces per-pair FFT volume, but all Nocc^2 pairs remain; compact action uses batches of4 targets, limiting active spatial FFT workers. Native RT stores all occupied columns per grid rank in this nproc_ob=1 experiment. Do not claim linear weak scaling or memory savings without evidence.
 - Archive results, source/build hashes, generated inputs, stdout, energy/current and per-rank RSS under `docs/benchmarks/2026-09-28-h2-blocks`; avoid copying large seed wavefunctions into Git. Preserve local seeds and reference their hashes/original paths. Include a manifest for every archived file. Render/inspect final scientific plot.
 - Review the final note against data, commit completed artifacts (no push requested this turn), and report completion with main comparisons. If a job fails, preserve partial data, identify the failure and report it; never label the matrix complete or fabricate missing rows.
+
+
+## User-directed stop before pair optimization
+
+Stopped at 32 completed RT runs / 8 GS preparations. Weak scaling complete; strong only MPI16 complete. MPI8 full run interrupted and excluded. Reference archive: `docs/benchmarks/2026-09-28-h2-blocks-before-pairs/`. Frozen old executable: `../work/salmon-before-pair-generation`. Do not resume this old matrix; implement `2026-09-28-exx-pair-candidates.md`, validate, then remeasure.
