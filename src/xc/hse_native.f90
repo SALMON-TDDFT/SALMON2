@@ -36,7 +36,7 @@ module hse_native
   type(s_hse_wannier),save :: wannier
   real(8),allocatable,save :: cached_occupation(:,:)
   complex(8),allocatable,save :: cached_action(:,:,:)
-  logical,save :: finite_support_localized=.true.
+  logical,save :: finite_support_localized=.true.,radius_warning_reported=.false.
   logical,save,public :: hse_adaptive_ready=.false.,hse_support_changed=.false.
   logical,save :: adaptive_active=.false.,cached_adaptive_ready=.false.
   logical,save :: hse_force_full_action=.false.
@@ -52,7 +52,7 @@ contains
   subroutine hse_check_localization()
     if(dc_canonical())return
     ! A density criterion cannot certify a gauge-dependent truncated operator.
-    if(exx_mlwf_norm_fraction>0d0.and..not.adaptive_active) &
+    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0.and..not.adaptive_active) &
       error stop 'Adaptive EXX: localized support not established; SCF result rejected'
     if(exx_mlwf_radius>0d0.and..not.finite_support_localized) &
       error stop 'EXX MLWF finite support: localization not converged; SCF result rejected'
@@ -185,6 +185,17 @@ contains
     hse_walltime=real(count,8)/real(rate,8)
   end function
 
+  subroutine warn_fixed_radius(max_loss)
+    real(8),intent(in) :: max_loss
+    real(8) :: target
+    if(exx_mlwf_radius<=0d0.or.radius_warning_reported)return
+    target=merge(exx_mlwf_norm_fraction,.999d0,exx_mlwf_norm_fraction>0d0)
+    if(1d0-max_loss>=target-64d0*epsilon(1d0))return
+    write(*,'(a,3es18.9)') 'WARNING EXX fixed radius retains less than target; R(bohr)/min retained/target: ', &
+      exx_mlwf_radius,1d0-max_loss,target
+    radius_warning_reported=.true.
+  end subroutine warn_fixed_radius
+
   logical function dc_canonical()
     dc_canonical=yn_dc=='y'.and.yn_exx_dc_mlwf=='n'
   end function
@@ -245,7 +256,7 @@ contains
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
     endif
-    if((info%isize_r>1.or.info%isize_o>1.or.exx_mlwf_norm_fraction>0d0).and. &
+    if((info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
        ((theory=='dft').or. &
         (yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
@@ -440,7 +451,7 @@ contains
     call hse_pack(psi,mg,info,target_work)
     if(timing_enabled)tick=hse_walltime()
     if(use_wannier_exchange().and.hse_force_full_action)then
-      if(info%isize_r>1.or.info%isize_o>1.or.exx_mlwf_norm_fraction>0d0)then
+      if(info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
           [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
@@ -507,19 +518,19 @@ contains
     integer,allocatable :: orbital_comm
     real(8),allocatable :: radii(:),loss(:)
     logical,allocatable :: protected(:)
-    logical :: was_active,screen_fallback
+    logical :: was_active,screen_fallback,radius_covers_cell
     integer :: requested_screen_mode
     real(8) :: correction_norm,accepted_bound
     integer :: adaptive_bad
     real(8) :: mask_diagnostic(2),mask_maximum(2)
-    if(exx_mlwf_norm_fraction>0d0.and.theory/='dft')hse_adaptive_ready=.true.
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.theory/='dft')hse_adaptive_ready=.true.
     if(info%isize_x/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
       error stop 'Spatial EXX: Gamma y/z pencils required'
     if(info%isize_o>system%no)error stop 'Spatial EXX: each orbital group must own at least one state'
     if(any(num_kgrid/=1).or.maxval(abs(system%vec_k))>1d-12.or.use_symmetry) &
       error stop 'Spatial EXX: unshifted Gamma required'
-    if(exx_mlwf_radius/=0d0.or.(theory/='dft'.and.maxval(abs(system%rocc-2d0))>1d-12)) &
-      error stop 'Spatial EXX: full support and occupied spin pairs required'
+    if(theory/='dft'.and.maxval(abs(system%rocc-2d0))>1d-12) &
+      error stop 'Spatial EXX: occupied spin pairs required'
     if(theory/='dft'.and.propagator/='hse_taylor4')error stop 'Spatial EXX: Taylor4 ACE required'
     if(any(mg%num/=num_rgrid/[1,info%isize_y,info%isize_z]).or. &
        any(mg%is/=[1,info%id_y*mg%num(2)+1,info%id_z*mg%num(3)+1])) &
@@ -538,14 +549,14 @@ contains
         if(all(cached_source==local).and.all(cached_occupation==system%rocc(:,:,1)))changed=0
       endif
     endif
-    if(exx_mlwf_norm_fraction>0d0.and.(hse_adaptive_ready.neqv.cached_adaptive_ready))changed=1
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.(hse_adaptive_ready.neqv.cached_adaptive_ready))changed=1
     call comm_summation(changed,total,info%icomm_ro)
     if(total==0)return
     maxiter=0
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
-    if(exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and.spatial%last_localization_status/=0) &
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.hse_adaptive_ready.and.spatial%last_localization_status/=0) &
       maxiter=exx_mlwf_maxiter
-    spatial%seed_localized=exx_mlwf_norm_fraction>0d0
+    spatial%seed_localized=exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0
     spatial%retain_accepted_gauge=theory/='dft'
     if(dc_canonical())then
       maxiter=0
@@ -558,26 +569,41 @@ contains
       maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(info%io_s:info%io_e,:,1),comm_o=orbital_comm)
     endif
     if(status/=0)error stop 'Spatial EXX: source refresh failed'
-    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.theory/='dft')then
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_mlwf_norm_fraction<1d0.and.theory/='dft')then
       if(spatial%last_localization_status/=0) &
         error stop 'Adaptive RT requires an accepted transported MLWF gauge; refine initial localization'
     endif
     if(spatial%retained_gauge.and.info%id_ro==0)write(*,'(a,i10)') &
       'EXX_SPATIAL retained accepted transported gauge at refresh: ',spatial%updates
     was_active=adaptive_active
-    adaptive_active=.not.dc_canonical().and.exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and. &
-      (spatial%last_localization_status==0.or.exx_mlwf_norm_fraction==1d0)
+    ! A sphere this large cannot truncate any point under the periodic metric;
+    ! as for fraction=1, its exact action does not require a converged gauge.
+    radius_covers_cell=exx_mlwf_radius>0d0.and. &
+      exx_mlwf_radius>=sqrt(sum((.5d0*num_rgrid*system%hgs)**2))
+    adaptive_active=.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.hse_adaptive_ready.and. &
+      (spatial%last_localization_status==0.or.radius_covers_cell.or. &
+       (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0))
     if(adaptive_active)then
       allocate(radii(info%numo),loss(info%numo),protected(info%numo))
       call adaptive_source_mask(num_rgrid,system%hgs,mg%is-1,mg%num,info%icomm_r,spatial%source, &
-        exx_mlwf_norm_fraction,radii,loss,protected,status)
+        merge(exx_mlwf_norm_fraction,.999d0,exx_mlwf_norm_fraction>0d0),radii,loss,protected,status, &
+        fixed_radius=exx_mlwf_radius)
       call comm_summation(status,adaptive_bad,info%icomm_ro)
       if(adaptive_bad/=0)error stop 'Adaptive EXX: source mask failed'
       mask_diagnostic=[maxval(loss),maxval(radii)]
       call comm_get_max(mask_diagnostic,mask_maximum,2,info%icomm_ro)
-      if(info%id_ro==0)write(*,'(a,3es18.9)')'EXX_ADAPTIVE fraction/max radius/max norm loss: ', &
-        exx_mlwf_norm_fraction,mask_maximum(2),mask_maximum(1)
+      if(info%id_ro==0)then
+        if(exx_mlwf_radius>0d0)then
+          write(*,'(a,3es18.9)') 'EXX_FIXED radius/min retained norm/max loss: ', &
+            exx_mlwf_radius,1d0-mask_maximum(1),mask_maximum(1)
+          call warn_fixed_radius(mask_maximum(1))
+        else
+          write(*,'(a,3es18.9)')'EXX_ADAPTIVE fraction/max radius/max norm loss: ', &
+            exx_mlwf_norm_fraction,mask_maximum(2),mask_maximum(1)
+        endif
+      endif
     endif
+    if(exx_mlwf_radius>0d0)finite_support_localized=adaptive_active
     if(adaptive_active.neqv.was_active)hse_support_changed=.true.
     cached_adaptive_ready=hse_adaptive_ready
     spatial%compact=adaptive_active.and.exx_local_fft=='auto'
@@ -722,6 +748,7 @@ contains
       if(status==0)then
         wannier%use_local_fft=exx_local_fft=='auto'
         call wannier_truncate_source(wannier,exx_mlwf_radius,status)
+        call warn_fixed_radius(wannier%max_discarded_norm_fraction)
         finite_support_localized=wannier%discarded_norm_fraction==0d0.or.wannier%last_localization_status==0
       endif
       if(status==0)call wannier_apply(wannier,allpsi,allw,status)

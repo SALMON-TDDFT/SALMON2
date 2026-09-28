@@ -6,7 +6,7 @@ program probe
  real(8) :: refcenter(3),mom(6),momglobal(6),outer,globalouter,inside,globalinside
  real(8),allocatable :: d2(:)
  real(8) :: h(3)=[.4d0,.6d0,.8d0],length(3),delta(3),radii(4),loss(4),before(4),after(4),local(4)
- complex(8),allocatable :: source(:,:),saved(:,:)
+ complex(8),allocatable :: source(:,:),saved(:,:),fixed(:,:)
  logical :: protected(4)
  call MPI_Init(ierr)
  call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
@@ -68,6 +68,22 @@ program probe
  enddo
  ! Quantile radius should remain small even when the WF straddles cell boundaries.
  if(any(radii(:2)>3d0))error stop 'periodic center or metric incorrect'
+ ! Explicit R controls geometry even if the norm target is not met.
+ source=saved
+ call adaptive_source_mask(n,h,lo,m,MPI_COMM_WORLD,source,.999d0,radii,loss,protected,status,fixed_radius=.7d0)
+ if(status/=0.or.any(abs(radii(:2)-.7d0)>1d-12))error stop 'fixed radius not respected'
+ if(any(loss(:2)<=.001d0))error stop 'fixture must miss the diagnostic target'
+ fixed=source
+ source=saved
+ call adaptive_source_mask(n,h,lo,m,MPI_COMM_WORLD,source,.5d0,radii,loss,protected,status,fixed_radius=.7d0)
+ if(status/=0.or.any(source/=fixed))error stop 'norm target changed fixed support'
+ source=saved
+ call adaptive_source_mask(n,h,lo,m,MPI_COMM_WORLD,source,1d0,radii,loss,protected,status,fixed_radius=.7d0)
+ if(status/=0.or.any(source/=fixed))error stop 'fraction one overrode fixed R'
+ if(any(source(:,3:)/=saved(:,3:)))error stop 'fixed R changed protected source'
+ local=sum(abs(source)**2,dim=1)
+ call MPI_Allreduce(local,after,4,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+ if(any(abs(loss(:2)-(1d0-after(:2)/before(:2)))>1d-12))error stop 'fixed loss mismatch'
  if(rank==0)write(*,'(8es25.16)')radii,loss
  call MPI_Finalize(ierr)
 end program

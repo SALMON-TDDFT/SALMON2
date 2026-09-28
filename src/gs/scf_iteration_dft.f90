@@ -115,7 +115,9 @@ pre_scf_root=comm_is_root(nproc_id_global)
 if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
 adaptive_comm=info%icomm_rko
 if(yn_dc=='y')adaptive_comm=dc%icomm_tot
-adaptive_exchange=(hse_enabled().or.exx_pre_scf_active).and.exx_mlwf_norm_fraction>0d0.and. &
+adaptive_exchange=(hse_enabled().or.exx_pre_scf_active).and. &
+  ((exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0).or. &
+   (exx_mlwf_radius>0d0.and.(info%isize_r>1.or.info%isize_o>1))).and. &
   .not.(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')
 if(adaptive_exchange)then
   ! Each static SCF starts with the full exchange operator.

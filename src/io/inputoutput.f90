@@ -3289,14 +3289,14 @@ contains
     if(exx_pair_screening/='off')then
       if(xc/='hse06'.or.hse_omega<=0d0)error stop 'pair screening requires HSE06 with positive omega'
       if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
+      if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
     endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'
     if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &
       error stop 'exx_mlwf_norm_fraction must be in [0,1]'
-    if(exx_mlwf_norm_fraction>0d0)then
-      if(exx_mlwf_radius>0d0)error stop 'choose adaptive norm fraction or fixed EXX radius'
+    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)then
       if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12)) &
         error stop 'adaptive EXX support requires unshifted Gamma'
       if(yn_hse_lcfo_rt=='y')error stop 'adaptive EXX support requires native mesh orbitals'
@@ -3326,11 +3326,11 @@ contains
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
       yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
     hybrid_spatial_scf=(xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.theory=='dft'.and. &
-      yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.exx_mlwf_norm_fraction>0d0)
+      yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
     if(hybrid_spatial_scf)then
       yn_hse_wannier='y'
-      if((yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)).or.exx_mlwf_radius/=0d0) &
-        error stop 'Spatial hybrid SCF: occupied spin pairs and full support required'
+      if(yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)) &
+        error stop 'Spatial hybrid SCF: occupied spin pairs required'
       if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
         error stop 'Spatial hybrid SCF: restart/snapshot/checkpoint unsupported'
       if(write_gs_restart_data/='no'.or.yn_self_checkpoint=='y') &
@@ -3407,7 +3407,7 @@ contains
       if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
-        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.exx_mlwf_norm_fraction>0d0))then
+        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)))then
           if(nproc_ob<1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
             error stop 'Spatial EXX: Gamma y/z pencils required'
           if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &

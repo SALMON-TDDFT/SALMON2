@@ -9,9 +9,10 @@ module exx_adaptive_support
   private
   public :: adaptive_source_mask
 contains
-  subroutine adaptive_source_mask(n,h,lo,m,comm_r,source,fraction,radii,loss,protected,status)
+  subroutine adaptive_source_mask(n,h,lo,m,comm_r,source,fraction,radii,loss,protected,status,fixed_radius)
     integer,intent(in) :: n(3),lo(3),m(3),comm_r
     real(8),intent(in) :: h(3),fraction
+    real(8),intent(in),optional :: fixed_radius
     complex(8),intent(inout) :: source(:,:)
     real(8),intent(out) :: radii(:),loss(:)
     logical,intent(out) :: protected(:)
@@ -19,8 +20,12 @@ contains
     real(8),allocatable :: weight(:),distance2(:),point(:,:)
     real(8) :: length(3),center(3),delta(3),local_moment(6),moment(6)
     real(8) :: norm,local_norm,kept,lower,upper,middle,pi,angle,tol
+    real(8) :: requested_radius
     integer :: bad,no,g,j,x,y,z,axis,iter
     status=1;bad=0;radii=0d0;loss=0d0;protected=.false.
+    requested_radius=0d0
+    if(present(fixed_radius))requested_radius=fixed_radius
+    if(.not.ieee_is_finite(requested_radius).or.requested_radius<0d0)bad=1
     no=size(source,2)
     if(any(n<1).or.any(m<0).or.any(lo<0).or.any(lo+m>n))bad=1
     if(size(source,1)/=product(m))bad=1
@@ -36,7 +41,7 @@ contains
     if(bad/=0)return
     radii=sqrt(sum((length/2d0)**2))
     ! Exact full-support mode: do not alter even subnormal source coefficients.
-    if(fraction==1d0)then
+    if(fraction==1d0.and.requested_radius==0d0)then
       status=0
       return
     endif
@@ -75,6 +80,11 @@ contains
         delta=modulo(point(:,g)-center+length/2d0,length)-length/2d0
         distance2(g)=sum(delta**2)
       enddo
+      if(requested_radius>0d0)then
+        ! Fixed R takes precedence over the diagnostic norm target. Limit the
+        ! square to the largest periodic distance to avoid overflow for huge R.
+        upper=min(requested_radius,sqrt(sum((length/2d0)**2)))**2
+      else
       lower=0d0;upper=sum((length/2d0)**2)
       ! upper always encloses at least fraction of the norm. Bisection in r^2
       ! locates the first retained mesh shell without storing global distances.
@@ -88,18 +98,20 @@ contains
           lower=middle
         endif
       enddo
+      endif
       ! Expand by roundoff only, to keep equivalent boundary shells consistent
       ! across MPI decompositions and the subsequent square-root conversion.
       tol=64d0*epsilon(1d0)*max(1d0,upper)
       upper=upper+tol
       local_norm=sum(weight,mask=distance2<=upper)
       call comm_summation(local_norm,kept,comm_r)
-      if(kept< fraction*norm-64d0*epsilon(1d0)*norm)then
+      if(requested_radius==0d0.and.kept< fraction*norm-64d0*epsilon(1d0)*norm)then
         protected(j)=.true.
         cycle
       endif
       where(distance2>upper)source(:,j)=(0d0,0d0)
       radii(j)=sqrt(upper)
+      if(requested_radius>0d0)radii(j)=requested_radius
       loss(j)=max(0d0,1d0-kept/norm)
     enddo
     status=0

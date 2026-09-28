@@ -10,7 +10,7 @@ ROOT=Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE') and os.environ.get('SALMON_TEST_MPIEXEC'), 'SALMON_TEST_EXE/MPIEXEC required')
 class AdaptiveSCF(unittest.TestCase):
-    def run_case(self, fraction, ranks=1, fft='auto', functional='pbeh40', dc=False, pre_scf=0, temperature_k=0, small_cell=False, dc_mlwf='y', orbital_ranks=1, kpoints=1):
+    def run_case(self, fraction, ranks=1, fft='auto', functional='pbeh40', dc=False, pre_scf=0, temperature_k=0, small_cell=False, dc_mlwf='y', orbital_ranks=1, kpoints=1, radius=0, mlwf_maxiter=100, mlwf_tolerance=1e-7):
         inp=Path(__file__).with_name('dc_hydrogen.inp').read_text()
         inp=inp.replace("yn_dc='y'", "yn_dc='y'" if dc else "yn_dc='n'")
         inp=inp.replace('nproc_k=2','nproc_k=1').replace('num_kgrid=1,2,1','num_kgrid=1,1,1')
@@ -19,7 +19,7 @@ class AdaptiveSCF(unittest.TestCase):
         inp=inp.replace('al=16d0,8d0,8d0','al=48d0,24d0,24d0')
         inp=inp.replace('num_rgrid=16,8,8','num_rgrid=48,24,24')
         inp=inp.replace("xc='pbeh40_rvv10'",f"xc='{functional}'")
-        inp=inp.replace('hse_mlwf_maxiter=20',f"yn_hse_wannier='y'\n exx_mlwf_maxiter=100\n exx_mlwf_interval=5\n exx_mlwf_tolerance=1d-7\n exx_mlwf_norm_fraction={fraction}\n exx_local_fft='{fft}'\n pbeh_coulomb_radius=4")
+        inp=inp.replace('hse_mlwf_maxiter=20',f"yn_hse_wannier='y'\n exx_mlwf_maxiter={mlwf_maxiter}\n exx_mlwf_interval=5\n exx_mlwf_tolerance={mlwf_tolerance}\n exx_mlwf_norm_fraction={fraction}\n exx_local_fft='{fft}'\n pbeh_coulomb_radius=4")
         inp=inp.replace('nscf=200','nscf=1000\n alpha_mb=0.1d0').replace('threshold=1d-8','threshold=1d-10')
         if dc:
             inp=inp.replace('&functional',f"&functional\n yn_exx_dc_mlwf='{dc_mlwf}'")
@@ -35,6 +35,8 @@ class AdaptiveSCF(unittest.TestCase):
             inp=inp.replace("method_init_wf='gauss10'","method_init_wf='gauss'")
             inp=inp.replace('al=48d0,24d0,24d0','al=16d0,8d0,8d0').replace('num_rgrid=48,24,24','num_rgrid=16,8,8')
             inp=inp[:inp.index('&atomic_coor')]+"&atomic_coor\n 'H' 3.3d0 4d0 4d0 1\n 'H' 4.7d0 4d0 4d0 1\n 'H' 11.3d0 4d0 4d0 1\n 'H' 12.7d0 4d0 4d0 1\n/\n"
+        if radius:
+            inp=inp.replace('&functional',f'&functional\n exx_mlwf_radius={radius}')
         if pre_scf:
             inp=inp.replace('&functional',f'&functional\n exx_pre_scf_threshold={pre_scf}\n exx_pre_scf_steps=3')
         command=[os.environ['SALMON_TEST_MPIEXEC'],'-n',str(ranks),os.environ['SALMON_TEST_EXE']]
@@ -43,7 +45,7 @@ class AdaptiveSCF(unittest.TestCase):
             run=subprocess.run(command,input=inp,cwd=tmp,text=True,capture_output=True,timeout=180,
                 env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
             if os.environ.get('SALMON_TEST_SAVE_DIR'):
-                out=Path(os.environ['SALMON_TEST_SAVE_DIR'])/f'{functional}-{dc}-{fraction}-{ranks}-{fft}-pre{pre_scf}-T{temperature_k}-small{small_cell}-mlwf{dc_mlwf}-ob{orbital_ranks}-k{kpoints}'
+                out=Path(os.environ['SALMON_TEST_SAVE_DIR'])/f'{functional}-{dc}-{fraction}-{ranks}-{fft}-pre{pre_scf}-T{temperature_k}-small{small_cell}-mlwf{dc_mlwf}-ob{orbital_ranks}-k{kpoints}-R{radius}'
                 out.mkdir(parents=True,exist_ok=True)
                 (out/'inputfile').write_text(inp);(out/'output').write_text(run.stdout+run.stderr)
             self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
@@ -57,7 +59,7 @@ class AdaptiveSCF(unittest.TestCase):
                 self.assertNotIn('EXX_ADAPTIVE',before)
                 self.assertNotIn('rVV10 backend:',before)
                 self.assertIn('EXX_DC canonical full-fragment source' if dc and dc_mlwf=='n' else
-                              ('EXX_ADAPTIVE' if fraction else 'HSE_WANNIER'),after)
+                              ('EXX_FIXED' if radius else ('EXX_ADAPTIVE' if fraction else 'HSE_WANNIER')),after)
 
             if dc and temperature_k>0:
                 charges=re.findall(r'integral\(rho_tot\)=\s*(\S+)',run.stdout)
@@ -67,7 +69,11 @@ class AdaptiveSCF(unittest.TestCase):
                 self.assertLess(float(re.findall(r'DC #SCF.*diff =\s*(\S+)',run.stdout)[-1]),1e-8)
             else:self.assertIn('#GS converged',run.stdout)
             energy=float(re.search(r'Total energy \(eV\) =\s*(\S+)',next(Path(tmp).rglob('*_info.data')).read_text())[1])
-            if fraction and not (dc and dc_mlwf=='n'):
+            if radius:
+                rows=re.findall(r'EXX_FIXED radius/min retained norm/max loss:\s*(\S+)\s*(\S+)\s*(\S+)',run.stdout)
+                self.assertTrue(rows)
+                self.assertTrue(all(abs(float(r[0])-radius)<1e-10 for r in rows))
+            if fraction and not radius and not (dc and dc_mlwf=='n'):
                 rows=re.findall(r'EXX_ADAPTIVE fraction/max radius/max norm loss:\s*(\S+)\s*(\S+)\s*(\S+)',run.stdout)
                 self.assertTrue(rows)
                 self.assertLessEqual(max(float(r[2]) for r in rows),1-fraction+1e-10)

@@ -20,8 +20,20 @@ values is an error; matching values are accepted. Logs use the canonical names.
 ## Meaning of the support radius
 
 `exx_mlwf_radius` uses the length unit selected by `unit_system` (bohr in `a.u.`,
-angstrom in `A_eV_fs`); it is logged in bohr. Zero keeps full support. A positive
-radius applies the existing LCFO periodic sphere-mask geometry to each
+angstrom in `A_eV_fs`); it is logged in bohr. A positive **R takes precedence**
+over `exx_mlwf_norm_fraction`. The fraction is then only a diagnostic target;
+0 or omission uses 0.999 as the warning target. If any source retains less than
+the target, `WARNING EXX fixed radius retains less than target` is printed once
+per source team, with R, the minimum retained squared norm and the target.
+The code does not enlarge R or stop solely because this target is missed.
+
+```fortran
+  exx_mlwf_radius=5d0           ! R in the selected input length unit
+  exx_mlwf_norm_fraction=.999d0 ! warning threshold when R > 0
+```
+
+With R=0, a positive fraction selects the adaptive norm-based radius; with both
+zero, sources remain full support. A positive radius applies the existing LCFO periodic sphere-mask geometry to each
 occupation-weighted Wannier source `Q=Psi sqrt(f/2) U`, about its periodic center
 in the Born–von Karman supercell (fragment supercell for DC). Both source
 appearances in the Fock action use this mask. Targets are not masked and sources
@@ -55,7 +67,7 @@ a small norm loss alone is not an exchange-energy error bound.
 This is an explicit, gauge-dependent source approximation. It preserves the
 Hermiticity of the exchange action and reuses ACE, but it does not establish a
 variational energy functional or consistent ionic forces. Positive radius is
-currently limited to static DFT (including static DC), with MD, relaxation,
+currently limited to static DFT (including explicitly enabled DC MLWF), with MD, relaxation,
 real-time propagation, restart and legacy snapshot export rejected. Any force
 values printed by a static finite-radius run are not validated for use in MD or
 optimization. Unconverged localization is reported during iteration and does not silently
@@ -93,7 +105,8 @@ has its own radius, determined from local grid rows and small reductions.
 Sources with ambiguous circular centers remain uncut. There is no source
 renormalization and no cutoff on arbitrary target wavefunctions. A value of
 1 is the full-support reference through the same spatial backend. A positive
-fixed `exx_mlwf_radius` and positive norm fraction cannot be combined.
+fixed `exx_mlwf_radius` overrides the adaptive radius; the fraction then serves
+only as a retained-norm warning threshold.
 
 The masked source appears in both factors of the exchange action. Compact
 convolution uses the same discrete global kernel (including G=0), but stores
@@ -145,7 +158,7 @@ weighted Frobenius norm of the **raw exchange action on the current occupied
 columns**, before the exchange mixing fraction. It is not an energy tolerance,
 a force tolerance, or a bound on arbitrary-target ACE propagation error.
 
-Requires positive HSE omega and `exx_mlwf_norm_fraction > 0`; use fraction 1 for
+Requires positive HSE omega, `exx_mlwf_radius=0` and `exx_mlwf_norm_fraction > 0`; use fraction 1 for
 a full-source-support reference. Existing Gamma, native-mesh, static-SCF/fixed-
 ion-RT and restart/snapshot restrictions apply. The current implementation does
 not support this control for PBEh. No memory ceiling is introduced.
@@ -241,3 +254,12 @@ snapshots are rejected rather than silently ignored. Set `yn_exx_dc_mlwf='y'`
 only to opt into the former DC localization route for comparisons. A 300 K
 DC test with empty states and 0.999 support did not converge on that old route;
 this does not limit the new full-fragment route. See `docs/pbe-pre-scf-ja.md`.
+
+
+Fixed-radius static SCF also supports the distributed spatial/orbital backend.
+Its support is enabled after PBE preconvergence (when selected), or the existing
+SCF residual warmup, and after successful localization. `EXX_FIXED` reports R,
+minimum retained squared norm and maximum loss. A radius enclosing the complete
+periodic cell is exact and does not require converged localization. The existing
+ambiguous-center protection still leaves such sources uncut. This correction
+does not add fixed-radius RT/MD or fixed-radius pair-screening support.
