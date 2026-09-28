@@ -75,3 +75,34 @@ seed payload hashes, every rank RSS, timings, currents, energies and MLWF
 status lines. Preserve the output directory until it has been archived.
 
 Recorded results: [Japanese RT measurement note](../../docs/h2-pbeh-rt-scaling-ja.md).
+
+## Paired adaptive-support measurements
+
+Reuse the archived GS payloads and original `results.json` in a seed directory:
+
+```sh
+python3 testsuites/benchmark_h2_pbeh_rt/run_adaptive.py \
+  --binary /absolute/path/to/salmon \
+  --seeds /absolute/path/to/original-measurements \
+  --output /absolute/path/to/new-adaptive-measurements --repeat 3
+python3 testsuites/benchmark_h2_pbeh_rt/analyze_adaptive.py \
+  /absolute/path/to/new-adaptive-measurements/results.json \
+  /absolute/path/to/analysis
+```
+
+Runs 72 jobs: the same 12 cases, three repeats, norm fractions 1.0 and 0.999.
+Both use the spatial EXX backend even at MPI1; 1.0 is a same-backend full-support
+reference. Modes alternate within each repetition, with reversed order on even
+repetitions. Initial seeds are identical and checked against archived hashes.
+`exx_local_fft='auto'`; all other physical conditions remain the same.
+
+Unlike the original full-support harness, the paired driver records approximate
+support energy widths even when they exceed 1e-7 Ha, and sets an explicit flag.
+It retains the original parser's completion, finiteness, rank, and step checks.
+The analyzer records current and energy differences across modes and layouts;
+`complete=true` means all measurements finished, **not numerical validation**.
+Support counters are emitted only while adaptive masking is active. Their pair
+counts exclude full-support fallback updates. The FFT volume ratio describes
+local pair transforms only; it excludes setup and communication costs.
+
+Results: [99.9% support measurement](../../docs/h2-pbeh-adaptive-rt-scaling-ja.md).

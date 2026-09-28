@@ -1,0 +1,338 @@
+{
+  "cases": [
+    {
+      "shape": [
+        1,
+        1,
+        1
+      ],
+      "ranks": 1,
+      "active_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 0,
+      "global_pairs_during_active_support": 99,
+      "local_fft_volume_ratio": null,
+      "maximum_norm_loss": 0.0009999918116,
+      "current_error_au": 5.170278904979889e-10,
+      "reference_peak_current_au": 3.93295117371786e-07,
+      "energy_error_ha": 2.1785037159993692e-05,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 5.830197991052444e-08
+    },
+    {
+      "shape": [
+        2,
+        1,
+        1
+      ],
+      "ranks": 2,
+      "active_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 0,
+      "global_pairs_during_active_support": 396,
+      "local_fft_volume_ratio": null,
+      "maximum_norm_loss": 0.0009999492833,
+      "current_error_au": 1.7798219205599525e-09,
+      "reference_peak_current_au": 3.93328894936716e-07,
+      "energy_error_ha": 3.933306784009716e-05,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 2.067731998955935e-07
+    },
+    {
+      "shape": [
+        4,
+        1,
+        1
+      ],
+      "ranks": 4,
+      "active_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 0,
+      "global_pairs_during_active_support": 1584,
+      "local_fft_volume_ratio": null,
+      "maximum_norm_loss": 0.0009999800774,
+      "current_error_au": 5.411258839430248e-10,
+      "reference_peak_current_au": 3.93328523069001e-07,
+      "energy_error_ha": 7.760925990041301e-05,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 1.0151004037339817e-07
+    },
+    {
+      "shape": [
+        8,
+        1,
+        1
+      ],
+      "ranks": 8,
+      "active_refreshes": [
+        13,
+        28,
+        18
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 0,
+      "global_pairs_during_active_support": 3776,
+      "local_fft_volume_ratio": null,
+      "maximum_norm_loss": 0.0009999979615,
+      "current_error_au": 4.442880890490102e-10,
+      "reference_peak_current_au": 3.93328535483743e-07,
+      "energy_error_ha": 0.00015519958797938216,
+      "repeat_current_error_au": 2.4094566838098754e-10,
+      "maximum_energy_width_ha": 0.0001550705735002822
+    },
+    {
+      "shape": [
+        16,
+        1,
+        1
+      ],
+      "ranks": 16,
+      "active_refreshes": [
+        0,
+        9,
+        4
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 3328,
+      "global_pairs_during_active_support": 0,
+      "local_fft_volume_ratio": 0.703125,
+      "maximum_norm_loss": 0.0009998115494,
+      "current_error_au": 1.5028541246802687e-10,
+      "reference_peak_current_au": 3.9332853520639e-07,
+      "energy_error_ha": 0.0003099508263026962,
+      "repeat_current_error_au": 1.5028541246903273e-10,
+      "maximum_energy_width_ha": 0.00030995082790141737
+    },
+    {
+      "shape": [
+        2,
+        2,
+        1
+      ],
+      "ranks": 4,
+      "active_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 0,
+      "global_pairs_during_active_support": 1584,
+      "local_fft_volume_ratio": null,
+      "maximum_norm_loss": 0.0009999379652,
+      "current_error_au": 1.4943789121601936e-10,
+      "reference_peak_current_au": 3.93347509193419e-07,
+      "energy_error_ha": 7.453358532050203e-05,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 1.1041579028869819e-07
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 16,
+      "active_refreshes": [
+        28,
+        27,
+        27
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 20992,
+      "global_pairs_during_active_support": 0,
+      "local_fft_volume_ratio": 0.98876953125,
+      "maximum_norm_loss": 0.0009999937779,
+      "current_error_au": 1.293702704670018e-09,
+      "reference_peak_current_au": 3.93347043682663e-07,
+      "energy_error_ha": 0.00028954376280054817,
+      "repeat_current_error_au": 5.027974417097018e-11,
+      "maximum_energy_width_ha": 0.0002894406510023373
+    },
+    {
+      "shape": [
+        2,
+        2,
+        2
+      ],
+      "ranks": 8,
+      "active_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 0,
+      "global_pairs_during_active_support": 6336,
+      "local_fft_volume_ratio": null,
+      "maximum_norm_loss": 0.0009999602164,
+      "current_error_au": 4.01818323861996e-10,
+      "reference_peak_current_au": 3.93365332037078e-07,
+      "energy_error_ha": 0.00014397640360996888,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 2.2329018989353244e-07
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 1,
+      "active_refreshes": [
+        27,
+        27,
+        27
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 20736,
+      "global_pairs_during_active_support": 0,
+      "local_fft_volume_ratio": 0.98876953125,
+      "maximum_norm_loss": 0.0009999915255,
+      "current_error_au": 1.3096390149160026e-09,
+      "reference_peak_current_au": 3.93347043682665e-07,
+      "energy_error_ha": 0.00028952974989948643,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 0.00028950879899980464
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 2,
+      "active_refreshes": [
+        24,
+        24,
+        24
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 18432,
+      "global_pairs_during_active_support": 0,
+      "local_fft_volume_ratio": 0.98876953125,
+      "maximum_norm_loss": 0.0009999913185,
+      "current_error_au": 1.1579687912739653e-09,
+      "reference_peak_current_au": 3.93347043682666e-07,
+      "energy_error_ha": 0.00028952974239970786,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 0.00028950878970235294
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 4,
+      "active_refreshes": [
+        25,
+        25,
+        25
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 19200,
+      "global_pairs_during_active_support": 0,
+      "local_fft_volume_ratio": 0.98876953125,
+      "maximum_norm_loss": 0.0009999607556,
+      "current_error_au": 1.2083672918220156e-09,
+      "reference_peak_current_au": 3.9334704368266e-07,
+      "energy_error_ha": 0.00028954702549910394,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 0.0002894586634987206
+    },
+    {
+      "shape": [
+        4,
+        4,
+        1
+      ],
+      "ranks": 8,
+      "active_refreshes": [
+        24,
+        24,
+        24
+      ],
+      "full_reference_refreshes": [
+        33,
+        33,
+        33
+      ],
+      "local_pairs": 18432,
+      "global_pairs_during_active_support": 0,
+      "local_fft_volume_ratio": 0.98876953125,
+      "maximum_norm_loss": 0.0009999718708,
+      "current_error_au": 1.0939780232300334e-09,
+      "reference_peak_current_au": 3.93347043682663e-07,
+      "energy_error_ha": 0.00028951418480005486,
+      "repeat_current_error_au": 0.0,
+      "maximum_energy_width_ha": 0.0002894832610991216
+    }
+  ],
+  "strong_layout_reference_errors": {
+    "full": {
+      "current_error_au": 1.4193425823400208e-20,
+      "energy_error_ha": 1.1013412404281553e-12
+    },
+    "adaptive": {
+      "current_error_au": 2.1595592094395925e-10,
+      "energy_error_ha": 0.00028940956300260723
+    }
+  }
+}

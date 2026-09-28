@@ -18,7 +18,7 @@ def timing(text,label):
     if not math.isfinite(value) or value<0:raise RuntimeError('invalid timer '+label)
     return value
 
-def parse_rt(folder,ranks):
+def parse_rt(folder,ranks,max_energy_width=1e-7):
     text=(folder/'output').read_text()
     if 'end SALMON' not in text or 'end complex DC-LCFO wavefunction reconstruction' not in text or 'Native LCFO RT active' in text:
         raise RuntimeError('not a completed mesh RT job: '+str(folder))
@@ -30,7 +30,7 @@ def parse_rt(folder,ranks):
     rank_rows=[json.loads((folder/f'rank-{i}.json').read_text()) for i in range(ranks)]
     if sorted(r['rank'] for r in rank_rows)!=list(range(ranks)) or any(r['returncode']!=0 or r['peak_rss_bytes']<=0 for r in rank_rows):raise RuntimeError('rank failure')
     post=[row[1] for row in energy[1:]];drift=max(post)-min(post)
-    if drift>1e-7:raise RuntimeError('post-impulse energy drift exceeds 1e-7 Ha')
+    if max_energy_width is not None and drift>max_energy_width:raise RuntimeError(f'post-impulse energy drift exceeds {max_energy_width} Ha')
     result=dict(rt_max_seconds=timing(text,'rt iterations'),propagation_max_seconds=timing(text,'time propagation'),
         total_root_seconds=float(re.search(r'total calculation time,(\S+)',text)[1]),
         peak_rank_bytes=max(r['peak_rss_bytes'] for r in rank_rows),per_rank=rank_rows,
