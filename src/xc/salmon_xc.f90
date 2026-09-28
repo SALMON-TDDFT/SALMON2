@@ -861,7 +861,7 @@ contains
 #endif         
         return
       
-      case ('hse06','pbeh40','pbeh40_rvv10')
+      case ('hse06','pbe0','pbeh40','pbeh40_rvv10')
 #ifdef USE_HSE
         if(spin/='unpolarized')error stop 'HSE06: unpolarized only'
         xc%xctype(1)=salmon_xctype_hse06
@@ -1322,6 +1322,7 @@ contains
 
 #ifdef USE_HSE
     subroutine exec_hse_semilocal()
+      use exx_functional, only: exx_fraction=>exchange_fraction
       use salmon_global, only: hse_omega,xc_name=>xc,exx_pre_scf_active
       real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
       integer :: status,j
@@ -1333,7 +1334,7 @@ contains
       else if(xc_name=='hse06')then
         call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
       else
-        call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status)
+        call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status,exchange_fraction=exx_fraction())
       endif
       if(status/=0)error stop 'HSE06: Libxc semilocal evaluation failed'
       if(present(exc))exc=reshape(ep,[nx,ny,nz])

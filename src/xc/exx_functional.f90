@@ -11,12 +11,12 @@ contains
   end function
   real(8) function exchange_screening()
     exchange_screening=hse_omega
-    if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')exchange_screening=0d0
+    if((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10')exchange_screening=0d0
   end function
   function parameters() result(p)
     real(8) :: p(7)
     p=[exchange_fraction(),exchange_screening(),0d0,0d0,0d0,0d0,exx_mlwf_radius]
-    if(xc=='pbeh40'.or.xc=='pbeh40_rvv10')p(3)=pbeh_coulomb_radius
+    if((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10')p(3)=pbeh_coulomb_radius
     if(xc=='pbeh40_rvv10')p(4:6)=[rvv10_b,rvv10_c,real(rvv10_nq,8)]
   end function
   subroutine lcfo_write_functional(path,run_id,status)
@@ -42,7 +42,7 @@ contains
     inquire(file=path,exist=exists)
     if(.not.exists)then
       ! Pre-metadata HSE data retain their historical reconstruction route.
-      if(xc/='pbeh40'.and.xc/='pbeh40_rvv10')status=0
+      if((xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10')status=0
     else
       open(newunit=u,file=path,status='old',action='read',iostat=ios)
       if(ios==0)then

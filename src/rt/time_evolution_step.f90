@@ -90,7 +90,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
-  hybrid_mesh_rt=((xc=='hse06'.and.yn_hse_wannier=='y').or.xc=='pbeh40'.or.xc=='pbeh40_rvv10') &
+  hybrid_mesh_rt=((xc=='hse06'.and.yn_hse_wannier=='y').or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10') &
     .and.yn_hse_lcfo_rt=='n' &
     .and.yn_conventional_from_dcdft=='y'
   pbeh_mesh_md=hybrid_mesh_rt.and.xc/='hse06'.and.yn_md=='y'

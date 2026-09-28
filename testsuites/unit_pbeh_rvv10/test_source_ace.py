@@ -45,6 +45,18 @@ class SourceACE(unittest.TestCase):
             _,run=self.execute('source_ace_guard_'+tag,inp,rt=True)
             self.assertNotEqual(run.returncode,0);self.assertIn(message,run.stdout+run.stderr)
 
+class PBE0SourceACE(SourceACE):
+    functional='pbe0'
+
+    def test_wrong_functional_seed(self):
+        inp=self.rt_input(nt=1,moving=False).replace("xc='pbe0'","xc='pbeh40'")
+        _,run=self.execute('wrong_functional',inp,rt=True)
+        # Legacy Fortran STOP can return zero: check rejection before any RT.
+        self.assertNotIn('end SALMON',run.stdout)
+        self.assertNotIn('end complex DC-LCFO wavefunction reconstruction',run.stdout)
+        self.assertIn('LCFO functional metadata missing or mismatched',run.stdout+run.stderr)
+        self.assertIn('fragment preflight failed',run.stdout+run.stderr)
+
 class HSESourceACE(SourceACE):
     functional='hse06'
 

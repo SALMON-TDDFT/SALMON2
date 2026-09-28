@@ -199,7 +199,7 @@ contains
   end function
 
   logical function hse_enabled()
-    hse_enabled=(trim(xc)=='hse06'.or.trim(xc)=='pbeh40'.or.trim(xc)=='pbeh40_rvv10').and..not.exx_pre_scf_active
+    hse_enabled=(trim(xc)=='hse06'.or.(trim(xc)=='pbe0'.or.trim(xc)=='pbeh40').or.trim(xc)=='pbeh40_rvv10').and..not.exx_pre_scf_active
   end function
 
   subroutine hse_pack(psi,mg,info,a)
@@ -242,7 +242,7 @@ contains
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
-      if((xc/='pbeh40'.and.xc/='pbeh40_rvv10').or. &
+      if(((xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10').or. &
          (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y'.or.lcfo_rt_active) &
         error stop 'Hybrid: unsupported real-time ionic extension'
     endif

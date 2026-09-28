@@ -87,7 +87,7 @@ contains
     io_e = info%io_e
     Norb = system%Nspin*info%numo*info%numk
 
-    variational_projector_force=(xc=='pbeh40'.or.xc=='pbeh40_rvv10')
+    variational_projector_force=((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10')
     if(variational_projector_force)then
       allocate(projector_grad(3,ppg%nps,ppg%nlma))
       call differentiate_projectors(pp,ppg,kion,projector_grad)

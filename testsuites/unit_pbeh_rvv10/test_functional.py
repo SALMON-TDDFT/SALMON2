@@ -55,8 +55,14 @@ class FunctionalTest(unittest.TestCase):
         subprocess.run([exe],capture_output=True,text=True,check=True)
 
     def test_pbeh_semilocal(self):
+        self.check_semilocal(.4)
+
+    def test_pbe0_semilocal(self):
+        self.check_semilocal(.25)
+
+    def check_semilocal(self, fraction):
         exe=self.compile(['hse_semilocal.f90'],'semilocal_probe.f90')
-        p=subprocess.run([exe],capture_output=True,text=True,check=True)
+        p=subprocess.run([exe,str(fraction)],capture_output=True,text=True,check=True)
         actual=np.loadtxt(p.stdout.splitlines())
         lib=ct.CDLL('/opt/homebrew/lib/libxc.dylib');ptr=ct.POINTER(ct.c_double)
         lib.xc_func_alloc.restype=ct.c_void_p
@@ -65,7 +71,7 @@ class FunctionalTest(unittest.TestCase):
         lib.xc_func_end.argtypes=lib.xc_func_free.argtypes=[ct.c_void_p]
         r=np.array([1e-7,.001,.1,1.]);s=np.array([1e-12,.0001,.03,.2])
         expected=np.zeros((4,3))
-        for id,weight in [(101,.6),(130,1.)]:
+        for id,weight in [(101,1-fraction),(130,1.)]:
             f=lib.xc_func_alloc();self.assertEqual(lib.xc_func_init(f,id,1),0)
             arrays=[np.zeros(4) for _ in range(3)]
             lib.xc_gga_exc_vxc(f,4,*[a.ctypes.data_as(ptr) for a in [r,s]+arrays])

@@ -33,7 +33,7 @@ contains
 
     call check_dcdft_complex_options
     ! Catch impossible capacity before fragment initialization fills occupations.
-    if(temperature>0d0.and.(xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+    if(temperature>0d0.and.(xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
       if(2d0*dble(nstate_frag)*dble(product(num_fragment))<dble(nelec)) &
         error stop 'DC thermal occupations: insufficient weighted state capacity; increase nstate_frag'
     endif
@@ -628,7 +628,7 @@ contains
     emin = minval(esp)
     emax = maxval(esp)
     ! Use the same charge-converged Fermi solver for all hybrid DC SCF.
-    if(temperature>0d0.and.(xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+    if(temperature>0d0.and.(xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
       wrk1=ne_frag_orb
       do ik=1,system%nk
         wrk1(:,ik,:,:)=wrk1(:,ik,:,:)*system%wtk(ik)

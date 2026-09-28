@@ -535,7 +535,7 @@ call hse_check_localization()
 #endif
 
 ! A BOMD step is not valid without a self-consistent electronic ground state.
-if(theory=='dft_md'.and.(xc=='pbeh40'.or.xc=='pbeh40_rvv10'))then
+if(theory=='dft_md'.and.((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
   if(.not.(sum1<threshold))error stop 'PBEh40 BOMD: SCF not converged; ionic step rejected'
 endif
 

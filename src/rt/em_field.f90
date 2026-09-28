@@ -43,7 +43,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   rt%E_ind(:,itt) = -( rt%Ac_ind(:,itt) - rt%Ac_ind(:,itt-1) )/dt
   rt%E_tot(:,itt) = -( rt%Ac_tot(:,itt) - rt%Ac_tot(:,itt-1) )/dt
 
-  if(((xc=='hse06'.and.yn_hse_wannier=='y').or.xc=='pbeh40'.or.xc=='pbeh40_rvv10') &
+  if(((xc=='hse06'.and.yn_hse_wannier=='y').or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10') &
      .and.yn_conventional_from_dcdft=='y' &
      .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2'.and.trans_longi=='tr')then
     ! The imposed A is known at all times. Center E at the same endpoint as
