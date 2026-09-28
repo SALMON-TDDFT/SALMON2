@@ -16,3 +16,5 @@ Progress: approved design recorded. GS preparations continue without overlapping
 - Read-only independent review found no blocking issues. Raw links are unused after minimization; accepted transported-gauge fallback remains safe.
 - 64-H2 actual initial localization now converges in three sweeps, gradient5.1780163e-8 at the unchanged 1e-6 target. Full 16-step run in progress.
 - GS preparation: seven shape payloads complete; explicitly interrupted only the final 2x2x2 preparation early so primary localization verification could proceed. Its incomplete directory remains preserved, is not imported, and will be recalculated.
+
+- Actual 64-H2 MPI8 adaptive RT completed 16 steps in103.0s, max-rank RSS1193541632 bytes, energy width5.8256e-6Ha. This is a completion check, not accuracy certification. Final matrix rerun uses new executable for both modes; old partial RT values remain separate.

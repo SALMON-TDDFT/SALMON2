@@ -41,16 +41,16 @@ def rt_block(shape,ranks,fraction):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
+    p.add_argument('--prepare-only',action='store_true');p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
     p.add_argument('--mpiexec',default='/opt/homebrew/bin/mpiexec --bind-to none')
-    p.add_argument('--seed-source',type=Path);p.add_argument('--resume',action='store_true');p.add_argument('--generate-only',action='store_true')
+    p.add_argument('--allow-seed-binary-change',action='store_true');p.add_argument('--seed-source',type=Path);p.add_argument('--resume',action='store_true');p.add_argument('--generate-only',action='store_true')
     a=p.parse_args();a.binary=a.binary.resolve();a.output=a.output.resolve()
     if a.repeat<1:p.error('repeat must be positive')
     shapes=SHAPES[:2] if a.pilot else SHAPES
     cases=[dict(shape=list(s),ranks=math.prod(s),suites=['weak']) for s in shapes]
     if not a.pilot:
         cases[6]['suites'].append('strong')
-        cases.extend(dict(shape=[4,4,1],ranks=n,suites=['strong']) for n in (1,2,4,8))
+        cases.extend(dict(shape=[4,4,1],ranks=n,suites=['strong']) for n in (8,4,2,1))
     if a.generate_only:
         for shape in shapes:
             print('geometry',shape,'H2',8*math.prod(shape),'states/fragment',fragment_states(shape),'input bytes',len(gs_input(shape)))
@@ -97,7 +97,8 @@ def main():
             if digest(a.output/prep['folder']/f)!=h:raise RuntimeError('seed changed')
     if a.seed_source and not data['preparations']:
         origin=a.seed_source.resolve();old=json.loads((origin/'results.json').read_text())
-        if old['binary_sha256']!=binary_hash or old['pseudo_sha256']!=data['pseudo_sha256']:raise RuntimeError('imported GS configuration mismatch')
+        if old['pseudo_sha256']!=data['pseudo_sha256']:raise RuntimeError('imported GS pseudopotential mismatch')
+        if old['binary_sha256']!=binary_hash and not a.allow_seed_binary_change:raise RuntimeError('imported GS executable differs; explicit override required')
         for prep in old['preparations']:
             if prep['shape'] not in [list(s) for s in shapes]:continue
             folder=origin/prep['folder']
@@ -105,6 +106,7 @@ def main():
             for name,sha in prep['payload_sha256'].items():
                 if digest(folder/name)!=sha:raise RuntimeError('imported GS hash mismatch')
             (a.output/prep['folder']).symlink_to(folder,target_is_directory=True)
+            prep.setdefault('binary_sha256',old['binary_sha256'])
             data['preparations'].append(prep)
         data['imported_seed_source']=str(origin);data['imported_seed_results_sha256']=digest(origin/'results.json')
     save()
@@ -122,9 +124,10 @@ def main():
             hashes={str(f.relative_to(folder)):digest(f) for f in (folder/'data_dcdft').rglob('*') if f.is_file()}
             if not any(k.endswith('wavefunctions.bin') for k in hashes):raise RuntimeError('missing payload')
             prep=dict(shape=list(shape),ranks=ranks,folder=name,iterations=int(scf[-1][0]),energy_ev=float(scf[-1][1]),residual=float(scf[-1][2]),
-              charge=charge,wall_seconds=wall,per_rank=rows,peak_rank_bytes=max(r['peak_rss_bytes'] for r in rows),payload_sha256=hashes,
+              charge=charge,binary_sha256=binary_hash,wall_seconds=wall,per_rank=rows,peak_rank_bytes=max(r['peak_rss_bytes'] for r in rows),payload_sha256=hashes,
               timers=[l for l in text.splitlines() if re.match(r'\s*(scf iterations|total calculation time|DC|lcfo)',l)])
             data['preparations'].append(prep);save();print('PREPARED',name,wall,'seconds',flush=True)
+        if a.prepare_only:continue
         for case in (c for c in cases if c['shape']==list(shape)):
             ranks=case['ranks']
             for rep in range(1,a.repeat+1):
@@ -139,6 +142,6 @@ def main():
                       retained_gauge_updates=text.count('retained accepted transported gauge'))
                     data['runs'].append(r);save();print('DONE',name,r['rt_max_seconds'],'seconds',r['peak_rank_bytes']/2**20,'MiB',flush=True)
         verify(prep)
-    data['complete']=True;save()
+    data['preparation_complete']=True;data['complete']=not a.prepare_only;save()
 
 if __name__=='__main__':main()

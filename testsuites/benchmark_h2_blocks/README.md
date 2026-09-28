@@ -46,3 +46,10 @@ counters apply only to active-support updates; they exclude initialization,
 communication, and global fallback work. Seed hashes are checked after reuse.
 Use --resume only with identical binary/scripts/configuration; incomplete job
 folders are preserved and rejected, never silently overwritten.
+
+`--prepare-only` exports all GS seeds without running RT and leaves `complete=false`.
+`--seed-source` imports input/hash-identical preparations. After a solver change
+that provably leaves canonical DC preparation unchanged, the explicit
+`--allow-seed-binary-change` option permits those frozen seeds for new-binary
+paired RT; each preparation retains its original binary hash. Never combine
+RT timings from different executables.
