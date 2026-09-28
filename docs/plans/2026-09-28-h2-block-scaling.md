@@ -18,3 +18,5 @@ Weak arrays: 1x1x1, 2x1x1, 4x1x1, 8x1x1, 16x1x1, 2x2x1, 4x4x1, 2x2x2; one rank p
 - Reuse existing feature checkout pbeh40-rvv10-water-md, clean at c5728525.
 - Benchmark input/script changes are reversible instrumentation; verify by actual pilot and geometry assertions rather than implementation-mirroring unit tests.
 - Fixed R remains static-only; RT comparison uses automatic .999 support as approved.
+
+- Pilot ruling: gauss10 initialization failed the actual core-weighted state-capacity check before SCF in the buffered two-fragment cell. Gaussian centers concentrate in part of the periodic fragment; use random initial orbitals with broadly uniform core weights for all GS seeds. Preserve the failed pilot in work/h2-block-pilot. No occupation guard or solver code is relaxed.
