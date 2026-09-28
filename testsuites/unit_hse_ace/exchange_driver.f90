@@ -10,10 +10,11 @@ program exchange_driver
   real(8),parameter :: h(3)=[.7d0,.8d0,.9d0]
   complex(8) :: psi(product(n),no,1),target(product(n),nt,1),reference(product(n),nt,1)
   complex(8),allocatable :: local(:,:,:),trial(:,:,:),action(:,:,:),previous_saved(:,:,:)
-  type(spatial_exx_state) :: spatial,full_spatial
+  type(spatial_exx_state) :: spatial,full_spatial,partitioned
   type(s_hse_wannier) :: serial
   integer(int64) :: before_transposes
   integer :: np,rank,err,status,dims(2),coords(2),comm(2),m(3),lo(3),g,l,x,y,z,j,k,stage
+  integer :: bad_coords(2),comm_r,comm_o,orb_rank,orb_size,spatial_rank,spatial_size,first_o,last_o,first_t,last_t
   real(8) :: error,global_error,dv,bad_dv,minimum,omega,occupation(no,1)
   character(32) :: argument
   complex(8) :: transported(no,no,1)
@@ -22,11 +23,18 @@ program exchange_driver
   call MPI_Init(err)
   call MPI_Comm_size(MPI_COMM_WORLD,np,err)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,err)
-  dims=[np,1]
-  if(np==4)dims=[2,2]
-  coords=[modulo(rank,dims(1)),rank/dims(1)]
-  call MPI_Comm_split(MPI_COMM_WORLD,coords(2),coords(1),comm(1),err)
-  call MPI_Comm_split(MPI_COMM_WORLD,coords(1),coords(2),comm(2),err)
+  orb_size=1
+  call get_command_argument(2,argument)
+  if(len_trim(argument)>0)read(argument,*)orb_size
+  if(modulo(np,orb_size)/=0)error stop 'invalid partition'
+  spatial_size=np/orb_size;orb_rank=rank/spatial_size;spatial_rank=modulo(rank,spatial_size)
+  call MPI_Comm_split(MPI_COMM_WORLD,orb_rank,spatial_rank,comm_r,err)
+  call MPI_Comm_split(MPI_COMM_WORLD,spatial_rank,orb_rank,comm_o,err)
+  dims=[spatial_size,1]
+  if(spatial_size==4)dims=[2,2]
+  coords=[modulo(spatial_rank,dims(1)),spatial_rank/dims(1)]
+  call MPI_Comm_split(comm_r,coords(2),coords(1),comm(1),err)
+  call MPI_Comm_split(comm_r,coords(1),coords(2),comm(2),err)
   m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
   dv=product(h)
   do j=1,no
@@ -61,7 +69,7 @@ program exchange_driver
       l=l+1;g=1+x+n(1)*(y+lo(2)+n(2)*(z+lo(3)))
       local(l,:,1)=psi(g,:,1);trial(l,:,1)=target(g,:,1)
     enddo;enddo;enddo
-    call spatial_exx_refresh(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,local, &
+    call spatial_exx_refresh(spatial,n,h,dims,coords,comm,comm_r,local, &
       merge(3,0,stage==1),1d-7,status,occupation=occupation)
     if(status/=0)error stop 'spatial refresh'
     call spatial_exx_refresh(full_spatial,n,h,[1,1],[0,0],[MPI_COMM_SELF,MPI_COMM_SELF], &
@@ -79,9 +87,15 @@ program exchange_driver
       if(maxval(abs(spatial%previous-previous_saved))>1d-10)error stop 'transport gauge mismatch'
     endif
     before_transposes=fftw_pencil_transposes
-    call spatial_exx_apply(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,2.5d0,trial,action,status,omega=omega)
+    call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=omega)
     if(fftw_pencil_transposes-before_transposes/=4*no*((nt+3)/4))error stop 'redundant FFT transpose'
     if(status/=0)error stop 'spatial action'
+    first_o=no*orb_rank/orb_size+1;last_o=no*(orb_rank+1)/orb_size
+    first_t=nt*orb_rank/orb_size+1;last_t=nt*(orb_rank+1)/orb_size
+    partitioned%source=spatial%source(:,first_o:last_o)
+    call spatial_exx_apply(partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+      trial(:,first_t:last_t,:),action(:,first_t:last_t,:),status,omega=omega,comm_o=comm_o)
+    if(status/=0)error stop 'orbital partition action'
     error=0d0;l=0
     do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1
       l=l+1;g=1+x+n(1)*(y+lo(2)+n(2)*(z+lo(3)))
@@ -91,19 +105,32 @@ program exchange_driver
     if(global_error>1d-10)error stop 'exchange mismatch'
     if(rank==0)print *, 'PASS spatial exchange ranks/stage/error ',np,stage,global_error,omega
   enddo
-  call spatial_exx_apply(spatial,n,h,dims,coords,comm,MPI_COMM_WORLD,2.5d0,trial,action,status,omega=-.1d0)
+  call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=-.1d0)
   if(status==0)error stop 'negative screening accepted'
+  ! Force an FFT validation failure after the first source broadcast.
+  ! Last orbital group always has a target, including layouts with empty peers.
+  bad_coords=coords
+  if(orb_rank==orb_size-1)bad_coords(1)=dims(1)
+  call spatial_exx_apply(partitioned,n,h,dims,bad_coords,comm,comm_r,2.5d0, &
+    trial(:,first_t:last_t,:),action(:,first_t:last_t,:),status,omega=omega,comm_o=comm_o)
+  if(status==0)error stop 'FFT failure not propagated'
+  ! One bad orbital group must make every group return before source broadcasts.
+  if(orb_rank==0)deallocate(partitioned%source)
+  call spatial_exx_apply(partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+    trial(:,first_t:last_t,:),action(:,first_t:last_t,:),status,omega=omega,comm_o=comm_o)
+  if(status==0)error stop 'invalid orbital source accepted'
   bad_dv=dv
-  if(rank==0)bad_dv=-1d0
+  if(spatial_rank==0)bad_dv=-1d0
   call gauge_transport(local,spatial%previous,bad_dv,transported,minimum,status,sum_grid)
   if(status==0)error stop 'invalid local transport volume accepted'
   call wannier_destroy(serial)
   call MPI_Comm_free(comm(1),err);call MPI_Comm_free(comm(2),err)
+  call MPI_Comm_free(comm_r,err);call MPI_Comm_free(comm_o,err)
   call MPI_Finalize(err)
 contains
   subroutine sum_grid(a)
     complex(8),intent(inout) :: a(:,:)
     integer :: code
-    call MPI_Allreduce(MPI_IN_PLACE,a,size(a),MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,code)
+    call MPI_Allreduce(MPI_IN_PLACE,a,size(a),MPI_DOUBLE_COMPLEX,MPI_SUM,comm_r,code)
   end subroutine
 end program

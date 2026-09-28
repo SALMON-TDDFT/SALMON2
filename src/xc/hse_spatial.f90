@@ -1,9 +1,11 @@
 ! Full-support Gamma exchange on x-complete y/z pencils.
-! All band matrices are replicated, but orbital grid rows and FFT work are local.
-! Collective contract: n/h/dims/band counts/radius/omega/maxiter and call order agree;
+! Refresh currently uses all band columns; apply also accepts orbital-local sources.
+! Grid rows and FFT work are spatially local.
+! Collective contract: n/h/dims/radius/omega/maxiter and call order agree;
+! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module hse_spatial
-  use communication, only: comm_summation,comm_get_max
+  use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use fftw_pencils, only: pencil_transform
   use hse_wannier_gauge, only: gauge_transport,gauge_minimize
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -105,18 +107,22 @@ contains
     end subroutine
   end subroutine
 
-  subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega)
+  ! Optional comm_o joins matching grid pencils across orbital groups. Source and
+  ! target columns may have different (including zero) local counts. Counts must
+  ! agree within comm_r, and the communicators form a spatial/orbital product.
+  subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o)
     type(spatial_exx_state),intent(in) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r
+    integer,intent(in),optional :: comm_o
     real(8),intent(in) :: h(3),radius_input
     real(8),intent(in),optional :: omega
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
-    complex(8),allocatable :: density(:,:),spectrum(:,:)
+    complex(8),allocatable :: density(:,:),spectrum(:,:),source_column(:)
     real(8),allocatable :: multiplier(:)
     real(8) :: radius,pi,q(3),q2,screening
-    integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad
+    integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
     screening=0d0
     if(present(omega))screening=omega
@@ -126,18 +132,31 @@ contains
     if(screening==0d0)then
       if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
     endif
-    call comm_get_max(bad,comm_r)
+    call collective_bad()
     if(bad/=0)return
     m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
     ng=product(m);nt=size(target,2)
-    if(size(target,1)/=ng.or.size(target,3)/=1.or.nt<1.or.any(shape(action)/=shape(target)))bad=1
+    if(size(target,1)/=ng.or.size(target,3)/=1.or.nt<0.or.any(shape(action)/=shape(target)))bad=1
     if(size(op%source,1)/=ng)bad=1
     if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
     radius=.5d0*minval(n*h)
     if(radius_input>0d0)radius=radius_input
     if(screening==0d0.and.radius>.5d0*minval(n*h)*(1d0+1d-12))bad=1
-    call comm_get_max(bad,comm_r)
+    call collective_bad()
     if(bad/=0)return
+    orb_rank=0;orb_size=1
+    if(present(comm_o))call comm_get_groupinfo(comm_o,orb_rank,orb_size)
+    ! FFT peers must use identical batch sizes and source broadcast counts.
+    nt_max=nt
+    call comm_get_max(nt_max,comm_r)
+    if(nt_max/=nt)bad=1
+    counts_max=size(op%source,2)
+    call comm_get_max(counts_max,comm_r)
+    if(counts_max/=size(op%source,2))bad=1
+    if(.not.all(ieee_is_finite(real(op%source))).or..not.all(ieee_is_finite(aimag(op%source))))bad=1
+    call collective_bad()
+    if(bad/=0)return
+    if(present(comm_o))allocate(source_column(ng))
     allocate(multiplier(ng));pi=acos(-1d0);g=0
     ! Keep the forward FFT in Z pencils: local storage order is (z,x,y).
     m=[n(1)/dims(1),n(2)/dims(2),n(3)]
@@ -159,25 +178,56 @@ contains
       endif
     enddo;enddo;enddo
     allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
-    do i=1,size(op%source,2)
-      do first=1,nt,4
-        nb=min(4,nt-first+1)
-        do j=1,nb
-          density(:,j)=conjg(op%source(:,i))*target(:,first+j-1,1)
+    ! Grid rows match across comm_o; stream one source column from its owner.
+    ! Empty source/target partitions participate in all orbital collectives.
+    do owner=0,orb_size-1
+      count=size(op%source,2)
+      if(present(comm_o))call comm_bcast(count,comm_o,owner)
+      do i=1,count
+        if(present(comm_o))then
+          if(orb_rank==owner)source_column=op%source(:,i)
+          call comm_bcast(source_column,comm_o,owner)
+        endif
+        do first=1,nt,4
+          nb=min(4,nt-first+1)
+          do j=1,nb
+            if(present(comm_o))then
+              density(:,j)=conjg(source_column)*target(:,first+j-1,1)
+            else
+              density(:,j)=conjg(op%source(:,i))*target(:,first+j-1,1)
+            endif
+          enddo
+          call pencil_transform(n,dims,coords,comm,density(:,:nb),spectrum(:,:nb),-1,status,spectral_z=.true.)
+          bad=status
+          if(present(comm_o))call comm_get_max(bad,comm_r)
+          if(bad/=0)exit
+          do j=1,nb
+            spectrum(:,j)=spectrum(:,j)*multiplier
+          enddo
+          ! Inverse pencil_transform already includes 1/product(n).
+          call pencil_transform(n,dims,coords,comm,spectrum(:,:nb),density(:,:nb),1,status,spectral_z=.true.)
+          bad=status
+          if(present(comm_o))call comm_get_max(bad,comm_r)
+          if(bad/=0)exit
+          do j=1,nb
+            if(present(comm_o))then
+              action(:,first+j-1,1)=action(:,first+j-1,1)-source_column*density(:,j)
+            else
+              action(:,first+j-1,1)=action(:,first+j-1,1)-op%source(:,i)*density(:,j)
+            endif
+          enddo
         enddo
-        call pencil_transform(n,dims,coords,comm,density(:,:nb),spectrum(:,:nb),-1,status,spectral_z=.true.)
-        if(status/=0)return
-        do j=1,nb
-          spectrum(:,j)=spectrum(:,j)*multiplier
-        enddo
-        ! Inverse pencil_transform already includes 1/product(n).
-        call pencil_transform(n,dims,coords,comm,spectrum(:,:nb),density(:,:nb),1,status,spectral_z=.true.)
-        if(status/=0)return
-        do j=1,nb
-          action(:,first+j-1,1)=action(:,first+j-1,1)-op%source(:,i)*density(:,j)
-        enddo
+        if(present(comm_o))call collective_bad()
+        if(bad/=0)return
       enddo
     enddo
     status=0
+  contains
+    subroutine collective_bad()
+      call comm_get_max(bad,comm_r)
+      if(present(comm_o))call comm_get_max(bad,comm_o)
+      ! Preserve a nonzero return on every peer, even after a successful local FFT.
+      if(bad/=0)status=1
+    end subroutine
   end subroutine
 end module

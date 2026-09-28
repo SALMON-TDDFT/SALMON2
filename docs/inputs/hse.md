@@ -334,3 +334,13 @@ tile and full halo for that rank. The representative still stores the complete
 inter-fragment receive buffers and one outgoing tile, so this diagnostic is
 not its total peak memory. The global LCFO eigensolver and the orbital-column
 layout of native MLWF/ACE exchange are unchanged by this assembly optimization.
+
+### Orbital-distributed exchange kernel (internal)
+
+`spatial_exx_apply` accepts an optional orbital communicator joining identical
+spatial pencils. Each orbital group holds its own localized source columns and
+target columns; sources are broadcast one at a time, with only one additional
+local-grid column of communication storage. Empty and unequal partitions are
+supported. The exchange-action oracle covers combined spatial/orbital layouts.
+MLWF refresh and ACE construction still require all orbital columns, so this
+internal interface does **not** yet enable `nproc_ob > 1` in native hybrid SCF/RT.

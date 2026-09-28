@@ -12,6 +12,6 @@ names=['xc/hse_spatial.f90.o','xc/hse_wannier_gauge.f90.o','xc/hse_wannier.f90.o
 with tempfile.TemporaryDirectory() as tmp:
     exe=Path(tmp)/'probe'
     subprocess.run(['mpifort','-fopenmp','-fcheck=all','-ffree-line-length-none','-I'+str(b),str(Path(__file__).with_name('exchange_driver.f90')),*[str(obj/n) for n in names],'-L/opt/homebrew/opt/fftw/lib','-lfftw3','-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(exe)],check=True)
-    for ranks in (1,2,4):
+    for ranks, orbitals in ((1,1),(2,1),(4,1),(2,2),(4,2),(8,2),(4,4),(8,4),(8,8)):
         for omega in ('0', '.11', '.3'):
-            subprocess.run(['mpiexec','-n',str(ranks),str(exe),omega],check=True,timeout=15,env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
+            subprocess.run(['mpiexec','-n',str(ranks),str(exe),omega,str(orbitals)],check=True,timeout=15,env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
