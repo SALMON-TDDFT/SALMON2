@@ -103,6 +103,18 @@ contains
   complex(8),allocatable :: R_total(:,:)
   real(8),allocatable :: esp_resync_l(:,:)
 
+  ! -- temporary diagnostic (Claude-Codex notes 039-041): input
+  ! orthonormality / cluster closure under translation / final
+  ! joint-diagonalization residual, restricted to a short hand-picked
+  ! isk list so as not to flood the log for every isk and cluster. Not
+  ! part of the normal Phase B algorithm; safe to remove once the
+  ! isk=5/isk=23 investigation is done. --
+  integer,parameter :: n_diag_isk = 2
+  integer,parameter :: diag_isk_list(n_diag_isk) = [ 5, 23 ]
+  real(8) :: diag_max
+  complex(8) :: diag_val
+  complex(8),allocatable :: diag_gram(:,:), diag_TcTc(:,:), diag_WtTcW(:,:)
+
   if( dm_unfold_option /= 'super' ) then
     if (comm_is_root(nproc_id_global)) then
       write(*,"(A)") "dm_unfold_option /= 'super' at init_dm_unfold"
@@ -1000,6 +1012,36 @@ contains
             cnorm(kk) = sqrt( sum( abs(cvec(1:ntot_ref,kk))**2 ) )
           end do
 
+          ! -- diag check 1 (temporary, notes 039-041): is this cluster's
+          ! cvec already orthonormal, i.e. is C^dagger C == I? This is
+          ! expected to hold to near machine precision, since psi_ref was
+          ! already Gram-Schmidt-orthonormalized in real space by the GS
+          ! calculation, and psi_refG is obtained from it by an exact,
+          ! untruncated discrete Fourier transform (same number of G
+          ! points as r points; see the psi_refG construction above). --
+          if( any( diag_isk_list(1:n_diag_isk) == isk ) ) then
+            allocate( diag_gram(g_cl,g_cl) )
+            do jj2 = 1, g_cl
+            do ii = 1, g_cl
+              diag_gram(ii,jj2) = dot_product( cvec(1:ntot_ref,ii), cvec(1:ntot_ref,jj2) ) &
+                & / ( cnorm(ii)*cnorm(jj2) )
+            end do
+            end do
+            diag_max = 0d0
+            do jj2 = 1, g_cl
+            do ii = 1, g_cl
+              diag_val = diag_gram(ii,jj2)
+              if( ii == jj2 ) diag_val = diag_val - (1d0,0d0)
+              diag_max = max( diag_max, abs(diag_val) )
+            end do
+            end do
+            if( comm_is_root(info%id_o) ) then
+              write(*,"(A,I0,A,I0,A,I0,A,ES10.3)") 'Diag(check1 input orthonormality): isk=', isk, &
+                & ' io_ref=', memb(1), '..', memb(g_cl), '  max|C^dagger C - I|=', diag_max
+            end if
+            deallocate( diag_gram )
+          end if
+
           allocate( Tc_list(g_cl,g_cl,nhprk), dvec(ntot_ref) )
           do jshift = 1, nhprk
             do jj2 = 1, g_cl
@@ -1011,6 +1053,41 @@ contains
             end do
           end do
           deallocate( dvec )
+
+          ! -- diag check 2 (temporary, notes 039-041): is the retained
+          ! g_cl-band cluster closed under each coset-shift translation,
+          ! i.e. is the compressed Tc_list(:,:,jshift) == C^dagger D_c C
+          ! unitary? A genuine, physical translation D_c is exactly
+          ! unitary on the full G-space; if it comes out non-unitary once
+          ! compressed into this cluster's g_cl-dim subspace, that is a
+          ! direct, quantitative measure of amplitude leaking to bands
+          ! OUTSIDE this cluster under this shift -- i.e. the no_ref/
+          ! egap_threshold clustering did not retain a translation-closed
+          ! subspace here (the "band cutoff" failure mode discussed in
+          ! Claude-Codex notes 036/038). This check is invariant under
+          ! whatever arbitrary unitary basis the reference-cell
+          ! diagonalization happened to settle on within an exactly
+          ! degenerate subspace, so it is meaningful even when cvec's
+          ! columns are not individually translation eigenstates. --
+          if( any( diag_isk_list(1:n_diag_isk) == isk ) ) then
+            allocate( diag_TcTc(g_cl,g_cl) )
+            diag_max = 0d0
+            do jshift = 1, nhprk
+              diag_TcTc = matmul( conjg(transpose(Tc_list(:,:,jshift))), Tc_list(:,:,jshift) )
+              do jj2 = 1, g_cl
+              do ii = 1, g_cl
+                diag_val = diag_TcTc(ii,jj2)
+                if( ii == jj2 ) diag_val = diag_val - (1d0,0d0)
+                diag_max = max( diag_max, abs(diag_val) )
+              end do
+              end do
+            end do
+            if( comm_is_root(info%id_o) ) then
+              write(*,"(A,I0,A,I0,A,I0,A,ES10.3)") 'Diag(check2 cluster closure): isk=', isk, &
+                & ' io_ref=', memb(1), '..', memb(g_cl), '  max over shifts of max|Tc^dagger Tc - I|=', diag_max
+            end if
+            deallocate( diag_TcTc )
+          end if
 
           ! -- jointly diagonalize the commuting family, then recover the
           ! energy eigenbasis within each resulting shared-hat_k block --
@@ -1105,6 +1182,32 @@ contains
               write(*,"(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A)") 'Warning (Phase B): large post-hoc residual, isk=', isk, &
                 & ' io_ref=', memb(1), '..', memb(g_cl), '  resid=', resid, ' a.u. (resid_tol=', resid_tol, ' a.u.)'
             end if
+          end if
+
+          ! -- diag check 3 (temporary, notes 039-041): after the joint
+          ! diagonalization and the per-block H_s rotation, how far off
+          ! block-diagonal is each Tc_list(:,:,jshift) once rotated by the
+          ! FULL Wfinal (i.e. W^dagger Tc W)? If check 1 and check 2 above
+          ! are both small but this one is not, the remaining error is
+          ! attributable to the joint-diagonalization routine itself
+          ! (diagonalize_commuting_unitary_family's block-splitting
+          ! tolerance), not to the input data or to subspace closure. --
+          if( any( diag_isk_list(1:n_diag_isk) == isk ) ) then
+            allocate( diag_WtTcW(g_cl,g_cl) )
+            diag_max = 0d0
+            do jshift = 1, nhprk
+              diag_WtTcW = matmul( conjg(transpose(Wfinal)), matmul( Tc_list(:,:,jshift), Wfinal ) )
+              do jj2 = 1, g_cl
+              do ii = 1, g_cl
+                if( ii /= jj2 ) diag_max = max( diag_max, abs(diag_WtTcW(ii,jj2)) )
+              end do
+              end do
+            end do
+            if( comm_is_root(info%id_o) ) then
+              write(*,"(A,I0,A,I0,A,I0,A,ES10.3)") 'Diag(check3 joint-diag residual): isk=', isk, &
+                & ' io_ref=', memb(1), '..', memb(g_cl), '  max off-diagonal of W^dagger Tc W over shifts=', diag_max
+            end if
+            deallocate( diag_WtTcW )
           end if
 
           deallocate( Tc_list, w_family, family_block_id )
