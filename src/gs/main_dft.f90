@@ -55,6 +55,7 @@ use hse_native, only: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_expor
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
+logical :: pre_scf_root
 real(8) :: sum1
 character(100) :: comment_line
 
@@ -102,6 +103,13 @@ end if
 !check condition for using jellium model
 if(yn_jm=='y') call check_condition_jm
 
+! Set the temporary functional before initialization evaluates any potential.
+exx_pre_scf_active=exx_pre_scf_threshold>0d0
+pre_scf_root=comm_is_root(nproc_id_global)
+if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
+if(exx_pre_scf_active.and.pre_scf_root) &
+  write(*,'(a,es14.6,a,i0)') 'EXX_PRE_SCF PBE stage: threshold=',exx_pre_scf_threshold, &
+                          ' consecutive steps=',exx_pre_scf_steps
 call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)

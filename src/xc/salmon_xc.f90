@@ -84,7 +84,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit,yn_dc,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft
+    use salmon_global, only: yn_spinorbit,yn_dc,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft,exx_pre_scf_active
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
     implicit none
@@ -350,7 +350,7 @@ contains
     end if
 
 #ifdef USE_HSE
-    if(xc_name=='pbeh40_rvv10')then
+    if(xc_name=='pbeh40_rvv10'.and..not.exx_pre_scf_active)then
       if(nspin/=1)error stop 'rVV10: unpolarized density required'
       ! In DC these are the buffered fragment density, cell and communicator.
       ! The caller integrates eexc over its core only for global DC energy.
@@ -1322,13 +1322,15 @@ contains
 
 #ifdef USE_HSE
     subroutine exec_hse_semilocal()
-      use salmon_global, only: hse_omega,xc_name=>xc
+      use salmon_global, only: hse_omega,xc_name=>xc,exx_pre_scf_active
       real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
       integer :: status,j
       if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
         error stop 'HSE06: unpolarized gradient inputs required'
       r=reshape(rho,[nl]);grad=reshape(grho,[nl,3]);sigma=sum(grad**2,dim=2)
-      if(xc_name=='hse06')then
+      if(exx_pre_scf_active)then
+        call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status,exchange_fraction=0d0)
+      else if(xc_name=='hse06')then
         call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
       else
         call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status)

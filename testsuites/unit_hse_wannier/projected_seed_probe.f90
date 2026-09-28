@@ -4,7 +4,7 @@ program probe
  use mpi
  use hse_spatial
  implicit none
- type(spatial_exx_state) :: seeded,plain,orbital
+ type(spatial_exx_state) :: seeded,plain,orbital,canonical
  integer :: ierr,np,rank,n(3)=[16,8,8],m(3),g,x,y,z,status
  complex(8),allocatable :: psi(:,:,:)
  call MPI_Init(ierr)
@@ -21,6 +21,14 @@ program probe
   MPI_COMM_WORLD,psi,20,1d-10,status)
  if(rank==0)print *,'PLAIN status/spread/gradient: ',status,plain%spread,plain%gradient
  if(status/=0.or.plain%spread<1d0.or.plain%gradient>1d-10)error stop 'identity saddle not reproduced'
+ canonical=plain
+ call spatial_exx_canonical_source(canonical,psi,reshape([2d0,.5d0],[2,1]),MPI_COMM_WORLD,status)
+ if(status/=0.or.allocated(canonical%gauge).or.allocated(canonical%previous))error stop 'canonical gauge allocation'
+ if(maxval(abs(canonical%source(:,1)-psi(:,1,1)))>1d-14.or. &
+    maxval(abs(canonical%source(:,2)-.5d0*psi(:,2,1)))>1d-14)error stop 'canonical occupation weighting'
+ call spatial_exx_canonical_source(canonical,psi,reshape([0d0,2d0],[2,1]),MPI_COMM_WORLD,status,comm_o=MPI_COMM_SELF)
+ if(status/=0.or.any(canonical%source(:,1)/=0d0).or. &
+    maxval(abs(canonical%source(:,2)-psi(:,2,1)))>1d-14)error stop 'canonical refresh'
  seeded%seed_localized=.true.
  call spatial_exx_refresh(seeded,n,[1d0,1d0,1d0],[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
   MPI_COMM_WORLD,psi,20,1d-10,status)

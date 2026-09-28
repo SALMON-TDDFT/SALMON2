@@ -22,7 +22,7 @@ module hse_native
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-    exx_pair_screening,exx_pair_tolerance,hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
+    yn_exx_dc_mlwf,exx_pre_scf_active,exx_pair_screening,exx_pair_tolerance,hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
   public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
@@ -50,6 +50,7 @@ module hse_native
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
   subroutine hse_check_localization()
+    if(dc_canonical())return
     ! A density criterion cannot certify a gauge-dependent truncated operator.
     if(exx_mlwf_norm_fraction>0d0.and..not.adaptive_active) &
       error stop 'Adaptive EXX: localized support not established; SCF result rejected'
@@ -184,8 +185,12 @@ contains
     hse_walltime=real(count,8)/real(rate,8)
   end function
 
+  logical function dc_canonical()
+    dc_canonical=yn_dc=='y'.and.yn_exx_dc_mlwf=='n'
+  end function
+
   logical function hse_enabled()
-    hse_enabled=trim(xc)=='hse06'.or.trim(xc)=='pbeh40'.or.trim(xc)=='pbeh40_rvv10'
+    hse_enabled=(trim(xc)=='hse06'.or.trim(xc)=='pbeh40'.or.trim(xc)=='pbeh40_rvv10').and..not.exx_pre_scf_active
   end function
 
   subroutine hse_pack(psi,mg,info,a)
@@ -542,10 +547,17 @@ contains
       maxiter=exx_mlwf_maxiter
     spatial%seed_localized=exx_mlwf_norm_fraction>0d0
     spatial%retain_accepted_gauge=theory/='dft'
+    if(dc_canonical())then
+      maxiter=0
+      call spatial_exx_canonical_source(spatial,local,system%rocc(info%io_s:info%io_e,:,1), &
+        info%icomm_r,status,comm_o=orbital_comm)
+      if(info%id_ro==0.and.spatial%updates==1)write(*,'(a)') 'EXX_DC canonical full-fragment source (spatial)'
+    else
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
       maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(info%io_s:info%io_e,:,1),comm_o=orbital_comm)
-    if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
+    endif
+    if(status/=0)error stop 'Spatial EXX: source refresh failed'
     if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.theory/='dft')then
       if(spatial%last_localization_status/=0) &
         error stop 'Adaptive RT requires an accepted transported MLWF gauge; refine initial localization'
@@ -553,7 +565,7 @@ contains
     if(spatial%retained_gauge.and.info%id_ro==0)write(*,'(a,i10)') &
       'EXX_SPATIAL retained accepted transported gauge at refresh: ',spatial%updates
     was_active=adaptive_active
-    adaptive_active=exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and. &
+    adaptive_active=.not.dc_canonical().and.exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.exx_mlwf_norm_fraction==1d0)
     if(adaptive_active)then
       allocate(radii(info%numo),loss(info%numo),protected(info%numo))
@@ -611,7 +623,7 @@ contains
         *real(sum(conjg(local(:,j,1))*w(:,j,1)),8)
     enddo
     call comm_summation(ex,hse_exchange_energy,info%icomm_ro)
-    if(info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
+    if(.not.dc_canonical().and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
@@ -702,7 +714,10 @@ contains
       if(status==0)then
         maxiter=0
         if(mod(wannier%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
-        call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,exx_mlwf_tolerance,status)
+        if(dc_canonical())maxiter=0
+        call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,exx_mlwf_tolerance,status, &
+          localize=.not.dc_canonical())
+        if(dc_canonical().and.wannier%updates==1)write(*,'(a)') 'EXX_DC canonical full-fragment source (k mesh)'
       endif
       if(status==0)then
         wannier%use_local_fft=exx_local_fft=='auto'
@@ -710,7 +725,7 @@ contains
         finite_support_localized=wannier%discarded_norm_fraction==0d0.or.wannier%last_localization_status==0
       endif
       if(status==0)call wannier_apply(wannier,allpsi,allw,status)
-      if(status==0.and.(wannier%updates==1.or.maxiter>0))then
+      if(.not.dc_canonical().and.status==0.and.(wannier%updates==1.or.maxiter>0))then
         write(*,'(a,3i7,3es16.7)')'HSE_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &
         wannier%updates,wannier%localization_iterations,wannier%localization_status, &
         wannier%spread,wannier%gradient,wannier%min_singular

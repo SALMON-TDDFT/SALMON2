@@ -283,7 +283,7 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-      & exx_pair_screening,exx_pair_tolerance, &
+      & exx_pair_screening,exx_pair_tolerance,exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -754,6 +754,10 @@ contains
     exx_mlwf_radius = 0d0
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
+    yn_exx_dc_mlwf = 'n'
+    exx_pre_scf_threshold = 0d0
+    exx_pre_scf_steps = 3
+    exx_pre_scf_active = .false.
     exx_pair_screening = 'off'
     exx_pair_tolerance = 0d0
     hse_lcfo_wf_radius = 0d0
@@ -1362,6 +1366,10 @@ contains
       exx_mlwf_tolerance=hse_mlwf_tolerance
     endif
     if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
+    call comm_bcast(yn_exx_dc_mlwf,nproc_group_global)
+    call string_lowercase(yn_exx_dc_mlwf)
+    call comm_bcast(exx_pre_scf_threshold,nproc_group_global)
+    call comm_bcast(exx_pre_scf_steps,nproc_group_global)
     call comm_bcast(exx_pair_screening,nproc_group_global)
     call string_lowercase(exx_pair_screening)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
@@ -2333,6 +2341,9 @@ contains
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
+      write(fh_variables_log, *) "# yn_exx_dc_mlwf=",yn_exx_dc_mlwf
+      write(fh_variables_log, *) "# exx_pre_scf_threshold=",exx_pre_scf_threshold
+      write(fh_variables_log, *) "# exx_pre_scf_steps=",exx_pre_scf_steps
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
@@ -3249,6 +3260,28 @@ contains
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
     if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
+    if(yn_exx_dc_mlwf/='y'.and.yn_exx_dc_mlwf/='n')error stop 'yn_exx_dc_mlwf must be y or n'
+    if(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')then
+      if(exx_mlwf_radius>0d0.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0).or. &
+         exx_pair_screening/='off'.or.yn_hse_wannier_snapshot=='y') &
+        error stop 'DC canonical exchange requires full support; opt into yn_exx_dc_mlwf=y for localization'
+    endif
+    if(.not.ieee_is_finite(exx_pre_scf_threshold).or.exx_pre_scf_threshold<0d0) &
+      error stop 'exx_pre_scf_threshold must be finite and nonnegative'
+    if(exx_pre_scf_steps<1)error stop 'exx_pre_scf_steps must be positive'
+    if(exx_pre_scf_threshold>0d0)then
+      if(theory/='dft'.or.yn_restart/='n'.or.yn_opt/='n'.or. &
+         (xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10')) &
+        error stop 'PBE pre-SCF requires fresh static hybrid SCF'
+      if(yn_dc=='y'.and.temperature<=0d0) &
+        error stop 'PBE pre-SCF in DC requires positive electronic temperature (e.g. temperature_k=300)'
+      if(checkpoint_interval>0.or.time_shutdown>0d0.or.yn_hse_wannier_snapshot=='y'.or. &
+         yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+        error stop 'PBE pre-SCF stage is not supported by checkpoints or diagnostic snapshots'
+      if(method_mixing=='simple_potential'.or. &
+         (convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')) &
+        error stop 'PBE pre-SCF requires density mixing and a density convergence metric'
+    endif
     if(exx_pair_screening/='off'.and.exx_pair_screening/='diagnose'.and.exx_pair_screening/='on') &
       error stop 'exx_pair_screening must be off, diagnose or on'
     if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &

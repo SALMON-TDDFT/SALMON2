@@ -22,7 +22,7 @@ contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
             &   miter,nscf_init_no_diagonal)
-  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,yn_dc
+  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,yn_dc,exx_pre_scf_active
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
@@ -96,7 +96,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
 #ifdef USE_HSE
   ! CG minimizes bands independently; orthogonalization can rotate them away
   ! from the eigenbasis. Return sorted Ritz states before DC assigns occupations.
-  if(yn_dc=='y'.and.hse_enabled())then
+  if(yn_dc=='y'.and.(hse_enabled().or.exx_pre_scf_active))then
     call timer_begin(LOG_CALC_SUBSPACE_DIAG)
     call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     call timer_end(LOG_CALC_SUBSPACE_DIAG)

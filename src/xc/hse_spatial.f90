@@ -14,7 +14,7 @@ module hse_spatial
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: spatial_exx_state,spatial_exx_refresh,spatial_exx_apply
+  public :: spatial_exx_state,spatial_exx_refresh,spatial_exx_apply,spatial_exx_canonical_source
   type spatial_exx_state
     integer :: updates=0,iterations=0,localization_status=1,last_localization_status=1
     logical :: compact=.false.,seed_localized=.false.,seed_needed=.true.,retained_gauge=.false.
@@ -27,6 +27,34 @@ module hse_spatial
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
 contains
+  subroutine spatial_exx_canonical_source(op,psi,occupation,comm_r,status,comm_o)
+    type(spatial_exx_state),intent(inout) :: op
+    complex(8),intent(in) :: psi(:,:,:)
+    real(8),intent(in) :: occupation(:,:)
+    integer,intent(in) :: comm_r
+    integer,intent(in),optional :: comm_o
+    integer,intent(out) :: status
+    integer :: bad,j
+    bad=0;status=1
+    if(size(psi,3)/=1.or.any(shape(occupation)/=[size(psi,2),1]))bad=1
+    if(.not.all(ieee_is_finite(real(psi))).or..not.all(ieee_is_finite(aimag(psi))))bad=1
+    if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))bad=1
+    call comm_get_max(bad,comm_r)
+    if(present(comm_o))call comm_get_max(bad,comm_o)
+    if(bad/=0)return
+    ! No gauge, overlap transport, or extra previous-state grid is needed.
+    if(allocated(op%gauge))deallocate(op%gauge)
+    if(allocated(op%previous))deallocate(op%previous)
+    op%source=psi(:,:,1)
+    do j=1,size(psi,2)
+      op%source(:,j)=op%source(:,j)*sqrt(occupation(j,1)/2d0)
+    enddo
+    op%iterations=0;op%localization_status=2;op%last_localization_status=2
+    op%spread=-1d0;op%gradient=-1d0;op%min_singular=0d0
+    op%compact=.false.;op%retained_gauge=.false.;op%screen_mode=0
+    op%updates=op%updates+1;status=0
+  end subroutine spatial_exx_canonical_source
+
   subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation,comm_o)
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r,maxiter

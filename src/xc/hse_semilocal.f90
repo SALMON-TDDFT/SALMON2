@@ -42,10 +42,11 @@ module hse_semilocal
     end subroutine
   end interface
 contains
-  subroutine pbeh_semilocal_evaluate(rho,sigma,eps,vrho,vsigma,ierr)
+  subroutine pbeh_semilocal_evaluate(rho,sigma,eps,vrho,vsigma,ierr,exchange_fraction)
     real(c_double),intent(in) :: rho(:),sigma(:)
     real(c_double),intent(out) :: eps(:),vrho(:),vsigma(:)
     integer,intent(out) :: ierr
+    real(c_double),intent(in),optional :: exchange_fraction
     type(c_ptr) :: func
     real(c_double) :: e(size(rho)),v(size(rho)),s(size(rho)),weight
     integer(c_int) :: ids(2)=[101_c_int,130_c_int]
@@ -65,7 +66,10 @@ contains
       call xc_gga_exc_vxc(func,int(n,c_size_t),rho,sigma,e,v,s)
       call xc_func_end(func);call xc_func_free(func)
       weight=1d0
-      if(j==1)weight=.6d0
+      if(j==1)then
+        weight=.6d0
+        if(present(exchange_fraction))weight=1d0-exchange_fraction
+      endif
       eps=eps+weight*e;vrho=vrho+weight*v;vsigma=vsigma+weight*s
     enddo
     where(rho==0d0)

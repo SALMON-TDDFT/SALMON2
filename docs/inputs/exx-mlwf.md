@@ -106,13 +106,13 @@ local/global pair counts with local FFT point counts for orbital group zero.
 Only exactly zero pair densities are skipped. Dense ACE/gauge algebra and
 source-target pair work remain; this is not a claim of linear overall scaling.
 
-In SCF, full support is used until the selected convergence residual is below
+Without PBE preconvergence (see below), in SCF full support is used until the selected convergence residual is below
 `sqrt(threshold)`. Masking then requires converged MLWF localization. This
 allows occupied-only calculations without adding empty states just to measure
 a gap. Mode changes reset the density mixing history and invalidate that
 iteration's convergence result. Failed gauge transport or localization restores
 full support; a result without established adaptive localization is rejected.
-In DC, all source geometry and exchange convolutions use the buffered fragment
+With explicit `yn_exx_dc_mlwf='y'`, in DC all source geometry and exchange convolutions use the buffered fragment
 cell and its communicators. SCF switching readiness is synchronized across
 fragments so global mixing history is reset consistently.
 
@@ -171,3 +171,73 @@ separate `retained accepted transported gauge` line. For fraction < 1, RT stops
 if it cannot obtain an accepted initial/transported gauge; it no longer
 silently switches to a full-support operator. This does not freeze the adaptive
 radius or remove errors from moving mask boundaries.
+
+
+## PBE preconvergence before hybrid SCF
+
+```fortran
+&functional
+  xc='pbeh40_rvv10'  ! also hse06 or pbeh40
+  exx_pre_scf_threshold=1d-4
+  exx_pre_scf_steps=3
+  exx_mlwf_norm_fraction=0.999d0
+/
+```
+
+`exx_pre_scf_threshold=0` (default) disables this stage and retains the existing
+SCF route. A positive value is a threshold in the **selected density residual**
+(`rho_dne`, `norm_rho`, or `norm_rho_dng`), not an energy tolerance; the example
+is not a universal recommended accuracy. `exx_pre_scf_steps` defaults to 3 and
+requires that many consecutive residuals below the threshold. A failed residual
+resets the counter. Switching does not use a gap criterion.
+
+PBE exchange and correlation are used from the first potential evaluation;
+EXX, ACE, MLWF and rVV10 are inactive. At readiness, the requested hybrid
+functional (including rVV10 when requested) is restored, the local potential and
+first EXX/ACE are built, and mixing history is restarted. No pre-stage ACE/gauge
+exists to reuse. Subsequent hybrid MLWF updates reuse the transported U normally.
+For whole-system SCF or explicitly enabled DC MLWF, adaptive support becomes
+eligible at this transition, still requiring successful
+localization; otherwise the established full-support fallback applies. The final
+`threshold` belongs to the target hybrid SCF. `nscf` counts both stages, and an
+unfinished PBE stage or unconverged final hybrid stage is rejected before final
+GS/restart/LCFO export. Logs explicitly mark the stage and transition.
+
+In DC, PBE and hybrid operators act on each buffered periodic fragment. The
+existing global Hartree update is preserved; the transition readiness reduction
+synchronizes all fragments so density mixing resets on the same iteration.
+Neither stage introduces a global EXX or global rVV10 evaluation. DC staged SCF
+requires a positive specified electronic temperature (use `temperature_k=300d0`
+in `&system` for the water workflow). Both stages use that same Fermi–Dirac
+occupation rule and a common chemical potential satisfying the total core-weighted
+charge. Current Ritz states and eigenvalues are updated before assigning
+occupations in both stages. No electronic temperature is imposed on laser RT.
+
+This option currently requires a fresh static SCF with density mixing. Restart,
+checkpoints/shutdown timers, ionic optimization/MD, RT, and eigen/MLWF diagnostic
+snapshots are rejected because they do not encode the temporary stage. Normal
+final GS restart output is supported. For subsequent native mesh RT, use that
+completed hybrid GS and omit `exx_pre_scf_threshold` from the RT input.
+
+`exx_mlwf_tolerance` remains independent: it controls the localization gradient
+norm, not the density residual or physical observable error. Its existing default
+is **1d-6**; examples/benchmarks explicitly using **1d-7** do not impose it as a
+requirement. This change does not normalize or loosen that criterion automatically.
+
+## DC fragment SCF: full support without MLWF (default)
+
+`yn_exx_dc_mlwf='n'` is now the default. DC already limits the exchange domain
+to each buffered periodic fragment. Its SCF therefore skips localization,
+gauge seeding/transport, and orbital masks; ACE and the existing spatial/orbital
+MPI distribution remain active. The canonical sources are weighted by
+`sqrt(occupation/2)`, preserving the finite-temperature density matrix exactly.
+The spatial route allocates neither a gauge matrix nor a previous-gauge grid.
+The full-k route retains its Fourier transform and periodic translation sum,
+with no gauge rotation. Native whole-system SCF/RT is unaffected.
+
+Use `exx_mlwf_norm_fraction=0` (default) or 1 and `exx_mlwf_radius=0` for this
+DC route. Fractional masks, positive fixed radii, pair screening and Wannier
+snapshots are rejected rather than silently ignored. Set `yn_exx_dc_mlwf='y'`
+only to opt into the former DC localization route for comparisons. A 300 K
+DC test with empty states and 0.999 support did not converge on that old route;
+this does not limit the new full-fragment route. See `docs/pbe-pre-scf-ja.md`.

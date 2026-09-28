@@ -195,14 +195,16 @@ contains
     enddo
   end subroutine
 
-  subroutine wannier_refresh_source(op,psi,occupation,maxiter,tolerance,status)
+  subroutine wannier_refresh_source(op,psi,occupation,maxiter,tolerance,status,localize)
     type(s_hse_wannier),intent(inout) :: op
     complex(8),intent(in) :: psi(:,:,:)
     real(8),intent(in) :: occupation(:,:),tolerance
     integer,intent(in) :: maxiter
     integer,intent(out) :: status
     integer,allocatable :: indices(:)
-    integer :: j
+    logical,intent(in),optional :: localize
+    complex(8),allocatable :: weighted(:,:,:)
+    integer :: j,ik
     logical :: reset
     status=1
     if(size(psi,2)<1.or.size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
@@ -222,6 +224,25 @@ contains
       op%min_singular=0d0
     endif
     op%source_indices=indices
+    if(present(localize))then
+      if(.not.localize)then
+        if(allocated(op%gauge))deallocate(op%gauge)
+        if(allocated(op%previous))deallocate(op%previous)
+        weighted=psi(:,indices,:)
+        do ik=1,op%nk
+          do j=1,size(indices)
+            weighted(:,j,ik)=weighted(:,j,ik)*sqrt(occupation(indices(j),ik)/2d0)
+          enddo
+        enddo
+        if(allocated(op%source))deallocate(op%source)
+        allocate(op%source(op%ngs,size(indices)))
+        call wannier_forward(op,weighted,op%source)
+        op%source_occupation=occupation(indices,:)
+        op%localization_iterations=0;op%localization_status=2;op%last_localization_status=2
+        op%spread=-1d0;op%gradient=-1d0;op%min_singular=0d0
+        op%updates=op%updates+1;status=0;return
+      endif
+    endif
     call wannier_localize(op,psi(:,indices,:),maxiter,tolerance,status)
     if(status==0)call wannier_set_source(op,psi(:,indices,:),occupation(indices,:),op%gauge,status)
   end subroutine

@@ -35,6 +35,7 @@ use inputoutput
 use parallelization, only: nproc_id_global,adjust_elapse_time
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
+use hamiltonian, only: update_vlocal
 use timer
 use scf_iteration_sub
 use density_matrix, only: calc_density
@@ -46,7 +47,7 @@ use code_optimization
 use initialization_sub
 use occupation
 use prep_pp_sub
-use mixing_sub, only: check_mixing_half, copy_density
+use mixing_sub, only: check_mixing_half, copy_density, reset_mixing_rate
 use checkpoint_restart_sub
 use total_energy
 use init_gs, only: init_wf
@@ -102,15 +103,21 @@ real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
 #ifdef USE_HSE
 logical :: saved_hse_freeze,adaptive_exchange,support_event,iteration_support_changed
-integer :: adaptive_comm,not_ready_local,not_ready_total
+integer :: adaptive_comm,not_ready_local,not_ready_total,pre_scf_count,pre_scf_first_iteration
+logical :: pre_scf_root
 #endif
 
 mixing_age=Miter
 #ifdef USE_HSE
-adaptive_exchange=hse_enabled().and.exx_mlwf_norm_fraction>0d0
+pre_scf_count=0
+pre_scf_first_iteration=Miter+1
+pre_scf_root=comm_is_root(nproc_id_global)
+if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
+adaptive_comm=info%icomm_rko
+if(yn_dc=='y')adaptive_comm=dc%icomm_tot
+adaptive_exchange=(hse_enabled().or.exx_pre_scf_active).and.exx_mlwf_norm_fraction>0d0.and. &
+  .not.(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')
 if(adaptive_exchange)then
-  adaptive_comm=info%icomm_rko
-  if(yn_dc=='y')adaptive_comm=dc%icomm_tot
   ! Each static SCF starts with the full exchange operator.
   hse_adaptive_ready=.false.
 endif
@@ -173,7 +180,38 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 #ifdef USE_HSE
    iteration_support_changed=.false.
-   if(adaptive_exchange.and..not.hse_adaptive_ready)then
+   if(exx_pre_scf_active)then
+     not_ready_local=0
+     if(iter==pre_scf_first_iteration.or..not.(sum1<exx_pre_scf_threshold))not_ready_local=1
+     call comm_summation(not_ready_local,not_ready_total,adaptive_comm)
+     if(not_ready_total==0)then
+       pre_scf_count=pre_scf_count+1
+     else
+       pre_scf_count=0
+     endif
+     if(iter>1.and.pre_scf_root) &
+       write(*,'(a,es24.16,1x,i0)') 'EXX_PRE_SCF residual/count: ',sum1,pre_scf_count
+     if(pre_scf_count>=exx_pre_scf_steps)then
+       exx_pre_scf_active=.false.
+       call reset_mixing_rate(mixing)
+       hse_adaptive_ready=.true.
+       mixing_age=0
+       sum1=huge(sum1)
+       iteration_support_changed=.true.
+       if(pre_scf_root) &
+         write(*,'(a,i0)') 'EXX_PRE_SCF switch to target hybrid before iteration ',iter
+       ! No ACE/gauge/cache was built during the PBE stage. Rebuild the full
+       ! target local potential and its first EXX/ACE before solving orbitals.
+       if(yn_dc=='y')then
+         call calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
+           pp,ppn,spsi,Vxc,energy,dc,V_local)
+       else
+         call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+         call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+       endif
+     endif
+   endif
+   if(adaptive_exchange.and..not.exx_pre_scf_active.and..not.hse_adaptive_ready)then
      ! Every fragment must reach the warm-up tolerance before any switches.
      ! This uses the selected SCF metric (density or potential), as does the
      ! final convergence test; readiness stays latched after this transition.
@@ -189,7 +227,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    endif
 #endif
 
-   if( sum1 < threshold ) then
+   if( sum1 < threshold .and. .not.exx_pre_scf_active ) then
 #ifdef USE_HSE
       call hse_check_localization()
 #endif
@@ -241,7 +279,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
 #ifdef USE_HSE
-       if(hse_enabled())then
+       if(hse_enabled().or.exx_pre_scf_active)then
          ! Occupations must use the current Ritz states and their fixed-H
          ! energies, not the previous iteration's spectrum. Do not rebuild
          ! exchange with old occupations after rotating the states.
@@ -459,7 +497,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 #ifdef USE_HSE
    ! Never accept a residual spanning two exchange support definitions.
-   if(adaptive_exchange.and.iteration_support_changed)sum1=huge(sum1)
+   if(iteration_support_changed)sum1=huge(sum1)
 #endif
 
    if(theory=='dft' .and. yn_opt=='n')then
@@ -483,6 +521,14 @@ DFT_Iteration : do iter=Miter+1,nscf
 
 end do DFT_Iteration
 #ifdef USE_HSE
+if(exx_pre_scf_active)error stop 'PBE pre-SCF unfinished; no hybrid ground state'
+if(exx_pre_scf_threshold>0d0.and..not.(sum1<threshold)) &
+  error stop 'Hybrid SCF after PBE pre-SCF not converged; ground state rejected'
+if(exx_pre_scf_threshold>0d0.and..not.flag_conv)then
+  flag_conv=.true.
+  if(ilevel_print>=3.and.comm_is_root(nproc_id_global)) &
+    write(*,'(a,i6,a,e15.8)') '  #GS converged at',Miter,' (last allowed iteration):',sum1
+endif
 call hse_check_localization()
 #endif
 
