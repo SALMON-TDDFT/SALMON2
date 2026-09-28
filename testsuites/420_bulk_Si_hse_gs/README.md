@@ -18,6 +18,6 @@ OMP_NUM_THREADS=1 ctest --test-dir build \
 
 The tests use four MPI ranks. In a Fugaku compute-node allocation, set
 OMP_NUM_THREADS=12 for the 4-rank × 12-thread configuration and use the site's
-MPI launcher. Retain the same setting in both producer and consumer. Python 3
-is used only by verification. CTest selecting case 421 automatically adds the
+MPI launcher. Retain the same setting in both producer and consumer. Python 2.7 or Python 3
+is supported by the verification scripts (including the legacy Jenkins runner). CTest selecting case 421 automatically adds the
 GS producer and verification through fixtures. Failed GS convergence blocks RT.

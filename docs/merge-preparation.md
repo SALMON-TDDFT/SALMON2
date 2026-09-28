@@ -89,3 +89,19 @@ Local validation: Apple Clang C99 compilation, including an explicitly supplied
 probe passed recursive creation, directory detection, stdio removal and nftw
 removal, including preservation of a directory reached only through a symlink.
 This does not replace the GNU 8.4.1/Linux CI rerun; that result remains pending.
+
+## Jenkins verification interpreter compatibility (2026-09-28)
+
+PR #1304 build 380 compiled successfully and case 420 reached GS convergence
+at reported iteration 87, density residual 4.3519093e-9. The legacy runner then
+launched `verification` with Python 2 despite its Python 3 shebang, failing on
+`pathlib`. Cases 420 and 421 now use Python 2.7/3-compatible file reads, regular
+expression groups, finite checks and closeness comparisons, with unchanged
+numerical thresholds. No other PR or test case is changed.
+
+`python3 testsuites/unit_hse_verification/test_verification.py` passes synthetic
+GS/RT acceptance and rejection checks, including missing convergence, excessive
+residual, NaN, electron loss, energy drift and inconsistent dielectric output.
+The tests also disable pathlib and the Python 3-only math helpers; the pre-fix
+scripts fail this regression. Python 2 itself is unavailable locally, so the
+actual legacy-interpreter run and Linux RT result still require Jenkins rerun.
