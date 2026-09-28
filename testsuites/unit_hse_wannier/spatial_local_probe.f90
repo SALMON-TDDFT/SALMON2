@@ -1,17 +1,21 @@
 program probe
  use mpi
  use iso_fortran_env, only: int64
+ use iso_c_binding
+ use exx_local_fft, only: s_exx_local_fft,exx_local_apply,exx_local_destroy
  use fftw_pencils
  use exx_spatial_local
  implicit none
+ include 'fftw3.f03'
  type(s_exx_spatial_local) :: plan
  integer :: n(3)=[16,12,8],dims(2),coords(2),comm(2),m(3),lo(3),p(3),rank,np,ierr,g,x,y,z,j,status,kind
- integer(int64) :: pairs,points
+ integer(int64) :: pairs,points,reference_points
  complex(8),allocatable :: source(:),target(:,:),action(:,:),ref(:,:),work(:,:),spec(:,:)
  real(8),allocatable :: multiplier(:)
  complex(8) :: metric(7,7),total(7,7)
  real(8) :: q2,err,err_all
- logical :: used
+ logical :: used,skip(7),oracle_fail=.false.
+ integer :: batch_sizes(4)=[1,2,3,8],ibatch,callback_calls,all_calls
  call MPI_Init(ierr)
  call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
  dims=[np,1];if(np==4)dims=[2,2]
@@ -95,7 +99,74 @@ program probe
  enddo
  err=maxval(abs(ref-action));call MPI_Allreduce(err,err_all,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
  if(err_all>1d-11)error stop 'single point parity'
+ ! Exercise optional batched dispatch using the production FFTW scalar oracle.
+ ! Seven columns, two explicit skips and a zero column leave partial owner batches.
+ g=0
+ do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1
+ g=g+1;p=[x,y,z]+lo
+ source(g)=0d0
+ if(all(modulo(p+1,n)<=2))source(g)=cmplx(.3d0+.01d0*sum(p),.2d0,8)
+ enddo;enddo;enddo
+ skip=.false.;skip(2)=.true.;skip(6)=.true.
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,ref,used,status,pairs,reference_points,skip)
+ if(status/=0.or..not.used.or.pairs/=4)error stop 'CPU skipped-pair reference'
+ plan%batch_action=>cpu_batch_action
+ do ibatch=1,size(batch_sizes)
+ plan%batch_size=batch_sizes(ibatch);callback_calls=0
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
+ if(status/=0.or..not.used.or.pairs/=4.or.points/=reference_points)error stop 'batched counters'
+ call MPI_Allreduce(callback_calls,all_calls,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
+ if(all_calls<1)error stop 'batch callback not exercised'
+ if(any(action(:,2)/=(0d0,0d0)).or.any(action(:,6:7)/=(0d0,0d0)))error stop 'skip/zero columns'
+ err=maxval(abs(ref-action));call MPI_Allreduce(err,err_all,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+ if(err_all>1d-11)error stop 'batched MPI scatter parity'
+ enddo
+ ! A backend error on one owner must reach all ranks instead of hanging or passing.
+ oracle_fail=(rank==0)
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
+ if(status==0)error stop 'batch callback error was not propagated'
+ oracle_fail=.false.
+ callback_calls=0
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target(:,1:0),action(:,1:0),used,status,pairs,points)
+ if(status/=0.or..not.used.or.pairs/=0.or.callback_calls/=0)error stop 'batch empty targets'
+ source=0d0
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points)
+ if(status/=0.or..not.used.or.pairs/=0.or.callback_calls/=0)error stop 'batch zero support'
+ nullify(plan%batch_action)
  call spatial_local_destroy(plan)
- if(rank==0)print *, 'PASS spatial local',np
+ if(rank==0)print *, 'PASS spatial local and batched callback',np
  call MPI_Finalize(ierr)
+contains
+ subroutine cpu_batch_action(padded,indices,filter,source,targets,action,status)
+  implicit none
+  integer,intent(in) :: padded(3),indices(:)
+  complex(8),intent(in) :: filter(:,:,:),source(:),targets(:,:)
+  complex(8),intent(out) :: action(:,:)
+  integer,intent(out) :: status
+  type(s_exx_local_fft) :: oracle
+  complex(8),allocatable :: density(:),potential(:)
+  integer :: column
+  callback_calls=callback_calls+1
+  if(size(targets,2)>plan%batch_size)error stop 'backend batch exceeds configured maximum'
+  status=1;action=0d0
+  if(oracle_fail)return
+  oracle%padded=padded;oracle%fft_points=product(padded);oracle%indices=indices
+  oracle%filter=filter
+  allocate(oracle%work(padded(1),padded(2),padded(3)),density(size(source)),potential(size(source)))
+  oracle%forward=fftw_plan_dft_3d(padded(3),padded(2),padded(1), &
+    oracle%work,oracle%work,FFTW_FORWARD,FFTW_ESTIMATE)
+  oracle%backward=fftw_plan_dft_3d(padded(3),padded(2),padded(1), &
+    oracle%work,oracle%work,FFTW_BACKWARD,FFTW_ESTIMATE)
+  if(.not.c_associated(oracle%forward).or..not.c_associated(oracle%backward)) &
+    error stop 'callback FFTW plan'
+  oracle%ready=.true.
+  do column=1,size(targets,2)
+    density=conjg(source)*targets(:,column)
+    call exx_local_apply(oracle,density,potential,status)
+    if(status/=0)error stop 'callback FFTW apply'
+    action(:,column)=-source*potential
+  enddo
+  call exx_local_destroy(oracle)
+  status=0
+ end subroutine
 end program

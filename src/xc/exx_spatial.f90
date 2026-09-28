@@ -7,7 +7,8 @@
 module exx_spatial
   use iso_fortran_env, only: int64
   use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
-  use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy
+  use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy, &
+    local_batch_action
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use fftw_pencils, only: pencil_transform
@@ -20,6 +21,8 @@ module exx_spatial
     integer :: updates=0,iterations=0,localization_status=1,last_localization_status=1
     logical :: compact=.false.,seed_localized=.false.,seed_needed=.true.,retained_gauge=.false.
     logical :: retain_accepted_gauge=.false.
+    procedure(local_batch_action),pointer,nopass :: local_batch=>null()
+    integer :: local_batch_size=8
     integer :: screen_mode=0 ! 0 off, 1 diagnose, 2 omit
     real(8) :: screen_tolerance=0d0,screen_bound=0d0,screen_cpu_seconds=0d0
     integer(int64) :: screen_candidates=0,screen_skipped=0
@@ -472,6 +475,8 @@ contains
     op%local_pairs=0;op%local_points=0;op%global_pairs=0
     if(op%compact)then
       call spatial_local_init(compact_plan,n,dims,coords,comm,multiplier,status)
+      compact_plan%batch_action=>op%local_batch
+      compact_plan%batch_size=op%local_batch_size
       call collective_bad_status()
       if(status/=0)return
     endif

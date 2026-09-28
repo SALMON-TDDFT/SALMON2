@@ -25,6 +25,11 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/analysis)
 # Executable binary
 add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
 target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
+if(USE_EXX_CUFFT)
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/xc/exx_cufft.f90
+    PROPERTIES COMPILE_OPTIONS "-acc")
+  target_link_options(${TARGET_NAME} PRIVATE -acc -cudalib=cufft)
+endif()
 if(EXTERNAL_PROJECT_TARGETS)
   add_dependencies(${TARGET_NAME} ${EXTERNAL_PROJECT_TARGETS})
 endif()

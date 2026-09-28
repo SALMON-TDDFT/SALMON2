@@ -32,6 +32,17 @@ class ExxInputs(unittest.TestCase):
             energy=float(re.search(r'Total energy \(eV\) =\s*([\d.E+-]+)',info)[1])
             return energy,(Path(tmp)/'variables.log').read_text(),run.stdout
 
+    def test_local_backend_input_contract(self):
+        self.run_case("exx_local_backend='invalid'",error='exx_local_backend must be cpu or cufft')
+        self.run_case('exx_gpu_batch_size=0',error='exx_gpu_batch_size must be positive')
+        _, log, _ = self.run_case("exx_local_backend='CPU'\n exx_gpu_batch_size=3")
+        self.assertRegex(log, r'exx_local_backend=\s*cpu')
+        self.assertRegex(log, r'exx_gpu_batch_size=\s*3')
+        config = Path(os.environ['SALMON_TEST_EXE']).resolve().parent / 'config.h'
+        if config.is_file() and '#define USE_EXX_CUFFT' not in config.read_text():
+            self.run_case("exx_local_backend='CUFFT'",
+                          error='exx_local_backend=cufft requires USE_EXX_CUFFT=ON')
+
     def test_pair_screen_input_contract(self):
         self.run_case("exx_pair_screening='invalid'",error='exx_pair_screening must be off, diagnose or on')
         self.run_case('exx_pair_tolerance=-1',error='exx_pair_tolerance must be finite and nonnegative')

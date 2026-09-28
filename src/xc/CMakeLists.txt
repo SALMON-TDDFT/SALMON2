@@ -13,6 +13,7 @@ set(SOURCES
 
 if(USE_HSE)
   list(APPEND SOURCES
+    exx_cufft.f90
     exx_local_fft.f90
     exx_adaptive_support.f90
     exx_pair_candidates.f90

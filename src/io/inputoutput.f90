@@ -284,6 +284,7 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+      & exx_local_backend,exx_gpu_batch_size, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
@@ -755,6 +756,8 @@ contains
     exx_mlwf_radius = 0d0
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
+    exx_local_backend = 'cpu'
+    exx_gpu_batch_size = 8
     yn_exx_dc_mlwf = 'n'
     exx_pre_scf_threshold = 0d0
     exx_pre_scf_steps = 3
@@ -1377,6 +1380,9 @@ contains
     call comm_bcast(exx_pair_screening,nproc_group_global)
     call string_lowercase(exx_pair_screening)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
+    call comm_bcast(exx_local_backend,nproc_group_global)
+    call string_lowercase(exx_local_backend)
+    call comm_bcast(exx_gpu_batch_size,nproc_group_global)
     call comm_bcast(exx_local_fft,nproc_group_global)
     call string_lowercase(exx_local_fft)
     call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
@@ -2354,6 +2360,8 @@ contains
       write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
+      write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
+      write(fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
       write(fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
       write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
@@ -3313,6 +3321,24 @@ contains
       if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
     endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
+    if(exx_local_backend/='cpu'.and.exx_local_backend/='cufft') &
+      error stop 'exx_local_backend must be cpu or cufft'
+    if(exx_gpu_batch_size<1)error stop 'exx_gpu_batch_size must be positive'
+    if(exx_local_backend=='cufft')then
+#ifndef USE_EXX_CUFFT
+      error stop 'exx_local_backend=cufft requires USE_EXX_CUFFT=ON'
+#endif
+      if(.not.is_hybrid(xc).or.yn_hse_lcfo_rt=='y')error stop 'cuFFT EXX requires native hybrid orbitals'
+      if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12).or.nproc_k/=1) &
+        error stop 'cuFFT EXX requires unshifted Gamma and nproc_k=1'
+      if(exx_local_fft/='auto'.or.exx_mlwf_radius/=0d0.or. &
+        .not.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0)) &
+        error stop 'cuFFT EXX requires auto local FFT and adaptive support fraction in (0,1)'
+      if(yn_md/='n'.or.yn_opt/='n'.or. &
+        (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'cuFFT EXX supports static SCF and fixed-ion native RT'
+    endif
+
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'
     if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &

@@ -4,6 +4,7 @@
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
   use exx_functional, only: exchange_fraction
+  use exx_cufft, only: exx_cufft_apply
   use iso_fortran_env, only: int64
   use lcfo_rt_basis, only: lcfo_rt_active
   use exx_lcfo_rt, only: lcfo_exx_refresh,lcfo_exx_add_action,lcfo_exx_stage
@@ -23,6 +24,7 @@ module exx_native
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_block_rows, &
+    exx_local_backend,exx_gpu_batch_size, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
@@ -649,6 +651,13 @@ contains
     if(adaptive_active.neqv.was_active)exx_support_changed=.true.
     cached_adaptive_ready=exx_adaptive_ready
     spatial%compact=adaptive_active.and.exx_local_fft=='auto'
+    nullify(spatial%local_batch)
+    if(exx_local_backend=='cufft')then
+      spatial%local_batch=>exx_cufft_apply
+      spatial%local_batch_size=exx_gpu_batch_size
+      if(spatial%updates==1.and.info%id_ro==0)write(*,'(a,i0)') &
+        'EXX experimental cuFFT compact backend; CPU global fallback; per-rank batch=',exx_gpu_batch_size
+    endif
     requested_screen_mode=0
     if(exx_pair_screening=='diagnose')requested_screen_mode=1
     if(exx_pair_screening=='on')requested_screen_mode=2

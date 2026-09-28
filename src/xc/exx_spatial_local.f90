@@ -8,11 +8,22 @@ module exx_spatial_local
  use exx_local_fft, only: s_exx_local_fft,exx_local_prepare_compact,exx_local_apply,exx_local_destroy,smooth_size
  implicit none
  private
- public :: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy
+ public :: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy,local_batch_action
+ abstract interface
+  subroutine local_batch_action(padded,indices,filter,source,targets,action,status)
+   implicit none
+   integer,intent(in) :: padded(3),indices(:)
+   complex(8),intent(in) :: filter(:,:,:),source(:),targets(:,:)
+   complex(8),intent(out) :: action(:,:)
+   integer,intent(out) :: status
+  end subroutine
+ end interface
  type s_exx_spatial_local
   integer :: n(3)=0,m(3)=0,lo(3)=0
   complex(8),allocatable :: kernel(:)
   type(s_exx_local_fft) :: fft
+  procedure(local_batch_action),pointer,nopass :: batch_action=>null()
+  integer :: batch_size=8
  end type
 contains
  subroutine spatial_local_destroy(plan)
@@ -21,6 +32,7 @@ contains
   call exx_local_destroy(plan%fft)
   if(allocated(plan%kernel))deallocate(plan%kernel)
   plan%n=0;plan%m=0;plan%lo=0
+  nullify(plan%batch_action);plan%batch_size=8
  end subroutine
  subroutine spatial_local_init(plan,n,dims,coords,comm,multiplier,status)
   implicit none
@@ -51,9 +63,10 @@ contains
   integer(int64),intent(out),optional :: pairs_executed,pair_fft_points
   integer,allocatable :: occupied(:,:),total(:,:),axis_points(:),local_rows(:),tile_rows(:)
   complex(8),allocatable :: kernel_tile(:,:,:),kernel_sum(:,:,:),tile(:,:),tile_sum(:,:),result(:,:),result_sum(:,:)
-  complex(8),allocatable :: density(:),potential(:)
+  complex(8),allocatable :: density(:),potential(:),batch_targets(:,:),batch_result(:,:)
+  integer,allocatable :: owned(:)
   integer :: ng,nt,bad,axis,j,g,x,y,z,p(3),box(3),origin(3),padded(3),gap,best,start,a,b,c,r,rank,peers
-  integer :: count,ntmax,first,nb,k,batch
+  integer :: count,ntmax,first,nb,k,batch,nowned
   integer(int64) :: local_counts(2),global_counts(2)
   ! communication wrappers do not expose int64 reductions; sums are bounded
   ! here by the target count and accumulated through small real vectors.
@@ -62,6 +75,7 @@ contains
   if(present(pairs_executed))pairs_executed=0_int64
   if(present(pair_fft_points))pair_fft_points=0_int64
   bad=0;ng=size(source);nt=size(targets,2)
+  if(associated(plan%batch_action).and.plan%batch_size<1)bad=1
   if(.not.allocated(plan%kernel))bad=1
   if(size(targets,1)/=ng.or.any(shape(action)/=shape(targets)))bad=1
   if(ng/=product(plan%m))bad=1
@@ -128,8 +142,15 @@ contains
   ! screened. No all-target compact action or fixed four-worker bottleneck.
   call comm_get_groupinfo(comm_r,rank,peers)
   batch=min(nt,max(1,peers))
+  if(associated(plan%batch_action)) &
+   batch=int(min(int(nt,int64),int(max(1,peers),int64)*int(plan%batch_size,int64)))
+  ! Communication wrappers take a default-integer element count.
+  if(int(count,int64)*(int(batch,int64)+1_int64)>int(huge(0),int64))then
+   status=1;return
+  endif
   allocate(tile(count,batch+1),tile_sum(count,batch+1),result(count,batch),result_sum(count,batch))
   allocate(local_rows(count),tile_rows(count),density(count),potential(count))
+  if(associated(plan%batch_action))allocate(owned(min(nt,plan%batch_size)))
   r=0
   do z=0,box(3)-1;do y=0,box(2)-1;do x=0,box(1)-1
    p=modulo(origin+[x,y,z],plan%n)-plan%lo
@@ -148,6 +169,36 @@ contains
    enddo
    call comm_summation(tile(:,1:nb+1),tile_sum(:,1:nb+1),count*(nb+1),comm_r)
    result=0d0
+   if(associated(plan%batch_action))then
+    ! The owner rule is unchanged; each worker collects several of its pairs.
+    nowned=0
+    do j=1,nb
+     if(modulo(first+j-2,peers)/=rank)cycle
+     if(present(skip))then
+      if(skip(first+j-1))cycle
+     endif
+     if(.not.any(tile_sum(:,1)/=(0d0,0d0).and.tile_sum(:,j+1)/=(0d0,0d0)))cycle
+     nowned=nowned+1;owned(nowned)=j
+    enddo
+    if(nowned>0)then
+     allocate(batch_targets(count,nowned),batch_result(count,nowned))
+     do k=1,nowned
+      batch_targets(:,k)=tile_sum(:,owned(k)+1)
+     enddo
+     call plan%batch_action(plan%fft%padded,plan%fft%indices,plan%fft%filter, &
+       tile_sum(:,1),batch_targets,batch_result,status)
+     if(status/=0)then
+      bad=1
+     else
+      do k=1,nowned
+       result(:,owned(k))=batch_result(:,k)
+      enddo
+      local_counts(1)=local_counts(1)+int(nowned,int64)
+      local_counts(2)=local_counts(2)+int(nowned,int64)*int(plan%fft%fft_points,int64)
+     endif
+     deallocate(batch_targets,batch_result)
+    endif
+   else
    do j=1,nb
     if(modulo(first+j-2,peers)/=rank)cycle
     if(present(skip))then
@@ -163,6 +214,7 @@ contains
     local_counts(1)=local_counts(1)+1_int64
     local_counts(2)=local_counts(2)+int(plan%fft%fft_points,int64)
    enddo
+   endif
    call comm_get_max(bad,comm_r)
    if(bad/=0)then
     status=1;return

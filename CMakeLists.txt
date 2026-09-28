@@ -79,6 +79,18 @@ if(USE_HSE AND USE_OPENACC)
   message(FATAL_ERROR "Native HSE requires a CPU build; use USE_HSE=OFF for accelerators")
 endif()
 
+# A local exchange accelerator, independent of the generic SALMON OpenACC route.
+option(USE_EXX_CUFFT "Experimental OpenACC/cuFFT compact exchange backend" OFF)
+if(USE_EXX_CUFFT)
+  if(NOT USE_HSE OR USE_OPENACC)
+    message(FATAL_ERROR "USE_EXX_CUFFT requires USE_HSE=ON and USE_OPENACC=OFF")
+  endif()
+  if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "^(NVHPC|PGI)$")
+    message(FATAL_ERROR "USE_EXX_CUFFT requires the NVIDIA HPC Fortran compiler")
+  endif()
+  message(STATUS "Experimental compact EXX GPU backend; other native hybrid work remains on CPU")
+endif()
+
 # for third party libraries
 include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
