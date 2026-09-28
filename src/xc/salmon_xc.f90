@@ -23,6 +23,10 @@
 
 module salmon_xc
   use structures, only: s_xc_functional, s_xc_operator_payload
+#ifdef USE_HSE
+  use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
+  use hse_semilocal, only: hse_semilocal_evaluate
+#endif
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
@@ -40,6 +44,7 @@ module salmon_xc
   implicit none
 
 ! List of Exchange Correlation Functionals
+  integer, parameter :: salmon_xctype_hse06 = 9
   integer, parameter :: salmon_xctype_none  = 0
   integer, parameter :: salmon_xctype_pz    = 1
   integer, parameter :: salmon_xctype_pzm   = 2
@@ -113,6 +118,14 @@ contains
     
     call nvtxStartRange('exchange_correlation', __LINE__)
 
+#ifdef USE_HSE
+    if(hse_enabled())then
+      if(allocated(ppn%rho_nlcc))then
+        if(maxval(abs(ppn%rho_nlcc))>1d-14)error stop 'HSE06: NLCC not yet supported'
+      endif
+      call hse_refresh(system,mg,info,spsi)
+    endif
+#endif
     ! Payload reset each call; a functional without a tau derivative leaves no stale one behind.
     system%xc_payload%use_tau_operator = .false.
     system%xc_payload%vtau_has_shadow_values = .false.
@@ -251,7 +264,7 @@ contains
       end do
 !$omp end parallel do
 
-      call calc_tau
+      if(xc_func%xctype(1)/=salmon_xctype_hse06)call calc_tau
       ! A functional carrying a tau operator is fed the gauge-invariant tau; the
       ! others (TB-mBJ) subtract the current themselves and keep the bare tau.
       if (xc_func%xctype(1) == salmon_xctype_r2scan) call build_gauge_invariant_tau
@@ -462,6 +475,9 @@ contains
     tot_exc = tot_exc*system%hvol
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
+#ifdef USE_HSE
+    if(hse_enabled())E_xc=E_xc+hse_exchange_energy
+#endif
     
     if(present(eexc)) then
       do iz=1,mg%num(3)
@@ -768,6 +784,15 @@ contains
 #endif         
         return
       
+      case ('hse06')
+#ifdef USE_HSE
+        if(spin/='unpolarized')error stop 'HSE06: unpolarized only'
+        xc%xctype(1)=salmon_xctype_hse06
+        xc%use_gradient=.true.
+        return
+#else
+        error stop 'HSE06 requires build option USE_HSE=ON'
+#endif
       case ('pz')
         xc%xctype(1) = salmon_xctype_pz
         return
@@ -1143,6 +1168,10 @@ contains
 
     ! Exchange-Correlation
     select case (xc%xctype(1))
+#ifdef USE_HSE
+    case(salmon_xctype_hse06)
+      call exec_hse_semilocal()
+#endif
     case(salmon_xctype_pz)
       call exec_builtin_pz()
     case(salmon_xctype_pzm)
@@ -1213,6 +1242,24 @@ contains
       y(:) = alpha * x(:) + y(:)
 !$acc end kernels
     end subroutine exec_builtin_calc_axpy
+
+#ifdef USE_HSE
+    subroutine exec_hse_semilocal()
+      use salmon_global, only: hse_omega
+      real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
+      integer :: status,j
+      if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
+        error stop 'HSE06: unpolarized gradient inputs required'
+      r=reshape(rho,[nl]);grad=reshape(grho,[nl,3]);sigma=sum(grad**2,dim=2)
+      call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
+      if(status/=0)error stop 'HSE06: Libxc semilocal evaluation failed'
+      if(present(exc))exc=reshape(ep,[nx,ny,nz])
+      if(present(eexc))eexc=reshape(r*ep,[nx,ny,nz])
+      if(present(vxc))vxc=reshape(vr,[nx,ny,nz])
+      ! SALMON adds div(rdedd), so store the negative gradient derivative.
+      do j=1,3;rdedd(:,:,:,j)=reshape(-2d0*vs*grad(:,j),[nx,ny,nz]);enddo
+    end subroutine
+#endif
 
     subroutine exec_builtin_pz()
       use nvtx_wrapper
@@ -1728,13 +1775,13 @@ contains
 
          case(XC_FAMILY_LDA)
            call xc_f90_lda_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), &
+             & xc%func(ii), np, rho_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1) &
              & )
 
          case(XC_FAMILY_GGA)
            call xc_f90_gga_exc_vxc( &
-             & xc%func(ii), 1, rho_1d(1), sigma_1d(1), &
+             & xc%func(ii), np, rho_1d(1), sigma_1d(1), &
              & exc_tmp_1d(1), vxc_tmp_1d(1), gvxc_tmp_1d(1) &
              & )
 

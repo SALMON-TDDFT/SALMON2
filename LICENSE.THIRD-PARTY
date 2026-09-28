@@ -526,3 +526,20 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
+
+----------------------------------------------------
+
+Automatically built HSE dependencies
+
+Libxc 5.2.3: Mozilla Public License 2.0 (license reproduced above).
+https://gitlab.com/libxc/libxc/-/tree/5.2.3
+
+FFTW 3.3.10: GNU General Public License version 2 or later.
+Copyright (c) Matteo Frigo and Massachusetts Institute of Technology.
+The complete license and notices are retained in COPYING and source files
+in the automatically downloaded FFTW source tree.
+https://www.fftw.org/fftw-3.3.10.tar.gz
+
+Netlib LAPACK 3.12.1: modified BSD license, retained in LICENSE in the
+automatically downloaded source tree.
+https://github.com/Reference-LAPACK/lapack/tree/v3.12.1
