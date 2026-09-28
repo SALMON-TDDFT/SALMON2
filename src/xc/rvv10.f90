@@ -12,6 +12,7 @@ module rvv10
   include 'fftw3.f03'
   abstract interface
     subroutine convolution_interface(theta,u,mesh,status)
+      implicit none
       complex(8),intent(in) :: theta(:,:)
       complex(8),intent(out) :: u(:,:)
       real(8),intent(in) :: mesh(:)
@@ -22,6 +23,7 @@ contains
   ! Full periodic density functional, using the same skew-adjoint central
   ! differences as SALMON. Small grids intentionally wrap multiple times.
   subroutine rvv10_periodic(n,h,coef,matrix_b,rho,b,c,nq,energy,potential,status)
+    implicit none
     integer,intent(in) :: n(3),nq
     real(8),intent(in) :: h(3),coef(4,3),matrix_b(3,3),rho(n(1),n(2),n(3)),b,c
     real(8),intent(out) :: energy(n(1),n(2),n(3)),potential(n(1),n(2),n(3))
@@ -58,6 +60,7 @@ contains
   end subroutine rvv10_periodic
 
   real(8) function rvv10_kernel_fourier(q1,q2,g) result(value)
+    implicit none
     real(8),intent(in) :: q1,q2,g
     real(8) :: a,b,c,pi,coef(3),r(3)
     pi=acos(-1d0)
@@ -78,6 +81,7 @@ contains
   ! Return energy per volume, partial dE/d(rho) and dE/d(sigma).
   ! Caller adds -div(2*vsigma*grad rho) using the adjoint of its density gradient.
   subroutine rvv10_evaluate(n,h,rho,sigma,b,c,nq,energy,vrho,vsigma,status,convolution)
+    implicit none
     integer,intent(in) :: n(3),nq
     real(8),intent(in) :: h(3),rho(:),sigma(:),b,c
     real(8),intent(out) :: energy(:),vrho(:),vsigma(:)
@@ -181,6 +185,7 @@ contains
   end subroutine
 
   subroutine spline_second(x,second)
+    implicit none
     real(8),intent(in) :: x(:)
     real(8),intent(out) :: second(:,:)
     real(8) :: lower(size(x)),diag(size(x)),upper(size(x)),rhs(size(x)),y(size(x)),factor
@@ -205,6 +210,7 @@ contains
   end subroutine
 
   subroutine spline_basis(x,second,q,basis,deriv)
+    implicit none
     real(8),intent(in) :: x(:),second(:,:),q
     real(8),intent(out) :: basis(:),deriv(:)
     real(8) :: h,a,b

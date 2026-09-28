@@ -4,8 +4,8 @@ root=Path(__file__).resolve().parents[2];here=Path(__file__).parent
 with tempfile.TemporaryDirectory() as d:
     exe=Path(d)/'probe'
     (Path(d)/'config.h').write_text('')
-    cmd=[os.environ.get('FC','gfortran'),'-I',d,'-cpp','-fopenmp','-O2','-fexternal-blas','-fno-tree-loop-vectorize','-fcheck=all',
-         str(here/'transport_stubs.f90'),str(root/'src/xc/exx_wannier_gauge.f90'),
+    cmd=[os.environ.get('FC','gfortran'),'-I',d,'-cpp','-ffree-line-length-none','-fallow-argument-mismatch','-fopenmp','-O2','-fexternal-blas','-fno-tree-loop-vectorize','-fcheck=all',
+         str(root/'src/parallel/communication_dummy.f90'),str(here/'transport_stubs.f90'),str(root/'src/xc/exx_wannier_gauge.f90'),
          *[str(root/'src/xc'/name) for name in ['exx_ace.f90','lcfo_dist_rows.f90','lcfo_dist_dense.f90','lcfo_seed.f90','lcfo_mlwf_links.f90','lcfo_wf_support.f90','lcfo_rt_wannier.f90']],str(here/'transport_probe.f90'),
          '-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(exe)]
     subprocess.run(cmd,cwd=d,check=True)

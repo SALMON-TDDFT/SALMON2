@@ -6,6 +6,7 @@ module lcfo_ace_local
  public :: lcfo_ace_local_action,lcfo_ace_half_trace,lcfo_ace_coefficient_action
 contains
  subroutine lcfo_ace_half_trace(coeff,factors,occupation,ace_dv,comm,energy)
+  implicit none
   complex(8),intent(in),contiguous :: coeff(:,:),factors(:,:)
   real(8),intent(in) :: occupation(:),ace_dv
   integer,intent(in) :: comm
@@ -43,6 +44,7 @@ contains
   call zgemm('N','N',n,no,nf,(-1d0,0d0),factors,n,total,nf,(1d0,0d0),action,n)
  end subroutine
  subroutine lcfo_ace_local_action(basis,psi,hpsi,factors,grid_dv,ace_dv,comm)
+  implicit none
   complex(8),intent(in),contiguous :: basis(:,:),psi(:,:)
   complex(8),intent(inout),contiguous :: hpsi(:,:)
   complex(8),intent(in) :: factors(:,:)

@@ -3,13 +3,14 @@
 ! source-column ordering/count; lo/m partition the global mesh without overlap.
 ! Only scalar/small-vector reductions are used, never a source or grid gather.
 module exx_adaptive_support
-  use communication, only: comm_summation,comm_get_max
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   public :: adaptive_source_mask
 contains
   subroutine adaptive_source_mask(n,h,lo,m,comm_r,source,fraction,radii,loss,protected,status,fixed_radius)
+    use communication, only: comm_summation,comm_get_max
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
     integer,intent(in) :: n(3),lo(3),m(3),comm_r
     real(8),intent(in) :: h(3),fraction
     real(8),intent(in),optional :: fixed_radius

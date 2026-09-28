@@ -19,12 +19,12 @@ import tempfile
 STARTS = {
     "initialize_fragment": "nf=size(lcfo_counts);",
     "pack_coefficients": "if(.not.lcfo_rt_active)error stop",
-    "lcfo_hse_direct_rotate": "if(.not.lcfo_rt_active.or..not.lcfo_direct_wf)return",
-    "lcfo_hse_refresh": "started=wall_seconds();old_count=",
+    "lcfo_exx_direct_rotate": "if(.not.lcfo_rt_active.or..not.lcfo_direct_wf)return",
+    "lcfo_exx_refresh": "started=wall_seconds();old_count=",
     "refresh_master": "started=wall_seconds()",
     "exchange_continuity": "ng=size(fragment_basis,1);",
-    "lcfo_hse_stage": "if(stage==0)then",
-    "lcfo_hse_add_action": "if(.not.allocated(hx))error stop",
+    "lcfo_exx_stage": "if(stage==0)then",
+    "lcfo_exx_add_action": "if(.not.allocated(hx))error stop",
     "wall_seconds": "call system_clock(tick,rate)",
     "report_timings": "local=0d0;local(1:4)=",
 }
@@ -130,7 +130,7 @@ def main():
     args = parser.parse_args()
     build = args.build.resolve()
     repo = Path(__file__).resolve().parents[1]
-    source = repo / "src/xc/hse_lcfo_rt.f90"
+    source = repo / "src/xc/exx_lcfo_rt.f90"
     text = source.read_text()
     probes = variants(text)
     compiler = shutil.which(args.compiler)
@@ -161,7 +161,7 @@ def main():
         # a production .mod, or contaminate a later probe.
         for module in modules:
             shutil.copy2(module, folder / module.name)
-        probe = folder / "hse_lcfo_rt.f90"
+        probe = folder / "exx_lcfo_rt.f90"
         probe.write_text(body)
         if args.gnu_check:
             flags = ["-O0", "-cpp", "-ffree-line-length-none", "-I."]

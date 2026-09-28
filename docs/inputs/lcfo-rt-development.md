@@ -30,7 +30,7 @@ All entries below belong to `&functional`; flags accept `'y'` or `'n'`.
 | `hse_lcfo_ace_interval` | `1` | ACE refresh cadence in physical steps |
 | `hse_lcfo_u_interval` | `1` | Independent U transport cadence |
 | `hse_lcfo_fft_batch` | `1` | Exchange FFT tile width, 1–32 |
-| `hse_lcfo_wf_radius` | `0d0` | Fixed source radius in bohr; zero means full support |
+| `hse_lcfo_wf_radius` | `0d0` | Fixed source radius in the input length unit; zero means full support |
 
 DC-SCF continues to enable Wannier exchange internally. For LCFO RT, set both
 `yn_hse_lcfo_rt='y'` and `yn_hse_wannier='y'` to use MLWFs. Direct-WF mode also
@@ -85,7 +85,7 @@ trial updates are rolled back before accepting the corrected frame. Cache keys
 include both coefficients and occupations. No repeated MV minimization occurs.
 
 `hse_lcfo_wf_radius=0` (default) retains full support. A positive value is a
-three-dimensional sphere radius in bohr around fixed INITIAL WF centers.
+three-dimensional sphere radius in the input length unit around fixed INITIAL WF centers.
 Each xyz displacement uses the minimum image of the orthorhombic global cell.
 A radius at least half the box diagonal retains full support.
 Distances use the whole Si128 cell, not the shorter fragment period. Centers with
@@ -343,7 +343,7 @@ ACE適用1回のMPI集約要素数は旧1024×256複素数から、通常256×25
 <!-- MLWF_SPHERICAL_SUPPORT_20260926 -->
 ## WF積分範囲を三次元球状カットへ変更（2026-09-26）
 
-`hse_lcfo_wf_radius=R` は、ここから初期WF中心からの三次元周期距離の半径R（bohr）を表す。直交セルで各軸の最小像変位を求め、dx²+dy²+dz² > R² のソースWFをゼロにする。y,z方向も判定に含む。半径0は全範囲、半径がセルの半対角長以上でも全範囲になる。中心はxyzの周期的モーメントから求め、時間発展中は初期中心に固定する。いずれかの軸で中心信頼度が0.1未満なら、そのWF全体を切らずに保持する。
+`hse_lcfo_wf_radius=R` は、ここから初期WF中心からの三次元周期距離の半径R（入力長さ単位、内部ではbohr）を表す。直交セルで各軸の最小像変位を求め、dx²+dy²+dz² > R² のソースWFをゼロにする。y,z方向も判定に含む。半径0は全範囲、半径がセルの半対角長以上でも全範囲になる。中心はxyzの周期的モーメントから求め、時間発展中は初期中心に固定する。いずれかの軸で中心信頼度が0.1未満なら、そのWF全体を切らずに保持する。
 
 ソースWFと破棄ノルムの診断には同じ三次元判定を使う。密度・Hartreeの範囲、交換カーネル、初期Uの局在化と位相追跡、ACE更新スケジュールは従来どおり。初期診断ファイル `lcfo_mlwf_initial.bin` はversion 2へ更新し、centers(3,no)をFortran配列順で記録する。旧version 1はx中心のみ。linksファイルはversion 1のまま。
 
@@ -624,8 +624,9 @@ Routine contract: [Netlib PZGEQPF](https://www.netlib.org/scalapack/explore-html
 
 ### Radius namelist and initial per-WF norm warning (2026-09-27)
 
-`&functional hse_lcfo_wf_radius` specifies the LCFO RT source sphere in **bohr**,
-independent of `unit_system`. Positive means fixed radius; zero means full support.
+`&functional hse_lcfo_wf_radius` specifies the LCFO RT source sphere in the **input length unit**.
+`unit_system='a.u.'` uses bohr and `unit_system='A_eV_fs'` uses Å;
+the radius is converted to bohr internally. Positive means fixed radius; zero means full support.
 The default is 0 (full support). Negative or nonfinite values are rejected.
 LCFO activation is `yn_hse_lcfo_rt='y'`; MLWF activation is `yn_hse_wannier='y'`.
 This radius parameter does not control DC-SCF exchange.
@@ -651,3 +652,12 @@ Full-support coverage reuses the already reduced initial norms without another
 WF scan or collective. Finite-radius loops hoist the constant radius condition
 and radius squared; fractions are computed only on root. Coverage semantics and
 warning thresholds are unchanged.
+
+### Radius input units (2026-09-29)
+
+`hse_lcfo_wf_radius` now follows `unit_system`, like `exx_mlwf_radius`.
+For example, `5.29177210903` with `A_eV_fs` and `10` with `a.u.`
+specify the same sphere. `variables.log` continues to report internal bohr.
+Earlier development versions interpreted this control as bohr even with
+`A_eV_fs`. Convert such old input radii from bohr to Å before reusing them.
+Atomic-unit inputs and zero (full support) are unchanged.

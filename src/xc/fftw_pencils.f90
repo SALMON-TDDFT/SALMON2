@@ -29,11 +29,13 @@ module fftw_pencils
   public :: pencil_transform,pencil_clear
 contains
   real(8) function stamp()
+    implicit none
     integer(int64) :: count,rate
     call system_clock(count,rate)
     stamp=real(count,8)/real(rate,8)
   end function
   subroutine destroy(p)
+    implicit none
     type(pencil_cache),intent(inout) :: p
     integer :: a,b
     do b=1,2;do a=1,3
@@ -48,12 +50,14 @@ contains
     p%n=0;p%batch=0;p%nt=0
   end subroutine
   subroutine pencil_clear()
+    implicit none
     integer :: a
     do a=1,max_batch
       call destroy(cache(a))
     enddo
   end subroutine
   subroutine layout(n,dims,coords,which,shape,origin,order)
+    implicit none
     integer,intent(in) :: n(3),dims(2),coords(2),which
     integer,intent(out) :: shape(3),origin(3),order(3)
     select case(which)
@@ -69,6 +73,7 @@ contains
     end select
   end subroutine
   subroutine mapping(p,step,from,to,axis,split_to,split_from)
+    implicit none
     type(pencil_cache),intent(inout) :: p
     integer,intent(in) :: step,from,to,axis,split_to,split_from
     integer :: shape(3),origin(3),order(3),point(3),global(3),counter(p%dims(axis))
@@ -98,6 +103,7 @@ contains
     enddo
   end subroutine
   subroutine prepare(p,n,dims,coords,batch,status)
+    implicit none
     type(pencil_cache),intent(inout) :: p
     integer,intent(in) :: n(3),dims(2),coords(2),batch
     integer,intent(out) :: status
@@ -127,6 +133,7 @@ contains
     if(status/=0)call destroy(p)
   end subroutine
   subroutine redistribute(p,step,comm)
+    implicit none
     type(pencil_cache),intent(inout) :: p
     integer,intent(in) :: step,comm(2)
     integer :: i,q,block
@@ -145,6 +152,7 @@ contains
     fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
   end subroutine
   subroutine pencil_transform(n,dims,coords,comm,input,output,sgn,status,spectral_z)
+    implicit none
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),sgn
     complex(8),intent(in) :: input(:,:)
     complex(8),intent(out) :: output(:,:)

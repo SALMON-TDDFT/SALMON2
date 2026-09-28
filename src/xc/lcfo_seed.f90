@@ -1,9 +1,7 @@
 #include "config.h"
 ! Gamma seed QR with bounded row recovery and optional distributed storage.
 module lcfo_seed
-#ifdef USE_MPI
- use mpi
-#endif
+ use communication, only: comm_get_groupinfo,comm_summation,comm_bcast,comm_get_max
  use lcfo_dist_rows, only: lcfo_gather_root
  use exx_wannier_gauge, only: gauge_seed_select,gauge_seed_finish
  implicit none
@@ -20,11 +18,8 @@ contains
   complex(8),allocatable :: columns(:,:),overlap(:,:),send(:,:),receive(:,:)
   integer,allocatable :: chosen(:)
   logical,optional,intent(in) :: distributed
-  integer :: rank,np,ierr,n,nb,lo,first,width,j,row,tile,backend
-  rank=0;np=1
-#ifdef USE_MPI
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,np,ierr)
-#endif
+  integer :: rank,np,n,nb,lo,first,width,j,row,tile,backend
+  call comm_get_groupinfo(comm,rank,np)
   if(size(counts)/=np.or.any(counts<0))error stop 'LCFO seed: incompatible row counts'
   n=size(local,2);nb=sum(counts)
   if(size(local,1)/=counts(rank+1).or.any(shape(u)/=[n,n])) &
@@ -34,9 +29,7 @@ contains
   if(rank==0.and.present(distributed))then
    if(distributed)backend=1
   endif
-#ifdef USE_MPI
-  call MPI_Bcast(backend,1,MPI_INTEGER,0,comm,ierr)
-#endif
+  call comm_bcast(backend,comm,0)
   if(backend==1)then
 #if defined(USE_MPI) && defined(USE_SCALAPACK)
    if(rank==0)write(*,'(a)')'LCFO seed: distributed pivoted QR'
@@ -49,15 +42,9 @@ contains
    if(rank==0)call gauge_seed_select(columns,chosen,status)
    deallocate(columns)
   endif
-#ifdef USE_MPI
-  call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
-  if(ierr/=MPI_SUCCESS)error stop 'LCFO seed: QR status broadcast failed'
-#endif
+  call comm_bcast(status,comm,0)
   if(status/=0)return
-#ifdef USE_MPI
-  call MPI_Bcast(chosen,n,MPI_INTEGER,0,comm,ierr)
-  if(ierr/=MPI_SUCCESS)error stop 'LCFO seed: pivot broadcast failed'
-#endif
+  call comm_bcast(chosen,comm,0)
   tile=min(64,n)
   if(n>huge(1)/tile)error stop 'LCFO seed: row tile exceeds MPI count'
   allocate(send(n,tile))
@@ -73,24 +60,17 @@ contains
     row=chosen(first+j-1)-lo
     if(row>=1.and.row<=size(local,1))send(:,j)=conjg(local(row,:))
    enddo
-#ifdef USE_MPI
    ! Exactly one owner contributes to each selected row; all others send zero.
-   call MPI_Reduce(send,receive,n*width,MPI_DOUBLE_COMPLEX,MPI_SUM,0,comm,ierr)
-   if(ierr/=MPI_SUCCESS)error stop 'LCFO seed: selected row reduction failed'
-#else
-   receive(:,1:width)=send(:,1:width)
-#endif
+   call comm_summation(send,receive,n*width,comm,0)
    if(rank==0)overlap(:,first:first+width-1)=receive(:,1:width)
   enddo
   deallocate(send,receive,chosen)
   if(rank==0)call gauge_seed_finish(overlap,nb,u,status)
-#ifdef USE_MPI
-  call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
-  if(ierr/=MPI_SUCCESS)error stop 'LCFO seed: SVD status broadcast failed'
-#endif
+  call comm_bcast(status,comm,0)
  end subroutine
 #if defined(USE_MPI) && defined(USE_SCALAPACK)
  subroutine distributed_select(local,counts,comm,chosen,status,snapshot_unit)
+  use mpi, only: MPI_Gatherv,MPI_Send,MPI_Recv,MPI_DOUBLE_COMPLEX,MPI_SUCCESS,MPI_STATUS_IGNORE
   implicit none
   complex(8),intent(in) :: local(:,:)
   integer,intent(in) :: counts(:),comm
@@ -98,7 +78,7 @@ contains
   integer,optional,intent(in) :: snapshot_unit
   integer,parameter :: block=32
   integer :: rank,np,ierr,n,nb,context,nc,desc(9),owner,dest,lo,row,gcol,width,j,jc
-  integer :: nw,nrw,local_status
+  integer :: nw,nrw
   integer,allocatable :: pivots(:),partial(:),displs(:)
   complex(8),allocatable :: a(:,:),buffer(:,:),tau(:),work(:),column(:)
   real(8),allocatable :: rwork(:)
@@ -106,7 +86,7 @@ contains
   real(8) :: rquery(1)
   integer,external :: sys2blacs_handle,numroc
   external :: pzgeqpf
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,np,ierr)
+  call comm_get_groupinfo(comm,rank,np)
   n=size(local,2);nb=sum(counts);chosen=0;status=1
   ! Preserve the existing column-major snapshot without allocating global coefficients.
   if(present(snapshot_unit))then
@@ -162,14 +142,14 @@ contains
   enddo
   deallocate(buffer)
   call pzgeqpf(n,nb,a,1,1,desc,pivots,tau,query,-1,rquery,-1,status)
-  local_status=abs(status)
-  call MPI_Allreduce(local_status,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+  status=abs(status)
+  call comm_get_max(status,comm)
   if(status==0)then
    nw=max(1,int(real(query(1))));nrw=max(1,int(rquery(1)))
    allocate(work(nw),rwork(nrw))
    call pzgeqpf(n,nb,a,1,1,desc,pivots,tau,work,nw,rwork,nrw,status)
-   local_status=abs(status)
-   call MPI_Allreduce(local_status,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
+   status=abs(status)
+   call comm_get_max(status,comm)
   endif
   if(status==0)then
    allocate(partial(n));partial=0
@@ -178,8 +158,7 @@ contains
     jc=((j-1)/(block*np))*block+mod(j-1,block)+1
     partial(j)=pivots(jc)
    enddo
-   call MPI_Allreduce(partial,chosen,n,MPI_INTEGER,MPI_SUM,comm,ierr)
-   if(ierr/=MPI_SUCCESS)error stop 'LCFO seed: QR pivot collection failed'
+   call comm_summation(partial,chosen,n,comm)
    if(any(chosen<1).or.any(chosen>nb))status=1
   endif
   call blacs_gridexit(context)

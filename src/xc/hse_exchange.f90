@@ -137,6 +137,7 @@ contains
   ! Synthetic scratch only: no physical density or orbital is read here.
   ! Preserve the actual strided leading dimension while sampling FFT batches.
   subroutine choose_fft_layout(op,ierr)
+    implicit none
     type(hse_kernel),target,intent(inout) :: op
     integer,intent(out) :: ierr
     complex(c_double_complex),allocatable :: tile(:,:,:)
@@ -223,6 +224,7 @@ contains
   end subroutine
 
   subroutine hse_kernel_apply(op,source,target,action,rank,nproc,ierr)
+    implicit none
     type(hse_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
@@ -288,6 +290,7 @@ contains
   ! K-distributed source/target/action; transpose density tiles, never orbitals.
   ! Caller supplies identical layout/kernel metadata and communicator size on all ranks.
   subroutine hse_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr,fill_density)
+    implicit none
     type(hse_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
@@ -296,12 +299,14 @@ contains
     interface
       subroutine transpose_tiles(send,recv,count)
         import c_double_complex
+        implicit none
         complex(c_double_complex),intent(in) :: send(:)
         complex(c_double_complex),intent(out) :: recv(:)
         integer,intent(in) :: count
       end subroutine
       subroutine fill_density(j,lo,rows,density)
         import c_double_complex
+        implicit none
         integer,intent(in) :: j,lo,rows
         complex(c_double_complex),intent(out) :: density(:,:)
       end subroutine
@@ -455,6 +460,7 @@ contains
   end subroutine
 
   subroutine transpose_contiguous(op,buffer,slot,unpack)
+    implicit none
     type(hse_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(inout) :: buffer(:,:,:)
     integer,intent(in) :: slot(:)
@@ -487,6 +493,7 @@ contains
   end subroutine
 
   subroutine multiply_kernel(op,lo,rows)
+    implicit none
     type(hse_kernel),target,intent(inout) :: op
     integer,intent(in) :: lo,rows
     complex(c_double_complex),pointer :: kw(:,:,:)
@@ -523,6 +530,7 @@ contains
 
   ! Callers guard this helper so disabled profiling makes no timing calls.
   subroutine mark_stage(op,stage,stamp)
+    implicit none
     type(hse_kernel),intent(inout) :: op
     integer,intent(in) :: stage
     real(c_double),intent(inout) :: stamp
@@ -533,6 +541,7 @@ contains
   end subroutine
 
   subroutine hse_kernel_destroy(op)
+    implicit none
     type(hse_kernel),intent(inout) :: op
     if(c_associated(op%forward))call fftw_destroy_plan(op%forward)
     if(c_associated(op%backward))call fftw_destroy_plan(op%backward)

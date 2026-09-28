@@ -81,7 +81,7 @@ but does not guarantee a unique localization minimum or radius convergence.
 
 The separate `pbeh_coulomb_radius` truncates the Coulomb **interaction kernel**,
 not orbitals. Changing it is a different approximation. The existing LCFO-RT
-`hse_lcfo_wf_radius` remains a separate control in bohr; it is not an alias for
+`hse_lcfo_wf_radius` remains a separate control in the input length unit (internally bohr); it is not an alias for
 `exx_mlwf_radius` and is unaffected by this SCF extension.
 
 ## Adaptive support on the spatial mesh

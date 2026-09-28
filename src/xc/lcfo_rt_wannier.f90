@@ -4,7 +4,9 @@
 module lcfo_rt_wannier
   use iso_fortran_env, only: int32,int64
   use lcfo_mlwf_links, only: lcfo_initial_links
-  use lcfo_rt_basis
+  use lcfo_rt_basis, only: lcfo_direct_wf,lcfo_basis,lcfo_counts,lcfo_origins,lcfo_grid, &
+    lcfo_core,lcfo_buffer,lcfo_rank,lcfo_comm,lcfo_h, &
+    lcfo_dv
   use communication, only: comm_summation,comm_bcast
   use exx_wannier_gauge, only: gauge_minimize_gamma_inplace
   use lcfo_seed, only: lcfo_seed_gamma
@@ -189,6 +191,7 @@ contains
   end subroutine
 
   subroutine lcfo_mlwf_track(coeff)
+    implicit none
     complex(8),intent(in) :: coeff(:,:)
     complex(8),allocatable :: new_u(:,:,:)
     real(8) :: minimum_overlap
@@ -228,6 +231,7 @@ contains
   end subroutine
 
   subroutine lcfo_mlwf_source(coeff,basis,selected,source,halo)
+    implicit none
     complex(8),intent(in) :: coeff(:,:),basis(:,:)
     integer,intent(in) :: selected(:)
     complex(8),allocatable,intent(out) :: source(:,:,:)
@@ -320,6 +324,7 @@ contains
   end subroutine
 
   subroutine lcfo_mlwf_stage(stage)
+    implicit none
     integer,intent(in) :: stage
     if(.not.lcfo_mlwf_enabled)return
     select case(stage)
@@ -339,6 +344,7 @@ contains
   end subroutine
 
   subroutine lcfo_mlwf_accept_cached()
+    implicit none
     if(.not.lcfo_mlwf_enabled)return
     ! A cache hit after predictor rollback still accepts the frame corresponding
     ! to those exact coefficients, without repeating FFT exchange or localization.

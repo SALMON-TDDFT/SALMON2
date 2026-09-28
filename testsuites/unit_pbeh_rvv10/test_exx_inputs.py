@@ -119,6 +119,24 @@ class ExxInputs(unittest.TestCase):
             error='restart/snapshot metadata unsupported')
         self.run_case("exx_mlwf_radius=2\n yn_hse_wannier_snapshot='y'",error='restart/snapshot metadata unsupported')
 
+    def test_backend_case_normalization(self):
+        lower=self.run_case("exx_mlwf_maxiter=20\n rvv10_fft='fftw'\n hse_fft_layout='auto'")
+        upper=self.run_case("exx_mlwf_maxiter=20\n rvv10_fft='FFTW'\n hse_fft_layout='AUTO'")
+        self.assertAlmostEqual(lower[0],upper[0],places=10)
+        self.assertIn('rVV10 backend: fftw',upper[2])
+
+    def test_lcfo_radius_length_units(self):
+        factor=.529177210903
+        def angstrom_input(s):
+            s=s.replace("unit_system='a.u.'", "unit_system='A_eV_fs'")
+            s=s.replace('al=16d0,8d0,8d0','al='+','.join(str(x*factor) for x in [16,8,8]))
+            return re.sub(r"'H' ([0-9.]+)d0 4d0 4d0 1",
+                lambda m:f"'H' {float(m[1])*factor} {4*factor} {4*factor} 1",s)
+        for radius,transform in [(10.,lambda s:s),(10.*factor,angstrom_input)]:
+            result=self.run_case(f'exx_mlwf_maxiter=20\n hse_lcfo_wf_radius={radius}',transform)
+            actual=float(re.search(r'# hse_lcfo_wf_radius .*?=\s*([\d.E+-]+)',result[1])[1])
+            self.assertAlmostEqual(actual,10.,places=6)
+
     def test_radius_length_units(self):
         def angstrom_input(s):
             s=s.replace("unit_system='a.u.'", "unit_system='A_eV_fs'")

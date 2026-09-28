@@ -136,7 +136,7 @@ module salmon_global
   real(8) :: exx_mlwf_radius ! input length, converted to bohr; 0=full support
   real(8) :: exx_mlwf_norm_fraction ! 0 disabled; otherwise per-source retained norm
   real(8) :: exx_mlwf_tolerance
-  real(8) :: hse_lcfo_wf_radius ! Always bohr; 0 means full support
+  real(8) :: hse_lcfo_wf_radius ! Input length unit, converted to bohr internally; 0 means full support
   character(1) :: yn_hse_lcfo_rt
   character(1) :: yn_hse_lcfo_direct_wf
   character(1) :: yn_hse_lcfo_continuity

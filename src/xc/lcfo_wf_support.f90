@@ -58,6 +58,7 @@ contains
  end subroutine
 
  subroutine lcfo_wf_kernel_init(kernel,plan,basis)
+  implicit none
   type(s_lcfo_wf_kernel),intent(out) :: kernel
   type(s_lcfo_wf_plan),intent(in) :: plan
   complex(8),intent(in) :: basis(:,:)
@@ -112,6 +113,7 @@ contains
   kernel%ready=.true.
  end subroutine
  subroutine lcfo_wf_kernel_apply(kernel,frame,wf)
+  implicit none
   type(s_lcfo_wf_kernel),intent(in) :: kernel
   complex(8),intent(in) :: frame(:,:)
   complex(8),allocatable,intent(out) :: wf(:,:)
@@ -132,6 +134,7 @@ contains
   enddo
  end subroutine
  subroutine lcfo_wf_plan_init(plan,positions,centers,length,radius,protected)
+  implicit none
   type(s_lcfo_wf_plan),intent(inout) :: plan
   real(8),intent(in) :: positions(:,:),centers(:,:),length(3),radius
   logical,intent(in) :: protected(:)
@@ -158,6 +161,7 @@ contains
   plan%ready=.true.
  end subroutine
  subroutine lcfo_wf_reconstruct(plan,basis,frame,wf,compact)
+  implicit none
   type(s_lcfo_wf_plan),intent(in) :: plan
   complex(8),intent(in) :: basis(:,:),frame(:,:)
   complex(8),allocatable,intent(out) :: wf(:,:)
@@ -185,6 +189,7 @@ contains
  end subroutine
  real(8) function lcfo_wf_total_norm(gram,frame) result(norm)
   ! Exact identity for any basis, including a nonorthogonal one: ||B F||_F^2.
+  implicit none
   complex(8),intent(in) :: gram(:,:),frame(:,:)
   norm=real(sum(conjg(frame)*matmul(gram,frame)),8)
  end function

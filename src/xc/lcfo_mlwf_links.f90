@@ -7,6 +7,7 @@ module lcfo_mlwf_links
  public :: lcfo_initial_links
 contains
  subroutine lcfo_initial_links(grid,position,lengths,dv,comm,raw,tile_width,scratch_elements)
+  implicit none
   complex(8),intent(in),contiguous :: grid(:,:)
   real(8),intent(in) :: position(:,:),lengths(3),dv
   integer,intent(in) :: comm

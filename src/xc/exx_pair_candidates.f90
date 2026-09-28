@@ -18,6 +18,7 @@ module exx_pair_candidates
  end type
 contains
  subroutine pair_catalog_build(cat,n,lo,m,comm_r,target,threshold,status)
+  implicit none
   type(exx_pair_catalog),intent(out) :: cat
   integer,intent(in) :: n(3),lo(3),m(3),comm_r
   complex(8),intent(in) :: target(:,:)
@@ -100,6 +101,7 @@ contains
  end subroutine
 
  subroutine pair_source_box(n,lo,m,comm_r,source,lower,upper,status)
+  implicit none
   integer,intent(in) :: n(3),lo(3),m(3),comm_r
   complex(8),intent(in) :: source(:)
   integer,intent(out) :: lower(3),upper(3),status
@@ -122,6 +124,7 @@ contains
  end subroutine
 
  subroutine pair_catalog_query(cat,lower,upper,threshold,selected,nselected,status)
+  implicit none
   type(exx_pair_catalog),intent(inout) :: cat
   integer,intent(in) :: lower(3),upper(3)
   real(8),intent(in) :: threshold

@@ -18,6 +18,7 @@ module exx_local_fft
  end type
 contains
  subroutine clear_box(plan)
+  implicit none
   type(s_exx_local_fft),intent(inout) :: plan
   if(c_associated(plan%forward))call fftw_destroy_plan(plan%forward)
   if(c_associated(plan%backward))call fftw_destroy_plan(plan%backward)
@@ -28,6 +29,7 @@ contains
  end subroutine
 
  subroutine exx_local_destroy(plan)
+  implicit none
   type(s_exx_local_fft),intent(inout) :: plan
   call clear_box(plan)
   if(allocated(plan%kernel))deallocate(plan%kernel)
@@ -35,6 +37,7 @@ contains
  end subroutine
 
  subroutine exx_local_init(plan,multiplier,status)
+  implicit none
   type(s_exx_local_fft),intent(inout) :: plan
   real(8),intent(in) :: multiplier(:,:,:)
   integer,intent(out) :: status
@@ -55,6 +58,7 @@ contains
  end subroutine
 
  integer function smooth_size(lower) result(value)
+  implicit none
   integer,intent(in) :: lower
   integer :: remainder,factor
   value=lower
@@ -72,6 +76,7 @@ contains
  end function
 
  subroutine exx_local_prepare(plan,points,used,status)
+  implicit none
   type(s_exx_local_fft),intent(inout) :: plan
   integer,intent(in) :: points(:,:) ! unique zero-based global grid coordinates
   logical,intent(out) :: used
@@ -144,6 +149,7 @@ contains
  ! Kernel entries are indexed by displacement + box, over -(box-1):box-1.
  ! This interface never stores a full global kernel; it accepts a compact tile.
  subroutine exx_local_prepare_compact(plan,n,box,kernel,status)
+  implicit none
   type(s_exx_local_fft),intent(inout) :: plan
   integer,intent(in) :: n(3),box(3)
   complex(8),intent(in) :: kernel(:,:,:)
@@ -179,6 +185,7 @@ contains
  end subroutine
 
  subroutine exx_local_apply(plan,density,potential,status)
+  implicit none
   type(s_exx_local_fft),intent(inout),target :: plan
   complex(8),intent(in) :: density(:)
   complex(8),intent(out) :: potential(:)

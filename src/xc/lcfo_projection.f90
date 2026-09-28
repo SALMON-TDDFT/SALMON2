@@ -11,6 +11,7 @@ module lcfo_projection
  end type
 contains
  subroutine lcfo_projection_init(plan,basis,scale)
+  implicit none
   type(s_lcfo_projection),intent(inout) :: plan
   complex(8),intent(in) :: basis(:,:)
   real(8),intent(in) :: scale
@@ -23,6 +24,7 @@ contains
   plan%ready=.true.
  end subroutine
  subroutine lcfo_projection_apply(plan,action,projected)
+  implicit none
   type(s_lcfo_projection),intent(in) :: plan
   complex(8),intent(in) :: action(:,:)
   complex(8),allocatable,intent(out) :: projected(:,:)

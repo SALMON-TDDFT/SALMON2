@@ -2,9 +2,7 @@
 ! Distributed orbital metrics; local-row ACE factors and coefficient transport.
 ! Orbital-space transforms remain replicated. Large decompositions use ScaLAPACK.
 module lcfo_dist_dense
-#ifdef USE_MPI
- use mpi
-#endif
+ use communication, only: comm_get_groupinfo,comm_summation,comm_bcast,comm_get_max
  use exx_ace,only:s_exx_ace
  use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
  implicit none
@@ -17,41 +15,32 @@ module lcfo_dist_dense
  logical,save :: reported_parallel=.false.,reported_serial=.false.
 contains
  subroutine group_info(comm,rank,np)
+  implicit none
   integer,intent(in) :: comm
   integer,intent(out) :: rank,np
-  integer :: ierr
-  rank=0;np=1
-#ifdef USE_MPI
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,np,ierr)
-#endif
+  call comm_get_groupinfo(comm,rank,np)
  end subroutine
  subroutine sum_matrix(local,total,comm)
+  implicit none
   complex(8),intent(in) :: local(:,:)
   complex(8),intent(out) :: total(:,:)
   integer,intent(in) :: comm
-  integer :: ierr
-#ifdef USE_MPI
-  call MPI_Allreduce(local,total,size(local),MPI_DOUBLE_COMPLEX,MPI_SUM,comm,ierr)
-  if(ierr/=MPI_SUCCESS)error stop 'LCFO dense: metric reduction failed'
-#else
-  total=local
-#endif
+  call comm_summation(local,total,size(local),comm)
  end subroutine
  subroutine share_solution(transform,e,condition,status,comm)
+  implicit none
   complex(8),intent(inout) :: transform(:,:)
   real(8),intent(inout) :: e,condition
   integer,intent(inout) :: status
   integer,intent(in) :: comm
-  integer :: ierr
-#ifdef USE_MPI
-  call MPI_Bcast(status,1,MPI_INTEGER,0,comm,ierr)
-  call MPI_Bcast(e,1,MPI_DOUBLE_PRECISION,0,comm,ierr)
-  call MPI_Bcast(condition,1,MPI_DOUBLE_PRECISION,0,comm,ierr)
-  if(status==0)call MPI_Bcast(transform,size(transform),MPI_DOUBLE_COMPLEX,0,comm,ierr)
-#endif
+  call comm_bcast(status,comm,0)
+  call comm_bcast(e,comm,0)
+  call comm_bcast(condition,comm,0)
+  if(status==0)call comm_bcast(transform,comm,0)
  end subroutine
 
  subroutine lcfo_distributed_polar(current,previous,comm,rotation,minimum,status)
+  implicit none
   complex(8),intent(in) :: current(:,:),previous(:,:)
   integer,intent(in) :: comm
   complex(8),intent(out) :: rotation(:,:)
@@ -71,14 +60,15 @@ contains
  end subroutine
 
  subroutine lcfo_distributed_ace_build(ace,c,w,dv,comm,status)
+  implicit none
   type(s_exx_ace),intent(inout) :: ace
   complex(8),intent(in) :: c(:,:),w(:,:)
   real(8),intent(in) :: dv
   integer,intent(in) :: comm
   integer,intent(out) :: status
   complex(8),allocatable :: local(:,:),metric(:,:),transform(:,:)
-  real(8) :: scale,smallest,maximum,local_max
-  integer :: n,ierr
+  real(8) :: scale,smallest,maximum(1),local_max(1)
+  integer :: n
   status=1
   if(allocated(ace%factors))deallocate(ace%factors)
   if(any(shape(c)/=shape(w)).or.dv<=0d0.or..not.ieee_is_finite(dv))return
@@ -88,13 +78,9 @@ contains
   call sum_matrix(local,metric,comm)
   if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))return
   local_max=0d0;if(size(w)>0)local_max=maxval(abs(w))
-#ifdef USE_MPI
-  call MPI_Allreduce(local_max,maximum,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm,ierr)
-#else
-  maximum=local_max
-#endif
+  call comm_get_max(local_max,maximum,1,comm)
   ace%dv=dv;ace%condition=0d0
-  if(maximum==0d0)then
+  if(maximum(1)==0d0)then
    allocate(ace%factors(size(c,1),n,1));ace%factors=0d0;status=0;return
   endif
   scale=sqrt(sum(abs(metric)**2))
@@ -106,6 +92,7 @@ contains
  end subroutine
 
  subroutine solve_matrix(matrix,comm,polar,transform,minimum,condition,status)
+  implicit none
   complex(8),intent(inout) :: matrix(:,:)
   integer,intent(in) :: comm
   logical,intent(in) :: polar
@@ -162,6 +149,7 @@ contains
 
 #ifdef USE_SCALAPACK
  subroutine setup_grid(comm,n,desc,nr,nc,block)
+  implicit none
   integer,intent(in) :: comm,n
   integer,intent(out) :: desc(9),nr,nc,block
   integer :: rank,np,ierr
@@ -183,6 +171,7 @@ contains
   if(ierr/=0)error stop 'LCFO dense: invalid ScaLAPACK descriptor'
  end subroutine
  subroutine pack_matrix(global,local,block)
+  implicit none
   complex(8),intent(in) :: global(:,:)
   complex(8),intent(out) :: local(:,:)
   integer,intent(in) :: block
@@ -199,6 +188,7 @@ contains
   enddo
  end subroutine
  subroutine collect_matrix(local,global,block,comm)
+  implicit none
   complex(8),intent(in) :: local(:,:)
   complex(8),intent(out) :: global(:,:)
   integer,intent(in) :: block,comm
@@ -217,15 +207,14 @@ contains
   call sum_matrix(contribution,global,comm)
  end subroutine
  subroutine agree_status(status,comm)
+  implicit none
   integer,intent(inout) :: status
   integer,intent(in) :: comm
-  integer :: local_status,ierr
-#ifdef USE_MPI
-  local_status=abs(status)
-  call MPI_Allreduce(local_status,status,1,MPI_INTEGER,MPI_MAX,comm,ierr)
-#endif
+  status=abs(status)
+  call comm_get_max(status,comm)
  end subroutine
  subroutine parallel_solve(matrix,comm,polar,transform,minimum,condition,status)
+  implicit none
   complex(8),intent(in) :: matrix(:,:)
   integer,intent(in) :: comm
   logical,intent(in) :: polar
@@ -236,7 +225,7 @@ contains
   complex(8) :: query(1)
   real(8),allocatable :: e(:),rwork(:)
   real(8) :: rquery(1)
-  integer :: desc(9),nr,nc,block,n,i,j,jc,ierr,global_status
+  integer :: desc(9),nr,nc,block,n,j,jc
   external :: pzgesvd,pzheev,pzgemm
   n=size(matrix,1);status=0;minimum=0d0;condition=0d0;transform=0d0
   call setup_grid(comm,n,desc,nr,nc,block)
@@ -257,11 +246,7 @@ contains
     call pzheev('V','U',n,a,1,1,desc,e,left,1,1,desc,work,size(work),rwork,size(rwork),status)
    endif
   endif
-#ifdef USE_MPI
-  ierr=abs(status)
-  call MPI_Allreduce(ierr,global_status,1,MPI_INTEGER,MPI_MAX,comm,i)
-  status=global_status
-#endif
+  call agree_status(status,comm)
   if(status/=0)return
   if(.not.all(ieee_is_finite(e)))then
    status=1;return

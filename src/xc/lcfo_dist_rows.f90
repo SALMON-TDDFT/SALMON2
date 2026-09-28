@@ -1,8 +1,9 @@
 #include "config.h"
 ! Sparse requests between core-row owners. No replicated global coefficient array.
 module lcfo_dist_rows
+ use communication, only: comm_get_groupinfo
 #ifdef USE_MPI
- use mpi
+ use mpi, only: MPI_Alltoall,MPI_Alltoallv,MPI_Gatherv,MPI_INTEGER,MPI_DOUBLE_COMPLEX,MPI_SUCCESS
 #endif
  implicit none
  private
@@ -22,16 +23,14 @@ module lcfo_dist_rows
  end type
 contains
  subroutine lcfo_halo_init(plan,counts,selected,comm)
+  implicit none
   type(s_lcfo_halo),intent(inout) :: plan
   integer,intent(in) :: counts(:),selected(:),comm
   integer,allocatable :: offsets(:),requests(:),received(:),cursor(:)
   integer :: p,j,owner,k,ierr
   call lcfo_halo_free(plan)
   plan%comm=comm
-#ifdef USE_MPI
-  call MPI_Comm_rank(comm,plan%rank,ierr)
-  call MPI_Comm_size(comm,plan%nproc,ierr)
-#endif
+  call comm_get_groupinfo(comm,plan%rank,plan%nproc)
   if(size(counts)/=plan%nproc.or.any(counts<0))error stop 'LCFO halo: invalid row counts'
   allocate(offsets(plan%nproc+1));offsets(1)=0
   do p=1,plan%nproc;offsets(p+1)=offsets(p)+counts(p);enddo
@@ -74,6 +73,7 @@ contains
  end subroutine
 
  subroutine lcfo_halo_get(plan,local,selected)
+  implicit none
   type(s_lcfo_halo),intent(in) :: plan
   complex(8),intent(in) :: local(:,:)
   complex(8),allocatable,intent(out) :: selected(:,:)
@@ -96,6 +96,7 @@ contains
  subroutine lcfo_column_halo_init(plan,rows,columns,ncolumns)
   ! Each requester asks its row owners for its own ordered set of WF columns.
   ! Row topology and column sets must remain fixed until this plan is rebuilt.
+  implicit none
   type(s_lcfo_column_halo),intent(inout) :: plan
   type(s_lcfo_halo),intent(in) :: rows
   integer,intent(in) :: columns(:),ncolumns
@@ -143,6 +144,7 @@ contains
  end subroutine
 
  subroutine lcfo_column_halo_get(plan,rows,local,selected)
+  implicit none
   type(s_lcfo_column_halo),intent(inout) :: plan
   type(s_lcfo_halo),intent(in) :: rows
   complex(8),intent(in) :: local(:,:)
@@ -174,6 +176,7 @@ contains
 
  subroutine lcfo_halo_sum(plan,selected,local)
   ! Adjoint of get: sum overlapping fragment contributions on their core owner.
+  implicit none
   type(s_lcfo_halo),intent(in) :: plan
   complex(8),intent(in) :: selected(:,:)
   complex(8),allocatable,intent(out) :: local(:,:)
@@ -196,6 +199,7 @@ contains
  end subroutine
 
  subroutine lcfo_halo_free(plan)
+  implicit none
   type(s_lcfo_halo),intent(inout) :: plan
   type(s_lcfo_halo) :: empty
   plan=empty
@@ -214,10 +218,7 @@ contains
   logical :: transpose_output
   integer,allocatable :: disps(:)
   integer :: rank,np,ierr,p,nc,lo,first,width,tile,j,offset
-  rank=0;np=1
-#ifdef USE_MPI
-  call MPI_Comm_rank(comm,rank,ierr);call MPI_Comm_size(comm,np,ierr)
-#endif
+  call comm_get_groupinfo(comm,rank,np)
   if(size(counts)/=np.or.size(local,1)/=counts(rank+1))error stop 'LCFO gather: incompatible rows'
   transpose_output=.false.
   if(present(adjoint))transpose_output=adjoint

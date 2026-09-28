@@ -7,7 +7,9 @@ module exx_lcfo_rt
   use communication, only: comm_bcast,comm_summation,comm_get_max
   use salmon_global, only: pbeh_coulomb_radius,exx_local_fft,ae_shape1,hse_lcfo_ace_interval,hse_lcfo_fft_batch, &
     yn_hse_lcfo_continuity,yn_hse_lcfo_fft_measure
-  use lcfo_rt_basis
+  use lcfo_rt_basis, only: lcfo_rt_active,lcfo_direct_wf,lcfo_basis,lcfo_counts,lcfo_offsets, &
+    lcfo_origins,lcfo_grid,lcfo_core,lcfo_buffer,lcfo_rank, &
+    lcfo_comm,lcfo_orb_rank,lcfo_orb_comm,lcfo_h,lcfo_dv
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track,lcfo_mlwf_rebase
   use exx_wannier, only: s_exx_wannier,wannier_init,wannier_apply,wannier_forward

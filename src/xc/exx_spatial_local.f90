@@ -16,12 +16,14 @@ module exx_spatial_local
  end type
 contains
  subroutine spatial_local_destroy(plan)
+  implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
   call exx_local_destroy(plan%fft)
   if(allocated(plan%kernel))deallocate(plan%kernel)
   plan%n=0;plan%m=0;plan%lo=0
  end subroutine
  subroutine spatial_local_init(plan,n,dims,coords,comm,multiplier,status)
+  implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
   integer,intent(in) :: n(3),dims(2),coords(2),comm(2)
   real(8),intent(in) :: multiplier(:) ! Z spectral order, (z,x,y)
@@ -38,6 +40,7 @@ contains
   plan%kernel=realspace(:,1)
  end subroutine
  subroutine spatial_local_apply(plan,comm_r,source,targets,action,used,status,pairs_executed,pair_fft_points,skip)
+  implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
   integer,intent(in) :: comm_r
   complex(8),intent(in) :: source(:),targets(:,:)

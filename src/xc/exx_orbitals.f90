@@ -10,6 +10,7 @@ module exx_orbitals
   public :: orbital_ace_build,orbital_ace_apply,orbital_hermitian_action
 contains
   subroutine orbital_check(bad,comm_r,comm_o)
+    implicit none
     integer,intent(inout) :: bad
     integer,intent(in) :: comm_r,comm_o
     call comm_get_max(bad,comm_r)
@@ -17,6 +18,7 @@ contains
   end subroutine
 
   subroutine orbital_layout(nlocal,comm_r,comm_o,counts,first,status)
+    implicit none
     integer,intent(in) :: nlocal,comm_r,comm_o
     integer,allocatable,intent(out) :: counts(:)
     integer,intent(out) :: first,status
@@ -40,6 +42,7 @@ contains
   subroutine orbital_overlap(left,right,dv,comm_r,comm_o,counts,first,matrix,phase)
     ! left/right have the same contiguous column ownership. Optional phase is
     ! applied to right grid rows. Global small matrix is identical on all peers.
+    implicit none
     complex(8),intent(in) :: left(:,:),right(:,:)
     real(8),intent(in) :: dv
     integer,intent(in) :: comm_r,comm_o,counts(0:),first
@@ -64,6 +67,7 @@ contains
   end subroutine
 
   subroutine orbital_rotate(input,matrix,comm_o,counts,first,output,weights)
+    implicit none
     complex(8),intent(in) :: input(:,:),matrix(:,:)
     integer,intent(in) :: comm_o,counts(0:),first
     complex(8),intent(out) :: output(:,:)
@@ -92,6 +96,7 @@ contains
     ! Complete the projected metric without assuming perfectly orthonormal U.
     ! A=U^dagger W, G=U^dagger U, D=U G^-1 (A^dagger-A)/2.
     ! Measure ||D|| on distributed rows/columns before accepting W+D.
+    implicit none
     complex(8),intent(in) :: u(:,:,:)
     complex(8),intent(inout) :: w(:,:,:)
     real(8),intent(in) :: dv,budget
@@ -143,6 +148,7 @@ contains
   end subroutine
 
   subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed)
+    implicit none
     type(s_exx_ace),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:,:),w(:,:,:)
     real(8),intent(in) :: dv
@@ -209,6 +215,7 @@ contains
     status=0
   contains
     subroutine pack_action()
+      implicit none
       integer :: column,g,k
       allocate(ace%offset(size(w,2)+1),ace%row(count(w/=(0d0,0d0))),ace%values(count(w/=(0d0,0d0))))
       k=1
@@ -224,6 +231,7 @@ contains
   end subroutine
 
   subroutine orbital_ace_apply(ace,target,action,comm_r,comm_o,status)
+    implicit none
     type(s_exx_ace),intent(in) :: ace
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
@@ -271,6 +279,7 @@ contains
     status=0
   end subroutine
   subroutine packed_ace_apply(ace,target,action,comm_r,comm_o,status)
+    implicit none
     type(s_exx_ace),intent(in) :: ace
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)

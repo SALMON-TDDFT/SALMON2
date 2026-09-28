@@ -1,8 +1,13 @@
 ! Fixed LCFO subspace adapter for native real-space RT routines.
 module lcfo_rt_basis
-  use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
-  use communication, only: comm_summation,comm_bcast
   implicit none
+  private
+  ! Deliberately shared basis and decomposition for the native LCFO RT adapters.
+  public :: lcfo_rt_active,lcfo_direct_wf,lcfo_basis,lcfo_counts
+  public :: lcfo_offsets,lcfo_origins,lcfo_grid,lcfo_core
+  public :: lcfo_buffer,lcfo_rank,lcfo_comm,lcfo_orb_rank
+  public :: lcfo_orb_comm,lcfo_h,lcfo_dv,lcfo_rt_requested
+  public :: lcfo_rt_configure,lcfo_project_orbital
   logical,save :: lcfo_rt_active=.false.,lcfo_direct_wf=.false.
   complex(8),allocatable :: lcfo_basis(:,:)
   integer,allocatable :: lcfo_counts(:),lcfo_offsets(:),lcfo_origins(:,:)
@@ -16,7 +21,10 @@ contains
   end function
 
   subroutine lcfo_rt_configure(basis,jxyz,meta,counts,system,mg,info)
+    use structures, only: s_dft_system,s_rgrid,s_parallel_info
+    use communication, only: comm_summation
     use salmon_global, only: yn_restart,write_rt_wfn_k,checkpoint_interval,time_shutdown,propagator,yn_hse_lcfo_direct_wf
+    implicit none
     complex(8),intent(in) :: basis(:,:)
     integer,intent(in) :: jxyz(:,:),meta(20),counts(:)
     type(s_dft_system),intent(in) :: system
@@ -78,6 +86,8 @@ contains
   end subroutine
 
   subroutine lcfo_collect_coefficients(local_grid,global)
+    use communication, only: comm_summation
+    implicit none
     complex(8),intent(in) :: local_grid(:,:)
     complex(8),intent(out) :: global(:,:)
     complex(8),allocatable :: work(:,:)
@@ -88,11 +98,14 @@ contains
   end subroutine
 
   subroutine lcfo_project_array(local_grid)
+    implicit none
     complex(8),intent(inout) :: local_grid(:,:)
     local_grid=matmul(lcfo_basis,matmul(conjg(transpose(lcfo_basis)),local_grid))*lcfo_dv
   end subroutine
 
   subroutine lcfo_project_orbital(psi,mg,info)
+    use structures, only: s_orbital,s_rgrid,s_parallel_info
+    implicit none
     type(s_orbital),intent(inout) :: psi
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info

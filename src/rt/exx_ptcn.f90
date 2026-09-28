@@ -1,14 +1,6 @@
 ! Native SALMON adapter for the verified PT-CN/ACE iteration.
 module exx_ptcn
   use iso_c_binding
-  use structures
-  use exx_ptcn_core
-  use exx_native
-  use communication, only: comm_summation,comm_is_root
-  use density_matrix, only: calc_density
-  use hartree_sub, only: hartree
-  use salmon_xc, only: exchange_correlation
-  use hamiltonian, only: hpsi,update_vlocal
   implicit none
   private
   include 'fftw3.f03'
@@ -16,6 +8,18 @@ module exx_ptcn
 contains
   subroutine native_exx_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
       input,output,rho,rho_s,vlocal,vh,vxc,vpsl,fg,poisson,energy)
+    use structures, only: s_rgrid,s_dft_system,s_parallel_info,s_stencil, &
+      s_xc_functional,s_sendrecv_grid,s_pp_info,s_pp_grid, &
+      s_pp_nlcc,s_orbital,s_scalar,s_reciprocal_grid, &
+      s_poisson,s_dft_energy,allocate_orbital_complex,deallocate_orbital
+    use exx_ptcn_core, only: exx_ptcn_solve
+    use exx_native, only: exx_freeze,exx_pack,exx_unpack,exx_timings, &
+      exx_walltime
+    use communication, only: comm_summation,comm_is_root
+    use density_matrix, only: calc_density
+    use hartree_sub, only: hartree
+    use salmon_xc, only: exchange_correlation
+    use hamiltonian, only: hpsi,update_vlocal
     implicit none
     real(8),intent(in) :: dt
     type(s_rgrid),intent(in) :: lg,mg

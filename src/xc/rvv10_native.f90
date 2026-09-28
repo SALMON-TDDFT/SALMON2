@@ -10,6 +10,7 @@ module rvv10_native
   public :: rvv10_native_periodic
 contains
   subroutine rvv10_native_periodic(n,mg,info,srg,system,stencil,rho,b,c,nq,energy,potential,used,status)
+    implicit none
     integer,intent(in) :: n(3),nq
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info

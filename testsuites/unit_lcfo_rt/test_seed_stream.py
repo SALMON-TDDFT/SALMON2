@@ -4,8 +4,9 @@ here = Path(__file__).resolve().parent
 root = here.parents[1]
 with tempfile.TemporaryDirectory() as folder:
     p = Path(folder);(p/'config.h').write_text('')
-    subprocess.run(['mpifort', '-cpp', '-DUSE_MPI', '-I'+folder, '-O2', '-fcheck=all',
+    subprocess.run(['mpifort', '-cpp','-ffree-line-length-none','-fallow-argument-mismatch', '-DUSE_MPI', '-I'+folder, '-O2', '-fcheck=all',
                     '-fexternal-blas', '-fno-tree-loop-vectorize',
+                    str(root/'src/misc/nvtx_wrapper.f90'), str(root/'src/parallel/communication.f90'),
                     str(root/'src/xc/exx_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'), str(here/'seed_stream_probe.f90'),
                     '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)
@@ -24,7 +25,8 @@ with tempfile.TemporaryDirectory() as folder:
     probe = probe.replace(' call MPI_Finalize(ierr)', '')
     assert 'MPI_' not in probe
     (p/'probe.f90').write_text(probe)
-    subprocess.run(['gfortran','-cpp','-I'+folder,'-O2','-fcheck=all','-fexternal-blas','-fno-tree-loop-vectorize',
+    subprocess.run(['gfortran','-cpp','-ffree-line-length-none','-fallow-argument-mismatch','-I'+folder,'-O2','-fcheck=all','-fexternal-blas','-fno-tree-loop-vectorize',
+                    str(root/'src/parallel/communication_dummy.f90'),
                     str(root/'src/xc/exx_wannier_gauge.f90'),str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'),str(p/'probe.f90'),
                     '-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(p/'probe')],cwd=p,check=True)

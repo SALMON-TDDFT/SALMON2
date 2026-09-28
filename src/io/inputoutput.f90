@@ -1383,6 +1383,7 @@ contains
     call comm_bcast(exx_mlwf_radius,nproc_group_global)
     exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
     call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
+    hse_lcfo_wf_radius=hse_lcfo_wf_radius*ulength_to_au
     call comm_bcast(yn_hse_lcfo_rt,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_direct_wf,nproc_group_global)
     call comm_bcast(yn_hse_lcfo_continuity,nproc_group_global)
@@ -1397,6 +1398,7 @@ contains
     call comm_bcast(hse_lcfo_fft_batch,nproc_group_global)
     call comm_bcast(hse_block_rows,nproc_group_global)
     call comm_bcast(hse_fft_layout,nproc_group_global)
+    call string_lowercase(hse_fft_layout)
     call comm_bcast(hse_reference_export_directory,nproc_group_global)
     call comm_bcast(pbeh_coulomb_radius,nproc_group_global)
     pbeh_coulomb_radius=pbeh_coulomb_radius*ulength_to_au
@@ -1404,6 +1406,7 @@ contains
     call comm_bcast(rvv10_c,nproc_group_global)
     call comm_bcast(rvv10_nq,nproc_group_global)
     call comm_bcast(rvv10_fft,nproc_group_global)
+    call string_lowercase(rvv10_fft)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)

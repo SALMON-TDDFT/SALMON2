@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import re, math
+s=Path('outputfile').read_text()
+variables=Path('variables.log').read_text()
+assert re.search(r'# rvv10_fft=\s*fftw\b',variables), 'FFT backend was not normalized'
+assert re.search(r'# hse_fft_layout=\s*auto\b',variables), 'FFT layout was not normalized'
+assert 'end SALMON' in s and 'end DC-LCFO complex' in s
+rows=re.findall(r'DC #SCF.*diff =\s*(\S+)',s)
+assert rows and float(rows[-1])<1e-10
+records=[line.split() for line in s.splitlines() if line.split()[:3]==['DC','#SCF','=']]
+assert records and all(math.isfinite(float(row[7])) for row in records), 'Nonfinite SCF energy'
+eigen=Path('data_dcdft/total/H_dc_hse_lcfo_complex_eigen.data')
+values=[float(line.split()[3]) for line in eigen.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith('#')]
+# Gamma, one spin, four retained states: 1 * 1 * 4 eigenvalues.
+assert len(values)==4 and all(map(math.isfinite,values)), 'LCFO eigenvalues missing/nonfinite'
+files=list(Path('data_dcdft').rglob('functional.txt'))
+assert len(files)==2
+for p in files:
+ lines=p.read_text().splitlines()
+ assert lines[0].strip()=='SLCFO_FUNCTIONAL_V1'
+ assert lines[2].strip()=='pbeh40_rvv10'
+ v=list(map(float,lines[3].split()))
+ assert all(map(math.isfinite,v)) and v[0]==.4 and v[1]==0
+ assert v[3:6]==[5.3,.0093,32.]
+print('pbeh40_rvv10 DC GS converged with correct functional metadata')

@@ -5,8 +5,9 @@ here = Path(__file__).resolve().parent
 root = here.parents[1]
 with tempfile.TemporaryDirectory() as folder:
     p = Path(folder); (p/'config.h').write_text('')
-    subprocess.run(['mpifort', '-cpp', '-DUSE_MPI', '-DUSE_SCALAPACK', '-I'+folder,
+    subprocess.run(['mpifort', '-cpp','-ffree-line-length-none','-fallow-argument-mismatch', '-DUSE_MPI', '-DUSE_SCALAPACK', '-I'+folder,
                     '-O2', '-fcheck=all', '-fexternal-blas', '-fno-tree-loop-vectorize',
+                    str(root/'src/misc/nvtx_wrapper.f90'), str(root/'src/parallel/communication.f90'),
                     str(root/'src/xc/exx_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'), str(here/'seed_stream_probe.f90'),
                     '-L/opt/homebrew/opt/scalapack/lib', '-lscalapack',
@@ -45,8 +46,10 @@ with tempfile.TemporaryDirectory() as folder:
 end program
 ''')
     for mpi in (False, True):
-        command = ['mpifort' if mpi else 'gfortran', '-cpp', '-I'+folder, '-O0']
+        command = ['mpifort' if mpi else 'gfortran', '-cpp','-ffree-line-length-none','-fallow-argument-mismatch', '-I'+folder, '-O0']
         if mpi:command += ['-DUSE_MPI']
+        command += ([str(root/'src/misc/nvtx_wrapper.f90'), str(root/'src/parallel/communication.f90')]
+                    if mpi else [str(root/'src/parallel/communication_dummy.f90')])
         command += [str(root/'src/xc'/name) for name in
                     ('exx_wannier_gauge.f90','lcfo_dist_rows.f90','lcfo_seed.f90')]
         command += [str(p/'unsupported.f90'),'-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(p/'probe')]
