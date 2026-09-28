@@ -82,3 +82,11 @@ full references retain occupied-vector ACE. Do not combine this with
 `--pair-tolerance`. Results retain acceptance/fallback counts and generated,
 skipped, catalogue and product-point counters. The approximation from changing
 ACE's training subspace is distinct from exact disjoint-support pair pruning.
+
+`--full-source PRIOR_DIRECTORY` explicitly reuses historical completed **full**
+references even when executable hashes differ. It checks exact full input,
+canonical seed hashes, pseudopotential, MPI/threads, and reparsed output; each
+imported row records its original binary/commit and source-results hash.
+Only missing full cases run again. With `--rt-source` as well, same-binary
+adaptive cases import from that source while full cases come from `--full-source`.
+Reports label the mixed measurement dates/executables as historical comparisons.

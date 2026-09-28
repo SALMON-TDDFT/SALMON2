@@ -51,6 +51,8 @@ for mode in ('full','adaptive'):
     strong_differences[mode]=dict(current=max(abs(x-y) for r in rows for a,b in zip(ref['observables'],r['observables']) for x,y in zip(a[13:16],b[13:16])),energy_ha=max(abs(a[1]-b[1]) for r in rows for a,b in zip(ref['energies'],r['energies'])))
 (out/'summary.json').write_text(json.dumps(dict(complete=d['complete'],summary=summary,strong_differences=strong_differences,missing_cases=[c for c in d['cases'] if not any(r['shape']==c['shape'] and r['ranks']==c['ranks'] for r in summary)]),indent=2)+'\n')
 lines=['Interim: remaining cases are pending.',''] if not d['complete'] else []
+if d.get('full_reference_source'):
+    lines+=['Full references reuse completed earlier measurements at the user’s request. Executables and measurement times differ; speedups are historical comparisons, not controlled same-binary measurements. Missing full cases use the new executable.','']
 for suite in ('weak','strong'):
     lines+=['## '+suite,'','|Fragment array|H₂|MPI|Runs per mode|Full seconds: single or min [median,max]|99.9% seconds: single or min [median,max]|Speedup|Peak RSS full / .999 MiB|Radius bohr|Local FFT volume ratio|Energy width .999 Ha|','|---|---:|---:|---:|---|---|---:|---:|---:|---:|---:|']
     table_rows=[r for r in summary if suite in r['suites']]

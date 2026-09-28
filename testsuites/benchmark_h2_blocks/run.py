@@ -1,4 +1,5 @@
 """Buffered DC preparation and paired native RT scaling: eight H2 per core."""
+import copy
 import argparse, hashlib, json, math, os, platform, re, shlex, shutil, statistics, subprocess, sys, time
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
@@ -47,9 +48,19 @@ def rt_block(shape,ranks,fraction,pair_tolerance=None,ace_support='occupied'):
         s=s.replace('&functional',f"&functional\n exx_pair_screening='on'\n exx_pair_tolerance={value}")
     return s.replace('&functional',f"&functional\n exx_mlwf_norm_fraction={fraction}d0\n exx_local_fft='auto'")
 
+def reference_record(row,origin,results_path,results_hash):
+    """Preserve provenance when explicitly reusing a historical full reference."""
+    if row['mode']!='full':raise ValueError('cross-binary reuse is only for full references')
+    result=copy.deepcopy(row)
+    result['binary_sha256']=row.get('binary_sha256',origin['binary_sha256'])
+    result['production_commit']=row.get('production_commit',origin['production_commit'])
+    result['reference_source']=dict(results_path=str(results_path),results_sha256=results_hash)
+    return result
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--full-source',type=Path,help='explicitly reuse completed historical full references, preserving their executable provenance')
     p.add_argument('--ace-support',choices=('occupied','source'),default='occupied',help='ACE construction vectors for adaptive RT only')
     p.add_argument('--pair-tolerance',type=float,help='screen adaptive RT only; default is off')
     p.add_argument('--large-repeat',type=int);p.add_argument('--rt-source',type=Path);p.add_argument('--prepare-only',action='store_true');p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
@@ -130,6 +141,7 @@ def main():
         if old['binary_sha256']!=binary_hash or old['pseudo_sha256']!=data['pseudo_sha256']:raise RuntimeError('imported RT executable/pseudopotential mismatch')
         if old['launcher']!=data['launcher'] or old['mpi_version']!=data['mpi_version'] or old['conditions']!=data['conditions']:raise RuntimeError('imported RT conditions mismatch')
         for r in old['runs']:
+            if a.full_source and r['mode']=='full':continue
             c=next((c for c in cases if c['shape']==r['shape'] and c['ranks']==r['ranks']),None)
             if c is None or r['repeat']>c['repeats']:continue
             prep=next(v for v in data['preparations'] if v['shape']==r['shape'])
@@ -143,6 +155,32 @@ def main():
             (a.output/r['folder']).symlink_to(folder,target_is_directory=True)
             data['runs'].append(r)
         data['imported_rt_source']=str(origin);data['imported_rt_results_sha256']=digest(origin/'results.json')
+    if a.full_source:
+        origin=a.full_source.resolve();old=json.loads((origin/'results.json').read_text())
+        if old['pseudo_sha256']!=data['pseudo_sha256']:raise RuntimeError('full reference pseudopotential mismatch')
+        if old['launcher']!=data['launcher'] or old['mpi_version']!=data['mpi_version']:raise RuntimeError('full reference MPI mismatch')
+        if old['conditions']['threads']!=data['conditions']['threads']:raise RuntimeError('full reference thread mismatch')
+        provenance_hash=digest(origin/'results.json')
+        if data.get('full_reference_results_sha256',provenance_hash)!=provenance_hash:raise RuntimeError('full reference source changed')
+        for r in old['runs']:
+            if r['mode']!='full':continue
+            c=next((c for c in cases if c['shape']==r['shape'] and c['ranks']==r['ranks']),None)
+            if c is None or r['repeat']>c['repeats']:continue
+            if any(v['folder']==r['folder'] for v in data['runs']):continue
+            prep=next(v for v in data['preparations'] if v['shape']==r['shape'])
+            oldprep=next(v for v in old['preparations'] if v['shape']==r['shape'])
+            if prep['payload_sha256']!=oldprep['payload_sha256']:raise RuntimeError('full reference seed differs')
+            folder=origin/r['folder']
+            if (folder/'inputfile').read_text()!=rt_block(r['shape'],r['ranks'],1.,a.pair_tolerance,a.ace_support):raise RuntimeError('full reference input mismatch')
+            check=parse_rt(folder,r['ranks'],max_energy_width=None)
+            for key in ('rt_max_seconds','peak_rank_bytes','observables','energies'):
+                if check[key]!=r[key]:raise RuntimeError('full reference payload differs')
+            (a.output/r['folder']).symlink_to(folder,target_is_directory=True)
+            record=reference_record(r,old,origin/'results.json',provenance_hash)
+            record.update(c)
+            data['runs'].append(record)
+        data['full_reference_source']=str(origin);data['full_reference_results_sha256']=provenance_hash
+        data['full_reference_note']='User-authorized historical full references; binaries and measurement times differ. Only missing full cases are newly measured.'
     save()
     seen_shapes=set()
     for shape in shapes+([(4,4,1)] if not a.pilot and not a.prepare_only else []):
@@ -172,7 +210,7 @@ def main():
                     if any(r['folder']==name for r in data['runs']):continue
                     folder,wall,_=execute(name,rt_block(shape,ranks,fraction,a.pair_tolerance,a.ace_support),ranks,a.output/prep['folder'])
                     r=parse_rt(folder,ranks,max_energy_width=None);text=(folder/'output').read_text()
-                    r.update(case,folder=name,mode=mode,repeat=rep,launcher_wall_seconds=wall,
+                    r.update(case,folder=name,mode=mode,repeat=rep,launcher_wall_seconds=wall,binary_sha256=binary_hash,production_commit=data['production_commit'],
                       pair_counters=[list(map(int,m)) for m in re.findall(r'EXX_ADAPTIVE local/global pairs/local FFT points \(orbital group 0\):\s+(\d+)\s+(\d+)\s+(\d+)',text)],
                       support_counters=[list(map(float,m)) for m in re.findall(r'EXX_ADAPTIVE fraction/max radius/max norm loss:\s+(\S+)\s+(\S+)\s+(\S+)',text)],
                       retained_gauge_updates=text.count('retained accepted transported gauge'),

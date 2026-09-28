@@ -78,3 +78,13 @@ Apply the resulting ACE to original occupied mesh orbitals for cached action and
 Tests: RED input/control and full-support equivalence against old executable; independent nonorthogonal ACE interpolation; finite-source overlap pairs with complex orbitals; MPI/orbital layouts; same-seed16-step native RT. Compare .999 source-support against .999 occupied ACE and full support, report approximation differences separately from exact-zero pair pruning. Rerun short64 H2 pilot and inspect pair count/time/RSS before full matrix.
 
 Benchmark: add `--ace-support source` for adaptive runs only; full reference stays occupied. Store controls in metadata/reuse checks and report local-support ACE acceptance/fallback. Native dense RT and ACE factors remain a later storage-optimization phase; this amendment must not claim linear total memory.
+
+## User-directed reference reuse
+
+User subsequently instructed reusing existing Full results instead of rerunning
+them. This supersedes the earlier same-binary reference requirement. Reuse the
+16 completed Full runs from the stopped baseline, retain original executable and
+measurement provenance, and check exact inputs/seeds/output. Import completed
+new-source-ACE adaptive runs without rerunning them. Only missing Full strong
+cases (MPI1/2/4/8) require new calculations. Report cross-executable/time speedups
+as historical comparisons, without presenting them as same-binary controlled runs.

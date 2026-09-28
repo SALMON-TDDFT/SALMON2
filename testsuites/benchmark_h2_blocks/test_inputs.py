@@ -29,4 +29,15 @@ class Inputs(unittest.TestCase):
         for value in (-1,float('nan'),float('inf')):
             with self.assertRaises(ValueError):bench.rt_block((2,1,1),2,.999,pair_tolerance=value)
 
+
+class FullReference(unittest.TestCase):
+    def test_cross_binary_full_only(self):
+        row={'mode':'full','folder':'full-case','rt_max_seconds':12.}
+        origin={'binary_sha256':'old','production_commit':'prior'}
+        actual=bench.reference_record(row,origin,'/old/results.json','hash')
+        self.assertEqual(actual['binary_sha256'],'old')
+        self.assertEqual(actual['reference_source']['results_sha256'],'hash')
+        self.assertNotIn('binary_sha256',row)
+        with self.assertRaises(ValueError):bench.reference_record(dict(row,mode='adaptive'),origin,'/old/results.json','hash')
+
 if __name__=='__main__':unittest.main()
