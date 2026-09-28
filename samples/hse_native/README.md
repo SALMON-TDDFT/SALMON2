@@ -1,4 +1,4 @@
-# Native HSE06 on the TDCDFT branch
+# Native HSE06
 
 This experimental CPU implementation integrates HSE06, full screened exchange,
 ACE and Taylor4 predictor/corrector into SALMON. It is not an upstream release.
@@ -15,9 +15,6 @@ The fourth-order exponential polynomial averages the local and exchange
 operators between the initial and predicted endpoint. Its self-consistent
 predictor/corrector has generally second-order global time accuracy. Assess
 time-step convergence, electron count and overlaps; orbitals are not renormalized.
-
-See the [implementation and efficiency note](../../docs/hse-implementation-notes.md)
-for the current Taylor+ACE baseline, algorithm details, and measured tradeoffs.
 
 ## Build
 
@@ -98,15 +95,13 @@ potential nor a Wannier localization/support-cutoff approximation.
 
 Taylor keeps the initial ACE for its predictor and averages initial/predicted
 ACE operators for its corrector, then refreshes at the accepted state. Only exactly identical
-source arrays bypass refresh through the cache. See the
-[ACE construction and update schedule](../../docs/hse-implementation-notes.md#exchange-and-ace).
+source arrays bypass refresh through the cache.
 
 ## Distributed exchange memory
 
 Source, target, action, phase and ACE factors now remain on their owning k
 ranks. Only density-matrix row tiles are transposed for the exchange FFT.
-Taylor snapshots are freed after use. This reduces memory but adds communication;
-see the [implementation note](../../docs/hse-implementation-notes.md).
+Taylor snapshots are freed after use. This reduces memory but adds communication.
 
 ### Internally threaded BLAS
 

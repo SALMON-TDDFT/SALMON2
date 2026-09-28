@@ -41,7 +41,3 @@ builds, but this change has only been executed and tested on Apple Silicon.
 Source archives retain their upstream licenses: Libxc MPL-2.0, FFTW GPL-2.0-or-later,
 and Netlib LAPACK modified BSD. See `LICENSE.THIRD-PARTY` and upstream `COPYING`
 files in the downloaded sources.
-
-The executed build and regression matrix is recorded in [validation](hse-build-validation.md).
-
-Fugaku/Linux audit and Nk=4^3 regressions: [platform notes](hse-platforms.md).
