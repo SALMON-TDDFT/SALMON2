@@ -283,6 +283,7 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+      & exx_pair_screening,exx_pair_tolerance, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -753,6 +754,8 @@ contains
     exx_mlwf_radius = 0d0
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
+    exx_pair_screening = 'off'
+    exx_pair_tolerance = 0d0
     hse_lcfo_wf_radius = 0d0
     yn_hse_lcfo_rt = 'n'
     yn_hse_lcfo_direct_wf = 'n'
@@ -1359,6 +1362,9 @@ contains
       exx_mlwf_tolerance=hse_mlwf_tolerance
     endif
     if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
+    call comm_bcast(exx_pair_screening,nproc_group_global)
+    call string_lowercase(exx_pair_screening)
+    call comm_bcast(exx_pair_tolerance,nproc_group_global)
     call comm_bcast(exx_local_fft,nproc_group_global)
     call string_lowercase(exx_local_fft)
     call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
@@ -2327,6 +2333,8 @@ contains
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
+      write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
+      write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
       write(fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
       write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
@@ -3241,6 +3249,14 @@ contains
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
     if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
+    if(exx_pair_screening/='off'.and.exx_pair_screening/='diagnose'.and.exx_pair_screening/='on') &
+      error stop 'exx_pair_screening must be off, diagnose or on'
+    if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &
+      error stop 'exx_pair_tolerance must be finite and nonnegative'
+    if(exx_pair_screening/='off')then
+      if(xc/='hse06'.or.hse_omega<=0d0)error stop 'pair screening requires HSE06 with positive omega'
+      if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
+    endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'

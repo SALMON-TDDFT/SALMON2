@@ -185,6 +185,28 @@ program exchange_driver
   if(masked_partitioned%local_pairs/=no*(last_t-first_t+1).or.masked_partitioned%global_pairs/=0) &
     error stop 'orbital compact path not used'
   if(rank==0)print *, 'PASS compact orbital exchange ranks/orbitals ',np,orb_size,omega
+  if(omega>0d0)then
+    ! Exercise all-dropped pairs with uneven/empty source and target owners.
+    ! Huge budget is a stress test, not a recommended physical tolerance.
+    masked_partitioned%screen_tolerance=1d6
+    do stage=1,2
+      masked_partitioned%screen_mode=stage
+      call spatial_exx_apply(masked_partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+        trial(:,first_t:last_t,:),ace_result,status,omega=omega,comm_o=comm_o)
+      if(status/=0.or.masked_partitioned%screen_candidates/=no*nt)error stop 'partitioned pair count'
+      if(stage==1)then
+        if(any(abs(ace_result-ace_ref(:,first_t:last_t,:))>1d-11))error stop 'pair diagnosis changed action'
+      else
+        if(masked_partitioned%screen_skipped/=no*nt)error stop 'partitioned skipped count'
+        error=sum(abs(ace_result-ace_ref(:,first_t:last_t,:))**2)*dv
+        call MPI_Allreduce(error,global_error,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,err)
+        if(sqrt(global_error)>masked_partitioned%screen_bound+1d-10)error stop 'partitioned bound'
+        if(any(ace_result/=(0d0,0d0)))error stop 'all-dropped action not zero'
+      endif
+    enddo
+    masked_partitioned%screen_mode=0
+    if(rank==0)print *, 'PASS pair screening orbital/empty layouts ',np,orb_size,omega
+  endif
   call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=-.1d0)
   if(status==0)error stop 'negative screening accepted'
   ! Force an FFT validation failure after the first source broadcast.

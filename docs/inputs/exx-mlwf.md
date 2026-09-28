@@ -125,3 +125,49 @@ export remain rejected for adaptive support. The fixed-radius legacy option
 keeps its previous static-only contract. As with existing finite support,
 energy/force variational consistency and long-time optical accuracy are not
 established by norm retention alone.
+
+
+## HSE pair screening (experimental, opt-in)
+
+```fortran
+&functional
+ xc='hse06'
+ exx_mlwf_norm_fraction=0.999d0
+ exx_pair_screening='diagnose'
+ exx_pair_tolerance=1d-6
+/
+```
+
+`exx_pair_screening` is `off` (default), `diagnose` (evaluate candidates but retain
+all pairs), or `on` (attempt omission). `exx_pair_tolerance` defaults to zero and
+is always in atomic units, independent of `unit_system`. It budgets the grid-
+weighted Frobenius norm of the **raw exchange action on the current occupied
+columns**, before the exchange mixing fraction. It is not an energy tolerance,
+a force tolerance, or a bound on arbitrary-target ACE propagation error.
+
+Requires positive HSE omega and `exx_mlwf_norm_fraction > 0`; use fraction 1 for
+a full-source-support reference. Existing Gamma, native-mesh, static-SCF/fixed-
+ion-RT and restart/snapshot restrictions apply. The current implementation does
+not support this control for PBEh. No memory ceiling is introduced.
+
+The estimator uses the actual discrete SR multiplier (including G=0), source
+amplitudes and localized pair densities. It does not use erfc of MLWF center
+separation. At most half the budget is assigned to omitted pairs; a measured
+Hermitian-completion correction must fit the remaining budget. Strict ACE
+Hermitian/positive metric checks remain unchanged. If correction or ACE checks
+fail, that refresh is recomputed without pair omission.
+
+`EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds` reports
+attempted screening. CPU time measures only the estimator, not rotation,
+completion, ACE, FFTs, MPI wall time or total speedup. The following
+`EXX_PAIR unscreened ACE fallback` line says whether the attempt was discarded
+and gives the accepted action bound (zero for diagnosis or fallback). Bounds
+are relative to **the same source mask** and subject to floating-point rounding.
+A finite WF mask introduces a separate approximation.
+
+In RT, an already accepted MLWF gauge is now transported and retained if later spread
+minimization fails. The failed attempt still appears in the status log, with a
+separate `retained accepted transported gauge` line. For fraction < 1, RT stops
+if it cannot obtain an accepted initial/transported gauge; it no longer
+silently switches to a full-support operator. This does not freeze the adaptive
+radius or remove errors from moving mask boundaries.

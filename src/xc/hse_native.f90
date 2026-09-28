@@ -12,7 +12,7 @@ module hse_native
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
   use hse_ace
-  use exx_orbitals, only: orbital_ace_build,orbital_ace_apply
+  use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
   use exx_adaptive_support, only: adaptive_source_mask
   use hse_spatial
   use hse_wannier
@@ -22,7 +22,7 @@ module hse_native
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-    hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
+    exx_pair_screening,exx_pair_tolerance,hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
   public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
@@ -502,7 +502,9 @@ contains
     integer,allocatable :: orbital_comm
     real(8),allocatable :: radii(:),loss(:)
     logical,allocatable :: protected(:)
-    logical :: was_active
+    logical :: was_active,screen_fallback
+    integer :: requested_screen_mode
+    real(8) :: correction_norm,accepted_bound
     integer :: adaptive_bad
     real(8) :: mask_diagnostic(2),mask_maximum(2)
     if(exx_mlwf_norm_fraction>0d0.and.theory/='dft')hse_adaptive_ready=.true.
@@ -539,10 +541,17 @@ contains
     if(exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and.spatial%last_localization_status/=0) &
       maxiter=exx_mlwf_maxiter
     spatial%seed_localized=exx_mlwf_norm_fraction>0d0
+    spatial%retain_accepted_gauge=theory/='dft'
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
       maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(info%io_s:info%io_e,:,1),comm_o=orbital_comm)
     if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
+    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.theory/='dft')then
+      if(spatial%last_localization_status/=0) &
+        error stop 'Adaptive RT requires an accepted transported MLWF gauge; refine initial localization'
+    endif
+    if(spatial%retained_gauge.and.info%id_ro==0)write(*,'(a,i10)') &
+      'EXX_SPATIAL retained accepted transported gauge at refresh: ',spatial%updates
     was_active=adaptive_active
     adaptive_active=exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.exx_mlwf_norm_fraction==1d0)
@@ -560,19 +569,38 @@ contains
     if(adaptive_active.neqv.was_active)hse_support_changed=.true.
     cached_adaptive_ready=hse_adaptive_ready
     spatial%compact=adaptive_active.and.exx_local_fft=='auto'
-    call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
-      [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-      pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+    requested_screen_mode=0
+    if(exx_pair_screening=='diagnose')requested_screen_mode=1
+    if(exx_pair_screening=='on')requested_screen_mode=2
+    spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
+    call apply_exchange_action()
     if(status/=0)error stop 'Spatial EXX: exchange action failed'
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i2,2i18,2es18.9)') &
+      'EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds: ',requested_screen_mode, &
+      spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
+    correction_norm=0d0;accepted_bound=0d0
+    if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
+      call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
+        exx_pair_tolerance-spatial%screen_bound,correction_norm,status)
+      accepted_bound=spatial%screen_bound+correction_norm
+    endif
+    if(status==0)call build_exchange_ace()
+    screen_fallback=status/=0.and.requested_screen_mode==2.and.spatial%screen_skipped>0
+    if(screen_fallback)then
+      ! Pair-dependent omissions need not define a Hermitian input metric.
+      ! Never relax the existing Hermitian/positive ACE validation to accept them.
+      spatial%screen_mode=0;accepted_bound=0d0
+      call apply_exchange_action()
+      if(status/=0)error stop 'Spatial EXX: unscreened fallback action failed'
+      call build_exchange_ace()
+    endif
+    if(status/=0)error stop 'Spatial EXX: ACE build failed'
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,l1,a,es18.9)') &
+      'EXX_PAIR unscreened ACE fallback: ',screen_fallback,' accepted action bound: ', &
+      accepted_bound
     if(adaptive_active.and.info%id_ro==0)write(*,'(a,3i18)') &
       'EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0): ', &
       spatial%local_pairs,spatial%global_pairs,spatial%local_points
-    if(info%isize_o>1)then
-      call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
-    else
-      call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
-    endif
-    if(status/=0)error stop 'Spatial EXX: ACE build failed'
     cached_source=local;cached_action=w;cached_occupation=system%rocc(:,:,1)
     if(spatial%updates==1)write(*,'(a,4i10)')'EXX_ORBITALS rank/local/global/grid: ', &
       info%id_ro,info%numo,system%no,product(mg%num)
@@ -587,6 +615,39 @@ contains
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
+    subroutine apply_exchange_action()
+      complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
+      integer,allocatable :: counts(:)
+      integer :: first
+      if(requested_screen_mode==0)then
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
+          [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+      else
+        allocate(localized_action(size(w,1),size(w,2),1))
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
+          [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,spatial%previous,localized_action,status,omega=hse_omega,comm_o=orbital_comm)
+        if(status/=0)return
+        adjoint=conjg(transpose(spatial%gauge(:,:,1)))
+        if(info%isize_o>1)then
+          call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first,status)
+          if(status/=0)return
+          call orbital_rotate(localized_action(:,:,1),adjoint,info%icomm_o,counts,first,w(:,:,1))
+        else
+          w(:,:,1)=matmul(localized_action(:,:,1),adjoint)
+        endif
+      endif
+    end subroutine
+    subroutine build_exchange_ace()
+      if(info%isize_o>1)then
+        call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
+      else
+        call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
+      endif
+      call comm_summation(status,adaptive_bad,info%icomm_ro)
+      status=adaptive_bad
+    end subroutine
     subroutine sum_spatial(a)
       complex(8),intent(inout) :: a(:,:)
       complex(8) :: total(size(a,1),size(a,2))

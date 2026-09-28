@@ -49,3 +49,14 @@ Files: src/io/salmon_global.f90; src/io/inputoutput.f90; src/xc/hse_native.f90; 
 - Plan/design approved by user; implementation begins from c6103d72.
 - Ruling: conservative spectral/kernel row bounds are the first supported estimator. Geometric block-distance refinements are deferred until diagnostic evidence justifies them.
 - Ruling: strict ACE acceptance and unscreened recomputation are mandatory; a small energy estimate alone cannot authorize a non-Hermitian ACE input.
+
+- Task 1: MPI1/2/4 retention/reseeding probe passed. Failed minimization preserves the transported accepted U. Adaptive RT transport/initial-localization failure now stops explicitly.
+- Task 2: raw diagnostic/omission bounds passed MPI1/2/4, global/compact FFT, omega=.11/.22. Native test showed all finite omissions initially fail strict ACE Hermiticity.
+- Ruling: add Hermitian completion D=Psi (Psi^dagger Psi)^-1 (A^dagger-A)/2, A=Psi^dagger W. Reserve half the user budget for pair omission; measure the actual distributed correction norm and require raw bound+correction norm <= user budget before strict ACE validation. This preserves the approved total-action bound without relaxing ACE checks. Singular Gram, over-budget completion, or invalid ACE recomputes unscreened W.
+- Review: no production correctness blockers; strengthen native tests to require accepted finite omission and accepted bounds, not attempted omission only. Implemented.
+- Regression finding: extending accepted-gauge retention to SCF changed a DC-rVV10 convergence trajectory (MPI4 failed within 1000 SCF iterations). Ruling: retention is RT-only, the originally observed continuity problem; SCF keeps its established retry/fallback behavior. Re-run exact DC regression before completion.
+
+- Final verification: native pair screening 3 tests, adaptive RT 3 tests, EXX input 15 tests, adaptive SCF/DC 4 tests all pass. Spatial exchange probe passed 27 MPI/kernel configurations; 18 positive-omega configurations also passed screening with empty orbital groups. Pair-bound/completion probe passed MPI1/2/4 and both FFT routes at omega .11/.22, including subnormal-scale norm regression; accepted-gauge probe passed MPI1/2/4.
+- Review follow-up found accumulated tiny bounds/corrections could underflow when squared. Added scaled distributed norm reductions and red/green positive-tiny-bound tests. Final independent review reports no remaining blocker.
+- Final RT-only retention DC-rVV10 MPI4 regression converged; full four-test SCF suite passed. Same-seed 4x4x1/MPI8 RT retained spherical support for all 33 updates; energy width about 2.975e-7 Ha, still above prior 1e-7 criterion. This residual is recorded, not marked accuracy-passing.
+- Implementation complete; no performance speedup claimed and no push requested.

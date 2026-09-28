@@ -37,6 +37,25 @@ program probe
  call spatial_exx_refresh(seeded,n,[1d0,1d0,1d0],[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
   MPI_COMM_WORLD,psi,20,1d-10,status)
  if(status/=0.or.seeded%seed_needed.or.seeded%spread>1d-8)error stop 'deferred reseed failed'
+ seeded%retain_accepted_gauge=.true.;orbital%retain_accepted_gauge=.true.
+ ! Perturb the occupied subspace, then deliberately exhaust minimization.
+ do g=1,size(psi,1)
+  psi(g,1,1)=psi(g,1,1)+1d-3*cmplx(sin(real(g+rank,8)),cos(real(2*g+rank,8)),8)
+  psi(g,2,1)=psi(g,2,1)+1d-3*cmplx(cos(real(3*g+rank,8)),sin(real(g+rank,8)),8)
+ enddo
+ call spatial_exx_refresh(seeded,n,[1d0,1d0,1d0],[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
+  MPI_COMM_WORLD,psi,1,1d-30,status)
+ if(status/=0.or.seeded%localization_status==0)error stop 'failed minimization not exercised'
+ if(.not.seeded%retained_gauge.or.seeded%last_localization_status/=0)error stop 'accepted gauge lost'
+ call spatial_exx_refresh(orbital,n,[1d0,1d0,1d0],[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
+  MPI_COMM_WORLD,psi,1,1d-30,status,comm_o=MPI_COMM_SELF)
+ if(status/=0.or.orbital%localization_status==0)error stop 'orbital failure not exercised'
+ if(.not.orbital%retained_gauge.or.orbital%last_localization_status/=0)error stop 'orbital accepted gauge lost'
+ ! SCF/default mode must retain the old retry/fallback contract.
+ seeded%retain_accepted_gauge=.false.
+ call spatial_exx_refresh(seeded,n,[1d0,1d0,1d0],[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
+  MPI_COMM_WORLD,psi,1,1d-30,status)
+ if(status/=0.or.seeded%last_localization_status==0.or.seeded%retained_gauge)error stop 'SCF retention enabled'
  if(rank==0)print *,'SPREAD plain/seeded: ',plain%spread,seeded%spread
  call MPI_Finalize(ierr)
 end program

@@ -37,12 +37,13 @@ contains
   plan%lo=[0,coords(1)*plan%m(2),coords(2)*plan%m(3)]
   plan%kernel=realspace(:,1)
  end subroutine
- subroutine spatial_local_apply(plan,comm_r,source,targets,action,used,status,pairs_executed,pair_fft_points)
+ subroutine spatial_local_apply(plan,comm_r,source,targets,action,used,status,pairs_executed,pair_fft_points,skip)
   type(s_exx_spatial_local),intent(inout) :: plan
   integer,intent(in) :: comm_r
   complex(8),intent(in) :: source(:),targets(:,:)
   complex(8),intent(out) :: action(:,:)
   logical,intent(out) :: used
+  logical,intent(in),optional :: skip(:)
   integer,intent(out) :: status
   integer(int64),intent(out),optional :: pairs_executed,pair_fft_points
   integer,allocatable :: occupied(:,:),total(:,:),axis_points(:),local_rows(:),tile_rows(:)
@@ -61,6 +62,9 @@ contains
   if(.not.allocated(plan%kernel))bad=1
   if(size(targets,1)/=ng.or.any(shape(action)/=shape(targets)))bad=1
   if(ng/=product(plan%m))bad=1
+  if(present(skip))then
+   if(size(skip)/=nt)bad=1
+  endif
   ntmax=nt;call comm_get_max(ntmax,comm_r)
   if(ntmax/=nt)bad=1
   call comm_get_max(bad,comm_r)
@@ -140,6 +144,9 @@ contains
    result=0d0
    do j=1,nb
     if(modulo(first+j-2,peers)/=rank)cycle
+    if(present(skip))then
+     if(skip(first+j-1))cycle
+    endif
     density=conjg(tile_sum(:,1))*tile_sum(:,j+1)
     if(all(density==(0d0,0d0)))cycle
     call exx_local_apply(plan%fft,density,potential,status)

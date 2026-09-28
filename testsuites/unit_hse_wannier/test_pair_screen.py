@@ -1,0 +1,48 @@
+"""Discrete HSE pair bounds, diagnose/on, compact parity and MPI regression."""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--build', type=Path, default=os.environ.get('SALMON_BUILD'))
+    args = parser.parse_args()
+    if args.build is None:
+        parser.error('provide --build PATH or set SALMON_BUILD')
+    build = args.build.resolve()
+    objects = build / 'src/CMakeFiles/salmon.dir'
+    dependencies = [
+        'xc/hse_ace.f90.o',
+        'xc/hse_wannier_gauge.f90.o',
+        'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o',
+        'parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o',
+    ]
+    fftw = Path(os.environ.get('FFTW_ROOT', '/opt/homebrew/opt/fftw'))
+    blas = Path(os.environ.get('OPENBLAS_ROOT', '/opt/homebrew/opt/openblas'))
+    with tempfile.TemporaryDirectory() as tmp:
+        executable = Path(tmp) / 'probe'
+        subprocess.run([
+            os.environ.get('MPIFC', 'mpifort'), '-fopenmp', '-fcheck=all',
+            '-ffree-line-length-none', '-I' + str(build),
+            str(ROOT / 'src/xc/exx_orbitals.f90'),
+            str(ROOT / 'src/xc/exx_spatial_local.f90'),
+            str(ROOT / 'src/xc/hse_spatial.f90'),
+            str(Path(__file__).with_name('pair_screen_probe.f90')),
+            *[str(objects / name) for name in dependencies],
+            '-L' + str(fftw / 'lib'), '-lfftw3',
+            '-L' + str(blas / 'lib'), '-lopenblas', '-o', str(executable),
+        ], cwd=tmp, check=True)
+        for ranks in (1, 2, 4):
+            subprocess.run([
+                os.environ.get('MPIEXEC', 'mpiexec'), '-n', str(ranks), str(executable),
+            ], cwd=tmp, check=True, timeout=30,
+                env=dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1'))
+
+
+if __name__ == '__main__':
+    main()

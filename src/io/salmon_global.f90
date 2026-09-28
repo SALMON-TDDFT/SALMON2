@@ -124,6 +124,8 @@ module salmon_global
   integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
+  character(8) :: exx_pair_screening ! off/diagnose/on; HSE discrete pair bound
+  real(8) :: exx_pair_tolerance ! raw exchange action Frobenius budget, atomic units
   character(8) :: exx_local_fft ! auto: exact compact convolution; off: full grid
   integer :: exx_mlwf_interval,exx_mlwf_maxiter
   real(8) :: exx_mlwf_radius ! input length, converted to bohr; 0=full support

@@ -7,7 +7,7 @@ module exx_orbitals
   implicit none
   private
   public :: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
-  public :: orbital_ace_build,orbital_ace_apply
+  public :: orbital_ace_build,orbital_ace_apply,orbital_hermitian_action
 contains
   subroutine orbital_check(bad,comm_r,comm_o)
     integer,intent(inout) :: bad
@@ -86,6 +86,60 @@ contains
         enddo
       enddo
     enddo
+  end subroutine
+
+  subroutine orbital_hermitian_action(u,w,dv,comm_r,comm_o,budget,correction_norm,status)
+    ! Complete the projected metric without assuming perfectly orthonormal U.
+    ! A=U^dagger W, G=U^dagger U, D=U G^-1 (A^dagger-A)/2.
+    ! Measure ||D|| on distributed rows/columns before accepting W+D.
+    complex(8),intent(in) :: u(:,:,:)
+    complex(8),intent(inout) :: w(:,:,:)
+    real(8),intent(in) :: dv,budget
+    integer,intent(in) :: comm_r,comm_o
+    real(8),intent(out) :: correction_norm
+    integer,intent(out) :: status
+    integer,allocatable :: counts(:)
+    complex(8),allocatable :: gram(:,:),metric(:,:),delta(:,:)
+    real(8) :: local_norm,spatial_norm,total_norm,scale,scale_max(1),scale_global(1)
+    integer :: first,n,bad
+    bad=0;status=1;correction_norm=0d0
+    if(any(shape(u)/=shape(w)).or.size(u,3)/=1.or.dv<=0d0.or..not.ieee_is_finite(dv))bad=1
+    if(.not.ieee_is_finite(budget).or.budget<0d0)bad=1
+    if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))bad=1
+    if(.not.all(ieee_is_finite(real(w))).or..not.all(ieee_is_finite(aimag(w))))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    call orbital_layout(size(u,2),comm_r,comm_o,counts,first,bad)
+    if(bad/=0.or.sum(counts)<1)return
+    n=sum(counts);allocate(gram(n,n),metric(n,n),delta(size(u,1),size(u,2)))
+    call orbital_overlap(u(:,:,1),u(:,:,1),dv,comm_r,comm_o,counts,first,gram)
+    call orbital_overlap(u(:,:,1),w(:,:,1),dv,comm_r,comm_o,counts,first,metric)
+    gram=.5d0*(gram+conjg(transpose(gram)))
+    metric=.5d0*(conjg(transpose(metric))-metric)
+    if(.not.all(ieee_is_finite(real(gram))).or..not.all(ieee_is_finite(aimag(gram))))bad=1
+    if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    call zposv('U',n,n,gram,n,metric,n,bad)
+    if(bad/=0)bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    call orbital_rotate(u(:,:,1),metric,comm_o,counts,first,delta)
+    scale=0d0
+    if(size(delta)>0)scale=maxval(abs(delta))
+    call comm_get_max([scale],scale_max,1,comm_r)
+    call comm_get_max(scale_max,scale_global,1,comm_o)
+    scale=scale_global(1)
+    local_norm=0d0
+    if(scale>0d0)local_norm=sum((abs(delta)/scale)**2)*dv
+    call comm_summation(local_norm,spatial_norm,comm_r)
+    call comm_summation(spatial_norm,total_norm,comm_o)
+    correction_norm=scale*sqrt(total_norm)*(1d0+128d0*epsilon(1d0))
+    if(.not.ieee_is_finite(correction_norm).or.correction_norm>budget)bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    w(:,:,1)=w(:,:,1)+delta
+    status=0
   end subroutine
 
   subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status)

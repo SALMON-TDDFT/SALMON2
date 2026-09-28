@@ -17,7 +17,11 @@ module hse_spatial
   public :: spatial_exx_state,spatial_exx_refresh,spatial_exx_apply
   type spatial_exx_state
     integer :: updates=0,iterations=0,localization_status=1,last_localization_status=1
-    logical :: compact=.false.,seed_localized=.false.,seed_needed=.true.
+    logical :: compact=.false.,seed_localized=.false.,seed_needed=.true.,retained_gauge=.false.
+    logical :: retain_accepted_gauge=.false.
+    integer :: screen_mode=0 ! 0 off, 1 diagnose, 2 omit
+    real(8) :: screen_tolerance=0d0,screen_bound=0d0,screen_cpu_seconds=0d0
+    integer(int64) :: screen_candidates=0,screen_skipped=0
     integer(int64) :: local_pairs=0,local_points=0,global_pairs=0
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
@@ -31,7 +35,8 @@ contains
     real(8),intent(in),optional :: occupation(:,:)
     complex(8),intent(in) :: psi(:,:,:)
     integer,intent(out) :: status
-    complex(8),allocatable :: raw(:,:,:,:),shifted(:,:),phase(:)
+    complex(8),allocatable :: raw(:,:,:,:),shifted(:,:),phase(:),transported(:,:,:)
+    logical :: accepted
     real(8) :: b(3,6),weights(6),delta,pi,position(3)
     integer :: no,ng,m(3),lo(3),x,y,z,g,j,axis,neighbors(6,1),bad
     if(present(comm_o))then
@@ -74,6 +79,9 @@ contains
         enddo
       endif
     endif
+    accepted=op%retain_accepted_gauge.and.op%seed_localized.and.op%last_localization_status==0
+    op%retained_gauge=.false.
+    if(accepted)transported=op%gauge
     op%iterations=0;op%localization_status=2;op%spread=-1d0;op%gradient=-1d0
     if(maxiter>0)then
       allocate(raw(no,no,6,1),shifted(ng,no),phase(ng))
@@ -101,7 +109,13 @@ contains
       endif
       call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
         op%iterations,op%localization_status)
-      op%last_localization_status=op%localization_status
+      if(op%localization_status/=0.and.accepted)then
+        ! Keep the accepted gauge transported into the current occupied space.
+        ! The failed minimization remains visible in localization_status.
+        op%gauge=transported;op%retained_gauge=.true.
+      else
+        op%last_localization_status=op%localization_status
+      endif
     endif
     ! A non-converged unitary gauge preserves the full-support exchange operator.
     if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
@@ -134,7 +148,8 @@ contains
     real(8),intent(in),optional :: occupation(:,:)
     integer,intent(out) :: status
     integer,allocatable :: counts(:)
-    complex(8),allocatable :: raw(:,:,:,:),phase(:),overlap(:,:),left(:,:),right(:,:),work(:)
+    complex(8),allocatable :: raw(:,:,:,:),phase(:),overlap(:,:),left(:,:),right(:,:),work(:),transported(:,:,:)
+    logical :: accepted
     real(8),allocatable :: singular(:),rwork(:),occupation_weights(:)
     real(8) :: b(3,6),weights(6),delta,pi,position(3)
     integer :: no,ng,nlocal,first,m(3),lo(3),axis,g,x,y,z,j,bad,neighbors(6,1),initialized,total_initialized
@@ -201,6 +216,9 @@ contains
         bad=0
       endif
     endif
+    accepted=op%retain_accepted_gauge.and.op%seed_localized.and.op%last_localization_status==0
+    op%retained_gauge=.false.
+    if(accepted)transported=op%gauge
     op%iterations=0;op%localization_status=2;op%spread=-1d0;op%gradient=-1d0
     if(maxiter>0)then
       allocate(raw(no,no,6,1),phase(ng))
@@ -224,7 +242,13 @@ contains
       endif
       call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
         op%iterations,op%localization_status)
-      op%last_localization_status=op%localization_status
+      if(op%localization_status/=0.and.accepted)then
+        ! Keep the accepted gauge transported into the current occupied space.
+        ! The failed minimization remains visible in localization_status.
+        op%gauge=transported;op%retained_gauge=.true.
+      else
+        op%last_localization_status=op%localization_status
+      endif
     endif
     if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
     call orbital_check(bad,comm_r,comm_o)
@@ -294,14 +318,24 @@ contains
     type(s_exx_spatial_local) :: compact_plan
     complex(8),allocatable :: compact_action(:,:)
     logical :: compact_used
+    logical,allocatable :: skip(:)
+    integer,allocatable :: selected(:)
+    real(8),allocatable :: omitted(:),pair_norms(:,:),pair_totals(:,:)
+    real(8) :: kernel_local(2),kernel_sum(2),lambda,kzero,krms,budget,normq,qmax,qnorm_local
+    real(8) :: candidate_bound,summary_local(3),summary_total(3),cpu_start,cpu_end,bound_scale
+    integer :: source_total,target_total,nselected
     integer(int64) :: compact_pairs,compact_points
     real(8) :: radius,pi,q(3),q2,screening
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
+    op%screen_candidates=0;op%screen_skipped=0;op%screen_bound=0d0;op%screen_cpu_seconds=0d0
     screening=0d0
     if(present(omega))screening=omega
     if(.not.ieee_is_finite(screening).or.screening<0d0)bad=1
     if(.not.allocated(op%source))bad=1
+    if(op%screen_mode<0.or.op%screen_mode>2)bad=1
+    if(.not.ieee_is_finite(op%screen_tolerance).or.op%screen_tolerance<0d0)bad=1
+    if(op%screen_mode/=0.and.screening<=0d0)bad=1
     if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
     if(screening==0d0)then
       if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
@@ -351,6 +385,24 @@ contains
         multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
       endif
     enddo;enddo;enddo
+    allocate(skip(nt),selected(nt),omitted(nt));omitted=0d0
+    if(op%screen_mode/=0)then
+      call cpu_time(cpu_start)
+      ! Norms of the actual discrete convolution, including the G=0 mode.
+      kernel_local=[sum(abs(multiplier)),sum(abs(multiplier)**2)]
+      call comm_summation(kernel_local,kernel_sum,2,comm_r)
+      lambda=maxval(abs(multiplier));call max_scalar(lambda,comm_r)
+      kzero=kernel_sum(1)/real(product(int(n,int64)),8)
+      krms=sqrt(kernel_sum(2)/real(product(int(n,int64)),8))
+      source_total=size(op%source,2);target_total=nt
+      if(present(comm_o))then
+        call comm_summation(size(op%source,2),source_total,comm_o)
+        call comm_summation(nt,target_total,comm_o)
+      endif
+      budget=op%screen_tolerance/(real(max(1,source_total),8)*sqrt(real(max(1,target_total),8)))
+      allocate(pair_norms(2,nt),pair_totals(2,nt))
+      call cpu_time(cpu_end);op%screen_cpu_seconds=cpu_end-cpu_start
+    endif
     op%local_pairs=0;op%local_points=0;op%global_pairs=0
     if(op%compact)then
       call spatial_local_init(compact_plan,n,dims,coords,comm,multiplier,status)
@@ -371,9 +423,45 @@ contains
         else
           source_column=op%source(:,i)
         endif
+        skip=.false.
+        if(op%screen_mode/=0)then
+          call cpu_time(cpu_start)
+          qmax=maxval(abs(source_column));call max_scalar(qmax,comm_r)
+          qnorm_local=0d0
+          if(qmax>0d0)qnorm_local=sum((abs(source_column)/qmax)**2)
+          call comm_summation(qnorm_local,normq,comm_r)
+          normq=qmax*sqrt(product(h)*normq)
+          do j=1,nt
+            pair_norms(1,j)=sum(abs(conjg(source_column)*target(:,j,1))**2)
+            pair_norms(2,j)=sum(abs(conjg(source_column)*target(:,j,1)))
+          enddo
+          if(nt>0)call comm_summation(pair_norms,pair_totals,2*nt,comm_r)
+          do j=1,nt
+            candidate_bound=min(qmax*lambda*sqrt(product(h)*pair_totals(1,j)), &
+              normq*kzero*pair_totals(2,j),normq*krms*sqrt(pair_totals(1,j)))
+            ! Do not turn a subnormal squared norm into a zero error certificate.
+            if(pair_totals(1,j)<tiny(1d0).and.pair_totals(2,j)>0d0) &
+              candidate_bound=normq*kzero*pair_totals(2,j)
+            ! Round upward; nonfinite diagnostics must never authorize omission.
+            candidate_bound=candidate_bound*(1d0+128d0*epsilon(1d0))
+            if(.not.ieee_is_finite(candidate_bound))cycle
+            if(candidate_bound<=budget.and.(budget>0d0.or.pair_totals(2,j)==0d0))then
+              op%screen_candidates=op%screen_candidates+1_int64
+              omitted(j)=omitted(j)+candidate_bound
+              if(op%screen_mode==2)skip(j)=.true.
+            endif
+          enddo
+          call cpu_time(cpu_end);op%screen_cpu_seconds=op%screen_cpu_seconds+cpu_end-cpu_start
+        endif
+        nselected=0
+        do j=1,nt
+          if(skip(j))cycle
+          nselected=nselected+1;selected(nselected)=j
+        enddo
+        op%screen_skipped=op%screen_skipped+int(nt-nselected,int64)
         if(op%compact)then
           call spatial_local_apply(compact_plan,comm_r,source_column,target(:,:,1),compact_action, &
-            compact_used,status,compact_pairs,compact_points)
+            compact_used,status,compact_pairs,compact_points,skip)
           call collective_bad_status()
           if(status/=0)then
             call spatial_local_destroy(compact_plan)
@@ -388,14 +476,14 @@ contains
             cycle
           endif
         endif
-        op%global_pairs=op%global_pairs+nt
-        do first=1,nt,4
-          nb=min(4,nt-first+1)
+        op%global_pairs=op%global_pairs+nselected
+        do first=1,nselected,4
+          nb=min(4,nselected-first+1)
           do j=1,nb
             if(present(comm_o))then
-              density(:,j)=conjg(source_column)*target(:,first+j-1,1)
+              density(:,j)=conjg(source_column)*target(:,selected(first+j-1),1)
             else
-              density(:,j)=conjg(op%source(:,i))*target(:,first+j-1,1)
+              density(:,j)=conjg(op%source(:,i))*target(:,selected(first+j-1),1)
             endif
           enddo
           call pencil_transform(n,dims,coords,comm,density(:,:nb),spectrum(:,:nb),-1,status,spectral_z=.true.)
@@ -412,9 +500,9 @@ contains
           if(bad/=0)exit
           do j=1,nb
             if(present(comm_o))then
-              action(:,first+j-1,1)=action(:,first+j-1,1)-source_column*density(:,j)
+              action(:,selected(first+j-1),1)=action(:,selected(first+j-1),1)-source_column*density(:,j)
             else
-              action(:,first+j-1,1)=action(:,first+j-1,1)-op%source(:,i)*density(:,j)
+              action(:,selected(first+j-1),1)=action(:,selected(first+j-1),1)-op%source(:,i)*density(:,j)
             endif
           enddo
         enddo
@@ -423,8 +511,28 @@ contains
       enddo
     enddo
     call spatial_local_destroy(compact_plan)
+    if(op%screen_mode/=0)then
+      bound_scale=0d0
+      if(nt>0)bound_scale=maxval(omitted)
+      if(present(comm_o))call max_scalar(bound_scale,comm_o)
+      summary_local=[0d0,real(op%screen_candidates,8),real(op%screen_skipped,8)]
+      if(bound_scale>0d0)summary_local(1)=sum((omitted/bound_scale)**2)
+      summary_total=summary_local
+      if(present(comm_o))call comm_summation(summary_local,summary_total,3,comm_o)
+      op%screen_bound=bound_scale*sqrt(summary_total(1))
+      op%screen_candidates=int(summary_total(2),int64);op%screen_skipped=int(summary_total(3),int64)
+      call max_scalar(op%screen_cpu_seconds,comm_r)
+      if(present(comm_o))call max_scalar(op%screen_cpu_seconds,comm_o)
+    endif
     status=0
   contains
+    subroutine max_scalar(value,group)
+      real(8),intent(inout) :: value
+      integer,intent(in) :: group
+      real(8) :: result(1)
+      call comm_get_max([value],result,1,group)
+      value=result(1)
+    end subroutine
     subroutine collective_bad_status()
       bad=status
       call collective_bad()

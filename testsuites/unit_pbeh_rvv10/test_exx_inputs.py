@@ -29,6 +29,13 @@ class ExxInputs(unittest.TestCase):
             energy=float(re.search(r'Total energy \(eV\) =\s*([\d.E+-]+)',info)[1])
             return energy,(Path(tmp)/'variables.log').read_text(),run.stdout
 
+    def test_pair_screen_input_contract(self):
+        self.run_case("exx_pair_screening='invalid'",error='exx_pair_screening must be off, diagnose or on')
+        self.run_case('exx_pair_tolerance=-1',error='exx_pair_tolerance must be finite and nonnegative')
+        self.run_case("exx_pair_screening='diagnose'",error='pair screening requires HSE06 with positive omega')
+        self.run_case("exx_pair_screening='on'",lambda s:s.replace("xc='pbeh40_rvv10'","xc='hse06'"),
+            error='pair screening requires exx_mlwf_norm_fraction > 0')
+
     def test_adaptive_norm_input_contract(self):
         for value in ('-0.1', '1.01'):
             self.run_case('exx_mlwf_norm_fraction='+value,
