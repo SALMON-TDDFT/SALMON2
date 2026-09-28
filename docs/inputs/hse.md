@@ -284,8 +284,30 @@ buffers change from `32*N*m*s` bytes per rank to `16*Nlocal*m*s` bytes.
 For the H4 test (N=1024, m=6, s=1), four spatial ranks reduce this workspace
 from 192 KiB to 24 KiB per rank. This is not a claim about total process memory.
 
-Remaining replication includes the core basis, received halo basis, dense
-LCFO diagonalization matrices, and all orbital columns in the spatial
+Remaining replication includes the representative rank's core basis, received
+halo basis, dense LCFO diagonalization matrices, and all orbital columns in the spatial
 MLWF/ACE representation. Halo data is still exchanged by fragment
 representatives and broadcast within each fragment. Further orbital and
 matrix distribution is needed for those parts; no fixed memory cap is imposed.
+
+## Distributed core-basis construction
+
+Complex DC-LCFO now restricts input orbitals to each rank's intersection with
+the fragment core. Orbital and k-point peers combine only columns on the same
+spatial rows. Overlap matrices, orthogonalization inner products and norms
+are reduced across spatial peers; basis rotation acts on local rows.
+Nonrepresentative ranks retain only their local core basis, including valid
+zero-sized domains. `DC_LCFO_BASIS rank/local/stored grid points` reports this
+layout once per fragment rank.
+
+The fragment representative still holds the full core basis for the existing
+binary writer and halo sender. Gathering streams one orbital column at a time;
+all-band full-core scratch is removed. Each rank still allocates one full-core
+send column during this gather, and the representative has a matching receive
+column. These are residual memory costs, not a fully distributed I/O solution.
+Received halo bases and global dense eigensolver matrices are unchanged.
+
+Validation includes spatial HSE DC eigenvalues and reconstructed RT, a rotated
+fragment geometry with ranks outside the core, and the existing four-k-point
+Si LCFO references with k-point/orbital decomposition. No new memory cap or
+input parameter is required.

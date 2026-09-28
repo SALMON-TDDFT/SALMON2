@@ -598,12 +598,13 @@ contains
     integer, allocatable :: id_array(:),n_basis(:,:,:),n_mat(:,:),index_basis(:,:,:,:)
     integer, allocatable :: req_send(:),req_recv(:)
     real(8), allocatable :: esp_tot(:,:,:)
-    complex(8), allocatable :: f_basis(:,:,:,:,:),work_basis(:,:,:,:,:)
+    complex(8), allocatable :: f_basis(:,:,:,:,:)
     complex(8), allocatable :: hf(:,:,:,:,:)
     complex(8), allocatable :: mat_h_local(:,:,:)
     complex(8), allocatable :: hsend(:,:),hmat(:,:),vmat(:,:)
     complex(8), allocatable :: coef_frag(:,:,:)
     real(8), allocatable :: eval(:)
+    integer :: basis_origin(3),basis_shape(3)
     integer :: n_halo,ik,ispin,io,ix,iy,iz,n,nactive,istat,global_status
     integer :: nspin,nk,m,pass,j,ifrag,i,jj,src_frag,tag,ios
     integer, allocatable :: nb(:)
@@ -642,7 +643,12 @@ contains
 
     do ik=1,nk
       owns_ik = (info%ik_s <= ik .and. ik <= info%ik_e)
-      allocate(f_basis(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,m))
+      basis_origin=mg%is
+      basis_shape=max(0,min(mg%ie,dc%nxyz_domain)-mg%is+1)
+      if(dc%id_frag==0)then
+        basis_origin=1;basis_shape=dc%nxyz_domain
+      endif
+      allocate(f_basis(basis_shape(1),basis_shape(2),basis_shape(3),nspin,m))
       allocate(nb(nspin))
       call build_basis(ik,f_basis,nb,basis_err)
       call collect_basis_dimensions(ik,nb)
@@ -659,7 +665,7 @@ contains
             do ix=mg%is(1),mg%ie(1)
               if (ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. &
                   iz <= dc%nxyz_domain(3)) &
-                sttpsi%zwf(ix,iy,iz,1:nspin,io,ik,1) = f_basis(ix,iy,iz,1:nspin,io)
+                sttpsi%zwf(ix,iy,iz,1:nspin,io,ik,1) = f_basis(ix-basis_origin(1)+1,iy-basis_origin(2)+1,iz-basis_origin(3)+1,1:nspin,io)
             end do
             end do
             end do
@@ -853,116 +859,122 @@ contains
       complex(8), intent(out) :: basis(:,:,:,:,:)
       integer, intent(out) :: nb0(:)
       real(8), intent(out) :: basis_err0
-      complex(8), allocatable :: local(:,:,:,:,:),work(:,:,:,:,:),smat(:,:,:),umat(:,:,:)
+      complex(8), allocatable :: local(:,:,:,:,:),work(:,:,:,:,:),phi(:,:,:,:,:)
+      complex(8), allocatable :: smat(:,:,:),partial(:,:,:),umat(:,:,:),send_column(:,:,:),recv_column(:,:,:)
       real(8), allocatable :: lambda(:,:)
-      integer :: io0,jo0,isp0,ix0,iy0,iz0,ieig,ib,pass0,status0
-      complex(8) :: coeff
-      real(8) :: norm2
+      integer :: io0,jo0,isp0,ix0,iy0,iz0,ieig,ib,pass0,status0,extent(3),hi(3)
+      complex(8) :: coeff,local_coeff
+      real(8) :: norm2,local_norm
 
-      allocate(local(size(basis,1),size(basis,2),size(basis,3),nspin,m))
-      allocate(work(size(basis,1),size(basis,2),size(basis,3),nspin,m))
-      allocate(smat(m,m,nspin),umat(m,m,nspin),lambda(m,nspin))
-      local = (0d0,0d0)
-      do io0=info%io_s,info%io_e
-        if (io0 <= m .and. info%ik_s <= ik0 .and. ik0 <= info%ik_e) then
-          do isp0=1,nspin
-          do iz0=mg%is(3),mg%ie(3)
-          do iy0=mg%is(2),mg%ie(2)
-          do ix0=mg%is(1),mg%ie(1)
-            if (ix0 <= dc%nxyz_domain(1) .and. iy0 <= dc%nxyz_domain(2) .and. &
-                iz0 <= dc%nxyz_domain(3)) then
-              if (energy%esp(io0,ik0,isp0)-system%mu < energy_cut) &
-                local(ix0,iy0,iz0,isp0,io0) = spsi%zwf(ix0,iy0,iz0,isp0,io0,ik0,1)
-            end if
-          end do
-          end do
-          end do
-          end do
-        end if
-      end do
-      call comm_summation(local,basis,size(basis),info%icomm_rko)
-      deallocate(local)
-      smat = (0d0,0d0)
-      umat = (0d0,0d0)
-      lambda = 0d0
-      status0 = 0
-      if (dc%id_frag == 0) then
-        status0 = 0
+      hi=min(mg%ie,dc%nxyz_domain);extent=max(0,hi-mg%is+1)
+      allocate(local(extent(1),extent(2),extent(3),nspin,m), &
+               work(extent(1),extent(2),extent(3),nspin,m), &
+               phi(extent(1),extent(2),extent(3),nspin,m))
+      allocate(smat(m,m,nspin),partial(m,m,nspin),umat(m,m,nspin),lambda(m,nspin))
+      local=(0d0,0d0)
+      do io0=info%io_s,min(info%io_e,m)
+        if(info%ik_s>ik0.or.ik0>info%ik_e)cycle
         do isp0=1,nspin
-        do io0=1,m
-        do jo0=1,m
-          smat(io0,jo0,isp0) = hvol*sum(conjg(basis(:,:,:,isp0,io0))*basis(:,:,:,isp0,jo0))
-        end do
-        end do
-        end do
-        status0 = 0
+          if(energy%esp(io0,ik0,isp0)-system%mu>=energy_cut)cycle
+          local(:,:,:,isp0,io0)=spsi%zwf(mg%is(1):hi(1),mg%is(2):hi(2), &
+                                       mg%is(3):hi(3),isp0,io0,ik0,1)
+        enddo
+      enddo
+      ! k/orbital peers share these spatial rows; never sum grid rows here.
+      call comm_summation(local,work,size(work),info%icomm_ko)
+      deallocate(local)
+      partial=(0d0,0d0)
+      do isp0=1,nspin
+      do io0=1,m
+      do jo0=1,m
+        partial(io0,jo0,isp0)=hvol*sum(conjg(work(:,:,:,isp0,io0))*work(:,:,:,isp0,jo0))
+      enddo
+      enddo
+      enddo
+      call comm_summation(partial,smat,size(smat),info%icomm_r)
+      umat=0d0;lambda=0d0;status0=0
+      if(dc%id_frag==0)then
         do isp0=1,nspin
           call eigen_zheev(smat(:,:,isp0),lambda(:,isp0),umat(:,:,isp0),lapack_info=status0)
-          if (status0 /= 0) exit
-          if (any(.not.ieee_is_finite(lambda(:,isp0))) .or. &
-              minval(lambda(:,isp0)) < -lcfo_tol*max(1d0,maxval(abs(lambda(:,isp0))))) then
-            status0 = 1
-            exit
-          end if
-        end do
-      end if
+          if(status0/=0)exit
+          if(any(.not.ieee_is_finite(lambda(:,isp0))).or. &
+             minval(lambda(:,isp0)) < -lcfo_tol*max(1d0,maxval(abs(lambda(:,isp0)))))then
+            status0=1;exit
+          endif
+        enddo
+      endif
       call check_collective_status(status0,"fragment overlap ZHEEV",ik0,0)
-      work = basis
-      basis = (0d0,0d0)
-      nb0 = 0
-      if (dc%id_frag == 0) then
-        do isp0=1,nspin
-          ib = 0
-          do ieig=m,1,-1
-            if (lambda(ieig,isp0) > lambda_cut) then
-              ib = ib + 1
-              do jo0=1,m
-                basis(:,:,:,isp0,ib) = basis(:,:,:,isp0,ib) + &
-                     work(:,:,:,isp0,jo0)*umat(jo0,ieig,isp0)/sqrt(lambda(ieig,isp0))
-              end do
-            end if
-          end do
-          nb0(isp0) = ib
-        end do
-        do pass0=1,2
-          do isp0=1,nspin
-            ib = count(lambda(:,isp0) > lambda_cut)
-            do io0=1,ib
-              do jo0=1,io0-1
-                coeff = hvol*sum(conjg(basis(:,:,:,isp0,jo0))*basis(:,:,:,isp0,io0))
-                basis(:,:,:,isp0,io0) = basis(:,:,:,isp0,io0) - &
-                     basis(:,:,:,isp0,jo0)*coeff
-              end do
-              norm2 = hvol*sum(abs(basis(:,:,:,isp0,io0))**2)
-              if (.not.ieee_is_finite(norm2) .or. norm2 <= 100d0*epsilon(1d0)) then
-                status0 = 1
-                exit
-              end if
-              basis(:,:,:,isp0,io0) = basis(:,:,:,isp0,io0)/sqrt(norm2)
-            end do
-          end do
-        end do
-      end if
+      call comm_bcast(lambda,info%icomm_rko,0)
+      call comm_bcast(umat,info%icomm_rko,0)
+      phi=0d0;nb0=0
+      do isp0=1,nspin
+        ib=0
+        do ieig=m,1,-1
+          if(lambda(ieig,isp0)<=lambda_cut)cycle
+          ib=ib+1
+          do jo0=1,m
+            phi(:,:,:,isp0,ib)=phi(:,:,:,isp0,ib)+ &
+              work(:,:,:,isp0,jo0)*umat(jo0,ieig,isp0)/sqrt(lambda(ieig,isp0))
+          enddo
+        enddo
+        nb0(isp0)=ib
+      enddo
+      deallocate(work)
+      status0=0
+      do pass0=1,2
+      do isp0=1,nspin
+      do io0=1,nb0(isp0)
+        do jo0=1,io0-1
+          local_coeff=hvol*sum(conjg(phi(:,:,:,isp0,jo0))*phi(:,:,:,isp0,io0))
+          call comm_summation(local_coeff,coeff,info%icomm_r)
+          phi(:,:,:,isp0,io0)=phi(:,:,:,isp0,io0)-phi(:,:,:,isp0,jo0)*coeff
+        enddo
+        local_norm=hvol*sum(abs(phi(:,:,:,isp0,io0))**2)
+        call comm_summation(local_norm,norm2,info%icomm_r)
+        if(.not.ieee_is_finite(norm2).or.norm2<=100d0*epsilon(1d0))then
+          status0=1;norm2=1d0
+        endif
+        phi(:,:,:,isp0,io0)=phi(:,:,:,isp0,io0)/sqrt(norm2)
+      enddo
+      enddo
+      enddo
       call check_collective_status(status0,"Gram-Schmidt",ik0,0)
-      basis_err0 = 0d0
-      if (dc%id_frag == 0) then
-        do isp0=1,nspin
-          do io0=1,nb0(isp0)
-          do jo0=1,nb0(isp0)
-            coeff = hvol*sum(conjg(basis(:,:,:,isp0,io0))*basis(:,:,:,isp0,jo0))
-            if (io0 == jo0) coeff = coeff-(1d0,0d0)
-            basis_err0 = max(basis_err0,abs(coeff))
-          end do
-          end do
-        end do
-      end if
-      call comm_bcast(basis_err0,info%icomm_rko,0)
-      status0 = 0
-      if (basis_err0 > lcfo_tol .or. .not.ieee_is_finite(basis_err0)) status0 = 1
+      basis_err0=0d0
+      do isp0=1,nspin
+      do io0=1,nb0(isp0)
+      do jo0=1,nb0(isp0)
+        local_coeff=hvol*sum(conjg(phi(:,:,:,isp0,io0))*phi(:,:,:,isp0,jo0))
+        call comm_summation(local_coeff,coeff,info%icomm_r)
+        if(io0==jo0)coeff=coeff-(1d0,0d0)
+        basis_err0=max(basis_err0,abs(coeff))
+      enddo
+      enddo
+      enddo
+      status0=0
+      if(basis_err0>lcfo_tol.or..not.ieee_is_finite(basis_err0))status0=1
       call check_collective_status(status0,"fragment basis orthogonality",ik0,0)
-      call comm_bcast(nb0,info%icomm_rko,0)
-      call comm_bcast(basis,info%icomm_rko,0)
-      deallocate(lambda,umat,smat,work)
+      basis=0d0
+      if(dc%id_frag/=0)basis=phi
+      ! Existing output and halo send formats require a full basis only at root.
+      ! Stream one column through the reduction; no full-grid all-band scratch.
+      allocate(send_column(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3)))
+      if(dc%id_frag==0)then
+        allocate(recv_column(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3)))
+      else
+        ! MPI_Reduce ignores the receive buffer on non-root processes.
+        allocate(recv_column(1,1,1))
+      endif
+      do isp0=1,nspin
+      do io0=1,nb0(isp0)
+        send_column=0d0
+        if(info%id_ko==0)send_column(mg%is(1):hi(1),mg%is(2):hi(2),mg%is(3):hi(3))=phi(:,:,:,isp0,io0)
+        call comm_summation(send_column,recv_column,size(send_column),info%icomm_rko,0)
+        if(dc%id_frag==0)basis(:,:,:,isp0,io0)=recv_column
+      enddo
+      enddo
+      if(ik0==1)write(*,'(a,3i18)')'DC_LCFO_BASIS rank/local/stored grid points: ', &
+        dc%id_frag,product(extent),product(basis_shape)
+      deallocate(send_column,recv_column,phi,lambda,umat,smat,partial)
     end subroutine build_basis
 
     subroutine collect_basis_dimensions(ik0,nb0)
@@ -1007,7 +1019,7 @@ contains
           do ic=mg%is(3),hi(3)
           do ib=mg%is(2),hi(2)
           do ia=mg%is(1),hi(1)
-            local_h(io0,jo0,isp0)=local_h(io0,jo0,isp0)+hvol*conjg(basis(ia,ib,ic,isp0,io0))* &
+            local_h(io0,jo0,isp0)=local_h(io0,jo0,isp0)+hvol*conjg(basis(ia-basis_origin(1)+1,ib-basis_origin(2)+1,ic-basis_origin(3)+1,isp0,io0))* &
               hf0(ia-mg%is(1)+1,ib-mg%is(2)+1,ic-mg%is(3)+1,isp0,jo0)
           end do
           end do

@@ -114,6 +114,10 @@ class HSESpatial(unittest.TestCase):
             self.assertIn('end SALMON',run.stdout)
             if per_fragment>1:self.assertIn('EXX_SPATIAL',run.stdout)
             workspaces=re.findall(r'DC_LCFO_HPSI local/global grid points:\s*(\d+)\s+(\d+)',run.stdout)
+            basis_rows=re.findall(r'DC_LCFO_BASIS rank/local/stored grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
+            self.assertTrue(basis_rows)
+            for rank,local,stored in basis_rows:
+                if int(rank)!=0:self.assertEqual(int(local),int(stored))
             self.assertTrue(workspaces)
             for local,global_points in workspaces:
                 self.assertEqual(int(local)*per_fragment,int(global_points))
@@ -160,3 +164,25 @@ class HSESpatial(unittest.TestCase):
         self.assertLess(abs(charge-4.),1e-10)
         differences=re.findall(r'DC #SCF.*diff =\s*(\S+)',run.stdout)
         self.assertLess(float(differences[-1]),1e-10)
+
+    def test_dc_empty_core_domains(self):
+        base=self.base.replace('num_fragment=2,1,1','num_fragment=1,2,1')
+        base=base.replace('num_rgrid_buffer=4,0,0','num_rgrid_buffer=0,4,0')
+        base=base.replace('num_rgrid=16,8,8','num_rgrid=8,16,8').replace('al=16d0,8d0,8d0','al=8d0,16d0,8d0')
+        base=re.sub(r"'H' (\S+) 4d0 4d0",r"'H' 4d0 \1 4d0",base)
+        base=base.replace('nstate_frag=4','nstate_frag=6').replace('nscf=500','nscf=2000')
+        base=base.replace('temperature_k=300d0','temperature_k=10000d0')
+        spectra=[]
+        for ranks,layout,total in [(2,'1,1,1','1,2,1'),(8,'1,2,2','1,4,2')]:
+            inp=base.replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            inp=inp.replace('nproc_rgrid_tot=2,1,1','nproc_rgrid_tot='+total)
+            folder,run=self.execute('empty_core'+str(ranks),inp,ranks=ranks)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            self.assertIn('end SALMON',run.stdout)
+            differences=re.findall(r'DC #SCF.*diff =\s*(\S+)',run.stdout)
+            self.assertLess(float(differences[-1]),1e-10)
+            if ranks==8:
+                rows=re.findall(r'DC_LCFO_BASIS rank/local/stored grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
+                self.assertTrue(any(int(rank)>0 and int(local)==0 and int(stored)==0 for rank,local,stored in rows))
+            spectra.append(np.loadtxt(next((folder/'data_dcdft/total').glob('*_eigen.data')))[:,3])
+        self.assertLess(np.max(abs(spectra[0]-spectra[1])),1e-7)
