@@ -13,13 +13,13 @@ class MemoryBuffers(unittest.TestCase):
 
     def test_midpoint_live_storage_and_equivalence(self):
         original=os.environ['SALMON_TEST_EXE'];build=Path(original).resolve().parent
-        source=(helpers.ROOT/'src/xc/hse_native.f90').read_text()
+        source=(helpers.ROOT/'src/xc/exx_native.f90').read_text()
         output="allocated(output_work)" if 'output_work(:,:,:)' in source else '.false.'
         source=source.replace('      taylor_midpoint=.true.',"      taylor_midpoint=.true.\n      write(*,'(a,3l2)')'MEMORY_PROBE redundant: ',allocated(midpoint_ace%factors),allocated(cached_action),"+output)
         source=source.replace('      taylor_midpoint=.true.', "      taylor_midpoint=.true.\n      write(*,'(a,3l2)')'MEMORY_PROBE packed: ',ace%packed,allocated(ace%factors),allocated(spatial%source)")
         src=self.root/'memory_probe.f90';src.write_text(source);obj=self.root/'memory_probe.o';exe=self.root/'salmon-memory-probe'
         subprocess.run(['mpifort','-O3','-fopenmp','-cpp','-ffree-line-length-none','-fallow-argument-mismatch','-I'+str(build),'-J'+str(self.root),'-c',str(src),'-o',str(obj)],check=True,capture_output=True)
-        cmd=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text());cmd[cmd.index('CMakeFiles/salmon.dir/xc/hse_native.f90.o')]=str(obj);cmd[cmd.index('-o')+1]=str(exe)
+        cmd=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text());cmd[cmd.index('CMakeFiles/salmon.dir/xc/exx_native.f90.o')]=str(obj);cmd[cmd.index('-o')+1]=str(exe)
         subprocess.run(cmd,cwd=build/'src',check=True,capture_output=True)
         for ranks,orbitals in [(1,1),(2,1),(2,2)]:
             inp=self.rt_input(nt=16,dt=.02,impulse=1e-4,moving=False).replace('&functional',"&functional\n exx_ace_support='source'\n exx_mlwf_norm_fraction=.999")

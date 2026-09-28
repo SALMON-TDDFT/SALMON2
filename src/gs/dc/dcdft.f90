@@ -820,7 +820,7 @@ contains
     use sendrecv_grid, only: update_overlap_real8, update_overlap_complex8
     use Total_Energy, only: calc_Total_Energy_periodic
 #ifdef USE_HSE
-    use hse_native, only: hse_enabled,hse_core_exchange
+    use exx_native, only: exx_enabled,exx_core_exchange
 #endif
     use salmon_global, only: kion !!!!!! future work: remove (kion --> system%kion)
     implicit none
@@ -958,8 +958,8 @@ contains
     energy%E_kin = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
 #ifdef USE_HSE
-    if(hse_enabled())then
-      call hse_core_exchange(system,mg,info,spsi,dc%nxyz_domain,exchange_core)
+    if(exx_enabled())then
+      call exx_core_exchange(system,mg,info,spsi,dc%nxyz_domain,exchange_core)
       E_tmp=0d0
       if(info%id_rko==0)E_tmp=exchange_core
       call comm_summation(E_tmp,exchange_total,dc%icomm_tot)

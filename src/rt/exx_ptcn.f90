@@ -1,9 +1,9 @@
 ! Native SALMON adapter for the verified PT-CN/ACE iteration.
-module hse_ptcn
+module exx_ptcn
   use iso_c_binding
   use structures
-  use hse_ptcn_core
-  use hse_native
+  use exx_ptcn_core
+  use exx_native
   use communication, only: comm_summation,comm_is_root
   use density_matrix, only: calc_density
   use hartree_sub, only: hartree
@@ -12,10 +12,11 @@ module hse_ptcn
   implicit none
   private
   include 'fftw3.f03'
-  public :: native_hse_step
+  public :: native_exx_step
 contains
-  subroutine native_hse_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
+  subroutine native_exx_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
       input,output,rho,rho_s,vlocal,vh,vxc,vpsl,fg,poisson,energy)
+    implicit none
     real(8),intent(in) :: dt
     type(s_rgrid),intent(in) :: lg,mg
     type(s_dft_system),intent(inout) :: system
@@ -41,7 +42,7 @@ contains
     complex(8),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     external :: zgemm
     call system_clock(clock0,rate)
-    initial_times=hse_timings;local_seconds=0d0;precondition_seconds=0d0
+    initial_times=exx_timings;local_seconds=0d0;precondition_seconds=0d0
     ng=product(mg%num);no=info%numo;nk=info%numk;n=mg%num(1)
     if(allocated(u))then
       if(any(shape(u)/=[ng,no,nk]))then
@@ -60,7 +61,7 @@ contains
       backward=fftw_plan_many_dft(3,dims,no,fftwork,dims,1,ng,fftwork,dims,1,ng, &
         FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
     endif
-    call hse_pack(input,mg,info,u)
+    call exx_pack(input,mg,info,u)
     if(.not.c_associated(forward).or..not.c_associated(backward))error stop 'HSE PT-CN FFT plan failed'
     do ki=1,nk
       ik=ki+info%ik_s-1;kv=system%vec_k(:,ik)+system%vec_Ac
@@ -74,8 +75,8 @@ contains
         denominator(index,ki)=one+(0d0,.5d0)*dt*symbol
       enddo;enddo;enddo
     enddo
-    call hse_ptcn_solve(u,dt,system%hvol,action,precondition,global_norm,x,error,builds,apps,ierr)
-    hse_freeze=.false.
+    call exx_ptcn_solve(u,dt,system%hvol,action,precondition,global_norm,x,error,builds,apps,ierr)
+    exx_freeze=.false.
     if(ierr/=0)then
       if(comm_is_root(info%id_rko))write(*,*)'HSE PT-CN rejected full residual:',error
       error stop 'HSE PT-CN nonlinear convergence failed'
@@ -96,37 +97,39 @@ contains
       write(*,*)'HSE PT-CN rejected: rank, electron number, local Gram error=',info%id_k,ne,ge
       error stop 'HSE PT-CN norm/orthogonality gate exceeded'
     endif
-    call hse_unpack(x,output,mg,info)
+    call exx_unpack(x,output,mg,info)
     call system_clock(clock1)
     if(comm_is_root(info%id_rko))write(*,'(a,es14.6,a,i0,a,i0,a,f12.6)') &
       'HSE_PT_CN residual=',error,' builds=',builds,' applications=',apps,' seconds=',real(clock1-clock0,8)/rate
     if(comm_is_root(info%id_rko))write(*,'(a,6f12.6)') &
       'HSE_TIMING EXX ACE_build ACE_apply EXX_collectives local_H precondition=', &
-      hse_timings-initial_times,local_seconds,precondition_seconds
+      exx_timings-initial_times,local_seconds,precondition_seconds
   contains
     subroutine action(a,b,refresh)
+      implicit none
       complex(8),intent(in) :: a(:,:,:)
       complex(8),intent(out) :: b(:,:,:)
       logical,intent(in) :: refresh
       real(8) :: start,counts(4)
-      start=hse_walltime();counts=hse_timings
-      call hse_unpack(a,trial,mg,info)
+      start=exx_walltime();counts=exx_timings
+      call exx_unpack(a,trial,mg,info)
       call calc_density(system,rho_s,trial,info,mg)
       rho%f=rho_s(1)%f
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,vh)
-      hse_freeze=.not.refresh
+      exx_freeze=.not.refresh
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,trial,stencil,vxc,energy%E_xc)
       call update_vlocal(mg,1,vh,vpsl,vxc,vlocal)
       call hpsi(trial,htrial,info,mg,vlocal,system,stencil,srg,ppg)
-      call hse_pack(htrial,mg,info,b)
-      local_seconds=local_seconds+hse_walltime()-start-sum(hse_timings-counts)
+      call exx_pack(htrial,mg,info,b)
+      local_seconds=local_seconds+exx_walltime()-start-sum(exx_timings-counts)
     end subroutine
     subroutine precondition(a,b)
+      implicit none
       complex(8),intent(in) :: a(:,:,:)
       complex(8),intent(out) :: b(:,:,:)
       integer :: k,j
       real(8) :: start
-      start=hse_walltime()
+      start=exx_walltime()
       do k=1,nk
         fftwork=a(:,:,k)
         call fftw_execute_dft(forward,fftwork,fftwork)
@@ -134,9 +137,10 @@ contains
         call fftw_execute_dft(backward,fftwork,fftwork)
         b(:,:,k)=fftwork/ng
       enddo
-      precondition_seconds=precondition_seconds+hse_walltime()-start
+      precondition_seconds=precondition_seconds+exx_walltime()-start
     end subroutine
     real(8) function global_norm(a)
+      implicit none
       complex(8),intent(in) :: a(:,:,:)
       real(8) :: local,total
       local=sum(abs(a)**2)

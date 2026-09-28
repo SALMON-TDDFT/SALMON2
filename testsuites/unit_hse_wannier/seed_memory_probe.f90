@@ -1,6 +1,6 @@
 program seed_memory_probe
  use iso_c_binding, only: c_int64_t
- use hse_wannier_gauge, only: gauge_seed,gauge_seed_gamma
+ use exx_wannier_gauge, only: gauge_seed,gauge_seed_gamma
  implicit none
  interface
   function peak_rss_bytes() bind(C) result(bytes)

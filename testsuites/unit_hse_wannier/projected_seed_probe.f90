@@ -2,7 +2,7 @@
 ! delocalized. The opt-in projected-position seed must escape this saddle.
 program probe
  use mpi
- use hse_spatial
+ use exx_spatial
  implicit none
  type(spatial_exx_state) :: seeded,plain,orbital,canonical
  integer :: ierr,np,rank,n(3)=[16,8,8],m(3),g,x,y,z,status

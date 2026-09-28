@@ -20,7 +20,7 @@ module hamiltonian
   use nvtx_wrapper
   use lcfo_rt_basis, only: lcfo_project_orbital,lcfo_rt_active
 #ifdef USE_HSE
-  use hse_native, only: hse_add_action,hse_enabled
+  use exx_native, only: exx_add_action,exx_enabled
 #endif
   implicit none
   integer,private,parameter :: Nd = 4
@@ -72,7 +72,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,lcfo_coe
   if(present(lcfo_coeff).neqv.present(lcfo_action))error stop 'hpsi: paired LCFO coefficients required'
   if(present(lcfo_coeff))then
 #ifdef USE_HSE
-    if(.not.lcfo_rt_active.or..not.hse_enabled())error stop 'hpsi: coefficient action requires LCFO HSE'
+    if(.not.lcfo_rt_active.or..not.exx_enabled())error stop 'hpsi: coefficient action requires LCFO EXX'
     if(present(ttpsi))error stop 'hpsi: coefficient action with ttpsi is unsupported'
 #else
     error stop 'hpsi: coefficient action requires USE_HSE'
@@ -484,8 +484,8 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi,lcfo_coe
   end if
 
 #ifdef USE_HSE
-  call hse_add_action(tpsi,htpsi,system,mg,info,lcfo_coeff,lcfo_action)
-  if(.not.(lcfo_rt_active.and.hse_enabled()))call lcfo_project_orbital(htpsi,mg,info)
+  call exx_add_action(tpsi,htpsi,system,mg,info,lcfo_coeff,lcfo_action)
+  if(.not.(lcfo_rt_active.and.exx_enabled()))call lcfo_project_orbital(htpsi,mg,info)
 #else
   call lcfo_project_orbital(htpsi,mg,info)
 #endif

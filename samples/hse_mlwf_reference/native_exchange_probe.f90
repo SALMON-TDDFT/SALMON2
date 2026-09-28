@@ -1,10 +1,10 @@
 program native_exchange_probe
   use iso_fortran_env, only: real64
   use hse_exchange, only: hse_kernel, hse_kernel_init, hse_kernel_apply, hse_kernel_destroy
-  use hse_ace
+  use exx_ace
   implicit none
   type(hse_kernel) :: kernel
-  type(hse_ace_state) :: ace,other,midpoint
+  type(s_exx_ace) :: ace,other,midpoint
   integer :: n,mesh,no,nt,nk,ng,ierr,unit,rank,nproc
   real(real64) :: h,omega,t0,t1
   real(real64), allocatable :: k(:,:)
@@ -32,9 +32,9 @@ program native_exchange_probe
     allocate(w(ng,no,nk),interpolated(ng,no,nk))
     call hse_kernel_apply(kernel,source,source,w,0,1,ierr)
     if(ierr/=0)error stop 'occupied action failed'
-    call hse_ace_build(ace,source,w,h**3,ierr)
+    call exx_ace_build(ace,source,w,h**3,ierr)
     if(ierr/=0)error stop 'ACE construction failed'
-    call hse_ace_apply(ace,target,action,ierr)
+    call exx_ace_apply(ace,target,action,ierr)
     if(ierr/=0)error stop 'ACE apply failed'
     open(newunit=unit,file=trim(output)//'.ace',access='stream',form='unformatted',status='replace')
     write(unit)action;close(unit)
@@ -44,15 +44,15 @@ program native_exchange_probe
     if(ierr/=0)error stop 'Full midpoint source action failed'
     open(newunit=unit,file=trim(output)//'.full_midpoint',access='stream',form='unformatted',status='replace')
     write(unit)action;close(unit)
-    call hse_ace_apply(ace,source,interpolated,ierr)
+    call exx_ace_apply(ace,source,interpolated,ierr)
     if(ierr/=0)error stop 'ACE interpolation failed'
     open(newunit=unit,file=trim(output)//'.occupied',access='stream',form='unformatted',status='replace')
     write(unit)interpolated;close(unit)
     other=ace
     other%factors=(.7d0,.2d0)*other%factors
-    call hse_ace_average(ace,other,midpoint,ierr)
+    call exx_ace_average(ace,other,midpoint,ierr)
     if(ierr/=0)error stop 'ACE midpoint construction failed'
-    call hse_ace_apply(midpoint,target,action,ierr)
+    call exx_ace_apply(midpoint,target,action,ierr)
     if(ierr/=0)error stop 'ACE midpoint apply failed'
     open(newunit=unit,file=trim(output)//'.midpoint',access='stream',form='unformatted',status='replace')
     write(unit)action;close(unit)

@@ -1,5 +1,5 @@
 program probe
- use hse_semilocal
+ use hybrid_semilocal
  implicit none
  real(8) :: r(4),s(4),e(4),v(4),w(4)
  integer :: i,status

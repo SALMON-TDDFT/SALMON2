@@ -1,7 +1,7 @@
 ! Native RT adapter for core-partitioned LCFO screened exchange.
 ! Each rank owns one core. Hartree, XC, propagation and current stay native.
 ! Full density-factor reference or opt-in initial-MLWF U reuse and source masks.
-module hse_lcfo_rt
+module exx_lcfo_rt
   use exx_functional, only: exchange_fraction,exchange_screening
   use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
   use communication, only: comm_bcast,comm_summation,comm_get_max
@@ -10,24 +10,24 @@ module hse_lcfo_rt
   use lcfo_rt_basis
   use lcfo_rt_wannier, only: lcfo_mlwf_enabled,lcfo_mlwf_configure,lcfo_mlwf_source, &
     lcfo_mlwf_stage,lcfo_mlwf_accept_cached,lcfo_mlwf_track,lcfo_mlwf_rebase
-  use hse_wannier, only: s_hse_wannier,wannier_init,wannier_apply,wannier_forward
+  use exx_wannier, only: s_exx_wannier,wannier_init,wannier_apply,wannier_forward
   use lcfo_ace_local, only: lcfo_ace_local_action,lcfo_ace_half_trace,lcfo_ace_coefficient_action
-  use hse_ace, only: hse_ace_state,hse_ace_average
+  use exx_ace, only: s_exx_ace,exx_ace_average
   use lcfo_dist_rows, only: s_lcfo_halo,lcfo_halo_init,lcfo_halo_get,lcfo_halo_sum
   use lcfo_projection, only: s_lcfo_projection,lcfo_projection_init,lcfo_projection_apply
   use lcfo_dist_dense, only: lcfo_distributed_ace_build
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage,lcfo_hse_direct_rotate
+  public :: lcfo_exx_refresh,lcfo_exx_add_action,lcfo_exx_stage,lcfo_exx_direct_rotate
   complex(8),allocatable,save :: fragment_basis(:,:),core_basis(:,:),hx(:,:),initial_hx(:,:),midpoint_hx(:,:)
   integer,allocatable,save :: selected(:),fragment_global_index(:)
   real(8),allocatable,save :: core_weight(:)
   logical,save :: measure_continuity=.false.
-  type(s_hse_wannier),save :: fragment_operator
+  type(s_exx_wannier),save :: fragment_operator
   type(s_lcfo_halo),save :: exchange_plan
   type(s_lcfo_projection),save :: projection_plan
-  type(hse_ace_state),save :: ace,initial_ace,midpoint_ace
+  type(s_exx_ace),save :: ace,initial_ace,midpoint_ace
   logical,save :: ace_valid=.false.,initial_ace_valid=.false.,midpoint_ace_valid=.false.,use_midpoint=.false.
   integer,save :: refresh_count=0,ace_interval=1,rt_step=0,step_start_builds=0,refresh_origin=0
   complex(8),allocatable,save :: cached_coeff(:,:)
@@ -40,7 +40,7 @@ contains
     integer,allocatable :: mapping(:,:),first(:)
     integer :: nf,ns(3),ng,f,g,x,y,z,p(3),global_point(3),rel(3),j,nsel,ierr,fft_batch,fft_measure
     nf=size(lcfo_counts);ns=lcfo_core+2*lcfo_buffer;ng=product(ns)
-    if(any(ns>lcfo_grid))error stop 'LCFO HSE: fragment exceeds global periodic grid'
+    if(any(ns>lcfo_grid))error stop 'LCFO EXX: fragment exceeds global periodic grid'
     allocate(mapping(ng,nf),first(nf),fragment_global_index(ng),core_weight(ng));mapping=0;first=0
     core_weight=0d0
     measure_continuity=yn_hse_lcfo_continuity=='y'
@@ -50,8 +50,8 @@ contains
     fft_batch=hse_lcfo_fft_batch
     fft_measure=merge(1,0,yn_hse_lcfo_fft_measure=='y')
     if(lcfo_rank==0)then
-      write(*,'(a,2i8)')'LCFO HSE ACE interval/refresh origin: ',ace_interval,refresh_origin
-      write(*,'(a,i2)')'LCFO HSE FFT measured planning: ',fft_measure
+      write(*,'(a,2i8)')'LCFO EXX ACE interval/refresh origin: ',ace_interval,refresh_origin
+      write(*,'(a,i2)')'LCFO EXX FFT measured planning: ',fft_measure
     endif
     ! FFT order is core/right-buffer then the periodic left buffer.
     g=0
@@ -65,7 +65,7 @@ contains
         rel=modulo(global_point-lcfo_origins(:,f),lcfo_grid)
         if(all(rel<lcfo_core))mapping(g,f)=1+rel(1)+lcfo_core(1)*(rel(2)+lcfo_core(2)*rel(3))
       enddo
-      if(count(mapping(g,:)>0)/=1)error stop 'LCFO HSE: core partition is not unique'
+      if(count(mapping(g,:)>0)/=1)error stop 'LCFO EXX: core partition is not unique'
     enddo;enddo;enddo
     nsel=0
     do f=1,nf
@@ -101,14 +101,14 @@ contains
       call wannier_init(fragment_operator,ns,[1,1,1],lcfo_h,reshape([0d0,0d0,0d0],[3,1]), &
         exchange_screening(),ierr)
     endif
-    if(ierr/=0)error stop 'LCFO HSE: fragment periodic exchange initialization failed'
+    if(ierr/=0)error stop 'LCFO EXX: fragment periodic exchange initialization failed'
     fragment_operator%use_local_fft=exx_local_fft=='auto'
     fragment_operator%fft_batch_size=fft_batch
     fragment_operator%fft_measure=fft_measure==1
     write(*,'(a,5i10)')'LCFO compact projection rank/rows/columns/fullrows/fullcolumns:', &
       lcfo_rank,size(projection_plan%rows),size(projection_plan%columns),ng,nsel
     call lcfo_mlwf_configure()
-    if(lcfo_rank==0)write(*,'(a,3i6)')'LCFO HSE fragment grid:',ns
+    if(lcfo_rank==0)write(*,'(a,3i6)')'LCFO EXX fragment grid:',ns
   end subroutine
 
   subroutine pack_coefficients(psi,system,mg,info,coeff)
@@ -120,11 +120,11 @@ contains
     complex(8),allocatable,intent(out) :: coeff(:,:)
     complex(8),allocatable :: grid(:,:),local(:,:),full_local(:,:)
     integer :: io,is(3),ie(3),n
-    if(.not.lcfo_rt_active)error stop 'LCFO HSE: inactive LCFO basis'
+    if(.not.lcfo_rt_active)error stop 'LCFO EXX: inactive LCFO basis'
     if(system%nk/=1.or.system%nspin/=1.or.info%numo<1.or. &
-       info%ik_s/=1.or.info%ik_e/=1.or.info%numm/=1)error stop 'LCFO HSE: requires Gamma/local orbital block'
-    if(any(mg%num/=lcfo_core))error stop 'LCFO HSE: native grid does not match LCFO core'
-    if(.not.allocated(psi%zwf))error stop 'LCFO HSE: complex wavefunctions required'
+       info%ik_s/=1.or.info%ik_e/=1.or.info%numm/=1)error stop 'LCFO EXX: requires Gamma/local orbital block'
+    if(any(mg%num/=lcfo_core))error stop 'LCFO EXX: native grid does not match LCFO core'
+    if(.not.allocated(psi%zwf))error stop 'LCFO EXX: complex wavefunctions required'
     is=mg%is;ie=mg%ie;n=size(lcfo_basis,2)
     allocate(grid(product(mg%num),info%numo),local(n,system%no),full_local(n,system%no));local=0d0
     do io=info%io_s,info%io_e
@@ -140,7 +140,7 @@ contains
     endif
   end subroutine
 
-  subroutine lcfo_hse_direct_rotate(system,mg,info,psi)
+  subroutine lcfo_exx_direct_rotate(system,mg,info,psi)
     use lcfo_gram, only:lcfo_gram_error
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -179,7 +179,7 @@ contains
     if(lcfo_orb_rank==0.and.allocated(cached_coeff))cached_coeff=coeff
   end subroutine
 
-  subroutine lcfo_hse_refresh(system,mg,info,psi,exchange_energy)
+  subroutine lcfo_exx_refresh(system,mg,info,psi,exchange_energy)
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
@@ -249,8 +249,8 @@ contains
     ! on this derived-type array section, even at O0. Check scalar values.
     do j=1,size(system%rocc,1)
       occupation_value=system%rocc(j,1,1)
-      if(.not.ieee_is_finite(occupation_value))error stop 'LCFO HSE: invalid occupations'
-      if(occupation_value<0d0.or.occupation_value>2d0)error stop 'LCFO HSE: invalid occupations'
+      if(.not.ieee_is_finite(occupation_value))error stop 'LCFO EXX: invalid occupations'
+      if(occupation_value<0d0.or.occupation_value>2d0)error stop 'LCFO EXX: invalid occupations'
     enddo
     ! On impulse step1 rebuild both endpoints. Smooth fields can retain the
     ! zero-field initial operator; subsequent refreshes are physical-step based.
@@ -261,7 +261,7 @@ contains
           ace%dv,lcfo_comm,exchange_energy)
         ! A transported current_frame no longer belongs to the exact cache key.
         if(allocated(cached_coeff))deallocate(cached_coeff)
-        if(lcfo_rank==0)write(*,'(a,i8,a,es20.10)')'LCFO HSE ACE retained at step ',rt_step, &
+        if(lcfo_rank==0)write(*,'(a,i8,a,es20.10)')'LCFO EXX ACE retained at step ',rt_step, &
           ' frozen-operator trace energy ',exchange_energy
         call report_timings('retained',pack_seconds,wall_seconds()-started,0d0,0d0)
         return
@@ -291,10 +291,10 @@ contains
     density=matmul(weighted,transpose(conjg(weighted)))
     density=.5d0*(density+transpose(conjg(density)))
     call zheev('V','U',nsel,density,nsel,eigenvalues,work,size(work),rwork,ierr)
-    if(ierr/=0)error stop 'LCFO HSE: fragment density diagonalization failed'
+    if(ierr/=0)error stop 'LCFO EXX: fragment density diagonalization failed'
     threshold=1d-14*max(0d0,eigenvalues(nsel))
     if(eigenvalues(1)<-max(threshold,1d-12*maxval(abs(eigenvalues)))) &
-      error stop 'LCFO HSE: fragment density is not positive semidefinite'
+      error stop 'LCFO EXX: fragment density is not positive semidefinite'
     nrank=count(eigenvalues>threshold);first=nsel-nrank+1
     discarded=sum(max(0d0,eigenvalues(:first-1)))
     allocate(source(ng,nrank,1))
@@ -308,7 +308,7 @@ contains
     call wannier_forward(fragment_operator,source,fragment_operator%source)
     allocate(action(ng,nsel,1))
     call wannier_apply(fragment_operator,reshape(fragment_basis,[ng,nsel,1]),action,ierr)
-    if(ierr/=0)error stop 'LCFO HSE: fragment exchange action failed'
+    if(ierr/=0)error stop 'LCFO EXX: fragment exchange action failed'
     action_seconds=wall_seconds()-started
     write(*,'(a,i6,2i14)')'LCFO exchange FFT pairs rank/executed/possible:', &
       lcfo_rank,fragment_operator%fft_pairs_executed,fragment_operator%fft_pairs_total
@@ -323,7 +323,7 @@ contains
     ! Retain this fragment's Hermitian contribution, not a replicated global Hx.
     hx=projected
     if(.not.all(ieee_is_finite(real(hx))).or..not.all(ieee_is_finite(aimag(hx)))) &
-      error stop 'LCFO HSE: nonfinite projected exchange'
+      error stop 'LCFO EXX: nonfinite projected exchange'
     contribution=matmul(hx,near_coeff)
     call lcfo_halo_sum(exchange_plan,contribution,w)
     local_energy=0d0
@@ -337,15 +337,15 @@ contains
       action_seconds,projection_seconds)
     cached_coeff=coeff;cached_occupation=system%rocc(:,1,1);cached_energy=exchange_energy
     refresh_count=refresh_count+1
-    if(lcfo_rank==0)write(*,'(a,i8)')'LCFO HSE exchange rebuilt at step ',rt_step
+    if(lcfo_rank==0)write(*,'(a,i8)')'LCFO EXX exchange rebuilt at step ',rt_step
     ! Every rank reports its actual source rank and discarded density weight.
-    write(*,'(a,i6,a,i6,a,i6,a,es12.4,a,es12.4)')'LCFO HSE rank ',lcfo_rank,' refresh ',refresh_count, &
+    write(*,'(a,i6,a,i6,a,i6,a,es12.4,a,es12.4)')'LCFO EXX rank ',lcfo_rank,' refresh ',refresh_count, &
       ' density factors ',nrank,' eig threshold ',threshold,' discarded trace ',discarded
     if(lcfo_rank==0)then
       if(ace_valid)then
-        write(*,'(a,i8,a,es12.4)')'LCFO HSE ACE build ',refresh_count,' valid, condition ',ace%condition
+        write(*,'(a,i8,a,es12.4)')'LCFO EXX ACE build ',refresh_count,' valid, condition ',ace%condition
       else
-        write(*,'(a,i8,a)')'LCFO HSE ACE build ',refresh_count, &
+        write(*,'(a,i8,a)')'LCFO EXX ACE build ',refresh_count, &
           ' rejected (indefinite/singular metric); using full projected exchange, no eigenvalue clipping'
       endif
     endif
@@ -365,7 +365,7 @@ contains
     ng=size(fragment_basis,1);ns=size(fragment_basis,2)
     allocate(core_action(ng,ns,1))
     call wannier_apply(fragment_operator,reshape(core_basis,[ng,ns,1]),core_action,ierr)
-    if(ierr/=0)error stop 'LCFO HSE: continuity diagnostic action failed'
+    if(ierr/=0)error stop 'LCFO EXX: continuity diagnostic action failed'
     psi=matmul(fragment_basis,coeff)
     left=matmul(action(:,:,1),coeff)
     right=matmul(core_action(:,:,1),coeff)
@@ -379,7 +379,7 @@ contains
       refresh_count+1,sum(global)*lcfo_dv,sum(abs(global))*lcfo_dv,maxval(abs(global))
   end subroutine
 
-  subroutine lcfo_hse_stage(stage,system,mg,info,psi)
+  subroutine lcfo_exx_stage(stage,system,mg,info,psi)
     implicit none
     integer,intent(in) :: stage
     type(s_dft_system),intent(in),optional :: system
@@ -392,26 +392,26 @@ contains
       rt_step=rt_step+1
       if(rt_step==1.and.refresh_origin==1)then
         if(.not.(present(system).and.present(mg).and.present(info).and.present(psi))) &
-          error stop 'LCFO HSE: impulse initial refresh requires current orbitals'
-        call lcfo_hse_refresh(system,mg,info,psi,rebuilt_energy)
-        if(lcfo_rank==0.and.lcfo_orb_rank==0)write(*,'(a)')'LCFO HSE impulse ACE rebuilt before first predictor'
+          error stop 'LCFO EXX: impulse initial refresh requires current orbitals'
+        call lcfo_exx_refresh(system,mg,info,psi,rebuilt_energy)
+        if(lcfo_rank==0.and.lcfo_orb_rank==0)write(*,'(a)')'LCFO EXX impulse ACE rebuilt before first predictor'
       endif
     endif
     if(lcfo_orb_rank==0)call lcfo_mlwf_stage(stage)
     select case(stage)
     case(0)
       step_start_builds=refresh_count
-      if(.not.allocated(hx))error stop 'LCFO HSE: initial operator missing'
+      if(.not.allocated(hx))error stop 'LCFO EXX: initial operator missing'
       initial_hx=hx;initial_ace=ace;initial_ace_valid=ace_valid;use_midpoint=.false.
     case(1)
-      if(.not.allocated(initial_hx).or..not.allocated(hx))error stop 'LCFO HSE: midpoint endpoints missing'
+      if(.not.allocated(initial_hx).or..not.allocated(hx))error stop 'LCFO EXX: midpoint endpoints missing'
       midpoint_hx=.5d0*(initial_hx+hx)
       midpoint_ace_valid=initial_ace_valid.and.ace_valid
       if(midpoint_ace_valid)then
         if(step_start_builds==refresh_count)then
           midpoint_ace=ace
         else
-          call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
+          call exx_ace_average(initial_ace,ace,midpoint_ace,ierr)
           midpoint_ace_valid=ierr==0
         endif
       endif
@@ -423,11 +423,11 @@ contains
       if(allocated(initial_ace%factors))deallocate(initial_ace%factors)
       if(allocated(midpoint_ace%factors))deallocate(midpoint_ace%factors)
     case default
-      error stop 'LCFO HSE: unknown Taylor stage'
+      error stop 'LCFO EXX: unknown Taylor stage'
     end select
   end subroutine
 
-  subroutine lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+  subroutine lcfo_exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
     implicit none
     complex(8),intent(in),optional :: lcfo_coeff(:,:)
     complex(8),intent(out),optional :: lcfo_action(:,:)
@@ -438,7 +438,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     complex(8),allocatable :: coeff(:,:),grid(:,:),hgrid(:,:),local_action(:,:),near_coeff(:,:),contribution(:,:)
     integer :: ng,no,io,j,is(3),ie(3)
-    if(.not.allocated(hx))error stop 'LCFO HSE: refresh required before action'
+    if(.not.allocated(hx))error stop 'LCFO EXX: refresh required before action'
     no=info%numo;ng=product(mg%num);is=mg%is;ie=mg%ie
     if(present(lcfo_coeff).neqv.present(lcfo_action))error stop 'LCFO action: paired coefficients required'
     if(present(lcfo_coeff))then

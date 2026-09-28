@@ -22,12 +22,12 @@ class NativeExchangeTest(unittest.TestCase):
   cls.tmp=tempfile.TemporaryDirectory();cls.directory=Path(cls.tmp.name);cls.exe=cls.directory/'probe'
   source=ROOT/'src/xc/hse_exchange.f90'
   if not source.exists():raise AssertionError('Native HSE exchange module has not been implemented')
-  if not (ROOT/'src/xc/hse_ace.f90').exists():raise AssertionError('Native ACE has not been implemented')
+  if not (ROOT/'src/xc/exx_ace.f90').exists():raise AssertionError('Native ACE has not been implemented')
   fftw=Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))
   if not shutil.which(os.environ.get('FC','gfortran')) or not (fftw/'include/fftw3.f03').exists():
    raise unittest.SkipTest('Native kernel tests require gfortran and FFTW_ROOT')
   blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-  cmd=[os.environ.get('FC','gfortran'),'-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(source),str(ROOT/'src/xc/hse_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
+  cmd=[os.environ.get('FC','gfortran'),'-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(source),str(ROOT/'src/xc/exx_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
   result=subprocess.run(cmd,cwd=cls.directory,capture_output=True,text=True)
   if result.returncode:raise AssertionError(result.stderr)
  @classmethod
@@ -35,14 +35,14 @@ class NativeExchangeTest(unittest.TestCase):
  def test_production_sized_ace_with_openmp_environment(self):
   exe=self.directory/'ace_omp'
   blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-  result=subprocess.run([os.environ.get('FC','gfortran'),'-O3','-fopenmp',str(ROOT/'src/xc/hse_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_ace_omp_probe.f90'),'-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)],cwd=self.directory,capture_output=True,text=True)
+  result=subprocess.run([os.environ.get('FC','gfortran'),'-O3','-fopenmp',str(ROOT/'src/xc/exx_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_ace_omp_probe.f90'),'-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)],cwd=self.directory,capture_output=True,text=True)
   self.assertEqual(result.returncode,0,result.stderr)
   for threads in (1,2,4,12):
    result=subprocess.run([str(exe)],env=dict(os.environ,OMP_NUM_THREADS=str(threads),OMP_DYNAMIC='FALSE',OPENBLAS_NUM_THREADS=str(threads)),capture_output=True,text=True)
    self.assertEqual(result.returncode,0,result.stdout+result.stderr)
  def test_ptcn_matches_reference(self):
   from ptcn import ptcn_step
-  source=ROOT/'src/rt/hse_ptcn_core.f90'
+  source=ROOT/'src/rt/exx_ptcn_core.f90'
   self.assertTrue(source.exists(),'Native PT-CN module has not been implemented')
   exe=self.directory/'ptcn'
   blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
@@ -57,7 +57,7 @@ class NativeExchangeTest(unittest.TestCase):
   np.testing.assert_allclose(values[:,0]+1j*values[:,1],expected.ravel(),rtol=1e-13,atol=1e-13)
  def test_semilocal_matches_libxc_reference(self):
   from semilocal import Semilocal
-  source=ROOT/'src/xc/hse_semilocal.f90'
+  source=ROOT/'src/xc/hybrid_semilocal.f90'
   self.assertTrue(source.exists(),'Native HSE semilocal module has not been implemented')
   lib=Path(os.environ.get('LIBXC_ROOT','/opt/homebrew/opt/libxc'))
   exe=self.directory/'semilocal'

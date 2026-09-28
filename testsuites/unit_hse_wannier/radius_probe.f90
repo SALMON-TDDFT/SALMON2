@@ -1,7 +1,7 @@
 program probe
- use hse_wannier
+ use exx_wannier
  implicit none
- type(s_hse_wannier) :: op
+ type(s_exx_wannier) :: op
  integer,parameter :: n(3)=[8,6,4],ng=192
  integer :: nk,ik,g,j,a,status,kind,p(3)
  real(8) :: h(3)=[.7d0,.8d0,.9d0],length(3),center(3),delta(3),radius,omega,before,expected_loss

@@ -10,7 +10,7 @@ class GaugeGradient(unittest.TestCase):
  def test_complex_gradient(self):
   with tempfile.TemporaryDirectory() as directory:
    directory=Path(directory);exe=directory/'probe';path=directory/'fixture'
-   subprocess.run([os.environ.get('FC','gfortran'),str(ROOT/'src/xc/hse_wannier_gauge.f90'),str(Path(__file__).with_name('gauge_probe.f90')),
+   subprocess.run([os.environ.get('FC','gfortran'),str(ROOT/'src/xc/exx_wannier_gauge.f90'),str(Path(__file__).with_name('gauge_probe.f90')),
                    '-L'+str(Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))/'lib'),'-lopenblas','-o',str(exe)],check=True,cwd=directory,capture_output=True)
    rng=np.random.default_rng(721);n=4;nk=2;nb=6;ng=35
    psi=np.array([np.linalg.qr(rng.normal(size=(ng,n))+1j*rng.normal(size=(ng,n)))[0] for _ in range(nk)])

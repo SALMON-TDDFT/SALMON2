@@ -1,6 +1,6 @@
 ! Occupied/retained-subspace MV localization and polar temporal transport.
 ! Port of the tested TDCDFT reference, using explicit state and grid-weighted overlaps.
-module hse_wannier_gauge
+module exx_wannier_gauge
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -9,6 +9,7 @@ module hse_wannier_gauge
   public :: gauge_transport,gauge_functional,gauge_minimize,gauge_seed,gauge_minimize_gamma
   abstract interface
     subroutine spatial_sum(matrix)
+      implicit none
       complex(8),intent(inout) :: matrix(:,:)
     end subroutine
   end interface
@@ -157,6 +158,7 @@ contains
   end subroutine
 
   subroutine gauge_functional(u,raw,neighbors,b,weights,spread,variable,gradient,status,phase_reference,phase_out)
+    implicit none
     complex(8),intent(in) :: u(:,:,:),raw(:,:,:,:)
     integer,intent(in) :: neighbors(:,:)
     real(8),intent(in) :: b(:,:),weights(:)
@@ -284,6 +286,7 @@ contains
     enddo
   end subroutine
   subroutine gauge_minimize_gamma(u,raw,b,weights,maxiter,tolerance,spread,gradnorm,iterations,status)
+    implicit none
     complex(8),intent(inout) :: u(:,:,:)
     complex(8),intent(in) :: raw(:,:,:,:)
     real(8),intent(in) :: b(:,:),weights(:),tolerance
@@ -305,6 +308,7 @@ contains
     ! Consumes input links; snapshots must be written before this call.
     ! Jacobi rotations update this representation, so no second six-link copy
     ! or reconstructed functional array is needed.
+    implicit none
     complex(8),intent(inout) :: u(:,:,:),links(:,:,:,:)
     real(8),intent(in) :: b(:,:),weights(:),tolerance
     integer,intent(in) :: maxiter
@@ -327,6 +331,7 @@ contains
     ! Each complex two-column SU(2) rotation maximizes n^T G n on |n|=1,
     ! G_ab=sum_link weight*Re(conjg(v_a)*v_b), A=a0 I+v.sigma.
     ! Unlike global steepest descent, distant centers do not limit every step.
+    implicit none
     complex(8),intent(inout) :: u(:,:,:)
     complex(8),intent(inout) :: links(:,:,:,:)
     complex(8),intent(in),optional :: raw(:,:,:,:)

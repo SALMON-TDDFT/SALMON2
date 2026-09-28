@@ -61,7 +61,7 @@ class FunctionalTest(unittest.TestCase):
         self.check_semilocal(.25)
 
     def check_semilocal(self, fraction):
-        exe=self.compile(['hse_semilocal.f90'],'semilocal_probe.f90')
+        exe=self.compile(['hybrid_semilocal.f90'],'semilocal_probe.f90')
         p=subprocess.run([exe,str(fraction)],capture_output=True,text=True,check=True)
         actual=np.loadtxt(p.stdout.splitlines())
         lib=ct.CDLL('/opt/homebrew/lib/libxc.dylib');ptr=ct.POINTER(ct.c_double)

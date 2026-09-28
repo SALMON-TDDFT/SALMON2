@@ -1,5 +1,5 @@
 program seed_probe
- use hse_wannier_gauge, only: gauge_seed,gauge_seed_gamma
+ use exx_wannier_gauge, only: gauge_seed,gauge_seed_gamma
  implicit none
  complex(8),allocatable :: coeff(:,:),saved(:,:),u(:,:,:),v(:,:),gram(:,:)
  real(8),allocatable :: position(:,:)

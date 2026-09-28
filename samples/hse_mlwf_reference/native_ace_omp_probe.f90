@@ -1,9 +1,9 @@
 ! Production-sized BLAS path: catches failures invisible on tiny matrices.
 program probe
-  use hse_ace
+  use exx_ace
   implicit none
   integer,parameter :: ng=1728,no=16,nk=8
-  type(hse_ace_state) :: ace
+  type(s_exx_ace) :: ace
   complex(8),allocatable :: t(:,:,:),a(:,:,:),ref(:,:,:)
   integer :: i,j,k,ierr
   real(8) :: error
@@ -16,7 +16,7 @@ program probe
   do k=1,nk
     ref(:,:,k)=-ace%dv*matmul(ace%factors(:,:,k),matmul(transpose(conjg(ace%factors(:,:,k))),t(:,:,k)))
   enddo
-  call hse_ace_apply(ace,t,a,ierr)
+  call exx_ace_apply(ace,t,a,ierr)
   if(ierr/=0)stop 1
   error=sqrt(sum(abs(a-ref)**2)/sum(abs(ref)**2))
   print *,error

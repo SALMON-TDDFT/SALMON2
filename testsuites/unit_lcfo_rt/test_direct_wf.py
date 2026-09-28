@@ -57,7 +57,7 @@ def run(name, text, rt=False, reject=False, controls=None, orbital_groups=1):
     else:
         assert status.returncode == 0 and "end SALMON" in log, folder
         if rt:
-            assert "Native LCFO RT active" in log and "LCFO HSE ACE build" in log, folder
+            assert "Native LCFO RT active" in log and "LCFO EXX ACE build" in log, folder
             storage=re.findall(r'LCFO distributed storage rank/local/global/halo rows:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',log)
             assert len(storage)==2, (folder,storage)
             assert all(0<int(local)<int(total) and 0<int(halo)<=int(total) for rank,local,total,halo in storage)
@@ -125,7 +125,7 @@ pt=run('direct_wf',pt_input,rt=True,controls=pt_env)
 log=(pt/'run.log').read_text()
 assert 'LCFO direct WF coefficient Taylor4' in log
 assert log.count('LCFO direct WF accepted Gram error:')==5, 'initial and four accepted frames required'
-assert log.count('LCFO HSE ACE build')==(mlwf/'run.log').read_text().count('LCFO HSE ACE build'), 'rebase rebuilt unchanged ACE'
+assert log.count('LCFO EXX ACE build')==(mlwf/'run.log').read_text().count('LCFO EXX ACE build'), 'rebase rebuilt unchanged ACE'
 ptrows=rows(pt/'H_dc_hse_rt.data');assert len(ptrows)==4
 error=max(abs(x[j]-y[j]) for x,y in zip(ptrows,mlwf_rows) for j in (13,14,15))
 assert error<1e-11,error
@@ -155,7 +155,7 @@ for label,extra in [('r3',{'hse_lcfo_wf_radius':'3'}),
     aa,bb=rows(base/'H_dc_hse_rt.data'),rows(direct/'H_dc_hse_rt.data');assert len(aa)==len(bb)==4
     err=max(abs(x[j]-y[j]) for x,y in zip(aa,bb) for j in (13,14,15));assert err<1e-11,err
     compare_density_energy(direct,base,4)
-    assert (direct/'run.log').read_text().count('LCFO HSE ACE build')==(base/'run.log').read_text().count('LCFO HSE ACE build')
+    assert (direct/'run.log').read_text().count('LCFO EXX ACE build')==(base/'run.log').read_text().count('LCFO EXX ACE build')
     print(json.dumps({'direct_case':label,'current_difference':err}))
 ptfine=run('direct_half_dt',pt_input.replace('nt=4','nt=8').replace('dt=0.02d0','dt=0.01d0'),rt=True,controls=pt_env)
 fr=rows(ptfine/'H_dc_hse_rt.data');assert len(fr)==8
@@ -170,7 +170,7 @@ for groups in (1,2):
     measured_rows=rows(measured/'H_dc_hse_rt.data')
     err=max(abs(x[j]-y[j]) for x,y in zip(ptrows,measured_rows) for j in (13,14,15))
     assert err<1e-11,err
-    assert 'LCFO HSE FFT measured planning:  1' in (measured/'run.log').read_text()
+    assert 'LCFO EXX FFT measured planning:  1' in (measured/'run.log').read_text()
     compare_density_energy(measured,pt,4)
 for flag in ('2','bad'):
     run('reject_measure_'+flag.replace(' ','_'),pt_input,rt=True,

@@ -2,21 +2,21 @@
 ! SALMON adapter: legacy full-grid/orbital layout distributes k points.
 ! Gamma HSE SCF and DC-initialized hybrid mesh RT support spatial y/z FFTW pencils.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
-module hse_native
+module exx_native
   use exx_functional, only: exchange_fraction
   use iso_fortran_env, only: int64
   use lcfo_rt_basis, only: lcfo_rt_active
-  use hse_lcfo_rt, only: lcfo_hse_refresh,lcfo_hse_add_action,lcfo_hse_stage
+  use exx_lcfo_rt, only: lcfo_exx_refresh,lcfo_exx_add_action,lcfo_exx_stage
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
-  use hse_ace
+  use exx_ace
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
   use exx_adaptive_support, only: adaptive_source_mask
-  use hse_spatial
-  use hse_wannier
-  use hse_symmetry
+  use exx_spatial
+  use exx_wannier
+  use exx_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall,comm_get_max
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
@@ -25,31 +25,31 @@ module hse_native
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
-  public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
-  public :: hse_check_localization
-  public :: hse_enabled,hse_refresh,hse_add_action,hse_exchange_energy,hse_freeze
-  public :: hse_pack,hse_unpack,hse_timings,hse_walltime
-  public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
-  type(hse_symmetry_map),save :: symmetry_map
+  public :: exx_export_snapshot,exx_eigen_diagnostic_enabled,exx_export_eigen_pair
+  public :: exx_check_localization
+  public :: exx_enabled,exx_refresh,exx_add_action,exx_exchange_energy,exx_freeze
+  public :: exx_pack,exx_unpack,exx_timings,exx_walltime
+  public :: exx_taylor_stage,exx_core_exchange,exx_force_full_action
+  type(s_exx_symmetry_map),save :: symmetry_map
   type(hse_kernel),save :: kernel
   type(spatial_exx_state),target,save :: spatial
-  type(s_hse_wannier),save :: wannier
+  type(s_exx_wannier),save :: wannier
   real(8),allocatable,save :: cached_occupation(:,:)
   complex(8),allocatable,save :: cached_action(:,:,:)
   logical,save :: finite_support_localized=.true.,radius_warning_reported=.false.
-  logical,save,public :: hse_adaptive_ready=.false.,hse_support_changed=.false.
+  logical,save,public :: exx_adaptive_ready=.false.,exx_support_changed=.false.
   logical,save :: adaptive_active=.false.,cached_adaptive_ready=.false.
-  logical,save :: hse_force_full_action=.false.
-  type(hse_ace_state),save :: ace
-  type(hse_ace_state),save :: initial_ace,midpoint_ace
+  logical,save :: exx_force_full_action=.false.
+  type(s_exx_ace),save :: ace
+  type(s_exx_ace),save :: initial_ace,midpoint_ace
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:)
-  real(8),save :: hse_exchange_energy=0d0
-  real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
-  logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
+  real(8),save :: exx_exchange_energy=0d0
+  real(8),save :: exx_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
+  logical,save :: exx_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
-  subroutine hse_check_localization()
+  subroutine exx_check_localization()
     implicit none
     if(dc_canonical())return
     ! A density criterion cannot certify a gauge-dependent truncated operator.
@@ -57,16 +57,16 @@ contains
       error stop 'Adaptive EXX: localized support not established; SCF result rejected'
     if(exx_mlwf_radius>0d0.and..not.finite_support_localized) &
       error stop 'EXX MLWF finite support: localization not converged; SCF result rejected'
-  end subroutine hse_check_localization
+  end subroutine exx_check_localization
 
-  logical function hse_eigen_diagnostic_enabled(info,solver) result(enabled)
+  logical function exx_eigen_diagnostic_enabled(info,solver) result(enabled)
     use communication, only: comm_bcast
     implicit none
     type(s_parallel_info),intent(in) :: info
     logical,optional,intent(in) :: solver
     integer :: flag
     enabled=.false.
-    if(.not.hse_enabled())return
+    if(.not.exx_enabled())return
     flag=0
     if(info%id_rko==0)then
       if(yn_hse_eigen_diagnostic=='y')flag=1
@@ -81,7 +81,7 @@ contains
     enabled=flag==1
   end function
 
-  subroutine hse_export_eigen_pair(system,mg,info,psi,hpsi,tag)
+  subroutine exx_export_eigen_pair(system,mg,info,psi,hpsi,tag)
     use iso_fortran_env, only: int32
     use salmon_global, only: base_directory
     implicit none
@@ -98,7 +98,7 @@ contains
       error stop 'HSE eigen diagnostic requires Gamma and full grid/orbitals'
     ng=product(mg%num);no=system%no
     allocate(p(ng,no,1),hp(ng,no,1))
-    call hse_pack(psi,mg,info,p);call hse_pack(hpsi,mg,info,hp)
+    call exx_pack(psi,mg,info,p);call exx_pack(hpsi,mg,info,hp)
     filename=trim(base_directory)//'hse_eigen_pair.bin'
     if(present(tag))filename=trim(base_directory)//'hse_eigen_'//tag//'.bin'
     open(newunit=iu,file=filename, &
@@ -113,7 +113,7 @@ contains
     if(total/=0)error stop 'HSE eigen diagnostic write failed'
   end subroutine
 
-  subroutine hse_export_snapshot(system,mg,info,psi,iteration,residual,converged)
+  subroutine exx_export_snapshot(system,mg,info,psi,iteration,residual,converged)
     use salmon_global, only: base_directory
     use communication, only: comm_bcast
     implicit none
@@ -125,21 +125,21 @@ contains
     real(8),intent(in) :: residual
     logical,intent(in) :: converged
     integer :: status,enabled
-    if(.not.hse_enabled().or..not.use_wannier_exchange())return
+    if(.not.exx_enabled().or..not.use_wannier_exchange())return
     enabled=0
     if(info%id_k==0)then
       if(yn_hse_wannier_snapshot=='y')enabled=1
     endif
     call comm_bcast(enabled,info%icomm_k,0)
     if(enabled==0)return
-    call hse_refresh(system,mg,info,psi)
+    call exx_refresh(system,mg,info,psi)
     status=0
-    if(info%id_k==0)call wannier_snapshot(wannier,wannier%source_occupation,hse_omega,hse_exchange_energy, &
+    if(info%id_k==0)call wannier_snapshot(wannier,wannier%source_occupation,hse_omega,exx_exchange_energy, &
       residual,iteration,converged,trim(base_directory)//'hse_wannier_snapshot.bin',status)
     call comm_bcast(status,info%icomm_k,0)
     if(status/=0)error stop 'HSE Wannier snapshot: write failed'
   end subroutine
-  subroutine hse_taylor_stage(stage,system,mg,info,psi)
+  subroutine exx_taylor_stage(stage,system,mg,info,psi)
     implicit none
     integer,intent(in) :: stage
     type(s_dft_system),intent(in),optional :: system
@@ -148,7 +148,7 @@ contains
     type(s_orbital),intent(in),optional :: psi
     integer :: ierr,no
     if(lcfo_rt_active)then
-      call lcfo_hse_stage(stage,system,mg,info,psi)
+      call lcfo_exx_stage(stage,system,mg,info,psi)
       return
     endif
     select case(stage)
@@ -171,8 +171,8 @@ contains
       taylor_midpoint=.true.
     case(2)
       taylor_active=.false.;taylor_midpoint=.false.
-      call hse_ace_clear(initial_ace)
-      call hse_ace_clear(midpoint_ace)
+      call exx_ace_clear(initial_ace)
+      call exx_ace_clear(midpoint_ace)
       if(allocated(initial_source))deallocate(initial_source)
       if(allocated(midpoint_source))deallocate(midpoint_source)
     case default
@@ -180,11 +180,11 @@ contains
     end select
   end subroutine
 
-  real(8) function hse_walltime()
+  real(8) function exx_walltime()
     implicit none
     integer(int64) :: count,rate
     call system_clock(count,rate)
-    hse_walltime=real(count,8)/real(rate,8)
+    exx_walltime=real(count,8)/real(rate,8)
   end function
 
   subroutine warn_fixed_radius(max_loss)
@@ -204,13 +204,13 @@ contains
     dc_canonical=yn_dc=='y'.and.yn_exx_dc_mlwf=='n'
   end function
 
-  logical function hse_enabled()
+  logical function exx_enabled()
     use exx_functional, only: is_hybrid
     implicit none
-    hse_enabled=(is_hybrid(xc)).and..not.exx_pre_scf_active
+    exx_enabled=(is_hybrid(xc)).and..not.exx_pre_scf_active
   end function
 
-  subroutine hse_pack(psi,mg,info,a)
+  subroutine exx_pack(psi,mg,info,a)
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_rgrid),intent(in) :: mg
@@ -224,7 +224,7 @@ contains
     enddo;enddo
   end subroutine
 
-  subroutine hse_unpack(a,psi,mg,info)
+  subroutine exx_unpack(a,psi,mg,info)
     implicit none
     complex(8),intent(in) :: a(:,:,:)
     type(s_orbital),intent(inout) :: psi
@@ -239,7 +239,7 @@ contains
     psi%update_zwf_overlap=.false.
   end subroutine
 
-  subroutine hse_refresh(system,mg,info,psi)
+  subroutine exx_refresh(system,mg,info,psi)
     use exx_functional, only: is_global_hybrid
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -249,7 +249,7 @@ contains
     complex(8),allocatable :: w(:,:,:),local(:,:,:)
     real(8) :: ex,offdiag(3,3),tick,communication_before
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
-    if(.not.hse_enabled().or.hse_freeze)return
+    if(.not.exx_enabled().or.exx_freeze)return
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
@@ -262,7 +262,7 @@ contains
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
     if(lcfo_rt_active)then
-      call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
+      call lcfo_exx_refresh(system,mg,info,psi,exx_exchange_energy)
       return
     endif
     if((info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
@@ -317,7 +317,7 @@ contains
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
     allocate(local(ng,no,info%numk))
-    call hse_pack(psi,mg,info,local)
+    call exx_pack(psi,mg,info,local)
     ierr=1
     if(allocated(cached_source))then
       if(all(shape(cached_source)==shape(local)))then
@@ -329,10 +329,10 @@ contains
     allocate(w(ng,no,info%numk))
     if(propagator=='hse_taylor4_full')full_source=local
     if(timing_enabled)then
-      tick=hse_walltime();communication_before=hse_timings(4)
+      tick=exx_walltime();communication_before=exx_timings(4)
     endif
     call apply_distributed(local,local,w,info,ierr)
-    if(timing_enabled)hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
+    if(timing_enabled)exx_timings(1)=exx_timings(1)+exx_walltime()-tick-(exx_timings(4)-communication_before)
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
     if(kernel%profile.and.info%id_k==0)write(*,'(a,i0,a,6es14.5)') &
@@ -342,9 +342,9 @@ contains
     if(.not.reported_team.and.info%id_k==0.and.kernel%auto_fft) &
       write(*,'(a,2es14.5)')'HSE_FFT_AUTO trial strided contiguous seconds=',kernel%fft_trial_seconds
     reported_team=.true.
-    if(timing_enabled)tick=hse_walltime()
-    call hse_ace_build(ace,local,w,system%hvol,ierr)
-    if(timing_enabled)hse_timings(2)=hse_timings(2)+hse_walltime()-tick
+    if(timing_enabled)tick=exx_walltime()
+    call exx_ace_build(ace,local,w,system%hvol,ierr)
+    if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: ACE metric failed'
     cached_source=local
@@ -352,7 +352,7 @@ contains
     do j=1,info%numk
       ex=ex+exchange_fraction()*real(sum(conjg(local(:,:,j))*w(:,:,j)),8)*system%hvol*system%wtk(info%ik_s+j-1)
     enddo
-    call comm_summation(ex,hse_exchange_energy,info%icomm_k)
+    call comm_summation(ex,exx_exchange_energy,info%icomm_k)
   end subroutine
 
   subroutine apply_distributed(source,target,action,info,ierr)
@@ -430,13 +430,13 @@ contains
       complex(8),intent(out) :: recv(:)
       integer,intent(in) :: count
       real(8) :: start
-      if(timing_enabled)start=hse_walltime()
+      if(timing_enabled)start=exx_walltime()
       call comm_alltoall(send,recv,info%icomm_k,count)
-      if(timing_enabled)hse_timings(4)=hse_timings(4)+hse_walltime()-start
+      if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
     end subroutine
   end subroutine
 
-  subroutine hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+  subroutine exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_orbital),intent(inout) :: hpsi
@@ -448,12 +448,12 @@ contains
     integer :: ierr,ng,total_error,info_error
     integer,allocatable :: orbital_comm
     real(8) :: tick,communication_before,action_scale
-    if(.not.hse_enabled())return
+    if(.not.exx_enabled())return
     if(lcfo_rt_active)then
-      call lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+      call lcfo_exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
       return
     endif
-    if(.not.hse_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
+    if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
     if(allocated(target_work))then
@@ -461,10 +461,10 @@ contains
     endif
     if(.not.allocated(target_work))allocate(target_work(ng,info%numo,info%numk), &
       action_work(ng,info%numo,info%numk))
-    call hse_pack(psi,mg,info,target_work)
+    call exx_pack(psi,mg,info,target_work)
     action_scale=exchange_fraction()
-    if(timing_enabled)tick=hse_walltime()
-    if(use_wannier_exchange().and.hse_force_full_action)then
+    if(timing_enabled)tick=exx_walltime()
+    if(use_wannier_exchange().and.exx_force_full_action)then
       if(info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
           [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
@@ -475,7 +475,7 @@ contains
       endif
       ierr=0
     else if(taylor_active.and.propagator=='hse_taylor4_full')then
-      communication_before=hse_timings(4)
+      communication_before=exx_timings(4)
       if(taylor_midpoint)then
         call apply_distributed(midpoint_source,target_work,action_work,info,ierr)
       else
@@ -483,7 +483,7 @@ contains
       endif
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE Taylor full target action failed'
-      if(timing_enabled)hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
+      if(timing_enabled)exx_timings(1)=exx_timings(1)+exx_walltime()-tick-(exx_timings(4)-communication_before)
     else
       if(taylor_active.and.taylor_midpoint)then
         call apply_endpoint(initial_ace)
@@ -492,20 +492,20 @@ contains
         action_scale=.5d0*exchange_fraction()
       endif
       call apply_endpoint(ace)
-      if(timing_enabled)hse_timings(3)=hse_timings(3)+hse_walltime()-tick
+      if(timing_enabled)exx_timings(3)=exx_timings(3)+exx_walltime()-tick
     endif
     if(ierr/=0)error stop 'HSE06: ACE application failed'
     call add_mesh_action(action_scale)
   contains
     subroutine apply_endpoint(state)
       implicit none
-      type(hse_ace_state),intent(in) :: state
+      type(s_exx_ace),intent(in) :: state
       if(info%isize_o>1.or.state%packed)then
         call orbital_ace_apply(state,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
       else if(info%isize_r>1)then
-        call hse_ace_apply(state,target_work,action_work,ierr,sum_spatial)
+        call exx_ace_apply(state,target_work,action_work,ierr,sum_spatial)
       else
-        call hse_ace_apply(state,target_work,action_work,ierr)
+        call exx_ace_apply(state,target_work,action_work,ierr)
       endif
     end subroutine
     subroutine add_mesh_action(weight)
@@ -553,7 +553,7 @@ contains
     real(8) :: correction_norm,accepted_bound
     integer :: adaptive_bad
     real(8) :: mask_diagnostic(2),mask_maximum(2)
-    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.theory/='dft')hse_adaptive_ready=.true.
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.theory/='dft')exx_adaptive_ready=.true.
     if(info%isize_x/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
       error stop 'Spatial EXX: Gamma y/z pencils required'
     if(info%isize_o>system%no)error stop 'Spatial EXX: each orbital group must own at least one state'
@@ -572,20 +572,20 @@ contains
     if(maxval(abs(offdiag))>1d-12)error stop 'Spatial EXX: orthogonal cell required'
     if(info%isize_o>1)orbital_comm=info%icomm_o
     allocate(local(product(mg%num),info%numo,1))
-    call hse_pack(psi,mg,info,local)
+    call exx_pack(psi,mg,info,local)
     changed=1
     if(allocated(cached_source).and.allocated(cached_occupation))then
       if(all(shape(cached_source)==shape(local)).and.all(shape(cached_occupation)==shape(system%rocc(:,:,1))))then
         if(all(cached_source==local).and.all(cached_occupation==system%rocc(:,:,1)))changed=0
       endif
     endif
-    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.(hse_adaptive_ready.neqv.cached_adaptive_ready))changed=1
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.(exx_adaptive_ready.neqv.cached_adaptive_ready))changed=1
     call comm_summation(changed,total,info%icomm_ro)
     if(total==0)return
     allocate(w(product(mg%num),info%numo,1))
     maxiter=0
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
-    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.hse_adaptive_ready.and.spatial%last_localization_status/=0) &
+    if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and.spatial%last_localization_status/=0) &
       maxiter=exx_mlwf_maxiter
     spatial%seed_localized=exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0
     spatial%retain_accepted_gauge=theory/='dft'
@@ -611,7 +611,7 @@ contains
     ! as for fraction=1, its exact action does not require a converged gauge.
     radius_covers_cell=exx_mlwf_radius>0d0.and. &
       exx_mlwf_radius>=sqrt(sum((.5d0*num_rgrid*system%hgs)**2))
-    adaptive_active=.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.hse_adaptive_ready.and. &
+    adaptive_active=.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.radius_covers_cell.or. &
        (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0))
     if(adaptive_active)then
@@ -635,8 +635,8 @@ contains
       endif
     endif
     if(exx_mlwf_radius>0d0)finite_support_localized=adaptive_active
-    if(adaptive_active.neqv.was_active)hse_support_changed=.true.
-    cached_adaptive_ready=hse_adaptive_ready
+    if(adaptive_active.neqv.was_active)exx_support_changed=.true.
+    cached_adaptive_ready=exx_adaptive_ready
     spatial%compact=adaptive_active.and.exx_local_fft=='auto'
     requested_screen_mode=0
     if(exx_pair_screening=='diagnose')requested_screen_mode=1
@@ -698,7 +698,7 @@ contains
       ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(io,1,1)*system%wtk(1) &
         *real(sum(conjg(local(:,j,1))*w(:,j,1)),8)
     enddo
-    call comm_summation(ex,hse_exchange_energy,info%icomm_ro)
+    call comm_summation(ex,exx_exchange_energy,info%icomm_ro)
     call move_alloc(local,cached_source)
     if(yn_dc=='y')then
       call move_alloc(w,cached_action)
@@ -770,7 +770,7 @@ contains
       if(info%isize_o>1)then
         call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
       else
-        call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
+        call exx_ace_build(ace,local,w,system%hvol,status,sum_spatial)
       endif
       call comm_summation(status,adaptive_bad,info%icomm_ro)
       status=adaptive_bad
@@ -804,7 +804,7 @@ contains
     if(maxval(abs(offdiag))>1d-12)error stop 'HSE Wannier: orthogonal cell required'
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE Wannier: invalid orbital layout'
     allocate(local(ng,no,info%numk))
-    call hse_pack(psi,mg,info,local)
+    call exx_pack(psi,mg,info,local)
     changed=1
     if(allocated(cached_source).and.allocated(cached_occupation))then
       if(all(shape(cached_source)==shape(local)).and.all(shape(cached_occupation)==shape(system%rocc(:,:,1))))then
@@ -843,7 +843,7 @@ contains
       endif
       if(status==0)call wannier_apply(wannier,allpsi,allw,status)
       if(.not.dc_canonical().and.status==0.and.(wannier%updates==1.or.maxiter>0))then
-        write(*,'(a,3i7,3es16.7)')'HSE_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &
+        write(*,'(a,3i7,3es16.7)')'EXX_WANNIER refresh/iterations/status/spread/gradient/overlap: ', &
         wannier%updates,wannier%localization_iterations,wannier%localization_status, &
         wannier%spread,wannier%gradient,wannier%min_singular
         if(wannier%use_local_fft)then
@@ -857,7 +857,7 @@ contains
           if(wannier%localization_status/=0) &
             write(*,'(a)')'EXX_MLWF: localization not converged; finite-radius source approximation is gauge dependent.'
         else if(wannier%localization_status/=0)then
-          write(*,'(a)')'HSE_WANNIER: localization not converged; retaining full-support exact exchange.'
+          write(*,'(a)')'EXX_WANNIER: localization not converged; retaining full-support exact exchange.'
         endif
       endif
     endif
@@ -866,7 +866,7 @@ contains
     call comm_bcast(finite_support_localized,info%icomm_k,0)
     call comm_bcast(allw,info%icomm_k,0)
     w=allw(:,:,info%ik_s:info%ik_e)
-    call hse_ace_build(ace,local,w,system%hvol,status)
+    call exx_ace_build(ace,local,w,system%hvol,status)
     call comm_summation(status,total_changed,info%icomm_k)
     if(total_changed/=0)error stop 'HSE Wannier: ACE construction metric failed'
     cached_source=local;cached_occupation=system%rocc(:,:,1)
@@ -882,7 +882,7 @@ contains
           *real(sum(conjg(local(:,j,ik))*w(:,j,ik)),8)
       enddo
     enddo
-    call comm_summation(ex,hse_exchange_energy,info%icomm_k)
+    call comm_summation(ex,exx_exchange_energy,info%icomm_k)
   end subroutine
 
   subroutine apply_wannier_collective(target,action,info)
@@ -905,7 +905,7 @@ contains
     action=allaction(:,:,info%ik_s:info%ik_e)
   end subroutine
 
-  subroutine hse_core_exchange(system,mg,info,psi,core,energy)
+  subroutine exx_core_exchange(system,mg,info,psi,core,energy)
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg

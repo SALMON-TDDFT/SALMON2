@@ -17,8 +17,8 @@ def main():
     build = args.build.resolve()
     objects = build / 'src/CMakeFiles/salmon.dir'
     dependencies = [
-        'xc/hse_ace.f90.o',
-        'xc/hse_wannier_gauge.f90.o',
+        'xc/exx_ace.f90.o',
+        'xc/exx_wannier_gauge.f90.o',
         'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o',
         'parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o',
     ]
@@ -32,7 +32,7 @@ def main():
             str(ROOT / 'src/xc/exx_orbitals.f90'),
             str(ROOT / 'src/xc/exx_spatial_local.f90'),
             str(ROOT / 'src/xc/exx_pair_candidates.f90'),
-            str(ROOT / 'src/xc/hse_spatial.f90'),
+            str(ROOT / 'src/xc/exx_spatial.f90'),
             str(Path(__file__).with_name('pair_screen_probe.f90')),
             *[str(objects / name) for name in dependencies],
             '-L' + str(fftw / 'lib'), '-lfftw3',

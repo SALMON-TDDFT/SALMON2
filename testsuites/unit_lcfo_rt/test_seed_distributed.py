@@ -7,7 +7,7 @@ with tempfile.TemporaryDirectory() as folder:
     p = Path(folder); (p/'config.h').write_text('')
     subprocess.run(['mpifort', '-cpp', '-DUSE_MPI', '-DUSE_SCALAPACK', '-I'+folder,
                     '-O2', '-fcheck=all', '-fexternal-blas', '-fno-tree-loop-vectorize',
-                    str(root/'src/xc/hse_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
+                    str(root/'src/xc/exx_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'), str(here/'seed_stream_probe.f90'),
                     '-L/opt/homebrew/opt/scalapack/lib', '-lscalapack',
                     '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)
@@ -48,7 +48,7 @@ end program
         command = ['mpifort' if mpi else 'gfortran', '-cpp', '-I'+folder, '-O0']
         if mpi:command += ['-DUSE_MPI']
         command += [str(root/'src/xc'/name) for name in
-                    ('hse_wannier_gauge.f90','lcfo_dist_rows.f90','lcfo_seed.f90')]
+                    ('exx_wannier_gauge.f90','lcfo_dist_rows.f90','lcfo_seed.f90')]
         command += [str(p/'unsupported.f90'),'-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(p/'probe')]
         subprocess.run(command,cwd=p,check=True)
         result = subprocess.run((['mpirun','-np','2'] if mpi else [])+[str(p/'probe')],

@@ -1,6 +1,6 @@
 program gamma_memory_probe
   use iso_c_binding, only: c_int64_t
-  use hse_wannier_gauge, only: gauge_minimize_gamma, gauge_minimize_gamma_inplace
+  use exx_wannier_gauge, only: gauge_minimize_gamma, gauge_minimize_gamma_inplace
   implicit none
   interface
     function peak_rss_bytes() bind(C) result(bytes)

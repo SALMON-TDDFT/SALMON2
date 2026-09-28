@@ -11,7 +11,7 @@ set(SOURCES
    )
 
 if(USE_HSE)
-  list(APPEND SOURCES hse_ptcn_core.f90 hse_ptcn.f90 lcfo_rt_taylor.f90)
+  list(APPEND SOURCES exx_ptcn_core.f90 exx_ptcn.f90 lcfo_rt_taylor.f90)
 endif()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

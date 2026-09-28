@@ -1,19 +1,20 @@
 ! Adaptively compressed exchange: fixed occupied source state, arbitrary targets.
-module hse_ace
+module exx_ace
   use iso_c_binding, only: c_double,c_double_complex
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average,hse_ace_clear,hse_ace_ready
+  public :: s_exx_ace,exx_ace_build,exx_ace_apply,exx_ace_average,exx_ace_clear,exx_ace_ready
   ! Spatial peers must share orbital/k dimensions, dv and collective call order.
   ! The callback sums a small matrix in place; grid rows are never gathered.
   abstract interface
     subroutine grid_sum(matrix)
       import c_double_complex
+      implicit none
       complex(c_double_complex),intent(inout) :: matrix(:,:)
     end subroutine
   end interface
-  type hse_ace_state
+  type s_exx_ace
     complex(c_double_complex),allocatable :: factors(:,:,:)
     real(c_double) :: dv=0d0,condition=0d0
     ! Exact-nonzero W and A=V/sqrt(e) with A A^H=(-U^H W dv)^-1.
@@ -23,22 +24,25 @@ module hse_ace
     complex(c_double_complex),allocatable :: values(:),metric_factor(:,:)
   end type
 contains
-  subroutine hse_ace_clear(ace)
-    type(hse_ace_state),intent(inout) :: ace
-    type(hse_ace_state) :: empty
+  subroutine exx_ace_clear(ace)
+    implicit none
+    type(s_exx_ace),intent(inout) :: ace
+    type(s_exx_ace) :: empty
     ace=empty
   end subroutine
 
-  logical function hse_ace_ready(ace)
-    type(hse_ace_state),intent(in) :: ace
-    hse_ace_ready=allocated(ace%factors)
-    if(ace%packed)hse_ace_ready=allocated(ace%values).and.allocated(ace%metric_factor).and. &
+  logical function exx_ace_ready(ace)
+    implicit none
+    type(s_exx_ace),intent(in) :: ace
+    exx_ace_ready=allocated(ace%factors)
+    if(ace%packed)exx_ace_ready=allocated(ace%values).and.allocated(ace%metric_factor).and. &
       allocated(ace%offset).and.allocated(ace%row)
   end function
 
-  subroutine hse_ace_average(left,right,average,ierr)
-    type(hse_ace_state),intent(in) :: left,right
-    type(hse_ace_state),intent(out) :: average
+  subroutine exx_ace_average(left,right,average,ierr)
+    implicit none
+    type(s_exx_ace),intent(in) :: left,right
+    type(s_exx_ace),intent(out) :: average
     integer,intent(out) :: ierr
     integer :: ng,nl,nr,nk
     ierr=1
@@ -54,8 +58,9 @@ contains
     ierr=0
   end subroutine
 
-  subroutine hse_ace_build(ace,u,w,dv,ierr,sum_grid)
-    type(hse_ace_state),intent(inout) :: ace
+  subroutine exx_ace_build(ace,u,w,dv,ierr,sum_grid)
+    implicit none
+    type(s_exx_ace),intent(inout) :: ace
     complex(c_double_complex),intent(in) :: u(:,:,:),w(:,:,:)
     real(c_double),intent(in) :: dv
     integer,intent(out) :: ierr
@@ -68,7 +73,7 @@ contains
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     external :: zgemm,zheev
     ierr=1
-    call hse_ace_clear(ace)
+    call exx_ace_clear(ace)
     check=0d0
     if(any(shape(u)/=shape(w)).or.dv<=0.or..not.ieee_is_finite(dv))check=1d0
     if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))check=1d0
@@ -107,8 +112,9 @@ contains
 900 deallocate(ace%factors)
   end subroutine
 
-  subroutine hse_ace_apply(ace,target,action,ierr,sum_grid)
-    type(hse_ace_state),intent(in) :: ace
+  subroutine exx_ace_apply(ace,target,action,ierr,sum_grid)
+    implicit none
+    type(s_exx_ace),intent(in) :: ace
     complex(c_double_complex),intent(in) :: target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
     integer,intent(out) :: ierr

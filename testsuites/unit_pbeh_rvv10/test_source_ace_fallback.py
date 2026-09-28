@@ -16,15 +16,15 @@ class SupportFallback(unittest.TestCase):
         cls.original=os.environ['SALMON_TEST_EXE']
         build=Path(cls.original).resolve().parent
         cls.injected=cls.root/'salmon-reject-support'
-        source=(helpers.ROOT/'src/xc/hse_native.f90').read_text()
+        source=(helpers.ROOT/'src/xc/exx_native.f90').read_text()
         start=source.index('    subroutine build_source_support_ace(')
         pos=source.index('      if(adaptive_bad/=0)return',start)
         source=source[:pos]+"      adaptive_bad=1 ! test-only rejection after exchange/ACE work\n"+source[pos:]
-        probe=cls.root/'hse_native.f90';probe.write_text(source);obj=cls.root/'hse_native.o'
+        probe=cls.root/'exx_native.f90';probe.write_text(source);obj=cls.root/'exx_native.o'
         subprocess.run(['mpifort','-O3','-fopenmp','-cpp','-ffree-line-length-none','-fallow-argument-mismatch',
             '-I'+str(build),'-J'+str(cls.root),'-c',str(probe),'-o',str(obj)],check=True,capture_output=True)
         cmd=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text())
-        index=cmd.index('CMakeFiles/salmon.dir/xc/hse_native.f90.o');cmd[index]=str(obj)
+        index=cmd.index('CMakeFiles/salmon.dir/xc/exx_native.f90.o');cmd[index]=str(obj)
         cmd[cmd.index('-o')+1]=str(cls.injected)
         subprocess.run(cmd,cwd=build/'src',check=True,capture_output=True)
 

@@ -58,7 +58,7 @@ def main():
         text=rt.replace("yn_hse_wannier='y'",f"yn_hse_wannier='y'\n exx_mlwf_interval={interval}")
         path=work/f'rt_interval{interval}'
         output=launch(exe,path,text)
-        assert 'HSE_WANNIER' in output
+        assert 'EXX_WANNIER' in output
         energy=np.loadtxt(path/'H_dc_hse_rt_energy.data')
         current=np.loadtxt(path/'H_dc_hse_rt.data')
         assert np.isfinite(energy).all() and np.isfinite(current).all()

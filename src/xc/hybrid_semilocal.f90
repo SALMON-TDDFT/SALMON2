@@ -1,5 +1,5 @@
 ! Libxc C ABI avoids compiler-specific libxcf03 module dependencies.
-module hse_semilocal
+module hybrid_semilocal
   use iso_c_binding
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none

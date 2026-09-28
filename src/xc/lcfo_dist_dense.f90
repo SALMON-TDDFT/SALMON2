@@ -5,7 +5,7 @@ module lcfo_dist_dense
 #ifdef USE_MPI
  use mpi
 #endif
- use hse_ace,only:hse_ace_state
+ use exx_ace,only:s_exx_ace
  use,intrinsic :: ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
@@ -71,7 +71,7 @@ contains
  end subroutine
 
  subroutine lcfo_distributed_ace_build(ace,c,w,dv,comm,status)
-  type(hse_ace_state),intent(inout) :: ace
+  type(s_exx_ace),intent(inout) :: ace
   complex(8),intent(in) :: c(:,:),w(:,:)
   real(8),intent(in) :: dv
   integer,intent(in) :: comm

@@ -3,7 +3,8 @@ import math
 from pathlib import Path
 text=Path('outputfile').read_text()
 assert 'end SALMON' in text, 'Calculation did not complete'
-assert 'HSE_WANNIER' in text, 'Fragment Wannier exchange was not used'
+assert 'EXX_DC canonical full-fragment source (k mesh)' in text, 'Canonical fragment exchange was not used'
+assert 'EXX_WANNIER' not in text, 'Default DC SCF must not localize fragment orbitals'
 assert 'DC_HSE_CORE' in text, 'Core exchange accounting missing'
 # Match independent of whitespace in the legacy DC output.
 records=[line.split() for line in text.splitlines() if line.split()[:3]==['DC','#SCF','=']]

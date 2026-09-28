@@ -50,7 +50,7 @@ use dcdft
 use dc_force, only: report_dc_frozen_force
 use lcfo
 #ifdef USE_HSE
-use hse_native, only: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair,hse_refresh
+use exx_native, only: exx_export_snapshot,exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_refresh
 #endif
 implicit none
 integer :: ix,iy,iz
@@ -323,11 +323,11 @@ call fipp_stop ! performance profiling
 
 
 #ifdef USE_HSE
-call hse_export_snapshot(system,mg,info,spsi,Miter,sum1,sum1<threshold)
-if(hse_eigen_diagnostic_enabled(info))then
-  call hse_refresh(system,mg,info,spsi)
+call exx_export_snapshot(system,mg,info,spsi,Miter,sum1,sum1<threshold)
+if(exx_eigen_diagnostic_enabled(info))then
+  call exx_refresh(system,mg,info,spsi)
   call hpsi(spsi,shpsi,info,mg,V_local,system,stencil,srg,ppg,sttpsi)
-  call hse_export_eigen_pair(system,mg,info,spsi,shpsi)
+  call exx_export_eigen_pair(system,mg,info,spsi,shpsi)
 end if
 #endif
 !------------ Writing part -----------

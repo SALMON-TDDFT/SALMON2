@@ -2,7 +2,7 @@
 ! Only band matrices are replicated; mesh arrays contain local orbital columns.
 module exx_orbitals
   use communication, only: comm_get_groupinfo,comm_get_max,comm_summation,comm_bcast
-  use hse_ace, only: hse_ace_state,hse_ace_clear
+  use exx_ace, only: s_exx_ace,exx_ace_clear
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -143,7 +143,7 @@ contains
   end subroutine
 
   subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed)
-    type(hse_ace_state),intent(inout) :: ace
+    type(s_exx_ace),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:,:),w(:,:,:)
     real(8),intent(in) :: dv
     integer,intent(in) :: comm_r,comm_o
@@ -156,7 +156,7 @@ contains
     integer :: first,n,j,bad,nonzero
     real(8) :: scale
     status=1;bad=0
-    call hse_ace_clear(ace)
+    call exx_ace_clear(ace)
     store_packed=.false.
     if(present(packed))store_packed=packed
     if(any(shape(u)/=shape(w)).or.size(u,3)/=1.or.dv<=0d0.or..not.ieee_is_finite(dv))bad=1
@@ -224,7 +224,7 @@ contains
   end subroutine
 
   subroutine orbital_ace_apply(ace,target,action,comm_r,comm_o,status)
-    type(hse_ace_state),intent(in) :: ace
+    type(s_exx_ace),intent(in) :: ace
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(in) :: comm_r,comm_o
@@ -271,7 +271,7 @@ contains
     status=0
   end subroutine
   subroutine packed_ace_apply(ace,target,action,comm_r,comm_o,status)
-    type(hse_ace_state),intent(in) :: ace
+    type(s_exx_ace),intent(in) :: ace
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(in) :: comm_r,comm_o

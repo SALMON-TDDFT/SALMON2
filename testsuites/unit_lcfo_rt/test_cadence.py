@@ -5,8 +5,8 @@ with tempfile.TemporaryDirectory() as d:
     exe=Path(d)/'probe'
     (Path(d)/'config.h').write_text('')
     cmd=[os.environ.get('FC','gfortran'),'-I',d,'-cpp','-fopenmp','-O2','-fexternal-blas','-fno-tree-loop-vectorize','-fcheck=all',
-         str(here/'transport_stubs.f90'),str(root/'src/xc/hse_wannier_gauge.f90'),
-         *[str(root/'src/xc'/name) for name in ['hse_ace.f90','lcfo_dist_rows.f90','lcfo_dist_dense.f90','lcfo_seed.f90','lcfo_mlwf_links.f90','lcfo_wf_support.f90','lcfo_rt_wannier.f90']],str(here/'cadence_probe.f90'),
+         str(here/'transport_stubs.f90'),str(root/'src/xc/exx_wannier_gauge.f90'),
+         *[str(root/'src/xc'/name) for name in ['exx_ace.f90','lcfo_dist_rows.f90','lcfo_dist_dense.f90','lcfo_seed.f90','lcfo_mlwf_links.f90','lcfo_wf_support.f90','lcfo_rt_wannier.f90']],str(here/'cadence_probe.f90'),
          '-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(exe)]
     subprocess.run(cmd,cwd=d,check=True)
     for threads in ['1','2','4']:

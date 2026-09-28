@@ -2,19 +2,19 @@ program exchange_driver
   use mpi
   use iso_fortran_env, only: int64
   use fftw_pencils, only: fftw_pencil_transposes
-  use hse_ace
+  use exx_ace
   use exx_orbitals
-  use hse_spatial
-  use hse_wannier
-  use hse_wannier_gauge, only: gauge_transport
+  use exx_spatial
+  use exx_wannier
+  use exx_wannier_gauge, only: gauge_transport
   implicit none
   integer,parameter :: n(3)=[8,8,8],no=3,nt=5
   real(8),parameter :: h(3)=[.7d0,.8d0,.9d0]
   complex(8) :: psi(product(n),no,1),target(product(n),nt,1),reference(product(n),nt,1)
   complex(8),allocatable :: local(:,:,:),trial(:,:,:),action(:,:,:),previous_saved(:,:,:)
   type(spatial_exx_state) :: spatial,full_spatial,partitioned,masked,masked_partitioned
-  type(s_hse_wannier) :: serial
-  type(hse_ace_state) :: distributed_ace,reference_ace,old_ace,average_ace
+  type(s_exx_wannier) :: serial
+  type(s_exx_ace) :: distributed_ace,reference_ace,old_ace,average_ace
   complex(8),allocatable :: local_w(:,:,:),ace_ref(:,:,:),ace_result(:,:,:),old_action(:,:,:)
   integer(int64) :: before_transposes
   integer :: np,rank,err,status,dims(2),coords(2),comm(2),m(3),lo(3),g,l,x,y,z,j,k,stage
@@ -108,13 +108,13 @@ program exchange_driver
     allocate(local_w(product(m),no,1),ace_ref(product(m),nt,1),ace_result(product(m),last_t-first_t+1,1))
     call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,local,local_w,status,omega=omega)
     if(status/=0)error stop 'reference source action'
-    call hse_ace_build(reference_ace,local,local_w,dv,status,sum_grid)
+    call exx_ace_build(reference_ace,local,local_w,dv,status,sum_grid)
     if(status/=0)error stop 'reference ACE build'
     call orbital_ace_build(distributed_ace,local(:,first_o:last_o,:),local_w(:,first_o:last_o,:), &
       dv,comm_r,comm_o,status)
     if(status/=0)error stop 'distributed ACE build'
     if(any(shape(distributed_ace%factors)/=[product(m),last_o-first_o+1,1]))error stop 'replicated ACE columns'
-    call hse_ace_apply(reference_ace,trial,ace_ref,status,sum_grid)
+    call exx_ace_apply(reference_ace,trial,ace_ref,status,sum_grid)
     if(status/=0)error stop 'reference ACE apply'
     call orbital_ace_apply(distributed_ace,trial(:,first_t:last_t,:),ace_result,comm_r,comm_o,status)
     if(status/=0)error stop 'distributed ACE apply'
@@ -125,7 +125,7 @@ program exchange_driver
     if(status/=0)error stop 'ACE source apply'
     if(any(abs(action(:,:last_o-first_o+1,:)-local_w(:,first_o:last_o,:))>1d-10))error stop 'ACE source mismatch'
     if(stage>1)then
-      call hse_ace_average(old_ace,distributed_ace,average_ace,status)
+      call exx_ace_average(old_ace,distributed_ace,average_ace,status)
       if(status/=0)error stop 'distributed ACE average'
       call orbital_ace_apply(average_ace,trial(:,first_t:last_t,:),ace_result,comm_r,comm_o,status)
       if(status/=0)error stop 'averaged ACE apply'

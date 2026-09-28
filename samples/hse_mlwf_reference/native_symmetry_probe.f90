@@ -1,8 +1,8 @@
 program probe
- use hse_symmetry
+ use exx_symmetry
  use, intrinsic :: ieee_arithmetic
  implicit none
- type(hse_symmetry_map):: m
+ type(s_exx_symmetry_map):: m
  real(8):: a(3,4,8), b(3,4,8), k(3,1),w(1),pi,atoms(3,2)
  complex(8),allocatable:: s(:,:,:),t(:,:,:),es(:,:,:),et(:,:,:)
  complex(8):: transformed(64,1)

@@ -3,21 +3,21 @@
 ! orthonormal localization frame. Neither the HSE fraction nor spin doubling
 ! is included in this module's action. Full support is the default; an explicit
 ! spherical source approximation can reuse the LCFO periodic support mask.
-module hse_wannier
+module exx_wannier
   use iso_c_binding
   use iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use exx_local_fft, only: s_exx_local_fft,exx_local_init,exx_local_prepare,exx_local_apply,exx_local_destroy
   use lcfo_wf_support, only: s_lcfo_wf_plan,lcfo_wf_plan_init
-  use hse_wannier_gauge, only: gauge_transport,gauge_minimize,gauge_seed
+  use exx_wannier_gauge, only: gauge_transport,gauge_minimize,gauge_seed
   !$ use omp_lib, only: omp_get_max_threads,omp_get_thread_num
   implicit none
   private
   include 'fftw3.f03'
   public :: wannier_snapshot,wannier_refresh_source,wannier_truncate_source
-  public :: s_hse_wannier,wannier_init,wannier_destroy,wannier_localize
+  public :: s_exx_wannier,wannier_init,wannier_destroy,wannier_localize
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
-  type s_hse_wannier
+  type s_exx_wannier
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
     integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64,fft_batches_executed=0_int64
     integer(int64) :: pair_product_points=0_int64,pair_accumulation_points=0_int64
@@ -44,7 +44,7 @@ contains
   subroutine wannier_snapshot(op,occupation,omega,exchange,residual,iteration,converged,path,status)
     use iso_fortran_env, only: int32
     implicit none
-    type(s_hse_wannier),intent(in) :: op
+    type(s_exx_wannier),intent(in) :: op
     real(8),intent(in) :: occupation(:,:),omega,exchange,residual
     integer,intent(in) :: iteration
     logical,intent(in) :: converged
@@ -65,8 +65,8 @@ contains
   end subroutine
   subroutine wannier_destroy(op)
     implicit none
-    type(s_hse_wannier),intent(inout) :: op
-    type(s_hse_wannier) :: empty
+    type(s_exx_wannier),intent(inout) :: op
+    type(s_exx_wannier) :: empty
     call clear_workers(op)
     call exx_local_destroy(op%local_fft)
     if(c_associated(op%forward))call fftw_destroy_plan(op%forward)
@@ -76,7 +76,7 @@ contains
 
   subroutine wannier_init(op,n,mesh,h,k,omega,status,coulomb_radius)
     implicit none
-    type(s_hse_wannier),intent(inout) :: op
+    type(s_exx_wannier),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3)
     real(8),intent(in) :: h(3),k(:,:),omega
     integer,intent(out) :: status
@@ -163,7 +163,7 @@ contains
 
   subroutine wannier_forward(op,bloch,home)
     implicit none
-    type(s_hse_wannier),intent(in) :: op
+    type(s_exx_wannier),intent(in) :: op
     complex(8),intent(in) :: bloch(:,:,:)
     complex(8),intent(out) :: home(:,:)
     integer :: ik,j,g,p
@@ -180,7 +180,7 @@ contains
 
   subroutine wannier_backward(op,home,bloch)
     implicit none
-    type(s_hse_wannier),intent(in) :: op
+    type(s_exx_wannier),intent(in) :: op
     complex(8),intent(in) :: home(:,:)
     complex(8),intent(out) :: bloch(:,:,:)
     integer :: ik,j,g,p
@@ -196,7 +196,8 @@ contains
   end subroutine
 
   subroutine wannier_refresh_source(op,psi,occupation,maxiter,tolerance,status,localize)
-    type(s_hse_wannier),intent(inout) :: op
+    implicit none
+    type(s_exx_wannier),intent(inout) :: op
     complex(8),intent(in) :: psi(:,:,:)
     real(8),intent(in) :: occupation(:,:),tolerance
     integer,intent(in) :: maxiter
@@ -249,7 +250,7 @@ contains
 
   subroutine wannier_localize(op,psi,maxiter,tolerance,status)
     implicit none
-    type(s_hse_wannier),intent(inout) :: op
+    type(s_exx_wannier),intent(inout) :: op
     complex(8),intent(in) :: psi(:,:,:)
     integer,intent(in) :: maxiter
     real(8),intent(in) :: tolerance
@@ -348,7 +349,8 @@ contains
   ! approximation, not a Coulomb-kernel cutoff or a variational-force model.
   ! Both source factors in wannier_apply see the same mask (Hermitian action).
   subroutine wannier_truncate_source(op,radius,status)
-    type(s_hse_wannier),intent(inout) :: op
+    implicit none
+    type(s_exx_wannier),intent(inout) :: op
     real(8),intent(in) :: radius
     integer,intent(out) :: status
     type(s_lcfo_wf_plan) :: support
@@ -391,7 +393,7 @@ contains
 
   subroutine wannier_set_source(op,psi,occupation,gauge,status)
     implicit none
-    type(s_hse_wannier),intent(inout) :: op
+    type(s_exx_wannier),intent(inout) :: op
     complex(8),intent(in) :: psi(:,:,:),gauge(:,:,:)
     real(8),intent(in) :: occupation(:,:)
     integer,intent(out) :: status
@@ -416,7 +418,8 @@ contains
   end subroutine
 
   subroutine clear_workers(op)
-    type(s_hse_wannier),intent(inout) :: op
+    implicit none
+    type(s_exx_wannier),intent(inout) :: op
     integer :: t,b
     if(allocated(op%worker_forward))then
       do t=1,size(op%worker_forward,2);do b=1,size(op%worker_forward,1)
@@ -429,7 +432,8 @@ contains
   end subroutine
 
   subroutine prepare_workers(op,count,batch,status)
-    type(s_hse_wannier),intent(inout) :: op
+    implicit none
+    type(s_exx_wannier),intent(inout) :: op
     integer,intent(in) :: count,batch
     integer,intent(out) :: status
     integer :: t,b,dims(3),flags
@@ -459,7 +463,7 @@ contains
 
   subroutine wannier_apply(op,target,action,status)
     implicit none
-    type(s_hse_wannier),intent(inout),target :: op
+    type(s_exx_wannier),intent(inout),target :: op
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status

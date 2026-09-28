@@ -1,10 +1,10 @@
 program probe
-  use hse_wannier
-  use hse_wannier_gauge
-  use hse_ace
+  use exx_wannier
+  use exx_wannier_gauge
+  use exx_ace
   implicit none
-  type(s_hse_wannier) :: op
-  type(hse_ace_state) :: ace
+  type(s_exx_wannier) :: op
+  type(s_exx_ace) :: ace
   integer :: n(3),mesh(3),no,nt,ng,nk,iu,ierr,i,j,ik,expected_workers
   real(8) :: h(3),omega,checks(5),spread,gradient,smin,coulomb_radius
   real(8),allocatable :: k(:,:),occ(:,:),trial_occ(:,:),eval(:),rwork(:)
@@ -66,9 +66,9 @@ program probe
     if(ierr/=0)error stop 'metric'
     checks(5)=max(checks(5),maxval(eval))
   enddo
-  call hse_ace_build(ace,psi,w,product(h),ierr)
+  call exx_ace_build(ace,psi,w,product(h),ierr)
   if(ierr/=0)error stop 'ACE build'
-  call hse_ace_apply(ace,psi,wa,ierr)
+  call exx_ace_apply(ace,psi,wa,ierr)
   if(ierr/=0)error stop 'ACE apply'
   checks(3)=maxval(abs(wa-w))
   allocate(back(ng*nk,no,1))
@@ -132,9 +132,9 @@ program probe
   call wannier_apply(op,target,action,ierr)
   if(ierr/=0.or.maxval(abs(transported_action-action))>1d-10)error stop 'reactivated source mismatch'
   w=0d0
-  call hse_ace_build(ace,psi,w,product(h),ierr)
+  call exx_ace_build(ace,psi,w,product(h),ierr)
   if(ierr/=0)error stop 'zero exchange ACE build'
-  call hse_ace_apply(ace,psi,wa,ierr)
+  call exx_ace_apply(ace,psi,wa,ierr)
   if(ierr/=0.or.maxval(abs(wa))>0d0)error stop 'zero exchange ACE apply'
   call wannier_destroy(op)
 contains

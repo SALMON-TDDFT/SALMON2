@@ -8,7 +8,7 @@ with tempfile.TemporaryDirectory() as folder:
     p = Path(folder);(p/'config.h').write_text('')
     subprocess.run(['cc', '-c', str(here/'peak_rss.c'), '-o', str(p/'rss.o')], check=True)
     subprocess.run(['mpifort', '-cpp', '-DUSE_MPI', '-I'+folder, '-O2', '-fexternal-blas', '-fno-tree-loop-vectorize',
-                    str(root/'src/xc/hse_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
+                    str(root/'src/xc/exx_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'), str(here/'seed_stream_memory_probe.f90'), str(p/'rss.o'),
                     '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)
     for n in (256,512):

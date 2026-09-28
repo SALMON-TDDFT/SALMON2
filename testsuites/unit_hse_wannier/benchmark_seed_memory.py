@@ -8,7 +8,7 @@ with tempfile.TemporaryDirectory() as folder:
     p = Path(folder)
     subprocess.run(['cc', '-c', str(root/'testsuites/unit_lcfo_rt/peak_rss.c'), '-o', str(p/'rss.o')], check=True)
     subprocess.run([os.environ.get('FC', 'gfortran'), '-O2', '-fexternal-blas', '-fno-tree-loop-vectorize',
-                    str(root/'src/xc/hse_wannier_gauge.f90'), str(here/'seed_memory_probe.f90'),
+                    str(root/'src/xc/exx_wannier_gauge.f90'), str(here/'seed_memory_probe.f90'),
                     str(p/'rss.o'), '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)
     for n in (256, 512):
         reference = None

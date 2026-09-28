@@ -29,7 +29,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
   use subspace_diagonalization, only: ssdg
 #ifdef USE_HSE
-  use hse_native, only: hse_eigen_diagnostic_enabled,hse_export_eigen_pair,hse_enabled
+  use exx_native, only: exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_enabled
   use hamiltonian, only: hpsi
 #endif
   implicit none
@@ -48,10 +48,10 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   integer :: nncg
 #ifdef USE_HSE
   logical :: diagnose
-  diagnose=hse_eigen_diagnostic_enabled(info,solver=.true.)
+  diagnose=exx_eigen_diagnostic_enabled(info,solver=.true.)
   if(diagnose)then
     call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'before_subspace')
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'before_subspace')
   endif
 #endif
 
@@ -72,7 +72,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
 #ifdef USE_HSE
   if(diagnose)then
     call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'after_subspace')
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_subspace')
   endif
 #endif
 
@@ -87,7 +87,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
 #ifdef USE_HSE
   if(diagnose)then
     call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'after_cg')
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_cg')
   endif
 #endif
 
@@ -96,14 +96,14 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
 #ifdef USE_HSE
   ! CG minimizes bands independently; orthogonalization can rotate them away
   ! from the eigenbasis. Return sorted Ritz states before DC assigns occupations.
-  if(yn_dc=='y'.and.(hse_enabled().or.exx_pre_scf_active))then
+  if(yn_dc=='y'.and.(exx_enabled().or.exx_pre_scf_active))then
     call timer_begin(LOG_CALC_SUBSPACE_DIAG)
     call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     call timer_end(LOG_CALC_SUBSPACE_DIAG)
   endif
   if(diagnose)then
     call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call hse_export_eigen_pair(system,mg,info,spsi,shpsi,'after_orthogonalization')
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_orthogonalization')
   endif
 #endif
 

@@ -69,7 +69,7 @@ def run(name, text, rt=False, reject=False, settings=None, orbital_groups=1):
     else:
         assert status.returncode == 0 and "end SALMON" in log, folder
         if rt:
-            assert "Native LCFO RT active" in log and "LCFO HSE ACE build" in log, folder
+            assert "Native LCFO RT active" in log and "LCFO EXX ACE build" in log, folder
             storage=re.findall(r'LCFO distributed storage rank/local/global/halo rows:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',log)
             assert len(storage)==2, (folder,storage)
             assert all(0<int(local)<int(total) and 0<int(halo)<=int(total) for rank,local,total,halo in storage)

@@ -5,7 +5,7 @@ module lcfo_seed
  use mpi
 #endif
  use lcfo_dist_rows, only: lcfo_gather_root
- use hse_wannier_gauge, only: gauge_seed_select,gauge_seed_finish
+ use exx_wannier_gauge, only: gauge_seed_select,gauge_seed_finish
  implicit none
  private
  public :: lcfo_seed_gamma

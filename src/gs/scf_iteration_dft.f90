@@ -56,7 +56,7 @@ use noncollinear_module, only: calc_magnetization
 use dcdft
 use hse_reference_export, only: export_hse_reference
 #ifdef USE_HSE
-use hse_native, only: hse_enabled,hse_freeze,hse_check_localization,hse_adaptive_ready,hse_support_changed
+use exx_native, only: exx_enabled,exx_freeze,exx_check_localization,exx_adaptive_ready,exx_support_changed
 use salmon_global, only: exx_mlwf_norm_fraction
 #endif
 use exx_functional, only: is_global_hybrid
@@ -116,13 +116,13 @@ pre_scf_root=comm_is_root(nproc_id_global)
 if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
 adaptive_comm=info%icomm_rko
 if(yn_dc=='y')adaptive_comm=dc%icomm_tot
-adaptive_exchange=(hse_enabled().or.exx_pre_scf_active).and. &
+adaptive_exchange=(exx_enabled().or.exx_pre_scf_active).and. &
   ((exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0).or. &
    (exx_mlwf_radius>0d0.and.(info%isize_r>1.or.info%isize_o>1))).and. &
   .not.(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')
 if(adaptive_exchange)then
   ! Each static SCF starts with the full exchange operator.
-  hse_adaptive_ready=.false.
+  exx_adaptive_ready=.false.
 endif
 #endif
 
@@ -197,7 +197,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      if(pre_scf_count>=exx_pre_scf_steps)then
        exx_pre_scf_active=.false.
        call reset_mixing_rate(mixing)
-       hse_adaptive_ready=.true.
+       exx_adaptive_ready=.true.
        mixing_age=0
        sum1=huge(sum1)
        iteration_support_changed=.true.
@@ -214,7 +214,7 @@ DFT_Iteration : do iter=Miter+1,nscf
        endif
      endif
    endif
-   if(adaptive_exchange.and..not.exx_pre_scf_active.and..not.hse_adaptive_ready)then
+   if(adaptive_exchange.and..not.exx_pre_scf_active.and..not.exx_adaptive_ready)then
      ! Every fragment must reach the warm-up tolerance before any switches.
      ! This uses the selected SCF metric (density or potential), as does the
      ! final convergence test; readiness stays latched after this transition.
@@ -222,7 +222,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      if(.not.(sum1<sqrt(threshold)))not_ready_local=1
      call comm_summation(not_ready_local,not_ready_total,adaptive_comm)
      if(not_ready_total==0)then
-       hse_adaptive_ready=.true.
+       exx_adaptive_ready=.true.
        mixing_age=0
        sum1=huge(sum1)
        iteration_support_changed=.true.
@@ -232,7 +232,7 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if( sum1 < threshold .and. .not.exx_pre_scf_active ) then
 #ifdef USE_HSE
-      call hse_check_localization()
+      call exx_check_localization()
 #endif
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
@@ -282,14 +282,14 @@ DFT_Iteration : do iter=Miter+1,nscf
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
 #ifdef USE_HSE
-       if(hse_enabled().or.exx_pre_scf_active)then
+       if(exx_enabled().or.exx_pre_scf_active)then
          ! Occupations must use the current Ritz states and their fixed-H
          ! energies, not the previous iteration's spectrum. Do not rebuild
          ! exchange with old occupations after rotating the states.
-         saved_hse_freeze=hse_freeze
-         hse_freeze=.true.
+         saved_hse_freeze=exx_freeze
+         exx_freeze=.true.
          call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-         hse_freeze=saved_hse_freeze
+         exx_freeze=saved_hse_freeze
        endif
 #endif
        call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
@@ -532,7 +532,7 @@ if(exx_pre_scf_threshold>0d0.and..not.flag_conv)then
   if(ilevel_print>=3.and.comm_is_root(nproc_id_global)) &
     write(*,'(a,i6,a,e15.8)') '  #GS converged at',Miter,' (last allowed iteration):',sum1
 endif
-call hse_check_localization()
+call exx_check_localization()
 #endif
 
 ! A BOMD step is not valid without a self-consistent electronic ground state.
@@ -558,11 +558,11 @@ contains
     logical,intent(out) :: changed
     integer :: local_event,total_events
     local_event=0
-    if(hse_support_changed)local_event=1
+    if(exx_support_changed)local_event=1
     call comm_summation(local_event,total_events,adaptive_comm)
     changed=total_events>0
-    ! hse_native latches this flag until every SCF rank has seen the event.
-    hse_support_changed=.false.
+    ! exx_native latches this flag until every SCF rank has seen the event.
+    exx_support_changed=.false.
   end subroutine consume_support_event
 #endif
 

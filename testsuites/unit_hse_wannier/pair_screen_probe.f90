@@ -1,11 +1,11 @@
 program probe
  use mpi
- use hse_spatial
- use hse_ace
+ use exx_spatial
+ use exx_ace
  use exx_orbitals, only: orbital_hermitian_action
  implicit none
  type(spatial_exx_state) :: op
- type(hse_ace_state) :: ace
+ type(s_exx_ace) :: ace
  integer :: ierr,np,rank,n(3)=[32,16,16],m(3),g,x,y,z,st,k,mode,compact
  real(8) :: h(3)=[.5d0,.5d0,.5d0],omega,err,global_err,budget,bound,correction,error_scale
  complex(8),allocatable :: target(:,:,:),reference(:,:,:),value(:,:,:),compressed(:,:,:)
@@ -51,9 +51,9 @@ program probe
       call MPI_Allreduce(err,global_err,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
       if(sqrt(global_err)>bound+1d-11)error stop 'completed action exceeds bound'
     endif
-    call hse_ace_build(ace,target,value,product(h),st,sum_grid)
+    call exx_ace_build(ace,target,value,product(h),st,sum_grid)
     if(st/=0)error stop 'screened ACE metric invalid'
-    call hse_ace_apply(ace,target,compressed,st,sum_grid)
+    call exx_ace_apply(ace,target,compressed,st,sum_grid)
     if(st/=0.or.maxval(abs(compressed-value))>1d-10)error stop 'ACE interpolation failed'
     if(rank==0)print *,'PAIR mode/compact/omega/error/bound: ',mode,compact,omega,sqrt(global_err),bound
    enddo

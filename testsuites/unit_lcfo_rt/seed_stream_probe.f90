@@ -2,7 +2,7 @@ program seed_stream_probe
  use mpi
  use lcfo_dist_rows, only: lcfo_gather_root
  use lcfo_seed, only: lcfo_seed_gamma
- use hse_wannier_gauge, only: gauge_seed_gamma
+ use exx_wannier_gauge, only: gauge_seed_gamma
  implicit none
  character(32) :: backend
  integer :: rank,np,ierr,n,lo,i,j,iu,status,reference,a,lowest,highest

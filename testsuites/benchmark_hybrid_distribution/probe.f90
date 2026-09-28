@@ -1,8 +1,8 @@
 program probe
   use mpi
   use iso_c_binding, only: c_int64_t
-  use hse_spatial
-  use hse_ace, only: hse_ace_state
+  use exx_spatial
+  use exx_ace, only: s_exx_ace
   use exx_orbitals
   use lcfo_scalapack
   implicit none
@@ -13,7 +13,7 @@ program probe
     end function
   end interface
   type(spatial_exx_state) :: exchange
-  type(hse_ace_state) :: ace
+  type(s_exx_ace) :: ace
   type(lcfo_dense_state) :: dense
   complex(8),allocatable :: psi(:,:,:),w(:,:,:),action(:,:,:),block(:,:)
   real(8),allocatable :: occupation(:,:)

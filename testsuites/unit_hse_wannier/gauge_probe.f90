@@ -1,5 +1,5 @@
 program gauge_probe
-  use hse_wannier_gauge
+  use exx_wannier_gauge
   implicit none
   complex(8),allocatable :: u(:,:,:),raw(:,:,:,:),d(:,:,:)
   real(8),allocatable :: b(:,:),w(:)

@@ -4,14 +4,14 @@
 ! Collective contract: n/h/dims/radius/omega/maxiter and call order agree;
 ! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
-module hse_spatial
+module exx_spatial
   use iso_fortran_env, only: int64
   use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
   use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use fftw_pencils, only: pencil_transform
-  use hse_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
+  use exx_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -30,6 +30,7 @@ module hse_spatial
   end type
 contains
   subroutine spatial_exx_canonical_source(op,psi,occupation,comm_r,status,comm_o)
+    implicit none
     type(spatial_exx_state),intent(inout) :: op
     complex(8),intent(in) :: psi(:,:,:)
     real(8),intent(in) :: occupation(:,:)
@@ -58,6 +59,7 @@ contains
   end subroutine spatial_exx_canonical_source
 
   subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation,comm_o)
+    implicit none
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r,maxiter
     integer,intent(in),optional :: comm_o
@@ -164,6 +166,7 @@ contains
     op%updates=op%updates+1;status=0
   contains
     subroutine sum_grid(a)
+      implicit none
       complex(8),intent(inout) :: a(:,:)
       complex(8) :: total(size(a,1),size(a,2))
       call comm_summation(a,total,size(a),comm_r)
@@ -172,6 +175,7 @@ contains
   end subroutine
 
   subroutine refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation)
+    implicit none
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm_r,comm_o,maxiter
     real(8),intent(in) :: h(3),tolerance
@@ -300,6 +304,7 @@ contains
   ! combination before the first minimization to select localized directions.
   ! The links are already reduced No x No matrices; no grid/WF gather is needed.
   subroutine projected_position_seed(raw,gauge,status)
+    implicit none
     complex(8),intent(in) :: raw(:,:,:,:)
     complex(8),intent(out) :: gauge(:,:)
     integer,intent(out) :: status
@@ -337,6 +342,7 @@ contains
   ! target columns may have different (including zero) local counts. Counts must
   ! agree within comm_r, and the communicators form a spatial/orbital product.
   subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o)
+    implicit none
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r
     integer,intent(in),optional :: comm_o
@@ -624,6 +630,7 @@ contains
     status=0
   contains
     subroutine max_scalar(value,group)
+      implicit none
       real(8),intent(inout) :: value
       integer,intent(in) :: group
       real(8) :: result(1)
@@ -631,10 +638,12 @@ contains
       value=result(1)
     end subroutine
     subroutine collective_bad_status()
+      implicit none
       bad=status
       call collective_bad()
     end subroutine
     subroutine collective_bad()
+      implicit none
       call comm_get_max(bad,comm_r)
       if(present(comm_o))call comm_get_max(bad,comm_o)
       ! Preserve a nonzero return on every peer, even after a successful local FFT.

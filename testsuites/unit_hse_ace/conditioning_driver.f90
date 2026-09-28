@@ -1,9 +1,9 @@
 program conditioning_driver
  use mpi
- use hse_ace
+ use exx_ace
  use exx_orbitals
  implicit none
- type(hse_ace_state) :: dense,sparse
+ type(s_exx_ace) :: dense,sparse
  complex(8) :: u(2,2,1),w(2,2,1),target(2,2,1),a(2,2,1),b(2,2,1)
  integer :: status,err
  call MPI_Init(err)

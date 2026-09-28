@@ -1,11 +1,11 @@
 ! Unitary space-group star reconstruction for a complete cubic k mesh.
 ! Sources average little-group projectors, not individual orbital gauges.
-module hse_symmetry
+module exx_symmetry
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
  implicit none
  private
- public :: hse_symmetry_map,symmetry_init,symmetry_expand,symmetry_validate_atoms,symmetry_transform
- type hse_symmetry_map
+ public :: s_exx_symmetry_map,symmetry_init,symmetry_expand,symmetry_validate_atoms,symmetry_transform
+ type s_exx_symmetry_map
    integer :: nfull=0,nrep=0,nsym=0,max_little=0
    integer :: n(3)=0
    real(8) :: h(3)=0
@@ -14,7 +14,8 @@ module hse_symmetry
  end type
 contains
  subroutine symmetry_init(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
- type(hse_symmetry_map),intent(out)::map
+ implicit none
+ type(s_exx_symmetry_map),intent(out)::map
  integer,intent(in):: n(3),mesh
  real(8),intent(in)::h(3),krep(:,:),weights(:),SymMatA(:,:,:),SymMatB(:,:,:)
  integer,intent(out)::ierr
@@ -119,7 +120,8 @@ contains
 
  ! Verify species-preserving ionic permutations before using a user symmetry file.
  subroutine symmetry_validate_atoms(map,rion,kion,ierr)
- type(hse_symmetry_map),intent(in)::map
+ implicit none
+ type(s_exx_symmetry_map),intent(in)::map
  real(8),intent(in)::rion(:,:)
  integer,intent(in)::kion(:)
  integer,intent(out)::ierr
@@ -155,7 +157,8 @@ contains
 
  ! Transform one representative orbital block; no little-group normalization.
  subroutine symmetry_transform(map,full_index,operation_slot,orbitals,transformed,ierr)
- type(hse_symmetry_map),intent(in)::map
+ implicit none
+ type(s_exx_symmetry_map),intent(in)::map
  integer,intent(in)::full_index,operation_slot
  complex(8),intent(in)::orbitals(:,:)
  complex(8),intent(out)::transformed(:,:)
@@ -183,7 +186,8 @@ contains
  end subroutine
 
  subroutine symmetry_expand(map,rep_start,source,target,expanded_source,expanded_target,ierr)
- type(hse_symmetry_map),intent(in)::map
+ implicit none
+ type(s_exx_symmetry_map),intent(in)::map
  integer,intent(in)::rep_start
  complex(8),intent(in)::source(:,:,:),target(:,:,:)
  complex(8),allocatable,intent(out)::expanded_source(:,:,:),expanded_target(:,:,:)

@@ -17,7 +17,7 @@
 #include "config.h"
 MODULE Total_Energy
 #ifdef USE_HSE
-  use hse_native, only: hse_enabled,hse_refresh,hse_exchange_energy
+  use exx_native, only: exx_enabled,exx_refresh,exx_exchange_energy
 #endif
 implicit none
 
@@ -563,9 +563,9 @@ CONTAINS
 
     call timer_begin(LOG_EIGEN_ENERGY_HPSI)
 #ifdef USE_HSE
-    if(hse_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc-hse_exchange_energy
-    call hse_refresh(system,mg,info,tpsi)
-    if(hse_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc+hse_exchange_energy
+    if(exx_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc-exx_exchange_energy
+    call exx_refresh(system,mg,info,tpsi)
+    if(exx_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc+exx_exchange_energy
 #endif
     call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_EIGEN_ENERGY_HPSI)
@@ -798,7 +798,7 @@ CONTAINS
     energy%E_kin      = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
 #ifdef USE_HSE
-    if(hse_enabled())energy%E_ion_nloc=energy%E_ion_nloc-2d0*hse_exchange_energy
+    if(exx_enabled())energy%E_ion_nloc=energy%E_ion_nloc-2d0*exx_exchange_energy
 #endif
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 

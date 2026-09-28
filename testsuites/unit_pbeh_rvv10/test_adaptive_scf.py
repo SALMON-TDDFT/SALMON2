@@ -53,13 +53,13 @@ class AdaptiveSCF(unittest.TestCase):
             if dc and dc_mlwf=='n':
                 self.assertIn('EXX_DC canonical full-fragment source',run.stdout)
                 self.assertNotIn('EXX_SPATIAL refresh/iterations',run.stdout)
-                self.assertNotIn('HSE_WANNIER refresh/iterations',run.stdout)
+                self.assertNotIn('EXX_WANNIER refresh/iterations',run.stdout)
             if pre_scf:
                 before,after=run.stdout.split('EXX_PRE_SCF switch to target hybrid',1)
                 self.assertNotIn('EXX_ADAPTIVE',before)
                 self.assertNotIn('rVV10 backend:',before)
                 self.assertIn('EXX_DC canonical full-fragment source' if dc and dc_mlwf=='n' else
-                              ('EXX_FIXED' if radius else ('EXX_ADAPTIVE' if fraction else 'HSE_WANNIER')),after)
+                              ('EXX_FIXED' if radius else ('EXX_ADAPTIVE' if fraction else 'EXX_WANNIER')),after)
 
             if dc and temperature_k>0:
                 charges=re.findall(r'integral\(rho_tot\)=\s*(\S+)',run.stdout)

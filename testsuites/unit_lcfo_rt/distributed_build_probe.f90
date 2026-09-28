@@ -2,10 +2,10 @@ program distributed_build_probe
  use mpi
  use lcfo_dist_rows
  use lcfo_dist_dense
- use hse_ace,only:hse_ace_state,hse_ace_build,hse_ace_apply
+ use exx_ace,only:s_exx_ace,exx_ace_build,exx_ace_apply
  implicit none
  type(s_lcfo_halo) :: halo
- type(hse_ace_state) :: ace,reference
+ type(s_exx_ace) :: ace,reference
  integer :: rank,np,ierr,nlocal,lo,j,k,p,n,ng,trial,status
  integer,allocatable :: counts(:),offsets(:),selected(:)
  complex(8),allocatable :: mixing(:,:), c(:,:),near(:,:),contribution(:,:),result(:,:),h(:,:),full(:,:),expected(:,:), &
@@ -71,10 +71,10 @@ program distributed_build_probe
   call lcfo_distributed_ace_build(ace,c,w,1d0,MPI_COMM_WORLD,status)
   if(status/=0)error stop 'distributed ACE rejected SPD metric'
   if(size(ace%factors,1)/=nlocal)error stop 'ACE factors are not local'
-  call hse_ace_build(reference,reshape(full,[ng,n,1]),reshape(allw,[ng,n,1]),1d0,status)
+  call exx_ace_build(reference,reshape(full,[ng,n,1]),reshape(allw,[ng,n,1]),1d0,status)
   if(status/=0)error stop 'reference ACE failed'
   target(:,:,1)=full(:,1:2)
-  call hse_ace_apply(reference,target,ref_action,status)
+  call exx_ace_apply(reference,target,ref_action,status)
   block=matmul(conjg(transpose(ace%factors(:,:,1))),target(lo+1:lo+nlocal,:,1))
   allocate(expected(n,2));call MPI_Allreduce(block,expected,2*n,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_COMM_WORLD,ierr)
   action(:,:,1)=-matmul(ace%factors(:,:,1),expected)

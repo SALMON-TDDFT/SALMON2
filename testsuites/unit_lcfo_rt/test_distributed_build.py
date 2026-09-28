@@ -8,7 +8,7 @@ with tempfile.TemporaryDirectory() as folder:
  (Path(folder)/'config.h').write_text('')
  command=['mpifort','-I',folder,'-cpp','-DUSE_MPI','-O2','-fexternal-blas','-fno-tree-loop-vectorize','-fcheck=all']
  if args.scalapack:command+=['-DUSE_SCALAPACK']
- command += [str(root/'src/xc'/name) for name in ['hse_ace.f90','lcfo_dist_rows.f90','lcfo_dist_dense.f90']]
+ command += [str(root/'src/xc'/name) for name in ['exx_ace.f90','lcfo_dist_rows.f90','lcfo_dist_dense.f90']]
  command += [str(here/'distributed_build_probe.f90'),'-L/opt/homebrew/opt/openblas/lib','-lopenblas']
  if args.scalapack:command+=['-L/opt/homebrew/opt/scalapack/lib','-lscalapack']
  subprocess.run(command+['-o',str(exe)],cwd=folder,check=True)

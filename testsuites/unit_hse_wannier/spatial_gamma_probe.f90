@@ -1,6 +1,6 @@
 program spatial_gamma_probe
  use mpi
- use hse_spatial
+ use exx_spatial
  implicit none
  integer,parameter :: n(3)=[64,16,16],no=32
  real(8),parameter :: h(3)=.5d0,tol=1d-9

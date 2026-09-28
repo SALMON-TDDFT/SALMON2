@@ -6,7 +6,7 @@ module lcfo_rt_wannier
   use lcfo_mlwf_links, only: lcfo_initial_links
   use lcfo_rt_basis
   use communication, only: comm_summation,comm_bcast
-  use hse_wannier_gauge, only: gauge_minimize_gamma_inplace
+  use exx_wannier_gauge, only: gauge_minimize_gamma_inplace
   use lcfo_seed, only: lcfo_seed_gamma
   use lcfo_dist_rows, only: s_lcfo_halo
   use lcfo_dist_rows, only: s_lcfo_column_halo,lcfo_column_halo_init,lcfo_column_halo_get

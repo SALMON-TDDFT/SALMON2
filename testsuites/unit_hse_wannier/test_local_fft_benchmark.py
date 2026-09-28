@@ -15,7 +15,7 @@ class LocalFFTBenchmark(unittest.TestCase):
             cmd=[os.environ.get('FC','gfortran'),'-O2','-g','-fcheck=all','-fopenmp',
                  '-fno-tree-loop-vectorize','-I'+str(fftw/'include')]
             cmd += [str(ROOT/'src/xc'/f) for f in ['exx_local_fft.f90','lcfo_wf_support.f90',
-                    'hse_wannier_gauge.f90','hse_wannier.f90']]
+                    'exx_wannier_gauge.f90','exx_wannier.f90']]
             cmd += [str(Path(__file__).with_name('local_fft_benchmark.f90')),
                     '-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)]
             build=subprocess.run(cmd,cwd=tmp,text=True,capture_output=True)

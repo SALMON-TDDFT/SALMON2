@@ -24,8 +24,8 @@
 module salmon_xc
   use structures, only: s_xc_functional, s_xc_operator_payload
 #ifdef USE_HSE
-  use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
-  use hse_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate
+  use exx_native, only: exx_refresh,exx_enabled,exx_exchange_energy
+  use hybrid_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate
   use rvv10, only: rvv10_evaluate
   use rvv10_distributed, only: rvv10_evaluate_distributed
 #endif
@@ -128,11 +128,11 @@ contains
     call nvtxStartRange('exchange_correlation', __LINE__)
 
 #ifdef USE_HSE
-    if(hse_enabled())then
+    if(exx_enabled())then
       if(allocated(ppn%rho_nlcc))then
         if(maxval(abs(ppn%rho_nlcc))>1d-14)error stop 'HSE06: NLCC not yet supported'
       endif
-      call hse_refresh(system,mg,info,spsi)
+      call exx_refresh(system,mg,info,spsi)
     endif
 #endif
     ! Payload reset each call; a functional without a tau derivative leaves no stale one behind.
@@ -553,7 +553,7 @@ contains
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
 #ifdef USE_HSE
-    if(hse_enabled().and.yn_dc/='y')E_xc=E_xc+hse_exchange_energy
+    if(exx_enabled().and.yn_dc/='y')E_xc=E_xc+exx_exchange_energy
 #endif
     
     if(present(eexc)) then
@@ -1247,7 +1247,7 @@ contains
     select case (xc%xctype(1))
 #ifdef USE_HSE
     case(salmon_xctype_hse06)
-      call exec_hse_semilocal()
+      call exec_hybrid_semilocal()
 #endif
     case(salmon_xctype_pz)
       call exec_builtin_pz()
@@ -1321,14 +1321,14 @@ contains
     end subroutine exec_builtin_calc_axpy
 
 #ifdef USE_HSE
-    subroutine exec_hse_semilocal()
+    subroutine exec_hybrid_semilocal()
       use exx_functional, only: exx_fraction=>exchange_fraction
       use salmon_global, only: hse_omega,xc_name=>xc,exx_pre_scf_active
       implicit none
       real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
       integer :: status,j
       if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
-        error stop 'HSE06: unpolarized gradient inputs required'
+        error stop 'Hybrid: unpolarized gradient inputs required'
       r=reshape(rho,[nl]);grad=reshape(grho,[nl,3]);sigma=sum(grad**2,dim=2)
       if(exx_pre_scf_active)then
         call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status,exchange_fraction=0d0)
@@ -1337,7 +1337,7 @@ contains
       else
         call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status,exchange_fraction=exx_fraction())
       endif
-      if(status/=0)error stop 'HSE06: Libxc semilocal evaluation failed'
+      if(status/=0)error stop 'Hybrid: Libxc semilocal evaluation failed'
       if(present(exc))exc=reshape(ep,[nx,ny,nz])
       if(present(eexc))eexc=reshape(r*ep,[nx,ny,nz])
       if(present(vxc))vxc=reshape(vr,[nx,ny,nz])

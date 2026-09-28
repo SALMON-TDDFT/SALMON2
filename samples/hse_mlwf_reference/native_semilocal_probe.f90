@@ -1,5 +1,5 @@
 program native_semilocal_probe
-  use hse_semilocal
+  use hybrid_semilocal
   implicit none
   real(8) :: rho(4),sigma(4),eps(4),vrho(4),vsigma(4)
   integer :: ierr,i

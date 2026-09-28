@@ -82,7 +82,7 @@ class RealspaceEhrenfest(unittest.TestCase):
         self.assertIn('end SALMON',run.stdout)
         self.assertIn('end complex DC-LCFO wavefunction reconstruction',run.stdout)
         self.assertNotIn('Native LCFO RT active',run.stdout)
-        self.assertIn('HSE_WANNIER',run.stdout)
+        self.assertIn('EXX_WANNIER',run.stdout)
         energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
         data=np.loadtxt(next(folder.glob('*_rt.data')))
         self.assertTrue(np.isfinite(energy).all())

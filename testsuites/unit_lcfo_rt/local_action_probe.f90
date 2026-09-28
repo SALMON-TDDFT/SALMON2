@@ -2,9 +2,9 @@ program local_action_probe
  use mpi
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
  use lcfo_ace_local,only:lcfo_ace_local_action,lcfo_ace_half_trace,lcfo_ace_coefficient_action
- use hse_ace,only:hse_ace_state,hse_ace_apply
+ use exx_ace,only:s_exx_ace,exx_ace_apply
  implicit none
- type(hse_ace_state) :: ace
+ type(s_exx_ace) :: ace
  integer :: rank,nproc,ierr,n,lo,hi,i,j,k,nf
  complex(8),allocatable :: b(:,:),psi(:,:),h(:,:),old(:,:),expected(:,:),c(:,:),global(:,:),w(:,:,:),coefficient_action(:,:)
  real(8) :: dv,pi,error,allerror,trace,reference_trace,occupation(2)
@@ -26,7 +26,7 @@ program local_action_probe
  do j=1,nf;do i=1,5
  ace%factors(i,j,1)=cmplx(sin(real(2*i+j,8)),cos(real(i+3*j,8)),8)/3
  enddo;enddo
- call hse_ace_apply(ace,reshape(global,[5,2,1]),w,ierr)
+ call exx_ace_apply(ace,reshape(global,[5,2,1]),w,ierr)
  if(ierr/=0)error stop 'dense ACE reference'
  occupation=[2d0,.37d0]
  reference_trace=0d0

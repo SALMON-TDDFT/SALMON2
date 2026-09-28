@@ -16,7 +16,7 @@ class NativeSymmetryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / 'probe'
             run = subprocess.run([compiler, '-O0', '-fcheck=all', '-Wall',
-                str(ROOT / 'src/xc/hse_symmetry.f90'),
+                str(ROOT / 'src/xc/exx_symmetry.f90'),
                 str(ROOT / 'samples/hse_mlwf_reference/native_symmetry_probe.f90'),
                 '-o', str(exe)], cwd=tmp, capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stderr)
@@ -33,7 +33,7 @@ class NativeSymmetryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / 'probe'
             run = subprocess.run([compiler, '-O0', '-fcheck=all', '-Wall',
-                '-I' + str(fftw / 'include'), str(ROOT / 'src/xc/hse_symmetry.f90'),
+                '-I' + str(fftw / 'include'), str(ROOT / 'src/xc/exx_symmetry.f90'),
                 str(ROOT / 'src/xc/hse_exchange.f90'),
                 str(ROOT / 'samples/hse_mlwf_reference/native_symmetry_exchange_probe.f90'),
                 '-L' + str(fftw / 'lib'), '-lfftw3', '-L' + str(blas / 'lib'),

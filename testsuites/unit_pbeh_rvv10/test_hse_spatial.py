@@ -26,7 +26,7 @@ class HSESpatial(unittest.TestCase):
                 folder,run=self.execute(field+str(ranks),inp,ranks=ranks,rt=True)
                 self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
                 self.assertIn('end SALMON',run.stdout)
-                self.assertIn('EXX_SPATIAL' if ranks>1 else 'HSE_WANNIER',run.stdout)
+                self.assertIn('EXX_SPATIAL' if ranks>1 else 'EXX_WANNIER',run.stdout)
                 self.assertNotIn('Native LCFO RT active',run.stdout)
                 energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
                 data=np.loadtxt(next(folder.glob('*_rt.data')))
@@ -100,7 +100,7 @@ class HSESpatial(unittest.TestCase):
             folder,run=self.execute('scf'+str(ranks),inp,ranks=ranks)
             self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
             self.assertIn('end SALMON',run.stdout)
-            self.assertIn('EXX_SPATIAL' if ranks>1 else 'HSE_WANNIER',run.stdout)
+            self.assertIn('EXX_SPATIAL' if ranks>1 else 'EXX_WANNIER',run.stdout)
 
             match=re.search(r'#GS converged at\s+(\d+)\s+:\s+(\S+)',run.stdout)
             self.assertIsNotNone(match,run.stdout[-3000:])

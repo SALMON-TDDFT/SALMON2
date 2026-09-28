@@ -31,7 +31,7 @@ def parse(folder,ranks):
     rows=[json.loads((folder/f'rank-{i}.json').read_text()) for i in range(ranks)]
     if any(r['returncode']!=0 or r['peak_rss_bytes']<=0 for r in rows):raise RuntimeError('rank failure')
     localizations=[]
-    for m in re.finditer(r'(EXX_SPATIAL|HSE_WANNIER) refresh/iterations/status/spread/gradient/overlap:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)',text):
+    for m in re.finditer(r'(EXX_SPATIAL|EXX_WANNIER) refresh/iterations/status/spread/gradient/overlap:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)',text):
         localizations.append(dict(backend=m[1],update=int(m[2]),iterations=int(m[3]),status=int(m[4]),spread=float(m[5]),gradient=float(m[6])))
     result=dict(iterations=iterations,residual=float(match[2]),energy_ev=float(re.search(r'Total energy \(eV\) =\s*(\S+)',info)[1]),
         total_root_seconds=float(re.search(r'total calculation time,(\S+)',text)[1]),scf_max_seconds=float(scf[2]),

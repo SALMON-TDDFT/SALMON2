@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 repo = Path(__file__).resolve().parents[2]
-source = (repo / 'src/xc/hse_lcfo_rt.f90').read_text()
+source = (repo / 'src/xc/exx_lcfo_rt.f90').read_text()
 body = source.split('  subroutine refresh_master(', 1)[1]
 guard = body.split('no=size(coeff,2);nsel=size(selected);ng=size(fragment_basis,1)\n', 1)[1].split('    ! On impulse', 1)[0]
 probe = '''program guard_probe
@@ -46,5 +46,5 @@ with tempfile.TemporaryDirectory() as folder:
         if mode == 0:
             assert run.returncode == 0, run.stderr
         else:
-            assert run.returncode != 0 and 'LCFO HSE: invalid occupations' in run.stderr, (mode, run.stderr)
+            assert run.returncode != 0 and 'LCFO EXX: invalid occupations' in run.stderr, (mode, run.stderr)
 print('Occupation guard: valid endpoints/fractional, negative, above two, NaN, +/-Inf passed')

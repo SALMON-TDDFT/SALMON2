@@ -6,7 +6,7 @@ with tempfile.TemporaryDirectory() as folder:
     p = Path(folder);(p/'config.h').write_text('')
     subprocess.run(['mpifort', '-cpp', '-DUSE_MPI', '-I'+folder, '-O2', '-fcheck=all',
                     '-fexternal-blas', '-fno-tree-loop-vectorize',
-                    str(root/'src/xc/hse_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
+                    str(root/'src/xc/exx_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'), str(here/'seed_stream_probe.f90'),
                     '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)
     for ranks in (2, 4):
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert 'MPI_' not in probe
     (p/'probe.f90').write_text(probe)
     subprocess.run(['gfortran','-cpp','-I'+folder,'-O2','-fcheck=all','-fexternal-blas','-fno-tree-loop-vectorize',
-                    str(root/'src/xc/hse_wannier_gauge.f90'),str(root/'src/xc/lcfo_dist_rows.f90'),
+                    str(root/'src/xc/exx_wannier_gauge.f90'),str(root/'src/xc/lcfo_dist_rows.f90'),
                     str(root/'src/xc/lcfo_seed.f90'),str(p/'probe.f90'),
                     '-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(p/'probe')],cwd=p,check=True)
     subprocess.run([str(p/'probe')],cwd=p,check=True,

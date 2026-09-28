@@ -1,5 +1,5 @@
 program gamma_probe
- use hse_wannier_gauge
+ use exx_wannier_gauge
  implicit none
  integer,parameter :: n=8
  complex(8) :: u(n,n,1),q(n,n),raw(n,n,6,1),diag(n,n),grad(n,n,1),overlap(n,n)

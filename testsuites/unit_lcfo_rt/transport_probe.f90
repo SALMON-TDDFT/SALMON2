@@ -2,7 +2,7 @@ program transport_probe
  use lcfo_rt_wannier
  use salmon_global, only: hse_lcfo_wf_radius
  use lcfo_rt_basis
- use hse_wannier_gauge, only: gauge_transport
+ use exx_wannier_gauge, only: gauge_transport
  implicit none
  complex(8) :: c(4,2),changed(4,2)
  complex(8),allocatable :: first(:,:,:),next(:,:,:)

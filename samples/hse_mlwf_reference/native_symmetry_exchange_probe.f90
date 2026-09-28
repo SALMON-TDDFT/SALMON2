@@ -1,8 +1,8 @@
 program symmetry_exchange_probe
- use hse_symmetry
+ use exx_symmetry
  use hse_exchange
  implicit none
- type(hse_symmetry_map)::map
+ type(s_exx_symmetry_map)::map
  type(hse_kernel)::kernel
  real(8)::a(3,4,16),b(3,4,16),k(3,8),weights(8),pi,err
  complex(8)::source(8,2,8),target(8,3,8),reference(8,3,8),callback_action(8,3,8)

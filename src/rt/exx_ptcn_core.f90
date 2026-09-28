@@ -1,25 +1,29 @@
 ! Parallel-transport Crank-Nicolson with fixed-ACE inner and fresh-EXX outer loops.
-module hse_ptcn_core
+module exx_ptcn_core
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: hse_ptcn_solve
+  public :: exx_ptcn_solve
   abstract interface
     subroutine action_callback(a,b,refresh)
+      implicit none
       complex(8),intent(in) :: a(:,:,:)
       complex(8),intent(out) :: b(:,:,:)
       logical,intent(in) :: refresh
     end subroutine
     subroutine precondition_callback(a,b)
+      implicit none
       complex(8),intent(in) :: a(:,:,:)
       complex(8),intent(out) :: b(:,:,:)
     end subroutine
     real(8) function norm_callback(a)
+      implicit none
       complex(8),intent(in) :: a(:,:,:)
     end function
   end interface
 contains
-  subroutine hse_ptcn_solve(u,dt,dv,action,precondition,norm,x,error,builds,apps,ierr)
+  subroutine exx_ptcn_solve(u,dt,dv,action,precondition,norm,x,error,builds,apps,ierr)
+    implicit none
     complex(8),intent(in) :: u(:,:,:)
     real(8),intent(in) :: dt,dv
     procedure(action_callback) :: action
@@ -68,6 +72,7 @@ contains
   end subroutine
 
   subroutine pt_gradient(u,hu,dv,r)
+    implicit none
     complex(8),intent(in) :: u(:,:,:),hu(:,:,:)
     complex(8),intent(out) :: r(:,:,:)
     real(8),intent(in) :: dv

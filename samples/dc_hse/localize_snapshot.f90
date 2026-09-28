@@ -2,9 +2,9 @@
 ! A positive cutoff is a separate occupation approximation, reported explicitly.
 program localize_snapshot
   use iso_fortran_env, only: int32
-  use hse_wannier
+  use exx_wannier
   implicit none
-  type(s_hse_wannier) :: op
+  type(s_exx_wannier) :: op
   integer(int32) :: header(14)
   real(8) :: metadata(9),cutoff,tolerance,exchange,k(3,1),discarded_occupation
   real(8),allocatable :: occupation(:,:),selected(:,:)

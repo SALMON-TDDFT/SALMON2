@@ -22,9 +22,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
 #ifdef USE_HSE
-  use hse_ptcn, only: native_hse_step
-  use hse_native, only: hse_taylor_stage
-  use hse_lcfo_rt, only: lcfo_hse_direct_rotate
+  use exx_ptcn, only: native_exx_step
+  use exx_native, only: exx_taylor_stage
+  use exx_lcfo_rt, only: lcfo_exx_direct_rotate
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -166,11 +166,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 #ifdef USE_HSE
   if(propagator=='hse_ptcn')then
-    call native_hse_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
+    call native_exx_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
       spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
   else
     if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') &
-      call hse_taylor_stage(0,system,mg,info,spsi_in)
+      call exx_taylor_stage(0,system,mg,info,spsi_in)
 #endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
@@ -184,7 +184,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   end if
     
 #ifdef USE_HSE
-    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(2)
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call exx_taylor_stage(2)
   endif
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
@@ -277,7 +277,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
 #ifdef USE_HSE
-    call lcfo_hse_direct_rotate(system,mg,info,spsi_out)
+    call lcfo_exx_direct_rotate(system,mg,info,spsi_out)
 #endif
     call timer_end(LOG_CALC_EXC_COR)
     
@@ -514,7 +514,7 @@ contains
     !$omp end workshare
 
 #ifdef USE_HSE
-    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call hse_taylor_stage(1)
+    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call exx_taylor_stage(1)
 #endif
 
 !  if(functional == 'VS98' .or. functional == 'TPSS')then

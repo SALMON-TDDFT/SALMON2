@@ -1,9 +1,9 @@
 program benchmark
  use iso_fortran_env,only:int64
- use hse_wannier
+ use exx_wannier
  implicit none
  integer,parameter :: n(3)=[32,24,20],ng=15360,no=4,nt=8
- type(s_hse_wannier) :: op
+ type(s_exx_wannier) :: op
  complex(8),allocatable :: target(:,:,:),full(:,:,:),local(:,:,:)
  real(8) :: h(3)=[.7d0,.8d0,.9d0],k(3,1),d(3),t0,t1,t2,error
  integer(int64) :: tick0,tick1,tick2,rate

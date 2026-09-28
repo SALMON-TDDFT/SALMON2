@@ -56,7 +56,7 @@ def run(name, text, rt=False, reject=False, settings=None, orbital_groups=1):
     else:
         assert status.returncode == 0 and "end SALMON" in log, folder
         if rt:
-            assert "Native LCFO RT active" in log and "LCFO HSE ACE build" in log, folder
+            assert "Native LCFO RT active" in log and "LCFO EXX ACE build" in log, folder
             storage=re.findall(r'LCFO distributed storage rank/local/global/halo rows:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',log)
             assert len(storage)==2, (folder,storage)
             assert all(0<int(local)<int(total) and 0<int(halo)<=int(total) for rank,local,total,halo in storage)
@@ -163,7 +163,7 @@ print(json.dumps(dict(full_continuity_L1_max=max(row[1] for row in full_c),
 # A physical-step interval must reduce expensive exchange builds, not merely
 # relabel a cache hit. Interval1 must reproduce the default trajectory.
 def builds(folder):
-    return (folder/'run.log').read_text().count('LCFO HSE ACE build')
+    return (folder/'run.log').read_text().count('LCFO EXX ACE build')
 one=run('rt_ace_interval1',mlwf_input,rt=True,
         settings={'yn_hse_wannier':'y','hse_lcfo_ace_interval':'1'})
 assert rows(one/'H_dc_hse_rt.data')==mlwf_rows
@@ -172,9 +172,9 @@ for interval in (2,4):
     reused=run(f'rt_ace_interval{interval}',mlwf_input,rt=True,
         settings={'yn_hse_wannier':'y','hse_lcfo_ace_interval':str(interval)})
     log=(reused/'run.log').read_text()
-    assert 'LCFO HSE ACE retained at step' in log, 'Missing physical-step ACE reuse'
-    assert 'LCFO HSE impulse ACE rebuilt before first predictor' in log
-    steps=[int(line.split()[-1]) for line in log.splitlines() if line.startswith('LCFO HSE exchange rebuilt at step')]
+    assert 'LCFO EXX ACE retained at step' in log, 'Missing physical-step ACE reuse'
+    assert 'LCFO EXX impulse ACE rebuilt before first predictor' in log
+    steps=[int(line.split()[-1]) for line in log.splitlines() if line.startswith('LCFO EXX exchange rebuilt at step')]
     assert 1 in steps and all(step==0 or (step-1)%interval==0 for step in steps), steps
     assert builds(reused)<builds(mlwf), (builds(reused),builds(mlwf))
     assert len(rows(reused/'H_dc_hse_rt.data'))==4
@@ -189,8 +189,8 @@ laser_input=mlwf_input.replace("ae_shape1='impulse'","ae_shape1='Acos2'\n I_wcm2
 laser=run('rt_ace_laser',laser_input,rt=True,
           settings={'yn_hse_wannier':'y','hse_lcfo_ace_interval':'4'})
 laser_log=(laser/'run.log').read_text()
-assert 'LCFO HSE ACE retained at step        1' in laser_log
-laser_steps=[int(line.split()[-1]) for line in laser_log.splitlines() if line.startswith('LCFO HSE exchange rebuilt at step')]
+assert 'LCFO EXX ACE retained at step        1' in laser_log
+laser_steps=[int(line.split()[-1]) for line in laser_log.splitlines() if line.startswith('LCFO EXX exchange rebuilt at step')]
 assert 1 not in laser_steps and 4 in laser_steps,laser_steps
 print('Impulse first step refresh and smooth laser initial ACE reuse passed')
 
@@ -224,7 +224,7 @@ def compare_split(name, baseline, text, settings):
     assert builds(split)==builds(baseline)
     def schedule(folder):
         return [line for line in (folder/'run.log').read_text().splitlines()
-                if line.startswith('LCFO HSE exchange rebuilt at step')]
+                if line.startswith('LCFO EXX exchange rebuilt at step')]
     assert schedule(split)==schedule(baseline)
     print(json.dumps(dict(case=name,max_current_difference=error,
                           max_energy_difference=energy_error,

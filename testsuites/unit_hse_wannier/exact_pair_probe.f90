@@ -1,9 +1,9 @@
 program exact_pair_probe
  use iso_fortran_env,only:int64
  use, intrinsic :: ieee_arithmetic,only:ieee_is_finite
- use hse_wannier
+ use exx_wannier
  implicit none
- type(s_hse_wannier) :: op
+ type(s_exx_wannier) :: op
  complex(8) :: target(24,12,1),action(24,12,1),dense_action(24,12,1),ref(24,12),kernel(24),metric(12,12)
  complex(8) :: density(24),potential(24),v
  real(8) :: h(3),k(3,1),angle,pi
@@ -93,7 +93,7 @@ program exact_pair_probe
 contains
  subroutine translated_support()
   implicit none
-  type(s_hse_wannier) :: multi
+  type(s_exx_wannier) :: multi
   complex(8) :: targets(24,3,2),out(24,3,2),dense(24,3,2),expected_out(24,3,2)
   complex(8) :: home(48,3),result(48,3),src(48),rho(48),pot(48),kern(48),z
   real(8) :: kv(3,2),theta
