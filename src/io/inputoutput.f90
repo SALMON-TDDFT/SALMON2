@@ -620,6 +620,7 @@ contains
       & no_ref, &
       & out_dm_unfold_step, &
       & unfold_egap_threshold, &
+      & unfold_tc_tol, &
       & al_pr, &
       & al_vec1_pr,al_vec2_pr,al_vec3_pr, &
       & yn_out_mom_distr_gs, &
@@ -1081,6 +1082,16 @@ contains
                                   ! not known here); left unset is fine when
                                   ! |det(pmat)|=1 (no coset structure, so
                                   ! Phase B's clustering never runs).
+    unfold_tc_tol = -1d0  ! sentinel: unset -> Phase B lets
+                          ! diagonalize_commuting_unitary_family (src/math/
+                          ! eigen_unitary.f90) use its own internal default
+                          ! (100*epsilon(1d0)). Dimensionless (a numerical
+                          ! tolerance on how close two translation-operator
+                          ! phase eigenvalues need to be to be treated as
+                          ! the same, not an energy), so unlike
+                          ! unfold_egap_threshold it is never unit-converted
+                          ! below. Temporary knob for the isk=5/23
+                          ! investigation (Claude-Codex notes 041/042).
     al_pr             = 0d0
     al_vec1_pr        = 0d0
     al_vec2_pr        = 0d0
@@ -1740,6 +1751,7 @@ contains
     call comm_bcast(out_dm_unfold_step, nproc_group_global)
     call comm_bcast(unfold_egap_threshold, nproc_group_global)
     if( unfold_egap_threshold > 0d0 ) unfold_egap_threshold = unfold_egap_threshold * uenergy_to_au
+    call comm_bcast(unfold_tc_tol, nproc_group_global)
     call comm_bcast(al_pr, nproc_group_global)
     al_pr = al_pr * ulength_to_au
     call comm_bcast(al_vec1_pr, nproc_group_global)
@@ -2758,6 +2770,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_ref', no_ref
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_egap_threshold', unfold_egap_threshold
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_tc_tol', unfold_tc_tol
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(1)', al_pr(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(2)', al_pr(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(3)', al_pr(3)

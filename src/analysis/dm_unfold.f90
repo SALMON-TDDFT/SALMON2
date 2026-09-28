@@ -29,7 +29,7 @@ contains
   use parallelization, only: nproc_id_global, nproc_group_global, end_parallel
   use salmon_global, only: dm_unfold_option, no_ref, base_directory, sysname, natom, izatom, kion, &
                          & yn_out_mom_distr_gs, dq_mom, nq_mom, num_kgrid, &
-                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr, unfold_egap_threshold
+                         & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr, unfold_egap_threshold, unfold_tc_tol
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
   use math_constants, only: zI,pi
@@ -111,7 +111,7 @@ contains
   ! isk=5/isk=23 investigation is done. --
   integer,parameter :: n_diag_isk = 2
   integer,parameter :: diag_isk_list(n_diag_isk) = [ 5, 23 ]
-  real(8) :: diag_max
+  real(8) :: diag_max, diag_tol_eff
   complex(8) :: diag_val
   complex(8),allocatable :: diag_gram(:,:), diag_TcTc(:,:), diag_WtTcW(:,:)
 
@@ -259,6 +259,7 @@ contains
     stop
   end if
   unfold%egap_threshold = unfold_egap_threshold
+  unfold%tc_tol = unfold_tc_tol
 
   if (comm_is_root(nproc_id_global)) then
     inquire(file='reference/wfn.bin', exist = e_wfn)
@@ -1092,7 +1093,51 @@ contains
           ! -- jointly diagonalize the commuting family, then recover the
           ! energy eigenbasis within each resulting shared-hat_k block --
           allocate( w_family(g_cl,g_cl), family_block_id(g_cl) )
-          call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id )
+          ! -- tol: unfold%tc_tol carries the -1d0 unset sentinel unless the
+          ! input file's unfold_tc_tol was set (temporary knob for the
+          ! isk=5/23 investigation, Claude-Codex notes 041/042); omitting
+          ! the optional argument entirely (not just passing a negative
+          ! value) is required so the library default (100*epsilon(1d0),
+          ! src/math/eigen_unitary.f90) applies unchanged when unset. --
+          if( unfold%tc_tol > 0d0 ) then
+            call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id, &
+              & tol=unfold%tc_tol )
+          else
+            call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id )
+          end if
+
+          ! -- diag check3b (temporary, notes 039-042): the SAME off-diagonal
+          ! residual as check3 below, but measured right here on w_family --
+          ! i.e. immediately after the joint diagonalization itself, BEFORE
+          ! the per-block H_s energy-eigenbasis rotation that produces
+          ! Wfinal. Comparing this to check3 (on Wfinal, printed later)
+          ! isolates which stage a large residual comes from (Codex review,
+          ! note 042, section 1): large already here -> the joint
+          ! diagonalization itself; small here but large on Wfinal -> the
+          ! block classification / H_s rotation step. --
+          if( any( diag_isk_list(1:n_diag_isk) == isk ) ) then
+            allocate( diag_WtTcW(g_cl,g_cl) )
+            diag_max = 0d0
+            do jshift = 1, nhprk
+              diag_WtTcW = matmul( conjg(transpose(w_family)), matmul( Tc_list(:,:,jshift), w_family ) )
+              do jj2 = 1, g_cl
+              do ii = 1, g_cl
+                if( ii /= jj2 ) diag_max = max( diag_max, abs(diag_WtTcW(ii,jj2)) )
+              end do
+              end do
+            end do
+            ! the *effective* tol (the library's own internal default,
+            ! 100*epsilon(1d0), when unfold%tc_tol carries the unset
+            ! sentinel -- NOT the raw sentinel value itself) --
+            diag_tol_eff = 1.0d2 * epsilon(1d0)
+            if( unfold%tc_tol > 0d0 ) diag_tol_eff = unfold%tc_tol
+            if( comm_is_root(info%id_o) ) then
+              write(*,"(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3)") 'Diag(check3b w_family-stage residual): isk=', isk, &
+                & ' io_ref=', memb(1), '..', memb(g_cl), '  max off-diagonal of w_family^dagger Tc w_family over shifts=', &
+                & diag_max, '  tol_used=', diag_tol_eff
+            end if
+            deallocate( diag_WtTcW )
+          end if
 
           allocate( Wfinal(g_cl,g_cl), e_final(g_cl), label_final(g_cl), score_final(g_cl) )
 
@@ -1204,8 +1249,9 @@ contains
               end do
             end do
             if( comm_is_root(info%id_o) ) then
-              write(*,"(A,I0,A,I0,A,I0,A,ES10.3)") 'Diag(check3 joint-diag residual): isk=', isk, &
-                & ' io_ref=', memb(1), '..', memb(g_cl), '  max off-diagonal of W^dagger Tc W over shifts=', diag_max
+              write(*,"(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3)") 'Diag(check3 joint-diag residual): isk=', isk, &
+                & ' io_ref=', memb(1), '..', memb(g_cl), '  max off-diagonal of W^dagger Tc W over shifts=', diag_max, &
+                & '  tol_used=', diag_tol_eff
             end if
             deallocate( diag_WtTcW )
           end if

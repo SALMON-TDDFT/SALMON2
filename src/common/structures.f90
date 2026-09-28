@@ -456,6 +456,16 @@ module structures
     ! no value is needed. Phase B (init_dm_unfold, src/analysis/dm_unfold.f90)
     ! reads this field to drive its energy-gap clustering.
     real(8) :: egap_threshold
+    ! tc_tol: numerical tolerance (dimensionless) passed to
+    ! diagonalize_commuting_unitary_family for the joint diagonalization
+    ! of the T_c family (src/math/eigen_unitary.f90), from the input
+    ! parameter unfold_tc_tol. Carries the -1d0 unset sentinel when the
+    ! input file leaves it unset, in which case dm_unfold.f90 omits the
+    ! optional tol argument entirely and that routine's own internal
+    ! default (100*epsilon(1d0)) applies. Temporary knob for the
+    ! isk=5/23 investigation (Claude-Codex notes 041/042); not otherwise
+    ! part of the project's confirmed parameter set.
+    real(8) :: tc_tol
     ! primitive-to-reference correspondence (dm_unfold_option='super' only):
     ! a_pr(3,3) = [a^P_1,a^P_2,a^P_3], the true primitive-cell lattice vectors;
     ! pmat(3,3) = P, with a^R_i = sum_j pmat(j,i)*a^P_j (a^R = A_ref, the
