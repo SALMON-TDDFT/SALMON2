@@ -45,6 +45,7 @@ option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
+option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)" OFF)
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
@@ -59,6 +60,10 @@ include_directories(${CMAKE_BINARY_DIR})
 
 include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 
+
+if(USE_HSE AND USE_OPENACC)
+  message(FATAL_ERROR "Native HSE requires a CPU build; use USE_HSE=OFF for accelerators")
+endif()
 
 # for third party libraries
 include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)

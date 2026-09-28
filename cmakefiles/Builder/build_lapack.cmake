@@ -19,6 +19,7 @@ else ()
       URL              "https://github.com/Reference-LAPACK/lapack/archive/refs/tags/v${LAPACK_VERSION}.tar.gz"
       PREFIX           "${CMAKE_BINARY_DIR}/lapack"
       CMAKE_ARGS       -D BUILD_SHARED_LIBS=off -D BUILD_TESTING=off
+                       -D CMAKE_INSTALL_LIBDIR=lib
                        -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -D CMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}
                        -D CMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
                        -D CMAKE_Fortran_FLAGS=${CMAKE_Fortran_FLAGS}
@@ -30,8 +31,8 @@ else ()
 
     add_library(lapack STATIC IMPORTED)
     add_library(blas   STATIC IMPORTED)
-    set_target_properties(lapack PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/liblapack.a)
-    set_target_properties(blas   PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib64/libblas.a)
+    set_target_properties(lapack PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/liblapack.a)
+    set_target_properties(blas   PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/libblas.a)
     add_dependencies(lapack lapack-project-install)
     add_dependencies(blas   lapack-project-install)
     set(EXTERNAL_LIBS lapack blas ${EXTERNAL_LIBS})
