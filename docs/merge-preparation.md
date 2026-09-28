@@ -75,3 +75,17 @@ The short pulse harness is `samples/hse_mlwf_reference/validate_native_pulse.py`
   native tests and representative HSE-disabled restart checks are the current evidence.
 
 No merge, force push or deletion of the research branch has been performed.
+
+## Jenkins GNU 8.4.1 build failure (2026-09-28)
+
+PR #1304, `qst-test-gfortran` build 378, failed while compiling
+`src/io/posix.c`, before numerical tests. `_XOPEN_SOURCE` was defined after
+`stdio.h`; glibc had already selected its feature declarations, leaving `nftw`,
+`FTW_DEPTH` and `FTW_PHYS` unavailable. Define the feature macro before all
+headers and preserve an explicitly supplied value.
+
+Local validation: Apple Clang C99 compilation, including an explicitly supplied
+`_XOPEN_SOURCE=700`, passed with errors enabled. A temporary-directory runtime
+probe passed recursive creation, directory detection, stdio removal and nftw
+removal, including preservation of a directory reached only through a symlink.
+This does not replace the GNU 8.4.1/Linux CI rerun; that result remains pending.
