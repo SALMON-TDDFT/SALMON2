@@ -278,7 +278,7 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, &
+      & cname, hse_omega, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -729,6 +729,7 @@ contains
     ! xcname = 'PZ'
     xname = 'none'
     cname = 'none'
+    hse_omega = .11d0 / ulength_from_au ! inverse input length
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
@@ -747,9 +748,9 @@ contains
     gram_schmidt_interval = -1
 !! == default for &propagation
     n_hamil     = 4
-    propagator  = 'middlepoint'
+    propagator  = '' ! resolved after functional and propagation input
     yn_fix_func = 'n'
-    yn_predictor_corrector = 'n'
+    yn_predictor_corrector = '' ! functional-dependent default
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -1293,6 +1294,8 @@ contains
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(hse_omega    ,nproc_group_global)
+    hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
 #ifdef USE_LIBXC
     call comm_bcast(alibxc       ,nproc_group_global)
@@ -1319,6 +1322,19 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
+    ! Resolve omitted options on every rank before validation and input logging.
+    ! Explicit developer propagators and incompatible user options remain visible
+    ! to validation rather than being silently overwritten.
+    if(propagator=='')then
+      propagator='middlepoint'
+      if(xc=='hse06'.and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
+        propagator='hse_taylor4'
+    endif
+    if(yn_predictor_corrector=='')then
+      yn_predictor_corrector='n'
+      if(xc=='hse06'.and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
+        yn_predictor_corrector='y'
+    endif
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
     call comm_bcast(iseed_number_change     ,nproc_group_global)
@@ -2213,6 +2229,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
+      write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
 #ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
@@ -2753,6 +2770,7 @@ contains
   end subroutine dump_input_common
 
   subroutine check_bad_input
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use parallelization
     use communication
     implicit none
@@ -3071,6 +3089,51 @@ contains
     if(yn_ffte=='y'.and. yn_fftw=='y') then
       stop "either yn_ffte or yn_fftw can be specified"
     end if
+
+    if(xc=='hse06')then
+      if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
+        error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'
+      if(xname/='none'.or.cname/='none')error stop 'HSE06 must not be combined with extra xname/cname'
+#ifndef USE_HSE
+      error stop 'HSE06 requires USE_HSE=ON'
+#endif
+      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n') &
+        error stop 'HSE06 requires fixed-ion unpolarized periodic system'
+      if(nstate*2/=nelec.or.temperature>=0d0) &
+        error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
+      if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
+        if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+          error stop 'HSE06: omit propagator to use Taylor4 + ACE'
+        if(yn_out_rvf_rt=='y')error stop 'HSE06: RT force output not yet certified'
+        if(yn_fix_func/='n')error stop 'HSE06 requires self-consistent functional updates'
+        if(trans_longi/='tr')error stop 'HSE06 native RT requires transverse fields'
+        if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
+        if(ae_shape1=='Acos2')then
+          if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+            error stop 'HSE06 laser requires Taylor4'
+          if(ae_shape2/='none'.and.ae_shape2/='impulse')error stop 'HSE06 laser: unsupported probe'
+          if(index(yn_symmetry,'y')/=0)error stop 'HSE06 laser: full k mesh required'
+          ! Pulse parameters are not covered by the legacy impulse restart metadata.
+          if(yn_restart=='y')error stop 'HSE06 laser RT restart is not yet supported'
+          if(maxval(abs(epdir_im1))>1d-12)error stop 'HSE06 laser: linear polarization required'
+        else
+          if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06: unsupported field shape'
+        endif
+        if(index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
+          error stop 'HSE symmetry: impulse must be z polarized'
+        if(gram_schmidt_interval>0)error stop 'HSE06 requires no Gram-Schmidt rescaling'
+        if(propagator=='hse_ptcn')then
+          if(yn_predictor_corrector=='y')error stop 'HSE06 PT-CN requires no external predictor-corrector'
+        else
+          if(n_hamil/=4.or.yn_predictor_corrector/='y') &
+            error stop 'HSE Taylor4 requires n_hamil=4 and predictor-corrector'
+        endif
+      else if(theory/='dft')then
+        error stop 'HSE06 initial support: dft or tddft only'
+      endif
+    else if(propagator=='hse_ptcn'.or.propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')then
+      error stop 'HSE propagation modes require xc=hse06'
+    endif
 
     if(yn_out_rt_energy_components=='y' .and. yn_periodic=='n') then
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"

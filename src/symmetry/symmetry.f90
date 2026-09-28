@@ -6,7 +6,7 @@ module sym_sub
 
   private
   public :: read_sw_symmetry
-  public :: init_sym_sub
+  public :: init_sym_sub, symmetry_validate_field, symmetry_validate_atoms_cartesian
 
   logical,public :: DISPLAY     =.false.
   logical,public :: use_symmetry=.false.
@@ -36,6 +36,7 @@ contains
   end subroutine read_sw_symmetry
 
   subroutine init_sym_sub( Amat_in, Bmat_in )
+    use salmon_global, only: xc, theory
     implicit none
     real(8),intent(in) :: Amat_in(3,3), Bmat_in(3,3) ! Lattice vectors
     real(8) :: tmpmat(3,3), pi2
@@ -111,10 +112,116 @@ contains
        SymMatB(1:3,1:3,isym)=matmul( Binv, tmpmat )
        SymMatB(1:3,4,isym)=SymMatR(1:3,4,isym)
     end do
+    if (xc=='hse06') call symmetry_validate_group()
     flag_init=.true.
+    ! Test the retained Cartesian group, not just the requested axis flags.
+    ! The bounded HSE RT implementation supports the z-field little group.
+    if ((xc=='hse06').and. &
+        (theory=='tddft_pulse'.or.theory=='tddft_response'.or.theory=='tddft')) &
+      call symmetry_validate_field([0d0,0d0,1d0])
     if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
 
+
+  subroutine symmetry_validate_atoms_cartesian(rion,kion)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(8),intent(in) :: rion(:,:)
+    integer,intent(in) :: kion(:)
+    real(8),allocatable :: fractional(:,:)
+    logical,allocatable :: used(:)
+    real(8) :: transformed(3),delta(3)
+    integer :: a,b,s,na
+    logical :: found
+    if (.not.use_symmetry) return
+    if (.not.flag_init) error stop 'Symmetry atom check before initialization'
+    na=size(kion)
+    if(size(rion,1)/=3.or.size(rion,2)/=na) error stop 'Symmetry: invalid atom layout'
+    if(.not.all(ieee_is_finite(rion))) error stop 'Symmetry: nonfinite atom position'
+    allocate(fractional(3,na),used(na))
+    fractional=matmul(Ainv,rion)
+    do s=1,size(SymMatA,3)
+      used=.false.
+      do a=1,na
+        transformed=matmul(SymMatA(:,1:3,s),fractional(:,a))+SymMatA(:,4,s)
+        found=.false.
+        do b=1,na
+          if(used(b).or.kion(a)/=kion(b))cycle
+          delta=transformed-fractional(:,b)
+          if(maxval(abs(delta-anint(delta)))<1d-8)then
+            used(b)=.true.;found=.true.;exit
+          endif
+        enddo
+        if(.not.found)error stop 'Symmetry: operation does not preserve atomic positions and species'
+      enddo
+    enddo
+  end subroutine symmetry_validate_atoms_cartesian
+
+  subroutine symmetry_validate_group()
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(8) :: rotation(3,3),translation(3),delta(3),cartesian(3,3),identity(3,3),determinant
+    integer :: a,b,c,nsym
+    logical :: found
+    nsym=size(SymMatA,3)
+    if (nsym==0) error stop 'Symmetry: empty retained group'
+    if (.not.all(ieee_is_finite(SymMatA))) error stop 'Symmetry: nonfinite operation'
+    identity=0d0
+    do a=1,3
+      identity(a,a)=1d0
+    enddo
+    do a=1,nsym
+      rotation=SymMatA(:,1:3,a)
+      if(maxval(abs(rotation-anint(rotation)))>1d-10) &
+        error stop 'Symmetry: rotation does not preserve the fractional lattice'
+      determinant=rotation(1,1)*(rotation(2,2)*rotation(3,3)-rotation(2,3)*rotation(3,2)) &
+        -rotation(1,2)*(rotation(2,1)*rotation(3,3)-rotation(2,3)*rotation(3,1)) &
+        +rotation(1,3)*(rotation(2,1)*rotation(3,2)-rotation(2,2)*rotation(3,1))
+      if(abs(abs(determinant)-1d0)>1d-10) error stop 'Symmetry: nonunimodular lattice rotation'
+      cartesian=matmul(Amat,matmul(rotation,Ainv))
+      if(.not.all(ieee_is_finite(cartesian))) error stop 'Symmetry: nonfinite Cartesian rotation'
+      if(maxval(abs(matmul(transpose(cartesian),cartesian)-identity))>1d-10) &
+        error stop 'Symmetry: operation is not a Cartesian isometry'
+    enddo
+    ! Fractional translations are reduced modulo the simulation cell, not an
+    ! assumed primitive cell. Conventional FCC cells require centering operations.
+    do a=1,nsym
+      do b=a+1,nsym
+        delta=SymMatA(:,4,a)-SymMatA(:,4,b)
+        if (maxval(abs(SymMatA(:,1:3,a)-SymMatA(:,1:3,b)))<1d-10.and. &
+            maxval(abs(delta-anint(delta)))<1d-10) error stop 'Symmetry: duplicate operation'
+      end do
+      do b=1,nsym
+        rotation=matmul(SymMatA(:,1:3,a),SymMatA(:,1:3,b))
+        translation=matmul(SymMatA(:,1:3,a),SymMatA(:,4,b))+SymMatA(:,4,a)
+        found=.false.
+        do c=1,nsym
+          delta=translation-SymMatA(:,4,c)
+          if (maxval(abs(rotation-SymMatA(:,1:3,c)))<1d-10.and. &
+              maxval(abs(delta-anint(delta)))<1d-10) then
+            found=.true.
+            exit
+          end if
+        end do
+        if (.not.found) error stop 'Symmetry: operations do not form a closed group in the simulation cell'
+      end do
+    end do
+  end subroutine symmetry_validate_group
+
+  subroutine symmetry_validate_field(direction)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    real(8),intent(in) :: direction(3)
+    real(8) :: rotated(3)
+    integer :: isym
+    if (.not.use_symmetry) return
+    if (.not.flag_init.or..not.allocated(SymMatB)) error stop 'Symmetry field check before initialization'
+    if (size(SymMatB,3)==0) error stop 'Symmetry: empty retained group'
+    if (.not.all(ieee_is_finite(direction))) error stop 'Symmetry: nonfinite field direction'
+    do isym=1,size(SymMatB,3)
+      rotated=matmul(Bmat,matmul(SymMatB(:,1:3,isym),matmul(Binv,direction)))
+      if (.not.all(ieee_is_finite(rotated))) error stop 'Symmetry: nonfinite field transformation'
+      if (maxval(abs(rotated-direction))>1d-10*max(1d0,maxval(abs(direction)))) &
+        error stop 'Symmetry: retained operation changes the RT field direction'
+    end do
+  end subroutine symmetry_validate_field
 
   subroutine read_SymMat( flag )
     implicit none

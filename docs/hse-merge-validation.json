@@ -1,0 +1,76 @@
+{
+  "input_cases": {
+    "omitted": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "explicit": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "afs_default": {
+      "exit_code": 0,
+      "passed": true,
+      "max_energy_difference_ha": 4.263256414560601e-14
+    },
+    "afs_explicit": {
+      "exit_code": 0,
+      "passed": true,
+      "max_energy_difference_ha": 4.263256414560601e-14
+    },
+    "afs_custom": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "invalid_pc": {
+      "exit_code": 1,
+      "passed": true
+    },
+    "zero_omega": {
+      "exit_code": 1,
+      "passed": true
+    },
+    "negative_omega": {
+      "exit_code": 1,
+      "passed": true
+    },
+    "restart_same": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "restart_changed_omega": {
+      "exit_code": 1,
+      "passed": true
+    },
+    "pz_fresh_two": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "pz_first_one": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "pz_odd_restart": {
+      "exit_code": 0,
+      "passed": true,
+      "max_current_difference_au": 0.0,
+      "energy_difference_ha": 0.0,
+      "stale_hse_metadata_removed": true
+    }
+  },
+  "input_passed": true,
+  "native_tests": 8,
+  "ctest_stages": 6,
+  "pulse_guards": {
+    "pulse_restart": {
+      "exit_code": 1,
+      "expected": "laser RT restart",
+      "passed": true
+    },
+    "pulse_as_impulse": {
+      "exit_code": 1,
+      "expected": "restart physics",
+      "passed": true
+    }
+  }
+}
