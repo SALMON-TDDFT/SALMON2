@@ -108,3 +108,5 @@ MLWFの制御名は `exx_mlwf_interval`、`exx_mlwf_maxiter`、
 
 主要実装コミット：`b6655232`（ネイティブMLWF/ACE軌道分散）、
 `1c4e6795`（複素LCFOのScaLAPACK全体対角化）。
+
+ローカルの合成系での時間・RSS測定は [分散性能の測定ノート](hybrid-distribution-measurements-ja.md) にまとめました。

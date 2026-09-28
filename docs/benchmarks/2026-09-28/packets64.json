@@ -1,0 +1,4153 @@
+{
+  "scope": "synthetic production-kernel phases; not SCF/RT or water",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "production_commit": "71208301eef07f7195ea927e290d5499ae0ff185",
+  "compiler": "GNU Fortran (Homebrew GCC 15.2.0_1) 15.2.0",
+  "build": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/pbeh40-scalapack-build",
+  "compiler_flags": "-fexternal-blas -fno-tree-loop-vectorize",
+  "build_type": "Release",
+  "link_flags": [
+    "-L/opt/homebrew/opt/scalapack/lib",
+    "-lscalapack",
+    "-L/opt/homebrew/opt/openblas/lib",
+    "-lopenblas",
+    "/opt/homebrew/lib/libfftw3.dylib"
+  ],
+  "build_type_flags": "-O3",
+  "probe_flags": [
+    "-O2",
+    "-fopenmp",
+    "-ffree-line-length-none"
+  ],
+  "exchange_workload": {
+    "source": "tensor Fourier wave packets with pair rotations, not water orbitals",
+    "h_bohr": 1.0,
+    "occupations": 2.0,
+    "mlwf_maxiter": 3,
+    "mlwf_tolerance": 1e-07,
+    "checksum": "unscaled Tr(Psi^dagger K Psi); no hybrid mixing, no rVV10"
+  },
+  "phase_labels": {
+    "exchange": [
+      "refresh",
+      "exact_exchange",
+      "ace_build",
+      "ace_apply"
+    ],
+    "dense": [
+      "replicated_block_input_and_layout",
+      "full_solve_and_diagnostics",
+      "unused",
+      "unused"
+    ]
+  },
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "memory_note": "Per-process lifetime high-water RSS. Sum of rank peaks is not simultaneous node RSS. Baseline is after MPI init; deltas are not isolated allocation accounting.",
+  "timing_note": "Cold first-call phases, including FFT plan initialization and validation collectives. Reported phases use max rank time; fresh MPI processes for every repeat.",
+  "runs": [
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.11,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14499840,
+          "peak_bytes": 232357888,
+          "phase_seconds": [
+            0.737418,
+            2.137753,
+            0.2589839999999999,
+            0.12312499999999993
+          ],
+          "checksum": -8.42874319302266,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.11,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14368768,
+          "peak_bytes": 232357888,
+          "phase_seconds": [
+            0.7318269999999998,
+            2.140838,
+            0.2656109999999998,
+            0.12462100000000031
+          ],
+          "checksum": -8.42874319302266,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.11,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14385152,
+          "peak_bytes": 232292352,
+          "phase_seconds": [
+            0.8189130000000001,
+            2.1626140000000005,
+            0.2806829999999998,
+            0.12740099999999988
+          ],
+          "checksum": -8.42874319302266,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.11,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 1,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 71516160,
+          "phase_seconds": [
+            0.321611,
+            0.5234460000000001,
+            0.12303299999999995,
+            0.04849700000000001
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 71745536,
+          "phase_seconds": [
+            0.321613,
+            0.523448,
+            0.12303399999999998,
+            0.04849700000000001
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 71532544,
+          "phase_seconds": [
+            0.321612,
+            0.5234479999999999,
+            0.12303200000000014,
+            0.048496000000000095
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14696448,
+          "peak_bytes": 71614464,
+          "phase_seconds": [
+            0.321612,
+            0.523448,
+            0.12303400000000009,
+            0.048493999999999815
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.11,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14827520,
+          "peak_bytes": 72269824,
+          "phase_seconds": [
+            0.313725,
+            0.5263760000000001,
+            0.09802300000000008,
+            0.04863200000000001
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 71467008,
+          "phase_seconds": [
+            0.313727,
+            0.526377,
+            0.09802400000000011,
+            0.04863300000000015
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14647296,
+          "peak_bytes": 71565312,
+          "phase_seconds": [
+            0.313721,
+            0.5263770000000001,
+            0.09802400000000011,
+            0.04863000000000017
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 72056832,
+          "phase_seconds": [
+            0.31372099999999997,
+            0.526376,
+            0.098024,
+            0.04863200000000001
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.11,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 1,
+          "baseline_bytes": 14843904,
+          "peak_bytes": 72695808,
+          "phase_seconds": [
+            0.39901200000000003,
+            0.5867020000000001,
+            0.1352479999999998,
+            0.05068699999999993
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 72515584,
+          "phase_seconds": [
+            0.39901200000000003,
+            0.5867019999999998,
+            0.1352549999999999,
+            0.050675000000000026
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 72630272,
+          "phase_seconds": [
+            0.39901,
+            0.5866990000000001,
+            0.1352479999999998,
+            0.050675000000000026
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14712832,
+          "peak_bytes": 72548352,
+          "phase_seconds": [
+            0.39901200000000003,
+            0.5867010000000001,
+            0.13527199999999984,
+            0.050675000000000026
+          ],
+          "checksum": -8.42874319302243,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.11,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 77234176,
+          "phase_seconds": [
+            0.252339,
+            0.6559029999999999,
+            0.07401400000000002,
+            0.047341999999999995
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14712832,
+          "peak_bytes": 77316096,
+          "phase_seconds": [
+            0.252337,
+            0.655902,
+            0.07401799999999992,
+            0.047341999999999995
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 77201408,
+          "phase_seconds": [
+            0.25233700000000003,
+            0.655902,
+            0.07401400000000002,
+            0.047341999999999995
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 77266944,
+          "phase_seconds": [
+            0.25233300000000003,
+            0.6559020000000001,
+            0.07401799999999992,
+            0.047340999999999855
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.11,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 1,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 76283904,
+          "phase_seconds": [
+            0.24333,
+            0.661321,
+            0.07473700000000005,
+            0.04539599999999999
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 77299712,
+          "phase_seconds": [
+            0.243332,
+            0.661322,
+            0.07473700000000005,
+            0.04539599999999999
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 76152832,
+          "phase_seconds": [
+            0.24333099999999996,
+            0.6613209999999999,
+            0.07473699999999983,
+            0.04539599999999999
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14712832,
+          "peak_bytes": 76267520,
+          "phase_seconds": [
+            0.243328,
+            0.6613199999999999,
+            0.07473700000000005,
+            0.04539599999999999
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.11,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 2,
+          "baseline_bytes": 14696448,
+          "peak_bytes": 77250560,
+          "phase_seconds": [
+            0.21411699999999995,
+            0.659587,
+            0.07569899999999996,
+            0.04901
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 76300288,
+          "phase_seconds": [
+            0.21411600000000003,
+            0.659586,
+            0.07569700000000013,
+            0.04900899999999986
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14827520,
+          "peak_bytes": 76234752,
+          "phase_seconds": [
+            0.21411899999999998,
+            0.659586,
+            0.07569799999999993,
+            0.04900900000000008
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 75988992,
+          "phase_seconds": [
+            0.21411799999999998,
+            0.659587,
+            0.07568600000000003,
+            0.04901
+          ],
+          "checksum": -8.428743193022182,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.11,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 3,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 84361216,
+          "phase_seconds": [
+            0.2690079999999999,
+            0.7550800000000001,
+            0.06246700000000005,
+            0.04622700000000002
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14893056,
+          "peak_bytes": 86523904,
+          "phase_seconds": [
+            0.26900199999999996,
+            0.75508,
+            0.06246700000000027,
+            0.04622700000000002
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 87638016,
+          "phase_seconds": [
+            0.26900900000000005,
+            0.7550800000000002,
+            0.06246799999999997,
+            0.04622700000000002
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 86507520,
+          "phase_seconds": [
+            0.268991,
+            0.75508,
+            0.06246300000000016,
+            0.04622700000000002
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.11,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 3,
+          "baseline_bytes": 14663680,
+          "peak_bytes": 86818816,
+          "phase_seconds": [
+            0.262881,
+            0.775028,
+            0.07167400000000002,
+            0.049512
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 86605824,
+          "phase_seconds": [
+            0.26288,
+            0.775029,
+            0.07167899999999983,
+            0.04951299999999992
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14794752,
+          "peak_bytes": 88555520,
+          "phase_seconds": [
+            0.26288100000000003,
+            0.775029,
+            0.07167699999999999,
+            0.04951299999999992
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14827520,
+          "peak_bytes": 86491136,
+          "phase_seconds": [
+            0.262882,
+            0.775028,
+            0.07167699999999999,
+            0.04951300000000014
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.11,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 3,
+          "baseline_bytes": 14729216,
+          "peak_bytes": 88637440,
+          "phase_seconds": [
+            0.22067299999999998,
+            0.714786,
+            0.07478399999999996,
+            0.04540500000000014
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14794752,
+          "peak_bytes": 88506368,
+          "phase_seconds": [
+            0.220675,
+            0.7147890000000001,
+            0.07478399999999996,
+            0.045404
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14876672,
+          "peak_bytes": 90406912,
+          "phase_seconds": [
+            0.220676,
+            0.714786,
+            0.07478400000000018,
+            0.04540300000000008
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14712832,
+          "peak_bytes": 86458368,
+          "phase_seconds": [
+            0.220675,
+            0.7147859999999999,
+            0.07478399999999996,
+            0.04540499999999992
+          ],
+          "checksum": -8.428743193022033,
+          "error": 7.076311083754595e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.11,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 5,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 48398336,
+          "phase_seconds": [
+            0.16681400000000005,
+            0.4136679999999999,
+            0.05082299999999995,
+            0.03388799999999992
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48742400,
+          "phase_seconds": [
+            0.16682199999999997,
+            0.4136669999999999,
+            0.05082300000000006,
+            0.03389199999999992
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 48463872,
+          "phase_seconds": [
+            0.166818,
+            0.41366800000000004,
+            0.05082299999999995,
+            0.03388800000000014
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 48168960,
+          "phase_seconds": [
+            0.16682500000000006,
+            0.413667,
+            0.05082300000000006,
+            0.03389199999999992
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 48250880,
+          "phase_seconds": [
+            0.16681299999999993,
+            0.413666,
+            0.05082399999999998,
+            0.03388800000000014
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48431104,
+          "phase_seconds": [
+            0.16682000000000002,
+            0.413666,
+            0.05082299999999995,
+            0.03389300000000006
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14893056,
+          "peak_bytes": 48660480,
+          "phase_seconds": [
+            0.16680799999999996,
+            0.4136670000000001,
+            0.05082299999999995,
+            0.033887
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 48758784,
+          "phase_seconds": [
+            0.16680999999999996,
+            0.41366599999999987,
+            0.050822000000000034,
+            0.03389300000000006
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.11,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 6,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 48087040,
+          "phase_seconds": [
+            0.16130100000000003,
+            0.41317899999999996,
+            0.051491000000000064,
+            0.03366200000000008
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 15040512,
+          "peak_bytes": 48775168,
+          "phase_seconds": [
+            0.16129700000000002,
+            0.41300700000000007,
+            0.051491000000000064,
+            0.03366099999999994
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 48316416,
+          "phase_seconds": [
+            0.161302,
+            0.413179,
+            0.05149499999999996,
+            0.03366199999999997
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 15040512,
+          "peak_bytes": 48349184,
+          "phase_seconds": [
+            0.16210600000000003,
+            0.41317899999999996,
+            0.051495999999999986,
+            0.03366200000000008
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 15073280,
+          "peak_bytes": 48775168,
+          "phase_seconds": [
+            0.1613,
+            0.413007,
+            0.051490999999999953,
+            0.03366099999999994
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48005120,
+          "phase_seconds": [
+            0.161304,
+            0.41317899999999996,
+            0.051490999999999953,
+            0.03366199999999997
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 48398336,
+          "phase_seconds": [
+            0.16209800000000002,
+            0.41317899999999996,
+            0.051495999999999986,
+            0.03366199999999997
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 48283648,
+          "phase_seconds": [
+            0.161295,
+            0.41317899999999996,
+            0.05149399999999993,
+            0.03366199999999997
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.11,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 5,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 48627712,
+          "phase_seconds": [
+            0.16813100000000003,
+            0.408434,
+            0.05338100000000001,
+            0.03383499999999995
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 48627712,
+          "phase_seconds": [
+            0.16811900000000002,
+            0.40843399999999996,
+            0.0533809999999999,
+            0.03383500000000006
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 48250880,
+          "phase_seconds": [
+            0.16813499999999998,
+            0.408434,
+            0.05338100000000001,
+            0.03383499999999995
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48332800,
+          "phase_seconds": [
+            0.168132,
+            0.4084340000000001,
+            0.05338100000000001,
+            0.03383499999999995
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 48250880,
+          "phase_seconds": [
+            0.168133,
+            0.40843299999999993,
+            0.05338100000000001,
+            0.03383500000000006
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14942208,
+          "peak_bytes": 48971776,
+          "phase_seconds": [
+            0.16813300000000003,
+            0.40843399999999996,
+            0.0533809999999999,
+            0.03383500000000006
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 15089664,
+          "peak_bytes": 48349184,
+          "phase_seconds": [
+            0.16811500000000001,
+            0.408434,
+            0.05338100000000001,
+            0.03383500000000006
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48201728,
+          "phase_seconds": [
+            0.168131,
+            0.408434,
+            0.0533809999999999,
+            0.03383499999999995
+          ],
+          "checksum": -8.428743193022209,
+          "error": 3.470706949364119e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.11,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 2,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 54689792,
+          "phase_seconds": [
+            0.18936399999999998,
+            0.468021,
+            0.05150500000000002,
+            0.03421099999999999
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 55361536,
+          "phase_seconds": [
+            0.189367,
+            0.46802,
+            0.05150499999999991,
+            0.03421199999999991
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 55246848,
+          "phase_seconds": [
+            0.18936899999999998,
+            0.46802,
+            0.05150600000000005,
+            0.03421099999999999
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14942208,
+          "peak_bytes": 54804480,
+          "phase_seconds": [
+            0.18936200000000003,
+            0.46801999999999994,
+            0.051505000000000134,
+            0.03421200000000002
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 15122432,
+          "peak_bytes": 55312384,
+          "phase_seconds": [
+            0.18936600000000003,
+            0.46802,
+            0.05150600000000005,
+            0.03421099999999999
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 15073280,
+          "peak_bytes": 55181312,
+          "phase_seconds": [
+            0.189358,
+            0.46802000000000005,
+            0.05150499999999991,
+            0.03421099999999999
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 54870016,
+          "phase_seconds": [
+            0.189359,
+            0.46802099999999996,
+            0.051505000000000134,
+            0.03421099999999999
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 54755328,
+          "phase_seconds": [
+            0.189356,
+            0.46802,
+            0.05150499999999991,
+            0.03421199999999991
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.11,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 4,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 55279616,
+          "phase_seconds": [
+            0.19050499999999998,
+            0.49273399999999995,
+            0.05001500000000003,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 15073280,
+          "peak_bytes": 54788096,
+          "phase_seconds": [
+            0.19050599999999998,
+            0.49273500000000003,
+            0.05001500000000003,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 55115776,
+          "phase_seconds": [
+            0.190498,
+            0.49273399999999995,
+            0.050014,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14827520,
+          "peak_bytes": 54837248,
+          "phase_seconds": [
+            0.190503,
+            0.4927349999999999,
+            0.05001500000000003,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 54738944,
+          "phase_seconds": [
+            0.19050099999999998,
+            0.49273400000000006,
+            0.05001500000000003,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 54689792,
+          "phase_seconds": [
+            0.1905,
+            0.49273399999999995,
+            0.05001500000000003,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 15056896,
+          "peak_bytes": 55001088,
+          "phase_seconds": [
+            0.1905,
+            0.492735,
+            0.05001499999999992,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 54755328,
+          "phase_seconds": [
+            0.19049799999999997,
+            0.492734,
+            0.05001499999999992,
+            0.03381400000000001
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.11,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 3,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 54837248,
+          "phase_seconds": [
+            0.307611,
+            0.464952,
+            0.0512689999999999,
+            0.035758999999999985
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 15056896,
+          "peak_bytes": 54788096,
+          "phase_seconds": [
+            0.308964,
+            0.46525999999999995,
+            0.051271000000000067,
+            0.035757999999999956
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14942208,
+          "peak_bytes": 55214080,
+          "phase_seconds": [
+            0.308982,
+            0.46526,
+            0.05126999999999993,
+            0.03575800000000007
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14893056,
+          "peak_bytes": 54755328,
+          "phase_seconds": [
+            0.308978,
+            0.46526000000000006,
+            0.05127000000000004,
+            0.03575800000000007
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14893056,
+          "peak_bytes": 54870016,
+          "phase_seconds": [
+            0.307612,
+            0.46495200000000003,
+            0.05126900000000001,
+            0.035758999999999985
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14942208,
+          "peak_bytes": 54935552,
+          "phase_seconds": [
+            0.307612,
+            0.464952,
+            0.05126900000000001,
+            0.035758999999999985
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14942208,
+          "peak_bytes": 54919168,
+          "phase_seconds": [
+            0.30761,
+            0.464951,
+            0.05126900000000001,
+            0.035758999999999985
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 15073280,
+          "peak_bytes": 54984704,
+          "phase_seconds": [
+            0.30898200000000003,
+            0.46526,
+            0.05126999999999993,
+            0.03575800000000007
+          ],
+          "checksum": -8.428743193022111,
+          "error": 5.0373881586535615e-17,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.0,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14368768,
+          "peak_bytes": 232275968,
+          "phase_seconds": [
+            0.8243020000000001,
+            2.280461,
+            0.2711929999999998,
+            0.13202200000000008
+          ],
+          "checksum": -15.159808930820295,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.0,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14368768,
+          "peak_bytes": 232226816,
+          "phase_seconds": [
+            0.801658,
+            2.203457,
+            0.2659239999999996,
+            0.13028200000000023
+          ],
+          "checksum": -15.159808930820295,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.0,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14385152,
+          "peak_bytes": 232374272,
+          "phase_seconds": [
+            0.857083,
+            2.28802,
+            0.2736730000000005,
+            0.13503399999999965
+          ],
+          "checksum": -15.159808930820295,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.0,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 1,
+          "baseline_bytes": 14647296,
+          "peak_bytes": 72646656,
+          "phase_seconds": [
+            0.364575,
+            0.6115090000000001,
+            0.12707500000000005,
+            0.04971199999999998
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 72679424,
+          "phase_seconds": [
+            0.364573,
+            0.6115109999999999,
+            0.127073,
+            0.04971199999999998
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 72712192,
+          "phase_seconds": [
+            0.364575,
+            0.6115109999999999,
+            0.12707400000000013,
+            0.0497120000000002
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 72073216,
+          "phase_seconds": [
+            0.36457300000000004,
+            0.611512,
+            0.12707400000000013,
+            0.049712999999999896
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.0,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 2,
+          "baseline_bytes": 14827520,
+          "peak_bytes": 72744960,
+          "phase_seconds": [
+            0.502468,
+            0.6278460000000001,
+            0.15532400000000002,
+            0.04770199999999991
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 72581120,
+          "phase_seconds": [
+            0.5024679999999999,
+            0.627845,
+            0.15532400000000002,
+            0.04770199999999991
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 72613888,
+          "phase_seconds": [
+            0.5024689999999999,
+            0.6278459999999999,
+            0.15532400000000002,
+            0.04770199999999991
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14860288,
+          "peak_bytes": 72712192,
+          "phase_seconds": [
+            0.5024660000000001,
+            0.627846,
+            0.15532400000000002,
+            0.04770299999999983
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.0,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 3,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 71712768,
+          "phase_seconds": [
+            0.411023,
+            0.574192,
+            0.1354979999999999,
+            0.049808000000000074
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14712832,
+          "peak_bytes": 72138752,
+          "phase_seconds": [
+            0.411022,
+            0.574193,
+            0.13549900000000004,
+            0.04980899999999999
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14729216,
+          "peak_bytes": 72105984,
+          "phase_seconds": [
+            0.41102299999999997,
+            0.574193,
+            0.13549900000000004,
+            0.04980700000000016
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 71565312,
+          "phase_seconds": [
+            0.41102400000000006,
+            0.574193,
+            0.13549800000000012,
+            0.049808000000000074
+          ],
+          "checksum": -15.15980893082133,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.0,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 1,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 75284480,
+          "phase_seconds": [
+            0.246287,
+            0.69076,
+            0.07452300000000012,
+            0.04700599999999988
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 75071488,
+          "phase_seconds": [
+            0.24629099999999998,
+            0.6907599999999999,
+            0.07452300000000012,
+            0.0470060000000001
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14843904,
+          "peak_bytes": 75284480,
+          "phase_seconds": [
+            0.24628799999999998,
+            0.69076,
+            0.07452300000000012,
+            0.0470060000000001
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 75202560,
+          "phase_seconds": [
+            0.246286,
+            0.69076,
+            0.0745229999999999,
+            0.0470060000000001
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.0,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14843904,
+          "peak_bytes": 76234752,
+          "phase_seconds": [
+            0.22638199999999997,
+            0.7173749999999999,
+            0.08571299999999993,
+            0.05312300000000003
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 77185024,
+          "phase_seconds": [
+            0.22637800000000005,
+            0.717375,
+            0.08571299999999993,
+            0.05312299999999981
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 76152832,
+          "phase_seconds": [
+            0.22638100000000003,
+            0.717375,
+            0.08571300000000015,
+            0.053120000000000056
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 76120064,
+          "phase_seconds": [
+            0.22637799999999997,
+            0.717375,
+            0.08571299999999993,
+            0.05312199999999989
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.0,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 75137024,
+          "phase_seconds": [
+            0.230096,
+            0.6895929999999999,
+            0.08097999999999983,
+            0.05068599999999979
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 75022336,
+          "phase_seconds": [
+            0.230109,
+            0.6895929999999999,
+            0.08098099999999997,
+            0.05068500000000009
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14729216,
+          "peak_bytes": 75022336,
+          "phase_seconds": [
+            0.23010900000000004,
+            0.6895920000000001,
+            0.08097999999999983,
+            0.05068500000000009
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14680064,
+          "peak_bytes": 76136448,
+          "phase_seconds": [
+            0.230093,
+            0.6895930000000001,
+            0.08098099999999997,
+            0.05068499999999987
+          ],
+          "checksum": -15.159808930821544,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.0,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14712832,
+          "peak_bytes": 86654976,
+          "phase_seconds": [
+            0.294442,
+            0.7768670000000001,
+            0.07171700000000003,
+            0.045771999999999924
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 86507520,
+          "phase_seconds": [
+            0.294444,
+            0.776867,
+            0.07171700000000003,
+            0.045772000000000146
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14778368,
+          "peak_bytes": 86425600,
+          "phase_seconds": [
+            0.294443,
+            0.7768679999999999,
+            0.07171799999999995,
+            0.045773000000000064
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14811136,
+          "peak_bytes": 88735744,
+          "phase_seconds": [
+            0.294442,
+            0.776867,
+            0.07171099999999986,
+            0.04577399999999998
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.0,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 2,
+          "baseline_bytes": 14696448,
+          "peak_bytes": 88539136,
+          "phase_seconds": [
+            0.27791599999999994,
+            0.844235,
+            0.08988299999999994,
+            0.05691899999999994
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14761984,
+          "peak_bytes": 88555520,
+          "phase_seconds": [
+            0.2779170000000001,
+            0.8442350000000001,
+            0.08987800000000012,
+            0.05692000000000008
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 88604672,
+          "phase_seconds": [
+            0.27791800000000005,
+            0.844235,
+            0.08988299999999994,
+            0.05691899999999994
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14729216,
+          "peak_bytes": 88588288,
+          "phase_seconds": [
+            0.27791800000000005,
+            0.8442350000000001,
+            0.0898819999999998,
+            0.05691899999999972
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.0,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 14876672,
+          "peak_bytes": 88735744,
+          "phase_seconds": [
+            0.286927,
+            0.813264,
+            0.09788900000000011,
+            0.05857899999999994
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14696448,
+          "peak_bytes": 88588288,
+          "phase_seconds": [
+            0.286926,
+            0.8132640000000001,
+            0.09788899999999989,
+            0.05857899999999994
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14745600,
+          "peak_bytes": 88489984,
+          "phase_seconds": [
+            0.28692400000000007,
+            0.813266,
+            0.09788700000000006,
+            0.05857899999999994
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14696448,
+          "peak_bytes": 88539136,
+          "phase_seconds": [
+            0.28692399999999996,
+            0.813367,
+            0.09788799999999998,
+            0.058580000000000076
+          ],
+          "checksum": -15.159808930821548,
+          "error": 1.9797899796144628e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243337,
+            "gradient": 4.842965874519807
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.0,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 48644096,
+          "phase_seconds": [
+            0.16828000000000004,
+            0.417995,
+            0.05221599999999993,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48431104,
+          "phase_seconds": [
+            0.168274,
+            0.417995,
+            0.05221600000000004,
+            0.035149999999999904
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 15040512,
+          "peak_bytes": 48660480,
+          "phase_seconds": [
+            0.16827399999999998,
+            0.417996,
+            0.05221599999999993,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 48201728,
+          "phase_seconds": [
+            0.168266,
+            0.417995,
+            0.05221599999999993,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 47972352,
+          "phase_seconds": [
+            0.16827200000000003,
+            0.417995,
+            0.05221599999999993,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14876672,
+          "peak_bytes": 48660480,
+          "phase_seconds": [
+            0.16827599999999998,
+            0.417996,
+            0.0522149999999999,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 47890432,
+          "phase_seconds": [
+            0.168279,
+            0.41799500000000006,
+            0.05221599999999993,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 48644096,
+          "phase_seconds": [
+            0.16828300000000002,
+            0.417995,
+            0.05221600000000004,
+            0.035150000000000015
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.0,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 4,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 48676864,
+          "phase_seconds": [
+            0.16756000000000001,
+            0.412123,
+            0.0536350000000001,
+            0.03560799999999997
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 48168960,
+          "phase_seconds": [
+            0.167553,
+            0.41212299999999996,
+            0.05363499999999988,
+            0.03561000000000003
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 48152576,
+          "phase_seconds": [
+            0.167551,
+            0.412123,
+            0.05363399999999996,
+            0.035609
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 48644096,
+          "phase_seconds": [
+            0.16756,
+            0.4121229999999999,
+            0.05363400000000007,
+            0.035609
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 48152576,
+          "phase_seconds": [
+            0.167559,
+            0.4121230000000001,
+            0.05363399999999996,
+            0.035609
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 15056896,
+          "peak_bytes": 48480256,
+          "phase_seconds": [
+            0.16756100000000002,
+            0.4121229999999999,
+            0.05363400000000007,
+            0.035609
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 48873472,
+          "phase_seconds": [
+            0.167547,
+            0.41212399999999993,
+            0.05363499999999999,
+            0.03561000000000003
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 48103424,
+          "phase_seconds": [
+            0.167557,
+            0.41212299999999996,
+            0.05363400000000007,
+            0.035609
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.0,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 47955968,
+          "phase_seconds": [
+            0.17219799999999996,
+            0.43336,
+            0.05283700000000002,
+            0.03418100000000002
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14991360,
+          "peak_bytes": 48988160,
+          "phase_seconds": [
+            0.172202,
+            0.43336100000000005,
+            0.05284500000000003,
+            0.03418100000000002
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 49004544,
+          "phase_seconds": [
+            0.172196,
+            0.433361,
+            0.05284500000000003,
+            0.034180999999999906
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 48693248,
+          "phase_seconds": [
+            0.172199,
+            0.43336199999999997,
+            0.05283700000000002,
+            0.03418100000000002
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14893056,
+          "peak_bytes": 48611328,
+          "phase_seconds": [
+            0.172202,
+            0.433361,
+            0.05283700000000002,
+            0.03418100000000002
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 15073280,
+          "peak_bytes": 48676864,
+          "phase_seconds": [
+            0.172201,
+            0.43336199999999997,
+            0.05283700000000002,
+            0.0341800000000001
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 48168960,
+          "phase_seconds": [
+            0.172196,
+            0.4333620000000001,
+            0.05283699999999991,
+            0.034180999999999906
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 48152576,
+          "phase_seconds": [
+            0.172203,
+            0.433362,
+            0.05283700000000002,
+            0.03418100000000002
+          ],
+          "checksum": -15.159808930821423,
+          "error": 1.162310366649339e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.0605632433467,
+            "gradient": 4.8429658745196615
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.0,
+      "repeat": 0,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 0,
+          "baseline_bytes": 15073280,
+          "peak_bytes": 54837248,
+          "phase_seconds": [
+            0.18894,
+            0.503296,
+            0.052319000000000004,
+            0.03775600000000001
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 54886400,
+          "phase_seconds": [
+            0.188929,
+            0.503296,
+            0.052319000000000004,
+            0.037753000000000037
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14876672,
+          "peak_bytes": 54657024,
+          "phase_seconds": [
+            0.18893,
+            0.503296,
+            0.05232000000000003,
+            0.037753000000000037
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14827520,
+          "peak_bytes": 54870016,
+          "phase_seconds": [
+            0.18893600000000002,
+            0.5032960000000001,
+            0.05232100000000006,
+            0.03775600000000001
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 54624256,
+          "phase_seconds": [
+            0.188934,
+            0.503296,
+            0.052319000000000004,
+            0.037753000000000037
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 54935552,
+          "phase_seconds": [
+            0.18894000000000002,
+            0.503296,
+            0.05231999999999992,
+            0.037754000000000065
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 54755328,
+          "phase_seconds": [
+            0.188934,
+            0.503295,
+            0.05232100000000006,
+            0.03775600000000001
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 54738944,
+          "phase_seconds": [
+            0.18893600000000002,
+            0.503296,
+            0.05232099999999995,
+            0.03775499999999998
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.0,
+      "repeat": 1,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 1,
+          "baseline_bytes": 15089664,
+          "peak_bytes": 54804480,
+          "phase_seconds": [
+            0.18443700000000002,
+            0.481386,
+            0.05137999999999998,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 2,
+          "baseline_bytes": 14843904,
+          "peak_bytes": 55230464,
+          "phase_seconds": [
+            0.18443,
+            0.481386,
+            0.05137899999999995,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 14860288,
+          "peak_bytes": 54738944,
+          "phase_seconds": [
+            0.18444100000000002,
+            0.481386,
+            0.051377999999999924,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 14974976,
+          "peak_bytes": 54837248,
+          "phase_seconds": [
+            0.18443400000000004,
+            0.4813859999999999,
+            0.051379000000000064,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 14876672,
+          "peak_bytes": 55001088,
+          "phase_seconds": [
+            0.184436,
+            0.481386,
+            0.05137999999999998,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 14925824,
+          "peak_bytes": 54738944,
+          "phase_seconds": [
+            0.184431,
+            0.48138600000000004,
+            0.05138000000000009,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 14876672,
+          "peak_bytes": 54640640,
+          "phase_seconds": [
+            0.18443199999999998,
+            0.481385,
+            0.051379000000000064,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14958592,
+          "peak_bytes": 54706176,
+          "phase_seconds": [
+            0.18443800000000002,
+            0.481386,
+            0.051378000000000035,
+            0.035995
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.0,
+      "repeat": 2,
+      "grid": 32,
+      "states": 64,
+      "dense_dim": 1024,
+      "per_rank": [
+        {
+          "rank": 2,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 54935552,
+          "phase_seconds": [
+            0.190791,
+            0.505396,
+            0.052524000000000015,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 0,
+          "baseline_bytes": 15056896,
+          "peak_bytes": 55263232,
+          "phase_seconds": [
+            0.190797,
+            0.5053970000000001,
+            0.052524000000000015,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 3,
+          "baseline_bytes": 15024128,
+          "peak_bytes": 55181312,
+          "phase_seconds": [
+            0.190789,
+            0.5053970000000001,
+            0.05252200000000007,
+            0.0381220000000001
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 7,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 55525376,
+          "phase_seconds": [
+            0.19078799999999996,
+            0.505397,
+            0.05252199999999996,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 6,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 54804480,
+          "phase_seconds": [
+            0.19079000000000002,
+            0.5053960000000001,
+            0.052522999999999986,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 5,
+          "baseline_bytes": 15040512,
+          "peak_bytes": 54984704,
+          "phase_seconds": [
+            0.19079300000000002,
+            0.505398,
+            0.052522999999999986,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 1,
+          "baseline_bytes": 15007744,
+          "peak_bytes": 54771712,
+          "phase_seconds": [
+            0.190796,
+            0.505398,
+            0.052522999999999986,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        },
+        {
+          "rank": 4,
+          "baseline_bytes": 14909440,
+          "peak_bytes": 54820864,
+          "phase_seconds": [
+            0.190795,
+            0.505396,
+            0.052522999999999986,
+            0.03812199999999999
+          ],
+          "checksum": -15.159808930821463,
+          "error": 1.2143127934770065e-16,
+          "localization": {
+            "iterations": 3,
+            "status": 1,
+            "spread": 2179.060563243349,
+            "gradient": 4.842965874519658
+          }
+        }
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.11,
+      "peak_rank_bytes_median": 232357888,
+      "peak_rank_bytes_min": 232292352,
+      "peak_rank_bytes_max": 232357888,
+      "sum_rank_peaks_bytes_median": 232357888,
+      "phase_seconds_median": [
+        0.737418,
+        2.140838,
+        0.2656109999999998,
+        0.12462100000000031
+      ],
+      "phase_seconds_min": [
+        0.7318269999999998,
+        2.137753,
+        0.2589839999999999,
+        0.12312499999999993
+      ],
+      "phase_seconds_max": [
+        0.8189130000000001,
+        2.1626140000000005,
+        0.2806829999999998,
+        0.12740099999999988
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.11,
+      "peak_rank_bytes_median": 72269824,
+      "peak_rank_bytes_min": 71745536,
+      "peak_rank_bytes_max": 72695808,
+      "sum_rank_peaks_bytes_median": 287358976,
+      "phase_seconds_median": [
+        0.321613,
+        0.5263770000000001,
+        0.12303400000000009,
+        0.04863300000000015
+      ],
+      "phase_seconds_min": [
+        0.313727,
+        0.523448,
+        0.09802400000000011,
+        0.04849700000000001
+      ],
+      "phase_seconds_max": [
+        0.39901200000000003,
+        0.5867020000000001,
+        0.13527199999999984,
+        0.05068699999999993
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.11,
+      "peak_rank_bytes_median": 77299712,
+      "peak_rank_bytes_min": 77250560,
+      "peak_rank_bytes_max": 77316096,
+      "sum_rank_peaks_bytes_median": 306003968,
+      "phase_seconds_median": [
+        0.243332,
+        0.659587,
+        0.07473700000000005,
+        0.047341999999999995
+      ],
+      "phase_seconds_min": [
+        0.21411899999999998,
+        0.6559029999999999,
+        0.07401799999999992,
+        0.04539599999999999
+      ],
+      "phase_seconds_max": [
+        0.252339,
+        0.661322,
+        0.07569899999999996,
+        0.04901
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.11,
+      "peak_rank_bytes_median": 88555520,
+      "peak_rank_bytes_min": 87638016,
+      "peak_rank_bytes_max": 90406912,
+      "sum_rank_peaks_bytes_median": 348471296,
+      "phase_seconds_median": [
+        0.262882,
+        0.7550800000000002,
+        0.07167899999999983,
+        0.04622700000000002
+      ],
+      "phase_seconds_min": [
+        0.220676,
+        0.7147890000000001,
+        0.06246799999999997,
+        0.04540500000000014
+      ],
+      "phase_seconds_max": [
+        0.26900900000000005,
+        0.775029,
+        0.07478400000000018,
+        0.04951300000000014
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.11,
+      "peak_rank_bytes_median": 48775168,
+      "peak_rank_bytes_min": 48758784,
+      "peak_rank_bytes_max": 48971776,
+      "sum_rank_peaks_bytes_median": 387612672,
+      "phase_seconds_median": [
+        0.16682500000000006,
+        0.413179,
+        0.051495999999999986,
+        0.03383500000000006
+      ],
+      "phase_seconds_min": [
+        0.16210600000000003,
+        0.4084340000000001,
+        0.05082399999999998,
+        0.03366200000000008
+      ],
+      "phase_seconds_max": [
+        0.16813499999999998,
+        0.41366800000000004,
+        0.05338100000000001,
+        0.03389300000000006
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.11,
+      "peak_rank_bytes_median": 55279616,
+      "peak_rank_bytes_min": 55214080,
+      "peak_rank_bytes_max": 55361536,
+      "sum_rank_peaks_bytes_median": 439304192,
+      "phase_seconds_median": [
+        0.19050599999999998,
+        0.468021,
+        0.051271000000000067,
+        0.03421200000000002
+      ],
+      "phase_seconds_min": [
+        0.18936899999999998,
+        0.46526000000000006,
+        0.05001500000000003,
+        0.03381400000000001
+      ],
+      "phase_seconds_max": [
+        0.30898200000000003,
+        0.49273500000000003,
+        0.05150600000000005,
+        0.035758999999999985
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 1,
+      "orbitals": 1,
+      "omega": 0.0,
+      "peak_rank_bytes_median": 232275968,
+      "peak_rank_bytes_min": 232226816,
+      "peak_rank_bytes_max": 232374272,
+      "sum_rank_peaks_bytes_median": 232275968,
+      "phase_seconds_median": [
+        0.8243020000000001,
+        2.280461,
+        0.2711929999999998,
+        0.13202200000000008
+      ],
+      "phase_seconds_min": [
+        0.801658,
+        2.203457,
+        0.2659239999999996,
+        0.13028200000000023
+      ],
+      "phase_seconds_max": [
+        0.857083,
+        2.28802,
+        0.2736730000000005,
+        0.13503399999999965
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 1,
+      "omega": 0.0,
+      "peak_rank_bytes_median": 72712192,
+      "peak_rank_bytes_min": 72138752,
+      "peak_rank_bytes_max": 72744960,
+      "sum_rank_peaks_bytes_median": 290111488,
+      "phase_seconds_median": [
+        0.41102400000000006,
+        0.611512,
+        0.13549900000000004,
+        0.049712999999999896
+      ],
+      "phase_seconds_min": [
+        0.364575,
+        0.574193,
+        0.12707500000000005,
+        0.04770299999999983
+      ],
+      "phase_seconds_max": [
+        0.5024689999999999,
+        0.6278460000000001,
+        0.15532400000000002,
+        0.04980899999999999
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 2,
+      "omega": 0.0,
+      "peak_rank_bytes_median": 76136448,
+      "peak_rank_bytes_min": 75284480,
+      "peak_rank_bytes_max": 77185024,
+      "sum_rank_peaks_bytes_median": 301318144,
+      "phase_seconds_median": [
+        0.23010900000000004,
+        0.69076,
+        0.08098099999999997,
+        0.05068599999999979
+      ],
+      "phase_seconds_min": [
+        0.22638199999999997,
+        0.6895930000000001,
+        0.07452300000000012,
+        0.0470060000000001
+      ],
+      "phase_seconds_max": [
+        0.24629099999999998,
+        0.717375,
+        0.08571300000000015,
+        0.05312300000000003
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 4,
+      "orbitals": 4,
+      "omega": 0.0,
+      "peak_rank_bytes_median": 88735744,
+      "peak_rank_bytes_min": 88604672,
+      "peak_rank_bytes_max": 88735744,
+      "sum_rank_peaks_bytes_median": 354287616,
+      "phase_seconds_median": [
+        0.286927,
+        0.813367,
+        0.08988299999999994,
+        0.05692000000000008
+      ],
+      "phase_seconds_min": [
+        0.27791800000000005,
+        0.7768679999999999,
+        0.07171799999999995,
+        0.04577399999999998
+      ],
+      "phase_seconds_max": [
+        0.294444,
+        0.8442350000000001,
+        0.09788900000000011,
+        0.058580000000000076
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 2,
+      "omega": 0.0,
+      "peak_rank_bytes_median": 48873472,
+      "peak_rank_bytes_min": 48660480,
+      "peak_rank_bytes_max": 49004544,
+      "sum_rank_peaks_bytes_median": 387252224,
+      "phase_seconds_median": [
+        0.16828300000000002,
+        0.417996,
+        0.05284500000000003,
+        0.035150000000000015
+      ],
+      "phase_seconds_min": [
+        0.16756100000000002,
+        0.41212399999999993,
+        0.05221600000000004,
+        0.03418100000000002
+      ],
+      "phase_seconds_max": [
+        0.172203,
+        0.4333620000000001,
+        0.0536350000000001,
+        0.03561000000000003
+      ]
+    },
+    {
+      "kind": "exchange",
+      "ranks": 8,
+      "orbitals": 4,
+      "omega": 0.0,
+      "peak_rank_bytes_median": 55230464,
+      "peak_rank_bytes_min": 54935552,
+      "peak_rank_bytes_max": 55525376,
+      "sum_rank_peaks_bytes_median": 438697984,
+      "phase_seconds_median": [
+        0.18894000000000002,
+        0.5032960000000001,
+        0.05232100000000006,
+        0.03775600000000001
+      ],
+      "phase_seconds_min": [
+        0.18444100000000002,
+        0.48138600000000004,
+        0.05138000000000009,
+        0.035995
+      ],
+      "phase_seconds_max": [
+        0.190797,
+        0.505398,
+        0.052524000000000015,
+        0.0381220000000001
+      ]
+    }
+  ],
+  "object_sha256": {
+    "xc/hse_spatial.f90.o": "8cf4ba19acb457fda7ceb16a7e5c30ecae3ebf10860f2797bf75ea07a9a32dd7",
+    "xc/exx_orbitals.f90.o": "45c82ec8a54ad881ebc0070c4b1fdff9439caef8628189931f5f2d8c0c21fd62",
+    "xc/hse_ace.f90.o": "a604bad341afae7e106fcb47f55ac8da49e12f6deaf551300c93587fca7e6414",
+    "xc/hse_wannier_gauge.f90.o": "fe615fd10eedf0999beea6bdeb58141e7605d66292982398cd778da0a6b39033",
+    "xc/fftw_pencils.f90.o": "07b59872c7762b069c85dbf0ab1754dd1648f9fc8912c4edec6c76c08cf3caff",
+    "gs/dc/lcfo_scalapack.f90.o": "eecd4ebb6aa49b1f6a591583e1b0990cdc57d0337e72ab0d524a5ef47a762aea",
+    "parallel/communication.f90.o": "7516cddbc8fec527345cdacea93b15c00096f0661352d403b90a32fa3f92d37d",
+    "misc/nvtx_wrapper.f90.o": "4c59d9d050ccecdada81085c7ac09f51b5b342a192b5617b8aec1870e1262fea"
+  },
+  "probe_sha256": {
+    "testsuites/benchmark_hybrid_distribution/run.py": "c3ebf229c233b5cfb57d7dbfda1e5c720e952fbae38959c35a924df6aaf496a0",
+    "testsuites/benchmark_hybrid_distribution/probe.f90": "924c79b861f20ffe92fa37e78cf5c85195019cbc20943680f7e13790968ac99c",
+    "testsuites/unit_lcfo_rt/peak_rss.c": "b08f838df36604a9bccb39ebd46d3adc2edb76eac9b543fba42b525b5323edd7"
+  },
+  "mpi_version": "mpiexec (Open MPI) 5.0.9\n\nReport bugs to https://www.open-mpi.org/community/help/",
+  "complete": true,
+  "probe_source_snapshot": {
+    "testsuites/benchmark_hybrid_distribution/run.py": "\"\"\"Fresh-process synthetic kernel scaling; never an end-to-end water benchmark.\"\"\"\nimport argparse,hashlib,json,math,os,platform,shlex,statistics,subprocess,tempfile\nfrom pathlib import Path\n\n\ndef run():\n    p=argparse.ArgumentParser(description=__doc__)\n    p.add_argument('--build',type=Path,required=True)\n    p.add_argument('--output',type=Path,required=True)\n    p.add_argument('--grid',type=int,default=32)\n    p.add_argument('--states',type=int,default=16)\n    p.add_argument('--dense-dim',type=int,default=1024)\n    p.add_argument('--repeat',type=int,default=3)\n    p.add_argument('--timeout',type=int,default=300)\n    p.add_argument('--mpiexec',default='mpiexec')\n    p.add_argument('--link-flags',help='Override FFTW, ScaLAPACK and BLAS/LAPACK link flags')\n    p.add_argument('--phase',choices=['all','exchange','dense'],default='all')\n    p.add_argument('--smoke',action='store_true',help='Small two-layout validation, not a performance result')\n    a=p.parse_args()\n    if min(a.grid,a.states,a.dense_dim,a.repeat,a.timeout)<1:p.error('sizes, repetitions and timeout must be positive')\n    b=a.build.resolve();root=Path(__file__).resolve().parents[2]\n    cache={}\n    for line in (b/'CMakeCache.txt').read_text().splitlines():\n        if '=' in line and ':' in line and not line.startswith(('//','#')):\n            key,value=line.split('=',1);cache[key.split(':',1)[0]]=value\n    if cache.get('USE_SCALAPACK')!='ON' or cache.get('USE_HSE')!='ON':p.error('MPI/HSE/ScaLAPACK build required')\n    if a.link_flags:\n        libs=shlex.split(a.link_flags)\n    else:\n        vendor=cache.get('ScaLAPACK_VENDOR_FLAGS')\n        fftw=cache.get('HSE_FFTW_LIBRARY')\n        if not vendor or not fftw:p.error('provide --link-flags for this build; vendor/FFTW flags not found in cache')\n        libs=shlex.split(vendor)+[fftw]\n    fc=cache.get('CMAKE_Fortran_COMPILER','mpifort')\n    env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',VECLIB_MAXIMUM_THREADS='1')\n    layouts=[(1,1),(4,1),(4,2),(4,4),(8,2),(8,4)]\n    dense_ranks=[1,4,8]\n    if a.smoke:\n        a.grid=8;a.states=8;a.dense_dim=19;a.repeat=1\n        layouts=[(1,1),(4,2)];dense_ranks=[1,4]\n    if a.states<max(o for _,o in layouts):p.error('each orbital group needs a state')\n    result={'scope':'synthetic production-kernel phases; not SCF/RT or water',\n            'platform':platform.platform(),'machine':platform.machine(),\n            'production_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),\n            'compiler':subprocess.check_output([fc,'--version'],text=True).splitlines()[0],\n            'build':str(b),'compiler_flags':cache.get('CMAKE_Fortran_FLAGS'),\n            'build_type':cache.get('CMAKE_BUILD_TYPE'),'link_flags':libs,\n            'build_type_flags':cache.get('CMAKE_Fortran_FLAGS_'+cache.get('CMAKE_BUILD_TYPE','').upper()),\n            'probe_flags':['-O2','-fopenmp','-ffree-line-length-none'],\n            'exchange_workload':{'source':'tensor Fourier wave packets with pair rotations, not water orbitals','h_bohr':1.,\n                'occupations':2.,'mlwf_maxiter':3,'mlwf_tolerance':1e-7,\n                'checksum':'unscaled Tr(Psi^dagger K Psi); no hybrid mixing, no rVV10'},\n            'phase_labels':{'exchange':['refresh','exact_exchange','ace_build','ace_apply'],\n                'dense':['replicated_block_input_and_layout','full_solve_and_diagnostics','unused','unused']},\n            'threads':{k:env[k] for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS')},\n            'memory_note':'Per-process lifetime high-water RSS. Sum of rank peaks is not simultaneous node RSS. Baseline is after MPI init; deltas are not isolated allocation accounting.',\n            'timing_note':'Cold first-call phases, including FFT plan initialization and validation collectives. Reported phases use max rank time; fresh MPI processes for every repeat.',\n            'runs':[],'summary':[]}\n    obj=b/'src/CMakeFiles/salmon.dir'\n    names=['xc/hse_spatial.f90.o','xc/exx_orbitals.f90.o','xc/hse_ace.f90.o',\n           'xc/hse_wannier_gauge.f90.o','xc/fftw_pencils.f90.o','gs/dc/lcfo_scalapack.f90.o',\n           'parallel/communication.f90.o','misc/nvtx_wrapper.f90.o']\n    result['object_sha256']={name:hashlib.sha256((obj/name).read_bytes()).hexdigest() for name in names}\n    result['probe_sha256']={str(f.relative_to(root)):hashlib.sha256(f.read_bytes()).hexdigest() for f in\n        (Path(__file__).resolve(),Path(__file__).with_name('probe.f90').resolve(),root/'testsuites/unit_lcfo_rt/peak_rss.c')}\n    result['mpi_version']=subprocess.run(shlex.split(a.mpiexec)+['--version'],text=True,capture_output=True).stdout.strip()\n    a.output.parent.mkdir(parents=True,exist_ok=True)\n    def save():a.output.write_text(json.dumps(result,indent=2)+'\\n')\n    with tempfile.TemporaryDirectory(prefix='hybrid-scaling-') as tmp:\n        tmp=Path(tmp);exe=tmp/'probe'\n        subprocess.run(['cc','-O2','-c',str(root/'testsuites/unit_lcfo_rt/peak_rss.c'),'-o',str(tmp/'rss.o')],check=True)\n        subprocess.run([fc,'-O2','-fopenmp','-ffree-line-length-none','-I'+str(b),str(Path(__file__).with_name('probe.f90')),\n                        str(tmp/'rss.o'),*[str(obj/name) for name in names],*libs,'-o',str(exe)],check=True)\n        tasks=[]\n        for omega in (.11,0.):\n            for ranks,orbitals in layouts:\n                tasks.append(('exchange',ranks,orbitals,omega,[1,a.grid,a.states,orbitals,omega]))\n        for ranks in dense_ranks:tasks.append(('dense',ranks,0,None,[2,a.dense_dim]))\n        tasks=[task for task in tasks if a.phase=='all' or task[0]==a.phase]\n        references={}\n        for kind,ranks,orbitals,omega,args in tasks:\n            subset=[]\n            for repeat in range(a.repeat):\n                cmd=shlex.split(a.mpiexec)+['-n',str(ranks),str(exe),*map(str,args)]\n                proc=subprocess.run(cmd,cwd=tmp,env=env,text=True,capture_output=True,timeout=a.timeout)\n                if proc.returncode:raise RuntimeError(proc.stdout+proc.stderr)\n                localizations={}\n                for line in proc.stdout.splitlines():\n                    if line.startswith('LOCALIZATION '):\n                        f=line.split()\n                        localizations[int(f[1])]=dict(iterations=int(f[2]),status=int(f[3]),spread=float(f[4]),gradient=float(f[5]))\n                if kind=='exchange' and sorted(localizations)!=list(range(ranks)):\n                    raise RuntimeError('missing localization diagnostics')\n                rows=[]\n                for line in proc.stdout.splitlines():\n                    if not line.startswith('MEASURE '):continue\n                    f=line.split()\n                    if len(f)!=10:raise RuntimeError('malformed measurement: '+line)\n                    rows.append(dict(rank=int(f[1]),baseline_bytes=int(f[2]),peak_bytes=int(f[3]),\n                                     phase_seconds=list(map(float,f[4:8])),checksum=float(f[8]),error=float(f[9])))\n                if sorted(r['rank'] for r in rows)!=list(range(ranks)):raise RuntimeError('missing or duplicate rank reports')\n                for row in rows:\n                    if kind=='exchange':\n                        row['localization']=localizations[row['rank']]\n                        loc=row['localization']\n                        if (loc['status']!=0 and loc['iterations']!=3) or not all(math.isfinite(loc[x]) for x in ('spread','gradient')):\n                            raise RuntimeError('localization failed: '+str(loc))\n                    if row['baseline_bytes']<=0 or row['peak_bytes']<row['baseline_bytes']:\n                        raise RuntimeError('invalid RSS measurement')\n                    if any(not math.isfinite(x) for x in row['phase_seconds']+[row['checksum'],row['error']]):\n                        raise RuntimeError('nonfinite measurement')\n                    if min(row['phase_seconds'])<0:raise RuntimeError('negative duration')\n                key=(kind,omega)\n                reference=references.setdefault(key,rows[0]['checksum'])\n                if any(abs(r['checksum']-reference)>1e-9*max(1.,abs(reference)) or r['error']>1e-10 for r in rows):\n                    raise RuntimeError('decomposition parity failed')\n                record=dict(kind=kind,ranks=ranks,orbitals=orbitals,omega=omega,repeat=repeat,\n                            grid=a.grid,states=a.states,dense_dim=a.dense_dim,per_rank=rows)\n                result['runs'].append(record);subset.append(record);save()\n            peak=[max(r['peak_bytes'] for r in x['per_rank']) for x in subset]\n            phases=[[max(r['phase_seconds'][i] for r in x['per_rank']) for x in subset] for i in range(4)]\n            summary=dict(kind=kind,ranks=ranks,orbitals=orbitals,omega=omega,\n                         peak_rank_bytes_median=statistics.median(peak),peak_rank_bytes_min=min(peak),peak_rank_bytes_max=max(peak),\n                         sum_rank_peaks_bytes_median=statistics.median(sum(r['peak_bytes'] for r in x['per_rank']) for x in subset),\n                         phase_seconds_median=[statistics.median(x) for x in phases],\n                         phase_seconds_min=[min(x) for x in phases],phase_seconds_max=[max(x) for x in phases])\n            result['summary'].append(summary);save()\n            print(json.dumps(summary),flush=True)\n    result['complete']=True;save()\n\n\nif __name__=='__main__':run()\n",
+    "testsuites/benchmark_hybrid_distribution/probe.f90": "program probe\n  use mpi\n  use iso_c_binding, only: c_int64_t\n  use hse_spatial\n  use hse_ace, only: hse_ace_state\n  use exx_orbitals\n  use lcfo_scalapack\n  implicit none\n  interface\n    function peak_rss_bytes() bind(C) result(bytes)\n      import c_int64_t\n      integer(c_int64_t) :: bytes\n    end function\n  end interface\n  type(spatial_exx_state) :: exchange\n  type(hse_ace_state) :: ace\n  type(lcfo_dense_state) :: dense\n  complex(8),allocatable :: psi(:,:,:),w(:,:,:),action(:,:,:),block(:,:)\n  real(8),allocatable :: occupation(:,:)\n  integer :: rank,np,err,comm_r,comm_o,comm(2),coords(2),dims(2),orb,rs,rr,ro\n  integer :: kd(3),partner,ngrid,no,n(3),m(3),lo(3),first,last,nlocal,x,y,z,g,j,k,mode,nb,dim,status,code\n  integer(c_int64_t) :: baseline,rss\n  real(8) :: t,times(4),h(3),phase,pi,volume,energy,global_energy,error,global_error,omega,he,oe,re\n  character(64) :: arg\n  call MPI_Init(err)\n  call MPI_Comm_rank(MPI_COMM_WORLD,rank,err);call MPI_Comm_size(MPI_COMM_WORLD,np,err)\n  call get_command_argument(1,arg);read(arg,*,iostat=code)mode\n  if(code/=0)call MPI_Abort(MPI_COMM_WORLD,1,err)\n  baseline=peak_rss_bytes();times=0d0;global_energy=0d0;global_error=0d0\n  if(mode==1)then\n    call get_command_argument(2,arg);read(arg,*)ngrid\n    call get_command_argument(3,arg);read(arg,*)no\n    call get_command_argument(4,arg);read(arg,*)orb\n    call get_command_argument(5,arg);read(arg,*)omega\n    if(min(ngrid,no,orb)<1.or.mod(np,orb)/=0.or.orb>no.or.no>ngrid**3)call MPI_Abort(MPI_COMM_WORLD,2,err)\n    rs=np/orb;rr=mod(rank,rs);ro=rank/rs\n    dims=[int(sqrt(real(rs,8))),1]\n    do while(mod(rs,dims(1))/=0)\n      dims(1)=dims(1)-1\n    enddo\n    dims(2)=rs/dims(1)\n    if(any(mod(ngrid,dims)/=0))call MPI_Abort(MPI_COMM_WORLD,3,err)\n    coords=[mod(rr,dims(1)),rr/dims(1)]\n    call MPI_Comm_split(MPI_COMM_WORLD,ro,rr,comm_r,err)\n    call MPI_Comm_split(MPI_COMM_WORLD,rr,ro,comm_o,err)\n    call MPI_Comm_split(comm_r,coords(2),coords(1),comm(1),err)\n    call MPI_Comm_split(comm_r,coords(1),coords(2),comm(2),err)\n    kd(1)=nint(real(no,8)**(1d0/3d0))\n    do while(mod(no,kd(1))/=0)\n      kd(1)=kd(1)-1\n    enddo\n    kd(2)=int(sqrt(real(no/kd(1),8)))\n    do while(mod(no/kd(1),kd(2))/=0)\n      kd(2)=kd(2)-1\n    enddo\n    kd(3)=no/kd(1)/kd(2)\n    if(any(kd<2).or.any(kd>ngrid))call MPI_Abort(MPI_COMM_WORLD,7,err)\n    n=ngrid;h=1d0;m=[ngrid,ngrid/dims(1),ngrid/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]\n    first=no*ro/orb+1;last=no*(ro+1)/orb;nlocal=last-first+1\n    allocate(psi(product(m),nlocal,1),w(product(m),nlocal,1),action(product(m),nlocal,1),occupation(nlocal,1))\n    pi=acos(-1d0);volume=real(product(n),8);occupation=2d0\n    do j=first,last\n      g=0;k=j-1\n      do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1\n        g=g+1\n        partner=k+1\n        if(mod(k,2)==1)partner=k-1\n        psi(g,j-first+1,1)=cos(.17d0)*packet([x,y+lo(2),z+lo(3)],k) &\n          +merge(1d0,-1d0,mod(k,2)==0)*sin(.17d0)*packet([x,y+lo(2),z+lo(3)],partner)\n      enddo;enddo;enddo\n    enddo\n    call MPI_Barrier(MPI_COMM_WORLD,err);t=MPI_Wtime()\n    call spatial_exx_refresh(exchange,n,h,dims,coords,comm,comm_r,psi,3,1d-7,status,occupation,comm_o)\n    call require_success(status)\n    times(1)=MPI_Wtime()-t\n    call MPI_Barrier(MPI_COMM_WORLD,err);t=MPI_Wtime()\n    call spatial_exx_apply(exchange,n,h,dims,coords,comm,comm_r,0d0,psi,w,status,omega,comm_o)\n    call require_success(status)\n    times(2)=MPI_Wtime()-t\n    call MPI_Barrier(MPI_COMM_WORLD,err);t=MPI_Wtime()\n    call orbital_ace_build(ace,psi,w,1d0,comm_r,comm_o,status)\n    call require_success(status)\n    times(3)=MPI_Wtime()-t\n    call MPI_Barrier(MPI_COMM_WORLD,err);t=MPI_Wtime()\n    call orbital_ace_apply(ace,psi,action,comm_r,comm_o,status)\n    call require_success(status)\n    times(4)=MPI_Wtime()-t\n    error=maxval(abs(action-w))\n    energy=real(sum(conjg(psi)*w),8)\n    call MPI_Allreduce(error,global_error,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,err)\n    call MPI_Allreduce(energy,global_energy,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,err)\n    if(global_error>1d-10)call MPI_Abort(MPI_COMM_WORLD,4,err)\n  else if(mode==2)then\n    call get_command_argument(2,arg);read(arg,*)dim\n    call MPI_Barrier(MPI_COMM_WORLD,err);t=MPI_Wtime()\n    call lcfo_dense_init(dense,dim,MPI_COMM_WORLD,status)\n    call require_success(status)\n    ! No full input oracle: materialize one bounded-width block, then discard.\n    nb=min(32,dim)\n    allocate(block(dim,nb))\n    do first=1,dim,nb\n      last=min(dim,first+nb-1)\n      do j=first,last;do g=1,dim\n        block(g,j-first+1)=cmplx(cos(.017d0*(g+j)),sin(.013d0*(g-j)),8)/dim\n        if(g==j)block(g,j-first+1)=block(g,j-first+1)+1d0+real(g,8)/dim\n      enddo;enddo\n      call lcfo_dense_add(dense,1,first,block(:,:last-first+1))\n    enddo\n    deallocate(block)\n    times(1)=MPI_Wtime()-t\n    call MPI_Barrier(MPI_COMM_WORLD,err);t=MPI_Wtime()\n    call lcfo_dense_solve(dense,dim,he,oe,re,status)\n    call require_success(status)\n    times(2)=MPI_Wtime()-t\n    global_error=max(he,oe,re);global_energy=sum(dense%values)\n  else\n    call MPI_Abort(MPI_COMM_WORLD,5,err)\n  endif\n  if(mode==1)write(*,'(a,3(1x,i0),2(1x,es26.16e3))') &\n    'LOCALIZATION',rank,exchange%iterations,exchange%localization_status,exchange%spread,exchange%gradient\n  rss=peak_rss_bytes()\n  if(baseline<0.or.rss<0)call MPI_Abort(MPI_COMM_WORLD,6,err)\n  write(*,'(a,1x,i0,2(1x,i0),6(1x,es26.16e3))')'MEASURE',rank,baseline,rss,times,global_energy,global_error\n  if(mode==2)call lcfo_dense_free(dense)\n  call MPI_Finalize(err)\ncontains\n  complex(8) function packet(point,index) result(value)\n    integer,intent(in) :: point(3),index\n    integer :: center(3),axis,q\n    complex(8) :: factor\n    center=[mod(index,kd(1)),mod(index/kd(1),kd(2)),index/(kd(1)*kd(2))]\n    value=1d0/sqrt(volume)\n    do axis=1,3\n      factor=0d0\n      do q=0,kd(axis)-1\n        factor=factor+exp(cmplx(0d0,2*pi*q*(real(point(axis),8)/ngrid-real(center(axis),8)/kd(axis)),8))\n      enddo\n      value=value*factor/sqrt(real(kd(axis),8))\n    enddo\n  end function\n  subroutine require_success(value)\n    integer,intent(in) :: value\n    integer :: total\n    call MPI_Allreduce(value,total,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,err)\n    if(total/=0)call MPI_Abort(MPI_COMM_WORLD,10,err)\n  end subroutine\nend program\n",
+    "testsuites/unit_lcfo_rt/peak_rss.c": "#include <stdint.h>\n#include <sys/resource.h>\nint64_t peak_rss_bytes(void) {\n    struct rusage usage;\n    if (getrusage(RUSAGE_SELF, &usage) != 0) return -1;\n#ifdef __APPLE__\n    return (int64_t)usage.ru_maxrss;\n#else\n    return (int64_t)usage.ru_maxrss * 1024;\n#endif\n}\n"
+  }
+}
