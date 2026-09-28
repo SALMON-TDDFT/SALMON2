@@ -1,5 +1,8 @@
 # Building HSE
 
+日本語のビルド・分散化・検証ノート：
+[HSE／PBEh(40)+rVV10 分散化ノート](hybrid-distribution-note-ja.md)。
+
 For Fugaku, use the standard SALMON entry point from a fresh build directory:
 
 ```sh
