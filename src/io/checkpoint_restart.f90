@@ -100,7 +100,8 @@ end subroutine generate_restart_directory_name
 subroutine checkpoint_gs(lg,mg,system,info,spsi,iter,mixing,odir)
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_mixing
   use filesystem, only: atomic_create_directory,create_directory
-  use salmon_global, only: yn_self_checkpoint
+  use salmon_global, only: yn_self_checkpoint,yn_dc,write_gs_restart_data
+  use exx_gs_metadata, only: exx_gs_metadata_write
   use parallelization, only: nproc_group_global,nproc_id_global
   implicit none
   type(s_rgrid)           ,intent(in) :: lg, mg
@@ -132,6 +133,8 @@ subroutine checkpoint_gs(lg,mg,system,info,spsi,iter,mixing,odir)
   call write_Rion(wdir,system)
   call write_Velocity(wdir,system)
   call write_bin(wdir,lg,mg,system,info,spsi,iter,mixing=mixing,is_self_checkpoint=iself)
+  if(yn_dc=='n'.and..not.iself.and.(write_gs_restart_data=='wfn'.or.write_gs_restart_data=='all')) &
+    call exx_gs_metadata_write(wdir,lg,system,info)
 end subroutine checkpoint_gs
 
 subroutine restart_gs(lg,mg,system,info,spsi,iter,mixing)
@@ -289,7 +292,9 @@ end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar, s_rt
-  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
+  use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_dc,yn_conventional_from_dcdft,xc
+  use exx_functional, only: is_global_hybrid
+  use exx_gs_metadata, only: exx_gs_metadata_check,exx_gs_occupation_check
   use nvtx_wrapper
   implicit none
   type(s_rgrid)          ,intent(in)    :: lg, mg
@@ -301,7 +306,8 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
   type(s_scalar)         ,intent(inout) :: Vh_stock1,Vh_stock2
 
   character(256) :: gdir,wdir
-  logical :: iself
+  logical :: iself,conventional_hybrid
+  real(8),allocatable :: gs_occupation(:,:,:)
   call nvtxStartRange('restart_rt', __LINE__)
   
   call generate_restart_directory_name(directory_read_data,gdir,wdir)
@@ -311,8 +317,12 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
     wdir = gdir
   end if
 
+  conventional_hybrid=yn_restart=='n'.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='n'.and.is_global_hybrid(xc)
+  if(conventional_hybrid)call exx_gs_metadata_check(wdir,lg,system,info,gs_occupation)
+
   call read_bin(wdir,lg,mg,system,info,spsi,iter &
                ,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2,is_self_checkpoint=iself)
+  if(conventional_hybrid)call exx_gs_occupation_check(system,info,gs_occupation)
        
   if(yn_restart =='y') then
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)

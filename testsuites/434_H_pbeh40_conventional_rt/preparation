@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+cp ../pseudo/H_rps.dat ./
+# Read the freshly verified ordinary GS directly; no DC files are used.
+test -s ../433_H_pbeh40_conventional_gs/data_for_restart/wfn.bin
+test -s ../433_H_pbeh40_conventional_gs/data_for_restart/hybrid_gs.bin

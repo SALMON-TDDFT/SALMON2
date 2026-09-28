@@ -76,7 +76,7 @@ PBEh forces differentiate the same cubic radial projector and solid spherical ha
 
 - Periodic, orthorhombic, unpolarized conventional DFT and fixed-cell BOMD, CPU, k-only MPI; uniform full k meshes.
 - Static `pbeh40` and `pbeh40_rvv10` use the inherited DC MLWF+ACE exchange path; DC convergence against fragment/buffer size is still needed.
-- **Not supported:** direct truncated-fragment MD, unrestricted conventional RT/Ehrenfest, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
+- **Not supported:** direct truncated-fragment MD, conventional-GS Ehrenfest and unrestricted RT, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
 - DC+rVV10 evaluates the **buffered fragment density in its own periodic cell**, including initial orbital preparation. It reuses the conventional XC evaluator and only the fragment spatial communicator for convolution; it does not convolve the assembled total density. The returned energy density is integrated over the core only, then scalar fragment energies are summed once (without orbital/k-point duplication). The potential acts throughout the core and buffer. Hartree remains a total-system calculation. Converge fragment/buffer size to control missing distant correlations and fragment periodic-image effects. The full-fragment potential is not asserted to be the functional derivative of the core-partitioned DC energy; direct truncated-fragment DC-MD remains disabled. Native mesh RT after DC initialization still evaluates rVV10 in its full propagation cell.
 - No production scaling, long liquid trajectory, diffusivity, RDF, density, or exchange-cutoff convergence claim follows from the bounded tests below.
 
@@ -336,3 +336,11 @@ and global grid size. `DC_LCFO_STREAM` identifies native payload streaming.
 Complete preflight rejects NaNs even in saved orbitals not requested by RT.
 No new parameter is needed. Repeated file opens and seeks can cost I/O time;
 no universal optimal read size or large-system startup speed is claimed.
+
+## Conventional GS to fixed-ion real-space RT
+
+PBE0, PBEh40, and PBEh40+rVV10 can read ordinary GS wavefunctions without DC.
+The supported route uses fresh GS metadata and fixed ions, with Gamma spatial
+parallelism or a complete uniform k mesh with k-only MPI. See
+[conventional GS to RT](conventional-hybrid-rt.md). RT continuation and
+conventional-GS moving-ion RT remain unsupported.

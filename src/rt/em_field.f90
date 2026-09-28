@@ -45,7 +45,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   rt%E_tot(:,itt) = -( rt%Ac_tot(:,itt) - rt%Ac_tot(:,itt-1) )/dt
 
   if(((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
-     .and.yn_conventional_from_dcdft=='y' &
+     .and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)) &
      .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2'.and.trans_longi=='tr')then
     ! The imposed A is known at all times. Center E at the same endpoint as
     ! force and current; keep the inherited convention on all other routes.

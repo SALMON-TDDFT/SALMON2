@@ -20,3 +20,25 @@ User approved this design on 2026-09-29. RT continuation/restart, moving nuclei 
 GS: yn_dc='n', theory='dft', write_gs_restart_data='wfn'.
 RT: theory='tddft_response' or 'tddft_pulse', yn_conventional_from_dcdft='n', yn_restart='n', directory_read_data points to GS output.
 Both use the same hybrid functional and physical system. A new GS must be written to obtain the metadata. Standard generic old GS files without hybrid metadata are not certified for this new route.
+
+## Verification (2026-09-29)
+
+- MPI/HSE/Libxc/ScaLAPACK build and HSE-enabled serial build succeeded.
+- New numbered cases 431–437: all 21 preparation/run/verification stages passed.
+- Existing HSE/DC cases 422–430: all 27 stages passed.
+- Conventional integration suite: 8 tests passed, covering all three functionals,
+  full-k impulse/Acos2, Gamma zero field/Acos2, adaptive 99.9% source ACE,
+  one-rank/two-rank current and energy agreement, electron norm, and metadata/
+  occupation rejection before wavefunction loading.
+- Serial executable: all three functionals, Gamma/two-k meshes, zero field/Acos2
+  (12 RT runs) completed with finite observables and conserved electron number.
+- Independent static review found no required changes. The updated manual
+  section parsed with docutils. These tests do not establish spectral or
+  k-point convergence.
+- HSE-disabled serial build also succeeded. Four focused HSE input/admission
+  regression tests passed. An obsolete test expecting static fixed-radius SCF
+  rejection was updated to check its already-supported admission instead.
+- The optional full HSE spatial Python suite was stopped during its 16-rank
+  fractional-occupation case to avoid competing with ongoing spectra runs;
+  this is not counted as a completed suite. The numbered DC/HSE suite above
+  completed, and the relevant input guards were rerun separately.

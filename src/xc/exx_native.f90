@@ -268,7 +268,7 @@ contains
     endif
     if((info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
        ((theory=='dft').or. &
-        (yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
+        (yn_dc=='n'.and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)).and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
       call refresh_spatial(system,mg,info,psi)
       return

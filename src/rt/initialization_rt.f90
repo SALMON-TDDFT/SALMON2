@@ -203,7 +203,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
   end do
   if(((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
-     .and.yn_conventional_from_dcdft=='y' &
+     .and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)) &
      .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2')then
     ! Endpoint E for the imposed transverse pulse, including the initial force.
     call calc_Ac_ext_t(-dt,0d0,0,0,prior_ac)

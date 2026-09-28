@@ -1,0 +1,57 @@
+&calculation
+ theory='dft'
+ yn_dc='n'
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,2,1
+/
+&control
+ sysname='H_conventional'
+ write_gs_restart_data='wfn'
+ yn_restart='n'
+/
+&units
+ unit_system='a.u.'
+/
+&system
+ yn_periodic='y'
+ al=16d0,8d0,8d0
+ nstate=2
+ nelec=4
+ nelem=1
+ natom=4
+/
+&pseudo
+ izatom(1)=1
+ file_pseudo(1)='H_rps.dat'
+ lmax_ps(1)=1
+ lloc_ps(1)=1
+/
+&functional
+ xc='pbeh40'
+ pbeh_coulomb_radius=4d0
+ exx_mlwf_interval=5
+ exx_mlwf_maxiter=100
+/
+&rgrid
+ num_rgrid=16,8,8
+/
+&kgrid
+ num_kgrid=1,1,1
+/
+&scf
+ nscf=500
+ ncg=4
+ threshold=1d-10
+ method_init_wf='random'
+ nscf_init_redistribution=0
+ nscf_init_no_diagonal=0
+/
+&atomic_coor
+ 'H' 3.3d0 4d0 4d0 1
+ 'H' 4.7d0 4d0 4d0 1
+ 'H' 11.3d0 4d0 4d0 1
+ 'H' 12.7d0 4d0 4d0 1
+/

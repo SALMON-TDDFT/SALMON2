@@ -7,6 +7,7 @@ set(SOURCES
     builtin_r2scan.f90
     builtin_tbmbj.f90
     exx_functional.f90
+    exx_gs_metadata.f90
     salmon_xc.f90
    )
 

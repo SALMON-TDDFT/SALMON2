@@ -129,8 +129,10 @@ With explicit `yn_exx_dc_mlwf='y'`, in DC all source geometry and exchange convo
 cell and its communicators. SCF switching readiness is synchronized across
 fragments so global mixing history is reset consistently.
 
-Adaptive support is also admitted for fixed-ion, DC-initialized native mesh
-RT with the existing Taylor4/ACE predictor-corrector. RT starts localization
+Adaptive support is also admitted for fixed-ion native mesh RT after DC
+initialization, or after conventional GS for PBE0/PBEh40/PBEh40+rVV10,
+with the existing Taylor4/ACE predictor-corrector. See
+[conventional GS to RT](conventional-hybrid-rt.md) for checkpoint requirements. RT starts localization
 immediately, without a gap or electronic-temperature criterion, and recomputes
 support on exchange refreshes. This is distinct from propagating in an LCFO
 basis. Moving ions, ionic relaxation, retained-LCFO RT, restart and snapshot

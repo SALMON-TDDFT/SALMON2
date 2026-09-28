@@ -123,7 +123,6 @@ class HSESpatial(unittest.TestCase):
             ('eigen_diagnostic',"xc='hse06'","xc='hse06'\n yn_hse_eigen_diagnostic='y'",'diagnostics unsupported'),
             ('empty_states',' nstate=2',' nstate=3','occupied spin pairs'),
             ('temperature',' nstate=2',' nstate=2\n temperature_k=300d0','occupied spin pairs'),
-            ('radius',"xc='hse06'","xc='hse06'\n exx_mlwf_radius=1d0",'full support'),
             ('restart',"sysname='H_dc_hse'","sysname='H_dc_hse'\n yn_restart='y'",'restart/snapshot'),
             ('snapshot',"xc='hse06'","xc='hse06'\n yn_hse_wannier_snapshot='y'",'restart/snapshot'),
             ('kpoints','num_kgrid=1,1,1','num_kgrid=1,2,1','Gamma y/z pencils'),
@@ -134,6 +133,14 @@ class HSESpatial(unittest.TestCase):
                 _,run=self.execute('scf_guard_'+name,base.replace(old,new),ranks=2)
                 self.assertNotEqual(run.returncode,0)
                 self.assertIn(message,run.stdout+run.stderr)
+
+    def test_scf_fixed_radius_admitted(self):
+        # Static SCF has supported finite MLWF radii since local-support EXX.
+        inp=self.scf_input().replace('nproc_rgrid=1,1,1','nproc_rgrid=1,2,1')
+        inp=inp.replace("xc='hse06'","xc='hse06'\n exx_mlwf_radius=1d0")
+        _,run=self.execute('scf_fixed_radius',inp,ranks=2)
+        self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+        self.assertIn('end SALMON',run.stdout)
 
     def test_dc_spatial_fractional(self):
         results=[]

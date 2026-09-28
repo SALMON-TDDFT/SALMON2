@@ -16,3 +16,7 @@ The PBEh Coulomb convention and controls are reused, including `pbeh_coulomb_rad
 DC-GS may use the PBE warm-up (`exx_pre_scf_threshold`) and unlocalized fragment exchange (`yn_exx_dc_mlwf='n'`). RT requires a compatible PBE0 seed: functional name, exchange fraction, Coulomb radius, and other saved functional parameters are checked. A PBEh(40) seed is not a PBE0 seed.
 
 The 32 H2 comparison uses the same mesh, fragment buffers, .999 source support, cutoff 4 bohr, dt=.05 au and 7000 steps as PBEh(40). Each functional has its own converged DC GS and its own impulse/zero-field runs.
+
+Conventional (non-DC) GS files can also initialize fixed-ion real-space RT.
+See [conventional GS to RT](conventional-hybrid-rt.md) for the required
+`hybrid_gs.bin` metadata, Gamma spatial and full-k parallel layouts, and examples.
