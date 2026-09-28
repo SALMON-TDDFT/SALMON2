@@ -12,7 +12,7 @@ program exchange_driver
   real(8),parameter :: h(3)=[.7d0,.8d0,.9d0]
   complex(8) :: psi(product(n),no,1),target(product(n),nt,1),reference(product(n),nt,1)
   complex(8),allocatable :: local(:,:,:),trial(:,:,:),action(:,:,:),previous_saved(:,:,:)
-  type(spatial_exx_state) :: spatial,full_spatial,partitioned
+  type(spatial_exx_state) :: spatial,full_spatial,partitioned,masked,masked_partitioned
   type(s_hse_wannier) :: serial
   type(hse_ace_state) :: distributed_ace,reference_ace,old_ace,average_ace
   complex(8),allocatable :: local_w(:,:,:),ace_ref(:,:,:),ace_result(:,:,:),old_action(:,:,:)
@@ -21,7 +21,8 @@ program exchange_driver
   integer :: bad_coords(2),comm_r,comm_o,orb_rank,orb_size,spatial_rank,spatial_size,first_o,last_o,first_t,last_t
   real(8) :: error,global_error,dv,bad_dv,minimum,omega,occupation(no,1)
   character(32) :: argument
-  complex(8) :: transported(no,no,1)
+  complex(8) :: transported(no,no,1),metric(nt,nt),metric_sum(nt,nt)
+  integer :: point(3),center(3)
   call get_command_argument(1,argument)
   read(argument,*)omega
   call MPI_Init(err)
@@ -145,6 +146,45 @@ program exchange_driver
     if(global_error>1d-10)error stop 'exchange mismatch'
     if(rank==0)print *, 'PASS spatial exchange ranks/stage/error ',np,stage,global_error,omega
   enddo
+  ! The same masked sources must give the same action with global and compact
+  ! convolution, including orbital streaming with uneven/empty target groups.
+  allocate(masked%source(product(m),no),masked_partitioned%source(product(m),last_o-first_o+1))
+  l=0
+  do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1
+    l=l+1;point=[x,y,z]+lo
+    do j=1,no
+      center=[j-1,0,0]
+      masked%source(l,j)=0d0
+      if(all(modulo(point-center+1,n)<=1)) &
+        masked%source(l,j)=cmplx(.1d0*j+.003d0*sum(point),.07d0*j,8)
+    enddo
+  enddo;enddo;enddo
+  masked_partitioned%source=masked%source(:,first_o:last_o)
+  masked%compact=.false.
+  call spatial_exx_apply(masked,n,h,dims,coords,comm,comm_r,2.5d0,trial,ace_ref,status,omega=omega)
+  if(status/=0)error stop 'masked global reference'
+  masked%compact=.true.
+  call spatial_exx_apply(masked,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=omega)
+  if(status/=0)error stop 'masked compact reference'
+  if(maxval(abs(action-ace_ref))>1d-11)error stop 'compact global mismatch'
+  if(masked%local_pairs/=no*nt.or.masked%global_pairs/=0)error stop 'compact path not used'
+  if(masked%local_points>=int(no*nt*product(n),int64))error stop 'compact FFT volume not reduced'
+  metric=matmul(conjg(transpose(trial(:,:,1))),action(:,:,1))
+  call MPI_Allreduce(metric,metric_sum,nt*nt,MPI_DOUBLE_COMPLEX,MPI_SUM,comm_r,err)
+  if(maxval(abs(metric_sum-conjg(transpose(metric_sum))))>1d-10)error stop 'compact Hermiticity'
+  masked_partitioned%compact=.false.
+  call spatial_exx_apply(masked_partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+    trial(:,first_t:last_t,:),ace_result,status,omega=omega,comm_o=comm_o)
+  if(status/=0)error stop 'masked orbital global'
+  if(any(abs(ace_result-ace_ref(:,first_t:last_t,:))>1d-11))error stop 'masked orbital global mismatch'
+  masked_partitioned%compact=.true.
+  call spatial_exx_apply(masked_partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+    trial(:,first_t:last_t,:),ace_result,status,omega=omega,comm_o=comm_o)
+  if(status/=0)error stop 'masked orbital compact'
+  if(any(abs(ace_result-ace_ref(:,first_t:last_t,:))>1d-11))error stop 'masked orbital compact mismatch'
+  if(masked_partitioned%local_pairs/=no*(last_t-first_t+1).or.masked_partitioned%global_pairs/=0) &
+    error stop 'orbital compact path not used'
+  if(rank==0)print *, 'PASS compact orbital exchange ranks/orbitals ',np,orb_size,omega
   call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=-.1d0)
   if(status==0)error stop 'negative screening accepted'
   ! Force an FFT validation failure after the first source broadcast.

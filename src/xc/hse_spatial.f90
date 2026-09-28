@@ -1,10 +1,12 @@
-! Full-support Gamma exchange on x-complete y/z pencils.
+! Gamma exchange on x-complete y/z pencils, with optional compact source action.
 ! Refresh and apply accept orbital-local columns through optional comm_o.
 ! Grid rows and FFT work are spatially local.
 ! Collective contract: n/h/dims/radius/omega/maxiter and call order agree;
 ! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module hse_spatial
+  use iso_fortran_env, only: int64
+  use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use fftw_pencils, only: pencil_transform
@@ -14,7 +16,9 @@ module hse_spatial
   private
   public :: spatial_exx_state,spatial_exx_refresh,spatial_exx_apply
   type spatial_exx_state
-    integer :: updates=0,iterations=0,localization_status=1
+    integer :: updates=0,iterations=0,localization_status=1,last_localization_status=1
+    logical :: compact=.false.,seed_localized=.false.,seed_needed=.true.
+    integer(int64) :: local_pairs=0,local_points=0,global_pairs=0
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
@@ -62,6 +66,8 @@ contains
     else
       call gauge_transport(psi,op%previous,product(h),op%gauge,op%min_singular,status,sum_grid)
       if(status/=0)then
+        op%last_localization_status=1
+        op%seed_needed=.true.
         op%gauge=0d0
         do j=1,no
           op%gauge(j,j,1)=1d0
@@ -87,8 +93,15 @@ contains
         call sum_grid(raw(:,:,axis,1))
         raw(:,:,axis+3,1)=conjg(transpose(raw(:,:,axis,1)))
       enddo
+      if(op%seed_localized.and.op%seed_needed)then
+        call projected_position_seed(raw,op%gauge(:,:,1),bad)
+        call comm_get_max(bad,comm_r)
+        if(bad/=0)return
+        op%seed_needed=.false.
+      endif
       call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
         op%iterations,op%localization_status)
+      op%last_localization_status=op%localization_status
     endif
     ! A non-converged unitary gauge preserves the full-support exchange operator.
     if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
@@ -179,6 +192,8 @@ contains
       if(bad==0)then
         op%gauge(:,:,1)=matmul(left,right)
       else
+        op%last_localization_status=1
+        op%seed_needed=.true.
         op%gauge=0d0
         do j=1,no
           op%gauge(j,j,1)=1d0
@@ -201,8 +216,15 @@ contains
         call orbital_overlap(psi(:,:,1),psi(:,:,1),product(h),comm_r,comm_o,counts,first,raw(:,:,axis,1),phase)
         raw(:,:,axis+3,1)=conjg(transpose(raw(:,:,axis,1)))
       enddo
+      if(op%seed_localized.and.op%seed_needed)then
+        call projected_position_seed(raw,op%gauge(:,:,1),bad)
+        call orbital_check(bad,comm_r,comm_o)
+        if(bad/=0)return
+        op%seed_needed=.false.
+      endif
       call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
         op%iterations,op%localization_status)
+      op%last_localization_status=op%localization_status
     endif
     if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
     call orbital_check(bad,comm_r,comm_o)
@@ -217,11 +239,49 @@ contains
     op%updates=op%updates+1;status=0
   end subroutine
 
+  ! A symmetry-adapted occupied basis can be a stationary saddle of the spread
+  ! functional. Diagonalize a fixed Hermitian projected periodic-position
+  ! combination before the first minimization to select localized directions.
+  ! The links are already reduced No x No matrices; no grid/WF gather is needed.
+  subroutine projected_position_seed(raw,gauge,status)
+    complex(8),intent(in) :: raw(:,:,:,:)
+    complex(8),intent(out) :: gauge(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: projected(:,:),work(:)
+    real(8),allocatable :: eigenvalues(:),rwork(:)
+    real(8) :: cosine_weight(3),sine_weight(3)
+    complex(8) :: coefficient,phase
+    integer :: no,axis,j,pivot
+    no=size(gauge,1);status=1
+    allocate(projected(no,no),eigenvalues(no),work(max(1,2*no)),rwork(max(1,3*no-2)))
+    cosine_weight=sqrt([2d0,3d0,5d0]);sine_weight=sqrt([7d0,11d0,13d0])
+    projected=0d0
+    do axis=1,3
+      coefficient=cmplx(cosine_weight(axis),-sine_weight(axis),8)/2d0
+      projected=projected+coefficient*raw(:,:,axis,1)+conjg(coefficient)*raw(:,:,axis+3,1)
+    enddo
+    ! Remove only floating-point anti-Hermitian roundoff before LAPACK.
+    projected=(projected+conjg(transpose(projected)))/2d0
+    call zheev('V','U',no,projected,no,eigenvalues,work,size(work),rwork,status)
+    if(status/=0)then
+      status=1;return
+    endif
+    if(.not.all(ieee_is_finite(real(projected))).or..not.all(ieee_is_finite(aimag(projected))))then
+      status=1;return
+    endif
+    do j=1,no
+      pivot=maxloc(abs(projected(:,j)),dim=1)
+      phase=projected(pivot,j)/abs(projected(pivot,j))
+      projected(:,j)=projected(:,j)*conjg(phase)
+    enddo
+    gauge=projected
+  end subroutine projected_position_seed
+
   ! Optional comm_o joins matching grid pencils across orbital groups. Source and
   ! target columns may have different (including zero) local counts. Counts must
   ! agree within comm_r, and the communicators form a spatial/orbital product.
   subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o)
-    type(spatial_exx_state),intent(in) :: op
+    type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r
     integer,intent(in),optional :: comm_o
     real(8),intent(in) :: h(3),radius_input
@@ -231,6 +291,10 @@ contains
     integer,intent(out) :: status
     complex(8),allocatable :: density(:,:),spectrum(:,:),source_column(:)
     real(8),allocatable :: multiplier(:)
+    type(s_exx_spatial_local) :: compact_plan
+    complex(8),allocatable :: compact_action(:,:)
+    logical :: compact_used
+    integer(int64) :: compact_pairs,compact_points
     real(8) :: radius,pi,q(3),q2,screening
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
@@ -266,7 +330,7 @@ contains
     if(.not.all(ieee_is_finite(real(op%source))).or..not.all(ieee_is_finite(aimag(op%source))))bad=1
     call collective_bad()
     if(bad/=0)return
-    if(present(comm_o))allocate(source_column(ng))
+    allocate(source_column(ng))
     allocate(multiplier(ng));pi=acos(-1d0);g=0
     ! Keep the forward FFT in Z pencils: local storage order is (z,x,y).
     m=[n(1)/dims(1),n(2)/dims(2),n(3)]
@@ -287,6 +351,13 @@ contains
         multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
       endif
     enddo;enddo;enddo
+    op%local_pairs=0;op%local_points=0;op%global_pairs=0
+    if(op%compact)then
+      call spatial_local_init(compact_plan,n,dims,coords,comm,multiplier,status)
+      call collective_bad_status()
+      if(status/=0)return
+      allocate(compact_action(ng,nt))
+    endif
     allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
     ! Grid rows match across comm_o; stream one source column from its owner.
     ! Empty source/target partitions participate in all orbital collectives.
@@ -297,7 +368,27 @@ contains
         if(present(comm_o))then
           if(orb_rank==owner)source_column=op%source(:,i)
           call comm_bcast(source_column,comm_o,owner)
+        else
+          source_column=op%source(:,i)
         endif
+        if(op%compact)then
+          call spatial_local_apply(compact_plan,comm_r,source_column,target(:,:,1),compact_action, &
+            compact_used,status,compact_pairs,compact_points)
+          call collective_bad_status()
+          if(status/=0)then
+            call spatial_local_destroy(compact_plan)
+            return
+          endif
+          if(compact_used)then
+            action(:,:,1)=action(:,:,1)+compact_action
+            op%local_pairs=op%local_pairs+compact_pairs
+            op%local_points=op%local_points+compact_points
+            if(present(comm_o))call collective_bad()
+            if(bad/=0)return
+            cycle
+          endif
+        endif
+        op%global_pairs=op%global_pairs+nt
         do first=1,nt,4
           nb=min(4,nt-first+1)
           do j=1,nb
@@ -331,8 +422,13 @@ contains
         if(bad/=0)return
       enddo
     enddo
+    call spatial_local_destroy(compact_plan)
     status=0
   contains
+    subroutine collective_bad_status()
+      bad=status
+      call collective_bad()
+    end subroutine
     subroutine collective_bad()
       call comm_get_max(bad,comm_r)
       if(present(comm_o))call comm_get_max(bad,comm_o)

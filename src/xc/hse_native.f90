@@ -13,14 +13,15 @@ module hse_native
   use hse_exchange
   use hse_ace
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply
+  use exx_adaptive_support, only: adaptive_source_mask
   use hse_spatial
   use hse_wannier
   use hse_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
-  use communication, only: comm_summation,comm_alltoall
+  use communication, only: comm_summation,comm_alltoall,comm_get_max
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
-    yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
+    yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
@@ -36,6 +37,8 @@ module hse_native
   real(8),allocatable,save :: cached_occupation(:,:)
   complex(8),allocatable,save :: cached_action(:,:,:)
   logical,save :: finite_support_localized=.true.
+  logical,save,public :: hse_adaptive_ready=.false.,hse_support_changed=.false.
+  logical,save :: adaptive_active=.false.,cached_adaptive_ready=.false.
   logical,save :: hse_force_full_action=.false.
   type(hse_ace_state),save :: ace
   type(hse_ace_state),save :: initial_ace,midpoint_ace
@@ -48,6 +51,8 @@ module hse_native
 contains
   subroutine hse_check_localization()
     ! A density criterion cannot certify a gauge-dependent truncated operator.
+    if(exx_mlwf_norm_fraction>0d0.and..not.adaptive_active) &
+      error stop 'Adaptive EXX: localized support not established; SCF result rejected'
     if(exx_mlwf_radius>0d0.and..not.finite_support_localized) &
       error stop 'EXX MLWF finite support: localization not converged; SCF result rejected'
   end subroutine hse_check_localization
@@ -235,7 +240,7 @@ contains
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
     endif
-    if((info%isize_r>1.or.info%isize_o>1).and. &
+    if((info%isize_r>1.or.info%isize_o>1.or.exx_mlwf_norm_fraction>0d0).and. &
        ((theory=='dft').or. &
         (yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
@@ -430,7 +435,7 @@ contains
     call hse_pack(psi,mg,info,target_work)
     if(timing_enabled)tick=hse_walltime()
     if(use_wannier_exchange().and.hse_force_full_action)then
-      if(info%isize_r>1.or.info%isize_o>1)then
+      if(info%isize_r>1.or.info%isize_o>1.or.exx_mlwf_norm_fraction>0d0)then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
           [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
@@ -495,6 +500,12 @@ contains
     real(8) :: ex,offdiag(3,3)
     integer :: status,total,changed,maxiter,j,io
     integer,allocatable :: orbital_comm
+    real(8),allocatable :: radii(:),loss(:)
+    logical,allocatable :: protected(:)
+    logical :: was_active
+    integer :: adaptive_bad
+    real(8) :: mask_diagnostic(2),mask_maximum(2)
+    if(exx_mlwf_norm_fraction>0d0.and.theory/='dft')hse_adaptive_ready=.true.
     if(info%isize_x/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
       error stop 'Spatial EXX: Gamma y/z pencils required'
     if(info%isize_o>system%no)error stop 'Spatial EXX: each orbital group must own at least one state'
@@ -520,18 +531,42 @@ contains
         if(all(cached_source==local).and.all(cached_occupation==system%rocc(:,:,1)))changed=0
       endif
     endif
+    if(exx_mlwf_norm_fraction>0d0.and.(hse_adaptive_ready.neqv.cached_adaptive_ready))changed=1
     call comm_summation(changed,total,info%icomm_ro)
     if(total==0)return
     maxiter=0
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
+    if(exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and.spatial%last_localization_status/=0) &
+      maxiter=exx_mlwf_maxiter
+    spatial%seed_localized=exx_mlwf_norm_fraction>0d0
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
       maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(info%io_s:info%io_e,:,1),comm_o=orbital_comm)
     if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
+    was_active=adaptive_active
+    adaptive_active=exx_mlwf_norm_fraction>0d0.and.hse_adaptive_ready.and. &
+      (spatial%last_localization_status==0.or.exx_mlwf_norm_fraction==1d0)
+    if(adaptive_active)then
+      allocate(radii(info%numo),loss(info%numo),protected(info%numo))
+      call adaptive_source_mask(num_rgrid,system%hgs,mg%is-1,mg%num,info%icomm_r,spatial%source, &
+        exx_mlwf_norm_fraction,radii,loss,protected,status)
+      call comm_summation(status,adaptive_bad,info%icomm_ro)
+      if(adaptive_bad/=0)error stop 'Adaptive EXX: source mask failed'
+      mask_diagnostic=[maxval(loss),maxval(radii)]
+      call comm_get_max(mask_diagnostic,mask_maximum,2,info%icomm_ro)
+      if(info%id_ro==0)write(*,'(a,3es18.9)')'EXX_ADAPTIVE fraction/max radius/max norm loss: ', &
+        exx_mlwf_norm_fraction,mask_maximum(2),mask_maximum(1)
+    endif
+    if(adaptive_active.neqv.was_active)hse_support_changed=.true.
+    cached_adaptive_ready=hse_adaptive_ready
+    spatial%compact=adaptive_active.and.exx_local_fft=='auto'
     call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
       pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
     if(status/=0)error stop 'Spatial EXX: exchange action failed'
+    if(adaptive_active.and.info%id_ro==0)write(*,'(a,3i18)') &
+      'EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0): ', &
+      spatial%local_pairs,spatial%global_pairs,spatial%local_points
     if(info%isize_o>1)then
       call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
     else

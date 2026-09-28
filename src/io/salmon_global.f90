@@ -127,6 +127,7 @@ module salmon_global
   character(8) :: exx_local_fft ! auto: exact compact convolution; off: full grid
   integer :: exx_mlwf_interval,exx_mlwf_maxiter
   real(8) :: exx_mlwf_radius ! input length, converted to bohr; 0=full support
+  real(8) :: exx_mlwf_norm_fraction ! 0 disabled; otherwise per-source retained norm
   real(8) :: exx_mlwf_tolerance
   real(8) :: hse_lcfo_wf_radius ! Always bohr; 0 means full support
   character(1) :: yn_hse_lcfo_rt

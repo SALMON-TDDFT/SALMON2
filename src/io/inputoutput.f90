@@ -282,7 +282,7 @@ contains
     namelist/functional/ &
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
-      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_local_fft, &
+      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -751,6 +751,7 @@ contains
     exx_mlwf_tolerance = -huge(1d0)
     hse_mlwf_tolerance = -huge(1d0)
     exx_mlwf_radius = 0d0
+    exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
     hse_lcfo_wf_radius = 0d0
     yn_hse_lcfo_rt = 'n'
@@ -1360,6 +1361,7 @@ contains
     if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
     call comm_bcast(exx_local_fft,nproc_group_global)
     call string_lowercase(exx_local_fft)
+    call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
     call comm_bcast(exx_mlwf_radius,nproc_group_global)
     exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
     call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
@@ -2326,6 +2328,7 @@ contains
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
+      write(fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
       write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
       write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
       write(fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
@@ -3241,9 +3244,25 @@ contains
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'
-    if(exx_mlwf_radius>0d0)then
-      if(theory/='dft'.or.yn_md=='y'.or.yn_opt=='y') &
-        error stop 'finite EXX MLWF radius supports static DFT only'
+    if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &
+      error stop 'exx_mlwf_norm_fraction must be in [0,1]'
+    if(exx_mlwf_norm_fraction>0d0)then
+      if(exx_mlwf_radius>0d0)error stop 'choose adaptive norm fraction or fixed EXX radius'
+      if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12)) &
+        error stop 'adaptive EXX support requires unshifted Gamma'
+      if(yn_hse_lcfo_rt=='y')error stop 'adaptive EXX support requires native mesh orbitals'
+    endif
+    if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0)then
+      if(exx_mlwf_radius>0d0)then
+        if(theory/='dft'.or.yn_md=='y'.or.yn_opt=='y') &
+          error stop 'finite EXX MLWF radius supports static DFT only'
+      else
+        if(yn_md=='y'.or.yn_opt=='y'.or. &
+          (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+          error stop 'adaptive EXX support requires static SCF or fixed-ion native RT'
+        if(theory/='dft'.and.(yn_dc=='y'.or.yn_conventional_from_dcdft/='y')) &
+          error stop 'adaptive EXX RT requires DC-initialized native mesh orbitals'
+      endif
       if(xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10') &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
       if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
@@ -3258,7 +3277,7 @@ contains
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
       yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
     hybrid_spatial_scf=(xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.theory=='dft'.and. &
-      yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1)
+      yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.exx_mlwf_norm_fraction>0d0)
     if(hybrid_spatial_scf)then
       yn_hse_wannier='y'
       if((yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)).or.exx_mlwf_radius/=0d0) &
@@ -3339,7 +3358,7 @@ contains
       if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
-        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1))then
+        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.exx_mlwf_norm_fraction>0d0))then
           if(nproc_ob<1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
             error stop 'Spatial EXX: Gamma y/z pencils required'
           if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &
@@ -3408,7 +3427,7 @@ contains
     if(yn_dc_force_diagnostic=='y')then
       if(yn_dc/='y'.or.theory/='dft'.or.(xc/='pbeh40'.and.xc/='pbeh40_rvv10')) &
         error stop 'DC force diagnostic requires static DC PBEh'
-      if(exx_mlwf_radius/=0d0.or.file_atom_coor_frag/='none') &
+      if(exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction>0d0.or.file_atom_coor_frag/='none') &
         error stop 'DC force diagnostic requires full MLWF support and automatic atom maps'
     endif
     if(yn_dc=='y') then

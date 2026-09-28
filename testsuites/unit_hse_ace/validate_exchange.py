@@ -6,7 +6,7 @@ import tempfile
 import os
 p=argparse.ArgumentParser();p.add_argument('--build',type=Path,required=True);args=p.parse_args()
 b=args.build.resolve();obj=b/'src/CMakeFiles/salmon.dir'
-names=['xc/exx_orbitals.f90.o','xc/hse_ace.f90.o','xc/hse_spatial.f90.o','xc/hse_wannier_gauge.f90.o','xc/hse_wannier.f90.o',
+names=['xc/exx_orbitals.f90.o','xc/hse_ace.f90.o','xc/hse_spatial.f90.o','xc/exx_spatial_local.f90.o','xc/hse_wannier_gauge.f90.o','xc/hse_wannier.f90.o',
        'xc/exx_local_fft.f90.o','xc/lcfo_wf_support.f90.o','xc/fftw_pencils.f90.o',
        'parallel/communication.f90.o','misc/nvtx_wrapper.f90.o']
 with tempfile.TemporaryDirectory() as tmp:

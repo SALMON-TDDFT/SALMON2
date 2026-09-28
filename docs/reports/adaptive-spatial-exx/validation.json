@@ -1,0 +1,343 @@
+{
+  "build": "MPI/HSE/ScaLAPACK GNU release",
+  "scf": [
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.49907308544607
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 1,
+      "fft": "off",
+      "energy_eV": -65.49907306654326
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 2,
+      "fft": "auto",
+      "energy_eV": -65.49907307865037
+    },
+    {
+      "functional": "hse06",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.5504996835801
+    },
+    {
+      "functional": "hse06",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 1,
+      "fft": "off",
+      "energy_eV": -65.55049968376714
+    },
+    {
+      "functional": "hse06",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 2,
+      "fft": "auto",
+      "energy_eV": -65.55049968362589
+    },
+    {
+      "functional": "pbeh40",
+      "dc": true,
+      "fraction": 0.999,
+      "ranks": 2,
+      "fft": "auto",
+      "energy_eV": -65.499647714046
+    },
+    {
+      "functional": "pbeh40",
+      "dc": true,
+      "fraction": 0.999,
+      "ranks": 4,
+      "fft": "auto",
+      "energy_eV": -65.49964771475476
+    },
+    {
+      "functional": "pbeh40_rvv10",
+      "dc": true,
+      "fraction": 0.999,
+      "ranks": 2,
+      "fft": "auto",
+      "energy_eV": -64.9180442761024
+    },
+    {
+      "functional": "pbeh40_rvv10",
+      "dc": true,
+      "fraction": 0.999,
+      "ranks": 4,
+      "fft": "auto",
+      "energy_eV": -64.91804428370583
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 0.0,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.49973727826949
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 1.0,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.49973727823014
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 1.0,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.49973729658008
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 0.999,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.49907310371499
+    },
+    {
+      "functional": "pbeh40",
+      "dc": false,
+      "fraction": 0.9999,
+      "ranks": 1,
+      "fft": "auto",
+      "energy_eV": -65.4996767402406
+    }
+  ],
+  "rt": [
+    {
+      "functional": "pbeh40_rvv10",
+      "full_current_peak_au": 4.41877152088775e-07,
+      "runs": [
+        {
+          "case": "rt_0.999_1_auto",
+          "energy_width_Ha": 1.7829200338326245e-09,
+          "current_difference_au": 3.024054873724992e-09
+        },
+        {
+          "case": "rt_0.999_2_auto",
+          "energy_width_Ha": 1.7829200338326245e-09,
+          "current_difference_au": 3.0240548737380152e-09
+        },
+        {
+          "case": "rt_0.999_2_off",
+          "energy_width_Ha": 1.7829200338326245e-09,
+          "current_difference_au": 3.0240548737380152e-09
+        },
+        {
+          "case": "rt_0_1_auto",
+          "energy_width_Ha": 4.4986236957811343e-13,
+          "current_difference_au": 0.0
+        },
+        {
+          "case": "rt_1_1_auto",
+          "energy_width_Ha": 4.596323321948148e-13,
+          "current_difference_au": 2.302870825347629e-20
+        }
+      ]
+    },
+    {
+      "functional": "pbeh40",
+      "full_current_peak_au": 4.41931252410848e-07,
+      "runs": [
+        {
+          "case": "rt_0.999_1_auto",
+          "energy_width_Ha": 1.7630399362644766e-09,
+          "current_difference_au": 1.2325390461740064e-09
+        },
+        {
+          "case": "rt_0.999_2_auto",
+          "energy_width_Ha": 1.7630501503163032e-09,
+          "current_difference_au": 1.232539046233987e-09
+        },
+        {
+          "case": "rt_0.999_2_off",
+          "energy_width_Ha": 1.7630501503163032e-09,
+          "current_difference_au": 1.232539046233987e-09
+        },
+        {
+          "case": "rt_0_1_auto",
+          "energy_width_Ha": 5.098144129078719e-13,
+          "current_difference_au": 0.0
+        },
+        {
+          "case": "rt_1_1_auto",
+          "energy_width_Ha": 5.098144129078719e-13,
+          "current_difference_au": 6.998609726688657e-20
+        }
+      ]
+    },
+    {
+      "functional": "hse06",
+      "full_current_peak_au": 4.41569284456783e-07,
+      "runs": [
+        {
+          "case": "rt_0.999_1_auto",
+          "energy_width_Ha": 2.7876007600013963e-06,
+          "current_difference_au": 7.215461638770025e-09
+        },
+        {
+          "case": "rt_0.999_2_auto",
+          "energy_width_Ha": 2.7876007600013963e-06,
+          "current_difference_au": 7.215461680226041e-09
+        },
+        {
+          "case": "rt_0.999_2_off",
+          "energy_width_Ha": 2.7876007600013963e-06,
+          "current_difference_au": 7.215461680226041e-09
+        },
+        {
+          "case": "rt_0_1_auto",
+          "energy_width_Ha": 4.098943406916078e-13,
+          "current_difference_au": 0.0
+        },
+        {
+          "case": "rt_1_1_auto",
+          "energy_width_Ha": 4.2010839251815923e-13,
+          "current_difference_au": 6.22240038052784e-16
+        }
+      ]
+    }
+  ],
+  "files": {
+    "scf/hse06-False-0.999-1-auto/inputfile": "50ec2721a032b269e45226c30b364b36538e1d68fee03f135ce0ff45b7692438",
+    "scf/hse06-False-0.999-1-auto/output": "c8c46a5cd537d290255c7458e45af61960aaf17f01c8dd91a9d565fce7511561",
+    "scf/hse06-False-0.999-1-off/inputfile": "13607dbb2f859885ce81a8da6e4aa08e36a70103bd0f904d7886798d7b179fde",
+    "scf/hse06-False-0.999-1-off/output": "02eb061812f1c30c46bba64e154aea5fa56760905f18e3d36101cdf4dc170596",
+    "scf/hse06-False-0.999-2-auto/inputfile": "a716f3e65ed557c8f4b2e641bf833150f7121b3ec6d72963145252cf9ff1a679",
+    "scf/hse06-False-0.999-2-auto/output": "4dc2aa6ccefc37a1f0f50a0e088cd017ec62677e78baa640200216f00c52de33",
+    "scf/pbeh40-False-0-1-auto/inputfile": "e8cd659d17c264ad93481083f2a58313d36432d9f46006f439aee3b4a3fe9aed",
+    "scf/pbeh40-False-0-1-auto/output": "c0c0a5dea58b01e4943681af34db49223d332b7dc8f1ff5a5b63fe45d998d87c",
+    "scf/pbeh40-False-0.999-1-auto/inputfile": "07b8582c8c13303953c1f66028c88d4bda16951b314b2b13c9904f6cfb89cc68",
+    "scf/pbeh40-False-0.999-1-auto/output": "9ff878a1f0c9d0b35a13bec6f2d509439da764811af974d98df38c13c770e027",
+    "scf/pbeh40-False-0.999-1-off/inputfile": "ee26d44a587dc2f36e2abafb3868940fb7797594d0d103343b5a0e39cb4ee454",
+    "scf/pbeh40-False-0.999-1-off/output": "d6a7f7cbe5da5249fb30721835534ec9e127bd4fec4102856020edd74a1d7b64",
+    "scf/pbeh40-False-0.999-2-auto/inputfile": "617674dd3b7e1bc1249bcbde3424af774160e7029b475a134d787eea29d57618",
+    "scf/pbeh40-False-0.999-2-auto/output": "839bf355c66a7887a2467cd93c04da87447da74fc7c8728cdb4015febb540545",
+    "scf/pbeh40-False-0.9999-1-auto/inputfile": "57d5b22bdd46827126fe2b75e93f02644469568299c2bce302d1c077b546f3a4",
+    "scf/pbeh40-False-0.9999-1-auto/output": "d657a883083da00bc528072fe1a7f870178873c2da26daece3ba69ebdf591482",
+    "scf/pbeh40-False-1-1-auto/inputfile": "dd136334b75f0e5a36afee234698329d140186d2971dbbf56be9c7be66f40ce0",
+    "scf/pbeh40-False-1-1-auto/output": "495b5e6c2ce786d1900c5d946937f3975235eb8af8e9c5f3420bafb35227aacf",
+    "scf/pbeh40-True-0.999-2-auto/inputfile": "d54da69aa4b3d85a93150ec78423c987ea1e3400ba55124c082b882f5e041201",
+    "scf/pbeh40-True-0.999-2-auto/output": "f8342f7bc307faed4b0e4659a012c6a00917391b82a25bba569d78cfff84659d",
+    "scf/pbeh40-True-0.999-4-auto/inputfile": "97262b057647feccca6ead79940d4e76e8c0462b20453667018b9470c6773adc",
+    "scf/pbeh40-True-0.999-4-auto/output": "faa5db8cf51f2bc5bbc57ef7feede09f6c498ae3eb4844256a287918911a53e2",
+    "scf/pbeh40_rvv10-True-0.999-2-auto/inputfile": "3a44469720af33e68c55743a0628c822d5c44c190c6d3ffffa887e16ece66f06",
+    "scf/pbeh40_rvv10-True-0.999-2-auto/output": "f9e181463707d50bfd898a5e646dcc10300f9908697e3cd9702a99cad992bc62",
+    "scf/pbeh40_rvv10-True-0.999-4-auto/inputfile": "23ffc0e5173b269a8828032de28250ebb3cd69a18588b9facc57cab5b617b07e",
+    "scf/pbeh40_rvv10-True-0.999-4-auto/output": "3002380c25a7127d7ba89f65906076e385139c2fd395e997338b56a58b5824b8",
+    "scf/realspace-ehrenfest-y58y9bea/gs/inputfile": "26ccace927e38e33b1f78ed3d3e7bd0254db87c28e94d34cffeccf0c7143bbdf",
+    "scf/realspace-ehrenfest-y58y9bea/gs/output": "721488ba6c46ed3e31222cd72cdf2f1720cfd8aac200ba9b482bcc27d706469d",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_1_auto/H_dc_hse_rt.data": "1d43cefeec13376ecb455ceab590c0d56e581edac6fe3e1c4c648ecbc334d6cf",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_1_auto/H_dc_hse_rt_energy.data": "33e4d6a525553425743786195877ad089629f8a72a411a4fd038f797c9cfb3e7",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_1_auto/inputfile": "666eecace998427960c7874205623364b67444ef90d49f7724dfb3e4ba0c41ff",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_1_auto/output": "e288b675659e3d37cde8eb33374924a1fbfcceb034f0df71a559f41f848b6fad",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_auto/H_dc_hse_rt.data": "ba9c02efa2feba2906655fb9159b0eced2801302a13e20423c3db718399e6cc1",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_auto/H_dc_hse_rt_energy.data": "afcae94243786086f12baeed36a2e7bde85951b4504ac212ec65583a58479d95",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_auto/inputfile": "07bbceab8fc1ecd884eae3fc2e250cbd46964af510d735a7512e2c0bf6c0f1aa",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_auto/output": "0df2480901fd530d7b050a807f94ef5795ab07c5561f51fa5a50b4b34133bcd2",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_off/H_dc_hse_rt.data": "ba9c02efa2feba2906655fb9159b0eced2801302a13e20423c3db718399e6cc1",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_off/H_dc_hse_rt_energy.data": "afcae94243786086f12baeed36a2e7bde85951b4504ac212ec65583a58479d95",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_off/inputfile": "857c05c6c6804242ba72018f864d63bb73c29de62217e2d811c9345810ea6f34",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0.999_2_off/output": "8da279dcdba8ae30c9f6ee61cdb10ffbec5b04dee788d8a0bd91ec5e944d01ff",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0_1_auto/H_dc_hse_rt.data": "d9a4b3d79aa1818fc2413d119064e26bd89710c5d0f99770315c3baafd87845a",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0_1_auto/H_dc_hse_rt_energy.data": "1a74b4056d3284610f0414e3a19963c0aa2c945f9f2af08198baad3c7f0b2512",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0_1_auto/inputfile": "858ea6327952f83ada7166b1f47c841645fa33f3bd31cc873536b03ca72b9e9a",
+    "scf/realspace-ehrenfest-y58y9bea/rt_0_1_auto/output": "ea759272ffc83b76b6f7b6072a1b28417e8f00e8f001f771431b55ac182b0ae2",
+    "scf/realspace-ehrenfest-y58y9bea/rt_1_1_auto/H_dc_hse_rt.data": "ba8793397cd8c3d44047c891d0bd82d557f1f4e6ddfff053ad7647f3eb419846",
+    "scf/realspace-ehrenfest-y58y9bea/rt_1_1_auto/H_dc_hse_rt_energy.data": "f8e555b3d179751eee7428a78f8169611e5246d58afac0ce4526fb63c9026aa4",
+    "scf/realspace-ehrenfest-y58y9bea/rt_1_1_auto/inputfile": "e1c8362021d31970bf24330f919ec836ab3297f9d35f55f2035208f6749596a7",
+    "scf/realspace-ehrenfest-y58y9bea/rt_1_1_auto/output": "d6048e5beefe9a2188f5b246f1088482ab0efa3856e29149351b6db21670d263",
+    "rt/realspace-ehrenfest-69nvz6vc/gs/inputfile": "177cc1598c58ec74f3084f4596d09dcf5ccd3009790c87a64992ede318e537c9",
+    "rt/realspace-ehrenfest-69nvz6vc/gs/output": "86e65ed5db2a6f30286f87e2cd8bc7a3f5a5402f91821ce20668a55dbd3210f9",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_1_auto/H_dc_hse_rt.data": "ab49b7ad654121d0c9f6d2a2eed005ed4f088dd98207abb3c54fd2fa9fe87b0d",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_1_auto/H_dc_hse_rt_energy.data": "88793a0c68bfd075a9214a98ef03bc3706fbc8c964cccb6c540321fc3c58060a",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_1_auto/inputfile": "477ee7cf0784649c21181739e821ba1fb8a202ea26e9bbe3b997617104d849d5",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_1_auto/output": "246702a6affdf3778b4f168c9824f16733c113aeb4c0adc5a28ca61967b86130",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_auto/H_dc_hse_rt.data": "41bb386cbe6bee1dd633029cf45d847d726a89308a4c5bc919810796276ecb93",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_auto/H_dc_hse_rt_energy.data": "59105292a64c421a1334f520af71777ca1b2e6605d239770aefa525020196d45",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_auto/inputfile": "f5825df1f30d82322633a6a926e31853e0ad5c9c08d1220dc71c75337d299d44",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_auto/output": "1b11151a5492b8b4f6c52e5a75e9474d0447c91be788bd46403253297693d421",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_off/H_dc_hse_rt.data": "41bb386cbe6bee1dd633029cf45d847d726a89308a4c5bc919810796276ecb93",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_off/H_dc_hse_rt_energy.data": "59105292a64c421a1334f520af71777ca1b2e6605d239770aefa525020196d45",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_off/inputfile": "fe64b519235eac9d2699f7e3a82c03a96336912544fe10604d5cff66cba67025",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0.999_2_off/output": "6989eb988a0920e8c5ae8216699607cb9f929f8b8c35bb780c1e34440233cb31",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0_1_auto/H_dc_hse_rt.data": "40d26fa491ecd7fe2ce5a3c4eb94238b8068aed3555ed2939ba8c66397245f40",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0_1_auto/H_dc_hse_rt_energy.data": "9e786043ffe995dc9aaca030fe14ef2fc99e04a9a8515500d8de9ca10a30f032",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0_1_auto/inputfile": "3975f8960635b24e727a8d8f0210d790b2624819172e1ae7995696b2d935b204",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_0_1_auto/output": "5413e39937cfa3b2ddc8ce797bcddb60f7195e9027824c1bf2a00028907af3cd",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_1_1_auto/H_dc_hse_rt.data": "bb7ae85da31c25250e8b78aa57f7c9ea7e22a797f19c08dbcab0810ed01a4f88",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_1_1_auto/H_dc_hse_rt_energy.data": "6f33426e03abbdc1745656f996de1f119989dc96083ddd66271db6069f511b37",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_1_1_auto/inputfile": "1a2a60b581e3d0b67a45ce4efa3eb8d0dd9c9617f1f6c0dc07827b4138a8cfde",
+    "rt/realspace-ehrenfest-69nvz6vc/rt_1_1_auto/output": "b78099d0bec35b7b356f9467c9512638c40b10621b1b96b1b550f5688185ff7c",
+    "rt/realspace-ehrenfest-tpi7vd5e/gs/inputfile": "26ccace927e38e33b1f78ed3d3e7bd0254db87c28e94d34cffeccf0c7143bbdf",
+    "rt/realspace-ehrenfest-tpi7vd5e/gs/output": "4330addbdf636eb20238a10fb5ddcd403049591e1b7e075a97dc0a99447b45f9",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_1_auto/H_dc_hse_rt.data": "1d43cefeec13376ecb455ceab590c0d56e581edac6fe3e1c4c648ecbc334d6cf",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_1_auto/H_dc_hse_rt_energy.data": "33e4d6a525553425743786195877ad089629f8a72a411a4fd038f797c9cfb3e7",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_1_auto/inputfile": "dcaff7db864d4a94f857245bd0c25656a31ee5f95dd948cc1225fc4c419944ec",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_1_auto/output": "bd23286256600fe71e9a6fa5e9cd8e1c30c78846162dcaeb2cd38535183a9d92",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_auto/H_dc_hse_rt.data": "ba9c02efa2feba2906655fb9159b0eced2801302a13e20423c3db718399e6cc1",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_auto/H_dc_hse_rt_energy.data": "afcae94243786086f12baeed36a2e7bde85951b4504ac212ec65583a58479d95",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_auto/inputfile": "0ef1087544d6722306bbfd5819b94ed7511c28f3b3defd48026c615036544cc5",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_auto/output": "53efd966392330009f5974499709826dc55106a1be71bf8003189787eb731d86",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_off/H_dc_hse_rt.data": "ba9c02efa2feba2906655fb9159b0eced2801302a13e20423c3db718399e6cc1",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_off/H_dc_hse_rt_energy.data": "afcae94243786086f12baeed36a2e7bde85951b4504ac212ec65583a58479d95",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_off/inputfile": "49839d8c8f73dcc189b88e6712a281518258b6219cdddcc3eddd825d1aa7fee5",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0.999_2_off/output": "cd0c62e00b0ac5491f06309f472a7ad344af22f7c7f4f65c404cc96aa7f5f261",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0_1_auto/H_dc_hse_rt.data": "d9a4b3d79aa1818fc2413d119064e26bd89710c5d0f99770315c3baafd87845a",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0_1_auto/H_dc_hse_rt_energy.data": "1a74b4056d3284610f0414e3a19963c0aa2c945f9f2af08198baad3c7f0b2512",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0_1_auto/inputfile": "718573384b20c85af278429a804ba4c7fe975e92ab0bfaed627cba33a186abf2",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_0_1_auto/output": "d19acdb8ba216595d14f3f9e733ae64eca99b52e65a342b16dd218e6796e2d10",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_1_1_auto/H_dc_hse_rt.data": "ba8793397cd8c3d44047c891d0bd82d557f1f4e6ddfff053ad7647f3eb419846",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_1_1_auto/H_dc_hse_rt_energy.data": "f8e555b3d179751eee7428a78f8169611e5246d58afac0ce4526fb63c9026aa4",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_1_1_auto/inputfile": "af5b3c6cb53bb8c91a3c22afc7959a3ea8758ab249baae3f7f81087cc2da7ac0",
+    "rt/realspace-ehrenfest-tpi7vd5e/rt_1_1_auto/output": "1e8f7a79d3e400837692d2906eeb8cf703bfdc518853b3200bad5f8aaa5e26a5",
+    "rt/realspace-ehrenfest-x8c8xjv8/gs/inputfile": "1642951137f5fabd5456dcdea708bb2c745a98ed276abcb82421a15e713a3e32",
+    "rt/realspace-ehrenfest-x8c8xjv8/gs/output": "2d3e52d3d056284886496ca589331486023a256f0dc687b8792f1b7d8676bedd",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_1_auto/H_dc_hse_rt.data": "7c56f01097034f86c9b36df233509c362bd927a2ba99fdabb59f85081d26fb5b",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_1_auto/H_dc_hse_rt_energy.data": "5b9fb5bf40d8f63014ce432f3fceb1d93bb02810a229a28ece2b18af5ce998e1",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_1_auto/inputfile": "25cf8ce9aa4918f9ff356bbbb74d721c494d600aa32112c9bc01d520ca215274",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_1_auto/output": "6ba309e7bea0d0ccec159246b3c83edf35596edc365844267c8cb33e3a9b2594",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_auto/H_dc_hse_rt.data": "cf7a62bfec23b77bd9831bddf7f1c046c5e8b43b6a58f0205346d1a698f3db4e",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_auto/H_dc_hse_rt_energy.data": "fd5fda881144a99a51612b73248cecb9e346c37aeedcb455eded8732676982bf",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_auto/inputfile": "4b485da6c95f3469fa835b5ecb70c966fbaf6643132739dfbf4e87c5c5115ae5",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_auto/output": "e679c1575a819a14f5f030c70e2dbfccfe44769a6f66aa5a25d8123fc72c3d62",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_off/H_dc_hse_rt.data": "cf7a62bfec23b77bd9831bddf7f1c046c5e8b43b6a58f0205346d1a698f3db4e",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_off/H_dc_hse_rt_energy.data": "fd5fda881144a99a51612b73248cecb9e346c37aeedcb455eded8732676982bf",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_off/inputfile": "82597591516d976d42eb8b74a5ab4208711b58665919c92d91366f56bcecd34a",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0.999_2_off/output": "18159b8e33e008981e61c2b99c227fbaaf24bb53f98a066373fb0391d18e5f83",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0_1_auto/H_dc_hse_rt.data": "9ae84ca870d9831cee990212821981cc56b229ea6d9b205bd29064087a1bac58",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0_1_auto/H_dc_hse_rt_energy.data": "fccaee099dde76dafb3e02b4748d47e2624e7b23d4af80f41373d1fa8222258a",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0_1_auto/inputfile": "667959e01f299fc5856ec7ca4fea793e82c904b428113dee8c3fc6b4ee83b2ca",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_0_1_auto/output": "9849ed67d1b75922ae48f3af767ba38902b8efbafaa089ac76f6c1263a471fb4",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_1_1_auto/H_dc_hse_rt.data": "376f561022eaf227c13acab7a99b6758e418b46dbe21ed22def2314a3e16f17b",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_1_1_auto/H_dc_hse_rt_energy.data": "94cae1de3b60d17aa11f6c0afa2b3e4f16f6e68fdb7fdd4724e6a8a5875ddbe5",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_1_1_auto/inputfile": "3873ef5b6e777e25a584630a16fad533908c8dbad5daddd30496dbf51f126c2d",
+    "rt/realspace-ehrenfest-x8c8xjv8/rt_1_1_auto/output": "65fa09ef0834863dea3aa37205974b82b55549eedb15de36da645d8fb93a2429"
+  },
+  "source_sha256": {
+    "src/xc/hse_native.f90": "9dfcf7d655b9fb42f19f8c85ec28bb3747cc326eff7182ebe6878abddc9377dd",
+    "src/xc/hse_spatial.f90": "74c5de25875d8aa346c4f248ebd6e3c347783d374aa8e5ccaa03f8ecf28f70ca",
+    "src/xc/exx_adaptive_support.f90": "65411053dc32f1d6f50d0ff60ec3f3c7e22c9a60a4ca33063f453602064ff51f",
+    "src/xc/exx_spatial_local.f90": "3795b4bb1b22389bbfb87e8e7d86f4fb136289842cf3c405655fb1f086f02cb9",
+    "src/xc/exx_local_fft.f90": "b26ca24a20ab49a82bea83862439828f6f9ac79cc04057880d837b520a50a2d8"
+  }
+}

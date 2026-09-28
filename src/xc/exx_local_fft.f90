@@ -7,6 +7,7 @@ module exx_local_fft
  implicit none
  private
  include 'fftw3.f03'
+ public :: exx_local_prepare_compact,smooth_size
  public :: s_exx_local_fft,exx_local_init,exx_local_prepare,exx_local_apply,exx_local_destroy
  type s_exx_local_fft
   integer :: n(3)=0,box(3)=0,padded(3)=0,fft_points=0
@@ -138,6 +139,43 @@ contains
    seen(a)=.true.;plan%indices(j)=a
   enddo
   used=.true.;plan%ready=.true.
+ end subroutine
+
+ ! Kernel entries are indexed by displacement + box, over -(box-1):box-1.
+ ! This interface never stores a full global kernel; it accepts a compact tile.
+ subroutine exx_local_prepare_compact(plan,n,box,kernel,status)
+  type(s_exx_local_fft),intent(inout) :: plan
+  integer,intent(in) :: n(3),box(3)
+  complex(8),intent(in) :: kernel(:,:,:)
+  integer,intent(out) :: status
+  integer :: padded(3),a,b,c,p(3),j
+  status=1
+  if(any(n<1).or.any(box<1).or.any(box>n))return
+  if(any(shape(kernel)/=2*box-1))return
+  padded=[smooth_size(2*box(1)-1),smooth_size(2*box(2)-1),smooth_size(2*box(3)-1)]
+  if(product(int(padded,int64))>=product(int(n,int64)))return
+  if(any(box/=plan%box).or..not.c_associated(plan%forward))then
+   call clear_box(plan)
+   plan%box=box;plan%padded=padded;plan%fft_points=product(padded)
+   allocate(plan%filter(padded(1),padded(2),padded(3)),plan%work(padded(1),padded(2),padded(3)))
+   plan%forward=fftw_plan_dft_3d(padded(3),padded(2),padded(1),plan%work,plan%work,FFTW_FORWARD,FFTW_ESTIMATE)
+   plan%backward=fftw_plan_dft_3d(padded(3),padded(2),padded(1),plan%work,plan%work,FFTW_BACKWARD,FFTW_ESTIMATE)
+   if(.not.c_associated(plan%forward).or..not.c_associated(plan%backward))then
+    call clear_box(plan);return
+   endif
+  endif
+  plan%n=n;plan%work=0d0
+  do c=1-box(3),box(3)-1;do b=1-box(2),box(2)-1;do a=1-box(1),box(1)-1
+   p=modulo([a,b,c],padded)+1
+   plan%work(p(1),p(2),p(3))=kernel(a+box(1),b+box(2),c+box(3))
+  enddo;enddo;enddo
+  call fftw_execute_dft(plan%forward,plan%work,plan%work);plan%filter=plan%work
+  if(allocated(plan%indices))deallocate(plan%indices)
+  allocate(plan%indices(product(box)));j=0
+  do c=0,box(3)-1;do b=0,box(2)-1;do a=0,box(1)-1
+   j=j+1;plan%indices(j)=1+a+padded(1)*(b+padded(2)*c)
+  enddo;enddo;enddo
+  plan%ready=.true.;status=0
  end subroutine
 
  subroutine exx_local_apply(plan,density,potential,status)

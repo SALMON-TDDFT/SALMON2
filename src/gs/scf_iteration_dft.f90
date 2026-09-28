@@ -55,7 +55,8 @@ use noncollinear_module, only: calc_magnetization
 use dcdft
 use hse_reference_export, only: export_hse_reference
 #ifdef USE_HSE
-use hse_native, only: hse_enabled,hse_freeze,hse_check_localization
+use hse_native, only: hse_enabled,hse_freeze,hse_check_localization,hse_adaptive_ready,hse_support_changed
+use salmon_global, only: exx_mlwf_norm_fraction
 #endif
 implicit none
 integer :: ix,iy,iz,ik,is
@@ -64,6 +65,7 @@ integer :: ilevel_print !=3:print-all
                         !=1:print-minimum
                         !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
+integer :: mixing_age
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
 
@@ -99,7 +101,19 @@ real(8) :: rNe
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
 #ifdef USE_HSE
-logical :: saved_hse_freeze
+logical :: saved_hse_freeze,adaptive_exchange,support_event,iteration_support_changed
+integer :: adaptive_comm,not_ready_local,not_ready_total
+#endif
+
+mixing_age=Miter
+#ifdef USE_HSE
+adaptive_exchange=hse_enabled().and.exx_mlwf_norm_fraction>0d0
+if(adaptive_exchange)then
+  adaptive_comm=info%icomm_rko
+  if(yn_dc=='y')adaptive_comm=dc%icomm_tot
+  ! Each static SCF starts with the full exchange operator.
+  hse_adaptive_ready=.false.
+endif
 #endif
 
 call init_convergence_check
@@ -157,6 +171,24 @@ sum1=1d9
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
+#ifdef USE_HSE
+   iteration_support_changed=.false.
+   if(adaptive_exchange.and..not.hse_adaptive_ready)then
+     ! Every fragment must reach the warm-up tolerance before any switches.
+     ! This uses the selected SCF metric (density or potential), as does the
+     ! final convergence test; readiness stays latched after this transition.
+     not_ready_local=0
+     if(.not.(sum1<sqrt(threshold)))not_ready_local=1
+     call comm_summation(not_ready_local,not_ready_total,adaptive_comm)
+     if(not_ready_total==0)then
+       hse_adaptive_ready=.true.
+       mixing_age=0
+       sum1=huge(sum1)
+       iteration_support_changed=.true.
+     endif
+   endif
+#endif
+
    if( sum1 < threshold ) then
 #ifdef USE_HSE
       call hse_check_localization()
@@ -175,6 +207,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    end if
 
    Miter=Miter+1
+   mixing_age=mixing_age+1
 
    if(calc_mode/='DFT_BAND')then
       ! for calc_total_energy_periodic
@@ -185,16 +218,26 @@ DFT_Iteration : do iter=Miter+1,nscf
       end if
    end if
    call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
+#ifdef USE_HSE
+   if(adaptive_exchange)then
+     call consume_support_event(support_event)
+     if(support_event)then
+       ! Discard extrapolation across a change of exchange operator.
+       mixing_age=1
+       iteration_support_changed=.true.
+     endif
+   endif
+#endif
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
-     call copy_density(Miter,system%nspin,mg,rho_s,mixing)
+     call copy_density(mixing_age,system%nspin,mg,rho_s,mixing)
      call timer_begin(LOG_CALC_RHO)
      call calc_density(system,rho_s,spsi,info,mg)
      call timer_end(LOG_CALC_RHO)
-     call update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
+     call update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,mixing_age, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,v_local,mixing,energy)
    else if(yn_dc=='y') then
    ! Divide-and-Conquer method
-     call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
+     call copy_density(mixing_age,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
 #ifdef USE_HSE
@@ -218,7 +261,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
      ! mixing & local KS potential (total system)
      call update_density_and_potential(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot, &
-     & stencil,xc_func,pp,ppn,iter, &
+     & stencil,xc_func,pp,ppn,mixing_age, &
      & spsi,srg,srg_scalar, & ! dummy
      & dc%poisson_tot,dc%fg_tot,dc%rho_tot,dc%rho_tot_s, &
      & rho_jm, & ! dummy
@@ -247,6 +290,17 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_total_energy_dcdft(mg,system,info,stencil,srg,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
+#ifdef USE_HSE
+   if(adaptive_exchange)then
+     ! Energy evaluation may refresh exchange after density mixing. Its event
+     ! invalidates this residual and restarts mixing on the following step.
+     call consume_support_event(support_event)
+     if(support_event)then
+       mixing_age=0
+       iteration_support_changed=.true.
+     endif
+   endif
+#endif
    if(calc_mode=='DFT_BAND')then
       esp_old=abs(esp_old-energy%esp)
       band%check_conv_esp(:,:,:)=.false.
@@ -403,6 +457,11 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    end if !calc_mode/=DFT_BAND
 
+#ifdef USE_HSE
+   ! Never accept a residual spanning two exchange support definitions.
+   if(adaptive_exchange.and.iteration_support_changed)sum1=huge(sum1)
+#endif
+
    if(theory=='dft' .and. yn_opt=='n')then
      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -444,6 +503,19 @@ call export_hse_reference(lg,mg,system,info,stencil,srg,ppg,ppn,spsi,shpsi, &
                           rho,V_local,Vh,Vxc,Vpsl,energy,Miter,flag_conv)
 
 contains
+
+#ifdef USE_HSE
+  subroutine consume_support_event(changed)
+    logical,intent(out) :: changed
+    integer :: local_event,total_events
+    local_event=0
+    if(hse_support_changed)local_event=1
+    call comm_summation(local_event,total_events,adaptive_comm)
+    changed=total_events>0
+    ! hse_native latches this flag until every SCF rank has seen the event.
+    hse_support_changed=.false.
+  end subroutine consume_support_event
+#endif
 
   subroutine init_convergence_check()
     implicit none

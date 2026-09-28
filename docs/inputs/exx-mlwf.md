@@ -71,3 +71,57 @@ The separate `pbeh_coulomb_radius` truncates the Coulomb **interaction kernel**,
 not orbitals. Changing it is a different approximation. The existing LCFO-RT
 `hse_lcfo_wf_radius` remains a separate control in bohr; it is not an alias for
 `exx_mlwf_radius` and is unaffected by this SCF extension.
+
+## Adaptive support on the spatial mesh
+
+For Gamma-point native mesh calculations, use:
+
+```fortran
+&functional
+  exx_mlwf_norm_fraction=0.999d0
+  exx_mlwf_radius=0d0
+  exx_mlwf_interval=5
+  exx_mlwf_maxiter=100
+  exx_mlwf_tolerance=1d-7
+  exx_local_fft='auto'
+/
+```
+
+`exx_mlwf_norm_fraction` defaults to 0 (disabled); 0.999 retains at least
+99.9% of each occupation-weighted source's squared norm. Each periodic sphere
+has its own radius, determined from local grid rows and small reductions.
+Sources with ambiguous circular centers remain uncut. There is no source
+renormalization and no cutoff on arbitrary target wavefunctions. A value of
+1 is the full-support reference through the same spatial backend. A positive
+fixed `exx_mlwf_radius` and positive norm fraction cannot be combined.
+
+The masked source appears in both factors of the exchange action. Compact
+convolution uses the same discrete global kernel (including G=0), but stores
+only its distributed grid rows and gathers compact displacement/source/target
+tiles. Target work is batched in four columns; no full wavefunction grid is
+gathered. Broad sources fall back to pencil FFTs. `exx_local_fft='off'` is the
+full-grid convolution reference for the **same masked sources**.
+`EXX_ADAPTIVE` reports retained fraction, maximum radius and norm loss, and
+local/global pair counts with local FFT point counts for orbital group zero.
+Only exactly zero pair densities are skipped. Dense ACE/gauge algebra and
+source-target pair work remain; this is not a claim of linear overall scaling.
+
+In SCF, full support is used until the selected convergence residual is below
+`sqrt(threshold)`. Masking then requires converged MLWF localization. This
+allows occupied-only calculations without adding empty states just to measure
+a gap. Mode changes reset the density mixing history and invalidate that
+iteration's convergence result. Failed gauge transport or localization restores
+full support; a result without established adaptive localization is rejected.
+In DC, all source geometry and exchange convolutions use the buffered fragment
+cell and its communicators. SCF switching readiness is synchronized across
+fragments so global mixing history is reset consistently.
+
+Adaptive support is also admitted for fixed-ion, DC-initialized native mesh
+RT with the existing Taylor4/ACE predictor-corrector. RT starts localization
+immediately, without a gap or electronic-temperature criterion, and recomputes
+support on exchange refreshes. This is distinct from propagating in an LCFO
+basis. Moving ions, ionic relaxation, retained-LCFO RT, restart and snapshot
+export remain rejected for adaptive support. The fixed-radius legacy option
+keeps its previous static-only contract. As with existing finite support,
+energy/force variational consistency and long-time optical accuracy are not
+established by norm retention alone.

@@ -29,6 +29,18 @@ class ExxInputs(unittest.TestCase):
             energy=float(re.search(r'Total energy \(eV\) =\s*([\d.E+-]+)',info)[1])
             return energy,(Path(tmp)/'variables.log').read_text(),run.stdout
 
+    def test_adaptive_norm_input_contract(self):
+        for value in ('-0.1', '1.01'):
+            self.run_case('exx_mlwf_norm_fraction='+value,
+                error='exx_mlwf_norm_fraction must be in [0,1]')
+        self.run_case('exx_mlwf_norm_fraction=.999\n exx_mlwf_radius=4',
+            error='choose adaptive norm fraction or fixed EXX radius')
+        self.run_case('exx_mlwf_norm_fraction=.999',
+            error='adaptive EXX support requires unshifted Gamma')
+        self.run_case('exx_mlwf_norm_fraction=.999',
+            lambda s:s.replace('num_kgrid=1,2,1','num_kgrid=1,1,1').replace("theory='dft'","theory='dft_md'"),
+            error='adaptive EXX support requires static SCF or fixed-ion native RT')
+
     def test_alias_and_matching_dual_values(self):
         old='hse_mlwf_interval=5\n hse_mlwf_maxiter=100\n hse_mlwf_tolerance=1d-7'
         new=old.replace('hse_','exx_')
