@@ -33,6 +33,13 @@ for c in d['cases']:
             max_catalogue_entries=max(v[1] for v in generated),mean_executed_pairs=statistics.mean(v[0]+v[1] for v in pairs),
             mean_product_points=statistics.mean(points),max_accepted_bound=max(bounds),
             fallbacks=sum(r.get('pair_fallbacks',0) for r in rr))
+    support_counts=[v for r in rr for v in r.get('source_ace_counts',[])]
+    if support_counts:
+        item['source_ace']=dict(mean_generated_pairs=statistics.mean(v[0] for v in support_counts),
+            mean_skipped_pairs=statistics.mean(v[1] for v in support_counts),
+            max_catalogue_entries=max(v[2] for v in support_counts),
+            mean_product_points=statistics.mean(v[3] for v in support_counts),
+            accepted=sum(r['source_ace_accepted'] for r in rr),fallbacks=sum(r['source_ace_fallbacks'] for r in rr))
     summary.append(item)
 # Compare each strong layout with MPI1, same mode and first repetition.
 strong_differences={}
@@ -66,6 +73,14 @@ if any('pair_screening' in r for r in summary):
         v=r['pair_screening']
         lines.append('|'+ '×'.join(map(str,r['shape']))+f"|{r['ranks']}|{v['mean_generated_pairs']:.1f}|{v['mean_executed_pairs']:.1f}|{v['mean_product_points']:.1f}|{v['max_catalogue_entries']}|{v['fallbacks']}|{v['max_accepted_bound']:.3e}|")
     lines+=['','Generated counts describe screening attempts; executed FFT counts include unscreened fallback work.','']
+if any('source_ace' in r for r in summary):
+    lines+=['## Source-support ACE (adaptive mode)','','|Fragment array|MPI|Generated pairs/update|Skipped pairs/update|Max catalogue entries|Product points/update|Accepted / fallback|',
+      '|---|---:|---:|---:|---:|---:|---:|']
+    for r in summary:
+        if 'source_ace' not in r:continue
+        v=r['source_ace']
+        lines.append('|'+ '×'.join(map(str,r['shape']))+f"|{r['ranks']}|{v['mean_generated_pairs']:.1f}|{v['mean_skipped_pairs']:.1f}|{v['max_catalogue_entries']}|{v['mean_product_points']:.1f}|{v['accepted']} / {v['fallbacks']}|")
+    lines+=['','Counts describe support-ACE attempts. A fallback recomputes occupied-vector ACE. Masking changes the ACE training subspace; exact support pruning adds no further error.','']
 (out/'tables.md').write_text('\n'.join(lines))
 fig,axes=plt.subplots(2,2,figsize=(12,8),layout='constrained')
 for col,suite in enumerate(('weak','strong')):

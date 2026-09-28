@@ -283,7 +283,7 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-      & exx_pair_screening,exx_pair_tolerance,exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
+      & exx_ace_support,exx_pair_screening,exx_pair_tolerance,exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -758,6 +758,7 @@ contains
     exx_pre_scf_threshold = 0d0
     exx_pre_scf_steps = 3
     exx_pre_scf_active = .false.
+    exx_ace_support = 'occupied'
     exx_pair_screening = 'off'
     exx_pair_tolerance = 0d0
     hse_lcfo_wf_radius = 0d0
@@ -1370,6 +1371,8 @@ contains
     call string_lowercase(yn_exx_dc_mlwf)
     call comm_bcast(exx_pre_scf_threshold,nproc_group_global)
     call comm_bcast(exx_pre_scf_steps,nproc_group_global)
+    call comm_bcast(exx_ace_support,nproc_group_global)
+    call string_lowercase(exx_ace_support)
     call comm_bcast(exx_pair_screening,nproc_group_global)
     call string_lowercase(exx_pair_screening)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
@@ -2344,6 +2347,7 @@ contains
       write(fh_variables_log, *) "# yn_exx_dc_mlwf=",yn_exx_dc_mlwf
       write(fh_variables_log, *) "# exx_pre_scf_threshold=",exx_pre_scf_threshold
       write(fh_variables_log, *) "# exx_pre_scf_steps=",exx_pre_scf_steps
+      write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
@@ -3281,6 +3285,15 @@ contains
       if(method_mixing=='simple_potential'.or. &
          (convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')) &
         error stop 'PBE pre-SCF requires density mixing and a density convergence metric'
+    endif
+    if(exx_ace_support/='occupied'.and.exx_ace_support/='source') &
+      error stop 'exx_ace_support must be occupied or source'
+    if(exx_ace_support=='source')then
+      if((theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_md=='y'.or.yn_dc=='y'.or.yn_hse_lcfo_rt=='y') &
+        error stop 'source-support ACE requires fixed-ion native RT'
+      if(xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10')error stop 'source-support ACE requires a hybrid functional'
+      if(exx_pair_screening/='off')error stop 'source-support ACE uses exact support pairs; set exx_pair_screening=off'
+      if(exx_mlwf_norm_fraction<=0d0)error stop 'source-support ACE requires adaptive support'
     endif
     if(exx_pair_screening/='off'.and.exx_pair_screening/='diagnose'.and.exx_pair_screening/='on') &
       error stop 'exx_pair_screening must be off, diagnose or on'

@@ -128,6 +128,7 @@ module salmon_global
   real(8) :: exx_pre_scf_threshold ! 0 disables PBE warmup; selected density residual
   integer :: exx_pre_scf_steps ! consecutive qualifying residuals
   logical :: exx_pre_scf_active=.false. ! runtime only, never serialized as target GS
+  character(8) :: exx_ace_support ! occupied/source ACE construction vectors
   character(8) :: exx_pair_screening ! off/diagnose/on; discrete hybrid pair bound
   real(8) :: exx_pair_tolerance ! raw exchange action Frobenius budget, atomic units
   character(8) :: exx_local_fft ! auto: exact compact convolution; off: full grid

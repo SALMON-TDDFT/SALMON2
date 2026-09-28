@@ -18,6 +18,13 @@ class Inputs(unittest.TestCase):
         self.assertIn('exx_pair_tolerance=9.99999999999999955d-07',adaptive)
         self.assertIn('nt=16',adaptive)
 
+    def test_source_ace_adaptive_only(self):
+        self.assertNotIn('exx_ace_support',bench.rt_block((2,1,1),2,1.,ace_support='source'))
+        self.assertIn("exx_ace_support='source'",bench.rt_block((2,1,1),2,.999,ace_support='source'))
+        for value in ('bad',):
+            with self.assertRaises(ValueError):bench.rt_block((2,1,1),2,.999,ace_support=value)
+        with self.assertRaises(ValueError):bench.rt_block((2,1,1),2,.999,pair_tolerance=0,ace_support='source')
+
     def test_invalid_budget(self):
         for value in (-1,float('nan'),float('inf')):
             with self.assertRaises(ValueError):bench.rt_block((2,1,1),2,.999,pair_tolerance=value)

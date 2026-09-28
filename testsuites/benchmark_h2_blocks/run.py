@@ -31,13 +31,17 @@ def gs_input(shape):
     assert s.count(" 'H'")==16*ranks
     return s
 
-def rt_block(shape,ranks,fraction,pair_tolerance=None):
+def rt_block(shape,ranks,fraction,pair_tolerance=None,ace_support='occupied'):
+    if ace_support not in ('occupied','source'):raise ValueError('invalid ACE support')
+    if ace_support=='source' and pair_tolerance is not None:raise ValueError('source ACE requires exact support pairs')
     if pair_tolerance is not None and (not math.isfinite(pair_tolerance) or pair_tolerance<0):
         raise ValueError('pair tolerance must be finite and nonnegative')
     s=rt_input(geometry(shape),ranks).replace('exx_mlwf_tolerance=1d-7','exx_mlwf_tolerance=1d-6').replace('exx_mlwf_maxiter=100','exx_mlwf_maxiter=1000')
     s=s.replace('num_fragment=1,1,1','num_fragment='+','.join(map(str,shape)))
     s=s.replace('num_rgrid_buffer=0,0,0','num_rgrid_buffer='+','.join('8' if n>1 else '0' for n in shape))
     s=s.replace(f'nstate_frag={8*math.prod(shape)}',f'nstate_frag={fragment_states(shape)}')
+    if fraction<1 and ace_support=='source':
+        s=s.replace('&functional',"&functional\n exx_ace_support='source'")
     if fraction<1 and pair_tolerance is not None:
         value=f'{pair_tolerance:.17e}'.replace('e','d')
         s=s.replace('&functional',f"&functional\n exx_pair_screening='on'\n exx_pair_tolerance={value}")
@@ -46,6 +50,7 @@ def rt_block(shape,ranks,fraction,pair_tolerance=None):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--ace-support',choices=('occupied','source'),default='occupied',help='ACE construction vectors for adaptive RT only')
     p.add_argument('--pair-tolerance',type=float,help='screen adaptive RT only; default is off')
     p.add_argument('--large-repeat',type=int);p.add_argument('--rt-source',type=Path);p.add_argument('--prepare-only',action='store_true');p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
     p.add_argument('--mpiexec',default='/opt/homebrew/bin/mpiexec --bind-to none')
@@ -53,6 +58,7 @@ def main():
     a=p.parse_args();a.binary=a.binary.resolve();a.output=a.output.resolve()
     if a.repeat<1 or (a.large_repeat is not None and a.large_repeat<1):p.error('repeat must be positive')
     if a.pair_tolerance is not None and (not math.isfinite(a.pair_tolerance) or a.pair_tolerance<0):p.error('invalid pair tolerance')
+    if a.ace_support=='source' and a.pair_tolerance is not None:p.error('source ACE requires exact support pairs')
     shapes=SHAPES[:2] if a.pilot else SHAPES
     cases=[dict(shape=list(s),ranks=math.prod(s),suites=['weak']) for s in shapes]
     if not a.pilot:
@@ -71,6 +77,7 @@ def main():
     if result_file.exists():
         if not a.resume:p.error('existing output requires --resume')
         data=json.loads(result_file.read_text())
+        if data['conditions'].get('ace_support','occupied')!=a.ace_support:raise RuntimeError('ACE support changed')
         if data['conditions'].get('pair_tolerance')!=a.pair_tolerance:raise RuntimeError('screening configuration changed')
         if data['binary_sha256']!=binary_hash or data['repeats']!=a.repeat or data['cases']!=cases:raise RuntimeError('resume configuration mismatch')
         if data['sources']!={str(f.relative_to(ROOT)):f.read_text() for f in sources}:raise RuntimeError('source changed during experiment')
@@ -84,7 +91,7 @@ def main():
           pseudo_sha256=digest(ROOT/'testsuites/pseudo/H_rps.dat'),repeats=a.repeat,large_repeats=a.large_repeat,cases=cases,
           conditions=dict(core_bohr=[16]*3,spacing_bohr=.5,H2_per_core=8,buffer_split_bohr=4,coulomb_radius_bohr=4,functional='pbeh40',
             gs_temperature_k=300,dc_mlwf=False,pre_scf_threshold=1e-4,gs_threshold=1e-10,dt=.02,steps=16,impulse=1e-4,fractions=[1.,.999],
-            mlwf_interval=5,mlwf_maxiter=1000,mlwf_tolerance=1e-6,pair_tolerance=a.pair_tolerance,threads={k:env[k] for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS')}),
+            mlwf_interval=5,mlwf_maxiter=1000,mlwf_tolerance=1e-6,pair_tolerance=a.pair_tolerance,ace_support=a.ace_support,threads={k:env[k] for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS')}),
           preparations=[],runs=[])
     def save():
         tmp=result_file.with_suffix('.tmp');tmp.write_text(json.dumps(data,indent=2)+'\n');tmp.replace(result_file)
@@ -129,7 +136,7 @@ def main():
             oldprep=next(v for v in old['preparations'] if v['shape']==r['shape'])
             if prep['payload_sha256']!=oldprep['payload_sha256']:raise RuntimeError('imported RT seed differs')
             folder=origin/r['folder'];fraction=1. if r['mode']=='full' else .999
-            if (folder/'inputfile').read_text()!=rt_block(r['shape'],r['ranks'],fraction,a.pair_tolerance):raise RuntimeError('imported RT input mismatch')
+            if (folder/'inputfile').read_text()!=rt_block(r['shape'],r['ranks'],fraction,a.pair_tolerance,a.ace_support):raise RuntimeError('imported RT input mismatch')
             check=parse_rt(folder,r['ranks'],max_energy_width=None)
             for key in ('rt_max_seconds','peak_rank_bytes','observables','energies'):
                 if check[key]!=r[key]:raise RuntimeError('imported RT payload differs')
@@ -163,7 +170,7 @@ def main():
                 for mode,fraction in ([('full',1.),('adaptive',.999)] if rep%2 else [('adaptive',.999),('full',1.)]):
                     name=f'{mode}-{tag}-mpi{ranks}-r{rep}'
                     if any(r['folder']==name for r in data['runs']):continue
-                    folder,wall,_=execute(name,rt_block(shape,ranks,fraction,a.pair_tolerance),ranks,a.output/prep['folder'])
+                    folder,wall,_=execute(name,rt_block(shape,ranks,fraction,a.pair_tolerance,a.ace_support),ranks,a.output/prep['folder'])
                     r=parse_rt(folder,ranks,max_energy_width=None);text=(folder/'output').read_text()
                     r.update(case,folder=name,mode=mode,repeat=rep,launcher_wall_seconds=wall,
                       pair_counters=[list(map(int,m)) for m in re.findall(r'EXX_ADAPTIVE local/global pairs/local FFT points \(orbital group 0\):\s+(\d+)\s+(\d+)\s+(\d+)',text)],
@@ -171,8 +178,12 @@ def main():
                       retained_gauge_updates=text.count('retained accepted transported gauge'),
                       generated_pair_counters=[list(map(int,m)) for m in re.findall(r'EXX_PAIR generated grid products/catalogue entries:\s+(\d+)\s+(\d+)',text)],
                       pair_product_points=[int(m) for m in re.findall(r'EXX_PAIR evaluated product points:\s+(\d+)',text)],
+                      source_ace_accepted=text.count('EXX_SUPPORT_ACE accepted: T'),source_ace_fallbacks=text.count('EXX_SUPPORT_ACE accepted: F'),
+                      source_ace_counts=[list(map(int,m)) for m in re.findall(r'EXX_SUPPORT_ACE products/skipped/catalogue/product points:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',text)],
                       pair_fallbacks=text.count('EXX_PAIR unscreened ACE fallback: T'),
                       accepted_pair_bounds=[float(m) for m in re.findall(r'EXX_PAIR unscreened ACE fallback: [TF] accepted action bound:\s+(\S+)',text)])
+                    if mode=='adaptive' and a.ace_support=='source':
+                        if r['source_ace_accepted']+r['source_ace_fallbacks']!=33 or len(r['source_ace_counts'])!=33:raise RuntimeError('missing source ACE diagnostics')
                     if mode=='adaptive' and a.pair_tolerance is not None:
                         if len(r['accepted_pair_bounds'])!=33 or len(r['generated_pair_counters'])!=33:raise RuntimeError('missing pair diagnostics')
                         if any(not math.isfinite(v) or v<0 or v>a.pair_tolerance*(1+1e-10) for v in r['accepted_pair_bounds']):raise RuntimeError('invalid accepted pair bound')

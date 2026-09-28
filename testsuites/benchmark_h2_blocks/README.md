@@ -76,3 +76,9 @@ reduce exchange work/temporary storage; dense native RT and ACE storage remain.
 Use a fresh RT output for each executable and reuse only validated canonical DC
 seeds with the explicit binary-change option. Old partial measurements remain
 in `docs/benchmarks/2026-09-28-h2-blocks-before-pairs/`.
+
+`--ace-support source` switches only the adaptive RT cases to masked-source ACE;
+full references retain occupied-vector ACE. Do not combine this with
+`--pair-tolerance`. Results retain acceptance/fallback counts and generated,
+skipped, catalogue and product-point counters. The approximation from changing
+ACE's training subspace is distinct from exact disjoint-support pair pruning.

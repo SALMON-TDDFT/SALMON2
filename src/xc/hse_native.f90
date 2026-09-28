@@ -22,7 +22,7 @@ module hse_native
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-    yn_exx_dc_mlwf,exx_pre_scf_active,exx_pair_screening,exx_pair_tolerance,hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
+    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_block_rows,yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
   public :: hse_export_snapshot,hse_eigen_diagnostic_enabled,hse_export_eigen_pair
@@ -32,7 +32,7 @@ module hse_native
   public :: hse_taylor_stage,hse_core_exchange,hse_force_full_action
   type(hse_symmetry_map),save :: symmetry_map
   type(hse_kernel),save :: kernel
-  type(spatial_exx_state),save :: spatial
+  type(spatial_exx_state),target,save :: spatial
   type(s_hse_wannier),save :: wannier
   real(8),allocatable,save :: cached_occupation(:,:)
   complex(8),allocatable,save :: cached_action(:,:,:)
@@ -518,7 +518,8 @@ contains
     integer,allocatable :: orbital_comm
     real(8),allocatable :: radii(:),loss(:)
     logical,allocatable :: protected(:)
-    logical :: was_active,screen_fallback,radius_covers_cell
+    integer(int64) :: fft_work(3)
+    logical :: was_active,screen_fallback,radius_covers_cell,support_accepted
     integer :: requested_screen_mode
     real(8) :: correction_norm,accepted_bound
     integer :: adaptive_bad
@@ -612,38 +613,49 @@ contains
     if(exx_pair_screening=='on')requested_screen_mode=2
     if(dc_canonical())requested_screen_mode=0
     spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
-    call apply_exchange_action()
-    if(status/=0)error stop 'Spatial EXX: exchange action failed'
-    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i2,2i18,2es18.9)') &
-      'EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds: ',requested_screen_mode, &
-      spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
-    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,2i18)') &
-      'EXX_PAIR generated grid products/catalogue entries: ',spatial%pair_products,spatial%pair_catalog_entries
-    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i18)') &
-      'EXX_PAIR evaluated product points: ',spatial%pair_product_points
-    correction_norm=0d0;accepted_bound=0d0
-    if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
-      call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
-        exx_pair_tolerance-spatial%screen_bound,correction_norm,status)
-      accepted_bound=spatial%screen_bound+correction_norm
+    fft_work=0_int64
+    support_accepted=.false.
+    if(exx_ace_support=='source')then
+      if(.not.adaptive_active)error stop 'Source-support ACE requires active MLWF support'
+      call build_source_support_ace(support_accepted)
+      if(info%id_ro==0)write(*,'(a,l1,a)')'EXX_SUPPORT_ACE accepted: ',support_accepted, &
+        ' (failure falls back to occupied-vector ACE)'
     endif
-    if(status==0)call build_exchange_ace()
-    screen_fallback=status/=0.and.requested_screen_mode==2.and.spatial%screen_skipped>0
-    if(screen_fallback)then
-      ! Pair-dependent omissions need not define a Hermitian input metric.
-      ! Never relax the existing Hermitian/positive ACE validation to accept them.
-      spatial%screen_mode=0;accepted_bound=0d0
+    if(.not.support_accepted)then
+      spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
       call apply_exchange_action()
-      if(status/=0)error stop 'Spatial EXX: unscreened fallback action failed'
-      call build_exchange_ace()
-    endif
-    if(status/=0)error stop 'Spatial EXX: ACE build failed'
-    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,l1,a,es18.9)') &
-      'EXX_PAIR unscreened ACE fallback: ',screen_fallback,' accepted action bound: ', &
-      accepted_bound
+      if(status/=0)error stop 'Spatial EXX: exchange action failed'
+      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i2,2i18,2es18.9)') &
+        'EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds: ',requested_screen_mode, &
+        spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
+      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,2i18)') &
+        'EXX_PAIR generated grid products/catalogue entries: ',spatial%pair_products,spatial%pair_catalog_entries
+      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i18)') &
+        'EXX_PAIR evaluated product points: ',spatial%pair_product_points
+      correction_norm=0d0;accepted_bound=0d0
+      if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
+        call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
+          exx_pair_tolerance-spatial%screen_bound,correction_norm,status)
+        accepted_bound=spatial%screen_bound+correction_norm
+      endif
+      if(status==0)call build_exchange_ace()
+      screen_fallback=status/=0.and.requested_screen_mode==2.and.spatial%screen_skipped>0
+      if(screen_fallback)then
+        ! Pair-dependent omissions need not define a Hermitian input metric.
+        ! Never relax the existing Hermitian/positive ACE validation to accept them.
+        spatial%screen_mode=0;accepted_bound=0d0
+        call apply_exchange_action()
+        if(status/=0)error stop 'Spatial EXX: unscreened fallback action failed'
+        call build_exchange_ace()
+      endif
+      if(status/=0)error stop 'Spatial EXX: ACE build failed'
+      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,l1,a,es18.9)') &
+        'EXX_PAIR unscreened ACE fallback: ',screen_fallback,' accepted action bound: ', &
+        accepted_bound
+    endif ! occupied-vector ACE, including support-ACE fallback
     if(adaptive_active.and.info%id_ro==0)write(*,'(a,3i18)') &
       'EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0): ', &
-      spatial%local_pairs,spatial%global_pairs,spatial%local_points
+      fft_work
     cached_source=local;cached_action=w;cached_occupation=system%rocc(:,:,1)
     if(spatial%updates==1)write(*,'(a,4i10)')'EXX_ORBITALS rank/local/global/grid: ', &
       info%id_ro,info%numo,system%no,product(mg%num)
@@ -658,6 +670,37 @@ contains
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
+    subroutine build_source_support_ace(accepted)
+      logical,intent(out) :: accepted
+      complex(8),pointer :: training(:,:,:)
+      accepted=.false.
+      ! Alias the existing finite source; do not allocate another full-grid copy.
+      training(1:size(spatial%source,1),1:size(spatial%source,2),1:1)=>spatial%source
+      spatial%screen_mode=2;spatial%screen_tolerance=0d0
+      call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
+        [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+        pbeh_coulomb_radius,training,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+      if(status/=0)error stop 'Source-support ACE: exchange action failed'
+      call record_fft_work()
+      if(info%id_ro==0)write(*,'(a,4i18)')'EXX_SUPPORT_ACE products/skipped/catalogue/product points: ', &
+        spatial%pair_products,spatial%screen_skipped,spatial%pair_catalog_entries,spatial%pair_product_points
+      ! The ACE metric is -S^H K_S S. S need not be orthonormal; the existing
+      ! Hermitian/positive metric checks and conditioning threshold still apply.
+      if(info%isize_o>1)then
+        call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status)
+      else
+        call hse_ace_build(ace,training,w,system%hvol,status,sum_spatial)
+      endif
+      call comm_summation(status,adaptive_bad,info%icomm_ro)
+      if(adaptive_bad/=0)return
+      if(info%isize_o>1)then
+        call orbital_ace_apply(ace,local,w,info%icomm_r,info%icomm_o,status)
+      else
+        call hse_ace_apply(ace,local,w,status,sum_spatial)
+      endif
+      if(status/=0)error stop 'Source-support ACE: occupied mesh action failed'
+      accepted=.true.
+    end subroutine
     subroutine apply_exchange_action()
       complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
       integer,allocatable :: counts(:)
@@ -682,6 +725,11 @@ contains
           w(:,:,1)=matmul(localized_action(:,:,1),adjoint)
         endif
       endif
+      call record_fft_work()
+    end subroutine
+    subroutine record_fft_work()
+      ! Count rejected ACE attempts too: each exchange call resets its counters.
+      fft_work=fft_work+[spatial%local_pairs,spatial%global_pairs,spatial%local_points]
     end subroutine
     subroutine build_exchange_ace()
       if(info%isize_o>1)then

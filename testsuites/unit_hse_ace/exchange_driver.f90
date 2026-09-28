@@ -207,6 +207,36 @@ program exchange_driver
     masked_partitioned%screen_mode=0
     if(rank==0)print *, 'PASS pair screening orbital/empty layouts ',np,orb_size,omega
   end block
+  block
+    complex(8),allocatable :: support(:,:,:),exact(:,:,:),pruned(:,:,:),interpolated(:,:,:)
+    integer :: count_o
+    count_o=last_o-first_o+1
+    allocate(support(product(m),count_o,1),exact(product(m),count_o,1), &
+      pruned(product(m),count_o,1),interpolated(product(m),count_o,1))
+    support(:,:,1)=masked_partitioned%source
+    ! Complex, overlapping, nonorthogonal finite-support training columns.
+    masked_partitioned%screen_mode=0
+    call spatial_exx_apply(masked_partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+      support,exact,status,omega=omega,comm_o=comm_o)
+    if(status/=0)error stop 'support exact exchange'
+    masked_partitioned%screen_mode=2;masked_partitioned%screen_tolerance=0d0
+    call spatial_exx_apply(masked_partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
+      support,pruned,status,omega=omega,comm_o=comm_o)
+    if(status/=0.or.any(abs(pruned-exact)>1d-12))error stop 'support pruning changed exchange'
+    call orbital_ace_build(distributed_ace,support,pruned,dv,comm_r,comm_o,status)
+    if(status/=0)error stop 'nonorthogonal support ACE build'
+    call orbital_ace_apply(distributed_ace,support,interpolated,comm_r,comm_o,status)
+    if(status/=0.or.any(abs(interpolated-exact)>1d-11))error stop 'nonorthogonal support interpolation'
+    ! Independent negative diagonal operator, unrelated to the exchange implementation.
+    do l=1,product(m)
+      exact(l,:,1)=-(1d0+.001d0*l)*support(l,:,1)
+    enddo
+    call orbital_ace_build(distributed_ace,support,exact,dv,comm_r,comm_o,status)
+    if(status/=0)error stop 'independent nonorthogonal ACE build'
+    call orbital_ace_apply(distributed_ace,support,interpolated,comm_r,comm_o,status)
+    if(status/=0.or.any(abs(interpolated-exact)>1d-11))error stop 'independent nonorthogonal interpolation'
+    if(rank==0)print *, 'PASS nonorthogonal source ACE ',np,orb_size,omega
+  end block
   call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=-.1d0)
   if(status==0)error stop 'negative screening accepted'
   ! Force an FFT validation failure after the first source broadcast.
