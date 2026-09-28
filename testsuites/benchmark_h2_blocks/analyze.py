@@ -6,11 +6,14 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 src=Path(sys.argv[1]);out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
 d=json.loads(src.read_text())
-if not d['complete']:raise RuntimeError('incomplete measurement matrix')
+partial='--partial' in sys.argv[3:]
+if not d['complete'] and not partial:raise RuntimeError('incomplete measurement matrix')
 summary=[]
 for c in d['cases']:
     rows={m:[r for r in d['runs'] if r['shape']==c['shape'] and r['ranks']==c['ranks'] and r['mode']==m] for m in ('full','adaptive')}
-    if any(len(rr)!=c.get('repeats',d['repeats']) for rr in rows.values()):raise RuntimeError('missing repeats')
+    if any(len(rr)!=c.get('repeats',d['repeats']) for rr in rows.values()):
+        if partial:continue
+        raise RuntimeError('missing repeats')
     item=dict(c)
     for m,rr in rows.items():
         item[m]={k:dict(min=min(r[k] for r in rr),median=statistics.median(r[k] for r in rr),max=max(r[k] for r in rr)) for k in ('rt_max_seconds','peak_rank_bytes','post_impulse_energy_width_ha')}
@@ -28,14 +31,16 @@ strong_differences={}
 for mode in ('full','adaptive'):
     rows=[r for r in d['runs'] if 'strong' in r['suites'] and r['mode']==mode]
     if not rows:continue
-    ref=next(r for r in rows if r['ranks']==1)
+    ref=next((r for r in rows if r['ranks']==1),None)
+    if ref is None:continue
     strong_differences[mode]=dict(current=max(abs(x-y) for r in rows for a,b in zip(ref['observables'],r['observables']) for x,y in zip(a[13:16],b[13:16])),energy_ha=max(abs(a[1]-b[1]) for r in rows for a,b in zip(ref['energies'],r['energies'])))
-(out/'summary.json').write_text(json.dumps(dict(summary=summary,strong_differences=strong_differences),indent=2)+'\n')
-lines=[]
+(out/'summary.json').write_text(json.dumps(dict(complete=d['complete'],summary=summary,strong_differences=strong_differences,missing_cases=[c for c in d['cases'] if not any(r['shape']==c['shape'] and r['ranks']==c['ranks'] for r in summary)]),indent=2)+'\n')
+lines=['Interim: remaining cases are pending.',''] if not d['complete'] else []
 for suite in ('weak','strong'):
     lines+=['## '+suite,'','|Fragment array|H₂|MPI|Runs per mode|Full seconds: single or min [median,max]|99.9% seconds: single or min [median,max]|Speedup|Peak RSS full / .999 MiB|Radius bohr|Local FFT volume ratio|Energy width .999 Ha|','|---|---:|---:|---:|---|---|---:|---:|---:|---:|---:|']
-    for r in summary:
-        if suite not in r['suites']:continue
+    table_rows=[r for r in summary if suite in r['suites']]
+    if suite=='strong':table_rows.sort(key=lambda r:r['ranks'])
+    for r in table_rows:
         def t(m):
             x=r[m]['rt_max_seconds']
             if r.get('repeats',d['repeats'])==1:return f"{x['min']:.4f}"
@@ -49,6 +54,9 @@ fig,axes=plt.subplots(2,2,figsize=(12,8),layout='constrained')
 for col,suite in enumerate(('weak','strong')):
     rr=[r for r in summary if suite in r['suites']]
     if suite=='strong':rr.sort(key=lambda r:r['ranks'])
+    if not rr:
+        for ax in axes[:,col]:ax.set_axis_off();ax.text(.5,.5,'Pending',ha='center',va='center')
+        continue
     x=list(range(len(rr)));labels=[('x'.join(map(str,r['shape']))+'\n'+str(r['ranks'])+' MPI') if suite=='weak' else str(r['ranks']) for r in rr]
     for mode,color in [('full','#4968b1'),('adaptive','#d27724')]:
         ys=[r[mode]['rt_max_seconds']['min'] for r in rr]
