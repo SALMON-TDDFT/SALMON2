@@ -32,7 +32,7 @@ class ExxInputs(unittest.TestCase):
     def test_pair_screen_input_contract(self):
         self.run_case("exx_pair_screening='invalid'",error='exx_pair_screening must be off, diagnose or on')
         self.run_case('exx_pair_tolerance=-1',error='exx_pair_tolerance must be finite and nonnegative')
-        self.run_case("exx_pair_screening='diagnose'",error='pair screening requires HSE06 with positive omega')
+        self.run_case("exx_pair_screening='diagnose'",error='pair screening requires exx_mlwf_norm_fraction > 0')
         self.run_case("exx_pair_screening='on'",lambda s:s.replace("xc='pbeh40_rvv10'","xc='hse06'"),
             error='pair screening requires exx_mlwf_norm_fraction > 0')
 

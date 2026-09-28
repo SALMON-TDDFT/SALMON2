@@ -6,6 +6,7 @@
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module hse_spatial
   use iso_fortran_env, only: int64
+  use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
   use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
@@ -22,6 +23,7 @@ module hse_spatial
     integer :: screen_mode=0 ! 0 off, 1 diagnose, 2 omit
     real(8) :: screen_tolerance=0d0,screen_bound=0d0,screen_cpu_seconds=0d0
     integer(int64) :: screen_candidates=0,screen_skipped=0
+    integer(int64) :: pair_products=0,pair_catalog_entries=0
     integer(int64) :: local_pairs=0,local_points=0,global_pairs=0
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
@@ -345,27 +347,30 @@ contains
     integer,intent(out) :: status
     complex(8),allocatable :: density(:,:),spectrum(:,:),source_column(:)
     real(8),allocatable :: multiplier(:)
+    type(exx_pair_catalog) :: catalogue
     type(s_exx_spatial_local) :: compact_plan
     complex(8),allocatable :: compact_action(:,:)
     logical :: compact_used
-    logical,allocatable :: skip(:)
-    integer,allocatable :: selected(:)
-    real(8),allocatable :: omitted(:),pair_norms(:,:),pair_totals(:,:)
+    integer,allocatable :: selected(:),broad_kept(:)
+    real(8),allocatable :: omitted(:),pair_norms(:,:),pair_totals(:,:),source_norms(:),global_norms(:)
     real(8) :: kernel_local(2),kernel_sum(2),lambda,kzero,krms,budget,normq,qmax,qnorm_local
     real(8) :: candidate_bound,summary_local(3),summary_total(3),cpu_start,cpu_end,bound_scale
-    integer :: source_total,target_total,nselected
+    integer :: source_total,target_total,nselected,ncandidate,k,broad_sources,box_lower(3),box_upper(3)
+    integer :: mesh_local(3),mesh_lo(3)
+    real(8) :: envelope_max,envelope_norm,envelope_factor,threshold_floor,threshold_pair,factor
+    real(8) :: pair_stats(2),global_pair_stats(2)
     integer(int64) :: compact_pairs,compact_points
     real(8) :: radius,pi,q(3),q2,screening
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
     op%screen_candidates=0;op%screen_skipped=0;op%screen_bound=0d0;op%screen_cpu_seconds=0d0
+    op%pair_products=0;op%pair_catalog_entries=0
     screening=0d0
     if(present(omega))screening=omega
     if(.not.ieee_is_finite(screening).or.screening<0d0)bad=1
     if(.not.allocated(op%source))bad=1
     if(op%screen_mode<0.or.op%screen_mode>2)bad=1
     if(.not.ieee_is_finite(op%screen_tolerance).or.op%screen_tolerance<0d0)bad=1
-    if(op%screen_mode/=0.and.screening<=0d0)bad=1
     if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
     if(screening==0d0)then
       if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
@@ -373,7 +378,7 @@ contains
     call collective_bad()
     if(bad/=0)return
     m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
-    ng=product(m);nt=size(target,2)
+    ng=product(m);nt=size(target,2);mesh_local=m;mesh_lo=lo
     if(size(target,1)/=ng.or.size(target,3)/=1.or.nt<0.or.any(shape(action)/=shape(target)))bad=1
     if(size(op%source,1)/=ng)bad=1
     if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
@@ -415,7 +420,7 @@ contains
         multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
       endif
     enddo;enddo;enddo
-    allocate(skip(nt),selected(nt),omitted(nt));omitted=0d0
+    allocate(selected(nt),omitted(nt),broad_kept(nt));omitted=0d0;broad_kept=0;broad_sources=0
     if(op%screen_mode/=0)then
       call cpu_time(cpu_start)
       ! Norms of the actual discrete convolution, including the G=0 mode.
@@ -431,6 +436,28 @@ contains
       endif
       budget=op%screen_tolerance/(real(max(1,source_total),8)*sqrt(real(max(1,target_total),8)))
       allocate(pair_norms(2,nt),pair_totals(2,nt))
+      ! A common floor retains every block that any source query might need.
+      ! Upper bounds on max|q| and ||q||_2 avoid one collective per source.
+      envelope_max=0d0
+      if(size(op%source)>0)envelope_max=maxval(abs(op%source))
+      call max_scalar(envelope_max,comm_r)
+      if(present(comm_o))call max_scalar(envelope_max,comm_o)
+      allocate(source_norms(size(op%source,2)),global_norms(size(op%source,2)))
+      source_norms=0d0
+      if(envelope_max>0d0)source_norms=sum((abs(op%source)/envelope_max)**2,dim=1)
+      if(size(source_norms)>0)call comm_summation(source_norms,global_norms,size(source_norms),comm_r)
+      envelope_norm=0d0
+      if(size(global_norms)>0)envelope_norm=envelope_max*sqrt(product(h)*maxval(global_norms))
+      if(present(comm_o))call max_scalar(envelope_norm,comm_o)
+      envelope_factor=envelope_max*lambda*envelope_norm*(1d0+512d0*epsilon(1d0))
+      threshold_floor=0d0
+      if(ieee_is_finite(envelope_factor).and.envelope_factor>tiny(1d0)) &
+        threshold_floor=(budget/envelope_factor)*(1d0-512d0*epsilon(1d0))
+      if(.not.ieee_is_finite(threshold_floor))threshold_floor=0d0
+      call pair_catalog_build(catalogue,n,mesh_lo,mesh_local,comm_r,target(:,:,1),threshold_floor,status)
+      call collective_bad_status()
+      if(bad/=0)return
+      op%pair_catalog_entries=catalogue%entries
       call cpu_time(cpu_end);op%screen_cpu_seconds=cpu_end-cpu_start
     endif
     op%local_pairs=0;op%local_points=0;op%global_pairs=0
@@ -438,7 +465,6 @@ contains
       call spatial_local_init(compact_plan,n,dims,coords,comm,multiplier,status)
       call collective_bad_status()
       if(status/=0)return
-      allocate(compact_action(ng,nt))
     endif
     allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
     ! Grid rows match across comm_o; stream one source column from its owner.
@@ -453,7 +479,6 @@ contains
         else
           source_column=op%source(:,i)
         endif
-        skip=.false.
         if(op%screen_mode/=0)then
           call cpu_time(cpu_start)
           qmax=maxval(abs(source_column));call max_scalar(qmax,comm_r)
@@ -461,50 +486,74 @@ contains
           if(qmax>0d0)qnorm_local=sum((abs(source_column)/qmax)**2)
           call comm_summation(qnorm_local,normq,comm_r)
           normq=qmax*sqrt(product(h)*normq)
-          do j=1,nt
-            pair_norms(1,j)=sum(abs(conjg(source_column)*target(:,j,1))**2)
-            pair_norms(2,j)=sum(abs(conjg(source_column)*target(:,j,1)))
+          factor=qmax*lambda*normq*(1d0+256d0*epsilon(1d0))
+          threshold_pair=threshold_floor
+          if(ieee_is_finite(factor).and.factor>tiny(1d0)) &
+            threshold_pair=max(threshold_floor,(budget/factor)*(1d0-512d0*epsilon(1d0)))
+          if(.not.ieee_is_finite(threshold_pair))threshold_pair=threshold_floor
+          call pair_source_box(n,mesh_lo,mesh_local,comm_r,source_column,box_lower,box_upper,status)
+          if(status==0)call pair_catalog_query(catalogue,box_lower,box_upper,threshold_pair,selected,ncandidate,status)
+          call collective_bad_status()
+          if(bad/=0)return
+          ! All absent pairs have action norm <= budget. Count their complement
+          ! without an Nsource-by-Ntarget skip table or per-source dense update.
+          broad_sources=broad_sources+1
+          do k=1,ncandidate
+            j=selected(k);broad_kept(j)=broad_kept(j)+1
+            pair_norms(1,k)=sum(abs(conjg(source_column)*target(:,j,1))**2)
+            pair_norms(2,k)=sum(abs(conjg(source_column)*target(:,j,1)))
           enddo
-          if(nt>0)call comm_summation(pair_norms,pair_totals,2*nt,comm_r)
-          do j=1,nt
-            candidate_bound=min(qmax*lambda*sqrt(product(h)*pair_totals(1,j)), &
-              normq*kzero*pair_totals(2,j),normq*krms*sqrt(pair_totals(1,j)))
+          op%pair_products=op%pair_products+int(ncandidate,int64)
+          op%screen_candidates=op%screen_candidates+int(nt-ncandidate,int64)
+          if(ncandidate>0)call comm_summation(pair_norms(:,:ncandidate),pair_totals(:,:ncandidate),2*ncandidate,comm_r)
+          nselected=0
+          do k=1,ncandidate
+            j=selected(k)
+            candidate_bound=min(qmax*lambda*sqrt(product(h)*pair_totals(1,k)), &
+              normq*kzero*pair_totals(2,k),normq*krms*sqrt(pair_totals(1,k)))
             ! Do not turn a subnormal squared norm into a zero error certificate.
-            if(pair_totals(1,j)<tiny(1d0).and.pair_totals(2,j)>0d0) &
-              candidate_bound=normq*kzero*pair_totals(2,j)
-            ! Round upward; nonfinite diagnostics must never authorize omission.
+            if(pair_totals(1,k)<tiny(1d0).and.pair_totals(2,k)>0d0) &
+              candidate_bound=normq*kzero*pair_totals(2,k)
             candidate_bound=candidate_bound*(1d0+128d0*epsilon(1d0))
-            if(.not.ieee_is_finite(candidate_bound))cycle
-            if(candidate_bound<=budget.and.(budget>0d0.or.pair_totals(2,j)==0d0))then
-              op%screen_candidates=op%screen_candidates+1_int64
-              omitted(j)=omitted(j)+candidate_bound
-              if(op%screen_mode==2)skip(j)=.true.
+            if(ieee_is_finite(candidate_bound))then
+              if(candidate_bound<=budget.and.(budget>0d0.or.pair_totals(2,k)==0d0))then
+                op%screen_candidates=op%screen_candidates+1_int64
+                omitted(j)=omitted(j)+candidate_bound
+                if(op%screen_mode==2)cycle
+              endif
             endif
+            nselected=nselected+1;selected(nselected)=j
           enddo
           call cpu_time(cpu_end);op%screen_cpu_seconds=op%screen_cpu_seconds+cpu_end-cpu_start
         endif
-        nselected=0
-        do j=1,nt
-          if(skip(j))cycle
-          nselected=nselected+1;selected(nselected)=j
-        enddo
+        if(op%screen_mode/=2)then
+          nselected=nt
+          do j=1,nt
+            selected(j)=j
+          enddo
+        endif
         op%screen_skipped=op%screen_skipped+int(nt-nselected,int64)
         if(op%compact)then
-          call spatial_local_apply(compact_plan,comm_r,source_column,target(:,:,1),compact_action, &
-            compact_used,status,compact_pairs,compact_points,skip)
+          allocate(compact_action(ng,nselected))
+          call spatial_local_apply(compact_plan,comm_r,source_column,target(:,selected(:nselected),1),compact_action, &
+            compact_used,status,compact_pairs,compact_points)
           call collective_bad_status()
           if(status/=0)then
             call spatial_local_destroy(compact_plan)
             return
           endif
           if(compact_used)then
-            action(:,:,1)=action(:,:,1)+compact_action
+            do j=1,nselected
+              action(:,selected(j),1)=action(:,selected(j),1)+compact_action(:,j)
+            enddo
+            deallocate(compact_action)
             op%local_pairs=op%local_pairs+compact_pairs
             op%local_points=op%local_points+compact_points
             if(present(comm_o))call collective_bad()
             if(bad/=0)return
             cycle
           endif
+          deallocate(compact_action)
         endif
         op%global_pairs=op%global_pairs+nselected
         do first=1,nselected,4
@@ -542,6 +591,10 @@ contains
     enddo
     call spatial_local_destroy(compact_plan)
     if(op%screen_mode/=0)then
+      omitted=omitted+budget*real(broad_sources-broad_kept,8)
+      pair_stats=real([op%pair_products,op%pair_catalog_entries],8);global_pair_stats=pair_stats
+      if(present(comm_o))call comm_summation(pair_stats,global_pair_stats,2,comm_o)
+      op%pair_products=int(global_pair_stats(1),int64);op%pair_catalog_entries=int(global_pair_stats(2),int64)
       bound_scale=0d0
       if(nt>0)bound_scale=maxval(omitted)
       if(present(comm_o))call max_scalar(bound_scale,comm_o)

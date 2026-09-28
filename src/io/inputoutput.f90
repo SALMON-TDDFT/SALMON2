@@ -3287,7 +3287,9 @@ contains
     if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &
       error stop 'exx_pair_tolerance must be finite and nonnegative'
     if(exx_pair_screening/='off')then
-      if(xc/='hse06'.or.hse_omega<=0d0)error stop 'pair screening requires HSE06 with positive omega'
+      if(xc/='hse06'.and.xc/='pbeh40'.and.xc/='pbeh40_rvv10') &
+        error stop 'pair screening requires HSE06 or PBEh'
+      if(xc=='hse06'.and.hse_omega<=0d0)error stop 'HSE pair screening requires positive omega'
       if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
       if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
     endif

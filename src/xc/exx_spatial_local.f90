@@ -50,7 +50,7 @@ contains
   complex(8),allocatable :: kernel_tile(:,:,:),kernel_sum(:,:,:),tile(:,:),tile_sum(:,:),result(:,:),result_sum(:,:)
   complex(8),allocatable :: density(:),potential(:)
   integer :: ng,nt,bad,axis,j,g,x,y,z,p(3),box(3),origin(3),padded(3),gap,best,start,a,b,c,r,rank,peers
-  integer :: count,ntmax,first,nb,k
+  integer :: count,ntmax,first,nb,k,batch
   integer(int64) :: local_counts(2),global_counts(2)
   ! communication wrappers do not expose int64 reductions; sums are bounded
   ! here by the target count and accumulated through small real vectors.
@@ -121,8 +121,11 @@ contains
    status=1;return
   endif
   count=product(box)
-  ! Bounded orbital batches: memory is O(compact volume), independent of nt.
-  allocate(tile(count,5),tile_sum(count,5),result(count,4),result_sum(count,4))
+  ! One selected pair per spatial worker; the target list has already been
+  ! screened. No all-target compact action or fixed four-worker bottleneck.
+  call comm_get_groupinfo(comm_r,rank,peers)
+  batch=min(nt,max(1,peers))
+  allocate(tile(count,batch+1),tile_sum(count,batch+1),result(count,batch),result_sum(count,batch))
   allocate(local_rows(count),tile_rows(count),density(count),potential(count))
   r=0
   do z=0,box(3)-1;do y=0,box(2)-1;do x=0,box(1)-1
@@ -134,8 +137,8 @@ contains
   enddo;enddo;enddo
   call comm_get_groupinfo(comm_r,rank,peers)
   local_counts=0_int64;bad=0
-  do first=1,nt,4
-   nb=min(4,nt-first+1);tile=0d0
+  do first=1,nt,batch
+   nb=min(batch,nt-first+1);tile=0d0
    do j=1,r
     g=local_rows(j);k=tile_rows(j)
     tile(k,1)=source(g);tile(k,2:nb+1)=targets(g,first:first+nb-1)

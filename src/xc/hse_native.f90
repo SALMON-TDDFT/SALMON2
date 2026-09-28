@@ -610,12 +610,15 @@ contains
     requested_screen_mode=0
     if(exx_pair_screening=='diagnose')requested_screen_mode=1
     if(exx_pair_screening=='on')requested_screen_mode=2
+    if(dc_canonical())requested_screen_mode=0
     spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
     call apply_exchange_action()
     if(status/=0)error stop 'Spatial EXX: exchange action failed'
     if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i2,2i18,2es18.9)') &
       'EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds: ',requested_screen_mode, &
       spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,2i18)') &
+      'EXX_PAIR generated grid products/catalogue entries: ',spatial%pair_products,spatial%pair_catalog_entries
     correction_norm=0d0;accepted_bound=0d0
     if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
       call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
@@ -665,7 +668,8 @@ contains
         allocate(localized_action(size(w,1),size(w,2),1))
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
           [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,spatial%previous,localized_action,status,omega=hse_omega,comm_o=orbital_comm)
+          pbeh_coulomb_radius,spatial%previous,localized_action,status, &
+          omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
         if(status/=0)return
         adjoint=conjg(transpose(spatial%gauge(:,:,1)))
         if(info%isize_o>1)then

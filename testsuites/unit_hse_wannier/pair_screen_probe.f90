@@ -23,7 +23,7 @@ program probe
  enddo;enddo;enddo
  allocate(compressed(product(m),2,1))
  op%source=target(:,:,1)
- do k=1,2
+ do k=0,2
   omega=.11d0*k
   op%screen_mode=0;op%compact=.false.
   call apply(reference)
@@ -80,8 +80,46 @@ program probe
  call orbital_hermitian_action(target*1d200,value,product(h),MPI_COMM_WORLD,MPI_COMM_SELF, &
    1d-190,correction,st)
  if(st/=0.or.correction<=0d0)error stop 'tiny completion norm underflowed'
+ call localized_chain()
  call MPI_Finalize(ierr)
 contains
+ subroutine localized_chain()
+  type(spatial_exx_state) :: chain
+  complex(8),allocatable :: t(:,:,:),exact(:,:,:),fast(:,:,:)
+  integer :: nn(3),mm(3),gg,xx,yy,zz,jj,ii,nnorb,ss,cc,kk
+  real(8) :: ee,ge,ww
+  nnorb=8;nn=[64,16,16];mm=[64,16/np,16]
+  allocate(t(product(mm),nnorb,1),exact(product(mm),nnorb,1),fast(product(mm),nnorb,1))
+  allocate(chain%source(product(mm),nnorb));chain%source=0d0
+  gg=0
+  do zz=0,mm(3)-1;do yy=0,mm(2)-1;do xx=0,mm(1)-1
+   gg=gg+1
+   if(yy+rank*mm(2)/=2.or.zz/=2)cycle
+   do jj=1,nnorb
+    if(xx==8*(jj-1)+1)chain%source(gg,jj)=cmplx(1d0,0d0,8)/sqrt(product(h))
+   enddo
+  enddo;enddo;enddo
+  t(:,:,1)=chain%source+cmplx(1d-12,-1d-12,8)
+  do kk=0,1
+   ww=.11d0*kk;chain%screen_mode=0;chain%compact=.false.
+   call spatial_exx_apply(chain,nn,h,[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
+       MPI_COMM_WORLD,4d0,t,exact,ss,omega=ww)
+   if(ss/=0)error stop 'chain reference'
+   do cc=0,1
+    chain%screen_mode=2;chain%screen_tolerance=1d-7;chain%compact=cc==1
+    call spatial_exx_apply(chain,nn,h,[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
+        MPI_COMM_WORLD,4d0,t,fast,ss,omega=ww)
+    if(ss/=0)error stop 'chain apply'
+    if(chain%pair_products/=nnorb)error stop 'distant pairs generated full products'
+    if(chain%screen_skipped/=nnorb*(nnorb-1))error stop 'chain pair reduction'
+    ee=sum(abs(fast-exact)**2)*product(h)
+    call MPI_Allreduce(ee,ge,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+    if(sqrt(ge)>chain%screen_bound+1d-13.or.chain%screen_bound>1d-7)error stop 'chain bound'
+    if(rank==0)print *,'CHAIN ACTION omega/products/skipped/error/bound',ww,chain%pair_products, &
+        chain%screen_skipped,sqrt(ge),chain%screen_bound
+   enddo
+  enddo
+ end subroutine
  subroutine sum_grid(a)
   complex(8),intent(inout) :: a(:,:)
   complex(8) :: b(size(a,1),size(a,2))

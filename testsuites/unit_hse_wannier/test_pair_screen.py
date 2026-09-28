@@ -31,6 +31,7 @@ def main():
             '-ffree-line-length-none', '-I' + str(build),
             str(ROOT / 'src/xc/exx_orbitals.f90'),
             str(ROOT / 'src/xc/exx_spatial_local.f90'),
+            str(ROOT / 'src/xc/exx_pair_candidates.f90'),
             str(ROOT / 'src/xc/hse_spatial.f90'),
             str(Path(__file__).with_name('pair_screen_probe.f90')),
             *[str(objects / name) for name in dependencies],

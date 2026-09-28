@@ -185,7 +185,7 @@ program exchange_driver
   if(masked_partitioned%local_pairs/=no*(last_t-first_t+1).or.masked_partitioned%global_pairs/=0) &
     error stop 'orbital compact path not used'
   if(rank==0)print *, 'PASS compact orbital exchange ranks/orbitals ',np,orb_size,omega
-  if(omega>0d0)then
+  block
     ! Exercise all-dropped pairs with uneven/empty source and target owners.
     ! Huge budget is a stress test, not a recommended physical tolerance.
     masked_partitioned%screen_tolerance=1d6
@@ -206,7 +206,7 @@ program exchange_driver
     enddo
     masked_partitioned%screen_mode=0
     if(rank==0)print *, 'PASS pair screening orbital/empty layouts ',np,orb_size,omega
-  endif
+  end block
   call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=-.1d0)
   if(status==0)error stop 'negative screening accepted'
   ! Force an FFT validation failure after the first source broadcast.
