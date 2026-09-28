@@ -185,6 +185,13 @@ if it cannot obtain an accepted initial/transported gauge; it no longer
 silently switches to a full-support operator. This does not freeze the adaptive
 radius or remove errors from moving mask boundaries.
 
+The Gamma-only spatial and spatial/orbital EXX paths share the existing Gamma
+Jacobi localizer. It consumes their six periodic overlap links directly, avoiding
+an extra copy and the long-axis convergence stalls of the generic gradient
+minimizer. The MLWF tolerance retains its gradient-norm meaning; gauge transport
+and accepted-gauge retention follow the same rules above. Canonical DC sources
+do not invoke this localizer.
+
 
 ## PBE preconvergence before hybrid SCF
 

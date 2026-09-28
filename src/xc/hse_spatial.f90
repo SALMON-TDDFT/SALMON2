@@ -10,7 +10,7 @@ module hse_spatial
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use fftw_pencils, only: pencil_transform
-  use hse_wannier_gauge, only: gauge_transport,gauge_minimize
+  use hse_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -66,7 +66,7 @@ contains
     complex(8),allocatable :: raw(:,:,:,:),shifted(:,:),phase(:),transported(:,:,:)
     logical :: accepted
     real(8) :: b(3,6),weights(6),delta,pi,position(3)
-    integer :: no,ng,m(3),lo(3),x,y,z,g,j,axis,neighbors(6,1),bad
+    integer :: no,ng,m(3),lo(3),x,y,z,g,j,axis,bad
     if(present(comm_o))then
       call refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation)
       return
@@ -113,7 +113,7 @@ contains
     op%iterations=0;op%localization_status=2;op%spread=-1d0;op%gradient=-1d0
     if(maxiter>0)then
       allocate(raw(no,no,6,1),shifted(ng,no),phase(ng))
-      pi=acos(-1d0);b=0d0;neighbors=1
+      pi=acos(-1d0);b=0d0
       do axis=1,3
         delta=2*pi/(n(axis)*h(axis));b(axis,axis)=delta;b(axis,axis+3)=-delta
         weights(axis)=1d0/(2*delta**2);weights(axis+3)=weights(axis)
@@ -135,7 +135,8 @@ contains
         if(bad/=0)return
         op%seed_needed=.false.
       endif
-      call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
+      ! This backend constructs Gamma +/- links; consume them with the shared Jacobi solver.
+      call gauge_minimize_gamma_inplace(op%gauge,raw,b,weights,maxiter,tolerance,op%spread,op%gradient, &
         op%iterations,op%localization_status)
       if(op%localization_status/=0.and.accepted)then
         ! Keep the accepted gauge transported into the current occupied space.
@@ -180,7 +181,7 @@ contains
     logical :: accepted
     real(8),allocatable :: singular(:),rwork(:),occupation_weights(:)
     real(8) :: b(3,6),weights(6),delta,pi,position(3)
-    integer :: no,ng,nlocal,first,m(3),lo(3),axis,g,x,y,z,j,bad,neighbors(6,1),initialized,total_initialized
+    integer :: no,ng,nlocal,first,m(3),lo(3),axis,g,x,y,z,j,bad,initialized,total_initialized
     ng=size(psi,1);nlocal=size(psi,2);status=1;bad=0
     if(size(psi,3)/=1.or.any(n<1).or.any(dims<1))bad=1
     if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
@@ -250,7 +251,7 @@ contains
     op%iterations=0;op%localization_status=2;op%spread=-1d0;op%gradient=-1d0
     if(maxiter>0)then
       allocate(raw(no,no,6,1),phase(ng))
-      pi=acos(-1d0);b=0d0;neighbors=1
+      pi=acos(-1d0);b=0d0
       do axis=1,3
         delta=2*pi/(n(axis)*h(axis));b(axis,axis)=delta;b(axis,axis+3)=-delta
         weights(axis)=1d0/(2*delta**2);weights(axis+3)=weights(axis)
@@ -268,7 +269,8 @@ contains
         if(bad/=0)return
         op%seed_needed=.false.
       endif
-      call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
+      ! This backend constructs Gamma +/- links; consume them with the shared Jacobi solver.
+      call gauge_minimize_gamma_inplace(op%gauge,raw,b,weights,maxiter,tolerance,op%spread,op%gradient, &
         op%iterations,op%localization_status)
       if(op%localization_status/=0.and.accepted)then
         ! Keep the accepted gauge transported into the current occupied space.
