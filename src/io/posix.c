@@ -14,13 +14,7 @@
  *  limitations under the License.
  */
 
-/* Feature-test macros must precede every system header, including stdio.h. */
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
-
 #include "config.h"
-#include <stdio.h> /* snprintf and remove in independently guarded helpers */
 
 
 #if defined(SYSTEM_HAS_POSIX) \
@@ -29,6 +23,7 @@
     && defined(SYSTEM_HAS_POSIX_MKDIR) \
     && defined(SYSTEM_HAS_POSIX_NFTW)
 
+#define _XOPEN_SOURCE    500
 #define NFTW_SUPPORT_FD  8
 
 #include <sys/stat.h>
