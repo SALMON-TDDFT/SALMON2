@@ -44,7 +44,7 @@ module hse_native
   type(hse_ace_state),save :: initial_ace,midpoint_ace
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
-  complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:),output_work(:,:,:)
+  complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:)
   real(8),save :: hse_exchange_energy=0d0
   real(8),save :: hse_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
@@ -163,10 +163,8 @@ contains
         allocate(midpoint_source(size(full_source,1),2*no,size(full_source,3)))
         midpoint_source(:,:no,:)=initial_source/sqrt(2d0)
         midpoint_source(:,no+1:,:)=full_source/sqrt(2d0)
-      else
-        call hse_ace_average(initial_ace,ace,midpoint_ace,ierr)
-        if(ierr/=0)error stop 'HSE Taylor midpoint ACE failed'
       endif
+      ! Apply the two endpoint operators with half weights; no doubled factors.
       taylor_midpoint=.true.
     case(2)
       taylor_active=.false.;taylor_midpoint=.false.
@@ -434,7 +432,7 @@ contains
     complex(8),intent(out),optional :: lcfo_action(:,:)
     integer :: ierr,ng,total_error,info_error
     integer,allocatable :: orbital_comm
-    real(8) :: tick,communication_before
+    real(8) :: tick,communication_before,action_scale
     if(.not.hse_enabled())return
     if(lcfo_rt_active)then
       call lcfo_hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
@@ -444,11 +442,12 @@ contains
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
     if(allocated(target_work))then
-      if(any(shape(target_work)/=[ng,info%numo,info%numk]))deallocate(target_work,action_work,output_work)
+      if(any(shape(target_work)/=[ng,info%numo,info%numk]))deallocate(target_work,action_work)
     endif
     if(.not.allocated(target_work))allocate(target_work(ng,info%numo,info%numk), &
-      action_work(ng,info%numo,info%numk),output_work(ng,info%numo,info%numk))
+      action_work(ng,info%numo,info%numk))
     call hse_pack(psi,mg,info,target_work)
+    action_scale=exchange_fraction()
     if(timing_enabled)tick=hse_walltime()
     if(use_wannier_exchange().and.hse_force_full_action)then
       if(info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
@@ -472,29 +471,40 @@ contains
       if(timing_enabled)hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
     else
       if(taylor_active.and.taylor_midpoint)then
-        if(info%isize_o>1)then
-          call orbital_ace_apply(midpoint_ace,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
-        else if(info%isize_r>1)then
-          call hse_ace_apply(midpoint_ace,target_work,action_work,ierr,sum_spatial)
-        else
-          call hse_ace_apply(midpoint_ace,target_work,action_work,ierr)
-        endif
-      else
-        if(info%isize_o>1)then
-          call orbital_ace_apply(ace,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
-        else if(info%isize_r>1)then
-          call hse_ace_apply(ace,target_work,action_work,ierr,sum_spatial)
-        else
-          call hse_ace_apply(ace,target_work,action_work,ierr)
-        endif
+        call apply_endpoint(initial_ace)
+        if(ierr/=0)error stop 'HSE06: initial endpoint ACE application failed'
+        call add_mesh_action(.5d0*exchange_fraction())
+        action_scale=.5d0*exchange_fraction()
       endif
+      call apply_endpoint(ace)
       if(timing_enabled)hse_timings(3)=hse_timings(3)+hse_walltime()-tick
     endif
     if(ierr/=0)error stop 'HSE06: ACE application failed'
-    call hse_pack(hpsi,mg,info,output_work)
-    output_work=output_work+exchange_fraction()*action_work
-    call hse_unpack(output_work,hpsi,mg,info)
+    call add_mesh_action(action_scale)
   contains
+    subroutine apply_endpoint(state)
+      type(hse_ace_state),intent(in) :: state
+      if(info%isize_o>1)then
+        call orbital_ace_apply(state,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
+      else if(info%isize_r>1)then
+        call hse_ace_apply(state,target_work,action_work,ierr,sum_spatial)
+      else
+        call hse_ace_apply(state,target_work,action_work,ierr)
+      endif
+    end subroutine
+    subroutine add_mesh_action(weight)
+      real(8),intent(in) :: weight
+      integer :: ix,iy,iz,io,ik,g
+      do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
+        g=0
+        do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+          g=g+1
+          hpsi%zwf(ix,iy,iz,1,io,ik,1)=hpsi%zwf(ix,iy,iz,1,io,ik,1) &
+            +weight*action_work(g,io-info%io_s+1,ik-info%ik_s+1)
+        enddo;enddo;enddo
+      enddo;enddo
+      hpsi%update_zwf_overlap=.false.
+    end subroutine
     subroutine sum_spatial(a)
       complex(8),intent(inout) :: a(:,:)
       complex(8) :: total(size(a,1),size(a,2))
@@ -542,7 +552,7 @@ contains
     enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'Spatial EXX: orthogonal cell required'
     if(info%isize_o>1)orbital_comm=info%icomm_o
-    allocate(local(product(mg%num),info%numo,1),w(product(mg%num),info%numo,1))
+    allocate(local(product(mg%num),info%numo,1))
     call hse_pack(psi,mg,info,local)
     changed=1
     if(allocated(cached_source).and.allocated(cached_occupation))then
@@ -553,6 +563,7 @@ contains
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.(hse_adaptive_ready.neqv.cached_adaptive_ready))changed=1
     call comm_summation(changed,total,info%icomm_ro)
     if(total==0)return
+    allocate(w(product(mg%num),info%numo,1))
     maxiter=0
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.hse_adaptive_ready.and.spatial%last_localization_status/=0) &
@@ -656,7 +667,7 @@ contains
     if(adaptive_active.and.info%id_ro==0)write(*,'(a,3i18)') &
       'EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0): ', &
       fft_work
-    cached_source=local;cached_action=w;cached_occupation=system%rocc(:,:,1)
+    cached_occupation=system%rocc(:,:,1)
     if(spatial%updates==1)write(*,'(a,4i10)')'EXX_ORBITALS rank/local/global/grid: ', &
       info%id_ro,info%numo,system%no,product(mg%num)
     ex=0d0
@@ -666,6 +677,12 @@ contains
         *real(sum(conjg(local(:,j,1))*w(:,j,1)),8)
     enddo
     call comm_summation(ex,hse_exchange_energy,info%icomm_ro)
+    call move_alloc(local,cached_source)
+    if(yn_dc=='y')then
+      call move_alloc(w,cached_action)
+    else if(allocated(cached_action))then
+      deallocate(cached_action)
+    endif
     if(.not.dc_canonical().and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
@@ -833,7 +850,12 @@ contains
     call hse_ace_build(ace,local,w,system%hvol,status)
     call comm_summation(status,total_changed,info%icomm_k)
     if(total_changed/=0)error stop 'HSE Wannier: ACE construction metric failed'
-    cached_source=local;cached_occupation=system%rocc(:,:,1);cached_action=w
+    cached_source=local;cached_occupation=system%rocc(:,:,1)
+    if(yn_dc=='y')then
+      cached_action=w
+    else if(allocated(cached_action))then
+      deallocate(cached_action)
+    endif
     ex=0d0
     do ik=1,info%numk
       do j=1,no
