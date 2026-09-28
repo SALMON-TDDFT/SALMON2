@@ -26,3 +26,5 @@ Weak arrays: 1x1x1, 2x1x1, 4x1x1, 8x1x1, 16x1x1, 2x2x1, 4x4x1, 2x2x2; one rank p
 - Task 1 complete: geometry generator, provenance/resume validation, shared-seed MPI runner, time/RSS/support/error analyzer implemented and reviewed.
 - Task 2 complete: one- and two-fragment pilots converged; 32-H2 localization controls validated independently before final measurements.
 - Task 3 running in work/h2-block-scaling-final; original 1e-7 results and localization probes preserved separately. Do not combine their RT times with final 1e-6 runs.
+
+- User runtime steering: 64/128-H2 conditions get one repetition initially; <=32-H2 conditions retain three. All cases retain 16 impulse steps. Label large cases single observations, not three-run minima. Import only same-binary, same-input, same-seed completed RT rows; retain source metadata/hashes and rank data.

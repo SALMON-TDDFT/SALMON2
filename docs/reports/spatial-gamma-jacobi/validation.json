@@ -1,0 +1,29 @@
+{
+  "commit": "f7c473ba",
+  "binary_sha256": "589888c5d7db8926fd77e192e065b00c7185be4f96e220402af6deadfd02916c",
+  "regression_tests": 20,
+  "gamma_layouts": 5,
+  "exchange_configurations": 27,
+  "actual_case": {
+    "shape": [
+      8,
+      1,
+      1
+    ],
+    "molecules": 64,
+    "ranks": 8,
+    "steps": 16,
+    "rt_seconds": 103.0,
+    "max_rank_rss_bytes": 1193541632,
+    "energy_width_ha": 5.8256142949630885e-06,
+    "initial_localization": {
+      "iterations": 3,
+      "gradient": 5.1780163e-08
+    },
+    "seed_source": "work/h2-block-scaling-final/gs-8x1x1",
+    "input_sha256": "8ce480654ae4c0475bddd1c592405728ac1037f08299abef553554ed3ca78217",
+    "same_input_as_failed_case": true
+  },
+  "accuracy_note": "Completion is not accuracy certification; finite-support energy drift remains recorded.",
+  "archive_sha256": "947740d0347e736ceffc7c464de45deb64f4c6f288a5a5a578af030b23ef37b9"
+}

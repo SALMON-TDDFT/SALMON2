@@ -41,16 +41,17 @@ def rt_block(shape,ranks,fraction):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--prepare-only',action='store_true');p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
+    p.add_argument('--large-repeat',type=int);p.add_argument('--rt-source',type=Path);p.add_argument('--prepare-only',action='store_true');p.add_argument('--repeat',type=int,default=3);p.add_argument('--pilot',action='store_true')
     p.add_argument('--mpiexec',default='/opt/homebrew/bin/mpiexec --bind-to none')
     p.add_argument('--allow-seed-binary-change',action='store_true');p.add_argument('--seed-source',type=Path);p.add_argument('--resume',action='store_true');p.add_argument('--generate-only',action='store_true')
     a=p.parse_args();a.binary=a.binary.resolve();a.output=a.output.resolve()
-    if a.repeat<1:p.error('repeat must be positive')
+    if a.repeat<1 or (a.large_repeat is not None and a.large_repeat<1):p.error('repeat must be positive')
     shapes=SHAPES[:2] if a.pilot else SHAPES
     cases=[dict(shape=list(s),ranks=math.prod(s),suites=['weak']) for s in shapes]
     if not a.pilot:
         cases[6]['suites'].append('strong')
         cases.extend(dict(shape=[4,4,1],ranks=n,suites=['strong']) for n in (8,4,2,1))
+    for c in cases:c['repeats']=a.large_repeat if a.large_repeat is not None and 8*math.prod(c['shape'])>=64 else a.repeat
     if a.generate_only:
         for shape in shapes:
             print('geometry',shape,'H2',8*math.prod(shape),'states/fragment',fragment_states(shape),'input bytes',len(gs_input(shape)))
@@ -72,7 +73,7 @@ def main():
         data=dict(complete=False,binary_sha256=binary_hash,production_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
           sources={str(f.relative_to(ROOT)):f.read_text() for f in sources},build_cache=(a.binary.parent/'CMakeCache.txt').read_text(),
           platform=platform.platform(),launcher=a.mpiexec,mpi_version=subprocess.check_output(shlex.split(a.mpiexec)+['--version'],text=True),
-          pseudo_sha256=digest(ROOT/'testsuites/pseudo/H_rps.dat'),repeats=a.repeat,cases=cases,
+          pseudo_sha256=digest(ROOT/'testsuites/pseudo/H_rps.dat'),repeats=a.repeat,large_repeats=a.large_repeat,cases=cases,
           conditions=dict(core_bohr=[16]*3,spacing_bohr=.5,H2_per_core=8,buffer_split_bohr=4,coulomb_radius_bohr=4,functional='pbeh40',
             gs_temperature_k=300,dc_mlwf=False,pre_scf_threshold=1e-4,gs_threshold=1e-10,dt=.02,steps=16,impulse=1e-4,fractions=[1.,.999],
             mlwf_interval=5,mlwf_maxiter=1000,mlwf_tolerance=1e-6,threads={k:env[k] for k in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS')}),
@@ -109,8 +110,28 @@ def main():
             prep.setdefault('binary_sha256',old['binary_sha256'])
             data['preparations'].append(prep)
         data['imported_seed_source']=str(origin);data['imported_seed_results_sha256']=digest(origin/'results.json')
+    if a.rt_source and not data['runs']:
+        origin=a.rt_source.resolve();old=json.loads((origin/'results.json').read_text())
+        if old['binary_sha256']!=binary_hash or old['pseudo_sha256']!=data['pseudo_sha256']:raise RuntimeError('imported RT executable/pseudopotential mismatch')
+        if old['launcher']!=data['launcher'] or old['mpi_version']!=data['mpi_version'] or old['conditions']!=data['conditions']:raise RuntimeError('imported RT conditions mismatch')
+        for r in old['runs']:
+            c=next((c for c in cases if c['shape']==r['shape'] and c['ranks']==r['ranks']),None)
+            if c is None or r['repeat']>c['repeats']:continue
+            prep=next(v for v in data['preparations'] if v['shape']==r['shape'])
+            oldprep=next(v for v in old['preparations'] if v['shape']==r['shape'])
+            if prep['payload_sha256']!=oldprep['payload_sha256']:raise RuntimeError('imported RT seed differs')
+            folder=origin/r['folder'];fraction=1. if r['mode']=='full' else .999
+            if (folder/'inputfile').read_text()!=rt_block(r['shape'],r['ranks'],fraction):raise RuntimeError('imported RT input mismatch')
+            check=parse_rt(folder,r['ranks'],max_energy_width=None)
+            for key in ('rt_max_seconds','peak_rank_bytes','observables','energies'):
+                if check[key]!=r[key]:raise RuntimeError('imported RT payload differs')
+            (a.output/r['folder']).symlink_to(folder,target_is_directory=True)
+            data['runs'].append(r)
+        data['imported_rt_source']=str(origin);data['imported_rt_results_sha256']=digest(origin/'results.json')
     save()
-    for shape in shapes:
+    seen_shapes=set()
+    for shape in shapes+([(4,4,1)] if not a.pilot and not a.prepare_only else []):
+        strong_phase=tuple(shape) in seen_shapes;seen_shapes.add(tuple(shape))
         tag='x'.join(map(str,shape));name='gs-'+tag;ranks=math.prod(shape)
         prep=next((r for r in data['preparations'] if r['folder']==name),None)
         if prep:verify(prep)
@@ -128,9 +149,9 @@ def main():
               timers=[l for l in text.splitlines() if re.match(r'\s*(scf iterations|total calculation time|DC|lcfo)',l)])
             data['preparations'].append(prep);save();print('PREPARED',name,wall,'seconds',flush=True)
         if a.prepare_only:continue
-        for case in (c for c in cases if c['shape']==list(shape)):
+        for case in (c for c in cases if c['shape']==list(shape) and ('strong' if strong_phase else 'weak') in c['suites']):
             ranks=case['ranks']
-            for rep in range(1,a.repeat+1):
+            for rep in range(1,case['repeats']+1):
                 for mode,fraction in ([('full',1.),('adaptive',.999)] if rep%2 else [('adaptive',.999),('full',1.)]):
                     name=f'{mode}-{tag}-mpi{ranks}-r{rep}'
                     if any(r['folder']==name for r in data['runs']):continue

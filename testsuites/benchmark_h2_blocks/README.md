@@ -53,3 +53,10 @@ that provably leaves canonical DC preparation unchanged, the explicit
 `--allow-seed-binary-change` option permits those frozen seeds for new-binary
 paired RT; each preparation retains its original binary hash. Never combine
 RT timings from different executables.
+
+User-selected final schedule: `--repeat 3 --large-repeat 1` gives one observation
+per mode at 64/128 H2 and three at <=32 H2. Single observations are not
+contention-corrected minima. `--rt-source` imports only verified completed rows
+with identical binary, physical inputs, launcher/MPI, seed hashes and parsed
+time/RSS/observables. It permits a revised repetition schedule without rerunning
+finished jobs or merging different executable timings.

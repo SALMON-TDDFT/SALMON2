@@ -10,7 +10,7 @@ if not d['complete']:raise RuntimeError('incomplete measurement matrix')
 summary=[]
 for c in d['cases']:
     rows={m:[r for r in d['runs'] if r['shape']==c['shape'] and r['ranks']==c['ranks'] and r['mode']==m] for m in ('full','adaptive')}
-    if any(len(rr)!=d['repeats'] for rr in rows.values()):raise RuntimeError('missing repeats')
+    if any(len(rr)!=c.get('repeats',d['repeats']) for rr in rows.values()):raise RuntimeError('missing repeats')
     item=dict(c)
     for m,rr in rows.items():
         item[m]={k:dict(min=min(r[k] for r in rr),median=statistics.median(r[k] for r in rr),max=max(r[k] for r in rr)) for k in ('rt_max_seconds','peak_rank_bytes','post_impulse_energy_width_ha')}
@@ -33,14 +33,16 @@ for mode in ('full','adaptive'):
 (out/'summary.json').write_text(json.dumps(dict(summary=summary,strong_differences=strong_differences),indent=2)+'\n')
 lines=[]
 for suite in ('weak','strong'):
-    lines+=['## '+suite,'','|Fragment array|H₂|MPI|Full seconds min [median,max]|99.9% seconds min [median,max]|Speedup|Peak RSS full / .999 MiB|Radius bohr|Local FFT volume ratio|Energy width .999 Ha|','|---|---:|---:|---|---|---:|---:|---:|---:|---:|']
+    lines+=['## '+suite,'','|Fragment array|H₂|MPI|Runs per mode|Full seconds: single or min [median,max]|99.9% seconds: single or min [median,max]|Speedup|Peak RSS full / .999 MiB|Radius bohr|Local FFT volume ratio|Energy width .999 Ha|','|---|---:|---:|---:|---|---|---:|---:|---:|---:|---:|']
     for r in summary:
         if suite not in r['suites']:continue
         def t(m):
-            x=r[m]['rt_max_seconds'];return f"{x['min']:.4f} [{x['median']:.4f},{x['max']:.4f}]"
+            x=r[m]['rt_max_seconds']
+            if r.get('repeats',d['repeats'])==1:return f"{x['min']:.4f}"
+            return f"{x['min']:.4f} [{x['median']:.4f},{x['max']:.4f}]"
         ratio='—' if r['local_fft_grid_ratio'] is None else f"{r['local_fft_grid_ratio']:.4f}"
         radius='—' if r['max_radius'] is None else f"{r['max_radius']:.3f}"
-        lines.append('|'+ '×'.join(map(str,r['shape']))+f"|{8*math.prod(r['shape'])}|{r['ranks']}|{t('full')}|{t('adaptive')}|{r['speedup']:.3f}|{r['full']['peak_rank_bytes']['median']/2**20:.1f} / {r['adaptive']['peak_rank_bytes']['median']/2**20:.1f}|{radius}|{ratio}|{r['adaptive']['post_impulse_energy_width_ha']['max']:.3e}|")
+        lines.append('|'+ '×'.join(map(str,r['shape']))+f"|{8*math.prod(r['shape'])}|{r['ranks']}|{r.get('repeats',d['repeats'])}|{t('full')}|{t('adaptive')}|{r['speedup']:.3f}|{r['full']['peak_rank_bytes']['median']/2**20:.1f} / {r['adaptive']['peak_rank_bytes']['median']/2**20:.1f}|{radius}|{ratio}|{r['adaptive']['post_impulse_energy_width_ha']['max']:.3e}|")
     lines+=['']
 (out/'tables.md').write_text('\n'.join(lines))
 fig,axes=plt.subplots(2,2,figsize=(12,8),layout='constrained')
@@ -55,7 +57,7 @@ for col,suite in enumerate(('weak','strong')):
         axes[1,col].plot(x,[r[mode]['peak_rank_bytes']['median']/2**20 for r in rr],'o-',label=mode,color=color)
     for ax in axes[:,col]:
         ax.set_xticks(x,labels,fontsize=8);ax.grid(alpha=.2);ax.legend()
-    axes[0,col].set_title(suite+' scaling: 8 H2 per fragment core');axes[0,col].set_ylabel('16-step RT time / s (minimum, range)');axes[0,col].set_yscale('log')
+    axes[0,col].set_title(suite+' scaling: 8 H2 per fragment core');axes[0,col].set_ylabel('16-step RT time / s (single or minimum, range)');axes[0,col].set_yscale('log')
     axes[1,col].set_ylabel('Max-rank lifetime peak RSS / MiB');axes[1,col].set_xlabel('Fragment array / MPI ranks' if suite=='weak' else 'MPI ranks')
 fig.savefig(out/'scaling.png',dpi=160);fig.savefig(out/'scaling.svg')
 print('\n'.join(lines))
