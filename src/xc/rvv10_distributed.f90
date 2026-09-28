@@ -11,6 +11,7 @@ module rvv10_distributed
 contains
   subroutine rvv10_evaluate_distributed(n,lo,m,dims,coords,comm,comm_r,h,rho,sigma,b,c,nq, &
       energy,vrho,vsigma,used,status,use_fftw)
+    implicit none
     integer,intent(in) :: n(3),lo(3),m(3),dims(3),coords(3),comm(3),comm_r,nq
     real(8),intent(in) :: h(3),rho(:),sigma(:),b,c
     real(8),intent(out) :: energy(:),vrho(:),vsigma(:)
@@ -68,6 +69,7 @@ contains
     whole=reshape(w,tile);vsigma=reshape(whole(lo(1):lo(1)+m(1)-1,:,:),[product(m)])
   contains
     subroutine convolve(theta,u,mesh,ierr)
+      implicit none
       complex(8),intent(in) :: theta(:,:)
       complex(8),intent(out) :: u(:,:)
       real(8),intent(in) :: mesh(:)

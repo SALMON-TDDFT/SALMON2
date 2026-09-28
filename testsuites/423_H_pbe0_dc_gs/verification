@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import re, math
+s=Path('outputfile').read_text()
+assert 'end SALMON' in s and 'end DC-LCFO complex' in s
+rows=re.findall(r'DC #SCF.*diff =\s*(\S+)',s)
+assert rows and float(rows[-1])<1e-10
+files=list(Path('data_dcdft').rglob('functional.txt'))
+assert len(files)==2
+for p in files:
+ lines=p.read_text().splitlines()
+ assert lines[2].strip()=='pbe0'
+ v=list(map(float,lines[3].split()))
+ assert all(map(math.isfinite,v)) and v[0]==.25 and v[1]==0
+print('PBE0 DC GS converged with correct functional metadata')

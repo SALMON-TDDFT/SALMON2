@@ -50,6 +50,7 @@ module hse_native
   logical,save :: hse_freeze=.false.,reported_team=.false.,timing_enabled=.false.
 contains
   subroutine hse_check_localization()
+    implicit none
     if(dc_canonical())return
     ! A density criterion cannot certify a gauge-dependent truncated operator.
     if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0.and..not.adaptive_active) &
@@ -83,6 +84,7 @@ contains
   subroutine hse_export_eigen_pair(system,mg,info,psi,hpsi,tag)
     use iso_fortran_env, only: int32
     use salmon_global, only: base_directory
+    implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -138,6 +140,7 @@ contains
     if(status/=0)error stop 'HSE Wannier snapshot: write failed'
   end subroutine
   subroutine hse_taylor_stage(stage,system,mg,info,psi)
+    implicit none
     integer,intent(in) :: stage
     type(s_dft_system),intent(in),optional :: system
     type(s_rgrid),intent(in),optional :: mg
@@ -178,12 +181,14 @@ contains
   end subroutine
 
   real(8) function hse_walltime()
+    implicit none
     integer(int64) :: count,rate
     call system_clock(count,rate)
     hse_walltime=real(count,8)/real(rate,8)
   end function
 
   subroutine warn_fixed_radius(max_loss)
+    implicit none
     real(8),intent(in) :: max_loss
     real(8) :: target
     if(exx_mlwf_radius<=0d0.or.radius_warning_reported)return
@@ -195,14 +200,18 @@ contains
   end subroutine warn_fixed_radius
 
   logical function dc_canonical()
+    implicit none
     dc_canonical=yn_dc=='y'.and.yn_exx_dc_mlwf=='n'
   end function
 
   logical function hse_enabled()
-    hse_enabled=(trim(xc)=='hse06'.or.(trim(xc)=='pbe0'.or.trim(xc)=='pbeh40').or.trim(xc)=='pbeh40_rvv10').and..not.exx_pre_scf_active
+    use exx_functional, only: is_hybrid
+    implicit none
+    hse_enabled=(is_hybrid(xc)).and..not.exx_pre_scf_active
   end function
 
   subroutine hse_pack(psi,mg,info,a)
+    implicit none
     type(s_orbital),intent(in) :: psi
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -216,6 +225,7 @@ contains
   end subroutine
 
   subroutine hse_unpack(a,psi,mg,info)
+    implicit none
     complex(8),intent(in) :: a(:,:,:)
     type(s_orbital),intent(inout) :: psi
     type(s_rgrid),intent(in) :: mg
@@ -230,6 +240,7 @@ contains
   end subroutine
 
   subroutine hse_refresh(system,mg,info,psi)
+    use exx_functional, only: is_global_hybrid
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
@@ -242,7 +253,7 @@ contains
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
-      if(((xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10').or. &
+      if((.not.is_global_hybrid(xc)).or. &
          (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y'.or.lcfo_rt_active) &
         error stop 'Hybrid: unsupported real-time ionic extension'
     endif
@@ -345,6 +356,7 @@ contains
   end subroutine
 
   subroutine apply_distributed(source,target,action,info,ierr)
+    implicit none
     complex(8),intent(in) :: source(:,:,:),target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     type(s_parallel_info),intent(in) :: info
@@ -390,6 +402,7 @@ contains
       info%id_k,transpose_tiles,ierr)
   contains
     subroutine fill_density(j,lo,rows,density)
+      implicit none
       integer,intent(in) :: j,lo,rows
       complex(8),intent(out) :: density(:,:)
       integer :: full_index,rep,op,g,stat,ng,no
@@ -412,6 +425,7 @@ contains
       enddo
     end subroutine
     subroutine transpose_tiles(send,recv,count)
+      implicit none
       complex(8),intent(in) :: send(:)
       complex(8),intent(out) :: recv(:)
       integer,intent(in) :: count
@@ -423,6 +437,7 @@ contains
   end subroutine
 
   subroutine hse_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+    implicit none
     type(s_orbital),intent(in) :: psi
     type(s_orbital),intent(inout) :: hpsi
     type(s_dft_system),intent(in) :: system
@@ -483,6 +498,7 @@ contains
     call add_mesh_action(action_scale)
   contains
     subroutine apply_endpoint(state)
+      implicit none
       type(hse_ace_state),intent(in) :: state
       if(info%isize_o>1.or.state%packed)then
         call orbital_ace_apply(state,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
@@ -493,6 +509,7 @@ contains
       endif
     end subroutine
     subroutine add_mesh_action(weight)
+      implicit none
       real(8),intent(in) :: weight
       integer :: ix,iy,iz,io,ik,g
       do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
@@ -506,6 +523,7 @@ contains
       hpsi%update_zwf_overlap=.false.
     end subroutine
     subroutine sum_spatial(a)
+      implicit none
       complex(8),intent(inout) :: a(:,:)
       complex(8) :: total(size(a,1),size(a,2))
       call comm_summation(a,total,size(a),info%icomm_r)
@@ -518,6 +536,7 @@ contains
   end function
 
   subroutine refresh_spatial(system,mg,info,psi)
+    implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -691,6 +710,7 @@ contains
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
     subroutine build_source_support_ace(accepted)
+      implicit none
       logical,intent(out) :: accepted
       complex(8),pointer :: training(:,:,:)
       accepted=.false.
@@ -714,6 +734,7 @@ contains
       accepted=.true.
     end subroutine
     subroutine apply_exchange_action()
+      implicit none
       complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
       integer,allocatable :: counts(:)
       integer :: first
@@ -741,9 +762,11 @@ contains
     end subroutine
     subroutine record_fft_work()
       ! Count rejected ACE attempts too: each exchange call resets its counters.
+      implicit none
       fft_work=fft_work+[spatial%local_pairs,spatial%global_pairs,spatial%local_points]
     end subroutine
     subroutine build_exchange_ace()
+      implicit none
       if(info%isize_o>1)then
         call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
       else
@@ -753,6 +776,7 @@ contains
       status=adaptive_bad
     end subroutine
     subroutine sum_spatial(a)
+      implicit none
       complex(8),intent(inout) :: a(:,:)
       complex(8) :: total(size(a,1),size(a,2))
       call comm_summation(a,total,size(a),info%icomm_r)

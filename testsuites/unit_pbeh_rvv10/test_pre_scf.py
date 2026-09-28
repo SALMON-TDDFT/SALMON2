@@ -78,7 +78,8 @@ class PreSCF(unittest.TestCase):
                       error='PBE pre-SCF requires fresh static hybrid SCF')
 
     def test_dc_localization_controls(self):
-        self.run_case("yn_exx_dc_mlwf='x'",error='yn_exx_dc_mlwf must be y or n')
+        self.run_case("yn_exx_dc_mlwf='x'",
+                      error="Bad input: yn_* option only accepts 'y' or 'n'.",error_exit=False)
         for mask in ('exx_mlwf_norm_fraction=.999','exx_mlwf_radius=3'):
             self.run_case(mask,lambda s:self.setup(s).replace("yn_dc='n'","yn_dc='y'"),
                 error='DC canonical exchange requires full support')

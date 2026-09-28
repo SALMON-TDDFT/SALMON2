@@ -1324,6 +1324,7 @@ contains
     subroutine exec_hse_semilocal()
       use exx_functional, only: exx_fraction=>exchange_fraction
       use salmon_global, only: hse_omega,xc_name=>xc,exx_pre_scf_active
+      implicit none
       real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
       integer :: status,j
       if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &

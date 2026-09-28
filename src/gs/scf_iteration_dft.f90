@@ -59,6 +59,7 @@ use hse_reference_export, only: export_hse_reference
 use hse_native, only: hse_enabled,hse_freeze,hse_check_localization,hse_adaptive_ready,hse_support_changed
 use salmon_global, only: exx_mlwf_norm_fraction
 #endif
+use exx_functional, only: is_global_hybrid
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -535,7 +536,7 @@ call hse_check_localization()
 #endif
 
 ! A BOMD step is not valid without a self-consistent electronic ground state.
-if(theory=='dft_md'.and.((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
+if(theory=='dft_md'.and.(is_global_hybrid(xc)))then
   if(.not.(sum1<threshold))error stop 'PBEh40 BOMD: SCF not converged; ionic step rejected'
 endif
 

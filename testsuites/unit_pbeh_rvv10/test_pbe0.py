@@ -18,6 +18,10 @@ use exx_functional
 implicit none
 integer :: status
 xc='pbe0'
+if(.not.is_global_hybrid(xc).or..not.is_hybrid(xc))error stop 'PBE0 classification'
+if(is_global_hybrid('hse06').or..not.is_hybrid('hse06'))error stop 'HSE classification'
+if(is_hybrid('pbe').or.is_global_hybrid('pbe'))error stop 'PBE classification'
+if(.not.is_global_hybrid('pbeh40_rvv10'))error stop 'rVV10 classification'
 if(abs(exchange_fraction()-.25d0)>1d-14)error stop 'PBE0 fraction'
 if(exchange_screening()/=0d0)error stop 'PBE0 screening'
 call lcfo_check_functional('missing','run',status)

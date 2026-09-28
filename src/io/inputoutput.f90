@@ -204,6 +204,7 @@ contains
     use communication
     use filesystem, only: get_filehandle
     use misc_routines, only: string_lowercase
+    use exx_functional, only: is_hybrid
     implicit none
     integer :: ii
     real(8) :: norm
@@ -1436,12 +1437,12 @@ contains
     ! to validation rather than being silently overwritten.
     if(propagator=='')then
       propagator='middlepoint'
-      if((xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10').and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
+      if((is_hybrid(xc)).and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
         propagator='hse_taylor4'
     endif
     if(yn_predictor_corrector=='')then
       yn_predictor_corrector='n'
-      if((xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10').and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
+      if((is_hybrid(xc)).and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
         yn_predictor_corrector='y'
     endif
 !! == bcast for &scf
@@ -2916,6 +2917,7 @@ contains
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     use parallelization
     use communication
+    use exx_functional, only: is_global_hybrid,is_hybrid
     implicit none
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
@@ -2993,6 +2995,7 @@ contains
     call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
+    call yn_argument_check(yn_exx_dc_mlwf)
     call yn_argument_check(yn_hse_wannier)
     call yn_argument_check(yn_hse_lcfo_rt)
     call yn_argument_check(yn_hse_lcfo_direct_wf)
@@ -3258,13 +3261,13 @@ contains
       error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
     if(yn_hse_lcfo_rt=='y')then
       if(yn_dc=='y'.or.yn_conventional_from_dcdft/='y')error stop 'LCFO RT requires conventional_from_dcdft'
-      if((xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10').or. &
+      if((.not.is_hybrid(xc)).or. &
          theory/='tddft_response'.or.propagator/='hse_taylor4') &
         error stop 'LCFO RT requires hybrid tddft_response with Taylor4'
     endif
     if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
     if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
-    if(yn_exx_dc_mlwf/='y'.and.yn_exx_dc_mlwf/='n')error stop 'yn_exx_dc_mlwf must be y or n'
+
     if(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')then
       if(exx_mlwf_radius>0d0.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0).or. &
          exx_pair_screening/='off'.or.yn_hse_wannier_snapshot=='y') &
@@ -3275,7 +3278,7 @@ contains
     if(exx_pre_scf_steps<1)error stop 'exx_pre_scf_steps must be positive'
     if(exx_pre_scf_threshold>0d0)then
       if(theory/='dft'.or.yn_restart/='n'.or.yn_opt/='n'.or. &
-         (xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10')) &
+         (.not.is_hybrid(xc))) &
         error stop 'PBE pre-SCF requires fresh static hybrid SCF'
       if(yn_dc=='y'.and.temperature<=0d0) &
         error stop 'PBE pre-SCF in DC requires positive electronic temperature (e.g. temperature_k=300)'
@@ -3291,7 +3294,7 @@ contains
     if(exx_ace_support=='source')then
       if((theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_md=='y'.or.yn_dc=='y'.or.yn_hse_lcfo_rt=='y') &
         error stop 'source-support ACE requires fixed-ion native RT'
-      if(xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10')error stop 'source-support ACE requires a hybrid functional'
+      if(.not.is_hybrid(xc))error stop 'source-support ACE requires a hybrid functional'
       if(exx_pair_screening/='off')error stop 'source-support ACE uses exact support pairs; set exx_pair_screening=off'
       if(exx_mlwf_norm_fraction<=0d0)error stop 'source-support ACE requires adaptive support'
     endif
@@ -3300,7 +3303,7 @@ contains
     if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &
       error stop 'exx_pair_tolerance must be finite and nonnegative'
     if(exx_pair_screening/='off')then
-      if(xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10') &
+      if(.not.is_hybrid(xc)) &
         error stop 'pair screening requires HSE06 or PBEh'
       if(xc=='hse06'.and.hse_omega<=0d0)error stop 'HSE pair screening requires positive omega'
       if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
@@ -3327,20 +3330,20 @@ contains
         if(theory/='dft'.and.(yn_dc=='y'.or.yn_conventional_from_dcdft/='y')) &
           error stop 'adaptive EXX RT requires DC-initialized native mesh orbitals'
       endif
-      if(xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10') &
+      if(.not.is_hybrid(xc)) &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
       if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
-    pbeh_mesh_rt=((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10') &
+    pbeh_mesh_rt=(is_global_hybrid(xc)) &
       .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
       .and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n'
     hybrid_mesh_rt=pbeh_mesh_rt.or.(xc=='hse06'.and. &
       (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1.or.nproc_ob>1).and. &
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
       yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
-    hybrid_spatial_scf=(xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10').and.theory=='dft'.and. &
+    hybrid_spatial_scf=(is_hybrid(xc)).and.theory=='dft'.and. &
       yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
     if(hybrid_spatial_scf)then
       yn_hse_wannier='y'
@@ -3376,7 +3379,7 @@ contains
           error stop 'PBEh40 mesh Ehrenfest: update pseudopotentials and energy every step'
       endif
     endif
-    if((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10')then
+    if(is_global_hybrid(xc))then
 #ifndef USE_HSE
       error stop 'PBEh40 requires USE_HSE=ON'
 #endif
@@ -3404,7 +3407,7 @@ contains
          .not.ieee_is_finite(rvv10_c).or.rvv10_c<0d0.or.rvv10_nq<8.or.rvv10_nq>128) &
         error stop 'PBEh40: invalid rVV10 parameters'
     endif
-    if(xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10')then
+    if(is_hybrid(xc))then
       if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
         error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'
       if(xname/='none'.or.cname/='none')error stop 'HSE06 must not be combined with extra xname/cname'
@@ -3489,7 +3492,7 @@ contains
     end if
     
     if(yn_dc_force_diagnostic=='y')then
-      if(yn_dc/='y'.or.theory/='dft'.or.((xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10')) &
+      if(yn_dc/='y'.or.theory/='dft'.or.(.not.is_global_hybrid(xc))) &
         error stop 'DC force diagnostic requires static DC PBEh'
       if(exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction>0d0.or.file_atom_coor_frag/='none') &
         error stop 'DC force diagnostic requires full MLWF support and automatic atom maps'

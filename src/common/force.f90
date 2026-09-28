@@ -35,6 +35,7 @@ contains
     use code_optimization, only: force_omp_mode
     use stencil_sub, only: calc_gradient_psi
     use timer
+    use exx_functional, only: is_global_hybrid
     implicit none
     type(s_dft_system)      ,intent(inout) :: system
     type(s_pp_info)         ,intent(in)    :: pp
@@ -87,7 +88,7 @@ contains
     io_e = info%io_e
     Norb = system%Nspin*info%numo*info%numk
 
-    variational_projector_force=((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10')
+    variational_projector_force=(is_global_hybrid(xc))
     if(variational_projector_force)then
       allocate(projector_grad(3,ppg%nps,ppg%nlma))
       call differentiate_projectors(pp,ppg,kion,projector_grad)

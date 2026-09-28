@@ -111,6 +111,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
+  use exx_functional, only: is_hybrid
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -175,7 +176,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
         system%if_real_orbital = .false.
       end if
     end select
-    if ( yn_spinorbit=='y' .or. xc=='hse06' .or. (xc=='pbe0'.or.xc=='pbeh40') .or. xc=='pbeh40_rvv10' ) system%if_real_orbital=.false.
+    if ( yn_spinorbit=='y' .or. is_hybrid(xc) ) system%if_real_orbital=.false.
   end if
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital

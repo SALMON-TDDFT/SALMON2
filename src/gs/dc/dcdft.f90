@@ -23,6 +23,7 @@ contains
     use structures
     use salmon_global, only: nproc_k, nproc_ob, nproc_rgrid, nproc_rgrid_tot &
     & , nstate, nelec, yn_dc, nstate_frag, temperature, xc, num_fragment
+    use exx_functional, only: is_hybrid
     implicit none
     type(s_dcdft)        ,intent(inout) :: dc
     type(s_pp_info)      ,intent(inout) :: pp
@@ -33,7 +34,7 @@ contains
 
     call check_dcdft_complex_options
     ! Catch impossible capacity before fragment initialization fills occupations.
-    if(temperature>0d0.and.(xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
+    if(temperature>0d0.and.(is_hybrid(xc)))then
       if(2d0*dble(nstate_frag)*dble(product(num_fragment))<dble(nelec)) &
         error stop 'DC thermal occupations: insufficient weighted state capacity; increase nstate_frag'
     endif
@@ -594,6 +595,7 @@ contains
     use communication, only: comm_summation
     use salmon_global, only: temperature,xc
     use dc_thermal, only: solve_dc_thermal,dc_thermal_capacity
+    use exx_functional, only: is_hybrid
     implicit none
     type(s_rgrid),        intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -628,7 +630,7 @@ contains
     emin = minval(esp)
     emax = maxval(esp)
     ! Use the same charge-converged Fermi solver for all hybrid DC SCF.
-    if(temperature>0d0.and.(xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
+    if(temperature>0d0.and.(is_hybrid(xc)))then
       wrk1=ne_frag_orb
       do ik=1,system%nk
         wrk1(:,ik,:,:)=wrk1(:,ik,:,:)*system%wtk(ik)

@@ -49,6 +49,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use gram_schmidt_orth, only: gram_schmidt
   use dm_unfold_sub, only: dm_unfold
   use nvtx_wrapper
+  use exx_functional, only: is_global_hybrid
   implicit none
   integer,intent(in)       :: itt
   integer,intent(in)       :: itotNtime
@@ -90,7 +91,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
-  hybrid_mesh_rt=((xc=='hse06'.and.yn_hse_wannier=='y').or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10') &
+  hybrid_mesh_rt=((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
     .and.yn_hse_lcfo_rt=='n' &
     .and.yn_conventional_from_dcdft=='y'
   pbeh_mesh_md=hybrid_mesh_rt.and.xc/='hse06'.and.yn_md=='y'

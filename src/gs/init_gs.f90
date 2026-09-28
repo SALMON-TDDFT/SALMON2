@@ -189,6 +189,7 @@ CONTAINS
   ! cf. RSDFT
   subroutine init_wf_rand(physical_k)
     use salmon_global, only: iseed_number_change
+    use exx_functional, only: is_hybrid
     implicit none
     integer,intent(in),optional :: physical_k
     integer :: s,k,n,i,llen,seed_k
@@ -210,7 +211,7 @@ CONTAINS
     ! Gaussian centers describe global orbitals, not independent local tiles.
     ! Keep the serial seed on every spatial/orbital rank for hybrid exchange.
     if(index(method_init_wf,'gauss')==1.and.(info%isize_r>1.or.info%isize_o>1).and. &
-       (xc=='hse06'.or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10'))then
+       (is_hybrid(xc)))then
       iseed(:)=seed_k*system%no*llen &
         +lg%num(2)*lg%num(1)+lg%num(1)+1+iseed_number_change
     endif

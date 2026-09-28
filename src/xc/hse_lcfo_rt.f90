@@ -112,6 +112,7 @@ contains
   end subroutine
 
   subroutine pack_coefficients(psi,system,mg,info,coeff)
+    implicit none
     type(s_orbital),intent(in) :: psi
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
@@ -179,6 +180,7 @@ contains
   end subroutine
 
   subroutine lcfo_hse_refresh(system,mg,info,psi,exchange_energy)
+    implicit none
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -354,6 +356,7 @@ contains
     ! LCFO output projection. For full Fock it cancels pointwise; masks may
     ! break cancellation even though the assembled K remains Hermitian.
     ! Include BOTH core-weighted adjoint halves, then sum overlapping buffers.
+    implicit none
     complex(8),intent(in) :: coeff(:,:),action(:,:,:)
     real(8),intent(in) :: occupation(:)
     complex(8),allocatable :: core_action(:,:,:),psi(:,:),left(:,:),right(:,:)
@@ -377,6 +380,7 @@ contains
   end subroutine
 
   subroutine lcfo_hse_stage(stage,system,mg,info,psi)
+    implicit none
     integer,intent(in) :: stage
     type(s_dft_system),intent(in),optional :: system
     type(s_rgrid),intent(in),optional :: mg
@@ -491,12 +495,14 @@ contains
     hpsi%update_zwf_overlap=.false.
   end subroutine
   real(8) function wall_seconds() result(seconds)
+    implicit none
     integer(8) :: tick,rate
     call system_clock(tick,rate)
     seconds=dble(tick)/dble(rate)
   end function
 
   subroutine report_timings(label,pack,source,exchange,build,action,projection)
+    implicit none
     character(*),intent(in) :: label
     real(8),intent(in) :: pack,source,exchange,build
     real(8),intent(in),optional :: action,projection

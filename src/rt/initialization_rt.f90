@@ -67,6 +67,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 #ifdef USE_HSE
   use hse_lcfo_rt, only: lcfo_hse_direct_rotate
 #endif
+  use exx_functional, only: is_global_hybrid,is_hybrid
   implicit none
   integer,parameter :: Nd = 4
 
@@ -109,11 +110,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   integer :: itt
   logical :: rion_update,pbeh_mesh_md
 
-  pbeh_mesh_md=yn_md=='y'.and.((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n'
+  pbeh_mesh_md=yn_md=='y'.and.(is_global_hybrid(xc)).and.yn_hse_lcfo_rt=='n'
 
   if(lcfo_rt_requested())then
     if(yn_dc/='n'.or.yn_conventional_from_dcdft/='y'.or. &
-       (xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10').or. &
+       (.not.is_hybrid(xc)).or. &
        theory/='tddft_response'.or.propagator/='hse_taylor4') &
       error stop 'LCFO RT: requires conventional-from-DC hybrid tddft_response with Taylor4+ACE'
     if(yn_restart=='y'.or.write_rt_wfn_k=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
@@ -201,7 +202,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   do itt = 0, nt
     rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
   end do
-  if(((xc=='hse06'.and.yn_hse_wannier=='y').or.(xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10') &
+  if(((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
      .and.yn_conventional_from_dcdft=='y' &
      .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2')then
     ! Endpoint E for the imposed transverse pulse, including the initial force.
@@ -284,7 +285,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
 
-  if(gram_schmidt_interval==0.and.xc/='hse06'.and.(xc/='pbe0'.and.xc/='pbeh40').and.xc/='pbeh40_rvv10')then
+  if(gram_schmidt_interval==0.and..not.is_hybrid(xc))then
     call gram_schmidt(system, mg, info, spsi_in)
   end if
 
@@ -528,7 +529,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     if(((xc=='pbe0'.or.xc=='pbeh40').or.xc=='pbeh40_rvv10').and.yn_hse_lcfo_rt=='n')then
+     if((is_global_hybrid(xc)).and.yn_hse_lcfo_rt=='n')then
        ! The reported GS energy remains the pre-kick reference, but the first
        ! nuclear half-kick must use the post-impulse electronic Hamiltonian.
        system%vec_Ac=rt%Ac_tot(:,0)

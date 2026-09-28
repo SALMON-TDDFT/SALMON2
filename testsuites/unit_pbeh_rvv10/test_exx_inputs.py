@@ -10,7 +10,7 @@ ROOT=Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE'),'SALMON_TEST_EXE required')
 class ExxInputs(unittest.TestCase):
-    def run_case(self, functional, transform=lambda s:s, error=None):
+    def run_case(self, functional, transform=lambda s:s, error=None, error_exit=True):
         inp=(ROOT/'testsuites/unit_pbeh_rvv10/dc_hydrogen.inp').read_text()
         inp=inp.replace("yn_dc='y'","yn_dc='n'").replace('nproc_k=2','nproc_k=1')
         inp=inp.replace('hse_mlwf_maxiter=20',functional)
@@ -20,7 +20,10 @@ class ExxInputs(unittest.TestCase):
             run=subprocess.run([os.environ['SALMON_TEST_EXE']],input=inp,cwd=tmp,text=True,
                 capture_output=True,timeout=120,env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',OMPI_MCA_btl='self,vader'))
             if error:
-                self.assertNotEqual(run.returncode,0)
+                if error_exit:
+                    self.assertNotEqual(run.returncode,0)
+                self.assertNotIn('end SALMON',run.stdout)
+                self.assertNotIn('#GS converged',run.stdout)
                 self.assertIn(error,run.stdout+run.stderr)
                 return
             self.assertEqual(run.returncode,0,run.stdout+run.stderr)
