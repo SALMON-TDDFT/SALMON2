@@ -852,7 +852,7 @@ contains
     end subroutine init_halo
 
     subroutine build_basis(ik0,basis,nb0,basis_err0)
-      use communication, only: comm_bcast,comm_summation
+      use communication, only: comm_bcast,comm_summation,comm_isend,comm_irecv,comm_wait
       use eigen_subdiag_sub, only: eigen_zheev
       implicit none
       integer, intent(in) :: ik0
@@ -860,9 +860,11 @@ contains
       integer, intent(out) :: nb0(:)
       real(8), intent(out) :: basis_err0
       complex(8), allocatable :: local(:,:,:,:,:),work(:,:,:,:,:),phi(:,:,:,:,:)
-      complex(8), allocatable :: smat(:,:,:),partial(:,:,:),umat(:,:,:),send_column(:,:,:),recv_column(:,:,:)
+      complex(8), allocatable :: smat(:,:,:),partial(:,:,:),umat(:,:,:),recv_column(:,:,:)
       real(8), allocatable :: lambda(:,:)
       integer :: io0,jo0,isp0,ix0,iy0,iz0,ieig,ib,pass0,status0,extent(3),hi(3)
+      integer :: peer,request,lo_peer(3),hi_peer(3),peer_extent(3),send_points,recv_points
+      integer,allocatable :: local_tiles(:,:),tiles(:,:)
       complex(8) :: coeff,local_coeff
       real(8) :: norm2,local_norm
 
@@ -955,26 +957,52 @@ contains
       call check_collective_status(status0,"fragment basis orthogonality",ik0,0)
       basis=0d0
       if(dc%id_frag/=0)basis=phi
-      ! Existing output and halo send formats require a full basis only at root.
-      ! Stream one column through the reduction; no full-grid all-band scratch.
-      allocate(send_column(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3)))
-      if(dc%id_frag==0)then
-        allocate(recv_column(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3)))
-      else
-        ! MPI_Reduce ignores the receive buffer on non-root processes.
-        allocate(recv_column(1,1,1))
+      ! Only k/orbital representative ranks supply spatial tiles. No full-core
+      ! send column is allocated; root receives one actual tile column at a time.
+      allocate(local_tiles(7,0:info%isize_rko-1),tiles(7,0:info%isize_rko-1))
+      local_tiles=0
+      if(info%id_ko==0)then
+        local_tiles(1:3,info%id_rko)=mg%is
+        local_tiles(4:6,info%id_rko)=hi
+        local_tiles(7,info%id_rko)=1
       endif
-      do isp0=1,nspin
-      do io0=1,nb0(isp0)
-        send_column=0d0
-        if(info%id_ko==0)send_column(mg%is(1):hi(1),mg%is(2):hi(2),mg%is(3):hi(3))=phi(:,:,:,isp0,io0)
-        call comm_summation(send_column,recv_column,size(send_column),info%icomm_rko,0)
-        if(dc%id_frag==0)basis(:,:,:,isp0,io0)=recv_column
+      call comm_summation(local_tiles,tiles,size(tiles),info%icomm_rko)
+      send_points=0;recv_points=0
+      do peer=0,info%isize_rko-1
+        if(tiles(7,peer)==0)cycle
+        lo_peer=tiles(1:3,peer);hi_peer=tiles(4:6,peer)
+        peer_extent=max(0,hi_peer-lo_peer+1)
+        if(any(peer_extent==0))cycle
+        if(peer==0)then
+          if(dc%id_frag==0)basis(lo_peer(1):hi_peer(1),lo_peer(2):hi_peer(2), &
+                                lo_peer(3):hi_peer(3),:,:)=phi
+          cycle
+        endif
+        if(dc%id_frag==0)then
+          allocate(recv_column(peer_extent(1),peer_extent(2),peer_extent(3)))
+          recv_points=max(recv_points,product(peer_extent))
+        endif
+        do isp0=1,nspin
+        do io0=1,nb0(isp0)
+          if(info%id_rko==peer)then
+            request=comm_isend(phi(:,:,:,isp0,io0),0,19001,info%icomm_rko)
+            call comm_wait(request)
+            send_points=product(extent)
+          else if(dc%id_frag==0)then
+            request=comm_irecv(recv_column,peer,19001,info%icomm_rko)
+            call comm_wait(request)
+            basis(lo_peer(1):hi_peer(1),lo_peer(2):hi_peer(2),lo_peer(3):hi_peer(3),isp0,io0)=recv_column
+          endif
+        enddo
+        enddo
+        if(dc%id_frag==0)deallocate(recv_column)
       enddo
-      enddo
-      if(ik0==1)write(*,'(a,3i18)')'DC_LCFO_BASIS rank/local/stored grid points: ', &
-        dc%id_frag,product(extent),product(basis_shape)
-      deallocate(send_column,recv_column,phi,lambda,umat,smat,partial)
+      if(ik0==1)then
+        write(*,'(a,3i18)')'DC_LCFO_BASIS rank/local/stored grid points: ', &
+          dc%id_frag,product(extent),product(basis_shape)
+        write(*,'(a,3i18)')'DC_LCFO_GATHER rank/send/receive grid points: ',dc%id_frag,send_points,recv_points
+      endif
+      deallocate(local_tiles,tiles,phi,lambda,umat,smat,partial)
     end subroutine build_basis
 
     subroutine collect_basis_dimensions(ik0,nb0)

@@ -301,10 +301,17 @@ zero-sized domains. `DC_LCFO_BASIS rank/local/stored grid points` reports this
 layout once per fragment rank.
 
 The fragment representative still holds the full core basis for the existing
-binary writer and halo sender. Gathering streams one orbital column at a time;
-all-band full-core scratch is removed. Each rank still allocates one full-core
-send column during this gather, and the representative has a matching receive
-column. These are residual memory costs, not a fully distributed I/O solution.
+binary writer and halo sender. Gathering now sends one actual spatial-domain orbital column at a time,
+selecting one k/orbital representative per spatial domain. Senders use their
+existing contiguous basis columns directly, with no extra send array. Root
+receives into a buffer sized to the sending domain, then places it in the output
+basis; its own domain is copied directly. Empty domains transfer no data.
+Only small owner/extent metadata is collected over the fragment communicator.
+`DC_LCFO_GATHER rank/send/receive grid points` reports the payload size and
+maximum receive workspace (not total process memory).
+
+The former full-core scratch columns on every process are gone. Root still
+holds the complete output basis, so this is not a fully distributed I/O solution.
 Received halo bases and global dense eigensolver matrices are unchanged.
 
 Validation includes spatial HSE DC eigenvalues and reconstructed RT, a rotated

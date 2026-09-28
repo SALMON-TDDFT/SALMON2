@@ -116,6 +116,17 @@ class HSESpatial(unittest.TestCase):
             workspaces=re.findall(r'DC_LCFO_HPSI local/global grid points:\s*(\d+)\s+(\d+)',run.stdout)
             basis_rows=re.findall(r'DC_LCFO_BASIS rank/local/stored grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
             self.assertTrue(basis_rows)
+            local_by_rank={int(rank):int(local) for rank,local,stored in basis_rows}
+            gather_rows=re.findall(r'DC_LCFO_GATHER rank/send/receive grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
+            self.assertTrue(gather_rows)
+            for rank,sent,received in gather_rows:
+                rank=int(rank)
+                if rank==0:
+                    self.assertEqual(int(sent),0)
+                    self.assertEqual(int(received),max((v for k,v in local_by_rank.items() if k!=0),default=0))
+                else:
+                    self.assertEqual(int(sent),local_by_rank[rank])
+                    self.assertEqual(int(received),0)
             for rank,local,stored in basis_rows:
                 if int(rank)!=0:self.assertEqual(int(local),int(stored))
             self.assertTrue(workspaces)
@@ -183,6 +194,11 @@ class HSESpatial(unittest.TestCase):
             self.assertLess(float(differences[-1]),1e-10)
             if ranks==8:
                 rows=re.findall(r'DC_LCFO_BASIS rank/local/stored grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
-                self.assertTrue(any(int(rank)>0 and int(local)==0 and int(stored)==0 for rank,local,stored in rows))
+                empty={int(rank) for rank,local,stored in rows if int(rank)>0 and int(local)==0 and int(stored)==0}
+                self.assertTrue(empty)
+                gathers=re.findall(r'DC_LCFO_GATHER rank/send/receive grid points:\s*(\d+)\s*(\d+)\s*(\d+)',run.stdout)
+                self.assertTrue(gathers)
+                for rank,sent,received in gathers:
+                    if int(rank) in empty:self.assertEqual((int(sent),int(received)),(0,0))
             spectra.append(np.loadtxt(next((folder/'data_dcdft/total').glob('*_eigen.data')))[:,3])
         self.assertLess(np.max(abs(spectra[0]-spectra[1])),1e-7)
