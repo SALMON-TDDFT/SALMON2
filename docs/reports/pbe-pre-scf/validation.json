@@ -1,0 +1,48 @@
+{
+  "production_commit": "fd7da330986cc3472e1c22f537acba98c48dd8c1",
+  "build": {
+    "MPI": true,
+    "HSE": true,
+    "ScaLAPACK": true
+  },
+  "tests": {
+    "unittest_methods_passed": 34,
+    "canonical_gauge_probe_MPI": [
+      1,
+      2,
+      4
+    ]
+  },
+  "executable_sha256": "978c9c04816eca24abc0911c0f3fda43be303b7caebfaf1982a3d33554e1d1ae",
+  "cases": [
+    "hse06-False-0.999-2-auto-pre0-T0-smallFalse-mlwfy-ob1-k1",
+    "hse06-False-0.999-2-auto-pre0.0001-T0-smallFalse-mlwfy-ob1-k1",
+    "pbeh40-False-0.999-2-auto-pre0-T0-smallFalse-mlwfy-ob1-k1",
+    "pbeh40-False-0.999-2-auto-pre0.0001-T0-smallFalse-mlwfy-ob1-k1",
+    "pbeh40_rvv10-True-0-2-auto-pre0.0001-T300-smallTrue-mlwfn-ob1-k1",
+    "pbeh40_rvv10-True-0-2-auto-pre0.0001-T300-smallTrue-mlwfy-ob1-k1",
+    "pbeh40_rvv10-True-0-4-auto-pre0.0001-T300-smallTrue-mlwfn-ob1-k2",
+    "pbeh40_rvv10-True-0-4-auto-pre0.0001-T300-smallTrue-mlwfy-ob1-k2",
+    "pbeh40_rvv10-True-1-2-auto-pre0-T300-smallTrue-mlwfn-ob1-k1",
+    "pbeh40_rvv10-True-1-2-auto-pre0-T300-smallTrue-mlwfy-ob1-k1",
+    "pbeh40_rvv10-True-1-2-auto-pre0.0001-T300-smallTrue-mlwfn-ob1-k1",
+    "pbeh40_rvv10-True-1-4-auto-pre0.0001-T300-smallTrue-mlwfn-ob1-k1",
+    "pbeh40_rvv10-True-1-4-auto-pre0.0001-T300-smallTrue-mlwfn-ob2-k1"
+  ],
+  "source_sha256": {
+    "src/gs/main_dft.f90": "bae547f3fe871cbb7b449750493a728e6497e5403fbdd12636c095e7de6b6fc2",
+    "src/gs/scf_iteration.f90": "5ea8d16a1243594147279647236a647107cd6bcbac40243df5a4a69dc7da6ea3",
+    "src/gs/scf_iteration_dft.f90": "5e8815799edbe244da3f3104fbab31fab56e5d98ddb2a50923add34ac7996d5d",
+    "src/io/inputoutput.f90": "189d853a000e5df2bbbe847e10d0d4449bce487d687ce798e29afc94db5e23f6",
+    "src/io/salmon_global.f90": "ec8b41e022f584b9960a0d0348626549d4ba53f61e5137e713c592458504df7b",
+    "src/xc/hse_native.f90": "3f5e7b5c5294b75c48388d0c55dede0c4ce94c285c81e8c8026f904605257127",
+    "src/xc/hse_semilocal.f90": "c094ddc20f6448b75d56ab173ec716ec3377092aaa47f54493dc68a9caea8def",
+    "src/xc/hse_spatial.f90": "57404ca73cb02befcd64764016fa7d7fa36bb89ec8ae81d7df5fe52a524f5ce4",
+    "src/xc/hse_wannier.f90": "1dacb8b2e140ca26b64945976dd8e1fb082a3ad0bf2e0e9d7723f17b3444be5c",
+    "src/xc/salmon_xc.f90": "e8bbe3e2a27a2bdbdf990bbcab02cbb5a40a74313e91b0a4d43abf6c05559630",
+    "testsuites/unit_hse_wannier/projected_seed_probe.f90": "c0b851da5f4e9cf00931bee3f370c8c7e97197a480b0536102439de13e2ecdf4",
+    "testsuites/unit_pbeh_rvv10/test_adaptive_scf.py": "5ac64176c23792b9f09a85d91770bf2a249c0ac4966b64db3a7c14d8ddc64169",
+    "testsuites/unit_pbeh_rvv10/test_pre_scf.py": "81c43b19b37a55a92e29425060f558f446853b6583aefda3d31c25a9d3fdf015"
+  },
+  "archive_sha256": "29cbddee8f931a3011978882e955bec5b7fda74c866e84caf21a91e17d6c491e"
+}
