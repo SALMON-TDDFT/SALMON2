@@ -217,12 +217,16 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     complex(8),intent(out) :: a(:,:,:)
-    integer :: ik,io,is(3),ie(3)
-    is=mg%is;ie=mg%ie
+    integer :: ik,io,ix,iy,iz,g
+!$omp parallel do collapse(4) default(none) schedule(static) &
+!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,psi,a)
     do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
-      a(:,io-info%io_s+1,ik-info%ik_s+1)=reshape( &
-        psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,ik,1),[product(mg%num)])
+      do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+        g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
+        a(g,io-info%io_s+1,ik-info%ik_s+1)=psi%zwf(ix,iy,iz,1,io,ik,1)
+      enddo;enddo;enddo
     enddo;enddo
+!$omp end parallel do
   end subroutine
 
   subroutine exx_unpack(a,psi,mg,info)
@@ -231,12 +235,16 @@ contains
     type(s_orbital),intent(inout) :: psi
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
-    integer :: ik,io,is(3),ie(3)
-    is=mg%is;ie=mg%ie
+    integer :: ik,io,ix,iy,iz,g
+!$omp parallel do collapse(4) default(none) schedule(static) &
+!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,psi,a)
     do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
-      psi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,ik,1)= &
-        reshape(a(:,io-info%io_s+1,ik-info%ik_s+1),mg%num)
+      do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+        g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
+        psi%zwf(ix,iy,iz,1,io,ik,1)=a(g,io-info%io_s+1,ik-info%ik_s+1)
+      enddo;enddo;enddo
     enddo;enddo
+!$omp end parallel do
     psi%update_zwf_overlap=.false.
   end subroutine
 
@@ -513,14 +521,16 @@ contains
       implicit none
       real(8),intent(in) :: weight
       integer :: ix,iy,iz,io,ik,g
+!$omp parallel do collapse(4) default(none) schedule(static) &
+!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,hpsi,weight,action_work)
       do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
-        g=0
         do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
-          g=g+1
+          g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
           hpsi%zwf(ix,iy,iz,1,io,ik,1)=hpsi%zwf(ix,iy,iz,1,io,ik,1) &
             +weight*action_work(g,io-info%io_s+1,ik-info%ik_s+1)
         enddo;enddo;enddo
       enddo;enddo
+!$omp end parallel do
       hpsi%update_zwf_overlap=.false.
     end subroutine
     subroutine sum_spatial(a)
@@ -914,23 +924,27 @@ contains
     type(s_orbital),intent(in) :: psi
     integer,intent(in) :: core(3)
     real(8),intent(out) :: energy
-    real(8) :: local
+    real(8) :: local,prefactor
     integer :: ix,iy,iz,io,ik,g
     if(.not.allocated(cached_action))error stop 'DC HSE: refreshed exchange action missing'
+    prefactor=.5d0*exchange_fraction()*system%hvol
     local=0d0
+!$omp parallel do collapse(4) default(none) schedule(static) &
+!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,core,system,psi,cached_action,prefactor) reduction(+:local)
     do ik=info%ik_s,info%ik_e
       do io=info%io_s,info%io_e
         do iz=mg%is(3),min(mg%ie(3),core(3))
           do iy=mg%is(2),min(mg%ie(2),core(2))
             do ix=mg%is(1),min(mg%ie(1),core(1))
               g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
-              local=local+.5d0*exchange_fraction()*system%rocc(io,ik,1)*system%wtk(ik)*system%hvol &
+              local=local+prefactor*system%rocc(io,ik,1)*system%wtk(ik) &
                 *real(conjg(psi%zwf(ix,iy,iz,1,io,ik,1))*cached_action(g,io-info%io_s+1,ik-info%ik_s+1),8)
             enddo
           enddo
         enddo
       enddo
     enddo
+!$omp end parallel do
     call comm_summation(local,energy,info%icomm_rko)
   end subroutine
 end module

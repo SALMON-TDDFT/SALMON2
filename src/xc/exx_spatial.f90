@@ -410,8 +410,10 @@ contains
     ! Keep the forward FFT in Z pencils: local storage order is (z,x,y).
     m=[n(1)/dims(1),n(2)/dims(2),n(3)]
     lo=[coords(1)*m(1),coords(2)*m(2),0]
+!$omp parallel do collapse(2) default(none) schedule(static) &
+!$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier)
     do y=0,m(2)-1;do x=0,m(1)-1;do z=0,m(3)-1
-      g=g+1;p=[x,y,z]+lo
+      g=1+z+m(3)*(x+m(1)*y);p=[x,y,z]+lo
       where(p>=(n+1)/2)p=p-n
       q=2*pi*p/(n*h);q2=sum(q*q)
       if(screening>0d0)then
@@ -426,6 +428,7 @@ contains
         multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
       endif
     enddo;enddo;enddo
+!$omp end parallel do
     allocate(selected(nt),omitted(nt),broad_kept(nt));omitted=0d0;broad_kept=0;broad_sources=0
     if(op%screen_mode/=0)then
       call cpu_time(cpu_start)

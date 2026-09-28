@@ -28,7 +28,7 @@ class ConventionalHybridRT(unittest.TestCase):
         cls.root = Path(cls.temp.name)
         cls.producers = {}
 
-    def execute(self, name, inp, ranks=1):
+    def execute(self, name, inp, ranks=1, threads=1):
         folder = self.root / name
         folder.mkdir()
         shutil.copy(ROOT / 'testsuites/pseudo/H_rps.dat', folder)
@@ -37,7 +37,7 @@ class ConventionalHybridRT(unittest.TestCase):
         if ranks > 1:
             command = [os.environ['SALMON_TEST_MPIEXEC'], '-n', str(ranks)] + command
         result = subprocess.run(command, input=inp, cwd=folder, text=True, capture_output=True,
-                                timeout=180, env=dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1'))
+                                timeout=180, env=dict(os.environ, OMP_NUM_THREADS=str(threads), OPENBLAS_NUM_THREADS='1'))
         (folder / 'outputfile').write_text(result.stdout + result.stderr)
         if os.environ.get('SALMON_TEST_SAVE_DIR'):
             shutil.copytree(folder, Path(os.environ['SALMON_TEST_SAVE_DIR']) / self.root.name / name)
@@ -146,6 +146,44 @@ class ConventionalHybridRT(unittest.TestCase):
                         np.testing.assert_allclose(current, reference[0], atol=1e-8, rtol=1e-7)
                         np.testing.assert_allclose(energy, reference[1], atol=1e-8, rtol=1e-7)
                     reference = (current, energy)
+
+    def test_openmp_native_rt_parity(self):
+        for functional in FUNCTIONALS:
+            for multik in (False, True):
+                with self.subTest(functional=functional, multik=multik):
+                    producer = self.ground_state(functional, multik)
+                    inp = self.rt_input(functional, producer, multik, 2, 'pulse')
+                    if not multik:
+                        inp = inp.replace("exx_mlwf_radius=0d0",
+                                          "exx_mlwf_radius=0d0\n exx_mlwf_norm_fraction=.999d0\n exx_ace_support='source'")
+                    reference = None
+                    for threads in (1, 2):
+                        folder, result = self.execute(f'omp_{functional}_{multik}_{threads}', inp, 2, threads)
+                        current, energy = self.assert_rt(folder, result)
+                        if reference is not None:
+                            np.testing.assert_allclose(current, reference[0], atol=1e-8, rtol=1e-7)
+                            np.testing.assert_allclose(energy, reference[1], atol=1e-8, rtol=1e-7)
+                        reference = (current, energy)
+
+    def test_openmp_dc_core_exchange_parity(self):
+        template = (ROOT / 'testsuites/425_H_pbeh40_dc_gs/inputfile').read_text()
+        for functional in ('hse06',) + FUNCTIONALS:
+            with self.subTest(functional=functional):
+                reference = None
+                for threads in (1, 2):
+                    inp = template.replace("xc='pbeh40'", f"xc='{functional}'")
+                    _, result = self.execute(f'omp_dc_{functional}_{threads}', inp, 2, threads)
+                    self.assertEqual(result.returncode, 0, result.stdout[-2500:] + result.stderr)
+                    self.assertIn('end SALMON', result.stdout)
+                    residual = re.findall(r'DC #SCF.*diff =\s*(\S+)', result.stdout)
+                    self.assertLess(float(residual[-1]), 1e-10)
+                    exchange = float(re.findall(r'DC_HSE_CORE exchange Ha =\s*(\S+)', result.stdout)[-1])
+                    charge = float(re.findall(r'integral\(rho_tot\)=\s*(\S+)', result.stdout)[-1])
+                    self.assertTrue(np.isfinite(exchange))
+                    self.assertLess(abs(charge - 4.), 1e-10)
+                    if reference is not None:
+                        self.assertLess(abs(exchange - reference), 1e-9)
+                    reference = exchange
 
     def test_metadata_rejections_before_wavefunction_read(self):
         original = self.ground_state('pbeh40')

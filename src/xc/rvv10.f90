@@ -106,6 +106,9 @@ contains
       mesh(a)=exp(log(1d-4)+real(a-1,8)/(nq-1)*log(.5d0/1d-4))
     enddo
     call spline_second(mesh,second)
+!$omp parallel do default(none) schedule(static) &
+!$omp private(i,j,q,qn,qs,amp,kappa,wg,w,t,exponent,ds,power,fac) &
+!$omp shared(ng,rho,sigma,b,c,pi,mesh,second,basis,deriv,amplitude,qn_all,qs_all,theta)
     do i=1,ng
       q=.5d0;qn=0d0;qs=0d0;amp=0d0
       if(rho(i)>1d-18)then
@@ -135,6 +138,7 @@ contains
       amplitude(i)=amp;qn_all(i)=qn;qs_all(i)=qs
       theta(i,:)=amp*basis(i,:)
     enddo
+!$omp end parallel do
     if(present(convolution))then
       call convolution(theta,u,mesh,status)
       if(status/=0)return
@@ -171,6 +175,8 @@ contains
       call fftw_destroy_plan(forward);call fftw_destroy_plan(backward)
     endif
     energy=beta*rho;vrho=beta;vsigma=0d0
+!$omp parallel do default(none) schedule(static) private(i,v1,v2,amp) &
+!$omp shared(ng,rho,basis,deriv,u,amplitude,qn_all,qs_all,energy,vrho,vsigma)
     do i=1,ng
       if(rho(i)<=1d-18)cycle
       v1=sum(basis(i,:)*real(u(i,:),8));v2=sum(deriv(i,:)*real(u(i,:),8))
@@ -179,6 +185,7 @@ contains
       vrho(i)=vrho(i)+.75d0*amp/rho(i)*v1+amp*qn_all(i)*v2
       vsigma(i)=amp*qs_all(i)*v2
     enddo
+!$omp end parallel do
     if(.not.all(ieee_is_finite(energy)).or..not.all(ieee_is_finite(vrho)).or. &
        .not.all(ieee_is_finite(vsigma)))return
     status=0
