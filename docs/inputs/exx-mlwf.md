@@ -158,12 +158,13 @@ weighted Frobenius norm of the **raw exchange action on the current occupied
 columns**, before the exchange mixing fraction. It is not an energy tolerance,
 a force tolerance, or a bound on arbitrary-target ACE propagation error.
 
-Requires positive HSE omega, `exx_mlwf_radius=0` and `exx_mlwf_norm_fraction > 0`; use fraction 1 for
+Supports HSE06 (positive omega), PBEh(40) and PBEh(40)+rVV10 with
+`exx_mlwf_radius=0` and `exx_mlwf_norm_fraction > 0`; use fraction 1 for
 a full-source-support reference. Existing Gamma, native-mesh, static-SCF/fixed-
-ion-RT and restart/snapshot restrictions apply. The current implementation does
-not support this control for PBEh. No memory ceiling is introduced.
+ion-RT and restart/snapshot restrictions apply. Canonical DC fragment SCF does
+not enter this localized pair path. No memory ceiling is introduced.
 
-The estimator uses the actual discrete SR multiplier (including G=0), source
+The estimator uses the actual discrete functional multiplier (including G=0), source
 amplitudes and localized pair densities. It does not use erfc of MLWF center
 separation. At most half the budget is assigned to omitted pairs; a measured
 Hermitian-completion correction must fit the remaining budget. Strict ACE
@@ -177,6 +178,25 @@ completion, ACE, FFTs, MPI wall time or total speedup. The following
 and gives the accepted action bound (zero for diagnosis or fallback). Bounds
 are relative to **the same source mask** and subject to floating-point rounding.
 A finite WF mask introduces a separate approximation.
+
+Before grid products, a sparse catalogue of target block-amplitude maxima is
+queried over each source's nonzero support bounding box. A pair absent from the
+query has `||q C(q* t)||₂ <= max|q| max|K(G)| ||q||₂ max_support|t|` within its
+allocated action budget. The block width is an indexing choice, not a physical
+cutoff. Periodic boundary boxes can be conservative (retain extra candidates).
+Targets are rotated to the transported MLWF gauge but are not additionally
+truncated. The remaining tighter pair norms use nonzero source grid rows only.
+There is no dense source-by-target candidate table. Delocalized states may still
+produce a dense catalogue; sparsity is measured, not assumed.
+
+`EXX_PAIR generated grid products/catalogue entries` reports expensive pair
+norm evaluations and stored sparse envelope entries (rank-boundary duplicates
+can occur). `EXX_PAIR evaluated product points` reports actual source-supported
+points used in those pair norms. These are attempted-screening diagnostics;
+the following fallback line must be checked before claiming accepted savings.
+Compact FFT target/action work contains surviving columns only, with one pair
+per available spatial worker per batch. Native RT wavefunctions and ACE factors
+are still dense mesh arrays: this change does not make total storage linear.
 
 In RT, an already accepted MLWF gauge is now transported and retained if later spread
 minimization fails. The failed attempt still appears in the status log, with a

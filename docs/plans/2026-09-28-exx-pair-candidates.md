@@ -62,3 +62,19 @@ Files: `testsuites/unit_pbeh_rvv10/test_pair_screen.py`, `testsuites/benchmark_h
 - Planning: old benchmark stopped by user; all child processes exited; old binary and completed data frozen.
 - Ruling: preserve dense native RT wavefunctions and ACE factors for this phase. Pair/workspace optimization is measurable independently; total-memory linear scaling is not claimed.
 - Ruling: block maxima bound candidates instead of treating nonoverlapping 99.9% spheres as exact zero. This retains explicit error control without changing target wavefunctions.
+
+## Approved amendment: local-support ACE before remeasurement
+
+The bounded untruncated-target pilot at64 H2 retained4096/4096 pairs, with32,768 catalogue entries: off10.70s vs on11.389s for2 steps, peak1139.67 vs1176.78MiB, no fallback, current difference1.02e-20 and energy difference9.95e-14Ha. Synthetic sparse tests pass, but this does not provide a useful production speedup. Do not launch the long benchmark yet.
+
+User explicitly approved: use the99.9%-masked MLWFs as ACE construction vectors and exactly exclude nonoverlapping supports; retain real-space RT wavefunctions and compare against the existing method.
+
+### Task 4: Source-support ACE (before Task3 remeasurement)
+
+Add opt-in `exx_ace_support='source'`, default `'occupied'`. Native source-support ACE forms S from the already masked source, W=K_S S, then ACE from(S,W). Nonorthogonal S is allowed by the existing Gram-based ACE construction; retain its strict Hermitian/positive/conditioning checks. Use zero-budget candidate screening to remove exact disjoint supports only. Do not silently reinterpret the finite pair-action error budget: reject combining source-support ACE with explicit pair screening initially.
+
+Apply the resulting ACE to original occupied mesh orbitals for cached action and exchange energy; time propagation remains on the mesh. Alias S into the three-dimensional ACE interface where possible instead of adding another full mesh copy. If the source ACE is inadmissible, recompute the existing occupied-vector ACE and report fallback. Initially restrict source-support mode to fully occupied native fixed-ion RT (existing DC preparations remain unchanged). Full support must reproduce occupied-vector ACE.
+
+Tests: RED input/control and full-support equivalence against old executable; independent nonorthogonal ACE interpolation; finite-source overlap pairs with complex orbitals; MPI/orbital layouts; same-seed16-step native RT. Compare .999 source-support against .999 occupied ACE and full support, report approximation differences separately from exact-zero pair pruning. Rerun short64 H2 pilot and inspect pair count/time/RSS before full matrix.
+
+Benchmark: add `--ace-support source` for adaptive runs only; full reference stays occupied. Store controls in metadata/reuse checks and report local-support ACE acceptance/fallback. Native dense RT and ACE factors remain a later storage-optimization phase; this amendment must not claim linear total memory.

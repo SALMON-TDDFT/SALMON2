@@ -111,6 +111,7 @@ contains
         MPI_COMM_WORLD,4d0,t,fast,ss,omega=ww)
     if(ss/=0)error stop 'chain apply'
     if(chain%pair_products/=nnorb)error stop 'distant pairs generated full products'
+    if(chain%pair_product_points/=nnorb)error stop 'zero source rows evaluated in pair norms'
     if(chain%screen_skipped/=nnorb*(nnorb-1))error stop 'chain pair reduction'
     ee=sum(abs(fast-exact)**2)*product(h)
     call MPI_Allreduce(ee,ge,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)

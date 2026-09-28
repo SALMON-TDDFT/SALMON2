@@ -16,7 +16,7 @@ class PairScreenRT(unittest.TestCase):
 
     def test_initial_localization_guard(self):
         inp=self.rt_input(nt=1,dt=.02,impulse=1e-4,moving=False)
-        inp=inp.replace("xc='hse06'","xc='hse06'\n exx_mlwf_norm_fraction=.999\n exx_mlwf_tolerance=1d-30")
+        inp=inp.replace(f"xc='{self.functional}'",f"xc='{self.functional}'\n exx_mlwf_norm_fraction=.999\n exx_mlwf_tolerance=1d-30")
         inp=inp.replace('exx_mlwf_maxiter=100','exx_mlwf_maxiter=1')
         folder,run=self.execute('pair_initial_localization_guard',inp,rt=True)
         self.assertNotEqual(run.returncode,0)
@@ -27,7 +27,7 @@ class PairScreenRT(unittest.TestCase):
         for fraction,mode,tol,ranks in [(1,'off',0,1),(1,'diagnose',1,1),(1,'on',1,1),
                 (1,'on',1,2),(.999,'off',0,1),(.999,'diagnose',1,1),(.999,'on',1,1)]:
             inp=self.rt_input(nt=16,dt=.02,impulse=1e-4,moving=False)
-            inp=inp.replace("xc='hse06'",f"xc='hse06'\n exx_mlwf_norm_fraction={fraction}\n exx_pair_screening='{mode}'\n exx_pair_tolerance={tol}")
+            inp=inp.replace(f"xc='{self.functional}'",f"xc='{self.functional}'\n exx_mlwf_norm_fraction={fraction}\n exx_pair_screening='{mode}'\n exx_pair_tolerance={tol}")
             inp=inp.replace('nproc_rgrid=1,1,1',f'nproc_rgrid=1,{ranks},1')
             folder,run=self.execute(f'pair_{fraction}_{mode}_{ranks}',inp,ranks=ranks,rt=True)
             self.assertEqual(run.returncode,0,run.stdout[-4000:]+run.stderr)
@@ -59,6 +59,23 @@ class PairScreenRT(unittest.TestCase):
         self.assertLess(np.ptp(results[.999,'on',1][1][1:,1]),np.ptp(results[.999,'off',1][1][1:,1])+1e-7)
         for a,b in zip(results[1,'on',2],results[1,'on',1]):
             np.testing.assert_allclose(a,b,atol=2e-8,rtol=0)
+
+
+class PBEhPairScreenRT(PairScreenRT):
+    functional='pbeh40'
+
+    def test_orbital_split(self):
+        values=[]
+        for orbitals in (1,2):
+            inp=self.rt_input(nt=4,dt=.02,impulse=1e-4,moving=False)
+            inp=inp.replace("xc='pbeh40'", "xc='pbeh40'\n exx_mlwf_norm_fraction=.999\n exx_pair_screening='on'\n exx_pair_tolerance=1d-6")
+            inp=inp.replace('nproc_ob=1',f'nproc_ob={orbitals}')
+            inp=inp.replace('nproc_rgrid=1,1,1',f'nproc_rgrid=1,{2//orbitals},1')
+            folder,run=self.execute(f'pbeh_pair_orbitals_{orbitals}',inp,ranks=2,rt=True)
+            self.assertEqual(run.returncode,0,run.stdout[-4000:]+run.stderr)
+            self.assertIn('EXX_PAIR generated grid products/catalogue entries:',run.stdout)
+            values.append((np.loadtxt(next(folder.glob('*_rt.data'))),np.loadtxt(next(folder.glob('*_rt_energy.data')))))
+        for a,b in zip(*values):np.testing.assert_allclose(a,b,atol=2e-8,rtol=0)
 
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE'),'SALMON_TEST_EXE required')
 class PairScreenSCF(unittest.TestCase):

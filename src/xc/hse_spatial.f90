@@ -23,7 +23,7 @@ module hse_spatial
     integer :: screen_mode=0 ! 0 off, 1 diagnose, 2 omit
     real(8) :: screen_tolerance=0d0,screen_bound=0d0,screen_cpu_seconds=0d0
     integer(int64) :: screen_candidates=0,screen_skipped=0
-    integer(int64) :: pair_products=0,pair_catalog_entries=0
+    integer(int64) :: pair_products=0,pair_catalog_entries=0,pair_product_points=0
     integer(int64) :: local_pairs=0,local_points=0,global_pairs=0
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
@@ -351,20 +351,20 @@ contains
     type(s_exx_spatial_local) :: compact_plan
     complex(8),allocatable :: compact_action(:,:)
     logical :: compact_used
-    integer,allocatable :: selected(:),broad_kept(:)
-    real(8),allocatable :: omitted(:),pair_norms(:,:),pair_totals(:,:),source_norms(:),global_norms(:)
+    integer,allocatable :: selected(:),broad_kept(:),active_rows(:)
+    real(8),allocatable :: omitted(:),pair_norms(:,:),pair_totals(:,:),source_norms(:),global_norms(:),pair_values(:)
     real(8) :: kernel_local(2),kernel_sum(2),lambda,kzero,krms,budget,normq,qmax,qnorm_local
     real(8) :: candidate_bound,summary_local(3),summary_total(3),cpu_start,cpu_end,bound_scale
     integer :: source_total,target_total,nselected,ncandidate,k,broad_sources,box_lower(3),box_upper(3)
-    integer :: mesh_local(3),mesh_lo(3)
+    integer :: mesh_local(3),mesh_lo(3),nactive
     real(8) :: envelope_max,envelope_norm,envelope_factor,threshold_floor,threshold_pair,factor
-    real(8) :: pair_stats(2),global_pair_stats(2)
+    real(8) :: pair_stats(3),global_pair_stats(3),point_total
     integer(int64) :: compact_pairs,compact_points
     real(8) :: radius,pi,q(3),q2,screening
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
     op%screen_candidates=0;op%screen_skipped=0;op%screen_bound=0d0;op%screen_cpu_seconds=0d0
-    op%pair_products=0;op%pair_catalog_entries=0
+    op%pair_products=0;op%pair_catalog_entries=0;op%pair_product_points=0
     screening=0d0
     if(present(omega))screening=omega
     if(.not.ieee_is_finite(screening).or.screening<0d0)bad=1
@@ -498,11 +498,23 @@ contains
           ! All absent pairs have action norm <= budget. Count their complement
           ! without an Nsource-by-Ntarget skip table or per-source dense update.
           broad_sources=broad_sources+1
+          nactive=0
+          do g=1,ng
+            if(source_column(g)/=(0d0,0d0))nactive=nactive+1
+          enddo
+          allocate(active_rows(nactive),pair_values(nactive));k=0
+          do g=1,ng
+            if(source_column(g)==(0d0,0d0))cycle
+            k=k+1;active_rows(k)=g
+          enddo
           do k=1,ncandidate
             j=selected(k);broad_kept(j)=broad_kept(j)+1
-            pair_norms(1,k)=sum(abs(conjg(source_column)*target(:,j,1))**2)
-            pair_norms(2,k)=sum(abs(conjg(source_column)*target(:,j,1)))
+            pair_values=abs(source_column(active_rows))*abs(target(active_rows,j,1))
+            pair_norms(1,k)=sum(pair_values**2)
+            pair_norms(2,k)=sum(pair_values)
           enddo
+          deallocate(active_rows,pair_values)
+          op%pair_product_points=op%pair_product_points+int(ncandidate,int64)*int(nactive,int64)
           op%pair_products=op%pair_products+int(ncandidate,int64)
           op%screen_candidates=op%screen_candidates+int(nt-ncandidate,int64)
           if(ncandidate>0)call comm_summation(pair_norms(:,:ncandidate),pair_totals(:,:ncandidate),2*ncandidate,comm_r)
@@ -592,9 +604,11 @@ contains
     call spatial_local_destroy(compact_plan)
     if(op%screen_mode/=0)then
       omitted=omitted+budget*real(broad_sources-broad_kept,8)
-      pair_stats=real([op%pair_products,op%pair_catalog_entries],8);global_pair_stats=pair_stats
-      if(present(comm_o))call comm_summation(pair_stats,global_pair_stats,2,comm_o)
+      call comm_summation(real(op%pair_product_points,8),point_total,comm_r)
+      pair_stats=[real(op%pair_products,8),real(op%pair_catalog_entries,8),point_total];global_pair_stats=pair_stats
+      if(present(comm_o))call comm_summation(pair_stats,global_pair_stats,3,comm_o)
       op%pair_products=int(global_pair_stats(1),int64);op%pair_catalog_entries=int(global_pair_stats(2),int64)
+      op%pair_product_points=int(global_pair_stats(3),int64)
       bound_scale=0d0
       if(nt>0)bound_scale=maxval(omitted)
       if(present(comm_o))call max_scalar(bound_scale,comm_o)

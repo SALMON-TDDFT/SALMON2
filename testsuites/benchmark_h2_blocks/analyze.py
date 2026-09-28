@@ -25,6 +25,14 @@ for c in d['cases']:
       active_updates=[len(r['support_counters']) for r in rr],retained_gauge_updates=[r['retained_gauge_updates'] for r in rr],
       max_current_difference=max(abs(a-b) for f,r in zip(rows['full'],rows['adaptive']) for fr,ar in zip(f['observables'],r['observables']) for a,b in zip(fr[13:16],ar[13:16])),
       max_energy_difference_ha=max(abs(fr[1]-ar[1]) for f,r in zip(rows['full'],rows['adaptive']) for fr,ar in zip(f['energies'],r['energies'])))
+    generated=[v for r in rr for v in r.get('generated_pair_counters',[])]
+    if generated:
+        points=[v for r in rr for v in r.get('pair_product_points',[])]
+        bounds=[v for r in rr for v in r.get('accepted_pair_bounds',[])]
+        item['pair_screening']=dict(mean_generated_pairs=statistics.mean(v[0] for v in generated),
+            max_catalogue_entries=max(v[1] for v in generated),mean_executed_pairs=statistics.mean(v[0]+v[1] for v in pairs),
+            mean_product_points=statistics.mean(points),max_accepted_bound=max(bounds),
+            fallbacks=sum(r.get('pair_fallbacks',0) for r in rr))
     summary.append(item)
 # Compare each strong layout with MPI1, same mode and first repetition.
 strong_differences={}
@@ -49,6 +57,15 @@ for suite in ('weak','strong'):
         radius='—' if r['max_radius'] is None else f"{r['max_radius']:.3f}"
         lines.append('|'+ '×'.join(map(str,r['shape']))+f"|{8*math.prod(r['shape'])}|{r['ranks']}|{r.get('repeats',d['repeats'])}|{t('full')}|{t('adaptive')}|{r['speedup']:.3f}|{r['full']['peak_rank_bytes']['median']/2**20:.1f} / {r['adaptive']['peak_rank_bytes']['median']/2**20:.1f}|{radius}|{ratio}|{r['adaptive']['post_impulse_energy_width_ha']['max']:.3e}|")
     lines+=['']
+if any('pair_screening' in r for r in summary):
+    lines+=['## Pair screening (adaptive mode)','',
+      '|Fragment array|MPI|Generated pairs/update|Executed FFT pairs/update|Product points/update|Max catalogue entries|ACE fallbacks|Max accepted action bound|',
+      '|---|---:|---:|---:|---:|---:|---:|---:|']
+    for r in summary:
+        if 'pair_screening' not in r:continue
+        v=r['pair_screening']
+        lines.append('|'+ '×'.join(map(str,r['shape']))+f"|{r['ranks']}|{v['mean_generated_pairs']:.1f}|{v['mean_executed_pairs']:.1f}|{v['mean_product_points']:.1f}|{v['max_catalogue_entries']}|{v['fallbacks']}|{v['max_accepted_bound']:.3e}|")
+    lines+=['','Generated counts describe screening attempts; executed FFT counts include unscreened fallback work.','']
 (out/'tables.md').write_text('\n'.join(lines))
 fig,axes=plt.subplots(2,2,figsize=(12,8),layout='constrained')
 for col,suite in enumerate(('weak','strong')):

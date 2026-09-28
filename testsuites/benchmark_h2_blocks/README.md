@@ -60,3 +60,19 @@ contention-corrected minima. `--rt-source` imports only verified completed rows
 with identical binary, physical inputs, launcher/MPI, seed hashes and parsed
 time/RSS/observables. It permits a revised repetition schedule without rerunning
 finished jobs or merging different executable timings.
+
+## Pair-generation remeasurement
+
+Add `--pair-tolerance 1e-6` to enable bounded pair screening only in the .999
+adaptive mode. The fraction=1 reference remains unscreened. The tolerance is
+an occupied-action budget, distinct from the .999 source-support approximation.
+The runner stores the budget in metadata and refuses resume/reuse mismatches.
+Each adaptive RT must provide 33 accepted-bound and candidate diagnostics.
+
+The report includes generated grid-product pairs, actual executed FFT pairs,
+source-supported product points, catalogue entries and ACE fallbacks. A
+screening attempt is not an accepted saving when ACE falls back. These changes
+reduce exchange work/temporary storage; dense native RT and ACE storage remain.
+Use a fresh RT output for each executable and reuse only validated canonical DC
+seeds with the explicit binary-change option. Old partial measurements remain
+in `docs/benchmarks/2026-09-28-h2-blocks-before-pairs/`.

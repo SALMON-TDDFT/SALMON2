@@ -619,6 +619,8 @@ contains
       spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
     if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,2i18)') &
       'EXX_PAIR generated grid products/catalogue entries: ',spatial%pair_products,spatial%pair_catalog_entries
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i18)') &
+      'EXX_PAIR evaluated product points: ',spatial%pair_product_points
     correction_norm=0d0;accepted_bound=0d0
     if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
       call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
