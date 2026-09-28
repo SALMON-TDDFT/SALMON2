@@ -2893,7 +2893,7 @@ contains
     implicit none
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
-    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hse_spatial_scf
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -3250,21 +3250,21 @@ contains
       .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
       .and.yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n'
     hybrid_mesh_rt=pbeh_mesh_rt.or.(xc=='hse06'.and. &
-      (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1).and. &
+      (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1.or.nproc_ob>1).and. &
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
       yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
-    hse_spatial_scf=xc=='hse06'.and.theory=='dft'.and. &
-      yn_hse_lcfo_rt=='n'.and.product(nproc_rgrid)>1
-    if(hse_spatial_scf)then
+    hybrid_spatial_scf=(xc=='hse06'.or.xc=='pbeh40'.or.xc=='pbeh40_rvv10').and.theory=='dft'.and. &
+      yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1)
+    if(hybrid_spatial_scf)then
       yn_hse_wannier='y'
       if((yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)).or.exx_mlwf_radius/=0d0) &
-        error stop 'Spatial HSE SCF: occupied spin pairs and full support required'
+        error stop 'Spatial hybrid SCF: occupied spin pairs and full support required'
       if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
-        error stop 'Spatial HSE SCF: restart/snapshot/checkpoint unsupported'
+        error stop 'Spatial hybrid SCF: restart/snapshot/checkpoint unsupported'
       if(write_gs_restart_data/='no'.or.yn_self_checkpoint=='y') &
-        error stop 'Spatial HSE SCF: use write_gs_restart_data=no and yn_self_checkpoint=n'
+        error stop 'Spatial hybrid SCF: use write_gs_restart_data=no and yn_self_checkpoint=n'
       if(yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
-        error stop 'Spatial HSE SCF: full-grid eigen/solver diagnostics unsupported'
+        error stop 'Spatial hybrid SCF: full-grid eigen/solver diagnostics unsupported'
     endif
     if(hybrid_mesh_rt)then
       yn_hse_wannier='y'
@@ -3335,9 +3335,13 @@ contains
       if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
-        if((hybrid_mesh_rt.or.hse_spatial_scf).and.product(nproc_rgrid)>1)then
-          if(nproc_ob/=1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
-            error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
+        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1))then
+          if(nproc_ob<1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
+            error stop 'Spatial EXX: Gamma y/z pencils required'
+          if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &
+            error stop 'Spatial EXX: each orbital group must own at least one state'
+          if(yn_dc=='y'.and.nstate_frag>0.and.nproc_ob>nstate_frag) &
+            error stop 'Spatial EXX: each orbital group must own at least one state'
           exx_grid=num_rgrid
           if(yn_dc=='y')then
             if(any(num_fragment<1))error stop 'Spatial EXX: positive fragment counts required'

@@ -37,6 +37,41 @@ class HSESpatial(unittest.TestCase):
                 print('HSE parity field/ranks/energy/current:',field,ranks,
                       np.max(abs(energy-results[0][0])),np.max(abs(data-results[0][1])))
 
+    def test_orbital_scf_and_rt(self):
+        scf_reference=None
+        for ranks,layout,orbitals in [(1,'1,1,1',1),(2,'1,1,1',2),(4,'1,2,1',2),(8,'1,2,2',2)]:
+            inp=self.scf_input().replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            inp=inp.replace('nproc_ob=1','nproc_ob='+str(orbitals))
+            folder,run=self.execute('orb_scf'+str(ranks),inp,ranks=ranks)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            match=re.search(r'#GS converged at\s+(\d+)\s+:\s+(\S+)',run.stdout)
+            self.assertIsNotNone(match,run.stdout[-3000:])
+            self.assertLess(float(match[2]),1e-10)
+            energy=float(re.search(r'Total energy \(eV\) =\s*(\S+)',next(folder.glob('*_info.data')).read_text())[1])
+            eigen=np.loadtxt(next(folder.glob('*_eigen.data')),skiprows=4)[:,1]
+            if scf_reference is None:scf_reference=(energy,eigen)
+            self.assertLess(abs(energy-scf_reference[0]),1e-7)
+            np.testing.assert_allclose(eigen,scf_reference[1],atol=1e-7,rtol=0)
+            if orbitals>1:
+                rows=re.findall(r'EXX_ORBITALS rank/local/global/grid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',run.stdout)
+                self.assertEqual(len(rows),ranks)
+                self.assertTrue(all(int(r[1])==1 and int(r[2])==2 for r in rows))
+            print('orbital SCF ranks/iterations/energy:',ranks,int(match[1]),energy)
+        for field in ('impulse','pulse'):
+            reference=None
+            for ranks,layout,orbitals in [(1,'1,1,1',1),(2,'1,1,1',2),(4,'1,2,1',2),(8,'1,2,2',2)]:
+                inp=(self.rt_input(nt=20,moving=False) if field=='impulse' else self.pulse_input(moving=False))
+                inp=inp.replace("xc='hse06'","xc='hse06'\n yn_hse_wannier='y'")
+                inp=inp.replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout).replace('nproc_ob=1','nproc_ob='+str(orbitals))
+                folder,run=self.execute('orb_'+field+str(ranks),inp,ranks=ranks,rt=True)
+                self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+                data=np.loadtxt(next(folder.glob('*_rt.data')))
+                energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
+                if reference is None:reference=(data,energy)
+                np.testing.assert_allclose(data,reference[0],atol=2e-8,rtol=0)
+                np.testing.assert_allclose(energy,reference[1],atol=2e-8,rtol=0)
+                print('orbital HSE RT ranks/field/energy error:',ranks,field,np.max(abs(energy-reference[1])))
+
     def test_hse_md_still_rejected(self):
         _,run=self.execute('md_rejected',self.rt_input(moving=True),rt=True)
         self.assertNotEqual(run.returncode,0)
@@ -167,6 +202,41 @@ class HSESpatial(unittest.TestCase):
             self.assertLess(np.max(abs(rt_energy-reference_rt)),1e-7)
             print('HSE DC ranks per fragment/energy eV/core exchange Ha/charge:',per_fragment,energy,exchange,charge)
 
+    def test_dc_orbital_fractional(self):
+        reference=None
+        for ranks,layout,orbitals,total_layout in [(2,'1,1,1',1,'2,1,1'),(8,'1,1,1',4,'4,2,1'),(16,'1,2,1',4,'4,2,2')]:
+            inp=self.base.replace('temperature_k=300d0','temperature_k=10000d0')
+            inp=inp.replace('nstate_frag=4','nstate_frag=6').replace('nscf=500','nscf=2000')
+            inp=inp.replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            inp=inp.replace('nproc_ob=1','nproc_ob='+str(orbitals))
+            inp=inp.replace('nproc_rgrid_tot=2,1,1','nproc_rgrid_tot='+total_layout)
+            folder,run=self.execute('dc_orbital'+str(ranks),inp,ranks=ranks)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            scf=re.findall(r'DC #SCF.*Total Energy =\s*(\S+)\s+diff =\s*(\S+)',run.stdout)
+            self.assertTrue(scf)
+            self.assertLess(float(scf[-1][1]),1e-10)
+            charge=float(re.findall(r'integral\(rho_tot\)=\s*(\S+)',run.stdout)[-1])
+            self.assertLess(abs(charge-4),1e-8)
+            energy=float(scf[-1][0])
+            exchange=float(re.findall(r'DC_HSE_CORE exchange Ha =\s*(\S+)',run.stdout)[-1])
+            eigen=np.loadtxt(next((folder/'data_dcdft/total').glob('*_eigen.data')))[:,3]
+            if reference is None:reference=(energy,exchange,eigen)
+            self.assertLess(abs(energy-reference[0]),2e-6)
+            self.assertLess(abs(exchange-reference[1]),1e-7)
+            np.testing.assert_allclose(eigen,reference[2],atol=1e-7,rtol=0)
+            if orbitals>1:
+                rows=re.findall(r'EXX_ORBITALS rank/local/global/grid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',run.stdout)
+                self.assertEqual(len(rows),ranks)
+                self.assertEqual({int(r[1]) for r in rows},{1,2})
+                self.assertTrue(all(int(r[2])==6 for r in rows))
+            print('DC orbital ranks/energy/exchange/charge:',ranks,energy,exchange,charge)
+
+    def test_empty_orbital_groups_rejected(self):
+        inp=self.rt_input(nt=1,moving=False).replace('nproc_ob=1','nproc_ob=4')
+        _,run=self.execute('empty_orbitals',inp,ranks=4,rt=True)
+        self.assertNotEqual(run.returncode,0)
+        self.assertIn('each orbital group must own at least one state',run.stdout+run.stderr)
+
     def test_legacy_multik_thermal_charge(self):
         inp=self.base.replace('temperature_k=300d0','temperature_k=10000d0')
         inp=inp.replace('nstate_frag=4','nstate_frag=6').replace('nscf=500','nscf=2000')
@@ -209,3 +279,15 @@ class HSESpatial(unittest.TestCase):
                     if int(rank) in empty:self.assertEqual((int(sent),int(received)),(0,0))
             spectra.append(np.loadtxt(next((folder/'data_dcdft/total').glob('*_eigen.data')))[:,3])
         self.assertLess(np.max(abs(spectra[0]-spectra[1])),1e-7)
+
+@unittest.skipUnless(os.environ.get('SALMON_TEST_EXE') and os.environ.get('SALMON_TEST_MPIEXEC'),
+                     'SALMON_TEST_EXE and SALMON_TEST_MPIEXEC required')
+class PBEhOrbitalSCF(unittest.TestCase):
+    functional='pbeh40_rvv10'
+    setUpClass=classmethod(helpers.RealspaceEhrenfest.setUpClass.__func__)
+    execute=classmethod(helpers.RealspaceEhrenfest.execute.__func__)
+    scf_input=HSESpatial.scf_input
+    rt_input=helpers.RealspaceEhrenfest.rt_input
+    pulse_input=helpers.RealspaceEhrenfest.pulse_input
+    test_orbital_scf_and_rt=HSESpatial.test_orbital_scf_and_rt
+    test_dc_orbital_fractional=HSESpatial.test_dc_orbital_fractional

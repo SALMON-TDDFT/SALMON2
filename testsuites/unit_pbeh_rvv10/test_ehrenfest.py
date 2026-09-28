@@ -180,6 +180,19 @@ class RealspaceEhrenfest(unittest.TestCase):
         energy2=np.loadtxt(next(folder2.glob('*_rt_energy.data')))
         np.testing.assert_allclose(energy2,energy,atol=1e-7,rtol=1e-7)
         print('water spatial energy parity eV:',np.max(abs(energy2-energy)))
+        # Four occupied water orbitals split unevenly over three orbital groups.
+        for ranks,layout in [(3,'1,1,1'),(6,'1,2,1')]:
+            inp=rt.replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout).replace('nproc_ob=1','nproc_ob=3')
+            folder3,run3=self.execute('water_rt_orbital'+str(ranks),inp,ranks=ranks,rt='water_gs')
+            self.assertEqual(run3.returncode,0,run3.stdout[-3000:]+run3.stderr)
+            self.assertIn('EXX_ORBITALS',run3.stdout)
+            energy3=np.loadtxt(next(folder3.glob('*_rt_energy.data')))
+            np.testing.assert_allclose(energy3,energy,atol=1e-7,rtol=1e-7)
+            xyz=next(folder3.glob('*_trj.xyz')).read_text().splitlines()[-3:]
+            reference_xyz=next(folder.glob('*_trj.xyz')).read_text().splitlines()[-3:]
+            vf=lambda lines:np.array([[float(x) for x in line.split('#v=')[1].replace('#f=','').split()] for line in lines])
+            np.testing.assert_allclose(vf(xyz),vf(reference_xyz),atol=1e-7,rtol=1e-7)
+            print('water orbital ranks/energy parity eV:',ranks,np.max(abs(energy3-energy)))
 
 
     def pulse_input(self,dt=.08,nt=120,amplitude=.03,moving=True):
@@ -278,6 +291,25 @@ class RealspaceEhrenfest(unittest.TestCase):
                 print('spatial pulse ranks/data/energy/vf differences:',ranks,
                       np.max(abs(data-reference[0])),np.max(abs(energy-reference[1])),np.max(abs(vf-reference[2])))
 
+    def test_orbital_mesh_pulse(self):
+        reference=None
+        for ranks,layout,orbitals in [(1,'1,1,1',1),(2,'1,1,1',2),(4,'1,2,1',2),(8,'1,2,2',2)]:
+            inp=self.pulse_input().replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
+            inp=inp.replace('nproc_ob=1','nproc_ob='+str(orbitals))
+            folder,run=self.execute('orbital_pulse'+str(ranks),inp,ranks=ranks,rt=True)
+            self.assertEqual(run.returncode,0,run.stdout[-3000:]+run.stderr)
+            self.assertIn('end SALMON',run.stdout)
+            self.assertNotIn('Native LCFO RT active',run.stdout)
+            data=np.loadtxt(next(folder.glob('*_rt.data')))
+            energy=np.loadtxt(next(folder.glob('*_rt_energy.data')))
+            xyz=next(folder.glob('*_trj.xyz')).read_text().splitlines()[-4:]
+            vf=np.array([[float(x) for x in line.split('#v=')[1].replace('#f=','').split()] for line in xyz])
+            if reference is None:reference=(data,energy,vf)
+            np.testing.assert_allclose(data,reference[0],atol=2e-10,rtol=2e-7)
+            np.testing.assert_allclose(energy,reference[1],atol=2e-9,rtol=2e-7)
+            np.testing.assert_allclose(vf,reference[2],atol=2e-9,rtol=2e-6)
+            print('orbital Ehrenfest ranks/energy/vf error:',ranks,np.max(abs(energy-reference[1])),np.max(abs(vf-reference[2])))
+
     def test_spatial_work_refinement(self):
         errors=[]
         for dt,nt in ((.08,120),(.04,240),(.02,480)):
@@ -296,12 +328,11 @@ class RealspaceEhrenfest(unittest.TestCase):
         self.assertLess(errors[-1],1e-5)
 
     def test_spatial_layout_guards(self):
-        for name,layout in [('x','2,1,1'),('orbital','1,2,1')]:
+        for name,layout in [('x','2,1,1')]:
             inp=self.rt_input().replace('nproc_rgrid=1,1,1','nproc_rgrid='+layout)
-            if name=='orbital':inp=inp.replace('nproc_ob=1','nproc_ob=2')
             _,run=self.execute('bad_layout_'+name,inp,rt=True)
             self.assertNotEqual(run.returncode,0)
-            self.assertIn('Gamma y/z pencils with all orbitals required',run.stdout+run.stderr)
+            self.assertIn('Gamma y/z pencils required',run.stdout+run.stderr)
 
     def test_reconstruction_bad_coverage(self):
         folder=self.root/'bad_coverage_gs'

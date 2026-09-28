@@ -2,6 +2,8 @@ program exchange_driver
   use mpi
   use iso_fortran_env, only: int64
   use fftw_pencils, only: fftw_pencil_transposes
+  use hse_ace
+  use exx_orbitals
   use hse_spatial
   use hse_wannier
   use hse_wannier_gauge, only: gauge_transport
@@ -12,6 +14,8 @@ program exchange_driver
   complex(8),allocatable :: local(:,:,:),trial(:,:,:),action(:,:,:),previous_saved(:,:,:)
   type(spatial_exx_state) :: spatial,full_spatial,partitioned
   type(s_hse_wannier) :: serial
+  type(hse_ace_state) :: distributed_ace,reference_ace,old_ace,average_ace
+  complex(8),allocatable :: local_w(:,:,:),ace_ref(:,:,:),ace_result(:,:,:),old_action(:,:,:)
   integer(int64) :: before_transposes
   integer :: np,rank,err,status,dims(2),coords(2),comm(2),m(3),lo(3),g,l,x,y,z,j,k,stage
   integer :: bad_coords(2),comm_r,comm_o,orb_rank,orb_size,spatial_rank,spatial_size,first_o,last_o,first_t,last_t
@@ -92,7 +96,43 @@ program exchange_driver
     if(status/=0)error stop 'spatial action'
     first_o=no*orb_rank/orb_size+1;last_o=no*(orb_rank+1)/orb_size
     first_t=nt*orb_rank/orb_size+1;last_t=nt*(orb_rank+1)/orb_size
-    partitioned%source=spatial%source(:,first_o:last_o)
+    call spatial_exx_refresh(partitioned,n,h,dims,coords,comm,comm_r, &
+      local(:,first_o:last_o,:),merge(3,0,stage==1),1d-7,status, &
+      occupation=occupation(first_o:last_o,:),comm_o=comm_o)
+    if(status/=0)error stop 'distributed localization'
+    if(any(shape(partitioned%source)/=[product(m),last_o-first_o+1]))error stop 'replicated source columns'
+    if(any(abs(partitioned%previous-spatial%previous(:,first_o:last_o,:))>1d-9))error stop 'distributed transport'
+    if(any(abs(partitioned%source-spatial%source(:,first_o:last_o))>1d-9))error stop 'distributed source'
+    if(allocated(local_w))deallocate(local_w,ace_ref,ace_result)
+    allocate(local_w(product(m),no,1),ace_ref(product(m),nt,1),ace_result(product(m),last_t-first_t+1,1))
+    call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,local,local_w,status,omega=omega)
+    if(status/=0)error stop 'reference source action'
+    call hse_ace_build(reference_ace,local,local_w,dv,status,sum_grid)
+    if(status/=0)error stop 'reference ACE build'
+    call orbital_ace_build(distributed_ace,local(:,first_o:last_o,:),local_w(:,first_o:last_o,:), &
+      dv,comm_r,comm_o,status)
+    if(status/=0)error stop 'distributed ACE build'
+    if(any(shape(distributed_ace%factors)/=[product(m),last_o-first_o+1,1]))error stop 'replicated ACE columns'
+    call hse_ace_apply(reference_ace,trial,ace_ref,status,sum_grid)
+    if(status/=0)error stop 'reference ACE apply'
+    call orbital_ace_apply(distributed_ace,trial(:,first_t:last_t,:),ace_result,comm_r,comm_o,status)
+    if(status/=0)error stop 'distributed ACE apply'
+    if(any(abs(ace_result-ace_ref(:,first_t:last_t,:))>1d-10))error stop 'ACE target mismatch'
+    ! ACE must reproduce exact exchange on every source column.
+    call orbital_ace_apply(distributed_ace,local(:,first_o:last_o,:),action(:,:last_o-first_o+1,:), &
+      comm_r,comm_o,status)
+    if(status/=0)error stop 'ACE source apply'
+    if(any(abs(action(:,:last_o-first_o+1,:)-local_w(:,first_o:last_o,:))>1d-10))error stop 'ACE source mismatch'
+    if(stage>1)then
+      call hse_ace_average(old_ace,distributed_ace,average_ace,status)
+      if(status/=0)error stop 'distributed ACE average'
+      call orbital_ace_apply(average_ace,trial(:,first_t:last_t,:),ace_result,comm_r,comm_o,status)
+      if(status/=0)error stop 'averaged ACE apply'
+      if(any(abs(ace_result-.5d0*(old_action+ace_ref(:,first_t:last_t,:)))>1d-10))error stop 'ACE average mismatch'
+    endif
+    old_ace=distributed_ace;old_action=ace_ref(:,first_t:last_t,:)
+    ! Recompute the reference outside the distributed slice overwritten above.
+    call spatial_exx_apply(spatial,n,h,dims,coords,comm,comm_r,2.5d0,trial,action,status,omega=omega)
     call spatial_exx_apply(partitioned,n,h,dims,coords,comm,comm_r,2.5d0, &
       trial(:,first_t:last_t,:),action(:,first_t:last_t,:),status,omega=omega,comm_o=comm_o)
     if(status/=0)error stop 'orbital partition action'
@@ -123,6 +163,14 @@ program exchange_driver
   if(spatial_rank==0)bad_dv=-1d0
   call gauge_transport(local,spatial%previous,bad_dv,transported,minimum,status,sum_grid)
   if(status==0)error stop 'invalid local transport volume accepted'
+  bad_dv=dv
+  if(rank==0)bad_dv=-1d0
+  call orbital_ace_build(distributed_ace,local(:,first_o:last_o,:),local_w(:,first_o:last_o,:), &
+    bad_dv,comm_r,comm_o,status)
+  if(status==0)error stop 'invalid orbital ACE volume accepted'
+  ! Build failure clears factors collectively, so subsequent action must fail too.
+  call orbital_ace_apply(distributed_ace,trial(:,first_t:last_t,:),ace_result,comm_r,comm_o,status)
+  if(status==0)error stop 'uninitialized orbital ACE accepted'
   call wannier_destroy(serial)
   call MPI_Comm_free(comm(1),err);call MPI_Comm_free(comm(2),err)
   call MPI_Comm_free(comm_r,err);call MPI_Comm_free(comm_o,err)

@@ -12,6 +12,7 @@ module hse_native
   use plusU_global, only: PLUS_U_ON
   use hse_exchange
   use hse_ace
+  use exx_orbitals, only: orbital_ace_build,orbital_ace_apply
   use hse_spatial
   use hse_wannier
   use hse_symmetry
@@ -234,8 +235,8 @@ contains
       call lcfo_hse_refresh(system,mg,info,psi,hse_exchange_energy)
       return
     endif
-    if(info%isize_r>1.and. &
-       ((xc=='hse06'.and.theory=='dft').or. &
+    if((info%isize_r>1.or.info%isize_o>1).and. &
+       ((theory=='dft').or. &
         (yn_dc=='n'.and.yn_conventional_from_dcdft=='y'.and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
       call refresh_spatial(system,mg,info,psi)
@@ -411,6 +412,7 @@ contains
     complex(8),intent(in),optional :: lcfo_coeff(:,:)
     complex(8),intent(out),optional :: lcfo_action(:,:)
     integer :: ierr,ng,total_error,info_error
+    integer,allocatable :: orbital_comm
     real(8) :: tick,communication_before
     if(.not.hse_enabled())return
     if(lcfo_rt_active)then
@@ -418,6 +420,7 @@ contains
       return
     endif
     if(.not.allocated(ace%factors))error stop 'HSE06: occupied exchange source is not initialized'
+    if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
     if(allocated(target_work))then
       if(any(shape(target_work)/=[ng,info%numo,info%numk]))deallocate(target_work,action_work,output_work)
@@ -427,10 +430,10 @@ contains
     call hse_pack(psi,mg,info,target_work)
     if(timing_enabled)tick=hse_walltime()
     if(use_wannier_exchange().and.hse_force_full_action)then
-      if(info%isize_r>1)then
+      if(info%isize_r>1.or.info%isize_o>1)then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
           [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'))
+          pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
         if(info_error/=0)error stop 'Spatial EXX: full action failed'
       else
         call apply_wannier_collective(target_work,action_work,info)
@@ -448,13 +451,17 @@ contains
       if(timing_enabled)hse_timings(1)=hse_timings(1)+hse_walltime()-tick-(hse_timings(4)-communication_before)
     else
       if(taylor_active.and.taylor_midpoint)then
-        if(info%isize_r>1)then
+        if(info%isize_o>1)then
+          call orbital_ace_apply(midpoint_ace,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
+        else if(info%isize_r>1)then
           call hse_ace_apply(midpoint_ace,target_work,action_work,ierr,sum_spatial)
         else
           call hse_ace_apply(midpoint_ace,target_work,action_work,ierr)
         endif
       else
-        if(info%isize_r>1)then
+        if(info%isize_o>1)then
+          call orbital_ace_apply(ace,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
+        else if(info%isize_r>1)then
           call hse_ace_apply(ace,target_work,action_work,ierr,sum_spatial)
         else
           call hse_ace_apply(ace,target_work,action_work,ierr)
@@ -486,9 +493,11 @@ contains
     type(s_orbital),intent(in) :: psi
     complex(8),allocatable :: local(:,:,:),w(:,:,:)
     real(8) :: ex,offdiag(3,3)
-    integer :: status,total,changed,maxiter,j
-    if(info%isize_x/=1.or.info%isize_o/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
-      error stop 'Spatial EXX: Gamma y/z pencils with all orbitals required'
+    integer :: status,total,changed,maxiter,j,io
+    integer,allocatable :: orbital_comm
+    if(info%isize_x/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
+      error stop 'Spatial EXX: Gamma y/z pencils required'
+    if(info%isize_o>system%no)error stop 'Spatial EXX: each orbital group must own at least one state'
     if(any(num_kgrid/=1).or.maxval(abs(system%vec_k))>1d-12.or.use_symmetry) &
       error stop 'Spatial EXX: unshifted Gamma required'
     if(exx_mlwf_radius/=0d0.or.(theory/='dft'.and.maxval(abs(system%rocc-2d0))>1d-12)) &
@@ -502,7 +511,8 @@ contains
       offdiag(j,j)=0d0
     enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'Spatial EXX: orthogonal cell required'
-    allocate(local(product(mg%num),system%no,1),w(product(mg%num),system%no,1))
+    if(info%isize_o>1)orbital_comm=info%icomm_o
+    allocate(local(product(mg%num),info%numo,1),w(product(mg%num),info%numo,1))
     call hse_pack(psi,mg,info,local)
     changed=1
     if(allocated(cached_source).and.allocated(cached_occupation))then
@@ -510,28 +520,35 @@ contains
         if(all(cached_source==local).and.all(cached_occupation==system%rocc(:,:,1)))changed=0
       endif
     endif
-    call comm_summation(changed,total,info%icomm_r)
+    call comm_summation(changed,total,info%icomm_ro)
     if(total==0)return
     maxiter=0
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
-      maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(:,:,1))
+      maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(info%io_s:info%io_e,:,1),comm_o=orbital_comm)
     if(status/=0)error stop 'Spatial EXX: MLWF refresh failed'
     call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
       [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-      pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'))
+      pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
     if(status/=0)error stop 'Spatial EXX: exchange action failed'
-    call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
+    if(info%isize_o>1)then
+      call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
+    else
+      call hse_ace_build(ace,local,w,system%hvol,status,sum_spatial)
+    endif
     if(status/=0)error stop 'Spatial EXX: ACE build failed'
     cached_source=local;cached_action=w;cached_occupation=system%rocc(:,:,1)
+    if(spatial%updates==1)write(*,'(a,4i10)')'EXX_ORBITALS rank/local/global/grid: ', &
+      info%id_ro,info%numo,system%no,product(mg%num)
     ex=0d0
-    do j=1,system%no
-      ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(j,1,1)*system%wtk(1) &
+    do j=1,info%numo
+      io=info%io_s+j-1
+      ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(io,1,1)*system%wtk(1) &
         *real(sum(conjg(local(:,j,1))*w(:,j,1)),8)
     enddo
-    call comm_summation(ex,hse_exchange_energy,info%icomm_r)
-    if(info%id_r==0.and.(spatial%updates==1.or.maxiter>0)) &
+    call comm_summation(ex,hse_exchange_energy,info%icomm_ro)
+    if(info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
@@ -674,7 +691,7 @@ contains
             do ix=mg%is(1),min(mg%ie(1),core(1))
               g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
               local=local+.5d0*exchange_fraction()*system%rocc(io,ik,1)*system%wtk(ik)*system%hvol &
-                *real(conjg(psi%zwf(ix,iy,iz,1,io,ik,1))*cached_action(g,io,ik-info%ik_s+1),8)
+                *real(conjg(psi%zwf(ix,iy,iz,1,io,ik,1))*cached_action(g,io-info%io_s+1,ik-info%ik_s+1),8)
             enddo
           enddo
         enddo

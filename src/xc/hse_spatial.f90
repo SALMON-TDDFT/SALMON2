@@ -1,11 +1,12 @@
 ! Full-support Gamma exchange on x-complete y/z pencils.
-! Refresh currently uses all band columns; apply also accepts orbital-local sources.
+! Refresh and apply accept orbital-local columns through optional comm_o.
 ! Grid rows and FFT work are spatially local.
 ! Collective contract: n/h/dims/radius/omega/maxiter and call order agree;
 ! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module hse_spatial
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
+  use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use fftw_pencils, only: pencil_transform
   use hse_wannier_gauge, only: gauge_transport,gauge_minimize
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -18,9 +19,10 @@ module hse_spatial
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
 contains
-  subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation)
+  subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation,comm_o)
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r,maxiter
+    integer,intent(in),optional :: comm_o
     real(8),intent(in) :: h(3),tolerance
     real(8),intent(in),optional :: occupation(:,:)
     complex(8),intent(in) :: psi(:,:,:)
@@ -28,6 +30,10 @@ contains
     complex(8),allocatable :: raw(:,:,:,:),shifted(:,:),phase(:)
     real(8) :: b(3,6),weights(6),delta,pi,position(3)
     integer :: no,ng,m(3),lo(3),x,y,z,g,j,axis,neighbors(6,1),bad
+    if(present(comm_o))then
+      call refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation)
+      return
+    endif
     no=size(psi,2);ng=size(psi,1);status=1;bad=0
     if(no<1.or.size(psi,3)/=1.or.any(n<1).or.any(dims<1))bad=1
     if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
@@ -105,6 +111,110 @@ contains
       call comm_summation(a,total,size(a),comm_r)
       a=total
     end subroutine
+  end subroutine
+
+  subroutine refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation)
+    type(spatial_exx_state),intent(inout) :: op
+    integer,intent(in) :: n(3),dims(2),coords(2),comm_r,comm_o,maxiter
+    real(8),intent(in) :: h(3),tolerance
+    complex(8),intent(in) :: psi(:,:,:)
+    real(8),intent(in),optional :: occupation(:,:)
+    integer,intent(out) :: status
+    integer,allocatable :: counts(:)
+    complex(8),allocatable :: raw(:,:,:,:),phase(:),overlap(:,:),left(:,:),right(:,:),work(:)
+    real(8),allocatable :: singular(:),rwork(:),occupation_weights(:)
+    real(8) :: b(3,6),weights(6),delta,pi,position(3)
+    integer :: no,ng,nlocal,first,m(3),lo(3),axis,g,x,y,z,j,bad,neighbors(6,1),initialized,total_initialized
+    ng=size(psi,1);nlocal=size(psi,2);status=1;bad=0
+    if(size(psi,3)/=1.or.any(n<1).or.any(dims<1))bad=1
+    if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
+    if(.not.all(ieee_is_finite(real(psi))).or..not.all(ieee_is_finite(aimag(psi))))bad=1
+    if(maxiter<0.or.tolerance<=0d0.or..not.ieee_is_finite(tolerance))bad=1
+    if(present(occupation))then
+      if(any(shape(occupation)/=[nlocal,1]))bad=1
+      if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))bad=1
+    endif
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
+    if(ng/=product(m).or.any(coords<0).or.any(coords>=dims))bad=1
+    if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
+       modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    call orbital_layout(nlocal,comm_r,comm_o,counts,first,bad)
+    if(bad/=0.or.sum(counts)<1)return
+    no=sum(counts)
+    initialized=0
+    if(allocated(op%gauge))initialized=1
+    total_initialized=initialized
+    call orbital_check(total_initialized,comm_r,comm_o)
+    if(initialized/=total_initialized)bad=1
+    if(allocated(op%gauge))then
+      if(any(shape(op%gauge)/=[no,no,1]).or..not.allocated(op%previous))then
+        bad=1
+      else
+        if(any(shape(op%previous)/=shape(psi)))bad=1
+        if(.not.all(ieee_is_finite(real(op%previous))).or..not.all(ieee_is_finite(aimag(op%previous))))bad=1
+      endif
+    endif
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    if(.not.allocated(op%gauge))then
+      allocate(op%gauge(no,no,1));op%gauge=0d0
+      do j=1,no
+        op%gauge(j,j,1)=1d0
+      enddo
+    else
+      allocate(overlap(no,no),left(no,no),right(no,no),work(8*no),singular(no),rwork(5*no))
+      call orbital_overlap(psi(:,:,1),op%previous(:,:,1),product(h),comm_r,comm_o,counts,first,overlap)
+      call zgesvd('A','A',no,no,overlap,no,singular,left,no,right,no,work,size(work),rwork,bad)
+      if(bad/=0)bad=1
+      call orbital_check(bad,comm_r,comm_o)
+      if(bad==0)then
+        op%min_singular=minval(singular)
+        if(.not.all(ieee_is_finite(singular)).or.op%min_singular<1d-8)bad=1
+      endif
+      call orbital_check(bad,comm_r,comm_o)
+      if(bad==0)then
+        op%gauge(:,:,1)=matmul(left,right)
+      else
+        op%gauge=0d0
+        do j=1,no
+          op%gauge(j,j,1)=1d0
+        enddo
+        bad=0
+      endif
+    endif
+    op%iterations=0;op%localization_status=2;op%spread=-1d0;op%gradient=-1d0
+    if(maxiter>0)then
+      allocate(raw(no,no,6,1),phase(ng))
+      pi=acos(-1d0);b=0d0;neighbors=1
+      do axis=1,3
+        delta=2*pi/(n(axis)*h(axis));b(axis,axis)=delta;b(axis,axis+3)=-delta
+        weights(axis)=1d0/(2*delta**2);weights(axis+3)=weights(axis)
+        g=0
+        do z=0,m(3)-1;do y=0,m(2)-1;do x=0,m(1)-1
+          g=g+1;position=([x,y,z]+lo)*h
+          phase(g)=exp(cmplx(0d0,-position(axis)*delta,8))
+        enddo;enddo;enddo
+        call orbital_overlap(psi(:,:,1),psi(:,:,1),product(h),comm_r,comm_o,counts,first,raw(:,:,axis,1),phase)
+        raw(:,:,axis+3,1)=conjg(transpose(raw(:,:,axis,1)))
+      enddo
+      call gauge_minimize(op%gauge,raw,neighbors,b,weights,maxiter,tolerance,op%spread,op%gradient, &
+        op%iterations,op%localization_status)
+    endif
+    if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
+    if(allocated(op%source))deallocate(op%source)
+    if(allocated(op%previous))deallocate(op%previous)
+    allocate(op%source(ng,nlocal),op%previous(ng,nlocal,1),occupation_weights(nlocal))
+    call orbital_rotate(psi(:,:,1),op%gauge(:,:,1),comm_o,counts,first,op%previous(:,:,1))
+    occupation_weights=1d0
+    if(present(occupation))occupation_weights=sqrt(occupation(:,1)/2d0)
+    call orbital_rotate(psi(:,:,1),op%gauge(:,:,1),comm_o,counts,first,op%source,occupation_weights)
+    op%updates=op%updates+1;status=0
   end subroutine
 
   ! Optional comm_o joins matching grid pencils across orbital groups. Source and

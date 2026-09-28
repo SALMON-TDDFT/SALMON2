@@ -187,11 +187,13 @@ DC initializes the mesh orbitals; time propagation acts directly on those
 orbitals, without an LCFO projection. `yn_hse_wannier` is enabled automatically
 for spatial layouts; use `yn_hse_wannier='y'` for the serial reference.
 
-Use `nproc_ob=1`, `nproc_k=1`, `num_kgrid=1,1,1`, and y/z spatial layouts such
+Use `nproc_k=1`, `num_kgrid=1,1,1`, and y/z spatial layouts such
 as `nproc_rgrid=1,2,1` or `1,2,2`. The x grid must divide by Py; y by both
 Py and Pz; z by Pz. Cells must be orthogonal, the k point unshifted Gamma,
 occupations fixed at two per orbital, and `exx_mlwf_radius=0` (full support).
-The existing `exx_mlwf_interval/maxiter/tolerance` controls apply.
+The existing `exx_mlwf_interval/maxiter/tolerance` controls apply. Orbital groups
+(`nproc_ob > 1`) may be combined with these spatial layouts or used with
+`nproc_rgrid=1,1,1`; every group must own at least one orbital.
 
 The HSE reciprocal kernel is `4*pi*(1-exp(-G^2/(4*omega^2)))/G^2`, with
 zero mode `pi/omega^2`; the PBEh Coulomb cutoff does not affect this kernel.
@@ -209,11 +211,12 @@ and Coulomb exchange against serial Wannier on 1/2/4 ranks;
 `testsuites/unit_pbeh_rvv10/test_hse_spatial.py` compares HSE DC-initialized
 impulse and pulse histories against the serial route.
 
-## Conventional spatial HSE SCF
+## Conventional spatial hybrid SCF
 
-For `xc='hse06'`, `theory='dft'`, `yn_dc='n'`, y/z spatial layouts now use
-the same screened-exchange, MLWF and ACE implementation. Wannier activation
-is automatic when the spatial process count exceeds one. The Gamma,
+For `xc='hse06'`, `xc='pbeh40'` or `xc='pbeh40_rvv10'`, with `theory='dft'`
+and `yn_dc='n'`, y/z spatial and orbital layouts use the corresponding exchange
+kernel with distributed MLWF and ACE. Wannier activation is automatic when
+the spatial or orbital process count exceeds one. The Gamma,
 orthogonal-cell, FFT divisibility and full-support restrictions above apply.
 Use occupied-only states (`2*nstate=nelec`), fixed occupations (omit electronic
 temperature), fixed ions, and `yn_hse_lcfo_rt='n'`.
@@ -231,10 +234,10 @@ serial MLWF route. Iteration counts were 109, 49 and 476 on 1, 2 and 4 ranks,
 respectively: this establishes final-state agreement, not parallel speedup or
 identical SCF trajectories. Finite-temperature Gamma DC fragment SCF is supported as described below.
 
-## Spatial HSE DC SCF with partial occupations
+## Spatial hybrid DC SCF with partial occupations
 
-`yn_dc='y'`, `theory='dft'`, `xc='hse06'` can now use y/z spatial pencils
-inside each fragment. The same unshifted Gamma, full-support and output
+`yn_dc='y'`, `theory='dft'`, with HSE06 or PBEh40 (including rVV10) can use
+y/z spatial pencils and orbital groups inside each fragment. The same unshifted Gamma, full-support and output
 restrictions apply. FFT divisibility is checked on the **fragment** grid
 `num_rgrid/num_fragment + 2*num_rgrid_buffer`, not the total grid.
 `nproc_rgrid` describes each fragment; `nproc_rgrid_tot` describes the total
@@ -285,9 +288,8 @@ For the H4 test (N=1024, m=6, s=1), four spatial ranks reduce this workspace
 from 192 KiB to 24 KiB per rank. This is not a claim about total process memory.
 
 Remaining replication includes the representative rank's core and halo bases,
-dense LCFO diagonalization matrices, and all orbital columns in the spatial
-MLWF/ACE representation. Halo data is exchanged by fragment representatives and then sent only to
-intersecting spatial domains with active k-point/orbital ownership. Further orbital and
+dense LCFO diagonalization matrices, and the small MLWF/ACE band matrices. Halo data is exchanged by fragment representatives and then sent only to
+intersecting spatial domains with active k-point/orbital ownership. Further
 matrix distribution is needed for those parts; no fixed memory cap is imposed.
 
 ## Distributed core-basis construction
@@ -335,12 +337,40 @@ inter-fragment receive buffers and one outgoing tile, so this diagnostic is
 not its total peak memory. The global LCFO eigensolver and the orbital-column
 layout of native MLWF/ACE exchange are unchanged by this assembly optimization.
 
-### Orbital-distributed exchange kernel (internal)
+## Orbital-distributed native MLWF/ACE
 
-`spatial_exx_apply` accepts an optional orbital communicator joining identical
-spatial pencils. Each orbital group holds its own localized source columns and
-target columns; sources are broadcast one at a time, with only one additional
-local-grid column of communication storage. Empty and unequal partitions are
-supported. The exchange-action oracle covers combined spatial/orbital layouts.
-MLWF refresh and ACE construction still require all orbital columns, so this
-internal interface does **not** yet enable `nproc_ob > 1` in native hybrid SCF/RT.
+The Gamma native SCF/RT routes above support `nproc_ob > 1`, alone or combined
+with y/z spatial pencils. HSE RT remains fixed-ion; PBEh RT supports the existing
+Ehrenfest route with fixed electronic occupations. Finite-radius, multi-k,
+projected LCFO RT and conventional BOMD retain their previous restrictions.
+
+Local mesh orbitals, localized exchange sources, previous localized orbitals,
+exchange actions, caches and ACE factors contain only owned orbital columns.
+Overlap and gauge/ACE metric matrices are replicated band matrices. Building
+these matrices, rotating mesh columns and applying ACE stream one source column
+between matching spatial pencils. No full mesh-by-all-orbitals array is gathered.
+Taylor midpoint ACE concatenates the two local factor sets, representing the
+average of the exchange operators rather than an average of orbitals.
+
+For a particular complex mesh array with Nlocal grid rows and nlocal orbitals,
+its storage is `16*Nlocal*nlocal` bytes. This is a per-array statement, not a
+bound on process memory: gauge/overlap/metric storage still scales quadratically
+with the global band count, and the midpoint stores two factor sets.
+`EXX_ORBITALS rank/local/global/grid` reports the native allocation dimensions.
+There is no arbitrary memory cap.
+
+The internal kernels support empty and unequal partitions. Native SCF/RT
+requires at least one state per orbital group because other SALMON propagation
+routines skip ranks with no orbitals; an explicit guard prevents collective
+hangs. Unequal nonempty partitions are supported. DC fragment counts and
+`nproc_rgrid_tot` must still describe the full launched process count.
+
+Validation covers distributed MLWF temporal transport, fractional/zero
+occupations, ACE source reproduction, arbitrary targets and midpoint averaging;
+HSE and PBEh SCF/DC energy, charge and LCFO eigenvalues; fixed-ion impulse/pulse
+response; and PBEh Ehrenfest energy, velocity and force parity. Water tests split
+four orbitals over three groups. Numerical agreement does not establish speedup
+or production-scale peak-memory reduction.
+
+Examples: `samples/hse_spatial/h4_orbital_scf.inp` (4 ranks) and
+`h4_orbital_dc_scf.inp` (16 ranks, 6 states over 4 orbital groups per fragment).
