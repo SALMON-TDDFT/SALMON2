@@ -1987,6 +1987,12 @@ contains
     & real(zj3d(1:3))*t_unit_current%conv,real(zj4d(1:3))*t_unit_current%conv, &
     & cdiagknown,cintra,cinter,cunknown
 
+    ! Match the write_rt_energy_data (src/io/write.f90) convention of
+    ! flushing after every per-step write, so that _dm_unfold.data
+    ! retains its progress if the job is killed/times out before normal
+    ! completion, instead of only being flushed at final program exit.
+    flush(ofl%fh_dm_unfold)
+
   end if
 
   return
