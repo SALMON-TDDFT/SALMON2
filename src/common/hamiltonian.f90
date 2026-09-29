@@ -904,7 +904,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
   type(s_stencil),            intent(in)    :: stencil
   type(s_sendrecv_grid),      intent(inout) :: srg
   !
-  integer :: im, ik, io, ispin, ix, iy, iz, c, d, n
+  integer :: ik, io, ispin, ix, iy, iz, c, d, n
   real(8) :: kvec(3), kvec_u(3), Bmat(3,3), vt, cnab(4,3), rwc(3), rdivg
   complex(8) :: psi0, wc(3), divg
   ! gpsi = (B^T nabla psi)_c ; the i*(k_c - u_c)*psi part of D_c psi is added in the
@@ -960,12 +960,11 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
     allocate(rgw  (3,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)))
     allocate(rwvec(  mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3),3))
     rwvec = 0d0
-    do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,system%nspin
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B, &
-                               tpsi%rwf(:,:,:,ispin,io,ik,im),rgpsi)
+                               tpsi%rwf(:,:,:,ispin,io,ik,1),rgpsi)
 !$omp parallel do collapse(2) private(ix,iy,iz,c)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -984,13 +983,12 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
           ! accumulate -1/2 d/dx_c ( vtau d psi / d x_c )
-          htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0 * rgw(c,ix,iy,iz)
+          htpsi%rwf(ix,iy,iz,ispin,io,ik,1) = htpsi%rwf(ix,iy,iz,ispin,io,ik,1) - 0.5d0 * rgw(c,ix,iy,iz)
         end do
         end do
         end do
 !$omp end parallel do
       end do
-    end do
     end do
     end do
     end do
@@ -1006,11 +1004,10 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
     allocate(ruorb(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3), &
                    system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,3))
     ruorb = 0d0
-    do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,system%nspin
-      call calc_gradient_field(mg,cnab,Bmat,tpsi%rwf(:,:,:,ispin,io,ik,im),rgpsi)
+      call calc_gradient_field(mg,cnab,Bmat,tpsi%rwf(:,:,:,ispin,io,ik,1),rgpsi)
 !$omp parallel do collapse(2) private(ix,iy,iz,c,d,vt,rwc)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
@@ -1029,11 +1026,9 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
     end do
     end do
     end do
-    end do
     do d=1,3
       call update_overlap_real8(srg, mg, ruorb(:,:,:,:,:,:,d))
     end do
-    do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,system%nspin
@@ -1047,12 +1042,11 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
                         + cnab(n,2)*( ruorb(ix,mg%idy(iy+n),iz,ispin,io,ik,2) - ruorb(ix,mg%idy(iy-n),iz,ispin,io,ik,2) ) &
                         + cnab(n,3)*( ruorb(ix,iy,mg%idz(iz+n),ispin,io,ik,3) - ruorb(ix,iy,mg%idz(iz-n),ispin,io,ik,3) )
         end do
-        htpsi%rwf(ix,iy,iz,ispin,io,ik,im) = htpsi%rwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0*rdivg
+        htpsi%rwf(ix,iy,iz,ispin,io,ik,1) = htpsi%rwf(ix,iy,iz,ispin,io,ik,1) - 0.5d0*rdivg
       end do
       end do
       end do
 !$omp end parallel do
-    end do
     end do
     end do
     end do
@@ -1070,21 +1064,20 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
     ! On a periodic grid mg%idx wraps back into the interior, but on an isolated
     ! one it addresses these cells for real, and they have to be zero.
     uloc = (0d0,0d0)
-    do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
     do io=info%io_s,info%io_e
     do ispin=1,system%nspin
       ! vec_k alone; see the GAUGE note in this routine's header.
       kvec = 0d0
       if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik)
-      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gpsi, &
+      call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,1),gpsi, &
            mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz, &
            cnab,Bmat)
 !$omp parallel do collapse(2) private(ix,iy,iz,c,d,psi0,vt,wc,kvec_u)
       do iz=mg%is(3),mg%ie(3)
       do iy=mg%is(2),mg%ie(2)
       do ix=mg%is(1),mg%ie(1)
-        psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+        psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,1)
         vt   = system%xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz))
         kvec_u(1:3) = kvec(1:3) - system%xc_payload%uvel%v(1:3,ix,iy,iz)
         do c=1,3
@@ -1093,7 +1086,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
         do d=1,3
           uloc(ix,iy,iz,d) = Bmat(d,1)*wc(1) + Bmat(d,2)*wc(2) + Bmat(d,3)*wc(3)
         end do
-        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+        htpsi%zwf(ix,iy,iz,ispin,io,ik,1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,1) &
              - 0.5d0*zi*( kvec_u(1)*wc(1) + kvec_u(2)*wc(2) + kvec_u(3)*wc(3) )
       end do
       end do
@@ -1109,12 +1102,11 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
                       + cnab(n,2)*( uloc(ix,mg%idy(iy+n),iz,2) - uloc(ix,mg%idy(iy-n),iz,2) ) &
                       + cnab(n,3)*( uloc(ix,iy,mg%idz(iz+n),3) - uloc(ix,iy,mg%idz(iz-n),3) )
         end do
-        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0*divg
+        htpsi%zwf(ix,iy,iz,ispin,io,ik,1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,1) - 0.5d0*divg
       end do
       end do
       end do
 !$omp end parallel do
-    end do
     end do
     end do
     end do
@@ -1129,21 +1121,20 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
   allocate(uorb(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2),mg%is_array(3):mg%ie_array(3), &
                 system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,3))
   uorb = (0d0,0d0)
-  do im=info%im_s,info%im_e
   do ik=info%ik_s,info%ik_e
   do io=info%io_s,info%io_e
   do ispin=1,system%nspin
     ! vec_k alone; see the GAUGE note in this routine's header.
     kvec = 0d0
     if (yn_periodic == 'y') kvec(1:3) = system%vec_k(1:3,ik)
-    call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,im),gpsi, &
+    call calc_gradient_psi(tpsi%zwf(:,:,:,ispin,io,ik,1),gpsi, &
          mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz, &
          cnab,Bmat)
 !$omp parallel do collapse(2) private(ix,iy,iz,c,d,psi0,vt,wc,kvec_u)
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
-      psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
+      psi0 = tpsi%zwf(ix,iy,iz,ispin,io,ik,1)
       vt   = system%xc_payload%vtau%f(mg%idx(ix),mg%idy(iy),mg%idz(iz))
       kvec_u(1:3) = kvec(1:3) - system%xc_payload%uvel%v(1:3,ix,iy,iz)
       do c=1,3
@@ -1152,7 +1143,7 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
       do d=1,3
         uorb(ix,iy,iz,ispin,io,ik,d) = Bmat(d,1)*wc(1) + Bmat(d,2)*wc(2) + Bmat(d,3)*wc(3)
       end do
-      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) &
+      htpsi%zwf(ix,iy,iz,ispin,io,ik,1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,1) &
            - 0.5d0*zi*( kvec_u(1)*wc(1) + kvec_u(2)*wc(2) + kvec_u(3)*wc(3) )
     end do
     end do
@@ -1161,11 +1152,9 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
   end do
   end do
   end do
-  end do
   do d=1,3
     call update_overlap_complex8(srg, mg, uorb(:,:,:,:,:,:,d))
   end do
-  do im=info%im_s,info%im_e
   do ik=info%ik_s,info%ik_e
   do io=info%io_s,info%io_e
   do ispin=1,system%nspin
@@ -1179,12 +1168,11 @@ subroutine add_xc_tau_operator(htpsi,tpsi,info,mg,system,stencil,srg)
                     + cnab(n,2)*( uorb(ix,mg%idy(iy+n),iz,ispin,io,ik,2) - uorb(ix,mg%idy(iy-n),iz,ispin,io,ik,2) ) &
                     + cnab(n,3)*( uorb(ix,iy,mg%idz(iz+n),ispin,io,ik,3) - uorb(ix,iy,mg%idz(iz-n),ispin,io,ik,3) )
       end do
-      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) - 0.5d0*divg
+      htpsi%zwf(ix,iy,iz,ispin,io,ik,1) = htpsi%zwf(ix,iy,iz,ispin,io,ik,1) - 0.5d0*divg
     end do
     end do
     end do
 !$omp end parallel do
-  end do
   end do
   end do
   end do
