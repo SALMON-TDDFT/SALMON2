@@ -28,7 +28,7 @@ program stub_probe
  shift(1,1)=1;call prepare(-2);shift(1,1)=0
  point(1,1)=2;call prepare(-2);point(1,1)=0
  kernel(0,0,0)=ieee_value(0d0,ieee_quiet_nan);call prepare(-2);kernel=1d0
- call backend%prepare(huge(0),2,3,kernel,point,shift,slot,10,status)
+ call backend%prepare([huge(0),2,2],[2,2,2],3,kernel,point,shift,slot,10,status)
  if(status/=-2)error stop 'dimension overflow'
  call prepare(-1)
  buffer(1,1,1)=cmplx(ieee_value(0d0,ieee_quiet_nan),0d0,8)
@@ -56,7 +56,7 @@ contains
  subroutine prepare(expected)
   implicit none
   integer,intent(in) :: expected
-  call backend%prepare(2,2,3,kernel,point,shift,slot,10,status)
+  call backend%prepare([2,2,2],[2,2,2],3,kernel,point,shift,slot,10,status)
   if(status/=expected)error stop 'prepare status'
  end subroutine
 end program

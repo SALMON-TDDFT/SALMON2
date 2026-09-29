@@ -2,9 +2,9 @@ program probe
   use, intrinsic :: ieee_arithmetic
   use omp_lib, only: omp_get_max_threads,omp_get_max_active_levels
   use mpi
-  use hse_exchange
+  use exx_k_exchange
   implicit none
-  type(hse_kernel) :: op
+  type(exx_k_kernel) :: op
   integer :: rank,np,status,n,m,no,nt,nk,ng,ik0,nloc,iu,ierr,p,provided,expected_block,chosen_block,old_levels,callback_count
   integer,allocatable :: starts(:),counts(:)
   real(8) :: h,omega
@@ -40,7 +40,7 @@ program probe
   layout='auto'
   call get_command_argument(5,setting)
   if(len_trim(setting)>0)layout=trim(setting)
-  call hse_kernel_init(op,n,m,h,k,omega,chosen_block,ierr,ik0,nloc, &
+  call exx_k_kernel_init(op,n,m,h,k,omega,chosen_block,ierr,ik0,nloc, &
     block_rows=expected_block,profile=.true.,fft_layout=layout)
   if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,1,status)
   if(expected_block==0)expected_block=chosen_block
@@ -65,17 +65,17 @@ program probe
     deallocate(local_t);allocate(local_t(ng,nt,0))
   endif
   old_levels=omp_get_max_active_levels()
-  call hse_kernel_apply_distributed(op,local_u,local_t,local_a,starts,counts,rank,transpose_tiles,ierr)
+  call exx_k_kernel_apply_distributed(op,local_u,local_t,local_a,starts,counts,rank,transpose_tiles,ierr)
   if(len_trim(invalid)>0)then
     if(ierr==0)call MPI_Abort(MPI_COMM_WORLD,5,status)
-    call hse_kernel_destroy(op)
+    call exx_k_kernel_destroy(op)
     call MPI_Finalize(status)
     stop
   endif
   if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,3,status)
   if(omp_get_max_active_levels()/=old_levels)call MPI_Abort(MPI_COMM_WORLD,16,status)
   allocate(callback_a(ng,nt,nloc));callback_count=0
-  call hse_kernel_apply_distributed(op,local_u,local_t,callback_a,starts,counts,rank,transpose_tiles, &
+  call exx_k_kernel_apply_distributed(op,local_u,local_t,callback_a,starts,counts,rank,transpose_tiles, &
     ierr,fill_density)
   if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,17,status)
   if(maxval(abs(callback_a-local_a))>1d-10)call MPI_Abort(MPI_COMM_WORLD,18,status)
@@ -92,7 +92,7 @@ program probe
     open(newunit=iu,file=trim(output),access='stream',form='unformatted',status='replace')
     write(iu)a;close(iu)
   endif
-  call hse_kernel_destroy(op)
+  call exx_k_kernel_destroy(op)
   call MPI_Finalize(status)
 contains
   subroutine fill_density(j,lo,rows,density)

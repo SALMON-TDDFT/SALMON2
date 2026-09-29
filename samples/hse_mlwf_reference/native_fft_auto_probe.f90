@@ -1,9 +1,9 @@
 ! Bounded initialization-only diagnostic: no SCF or time propagation.
 program fft_auto_probe
   use mpi
-  use hse_exchange
+  use exx_k_exchange
   implicit none
-  type(hse_kernel) :: op
+  type(exx_k_kernel) :: op
   real(8),allocatable :: k(:,:)
   real(8) :: t
   integer :: rank,np,status,n,m,nk,i,x,y,z,start,count,ierr,provided
@@ -19,10 +19,10 @@ program fft_auto_probe
   enddo;enddo;enddo
   start=1+rank*nk/np;count=(rank+1)*nk/np-rank*nk/np
   t=MPI_Wtime()
-  call hse_kernel_init(op,n,m,1d0,k,.11d0,8,ierr,start,count)
+  call exx_k_kernel_init(op,n,m,1d0,k,.11d0,8,ierr,start,count)
   if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,2,status)
   write(*,'(a,i0,a,l1,a,3es14.5)')'rank=',rank,' contiguous=',op%contiguous_fft, &
     ' trial strided contiguous init_seconds=',op%fft_trial_seconds,MPI_Wtime()-t
-  call hse_kernel_destroy(op)
+  call exx_k_kernel_destroy(op)
   call MPI_Finalize(status)
 end program

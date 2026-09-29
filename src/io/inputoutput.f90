@@ -3331,11 +3331,13 @@ contains
 #ifndef USE_EXX_CUFFT
       error stop 'exx_kpoint_backend=cufft requires USE_EXX_CUFFT=ON'
 #endif
-      if(xc/='hse06'.or.yn_dc/='n'.or.yn_hse_wannier/='n'.or.yn_hse_lcfo_rt/='n') &
-        error stop 'k-point cuFFT requires native HSE06 without Wannier/DC/LCFO'
-      if(any(num_kgrid/=num_kgrid(1)).or.any(num_kgrid<2).or. &
+      if(.not.is_hybrid(xc).or.yn_dc/='n'.or.yn_hse_lcfo_rt/='n') &
+        error stop 'k-point cuFFT requires native hybrid exchange without DC/LCFO'
+      if(temperature>=0d0.or.(nstate>0.and.nstate*2/=nelec).or.yn_hse_wannier_snapshot=='y') &
+        error stop 'k-point cuFFT requires occupied spin pairs without Wannier snapshots'
+      if(any(num_kgrid<1).or.product(num_kgrid)<2.or. &
          index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none') &
-        error stop 'k-point cuFFT requires a full cubic k mesh with at least 2 points per axis'
+        error stop 'k-point cuFFT requires a full uniform mesh with more than one k point'
       if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.nproc_k<1) &
         error stop 'k-point cuFFT requires k-only MPI distribution'
       if(exx_local_backend/='cpu'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &

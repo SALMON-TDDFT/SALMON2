@@ -25,7 +25,7 @@ if a.gpu:
     flags = ['-O2', '-cpp', '-mp', '-acc', '-cudalib=cufft', '-Mbounds', '-DUSE_EXX_CUFFT']
     flags += shlex.split(os.environ.get('CUFFT_TEST_FFLAGS', '-gpu=cc90'))
     sources += ['src/xc/exx_batch_backend.f90', 'src/xc/exx_cufft.f90', 'src/xc/exx_k_cufft.f90']
-sources += ['src/xc/hse_exchange.f90', 'testsuites/unit_kpoint_cufft/probe.f90']
+sources += ['src/xc/exx_k_exchange.f90', 'testsuites/unit_kpoint_cufft/probe.f90']
 with tempfile.TemporaryDirectory(prefix='salmon-k-cufft-') as tmp:
     folder = Path(tmp)
     (folder / 'config.h').write_text('#define USE_MPI\n')

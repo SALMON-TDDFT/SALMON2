@@ -56,6 +56,9 @@ class ConventionalHybridRT(unittest.TestCase):
             self.assertIn('#GS converged at', result.stdout)
             self.assertIn('end SALMON', result.stdout)
             self.assertTrue((folder / 'data_for_restart/hybrid_gs.bin').is_file())
+            if multik:
+                self.assertIn('EXX_DISTRIBUTED_K:', result.stdout)
+                self.assertNotIn('EXX_WANNIER refresh/', result.stdout)
             self.producers[key] = folder
         return self.producers[key]
 
@@ -106,6 +109,9 @@ class ConventionalHybridRT(unittest.TestCase):
                     inp = self.rt_input(functional, producer, multik, ranks, field)
                     folder, result = self.execute(f'{field}_{functional}_{int(multik)}_{ranks}', inp, ranks)
                     current, energy = self.assert_rt(folder, result)
+                    if multik:
+                        self.assertIn('EXX_DISTRIBUTED_K:', result.stdout)
+                        self.assertNotIn('EXX_WANNIER refresh/', result.stdout)
                     if field == 'zero':
                         self.assertLess(np.max(np.abs(energy[:, 1] - energy[0, 1])), 1e-7)
                         self.assertLess(np.max(np.abs(current[:, 13:16])), 1e-6)
@@ -115,6 +121,25 @@ class ConventionalHybridRT(unittest.TestCase):
                         np.testing.assert_allclose(current, reference[0], atol=1e-8, rtol=1e-7)
                         np.testing.assert_allclose(energy, reference[1], atol=1e-8, rtol=1e-7)
                     reference = (current, energy)
+
+    def test_multik_fractional_source_keeps_occupation_aware_route(self):
+        inp = (ROOT / 'testsuites/431_H_pbe0_conventional_gs/inputfile').read_text()
+        inp = inp.replace('nproc_k=2', 'nproc_k=1')
+        inp = inp.replace('nstate=2', 'nstate=3\n temperature_k=300d0')
+        folder, result = self.execute('gs_thermal_extra_state', inp)
+        self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr)
+        self.assertIn('#GS converged at', result.stdout)
+        self.assertIn('EXX_WANNIER refresh/', result.stdout)
+        self.assertNotIn('EXX_DISTRIBUTED_K:', result.stdout)
+
+    def test_hse_multik_snapshot_remains_available(self):
+        inp = (ROOT / 'testsuites/431_H_pbe0_conventional_gs/inputfile').read_text()
+        inp = inp.replace('nproc_k=2', 'nproc_k=1')
+        inp = inp.replace("xc='pbe0'", "xc='hse06'\n yn_hse_wannier='y'\n yn_hse_wannier_snapshot='y'")
+        folder, result = self.execute('gs_hse_snapshot', inp)
+        self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr)
+        self.assertIn('#GS converged at', result.stdout)
+        self.assertTrue(list(folder.rglob('hse_wannier_snapshot.bin')))
 
     def test_gamma_zero_field_and_spatial_mpi(self):
         self.check_layouts('zero', False)

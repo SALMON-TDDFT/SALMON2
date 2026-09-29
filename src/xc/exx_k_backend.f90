@@ -14,7 +14,7 @@ module exx_k_backend
    import s_exx_k_backend
    implicit none
    class(s_exx_k_backend),target,intent(inout) :: self
-   integer,intent(in) :: n,mesh,block,point(:,:),shift(:,:),slot(:),nslots
+   integer,intent(in) :: n(3),mesh(3),block,point(:,:),shift(:,:),slot(:),nslots
    real(8),intent(in) :: kernel(0:,0:,0:)
    integer,intent(out) :: status
   end subroutine

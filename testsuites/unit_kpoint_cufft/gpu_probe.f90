@@ -84,7 +84,7 @@ program gpu_probe
 contains
  subroutine prepare()
   implicit none
-  call backend%prepare(n,mesh,block,kernel,point,shift,slot,nslots,status)
+  call backend%prepare([n,n,n],[mesh,mesh,mesh],block,kernel,point,shift,slot,nslots,status)
   if(status/=0)error stop 'k-cuFFT prepare failed (NVHPC and NVIDIA device required)'
  end subroutine
 

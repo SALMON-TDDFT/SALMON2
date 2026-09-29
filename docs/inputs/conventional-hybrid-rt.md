@@ -105,3 +105,18 @@ checks zero-field stability and Gamma adaptive 99.9% source ACE, and rejects
 missing/mismatched saved data.
 Set `SALMON_TEST_EXE` and `SALMON_TEST_MPIEXEC` to run that integration suite.
 These small tests do not establish k-mesh, time-step, or spectral convergence.
+
+## Common full-support k-point exchange
+
+Ordinary fully occupied multi-k GS and native RT now share `exx_k_exchange`
+with HSE06. Density tiles are transposed across k ranks; the full orbital set
+is not gathered to the k-root for exchange. Rectangular orthorhombic grids are
+accepted. PBE0/PBEh retain the analytic spherical-Coulomb G=0 term and the existing
+`pbeh_coulomb_radius` convention (zero selects half the shortest BvK cell length).
+This is a kernel choice, not an MLWF support radius.
+
+DC, fractional/extra-state GS, explicitly localized support and requested HSE
+Wannier snapshots retain the occupation-aware Wannier/spatial paths. Gamma
+spatial exchange is unchanged. Legacy `hse_block_rows`, `hse_fft_layout` and
+`yn_hse_profile` input names still control the common k engine for compatibility.
+The `EXX_DISTRIBUTED_K` log marker identifies the shared path.

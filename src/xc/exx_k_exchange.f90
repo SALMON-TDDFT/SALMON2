@@ -1,6 +1,6 @@
-! Full periodic sampled HSE kernel. Unit one-spin source occupations;
+! Full periodic sampled hybrid exchange kernel. Unit one-spin source occupations;
 ! neither the hybrid mixing fraction nor a second spin factor is included.
-module hse_exchange
+module exx_k_exchange
 !$ use omp_lib, only: omp_get_num_threads,omp_get_max_threads
   use exx_k_backend, only: s_exx_k_backend,k_backend_factory
   use iso_fortran_env, only: int64
@@ -9,44 +9,70 @@ module hse_exchange
   implicit none
   private
   include 'fftw3.f03'
-  public :: hse_kernel, hse_kernel_init, hse_kernel_apply, hse_kernel_destroy
-  public :: hse_kernel_apply_distributed
-  type hse_kernel
+  public :: exx_k_kernel, exx_k_kernel_init, exx_k_kernel_apply, exx_k_kernel_destroy
+  public :: exx_k_kernel_apply_distributed
+  type exx_k_kernel
     class(s_exx_k_backend),allocatable :: accelerator
-    integer :: n=0, mesh=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1
+    integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1
     logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
     real(c_double) :: seconds(6)=0d0,fft_trial_seconds(2)=0d0
-    integer, allocatable :: order(:), point(:,:),shift(:,:),distance_index(:,:,:)
+    integer, allocatable :: order(:), point(:,:),shift(:,:),distance_index(:,:,:,:)
     complex(c_double_complex), allocatable :: phase(:,:),work(:,:,:)
     real(c_double), allocatable :: kernel(:,:,:)
     type(c_ptr) :: forward=c_null_ptr, backward=c_null_ptr
   end type
+interface exx_k_kernel_init
+    module procedure init_cubic,init_rectangular
+  end interface
 contains
-  subroutine hse_kernel_init(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend)
+  subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
+                        block_rows,profile,fft_layout,create_backend,coulomb_radius)
     implicit none
-    type(hse_kernel),intent(inout) :: op
+    type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n,mesh,block
-    real(c_double),intent(in) :: h,omega,k(:,:)
+    real(c_double),intent(in) :: h,k(:,:),omega
+    integer,intent(out) :: ierr
+    integer,optional,intent(in) :: phase_start,phase_count,block_rows
+    logical,optional,intent(in) :: profile
+    character(*),optional,intent(in) :: fft_layout
+    procedure(k_backend_factory),pointer,optional :: create_backend
+    real(c_double),optional,intent(in) :: coulomb_radius
+    call init_rectangular(op,[n,n,n],[mesh,mesh,mesh],[h,h,h],k,omega,block,ierr, &
+      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius)
+  end subroutine
+
+  subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
+                             block_rows,profile,fft_layout,create_backend,coulomb_radius)
+    implicit none
+    type(exx_k_kernel),intent(inout) :: op
+    integer,intent(in) :: n(3),mesh(3),block
+    real(c_double),intent(in) :: h(3),omega,k(:,:)
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count
     integer,optional,intent(in) :: block_rows
     logical,optional,intent(in) :: profile
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
-    integer :: ns,nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen
-    real(c_double) :: pi,q2,q(3),scaled(3)
+    real(c_double),optional,intent(in) :: coulomb_radius
+    integer :: ns(3),nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen,axis
+    real(c_double) :: pi,q2,q(3),scaled(3),radius
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
     type(c_ptr) :: plan
     ierr=1
-    call hse_kernel_destroy(op,ierr)
+    call exx_k_kernel_destroy(op,ierr)
     if(ierr/=0)return
     ierr=1
-    if(n<1.or.mesh<1.or.block<1.or.h<=0.or.omega<=0) return
-    if(.not.ieee_is_finite(h).or..not.ieee_is_finite(omega))return
+    if(any(n<1).or.any(mesh<1).or.block<1.or.any(h<=0).or.omega<0) return
+    if(.not.all(ieee_is_finite(h)).or..not.ieee_is_finite(omega))return
+    radius=.5d0*minval(n*mesh*h)
+    if(present(coulomb_radius))then
+      if(.not.ieee_is_finite(coulomb_radius).or.coulomb_radius<0d0)return
+      if(coulomb_radius>0d0)radius=coulomb_radius
+    endif
+    if(omega==0d0.and.radius>.5d0*minval(n*mesh*h)*(1d0+1d-12))return
     chosen=block
     if(present(block_rows))then
-      if(block_rows<0.or.block_rows>n**3)return
+      if(block_rows<0.or.block_rows>product(n))return
       if(block_rows>0)chosen=block_rows
     endif
     op%profile=.false.
@@ -65,7 +91,7 @@ contains
         return
       end select
     endif
-    nk=mesh**3;ng=n**3;ns=n*mesh;pi=acos(-1d0)
+    nk=product(mesh);ng=product(n);ns=n*mesh;pi=acos(-1d0)
     if(size(k,1)/=3.or.size(k,2)/=nk.or..not.all(ieee_is_finite(k)))return
     first=1;nphase=nk
     if(present(phase_start))first=phase_start
@@ -73,49 +99,57 @@ contains
     if(first<1.or.nphase<0.or.first+nphase-1>nk)return
     op%phase_start=first
     op%n=n;op%mesh=mesh;op%ng=ng;op%nk=nk;op%block=min(chosen,ng)
-    allocate(op%order(nk),op%point(3,ng),op%shift(3,nk),op%phase(ng,nphase),op%kernel(0:ns-1,0:ns-1,0:ns-1))
+    allocate(op%order(nk),op%point(3,ng),op%shift(3,nk),op%phase(ng,nphase),op%kernel(0:ns(1)-1,0:ns(2)-1,0:ns(3)-1))
     ! Separable periodic coordinate differences: O(n*n*mesh) integers, not
     ! O(ng*ng*nk). Avoid integer modulo in every exchange-kernel multiply.
-    allocate(op%distance_index(0:n-1,0:n-1,0:mesh-1))
-    do z=0,mesh-1;do y=0,n-1;do x=0,n-1
-      op%distance_index(x,y,z)=modulo(x-y-z*n,ns)
-    enddo;enddo;enddo
+    allocate(op%distance_index(0:maxval(n)-1,0:maxval(n)-1,0:maxval(mesh)-1,3))
+    do axis=1,3
+      do z=0,mesh(axis)-1;do y=0,n(axis)-1;do x=0,n(axis)-1
+        op%distance_index(x,y,z,axis)=modulo(x-y-z*n(axis),ns(axis))
+      enddo;enddo;enddo
+    enddo
     op%order=0
     do i=1,nk
       scaled=(k(:,i)-k(:,1))*real(n*mesh,c_double)*h/(2*pi)
       if(maxval(abs(scaled-anint(scaled)))>1d-8)goto 900
-      idx=modulo(nint(scaled),mesh);index=1+idx(1)+mesh*idx(2)+mesh**2*idx(3)
+      idx=modulo(nint(scaled),mesh);index=1+idx(1)+mesh(1)*(idx(2)+mesh(2)*idx(3))
       if(op%order(index)/=0)goto 900
       op%order(index)=i
     enddo
     i=0
-    do z=0,n-1;do y=0,n-1;do x=0,n-1
+    do z=0,n(3)-1;do y=0,n(2)-1;do x=0,n(1)-1
       i=i+1;op%point(:,i)=[x,y,z]
       do j=1,nphase
-        op%phase(i,j)=exp(cmplx(0d0,sum((k(:,first+j-1)-k(:,1))*op%point(:,i))*h,c_double))
+        op%phase(i,j)=exp(cmplx(0d0,sum((k(:,first+j-1)-k(:,1))*op%point(:,i)*h),c_double))
       enddo
     enddo;enddo;enddo
     i=0
-    do z=0,mesh-1;do y=0,mesh-1;do x=0,mesh-1
+    do z=0,mesh(3)-1;do y=0,mesh(2)-1;do x=0,mesh(1)-1
       i=i+1;op%shift(:,i)=[x,y,z]*n
     enddo;enddo;enddo
-    allocate(spectrum(ns,ns,ns))
-    do z=0,ns-1;do y=0,ns-1;do x=0,ns-1
-      ix=x;if(x>=(ns+1)/2)ix=x-ns
-      iy=y;if(y>=(ns+1)/2)iy=y-ns
-      iz=z;if(z>=(ns+1)/2)iz=z-ns
+    allocate(spectrum(ns(1),ns(2),ns(3)))
+    do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
+      ix=x;if(x>=(ns(1)+1)/2)ix=x-ns(1)
+      iy=y;if(y>=(ns(2)+1)/2)iy=y-ns(2)
+      iz=z;if(z>=(ns(3)+1)/2)iz=z-ns(3)
       q=2*pi*real([ix,iy,iz],c_double)/(ns*h);q2=sum(q*q)
-      if(q2<1d-24)then
+      if(omega==0d0)then
+        if(q2<1d-24)then
+          spectrum(x+1,y+1,z+1)=2*pi*radius**2
+        else
+          spectrum(x+1,y+1,z+1)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
+        endif
+      else if(q2<1d-24)then
         spectrum(x+1,y+1,z+1)=pi/omega**2
       else
         spectrum(x+1,y+1,z+1)=4*pi*(1-exp(-q2/(4*omega**2)))/q2
       endif
     enddo;enddo;enddo
-    plan=fftw_plan_dft_3d(ns,ns,ns,spectrum,spectrum,FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+    plan=fftw_plan_dft_3d(ns(3),ns(2),ns(1),spectrum,spectrum,FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
     if(.not.c_associated(plan))goto 900
     call fftw_execute_dft(plan,spectrum,spectrum)
     call fftw_destroy_plan(plan)
-    op%kernel=real(spectrum,c_double)/real(ns,c_double)**3
+    op%kernel=real(spectrum,c_double)/real(product(ns),c_double)
     if(present(create_backend))then
       if(associated(create_backend))call create_backend(op%accelerator)
     endif
@@ -124,7 +158,7 @@ contains
       op%auto_fft=.false.;op%contiguous_fft=.true.
       ierr=0;return
     endif
-    allocate(op%work(op%block,ng,nk));dims=mesh
+    allocate(op%work(op%block,ng,nk));dims=mesh(3:1:-1)
     if(op%auto_fft)then
       call choose_fft_layout(op,ierr)
       if(ierr/=0)goto 900
@@ -144,14 +178,14 @@ contains
     endif
     if(.not.c_associated(op%forward).or..not.c_associated(op%backward))goto 900
     ierr=0;return
-900 call hse_kernel_destroy(op)
+900 call exx_k_kernel_destroy(op)
   end subroutine
 
   ! Synthetic scratch only: no physical density or orbital is read here.
   ! Preserve the actual strided leading dimension while sampling FFT batches.
   subroutine choose_fft_layout(op,ierr)
     implicit none
-    type(hse_kernel),target,intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(out) :: ierr
     complex(c_double_complex),allocatable :: tile(:,:,:)
     complex(c_double_complex),pointer :: kw(:,:,:)
@@ -159,7 +193,7 @@ contains
     integer :: cols,b,nk,dims(3),flags,mode,pass,order,j,g0,k0,g,r,k,stat,threads
     real(c_double) :: stamp,elapsed(2,3),value
     ierr=1;f=c_null_ptr;back=c_null_ptr
-    b=op%block;nk=op%nk;dims=op%mesh
+    b=op%block;nk=op%nk;dims=op%mesh(3:1:-1)
     ! At least one g tile per OpenMP worker where the64MiB bound permits.
     ! One column is the minimum even if it exceeds the scratch budget.
     threads=1
@@ -236,9 +270,9 @@ contains
     enddo
   end subroutine
 
-  subroutine hse_kernel_apply(op,source,target,action,rank,nproc,ierr)
+  subroutine exx_k_kernel_apply(op,source,target,action,rank,nproc,ierr)
     implicit none
-    type(hse_kernel),target,intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
     integer,intent(in) :: rank,nproc
@@ -246,12 +280,12 @@ contains
     complex(c_double_complex),allocatable :: s(:,:,:),t(:,:,:),tile(:,:)
     complex(c_double_complex),pointer :: kw(:,:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
-    integer :: lo,rows,ik,ki,b,j,r,offset(3),ng,nk,no,nt,ns
+    integer :: lo,rows,ik,ki,b,j,r,offset(3),ng,nk,no,nt
     external :: zgemm
     ierr=1;action=zero
     if(.not.c_associated(op%forward))return
     if(op%phase_start/=1.or.size(op%phase,2)/=op%nk)return
-    ng=op%ng;nk=op%nk;ns=op%n*op%mesh;b=op%block
+    ng=op%ng;nk=op%nk;b=op%block
     if(nproc<1.or.rank<0.or.rank>=nproc)return
     if(size(source,1)/=ng.or.size(target,1)/=ng.or.size(source,3)/=nk.or.size(target,3)/=nk)return
     if(any(shape(action)/=shape(target)))return
@@ -302,9 +336,9 @@ contains
 
   ! K-distributed source/target/action; transpose density tiles, never orbitals.
   ! Caller supplies identical layout/kernel metadata and communicator size on all ranks.
-  subroutine hse_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr,fill_density)
+  subroutine exx_k_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr,fill_density)
     implicit none
-    type(hse_kernel),target,intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
     integer,intent(in) :: starts(:),counts(:),rank
@@ -329,7 +363,7 @@ contains
     complex(c_double_complex),allocatable,target :: send(:),recv(:)
     complex(c_double_complex),pointer :: sb(:,:,:,:),rb(:,:,:,:),flat_send(:,:,:),flat_recv(:,:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
-    integer :: ng,nk,np,nlocal,no,nt,b,km,nmsg,p,j,ki,ik,base,lo,rows,r,g,offset(3),ns
+    integer :: ng,nk,np,nlocal,no,nt,b,km,nmsg,p,j,ki,ik,base,lo,rows,r,g,offset(3)
     integer,allocatable :: inverse(:),slot(:)
     complex(c_double_complex) :: valid_send(size(counts)),valid_recv(size(counts))
     logical :: valid
@@ -340,7 +374,7 @@ contains
     op%seconds=0d0
     stamp=0d0
     if(op%profile)stamp=kernel_walltime()
-    np=size(counts);ng=op%ng;nk=op%nk;b=op%block;ns=op%n*op%mesh
+    np=size(counts);ng=op%ng;nk=op%nk;b=op%block
     if(np<1.or.rank<0.or.rank>=np.or.size(starts)/=np)return
     ! All communicator members must participate even if one has invalid data.
     valid=c_associated(op%forward).or.allocated(op%accelerator)
@@ -498,7 +532,7 @@ contains
 
   subroutine transpose_contiguous(op,buffer,slot,unpack)
     implicit none
-    type(hse_kernel),target,intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(inout) :: buffer(:,:,:)
     integer,intent(in) :: slot(:)
     logical,intent(in) :: unpack
@@ -531,7 +565,7 @@ contains
 
   subroutine multiply_kernel(op,lo,rows)
     implicit none
-    type(hse_kernel),target,intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(in) :: lo,rows
     complex(c_double_complex),pointer :: kw(:,:,:)
     integer :: ki,g,r,offset(3)
@@ -540,9 +574,9 @@ contains
       !$omp parallel do collapse(2) private(ki,offset) schedule(static)
       do g=1,op%ng;do r=1,max(0,rows)
         do ki=1,op%nk
-          offset(1)=op%distance_index(op%point(1,lo+r-1),op%point(1,g),op%shift(1,ki)/op%n)
-          offset(2)=op%distance_index(op%point(2,lo+r-1),op%point(2,g),op%shift(2,ki)/op%n)
-          offset(3)=op%distance_index(op%point(3,lo+r-1),op%point(3,g),op%shift(3,ki)/op%n)
+          offset(1)=op%distance_index(op%point(1,lo+r-1),op%point(1,g),op%shift(1,ki)/op%n(1),1)
+          offset(2)=op%distance_index(op%point(2,lo+r-1),op%point(2,g),op%shift(2,ki)/op%n(2),2)
+          offset(3)=op%distance_index(op%point(3,lo+r-1),op%point(3,g),op%shift(3,ki)/op%n(3),3)
           kw(ki,r,g)=kw(ki,r,g)*op%kernel(offset(1),offset(2),offset(3))
         enddo
       enddo;enddo
@@ -550,9 +584,9 @@ contains
     else
       !$omp parallel do collapse(2) private(r,offset) schedule(static)
       do ki=1,op%nk;do g=1,op%ng;do r=1,max(0,rows)
-        offset(1)=op%distance_index(op%point(1,lo+r-1),op%point(1,g),op%shift(1,ki)/op%n)
-        offset(2)=op%distance_index(op%point(2,lo+r-1),op%point(2,g),op%shift(2,ki)/op%n)
-        offset(3)=op%distance_index(op%point(3,lo+r-1),op%point(3,g),op%shift(3,ki)/op%n)
+        offset(1)=op%distance_index(op%point(1,lo+r-1),op%point(1,g),op%shift(1,ki)/op%n(1),1)
+        offset(2)=op%distance_index(op%point(2,lo+r-1),op%point(2,g),op%shift(2,ki)/op%n(2),2)
+        offset(3)=op%distance_index(op%point(3,lo+r-1),op%point(3,g),op%shift(3,ki)/op%n(3),3)
         op%work(r,g,ki)=op%work(r,g,ki)*op%kernel(offset(1),offset(2),offset(3))
       enddo;enddo;enddo
       !$omp end parallel do
@@ -568,7 +602,7 @@ contains
   ! Callers guard this helper so disabled profiling makes no timing calls.
   subroutine mark_stage(op,stage,stamp)
     implicit none
-    type(hse_kernel),intent(inout) :: op
+    type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: stage
     real(c_double),intent(inout) :: stamp
     real(c_double) :: now
@@ -577,9 +611,9 @@ contains
     stamp=now
   end subroutine
 
-  subroutine hse_kernel_destroy(op,status)
+  subroutine exx_k_kernel_destroy(op,status)
     implicit none
-    type(hse_kernel),intent(inout) :: op
+    type(exx_k_kernel),intent(inout) :: op
     integer,intent(out),optional :: status
     integer :: cleanup
     cleanup=0

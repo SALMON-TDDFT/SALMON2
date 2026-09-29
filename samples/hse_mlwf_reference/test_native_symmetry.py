@@ -34,7 +34,7 @@ class NativeSymmetryTest(unittest.TestCase):
             exe = Path(tmp) / 'probe'
             run = subprocess.run([compiler, '-O0', '-fcheck=all', '-Wall',
                 '-I' + str(fftw / 'include'), str(ROOT / 'src/xc/exx_symmetry.f90'),
-                str(ROOT / 'src/xc/hse_exchange.f90'),
+                str(ROOT / 'src/xc/exx_k_backend.f90'), str(ROOT / 'src/xc/exx_k_exchange.f90'),
                 str(ROOT / 'samples/hse_mlwf_reference/native_symmetry_exchange_probe.f90'),
                 '-L' + str(fftw / 'lib'), '-lfftw3', '-L' + str(blas / 'lib'),
                 '-lopenblas', '-o', str(exe)], cwd=tmp, capture_output=True, text=True)

@@ -12,7 +12,7 @@ class DistributedExchangeTest(unittest.TestCase):
    d=Path(tmp); exe=d/'probe'
    fftw=Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))
    blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-   cmd=['mpifort','-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(ROOT/'src/xc/exx_k_backend.f90'),str(ROOT/'src/xc/hse_exchange.f90'),str(ROOT/'samples/hse_mlwf_reference/native_distributed_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)]
+   cmd=['mpifort','-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(ROOT/'src/xc/exx_k_backend.f90'),str(ROOT/'src/xc/exx_k_exchange.f90'),str(ROOT/'samples/hse_mlwf_reference/native_distributed_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)]
    result=subprocess.run(cmd,cwd=d,capture_output=True,text=True)
    self.assertEqual(result.returncode,0,result.stderr)
    rng=np.random.default_rng(804)

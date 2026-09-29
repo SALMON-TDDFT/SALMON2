@@ -11,7 +11,7 @@ module exx_k_cufft
   public :: s_exx_k_cufft,exx_k_cufft_create
   type,extends(s_exx_k_backend) :: s_exx_k_cufft
     private
-    integer :: n=0,mesh=0,block=0,ng=0,nk=0,ns=0,nslots=0,device=-1,plan=0
+    integer :: n(3)=0,mesh(3)=0,block=0,ng=0,nk=0,ns(3)=0,nslots=0,device=-1,plan=0
     integer(c_intptr_t) :: stream=0
     logical :: ready=.false.,resident=.false.,plan_created=.false.
     integer,allocatable :: point(:,:),shift(:,:),slot(:)
@@ -49,30 +49,32 @@ contains
   subroutine validate_geometry(n,mesh,block,kernel,point,shift,slot,nslots,ng,nk,ns,status)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
-    integer,intent(in) :: n,mesh,block,point(:,:),shift(:,:),slot(:),nslots
+    integer,intent(in) :: n(3),mesh(3),block,point(:,:),shift(:,:),slot(:),nslots
     real(8),intent(in) :: kernel(0:,0:,0:)
-    integer,intent(out) :: ng,nk,ns,status
+    integer,intent(out) :: ng,nk,ns(3),status
     integer :: axis,batches,i,ios
     logical,allocatable :: used(:)
     status=-2;ng=1;nk=1;ns=0
-    if(n<1.or.mesh<1.or.block<1.or.nslots<1)return
+    if(any(n<1).or.any(mesh<1).or.block<1.or.nslots<1)return
     ! Check before each multiplication, including the full MPI tile extent.
     do axis=1,3
-      if(ng>huge(ng)/n.or.nk>huge(nk)/mesh)return
-      ng=ng*n;nk=nk*mesh
+      if(ng>huge(ng)/n(axis).or.nk>huge(nk)/mesh(axis))return
+      ng=ng*n(axis);nk=nk*mesh(axis)
     enddo
-    if(n>huge(ns)/mesh)return
+    if(any(n>huge(1)/mesh))return
     ns=n*mesh
     if(nslots<nk)return
     if(block>huge(batches)/ng)return
     batches=block*ng
     if(nslots>huge(batches)/batches)return
     ! Since nslots >= nk, this also bounds the contiguous cuFFT work size.
-    if(any(shape(kernel)/=[ns,ns,ns]))return
+    if(any(shape(kernel)/=ns))return
     if(any(shape(point)/=[3,ng]).or.any(shape(shift)/=[3,nk]).or.size(slot)/=nk)return
-    if(any(point<0).or.any(point>=n))return
-    if(any(shift<0).or.any(shift>ns-n))return
-    if(any(modulo(shift,n)/=0))return
+    do axis=1,3
+      if(any(point(axis,:)<0).or.any(point(axis,:)>=n(axis)))return
+      if(any(shift(axis,:)<0).or.any(shift(axis,:)>ns(axis)-n(axis)))return
+      if(any(modulo(shift(axis,:),n(axis))/=0))return
+    enddo
     if(any(slot<1).or.any(slot>nslots))return
     if(.not.all(ieee_is_finite(kernel)))return
     allocate(used(nslots),stat=ios)
@@ -96,10 +98,10 @@ contains
 #endif
     implicit none
     class(s_exx_k_cufft),target,intent(inout) :: self
-    integer,intent(in) :: n,mesh,block,point(:,:),shift(:,:),slot(:),nslots
+    integer,intent(in) :: n(3),mesh(3),block,point(:,:),shift(:,:),slot(:),nslots
     real(8),intent(in) :: kernel(0:,0:,0:)
     integer,intent(out) :: status
-    integer :: ng,nk,ns,cleanup
+    integer :: ng,nk,ns(3),cleanup
 #ifdef USE_EXX_CUFFT
     integer :: device,dims(3),ios
     integer(c_size_t) :: workspace_bytes(1)
@@ -126,21 +128,21 @@ contains
     endif
     call acc_init(acc_device_nvidia)
     device=acc_get_device_num(acc_device_nvidia)
-    rebuild=.not.self%ready.or.self%n/=n.or.self%mesh/=mesh.or.self%block/=block.or. &
+    rebuild=.not.self%ready.or.any(self%n/=n).or.any(self%mesh/=mesh).or.self%block/=block.or. &
       self%nslots/=nslots.or.self%device/=device
     if(rebuild)then
       call self%release(status)
       if(status/=0)return
       self%n=n;self%mesh=mesh;self%block=block;self%ng=ng;self%nk=nk;self%ns=ns;self%nslots=nslots
       self%device=device;self%stream=acc_get_cuda_stream(acc_async_sync)
-      allocate(self%kernel(0:ns-1,0:ns-1,0:ns-1),self%point(3,ng),self%shift(3,nk),self%slot(nk), &
+      allocate(self%kernel(0:ns(1)-1,0:ns(2)-1,0:ns(3)-1),self%point(3,ng),self%shift(3,nk),self%slot(nk), &
         self%work(nk*block*ng),self%buffer(block,ng,nslots),self%output(block,ng,nslots),stat=ios)
       if(ios/=0)then
         call self%release(cleanup)
         status=-3;return
       endif
       self%kernel(:,:,:)=kernel;self%point(:,:)=point;self%shift(:,:)=shift;self%slot(:)=slot
-      dims=mesh
+      dims=mesh(3:1:-1)
       status=cufftCreate(self%plan)
       if(status==CUFFT_SUCCESS)then
         self%plan_created=.true.
@@ -202,7 +204,7 @@ contains
     integer,intent(out) :: status
     integer :: cleanup
 #ifdef USE_EXX_CUFFT
-    integer :: b,ng,nk,ns,nslots,i,r,g,ki,total,offset_x,offset_y,offset_z,flat,ierr
+    integer :: b,ng,nk,nsx,nsy,nsz,nslots,i,r,g,ki,total,offset_x,offset_y,offset_z,flat,ierr
     integer,pointer,contiguous :: point_map(:,:),shift_map(:,:),slot_map(:)
     real(8),pointer,contiguous :: kernel_gpu(:,:,:)
     complex(8),pointer,contiguous :: work(:),tile(:,:,:),output(:,:,:)
@@ -245,7 +247,7 @@ contains
     endif
     point_map=>self%point;shift_map=>self%shift;slot_map=>self%slot;kernel_gpu=>self%kernel
     work=>self%work;tile=>self%buffer;output=>self%output
-    b=self%block;ng=self%ng;nk=self%nk;ns=self%ns;nslots=self%nslots;total=nk*b*ng
+    b=self%block;ng=self%ng;nk=self%nk;nsx=self%ns(1);nsy=self%ns(2);nsz=self%ns(3);nslots=self%nslots;total=nk*b*ng
     tile=buffer
     !$acc update device(tile)
     self%tile_uploads=self%tile_uploads+1
@@ -283,9 +285,9 @@ contains
       do g=1,ng
         do r=1,rows
           do ki=1,nk
-            offset_x=modulo(point_map(1,lo+r-1)-point_map(1,g)-shift_map(1,ki),ns)
-            offset_y=modulo(point_map(2,lo+r-1)-point_map(2,g)-shift_map(2,ki),ns)
-            offset_z=modulo(point_map(3,lo+r-1)-point_map(3,g)-shift_map(3,ki),ns)
+            offset_x=modulo(point_map(1,lo+r-1)-point_map(1,g)-shift_map(1,ki),nsx)
+            offset_y=modulo(point_map(2,lo+r-1)-point_map(2,g)-shift_map(2,ki),nsy)
+            offset_z=modulo(point_map(3,lo+r-1)-point_map(3,g)-shift_map(3,ki),nsz)
             flat=ki+nk*((r-1)+b*(g-1))
             work(flat)=work(flat)*kernel_gpu(offset_x,offset_y,offset_z)
           enddo

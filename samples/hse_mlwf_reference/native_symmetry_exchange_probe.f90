@@ -1,9 +1,9 @@
 program symmetry_exchange_probe
  use exx_symmetry
- use hse_exchange
+ use exx_k_exchange
  implicit none
  type(s_exx_symmetry_map)::map
- type(hse_kernel)::kernel
+ type(exx_k_kernel)::kernel
  real(8)::a(3,4,16),b(3,4,16),k(3,8),weights(8),pi,err
  complex(8)::source(8,2,8),target(8,3,8),reference(8,3,8),callback_action(8,3,8)
  complex(8),allocatable::expanded_source(:,:,:),expanded_target(:,:,:)
@@ -36,17 +36,17 @@ program symmetry_exchange_probe
  if(map%max_little/=16)stop 2
  call symmetry_expand(map,1,source,target,expanded_source,expanded_target,ierr)
  if(ierr/=0)stop 3
- call hse_kernel_init(kernel,2,2,1d0,map%full_k,.11d0,3,ierr,1,8)
+ call exx_k_kernel_init(kernel,2,2,1d0,map%full_k,.11d0,3,ierr,1,8)
  if(ierr/=0)stop 4
- call hse_kernel_apply_distributed(kernel,expanded_source,expanded_target,reference,[1],[8],0,transpose_tiles,ierr)
+ call exx_k_kernel_apply_distributed(kernel,expanded_source,expanded_target,reference,[1],[8],0,transpose_tiles,ierr)
  if(ierr/=0)stop 5
- call hse_kernel_apply_distributed(kernel,expanded_target,expanded_target,callback_action,[1],[8],0, &
+ call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,callback_action,[1],[8],0, &
                                  transpose_tiles,ierr,fill_density)
  if(ierr/=0)stop 6
  err=maxval(abs(reference-callback_action))/maxval(abs(reference))
  if(.not.(err<1d-12))stop 7
  print *, 'symmetry exchange callback passed',err
- call hse_kernel_destroy(kernel)
+ call exx_k_kernel_destroy(kernel)
 contains
  subroutine transpose_tiles(send,recv,count)
  complex(8),intent(in)::send(:)

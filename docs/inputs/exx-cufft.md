@@ -160,10 +160,24 @@ A negative release failure on one rank is tested during reinitialization; the
 pair-screen fixture also tests release failures at the exchange-action boundary.
 It validates CPU dispatch and MPI handling; it does not validate cuFFT itself.
 
-## Full k-mesh HSE06 route
+## Full k-mesh hybrid route
 
 The separate `exx_kpoint_backend='cufft'` now accelerates the distributed
 k-mesh density convolution. It does not relax the compact Gamma backend's
 restrictions. See [Si CPU/GPU tests](../../testsuites/benchmark_si_kpoint_cufft/README.md)
 for supported inputs, resident data lifetime and MIYABI-G jobs. This route also
 requires actual NVHPC/GPU validation before numerical or performance claims.
+
+The common `exx_k_exchange` density-tile engine handles HSE06, PBE0, PBEh(40)
+and PBEh(40)+rVV10 with the same MPI layout. The screened or spherical Coulomb
+kernel and exchange fraction select the functional. Rectangular orthorhombic
+real-space grids and full uniform k meshes are supported; the k backend requires
+more than one k point and fully occupied spin pairs. Fractional/empty-state
+sources, DC, localized support and Wannier snapshots retain their specialized
+CPU routes and cannot select this cuFFT backend. rVV10 is a separate correlation
+calculation, not part of the exchange accelerator.
+
+Run `python3 testsuites/unit_exx_k_exchange/run.py` for MPI1/2/3/4 comparisons
+against the retained full-support Wannier reference. `unit_kpoint_cufft/run.py`
+also exercises rectangular and global-Coulomb convolution; add `--gpu` only on
+an NVHPC/NVIDIA machine. GNU oracle/stub tests do not validate the GPU binary.

@@ -20,7 +20,7 @@ class NativeExchangeTest(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   cls.tmp=tempfile.TemporaryDirectory();cls.directory=Path(cls.tmp.name);cls.exe=cls.directory/'probe'
-  source=ROOT/'src/xc/hse_exchange.f90'
+  source=ROOT/'src/xc/exx_k_exchange.f90'
   if not source.exists():raise AssertionError('Native HSE exchange module has not been implemented')
   if not (ROOT/'src/xc/exx_ace.f90').exists():raise AssertionError('Native ACE has not been implemented')
   fftw=Path(os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw'))

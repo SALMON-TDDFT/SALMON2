@@ -29,7 +29,7 @@ if(USE_HSE)
     exx_wannier_gauge.f90
     exx_wannier.f90
     exx_symmetry.f90
-    hse_exchange.f90
+    exx_k_exchange.f90
     exx_ace.f90
     exx_orbitals.f90
     hybrid_semilocal.f90

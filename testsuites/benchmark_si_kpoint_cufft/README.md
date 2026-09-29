@@ -9,14 +9,14 @@
 `&functional` の `exx_kpoint_backend='cpu'/'cufft'` で切り替える。
 Γ点局所支持版の `exx_local_backend` とは別である。ここではMLWF切り詰めを使わない。
 
-- 現在はHSE06、完全な立方kメッシュ（各軸2以上）、k点並列のみ。
+- このベンチマークはHSE06を使用。共通エンジンはPBE0/PBEhも扱い、完全な一様kメッシュ（総数2以上）と直交セル、k点並列に対応。
 - GPU：MPI受信密度タイルの並べ替え、k格子FFT、同じ離散交換カーネルの乗算、逆FFT、送信用並べ替え。
 - CPU：密度行列と作用のBLAS、MPI通信、ACE、その他のHamiltonian。
 - k格子FFTの逆変換は未規格化。既存の作用BLASにある`-1/Nk`を維持する。
 - 定数配列・FFTプラン・GPUバッファはkernelオブジェクトの寿命中再利用し、同じデータは再転送しない。
 - 各MPIタイルの入出力は転送が必要。GPU-aware MPIは不要。
 - `hse_block_rows`が行タイル数。`exx_gpu_batch_size`はこの経路には使わない。
-- PBE0/PBEhの多k点Wannier経路、DC、空間分割、縮約k点には未対応。
+- 分数占有・空状態を含むWannier経路、DC、空間分割、縮約k点、Wannierスナップショットには未対応。
 
 手元にはNVHPC/NVIDIA GPUがなく、実GPUコンパイル・実行・性能は未検証。
 

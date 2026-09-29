@@ -3,7 +3,7 @@
 ! Gamma HSE SCF and DC-initialized hybrid mesh RT support spatial y/z FFTW pencils.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
-  use exx_functional, only: exchange_fraction
+  use exx_functional, only: exchange_fraction,exchange_screening
   use exx_cufft, only: exx_cufft_create
   use exx_k_backend, only: k_backend_factory
   use exx_k_cufft, only: exx_k_cufft_create
@@ -13,7 +13,7 @@ module exx_native
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures
   use plusU_global, only: PLUS_U_ON
-  use hse_exchange
+  use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_ace
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
   use exx_adaptive_support, only: adaptive_source_mask
@@ -23,7 +23,7 @@ module exx_native
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall,comm_get_max
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
-    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
+    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_block_rows, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
@@ -36,7 +36,7 @@ module exx_native
   public :: exx_pack,exx_unpack,exx_timings,exx_walltime
   public :: exx_taylor_stage,exx_core_exchange,exx_force_full_action
   type(s_exx_symmetry_map),save :: symmetry_map
-  type(hse_kernel),save :: kernel
+  type(exx_k_kernel),save :: kernel
   type(spatial_exx_state),target,save :: spatial
   type(s_exx_wannier),save :: wannier
   real(8),allocatable,save :: cached_occupation(:,:)
@@ -295,9 +295,11 @@ contains
     endif
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
     if(use_symmetry)mesh=num_kgrid(1)
-    if(any(mg%num/=n).or.(.not.use_symmetry.and.mesh**3/=nk).or. &
-      maxval(abs(system%hgs-system%hgs(1)))>1d-12) &
-      error stop 'HSE06: cubic grid and full cubic k mesh required'
+    if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
+      error stop 'EXX: full uniform k mesh required'
+    if(use_symmetry.and.(any(mg%num/=n).or.any(num_kgrid/=mesh).or. &
+      maxval(abs(system%hgs-system%hgs(1)))>1d-12)) &
+      error stop 'EXX symmetry: cubic grid and cubic k mesh required'
     offdiag=system%primitive_a
     do j=1,3;offdiag(j,j)=0;enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'HSE06: orthogonal cell required'
@@ -305,7 +307,7 @@ contains
       maxval(abs(system%rocc-2d0))>1d-12) &
       error stop 'HSE06: uniform k weights and fully occupied spin pairs required'
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE06: unsupported orbital layout'
-    if(kernel%n==0)then
+    if(all(kernel%n==0))then
       nullify(create_backend)
       if(exx_kpoint_backend=='cufft')create_backend=>exx_k_cufft_create
       ! Keep representatives persistent; expand only rank-local stars for EXX.
@@ -320,20 +322,21 @@ contains
         if(total_error/=0)error stop 'HSE symmetry: operation does not preserve atoms'
         first_full=symmetry_map%first(info%ik_s)
         count_full=symmetry_map%first(info%ik_e+1)-first_full
-        call hse_kernel_init(kernel,n,mesh,system%hgs(1),symmetry_map%full_k,hse_omega, &
+        call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,symmetry_map%full_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
-          create_backend=create_backend)
+          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius)
       else
-        call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,hse_omega, &
+        call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
-          create_backend=create_backend)
+          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius)
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
       if(allocated(kernel%accelerator).and.info%id_k==0) &
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
+      if(info%id_k==0)write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
     allocate(local(ng,no,info%numk))
@@ -408,7 +411,7 @@ contains
       enddo
       allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
       ! Source argument is only a valid layout placeholder when the density callback is supplied.
-      call hse_kernel_apply_distributed(kernel,expanded_target,expanded_target,expanded_action,layout(:np), &
+      call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,expanded_action,layout(:np), &
         layout(np+1:),info%id_k,transpose_tiles,ierr,fill_density)
       if(ierr==0)then
         do j=1,info%numk
@@ -418,7 +421,7 @@ contains
       endif
       return
     endif
-    call hse_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
+    call exx_k_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
       info%id_k,transpose_tiles,ierr)
   contains
     subroutine fill_density(j,lo,rows,density)
@@ -494,6 +497,10 @@ contains
         call apply_wannier_collective(target_work,action_work,info)
       endif
       ierr=0
+    else if(exx_force_full_action)then
+      call apply_distributed(cached_source,target_work,action_work,info,ierr)
+      call comm_summation(ierr,total_error,info%icomm_k)
+      if(total_error/=0)error stop 'EXX: full trial action failed'
     else if(taylor_active.and.propagator=='hse_taylor4_full')then
       communication_before=exx_timings(4)
       if(taylor_midpoint)then
@@ -554,7 +561,12 @@ contains
   end subroutine
   logical function use_wannier_exchange()
     implicit none
-    use_wannier_exchange=yn_dc=='y'.or.yn_hse_wannier=='y'
+    ! Full-support ordinary multi-k exchange uses density-tile MPI for every
+    ! hybrid. Retain Wannier for DC, fractional/empty states and localized support.
+    use_wannier_exchange=yn_dc=='y'.or.yn_hse_wannier_snapshot=='y'.or. &
+      exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0.or. &
+      (yn_hse_wannier=='y'.and.(product(num_kgrid)==1.or.temperature>=0d0.or. &
+        (nstate>0.and.nstate*2/=nelec)))
   end function
 
   subroutine refresh_spatial(system,mg,info,psi)
