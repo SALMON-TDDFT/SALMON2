@@ -1091,6 +1091,41 @@ contains
           memb(1:g_cl) = order_l(i0_cl:i1_cl)
           original_eps(1:g_cl) = unfold%esp_ref(memb(1:g_cl),isk,1)
 
+          ! -- Phase B's joint-diagonalization/eigen_zheev steps below are
+          ! numerically unstable *within* a degenerate (or near-degenerate)
+          ! eigenspace: the eigenSPACE and each eigenVALUE are robust, but
+          ! the specific eigenVECTORS returned can be sensitive to
+          ! machine-epsilon-level perturbations of the input (e.g. from
+          ! non-bit-reproducible floating-point reduction order inside
+          ! threaded BLAS/LAPACK). Since no_ref/io_ref is fully replicated
+          ! across every orbital-parallel rank (nproc_ob splits only the
+          ! supercell/TD orbital index io, never io_ref), every orbital
+          ! rank sharing this k-group would otherwise independently repeat
+          ! this diagonalization and could pick a DIFFERENT (but
+          ! individually valid -- unitary, energy-exact) rotation for the
+          ! SAME degenerate cluster. Each rank's own eta_c_l contribution
+          ! (summed over its own io-slice) is then combined across ranks
+          ! via comm_summation(...,info%icomm_o); rank-divergent rotations
+          ! do not cancel there: the trace (electron count N) stays
+          ! exactly invariant term-by-term, but the trace of the square
+          ! (S2) does not, since eta_after = sum_p R_p^H.eta_before,p.R_p
+          ! is not reducible to a single unitary transform when R_p varies
+          ! with p (Codex review note 084; 2x2 counterexample: diag(2,0)
+          ! and diag(0,2) summed with a common basis give trace=4/S2=8,
+          ! but summed after rank 2's rotation swaps its basis relative to
+          ! rank 1's gives the same trace=4 yet S2=16).
+          !
+          ! Fix: only the orbital-parallel root rank within this k-group
+          ! (comm_is_root(info%id_o), i.e. info%id_o==0 in info%icomm_o)
+          ! performs the diagonalization for this cluster; Wfinal/e_final/
+          ! label_final/score_final are then broadcast (below) to every
+          ! other orbital rank sharing this k-group, so all ranks apply
+          ! the IDENTICAL rotation in the (unconditional, common) write-
+          ! back step further down. --
+          allocate( Wfinal(g_cl,g_cl), e_final(g_cl), label_final(g_cl), score_final(g_cl) )
+
+          if( comm_is_root(info%id_o) ) then
+
           ! -- build [T_c] for every shift, from psi_refG (flattened over the
           ! reference-cell G-grid), reusing phase_gj_flat above --
           allocate( cvec(ntot_ref,g_cl), cnorm(g_cl) )
@@ -1144,8 +1179,6 @@ contains
               write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||w_family^H w_family - I||_max = ', diag_resid
             end if
           end if
-
-          allocate( Wfinal(g_cl,g_cl), e_final(g_cl), label_final(g_cl), score_final(g_cl) )
 
           ib2 = 1
           do while( ib2 <= g_cl )
@@ -1269,7 +1302,18 @@ contains
             end if
           end if
 
-          deallocate( Tc_list, w_family, family_block_id )
+          deallocate( Tc_list, w_family, family_block_id, cvec, cnorm )
+
+          end if
+
+          ! -- broadcast the root rank's diagonalization result to every
+          ! other orbital rank sharing this k-group, so the write-back
+          ! step just below applies the identical rotation everywhere
+          ! (see the design note above allocate(Wfinal,...) further up). --
+          call comm_bcast( Wfinal, info%icomm_o )
+          call comm_bcast( e_final, info%icomm_o )
+          call comm_bcast( label_final, info%icomm_o )
+          call comm_bcast( score_final, info%icomm_o )
 
           ! -- write the rotated states back into the SAME set of io_ref
           ! slots this cluster occupied (memb), assigned in ascending
@@ -1314,7 +1358,7 @@ contains
           ! overwrites the identity sub-block R_total started with there;
           ! no separate clearing step is needed or correct here.
 
-          deallocate( memb, original_eps, cvec, cnorm, Wfinal, e_final, label_final, score_final )
+          deallocate( memb, original_eps, Wfinal, e_final, label_final, score_final )
           deallocate( sort_perm, iord_memb, memb_sorted, psi_ref_tmp, psi_refG_tmp )
 
         end if
