@@ -1,0 +1,14 @@
+ PASS block FFT           1           1           1   7.2164496600635175E-016
+ PASS block FFT           1           1           1   7.2164496600635175E-016
+ PASS block FFT           2           1           1   7.2164496600635175E-016
+ PASS block FFT           2           1           1   7.2164496600635175E-016
+ PASS block FFT           2           2           1   7.2164496600635175E-016
+ PASS block FFT           2           2           1   7.2164496600635175E-016
+ PASS block FFT           8           1           1   7.2164496600635175E-016
+ PASS block FFT           8           1           1   7.2164496600635175E-016
+ PASS block FFT           2           2           2   7.2164496600635175E-016
+ PASS block FFT           2           2           2   7.2164496600635175E-016
+ PASS block FFT           1           2           4   7.2164496600635175E-016
+ PASS block FFT           1           2           4   7.2164496600635175E-016
+ PASS block FFT           8           1           1   7.0216669371534024E-016
+ PASS block FFT           3           2           1   7.8712874620952183E-016

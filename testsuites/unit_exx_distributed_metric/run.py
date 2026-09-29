@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='ace-metric-') as directory:
         libs = shlex.split(os.environ.get('SCALAPACK_LIBS', '-L/opt/homebrew/opt/scalapack/lib -lscalapack')) + libs
     cmd = [os.environ.get('MPIFC', 'mpifort'), '-cpp', '-fopenmp', '-fcheck=all', '-g',
            '-I'+str(tmp), '-I'+str(b)]
-    sources = ['src/xc/exx_ace.f90', 'src/xc/exx_distributed_metric.f90', 'src/xc/exx_orbitals.f90',
+    sources = ['src/xc/exx_sparse_orbitals.f90', 'src/xc/exx_ace.f90', 'src/xc/exx_distributed_metric.f90', 'src/xc/exx_orbitals.f90',
                'testsuites/unit_exx_distributed_metric/driver.f90']
     subprocess.run(cmd + [str(root / f) for f in sources] +
                    [str(objects / f) for f in ['parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o']] +

@@ -53,12 +53,13 @@ contains
     if(ios/=0)status=ios
   end subroutine
   subroutine lcfo_check_functional(path,run_id,status)
+    use salmon_global, only: theory,yn_conventional_from_dcdft,yn_restart
     use ieee_arithmetic, only: ieee_is_finite
     implicit none
     character(*),intent(in) :: path,run_id
     integer,intent(out) :: status
     character(96) :: magic,saved_run,saved_xc
-    real(8) :: p(7)
+    real(8) :: p(7),expected(7)
     integer :: u,ios
     logical :: exists
     status=1
@@ -77,7 +78,14 @@ contains
         if(ios==0)then
           if(magic=='SLCFO_FUNCTIONAL_V1'.and.saved_run==run_id.and.saved_xc==xc)then
             if(salmon_all_finite(p))then
-              if(all(abs(p-parameters())<=1d-13*max(1d0,abs(parameters()))))status=0
+              expected=parameters()
+              ! A fresh fixed-ion mesh RT rebuilds its MLWF/ACE support. Permit
+              ! truncation of a previously untruncated GS, not a changed GS kernel
+              ! or resumption of an RT state prepared with different support.
+              if((theory=='tddft_response'.or.theory=='tddft_pulse').and. &
+                 yn_conventional_from_dcdft=='y'.and.yn_restart=='n'.and.p(7)==0d0.and.expected(7)>0d0) &
+                expected(7)=0d0
+              if(all(abs(p-expected)<=1d-13*max(1d0,abs(expected))))status=0
             endif
           endif
         endif

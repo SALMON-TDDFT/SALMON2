@@ -1,0 +1,27 @@
+{
+  "states": 128,
+  "mpi": 8,
+  "omp": 1,
+  "before": {
+    "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/exx-block/mpi8-omp1/n128-ace-mpi8-omp1-r1",
+    "wall_seconds": 199.8531737079902,
+    "rt_seconds_per_step": 12.05,
+    "rt_max_seconds": 192.8,
+    "peak_rank_bytes": 3058761728
+  },
+  "after": {
+    "directory": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/exx-sparse/mpi8-omp1/n128-ace-mpi8-omp1-r1",
+    "wall_seconds": 193.2690596669854,
+    "rt_seconds_per_step": 11.65875,
+    "rt_max_seconds": 186.54,
+    "peak_rank_bytes": 3159064576
+  },
+  "input_sha256": "a4c7f74f0f5ced90bb51c76ed7b1434118d3abbfc99873a3d5fafe0acdf2640c",
+  "seed": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/h2-block-gs-all/gs-16x1x1/data_dcdft",
+  "current_difference": 1.0164395367051604e-20,
+  "energy_difference_ha": 9.947598300641403e-13,
+  "memory_reduction_percent": -3.27919782315258,
+  "time_change_percent": -3.24688796680499,
+  "before_results": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/exx-block/mpi8-omp1/results.json",
+  "after_results": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/exx-sparse/mpi8-omp1/results.json"
+}

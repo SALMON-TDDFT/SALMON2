@@ -1,0 +1,28 @@
+{
+  "name": "pbe0-probe-004",
+  "complete": true,
+  "started": 1790677581.773986,
+  "command": [
+    "/opt/homebrew/bin/mpiexec",
+    "--bind-to",
+    "none",
+    "-n",
+    "4",
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-4x1x1/salmon"
+  ],
+  "binary_sha256": "b917ed803bfc3a0ba56b76a44766e843e032a7ab7a8261787e1134d6e05c3f84",
+  "input_sha256": "98dc3baa5c4f50d5de98a345705ce4135e19be6aa7e12a5b9d451de06a9b24c8",
+  "mpi": 4,
+  "omp": 4,
+  "launcher_pid": 8353,
+  "returncode": 0,
+  "wall_seconds": 37.45433187484741,
+  "rank_peak_rss_bytes": [
+    232357888,
+    236617728,
+    236650496,
+    237322240
+  ]
+}

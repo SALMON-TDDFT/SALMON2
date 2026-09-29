@@ -1,6 +1,7 @@
 ! Column-streamed linear algebra on a Cartesian spatial/orbital process grid.
 ! Mesh arrays contain local orbital columns; ScaLAPACK ACE metrics use tiles.
 module exx_orbitals
+  use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_dot,sparse_valid
   use communication, only: comm_get_groupinfo,comm_get_max,comm_summation,comm_bcast
   use exx_ace, only: s_exx_ace,exx_ace_clear
   use exx_distributed_metric, only: distributed_metric_available,distributed_metric_build, &
@@ -46,7 +47,7 @@ contains
     first=1+sum(counts(:rank-1))
   end subroutine
 
-  subroutine orbital_overlap(left,right,dv,comm_r,comm_o,counts,first,matrix,phase)
+  subroutine orbital_overlap(left,right,dv,comm_r,comm_o,counts,first,matrix,phase,sparse_left)
     ! left/right have the same contiguous column ownership. Optional phase is
     ! applied to right grid rows. Global small matrix is identical on all peers.
     implicit none
@@ -55,8 +56,9 @@ contains
     integer,intent(in) :: comm_r,comm_o,counts(0:),first
     complex(8),intent(out) :: matrix(:,:)
     complex(8),intent(in),optional :: phase(:)
+    type(s_sparse_orbitals),intent(in),optional :: sparse_left
     complex(8),allocatable :: column(:),total(:,:)
-    integer :: owner,rank,np,j,k
+    integer :: owner,rank,np,j,k,i
     call comm_get_groupinfo(comm_o,rank,np)
     allocate(column(size(right,1)),total(size(matrix,1),size(matrix,2)))
     matrix=0d0;k=0
@@ -66,7 +68,13 @@ contains
         if(rank==owner)column=right(:,j)
         call comm_bcast(column,comm_o,owner)
         if(present(phase))column=column*phase
-        matrix(first:first+size(left,2)-1,k)=matmul(conjg(transpose(left)),column)*dv
+        if(present(sparse_left))then
+          do i=1,size(left,2)
+            matrix(first+i-1,k)=sparse_dot(sparse_left,i,column)*dv
+          enddo
+        else
+          matrix(first:first+size(left,2)-1,k)=matmul(conjg(transpose(left)),column)*dv
+        endif
       enddo
     enddo
     call comm_summation(matrix,total,size(matrix),comm_r)
@@ -154,7 +162,7 @@ contains
     status=0
   end subroutine
 
-  subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed,comm_matrix)
+  subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed,comm_matrix,sparse_u)
     implicit none
     type(s_exx_ace),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:,:),w(:,:,:)
@@ -163,6 +171,7 @@ contains
     integer,intent(out) :: status
     integer,intent(in),optional :: comm_matrix
     logical,intent(in),optional :: packed
+    type(s_sparse_orbitals),intent(in),optional :: sparse_u
     logical :: store_packed
     integer,allocatable :: counts(:)
     complex(8),allocatable :: metric(:,:),work(:)
@@ -174,7 +183,12 @@ contains
     store_packed=.false.
     if(present(packed))store_packed=packed
     if(any(shape(u)/=shape(w)).or.size(u,3)/=1.or.dv<=0d0.or..not.ieee_is_finite(dv))bad=1
-    if(.not.salmon_all_finite(real(u)).or..not.salmon_all_finite(aimag(u)))bad=1
+    ! With sparse_u, u supplies only the dimensions (callers may pass w twice).
+    if(present(sparse_u))then
+      if(.not.sparse_valid(sparse_u,size(w,1),size(w,2)))bad=1
+    else
+      if(.not.salmon_all_finite(real(u)).or..not.salmon_all_finite(aimag(u)))bad=1
+    endif
     if(.not.salmon_all_finite(real(w)).or..not.salmon_all_finite(aimag(w)))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
@@ -187,7 +201,7 @@ contains
     ace%dv=dv;ace%condition=0d0
     if(present(comm_matrix))then
       if(distributed_metric_available(comm_matrix))then
-        call distributed_metric_build(ace,u(:,:,1),w(:,:,1),dv,comm_o,comm_matrix,counts,first,nonzero,bad)
+        call distributed_metric_build(ace,u(:,:,1),w(:,:,1),dv,comm_o,comm_matrix,counts,first,nonzero,bad,sparse_u)
         if(bad/=0)then
           call exx_ace_clear(ace)
           return
@@ -214,7 +228,7 @@ contains
       endif
       status=0;return
     endif
-    call orbital_overlap(u(:,:,1),w(:,:,1),-dv,comm_r,comm_o,counts,first,metric)
+    call orbital_overlap(u(:,:,1),w(:,:,1),-dv,comm_r,comm_o,counts,first,metric,sparse_left=sparse_u)
     if(.not.salmon_all_finite(real(metric)).or..not.salmon_all_finite(aimag(metric)))bad=1
     scale=sqrt(sum(abs(metric)**2))
     if(scale==0d0.or.sqrt(sum(abs(metric-transpose(conjg(metric)))**2))>1d-10*scale)bad=1

@@ -1,0 +1,194 @@
+[
+  {
+    "name": "hse06-omp1",
+    "complete": true,
+    "started": 1790679576.560447,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp/before/salmon"
+    ],
+    "binary_sha256": "b917ed803bfc3a0ba56b76a44766e843e032a7ab7a8261787e1134d6e05c3f84",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 1,
+    "launcher_pid": 14499,
+    "returncode": 0,
+    "wall_seconds": 21.706398963928223,
+    "rank_peak_rss_bytes": [
+      242761728,
+      242991104,
+      242270208,
+      242466816
+    ],
+    "version": "before",
+    "rt_seconds_per_step": 1.240375,
+    "current_difference": 0.0,
+    "energy_difference": 0.0
+  },
+  {
+    "name": "hse06-omp2",
+    "complete": true,
+    "started": 1790679598.2743418,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp/before/salmon"
+    ],
+    "binary_sha256": "b917ed803bfc3a0ba56b76a44766e843e032a7ab7a8261787e1134d6e05c3f84",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 2,
+    "launcher_pid": 14557,
+    "returncode": 0,
+    "wall_seconds": 19.212716102600098,
+    "rank_peak_rss_bytes": [
+      230686720,
+      232013824,
+      230359040,
+      231604224
+    ],
+    "version": "before",
+    "rt_seconds_per_step": 1.1385625,
+    "current_difference": 2.7130999990103194e-16,
+    "energy_difference": 1.0089706847793423e-12
+  },
+  {
+    "name": "hse06-omp4",
+    "complete": true,
+    "started": 1790679617.491642,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp/before/salmon"
+    ],
+    "binary_sha256": "b917ed803bfc3a0ba56b76a44766e843e032a7ab7a8261787e1134d6e05c3f84",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 4,
+    "launcher_pid": 14607,
+    "returncode": 0,
+    "wall_seconds": 19.712979078292847,
+    "rank_peak_rss_bytes": [
+      235814912,
+      233963520,
+      231587840,
+      233111552
+    ],
+    "version": "before",
+    "rt_seconds_per_step": 1.154125,
+    "current_difference": 1.3006500601511122e-16,
+    "energy_difference": 1.0089706847793423e-12
+  },
+  {
+    "name": "hse06-omp1",
+    "complete": true,
+    "started": 1790679637.214758,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp/after/salmon"
+    ],
+    "binary_sha256": "562bae0b7ab6d62be5425b6761c96fbba93296daa22c00f9367da5df14e22b54",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 1,
+    "launcher_pid": 14835,
+    "returncode": 0,
+    "wall_seconds": 23.742990970611572,
+    "rank_peak_rss_bytes": [
+      240287744,
+      242434048,
+      242270208,
+      242352128
+    ],
+    "version": "after",
+    "rt_seconds_per_step": 1.36125,
+    "current_difference": 1.015559945928996e-16,
+    "energy_difference": 0.0
+  },
+  {
+    "name": "hse06-omp2",
+    "complete": true,
+    "started": 1790679660.9619598,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp/after/salmon"
+    ],
+    "binary_sha256": "562bae0b7ab6d62be5425b6761c96fbba93296daa22c00f9367da5df14e22b54",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 2,
+    "launcher_pid": 14904,
+    "returncode": 0,
+    "wall_seconds": 28.312572240829468,
+    "rank_peak_rss_bytes": [
+      230932480,
+      228917248,
+      230014976,
+      227409920
+    ],
+    "version": "after",
+    "rt_seconds_per_step": 1.697125,
+    "current_difference": 2.3526700098990775e-16,
+    "energy_difference": 1.0089706847793423e-12
+  },
+  {
+    "name": "hse06-omp4",
+    "complete": true,
+    "started": 1790679689.277545,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp/after/salmon"
+    ],
+    "binary_sha256": "562bae0b7ab6d62be5425b6761c96fbba93296daa22c00f9367da5df14e22b54",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 4,
+    "launcher_pid": 14973,
+    "returncode": 0,
+    "wall_seconds": 30.82791018486023,
+    "rank_peak_rss_bytes": [
+      234717184,
+      233570304,
+      232210432,
+      231178240
+    ],
+    "version": "after",
+    "rt_seconds_per_step": 1.8301875,
+    "current_difference": 2.0995699478145921e-16,
+    "energy_difference": 1.0089706847793423e-12
+  }
+]

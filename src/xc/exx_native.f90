@@ -3,6 +3,7 @@
 ! Gamma HSE SCF and DC-initialized hybrid mesh RT support spatial y/z FFTW pencils.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
+  use exx_sparse_orbitals, only: sparse_pack,sparse_clear,sparse_column
   use exx_functional, only: exchange_fraction,exchange_screening
   use exx_cufft, only: exx_cufft_create
   use exx_k_backend, only: k_backend_factory
@@ -22,7 +23,7 @@ module exx_native
   use exx_wannier
   use exx_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
-  use communication, only: comm_summation,comm_alltoall,comm_get_max
+  use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
@@ -51,6 +52,10 @@ module exx_native
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:)
+  ! Experimental inverse blocking: no RSS benefit in the first real-workload comparison.
+  logical,parameter :: use_blocked_inverse=.false.
+  ! Storage is compact, but the first whole-process RSS comparison did not improve.
+  logical,parameter :: use_sparse_source=.false.
   real(8),save :: exx_exchange_energy=0d0
   real(8),save :: exx_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: exx_freeze=.false.,reported_team=.false.,timing_enabled=.false.
@@ -507,8 +512,8 @@ contains
     if(timing_enabled)tick=exx_walltime()
     if(use_wannier_exchange().and.exx_force_full_action)then
       if(info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
-        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
-          [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
         if(info_error/=0)error stop 'Spatial EXX: full action failed'
       else
@@ -656,17 +661,17 @@ contains
     integer :: adaptive_bad
     real(8) :: mask_diagnostic(2),mask_maximum(2)
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.theory/='dft')exx_adaptive_ready=.true.
-    if(info%isize_x/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
-      error stop 'Spatial EXX: Gamma y/z pencils required'
+    if(info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
+      error stop 'Spatial EXX: Gamma spatial domains required'
     if(info%isize_o>system%no)error stop 'Spatial EXX: each orbital group must own at least one state'
     if(any(num_kgrid/=1).or.maxval(abs(system%vec_k))>1d-12.or.use_symmetry) &
       error stop 'Spatial EXX: unshifted Gamma required'
     if(theory/='dft'.and.maxval(abs(system%rocc-2d0))>1d-12) &
       error stop 'Spatial EXX: occupied spin pairs required'
     if(theory/='dft'.and.propagator/='hse_taylor4')error stop 'Spatial EXX: Taylor4 ACE required'
-    if(any(mg%num/=num_rgrid/[1,info%isize_y,info%isize_z]).or. &
-       any(mg%is/=[1,info%id_y*mg%num(2)+1,info%id_z*mg%num(3)+1])) &
-      error stop 'Spatial EXX: mesh pencil layout mismatch'
+    if(any(mg%num/=num_rgrid/[info%isize_x,info%isize_y,info%isize_z]).or. &
+       any(mg%is/=1+[info%id_x,info%id_y,info%id_z]*mg%num)) &
+      error stop 'Spatial EXX: Cartesian mesh layout mismatch'
     offdiag=system%primitive_a
     do j=1,3
       offdiag(j,j)=0d0
@@ -709,11 +714,12 @@ contains
         info%icomm_r,status,comm_o=orbital_comm)
       if(info%id_ro==0.and.spatial%updates==1)write(*,'(a)') 'EXX_DC canonical full-fragment source (spatial)'
     else
-    call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
-      [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r,local, &
+    call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+      [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,local, &
       maxiter,exx_mlwf_tolerance,status,occupation=system%rocc(info%io_s:info%io_e,:,1),comm_o=orbital_comm)
     endif
     if(status/=0)error stop 'Spatial EXX: source refresh failed'
+    call sparse_clear(spatial%sparse_source)
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_mlwf_norm_fraction<1d0.and.theory/='dft')then
       if(spatial%last_localization_status/=0) &
         error stop 'Adaptive RT requires an accepted transported MLWF gauge; refine initial localization'
@@ -748,6 +754,14 @@ contains
         endif
       endif
     endif
+    if(use_sparse_source.and.adaptive_active.and..not.radius_covers_cell.and. &
+       (exx_mlwf_norm_fraction<1d0.or.exx_mlwf_radius>0d0))then
+      call sparse_pack(spatial%sparse_source,spatial%source)
+      deallocate(spatial%source)
+      if(spatial%updates==1.and.info%id_ro==0)write(*,'(a,2i18)') &
+        'EXX_SOURCE sparse local entries/dense entries: ',size(spatial%sparse_source%value,kind=int64), &
+        int(product(mg%num),int64)*info%numo
+    endif
     if(exx_mlwf_radius>0d0)finite_support_localized=adaptive_active
     if(adaptive_active.neqv.was_active)exx_support_changed=.true.
     cached_adaptive_ready=exx_adaptive_ready
@@ -779,7 +793,10 @@ contains
       call build_source_support_ace(support_accepted)
       ! Fixed-ion source ACE never uses the full-action DC route. Its next
       ! refresh regenerates source from the mesh; only transport previous persists.
-      if(support_accepted)deallocate(spatial%source)
+      if(support_accepted)then
+        if(allocated(spatial%source))deallocate(spatial%source)
+        call sparse_clear(spatial%sparse_source)
+      endif
       if(info%id_ro==0)write(*,'(a,l1,a)')'EXX_SUPPORT_ACE accepted: ',support_accepted, &
         ' (failure falls back to occupied-vector ACE)'
     endif
@@ -844,39 +861,78 @@ contains
       logical,intent(out) :: accepted
       complex(8),pointer :: training(:,:,:)
       accepted=.false.
-      ! Alias the existing finite source; do not allocate another full-grid copy.
-      training(1:size(spatial%source,1),1:size(spatial%source,2),1:1)=>spatial%source
       spatial%screen_mode=2;spatial%screen_tolerance=0d0
-      call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
-        [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
-        pbeh_coulomb_radius,training,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+      if(allocated(spatial%sparse_source%offset))then
+        call apply_sparse_training()
+      else
+        ! Alias full support without an extra mesh copy.
+        training(1:size(spatial%source,1),1:size(spatial%source,2),1:1)=>spatial%source
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,training,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+        call record_fft_work()
+      endif
       if(status/=0)error stop 'Source-support ACE: exchange action failed'
-      call record_fft_work()
       if(info%id_ro==0)write(*,'(a,4i18)')'EXX_SUPPORT_ACE products/skipped/catalogue/product points: ', &
         spatial%pair_products,spatial%screen_skipped,spatial%pair_catalog_entries,spatial%pair_product_points
-      ! The ACE metric is -S^H K_S S. S need not be orthonormal; the existing
-      ! Hermitian/positive metric checks and conditioning threshold still apply.
-      call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true., &
-        comm_matrix=info%icomm_ro)
+      if(allocated(spatial%sparse_source%offset))then
+        ! sparse_u replaces the training values; w supplies only u's dimensions.
+        call orbital_ace_build(ace,w,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true., &
+          comm_matrix=info%icomm_ro,sparse_u=spatial%sparse_source)
+      else
+        call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true., &
+          comm_matrix=info%icomm_ro)
+      endif
       call comm_summation(status,adaptive_bad,info%icomm_ro)
       if(adaptive_bad/=0)return
       call orbital_ace_apply(ace,local,w,info%icomm_r,info%icomm_o,status)
       if(status/=0)error stop 'Source-support ACE: occupied mesh action failed'
       accepted=.true.
     end subroutine
+    subroutine apply_sparse_training()
+      implicit none
+      integer,parameter :: block_size=32
+      complex(8),allocatable :: targets(:,:,:)
+      integer :: largest,first,count,j,lo
+      integer(int64) :: stats(5)
+      largest=info%numo;stats=0
+      call comm_get_max(largest,info%icomm_ro)
+      do first=1,largest,block_size
+        count=max(0,min(block_size,info%numo-first+1));lo=min(first,info%numo+1)
+        allocate(targets(size(w,1),count,1))
+        do j=1,count
+          call sparse_column(spatial%sparse_source,first+j-1,targets(:,j,1))
+        enddo
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,targets,w(:,lo:lo+count-1,:),status, &
+          omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm,screen_target_count=system%no)
+        if(status/=0)return
+        call record_fft_work()
+        stats=stats+[spatial%screen_candidates,spatial%screen_skipped,spatial%pair_products, &
+                     spatial%pair_catalog_entries,spatial%pair_product_points]
+        deallocate(targets)
+      enddo
+      spatial%screen_candidates=stats(1);spatial%screen_skipped=stats(2)
+      spatial%pair_products=stats(3);spatial%pair_catalog_entries=stats(4);spatial%pair_product_points=stats(5)
+      status=0
+    end subroutine apply_sparse_training
     subroutine apply_exchange_action()
       implicit none
       complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
       integer,allocatable :: counts(:)
       integer :: first
       if(requested_screen_mode==0)then
-        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
-          [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+      else if(use_blocked_inverse.and..not.allocated(spatial%gauge_tiles%matrix))then
+        call apply_localized_blocks()
+        return
       else
         allocate(localized_action(size(w,1),size(w,2),1))
-        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_y,info%isize_z], &
-          [info%id_y,info%id_z],[info%icomm_y,info%icomm_z],info%icomm_r, &
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,spatial%previous,localized_action,status, &
           omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
         if(status/=0)return
@@ -897,6 +953,67 @@ contains
       endif
       call record_fft_work()
     end subroutine
+    subroutine apply_localized_blocks()
+      implicit none
+      integer,parameter :: block_size=32
+      complex(8),allocatable :: block_action(:,:,:),wire(:,:),rotation(:,:)
+      integer,allocatable :: counts(:)
+      integer :: first_owned,begin_col,nlocal,owner,nowner,j,k,global_col,ngrid,lo_col
+      integer(int64) :: stats(5)
+      real(8) :: bound,cpu_seconds,bound_scale
+      external :: zgemm
+      call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first_owned,status)
+      if(status/=0)return
+      ngrid=size(w,1);w=0d0;stats=0;bound=0d0;cpu_seconds=0d0
+      allocate(rotation(min(block_size,maxval(counts)),info%numo))
+      if(size(counts)>1)allocate(wire(ngrid,min(block_size,maxval(counts))))
+      do begin_col=1,maxval(counts),block_size
+        nlocal=max(0,min(block_size,info%numo-begin_col+1))
+        ! Clamp an empty orbital rank's section to its legal zero-sized endpoint.
+        lo_col=min(begin_col,info%numo+1)
+        allocate(block_action(ngrid,nlocal,1))
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,spatial%previous(:,lo_col:lo_col+nlocal-1,:),block_action,status, &
+          omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm,screen_target_count=sum(counts))
+        if(status/=0)return
+        call record_fft_work()
+        stats=stats+[spatial%screen_candidates,spatial%screen_skipped,spatial%pair_products, &
+                     spatial%pair_catalog_entries,spatial%pair_product_points]
+        bound_scale=max(bound,spatial%screen_bound)
+        if(bound_scale>0d0)bound=bound_scale*sqrt((bound/bound_scale)**2+(spatial%screen_bound/bound_scale)**2)
+        cpu_seconds=cpu_seconds+spatial%screen_cpu_seconds
+        ! Accumulate K(WF) U^H, broadcasting only each owner's current block.
+        do owner=0,size(counts)-1
+          nowner=max(0,min(block_size,counts(owner)-begin_col+1))
+          if(nowner==0)cycle
+          if(size(counts)>1)then
+            if(info%id_o==owner)wire(:,:nowner)=block_action(:,:,1)
+            call comm_bcast(wire(:,:nowner),info%icomm_o,owner)
+          endif
+          global_col=sum(counts(:owner-1))+begin_col
+          do j=1,info%numo
+            do k=1,nowner
+              rotation(k,j)=conjg(spatial%gauge(first_owned+j-1,global_col+k-1,1))
+            enddo
+          enddo
+          if(info%numo>0)then
+            if(size(counts)>1)then
+              call zgemm('N','N',ngrid,info%numo,nowner,(1d0,0d0),wire,ngrid, &
+                rotation,size(rotation,1),(1d0,0d0),w,ngrid)
+            else
+              call zgemm('N','N',ngrid,info%numo,nowner,(1d0,0d0),block_action,ngrid, &
+                rotation,size(rotation,1),(1d0,0d0),w,ngrid)
+            endif
+          endif
+        enddo
+        deallocate(block_action)
+      enddo
+      spatial%screen_candidates=stats(1);spatial%screen_skipped=stats(2)
+      spatial%pair_products=stats(3);spatial%pair_catalog_entries=stats(4);spatial%pair_product_points=stats(5)
+      spatial%screen_bound=bound;spatial%screen_cpu_seconds=cpu_seconds
+      status=0
+    end subroutine apply_localized_blocks
     subroutine record_fft_work()
       ! Count rejected ACE attempts too: each exchange call resets its counters.
       implicit none

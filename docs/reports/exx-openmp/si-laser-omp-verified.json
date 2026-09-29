@@ -1,0 +1,64 @@
+[
+  {
+    "name": "hse06-omp4",
+    "complete": true,
+    "started": 1790681087.5794182,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp-verified/salmon"
+    ],
+    "binary_sha256": "ee7520417c8614477503c5b331c7d02af135fb6160ec9b3eaed2888cad3232e7",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 4,
+    "launcher_pid": 25617,
+    "returncode": 0,
+    "wall_seconds": 18.18909978866577,
+    "rank_peak_rss_bytes": [
+      234160128,
+      234913792,
+      235126784,
+      234815488
+    ],
+    "rt_seconds_per_step": 1.0630625,
+    "current_difference": 8.62189807752028e-17,
+    "energy_difference": 0.0
+  },
+  {
+    "name": "pbe0-omp4",
+    "complete": true,
+    "started": 1790681105.7745962,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp-verified/salmon"
+    ],
+    "binary_sha256": "ee7520417c8614477503c5b331c7d02af135fb6160ec9b3eaed2888cad3232e7",
+    "input_sha256": "00802acb2f8eb5ba948bfdc72fc9c287578bb97fbf60d86abe81436b1355bab6",
+    "mpi": 4,
+    "omp": 4,
+    "launcher_pid": 25661,
+    "returncode": 0,
+    "wall_seconds": 18.700366735458374,
+    "rank_peak_rss_bytes": [
+      231407616,
+      234045440,
+      234749952,
+      234356736
+    ],
+    "rt_seconds_per_step": 1.1131875,
+    "current_difference": 4.097521882342678e-20,
+    "energy_difference": 0.0
+  }
+]

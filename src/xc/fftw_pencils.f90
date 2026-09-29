@@ -1,5 +1,5 @@
 ! Reusable FFTW transforms with native y/z pencil communicators.
-! Local FFTW is serial within each MPI rank; channel batches bound workspace.
+! Independent local FFT lines use OpenMP chunks; MPI remains on the caller thread.
 ! Collective caller contract: identical grid, process dimensions, channel count,
 ! sign and spectral_z selection;
 ! axis communicators ordered by coordinates. Saved caches require serial entry per rank.
@@ -16,10 +16,11 @@ module fftw_pencils
     integer,allocatable :: pack(:),unpack(:)
   end type
   type pencil_cache
-    integer :: n(3)=0,dims(2)=0,coords(2)=0,batch=0,nt=0
+    integer :: n(3)=0,dims(2)=0,coords(2)=0,batch=0,nt=0,workers=1
     complex(c_double_complex),allocatable :: work(:)
     complex(c_double_complex),allocatable :: send(:),recv(:)
-    type(c_ptr) :: plans(3,2)=c_null_ptr
+    type(c_ptr),allocatable :: plans(:,:,:)
+    integer,allocatable :: first(:,:),length(:,:)
     type(redistribution) :: steps(4)
   end type
   type(pencil_cache),save :: cache(max_batch)
@@ -37,11 +38,13 @@ contains
   subroutine destroy(p)
     implicit none
     type(pencil_cache),intent(inout) :: p
-    integer :: a,b
-    do b=1,2;do a=1,3
-      if(c_associated(p%plans(a,b)))call fftw_destroy_plan(p%plans(a,b))
-    enddo;enddo
-    p%plans=c_null_ptr
+    integer :: a,b,w
+    if(allocated(p%plans))then
+      do w=1,p%workers;do b=1,2;do a=1,3
+        if(c_associated(p%plans(a,b,w)))call fftw_destroy_plan(p%plans(a,b,w))
+      enddo;enddo;enddo
+      deallocate(p%plans,p%first,p%length)
+    endif
     if(allocated(p%work))deallocate(p%work)
     if(allocated(p%send))deallocate(p%send,p%recv)
     do a=1,4
@@ -103,18 +106,27 @@ contains
     enddo
   end subroutine
   subroutine prepare(p,n,dims,coords,batch,status)
+!$  use omp_lib, only: omp_get_max_threads
     implicit none
     type(pencil_cache),intent(inout) :: p
     integer,intent(in) :: n(3),dims(2),coords(2),batch
     integer,intent(out) :: status
-    integer :: a,b,sgn
+    integer :: a,b,sgn,w,workers,lines,lo,hi
     real(8) :: start
     status=0
-    if(all(p%n==n).and.all(p%dims==dims).and.all(p%coords==coords).and.p%batch==batch)return
+    workers=1
+!$  workers=omp_get_max_threads()
+    ! Small local FFTs lose more to synchronization than they gain from threads.
+    workers=min(workers,max(1,(n(1)*(n(2)/dims(1))*(n(3)/dims(2))*batch)/65536))
+    workers=min(workers,(n(1)*(n(2)/dims(1))*(n(3)/dims(2))*batch)/maxval(n))
+    if(all(p%n==n).and.all(p%dims==dims).and.all(p%coords==coords).and. &
+       p%batch==batch.and.p%workers==workers)return
     start=stamp();call destroy(p)
     p%n=n;p%dims=dims;p%coords=coords;p%batch=batch;p%nt=n(1)*(n(2)/dims(1))*(n(3)/dims(2))
     allocate(p%work(p%nt*batch),p%send(p%nt*batch),p%recv(p%nt*batch))
-    p%work=0d0
+    p%work=0d0;p%workers=workers
+    allocate(p%plans(3,2,workers),p%first(3,workers),p%length(3,workers))
+    p%plans=c_null_ptr
     call mapping(p,1,1,2,1,1,2)
     call mapping(p,2,2,3,2,2,3)
     call mapping(p,3,3,2,2,3,2)
@@ -123,16 +135,89 @@ contains
       sgn=FFTW_FORWARD
       if(b==2)sgn=FFTW_BACKWARD
       do a=1,3
-        p%plans(a,b)=fftw_plan_many_dft(1,[n(a)],p%nt*batch/n(a),p%work,[n(a)],1,n(a), &
-          p%work,[n(a)],1,n(a),sgn,FFTW_MEASURE)
-        if(.not.c_associated(p%plans(a,b)))status=1
-        fftw_pencil_plans_created=fftw_pencil_plans_created+1
+        lines=p%nt*batch/n(a)
+        do w=1,workers
+          lo=int(int(w-1,int64)*lines/workers)*n(a)+1
+          hi=int(int(w,int64)*lines/workers)*n(a)
+          p%first(a,w)=lo;p%length(a,w)=hi-lo+1
+          ! Plan only on the caller thread, against the exact disjoint work slice.
+          p%plans(a,b,w)=fftw_plan_many_dft(1,[n(a)],(hi-lo+1)/n(a),p%work(lo:hi),[n(a)],1,n(a), &
+            p%work(lo:hi),[n(a)],1,n(a),sgn,FFTW_MEASURE)
+          if(.not.c_associated(p%plans(a,b,w)))status=1
+          fftw_pencil_plans_created=fftw_pencil_plans_created+1
+        enddo
       enddo
     enddo
     fftw_pencil_seconds(1)=fftw_pencil_seconds(1)+stamp()-start
     if(status/=0)call destroy(p)
   end subroutine
   subroutine redistribute(p,step,comm)
+    implicit none
+    type(pencil_cache),intent(inout) :: p
+    integer,intent(in) :: step,comm(2)
+    integer :: i,q,block
+    real(8) :: start
+    block=p%nt/p%steps(step)%peers
+!$omp master
+    start=stamp()
+    fftw_pencil_transposes=fftw_pencil_transposes+1_int64
+!$omp end master
+!$omp do collapse(2) schedule(static)
+    do q=1,p%batch;do i=1,p%nt
+      p%send(p%steps(step)%pack(i)+(q-1)*block)=p%work(i+(q-1)*p%nt)
+    enddo;enddo
+!$omp end do
+!$omp master
+    fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start;start=stamp()
+    call comm_alltoall(p%send,p%recv,comm(p%steps(step)%axis),block*p%batch)
+    fftw_pencil_seconds(3)=fftw_pencil_seconds(3)+stamp()-start;start=stamp()
+!$omp end master
+!$omp barrier
+!$omp do collapse(2) schedule(static)
+    do q=1,p%batch;do i=1,p%nt
+      p%work(i+(q-1)*p%nt)=p%recv(p%steps(step)%unpack(i)+(q-1)*block)
+    enddo;enddo
+!$omp end do
+!$omp master
+    fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
+!$omp end master
+  end subroutine
+  ! Preserve the low-overhead path for small pencils and OMP-disabled builds.
+  subroutine serial_transform(p,comm,input,output,sgn,keep_z)
+    implicit none
+    type(pencil_cache),intent(inout) :: p
+    integer,intent(in) :: comm(2),sgn
+    complex(8),intent(in) :: input(:,:)
+    complex(8),intent(out) :: output(:,:)
+    logical,intent(in) :: keep_z
+    integer :: a,first,last,step,direction
+    real(8) :: start
+    first=1;last=3;step=1;direction=1
+    if(sgn==1)direction=2
+    if(keep_z.and.sgn==1)then
+      first=3;last=1;step=-1
+    endif
+    start=stamp();p%work=reshape(input,[p%nt*p%batch])
+    fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
+    do a=first,last,step
+      start=stamp()
+      call fftw_execute_dft(p%plans(a,direction,1),p%work,p%work)
+      fftw_pencil_seconds(2)=fftw_pencil_seconds(2)+stamp()-start
+      if(keep_z.and.sgn==1)then
+        if(a>1)call redistribute_serial(p,6-a,comm)
+      else
+        if(a<3)call redistribute_serial(p,a,comm)
+      endif
+    enddo
+    if(.not.keep_z)then
+      call redistribute_serial(p,3,comm);call redistribute_serial(p,4,comm)
+    endif
+    start=stamp()
+    if(sgn==1)p%work=p%work/product(real(p%n,8))
+    output=reshape(p%work,shape(output))
+    fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
+  end subroutine
+  subroutine redistribute_serial(p,step,comm)
     implicit none
     type(pencil_cache),intent(inout) :: p
     integer,intent(in) :: step,comm(2)
@@ -161,9 +246,9 @@ contains
     ! consumes that layout and returns X pencils. Default remains X-to-X.
     logical,intent(in),optional :: spectral_z
     logical :: keep_z
-    integer :: first,batch,a,direction,nt,bad,axis_first,axis_last,axis_step
+    integer :: first,batch,a,direction,nt,bad,axis_first,axis_last,axis_step,w,lo,hi,i,q
     integer(int64) :: wide_nt
-    real(8) :: start
+    real(8) :: start,scale
     status=0
     if(any(n<1).or.any(dims<1))status=1
     if(status==0)then
@@ -200,14 +285,41 @@ contains
     if(status/=0)return
     do first=1,size(input,2),max_batch
       batch=min(max_batch,size(input,2)-first+1)
-      start=stamp();cache(batch)%work=reshape(input(:,first:first+batch-1),[nt*batch])
+      if(cache(batch)%workers==1)then
+        call serial_transform(cache(batch),comm,input(:,first:first+batch-1),output(:,first:first+batch-1),sgn,keep_z)
+        cycle
+      endif
+      ! One team covers the complete transform, including local packing.
+      ! Only the primary thread calls MPI (MPI_THREAD_FUNNELED).
+!$omp parallel default(none) private(i,q,w,lo,hi,a,scale,start) &
+!$omp shared(cache,batch,nt,input,first,output,axis_first,axis_last,axis_step,direction,keep_z,sgn,n,comm, &
+!$omp fftw_pencil_seconds) &
+!$omp num_threads(cache(batch)%workers) if(cache(batch)%workers>1)
+!$omp master
+      start=stamp()
+!$omp end master
+!$omp do collapse(2) schedule(static)
+      do q=1,batch;do i=1,nt
+        cache(batch)%work(i+(q-1)*nt)=input(i,first+q-1)
+      enddo;enddo
+!$omp end do
+!$omp master
       fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
+!$omp end master
       do a=axis_first,axis_last,axis_step
+!$omp master
         start=stamp()
-        call fftw_execute_dft(cache(batch)%plans(a,direction),cache(batch)%work,cache(batch)%work)
+!$omp end master
+!$omp do schedule(static)
+        do w=1,cache(batch)%workers
+          lo=cache(batch)%first(a,w);hi=lo+cache(batch)%length(a,w)-1
+          call fftw_execute_dft(cache(batch)%plans(a,direction,w),cache(batch)%work(lo:hi),cache(batch)%work(lo:hi))
+        enddo
+!$omp end do
+!$omp master
         fftw_pencil_seconds(2)=fftw_pencil_seconds(2)+stamp()-start
+!$omp end master
         if(keep_z.and.sgn==1)then
-          ! Reverse sequence: Z->Y (step3), then Y->X (step4).
           if(a>1)call redistribute(cache(batch),6-a,comm)
         else
           if(a<3)call redistribute(cache(batch),a,comm)
@@ -216,10 +328,20 @@ contains
       if(.not.keep_z)then
         call redistribute(cache(batch),3,comm);call redistribute(cache(batch),4,comm)
       endif
+!$omp master
       start=stamp()
-      if(sgn==1)cache(batch)%work=cache(batch)%work/product(real(n,8))
-      output(:,first:first+batch-1)=reshape(cache(batch)%work,[nt,batch])
+!$omp end master
+      scale=1d0
+      if(sgn==1)scale=1d0/product(real(n,8))
+!$omp do collapse(2) schedule(static)
+      do q=1,batch;do i=1,nt
+        output(i,first+q-1)=cache(batch)%work(i+(q-1)*nt)*scale
+      enddo;enddo
+!$omp end do
+!$omp master
       fftw_pencil_seconds(4)=fftw_pencil_seconds(4)+stamp()-start
+!$omp end master
+!$omp end parallel
     enddo
   end subroutine
 end module

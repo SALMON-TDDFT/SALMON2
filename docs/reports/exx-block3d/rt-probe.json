@@ -1,0 +1,17 @@
+[
+  {
+    "layout": "811",
+    "current_max_difference": 2.4679462803090553e-17,
+    "energy_max_difference": 0.0
+  },
+  {
+    "layout": "222",
+    "current_max_difference": 2.338403857484947e-17,
+    "energy_max_difference": 9.947598300641403e-13
+  },
+  {
+    "layout": "124",
+    "current_max_difference": 0.0,
+    "energy_max_difference": 0.0
+  }
+]

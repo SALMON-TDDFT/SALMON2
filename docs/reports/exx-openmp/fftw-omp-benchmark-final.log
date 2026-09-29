@@ -1,0 +1,3 @@
+OMP / roundtrip / FFT / MPI / packing:   1    1.40963000E-02    5.12919426E-03    2.16743946E-03    8.01374912E-03
+OMP / roundtrip / FFT / MPI / packing:   2    1.06031000E-02    2.64973640E-03    2.57875919E-03    5.93023300E-03
+OMP / roundtrip / FFT / MPI / packing:   4    8.84110000E-03    1.67121887E-03    2.52380371E-03    4.72769737E-03

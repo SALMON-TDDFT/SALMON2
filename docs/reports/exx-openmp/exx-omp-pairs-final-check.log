@@ -1,0 +1,29 @@
+test_initial_localization_guard (test_pair_screen.PBEhPairScreenRT.test_initial_localization_guard) ... ok
+test_modes_and_fallback (test_pair_screen.PBEhPairScreenRT.test_modes_and_fallback) ... ok
+test_orbital_split (test_pair_screen.PBEhPairScreenRT.test_orbital_split) ... ok
+test_initial_localization_guard (test_pair_screen.PairScreenRT.test_initial_localization_guard) ... ok
+test_modes_and_fallback (test_pair_screen.PairScreenRT.test_modes_and_fallback) ... ok
+test_screened_scf (test_pair_screen.PairScreenSCF.test_screened_scf) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 3.656s
+
+OK
+PAIR_RT 1 off 1 energy width 4.800604358479177e-13 attempted omissions 0 fallbacks 0
+PAIR_RT 1 diagnose 1 energy width 4.800604358479177e-13 attempted omissions 0 fallbacks 0
+PAIR_RT 1 on 1 energy width 2.2106982910941042e-10 attempted omissions 66 fallbacks 0
+PAIR_RT 1 on 2 energy width 2.2106982910941042e-10 attempted omissions 66 fallbacks 0
+PAIR_RT 0.999 off 1 energy width 1.7661498930010566e-09 attempted omissions 0 fallbacks 0
+PAIR_RT 0.999 diagnose 1 energy width 1.7661503370902665e-09 attempted omissions 0 fallbacks 0
+PAIR_RT 0.999 on 1 energy width 3.093800771125643e-10 attempted omissions 66 fallbacks 0
+PAIR_RT 1 off 1 energy width 4.098943406916078e-13 attempted omissions 0 fallbacks 0
+PAIR_RT 1 diagnose 1 energy width 4.1966430330830917e-13 attempted omissions 0 fallbacks 0
+PAIR_RT 1 on 1 energy width 9.102985032427569e-11 attempted omissions 66 fallbacks 0
+PAIR_RT 1 on 2 energy width 9.102008036165898e-11 attempted omissions 66 fallbacks 0
+PAIR_RT 0.999 off 1 energy width 1.3862417498344826e-06 attempted omissions 0 fallbacks 0
+PAIR_RT 0.999 diagnose 1 energy width 1.3862417498344826e-06 attempted omissions 0 fallbacks 0
+PAIR_RT 0.999 on 1 energy width 1.3848065099075768e-06 attempted omissions 66 fallbacks 0
+PAIR_SCF off 0 energy eV -67.69739225358514
+PAIR_SCF diagnose 1 energy eV -67.69739222452687
+PAIR_SCF on 1 energy eV -67.69693317825923
+PAIR_SCF on 1e-06 energy eV -67.69739222452687

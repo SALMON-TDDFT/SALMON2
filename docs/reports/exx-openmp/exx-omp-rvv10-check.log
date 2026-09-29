@@ -1,0 +1,112 @@
+           1   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           2   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           3   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           1   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           2   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           3   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           1   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           2   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           3   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+Passed 2 MPI ranks, 1 threads
+           1   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           2   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           3   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           1   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           2   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           3   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           1   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           2   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           3   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+Passed 2 MPI ranks, 2 threads
+           1   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           2   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           3   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           4   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           5   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           6   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           1   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           2   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           3   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           4   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           5   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           6   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           1   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           2   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           3   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           4   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           5   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           6   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+Passed 4 MPI ranks, 1 threads
+           1   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           2   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           3   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           4   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           5   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           6   4.0927261579781771E-012
+ Full potential comparison:   1.1901590823981678E-013
+           1   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           2   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           3   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           4   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           5   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           6   4.1078251911130792E-015
+ Full potential comparison:   3.1225022567582528E-017
+           1   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           2   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           3   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           4   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           5   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+           6   5.3290705182007514E-015
+ Full potential comparison:   4.8572257327350599E-017
+Passed 4 MPI ranks, 2 threads

@@ -22,9 +22,9 @@ def main():
     build = args.build.resolve()
     objects = build / 'src/CMakeFiles/salmon.dir'
     dependencies = [
-        'xc/exx_distributed_gauge.f90.o','xc/exx_distributed_metric.f90.o','xc/exx_orbitals.f90.o', 'xc/exx_ace.f90.o',
+        'xc/exx_distributed_gauge.f90.o','xc/exx_sparse_orbitals.f90.o','xc/exx_distributed_metric.f90.o','xc/exx_orbitals.f90.o', 'xc/exx_ace.f90.o',
         'xc/exx_batch_backend.f90.o','xc/exx_spatial_local.f90.o', 'xc/exx_wannier_gauge.f90.o',
-        'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o',
+        'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o','xc/fftw_blocks.f90.o',
         'parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o',
     ]
     fftw = Path(os.environ.get('FFTW_ROOT', '/opt/homebrew/opt/fftw'))

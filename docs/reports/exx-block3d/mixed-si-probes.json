@@ -1,0 +1,22 @@
+[
+  {
+    "support": "auto",
+    "complete": true,
+    "last_pair_counts": [
+      "8704",
+      "0",
+      "160432128"
+    ],
+    "max_norm_error": 1.9999998812636477e-07
+  },
+  {
+    "support": "r10",
+    "complete": true,
+    "last_pair_counts": [
+      "7680",
+      "0",
+      "125829120"
+    ],
+    "max_norm_error": 1.9999998812636477e-07
+  }
+]

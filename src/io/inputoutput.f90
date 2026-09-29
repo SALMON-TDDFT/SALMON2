@@ -3379,16 +3379,14 @@ contains
       if(yn_hse_lcfo_rt=='y')error stop 'adaptive EXX support requires native mesh orbitals'
     endif
     if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0)then
-      if(exx_mlwf_radius>0d0)then
-        if(theory/='dft'.or.yn_md=='y'.or.yn_opt=='y') &
-          error stop 'finite EXX MLWF radius supports static DFT only'
-      else
-        if(yn_md=='y'.or.yn_opt=='y'.or. &
-          (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
-          error stop 'adaptive EXX support requires static SCF or fixed-ion native RT'
-        if(theory/='dft'.and.(yn_dc=='y'.or. &
-          (yn_conventional_from_dcdft/='y'.and..not.is_global_hybrid(xc)))) &
-          error stop 'adaptive EXX RT requires DC or conventional hybrid mesh orbitals'
+      if(yn_md=='y'.or.yn_opt=='y'.or. &
+        (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'finite EXX support requires static SCF or fixed-ion native RT'
+      if(theory/='dft')then
+        if(yn_dc=='y'.or.(yn_conventional_from_dcdft/='y'.and..not.is_global_hybrid(xc))) &
+          error stop 'finite EXX RT requires DC or conventional hybrid mesh orbitals'
+        if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12).or.yn_hse_lcfo_rt=='y') &
+          error stop 'finite EXX RT requires unshifted Gamma native mesh orbitals'
       endif
       if(.not.is_hybrid(xc)) &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
@@ -3496,8 +3494,8 @@ contains
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
         if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or. &
           (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)))then
-          if(nproc_ob<1.or.nproc_k/=1.or.nproc_rgrid(1)/=1.or.any(num_kgrid/=1)) &
-            error stop 'Spatial EXX: Gamma y/z pencils required'
+          if(nproc_ob<1.or.nproc_k/=1.or.any(num_kgrid/=1)) &
+            error stop 'Spatial EXX: Gamma spatial domains required'
           if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &
             error stop 'Spatial EXX: each orbital group must own at least one state'
           if(yn_dc=='y'.and.nstate_frag>0.and.nproc_ob>nstate_frag) &
@@ -3507,9 +3505,9 @@ contains
             if(any(num_fragment<1))error stop 'Spatial EXX: positive fragment counts required'
             exx_grid=num_rgrid/num_fragment+2*num_rgrid_buffer
           endif
-          if(modulo(exx_grid(1),nproc_rgrid(2))/=0.or.modulo(exx_grid(2),nproc_rgrid(2))/=0.or. &
-             modulo(exx_grid(2),nproc_rgrid(3))/=0.or.modulo(exx_grid(3),nproc_rgrid(3))/=0) &
-            error stop 'Spatial EXX: incompatible FFTW pencil grid'
+          if(any(nproc_rgrid<1))error stop 'Spatial EXX: positive Cartesian process counts required'
+          if(any(modulo(exx_grid,nproc_rgrid)/=0)) &
+            error stop 'Spatial EXX: incompatible Cartesian grid'
         else
           if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
             error stop 'HSE Wannier: only k parallelism within each fragment is supported'

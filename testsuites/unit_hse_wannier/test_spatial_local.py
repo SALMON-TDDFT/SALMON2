@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as tmp:
         '-I'+str(b),'-I'+os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw')+'/include',
         str(ROOT / 'src/xc/exx_batch_backend.f90'),str(ROOT/'src/xc/exx_local_fft.f90'),str(ROOT/'src/xc/exx_spatial_local.f90'),
         str(Path(__file__).with_name('spatial_local_probe.f90')),
-        *[str(obj/s) for s in ['xc/fftw_pencils.f90.o','parallel/communication.f90.o','misc/nvtx_wrapper.f90.o']],
+        *[str(obj/s) for s in ['xc/fftw_pencils.f90.o','xc/fftw_blocks.f90.o','parallel/communication.f90.o','misc/nvtx_wrapper.f90.o']],
         '-L'+os.environ.get('FFTW_ROOT','/opt/homebrew/opt/fftw')+'/lib','-lfftw3','-o',str(exe)],cwd=tmp,check=True)
     for rank in a.ranks:
         subprocess.run([os.environ.get('MPIEXEC','mpiexec'),'-n',str(rank),str(exe)],check=True,timeout=60,

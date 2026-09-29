@@ -1,0 +1,51 @@
+ PAIR mode/compact/omega/error/bound:            1           0   0.0000000000000000        0.0000000000000000        1.3786298469489700E-005
+ PAIR mode/compact/omega/error/bound:            2           0   0.0000000000000000        1.3777423646422764E-011   2.0674974627966951E-005
+ PAIR mode/compact/omega/error/bound:            1           1   0.0000000000000000        8.9078385429015017E-016   1.3786298469489700E-005
+ PAIR mode/compact/omega/error/bound:            2           1   0.0000000000000000        1.3778311824842463E-011   2.0674974627966947E-005
+ PAIR mode/compact/omega/error/bound:            1           0  0.11000000000000000        0.0000000000000000        1.3860026186437160E-005
+ PAIR mode/compact/omega/error/bound:            2           0  0.11000000000000000        1.3477219340769948E-011   2.0598743924951472E-005
+ PAIR mode/compact/omega/error/bound:            1           1  0.11000000000000000        2.2775067461941615E-015   1.3860026186437160E-005
+ PAIR mode/compact/omega/error/bound:            2           1  0.11000000000000000        1.3479439794134570E-011   2.0598743924951468E-005
+ PAIR mode/compact/omega/error/bound:            1           0  0.22000000000000000        0.0000000000000000        1.3116353271948125E-005
+ PAIR mode/compact/omega/error/bound:            2           0  0.22000000000000000        1.3107737118004204E-011   1.9670352240093789E-005
+ PAIR mode/compact/omega/error/bound:            1           1  0.22000000000000000        1.9875081538868961E-015   1.3116353271948125E-005
+ PAIR mode/compact/omega/error/bound:            2           1  0.22000000000000000        1.3109513504930941E-011   1.9670352240093785E-005
+ CHAIN ACTION omega/products/skipped/error/bound   0.0000000000000000                         8                   56   1.8235702131794044E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound   0.0000000000000000                         8                   56   1.8235702568738461E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound  0.11000000000000000                         8                   56   1.8317514064342526E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound  0.11000000000000000                         8                   56   1.8317515141863725E-011   8.7500000000000009E-008
+ PASS collective negative backend release status
+ PAIR mode/compact/omega/error/bound:            1           0   0.0000000000000000        0.0000000000000000        1.3786298469489707E-005
+ PAIR mode/compact/omega/error/bound:            2           0   0.0000000000000000        1.3777423646422764E-011   2.0674974627966957E-005
+ PAIR mode/compact/omega/error/bound:            1           1   0.0000000000000000        8.9078385429015017E-016   1.3786298469489707E-005
+ PAIR mode/compact/omega/error/bound:            2           1   0.0000000000000000        1.3778311824842463E-011   2.0674974627966954E-005
+ PAIR mode/compact/omega/error/bound:            1           0  0.11000000000000000        0.0000000000000000        1.3860026186437121E-005
+ PAIR mode/compact/omega/error/bound:            2           0  0.11000000000000000        1.3477219340769948E-011   2.0598743924951434E-005
+ PAIR mode/compact/omega/error/bound:            1           1  0.11000000000000000        2.2775067461941615E-015   1.3860026186437121E-005
+ PAIR mode/compact/omega/error/bound:            2           1  0.11000000000000000        1.3479439794134570E-011   2.0598743924951431E-005
+ PAIR mode/compact/omega/error/bound:            1           0  0.22000000000000000        0.0000000000000000        1.3116353271948176E-005
+ PAIR mode/compact/omega/error/bound:            2           0  0.22000000000000000        1.3107737118004204E-011   1.9670352240093836E-005
+ PAIR mode/compact/omega/error/bound:            1           1  0.22000000000000000        1.9875081538868961E-015   1.3116353271948176E-005
+ PAIR mode/compact/omega/error/bound:            2           1  0.22000000000000000        1.3109513504930941E-011   1.9670352240093836E-005
+ CHAIN ACTION omega/products/skipped/error/bound   0.0000000000000000                         8                   56   1.8235702131794044E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound   0.0000000000000000                         8                   56   1.8235702568738461E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound  0.11000000000000000                         8                   56   1.8317514064342526E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound  0.11000000000000000                         8                   56   1.8317515141863725E-011   8.7500000000000009E-008
+ PASS collective negative backend release status
+ PAIR mode/compact/omega/error/bound:            1           0   0.0000000000000000        0.0000000000000000        1.3786298469489761E-005
+ PAIR mode/compact/omega/error/bound:            2           0   0.0000000000000000        1.3777423646422764E-011   2.0674974627967012E-005
+ PAIR mode/compact/omega/error/bound:            1           1   0.0000000000000000        8.9078385429015017E-016   1.3786298469489761E-005
+ PAIR mode/compact/omega/error/bound:            2           1   0.0000000000000000        1.3778311824842463E-011   2.0674974627967008E-005
+ PAIR mode/compact/omega/error/bound:            1           0  0.11000000000000000        0.0000000000000000        1.3860026186437167E-005
+ PAIR mode/compact/omega/error/bound:            2           0  0.11000000000000000        1.3477219340769948E-011   2.0598743924951478E-005
+ PAIR mode/compact/omega/error/bound:            1           1  0.11000000000000000        2.2775067461941615E-015   1.3860026186437167E-005
+ PAIR mode/compact/omega/error/bound:            2           1  0.11000000000000000        1.3479439794134570E-011   2.0598743924951475E-005
+ PAIR mode/compact/omega/error/bound:            1           0  0.22000000000000000        0.0000000000000000        1.3116353271948235E-005
+ PAIR mode/compact/omega/error/bound:            2           0  0.22000000000000000        1.3107737118004204E-011   1.9670352240093897E-005
+ PAIR mode/compact/omega/error/bound:            1           1  0.22000000000000000        1.9875081538868961E-015   1.3116353271948235E-005
+ PAIR mode/compact/omega/error/bound:            2           1  0.22000000000000000        1.3109513504930941E-011   1.9670352240093894E-005
+ CHAIN ACTION omega/products/skipped/error/bound   0.0000000000000000                         8                   56   1.8235702131794044E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound   0.0000000000000000                         8                   56   1.8235702568738461E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound  0.11000000000000000                         8                   56   1.8317514064342526E-011   8.7500000000000009E-008
+ CHAIN ACTION omega/products/skipped/error/bound  0.11000000000000000                         8                   56   1.8317515141863725E-011   8.7500000000000009E-008
+ PASS collective negative backend release status

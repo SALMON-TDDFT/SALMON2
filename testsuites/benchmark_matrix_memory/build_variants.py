@@ -36,7 +36,7 @@ manifest = dict(kind='current-source routing comparison', build=str(b), variants
                 source_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip())
 (out / 'working-tree.patch').write_bytes(subprocess.check_output(['git', 'diff'], cwd=root))
 # Archive new, as-yet-untracked production modules as well as their hashes.
-for name in ['exx_distributed_metric.f90', 'exx_distributed_gauge.f90']:
+for name in ['exx_distributed_metric.f90', 'exx_distributed_gauge.f90', 'exx_sparse_orbitals.f90']:
     shutil.copy2(root / 'src/xc' / name, out / name)
 for mode in ['replicated', 'ace', 'all']:
     folder = out / mode

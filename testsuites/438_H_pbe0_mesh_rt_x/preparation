@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+cp ../pseudo/H_rps.dat ./
+# Producer is the freshly verified 423 DC-GS test.
+test -d ../423_H_pbe0_dc_gs/data_dcdft
+cp -R ../423_H_pbe0_dc_gs/data_dcdft ./

@@ -1,0 +1,66 @@
+[
+  {
+    "name": "hse06-omp2",
+    "complete": true,
+    "started": 1790680137.71767,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp-passive/after/salmon"
+    ],
+    "binary_sha256": "60b3aa908e0afa89220a894fd54b4685ee50d07c423548ec23f7977390a9ae9a",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 2,
+    "launcher_pid": 18805,
+    "returncode": 0,
+    "wall_seconds": 23.734436988830566,
+    "rank_peak_rss_bytes": [
+      234078208,
+      241614848,
+      237027328,
+      233619456
+    ],
+    "version": "after",
+    "rt_seconds_per_step": 1.398875,
+    "current_difference": 0.0,
+    "energy_difference": 0.0
+  },
+  {
+    "name": "hse06-omp4",
+    "complete": true,
+    "started": 1790680161.456435,
+    "command": [
+      "/opt/homebrew/bin/mpiexec",
+      "--bind-to",
+      "none",
+      "-n",
+      "4",
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/SALMON2-pbeh40-rvv10/testsuites/benchmark_si_dielectric/rank_run.py",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/si-laser-omp-passive/after/salmon"
+    ],
+    "binary_sha256": "60b3aa908e0afa89220a894fd54b4685ee50d07c423548ec23f7977390a9ae9a",
+    "input_sha256": "8d3f23becd0958de0fa0c7662aeb30b290772dd52218c4d7be901aa6d79d11f5",
+    "mpi": 4,
+    "omp": 4,
+    "launcher_pid": 18864,
+    "returncode": 0,
+    "wall_seconds": 27.282968044281006,
+    "rank_peak_rss_bytes": [
+      237649920,
+      236011520,
+      238043136,
+      234782720
+    ],
+    "version": "after",
+    "rt_seconds_per_step": 1.6110625,
+    "current_difference": 4.042841934968914e-17,
+    "energy_difference": 0.0
+  }
+]

@@ -1,10 +1,11 @@
-! Gamma exchange on x-complete y/z pencils, with optional compact source action.
+! Gamma exchange on native Cartesian domains, with optional compact source action.
 ! Refresh and apply accept orbital-local columns through optional comm_o.
 ! Grid rows and FFT work are spatially local.
 ! Collective contract: n/h/dims/radius/omega/maxiter and call order agree;
 ! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module exx_spatial
+  use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_valid,sparse_column,sparse_norms,sparse_clear
   use iso_fortran_env, only: int64
   use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
   use exx_batch_backend, only: local_backend_factory
@@ -14,7 +15,7 @@ module exx_spatial
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use exx_distributed_metric, only: distributed_metric_available
   use exx_distributed_gauge, only: s_exx_gauge,gauge_tiles_clear,gauge_tiles_refresh,gauge_tiles_rotate
-  use fftw_pencils, only: pencil_transform
+  use fftw_blocks, only: pencil_transform=>mesh_transform,block_layout
   use exx_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -34,6 +35,7 @@ module exx_spatial
     integer(int64) :: local_pairs=0,local_points=0,global_pairs=0
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
     type(s_exx_gauge) :: gauge_tiles
+    type(s_sparse_orbitals) :: sparse_source
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
@@ -62,6 +64,7 @@ contains
     call gauge_tiles_clear(op%gauge_tiles)
     if(allocated(op%gauge))deallocate(op%gauge)
     if(allocated(op%previous))deallocate(op%previous)
+    call sparse_clear(op%sparse_source)
     op%source=psi(:,:,1)
     do j=1,size(psi,2)
       op%source(:,j)=op%source(:,j)*sqrt(occupation(j,1)/2d0)
@@ -76,7 +79,7 @@ contains
     implicit none
     integer,intent(in),optional :: comm_matrix
     type(spatial_exx_state),intent(inout) :: op
-    integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r,maxiter
+    integer,intent(in) :: n(3),dims(:),coords(:),comm(:),comm_r,maxiter
     integer,intent(in),optional :: comm_o
     real(8),intent(in) :: h(3),tolerance
     real(8),intent(in),optional :: occupation(:,:)
@@ -102,10 +105,12 @@ contains
     endif
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
-    m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
+    call block_layout(n,dims,coords,m,lo,bad)
     if(ng/=product(m).or.any(coords<0).or.any(coords>=dims))bad=1
-    if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
-       modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
+    if(size(dims)==2)then
+      if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
+         modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
+    endif
     if(allocated(op%gauge))then
       if(any(shape(op%gauge)/=[no,no,1]).or.any(shape(op%previous)/=shape(psi)))bad=1
     endif
@@ -194,7 +199,7 @@ contains
     implicit none
     integer,intent(in),optional :: comm_matrix
     type(spatial_exx_state),intent(inout) :: op
-    integer,intent(in) :: n(3),dims(2),coords(2),comm_r,comm_o,maxiter
+    integer,intent(in) :: n(3),dims(:),coords(:),comm_r,comm_o,maxiter
     real(8),intent(in) :: h(3),tolerance
     complex(8),intent(in) :: psi(:,:,:)
     real(8),intent(in),optional :: occupation(:,:)
@@ -216,10 +221,12 @@ contains
     endif
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
-    m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
+    call block_layout(n,dims,coords,m,lo,bad)
     if(ng/=product(m).or.any(coords<0).or.any(coords>=dims))bad=1
-    if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
-       modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
+    if(size(dims)==2)then
+      if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
+         modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
+    endif
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(nlocal,comm_r,comm_o,counts,first,bad)
@@ -415,14 +422,16 @@ contains
     gauge=projected
   end subroutine projected_position_seed
 
-  ! Optional comm_o joins matching grid pencils across orbital groups. Source and
+  ! Optional comm_o joins matching grid blocks across orbital groups. Source and
   ! target columns may have different (including zero) local counts. Counts must
   ! agree within comm_r, and the communicators form a spatial/orbital product.
-  subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o)
+  subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o, &
+                               screen_target_count)
+!$  use omp_lib, only: omp_get_max_threads
     implicit none
     type(spatial_exx_state),intent(inout) :: op
-    integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r
-    integer,intent(in),optional :: comm_o
+    integer,intent(in) :: n(3),dims(:),coords(:),comm(:),comm_r
+    integer,intent(in),optional :: comm_o,screen_target_count
     real(8),intent(in) :: h(3),radius_input
     real(8),intent(in),optional :: omega
     complex(8),intent(in) :: target(:,:,:)
@@ -433,7 +442,10 @@ contains
     type(exx_pair_catalog) :: catalogue
     type(s_exx_spatial_local) :: compact_plan
     complex(8),allocatable :: compact_action(:,:)
-    logical :: compact_used
+    logical :: compact_used,packed_source
+    integer :: no_source,nnz,k0,point_workers
+    integer,allocatable :: wire_rows(:)
+    complex(8),allocatable :: wire_values(:)
     integer,allocatable :: selected(:),broad_kept(:),active_rows(:)
     real(8),allocatable :: omitted(:),pair_norms(:,:),pair_totals(:,:),source_norms(:),global_norms(:),pair_values(:)
     real(8) :: kernel_local(2),kernel_sum(2),lambda,kzero,krms,budget,normq,qmax,qnorm_local
@@ -451,7 +463,15 @@ contains
     screening=0d0
     if(present(omega))screening=omega
     if(.not.ieee_is_finite(screening).or.screening<0d0)bad=1
-    if(.not.allocated(op%source))bad=1
+    packed_source=.not.allocated(op%source).and.allocated(op%sparse_source%offset)
+    no_source=0
+    if(allocated(op%source))then
+      no_source=size(op%source,2)
+    else if(packed_source)then
+      no_source=op%sparse_source%no
+    else
+      bad=1
+    endif
     if(op%screen_mode<0.or.op%screen_mode>2)bad=1
     if(.not.ieee_is_finite(op%screen_tolerance).or.op%screen_tolerance<0d0)bad=1
     if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.salmon_all_finite(h))bad=1
@@ -460,10 +480,14 @@ contains
     endif
     call collective_bad()
     if(bad/=0)return
-    m=[n(1),n(2)/dims(1),n(3)/dims(2)];lo=[0,coords(1)*m(2),coords(2)*m(3)]
+    call block_layout(n,dims,coords,m,lo,bad)
     ng=product(m);nt=size(target,2);mesh_local=m;mesh_lo=lo
     if(size(target,1)/=ng.or.size(target,3)/=1.or.nt<0.or.any(shape(action)/=shape(target)))bad=1
-    if(size(op%source,1)/=ng)bad=1
+    if(packed_source)then
+      if(.not.sparse_valid(op%sparse_source,ng,no_source))bad=1
+    else
+      if(size(op%source,1)/=ng)bad=1
+    endif
     if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))bad=1
     radius=.5d0*minval(n*h)
     if(radius_input>0d0)radius=radius_input
@@ -476,21 +500,27 @@ contains
     nt_max=nt
     call comm_get_max(nt_max,comm_r)
     if(nt_max/=nt)bad=1
-    counts_max=size(op%source,2)
+    counts_max=no_source
     call comm_get_max(counts_max,comm_r)
-    if(counts_max/=size(op%source,2))bad=1
-    if(.not.salmon_all_finite(real(op%source)).or..not.salmon_all_finite(aimag(op%source)))bad=1
+    if(counts_max/=no_source)bad=1
+    if(.not.packed_source)then
+      if(.not.salmon_all_finite(real(op%source)).or..not.salmon_all_finite(aimag(op%source)))bad=1
+    endif
     call collective_bad()
     if(bad/=0)return
     allocate(source_column(ng))
     allocate(multiplier(ng));pi=acos(-1d0);g=0
-    ! Keep the forward FFT in Z pencils: local storage order is (z,x,y).
-    m=[n(1)/dims(1),n(2)/dims(2),n(3)]
-    lo=[coords(1)*m(1),coords(2)*m(2),0]
+    ! Native 3D transforms retain xyz ownership; legacy callers use Z pencils.
+    if(size(dims)==2)then
+      m=[n(1)/dims(1),n(2)/dims(2),n(3)]
+      lo=[coords(1)*m(1),coords(2)*m(2),0]
+    endif
 !$omp parallel do collapse(2) default(none) schedule(static) &
-!$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier)
+!$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier,dims)
     do y=0,m(2)-1;do x=0,m(1)-1;do z=0,m(3)-1
-      g=1+z+m(3)*(x+m(1)*y);p=[x,y,z]+lo
+      g=1+z+m(3)*(x+m(1)*y)
+      if(size(dims)==3)g=1+x+m(1)*(y+m(2)*z)
+      p=[x,y,z]+lo
       where(p>=(n+1)/2)p=p-n
       q=2*pi*p/(n*h);q2=sum(q*q)
       if(screening>0d0)then
@@ -515,22 +545,37 @@ contains
       lambda=maxval(abs(multiplier));call max_scalar(lambda,comm_r)
       kzero=kernel_sum(1)/real(product(int(n,int64)),8)
       krms=sqrt(kernel_sum(2)/real(product(int(n,int64)),8))
-      source_total=size(op%source,2);target_total=nt
+      source_total=no_source;target_total=nt
       if(present(comm_o))then
-        call comm_summation(size(op%source,2),source_total,comm_o)
+        call comm_summation(no_source,source_total,comm_o)
         call comm_summation(nt,target_total,comm_o)
       endif
+      ! Blocked callers retain the full-target error budget and catalogue floor.
+      if(present(screen_target_count))then
+        if(screen_target_count<target_total)bad=1
+        target_total=screen_target_count
+      endif
+      call collective_bad()
+      if(bad/=0)return
       budget=op%screen_tolerance/(real(max(1,source_total),8)*sqrt(real(max(1,target_total),8)))
       allocate(pair_norms(2,nt),pair_totals(2,nt))
       ! A common floor retains every block that any source query might need.
       ! Upper bounds on max|q| and ||q||_2 avoid one collective per source.
       envelope_max=0d0
-      if(size(op%source)>0)envelope_max=maxval(abs(op%source))
+      if(packed_source)then
+        if(size(op%sparse_source%value)>0)envelope_max=maxval(abs(op%sparse_source%value))
+      else
+        if(size(op%source)>0)envelope_max=maxval(abs(op%source))
+      endif
       call max_scalar(envelope_max,comm_r)
       if(present(comm_o))call max_scalar(envelope_max,comm_o)
-      allocate(source_norms(size(op%source,2)),global_norms(size(op%source,2)))
+      allocate(source_norms(no_source),global_norms(no_source))
       source_norms=0d0
-      if(envelope_max>0d0)source_norms=sum((abs(op%source)/envelope_max)**2,dim=1)
+      if(packed_source)then
+        call sparse_norms(op%sparse_source,envelope_max,source_norms)
+      else
+        if(envelope_max>0d0)source_norms=sum((abs(op%source)/envelope_max)**2,dim=1)
+      endif
       if(size(source_norms)>0)call comm_summation(source_norms,global_norms,size(source_norms),comm_r)
       envelope_norm=0d0
       if(size(global_norms)>0)envelope_norm=envelope_max*sqrt(product(h)*maxval(global_norms))
@@ -555,18 +600,36 @@ contains
       call collective_bad_status()
       if(status/=0)return
     endif
+    point_workers=1
+!$  point_workers=omp_get_max_threads()
     allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
     ! Grid rows match across comm_o; stream one source column from its owner.
     ! Empty source/target partitions participate in all orbital collectives.
     do owner=0,orb_size-1
-      count=size(op%source,2)
+      count=no_source
       if(present(comm_o))call comm_bcast(count,comm_o,owner)
       do i=1,count
-        if(present(comm_o))then
-          if(orb_rank==owner)source_column=op%source(:,i)
-          call comm_bcast(source_column,comm_o,owner)
+        ! Send support entries only; materialize one spatial column for FFTs.
+        nnz=-1
+        if(orb_rank==owner.and.packed_source)nnz=op%sparse_source%offset(i+1)-op%sparse_source%offset(i)
+        if(present(comm_o))call comm_bcast(nnz,comm_o,owner)
+        if(nnz>=0)then
+          allocate(wire_rows(nnz),wire_values(nnz))
+          if(orb_rank==owner)then
+            k0=op%sparse_source%offset(i)
+            wire_rows=op%sparse_source%row(k0:k0+nnz-1)
+            wire_values=op%sparse_source%value(k0:k0+nnz-1)
+          endif
+          if(present(comm_o))then
+            call comm_bcast(wire_rows,comm_o,owner)
+            call comm_bcast(wire_values,comm_o,owner)
+          endif
+          source_column=0d0
+          source_column(wire_rows)=wire_values
+          deallocate(wire_rows,wire_values)
         else
-          source_column=op%source(:,i)
+          if(orb_rank==owner)source_column=op%source(:,i)
+          if(present(comm_o))call comm_bcast(source_column,comm_o,owner)
         endif
         if(op%screen_mode/=0)then
           call cpu_time(cpu_start)
@@ -664,33 +727,39 @@ contains
         endif
         op%global_pairs=op%global_pairs+nselected
         do first=1,nselected,4
-          nb=min(4,nselected-first+1)
+          nb=min(size(density,2),nselected-first+1)
+          ! Pad the final batch to reuse a bounded set of FFT plans/work arrays.
+          if(nb<size(density,2))density(:,nb+1:)=0d0
+!$omp parallel do default(none) schedule(static) private(j) &
+!$omp shared(nb,ng,density,source_column,target,selected,first) &
+!$omp num_threads(min(nb,point_workers)) if(ng*nb>=262144.and.point_workers>1)
           do j=1,nb
-            if(present(comm_o))then
-              density(:,j)=conjg(source_column)*target(:,selected(first+j-1),1)
-            else
-              density(:,j)=conjg(op%source(:,i))*target(:,selected(first+j-1),1)
-            endif
+            density(:,j)=conjg(source_column)*target(:,selected(first+j-1),1)
           enddo
-          call pencil_transform(n,dims,coords,comm,density(:,:nb),spectrum(:,:nb),-1,status,spectral_z=.true.)
+!$omp end parallel do
+          call pencil_transform(n,dims,coords,comm,density,spectrum,-1,status,spectral_z=.true.)
           bad=status
           if(present(comm_o))call comm_get_max(bad,comm_r)
           if(bad/=0)exit
+!$omp parallel do default(none) schedule(static) private(j) &
+!$omp shared(nb,ng,spectrum,multiplier) &
+!$omp num_threads(min(nb,point_workers)) if(ng*nb>=262144.and.point_workers>1)
           do j=1,nb
             spectrum(:,j)=spectrum(:,j)*multiplier
           enddo
+!$omp end parallel do
           ! Inverse pencil_transform already includes 1/product(n).
-          call pencil_transform(n,dims,coords,comm,spectrum(:,:nb),density(:,:nb),1,status,spectral_z=.true.)
+          call pencil_transform(n,dims,coords,comm,spectrum,density,1,status,spectral_z=.true.)
           bad=status
           if(present(comm_o))call comm_get_max(bad,comm_r)
           if(bad/=0)exit
+!$omp parallel do default(none) schedule(static) private(j) &
+!$omp shared(nb,ng,action,selected,first,source_column,density) &
+!$omp num_threads(min(nb,point_workers)) if(ng*nb>=262144.and.point_workers>1)
           do j=1,nb
-            if(present(comm_o))then
-              action(:,selected(first+j-1),1)=action(:,selected(first+j-1),1)-source_column*density(:,j)
-            else
-              action(:,selected(first+j-1),1)=action(:,selected(first+j-1),1)-op%source(:,i)*density(:,j)
-            endif
+            action(:,selected(first+j-1),1)=action(:,selected(first+j-1),1)-source_column*density(:,j)
           enddo
+!$omp end parallel do
         enddo
         if(present(comm_o))call collective_bad()
         if(bad/=0)then

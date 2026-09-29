@@ -1,0 +1,15 @@
+test_mesh_rt_and_layouts (test_source_ace.HSESourceACE.test_mesh_rt_and_layouts) ... ok
+test_source_mode_guards (test_source_ace.HSESourceACE.test_source_mode_guards) ... ok
+test_mesh_rt_and_layouts (test_source_ace.PBE0SourceACE.test_mesh_rt_and_layouts) ... ok
+test_source_mode_guards (test_source_ace.PBE0SourceACE.test_source_mode_guards) ... ok
+test_wrong_functional_seed (test_source_ace.PBE0SourceACE.test_wrong_functional_seed) ... ok
+test_mesh_rt_and_layouts (test_source_ace.SourceACE.test_mesh_rt_and_layouts) ... ok
+test_source_mode_guards (test_source_ace.SourceACE.test_source_mode_guards) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 5.462s
+
+OK
+SOURCE_ACE current difference / energy difference / energy width 2.915782134630144e-10 1.0758394499710278e-06 1.3827465097371316e-06
+SOURCE_ACE current difference / energy difference / energy width 1.451650183260296e-10 6.899866700216251e-07 4.253770224948994e-09
+SOURCE_ACE current difference / energy difference / energy width 2.2313673499979543e-11 8.329773502069315e-07 8.210920388052045e-09

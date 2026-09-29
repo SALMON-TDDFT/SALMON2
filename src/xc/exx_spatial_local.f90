@@ -1,12 +1,13 @@
-! Compact source convolution on x-complete y/z pencils. Only compact tiles
+! Compact source convolution on native Cartesian blocks. Only compact tiles
 ! are replicated; the inverse global kernel remains spatially distributed.
 ! All calls are collective over comm_r with matching target column counts.
 module exx_spatial_local
  use iso_fortran_env, only: int64
  use exx_batch_backend, only: s_exx_batch_backend
- use communication, only: comm_summation,comm_get_max,comm_get_groupinfo
- use fftw_pencils, only: pencil_transform
- use exx_local_fft, only: s_exx_local_fft,exx_local_prepare_compact,exx_local_apply,exx_local_destroy,smooth_size
+ use communication, only: comm_summation,comm_get_max,comm_get_groupinfo,comm_create_group,comm_free_group
+ use fftw_blocks, only: pencil_transform=>mesh_transform,block_layout
+ use exx_local_fft, only: s_exx_local_fft,exx_local_prepare_compact,exx_local_apply,exx_local_destroy, &
+                          compact_axis_size,compact_kernel_bounds
  implicit none
  private
  public :: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy,local_batch_action
@@ -47,25 +48,103 @@ contains
  subroutine spatial_local_init(plan,n,dims,coords,comm,multiplier,status)
   implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
-  integer,intent(in) :: n(3),dims(2),coords(2),comm(2)
-  real(8),intent(in) :: multiplier(:) ! Z spectral order, (z,x,y)
+  integer,intent(in) :: n(3),dims(:),coords(:),comm(:)
+  real(8),intent(in) :: multiplier(:) ! xyz block order (3D) or legacy Z pencil order (2D)
   integer,intent(out) :: status
+  integer :: a
   complex(8),allocatable :: spectrum(:,:),realspace(:,:)
   call spatial_local_destroy(plan,status)
   status=merge(1,0,status/=0)
-  call comm_get_max(status,comm(1))
-  call comm_get_max(status,comm(2))
+  do a=1,size(comm)
+   call comm_get_max(status,comm(a))
+  enddo
   if(status/=0)return
   allocate(spectrum(size(multiplier),1),realspace(size(multiplier),1))
   spectrum(:,1)=cmplx(multiplier,0d0,8)
   ! Includes global 1/N and the supplied G=0 value without modification.
   call pencil_transform(n,dims,coords,comm,spectrum,realspace,1,status,spectral_z=.true.)
   if(status/=0)return
-  plan%n=n;plan%m=[n(1),n(2)/dims(1),n(3)/dims(2)]
-  plan%lo=[0,coords(1)*plan%m(2),coords(2)*plan%m(3)]
+  plan%n=n
+  call block_layout(n,dims,coords,plan%m,plan%lo,status)
   plan%kernel=realspace(:,1)
  end subroutine
  subroutine spatial_local_apply(plan,comm_r,source,targets,action,used,status,pairs_executed,pair_fft_points,skip)
+  implicit none
+  type(s_exx_spatial_local),intent(inout) :: plan
+  integer,intent(in) :: comm_r
+  complex(8),intent(in) :: source(:),targets(:,:)
+  complex(8),intent(out) :: action(:,:)
+  logical,intent(out) :: used
+  integer,intent(out) :: status
+  integer(int64),intent(out),optional :: pairs_executed,pair_fft_points
+  logical,intent(in),optional :: skip(:)
+  integer,allocatable :: occupied(:,:),total(:,:),points(:)
+  integer :: g,x,y,z,p(3),a,b,c,axis,j,gap,best,box(3),padded(3)
+  integer :: rank,peers,group,member,bad,used_flag,lower(3),upper(3)
+  integer(int64) :: pairs,fft_points
+  real(8) :: counts(2),global_counts(2)
+  action=0d0;used=.false.;status=0;pairs=0_int64;fft_points=0_int64
+  if(present(pairs_executed))pairs_executed=0_int64
+  if(present(pair_fft_points))pair_fft_points=0_int64
+  bad=0
+  if(any(plan%n<1).or.any(plan%m<1))bad=1
+  if(size(source)/=product(plan%m).or.size(targets,1)/=size(source))bad=1
+  if(any(shape(action)/=shape(targets)))bad=1
+  call comm_get_max(bad,comm_r)
+  if(bad/=0)then
+   status=1;return
+  endif
+  allocate(occupied(maxval(plan%n),3),total(maxval(plan%n),3));occupied=0
+  g=0;member=0
+  do z=0,plan%m(3)-1;do y=0,plan%m(2)-1;do x=0,plan%m(1)-1
+   g=g+1
+   if(source(g)==(0d0,0d0))cycle
+   member=1;p=[x,y,z]+plan%lo
+   do axis=1,3
+    occupied(p(axis)+1,axis)=1
+   enddo
+  enddo;enddo;enddo
+  call comm_summation(occupied,total,size(total),comm_r)
+  if(.not.any(total/=0))then
+   used=.true.;return
+  endif
+  do axis=1,3
+   points=pack([(j-1,j=1,plan%n(axis))],total(1:plan%n(axis),axis)>0)
+   best=0
+   do j=1,size(points)
+    gap=points(mod(j,size(points))+1)-points(j)
+    if(j==size(points))gap=gap+plan%n(axis)
+    best=max(best,gap)
+   enddo
+   box(axis)=plan%n(axis)-best+1;padded(axis)=compact_axis_size(plan%n(axis),box(axis))
+   deallocate(points)
+  enddo
+  if(product(int(padded,int64))>=product(int(plan%n,int64)))return
+  ! Kernel displacements may have owners outside the source support. Include
+  ! those owners, but never allocate compact tiles on unrelated spatial ranks.
+  call compact_kernel_bounds(plan%n,box,lower,upper)
+  if(member==0)then
+   do c=lower(3),upper(3);do b=lower(2),upper(2);do a=lower(1),upper(1)
+    p=modulo([a,b,c],plan%n)-plan%lo
+    if(all(p>=0).and.all(p<plan%m))member=1
+   enddo;enddo;enddo
+  endif
+  call comm_get_groupinfo(comm_r,rank,peers)
+  group=comm_create_group(comm_r,member,rank)
+  if(member==1)then
+   call local_apply_group(plan,group,source,targets,action,used,status,pairs,fft_points,skip)
+  else
+   used=.true.
+  endif
+  call comm_free_group(group)
+  call comm_get_max(status,comm_r)
+  used_flag=merge(0,1,used);call comm_get_max(used_flag,comm_r);used=used_flag==0
+  counts=real([pairs,fft_points],8)
+  call comm_get_max(counts,global_counts,2,comm_r)
+  if(present(pairs_executed))pairs_executed=int(global_counts(1),int64)
+  if(present(pair_fft_points))pair_fft_points=int(global_counts(2),int64)
+ end subroutine
+ subroutine local_apply_group(plan,comm_r,source,targets,action,used,status,pairs_executed,pair_fft_points,skip)
   implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
   integer,intent(in) :: comm_r
@@ -80,7 +159,7 @@ contains
   complex(8),allocatable :: density(:),potential(:),source_tile(:),source_sum(:),batch_targets(:,:),batch_result(:,:)
   integer,allocatable :: owned(:)
   integer :: ng,nt,bad,axis,j,g,x,y,z,p(3),box(3),origin(3),padded(3),gap,best,start,a,b,c,r,rank,peers
-  integer :: count,ntmax,first,nb,k,batch,nowned,capacity
+  integer :: count,ntmax,first,nb,k,batch,nowned,capacity,lower(3),upper(3),extent(3)
   logical :: batched
   integer(int64) :: local_counts(2),global_counts(2)
   ! communication wrappers do not expose int64 reductions; sums are bounded
@@ -135,18 +214,20 @@ contains
     endif
    enddo
    origin(axis)=axis_points(start);box(axis)=plan%n(axis)-best+1
-   padded(axis)=smooth_size(2*box(axis)-1)
+   padded(axis)=compact_axis_size(plan%n(axis),box(axis))
    deallocate(axis_points)
   enddo
   if(product(int(padded,int64))>=product(int(plan%n,int64)))return
   ! Gather only kernel displacements required by this compact source box.
-  allocate(kernel_tile(2*box(1)-1,2*box(2)-1,2*box(3)-1),kernel_sum(2*box(1)-1,2*box(2)-1,2*box(3)-1))
+  call compact_kernel_bounds(plan%n,box,lower,upper)
+  extent=upper-lower+1
+  allocate(kernel_tile(extent(1),extent(2),extent(3)),kernel_sum(extent(1),extent(2),extent(3)))
   kernel_tile=0d0
-  do c=1-box(3),box(3)-1;do b=1-box(2),box(2)-1;do a=1-box(1),box(1)-1
+  do c=lower(3),upper(3);do b=lower(2),upper(2);do a=lower(1),upper(1)
    p=modulo([a,b,c],plan%n)-plan%lo
    if(any(p<0).or.any(p>=plan%m))cycle
    g=1+p(1)+plan%m(1)*(p(2)+plan%m(2)*p(3))
-   kernel_tile(a+box(1),b+box(2),c+box(3))=plan%kernel(g)
+   kernel_tile(a-lower(1)+1,b-lower(2)+1,c-lower(3)+1)=plan%kernel(g)
   enddo;enddo;enddo
   call comm_summation(kernel_tile,kernel_sum,size(kernel_sum),comm_r)
   call exx_local_prepare_compact(plan%fft,plan%n,box,kernel_sum,status)

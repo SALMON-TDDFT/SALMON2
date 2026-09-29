@@ -41,7 +41,8 @@ class RealspaceEhrenfest(unittest.TestCase):
         cmd=[os.environ['SALMON_TEST_EXE']]
         if ranks>1:cmd=[os.environ['SALMON_TEST_MPIEXEC'],'-n',str(ranks)]+cmd
         run=subprocess.run(cmd,input=inp,cwd=folder,text=True,capture_output=True,timeout=180,
-            env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'))
+            env=dict(os.environ,OMP_NUM_THREADS=os.environ.get('SALMON_TEST_RT_OMP','1') if rt else '1',
+                     OPENBLAS_NUM_THREADS='1'))
         (folder/'output').write_text(run.stdout+run.stderr)
         if os.environ.get('SALMON_TEST_SAVE_DIR'):
             dest=Path(os.environ['SALMON_TEST_SAVE_DIR'])/cls.root.name/name

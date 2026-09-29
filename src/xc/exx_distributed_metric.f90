@@ -2,6 +2,7 @@
 ! ACE metric tiles are unique over the combined spatial/orbital communicator.
 ! BLACS contexts live only during construction; ACE copies own plain arrays.
 module exx_distributed_metric
+  use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_dot
   use communication, only: comm_get_groupinfo,comm_summation,comm_bcast,comm_get_max
   use exx_ace, only: s_exx_ace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -20,10 +21,11 @@ contains
 #endif
   end function
 
-  subroutine distributed_metric_build(ace,u,w,dv,comm_o,comm,counts,first,nonzero,status)
+  subroutine distributed_metric_build(ace,u,w,dv,comm_o,comm,counts,first,nonzero,status,sparse_u)
     implicit none
     type(s_exx_ace),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:),w(:,:)
+    type(s_sparse_orbitals),intent(in),optional :: sparse_u
     real(8),intent(in) :: dv
     integer,intent(in) :: comm_o,comm,counts(0:),first,nonzero
     integer,intent(out) :: status
@@ -77,7 +79,11 @@ contains
           call comm_bcast(column,comm_o,owner)
           partial=0d0
           do i=1,size(u,2)
-            partial(first+i-1)=-dv*dot_product(u(:,i),column)
+            if(present(sparse_u))then
+              partial(first+i-1)=-dv*sparse_dot(sparse_u,i,column)
+            else
+              partial(first+i-1)=-dv*dot_product(u(:,i),column)
+            endif
           enddo
           call comm_summation(partial,total,n,comm)
           do j=1,nc

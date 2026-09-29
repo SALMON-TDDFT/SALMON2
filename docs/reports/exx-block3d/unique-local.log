@@ -1,0 +1,3 @@
+ PASS spatial local and batched callback (resident prepare/apply/release)           1
+ PASS spatial local and batched callback (resident prepare/apply/release)           2
+ PASS spatial local and batched callback (resident prepare/apply/release)           4

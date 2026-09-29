@@ -13,6 +13,7 @@ set(SOURCES
 
 if(USE_HSE)
   list(APPEND SOURCES
+    exx_sparse_orbitals.f90
     exx_k_backend.f90
     exx_k_cufft.f90
     exx_batch_backend.f90
@@ -23,6 +24,7 @@ if(USE_HSE)
     exx_spatial_local.f90
     rvv10.f90
     fftw_pencils.f90
+    fftw_blocks.f90
     rvv10_distributed.f90
     rvv10_native.f90
     rvv10_ffte.f

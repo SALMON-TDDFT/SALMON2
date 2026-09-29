@@ -3,13 +3,16 @@ program benchmark
   use fftw_pencils
   use rvv10_distributed
   implicit none
+  integer :: provided
   integer :: ierr,rank,np,dims(2),coords(2),comm(2),n(3),m(3),lo(3),nt,q,i,j,status,reps,scale
   complex(8),allocatable :: input(:,:),output(:,:),back(:,:),a(:),b(:)
   real(8),allocatable :: rho(:),sigma(:),e(:),v(:),w(:),er(:),vr(:),wr(:)
   real(8) :: start,first,warm(2),whole(2),totals(8),maximum(8),err
   character(16) :: argument
   logical :: used
-  call MPI_Init(ierr);call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
+  call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,ierr)
+  if(provided<MPI_THREAD_FUNNELED)error stop 'MPI thread support'
+  call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
   if(np/=2.and.np/=4)error stop 'use 2 or 4 ranks'
   scale=1
   call get_command_argument(1,argument)

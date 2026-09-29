@@ -33,7 +33,7 @@ probe = root / 'testsuites/benchmark_h2_pbeh/rank_probe.py'
 assert (a.mpi,a.omp) in [(8,1),(4,2)]
 layout = '1,4,2' if a.mpi == 8 else '1,2,2'
 data = dict(complete=False, variants=variants, runs=[], mpi=a.mpi, omp=a.omp,
-            blas_threads=1, steps=16, dt=0.02, workload='saved DC -> Gamma PBEh(40) native RT; source ACE, .999 support',
+            blas_threads=1, steps=16, dt=0.02, workload='saved DC -> Gamma PBEh(40) native RT; ACE/support controls in inputfile',
             memory_note='Rank child lifetime peak RSS includes LCFO reconstruction/initialization. Sum of RSS is not unique physical memory.',
             sampling_seconds=0.5)
 result_file = work / 'results.json'

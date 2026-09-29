@@ -22,11 +22,11 @@ with tempfile.TemporaryDirectory(prefix='gauge-tiles-') as directory:
     libs += shlex.split(os.environ.get('FFTW_LIBS', '-L/opt/homebrew/opt/fftw/lib -lfftw3'))
     if not a.no_scalapack:
         libs += shlex.split(os.environ.get('SCALAPACK_LIBS', '-L/opt/homebrew/opt/scalapack/lib -lscalapack'))
-    sources = ['src/xc/exx_ace.f90', 'src/xc/exx_distributed_metric.f90', 'src/xc/exx_orbitals.f90',
+    sources = ['src/xc/exx_sparse_orbitals.f90', 'src/xc/exx_ace.f90', 'src/xc/exx_distributed_metric.f90', 'src/xc/exx_orbitals.f90',
                'src/xc/exx_distributed_gauge.f90', 'src/xc/exx_spatial.f90',
                'testsuites/unit_exx_distributed_gauge/driver.f90']
     deps = ['xc/exx_pair_candidates.f90.o', 'xc/exx_batch_backend.f90.o', 'xc/exx_spatial_local.f90.o',
-            'xc/exx_wannier_gauge.f90.o', 'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o',
+            'xc/exx_wannier_gauge.f90.o', 'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o','xc/fftw_blocks.f90.o',
             'parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o']
     subprocess.run([os.environ.get('MPIFC', 'mpifort'), '-cpp', '-fopenmp', '-fcheck=all', '-g',
                     '-ffree-line-length-none', '-I'+str(tmp), '-I'+str(b)] +

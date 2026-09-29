@@ -1,11 +1,13 @@
 #include "config.h"
 program test_metric
   use mpi
+  use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_pack,sparse_clear
   use exx_ace, only: s_exx_ace,exx_ace_clear,exx_ace_ready
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply
   use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
   implicit none
   type(s_exx_ace) :: reference,distributed,copy
+  type(s_sparse_orbitals) :: sparse_u
   complex(8),allocatable :: u(:,:,:),w(:,:,:),t(:,:,:),a(:,:,:),b(:,:,:)
   integer :: ierr,rank,np,nr,ro,rr,cr,co,n,g,lo,hi,gs,ge,j,mode,status,packed,trial,tl,th,bytes,maxbytes
   real(8) :: error,total,tolerance
@@ -84,6 +86,18 @@ program test_metric
         call check(total<tolerance,'action equality')
         if(rank==0)write(*,*) 'PASS N/layout/trial/packed/error',n,mode,trial,packed,total
         call exx_ace_clear(copy)
+        call sparse_pack(sparse_u,u(:,:,1))
+        call orbital_ace_build(distributed,w,w,0.5d0,cr,co,status,packed=packed==1, &
+          comm_matrix=MPI_COMM_WORLD,sparse_u=sparse_u)
+        call check(status==0,'sparse training build')
+        call orbital_ace_apply(distributed,t,b,cr,co,status)
+        call check(status==0,'sparse training apply')
+        error=0d0
+        if(size(a)>0)error=maxval(abs(a-b))
+        call MPI_Allreduce(error,total,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+        call check(total<tolerance,'sparse training equality')
+        call exx_ace_clear(distributed)
+        call sparse_clear(sparse_u)
       enddo
     enddo
     deallocate(u,w,t,a,b)

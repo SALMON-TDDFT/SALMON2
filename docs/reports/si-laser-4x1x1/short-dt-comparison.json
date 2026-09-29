@@ -1,0 +1,20 @@
+[
+  {
+    "xc": "pbe",
+    "max_current_difference": 1.1110559736849963e-09,
+    "signal": 4.22818514659885e-07,
+    "accepted": true
+  },
+  {
+    "xc": "hse06",
+    "max_current_difference": 4.2810686008987706e-11,
+    "signal": 4.13766150765006e-07,
+    "accepted": true
+  },
+  {
+    "xc": "pbe0",
+    "max_current_difference": 3.342708465140154e-10,
+    "signal": 3.72926214323045e-07,
+    "accepted": true
+  }
+]

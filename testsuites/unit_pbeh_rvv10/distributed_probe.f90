@@ -4,6 +4,7 @@ program probe
   use rvv10, only: rvv10_evaluate,rvv10_periodic
   use rvv10_distributed, only: rvv10_evaluate_distributed
   implicit none
+  integer :: provided
   integer :: ierr,rank,nproc,axis,comm(3),coords(3),dims(3),n(3),lo(3),local_n(3),i,j,k,g,l,status,color,key,nq,channel,plans_before,batch_count
   character(16) :: argument
   logical :: used
@@ -14,7 +15,8 @@ program probe
   complex(8),allocatable :: spectrum(:,:,:),spectrum_y(:,:,:),spectrum_global(:,:,:)
   complex(8),allocatable :: old_input(:),old_a(:),old_b(:),old_reference(:)
   real(8),allocatable :: rho(:),sigma(:),e(:),v(:),w(:),lr(:),ls(:),le(:),lv(:),lw(:)
-  call MPI_Init(ierr)
+  call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,ierr)
+  if(provided<MPI_THREAD_FUNNELED)error stop 'MPI thread support'
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
   call MPI_Comm_size(MPI_COMM_WORLD,nproc,ierr)
   nq=16
