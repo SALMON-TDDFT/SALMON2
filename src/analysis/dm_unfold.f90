@@ -461,6 +461,11 @@ contains
         & 43, "Jx:uG2", trim(t_unit_current%name), &
         & 44, "Jy:uG2", trim(t_unit_current%name), &
         & 45, "Jz:uG2", trim(t_unit_current%name), &
+        ! Columns 46-55 (momentum-distribution integrals) are only
+        ! evaluated at time steps where yn_out_mom_distr_rt=='y' and
+        ! the out_mom_distr_rt_step condition is met; at other steps
+        ! they are output as 0.0, meaning "not computed this step",
+        ! not a physically vanishing value (note 058, 060).
         & 46, "int nq(q)", "none", &
         & 47, "Jx:nq-d", trim(t_unit_current%name), &
         & 48, "Jy:nq-d", trim(t_unit_current%name), &
@@ -470,7 +475,57 @@ contains
         & 52, "Jz:nq-nd", trim(t_unit_current%name), &
         & 53, "Jx:nq", trim(t_unit_current%name), &
         & 54, "Jy:nq", trim(t_unit_current%name), &
-        & 55, "Jz:nq", trim(t_unit_current%name)
+        & 55, "Jz:nq", trim(t_unit_current%name), &
+        ! -- reference-cell -> primitive-cell decomposition (hprk_label
+        ! based; classes 1/2/3/4, see notes 047-054 in
+        ! dephasing/Claude-Codex/) and coherence-norm diagnostics.
+        ! All quantities below are "reference-cell total" (existing
+        ! wtk_ref weighting), NOT divided by q=|det(pmat)|; class 1 =
+        ! hat_k-diagonal/n=n', class 2 = hat_k-diagonal/n/=n' (same
+        ! known primitive sector), class 4 = Q_0(unassigned)-involving,
+        ! class 3 = hat_k non-diagonal/sector-cross (direct, not a
+        ! residual; see the comment at its point of computation in
+        ! dm_unfold for the exact-identity relation to the existing
+        ! unrestricted zj1-zj4 totals above). C_diag_known/C_intra/
+        ! C_inter/C_unknown are the corresponding sum-of-|eta_ab|^2
+        ! coherence-norm diagnostics (note 054 sec.3-4); dimensionless,
+        ! same convention as column 5, Tr[rho(t)].
+        & 56, "N:class1(known-diag)", "none", &
+        & 57, "N:class4(unknown-diag)", "none", &
+        & 58, "Jx:<upu>-1", trim(t_unit_current%name), &
+        & 59, "Jy:<upu>-1", trim(t_unit_current%name), &
+        & 60, "Jz:<upu>-1", trim(t_unit_current%name), &
+        & 61, "Jx:<u[r,V]u>-1", trim(t_unit_current%name), &
+        & 62, "Jy:<u[r,V]u>-1", trim(t_unit_current%name), &
+        & 63, "Jz:<u[r,V]u>-1", trim(t_unit_current%name), &
+        & 64, "Jx:<upu>-4d", trim(t_unit_current%name), &
+        & 65, "Jy:<upu>-4d", trim(t_unit_current%name), &
+        & 66, "Jz:<upu>-4d", trim(t_unit_current%name), &
+        & 67, "Jx:<u[r,V]u>-4d", trim(t_unit_current%name), &
+        & 68, "Jy:<u[r,V]u>-4d", trim(t_unit_current%name), &
+        & 69, "Jz:<u[r,V]u>-4d", trim(t_unit_current%name), &
+        & 70, "Jx:<upu>-2", trim(t_unit_current%name), &
+        & 71, "Jy:<upu>-2", trim(t_unit_current%name), &
+        & 72, "Jz:<upu>-2", trim(t_unit_current%name), &
+        & 73, "Jx:<u[r,V]u>-2", trim(t_unit_current%name), &
+        & 74, "Jy:<u[r,V]u>-2", trim(t_unit_current%name), &
+        & 75, "Jz:<u[r,V]u>-2", trim(t_unit_current%name), &
+        & 76, "Jx:<upu>-4o", trim(t_unit_current%name), &
+        & 77, "Jy:<upu>-4o", trim(t_unit_current%name), &
+        & 78, "Jz:<upu>-4o", trim(t_unit_current%name), &
+        & 79, "Jx:<u[r,V]u>-4o", trim(t_unit_current%name), &
+        & 80, "Jy:<u[r,V]u>-4o", trim(t_unit_current%name), &
+        & 81, "Jz:<u[r,V]u>-4o", trim(t_unit_current%name), &
+        & 82, "Jx:<upu>-3", trim(t_unit_current%name), &
+        & 83, "Jy:<upu>-3", trim(t_unit_current%name), &
+        & 84, "Jz:<upu>-3", trim(t_unit_current%name), &
+        & 85, "Jx:<u[r,V]u>-3", trim(t_unit_current%name), &
+        & 86, "Jy:<u[r,V]u>-3", trim(t_unit_current%name), &
+        & 87, "Jz:<u[r,V]u>-3", trim(t_unit_current%name), &
+        & 88, "C_diag_known", "none", &
+        & 89, "C_intra", "none", &
+        & 90, "C_inter", "none", &
+        & 91, "C_unknown", "none"
 
   end if
 
@@ -1396,7 +1451,31 @@ contains
     complex(8),allocatable :: nq_d_l(:,:,:),nq_d(:,:,:),nq_nd_l(:,:,:),nq_nd(:,:,:),nq_d_l_private(:,:,:),nq_nd_l_private(:,:,:)
     complex(8) :: zj1(3),zj2(3),zj3(3),zj4(3),zj5(3),zj6(3),zj1_uu(3),zj2_uu(3),zj3_uu(3),zj4_uu(3),zj_d(3),zj_nd(3)
     complex(8) :: zj1_l(3),zj2_l(3),zj3_l(3),zj4_l(3),zj5_l(3),zj6_l(3),zsum,zsum_d,zsum_nd,zsum_l,zsum_uu
-      
+
+    ! -- reference-cell -> primitive-cell decomposition into classes
+    ! 1 (hat_k-diagonal, n=n'), 2 (hat_k-diagonal, n/=n'), 3 (hat_k
+    ! non-diagonal, sector-cross), 4 (Q_0/unassigned-involving), plus
+    ! primitive-sector coherence-norm diagnostics (C_diag_known,
+    ! C_intra, C_inter, C_unknown). No new matrix elements are used:
+    ! this block only re-classifies the existing eta/upu_ref/
+    ! u_rVnl_Vnlr_u_ref/wtk_ref by unfold%hprk_label. See notes 047-054
+    ! in dephasing/Claude-Codex/ for the full design/physics discussion
+    ! and the precise definitions reproduced here. lab=0 is the Q_0
+    ! (unassigned) sentinel; lab>0 identifies a known primitive sector.
+    ! All sums use the existing reference-cell weight wtk_ref (i.e.
+    ! these are "reference-cell total" quantities, NOT divided by
+    ! q=|det(pmat)|; see note 054 sec.4 on normalization conventions).
+    integer :: lab1, lab2
+    complex(8) :: zsum1,zsum4,zsum1_l,zsum4_l                 ! class 1 / class 4 (diag) population
+    complex(8) :: zj1a(3),zj2a(3),zj1a_l(3),zj2a_l(3)         ! class 1: bare / nonlocal-correction current
+    complex(8) :: zj1c(3),zj2c(3),zj1c_l(3),zj2c_l(3)         ! class 4, diagonal part (lab1==0)
+    complex(8) :: zj3b(3),zj4b(3),zj3b_l(3),zj4b_l(3)         ! class 2: bare / nonlocal-correction current
+    complex(8) :: zj3c(3),zj4c(3),zj3c_l(3),zj4c_l(3)         ! class 4, off-diagonal part (lab1==0 .or. lab2==0)
+    complex(8) :: zj3d(3),zj4d(3),zj3d_l(3),zj4d_l(3)         ! class 3: bare / nonlocal-correction current
+                                                               ! (direct, sector-cross: lab1>0,lab2>0,lab1/=lab2)
+    real(8) :: cdiagknown,cintra,cinter,cunknown               ! coherence-norm diagnostics (see notes 053/054)
+    real(8) :: cdiagknown_l,cintra_l,cinter_l,cunknown_l
+
     allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
     omega_ref = system%hvol * system%ngrid / dble(unfold%num_hkgrid(1)*unfold%num_hkgrid(2)*unfold%num_hkgrid(3))
@@ -1515,6 +1594,125 @@ contains
     zj5 = zj5 / omega_ref
     zj6 = zj6 / omega_ref
 
+    ! ================================================================
+    ! Classes 1/2/4 (direct) and class 3 (direct, sector-cross), plus
+    ! coherence-norm diagnostics. Every (io_ref1,io_ref2) pair falls
+    ! into exactly one of: class 1 (io_ref1==io_ref2, lab1>0), class 4
+    ! diagonal part (io_ref1==io_ref2, lab1==0), class 2
+    ! (io_ref1/=io_ref2, lab1==lab2>0), class 4 off-diagonal part
+    ! (io_ref1/=io_ref2, lab1==0 .or. lab2==0), class 3
+    ! (io_ref1/=io_ref2, lab1>0, lab2>0, lab1/=lab2) -- so
+    ! zj1==zj1a+zj1c, zj2==zj2a+zj2c, zj3==zj3b+zj3c+zj3d,
+    ! zj4==zj4b+zj4c+zj4d, zsum==zsum1+zsum4 are exact identities of
+    ! this classification (mathematical consequences of an exhaustive,
+    ! non-overlapping partition, not approximate checks), which can be
+    ! used to validate the implementation; floating-point/parallel-
+    ! reduction rounding tolerance should be allowed when comparing
+    ! (note 056). The physically meaningful diagnostic is whether zj3d
+    ! (class 3, sector-cross current) is itself close to zero.
+    !
+    ! For an operator commuting with primitive-cell translations,
+    ! matrix elements between distinct exact primitive sectors vanish.
+    ! Thus the class-3 current vanishes for any density matrix when
+    ! the basis states have pure, correctly assigned sectors; the
+    ! density matrix need not be sector-block-diagonal.
+    ! A nonzero result is a sector-selection-rule consistency residual,
+    ! to be interpreted together with scores and unassigned labels.
+    ! Label impurity, operator/discretization errors, and transformation
+    ! mismatches may contribute. A zero result alone does not validate
+    ! the labels, because occupations and cancellations also matter.
+    ! (notes 051 sec.5, 052-054, 056, 060)
+    ! ================================================================
+    zsum1_l = 0d0 ; zsum4_l = 0d0
+    zj1a_l(:) = 0d0 ; zj2a_l(:) = 0d0
+    zj1c_l(:) = 0d0 ; zj2c_l(:) = 0d0
+    zj3b_l(:) = 0d0 ; zj4b_l(:) = 0d0
+    zj3c_l(:) = 0d0 ; zj4c_l(:) = 0d0
+    zj3d_l(:) = 0d0 ; zj4d_l(:) = 0d0
+    cdiagknown_l = 0d0 ; cintra_l = 0d0 ; cinter_l = 0d0 ; cunknown_l = 0d0
+
+  !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,lab1,lab2) &
+  !$omp reduction(+:zsum1_l,zsum4_l,zj1a_l,zj2a_l,zj1c_l,zj2c_l,zj3b_l,zj4b_l,zj3c_l,zj4c_l,zj3d_l,zj4d_l, &
+  !$omp            cdiagknown_l,cintra_l,cinter_l,cunknown_l) collapse(2)
+    do ilk = info%ik_s, info%ik_e
+    do ihk = 1, unfold%nhrsk
+      isk = unfold%isk_tbl(ilk,ihk)
+    do io_ref1 = 1, no_ref
+      lab1 = unfold%hprk_label(io_ref1,isk)
+      if( lab1 > 0 ) then
+        zsum1_l = zsum1_l + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk)
+        zj1a_l(:) = zj1a_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%upu_ref(:, io_ref1, io_ref1, isk)
+        zj2a_l(:) = zj2a_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref1, isk)
+        cdiagknown_l = cdiagknown_l + abs(eta(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      else
+        zsum4_l = zsum4_l + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk)
+        zj1c_l(:) = zj1c_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%upu_ref(:, io_ref1, io_ref1, isk)
+        zj2c_l(:) = zj2c_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref1, isk)
+        cunknown_l = cunknown_l + abs(eta(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      end if
+    do io_ref2 = 1, no_ref
+      if( io_ref1 == io_ref2 ) cycle
+      lab2 = unfold%hprk_label(io_ref2,isk)
+      if( lab1 > 0 .and. lab2 == lab1 ) then
+        zj3b_l(:) = zj3b_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%upu_ref(:, io_ref1, io_ref2, isk)
+        zj4b_l(:) = zj4b_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref2, isk)
+        cintra_l = cintra_l + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      else if( lab1 == 0 .or. lab2 == 0 ) then
+        zj3c_l(:) = zj3c_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%upu_ref(:, io_ref1, io_ref2, isk)
+        zj4c_l(:) = zj4c_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref2, isk)
+        cunknown_l = cunknown_l + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      else
+        zj3d_l(:) = zj3d_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%upu_ref(:, io_ref1, io_ref2, isk)
+        zj4d_l(:) = zj4d_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
+         & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref2, isk)
+        cinter_l = cinter_l + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      end if
+    end do
+    end do
+    end do
+    end do
+
+    zsum1 = 0d0 ; zsum4 = 0d0
+    zj1a(:) = 0d0 ; zj2a(:) = 0d0 ; zj1c(:) = 0d0 ; zj2c(:) = 0d0
+    zj3b(:) = 0d0 ; zj4b(:) = 0d0 ; zj3c(:) = 0d0 ; zj4c(:) = 0d0 ; zj3d(:) = 0d0 ; zj4d(:) = 0d0
+    cdiagknown = 0d0 ; cintra = 0d0 ; cinter = 0d0 ; cunknown = 0d0
+    call comm_summation(zsum1_l,zsum1,icomm)
+    call comm_summation(zsum4_l,zsum4,icomm)
+    call comm_summation(zj1a_l,zj1a,3,icomm)
+    call comm_summation(zj2a_l,zj2a,3,icomm)
+    call comm_summation(zj1c_l,zj1c,3,icomm)
+    call comm_summation(zj2c_l,zj2c,3,icomm)
+    call comm_summation(zj3b_l,zj3b,3,icomm)
+    call comm_summation(zj4b_l,zj4b,3,icomm)
+    call comm_summation(zj3c_l,zj3c,3,icomm)
+    call comm_summation(zj4c_l,zj4c,3,icomm)
+    call comm_summation(zj3d_l,zj3d,3,icomm)
+    call comm_summation(zj4d_l,zj4d,3,icomm)
+    call comm_summation(cdiagknown_l,cdiagknown,icomm)
+    call comm_summation(cintra_l,cintra,icomm)
+    call comm_summation(cinter_l,cinter,icomm)
+    call comm_summation(cunknown_l,cunknown,icomm)
+
+    zj1a = zj1a / omega_ref
+    zj2a = zj2a / omega_ref
+    zj1c = zj1c / omega_ref
+    zj2c = zj2c / omega_ref
+    zj3b = zj3b / omega_ref
+    zj4b = zj4b / omega_ref
+    zj3c = zj3c / omega_ref
+    zj4c = zj4c / omega_ref
+    zj3d = zj3d / omega_ref
+    zj4d = zj4d / omega_ref
+
   if(comm_is_root(nproc_id_global))then
     write(*,'(A,2x,i7,2x,A,3f17.12)') 'dm_unfold  it=', itt, '     Ac(t)=',system%vec_Ac(:)
     write(*,'(A,7x,f17.12)')          'N:Tr[rho(t)]             ', real(zsum)
@@ -1614,6 +1812,18 @@ contains
   if(comm_is_root(nproc_id_global))then
     write(*,'(A,7x,3f17.12)')         'J:rho_uu(k,G)(G+k+A)     ', real(zj1_uu(:)+zj2_uu(:)+zj3_uu(:)+zj4_uu(:))
   end if
+
+  ! zsum_d/zsum_nd/zj_d/zj_nd are only assigned meaningful values inside
+  ! the yn_out_mom_distr_rt block below; at other time steps they are
+  ! left over from an unrelated earlier private-variable use (or
+  ! undefined on first entry). Pre-zero them here so that columns
+  ! 46-55 of the dm_unfold output are a well-defined 0.0 (not computed
+  ! this step) rather than whatever garbage was left in memory
+  ! (reported as undefined/'*****' output, note 058).
+  zsum_d = 0d0
+  zsum_nd = 0d0
+  zj_d(:) = 0d0
+  zj_nd(:) = 0d0
 
   if( yn_out_mom_distr_rt == 'y' .and. (itt==1 .or. mod(itt,out_mom_distr_rt_step)==0)) then
 
@@ -1759,7 +1969,7 @@ contains
 
   if(comm_is_root(nproc_id_global))then
 
-    write(ofl%fh_dm_unfold,'(55f17.12)') itt*dt, system%vec_Ac(1:3)*t_unit_ac%conv, &
+    write(ofl%fh_dm_unfold,'(91f17.12)') itt*dt, system%vec_Ac(1:3)*t_unit_ac%conv, &
     & real(zsum),real(zj1(1:3))*t_unit_current%conv,real(zj2(1:3))*t_unit_current%conv,real(zj3(1:3))*t_unit_current%conv, &
     & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3))*t_unit_current%conv, &
     & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
@@ -1768,7 +1978,14 @@ contains
     & real(zj3_uu(1:3))*t_unit_current%conv,real(zj4_uu(1:3))*t_unit_current%conv, &
     & real(zj1_uu(1:3)+zj2_uu(1:3)+zj3_uu(1:3)+zj4_uu(1:3))*t_unit_current%conv, &
     & real(zsum_d+zsum_nd),real(zj_d(1:3))*t_unit_current%conv,real(zj_nd(1:3))*t_unit_current%conv, &
-    & real(zj_d(1:3)+zj_nd(1:3))*t_unit_current%conv
+    & real(zj_d(1:3)+zj_nd(1:3))*t_unit_current%conv, &
+    & real(zsum1),real(zsum4), &
+    & real(zj1a(1:3))*t_unit_current%conv,real(zj2a(1:3))*t_unit_current%conv, &
+    & real(zj1c(1:3))*t_unit_current%conv,real(zj2c(1:3))*t_unit_current%conv, &
+    & real(zj3b(1:3))*t_unit_current%conv,real(zj4b(1:3))*t_unit_current%conv, &
+    & real(zj3c(1:3))*t_unit_current%conv,real(zj4c(1:3))*t_unit_current%conv, &
+    & real(zj3d(1:3))*t_unit_current%conv,real(zj4d(1:3))*t_unit_current%conv, &
+    & cdiagknown,cintra,cinter,cunknown
 
   end if
 
