@@ -49,6 +49,7 @@ program symmetry_exchange_probe
  call exx_k_kernel_destroy(kernel)
 contains
  subroutine transpose_tiles(send,recv,count)
+ implicit none
  complex(8),intent(in)::send(:)
  complex(8),intent(out)::recv(:)
  integer,intent(in)::count
@@ -56,6 +57,7 @@ contains
  recv=send
  end subroutine
  subroutine fill_density(j,lo,rows,density)
+ implicit none
  integer,intent(in)::j,lo,rows
  complex(8),intent(out)::density(:,:)
  complex(8)::u(8,2),ph

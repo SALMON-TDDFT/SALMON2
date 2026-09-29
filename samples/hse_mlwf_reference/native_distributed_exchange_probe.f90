@@ -96,6 +96,7 @@ program probe
   call MPI_Finalize(status)
 contains
   subroutine fill_density(j,lo,rows,density)
+    implicit none
     integer,intent(in) :: j,lo,rows
     complex(8),intent(out) :: density(:,:)
     complex(8) :: phased(ng,no)
@@ -109,6 +110,7 @@ contains
     callback_count=callback_count+1
   end subroutine
   subroutine transpose_tiles(send,recv,count)
+    implicit none
     complex(8),intent(in) :: send(:)
     complex(8),intent(out) :: recv(:)
     integer,intent(in) :: count

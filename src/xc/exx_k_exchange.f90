@@ -594,6 +594,7 @@ contains
   end subroutine
 
   real(c_double) function kernel_walltime()
+    implicit none
     integer(int64) :: count,rate
     call system_clock(count,rate)
     kernel_walltime=real(count,c_double)/real(rate,c_double)
