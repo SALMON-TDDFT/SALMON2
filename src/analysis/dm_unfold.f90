@@ -1475,6 +1475,14 @@ contains
                                                                ! (direct, sector-cross: lab1>0,lab2>0,lab1/=lab2)
     real(8) :: cdiagknown,cintra,cinter,cunknown               ! coherence-norm diagnostics (see notes 053/054)
     real(8) :: cdiagknown_l,cintra_l,cinter_l,cunknown_l
+    ! Stage-1 diagnostic (note 066): per-isk breakdown of the same four
+    ! coherence-norm quantities, plus a representative k-vector per isk,
+    ! to identify which isk (k-points) dominate C_intra/C_inter (notes
+    ! 064/065). See the allocation/accumulation/output code below.
+    real(8),allocatable :: cdiagknown_isk_l(:),cintra_isk_l(:),cinter_isk_l(:),cunknown_isk_l(:)
+    real(8),allocatable :: cdiagknown_isk(:),cintra_isk(:),cinter_isk(:),cunknown_isk(:)
+    real(8),allocatable :: veck_isk_l(:,:),veck_isk(:,:)
+    logical :: iofile_exists  ! Stage-1 diagnostic (note 067): restart-safe file open
 
     allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
@@ -1631,12 +1639,29 @@ contains
     zj3d_l(:) = 0d0 ; zj4d_l(:) = 0d0
     cdiagknown_l = 0d0 ; cintra_l = 0d0 ; cinter_l = 0d0 ; cunknown_l = 0d0
 
+    ! Stage-1 diagnostic (note 066): allocate and zero the per-isk arrays.
+    ! Safe to accumulate into these SHARED arrays from multiple OMP
+    ! threads below without a reduction clause: unfold%isk_tbl(ilk,ihk)
+    ! is a bijection, so distinct (ilk,ihk) pairs in the collapse(2) loop
+    ! always give distinct isk indices -- no two threads ever touch the
+    ! same isk element concurrently.
+    allocate( cdiagknown_isk_l(unfold%nsk), cintra_isk_l(unfold%nsk), &
+            & cinter_isk_l(unfold%nsk), cunknown_isk_l(unfold%nsk) )
+    allocate( veck_isk_l(3,unfold%nsk) )
+    cdiagknown_isk_l(:) = 0d0 ; cintra_isk_l(:) = 0d0
+    cinter_isk_l(:) = 0d0 ; cunknown_isk_l(:) = 0d0
+    veck_isk_l(:,:) = 0d0
+
   !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,lab1,lab2) &
   !$omp reduction(+:zsum1_l,zsum4_l,zj1a_l,zj2a_l,zj1c_l,zj2c_l,zj3b_l,zj4b_l,zj3c_l,zj4c_l,zj3d_l,zj4d_l, &
   !$omp            cdiagknown_l,cintra_l,cinter_l,cunknown_l) collapse(2)
     do ilk = info%ik_s, info%ik_e
     do ihk = 1, unfold%nhrsk
       isk = unfold%isk_tbl(ilk,ihk)
+      ! representative k-vector for this isk (before any G-shift), same
+      ! formula used elsewhere in this subroutine (e.g. the momentum-
+      ! distribution qx/qy/qz above)
+      veck_isk_l(:,isk) = system%vec_k(:,ilk) + unfold%vec_hrsk(:,ihk)
     do io_ref1 = 1, no_ref
       lab1 = unfold%hprk_label(io_ref1,isk)
       if( lab1 > 0 ) then
@@ -1646,6 +1671,7 @@ contains
         zj2a_l(:) = zj2a_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref1, isk)
         cdiagknown_l = cdiagknown_l + abs(eta(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cdiagknown_isk_l(isk) = cdiagknown_isk_l(isk) + abs(eta(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
       else
         zsum4_l = zsum4_l + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk)
         zj1c_l(:) = zj1c_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
@@ -1653,6 +1679,7 @@ contains
         zj2c_l(:) = zj2c_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref1, isk)
         cunknown_l = cunknown_l + abs(eta(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cunknown_isk_l(isk) = cunknown_isk_l(isk) + abs(eta(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
       end if
     do io_ref2 = 1, no_ref
       if( io_ref1 == io_ref2 ) cycle
@@ -1663,18 +1690,21 @@ contains
         zj4b_l(:) = zj4b_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref2, isk)
         cintra_l = cintra_l + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cintra_isk_l(isk) = cintra_isk_l(isk) + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
       else if( lab1 == 0 .or. lab2 == 0 ) then
         zj3c_l(:) = zj3c_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%upu_ref(:, io_ref1, io_ref2, isk)
         zj4c_l(:) = zj4c_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref2, isk)
         cunknown_l = cunknown_l + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cunknown_isk_l(isk) = cunknown_isk_l(isk) + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
       else
         zj3d_l(:) = zj3d_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%upu_ref(:, io_ref1, io_ref2, isk)
         zj4d_l(:) = zj4d_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
          & * unfold%u_rVnl_Vnlr_u_ref(:, io_ref1, io_ref2, isk)
         cinter_l = cinter_l + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cinter_isk_l(isk) = cinter_isk_l(isk) + abs(eta(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
       end if
     end do
     end do
@@ -1702,6 +1732,20 @@ contains
     call comm_summation(cinter_l,cinter,icomm)
     call comm_summation(cunknown_l,cunknown,icomm)
 
+    ! Stage-1 diagnostic (note 066): reduce the per-isk arrays the same
+    ! way as the scalar totals just above.
+    allocate( cdiagknown_isk(unfold%nsk), cintra_isk(unfold%nsk), &
+            & cinter_isk(unfold%nsk), cunknown_isk(unfold%nsk) )
+    allocate( veck_isk(3,unfold%nsk) )
+    cdiagknown_isk(:) = 0d0 ; cintra_isk(:) = 0d0
+    cinter_isk(:) = 0d0 ; cunknown_isk(:) = 0d0
+    veck_isk(:,:) = 0d0
+    call comm_summation(cdiagknown_isk_l,cdiagknown_isk,unfold%nsk,icomm)
+    call comm_summation(cintra_isk_l,cintra_isk,unfold%nsk,icomm)
+    call comm_summation(cinter_isk_l,cinter_isk,unfold%nsk,icomm)
+    call comm_summation(cunknown_isk_l,cunknown_isk,unfold%nsk,icomm)
+    call comm_summation(veck_isk_l,veck_isk,3*unfold%nsk,icomm)
+
     zj1a = zj1a / omega_ref
     zj2a = zj2a / omega_ref
     zj1c = zj1c / omega_ref
@@ -1717,6 +1761,59 @@ contains
     write(*,'(A,2x,i7,2x,A,3f17.12)') 'dm_unfold  it=', itt, '     Ac(t)=',system%vec_Ac(:)
     write(*,'(A,7x,f17.12)')          'N:Tr[rho(t)]             ', real(zsum)
     write(*,'(A,7x,3f17.12)')         'J:rho(t)<unk|i[h,r]|unk> ', real(zj1(:)+zj2(:)+zj3(:)+zj4(:)+zj5(:)+zj6(:))
+  end if
+
+  if(comm_is_root(nproc_id_global))then
+    ! Stage-1 diagnostic (notes 066/067): write the per-isk coherence-norm
+    ! breakdown to a standalone file, following the same open/write/close
+    ! pattern as the existing _momgs.cube writer elsewhere in this
+    ! subroutine (i.e. NOT routed through the s_ofile/ofl structure).
+    ! Unlike _momgs.cube this is one growing file for the whole run
+    ! (unfold%nsk rows appended every step dm_unfold is called), with TWO
+    ! blank lines between steps' blocks: gnuplot's `index` selects data
+    ! blocks separated by two blank lines, not one (note 067 point 3).
+    !
+    ! Columns 7-10 already include the wtk_ref(isk) weighting -- i.e.
+    ! summing each of these columns over isk reproduces the corresponding
+    ! *_dm_unfold.data columns 88-91 total directly; do not multiply by
+    ! wtk_ref again. To compare the coherence strength AT different
+    ! k-points on an equal footing (rather than each isk's contribution
+    ! to the total), divide these columns by column 6 (wtk_ref) first
+    ! (note 067 point 2).
+    iofile = trim(base_directory)//trim(sysname)//"_dm_unfold_isk_coherence.data"
+    fp = 272
+    ! Do not gate file creation on itt==1: a restarted run resumes at
+    ! itt=Mit+1>1 (main_tddft.f90's `do itt=Mit+1,nt`), so this diagnostic
+    ! file may not exist yet in the restart directory even on the very
+    ! first dm_unfold call of that run. Check existence instead, so a
+    ! missing diagnostic file never stalls the physics calculation (note
+    ! 067 point 4). If a restart appends to a file left over from before
+    ! the restart point, Time values can duplicate/overlap across the
+    ! restart boundary; downstream analysis should key on column 1
+    ! (Time), not on the gnuplot block index.
+    inquire(file=iofile, exist=iofile_exists)
+    if( .not. iofile_exists ) then
+      open(fp,file=iofile,status='replace')
+      write(fp,'(A)') "# per-isk breakdown of the coherence-norm diagnostics in "// &
+                     & "*_dm_unfold.data columns 88-91 (notes 053/054/064-067)"
+      write(fp,'(A)') "# columns 7-10 already include the wtk_ref(isk) weighting "// &
+                     & "(summing each over isk = the corresponding *_dm_unfold.data "// &
+                     & "columns 88-91 total); do not multiply by wtk_ref again. Divide "// &
+                     & "by column 6 to compare coherence strength across k-points instead."
+      write(fp,'(A)') "# 1:Time[a.u.] 2:isk 3:kx[bohr^-1] 4:ky[bohr^-1] 5:kz[bohr^-1] "// &
+                     & "6:wtk_ref 7:wtk_ref*C_diag_known(isk) 8:wtk_ref*C_intra(isk) "// &
+                     & "9:wtk_ref*C_inter(isk) 10:wtk_ref*C_unknown(isk)"
+    else
+      open(fp,file=iofile,status='old',position='append')
+    end if
+    do isk = 1, unfold%nsk
+      write(fp,'(f16.8,1x,i8,8(1x,es17.9e3))') itt*dt, isk, veck_isk(1:3,isk), unfold%wtk_ref(isk), &
+        & cdiagknown_isk(isk), cintra_isk(isk), cinter_isk(isk), cunknown_isk(isk)
+    end do
+    write(fp,*)
+    write(fp,*)
+    flush(fp)
+    close(fp)
   end if
 
   allocate( eta_uu_d(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),isk_s:isk_e) )
