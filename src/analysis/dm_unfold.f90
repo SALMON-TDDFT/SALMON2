@@ -20,6 +20,16 @@
 module dm_unfold_sub
   implicit none
 
+  ! -- TEMPORARY diagnostic target isk (Codex review note 082 / Claude-
+  ! Codex note 081): the Gamma point (k=0,0,0) is, for the current
+  ! sk=8^3/lk=4^3 Si mesh, the single isk where the P=I vs P/=I total S2
+  ! discrepancy is concentrated. Used below to gate a direct unitarity/
+  ! Gram-matrix check of Phase B's rotation at that one isk only, and a
+  ! matching Tr[eta_c] printout. Not a permanent feature -- remove once
+  ! that discrepancy is understood, and note that this isk index is only
+  ! valid for this particular mesh/ordering, not a general constant. --
+  integer,parameter :: isk_diag = 1688
+
 contains
 
   subroutine init_dm_unfold(lg,system,info,ofl,unfold)
@@ -103,6 +113,19 @@ contains
   integer,allocatable :: sort_perm(:), iord_memb(:)
   complex(8),allocatable :: R_total(:,:)
   real(8),allocatable :: esp_resync_l(:,:)
+
+  ! -- TEMPORARY diagnostic, isk=isk_diag (Gamma point) only: direct
+  ! unitarity/orthonormality check of Phase B's rotation, per Codex
+  ! review note 082 (w_family, Vs, Wfinal, R_total, and the actual
+  ! psi_ref write-back). See the module-level isk_diag comment above.
+  ! Not a permanent diagnostic feature. --
+  integer :: ilk_diag, ihk_diag, n_clusters_diag
+  logical :: found_diag
+  real(8) :: diag_veck(3), diag_resid
+  complex(8) :: zchk_diag
+  complex(8),allocatable :: psi_ref_before_diag(:,:), psi_ref_after_diag(:,:)
+  complex(8),allocatable :: psi_pred_diag(:,:)
+  complex(8),allocatable :: G_before_diag(:,:), G_after_diag(:,:), G_pred_diag(:,:)
 
   if( dm_unfold_option /= 'super' ) then
     if (comm_is_root(nproc_id_global)) then
@@ -1015,6 +1038,33 @@ contains
 
     do isk = isk_s, isk_e
 
+      if( isk == isk_diag ) then
+        ! -- TEMPORARY (isk_diag diagnostic, see module-level comment):
+        ! snapshot psi_ref for this isk BEFORE any Phase B cluster in it
+        ! is touched, and identify kappa_raw for this isk as a sanity
+        ! check that isk_diag really is the Gamma point on this mesh. --
+        n_clusters_diag = 0
+        found_diag = .false.
+        diag_veck = 0d0
+        do ilk_diag = info%ik_s, info%ik_e
+          do ihk_diag = 1, unfold%nhrsk
+            if( unfold%isk_tbl(ilk_diag,ihk_diag) == isk_diag ) then
+              diag_veck(:) = system%vec_k(:,ilk_diag) + unfold%vec_hrsk(:,ihk_diag)
+              found_diag = .true.
+              exit
+            end if
+          end do
+          if( found_diag ) exit
+        end do
+        if( comm_is_root(info%id_o) ) then
+          write(*,"(A,I0,A,L1,A,3ES12.4,A,I0)") 'Diag(GammaPhaseB): isk=', isk_diag, &
+            & '  found=', found_diag, '  kappa_raw=', diag_veck(1:3), '  nhprk=', nhprk
+        end if
+        allocate( psi_ref_before_diag(ntot_ref,no_ref) )
+        psi_ref_before_diag = reshape( unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,1:no_ref,isk,1), &
+          & [ntot_ref,no_ref] )
+      end if
+
       allocate( order_l(no_ref) )
       call argsort_real( no_ref, unfold%esp_ref(1:no_ref,isk,1), order_l )
 
@@ -1075,6 +1125,26 @@ contains
           call diagonalize_commuting_unitary_family( g_cl, nhprk, Tc_list, w_family, family_block_id, &
             & tol=unfold%tc_tol )
 
+          if( isk == isk_diag ) then
+            ! -- TEMPORARY (isk_diag diagnostic): stage (a), Codex note 082
+            ! -- ||w_family^H w_family - I||_max. --
+            n_clusters_diag = n_clusters_diag + 1
+            diag_resid = 0d0
+            do jj2 = 1, g_cl
+            do ii = 1, g_cl
+              zchk_diag = sum( conjg(w_family(1:g_cl,ii)) * w_family(1:g_cl,jj2) )
+              if( ii == jj2 ) zchk_diag = zchk_diag - (1d0,0d0)
+              diag_resid = max( diag_resid, abs(zchk_diag) )
+            end do
+            end do
+            if( comm_is_root(info%id_o) ) then
+              write(*,"(A,I0,A,I0)") 'Diag(GammaPhaseB): cluster #', n_clusters_diag, '  g_cl=', g_cl
+              write(*,"(A,ES14.6,A,ES14.6)") 'Diag(GammaPhaseB):   eps range = ', &
+                & minval(original_eps(1:g_cl)), ' .. ', maxval(original_eps(1:g_cl))
+              write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||w_family^H w_family - I||_max = ', diag_resid
+            end if
+          end if
+
           allocate( Wfinal(g_cl,g_cl), e_final(g_cl), label_final(g_cl), score_final(g_cl) )
 
           ib2 = 1
@@ -1093,6 +1163,23 @@ contains
             end do
             end do
             call eigen_zheev( Hs, Es, Vs )
+
+            if( isk == isk_diag ) then
+              ! -- TEMPORARY (isk_diag diagnostic): stage (a), Codex note
+              ! 082 -- ||Vs^H Vs - I||_max for this shared-hat_k block. --
+              diag_resid = 0d0
+              do jj2 = 1, gb
+              do ii = 1, gb
+                zchk_diag = sum( conjg(Vs(1:gb,ii)) * Vs(1:gb,jj2) )
+                if( ii == jj2 ) zchk_diag = zchk_diag - (1d0,0d0)
+                diag_resid = max( diag_resid, abs(zchk_diag) )
+              end do
+              end do
+              if( comm_is_root(info%id_o) ) then
+                write(*,"(A,I0,A,ES12.4)") 'Diag(GammaPhaseB):   block gb=', gb, &
+                  & '  ||Vs^H Vs - I||_max = ', diag_resid
+              end if
+            end if
 
             Wfinal(:,ib2:i1b) = matmul( w_family(:,ib2:i1b), Vs )
             e_final(ib2:i1b) = Es(1:gb)
@@ -1165,6 +1252,23 @@ contains
             end if
           end if
 
+          if( isk == isk_diag ) then
+            ! -- TEMPORARY (isk_diag diagnostic): stage (a), Codex note 082
+            ! -- ||Wfinal^H Wfinal - I||_max for the whole cluster (across
+            ! all its shared-hat_k blocks assembled together). --
+            diag_resid = 0d0
+            do jj2 = 1, g_cl
+            do ii = 1, g_cl
+              zchk_diag = sum( conjg(Wfinal(1:g_cl,ii)) * Wfinal(1:g_cl,jj2) )
+              if( ii == jj2 ) zchk_diag = zchk_diag - (1d0,0d0)
+              diag_resid = max( diag_resid, abs(zchk_diag) )
+            end do
+            end do
+            if( comm_is_root(info%id_o) ) then
+              write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||Wfinal^H Wfinal - I||_max = ', diag_resid
+            end if
+          end if
+
           deallocate( Tc_list, w_family, family_block_id )
 
           ! -- write the rotated states back into the SAME set of io_ref
@@ -1219,6 +1323,78 @@ contains
       end do
 
       deallocate( order_l )
+
+      if( isk == isk_diag ) then
+        ! -- TEMPORARY (isk_diag diagnostic): stage (a) Codex note 082 --
+        ! ||R_total^H R_total - I||_max over the whole no_ref x no_ref
+        ! rotation for this isk (identity outside touched clusters);
+        ! and stage (b) -- the actual psi_ref write-back, checked via
+        ! Psi_after vs Psi_before.R_total and the Gram matrices
+        ! G = hvol * Psi^H Psi before/after, compared against
+        ! R_total^H G_before R_total. --
+        diag_resid = 0d0
+        do jj2 = 1, no_ref
+        do ii = 1, no_ref
+          zchk_diag = sum( conjg(R_total(1:no_ref,ii)) * R_total(1:no_ref,jj2) )
+          if( ii == jj2 ) zchk_diag = zchk_diag - (1d0,0d0)
+          diag_resid = max( diag_resid, abs(zchk_diag) )
+        end do
+        end do
+        if( comm_is_root(info%id_o) ) then
+          write(*,"(A,I0,A,I0)") 'Diag(GammaPhaseB): isk=', isk, &
+            & '  clusters(g_cl>1)=', n_clusters_diag
+          write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||R_total^H R_total - I||_max = ', diag_resid
+        end if
+
+        allocate( psi_ref_after_diag(ntot_ref,no_ref) )
+        psi_ref_after_diag = reshape( unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,1:no_ref,isk,1), &
+          & [ntot_ref,no_ref] )
+
+        allocate( psi_pred_diag(ntot_ref,no_ref) )
+        psi_pred_diag = matmul( psi_ref_before_diag, R_total(1:no_ref,1:no_ref) )
+        diag_resid = maxval( abs( psi_pred_diag - psi_ref_after_diag ) )
+        if( comm_is_root(info%id_o) ) then
+          write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||Psi_after - Psi_before.R_total||_max = ', diag_resid
+        end if
+
+        allocate( G_before_diag(no_ref,no_ref), G_after_diag(no_ref,no_ref), G_pred_diag(no_ref,no_ref) )
+        G_before_diag = system%hvol * matmul( conjg(transpose(psi_ref_before_diag)), psi_ref_before_diag )
+        G_after_diag  = system%hvol * matmul( conjg(transpose(psi_ref_after_diag)),  psi_ref_after_diag  )
+        G_pred_diag   = matmul( conjg(transpose(R_total(1:no_ref,1:no_ref))), &
+          & matmul( G_before_diag, R_total(1:no_ref,1:no_ref) ) )
+
+        diag_resid = 0d0
+        do jj2 = 1, no_ref
+        do ii = 1, no_ref
+          zchk_diag = G_before_diag(ii,jj2)
+          if( ii == jj2 ) zchk_diag = zchk_diag - (1d0,0d0)
+          diag_resid = max( diag_resid, abs(zchk_diag) )
+        end do
+        end do
+        if( comm_is_root(info%id_o) ) then
+          write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||G_before - I||_max (pre-rotation orthonormality) = ', diag_resid
+        end if
+
+        diag_resid = 0d0
+        do jj2 = 1, no_ref
+        do ii = 1, no_ref
+          zchk_diag = G_after_diag(ii,jj2)
+          if( ii == jj2 ) zchk_diag = zchk_diag - (1d0,0d0)
+          diag_resid = max( diag_resid, abs(zchk_diag) )
+        end do
+        end do
+        if( comm_is_root(info%id_o) ) then
+          write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||G_after - I||_max (post-rotation orthonormality) = ', diag_resid
+        end if
+
+        diag_resid = maxval( abs( G_after_diag - G_pred_diag ) )
+        if( comm_is_root(info%id_o) ) then
+          write(*,"(A,ES12.4)") 'Diag(GammaPhaseB):   ||G_after - R_total^H G_before R_total||_max = ', diag_resid
+        end if
+
+        deallocate( psi_ref_before_diag, psi_ref_after_diag, psi_pred_diag )
+        deallocate( G_before_diag, G_after_diag, G_pred_diag )
+      end if
 
       ! -- apply R_total (identity outside touched clusters) to the whole
       ! isk slice of upu_ref/u_rVnl_Vnlr_u_ref at once, so that off-
@@ -1515,6 +1691,11 @@ contains
     real(8),allocatable :: cdiagknown_c_isk_l(:),cintra_c_isk_l(:),cinter_c_isk_l(:),cunknown_c_isk_l(:)
     real(8),allocatable :: cdiagknown_c_isk(:),cintra_c_isk(:),cinter_c_isk(:),cunknown_c_isk(:)
     complex(8) :: zsum_c, zsum_c_l
+    ! -- TEMPORARY diagnostic (isk_diag, see module-level comment): a
+    ! matching Tr[eta_c] at the Gamma point, per Codex review note 082
+    ! point 6 (compare this, not just the S2 total, between P=I and
+    ! P/=I runs). Not a permanent diagnostic feature. --
+    complex(8) :: zsum_c_diag, zsum_c_diag_l
 
     allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
@@ -1933,6 +2114,19 @@ contains
     eta_c = 0.0d0
     call comm_summation(eta_c_l,eta_c,no_ref*no_ref*nsk_se,info%icomm_o)
 
+    ! -- TEMPORARY diagnostic (isk_diag, see module-level comment):
+    ! Tr[eta_c] at the Gamma point only, per Codex review note 082 point
+    ! 6. Whichever k-rank owns isk_diag has the full (already orbital-
+    ! summed) eta_c(:,:,isk_diag) here; reducing over icomm (=icomm_k)
+    ! mirrors the cdiagknown_c/zsum_c reduction just below. --
+    zsum_c_diag_l = (0d0,0d0)
+    if( isk_diag >= isk_s .and. isk_diag <= isk_e ) then
+      do io_ref1 = 1, no_ref
+        zsum_c_diag_l = zsum_c_diag_l + eta_c(io_ref1, io_ref1, isk_diag)
+      end do
+    end if
+    zsum_c_diag = (0d0,0d0)
+
     ! Corrected coherence-norm diagnostics: same classification
     ! (unfold%hprk_label) and wtk_ref weighting as cdiagknown/cintra/
     ! cinter/cunknown above (lines computing cdiagknown_l etc.), applied
@@ -1986,6 +2180,7 @@ contains
     call comm_summation(cinter_c_l,cinter_c,icomm)
     call comm_summation(cunknown_c_l,cunknown_c,icomm)
     call comm_summation(zsum_c_l,zsum_c,icomm)
+    call comm_summation(zsum_c_diag_l,zsum_c_diag,icomm)   ! TEMPORARY (isk_diag diagnostic)
 
     allocate( cdiagknown_c_isk(unfold%nsk), cintra_c_isk(unfold%nsk), &
             & cinter_c_isk(unfold%nsk), cunknown_c_isk(unfold%nsk) )
@@ -2005,6 +2200,7 @@ contains
       write(*,'(A,7x,f17.12)')  'C_unknown_c                       ', cunknown_c
       write(*,'(A,7x,f17.12)')  '  (uncorrected, for reference) C_intra =', cintra
       write(*,'(A,7x,f17.12)')  '  (uncorrected, for reference) C_inter =', cinter
+      write(*,'(A,7x,2f17.12)') 'Diag(GammaPhaseB): Tr[eta_c] at isk_diag ', real(zsum_c_diag), aimag(zsum_c_diag)
     end if
 
     if(comm_is_root(nproc_id_global))then
