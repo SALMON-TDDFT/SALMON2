@@ -2137,7 +2137,7 @@ subroutine symmetry_checkpoint_metadata(wdir,system,info,writing)
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_is_root,comm_bcast
   use salmon_global, only: xc
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   character(*),intent(in) :: wdir
   type(s_dft_system),intent(in) :: system
@@ -2199,7 +2199,7 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_is_root,comm_bcast
   use salmon_global, only: xc,dt,e_impulse,epdir_re1,propagator,trans_longi,file_pseudo,nelem,ae_shape1,hse_omega
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   character(*),intent(in) :: wdir
   type(s_dft_system),intent(in) :: system

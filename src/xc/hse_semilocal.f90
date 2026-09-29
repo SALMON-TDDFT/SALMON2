@@ -1,7 +1,7 @@
 ! Libxc C ABI avoids compiler-specific libxcf03 module dependencies.
 module hse_semilocal
   use iso_c_binding
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   private
   public :: hse_semilocal_evaluate

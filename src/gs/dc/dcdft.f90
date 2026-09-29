@@ -382,7 +382,7 @@ contains
     subroutine check_dcdft_complex_options
       use plusU_global, only: PLUS_U_ON
       use salmon_global, only: num_kgrid, temperature, yn_spinorbit
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       implicit none
       logical :: complex_path
 

@@ -2774,7 +2774,7 @@ contains
   end subroutine dump_input_common
 
   subroutine check_bad_input
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use parallelization
     use communication
     implicit none

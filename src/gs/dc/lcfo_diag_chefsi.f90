@@ -357,7 +357,7 @@ contains
     end subroutine finalize_workspace
 
     subroutine initialize_subspace(s,layout,x)
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout), intent(in) :: layout
@@ -512,7 +512,7 @@ contains
 
     subroutine chebyshev_filter(s,layout_n,layout_d,x,lower,cutoff,upper, &
     & fallback_upper,nlocked,workspace)
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       use timer, only: LOG_CHEFSI_FILTER,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s,nlocked
@@ -879,7 +879,7 @@ contains
 
     subroutine estimate_upper_bound(s,layout,workspace,lower,cutoff, &
     & gershgorin_upper,upper,lanczos_ritz,lanczos_residual,nsteps)
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       use timer, only: LOG_CHEFSI_LANCZOS,timer_begin,timer_end
       implicit none
       integer, intent(in) :: s
@@ -942,7 +942,7 @@ contains
 
     subroutine lanczos_upper_bound(s,layout,workspace,ritz,residual, &
     & nsteps)
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       implicit none
       integer, intent(in) :: s
       type(s_matrix_layout), intent(in) :: layout
