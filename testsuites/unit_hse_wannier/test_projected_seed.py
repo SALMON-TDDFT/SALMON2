@@ -1,8 +1,9 @@
-"""Regress the symmetric identity-gauge saddle and deferred reseeding.
+"""Regress Gamma Jacobi saddle escape, projected seeds and deferred reseeding.
 
 Run with --build PATH or SALMON_BUILD=PATH after building SALMON with HSE/MPI.
 The probe compiles the current spatial module against the build's dependencies.
 """
+import shlex
 import argparse
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ def main():
     build = args.build.resolve()
     objects = build / 'src/CMakeFiles/salmon.dir'
     dependencies = [
-        'xc/exx_orbitals.f90.o', 'xc/exx_ace.f90.o',
+        'xc/exx_distributed_gauge.f90.o','xc/exx_distributed_metric.f90.o','xc/exx_orbitals.f90.o', 'xc/exx_ace.f90.o',
         'xc/exx_batch_backend.f90.o','xc/exx_spatial_local.f90.o', 'xc/exx_wannier_gauge.f90.o',
         'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o',
         'parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o',
@@ -38,7 +39,7 @@ def main():
             str(Path(__file__).with_name('projected_seed_probe.f90')),
             *[str(objects / name) for name in dependencies],
             '-L' + str(fftw / 'lib'), '-lfftw3',
-            '-L' + str(blas / 'lib'), '-lopenblas', '-o', str(executable),
+            '-L' + str(blas / 'lib'), *(shlex.split(os.environ.get('SCALAPACK_LIBS', '-L/opt/homebrew/opt/scalapack/lib -lscalapack')) if 'USE_SCALAPACK:BOOL=ON' in (build / 'CMakeCache.txt').read_text() else []),'-lopenblas', '-o', str(executable),
         ], cwd=tmp, check=True)
         for ranks in (1, 2, 4):
             subprocess.run([

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--gpu', action='store_true')
 p.add_argument('--ranks', type=int, nargs='+', default=[1, 2, 3, 4])
+p.add_argument('--threads', type=int, default=1)
 p.add_argument('--mpi-args', default='', help='site-specific launcher mapping options')
 a = p.parse_args()
 if any(n < 1 for n in a.ranks):
@@ -36,4 +37,4 @@ with tempfile.TemporaryDirectory(prefix='salmon-k-cufft-') as tmp:
     for ranks in a.ranks:
         subprocess.run([os.environ.get('MPIEXEC', 'mpiexec'), *shlex.split(a.mpi_args), '-n', str(ranks), str(exe)],
                        check=True, timeout=120,
-                       env=dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1'))
+                       env=dict(os.environ, OMP_NUM_THREADS=str(a.threads), OPENBLAS_NUM_THREADS='1'))

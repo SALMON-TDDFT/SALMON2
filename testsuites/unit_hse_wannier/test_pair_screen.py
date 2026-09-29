@@ -1,4 +1,5 @@
 """Discrete HSE pair bounds, diagnose/on, compact parity and MPI regression."""
+import shlex
 import argparse
 import os
 from pathlib import Path
@@ -17,7 +18,7 @@ def main():
     build = args.build.resolve()
     objects = build / 'src/CMakeFiles/salmon.dir'
     dependencies = [
-        'xc/exx_ace.f90.o',
+        'xc/exx_distributed_gauge.f90.o','xc/exx_distributed_metric.f90.o','xc/exx_ace.f90.o',
         'xc/exx_wannier_gauge.f90.o',
         'xc/exx_local_fft.f90.o', 'xc/fftw_pencils.f90.o',
         'parallel/communication.f90.o', 'misc/nvtx_wrapper.f90.o',
@@ -37,7 +38,7 @@ def main():
             str(Path(__file__).with_name('pair_screen_probe.f90')),
             *[str(objects / name) for name in dependencies],
             '-L' + str(fftw / 'lib'), '-lfftw3',
-            '-L' + str(blas / 'lib'), '-lopenblas', '-o', str(executable),
+            '-L' + str(blas / 'lib'), *(shlex.split(os.environ.get('SCALAPACK_LIBS', '-L/opt/homebrew/opt/scalapack/lib -lscalapack')) if 'USE_SCALAPACK:BOOL=ON' in (build / 'CMakeCache.txt').read_text() else []),'-lopenblas', '-o', str(executable),
         ], cwd=tmp, check=True)
         for ranks in (1, 2, 4):
             subprocess.run([

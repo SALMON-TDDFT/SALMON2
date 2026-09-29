@@ -5,12 +5,13 @@ program probe
   implicit none
   type(exx_k_kernel) :: kernel
   type(s_exx_wannier) :: reference
-  integer :: rank,np,ierr,status,n(3),mesh(3),nk,ng,no,nt,i,j,g,x,y,z,mode,first,last
+  integer :: rank,np,ierr,status,test_comm,n(3),mesh(3),nk,ng,no,nt,i,j,g,x,y,z,mode,first,last
   integer,allocatable :: starts(:),counts(:)
   real(8) :: h(3),omega,radius,err,scale
   real(8),allocatable :: k(:,:),occ(:,:)
   complex(8),allocatable :: source(:,:,:),target(:,:,:),expected(:,:,:),actual(:,:,:)
   call MPI_Init(ierr)
+ call MPI_Comm_dup(MPI_COMM_WORLD,test_comm,ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
   call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
   n=[3,2,4];mesh=[2,3,1];h=[.6d0,.8d0,.7d0];ng=product(n);nk=product(mesh);no=2;nt=3
@@ -45,7 +46,7 @@ program probe
     call exx_k_kernel_init(kernel,n,mesh,h,k,omega,5,status,first,counts(rank+1),coulomb_radius=radius)
     if(status/=0)error stop 'distributed init'
     call exx_k_kernel_apply_distributed(kernel,source(:,:,first:last),target(:,:,first:last),actual, &
-      starts,counts,rank,transpose_tiles,status)
+      starts,counts,rank,test_comm,transpose_tiles,status)
     if(status/=0)error stop 'distributed action'
     err=maxval(abs(actual-expected(:,:,first:last)));scale=max(1d0,maxval(abs(expected)))
     if(err>2d-11*scale)then
@@ -56,15 +57,17 @@ program probe
     call exx_k_kernel_destroy(kernel)
     call wannier_destroy(reference)
   enddo
-  call MPI_Finalize(ierr)
+  call MPI_Comm_free(test_comm,ierr)
+ call MPI_Finalize(ierr)
 contains
-  subroutine transpose_tiles(send,recv,count)
+  subroutine transpose_tiles(send,recv,count,comm)
     implicit none
     complex(8),intent(in) :: send(:)
     complex(8),intent(out) :: recv(:)
-    integer,intent(in) :: count
+    integer,intent(in) :: count,comm
     integer :: stat
-    call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,MPI_COMM_WORLD,stat)
+    if(comm/=test_comm.or.comm==MPI_COMM_NULL)error stop 'wrong explicit transpose communicator'
+  call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,comm,stat)
     if(stat/=MPI_SUCCESS)error stop 'test transpose'
   end subroutine
 end program

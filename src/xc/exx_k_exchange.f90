@@ -341,20 +341,20 @@ contains
 
   ! K-distributed source/target/action; transpose density tiles, never orbitals.
   ! Caller supplies identical layout/kernel metadata and communicator size on all ranks.
-  subroutine exx_k_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr,fill_density)
+  subroutine exx_k_kernel_apply_distributed(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr,fill_density)
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
-    integer,intent(in) :: starts(:),counts(:),rank
+    integer,intent(in) :: starts(:),counts(:),rank,comm
     integer,intent(out) :: ierr
     interface
-      subroutine transpose_tiles(send,recv,count)
+      subroutine transpose_tiles(send,recv,count,comm)
         import c_double_complex
         implicit none
         complex(c_double_complex),intent(in) :: send(:)
         complex(c_double_complex),intent(out) :: recv(:)
-        integer,intent(in) :: count
+        integer,intent(in) :: count,comm
       end subroutine
       subroutine fill_density(j,lo,rows,density)
         import c_double_complex
@@ -401,7 +401,7 @@ contains
     ! Fixed-size handshake must agree before variable-size tile collectives.
     valid_send=cmplx(b,merge(2,0,allocated(op%accelerator)),c_double)
     if(.not.valid)valid_send=cmplx(b,-1,c_double)
-    call transpose_tiles(valid_send,valid_recv,1)
+    call transpose_tiles(valid_send,valid_recv,1,comm)
     if(any(real(valid_recv)/=real(b,c_double)).or. &
        any(aimag(valid_recv)/=real(merge(2,0,allocated(op%accelerator)),c_double)))return
     km=maxval(counts);nmsg=b*ng*km
@@ -421,7 +421,10 @@ contains
     enddo;enddo
     if(allocated(op%accelerator))then
       call op%accelerator%prepare(op%n,op%mesh,b,op%kernel,op%point,op%shift,slot,km*np,ierr)
-      call backend_status_collective()
+      valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
+      call transpose_tiles(valid_send,valid_recv,1,comm)
+      ierr=0
+      if(any(real(valid_recv)/=0d0))ierr=1
       if(ierr/=0)return
     endif
     batch_rows=min(ng,np*b)
@@ -466,13 +469,16 @@ contains
         enddo
       endif
       if(op%profile)call mark_stage(op,1,stamp)
-      call transpose_tiles(send,recv,nmsg)
+      call transpose_tiles(send,recv,nmsg,comm)
       if(op%profile)call mark_stage(op,2,stamp)
       if(allocated(op%accelerator))then
         lo=base+rank*b;rows=max(0,min(b,ng-lo+1))
         call op%accelerator%apply(lo,rows,flat_recv,flat_send,ierr)
         ! A failed rank must not leave peers entering the next tile transpose.
-        call backend_status_collective()
+        valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
+        call transpose_tiles(valid_send,valid_recv,1,comm)
+        ierr=0
+        if(any(real(valid_recv)/=0d0))ierr=1
         if(ierr/=0)return
         ! Device packing/FFT/kernel/transfers are a combined measured stage.
         if(op%profile)call mark_stage(op,3,stamp)
@@ -508,7 +514,7 @@ contains
       endif
       if(op%profile)call mark_stage(op,5,stamp)
       endif
-      call transpose_tiles(send,recv,nmsg)
+      call transpose_tiles(send,recv,nmsg,comm)
       if(op%profile)call mark_stage(op,2,stamp)
       ! BLAS owns threading here; call only outside application OpenMP regions.
       do p=0,np-1
@@ -525,14 +531,6 @@ contains
       if(op%profile)call mark_stage(op,6,stamp)
     enddo
     ierr=0
-  contains
-    subroutine backend_status_collective()
-      implicit none
-      valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
-      call transpose_tiles(valid_send,valid_recv,1)
-      ierr=0
-      if(any(real(valid_recv)/=0d0))ierr=1
-    end subroutine
   end subroutine
 
   subroutine transpose_contiguous(op,buffer,slot,unpack)

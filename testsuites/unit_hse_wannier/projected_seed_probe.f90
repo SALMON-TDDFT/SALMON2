@@ -1,5 +1,5 @@
 ! A symmetric pair of occupied combinations has zero spread gradient but is
-! delocalized. The opt-in projected-position seed must escape this saddle.
+! delocalized. Gamma Jacobi and the optional projected seed must both escape it.
 program probe
  use mpi
  use exx_spatial
@@ -20,7 +20,7 @@ program probe
  call spatial_exx_refresh(plain,n,[1d0,1d0,1d0],[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF], &
   MPI_COMM_WORLD,psi,20,1d-10,status)
  if(rank==0)print *,'PLAIN status/spread/gradient: ',status,plain%spread,plain%gradient
- if(status/=0.or.plain%spread<1d0.or.plain%gradient>1d-10)error stop 'identity saddle not reproduced'
+ if(status/=0.or.plain%spread>1d-8.or.plain%gradient>1d-10)error stop 'Gamma Jacobi failed to escape saddle'
  canonical=plain
  call spatial_exx_canonical_source(canonical,psi,reshape([2d0,.5d0],[2,1]),MPI_COMM_WORLD,status)
  if(status/=0.or.allocated(canonical%gauge).or.allocated(canonical%previous))error stop 'canonical gauge allocation'

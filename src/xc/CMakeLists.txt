@@ -31,7 +31,9 @@ if(USE_HSE)
     exx_symmetry.f90
     exx_k_exchange.f90
     exx_ace.f90
+    exx_distributed_metric.f90
     exx_orbitals.f90
+    exx_distributed_gauge.f90
     hybrid_semilocal.f90
     exx_spatial.f90
     exx_native.f90

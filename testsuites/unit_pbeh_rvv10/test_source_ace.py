@@ -13,6 +13,7 @@ class SourceACE(unittest.TestCase):
     def test_mesh_rt_and_layouts(self):
         results={}
         for support,fraction,ranks,orbitals in [('occupied',1,1,1),('source',1,1,1),
+                ('occupied',1,2,1),('occupied',1,2,2),
                 ('occupied',.999,1,1),('source',.999,1,1),('source',.999,2,1),('source',.999,2,2)]:
             inp=self.rt_input(nt=16,dt=.02,impulse=1e-4,moving=False)
             inp=inp.replace(f"xc='{self.functional}'",f"xc='{self.functional}'\n exx_ace_support='{support}'\n exx_mlwf_norm_fraction={fraction}")
@@ -30,6 +31,8 @@ class SourceACE(unittest.TestCase):
             results[support,fraction,ranks,orbitals]=(c,e)
         for a,b in zip(results['source',1,1,1],results['occupied',1,1,1]):np.testing.assert_allclose(a,b,atol=2e-8,rtol=0)
         for ranks,orbitals in [(2,1),(2,2)]:
+            for a,b in zip(results['occupied',1,ranks,orbitals],results['occupied',1,1,1]):
+                np.testing.assert_allclose(a,b,atol=2e-8,rtol=0)
             for a,b in zip(results['source',.999,ranks,orbitals],results['source',.999,1,1]):np.testing.assert_allclose(a,b,atol=2e-8,rtol=0)
         f,s=results['occupied',.999,1,1],results['source',.999,1,1]
         print('SOURCE_ACE current difference / energy difference / energy width',

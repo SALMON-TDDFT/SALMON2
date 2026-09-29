@@ -87,12 +87,13 @@ program probe
  implicit none
  type(exx_k_kernel) :: cpu,device
  procedure(k_backend_factory),pointer :: factory
- integer :: rank,np,ierr,status,n(3),m(3),nk,ng,p,j,g,pass,mode,block,x,y,z,i
+ integer :: rank,np,ierr,status,test_comm,n(3),m(3),nk,ng,p,j,g,pass,mode,block,x,y,z,i
  integer,allocatable :: starts(:),counts(:)
  real(8),allocatable :: k(:,:)
  complex(8),allocatable :: source(:,:,:),target(:,:,:),a(:,:,:),b(:,:,:)
  real(8) :: err,scale,h(3),omega
  call MPI_Init(ierr)
+ call MPI_Comm_dup(MPI_COMM_WORLD,test_comm,ierr)
  call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
  call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
  factory=>create_oracle
@@ -131,9 +132,9 @@ program probe
   if(status/=0.or..not.allocated(device%accelerator))error stop 'device init'
   if(allocated(device%work))error stop 'unused CPU FFT workspace allocated'
   do pass=1,2
-   call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,transpose_tiles,status)
+   call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,test_comm,transpose_tiles,status)
    if(status/=0)error stop 'cpu apply'
-   call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
+   call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
    if(status/=0)error stop 'device apply'
    scale=max(1d0,maxval(abs(a)));err=maxval(abs(a-b))/scale
    if(err>3d-12)error stop 'distributed backend parity'
@@ -147,19 +148,19 @@ program probe
    if(backend%calls/=2*((ng+np*block-1)/(np*block)))error stop 'tile calls'
   end select
   fail_prepare=rank==0
-  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
+  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
   if(status==0)error stop 'prepare failure not collective'
   fail_prepare=.false.;fail_apply=rank==0
-  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
+  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
   if(status==0)error stop 'apply failure not collective'
   fail_apply=.false.
 #endif
   if(np>1)then
    ! Mismatched backend selection must fail in the first fixed-size handshake.
    if(rank==0)then
-    call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,transpose_tiles,status)
+    call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,test_comm,transpose_tiles,status)
    else
-    call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
+    call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
    endif
    if(status==0)error stop 'mixed backend accepted'
   endif
@@ -173,15 +174,17 @@ program probe
  if(release_count/=4)error stop 'release lifecycle'
 #endif
  if(rank==0)print *, 'PASS distributed k backend parity, tails and lifecycle',np
+ call MPI_Comm_free(test_comm,ierr)
  call MPI_Finalize(ierr)
 contains
- subroutine transpose_tiles(send,recv,count)
+ subroutine transpose_tiles(send,recv,count,comm)
   implicit none
   complex(8),intent(in) :: send(:)
   complex(8),intent(out) :: recv(:)
-  integer,intent(in) :: count
+  integer,intent(in) :: count,comm
   integer :: e
-  call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,MPI_COMM_WORLD,e)
+  if(comm/=test_comm.or.comm==MPI_COMM_NULL)error stop 'wrong explicit transpose communicator'
+  call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,comm,e)
   if(e/=MPI_SUCCESS)call MPI_Abort(MPI_COMM_WORLD,4,e)
  end subroutine
 end program

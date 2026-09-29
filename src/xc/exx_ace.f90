@@ -19,6 +19,10 @@ module exx_ace
     real(c_double) :: dv=0d0,condition=0d0
     ! Exact-nonzero W and A=V/sqrt(e) with A A^H=(-U^H W dv)^-1.
     logical :: packed=.false.
+    ! No BLACS context is retained: ordinary assignment safely copies this state.
+    logical :: metric_distributed=.false.
+    integer :: metric_comm=0,metric_order=0
+    integer,allocatable :: metric_rows(:),metric_cols(:)
     integer :: grid_rows=0
     integer,allocatable :: offset(:),row(:)
     complex(c_double_complex),allocatable :: values(:),metric_factor(:,:)

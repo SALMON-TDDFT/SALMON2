@@ -1,0 +1,196 @@
+{
+  "mpi": 8,
+  "omp": 1,
+  "blas_threads": 1,
+  "steps": 16,
+  "binaries": {
+    "replicated": "239bdb1e990276b87ff607e3282ffa6c97fa2d63824924f7eb8ad29af9a16ce0",
+    "ace": "d14295f5cd8a0dafb56a1bb954855c709127381e99e8b532d8a7051bcc8acbab",
+    "all": "5c0cef079e414d973763177a77e875f4d66a07c3e4393d0f85415432047f0c43"
+  },
+  "source_results": [
+    "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/results.json"
+  ],
+  "summary": [
+    {
+      "states": 64,
+      "mode": "replicated",
+      "count": 1,
+      "rt_seconds_per_step": {
+        "median": 3.1948125,
+        "minimum": 3.1948125,
+        "maximum": 3.1948125
+      },
+      "rt_max_seconds": {
+        "median": 51.117,
+        "minimum": 51.117,
+        "maximum": 51.117
+      },
+      "wall_seconds": {
+        "median": 53.98074279201683,
+        "minimum": 53.98074279201683,
+        "maximum": 53.98074279201683
+      },
+      "peak_rank_bytes": {
+        "median": 1021378560,
+        "minimum": 1021378560,
+        "maximum": 1021378560
+      },
+      "current_difference_max": 0.0,
+      "energy_difference_max_ha": 0.0,
+      "directories": [
+        "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/n64-replicated-mpi8-omp1-r1"
+      ]
+    },
+    {
+      "states": 64,
+      "mode": "ace",
+      "count": 1,
+      "rt_seconds_per_step": {
+        "median": 2.656875,
+        "minimum": 2.656875,
+        "maximum": 2.656875
+      },
+      "rt_max_seconds": {
+        "median": 42.51,
+        "minimum": 42.51,
+        "maximum": 42.51
+      },
+      "wall_seconds": {
+        "median": 45.31222362499102,
+        "minimum": 45.31222362499102,
+        "maximum": 45.31222362499102
+      },
+      "peak_rank_bytes": {
+        "median": 1021935616,
+        "minimum": 1021935616,
+        "maximum": 1021935616
+      },
+      "current_difference_max": 1.0164395367051604e-20,
+      "energy_difference_max_ha": 9.947598300641403e-14,
+      "directories": [
+        "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/n64-ace-mpi8-omp1-r1"
+      ]
+    },
+    {
+      "states": 64,
+      "mode": "all",
+      "count": 1,
+      "rt_seconds_per_step": {
+        "median": 3.3341875,
+        "minimum": 3.3341875,
+        "maximum": 3.3341875
+      },
+      "rt_max_seconds": {
+        "median": 53.347,
+        "minimum": 53.347,
+        "maximum": 53.347
+      },
+      "wall_seconds": {
+        "median": 56.460940249991836,
+        "minimum": 56.460940249991836,
+        "maximum": 56.460940249991836
+      },
+      "peak_rank_bytes": {
+        "median": 953958400,
+        "minimum": 953958400,
+        "maximum": 953958400
+      },
+      "current_difference_max": 1.0164395367051604e-20,
+      "energy_difference_max_ha": 9.947598300641403e-14,
+      "directories": [
+        "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/n64-all-mpi8-omp1-r1"
+      ]
+    },
+    {
+      "states": 128,
+      "mode": "replicated",
+      "count": 1,
+      "rt_seconds_per_step": {
+        "median": 18.443125,
+        "minimum": 18.443125,
+        "maximum": 18.443125
+      },
+      "rt_max_seconds": {
+        "median": 295.09,
+        "minimum": 295.09,
+        "maximum": 295.09
+      },
+      "wall_seconds": {
+        "median": 307.17366566698183,
+        "minimum": 307.17366566698183,
+        "maximum": 307.17366566698183
+      },
+      "peak_rank_bytes": {
+        "median": 3504160768,
+        "minimum": 3504160768,
+        "maximum": 3504160768
+      },
+      "current_difference_max": 0.0,
+      "energy_difference_max_ha": 0.0,
+      "directories": [
+        "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/n128-replicated-mpi8-omp1-r1"
+      ]
+    },
+    {
+      "states": 128,
+      "mode": "ace",
+      "count": 1,
+      "rt_seconds_per_step": {
+        "median": 12.60125,
+        "minimum": 12.60125,
+        "maximum": 12.60125
+      },
+      "rt_max_seconds": {
+        "median": 201.62,
+        "minimum": 201.62,
+        "maximum": 201.62
+      },
+      "wall_seconds": {
+        "median": 208.75135908299126,
+        "minimum": 208.75135908299126,
+        "maximum": 208.75135908299126
+      },
+      "peak_rank_bytes": {
+        "median": 3619340288,
+        "minimum": 3619340288,
+        "maximum": 3619340288
+      },
+      "current_difference_max": 1.0164395367051604e-20,
+      "energy_difference_max_ha": 9.947598300641403e-13,
+      "directories": [
+        "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/n128-ace-mpi8-omp1-r1"
+      ]
+    },
+    {
+      "states": 128,
+      "mode": "all",
+      "count": 1,
+      "rt_seconds_per_step": {
+        "median": 19.155625,
+        "minimum": 19.155625,
+        "maximum": 19.155625
+      },
+      "rt_max_seconds": {
+        "median": 306.49,
+        "minimum": 306.49,
+        "maximum": 306.49
+      },
+      "wall_seconds": {
+        "median": 319.53570204100106,
+        "minimum": 319.53570204100106,
+        "maximum": 319.53570204100106
+      },
+      "peak_rank_bytes": {
+        "median": 3360997376,
+        "minimum": 3360997376,
+        "maximum": 3360997376
+      },
+      "current_difference_max": 1.0164395367051604e-20,
+      "energy_difference_max_ha": 9.947598300641403e-13,
+      "directories": [
+        "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/work/matrix-memory-tradeoff/mpi8-omp1/n128-all-mpi8-omp1-r1"
+      ]
+    }
+  ]
+}

@@ -1,8 +1,10 @@
 ! Column-streamed linear algebra on a Cartesian spatial/orbital process grid.
-! Only band matrices are replicated; mesh arrays contain local orbital columns.
+! Mesh arrays contain local orbital columns; ScaLAPACK ACE metrics use tiles.
 module exx_orbitals
   use communication, only: comm_get_groupinfo,comm_get_max,comm_summation,comm_bcast
   use exx_ace, only: s_exx_ace,exx_ace_clear
+  use exx_distributed_metric, only: distributed_metric_available,distributed_metric_build, &
+    distributed_metric_rotate,distributed_metric_apply
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
@@ -152,13 +154,14 @@ contains
     status=0
   end subroutine
 
-  subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed)
+  subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed,comm_matrix)
     implicit none
     type(s_exx_ace),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:,:),w(:,:,:)
     real(8),intent(in) :: dv
     integer,intent(in) :: comm_r,comm_o
     integer,intent(out) :: status
+    integer,intent(in),optional :: comm_matrix
     logical,intent(in),optional :: packed
     logical :: store_packed
     integer,allocatable :: counts(:)
@@ -178,11 +181,30 @@ contains
     call orbital_layout(size(u,2),comm_r,comm_o,counts,first,bad)
     if(bad/=0.or.sum(counts)<1)return
     n=sum(counts)
-    allocate(metric(n,n),work(2*n),e(n),rwork(max(1,3*n-2)))
     nonzero=0
     if(any(w/=(0d0,0d0)))nonzero=1
     call orbital_check(nonzero,comm_r,comm_o)
     ace%dv=dv;ace%condition=0d0
+    if(present(comm_matrix))then
+      if(distributed_metric_available(comm_matrix))then
+        call distributed_metric_build(ace,u(:,:,1),w(:,:,1),dv,comm_o,comm_matrix,counts,first,nonzero,bad)
+        if(bad/=0)then
+          call exx_ace_clear(ace)
+          return
+        endif
+        if(store_packed)then
+          call pack_action()
+        else
+          allocate(ace%factors(size(u,1),size(u,2),1))
+          call distributed_metric_rotate(ace,w(:,:,1),comm_o,counts,first,ace%factors(:,:,1))
+          deallocate(ace%metric_factor,ace%metric_rows,ace%metric_cols)
+          ace%metric_distributed=.false.
+        endif
+        status=0
+        return
+      endif
+    endif
+    allocate(metric(n,n),work(2*n),e(n),rwork(max(1,3*n-2)))
     if(nonzero==0)then
       if(store_packed)then
         allocate(ace%metric_factor(n,n));ace%metric_factor=0d0
@@ -292,8 +314,11 @@ contains
     integer,intent(out) :: status
     integer,allocatable :: counts(:),target_counts(:)
     complex(8),allocatable :: column(:),partial_action(:),total_action(:),overlap(:),overlap_o(:),overlap_r(:),coeff(:),rotated(:)
-    integer :: bad,ng,n,first,target_first,rank,np,owner,i,j,k,start,finish
+    integer :: bad,ng,n,first,target_first,rank,np,owner,i,j,k,start,finish,distributed_mode
     status=1;action=0d0;bad=0;ng=size(target,1)
+    distributed_mode=merge(1,0,ace%metric_distributed)
+    call orbital_check(distributed_mode,comm_r,comm_o)
+    if((distributed_mode==1).neqv.ace%metric_distributed)bad=1
     if(.not.allocated(ace%offset).or..not.allocated(ace%row).or. &
        .not.allocated(ace%values).or..not.allocated(ace%metric_factor))bad=1
     call orbital_check(bad,comm_r,comm_o)
@@ -314,7 +339,18 @@ contains
     call orbital_layout(size(ace%offset)-1,comm_r,comm_o,counts,first,bad)
     if(bad/=0)return
     n=sum(counts)
-    if(n<1.or.any(shape(ace%metric_factor)/=[n,n]))bad=1
+    if(n<1)bad=1
+    if(ace%metric_distributed)then
+      if(.not.allocated(ace%metric_rows).or..not.allocated(ace%metric_cols))bad=1
+      call orbital_check(bad,comm_r,comm_o)
+      if(bad/=0)return
+      if(ace%metric_order/=n)bad=1
+      if(any(shape(ace%metric_factor)/=[size(ace%metric_rows),size(ace%metric_cols)]))bad=1
+      if(any(ace%metric_rows<0).or.any(ace%metric_rows>n))bad=1
+      if(any(ace%metric_cols<0).or.any(ace%metric_cols>n))bad=1
+    else
+      if(any(shape(ace%metric_factor)/=[n,n]))bad=1
+    endif
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(size(target,2),comm_r,comm_o,target_counts,target_first,bad)
@@ -335,8 +371,12 @@ contains
         call comm_summation(overlap_o,overlap_r,n,comm_r)
         ! Do not form A A^H explicitly: near the accepted conditioning limit,
         ! that inverse loses cancellation accuracy relative to dense ACE factors.
-        call zgemv('C',n,n,(1d0,0d0),ace%metric_factor,n,overlap_r,1,(0d0,0d0),rotated,1)
-        call zgemv('N',n,n,(1d0,0d0),ace%metric_factor,n,rotated,1,(0d0,0d0),coeff,1)
+        if(ace%metric_distributed)then
+          call distributed_metric_apply(ace,overlap_r,rotated,coeff,overlap)
+        else
+          call zgemv('C',n,n,(1d0,0d0),ace%metric_factor,n,overlap_r,1,(0d0,0d0),rotated,1)
+          call zgemv('N',n,n,(1d0,0d0),ace%metric_factor,n,rotated,1,(0d0,0d0),coeff,1)
+        endif
         partial_action=0d0
         do j=1,size(ace%offset)-1
           do k=ace%offset(j),ace%offset(j+1)-1

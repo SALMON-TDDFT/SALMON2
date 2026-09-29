@@ -12,6 +12,8 @@ module exx_spatial
     local_batch_action
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
+  use exx_distributed_metric, only: distributed_metric_available
+  use exx_distributed_gauge, only: s_exx_gauge,gauge_tiles_clear,gauge_tiles_refresh,gauge_tiles_rotate
   use fftw_pencils, only: pencil_transform
   use exx_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -31,6 +33,7 @@ module exx_spatial
     integer(int64) :: pair_products=0,pair_catalog_entries=0,pair_product_points=0
     integer(int64) :: local_pairs=0,local_points=0,global_pairs=0
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
+    type(s_exx_gauge) :: gauge_tiles
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
@@ -56,6 +59,7 @@ contains
     if(present(comm_o))call comm_get_max(bad,comm_o)
     if(bad/=0)return
     ! No gauge, overlap transport, or extra previous-state grid is needed.
+    call gauge_tiles_clear(op%gauge_tiles)
     if(allocated(op%gauge))deallocate(op%gauge)
     if(allocated(op%previous))deallocate(op%previous)
     op%source=psi(:,:,1)
@@ -68,8 +72,9 @@ contains
     op%updates=op%updates+1;status=0
   end subroutine spatial_exx_canonical_source
 
-  subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation,comm_o)
+  subroutine spatial_exx_refresh(op,n,h,dims,coords,comm,comm_r,psi,maxiter,tolerance,status,occupation,comm_o,comm_matrix)
     implicit none
+    integer,intent(in),optional :: comm_matrix
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm(2),comm_r,maxiter
     integer,intent(in),optional :: comm_o
@@ -82,10 +87,11 @@ contains
     real(8) :: b(3,6),weights(6),delta,pi,position(3)
     integer :: no,ng,m(3),lo(3),x,y,z,g,j,axis,bad
     if(present(comm_o))then
-      call refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation)
+      call refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation,comm_matrix)
       return
     endif
     no=size(psi,2);ng=size(psi,1);status=1;bad=0
+    if(allocated(op%gauge_tiles%matrix))bad=1
     if(no<1.or.size(psi,3)/=1.or.any(n<1).or.any(dims<1))bad=1
     if(any(h<=0d0).or..not.salmon_all_finite(h))bad=1
     if(.not.salmon_all_finite(real(psi)).or..not.salmon_all_finite(aimag(psi)))bad=1
@@ -184,8 +190,9 @@ contains
     end subroutine
   end subroutine
 
-  subroutine refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation)
+  subroutine refresh_orbitals(op,n,h,dims,coords,comm_r,comm_o,psi,maxiter,tolerance,status,occupation,comm_matrix)
     implicit none
+    integer,intent(in),optional :: comm_matrix
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(2),coords(2),comm_r,comm_o,maxiter
     real(8),intent(in) :: h(3),tolerance
@@ -218,6 +225,15 @@ contains
     call orbital_layout(nlocal,comm_r,comm_o,counts,first,bad)
     if(bad/=0.or.sum(counts)<1)return
     no=sum(counts)
+    if(present(comm_matrix))then
+      if(distributed_metric_available(comm_matrix))then
+        call refresh_tiles(op,n,h,m,lo,comm_r,comm_o,comm_matrix,psi,maxiter,tolerance,status,occupation)
+        return
+      endif
+    endif
+    if(allocated(op%gauge_tiles%matrix))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    if(bad/=0)return
     initialized=0
     if(allocated(op%gauge))initialized=1
     total_initialized=initialized
@@ -307,6 +323,57 @@ contains
     if(present(occupation))occupation_weights=sqrt(occupation(:,1)/2d0)
     call orbital_rotate(psi(:,:,1),op%gauge(:,:,1),comm_o,counts,first,op%source,occupation_weights)
     op%updates=op%updates+1;status=0
+  end subroutine
+
+  subroutine refresh_tiles(op,n,h,m,lo,comm_r,comm_o,comm_matrix,psi,maxiter,tolerance,status,occupation)
+    implicit none
+    type(spatial_exx_state),intent(inout) :: op
+    integer,intent(in) :: n(3),m(3),lo(3),comm_r,comm_o,comm_matrix,maxiter
+    complex(8),intent(in) :: psi(:,:,:)
+    real(8),intent(in) :: h(3),tolerance
+    real(8),intent(in),optional :: occupation(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: phase(:,:)
+    real(8),allocatable :: occupation_weights(:)
+    real(8) :: b(3,6),weights(6),delta,pi,position(3)
+    integer :: ng,nlocal,axis,g,x,y,z,bad
+    ng=size(psi,1);nlocal=size(psi,2)
+    bad=0
+    ! A state must not silently change matrix distribution after initialization.
+    if(allocated(op%gauge))bad=1
+    call orbital_check(bad,comm_r,comm_o)
+    status=1
+    if(bad/=0)return
+    allocate(phase(ng,3));phase=0d0
+    pi=acos(-1d0);b=0d0
+    do axis=1,3
+      delta=2*pi/(n(axis)*h(axis));b(axis,axis)=delta;b(axis,axis+3)=-delta
+      weights(axis)=1d0/(2*delta**2);weights(axis+3)=weights(axis)
+      if(maxiter==0)cycle
+      g=0
+      do z=0,m(3)-1
+        do y=0,m(2)-1
+          do x=0,m(1)-1
+            g=g+1;position=([x,y,z]+lo)*h
+            phase(g,axis)=exp(cmplx(0d0,-position(axis)*delta,8))
+          enddo
+        enddo
+      enddo
+    enddo
+    call gauge_tiles_refresh(op%gauge_tiles,psi(:,:,1),op%previous,product(h),phase,b,weights,comm_r,comm_o, &
+      comm_matrix,maxiter,tolerance,op%seed_localized,op%seed_needed,op%retain_accepted_gauge, &
+      op%last_localization_status,op%retained_gauge,op%min_singular,op%spread,op%gradient,op%iterations, &
+      op%localization_status,status)
+    if(status/=0)return
+    if(allocated(op%source))deallocate(op%source)
+    if(allocated(op%previous))deallocate(op%previous)
+    allocate(op%source(ng,nlocal),op%previous(ng,nlocal,1),occupation_weights(nlocal))
+    call gauge_tiles_rotate(op%gauge_tiles,psi(:,:,1),comm_r,comm_o,op%previous(:,:,1),status)
+    if(status/=0)return
+    occupation_weights=1d0
+    if(present(occupation))occupation_weights=sqrt(occupation(:,1)/2d0)
+    call gauge_tiles_rotate(op%gauge_tiles,psi(:,:,1),comm_r,comm_o,op%source,status,weights=occupation_weights)
+    if(status==0)op%updates=op%updates+1
   end subroutine
 
   ! A symmetry-adapted occupied basis can be a stationary saddle of the spread

@@ -15,6 +15,7 @@ module exx_native
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_ace
+  use exx_distributed_gauge, only: gauge_tiles_rotate
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
   use exx_adaptive_support, only: adaptive_source_mask
   use exx_spatial
@@ -417,7 +418,7 @@ contains
       allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
       ! Source argument is only a valid layout placeholder when the density callback is supplied.
       call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,expanded_action,layout(:np), &
-        layout(np+1:),info%id_k,transpose_tiles,ierr,fill_density)
+        layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr,fill_density)
       if(ierr==0)then
         do j=1,info%numk
           index=symmetry_map%first(info%ik_s+j-1)-symmetry_map%first(info%ik_s)+1
@@ -427,7 +428,7 @@ contains
       return
     endif
     call exx_k_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
-      info%id_k,transpose_tiles,ierr)
+      info%id_k,info%icomm_k,transpose_k_tiles,ierr)
   contains
     subroutine fill_density(j,lo,rows,density)
       implicit none
@@ -452,17 +453,19 @@ contains
           (1d0,0d0),density(1,1),size(density,1))
       enddo
     end subroutine
-    subroutine transpose_tiles(send,recv,count)
-      implicit none
-      complex(8),intent(in) :: send(:)
-      complex(8),intent(out) :: recv(:)
-      integer,intent(in) :: count
-      real(8) :: start
-      if(timing_enabled)start=exx_walltime()
-      call comm_alltoall(send,recv,info%icomm_k,count)
-      if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
-    end subroutine
   end subroutine
+
+  subroutine transpose_k_tiles(send,recv,count,comm)
+    ! Explicit context avoids a callback capturing an enclosing info argument.
+    implicit none
+    complex(8),intent(in) :: send(:)
+    complex(8),intent(out) :: recv(:)
+    integer,intent(in) :: count,comm
+    real(8) :: start
+    if(timing_enabled)start=exx_walltime()
+    call comm_alltoall(send,recv,comm,count)
+    if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
+  end subroutine transpose_k_tiles
 
   subroutine exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
     implicit none
@@ -484,11 +487,21 @@ contains
     if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
-    if(allocated(target_work))then
-      if(any(shape(target_work)/=[ng,info%numo,info%numk]))deallocate(target_work,action_work)
+    if(ace%packed.and.product(num_kgrid)==1.and..not.exx_force_full_action.and. &
+       .not.(taylor_active.and.propagator=='hse_taylor4_full'))then
+      if(.not.(taylor_active.and.taylor_midpoint).or.initial_ace%packed)then
+        call apply_packed_blocks()
+        return
+      endif
     endif
-    if(.not.allocated(target_work))allocate(target_work(ng,info%numo,info%numk), &
-      action_work(ng,info%numo,info%numk))
+    if(allocated(target_work))then
+      if(any(shape(target_work)/=[ng,info%numo,info%numk]))deallocate(target_work)
+    endif
+    if(allocated(action_work))then
+      if(any(shape(action_work)/=[ng,info%numo,info%numk]))deallocate(action_work)
+    endif
+    if(.not.allocated(target_work))allocate(target_work(ng,info%numo,info%numk))
+    if(.not.allocated(action_work))allocate(action_work(ng,info%numo,info%numk))
     call exx_pack(psi,mg,info,target_work)
     action_scale=exchange_fraction()
     if(timing_enabled)tick=exx_walltime()
@@ -529,6 +542,52 @@ contains
     if(ierr/=0)error stop 'HSE06: ACE application failed'
     call add_mesh_action(action_scale)
   contains
+    subroutine apply_packed_blocks()
+      implicit none
+      integer,parameter :: block_size=32
+      integer :: largest,first,count,ix,iy,iz,j,g,io
+      real(8) :: block_weight
+      largest=info%numo
+      call comm_get_max(largest,info%icomm_ro)
+      if(timing_enabled)tick=exx_walltime()
+      do first=1,largest,block_size
+        count=max(0,min(block_size,info%numo-first+1))
+        ! Zero-column orbital ranks still join every packed-ACE collective.
+        if(allocated(target_work))then
+          if(any(shape(target_work)/=[ng,count,1]))deallocate(target_work)
+        endif
+        if(allocated(action_work))then
+          if(any(shape(action_work)/=[ng,count,1]))deallocate(action_work)
+        endif
+        if(.not.allocated(target_work))allocate(target_work(ng,count,1))
+        if(.not.allocated(action_work))allocate(action_work(ng,count,1))
+!$omp parallel do collapse(3) default(none) schedule(static) &
+!$omp private(j,iz,iy,ix,g,io) shared(count,mg,info,first,psi,target_work)
+        do j=1,count
+          do iz=mg%is(3),mg%ie(3)
+            do iy=mg%is(2),mg%ie(2)
+              do ix=mg%is(1),mg%ie(1)
+                g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
+                io=info%io_s+first+j-2
+                target_work(g,j,1)=psi%zwf(ix,iy,iz,1,io,info%ik_s,1)
+              enddo
+            enddo
+          enddo
+        enddo
+!$omp end parallel do
+        block_weight=exchange_fraction()
+        if(taylor_active.and.taylor_midpoint)then
+          call apply_endpoint(initial_ace)
+          if(ierr/=0)error stop 'EXX: initial block ACE application failed'
+          block_weight=.5d0*exchange_fraction()
+          call add_mesh_action(block_weight,first,first+count-1)
+        endif
+        call apply_endpoint(ace)
+        if(ierr/=0)error stop 'EXX: block ACE application failed'
+        call add_mesh_action(block_weight,first,first+count-1)
+      enddo
+      if(timing_enabled)exx_timings(3)=exx_timings(3)+exx_walltime()-tick
+    end subroutine apply_packed_blocks
     subroutine apply_endpoint(state)
       implicit none
       type(s_exx_ace),intent(in) :: state
@@ -540,17 +599,21 @@ contains
         call exx_ace_apply(state,target_work,action_work,ierr)
       endif
     end subroutine
-    subroutine add_mesh_action(weight)
+    subroutine add_mesh_action(weight,first,last)
       implicit none
       real(8),intent(in) :: weight
-      integer :: ix,iy,iz,io,ik,g
+      integer,optional,intent(in) :: first,last
+      integer :: ix,iy,iz,io,ik,g,io_first,io_last
+      io_first=info%io_s;io_last=info%io_e
+      if(present(first))io_first=info%io_s+first-1
+      if(present(last))io_last=info%io_s+last-1
 !$omp parallel do collapse(4) default(none) schedule(static) &
-!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,hpsi,weight,action_work)
-      do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
+!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,hpsi,weight,action_work,io_first,io_last)
+      do ik=info%ik_s,info%ik_e;do io=io_first,io_last
         do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
           g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
           hpsi%zwf(ix,iy,iz,1,io,ik,1)=hpsi%zwf(ix,iy,iz,1,io,ik,1) &
-            +weight*action_work(g,io-info%io_s+1,ik-info%ik_s+1)
+            +weight*action_work(g,io-io_first+1,ik-info%ik_s+1)
         enddo;enddo;enddo
       enddo;enddo
 !$omp end parallel do
@@ -610,7 +673,15 @@ contains
     enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'Spatial EXX: orthogonal cell required'
     if(info%isize_o>1)orbital_comm=info%icomm_o
-    allocate(local(product(mg%num),info%numo,1))
+    ! Apply and refresh never run concurrently. Reuse their mesh workspaces.
+    if(allocated(target_work))then
+      if(all(shape(target_work)==[product(mg%num),info%numo,1]))then
+        call move_alloc(target_work,local)
+      else
+        deallocate(target_work)
+      endif
+    endif
+    if(.not.allocated(local))allocate(local(product(mg%num),info%numo,1))
     call exx_pack(psi,mg,info,local)
     changed=1
     if(allocated(cached_source).and.allocated(cached_occupation))then
@@ -620,8 +691,12 @@ contains
     endif
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.(exx_adaptive_ready.neqv.cached_adaptive_ready))changed=1
     call comm_summation(changed,total,info%icomm_ro)
-    if(total==0)return
-    allocate(w(product(mg%num),info%numo,1))
+    if(total==0)then
+      call move_alloc(local,target_work)
+      return
+    endif
+    ! The old source has served its equality check; the new source replaces it.
+    if(allocated(cached_source))deallocate(cached_source)
     maxiter=0
     if(mod(spatial%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
     if((exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and.spatial%last_localization_status/=0) &
@@ -690,6 +765,14 @@ contains
     if(dc_canonical())requested_screen_mode=0
     spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
     fft_work=0_int64
+    if(allocated(action_work))then
+      if(all(shape(action_work)==[product(mg%num),info%numo,1]))then
+        call move_alloc(action_work,w)
+      else
+        deallocate(action_work)
+      endif
+    endif
+    if(.not.allocated(w))allocate(w(product(mg%num),info%numo,1))
     support_accepted=.false.
     if(exx_ace_support=='source')then
       if(.not.adaptive_active)error stop 'Source-support ACE requires active MLWF support'
@@ -748,8 +831,9 @@ contains
     call move_alloc(local,cached_source)
     if(yn_dc=='y')then
       call move_alloc(w,cached_action)
-    else if(allocated(cached_action))then
-      deallocate(cached_action)
+    else
+      if(allocated(cached_action))deallocate(cached_action)
+      call move_alloc(w,action_work)
     endif
     if(.not.dc_canonical().and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
@@ -772,7 +856,8 @@ contains
         spatial%pair_products,spatial%screen_skipped,spatial%pair_catalog_entries,spatial%pair_product_points
       ! The ACE metric is -S^H K_S S. S need not be orthonormal; the existing
       ! Hermitian/positive metric checks and conditioning threshold still apply.
-      call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true.)
+      call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true., &
+        comm_matrix=info%icomm_ro)
       call comm_summation(status,adaptive_bad,info%icomm_ro)
       if(adaptive_bad/=0)return
       call orbital_ace_apply(ace,local,w,info%icomm_r,info%icomm_o,status)
@@ -795,13 +880,19 @@ contains
           pbeh_coulomb_radius,spatial%previous,localized_action,status, &
           omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
         if(status/=0)return
-        adjoint=conjg(transpose(spatial%gauge(:,:,1)))
-        if(info%isize_o>1)then
-          call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first,status)
+        if(allocated(spatial%gauge_tiles%matrix))then
+          call gauge_tiles_rotate(spatial%gauge_tiles,localized_action(:,:,1),info%icomm_r,info%icomm_o, &
+            w(:,:,1),status,adjoint=.true.)
           if(status/=0)return
-          call orbital_rotate(localized_action(:,:,1),adjoint,info%icomm_o,counts,first,w(:,:,1))
         else
-          w(:,:,1)=matmul(localized_action(:,:,1),adjoint)
+          adjoint=conjg(transpose(spatial%gauge(:,:,1)))
+          if(info%isize_o>1)then
+            call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first,status)
+            if(status/=0)return
+            call orbital_rotate(localized_action(:,:,1),adjoint,info%icomm_o,counts,first,w(:,:,1))
+          else
+            w(:,:,1)=matmul(localized_action(:,:,1),adjoint)
+          endif
         endif
       endif
       call record_fft_work()
@@ -813,8 +904,8 @@ contains
     end subroutine
     subroutine build_exchange_ace()
       implicit none
-      if(info%isize_o>1)then
-        call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status)
+      if(info%isize_o>1.or.info%isize_r>1)then
+        call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status,comm_matrix=info%icomm_ro)
       else
         call exx_ace_build(ace,local,w,system%hvol,status,sum_spatial)
       endif

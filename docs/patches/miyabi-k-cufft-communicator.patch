@@ -1,0 +1,280 @@
+--- a/src/xc/exx_native.f90
++++ b/src/xc/exx_native.f90
+@@ -418,7 +418,7 @@
+       allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
+       ! Source argument is only a valid layout placeholder when the density callback is supplied.
+       call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,expanded_action,layout(:np), &
+-        layout(np+1:),info%id_k,transpose_tiles,ierr,fill_density)
++        layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr,fill_density)
+       if(ierr==0)then
+         do j=1,info%numk
+           index=symmetry_map%first(info%ik_s+j-1)-symmetry_map%first(info%ik_s)+1
+@@ -428,7 +428,7 @@
+       return
+     endif
+     call exx_k_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
+-      info%id_k,transpose_tiles,ierr)
++      info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+   contains
+     subroutine fill_density(j,lo,rows,density)
+       implicit none
+@@ -453,17 +453,19 @@
+           (1d0,0d0),density(1,1),size(density,1))
+       enddo
+     end subroutine
+-    subroutine transpose_tiles(send,recv,count)
+-      implicit none
+-      complex(8),intent(in) :: send(:)
+-      complex(8),intent(out) :: recv(:)
+-      integer,intent(in) :: count
+-      real(8) :: start
+-      if(timing_enabled)start=exx_walltime()
+-      call comm_alltoall(send,recv,info%icomm_k,count)
+-      if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
+-    end subroutine
+-  end subroutine
++  end subroutine
++
++  subroutine transpose_k_tiles(send,recv,count,comm)
++    ! Explicit context avoids a callback capturing an enclosing info argument.
++    implicit none
++    complex(8),intent(in) :: send(:)
++    complex(8),intent(out) :: recv(:)
++    integer,intent(in) :: count,comm
++    real(8) :: start
++    if(timing_enabled)start=exx_walltime()
++    call comm_alltoall(send,recv,comm,count)
++    if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
++  end subroutine transpose_k_tiles
+ 
+   subroutine exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+     implicit none
+--- a/src/xc/exx_k_exchange.f90
++++ b/src/xc/exx_k_exchange.f90
+@@ -341,20 +341,20 @@
+ 
+   ! K-distributed source/target/action; transpose density tiles, never orbitals.
+   ! Caller supplies identical layout/kernel metadata and communicator size on all ranks.
+-  subroutine exx_k_kernel_apply_distributed(op,source,target,action,starts,counts,rank,transpose_tiles,ierr,fill_density)
++  subroutine exx_k_kernel_apply_distributed(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr,fill_density)
+     implicit none
+     type(exx_k_kernel),target,intent(inout) :: op
+     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
+     complex(c_double_complex),intent(out) :: action(:,:,:)
+-    integer,intent(in) :: starts(:),counts(:),rank
++    integer,intent(in) :: starts(:),counts(:),rank,comm
+     integer,intent(out) :: ierr
+     interface
+-      subroutine transpose_tiles(send,recv,count)
++      subroutine transpose_tiles(send,recv,count,comm)
+         import c_double_complex
+         implicit none
+         complex(c_double_complex),intent(in) :: send(:)
+         complex(c_double_complex),intent(out) :: recv(:)
+-        integer,intent(in) :: count
++        integer,intent(in) :: count,comm
+       end subroutine
+       subroutine fill_density(j,lo,rows,density)
+         import c_double_complex
+@@ -401,7 +401,7 @@
+     ! Fixed-size handshake must agree before variable-size tile collectives.
+     valid_send=cmplx(b,merge(2,0,allocated(op%accelerator)),c_double)
+     if(.not.valid)valid_send=cmplx(b,-1,c_double)
+-    call transpose_tiles(valid_send,valid_recv,1)
++    call transpose_tiles(valid_send,valid_recv,1,comm)
+     if(any(real(valid_recv)/=real(b,c_double)).or. &
+        any(aimag(valid_recv)/=real(merge(2,0,allocated(op%accelerator)),c_double)))return
+     km=maxval(counts);nmsg=b*ng*km
+@@ -421,7 +421,10 @@
+     enddo;enddo
+     if(allocated(op%accelerator))then
+       call op%accelerator%prepare(op%n,op%mesh,b,op%kernel,op%point,op%shift,slot,km*np,ierr)
+-      call backend_status_collective()
++      valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
++      call transpose_tiles(valid_send,valid_recv,1,comm)
++      ierr=0
++      if(any(real(valid_recv)/=0d0))ierr=1
+       if(ierr/=0)return
+     endif
+     batch_rows=min(ng,np*b)
+@@ -466,13 +469,16 @@
+         enddo
+       endif
+       if(op%profile)call mark_stage(op,1,stamp)
+-      call transpose_tiles(send,recv,nmsg)
++      call transpose_tiles(send,recv,nmsg,comm)
+       if(op%profile)call mark_stage(op,2,stamp)
+       if(allocated(op%accelerator))then
+         lo=base+rank*b;rows=max(0,min(b,ng-lo+1))
+         call op%accelerator%apply(lo,rows,flat_recv,flat_send,ierr)
+         ! A failed rank must not leave peers entering the next tile transpose.
+-        call backend_status_collective()
++        valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
++        call transpose_tiles(valid_send,valid_recv,1,comm)
++        ierr=0
++        if(any(real(valid_recv)/=0d0))ierr=1
+         if(ierr/=0)return
+         ! Device packing/FFT/kernel/transfers are a combined measured stage.
+         if(op%profile)call mark_stage(op,3,stamp)
+@@ -508,7 +514,7 @@
+       endif
+       if(op%profile)call mark_stage(op,5,stamp)
+       endif
+-      call transpose_tiles(send,recv,nmsg)
++      call transpose_tiles(send,recv,nmsg,comm)
+       if(op%profile)call mark_stage(op,2,stamp)
+       ! BLAS owns threading here; call only outside application OpenMP regions.
+       do p=0,np-1
+@@ -525,14 +531,6 @@
+       if(op%profile)call mark_stage(op,6,stamp)
+     enddo
+     ierr=0
+-  contains
+-    subroutine backend_status_collective()
+-      implicit none
+-      valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
+-      call transpose_tiles(valid_send,valid_recv,1)
+-      ierr=0
+-      if(any(real(valid_recv)/=0d0))ierr=1
+-    end subroutine
+   end subroutine
+ 
+   subroutine transpose_contiguous(op,buffer,slot,unpack)
+--- a/testsuites/unit_exx_k_exchange/probe.f90
++++ b/testsuites/unit_exx_k_exchange/probe.f90
+@@ -5,12 +5,13 @@
+   implicit none
+   type(exx_k_kernel) :: kernel
+   type(s_exx_wannier) :: reference
+-  integer :: rank,np,ierr,status,n(3),mesh(3),nk,ng,no,nt,i,j,g,x,y,z,mode,first,last
++  integer :: rank,np,ierr,status,test_comm,n(3),mesh(3),nk,ng,no,nt,i,j,g,x,y,z,mode,first,last
+   integer,allocatable :: starts(:),counts(:)
+   real(8) :: h(3),omega,radius,err,scale
+   real(8),allocatable :: k(:,:),occ(:,:)
+   complex(8),allocatable :: source(:,:,:),target(:,:,:),expected(:,:,:),actual(:,:,:)
+   call MPI_Init(ierr)
++ call MPI_Comm_dup(MPI_COMM_WORLD,test_comm,ierr)
+   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
+   n=[3,2,4];mesh=[2,3,1];h=[.6d0,.8d0,.7d0];ng=product(n);nk=product(mesh);no=2;nt=3
+@@ -45,7 +46,7 @@
+     call exx_k_kernel_init(kernel,n,mesh,h,k,omega,5,status,first,counts(rank+1),coulomb_radius=radius)
+     if(status/=0)error stop 'distributed init'
+     call exx_k_kernel_apply_distributed(kernel,source(:,:,first:last),target(:,:,first:last),actual, &
+-      starts,counts,rank,transpose_tiles,status)
++      starts,counts,rank,test_comm,transpose_tiles,status)
+     if(status/=0)error stop 'distributed action'
+     err=maxval(abs(actual-expected(:,:,first:last)));scale=max(1d0,maxval(abs(expected)))
+     if(err>2d-11*scale)then
+@@ -56,15 +57,17 @@
+     call exx_k_kernel_destroy(kernel)
+     call wannier_destroy(reference)
+   enddo
+-  call MPI_Finalize(ierr)
++  call MPI_Comm_free(test_comm,ierr)
++ call MPI_Finalize(ierr)
+ contains
+-  subroutine transpose_tiles(send,recv,count)
++  subroutine transpose_tiles(send,recv,count,comm)
+     implicit none
+     complex(8),intent(in) :: send(:)
+     complex(8),intent(out) :: recv(:)
+-    integer,intent(in) :: count
++    integer,intent(in) :: count,comm
+     integer :: stat
+-    call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,MPI_COMM_WORLD,stat)
++    if(comm/=test_comm.or.comm==MPI_COMM_NULL)error stop 'wrong explicit transpose communicator'
++  call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,comm,stat)
+     if(stat/=MPI_SUCCESS)error stop 'test transpose'
+   end subroutine
+ end program
+--- a/testsuites/unit_kpoint_cufft/probe.f90
++++ b/testsuites/unit_kpoint_cufft/probe.f90
+@@ -87,12 +87,13 @@
+  implicit none
+  type(exx_k_kernel) :: cpu,device
+  procedure(k_backend_factory),pointer :: factory
+- integer :: rank,np,ierr,status,n(3),m(3),nk,ng,p,j,g,pass,mode,block,x,y,z,i
++ integer :: rank,np,ierr,status,test_comm,n(3),m(3),nk,ng,p,j,g,pass,mode,block,x,y,z,i
+  integer,allocatable :: starts(:),counts(:)
+  real(8),allocatable :: k(:,:)
+  complex(8),allocatable :: source(:,:,:),target(:,:,:),a(:,:,:),b(:,:,:)
+  real(8) :: err,scale,h(3),omega
+  call MPI_Init(ierr)
++ call MPI_Comm_dup(MPI_COMM_WORLD,test_comm,ierr)
+  call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
+  call MPI_Comm_size(MPI_COMM_WORLD,np,ierr)
+  factory=>create_oracle
+@@ -131,9 +132,9 @@
+   if(status/=0.or..not.allocated(device%accelerator))error stop 'device init'
+   if(allocated(device%work))error stop 'unused CPU FFT workspace allocated'
+   do pass=1,2
+-   call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,transpose_tiles,status)
++   call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,test_comm,transpose_tiles,status)
+    if(status/=0)error stop 'cpu apply'
+-   call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
++   call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
+    if(status/=0)error stop 'device apply'
+    scale=max(1d0,maxval(abs(a)));err=maxval(abs(a-b))/scale
+    if(err>3d-12)error stop 'distributed backend parity'
+@@ -147,19 +148,19 @@
+    if(backend%calls/=2*((ng+np*block-1)/(np*block)))error stop 'tile calls'
+   end select
+   fail_prepare=rank==0
+-  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
++  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
+   if(status==0)error stop 'prepare failure not collective'
+   fail_prepare=.false.;fail_apply=rank==0
+-  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
++  call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
+   if(status==0)error stop 'apply failure not collective'
+   fail_apply=.false.
+ #endif
+   if(np>1)then
+    ! Mismatched backend selection must fail in the first fixed-size handshake.
+    if(rank==0)then
+-    call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,transpose_tiles,status)
++    call exx_k_kernel_apply_distributed(cpu,source,target,a,starts,counts,rank,test_comm,transpose_tiles,status)
+    else
+-    call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,transpose_tiles,status)
++    call exx_k_kernel_apply_distributed(device,source,target,b,starts,counts,rank,test_comm,transpose_tiles,status)
+    endif
+    if(status==0)error stop 'mixed backend accepted'
+   endif
+@@ -173,15 +174,17 @@
+  if(release_count/=4)error stop 'release lifecycle'
+ #endif
+  if(rank==0)print *, 'PASS distributed k backend parity, tails and lifecycle',np
++ call MPI_Comm_free(test_comm,ierr)
+  call MPI_Finalize(ierr)
+ contains
+- subroutine transpose_tiles(send,recv,count)
++ subroutine transpose_tiles(send,recv,count,comm)
+   implicit none
+   complex(8),intent(in) :: send(:)
+   complex(8),intent(out) :: recv(:)
+-  integer,intent(in) :: count
++  integer,intent(in) :: count,comm
+   integer :: e
+-  call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,MPI_COMM_WORLD,e)
++  if(comm/=test_comm.or.comm==MPI_COMM_NULL)error stop 'wrong explicit transpose communicator'
++  call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,comm,e)
+   if(e/=MPI_SUCCESS)call MPI_Abort(MPI_COMM_WORLD,4,e)
+  end subroutine
+ end program
+--- a/testsuites/unit_kpoint_cufft/run.py
++++ b/testsuites/unit_kpoint_cufft/run.py
+@@ -10,6 +10,7 @@
+ p = argparse.ArgumentParser(description=__doc__)
+ p.add_argument('--gpu', action='store_true')
+ p.add_argument('--ranks', type=int, nargs='+', default=[1, 2, 3, 4])
++p.add_argument('--threads', type=int, default=1)
+ p.add_argument('--mpi-args', default='', help='site-specific launcher mapping options')
+ a = p.parse_args()
+ if any(n < 1 for n in a.ranks):
+@@ -36,4 +37,4 @@
+     for ranks in a.ranks:
+         subprocess.run([os.environ.get('MPIEXEC', 'mpiexec'), *shlex.split(a.mpi_args), '-n', str(ranks), str(exe)],
+                        check=True, timeout=120,
+-                       env=dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1'))
++                       env=dict(os.environ, OMP_NUM_THREADS=str(a.threads), OPENBLAS_NUM_THREADS='1'))
