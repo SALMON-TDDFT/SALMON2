@@ -27,7 +27,7 @@ class NativeExchangeTest(unittest.TestCase):
   if not shutil.which(os.environ.get('FC','gfortran')) or not (fftw/'include/fftw3.f03').exists():
    raise unittest.SkipTest('Native kernel tests require gfortran and FFTW_ROOT')
   blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-  cmd=[os.environ.get('FC','gfortran'),'-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(source),str(ROOT/'src/xc/exx_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
+  cmd=[os.environ.get('FC','gfortran'),'-O2','-fopenmp','-fcheck=all','-I'+str(fftw/'include'),str(ROOT/'src/xc/exx_k_backend.f90'),str(source),str(ROOT/'src/xc/exx_ace.f90'),str(ROOT/'samples/hse_mlwf_reference/native_exchange_probe.f90'),'-L'+str(fftw/'lib'),'-lfftw3','-L'+str(blas/'lib'),'-lopenblas','-o',str(cls.exe)]
   result=subprocess.run(cmd,cwd=cls.directory,capture_output=True,text=True)
   if result.returncode:raise AssertionError(result.stderr)
  @classmethod

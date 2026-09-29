@@ -5,6 +5,8 @@
 module exx_native
   use exx_functional, only: exchange_fraction
   use exx_cufft, only: exx_cufft_create
+  use exx_k_backend, only: k_backend_factory
+  use exx_k_cufft, only: exx_k_cufft_create
   use iso_fortran_env, only: int64
   use lcfo_rt_basis, only: lcfo_rt_active
   use exx_lcfo_rt, only: lcfo_exx_refresh,lcfo_exx_add_action,lcfo_exx_stage
@@ -24,7 +26,7 @@ module exx_native
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_block_rows, &
-    exx_local_backend,exx_gpu_batch_size, &
+    exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
@@ -260,6 +262,7 @@ contains
     complex(8),allocatable :: w(:,:,:),local(:,:,:)
     real(8) :: ex,offdiag(3,3),tick,communication_before
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
+    procedure(k_backend_factory),pointer :: create_backend
     if(.not.exx_enabled().or.exx_freeze)return
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
@@ -303,6 +306,8 @@ contains
       error stop 'HSE06: uniform k weights and fully occupied spin pairs required'
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE06: unsupported orbital layout'
     if(kernel%n==0)then
+      nullify(create_backend)
+      if(exx_kpoint_backend=='cufft')create_backend=>exx_k_cufft_create
       ! Keep representatives persistent; expand only rank-local stars for EXX.
       if(use_symmetry)then
         if(any(num_kgrid/=mesh))error stop 'HSE symmetry: cubic full mesh required'
@@ -317,14 +322,18 @@ contains
         count_full=symmetry_map%first(info%ik_e+1)-first_full
         call hse_kernel_init(kernel,n,mesh,system%hgs(1),symmetry_map%full_k,hse_omega, &
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
-          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout)
+          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
+          create_backend=create_backend)
       else
         call hse_kernel_init(kernel,n,mesh,system%hgs(1),system%vec_k,hse_omega, &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
-          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout)
+          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
+          create_backend=create_backend)
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
+      if(allocated(kernel%accelerator).and.info%id_k==0) &
+        write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
     allocate(local(ng,no,info%numk))

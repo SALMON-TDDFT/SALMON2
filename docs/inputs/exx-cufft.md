@@ -159,3 +159,11 @@ changed-source results, and collective propagation of prepare/apply errors.
 A negative release failure on one rank is tested during reinitialization; the
 pair-screen fixture also tests release failures at the exchange-action boundary.
 It validates CPU dispatch and MPI handling; it does not validate cuFFT itself.
+
+## Full k-mesh HSE06 route
+
+The separate `exx_kpoint_backend='cufft'` now accelerates the distributed
+k-mesh density convolution. It does not relax the compact Gamma backend's
+restrictions. See [Si CPU/GPU tests](../../testsuites/benchmark_si_kpoint_cufft/README.md)
+for supported inputs, resident data lifetime and MIYABI-G jobs. This route also
+requires actual NVHPC/GPU validation before numerical or performance claims.

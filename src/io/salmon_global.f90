@@ -131,6 +131,7 @@ module salmon_global
   character(8) :: exx_ace_support ! occupied/source ACE construction vectors
   character(8) :: exx_pair_screening ! off/diagnose/on; discrete hybrid pair bound
   real(8) :: exx_pair_tolerance ! raw exchange action Frobenius budget, atomic units
+  character(8) :: exx_kpoint_backend ! cpu/cufft full k-mesh exchange convolution
   character(8) :: exx_local_backend ! cpu/cufft compact exchange implementation
   integer :: exx_gpu_batch_size ! maximum local target batch per GPU rank
   character(8) :: exx_local_fft ! auto: exact compact convolution; off: full grid

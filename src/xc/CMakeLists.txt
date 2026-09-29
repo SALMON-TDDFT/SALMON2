@@ -13,6 +13,8 @@ set(SOURCES
 
 if(USE_HSE)
   list(APPEND SOURCES
+    exx_k_backend.f90
+    exx_k_cufft.f90
     exx_batch_backend.f90
     exx_cufft.f90
     exx_local_fft.f90

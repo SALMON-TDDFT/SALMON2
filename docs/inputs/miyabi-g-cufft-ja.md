@@ -3,6 +3,10 @@
 対象: SALMON2 `pbeh40-rvv10-water-md`、GPU転送再利用を含むコミット `ec7f565c`。
 2026-09-29作成。以下は現地未実行の手順。最初の目標は1 GPUでのコンパイル・数値一致・再利用確認で、速度測定はその後に行う。
 
+Si・8×8×8 k点のHSE06比較には、局所支持版ではなく新しい
+`exx_kpoint_backend`を使う。[多k点のビルド・試験・PBSジョブ](../../testsuites/benchmark_si_kpoint_cufft/README.md)を参照。
+下記の旧アーカイブ`ec7f565c`には多k点拡張は含まれないため、その試験では最新ブランチを使う。
+
 ## 1. ソースと環境
 
 今回のソースアーカイブ `salmon-cufft-ec7f565c.tar.gz` をMIYABI-Gの作業領域へ転送し、展開する。

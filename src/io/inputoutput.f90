@@ -284,7 +284,7 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-      & exx_local_backend,exx_gpu_batch_size, &
+      & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
@@ -756,6 +756,7 @@ contains
     exx_mlwf_radius = 0d0
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
+    exx_kpoint_backend = 'cpu'
     exx_local_backend = 'cpu'
     exx_gpu_batch_size = 8
     yn_exx_dc_mlwf = 'n'
@@ -1380,6 +1381,8 @@ contains
     call comm_bcast(exx_pair_screening,nproc_group_global)
     call string_lowercase(exx_pair_screening)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
+    call comm_bcast(exx_kpoint_backend,nproc_group_global)
+    call string_lowercase(exx_kpoint_backend)
     call comm_bcast(exx_local_backend,nproc_group_global)
     call string_lowercase(exx_local_backend)
     call comm_bcast(exx_gpu_batch_size,nproc_group_global)
@@ -2360,6 +2363,7 @@ contains
       write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
+      write(fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
       write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
       write(fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
@@ -3321,6 +3325,25 @@ contains
       if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
     endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
+    if(exx_kpoint_backend/='cpu'.and.exx_kpoint_backend/='cufft') &
+      error stop 'exx_kpoint_backend must be cpu or cufft'
+    if(exx_kpoint_backend=='cufft')then
+#ifndef USE_EXX_CUFFT
+      error stop 'exx_kpoint_backend=cufft requires USE_EXX_CUFFT=ON'
+#endif
+      if(xc/='hse06'.or.yn_dc/='n'.or.yn_hse_wannier/='n'.or.yn_hse_lcfo_rt/='n') &
+        error stop 'k-point cuFFT requires native HSE06 without Wannier/DC/LCFO'
+      if(any(num_kgrid/=num_kgrid(1)).or.any(num_kgrid<2).or. &
+         index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none') &
+        error stop 'k-point cuFFT requires a full cubic k mesh with at least 2 points per axis'
+      if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.nproc_k<1) &
+        error stop 'k-point cuFFT requires k-only MPI distribution'
+      if(exx_local_backend/='cpu'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
+        error stop 'k-point cuFFT is incompatible with localized exchange support'
+      if(yn_md/='n'.or.yn_opt/='n'.or. &
+         (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'k-point cuFFT supports static SCF and fixed-ion native RT'
+    endif
     if(exx_local_backend/='cpu'.and.exx_local_backend/='cufft') &
       error stop 'exx_local_backend must be cpu or cufft'
     if(exx_gpu_batch_size<1)error stop 'exx_gpu_batch_size must be positive'

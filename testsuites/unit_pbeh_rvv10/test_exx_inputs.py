@@ -43,6 +43,15 @@ class ExxInputs(unittest.TestCase):
             self.run_case("exx_local_backend='CUFFT'",
                           error='exx_local_backend=cufft requires USE_EXX_CUFFT=ON')
 
+    def test_kpoint_backend_input_contract(self):
+        self.run_case("exx_kpoint_backend='invalid'",error='exx_kpoint_backend must be cpu or cufft')
+        _, log, _ = self.run_case("exx_kpoint_backend='CPU'")
+        self.assertRegex(log, r'exx_kpoint_backend=\s*cpu')
+        config = Path(os.environ['SALMON_TEST_EXE']).resolve().parent / 'config.h'
+        if config.is_file() and '#define USE_EXX_CUFFT' not in config.read_text():
+            self.run_case("exx_kpoint_backend='CUFFT'",
+                          error='exx_kpoint_backend=cufft requires USE_EXX_CUFFT=ON')
+
     def test_pair_screen_input_contract(self):
         self.run_case("exx_pair_screening='invalid'",error='exx_pair_screening must be off, diagnose or on')
         self.run_case('exx_pair_tolerance=-1',error='exx_pair_tolerance must be finite and nonnegative')

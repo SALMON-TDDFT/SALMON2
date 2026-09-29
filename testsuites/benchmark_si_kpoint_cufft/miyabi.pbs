@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N Si-HSE-k-cufft
+#PBS -q debug-g
+#PBS -l select=1
+#PBS -l walltime=00:30:00
+#PBS -j oe
+set -eo pipefail
+cd "${PBS_O_WORKDIR:?Submit from the SALMON repository root}"
+module purge
+# Adjust to the module versions used to build SALMON; keep their names in the log.
+module load nvidia nv-hpcx fftw
+module list
+nvidia-smi
+export ACC_DEVICE_NUM=0
+export OMP_NUM_THREADS=8
+export OPENBLAS_NUM_THREADS=1
+: "${SALMON_EXE:=$PWD/build-miyabi-cufft/salmon}"
+: "${NK:=2}"
+: "${SCF_STEPS:=3}"
+: "${MPI_RANKS:=1}"
+python3 testsuites/benchmark_si_kpoint_cufft/run.py \
+  --exe "$SALMON_EXE" --output "si-k${NK}-${PBS_JOBID}" \
+  --nk "$NK" --steps "$SCF_STEPS" --ranks "$MPI_RANKS" --threads 8 \
+  --mpi-args='--map-by ppr:1:node:PE=8 --bind-to core'

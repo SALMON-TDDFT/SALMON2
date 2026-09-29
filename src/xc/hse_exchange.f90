@@ -2,6 +2,7 @@
 ! neither the hybrid mixing fraction nor a second spin factor is included.
 module hse_exchange
 !$ use omp_lib, only: omp_get_num_threads,omp_get_max_threads
+  use exx_k_backend, only: s_exx_k_backend,k_backend_factory
   use iso_fortran_env, only: int64
   use iso_c_binding
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -11,6 +12,7 @@ module hse_exchange
   public :: hse_kernel, hse_kernel_init, hse_kernel_apply, hse_kernel_destroy
   public :: hse_kernel_apply_distributed
   type hse_kernel
+    class(s_exx_k_backend),allocatable :: accelerator
     integer :: n=0, mesh=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1
     logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
     real(c_double) :: seconds(6)=0d0,fft_trial_seconds(2)=0d0
@@ -21,7 +23,7 @@ module hse_exchange
   end type
 contains
   subroutine hse_kernel_init(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout)
+                             block_rows,profile,fft_layout,create_backend)
     implicit none
     type(hse_kernel),intent(inout) :: op
     integer,intent(in) :: n,mesh,block
@@ -31,12 +33,15 @@ contains
     integer,optional,intent(in) :: block_rows
     logical,optional,intent(in) :: profile
     character(*),optional,intent(in) :: fft_layout
+    procedure(k_backend_factory),pointer,optional :: create_backend
     integer :: ns,nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen
     real(c_double) :: pi,q2,q(3),scaled(3)
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
     type(c_ptr) :: plan
     ierr=1
-    call hse_kernel_destroy(op)
+    call hse_kernel_destroy(op,ierr)
+    if(ierr/=0)return
+    ierr=1
     if(n<1.or.mesh<1.or.block<1.or.h<=0.or.omega<=0) return
     if(.not.ieee_is_finite(h).or..not.ieee_is_finite(omega))return
     chosen=block
@@ -111,6 +116,14 @@ contains
     call fftw_execute_dft(plan,spectrum,spectrum)
     call fftw_destroy_plan(plan)
     op%kernel=real(spectrum,c_double)/real(ns,c_double)**3
+    if(present(create_backend))then
+      if(associated(create_backend))call create_backend(op%accelerator)
+    endif
+    if(allocated(op%accelerator))then
+      ! Device plans are prepared once the distributed slot layout is known.
+      op%auto_fft=.false.;op%contiguous_fft=.true.
+      ierr=0;return
+    endif
     allocate(op%work(op%block,ng,nk));dims=mesh
     if(op%auto_fft)then
       call choose_fft_layout(op,ierr)
@@ -330,7 +343,7 @@ contains
     np=size(counts);ng=op%ng;nk=op%nk;b=op%block;ns=op%n*op%mesh
     if(np<1.or.rank<0.or.rank>=np.or.size(starts)/=np)return
     ! All communicator members must participate even if one has invalid data.
-    valid=c_associated(op%forward)
+    valid=c_associated(op%forward).or.allocated(op%accelerator)
     valid=valid.and..not.any(counts<0).and.sum(counts)==nk.and.starts(1)==1
     do p=2,np
       valid=valid.and.starts(p)==starts(p-1)+counts(p-1)
@@ -347,10 +360,11 @@ contains
     valid=valid.and.all(ieee_is_finite(real(source))).and.all(ieee_is_finite(aimag(source)))
     valid=valid.and.all(ieee_is_finite(real(target))).and.all(ieee_is_finite(aimag(target)))
     ! Fixed-size handshake must agree before variable-size tile collectives.
-    valid_send=cmplx(b,0,c_double)
-    if(.not.valid)valid_send=cmplx(b,1,c_double)
+    valid_send=cmplx(b,merge(2,0,allocated(op%accelerator)),c_double)
+    if(.not.valid)valid_send=cmplx(b,-1,c_double)
     call transpose_tiles(valid_send,valid_recv,1)
-    if(any(real(valid_recv)/=real(b,c_double)).or.any(aimag(valid_recv)/=0d0))return
+    if(any(real(valid_recv)/=real(b,c_double)).or. &
+       any(aimag(valid_recv)/=real(merge(2,0,allocated(op%accelerator)),c_double)))return
     km=maxval(counts);nmsg=b*ng*km
     allocate(send(nmsg*np),recv(nmsg*np),t(ng,nt,nlocal),inverse(nk))
     if(present(fill_density))then
@@ -366,6 +380,11 @@ contains
     do p=1,np;do j=1,counts(p)
       slot(inverse(starts(p)+j-1))=j+(p-1)*km
     enddo;enddo
+    if(allocated(op%accelerator))then
+      call op%accelerator%prepare(op%n,op%mesh,b,op%kernel,op%point,op%shift,slot,km*np,ierr)
+      call backend_status_collective()
+      if(ierr/=0)return
+    endif
     batch_rows=min(ng,np*b)
     if(present(fill_density))allocate(density_batch(batch_rows,ng))
     op%threads_used=1
@@ -410,6 +429,15 @@ contains
       if(op%profile)call mark_stage(op,1,stamp)
       call transpose_tiles(send,recv,nmsg)
       if(op%profile)call mark_stage(op,2,stamp)
+      if(allocated(op%accelerator))then
+        lo=base+rank*b;rows=max(0,min(b,ng-lo+1))
+        call op%accelerator%apply(lo,rows,flat_recv,flat_send,ierr)
+        ! A failed rank must not leave peers entering the next tile transpose.
+        call backend_status_collective()
+        if(ierr/=0)return
+        ! Device packing/FFT/kernel/transfers are a combined measured stage.
+        if(op%profile)call mark_stage(op,3,stamp)
+      else
       ! Every k tile (including padded rows) is overwritten below.
       if(op%contiguous_fft)then
         call transpose_contiguous(op,flat_recv,slot,.false.)
@@ -440,6 +468,7 @@ contains
       !$omp end parallel do
       endif
       if(op%profile)call mark_stage(op,5,stamp)
+      endif
       call transpose_tiles(send,recv,nmsg)
       if(op%profile)call mark_stage(op,2,stamp)
       ! BLAS owns threading here; call only outside application OpenMP regions.
@@ -457,6 +486,14 @@ contains
       if(op%profile)call mark_stage(op,6,stamp)
     enddo
     ierr=0
+  contains
+    subroutine backend_status_collective()
+      implicit none
+      valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)
+      call transpose_tiles(valid_send,valid_recv,1)
+      ierr=0
+      if(any(real(valid_recv)/=0d0))ierr=1
+    end subroutine
   end subroutine
 
   subroutine transpose_contiguous(op,buffer,slot,unpack)
@@ -540,9 +577,17 @@ contains
     stamp=now
   end subroutine
 
-  subroutine hse_kernel_destroy(op)
+  subroutine hse_kernel_destroy(op,status)
     implicit none
     type(hse_kernel),intent(inout) :: op
+    integer,intent(out),optional :: status
+    integer :: cleanup
+    cleanup=0
+    if(allocated(op%accelerator))then
+      call op%accelerator%release(cleanup)
+      deallocate(op%accelerator)
+    endif
+    if(present(status))status=cleanup
     if(c_associated(op%forward))call fftw_destroy_plan(op%forward)
     if(c_associated(op%backward))call fftw_destroy_plan(op%backward)
     op%forward=c_null_ptr;op%backward=c_null_ptr

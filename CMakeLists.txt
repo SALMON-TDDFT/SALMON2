@@ -80,7 +80,7 @@ if(USE_HSE AND USE_OPENACC)
 endif()
 
 # A local exchange accelerator, independent of the generic SALMON OpenACC route.
-option(USE_EXX_CUFFT "Experimental OpenACC/cuFFT compact exchange backend" OFF)
+option(USE_EXX_CUFFT "Experimental OpenACC/cuFFT exchange backends" OFF)
 if(USE_EXX_CUFFT)
   if(NOT USE_HSE OR USE_OPENACC)
     message(FATAL_ERROR "USE_EXX_CUFFT requires USE_HSE=ON and USE_OPENACC=OFF")
@@ -88,7 +88,7 @@ if(USE_EXX_CUFFT)
   if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "^(NVHPC|PGI)$")
     message(FATAL_ERROR "USE_EXX_CUFFT requires the NVIDIA HPC Fortran compiler")
   endif()
-  message(STATUS "Experimental compact EXX GPU backend; other native hybrid work remains on CPU")
+  message(STATUS "Experimental EXX GPU backends; other native hybrid work remains on CPU")
 endif()
 
 # for third party libraries
