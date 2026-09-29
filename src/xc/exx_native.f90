@@ -3,6 +3,7 @@
 ! Gamma hybrid SCF and native mesh RT preserve three-dimensional Cartesian spatial blocks.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
+  use exx_blas_threads, only: exx_blas_thread_control
   use exx_sparse_orbitals, only: sparse_pack,sparse_clear,sparse_column
   use exx_functional, only: exchange_fraction,exchange_screening
   use exx_cufft, only: exx_cufft_create
@@ -377,7 +378,7 @@ contains
       write(*,'(a,2es14.5)')'HSE_FFT_AUTO trial strided contiguous seconds=',kernel%fft_trial_seconds
     reported_team=.true.
     if(timing_enabled)tick=exx_walltime()
-    call exx_ace_build(ace,local,w,system%hvol,ierr)
+    call exx_ace_build(ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
     if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: ACE metric failed'
@@ -599,9 +600,9 @@ contains
       if(info%isize_o>1.or.state%packed)then
         call orbital_ace_apply(state,target_work,action_work,info%icomm_r,info%icomm_o,ierr)
       else if(info%isize_r>1)then
-        call exx_ace_apply(state,target_work,action_work,ierr,sum_spatial)
+        call exx_ace_apply(state,target_work,action_work,ierr,sum_spatial,exx_blas_thread_control)
       else
-        call exx_ace_apply(state,target_work,action_work,ierr)
+        call exx_ace_apply(state,target_work,action_work,ierr,thread_control=exx_blas_thread_control)
       endif
     end subroutine
     subroutine add_mesh_action(weight,first,last)
@@ -1024,7 +1025,7 @@ contains
       if(info%isize_o>1.or.info%isize_r>1)then
         call orbital_ace_build(ace,local,w,system%hvol,info%icomm_r,info%icomm_o,status,comm_matrix=info%icomm_ro)
       else
-        call exx_ace_build(ace,local,w,system%hvol,status,sum_spatial)
+        call exx_ace_build(ace,local,w,system%hvol,status,sum_spatial,exx_blas_thread_control)
       endif
       call comm_summation(status,adaptive_bad,info%icomm_ro)
       status=adaptive_bad
@@ -1120,7 +1121,7 @@ contains
     call comm_bcast(finite_support_localized,info%icomm_k,0)
     call comm_bcast(allw,info%icomm_k,0)
     w=allw(:,:,info%ik_s:info%ik_e)
-    call exx_ace_build(ace,local,w,system%hvol,status)
+    call exx_ace_build(ace,local,w,system%hvol,status,thread_control=exx_blas_thread_control)
     call comm_summation(status,total_changed,info%icomm_k)
     if(total_changed/=0)error stop 'HSE Wannier: ACE construction metric failed'
     cached_source=local;cached_occupation=system%rocc(:,:,1)

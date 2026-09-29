@@ -7,12 +7,15 @@ module exx_local_fft
  implicit none
  private
  include 'fftw3.f03'
+ public :: exx_local_cpu_prepare,exx_local_cpu_pair
  public :: exx_local_prepare_compact,smooth_size,compact_axis_size,compact_kernel_bounds
  public :: s_exx_local_fft,exx_local_init,exx_local_prepare,exx_local_apply,exx_local_destroy
  type s_exx_local_fft
   integer :: n(3)=0,box(3)=0,padded(3)=0,fft_points=0
   logical :: ready=.false.
   complex(c_double_complex),allocatable :: kernel(:,:,:),filter(:,:,:),work(:,:,:)
+  complex(c_double_complex),allocatable :: thread_work(:,:,:,:)
+  type(c_ptr),allocatable :: thread_forward(:),thread_backward(:)
   integer,allocatable :: indices(:)
   type(c_ptr) :: forward=c_null_ptr,backward=c_null_ptr
  end type
@@ -20,12 +23,88 @@ contains
  subroutine clear_box(plan)
   implicit none
   type(s_exx_local_fft),intent(inout) :: plan
+  call clear_threads(plan)
   if(c_associated(plan%forward))call fftw_destroy_plan(plan%forward)
   if(c_associated(plan%backward))call fftw_destroy_plan(plan%backward)
   plan%forward=c_null_ptr;plan%backward=c_null_ptr
   if(allocated(plan%filter))deallocate(plan%filter,plan%work)
   if(allocated(plan%indices))deallocate(plan%indices)
   plan%box=0;plan%padded=0;plan%fft_points=0;plan%ready=.false.
+ end subroutine
+
+ subroutine clear_threads(plan)
+  implicit none
+  type(s_exx_local_fft),intent(inout) :: plan
+  integer :: i
+  if(.not.allocated(plan%thread_forward))return
+  do i=1,size(plan%thread_forward)
+   if(c_associated(plan%thread_forward(i)))call fftw_destroy_plan(plan%thread_forward(i))
+   if(c_associated(plan%thread_backward(i)))call fftw_destroy_plan(plan%thread_backward(i))
+  enddo
+  deallocate(plan%thread_forward,plan%thread_backward,plan%thread_work)
+ end subroutine
+
+ subroutine exx_local_cpu_prepare(plan,workers,status)
+  implicit none
+  type(s_exx_local_fft),intent(inout) :: plan
+  integer,intent(in) :: workers
+  integer,intent(out) :: status
+  integer :: i,n(3)
+  status=1
+  if(.not.plan%ready.or.workers<1)return
+  if(allocated(plan%thread_forward))then
+   if(size(plan%thread_forward)/=workers-1)call clear_threads(plan)
+  endif
+  if(workers>1.and..not.allocated(plan%thread_forward))then
+   n=plan%padded
+   allocate(plan%thread_work(n(1),n(2),n(3),workers-1))
+   allocate(plan%thread_forward(workers-1),plan%thread_backward(workers-1))
+   plan%thread_forward=c_null_ptr;plan%thread_backward=c_null_ptr
+   do i=1,workers-1
+    plan%thread_forward(i)=fftw_plan_dft_3d(n(3),n(2),n(1), &
+     plan%thread_work(:,:,:,i),plan%thread_work(:,:,:,i),FFTW_FORWARD,FFTW_ESTIMATE)
+    plan%thread_backward(i)=fftw_plan_dft_3d(n(3),n(2),n(1), &
+     plan%thread_work(:,:,:,i),plan%thread_work(:,:,:,i),FFTW_BACKWARD,FFTW_ESTIMATE)
+    if(.not.c_associated(plan%thread_forward(i)).or..not.c_associated(plan%thread_backward(i)))then
+     call clear_threads(plan);return
+    endif
+   enddo
+  endif
+  status=0
+ end subroutine
+
+ ! Each worker owns a distinct FFT buffer and writes one independent action.
+ ! Caller prepares the plan/workers serially, supplies matching support-sized
+ ! vectors, and assigns each concurrent call a unique worker in 1:workers.
+ subroutine exx_local_cpu_pair(plan,worker,source,target,action,used)
+  implicit none
+  type(s_exx_local_fft),intent(inout),target :: plan
+  integer,intent(in) :: worker
+  complex(8),intent(in) :: source(:),target(:)
+  complex(8),intent(out) :: action(:)
+  logical,intent(out) :: used
+  complex(c_double_complex),pointer,contiguous :: work(:,:,:),flat(:)
+  type(c_ptr) :: forward,backward
+  integer :: i
+  if(worker==1)then
+   work=>plan%work;forward=plan%forward;backward=plan%backward
+  else
+   work=>plan%thread_work(:,:,:,worker-1)
+   forward=plan%thread_forward(worker-1);backward=plan%thread_backward(worker-1)
+  endif
+  flat(1:plan%fft_points)=>work
+  flat=0d0;used=.false.;action=0d0
+  do i=1,size(source)
+   flat(plan%indices(i))=conjg(source(i))*target(i)
+   if(flat(plan%indices(i))/=(0d0,0d0))used=.true.
+  enddo
+  if(.not.used)return
+  call fftw_execute_dft(forward,work,work)
+  work=work*plan%filter
+  call fftw_execute_dft(backward,work,work)
+  do i=1,size(source)
+   action(i)=-source(i)*(flat(plan%indices(i))/plan%fft_points)
+  enddo
  end subroutine
 
  subroutine exx_local_destroy(plan)

@@ -66,7 +66,7 @@ def run():
             'timing_note':'Cold first-call phases, including FFT plan initialization and validation collectives. Reported phases use max rank time; fresh MPI processes for every repeat.',
             'runs':[],'summary':[]}
     obj=b/'src/CMakeFiles/salmon.dir'
-    names=['xc/exx_pair_candidates.f90.o','xc/exx_spatial.f90.o','xc/exx_batch_backend.f90.o','xc/exx_spatial_local.f90.o','xc/exx_local_fft.f90.o','xc/exx_distributed_gauge.f90.o','xc/exx_sparse_orbitals.f90.o','xc/exx_distributed_metric.f90.o','xc/exx_orbitals.f90.o','xc/exx_ace.f90.o',
+    names=['xc/exx_pair_candidates.f90.o','xc/exx_spatial.f90.o','xc/exx_batch_backend.f90.o','xc/exx_spatial_local.f90.o','xc/exx_local_fft.f90.o','xc/exx_blas_threads.f90.o','xc/exx_distributed_gauge.f90.o','xc/exx_sparse_orbitals.f90.o','xc/exx_distributed_metric.f90.o','xc/exx_orbitals.f90.o','xc/exx_ace.f90.o',
            'xc/exx_wannier_gauge.f90.o','xc/fftw_pencils.f90.o','xc/fftw_blocks.f90.o','gs/dc/lcfo_scalapack.f90.o',
            'parallel/communication.f90.o','misc/nvtx_wrapper.f90.o']
     result['object_sha256']={name:hashlib.sha256((obj/name).read_bytes()).hexdigest() for name in names}

@@ -13,6 +13,7 @@ set(SOURCES
 
 if(USE_HSE)
   list(APPEND SOURCES
+    exx_blas_threads.f90
     exx_sparse_orbitals.f90
     exx_k_backend.f90
     exx_k_cufft.f90

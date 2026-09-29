@@ -22,6 +22,10 @@ contains
 
   subroutine gauge_tiles_refresh(gauge,psi,previous,dv,phase,b,weights,comm_r,comm_o,comm, &
       maxiter,tolerance,seed,needed,retain,last_status,retained,minimum,spread,gradient,iterations,loc_status,status)
+#ifdef USE_SCALAPACK
+    use exx_blas_threads, only: exx_blas_thread_control
+!$  use omp_lib, only: omp_get_max_threads,omp_in_parallel
+#endif
     implicit none
     type(s_exx_gauge),intent(inout) :: gauge
     complex(8),intent(in) :: psi(:,:),phase(:,:)
@@ -34,6 +38,21 @@ contains
     logical,intent(out) :: retained
     real(8),intent(out) :: minimum,spread,gradient
     integer,intent(out) :: iterations,loc_status,status
+#ifdef USE_SCALAPACK
+    integer :: workers,thread_state(3)
+    workers=1;thread_state=0
+!$  workers=omp_get_max_threads()
+!$  if(omp_in_parallel())workers=1
+    if(workers>1)call exx_blas_thread_control(workers,thread_state)
+#endif
+    ! Keep one cleanup path for normal completion and every early return below.
+    call refresh_core()
+#ifdef USE_SCALAPACK
+    call exx_blas_thread_control(0,thread_state)
+#endif
+  contains
+    subroutine refresh_core()
+      implicit none
 #ifdef USE_SCALAPACK
     integer :: context,desc(9),nr,nc,n,first,bad,axis
     integer,allocatable :: counts(:)
@@ -118,7 +137,8 @@ contains
     status=1;retained=.false.;minimum=0d0
     spread=-1d0;gradient=-1d0;iterations=0;loc_status=2
 #endif
-  end subroutine
+    end subroutine refresh_core
+  end subroutine gauge_tiles_refresh
 
 #ifdef USE_SCALAPACK
   subroutine setup(gauge,n,comm,context,desc,status)

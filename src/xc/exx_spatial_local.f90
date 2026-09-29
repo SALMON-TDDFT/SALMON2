@@ -7,7 +7,7 @@ module exx_spatial_local
  use communication, only: comm_summation,comm_get_max,comm_get_groupinfo,comm_create_group,comm_free_group
  use fftw_blocks, only: pencil_transform=>mesh_transform,block_layout
  use exx_local_fft, only: s_exx_local_fft,exx_local_prepare_compact,exx_local_apply,exx_local_destroy, &
-                          compact_axis_size,compact_kernel_bounds
+                          compact_axis_size,compact_kernel_bounds,exx_local_cpu_prepare,exx_local_cpu_pair
  implicit none
  private
  public :: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy,local_batch_action
@@ -124,10 +124,15 @@ contains
   ! those owners, but never allocate compact tiles on unrelated spatial ranks.
   call compact_kernel_bounds(plan%n,box,lower,upper)
   if(member==0)then
-   do c=lower(3),upper(3);do b=lower(2),upper(2);do a=lower(1),upper(1)
-    p=modulo([a,b,c],plan%n)-plan%lo
-    if(all(p>=0).and.all(p<plan%m))member=1
-   enddo;enddo;enddo
+   kernel_owner: do c=lower(3),upper(3)
+    do b=lower(2),upper(2);do a=lower(1),upper(1)
+     p=modulo([a,b,c],plan%n)-plan%lo
+     if(all(p>=0).and.all(p<plan%m))then
+      member=1
+      exit kernel_owner
+     endif
+    enddo;enddo
+   enddo kernel_owner
   endif
   call comm_get_groupinfo(comm_r,rank,peers)
   group=comm_create_group(comm_r,member,rank)
@@ -145,6 +150,7 @@ contains
   if(present(pair_fft_points))pair_fft_points=int(global_counts(2),int64)
  end subroutine
  subroutine local_apply_group(plan,comm_r,source,targets,action,used,status,pairs_executed,pair_fft_points,skip)
+!$ use omp_lib, only: omp_get_max_threads,omp_get_thread_num
   implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
   integer,intent(in) :: comm_r
@@ -156,11 +162,12 @@ contains
   integer(int64),intent(out),optional :: pairs_executed,pair_fft_points
   integer,allocatable :: occupied(:,:),total(:,:),axis_points(:),local_rows(:),tile_rows(:)
   complex(8),allocatable :: kernel_tile(:,:,:),kernel_sum(:,:,:),tile(:,:),tile_sum(:,:),result(:,:),result_sum(:,:)
-  complex(8),allocatable :: density(:),potential(:),source_tile(:),source_sum(:),batch_targets(:,:),batch_result(:,:)
+  complex(8),allocatable :: source_tile(:),source_sum(:),batch_targets(:,:),batch_result(:,:)
   integer,allocatable :: owned(:)
   integer :: ng,nt,bad,axis,j,g,x,y,z,p(3),box(3),origin(3),padded(3),gap,best,start,a,b,c,r,rank,peers
-  integer :: count,ntmax,first,nb,k,batch,nowned,capacity,lower(3),upper(3),extent(3)
-  logical :: batched
+  integer :: count,ntmax,first,nb,k,batch,nowned,capacity,first_owned,lower(3),upper(3),extent(3)
+  integer :: workers,worker,executed
+  logical :: batched,pair_used
   integer(int64) :: local_counts(2),global_counts(2)
   ! communication wrappers do not expose int64 reductions; sums are bounded
   ! here by the target count and accumulated through small real vectors.
@@ -236,19 +243,31 @@ contains
    status=1;return
   endif
   count=product(box)
-  ! One selected pair per spatial worker; the target list has already been
-  ! screened. No all-target compact action or fixed four-worker bottleneck.
+  ! CPU workers process independent pairs with reusable private FFT buffers.
+  ! Keep the batch bounded by the active worker count, not all target orbitals.
   call comm_get_groupinfo(comm_r,rank,peers)
-  batch=min(nt,max(1,peers))
+  workers=1
+!$ workers=omp_get_max_threads()
+  if(batched)workers=1
+  call comm_get_max(workers,comm_r)
+  workers=min(workers,1+(nt-1)/peers)
+  batch=int(min(int(nt,int64),int(peers,int64)*int(workers,int64)))
   if(batched) &
    batch=int(min(int(nt,int64),int(max(1,peers),int64)*int(plan%batch_size,int64)))
+  if(.not.batched)then
+   call exx_local_cpu_prepare(plan%fft,workers,bad)
+   call comm_get_max(bad,comm_r)
+   if(bad/=0)then
+    status=1;return
+   endif
+  endif
   ! Communication wrappers take a default-integer element count.
   if(int(count,int64)*int(batch,int64)>int(huge(0),int64))then
    status=1;return
   endif
   allocate(tile(count,batch),tile_sum(count,batch),result(count,batch),result_sum(count,batch))
   allocate(source_tile(count),source_sum(count))
-  allocate(local_rows(count),tile_rows(count),density(count),potential(count))
+  allocate(local_rows(count),tile_rows(count))
   capacity=min(plan%batch_size,1+(nt-1)/max(1,peers))
   if(batched)allocate(owned(capacity))
   r=0
@@ -283,11 +302,11 @@ contains
    enddo
    call comm_summation(tile(:,1:nb),tile_sum(:,1:nb),count*nb,comm_r)
    result=0d0
+   first_owned=1+modulo(rank-modulo(first-1,peers),peers)
    if(batched)then
     ! The owner rule is unchanged; each worker collects several of its pairs.
     nowned=0
-    do j=1,nb
-     if(modulo(first+j-2,peers)/=rank)cycle
+    do j=first_owned,nb,peers
      if(present(skip))then
       if(skip(first+j-1))cycle
      endif
@@ -317,21 +336,22 @@ contains
      deallocate(batch_targets,batch_result)
     endif
    else
-   do j=1,nb
-    if(modulo(first+j-2,peers)/=rank)cycle
+   executed=0
+!$omp parallel do default(none) schedule(static) num_threads(workers) if(workers>1) &
+!$omp shared(first_owned,nb,peers,first,skip,source_sum,tile_sum,result,plan) &
+!$omp private(j,worker,pair_used) reduction(+:executed)
+   do j=first_owned,nb,peers
     if(present(skip))then
      if(skip(first+j-1))cycle
     endif
-    density=conjg(source_sum)*tile_sum(:,j)
-    if(all(density==(0d0,0d0)))cycle
-    call exx_local_apply(plan%fft,density,potential,status)
-    if(status/=0)then
-     bad=1;exit
-    endif
-    result(:,j)=-source_sum*potential
-    local_counts(1)=local_counts(1)+1_int64
-    local_counts(2)=local_counts(2)+int(plan%fft%fft_points,int64)
+    worker=1
+!$  worker=omp_get_thread_num()+1
+    call exx_local_cpu_pair(plan%fft,worker,source_sum,tile_sum(:,j),result(:,j),pair_used)
+    if(pair_used)executed=executed+1
    enddo
+!$omp end parallel do
+   local_counts(1)=local_counts(1)+int(executed,int64)
+   local_counts(2)=local_counts(2)+int(executed,int64)*int(plan%fft%fft_points,int64)
    endif
    call comm_get_max(bad,comm_r)
    if(bad/=0)then

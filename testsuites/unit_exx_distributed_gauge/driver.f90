@@ -1,5 +1,7 @@
 #include "config.h"
 program spatial_gamma_probe
+ use omp_lib, only: omp_get_max_threads
+ use exx_blas_threads, only: scope_entries,scope_active
  use mpi
  use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
  use exx_spatial, only: spatial_exx_state,spatial_exx_refresh,spatial_exx_canonical_source
@@ -138,6 +140,10 @@ program spatial_gamma_probe
  call spatial_exx_refresh(copy,n,h,dims,coords,comm,comm_r,local,0,tol,status, &
    comm_o=comm_o,comm_matrix=MPI_COMM_WORLD)
  if(status==0)call MPI_Abort(MPI_COMM_WORLD,21,err)
+#ifdef USE_SCALAPACK
+ if(np>1.and.omp_get_max_threads()>1.and.scope_entries==0)call MPI_Abort(MPI_COMM_WORLD,22,err)
+#endif
+ if(scope_active)call MPI_Abort(MPI_COMM_WORLD,23,err)
  if(rank==0)print *, 'PASS Gamma localization, inverse, transport, reset/seed, retain, copy and invalid state'
 
  call MPI_Finalize(err)

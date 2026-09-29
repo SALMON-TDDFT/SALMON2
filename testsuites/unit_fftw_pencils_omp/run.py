@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='fftw-omp-') as t:
  subprocess.run(cmd+['-c',str(root/'src/xc/fftw_pencils.f90'),'-o',str(t/'fft.o')],check=True,cwd=t)
  extra=[];libraries=[]
  if a.action:
-  names=['exx_ace','exx_distributed_gauge','exx_sparse_orbitals','exx_distributed_metric','exx_orbitals',
+  names=['exx_ace','exx_blas_threads','exx_distributed_gauge','exx_sparse_orbitals','exx_distributed_metric','exx_orbitals',
          'exx_pair_candidates','exx_spatial','exx_batch_backend','exx_spatial_local','exx_wannier_gauge','exx_local_fft']
   extra=[str(obj/('xc/'+n+'.f90.o')) for n in names]
   libraries=['-L/opt/homebrew/opt/openblas/lib','-lopenblas']

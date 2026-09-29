@@ -18,6 +18,9 @@
 #cmakedefine USE_SCALAPACK
 #cmakedefine USE_EIGENEXA
 #cmakedefine USE_EXX_CUFFT
+#cmakedefine HAVE_EXX_OPENBLAS_THREADS
+#cmakedefine HAVE_EXX_NVPL_THREADS
+#cmakedefine HAVE_EXX_FUJITSU_THREADS
 #cmakedefine USE_HSE
 #cmakedefine USE_LIBXC
 #cmakedefine USE_FFTW

@@ -7,7 +7,7 @@ a=p.parse_args();b=a.build.resolve();obj=b/'src/CMakeFiles/salmon.dir'
 names=['fftw_blocks','fftw_pencils']
 libs=[]
 if a.action:
- names+=['exx_ace','exx_distributed_gauge','exx_sparse_orbitals','exx_distributed_metric','exx_orbitals',
+ names+=['exx_ace','exx_blas_threads','exx_distributed_gauge','exx_sparse_orbitals','exx_distributed_metric','exx_orbitals',
   'exx_pair_candidates','exx_spatial','exx_batch_backend','exx_spatial_local','exx_wannier_gauge','exx_local_fft']
  libs=['-L/opt/homebrew/opt/openblas/lib','-lopenblas']
  if 'USE_SCALAPACK:BOOL=ON' in (b/'CMakeCache.txt').read_text():
@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='block-fft-') as tmp:
   *[str(obj/('xc/'+n+'.f90.o')) for n in names],str(obj/'parallel/communication.f90.o'),str(obj/'misc/nvtx_wrapper.f90.o'),
   '-L/opt/homebrew/lib','-lfftw3',*libs,'-o',str(exe)],check=True)
  for dims in [(1,1,1),(2,1,1),(2,2,1),(8,1,1),(2,2,2),(1,2,4)]:
-  for threads in (1,2):
+  for threads in (1,2,4):
    subprocess.run(['mpiexec','-n',str(dims[0]*dims[1]*dims[2]),str(exe),' '.join(map(str,dims)),*(['slab'] if a.slab else [])],
     check=True,timeout=120,env=dict(os.environ,OMP_NUM_THREADS=str(threads),OPENBLAS_NUM_THREADS='1'))
 

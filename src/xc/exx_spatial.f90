@@ -451,7 +451,7 @@ contains
     real(8) :: kernel_local(2),kernel_sum(2),lambda,kzero,krms,budget,normq,qmax,qnorm_local
     real(8) :: candidate_bound,summary_local(3),summary_total(3),cpu_start,cpu_end,bound_scale
     integer :: source_total,target_total,nselected,ncandidate,k,broad_sources,box_lower(3),box_upper(3)
-    integer :: mesh_local(3),mesh_lo(3),nactive
+    integer :: mesh_local(3),mesh_lo(3),nactive,stride(3)
     real(8) :: envelope_max,envelope_norm,envelope_factor,threshold_floor,threshold_pair,factor
     real(8) :: pair_stats(3),global_pair_stats(3),point_total
     integer(int64) :: compact_pairs,compact_points
@@ -515,27 +515,39 @@ contains
       m=[n(1)/dims(1),n(2)/dims(2),n(3)]
       lo=[coords(1)*m(1),coords(2)*m(2),0]
     endif
+    stride=[m(3),m(3)*m(1),1]
+    if(size(dims)==3)stride=[1,m(1),m(1)*m(2)]
+    if(screening>0d0)then
 !$omp parallel do collapse(2) default(none) schedule(static) &
-!$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier,dims)
-    do y=0,m(2)-1;do x=0,m(1)-1;do z=0,m(3)-1
-      g=1+z+m(3)*(x+m(1)*y)
-      if(size(dims)==3)g=1+x+m(1)*(y+m(2)*z)
-      p=[x,y,z]+lo
-      where(p>=(n+1)/2)p=p-n
-      q=2*pi*p/(n*h);q2=sum(q*q)
-      if(screening>0d0)then
+!$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier,stride)
+      do y=0,m(2)-1;do x=0,m(1)-1;do z=0,m(3)-1
+        g=1+x*stride(1)+y*stride(2)+z*stride(3)
+        p=[x,y,z]+lo
+        where(p>=(n+1)/2)p=p-n
+        q=2*pi*p/(n*h);q2=sum(q*q)
         if(q2<1d-24)then
           multiplier(g)=pi/screening**2
         else
           multiplier(g)=4*pi*(1d0-exp(-q2/(4*screening**2)))/q2
         endif
-      else if(q2<1d-24)then
-        multiplier(g)=2*pi*radius**2
-      else
-        multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
-      endif
-    enddo;enddo;enddo
+      enddo;enddo;enddo
 !$omp end parallel do
+    else
+!$omp parallel do collapse(2) default(none) schedule(static) &
+!$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier,stride)
+      do y=0,m(2)-1;do x=0,m(1)-1;do z=0,m(3)-1
+        g=1+x*stride(1)+y*stride(2)+z*stride(3)
+        p=[x,y,z]+lo
+        where(p>=(n+1)/2)p=p-n
+        q=2*pi*p/(n*h);q2=sum(q*q)
+        if(q2<1d-24)then
+          multiplier(g)=2*pi*radius**2
+        else
+          multiplier(g)=8*pi*sin(.5d0*sqrt(q2)*radius)**2/q2
+        endif
+      enddo;enddo;enddo
+!$omp end parallel do
+    endif
     allocate(selected(nt),omitted(nt),broad_kept(nt));omitted=0d0;broad_kept=0;broad_sources=0
     if(op%screen_mode/=0)then
       call cpu_time(cpu_start)
