@@ -1,6 +1,5 @@
 ! Exact nonzero storage of already masked, spatially local orbital columns.
 module exx_sparse_orbitals
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   public :: s_sparse_orbitals,sparse_pack,sparse_clear,sparse_valid,sparse_column,sparse_dot,sparse_norms
@@ -37,6 +36,7 @@ contains
     a%offset(a%no+1)=k
   end subroutine
   logical function sparse_valid(a,ng,no) result(valid)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     type(s_sparse_orbitals),intent(in) :: a
     integer,intent(in) :: ng,no

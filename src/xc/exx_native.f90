@@ -1,6 +1,6 @@
 #include "config.h"
 ! SALMON adapter: legacy full-grid/orbital layout distributes k points.
-! Gamma HSE SCF and DC-initialized hybrid mesh RT support spatial y/z FFTW pencils.
+! Gamma hybrid SCF and native mesh RT preserve three-dimensional Cartesian spatial blocks.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
   use exx_sparse_orbitals, only: sparse_pack,sparse_clear,sparse_column
