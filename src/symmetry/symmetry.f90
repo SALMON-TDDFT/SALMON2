@@ -158,12 +158,23 @@ contains
 
   subroutine symmetry_validate_group()
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
     real(8) :: rotation(3,3),translation(3),delta(3),cartesian(3,3),identity(3,3),determinant
-    integer :: a,b,c,nsym
+    real(8) :: operation_element
+    integer :: a,b,c,nsym,i,j,k
     logical :: found
     nsym=size(SymMatA,3)
     if (nsym==0) error stop 'Symmetry: empty retained group'
-    if (.not.all(ieee_is_finite(SymMatA))) error stop 'Symmetry: nonfinite operation'
+    ! NVHPC 25.9 can resolve the whole allocatable array to a device IEEE
+    ! routine in host code. Check a local scalar instead, including translations.
+    do k=1,nsym
+      do j=1,size(SymMatA,2)
+        do i=1,size(SymMatA,1)
+          operation_element=SymMatA(i,j,k)
+          if (.not.ieee_is_finite(operation_element)) error stop 'Symmetry: nonfinite operation'
+        end do
+      end do
+    end do
     identity=0d0
     do a=1,3
       identity(a,a)=1d0
