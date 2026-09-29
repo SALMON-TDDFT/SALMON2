@@ -24,6 +24,11 @@ module exx_k_exchange
 interface exx_k_kernel_init
     module procedure init_cubic,init_rectangular
   end interface
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
                         block_rows,profile,fft_layout,create_backend,coulomb_radius)
@@ -63,7 +68,7 @@ contains
     if(ierr/=0)return
     ierr=1
     if(any(n<1).or.any(mesh<1).or.block<1.or.any(h<=0).or.omega<0) return
-    if(.not.all(ieee_is_finite(h)).or..not.ieee_is_finite(omega))return
+    if(.not.salmon_all_finite(h).or..not.ieee_is_finite(omega))return
     radius=.5d0*minval(n*mesh*h)
     if(present(coulomb_radius))then
       if(.not.ieee_is_finite(coulomb_radius).or.coulomb_radius<0d0)return
@@ -92,7 +97,7 @@ contains
       end select
     endif
     nk=product(mesh);ng=product(n);ns=n*mesh;pi=acos(-1d0)
-    if(size(k,1)/=3.or.size(k,2)/=nk.or..not.all(ieee_is_finite(k)))return
+    if(size(k,1)/=3.or.size(k,2)/=nk.or..not.salmon_all_finite(k))return
     first=1;nphase=nk
     if(present(phase_start))first=phase_start
     if(present(phase_count))nphase=phase_count
@@ -291,8 +296,8 @@ contains
     if(any(shape(action)/=shape(target)))return
     no=size(source,2);nt=size(target,2)
     if(no<1.or.nt<1)return
-    if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))return
-    if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))return
+    if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))return
+    if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))return
     allocate(s(ng,no,nk),t(ng,nt,nk))
     if(op%contiguous_fft)then
       allocate(tile(b,ng))
@@ -391,8 +396,8 @@ contains
     else
       valid=.false.
     endif
-    valid=valid.and.all(ieee_is_finite(real(source))).and.all(ieee_is_finite(aimag(source)))
-    valid=valid.and.all(ieee_is_finite(real(target))).and.all(ieee_is_finite(aimag(target)))
+    valid=valid.and.salmon_all_finite(real(source)).and.salmon_all_finite(aimag(source))
+    valid=valid.and.salmon_all_finite(real(target)).and.salmon_all_finite(aimag(target))
     ! Fixed-size handshake must agree before variable-size tile collectives.
     valid_send=cmplx(b,merge(2,0,allocated(op%accelerator)),c_double)
     if(.not.valid)valid_send=cmplx(b,-1,c_double)
@@ -631,4 +636,53 @@ contains
     if(allocated(op%order))deallocate(op%order,op%point,op%shift,op%phase,op%kernel)
     op%n=0;op%mesh=0;op%ng=0;op%nk=0;op%block=0
   end subroutine
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module

@@ -7,6 +7,11 @@ module dc_thermal
   integer,parameter,public :: dc_thermal_invalid=1,dc_thermal_capacity=2, &
     dc_thermal_unconverged=3,dc_thermal_singular=4
   public :: solve_dc_thermal,response_dc_thermal,fermi_entropy
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   pure real(8) function fermi_entropy(f) result(s)
     real(8),intent(in) :: f
@@ -18,7 +23,7 @@ contains
     real(8),intent(in) :: e(:),w(:),t,g
     valid=.false.
     if(size(e)==0.or.size(w)/=size(e))return
-    if(.not.all(ieee_is_finite(e)).or..not.all(ieee_is_finite(w)))return
+    if(.not.salmon_all_finite(e).or..not.salmon_all_finite(w))return
     if(.not.ieee_is_finite(t).or..not.ieee_is_finite(g))return
     if(t<=0d0.or.g<=0d0.or.any(w<0d0))return
     valid=sum(w)>0d0
@@ -99,7 +104,7 @@ contains
     if(.not.valid_inputs(e,w,t,g))return
     if(size(de)/=size(e).or.size(dw)/=size(e).or.size(df)/=size(e))return
     if(.not.ieee_is_finite(mu))return
-    if(.not.all(ieee_is_finite(de)).or..not.all(ieee_is_finite(dw)))return
+    if(.not.salmon_all_finite(de).or..not.salmon_all_finite(dw))return
     call evaluate(e,t,mu,f,b,s)
     susceptibility=sum(w*b)
     ! Do not divide by a numerically unresolved charge susceptibility.
@@ -110,4 +115,19 @@ contains
     dts=g*sum(t*s*dw+(e-mu)*w*df)
     status=0
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
 end module

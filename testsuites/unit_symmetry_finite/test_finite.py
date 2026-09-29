@@ -15,13 +15,19 @@ class SymmetryFinite(unittest.TestCase):
         start = source.index('  subroutine symmetry_validate_group()')
         end = source.index('  end subroutine symmetry_validate_group', start)
         routine = source[start:end] + '  end subroutine symmetry_validate_group\n'
+        helper_start = source.index('  pure logical function finite_real_2d(')
+        helper_end = source.index('  end function', helper_start) + len('  end function')
+        helper = source[helper_start:helper_end] + '\n'
         # Keep the allocatable array at module scope, as in the production code.
         module = '''module probe_group
 implicit none
 real(8), allocatable :: SymMatA(:,:,:)
 real(8) :: Amat(3,3), Ainv(3,3)
+interface salmon_all_finite
+  module procedure finite_real_2d
+end interface
 contains
-''' + routine + 'end module probe_group\n'
+''' + routine + helper + 'end module probe_group\n'
         driver = '''program probe
 use probe_group
 use, intrinsic :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_positive_inf, ieee_negative_inf

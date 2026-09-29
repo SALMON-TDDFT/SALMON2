@@ -6,6 +6,11 @@ module lcfo_mesh_stream
   implicit none
   private
   public :: lcfo_stream_contract
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   subroutine read_values(unit,position,values,status)
     integer,intent(in) :: unit
@@ -19,7 +24,7 @@ contains
     allocate(wire(2*n))
     read(unit,pos=position,iostat=status)wire(:2*n)
     if(status/=0)return
-    if(.not.all(ieee_is_finite(wire(:2*n))))then
+    if(.not.salmon_all_finite(wire(:2*n)))then
       status=1;return
     endif
     do i=1,n
@@ -106,4 +111,19 @@ contains
     enddo
     status=0
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
 end module

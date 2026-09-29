@@ -8,6 +8,11 @@ module rvv10_distributed
   implicit none
   private
   public :: rvv10_evaluate_distributed
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   subroutine rvv10_evaluate_distributed(n,lo,m,dims,coords,comm,comm_r,h,rho,sigma,b,c,nq, &
       energy,vrho,vsigma,used,status,use_fftw)
@@ -48,9 +53,9 @@ contains
     used=.true.;status=1;bad=0
     if(size(rho)/=product(m).or.size(sigma)/=product(m).or.size(energy)/=product(m).or. &
       size(vrho)/=product(m).or.size(vsigma)/=product(m))bad=1
-    if(any(rho<0d0).or.any(sigma<0d0).or..not.all(ieee_is_finite(rho)).or. &
-       .not.all(ieee_is_finite(sigma)))bad=1
-    if(any(h<=0d0).or..not.all(ieee_is_finite(h)).or.nq<8.or.nq>128)bad=1
+    if(any(rho<0d0).or.any(sigma<0d0).or..not.salmon_all_finite(rho).or. &
+       .not.salmon_all_finite(sigma))bad=1
+    if(any(h<=0d0).or..not.salmon_all_finite(h).or.nq<8.or.nq>128)bad=1
     if(.not.ieee_is_finite(b).or..not.ieee_is_finite(c).or.b<=0d0.or.c<0d0)bad=1
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
@@ -121,4 +126,19 @@ contains
       ierr=0
     end subroutine
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
 end module

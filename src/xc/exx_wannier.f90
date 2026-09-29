@@ -40,6 +40,11 @@ module exx_wannier
     type(c_ptr),allocatable :: worker_forward(:,:),worker_backward(:,:)
     type(c_ptr) :: forward=c_null_ptr,backward=c_null_ptr
   end type
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
   subroutine wannier_snapshot(op,occupation,omega,exchange,residual,iteration,converged,path,status)
     use iso_fortran_env, only: int32
@@ -88,8 +93,8 @@ contains
     call wannier_destroy(op)
     status=1
     if(any(n<1).or.any(mesh<1).or.any(h<=0d0).or.omega<0d0)return
-    if(.not.all(ieee_is_finite(h)).or..not.ieee_is_finite(omega))return
-    if(size(k,1)/=3.or.size(k,2)/=product(mesh).or..not.all(ieee_is_finite(k)))return
+    if(.not.salmon_all_finite(h).or..not.ieee_is_finite(omega))return
+    if(size(k,1)/=3.or.size(k,2)/=product(mesh).or..not.salmon_all_finite(k))return
     op%n=n;op%mesh=mesh;op%ns=n*mesh;op%ng=product(n);op%nk=product(mesh);op%ngs=product(op%ns)
     op%h=h;op%dv=product(h);op%k=k;ns=op%ns;pi=acos(-1d0);length=n*h
     radius=.5d0*minval(ns*h)
@@ -210,7 +215,7 @@ contains
     status=1
     if(size(psi,2)<1.or.size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
     if(any(shape(occupation)/=[size(psi,2),op%nk]))return
-    if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))return
+    if(any(occupation<0d0).or.any(occupation>2d0).or..not.salmon_all_finite(occupation))return
     ! Keep a common band set over k; never discard a positive occupation.
     indices=pack([(j,j=1,size(psi,2))],any(occupation>0d0,dim=2))
     if(size(indices)==0)indices=[1] ! zero-density operator still has a valid frame
@@ -402,7 +407,7 @@ contains
     status=1;n=size(psi,2)
     if(size(psi,1)/=op%ng.or.size(psi,3)/=op%nk)return
     if(any(shape(occupation)/=[n,op%nk]).or.any(shape(gauge)/=[n,n,op%nk]))return
-    if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))return
+    if(any(occupation<0d0).or.any(occupation>2d0).or..not.salmon_all_finite(occupation))return
     allocate(weighted(op%ng,n,op%nk),tmp(op%ng,n))
     do ik=1,op%nk
       do j=1,n
@@ -589,4 +594,35 @@ contains
     call wannier_backward(op,result,action)
     status=0
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

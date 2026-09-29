@@ -6,6 +6,11 @@ module exx_adaptive_support
   implicit none
   private
   public :: adaptive_source_mask
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
   subroutine adaptive_source_mask(n,h,lo,m,comm_r,source,fraction,radii,loss,protected,status,fixed_radius)
     use communication, only: comm_summation,comm_get_max
@@ -31,13 +36,13 @@ contains
     if(any(n<1).or.any(m<0).or.any(lo<0).or.any(lo+m>n))bad=1
     if(size(source,1)/=product(m))bad=1
     if(size(radii)/=no.or.size(loss)/=no.or.size(protected)/=no)bad=1
-    if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
+    if(any(h<=0d0).or..not.salmon_all_finite(h))bad=1
     if(.not.ieee_is_finite(fraction).or.fraction<=0d0.or.fraction>1d0)bad=1
-    if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))bad=1
+    if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))bad=1
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     length=n*h
-    if(.not.all(ieee_is_finite(length)).or..not.ieee_is_finite(sum(length**2)))bad=1
+    if(.not.salmon_all_finite(length).or..not.ieee_is_finite(sum(length**2)))bad=1
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     radii=sqrt(sum((length/2d0)**2))
@@ -117,4 +122,53 @@ contains
     enddo
     status=0
   end subroutine adaptive_source_mask
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module exx_adaptive_support

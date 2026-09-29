@@ -13,6 +13,11 @@ module exx_wannier_gauge
       complex(8),intent(inout) :: matrix(:,:)
     end subroutine
   end interface
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_3d
+  end interface
 contains
   subroutine gauge_seed(psi,position,k,u,status)
     implicit none
@@ -135,8 +140,8 @@ contains
     if(any(shape(current)/=shape(previous)).or.dv<=0d0.or..not.ieee_is_finite(dv))check=1d0
     n=size(current,2)
     if(n<1.or.size(current,3)<1.or.any(shape(u)/=[n,n,size(current,3)]))check=1d0
-    if(.not.all(ieee_is_finite(real(current))).or..not.all(ieee_is_finite(aimag(current))))check=1d0
-    if(.not.all(ieee_is_finite(real(previous))).or..not.all(ieee_is_finite(aimag(previous))))check=1d0
+    if(.not.salmon_all_finite(real(current)).or..not.salmon_all_finite(aimag(current)))check=1d0
+    if(.not.salmon_all_finite(real(previous)).or..not.salmon_all_finite(aimag(previous)))check=1d0
     ! Every spatial peer must take the same branch before overlap collectives.
     ! Band/k dimensions and callback call order are a collective caller contract.
     if(present(sum_grid))call sum_grid(check)
@@ -149,7 +154,7 @@ contains
       call zgesvd('A','A',n,n,overlap,n,singular,left,n,right,n,work,size(work),rwork,status)
       if(status/=0)return
       min_singular=min(min_singular,minval(singular))
-      if(.not.all(ieee_is_finite(singular)).or.min_singular<1d-8)then
+      if(.not.salmon_all_finite(singular).or.min_singular<1d-8)then
         status=1;return
       endif
       u(:,:,ik)=matmul(left,right)
@@ -396,4 +401,36 @@ contains
       enddo;enddo
     enddo
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module

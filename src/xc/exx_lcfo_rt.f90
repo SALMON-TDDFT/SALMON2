@@ -35,6 +35,11 @@ module exx_lcfo_rt
   complex(8),allocatable,save :: cached_coeff(:,:)
   real(8),save :: cached_energy=0d0
   real(8),allocatable,save :: cached_occupation(:)
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_2d
+  end interface
 contains
   subroutine initialize_fragment()
     implicit none
@@ -324,7 +329,7 @@ contains
     projection_seconds=wall_seconds()-projection_started
     ! Retain this fragment's Hermitian contribution, not a replicated global Hx.
     hx=projected
-    if(.not.all(ieee_is_finite(real(hx))).or..not.all(ieee_is_finite(aimag(hx)))) &
+    if(.not.salmon_all_finite(real(hx)).or..not.salmon_all_finite(aimag(hx))) &
       error stop 'LCFO EXX: nonfinite projected exchange'
     contribution=matmul(hx,near_coeff)
     call lcfo_halo_sum(exchange_plan,contribution,w)
@@ -518,4 +523,21 @@ contains
       if(present(action))write(*,'(a,2es16.7)')'LCFO exchange detail action/projection ',maximum(5:6)
     endif
   end subroutine
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

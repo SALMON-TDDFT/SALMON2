@@ -8,6 +8,11 @@ module exx_orbitals
   private
   public :: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   public :: orbital_ace_build,orbital_ace_apply,orbital_hermitian_action
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
   subroutine orbital_check(bad,comm_r,comm_o)
     implicit none
@@ -110,8 +115,8 @@ contains
     bad=0;status=1;correction_norm=0d0
     if(any(shape(u)/=shape(w)).or.size(u,3)/=1.or.dv<=0d0.or..not.ieee_is_finite(dv))bad=1
     if(.not.ieee_is_finite(budget).or.budget<0d0)bad=1
-    if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))bad=1
-    if(.not.all(ieee_is_finite(real(w))).or..not.all(ieee_is_finite(aimag(w))))bad=1
+    if(.not.salmon_all_finite(real(u)).or..not.salmon_all_finite(aimag(u)))bad=1
+    if(.not.salmon_all_finite(real(w)).or..not.salmon_all_finite(aimag(w)))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(size(u,2),comm_r,comm_o,counts,first,bad)
@@ -121,8 +126,8 @@ contains
     call orbital_overlap(u(:,:,1),w(:,:,1),dv,comm_r,comm_o,counts,first,metric)
     gram=.5d0*(gram+conjg(transpose(gram)))
     metric=.5d0*(conjg(transpose(metric))-metric)
-    if(.not.all(ieee_is_finite(real(gram))).or..not.all(ieee_is_finite(aimag(gram))))bad=1
-    if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))bad=1
+    if(.not.salmon_all_finite(real(gram)).or..not.salmon_all_finite(aimag(gram)))bad=1
+    if(.not.salmon_all_finite(real(metric)).or..not.salmon_all_finite(aimag(metric)))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call zposv('U',n,n,gram,n,metric,n,bad)
@@ -166,8 +171,8 @@ contains
     store_packed=.false.
     if(present(packed))store_packed=packed
     if(any(shape(u)/=shape(w)).or.size(u,3)/=1.or.dv<=0d0.or..not.ieee_is_finite(dv))bad=1
-    if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))bad=1
-    if(.not.all(ieee_is_finite(real(w))).or..not.all(ieee_is_finite(aimag(w))))bad=1
+    if(.not.salmon_all_finite(real(u)).or..not.salmon_all_finite(aimag(u)))bad=1
+    if(.not.salmon_all_finite(real(w)).or..not.salmon_all_finite(aimag(w)))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(size(u,2),comm_r,comm_o,counts,first,bad)
@@ -188,7 +193,7 @@ contains
       status=0;return
     endif
     call orbital_overlap(u(:,:,1),w(:,:,1),-dv,comm_r,comm_o,counts,first,metric)
-    if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))bad=1
+    if(.not.salmon_all_finite(real(metric)).or..not.salmon_all_finite(aimag(metric)))bad=1
     scale=sqrt(sum(abs(metric)**2))
     if(scale==0d0.or.sqrt(sum(abs(metric-transpose(conjg(metric)))**2))>1d-10*scale)bad=1
     call orbital_check(bad,comm_r,comm_o)
@@ -255,8 +260,8 @@ contains
     if(bad/=0)return
     if(size(ace%factors,1)/=size(target,1).or.size(ace%factors,3)/=1.or.size(target,3)/=1)bad=1
     if(any(shape(target)/=shape(action)).or.ace%dv<=0d0.or..not.ieee_is_finite(ace%dv))bad=1
-    if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
-    if(.not.all(ieee_is_finite(real(ace%factors))).or..not.all(ieee_is_finite(aimag(ace%factors))))bad=1
+    if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))bad=1
+    if(.not.salmon_all_finite(real(ace%factors)).or..not.salmon_all_finite(aimag(ace%factors)))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(size(target,2),comm_r,comm_o,target_counts,first,bad)
@@ -296,9 +301,9 @@ contains
     if(ng/=ace%grid_rows.or.size(target,3)/=1.or.any(shape(target)/=shape(action)))bad=1
     if(ace%dv<=0d0.or..not.ieee_is_finite(ace%dv))bad=1
     if(size(ace%offset)<1.or.size(ace%row)/=size(ace%values))bad=1
-    if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
-    if(.not.all(ieee_is_finite(real(ace%values))).or..not.all(ieee_is_finite(aimag(ace%values))))bad=1
-    if(.not.all(ieee_is_finite(real(ace%metric_factor))).or..not.all(ieee_is_finite(aimag(ace%metric_factor))))bad=1
+    if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))bad=1
+    if(.not.salmon_all_finite(real(ace%values)).or..not.salmon_all_finite(aimag(ace%values)))bad=1
+    if(.not.salmon_all_finite(real(ace%metric_factor)).or..not.salmon_all_finite(aimag(ace%metric_factor)))bad=1
     if(any(ace%row<1).or.any(ace%row>ng))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
@@ -344,4 +349,53 @@ contains
     enddo
     status=0
   end subroutine
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module

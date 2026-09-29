@@ -5,6 +5,11 @@ module exx_functional
   private
   public :: is_hybrid,is_global_hybrid
   public :: exchange_fraction,exchange_screening,lcfo_write_functional,lcfo_check_functional
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   pure logical function is_global_hybrid(name)
     implicit none
@@ -71,7 +76,7 @@ contains
         close(u)
         if(ios==0)then
           if(magic=='SLCFO_FUNCTIONAL_V1'.and.saved_run==run_id.and.saved_xc==xc)then
-            if(all(ieee_is_finite(p)))then
+            if(salmon_all_finite(p))then
               if(all(abs(p-parameters())<=1d-13*max(1d0,abs(parameters()))))status=0
             endif
           endif
@@ -80,4 +85,19 @@ contains
     endif
     if(status/=0)write(*,'(2a)')'LCFO functional metadata missing or mismatched: ',path
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
 end module

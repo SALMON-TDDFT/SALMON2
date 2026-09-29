@@ -12,6 +12,11 @@ module exx_symmetry
    real(8),allocatable :: full_k(:,:),rep_k(:,:),rotation(:,:,:),translation(:,:)
    integer,allocatable :: first(:),owner(:),operations(:,:),multiplicity(:),grid(:,:)
  end type
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
  subroutine symmetry_init(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
  implicit none
@@ -23,13 +28,13 @@ contains
  integer:: nr,ns,nf,ng,r,s,d,g,j,i,id,slot,base,c(3),c0(3),nstar,matches
  integer,allocatable::lookup(:),order(:),used(:)
  ierr=1
- if(any(n<1).or.mesh<1.or.any(h<=0).or..not.all(ieee_is_finite(h)))return
+ if(any(n<1).or.mesh<1.or.any(h<=0).or..not.salmon_all_finite(h))return
  if(size(krep,1)/=3.or.size(SymMatA,1)/=3.or.size(SymMatA,2)/=4)return
  if(any(shape(SymMatA)/=shape(SymMatB)))return
  nr=size(krep,2);ns=size(SymMatA,3);nf=mesh**3;ng=product(n)
  if(nr<1.or.ns<1.or.size(weights)/=nr)return
- if(.not.all(ieee_is_finite(krep)).or..not.all(ieee_is_finite(weights)))return
- if(.not.all(ieee_is_finite(SymMatA)).or..not.all(ieee_is_finite(SymMatB)))return
+ if(.not.salmon_all_finite(krep).or..not.salmon_all_finite(weights))return
+ if(.not.salmon_all_finite(SymMatA).or..not.salmon_all_finite(SymMatB))return
  L=n*h;pi2=2*acos(-1d0);ident=0
  do d=1,3
  ident(d,d)=1
@@ -130,7 +135,7 @@ contains
  real(8)::L(3),v(3),delta(3)
  ierr=1;na=size(kion)
  if(size(rion,1)/=3.or.size(rion,2)/=na.or.na<1)return
- if(.not.all(ieee_is_finite(rion)))return
+ if(.not.salmon_all_finite(rion))return
  if(.not.allocated(map%rotation).or..not.allocated(map%translation))return
  L=map%n*map%h
  if(any(L<=0))return
@@ -171,7 +176,7 @@ contains
  if(full_index<1.or.full_index>map%nfull)return
  if(operation_slot<1.or.operation_slot>map%multiplicity(full_index))return
  if(size(orbitals,1)/=ng.or.any(shape(orbitals)/=shape(transformed)))return
- if(.not.all(ieee_is_finite(real(orbitals))).or..not.all(ieee_is_finite(aimag(orbitals))))return
+ if(.not.salmon_all_finite(real(orbitals)).or..not.salmon_all_finite(aimag(orbitals)))return
  r=map%owner(full_index);s=map%operations(operation_slot,full_index)
  rk=matmul(map%rotation(:,:,s),map%rep_k(:,r))
  Gvec=rk-map%full_k(:,full_index)
@@ -200,8 +205,8 @@ contains
  if(rep_start<1.or.rep_start+nr>map%nrep+1)return
  if(size(source,1)/=ng.or.size(target,1)/=ng.or.size(target,3)/=nr)return
  if(no<1.or.nv<1)return
- if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))return
- if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))return
+ if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))return
+ if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))return
  lo=map%first(rep_start);hi=map%first(rep_start+nr)-1
  allocate(expanded_source(ng,no*map%max_little,hi-lo+1),expanded_target(ng,nv,hi-lo+1))
  expanded_source=0;expanded_target=0
@@ -223,4 +228,53 @@ contains
  enddo
  ierr=0
  end subroutine
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module

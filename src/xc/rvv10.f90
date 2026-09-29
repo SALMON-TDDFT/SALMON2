@@ -19,6 +19,11 @@ module rvv10
       integer,intent(out) :: status
     end subroutine
   end interface
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   ! Full periodic density functional, using the same skew-adjoint central
   ! differences as SALMON. Small grids intentionally wrap multiple times.
@@ -94,11 +99,11 @@ contains
     type(c_ptr) :: forward,backward
     status=1;ng=product(n)
     if(any(n<1).or.nq<8.or.nq>128)return
-    if(any(h<=0d0).or..not.all(ieee_is_finite(h)))return
+    if(any(h<=0d0).or..not.salmon_all_finite(h))return
     if(.not.ieee_is_finite(b).or..not.ieee_is_finite(c).or.b<=0d0.or.c<0d0)return
     if(size(rho)/=ng.or.size(sigma)/=ng.or.size(energy)/=ng.or.size(vrho)/=ng.or.size(vsigma)/=ng)return
     if(any(rho<0d0).or.any(sigma<0d0))return
-    if(.not.all(ieee_is_finite(rho)).or..not.all(ieee_is_finite(sigma)))return
+    if(.not.salmon_all_finite(rho).or..not.salmon_all_finite(sigma))return
     pi=acos(-1d0);beta=(3/b**2)**.75d0/32
     allocate(mesh(nq),second(nq,nq),basis(ng,nq),deriv(ng,nq),qn_all(ng),qs_all(ng),amplitude(ng))
     allocate(theta(ng,nq),u(ng,nq),work(ng))
@@ -186,8 +191,8 @@ contains
       vsigma(i)=amp*qs_all(i)*v2
     enddo
 !$omp end parallel do
-    if(.not.all(ieee_is_finite(energy)).or..not.all(ieee_is_finite(vrho)).or. &
-       .not.all(ieee_is_finite(vsigma)))return
+    if(.not.salmon_all_finite(energy).or..not.salmon_all_finite(vrho).or. &
+       .not.salmon_all_finite(vsigma))return
     status=0
   end subroutine
 
@@ -237,4 +242,19 @@ contains
     basis(lo)=basis(lo)+a;basis(hi)=basis(hi)+b
     deriv(lo)=deriv(lo)-1/h;deriv(hi)=deriv(hi)+1/h
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
 end module

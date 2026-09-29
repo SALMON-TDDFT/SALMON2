@@ -5,6 +5,39 @@ module exx_gs_metadata
   private
   public :: exx_gs_metadata_write,exx_gs_metadata_check,exx_gs_occupation_check
 contains
+  ! Keep IEEE inquiries scalar for the Fujitsu Fortran compiler.
+  logical function finite_vector(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  logical function finite_occupations(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
   function physics_values(system,grid) result(values)
     use structures, only: s_dft_system
     use salmon_global, only: xc,num_kgrid,pbeh_coulomb_radius,rvv10_b,rvv10_c,rvv10_nq, &
@@ -70,7 +103,6 @@ contains
     use structures, only: s_rgrid,s_dft_system,s_parallel_info
     use communication, only: comm_is_root,comm_bcast
     use salmon_global, only: xc,nelem,num_kgrid,lmax_ps,lloc_ps,izatom,yn_psmask
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     character(*),intent(in) :: path
     type(s_rgrid),intent(in) :: lg
@@ -106,7 +138,7 @@ contains
           allocate(saved(size(current)))
           read(unit,iostat=status)saved
           if(status==0)then
-            if(.not.all(ieee_is_finite(saved)).or..not.all(ieee_is_finite(current)))then
+            if(.not.finite_vector(saved).or..not.finite_vector(current))then
               status=1
             else if(any(abs(saved-current)>1d-12*max(1d0,abs(current))))then
               status=1
@@ -116,11 +148,11 @@ contains
         if(status==0)read(unit,iostat=status)occupation
         if(status==0)then
           ! This route evolves a complete, doubly occupied, one-spin subspace only.
-          if(system%nspin/=1.or..not.all(ieee_is_finite(occupation)))then
+          if(system%nspin/=1.or..not.finite_occupations(occupation))then
             status=1
           else if(any(abs(occupation-2d0)>1d-12))then
             status=1
-          else if(.not.all(ieee_is_finite(system%rocc)))then
+          else if(.not.finite_occupations(system%rocc))then
             status=1
           else if(any(abs(occupation-system%rocc)>1d-12))then
             status=1
@@ -151,7 +183,6 @@ contains
 
   subroutine checkpoint_payload_check(path,system,occupation,saved_real,status)
     use structures, only: s_dft_system
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     character(*),intent(in) :: path
     type(s_dft_system),intent(in) :: system
@@ -181,7 +212,7 @@ contains
     close(unit,iostat=ios)
     if(ios/=0)status=ios
     if(status/=0)return
-    if(.not.all(ieee_is_finite(payload)))then
+    if(.not.finite_occupations(payload))then
       status=1
     else if(any(abs(payload-occupation)>1d-12))then
       status=1
@@ -191,7 +222,6 @@ contains
   subroutine exx_gs_occupation_check(system,info,occupation)
     use structures, only: s_dft_system,s_parallel_info
     use communication, only: comm_get_max
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     type(s_dft_system),intent(in) :: system
     type(s_parallel_info),intent(in) :: info
@@ -200,7 +230,7 @@ contains
     status=0
     if(any(shape(system%rocc)/=shape(occupation)))then
       status=1
-    else if(.not.all(ieee_is_finite(system%rocc)))then
+    else if(.not.finite_occupations(system%rocc))then
       status=1
     else if(any(abs(system%rocc-occupation)>1d-12))then
       status=1

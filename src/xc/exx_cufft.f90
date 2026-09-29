@@ -32,6 +32,11 @@ module exx_cufft
     end subroutine
   end interface
 #endif
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
   subroutine exx_cufft_create(backend)
     implicit none
@@ -67,8 +72,8 @@ contains
     if(ns==0)then
       status=0;return
     endif
-    if(.not.all(ieee_is_finite(real(filter))).or..not.all(ieee_is_finite(aimag(filter))))return
-    if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))return
+    if(.not.salmon_all_finite(real(filter)).or..not.salmon_all_finite(aimag(filter)))return
+    if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))return
     allocate(seen(npoints),stat=ios)
     if(ios/=0)then
       status=-3;return
@@ -211,7 +216,7 @@ contains
     if(ns==0.or.nb==0)then
       status=0;return
     endif
-    if(.not.all(ieee_is_finite(real(targets))).or..not.all(ieee_is_finite(aimag(targets))))then
+    if(.not.salmon_all_finite(real(targets)).or..not.salmon_all_finite(aimag(targets)))then
       call self%release(cleanup)
       return
     endif
@@ -280,7 +285,7 @@ contains
     if(status==CUFFT_SUCCESS)then
       !$acc update self(output_buffer(:,1:nb))
       action=output_buffer(:,1:nb)
-      if(.not.all(ieee_is_finite(real(action))).or..not.all(ieee_is_finite(aimag(action))))status=-4
+      if(.not.salmon_all_finite(real(action)).or..not.salmon_all_finite(aimag(action)))status=-4
     endif
     if(status/=CUFFT_SUCCESS)then
       action=0d0
@@ -355,7 +360,7 @@ contains
       call validate_source(padded,indices,filter,source,max(1,nb),npoints,status)
       return
     endif
-    if(.not.all(ieee_is_finite(real(targets))).or..not.all(ieee_is_finite(aimag(targets))))return
+    if(.not.salmon_all_finite(real(targets)).or..not.salmon_all_finite(aimag(targets)))return
     call backend%prepare(padded,indices,filter,source,nb,status)
     if(status==0)call backend%apply(targets,action,status)
     call backend%release(cleanup)
@@ -391,4 +396,53 @@ contains
     ! Returning from an OpenACC error callback has undefined behavior.
     error stop 'EXX cuFFT: fatal OpenACC runtime error'
   end subroutine
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module exx_cufft

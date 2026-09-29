@@ -11,6 +11,11 @@ module lcfo_scalapack
     complex(8),allocatable :: h(:,:),vectors(:,:)
     real(8),allocatable :: values(:)
   end type
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
   subroutine max_real(value,comm)
     real(8),intent(inout) :: value
@@ -91,7 +96,7 @@ contains
     complex(8),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     n=s%n;status=0;hermitian=huge(1d0);orthogonal=huge(1d0);residual=huge(1d0)
     if(nt<1.or.nt>n)status=1
-    if(.not.all(ieee_is_finite(real(s%h))).or..not.all(ieee_is_finite(aimag(s%h))))status=1
+    if(.not.salmon_all_finite(real(s%h)).or..not.salmon_all_finite(aimag(s%h)))status=1
     call comm_get_max(status,s%comm)
     if(status/=0)return
     call pztranc(n,n,one,s%h,1,1,s%desc,zero,s%vectors,1,1,s%desc)
@@ -145,7 +150,7 @@ contains
     local_norm=sum(abs(original(:s%nr,:s%nc))**2)
     call comm_summation(local_norm,norm,s%comm)
     residual=maxval(sqrt(total_res)/max(1d0,sqrt(norm),abs(s%values(:nt))))
-    if(.not.all(ieee_is_finite(s%values)).or..not.ieee_is_finite(residual).or. &
+    if(.not.salmon_all_finite(s%values).or..not.ieee_is_finite(residual).or. &
        .not.ieee_is_finite(orthogonal).or.max(orthogonal,residual)>1d-10)status=1
     call comm_get_max(status,s%comm)
   end subroutine
@@ -173,4 +178,35 @@ contains
     if(s%context>=0)call blacs_gridexit(s%context)
     s%context=-1
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

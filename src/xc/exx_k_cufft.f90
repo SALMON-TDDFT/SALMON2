@@ -39,6 +39,11 @@ module exx_k_cufft
     end subroutine
   end interface
 #endif
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_3d
+  end interface
 contains
   subroutine exx_k_cufft_create(backend)
     implicit none
@@ -76,7 +81,7 @@ contains
       if(any(modulo(shift(axis,:),n(axis))/=0))return
     enddo
     if(any(slot<1).or.any(slot>nslots))return
-    if(.not.all(ieee_is_finite(kernel)))return
+    if(.not.salmon_all_finite(kernel))return
     allocate(used(nslots),stat=ios)
     if(ios/=0)then
       status=-3;return
@@ -231,7 +236,7 @@ contains
         return
       endif
     endif
-    if(.not.all(ieee_is_finite(real(buffer))).or..not.all(ieee_is_finite(aimag(buffer))))then
+    if(.not.salmon_all_finite(real(buffer)).or..not.salmon_all_finite(aimag(buffer)))then
       call self%release(cleanup)
       return
     endif
@@ -317,7 +322,7 @@ contains
     if(status==CUFFT_SUCCESS)then
       !$acc update self(output)
       action=output
-      if(.not.all(ieee_is_finite(real(action))).or..not.all(ieee_is_finite(aimag(action))))status=-4
+      if(.not.salmon_all_finite(real(action)).or..not.salmon_all_finite(aimag(action)))status=-4
     endif
     if(status/=CUFFT_SUCCESS)then
       action=0d0
@@ -378,4 +383,22 @@ contains
     integer :: status
     call self%release(status)
   end subroutine
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module exx_k_cufft

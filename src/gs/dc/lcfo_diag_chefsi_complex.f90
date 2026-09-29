@@ -35,6 +35,11 @@ module lcfo_diag_chefsi_complex
 
   public :: diag_chefsi_complex
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d,finite_real_4d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d,finite_real_4d
+  end interface
 contains
 
   subroutine diag_chefsi_complex(dc,ik,nspin,filter_degree,filter_chunk_size, &
@@ -111,10 +116,10 @@ contains
     call prepare_blocks
     if(status/=0) goto 900
     flag=0
-    if(any(.not.ieee_is_finite(real(hdiag_sym,8))) .or. &
-       any(.not.ieee_is_finite(aimag(hdiag_sym))) .or. &
-       any(.not.ieee_is_finite(real(hrow,8))) .or. &
-       any(.not.ieee_is_finite(aimag(hrow)))) flag=1
+    if(.not.salmon_all_finite(real(hdiag_sym,8)) .or. &
+       .not.salmon_all_finite(aimag(hdiag_sym)) .or. &
+       .not.salmon_all_finite(real(hrow,8)) .or. &
+       .not.salmon_all_finite(aimag(hrow))) flag=1
     call sync_status(flag)
     if(flag/=0) then
       status=1
@@ -200,8 +205,8 @@ contains
                   q0(:,1:nchunk)=q1(:,1:nchunk)
                   q1(:,1:nchunk)=q2(:,1:nchunk)
                 end do
-                if(any(.not.ieee_is_finite(real(q1(:,1:nchunk),8))) .or. &
-                   any(.not.ieee_is_finite(aimag(q1(:,1:nchunk))))) then
+                if(.not.salmon_all_finite(real(q1(:,1:nchunk),8)) .or. &
+                   .not.salmon_all_finite(aimag(q1(:,1:nchunk)))) then
                   flag=1
                 else
                   max_amplitude=maxval(abs(q1(:,1:nchunk)))
@@ -552,7 +557,7 @@ contains
       call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
         eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,info0)
       istat=merge(1,0,info0/=0)
-      if(any(.not.ieee_is_finite(eigenvalue(nlocked+1:n)))) istat=1
+      if(.not.salmon_all_finite(eigenvalue(nlocked+1:n))) istat=1
       call sync_status(istat)
       deallocate(work0,rwork0)
       if(istat/=0) return
@@ -705,8 +710,8 @@ contains
       error=max_out(1)
       istat=0
       if(.not.ieee_is_finite(error) .or. &
-         any(.not.ieee_is_finite(real(gram,8))) .or. &
-         any(.not.ieee_is_finite(aimag(gram)))) istat=1
+         .not.salmon_all_finite(real(gram,8)) .or. &
+         .not.salmon_all_finite(aimag(gram))) istat=1
       call sync_status(istat)
     end subroutine calculate_orthogonality
 
@@ -1027,5 +1032,73 @@ contains
     if(left<j) call sort_values(value,index,left,j)
     if(i<right) call sort_values(value,index,i,right)
   end subroutine sort_values
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_4d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:,:)
+    real(8) :: value
+    integer :: i,j,k,l
+    finite=.false.
+    do l=1,size(values,4)
+      do k=1,size(values,3)
+        do j=1,size(values,2)
+          do i=1,size(values,1)
+            value=values(i,j,k,l)
+            if(.not.ieee_is_finite(value))return
+          enddo
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module lcfo_diag_chefsi_complex

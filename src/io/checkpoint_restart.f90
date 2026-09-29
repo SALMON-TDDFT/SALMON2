@@ -23,6 +23,11 @@ module checkpoint_restart_sub
   integer,parameter,private :: write_mode = 1
   integer,parameter,private :: read_mode  = 2
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
 
 !===================================================================================================================================
@@ -2191,7 +2196,7 @@ subroutine symmetry_checkpoint_metadata(wdir,system,info,writing)
           allocate(saved(size(values)))
           read(unit,iostat=status)saved
           if(status==0)then
-            if(.not.all(ieee_is_finite(saved)).or.any(abs(saved-values)>1d-13))status=1
+            if(.not.salmon_all_finite(saved).or.any(abs(saved-values)>1d-13))status=1
           endif
         endif
       endif
@@ -2263,7 +2268,7 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
         if(status==0)call read_methods(unit,status)
         if(status==0)read(unit,iostat=status)saved
         if(status==0)then
-          if(.not.all(ieee_is_finite(saved)))status=1
+          if(.not.salmon_all_finite(saved))status=1
           if(any(abs(saved-values)>1d-13))status=1
         endif
       endif
@@ -2591,5 +2596,19 @@ contains
   end subroutine
 end subroutine
 #endif
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
 
 end module checkpoint_restart_sub

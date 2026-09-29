@@ -108,6 +108,11 @@ module inputoutput
   type(unit_t) :: t_unit_polarizability
   type(unit_t) :: t_unit_conductivity
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   subroutine read_input
     implicit none
@@ -3429,7 +3434,7 @@ contains
       if(.not.ieee_is_finite(dt).or.dt<=0d0.or.nt<1) &
         error stop 'Hybrid mesh RT: positive finite dt and nt required'
       if(ae_shape1=='Acos2')then
-        if(.not.all(ieee_is_finite([omega1,tw1,t1_start,E_amplitude1,I_wcm2_1,phi_CEP1]))) &
+        if(.not.salmon_all_finite([omega1,tw1,t1_start,E_amplitude1,I_wcm2_1,phi_CEP1])) &
           error stop 'Hybrid mesh RT: finite pulse parameters required'
         if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
           error stop 'Hybrid mesh RT: positive frequency/width and nonnegative pulse start required'
@@ -3654,5 +3659,19 @@ contains
       call yn_argument_check( str(i:i) )
     end do
   end subroutine yyynnn_argument_check
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
 
 end module inputoutput

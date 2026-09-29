@@ -3,6 +3,11 @@ module lcfo_gram
  implicit none
  private
  public :: lcfo_gram_error
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_2d
+  end interface
 contains
  subroutine lcfo_gram_error(coeff,comm,error)
   use iso_fortran_env, only:int64
@@ -30,7 +35,7 @@ contains
   enddo
   call comm_summation(packed,total,npair,comm)
   ! A NaN can be hidden by MAXVAL; check every independent entry first.
-  if(.not.all(ieee_is_finite(real(total))).or..not.all(ieee_is_finite(aimag(total))))then
+  if(.not.salmon_all_finite(real(total)).or..not.salmon_all_finite(aimag(total)))then
    error=huge(1d0);return
   endif
   offset=0
@@ -39,4 +44,21 @@ contains
   enddo
   error=maxval(abs(total))
  end subroutine
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

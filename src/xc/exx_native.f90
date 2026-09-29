@@ -53,6 +53,11 @@ module exx_native
   real(8),save :: exx_exchange_energy=0d0
   real(8),save :: exx_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
   logical,save :: exx_freeze=.false.,reported_team=.false.,timing_enabled=.false.
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_3d
+  end interface
 contains
   subroutine exx_check_localization()
     implicit none
@@ -396,7 +401,7 @@ contains
     call comm_summation(local_layout,layout,size(layout),info%icomm_k)
     if(use_symmetry)then
       ierr=0
-      if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))ierr=1
+      if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))ierr=1
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)then
         ierr=1;return
@@ -977,4 +982,22 @@ contains
 !$omp end parallel do
     call comm_summation(local,energy,info%icomm_rko)
   end subroutine
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module

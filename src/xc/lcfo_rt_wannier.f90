@@ -38,6 +38,11 @@ module lcfo_rt_wannier
   type(s_lcfo_column_halo),save :: source_halo
   type(s_lcfo_wf_kernel),save :: fragment_kernel,core_kernel
   complex(8),allocatable,save :: core_gram(:,:)
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_2d
+  end interface
 contains
   subroutine lcfo_mlwf_configure()
     implicit none
@@ -123,7 +128,7 @@ contains
     overlap=matmul(conjg(transpose(rotation)),rotation)
     do j=1,no;overlap(j,j)=overlap(j,j)-1d0;enddo
     unitary_error=maxval(abs(overlap))
-    if(.not.all(ieee_is_finite(real(rotation))).or..not.all(ieee_is_finite(aimag(rotation))).or. &
+    if(.not.salmon_all_finite(real(rotation)).or..not.salmon_all_finite(aimag(rotation)).or. &
        unitary_error>1d-10)error stop 'LCFO MLWF: invalid initial U'
     deallocate(overlap)
     grid=matmul(grid,rotation)
@@ -354,4 +359,21 @@ contains
       if(frame_transported)transport_anchor=current_frame
     endif
   end subroutine
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

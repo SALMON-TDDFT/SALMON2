@@ -1,0 +1,48 @@
+{
+  "atoms": 512,
+  "valence_electrons": 2048,
+  "occupied_rt_states": 1024,
+  "lcfo_export_states": 2048,
+  "lattice_bohr": 10.26,
+  "cell_bohr": [
+    41.04,
+    41.04,
+    41.04
+  ],
+  "grid": [
+    64,
+    64,
+    64
+  ],
+  "spacing_bohr": 0.64125,
+  "fragment_array": [
+    4,
+    4,
+    4
+  ],
+  "core_grid": [
+    16,
+    16,
+    16
+  ],
+  "buffer_each_side_grid": [
+    8,
+    8,
+    8
+  ],
+  "buffer_each_side_bohr": 5.13,
+  "fragment_grid": [
+    32,
+    32,
+    32
+  ],
+  "atoms_per_core": 8,
+  "atoms_per_buffered_fragment": 64,
+  "fragment_states": 256,
+  "mpi_ranks": 64,
+  "xc": "hse06",
+  "electronic_temperature_K": 300,
+  "validation": "static only; 512-atom GS not executed",
+  "input_sha256": "b31d3db90627aa2b3b66abbc5f1d1e67988c9ef9085c4e505de194f301748520",
+  "pseudo_sha256": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c"
+}

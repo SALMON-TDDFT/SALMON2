@@ -16,6 +16,11 @@ module exx_pair_candidates
   integer,allocatable :: offset(:),column(:),mark(:)
   real(8),allocatable :: amplitude(:)
  end type
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
  subroutine pair_catalog_build(cat,n,lo,m,comm_r,target,threshold,status)
   implicit none
@@ -31,7 +36,7 @@ contains
   if(any(n<1).or.any(lo<0).or.any(m<0).or.any(lo+m>n))bad=1
   if(size(target,1)/=product(m))bad=1
   if(.not.ieee_is_finite(threshold).or.threshold<0d0)bad=1
-  if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
+  if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))bad=1
   call comm_get_max(bad,comm_r)
   if(bad/=0)return
   cat%blocks=(n+block_edge-1)/block_edge;cat%targets=size(target,2);cat%floor=threshold
@@ -109,7 +114,7 @@ contains
   integer :: bad,g,x,y,z,p(3)
   status=1;bad=0;lower=n;upper=-1
   if(any(n<1).or.any(lo<0).or.any(m<0).or.any(lo+m>n).or.size(source)/=product(m))bad=1
-  if(.not.all(ieee_is_finite(real(source))).or..not.all(ieee_is_finite(aimag(source))))bad=1
+  if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))bad=1
   call comm_get_max(bad,comm_r)
   if(bad/=0)return
   g=0
@@ -153,4 +158,35 @@ contains
   enddo;enddo;enddo
   status=0
  end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

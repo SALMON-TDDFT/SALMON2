@@ -57,6 +57,11 @@ module lcfo_complex
     integer(int64),allocatable :: basis_pos(:,:),coef_pos(:,:)
   end type s_complex_lcfo_fragment
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
 
   subroutine open_complex_lcfo_files(lg,dc,writer,do_diag,local_status)
@@ -618,7 +623,7 @@ contains
     if (.not.ieee_is_finite(system%mu)) stop "DC-LCFO complex: chemical potential is not finite."
     if (any(shape(energy%esp) /= [system%no,system%nk,system%nspin])) &
       stop "DC-LCFO complex: SCF eigenvalue shape is inconsistent."
-    if (any(.not.ieee_is_finite(energy%esp))) &
+    if (.not.salmon_all_finite(energy%esp)) &
       stop "DC-LCFO complex: SCF eigenvalues are not finite."
 
     if (dc%id_tot == 0) write(*,*) "start DC-LCFO complex"
@@ -960,7 +965,7 @@ contains
         do isp0=1,nspin
           call eigen_zheev(smat(:,:,isp0),lambda(:,isp0),umat(:,:,isp0),lapack_info=status0)
           if(status0/=0)exit
-          if(any(.not.ieee_is_finite(lambda(:,isp0))).or. &
+          if(.not.salmon_all_finite(lambda(:,isp0)).or. &
              minval(lambda(:,isp0)) < -lcfo_tol*max(1d0,maxval(abs(lambda(:,isp0)))))then
             status0=1;exit
           endif
@@ -1615,8 +1620,8 @@ contains
     if (abs(geom(10)-system%hvol) > 1d-12*max(1d0,abs(geom(10)))) goto 900
     if (any(abs(vec_k-system%vec_k) > 1d-12*max(1d0,maxval(abs(vec_k)))) .or. &
         any(abs(wtk-system%wtk) > 1d-12*max(1d0,maxval(abs(wtk))))) goto 900
-    if (any(.not.ieee_is_finite(geom)) .or. any(.not.ieee_is_finite(vec_k)) .or. &
-        any(.not.ieee_is_finite(wtk))) goto 900
+    if (.not.salmon_all_finite(geom) .or. .not.salmon_all_finite(vec_k) .or. &
+        .not.salmon_all_finite(wtk)) goto 900
     inquire(unit=unit,size=file_size,iostat=ios)
     if (ios /= 0 .or. file_size < header_bytes+124_int64) goto 900
     status = 0
@@ -1649,7 +1654,7 @@ contains
         status = 1
         return
       end if
-      if(.not.all(ieee_is_finite(buffer(:n))))then
+      if(.not.salmon_all_finite(buffer(:n)))then
         status=1;return
       endif
       remain = remain-int(n,int64)
@@ -2033,7 +2038,7 @@ contains
         status=1
         return
       end if
-      if (any(.not.ieee_is_finite(wire(1:2*n)))) then
+      if (.not.salmon_all_finite(wire(1:2*n))) then
         status=1
         return
       end if
@@ -2199,5 +2204,54 @@ contains
       if (allocated(fragment%coef)) deallocate(fragment%coef)
     end if
   end subroutine load_complex_lcfo_fragment_k
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module lcfo_complex

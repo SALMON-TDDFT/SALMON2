@@ -13,6 +13,11 @@ module lcfo_dist_dense
  integer,save :: saved_comm=-1,context=-1,nprow,npcol,myrow,mycol
 #endif
  logical,save :: reported_parallel=.false.,reported_serial=.false.
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
  subroutine group_info(comm,rank,np)
   implicit none
@@ -54,7 +59,7 @@ contains
   allocate(local(n,n),metric(n,n))
   local=matmul(conjg(transpose(current)),previous)
   call sum_matrix(local,metric,comm)
-  if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))return
+  if(.not.salmon_all_finite(real(metric)).or..not.salmon_all_finite(aimag(metric)))return
   call solve_matrix(metric,comm,.true.,rotation,minimum,condition,status)
   if(status==0.and.minimum<1d-8)status=1
  end subroutine
@@ -76,7 +81,7 @@ contains
   allocate(local(n,n),metric(n,n),transform(n,n))
   local=-matmul(conjg(transpose(c)),w)*dv
   call sum_matrix(local,metric,comm)
-  if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))return
+  if(.not.salmon_all_finite(real(metric)).or..not.salmon_all_finite(aimag(metric)))return
   local_max=0d0;if(size(w)>0)local_max=maxval(abs(w))
   call comm_get_max(local_max,maximum,1,comm)
   ace%dv=dv;ace%condition=0d0
@@ -248,7 +253,7 @@ contains
   endif
   call agree_status(status,comm)
   if(status/=0)return
-  if(.not.all(ieee_is_finite(e)))then
+  if(.not.salmon_all_finite(e))then
    status=1;return
   endif
   if(polar)then
@@ -269,4 +274,35 @@ contains
   endif
  end subroutine
 #endif
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module

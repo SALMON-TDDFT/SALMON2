@@ -24,6 +24,44 @@ module exx_ace
     complex(c_double_complex),allocatable :: values(:),metric_factor(:,:)
   end type
 contains
+  ! Scalar temporaries avoid the array IEEE-expression crash seen with frtpx.
+  logical function finite_orbitals(values) result(finite)
+    implicit none
+    complex(c_double_complex),intent(in) :: values(:,:,:)
+    real(c_double) :: component
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        component=real(values(i,j,k),c_double)
+        if(.not.ieee_is_finite(component))return
+        component=aimag(values(i,j,k))
+        if(.not.ieee_is_finite(component))return
+      enddo
+    enddo
+    enddo
+    finite=.true.
+  end function
+
+  ! Scalar temporaries avoid the array IEEE-expression crash seen with frtpx.
+  logical function finite_matrix(values) result(finite)
+    implicit none
+    complex(c_double_complex),intent(in) :: values(:,:)
+    real(c_double) :: component
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        component=real(values(i,j),c_double)
+        if(.not.ieee_is_finite(component))return
+        component=aimag(values(i,j))
+        if(.not.ieee_is_finite(component))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
   subroutine exx_ace_clear(ace)
     implicit none
     type(s_exx_ace),intent(inout) :: ace
@@ -76,8 +114,8 @@ contains
     call exx_ace_clear(ace)
     check=0d0
     if(any(shape(u)/=shape(w)).or.dv<=0.or..not.ieee_is_finite(dv))check=1d0
-    if(.not.all(ieee_is_finite(real(u))).or..not.all(ieee_is_finite(aimag(u))))check=1d0
-    if(.not.all(ieee_is_finite(real(w))).or..not.all(ieee_is_finite(aimag(w))))check=1d0
+    if(.not.finite_orbitals(u))check=1d0
+    if(.not.finite_orbitals(w))check=1d0
     ng=size(u,1);n=size(u,2);nk=size(u,3)
     if(min(n,nk)<1)check=1d0
     if(ng<1.and..not.present(sum_grid))check=1d0
@@ -97,7 +135,7 @@ contains
       metric=zero
       if(ng>0)call zgemm('C','N',n,n,ng,-one*dv,u(1,1,ik),ng,w(1,1,ik),ng,zero,metric(1,1),n)
       if(present(sum_grid))call sum_grid(metric)
-      if(.not.all(ieee_is_finite(real(metric))).or..not.all(ieee_is_finite(aimag(metric))))goto 900
+      if(.not.finite_matrix(metric))goto 900
       scale=sqrt(sum(abs(metric)**2))
       if(scale==0d0.or.sqrt(sum(abs(metric-transpose(conjg(metric)))**2))>1d-10*scale)goto 900
       metric=.5d0*(metric+transpose(conjg(metric)))
@@ -132,8 +170,8 @@ contains
     ng=size(ace%factors,1);no=size(ace%factors,2);nk=size(ace%factors,3);nt=size(target,2)
     check=0d0
     if(size(target,1)/=ng.or.size(target,3)/=nk.or.nt<1.or.any(shape(target)/=shape(action)))check=1d0
-    if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))check=1d0
-    if(.not.all(ieee_is_finite(real(ace%factors))).or..not.all(ieee_is_finite(aimag(ace%factors))))check=1d0
+    if(.not.finite_orbitals(target))check=1d0
+    if(.not.finite_orbitals(ace%factors))check=1d0
     if(present(sum_grid))call sum_grid(check)
     if(real(check(1,1))/=0d0)return
     allocate(overlap(no,nt))

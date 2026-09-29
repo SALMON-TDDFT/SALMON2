@@ -227,3 +227,37 @@ Compiler 4.12.2 tcsds-1.2.43で上記2修正を適用した構成のビルド完
 計算ノード上でのGS/RT数値検証・3Dメモリ測定は別途必要。
 その後に追加したGamma seedの2次元化はローカルGNUで検証済みだが、
 この富岳ビルド成功ログには含まれない。
+
+
+## 2026-09-29: scalar IEEE finite checks on Fugaku
+
+Fujitsu Fortran 4.12.2 (tcsds-1.2.43) reported compiler SIGSEGV/`flist: Invalid
+format` while compiling `exx_ace.f90` and subsequently `exx_gs_metadata.f90`.
+The isolated ACE compile passed after scalarization; the user reproduced the
+metadata failure with the actual single-object build command.
+
+The source audit replaced 191 array IEEE inquiries in 31 Fortran files, including
+EXX, LCFO, rVV10, symmetry, input and checkpoint validation. Private rank-specific
+loops query scalar temporaries. Existing scalar inquiries, finite-value
+requirements, empty-array truth values, tolerances, and checkpoint formats are
+preserved. Helpers remain local to avoid new dependencies in standalone probes.
+
+The user reported a successful Fugaku build after applying the cumulative
+scalarization patch. This confirms the reported build outcome, not numerical
+validation or performance on Fugaku. GPU hardware compilation remains untested.
+Local GNU Fortran 15 verification passed: MPI/HSE/Libxc/ScaLAPACK build,
+non-MPI/HSE-disabled build, CTest 422–437 (48 stages), ordinary GS-to-RT (12 tests),
+MPI 1/2/3/4 exchange parity, MPI 1/2/4 ACE parity, symmetry checks, and rank 1–4
+finite/NaN/infinity/empty/strided-array checks. Test registration was not changed.
+
+`tools/diagnose_frtpx_ace.py --build build --compiler mpifrtpx` is a compile-only
+isolation tool. It records compiler version, source hash, flags and per-case
+logs in a separate directory. Diagnostic stubs must not be linked or executed.
+Its `full_build_flags` case retains flags/defines but deliberately omits normal
+include paths and redirects module output, so it is not an exact production
+build reproduction. Use a verbose single-object make invocation to compare the
+actual build environment when only the normal build fails.
+
+The accompanying [Si512 GS input](../samples/dc_hse/si512-dc-lcfo-gs/README-ja.md)
+prepares HSE06 DC-LCFO data for native real-space RT. Its geometry and input keys
+have been statically checked; the 512-atom GS has not been run in this session.

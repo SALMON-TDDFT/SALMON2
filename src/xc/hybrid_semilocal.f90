@@ -48,6 +48,11 @@ module hybrid_semilocal
       real(c_double) :: rho(*),sigma(*),eps(*),vrho(*),vsigma(*)
     end subroutine
   end interface
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   subroutine pbeh_semilocal_evaluate(rho,sigma,eps,vrho,vsigma,ierr,exchange_fraction)
     implicit none
@@ -62,7 +67,7 @@ contains
     ierr=1;n=size(rho)
     if(size(sigma)/=n.or.size(eps)/=n.or.size(vrho)/=n.or.size(vsigma)/=n)return
     if(any(rho<0d0).or.any(sigma<0d0))return
-    if(.not.all(ieee_is_finite(rho)).or..not.all(ieee_is_finite(sigma)))return
+    if(.not.salmon_all_finite(rho).or..not.salmon_all_finite(sigma))return
     eps=0d0;vrho=0d0;vsigma=0d0
     do j=1,2
       ierr=1
@@ -84,8 +89,8 @@ contains
       eps=0d0;vrho=0d0;vsigma=0d0
     endwhere
     ierr=0
-    if(.not.all(ieee_is_finite(eps)).or..not.all(ieee_is_finite(vrho)).or. &
-       .not.all(ieee_is_finite(vsigma)))ierr=1
+    if(.not.salmon_all_finite(eps).or..not.salmon_all_finite(vrho).or. &
+       .not.salmon_all_finite(vsigma))ierr=1
   end subroutine
   subroutine hse_semilocal_evaluate(rho,sigma,eps,vrho,vsigma,ierr,screening)
     implicit none
@@ -103,7 +108,7 @@ contains
     if(.not.ieee_is_finite(requested).or.requested<=0d0)return
     if(size(sigma)/=n.or.size(eps)/=n.or.size(vrho)/=n.or.size(vsigma)/=n)return
     if(any(rho<0).or.any(sigma<0))return
-    if(.not.all(ieee_is_finite(rho)).or..not.all(ieee_is_finite(sigma)))return
+    if(.not.salmon_all_finite(rho).or..not.salmon_all_finite(sigma))return
     func=xc_func_alloc();if(.not.c_associated(func))return
     ierr=xc_func_init(func,428_c_int,1_c_int)
     if(ierr/=0)then
@@ -120,9 +125,24 @@ contains
       where(rho==0d0)
         eps=0d0;vrho=0d0;vsigma=0d0
       endwhere
-      if(.not.all(ieee_is_finite(eps)).or..not.all(ieee_is_finite(vrho)).or. &
-         .not.all(ieee_is_finite(vsigma)))ierr=1
+      if(.not.salmon_all_finite(eps).or..not.salmon_all_finite(vrho).or. &
+         .not.salmon_all_finite(vsigma))ierr=1
     endif
     call xc_func_end(func);call xc_func_free(func)
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
 end module

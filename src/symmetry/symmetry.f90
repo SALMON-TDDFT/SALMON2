@@ -20,6 +20,11 @@ module sym_sub
   real(8),public :: Bmat(3,3), Binv(3,3) !   is the (reciprocal) lattice vector
   logical :: flag_init=.false.
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
 
 
@@ -136,7 +141,7 @@ contains
     if (.not.flag_init) error stop 'Symmetry atom check before initialization'
     na=size(kion)
     if(size(rion,1)/=3.or.size(rion,2)/=na) error stop 'Symmetry: invalid atom layout'
-    if(.not.all(ieee_is_finite(rion))) error stop 'Symmetry: nonfinite atom position'
+    if(.not.salmon_all_finite(rion)) error stop 'Symmetry: nonfinite atom position'
     allocate(fractional(3,na),used(na))
     fractional=matmul(Ainv,rion)
     do s=1,size(SymMatA,3)
@@ -188,7 +193,7 @@ contains
         +rotation(1,3)*(rotation(2,1)*rotation(3,2)-rotation(2,2)*rotation(3,1))
       if(abs(abs(determinant)-1d0)>1d-10) error stop 'Symmetry: nonunimodular lattice rotation'
       cartesian=matmul(Amat,matmul(rotation,Ainv))
-      if(.not.all(ieee_is_finite(cartesian))) error stop 'Symmetry: nonfinite Cartesian rotation'
+      if(.not.salmon_all_finite(cartesian)) error stop 'Symmetry: nonfinite Cartesian rotation'
       if(maxval(abs(matmul(transpose(cartesian),cartesian)-identity))>1d-10) &
         error stop 'Symmetry: operation is not a Cartesian isometry'
     enddo
@@ -225,10 +230,10 @@ contains
     if (.not.use_symmetry) return
     if (.not.flag_init.or..not.allocated(SymMatB)) error stop 'Symmetry field check before initialization'
     if (size(SymMatB,3)==0) error stop 'Symmetry: empty retained group'
-    if (.not.all(ieee_is_finite(direction))) error stop 'Symmetry: nonfinite field direction'
+    if (.not.salmon_all_finite(direction)) error stop 'Symmetry: nonfinite field direction'
     do isym=1,size(SymMatB,3)
       rotated=matmul(Bmat,matmul(SymMatB(:,1:3,isym),matmul(Binv,direction)))
-      if (.not.all(ieee_is_finite(rotated))) error stop 'Symmetry: nonfinite field transformation'
+      if (.not.salmon_all_finite(rotated)) error stop 'Symmetry: nonfinite field transformation'
       if (maxval(abs(rotated-direction))>1d-10*max(1d0,maxval(abs(direction)))) &
         error stop 'Symmetry: retained operation changes the RT field direction'
     end do
@@ -276,5 +281,34 @@ contains
 
   end subroutine read_SymMat
 
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module sym_sub

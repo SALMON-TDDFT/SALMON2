@@ -33,6 +33,11 @@ module exx_spatial
     real(8) :: spread=0d0,gradient=0d0,min_singular=0d0
     complex(8),allocatable :: gauge(:,:,:),previous(:,:,:),source(:,:)
   end type
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
   subroutine spatial_exx_canonical_source(op,psi,occupation,comm_r,status,comm_o)
     implicit none
@@ -45,8 +50,8 @@ contains
     integer :: bad,j
     bad=0;status=1
     if(size(psi,3)/=1.or.any(shape(occupation)/=[size(psi,2),1]))bad=1
-    if(.not.all(ieee_is_finite(real(psi))).or..not.all(ieee_is_finite(aimag(psi))))bad=1
-    if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))bad=1
+    if(.not.salmon_all_finite(real(psi)).or..not.salmon_all_finite(aimag(psi)))bad=1
+    if(any(occupation<0d0).or.any(occupation>2d0).or..not.salmon_all_finite(occupation))bad=1
     call comm_get_max(bad,comm_r)
     if(present(comm_o))call comm_get_max(bad,comm_o)
     if(bad/=0)return
@@ -82,12 +87,12 @@ contains
     endif
     no=size(psi,2);ng=size(psi,1);status=1;bad=0
     if(no<1.or.size(psi,3)/=1.or.any(n<1).or.any(dims<1))bad=1
-    if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
-    if(.not.all(ieee_is_finite(real(psi))).or..not.all(ieee_is_finite(aimag(psi))))bad=1
+    if(any(h<=0d0).or..not.salmon_all_finite(h))bad=1
+    if(.not.salmon_all_finite(real(psi)).or..not.salmon_all_finite(aimag(psi)))bad=1
     if(maxiter<0.or.tolerance<=0d0.or..not.ieee_is_finite(tolerance))bad=1
     if(present(occupation))then
       if(any(shape(occupation)/=[no,1]))bad=1
-      if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))bad=1
+      if(any(occupation<0d0).or.any(occupation>2d0).or..not.salmon_all_finite(occupation))bad=1
     endif
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
@@ -156,7 +161,7 @@ contains
       endif
     endif
     ! A non-converged unitary gauge preserves the full-support exchange operator.
-    if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
+    if(.not.salmon_all_finite(real(op%gauge)).or..not.salmon_all_finite(aimag(op%gauge)))bad=1
     call comm_get_max(bad,comm_r)
     if(bad/=0)return
     op%source=matmul(psi(:,:,1),op%gauge(:,:,1))
@@ -195,12 +200,12 @@ contains
     integer :: no,ng,nlocal,first,m(3),lo(3),axis,g,x,y,z,j,bad,initialized,total_initialized
     ng=size(psi,1);nlocal=size(psi,2);status=1;bad=0
     if(size(psi,3)/=1.or.any(n<1).or.any(dims<1))bad=1
-    if(any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
-    if(.not.all(ieee_is_finite(real(psi))).or..not.all(ieee_is_finite(aimag(psi))))bad=1
+    if(any(h<=0d0).or..not.salmon_all_finite(h))bad=1
+    if(.not.salmon_all_finite(real(psi)).or..not.salmon_all_finite(aimag(psi)))bad=1
     if(maxiter<0.or.tolerance<=0d0.or..not.ieee_is_finite(tolerance))bad=1
     if(present(occupation))then
       if(any(shape(occupation)/=[nlocal,1]))bad=1
-      if(any(occupation<0d0).or.any(occupation>2d0).or..not.all(ieee_is_finite(occupation)))bad=1
+      if(any(occupation<0d0).or.any(occupation>2d0).or..not.salmon_all_finite(occupation))bad=1
     endif
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
@@ -223,7 +228,7 @@ contains
         bad=1
       else
         if(any(shape(op%previous)/=shape(psi)))bad=1
-        if(.not.all(ieee_is_finite(real(op%previous))).or..not.all(ieee_is_finite(aimag(op%previous))))bad=1
+        if(.not.salmon_all_finite(real(op%previous)).or..not.salmon_all_finite(aimag(op%previous)))bad=1
       endif
     endif
     call orbital_check(bad,comm_r,comm_o)
@@ -241,7 +246,7 @@ contains
       call orbital_check(bad,comm_r,comm_o)
       if(bad==0)then
         op%min_singular=minval(singular)
-        if(.not.all(ieee_is_finite(singular)).or.op%min_singular<1d-8)bad=1
+        if(.not.salmon_all_finite(singular).or.op%min_singular<1d-8)bad=1
       endif
       call orbital_check(bad,comm_r,comm_o)
       if(bad==0)then
@@ -291,7 +296,7 @@ contains
         op%last_localization_status=op%localization_status
       endif
     endif
-    if(.not.all(ieee_is_finite(real(op%gauge))).or..not.all(ieee_is_finite(aimag(op%gauge))))bad=1
+    if(.not.salmon_all_finite(real(op%gauge)).or..not.salmon_all_finite(aimag(op%gauge)))bad=1
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     if(allocated(op%source))deallocate(op%source)
@@ -332,7 +337,7 @@ contains
     if(status/=0)then
       status=1;return
     endif
-    if(.not.all(ieee_is_finite(real(projected))).or..not.all(ieee_is_finite(aimag(projected))))then
+    if(.not.salmon_all_finite(real(projected)).or..not.salmon_all_finite(aimag(projected)))then
       status=1;return
     endif
     do j=1,no
@@ -382,7 +387,7 @@ contains
     if(.not.allocated(op%source))bad=1
     if(op%screen_mode<0.or.op%screen_mode>2)bad=1
     if(.not.ieee_is_finite(op%screen_tolerance).or.op%screen_tolerance<0d0)bad=1
-    if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.all(ieee_is_finite(h)))bad=1
+    if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.salmon_all_finite(h))bad=1
     if(screening==0d0)then
       if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
     endif
@@ -392,7 +397,7 @@ contains
     ng=product(m);nt=size(target,2);mesh_local=m;mesh_lo=lo
     if(size(target,1)/=ng.or.size(target,3)/=1.or.nt<0.or.any(shape(action)/=shape(target)))bad=1
     if(size(op%source,1)/=ng)bad=1
-    if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))))bad=1
+    if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))bad=1
     radius=.5d0*minval(n*h)
     if(radius_input>0d0)radius=radius_input
     if(screening==0d0.and.radius>.5d0*minval(n*h)*(1d0+1d-12))bad=1
@@ -407,7 +412,7 @@ contains
     counts_max=size(op%source,2)
     call comm_get_max(counts_max,comm_r)
     if(counts_max/=size(op%source,2))bad=1
-    if(.not.all(ieee_is_finite(real(op%source))).or..not.all(ieee_is_finite(aimag(op%source))))bad=1
+    if(.not.salmon_all_finite(real(op%source)).or..not.salmon_all_finite(aimag(op%source)))bad=1
     call collective_bad()
     if(bad/=0)return
     allocate(source_column(ng))
@@ -673,4 +678,53 @@ contains
       if(bad/=0)status=1
     end subroutine
   end subroutine
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 end module

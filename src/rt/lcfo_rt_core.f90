@@ -15,10 +15,15 @@ module lcfo_rt_core
       integer,intent(out) :: status
     end subroutine
   end interface
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
   logical function finite_complex(a) result(ok)
     complex(8),intent(in) :: a(:,:)
-    ok=all(ieee_is_finite(real(a,8))).and.all(ieee_is_finite(aimag(a)))
+    ok=salmon_all_finite(real(a,8)).and.salmon_all_finite(aimag(a))
   end function
 
   subroutine lcfo_density(c,occupation,p,status)
@@ -30,7 +35,7 @@ contains
     integer :: m,n
     status=1;p=(0d0,0d0);m=size(c,1);n=size(c,2)
     if(m<1.or.n<1.or.size(occupation)/=n.or.any(shape(p)/=[m,m]))return
-    if(.not.finite_complex(c).or.any(.not.ieee_is_finite(occupation)))return
+    if(.not.finite_complex(c).or..not.salmon_all_finite(occupation))return
     if(any(occupation<0d0))return
     allocate(weighted(m,n))
     weighted=c*spread(occupation,1,m)
@@ -130,12 +135,12 @@ contains
     status=1;rho=0d0;ng=size(basis,1);nb=size(basis,2);no=size(coeff,2)
     if(ng<1.or.no<1.or.size(coeff,1)/=nb.or.size(rho)/=ng.or.size(occupation)/=no)return
     if(.not.finite_complex(basis).or..not.finite_complex(coeff))return
-    if(any(.not.ieee_is_finite(occupation)).or.any(occupation<0d0))return
+    if(.not.salmon_all_finite(occupation).or.any(occupation<0d0))return
     allocate(psi(ng,no));psi=matmul(basis,coeff)
     do j=1,no
       rho=rho+occupation(j)*abs(psi(:,j))**2
     end do
-    if(any(.not.ieee_is_finite(rho)))then
+    if(.not.salmon_all_finite(rho))then
       rho=0d0;return
     end if
     status=0
@@ -151,7 +156,7 @@ contains
     status=1;h=0d0;ng=size(basis,1);nb=size(basis,2)
     if(ng<1.or.size(potential)/=ng.or.any(shape(h)/=[nb,nb]))return
     if(.not.ieee_is_finite(dv).or.dv<=0d0)return
-    if(.not.finite_complex(basis).or.any(.not.ieee_is_finite(potential)))return
+    if(.not.finite_complex(basis).or..not.salmon_all_finite(potential))return
     allocate(weighted(ng,nb));weighted=basis*spread(potential,2,nb)
     h=matmul(conjg(transpose(basis)),weighted)*dv
     if(.not.finite_complex(h))then
@@ -159,4 +164,35 @@ contains
     end if
     status=0
   end subroutine
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
 end module
