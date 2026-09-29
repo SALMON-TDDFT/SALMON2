@@ -46,3 +46,11 @@ ordinary full-support k exchange. No zero-field spectrum work is introduced.
   (old and new paths both fail with no states) and was removed. This change does
   not introduce GS default-state support. Routing checks only explicit extra
   states when nstate>0, consistent with the GPU input guard.
+
+- Final conventional GS/RT rerun: 12/12 passed; independent HSE exchange 4/4,
+  symmetry 2/2, and MPI uneven/idle-row/OMP regression passed. Final MPI and
+  non-MPI HSE builds passed. git diff --check clean.
+- Implementation committed as 1bee937f. Si stage-1 runner now snapshots this
+  build and starts fresh GS/probes sequentially; no spectrum production has
+  started. The initial PBE alias was rejected by Libxc-enabled SALMON; the
+  input was corrected to libxc_pbe and the rejected attempt preserved separately.
