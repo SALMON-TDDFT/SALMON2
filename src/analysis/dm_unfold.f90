@@ -1429,7 +1429,8 @@ contains
     use salmon_global, only: no_ref, dt, num_kgrid, num_skgrid, sysname, base_directory, natom,izatom,kion, &
                             & dq_mom, nq_mom, yn_out_mom_distr_rt, out_mom_distr_rt_step
     use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
-    use math_constants, only: pi
+    use math_constants, only: zI, pi
+    use lattice, only: calc_inverse
     implicit none
     integer                 ,intent(in) :: itt
     type(s_ofile)           ,intent(in) :: ofl
@@ -1483,6 +1484,37 @@ contains
     real(8),allocatable :: cdiagknown_isk(:),cintra_isk(:),cinter_isk(:),cunknown_isk(:)
     real(8),allocatable :: veck_isk_l(:,:),veck_isk(:,:)
     logical :: iofile_exists  ! Stage-1 diagnostic (note 067): restart-safe file open
+
+    ! --- G_R phase-correction check (note 075) --------------------------
+    ! kappa_raw = system%vec_k(ilk)+unfold%vec_hrsk(ihk), used throughout
+    ! this subroutine, is NOT folded into the domain that lattice.f90's
+    ! case('reference') used when generating reference/wfn.bin; the
+    ! mismatch is G_R = kappa_raw - kappa_ref, a reference-cell
+    ! reciprocal lattice vector (notes 072-074). The block below (see
+    ! "G_R phase-correction check" further down) recomputes an
+    ! independent, phase-corrected mat_c/eta_c and the corresponding
+    ! coherence-norm diagnostics IN PARALLEL with the existing,
+    ! completely unmodified mat/eta pipeline -- nothing in the existing
+    ! pipeline is touched by this addition. This covers only steps 1-2 of
+    ! Codex's note-074 five-step plan (determine G_R/kappa_ref, fix the
+    ! projection phase, verify eta); steps 3-5 (replacing kappa_raw by
+    ! kappa_ref in the explicit k-term zj5 above, the Fourier-current
+    ! G-sum, and the momentum distribution) are intentionally deferred to
+    ! a later pass -- their continuing use of kappa_raw is a documented
+    ! scope limit, not an oversight.
+    integer :: n1_g, n2_g, n3_g, ishidx_g, fp2
+    integer,allocatable :: isk_shift_id_l(:)
+    real(8),allocatable :: isk_n1_l(:), isk_n2_l(:), isk_n3_l(:)
+    real(8),allocatable :: isk_n1(:), isk_n2(:), isk_n3(:)
+    real(8) :: B_ref_g(3,3), B_ref_g_inv(3,3), detB_g
+    real(8) :: kraw_g(3), kfrac_g(3), gr_g(3)
+    complex(8),allocatable :: gshift_ph(:,:,:,:)
+    complex(8),allocatable :: mat_c(:,:,:,:), eta_c(:,:,:), eta_c_l(:,:,:)
+    real(8) :: cdiagknown_c,cintra_c,cinter_c,cunknown_c
+    real(8) :: cdiagknown_c_l,cintra_c_l,cinter_c_l,cunknown_c_l
+    real(8),allocatable :: cdiagknown_c_isk_l(:),cintra_c_isk_l(:),cinter_c_isk_l(:),cunknown_c_isk_l(:)
+    real(8),allocatable :: cdiagknown_c_isk(:),cintra_c_isk(:),cinter_c_isk(:),cunknown_c_isk(:)
+    complex(8) :: zsum_c, zsum_c_l
 
     allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
@@ -1745,6 +1777,278 @@ contains
     call comm_summation(cinter_isk_l,cinter_isk,unfold%nsk,icomm)
     call comm_summation(cunknown_isk_l,cunknown_isk,unfold%nsk,icomm)
     call comm_summation(veck_isk_l,veck_isk,3*unfold%nsk,icomm)
+
+    ! =================================================================
+    ! G_R phase-correction check (note 075). See the declaration-block
+    ! comment above for scope. Nothing above this point is read again
+    ! below except mat/eta-independent, already-finalized quantities
+    ! (unfold%psi_ref, unfold%eihkr_tbl, psi_t%zwf, unfold%hprk_label,
+    ! unfold%wtk_ref, veck_isk, ie_ref, omega_ref, isk_s/isk_e/nsk_se,
+    ! icomm, no_ref) -- eta/mat themselves and everything derived from
+    ! them (zj1..zj6, zsum, the cdiagknown/cintra/cinter/cunknown above)
+    ! are all untouched by this block.
+    !
+    ! Reference-cell reciprocal lattice B_ref_g: system%primitive_b is
+    ! the SUPER cell's own reciprocal lattice during a 'super' run (see
+    ! B_ref below, momentum-distribution section, for the identical,
+    ! pre-existing formula) -- scaling column j by num_hkgrid(j) gives
+    ! the reference cell's reciprocal lattice, exactly as A_ref =
+    ! system%primitive_a(:,j)/num_hkgrid(j) gives its real lattice in
+    ! init_dm_unfold. Computed here as an independent local copy so this
+    ! block has no ordering dependency on the B_ref computed later.
+    B_ref_g(:,:) = system%primitive_b(:,:)
+    B_ref_g(:,1) = B_ref_g(:,1) * unfold%num_hkgrid(1)
+    B_ref_g(:,2) = B_ref_g(:,2) * unfold%num_hkgrid(2)
+    B_ref_g(:,3) = B_ref_g(:,3) * unfold%num_hkgrid(3)
+    call calc_inverse(B_ref_g, B_ref_g_inv, detB_g)
+
+    ! Phase table for all 27 possible single-fold integer shifts
+    ! (n1,n2,n3) in {-1,0,1}^3. A single fold per axis always suffices:
+    ! kfrac_g = kfrac(K) + kfrac(hat_k) sums two terms each already
+    ! within (approximately) [-0.5,0.5) of their own, different-
+    ! resolution reciprocal lattice, so |kfrac_g(j)|<1.5 always (matches
+    ! the up-to-+-3/4-b_R magnitudes found in note 072). The correction
+    ! is replica-independent -- exp(i*G_R.r) depends only on the
+    ! reference-cell-local coordinate r_ref, never on which super-cell
+    ! replica -- so this table is sized by (ie_ref(1),ie_ref(2),ie_ref(3))
+    ! and a 27-entry shift index, not by isk.
+    allocate( gshift_ph(ie_ref(1),ie_ref(2),ie_ref(3),27) )
+  !$omp parallel do private(ishidx_g,n1_g,n2_g,n3_g,gr_g,ir1_ref,ir2_ref,ir3_ref)
+    do ishidx_g = 1, 27
+      n3_g = mod(ishidx_g-1,3) - 1
+      n2_g = mod((ishidx_g-1)/3,3) - 1
+      n1_g = mod((ishidx_g-1)/9,3) - 1
+      gr_g(:) = dble(n1_g)*B_ref_g(:,1) + dble(n2_g)*B_ref_g(:,2) + dble(n3_g)*B_ref_g(:,3)
+      do ir3_ref = 1, ie_ref(3)
+      do ir2_ref = 1, ie_ref(2)
+      do ir1_ref = 1, ie_ref(1)
+        gshift_ph(ir1_ref,ir2_ref,ir3_ref,ishidx_g) = exp( zI * ( gr_g(1)*dble(ir1_ref-1)*system%hgs(1) &
+         & + gr_g(2)*dble(ir2_ref-1)*system%hgs(2) + gr_g(3)*dble(ir3_ref-1)*system%hgs(3) ) )
+      end do
+      end do
+      end do
+    end do
+
+    ! Per-isk integer shift n=(n1,n2,n3): replicate lattice.f90's
+    ! case('reference') fold EXACTLY (same +-0.50001d0 boundary, same
+    ! +1/-1 correction) applied to the fractional reference-cell
+    ! coordinate of kappa_raw, so isk_n1/isk_n2/isk_n3 record the shift
+    ! actually needed to reach the domain reference/wfn.bin was
+    ! generated in -- NOT a round()-based reduction (note 072 caution).
+    allocate( isk_shift_id_l(isk_s:isk_e) )
+    allocate( isk_n1_l(unfold%nsk), isk_n2_l(unfold%nsk), isk_n3_l(unfold%nsk) )
+    isk_n1_l(:) = 0d0 ; isk_n2_l(:) = 0d0 ; isk_n3_l(:) = 0d0
+    do ilk = info%ik_s, info%ik_e
+    do ihk = 1, unfold%nhrsk
+      isk = unfold%isk_tbl(ilk,ihk)
+      kraw_g(:) = system%vec_k(:,ilk) + unfold%vec_hrsk(:,ihk)
+      kfrac_g(1) = B_ref_g_inv(1,1)*kraw_g(1) + B_ref_g_inv(1,2)*kraw_g(2) + B_ref_g_inv(1,3)*kraw_g(3)
+      kfrac_g(2) = B_ref_g_inv(2,1)*kraw_g(1) + B_ref_g_inv(2,2)*kraw_g(2) + B_ref_g_inv(2,3)*kraw_g(3)
+      kfrac_g(3) = B_ref_g_inv(3,1)*kraw_g(1) + B_ref_g_inv(3,2)*kraw_g(2) + B_ref_g_inv(3,3)*kraw_g(3)
+      n1_g = 0 ; n2_g = 0 ; n3_g = 0
+      if( kfrac_g(1) < -0.50001d0 ) then
+        n1_g = -1
+      else if( kfrac_g(1) > +0.50001d0 ) then
+        n1_g = +1
+      end if
+      if( kfrac_g(2) < -0.50001d0 ) then
+        n2_g = -1
+      else if( kfrac_g(2) > +0.50001d0 ) then
+        n2_g = +1
+      end if
+      if( kfrac_g(3) < -0.50001d0 ) then
+        n3_g = -1
+      else if( kfrac_g(3) > +0.50001d0 ) then
+        n3_g = +1
+      end if
+      isk_n1_l(isk) = dble(n1_g) ; isk_n2_l(isk) = dble(n2_g) ; isk_n3_l(isk) = dble(n3_g)
+      isk_shift_id_l(isk) = (n1_g+1)*9 + (n2_g+1)*3 + (n3_g+1) + 1
+    end do
+    end do
+    allocate( isk_n1(unfold%nsk), isk_n2(unfold%nsk), isk_n3(unfold%nsk) )
+    isk_n1(:) = 0d0 ; isk_n2(:) = 0d0 ; isk_n3(:) = 0d0
+    call comm_summation(isk_n1_l,isk_n1,unfold%nsk,icomm)
+    call comm_summation(isk_n2_l,isk_n2,unfold%nsk,icomm)
+    call comm_summation(isk_n3_l,isk_n3,unfold%nsk,icomm)
+
+    ! Corrected projection: identical to the mat/eta construction above,
+    ! with ONE addition -- the extra factor gshift_ph(...,isk_shift_id)
+    ! = exp(+i*G_R.r_ref) (Codex note 074's corrected sign; NOT
+    ! conjugated) multiplying the existing conjg(eihkr_tbl(...)) term.
+    ! unfold%psi_ref/unfold%eihkr_tbl/psi_t%zwf are read, never written,
+    ! by both this block and the original block above.
+    allocate( mat_c(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
+  !$omp parallel do private(ilk,ihk,isk,ishidx_g,io,io_ref,zsum_c,ih1,ih2,ih3,ir1_ref,ir2_ref,ir3_ref,ir1,ir2,ir3) collapse(2)
+    do ilk = info%ik_s, info%ik_e ! large k
+    do ihk = 1, unfold%nhrsk   ! hat k
+      isk = unfold%isk_tbl(ilk,ihk)
+      ishidx_g = isk_shift_id_l(isk)
+    do io = info%io_s, info%io_e     ! m, supercell
+    do io_ref = 1, no_ref   ! n, reference
+      zsum_c = 0d0
+      do ih1 = 1, unfold%num_hkgrid(1)
+      do ih2 = 1, unfold%num_hkgrid(2)
+      do ih3 = 1, unfold%num_hkgrid(3)
+      do ir1_ref = 1, ie_ref(1)
+      do ir2_ref = 1, ie_ref(2)
+      do ir3_ref = 1, ie_ref(3)
+        ir1 = ir1_ref + (ih1-1) * ie_ref(1)
+        ir2 = ir2_ref + (ih2-1) * ie_ref(2)
+        ir3 = ir3_ref + (ih3-1) * ie_ref(3)
+        zsum_c = zsum_c + conjg( unfold%psi_ref( ir1_ref, ir2_ref, ir3_ref, 1, io_ref, isk, 1) ) &
+         &        * conjg( unfold%eihkr_tbl(ir1,ir2,ir3,ihk) ) &
+         &        * gshift_ph(ir1_ref,ir2_ref,ir3_ref,ishidx_g) &
+         &        * psi_t%zwf( ir1, ir2, ir3, 1, io, ilk, 1 )
+      end do
+      end do
+      end do
+      end do
+      end do
+      end do
+      zsum_c = zsum_c * system%hvol
+      mat_c(io_ref, ihk, io, ilk) = zsum_c / (unfold%num_hkgrid(1)*unfold%num_hkgrid(2)*unfold%num_hkgrid(3))
+    end do
+    end do
+    end do
+    end do
+
+    allocate( eta_c(no_ref,no_ref,isk_s:isk_e),eta_c_l(no_ref,no_ref,isk_s:isk_e) )
+    eta_c_l = 0.0d0
+  !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,zsum_c,io) collapse(2)
+    do ilk = info%ik_s, info%ik_e
+    do ihk = 1, unfold%nhrsk
+      isk = unfold%isk_tbl(ilk,ihk)
+      do io_ref1 = 1, no_ref
+      do io_ref2 = 1, no_ref
+        zsum_c = 0d0
+        do io = info%io_s, info%io_e
+          zsum_c = zsum_c + system%rocc(io,ilk,1) * mat_c(io_ref1, ihk, io, ilk) * conjg( mat_c(io_ref2, ihk, io, ilk) )
+        end do
+        eta_c_l(io_ref1, io_ref2, isk) = zsum_c
+      end do
+      end do
+    end do
+    end do
+    eta_c_l = eta_c_l * (unfold%num_hkgrid(1)*unfold%num_hkgrid(2)*unfold%num_hkgrid(3))
+    eta_c = 0.0d0
+    call comm_summation(eta_c_l,eta_c,no_ref*no_ref*nsk_se,info%icomm_o)
+
+    ! Corrected coherence-norm diagnostics: same classification
+    ! (unfold%hprk_label) and wtk_ref weighting as cdiagknown/cintra/
+    ! cinter/cunknown above (lines computing cdiagknown_l etc.), applied
+    ! to eta_c instead of eta. The current terms (zj1a_c etc.) are NOT
+    ! recomputed here -- that requires deciding how zj5's explicit
+    ! kappa_raw term is corrected too (note-074 step 4), out of scope
+    ! for this pass.
+    cdiagknown_c_l = 0d0 ; cintra_c_l = 0d0 ; cinter_c_l = 0d0 ; cunknown_c_l = 0d0
+    zsum_c_l = 0d0
+    allocate( cdiagknown_c_isk_l(unfold%nsk), cintra_c_isk_l(unfold%nsk), &
+            & cinter_c_isk_l(unfold%nsk), cunknown_c_isk_l(unfold%nsk) )
+    cdiagknown_c_isk_l(:) = 0d0 ; cintra_c_isk_l(:) = 0d0
+    cinter_c_isk_l(:) = 0d0 ; cunknown_c_isk_l(:) = 0d0
+
+  !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,lab1,lab2) &
+  !$omp reduction(+:cdiagknown_c_l,cintra_c_l,cinter_c_l,cunknown_c_l,zsum_c_l) collapse(2)
+    do ilk = info%ik_s, info%ik_e
+    do ihk = 1, unfold%nhrsk
+      isk = unfold%isk_tbl(ilk,ihk)
+    do io_ref1 = 1, no_ref
+      lab1 = unfold%hprk_label(io_ref1,isk)
+      zsum_c_l = zsum_c_l + eta_c(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk)
+      if( lab1 > 0 ) then
+        cdiagknown_c_l = cdiagknown_c_l + abs(eta_c(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cdiagknown_c_isk_l(isk) = cdiagknown_c_isk_l(isk) + abs(eta_c(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      else
+        cunknown_c_l = cunknown_c_l + abs(eta_c(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cunknown_c_isk_l(isk) = cunknown_c_isk_l(isk) + abs(eta_c(io_ref1, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      end if
+    do io_ref2 = 1, no_ref
+      if( io_ref1 == io_ref2 ) cycle
+      lab2 = unfold%hprk_label(io_ref2,isk)
+      if( lab1 > 0 .and. lab2 == lab1 ) then
+        cintra_c_l = cintra_c_l + abs(eta_c(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cintra_c_isk_l(isk) = cintra_c_isk_l(isk) + abs(eta_c(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      else if( lab1 == 0 .or. lab2 == 0 ) then
+        cunknown_c_l = cunknown_c_l + abs(eta_c(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cunknown_c_isk_l(isk) = cunknown_c_isk_l(isk) + abs(eta_c(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      else
+        cinter_c_l = cinter_c_l + abs(eta_c(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+        cinter_c_isk_l(isk) = cinter_c_isk_l(isk) + abs(eta_c(io_ref2, io_ref1, isk))**2 * unfold%wtk_ref(isk)
+      end if
+    end do
+    end do
+    end do
+    end do
+
+    cdiagknown_c = 0d0 ; cintra_c = 0d0 ; cinter_c = 0d0 ; cunknown_c = 0d0 ; zsum_c = 0d0
+    call comm_summation(cdiagknown_c_l,cdiagknown_c,icomm)
+    call comm_summation(cintra_c_l,cintra_c,icomm)
+    call comm_summation(cinter_c_l,cinter_c,icomm)
+    call comm_summation(cunknown_c_l,cunknown_c,icomm)
+    call comm_summation(zsum_c_l,zsum_c,icomm)
+
+    allocate( cdiagknown_c_isk(unfold%nsk), cintra_c_isk(unfold%nsk), &
+            & cinter_c_isk(unfold%nsk), cunknown_c_isk(unfold%nsk) )
+    cdiagknown_c_isk(:) = 0d0 ; cintra_c_isk(:) = 0d0
+    cinter_c_isk(:) = 0d0 ; cunknown_c_isk(:) = 0d0
+    call comm_summation(cdiagknown_c_isk_l,cdiagknown_c_isk,unfold%nsk,icomm)
+    call comm_summation(cintra_c_isk_l,cintra_c_isk,unfold%nsk,icomm)
+    call comm_summation(cinter_c_isk_l,cinter_c_isk,unfold%nsk,icomm)
+    call comm_summation(cunknown_c_isk_l,cunknown_c_isk,unfold%nsk,icomm)
+
+    if(comm_is_root(nproc_id_global))then
+      write(*,'(A,2x,i7)')      'dm_unfold G_R-correction check (note 075), it=', itt
+      write(*,'(A,7x,2f17.12)') 'N:Tr[rho_c(t)] corrected          ', real(zsum_c), aimag(zsum_c)
+      write(*,'(A,7x,f17.12)')  'C_diag_known_c                    ', cdiagknown_c
+      write(*,'(A,7x,f17.12)')  'C_intra_c                         ', cintra_c
+      write(*,'(A,7x,f17.12)')  'C_inter_c                         ', cinter_c
+      write(*,'(A,7x,f17.12)')  'C_unknown_c                       ', cunknown_c
+      write(*,'(A,7x,f17.12)')  '  (uncorrected, for reference) C_intra =', cintra
+      write(*,'(A,7x,f17.12)')  '  (uncorrected, for reference) C_inter =', cinter
+    end if
+
+    if(comm_is_root(nproc_id_global))then
+      ! Per-isk corrected coherence-norm breakdown, same layout family as
+      ! *_dm_unfold_isk_coherence.data (notes 066/067) but with the G_R
+      ! phase correction (note 075) applied to mat/eta, plus the integer
+      ! shift n=(n1,n2,n3) used for that isk, for direct before/after
+      ! comparison and for Codex's isolated sign-check verification
+      ! (note 074: n=-1/+1/no-shift). Columns 10-13 use the SAME
+      ! classification (unfold%hprk_label) and wtk_ref weighting as
+      ! columns 7-10 of the uncorrected file; only the phase inside the
+      ! underlying mat/eta projection differs.
+      iofile = trim(base_directory)//trim(sysname)//"_dm_unfold_gshift_check.data"
+      fp2 = 273
+      inquire(file=iofile, exist=iofile_exists)
+      if( .not. iofile_exists ) then
+        open(fp2,file=iofile,status='replace')
+        write(fp2,'(A)') "# per-isk G_R phase-correction check (note 075): reference<->"// &
+                       & "super-reference projection recomputed with the exp(+i*G_R.r_ref) "// &
+                       & "correction (Codex note 074), compare directly against the "// &
+                       & "corresponding columns of *_dm_unfold_isk_coherence.data (uncorrected)."
+        write(fp2,'(A)') "# scope: projection/eta fix only (note-074 steps 1-2); the explicit "// &
+                       & "k-term (zj5), Fourier-current G-sum and momentum distribution still "// &
+                       & "use kappa_raw (steps 3-5, deferred)."
+        write(fp2,'(A)') "# 1:Time[a.u.] 2:isk 3:kx[bohr^-1] 4:ky[bohr^-1] 5:kz[bohr^-1] "// &
+                       & "(kappa_raw, uncorrected) 6:n1 7:n2 8:n3 (integer shift) 9:wtk_ref "// &
+                       & "10:wtk_ref*C_diag_known_c(isk) 11:wtk_ref*C_intra_c(isk) "// &
+                       & "12:wtk_ref*C_inter_c(isk) 13:wtk_ref*C_unknown_c(isk)"
+      else
+        open(fp2,file=iofile,status='old',position='append')
+      end if
+      do isk = 1, unfold%nsk
+        write(fp2,'(f16.8,1x,i8,11(1x,es17.9e3))') itt*dt, isk, veck_isk(1:3,isk), &
+          & isk_n1(isk), isk_n2(isk), isk_n3(isk), unfold%wtk_ref(isk), &
+          & cdiagknown_c_isk(isk), cintra_c_isk(isk), cinter_c_isk(isk), cunknown_c_isk(isk)
+      end do
+      write(fp2,*)
+      write(fp2,*)
+      flush(fp2)
+      close(fp2)
+    end if
+    ! =================================================================
+    ! end of G_R phase-correction check (note 075)
+    ! =================================================================
 
     zj1a = zj1a / omega_ref
     zj2a = zj2a / omega_ref
