@@ -59,7 +59,7 @@ class CufftBackend(unittest.TestCase):
         if not shutil.which(compiler):
             self.skipTest('GNU Fortran unavailable; set GNU_FC to test the CPU stub')
         self.compile_and_run(compiler, ['-cpp', '-O0', '-g', '-fcheck=all'],
-                             [ROOT / 'src/xc/exx_cufft.f90', HERE / 'cufft_stub_probe.f90'], [],
+                             [ROOT / 'src/xc/exx_batch_backend.f90', ROOT / 'src/xc/exx_cufft.f90', HERE / 'cufft_stub_probe.f90'], [],
                              'PASS CPU cuFFT stub')
 
     @unittest.skipUnless(os.environ.get('SALMON_TEST_MPIEXEC'), 'set SALMON_TEST_MPIEXEC for abort test')
@@ -91,7 +91,8 @@ class CufftBackend(unittest.TestCase):
 end program
 """)
             exe = folder / 'abort'
-            build = subprocess.run([compiler, '-cpp', '-I' + tmp, str(ROOT / 'src/xc/exx_cufft.f90'),
+            build = subprocess.run([compiler, '-cpp', '-I' + tmp, str(ROOT / 'src/xc/exx_batch_backend.f90'),
+                                    str(ROOT / 'src/xc/exx_cufft.f90'),
                                     str(driver), '-o', str(exe)], cwd=tmp, text=True, capture_output=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             run = subprocess.run([os.environ['SALMON_TEST_MPIEXEC'], '-n', '2', str(exe)],
@@ -108,7 +109,7 @@ end program
         flags = ['-cpp', '-DUSE_EXX_CUFFT', '-acc', '-cudalib=cufft', '-O2', '-Mbounds',
                  *shlex.split(os.environ.get('CUFFT_TEST_FFLAGS', '')), *include]
         self.compile_and_run(compiler, flags,
-                             [ROOT / 'src/xc/exx_cufft.f90', ROOT / 'src/xc/exx_local_fft.f90',
+                             [ROOT / 'src/xc/exx_batch_backend.f90', ROOT / 'src/xc/exx_cufft.f90', ROOT / 'src/xc/exx_local_fft.f90',
                               HERE / 'cufft_gpu_probe.f90'], libraries, 'PASS cuFFT/FFTW complex128 parity')
 
 

@@ -1,4 +1,49 @@
+! Fault injection checks signed backend errors at the exchange-action boundary.
+module cleanup_failure_backend
+ use exx_batch_backend, only: s_exx_batch_backend
+ implicit none
+ integer :: fail_rank=0
+ type,extends(s_exx_batch_backend) :: failing_backend
+ contains
+  procedure :: prepare=>prepare_ok
+  procedure :: apply=>apply_ok
+  procedure :: release=>release_failure
+ end type
+contains
+ subroutine create_failure(backend)
+  implicit none
+  class(s_exx_batch_backend),allocatable,intent(out) :: backend
+  allocate(failing_backend::backend)
+ end subroutine
+ subroutine prepare_ok(self,padded,indices,filter,source,capacity,status)
+  implicit none
+  class(failing_backend),target,intent(inout) :: self
+  integer,intent(in) :: padded(3),indices(:),capacity
+  complex(8),intent(in) :: filter(:,:,:),source(:)
+  integer,intent(out) :: status
+  status=0
+ end subroutine
+ subroutine apply_ok(self,targets,action,status)
+  implicit none
+  class(failing_backend),target,intent(inout) :: self
+  complex(8),intent(in) :: targets(:,:)
+  complex(8),intent(out) :: action(:,:)
+  integer,intent(out) :: status
+  action=0d0;status=0
+ end subroutine
+ subroutine release_failure(self,status)
+  use mpi, only: MPI_Comm_rank,MPI_COMM_WORLD
+  implicit none
+  class(failing_backend),target,intent(inout) :: self
+  integer,intent(out) :: status
+  integer :: rank,ierr
+  call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr)
+  status=0
+  if(rank==fail_rank)status=-1001
+ end subroutine
+end module
 program probe
+ use cleanup_failure_backend, only: create_failure
  use mpi
  use exx_spatial
  use exx_ace
@@ -81,6 +126,12 @@ program probe
    1d-190,correction,st)
  if(st/=0.or.correction<=0d0)error stop 'tiny completion norm underflowed'
  call localized_chain()
+ op%screen_mode=0;op%compact=.true.;op%create_local_backend=>create_failure
+ call spatial_exx_apply(op,n,h,[np,1],[rank,0],[MPI_COMM_WORLD,MPI_COMM_SELF],MPI_COMM_WORLD, &
+   4d0,target,value,st,omega=omega)
+ if(st==0)error stop 'negative release error lost on peer'
+ if(rank==0)print *, 'PASS collective negative backend release status'
+ nullify(op%create_local_backend)
  call MPI_Finalize(ierr)
 contains
  subroutine localized_chain()

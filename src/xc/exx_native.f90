@@ -4,7 +4,7 @@
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
   use exx_functional, only: exchange_fraction
-  use exx_cufft, only: exx_cufft_apply
+  use exx_cufft, only: exx_cufft_create
   use iso_fortran_env, only: int64
   use lcfo_rt_basis, only: lcfo_rt_active
   use exx_lcfo_rt, only: lcfo_exx_refresh,lcfo_exx_add_action,lcfo_exx_stage
@@ -651,9 +651,9 @@ contains
     if(adaptive_active.neqv.was_active)exx_support_changed=.true.
     cached_adaptive_ready=exx_adaptive_ready
     spatial%compact=adaptive_active.and.exx_local_fft=='auto'
-    nullify(spatial%local_batch)
+    nullify(spatial%local_batch,spatial%create_local_backend)
     if(exx_local_backend=='cufft')then
-      spatial%local_batch=>exx_cufft_apply
+      spatial%create_local_backend=>exx_cufft_create
       spatial%local_batch_size=exx_gpu_batch_size
       if(spatial%updates==1.and.info%id_ro==0)write(*,'(a,i0)') &
         'EXX experimental cuFFT compact backend; CPU global fallback; per-rank batch=',exx_gpu_batch_size

@@ -58,14 +58,24 @@ NVIDIA device is available; it does not silently pass the GPU test on the CPU.
 
 ## Current implementation limits
 
-Each nonempty compact batch creates and destroys a cuFFT plan and transfers
-its filter and work arrays. Persistent device plans/filter caching are not part
-of this first backend, so transfer and planning overhead may dominate small
-batches. Performance has not been measured on a GPU.
+The compact plan owns resident GPU data for one exchange-action call. The
+source tile is gathered once per source orbital, before the target-batch loop.
+Support indices, the Fourier kernel and the source remain on the GPU; prepare
+uploads them only when their contents change. Each batch uploads its target
+columns and downloads its action columns. Pair-density generation, forward FFT,
+kernel multiplication, inverse FFT and action assembly stay on the GPU.
+
+The cuFFT plan and work buffers are reused when padded dimensions, support size,
+batch capacity and selected device match. Tail batches zero unused columns and
+use the same plan. A geometry/capacity change rebuilds the resources. Explicit
+release at the end of the exchange action frees them; this cache does not yet
+persist across separate Hamiltonian applications or RT steps. CPU-side MPI
+collectives still require per-batch target/result transfers. Performance has
+not been measured on a GPU.
 
 Only compact local convolutions use this backend. Broad-support/full-grid FFT
 fallbacks, ACE construction/application, and rVV10 remain CPU work. A rank with
-no selected local pairs does not call cuFFT; selecting the backend alone does
+no owned target columns does not prepare the GPU backend; selecting the backend alone does
 not prove that a particular step executed a GPU convolution. Check the existing
 `EXX_ADAPTIVE` local/global pair counters to identify compact work versus
 full-grid fallback. Those counters are workload diagnostics, not GPU timings.
@@ -130,7 +140,10 @@ The device fixture compares the production cuFFT batch with the production
 FFTW scalar convolution on unequal padded dimensions `3 x 5 x 8`, irregular
 periodic support indices, complex sources and targets, a zero column, multiple
 batch sizes/tails, repeated calls, and an empty batch. It compares normalized
-complex actions at a tolerance of `2e-12`.
+complex actions at a tolerance of `2e-12`. The stateful fixture also checks
+operation counters: repeated prepare leaves uploads unchanged, source/filter/
+index changes upload only that data, and tail batches reuse the plan. Capacity
+and geometry changes, repeated release, and owner finalization are covered.
 
 The independent CPU MPI callback test exercises the selected-pair batching and
 scatter path without requiring CUDA:
@@ -140,6 +153,9 @@ python3 testsuites/unit_hse_wannier/test_spatial_local.py \
   --build /path/to/cpu-hybrid-build --ranks 1 2 4
 ```
 
-Its callback uses real FFTW transforms and checks skipped/zero targets, partial
-batches, conserved pair counters, and collective propagation of backend errors.
+Its callback and stateful oracle use real FFTW transforms and check skipped/zero
+targets, partial batches, conserved pair counters, one prepare per source,
+changed-source results, and collective propagation of prepare/apply errors.
+A negative release failure on one rank is tested during reinitialization; the
+pair-screen fixture also tests release failures at the exchange-action boundary.
 It validates CPU dispatch and MPI handling; it does not validate cuFFT itself.

@@ -1,4 +1,72 @@
+! CPU oracle for the stateful prepare/apply/release contract.
+module resident_oracle
+ use iso_c_binding
+ use exx_batch_backend, only: s_exx_batch_backend
+ use exx_local_fft, only: s_exx_local_fft,exx_local_apply,exx_local_destroy
+ implicit none
+ include 'fftw3.f03'
+ integer :: releases=0
+ type,extends(s_exx_batch_backend) :: cpu_backend
+  type(s_exx_local_fft) :: fft
+  complex(8),allocatable :: source(:)
+  integer :: prepares=0,batches=0,capacity=0
+  logical :: fail_prepare=.false.,fail_apply=.false.,fail_release=.false.
+ contains
+  procedure :: prepare=>prepare_cpu
+  procedure :: apply=>apply_cpu
+  procedure :: release=>release_cpu
+ end type
+contains
+ subroutine prepare_cpu(self,padded,indices,filter,source,capacity,status)
+  implicit none
+  class(cpu_backend),target,intent(inout) :: self
+  integer,intent(in) :: padded(3),indices(:),capacity
+  complex(8),intent(in) :: filter(:,:,:),source(:)
+  integer,intent(out) :: status
+  self%prepares=self%prepares+1;status=1
+  if(self%fail_prepare)return
+  call exx_local_destroy(self%fft)
+  self%capacity=capacity;self%source=source
+  self%fft%padded=padded;self%fft%fft_points=product(padded)
+  self%fft%indices=indices;self%fft%filter=filter
+  allocate(self%fft%work(padded(1),padded(2),padded(3)))
+  self%fft%forward=fftw_plan_dft_3d(padded(3),padded(2),padded(1), &
+    self%fft%work,self%fft%work,FFTW_FORWARD,FFTW_ESTIMATE)
+  self%fft%backward=fftw_plan_dft_3d(padded(3),padded(2),padded(1), &
+    self%fft%work,self%fft%work,FFTW_BACKWARD,FFTW_ESTIMATE)
+  if(.not.c_associated(self%fft%forward).or..not.c_associated(self%fft%backward))return
+  self%fft%ready=.true.;status=0
+ end subroutine
+ subroutine apply_cpu(self,targets,action,status)
+  implicit none
+  class(cpu_backend),target,intent(inout) :: self
+  complex(8),intent(in) :: targets(:,:)
+  complex(8),intent(out) :: action(:,:)
+  integer,intent(out) :: status
+  complex(8) :: potential(size(targets,1))
+  integer :: j
+  self%batches=self%batches+1;status=1;action=0d0
+  if(self%fail_apply)return
+  if(size(targets,2)>self%capacity)error stop 'stateful capacity'
+  do j=1,size(targets,2)
+   call exx_local_apply(self%fft,conjg(self%source)*targets(:,j),potential,status)
+   if(status/=0)return
+   action(:,j)=-self%source*potential
+  enddo
+  status=0
+ end subroutine
+ subroutine release_cpu(self,status)
+  implicit none
+  class(cpu_backend),target,intent(inout) :: self
+  integer,intent(out) :: status
+  call exx_local_destroy(self%fft)
+  if(allocated(self%source))deallocate(self%source)
+  releases=releases+1;status=0
+  if(self%fail_release)status=-1001
+ end subroutine
+end module
 program probe
+ use resident_oracle, only: cpu_backend,releases
  use mpi
  use iso_fortran_env, only: int64
  use iso_c_binding
@@ -126,15 +194,70 @@ program probe
  call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
  if(status==0)error stop 'batch callback error was not propagated'
  oracle_fail=.false.
+ nullify(plan%batch_action)
+ allocate(cpu_backend::plan%backend)
+ do ibatch=1,size(batch_sizes)
+ plan%batch_size=batch_sizes(ibatch)
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ backend%prepares=0;backend%batches=0
+ end select
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
+ if(status/=0.or..not.used.or.pairs/=4.or.points/=reference_points)error stop 'resident counters'
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ if(backend%prepares/=1)error stop 'prepare must be once per source, outside batches'
+ if(ibatch==1.and.rank==0.and.backend%batches<2)error stop 'multiple batches not exercised'
+ end select
+ err=maxval(abs(ref-action));call MPI_Allreduce(err,err_all,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+ if(err_all>1d-11)error stop 'resident MPI scatter parity'
+ enddo
+ ! Reusing the object with a changed source must not use a stale source.
+ source=2d0*source
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
+ if(status/=0)error stop 'resident new source'
+ err=maxval(abs(4d0*ref-action));call MPI_Allreduce(err,err_all,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+ if(err_all>1d-11)error stop 'resident source update'
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ backend%fail_prepare=(rank==0)
+ end select
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
+ if(status==0)error stop 'resident prepare error propagation'
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ backend%fail_prepare=.false.;backend%fail_apply=(rank==0)
+ end select
+ call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points,skip)
+ if(status==0)error stop 'resident apply error propagation'
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ backend%fail_apply=.false.;backend%prepares=0;backend%batches=0
+ end select
  callback_calls=0
  call spatial_local_apply(plan,MPI_COMM_WORLD,source,target(:,1:0),action(:,1:0),used,status,pairs,points)
  if(status/=0.or..not.used.or.pairs/=0.or.callback_calls/=0)error stop 'batch empty targets'
  source=0d0
  call spatial_local_apply(plan,MPI_COMM_WORLD,source,target,action,used,status,pairs,points)
  if(status/=0.or..not.used.or.pairs/=0.or.callback_calls/=0)error stop 'batch zero support'
- nullify(plan%batch_action)
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ if(backend%prepares/=0.or.backend%batches/=0)error stop 'empty work prepared resident backend'
+ end select
+ call spatial_local_destroy(plan,status)
+ if(status/=0.or.releases/=1.or.allocated(plan%backend))error stop 'resident release'
+ call spatial_local_destroy(plan,status)
+ if(status/=0.or.releases/=1)error stop 'repeat destroy'
+ allocate(cpu_backend::plan%backend)
+ select type(backend=>plan%backend)
+ type is(cpu_backend)
+ backend%fail_release=(rank==0)
+ end select
+ call spatial_local_init(plan,n,dims,coords,comm,multiplier,status)
+ if(status==0)error stop 'negative reinit release error lost on peer'
+ if(allocated(plan%backend).or.releases/=2)error stop 'reinit release lifecycle'
  call spatial_local_destroy(plan)
- if(rank==0)print *, 'PASS spatial local and batched callback',np
+ if(rank==0)print *, 'PASS spatial local and batched callback (resident prepare/apply/release)',np
  call MPI_Finalize(ierr)
 contains
  subroutine cpu_batch_action(padded,indices,filter,source,targets,action,status)

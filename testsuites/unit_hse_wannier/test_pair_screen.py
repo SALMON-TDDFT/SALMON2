@@ -30,6 +30,7 @@ def main():
             os.environ.get('MPIFC', 'mpifort'), '-fopenmp', '-fcheck=all',
             '-ffree-line-length-none', '-I' + str(build),
             str(ROOT / 'src/xc/exx_orbitals.f90'),
+            str(ROOT / 'src/xc/exx_batch_backend.f90'),
             str(ROOT / 'src/xc/exx_spatial_local.f90'),
             str(ROOT / 'src/xc/exx_pair_candidates.f90'),
             str(ROOT / 'src/xc/exx_spatial.f90'),

@@ -7,6 +7,7 @@
 module exx_spatial
   use iso_fortran_env, only: int64
   use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
+  use exx_batch_backend, only: local_backend_factory
   use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy, &
     local_batch_action
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
@@ -22,6 +23,7 @@ module exx_spatial
     logical :: compact=.false.,seed_localized=.false.,seed_needed=.true.,retained_gauge=.false.
     logical :: retain_accepted_gauge=.false.
     procedure(local_batch_action),pointer,nopass :: local_batch=>null()
+    procedure(local_backend_factory),pointer,nopass :: create_local_backend=>null()
     integer :: local_batch_size=8
     integer :: screen_mode=0 ! 0 off, 1 diagnose, 2 omit
     real(8) :: screen_tolerance=0d0,screen_bound=0d0,screen_cpu_seconds=0d0
@@ -477,6 +479,7 @@ contains
       call spatial_local_init(compact_plan,n,dims,coords,comm,multiplier,status)
       compact_plan%batch_action=>op%local_batch
       compact_plan%batch_size=op%local_batch_size
+      if(associated(op%create_local_backend))call op%create_local_backend(compact_plan%backend)
       call collective_bad_status()
       if(status/=0)return
     endif
@@ -508,7 +511,10 @@ contains
           call pair_source_box(n,mesh_lo,mesh_local,comm_r,source_column,box_lower,box_upper,status)
           if(status==0)call pair_catalog_query(catalogue,box_lower,box_upper,threshold_pair,selected,ncandidate,status)
           call collective_bad_status()
-          if(bad/=0)return
+          if(bad/=0)then
+            call spatial_local_destroy(compact_plan)
+            return
+          endif
           ! All absent pairs have action norm <= budget. Count their complement
           ! without an Nsource-by-Ntarget skip table or per-source dense update.
           broad_sources=broad_sources+1
@@ -576,7 +582,10 @@ contains
             op%local_pairs=op%local_pairs+compact_pairs
             op%local_points=op%local_points+compact_points
             if(present(comm_o))call collective_bad()
-            if(bad/=0)return
+            if(bad/=0)then
+              call spatial_local_destroy(compact_plan)
+              return
+            endif
             cycle
           endif
           deallocate(compact_action)
@@ -612,10 +621,15 @@ contains
           enddo
         enddo
         if(present(comm_o))call collective_bad()
-        if(bad/=0)return
+        if(bad/=0)then
+          call spatial_local_destroy(compact_plan)
+          return
+        endif
       enddo
     enddo
-    call spatial_local_destroy(compact_plan)
+    call spatial_local_destroy(compact_plan,status)
+    call collective_bad_status()
+    if(status/=0)return
     if(op%screen_mode/=0)then
       omitted=omitted+budget*real(broad_sources-broad_kept,8)
       call comm_summation(real(op%pair_product_points,8),point_total,comm_r)
@@ -647,7 +661,8 @@ contains
     end subroutine
     subroutine collective_bad_status()
       implicit none
-      bad=status
+      ! Backends use signed error codes; MPI_MAX must see a Boolean failure.
+      bad=merge(1,0,status/=0)
       call collective_bad()
     end subroutine
     subroutine collective_bad()
