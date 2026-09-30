@@ -308,7 +308,8 @@ contains
     integer,intent(out) :: status
     integer,allocatable :: counts(:),target_counts(:)
     complex(8),allocatable :: column(:),overlap(:),total(:)
-    integer :: first,rank,np,owner,i,j,bad,packed_mode
+    integer :: first,rank,np,owner,i,j,g,bad,packed_mode
+    complex(8) :: dot
     status=1;action=0d0;bad=0
     packed_mode=merge(1,0,ace%packed)
     call comm_get_max(packed_mode,comm_r);call comm_get_max(packed_mode,comm_o)
@@ -338,11 +339,22 @@ contains
       do i=1,counts(owner)
         if(rank==owner)column=ace%factors(:,i,1)
         call comm_bcast(column,comm_o,owner)
-        overlap=matmul(conjg(column),target(:,:,1))*ace%dv
+        ! Keep grid summation order within each independent target orbital.
+!$omp parallel do default(none) private(j,g,dot) shared(target,column,overlap,ace)
+        do j=1,size(target,2)
+          dot=0d0
+          do g=1,size(target,1)
+            dot=dot+conjg(column(g))*target(g,j,1)
+          enddo
+          overlap(j)=dot*ace%dv
+        enddo
+!$omp end parallel do
         call comm_summation(overlap,total,size(overlap),comm_r)
+!$omp parallel do default(none) private(j) shared(target,action,column,total)
         do j=1,size(target,2)
           action(:,j,1)=action(:,j,1)-column*total(j)
         enddo
+!$omp end parallel do
       enddo
     enddo
     status=0
