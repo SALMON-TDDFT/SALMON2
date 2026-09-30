@@ -2,6 +2,9 @@
 module nvpl_test_state
  use iso_c_binding, only: c_int
  implicit none
+ private
+ public :: blas,lapack,calls,blas_local,lapack_local
+ ! Thread-local state deliberately models the vendor API for this test.
  integer(c_int) :: blas=0,lapack=5
  integer :: calls=0
 !$omp threadprivate(blas,lapack,calls)

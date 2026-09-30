@@ -1,5 +1,6 @@
 program rotation_probe
- use mpi
+ use mpi, only: MPI_COMM_SELF,MPI_COMM_WORLD
+ use communication, only: comm_init,comm_finalize,comm_get_groupinfo,comm_is_root
  use omp_lib, only: omp_set_num_threads
  use exx_orbitals, only: orbital_rotate
  use exx_distributed_gauge, only: s_exx_gauge,gauge_tiles_rotate
@@ -10,10 +11,9 @@ program rotation_probe
  complex(8),allocatable :: local(:,:),output(:,:),baseline(:,:)
  real(8) :: weights(n),angle
  integer,allocatable :: counts(:)
- integer :: rank,np,err,first,last,i,j,g,k,threads,status,mode
- call MPI_Init(err)
- call MPI_Comm_rank(MPI_COMM_WORLD,rank,err)
- call MPI_Comm_size(MPI_COMM_WORLD,np,err)
+ integer :: rank,np,first,last,i,j,g,threads,status,mode
+ call comm_init
+ call comm_get_groupinfo(MPI_COMM_WORLD,rank,np)
  allocate(counts(0:np-1))
  do i=0,np-1
   counts(i)=(i+1)*n/np-i*n/np
@@ -61,13 +61,15 @@ program rotation_probe
    call check(all(output==baseline),'orbital/gauge equality')
   enddo
  enddo
- if(rank==0)print *, 'PASS weighted/forward/adjoint rotations, OMP 1/2/3/4 and empty orbital ranks'
- call MPI_Finalize(err)
+ if(comm_is_root(rank))print *, 'PASS weighted/forward/adjoint rotations, OMP 1/2/3/4 and empty orbital ranks'
+ call comm_finalize
 contains
  subroutine check(ok,message)
+  use mpi, only: MPI_Abort
   implicit none
   logical,intent(in) :: ok
   character(*),intent(in) :: message
+  integer :: err
   if(ok)return
   print *,rank,message
   call MPI_Abort(MPI_COMM_WORLD,1,err)
