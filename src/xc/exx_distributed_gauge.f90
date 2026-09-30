@@ -563,7 +563,7 @@ contains
     real(8),intent(in),optional :: weights(:)
     integer,allocatable :: counts(:)
     complex(8),allocatable :: column(:),partial(:),total(:)
-    integer :: first,rank,np,owner,k,col,i,j,bad
+    integer :: first,rank,np,owner,k,col,i,j,g,bad
     logical :: reverse
     reverse=.false.
     if(present(adjoint))reverse=adjoint
@@ -605,9 +605,15 @@ contains
           enddo
         endif
         call comm_summation(partial,total,size(total),gauge%comm)
+        ! Preserve the input-column summation order and the original mesh ownership.
+!$omp parallel do collapse(2) default(none) schedule(static) &
+!$omp shared(output,column,total,first) private(j,g)
         do j=1,size(output,2)
-          output(:,j)=output(:,j)+column*total(first+j-1)
+          do g=1,size(output,1)
+            output(g,j)=output(g,j)+column(g)*total(first+j-1)
+          enddo
         enddo
+!$omp end parallel do
       enddo
     enddo
     status=0

@@ -52,3 +52,9 @@ Sources: NVIDIA NVPL BLAS and LAPACK service APIs; RIKEN Fujitsu BLAS/LAPACK and
 逆変換はexx_nativeの非分散gaugeのMATMUL前後と、ブロック逆変換のownerループ前後に限定して設定する。MATMULがBLASを使うかはコンパイラ設定による（手元GNUビルドは-fexternal-blas）。ブロック経路のuse_blocked_inverse=.false.は維持。通常のgauge_tiles_rotate/orbital_rotateは列通信と配列更新で、BLAS制御だけでは高速化されない。多k点交換、LCFO GS対角化、PTCN等は今回の対象外。性能未計測、進行中のバイナリは維持。
 
 分散ACE追加検証: ScaLAPACK有効MPI1/2/4×OMP1/2×軌道数2/7、無効MPI2/4×OMP1/2×軌道数2/7が成功。通常/packed/sparse training、異常入力、空ランク、実OpenBLAS設定復元を含む。MPI/nonMPIビルドと関連CTest11件、条件数回帰も成功。`work/exx-block3d/orbital-threads-*.log`。無効のブロック逆変換はビルド確認のみ。読取りレビューで重大な問題なし。
+
+## Wannier正変換・逆変換の局所更新（承認済み）
+
+orbital_rotate / gauge_tiles_rotate のoutput更新を明示的な格子点×出力軌道ループにし、OMP collapse(2)で並列化する。列のbroadcast/reductionは並列領域の外に置き、入力列順序と各出力要素の加算順序を維持する。追加の全メッシュ配列は不要。複素U、非一様weights、正変換/随伴変換、軌道を持たないrank、OMP1/2/4とOMP無効を検証する。列ごとのOMP領域起動コストを伴うため、速度改善は実測まで断定しない。
+
+正逆変換検証: 複素U・非一様weights・随伴変換でMPI1/2/4、OMP1/2/3/4の出力が完全一致。OMP指示無効でも参照値と一致。ScaLAPACK有効/無効、既存ゲージ更新試験、MPI/nonMPIビルド、関連CTest11件成功。`work/exx-block3d/rotation-omp-*.log`。読取りレビューで重大な問題なし。

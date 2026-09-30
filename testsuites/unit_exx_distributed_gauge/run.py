@@ -36,6 +36,16 @@ with tempfile.TemporaryDirectory(prefix='gauge-tiles-') as directory:
                     '-ffree-line-length-none', '-I'+str(tmp), '-I'+str(b)] +
                    [str(tmp/'backend.f90')] + [str(root / f) for f in sources] + [str(objects / f) for f in deps] +
                    libs + ['-o', str(tmp / 'driver')], cwd=tmp, check=True)
+    # -lgomp resolves test/runtime dependencies without enabling OMP directives.
+    for omp_flags in (['-fopenmp'],['-lgomp']):
+        subprocess.run([os.environ.get('MPIFC','mpifort'),'-cpp',*omp_flags,'-fcheck=all',
+                        '-I'+str(tmp),'-I'+str(b),str(tmp/'backend.f90')] +
+                       [str(root/f) for f in sources[:-1]] +
+                       [str(root/'testsuites/unit_exx_distributed_gauge/rotation_probe.f90')] +
+                       [str(objects/f) for f in deps] + libs + ['-o',str(tmp/'rotation')],cwd=tmp,check=True)
+        for ranks in (1,2,4):
+            subprocess.run([os.environ.get('MPIEXEC','mpiexec'),'-n',str(ranks),str(tmp/'rotation')],
+                           cwd=tmp,env=env,timeout=120,check=True)
     cases = [(1, 1, 32), (2, 1, 32), (2, 2, 32), (4, 1, 32),
                                   (4, 2, 32), (4, 4, 32), (8, 1, 2), (8, 8, 2)]
     if a.empty_only:

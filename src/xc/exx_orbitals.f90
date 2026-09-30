@@ -88,7 +88,7 @@ contains
     complex(8),intent(out) :: output(:,:)
     real(8),intent(in),optional :: weights(:)
     complex(8),allocatable :: column(:)
-    integer :: rank,np,owner,i,j,k
+    integer :: rank,np,owner,i,j,k,g
     call comm_get_groupinfo(comm_o,rank,np)
     allocate(column(size(input,1)))
     output=0d0;k=0
@@ -100,9 +100,15 @@ contains
           if(present(weights))column=column*weights(i)
         endif
         call comm_bcast(column,comm_o,owner)
+        ! Communication stays outside OMP; each worker owns distinct output elements.
+!$omp parallel do collapse(2) default(none) schedule(static) &
+!$omp shared(output,column,matrix,k,first) private(j,g)
         do j=1,size(output,2)
-          output(:,j)=output(:,j)+column*matrix(k,first+j-1)
+          do g=1,size(output,1)
+            output(g,j)=output(g,j)+column(g)*matrix(k,first+j-1)
+          enddo
         enddo
+!$omp end parallel do
       enddo
     enddo
   end subroutine
