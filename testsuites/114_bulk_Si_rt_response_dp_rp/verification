@@ -13,15 +13,16 @@ print("#" * 60)
 print("# Verification start") 
 
 filelist = [ 
-    "H2O_rt_energy.data", 
+    "Si_rt.data", 
 ] 
 
 checklist = { 
-    # Eall
-    "Eall": [
+    # Current: same reference as 112, which runs this input undecomposed.
+    # The nonlocal current must not depend on how the r-grid is split.
+    "Current": [
         -100, # Temporary value for result
-        -0.466289445223927E+003,  # Reference value 
-        1e-6,  # Permissible error 
+        -0.000297090762249,  # Reference value 
+        1e-8,  # Permissible error 
     ], 
 } 
 
@@ -34,17 +35,17 @@ for item in filelist:
 print("# Checking calculated result")
 result = {}
 linecount = 0
-for line in open("H2O_rt_energy.data"):
+for line in open("Si_rt.data"):
     linecount += 1
-    if linecount == 108: # corresponds to line 108
+    if linecount == 167: # corresponds to line 167, (25.6 a.u.)
         for name, [resval, refval, error] in checklist.items(): 
             data = line.split()
-            result[name] = float(data[1])
+            result[name] = float(data[15])
             print(result[name])
 
 for name, [resval, refval, error] in checklist.items():
     if name not in result: 
-        print("Result %s is not found" % name) 
+        print("Result %s (%s) is not found" % (name, ptn)) 
         sys.exit(-1)  # Failure 
     else:
         print("Result %s = %e (Reference = %e)" % (name, result[name], refval)) 

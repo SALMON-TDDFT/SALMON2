@@ -1,7 +1,7 @@
 ! Unitary space-group star reconstruction for a complete cubic k mesh.
 ! Sources average little-group projectors, not individual orbital gauges.
 module hse_symmetry
- use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+ use ieee_finite_check, only: ieee_is_finite => is_finite
  implicit none
  private
  public :: hse_symmetry_map,symmetry_init,symmetry_expand,symmetry_validate_atoms,symmetry_transform

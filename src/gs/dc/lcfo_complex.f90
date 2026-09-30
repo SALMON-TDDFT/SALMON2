@@ -499,7 +499,7 @@ contains
   end subroutine finish_complex_lcfo_files
 
   subroutine check_lcfo_complex_options(system,info,dc)
-    use ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use salmon_global, only: energy_cut,lambda_cut,lcfo_eigensolver, &
          num_fragment,yn_dc_lcfo_diag,yn_spinorbit,theory
     use structures, only: s_dcdft,s_dft_system,s_parallel_info
@@ -567,7 +567,7 @@ contains
     use communication, only: comm_bcast,comm_irecv,comm_isend,comm_summation,comm_wait_all
     use eigen_subdiag_sub, only: eigen_zheev
     use hamiltonian, only: hpsi
-    use ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use filesystem, only: get_filehandle
     use math_constants, only: pi
     use salmon_global, only: energy_cut,lambda_cut,sysname, &
@@ -1369,7 +1369,7 @@ contains
 
   subroutine open_complex_lcfo_read(path,file_kind,system,lg,unit,meta,geom,vec_k,wtk,run_id,file_size,status)
     use filesystem, only: get_filehandle
-    use ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use iso_fortran_env, only: int32,int64,real64,file_storage_size
     use structures, only: s_dft_system,s_rgrid
     implicit none
@@ -1808,7 +1808,7 @@ contains
   end function complex_lcfo_headers_match
 
   subroutine read_wire_complex_values(unit,values,status)
-    use ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use iso_fortran_env, only: real64
     implicit none
     integer, intent(in) :: unit

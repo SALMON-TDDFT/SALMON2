@@ -1,7 +1,7 @@
 ! Adaptively compressed exchange: fixed occupied source state, arbitrary targets.
 module hse_ace
   use iso_c_binding, only: c_double,c_double_complex
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   private
   public :: hse_ace_state,hse_ace_build,hse_ace_apply,hse_ace_average

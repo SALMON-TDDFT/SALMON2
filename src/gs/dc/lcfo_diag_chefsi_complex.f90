@@ -44,7 +44,7 @@ contains
     use communication, only: comm_bcast,comm_create_group,comm_free_group, &
       comm_get_max,comm_get_min,comm_irecv,comm_isend,comm_summation,comm_wait_all
     use eigen_subdiag_sub, only: eigen_zheev
-    use ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use structures, only: s_dcdft
     implicit none
     type(s_dcdft), intent(in) :: dc
@@ -755,7 +755,7 @@ contains
     end subroutine spectral_bounds
 
     subroutine estimate_upper_bound(s,layout,cutoff0,lo,gersh_hi,hi)
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       integer, intent(in) :: s
       type(s_layout), intent(in) :: layout
       real(8), intent(in) :: cutoff0
@@ -777,7 +777,7 @@ contains
 
     subroutine lanczos_upper_bound(s,layout,ritz,residual)
       use eigen_subdiag_sub, only: eigen_dsyev
-      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      use ieee_finite_check, only: ieee_is_finite => is_finite
       integer, intent(in) :: s
       type(s_layout), intent(in) :: layout
       real(8), intent(out) :: ritz,residual

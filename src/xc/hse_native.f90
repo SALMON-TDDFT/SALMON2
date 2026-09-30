@@ -3,7 +3,7 @@
 ! distributed k points. Exchange transfers density tiles; ACE applications stay local.
 module hse_native
   use iso_fortran_env, only: int64
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   use structures
   use plusU_global, only: PLUS_U_ON
   use hse_exchange

@@ -4,7 +4,7 @@ module hse_exchange
 !$ use omp_lib, only: omp_get_num_threads,omp_get_max_threads
   use iso_fortran_env, only: int64
   use iso_c_binding
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   private
   include 'fftw3.f03'
