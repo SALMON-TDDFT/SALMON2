@@ -405,3 +405,37 @@ DC regression compares HSE/PBEh eigenvalues and reconstructed response to
 LAPACK on 2/8 ranks. The complex Si reference covers four k points.
 
 Example: `samples/hse_spatial/h4_scalapack_dc_scf.inp` uses four MPI ranks.
+
+
+### Experimental finite-range source-support ACE (CPU Gamma RT)
+
+`hse_sr_tolerance=0d0` (default) disables this approximation. A value strictly
+between zero and one selects R from `erfc(hse_omega*R)=hse_sr_tolerance`.
+This is a dimensionless continuum screening envelope, not an exchange-energy
+error tolerance. The actual kernel is the inverse transform of SALMON's
+existing discrete multiplier; discarded L1/L2 kernel norms are printed.
+
+Requires HSE06, fixed-ion native Gamma RT, `exx_ace_support='source'`,
+`exx_local_fft='auto'`, and `exx_local_backend='cpu'`. WF retained-norm/radius
+selection remains independent. Application mesh orbitals are not truncated.
+Each Cartesian rank exchanges pair density with intersecting neighboring
+blocks and uses an overlap-save window. Short periodic axes keep their full
+period; only the rank's own output region is retained. One pair is processed
+at a time. Halo metadata are exchanged collectively; density exchanges are
+between neighbors. If the window covers the whole cell, the original uncut
+route is used. MPI1 therefore currently retains the uncut route.
+
+The sharp discrete-kernel cutoff can lose positivity. ACE's Hermitian/positive
+checks are unchanged; failure uses the existing occupied-vector fallback with
+the kernel cutoff disabled. Inspect `EXX_SUPPORT_ACE accepted` and `EXX_SR`
+logs; do not claim a speedup from a failed approximation. CPU only; GPU and
+large production accuracy/performance have not been established. Existing
+running benchmark binaries are not changed by enabling this in a new build.
+
+For an active finite-range kernel, source supports use the existing compact
+WF transform when its estimated FFT work is lower. Otherwise they use the
+neighborhood window. Both routes use exactly the same truncated kernel.
+`EXX_SR WF-local/neighborhood pairs` records the selection. The initial model
+compares N log N with the aggregate neighborhood FFT work; it is not a
+calibrated communication-time model. No automatic change of cutoff radius or
+physical kernel is made when switching FFT routes.

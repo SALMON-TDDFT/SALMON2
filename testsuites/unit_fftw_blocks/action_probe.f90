@@ -13,6 +13,8 @@ program action_probe
   call compact_kernel_bounds([128,16,16],[31,16,16],lower,upper)
   if(any(lower/=[-30,0,0]).or.any(upper/=[30,15,15]))error stop 'kernel bounds'
   if(product(upper-lower+1)/=15616)error stop 'duplicate periodic kernel entries'
+  call compact_kernel_bounds([128,16,16],[31,15,15],lower,upper)
+  if(any(lower/=[-30,0,0]).or.any(upper/=[30,15,15]))error stop 'partial periodic bounds'
   call MPI_Init_thread(MPI_THREAD_FUNNELED,provided,ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD,rank,ierr);call MPI_Comm_size(MPI_COMM_WORLD,peers,ierr)
   call get_command_argument(1,arg);read(arg,*)dims
@@ -36,6 +38,8 @@ program action_probe
       distance=modulo(p-[0,8,8]-(j-1)*[7,0,0]+n/2,n)-n/2
       ref%source(g,j)=0d0
       if(sum(distance**2)<=2)ref%source(g,j)=cmplx(.1d0,.01d0*j,8)
+      if(trim(mode)=='mixed'.and.abs(distance(1))<=1.and.all(distance(2:3)/=-8)) &
+        ref%source(g,j)=cmplx(.1d0,.01d0*j,8)
       if(trim(mode)=='slab'.and.abs(distance(1))<=1)ref%source(g,j)=cmplx(.1d0,.01d0*j,8)
     enddo
     do j=1,3

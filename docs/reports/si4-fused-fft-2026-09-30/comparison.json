@@ -1,0 +1,38 @@
+[
+  {
+    "wall_seconds": 43.92862892150879,
+    "omp": 1,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "fused1",
+    "rt_seconds": 42.246,
+    "seconds_per_step": 2.640375,
+    "current_error": 3.6662021176889475e-17,
+    "energy_error": 1.0089706847793423e-12,
+    "peak_mib": 270.015625
+  },
+  {
+    "wall_seconds": 39.77579712867737,
+    "omp": 2,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "fused2",
+    "rt_seconds": 38.466,
+    "seconds_per_step": 2.404125,
+    "current_error": 0.0,
+    "energy_error": 0.0,
+    "peak_mib": 270.765625
+  },
+  {
+    "wall_seconds": 45.27148795127869,
+    "omp": 4,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "fused4",
+    "rt_seconds": 43.807,
+    "seconds_per_step": 2.7379375,
+    "current_error": 7.954600227717422e-17,
+    "energy_error": 0.0,
+    "peak_mib": 268.890625
+  }
+]

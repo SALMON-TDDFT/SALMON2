@@ -1,0 +1,35 @@
+[
+  {
+    "name": "control",
+    "rt_seconds": 10.948,
+    "current_error": 0.0,
+    "energy_error_Ha": 0.0,
+    "current_route_difference": 3.250760250329295e-17,
+    "energy_route_difference_Ha": 0.0,
+    "ace_failures": 0,
+    "peak_mib": 206.484375,
+    "routes": ""
+  },
+  {
+    "name": "eps1e-2",
+    "rt_seconds": 10.749,
+    "current_error": 6.837419358943746e-13,
+    "energy_error_Ha": 5.283970097025303e-07,
+    "current_route_difference": 3.804669505252364e-17,
+    "energy_route_difference_Ha": 0.0,
+    "ace_failures": 0,
+    "peak_mib": 208.515625,
+    "routes": "EXX_SR WF-local/neighborhood pairs:               8448                 0"
+  },
+  {
+    "name": "eps1e-3",
+    "rt_seconds": 10.749,
+    "current_error": 1.3492109884127932e-16,
+    "energy_error_Ha": 2.7401370061852504e-10,
+    "current_route_difference": 1.3410199151150481e-17,
+    "energy_route_difference_Ha": 0.0,
+    "ace_failures": 0,
+    "peak_mib": 206.296875,
+    "routes": "EXX_SR WF-local/neighborhood pairs:               8448                 0"
+  }
+]

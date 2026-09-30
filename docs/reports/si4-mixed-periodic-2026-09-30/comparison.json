@@ -1,0 +1,21 @@
+{
+  "rt_seconds": 13.787,
+  "current_error": 3.119198828263961e-17,
+  "energy_error": 5.685035775471192e-14,
+  "pairs": "EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0):               1792                 0          13762560",
+  "ace_failures": 0,
+  "ranks": [
+    {
+      "rank": 1,
+      "returncode": 0,
+      "wall_seconds": 14.643385648727417,
+      "peak_rss_bytes": 262848512
+    },
+    {
+      "rank": 0,
+      "returncode": 0,
+      "wall_seconds": 14.643391132354736,
+      "peak_rss_bytes": 261767168
+    }
+  ]
+}

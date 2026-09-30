@@ -154,25 +154,31 @@ contains
   enddo
  end function
 
- ! A full periodic axis already has the correct circular convolution length.
- ! Only restricted axes need padding to prevent local circular aliasing.
+ ! Choose the shorter exact embedding: periodic length or zero-padded support.
+ ! Periodic axes use one copy of each kernel displacement, even for partial support.
  integer function compact_axis_size(n,box) result(value)
   implicit none
   integer,intent(in) :: n,box
   if(box==n)then
    value=n
   else
-   value=smooth_size(2*box-1)
+   value=min(n,smooth_size(2*box-1))
   endif
  end function
 
- ! Store each displacement once on full periodic axes.
+ ! Store each displacement once on axes using the periodic embedding.
  subroutine compact_kernel_bounds(n,box,lower,upper)
   implicit none
   integer,intent(in) :: n(3),box(3)
   integer,intent(out) :: lower(3),upper(3)
-  lower=merge(0,1-box,box==n)
-  upper=box-1
+  integer :: axis
+  do axis=1,3
+   if(compact_axis_size(n(axis),box(axis))==n(axis))then
+    lower(axis)=0;upper(axis)=n(axis)-1
+   else
+    lower(axis)=1-box(axis);upper(axis)=box(axis)-1
+   endif
+  enddo
  end subroutine
 
  subroutine exx_local_prepare(plan,points,used,status)
@@ -247,7 +253,7 @@ contains
   used=.true.;plan%ready=.true.
  end subroutine
 
- ! Restricted axes store -(box-1):box-1; full periodic axes store 0:n-1.
+ ! Zero-padded axes store -(box-1):box-1; periodic embeddings store 0:n-1.
  ! This interface never stores a full global kernel; it accepts a compact tile.
  subroutine exx_local_prepare_compact(plan,n,box,kernel,status)
   implicit none

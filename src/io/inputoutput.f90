@@ -290,7 +290,8 @@ contains
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
-      & exx_ace_support,exx_pair_screening,exx_pair_tolerance,exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
+      & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
+      & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & hse_lcfo_wf_radius, &
       & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
@@ -770,6 +771,7 @@ contains
     exx_pre_scf_active = .false.
     exx_ace_support = 'occupied'
     exx_pair_screening = 'off'
+    hse_sr_tolerance = 0d0
     exx_pair_tolerance = 0d0
     hse_lcfo_wf_radius = 0d0
     yn_hse_lcfo_rt = 'n'
@@ -1385,6 +1387,7 @@ contains
     call string_lowercase(exx_ace_support)
     call comm_bcast(exx_pair_screening,nproc_group_global)
     call string_lowercase(exx_pair_screening)
+    call comm_bcast(hse_sr_tolerance,nproc_group_global)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
     call comm_bcast(exx_kpoint_backend,nproc_group_global)
     call string_lowercase(exx_kpoint_backend)
@@ -2367,6 +2370,7 @@ contains
       write(fh_variables_log, *) "# exx_pre_scf_steps=",exx_pre_scf_steps
       write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
+      write(fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
       write(fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
       write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
@@ -3328,6 +3332,13 @@ contains
       if(xc=='hse06'.and.hse_omega<=0d0)error stop 'HSE pair screening requires positive omega'
       if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
       if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
+    endif
+    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance<0d0.or.hse_sr_tolerance>=1d0) &
+      error stop 'hse_sr_tolerance must be finite and in [0,1)'
+    if(hse_sr_tolerance>0d0)then
+      if(xc/='hse06'.or.exx_ace_support/='source'.or.product(num_kgrid)/=1.or. &
+         exx_local_fft/='auto'.or.exx_local_backend/='cpu') &
+        error stop 'HSE finite range requires Gamma HSE source-support ACE and CPU local FFT'
     endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(exx_kpoint_backend/='cpu'.and.exx_kpoint_backend/='cufft') &

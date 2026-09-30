@@ -24,12 +24,14 @@ program probe
  enddo
  call exx_local_init(plan,multiplier,status)
  if(status/=0)error stop 'init'
- do trial=1,7
+ do trial=1,9
  m=[2,2,2]
  if(trial==2)m=[3,2,2]
  if(trial==3)m=1
  if(trial==4)m=[2,2,2]
  if(trial==5)m=n
+ if(trial==8)m=[2,6,5]
+ if(trial==9)m=[2,5,4]
  shift=n-[1,1,1]
  if(trial==6)shift=0
  if(trial==7)shift=[2,3,1]
@@ -42,6 +44,7 @@ program probe
  enddo;enddo;enddo
  call exx_local_prepare(plan,points,used,status)
  if(status/=0)error stop 'prepare'
+ if(trial>=8.and.any(plan%padded/=[3,7,6]))error stop 'mixed periodic embedding'
  if(trial==5)then
   if(used)error stop 'extended source must fall back'
  else

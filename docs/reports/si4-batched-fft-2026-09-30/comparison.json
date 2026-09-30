@@ -1,0 +1,102 @@
+[
+  {
+    "wall_seconds": 40.22157526016235,
+    "omp": 2,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "batch16-omp2",
+    "rt_seconds": 38.527,
+    "seconds_per_step": 2.4079375,
+    "current_error": 0.0,
+    "energy_error": 0.0,
+    "ranks": [
+      {
+        "rank": 1,
+        "returncode": 0,
+        "wall_seconds": 40.13514971733093,
+        "peak_rss_bytes": 283295744
+      },
+      {
+        "rank": 0,
+        "returncode": 0,
+        "wall_seconds": 40.13512873649597,
+        "peak_rss_bytes": 283672576
+      }
+    ]
+  },
+  {
+    "wall_seconds": 44.44841504096985,
+    "omp": 4,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "batch16-omp4",
+    "rt_seconds": 43.022,
+    "seconds_per_step": 2.688875,
+    "current_error": 7.954600227717422e-17,
+    "energy_error": 0.0,
+    "ranks": [
+      {
+        "rank": 1,
+        "returncode": 0,
+        "wall_seconds": 44.38241386413574,
+        "peak_rss_bytes": 283525120
+      },
+      {
+        "rank": 0,
+        "returncode": 0,
+        "wall_seconds": 44.38226103782654,
+        "peak_rss_bytes": 284033024
+      }
+    ]
+  },
+  {
+    "wall_seconds": 38.72361874580383,
+    "omp": 2,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "batch4-omp2",
+    "rt_seconds": 37.082,
+    "seconds_per_step": 2.317625,
+    "current_error": 0.0,
+    "energy_error": 0.0,
+    "ranks": [
+      {
+        "rank": 1,
+        "returncode": 0,
+        "wall_seconds": 38.61813497543335,
+        "peak_rss_bytes": 284655616
+      },
+      {
+        "rank": 0,
+        "returncode": 0,
+        "wall_seconds": 38.61827087402344,
+        "peak_rss_bytes": 283197440
+      }
+    ]
+  },
+  {
+    "wall_seconds": 44.682308197021484,
+    "omp": 4,
+    "mpi": 2,
+    "returncode": 0,
+    "name": "batch4-omp4",
+    "rt_seconds": 43.188,
+    "seconds_per_step": 2.69925,
+    "current_error": 7.954600227717422e-17,
+    "energy_error": 0.0,
+    "ranks": [
+      {
+        "rank": 1,
+        "returncode": 0,
+        "wall_seconds": 44.599637031555176,
+        "peak_rss_bytes": 286113792
+      },
+      {
+        "rank": 0,
+        "returncode": 0,
+        "wall_seconds": 44.599539041519165,
+        "peak_rss_bytes": 286670848
+      }
+    ]
+  }
+]

@@ -8,13 +8,16 @@ module fftw_blocks
   private
   include 'fftw3.f03'
   public :: block_layout,block_transform,block_clear,mesh_transform
+  integer,parameter :: local_batch=4
   type axis_workspace
     integer :: length=0,segment=0,lines=0,peers=0
     complex(c_double_complex),allocatable :: send(:),recv(:),work(:)
     type(c_ptr) :: forward=c_null_ptr,backward=c_null_ptr
+    type(c_ptr) :: batch_forward=c_null_ptr,batch_backward=c_null_ptr
   end type
   type(axis_workspace),save :: cache(3)
   real(8),save,public :: fftw_block_seconds(4)=0d0 ! setup, FFT, MPI, packing/copies
+  real(8),save,public :: fftw_block_fused_seconds=0d0 ! local gather + FFT + scatter
 contains
   real(8) function stamp()
     implicit none
@@ -64,6 +67,9 @@ contains
     type(axis_workspace),intent(inout) :: p
     if(c_associated(p%forward))call fftw_destroy_plan(p%forward)
     if(c_associated(p%backward))call fftw_destroy_plan(p%backward)
+    if(c_associated(p%batch_forward))call fftw_destroy_plan(p%batch_forward)
+    if(c_associated(p%batch_backward))call fftw_destroy_plan(p%batch_backward)
+    p%batch_forward=c_null_ptr;p%batch_backward=c_null_ptr
     p%forward=c_null_ptr;p%backward=c_null_ptr
     if(allocated(p%work))deallocate(p%work,p%send,p%recv)
     p%length=0;p%segment=0;p%lines=0;p%peers=0
@@ -94,6 +100,15 @@ contains
     p%backward=fftw_plan_dft_1d(n,p%work,p%work,FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
     if(.not.c_associated(p%forward).or..not.c_associated(p%backward))then
       call release(p);status=1;return
+    endif
+    if(peers==1.and.lines>=local_batch)then
+      p%batch_forward=fftw_plan_many_dft(1,[n],local_batch,p%work,[n],1,n,p%work,[n],1,n, &
+        FFTW_FORWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+      p%batch_backward=fftw_plan_many_dft(1,[n],local_batch,p%work,[n],1,n,p%work,[n],1,n, &
+        FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+      if(.not.c_associated(p%batch_forward).or..not.c_associated(p%batch_backward))then
+        call release(p);status=1;return
+      endif
     endif
     p%length=n;p%segment=m;p%lines=lines;p%peers=peers
   end subroutine
@@ -139,8 +154,9 @@ contains
     integer,intent(in) :: n(3),m(3),axis,peers,comm,sign
     complex(8),intent(inout) :: field(:,:)
     integer,intent(out) :: status
-    integer :: cross,lines,nowned,count,ell,owner,slot,i,j,t,b,g,point(3),other(2),s,base
-    type(c_ptr) :: plan
+    integer :: cross,lines,nowned,count,ell,owner,slot,i,j,t,b,g,point(3),other(2),s,base,full_slots,tail_lines,q,stride
+    integer :: first,last,batch_base
+    type(c_ptr) :: plan,batch_plan
     integer(int64) :: total_lines
     real(8) :: started
     other=pack([1,2,3],[1,2,3]/=axis)
@@ -149,7 +165,8 @@ contains
       status=1;return
     endif
     cross=m(other(1))*m(other(2));lines=int(total_lines)
-    nowned=1+(lines-1)/peers
+    full_slots=lines/peers;tail_lines=lines-full_slots*peers
+    nowned=full_slots+min(1,tail_lines)
     started=stamp()
     call prepare(p,n(axis),m(axis),nowned,peers,status)
     call comm_get_max(status,comm)
@@ -161,9 +178,10 @@ contains
       ! The contiguous, unpartitioned axis can transform the field in place.
       plan=p%forward
       if(sign==1)plan=p%backward
-!$omp parallel do default(none) private(ell,b,t,base) shared(lines,cross,n,plan,field)
+!$omp parallel do default(none) private(ell,b,t,base,q) shared(lines,cross,n,plan,field)
       do ell=1,lines
-        b=1+(ell-1)/cross;t=modulo(ell-1,cross)
+        q=(ell-1)/cross
+        b=1+q;t=(ell-1)-q*cross
         base=1+t*n(1)
         call fftw_execute_dft(plan,field(base:base+n(1)-1,b),field(base:base+n(1)-1,b))
       enddo
@@ -171,44 +189,92 @@ contains
       fftw_block_seconds(2)=fftw_block_seconds(2)+stamp()-started
       return
     endif
+    if(peers==1)then
+      ! Batch adjacent lines in existing disjoint workspace, including a scalar tail.
+      plan=p%forward;batch_plan=p%batch_forward
+      if(sign==1)then
+        plan=p%backward;batch_plan=p%batch_backward
+      endif
+      stride=product(m(:axis-1))
+!$omp parallel do default(none) private(first,last,ell,b,t,q,point,g,base,i,batch_base) &
+!$omp shared(lines,cross,other,m,n,axis,stride,p,plan,batch_plan,field)
+      do first=1,lines,local_batch
+        last=min(lines,first+local_batch-1)
+        do ell=first,last
+          q=(ell-1)/cross
+          b=1+q;t=(ell-1)-q*cross
+          q=t/m(other(1))
+          point=0;point(other(2))=q;point(other(1))=t-q*m(other(1))
+          g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
+          base=1+(ell-1)*n(axis)
+          do i=0,n(axis)-1
+            p%work(base+i)=field(g+i*stride,b)
+          enddo
+        enddo
+        batch_base=1+(first-1)*n(axis)
+        if(last-first+1==local_batch)then
+          call fftw_execute_dft(batch_plan,p%work(batch_base:),p%work(batch_base:))
+        else
+          do ell=first,last
+            base=1+(ell-1)*n(axis)
+            call fftw_execute_dft(plan,p%work(base:),p%work(base:))
+          enddo
+        endif
+        do ell=first,last
+          q=(ell-1)/cross
+          b=1+q;t=(ell-1)-q*cross
+          q=t/m(other(1))
+          point=0;point(other(2))=q;point(other(1))=t-q*m(other(1))
+          g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
+          base=1+(ell-1)*n(axis)
+          do i=0,n(axis)-1
+            field(g+i*stride,b)=p%work(base+i)
+          enddo
+        enddo
+      enddo
+!$omp end parallel do
+      fftw_block_fused_seconds=fftw_block_fused_seconds+stamp()-started
+      return
+    endif
     plan=p%forward
     if(sign==1)plan=p%backward
     ! Reuse one team across packing/FFT/restoration; only the master calls MPI.
-!$omp parallel default(none) private(ell,b,t,point,owner,slot,i,g,j,s,base) &
-!$omp shared(peers,lines,nowned,cross,other,m,n,axis,count,p,field,plan,comm,started,fftw_block_seconds)
-    if(peers==1)then
-      ! All axis points are already local: bypass communication buffers.
-!$omp do schedule(static)
-      do ell=1,lines
-        b=1+(ell-1)/cross;t=modulo(ell-1,cross)
-        point=0;point(other(1))=modulo(t,m(other(1)));point(other(2))=t/m(other(1))
-        do i=0,m(axis)-1
-          point(axis)=i;g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
-          p%work(1+(ell-1)*n(axis)+i)=field(g,b)
-        enddo
-      enddo
-!$omp end do
-!$omp master
-      fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
-!$omp end master
-    else
-      ! Each line owns a disjoint send segment. Only padding needs zeroing.
-!$omp do schedule(static)
-      do ell=1,nowned*peers
-        owner=modulo(ell-1,peers);slot=(ell-1)/peers
-        if(ell<=lines)then
-          b=1+(ell-1)/cross;t=modulo(ell-1,cross)
-          point=0;point(other(1))=modulo(t,m(other(1)));point(other(2))=t/m(other(1))
+!$omp parallel default(none) private(ell,b,t,point,owner,slot,i,g,j,s,base,q) &
+!$omp shared(peers,lines,nowned,cross,other,m,n,axis,count,p,field,plan,comm,started,fftw_block_seconds) &
+!$omp shared(full_slots,tail_lines)
+      ! Rectangular full slots preserve OMP parallelism even with few peers.
+!$omp do collapse(2) schedule(static)
+      do owner=0,peers-1
+        do slot=0,full_slots-1
+          ell=1+owner+peers*slot
+          q=(ell-1)/cross
+          b=1+q;t=(ell-1)-q*cross
+          q=t/m(other(1))
+          point=0;point(other(2))=q;point(other(1))=t-q*m(other(1))
           do i=0,m(axis)-1
             point(axis)=i;g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
             p%send(1+owner*count+slot*m(axis)+i)=field(g,b)
           enddo
-        else
-          p%send(1+owner*count+slot*m(axis):owner*count+(slot+1)*m(axis))=0d0
-        endif
+        enddo
       enddo
 !$omp end do
 !$omp master
+      ! The final partial slot has fewer than peers data lines.
+      slot=full_slots
+      do owner=0,tail_lines-1
+        ell=1+owner+peers*slot
+        q=(ell-1)/cross
+        b=1+q;t=(ell-1)-q*cross
+        q=t/m(other(1))
+        point=0;point(other(2))=q;point(other(1))=t-q*m(other(1))
+        do i=0,m(axis)-1
+          point(axis)=i;g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
+          p%send(1+owner*count+slot*m(axis)+i)=field(g,b)
+        enddo
+      enddo
+      do owner=lines-(nowned-1)*peers,peers-1
+        p%send(1+owner*count+full_slots*m(axis):owner*count+nowned*m(axis))=0d0
+      enddo
       fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
       started=stamp()
       call comm_alltoall(p%send,p%recv,comm,count)
@@ -228,7 +294,6 @@ contains
 !$omp master
       fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
 !$omp end master
-    endif
 !$omp master
     started=stamp()
 !$omp end master
@@ -243,18 +308,6 @@ contains
     fftw_block_seconds(2)=fftw_block_seconds(2)+stamp()-started
     started=stamp()
 !$omp end master
-    if(peers==1)then
-!$omp do schedule(static)
-      do ell=1,lines
-        b=1+(ell-1)/cross;t=modulo(ell-1,cross)
-        point=0;point(other(1))=modulo(t,m(other(1)));point(other(2))=t/m(other(1))
-        do i=0,m(axis)-1
-          point(axis)=i;g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
-          field(g,b)=p%work(1+(ell-1)*n(axis)+i)
-        enddo
-      enddo
-!$omp end do
-    else
 !$omp do collapse(2) schedule(static)
       do j=0,peers-1
         do s=0,nowned-1
@@ -272,18 +325,35 @@ contains
       started=stamp()
 !$omp end master
 !$omp barrier
-!$omp do schedule(static)
-      do ell=1,lines
-        b=1+(ell-1)/cross;t=modulo(ell-1,cross)
-        point=0;point(other(1))=modulo(t,m(other(1)));point(other(2))=t/m(other(1))
-        owner=modulo(ell-1,peers);slot=(ell-1)/peers
+!$omp do collapse(2) schedule(static)
+      do owner=0,peers-1
+        do slot=0,full_slots-1
+          ell=1+owner+peers*slot
+          q=(ell-1)/cross
+          b=1+q;t=(ell-1)-q*cross
+          q=t/m(other(1))
+          point=0;point(other(2))=q;point(other(1))=t-q*m(other(1))
+          do i=0,m(axis)-1
+            point(axis)=i;g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
+            field(g,b)=p%recv(1+owner*count+slot*m(axis)+i)
+          enddo
+        enddo
+      enddo
+!$omp end do
+!$omp master
+      slot=full_slots
+      do owner=0,tail_lines-1
+        ell=1+owner+peers*slot
+        q=(ell-1)/cross
+        b=1+q;t=(ell-1)-q*cross
+        q=t/m(other(1))
+        point=0;point(other(2))=q;point(other(1))=t-q*m(other(1))
         do i=0,m(axis)-1
           point(axis)=i;g=1+point(1)+m(1)*(point(2)+m(2)*point(3))
           field(g,b)=p%recv(1+owner*count+slot*m(axis)+i)
         enddo
       enddo
-!$omp end do
-    endif
+!$omp end master
 !$omp master
     fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
 !$omp end master

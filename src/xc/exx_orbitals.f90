@@ -417,10 +417,12 @@ contains
         if(rank==owner)column=target(:,i,1)
         call comm_bcast(column,comm_o,owner)
         overlap=0d0
+!$omp parallel do default(none) private(j,start,finish) shared(ace,column,overlap,first)
         do j=1,size(ace%offset)-1
           start=ace%offset(j);finish=ace%offset(j+1)-1
           overlap(first+j-1)=sum(conjg(ace%values(start:finish))*column(ace%row(start:finish)))*ace%dv
         enddo
+!$omp end parallel do
         call comm_summation(overlap,overlap_o,n,comm_o)
         call comm_summation(overlap_o,overlap_r,n,comm_r)
         ! Do not form A A^H explicitly: near the accepted conditioning limit,

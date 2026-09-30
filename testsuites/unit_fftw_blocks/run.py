@@ -3,6 +3,7 @@ import argparse,os,subprocess,tempfile,shlex
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--build',type=Path,required=True);p.add_argument('--action',action='store_true')
 p.add_argument('--slab',action='store_true')
+p.add_argument('--mixed',action='store_true')
 a=p.parse_args();b=a.build.resolve();obj=b/'src/CMakeFiles/salmon.dir'
 names=['fftw_blocks','fftw_pencils']
 libs=[]
@@ -19,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='block-fft-') as tmp:
   '-L/opt/homebrew/lib','-lfftw3',*libs,'-o',str(exe)],check=True)
  for dims in [(1,1,1),(2,1,1),(2,2,1),(8,1,1),(2,2,2),(1,2,4)]:
   for threads in (1,2,4):
-   subprocess.run(['mpiexec','-n',str(dims[0]*dims[1]*dims[2]),str(exe),' '.join(map(str,dims)),*(['slab'] if a.slab else [])],
+   subprocess.run(['mpiexec','-n',str(dims[0]*dims[1]*dims[2]),str(exe),' '.join(map(str,dims)),*(['mixed'] if a.mixed else ['slab'] if a.slab else [])],
     check=True,timeout=120,env=dict(os.environ,OMP_NUM_THREADS=str(threads),OPENBLAS_NUM_THREADS='1'))
 
  if not a.action:
@@ -27,3 +28,7 @@ with tempfile.TemporaryDirectory(prefix='block-fft-') as tmp:
    env=dict(os.environ,OMP_NUM_THREADS='2',OPENBLAS_NUM_THREADS='1'))
   subprocess.run(['mpiexec','-n','6',str(exe),'3 2 1','15 8 6'],check=True,timeout=120,
    env=dict(os.environ,OMP_NUM_THREADS='2',OPENBLAS_NUM_THREADS='1'))
+
+  # One-field cache probe has fewer axis lines than peers (no full slot).
+  subprocess.run(['mpiexec','-n','8',str(exe),'8 1 1','16 2 2'],check=True,timeout=120,
+   env=dict(os.environ,OMP_NUM_THREADS='4',OPENBLAS_NUM_THREADS='1'))

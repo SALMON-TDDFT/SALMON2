@@ -10,7 +10,7 @@ module exx_spatial
   use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
   use exx_batch_backend, only: local_backend_factory
   use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy, &
-    local_batch_action
+    local_batch_action,s_exx_sr,sr_prepare,sr_apply,sr_destroy,sr_mask_kernel
   use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use exx_distributed_metric, only: distributed_metric_available
@@ -28,6 +28,7 @@ module exx_spatial
     procedure(local_batch_action),pointer,nopass :: local_batch=>null()
     procedure(local_backend_factory),pointer,nopass :: create_local_backend=>null()
     integer :: local_batch_size=8
+    real(8) :: sr_tolerance=0d0
     integer :: screen_mode=0 ! 0 off, 1 diagnose, 2 omit
     real(8) :: screen_tolerance=0d0,screen_bound=0d0,screen_cpu_seconds=0d0
     integer(int64) :: screen_candidates=0,screen_skipped=0
@@ -441,6 +442,7 @@ contains
     real(8),allocatable :: multiplier(:)
     type(exx_pair_catalog) :: catalogue
     type(s_exx_spatial_local) :: compact_plan
+    type(s_exx_sr) :: sr
     complex(8),allocatable :: compact_action(:,:)
     logical :: compact_used,packed_source
     integer :: no_source,nnz,k0,point_workers
@@ -455,7 +457,8 @@ contains
     real(8) :: envelope_max,envelope_norm,envelope_factor,threshold_floor,threshold_pair,factor
     real(8) :: pair_stats(3),global_pair_stats(3),point_total
     integer(int64) :: compact_pairs,compact_points
-    real(8) :: radius,pi,q(3),q2,screening
+    real(8) :: radius,pi,q(3),q2,screening,sr_cost,fft_volume
+    integer(int64) :: sr_pairs,wf_pairs
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
     op%screen_candidates=0;op%screen_skipped=0;op%screen_bound=0d0;op%screen_cpu_seconds=0d0
@@ -474,6 +477,10 @@ contains
     endif
     if(op%screen_mode<0.or.op%screen_mode>2)bad=1
     if(.not.ieee_is_finite(op%screen_tolerance).or.op%screen_tolerance<0d0)bad=1
+    if(.not.ieee_is_finite(op%sr_tolerance).or.op%sr_tolerance<0d0.or.op%sr_tolerance>=1d0)bad=1
+    if(op%sr_tolerance>0d0)then
+      if(.not.op%compact.or.screening<=0d0.or.associated(op%create_local_backend))bad=1
+    endif
     if(any(n<1).or.any(dims<1).or.any(h<=0d0).or..not.salmon_all_finite(h))bad=1
     if(screening==0d0)then
       if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
@@ -612,6 +619,18 @@ contains
       call collective_bad_status()
       if(status/=0)return
     endif
+    sr_cost=huge(1d0);sr_pairs=0;wf_pairs=0
+    if(op%sr_tolerance>0d0)then
+      call sr_prepare(sr,compact_plan,h,screening,op%sr_tolerance,comm_r,status)
+      if(status/=0)return
+      if(sr%ready)then
+        call sr_mask_kernel(sr,compact_plan,h)
+        fft_volume=real(product(int(sr%length,int64)),8)
+        sr_cost=real(sr%peers,8)*fft_volume*log(max(2d0,fft_volume))
+      endif
+      if(sr%rank==0)write(*,'(a,l2,3es18.9,3i8)')'EXX_SR active/radius/tail L1/L2/FFT shape: ', &
+        sr%ready,sr%radius,sr%tail_l1,sr%tail_l2,sr%length
+    endif
     point_workers=1
 !$  point_workers=omp_get_max_threads()
     allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
@@ -659,6 +678,7 @@ contains
           if(status==0)call pair_catalog_query(catalogue,box_lower,box_upper,threshold_pair,selected,ncandidate,status)
           call collective_bad_status()
           if(bad/=0)then
+            call sr_destroy(sr)
             call spatial_local_destroy(compact_plan)
             return
           endif
@@ -715,9 +735,10 @@ contains
         if(op%compact)then
           allocate(compact_action(ng,nselected))
           call spatial_local_apply(compact_plan,comm_r,source_column,target(:,selected(:nselected),1),compact_action, &
-            compact_used,status,compact_pairs,compact_points)
+            compact_used,status,compact_pairs,compact_points,fft_cost_limit=sr_cost)
           call collective_bad_status()
           if(status/=0)then
+            call sr_destroy(sr)
             call spatial_local_destroy(compact_plan)
             return
           endif
@@ -726,16 +747,30 @@ contains
               action(:,selected(j),1)=action(:,selected(j),1)+compact_action(:,j)
             enddo
             deallocate(compact_action)
+            wf_pairs=wf_pairs+compact_pairs
             op%local_pairs=op%local_pairs+compact_pairs
             op%local_points=op%local_points+compact_points
             if(present(comm_o))call collective_bad()
             if(bad/=0)then
+              call sr_destroy(sr)
               call spatial_local_destroy(compact_plan)
               return
             endif
             cycle
           endif
           deallocate(compact_action)
+        endif
+        if(sr%ready)then
+          allocate(compact_action(ng,nselected))
+          call sr_apply(sr,comm_r,source_column,target(:,selected(:nselected),1),compact_action)
+          do j=1,nselected
+            action(:,selected(j),1)=action(:,selected(j),1)+compact_action(:,j)
+          enddo
+          deallocate(compact_action)
+          sr_pairs=sr_pairs+nselected
+          op%local_pairs=op%local_pairs+nselected
+          op%local_points=op%local_points+int(nselected,int64)*int(sr%peers,int64)*product(int(sr%length,int64))
+          cycle
         endif
         op%global_pairs=op%global_pairs+nselected
         do first=1,nselected,4
@@ -775,11 +810,15 @@ contains
         enddo
         if(present(comm_o))call collective_bad()
         if(bad/=0)then
+          call sr_destroy(sr)
           call spatial_local_destroy(compact_plan)
           return
         endif
       enddo
     enddo
+    if(op%sr_tolerance>0d0.and.sr%rank==0) &
+      write(*,'(a,2i18)')'EXX_SR WF-local/neighborhood pairs: ',wf_pairs,sr_pairs
+    call sr_destroy(sr)
     call spatial_local_destroy(compact_plan,status)
     call collective_bad_status()
     if(status/=0)return

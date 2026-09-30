@@ -1,0 +1,499 @@
+{
+  "control2": {
+    "wall_seconds": 48.26779508590698,
+    "omp": 2,
+    "returncode": 0,
+    "rt_seconds": 46.324,
+    "current_max_error": 0.0,
+    "energy_max_error": 0.0,
+    "ranks": []
+  },
+  "profile1": {
+    "wall_seconds": 43.60847592353821,
+    "omp": 1,
+    "returncode": 0,
+    "rt_seconds": 41.853,
+    "current_max_error": 3.6662021176889475e-17,
+    "energy_max_error": 1.0089706847793423e-12,
+    "ranks": [
+      {
+        "rank": 0,
+        "steps": 15,
+        "step_wall": 39.25929594039917,
+        "block_wall": 19.715494871139526,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 8.655149698257446,
+            "setup_wall": 0.0168609619140625,
+            "fft_wall": 3.0208117961883545,
+            "mpi_wall": 1.8153538703918457,
+            "packing_wall": 3.781864643096924,
+            "packing_thread_seconds": 3.750943899154663,
+            "fft_thread_seconds": 3.015666961669922,
+            "work_barrier_thread_seconds": 0.008498430252075195,
+            "mpi_barrier_thread_seconds": 0.0034151077270507812
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 4.726994514465332,
+            "setup_wall": 0.0018274784088134766,
+            "fft_wall": 1.3789124488830566,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.3349595069885254,
+            "packing_thread_seconds": 3.321671962738037,
+            "fft_thread_seconds": 1.3735740184783936,
+            "work_barrier_thread_seconds": 0.004485607147216797,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 4.969904661178589,
+            "setup_wall": 0.0018429756164550781,
+            "fft_wall": 1.370666742324829,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.5848388671875,
+            "packing_thread_seconds": 3.5717008113861084,
+            "fft_thread_seconds": 1.3654606342315674,
+            "work_barrier_thread_seconds": 0.004609584808349609,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "block_other": 1.3634459972381592
+      },
+      {
+        "rank": 1,
+        "steps": 15,
+        "step_wall": 39.25849223136902,
+        "block_wall": 19.716469764709473,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 8.6438307762146,
+            "setup_wall": 0.017040491104125977,
+            "fft_wall": 3.0242578983306885,
+            "mpi_wall": 1.8096587657928467,
+            "packing_wall": 3.7744367122650146,
+            "packing_thread_seconds": 3.745368719100952,
+            "fft_thread_seconds": 3.0193846225738525,
+            "work_barrier_thread_seconds": 0.007258415222167969,
+            "mpi_barrier_thread_seconds": 0.0031926631927490234
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 4.733231067657471,
+            "setup_wall": 0.0018622875213623047,
+            "fft_wall": 1.3734972476959229,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.347020387649536,
+            "packing_thread_seconds": 3.333599328994751,
+            "fft_thread_seconds": 1.368647813796997,
+            "work_barrier_thread_seconds": 0.004010915756225586,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 4.973174333572388,
+            "setup_wall": 0.0018541812896728516,
+            "fft_wall": 1.37129545211792,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.5889225006103516,
+            "packing_thread_seconds": 3.5760819911956787,
+            "fft_thread_seconds": 1.366398572921753,
+            "work_barrier_thread_seconds": 0.0041942596435546875,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "block_other": 1.3662335872650146
+      }
+    ]
+  },
+  "profile2": {
+    "wall_seconds": 45.925994873046875,
+    "omp": 2,
+    "returncode": 0,
+    "rt_seconds": 44.469,
+    "current_max_error": 0.0,
+    "energy_max_error": 0.0,
+    "ranks": [
+      {
+        "rank": 0,
+        "steps": 15,
+        "step_wall": 41.66160202026367,
+        "block_wall": 22.950608730316162,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 10.603004932403564,
+            "setup_wall": 0.016373872756958008,
+            "fft_wall": 2.130103349685669,
+            "mpi_wall": 2.2868614196777344,
+            "packing_wall": 5.628918170928955,
+            "packing_thread_seconds": 4.113173484802246,
+            "fft_thread_seconds": 3.312476634979248,
+            "work_barrier_thread_seconds": 5.1633241176605225,
+            "mpi_barrier_thread_seconds": 4.1783576011657715
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.375178337097168,
+            "setup_wall": 0.0019342899322509766,
+            "fft_wall": 1.2333335876464844,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.4399781227111816,
+            "packing_thread_seconds": 3.6704044342041016,
+            "fft_thread_seconds": 1.5001850128173828,
+            "work_barrier_thread_seconds": 3.1015572547912598,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.3471527099609375,
+            "setup_wall": 0.0020558834075927734,
+            "fft_wall": 1.2391808032989502,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.4932737350463867,
+            "packing_thread_seconds": 3.9179601669311523,
+            "fft_thread_seconds": 1.5014195442199707,
+            "work_barrier_thread_seconds": 3.0784006118774414,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "block_other": 1.6252727508544922
+      },
+      {
+        "rank": 1,
+        "steps": 15,
+        "step_wall": 41.66080045700073,
+        "block_wall": 22.949727535247803,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 10.591215372085571,
+            "setup_wall": 0.01679515838623047,
+            "fft_wall": 2.108487367630005,
+            "mpi_wall": 2.3506083488464355,
+            "packing_wall": 5.5736305713653564,
+            "packing_thread_seconds": 4.116760492324829,
+            "fft_thread_seconds": 3.2766942977905273,
+            "work_barrier_thread_seconds": 5.117099761962891,
+            "mpi_barrier_thread_seconds": 4.155777931213379
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.380145788192749,
+            "setup_wall": 0.0019850730895996094,
+            "fft_wall": 1.2323951721191406,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.4557266235351562,
+            "packing_thread_seconds": 3.692584991455078,
+            "fft_thread_seconds": 1.5008108615875244,
+            "work_barrier_thread_seconds": 3.10290265083313,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.350024938583374,
+            "setup_wall": 0.0019185543060302734,
+            "fft_wall": 1.2386572360992432,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.4898393154144287,
+            "packing_thread_seconds": 3.924403190612793,
+            "fft_thread_seconds": 1.5026578903198242,
+            "work_barrier_thread_seconds": 3.0771327018737793,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "block_other": 1.6283414363861084
+      }
+    ]
+  },
+  "profile4": {
+    "wall_seconds": 55.67876100540161,
+    "omp": 4,
+    "returncode": 0,
+    "rt_seconds": 53.949,
+    "current_max_error": 7.954600227717422e-17,
+    "energy_max_error": 0.0,
+    "ranks": [
+      {
+        "rank": 0,
+        "steps": 15,
+        "step_wall": 50.621585845947266,
+        "block_wall": 32.15568971633911,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 15.316626071929932,
+            "setup_wall": 0.018451213836669922,
+            "fft_wall": 2.226996660232544,
+            "mpi_wall": 2.7682981491088867,
+            "packing_wall": 8.872338771820068,
+            "packing_thread_seconds": 4.232532024383545,
+            "fft_thread_seconds": 3.6075050830841064,
+            "work_barrier_thread_seconds": 26.191314697265625,
+            "mpi_barrier_thread_seconds": 15.349967241287231
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 7.30520224571228,
+            "setup_wall": 0.002006053924560547,
+            "fft_wall": 1.526449203491211,
+            "mpi_wall": 0.0,
+            "packing_wall": 4.353946208953857,
+            "packing_thread_seconds": 3.9092698097229004,
+            "fft_thread_seconds": 1.5450775623321533,
+            "work_barrier_thread_seconds": 14.39579153060913,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 7.2395875453948975,
+            "setup_wall": 0.0019495487213134766,
+            "fft_wall": 1.5123977661132812,
+            "mpi_wall": 0.0,
+            "packing_wall": 4.31496000289917,
+            "packing_thread_seconds": 4.261825084686279,
+            "fft_thread_seconds": 1.541363000869751,
+            "work_barrier_thread_seconds": 13.914539098739624,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "block_other": 2.294273853302002
+      },
+      {
+        "rank": 1,
+        "steps": 15,
+        "step_wall": 50.620723724365234,
+        "block_wall": 32.1543869972229,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 15.311328172683716,
+            "setup_wall": 0.01710987091064453,
+            "fft_wall": 2.2152888774871826,
+            "mpi_wall": 2.7968993186950684,
+            "packing_wall": 8.853368520736694,
+            "packing_thread_seconds": 4.225958824157715,
+            "fft_thread_seconds": 3.6029276847839355,
+            "work_barrier_thread_seconds": 26.057823419570923,
+            "mpi_barrier_thread_seconds": 15.409066677093506
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 7.290697813034058,
+            "setup_wall": 0.0019266605377197266,
+            "fft_wall": 1.5267860889434814,
+            "mpi_wall": 0.0,
+            "packing_wall": 4.348437786102295,
+            "packing_thread_seconds": 3.909118175506592,
+            "fft_thread_seconds": 1.5497710704803467,
+            "work_barrier_thread_seconds": 14.36029577255249,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 7.2232208251953125,
+            "setup_wall": 0.0018858909606933594,
+            "fft_wall": 1.5094671249389648,
+            "mpi_wall": 0.0,
+            "packing_wall": 4.307401180267334,
+            "packing_thread_seconds": 4.263914108276367,
+            "fft_thread_seconds": 1.5490264892578125,
+            "work_barrier_thread_seconds": 13.840174436569214,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "block_other": 2.3291401863098145
+      }
+    ]
+  },
+  "packed2": {
+    "wall_seconds": 47.37117004394531,
+    "omp": 2,
+    "returncode": 0,
+    "rt_seconds": 45.483,
+    "current_max_error": 0.0,
+    "energy_max_error": 0.0,
+    "ranks": [
+      {
+        "rank": 0,
+        "steps": 15,
+        "step_wall": 42.67657685279846,
+        "block_wall": 23.416399002075195,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 10.9119291305542,
+            "setup_wall": 0.01741480827331543,
+            "fft_wall": 2.1703109741210938,
+            "mpi_wall": 2.364610433578491,
+            "packing_wall": 5.814213752746582,
+            "packing_thread_seconds": 4.278968811035156,
+            "fft_thread_seconds": 3.362293004989624,
+            "work_barrier_thread_seconds": 5.324751615524292,
+            "mpi_barrier_thread_seconds": 4.310040712356567
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.4387969970703125,
+            "setup_wall": 0.002074718475341797,
+            "fft_wall": 1.25050950050354,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.4327752590179443,
+            "packing_thread_seconds": 3.676051378250122,
+            "fft_thread_seconds": 1.5183677673339844,
+            "work_barrier_thread_seconds": 3.129887819290161,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.395340442657471,
+            "setup_wall": 0.0019524097442626953,
+            "fft_wall": 1.251420259475708,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.5303242206573486,
+            "packing_thread_seconds": 3.965745210647583,
+            "fft_thread_seconds": 1.5152578353881836,
+            "work_barrier_thread_seconds": 3.1054975986480713,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "packed_ace": {
+          "calls": 420.0,
+          "overlap": 5.891533999994863,
+          "mpi": 0.11384200269822031,
+          "metric": 0.08899300178745762,
+          "update": 3.0838809985434636,
+          "total": 9.764227000181563
+        },
+        "block_other": 1.670332431793213
+      },
+      {
+        "rank": 1,
+        "steps": 15,
+        "step_wall": 42.675766468048096,
+        "block_wall": 23.412267446517944,
+        "ace_overlap": 0.0,
+        "ace_mpi": 0.0,
+        "ace_update": 0.0,
+        "axes": [
+          {
+            "axis": 1,
+            "calls": 61470.0,
+            "lines": 31461120.0,
+            "axis_wall": 10.8988196849823,
+            "setup_wall": 0.018552303314208984,
+            "fft_wall": 2.1567795276641846,
+            "mpi_wall": 2.3956267833709717,
+            "packing_wall": 5.777785539627075,
+            "packing_thread_seconds": 4.287041902542114,
+            "fft_thread_seconds": 3.3440184593200684,
+            "work_barrier_thread_seconds": 5.298705577850342,
+            "mpi_barrier_thread_seconds": 4.256618499755859
+          },
+          {
+            "axis": 2,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.469871759414673,
+            "setup_wall": 0.0021698474884033203,
+            "fft_wall": 1.2558307647705078,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.475242853164673,
+            "packing_thread_seconds": 3.6944353580474854,
+            "fft_thread_seconds": 1.5187442302703857,
+            "work_barrier_thread_seconds": 3.1773312091827393,
+            "mpi_barrier_thread_seconds": 0.0
+          },
+          {
+            "axis": 3,
+            "calls": 61470.0,
+            "lines": 125844480.0,
+            "axis_wall": 5.434016227722168,
+            "setup_wall": 0.0019409656524658203,
+            "fft_wall": 1.2560701370239258,
+            "mpi_wall": 0.0,
+            "packing_wall": 3.556271553039551,
+            "packing_thread_seconds": 3.969212293624878,
+            "fft_thread_seconds": 1.5128564834594727,
+            "work_barrier_thread_seconds": 3.1574079990386963,
+            "mpi_barrier_thread_seconds": 0.0
+          }
+        ],
+        "packed_ace": {
+          "calls": 420.0,
+          "overlap": 5.896691000845749,
+          "mpi": 0.10751200595404953,
+          "metric": 0.08782400004565716,
+          "update": 3.0856719984440133,
+          "total": 9.764229000604246
+        },
+        "block_other": 1.6095597743988037
+      }
+    ]
+  }
+}

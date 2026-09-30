@@ -28,7 +28,7 @@ module exx_native
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_block_rows, &
+    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance,hse_block_rows, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
@@ -778,6 +778,7 @@ contains
     if(exx_pair_screening=='diagnose')requested_screen_mode=1
     if(exx_pair_screening=='on')requested_screen_mode=2
     if(dc_canonical())requested_screen_mode=0
+    spatial%sr_tolerance=hse_sr_tolerance
     spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
     fft_work=0_int64
     if(allocated(action_work))then
@@ -802,6 +803,7 @@ contains
         ' (failure falls back to occupied-vector ACE)'
     endif
     if(.not.support_accepted)then
+      spatial%sr_tolerance=0d0 ! Never retain a failed finite-range ACE approximation.
       spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
       call apply_exchange_action()
       if(status/=0)error stop 'Spatial EXX: exchange action failed'
