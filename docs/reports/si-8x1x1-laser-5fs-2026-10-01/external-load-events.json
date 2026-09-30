@@ -1,0 +1,230 @@
+[
+  {
+    "start_unix": 1790721915.7965062,
+    "end_unix": 1790722006.165212,
+    "reason": "Single-job rebuild and short MPI loop-hoisting regression tests; conservative start window. Exclude overlap from uncontended speed estimates.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790722120.9024096,
+    "end_unix": 1790722404.582529,
+    "reason": "CPU pair OpenMP development: single-job rebuilds, short MPI regressions and serial lifecycle tests; conservative start window. Exclude overlap from uncontended speed estimates.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790723111.984431,
+    "end_unix": 1790723823.250231,
+    "reason": "ACE k threading development builds and short regression tests, including MPI and non-MPI builds. Conservative timing exclusion.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790724228.331841,
+    "end_unix": 1790724608.570703,
+    "reason": "Vendor BLAS control development: small tests and single-job builds; conservative timing exclusion.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790724621.825315,
+    "end_unix": 1790724849.76413,
+    "reason": "ACE apply threading development: short unit tests and single-job builds; conservative timing exclusion.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790724938.93654,
+    "end_unix": 1790725216.932107,
+    "reason": "Distributed gauge BLAS threading: short MPI probes and single-job builds; conservative timing exclusion.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790725951.2156632,
+    "end_unix": 1790726213.053988,
+    "reason": "Distributed ACE threading tests and single-job builds; conservative timing exclusion.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790726980.534771,
+    "end_unix": 1790727197.112879,
+    "reason": "Wannier rotation OpenMP tests and single-job builds; conservative timing exclusion.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790727736.069985,
+    "end_unix": 1790727768.174888,
+    "reason": "Coding-rules test cleanup: short MPI and adapter regressions.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790730712.583149,
+    "end_unix": 1790730925.318665,
+    "reason": "8-cell ranks suspended for isolated Si4 MPI2 OMP2 hotspot sampling; exclude pause from elapsed timing.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790731322.390281,
+    "end_unix": 1790731541.052693,
+    "reason": "Production paused for FFT/ACE OMP regressions and isolated Si4 timings.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790731585.405025,
+    "end_unix": 1790731823.1013482,
+    "reason": "Production paused for FFT/ACE OMP regressions and isolated Si4 timings.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790731862.876229,
+    "end_unix": 1790732029.086863,
+    "reason": "Production paused for FFT/ACE OMP regressions and isolated Si4 timings.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790731240.137878,
+    "end_unix": 1790731322.390281,
+    "reason": "Initial FFT/ACE optimization build before isolated verification.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790732454.5612748,
+    "end_unix": 1790732461.2624562,
+    "reason": "Production paused for FFT padding branch removal build and regressions.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790732828.894121,
+    "end_unix": 1790732835.695093,
+    "reason": "Production paused for integer-division-free FFT packing regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790732949.902056,
+    "end_unix": 1790732956.66067,
+    "reason": "Production paused for FFT quotient reuse build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790733444.208538,
+    "end_unix": 1790733497.5112069,
+    "reason": "Detailed FFT diagnostic binary compilation.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790733497.5112069,
+    "end_unix": 1790733691.0278091,
+    "reason": "Production paused for isolated detailed FFT phase measurements.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790733444.208538,
+    "end_unix": 1790733719.223226,
+    "reason": "Detailed FFT diagnostic binary compilation.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790733719.223226,
+    "end_unix": 1790733768.201005,
+    "reason": "Production paused for isolated detailed FFT phase measurements.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790734171.1844852,
+    "end_unix": 1790734315.0286589,
+    "reason": "Production paused for FFT/ACE OMP regressions and isolated Si4 timings.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790734351.245514,
+    "end_unix": 1790734352.25387,
+    "reason": "Production paused for FFTW batching and planner microbenchmark.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790734389.45265,
+    "end_unix": 1790734410.440634,
+    "reason": "Production paused for FFTW batching and planner microbenchmark.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790734844.941634,
+    "end_unix": 1790735042.2016351,
+    "reason": "Production paused for FFT/ACE OMP regressions and isolated Si4 timings.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790735091.183848,
+    "end_unix": 1790735092.150818,
+    "reason": "Production paused for FFT/ACE OMP regressions and isolated Si4 timings.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790735257.59215,
+    "end_unix": 1790735310.379518,
+    "reason": "Production paused for Si4 retained-norm threshold comparison: 99,95,90 percent versus existing 99.9 percent.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790735657.829576,
+    "end_unix": 1790735684.2736928,
+    "reason": "Production paused for mixed periodic/local FFT regression and Si4 95 percent comparison.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790744456.3929548,
+    "end_unix": 1790744527.34404,
+    "reason": "Production paused for HSE screened-neighborhood build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790744589.695394,
+    "end_unix": 1790744640.419011,
+    "reason": "Production paused for HSE screened-neighborhood build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790744753.487545,
+    "end_unix": 1790744763.556897,
+    "reason": "Production paused for HSE screened-neighborhood build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790745003.4376562,
+    "end_unix": 1790745013.255122,
+    "reason": "Production paused for HSE screened-neighborhood build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790745045.576231,
+    "end_unix": 1790745088.304584,
+    "reason": "Production paused for HSE screened-neighborhood build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790753980.040499,
+    "end_unix": 1790753980.045524,
+    "reason": "Production paused for Pair-density regions build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790754003.429557,
+    "end_unix": 1790754010.724809,
+    "reason": "Production paused for Pair-density regions build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790754124.9409149,
+    "end_unix": 1790754195.678064,
+    "reason": "Production paused for Pair-density regions build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790754208.97612,
+    "end_unix": 1790754268.211942,
+    "reason": "Production paused for Pair-density regions build and regression.",
+    "production_binary_changed": false
+  },
+  {
+    "start_unix": 1790754352.226736,
+    "end_unix": 1790754372.520423,
+    "reason": "Production paused for Pair-density regions build and regression.",
+    "production_binary_changed": false
+  }
+]
