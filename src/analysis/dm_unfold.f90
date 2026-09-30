@@ -1796,6 +1796,15 @@ contains
     real(8),allocatable :: cdiagknown_isk(:),cintra_isk(:),cinter_isk(:),cunknown_isk(:)
     real(8),allocatable :: veck_isk_l(:,:),veck_isk(:,:)
     logical :: iofile_exists  ! Stage-1 diagnostic (note 067): restart-safe file open
+    ! Per-isk k-term current diagnostic (notes 105-108): isk-resolved
+    ! breakdown of the explicit k-term zj5 (*_dm_unfold.data columns
+    ! 18-20, Jx:k/Jy:k/Jz:k), using the same kappa_ref as the production
+    ! zj5 computation. nisk_l/nisk = Tr[eta(isk)] (real part, NOT
+    ! weighted by wtk_ref); jisk = wtk_ref(isk)*nisk(isk)*kappa_ref(:,isk)
+    ! /omega_ref, computed once per isk after nisk is reduced (not itself
+    ! accumulated inside the io_ref1 loop, unlike nisk_l). Output-only:
+    ! does not affect eta/zj5/kappa_ref or any other production result.
+    real(8),allocatable :: nisk_l(:), nisk(:), jisk(:,:)
 
     ! --- G_R reference-cell Brillouin-zone folding correction ------------
     ! (notes 072-090; unfolding.tex sec.~implementation-gR). kappa_raw =
@@ -1933,22 +1942,46 @@ contains
     kappa_ref(:,:) = 0d0
     call comm_summation(kappa_ref_l,kappa_ref,3*unfold%nsk,info%icomm_k)
 
-    ! Diagnostic (Kazu/Claude discussion, 2026-09-30): how many (ilk,ihk)
-    ! pairs in this run actually needed a nonzero G_R fold, i.e.
-    ! isk_shift_id_l(isk) /= 14 (the center value: (0+1)*9+(0+1)*3+(0+1)+1
-    ! = 14, corresponding to n1_g=n2_g=n3_g=0, G_R=0). Diagnostic-only --
-    ! does not affect kappa_ref/gshift_ph/mat/eta or any production
-    ! result above. Added because the P=I/P!=I Fugaku comparison showed
-    ! Jx:k and Jx:uG2k-d exactly zero in both runs; that null result is
-    ! expected regardless of G_R (an inversion/time-reversal-symmetric
-    ! k-mesh makes kappa_ref odd under k->-k just like kappa_raw, so an
-    ! odd-in-k quantity weighted by the even occupation eta_nn sums to
-    ! zero either way -- see note 095) and so cannot confirm whether this
-    ! run exercised the G_R correction at all. This count settles that
-    ! directly. isk_shift_id_l is redundantly recomputed identically by
-    ! every orbital rank sharing a k-group (see the comment above), so
-    ! reducing over info%icomm_k here follows the same pattern already
-    ! used for n_clusters/cdiagknown elsewhere in this file.
+    ! Diagnostic (Kazu/Claude discussion, 2026-09-30; corrected per Codex
+    ! review note 096): how many (ilk,ihk) pairs in this run actually
+    ! needed a nonzero G_R fold, i.e. isk_shift_id_l(isk) /= 14 (the
+    ! center value: (0+1)*9+(0+1)*3+(0+1)+1 = 14, corresponding to
+    ! n1_g=n2_g=n3_g=0, G_R=0). Diagnostic-only -- does not affect
+    ! kappa_ref/gshift_ph/mat/eta or any production result above.
+    !
+    ! Added because the P=I/P!=I Fugaku comparison showed Jx:k and
+    ! Jx:uG2k-d exactly zero (to printed precision) in both runs. Since
+    ! the fold rule is odd under k->-k on an inversion-symmetric mesh,
+    ! kappa_ref(-isk) = -kappa_ref(isk) regardless of whether G_R is
+    ! zero or not; writing N(isk,t) = Tr[eta(isk,t)], the explicit k-term
+    ! J_k(t) ~ sum_isk w(isk) N(isk,t) kappa_ref(isk) cancels between an
+    ! inversion pair whenever w and N(.,t) match at that pair -- true at
+    ! t=0 by the ground state's time-reversal symmetry, but NOT
+    ! guaranteed at every later time under a driving field (Codex review
+    ! note 099, point 2): with a uniform vector potential (velocity
+    ! gauge) the supercell's own translational symmetry is preserved, so
+    ! the propagated Bloch label K (system%vec_k/ilk) itself does not mix
+    ! across distinct K-blocks -- what is NOT guaranteed is that the
+    ! unfolded reference-cell sector (hat_k) weights stay inversion-
+    ! symmetric under driving, since the reference cell's own
+    ! translational symmetry need not be a symmetry of the actual
+    ! (supercell) Hamiltonian; projection leakage into the finite
+    ! reference basis is a separate effect on top of that. (A
+    ! Houston-frame shifted wavevector K+A(t)/c is a distinct notion from
+    ! mixing between fixed-K blocks, and is not what is meant here.) So a
+    ! zero Jx:k does not by
+    ! itself confirm the G_R correction was exercised (nor does it
+    ! indicate a problem) -- this count is a direct, independent check of
+    ! which branch the code actually took (isk_shift_id_l(isk) == 14 or
+    ! not), rather than inferring it from a current that can vanish by
+    ! symmetry either way. isk_shift_id_l is redundantly recomputed
+    ! identically by every orbital rank sharing a k-group (see the
+    ! comment above), so reducing over info%icomm_k here follows the
+    ! same pattern already used for n_clusters/cdiagknown elsewhere in
+    ! this file. This count depends only on the fixed (ilk,ihk) mesh, not
+    ! on itt, so it is not itself a time-dependent physical quantity --
+    ! it is printed every call purely to sit next to the existing
+    ! per-call diagnostics.
     n_gr_shift_l = count( isk_shift_id_l(isk_s:isk_e) /= 14 )
     n_gr_shift = 0
     call comm_summation(n_gr_shift_l,n_gr_shift,info%icomm_k)
@@ -2117,9 +2150,11 @@ contains
     allocate( cdiagknown_isk_l(unfold%nsk), cintra_isk_l(unfold%nsk), &
             & cinter_isk_l(unfold%nsk), cunknown_isk_l(unfold%nsk) )
     allocate( veck_isk_l(3,unfold%nsk) )
+    allocate( nisk_l(unfold%nsk) )
     cdiagknown_isk_l(:) = 0d0 ; cintra_isk_l(:) = 0d0
     cinter_isk_l(:) = 0d0 ; cunknown_isk_l(:) = 0d0
     veck_isk_l(:,:) = 0d0
+    nisk_l(:) = 0d0
 
   !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,lab1,lab2) &
   !$omp reduction(+:zsum1_l,zsum4_l,zj1a_l,zj2a_l,zj1c_l,zj2c_l,zj3b_l,zj4b_l,zj3c_l,zj4c_l,zj3d_l,zj4d_l, &
@@ -2135,6 +2170,11 @@ contains
       veck_isk_l(:,isk) = system%vec_k(:,ilk) + unfold%vec_hrsk(:,ihk)
     do io_ref1 = 1, no_ref
       lab1 = unfold%hprk_label(io_ref1,isk)
+      ! N_isk accumulation (notes 105-108): unconditional on lab1, mirrors
+      ! zsum1_l+zsum4_l = Tr[eta(isk)] (both diagonal classes contribute
+      ! to the k-term current zj5 in the first eta loop above, which is
+      ! also not restricted by lab1).
+      nisk_l(isk) = nisk_l(isk) + real(eta(io_ref1, io_ref1, isk))
       if( lab1 > 0 ) then
         zsum1_l = zsum1_l + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk)
         zj1a_l(:) = zj1a_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
@@ -2208,14 +2248,24 @@ contains
     allocate( cdiagknown_isk(unfold%nsk), cintra_isk(unfold%nsk), &
             & cinter_isk(unfold%nsk), cunknown_isk(unfold%nsk) )
     allocate( veck_isk(3,unfold%nsk) )
+    allocate( nisk(unfold%nsk), jisk(3,unfold%nsk) )
     cdiagknown_isk(:) = 0d0 ; cintra_isk(:) = 0d0
     cinter_isk(:) = 0d0 ; cunknown_isk(:) = 0d0
     veck_isk(:,:) = 0d0
+    nisk(:) = 0d0 ; jisk(:,:) = 0d0
     call comm_summation(cdiagknown_isk_l,cdiagknown_isk,unfold%nsk,icomm)
     call comm_summation(cintra_isk_l,cintra_isk,unfold%nsk,icomm)
     call comm_summation(cinter_isk_l,cinter_isk,unfold%nsk,icomm)
     call comm_summation(cunknown_isk_l,cunknown_isk,unfold%nsk,icomm)
     call comm_summation(veck_isk_l,veck_isk,3*unfold%nsk,icomm)
+    call comm_summation(nisk_l,nisk,unfold%nsk,icomm)
+    ! jisk is a deterministic function of the now-reduced nisk (not itself
+    ! accumulated inside the parallel io_ref1 loop); computed identically
+    ! on every rank sharing this k-group, matching the pattern already
+    ! used for isk_shift_id_l/n_gr_shift elsewhere in this file.
+    do isk = 1, unfold%nsk
+      jisk(:,isk) = unfold%wtk_ref(isk) * nisk(isk) * kappa_ref(:,isk) / omega_ref
+    end do
 
     ! =================================================================
     ! isk_diag (Gamma-point) Tr[eta] diagnostic. Previously computed from
@@ -2315,6 +2365,56 @@ contains
     do isk = 1, unfold%nsk
       write(fp,'(f16.8,1x,i8,8(1x,es17.9e3))') itt*dt, isk, veck_isk(1:3,isk), unfold%wtk_ref(isk), &
         & cdiagknown_isk(isk), cintra_isk(isk), cinter_isk(isk), cunknown_isk(isk)
+    end do
+    write(fp,*)
+    write(fp,*)
+    flush(fp)
+    close(fp)
+  end if
+
+  if(comm_is_root(nproc_id_global))then
+    ! Per-isk k-term current diagnostic (notes 105-108): breaks down the
+    ! explicit k-term zj5 (*_dm_unfold.data columns 18-20, Jx:k/Jy:k/
+    ! Jz:k) by isk, using the same kappa_ref as the production zj5
+    ! computation above (notes 072-092). Output-only addition: does not
+    ! affect eta/zj5/kappa_ref or any other production result.
+    !
+    ! Column 7 (N_isk) is Tr[eta(isk)] BEFORE the wtk_ref weighting -- to
+    ! compare against *_dm_unfold.data column 5 (N:Tr[rho(t)]), compute
+    ! sum_isk column3*column7, not sum_isk column7 alone (Codex review
+    ! note 108, point 1).
+    !
+    ! Columns 8-10 already include the wtk_ref(isk) weighting and the
+    ! 1/omega_ref unit conversion used in *_dm_unfold.data columns 18-20;
+    ! summing them directly over isk reproduces those columns exactly --
+    ! do not multiply by wtk_ref again.
+    !
+    ! Raw (un-folded) kx/ky/kz per isk are already in
+    ! *_dm_unfold_isk_coherence.data and can be joined on (Time,isk); not
+    ! repeated here to avoid duplicated columns.
+    iofile = trim(base_directory)//trim(sysname)//"_dm_unfold_isk_current.data"
+    fp = 273
+    inquire(file=iofile, exist=iofile_exists)
+    if( .not. iofile_exists ) then
+      open(fp,file=iofile,status='replace')
+      write(fp,'(A)') "# per-isk breakdown of the k-term current in "// &
+                     & "*_dm_unfold.data columns 18-20 (Jx:k/Jy:k/Jz:k), notes 105-108"
+      write(fp,'(A)') "# column 7 (N_isk) is NOT weighted by wtk_ref: to compare "// &
+                     & "against *_dm_unfold.data column 5, compute sum_isk column3*column7."
+      write(fp,'(A)') "# columns 8-10 already include the wtk_ref(isk) weighting and "// &
+                     & "1/omega_ref unit conversion; summing them over isk reproduces "// &
+                     & "*_dm_unfold.data columns 18-20 directly -- do not multiply by "// &
+                     & "wtk_ref again. Raw kx/ky/kz per isk are in "// &
+                     & "*_dm_unfold_isk_coherence.data (join on Time,isk)."
+      write(fp,'(A)') "# 1:Time[a.u.] 2:isk 3:wtk_ref 4:kappa_ref_x[bohr^-1] "// &
+                     & "5:kappa_ref_y[bohr^-1] 6:kappa_ref_z[bohr^-1] 7:N_isk=Tr[eta(isk)] "// &
+                     & "8:Jx_isk[a.u.] 9:Jy_isk[a.u.] 10:Jz_isk[a.u.]"
+    else
+      open(fp,file=iofile,status='old',position='append')
+    end if
+    do isk = 1, unfold%nsk
+      write(fp,'(f16.8,1x,i8,8(1x,es17.9e3))') itt*dt, isk, unfold%wtk_ref(isk), &
+        & kappa_ref(1:3,isk), nisk(isk), jisk(1:3,isk)
     end do
     write(fp,*)
     write(fp,*)
