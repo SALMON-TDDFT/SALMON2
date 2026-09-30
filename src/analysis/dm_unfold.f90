@@ -1821,6 +1821,7 @@ contains
     real(8) :: B_ref_g(3,3), B_ref_g_inv(3,3), detB_g
     real(8) :: kraw_g(3), kfrac_g(3), gr_g(3)
     real(8),allocatable :: kappa_ref_l(:,:), kappa_ref(:,:)
+    integer :: n_gr_shift_l, n_gr_shift
     complex(8),allocatable :: gshift_ph(:,:,:,:)
     ! -- TEMPORARY diagnostic (isk_diag, see module-level comment): Tr[eta]
     ! at the Gamma point, per Codex review note 082 point 6 (compare this,
@@ -1931,6 +1932,30 @@ contains
     end do
     kappa_ref(:,:) = 0d0
     call comm_summation(kappa_ref_l,kappa_ref,3*unfold%nsk,info%icomm_k)
+
+    ! Diagnostic (Kazu/Claude discussion, 2026-09-30): how many (ilk,ihk)
+    ! pairs in this run actually needed a nonzero G_R fold, i.e.
+    ! isk_shift_id_l(isk) /= 14 (the center value: (0+1)*9+(0+1)*3+(0+1)+1
+    ! = 14, corresponding to n1_g=n2_g=n3_g=0, G_R=0). Diagnostic-only --
+    ! does not affect kappa_ref/gshift_ph/mat/eta or any production
+    ! result above. Added because the P=I/P!=I Fugaku comparison showed
+    ! Jx:k and Jx:uG2k-d exactly zero in both runs; that null result is
+    ! expected regardless of G_R (an inversion/time-reversal-symmetric
+    ! k-mesh makes kappa_ref odd under k->-k just like kappa_raw, so an
+    ! odd-in-k quantity weighted by the even occupation eta_nn sums to
+    ! zero either way -- see note 095) and so cannot confirm whether this
+    ! run exercised the G_R correction at all. This count settles that
+    ! directly. isk_shift_id_l is redundantly recomputed identically by
+    ! every orbital rank sharing a k-group (see the comment above), so
+    ! reducing over info%icomm_k here follows the same pattern already
+    ! used for n_clusters/cdiagknown elsewhere in this file.
+    n_gr_shift_l = count( isk_shift_id_l(isk_s:isk_e) /= 14 )
+    n_gr_shift = 0
+    call comm_summation(n_gr_shift_l,n_gr_shift,info%icomm_k)
+    if(comm_is_root(nproc_id_global))then
+      write(*,'(A,I0,A,I0,A,I0)') 'dm_unfold G_R diagnostic: isk with nonzero G_R fold = ', &
+        & n_gr_shift, ' / ', unfold%nsk, '  it=', itt
+    end if
     ! =================================================================
     ! end of G_R folding correction setup
     ! =================================================================
