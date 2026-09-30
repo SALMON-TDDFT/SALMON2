@@ -1,5 +1,7 @@
 #include "config.h"
 program test_metric
+  use omp_lib, only: omp_get_max_threads
+  use exx_blas_threads, only: scope_entries,scope_active
   use mpi
   use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_pack,sparse_clear
   use exx_ace, only: s_exx_ace,exx_ace_clear,exx_ace_ready
@@ -109,6 +111,8 @@ contains
     implicit none
     logical,intent(in) :: ok
     character(*),intent(in) :: message
+    if(scope_active)error stop 'unrestored ACE thread scope'
+    if(omp_get_max_threads()>1.and.scope_entries==0)error stop 'ACE thread scope not entered'
     if(ok)return
     write(*,*) 'FAIL ',rank,message
     call MPI_Abort(MPI_COMM_WORLD,1,ierr)

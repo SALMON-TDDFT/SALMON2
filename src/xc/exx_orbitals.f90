@@ -163,6 +163,28 @@ contains
   end subroutine
 
   subroutine orbital_ace_build(ace,u,w,dv,comm_r,comm_o,status,packed,comm_matrix,sparse_u)
+    use exx_blas_threads, only: exx_blas_thread_control
+!$  use omp_lib, only: omp_get_max_threads,omp_in_parallel
+    implicit none
+    type(s_exx_ace),intent(inout) :: ace
+    complex(8),intent(in) :: u(:,:,:),w(:,:,:)
+    real(8),intent(in) :: dv
+    integer,intent(in) :: comm_r,comm_o
+    integer,intent(out) :: status
+    integer,intent(in),optional :: comm_matrix
+    logical,intent(in),optional :: packed
+    type(s_sparse_orbitals),intent(in),optional :: sparse_u
+    integer :: workers,thread_state(3)
+    workers=1;thread_state=0
+!$  workers=omp_get_max_threads()
+!$  if(omp_in_parallel())workers=1
+    if(workers>1)call exx_blas_thread_control(workers,thread_state)
+    ! The core has early exits and an internal packer; keep cleanup in this wrapper.
+    call orbital_ace_build_core(ace,u,w,dv,comm_r,comm_o,status,packed,comm_matrix,sparse_u)
+    call exx_blas_thread_control(0,thread_state)
+  end subroutine orbital_ace_build
+
+  subroutine orbital_ace_build_core(ace,u,w,dv,comm_r,comm_o,status,packed,comm_matrix,sparse_u)
     implicit none
     type(s_exx_ace),intent(inout) :: ace
     complex(8),intent(in) :: u(:,:,:),w(:,:,:)

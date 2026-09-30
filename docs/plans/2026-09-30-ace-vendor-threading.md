@@ -44,3 +44,11 @@ Sources: NVIDIA NVPL BLAS and LAPACK service APIs; RIKEN Fujitsu BLAS/LAPACK and
 `gauge_tiles_refresh` の全体を一つのスレッド制御スコープとする。内部処理を `refresh_core` に置き、早期returnがあっても外側で必ず復元する。これにより通常のpzgemm、分散SVD/固有値計算、および極分解の代替反復内のpzgemmを同じ設定で実行する。反復やMPIを呼ぶ処理そのものをOMPループにしない。既存並列領域内またはOMP無効時は設定変更なし。通常・異常経路のスコープ実行/復元をMPI試験で確認し、分散ゲージの既存数値比較をOMP1/2で実施する。周辺の明示オブジェクトリンク式の試験には新しいモジュール依存を加える。
 
 分散ゲージ検証: MPI2/4×OMP1/2、各ScaLAPACK有効/無効の8構成に成功。OpenBLAS実APIで設定変更と復元を確認。MPI/nonMPIビルド、関連CTest11件に成功。`work/exx-block3d/gauge-threads-*.log`。読取りレビューで重大な問題なし。速度とベンダー実機は未検証。
+
+## 分散ACE構築と逆変換（承認済み）
+
+`orbital_ace_build` に外側wrapperを設け、元の内部packerと早期returnを保ちながら、分散metricのpzheevと複製metricのzheevを同じスレッド設定で実行し、必ず復元する。分散/複製、packed/dense、sparse training、異常入力、空ランクを既存試験で検証する。
+
+逆変換はexx_nativeの非分散gaugeのMATMUL前後と、ブロック逆変換のownerループ前後に限定して設定する。MATMULがBLASを使うかはコンパイラ設定による（手元GNUビルドは-fexternal-blas）。ブロック経路のuse_blocked_inverse=.false.は維持。通常のgauge_tiles_rotate/orbital_rotateは列通信と配列更新で、BLAS制御だけでは高速化されない。多k点交換、LCFO GS対角化、PTCN等は今回の対象外。性能未計測、進行中のバイナリは維持。
+
+分散ACE追加検証: ScaLAPACK有効MPI1/2/4×OMP1/2×軌道数2/7、無効MPI2/4×OMP1/2×軌道数2/7が成功。通常/packed/sparse training、異常入力、空ランク、実OpenBLAS設定復元を含む。MPI/nonMPIビルドと関連CTest11件、条件数回帰も成功。`work/exx-block3d/orbital-threads-*.log`。無効のブロック逆変換はビルド確認のみ。読取りレビューで重大な問題なし。

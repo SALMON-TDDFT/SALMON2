@@ -919,10 +919,11 @@ contains
       status=0
     end subroutine apply_sparse_training
     subroutine apply_exchange_action()
+!$    use omp_lib, only: omp_get_max_threads,omp_in_parallel
       implicit none
       complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
       integer,allocatable :: counts(:)
-      integer :: first
+      integer :: first,workers,thread_state(3)
       if(requested_screen_mode==0)then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
@@ -948,23 +949,33 @@ contains
             if(status/=0)return
             call orbital_rotate(localized_action(:,:,1),adjoint,info%icomm_o,counts,first,w(:,:,1))
           else
+            workers=1;thread_state=0
+!$          workers=omp_get_max_threads()
+!$          if(omp_in_parallel())workers=1
+            if(workers>1)call exx_blas_thread_control(workers,thread_state)
             w(:,:,1)=matmul(localized_action(:,:,1),adjoint)
+            call exx_blas_thread_control(0,thread_state)
           endif
         endif
       endif
       call record_fft_work()
     end subroutine
     subroutine apply_localized_blocks()
+!$    use omp_lib, only: omp_get_max_threads,omp_in_parallel
       implicit none
       integer,parameter :: block_size=32
       complex(8),allocatable :: block_action(:,:,:),wire(:,:),rotation(:,:)
       integer,allocatable :: counts(:)
       integer :: first_owned,begin_col,nlocal,owner,nowner,j,k,global_col,ngrid,lo_col
       integer(int64) :: stats(5)
+      integer :: workers,thread_state(3)
       real(8) :: bound,cpu_seconds,bound_scale
       external :: zgemm
       call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first_owned,status)
       if(status/=0)return
+      workers=1
+!$    workers=omp_get_max_threads()
+!$    if(omp_in_parallel())workers=1
       ngrid=size(w,1);w=0d0;stats=0;bound=0d0;cpu_seconds=0d0
       allocate(rotation(min(block_size,maxval(counts)),info%numo))
       if(size(counts)>1)allocate(wire(ngrid,min(block_size,maxval(counts))))
@@ -984,6 +995,9 @@ contains
         bound_scale=max(bound,spatial%screen_bound)
         if(bound_scale>0d0)bound=bound_scale*sqrt((bound/bound_scale)**2+(spatial%screen_bound/bound_scale)**2)
         cpu_seconds=cpu_seconds+spatial%screen_cpu_seconds
+        ! The exchange action above uses its own threading; scope only the inverse product.
+        thread_state=0
+        if(workers>1)call exx_blas_thread_control(workers,thread_state)
         ! Accumulate K(WF) U^H, broadcasting only each owner's current block.
         do owner=0,size(counts)-1
           nowner=max(0,min(block_size,counts(owner)-begin_col+1))
@@ -1008,6 +1022,7 @@ contains
             endif
           endif
         enddo
+        call exx_blas_thread_control(0,thread_state)
         deallocate(block_action)
       enddo
       spatial%screen_candidates=stats(1);spatial%screen_skipped=stats(2)
