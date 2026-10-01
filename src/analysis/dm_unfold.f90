@@ -103,6 +103,8 @@ contains
   ! below for the algorithm; these are just its working variables. --
   integer :: ntot_ref, ig, kk, ii, jj2, ib2, i1b, gb, slot, col, kcol
   integer :: n_clusters_l, n_clusters, n_resid_warn_l, n_resid_warn, n_score_warn_l, n_score_warn
+  integer, allocatable :: nbad_by_io(:)   ! per-io_ref isk-count tally for the final sentinel-label report
+  integer, allocatable :: nres_by_io_l(:), nres_by_io(:)   ! per-io_ref isk-count tally for large-residual warnings
   integer :: i0_cl, i1_cl, g_cl, ibest_c2
   real(8) :: resid, resid_tol, score_abs2
   complex(8) :: cscore2
@@ -1070,6 +1072,8 @@ contains
     n_clusters_l = 0
     n_resid_warn_l = 0
     n_score_warn_l = 0
+    allocate( nres_by_io_l(no_ref) )
+    nres_by_io_l = 0
     resid_tol = 0.1d0 * unfold%egap_threshold   ! see design note above; not yet user-confirmed
 
     do isk = isk_s, isk_e
@@ -1245,10 +1249,13 @@ contains
               end do
               if( 1d0 - score_abs2 > hprk_thresh ) then
                 n_score_warn_l = n_score_warn_l + 1
-                if( comm_is_root(info%id_o) ) then   ! avoid nproc_ob-fold duplicate prints for one isk (Codex note 030, section 6)
-                  write(*,"(A,I0,A,I0,A,F10.6)") 'Warning (Phase B): unresolved hat_k after full T_c family, isk=', &
-                    & isk, ' io_ref=', memb(kcol), '  |score|=', score_abs2
-                end if
+                ! per-(isk,io_ref) detail is intentionally not printed here any
+                ! more (Kazu, 2026-10-01): it was redundant with, and scattered
+                ! across far more per-rank log files than, the single
+                ! per-io_ref tally now printed once (after full resync) in the
+                ! final "Detail:" report below -- every case that sets
+                ! label_final=0 here also ends up with unfold%hprk_label(io_ref,isk)=0
+                ! there, so it is counted in that tally too.
                 label_final(kcol) = 0
               else
                 label_final(kcol) = ibest_c2
@@ -1277,10 +1284,16 @@ contains
           end do
           if( resid > resid_tol ) then
             n_resid_warn_l = n_resid_warn_l + 1
-            if( comm_is_root(info%id_o) ) then   ! avoid nproc_ob-fold duplicate prints for one isk (Codex note 030, section 6)
-              write(*,"(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A)") 'Warning (Phase B): large post-hoc residual, isk=', isk, &
-                & ' io_ref=', memb(1), '..', memb(g_cl), '  resid=', resid, ' a.u. (resid_tol=', resid_tol, ' a.u.)'
-            end if
+            ! per-(isk,cluster) detail is not printed here any more (Kazu,
+            ! 2026-10-01): same reasoning as the unresolved-hat_k warning
+            ! above -- tallied once, per io_ref, in the Phase B summary
+            ! below. Every io_ref in this cluster (memb(1:g_cl)) shares the
+            ! same resid value by construction, so each one is credited
+            ! with +1 for this isk (Kazu's "+1 to every associated io_ref"
+            ! rule).
+            do jj2 = 1, g_cl
+              nres_by_io_l(memb(jj2)) = nres_by_io_l(memb(jj2)) + 1
+            end do
           end if
 
           deallocate( Tc_list, w_family, family_block_id, cvec, cnorm )
@@ -1398,11 +1411,23 @@ contains
     call comm_summation(n_clusters_l, n_clusters, info%icomm_k)
     call comm_summation(n_resid_warn_l, n_resid_warn, info%icomm_k)
     call comm_summation(n_score_warn_l, n_score_warn, info%icomm_k)
+    allocate( nres_by_io(no_ref) )
+    call comm_summation(nres_by_io_l, nres_by_io, no_ref, info%icomm_k)
+    deallocate( nres_by_io_l )
     if (comm_is_root(nproc_id_global)) then
       write(*,"(A,I0,A,I0,A,I0,A)") 'Phase B (energy-eigenbasis recovery): ', n_clusters, &
         & ' cluster(s) processed; ', n_resid_warn, ' residual-check warning(s), ', &
         & n_score_warn, ' unresolved-hat_k warning(s) (see above for detail; job continues regardless).'
+      if( any(nres_by_io > 0) ) then
+        write(*,"(A)") 'Tally by io_ref (isk count with large post-hoc residual):'
+        do io_ref = 1, no_ref
+          if( nres_by_io(io_ref) > 0 ) then
+            write(*,"(A,I0,A,I0)") '  io_ref=', io_ref, '  isk count=', nres_by_io(io_ref)
+          end if
+        end do
+      end if
     end if
+    deallocate( nres_by_io )
   end if
 
   deallocate( phase_gj, phi_pred, hprk_label_l, hprk_score_l )
@@ -1417,14 +1442,24 @@ contains
     write(*,"(A,I0)") 'final hat_k labeling (Phase A, refined by Phase B when |det P|>1): nhprk = ', nhprk
     if( nbad > 0 ) then
       write(*,"(A,I0,A,ES10.3,A)") 'Warning: ', nbad, ' reference-cell band(s) had 1-|score| above ', &
-        & hprk_thresh, '; hat_k label set to the sentinel value 0 for these bands (job continues). Detail:'
+        & hprk_thresh, '; hat_k label set to the sentinel value 0 for these bands (job continues).'
+      ! tally by io_ref (isk count), rather than one line per (isk,io_ref)
+      ! pair -- a per-band breakdown is what is actually useful for judging
+      ! whether no_ref is large enough (Kazu, 2026-10-01).
+      write(*,"(A)") 'Tally by io_ref (isk count with sentinel label):'
+      allocate( nbad_by_io(no_ref) )
+      nbad_by_io = 0
       do isk = 1, unfold%nsk
       do io_ref = 1, no_ref
-        if( unfold%hprk_label(io_ref,isk) == 0 ) then
-          write(*,"(A,I0,A,I0,A,F10.6)") '  isk=', isk, '  io_ref=', io_ref, '  |score|=', unfold%hprk_score(io_ref,isk)
+        if( unfold%hprk_label(io_ref,isk) == 0 ) nbad_by_io(io_ref) = nbad_by_io(io_ref) + 1
+      end do
+      end do
+      do io_ref = 1, no_ref
+        if( nbad_by_io(io_ref) > 0 ) then
+          write(*,"(A,I0,A,I0)") '  io_ref=', io_ref, '  isk count=', nbad_by_io(io_ref)
         end if
       end do
-      end do
+      deallocate( nbad_by_io )
     else
       write(*,"(A)") 'final hat_k labeling (Phase A, refined by Phase B when |det P|>1): all reference-cell bands matched a single hat_k candidate cleanly.'
     end if
