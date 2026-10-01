@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+
+
+def fail(message):
+    print(message)
+    raise SystemExit(1)
+
+
+def is_finite(value):
+    return value == value and abs(value) != float("inf")
+
+
+outputfile = "outputfile"
+eigenfile = (
+    "data_dcdft/total/Si_2x1x1_dc_lcfo_complex_"
+    "lcfo_complex_eigen.data"
+)
+variablesfile = "variables.log"
+
+# Reference values for the reproducibility check.  Keep this table small:
+# one low and one representative upper retained state for each physical k point.  The full
+# output is still checked for finite values, record count, and index coverage.
+reference_total_energy = -1702.2269  # eV
+permissible_total_energy_error = 1.0e-3  # eV
+reference_eigenvalues = {
+    (1, 1, 1): -1.8262711562304929e-1,
+    (1, 1, 43): 3.3893699888591583e-1,
+    (2, 1, 1): -1.8262711562315798e-1,
+    (2, 1, 43): 3.3893678852570441e-1,
+    (3, 1, 1): -1.8262711562315800e-1,
+    (3, 1, 43): 3.3893684399354629e-1,
+    (4, 1, 1): -1.8262711562304754e-1,
+    (4, 1, 43): 3.3893684854022965e-1,
+}
+permissible_eigenvalue_error = 1.0e-4  # Ha
+
+for filename in (outputfile, eigenfile, variablesfile):
+    if not os.path.isfile(filename):
+        fail("required output is missing: %s" % filename)
+
+with open(outputfile) as handle:
+    output = handle.read().splitlines()
+if "end SALMON" not in [line.strip() for line in output]:
+    fail("SALMON did not finish normally")
+
+scf_records = []
+complex_records = []
+for line in output:
+    fields = line.split()
+    if (len(fields) >= 11 and fields[:3] == ["DC", "#SCF", "="] and
+            fields[4:7] == ["Total", "Energy", "="] and
+            fields[8:10] == ["diff", "="]):
+        try:
+            scf_records.append((int(fields[3]), float(fields[7]), float(fields[10])))
+        except ValueError:
+            fail("invalid DC SCF record: %s" % line)
+    if (len(fields) >= 10 and fields[:4] ==
+            ["complex", "LCFO", "k/spin,", "hermitian/basis/eigen/residual:"]):
+        try:
+            complex_records.append([float(value) for value in fields[6:10]])
+        except ValueError:
+            fail("invalid complex LCFO diagnostic: %s" % line)
+
+if not scf_records:
+    fail("DC SCF convergence history is missing")
+scf_iteration, total_energy, scf_residual = scf_records[-1]
+if scf_residual > 1.0e-9:
+    fail("DC SCF did not reach threshold: %.6e" % scf_residual)
+if not is_finite(total_energy):
+    fail("DC total energy is non-finite")
+if abs(total_energy - reference_total_energy) > permissible_total_energy_error:
+    fail("DC total energy differs from reference: %.10f eV" % total_energy)
+if len(complex_records) != 4:
+    fail("expected four complex LCFO k-point diagnostics, got %d" %
+         len(complex_records))
+for record in complex_records:
+    if not all(is_finite(value) for value in record):
+        fail("complex LCFO diagnostic is non-finite")
+    if max(record) > 1.0e-10:
+        fail("complex LCFO diagnostic exceeds tolerance: %s" % record)
+
+with open(eigenfile) as handle:
+    eigen_lines = handle.read().splitlines()
+metadata = [line for line in eigen_lines if line.strip().startswith("#")]
+data = [line for line in eigen_lines
+        if line.strip() and not line.lstrip().startswith("#")]
+if not any(line.startswith("# columns: ik ispin iband eigenvalue_Ha")
+           for line in metadata):
+    fail("complex LCFO metadata header is missing")
+if len(data) != 4 * 1 * 48:
+    fail("expected 192 eigenvalue records, got %d" % len(data))
+seen = set()
+eigenvalues = {}
+for line in data:
+    fields = line.split()
+    if len(fields) != 4:
+        fail("complex LCFO eigenvalue record is not four columns: %s" % line)
+    try:
+        key = (int(fields[0]), int(fields[1]), int(fields[2]))
+        value = float(fields[3])
+    except ValueError:
+        fail("invalid complex LCFO eigenvalue record: %s" % line)
+    if not is_finite(value):
+        fail("complex LCFO eigenvalue is non-finite")
+    seen.add(key)
+    eigenvalues[key] = value
+if len(seen) != 192 or (1, 1, 1) not in seen or (4, 1, 48) not in seen:
+    fail("complex LCFO eigenvalue index coverage is incomplete")
+for key, reference in reference_eigenvalues.items():
+    if key not in eigenvalues:
+        fail("reference eigenvalue index is missing: %s" % (key,))
+    value = eigenvalues[key]
+    if abs(value - reference) > permissible_eigenvalue_error:
+        fail("eigenvalue %s differs from reference: %.10e Ha" % (key, value))
+
+with open(variablesfile) as handle:
+    variables = handle.read()
+if "method_mixing=broyden" not in variables:
+    fail("method_mixing default is not Broyden")
+if "mixrate= 5.00000E-01" not in variables:
+    fail("mixrate default is not 0.5")
+if ("num_kgrid(1)=   1" not in variables or
+        "num_kgrid(2)=   2" not in variables or
+        "num_kgrid(3)=   2" not in variables):
+    fail("requested 1x2x2 k-point grid is not reflected in variables.log")
+
+print("DC complex multi-k LCFO converged in %d iterations" % scf_iteration)
+print("DC total energy = %.10f eV" % total_energy)
+print("verified four k points, 192 finite eigenvalues, selected eigenvalue references, and Broyden defaults")

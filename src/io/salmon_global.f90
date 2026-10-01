@@ -83,6 +83,7 @@ module salmon_global
   character(1)   :: yn_gramschmidt_blas
   character(1)   :: yn_eigenexa
   character(1)   :: yn_diagonalization_red_mem
+  character(1)   :: yn_nccl_reduction
   character(32)  :: process_allocation
 
 !! &system
@@ -119,6 +120,7 @@ module salmon_global
 !! &functional
   character(64)  :: xc !, xcname
   character(64)  :: xname
+  real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc

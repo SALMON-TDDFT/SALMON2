@@ -1,0 +1,3 @@
+#!/bin/sh
+
+cp ../pseudo/Si_rps.dat ./

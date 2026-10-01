@@ -37,11 +37,12 @@ contains
     return
   end subroutine eigen_dsyev
 
-  subroutine eigen_zheev(h,e,v)
+  subroutine eigen_zheev(h,e,v,lapack_info)
     implicit none
     complex(8), intent(in)  :: h(:,:)
     real(8), intent(out) :: e(:)
     complex(8), intent(out) :: v(:,:)
+    integer, optional, intent(out) :: lapack_info
     complex(8), allocatable :: work(:)
     real(8), allocatable :: rwork(:)
     integer :: n,lwork,info
@@ -52,6 +53,7 @@ contains
     v=h
     call ZHEEV('V', 'U', n, v, n, e, work, lwork, rwork, info)
     deallocate(work, rwork)
+    if (present(lapack_info)) lapack_info = info
     return
   end subroutine eigen_zheev
 

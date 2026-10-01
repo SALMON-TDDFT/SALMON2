@@ -54,14 +54,15 @@ contains
       end if
     end do
 
+    ! Centre before squaring; sum(x**2)-mean**2 cancels to noise and NaNs the sqrt.
     do i=1,nsize
-      tnorm(i) = tsrc(i)**2 - tavg(i)**2
+      tnorm(i) = (tsrc(i) - tavg(i))**2
     end do
 
     call comm_summation(tnorm,tstdev,nsize,nproc_group_global)
 
     do i=1,nsize
-      tstdev(i) = sqrt(tstdev(i) / nproc_size_global)
+      tstdev(i) = sqrt(max(0.d0, tstdev(i) / nproc_size_global))
     end do
 
     if (comm_is_root(nproc_id_global)) then

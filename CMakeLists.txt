@@ -45,10 +45,23 @@ option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
+option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)" OFF)
+
+## OpenACC/CUDA GPU libraries (only meaningful when USE_OPENACC is on)
+option_set(USE_GEMM      "Use cuBLAS batched-GEMM for pseudo-pt" ON)
+option_set(USE_NCCL      "Use NCCL for the pseudo-pt allreduce"  ON)
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
 option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
+
+# cublas/cusolver are always linked by the nvhpc-openacc toolchain files; NCCL is the one
+# GPU library that's genuinely optional, so it needs its own link flag. -cudalib= is an
+# nvhpc-only flag, so guard on USE_OPENACC: USE_NCCL defaults on even for non-GPU builds.
+if (USE_OPENACC AND USE_NCCL)
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cudalib=nccl")
+  set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} -cudalib=nccl")
+endif ()
 
 
 # variables
@@ -59,6 +72,10 @@ include_directories(${CMAKE_BINARY_DIR})
 
 include(${CMAKE_SOURCE_DIR}/cmakefiles/check_compiler_features.cmake)
 
+
+if(USE_HSE AND USE_OPENACC)
+  message(FATAL_ERROR "Native HSE requires a CPU build; use USE_HSE=OFF for accelerators")
+endif()
 
 # for third party libraries
 include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
