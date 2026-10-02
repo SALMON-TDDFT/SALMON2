@@ -2514,7 +2514,7 @@ contains
 
   if(comm_is_root(nproc_id_global))then
 
-    write(ofl%fh_dm_unfold,'(91f17.12)') itt*dt, system%vec_Ac(1:3)*t_unit_ac%conv, &
+    write(ofl%fh_dm_unfold,'(91f17.12)') itt*dt*t_unit_time%conv, system%vec_Ac(1:3)*t_unit_ac%conv, &
     & real(zsum),real(zj1(1:3))*t_unit_current%conv,real(zj2(1:3))*t_unit_current%conv,real(zj3(1:3))*t_unit_current%conv, &
     & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3))*t_unit_current%conv, &
     & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
