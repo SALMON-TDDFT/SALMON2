@@ -656,7 +656,7 @@ contains
     real(8),allocatable :: radii(:),loss(:)
     logical,allocatable :: protected(:)
     integer(int64) :: fft_work(3)
-    logical :: was_active,screen_fallback,radius_covers_cell,support_accepted
+    logical :: was_active,screen_fallback,radius_covers_cell,support_accepted,sr_canonical
     integer :: requested_screen_mode
     real(8) :: correction_norm,accepted_bound
     integer :: adaptive_bad
@@ -709,11 +709,23 @@ contains
       maxiter=exx_mlwf_maxiter
     spatial%seed_localized=exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0
     spatial%retain_accepted_gauge=theory/='dft'
-    if(dc_canonical())then
+    ! Uniform occupied spin pairs allow any unitary occupied frame. Full
+    ! support with a fixed SR kernel needs no localization or transport.
+    sr_canonical=yn_dc=='n'.and.xc=='hse06'.and.hse_sr_tolerance>0d0.and.exx_mlwf_radius==0d0.and. &
+      (exx_mlwf_norm_fraction==0d0.or.exx_mlwf_norm_fraction==1d0).and. &
+      yn_hse_wannier_snapshot/='y'.and.exx_pair_screening=='off'.and.exx_ace_support=='source'.and. &
+      all(abs(system%rocc-2d0)<1d-12)
+    if(dc_canonical().or.sr_canonical)then
       maxiter=0
       call spatial_exx_canonical_source(spatial,local,system%rocc(info%io_s:info%io_e,:,1), &
         info%icomm_r,status,comm_o=orbital_comm)
-      if(info%id_ro==0.and.spatial%updates==1)write(*,'(a)') 'EXX_DC canonical full-fragment source (spatial)'
+      if(info%id_ro==0.and.spatial%updates==1)then
+        if(sr_canonical)then
+          write(*,'(a)')'EXX_SR canonical occupied source; MLWF bypassed'
+        else
+          write(*,'(a)')'EXX_DC canonical full-fragment source (spatial)'
+        endif
+      endif
     else
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
       [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,local, &
@@ -732,10 +744,10 @@ contains
     ! as for fraction=1, its exact action does not require a converged gauge.
     radius_covers_cell=exx_mlwf_radius>0d0.and. &
       exx_mlwf_radius>=sqrt(sum((.5d0*num_rgrid*system%hgs)**2))
-    adaptive_active=.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
+    adaptive_active=sr_canonical.or.(.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.radius_covers_cell.or. &
-       (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0))
-    if(adaptive_active)then
+       (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0)))
+    if(adaptive_active.and..not.sr_canonical)then
       allocate(radii(info%numo),loss(info%numo),protected(info%numo))
       call adaptive_source_mask(num_rgrid,system%hgs,mg%is-1,mg%num,info%icomm_r,spatial%source, &
         merge(exx_mlwf_norm_fraction,.999d0,exx_mlwf_norm_fraction>0d0),radii,loss,protected,status, &
@@ -755,7 +767,7 @@ contains
         endif
       endif
     endif
-    if(use_sparse_source.and.adaptive_active.and..not.radius_covers_cell.and. &
+    if(use_sparse_source.and.adaptive_active.and..not.sr_canonical.and..not.radius_covers_cell.and. &
        (exx_mlwf_norm_fraction<1d0.or.exx_mlwf_radius>0d0))then
       call sparse_pack(spatial%sparse_source,spatial%source)
       deallocate(spatial%source)
@@ -793,6 +805,8 @@ contains
     if(exx_ace_support=='source')then
       if(.not.adaptive_active)error stop 'Source-support ACE requires active MLWF support'
       call build_source_support_ace(support_accepted)
+      if(sr_canonical.and..not.support_accepted) &
+        error stop 'SR canonical source ACE rejected; no full-kernel fallback'
       ! Fixed-ion source ACE never uses the full-action DC route. Its next
       ! refresh regenerates source from the mesh; only transport previous persists.
       if(support_accepted)then
@@ -855,7 +869,7 @@ contains
       if(allocated(cached_action))deallocate(cached_action)
       call move_alloc(w,action_work)
     endif
-    if(.not.dc_canonical().and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
+    if(.not.dc_canonical().and..not.sr_canonical.and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
