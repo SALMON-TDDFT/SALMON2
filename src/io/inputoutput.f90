@@ -3404,8 +3404,8 @@ contains
         error stop 'cuFFT EXX supports static SCF and fixed-ion native RT'
     endif
 
-    if(exx_factor_history_frames<3.or.exx_factor_history_frames>5) &
-      error stop 'EXX factor history frames must be 3 through 5'
+    if(exx_factor_history_frames/=3) &
+      error stop 'EXX factor history is fixed at 3 frames'
     if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
     if(exx_factor_warmup_steps<0)error stop 'EXX factor warmup steps must be nonnegative'
     if(exx_surrogate_mode/='off'.and.exx_surrogate_mode/='trace') &
@@ -3430,7 +3430,7 @@ contains
       error stop 'exx_mlwf_radius must be finite and nonnegative'
     if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &
       error stop 'exx_mlwf_norm_fraction must be in [0,1]'
-    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)then
+    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)then
       if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12)) &
         error stop 'adaptive EXX support requires unshifted Gamma'
       if(yn_hse_lcfo_rt=='y')error stop 'adaptive EXX support requires native mesh orbitals'
@@ -3442,8 +3442,11 @@ contains
       if(theory/='dft')then
         if(yn_dc=='y'.or.(yn_conventional_from_dcdft/='y'.and..not.is_global_hybrid(xc))) &
           error stop 'finite EXX RT requires DC or conventional hybrid mesh orbitals'
-        if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12).or.yn_hse_lcfo_rt=='y') &
-          error stop 'finite EXX RT requires unshifted Gamma native mesh orbitals'
+        if(any(abs(dk_shift)>1d-12).or.yn_hse_lcfo_rt=='y') &
+          error stop 'EXX RT requires unshifted native mesh orbitals'
+        if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction<1d0)then
+          if(any(num_kgrid/=1))error stop 'finite EXX RT requires Gamma'
+        endif
       endif
       if(.not.is_hybrid(xc)) &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
@@ -3550,7 +3553,7 @@ contains
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
         if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or. &
-          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)))then
+          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)))then
           if(nproc_ob<1.or.nproc_k/=1.or.any(num_kgrid/=1)) &
             error stop 'Spatial EXX: Gamma spatial domains required'
           if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &

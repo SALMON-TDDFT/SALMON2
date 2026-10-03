@@ -1,4 +1,4 @@
-! Experimental local-row ACE factor prediction: accepted endpoints only.
+! Experimental local-row ACE factor prediction: three accepted endpoints only.
 module exx_factor_history
  use iso_fortran_env,only:real64,int64
  use,intrinsic::ieee_arithmetic
@@ -7,8 +7,8 @@ module exx_factor_history
  public::s_factor_history,history_accept,history_predict,factor_align
  type s_factor_history
   complex(real64),allocatable::x(:,:,:)
-  integer::interval=8,frames=3
-  real(real64)::g(4,4)=0,b(4)=0,coeff(4)=[1d0,0d0,0d0,0d0]
+  integer::interval=8
+  real(real64)::g(2,2)=0,b(2)=0,coeff(2)=[1d0,0d0]
   integer::count=0,last=-1,teachers=0
   logical::ready=.false.
  end type
@@ -75,11 +75,11 @@ contains
   integer,intent(in)::step
   procedure(sum_callback)::sumgrid
   integer,intent(out)::status
-  complex(real64)::d(4),y,acc(20,1)
-  real(real64)::g(4,4),b(4),gg(4,4),rhs(4,1),ridge,det
-  integer::i,j,k,l,m,info
+  complex(real64)::d(2),y,acc(6,1)
+  real(real64)::g(2,2),b(2),gg(2,2),rhs(2,1),ridge,det
+  integer::i,j,k,l,info
   status=1
-  if(step<0.or.dv<=0.or.h%interval<1.or.h%frames<3.or.h%frames>5)return
+  if(step<0.or.dv<=0.or.h%interval<1)return
   if(.not.all(ieee_is_finite(real(x))).or..not.all(ieee_is_finite(aimag(x))))return
   if(h%count>0)then
    if(step-h%last/=h%interval)return
@@ -87,66 +87,62 @@ contains
    call factor_align(x,h%x(:,:,1),sumgrid,status)
    if(status/=0)return
   else
-   allocate(h%x(size(x,1),size(x,2),h%frames));h%x=0
+   allocate(h%x(size(x,1),size(x,2),3));h%x=0
   endif
-  status=1;m=h%frames-1
-  if(h%count==h%frames)then
+  status=1
+  if(h%count==3)then
    g=0;b=0
 !$omp parallel do collapse(2) private(d,y,k,l) reduction(+:g,b)
    do j=1,size(x,2)
    do i=1,size(x,1)
     d=0
-    do k=1,m
+    do k=1,2
      d(k)=h%x(i,j,k)-h%x(i,j,k+1)
     enddo
     y=x(i,j)-h%x(i,j,1)
-    do k=1,m
+    do k=1,2
      b(k)=b(k)+real(conjg(d(k))*y,real64)
-     do l=1,m
+     do l=1,2
       g(k,l)=g(k,l)+real(conjg(d(k))*d(l),real64)
      enddo
     enddo
    enddo
    enddo
 !$omp end parallel do
-   acc(:,1)=cmplx([reshape(g,[16]),b]*dv,0d0,real64);call sumgrid(acc)
-   h%g=h%g+reshape(real(acc(1:16,1),real64),[4,4]);h%b=h%b+real(acc(17:20,1),real64)
+   acc(:,1)=cmplx([reshape(g,[4]),b]*dv,0d0,real64);call sumgrid(acc)
+   h%g=h%g+reshape(real(acc(1:4,1),real64),[2,2]);h%b=h%b+real(acc(5:6,1),real64)
    h%teachers=h%teachers+1;ridge=0
-   do k=1,m
+   do k=1,2
     ridge=ridge+h%g(k,k)
    enddo
    ridge=1d-8*ridge;gg=h%g;rhs(:,1)=h%b
-   do k=1,m
+   do k=1,2
     gg(k,k)=gg(k,k)+ridge
    enddo
    h%ready=.false.;info=1
-   if(m==2)then
-    det=gg(1,1)*gg(2,2)-gg(1,2)*gg(2,1)
-    if(det>tiny(det))then
-     rhs(1,1)=(gg(2,2)*h%b(1)-gg(1,2)*h%b(2))/det
-     rhs(2,1)=(-gg(2,1)*h%b(1)+gg(1,1)*h%b(2))/det
-     info=0
-    endif
-   else
-    call dposv('U',m,1,gg,4,rhs,4,info)
+   det=gg(1,1)*gg(2,2)-gg(1,2)*gg(2,1)
+   if(det>tiny(det))then
+    rhs(1,1)=(gg(2,2)*h%b(1)-gg(1,2)*h%b(2))/det
+    rhs(2,1)=(-gg(2,1)*h%b(1)+gg(1,1)*h%b(2))/det
+    info=0
    endif
    if(info==0)then
-    if(all(ieee_is_finite(rhs(1:m,1))).and.sum(abs(rhs(1:m,1)))<32d0)then
-     h%coeff=0;h%coeff(1:m)=rhs(1:m,1);h%ready=h%teachers>=8
+    if(all(ieee_is_finite(rhs(:,1))).and.sum(abs(rhs(:,1)))<32d0)then
+     h%coeff=rhs(:,1);h%ready=h%teachers>=8
     endif
    endif
   endif
 !$omp parallel do collapse(2) private(k)
   do j=1,size(x,2)
   do i=1,size(x,1)
-   do k=h%frames,2,-1
+   do k=3,2,-1
     h%x(i,j,k)=h%x(i,j,k-1)
    enddo
    h%x(i,j,1)=x(i,j)
   enddo
   enddo
 !$omp end parallel do
-  h%count=min(h%count+1,h%frames);h%last=step;status=0
+  h%count=min(h%count+1,3);h%last=step;status=0
  end subroutine
  subroutine history_predict(h,horizon,x,status)
   implicit none
@@ -154,18 +150,18 @@ contains
   integer,intent(in)::horizon
   complex(real64),intent(out)::x(:,:)
   integer,intent(out)::status
-  real(real64)::f,a(4)
-  integer::i,j,k,m
+  real(real64)::f,a(2)
+  integer::i,j,k
   status=1
   if(.not.h%ready.or.horizon<1.or.horizon>h%interval)return
   if(any(shape(x)/=shape(h%x(:,:,1))))return
-  m=h%frames-1;f=real(horizon,real64)/real(h%interval,real64)
+  f=real(horizon,real64)/real(h%interval,real64)
   a=f*f*h%coeff;a(1)=f+f*f*(h%coeff(1)-1d0)
 !$omp parallel do collapse(2) private(k)
   do j=1,size(x,2)
   do i=1,size(x,1)
    x(i,j)=h%x(i,j,1)
-   do k=1,m
+   do k=1,2
     x(i,j)=x(i,j)+a(k)*(h%x(i,j,k)-h%x(i,j,k+1))
    enddo
   enddo
