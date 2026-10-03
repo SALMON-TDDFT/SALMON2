@@ -289,6 +289,8 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+      & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
+      & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
@@ -760,6 +762,13 @@ contains
     exx_mlwf_tolerance = -huge(1d0)
     hse_mlwf_tolerance = -huge(1d0)
     exx_mlwf_radius = 0d0
+    exx_factor_history_frames = 3
+    exx_factor_exact_interval = 8
+    exx_factor_warmup_steps = 128
+    exx_surrogate_mode = 'off'
+    exx_surrogate_capacity = 64
+    exx_surrogate_rank_max = 256
+    exx_surrogate_rank_rtol = 1d-12
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
     exx_kpoint_backend = 'cpu'
@@ -1396,6 +1405,14 @@ contains
     call comm_bcast(exx_gpu_batch_size,nproc_group_global)
     call comm_bcast(exx_local_fft,nproc_group_global)
     call string_lowercase(exx_local_fft)
+    call comm_bcast(exx_factor_history_frames,nproc_group_global)
+    call comm_bcast(exx_factor_exact_interval,nproc_group_global)
+    call comm_bcast(exx_factor_warmup_steps,nproc_group_global)
+    call comm_bcast(exx_surrogate_mode,nproc_group_global)
+    call string_lowercase(exx_surrogate_mode)
+    call comm_bcast(exx_surrogate_capacity,nproc_group_global)
+    call comm_bcast(exx_surrogate_rank_max,nproc_group_global)
+    call comm_bcast(exx_surrogate_rank_rtol,nproc_group_global)
     call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
     call comm_bcast(exx_mlwf_radius,nproc_group_global)
     exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
@@ -2376,6 +2393,13 @@ contains
       write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
       write(fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
+      write(fh_variables_log, *) "# exx_factor_history_frames=",exx_factor_history_frames
+      write(fh_variables_log, *) "# exx_factor_exact_interval=",exx_factor_exact_interval
+      write(fh_variables_log, *) "# exx_factor_warmup_steps=",exx_factor_warmup_steps
+      write(fh_variables_log, *) "# exx_surrogate_mode=",exx_surrogate_mode
+      write(fh_variables_log, *) "# exx_surrogate_capacity=",exx_surrogate_capacity
+      write(fh_variables_log, *) "# exx_surrogate_rank_max=",exx_surrogate_rank_max
+      write(fh_variables_log, *) "# exx_surrogate_rank_rtol=",exx_surrogate_rank_rtol
       write(fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
       write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
       write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
@@ -3380,6 +3404,28 @@ contains
         error stop 'cuFFT EXX supports static SCF and fixed-ion native RT'
     endif
 
+    if(exx_factor_history_frames<3.or.exx_factor_history_frames>5) &
+      error stop 'EXX factor history frames must be 3 through 5'
+    if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
+    if(exx_factor_warmup_steps<0)error stop 'EXX factor warmup steps must be nonnegative'
+    if(exx_surrogate_mode/='off'.and.exx_surrogate_mode/='trace') &
+      error stop 'exx_surrogate_mode: only off/trace implemented'
+    if(exx_surrogate_mode=='trace')then
+      if(propagator/='hse_taylor4'.or.yn_fix_func/='n'.or.yn_restart=='y'.or. &
+         yn_dc=='y'.or.yn_md=='y'.or.yn_hse_lcfo_rt=='y'.or.any(num_kgrid/=1).or. &
+         product(nproc_rgrid)/=1.or.nproc_ob/=1.or.any(abs(dk_shift)>1d-12).or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
+        error stop 'EXX trace requires nonrestart serial Gamma dense Taylor4 RT'
+      if(theory/='tddft_response'.and.theory/='tddft_pulse') &
+        error stop 'EXX trace requires RT theory'
+    endif
+    if(exx_surrogate_capacity<1.or.exx_surrogate_rank_max<1) &
+      error stop 'EXX surrogate trace capacity/rank must be positive'
+    if(.not.ieee_is_finite(exx_surrogate_rank_rtol).or.exx_surrogate_rank_rtol<=0d0.or. &
+       exx_surrogate_rank_rtol>=1d0)error stop 'EXX surrogate rank rtol must be in (0,1)'
+#ifndef USE_HSE
+    if(exx_surrogate_mode/='off')error stop 'EXX surrogate trace requires USE_HSE'
+#endif
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'
     if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &

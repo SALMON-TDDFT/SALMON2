@@ -169,3 +169,8 @@ if(USE_HSE AND USE_MPI AND NOT USE_OPENACC)
   add_subdirectory(420_bulk_Si_hse_gs)
   add_subdirectory(421_bulk_Si_hse_rt)
 endif()
+
+# Mathematical CPU test for configurable learned ACE histories.
+if(USE_HSE AND NOT USE_OPENACC)
+  add_subdirectory(650_exx_factor_history)
+endif()

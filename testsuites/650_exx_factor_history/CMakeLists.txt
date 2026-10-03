@@ -1,0 +1,6 @@
+add_executable(exx_history345 probe.f90 ${PROJECT_SOURCE_DIR}/src/xc/exx_factor_history.f90)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/mod)
+set_target_properties(exx_history345 PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/mod)
+target_include_directories(exx_history345 PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/mod)
+target_link_libraries(exx_history345 ${EXTERNAL_LIBS})
+add_test(NAME exx_history345 COMMAND exx_history345)

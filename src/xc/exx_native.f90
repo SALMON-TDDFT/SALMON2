@@ -17,6 +17,10 @@ module exx_native
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_ace
+  use exx_factor_history,only:s_factor_history,history_accept,history_predict
+  use exx_surrogate_dense,only:surrogate_dense_basis_error
+  use exx_surrogate_trace,only:s_surrogate_trace,trace_initialize,trace_candidate,trace_write_diagnostic, &
+    trace_shadow_fit,trace_shadow_compare,s_factor_diagnostic,trace_factor_write
   use exx_distributed_gauge, only: gauge_tiles_rotate
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
   use exx_adaptive_support, only: adaptive_source_mask
@@ -25,9 +29,11 @@ module exx_native
   use exx_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+    exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+    exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames, &
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance,hse_block_rows, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
@@ -48,7 +54,17 @@ module exx_native
   logical,save,public :: exx_adaptive_ready=.false.,exx_support_changed=.false.
   logical,save :: adaptive_active=.false.,cached_adaptive_ready=.false.
   logical,save :: exx_force_full_action=.false.
+  logical,save::diagnostic_shadow=.false.,diagnostic_ready(4)=.false.,export_factor_diagnostic=.false.
+  type(s_factor_diagnostic),save::factor_diag
+  real(8),save::diagnostic_coeff(3,4)=0
+  type(s_surrogate_trace),save :: strict_trace
+  public :: exx_trace_corrected_endpoint
   type(s_exx_ace),save :: ace
+  type(s_factor_history),allocatable,save::factor_history(:)
+  logical,save::factor_initialized=.false.,factor_configured=.false.,factor_experiment=.false.,factor_learned=.false.
+  logical,save::factor_prediction_installed=.false.,factor_all_ready=.false.
+  integer,save::factor_step=0
+  public::exx_factor_begin,exx_factor_endpoint
   type(s_exx_ace),save :: initial_ace,midpoint_ace
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
@@ -66,6 +82,231 @@ module exx_native
     module procedure finite_real_3d
   end interface
 contains
+  subroutine exx_trace_corrected_endpoint(system,info,step,step_dt,final_step,total_steps)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::step
+    integer,intent(in),optional::total_steps
+    real(8),intent(in)::step_dt
+    logical,intent(in)::final_step
+    integer::status,h,env_status,factor_count
+    character(8)::shadow_env
+    complex(8),allocatable::pred(:,:),truth(:,:),frozen(:,:),linear(:,:)
+    real(8)::basis_leakage,basis_action_error
+    if(exx_surrogate_mode=='off')return
+    if(exx_freeze)error stop 'EXX trace cannot record frozen exchange'
+    if(strict_trace%epoch<0)then
+      shadow_env=''
+      call get_environment_variable('SALMON_ACE_SHADOW_DIAGNOSTIC',shadow_env,status=env_status)
+      diagnostic_shadow=env_status==0.and.shadow_env=='1'
+      shadow_env=''
+      call get_environment_variable('SALMON_ACE_EXPORT_FACTORS',shadow_env,status=env_status)
+      export_factor_diagnostic=env_status==0.and.shadow_env=='1'
+      if(export_factor_diagnostic.and.(nelec/=2.or.nstate/=1)) &
+        error stop 'Raw factor export currently restricted to H2 one-orbital diagnostic'
+      ! Layout and propagator are invariant within this fixed-ion trace epoch.
+      if(.not.exx_enabled().or.propagator/='hse_taylor4') &
+        error stop 'EXX trace requires corrected exact Taylor4 ACE'
+      if(info%isize_r/=1.or.info%isize_o/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1.or. &
+         yn_dc=='y'.or.yn_md=='y'.or.lcfo_rt_active.or.use_wannier_exchange()) &
+        error stop 'EXX trace currently requires serial Gamma dense ACE'
+      call trace_initialize(strict_trace,0,step_dt,exx_surrogate_rank_max,exx_surrogate_capacity, &
+                            exx_surrogate_rank_rtol,status)
+      if(status/=0)error stop 'EXX trace initialization failed'
+    endif
+    ! Diagnostic bounded capture; no surrogate action or physical accuracy claim.
+    if(strict_trace%count>=strict_trace%capacity)return
+    call trace_candidate(strict_trace,ace,step,step,.true.,status)
+    if(status/=0)error stop 'EXX strict corrected endpoint capture failed'
+    call surrogate_dense_basis_error(ace,strict_trace%q,basis_leakage,basis_action_error,status)
+    if(status/=0)error stop 'EXX fixed-Q representation diagnostic failed'
+    write(*,'(a,i8,2es24.15)')'EXX fixed-Q step/leakage/action-error:',step,basis_leakage,basis_action_error
+    if(diagnostic_shadow)then
+      if(step==40)then
+        do h=1,4
+          call trace_shadow_fit(strict_trace,40,h,0d0,diagnostic_coeff(:,h),status)
+          diagnostic_ready(h)=status==0
+          if(diagnostic_ready(h))then
+            write(*,'(a,i4,3es24.15)')'EXX shadow coefficients horizon:',h,diagnostic_coeff(:,h)
+          else
+            write(*,'(a,i4)')'EXX shadow unavailable (rank-deficient fit) horizon:',h
+          endif
+        enddo
+      endif
+      if(step>=72)then
+        allocate(pred(strict_trace%rank,strict_trace%rank),truth(strict_trace%rank,strict_trace%rank), &
+                 frozen(strict_trace%rank,strict_trace%rank),linear(strict_trace%rank,strict_trace%rank))
+        do h=1,4
+          if(.not.diagnostic_ready(h))cycle
+          call trace_shadow_compare(strict_trace,h,diagnostic_coeff(:,h),pred,truth,frozen,linear,status)
+          if(status/=0)error stop 'EXX diagnostic shadow comparison failed'
+          write(*,'(a,2i8,3es24.15)')'EXX shadow step/horizon/learned/frozen/linear:',step,h, &
+            sqrt(sum(abs(pred-truth)**2)),sqrt(sum(abs(frozen-truth)**2)),sqrt(sum(abs(linear-truth)**2))
+        enddo
+      endif
+    endif
+    if(export_factor_diagnostic)then
+      if(.not.present(total_steps))error stop 'Factor diagnostic requires total RT count'
+      factor_count=min(strict_trace%capacity,total_steps)
+      call trace_factor_write(factor_diag,'exx_factor_diagnostic.bin',ace,step,step_dt, &
+        factor_count,step==factor_count,status)
+      if(status/=0)error stop 'EXX raw factor diagnostic write failed'
+    endif
+    write(*,*)'EXX diagnostic candidate (unaccepted) step/rank/count:',step,strict_trace%rank,strict_trace%count
+    if(strict_trace%count==strict_trace%capacity.or.final_step)then
+      call trace_write_diagnostic(strict_trace,'exx_surrogate_diagnostic.dat',status)
+      if(status/=0)error stop 'EXX diagnostic output failed or already exists'
+    endif
+  end subroutine exx_trace_corrected_endpoint
+
+
+  ! Experimental canonical factor history: Gamma/grid or full k-only MPI.
+  subroutine factor_configure(system,info)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    character(32)::value
+    integer::stat
+    if(.not.factor_configured)then
+      call get_environment_variable('SALMON_FACTOR_HISTORY',value,status=stat)
+      factor_experiment=stat==0
+      if(factor_experiment)then
+        if(trim(value)/='strict'.and.trim(value)/='learned')error stop 'Invalid factor history mode'
+        factor_learned=trim(value)=='learned'
+        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or.lcfo_rt_active.or. &
+          propagator/='hse_taylor4'.or.yn_predictor_corrector/='y'.or. &
+          hse_sr_tolerance/=1d-3.or. &
+          exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=1d0.or. &
+          exx_ace_support/='source'.or.exx_pair_screening/='off'.or. &
+          yn_hse_wannier_snapshot=='y'.or.any(abs(system%rocc-2d0)>1d-12).or.info%isize_o/=1) &
+          error stop 'Factor experiment requires static canonical HSE SR1e-3 full support, integer occupation, no orbital MPI'
+        if(product(num_kgrid)>1.and.(info%isize_r/=1.or.use_symmetry.or.product(num_kgrid)/=system%nk)) &
+          error stop 'Factor k experiment requires full uniform k mesh and k-only MPI'
+        if(exx_factor_exact_interval<1)error stop 'Factor interval must be positive'
+        if(exx_factor_warmup_steps/exx_factor_exact_interval<10.or. &
+          mod(exx_factor_warmup_steps,exx_factor_exact_interval)/=0) &
+          error stop 'Factor warmup must be an interval multiple with at least ten exact endpoints'
+        allocate(factor_history(info%numk))
+        factor_history%interval=exx_factor_exact_interval
+        factor_history%frames=exx_factor_history_frames
+      endif
+      factor_configured=.true.
+    endif
+  end subroutine
+
+  subroutine exx_factor_begin(step,system,mg,info,psi)
+    integer,intent(in)::step
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_orbital),intent(in)::psi
+    if(.not.factor_initialized)then
+      call factor_configure(system,info)
+      if(factor_experiment)then
+        call factor_materialize()
+        call exx_factor_endpoint(system,info,0)
+        if(info%id_rko==0)write(*,'(a,l1)')'FACTOR_HISTORY learned: ',factor_learned
+      endif
+      factor_initialized=.true.
+    endif
+    if(.not.factor_experiment)return
+    factor_step=step;factor_prediction_installed=.false.
+    exx_freeze=factor_learned.and.step>exx_factor_warmup_steps.and. &
+      mod(step,exx_factor_exact_interval)/=0.and.factor_all_ready
+    ! At strict correction steps refresh the true starting operator before Taylor stage zero.
+    if(.not.exx_freeze.and.step>exx_factor_warmup_steps.and.factor_learned)call exx_refresh(system,mg,info,psi)
+    if(info%id_rko==0)write(*,'(a,i8,l2)')'FACTOR_HISTORY step/predicted: ',step,exx_freeze
+  end subroutine
+
+  subroutine factor_materialize()
+    complex(8),allocatable::rowbuf(:)
+    integer::i,j,k,n,ng
+    if(.not.ace%packed)return
+    if(ace%metric_distributed)error stop 'Factor history distributed metric unsupported'
+    n=size(ace%offset)-1;ng=ace%grid_rows
+    allocate(ace%factors(ng,n,1));ace%factors=0
+    do j=1,n
+      do k=ace%offset(j),ace%offset(j+1)-1
+        ace%factors(ace%row(k),j,1)=ace%values(k)
+      enddo
+    enddo
+!$omp parallel private(rowbuf,i,j)
+    allocate(rowbuf(n))
+!$omp do
+    do i=1,ng
+      rowbuf=ace%factors(i,:,1)
+      do j=1,n
+        ace%factors(i,j,1)=sum(rowbuf*ace%metric_factor(:,j))
+      enddo
+    enddo
+!$omp end do
+    deallocate(rowbuf)
+!$omp end parallel
+    deallocate(ace%offset,ace%row,ace%values,ace%metric_factor)
+    ace%packed=.false.
+  end subroutine
+
+  subroutine exx_factor_endpoint(system,info,step)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::step
+    integer::stat,ik,not_ready,total_not_ready
+    if(.not.factor_learned)return
+    if(mod(step,exx_factor_exact_interval)/=0)return
+    if(exx_freeze)error stop 'Predicted endpoint cannot enter exact factor history'
+    call factor_materialize()
+    do ik=1,info%numk
+      call history_accept(factor_history(ik),ace%factors(:,:,ik),system%hvol,step,sumgrid,stat)
+      if(stat/=0)error stop 'Factor k history alignment/teacher failed'
+      if(info%id_r==0)write(*,'(a,4i8,4es18.9,l2)')'FACTOR_HISTORY k/teacher/step/count/coeff/ready: ', &
+        info%ik_s+ik-1,factor_history(ik)%teachers,step,factor_history(ik)%count, &
+        factor_history(ik)%coeff,factor_history(ik)%ready
+    enddo
+    ! Readiness can change only after exact teachers; synchronize here, not every RT step.
+    not_ready=count(.not.factor_history%ready)
+    call comm_summation(not_ready,total_not_ready,info%icomm_k)
+    factor_all_ready=total_not_ready==0
+  contains
+    subroutine sumgrid(a)
+      complex(8),intent(inout)::a(:,:)
+      complex(8)::total(size(a,1),size(a,2))
+      call comm_summation(a,total,size(a),info%icomm_r);a=total
+    end subroutine
+  end subroutine
+
+  subroutine factor_predicted_expectation(system,mg,info,psi)
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_orbital),intent(in)::psi
+    real(8)::ex
+    integer::j,io,stat,ik
+    if(.not.factor_prediction_installed)then
+      do ik=1,info%numk
+        call history_predict(factor_history(ik),factor_step-factor_history(ik)%last,ace%factors(:,:,ik),stat)
+        if(stat/=0)error stop 'Factor k predictor failed'
+      enddo
+      factor_prediction_installed=.true.
+    endif
+    if(.not.allocated(target_work))allocate(target_work(product(mg%num),info%numo,info%numk))
+    if(.not.allocated(action_work))allocate(action_work(product(mg%num),info%numo,info%numk))
+    call exx_pack(psi,mg,info,target_work)
+    if(info%isize_r>1.or.ace%packed)then
+      call orbital_ace_apply(ace,target_work,action_work,info%icomm_r,info%icomm_o,stat)
+    else
+      call exx_ace_apply(ace,target_work,action_work,stat,thread_control=exx_blas_thread_control)
+    endif
+    if(stat/=0)error stop 'Predicted ACE expectation failed'
+    ex=0d0
+    do ik=1,info%numk
+    do j=1,info%numo
+      io=info%io_s+j-1
+      ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(io,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1) &
+        *real(sum(conjg(target_work(:,j,ik))*action_work(:,j,ik)),8)
+    enddo
+    enddo
+    call comm_summation(ex,exx_exchange_energy,info%icomm_rko)
+  end subroutine
+
   subroutine exx_check_localization()
     implicit none
     if(dc_canonical())return
@@ -275,7 +516,12 @@ contains
     real(8) :: ex,offdiag(3,3),tick,communication_before
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
     procedure(k_backend_factory),pointer :: create_backend
-    if(.not.exx_enabled().or.exx_freeze)return
+    if(.not.exx_enabled())return
+    if(theory=='tddft_response'.or.theory=='tddft_pulse')call factor_configure(system,info)
+    if(exx_freeze)then
+      if(factor_experiment)call factor_predicted_expectation(system,mg,info,psi)
+      return
+    endif
     if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
@@ -291,7 +537,8 @@ contains
       call lcfo_exx_refresh(system,mg,info,psi,exx_exchange_energy)
       return
     endif
-    if((info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
+    if((.not.factor_experiment.or.product(num_kgrid)==1).and. &
+       (info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
        ((theory=='dft').or. &
         (yn_dc=='n'.and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)).and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
@@ -301,7 +548,7 @@ contains
     if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
       error stop 'HSE06: initial native support requires k-only MPI distribution'
 
-    if(use_wannier_exchange())then
+    if(use_wannier_exchange().and.(.not.factor_experiment.or.product(num_kgrid)==1))then
       call refresh_wannier(system,mg,info,psi)
       return
     endif
@@ -894,10 +1141,10 @@ contains
         spatial%pair_products,spatial%screen_skipped,spatial%pair_catalog_entries,spatial%pair_product_points
       if(allocated(spatial%sparse_source%offset))then
         ! sparse_u replaces the training values; w supplies only u's dimensions.
-        call orbital_ace_build(ace,w,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true., &
+        call orbital_ace_build(ace,w,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.not.factor_experiment, &
           comm_matrix=info%icomm_ro,sparse_u=spatial%sparse_source)
       else
-        call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.true., &
+        call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.not.factor_experiment, &
           comm_matrix=info%icomm_ro)
       endif
       call comm_summation(status,adaptive_bad,info%icomm_ro)

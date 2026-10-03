@@ -34,11 +34,21 @@ if(USE_HSE)
     exx_symmetry.f90
     exx_k_exchange.f90
     exx_ace.f90
+    exx_surrogate_basis.f90
+    exx_surrogate_dense.f90
+    exx_surrogate_model.f90
+    exx_surrogate_guard.f90
+    exx_surrogate_stage.f90
+    exx_surrogate_export.f90
+    exx_surrogate_controller.f90
+    exx_surrogate_shadow.f90
+    exx_surrogate_trace.f90
     exx_distributed_metric.f90
     exx_orbitals.f90
     exx_distributed_gauge.f90
     hybrid_semilocal.f90
     exx_spatial.f90
+    exx_factor_history.f90
     exx_native.f90
     exx_lcfo_rt.f90
     lcfo_wf_support.f90

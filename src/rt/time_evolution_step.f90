@@ -23,7 +23,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   use structures
 #ifdef USE_HSE
   use exx_ptcn, only: native_exx_step
-  use exx_native, only: exx_taylor_stage
+  use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint
   use exx_lcfo_rt, only: lcfo_exx_direct_rotate
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -88,6 +88,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   real(8) :: rion_endpoint(3,system%nion)
   integer :: ihpsieff
   call nvtxStartRange('time_evolution_step', __LINE__)
+#ifdef USE_HSE
+  call exx_factor_begin(itt,system,mg,info,spsi_in)
+#endif
 
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
@@ -445,6 +448,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
   call timer_end(LOG_WRITE_RT_INFOS)
 
+#ifdef USE_HSE
+  ! One capture per completed step; predictor stages never call the collector.
+  call exx_factor_endpoint(system,info,itt)
+  call exx_trace_corrected_endpoint(system,info,itt,dt,itt==itotNtime,itotNtime)
+#endif
   call nvtxEndRange
   return
   
