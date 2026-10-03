@@ -25,6 +25,17 @@ module exx_surrogate_trace
   public::trace_shadow_fit,trace_shadow_compare
   public::trace_initialize,trace_endpoint,trace_candidate,trace_teacher,trace_write_diagnostic
 contains
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
   ! Bounded raw factor stream for offline response-basis diagnostics only.
   subroutine trace_factor_write(writer,path,ace,step,dt,expected,final,status)
     type(s_factor_diagnostic),intent(inout)::writer
@@ -34,14 +45,22 @@ contains
     real(real64),intent(in)::dt
     logical,intent(in)::final
     integer,intent(out)::status
-    integer::ios,ng,no
+    integer::ios,ng,no,i,j,k
     status=1
     if(writer%finished.or.step/=writer%last_step+1.or.expected<step)return
     if(ace%packed.or.ace%metric_distributed.or..not.allocated(ace%factors))return
     if(size(ace%factors,3)/=1)return
     ng=size(ace%factors,1);no=size(ace%factors,2)
-    if(min(ng,no,expected)<1.or..not.all(ieee_is_finite([dt,ace%dv])).or.min(dt,ace%dv)<=0)return
-    if(.not.all(ieee_is_finite(real(ace%factors))).or..not.all(ieee_is_finite(aimag(ace%factors))))return
+    if(min(ng,no,expected)<1.or..not.scalar_finite_real([dt,ace%dv]).or.min(dt,ace%dv)<=0)return
+    ! Scalar IEEE inquiries avoid rank-three array temporaries on Fujitsu.
+    do k=1,size(ace%factors,3)
+      do j=1,no
+        do i=1,ng
+          if(.not.ieee_is_finite(real(ace%factors(i,j,k),real64)))return
+          if(.not.ieee_is_finite(aimag(ace%factors(i,j,k))))return
+        enddo
+      enddo
+    enddo
     if(final.neqv.(step==expected))return
     if(.not.writer%opened)then
       open(newunit=writer%unit,file=path,status='new',access='stream',form='unformatted',iostat=ios)
@@ -119,7 +138,7 @@ contains
     type(s_surrogate_trace)::fresh
     status=1
     if(epoch<0.or.rank_max<1.or.capacity<1)return
-    if(.not.all(ieee_is_finite([dt,rank_rtol])).or.dt<=0.or.rank_rtol<=0.or.rank_rtol>=1)return
+    if(.not.scalar_finite_real([dt,rank_rtol]).or.dt<=0.or.rank_rtol<=0.or.rank_rtol>=1)return
     fresh%epoch=epoch;fresh%dt=dt;fresh%rank_max=rank_max;fresh%capacity=capacity;fresh%rank_rtol=rank_rtol
     state=fresh;status=0
   end subroutine

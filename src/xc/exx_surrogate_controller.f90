@@ -17,6 +17,28 @@ module exx_surrogate_controller
   end type
   public::surrogate_initialize,surrogate_record,surrogate_set_class,surrogate_evaluate,surrogate_certify_bundle
 contains
+ logical function scalar_finite_matrix(a) result(ok)
+  real(real64),intent(in)::a(:,:)
+  integer::i,j
+  ok=.false.
+  do j=1,size(a,2)
+   do i=1,size(a,1)
+    if(.not.ieee_is_finite(a(i,j)))return
+   enddo
+  enddo
+  ok=.true.
+ end function
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
   logical function valid_matrix(b)result(ok)
     complex(real64),intent(in)::b(:,:)
     integer::i,j
@@ -40,7 +62,7 @@ contains
     integer::k,i
     status=1;k=size(q,2)
     if(epoch<0.or.p<2.or.p>4.or.period<1.or.k<1)return
-    if(.not.all(ieee_is_finite([dt,dv])).or.dt<=0.or.dv<=0.or..not.valid_matrix(q))return
+    if(.not.scalar_finite_real([dt,dv]).or.dt<=0.or.dv<=0.or..not.valid_matrix(q))return
     gram=matmul(conjg(transpose(q)),q)*dv
     do i=1,k
       gram(i,i)=gram(i,i)-1
@@ -93,7 +115,7 @@ contains
     if(.not.allocated(state%q).or..not.validated)return
     if(horizon<1.or.horizon>state%period.or.size(coeff)/=state%p-1)return
     if(state%certified(horizon))return
-    if(.not.all(ieee_is_finite(coeff)))return
+    if(.not.scalar_finite_real(coeff))return
     ! Caller is responsible for offline/shadow certification, never RT self-training.
     state%coefficients(:,horizon)=coeff;state%certified(horizon)=.true.;status=0
   end subroutine
@@ -106,7 +128,7 @@ contains
     status=1
     if(.not.allocated(state%q).or..not.validated.or.state%bundle_ready)return
     if(any(shape(coeff)/=[state%p-1,state%period]))return
-    if(.not.all(ieee_is_finite(coeff)))return
+    if(.not.scalar_finite_matrix(coeff))return
     if(state%count/=state%p)return
     if(mod(state%steps(state%p),state%period)/=0)return
     if(state%last_exact/=state%steps(state%p))return

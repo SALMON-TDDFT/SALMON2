@@ -13,6 +13,17 @@ module exx_surrogate_shadow
   end type
   public::shadow_initialize,shadow_observe,shadow_complete
 contains
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
   subroutine shadow_initialize(state,period,min_count,atol,rtol,status)
     type(s_surrogate_shadow),intent(inout)::state
     integer,intent(in)::period,min_count
@@ -21,7 +32,7 @@ contains
     type(s_surrogate_shadow)::fresh
     status=1
     if(period<1.or.min_count<1)return
-    if(.not.all(ieee_is_finite([atol,rtol])).or.atol<0.or.rtol<0)return
+    if(.not.scalar_finite_real([atol,rtol]).or.atol<0.or.rtol<0)return
     fresh%period=period;fresh%min_count=min_count;fresh%atol=atol;fresh%rtol=rtol
     allocate(fresh%counts(0:period,3),fresh%failures(0:period,3), &
       fresh%max_absolute(0:period,3),fresh%max_relative(0:period,3))
@@ -42,7 +53,7 @@ contains
     if(horizon<0.or.horizon>state%period)return
     if(stage==1.and.horizon==state%period)return
     if(stage>1.and.horizon==0)return
-    if(.not.all(ieee_is_finite([absolute,relative])).or.absolute<0.or.relative<0)return
+    if(.not.scalar_finite_real([absolute,relative]).or.absolute<0.or.relative<0)return
     if(stage==shadow_beginning)then
       if(state%last_stage/=0.and.state%last_stage/=shadow_endpoint)return
       if(step<=state%last_step)return

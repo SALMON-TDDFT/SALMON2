@@ -6,6 +6,17 @@ module exx_surrogate_model
   private
   public::surrogate_fit,surrogate_predict,surrogate_difference
 contains
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
   logical function finite_complex(a)result(ok)
     complex(real64),intent(in)::a(:)
     integer::i
@@ -77,7 +88,7 @@ contains
     n=size(history,1)
     if(size(history,3)/=4.or.size(history,2)/=n.or.n<1.or.size(times)/=4)return
     if(any(shape(p2)/=[n,n]).or.any(shape(p4)/=[n,n]))return
-    if(.not.all(ieee_is_finite(times)).or..not.ieee_is_finite(floor).or.floor<=0)return
+    if(.not.scalar_finite_real(times).or..not.ieee_is_finite(floor).or.floor<=0)return
     spacing=times(2)-times(1)
     if(spacing<=0)return
     if(any(abs((times(2:)-times(:3))-spacing)>1d-10*spacing))return
@@ -95,7 +106,7 @@ contains
     absolute=sqrt(sum(abs(p4-p2)**2))
     n2=sqrt(sum(abs(p2-history(:,:,4))**2));n4=sqrt(sum(abs(p4-history(:,:,4))**2))
     relative=absolute/max(n2,n4,floor)
-    if(.not.all(ieee_is_finite([absolute,relative,n2,n4])))then
+    if(.not.scalar_finite_real([absolute,relative,n2,n4]))then
       p2=0;p4=0;absolute=0;relative=0;status=1
     endif
     ! PSD projection and strict sampled action checks remain separate.
@@ -111,7 +122,7 @@ contains
     if(p<2.or.p>4.or.n<1.or.size(history,2)/=n)return
     if(size(times)/=p.or.size(coeff)/=p-1.or.any(shape(b)/=[n,n]))return
     if(.not.finite_complex(reshape(history,[size(history)])))return
-    if(.not.all(ieee_is_finite(times)).or..not.all(ieee_is_finite(coeff)))return
+    if(.not.scalar_finite_real(times).or..not.scalar_finite_real(coeff))return
     if(.not.ieee_is_finite(target_time))return
     if(any(times(2:)<=times(:p-1)).or.target_time<times(p))return
     b=history(:,:,p)

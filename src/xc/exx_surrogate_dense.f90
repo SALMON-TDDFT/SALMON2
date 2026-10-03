@@ -8,6 +8,30 @@ module exx_surrogate_dense
   private
   public::surrogate_project_dense,surrogate_dense_snapshot,surrogate_dense_basis_error
 contains
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
+ logical function scalar_finite_complex(a) result(ok)
+  complex(8),intent(in)::a(:,:)
+  integer::i,j
+  ok=.false.
+  do j=1,size(a,2)
+   do i=1,size(a,1)
+    if(.not.ieee_is_finite(real(a(i,j),8)))return
+    if(.not.ieee_is_finite(aimag(a(i,j))))return
+   enddo
+  enddo
+  ok=.true.
+ end function
+
   ! Relative factor leakage and ACE action error on all factor columns.
   ! These are representation diagnostics, not a strict-Fock sample certificate.
   subroutine surrogate_dense_basis_error(ace,q,eta,action_error,status)
@@ -22,9 +46,9 @@ contains
     if(ace%packed.or.ace%metric_distributed.or..not.allocated(ace%factors))return
     if(size(ace%factors,3)/=1.or.size(q,1)/=size(ace%factors,1).or.size(q,2)<1)return
     if(.not.ieee_is_finite(ace%dv).or.ace%dv<=0)return
-    if(.not.all(ieee_is_finite(real(q))).or..not.all(ieee_is_finite(aimag(q))))return
+    if(.not.scalar_finite_complex(q))return
     x=ace%factors(:,:,1)
-    if(.not.all(ieee_is_finite(real(x))).or..not.all(ieee_is_finite(aimag(x))))return
+    if(.not.scalar_finite_complex(x))return
     gram=matmul(conjg(transpose(q)),q)*ace%dv
     do i=1,size(q,2)
       gram(i,i)=gram(i,i)-1
@@ -38,7 +62,7 @@ contains
     projected=-matmul(q,matmul(b,c))
     norm_action=sqrt(sum(abs(exact)**2));if(norm_action<=tiny(1d0))return
     action_error=sqrt(sum(abs(exact-projected)**2))/norm_action
-    if(.not.all(ieee_is_finite([eta,action_error])))return
+    if(.not.scalar_finite_real([eta,action_error]))return
     status=0
   end subroutine
 

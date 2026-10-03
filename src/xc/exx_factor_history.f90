@@ -19,6 +19,30 @@ module exx_factor_history
   end subroutine
  end interface
 contains
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
+ logical function scalar_finite_complex(a) result(ok)
+  complex(8),intent(in)::a(:,:)
+  integer::i,j
+  ok=.false.
+  do j=1,size(a,2)
+   do i=1,size(a,1)
+    if(.not.ieee_is_finite(real(a(i,j),8)))return
+    if(.not.ieee_is_finite(aimag(a(i,j))))return
+   enddo
+  enddo
+  ok=.true.
+ end function
+
  subroutine factor_align(x,ref,sumgrid,status)
   implicit none
   complex(real64),intent(inout)::x(:,:)
@@ -32,7 +56,7 @@ contains
   status=1;ng=size(x,1);n=size(x,2)
   if(any(shape(x)/=shape(ref)).or.n<1)return
   bad=0
-  if(.not.all(ieee_is_finite(real(x))).or..not.all(ieee_is_finite(aimag(x))))bad=1
+  if(.not.scalar_finite_complex(x))bad=1
   call sumgrid(bad)
   if(abs(bad(1,1))>0)return
   allocate(m(n,n),u(n,n),vh(n,n),r(n,n),work(max(1,8*n*n)),s(n),rw(5*n))
@@ -80,7 +104,7 @@ contains
   integer::i,j,k,l,info
   status=1
   if(step<0.or.dv<=0.or.h%interval<1)return
-  if(.not.all(ieee_is_finite(real(x))).or..not.all(ieee_is_finite(aimag(x))))return
+  if(.not.scalar_finite_complex(x))return
   if(h%count>0)then
    if(step-h%last/=h%interval)return
    if(any(shape(x)/=shape(h%x(:,:,1))))return
@@ -127,7 +151,7 @@ contains
     info=0
    endif
    if(info==0)then
-    if(all(ieee_is_finite(rhs(:,1))).and.sum(abs(rhs(:,1)))<32d0)then
+    if(scalar_finite_real(rhs(:,1)).and.sum(abs(rhs(:,1)))<32d0)then
      h%coeff=rhs(:,1);h%ready=h%teachers>=8
     endif
    endif
@@ -167,7 +191,7 @@ contains
   enddo
   enddo
 !$omp end parallel do
-  if(.not.all(ieee_is_finite(real(x))).or..not.all(ieee_is_finite(aimag(x))))return
+  if(.not.scalar_finite_complex(x))return
   status=0
  end subroutine
 end module

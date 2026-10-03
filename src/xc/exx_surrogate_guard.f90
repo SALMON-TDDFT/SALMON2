@@ -6,6 +6,17 @@ module exx_surrogate_guard
   private
   public::surrogate_psd,surrogate_action_check
 contains
+
+ logical function scalar_finite_real(a) result(ok)
+  real(8),intent(in)::a(:)
+  integer::i
+  ok=.false.
+  do i=1,size(a)
+   if(.not.ieee_is_finite(a(i)))return
+  enddo
+  ok=.true.
+ end function
+
   logical function finite(a)result(ok)
     complex(real64),intent(in)::a(:,:)
     integer::i,j
@@ -60,7 +71,7 @@ contains
     if(k<1.or.any(shape(b)/=[k,k]).or.size(psi,1)/=size(q,1))return
     if(any(shape(exact)/=shape(psi)).or.size(psi,2)<1)return
     if(.not.finite(q).or..not.finite(b).or..not.finite(psi).or..not.finite(exact))return
-    if(.not.all(ieee_is_finite([dv,atol,rtol,floor])))return
+    if(.not.scalar_finite_real([dv,atol,rtol,floor]))return
     if(dv<=0.or.atol<0.or.rtol<0.or.floor<=0)return
     gram=matmul(conjg(transpose(q)),q)*dv
     do i=1,k
@@ -74,7 +85,7 @@ contains
       norm=sqrt(sum(abs(exact(:,j))**2)*dv);e=a/max(norm,floor)
       absolute=max(absolute,a);relative=max(relative,e)
     enddo
-    if(.not.all(ieee_is_finite([absolute,relative])))return
+    if(.not.scalar_finite_real([absolute,relative]))return
     accepted=absolute<=atol.and.relative<=rtol;status=0
   end subroutine
 end module
