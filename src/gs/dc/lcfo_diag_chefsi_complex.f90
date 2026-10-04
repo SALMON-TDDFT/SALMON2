@@ -35,10 +35,12 @@ module lcfo_diag_chefsi_complex
 
   public :: diag_chefsi_complex
 
-  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  ! Inspect complex elements directly: REAL/AIMAG array arguments allocate large temporaries.
   private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d,finite_real_4d
+  private :: finite_complex_2d,finite_complex_3d,finite_complex_4d
   interface salmon_all_finite
     module procedure finite_real_1d,finite_real_2d,finite_real_3d,finite_real_4d
+    module procedure finite_complex_2d,finite_complex_3d,finite_complex_4d
   end interface
 contains
 
@@ -116,10 +118,8 @@ contains
     call prepare_blocks
     if(status/=0) goto 900
     flag=0
-    if(.not.salmon_all_finite(real(hdiag_sym,8)) .or. &
-       .not.salmon_all_finite(aimag(hdiag_sym)) .or. &
-       .not.salmon_all_finite(real(hrow,8)) .or. &
-       .not.salmon_all_finite(aimag(hrow))) flag=1
+    if(.not.salmon_all_finite(hdiag_sym) .or. &
+       .not.salmon_all_finite(hrow)) flag=1
     call sync_status(flag)
     if(flag/=0) then
       status=1
@@ -205,8 +205,7 @@ contains
                   q0(:,1:nchunk)=q1(:,1:nchunk)
                   q1(:,1:nchunk)=q2(:,1:nchunk)
                 end do
-                if(.not.salmon_all_finite(real(q1(:,1:nchunk),8)) .or. &
-                   .not.salmon_all_finite(aimag(q1(:,1:nchunk)))) then
+                if(.not.salmon_all_finite(q1(:,1:nchunk))) then
                   flag=1
                 else
                   max_amplitude=maxval(abs(q1(:,1:nchunk)))
@@ -710,8 +709,7 @@ contains
       error=max_out(1)
       istat=0
       if(.not.ieee_is_finite(error) .or. &
-         .not.salmon_all_finite(real(gram,8)) .or. &
-         .not.salmon_all_finite(aimag(gram))) istat=1
+         .not.salmon_all_finite(gram)) istat=1
       call sync_status(istat)
     end subroutine calculate_orthogonality
 
@@ -1094,6 +1092,63 @@ contains
           do i=1,size(values,1)
             value=values(i,j,k,l)
             if(.not.ieee_is_finite(value))return
+          enddo
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_complex_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    complex(8),intent(in) :: values(:,:)
+    complex(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(real(value,8)))return
+        if(.not.ieee_is_finite(aimag(value)))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_complex_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    complex(8),intent(in) :: values(:,:,:)
+    complex(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(real(value,8)))return
+          if(.not.ieee_is_finite(aimag(value)))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_complex_4d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    complex(8),intent(in) :: values(:,:,:,:)
+    complex(8) :: value
+    integer :: i,j,k,l
+    finite=.false.
+    do l=1,size(values,4)
+      do k=1,size(values,3)
+        do j=1,size(values,2)
+          do i=1,size(values,1)
+            value=values(i,j,k,l)
+            if(.not.ieee_is_finite(real(value,8)))return
+            if(.not.ieee_is_finite(aimag(value)))return
           enddo
         enddo
       enddo
