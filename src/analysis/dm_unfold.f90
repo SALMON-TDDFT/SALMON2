@@ -54,7 +54,7 @@ contains
   integer :: iopen_flag, minfo, mfile
   integer :: source_type, local_type, global_type, file_type
   integer :: ierr, n_count
-  integer(kind=MPI_OFFSET_KIND) :: disp_upu, disp_vnl
+  integer(kind=MPI_OFFSET_KIND) :: disp_upu, disp_vnl, fsize_wfn_actual, fsize_wfn_expect
   integer :: nspin,ispin,nsk_se,isk_s,isk_e,ie_ref(3),ihk,ir1,ir2,ir3
   integer :: ih1,ih2,ih3,ir1_ref,ir2_ref,ir3_ref,ig1_ref,ig2_ref,ig3_ref,io_ref,isk,ilk
   integer :: ig1,ig2,ig3,iqx,iqy,iqz,fp,iatom,j,ik
@@ -73,7 +73,7 @@ contains
   integer :: n1_g, n2_g, n3_g
   real(8) :: B_ref_g(3,3), B_ref_g_inv(3,3), detB_g, kraw_g(3), kfrac_g(3), gr_g(3)
   real(8),allocatable :: kappa_ref_l(:,:), kappa_ref(:,:)
-  logical :: exists, e_occupation, e_wfn, e_tm, e_eigen
+  logical :: exists, e_occupation, e_wfn, e_tm, e_eigen, size_ok
   integer :: i
   real(8) :: a_pr(3,3), ainv_pr(3,3), detA_pr, pmat_r(3,3), pmat_resid
   real(8) :: norm_pr(3), A_ref(3,3)
@@ -293,6 +293,36 @@ contains
   end if
 
   ie_ref(1:3)=lg%ie(1:3)/unfold%num_hkgrid(1:3) ! size of reference cell grid
+
+! Precaution (Claude-Codex notes 125/128/130/131): no_ref must equal the
+! reference ground-state calculation's nstate, but nothing enforces this.
+! A stale/mismatched reference/wfn.bin (wrong no_ref or wrong grid) would
+! otherwise be read silently here, scrambling psi_ref with no error at
+! all. Check the file's byte size against what this no_ref/ie_ref/
+! unfold%nsk combination implies before reading it -- wfn.bin has no
+! header; it is raw MPI_DOUBLE_COMPLEX data laid out in the gsize order
+! used by the MPI_Type_create_subarray calls below.
+! Limitation (Codex, note 131): this only detects a byte-size mismatch;
+! a leftover file from an unrelated calculation that happens to have the
+! exact same total byte count is NOT caught.
+  if (comm_is_root(nproc_id_global)) then
+    inquire(file='reference/wfn.bin', size=fsize_wfn_actual)
+    fsize_wfn_expect = int(ie_ref(1),8)*int(ie_ref(2),8)*int(ie_ref(3),8) &
+                      & *int(nspin,8)*int(no_ref,8)*int(unfold%nsk,8)*int(16,8)
+    size_ok = (fsize_wfn_actual == fsize_wfn_expect)
+    if( .not. size_ok ) then
+      write(*,"(A)")    'Error: reference/wfn.bin size does not match no_ref/ie_ref/num_skgrid'
+      write(*,"(A,I0)") '  actual size [byte]   = ', fsize_wfn_actual
+      write(*,"(A,I0)") '  expected size [byte] = ', fsize_wfn_expect
+      write(*,"(A,3(1x,I0),A,I0,A,I0)") '  from ie_ref=', ie_ref(1:3), ', no_ref=', no_ref, ', unfold%nsk=', unfold%nsk
+      write(*,"(A)")    '  (check: no_ref must equal the reference ground-state calculation''s nstate)'
+    end if
+  end if
+  call comm_bcast(size_ok, nproc_group_global)
+  if( .not. size_ok ) then
+    call end_parallel
+    stop
+  end if
 
   allocate( unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),nspin,no_ref,isk_s:isk_e,1) )
 
