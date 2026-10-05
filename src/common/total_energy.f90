@@ -16,9 +16,6 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 #include "config.h"
 MODULE Total_Energy
-#ifdef USE_HSE
-  use hse_native, only: hse_enabled,hse_refresh,hse_exchange_energy
-#endif
 implicit none
 
 CONTAINS
@@ -529,6 +526,9 @@ CONTAINS
 
 ! eigen energies (esp), kinetic energy (E_kin), & nonlocal part of electron-ion energy (E_ion_nloc)
   Subroutine calc_eigen_energy(energy,tpsi,htpsi,ttpsi,system,info,mg,V_local,stencil,srg,ppg)
+#ifdef USE_HSE
+    use hse_native, only: hse_enabled,hse_refresh,hse_exchange_energy
+#endif
     use structures
     use communication, only: comm_summation
     use hamiltonian, only: hpsi
