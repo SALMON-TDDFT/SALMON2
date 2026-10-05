@@ -109,7 +109,7 @@ SUBROUTINE init_kvector(system,unfold)
   use sym_kvector, only: init_sym_kvector
   use parallelization, only: nproc_id_global, nproc_group_global
   use communication, only: comm_bcast, comm_sync_all, comm_is_root
-  use salmon_global, only: num_kgrid, file_kw, dk_shift, dm_unfold_option, num_lkgrid, num_skgrid, yn_gamma_centered
+  use salmon_global, only: num_kgrid, file_kw, dk_shift, dm_unfold_option, num_lkgrid, num_skgrid, yn_gamma_centered, calc_mode
   implicit none
   type(s_dft_system) :: system
   type(s_unfold) :: unfold
@@ -289,6 +289,10 @@ SUBROUTINE init_kvector(system,unfold)
         write(*,"(A,2x,i8,2x,A,2x,f18.8)") 'dm_unfold_option=super, nk=', nk, 'sum(wtk)=', sum(wtk)
       end if
 
+      ! the tables below (num_skgrid, hat-k, isk_tbl, wtk_ref) are used only by the dm_unfold calculation in RT;
+      ! the ground-state calculation needs only the k-points above, so num_skgrid is not required there.
+      if( calc_mode == 'RT' ) then
+
       num_sk(:) = num_skgrid(:)
       if( sum(mod(num_sk(:),num_lk(:))) /= 0) stop 'mod(num_sk,num_lk) /= 0 in dm_unfold, super'
       num_hk(:) = num_sk(:)/num_lk(:)
@@ -347,6 +351,8 @@ SUBROUTINE init_kvector(system,unfold)
       enddo
       enddo
       enddo
+
+      end if ! calc_mode == 'RT'
 
     end select
   endif
