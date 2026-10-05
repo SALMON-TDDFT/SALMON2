@@ -114,9 +114,27 @@ contains
 
     call read_stdin
     call read_input_common ! Should be renamed properly later
+    call resolve_propagation_defaults
     call read_atomic_coordinates
     call dump_input_common ! Should be renamed properly later
     call check_bad_input
+
+  contains
+
+    subroutine resolve_propagation_defaults
+      implicit none
+
+      if(propagator=='')then
+        propagator='middlepoint'
+        if(xc=='hse06'.and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
+          propagator='hse_taylor4'
+      endif
+      if(yn_predictor_corrector=='')then
+        yn_predictor_corrector='n'
+        if(xc=='hse06'.and.propagator=='hse_taylor4') &
+          yn_predictor_corrector='y'
+      endif
+    end subroutine resolve_propagation_defaults
 
   end subroutine read_input
 
@@ -279,7 +297,8 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, hse_omega, &
+      & cname, &
+      & hse_omega, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -750,9 +769,9 @@ contains
     gram_schmidt_interval = -1
 !! == default for &propagation
     n_hamil     = 4
-    propagator  = '' ! resolved after functional and propagation input
+    propagator  = '' ! unspecified; resolved in read_input
     yn_fix_func = 'n'
-    yn_predictor_corrector = '' ! functional-dependent default
+    yn_predictor_corrector = '' ! unspecified; resolved in read_input
 !! == default for &scf
     method_init_wf = 'gauss'
     iseed_number_change  =  0
@@ -1325,19 +1344,6 @@ contains
     call comm_bcast(propagator ,nproc_group_global)
     call comm_bcast(yn_fix_func,nproc_group_global)
     call comm_bcast(yn_predictor_corrector,nproc_group_global)
-    ! Resolve omitted options on every rank before validation and input logging.
-    ! Explicit developer propagators and incompatible user options remain visible
-    ! to validation rather than being silently overwritten.
-    if(propagator=='')then
-      propagator='middlepoint'
-      if(xc=='hse06'.and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
-        propagator='hse_taylor4'
-    endif
-    if(yn_predictor_corrector=='')then
-      yn_predictor_corrector='n'
-      if(xc=='hse06'.and.propagator=='hse_taylor4') &
-        yn_predictor_corrector='y'
-    endif
 !! == bcast for &scf
     call comm_bcast(method_init_wf          ,nproc_group_global)
     call comm_bcast(iseed_number_change     ,nproc_group_global)

@@ -18,9 +18,6 @@
 
 module hamiltonian
   use nvtx_wrapper
-#ifdef USE_HSE
-  use hse_native, only: hse_add_action
-#endif
   implicit none
   integer,private,parameter :: Nd = 4
 
@@ -29,6 +26,9 @@ contains
 !===================================================================================================================================
 
 SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
+#ifdef USE_HSE
+  use hse_native, only: hse_add_action
+#endif
   use structures
   use stencil_sub
   use nonlocal_potential
