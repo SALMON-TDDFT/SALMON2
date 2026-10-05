@@ -444,8 +444,13 @@ contains
     ir1 = ir1_ref + (ih1-1) * ie_ref(1)
     ir2 = ir2_ref + (ih2-1) * ie_ref(2)
     ir3 = ir3_ref + (ih3-1) * ie_ref(3)
-    unfold%eihkr_tbl(ir1,ir2,ir3,ihk) = exp( zI * (unfold%vec_hrsk(1,ihk)*(ir1-1)*system%hgs(1) &
-    &  + unfold%vec_hrsk(2,ihk)*(ir2-1)*system%hgs(2) + unfold%vec_hrsk(3,ihk)*(ir3-1)*system%hgs(3) ) )
+    ! grid point position: r = sum_d (ir_d-1)*hgs(d)*u_d, with u_d = rmatrix_A(:,d) the unit vector
+    ! along the d-th lattice axis (identity for axis-aligned orthogonal cells, so unchanged there).
+    ! Hence hat_k.r = sum_d (hat_k.u_d)*(ir_d-1)*hgs(d), also for oblique cells.
+    unfold%eihkr_tbl(ir1,ir2,ir3,ihk) = exp( zI * ( &
+    &    dot_product(system%rmatrix_A(:,1),unfold%vec_hrsk(:,ihk))*(ir1-1)*system%hgs(1) &
+    &  + dot_product(system%rmatrix_A(:,2),unfold%vec_hrsk(:,ihk))*(ir2-1)*system%hgs(2) &
+    &  + dot_product(system%rmatrix_A(:,3),unfold%vec_hrsk(:,ihk))*(ir3-1)*system%hgs(3) ) )
   end do
   end do
   end do
@@ -1771,8 +1776,11 @@ contains
       do ir3_ref = 1, ie_ref(3)
       do ir2_ref = 1, ie_ref(2)
       do ir1_ref = 1, ie_ref(1)
-        gshift_ph(ir1_ref,ir2_ref,ir3_ref,ishidx_g) = exp( zI * ( gr_g(1)*dble(ir1_ref-1)*system%hgs(1) &
-         & + gr_g(2)*dble(ir2_ref-1)*system%hgs(2) + gr_g(3)*dble(ir3_ref-1)*system%hgs(3) ) )
+        ! G_R.r = sum_d (G_R.u_d)*(ir_d-1)*hgs(d), u_d = rmatrix_A(:,d) (see eihkr_tbl above)
+        gshift_ph(ir1_ref,ir2_ref,ir3_ref,ishidx_g) = exp( zI * ( &
+         &   dot_product(system%rmatrix_A(:,1),gr_g)*dble(ir1_ref-1)*system%hgs(1) &
+         & + dot_product(system%rmatrix_A(:,2),gr_g)*dble(ir2_ref-1)*system%hgs(2) &
+         & + dot_product(system%rmatrix_A(:,3),gr_g)*dble(ir3_ref-1)*system%hgs(3) ) )
       end do
       end do
       end do
