@@ -237,13 +237,11 @@ subroutine input_pp(pp,hx,hy,hz)
         stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
 
+      pp%upp_f(:,:,ik)=pp%upp(:,:)
 ! vloctbl and udvtbl are ready after the masking and SO preprocessing above.
 ! Generated orbitals have distinct upp and upp_f conventions; keep the solver's upp_f.
       if (yn_pseudo_atomic_orbital == 'y') then
         call calc_pseudo_wavefunction(pp,ik,with_masking=(yn_psmask == 'y'))
-      end if
-      if (yn_pseudo_atomic_orbital /= 'y' .or. pp%has_wf_pp(ik)) then
-        pp%upp_f(:,:,ik)=pp%upp(:,:)
       end if
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
