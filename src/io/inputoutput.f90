@@ -279,7 +279,8 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, hse_omega, &
+      & cname, &
+      & hse_omega, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
