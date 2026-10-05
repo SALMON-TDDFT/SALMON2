@@ -30,6 +30,7 @@ contains
 subroutine calc_pseudo_wf(pp,ik)
   use structures,only : s_pp_info
   use math_constants,only : pi
+  use salmon_math,only : interp_linear
   implicit none
   type(s_pp_info),intent(inout) :: pp
   integer,intent(in) :: ik
@@ -196,38 +197,6 @@ subroutine calc_single_eigenpair(n,a,e,v,info)
 
   return
 end subroutine calc_single_eigenpair
-
-
-
-!--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-! Linear interpolation of f given on the increasing grid x(1:n); x0 must be in [x(1),x(n)].
-function interp_linear(n,x,f,x0) result(y)
-  implicit none
-  integer,intent(in) :: n
-  real(8),intent(in) :: x(n),f(n),x0
-  real(8) :: y
-  integer :: ilo,ihi,imid
-
-  ilo=1; ihi=n
-  do while (ihi-ilo > 1)
-    imid=(ilo+ihi)/2
-    if (x(imid) <= x0) then
-      ilo=imid
-    else
-      ihi=imid
-    end if
-  end do
-  if (x(ihi) == x(ilo)) then
-    y=f(ilo)
-  else
-    y=f(ilo)+(f(ihi)-f(ilo))*(x0-x(ilo))/(x(ihi)-x(ilo))
-  end if
-
-  return
-end function interp_linear
-
-
-
 
 end subroutine calc_pseudo_wf
 

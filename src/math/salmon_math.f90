@@ -21,7 +21,8 @@ module salmon_math
             erfc_salmon, &
             bessel_j1_salmon, &
             matrix_inverse, &
-            xjl, dxjl
+            xjl, dxjl, &
+            interp_linear
 
   interface matrix_inverse
      module procedure matrix_inverse_double
@@ -584,6 +585,41 @@ contains
     return
   end subroutine spline
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+
+  ! Linear interpolation on a finite, strictly increasing grid x(1:n), n >= 2.
+  ! x and f must use matching indices. Grid ordering is a caller precondition;
+  ! only the selected interval is checked, keeping the search O(log n).
+  ! Endpoints are included; extrapolation must be handled by the caller.
+  pure function interp_linear(n,x,f,x0) result(y)
+    implicit none
+    integer,intent(in) :: n
+    real(8),intent(in) :: x(n),f(n),x0
+    real(8) :: y
+    integer :: ilo,ihi,imid
+
+    if (n < 2) error stop "interp_linear: at least two grid points are required"
+    if (.not. (x0 >= x(1) .and. x0 <= x(n))) &
+      error stop "interp_linear: evaluation point outside grid range"
+
+    ilo=1; ihi=n
+    do while (ihi-ilo > 1)
+      imid=ilo+(ihi-ilo)/2
+      if (x(imid) <= x0) then
+        ilo=imid
+      else
+        ihi=imid
+      end if
+    end do
+    if (.not. (x(ihi) > x(ilo))) error stop "interp_linear: grid interval must be positive"
+
+    if (x0 == x(ilo)) then
+      y=f(ilo)
+    else if (x0 == x(ihi)) then
+      y=f(ihi)
+    else
+      y=f(ilo)+(f(ihi)-f(ilo))*(x0-x(ilo))/(x(ihi)-x(ilo))
+    end if
+  end function interp_linear
 
 end module salmon_math
 !--------------------------------------------------------------------------------
