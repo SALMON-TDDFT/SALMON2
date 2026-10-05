@@ -36,7 +36,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use math_constants, only : pi
   use read_ps_upf_module, only: read_ps_upf
   use read_paw_upf_module, only: read_paw_upf
-  use pseudo_wf, only: calc_pseudo_wf
+  use atomic_solver, only: calc_pseudo_wavefunction
   implicit none
   type(s_pp_info) :: pp
   real(8),parameter :: Eps0=1d-10
@@ -238,10 +238,13 @@ subroutine input_pp(pp,hx,hy,hz)
       end if
 
 ! vloctbl and udvtbl are ready after the masking and SO preprocessing above.
-! calc_pseudo_wf overwrites upp only when has_wf_pp(ik) is false, before copying to upp_f.
-      if (yn_pseudo_atomic_orbital == 'y') call calc_pseudo_wf(pp,ik)
-
-      pp%upp_f(:,:,ik)=pp%upp(:,:)
+! Generated orbitals have distinct upp and upp_f conventions; keep the solver's upp_f.
+      if (yn_pseudo_atomic_orbital == 'y') then
+        call calc_pseudo_wavefunction(pp,ik,with_masking=(yn_psmask == 'y'))
+      end if
+      if (yn_pseudo_atomic_orbital /= 'y' .or. pp%has_wf_pp(ik)) then
+        pp%upp_f(:,:,ik)=pp%upp(:,:)
+      end if
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
       open(4,file=trim(base_directory)//"PS_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//"_"//trim(yn_psmask)//".dat")
@@ -609,7 +612,6 @@ subroutine read_ps_abinitpsp8(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
     read(4,*) dummy_text, r_tmp, rho_tmp
     pp%rho_pp_tbl(i,ik)=rho_tmp*r_tmp**2 ! file value 4*pi*n(r) is assumed; rho_pp_tbl(i) <-> rad(i)
     sum_rho_pp=sum_rho_pp+rho_tmp*r_tmp**2
-    write(101, *) r_tmp, rho_tmp, sum_rho_pp*dr
   end do
   pp%has_rho_pp(ik)=.true.
   write(*,*) "sum(rho_pp)=",sum_rho_pp*dr

@@ -4,7 +4,7 @@ set(SOURCES
     pp/input_pp.f90
     pp/salmon_pp.f90
     pp/prep_density_pp.f90
-    pp/pseudo_wf.f90
+    pp/atomic_solver.f90
     pp/prep_pp.f90
     jellium.f90
    )
