@@ -174,11 +174,14 @@ contains
         factor_learned=trim(value)=='learned'
         if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or.lcfo_rt_active.or. &
           propagator/='hse_taylor4'.or.yn_predictor_corrector/='y'.or. &
-          hse_sr_tolerance/=1d-3.or. &
-          exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=1d0.or. &
-          exx_ace_support/='source'.or.exx_pair_screening/='off'.or. &
+          (product(num_kgrid)==1.and.hse_sr_tolerance/=1d-3).or. &
+          (product(num_kgrid)>1.and.hse_sr_tolerance/=0d0).or. &
+          exx_mlwf_radius/=0d0.or. &
+          (product(num_kgrid)==1.and.(exx_mlwf_norm_fraction/=1d0.or.exx_ace_support/='source')).or. &
+          (product(num_kgrid)>1.and.(exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied')).or. &
+          exx_pair_screening/='off'.or. &
           yn_hse_wannier_snapshot=='y'.or.any(abs(system%rocc-2d0)>1d-12).or.info%isize_o/=1) &
-          error stop 'Factor experiment requires static canonical HSE SR1e-3 full support, integer occupation, no orbital MPI'
+          error stop 'Factor history requires static full-support HSE, compatible k/SR settings and integer occupation'
         if(product(num_kgrid)>1.and.(info%isize_r/=1.or.use_symmetry.or.product(num_kgrid)/=system%nk)) &
           error stop 'Factor k experiment requires full uniform k mesh and k-only MPI'
         if(exx_factor_exact_interval<1)error stop 'Factor interval must be positive'
