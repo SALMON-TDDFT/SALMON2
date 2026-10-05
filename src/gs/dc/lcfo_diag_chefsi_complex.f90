@@ -520,6 +520,7 @@ contains
     end subroutine distributed_qr
 
     subroutine rayleigh_ritz(s,n,nlocked,layout_n,layout_d,layout_g,vector,eigenvalue,istat)
+      implicit none
       integer, intent(in) :: s,n,nlocked
       type(s_layout), intent(in) :: layout_n,layout_d,layout_g
       complex(8), intent(inout) :: vector(:,:)
@@ -530,7 +531,9 @@ contains
       real(8) :: rwork_query(1)
       complex(8), allocatable :: work0(:)
       real(8), allocatable :: rwork0(:)
-      integer :: lwork0,lrwork0,info0,nactive
+      integer :: lwork0,lrwork0,liwork0,info0,nactive
+      integer :: iwork_query(1)
+      integer, allocatable :: iwork0(:)
       nactive=n-nlocked
       call initialize_active_layouts(nactive,layout_d,layout_g,layout_active,layout_small,istat)
       if(istat/=0) return
@@ -543,22 +546,24 @@ contains
       zero_c=(0d0,0d0)
       call pzgemm('C','N',nactive,nactive,npadded,one_c,xd,1,1,layout_active%desc, &
         hxd,1,1,layout_active%desc,zero_c,projected,1,1,layout_small%desc)
-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,info0)
+      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
+        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,iwork_query,-1,info0)
       istat=merge(1,0,info0/=0)
       call sync_status(istat)
       if(istat/=0) return
       lwork0=max(1,ceiling(real(work_query(1),8)))
-      lrwork0=max(1,ceiling(rwork_query(1)))
+      lwork0=max(lwork0,nactive+(layout_small%nrow+layout_small%ncol+block_size)*block_size)
+      lrwork0=max(ceiling(rwork_query(1)),2*(1+8*nactive+2*layout_small%nrow*layout_small%ncol))
+      liwork0=max(ceiling(real(iwork_query(1),8)),2+7*nactive+8*dense%npcol)
       call comm_get_max(lwork0,dc%icomm_tot)
       call comm_get_max(lrwork0,dc%icomm_tot)
-      allocate(work0(lwork0),rwork0(lrwork0))
-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,info0)
+      allocate(work0(lwork0),rwork0(lrwork0),iwork0(liwork0))
+      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
+        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,iwork0,liwork0,info0)
       istat=merge(1,0,info0/=0)
       if(.not.salmon_all_finite(eigenvalue(nlocked+1:n))) istat=1
       call sync_status(istat)
-      deallocate(work0,rwork0)
+      deallocate(work0,rwork0,iwork0)
       if(istat/=0) return
       call comm_bcast(eigenvalue(nlocked+1:n),dc%icomm_tot,0)
       xrot=(0d0,0d0)
