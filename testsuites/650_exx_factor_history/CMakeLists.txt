@@ -4,3 +4,10 @@ set_target_properties(exx_history3 PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_C
 target_include_directories(exx_history3 PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/mod)
 target_link_libraries(exx_history3 ${EXTERNAL_LIBS})
 add_test(NAME exx_history3 COMMAND exx_history3)
+
+add_executable(exx_history3_coefficients coefficient_probe.f90 ${PROJECT_SOURCE_DIR}/src/xc/exx_factor_history.f90)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/coeff_mod)
+set_target_properties(exx_history3_coefficients PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/coeff_mod)
+target_include_directories(exx_history3_coefficients PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/coeff_mod)
+target_link_libraries(exx_history3_coefficients ${EXTERNAL_LIBS})
+add_test(NAME exx_history3_coefficients COMMAND exx_history3_coefficients)

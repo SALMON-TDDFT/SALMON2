@@ -100,7 +100,11 @@ contains
   procedure(sum_callback)::sumgrid
   integer,intent(out)::status
   complex(real64)::d(2),y,acc(6,1)
-  real(real64)::g(2,2),b(2),gg(2,2),rhs(2,1),ridge,det
+  real(real64)::g(2,2),b(2),gg(2,2),rhs(2,1),ridge
+  real(real64)::af(2,2),scales(2),solution(2,1),rcond,ferr(1),berr(1),solve_work(6)
+  integer::solve_iwork(2)
+  character::equed
+  external::dposvx
   integer::i,j,k,l,info
   status=1
   if(step<0.or.dv<=0.or.h%interval<1)return
@@ -144,13 +148,11 @@ contains
     gg(k,k)=gg(k,k)+ridge
    enddo
    h%ready=.false.;info=1
-   det=gg(1,1)*gg(2,2)-gg(1,2)*gg(2,1)
-   if(det>tiny(det))then
-    rhs(1,1)=(gg(2,2)*h%b(1)-gg(1,2)*h%b(2))/det
-    rhs(2,1)=(-gg(2,1)*h%b(1)+gg(1,1)*h%b(2))/det
-    info=0
-   endif
+   ! Solve the regularized Gram system directly; avoid determinant underflow.
+   call dposvx('E','U',2,1,gg,2,af,2,equed,scales,rhs,2,solution,2, &
+     rcond,ferr,berr,solve_work,solve_iwork,info)
    if(info==0)then
+    rhs=solution
     if(scalar_finite_real(rhs(:,1)).and.sum(abs(rhs(:,1)))<32d0)then
      h%coeff=rhs(:,1);h%ready=h%teachers>=8
     endif

@@ -256,7 +256,7 @@ contains
     do ik=1,info%numk
       call history_accept(factor_history(ik),ace%factors(:,:,ik),system%hvol,step,sumgrid,stat)
       if(stat/=0)error stop 'Factor k history alignment/teacher failed'
-      if(info%id_r==0)write(*,'(a,4i8,4es18.9,l2)')'FACTOR_HISTORY k/teacher/step/count/coeff/ready: ', &
+      if(info%id_r==0)write(*,'(a,4i8,2es18.9,l2)')'FACTOR_HISTORY k/teacher/step/count/coeff/ready: ', &
         info%ik_s+ik-1,factor_history(ik)%teachers,step,factor_history(ik)%count, &
         factor_history(ik)%coeff,factor_history(ik)%ready
     enddo
