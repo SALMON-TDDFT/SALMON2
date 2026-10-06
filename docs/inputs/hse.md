@@ -439,3 +439,101 @@ neighborhood window. Both routes use exactly the same truncated kernel.
 compares N log N with the aggregate neighborhood FFT work; it is not a
 calibrated communication-time model. No automatic change of cutoff radius or
 physical kernel is made when switching FFT routes.
+
+## Learned ACE: activation and defaults
+
+These controls belong to `&functional`. Learned ACE is **off by default**:
+setting the namelist parameters alone does not activate it. Enable prediction
+with the case-sensitive environment value `SALMON_FACTOR_HISTORY=learned` on
+all MPI ranks. `strict` keeps full exchange updates for a comparison run;
+unset the variable to use the ordinary ACE path.
+
+| Control | Code default | Meaning |
+|---|---|---|
+| `exx_factor_history_frames` | `3` | Retained exact factor frames; currently only 3 is accepted. |
+| `exx_factor_exact_interval` | `8` | Interval in RT steps between full exchange corrections after warm-up. |
+| `exx_factor_warmup_steps` | `128` | Initial RT steps using full exchange; not the number of retained frames. |
+
+Warm-up must be an integer multiple of the interval and include at least ten
+exact endpoint samples: `warmup >= 10*interval`. The Si test value 80 with
+interval 8 is valid but is **not** the code default. Accepted endpoint history
+excludes predictor/intermediate trials. Once warm-up and history readiness are
+satisfied, intervening steps predict ACE factors; full corrections also update
+the fit. Interval 8 is the current tested recommendation, not a universal
+accuracy guarantee. Forgetting-based prediction remains pending.
+
+The published route requires fixed-ion, non-DC HSE06, integer fully occupied
+spin pairs, Taylor4 with predictor/corrector, no pair screening or Wannier
+snapshot, and `nproc_ob=1`. Gamma requires the SR/source settings below. Multi-k
+requires a full uniform unreduced mesh, k-only MPI (`nproc_rgrid=1,1,1`),
+`hse_sr_tolerance=0d0`, `exx_mlwf_norm_fraction=0d0`, and
+`exx_ace_support='occupied'`. Spatial SR localization is not implemented for
+this multi-k route. Extra empty states and a second Acos2 pulse are currently
+separate test-build extensions, not a general promise of this published route.
+
+Example for Gamma spatial MPI (add ordinary system/grid/pseudopotential input):
+
+```fortran
+&functional
+ xc='hse06'
+ exx_factor_history_frames=3
+ exx_factor_exact_interval=8
+ exx_factor_warmup_steps=128
+ exx_mlwf_norm_fraction=1d0
+ exx_mlwf_radius=0d0
+ exx_ace_support='source'
+ hse_sr_tolerance=1d-3
+ exx_local_fft='auto'
+ exx_local_backend='cpu'
+/
+&propagation
+ propagator='hse_taylor4'
+ yn_predictor_corrector='y'
+/
+```
+
+```sh
+export SALMON_FACTOR_HISTORY=learned
+mpiexec -n 8 /path/to/salmon < inputfile > output.log
+```
+
+Ensure the launcher exports the variable to every rank. Check
+`FACTOR_HISTORY learned`, `FACTOR_HISTORY step/predicted`, and `variables.log`.
+Compare currents, absorbed work and spectra with `strict` at the same physical
+conditions; a predicted ACE energy expectation is not an independently
+recomputed instantaneous full-exchange functional energy.
+State lifetime is described in [the shared-state design](../design/learned-ace-state-lifetime.md).
+
+## SR localization: activation and defaults
+
+HSE's screened kernel is always part of HSE06. **Additional numerical SR
+localization is off by default**, because `hse_sr_tolerance=0d0`. A positive
+value below one selects `R` from `erfc(hse_omega*R)=hse_sr_tolerance`.
+The tolerance is dimensionless and is not a relative current, energy or
+spectrum error bound. A smaller tolerance gives a larger radius and generally
+more work. `1d-3` is the tested starting setting; validate it for the material.
+
+| Control | Code default | Usage |
+|---|---|---|
+| `hse_sr_tolerance` | `0d0` | 0 disables numerical kernel cutoff; `1d-3` enables the tested Gamma SR route. |
+| `exx_mlwf_radius` | `0d0` | No fixed WF cutoff radius. |
+| `exx_mlwf_norm_fraction` | `0d0` | Disabled retained-norm selection; use `1d0` for full WF support in Gamma source ACE. |
+| `exx_ace_support` | `'occupied'` | Set `'source'` for this SR route. |
+| `exx_local_fft` | `'auto'` | Select compatible local/neighborhood FFT work. |
+| `exx_local_backend` | `'cpu'` | CPU SR implementation. |
+
+Use the Gamma example above without the `exx_factor_*` entries and without
+`SALMON_FACTOR_HISTORY` to use SR with ordinary ACE. WF truncation is not
+required: fraction 1 and radius 0 preserve full support. The current learned
+Gamma adapter specifically requires these values and SR tolerance `1d-3`.
+
+The supported numerical SR path is native fixed-ion HSE06 Gamma RT on CPU,
+source-support ACE and compatible Cartesian spatial MPI. Neighboring ranks
+exchange pair densities; overlap-save FFTs retain each rank's output region.
+Short periodic axes remain full length. This reduces FFT volume where the
+cell/decomposition permits; MPI1 or a window covering the cell retains the
+uncut path. It is not a spherical restriction of the orbital integration.
+Inspect `EXX_SR`, `EXX_SR WF-local/neighborhood pairs` and
+`EXX_SUPPORT_ACE accepted`. Positivity/Hermiticity rejection and any uncut
+fallback must be reported; do not attribute fallback timing to SR speedup.
+Neither this section nor the RT examples certify GS SR or GPU SR support.

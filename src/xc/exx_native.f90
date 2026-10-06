@@ -60,6 +60,8 @@ module exx_native
   type(s_surrogate_trace),save :: strict_trace
   public :: exx_trace_corrected_endpoint
   type(s_exx_ace),save :: ace
+  ! Rank-local RT framework state; see docs/design/learned-ace-state-lifetime.md.
+  ! Predictor trials never commit history.
   type(s_factor_history),allocatable,save::factor_history(:)
   logical,save::factor_initialized=.false.,factor_configured=.false.,factor_experiment=.false.,factor_learned=.false.
   logical,save::factor_prediction_installed=.false.,factor_all_ready=.false.
@@ -83,6 +85,7 @@ module exx_native
   end interface
 contains
   subroutine exx_trace_corrected_endpoint(system,info,step,step_dt,final_step,total_steps)
+    implicit none
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::step
@@ -162,6 +165,7 @@ contains
 
   ! Experimental canonical factor history: Gamma/grid or full k-only MPI.
   subroutine factor_configure(system,info)
+    implicit none
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
     character(32)::value
@@ -196,6 +200,7 @@ contains
   end subroutine
 
   subroutine exx_factor_begin(step,system,mg,info,psi)
+    implicit none
     integer,intent(in)::step
     type(s_dft_system),intent(in)::system
     type(s_rgrid),intent(in)::mg
@@ -220,6 +225,7 @@ contains
   end subroutine
 
   subroutine factor_materialize()
+    implicit none
     complex(8),allocatable::rowbuf(:)
     integer::i,j,k,n,ng
     if(.not.ace%packed)return
@@ -248,6 +254,7 @@ contains
   end subroutine
 
   subroutine exx_factor_endpoint(system,info,step)
+    implicit none
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
     integer,intent(in)::step
@@ -269,6 +276,7 @@ contains
     factor_all_ready=total_not_ready==0
   contains
     subroutine sumgrid(a)
+    implicit none
       complex(8),intent(inout)::a(:,:)
       complex(8)::total(size(a,1),size(a,2))
       call comm_summation(a,total,size(a),info%icomm_r);a=total
@@ -276,6 +284,7 @@ contains
   end subroutine
 
   subroutine factor_predicted_expectation(system,mg,info,psi)
+    implicit none
     type(s_dft_system),intent(in)::system
     type(s_rgrid),intent(in)::mg
     type(s_parallel_info),intent(in)::info
@@ -691,7 +700,17 @@ contains
       complex(8),intent(out) :: density(:,:)
       integer :: full_index,rep,op,g,stat,ng,no
       complex(8) :: coefficient
-      external :: zgemm
+  ! BLAS explicit interface: sequence association preserves strided row offsets.
+  interface
+    subroutine zgemm(transa,transb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc)
+      implicit none
+      character(1),intent(in) :: transa,transb
+      integer,intent(in) :: m,n,k,lda,ldb,ldc
+      complex(8),intent(in) :: alpha,beta,a(lda,*),b(ldb,*)
+      complex(8),intent(inout) :: c(ldc,*)
+    end subroutine zgemm
+  end interface
+
       ng=size(source,1);no=size(source,2)
       full_index=layout(info%id_k+1)+j-1
       rep=symmetry_map%owner(full_index)-info%ik_s+1
@@ -705,7 +724,7 @@ contains
           rotated(:,g)=rotated(:,g)*kernel%phase(:,j)
         enddo
         call zgemm('N','C',rows,ng,no,coefficient,rotated(lo,1),ng,rotated(1,1),ng, &
-          (1d0,0d0),density(1,1),size(density,1))
+          (1d0,0d0),density,size(density,1))
       enddo
     end subroutine
   end subroutine
@@ -1235,7 +1254,17 @@ contains
       integer(int64) :: stats(5)
       integer :: workers,thread_state(3)
       real(8) :: bound,cpu_seconds,bound_scale
-      external :: zgemm
+  ! BLAS explicit interface: sequence association preserves strided row offsets.
+  interface
+    subroutine zgemm(transa,transb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc)
+      implicit none
+      character(1),intent(in) :: transa,transb
+      integer,intent(in) :: m,n,k,lda,ldb,ldc
+      complex(8),intent(in) :: alpha,beta,a(lda,*),b(ldb,*)
+      complex(8),intent(inout) :: c(ldc,*)
+    end subroutine zgemm
+  end interface
+
       call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first_owned,status)
       if(status/=0)return
       workers=1
