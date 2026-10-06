@@ -11,7 +11,7 @@ at a collective SCF transition. No basis change or new wavefunction storage.
 Spec: `docs/plans/2026-09-28-pbe-pre-scf-design.md`.
 
 ### Task 1: Behavioral regression (RED)
-Create testsuites/653_functional/test_pre_scf.py. Check staged HSE/PBEh/rVV10
+Create developer_tests/653_functional/test_pre_scf.py. Check staged HSE/PBEh/rVV10
 energies against direct convergence, require transition log and no earlier MLWF,
 validate controls and rejection of unfinished warmup. Run against old binary;
 Expected: new namelist controls are rejected.

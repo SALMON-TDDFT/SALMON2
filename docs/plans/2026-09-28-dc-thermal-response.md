@@ -16,16 +16,16 @@ Temperature is kBT in Hartree. Weights contain core norm and k-point weight; spi
 
 ### Task 1: Weighted occupation and response kernel
 
-Files: create `src/gs/dc/dc_thermal.f90`, `testsuites/653_functional/dc_thermal_probe.f90`, `testsuites/653_functional/test_dc_thermal.py`.
+Files: create `src/gs/dc/dc_thermal.f90`, `developer_tests/653_functional/dc_thermal_probe.f90`, `developer_tests/653_functional/test_dc_thermal.py`.
 
 1. Write a standalone probe of weighted charge, entropy, analytic fixed-N directional derivatives versus independent central differences, common energy shifts, zero weights, degenerate states, extreme tails, insufficient capacity, invalid inputs and saturated response rejection.
-2. Run `python3 -m unittest discover -s testsuites/653_functional -p test_dc_thermal.py -v`. Expected: missing production module failure.
+2. Run `python3 -m unittest discover -s developer_tests/653_functional -p test_dc_thermal.py -v`. Expected: missing production module failure.
 3. Implement `solve_dc_thermal(e,w,T,g,N,mu,f,ts,status)` and `response_dc_thermal(e,w,T,g,mu,de,dw,dmu,df,dts,status)`. Solve a monotone bracket by bisection, compute stable Fermi tails, and enforce sum(g*(w*df+f*dw))=0. Use dTS=g*sum(T*s(f)*dw+(e-mu)*w*df).
 4. Run the same test. Expected: PASS.
 
 ### Task 2: Native finite-temperature PBEh DC integration
 
-Files: modify `src/gs/dc/CMakeLists.txt`, `src/gs/dc/dcdft.f90`, `src/gs/dc/dc_force.f90`, `testsuites/653_functional/test_dc_force.py`.
+Files: modify `src/gs/dc/CMakeLists.txt`, `src/gs/dc/dcdft.f90`, `src/gs/dc/dc_force.f90`, `developer_tests/653_functional/test_dc_force.py`.
 
 1. Add a native failure test for insufficient fragment-state capacity. Run against old binary. Expected: no explicit occupation failure.
 2. Register module, call weighted solver for positive-T PBEh DC, preserve legacy paths, use shared entropy in force diagnostic. Status failures print a useful error on representative rank then stop collectively.

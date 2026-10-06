@@ -12,7 +12,7 @@ Spec: user-approved real-space Ehrenfest continuation from 426259e7. Full EXX su
 
 ### Task 1: Pulse acceptance and work oracle
 
-Extend testsuites/653_functional/test_ehrenfest.py with Acos2 inputs using theory=tddft_pulse, a finite pulse followed by field-free propagation, dt/dt2/dt4. Independently integrate volume*(Jion-Jmatter).E with endpoint trapezoidal quadrature; compare to Eall+Tion and refine trajectory/current. Observe current input rejection first. Preserve an unsupported pulse-shape rejection case.
+Extend developer_tests/653_functional/test_ehrenfest.py with Acos2 inputs using theory=tddft_pulse, a finite pulse followed by field-free propagation, dt/dt2/dt4. Independently integrate volume*(Jion-Jmatter).E with endpoint trapezoidal quadrature; compare to Eall+Tion and refine trajectory/current. Observe current input rejection first. Preserve an unsupported pulse-shape rejection case.
 
 ### Task 2: Correct time locations
 

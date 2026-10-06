@@ -41,8 +41,8 @@ GNU Fortran / Open MPI / ScaLAPACK / OpenBLASによる手元CPU検証：
 手動実行例（MPI/HSE/ScaLAPACKビルドを指定）：
 
 ```sh
-python3 testsuites/651_hybrid_exchange/metric/run.py --build /path/to/build
-python3 testsuites/651_hybrid_exchange/metric/run.py --build /path/to/build --no-scalapack
+python3 developer_tests/651_hybrid_exchange/metric/run.py --build /path/to/build
+python3 developer_tests/651_hybrid_exchange/metric/run.py --build /path/to/build --no-scalapack
 ```
 
 `MPIFC`、`MPIEXEC`、`BLAS_LIBS`、`SCALAPACK_LIBS`でコンパイラ・リンク設定を指定できる。テストは現行ソースを境界検査付きで一時領域にコンパイルする。Fugaku/NVHPC/GPUでは今回の変更を未検証。

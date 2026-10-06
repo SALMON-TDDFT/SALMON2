@@ -26,7 +26,7 @@ Index blocks are a computational partition, not a new physical cutoff. Build a s
 
 ## Task 1: Sparse candidate catalogue and independent tests
 
-Files: create `src/xc/exx_pair_candidates.f90`, `testsuites/651_hybrid_exchange/wannier/pair_candidates_probe.f90`, and Python driver; add module to `src/xc/CMakeLists.txt`.
+Files: create `src/xc/exx_pair_candidates.f90`, `developer_tests/651_hybrid_exchange/wannier/pair_candidates_probe.f90`, and Python driver; add module to `src/xc/CMakeLists.txt`.
 
 Interface: build catalogue collectively for local target columns over comm_r; query a source bounding box and amplitude threshold to return unique target indices. Store CSR block entries and per-target marks, never an Nsource×Ntarget matrix. Keep counters for catalogue entries and candidate examinations. Metadata may grow dense for physically delocalized input; do not impose a memory cap or silently discard amplitudes.
 
@@ -49,7 +49,7 @@ Consumes Task1 catalogue. Produces screened action with unchanged error-budget/A
 
 ## Task 3: Native RT validation and benchmark configuration
 
-Files: `testsuites/653_functional/test_pair_screen.py`, `benchmarks/benchmark_h2_blocks/run.py`, analysis/README, `docs/inputs/exx-mlwf.md`.
+Files: `developer_tests/653_functional/test_pair_screen.py`, `benchmarks/benchmark_h2_blocks/run.py`, analysis/README, `docs/inputs/exx-mlwf.md`.
 
 1. Add RED same-seed PBEh native RT on/off/diagnose, full/.999 supports, MPI1/2 and orbital split validation; test fixed-radius guards remain unchanged.
 2. Verify actual small H2 seed pair reductions and accepted bound/fallback behavior before launching the long matrix. Compare energy/current, not merely successful exit.

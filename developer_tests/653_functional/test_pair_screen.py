@@ -93,7 +93,7 @@ class PairScreenSCF(unittest.TestCase):
             if os.environ.get('SALMON_TEST_SAVE_DIR'):
                 folder=Path(os.environ['SALMON_TEST_SAVE_DIR'])/f'pair_scf_{mode}_{tol}'
                 folder.mkdir(parents=True,exist_ok=True)
-                inp=(input_helpers.ROOT/'testsuites/653_functional/dc_hydrogen.inp').read_text()
+                inp=(input_helpers.ROOT/'developer_tests/653_functional/dc_hydrogen.inp').read_text()
                 inp=inp.replace("yn_dc='y'","yn_dc='n'").replace('nproc_k=2','nproc_k=1')
                 inp=setup(inp.replace('hse_mlwf_maxiter=20',controls+f"\n exx_pair_screening='{mode}'\n exx_pair_tolerance={tol}"))
                 (folder/'inputfile').write_text(inp);(folder/'output').write_text(result[2])

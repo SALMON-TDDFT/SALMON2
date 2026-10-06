@@ -1,7 +1,7 @@
 """Sequential MPI2 old/new allocation benchmark; reports process peak RSS."""
 from pathlib import Path
 import os,subprocess,tempfile
-root=Path(__file__).resolve().parents[2];here=root/"testsuites"/"652_dc_lcfo/rt"
+root=Path(__file__).resolve().parents[2];here=root/"developer_tests" / "652_dc_lcfo/rt"
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
  subprocess.run(['cc','-c',str(here/'peak_rss.c'),'-o',str(p/'rss.o')],check=True)

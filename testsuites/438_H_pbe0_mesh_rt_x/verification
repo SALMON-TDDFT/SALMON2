@@ -1,14 +1,27 @@
 #!/usr/bin/env python3
+
+# Verification follows the standard testsuite exit-code contract.
+import sys
+print("#" * 60)
+print("# Verification start")
 from pathlib import Path
 import math
 s=Path('outputfile').read_text()
-assert 'end SALMON' in s and 'end complex DC-LCFO wavefunction reconstruction' in s
-assert s.count('EXX_SUPPORT_ACE accepted: T')==33
-assert 'EXX_SUPPORT_ACE accepted: F' not in s
+if not ('end SALMON' in s and 'end complex DC-LCFO wavefunction reconstruction' in s):
+    print("Mismatch:", "Check failed: 'end SALMON' in s and 'end complex DC-LCFO wavefunction reconstruction' in s")
+    sys.exit(-1)
+if not (s.count('EXX_SUPPORT_ACE accepted: T') == 33):
+    print("Mismatch:", "Check failed: s.count('EXX_SUPPORT_ACE accepted: T') == 33")
+    sys.exit(-1)
+if not ('EXX_SUPPORT_ACE accepted: F' not in s):
+    print("Mismatch:", "Check failed: 'EXX_SUPPORT_ACE accepted: F' not in s")
+    sys.exit(-1)
 for pattern,count in [('*_rt.data',16),('*_rt_energy.data',17)]:
  p=next(Path('.').glob(pattern))
  rows=[list(map(float,l.split())) for l in p.read_text().splitlines() if l.strip() and not l.lstrip().startswith('#')]
- assert len(rows)==count and all(math.isfinite(v) for row in rows for v in row)
+ if not (len(rows) == count and all((math.isfinite(v) for row in rows for v in row))):
+     print("Mismatch:", 'Check failed: len(rows) == count and all((math.isfinite(v) for row in rows for v in row))')
+     sys.exit(-1)
 print('PBE0 native mesh RT completed 16 steps with source ACE')
 
 reference=Path('../424_H_pbe0_mesh_rt')
@@ -17,7 +30,17 @@ for pattern,columns,tolerance in [('*_rt.data',range(13,16),1e-10),('*_rt_energy
   return [list(map(float,l.split())) for l in next(folder.glob(pattern)).read_text().splitlines()
           if l.strip() and not l.lstrip().startswith('#')]
  actual=read(Path('.'));expected=read(reference)
- assert len(actual)==len(expected)
- assert max(abs(a[0]-b[0]) for a,b in zip(actual,expected))<1e-12
- assert max(abs(a[c]-b[c]) for a,b in zip(actual,expected) for c in columns)<tolerance
+ if not (len(actual) == len(expected)):
+     print("Mismatch:", 'Check failed: len(actual) == len(expected)')
+     sys.exit(-1)
+ if not (max((abs(a[0] - b[0]) for a, b in zip(actual, expected))) < 1e-12):
+     print("Mismatch:", 'Check failed: max((abs(a[0] - b[0]) for a, b in zip(actual, expected))) < 1e-12')
+     sys.exit(-1)
+ if not (max((abs(a[c] - b[c]) for a, b in zip(actual, expected) for c in columns)) < tolerance):
+     print("Mismatch:", 'Check failed: max((abs(a[c] - b[c]) for a, b in zip(actual, expected) for c in columns)) < tolerance')
+     sys.exit(-1)
 print('Cartesian x/y decomposition agrees for PBE0 current and energy')
+
+print("# Verification end")
+print("#" * 60)
+sys.exit(0)

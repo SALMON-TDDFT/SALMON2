@@ -2,11 +2,11 @@
 from pathlib import Path
 import json, os, subprocess, tempfile
 root = Path(__file__).resolve().parents[2]
-here = root / "testsuites" / "651_hybrid_exchange/wannier"
+here = root / "developer_tests" / "651_hybrid_exchange/wannier"
 results = []
 with tempfile.TemporaryDirectory() as folder:
     p = Path(folder)
-    subprocess.run(['cc', '-c', str(root/'testsuites/652_dc_lcfo/rt/peak_rss.c'), '-o', str(p/'rss.o')], check=True)
+    subprocess.run(['cc', '-c', str(root/'developer_tests/652_dc_lcfo/rt/peak_rss.c'), '-o', str(p/'rss.o')], check=True)
     subprocess.run([os.environ.get('FC', 'gfortran'), '-O2', '-fexternal-blas', '-fno-tree-loop-vectorize',
                     str(root/'src/xc/exx_wannier_gauge.f90'), str(here/'gamma_memory_probe.f90'),
                     str(p/'rss.o'), '-L/opt/homebrew/opt/openblas/lib', '-lopenblas', '-o', str(p/'probe')], cwd=p, check=True)

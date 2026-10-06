@@ -84,7 +84,7 @@ export NVCOMPILER_ACC_NOTIFY=3
   nvfortran --version
   python3 --version
   nvidia-smi
-  python3 testsuites/653_functional/test_cufft.py \
+  python3 developer_tests/653_functional/test_cufft.py \
     --gpu -v CufftBackend.test_gpu_matches_fftw
 } > "cufft-smoke.${PBS_JOBID}.log" 2>&1
 ```

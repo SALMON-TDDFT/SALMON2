@@ -1,16 +1,39 @@
 #!/usr/bin/env python3
+
+# Verification follows the standard testsuite exit-code contract.
+import sys
+print("#" * 60)
+print("# Verification start")
 import math
 from pathlib import Path
 text=Path('outputfile').read_text()
-assert 'end SALMON' in text, 'Calculation did not complete'
-assert 'EXX_DC canonical full-fragment source (k mesh)' in text, 'Canonical fragment exchange was not used'
-assert 'EXX_WANNIER' not in text, 'Default DC SCF must not localize fragment orbitals'
-assert 'DC_HSE_CORE' in text, 'Core exchange accounting missing'
+if not ('end SALMON' in text):
+    print("Mismatch:", 'Calculation did not complete')
+    sys.exit(-1)
+if not ('EXX_DC canonical full-fragment source (k mesh)' in text):
+    print("Mismatch:", 'Canonical fragment exchange was not used')
+    sys.exit(-1)
+if not ('EXX_WANNIER' not in text):
+    print("Mismatch:", 'Default DC SCF must not localize fragment orbitals')
+    sys.exit(-1)
+if not ('DC_HSE_CORE' in text):
+    print("Mismatch:", 'Core exchange accounting missing')
+    sys.exit(-1)
 # Match independent of whitespace in the legacy DC output.
 records=[line.split() for line in text.splitlines() if line.split()[:3]==['DC','#SCF','=']]
-assert records and float(records[-1][10])<=1e-8, 'DC SCF did not converge'
-assert math.isfinite(float(records[-1][7])), 'Nonfinite total energy'
+if not (records and float(records[-1][10]) <= 1e-08):
+    print("Mismatch:", 'DC SCF did not converge')
+    sys.exit(-1)
+if not (math.isfinite(float(records[-1][7]))):
+    print("Mismatch:", 'Nonfinite total energy')
+    sys.exit(-1)
 f=Path('data_dcdft/total/H_dc_hse_lcfo_complex_eigen.data')
 values=[float(line.split()[3]) for line in f.read_text().splitlines() if line.strip() and not line.startswith('#')]
-assert len(values)==8 and all(map(math.isfinite,values)), 'LCFO eigenvalues missing/nonfinite'
+if not (len(values) == 8 and all(map(math.isfinite, values))):
+    print("Mismatch:", 'LCFO eigenvalues missing/nonfinite')
+    sys.exit(-1)
 print('DC-HSE converged; two k points, complex LCFO, core exchange accounting present')
+
+print("# Verification end")
+print("#" * 60)
+sys.exit(0)

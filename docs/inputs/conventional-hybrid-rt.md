@@ -99,7 +99,7 @@ exchange truncation are outside the supported scope.
 
 These CPU/MPI/HSE-enabled CTest cases generate fresh GS data and require its
 verification before preparing RT. They check completion, finite currents and
-energies, and electron-number conservation. `testsuites/653_functional/test_conventional_rt.py`
+energies, and electron-number conservation. `developer_tests/653_functional/test_conventional_rt.py`
 also compares one-rank and two-rank propagation for all three functionals,
 checks zero-field stability and Gamma adaptive 99.9% source ACE, and rejects
 missing/mismatched saved data.

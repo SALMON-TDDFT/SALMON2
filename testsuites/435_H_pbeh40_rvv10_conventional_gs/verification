@@ -1,11 +1,26 @@
 #!/usr/bin/env python3
+
+# Verification follows the standard testsuite exit-code contract.
+import sys
+print("#" * 60)
+print("# Verification start")
 from pathlib import Path
 import math
 import re
 
 text = Path('outputfile').read_text()
-assert 'end SALMON' in text and '#GS converged at' in text, 'GS did not converge'
-assert 'DC #SCF' not in text, 'Expected conventional GS'
+if not ('end SALMON' in text and '#GS converged at' in text):
+    print("Mismatch:", 'GS did not converge')
+    sys.exit(-1)
+if not ('DC #SCF' not in text):
+    print("Mismatch:", 'Expected conventional GS')
+    sys.exit(-1)
 for name in ('wfn.bin', 'occupation.bin', 'info.bin', 'hybrid_gs.bin'):
-    assert (Path('data_for_restart') / name).stat().st_size > 0, name
+    if not ((Path('data_for_restart') / name).stat().st_size > 0):
+        print("Mismatch:", name)
+        sys.exit(-1)
 print('Conventional hybrid GS converged and exported wavefunctions with metadata')
+
+print("# Verification end")
+print("#" * 60)
+sys.exit(0)

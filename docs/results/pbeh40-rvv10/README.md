@@ -42,7 +42,7 @@ Total-density DC+rVV10, DC-MD forces, restart metadata, real-space distribution,
 ## Static DC total-density rVV10
 
 `dc-static.json` records the 16x8x8 hydrogen-cell integration check from
-`testsuites/653_functional/dc_hydrogen.inp`. The two-fragment buffers cover the
+`developer_tests/653_functional/dc_hydrogen.inp`. The two-fragment buffers cover the
 full cell, so this checks communication and energy accounting, not convergence
 of a genuinely truncated fragment approximation. One-fragment DC agrees with
 conventional PBEh40+rVV10 within 2e-6 eV; two/four-rank calculations also agree
@@ -54,7 +54,7 @@ Reproduce with an HSE-enabled executable and a local MPI launcher:
 
 ```
 SALMON_TEST_EXE=/absolute/path/salmon SALMON_TEST_MPIEXEC=/absolute/path/mpiexec \
-  python3 -m unittest discover -s testsuites/653_functional
+  python3 -m unittest discover -s developer_tests/653_functional
 ```
 
 This validates static DC only. Root-only nonlocal FFT performance, realistic
@@ -101,8 +101,8 @@ serially, and dense targets may still require every source-target pair.
 Reproduce the standalone correctness and bounded benchmark checks:
 
 ```
-python3 -m unittest discover -s testsuites/651_hybrid_exchange/wannier -p test_local_fft.py
-python3 -m unittest discover -s testsuites/651_hybrid_exchange/wannier -p test_local_fft_benchmark.py
+python3 -m unittest discover -s developer_tests/651_hybrid_exchange/wannier -p test_local_fft.py
+python3 -m unittest discover -s developer_tests/651_hybrid_exchange/wannier -p test_local_fft_benchmark.py
 ```
 
 The standalone direct sum includes complex kernels, wrapped support, moving box
@@ -307,7 +307,7 @@ validation of giant-system scaling or liquid-water trajectories.
 ## Spatial ACE algebra
 
 The optional reduction API in hse_ace stores local factor rows. The independent
-MPI driver `testsuites/651_hybrid_exchange/ace/spatial_driver.f90` checks a complex negative
+MPI driver `developer_tests/651_hybrid_exchange/ace/spatial_driver.f90` checks a complex negative
 operator against direct dense multiplication, plus source interpolation,
 non-unit dv, multiple k points/targets, midpoint factors, zero exchange and
 collective rejection of a NaN on one rank. MPI1/2/4 pass, including an empty

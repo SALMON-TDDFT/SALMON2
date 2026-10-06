@@ -23,7 +23,7 @@ local pairs serially; full-domain pairs retain existing OpenMP/batching. Record
 FFT volume and avoid claiming overall linear scaling from FFT-volume reduction.
 
 ### Task 1: standalone convolution
-- Create `src/xc/exx_local_fft.f90`, `testsuites/651_hybrid_exchange/wannier/local_fft_probe.f90`
+- Create `src/xc/exx_local_fft.f90`, `developer_tests/651_hybrid_exchange/wannier/local_fft_probe.f90`
   and `test_local_fft.py`.
 - First fail tests for a missing module. Cover wrapped boxes in three axes,
   singleton/full supports, complex pair densities, rectangular meshes, arbitrary

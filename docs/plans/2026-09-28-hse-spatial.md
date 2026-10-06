@@ -6,7 +6,7 @@
 
 **Technology:** Fortran, MPI, FFTW, Python unittest.
 
-1. Extend `testsuites/651_hybrid_exchange/ace/exchange_driver.f90` and `validate_exchange.py` to compare screened exchange against serial Wannier for omega 0, .11 and .3 on 1/2/4 ranks. Observe missing interface, implement optional omega in `src/xc/hse_spatial.f90`, verify parity.
+1. Extend `developer_tests/651_hybrid_exchange/ace/exchange_driver.f90` and `validate_exchange.py` to compare screened exchange against serial Wannier for omega 0, .11 and .3 on 1/2/4 ranks. Observe missing interface, implement optional omega in `src/xc/hse_spatial.f90`, verify parity.
 2. Extend `src/xc/hse_native.f90` dispatch and both action calls for HSE DC-initialized RT. Update `src/io/inputoutput.f90` admission and shared RT timing in `src/rt/{initialization_rt,time_evolution_step,em_field}.f90`. Preserve PBEh-only force and MD permissions.
 3. Add HSE DC preparation and fixed-ion impulse/pulse serial vs 2/4-rank integration regression. Run existing PBEh suite, HSE-off build and independent review.
 4. Document verified scope and remaining migration work. Do not remove legacy multi-k, finite-support, SCF or projected functionality before replacement validation.

@@ -58,7 +58,6 @@ if (USE_OPENACC)
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/602_bulk_Si_gs_gramschmidt_blas_n")
 else () 
 ### Testsuites for CPU ###
-  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/652_dc_lcfo/rt")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/101_C2H2_gs")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/102_C2H2_rt_response")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/103_C2H2_rt_pulse")
@@ -165,9 +164,4 @@ endif ()
 if(USE_HSE AND USE_MPI AND NOT USE_OPENACC)
   add_subdirectory(420_bulk_Si_hse_gs)
   add_subdirectory(421_bulk_Si_hse_rt)
-endif()
-
-# Mathematical CPU test for configurable learned ACE histories.
-if(USE_HSE AND NOT USE_OPENACC)
-  add_subdirectory(651_hybrid_exchange/history)
 endif()

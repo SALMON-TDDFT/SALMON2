@@ -1,17 +1,11 @@
-# 機能単位の通常回帰
+# 回帰試験と開発検証の分離
 
-通常実行窓口を3機能へ統合した。
+`testsuites`には通常のSALMON入力、参照データ、CMake登録、準備・合否判定を置く。内部演算用FortranドライバとPython単体検証はすべて`developer_tests`へ移動した。
 
-1. `651_hybrid_exchange/check_function.py`: 交換・ACE、SR畳込み、ブロックFFT、WF局在化、学習ACE履歴。
-2. `652_dc_lcfo/check_function.py`: DC-LCFOの有限値検査、再構成、分散対角化、時間発展・輸送・占有数。
-3. `653_functional/check_function.py`: PBEh/rVV10の独立積分・変分微分、分散畳込み。
+開発検証は交換/ACE・DC-LCFO・汎関数の3機能に集約。`BUILD_DEVELOPER_TESTS`は既定OFF。ON時だけLCFO・学習ACE数学試験をビルド・CTest登録する。手動機能検証の手順はdeveloper_tests/README.md。
 
-すべて`--build /path/to/build`を指定。`--detailed`で多数の分割条件と追加の開発検証を実行する。標準窓口は手動実行で、番号付与のみをCTest登録とはしない。
+420番台の代表GS→RTと129/130のDC-GS回帰は維持。性能測定はbenchmarks、GPU試作検証はexperiments、機種設定はtools/validation。過去の計算記録中の当時のパスは保存する。
 
-交換比較は(1 MPI, 1軌道並列)と(4 MPI, 2軌道並列)、FFT/SRは1×1×1と2×2×1（OMP1/2）、LCFO対角化は1 MPIと4 MPI、rVV10分散比較は4 MPI/OMP2を通常条件に選んだ。核・積分サイズなどの独立数値比較は維持した。全並列構成を通常回帰で保証するものではない。
+検証: 開発検証OFFでは4内部数値試験が未登録、ONではLCFO・学習履歴2件・LAPACKの4試験合格。Python構文・固定パス・420番台fixture依存とtestsuites内Fortran/Cドライバゼロを確認。代表GS→RT全計算とGPU実機検証は今回未実施。
 
-旧の6窓口は削除、学習履歴650は交換機能内historyへ統合。内部の数値基準と詳細開発スクリプトを保管しており、ソースファイル数が3になったという意味ではない。正常終了だけでは数学的数値一致を代替できないため独立数値基準は残した。
-
-420/421のSi HSE、422のDC-HSE、425/426、427/428、430、435/436の代表GS→RT試験は維持。重複429/433/434は削除。129/130の番号付きDC-GS試験も維持。
-
-ビルド・機種設定はtools/validation、GPUはexperimentsへ分離。pseudoは共有入力。
+既存111/112の形式に準拠: preparationはsh、verificationはPythonによる出力検査、CMakeはcreate_test/create_mpi_test。追加420番台のassert判定を明示的な失敗表示とsys.exit(-1)へ変更し、成功時sys.exit(0)を明記。判定条件・許容誤差・物理入力は変更していない。Python最適化実行でも合否判定が消えない。基準値のない正常終了・有限値検査を物理精度の基準値回帰と混同しない。

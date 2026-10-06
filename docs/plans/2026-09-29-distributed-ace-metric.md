@@ -9,7 +9,7 @@
 **Tech Stack:** Fortran, communication wrappers, BLACS/ScaLAPACK, MPI synthetic tests.
 
 ## Tasks
-1. Add `testsuites/651_hybrid_exchange/metric/driver.f90` and runner. Compare old/new dense and packed actions over spatial/orbital/mixed layouts, including empty ranks, arbitrary targets and error cases. First compile must fail on the missing optional combined communicator argument.
+1. Add `developer_tests/651_hybrid_exchange/metric/driver.f90` and runner. Compare old/new dense and packed actions over spatial/orbital/mixed layouts, including empty ranks, arbitrary targets and error cases. First compile must fail on the missing optional combined communicator argument.
 2. Add `src/xc/exx_distributed_metric.f90`, primitive tile metadata in `s_exx_ace`, optional `comm_matrix` in `orbital_ace_build`, native `icomm_ro` wiring and CMake source. Keep BLACS ownership temporary so copied ACE states are safe. No global N-square scratch.
 3. Update manual test object dependencies. Build GNU ScaLAPACK; run synthetic MPI and native short regressions. Compile/run no-ScaLAPACK fallback. Check coding rules and scalar IEEE inquiries.
 4. Record tested tile memory and remaining replicated MLWF/hermitian-correction matrices. Review complete patch; no production timing or Fugaku validation claims without measurements.

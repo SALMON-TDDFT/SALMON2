@@ -1,15 +1,34 @@
 #!/usr/bin/env python3
+
+# Verification follows the standard testsuite exit-code contract.
+import sys
+print("#" * 60)
+print("# Verification start")
 from pathlib import Path
 import re, math
 s=Path('outputfile').read_text()
-assert 'end SALMON' in s and 'end DC-LCFO complex' in s
+if not ('end SALMON' in s and 'end DC-LCFO complex' in s):
+    print("Mismatch:", "Check failed: 'end SALMON' in s and 'end DC-LCFO complex' in s")
+    sys.exit(-1)
 rows=re.findall(r'DC #SCF.*diff =\s*(\S+)',s)
-assert rows and float(rows[-1])<1e-10
+if not (rows and float(rows[-1]) < 1e-10):
+    print("Mismatch:", 'Check failed: rows and float(rows[-1]) < 1e-10')
+    sys.exit(-1)
 files=list(Path('data_dcdft').rglob('functional.txt'))
-assert len(files)==2
+if not (len(files) == 2):
+    print("Mismatch:", 'Check failed: len(files) == 2')
+    sys.exit(-1)
 for p in files:
  lines=p.read_text().splitlines()
- assert lines[2].strip()=='pbe0'
+ if not (lines[2].strip() == 'pbe0'):
+     print("Mismatch:", "Check failed: lines[2].strip() == 'pbe0'")
+     sys.exit(-1)
  v=list(map(float,lines[3].split()))
- assert all(map(math.isfinite,v)) and v[0]==.25 and v[1]==0
+ if not (all(map(math.isfinite, v)) and v[0] == 0.25 and (v[1] == 0)):
+     print("Mismatch:", 'Check failed: all(map(math.isfinite, v)) and v[0] == 0.25 and (v[1] == 0)')
+     sys.exit(-1)
 print('PBE0 DC GS converged with correct functional metadata')
+
+print("# Verification end")
+print("#" * 60)
+sys.exit(0)

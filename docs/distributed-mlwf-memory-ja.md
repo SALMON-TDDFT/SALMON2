@@ -52,8 +52,8 @@ GNU Fortran / Open MPI / ScaLAPACK / OpenBLASで確認：
 - 読み取りによる独立レビューを実施。Fugaku/NVHPC/GPU環境では今回の変更を未検証。
 
 ```sh
-python3 testsuites/651_hybrid_exchange/gauge/run.py --build /path/to/mpi-build
-python3 testsuites/651_hybrid_exchange/gauge/run.py --build /path/to/mpi-build --no-scalapack
+python3 developer_tests/651_hybrid_exchange/gauge/run.py --build /path/to/mpi-build
+python3 developer_tests/651_hybrid_exchange/gauge/run.py --build /path/to/mpi-build --no-scalapack
 ```
 
 試験は現行ソースを一時領域に境界検査付きでコンパイルする。`MPIFC`、`MPIEXEC`、`BLAS_LIBS`、`FFTW_LIBS`、`SCALAPACK_LIBS`で環境を指定できる。

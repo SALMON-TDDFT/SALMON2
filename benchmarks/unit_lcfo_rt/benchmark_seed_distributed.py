@@ -2,7 +2,7 @@
 from pathlib import Path
 import array, hashlib, json, math, os, subprocess, tempfile
 root = Path(__file__).resolve().parents[2]
-here = root / "testsuites" / "652_dc_lcfo/rt"
+here = root / "developer_tests" / "652_dc_lcfo/rt"
 results = []
 with tempfile.TemporaryDirectory() as folder:
     p = Path(folder);(p/'config.h').write_text('')

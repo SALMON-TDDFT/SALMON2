@@ -101,7 +101,7 @@ Use a shared per-axis roundoff allowance 32*epsilon*total-cell-length on both
 faces of each half-open fragment box, including lower and excluding upper
 boundary atoms without modifying coordinates. It is a numerical boundary
 convention, not a physical buffer expansion. The actual MPI8 one-iteration
-regression in testsuites/652_dc_lcfo/boundary/check.py failed on the old binary
+regression in developer_tests/652_dc_lcfo/boundary/check.py failed on the old binary
 with the observed 18/14 atom counts and passed after recompilation. Complex
 LCFO130, HSE422 and LAPACK eigenvector CTest checks: 7/7 passed serially.
 

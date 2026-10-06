@@ -1,6 +1,6 @@
 # 現行実装への移行
 
-2026-10-06：以下は旧pencil実装の測定記録。FFTW pencil実装と専用試験は削除し、現行は`fftw_blocks`へ統一した。現在の検証コマンドは `python3 testsuites/651_hybrid_exchange/fft/run.py --build /path/to/build`。旧コマンドは現在の版では使わない。通常のFFTE経路は維持する。
+2026-10-06：以下は旧pencil実装の測定記録。FFTW pencil実装と専用試験は削除し、現行は`fftw_blocks`へ統一した。現在の検証コマンドは `python3 developer_tests/651_hybrid_exchange/fft/run.py --build /path/to/build`。旧コマンドは現在の版では使わない。通常のFFTE経路は維持する。
 
 # 空間分割交換計算のOpenMP対応
 

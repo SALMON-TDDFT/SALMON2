@@ -11,7 +11,7 @@ ROOT=Path(__file__).resolve().parents[2]
 @unittest.skipUnless(os.environ.get('SALMON_TEST_EXE'),'SALMON_TEST_EXE required')
 class ExxInputs(unittest.TestCase):
     def run_case(self, functional, transform=lambda s:s, error=None, error_exit=True):
-        inp=(ROOT/'testsuites/653_functional/dc_hydrogen.inp').read_text()
+        inp=(ROOT/'developer_tests/653_functional/dc_hydrogen.inp').read_text()
         inp=inp.replace("yn_dc='y'","yn_dc='n'").replace('nproc_k=2','nproc_k=1')
         inp=inp.replace('hse_mlwf_maxiter=20',functional)
         inp=transform(inp)

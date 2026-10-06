@@ -21,8 +21,8 @@ GNU MPI/ScaLAPACK版と逐次版のビルド成功。HSE06/PBE0/PBEhのsource AC
 
 ```sh
 python3 experiments/unit_exx_sparse_orbitals/run.py
-python3 testsuites/651_hybrid_exchange/metric/run.py --build /path/to/build
-python3 testsuites/651_hybrid_exchange/metric/run.py --build /path/to/build --no-scalapack
+python3 developer_tests/651_hybrid_exchange/metric/run.py --build /path/to/build
+python3 developer_tests/651_hybrid_exchange/metric/run.py --build /path/to/build --no-scalapack
 ```
 
 ## 実測

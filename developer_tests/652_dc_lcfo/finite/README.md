@@ -1,6 +1,6 @@
 # CheFSI finite checks without array conversion temporaries
 
-Run `python3 testsuites/652_dc_lcfo/finite/run.py` (GNU Fortran by default).
+Run `python3 developer_tests/652_dc_lcfo/finite/run.py` (GNU Fortran by default).
 FC and FFLAGS override the compiler and flags. The default flags deliberately
 put array temporaries on the stack to detect this regression.
 
