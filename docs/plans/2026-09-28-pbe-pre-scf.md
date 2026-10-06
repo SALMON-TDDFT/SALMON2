@@ -1,5 +1,7 @@
 # PBE Pre-SCF Implementation Plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use executing-plans to implement task-by-task.
 
 **Goal:** Opt-in PBE warmup before native/DC hybrid SCF.

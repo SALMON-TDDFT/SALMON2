@@ -3544,6 +3544,18 @@ contains
       if(xc=='hse06'.and.(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n')) &
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
       if(yn_dc=='y')yn_hse_wannier='y'
+      ! Fixed thermal occupations use the existing weighted canonical source.
+      if(xc=='hse06'.and.yn_dc=='n'.and.temperature>=0d0)then
+        if(nstate*2<nelec.or.nstate<1.or.mod(nelec,2)/=0.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or.exx_kpoint_backend/='cpu'.or. &
+           index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
+           exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.hse_sr_tolerance/=0d0.or. &
+           yn_hse_wannier_snapshot=='y'.or.yn_hse_lcfo_rt=='y'.or.yn_conventional_from_dcdft=='y') &
+          error stop 'Thermal HSE: full-support CPU k-only exchange required'
+        if(theory/='dft'.and.propagator/='hse_taylor4') &
+          error stop 'Thermal HSE RT: Taylor4 ACE required'
+        yn_hse_wannier='y'
+      endif
       if(yn_hse_wannier=='y')then
         if(exx_mlwf_interval<1.or.exx_mlwf_maxiter<1.or. &
           .not.ieee_is_finite(exx_mlwf_tolerance).or.exx_mlwf_tolerance<=0d0) &
@@ -3577,7 +3589,8 @@ contains
         if(yn_dc=='y'.and.temperature<0d0) &
           error stop 'DC HSE: a nonnegative electronic temperature is required'
       endif
-      if(yn_dc/='y'.and.(yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
+      if(yn_dc/='y'.and..not.(xc=='hse06'.and.temperature>=0d0).and. &
+         (yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
         if(nstate*2/=nelec.or.temperature>=0d0) &
           error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
       endif

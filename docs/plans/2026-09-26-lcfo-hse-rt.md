@@ -1,5 +1,7 @@
 # LCFO HSE real-time implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 **Goal:** Propagate the Si128 system in a fixed complex LCFO basis, retain sixteen fragment-local exchange evaluations, and compare dielectric response versus Wannier axial support.
 
 **Architecture:** Separate a verified finite-basis propagation kernel from density/Hamiltonian assembly and the electromagnetic response. Import the actual complex LCFO basis and Hamiltonian rather than evolving sixteen isolated periodic fragments. Preserve an explicit full-support reference. No frozen-Hamiltonian trace is a self-consistent HSE dielectric spectrum.

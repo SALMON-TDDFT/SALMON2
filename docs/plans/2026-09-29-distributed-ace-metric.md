@@ -1,5 +1,7 @@
 # Distributed ACE Metric Implementation Plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 > Execute inline in the existing hybrid feature checkout using executing-plans.
 
 **Goal:** Remove replicated ACE metric/factor matrices from the native Gamma spatial/orbital path with ScaLAPACK.

@@ -1,5 +1,7 @@
 # Conventional hybrid ground state to native real-time propagation
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 PBE0, PBEh(40), and PBEh(40)+rVV10 can start fixed-ion native real-space RT
 from an ordinary converged GS. This route does not require divide-and-conquer
 (DC) preparation or LCFO reconstruction.

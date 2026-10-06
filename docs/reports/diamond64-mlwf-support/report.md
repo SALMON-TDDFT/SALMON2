@@ -1,5 +1,7 @@
 # Diamond C64：MLWFの球状積分範囲の比較
 
+> 2026-10-06更新：以下の旧版向けパッチは現行ソースへ反映済みのため配布を終了しました。過去の適用・検証記録は履歴として残しています。現行版では追加パッチを適用せず、ソースから再ビルドしてください。
+
 > 過去の測定条件・実装段階を含む時系列記録です。最新の状況・比較表は[統合ノート](../../../DEVELOPMENT_NOTES.md)を参照してください。旧x方向カット、3次元球カット、異なるステップ数の速度比は相互に混在させません。
 
 
@@ -720,7 +722,7 @@ RTは各1回で負荷差があり、速度改善の主張はしません。QRは
 
 MPI1/2/3/4、空のroot・不均等行分割・端数ブロック・特異行列、非対応ビルドの拒否を検証。分散seedを有効にしたnative Taylor4、フラグメント×軌道MPI、局所半径、ACE/U再利用も通過。**富岳での新経路のビルドと数値計算は未検証**です。密SVD/U/ACEとrootの6リンクは残り、8³・10³本番の保留は継続します。
 
-[詳細](../../../DEVELOPMENT_NOTES.md#distributed-seed) ／ [測定データ](distributed-seed-memory-results.json) ／ [適用用差分](../../../tools/patches/distributed-gamma-seed.patch)
+[詳細](../../../DEVELOPMENT_NOTES.md#distributed-seed) ／ [測定データ](distributed-seed-memory-results.json) ／ `distributed-gamma-seed.patch`（旧版向け・配布終了）
 
 
 ### 実装と再実行
@@ -731,12 +733,7 @@ QRの各rank保持量は`Nocc × max(1,NUMROC(Nbasis,32,rank,0,np))`複素数。
 
 Git管理されていないソース用差分は`distributed-gamma-seed.patch`。**64d147d8/8cca5430相当のstreamed seedが適用済みであること**が前提。古い富岳ソースへ直接適用しない。ソース直下でdry-run後に適用し再ビルド：
 
-```sh
-patch --dry-run -p1 < distributed-gamma-seed.patch
-patch -p1 < distributed-gamma-seed.patch
-cmake --build build -j 8
-export SALMON_LCFO_SEED_DISTRIBUTED=1
-```
+旧版への個別パッチ適用手順は廃止。現行ブランチのソースから再設定・再ビルドする。
 
 以前のroot経路は`SALMON_LCFO_SEED_DISTRIBUTED=0`で選択。新経路は通常ビルドに含まれるが、富岳のPZGEQPFリンク・コンパイル・数値は実機検証待ち。
 
@@ -748,19 +745,13 @@ export SALMON_LCFO_SEED_DISTRIBUTED=1
 ビルドが成功したことだけでは、rootメモリ削減まで適用済みとは判断できない。
 以前の3枚の適用案内はこの前提確認が不足していた。
 
-この旧版用に[累積パッチ](../../../tools/patches/gamma-memory-from-pre-root.patch)
+この旧版用に`gamma-memory-from-pre-root.patch`（旧版向け・配布終了）
 を用意。rootリンク/集約の削減、Gamma seed 2D化、streamed seed、分散QRの
 4段階を含む。変更対象5ファイルを旧版から更新し、`133e8b37`の内容と
 byte一致することを確認した。コンパイラ/POSIX修正のファイルは変更しない。
 初期リンクのタイル化`b743e8b3`は適用済みであることが前提。
 
-```sh
-patch --batch --forward --fuzz=0 --dry-run -p1 < gamma-memory-from-pre-root.patch
-# 上が全て成功した場合のみ
-patch --batch --forward --fuzz=0 -p1 < gamma-memory-from-pre-root.patch
-cmake -S . -B build
-cmake --build build -j 8
-```
+旧版への個別パッチ適用手順は廃止。現行ブランチのソースから再設定・再ビルドする。
 
 先の3枚と重ねて適用しない。dry-run失敗時は元ソースは変更されていないので
 復元操作は不要。累積パッチのdry-runも失敗する場合は現物の版を確認する。
@@ -773,30 +764,22 @@ cmake --build build -j 8
 `gamma-memory-from-pre-root.patch`では不足した。2回ともdry-runで止まり、
 本適用やビルドは実行されていない。失敗hunk数だけで版を推定した案内を訂正する。
 
-この実ファイル用は[gamma-memory-fugaku-verified.patch](../../../tools/patches/gamma-memory-fugaku-verified.patch)。
+この実ファイル用は`gamma-memory-fugaku-verified.patch`（旧版向け・配布終了）。
 初期リンク削減、rootリンク削減、Gamma seed 2D化、streamed seed、分散seedまでを含む。
 既存4ファイルの変更と`lcfo_mlwf_links.f90`・`lcfo_seed.f90`の新設で計6ファイル。
 富岳で直した`hse_lcfo_rt.f90`・`posix.c`には触れない。
 
 適用前4ファイル・適用後6ファイルのSHA-256照合表も同梱：
-[before](../../../tools/patches/gamma-memory-fugaku-before.sha256)／
-[after](../../../tools/patches/gamma-memory-fugaku-after.sha256)／
-[版情報](../../../tools/patches/gamma-memory-fugaku-verified.json)。
+`gamma-memory-fugaku-before.sha256`（旧版向け・配布終了）／
+`gamma-memory-fugaku-after.sha256`（旧版向け・配布終了）／
+`gamma-memory-fugaku-verified.json`（旧版向け・配布終了）。
 特定した旧版からfuzz=0でdry-run・本適用を行い、全6ファイルが数値実装
 `133e8b37`とbyte一致すること、二重適用を拒否することをローカルで検証済み。
 この配布修正で数値コードは変更していない。富岳でのビルド成功はまだ未確認。
 
 ソース直下に上記patchとbefore/afterをダウンロード後：
 
-```sh
-# いずれか失敗したら後続処理を実行しない
-sha256sum -c gamma-memory-fugaku-before.sha256
-patch --batch --forward --fuzz=0 --dry-run -p1 < gamma-memory-fugaku-verified.patch
-patch --batch --forward --fuzz=0 -p1 < gamma-memory-fugaku-verified.patch
-sha256sum -c gamma-memory-fugaku-after.sha256
-cmake -S . -B build
-cmake --build build -j 8
-```
+旧版への個別パッチ適用手順は廃止。現行ブランチのソースから再設定・再ビルドする。
 
 先に案内した3枚やpre-rootパッチは、この版には適用しない。
 
@@ -813,7 +796,7 @@ cmake --build build -j 8
 Release/Debugと公式aliasの両方を設定テストし、Cフラグには混入しないことを確認。
 フラグ欠落でテストが失敗し、追加後に成功することを確認した。
 
-[適用用パッチ](../../../tools/patches/fugaku-alloc-assign.patch)をソース直下で
+`fugaku-alloc-assign.patch`（旧版向け・配布終了）をソース直下で
 dry-run後に適用し、CMake再設定・再ビルドする。既存数値バイナリのリンク成功と、
 この追加設定の富岳実機ビルド・実行確認は区別する。パッチは既存toolchainへ
 fuzz=0で適用して変更後ファイルと一致することを検証済み。
@@ -886,4 +869,4 @@ Tofu形状から全フラグメント分を含めて算出したプロセス数�
 全体系のDC初期化と通常3Dの既存最適化は保持。環境変数・namelist追加なし。
 実際の手続きを抽出しFJMPI APIを模擬するテストで旧STOPを再現し、修正後4ケース成功。
 GNUビルド成功。実機のFJMPI・MPI通信グループ生成の結合試験は未実施。
-[適用差分](../../../tools/patches/fugaku-dc-tofu-fallback.patch)。
+`fugaku-dc-tofu-fallback.patch`（旧版向け・配布終了）。

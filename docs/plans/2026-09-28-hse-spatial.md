@@ -1,5 +1,7 @@
 # HSE spatial exchange implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 **Goal:** Extend the existing Gamma spatial MLWF/FFTW/ACE mesh route to HSE fixed-ion RT, keeping legacy implementations until all their supported modes have replacements.
 
 **Architecture:** Share localization, distributed FFT and ACE; select the screened reciprocal HSE kernel with its analytic zero mode, or the existing truncated Coulomb kernel. DC provides initial mesh wavefunctions only. HSE MD remains gated pending force validation.

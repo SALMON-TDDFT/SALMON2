@@ -1,5 +1,7 @@
 # Real-space Ehrenfest finite pulse implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a bounded finite-duration laser to the existing DC-initialized real-space PBEh Ehrenfest route and verify energy against external work.

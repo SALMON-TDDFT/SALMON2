@@ -1,5 +1,7 @@
 # ACE vendor threading implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 **Goal:** Extend the approved single-k / multiple-k threading policy to Fujitsu BLAS/LAPACK and NVIDIA NVPL without changing the production benchmark binary.
 
 **Architecture:** Keep optional control callbacks. Carry an explicit three-integer scope state (active, prior BLAS count, prior LAPACK count), with request zero restoring that state. Enter and leave scopes on the calling thread and each k worker. OpenBLAS changes its process-wide setting only outside the parallel region; NVPL changes BLAS and LAPACK thread-local settings independently; Fujitsu changes the OpenMP task setting. Unknown providers retain the serial-k fallback.

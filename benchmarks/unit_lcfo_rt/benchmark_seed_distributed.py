@@ -2,11 +2,11 @@
 from pathlib import Path
 import array, hashlib, json, math, os, subprocess, tempfile
 root = Path(__file__).resolve().parents[2]
-here = root / "developer_tests" / "652_dc_lcfo/rt"
+here = Path(__file__).resolve().parent
 results = []
 with tempfile.TemporaryDirectory() as folder:
     p = Path(folder);(p/'config.h').write_text('')
-    subprocess.run(['cc', '-c', str(here/'peak_rss.c'), '-o', str(p/'rss.o')], check=True)
+    subprocess.run(['cc', '-c', str(root/'benchmarks/peak_rss.c'), '-o', str(p/'rss.o')], check=True)
     subprocess.run(['mpifort', '-cpp','-ffree-line-length-none','-fallow-argument-mismatch', '-DUSE_MPI', '-DUSE_SCALAPACK', '-I'+folder, '-O2', '-fexternal-blas', '-fno-tree-loop-vectorize',
                     str(root/'src/misc/nvtx_wrapper.f90'), str(root/'src/parallel/communication.f90'),
                     str(root/'src/xc/exx_wannier_gauge.f90'), str(root/'src/xc/lcfo_dist_rows.f90'),

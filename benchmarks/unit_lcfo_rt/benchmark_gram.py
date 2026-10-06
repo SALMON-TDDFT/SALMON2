@@ -1,7 +1,7 @@
 """Isolated Gram timing; one MPI job at a time, no timing pass/fail threshold."""
 from pathlib import Path
 import os,subprocess,tempfile
-root=Path(__file__).resolve().parents[2];here=root/"developer_tests" / "652_dc_lcfo/rt"
+root=Path(__file__).resolve().parents[2];here=Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as folder:
  exe=Path(folder)/'probe'
  subprocess.run(['mpifort','-O3','-fexternal-blas','-fno-tree-loop-vectorize',str(here/'local_action_stubs.f90'),str(root/'src/xc/lcfo_gram.f90'),str(here/'gram_benchmark.f90'),'-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(exe)],cwd=folder,check=True)

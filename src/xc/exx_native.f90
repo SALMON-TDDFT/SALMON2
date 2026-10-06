@@ -905,7 +905,7 @@ contains
     implicit none
     ! Full-support ordinary multi-k exchange uses density-tile MPI for every
     ! hybrid. Retain Wannier for DC, fractional/empty states and localized support.
-    use_wannier_exchange=yn_dc=='y'.or.yn_hse_wannier_snapshot=='y'.or. &
+    use_wannier_exchange=temperature>=0d0.or.yn_dc=='y'.or.yn_hse_wannier_snapshot=='y'.or. &
       exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0.or. &
       (yn_hse_wannier=='y'.and.(product(num_kgrid)==1.or.temperature>=0d0.or. &
         (nstate>0.and.nstate*2/=nelec)))
@@ -1361,6 +1361,19 @@ contains
     ng=product(mg%num);no=system%no;nk=system%nk
     if(use_symmetry.or.nk/=product(num_kgrid))error stop 'HSE Wannier: full k mesh required'
     if(maxval(abs(system%wtk-1d0/nk))>1d-12)error stop 'HSE Wannier: uniform k weights required'
+    if(temperature>=0d0.and.yn_dc=='n')then
+      do ik=1,nk
+        do j=1,no
+          if(.not.ieee_is_finite(system%rocc(j,ik,1)).or.system%rocc(j,ik,1)<0d0.or. &
+             system%rocc(j,ik,1)>2d0)error stop 'Thermal HSE: invalid source occupations'
+        enddo
+      enddo
+      ex=sum(sum(system%rocc(:,:,1),dim=1)*system%wtk)
+      if(abs(ex-real(nelec,8))>1d-8)error stop 'Thermal HSE: source electron count mismatch'
+      if(wannier%updates==0.and.info%id_k==0) &
+        write(*,'(a,3es24.15)')'EXX_THERMAL electrons/min/max occupation: ', &
+          ex,minval(system%rocc(:,:,1)),maxval(system%rocc(:,:,1))
+    endif
     offdiag=system%primitive_a
     do j=1,3
       offdiag(j,j)=0d0
@@ -1396,7 +1409,7 @@ contains
         if(mod(wannier%updates,exx_mlwf_interval)==0)maxiter=exx_mlwf_maxiter
         if(dc_canonical())maxiter=0
         call wannier_refresh_source(wannier,allpsi,system%rocc(:,:,1),maxiter,exx_mlwf_tolerance,status, &
-          localize=.not.dc_canonical())
+          localize=.not.dc_canonical().and..not.(temperature>=0d0.and.yn_dc=='n'))
         if(dc_canonical().and.wannier%updates==1)write(*,'(a)') 'EXX_DC canonical full-fragment source (k mesh)'
       endif
       if(status==0)then

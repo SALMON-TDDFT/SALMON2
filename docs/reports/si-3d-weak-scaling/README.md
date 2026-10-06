@@ -1,5 +1,7 @@
 # Si 3D DC-HSE / LCFO RT inputs
 
+> 2026-10-06更新：以下の旧版向けパッチは現行ソースへ反映済みのため配布を終了しました。過去の適用・検証記録は履歴として残しています。現行版では追加パッチを適用せず、ソースから再ビルドしてください。
+
 Siの4³/6³/8³/10³用GS・RT入力セットです。RTの`&functional`で
 `hse_lcfo_wf_radius=9d0`を指定済み。初期WFの球内ノルムが99.9%未満なら
 Warningを出します。半径の自動変更はしません。大規模計算は未実行です。
@@ -128,18 +130,7 @@ Choose the starting step matching the source; do not apply an earlier patch twic
 Each earlier patch also requires a successful `--dry-run --fuzz=0` before applying.
 For step 3, from the SALMON source root:
 
-```sh
-(
-  set -e
-  si_inputs=/absolute/path/to/si-3d-weak-scaling
-  sha256sum -c "$si_inputs/patches/lcfo-namelist-only-before.sha256"
-  patch --batch --forward --fuzz=0 --dry-run -p1 < "$si_inputs/patches/lcfo-namelist-only.patch"
-  patch --batch --forward --fuzz=0 -p1 < "$si_inputs/patches/lcfo-namelist-only.patch"
-  sha256sum -c "$si_inputs/patches/lcfo-namelist-only-after.sha256"
-  cmake -S . -B build
-  cmake --build build -j 8
-)
-```
+旧版への個別パッチ適用手順は廃止。現行ブランチのソースから再設定・再ビルドする。
 
 If a hash or dry-run differs, stop; do not force the patch. The complete patch
 was applied to clean copies and the resulting files matched the expected hashes.

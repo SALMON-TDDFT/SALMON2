@@ -1,4 +1,0 @@
-51db6c115eca0d7e356a6d68bebf7e1d48d3737f06c218859a5d46821f00d05f  src/xc/CMakeLists.txt
-03c5f354c59174bea6e5ddfc8dcb565aba2fdccfd35cb951c0abd1c0c8dd66fe  src/xc/hse_wannier_gauge.f90
-19a51fb2c668e46be2c4ac4ca6572e955a2f27a305aa073e2c5c91ceb5b5ece4  src/xc/lcfo_dist_rows.f90
-079ce8c14175573c57666314e5b8495f4168cfb819e1a7e04c295af0d2c42f3e  src/xc/lcfo_rt_wannier.f90

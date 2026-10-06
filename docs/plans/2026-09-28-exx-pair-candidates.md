@@ -1,5 +1,7 @@
 # Bounded spatial EXX pair candidate generation
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Reduce expensive pair generation, pair FFTs and temporary memory for localized HSE/PBEh native mesh exchange, then repeat the approved H2 benchmark.

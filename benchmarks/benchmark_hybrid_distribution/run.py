@@ -71,14 +71,14 @@ def run():
            'parallel/communication.f90.o','misc/nvtx_wrapper.f90.o']
     result['object_sha256']={name:hashlib.sha256((obj/name).read_bytes()).hexdigest() for name in names}
     result['probe_sha256']={str(f.relative_to(root)):hashlib.sha256(f.read_bytes()).hexdigest() for f in
-        (Path(__file__).resolve(),Path(__file__).with_name('probe.f90').resolve(),root/'developer_tests/652_dc_lcfo/rt/peak_rss.c')}
+        (Path(__file__).resolve(),Path(__file__).with_name('probe.f90').resolve(),root/'benchmarks/peak_rss.c')}
     result['probe_source_snapshot']={path:(root/path).read_text() for path in result['probe_sha256']}
     result['mpi_version']=subprocess.run(shlex.split(a.mpiexec)+['--version'],text=True,capture_output=True).stdout.strip()
     a.output.parent.mkdir(parents=True,exist_ok=True)
     def save():a.output.write_text(json.dumps(result,indent=2)+'\n')
     with tempfile.TemporaryDirectory(prefix='hybrid-scaling-') as tmp:
         tmp=Path(tmp);exe=tmp/'probe'
-        subprocess.run(['cc','-O2','-c',str(root/'developer_tests/652_dc_lcfo/rt/peak_rss.c'),'-o',str(tmp/'rss.o')],check=True)
+        subprocess.run(['cc','-O2','-c',str(root/'benchmarks/peak_rss.c'),'-o',str(tmp/'rss.o')],check=True)
         subprocess.run([fc,'-O2','-fopenmp','-ffree-line-length-none','-I'+str(b),str(Path(__file__).with_name('probe.f90')),
                         str(tmp/'rss.o'),*[str(obj/name) for name in names],*libs,'-o',str(exe)],check=True)
         tasks=[]

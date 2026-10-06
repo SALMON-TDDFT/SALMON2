@@ -1,5 +1,7 @@
 # LCFO RT development status
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 Current control interface: all LCFO HSE algorithm settings use `&functional`.
 Earlier benchmark measurements below describe the same numerical algorithms;
 old input archives with shell switches must be migrated before use.

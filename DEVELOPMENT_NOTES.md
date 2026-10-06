@@ -1,5 +1,7 @@
 # DC-HSE・MLWF・ACE：実装と測定結果
 
+> 2026-10-06更新：以下の旧版向けパッチは現行ソースへ反映済みのため配布を終了しました。過去の適用・検証記録は履歴として残しています。現行版では追加パッチを適用せず、ソースから再ビルドしてください。
+
 更新：2026-09-27。対象ブランチ：`dc-hse-mlwf-ace`。最新変更：HSE/LCFOの制御をnamelistへ統一。前版：`3c4ff577`（半径診断のループ整理）。半径namelist：`e6c54a87`。分散seedのメモリ測定：`133e8b37`。
 
 **時間発展はTaylor4。局所交換と2段階MPIは実装済みですが、直接WF伝播の疎な局所化は未完了です。** このノートを開発状況の入口とし、詳細な時系列記録・図・数値データを下記にまとめています。
@@ -31,15 +33,15 @@
 4×4×4/MPI64/OMP12で報告された`logical error: get # of process/node`は、
 フラグメント内通信グループのノード内rank数を全体Tofu形状から求めた値と
 比較して停止する処理に対応する。未対応Tofu次元のfallback判定もこの比較の後だった。
-[修正パッチ](tools/patches/fugaku-dc-tofu-fallback.patch)は、1D/2D等の未対応次元と
+`fugaku-dc-tofu-fallback.patch`（旧版向け・配布終了）は、1D/2D等の未対応次元と
 DCフラグメントを既存の通常マッピングへ戻す。MPI64/OMP12を変更する対策ではない。
 全体系のDC初期化（内部`yn_dc='t'`）と通常3Dの最適化は維持する。
 
 Fujitsu APIを模擬して実際のマッピング手続きをコンパイルするテストで、旧版の同一STOPを
 再現。修正後はDCの1D/3D、全体系の1D、通常3Dの4ケース成功。GNU通常ビルド成功。
 富岳実機でのビルド・再実行は未確認。適用は
-[before](tools/patches/fugaku-dc-tofu-fallback-before.sha256)照合→dry-run→適用→
-[after](tools/patches/fugaku-dc-tofu-fallback-after.sha256)照合→再ビルド。
+`fugaku-dc-tofu-fallback-before.sha256`（旧版向け・配布終了）照合→dry-run→適用→
+`fugaku-dc-tofu-fallback-after.sha256`（旧版向け・配布終了）照合→再ビルド。
 この1ファイルの修正はnamelist移行と独立して適用できる。
 
 
@@ -78,11 +80,11 @@ Si入力はa=10.26 bohr、core16³、buffer各方向8点、RT dt=0.02、16step�
 
 | ソースの状態 | 適用する差分 |
 |---|---|
-| 初期リンク削減前（利用者の4ファイルSHAと照合済み） | [累積メモリパッチ](tools/patches/gamma-memory-fugaku-verified.patch)。[before](tools/patches/gamma-memory-fugaku-before.sha256)→[after](tools/patches/gamma-memory-fugaku-after.sha256)を確認 |
-| allocatable代入の自動確保が無効 | [富岳設定](tools/patches/fugaku-alloc-assign.patch)。正確なオプションは`-Nalloc_assign`（アスタリスクなし） |
-| 累積メモリ版まで適用済み | [半径namelist](tools/patches/lcfo-radius-namelist.patch)。[before](tools/patches/lcfo-radius-before.sha256)→[after](tools/patches/lcfo-radius-after.sha256)を確認 |
-| 半径namelist適用済み（e6c54a87/6e07618d相当） | [ループ整理](tools/patches/lcfo-radius-loop-cleanup.patch) |
-| ループ整理適用済み（3c4ff577/eb23bfea相当） | [namelist統一](tools/patches/lcfo-namelist-only.patch)。[before](tools/patches/lcfo-namelist-only-before.sha256)→[after](tools/patches/lcfo-namelist-only-after.sha256)を確認 |
+| 初期リンク削減前（利用者の4ファイルSHAと照合済み） | `gamma-memory-fugaku-verified.patch`（旧版向け・配布終了）。`gamma-memory-fugaku-before.sha256`（旧版向け・配布終了）→`gamma-memory-fugaku-after.sha256`（旧版向け・配布終了）を確認 |
+| allocatable代入の自動確保が無効 | `fugaku-alloc-assign.patch`（旧版向け・配布終了）。正確なオプションは`-Nalloc_assign`（アスタリスクなし） |
+| 累積メモリ版まで適用済み | `lcfo-radius-namelist.patch`（旧版向け・配布終了）。`lcfo-radius-before.sha256`（旧版向け・配布終了）→`lcfo-radius-after.sha256`（旧版向け・配布終了）を確認 |
+| 半径namelist適用済み（e6c54a87/6e07618d相当） | `lcfo-radius-loop-cleanup.patch`（旧版向け・配布終了） |
+| ループ整理適用済み（3c4ff577/eb23bfea相当） | `lcfo-namelist-only.patch`（旧版向け・配布終了）。`lcfo-namelist-only-before.sha256`（旧版向け・配布終了）→`lcfo-namelist-only-after.sha256`（旧版向け・配布終了）を確認 |
 
 各差分はソース直下で`patch --batch --forward --fuzz=0 --dry-run -p1`に成功した場合だけ
 本適用します。失敗したら後続を実行しません。半径パッチのafter照合はループ整理を適用する
@@ -118,7 +120,7 @@ make -j 8
 
 実行ファイルは `build/salmon`。インストール先を指定する場合はconfigure.pyに `--prefix=/absolute/path/to/install` を追加し、続けて `make install`。今回追加したHSE・MLWF・ACEも同じ手順で組み込まれます。FFTW/Libxcは利用可能なものをリンク検査し、なければ対象コンパイラで自動ビルドします（初回ダウンロードにはネットワークが必要）。直接CMakeを呼ぶ場合の富岳自動選択も残しています。
 
-ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳では累積seedメモリ削減版までコンパイル・リンク完了を利用者ログで確認。GS/RT・3次元の数値実行は未確認**です。ログでallocatable代入の自動確保が無効と判明したため、実行前に[Fortran設定の追加パッチ](tools/patches/fugaku-alloc-assign.patch)を適用し再ビルドします。この追加設定の実機確認はまだです。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
+ローカルでは設定選択の自動試験と、追加のライブラリ指定なしのMPI/HSE・HSE無効ビルドを確認。**富岳では累積seedメモリ削減版までコンパイル・リンク完了を利用者ログで確認。GS/RT・3次元の数値実行は未確認**です。ログでallocatable代入の自動確保が無効と判明したため、実行前に`fugaku-alloc-assign.patch`（旧版向け・配布終了）を適用し再ビルドします。この追加設定の実機確認はまだです。[手順・設定の優先順位・実機検証範囲](docs/hse-platforms.md#fugaku)
 
 <a id="implementation"></a>
 
@@ -171,9 +173,9 @@ RTは各1回で負荷差があり、速度改善の主張はしません。QRは
 
 MPI1/2/3/4、空のroot・不均等行分割・端数ブロック・特異行列、非対応ビルドの拒否を検証。分散seedを有効にしたnative Taylor4、フラグメント×軌道MPI、局所半径、ACE/U再利用も通過。**富岳での新経路のビルドと数値計算は未検証**です。密SVD/U/ACEとrootの6リンクは残り、8³・10³本番の保留は継続します。
 
-[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/distributed-seed-memory-results.json) ／ [適用用差分](tools/patches/distributed-gamma-seed.patch)
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/distributed-seed-memory-results.json) ／ `distributed-gamma-seed.patch`（旧版向け・配布終了）
 
-富岳側の実ファイル4個のSHA-256を照合し、初期リンク削減前の版と特定。[実ファイル照合済み累積パッチ](tools/patches/gamma-memory-fugaku-verified.patch)と[適用前](tools/patches/gamma-memory-fugaku-before.sha256)・[適用後](tools/patches/gamma-memory-fugaku-after.sha256)の検証表を使用します。以前の3枚とpre-root用差分はこの版には適用しません。経緯と手順は詳細ノート末尾に追記。
+富岳側の実ファイル4個のSHA-256を照合し、初期リンク削減前の版と特定。`gamma-memory-fugaku-verified.patch`（旧版向け・配布終了）と`gamma-memory-fugaku-before.sha256`（旧版向け・配布終了）・`gamma-memory-fugaku-after.sha256`（旧版向け・配布終了）の検証表を使用します。以前の3枚とpre-root用差分はこの版には適用しません。経緯と手順は詳細ノート末尾に追記。
 
 <a id="streamed-seed"></a>
 
@@ -191,7 +193,7 @@ MPI2・占有512/基底8192のseed単独peak RSSは **root204.25→141.27 MiB（
 
 この標準経路ではrootにQR行列1枚は残り、QR自体は未分散。密SVD/U/ACEも残るため、RT全体や8³のピーク削減率・本番可否を保証する結果ではありません。今回の変更は富岳では未検証です。
 
-[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/streamed-seed-memory-results.json) ／ [適用用差分](tools/patches/streamed-gamma-seed.patch)
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/streamed-seed-memory-results.json) ／ `streamed-gamma-seed.patch`（旧版向け・配布終了）
 
 <a id="seed-memory"></a>
 
@@ -207,7 +209,7 @@ MPI2・占有512/基底8192のseed単独peak RSSは **root204.25→141.27 MiB（
 
 初期化のメモリ削減であり、RT速度改善の主張はしません。rootの全係数＋転置QR配列、全体ピボット選択、密U/ACEは残るため、8³・10³の本番は引き続きピーク検証待ちです。
 
-[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/gamma-seed-memory-results.json) ／ [適用用差分](tools/patches/gamma-seed-memory.patch)
+[詳細](docs/reports/diamond64-mlwf-support/report.md) ／ [測定データ](docs/reports/diamond64-mlwf-support/gamma-seed-memory-results.json) ／ `gamma-seed-memory.patch`（旧版向け・配布終了）
 
 <a id="initial-memory"></a>
 

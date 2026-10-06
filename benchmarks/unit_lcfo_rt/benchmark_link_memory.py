@@ -1,10 +1,10 @@
 """Sequential MPI2 old/new allocation benchmark; reports process peak RSS."""
 from pathlib import Path
 import os,subprocess,tempfile
-root=Path(__file__).resolve().parents[2];here=root/"developer_tests" / "652_dc_lcfo/rt"
+root=Path(__file__).resolve().parents[2];here=Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
- subprocess.run(['cc','-c',str(here/'peak_rss.c'),'-o',str(p/'rss.o')],check=True)
+ subprocess.run(['cc','-c',str(root/'benchmarks/peak_rss.c'),'-o',str(p/'rss.o')],check=True)
  subprocess.run(['mpifort','-O2','-fexternal-blas','-fno-tree-loop-vectorize',str(here/'local_action_stubs.f90'),str(root/'src/xc/lcfo_mlwf_links.f90'),str(here/'link_memory_probe.f90'),str(p/'rss.o'),'-L/opt/homebrew/opt/openblas/lib','-lopenblas','-o',str(p/'probe')],cwd=p,check=True)
  for n in (512,1024):
   for mode in ('dense','tiled'):

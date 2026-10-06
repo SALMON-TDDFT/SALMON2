@@ -1,5 +1,7 @@
 # MIYABI cuFFTのAlltoallクラッシュへの対応
 
+> 2026-10-06更新：以下の旧版向けパッチは現行ソースへ反映済みのため配布を終了しました。過去の適用・検証記録は履歴として残しています。現行版では追加パッチを適用せず、ソースから再ビルドしてください。
+
 報告：MPI 1 rank / OpenMP 8 threads、NVHPC/HPC-Xでreturncode 139。`exx_k_exchange`のGPU状態通知→`exx_native`の内部コールバック→`communication`のMPI_Alltoall。gdbのC側PMPI_AlltoallではcommunicatorポインタがNULL。
 
 ## 調査と変更
@@ -18,7 +20,7 @@ NVHPC/HPC-X/cuFFTでのSIGSEGVそのものは手元で再現・修正確認で�
 
 ## MIYABIでの再確認
 
-コード更新後、既存のGPUビルド設定で再ビルドする。個別に適用する場合は[この問題だけのパッチ](patches/miyabi-k-cufft-communicator.patch)をリポジトリ直下で`git apply --check`してから適用する。パッチには同時開発中のメモリ削減変更を含めていない。
+コード更新後、既存のGPUビルド設定で再ビルドする。修正は現行ソースに反映済みで、個別パッチの適用は不要。
 
 計算ノード上で、既存のNVHPC/HPC-X、FFTW、BLAS設定を使う：
 

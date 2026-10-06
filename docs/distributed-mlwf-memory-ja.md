@@ -1,5 +1,7 @@
 # Γ点MLWF行列の分散化（2026-09-29）
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 [ACE計量行列の分散化](distributed-ace-memory-ja.md)に続き、native Γ点のMLWFゲージ、6本のリンク行列、輸送用SVDと初期シードの行列を空間×軌道MPIランクに分散した。
 
 ## 採用状態

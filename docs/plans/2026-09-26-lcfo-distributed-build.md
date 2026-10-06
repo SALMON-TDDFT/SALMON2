@@ -1,5 +1,7 @@
 # Distributed LCFO exchange construction implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 **Goal:** Remove repeated global coefficient rotations and exchange/ACE construction from native LCFO RT, preserving the physical operator and fragment x orbital MPI.
 
 **Architecture:** Store C, transported frames, W and ACE factors by core rows. Exchange only the rows required by each fragment's basis; reverse that exchange to sum fragment operator contributions back to their row owners. Keep the fallback exchange as fragment blocks, including both midpoint endpoints. Assemble orbital-space metrics from local contributions, solve small problems on the root, and use ScaLAPACK for >=128 occupied states when built with it. Orbital-space rotations/metrics remain dense; this is distributed computation, not linear-scaling sparse orbital algebra. Initial MLWF seeding and the existing diagnostic dump may gather coefficients to one root once.

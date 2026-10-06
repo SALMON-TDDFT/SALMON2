@@ -1,5 +1,7 @@
 # Experimental cuFFT backend for compact exact exchange
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 The default remains `exx_local_backend='cpu'`. The optional `cufft` backend
 moves the existing compact-support convolution batches to an NVIDIA GPU, in
 double-complex precision. It uses the same discrete kernel/filter and selected

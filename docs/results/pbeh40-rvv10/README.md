@@ -1,5 +1,7 @@
 # PBEh(40)+rVV10 validation — 2026-09-27
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 Base `4048d67f`; CPU Apple arm64, GNU Fortran 15, FFTW, Libxc, OpenBLAS. MPI-enabled build used for water with one rank and one OpenMP/BLAS thread. `USE_HSE=OFF`, non-MPI build also compiles. Existing compiler warnings in legacy sources remain.
 
 ## Kernel and integration checks

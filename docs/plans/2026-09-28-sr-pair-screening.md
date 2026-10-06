@@ -1,5 +1,7 @@
 # SR pair screening implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Diagnose and optionally omit HSE source/target pairs with a conservative discrete exchange-action error budget, preserving the existing spherical support and FFT machinery.

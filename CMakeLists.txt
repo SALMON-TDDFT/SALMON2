@@ -152,10 +152,6 @@ configure_file(
 add_subdirectory(${CMAKE_SOURCE_DIR}/src)        # sources
 add_subdirectory(${CMAKE_SOURCE_DIR}/testsuites) # tests
 
-option(BUILD_DEVELOPER_TESTS "Build internal numerical development tests" OFF)
-if(BUILD_DEVELOPER_TESTS)
-  add_subdirectory(developer_tests)
-endif()
 
 
 

@@ -1,5 +1,7 @@
 # HSE build portability and Nk=4^3 tests
 
+> 2026-10-06更新：以下の旧版向けパッチは現行ソースへ反映済みのため配布を終了しました。過去の適用・検証記録は履歴として残しています。現行版では追加パッチを適用せず、ソースから再ビルドしてください。
+
 ## Status
 
 The implementation uses the existing CPU toolchain selection. The Fugaku and
@@ -201,11 +203,8 @@ if(any(system%rocc(:,1,1)<0d0).or.any(system%rocc(:,1,1)>2d0).or. &
 NaN・正負の無限大を拒否する条件を維持する。最適化フラグ・交換・ACEの計算は変更しない。
 元の式中の個々の演算のどれがコンパイラ内部の不具合を誘発するかまでは特定していない。
 
-Git管理されていない既存ソースにも適用できる差分を
-`tools/patches/frtpx-occupation-guard.patch`に保存した。ソース直下で
-`patch --dry-run --forward -p1 < 差分ファイル`に成功した場合のみ、
-`patch --forward -b -p1 < 差分ファイル`で適用する。`-b`で修正前を保存する。
-その後、既存buildを通常のRelease設定で再ビルドする。
+修正は現行ソースに反映済み。個別パッチの適用は不要で、
+既存buildを通常のRelease設定で再ビルドする。
 GNUで占有数の境界・非有限値検査と本体ビルドを確認した。
 **富岳での回避成立は、修正版の再コンパイル結果待ち。**
 
@@ -218,7 +217,7 @@ feature-test macroがヘッダの機能選択に間に合っていなかった�
 前へ移動し、未指定時は700（POSIX.1-2008）を選ぶ。既存の外部定義は上書きしない。
 500を先頭に移動するだけではmacOSの厳格なヘッダで`snprintf`が非公開となるため、
 700で`snprintf`と`nftw`の双方を公開する。削除処理やシンボリックリンクの扱いは変更しない。
-修正差分は`tools/patches/posix-feature-macro.patch`。
+修正は現行ソースに反映済み。
 ローカルでC99・暗黙関数宣言をエラーとした単独コンパイル（既定値／外部700指定）と
 本体ビルドを確認。富岳でのCコンパイル・リンク完了は再ビルド結果待ち。
 

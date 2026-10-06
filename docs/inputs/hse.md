@@ -1,5 +1,7 @@
 # Native HSE input
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 HSE is enabled by default in ordinary CPU CMake builds. Compatible installed
 Libxc, FFTW and BLAS/LAPACK are selected automatically; missing dependencies
 are downloaded and built locally. See [build instructions](../hse-build.md).

@@ -1,5 +1,7 @@
 # PBE DC-to-mesh response and dielectric comparison
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Compare epsilon_xx for the 4x1x1 fragment /32 H2 cell using PBE and PBEh40, with approximately0.5 eV nominal Fourier spacing.

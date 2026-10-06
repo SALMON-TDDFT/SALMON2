@@ -1,5 +1,7 @@
 # Si64 chain locality and compiler isolation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 Goal: rearrange the existing Si64 crystal to 8x1x1 conventional cells and DC
 fragments, measure axial WF tails against exchange errors, and isolate the user's
 GNU Fortran 15/AArch64 loop-vectorization report before interpreting SCF failure.

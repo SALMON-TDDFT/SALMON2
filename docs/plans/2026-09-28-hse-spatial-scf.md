@@ -1,5 +1,7 @@
 # HSE spatial SCF implementation plan
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 **Goal:** Continue the approved common spatial exchange migration with conventional fixed-ion HSE Gamma SCF.
 
 **Architecture:** Reuse spatial MLWF, screened FFTW and reduced ACE operations already used by RT. Admit only ordinary DFT, fixed occupied spin pairs, orthogonal Gamma y/z pencils, full support. Keep fractional DC, multi-k and finite-support legacy implementations until replaced. No arbitrary memory limits.

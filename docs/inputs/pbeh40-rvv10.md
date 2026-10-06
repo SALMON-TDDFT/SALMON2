@@ -1,5 +1,7 @@
 # PBEh(40)+rVV10 through MLWF and ACE
 
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
 Experimental implementation on `pbeh40-rvv10-water-md`, based on `dc-hse-mlwf-ace` (`4048d67f`).
 
 ## Model and inputs
