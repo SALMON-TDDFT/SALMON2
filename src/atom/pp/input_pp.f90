@@ -1298,9 +1298,6 @@ subroutine estimate_rho_pp_tbl(mlps1,mr1,zps1,upp1,rho_pp_tbl)
     if (nelec_tmp < 1d0) exit
   end do
   if (nelec_tmp >= 1d0) write(*,*) "Warning: electrons not assigned to any channel in estimate_rho_pp_tbl:",nelec_tmp
-  write(*, *) "DEBUG", "occ", occ
-  write(*, *) "DEBUG", "sum(occ)", sum(occ)
-  write(*, *) "DEBUG", "zps1", zps1
 
   rho_pp_tbl(:) = 0d0
   do l = 0, mlps1

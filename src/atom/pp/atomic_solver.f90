@@ -103,7 +103,7 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
 
   occ = assign_orbital_occupations(pp%mlps(ik), eig, int(pp%zps(ik)))
   do l = 0, pp%mlps(ik)
-    write(*,'(2x,a,i4,a,i3,a,f16.9,a,i)') "ik=",ik," l=",l," eigval(Ha)=",eig(l), " occup=",occ(l)
+    write(*,'(2x,a,i4,a,i3,a,f16.9,a,i3)') "ik=",ik," l=",l," eigval(Ha)=",eig(l), " occup=",occ(l)
   end do
 
   if (.not. pp%has_wf_pp(ik)) then
