@@ -1,5 +1,7 @@
 # H2 PBEh impulse RT scaling
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 Continue the requested H2 weak and strong matrix, now impulse16steps rather
 than GS. Keep geometry, grid, Coulomb cutoff, full EXX support, MLWF controls,
 MPI layouts and three repeats. Fixed ions; x impulse1e-4au, dt0.02au.

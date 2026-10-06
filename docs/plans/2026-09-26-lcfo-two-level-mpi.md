@@ -1,5 +1,7 @@
 # Fragment x orbital MPI implementation plan
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 User approved Gamma-point two-level MPI and Si64 8x1x1 MPI8 versus MPI16.
 Reuse native icomm_r (same orbitals across fragments) and icomm_o (same core
 across orbital groups). Native orbitals, Hamiltonian actions, density/current

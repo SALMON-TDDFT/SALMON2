@@ -1,5 +1,7 @@
 # H2 supercell PBEh scaling measurement
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 User-requested weak shapes: 1x1x1, 2x1x1, 4x1x1, 8x1x1, 16x1x1,
 2x2x1, 4x4x1, 2x2x2. One MPI rank per molecule. Strong: fixed 4x4x1,
 MPI1/2/4/8/16. Three fresh-process repetitions, common MPI16 case shared.

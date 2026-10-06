@@ -1,5 +1,7 @@
 # ACE・MLWF分散化の実計算でのメモリ／時間比較
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 2026-09-29。長時間実行中だったSi Nk=4³のRTと後続キューを停止し、途中結果を保存してから測定した。今回の変更対象はnative Γ点経路なので、収束済みDC GSを利用できる64・128 H₂のPBEh(40)実空間RTで比較する。Si 512原子や富岳での性能測定ではない。
 
 ## 比較方法
@@ -50,6 +52,6 @@ Jacobi局所化の分散は集団通信を増やすため、メモリ削減と�
 
 ## 再現資料
 
-集計値・図は[レポート](reports/matrix-memory-tradeoff/summary.json)を参照。測定・集計手順は[benchmark README](../benchmarks/benchmark_matrix_memory/README.md)。ローカルの`work/matrix-memory-tradeoff/`には各入力、全出力、ランク別RSS、観測量、実行ファイルと共通オブジェクトのSHA256、ルーティング用ソースを保存した。GS再計算は不要だが、再現には同じ保存済みGSデータが必要。
+集計値・図は[レポート](reports/matrix-memory-tradeoff/summary.json)を参照。測定・集計手順はbenchmark README（ローカル測定記録）。ローカルの`work/matrix-memory-tradeoff/`には各入力、全出力、ランク別RSS、観測量、実行ファイルと共通オブジェクトのSHA256、ルーティング用ソースを保存した。GS再計算は不要だが、再現には同じ保存済みGSデータが必要。
 
 実装の詳細は[ACE分散](distributed-ace-memory-ja.md)と[MLWF分散](distributed-mlwf-memory-ja.md)を参照。

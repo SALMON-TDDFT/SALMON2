@@ -1,5 +1,7 @@
 # Shared EXX MLWF controls
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 HSE06 and PBEh40 use the same localization controls in `&functional`:
 
 ```fortran

@@ -1,5 +1,7 @@
 # Experimental cuFFT backend for compact exact exchange
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 > 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
 
 The default remains `exx_local_backend='cpu'`. The optional `cufft` backend
@@ -166,7 +168,7 @@ It validates CPU dispatch and MPI handling; it does not validate cuFFT itself.
 
 The separate `exx_kpoint_backend='cufft'` now accelerates the distributed
 k-mesh density convolution. It does not relax the compact Gamma backend's
-restrictions. See [Si CPU/GPU tests](../../benchmarks/benchmark_si_kpoint_cufft/README.md)
+restrictions. See Si CPU/GPU tests（ローカル測定記録）
 for supported inputs, resident data lifetime and MIYABI-G jobs. This route also
 requires actual NVHPC/GPU validation before numerical or performance claims.
 

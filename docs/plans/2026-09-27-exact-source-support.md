@@ -1,5 +1,7 @@
 # Exact source-support exchange loops
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 Goal: reduce zero-region memory traffic in the dominant exchange construction without changing the operator, FFT grid, cut radius, Taylor4, or MPI layout.
 
 Design: construct exact nonzero source row indices once per translated source. When fewer than half of grid rows are nonzero, form pair products and accumulate exchange only on those rows. Clear the full FFT work array before each pair. Dense sources retain the original contiguous loops. Count actual product/accumulation grid points for regression and measured work reduction; no magnitude threshold. The internal dense switch is for direct reference testing.

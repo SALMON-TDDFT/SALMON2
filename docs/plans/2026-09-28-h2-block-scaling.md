@@ -1,5 +1,7 @@
 # H2 2x2x2 fragment-block scaling implementation plan
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 **Goal:** Remeasure PBEh40 GS preparation and 16-step impulse native RT using eight H2 per fragment core.
 **Architecture:** Buffered periodic DC-SCF at 300 K with canonical full-support exchange; LCFO export reconstructed onto the global real-space grid. Compare fraction=1 and .999 on identical seeds, using the same spatial EXX backend. Production solver unchanged.
 **Tech stack:** Existing Python MPI benchmark helpers, ScaLAPACK-enabled SALMON, rank wait4 RSS measurement.

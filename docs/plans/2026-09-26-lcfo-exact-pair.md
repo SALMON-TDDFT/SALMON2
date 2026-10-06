@@ -1,5 +1,7 @@
 # Exact zero-pair FFT elimination
 
+> 2026-10-06：以下の`benchmarks`は当時のローカル性能測定です。マージ対象から除外し、測定コードはブランチ外へ保存しています。
+
 Goal: avoid screened-exchange FFTs whose pair density is exactly zero, with no new threshold or physical approximation.
 Architecture: after forming conjugate(source)*target in each thread-local FFT buffer, skip only all-zero products. Replace redundant per-pair target magnitude scans. Count total/executed FFT pairs with 64-bit counters and an OpenMP reduction, and expose the counts in LCFO refresh diagnostics. Preserve source accumulation order and existing kernel/normalization.
 
