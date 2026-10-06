@@ -9,7 +9,7 @@
 **Tech Stack:** Fortran complex BLAS/LAPACK, MPI executable regression, Python unittest.
 
 ## Task 1: Distributed algebra oracle
-Create testsuites/unit_hse_ace/test_spatial.py and spatial_driver.f90. Build with mpifort and OpenBLAS. Use a deterministic complex negative operator, independent dense action, uneven 1/2/4 rank row partitions including a zero-row rank, and multiple k/target columns. Test source interpolation, arbitrary targets, midpoint average, zero exchange and invalid local input. Observe missing callback API fail first.
+Create testsuites/651_hybrid_exchange/ace/test_spatial.py and spatial_driver.f90. Build with mpifort and OpenBLAS. Use a deterministic complex negative operator, independent dense action, uneven 1/2/4 rank row partitions including a zero-row rank, and multiple k/target columns. Test source interpolation, arbitrary targets, midpoint average, zero exchange and invalid local input. Observe missing callback API fail first.
 
 ## Task 2: Implementation
 Extend src/xc/hse_ace.f90 build/apply with optional sum_grid complex matrix callback. Sum local metrics and overlaps; handle zero rows and globally zero exchange; collectively reject nonfinite data. Preserve serial interface and average representation. Run the new oracle and existing ACE regression.

@@ -39,7 +39,7 @@ see [the updated portability and numerical test record](hse-platforms.md).
 
 Executed locally on Apple Silicon / GNU Fortran15, not on Fugaku:
 
-- `python3 testsuites/unit_cmake/test_platform.py`: platform selection with fake compiler paths, overrides, compatibility alias, Release/Debug defaults, MPI/ScaLAPACK defaults, repeated inclusion, and dependency toolchain forwarding passed. No fake compiler was invoked as a real compiler.
+- `python3 tools/validation/cmake/test_platform.py`: platform selection with fake compiler paths, overrides, compatibility alias, Release/Debug defaults, MPI/ScaLAPACK defaults, repeated inclusion, and dependency toolchain forwarding passed. No fake compiler was invoked as a real compiler.
 - Fresh `cmake -S . -B <new-build> -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON`, then `cmake --build <new-build> -j4`: HSE enabled by default; installed OpenBLAS, Libxc and FFTW detected; full binary built. No manual compiler/library paths or extra compiler flags.
 - Fresh `USE_HSE=OFF` Release configure and complete build passed.
 - The newly built MPI/HSE executable passed `hse_lapack_eigenvectors` and `test_direct_wf.py` (MPI2/4, density/current/energy, finite support, ACE/U reuse, half dt, measured FFT and flag rejection).
@@ -52,4 +52,4 @@ The official `configure.py --arch=fujitsu-a64fx-ea --enable-scalapack --prefix=.
 
 A user configure log reached `Configuring done` / `Generating done` with the Fujitsu MPI/ScaLAPACK flags, but CMake 3.24+ emitted CMP0135 warnings for the Libxc and FFTW fallback projects. This is a configuration warning, not evidence of a failed or completed compilation. The top-level project now selects CMP0135 NEW when that policy exists, using extraction-time timestamps for correct dependency rebuilds while retaining the CMake 3.14 minimum. See [CMake policy documentation](https://cmake.org/cmake/help/latest/policy/CMP0135.html).
 
-`testsuites/unit_cmake/test_extract_timestamp.py` reproduced the warning as an error before the change. After the change it configures with `-Werror=dev`, extracts/builds an offline local archive and verifies that its old archived timestamp is not retained (CMake 3.24+). The platform-selection tests also pass. CMake 3.14–3.23 are guarded in source but were not executed locally.
+`tools/validation/cmake/test_extract_timestamp.py` reproduced the warning as an error before the change. After the change it configures with `-Werror=dev`, extracts/builds an offline local archive and verifies that its old archived timestamp is not retained (CMake 3.24+). The platform-selection tests also pass. CMake 3.14–3.23 are guarded in source but were not executed locally.

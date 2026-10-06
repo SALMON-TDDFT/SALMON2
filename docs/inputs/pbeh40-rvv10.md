@@ -117,7 +117,7 @@ remains unsupported.
 Run the integration fixture with:
 
 ```
-python3 testsuites/unit_lcfo_rt/test_pbeh_response.py \
+python3 testsuites/652_dc_lcfo/rt/test_pbeh_response.py \
   --binary /absolute/path/to/salmon --pseudo /absolute/path/to/H_rps.dat
 ```
 
@@ -125,7 +125,7 @@ Direct distributed energy, density derivatives and full-potential comparisons
 against serial FFTW are available with:
 
 ```
-python3 testsuites/unit_pbeh_rvv10/test_distributed.py --build /absolute/path/to/build
+python3 testsuites/653_functional/test_distributed.py --build /absolute/path/to/build
 ```
 
 This uses the configured MPI/HSE build objects and tests 2/4 ranks, individual
@@ -146,9 +146,9 @@ cmake -S . -B build -DUSE_HSE=ON -DUSE_MPI=ON \
   -DCMAKE_Fortran_COMPILER=mpifort -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j 6
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-  python3 -m unittest discover -s testsuites/unit_hse_wannier -p test_wannier.py -v
+  python3 -m unittest discover -s testsuites/651_hybrid_exchange/wannier -p test_wannier.py -v
 SALMON_TEST_EXE=/absolute/path/to/build/salmon \
-  python3 -m unittest discover -s testsuites/unit_pbeh_rvv10 -v
+  python3 -m unittest discover -s testsuites/653_functional -v
 python3 samples/pbeh40_rvv10/validate.py build/salmon /fresh/force-H --grid 24
 python3 samples/pbeh40_rvv10/validate.py build/salmon /fresh/force-O --grid 24 --atom O
 python3 samples/pbeh40_rvv10/validate.py build/salmon /fresh/nve --grid 24 --md
@@ -179,8 +179,8 @@ target machine before selecting a backend. Setup, warm forward/inverse pairs,
 local FFT, communication, packing and full rVV10 timings are separated by:
 
 ```
-python3 testsuites/unit_pbeh_rvv10/test_distributed.py --build /path/to/build --benchmark --scale 1
-python3 testsuites/unit_pbeh_rvv10/test_distributed.py --build /path/to/build --benchmark --scale 2
+python3 testsuites/653_functional/test_distributed.py --build /path/to/build --benchmark --scale 1
+python3 testsuites/653_functional/test_distributed.py --build /path/to/build --benchmark --scale 2
 ```
 
 The grids are 32x24x16 and 64x48x32, with 32 channels, 2/4 MPI ranks and one
@@ -206,7 +206,7 @@ is present, but moving atom-list updates and boundary-crossing MD are not.
 Run the reproducible small H4 audit with:
 
 ```
-python3 testsuites/unit_pbeh_rvv10/audit_dc_force.py \
+python3 testsuites/653_functional/audit_dc_force.py \
   --binary /path/to/salmon --mpiexec mpiexec --output /path/to/results.json
 ```
 

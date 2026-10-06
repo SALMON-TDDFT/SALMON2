@@ -37,7 +37,7 @@ GNU MPI/ScaLAPACKビルド成功。通常32軌道版の対省略SCF/RT 6試験�
 
 ## 再現
 
-`testsuites/benchmark_matrix_memory/run.py`を`--states 64 --repeats 1 --modes ace`で実行した。基準入力は保存済みの64 H₂ DC GS→実空間RTから、`exx_ace_support='occupied'`、`exx_pair_screening='diagnose'`、`exx_pair_tolerance=0d0`へ変更。0.999支持、MPI 8・OMP 1・BLAS 1、impulse 16ステップは両方で同じ。
+`benchmarks/benchmark_matrix_memory/run.py`を`--states 64 --repeats 1 --modes ace`で実行した。基準入力は保存済みの64 H₂ DC GS→実空間RTから、`exx_ace_support='occupied'`、`exx_pair_screening='diagnose'`、`exx_pair_tolerance=0d0`へ変更。0.999支持、MPI 8・OMP 1・BLAS 1、impulse 16ステップは両方で同じ。
 
 変更前バイナリは同じコンパイル済みオブジェクトを使用し、`exx_native`の`apply_localized_blocks`への分岐だけを外して従来の全軌道作用・逆変換を呼ぶ比較用コピー。測定後、通常ソースの実験用スイッチは無効へ戻した。実行ファイル、比較用ソース、コンパイル／リンクコマンド、入力・出力はローカル`work/exx-inverse/`に保存。
 
@@ -46,7 +46,7 @@ GNU MPI/ScaLAPACKビルド成功。通常32軌道版の対省略SCF/RT 6試験�
 比較用バイナリは次で再作成できる（新しい出力ディレクトリを使う）：
 
 ```sh
-python3 testsuites/benchmark_matrix_memory/build_inverse_variants.py \
+python3 benchmarks/benchmark_matrix_memory/build_inverse_variants.py \
   --build /path/to/mpi-scalapack-build --output /path/to/inverse-variants
 ```
 

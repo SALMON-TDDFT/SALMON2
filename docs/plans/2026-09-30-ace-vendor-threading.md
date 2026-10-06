@@ -22,7 +22,7 @@ Sources: NVIDIA NVPL BLAS and LAPACK service APIs; RIKEN Fujitsu BLAS/LAPACK and
 - OpenBLAS: 既存の実行時制御を維持する。プロセス全体に影響するため、別のアプリケーションスレッドが同時にBLASを使わない通常のACE呼出しを前提とする。
 - その他/未検出: 既存のライブラリ設定を保持し、k点ループは逐次実行する。MKL/ArmPLの専用制御は今回追加していない。
 
-`python3 testsuites/unit_ace_k_threads/run.py` はGNU FortranとOpenBLASで実行する手元検証。OpenMP有効/無効、OpenBLAS制御有効/無効、富士通向けOpenMP task設定の入れ子と復元、NVPL API模擬実装による各ワーカーの設定・独立した既定値・ACE作用・異常終了時の復元を確認する。NVPL模擬試験およびGNUのOpenMP試験は、富岳/MIYABIの実ライブラリのABIや性能の検証ではない。実機で同一入力をOMP1/複数スレッドで比較する必要がある。進行中の5 fs計測バイナリには変更を適用しない。
+`python3 testsuites/651_hybrid_exchange/threads/run.py` はGNU FortranとOpenBLASで実行する手元検証。OpenMP有効/無効、OpenBLAS制御有効/無効、富士通向けOpenMP task設定の入れ子と復元、NVPL API模擬実装による各ワーカーの設定・独立した既定値・ACE作用・異常終了時の復元を確認する。NVPL模擬試験およびGNUのOpenMP試験は、富岳/MIYABIの実ライブラリのABIや性能の検証ではない。実機で同一入力をOMP1/複数スレッドで比較する必要がある。進行中の5 fs計測バイナリには変更を適用しない。
 
 参照:
 - https://www.r-ccs.riken.jp/fugaku/docs/manual/en/lang/math/j2ul-2575-01enz0.pdf

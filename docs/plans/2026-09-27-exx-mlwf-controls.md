@@ -22,7 +22,7 @@ static DFT, and disallow checkpoint restarts and legacy snapshot export with
 positive radius. Keep the separate legacy LCFO-RT radius unchanged (bohr).
 
 ### 1. Input compatibility
-- Add compiled input tests in `testsuites/unit_pbeh_rvv10/test_exx_inputs.py`:
+- Add compiled input tests in `testsuites/653_functional/test_exx_inputs.py`:
   new/old equivalence, matching/conflicting dual assignments, validation and
   length-unit conversion, finite-radius MD/restart rejection.
 - Replace internal MLWF control references in `src/io/salmon_global.f90`,

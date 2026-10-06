@@ -112,7 +112,7 @@ by this backend.
 CPU stub validation needs GNU Fortran (`GNU_FC` may override `gfortran`):
 
 ```sh
-python3 testsuites/unit_pbeh_rvv10/test_cufft.py -v
+python3 testsuites/653_functional/test_cufft.py -v
 ```
 
 This explicitly skips GPU parity. It checks that disabled nonempty work fails,
@@ -126,7 +126,7 @@ On an NVIDIA system, request the actual device test:
 
 ```sh
 FFTW_ROOT=/path/to/fftw NVFC=nvfortran \
-  python3 testsuites/unit_pbeh_rvv10/test_cufft.py --gpu -v
+  python3 testsuites/653_functional/test_cufft.py --gpu -v
 ```
 
 Alternatively set `SALMON_TEST_CUFFT_GPU=1`. An explicitly requested GPU test
@@ -149,7 +149,7 @@ The independent CPU MPI callback test exercises the selected-pair batching and
 scatter path without requiring CUDA:
 
 ```sh
-python3 testsuites/unit_hse_wannier/test_spatial_local.py \
+python3 testsuites/651_hybrid_exchange/wannier/test_spatial_local.py \
   --build /path/to/cpu-hybrid-build --ranks 1 2 4
 ```
 
@@ -164,7 +164,7 @@ It validates CPU dispatch and MPI handling; it does not validate cuFFT itself.
 
 The separate `exx_kpoint_backend='cufft'` now accelerates the distributed
 k-mesh density convolution. It does not relax the compact Gamma backend's
-restrictions. See [Si CPU/GPU tests](../../testsuites/benchmark_si_kpoint_cufft/README.md)
+restrictions. See [Si CPU/GPU tests](../../benchmarks/benchmark_si_kpoint_cufft/README.md)
 for supported inputs, resident data lifetime and MIYABI-G jobs. This route also
 requires actual NVHPC/GPU validation before numerical or performance claims.
 
@@ -177,7 +177,7 @@ sources, DC, localized support and Wannier snapshots retain their specialized
 CPU routes and cannot select this cuFFT backend. rVV10 is a separate correlation
 calculation, not part of the exchange accelerator.
 
-Run `python3 testsuites/unit_exx_k_exchange/run.py` for MPI1/2/3/4 comparisons
-against the retained full-support Wannier reference. `unit_kpoint_cufft/run.py`
+Run `python3 testsuites/651_hybrid_exchange/k_exchange/run.py` for MPI1/2/3/4 comparisons
+against the retained full-support Wannier reference. `661_unit_kpoint_cufft/run.py`
 also exercises rectangular and global-Coulomb convolution; add `--gpu` only on
 an NVHPC/NVIDIA machine. GNU oracle/stub tests do not validate the GPU binary.

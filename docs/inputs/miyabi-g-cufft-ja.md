@@ -4,7 +4,7 @@
 2026-09-29作成。以下は現地未実行の手順。最初の目標は1 GPUでのコンパイル・数値一致・再利用確認で、速度測定はその後に行う。
 
 Si・8×8×8 k点のHSE06比較には、局所支持版ではなく新しい
-`exx_kpoint_backend`を使う。[多k点のビルド・試験・PBSジョブ](../../testsuites/benchmark_si_kpoint_cufft/README.md)を参照。
+`exx_kpoint_backend`を使う。[多k点のビルド・試験・PBSジョブ](../../benchmarks/benchmark_si_kpoint_cufft/README.md)を参照。
 下記の旧アーカイブ`ec7f565c`には多k点拡張は含まれないため、その試験では最新ブランチを使う。
 
 ## 1. ソースと環境
@@ -84,7 +84,7 @@ export NVCOMPILER_ACC_NOTIFY=3
   nvfortran --version
   python3 --version
   nvidia-smi
-  python3 testsuites/unit_pbeh_rvv10/test_cufft.py \
+  python3 testsuites/653_functional/test_cufft.py \
     --gpu -v CufftBackend.test_gpu_matches_fftw
 } > "cufft-smoke.${PBS_JOBID}.log" 2>&1
 ```

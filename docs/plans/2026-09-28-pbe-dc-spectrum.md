@@ -7,7 +7,7 @@
 **Tech Stack:** Fortran MPI, Libxc, ScaLAPACK/LAPACK, Python numerical analysis.
 
 ## Task1: Reader regression and fix
-- Add testsuites/unit_lcfo_rt/test_real_response.py, taking a binary and existing32H2 PBE seed. Run one RT step on MPI4 and8, compare currents and test mixed/truncated headers.
+- Add testsuites/652_dc_lcfo/rt/test_real_response.py, taking a binary and existing32H2 PBE seed. Run one RT step on MPI4 and8, compare currents and test mixed/truncated headers.
 - Verify unmodified reader fails on real PBE seed (already reproduced: reference metadata invalid).
 - In src/gs/dc/lcfo.f90 choose reader from collective on-disk headers, validating real integer headers before allocation. Allow real reader to populate zwf at Gamma, preserving spin/k-point guards. Reject complex files requested as real orbitals.
 - Build dedicated USE_LIBXC/USE_HSE/USE_SCALAPACK executable; run reader tests and existing complex/native tests.

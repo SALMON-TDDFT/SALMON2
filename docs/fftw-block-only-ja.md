@@ -1,0 +1,5 @@
+# FFTW分散変換のブロック統一
+
+2026-10-06。fftw_pencilsと専用試験を削除。fftw_blocksのmesh_transformは3D Cartesianブロック変換のみを使用する。旧2軸呼出しはx非分割の3Dブロックへ変換し、周波数データもxyz順・同一所有範囲に統一する。旧spectral_z指定によるZ-pencilへの再分布は行わない。
+
+交換カーネルの周波数添字とrVV10のFFTWカーネル添字をxyzへ合わせた。FFTE実装は変更しない。MPI self通信子はcommunicationのCOMM_GROUP_SELFを使用する。専用pencil通信回数・plan再利用試験は廃止し、ブロックFFTのFourier解析値/逆変換と交換作用/rVV10の参照比較を使用する。

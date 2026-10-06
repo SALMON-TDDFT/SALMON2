@@ -6,7 +6,7 @@
 
 **Technology:** Fortran, MPI, FFTW, Python unittest.
 
-1. Add serial/2/4-rank SCF convergence and final-energy comparison in `testsuites/unit_pbeh_rvv10/test_hse_spatial.py`; run to establish current spatial rejection.
+1. Add serial/2/4-rank SCF convergence and final-energy comparison in `testsuites/653_functional/test_hse_spatial.py`; run to establish current spatial rejection.
 2. Extend `src/io/inputoutput.f90` admission and `src/xc/hse_native.f90` spatial dispatch for HSE DFT, restrict Taylor4 requirement to RT, reject unsupported occupations/restarts/snapshots early.
 3. Compare converged energy and eigenvalues, exercise invalid inputs, run existing HSE RT tests and ON/OFF builds. Request independent code review.
 4. Document scope and results. Preserve old routes required by outstanding modes and the serial reference.

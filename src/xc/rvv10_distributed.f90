@@ -2,7 +2,7 @@
 ! x-only grid decomposition replicates pencils; use y/z decomposition to scale.
 module rvv10_distributed
   use communication, only: comm_summation,comm_get_max
-  use fftw_pencils, only: pencil_transform
+  use fftw_blocks, only: mesh_transform
   use rvv10, only: rvv10_evaluate,rvv10_kernel_fourier
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -85,12 +85,8 @@ contains
       allocate(transformed(nt,nq));pi=acos(-1d0)
       spectral_shape=tile;spectral_origin=[0,lo(2)-1,lo(3)-1];physical_axis=[1,2,3]
       if(fftw_backend)then
-        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),theta,transformed,-1,ierr,spectral_z=.true.)
+        call mesh_transform(n,dims(2:3),coords(2:3),comm(2:3),theta,transformed,-1,ierr)
         if(ierr/=0)return
-        ! Z pencil memory axes are z,x,y; kernel wavevectors remain physical xyz.
-        spectral_shape=[n(3),n(1)/dims(2),n(2)/dims(3)]
-        spectral_origin=[0,coords(2)*spectral_shape(2),coords(3)*spectral_shape(3)]
-        physical_axis=[3,1,2]
       else
       allocate(a(nt),bb(nt))
       do q=1,nq
@@ -112,7 +108,7 @@ contains
       enddo;enddo;enddo
 !$omp end parallel do
       if(fftw_backend)then
-        call pencil_transform(n,dims(2:3),coords(2:3),comm(2:3),u,transformed,1,ierr,spectral_z=.true.)
+        call mesh_transform(n,dims(2:3),coords(2:3),comm(2:3),u,transformed,1,ierr)
         if(ierr/=0)return
         u=transformed
       else

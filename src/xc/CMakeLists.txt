@@ -24,7 +24,6 @@ if(USE_HSE)
     exx_pair_candidates.f90
     exx_spatial_local.f90
     rvv10.f90
-    fftw_pencils.f90
     fftw_blocks.f90
     rvv10_distributed.f90
     rvv10_native.f90

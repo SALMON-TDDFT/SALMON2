@@ -14,10 +14,11 @@
 !  limitations under the License.
 !
 module communication
-  use mpi, only: MPI_COMM_NULL,MPI_PROC_NULL
+  use mpi, only: MPI_COMM_NULL,MPI_PROC_NULL,MPI_COMM_SELF
   use nvtx_wrapper
   implicit none
 
+  integer, public, parameter :: COMM_GROUP_SELF = MPI_COMM_SELF
   integer, public, parameter :: COMM_GROUP_NULL = MPI_COMM_NULL
   integer, public, parameter :: ROOT_PROCID     = 0
   integer, public, parameter :: COMM_PROC_NULL  = MPI_PROC_NULL

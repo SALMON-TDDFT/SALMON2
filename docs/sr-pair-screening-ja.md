@@ -110,9 +110,9 @@ SCFへU保持を広げた途中版ではDC-rVV10の収束回帰が出たため�
 主要な再実行コマンドは次の通りです。ビルドはMPI/HSE/ScaLAPACKを有効にしてください。
 
 ```sh
-python3 testsuites/unit_hse_wannier/test_pair_screen.py --build /path/to/build
-python3 testsuites/unit_hse_wannier/test_projected_seed.py --build /path/to/build
-python3 testsuites/unit_hse_ace/validate_exchange.py --build /path/to/build
+python3 testsuites/651_hybrid_exchange/wannier/test_pair_screen.py --build /path/to/build
+python3 testsuites/651_hybrid_exchange/wannier/test_projected_seed.py --build /path/to/build
+python3 testsuites/651_hybrid_exchange/ace/validate_exchange.py --build /path/to/build
 SALMON_TEST_EXE=/path/to/build/salmon SALMON_TEST_MPIEXEC=mpiexec \
-  python3 -m unittest discover -s testsuites/unit_pbeh_rvv10 -p test_pair_screen.py
+  python3 -m unittest discover -s testsuites/653_functional -p test_pair_screen.py
 ```

@@ -128,5 +128,5 @@ dt=.05 au、7000ステップは8.466 fs、公称Fourier間隔約0.489 eV。
 ```sh
 export SALMON_TEST_EXE="$PWD/build/salmon"
 export SALMON_TEST_MPIEXEC="$(command -v mpiexec)"
-PYTHONPATH=testsuites/unit_pbeh_rvv10 python3 -m unittest test_source_ace test_source_ace_fallback
+PYTHONPATH=testsuites/653_functional python3 -m unittest test_source_ace test_source_ace_fallback
 ```

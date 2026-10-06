@@ -86,7 +86,7 @@ GS準備は別プロセスなので、そのピークメモリは含みません
 
 ## 再現データ
 
-- [実行スクリプトと測定定義](../testsuites/benchmark_h2_pbeh_rt/README.md)
+- [実行スクリプトと測定定義](../benchmarks/benchmark_h2_pbeh_rt/README.md)
 - [全測定値・環境・ソース・ハッシュ](benchmarks/2026-09-28-h2-rt/results.json)
 - [RT全36実行の入力・ログ・軌跡・ランク別RSS](benchmarks/2026-09-28-h2-rt/rt-runs.tar.gz)
 - [同じ初期状態を再利用するための保存波動関数とGS準備ログ](benchmarks/2026-09-28-h2-rt/seeds-and-preparation.tar.gz)

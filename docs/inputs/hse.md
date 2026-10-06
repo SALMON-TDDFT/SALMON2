@@ -206,9 +206,9 @@ HSE MD remains disabled until its forces are validated. Legacy multi-k, finite-s
 existing restrictions; they will be removed only after their replacements are
 implemented and verified.
 
-Validation: `testsuites/unit_hse_ace/validate_exchange.py` compares screened
+Validation: `testsuites/651_hybrid_exchange/ace/validate_exchange.py` compares screened
 and Coulomb exchange against serial Wannier on 1/2/4 ranks;
-`testsuites/unit_pbeh_rvv10/test_hse_spatial.py` compares HSE DC-initialized
+`testsuites/653_functional/test_hse_spatial.py` compares HSE DC-initialized
 impulse and pulse histories against the serial route.
 
 ## Conventional spatial hybrid SCF

@@ -25,19 +25,20 @@ contains
     call system_clock(count,rate)
     stamp=real(count,8)/real(rate,8)
   end function
-  subroutine mesh_transform(n,dims,coords,comm,input,output,sign,status,spectral_z)
-    use fftw_pencils, only: pencil_transform
+  subroutine mesh_transform(n,dims,coords,comm,input,output,sign,status)
+    use communication, only: COMM_GROUP_SELF
     implicit none
     integer,intent(in) :: n(3),dims(:),coords(:),comm(:),sign
     complex(8),intent(in) :: input(:,:)
     complex(8),intent(out) :: output(:,:)
     integer,intent(out) :: status
-    logical,intent(in),optional :: spectral_z
+    integer :: d(3),c(3),groups(3)
     status=1
     if(size(dims)/=size(coords).or.size(dims)/=size(comm))return
     select case(size(dims))
     case(2)
-      call pencil_transform(n,dims,coords,comm,input,output,sign,status,spectral_z)
+      d=[1,dims];c=[0,coords];groups=[COMM_GROUP_SELF,comm]
+      call block_transform(n,d,c,groups,input,output,sign,status)
     case(3)
       ! Spectra share Cartesian ownership and xyz order with real-space fields.
       call block_transform(n,dims,coords,comm,input,output,sign,status)

@@ -164,20 +164,20 @@ optical-response accuracy. In particular, the static source-cutoff scripts are
 not silently promoted into a variational time-dependent functional.
 
 Tests: CTest `lcfo_rt_core`; `OPENBLAS_NUM_THREADS=1 python3
-testsuites/unit_lcfo_rt/test_reference.py`. The standalone check.py compiles
+testsuites/652_dc_lcfo/rt/test_reference.py`. The standalone check.py compiles
 against the local Homebrew BLAS for the current development machine; CTest uses
 the build's selected BLAS/LAPACK and is the portable verification path.
 
-Native integration regression: `python3 testsuites/unit_lcfo_rt/test_native.py
+Native integration regression: `python3 testsuites/652_dc_lcfo/rt/test_native.py
 --binary /absolute/path/to/salmon --pseudo /absolute/path/to/H_rps.dat`.
 It runs MPI2 jobs sequentially in a fresh temporary directory: Gamma DC-SCF,
 LCFO RT, half-dt RT, and rejection of unsupported restart. It checks normal
 completion, finite output, endpoint-current agreement and post-impulse energy
 width. This small integration test is not a production convergence criterion.
 
-Additional regressions: `testsuites/unit_hse_wannier/test_gamma.py` (known
+Additional regressions: `testsuites/651_hybrid_exchange/wannier/test_gamma.py` (known
 anisotropic Gamma solution and noncommuting links), and
-`testsuites/unit_lcfo_rt/test_transport.py` (stationary-density phase invariance,
+`testsuites/652_dc_lcfo/rt/test_transport.py` (stationary-density phase invariance,
 predictor rollback and corrected-state cache acceptance). These standalone tests
 currently use the local Homebrew BLAS path. `test_native.py` also checks full
 source parity, large-radius identity, initial-U identity across support cases,
@@ -443,7 +443,7 @@ phase includes gauge transport and reconstruction; retained-step source time
 also includes the frozen exchange trace. Initial MLWF work belongs to the first
 source phase. These diagnostics supplement the native `rt iterations` timer.
 
-The standalone `testsuites/unit_lcfo_rt/test_distributed_build.py` accepts
+The standalone `testsuites/652_dc_lcfo/rt/test_distributed_build.py` accepts
 `--scalapack` and `--ranks 2|4`. It covers unequal local rows, arbitrary halo row
 order, the sum of overlapping Hermitian fragment operators versus a dense
 reference, root-only gather, dense-unitary polar transport, local ACE factors and
@@ -582,7 +582,7 @@ Diamond R6 reduces product points94,371,840→51,339,264 and accumulation60,817,
 
 ### Direct-WF Gram validation
 
-The accepted-state orthogonality check uses ZHERK and a packed upper-triangle reduction over the existing spatial communicator (`lcfo_gram.f90`). The check frequency and 1e-8 tolerance are unchanged. All independent entries are checked for finiteness before the maximum norm. This reduces arithmetic and collective payload, but retains dense occupied-column dependence and approximately 2n² complex scratch entries. Regression: `testsuites/unit_lcfo_rt/test_gram.py`; isolated timing: `benchmark_gram.py`.
+The accepted-state orthogonality check uses ZHERK and a packed upper-triangle reduction over the existing spatial communicator (`lcfo_gram.f90`). The check frequency and 1e-8 tolerance are unchanged. All independent entries are checked for finiteness before the maximum norm. This reduces arithmetic and collective payload, but retains dense occupied-column dependence and approximately 2n² complex scratch entries. Regression: `testsuites/652_dc_lcfo/rt/test_gram.py`; isolated timing: `benchmark_gram.py`.
 
 ### Opt-in measured exchange FFT planning
 

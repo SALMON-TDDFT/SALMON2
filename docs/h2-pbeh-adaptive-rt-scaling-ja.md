@@ -121,7 +121,7 @@ FFT格子比は局所FFT1対当たりの格子数／全セル格子数で、カ�
 
 ## 再現データ
 
-- [測定・解析スクリプト](../testsuites/benchmark_h2_pbeh_rt/README.md)
+- [測定・解析スクリプト](../benchmarks/benchmark_h2_pbeh_rt/README.md)
 - [全測定値、実行環境、ソース、ハッシュ](benchmarks/2026-09-28-h2-adaptive-rt/results.json)
 - [支持領域・数値差の診断](benchmarks/2026-09-28-h2-adaptive-rt/diagnostics.json)
 - [72実行の入力・ログ・電流・エネルギー・ランク別RSS](benchmarks/2026-09-28-h2-adaptive-rt/rt-runs.tar.gz)

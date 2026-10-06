@@ -14,7 +14,7 @@
 - MLWFは最大3反復、許容値1e-7。**全測定が3反復の上限到達（status=1）であり、収束した水のMLWF局在化時間ではありません。**
 - LCFO相当の行列：1024×1024の複素Hermitian合成行列、全固有対。比較元も1ランクScaLAPACKです。
 
-[測定手順とハーネス](../testsuites/benchmark_hybrid_distribution/README.md)、
+[測定手順とハーネス](../benchmarks/benchmark_hybrid_distribution/README.md)、
 [16軌道＋行列の生データ](benchmarks/2026-09-28/packets16.json)、
 [64軌道の生データ](benchmarks/2026-09-28/packets64.json) に詳細を保存しています。
 81回の本測定の各ランク値、反復間の最小・最大、MPI/コンパイラ情報、リンク設定、

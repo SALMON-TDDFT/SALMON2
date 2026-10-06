@@ -20,6 +20,7 @@ module communication
   integer, private, parameter :: DEAD_BEEF       = int(z'7FFFDEAD')
   integer, private, parameter :: COMM_WORLD_ID   = int(z'7FFFFFFF')
 
+  integer, public, parameter  :: COMM_GROUP_SELF = COMM_WORLD_ID
   integer, public, parameter  :: COMM_GROUP_NULL = DEAD_BEEF
   integer, public, parameter  :: ROOT_PROCID     = 0
   integer, public, parameter  :: COMM_PROC_NULL  = DEAD_BEEF

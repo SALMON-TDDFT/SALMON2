@@ -89,7 +89,7 @@ MPI・ライブラリの使用量は含みます。特定の配列の使用量�
 
 ## 再現データ
 
-- [入力生成・実行方法](../testsuites/benchmark_h2_pbeh/README.md)
+- [入力生成・実行方法](../benchmarks/benchmark_h2_pbeh/README.md)
 - [全測定値・実行環境・ソース・バイナリハッシュ](benchmarks/2026-09-28-h2/results.json)
 - [全36計算の入力・出力・エネルギー・ランク別RSS](benchmarks/2026-09-28-h2/runs.tar.gz)
 - [初期化の診断ログ（失敗試行を含む）](benchmarks/2026-09-28-h2/initialization-diagnostics.tar.gz)

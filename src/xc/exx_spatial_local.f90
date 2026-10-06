@@ -6,7 +6,7 @@ module exx_spatial_local
  use iso_fortran_env, only: int64
  use exx_batch_backend, only: s_exx_batch_backend
  use communication, only: comm_summation,comm_get_max,comm_get_groupinfo,comm_create_group,comm_free_group,comm_bcast,comm_exchange
- use fftw_blocks, only: pencil_transform=>mesh_transform,block_layout
+ use fftw_blocks, only: mesh_transform,block_layout
  use exx_local_fft, only: s_exx_local_fft,exx_local_prepare_compact,exx_local_apply,exx_local_destroy, &
                           compact_axis_size,compact_kernel_bounds,smooth_size,exx_local_cpu_prepare,exx_local_cpu_pair
  implicit none
@@ -229,7 +229,7 @@ contains
   implicit none
   type(s_exx_spatial_local),intent(inout) :: plan
   integer,intent(in) :: n(3),dims(:),coords(:),comm(:)
-  real(8),intent(in) :: multiplier(:) ! xyz block order (3D) or legacy Z pencil order (2D)
+  real(8),intent(in) :: multiplier(:) ! Cartesian xyz block order
   integer,intent(out) :: status
   integer :: a
   complex(8),allocatable :: spectrum(:,:),realspace(:,:)
@@ -242,7 +242,7 @@ contains
   allocate(spectrum(size(multiplier),1),realspace(size(multiplier),1))
   spectrum(:,1)=cmplx(multiplier,0d0,8)
   ! Includes global 1/N and the supplied G=0 value without modification.
-  call pencil_transform(n,dims,coords,comm,spectrum,realspace,1,status,spectral_z=.true.)
+  call mesh_transform(n,dims,coords,comm,spectrum,realspace,1,status)
   if(status/=0)return
   plan%n=n
   call block_layout(n,dims,coords,plan%m,plan%lo,status)

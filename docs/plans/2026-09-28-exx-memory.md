@@ -7,11 +7,11 @@
 **Tech Stack:** Fortran/MPI/BLAS/LAPACK/FFTW/ScaLAPACK; Python validation.
 
 ### Task1: Exact buffer reduction
-Files: src/xc/hse_native.f90; testsuites/unit_pbeh_rvv10/test_exx_memory.py.
+Files: src/xc/hse_native.f90; testsuites/653_functional/test_exx_memory.py.
 Write a regression that detects the redundant native midpoint/cached-action/output allocation in a temporary instrumented executable and compares native results to the frozen executable. RED must show redundant storage. Implement endpoint-sum midpoint action and direct accumulation to mesh; remove RT-only cached_action; transfer local into cached_source after energy calculation. Run source/native/fallback and DC regression. Expected numerical equivalence, eliminated buffers. Commit.
 
 ### Task2: Sparse source ACE
-Files: src/xc/hse_ace.f90, src/xc/exx_orbitals.f90, src/xc/hse_native.f90; testsuites/unit_hse_ace/exchange_driver.f90.
+Files: src/xc/hse_ace.f90, src/xc/exx_orbitals.f90, src/xc/hse_native.f90; testsuites/651_hybrid_exchange/ace/exchange_driver.f90.
 Write RED packed=true build/apply tests comparing dense factors on arbitrary complex targets and nonorthogonal support vectors, zero action, rejected state and empty/uneven MPI layouts. Extend ACE state with sparse column offsets/rows/values, metric inverse and dimensions. Factorization validation unchanged; source native builds select packing. Apply via streamed target columns and two overlap/action reductions across orbital/spatial groups; no mesh-by-all-global-orbitals temporary. Clear both representations on failure/rebuild. Release masked sources after fixed-ion source-ACE refresh; transport previous remains. Expected27 exchange configurations and native source/fallback regressions pass. Commit.
 
 ### Task3: Memory measurements and review

@@ -22,7 +22,7 @@ These are discrete bounds, not continuous-kernel or center-distance heuristics. 
 
 ## Task 1: Preserve transported localization
 
-Files: src/xc/hse_spatial.f90; src/xc/hse_native.f90; testsuites/unit_hse_wannier/projected_seed_probe.f90.
+Files: src/xc/hse_spatial.f90; src/xc/hse_native.f90; testsuites/651_hybrid_exchange/wannier/projected_seed_probe.f90.
 1. Add a regression that first accepts a localized state, then forces minimization failure at an unrealistically tight tolerance; require the transported accepted gauge and status to remain usable. Run test_projected_seed.py --build ../work/pbeh40-scalapack-build; expect failure before changes.
 2. Save transported U before minimization. On failed minimization with previously accepted state and successful transport, restore U and retain accepted status; expose a retained-gauge flag while leaving the attempt status visible. Apply to both layouts. Keep existing transport-loss reseeding.
 3. Adaptive RT must fail explicitly if no accepted localized gauge can be transported/initialized, instead of toggling to full support. SCF retains its existing warmup/fallback.
@@ -30,7 +30,7 @@ Files: src/xc/hse_spatial.f90; src/xc/hse_native.f90; testsuites/unit_hse_wannie
 
 ## Task 2: Discrete pair diagnostics and optional omission
 
-Files: src/xc/hse_spatial.f90; src/xc/exx_spatial_local.f90; new testsuites/unit_hse_wannier/pair_screen_probe.f90 and test_pair_screen.py.
+Files: src/xc/hse_spatial.f90; src/xc/exx_spatial_local.f90; new testsuites/651_hybrid_exchange/wannier/pair_screen_probe.f90 and test_pair_screen.py.
 1. Write MPI probe with overlapping/tiny-tail/disjoint localized functions and varying SR omega; compare exact and screened action to reported bound, diagnostic equality, compact/global equality, and zero-tolerance identity. Expect missing screening fields before implementation.
 2. Add mode (off/diagnose/on), nonnegative raw-action tolerance, counters, accumulated bound, and timing to spatial state. Compute multiplier norms collectively without gathering grids. Compute q/rho norms using small reductions. Count candidates and estimated bound in diagnose but omit only in on.
 3. Add optional skip mask to compact apply; pack surviving global-FFT targets in existing batches. Preserve collective calls for empty partitions.
@@ -38,7 +38,7 @@ Files: src/xc/hse_spatial.f90; src/xc/exx_spatial_local.f90; new testsuites/unit
 
 ## Task 3: Native integration and checks
 
-Files: src/io/salmon_global.f90; src/io/inputoutput.f90; src/xc/hse_native.f90; testsuites/unit_pbeh_rvv10; docs/inputs/exx-mlwf.md.
+Files: src/io/salmon_global.f90; src/io/inputoutput.f90; src/xc/hse_native.f90; testsuites/653_functional; docs/inputs/exx-mlwf.md.
 1. Add input/regression coverage for exx_pair_screening and exx_pair_tolerance, HSE-only and supported spatial/native routes. Default off, zero tolerance means no finite omission. Moving-ion/restart restrictions follow the existing adaptive route. Reject unsupported combinations explicitly.
 2. For enabled modes, use transported localized target columns, then rotate the action back to original orbitals without gathering WFs. Build ACE with unchanged strict Hermitian/positive metric validation; on screened failure recompute all pairs and rebuild. Log attempted candidates, bound, skipped pairs and acceptance/fallback distinctly.
 3. Compare off/diagnose/on full-support and .999 HSE SCF/native RT using identical seeds; verify actual omission (or honestly report none), action bound, ACE Hermiticity/interpolation, MPI parity and 16-step current/energy behavior. Finite screening is experimental and opt-in.

@@ -20,9 +20,9 @@
 GNU MPI/ScaLAPACK版と逐次版のビルド成功。HSE06/PBE0/PBEhのsource ACE 7試験、対省略SCF/RT 6試験に合格。疎な訓練軌道を使う計量行列も、空ランク・ゼロ作用・悪条件行列を含め、MPI 1/2/4で密訓練と比較。ScaLAPACKなしのLAPACK経路でも比較した。読み取りによる独立レビューで重大な指摘なし。富岳・NVHPC/GPUは今回の変更を未検証。
 
 ```sh
-python3 testsuites/unit_exx_sparse_orbitals/run.py
-python3 testsuites/unit_exx_distributed_metric/run.py --build /path/to/build
-python3 testsuites/unit_exx_distributed_metric/run.py --build /path/to/build --no-scalapack
+python3 experiments/unit_exx_sparse_orbitals/run.py
+python3 testsuites/651_hybrid_exchange/metric/run.py --build /path/to/build
+python3 testsuites/651_hybrid_exchange/metric/run.py --build /path/to/build --no-scalapack
 ```
 
 ## 実測
@@ -47,7 +47,7 @@ python3 testsuites/unit_exx_distributed_metric/run.py --build /path/to/build --n
 以下は共有オブジェクトを再利用して、密source、圧縮source、1軌道ブロックの境界試験用バイナリを別ディレクトリに作る。既定ビルドは変更しない。出力先には未使用のディレクトリを指定する。
 
 ```sh
-python3 testsuites/benchmark_matrix_memory/build_sparse_variants.py \
+python3 benchmarks/benchmark_matrix_memory/build_sparse_variants.py \
   --build /path/to/build --output /path/to/new-comparison-directory
 ```
 

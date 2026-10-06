@@ -15,7 +15,7 @@ module exx_spatial
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use exx_distributed_metric, only: distributed_metric_available
   use exx_distributed_gauge, only: s_exx_gauge,gauge_tiles_clear,gauge_tiles_refresh,gauge_tiles_rotate
-  use fftw_blocks, only: pencil_transform=>mesh_transform,block_layout
+  use fftw_blocks, only: mesh_transform,block_layout
   use exx_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -108,10 +108,6 @@ contains
     if(bad/=0)return
     call block_layout(n,dims,coords,m,lo,bad)
     if(ng/=product(m).or.any(coords<0).or.any(coords>=dims))bad=1
-    if(size(dims)==2)then
-      if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
-         modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
-    endif
     if(allocated(op%gauge))then
       if(any(shape(op%gauge)/=[no,no,1]).or.any(shape(op%previous)/=shape(psi)))bad=1
     endif
@@ -224,10 +220,6 @@ contains
     if(bad/=0)return
     call block_layout(n,dims,coords,m,lo,bad)
     if(ng/=product(m).or.any(coords<0).or.any(coords>=dims))bad=1
-    if(size(dims)==2)then
-      if(modulo(n(1),dims(1))/=0.or.modulo(n(2),dims(1))/=0.or. &
-         modulo(n(2),dims(2))/=0.or.modulo(n(3),dims(2))/=0)bad=1
-    endif
     call orbital_check(bad,comm_r,comm_o)
     if(bad/=0)return
     call orbital_layout(nlocal,comm_r,comm_o,counts,first,bad)
@@ -517,13 +509,8 @@ contains
     if(bad/=0)return
     allocate(source_column(ng))
     allocate(multiplier(ng));pi=acos(-1d0);g=0
-    ! Native 3D transforms retain xyz ownership; legacy callers use Z pencils.
-    if(size(dims)==2)then
-      m=[n(1)/dims(1),n(2)/dims(2),n(3)]
-      lo=[coords(1)*m(1),coords(2)*m(2),0]
-    endif
-    stride=[m(3),m(3)*m(1),1]
-    if(size(dims)==3)stride=[1,m(1),m(1)*m(2)]
+    ! Every FFT preserves Cartesian xyz ownership, including two-axis callers.
+    stride=[1,m(1),m(1)*m(2)]
     if(screening>0d0)then
 !$omp parallel do collapse(2) default(none) schedule(static) &
 !$omp private(y,x,z,g,p,q,q2) shared(m,lo,n,h,pi,screening,radius,multiplier,stride)
@@ -784,7 +771,7 @@ contains
             density(:,j)=conjg(source_column)*target(:,selected(first+j-1),1)
           enddo
 !$omp end parallel do
-          call pencil_transform(n,dims,coords,comm,density,spectrum,-1,status,spectral_z=.true.)
+          call mesh_transform(n,dims,coords,comm,density,spectrum,-1,status)
           bad=status
           if(present(comm_o))call comm_get_max(bad,comm_r)
           if(bad/=0)exit
@@ -795,8 +782,8 @@ contains
             spectrum(:,j)=spectrum(:,j)*multiplier
           enddo
 !$omp end parallel do
-          ! Inverse pencil_transform already includes 1/product(n).
-          call pencil_transform(n,dims,coords,comm,spectrum,density,1,status,spectral_z=.true.)
+          ! Inverse mesh_transform already includes 1/product(n).
+          call mesh_transform(n,dims,coords,comm,spectrum,density,1,status)
           bad=status
           if(present(comm_o))call comm_get_max(bad,comm_r)
           if(bad/=0)exit

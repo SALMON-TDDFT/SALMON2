@@ -23,7 +23,7 @@ NVHPC/HPC-X/cuFFTでのSIGSEGVそのものは手元で再現・修正確認で�
 計算ノード上で、既存のNVHPC/HPC-X、FFTW、BLAS設定を使う：
 
 ```sh
-python3 testsuites/unit_kpoint_cufft/run.py --gpu --ranks 1 --threads 8
+python3 experiments/kpoint_cufft/run.py --gpu --ranks 1 --threads 8
 ```
 
 試験が通った後、報告時と同じSi入力・MPI 1・OMP 8で再実行する。単体試験だけで実計算側の問題が解消したと判断しない。再発した場合はprepare前後とコールバック入口でcommunicator値が保たれるかを比較し、デバイス処理後の破損とMPI ABI/ライブラリ混在も切り分ける。

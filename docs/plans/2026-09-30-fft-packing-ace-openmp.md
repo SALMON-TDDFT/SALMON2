@@ -8,7 +8,7 @@ Approved design: user approved FFT data movement reduction and ACE inner-loop th
 
 1. Modify src/xc/fftw_blocks.f90: unpartitioned axes pack directly to work and unpack from work; parallelize line pack/unpack and distributed reorder loops. Preserve padding correctness and MPI only on the master thread, with barriers publishing received data. Do not allocate a full-mesh replica.
 2. Modify src/xc/exx_orbitals.f90: parallelize streamed dense ACE overlaps across target orbitals, scalar grid summation per orbital; parallelize action updates across target orbitals. Retain outer factor order and collective order.
-3. Build work/hybrid-rules-build. Run unit_fftw_blocks roundtrip/reference suite for MPI1/2/4/8 and OMP1/2/4, and distributed metric tests for MPI1/2/4 and OMP1/2/4. Include no-OMP build. Existing numerical tests should pass before and after; the baseline performance deficiency is measured, not a correctness failure.
+3. Build work/hybrid-rules-build. Run 657_unit_fftw_blocks roundtrip/reference suite for MPI1/2/4/8 and OMP1/2/4, and distributed metric tests for MPI1/2/4 and OMP1/2/4. Include no-OMP build. Existing numerical tests should pass before and after; the baseline performance deficiency is measured, not a correctness failure.
 4. Snapshot new binary and run identical Si4 MPI2 short RT for OMP1/2/4, separately from production load. Compare current/energy/norm with immutable baseline, log peak RSS and timing. Sampling overhead must not be presented as clean baseline runtime.
 5. Record measured outcomes and limitations. Do not push or replace the running production binary.
 

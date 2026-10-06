@@ -12,7 +12,7 @@ Spec: 2026-09-28-dc-ehrenfest-design.md, user explicit mesh representation corre
 
 ### Task 1: Native rejection test then connection
 
-Create testsuites/unit_pbeh_rvv10/test_ehrenfest.py: generate a 2-fragment DC initial state, reconstruct into one native full-grid rank without LCFO projection, impulse and moving NVE ions. Observe existing PBEh input rejection first. Modify inputoutput.f90 to permit precisely this metadata-checked route, retaining checkpoint, finite-support, projected-LCFO MD, fractional RT occupation and finite-pulse guards. Modify hse_native.f90 to admit the corresponding ionic extension. Require per-step pseudopotential updates and fresh per-step energy. Build and rerun.
+Create testsuites/653_functional/test_ehrenfest.py: generate a 2-fragment DC initial state, reconstruct into one native full-grid rank without LCFO projection, impulse and moving NVE ions. Observe existing PBEh input rejection first. Modify inputoutput.f90 to permit precisely this metadata-checked route, retaining checkpoint, finite-support, projected-LCFO MD, fractional RT occupation and finite-pulse guards. Modify hse_native.f90 to admit the corresponding ionic extension. Require per-step pseudopotential updates and fresh per-step energy. Build and rerun.
 
 ### Task 2: Geometry and force consistency
 
