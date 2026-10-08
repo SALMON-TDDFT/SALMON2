@@ -48,6 +48,7 @@ use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
 use lcfo
+use dm_unfold_reference_sub, only: check_dm_unfold_reference, write_dm_unfold_reference
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -125,6 +126,9 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
+
+! dm_unfold (ground state of the reference cell): stop here if the Hamiltonian file cannot be written
+if(dm_unfold_option=='reference') call check_dm_unfold_reference(info,system)
 
 Miopt = 0
 nopt_max = 1
@@ -339,6 +343,9 @@ else if(write_gs_restart_data.ne."checkpoint_only") then
    if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
    call comm_sync_all
+   ! dm_unfold (ground state of the reference cell): Hamiltonian data to be kept together with wfn.bin
+   if(dm_unfold_option=='reference') &
+      call write_dm_unfold_reference(ofl%dir_out_restart,Miter,sum1,system,energy,lg,mg,stencil,V_local,ppg)
    if(yn_opt=='y') then
       if(.not.flag_opt_conv) then
          call comm_sync_all
