@@ -42,6 +42,7 @@ restart_filelist = [
     "data_for_restart/wfn.bin",
     "data_for_restart/occupation.bin",
     "data_for_restart/tm.bin",
+    "data_for_restart/dm_unfold_ref_hamiltonian.bin",
 ]
 
 # gap between the io=8 and io=9 clusters, k=2 (1 of 27 k-points)
@@ -63,6 +64,10 @@ for item in restart_filelist:
     if not os.path.exists(item):
         print("File not found: %s" % item)
         sys.exit(-1)  # Failure
+
+if os.path.getsize("data_for_restart/dm_unfold_ref_hamiltonian.bin") == 0:
+    print("File is empty: data_for_restart/dm_unfold_ref_hamiltonian.bin")
+    sys.exit(-1)  # Failure
 
 print("# Checking calculated result")
 

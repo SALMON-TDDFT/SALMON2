@@ -44,6 +44,7 @@ use init_gs, only: init_wf
 use md_sub, only: init_md, update_pseudo_rt, &
                   time_evolution_step_md_part1,time_evolution_step_md_part2
 use initialization_dft
+use dm_unfold_reference_sub, only: check_dm_unfold_reference
 
 implicit none
 type(s_rgrid) :: lg
@@ -104,6 +105,9 @@ call initialization2_dft( it, nspin, rion_update,  &
                           spsi, shpsi, sttpsi,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
+
+! dm_unfold_option='reference' is for the ground state (theory='dft'): this stops here with a message
+if(dm_unfold_option=='reference') call check_dm_unfold_reference(info,system)
 
 call initialization_dft_md( it, rion_update,  &
                           system, md, energy, ewald, stencil, fg, poisson,&
