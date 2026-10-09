@@ -50,7 +50,7 @@ module exx_native
   logical,save :: exx_force_full_action=.false.
   type(s_exx_ace),save :: ace
   type(s_exx_ace),save :: initial_ace,midpoint_ace
-  complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
+  complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:)
   ! Experimental inverse blocking: no RSS benefit in the first real-workload comparison.
@@ -163,7 +163,7 @@ contains
     type(s_rgrid),intent(in),optional :: mg
     type(s_parallel_info),intent(in),optional :: info
     type(s_orbital),intent(in),optional :: psi
-    integer :: ierr,no
+    integer :: ierr
     if(lcfo_rt_active)then
       call lcfo_exx_stage(stage,system,mg,info,psi)
       return
@@ -177,13 +177,6 @@ contains
         initial_ace=ace
       endif
     case(1)
-      if(propagator=='hse_taylor4_full')then
-        no=size(full_source,2)
-        if(allocated(midpoint_source))deallocate(midpoint_source)
-        allocate(midpoint_source(size(full_source,1),2*no,size(full_source,3)))
-        midpoint_source(:,:no,:)=initial_source/sqrt(2d0)
-        midpoint_source(:,no+1:,:)=full_source/sqrt(2d0)
-      endif
       ! Apply the two endpoint operators with half weights; no doubled factors.
       taylor_midpoint=.true.
     case(2)
@@ -191,7 +184,6 @@ contains
       call exx_ace_clear(initial_ace)
       call exx_ace_clear(midpoint_ace)
       if(allocated(initial_source))deallocate(initial_source)
-      if(allocated(midpoint_source))deallocate(midpoint_source)
     case default
       error stop 'Invalid HSE Taylor stage'
     end select
@@ -357,6 +349,7 @@ contains
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
       if(info%id_k==0)then
         write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
+        if(propagator=='hse_taylor4_full')write(*,'(a)')'EXX_DIRECT: ACE construction disabled'
         if(any(exx_kgrid_reduction/=1))write(*,'(a)')'EXX_K_REDUCTION: experimental feature'
         write(*,'(a,3i5,a,i8,a,i8)')'EXX_K_REDUCTION:',exx_kgrid_reduction, &
           ' source points per target=',kernel%fft_nk,' target points=',system%nk
@@ -389,11 +382,13 @@ contains
     if(.not.reported_team.and.info%id_k==0.and.kernel%auto_fft) &
       write(*,'(a,2es14.5)')'HSE_FFT_AUTO trial strided contiguous seconds=',kernel%fft_trial_seconds
     reported_team=.true.
-    if(timing_enabled)tick=exx_walltime()
-    call exx_ace_build(ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
-    if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
-    call comm_summation(ierr,total_error,info%icomm_k)
-    if(total_error/=0)error stop 'HSE06: ACE metric failed'
+    if(propagator/='hse_taylor4_full')then
+      if(timing_enabled)tick=exx_walltime()
+      call exx_ace_build(ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
+      if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
+      call comm_summation(ierr,total_error,info%icomm_k)
+      if(total_error/=0)error stop 'HSE06: ACE metric failed'
+    endif
     cached_source=local
     ex=0d0
     do j=1,info%numk
@@ -502,7 +497,11 @@ contains
       call lcfo_exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
       return
     endif
-    if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
+    if(propagator=='hse_taylor4_full')then
+      if(.not.allocated(full_source))error stop 'EXX: direct exchange source is not initialized'
+    else
+      if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
+    endif
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
     if(ace%packed.and.product(num_kgrid)==1.and..not.exx_force_full_action.and. &
@@ -537,12 +536,20 @@ contains
       call apply_distributed(cached_source,target_work,action_work,info,ierr)
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'EXX: full trial action failed'
-    else if(taylor_active.and.propagator=='hse_taylor4_full')then
+    else if(propagator=='hse_taylor4_full')then
       communication_before=exx_timings(4)
-      if(taylor_midpoint)then
-        call apply_distributed(midpoint_source,target_work,action_work,info,ierr)
-      else
+      if(taylor_active.and.taylor_midpoint)then
+        ! Keep occupied-prefix selection separate for the two endpoint sources.
         call apply_distributed(initial_source,target_work,action_work,info,ierr)
+        call comm_summation(ierr,total_error,info%icomm_k)
+        if(total_error/=0)error stop 'HSE Taylor initial full target action failed'
+        call add_mesh_action(.5d0*exchange_fraction())
+        call apply_distributed(full_source,target_work,action_work,info,ierr)
+        action_scale=.5d0*exchange_fraction()
+      else if(taylor_active)then
+        call apply_distributed(initial_source,target_work,action_work,info,ierr)
+      else
+        call apply_distributed(full_source,target_work,action_work,info,ierr)
       endif
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE Taylor full target action failed'
