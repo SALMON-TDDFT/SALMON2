@@ -20,6 +20,13 @@
 module checkpoint_restart_sub
   implicit none
 
+  ! Checkpoint loading precedes RT energy initialization. Keep the original
+  ! energy reference across these framework phases so restart preserves delta E.
+  ! The loaded flag selects the restored reference instead of the restart energy;
+  ! rt_energy_reference_file broadcasts both values to the participating ranks.
+  ! Access is restricted to the initialization and checkpoint procedures below.
+  real(8),save,private :: rt_initial_energy=0d0
+  logical,save,private :: rt_initial_energy_loaded=.false.
   integer,parameter,private :: write_mode = 1
   integer,parameter,private :: read_mode  = 2
 
@@ -29,6 +36,65 @@ module checkpoint_restart_sub
     module procedure finite_real_1d
   end interface
 contains
+
+subroutine rt_energy_reference_initialize(value)
+  implicit none
+  real(8),intent(inout)::value
+  if(rt_initial_energy_loaded)then
+    value=rt_initial_energy
+  else
+    rt_initial_energy=value
+  endif
+end subroutine
+
+subroutine rt_energy_reference_file(directory,step,info,writing)
+  use structures,only:s_parallel_info
+  use communication,only:comm_bcast
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  character(*),intent(in)::directory
+  integer,intent(in)::step
+  type(s_parallel_info),intent(in)::info
+  logical,intent(in)::writing
+  integer::unit,status,ios,version,saved_step,envstat
+  character(32)::mode
+  logical::exists
+  status=0
+  if(info%id_rko==0)then
+    inquire(file=trim(directory)//'rt-initial-energy.bin',exist=exists)
+    if(writing.or.exists)then
+      if(writing)then
+        open(newunit=unit,file=trim(directory)//'rt-initial-energy.bin', &
+          form='unformatted',status='replace',iostat=status)
+      else
+        open(newunit=unit,file=trim(directory)//'rt-initial-energy.bin', &
+          form='unformatted',status='old',iostat=status)
+      endif
+      if(status==0)then
+        if(writing)then
+          write(unit,iostat=status)1,step,rt_initial_energy
+        else
+          read(unit,iostat=status)version,saved_step,rt_initial_energy
+          if(status==0)then
+            if(version/=1.or.saved_step/=step)status=1
+            if(.not.ieee_is_finite(rt_initial_energy))status=1
+          endif
+        endif
+        close(unit,iostat=ios)
+        if(ios/=0)status=1
+      endif
+    else
+      call get_environment_variable('SALMON_FACTOR_HISTORY',mode,status=envstat)
+      if(envstat==0.and.trim(mode)=='learned')status=1
+    endif
+    rt_initial_energy_loaded=.not.writing.and.exists.and.status==0
+  endif
+  call comm_bcast(status,info%icomm_rko)
+  if(status/=0)error stop 'RT initial energy checkpoint missing or incompatible'
+  call comm_bcast(rt_initial_energy,info%icomm_rko)
+  call comm_bcast(rt_initial_energy_loaded,info%icomm_rko)
+end subroutine
+
 
 !===================================================================================================================================
 
@@ -249,6 +315,7 @@ subroutine restart_opt(Miopt,opt)
 end subroutine restart_opt
 
 subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,singlescale,idir)
+  use exx_native, only: exx_factor_checkpoint,exx_factor_mode_metadata
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale, s_rt
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint
@@ -290,12 +357,16 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,sing
     call write_singlescale(wdir,lg,mg,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
 
+  call exx_factor_mode_metadata(wdir,iter,info,.true.)
+  call rt_energy_reference_file(wdir,iter,info,.true.)
+  call exx_factor_checkpoint(wdir,iter,system,mg,info)
   call write_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
   call write_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself)
 
 end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
+  use exx_native, only: exx_factor_restart_pending,exx_factor_mode_metadata
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar, s_rt
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_dc,yn_conventional_from_dcdft,xc
   use exx_functional, only: is_global_hybrid
@@ -330,6 +401,9 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
   if(conventional_hybrid)call exx_gs_occupation_check(system,info,gs_occupation)
        
   if(yn_restart =='y') then
+    call exx_factor_mode_metadata(wdir,iter,info,.false.)
+    call rt_energy_reference_file(wdir,iter,info,.false.)
+    call exx_factor_restart_pending(wdir,iter)
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
     ! restore the t=0 (GS) density used as the difference-density reference
     call read_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself,rt%rho0_loaded)
@@ -1661,7 +1735,7 @@ subroutine read_Vh_stock(idir,lg,mg,info,Vh_stock1,Vh_stock2,is_self_checkpoint)
   integer :: iu1_r
   integer :: ix,iy,iz
   real(8),allocatable :: matbox1(:,:,:),matbox2(:,:,:)
-  character(100) :: dir_file_in
+  character(:),allocatable :: dir_file_in
 
   iu1_r = 96
   dir_file_in = trim(idir)//"Vh_stock.bin"
@@ -2214,18 +2288,21 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_is_root,comm_bcast
   use salmon_global, only: xc,dt,e_impulse,epdir_re1,propagator,trans_longi,file_pseudo,nelem,ae_shape1,hse_omega
+  use salmon_global, only: ae_shape2,omega1,I_wcm2_1,E_amplitude1,tw1,t1_start,phi_cep1,epdir_im1
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   character(*),intent(in) :: wdir
   type(s_dft_system),intent(in) :: system
   type(s_parallel_info),intent(in) :: info
   logical,intent(in) :: writing
-  integer :: unit,status,version,dims(4),j,pu,nbytes,saved_bytes,ios
+  integer :: unit,status,version,expected_version,dims(4),j,pu,nbytes,saved_bytes,ios
   real(8),allocatable :: values(:),saved(:)
   character(:),allocatable :: bytes,saved_text
   logical :: exists,opened
   character(32) :: method,field_mode
   status=0;opened=.false.
+  expected_version=merge(2,1,use_symmetry)
+  if(ae_shape1=='Acos2')expected_version=merge(6,5,use_symmetry)
   if(comm_is_root(info%id_rko))then
     inquire(file=trim(wdir)//'hse_restart.bin',exist=exists)
     if(writing)then
@@ -2250,19 +2327,20 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
         reshape(system%Rion,[3*system%nion]),real(system%kion,8)]
       if(use_symmetry)values=[values,system%wtk(:system%nk), &
         reshape(SymMatA,[size(SymMatA)]),reshape(SymMatB,[size(SymMatB)])]
+      if(ae_shape1=='Acos2')values=[values,omega1,I_wcm2_1,E_amplitude1,tw1,t1_start,phi_cep1,epdir_im1]
       allocate(saved(size(values)))
       if(writing)then
         ! Mark pulse checkpoints distinctly: legacy impulse readers must not
         ! accept them after changing the field shape. Pulse restart is guarded.
-        version=merge(2,1,use_symmetry)
-        if(ae_shape1=='Acos2')version=version+2
+        version=expected_version
         write(unit,iostat=status)version,[system%nk,system%no,system%nion,nelem]
         if(status==0)write(unit,iostat=status)propagator,trans_longi
+        if(status==0.and.ae_shape1=='Acos2')write(unit,iostat=status)ae_shape1,ae_shape2
         if(status==0)write(unit,iostat=status)values
       else
         read(unit,iostat=status)version,dims
         if(status==0)then
-          if(version/=merge(2,1,use_symmetry).or.any(dims/=[system%nk,system%no,system%nion,nelem]))status=1
+          if(version/=expected_version.or.any(dims/=[system%nk,system%no,system%nion,nelem]))status=1
         endif
         ! Strings are written with their declared SALMON lengths; read matching lengths below.
         if(status==0)call read_methods(unit,status)
@@ -2311,13 +2389,21 @@ subroutine hse_checkpoint_metadata(wdir,system,info,writing)
   if(status/=0)error stop 'HSE06 restart physics/pseudopotential mismatch or incomplete metadata'
 contains
   subroutine read_methods(unit,status)
+    implicit none
     integer,intent(in) :: unit
     integer,intent(out) :: status
+    character(len(ae_shape1)) :: old_shape1,old_shape2
     character(len(propagator)) :: old_method
     character(len(trans_longi)) :: old_field
     read(unit,iostat=status)old_method,old_field
     if(status==0)then
       if(old_method/=propagator.or.old_field/=trans_longi)status=1
+    endif
+    if(status==0.and.ae_shape1=='Acos2')then
+      read(unit,iostat=status)old_shape1,old_shape2
+      if(status==0)then
+        if(old_shape1/=ae_shape1.or.old_shape2/=ae_shape2)status=1
+      endif
     endif
   end subroutine
 end subroutine hse_checkpoint_metadata

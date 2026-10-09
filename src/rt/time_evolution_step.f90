@@ -290,7 +290,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 ! result
 
-  if(hybrid_mesh_rt)then
+  if(hybrid_mesh_rt.or.xc=='hse06')then
     ! Propagation uses midpoint A, but energy/current/force describe t_{n+1}.
     system%vec_Ac=rt%Ac_tot(:,itt)
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)

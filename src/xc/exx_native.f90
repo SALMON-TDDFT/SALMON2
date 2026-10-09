@@ -17,7 +17,7 @@ module exx_native
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_ace
-  use exx_factor_history,only:s_factor_history,history_accept,history_predict
+  use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
   use exx_surrogate_dense,only:surrogate_dense_basis_error
   use exx_surrogate_trace,only:s_surrogate_trace,trace_initialize,trace_candidate,trace_write_diagnostic, &
     trace_shadow_fit,trace_shadow_compare,s_factor_diagnostic,trace_factor_write
@@ -66,9 +66,12 @@ module exx_native
   logical,save::factor_initialized=.false.,factor_configured=.false.,factor_experiment=.false.,factor_learned=.false.
   logical,save::factor_prediction_installed=.false.,factor_all_ready=.false.
   integer,save::factor_step=0
-  public::exx_factor_begin,exx_factor_endpoint
+  public::exx_factor_begin,exx_factor_endpoint,exx_factor_checkpoint,exx_factor_restart_pending
+  public::exx_factor_mode_metadata
+  character(512),save::factor_restart_directory=""
+  integer,save::factor_restart_step=-1
   type(s_exx_ace),save :: initial_ace,midpoint_ace
-  complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:),midpoint_source(:,:,:)
+  complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:)
   ! Experimental inverse blocking: no RSS benefit in the first real-workload comparison.
@@ -164,7 +167,24 @@ contains
 
 
   ! Experimental canonical factor history: Gamma/grid or full k-only MPI.
+  logical function native_integer_occupation(system) result(valid)
+    implicit none
+    type(s_dft_system),intent(in) :: system
+    integer :: occupied
+    occupied=nelec/2
+    valid=.false.
+    if(temperature>=0d0)return
+    if(mod(nelec,2)/=0.or.occupied<1.or.occupied>system%no)return
+    if(maxval(abs(system%rocc(:occupied,:,:)-2d0))>1d-12)return
+    if(system%no>occupied)then
+      if(yn_dc/='n'.or.product(num_kgrid)==1)return
+      if(maxval(abs(system%rocc(occupied+1:,:,:)))>1d-12)return
+    endif
+    valid=.true.
+  end function native_integer_occupation
+
   subroutine factor_configure(system,info)
+    use salmon_global, only: yn_restart
     implicit none
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
@@ -176,15 +196,16 @@ contains
       if(factor_experiment)then
         if(trim(value)/='strict'.and.trim(value)/='learned')error stop 'Invalid factor history mode'
         factor_learned=trim(value)=='learned'
+
         if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or.lcfo_rt_active.or. &
           propagator/='hse_taylor4'.or.yn_predictor_corrector/='y'.or. &
-          (product(num_kgrid)==1.and.hse_sr_tolerance/=1d-3).or. &
+          (product(num_kgrid)==1.and.hse_sr_tolerance<0d0).or. &
           (product(num_kgrid)>1.and.hse_sr_tolerance/=0d0).or. &
           exx_mlwf_radius/=0d0.or. &
           (product(num_kgrid)==1.and.(exx_mlwf_norm_fraction/=1d0.or.exx_ace_support/='source')).or. &
           (product(num_kgrid)>1.and.(exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied')).or. &
           exx_pair_screening/='off'.or. &
-          yn_hse_wannier_snapshot=='y'.or.any(abs(system%rocc-2d0)>1d-12).or.info%isize_o/=1) &
+          yn_hse_wannier_snapshot=='y'.or..not.native_integer_occupation(system).or.info%isize_o/=1) &
           error stop 'Factor history requires static full-support HSE, compatible k/SR settings and integer occupation'
         if(product(num_kgrid)>1.and.(info%isize_r/=1.or.use_symmetry.or.product(num_kgrid)/=system%nk)) &
           error stop 'Factor k experiment requires full uniform k mesh and k-only MPI'
@@ -210,7 +231,11 @@ contains
       call factor_configure(system,info)
       if(factor_experiment)then
         call factor_materialize()
-        call exx_factor_endpoint(system,info,0)
+        if(factor_restart_step>=0.and.factor_learned)then
+          call exx_factor_restore(system,mg,info)
+        else
+          call exx_factor_endpoint(system,info,0)
+        endif
         if(info%id_rko==0)write(*,'(a,l1)')'FACTOR_HISTORY learned: ',factor_learned
       endif
       factor_initialized=.true.
@@ -223,6 +248,177 @@ contains
     if(.not.exx_freeze.and.step>exx_factor_warmup_steps.and.factor_learned)call exx_refresh(system,mg,info,psi)
     if(info%id_rko==0)write(*,'(a,i8,l2)')'FACTOR_HISTORY step/predicted: ',step,exx_freeze
   end subroutine
+
+  subroutine exx_factor_mode_metadata(directory,step,info,writing)
+    implicit none
+    character(*),intent(in)::directory
+    integer,intent(in)::step
+    type(s_parallel_info),intent(in)::info
+    logical,intent(in)::writing
+    character(32)::value
+    integer::env_status,mode,saved_mode,unit,status,total,ios,version,saved_step
+    logical::exists,has_history
+    mode=0;status=0;value=''
+    call get_environment_variable('SALMON_FACTOR_HISTORY',value,status=env_status)
+    if(env_status==0)then
+      select case(trim(value))
+      case('strict');mode=1
+      case('learned');mode=2
+      case default;status=1
+      end select
+    else if(env_status/=1)then
+      status=1
+    endif
+    call comm_summation(status,total,info%icomm_rko)
+    if(total/=0)error stop 'Invalid factor mode at checkpoint/restart'
+    if(info%id_rko==0)then
+      inquire(file=trim(directory)//'factor-mode.bin',exist=exists)
+      if(writing.or.exists)then
+        if(writing)then
+          open(newunit=unit,file=trim(directory)//'factor-mode.bin', &
+            form='unformatted',status='replace',iostat=status)
+        else
+          open(newunit=unit,file=trim(directory)//'factor-mode.bin', &
+            form='unformatted',status='old',iostat=status)
+        endif
+        if(status==0)then
+          if(writing)then
+            write(unit,iostat=status)1,step,mode
+          else
+            read(unit,iostat=status)version,saved_step,saved_mode
+            if(status==0)then
+              if(version/=1.or.saved_step/=step.or.saved_mode/=mode)status=1
+            endif
+          endif
+          close(unit,iostat=ios)
+          if(ios/=0)status=1
+        endif
+      else
+        inquire(file=trim(directory)//'factor-history-00000000.bin',exist=has_history)
+        if(mode/=0.or.has_history)status=1
+      endif
+    endif
+    call comm_bcast(status,info%icomm_rko)
+    if(status/=0)error stop 'Factor mode checkpoint missing or mismatched'
+  end subroutine
+
+  ! Deferred restore follows initialization of the exchange backend.
+  subroutine exx_factor_restart_pending(directory,step)
+    implicit none
+    character(*),intent(in)::directory
+    integer,intent(in)::step
+    factor_restart_directory=directory
+    factor_restart_step=step
+  end subroutine
+
+  subroutine exx_factor_checkpoint(directory,step,system,mg,info)
+    implicit none
+    character(*),intent(in)::directory
+    integer,intent(in)::step
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    integer::unit,status,total,ik,ios
+    character(600)::filename
+    if(.not.factor_learned)return
+    status=0
+    if(.not.factor_initialized.or.ace%packed.or..not.allocated(ace%factors))status=1
+    call comm_summation(status,total,info%icomm_rko)
+    if(total/=0)error stop 'Learned ACE checkpoint requires initialized dense factors'
+    write(filename,'(a,a,i8.8,a)')trim(directory),'factor-history-',info%id_rko,'.bin'
+    open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='replace',iostat=status)
+    if(status==0)then
+      write(unit,iostat=status)1,step,mg%is,mg%ie,system%no,system%nk, &
+        info%isize_r,info%isize_k,info%isize_o,info%ik_s,info%numk, &
+        exx_factor_exact_interval,exx_factor_warmup_steps,shape(ace%factors), &
+        ace%dv,ace%condition,ace%grid_rows,factor_all_ready, &
+        hse_sr_tolerance,exx_mlwf_norm_fraction,exx_mlwf_radius
+      if(status==0)write(unit,iostat=status)ace%factors
+      do ik=1,size(factor_history)
+        if(status/=0)exit
+        call history_write(unit,factor_history(ik),status)
+      enddo
+      close(unit,iostat=ios)
+      if(ios/=0)status=1
+    endif
+    status=merge(1,0,status/=0)
+    call comm_summation(status,total,info%icomm_rko)
+    if(total/=0)error stop 'Learned ACE checkpoint write failed'
+  end subroutine
+
+  subroutine exx_factor_restore(system,mg,info)
+    implicit none
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_factor_history),allocatable::loaded(:)
+    complex(8),allocatable::factors(:,:,:)
+    integer::unit,status,total,ios,ik,version,step,header(15),expected(15),dims(3),rows
+    real(8)::dv,condition,settings(3)
+    logical::ready
+    character(600)::filename
+    expected=[mg%is,mg%ie,system%no,system%nk,info%isize_r,info%isize_k, &
+      info%isize_o,info%ik_s,info%numk,exx_factor_exact_interval,exx_factor_warmup_steps]
+    write(filename,'(a,a,i8.8,a)')trim(factor_restart_directory),'factor-history-',info%id_rko,'.bin'
+    open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='old',iostat=status)
+    if(status==0)then
+      read(unit,iostat=status)version,step,header,dims,dv,condition,rows,ready,settings
+      if(status==0)then
+        if(version/=1.or.step/=factor_restart_step.or.any(header/=expected))status=1
+        if(any(dims/=shape(ace%factors)))status=1
+        if(.not.ieee_is_finite(dv).or..not.ieee_is_finite(condition))status=1
+        if(dv/=system%hvol.or.rows/=ace%grid_rows)status=1
+        if(any(settings/=[hse_sr_tolerance,exx_mlwf_norm_fraction,exx_mlwf_radius]))status=1
+        do ik=1,3
+          if(.not.ieee_is_finite(settings(ik)))status=1
+        enddo
+      endif
+      if(status==0)then
+        allocate(factors(dims(1),dims(2),dims(3)),loaded(info%numk))
+        read(unit,iostat=status)factors
+        if(status==0)then
+          if(.not.finite_complex_3d_restart(factors))status=1
+        endif
+        do ik=1,info%numk
+          if(status/=0)exit
+          call history_read(unit,loaded(ik),dims(1),dims(2),status)
+          if(status/=0)exit
+          if(loaded(ik)%interval/=exx_factor_exact_interval)status=1
+          if(loaded(ik)%last/=step-mod(step,exx_factor_exact_interval))status=1
+
+        enddo
+      endif
+      close(unit,iostat=ios)
+      if(ios/=0)status=1
+    endif
+    status=merge(1,0,status/=0)
+    call comm_summation(status,total,info%icomm_rko)
+    if(total/=0)error stop 'Learned ACE restart state missing, incompatible or corrupt'
+    status=count(.not.loaded%ready)
+    call comm_summation(status,total,info%icomm_k)
+    if(ready.neqv.(total==0))error stop "Learned ACE restart readiness mismatch"
+    ace%factors=factors;ace%dv=dv;ace%condition=condition
+    factor_history=loaded;factor_all_ready=ready
+    if(allocated(cached_source))deallocate(cached_source)
+    if(allocated(cached_occupation))deallocate(cached_occupation)
+    factor_restart_step=-1
+  end subroutine
+
+  logical function finite_complex_3d_restart(a) result(ok)
+    implicit none
+    complex(8),intent(in)::a(:,:,:)
+    integer::i,j,k
+    ok=.false.
+    do k=1,size(a,3)
+      do j=1,size(a,2)
+        do i=1,size(a,1)
+          if(.not.ieee_is_finite(real(a(i,j,k),8)))return
+          if(.not.ieee_is_finite(aimag(a(i,j,k))))return
+        enddo
+      enddo
+    enddo
+    ok=.true.
+  end function
 
   subroutine factor_materialize()
     implicit none
@@ -415,7 +611,7 @@ contains
     type(s_rgrid),intent(in),optional :: mg
     type(s_parallel_info),intent(in),optional :: info
     type(s_orbital),intent(in),optional :: psi
-    integer :: ierr,no
+    integer :: ierr
     if(lcfo_rt_active)then
       call lcfo_exx_stage(stage,system,mg,info,psi)
       return
@@ -429,13 +625,6 @@ contains
         initial_ace=ace
       endif
     case(1)
-      if(propagator=='hse_taylor4_full')then
-        no=size(full_source,2)
-        if(allocated(midpoint_source))deallocate(midpoint_source)
-        allocate(midpoint_source(size(full_source,1),2*no,size(full_source,3)))
-        midpoint_source(:,:no,:)=initial_source/sqrt(2d0)
-        midpoint_source(:,no+1:,:)=full_source/sqrt(2d0)
-      endif
       ! Apply the two endpoint operators with half weights; no doubled factors.
       taylor_midpoint=.true.
     case(2)
@@ -443,7 +632,6 @@ contains
       call exx_ace_clear(initial_ace)
       call exx_ace_clear(midpoint_ace)
       if(allocated(initial_source))deallocate(initial_source)
-      if(allocated(midpoint_source))deallocate(midpoint_source)
     case default
       error stop 'Invalid HSE Taylor stage'
     end select
@@ -548,6 +736,17 @@ contains
       call lcfo_exx_refresh(system,mg,info,psi,exx_exchange_energy)
       return
     endif
+    ! Select occupation semantics before the integer-prefix native route.
+    ! Nonnegative temperature retains the existing occupation-weighted source.
+    if(temperature>=0d0)then
+      if(info%isize_r>1.or.info%isize_o>1.or. &
+         (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
+        call refresh_spatial(system,mg,info,psi)
+      else
+        call refresh_wannier(system,mg,info,psi)
+      endif
+      return
+    endif
     if((.not.factor_experiment.or.product(num_kgrid)==1).and. &
        (info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
        ((theory=='dft').or. &
@@ -574,8 +773,8 @@ contains
     do j=1,3;offdiag(j,j)=0;enddo
     if(maxval(abs(offdiag))>1d-12)error stop 'HSE06: orthogonal cell required'
     if((.not.use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12).or. &
-      maxval(abs(system%rocc-2d0))>1d-12) &
-      error stop 'HSE06: uniform k weights and fully occupied spin pairs required'
+      .not.native_integer_occupation(system)) &
+      error stop 'HSE06: uniform k weights and occupied-prefix spin pairs required'
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE06: unsupported orbital layout'
     if(all(kernel%n==0))then
       nullify(create_backend)
@@ -606,7 +805,10 @@ contains
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
       if(allocated(kernel%accelerator).and.info%id_k==0) &
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
-      if(info%id_k==0)write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
+      if(info%id_k==0)then
+        write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
+        if(propagator=='hse_taylor4_full')write(*,'(a)')'EXX_DIRECT: ACE construction disabled'
+      endif
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
     allocate(local(ng,no,info%numk))
@@ -635,15 +837,18 @@ contains
     if(.not.reported_team.and.info%id_k==0.and.kernel%auto_fft) &
       write(*,'(a,2es14.5)')'HSE_FFT_AUTO trial strided contiguous seconds=',kernel%fft_trial_seconds
     reported_team=.true.
-    if(timing_enabled)tick=exx_walltime()
-    call exx_ace_build(ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
-    if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
-    call comm_summation(ierr,total_error,info%icomm_k)
-    if(total_error/=0)error stop 'HSE06: ACE metric failed'
+    if(propagator/='hse_taylor4_full')then
+      if(timing_enabled)tick=exx_walltime()
+      call exx_ace_build(ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
+      if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
+      call comm_summation(ierr,total_error,info%icomm_k)
+      if(total_error/=0)error stop 'HSE06: ACE metric failed'
+    endif
     cached_source=local
     ex=0d0
     do j=1,info%numk
-      ex=ex+exchange_fraction()*real(sum(conjg(local(:,:,j))*w(:,:,j)),8)*system%hvol*system%wtk(info%ik_s+j-1)
+      ex=ex+.5d0*exchange_fraction()*sum(sum(real(conjg(local(:,:,j))*w(:,:,j),8),dim=1) &
+        *system%rocc(:,info%ik_s+j-1,1))*system%hvol*system%wtk(info%ik_s+j-1)
     enddo
     call comm_summation(ex,exx_exchange_energy,info%icomm_k)
   end subroutine
@@ -691,8 +896,13 @@ contains
       endif
       return
     endif
-    call exx_k_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
-      info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+    if(temperature<0d0.and.yn_dc=='n')then
+      call exx_k_kernel_apply_distributed(kernel,source(:,:nelec/2,:),target,action,layout(:np),layout(np+1:), &
+        info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+    else
+      call exx_k_kernel_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
+        info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+    endif
   contains
     subroutine fill_density(j,lo,rows,density)
       implicit none
@@ -712,13 +922,14 @@ contains
   end interface
 
       ng=size(source,1);no=size(source,2)
+      if(temperature<0d0.and.yn_dc=='n')no=nelec/2
       full_index=layout(info%id_k+1)+j-1
       rep=symmetry_map%owner(full_index)-info%ik_s+1
       coefficient=cmplx(1d0/symmetry_map%multiplicity(full_index),0d0,8)
       density=0d0
       ! Average little-group projectors one orbital block at a time, not copies of all orbitals.
       do op=1,symmetry_map%multiplicity(full_index)
-        call symmetry_transform(symmetry_map,full_index,op,source(:,:,rep),rotated,stat)
+        call symmetry_transform(symmetry_map,full_index,op,source(:,:no,rep),rotated(:,:no),stat)
         if(stat/=0)error stop 'HSE symmetry source transformation failed'
         do g=1,no
           rotated(:,g)=rotated(:,g)*kernel%phase(:,j)
@@ -758,7 +969,11 @@ contains
       call lcfo_exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
       return
     endif
-    if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
+    if(propagator=='hse_taylor4_full')then
+      if(.not.allocated(full_source))error stop 'EXX: direct exchange source is not initialized'
+    else
+      if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
+    endif
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)
     if(ace%packed.and.product(num_kgrid)==1.and..not.exx_force_full_action.and. &
@@ -793,12 +1008,20 @@ contains
       call apply_distributed(cached_source,target_work,action_work,info,ierr)
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'EXX: full trial action failed'
-    else if(taylor_active.and.propagator=='hse_taylor4_full')then
+    else if(propagator=='hse_taylor4_full')then
       communication_before=exx_timings(4)
-      if(taylor_midpoint)then
-        call apply_distributed(midpoint_source,target_work,action_work,info,ierr)
-      else
+      if(taylor_active.and.taylor_midpoint)then
+        ! Keep occupied-prefix selection separate for the two endpoint sources.
         call apply_distributed(initial_source,target_work,action_work,info,ierr)
+        call comm_summation(ierr,total_error,info%icomm_k)
+        if(total_error/=0)error stop 'HSE Taylor initial full target action failed'
+        call add_mesh_action(.5d0*exchange_fraction())
+        call apply_distributed(full_source,target_work,action_work,info,ierr)
+        action_scale=.5d0*exchange_fraction()
+      else if(taylor_active)then
+        call apply_distributed(initial_source,target_work,action_work,info,ierr)
+      else
+        call apply_distributed(full_source,target_work,action_work,info,ierr)
       endif
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE Taylor full target action failed'

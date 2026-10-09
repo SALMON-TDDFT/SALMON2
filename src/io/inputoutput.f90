@@ -2969,7 +2969,15 @@ contains
     implicit none
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
-    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
+    character(32) :: history_mode
+    integer :: history_status
+
+    call get_environment_variable('SALMON_FACTOR_HISTORY',history_mode,status=history_status)
+    learned_mesh_checkpoint=history_status==0.and.trim(history_mode)=='learned'.and.xc=='hse06'.and. &
+      yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
+      product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
+      exx_ace_support=='source'.and.nproc_ob==1.and.yn_self_checkpoint=='n'
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -3450,7 +3458,7 @@ contains
       endif
       if(.not.is_hybrid(xc)) &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
-      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
+      if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
@@ -3485,7 +3493,7 @@ contains
     endif
     if(hybrid_mesh_rt)then
       yn_hse_wannier='y'
-      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
+      if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
         error stop 'Hybrid mesh RT: restart/snapshot unsupported'
       if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
         error stop 'Hybrid mesh RT: impulse or Acos2 without a second field required'
@@ -3497,7 +3505,7 @@ contains
         if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
           error stop 'Hybrid mesh RT: positive frequency/width and nonnegative pulse start required'
       endif
-      if(checkpoint_interval>0.or.time_shutdown>0d0.or.write_rt_wfn_k=='y') &
+      if(((checkpoint_interval>0.or.time_shutdown>0d0).and..not.learned_mesh_checkpoint).or.write_rt_wfn_k=='y') &
         error stop 'Hybrid mesh RT: checkpoint output not supported'
       if(yn_md=='y')then
         if(ensemble/='NVE'.or.step_velocity_scaling>=1.or.yn_stop_system_momt=='y') &
@@ -3591,8 +3599,9 @@ contains
       endif
       if(yn_dc/='y'.and..not.(xc=='hse06'.and.temperature>=0d0).and. &
          (yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
-        if(nstate*2/=nelec.or.temperature>=0d0) &
-          error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
+        if(nstate*2<nelec.or.mod(nelec,2)/=0.or.temperature>=0d0.or. &
+           (product(num_kgrid)==1.and.nstate*2/=nelec)) &
+          error stop 'HSE06 native support requires integer occupied states and fixed occupations'
       endif
       if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
         if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
@@ -3607,7 +3616,8 @@ contains
           if(ae_shape2/='none'.and.ae_shape2/='impulse')error stop 'HSE06 laser: unsupported probe'
           if(index(yn_symmetry,'y')/=0)error stop 'HSE06 laser: full k mesh required'
           ! Pulse parameters are not covered by the legacy impulse restart metadata.
-          if(yn_restart=='y')error stop 'HSE06 laser RT restart is not yet supported'
+          if(yn_restart=='y'.and.((propagator/='hse_taylor4_full'.and.propagator/='hse_taylor4').or.ae_shape2/='none')) &
+            error stop 'HSE laser restart requires direct Taylor4 and a single pulse'
           if(maxval(abs(epdir_im1))>1d-12)error stop 'HSE06 laser: linear polarization required'
         else
           if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06: unsupported field shape'

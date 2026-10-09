@@ -273,7 +273,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  if(yn_conventional_from_dcdft=='n') then
+  if(yn_conventional_from_dcdft=='n'.or.yn_restart=='y') then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   else
   ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data
@@ -376,6 +376,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
+  call rt_energy_reference_initialize(energy%E_tot0)
   
   call timer_begin(LOG_INIT_RT)
   

@@ -4,7 +4,7 @@ module exx_factor_history
  use,intrinsic::ieee_arithmetic
  implicit none
  private
- public::s_factor_history,history_accept,history_predict,factor_align
+ public::s_factor_history,history_accept,history_predict,factor_align,history_write,history_read
  type s_factor_history
   complex(real64),allocatable::x(:,:,:)
   integer::interval=8
@@ -99,7 +99,7 @@ contains
   integer,intent(in)::step
   procedure(sum_callback)::sumgrid
   integer,intent(out)::status
-  complex(real64)::d(2),y,acc(6,1)
+  complex(real64)::d(2),y,acc(6,1),bad(1,1)
   real(real64)::g(2,2),b(2),gg(2,2),rhs(2,1),ridge
   real(real64)::af(2,2),scales(2),solution(2,1),rcond,ferr(1),berr(1),solve_work(6)
   integer::solve_iwork(2)
@@ -108,7 +108,10 @@ contains
   integer::i,j,k,l,info
   status=1
   if(step<0.or.dv<=0.or.h%interval<1)return
-  if(.not.scalar_finite_complex(x))return
+  bad=0
+  if(.not.scalar_finite_complex(x))bad=1
+  call sumgrid(bad)
+  if(abs(bad(1,1))>0)return
   if(h%count>0)then
    if(step-h%last/=h%interval)return
    if(any(shape(x)/=shape(h%x(:,:,1))))return
@@ -194,6 +197,51 @@ contains
   enddo
 !$omp end parallel do
   if(.not.scalar_finite_complex(x))return
+  status=0
+ end subroutine
+
+ subroutine history_write(unit,h,status)
+  implicit none
+  integer,intent(in)::unit
+  type(s_factor_history),intent(in)::h
+  integer,intent(out)::status
+  integer::dims(3)
+  dims=0
+  if(allocated(h%x))dims=shape(h%x)
+  write(unit,iostat=status)1,dims,h%interval,h%count,h%last,h%teachers,h%ready,h%g,h%b,h%coeff
+  if(status/=0)return
+  if(allocated(h%x))write(unit,iostat=status)h%x
+ end subroutine
+
+ subroutine history_read(unit,h,ng,nfactor,status)
+  implicit none
+  integer,intent(in)::unit,ng,nfactor
+  type(s_factor_history),intent(inout)::h
+  integer,intent(out)::status
+  type(s_factor_history)::candidate
+  integer::version,dims(3),k
+  read(unit,iostat=status)version,dims,candidate%interval,candidate%count,candidate%last, &
+   candidate%teachers,candidate%ready,candidate%g,candidate%b,candidate%coeff
+  if(status/=0)return
+  status=1
+  if(version/=1.or.candidate%interval<1)return
+  if(candidate%count<0.or.candidate%count>3.or.candidate%teachers<0)return
+  if(candidate%ready.and.(candidate%count/=3.or.candidate%teachers<8))return
+  if(.not.scalar_finite_real(reshape(candidate%g,[4])))return
+  if(.not.scalar_finite_real(candidate%b).or..not.scalar_finite_real(candidate%coeff))return
+  if(any(dims/=0))then
+   if(any(dims/=[ng,nfactor,3]))return
+   allocate(candidate%x(ng,nfactor,3))
+   read(unit,iostat=status)candidate%x
+   if(status/=0)return
+   status=1
+   do k=1,3
+    if(.not.scalar_finite_complex(candidate%x(:,:,k)))return
+   enddo
+  else
+   if(candidate%count/=0.or.candidate%ready)return
+  endif
+  h=candidate
   status=0
  end subroutine
 end module
