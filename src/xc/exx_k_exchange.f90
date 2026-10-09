@@ -14,6 +14,7 @@ module exx_k_exchange
   type exx_k_kernel
     class(s_exx_k_backend),allocatable :: accelerator
     integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1
+    integer :: fft_nk=0,cosets=1
     logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
     real(c_double) :: seconds(6)=0d0,fft_trial_seconds(2)=0d0
     integer, allocatable :: order(:), point(:,:),shift(:,:),distance_index(:,:,:,:)
@@ -31,7 +32,7 @@ interface exx_k_kernel_init
   end interface
 contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                        block_rows,profile,fft_layout,create_backend,coulomb_radius)
+                        block_rows,profile,fft_layout,create_backend,coulomb_radius,source_reduction)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n,mesh,block
@@ -41,13 +42,14 @@ contains
     logical,optional,intent(in) :: profile
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
+    integer,optional,intent(in) :: source_reduction(3)
     real(c_double),optional,intent(in) :: coulomb_radius
     call init_rectangular(op,[n,n,n],[mesh,mesh,mesh],[h,h,h],k,omega,block,ierr, &
-      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius)
+      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius,source_reduction)
   end subroutine
 
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend,coulomb_radius)
+                             block_rows,profile,fft_layout,create_backend,coulomb_radius,source_reduction)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3),block
@@ -58,10 +60,13 @@ contains
     logical,optional,intent(in) :: profile
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
+    integer,optional,intent(in) :: source_reduction(3)
     real(c_double),optional,intent(in) :: coulomb_radius
     integer :: ns(3),nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen,axis
+    integer :: reduction(3),coarse(3),coarse_ns(3),residue(3),cell(3),ax,ay,az
     real(c_double) :: pi,q2,q(3),scaled(3),radius
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
+    real(c_double),allocatable :: folded_kernel(:,:,:)
     type(c_ptr) :: plan
     ierr=1
     call exx_k_kernel_destroy(op,ierr)
@@ -75,6 +80,17 @@ contains
       if(coulomb_radius>0d0)radius=coulomb_radius
     endif
     if(omega==0d0.and.radius>.5d0*minval(n*mesh*h)*(1d0+1d-12))return
+    reduction=1
+    if(present(source_reduction))reduction=source_reduction
+    if(any(reduction<1))return
+    if(any(modulo(mesh,reduction)/=0))return
+    if(any(reduction>1).and.omega<=0d0)return
+    if(any(reduction>1).and.present(create_backend))then
+      if(associated(create_backend))return
+    endif
+    coarse=mesh/reduction
+    coarse_ns=n*coarse
+    op%fft_nk=product(coarse);op%cosets=product(reduction)
     chosen=block
     if(present(block_rows))then
       if(block_rows<0.or.block_rows>product(n))return
@@ -96,6 +112,10 @@ contains
         return
       end select
     endif
+    if(op%cosets>1)then
+      if(op%contiguous_fft)return
+      op%auto_fft=.false.
+    endif
     nk=product(mesh);ng=product(n);ns=n*mesh;pi=acos(-1d0)
     if(size(k,1)/=3.or.size(k,2)/=nk.or..not.salmon_all_finite(k))return
     first=1;nphase=nk
@@ -103,21 +123,24 @@ contains
     if(present(phase_count))nphase=phase_count
     if(first<1.or.nphase<0.or.first+nphase-1>nk)return
     op%phase_start=first
-    op%n=n;op%mesh=mesh;op%ng=ng;op%nk=nk;op%block=min(chosen,ng)
+    op%n=n;op%mesh=coarse;op%ng=ng;op%nk=nk;op%block=min(chosen,ng)
     allocate(op%order(nk),op%point(3,ng),op%shift(3,nk),op%phase(ng,nphase),op%kernel(0:ns(1)-1,0:ns(2)-1,0:ns(3)-1))
     ! Separable periodic coordinate differences: O(n*n*mesh) integers, not
     ! O(ng*ng*nk). Avoid integer modulo in every exchange-kernel multiply.
     allocate(op%distance_index(0:maxval(n)-1,0:maxval(n)-1,0:maxval(mesh)-1,3))
     do axis=1,3
-      do z=0,mesh(axis)-1;do y=0,n(axis)-1;do x=0,n(axis)-1
-        op%distance_index(x,y,z,axis)=modulo(x-y-z*n(axis),ns(axis))
+      do z=0,coarse(axis)-1;do y=0,n(axis)-1;do x=0,n(axis)-1
+        op%distance_index(x,y,z,axis)=modulo(x-y-z*n(axis),coarse_ns(axis))
       enddo;enddo;enddo
     enddo
     op%order=0
     do i=1,nk
       scaled=(k(:,i)-k(:,1))*real(n*mesh,c_double)*h/(2*pi)
       if(maxval(abs(scaled-anint(scaled)))>1d-8)goto 900
-      idx=modulo(nint(scaled),mesh);index=1+idx(1)+mesh(1)*(idx(2)+mesh(2)*idx(3))
+      idx=modulo(nint(scaled),mesh)
+      cell=idx/reduction;residue=modulo(idx,reduction)
+      index=1+cell(1)+coarse(1)*(cell(2)+coarse(2)*cell(3))+ &
+        op%fft_nk*(residue(1)+reduction(1)*(residue(2)+reduction(2)*residue(3)))
       if(op%order(index)/=0)goto 900
       op%order(index)=i
     enddo
@@ -128,10 +151,11 @@ contains
         op%phase(i,j)=exp(cmplx(0d0,sum((k(:,first+j-1)-k(:,1))*op%point(:,i)*h),c_double))
       enddo
     enddo;enddo;enddo
-    i=0
-    do z=0,mesh(3)-1;do y=0,mesh(2)-1;do x=0,mesh(1)-1
-      i=i+1;op%shift(:,i)=[x,y,z]*n
-    enddo;enddo;enddo
+    do i=1,nk
+      index=modulo(i-1,op%fft_nk)
+      op%shift(:,i)=[modulo(index,coarse(1)),modulo(index/coarse(1),coarse(2)), &
+        index/(coarse(1)*coarse(2))]*n
+    enddo
     allocate(spectrum(ns(1),ns(2),ns(3)))
     do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
       ix=x;if(x>=(ns(1)+1)/2)ix=x-ns(1)
@@ -155,6 +179,19 @@ contains
     call fftw_execute_dft(plan,spectrum,spectrum)
     call fftw_destroy_plan(plan)
     op%kernel=real(spectrum,c_double)/real(product(ns),c_double)
+    if(op%cosets>1)then
+      ! Fold the full real-space kernel into the smaller Born-von Karman cell.
+      ! Each k coset then uses only sources differing by multiples of reduction.
+      allocate(folded_kernel(0:coarse_ns(1)-1,0:coarse_ns(2)-1,0:coarse_ns(3)-1))
+      folded_kernel=0d0
+      do az=0,reduction(3)-1;do ay=0,reduction(2)-1;do ax=0,reduction(1)-1
+        folded_kernel=folded_kernel+op%kernel( &
+          ax*coarse_ns(1):(ax+1)*coarse_ns(1)-1, &
+          ay*coarse_ns(2):(ay+1)*coarse_ns(2)-1, &
+          az*coarse_ns(3):(az+1)*coarse_ns(3)-1)
+      enddo;enddo;enddo
+      call move_alloc(folded_kernel,op%kernel)
+    endif
     if(present(create_backend))then
       if(associated(create_backend))call create_backend(op%accelerator)
     endif
@@ -163,7 +200,7 @@ contains
       op%auto_fft=.false.;op%contiguous_fft=.true.
       ierr=0;return
     endif
-    allocate(op%work(op%block,ng,nk));dims=mesh(3:1:-1)
+    allocate(op%work(op%block,ng,nk));dims=coarse(3:1:-1)
     if(op%auto_fft)then
       call choose_fft_layout(op,ierr)
       if(ierr/=0)goto 900
@@ -318,17 +355,17 @@ contains
           call zgemm('N','C',rows,ng,no,one,s(lo,1,ik),ng,s(1,1,ik),ng,zero,op%work(1,1,ki),b)
         endif
       enddo
-      call fftw_execute_dft(op%forward,op%work,op%work)
+      call execute_k_fft(op,op%forward)
       call multiply_kernel(op,lo,rows)
-      call fftw_execute_dft(op%backward,op%work,op%work)
+      call execute_k_fft(op,op%backward)
       do ki=1,nk
         ik=op%order(ki)
         if(op%contiguous_fft)then
           tile=kw(ki,:,:)
-          call zgemm('N','N',rows,nt,ng,-one/real(nk,c_double),tile(1,1),b, &
+          call zgemm('N','N',rows,nt,ng,-one/real(op%fft_nk,c_double),tile(1,1),b, &
             t(1,1,ik),ng,zero,action(lo,1,ik),ng)
         else
-        call zgemm('N','N',rows,nt,ng,-one/real(nk,c_double),op%work(1,1,ki),b, &
+        call zgemm('N','N',rows,nt,ng,-one/real(op%fft_nk,c_double),op%work(1,1,ki),b, &
           t(1,1,ik),ng,zero,action(lo,1,ik),ng)
         endif
         do j=1,nt
@@ -494,12 +531,12 @@ contains
       !$omp end parallel do
       endif
       if(op%profile)call mark_stage(op,5,stamp)
-      call fftw_execute_dft(op%forward,op%work,op%work)
+      call execute_k_fft(op,op%forward)
       if(op%profile)call mark_stage(op,3,stamp)
       lo=base+rank*b;rows=min(b,ng-lo+1)
       call multiply_kernel(op,lo,rows)
       if(op%profile)call mark_stage(op,4,stamp)
-      call fftw_execute_dft(op%backward,op%work,op%work)
+      call execute_k_fft(op,op%backward)
       if(op%profile)call mark_stage(op,3,stamp)
       ! Reuse send storage: useful entries are all overwritten; padded k
       ! entries remain defined from the density stage and are never consumed.
@@ -521,7 +558,7 @@ contains
         lo=base+p*b;rows=min(b,ng-lo+1)
         if(rows<=0)cycle
         do j=1,nlocal
-          call zgemm('N','N',rows,nt,ng,-one/real(nk,c_double),rb(1,1,j,p+1),b, &
+          call zgemm('N','N',rows,nt,ng,-one/real(op%fft_nk,c_double),rb(1,1,j,p+1),b, &
             t(1,1,j),ng,zero,action(lo,1,j),ng)
           do g=1,nt
             action(lo:lo+rows-1,g,j)=action(lo:lo+rows-1,g,j)*conjg(op%phase(lo:lo+rows-1,j))
@@ -564,6 +601,17 @@ contains
       enddo
       !$omp end parallel do
     endif
+  end subroutine
+
+  subroutine execute_k_fft(op,plan)
+    implicit none
+    type(exx_k_kernel),intent(inout) :: op
+    type(c_ptr),intent(in) :: plan
+    integer :: first,last
+    do first=1,op%nk,op%fft_nk
+      last=first+op%fft_nk-1
+      call fftw_execute_dft(plan,op%work(:,:,first:last),op%work(:,:,first:last))
+    enddo
   end subroutine
 
   subroutine multiply_kernel(op,lo,rows)

@@ -29,7 +29,7 @@ module exx_native
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance,hse_block_rows, &
-    exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
+    exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend,exx_kgrid_reduction, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
   private
@@ -287,6 +287,11 @@ contains
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
+    if(any(exx_kgrid_reduction>1))then
+      if(lcfo_rt_active.or.use_symmetry.or.info%isize_r/=1.or.info%isize_o/=1.or. &
+         temperature>=0d0.or.use_wannier_exchange()) &
+        error stop 'EXX k reduction requires full-mesh k-only native exchange'
+    endif
     if(lcfo_rt_active)then
       call lcfo_exx_refresh(system,mg,info,psi,exx_exchange_energy)
       return
@@ -337,18 +342,25 @@ contains
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,symmetry_map%full_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
-          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius)
+          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
+          source_reduction=exx_kgrid_reduction)
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
-          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius)
+          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
+          source_reduction=exx_kgrid_reduction)
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
       if(allocated(kernel%accelerator).and.info%id_k==0) &
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
-      if(info%id_k==0)write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
+      if(info%id_k==0)then
+        write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
+        if(any(exx_kgrid_reduction/=1))write(*,'(a)')'EXX_K_REDUCTION: experimental feature'
+        write(*,'(a,3i5,a,i8,a,i8)')'EXX_K_REDUCTION:',exx_kgrid_reduction, &
+          ' source points per target=',kernel%fft_nk,' target points=',system%nk
+      endif
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
     allocate(local(ng,no,info%numk))

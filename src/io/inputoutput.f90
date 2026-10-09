@@ -289,7 +289,7 @@ contains
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-      & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
+      & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend,exx_kgrid_reduction, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & hse_lcfo_wf_radius, &
@@ -763,6 +763,7 @@ contains
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
     exx_kpoint_backend = 'cpu'
+    exx_kgrid_reduction = 1
     exx_local_backend = 'cpu'
     exx_gpu_batch_size = 8
     yn_exx_dc_mlwf = 'n'
@@ -1389,6 +1390,7 @@ contains
     call string_lowercase(exx_pair_screening)
     call comm_bcast(hse_sr_tolerance,nproc_group_global)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
+    call comm_bcast(exx_kgrid_reduction,nproc_group_global)
     call comm_bcast(exx_kpoint_backend,nproc_group_global)
     call string_lowercase(exx_kpoint_backend)
     call comm_bcast(exx_local_backend,nproc_group_global)
@@ -2372,6 +2374,7 @@ contains
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
+      write(fh_variables_log, *) "# exx_kgrid_reduction=",exx_kgrid_reduction
       write(fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
       write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
       write(fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
@@ -3341,6 +3344,16 @@ contains
         error stop 'HSE finite range requires Gamma HSE source-support ACE and CPU local FFT'
     endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
+    if(any(exx_kgrid_reduction<1))error stop 'EXX k reduction factors must be positive'
+    if(any(modulo(num_kgrid,exx_kgrid_reduction)/=0)) &
+      error stop 'EXX k reduction factors must divide num_kgrid'
+    if(any(exx_kgrid_reduction>1))then
+      if(xc/='hse06'.or.exx_kpoint_backend/='cpu'.or.yn_dc/='n'.or.temperature>=0d0) &
+        error stop 'EXX k reduction requires HSE06 CPU non-DC integer occupations'
+      if(hse_fft_layout=='contiguous')error stop 'EXX k reduction requires auto or strided FFT layout'
+      if(yn_restart=='y'.or.write_rt_wfn_k=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
+        error stop 'EXX k reduction restart metadata is not yet supported'
+    endif
     if(exx_kpoint_backend/='cpu'.and.exx_kpoint_backend/='cufft') &
       error stop 'exx_kpoint_backend must be cpu or cufft'
     if(exx_kpoint_backend=='cufft')then
