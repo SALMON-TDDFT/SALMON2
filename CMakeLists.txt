@@ -44,6 +44,16 @@ option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)"
 option_set(USE_GEMM      "Use cuBLAS batched-GEMM for pseudo-pt" ON)
 option_set(USE_NCCL      "Use NCCL for the pseudo-pt allreduce"  ON)
 
+# USE_CUDA selects CUDA Fortran kernels for the pseudo-pt gather and
+# back-projection. Both live inside the USE_GEMM path, so the flag has no
+# effect without it, and none without OpenACC either.
+if (USE_CUDA AND NOT USE_OPENACC)
+  message(FATAL_ERROR "USE_CUDA requires USE_OPENACC")
+endif ()
+if (USE_CUDA AND NOT USE_GEMM)
+  message(FATAL_ERROR "USE_CUDA requires USE_GEMM")
+endif ()
+
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)
 option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for the stencil" OFF)
