@@ -255,17 +255,18 @@ contains
   ! used: a process which stopped alone would leave the other processes waiting. The message is written by the process
   ! which calls this routine (nothing is written if msg is empty).
   subroutine abort_job(msg)
+    use, intrinsic :: iso_fortran_env, only: output_unit
     use parallelization, only: nproc_id_global
 #ifdef USE_MPI
     use mpi, only: MPI_COMM_WORLD
 #endif
     implicit none
     character(*), intent(in) :: msg
-    integer :: ierr
+    integer :: ierr, ios
     if (len_trim(msg) > 0) then
       write(*,'(a,i0,a)') 'Error: dm_unfold reference Hamiltonian (process ', nproc_id_global, '): '//trim(msg)
     end if
-    flush(6)
+    flush(output_unit, iostat=ios) ! a failure of flush must not prevent the abort
 #ifdef USE_MPI
     call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
 #endif
