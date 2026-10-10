@@ -60,7 +60,6 @@ contains
   integer :: ig1,ig2,ig3,iqx,iqy,iqz,fp,iatom,j,ik
   real(8) :: omega_ref,B_ref(3,3),rsum,rsum_l,rj_l(3),rj(3),gx,gy,gz
   real(8) :: qx,qy,qz,dqx,dqy,dqz,value,nq_sum
-  complex(8) :: zsum
   real(8),allocatable :: reta_uu(:,:,:,:),nq_l(:,:,:),nq_l_private(:,:,:)
   ! -- G_R reference-cell Brillouin-zone folding correction (notes
   ! 072-090; unfolding.tex sec.~implementation-gR), needed here so the
@@ -583,30 +582,15 @@ contains
   ispin = 1
   omega_ref = system%hvol * system%ngrid / dble(unfold%num_hkgrid(1)*unfold%num_hkgrid(2)*unfold%num_hkgrid(3))
 
-  !$omp parallel do private(ilk,ihk,isk,io_ref,ig1_ref,ig2_ref,ig3_ref,zsum,ir1_ref,ir2_ref,ir3_ref) collapse(2)
+  !$omp parallel do private(ilk,ihk,isk,io_ref) collapse(2)
   do ilk = info%ik_s, info%ik_e ! large k
   do ihk = 1, unfold%nhrsk   ! hat k
     isk = unfold%isk_tbl(ilk,ihk) !small k = large k + hat k
   do io_ref = 1, no_ref
-  do ig1_ref = 1, ie_ref(1)
-  do ig2_ref = 1, ie_ref(2)
-  do ig3_ref = 1, ie_ref(3)
-    zsum = 0d0
-    do ir1_ref = 1, ie_ref(1)
-    do ir2_ref = 1, ie_ref(2)
-    do ir3_ref = 1, ie_ref(3)
-      zsum = zsum + unfold%psi_ref(ir1_ref,ir2_ref,ir3_ref,ispin,io_ref,isk,1) &
-      & * exp( -2*pi*zI*((ig1_ref-1)*(ir1_ref-1)/dble(ie_ref(1))+(ig2_ref-1)*(ir2_ref-1)/dble(ie_ref(2)) &
-      &                 +(ig3_ref-1)*(ir3_ref-1)/dble(ie_ref(3))) )
-    end do
-    end do
-    end do
-    unfold%psi_refG(ig1_ref,ig2_ref,ig3_ref,ispin,io_ref,isk,1) = zsum *system%hvol / omega_ref
+    call fourier_cell_r2g( ie_ref(1), ie_ref(2), ie_ref(3), &
+      & unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),ispin,io_ref,isk,1), system%hvol / omega_ref, &
+      & unfold%psi_refG(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),ispin,io_ref,isk,1) )
   end do
-  end do
-  end do
-  end do
-
   end do
   end do
 
@@ -2581,6 +2565,69 @@ contains
   return
            
   end subroutine dm_unfold
+
+  !> Discrete Fourier transform of one Bloch orbital of the reference cell from the real-space grid to the G grid,
+  !>   psi_g(g) = scale * sum_r psi_r(r) exp[-2 pi i ( (g1-1)(r1-1)/n1 + (g2-1)(r2-1)/n2 + (g3-1)(r3-1)/n3 )],
+  !> g = (g1,g2,g3), r = (r1,r2,r3), both running over 1..n_j (the phases use g-1 and r-1),
+  !> evaluated as three one-dimensional passes (the kernel is a product of three one-dimensional kernels), which needs
+  !> n1*n2*n3*(n1+n2+n3) complex multiply-adds instead of (n1*n2*n3)**2 for the direct sum. The G points stay in the
+  !> storage order (no shift of the origin, no reordering), as in the direct sum it replaces.
+  !> The grid indices are the fractional coordinates of the reference cell, so the transform does not depend on the cell
+  !> shape (oblique cells included). All work arrays are local, so that the routine can be called inside an OpenMP loop.
+  subroutine fourier_cell_r2g(n1, n2, n3, psi_r, scale, psi_g)
+    implicit none
+    integer,intent(in)     :: n1, n2, n3
+    complex(8),intent(in)  :: psi_r(n1,n2,n3)
+    real(8),intent(in)     :: scale   ! overall factor (hvol/omega_ref in the caller), applied once at the end
+    complex(8),intent(out) :: psi_g(n1,n2,n3)
+    integer :: i, j, k, g
+    real(8) :: twopi
+    complex(8) :: c
+    complex(8),allocatable :: e1(:,:), e2(:,:), e3(:,:), w1(:,:,:), w2(:,:,:)   ! heap, not stack: safe for OpenMP threads
+
+    allocate( e1(n1,n1), e2(n2,n2), e3(n3,n3), w1(n1,n2,n3), w2(n1,n2,n3) )
+    twopi = 8d0 * atan(1d0)
+    ! e(g,r) = exp(-2 pi i (g-1)(r-1)/n): the product is reduced modulo n as an integer before the exponential
+    do j = 1, n1 ; do i = 1, n1
+      e1(i,j) = exp( cmplx(0d0, -twopi * dble(mod((i-1)*(j-1), n1)) / dble(n1), kind=8) )
+    end do ; end do
+    do j = 1, n2 ; do i = 1, n2
+      e2(i,j) = exp( cmplx(0d0, -twopi * dble(mod((i-1)*(j-1), n2)) / dble(n2), kind=8) )
+    end do ; end do
+    do j = 1, n3 ; do i = 1, n3
+      e3(i,j) = exp( cmplx(0d0, -twopi * dble(mod((i-1)*(j-1), n3)) / dble(n3), kind=8) )
+    end do ; end do
+
+    ! pass 1: r1 -> g1
+    w1 = 0d0
+    do k = 1, n3 ; do j = 1, n2 ; do i = 1, n1
+      c = psi_r(i,j,k)
+      do g = 1, n1
+        w1(g,j,k) = w1(g,j,k) + e1(g,i) * c
+      end do
+    end do ; end do ; end do
+
+    ! pass 2: r2 -> g2
+    w2 = 0d0
+    do k = 1, n3 ; do g = 1, n2 ; do j = 1, n2
+      c = e2(g,j)
+      do i = 1, n1
+        w2(i,g,k) = w2(i,g,k) + c * w1(i,j,k)
+      end do
+    end do ; end do ; end do
+
+    ! pass 3: r3 -> g3, with the overall factor
+    psi_g = 0d0
+    do g = 1, n3 ; do k = 1, n3
+      c = scale * e3(g,k)
+      do j = 1, n2 ; do i = 1, n1
+        psi_g(i,j,g) = psi_g(i,j,g) + c * w2(i,j,k)
+      end do ; end do
+    end do ; end do
+
+    deallocate( e1, e2, e3, w1, w2 )
+
+  end subroutine fourier_cell_r2g
 
   !> Stable-ish ascending selection sort, returning a permutation iord such
   !> that key(iord(1)) <= key(iord(2)) <= ... <= key(iord(n)), rather than
