@@ -261,7 +261,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call timer_end(LOG_CALC_PROJECTION)
 
   if(dm_unfold_option == 'super' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_dm_unfold_step)==0)) then
-    call dm_unfold(itt,system,info,lg,ofl,spsi_out,unfold)
+    ! A(t) of the time of spsi_out (the end of the step), as used for the current below; system%vec_Ac is the value at the
+    ! middle of the step here
+    call dm_unfold(itt,system,info,lg,ofl,spsi_out,unfold,rt%Ac_tot(1:3,itt))
   end if
 
   if(itt==1.or.itt==itotNtime.or.mod(itt,out_rt_energy_step)==0)then

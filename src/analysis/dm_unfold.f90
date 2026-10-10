@@ -1608,7 +1608,7 @@ contains
   end subroutine init_dm_unfold
 
 !===================================================================================================================================
-  subroutine dm_unfold(itt,system,info,lg,ofl,psi_t,unfold)
+  subroutine dm_unfold(itt,system,info,lg,ofl,psi_t,unfold,vec_Ac_eval)
 
     use structures
     use communication, only: comm_is_root, comm_summation
@@ -1626,6 +1626,9 @@ contains
     type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)         ,intent(in) :: psi_t
     type(s_unfold)          ,intent(in) :: unfold
+    ! vector potential A(t) at the time of psi_t, given by the caller. system%vec_Ac is not used: during the
+    ! propagation step it holds the value at the middle of the step (middlepoint, hse_taylor4).
+    real(8)                 ,intent(in) :: vec_Ac_eval(3)
 
     character(10) :: filenum
     character(60) :: iofile
@@ -1942,7 +1945,7 @@ contains
        zj5_l(:) = zj5_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
         & * kappa_ref(:,isk)
        zj6_l(:) = zj6_l(:) + eta(io_ref1, io_ref1, isk) * unfold%wtk_ref(isk) &
-        & * system%vec_Ac(:)
+        & * vec_Ac_eval(:)
     do io_ref2 = 1, no_ref
        if( io_ref1 /= io_ref2) then
          zj3_l(:) = zj3_l(:) + eta(io_ref2, io_ref1, isk) * unfold%wtk_ref(isk) &
@@ -2161,7 +2164,7 @@ contains
     zj4d = zj4d / omega_ref
 
   if(comm_is_root(nproc_id_global))then
-    write(*,'(A,2x,i7,2x,A,3f17.12)') 'dm_unfold  it=', itt, '     Ac(t)=',system%vec_Ac(:)
+    write(*,'(A,2x,i7,2x,A,3f17.12)') 'dm_unfold  it=', itt, '     Ac(t)=',vec_Ac_eval(:)
     write(*,'(A,7x,f17.12)')          'N:Tr[rho(t)]             ', real(zsum)
     write(*,'(A,7x,3f17.12)')         'J:rho(t)<unk|i[h,r]|unk> ', real(zj1(:)+zj2(:)+zj3(:)+zj4(:)+zj5(:)+zj6(:))
   end if
@@ -2352,7 +2355,7 @@ contains
     zj2_l(3) = zj2_l(3) + unfold%wtk_ref(isk) * eta_uu_nd(ig1_ref,ig2_ref,ig3_ref,isk) * gz
     zj3_l(:) = zj3_l(:) + unfold%wtk_ref(isk) * eta_uu_d(ig1_ref,ig2_ref,ig3_ref,isk) &
         & * kappa_ref(:,isk)
-    zj4_l(:) = zj4_l(:) + unfold%wtk_ref(isk) * eta_uu_d(ig1_ref,ig2_ref,ig3_ref,isk) * system%vec_Ac(:)
+    zj4_l(:) = zj4_l(:) + unfold%wtk_ref(isk) * eta_uu_d(ig1_ref,ig2_ref,ig3_ref,isk) * vec_Ac_eval(:)
   end do
   end do
   end do
@@ -2426,9 +2429,9 @@ contains
       gx = ig1*B_ref(1,1) + ig2*B_ref(1,2) + ig3*B_ref(1,3)
       gy = ig1*B_ref(2,1) + ig2*B_ref(2,2) + ig3*B_ref(2,3)
       gz = ig1*B_ref(3,1) + ig2*B_ref(3,2) + ig3*B_ref(3,3)
-      qx = system%vec_Ac(1) + kappa_ref(1,isk) + gx
-      qy = system%vec_Ac(2) + kappa_ref(2,isk) + gy
-      qz = system%vec_Ac(3) + kappa_ref(3,isk) + gz
+      qx = vec_Ac_eval(1) + kappa_ref(1,isk) + gx
+      qy = vec_Ac_eval(2) + kappa_ref(2,isk) + gy
+      qz = vec_Ac_eval(3) + kappa_ref(3,isk) + gz
       iqx = floor( qx/dq_mom )
       iqy = floor( qy/dq_mom )
       iqz = floor( qz/dq_mom )
@@ -2536,7 +2539,7 @@ contains
 
   if(comm_is_root(nproc_id_global))then
 
-    write(ofl%fh_dm_unfold,'(91f17.12)') itt*dt*t_unit_time%conv, system%vec_Ac(1:3)*t_unit_ac%conv, &
+    write(ofl%fh_dm_unfold,'(91f17.12)') itt*dt*t_unit_time%conv, vec_Ac_eval(1:3)*t_unit_ac%conv, &
     & real(zsum),real(zj1(1:3))*t_unit_current%conv,real(zj2(1:3))*t_unit_current%conv,real(zj3(1:3))*t_unit_current%conv, &
     & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3))*t_unit_current%conv, &
     & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
