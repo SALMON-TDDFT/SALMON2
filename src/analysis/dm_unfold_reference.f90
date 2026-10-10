@@ -57,9 +57,19 @@
 ! Errors in the restore routines terminate the whole job (MPI_Abort), because they are not necessarily called by all the
 ! processes at the same time.
 ! The Bloch vector q is the Cartesian one (the same convention as system%vec_k), and no vector potential is added.
+!
+! Eigenstates of H(q) (second stage):
+!   solve_dm_unfold_reference   : nvec states of H(q) from the bottom of the spectrum, found by the iteration which the
+!                                 ground state calculation and the projection of the real-time calculation use
+!                                 (subspace diagonalization -> conjugate gradient -> Gram-Schmidt), starting from the vectors
+!                                 given on entry (for example, the states for a q nearby). The convergence is judged by
+!                                 the residual |H phi - e phi| of the lowest nconv of the nvec states, after a last subspace
+!                                 diagonalization. Only these nconv states are to be used as the eigenstates: the others are
+!                                 buffer (work) states which help the next call and are not eigenstates of H(q).
+!                                 The routine needs yn_scalapack='n' (the processes of this module are not set up for ScaLAPACK).
 
 module dm_unfold_reference_sub
-  use structures, only: s_rgrid, s_parallel_info, s_dft_system, s_stencil, s_scalar, s_pp_grid, s_sendrecv_grid, s_orbital
+  use structures, only: s_rgrid, s_parallel_info, s_dft_system, s_stencil, s_scalar, s_pp_grid, s_sendrecv_grid, s_orbital, s_cg
   implicit none
   private
 
@@ -69,16 +79,19 @@ module dm_unfold_reference_sub
   public :: read_dm_unfold_reference
   public :: build_dm_unfold_reference
   public :: apply_h_dm_unfold_reference
+  public :: solve_dm_unfold_reference
   public :: release_dm_unfold_reference
 
   character(*), parameter, public :: dm_unfold_ref_file_name = 'dm_unfold_ref_hamiltonian.bin'
   character(16), parameter :: file_magic = 'SALMON_DMUNF_REF'
   integer, parameter :: format_version = 1
   integer, parameter :: nd_ref = 4 ! half width of the finite-difference stencil (fixed in hpsi)
+  real(8), parameter :: tol_orth = 1d-10 ! allowed max| <phi_n|phi_m> - delta_nm | of the states returned by solve
 
   ! The Hamiltonian of the reference cell. The components are private: they are set only by the routines of this module.
   ! Immutable after build: lattice, V_local, ppg (except zekr_uV), stencil, grid.
-  ! Changed by apply: system%vec_k (= q), ppg%zekr_uV, and the work arrays/dimensions which depend on the number of vectors.
+  ! Changed by apply and solve: system%vec_k (= q), ppg%zekr_uV, and the work arrays/dimensions which depend on the number of
+  ! vectors.
   type s_dm_unfold_ref
     private
     logical :: is_read  = .false.
@@ -94,6 +107,8 @@ module dm_unfold_reference_sub
     type(s_scalar), allocatable :: V_local(:)
     type(s_pp_grid)       :: ppg
     type(s_orbital)       :: tpsi, htpsi
+    type(s_orbital)       :: gpsi ! work arrays of solve_dm_unfold_reference (allocated when it is used)
+    type(s_cg)            :: cg
   end type s_dm_unfold_ref
 
 contains
@@ -591,23 +606,7 @@ contains
     end if
 
     ! work arrays and the dimensions which depend on the number of vectors
-    if (nvec /= ref%nvec) then
-      if (allocated(ref%tpsi%zwf))  deallocate(ref%tpsi%zwf)
-      if (allocated(ref%htpsi%zwf)) deallocate(ref%htpsi%zwf)
-      allocate(ref%tpsi%zwf (ref%mg%is_array(1):ref%mg%ie_array(1),ref%mg%is_array(2):ref%mg%ie_array(2), &
-                             ref%mg%is_array(3):ref%mg%ie_array(3),1,1:nvec,1:1,1:1))
-      allocate(ref%htpsi%zwf(ref%mg%is_array(1):ref%mg%ie_array(1),ref%mg%is_array(2):ref%mg%ie_array(2), &
-                             ref%mg%is_array(3):ref%mg%ie_array(3),1,1:nvec,1:1,1:1))
-      ref%tpsi%zwf  = (0d0,0d0)
-      ref%htpsi%zwf = (0d0,0d0)
-      ref%tpsi%update_zwf_overlap = .true.
-      ref%htpsi%update_zwf_overlap = .true.
-      ref%system%no = nvec
-      ref%info%io_s = 1
-      ref%info%io_e = nvec
-      ref%info%numo = nvec
-      ref%nvec = nvec
-    end if
+    call set_work_arrays(ref,nvec)
 
     ! k = q, A = 0 (k + A is not added twice), and the phase of the non-local projectors for this q
     ref%system%vec_k(1:3,1) = q(1:3)
@@ -624,6 +623,204 @@ contains
       hpsi_out(:,:,:,io) = ref%htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)
     end do
   end subroutine apply_h_dm_unfold_reference
+
+  ! Work arrays and the dimensions which depend on the number of vectors. Nothing is done if nvec is the same as before.
+  subroutine set_work_arrays(ref,nvec)
+    implicit none
+    type(s_dm_unfold_ref), intent(inout) :: ref
+    integer,               intent(in)    :: nvec
+
+    if (nvec == ref%nvec) return
+    if (allocated(ref%tpsi%zwf))  deallocate(ref%tpsi%zwf)
+    if (allocated(ref%htpsi%zwf)) deallocate(ref%htpsi%zwf)
+    allocate(ref%tpsi%zwf (ref%mg%is_array(1):ref%mg%ie_array(1),ref%mg%is_array(2):ref%mg%ie_array(2), &
+                           ref%mg%is_array(3):ref%mg%ie_array(3),1,1:nvec,1:1,1:1))
+    allocate(ref%htpsi%zwf(ref%mg%is_array(1):ref%mg%ie_array(1),ref%mg%is_array(2):ref%mg%ie_array(2), &
+                           ref%mg%is_array(3):ref%mg%ie_array(3),1,1:nvec,1:1,1:1))
+    ref%tpsi%zwf  = (0d0,0d0)
+    ref%htpsi%zwf = (0d0,0d0)
+    ref%tpsi%update_zwf_overlap = .true.
+    ref%htpsi%update_zwf_overlap = .true.
+    ! the work arrays of solve_dm_unfold_reference are made again (gscg_zwf allocates those of cg when they are not allocated)
+    if (allocated(ref%gpsi%zwf))      deallocate(ref%gpsi%zwf)
+    if (allocated(ref%cg%pk%zwf))     deallocate(ref%cg%pk%zwf)
+    if (allocated(ref%cg%pre_gk%zwf)) deallocate(ref%cg%pre_gk%zwf)
+    if (allocated(ref%cg%hpk%zwf))    deallocate(ref%cg%hpk%zwf)
+
+    ref%system%no = nvec
+    ref%info%io_s = 1
+    ref%info%io_e = nvec
+    ref%info%numo = nvec
+    ! the tables of the orbital index which the subspace diagonalization and the Gram-Schmidt routines refer to,
+    ! for one orbital process
+    ref%info%numo_max = nvec
+    if (allocated(ref%info%io_s_all)) deallocate(ref%info%io_s_all)
+    if (allocated(ref%info%io_e_all)) deallocate(ref%info%io_e_all)
+    if (allocated(ref%info%numo_all)) deallocate(ref%info%numo_all)
+    if (allocated(ref%info%irank_io)) deallocate(ref%info%irank_io)
+    allocate(ref%info%io_s_all(0:0), ref%info%io_e_all(0:0), ref%info%numo_all(0:0), ref%info%irank_io(1:nvec))
+    ref%info%io_s_all(0) = 1
+    ref%info%io_e_all(0) = nvec
+    ref%info%numo_all(0) = nvec
+    ref%info%irank_io    = 0
+    ref%nvec = nvec
+  end subroutine set_work_arrays
+
+  ! nvec states of H(q) from the bottom of the spectrum: H(q) phi_n = e_n phi_n, <phi_n|phi_m> = delta_nm (the volume element
+  ! included) for the lowest nconv states. The caller uses only the states 1..nconv as the eigenstates.
+  !   phi (N1,N2,N3,nvec): the starting vectors on entry (linearly independent; they are orthonormalized first), the
+  !                        eigenstates in the order of increasing e_n on exit
+  !   q                  : the Cartesian Bloch vector (the same convention as apply), no vector potential is added
+  !   nconv              : the number of the lowest states which have to converge (1 <= nconv <= nvec). The states nconv+1, ..,
+  !                        nvec are buffer states: they are iterated and returned, but their residuals do not enter the
+  !                        judgement and they are not guaranteed to be eigenstates (the upper bands may cross the bands
+  !                        which are not in the set, and then they converge slowly). The residual of the nconv states does not
+  !                        show that no lower state of H(q) has been missed. If the boundary between nconv and nconv+1 cuts a
+  !                        degenerate group, the subspace of the lowest nconv states is not unique: the caller chooses nconv
+  !                        at a gap of the spectrum (or takes the whole group), or knows that the output depends on the cut.
+  !   tol                : the states are accepted when max_{n<=nconv} res_n <= tol and orth <= tol_orth (orth: all nvec states).
+  !                        tol is in Hartree (the residual is the norm of an energy). There is no lower limit of tol. A tol which
+  !                        cannot be reached (for example 1d-20) makes the routine iterate niter_max sweeps (in the tests without
+  !                        preconditioning the residual then stayed at the level of 1d-14 .. 1d-13). This relies on the
+  !                        correction of the conjugate gradient in
+  !                        conjugate_gradient.f90 (guard of the step: a band rejected by the guard is not updated any more in the
+  !                        call): without it the residual of the converged states suddenly grew to 1d-5 .. 1d-1 after 20 .. 50
+  !                        sweeps when the iteration was continued.
+  !   niter_max          : the maximum number of the sweeps (a sweep = conjugate gradient with ncg_sweep steps + Gram-Schmidt).
+  !                        Every judgement is made after a subspace diagonalization, so with niter_max = 0 the starting
+  !                        vectors are rotated to the eigenbasis of H(q) in their span and only evaluated
+  !   eps, res           : e_n = <phi_n|H|phi_n> and res_n = ||(H - e_n) phi_n|| (the norm with the volume element), of the
+  !                        returned states
+  !   orth               : max| <phi_n|phi_m> - delta_nm | of the returned states
+  !   iter_done          : the number of the sweeps done
+  !   converged          : whether the condition on tol and tol_orth is satisfied. The routine does not stop the job when it is
+  !                        not, and the last states are returned in any case (as the iteration of the projection in write.f90
+  !                        does): the caller checks converged and res, and decides. A state which has not converged is not an
+  !                        eigenstate of H(q) to the accuracy of tol; how much it is off depends on res and on the gaps to the
+  !                        other states, not on res alone. If eps, res or orth contain NaN or Inf, the job is aborted: such a
+  !                        state cannot be used as a basis, whatever the tol.
+  ! The routine follows solve_orbitals in the ground state calculation (scf_iteration.f90) and the iteration of the projection in
+  ! write.f90, with the judgement by the residual of the lowest nconv states instead of the kinetic energy of the occupied
+  ! states. The number of the applications of H (each for all the nvec states) is 2 + 3 iter_done + (the sum of the numbers
+  ! of the steps the conjugate gradient actually did), which is 2 + iter_done*(ncg_sweep + 3) if every conjugate gradient runs
+  ! ncg_sweep steps (subspace diagonalization and evaluation: 1 each, conjugate gradient: 1 + the steps).
+  ! There is no communication outside of the process.
+  subroutine solve_dm_unfold_reference(ref,q,nvec,nconv,phi,tol,niter_max,ncg_sweep,eps,res,orth,iter_done,converged)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use hamiltonian, only: update_kvector_nonlocalpt
+    use salmon_global, only: yn_scalapack
+    use structures, only: allocate_orbital_complex
+    use subspace_diagonalization, only: ssdg
+    use Conjugate_Gradient, only: gscg_zwf
+    use gram_schmidt_orth, only: gram_schmidt
+    implicit none
+    type(s_dm_unfold_ref), intent(inout) :: ref
+    real(8),               intent(in)    :: q(3), tol
+    integer,               intent(in)    :: nvec, nconv, niter_max, ncg_sweep
+    complex(8),            intent(inout) :: phi(:,:,:,:)
+    real(8),               intent(out)   :: eps(nvec), res(nvec), orth
+    integer,               intent(out)   :: iter_done
+    logical,               intent(out)   :: converged
+    type(s_sendrecv_grid) :: srg ! not used (the grid is not divided); it is only an argument
+    integer :: io, iter, is(3), ie(3)
+    real(8) :: rmax
+
+    if (.not. ref%is_built) call abort_job('solve: the Hamiltonian has not been built.')
+    if (yn_scalapack == 'y') call abort_job("solve: yn_scalapack must be 'n'.")
+    if (nvec < 1) call abort_job('solve: nvec must be positive.')
+    if (nconv < 1 .or. nconv > nvec) call abort_job('solve: nconv must satisfy 1 <= nconv <= nvec.')
+    if (tol <= 0d0 .or. niter_max < 0 .or. ncg_sweep < 0) then
+      call abort_job('solve: tol must be positive, niter_max and ncg_sweep must not be negative.')
+    end if
+    is = ref%mg%is
+    ie = ref%mg%ie
+    if (any(shape(phi) /= [ref%mg%num(1),ref%mg%num(2),ref%mg%num(3),nvec])) then
+      call abort_job('solve: the shape of phi is not (N1,N2,N3,nvec).')
+    end if
+
+    call set_work_arrays(ref,nvec)
+    if (.not. allocated(ref%gpsi%zwf)) then
+      call allocate_orbital_complex(1,ref%mg,ref%info,ref%gpsi)
+      ref%gpsi%update_zwf_overlap = .true.
+    end if
+
+    ! k = q, A = 0, and the phase of the non-local projectors for this q (the same as apply)
+    ref%system%vec_k(1:3,1) = q(1:3)
+    ref%system%vec_Ac = 0d0
+    call update_kvector_nonlocalpt(1,1,ref%system,ref%ppg)
+
+    do io = 1, nvec
+      ref%tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1) = phi(:,:,:,io)
+    end do
+    call gram_schmidt(ref%system,ref%mg,ref%info,ref%tpsi)
+
+    iter_done = 0
+    converged = .false.
+    do iter = 0, niter_max
+      call ssdg(ref%mg,ref%system,ref%info,ref%stencil,ref%tpsi,ref%htpsi,ref%ppg,ref%V_local,srg)
+      call evaluate_bands(ref,srg,eps,res,orth)
+      if (.not. (all(ieee_is_finite(eps)) .and. all(ieee_is_finite(res)) .and. ieee_is_finite(orth))) then
+        call abort_job('solve: eps, res or orth is NaN or Inf.')
+      end if
+      rmax = maxval(res(1:nconv))
+      if (rmax <= tol .and. orth <= tol_orth) then
+        converged = .true.
+        exit
+      end if
+      if (iter == niter_max) exit
+      call gscg_zwf(ncg_sweep,ref%mg,ref%system,ref%info,ref%stencil,ref%ppg,ref%V_local,srg,ref%tpsi,ref%htpsi,ref%gpsi,ref%cg)
+      call gram_schmidt(ref%system,ref%mg,ref%info,ref%tpsi)
+      iter_done = iter_done + 1
+    end do
+
+    do io = 1, nvec
+      phi(:,:,:,io) = ref%tpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)
+    end do
+  end subroutine solve_dm_unfold_reference
+
+  ! e_n, the residual and the orthonormality of the states in ref%tpsi (ref%htpsi is used as a work array)
+  subroutine evaluate_bands(ref,srg,eps,res,orth)
+    use hamiltonian, only: hpsi
+    implicit none
+    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_sendrecv_grid), intent(inout) :: srg
+    real(8),               intent(out)   :: eps(:), res(:), orth
+    complex(8), allocatable :: w(:,:), hw(:,:), s(:,:)
+    integer :: nv, nr, io, jo, is(3), ie(3)
+    real(8) :: hvol, nrm
+    complex(8) :: zc
+
+    nv = ref%nvec
+    nr = product(ref%mg%num)
+    is = ref%mg%is
+    ie = ref%mg%ie
+    hvol = ref%system%hvol
+    call hpsi(ref%tpsi,ref%htpsi,ref%info,ref%mg,ref%V_local,ref%system,ref%stencil,srg,ref%ppg)
+
+    allocate(w(nr,nv), hw(nr,nv), s(nv,nv))
+    do io = 1, nv
+      w(:,io)  = reshape(ref%tpsi%zwf (is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1), [nr])
+      hw(:,io) = reshape(ref%htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1), [nr])
+    end do
+    do io = 1, nv
+      nrm = hvol*sum(abs(w(:,io))**2)
+      zc  = hvol*sum(conjg(w(:,io))*hw(:,io))/nrm
+      eps(io) = real(zc,8)
+      res(io) = sqrt(hvol*sum(abs(hw(:,io) - eps(io)*w(:,io))**2)/nrm)
+    end do
+    call zgemm('C','N',nv,nv,nr,cmplx(hvol,0d0,8),w,nr,w,nr,(0d0,0d0),s,nv)
+    orth = 0d0
+    do jo = 1, nv
+    do io = 1, nv
+      if (io == jo) then
+        orth = max(orth, abs(s(io,jo) - (1d0,0d0)))
+      else
+        orth = max(orth, abs(s(io,jo)))
+      end if
+    end do
+    end do
+    deallocate(w, hw, s)
+  end subroutine evaluate_bands
 
   ! Free everything. read and build can be done again after this.
   subroutine release_dm_unfold_reference(ref)
