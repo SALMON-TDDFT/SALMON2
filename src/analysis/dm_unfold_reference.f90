@@ -67,6 +67,12 @@
 !                                 diagonalization. Only these no_conv states are to be used as the eigenstates: the others are
 !                                 buffer (work) states which help the next call and are not eigenstates of H(q).
 !                                 The routine needs yn_scalapack='n' (the processes of this module are not set up for ScaLAPACK).
+!
+! Matrix elements (third stage):
+!   calc_tm_dm_unfold_reference : -i <psi_i|d/dr|psi_j> and the commutator term of the non-local pseudopotential for given
+!                                 vectors at an arbitrary Bloch vector q, with the definitions of write_tm_data (tm.bin of
+!                                 the ground state), so that the matrices of the states of H(q) from solve_dm_unfold_reference
+!                                 are consistent with the Hamiltonian they are eigenstates of.
 
 module dm_unfold_reference_sub
   use structures, only: s_rgrid, s_parallel_info, s_dft_system, s_stencil, s_scalar, s_pp_grid, s_sendrecv_grid, s_orbital, s_cg
@@ -79,6 +85,7 @@ module dm_unfold_reference_sub
   public :: read_dm_unfold_reference
   public :: build_dm_unfold_reference
   public :: apply_h_dm_unfold_reference
+  public :: calc_tm_dm_unfold_reference
   public :: solve_dm_unfold_reference
   public :: release_dm_unfold_reference
 
@@ -623,6 +630,112 @@ contains
       hpsi_out(:,:,:,io) = ref%htpsi%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,io,1,1)
     end do
   end subroutine apply_h_dm_unfold_reference
+
+  ! Matrix elements of the current for no_mat vectors given on the real-space grid of the reference cell, (N1,N2,N3,no_mat),
+  ! at the Bloch vector q (Cartesian, the same convention as apply and solve; no vector potential is added). The definitions
+  ! and the order of the indices are those of write_tm_data (the transition moments tm.bin of the ground state), with the first
+  ! index of the matrix for the bra: for i, j = 1 .. no_mat and c = x, y, z,
+  !   upu(c,i,j)           = -i <psi_i| d/dr_c |psi_j>
+  !   u_rVnl_Vnlr_u(c,i,j) = -i ( <psi_i| e^{-iqr} r_c V_nl e^{iqr} |psi_j> - <psi_i| e^{-iqr} V_nl r_c e^{iqr} |psi_j> )
+  ! (the volume element is included in both). psi_j are the periodic parts u_j of the Bloch orbitals, as the states of the
+  ! ground state calculation and of solve. The gradient is the finite-difference one with the Cartesian transformation of the
+  ! oblique cells (calc_gradient_psi), and r in the non-local term is the position of the grid point of the projector of the
+  ! file (rxyz), as in write_tm_data. The matrix of dH(q)/dq_c, the velocity, between the vectors is upu + u_rVnl_Vnlr_u
+  ! + q_c <psi_i|psi_j>, where the last term is q_c delta_ij only if the vectors are orthonormal (it is not in the returned
+  ! matrices). The vectors do not have to be eigenstates or orthonormal, and the order of the bands does not matter.
+  ! No communication; every process which calls it uses its own copy of the Hamiltonian. This routine does not use the work
+  ! arrays of apply and solve (their contents and their dimensions are not changed), but changes system%vec_k (= q) and
+  ! ppg%zekr_uV as apply does.
+  subroutine calc_tm_dm_unfold_reference(ref,q,no_mat,psi,upu,u_rVnl_Vnlr_u)
+    use hamiltonian, only: update_kvector_nonlocalpt
+    use stencil_sub, only: calc_gradient_psi
+    use math_constants, only: zI
+    implicit none
+    type(s_dm_unfold_ref), intent(inout) :: ref
+    real(8),               intent(in)    :: q(3)
+    integer,               intent(in)    :: no_mat
+    complex(8),            intent(in)    :: psi(:,:,:,:)
+    complex(8),            intent(out)   :: upu(:,:,:), u_rVnl_Vnlr_u(:,:,:)
+    complex(8), allocatable :: wpsi(:,:,:), gpsi_c(:,:,:,:), uVpsi(:), uVrpsi(:,:)
+    complex(8) :: veik, wrk(3)
+    integer :: is(3), ie(3), i, j, c, ilma, ia, jj, ix, iy, iz
+    real(8) :: x, y, z
+
+    if (.not. ref%is_built) call abort_job('calc_tm: the Hamiltonian has not been built.')
+    if (ref%system%nspin /= 1) call abort_job('calc_tm: only nspin = 1 is supported.')
+    if (no_mat < 1) call abort_job('calc_tm: no_mat must be positive.')
+    is = ref%mg%is
+    ie = ref%mg%ie
+    if (any(shape(psi) /= [ref%mg%num(1),ref%mg%num(2),ref%mg%num(3),no_mat])) then
+      call abort_job('calc_tm: the shape of psi is not (N1,N2,N3,no_mat).')
+    end if
+    if (any(shape(upu) /= [3,no_mat,no_mat]) .or. any(shape(u_rVnl_Vnlr_u) /= [3,no_mat,no_mat])) then
+      call abort_job('calc_tm: the shape of upu or u_rVnl_Vnlr_u is not (3,no_mat,no_mat).')
+    end if
+
+    ! -i <psi_i|nabla|psi_j>: the gradient of one vector at a time (as write_tm_data does)
+    allocate(wpsi(ref%mg%is_array(1):ref%mg%ie_array(1),ref%mg%is_array(2):ref%mg%ie_array(2), &
+                  ref%mg%is_array(3):ref%mg%ie_array(3)))
+    allocate(gpsi_c(3,ref%mg%is_array(1):ref%mg%ie_array(1),ref%mg%is_array(2):ref%mg%ie_array(2), &
+                  ref%mg%is_array(3):ref%mg%ie_array(3)))
+    wpsi = (0d0,0d0)
+    gpsi_c = (0d0,0d0)
+    do j = 1, no_mat
+      wpsi(is(1):ie(1),is(2):ie(2),is(3):ie(3)) = psi(:,:,:,j)
+      call calc_gradient_psi(wpsi,gpsi_c,ref%mg%is_array,ref%mg%ie_array,ref%mg%is,ref%mg%ie, &
+                             ref%mg%idx,ref%mg%idy,ref%mg%idz,ref%stencil%coef_nab,ref%system%rmatrix_B)
+      !$omp parallel do private(i,c,wrk)
+      do i = 1, no_mat
+        do c = 1, 3
+          wrk(c) = sum(conjg(psi(:,:,:,i)) * gpsi_c(c,is(1):ie(1),is(2):ie(2),is(3):ie(3)))
+        end do
+        upu(1:3,i,j) = -zI * wrk(1:3) * ref%system%hvol
+      end do
+      !$omp end parallel do
+    end do
+    deallocate(wpsi, gpsi_c)
+
+    ! the non-local term for this q: zekr_uV = e^{-iqr} uV (update_kvector_nonlocalpt), vec_Ac = 0
+    ref%system%vec_k(1:3,1) = q(1:3)
+    ref%system%vec_Ac = 0d0
+    call update_kvector_nonlocalpt(1,1,ref%system,ref%ppg)
+
+    allocate(uVpsi(no_mat), uVrpsi(3,no_mat))
+    u_rVnl_Vnlr_u = (0d0,0d0)
+    do ilma = 1, ref%ppg%nlma
+      ia = ref%ppg%ia_tbl(ilma)
+      uVpsi  = (0d0,0d0)
+      uVrpsi = (0d0,0d0)
+      !$omp parallel do private(jj,x,y,z,ix,iy,iz,veik)
+      do i = 1, no_mat
+        do jj = 1, ref%ppg%mps(ia)
+          x  = ref%ppg%rxyz(1,jj,ia)
+          y  = ref%ppg%rxyz(2,jj,ia)
+          z  = ref%ppg%rxyz(3,jj,ia)
+          ix = ref%ppg%jxyz(1,jj,ia) - is(1) + 1 ! the index of psi
+          iy = ref%ppg%jxyz(2,jj,ia) - is(2) + 1 ! the index of psi
+          iz = ref%ppg%jxyz(3,jj,ia) - is(3) + 1 ! the index of psi
+          veik = conjg(ref%ppg%zekr_uV(jj,ilma,1))
+          uVpsi(i)    = uVpsi(i)    + veik     * psi(ix,iy,iz,i)  ! <v|e^{iqr}|u>
+          uVrpsi(1,i) = uVrpsi(1,i) + veik * x * psi(ix,iy,iz,i)  ! <v|e^{iqr} x|u>
+          uVrpsi(2,i) = uVrpsi(2,i) + veik * y * psi(ix,iy,iz,i)
+          uVrpsi(3,i) = uVrpsi(3,i) + veik * z * psi(ix,iy,iz,i)
+        end do
+      end do
+      !$omp end parallel do
+      uVpsi = uVpsi * ref%ppg%rinv_uvu(ilma)
+      !$omp parallel do private(i,j) collapse(2)
+      do j = 1, no_mat
+        do i = 1, no_mat
+          ! -i ( <u_i|e^{-iqr} r|v><v|e^{iqr}|u_j> - <u_i|e^{-iqr}|v><v|e^{iqr} r|u_j> ) * hvol
+          u_rVnl_Vnlr_u(1:3,i,j) = u_rVnl_Vnlr_u(1:3,i,j) &
+            - zI * ( conjg(uVrpsi(1:3,i)) * uVpsi(j) - conjg(uVpsi(i)) * uVrpsi(1:3,j) ) * ref%system%hvol
+        end do
+      end do
+      !$omp end parallel do
+    end do
+    deallocate(uVpsi, uVrpsi)
+  end subroutine calc_tm_dm_unfold_reference
 
   ! Work arrays and the dimensions which depend on the number of vectors. Nothing is done if no_work is the same as before.
   subroutine set_work_arrays(ref,no_work)
