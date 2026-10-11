@@ -1814,14 +1814,14 @@ contains
     call comm_bcast(unfold_tc_tol, nproc_group_global)
     call comm_bcast(unfold_basis, nproc_group_global)
     if( trim(unfold_basis) /= 'reference' .and. trim(unfold_basis) /= 'houston' ) &
-      stop "unfold_basis must be 'reference' or 'houston'"
+      error stop "unfold_basis must be 'reference' or 'houston'"
     if( trim(unfold_basis) == 'houston' .and. trim(dm_unfold_option) /= 'super' ) &
-      stop "unfold_basis = 'houston' requires dm_unfold_option = 'super'"
+      error stop "unfold_basis = 'houston' requires dm_unfold_option = 'super'"
     call comm_bcast(unfold_threshold_projection, nproc_group_global)
-    if( unfold_threshold_projection <= 0d0 ) stop 'unfold_threshold_projection must be positive'
+    if( unfold_threshold_projection <= 0d0 ) error stop 'unfold_threshold_projection must be positive'
     unfold_threshold_projection = unfold_threshold_projection * uenergy_to_au
     call comm_bcast(unfold_nstate_buffer, nproc_group_global)
-    if( unfold_nstate_buffer < 0 ) stop 'unfold_nstate_buffer must not be negative'
+    if( unfold_nstate_buffer < 0 ) error stop 'unfold_nstate_buffer must not be negative'
     call comm_bcast(al_pr, nproc_group_global)
     al_pr = al_pr * ulength_to_au
     call comm_bcast(al_vec1_pr, nproc_group_global)

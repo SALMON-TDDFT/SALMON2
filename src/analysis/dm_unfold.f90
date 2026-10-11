@@ -1645,15 +1645,15 @@ contains
     do j = 1, 3
     do i = 1, 3
       if (unfold%pmat(i,j) /= merge(1,0,i==j)) &
-        & stop "unfold_basis = 'houston' requires the primitive-to-reference matrix P = I (al_pr, al_vec1-3_pr must not be given)"
+        & error stop "unfold_basis = 'houston' requires the primitive-to-reference matrix P = I"
     end do
     end do
-    if (yn_scalapack == 'y') stop "unfold_basis = 'houston' requires yn_scalapack = 'n'"
+    if (yn_scalapack == 'y') error stop "unfold_basis = 'houston' requires yn_scalapack = 'n'"
 
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
     no_work = no_ref + unfold_nstate_buffer
     if (no_work > ie_ref(1)*ie_ref(2)*ie_ref(3)) &
-      & stop 'no_ref + unfold_nstate_buffer is larger than the number of the grid points of the reference cell'
+      & error stop 'no_ref + unfold_nstate_buffer is larger than the number of the grid points of the reference cell'
     nsweep_max = nscf
     if (nsweep_max == 0) nsweep_max = 10
 
