@@ -40,8 +40,8 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
   ! Do not subsequently overwrite upp_f with upp.
   type(s_pp_info), intent(inout) :: pp
   integer, intent(in) :: ik
+  ! Retained for call compatibility; upp is now scaled for both masking modes.
   logical, intent(in), optional :: with_masking
-  logical :: masked
   real(8) :: c_l,radius
   real(8) :: r(nr_atom),rho(nr_atom),beta(nr_atom)
   real(8) :: v_eff(nr_atom),v_h(nr_atom),v_xc(nr_atom),v_loc(nr_atom)
@@ -51,8 +51,6 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
   real(8), allocatable :: h(:,:)
   integer :: nloc,nnl,l,p,p0,iproj,i,j,info
 
-  masked=.false.
-  if (present(with_masking)) masked=with_masking
 
   write(*, *) "Recalculating pseudo wavefunction (atomic_solver)"
   call check_input_tables()
@@ -115,16 +113,14 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
       pp%upp(:,l)=pp%upp_f(:,l,ik)
     end do
 
-    if (.not. masked) then
-      do l=0,pp%mlps(ik)
-        c_l=sqrt((2d0*l+1d0)/(4d0*pi))
-        do i=1,min(ubound(pp%upp,1),pp%nrmax-1)
-          radius=pp%rad(i+1,ik)
-          if (radius > r_max_atom) exit
-          pp%upp(i,l)=pp%upp(i,l)*c_l/radius**(l+1)
-        end do
+    do l=0,pp%mlps(ik)
+      c_l=sqrt((2d0*l+1d0)/(4d0*pi))
+      do i=1,min(ubound(pp%upp,1),pp%nrmax-1)
+        radius=pp%rad(i+1,ik)
+        if (radius > r_max_atom) exit
+        pp%upp(i,l)=pp%upp(i,l)*c_l/radius**(l+1)
       end do
-    end if
+    end do
     pp%upp(0,:)=pp%upp(1,:)
 
     pp%has_wf_pp(ik) = .true.

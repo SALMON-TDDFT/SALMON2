@@ -20,6 +20,7 @@ module input_pp_sub
   logical,private :: flag_potential_is_given=.true.  ! Pseudopotential data is given as the potentitals and the wavefunctions
   logical,private :: flag_beta_proj_is_given=.false. ! Pseudopotential data is given as projection operators
   logical,private :: flag_so=.false.
+  private :: scale_pseudo_wavefunctions
 
 contains
 
@@ -48,6 +49,8 @@ subroutine input_pp(pp,hx,hy,hz)
   character(256) :: ps_file
   logical,allocatable :: flag_nlcc_element(:)
   logical :: flag_rho_pp_missing
+  logical :: wf_from_file
+  integer :: nr_ao
 
   allocate(rhor_nlcc(0:pp%nrmax0,0:2))
   rhor_nlcc=0d0
@@ -240,8 +243,23 @@ subroutine input_pp(pp,hx,hy,hz)
       pp%upp_f(:,:,ik)=pp%upp(:,:)
 ! vloctbl and udvtbl are ready after the masking and SO preprocessing above.
 ! Generated orbitals have distinct upp and upp_f conventions; keep the solver's upp_f.
+      wf_from_file = pp%has_wf_pp(ik)
       if (yn_pseudo_atomic_orbital == 'y') then
         call calc_pseudo_wavefunction(pp,ik,with_masking=(yn_psmask == 'y'))
+      end if
+! store the scaled radial orbital f_l on rad(i,ik); upp(i,l) corresponds to rad(i+1,ik)
+      pp%upptbl_ao_l(:,:,ik) = 0d0
+      if (pp%has_wf_pp(ik)) then
+        if (wf_from_file) then
+          nr_ao = pp%mr(ik)-1   ! file data are valid up to mr only
+        else
+          nr_ao = pp%nrmax-1    ! generated orbital: zero beyond r_max_atom
+        end if
+        nr_ao = min(nr_ao,ubound(pp%upp,1),pp%nrmax-1)
+        do l=0,pp%mlps(ik)
+          pp%upptbl_ao_l(2:nr_ao+1,l,ik) = pp%upp(1:nr_ao,l)
+          pp%upptbl_ao_l(1,l,ik) = pp%upptbl_ao_l(2,l,ik)
+        end do
       end if
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
 
@@ -310,6 +328,7 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%rps_ao,nproc_group_global)
   call comm_bcast(pp%nrps_ao,nproc_group_global)
   call comm_bcast(pp%upptbl_ao,nproc_group_global)
+  call comm_bcast(pp%upptbl_ao_l,nproc_group_global)
 
   return
 end subroutine input_pp
@@ -1034,6 +1053,9 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
     enddo
   end if
 
+  ! Projector construction is complete; return upp in the common scaled convention.
+  call scale_pseudo_wavefunctions(pp,ik)
+
   pp%flag_nlcc = pp%flag_nlcc.or.flag_nlcc_element(ik)
   pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
   if(.not.flag_nlcc_element(ik))return
@@ -1171,14 +1193,7 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
       if (u > 0d0) pp%has_rho_pp(ik) = .true.
   end if
 
-! multiply sqrt((2l+1)/4pi)/r**(l+1) for radial w.f.
-  do l=0,pp%mlps(ik)
-    do i=1,pp%mr(ik)
-      pp%upp(i,l)=pp%upp(i,l)*sqrt((2*l+1.d0)/(4*pi))/(pp%rad(i+1,ik))**(l+1)
-    enddo
-    pp%upp(0,l)=pp%upp(1,l)
-!    pp%upp(0,l)=2.d0*pp%upp(1,l)-pp%upp(2,l)
-  enddo
+  call scale_pseudo_wavefunctions(pp,ik)
   
 ! copy the radial wave functions for DFT+U
   l0=0
@@ -1278,6 +1293,24 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
   return
 end subroutine making_ps_without_masking
 !====
+! Convert raw u_l=r*R_l to the radial factor used with SALMON's solid harmonics.
+! Call once, after all calculations that require raw wavefunctions.
+subroutine scale_pseudo_wavefunctions(pp,ik)
+  use structures, only: s_pp_info
+  use math_constants, only: pi
+  implicit none
+  type(s_pp_info), intent(inout) :: pp
+  integer, intent(in) :: ik
+  integer :: i,l
+
+  do l=0,pp%mlps(ik)
+    do i=1,pp%mr(ik)
+      pp%upp(i,l)=pp%upp(i,l)*sqrt((2*l+1.d0)/(4*pi))/pp%rad(i+1,ik)**(l+1)
+    end do
+    pp%upp(0,l)=pp%upp(1,l)
+  end do
+end subroutine scale_pseudo_wavefunctions
+
 ! Estimate the radial valence density 4*pi*r^2*n(r) from the pseudo wavefunctions.
 ! Occupations are filled from low angular momentum with at most 2*(2l+1) electrons per channel.
 ! upp1(i,l) is the value at rad(i+1) while rho_pp_tbl(i) is the value at rad(i).

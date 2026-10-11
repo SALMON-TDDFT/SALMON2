@@ -48,6 +48,7 @@ use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
 use lcfo
+use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
 implicit none
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -327,6 +328,8 @@ if(yn_out_dns =='y') call write_dns(lg,mg,system,info,rho_s)
 if(yn_out_dos =='y') call write_dos(system,energy)
 if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
 if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
+
+! if(comm_is_root(nproc_id_global)) call verify_atomic_orbital_consistency(system,pp,lg,mg,nproc_id_global) !!DEBUG
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 
