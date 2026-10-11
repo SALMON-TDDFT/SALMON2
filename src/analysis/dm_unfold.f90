@@ -1620,7 +1620,7 @@ contains
 !     id_o == 0 of the orbital communicator holds them: that is the process which solves.
 ! The parameters of the solver are not stored: they are no_ref, unfold_nstate_buffer, unfold_threshold_projection, ncg and nscf
 ! (salmon_global).
-! The update of the basis is not connected yet: dm_unfold stops when this option is used.
+! The basis is updated at each analysis step by update_dm_unfold_houston.
   subroutine init_dm_unfold_houston(lg,system,info,unfold)
     use structures
     use communication, only: comm_is_root
@@ -1693,10 +1693,114 @@ contains
       write(*,"(A,I0,A,I0)") '  no_work = ', no_work, ',  no_conv = ', no_ref
       write(*,"(A,ES12.5,A,I0,A,I0)") '  tol_res [a.u.] = ', unfold_threshold_projection, &
         & ',  nsweep_max = ', nsweep_max, ',  ncg = ', ncg
-      write(*,"(A)") '  the update of the basis is not connected yet: the analysis stops at the first call'
+      write(*,"(A)") '  the basis is updated at each analysis step'
     end if
 
   end subroutine init_dm_unfold_houston
+
+!===================================================================================================================================
+! Houston basis (unfold_basis = 'houston'): the basis of the reference cell at the time of the analysis.
+! The states psi_ref(isk) (the lowest no_ref states) are replaced by the eigenstates of the Hamiltonian H(q) of the reference
+! ground state at the Bloch vector q = kappa_ref(isk) + A(t) (the vector potential of the analysis, vec_Ac_eval). The potential of
+! H(q) is the fixed one of the ground state; A enters only through q. Replaced together (they are never mixed with the old ones):
+!   psi_ref, psi_refG, esp_ref, upu_ref, u_rVnl_Vnlr_u_ref
+! The eigenstates are calculated by the process with id_o == 0 of the orbital communicator, for the reference k points of its k
+! group, starting from the vectors of the last call (unfold%phi_houston), and sent to the other processes of the orbital
+! communicator. psi_refG is calculated by every process as in init_dm_unfold, esp_ref is made complete again as in Phase B.
+! The convergence is judged by the residual of the lowest no_ref states (unfold_threshold_projection). The calculation goes on
+! when it is not reached: one line gives the number of the reference k points which are not converged and the maximum and the
+! minimum residual of these (all the processes are included).
+  subroutine update_dm_unfold_houston(itt,system,info,unfold,kappa_ref,vec_Ac_eval)
+    use structures
+    use communication, only: comm_is_root, comm_bcast, comm_summation, comm_get_min
+    use parallelization, only: nproc_id_global, nproc_group_global
+    use salmon_global, only: no_ref, ncg, nscf, unfold_nstate_buffer, unfold_threshold_projection
+    use dm_unfold_reference_sub, only: solve_dm_unfold_reference, calc_tm_dm_unfold_reference
+    implicit none
+    integer,               intent(in)    :: itt
+    type(s_dft_system),    intent(in)    :: system
+    type(s_parallel_info), intent(in)    :: info
+    type(s_unfold),        intent(inout) :: unfold
+    real(8),               intent(in)    :: kappa_ref(3,unfold%nsk), vec_Ac_eval(3)
+    integer :: n1, n2, n3, no_work, nsweep_max, isk_s, isk_e, isk, io, nsweep_done, n_nonconv_l, n_nonconv
+    real(8) :: q(3), orth, omega_ref, rband, rall_l, rall, rmax_l, rmax, rmin_l, rmin
+    logical :: converged
+    real(8), allocatable :: eps(:), res(:), esp_l(:,:)
+    complex(8), allocatable :: psi_buf(:,:,:,:), upu_buf(:,:,:), urv_buf(:,:,:)
+
+    n1 = size(unfold%psi_ref,1)
+    n2 = size(unfold%psi_ref,2)
+    n3 = size(unfold%psi_ref,3)
+    no_work = no_ref + unfold_nstate_buffer
+    nsweep_max = nscf
+    if (nsweep_max == 0) nsweep_max = 10
+    isk_s = (info%ik_s-1) * unfold%nhrsk + 1
+    isk_e = info%ik_e * unfold%nhrsk
+    omega_ref = system%hvol * system%ngrid / dble(unfold%num_hkgrid(1)*unfold%num_hkgrid(2)*unfold%num_hkgrid(3))
+
+    allocate( eps(no_work), res(no_work), esp_l(no_ref,unfold%nsk) )
+    allocate( psi_buf(n1,n2,n3,no_ref), upu_buf(3,no_ref,no_ref), urv_buf(3,no_ref,no_ref) )
+    esp_l = 0d0
+    n_nonconv_l = 0
+    rall_l = 0d0 ; rmax_l = 0d0 ; rmin_l = huge(1d0)
+
+    do isk = isk_s, isk_e
+      if (info%id_o == 0) then
+        q(1:3) = kappa_ref(1:3,isk) + vec_Ac_eval(1:3)
+        call solve_dm_unfold_reference(unfold%houston,q,no_work,no_ref,unfold%phi_houston(:,:,:,:,isk), &
+                                     & unfold_threshold_projection,nsweep_max,ncg,eps,res,orth,nsweep_done,converged)
+        call calc_tm_dm_unfold_reference(unfold%houston,q,no_ref,unfold%phi_houston(:,:,:,1:no_ref,isk),upu_buf,urv_buf)
+        psi_buf(:,:,:,1:no_ref) = unfold%phi_houston(:,:,:,1:no_ref,isk)
+        rband = maxval(res(1:no_ref))
+        rall_l = max(rall_l, rband)
+        if (.not. converged) then
+          n_nonconv_l = n_nonconv_l + 1
+          rmax_l = max(rmax_l, rband)
+          rmin_l = min(rmin_l, rband)
+        end if
+      end if
+      call comm_bcast(psi_buf, info%icomm_o)
+      call comm_bcast(upu_buf, info%icomm_o)
+      call comm_bcast(urv_buf, info%icomm_o)
+      call comm_bcast(eps, info%icomm_o)
+      unfold%psi_ref(1:n1,1:n2,1:n3,1,1:no_ref,isk,1) = psi_buf(:,:,:,1:no_ref)
+      unfold%upu_ref(:,:,:,isk) = upu_buf
+      unfold%u_rVnl_Vnlr_u_ref(:,:,:,isk) = urv_buf
+      esp_l(1:no_ref,isk) = eps(1:no_ref)
+    end do
+
+    ! esp_ref is complete over all the reference k points on every process
+    call comm_summation(esp_l, unfold%esp_ref(1:no_ref,1:unfold%nsk,1), no_ref*unfold%nsk, info%icomm_k)
+
+    !$omp parallel do private(isk,io) collapse(2)
+    do isk = isk_s, isk_e
+    do io = 1, no_ref
+      call fourier_cell_r2g( n1, n2, n3, unfold%psi_ref(1:n1,1:n2,1:n3,1,io,isk,1), system%hvol / omega_ref, &
+        & unfold%psi_refG(1:n1,1:n2,1:n3,1,io,isk,1) )
+    end do
+    end do
+
+    ! one line about the convergence; the processes which do not solve (id_o /= 0) give nothing
+    call comm_summation(n_nonconv_l, n_nonconv, nproc_group_global)
+    rall_l = -rall_l ; rmax_l = -rmax_l
+    call comm_get_min(rall_l, nproc_group_global)
+    call comm_get_min(rmax_l, nproc_group_global)
+    call comm_get_min(rmin_l, nproc_group_global)
+    rall = -rall_l ; rmax = -rmax_l ; rmin = rmin_l
+    if (comm_is_root(nproc_id_global)) then
+      if (n_nonconv == 0) then
+        write(*,'(A,I0,A,ES10.3,A,ES10.3)') 'dm_unfold houston basis: all the reference k points are converged  it=', itt, &
+          & '  max residual =', rall, '  tol =', unfold_threshold_projection
+      else
+        write(*,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3)') &
+          & 'dm_unfold houston basis: WARNING not converged at ', n_nonconv, ' of ', unfold%nsk, &
+          & ' reference k points  it=', itt, '  max residual =', rmax, '  min residual =', rmin, &
+          & '  tol =', unfold_threshold_projection
+      end if
+    end if
+
+    deallocate( eps, res, esp_l, psi_buf, upu_buf, urv_buf )
+  end subroutine update_dm_unfold_houston
 
 !===================================================================================================================================
   subroutine dm_unfold(itt,system,info,lg,ofl,psi_t,unfold,vec_Ac_eval)
@@ -1716,7 +1820,7 @@ contains
     type(s_dft_system)      ,intent(in) :: system
     type(s_parallel_info)   ,intent(in) :: info
     type(s_orbital)         ,intent(in) :: psi_t
-    type(s_unfold)          ,intent(in) :: unfold
+    type(s_unfold)          ,intent(inout) :: unfold
     ! vector potential A(t) at the time of psi_t, given by the caller. system%vec_Ac is not used: during the
     ! propagation step it holds the value at the middle of the step (middlepoint, hse_taylor4).
     real(8)                 ,intent(in) :: vec_Ac_eval(3)
@@ -1806,9 +1910,6 @@ contains
     real(8),allocatable :: kappa_ref_l(:,:), kappa_ref(:,:)
     integer :: n_gr_shift_l, n_gr_shift
     complex(8),allocatable :: gshift_ph(:,:,:,:)
-
-    if (trim(unfold_basis) == 'houston') &
-      & stop "unfold_basis = 'houston': the update of the basis is not connected yet"
 
     allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
@@ -1963,6 +2064,10 @@ contains
     ! =================================================================
     ! end of G_R folding correction setup
     ! =================================================================
+
+    ! unfold_basis = 'houston': psi_ref, psi_refG, esp_ref, upu_ref and u_rVnl_Vnlr_u_ref are replaced by those of the
+    ! eigenstates of the Hamiltonian of the reference cell at kappa_ref + A(t)
+    if (trim(unfold_basis) == 'houston') call update_dm_unfold_houston(itt,system,info,unfold,kappa_ref,vec_Ac_eval)
 
   !$omp parallel do private(ilk,ihk,isk,ishidx_g,io,io_ref,zsum,ih1,ih2,ih3,ir1_ref,ir2_ref,ir3_ref,ir1,ir2,ir3) collapse(2)
     do ilk = info%ik_s, info%ik_e ! large k
