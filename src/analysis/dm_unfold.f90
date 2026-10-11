@@ -1601,11 +1601,102 @@ contains
     end if
 
   end if ! yn_out_mom_distr_gs
+  call init_dm_unfold_houston(lg,system,info,unfold)
 #else
   stop 'dm_unfold_option requires a build with MPI support.'
 #endif
 
   end subroutine init_dm_unfold
+
+!===================================================================================================================================
+! Houston basis (unfold_basis = 'houston'): the data which the update of the basis at each analysis step needs, kept in
+! unfold%houston (the type s_unfold_houston, structures.f90; no module variable).
+!   - the Hamiltonian of the reference cell: the file of the reference ground state (reference/dm_unfold_ref_hamiltonian.bin) is
+!     read once here (the root process reads and broadcasts) and built on the grid of the reference cell of this run.
+!     Every process holds it (it is small).
+!   - the starting vectors of the eigenstate solver for each reference k point of the k group: the no_ref states of
+!     reference/wfn.bin and unfold_nstate_buffer more vectors (buffer states), which are random (a fixed sequence for each
+!     reference k point and band, so that the vectors do not depend on the number of the processes). Only the process with
+!     id_o == 0 of the orbital communicator holds them: that is the process which solves.
+! The parameters of the solver are not stored: they are no_ref, unfold_nstate_buffer, unfold_threshold_projection, ncg and nscf
+! (salmon_global).
+! The update of the basis is not connected yet: dm_unfold stops when this option is used.
+  subroutine init_dm_unfold_houston(lg,system,info,unfold)
+    use structures
+    use communication, only: comm_is_root
+    use parallelization, only: nproc_id_global, nproc_group_global
+    use salmon_global, only: unfold_basis, unfold_threshold_projection, unfold_nstate_buffer, no_ref, ncg, nscf, yn_scalapack
+    use dm_unfold_reference_sub, only: read_dm_unfold_reference, build_dm_unfold_reference
+    implicit none
+    type(s_rgrid),         intent(in)    :: lg
+    type(s_dft_system),    intent(in)    :: system
+    type(s_parallel_info), intent(in)    :: info
+    type(s_unfold),        intent(inout) :: unfold
+    integer :: i, j, ie_ref(3), no_work, nsweep_max, isk_s, isk_e, isk, io
+    integer(8) :: iseed
+    real(8) :: xr, xi
+    integer :: ir1, ir2, ir3
+
+    if (trim(unfold_basis) /= 'houston') return
+
+    if (comm_is_root(nproc_id_global)) &
+      & write(*,"(A)") "dm_unfold: unfold_basis = 'houston': set up of the reference-cell eigenstates"
+
+    do j = 1, 3
+    do i = 1, 3
+      if (unfold%pmat(i,j) /= merge(1,0,i==j)) &
+        & stop "unfold_basis = 'houston' requires the primitive-to-reference matrix P = I (al_pr, al_vec1-3_pr must not be given)"
+    end do
+    end do
+    if (yn_scalapack == 'y') stop "unfold_basis = 'houston' requires yn_scalapack = 'n'"
+
+    ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)
+    no_work = no_ref + unfold_nstate_buffer
+    if (no_work > ie_ref(1)*ie_ref(2)*ie_ref(3)) &
+      & stop 'no_ref + unfold_nstate_buffer is larger than the number of the grid points of the reference cell'
+    nsweep_max = nscf
+    if (nsweep_max == 0) nsweep_max = 10
+
+    call read_dm_unfold_reference('reference/',nproc_group_global,unfold%houston)
+    call build_dm_unfold_reference(unfold%houston,system%primitive_a,lg%num,system%hgs,unfold%num_hkgrid)
+
+    isk_s = (info%ik_s-1) * unfold%nhrsk + 1
+    isk_e = info%ik_e * unfold%nhrsk
+    if (info%id_o == 0) then
+      allocate( unfold%phi_houston(ie_ref(1),ie_ref(2),ie_ref(3),no_work,isk_s:isk_e) )
+      do isk = isk_s, isk_e
+        do io = 1, no_ref
+          unfold%phi_houston(:,:,:,io,isk) = unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,io,isk,1)
+        end do
+        do io = no_ref+1, no_work
+          ! Park-Miller generator: the sequence depends only on isk and io
+          iseed = mod(int(isk,8)*7919_8 + int(io,8)*104729_8 + 12345_8, 2147483646_8) + 1_8
+          do i = 1, 10
+            iseed = mod(16807_8*iseed, 2147483647_8)
+          end do
+          do ir3 = 1, ie_ref(3)
+          do ir2 = 1, ie_ref(2)
+          do ir1 = 1, ie_ref(1)
+            iseed = mod(16807_8*iseed, 2147483647_8)
+            xr = dble(iseed)/2147483647d0 - 0.5d0
+            iseed = mod(16807_8*iseed, 2147483647_8)
+            xi = dble(iseed)/2147483647d0 - 0.5d0
+            unfold%phi_houston(ir1,ir2,ir3,io,isk) = cmplx(xr,xi,kind=8)
+          end do
+          end do
+          end do
+        end do
+      end do
+    end if
+
+    if (comm_is_root(nproc_id_global)) then
+      write(*,"(A,I0,A,I0)") '  no_work = ', no_work, ',  no_conv = ', no_ref
+      write(*,"(A,ES12.5,A,I0,A,I0)") '  tol_res [a.u.] = ', unfold_threshold_projection, &
+        & ',  nsweep_max = ', nsweep_max, ',  ncg = ', ncg
+      write(*,"(A)") '  the update of the basis is not connected yet: the analysis stops at the first call'
+    end if
+
+  end subroutine init_dm_unfold_houston
 
 !===================================================================================================================================
   subroutine dm_unfold(itt,system,info,lg,ofl,psi_t,unfold,vec_Ac_eval)
@@ -1614,7 +1705,7 @@ contains
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_id_global
     use salmon_global, only: no_ref, dt, num_kgrid, num_skgrid, sysname, base_directory, natom,izatom,kion, &
-                            & dq_mom, nq_mom, yn_out_mom_distr_rt, out_mom_distr_rt_step
+                            & dq_mom, nq_mom, yn_out_mom_distr_rt, out_mom_distr_rt_step, unfold_basis
     use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
     use math_constants, only: zI, pi
     use lattice, only: calc_inverse
@@ -1715,6 +1806,9 @@ contains
     real(8),allocatable :: kappa_ref_l(:,:), kappa_ref(:,:)
     integer :: n_gr_shift_l, n_gr_shift
     complex(8),allocatable :: gshift_ph(:,:,:,:)
+
+    if (trim(unfold_basis) == 'houston') &
+      & stop "unfold_basis = 'houston': the update of the basis is not connected yet"
 
     allocate( mat(no_ref,unfold%nhrsk,info%io_s:info%io_e,info%ik_s:info%ik_e))
     ie_ref(1:3) = lg%ie(1:3)/unfold%num_hkgrid(1:3)

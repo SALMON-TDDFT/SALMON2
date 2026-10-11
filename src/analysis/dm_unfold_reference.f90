@@ -75,11 +75,12 @@
 !                                 are consistent with the Hamiltonian they are eigenstates of.
 
 module dm_unfold_reference_sub
-  use structures, only: s_rgrid, s_parallel_info, s_dft_system, s_stencil, s_scalar, s_pp_grid, s_sendrecv_grid, s_orbital, s_cg
+  use structures, only: s_rgrid, s_parallel_info, s_dft_system, s_stencil, s_scalar, s_pp_grid, s_sendrecv_grid, s_orbital, &
+    & s_unfold_houston
   implicit none
   private
 
-  public :: s_dm_unfold_ref
+  public :: s_unfold_houston
   public :: check_dm_unfold_reference
   public :: write_dm_unfold_reference
   public :: read_dm_unfold_reference
@@ -89,28 +90,7 @@ module dm_unfold_reference_sub
   public :: solve_dm_unfold_reference
   public :: release_dm_unfold_reference
 
-  ! The Hamiltonian of the reference cell. The components are private: they are set only by the routines of this module.
-  ! Immutable after build: lattice, V_local, ppg (except zekr_uV), stencil, grid.
-  ! Changed by apply and solve: system%vec_k (= q), ppg%zekr_uV, and the work arrays/dimensions which depend on the number of
-  ! vectors.
-  type s_dm_unfold_ref
-    private
-    logical :: is_read  = .false.
-    logical :: is_built = .false.
-    integer :: no_work     = 0    ! number of vectors the work arrays are made for
-    integer :: file_nk  = 0    ! number of k points and bands of the reference ground state (informational)
-    integer :: file_no  = 0
-    real(8) :: file_hvol = 0d0 ! hvol written in the file
-    type(s_dft_system)    :: system
-    type(s_stencil)       :: stencil
-    type(s_rgrid)         :: lg, mg
-    type(s_parallel_info) :: info
-    type(s_scalar), allocatable :: V_local(:)
-    type(s_pp_grid)       :: ppg
-    type(s_orbital)       :: tpsi, htpsi
-    type(s_orbital)       :: gpsi ! work arrays of solve_dm_unfold_reference (allocated when it is used)
-    type(s_cg)            :: cg
-  end type s_dm_unfold_ref
+  ! The type of the Hamiltonian of the reference cell, s_unfold_houston, is defined in structures.f90 (no module variable here).
 
 contains
 
@@ -296,22 +276,20 @@ contains
   ! ihead = [N(3), nspin, nion, nk, no, nd, nps, nlma] (record 2 of the file)
   subroutine set_dimensions(ref,ihead)
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     integer,               intent(in)    :: ihead(10)
     ref%lg%num(1:3) = ihead(1:3)
     ref%lg%is(1:3)  = 1
     ref%lg%ie(1:3)  = ihead(1:3)
     ref%system%nspin = ihead(4)
     ref%system%nion  = ihead(5)
-    ref%file_nk      = ihead(6)
-    ref%file_no      = ihead(7)
     ref%ppg%nps      = ihead(9)
     ref%ppg%nlma     = ihead(10)
   end subroutine set_dimensions
 
   subroutine allocate_arrays(ref)
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     integer :: ispin, nps, nlma, nion
     nps  = ref%ppg%nps
     nlma = ref%ppg%nlma
@@ -332,8 +310,8 @@ contains
     implicit none
     character(*),          intent(in)    :: idir ! directory (with the last '/') which contains the file
     integer,               intent(in)    :: icomm
-    type(s_dm_unfold_ref), intent(inout) :: ref
-    type(s_dm_unfold_ref) :: blank
+    type(s_unfold_houston), intent(inout) :: ref
+    type(s_unfold_houston) :: blank
     integer :: myrank, nprocs, fh, ios, ios_close, ispin, ihead(10), version, iter
     character(16)  :: magic, conv
     real(8)        :: thr, sum1, etot
@@ -442,7 +420,6 @@ contains
     call comm_bcast(ref%ppg%rinv_uvu, icomm)
     call comm_bcast(ref%ppg%uv, icomm)
 
-    ref%is_read = .true.
     if (comm_is_root(myrank)) write(*,'(a)') '  dm_unfold reference Hamiltonian read: '//trim(fname)
   end subroutine read_dm_unfold_reference
 
@@ -460,7 +437,7 @@ contains
     use mpi, only: MPI_COMM_SELF
 #endif
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     real(8),               intent(in)    :: primitive_a_super(3,3), hgs_super(3)
     integer,               intent(in)    :: num_super(3), nmul(3)
     type(s_stencil) :: st_chk
@@ -470,8 +447,6 @@ contains
     character(256) :: msg
     integer, parameter :: nd_ref = 4 ! half width of the finite-difference stencil (fixed in hpsi); the same in read
 
-    if (.not. ref%is_read) call abort_job('build: the file has not been read.')
-    if (ref%is_built) call abort_job('build: already built (call release_dm_unfold_reference before building again).')
 
     ! supported builds and current settings (they are used by hpsi/zpseudo as they are; none of them is changed here)
     msg = ''
@@ -591,7 +566,6 @@ contains
     ref%ppg%zekr_uV = (0d0,0d0)
 
     ref%no_work = 0
-    ref%is_built = .true.
   end subroutine build_dm_unfold_reference
 
   ! H(q)*psi for no_work vectors. psi and hpsi_out are given on the physical region of the grid of the reference cell:
@@ -599,7 +573,7 @@ contains
   subroutine apply_h_dm_unfold_reference(ref,q,no_work,psi,hpsi_out)
     use hamiltonian, only: hpsi, update_kvector_nonlocalpt
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     real(8),               intent(in)    :: q(3)
     integer,               intent(in)    :: no_work
     complex(8),            intent(in)    :: psi(:,:,:,:)
@@ -607,7 +581,6 @@ contains
     type(s_sendrecv_grid) :: srg ! not used (the grid is not divided); it is only an argument of hpsi
     integer :: io, is(3), ie(3)
 
-    if (.not. ref%is_built) call abort_job('apply: the Hamiltonian has not been built.')
     if (no_work < 1) call abort_job('apply: no_work must be positive.')
     is = ref%mg%is
     ie = ref%mg%ie
@@ -655,7 +628,7 @@ contains
     use stencil_sub, only: calc_gradient_psi
     use math_constants, only: zI
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     real(8),               intent(in)    :: q(3)
     integer,               intent(in)    :: no_mat
     complex(8),            intent(in)    :: psi(:,:,:,:)
@@ -665,7 +638,6 @@ contains
     integer :: is(3), ie(3), i, j, c, ilma, ia, jj, ix, iy, iz
     real(8) :: x, y, z
 
-    if (.not. ref%is_built) call abort_job('calc_tm: the Hamiltonian has not been built.')
     if (ref%system%nspin /= 1) call abort_job('calc_tm: only nspin = 1 is supported.')
     if (no_mat < 1) call abort_job('calc_tm: no_mat must be positive.')
     is = ref%mg%is
@@ -744,7 +716,7 @@ contains
   ! Work arrays and the dimensions which depend on the number of vectors. Nothing is done if no_work is the same as before.
   subroutine set_work_arrays(ref,no_work)
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     integer,               intent(in)    :: no_work
 
     if (no_work == ref%no_work) return
@@ -833,7 +805,7 @@ contains
     use Conjugate_Gradient, only: gscg_zwf
     use gram_schmidt_orth, only: gram_schmidt
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     real(8),               intent(in)    :: q(3), tol_res
     integer,               intent(in)    :: no_work, no_conv, nsweep_max, ncg
     complex(8),            intent(inout) :: phi(:,:,:,:)
@@ -845,7 +817,6 @@ contains
     real(8) :: rmax
     real(8), parameter :: tol_orth = 1d-10 ! allowed max| <phi_n|phi_m> - delta_nm | of the states returned
 
-    if (.not. ref%is_built) call abort_job('solve: the Hamiltonian has not been built.')
     if (yn_scalapack == 'y') call abort_job("solve: yn_scalapack must be 'n'.")
     if (no_work < 1) call abort_job('solve: no_work must be positive.')
     if (no_conv < 1 .or. no_conv > no_work) call abort_job('solve: no_conv must satisfy 1 <= no_conv <= no_work.')
@@ -902,7 +873,7 @@ contains
   subroutine evaluate_bands(ref,srg,eps,res,orth)
     use hamiltonian, only: hpsi
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
+    type(s_unfold_houston), intent(inout) :: ref
     type(s_sendrecv_grid), intent(inout) :: srg
     real(8),               intent(out)   :: eps(:), res(:), orth
     complex(8), allocatable :: w(:,:), hw(:,:), s(:,:)
@@ -945,8 +916,8 @@ contains
   ! Free everything. read and build can be done again after this.
   subroutine release_dm_unfold_reference(ref)
     implicit none
-    type(s_dm_unfold_ref), intent(inout) :: ref
-    type(s_dm_unfold_ref) :: blank
+    type(s_unfold_houston), intent(inout) :: ref
+    type(s_unfold_houston) :: blank
     ref = blank ! the allocatable components of ref are deallocated by the assignment
   end subroutine release_dm_unfold_reference
 

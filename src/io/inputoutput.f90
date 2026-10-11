@@ -622,6 +622,9 @@ contains
       & out_dm_unfold_step, &
       & unfold_egap_threshold, &
       & unfold_tc_tol, &
+      & unfold_basis, &
+      & unfold_threshold_projection, &
+      & unfold_nstate_buffer, &
       & al_pr, &
       & al_vec1_pr,al_vec2_pr,al_vec3_pr, &
       & yn_out_mom_distr_gs, &
@@ -1117,6 +1120,21 @@ contains
                           ! structure actually requires joint
                           ! diagonalization (|det(pmat)|>1 in
                           ! dm_unfold_option='super').
+    unfold_basis = 'reference' ! dm_unfold_option='super': the basis of the reference cell used for the analysis.
+                          ! 'reference': the states of the reference ground state (reference/wfn.bin, tm.bin, eigen.bin),
+                          ! as they are. 'houston': the eigenstates of the Hamiltonian of the reference ground state at the
+                          ! Bloch vector q = kappa_ref + A(t) are calculated at every step of the analysis (this needs
+                          ! reference/dm_unfold_ref_hamiltonian.bin, which the reference ground state writes).
+    unfold_threshold_projection = 1d-6*uenergy_from_au ! unfold_basis='houston': convergence threshold of the eigenstate
+                          ! solver of the reference-cell Hamiltonian: the maximum residual norm ||(H - e_n) phi_n|| of the
+                          ! no_ref lowest states. It has the dimension of energy: given in the unit of energy of
+                          ! unit_system and converted to a.u. (like energy_cut); the default is 1d-6 a.u. This is not the
+                          ! change of the kinetic energy which threshold_projection of the projection means. The maximum
+                          ! number of the sweeps is nscf and the number of the conjugate gradient steps per sweep is ncg;
+                          ! yn_preconditioning is respected as it is.
+    unfold_nstate_buffer = 8 ! unfold_basis='houston': the number of states calculated in addition to the no_ref states
+                          ! which are used (buffer states). They are not used in the analysis; they follow the states above
+                          ! no_ref so that the lowest no_ref converge also when the bands cross. Zero is allowed.
     al_pr             = 0d0
     al_vec1_pr        = 0d0
     al_vec2_pr        = 0d0
@@ -1253,6 +1271,7 @@ contains
     end if
     call string_lowercase(lattice)
     call string_lowercase(dm_unfold_option)
+    call string_lowercase(unfold_basis)
     call string_lowercase(lcfo_eigensolver)
 
 ! Broad cast
@@ -1793,6 +1812,16 @@ contains
     call comm_bcast(unfold_egap_threshold, nproc_group_global)
     if( unfold_egap_threshold > 0d0 ) unfold_egap_threshold = unfold_egap_threshold * uenergy_to_au
     call comm_bcast(unfold_tc_tol, nproc_group_global)
+    call comm_bcast(unfold_basis, nproc_group_global)
+    if( trim(unfold_basis) /= 'reference' .and. trim(unfold_basis) /= 'houston' ) &
+      stop "unfold_basis must be 'reference' or 'houston'"
+    if( trim(unfold_basis) == 'houston' .and. trim(dm_unfold_option) /= 'super' ) &
+      stop "unfold_basis = 'houston' requires dm_unfold_option = 'super'"
+    call comm_bcast(unfold_threshold_projection, nproc_group_global)
+    if( unfold_threshold_projection <= 0d0 ) stop 'unfold_threshold_projection must be positive'
+    unfold_threshold_projection = unfold_threshold_projection * uenergy_to_au
+    call comm_bcast(unfold_nstate_buffer, nproc_group_global)
+    if( unfold_nstate_buffer < 0 ) stop 'unfold_nstate_buffer must not be negative'
     call comm_bcast(al_pr, nproc_group_global)
     al_pr = al_pr * ulength_to_au
     call comm_bcast(al_vec1_pr, nproc_group_global)
@@ -2814,6 +2843,9 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_egap_threshold', unfold_egap_threshold
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_tc_tol', unfold_tc_tol
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'unfold_basis', trim(unfold_basis)
+      write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_threshold_projection', unfold_threshold_projection
+      write(fh_variables_log, '("#",4X,A,"=",I6)') 'unfold_nstate_buffer', unfold_nstate_buffer
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(1)', al_pr(1)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(2)', al_pr(2)
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'al_pr(3)', al_pr(3)

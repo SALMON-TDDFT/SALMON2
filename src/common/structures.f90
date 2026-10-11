@@ -429,7 +429,35 @@ module structures
     real(8),allocatable :: Rion_last(:,:), Force_last(:,:)
   end type s_md
 
+  type s_cg
+    type(s_orbital) :: pre_gk,pk,hpk
+  end type s_cg
+
+  ! dm_unfold_option = 'super', unfold_basis = 'houston': the data of the Houston basis which are kept between the analysis steps
+  ! (unfold%houston). The Hamiltonian of the reference cell, restored from the file which the reference ground state writes. The
+  ! components are set only by the routines of dm_unfold_reference_sub (src/analysis/dm_unfold_reference.f90).
+  ! Immutable after build: lattice, V_local, ppg (except zekr_uV), stencil, grid. Changed by apply and solve: system%vec_k (= q),
+  ! ppg%zekr_uV, and the work arrays/dimensions which depend on the number of vectors.
+  type s_unfold_houston
+    integer :: no_work     = 0    ! number of vectors the work arrays are made for
+    real(8) :: file_hvol = 0d0 ! hvol written in the file (checked in build)
+    type(s_dft_system)    :: system
+    type(s_stencil)       :: stencil
+    type(s_rgrid)         :: lg, mg
+    type(s_parallel_info) :: info
+    type(s_scalar), allocatable :: V_local(:)
+    type(s_pp_grid)       :: ppg
+    type(s_orbital)       :: tpsi, htpsi
+    type(s_orbital)       :: gpsi ! work arrays of solve_dm_unfold_reference (allocated when it is used)
+    type(s_cg)            :: cg
+  end type s_unfold_houston
+
   type s_unfold
+    type(s_unfold_houston) :: houston
+    ! phi_houston(N1,N2,N3,no_work,isk_s:isk_e): starting vectors of the eigenstate solver of the Houston basis on the grid of the
+    ! reference cell, for the reference k points of the k group. Only the process with id_o == 0 of the orbital communicator, which
+    ! solves, has them allocated.
+    complex(8),allocatable :: phi_houston(:,:,:,:,:)
     complex(8),allocatable :: psi_ref(:,:,:,:,:,:,:), psi_refG(:,:,:,:,:,:,:)
     ! vec_hrsk/nhrsk: reference-to-super-reference hat-kappa offset (note's
     ! \hat\bmkappa; formerly named vec_hk/nhk). small k (isk, reference-cell
@@ -520,10 +548,6 @@ module structures
 ! +-----------------------------------+
 ! | for DFT ground-state calculations |
 ! +-----------------------------------+
-
-  type s_cg
-    type(s_orbital) :: pre_gk,pk,hpk
-  end type s_cg
 
   type s_mixing
     logical :: flag_mix_zero
