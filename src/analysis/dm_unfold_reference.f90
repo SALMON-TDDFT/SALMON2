@@ -89,12 +89,6 @@ module dm_unfold_reference_sub
   public :: solve_dm_unfold_reference
   public :: release_dm_unfold_reference
 
-  character(*), parameter, public :: dm_unfold_ref_file_name = 'dm_unfold_ref_hamiltonian.bin'
-  character(16), parameter :: file_magic = 'SALMON_DMUNF_REF'
-  integer, parameter :: format_version = 1
-  integer, parameter :: nd_ref = 4 ! half width of the finite-difference stencil (fixed in hpsi)
-  real(8), parameter :: tol_orth = 1d-10 ! allowed max| <phi_n|phi_m> - delta_nm | of the states returned by solve
-
   ! The Hamiltonian of the reference cell. The components are private: they are set only by the routines of this module.
   ! Immutable after build: lattice, V_local, ppg (except zekr_uV), stencil, grid.
   ! Changed by apply and solve: system%vec_k (= q), ppg%zekr_uV, and the work arrays/dimensions which depend on the number of
@@ -189,6 +183,10 @@ contains
     integer :: fh, ios, ios_close, ispin, ilma, ia, nps, nlma, nion
     real(8), allocatable :: uv_w(:,:)
     character(256) :: fname, msg
+    ! the name and the format of the file: the same values in read_dm_unfold_reference
+    character(*),  parameter :: dm_unfold_ref_file_name = 'dm_unfold_ref_hamiltonian.bin'
+    character(16), parameter :: file_magic = 'SALMON_DMUNF_REF'
+    integer,       parameter :: format_version = 1
 
     fname = trim(odir)//dm_unfold_ref_file_name
     nion = system%nion
@@ -341,6 +339,11 @@ contains
     real(8)        :: thr, sum1, etot
     character(256) :: fname, msg
     integer, allocatable :: ibuf(:)
+    ! the name and the format of the file: the same values in write_dm_unfold_reference
+    character(*),  parameter :: dm_unfold_ref_file_name = 'dm_unfold_ref_hamiltonian.bin'
+    character(16), parameter :: file_magic = 'SALMON_DMUNF_REF'
+    integer,       parameter :: format_version = 1
+    integer,       parameter :: nd_ref = 4 ! half width of the finite-difference stencil (fixed in hpsi); the same in build
 
 #ifndef USE_MPI
     call abort_job('read: a build with MPI support is required.')
@@ -465,6 +468,7 @@ contains
     real(8) :: tol
     logical :: quiet_save
     character(256) :: msg
+    integer, parameter :: nd_ref = 4 ! half width of the finite-difference stencil (fixed in hpsi); the same in read
 
     if (.not. ref%is_read) call abort_job('build: the file has not been read.')
     if (ref%is_built) call abort_job('build: already built (call release_dm_unfold_reference before building again).')
@@ -839,6 +843,7 @@ contains
     type(s_sendrecv_grid) :: srg ! not used (the grid is not divided); it is only an argument
     integer :: io, iter, is(3), ie(3)
     real(8) :: rmax
+    real(8), parameter :: tol_orth = 1d-10 ! allowed max| <phi_n|phi_m> - delta_nm | of the states returned
 
     if (.not. ref%is_built) call abort_job('solve: the Hamiltonian has not been built.')
     if (yn_scalapack == 'y') call abort_job("solve: yn_scalapack must be 'n'.")
