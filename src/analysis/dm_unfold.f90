@@ -124,6 +124,10 @@ contains
     stop
   end if
 
+  if( any(info%nprgrid(1:3) /= 1) ) &
+    & error stop "dm_unfold_option = 'super': real-space parallelization (nproc_rgrid) is not allowed; &
+    &use only nproc_k and nproc_ob"
+
   if( system%nspin /= 1 ) then
     if (comm_is_root(nproc_id_global)) then
       write(*,"(A)") 'nspin /= 1 not allowed in dm_unfold calculations'
