@@ -245,7 +245,8 @@ CONTAINS
         do iz=mg%is(3),mg%ie(3)
         do iy=mg%is(2),mg%ie(2)
         do ix=mg%is(1),mg%ie(1)
-          sum1 = sum1 - Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)
+          sum1 = sum1 - 0.5d0* Vh%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz)    &
+                      - ( Vxc(ispin)%f(ix,iy,iz) * rho(ispin)%f(ix,iy,iz) )
         end do
         end do
         end do
@@ -262,10 +263,6 @@ CONTAINS
       ! meta-GGA: e_tau correction to Etot
       Etot = Etot - system%xc_payload%e_tau
       Etot = Etot + sum2*system%Hvol + energy%E_xc + energy%E_ion_ion
-      select case(method_poisson)
-      case('ft')
-        Etot = Etot + E_sum(1) + E_sum(2) + E_sum(3)
-      end select
     end if
     energy%E_tot = Etot
 
