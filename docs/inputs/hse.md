@@ -454,11 +454,14 @@ unset the variable to use the ordinary ACE path.
 |---|---|---|
 | `exx_factor_history_frames` | `3` | Retained exact factor frames; currently only 3 is accepted. |
 | `exx_factor_exact_interval` | `8` | Interval in RT steps between full exchange corrections after warm-up. |
-| `exx_factor_warmup_steps` | `128` | Initial RT steps using full exchange; not the number of retained frames. |
+| `exx_factor_n_teach` | `8` | Required accepted increment examples before prediction. |
+| `exx_factor_warmup_steps` | Automatic | Derived from history frames, teacher count and correction interval; legacy input values are overwritten. |
 
-Warm-up must be an integer multiple of the interval and include at least ten
-exact endpoint samples: `warmup >= 10*interval`. The Si test value 80 with
-interval 8 is valid but is **not** the code default. Accepted endpoint history
+Warm-up is calculated as `(H + N_teach - 1)*K`, where `H=3` is the retained
+frame count, `N_teach=exx_factor_n_teach`, and `K=exx_factor_exact_interval`.
+Three retained factors and the next exact endpoint give the first increment
+example. Each following endpoint adds one example. The default therefore gives
+80 warm-up steps for interval 8. Teacher count must be positive. Accepted endpoint history
 excludes predictor/intermediate trials. Once warm-up and history readiness are
 satisfied, intervening steps predict ACE factors; full corrections also update
 the fit. Interval 8 is the current tested recommendation, not a universal
@@ -480,7 +483,7 @@ Example for Gamma spatial MPI (add ordinary system/grid/pseudopotential input):
  xc='hse06'
  exx_factor_history_frames=3
  exx_factor_exact_interval=8
- exx_factor_warmup_steps=128
+ exx_factor_n_teach=8
  exx_mlwf_norm_fraction=1d0
  exx_mlwf_radius=0d0
  exx_ace_support='source'

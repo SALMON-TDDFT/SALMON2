@@ -7,7 +7,7 @@ module exx_factor_history
  public::s_factor_history,history_accept,history_predict,factor_align,history_write,history_read
  type s_factor_history
   complex(real64),allocatable::x(:,:,:)
-  integer::interval=8
+  integer::interval=8,n_teach=8
   real(real64)::g(2,2)=0,b(2)=0,coeff(2)=[1d0,0d0]
   integer::count=0,last=-1,teachers=0
   logical::ready=.false.
@@ -107,7 +107,7 @@ contains
   external::dposvx
   integer::i,j,k,l,info
   status=1
-  if(step<0.or.dv<=0.or.h%interval<1)return
+  if(step<0.or.dv<=0.or.h%interval<1.or.h%n_teach<1)return
   bad=0
   if(.not.scalar_finite_complex(x))bad=1
   call sumgrid(bad)
@@ -157,7 +157,7 @@ contains
    if(info==0)then
     rhs=solution
     if(scalar_finite_real(rhs(:,1)).and.sum(abs(rhs(:,1)))<32d0)then
-     h%coeff=rhs(:,1);h%ready=h%teachers>=8
+     h%coeff=rhs(:,1);h%ready=h%teachers>=h%n_teach
     endif
    endif
   endif
@@ -220,13 +220,15 @@ contains
   integer,intent(out)::status
   type(s_factor_history)::candidate
   integer::version,dims(3),k
+  ! Teacher count is restored from validated input; outer checkpoint checks derived warmup.
+  candidate%n_teach=h%n_teach
   read(unit,iostat=status)version,dims,candidate%interval,candidate%count,candidate%last, &
    candidate%teachers,candidate%ready,candidate%g,candidate%b,candidate%coeff
   if(status/=0)return
   status=1
   if(version/=1.or.candidate%interval<1)return
   if(candidate%count<0.or.candidate%count>3.or.candidate%teachers<0)return
-  if(candidate%ready.and.(candidate%count/=3.or.candidate%teachers<8))return
+  if(candidate%ready.and.(candidate%count/=3.or.candidate%teachers<candidate%n_teach))return
   if(.not.scalar_finite_real(reshape(candidate%g,[4])))return
   if(.not.scalar_finite_real(candidate%b).or..not.scalar_finite_real(candidate%coeff))return
   if(any(dims/=0))then

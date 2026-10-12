@@ -290,7 +290,7 @@ contains
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
-      & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames, &
+      & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
@@ -764,7 +764,8 @@ contains
     exx_mlwf_radius = 0d0
     exx_factor_history_frames = 3
     exx_factor_exact_interval = 8
-    exx_factor_warmup_steps = 128
+    exx_factor_n_teach = 8
+    exx_factor_warmup_steps = 0 ! Deprecated input; derived after reading the namelist.
     exx_surrogate_mode = 'off'
     exx_surrogate_capacity = 64
     exx_surrogate_rank_max = 256
@@ -1405,6 +1406,7 @@ contains
     call comm_bcast(exx_gpu_batch_size,nproc_group_global)
     call comm_bcast(exx_local_fft,nproc_group_global)
     call string_lowercase(exx_local_fft)
+    call comm_bcast(exx_factor_n_teach,nproc_group_global)
     call comm_bcast(exx_factor_history_frames,nproc_group_global)
     call comm_bcast(exx_factor_exact_interval,nproc_group_global)
     call comm_bcast(exx_factor_warmup_steps,nproc_group_global)
@@ -1888,6 +1890,18 @@ contains
     call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
     call comm_bcast(nq_mom, nproc_group_global)
     call comm_bcast(dq_mom, nproc_group_global)
+    ! BEGIN automatic ACE warmup
+    ! H factors supply the first increment example at endpoint H; each later endpoint adds one.
+    if(exx_factor_history_frames/=3)error stop 'EXX factor history is fixed at 3 frames'
+    if(exx_factor_n_teach<1)error stop 'EXX factor teacher count must be positive'
+    if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
+    if(exx_factor_n_teach>huge(exx_factor_n_teach)-(exx_factor_history_frames-1)) &
+      error stop 'EXX factor teacher count overflows warmup'
+    if(exx_factor_n_teach+exx_factor_history_frames-1> &
+      huge(exx_factor_warmup_steps)/exx_factor_exact_interval) &
+      error stop 'EXX factor warmup exceeds integer range'
+    exx_factor_warmup_steps=(exx_factor_history_frames+exx_factor_n_teach-1)*exx_factor_exact_interval
+    ! END automatic ACE warmup
   end subroutine read_input_common
 
   subroutine read_atomic_coordinates
@@ -2393,6 +2407,7 @@ contains
       write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
       write(fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
       write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
+      write(fh_variables_log, *) "# exx_factor_n_teach=",exx_factor_n_teach
       write(fh_variables_log, *) "# exx_factor_history_frames=",exx_factor_history_frames
       write(fh_variables_log, *) "# exx_factor_exact_interval=",exx_factor_exact_interval
       write(fh_variables_log, *) "# exx_factor_warmup_steps=",exx_factor_warmup_steps

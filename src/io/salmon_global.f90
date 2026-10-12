@@ -137,7 +137,7 @@ module salmon_global
   integer :: exx_gpu_batch_size ! maximum local target batch per GPU rank
   character(8) :: exx_local_fft ! auto: exact compact convolution; off: full grid
   character(8) :: exx_surrogate_mode ! off or diagnostic trace; no ACTIVE propagation
-  integer :: exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames
+  integer :: exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach
   integer :: exx_surrogate_capacity,exx_surrogate_rank_max
   real(8) :: exx_surrogate_rank_rtol
   integer :: exx_mlwf_interval,exx_mlwf_maxiter
