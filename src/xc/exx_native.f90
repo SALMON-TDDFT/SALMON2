@@ -34,7 +34,8 @@ module exx_native
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
-    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance,hse_block_rows,hse_q_reduction, &
+    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance, &
+    hse_sr_tolerance,hse_block_rows,hse_q_reduction, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
