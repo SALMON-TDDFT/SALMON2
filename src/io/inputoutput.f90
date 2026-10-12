@@ -2110,7 +2110,7 @@ contains
        iflag_unit_charge == ntype_unit_charge_au &
          )then
       t_unit_polarizability%name  = 'Augstrom^2/V'
-      t_unit_polarizability%conv = ulength_from_au**2/51.42206707d0
+      t_unit_polarizability%conv = ulength_from_au/51.42206707d0
     else
       t_unit_polarizability%name  = 'a.u.'
       t_unit_polarizability%conv  = 1d0
