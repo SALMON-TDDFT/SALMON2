@@ -1714,11 +1714,14 @@ contains
 ! The convergence is judged by the residual of the lowest no_ref states (unfold_threshold_projection). The calculation goes on
 ! when it is not reached: one line gives the number of the reference k points which are not converged and the maximum and the
 ! minimum residual of these (all the processes are included).
-! The gap between the states no_ref and no_ref+1 (the first buffer state) is checked as well. Where it is smaller than
-! gap_factor*unfold_threshold_projection, the lowest no_ref states are not determined uniquely: the mixing angle with the next
-! state is about residual/gap, and when the gap is zero (a degenerate group is cut at no_ref) the subspace is arbitrary. A second
-! line then gives the number of such reference k points and the smallest gap. The gap is calculated with the buffer state, which
-! may not be converged (then the gap is too large and a cut can be missed); nothing is checked when unfold_nstate_buffer is zero.
+! The gap between the states no_ref and no_ref+1 (the first buffer state) is estimated as well. This is a rough diagnostic, not a
+! guarantee. Where the estimate is smaller than gap_factor*unfold_threshold_projection, the subspace of the lowest no_ref states may
+! be sensitive to the solver accuracy (the mixing angle with the next state is about residual/gap), and when the gap is zero (a
+! degenerate group is cut at no_ref) the subspace is not unique. A second line then gives the number of such reference k points and
+! the smallest estimated gap. The buffer states may not be converged: the estimate can be wrong, and the sign of its error is not
+! known (a too large gap can hide a cut). A tolerance which cannot be reached makes the threshold itself very small, and then even a
+! degenerate pair at the size of the rounding error is not reported. No warning does not mean that the choice of no_ref is safe.
+! Nothing is checked when unfold_nstate_buffer is zero.
   subroutine update_dm_unfold_houston(itt,system,info,unfold,kappa_ref,vec_Ac_eval)
     use structures
     use communication, only: comm_is_root, comm_bcast, comm_summation, comm_get_min
@@ -1821,10 +1824,12 @@ contains
       end if
       if (n_gap > 0) then
         write(*,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3)') &
-          & 'dm_unfold houston basis: WARNING the gap between the states no_ref and no_ref+1 is small at ', n_gap, ' of ', &
+          & 'dm_unfold houston basis: WARNING the estimated gap between the states no_ref and no_ref+1 ' // &
+          & 'is small at ', n_gap, ' of ', &
           & unfold%nsk, ' reference k points  it=', itt, '  min gap =', gap_min, '  threshold =', &
           & gap_factor*unfold_threshold_projection
-        write(*,'(A)') '  the lowest no_ref states are not determined uniquely there: choose no_ref at a gap of the spectrum'
+        write(*,'(A)') '  the selected lowest no_ref states may be sensitive to the solver accuracy (not unique if the gap is zero)'
+        write(*,'(A)') '  choose no_ref at a gap of the spectrum; the gap uses buffer states which may be unconverged'
       end if
     end if
 
