@@ -1710,6 +1710,11 @@ contains
 ! The convergence is judged by the residual of the lowest no_ref states (unfold_threshold_projection). The calculation goes on
 ! when it is not reached: one line gives the number of the reference k points which are not converged and the maximum and the
 ! minimum residual of these (all the processes are included).
+! The gap between the states no_ref and no_ref+1 (the first buffer state) is checked as well. Where it is smaller than
+! gap_factor*unfold_threshold_projection, the lowest no_ref states are not determined uniquely: the mixing angle with the next
+! state is about residual/gap, and when the gap is zero (a degenerate group is cut at no_ref) the subspace is arbitrary. A second
+! line then gives the number of such reference k points and the smallest gap. The gap is calculated with the buffer state, which
+! may not be converged (then the gap is too large and a cut can be missed); nothing is checked when unfold_nstate_buffer is zero.
   subroutine update_dm_unfold_houston(itt,system,info,unfold,kappa_ref,vec_Ac_eval)
     use structures
     use communication, only: comm_is_root, comm_bcast, comm_summation, comm_get_min
@@ -1725,6 +1730,9 @@ contains
     integer :: n1, n2, n3, no_work, nsweep_max, isk_s, isk_e, isk, io, nsweep_done, n_nonconv_l, n_nonconv
     real(8) :: q(3), orth, omega_ref, rband, rall_l, rall, rmax_l, rmax, rmin_l, rmin
     logical :: converged
+    integer :: n_gap_l, n_gap
+    real(8) :: gap, gap_min_l, gap_min
+    real(8), parameter :: gap_factor = 1d2 ! warning if eps(no_ref+1) - eps(no_ref) < gap_factor*unfold_threshold_projection
     real(8), allocatable :: eps(:), res(:), esp_l(:,:)
     complex(8), allocatable :: psi_buf(:,:,:,:), upu_buf(:,:,:), urv_buf(:,:,:)
 
@@ -1743,6 +1751,7 @@ contains
     esp_l = 0d0
     n_nonconv_l = 0
     rall_l = 0d0 ; rmax_l = 0d0 ; rmin_l = huge(1d0)
+    n_gap_l = 0 ; gap_min_l = huge(1d0)
 
     do isk = isk_s, isk_e
       if (info%id_o == 0) then
@@ -1757,6 +1766,13 @@ contains
           n_nonconv_l = n_nonconv_l + 1
           rmax_l = max(rmax_l, rband)
           rmin_l = min(rmin_l, rband)
+        end if
+        if (no_work > no_ref) then
+          gap = eps(no_ref+1) - eps(no_ref)
+          if (gap < gap_factor*unfold_threshold_projection) then
+            n_gap_l = n_gap_l + 1
+            gap_min_l = min(gap_min_l, gap)
+          end if
         end if
       end if
       call comm_bcast(psi_buf, info%icomm_o)
@@ -1780,13 +1796,15 @@ contains
     end do
     end do
 
-    ! one line about the convergence; the processes which do not solve (id_o /= 0) give nothing
+    ! one line about the convergence and, if needed, one about the gap at no_ref (id_o /= 0: nothing)
     call comm_summation(n_nonconv_l, n_nonconv, nproc_group_global)
+    call comm_summation(n_gap_l, n_gap, nproc_group_global)
     rall_l = -rall_l ; rmax_l = -rmax_l
     call comm_get_min(rall_l, nproc_group_global)
     call comm_get_min(rmax_l, nproc_group_global)
     call comm_get_min(rmin_l, nproc_group_global)
-    rall = -rall_l ; rmax = -rmax_l ; rmin = rmin_l
+    call comm_get_min(gap_min_l, nproc_group_global)
+    rall = -rall_l ; rmax = -rmax_l ; rmin = rmin_l ; gap_min = gap_min_l
     if (comm_is_root(nproc_id_global)) then
       if (n_nonconv == 0) then
         write(*,'(A,I0,A,ES10.3,A,ES10.3)') 'dm_unfold houston basis: all the reference k points are converged  it=', itt, &
@@ -1796,6 +1814,13 @@ contains
           & 'dm_unfold houston basis: WARNING not converged at ', n_nonconv, ' of ', unfold%nsk, &
           & ' reference k points  it=', itt, '  max residual =', rmax, '  min residual =', rmin, &
           & '  tol =', unfold_threshold_projection
+      end if
+      if (n_gap > 0) then
+        write(*,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3)') &
+          & 'dm_unfold houston basis: WARNING the gap between the states no_ref and no_ref+1 is small at ', n_gap, ' of ', &
+          & unfold%nsk, ' reference k points  it=', itt, '  min gap =', gap_min, '  threshold =', &
+          & gap_factor*unfold_threshold_projection
+        write(*,'(A)') '  the lowest no_ref states are not determined uniquely there: choose no_ref at a gap of the spectrum'
       end if
     end if
 
