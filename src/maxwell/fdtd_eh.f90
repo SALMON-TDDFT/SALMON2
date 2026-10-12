@@ -3225,7 +3225,7 @@ contains
     !for ttm
     integer             :: jx,jy,jz,unit1=4000
     real(8),allocatable :: Spoynting(:,:,:,:), divS(:,:,:)
-    real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:)
+    real(8),allocatable :: u_energy(:,:,:), u_energy_p(:,:,:), u_power_p(:,:,:)
     real(8),allocatable :: work(:,:,:), work1(:,:,:), work2(:,:,:)
     real(8)             :: dV, tmp(4)
     real(8), parameter  :: hartree_kelvin_relationship = 3.1577502480407d5 ! [K] (+/- 6.1e-07)
@@ -3311,16 +3311,18 @@ contains
         if ( .not.allocated(Spoynting) ) then
           call allocate_poynting(fs, Spoynting, divS, u_energy)
           call allocate_poynting(fs, u=u_energy_p)
+          call allocate_poynting(fs, u=u_power_p)
         end if
         call calc_es_and_hs(fs, fe)
         call calc_poynting_vector(fs, fe, Spoynting)
         call calc_poynting_vector_div(fs, Spoynting, divS)
         u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
         
-        u_energy_p = u_energy
-        call ttm_penetration( fs%mg%is, u_energy_p )
+        u_power_p(:,:,:) = -divS(:,:,:)
+        call ttm_penetration( fs%mg%is, u_power_p )
+        u_energy_p(:,:,:) = u_energy_p(:,:,:) + u_power_p(:,:,:)*dt_em
         
-        call ttm_main( fs%srg_ng, fs%mg, u_energy_p )
+        call ttm_main( fs%srg_ng, fs%mg, u_power_p )
         
         if( mod(iter,obs_samp_em) == 0 )then
           ix=fs%lg%is(1)-fe%Nd; jx=fs%lg%ie(1)+fe%Nd
