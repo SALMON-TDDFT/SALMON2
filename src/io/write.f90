@@ -1798,14 +1798,14 @@ contains
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2)
+                  +system%wtk(iik)*abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2)
               end do
             case('gaussian')
               fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
-                  +abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)
+                  +system%wtk(iik)*abs(rbox_pdos2(lm,iatom))**2*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)
               end do
             end select
           end do
