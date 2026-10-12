@@ -1,0 +1,97 @@
+&calculation
+  theory='dft'
+ yn_dc='n'
+/
+
+&control
+  sysname = 'Si'
+  yn_restart='n'
+ write_gs_restart_data='wfn'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec1=0d0,5.13d0,5.13d0
+ al_vec2=5.13d0,0d0,5.13d0
+ al_vec3=5.13d0,5.13d0,0d0
+  nstate = 8
+  nelec = 8
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = '../Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'hse06'
+ exx_kpoint_backend='cpu'
+ yn_hse_wannier='n'
+ exx_mlwf_norm_fraction=0d0
+ exx_mlwf_radius=0d0
+ hse_sr_tolerance=0d0
+ exx_ace_support='occupied'
+ exx_factor_history_frames=3
+ exx_factor_exact_interval=8
+ yn_hse_profile='y'
+ hse_block_rows=8
+
+/
+
+&rgrid
+  num_rgrid = 12, 12, 12
+/
+
+&kgrid
+  num_kgrid = 2, 2, 2
+/
+
+&tgrid
+  nt = 256
+  dt = 0.16
+/
+
+&scf
+ method_init_wf='random'
+  nscf_init_no_diagonal=0
+  ncg = 4
+  nscf = 300
+  threshold = 1.d-8
+/
+
+&emfield
+  trans_longi = 'lo'
+  ae_shape1 = 'impulse'
+ e_impulse=1d-4
+  epdir_re1 = 0., 0., 1.
+/
+
+&analysis
+  out_rt_energy_step=1
+ nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+ 'Si' 0 0 0 1
+ 'Si' 2.565 2.565 2.565 1
+/
+
+&parallel
+ nproc_k=8
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+/
+
+&propagation
+ propagator='hse_taylor4'
+ yn_predictor_corrector='y'
+/

@@ -299,7 +299,7 @@ contains
       & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
       & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
       & hse_lcfo_ace_interval, hse_lcfo_u_interval, hse_lcfo_fft_batch, &
-      & hse_block_rows, hse_fft_layout, hse_reference_export_directory, &
+      & hse_q_reduction, hse_block_rows, hse_fft_layout, hse_reference_export_directory, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -796,6 +796,7 @@ contains
     hse_lcfo_ace_interval = 1
     hse_lcfo_u_interval = 1
     hse_lcfo_fft_batch = 1
+    hse_q_reduction = 1
     hse_block_rows = 0
     hse_fft_layout = 'auto'
     hse_reference_export_directory = 'none'
@@ -1432,6 +1433,7 @@ contains
     call comm_bcast(hse_lcfo_ace_interval,nproc_group_global)
     call comm_bcast(hse_lcfo_u_interval,nproc_group_global)
     call comm_bcast(hse_lcfo_fft_batch,nproc_group_global)
+    call comm_bcast(hse_q_reduction,nproc_group_global)
     call comm_bcast(hse_block_rows,nproc_group_global)
     call comm_bcast(hse_fft_layout,nproc_group_global)
     call string_lowercase(hse_fft_layout)
@@ -2433,6 +2435,7 @@ contains
       write(fh_variables_log, *) "# hse_lcfo_ace_interval=",hse_lcfo_ace_interval
       write(fh_variables_log, *) "# hse_lcfo_u_interval=",hse_lcfo_u_interval
       write(fh_variables_log, *) "# hse_lcfo_fft_batch=",hse_lcfo_fft_batch
+      write(fh_variables_log, *) "# hse_q_reduction=",hse_q_reduction
       write(fh_variables_log, *) "# hse_block_rows=",hse_block_rows
       write(fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
       write(fh_variables_log, *) "# hse_reference_export_directory=",hse_reference_export_directory
@@ -3327,6 +3330,15 @@ contains
     if(hse_lcfo_ace_interval<1.or.hse_lcfo_u_interval<1) &
       error stop 'HSE: LCFO ACE and U intervals must be positive'
     if(hse_lcfo_fft_batch<1.or.hse_lcfo_fft_batch>32)error stop 'HSE: LCFO FFT batch must be 1 to 32'
+    if(any(hse_q_reduction<1))error stop 'HSE: q reduction factors must be positive'
+    if(any(modulo(num_kgrid,hse_q_reduction)/=0)) &
+      error stop 'HSE: q reduction factors must divide the k mesh'
+    if(any(hse_q_reduction/=1))then
+      if(xc/='hse06'.or.yn_dc/='n'.or.yn_hse_lcfo_rt=='y'.or.temperature>=0d0.or. &
+         yn_hse_wannier/='n'.or.exx_mlwf_norm_fraction/=0d0.or.exx_mlwf_radius/=0d0.or. &
+         hse_sr_tolerance/=0d0.or.exx_kpoint_backend/='cpu') &
+        error stop 'HSE: q reduction requires non-DC integer full-k CPU exchange without spatial localization'
+    endif
     if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
     if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
       error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'

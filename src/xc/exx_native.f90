@@ -34,7 +34,7 @@ module exx_native
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
-    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance,hse_block_rows, &
+    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance,hse_block_rows,hse_q_reduction, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
   implicit none
@@ -326,11 +326,12 @@ contains
     write(filename,'(a,a,i8.8,a)')trim(directory),'factor-history-',info%id_rko,'.bin'
     open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='replace',iostat=status)
     if(status==0)then
-      write(unit,iostat=status)1,step,mg%is,mg%ie,system%no,system%nk, &
+      write(unit,iostat=status)2,step,mg%is,mg%ie,system%no,system%nk, &
         info%isize_r,info%isize_k,info%isize_o,info%ik_s,info%numk, &
         exx_factor_exact_interval,exx_factor_warmup_steps,shape(ace%factors), &
         ace%dv,ace%condition,ace%grid_rows,factor_all_ready, &
         hse_sr_tolerance,exx_mlwf_norm_fraction,exx_mlwf_radius
+      if(status==0)write(unit,iostat=status)hse_q_reduction
       if(status==0)write(unit,iostat=status)ace%factors
       do ik=1,size(factor_history)
         if(status/=0)exit
@@ -351,7 +352,7 @@ contains
     type(s_parallel_info),intent(in)::info
     type(s_factor_history),allocatable::loaded(:)
     complex(8),allocatable::factors(:,:,:)
-    integer::unit,status,total,ios,ik,version,step,header(15),expected(15),dims(3),rows
+    integer::unit,status,total,ios,ik,version,step,header(15),expected(15),dims(3),rows,saved_q_reduction(3)
     real(8)::dv,condition,settings(3)
     logical::ready
     character(600)::filename
@@ -361,8 +362,11 @@ contains
     open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='old',iostat=status)
     if(status==0)then
       read(unit,iostat=status)version,step,header,dims,dv,condition,rows,ready,settings
+      saved_q_reduction=1
+      if(status==0.and.version==2)read(unit,iostat=status)saved_q_reduction
       if(status==0)then
-        if(version/=1.or.step/=factor_restart_step.or.any(header/=expected))status=1
+        if((version/=1.and.version/=2).or.step/=factor_restart_step.or.any(header/=expected))status=1
+        if(any(saved_q_reduction/=hse_q_reduction))status=1
         if(any(dims/=shape(ace%factors)))status=1
         if(.not.ieee_is_finite(dv).or..not.ieee_is_finite(condition))status=1
         if(dv/=system%hvol.or.rows/=ace%grid_rows)status=1
@@ -762,6 +766,7 @@ contains
       return
     endif
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
+    if(use_symmetry.and.any(hse_q_reduction/=1))error stop 'HSE q reduction requires an unreduced k mesh'
     if(use_symmetry)mesh=num_kgrid(1)
     if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
       error stop 'EXX: full uniform k mesh required'
@@ -770,7 +775,8 @@ contains
       error stop 'EXX symmetry: cubic grid and cubic k mesh required'
     offdiag=system%primitive_a
     do j=1,3;offdiag(j,j)=0;enddo
-    if(maxval(abs(offdiag))>1d-12)error stop 'HSE06: orthogonal cell required'
+    if(use_symmetry.and.maxval(abs(offdiag))>1d-12) &
+      error stop 'HSE symmetry: orthogonal cell required'
     if((.not.use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12).or. &
       .not.native_integer_occupation(system)) &
       error stop 'HSE06: uniform k weights and occupied-prefix spin pairs required'
@@ -793,12 +799,14 @@ contains
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,symmetry_map%full_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
-          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius)
+          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
+          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction)
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
-          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius)
+          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
+          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction)
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
@@ -806,6 +814,7 @@ contains
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
       if(info%id_k==0)then
         write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
+        write(*,'(a,3i6,a,i10)')'EXX_Q_REDUCTION: ',hse_q_reduction,' q points=',kernel%nq
         if(propagator=='hse_taylor4_full')write(*,'(a)')'EXX_DIRECT: ACE construction disabled'
       endif
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'

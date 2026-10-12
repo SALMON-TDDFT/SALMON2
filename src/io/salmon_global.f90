@@ -157,6 +157,7 @@ module salmon_global
   integer :: hse_lcfo_ace_interval
   integer :: hse_lcfo_u_interval
   integer :: hse_lcfo_fft_batch
+  integer :: hse_q_reduction(3)
   integer :: hse_block_rows
   character(64) :: hse_fft_layout
   character(256) :: hse_reference_export_directory

@@ -542,3 +542,61 @@ Inspect `EXX_SR`, `EXX_SR WF-local/neighborhood pairs` and
 `EXX_SUPPORT_ACE accepted`. Positivity/Hermiticity rejection and any uncut
 fallback must be reported; do not attribute fallback timing to SR speedup.
 Neither this section nor the RT examples certify GS SR or GPU SR support.
+
+### Nonorthogonal cells in the full-k backend
+
+The ordinary, non-DC full-k CPU route supports nonorthogonal periodic cells
+specified by `al_vec1`, `al_vec2`, and `al_vec3`. The exchange kernel uses
+SALMON's reciprocal lattice vectors. Bloch phases use Cartesian positions
+formed from the real lattice vectors. Ordinary ACE, direct exchange
+(`hse_taylor4_full`), and learned ACE share this geometry.
+
+Use a full uniform unreduced k mesh, integer occupations (`temperature<0`),
+`yn_hse_wannier='n'`, `hse_sr_tolerance=0`, `exx_mlwf_radius=0`,
+`exx_mlwf_norm_fraction=0`, `nproc_ob=1`, and `nproc_rgrid=1,1,1`.
+The k points can be distributed over MPI ranks. The DC, spatial-neighborhood,
+Wannier and symmetry-reduced exchange routes retain their orthogonal-cell
+restrictions. The fractionally occupied backend is not enabled by this change.
+
+For even FFT dimensions the real exchange kernel uses the even average of
+opposite discrete reciprocal multipliers, including Nyquist components.
+This retains a real Hermitian convolution with a nonnegative reciprocal
+multiplier. Orthogonal cells recover the previous kernel.
+
+Choose the mesh and Taylor time step for the primitive-cell metric.
+Equal point counts in primitive and conventional cells do not imply equal
+spatial resolution or an equal stable time step. The local implementation
+check used a two-atom Si primitive cell, a 12^3 grid, a 2^3 k mesh, eight
+states and eight MPI ranks. It is a short integration check, not an optical
+spectrum or a grid-convergence benchmark.
+
+### Momentum-transfer q-grid downsampling
+
+`hse_q_reduction = 1, 1, 1` in `&functional` is the default and retains the
+full exchange q grid. Positive factors must divide `num_kgrid` componentwise.
+For example, `num_kgrid=4,4,4` with `hse_q_reduction=2,2,2` retains all 64 target
+k points while using eight momentum transfers in each exchange sum. For each
+target k, the source is k-q modulo the full mesh. The exchange quadrature
+weight is `1/product(num_kgrid/hse_q_reduction)`. This is not selection of a
+single fixed source-k subset for every target.
+
+The current implementation supports non-DC HSE06 with integer occupations,
+a full unreduced uniform k mesh, k-only MPI and the CPU backend. Ordinary ACE,
+direct exchange and learned ACE use the same reduced-q exchange operator.
+Nonorthogonal cells are supported. DC, spatial/SR localization, Wannier,
+fractional occupations, symmetry-reduced meshes and cuFFT combinations are
+rejected for nonunit factors. These restrictions do not change the default
+full-q routes.
+
+The k-point residue classes are transformed independently with smaller FFTs.
+`hse_fft_layout='auto'` selects strided transforms for downsampling; explicit
+`strided` and `contiguous` layouts are supported. All target orbitals, their
+history factors and full-k MPI density-tile buffers remain allocated. Only
+the periodic exchange-kernel grid shrinks by the product of the factors.
+Consequently this FFT-based implementation does not promise the inverse
+q-count speedup of a direct pairwise k-q loop.
+
+Use the same reduction in GS and RT. Assess q-grid convergence separately
+from target-k convergence, particularly for excited-state spectra. Learned
+ACE checkpoint format 2 stores the reduction factors and rejects a changed
+reduction on restart. Format 1 remains readable with unit factors only.

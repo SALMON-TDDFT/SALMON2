@@ -85,3 +85,35 @@ HSE-disabled build are tested separately. Fugaku performance is not established
 by Mac measurements.
 
 See [merge verification](merge-preparation.md) for the actual tested configurations.
+
+## Nonorthogonal full-k exchange geometry (2026-10-12)
+
+The full-k CPU exchange initializer accepts the real and reciprocal primitive
+vectors already computed by SALMON. It checks `transpose(A)*B=2*pi*I`.
+Grid positions are `A*(i/n)`, k-mesh indices are
+`transpose(A)*(k-k0)*mesh/(2*pi)`, and reciprocal vectors of the
+Born--von Karman cell are `B*(m/mesh)`. Coordinate differences used for indexing
+remain integer lattice coordinates. The unscreened spherical-cutoff limit is
+half the smallest distance between opposite supercell faces.
+
+The real inverse-transform kernel pairs conjugate discrete frequencies.
+On skew even grids this averages the positive multipliers at paired Nyquist
+indices. This choice preserves the real, Hermitian discrete operator and the
+existing real-kernel backend interface. Orthogonal-grid results are unchanged
+to roundoff. No real/reciprocal lattice inverse is recomputed in exchange.
+
+Local validation uses independent NumPy Fourier kernels, Bloch phases and a
+Gamma direct pair-density convolution. Errors were 2.8e-16, zero at the tested
+points and 8.4e-17, respectively. A Cartesian rotation, the legacy diagonal-cell
+API, and rejection of inconsistent dual vectors were checked separately.
+Eight-rank Si tests use two atoms, eight states, an unreduced 2^3 k mesh and
+12^3 spatial points. GS converges; ordinary and learned K=8 ACE RT complete
+192 steps at dt=0.02 a.u., including 98 predicted steps. Matched direct exchange also completes.
+Relative current errors are 4.055e-07 (ACE) and 2.689e-05 (learned ACE).
+The initial coarse
+8^3 test at dt=0.16 became unstable and is retained as a failed diagnostic.
+No grid, k-mesh or long-time accuracy convergence is claimed by these checks.
+
+This change enables the integer-occupation full-k route. Fractional-occupation,
+Wannier, spatial-neighborhood/SR localization and symmetry-reduced routes keep
+their existing geometry restrictions. DC remains orthogonal only.

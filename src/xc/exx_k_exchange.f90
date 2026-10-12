@@ -13,7 +13,7 @@ module exx_k_exchange
   public :: exx_k_kernel_apply_distributed
   type exx_k_kernel
     class(s_exx_k_backend),allocatable :: accelerator
-    integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1
+    integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1, nq=0
     logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
     real(c_double) :: seconds(6)=0d0,fft_trial_seconds(2)=0d0
     integer, allocatable :: order(:), point(:,:),shift(:,:),distance_index(:,:,:,:)
@@ -47,7 +47,7 @@ contains
   end subroutine
 
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend,coulomb_radius)
+                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3),block
@@ -59,8 +59,11 @@ contains
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     real(c_double),optional,intent(in) :: coulomb_radius
+    real(c_double),optional,intent(in) :: cell(3,3),reciprocal(3,3)
+    integer,optional,intent(in) :: q_reduction(3)
     integer :: ns(3),nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen,axis
-    real(c_double) :: pi,q2,q(3),scaled(3),radius
+    integer :: reduce(3),coarse(3),residue(3),group,coarse_index
+    real(c_double) :: pi,q2,q(3),scaled(3),radius,a(3,3),bvec(3,3),dual(3,3),position(3),limit
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
     type(c_ptr) :: plan
     ierr=1
@@ -69,12 +72,39 @@ contains
     ierr=1
     if(any(n<1).or.any(mesh<1).or.block<1.or.any(h<=0).or.omega<0) return
     if(.not.salmon_all_finite(h).or..not.ieee_is_finite(omega))return
-    radius=.5d0*minval(n*mesh*h)
+    reduce=1
+    if(present(q_reduction))reduce=q_reduction
+    if(any(reduce<1))return
+    if(any(modulo(mesh,reduce)/=0))return
+    coarse=mesh/reduce
+    op%nq=product(coarse)
+    pi=acos(-1d0)
+    a=0d0;bvec=0d0
+    do axis=1,3
+      a(axis,axis)=n(axis)*h(axis)
+      bvec(axis,axis)=2*pi/a(axis,axis)
+    enddo
+    if(present(cell).neqv.present(reciprocal))return
+    if(present(cell).and.present(reciprocal))then
+      if(.not.salmon_all_finite(cell).or..not.salmon_all_finite(reciprocal))return
+      a=cell;bvec=reciprocal
+      dual=matmul(transpose(a),bvec)/(2*pi)
+      do axis=1,3
+        dual(axis,axis)=dual(axis,axis)-1d0
+      enddo
+      if(maxval(abs(dual))>1d-10)return
+    endif
+    ! Half the shortest separation between opposite supercell faces.
+    limit=huge(1d0)
+    do axis=1,3
+      limit=min(limit,pi*coarse(axis)/sqrt(sum(bvec(:,axis)**2)))
+    enddo
+    radius=limit
     if(present(coulomb_radius))then
       if(.not.ieee_is_finite(coulomb_radius).or.coulomb_radius<0d0)return
       if(coulomb_radius>0d0)radius=coulomb_radius
     endif
-    if(omega==0d0.and.radius>.5d0*minval(n*mesh*h)*(1d0+1d-12))return
+    if(omega==0d0.and.radius>limit*(1d0+1d-12))return
     chosen=block
     if(present(block_rows))then
       if(block_rows<0.or.block_rows>product(n))return
@@ -96,7 +126,7 @@ contains
         return
       end select
     endif
-    nk=product(mesh);ng=product(n);ns=n*mesh;pi=acos(-1d0)
+    nk=product(mesh);ng=product(n);ns=n*coarse;pi=acos(-1d0)
     if(size(k,1)/=3.or.size(k,2)/=nk.or..not.salmon_all_finite(k))return
     first=1;nphase=nk
     if(present(phase_start))first=phase_start
@@ -115,29 +145,37 @@ contains
     enddo
     op%order=0
     do i=1,nk
-      scaled=(k(:,i)-k(:,1))*real(n*mesh,c_double)*h/(2*pi)
+      scaled=matmul(transpose(a),k(:,i)-k(:,1))*real(mesh,c_double)/(2*pi)
       if(maxval(abs(scaled-anint(scaled)))>1d-8)goto 900
-      idx=modulo(nint(scaled),mesh);index=1+idx(1)+mesh(1)*(idx(2)+mesh(2)*idx(3))
+      idx=modulo(nint(scaled),mesh)
+      residue=modulo(idx,reduce)
+      group=residue(1)+reduce(1)*(residue(2)+reduce(2)*residue(3))
+      idx=idx/reduce
+      index=1+idx(1)+coarse(1)*(idx(2)+coarse(2)*idx(3))+op%nq*group
       if(op%order(index)/=0)goto 900
       op%order(index)=i
     enddo
     i=0
     do z=0,n(3)-1;do y=0,n(2)-1;do x=0,n(1)-1
       i=i+1;op%point(:,i)=[x,y,z]
+      position=matmul(a,real(op%point(:,i),c_double)/real(n,c_double))
       do j=1,nphase
-        op%phase(i,j)=exp(cmplx(0d0,sum((k(:,first+j-1)-k(:,1))*op%point(:,i)*h),c_double))
+        op%phase(i,j)=exp(cmplx(0d0,sum((k(:,first+j-1)-k(:,1))*position),c_double))
       enddo
     enddo;enddo;enddo
-    i=0
-    do z=0,mesh(3)-1;do y=0,mesh(2)-1;do x=0,mesh(1)-1
-      i=i+1;op%shift(:,i)=[x,y,z]*n
-    enddo;enddo;enddo
+    do i=1,nk
+      coarse_index=modulo(i-1,op%nq)
+      idx(1)=modulo(coarse_index,coarse(1))
+      idx(2)=modulo(coarse_index/coarse(1),coarse(2))
+      idx(3)=coarse_index/(coarse(1)*coarse(2))
+      op%shift(:,i)=idx*n
+    enddo
     allocate(spectrum(ns(1),ns(2),ns(3)))
     do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
       ix=x;if(x>=(ns(1)+1)/2)ix=x-ns(1)
       iy=y;if(y>=(ns(2)+1)/2)iy=y-ns(2)
       iz=z;if(z>=(ns(3)+1)/2)iz=z-ns(3)
-      q=2*pi*real([ix,iy,iz],c_double)/(ns*h);q2=sum(q*q)
+      q=matmul(bvec,real([ix,iy,iz],c_double)/real(coarse,c_double));q2=sum(q*q)
       if(omega==0d0)then
         if(q2<1d-24)then
           spectrum(x+1,y+1,z+1)=2*pi*radius**2
@@ -154,16 +192,22 @@ contains
     if(.not.c_associated(plan))goto 900
     call fftw_execute_dft(plan,spectrum,spectrum)
     call fftw_destroy_plan(plan)
+    ! A skew metric couples Nyquist components. Taking the real part pairs
+    ! opposite discrete frequencies, yielding their positive even average.
+    ! This preserves a real Hermitian convolution on even as well as odd grids.
     op%kernel=real(spectrum,c_double)/real(product(ns),c_double)
     if(present(create_backend))then
       if(associated(create_backend))call create_backend(op%accelerator)
     endif
+    if(allocated(op%accelerator).and.any(reduce/=1))goto 900
     if(allocated(op%accelerator))then
       ! Device plans are prepared once the distributed slot layout is known.
       op%auto_fft=.false.;op%contiguous_fft=.true.
       ierr=0;return
     endif
-    allocate(op%work(op%block,ng,nk));dims=mesh(3:1:-1)
+    allocate(op%work(op%block,ng,nk));dims=coarse(3:1:-1)
+    ! Independent residue classes require separate reduced-mesh transforms.
+    if(any(reduce/=1))op%auto_fft=.false.
     if(op%auto_fft)then
       call choose_fft_layout(op,ierr)
       if(ierr/=0)goto 900
@@ -318,17 +362,17 @@ contains
           call zgemm('N','C',rows,ng,no,one,s(lo,1,ik),ng,s(1,1,ik),ng,zero,op%work(1,1,ki),b)
         endif
       enddo
-      call fftw_execute_dft(op%forward,op%work,op%work)
+      call execute_kernel_fft(op,op%forward)
       call multiply_kernel(op,lo,rows)
-      call fftw_execute_dft(op%backward,op%work,op%work)
+      call execute_kernel_fft(op,op%backward)
       do ki=1,nk
         ik=op%order(ki)
         if(op%contiguous_fft)then
           tile=kw(ki,:,:)
-          call zgemm('N','N',rows,nt,ng,-one/real(nk,c_double),tile(1,1),b, &
+          call zgemm('N','N',rows,nt,ng,-one/real(op%nq,c_double),tile(1,1),b, &
             t(1,1,ik),ng,zero,action(lo,1,ik),ng)
         else
-        call zgemm('N','N',rows,nt,ng,-one/real(nk,c_double),op%work(1,1,ki),b, &
+        call zgemm('N','N',rows,nt,ng,-one/real(op%nq,c_double),op%work(1,1,ki),b, &
           t(1,1,ik),ng,zero,action(lo,1,ik),ng)
         endif
         do j=1,nt
@@ -494,12 +538,12 @@ contains
       !$omp end parallel do
       endif
       if(op%profile)call mark_stage(op,5,stamp)
-      call fftw_execute_dft(op%forward,op%work,op%work)
+      call execute_kernel_fft(op,op%forward)
       if(op%profile)call mark_stage(op,3,stamp)
       lo=base+rank*b;rows=min(b,ng-lo+1)
       call multiply_kernel(op,lo,rows)
       if(op%profile)call mark_stage(op,4,stamp)
-      call fftw_execute_dft(op%backward,op%work,op%work)
+      call execute_kernel_fft(op,op%backward)
       if(op%profile)call mark_stage(op,3,stamp)
       ! Reuse send storage: useful entries are all overwritten; padded k
       ! entries remain defined from the density stage and are never consumed.
@@ -521,7 +565,7 @@ contains
         lo=base+p*b;rows=min(b,ng-lo+1)
         if(rows<=0)cycle
         do j=1,nlocal
-          call zgemm('N','N',rows,nt,ng,-one/real(nk,c_double),rb(1,1,j,p+1),b, &
+          call zgemm('N','N',rows,nt,ng,-one/real(op%nq,c_double),rb(1,1,j,p+1),b, &
             t(1,1,j),ng,zero,action(lo,1,j),ng)
           do g=1,nt
             action(lo:lo+rows-1,g,j)=action(lo:lo+rows-1,g,j)*conjg(op%phase(lo:lo+rows-1,j))
@@ -564,6 +608,22 @@ contains
       enddo
       !$omp end parallel do
     endif
+  end subroutine
+
+  ! Each residue class has a separate q convolution. No target k is removed.
+  subroutine execute_kernel_fft(op,plan)
+    implicit none
+    type(exx_k_kernel),target,intent(inout) :: op
+    type(c_ptr),intent(in) :: plan
+    complex(c_double_complex),pointer :: flat(:)
+    integer :: group,offset,stride
+    flat(1:size(op%work))=>op%work
+    stride=op%block*op%ng
+    if(op%contiguous_fft)stride=1
+    do group=0,op%nk/op%nq-1
+      offset=1+group*op%nq*stride
+      call fftw_execute_dft(plan,flat(offset:),flat(offset:))
+    enddo
   end subroutine
 
   subroutine multiply_kernel(op,lo,rows)
