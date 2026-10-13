@@ -17,6 +17,13 @@ module exx_factor_history
    import real64
    complex(real64),intent(inout)::a(:,:)
   end subroutine
+  subroutine alignment_callback(x,ref,status)
+   import real64
+   implicit none
+   complex(real64),intent(inout)::x(:,:)
+   complex(real64),intent(in)::ref(:,:)
+   integer,intent(out)::status
+  end subroutine
  end interface
 contains
 
@@ -91,13 +98,14 @@ contains
 !$omp end parallel
   status=0
  end subroutine
- subroutine history_accept(h,x,dv,step,sumgrid,status)
+ subroutine history_accept(h,x,dv,step,sumgrid,status,align)
   implicit none
   type(s_factor_history),intent(inout)::h
   complex(real64),intent(inout)::x(:,:)
   real(real64),intent(in)::dv
   integer,intent(in)::step
   procedure(sum_callback)::sumgrid
+  procedure(alignment_callback),optional::align
   integer,intent(out)::status
   complex(real64)::d(2),y,acc(6,1),bad(1,1)
   real(real64)::g(2,2),b(2),gg(2,2),rhs(2,1),ridge
@@ -115,7 +123,11 @@ contains
   if(h%count>0)then
    if(step-h%last/=h%interval)return
    if(any(shape(x)/=shape(h%x(:,:,1))))return
-   call factor_align(x,h%x(:,:,1),sumgrid,status)
+   if(present(align))then
+    call align(x,h%x(:,:,1),status)
+   else
+    call factor_align(x,h%x(:,:,1),sumgrid,status)
+   endif
    if(status/=0)return
   else
    allocate(h%x(size(x,1),size(x,2),3));h%x=0

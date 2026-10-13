@@ -315,7 +315,9 @@ subroutine restart_opt(Miopt,opt)
 end subroutine restart_opt
 
 subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,singlescale,idir)
+#ifdef USE_HSE
   use exx_native, only: exx_factor_checkpoint,exx_factor_mode_metadata
+#endif
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale, s_rt
   use filesystem, only: atomic_create_directory,create_directory
   use salmon_global, only: yn_self_checkpoint
@@ -357,16 +359,22 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,sing
     call write_singlescale(wdir,lg,mg,info,singlescale,system%Ac_micro,system%div_Ac,is_self_checkpoint=iself)
   end if
 
+#ifdef USE_HSE
   call exx_factor_mode_metadata(wdir,iter,info,.true.)
+#endif
   call rt_energy_reference_file(wdir,iter,info,.true.)
+#ifdef USE_HSE
   call exx_factor_checkpoint(wdir,iter,system,mg,info)
+#endif
   call write_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
   call write_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself)
 
 end subroutine checkpoint_rt
 
 subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
+#ifdef USE_HSE
   use exx_native, only: exx_factor_restart_pending,exx_factor_mode_metadata
+#endif
   use structures, only: s_rgrid, s_dft_system,s_parallel_info, s_orbital, s_mixing, s_scalar, s_rt
   use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint,yn_dc,yn_conventional_from_dcdft,xc
   use exx_functional, only: is_global_hybrid
@@ -401,9 +409,13 @@ subroutine restart_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2)
   if(conventional_hybrid)call exx_gs_occupation_check(system,info,gs_occupation)
        
   if(yn_restart =='y') then
+#ifdef USE_HSE
     call exx_factor_mode_metadata(wdir,iter,info,.false.)
+#endif
     call rt_energy_reference_file(wdir,iter,info,.false.)
+#ifdef USE_HSE
     call exx_factor_restart_pending(wdir,iter)
+#endif
     call read_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
     ! restore the t=0 (GS) density used as the difference-density reference
     call read_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself,rt%rho0_loaded)

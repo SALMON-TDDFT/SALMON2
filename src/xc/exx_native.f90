@@ -10,15 +10,15 @@ module exx_native
   use exx_k_backend, only: k_backend_factory
   use exx_k_cufft, only: exx_k_cufft_create
   use iso_fortran_env, only: int64
-  use lcfo_rt_basis, only: lcfo_rt_active
-  use exx_lcfo_rt, only: lcfo_exx_refresh,lcfo_exx_add_action,lcfo_exx_stage
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_k_orbits, only: apply_k_orbits
   use exx_ace
-  use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
+  use exx_distributed_alignment,only:distributed_factor_align
+  use exx_distributed_metric,only:distributed_metric_available,distributed_metric_rotate
+  use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read,factor_align
   use exx_surrogate_dense,only:surrogate_dense_basis_error
   use exx_surrogate_trace,only:s_surrogate_trace,trace_initialize,trace_candidate,trace_write_diagnostic, &
     trace_shadow_fit,trace_shadow_compare,s_factor_diagnostic,trace_factor_write
@@ -116,7 +116,7 @@ contains
       if(.not.exx_enabled().or.propagator/='hse_taylor4') &
         error stop 'EXX trace requires corrected exact Taylor4 ACE'
       if(info%isize_r/=1.or.info%isize_o/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1.or. &
-         yn_dc=='y'.or.yn_md=='y'.or.lcfo_rt_active.or.use_wannier_exchange()) &
+         yn_dc=='y'.or.yn_md=='y'.or.use_wannier_exchange()) &
         error stop 'EXX trace currently requires serial Gamma dense ACE'
       call trace_initialize(strict_trace,0,step_dt,exx_surrogate_rank_max,exx_surrogate_capacity, &
                             exx_surrogate_rank_rtol,status)
@@ -199,7 +199,7 @@ contains
         if(trim(value)/='strict'.and.trim(value)/='learned')error stop 'Invalid factor history mode'
         factor_learned=trim(value)=='learned'
 
-        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or.lcfo_rt_active.or. &
+        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
           propagator/='hse_taylor4'.or.yn_predictor_corrector/='y'.or. &
           (product(num_kgrid)==1.and.hse_sr_tolerance<0d0).or. &
           (product(num_kgrid)>1.and.hse_sr_tolerance/=0d0).or. &
@@ -207,9 +207,12 @@ contains
           (product(num_kgrid)==1.and.(exx_mlwf_norm_fraction/=1d0.or.exx_ace_support/='source')).or. &
           (product(num_kgrid)>1.and.(exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied')).or. &
           exx_pair_screening/='off'.or. &
-          yn_hse_wannier_snapshot=='y'.or..not.native_integer_occupation(system).or.info%isize_o/=1) &
+          yn_hse_wannier_snapshot=='y'.or..not.native_integer_occupation(system)) &
           error stop 'Factor history requires static full-support HSE, compatible k/SR settings and integer occupation'
-        if(product(num_kgrid)>1.and.(info%isize_r/=1.or.use_symmetry.or.product(num_kgrid)/=system%nk)) &
+        if(info%isize_o>1.and..not.distributed_metric_available(info%icomm_ro)) &
+          error stop 'Orbital-distributed factor history requires ScaLAPACK'
+        if(product(num_kgrid)>1.and.(info%isize_r/=1.or.info%isize_o/=1.or. &
+          use_symmetry.or.product(num_kgrid)/=system%nk)) &
           error stop 'Factor k experiment requires full uniform k mesh and k-only MPI'
         if(exx_factor_exact_interval<1)error stop 'Factor interval must be positive'
         allocate(factor_history(info%numk))
@@ -230,7 +233,7 @@ contains
     if(.not.factor_initialized)then
       call factor_configure(system,info)
       if(factor_experiment)then
-        call factor_materialize()
+        call factor_materialize(info)
         if(factor_restart_step>=0.and.factor_learned)then
           call exx_factor_restore(system,mg,info)
         else
@@ -400,7 +403,7 @@ contains
     call comm_summation(status,total,info%icomm_rko)
     if(total/=0)error stop 'Learned ACE restart state missing, incompatible or corrupt'
     status=count(.not.loaded%ready)
-    call comm_summation(status,total,info%icomm_k)
+    call comm_summation(status,total,info%icomm_rko)
     if(ready.neqv.(total==0))error stop "Learned ACE restart readiness mismatch"
     ace%factors=factors;ace%dv=dv;ace%condition=condition
     factor_history=loaded;factor_all_ready=ready
@@ -425,12 +428,13 @@ contains
     ok=.true.
   end function
 
-  subroutine factor_materialize()
+  subroutine factor_materialize(info)
     implicit none
-    complex(8),allocatable::rowbuf(:)
-    integer::i,j,k,n,ng
+    type(s_parallel_info),intent(in)::info
+    complex(8),allocatable::rowbuf(:),rotated(:,:)
+    integer,allocatable::counts(:)
+    integer::i,j,k,n,ng,first,stat
     if(.not.ace%packed)return
-    if(ace%metric_distributed)error stop 'Factor history distributed metric unsupported'
     n=size(ace%offset)-1;ng=ace%grid_rows
     allocate(ace%factors(ng,n,1));ace%factors=0
     do j=1,n
@@ -438,6 +442,15 @@ contains
         ace%factors(ace%row(k),j,1)=ace%values(k)
       enddo
     enddo
+    if(ace%metric_distributed)then
+      call orbital_layout(n,info%icomm_r,info%icomm_o,counts,first,stat)
+      if(stat/=0)error stop 'Factor history orbital layout failed'
+      allocate(rotated(ng,n))
+      call distributed_metric_rotate(ace,ace%factors(:,:,1),info%icomm_o,counts,first,rotated)
+      ace%factors(:,:,1)=rotated
+      deallocate(ace%metric_rows,ace%metric_cols)
+      ace%metric_distributed=.false.
+    else
 !$omp parallel private(rowbuf,i,j)
     allocate(rowbuf(n))
 !$omp do
@@ -450,6 +463,7 @@ contains
 !$omp end do
     deallocate(rowbuf)
 !$omp end parallel
+    endif
     deallocate(ace%offset,ace%row,ace%values,ace%metric_factor)
     ace%packed=.false.
   end subroutine
@@ -463,9 +477,9 @@ contains
     if(.not.factor_learned)return
     if(mod(step,exx_factor_exact_interval)/=0)return
     if(exx_freeze)error stop 'Predicted endpoint cannot enter exact factor history'
-    call factor_materialize()
+    call factor_materialize(info)
     do ik=1,info%numk
-      call history_accept(factor_history(ik),ace%factors(:,:,ik),system%hvol,step,sumgrid,stat)
+      call history_accept(factor_history(ik),ace%factors(:,:,ik),system%hvol,step,sumgrid,stat,aligngrid)
       if(stat/=0)error stop 'Factor k history alignment/teacher failed'
       if(info%id_r==0)write(*,'(a,4i8,2es18.9,l2)')'FACTOR_HISTORY k/teacher/step/count/coeff/ready: ', &
         info%ik_s+ik-1,factor_history(ik)%teachers,step,factor_history(ik)%count, &
@@ -473,14 +487,25 @@ contains
     enddo
     ! Readiness can change only after exact teachers; synchronize here, not every RT step.
     not_ready=count(.not.factor_history%ready)
-    call comm_summation(not_ready,total_not_ready,info%icomm_k)
+    call comm_summation(not_ready,total_not_ready,info%icomm_rko)
     factor_all_ready=total_not_ready==0
   contains
+    subroutine aligngrid(x,ref,status)
+      implicit none
+      complex(8),intent(inout)::x(:,:)
+      complex(8),intent(in)::ref(:,:)
+      integer,intent(out)::status
+      if(distributed_metric_available(info%icomm_ro))then
+        call distributed_factor_align(x,ref,info%icomm_r,info%icomm_o,info%icomm_ro,status)
+      else
+        call factor_align(x,ref,sumgrid,status)
+      endif
+    end subroutine
     subroutine sumgrid(a)
     implicit none
       complex(8),intent(inout)::a(:,:)
       complex(8)::total(size(a,1),size(a,2))
-      call comm_summation(a,total,size(a),info%icomm_r);a=total
+      call comm_summation(a,total,size(a),info%icomm_ro);a=total
     end subroutine
   end subroutine
 
@@ -502,7 +527,7 @@ contains
     if(.not.allocated(target_work))allocate(target_work(product(mg%num),info%numo,info%numk))
     if(.not.allocated(action_work))allocate(action_work(product(mg%num),info%numo,info%numk))
     call exx_pack(psi,mg,info,target_work)
-    if(info%isize_r>1.or.ace%packed)then
+    if(info%isize_r>1.or.info%isize_o>1.or.ace%packed)then
       call orbital_ace_apply(ace,target_work,action_work,info%icomm_r,info%icomm_o,stat)
     else
       call exx_ace_apply(ace,target_work,action_work,stat,thread_control=exx_blas_thread_control)
@@ -617,10 +642,6 @@ contains
     type(s_parallel_info),intent(in),optional :: info
     type(s_orbital),intent(in),optional :: psi
     integer :: ierr
-    if(lcfo_rt_active)then
-      call lcfo_exx_stage(stage,system,mg,info,psi)
-      return
-    endif
     select case(stage)
     case(0)
       taylor_active=.true.;taylor_midpoint=.false.
@@ -730,17 +751,13 @@ contains
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
       if((.not.is_global_hybrid(xc)).or. &
-         (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y'.or.lcfo_rt_active) &
+         (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y') &
         error stop 'Hybrid: unsupported real-time ionic extension'
     endif
     if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_symmetrized_stencil=='y') &
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
-    if(lcfo_rt_active)then
-      call lcfo_exx_refresh(system,mg,info,psi,exx_exchange_energy)
-      return
-    endif
     ! Select occupation semantics before the integer-prefix native route.
     ! Nonnegative temperature retains the existing occupation-weighted source.
     if(temperature>=0d0)then
@@ -994,23 +1011,17 @@ contains
     if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
   end subroutine transpose_k_tiles
 
-  subroutine exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
+  subroutine exx_add_action(psi,hpsi,system,mg,info)
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_orbital),intent(inout) :: hpsi
     type(s_dft_system),intent(in) :: system
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
-    complex(8),intent(in),optional :: lcfo_coeff(:,:)
-    complex(8),intent(out),optional :: lcfo_action(:,:)
     integer :: ierr,ng,total_error,info_error
     integer,allocatable :: orbital_comm
     real(8) :: tick,communication_before,action_scale
     if(.not.exx_enabled())return
-    if(lcfo_rt_active)then
-      call lcfo_exx_add_action(psi,hpsi,system,mg,info,lcfo_coeff,lcfo_action)
-      return
-    endif
     if(propagator=='hse_taylor4_full')then
       if(.not.allocated(full_source))error stop 'EXX: direct exchange source is not initialized'
     else

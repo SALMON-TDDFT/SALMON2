@@ -1,3 +1,7 @@
+## Fixed LCFO subspace RT removed
+
+DC-LCFO is retained for ground-state preparation and initial real-space wavefunction reconstruction only. Fixed-basis RT, its Hamiltonian projection hooks and its input controls have been removed. The LCFO RT entries below are historical records, not current execution instructions.
+
 # DC-HSE・MLWF・ACE：実装と測定結果
 
 > 2026-10-06更新：以下の旧版向けパッチは現行ソースへ反映済みのため配布を終了しました。過去の適用・検証記録は履歴として残しています。現行版では追加パッチを適用せず、ソースから再ビルドしてください。

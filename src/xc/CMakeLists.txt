@@ -44,22 +44,14 @@ if(USE_HSE)
     exx_surrogate_shadow.f90
     exx_surrogate_trace.f90
     exx_distributed_metric.f90
+    exx_distributed_alignment.f90
     exx_orbitals.f90
     exx_distributed_gauge.f90
     hybrid_semilocal.f90
     exx_spatial.f90
     exx_factor_history.f90
     exx_native.f90
-    exx_lcfo_rt.f90
     lcfo_wf_support.f90
-    lcfo_projection.f90
-    lcfo_rt_wannier.f90
-    lcfo_ace_local.f90
-    lcfo_gram.f90
-    lcfo_mlwf_links.f90
-    lcfo_seed.f90
-    lcfo_dist_rows.f90
-    lcfo_dist_dense.f90
   )
 endif()
 

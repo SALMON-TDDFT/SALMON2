@@ -82,9 +82,7 @@ for random seeds. This removes an avoidable MPI dependence of the initial state,
 but does not guarantee a unique localization minimum or radius convergence.
 
 The separate `pbeh_coulomb_radius` truncates the Coulomb **interaction kernel**,
-not orbitals. Changing it is a different approximation. The existing LCFO-RT
-`hse_lcfo_wf_radius` remains a separate control in the input length unit (internally bohr); it is not an alias for
-`exx_mlwf_radius` and is unaffected by this SCF extension.
+not orbitals. Changing it is a different approximation.
 
 ## Adaptive support on the spatial mesh
 
@@ -137,7 +135,7 @@ with the existing Taylor4/ACE predictor-corrector. See
 [conventional GS to RT](conventional-hybrid-rt.md) for checkpoint requirements. RT starts localization
 immediately, without a gap or electronic-temperature criterion, and recomputes
 support on exchange refreshes. This is distinct from propagating in an LCFO
-basis. Moving ions, ionic relaxation, retained-LCFO RT, restart and snapshot
+basis. Moving ions, ionic relaxation, restart and snapshot
 export remain rejected for adaptive support. The fixed-radius legacy option
 keeps its previous static-only contract. As with existing finite support,
 energy/force variational consistency and long-time optical accuracy are not

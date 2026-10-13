@@ -294,11 +294,8 @@ contains
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
-      & hse_lcfo_wf_radius, &
-      & yn_hse_lcfo_rt, yn_hse_lcfo_direct_wf, yn_hse_lcfo_continuity, &
-      & yn_hse_lcfo_fft_measure, yn_hse_lcfo_seed_distributed, yn_hse_profile, &
+      & yn_hse_profile, &
       & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
-      & hse_lcfo_ace_interval, hse_lcfo_u_interval, hse_lcfo_fft_batch, &
       & hse_q_reduction, hse_block_rows, hse_fft_layout, hse_reference_export_directory, &
       & xname, &
 #ifdef USE_LIBXC
@@ -783,19 +780,10 @@ contains
     exx_pair_screening = 'off'
     hse_sr_tolerance = 0d0
     exx_pair_tolerance = 0d0
-    hse_lcfo_wf_radius = 0d0
-    yn_hse_lcfo_rt = 'n'
-    yn_hse_lcfo_direct_wf = 'n'
-    yn_hse_lcfo_continuity = 'n'
-    yn_hse_lcfo_fft_measure = 'n'
-    yn_hse_lcfo_seed_distributed = 'n'
     yn_hse_profile = 'n'
     yn_hse_eigen_diagnostic = 'n'
     yn_hse_solver_diagnostic = 'n'
     yn_hse_wannier_snapshot = 'n'
-    hse_lcfo_ace_interval = 1
-    hse_lcfo_u_interval = 1
-    hse_lcfo_fft_batch = 1
     hse_q_reduction = 1
     hse_block_rows = 0
     hse_fft_layout = 'auto'
@@ -1419,20 +1407,10 @@ contains
     call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
     call comm_bcast(exx_mlwf_radius,nproc_group_global)
     exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
-    call comm_bcast(hse_lcfo_wf_radius,nproc_group_global)
-    hse_lcfo_wf_radius=hse_lcfo_wf_radius*ulength_to_au
-    call comm_bcast(yn_hse_lcfo_rt,nproc_group_global)
-    call comm_bcast(yn_hse_lcfo_direct_wf,nproc_group_global)
-    call comm_bcast(yn_hse_lcfo_continuity,nproc_group_global)
-    call comm_bcast(yn_hse_lcfo_fft_measure,nproc_group_global)
-    call comm_bcast(yn_hse_lcfo_seed_distributed,nproc_group_global)
     call comm_bcast(yn_hse_profile,nproc_group_global)
     call comm_bcast(yn_hse_eigen_diagnostic,nproc_group_global)
     call comm_bcast(yn_hse_solver_diagnostic,nproc_group_global)
     call comm_bcast(yn_hse_wannier_snapshot,nproc_group_global)
-    call comm_bcast(hse_lcfo_ace_interval,nproc_group_global)
-    call comm_bcast(hse_lcfo_u_interval,nproc_group_global)
-    call comm_bcast(hse_lcfo_fft_batch,nproc_group_global)
     call comm_bcast(hse_q_reduction,nproc_group_global)
     call comm_bcast(hse_block_rows,nproc_group_global)
     call comm_bcast(hse_fft_layout,nproc_group_global)
@@ -2422,19 +2400,10 @@ contains
       write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
       write(fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
       write(fh_variables_log, *) "# exx_mlwf_tolerance=",exx_mlwf_tolerance
-      write(fh_variables_log, *) "# hse_lcfo_wf_radius (bohr; 0=full)=",hse_lcfo_wf_radius
-      write(fh_variables_log, *) "# yn_hse_lcfo_rt=",yn_hse_lcfo_rt
-      write(fh_variables_log, *) "# yn_hse_lcfo_direct_wf=",yn_hse_lcfo_direct_wf
-      write(fh_variables_log, *) "# yn_hse_lcfo_continuity=",yn_hse_lcfo_continuity
-      write(fh_variables_log, *) "# yn_hse_lcfo_fft_measure=",yn_hse_lcfo_fft_measure
-      write(fh_variables_log, *) "# yn_hse_lcfo_seed_distributed=",yn_hse_lcfo_seed_distributed
       write(fh_variables_log, *) "# yn_hse_profile=",yn_hse_profile
       write(fh_variables_log, *) "# yn_hse_eigen_diagnostic=",yn_hse_eigen_diagnostic
       write(fh_variables_log, *) "# yn_hse_solver_diagnostic=",yn_hse_solver_diagnostic
       write(fh_variables_log, *) "# yn_hse_wannier_snapshot=",yn_hse_wannier_snapshot
-      write(fh_variables_log, *) "# hse_lcfo_ace_interval=",hse_lcfo_ace_interval
-      write(fh_variables_log, *) "# hse_lcfo_u_interval=",hse_lcfo_u_interval
-      write(fh_variables_log, *) "# hse_lcfo_fft_batch=",hse_lcfo_fft_batch
       write(fh_variables_log, *) "# hse_q_reduction=",hse_q_reduction
       write(fh_variables_log, *) "# hse_block_rows=",hse_block_rows
       write(fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
@@ -3071,11 +3040,6 @@ contains
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
     call yn_argument_check(yn_hse_wannier)
-    call yn_argument_check(yn_hse_lcfo_rt)
-    call yn_argument_check(yn_hse_lcfo_direct_wf)
-    call yn_argument_check(yn_hse_lcfo_continuity)
-    call yn_argument_check(yn_hse_lcfo_fft_measure)
-    call yn_argument_check(yn_hse_lcfo_seed_distributed)
     call yn_argument_check(yn_hse_profile)
     call yn_argument_check(yn_hse_eigen_diagnostic)
     call yn_argument_check(yn_hse_solver_diagnostic)
@@ -3325,16 +3289,11 @@ contains
       stop "either yn_ffte or yn_fftw can be specified"
     end if
 
-    if(.not.ieee_is_finite(hse_lcfo_wf_radius))error stop 'HSE: hse_lcfo_wf_radius must be finite'
-    if(hse_lcfo_wf_radius<0d0)error stop 'HSE: hse_lcfo_wf_radius must be >=0 bohr'
-    if(hse_lcfo_ace_interval<1.or.hse_lcfo_u_interval<1) &
-      error stop 'HSE: LCFO ACE and U intervals must be positive'
-    if(hse_lcfo_fft_batch<1.or.hse_lcfo_fft_batch>32)error stop 'HSE: LCFO FFT batch must be 1 to 32'
     if(any(hse_q_reduction<1))error stop 'HSE: q reduction factors must be positive'
     if(any(modulo(num_kgrid,hse_q_reduction)/=0)) &
       error stop 'HSE: q reduction factors must divide the k mesh'
     if(any(hse_q_reduction/=1))then
-      if(xc/='hse06'.or.yn_dc/='n'.or.yn_hse_lcfo_rt=='y'.or.temperature>=0d0.or. &
+      if(xc/='hse06'.or.yn_dc/='n'.or.temperature>=0d0.or. &
          yn_hse_wannier/='n'.or.exx_mlwf_norm_fraction/=0d0.or.exx_mlwf_radius/=0d0.or. &
          hse_sr_tolerance/=0d0.or.exx_kpoint_backend/='cpu') &
         error stop 'HSE: q reduction requires non-DC integer full-k CPU exchange without spatial localization'
@@ -3342,13 +3301,6 @@ contains
     if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
     if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
       error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
-    if(yn_hse_lcfo_rt=='y')then
-      if(yn_dc=='y'.or.yn_conventional_from_dcdft/='y')error stop 'LCFO RT requires conventional_from_dcdft'
-      if((.not.is_hybrid(xc)).or. &
-         theory/='tddft_response'.or.propagator/='hse_taylor4') &
-        error stop 'LCFO RT requires hybrid tddft_response with Taylor4'
-    endif
-    if(yn_hse_lcfo_direct_wf=='y'.and.yn_hse_lcfo_rt/='y')error stop 'Direct WF requires LCFO RT'
     if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
 
     if(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')then
@@ -3375,7 +3327,7 @@ contains
     if(exx_ace_support/='occupied'.and.exx_ace_support/='source') &
       error stop 'exx_ace_support must be occupied or source'
     if(exx_ace_support=='source')then
-      if((theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_md=='y'.or.yn_dc=='y'.or.yn_hse_lcfo_rt=='y') &
+      if((theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_md=='y'.or.yn_dc=='y') &
         error stop 'source-support ACE requires fixed-ion native RT'
       if(.not.is_hybrid(xc))error stop 'source-support ACE requires a hybrid functional'
       if(exx_pair_screening/='off')error stop 'source-support ACE uses exact support pairs; set exx_pair_screening=off'
@@ -3406,8 +3358,8 @@ contains
 #ifndef USE_EXX_CUFFT
       error stop 'exx_kpoint_backend=cufft requires USE_EXX_CUFFT=ON'
 #endif
-      if(.not.is_hybrid(xc).or.yn_dc/='n'.or.yn_hse_lcfo_rt/='n') &
-        error stop 'k-point cuFFT requires native hybrid exchange without DC/LCFO'
+      if(.not.is_hybrid(xc).or.yn_dc/='n') &
+        error stop 'k-point cuFFT requires native hybrid exchange without DC'
       if(temperature>=0d0.or.(nstate>0.and.nstate*2/=nelec).or.yn_hse_wannier_snapshot=='y') &
         error stop 'k-point cuFFT requires occupied spin pairs without Wannier snapshots'
       if(any(num_kgrid<1).or.product(num_kgrid)<2.or. &
@@ -3428,7 +3380,7 @@ contains
 #ifndef USE_EXX_CUFFT
       error stop 'exx_local_backend=cufft requires USE_EXX_CUFFT=ON'
 #endif
-      if(.not.is_hybrid(xc).or.yn_hse_lcfo_rt=='y')error stop 'cuFFT EXX requires native hybrid orbitals'
+      if(.not.is_hybrid(xc))error stop 'cuFFT EXX requires native hybrid orbitals'
       if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12).or.nproc_k/=1) &
         error stop 'cuFFT EXX requires unshifted Gamma and nproc_k=1'
       if(exx_local_fft/='auto'.or.exx_mlwf_radius/=0d0.or. &
@@ -3447,7 +3399,7 @@ contains
       error stop 'exx_surrogate_mode: only off/trace implemented'
     if(exx_surrogate_mode=='trace')then
       if(propagator/='hse_taylor4'.or.yn_fix_func/='n'.or.yn_restart=='y'.or. &
-         yn_dc=='y'.or.yn_md=='y'.or.yn_hse_lcfo_rt=='y'.or.any(num_kgrid/=1).or. &
+         yn_dc=='y'.or.yn_md=='y'.or.any(num_kgrid/=1).or. &
          product(nproc_rgrid)/=1.or.nproc_ob/=1.or.any(abs(dk_shift)>1d-12).or. &
          exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
         error stop 'EXX trace requires nonrestart serial Gamma dense Taylor4 RT'
@@ -3468,7 +3420,6 @@ contains
     if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)then
       if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12)) &
         error stop 'adaptive EXX support requires unshifted Gamma'
-      if(yn_hse_lcfo_rt=='y')error stop 'adaptive EXX support requires native mesh orbitals'
     endif
     if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0)then
       if(yn_md=='y'.or.yn_opt=='y'.or. &
@@ -3477,7 +3428,7 @@ contains
       if(theory/='dft')then
         if(yn_dc=='y'.or.(yn_conventional_from_dcdft/='y'.and..not.is_global_hybrid(xc))) &
           error stop 'finite EXX RT requires DC or conventional hybrid mesh orbitals'
-        if(any(abs(dk_shift)>1d-12).or.yn_hse_lcfo_rt=='y') &
+        if(any(abs(dk_shift)>1d-12)) &
           error stop 'EXX RT requires unshifted native mesh orbitals'
         if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction<1d0)then
           if(any(num_kgrid/=1))error stop 'finite EXX RT requires Gamma'
@@ -3491,13 +3442,13 @@ contains
     endif
     pbeh_mesh_rt=(is_global_hybrid(xc)) &
       .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
-      .and.yn_dc=='n'.and.yn_hse_lcfo_rt=='n'
+      .and.yn_dc=='n'
     hybrid_mesh_rt=pbeh_mesh_rt.or.(xc=='hse06'.and. &
       (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1.or.nproc_ob>1).and. &
       (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
-      yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt=='n')
+      yn_conventional_from_dcdft=='y')
     hybrid_spatial_scf=(is_hybrid(xc)).and.theory=='dft'.and. &
-      yn_hse_lcfo_rt=='n'.and.(product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
+      (product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
     if(hybrid_spatial_scf)then
       yn_hse_wannier='y'
       if(yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)) &
@@ -3549,8 +3500,8 @@ contains
       error stop 'PBEh40: OpenACC force/potential path not yet supported'
 #endif
       yn_hse_wannier='y'
-      if(theory/='dft'.and.theory/='dft_md'.and.yn_hse_lcfo_rt/='y'.and..not.pbeh_mesh_rt) &
-        error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported native/LCFO RT'
+      if(theory/='dft'.and.theory/='dft_md'.and..not.pbeh_mesh_rt) &
+        error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported real-space RT'
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
         error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
       if(yn_hse_wannier_snapshot=='y') &
@@ -3558,10 +3509,8 @@ contains
       if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
       if(yn_dc=='y'.and.theory=='dft_md') &
         error stop 'PBEh40: DC MD is not yet supported'
-      if(yn_conventional_from_dcdft=='y'.and.yn_hse_lcfo_rt/='y'.and..not.pbeh_mesh_rt) &
-        error stop 'PBEh40: reconstruction requires LCFO response'
-      if(yn_hse_lcfo_rt=='y'.and.(yn_md=='y'.or.ae_shape1/='impulse'.or.hse_lcfo_wf_radius>0d0)) &
-        error stop 'PBEh40 LCFO: fixed nuclei, impulse and full source support required'
+      if(yn_conventional_from_dcdft=='y'.and..not.pbeh_mesh_rt) &
+        error stop 'PBEh40: reconstruction requires supported real-space response'
       if(xname/='none'.or.cname/='none')error stop 'PBEh40: extra xname/cname unsupported'
       if(.not.ieee_is_finite(pbeh_coulomb_radius).or.pbeh_coulomb_radius<0d0) &
         error stop 'PBEh40: invalid Coulomb radius'
@@ -3585,7 +3534,7 @@ contains
            nproc_ob/=1.or.any(nproc_rgrid/=1).or.exx_kpoint_backend/='cpu'.or. &
            index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
            exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.hse_sr_tolerance/=0d0.or. &
-           yn_hse_wannier_snapshot=='y'.or.yn_hse_lcfo_rt=='y'.or.yn_conventional_from_dcdft=='y') &
+           yn_hse_wannier_snapshot=='y'.or.yn_conventional_from_dcdft=='y') &
           error stop 'Thermal HSE: full-support CPU k-only exchange required'
         if(theory/='dft'.and.propagator/='hse_taylor4') &
           error stop 'Thermal HSE RT: Taylor4 ACE required'
@@ -3596,7 +3545,7 @@ contains
           .not.ieee_is_finite(exx_mlwf_tolerance).or.exx_mlwf_tolerance<=0d0) &
           error stop 'HSE Wannier: invalid localization controls'
       endif
-      if(yn_hse_wannier=='y'.and.yn_hse_lcfo_rt/='y')then
+      if(yn_hse_wannier=='y')then
         if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
           error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
         if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or. &

@@ -14,7 +14,7 @@ Run `salmon < water_ehrenfest_gs.inp` first, then
 `salmon < water_ehrenfest_rt.inp` in the same fresh directory, containing the
 H/O pseudopotentials and `water_ehrenfest_velocity.dat`. The GS stage writes
 `data_dcdft`; the RT reader verifies its functional/run metadata and reconstructs
-occupied mesh wavefunctions once. RT uses `yn_hse_lcfo_rt='n'`: no LCFO projection
+occupied mesh wavefunctions once. RT uses real-space orbitals. No LCFO projection
 or basis propagation occurs. MLWF/ACE accelerates exchange only.
 
 This is a one-water, one-rank, 24³-grid smoke fixture: four 0.0005 fs steps after

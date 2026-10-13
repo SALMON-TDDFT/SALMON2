@@ -26,7 +26,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
   use math_constants, only : pi
   use phys_constants, only: cspeed_au
   use salmon_global, only : dt,trans_longi,film_thickness,epsilon_em,xc, &
-    yn_conventional_from_dcdft,yn_hse_lcfo_rt,yn_hse_wannier,ae_shape1
+    yn_conventional_from_dcdft,yn_hse_wannier,ae_shape1
   use nvtx_wrapper
   use exx_functional, only: is_global_hybrid
   implicit none
@@ -46,7 +46,7 @@ subroutine calc_emfields(itt,nspin,curr_in,rt)
 
   if(((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
      .and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)) &
-     .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2'.and.trans_longi=='tr')then
+     .and.ae_shape1=='Acos2'.and.trans_longi=='tr')then
     ! The imposed A is known at all times. Center E at the same endpoint as
     ! force and current; keep the inherited convention on all other routes.
     rt%E_ext(:,itt)=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)

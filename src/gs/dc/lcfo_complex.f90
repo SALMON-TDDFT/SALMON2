@@ -1388,8 +1388,7 @@ contains
   end subroutine dc_lcfo_complex
 
   subroutine init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
-    use lcfo_mesh_tile, only: lcfo_tile_coverage,lcfo_tile_contract
-    use lcfo_rt_basis, only: lcfo_rt_requested,lcfo_rt_configure
+    use lcfo_mesh_tile, only: lcfo_tile_coverage
     use communication, only: comm_summation,comm_bcast
     use salmon_global, only: num_fragment
     use structures, only: s_dft_system,s_orbital,s_parallel_info,s_rgrid
@@ -1400,15 +1399,13 @@ contains
     type(s_orbital), intent(inout) :: spsi
     integer, allocatable :: n_basis_all(:,:,:),n_basis_wire(:),coverage(:),coverage_sum(:),tiles(:,:)
     integer :: meta(20),local_status,total_status,f,ik,ispin,io,j,ix,iy,iz
-    integer :: nfrag,nspin,nk,ngrid,dest,lo(3),m(3),first,count,points,scratch_points,g,t,nb
+    integer :: nfrag,nspin,nk,ngrid,dest,lo(3),m(3),first,count,points,scratch_points,g,t
     real(8) :: geom(10)
     real(8), allocatable :: vec_k(:,:),wtk(:)
     character(96) :: run_id
     character(32), parameter :: bdir='./data_dcdft/fragments/'
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
-    complex(8), allocatable :: wrk_local(:),wrk_sum(:),rt_basis(:,:)
-    integer,allocatable :: rt_jxyz(:,:)
-    logical :: stream_payload
+    complex(8), allocatable :: wrk_local(:),wrk_sum(:)
 
 #if defined(USE_OPENACC) || defined(USE_CUDA)
     stop "DC-LCFO complex reconstruction: GPU/OpenACC/CUDA is unsupported."
@@ -1419,7 +1416,6 @@ contains
       stop "DC-LCFO complex reconstruction: k-point data is not allocated."
     if (info%isize_ro < 1 .or. info%id_ro < 0 .or. info%id_ro >= info%isize_ro) &
       stop "DC-LCFO complex reconstruction: invalid r/o communicator."
-    stream_payload=.not.lcfo_rt_requested()
     nfrag = product(num_fragment)
     nspin = system%nspin
     nk = system%nk
@@ -1501,33 +1497,11 @@ contains
     if (info%id_ro == 0) then
       write(*,*) "start complex DC-LCFO wavefunction reconstruction"
       write(*,*) "complex LCFO format v1; fragments/k/spins:",nfrag,nk,nspin
-      if(stream_payload)write(*,*) 'DC_LCFO_STREAM native payload buffers follow domain and coefficient-column sizes'
+      write(*,*) 'DC_LCFO_STREAM native payload buffers follow domain and coefficient-column sizes'
     end if
+    ! LCFO coefficients are streamed only to construct the initial mesh orbitals.
+    ! RT retains no fixed LCFO basis and evolves these mesh orbitals directly.
     do ik=info%ik_s,info%ik_e
-      if(.not.stream_payload)then
-        do f=1,nfrag
-          if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
-          call load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
-               run_id,n_basis_all,frag(f),local_status)
-          if (local_status /= 0) exit
-        end do
-        call comm_summation(local_status,total_status,info%icomm_ro)
-        if (total_status /= 0) stop "DC-LCFO complex reconstruction: k-record read failed."
-      endif
-      if(lcfo_rt_requested())then
-        if(nfrag/=info%isize_r)error stop 'LCFO RT requires one spatial rank per fragment'
-        f=info%id_r+1
-        allocate(rt_basis(product(meta(7:9)),n_basis_all(f,1,ik)),rt_jxyz(maxval(meta(4:6)),3))
-        if(info%id_o==0)then
-          if(.not.allocated(frag(f)%basis))error stop 'LCFO RT: fragment owner mismatch'
-          rt_basis=reshape(frag(f)%basis(:,:,:,1,1:n_basis_all(f,1,ik)),shape(rt_basis))
-          rt_jxyz=frag(f)%jxyz
-        endif
-        call comm_bcast(rt_basis,info%icomm_o,0)
-        call comm_bcast(rt_jxyz,info%icomm_o,0)
-        call lcfo_rt_configure(rt_basis,rt_jxyz,meta,n_basis_all(:,1,ik),system,mg,info)
-        deallocate(rt_basis,rt_jxyz)
-      endif
       do dest=0,info%isize_ro-1
         lo=tiles(1:3,dest);m=tiles(4:6,dest);points=product(m)
         do ispin=1,nspin
@@ -1537,17 +1511,10 @@ contains
             wrk_local(:count)=(0d0,0d0)
             local_status=0
             do f=1,nfrag
-              if(stream_payload)then
-                if(.not.allocated(frag(f)%jxyz))cycle
-                call stream_complex_lcfo_tile(f,ik,ispin,io,bdir,system,lg,meta,geom,vec_k,wtk, &
-                  run_id,n_basis_all,frag(f),lo,m,first,wrk_local(:count),local_status)
-                if(local_status/=0)exit
-              else
-                if(.not.allocated(frag(f)%basis))cycle
-                nb=frag(f)%n_basis(ispin)
-                call lcfo_tile_contract(frag(f)%jxyz,lo,m,first, &
-                  frag(f)%basis(:,:,:,ispin,:nb),frag(f)%coef(:nb,io,ispin),wrk_local(:count))
-              endif
+              if(.not.allocated(frag(f)%jxyz))cycle
+              call stream_complex_lcfo_tile(f,ik,ispin,io,bdir,system,lg,meta,geom,vec_k,wtk, &
+                run_id,n_basis_all,frag(f),lo,m,first,wrk_local(:count),local_status)
+              if(local_status/=0)exit
             enddo
             call comm_summation(local_status,total_status,info%icomm_ro)
             if(total_status/=0)error stop 'DC-LCFO complex reconstruction: streamed payload read failed'
@@ -2088,122 +2055,6 @@ contains
     if(ios/=0)status=1
   end subroutine
 
-  subroutine load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,ref_meta,ref_geom, &
-       ref_k,ref_wtk,ref_run,n_basis_all,fragment,status)
-    use iso_fortran_env, only: int32,int64,real64
-    use structures, only: s_dft_system,s_rgrid
-    implicit none
-    integer, intent(in) :: f,ik,nfrag,ref_meta(20),n_basis_all(:,:,:)
-    character(*), intent(in) :: bdir
-    type(s_dft_system), intent(in) :: system
-    type(s_rgrid), intent(in) :: lg
-    real(real64), intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
-    character(96), intent(in) :: ref_run
-    type(s_complex_lcfo_fragment), intent(inout) :: fragment
-    integer, intent(out) :: status
-    character(256) :: filename
-    character(96) :: run_b,run_c
-    integer :: ub,uc,ios,ispin,nb,ik0,jrow,prefix,meta_b(20),meta_c(20),stage
-    integer(int32) :: ikwire,spinwire,nbwire,nmatwire,counts(size(n_basis_all,1)),row
-    integer(int64) :: size_b,size_c,payload_b,payload_c,nreal
-    real(real64) :: geom_b(10),geom_c(10),vk_b(3,size(ref_k,2)),vk_c(3,size(ref_k,2))
-    real(real64) :: w_b(size(ref_wtk)),w_c(size(ref_wtk))
-    complex(8), allocatable :: values(:),matrix_tmp(:,:)
-
-    status=1
-    stage=1
-    if (ik < 1 .or. ik > system%nk .or. .not.allocated(fragment%jxyz)) return
-    write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','basis_functions.bin'
-    call open_complex_lcfo_read(filename,1,system,lg,ub,meta_b,geom_b,vk_b,w_b,run_b,size_b,ios)
-    if (ios /= 0) return
-    write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','wavefunctions.bin'
-    call open_complex_lcfo_read(filename,2,system,lg,uc,meta_c,geom_c,vk_c,w_c,run_c,size_c,ios)
-    if (ios /= 0) then
-      close(ub)
-      return
-    end if
-    if (.not.complex_lcfo_headers_match(meta_b,geom_b,vk_b,w_b,run_b, &
-        meta_c,geom_c,vk_c,w_c,run_c,ref_meta,ref_geom,ref_k,ref_wtk,ref_run)) goto 900
-    if (meta_b(16) /= f) goto 900
-    stage=2
-    do ik0=1,ik
-      stage=3
-      read(ub,iostat=ios) ikwire,payload_b
-      if (ios /= 0 .or. ikwire /= ik0 .or. payload_b < 0_int64) goto 900
-      if (ik0 < ik) then
-        call skip_complex_lcfo_bytes(ub,payload_b,ios)
-        if (ios /= 0) goto 900
-      else
-        allocate(fragment%n_basis(system%nspin))
-        allocate(fragment%basis(meta_b(7),meta_b(8),meta_b(9),system%nspin,meta_b(19)))
-        fragment%n_basis=0
-        fragment%basis=(0d0,0d0)
-        do ispin=1,system%nspin
-          read(ub,iostat=ios) spinwire,nbwire
-          if (ios /= 0 .or. spinwire /= ispin .or. nbwire /= n_basis_all(f,ispin,ik)) goto 900
-          nb=int(nbwire)
-          fragment%n_basis(ispin)=nb
-          nreal=2_int64*int(meta_b(7),int64)*int(meta_b(8),int64)*int(meta_b(9),int64)*int(nb,int64)
-          if (nb > 0) then
-            if (nreal/2_int64 > int(huge(1),int64)) goto 900
-            allocate(values(int(nreal/2_int64)))
-            call read_wire_complex_values(ub,values,ios)
-            if (ios /= 0) goto 900
-            fragment%basis(:,:,:,ispin,1:nb)=reshape(values, &
-                 [meta_b(7),meta_b(8),meta_b(9),nb])
-            deallocate(values)
-          end if
-        end do
-      end if
-      stage=4
-      read(uc,iostat=ios) ikwire,payload_c
-      if (ios /= 0 .or. ikwire /= ik0 .or. payload_c < 0_int64) goto 900
-      if (ik0 < ik) then
-        call skip_complex_lcfo_bytes(uc,payload_c,ios)
-        if (ios /= 0) goto 900
-      else
-        allocate(fragment%coef(meta_c(19),meta_c(20),system%nspin))
-        fragment%coef=(0d0,0d0)
-        do ispin=1,system%nspin
-          stage=5
-          read(uc,iostat=ios) spinwire,nbwire,nmatwire
-          if (ios /= 0) goto 900
-          read(uc,iostat=ios) counts
-          if (ios /= 0) goto 900
-          nb=int(nbwire)
-          if (spinwire /= ispin .or. nb /= n_basis_all(f,ispin,ik) .or. &
-              any(counts /= n_basis_all(:,ispin,ik)) .or. nmatwire /= sum(counts)) goto 900
-          prefix=sum(counts(1:f-1))
-          do jrow=1,nb
-            read(uc,iostat=ios) row
-            if (ios /= 0 .or. row /= prefix+jrow) goto 900
-          end do
-          if (nb > 0) then
-            if (int(nb,int64)*int(meta_c(20),int64) > int(huge(1),int64)) goto 900
-            allocate(values(nb*meta_c(20)),matrix_tmp(nb,meta_c(20)))
-            call read_wire_complex_values(uc,values,ios)
-            if (ios /= 0) goto 900
-            matrix_tmp=reshape(values,[nb,meta_c(20)])
-            fragment%coef(1:nb,1:system%no,ispin)=matrix_tmp(:,1:system%no)
-            deallocate(matrix_tmp,values)
-          end if
-        end do
-      end if
-    end do
-    status=0
-900 continue
-    if (status /= 0) write(*,*) &
-         "DC-LCFO complex reconstruction: k record load failed (fragment,k,stage,io):",f,ik,stage,ios
-    close(ub,iostat=ios)
-    if (ios /= 0) status=1
-    close(uc,iostat=ios)
-    if (ios /= 0) status=1
-    if (status /= 0) then
-      if (allocated(fragment%n_basis)) deallocate(fragment%n_basis)
-      if (allocated(fragment%basis)) deallocate(fragment%basis)
-      if (allocated(fragment%coef)) deallocate(fragment%coef)
-    end if
-  end subroutine load_complex_lcfo_fragment_k
 
 
   pure logical function finite_real_1d(values) result(finite)
