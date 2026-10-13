@@ -23,8 +23,9 @@ module nonlocal_potential
 ! WARNING: We must not call these except for hpsi routine.
 
 #if defined(USE_OPENACC)
-  ! Orbitals batched per thread by the phase-2 back-projection. Trades a few
-  ! registers for that many independent FMA chains per index load.
+  ! Orbitals batched per thread by the phase-2 back-projection, OpenACC and
+  ! CUDA alike. Trades registers for that many independent FMA chains per
+  ! index load; the CUDA host grid sizing follows it.
   integer, parameter :: zphase2_norb = 4
 #endif
 
@@ -65,25 +66,26 @@ contains
     end if
   end subroutine zgather_cuda
 
-  ! Four orbitals per thread: k2ilma/k2j/zekr_uV do not depend on the orbital,
-  ! so one set of index and projector loads feeds four independent FMA chains,
-  ! which is what hides the dependent-load latency this kernel is bound by.
-  ! Per-orbital accumulation order is unchanged, so results stay bit-exact.
+  ! zphase2_norb orbitals per thread: k2ilma/k2j/zekr_uV do not depend on the
+  ! orbital, so one set of index and projector loads feeds that many
+  ! independent FMA chains, hiding the dependent-load latency this kernel is
+  ! bound by. Per-orbital accumulation order is unchanged, so results stay
+  ! bit-exact. nio is a *count* of this rank's orbitals, not an upper index.
   attributes(global) subroutine zphase2_cuda_d(v2nlma, k2ilma, k2j, v2j, &
-      ubox, zekr, htpsi, nwork, max_vi, nspin, nioq, io_e, io_s, ik_s, im_s, &
+      ubox, zekr, htpsi, nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s, &
       ub2, ub3, ub4, ub5, z2, z3, ik_lb, &
       lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7)
     use cudafor
     implicit none
     integer :: v2nlma(*), k2ilma(*), k2j(*), v2j(*)
     complex(8) :: ubox(*), zekr(*), htpsi(*)
-    integer, value :: nwork, max_vi, nspin, nioq, io_e, io_s, ik_s, im_s
+    integer, value :: nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s
     integer, value :: ub2, ub3, ub4, ub5, z2, z3, ik_lb
     integer, value :: lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7
-    integer :: i, vi, isp, ioq, ik_l, im_l, io0, ik, im
-    integer :: my_nlma, k, ilma, j, ix, iy, iz, off, ub0, uo, zbase
-    integer :: o, io_o(4)
-    complex(8) :: zk, wrk(4)
+    integer :: i, vi, isp, ioq, ik_l, im_l, io0, io, ik, im
+    integer :: my_nlma, k, ilma, j, ix, iy, iz, off, uo, zbase
+    integer :: o
+    complex(8) :: zk, wrk(zphase2_norb)
 
     i = (blockidx%x - 1) * blockdim%x + threadidx%x
     if (i > nwork) return
@@ -91,42 +93,39 @@ contains
     vi    = mod(i - 1, max_vi)
     isp   = mod((i - 1) / max_vi, nspin) + 1
     ioq   = mod((i - 1) / (max_vi * nspin), nioq) + 1
-    ik_l  = mod((i - 1) / (max_vi * nspin * nioq), 1) + 1
-    im_l  = (i - 1) / (max_vi * nspin * nioq) + 1
+    ik_l  = mod((i - 1) / (max_vi * nspin * nioq), nik) + 1
+    im_l  = (i - 1) / (max_vi * nspin * nioq * nik) + 1
 
     my_nlma = v2nlma(vi + 1)
     if (my_nlma < 1) return
 
-    io0 = (ioq - 1) * 4
-    ik  = ik_s
+    io0 = (ioq - 1) * zphase2_norb
+    ik  = ik_s + ik_l - 1
     im  = im_s + im_l - 1
     uo  = (isp - 1) * ub2 + (ik - ik_s) * ub4 + (im - im_s) * ub5
     zbase = (ik - ik_lb) * z3
-    do o = 1, 4
-      io_o(o) = io0 + o
-    end do
 
-    wrk(1) = (0d0, 0d0)
-    wrk(2) = (0d0, 0d0)
-    wrk(3) = (0d0, 0d0)
-    wrk(4) = (0d0, 0d0)
+    do o = 1, zphase2_norb
+      wrk(o) = (0d0, 0d0)
+    end do
     do k = 1, my_nlma
       ilma = k2ilma((k - 1) * max_vi + vi + 1)
       j    = k2j((k - 1) * max_vi + vi + 1)
       zk   = zekr(zbase + (ilma - 1) * z2 + j)
-      if (io_o(1) <= io_e) wrk(1) = wrk(1) + ubox(uo + (io_o(1) - 1) * ub3 + ilma) * zk
-      if (io_o(2) <= io_e) wrk(2) = wrk(2) + ubox(uo + (io_o(2) - 1) * ub3 + ilma) * zk
-      if (io_o(3) <= io_e) wrk(3) = wrk(3) + ubox(uo + (io_o(3) - 1) * ub3 + ilma) * zk
-      if (io_o(4) <= io_e) wrk(4) = wrk(4) + ubox(uo + (io_o(4) - 1) * ub3 + ilma) * zk
+      do o = 1, zphase2_norb
+        io = io0 + o
+        if (io <= nio) wrk(o) = wrk(o) + ubox(uo + (io - 1) * ub3 + ilma) * zk
+      end do
     end do
 
     ix = v2j(vi * 3 + 1)
     iy = v2j(vi * 3 + 2)
     iz = v2j(vi * 3 + 3)
-    do o = 1, 4
-      if (io_o(o) <= io_e) then
+    do o = 1, zphase2_norb
+      io = io0 + o
+      if (io <= nio) then
         off = (ix - lb1) + (iy - lb2) * s2 + (iz - lb3) * s3 &
-            + (isp - 1) * s4 + (io_o(o) - 1) * s5 + (ik - lb6) * s6 + (im - lb7) * s7
+            + (isp - 1) * s4 + (io - 1) * s5 + (ik - lb6) * s6 + (im - lb7) * s7
         htpsi(off + 1) = htpsi(off + 1) + wrk(o)
       end if
     end do
@@ -613,7 +612,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
   ! Phase 2 (back-projection): v2j-based scatter, no atomics.
 #if defined(USE_CUDA)
-      ph2_nioq = (io_e - io_s + 1 + 3) / 4
+      ph2_nioq = (io_e - io_s + 1 + zphase2_norb - 1) / zphase2_norb
       ph2_nik = ik_e - ik_s + 1
       ph2_nwork = (im_e - im_s + 1) * ph2_nik * ph2_nioq * Nspin * ppg%max_vi
       ph2_ub2 = size(uVpsibox_acc, 1)
@@ -631,7 +630,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       ph2_grid = ceiling(dble(ph2_nwork) / 128d0)
       call zphase2_cuda_d<<<ph2_grid, 128, 0, acc_get_cuda_stream(acc_async_sync)>>>( &
           ppg%v2nlma, ppg%k2ilma, ppg%k2j, ppg%v2j, uVpsibox_acc, ppg%zekr_uV, htpsi%zwf, &
-          ph2_nwork, ppg%max_vi, Nspin, ph2_nioq, io_e - io_s + 1, io_s, ik_s, im_s, &
+          ph2_nwork, ppg%max_vi, Nspin, ph2_nioq, io_e - io_s + 1, ph2_nik, ik_s, im_s, &
           ph2_ub2, ph2_ub3, ph2_ub4, ph2_ub5, ph2_z2, ph2_z3, lbound(ppg%zekr_uV, 3), &
           lbound(htpsi%zwf,1), lbound(htpsi%zwf,2), lbound(htpsi%zwf,3), &
           lbound(htpsi%zwf,5), lbound(htpsi%zwf,6), lbound(htpsi%zwf,7), &
