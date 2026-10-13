@@ -3641,7 +3641,10 @@ contains
           if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
             error stop 'HSE06 laser requires Taylor4'
           if(ae_shape2/='none'.and.ae_shape2/='impulse')error stop 'HSE06 laser: unsupported probe'
-          if(index(yn_symmetry,'y')/=0)error stop 'HSE06 laser: full k mesh required'
+          ! A z-polarized pulse may use its field-preserving spatial group.
+          ! init_sym_sub validates every retained operation against that field.
+          if(index(yn_symmetry,'y')/=0.and.trim(yn_symmetry)/='yyn') &
+            error stop 'HSE06 laser symmetry requires the z-field subgroup yyn'
           ! Pulse parameters are not covered by the legacy impulse restart metadata.
           if(yn_restart=='y'.and.((propagator/='hse_taylor4_full'.and.propagator/='hse_taylor4').or.ae_shape2/='none')) &
             error stop 'HSE laser restart requires direct Taylor4 and a single pulse'

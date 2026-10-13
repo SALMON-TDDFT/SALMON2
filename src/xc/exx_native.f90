@@ -16,6 +16,7 @@ module exx_native
   use structures
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
+  use exx_k_orbits, only: apply_k_orbits
   use exx_ace
   use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
   use exx_surrogate_dense,only:surrogate_dense_basis_error
@@ -870,6 +871,8 @@ contains
     integer,intent(out) :: ierr
     integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np,j,index,total_error
     complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:)
+    character(16) :: orbit_mode
+    integer :: orbit_status
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
@@ -885,8 +888,15 @@ contains
       if(total_error/=0)then
         ierr=1;return
       endif
-      allocate(expanded_target(size(target,1),size(target,2),layout(np+info%id_k+1)))
       allocate(rotated(size(source,1),size(source,2)))
+      ! Opt-in diagnostic route. Keep the established full route as the default.
+      call get_environment_variable('SALMON_EXX_FFT_ORBITS',orbit_mode,status=orbit_status)
+      if(orbit_status==0.and.trim(orbit_mode)=='1')then
+        call apply_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
+          info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_density_selected,ierr)
+        return
+      endif
+      allocate(expanded_target(size(target,1),size(target,2),layout(np+info%id_k+1)))
       do j=1,size(expanded_target,3)
         index=layout(info%id_k+1)+j-1
         call symmetry_transform(symmetry_map,index,1,target(:,:,symmetry_map%owner(index)-info%ik_s+1), &
@@ -896,7 +906,7 @@ contains
       allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
       ! Source argument is only a valid layout placeholder when the density callback is supplied.
       call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,expanded_action,layout(:np), &
-        layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr,fill_density)
+        layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr,fill_density_contiguous)
       if(ierr==0)then
         do j=1,info%numk
           index=symmetry_map%first(info%ik_s+j-1)-symmetry_map%first(info%ik_s)+1
@@ -913,10 +923,26 @@ contains
         info%id_k,info%icomm_k,transpose_k_tiles,ierr)
     endif
   contains
-    subroutine fill_density(j,lo,rows,density)
+    subroutine fill_density_contiguous(j,lo,rows,density)
       implicit none
       integer,intent(in) :: j,lo,rows
       complex(8),intent(out) :: density(:,:)
+      call fill_density(j,lo,rows,density)
+    end subroutine fill_density_contiguous
+
+    subroutine fill_density_selected(j,points,density)
+      implicit none
+      integer,intent(in) :: j,points(:)
+      complex(8),intent(out) :: density(:,:)
+      call fill_density(j,1,size(points),density,points)
+    end subroutine fill_density_selected
+
+    subroutine fill_density(j,lo,rows,density,points)
+      implicit none
+      integer,intent(in) :: j,lo,rows
+      complex(8),intent(out) :: density(:,:)
+      integer,intent(in),optional :: points(:)
+      complex(8),allocatable :: selected(:,:)
       integer :: full_index,rep,op,g,stat,ng,no
       complex(8) :: coefficient
   ! BLAS explicit interface: sequence association preserves strided row offsets.
@@ -935,6 +961,7 @@ contains
       full_index=layout(info%id_k+1)+j-1
       rep=symmetry_map%owner(full_index)-info%ik_s+1
       coefficient=cmplx(1d0/symmetry_map%multiplicity(full_index),0d0,8)
+      if(present(points))allocate(selected(rows,no))
       density=0d0
       ! Average little-group projectors one orbital block at a time, not copies of all orbitals.
       do op=1,symmetry_map%multiplicity(full_index)
@@ -943,8 +970,14 @@ contains
         do g=1,no
           rotated(:,g)=rotated(:,g)*kernel%phase(:,j)
         enddo
+        if(present(points))then
+          selected=rotated(points,:no)
+          call zgemm('N','C',rows,ng,no,coefficient,selected,rows,rotated,ng, &
+            (1d0,0d0),density,size(density,1))
+        else
         call zgemm('N','C',rows,ng,no,coefficient,rotated(lo,1),ng,rotated(1,1),ng, &
           (1d0,0d0),density,size(density,1))
+        endif
       enddo
     end subroutine
   end subroutine
