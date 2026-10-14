@@ -32,9 +32,8 @@ module nonlocal_potential
 contains
 
 #if defined(USE_OPENACC) && defined(USE_CUDA)
-  ! Same element mapping as the OpenACC version (one thread per
-  ! (atom, orbital, support point)), but addresses arrive as raw pointers with
-  ! host-computed strides, so the inner loop reads no array descriptors.
+  ! Same element mapping as the OpenACC version, but addresses arrive as raw
+  ! pointers with host strides, so the loop reads no array descriptors.
   attributes(global) subroutine zgather_cuda(jxyz, mps, wf, packed, nelem, nps, &
       this_block, io_blk_s, ik, im, ispin, &
       lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7, p2, p3)
@@ -67,10 +66,9 @@ contains
   end subroutine zgather_cuda
 
   ! zphase2_norb orbitals per thread: k2ilma/k2j/zekr_uV do not depend on the
-  ! orbital, so one set of index and projector loads feeds that many
-  ! independent FMA chains, hiding the dependent-load latency this kernel is
-  ! bound by. Per-orbital accumulation order is unchanged, so results stay
-  ! bit-exact. nio is a *count* of this rank's orbitals, not an upper index.
+  ! orbital, so one index+projector load feeds that many independent FMA chains.
+  ! Accumulation order per orbital is unchanged, so results stay bit-exact.
+  ! nio counts this rank's orbitals; it is not an upper index.
   attributes(global) subroutine zphase2_cuda_d(v2nlma, k2ilma, k2j, v2j, &
       ubox, zekr, htpsi, nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s, &
       ub2, ub3, ub4, ub5, z2, z3, ik_lb, &
@@ -82,7 +80,7 @@ contains
     integer, value :: nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s
     integer, value :: ub2, ub3, ub4, ub5, z2, z3, ik_lb
     integer, value :: lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7
-    integer :: i, vi, isp, ioq, ik_l, im_l, io0, io, ik, im
+    integer :: i, vi, isp, ioq, ik_l, im_l, io0, io, ik, im, q
     integer :: my_nlma, k, ilma, j, ix, iy, iz, off, uo, zbase
     integer :: o
     complex(8) :: zk, wrk(zphase2_norb)
@@ -93,8 +91,17 @@ contains
     vi    = mod(i - 1, max_vi)
     isp   = mod((i - 1) / max_vi, nspin) + 1
     ioq   = mod((i - 1) / (max_vi * nspin), nioq) + 1
-    ik_l  = mod((i - 1) / (max_vi * nspin * nioq), nik) + 1
-    im_l  = (i - 1) / (max_vi * nspin * nioq * nik) + 1
+    ! nik is a kernel argument, so this branch is warp-uniform and the
+    ! Gamma-only case skips the quotient split's integer division entirely.
+    q = (i - 1) / (max_vi * nspin * nioq)
+    if (nik == 1) then
+      ik_l = 1
+      im_l = q + 1
+    else
+      im_l = q / nik
+      ik_l = q - im_l * nik + 1
+      im_l = im_l + 1
+    end if
 
     my_nlma = v2nlma(vi + 1)
     if (my_nlma < 1) return
