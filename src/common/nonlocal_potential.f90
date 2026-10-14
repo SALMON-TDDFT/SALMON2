@@ -22,6 +22,12 @@ module nonlocal_potential
 
 ! WARNING: We must not call these except for hpsi routine.
 
+#if defined(USE_OPENACC)
+  ! Orbitals batched per thread by the phase-2 back-projection. Trades a few
+  ! registers for that many independent FMA chains per index load.
+  integer, parameter :: zphase2_norb = 4
+#endif
+
 contains
 
 subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
@@ -275,6 +281,10 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   integer :: gemm_io_blk_s, gemm_this_block, gemm_io_local, gemm_stat
   integer :: mpi_ierr
 #endif
+#if defined(USE_OPENACC)
+  integer :: ioq, o, nioq
+  complex(8) :: zk, wrkb(zphase2_norb)
+#endif
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
 !dir$ attributes align : 2097152 :: uVpsibox, uVpsibox2
@@ -508,28 +518,45 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   end if
 
   ! Phase 2 (back-projection): v2j-based scatter, no atomics.
+  ! k2ilma/k2j/zekr_uV do not depend on the orbital, so one thread handles
+  ! zphase2_norb of them: one index load feeds that many independent FMA chains.
+  ! Accumulation order per orbital is unchanged, so results are unaffected.
+  nioq = (io_e - io_s + zphase2_norb) / zphase2_norb
 !$acc kernels present(ppg,tpsi,htpsi,uVpsibox_acc)
-!$acc loop collapse(5) independent private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
+!$acc loop collapse(5) independent private(ilma,my_nlma,k,j,ix,iy,iz,io,o,zk,wrkb)
   do im=im_s,im_e
   do ik=ik_s,ik_e
-  do io=io_s,io_e
+  do ioq=0,nioq-1
   do ispin=1,Nspin
     do vi=0,ppg%max_vi-1
       my_nlma = ppg%v2nlma(vi)
       if (my_nlma < 1) cycle
 
-      wrk = 0d0
+!$acc loop seq
+      do o=1,zphase2_norb
+        wrkb(o) = (0d0,0d0)
+      end do
 !$acc loop seq
       do k=1,my_nlma
         ilma = ppg%k2ilma(vi,k)
         j    = ppg%k2j(vi,k)
-        wrk  = wrk + uVpsibox_acc(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
+        zk   = ppg%zekr_uV(j,ilma,ik)
+!$acc loop seq
+        do o=1,zphase2_norb
+          io = io_s + ioq*zphase2_norb + o - 1
+          if (io <= io_e) wrkb(o) = wrkb(o) + uVpsibox_acc(ilma,ispin,io,ik,im) * zk
+        end do
       end do
 
       ix = ppg%v2j(1,vi)
       iy = ppg%v2j(2,vi)
       iz = ppg%v2j(3,vi)
-      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
+!$acc loop seq
+      do o=1,zphase2_norb
+        io = io_s + ioq*zphase2_norb + o - 1
+        if (io <= io_e) htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = &
+                        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrkb(o)
+      end do
     end do
   end do
   end do
