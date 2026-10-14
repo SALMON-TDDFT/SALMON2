@@ -30,7 +30,6 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 include(cmakefiles/check_build_environments.cmake)
 
-
 # Bulid options
 ## For third party libraries
 option_set(USE_MPI       "Use MPI parallelization" OFF)
