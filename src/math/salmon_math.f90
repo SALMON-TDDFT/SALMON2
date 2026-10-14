@@ -590,7 +590,7 @@ contains
   ! x and f must use matching indices. Grid ordering is a caller precondition;
   ! only the selected interval is checked, keeping the search O(log n).
   ! Endpoints are included; extrapolation must be handled by the caller.
-  pure function interp_linear(n,x,f,x0) result(y)
+  function interp_linear(n,x,f,x0) result(y)
     implicit none
     integer,intent(in) :: n
     real(8),intent(in) :: x(n),f(n),x0
