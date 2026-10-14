@@ -30,7 +30,7 @@ contains
 subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
   use structures, only: s_pp_info
   use math_constants, only: pi
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   ! Fixed-density, scalar norm-conserving atomic solver (no PAW overlap or SO).
   ! Solve one state per angular momentum, including all its diagonal KB projectors.
@@ -203,7 +203,7 @@ function interp_rho_in(pp,ik,nr,r) result(rho)
   use structures, only: s_pp_info
   use math_constants, only: pi
   use salmon_math, only: interp_linear
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use ieee_finite_check, only: ieee_is_finite => is_finite
   implicit none
   type(s_pp_info), intent(in) :: pp
   integer, intent(in) :: ik,nr
