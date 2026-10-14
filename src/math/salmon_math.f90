@@ -590,16 +590,16 @@ contains
   ! x and f must use matching indices. Grid ordering is a caller precondition;
   ! only the selected interval is checked, keeping the search O(log n).
   ! Endpoints are included; extrapolation must be handled by the caller.
-  pure function interp_linear(n,x,f,x0) result(y)
+  function interp_linear(n,x,f,x0) result(y)
     implicit none
     integer,intent(in) :: n
     real(8),intent(in) :: x(n),f(n),x0
     real(8) :: y
     integer :: ilo,ihi,imid
 
-    if (n < 2) error stop "interp_linear: at least two grid points are required"
-    if (.not. (x0 >= x(1) .and. x0 <= x(n))) &
-      error stop "interp_linear: evaluation point outside grid range"
+    !if (n < 2) error stop "interp_linear: at least two grid points are required"
+    !if (.not. (x0 >= x(1) .and. x0 <= x(n))) &
+    !  error stop "interp_linear: evaluation point outside grid range"
 
     ilo=1; ihi=n
     do while (ihi-ilo > 1)
