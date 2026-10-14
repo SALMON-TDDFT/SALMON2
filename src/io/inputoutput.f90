@@ -2924,7 +2924,8 @@ contains
     select case(method_init_wf)
     case ('gauss','random') ; continue
     case ('gauss2','gauss3','gauss4','gauss5','gauss10') ; continue
-    case default            ; stop 'method_init_wf must be gauss or random'
+    case ('pp') ; continue
+    case default            ; stop 'method_init_wf must be gauss, random or pp'
     end select
 
     select case(convergence)

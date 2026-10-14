@@ -234,7 +234,7 @@ module structures
     logical,allocatable :: has_rho_pp(:) ! rho_pp_tbl is populated for this element
     logical,allocatable :: has_wf_pp(:)  ! upp contains input pseudo wavefunctions
     logical,allocatable :: has_proj_pp(:) ! projectors (and KB coefficients) are given by the input file
-    logical,allocatable :: has_pseudo_wf(:) ! rough has_pseudo_wf is calculated for this element
+    logical,allocatable :: has_pseudo_wf(:) ! pseudo_wf_eigval and pseudo_wf_occup are set by calc_pseudo_wavefunction
     character(2),allocatable :: atom_symbol(:) ! chemical symbol for each element
     real(8),allocatable :: rmass(:) ! atomic mass for each element
     integer,allocatable :: mr(:) ! last radial index containing input data
@@ -260,8 +260,8 @@ module structures
     real(8),allocatable :: rho_pp_tbl(:,:) ! radial valence density 4*pi*r^2*n(r) at rad(i,ik) for method_init_density=pp
     real(8),allocatable :: pseudo_wf_rad(:,:) ! radial grid r(j) of the pseudo wavefunction solver (calc_pseudo_wf)
     real(8),allocatable :: pseudo_wf(:,:,:)  ! radial pseudo wavefunction u_l(r)=r*R_l(r), indexed by pseudo_wf_rad
-    real(8),allocatable :: pseudo_wf_eigval(:,:) ! eigenvalue of pseudo_wf(:,l,ik)
-    real(8),allocatable :: pseudo_wf_occup(:,:)  ! occupation number of pseudo_wf(:,l,ik)
+    real(8),allocatable :: pseudo_wf_eigval(:,:) ! eigenvalue (Ha) of the atomic solver for each l and element, (0:2*lmax0+1,nelem)
+    real(8),allocatable :: pseudo_wf_occup(:,:)  ! occupation number of the l-channel state, same shape as pseudo_wf_eigval
     real(8),allocatable :: pseudo_wf_rho(:,:)  ! charge density pseudo_wf(:,l,ik)
     real(8),allocatable :: rho_nlcc_tbl(:,:) ! nonlinear core charge density for each element
     real(8),allocatable :: tau_nlcc_tbl(:,:) ! NLCC kinetic-energy density correction, (rho_c')^2/(4*rho_c)
@@ -797,6 +797,8 @@ contains
     DEAL(pp%rho_nlcc_tbl)
     DEAL(pp%tau_nlcc_tbl)
     DEAL(pp%upp_f)
+    DEAL(pp%pseudo_wf_eigval)
+    DEAL(pp%pseudo_wf_occup)
     DEAL(pp%vpp_f)
     DEAL(pp%upp)
     DEAL(pp%dupp)
