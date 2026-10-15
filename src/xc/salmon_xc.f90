@@ -324,7 +324,8 @@ contains
 !      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       if(nspin==1)then
         call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
-               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=system%xc_payload)
+               &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=system%xc_payload, &
+               &     icomm=info%icomm_r)
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
         call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, & 
@@ -1059,7 +1060,7 @@ contains
 
   subroutine calc_xc(xc, pp, rho, rho_s, exc, eexc, vxc, vxc_s, rdedd, rdedd_s, &
       & grho, grho_s, rlrho, rlrho_s, tau, tau_s, rj, rj_s, &
-      & rho_nlcc, payload, &
+      & rho_nlcc, payload, icomm, &
       & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     use structures, only: s_pp_info
@@ -1089,6 +1090,7 @@ contains
     real(8), intent(out),optional :: rdedd_s(:, :, :, :, :)
     ! Operator part of Vxc, filled by a functional that depends on the kinetic-energy density.
     type(s_xc_operator_payload), intent(inout), optional :: payload
+    integer, intent(in), optional :: icomm
 
     !===============================================================
     ! NOTE:
@@ -1475,7 +1477,7 @@ contains
       j_s_1d = reshape(rj(:, :, :, :), (/nl, 3/)) * 0.5
 
       !call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d, Hxyz, aLxyz)
-      call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d)
+      call exc_cor_tbmbj(nl, rho_1d, rho_s_1d,  grho_s_1d, rlrho_s_1d, tau_s_1d, j_s_1d, xc%cval, eexc_1d, vexc_1d, icomm)
 
       if (present(vxc)) then
         vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
