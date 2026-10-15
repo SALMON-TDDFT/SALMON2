@@ -30,14 +30,6 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 include(cmakefiles/check_build_environments.cmake)
 
-if(USE_OPENACC)
-  if(USE_CUDA)
-    option(CMAKE_CUDA_ARCHITECTURES "80") # Dummy variable
-    enable_language(CUDA)
-  endif()
-endif()
-
-
 # Bulid options
 ## For third party libraries
 option_set(USE_MPI       "Use MPI parallelization" OFF)
@@ -50,6 +42,16 @@ option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)"
 ## OpenACC/CUDA GPU libraries (only meaningful when USE_OPENACC is on)
 option_set(USE_GEMM      "Use cuBLAS batched-GEMM for pseudo-pt" ON)
 option_set(USE_NCCL      "Use NCCL for the pseudo-pt allreduce"  ON)
+
+# USE_CUDA selects CUDA Fortran kernels for the pseudo-pt gather and
+# back-projection. Both live inside the USE_GEMM path, so the flag has no
+# effect without it, and none without OpenACC either.
+if (USE_CUDA AND NOT USE_OPENACC)
+  message(FATAL_ERROR "USE_CUDA requires USE_OPENACC")
+endif ()
+if (USE_CUDA AND NOT USE_GEMM)
+  message(FATAL_ERROR "USE_CUDA requires USE_GEMM")
+endif ()
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)

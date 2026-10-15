@@ -509,7 +509,7 @@ contains
     type(s_dcdft), intent(in) :: dc
     integer :: ik,n
 
-#if defined(USE_OPENACC) || defined(USE_CUDA)
+#if defined(USE_OPENACC)
     stop "DC-LCFO complex: GPU/OpenACC/CUDA is unsupported."
 #endif
     if (yn_spinorbit == 'y') stop "DC-LCFO complex: spin-orbit and noncollinear calculations are unsupported."
@@ -1254,7 +1254,7 @@ contains
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
     complex(8), allocatable :: wrk_local(:,:,:),wrk_sum(:,:,:)
 
-#if defined(USE_OPENACC) || defined(USE_CUDA)
+#if defined(USE_OPENACC)
     stop "DC-LCFO complex reconstruction: GPU/OpenACC/CUDA is unsupported."
 #endif
     if (system%if_real_orbital) stop "DC-LCFO complex reconstruction requires complex orbitals."
