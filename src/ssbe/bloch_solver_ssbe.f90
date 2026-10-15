@@ -249,7 +249,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                     if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
                        abs(gs%delta_omega(jb, nb, ik))> 1.d-3 .and. &
                        abs(gs%delta_omega(kb, nb, ik))> 1.d-3)then
-                      tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+                      tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
                                    sbe%rho(nb, nb, ik) / &
                                    gs%delta_omega(ib, nb, ik) / &
                                    gs%delta_omega(jb, nb, ik) / &
@@ -264,7 +264,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                 if(nb /= ib .and. nb /= jb) then
                   if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
                      abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
-                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+                    tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
                                  sbe%rho(nb, nb, ik) * &
                                  (gs%delta_omega(ib, nb, ik) + gs%delta_omega(jb, nb, ik)) / &
                                  2.d0 / &
@@ -316,7 +316,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                 end if
               end if
             end do
-            tmp1(idir) = tmp1(idir) - gs%kweight(ik) * sbe%rho(nb, nb, ik) * pnn_Ac * sum1(idir)
+            tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(nb, nb, ik) * pnn_Ac * sum1(idir)
           end do
         end do
       end do
