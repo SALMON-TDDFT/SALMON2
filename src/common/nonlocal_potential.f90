@@ -43,8 +43,11 @@ contains
     complex(8) :: wf(*), packed(*)
     integer, value :: nelem, nps, this_block, io_blk_s, ik, im, ispin
     integer, value :: lb1, lb2, lb3, lb5, lb6, lb7
-    integer, value :: s2, s3, s4, s5, s6, s7, p2, p3
-    integer :: i, j, io_l, ia, jx, jy, jz, offw, offp
+    ! 64-bit: a flat offset into psi exceeds 2^31 once local orbitals times
+    ! grid points does, which a 4x4x4 cell reaches at four GPUs.
+    integer(8), value :: s2, s3, s4, s5, s6, s7, p2, p3
+    integer :: i, j, io_l, ia, jx, jy, jz
+    integer(8) :: offw, offp
 
     i = (blockidx%x - 1) * blockdim%x + threadidx%x
     if (i > nelem) return
@@ -57,10 +60,10 @@ contains
       jx = jxyz((j - 1) * 3 + (ia - 1) * 3 * nps + 1)
       jy = jxyz((j - 1) * 3 + (ia - 1) * 3 * nps + 2)
       jz = jxyz((j - 1) * 3 + (ia - 1) * 3 * nps + 3)
-      offw = (jx - lb1) + (jy - lb2) * s2 + (jz - lb3) * s3 &
-           + (ispin - 1) * s4 + (io_blk_s + io_l - 1 - lb5) * s5 &
-           + (ik - lb6) * s6 + (im - lb7) * s7
-      offp = (j - 1) + (io_l - 1) * p2 + (ia - 1) * p3
+      offw = int(jx - lb1, 8) + int(jy - lb2, 8) * s2 + int(jz - lb3, 8) * s3 &
+           + int(ispin - 1, 8) * s4 + int(io_blk_s + io_l - 1 - lb5, 8) * s5 &
+           + int(ik - lb6, 8) * s6 + int(im - lb7, 8) * s7
+      offp = int(j - 1, 8) + int(io_l - 1, 8) * p2 + int(ia - 1, 8) * p3
       packed(offp + 1) = wf(offw + 1)
     end if
   end subroutine zgather_cuda
@@ -78,10 +81,13 @@ contains
     integer :: v2nlma(*), k2ilma(*), k2j(*), v2j(*)
     complex(8) :: ubox(*), zekr(*), htpsi(*)
     integer, value :: nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s
-    integer, value :: ub2, ub3, ub4, ub5, z2, z3, ik_lb
-    integer, value :: lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7
+    integer(8), value :: ub2, ub3, ub4, ub5, z2, z3
+    integer, value :: ik_lb
+    integer, value :: lb1, lb2, lb3, lb5, lb6, lb7
+    integer(8), value :: s2, s3, s4, s5, s6, s7
     integer :: i, vi, isp, ioq, ik_l, im_l, io0, io, ik, im, q
-    integer :: my_nlma, k, ilma, j, ix, iy, iz, off, uo, zbase
+    integer :: my_nlma, k, ilma, j, ix, iy, iz
+    integer(8) :: off, uo, zbase
     integer :: o
     complex(8) :: zk, wrk(zphase2_norb)
 
@@ -109,8 +115,8 @@ contains
     io0 = (ioq - 1) * zphase2_norb
     ik  = ik_s + ik_l - 1
     im  = im_s + im_l - 1
-    uo  = (isp - 1) * ub2 + (ik - ik_s) * ub4 + (im - im_s) * ub5
-    zbase = (ik - ik_lb) * z3
+    uo  = int(isp - 1, 8) * ub2 + int(ik - ik_s, 8) * ub4 + int(im - im_s, 8) * ub5
+    zbase = int(ik - ik_lb, 8) * z3
 
     do o = 1, zphase2_norb
       wrk(o) = (0d0, 0d0)
@@ -118,10 +124,10 @@ contains
     do k = 1, my_nlma
       ilma = k2ilma((k - 1) * max_vi + vi + 1)
       j    = k2j((k - 1) * max_vi + vi + 1)
-      zk   = zekr(zbase + (ilma - 1) * z2 + j)
+      zk   = zekr(zbase + int(ilma - 1, 8) * z2 + int(j, 8))
       do o = 1, zphase2_norb
         io = io0 + o
-        if (io <= nio) wrk(o) = wrk(o) + ubox(uo + (io - 1) * ub3 + ilma) * zk
+        if (io <= nio) wrk(o) = wrk(o) + ubox(uo + int(io - 1, 8) * ub3 + int(ilma, 8)) * zk
       end do
     end do
 
@@ -131,8 +137,9 @@ contains
     do o = 1, zphase2_norb
       io = io0 + o
       if (io <= nio) then
-        off = (ix - lb1) + (iy - lb2) * s2 + (iz - lb3) * s3 &
-            + (isp - 1) * s4 + (io - 1) * s5 + (ik - lb6) * s6 + (im - lb7) * s7
+        off = int(ix - lb1, 8) + int(iy - lb2, 8) * s2 + int(iz - lb3, 8) * s3 &
+            + int(isp - 1, 8) * s4 + int(io - 1, 8) * s5 &
+            + int(ik - lb6, 8) * s6 + int(im - lb7, 8) * s7
         htpsi(off + 1) = htpsi(off + 1) + wrk(o)
       end if
     end do
@@ -360,11 +367,12 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   complex(8) :: zk, wrkb(zphase2_norb)
 #endif
 #if defined(USE_OPENACC) && defined(USE_GEMM) && defined(USE_CUDA)
-  integer :: zwf_nelem, zwf_s2, zwf_s3, zwf_s4, zwf_s5, zwf_s6, zwf_s7
-  integer :: pk_p2, pk_p3, zgather_grid
+  integer :: zwf_nelem, zgather_grid
+  integer(8) :: zwf_s2, zwf_s3, zwf_s4, zwf_s5, zwf_s6, zwf_s7
+  integer(8) :: pk_p2, pk_p3
   integer :: ph2_nioq, ph2_nik, ph2_nwork, ph2_grid
-  integer :: ph2_ub2, ph2_ub3, ph2_ub4, ph2_ub5, ph2_z2, ph2_z3
-  integer :: hs_s2, hs_s3, hs_s4, hs_s5, hs_s6, hs_s7
+  integer(8) :: ph2_ub2, ph2_ub3, ph2_ub4, ph2_ub5, ph2_z2, ph2_z3
+  integer(8) :: hs_s2, hs_s3, hs_s4, hs_s5, hs_s6, hs_s7
 #endif
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -489,13 +497,13 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
 #if defined(USE_CUDA)
       zwf_nelem = gemm_natom * gemm_this_block * ppg%nps
-      zwf_s2 = size(tpsi%zwf, 1)
+      zwf_s2 = int(size(tpsi%zwf, 1), 8)
       zwf_s3 = zwf_s2 * size(tpsi%zwf, 2)
       zwf_s4 = zwf_s3 * size(tpsi%zwf, 3)
       zwf_s5 = zwf_s4 * size(tpsi%zwf, 4)
       zwf_s6 = zwf_s5 * size(tpsi%zwf, 5)
       zwf_s7 = zwf_s6 * size(tpsi%zwf, 6)
-      pk_p2  = size(gemm_wf_packed, 1)
+      pk_p2  = int(size(gemm_wf_packed, 1), 8)
       pk_p3  = pk_p2 * size(gemm_wf_packed, 2)
       zgather_grid = ceiling(dble(zwf_nelem) / 128d0)
       call zgather_cuda<<<zgather_grid, 128, 0, acc_get_cuda_stream(acc_async_sync)>>>( &
@@ -622,13 +630,13 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       ph2_nioq = (io_e - io_s + 1 + zphase2_norb - 1) / zphase2_norb
       ph2_nik = ik_e - ik_s + 1
       ph2_nwork = (im_e - im_s + 1) * ph2_nik * ph2_nioq * Nspin * ppg%max_vi
-      ph2_ub2 = size(uVpsibox_acc, 1)
+      ph2_ub2 = int(size(uVpsibox_acc, 1), 8)
       ph2_ub3 = ph2_ub2 * size(uVpsibox_acc, 2)
       ph2_ub4 = ph2_ub3 * size(uVpsibox_acc, 3)
       ph2_ub5 = ph2_ub4 * size(uVpsibox_acc, 4)
-      ph2_z2 = size(ppg%zekr_uV, 1)
+      ph2_z2 = int(size(ppg%zekr_uV, 1), 8)
       ph2_z3 = ph2_z2 * size(ppg%zekr_uV, 2)
-      hs_s2 = size(htpsi%zwf, 1)
+      hs_s2 = int(size(htpsi%zwf, 1), 8)
       hs_s3 = hs_s2 * size(htpsi%zwf, 2)
       hs_s4 = hs_s3 * size(htpsi%zwf, 3)
       hs_s5 = hs_s4 * size(htpsi%zwf, 4)
