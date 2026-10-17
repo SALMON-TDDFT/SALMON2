@@ -182,7 +182,6 @@ contains
 
   subroutine factor_configure(system,info)
     use exx_distributed_metric,only:distributed_metric_available
-    use salmon_global, only: yn_restart
     implicit none
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
@@ -644,14 +643,9 @@ contains
     call comm_bcast(status,info%icomm_k,0)
     if(status/=0)error stop 'HSE Wannier snapshot: write failed'
   end subroutine
-  subroutine exx_taylor_stage(stage,system,mg,info,psi)
+  subroutine exx_taylor_stage(stage)
     implicit none
     integer,intent(in) :: stage
-    type(s_dft_system),intent(in),optional :: system
-    type(s_rgrid),intent(in),optional :: mg
-    type(s_parallel_info),intent(in),optional :: info
-    type(s_orbital),intent(in),optional :: psi
-    integer :: ierr
     select case(stage)
     case(0)
       taylor_active=.true.;taylor_midpoint=.false.

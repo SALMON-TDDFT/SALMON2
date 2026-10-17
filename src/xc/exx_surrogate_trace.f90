@@ -14,7 +14,6 @@ module exx_surrogate_trace
     complex(real64),allocatable::q(:,:)
     complex(real64),allocatable,private::b(:,:,:)
     integer,allocatable::steps(:)
-    logical,allocatable,private::accepted(:)
   end type
   type,public::s_factor_diagnostic
     integer::unit=0,last_step=0,ng=0,no=0,expected=0
@@ -23,10 +22,11 @@ module exx_surrogate_trace
   end type
   public::trace_factor_write
   public::trace_shadow_fit,trace_shadow_compare
-  public::trace_initialize,trace_endpoint,trace_candidate,trace_teacher,trace_write_diagnostic
+  public::trace_initialize,trace_candidate,trace_write_diagnostic
 contains
 
  logical function scalar_finite_real(a) result(ok)
+   implicit none
   real(8),intent(in)::a(:)
   integer::i
   ok=.false.
@@ -38,6 +38,7 @@ contains
 
   ! Bounded raw factor stream for offline response-basis diagnostics only.
   subroutine trace_factor_write(writer,path,ace,step,dt,expected,final,status)
+    implicit none
     type(s_factor_diagnostic),intent(inout)::writer
     character(*),intent(in)::path
     type(s_exx_ace),intent(in)::ace
@@ -87,6 +88,7 @@ contains
 
   ! Diagnostic-only native fit: uses the fixed prefix, never later test data.
   subroutine trace_shadow_fit(state,train_end,horizon,lambda,coeff,status)
+    implicit none
     type(s_surrogate_trace),intent(in)::state
     integer,intent(in)::train_end,horizon
     real(real64),intent(in)::lambda
@@ -110,6 +112,7 @@ contains
   end subroutine
 
   subroutine trace_shadow_compare(state,horizon,coeff,pred,truth,frozen,linear,status)
+    implicit none
     type(s_surrogate_trace),intent(in)::state
     integer,intent(in)::horizon
     real(real64),intent(in)::coeff(3)
@@ -131,6 +134,7 @@ contains
   end subroutine
 
   subroutine trace_initialize(state,epoch,dt,rank_max,capacity,rank_rtol,status)
+    implicit none
     type(s_surrogate_trace),intent(inout)::state
     integer,intent(in)::epoch,rank_max,capacity
     real(real64),intent(in)::dt,rank_rtol
@@ -143,31 +147,10 @@ contains
     state=fresh;status=0
   end subroutine
 
-  ! Only this explicit accepted-entry API can create a teacher.
-  subroutine trace_endpoint(state,ace,step,exact_generation,strict_corrected,accepted,status)
-    type(s_surrogate_trace),intent(inout)::state
-    type(s_exx_ace),intent(in)::ace
-    integer,intent(in)::step,exact_generation
-    logical,intent(in)::strict_corrected,accepted
-    integer,intent(out)::status
-    status=1
-    if(.not.accepted)return
-    call trace_capture(state,ace,step,exact_generation,strict_corrected,accepted,status)
-  end subroutine
-
-  ! RT capture has no acceptance evidence yet. Never label it as a teacher.
-  subroutine trace_candidate(state,ace,step,exact_generation,strict_corrected,status)
-    type(s_surrogate_trace),intent(inout)::state
-    type(s_exx_ace),intent(in)::ace
-    integer,intent(in)::step,exact_generation
-    logical,intent(in)::strict_corrected
-    integer,intent(out)::status
-    call trace_capture(state,ace,step,exact_generation,strict_corrected,.false.,status)
-  end subroutine
-
   ! Raw diagnostics, never a certified teacher/model file. External provenance
   ! sealing and accepted-run validation are required before any training use.
   subroutine trace_write_diagnostic(state,path,status)
+    implicit none
     type(s_surrogate_trace),intent(in)::state
     character(*),intent(in)::path
     integer,intent(out)::status
@@ -184,7 +167,8 @@ contains
       enddo
     enddo
     do k=1,state%count
-      if(ios==0)write(unit,*,iostat=ios)state%steps(k),state%accepted(k)
+      ! Preserve the V1 acceptance marker; this collector records diagnostics only.
+      if(ios==0)write(unit,*,iostat=ios)state%steps(k),.false.
       do j=1,state%rank
         do i=1,state%rank
           if(ios==0)write(unit,'(2(es26.17e3,1x))',iostat=ios)real(state%b(i,j,k)),aimag(state%b(i,j,k))
@@ -196,22 +180,13 @@ contains
     if(ios==0.and.closed==0)status=0
   end subroutine
 
-  subroutine trace_teacher(state,index,b,status)
-    type(s_surrogate_trace),intent(in)::state
-    integer,intent(in)::index
-    complex(real64),allocatable,intent(out)::b(:,:)
-    integer,intent(out)::status
-    status=1
-    if(index<1.or.index>state%count)return
-    if(.not.state%accepted(index))return
-    b=state%b(:,:,index);status=0
-  end subroutine
-
-  subroutine trace_capture(state,ace,step,exact_generation,strict_corrected,accepted,status)
+  ! Diagnostic capture is never labeled as an accepted teacher.
+  subroutine trace_candidate(state,ace,step,exact_generation,strict_corrected,status)
+    implicit none
     type(s_surrogate_trace),intent(inout)::state
     type(s_exx_ace),intent(in)::ace
     integer,intent(in)::step,exact_generation
-    logical,intent(in)::strict_corrected,accepted
+    logical,intent(in)::strict_corrected
     integer,intent(out)::status
     complex(real64),allocatable::initial_q(:,:),snapshot(:,:)
     integer::rank
@@ -223,8 +198,8 @@ contains
       call surrogate_dense_snapshot(ace,state%rank_max,state%rank_rtol,initial_q,snapshot,rank,status)
       if(status/=0)return
       state%q=initial_q;state%rank=rank;state%dv=ace%dv
-      allocate(state%b(rank,rank,state%capacity),state%steps(state%capacity),state%accepted(state%capacity))
-      state%b=0;state%steps=-1;state%accepted=.false.
+      allocate(state%b(rank,rank,state%capacity),state%steps(state%capacity))
+      state%b=0;state%steps=-1
     else
       ! Same grid-volume convention and fixed coordinates throughout the epoch.
       if(.not.ieee_is_finite(ace%dv))return
@@ -234,7 +209,6 @@ contains
       if(status/=0)return
     endif
     state%count=state%count+1;state%b(:,:,state%count)=snapshot;state%steps(state%count)=step
-    state%accepted(state%count)=accepted
     state%last_step=step
     state%last_generation=exact_generation
     status=0

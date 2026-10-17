@@ -40,11 +40,6 @@ if(USE_HSE)
     exx_surrogate_basis.f90
     exx_surrogate_dense.f90
     exx_surrogate_model.f90
-    exx_surrogate_guard.f90
-    exx_surrogate_stage.f90
-    exx_surrogate_export.f90
-    exx_surrogate_controller.f90
-    exx_surrogate_shadow.f90
     exx_surrogate_trace.f90
     exx_distributed_metric.f90
     exx_distributed_alignment.f90

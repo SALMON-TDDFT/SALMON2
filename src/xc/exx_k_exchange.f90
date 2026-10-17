@@ -332,7 +332,7 @@ contains
     complex(c_double_complex),allocatable :: s(:,:,:),t(:,:,:),tile(:,:)
     complex(c_double_complex),pointer :: kw(:,:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
-    integer :: lo,rows,ik,ki,b,j,r,offset(3),ng,nk,no,nt
+    integer :: lo,rows,ik,ki,b,j,ng,nk,no,nt
     external :: zgemm
     ierr=1;action=zero
     if(.not.c_associated(op%forward))return
@@ -415,7 +415,7 @@ contains
     complex(c_double_complex),allocatable,target :: send(:),recv(:)
     complex(c_double_complex),pointer :: sb(:,:,:,:),rb(:,:,:,:),flat_send(:,:,:),flat_recv(:,:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
-    integer :: ng,nk,np,nlocal,no,nt,b,km,nmsg,p,j,ki,ik,base,lo,rows,r,g,offset(3)
+    integer :: ng,nk,np,nlocal,no,nt,b,km,nmsg,p,j,ki,base,lo,rows,g
     integer,allocatable :: inverse(:),slot(:)
     complex(c_double_complex) :: valid_send(size(counts)),valid_recv(size(counts))
     logical :: valid

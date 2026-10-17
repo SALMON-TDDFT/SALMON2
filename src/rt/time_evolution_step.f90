@@ -171,7 +171,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
   else
     if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') &
-      call exx_taylor_stage(0,system,mg,info,spsi_in)
+      call exx_taylor_stage(0)
 #endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
