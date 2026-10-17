@@ -56,8 +56,9 @@ contains
   complex(real64),intent(in)::ref(:,:)
   procedure(sum_callback)::sumgrid
   integer,intent(out)::status
-  complex(real64),allocatable::m(:,:),u(:,:),vh(:,:),r(:,:),work(:),row(:)
+  complex(real64),allocatable::m(:,:),u(:,:),vh(:,:),r(:,:),work(:),row(:),saved(:,:)
   real(real64),allocatable::s(:),rw(:)
+  real(real64)::svd_res,unit_u,unit_v,svd_scale
   complex(real64)::v,bad(1,1)
   integer::n,ng,i,j,k,info
   status=1;ng=size(x,1);n=size(x,2)
@@ -79,8 +80,30 @@ contains
   enddo
 !$omp end parallel do
   call sumgrid(m)
+  allocate(saved(n,n));saved=m
   call zgesvd('A','A',n,n,m,n,s,u,n,vh,n,work,size(work),rw,info)
-  if(info/=0)return
+  if(info/=0)then
+   write(*,'(a,i8)')'FACTOR_SVD_INFO ',info
+   return
+  endif
+  r=u
+  do j=1,n
+   r(:,j)=r(:,j)*s(j)
+  enddo
+  svd_scale=sqrt(sum(abs(saved)**2))
+  svd_res=sqrt(sum(abs(saved-matmul(r,vh))**2))/max(svd_scale,tiny(1d0))
+  r=matmul(conjg(transpose(u)),u)
+  m=matmul(vh,conjg(transpose(vh)))
+  do j=1,n
+   r(j,j)=r(j,j)-1d0
+   m(j,j)=m(j,j)-1d0
+  enddo
+  unit_u=sqrt(sum(abs(r)**2));unit_v=sqrt(sum(abs(m)**2))
+  write(*,'(a,i6,5es24.15)')'FACTOR_SVD_QUALITY n/residual/unit_u/unit_v/smin/smax: ', &
+    n,svd_res,unit_u,unit_v,minval(s),maxval(s)
+  if(.not.scalar_finite_real([svd_res,unit_u,unit_v,minval(s),maxval(s)]))return
+  if(svd_scale<=0d0.or.svd_res>1d-10)return
+  if(max(unit_u,unit_v)>1d-10*sqrt(dble(n)))return
   if(minval(s)<=maxval(s)*1d-12)return
   r=matmul(u,vh)
   ! Thread-private row workspace is only n elements; no extra local-grid frame.

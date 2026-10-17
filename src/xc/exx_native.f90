@@ -191,7 +191,7 @@ contains
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
     character(32)::value
-    integer::stat
+    integer::stat,ik
     if(.not.factor_configured)then
       call get_environment_variable('SALMON_FACTOR_HISTORY',value,status=stat)
       factor_experiment=stat==0
@@ -211,9 +211,23 @@ contains
           error stop 'Factor history requires static full-support HSE, compatible k/SR settings and integer occupation'
         if(info%isize_o>1.and..not.distributed_metric_available(info%icomm_ro)) &
           error stop 'Orbital-distributed factor history requires ScaLAPACK'
-        if(product(num_kgrid)>1.and.(info%isize_r/=1.or.info%isize_o/=1.or. &
-          use_symmetry.or.product(num_kgrid)/=system%nk)) &
-          error stop 'Factor k experiment requires full uniform k mesh and k-only MPI'
+        if(product(num_kgrid)>1)then
+          if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
+            error stop 'Factor k history requires k-only MPI'
+          if(info%numk<1.or.info%ik_s<1.or.info%ik_e>system%nk.or. &
+             info%ik_e-info%ik_s+1/=info%numk)error stop 'Invalid factor representative k layout'
+          if(.not.use_symmetry.and.product(num_kgrid)/=system%nk) &
+            error stop 'Factor k history requires full mesh without symmetry'
+          if(any(hse_q_reduction/=1))error stop 'Factor k history requires all q points'
+          do ik=1,system%nk
+            if(.not.ieee_is_finite(system%wtk(ik)))error stop 'Nonfinite factor k weight'
+          enddo
+          ! Symmetry retains zero-padded storage beyond active representatives.
+          if(any(system%wtk(:system%nk)<=0d0).or. &
+             abs(sum(system%wtk(:system%nk))-1d0)>1d-12)error stop 'Invalid factor k weights'
+          if(info%id_rko==0)write(*,'(a,l1,2i10)') &
+            'FACTOR_HISTORY symmetry/full/representatives: ',use_symmetry,product(num_kgrid),system%nk
+        endif
         if(exx_factor_exact_interval<1)error stop 'Factor interval must be positive'
         allocate(factor_history(info%numk))
         factor_history%interval=exx_factor_exact_interval
@@ -478,6 +492,9 @@ contains
     if(mod(step,exx_factor_exact_interval)/=0)return
     if(exx_freeze)error stop 'Predicted endpoint cannot enter exact factor history'
     call factor_materialize(info)
+    if(.not.allocated(ace%factors))error stop 'Factor endpoint missing local factors'
+    if(size(ace%factors,3)/=info%numk.or.size(factor_history)/=info%numk) &
+      error stop 'Factor endpoint representative/history mismatch'
     do ik=1,info%numk
       call history_accept(factor_history(ik),ace%factors(:,:,ik),system%hvol,step,sumgrid,stat,aligngrid)
       if(stat/=0)error stop 'Factor k history alignment/teacher failed'
@@ -960,7 +977,7 @@ contains
       complex(8),intent(out) :: density(:,:)
       integer,intent(in),optional :: points(:)
       complex(8),allocatable :: selected(:,:)
-      integer :: full_index,rep,op,g,stat,ng,no
+      integer :: full_index,rep,op,g,stat,ng,no,blas_state(3)
       complex(8) :: coefficient
   ! BLAS explicit interface: sequence association preserves strided row offsets.
   interface
@@ -980,6 +997,8 @@ contains
       coefficient=cmplx(1d0/symmetry_map%multiplicity(full_index),0d0,8)
       if(present(points))allocate(selected(rows,no))
       density=0d0
+      blas_state=0
+      call exx_blas_thread_control(1,blas_state)
       ! Average little-group projectors one orbital block at a time, not copies of all orbitals.
       do op=1,symmetry_map%multiplicity(full_index)
         call symmetry_transform(symmetry_map,full_index,op,source(:,:no,rep),rotated(:,:no),stat)
@@ -996,6 +1015,7 @@ contains
           (1d0,0d0),density,size(density,1))
         endif
       enddo
+      call exx_blas_thread_control(0,blas_state)
     end subroutine
   end subroutine
 
