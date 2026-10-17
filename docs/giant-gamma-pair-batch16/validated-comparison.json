@@ -1,0 +1,228 @@
+{
+  "verified": true,
+  "rows": [
+    {
+      "series": "sr-native-production-20261016",
+      "case": "cases/2-R10-feature-native/production",
+      "steps": 1,
+      "step_rankmax_seconds": [
+        4.356712280015927
+      ],
+      "mean_s_per_step": 4.356712280015927,
+      "rank_RSS_Huge_sample_max_KiB": 356864,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 348.5
+    },
+    {
+      "series": "sr-native-production-20261016",
+      "case": "cases/2-R10-feature-reference/production",
+      "steps": 1,
+      "step_rankmax_seconds": [
+        7.62316150998231
+      ],
+      "mean_s_per_step": 7.62316150998231,
+      "rank_RSS_Huge_sample_max_KiB": 353600,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 345.3125
+    },
+    {
+      "series": "sr-batch16-comparison-20261016",
+      "case": "batch16/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        4.147724400041625,
+        4.128107539960183,
+        4.141913940024097,
+        4.128485740046017
+      ],
+      "mean_s_per_step": 4.13655790501798,
+      "rank_RSS_Huge_sample_max_KiB": 392640,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 383.4375
+    },
+    {
+      "series": "sr-batch16-comparison-20261016",
+      "case": "batch8/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        4.329473550023977,
+        4.339459129958414,
+        4.349762959987856,
+        4.326479159994051
+      ],
+      "mean_s_per_step": 4.336293699991074,
+      "rank_RSS_Huge_sample_max_KiB": 361792,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 353.3125
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "batch16-pair0/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        4.163615290017333,
+        4.149304369988386,
+        4.129258039989509,
+        4.130545050022192
+      ],
+      "mean_s_per_step": 4.143180687504355,
+      "rank_RSS_Huge_sample_max_KiB": 392000,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 382.8125
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "batch16-pair1/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        3.370943629997782,
+        3.334211070032325,
+        3.33849392994307,
+        3.344101900001988
+      ],
+      "mean_s_per_step": 3.346937632493791,
+      "rank_RSS_Huge_sample_max_KiB": 385472,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 376.4375
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "batch8-pair0/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        4.348413300001994,
+        4.323817140015308,
+        4.325809539994225,
+        4.333109360013623
+      ],
+      "mean_s_per_step": 4.332787335006287,
+      "rank_RSS_Huge_sample_max_KiB": 360960,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 352.5
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "batch8-pair1/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        3.643034200009424,
+        3.615319489967078,
+        3.621582830033731,
+        3.61040301003959
+      ],
+      "mean_s_per_step": 3.622584882512456,
+      "rank_RSS_Huge_sample_max_KiB": 356736,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 348.375
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "o2-reference/batch16-pair0/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        6.250212040031329,
+        6.213879710005131,
+        6.215894949971698,
+        6.210027649998665
+      ],
+      "mean_s_per_step": 6.222503587501706,
+      "rank_RSS_Huge_sample_max_KiB": 386816,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 377.75
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "o2-reference/batch16-pair1/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        4.40096232003998,
+        4.375714850029908,
+        4.384775760001503,
+        4.379462180018891
+      ],
+      "mean_s_per_step": 4.3852287775225705,
+      "rank_RSS_Huge_sample_max_KiB": 385280,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 376.25
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "o2-reference/batch8-pair0/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        6.450922210002318,
+        6.430709190026391,
+        6.434329610026907,
+        6.430257219995838
+      ],
+      "mean_s_per_step": 6.4365545575128635,
+      "rank_RSS_Huge_sample_max_KiB": 360512,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 352.0625
+    },
+    {
+      "series": "sr-pair-symmetry-comparison-20261016",
+      "case": "o2-reference/batch8-pair1/production",
+      "steps": 4,
+      "step_rankmax_seconds": [
+        4.692402849963401,
+        4.662998349987902,
+        4.66598684003111,
+        4.671433290001005
+      ],
+      "mean_s_per_step": 4.673205332495854,
+      "rank_RSS_Huge_sample_max_KiB": 360640,
+      "allrank_exit0": true,
+      "capacity_pass": true,
+      "memory_MiB": 352.1875
+    }
+  ],
+  "accuracy": {
+    "sr-pair-symmetry-comparison-20261016": {
+      "pass": true,
+      "comparisons": {
+        "8": {
+          "current_maxabs": 5.4977004313785385e-18,
+          "energy_maxabs_Ha": 2.842171001273916e-14
+        },
+        "16": {
+          "current_maxabs": 2.5361026708630807e-18,
+          "energy_maxabs_Ha": 2.842171001273916e-14
+        }
+      },
+      "scope": "4step feature comparison, not learned steady-state or production acceptance"
+    },
+    "sr-batch16-comparison-20261016": {
+      "pass": true,
+      "current_maxabs": 2.2504011047321654e-18,
+      "energy_maxabs_Ha": 2.842171001273916e-14,
+      "scope": "four step batch comparison, not production acceptance"
+    },
+    "sr-native-production-20261016": {
+      "pass": true,
+      "current_maxabs": 1.3337096237335495e-18,
+      "energy_maxabs_Ha": 0.0,
+      "scope": "one step newfeature check, not production acceptance"
+    }
+  },
+  "speedups": {
+    "native_vs_reference": 1.7497509635762412,
+    "batch16_vs_batch8": 1.0482855068294339,
+    "pair_batch8": 1.1960485331681914,
+    "pair_batch16": 1.2379019696334426,
+    "pair16_vs_pair8": 1.0823580479488293
+  },
+  "scope": "32MPI8nodes12OMP Si64 Gamma R10; native1step versus batch/pair4steps; whole time_evolution_step rankmax, initialization excluded; sample RSS+Huge not instantaneous peak; no learned steady-state or production accuracy claim",
+  "cloud_sync": "unverified"
+}

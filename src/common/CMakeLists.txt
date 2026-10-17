@@ -10,6 +10,7 @@ set(SOURCES
    density_matrix.f90
    pack_unpack.f90
    sendrecv_grid.f90
+    sendrecv_grid_box.f90
    total_energy.f90
    lattice.f90
    force.f90

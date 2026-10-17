@@ -25,6 +25,8 @@ if(USE_HSE)
     exx_spatial_local.f90
     rvv10.f90
     fftw_blocks.f90
+    sr_group_fft.f90
+    sr_wave_fft.f90
     rvv10_distributed.f90
     rvv10_native.f90
     rvv10_ffte.f
@@ -32,6 +34,7 @@ if(USE_HSE)
     exx_wannier.f90
     exx_symmetry.f90
     exx_k_exchange.f90
+    exx_k_orbits.f90
     exx_ace.f90
     exx_surrogate_basis.f90
     exx_surrogate_dense.f90
@@ -43,22 +46,14 @@ if(USE_HSE)
     exx_surrogate_shadow.f90
     exx_surrogate_trace.f90
     exx_distributed_metric.f90
+    exx_distributed_alignment.f90
     exx_orbitals.f90
     exx_distributed_gauge.f90
     hybrid_semilocal.f90
     exx_spatial.f90
     exx_factor_history.f90
     exx_native.f90
-    exx_lcfo_rt.f90
     lcfo_wf_support.f90
-    lcfo_projection.f90
-    lcfo_rt_wannier.f90
-    lcfo_ace_local.f90
-    lcfo_gram.f90
-    lcfo_mlwf_links.f90
-    lcfo_seed.f90
-    lcfo_dist_rows.f90
-    lcfo_dist_dense.f90
   )
 endif()
 

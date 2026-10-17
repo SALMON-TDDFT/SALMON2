@@ -31,7 +31,9 @@ contains
     integer,intent(out) :: status
 #ifdef USE_SCALAPACK
     integer :: context,nprow,npcol,myrow,mycol,block,desc(9),nr,nc,n,rank,np,rank_o,np_o
-    integer :: i,j,k,owner,col,ir,jc,bad
+    integer :: i,j,k,owner,col,ir,jc,bad,lwork,lrwork,liwork
+    integer,allocatable :: iwork(:)
+    integer :: iquery(1)
     integer,external :: sys2blacs_handle,numroc
     complex(8),allocatable :: a(:,:),z(:,:),column(:),partial(:),total(:),work(:)
     complex(8) :: query(1)
@@ -107,11 +109,15 @@ contains
       if(bad==0)then
         a=.5d0*(a+z)
         allocate(eigen(n))
-        call pzheev('V','U',n,a,1,1,desc,eigen,z,1,1,desc,query,-1,rquery,-1,bad)
+        call pzheevd('V','U',n,a,1,1,desc,eigen,z,1,1,desc,query,-1,rquery,-1,iquery,-1,bad)
         bad=abs(bad);call comm_get_max(bad,comm)
         if(bad==0)then
-          allocate(work(max(1,int(real(query(1))))),rwork(max(1,int(rquery(1)))))
-          call pzheev('V','U',n,a,1,1,desc,eigen,z,1,1,desc,work,size(work),rwork,size(rwork),bad)
+          ! Keep distributed local workspaces; use validated Fugaku D&C driver.
+          lwork=max(1,ceiling(real(query(1),8)))
+          lrwork=max(ceiling(rquery(1)),2*(1+8*n+2*nr*nc))
+          liwork=max(iquery(1),2+7*n+8*npcol)
+          allocate(work(lwork),rwork(lrwork),iwork(liwork))
+          call pzheevd('V','U',n,a,1,1,desc,eigen,z,1,1,desc,work,lwork,rwork,lrwork,iwork,liwork,bad)
           bad=abs(bad);call comm_get_max(bad,comm)
           if(bad==0)then
             do i=1,n

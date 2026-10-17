@@ -5,6 +5,9 @@
 ! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module exx_spatial
+  use sr_wave_fft,only:wave_apply,wave_apply_pairs,wave_screen_supported
+  use mpi,only:MPI_Reduce,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_Wtime,MPI_Allreduce,MPI_INTEGER8
+  use sr_group_fft, only: group_plan,group_prepare,group_apply,group_destroy
   use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_valid,sparse_column,sparse_norms,sparse_clear
   use iso_fortran_env, only: int64
   use exx_pair_candidates, only: exx_pair_catalog,pair_catalog_build,pair_catalog_query,pair_source_box
@@ -15,7 +18,7 @@ module exx_spatial
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use exx_distributed_metric, only: distributed_metric_available
   use exx_distributed_gauge, only: s_exx_gauge,gauge_tiles_clear,gauge_tiles_refresh,gauge_tiles_rotate
-  use fftw_blocks, only: mesh_transform,block_layout
+  use fftw_blocks, only: mesh_transform,block_layout,fftw_block_seconds
   use exx_wannier_gauge, only: gauge_transport,gauge_minimize_gamma_inplace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -419,12 +422,13 @@ contains
   ! target columns may have different (including zero) local counts. Counts must
   ! agree within comm_r, and the communicators form a spatial/orbital product.
   subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o, &
-                               screen_target_count)
+                               screen_target_count,same_source)
 !$  use omp_lib, only: omp_get_max_threads
     implicit none
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(:),coords(:),comm(:),comm_r
     integer,intent(in),optional :: comm_o,screen_target_count
+    logical,intent(in),optional :: same_source
     real(8),intent(in) :: h(3),radius_input
     real(8),intent(in),optional :: omega
     complex(8),intent(in) :: target(:,:,:)
@@ -434,6 +438,19 @@ contains
     real(8),allocatable :: multiplier(:)
     type(exx_pair_catalog) :: catalogue
     type(s_exx_spatial_local) :: compact_plan
+    type(group_plan) :: gp
+    logical :: group_active,halo_enabled,wave_route,return_sum,pair_route,pair_requested
+    integer,allocatable :: pair_counts(:),source_ids(:),target_ids(:)
+    complex(8),allocatable :: reverse_action(:,:),reverse_recv(:,:)
+    integer(int64) :: pair_count,pair_total,pair_part,pair_reduction_bytes,bcast_bytes,bcast_calls
+    integer :: pair_flag,pair_negflag,pair_hi,pair_lo,mpi_error
+    real(8) :: pair_reduce_seconds,pair_tick,pair_fft_before(4)
+    complex(8),allocatable :: wave_sources(:,:)
+    integer(int64) :: wave_scratch,wave_peak,wave_return,wave_return_total
+    character(64) :: wave_env
+    character(64) :: radius_env,route_env
+    integer :: env_status,parse_status,wave_batch,batch_max,batch_negmax
+    real(8) :: explicit_radius
     type(s_exx_sr) :: sr
     complex(8),allocatable :: compact_action(:,:)
     logical :: compact_used,packed_source
@@ -453,6 +470,61 @@ contains
     integer(int64) :: sr_pairs,wf_pairs
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
+    group_active=.false.;halo_enabled=.true.;explicit_radius=0d0;wave_route=.false.
+    pair_requested=.false.;pair_route=.false.
+    call get_environment_variable('SALMON_HSE_SR_PAIR_SYMMETRY',wave_env,status=env_status)
+    if(env_status==0.and.len_trim(wave_env)>0)then
+      if(trim(wave_env)/='0'.and.trim(wave_env)/='1')bad=1
+      pair_requested=trim(wave_env)=='1'
+    endif
+    if(present(same_source))pair_route=pair_requested.and.same_source
+    pair_flag=merge(1,0,pair_route);pair_negflag=-pair_flag
+    call comm_get_max(pair_flag,comm_r);call comm_get_max(pair_negflag,comm_r)
+    if(present(comm_o))then
+      call comm_get_max(pair_flag,comm_o);call comm_get_max(pair_negflag,comm_o)
+    endif
+    if(pair_flag/=-pair_negflag)bad=1
+    return_sum=.true.;wave_batch=8
+    call get_environment_variable('SALMON_HSE_SR_WAVE_BATCH',wave_env,status=env_status)
+    if(env_status==0.and.len_trim(wave_env)>0)then
+      if(trim(wave_env)=='8')then
+        wave_batch=8
+      else if(trim(wave_env)=='16')then
+        wave_batch=16
+      else
+        bad=1
+      endif
+    endif
+    call get_environment_variable('SALMON_HSE_SR_RETURN_SUM',wave_env,status=env_status)
+    if(env_status==0.and.len_trim(wave_env)>0)then
+      if(trim(wave_env)/='0'.and.trim(wave_env)/='1')bad=1
+      return_sum=trim(wave_env)=='1'
+    endif
+    call get_environment_variable('SALMON_HSE_SR_WAVE_FIRST',wave_env,status=env_status)
+    if(env_status==0.and.len_trim(wave_env)>0)then
+      if(trim(wave_env)/='0'.and.trim(wave_env)/='1')bad=1
+      wave_route=trim(wave_env)=='1'
+    endif
+    call get_environment_variable('SALMON_HSE_SR_GROUP_FFT',route_env,status=env_status)
+    if(env_status==0.and.len_trim(route_env)>0)then
+      if(trim(route_env)/='0'.and.trim(route_env)/='1')bad=1
+      halo_enabled=trim(route_env)=='1';group_active=.true.
+      call get_environment_variable('SALMON_HSE_SR_RADIUS_AU',radius_env,status=env_status)
+      if(env_status/=0)then
+        bad=1
+      else
+        read(radius_env,*,iostat=parse_status)explicit_radius
+        if(parse_status/=0)then
+          bad=1
+        else if(.not.ieee_is_finite(explicit_radius).or.explicit_radius<=0d0)then
+          bad=1
+        endif
+      endif
+    endif
+    if(wave_route.and.(.not.group_active.or..not.wave_screen_supported(op%screen_mode,op%screen_tolerance)))bad=1
+    if(group_active.and.(.not.op%compact.or.op%sr_tolerance<=0d0))bad=1
+    pair_route=pair_route.and.wave_route
+    if(pair_route.and..not.return_sum)bad=1
     op%screen_candidates=0;op%screen_skipped=0;op%screen_bound=0d0;op%screen_cpu_seconds=0d0
     op%pair_products=0;op%pair_catalog_entries=0;op%pair_product_points=0
     screening=0d0
@@ -477,6 +549,14 @@ contains
     if(screening==0d0)then
       if(.not.ieee_is_finite(radius_input).or.radius_input<0d0)bad=1
     endif
+    batch_max=wave_batch;batch_negmax=-wave_batch
+    call comm_get_max(batch_max,comm_r)
+    call comm_get_max(batch_negmax,comm_r)
+    if(present(comm_o))then
+      call comm_get_max(batch_max,comm_o)
+      call comm_get_max(batch_negmax,comm_o)
+    endif
+    if(batch_max/=-batch_negmax)bad=1
     call collective_bad()
     if(bad/=0)return
     call block_layout(n,dims,coords,m,lo,bad)
@@ -507,6 +587,17 @@ contains
     endif
     call collective_bad()
     if(bad/=0)return
+    if(pair_route)then
+      if(packed_source.or..not.allocated(op%source))then
+        bad=1
+      else if(nt/=no_source)then
+        bad=1
+      else
+        if(any(target(:,:,1)/=op%source))bad=1
+      endif
+      call collective_bad()
+      if(bad/=0)return
+    endif
     allocate(source_column(ng))
     allocate(multiplier(ng));pi=acos(-1d0);g=0
     ! Every FFT preserves Cartesian xyz ownership, including two-axis callers.
@@ -607,7 +698,15 @@ contains
       if(status/=0)return
     endif
     sr_cost=huge(1d0);sr_pairs=0;wf_pairs=0
-    if(op%sr_tolerance>0d0)then
+    if(group_active)then
+      call group_prepare(gp,n,dims,coords,comm_r,compact_plan%kernel,h,explicit_radius,status,halo_enabled)
+      if(status/=0)then
+        call spatial_local_destroy(compact_plan)
+        return
+      endif
+      if(gp%rank==0)write(*,*)'EXX_GROUP_FFT radius/halo/group/shape ', &
+        explicit_radius,gp%use_halo,gp%gpeers,gp%length
+    else if(op%sr_tolerance>0d0)then
       call sr_prepare(sr,compact_plan,h,screening,op%sr_tolerance,comm_r,status)
       if(status/=0)return
       if(sr%ready)then
@@ -617,6 +716,105 @@ contains
       endif
       if(sr%rank==0)write(*,'(a,l2,3es18.9,3i8)')'EXX_SR active/radius/tail L1/L2/FFT shape: ', &
         sr%ready,sr%radius,sr%tail_l1,sr%tail_l2,sr%length
+    endif
+    if(wave_route)then
+      if(gp%rank==0)write(*,*)'EXX_WAVE_BATCH ',wave_batch
+      allocate(wave_sources(ng,wave_batch),compact_action(ng,nt));wave_peak=0;wave_return_total=0
+      pair_fft_before=fftw_block_seconds
+      pair_count=0;pair_reduction_bytes=0;bcast_bytes=0;bcast_calls=0;pair_reduce_seconds=0d0
+      if(pair_route)then
+        allocate(pair_counts(orb_size),source_ids(wave_batch),target_ids(nt))
+        allocate(reverse_action(ng,wave_batch),reverse_recv(ng,wave_batch))
+        do owner=0,orb_size-1
+          count=no_source
+          if(present(comm_o))call comm_bcast(count,comm_o,owner)
+          pair_counts(owner+1)=count
+        enddo
+        do j=1,nt;target_ids(j)=sum(pair_counts(:orb_rank))+j;enddo
+      endif
+      do owner=0,orb_size-1
+        count=no_source
+        if(present(comm_o))call comm_bcast(count,comm_o,owner)
+        do first=1,count,wave_batch
+          nb=min(wave_batch,count-first+1);wave_sources=0
+          do j=1,nb
+            i=first+j-1;nnz=-1
+            if(orb_rank==owner.and.packed_source)nnz=op%sparse_source%offset(i+1)-op%sparse_source%offset(i)
+            if(present(comm_o))call comm_bcast(nnz,comm_o,owner)
+            if(nnz>=0)then
+              allocate(wire_rows(nnz),wire_values(nnz))
+              if(orb_rank==owner)then
+                k0=op%sparse_source%offset(i)
+                wire_rows=op%sparse_source%row(k0:k0+nnz-1)
+                wire_values=op%sparse_source%value(k0:k0+nnz-1)
+              endif
+              if(present(comm_o))then
+                call comm_bcast(wire_rows,comm_o,owner)
+                call comm_bcast(wire_values,comm_o,owner)
+              endif
+              wave_sources(wire_rows,j)=wire_values
+              deallocate(wire_rows,wire_values)
+            else
+              if(orb_rank==owner)wave_sources(:,j)=op%source(:,i)
+              if(present(comm_o))then
+                call comm_bcast(wave_sources(:,j),comm_o,owner)
+                if(orb_size>1)then
+                  bcast_calls=bcast_calls+1
+                  if(orb_rank==owner)bcast_bytes=bcast_bytes+16_int64*ng*(orb_size-1)
+                endif
+              endif
+            endif
+          enddo
+          if(pair_route)then
+            do j=1,nb;source_ids(j)=sum(pair_counts(:owner))+first+j-1;enddo
+            call wave_apply_pairs(gp,wave_sources(:,:nb),target(:,:,1),source_ids(:nb),target_ids, &
+              compact_action,reverse_action(:,:nb),status,pair_part,wave_scratch,wave_batch)
+            pair_count=pair_count+pair_part;wave_return=0
+            wave_scratch=wave_scratch+32_int64*ng*wave_batch ! two reverse native blocks
+          else
+            call wave_apply(gp,wave_sources(:,:nb),target(:,:,1),compact_action,status,wave_scratch, &
+              aggregate_return=return_sum,return_bytes=wave_return,batch_size=wave_batch)
+            pair_count=pair_count+int(nb,int64)*nt
+          endif
+          call collective_bad_status()
+          if(status/=0)then
+            call group_destroy(gp)
+            call spatial_local_destroy(compact_plan)
+            return
+          endif
+          action(:,:,1)=action(:,:,1)+compact_action
+          if(pair_route)then
+            pair_tick=MPI_Wtime()
+            if(present(comm_o))then
+              call MPI_Reduce(reverse_action(:,:nb),reverse_recv(:,:nb),ng*nb,MPI_DOUBLE_COMPLEX,MPI_SUM, &
+                owner,comm_o,mpi_error)
+              if(orb_rank/=owner)pair_reduction_bytes=pair_reduction_bytes+16_int64*ng*nb
+            else
+              reverse_recv(:,:nb)=reverse_action(:,:nb)
+            endif
+            if(orb_rank==owner)action(:,first:first+nb-1,1)=action(:,first:first+nb-1,1)+reverse_recv(:,:nb)
+            pair_reduce_seconds=pair_reduce_seconds+MPI_Wtime()-pair_tick
+          endif
+          wave_peak=max(wave_peak,wave_scratch)
+          wave_return_total=wave_return_total+wave_return
+        enddo
+      enddo
+      if(gp%rank==0)write(*,*)'EXX_WAVE_FIRST phase/messages/bytes/scratch ', &
+        gp%phase,gp%messages,gp%bytes,wave_peak
+      if(gp%rank==0)write(*,*)'EXX_RETURN_SUM enabled/return_bytes ',return_sum,wave_return_total
+      pair_total=pair_count
+      if(present(comm_o))call MPI_Allreduce(pair_count,pair_total,1,MPI_INTEGER8,MPI_SUM,comm_o,mpi_error)
+      if(gp%rank==0)write(*,*)'EXX_PAIR_SYMMETRY enabled/local/global pairs/reduction bytes/bcast calls bytes/reduce seconds ', &
+        pair_route,pair_count,pair_total,pair_reduction_bytes,bcast_calls,bcast_bytes,pair_reduce_seconds
+      write(*,*)'EXX_PAIR_COMM orbital/spatial/sym/phase/pairs/msg/bytes/scratch/reduce/calls/bcast/reduce_seconds/fft ', &
+        orb_rank,gp%rank,pair_route,gp%phase,pair_count,gp%messages,gp%bytes,wave_peak, &
+        pair_reduction_bytes,bcast_calls,bcast_bytes,pair_reduce_seconds,fftw_block_seconds-pair_fft_before
+      ! Bytes above are logical collective payloads, not MPI algorithm wire traffic.
+      ! Per-spatial-rank repeats must not be summed as independent orbital pairs.
+      call group_destroy(gp)
+      call spatial_local_destroy(compact_plan,status)
+      call collective_bad_status()
+      return
     endif
     point_workers=1
 !$  point_workers=omp_get_max_threads()
@@ -665,7 +863,8 @@ contains
           if(status==0)call pair_catalog_query(catalogue,box_lower,box_upper,threshold_pair,selected,ncandidate,status)
           call collective_bad_status()
           if(bad/=0)then
-            call sr_destroy(sr)
+            call group_destroy(gp)
+          call sr_destroy(sr)
             call spatial_local_destroy(compact_plan)
             return
           endif
@@ -719,13 +918,14 @@ contains
           enddo
         endif
         op%screen_skipped=op%screen_skipped+int(nt-nselected,int64)
-        if(op%compact)then
+        if(.not.group_active.and.op%compact)then
           allocate(compact_action(ng,nselected))
           call spatial_local_apply(compact_plan,comm_r,source_column,target(:,selected(:nselected),1),compact_action, &
             compact_used,status,compact_pairs,compact_points,fft_cost_limit=sr_cost)
           call collective_bad_status()
           if(status/=0)then
-            call sr_destroy(sr)
+            call group_destroy(gp)
+          call sr_destroy(sr)
             call spatial_local_destroy(compact_plan)
             return
           endif
@@ -739,13 +939,28 @@ contains
             op%local_points=op%local_points+compact_points
             if(present(comm_o))call collective_bad()
             if(bad/=0)then
-              call sr_destroy(sr)
+              call group_destroy(gp)
+          call sr_destroy(sr)
               call spatial_local_destroy(compact_plan)
               return
             endif
             cycle
           endif
           deallocate(compact_action)
+        endif
+        if(group_active)then
+          allocate(compact_action(ng,nselected))
+          call group_apply(gp,source_column,target(:,selected(:nselected),1),compact_action,status)
+          if(status/=0)then
+            call group_destroy(gp)
+            call spatial_local_destroy(compact_plan)
+            return
+          endif
+          do j=1,nselected
+            action(:,selected(j),1)=action(:,selected(j),1)+compact_action(:,j)
+          enddo
+          deallocate(compact_action)
+          cycle
         endif
         if(sr%ready)then
           allocate(compact_action(ng,nselected))
@@ -797,15 +1012,18 @@ contains
         enddo
         if(present(comm_o))call collective_bad()
         if(bad/=0)then
+          call group_destroy(gp)
           call sr_destroy(sr)
           call spatial_local_destroy(compact_plan)
           return
         endif
       enddo
     enddo
+    if(group_active.and.gp%rank==0)write(*,*)'EXX_GROUP_FFT phase/messages/bytes ',gp%phase,gp%messages,gp%bytes
     if(op%sr_tolerance>0d0.and.sr%rank==0) &
       write(*,'(a,2i18)')'EXX_SR WF-local/neighborhood pairs: ',wf_pairs,sr_pairs
-    call sr_destroy(sr)
+    call group_destroy(gp)
+          call sr_destroy(sr)
     call spatial_local_destroy(compact_plan,status)
     call collective_bad_status()
     if(status/=0)return

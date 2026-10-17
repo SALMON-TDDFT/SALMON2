@@ -24,7 +24,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #ifdef USE_HSE
   use exx_ptcn, only: native_exx_step
   use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint
-  use exx_lcfo_rt, only: lcfo_exx_direct_rotate
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -95,7 +94,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   spsi_out%update_zwf_overlap = .false. 
   nspin = system%nspin
   hybrid_mesh_rt=((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
-    .and.yn_hse_lcfo_rt=='n' &
     .and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc))
   pbeh_mesh_md=hybrid_mesh_rt.and.xc/='hse06'.and.yn_md=='y'
 
@@ -279,9 +277,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
-#ifdef USE_HSE
-    call lcfo_exx_direct_rotate(system,mg,info,spsi_out)
-#endif
     call timer_end(LOG_CALC_EXC_COR)
     
   end if

@@ -63,10 +63,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
-  use lcfo_rt_basis, only: lcfo_rt_requested
-#ifdef USE_HSE
-  use exx_lcfo_rt, only: lcfo_exx_direct_rotate
-#endif
   use exx_functional, only: is_global_hybrid,is_hybrid
   implicit none
   integer,parameter :: Nd = 4
@@ -110,16 +106,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   integer :: itt
   logical :: rion_update,pbeh_mesh_md
 
-  pbeh_mesh_md=yn_md=='y'.and.(is_global_hybrid(xc)).and.yn_hse_lcfo_rt=='n'
+  pbeh_mesh_md=yn_md=='y'.and.(is_global_hybrid(xc))
 
-  if(lcfo_rt_requested())then
-    if(yn_dc/='n'.or.yn_conventional_from_dcdft/='y'.or. &
-       (.not.is_hybrid(xc)).or. &
-       theory/='tddft_response'.or.propagator/='hse_taylor4') &
-      error stop 'LCFO RT: requires conventional-from-DC hybrid tddft_response with Taylor4+ACE'
-    if(yn_restart=='y'.or.write_rt_wfn_k=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
-      error stop 'LCFO RT: restart/checkpoint output is not supported yet'
-  endif
 
   call nvtxStartRange('initialization_rt', __LINE__)
 
@@ -204,7 +192,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   end do
   if(((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
      .and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)) &
-     .and.yn_hse_lcfo_rt=='n'.and.ae_shape1=='Acos2')then
+     .and.ae_shape1=='Acos2')then
     ! Endpoint E for the imposed transverse pulse, including the initial force.
     call calc_Ac_ext_t(-dt,0d0,0,0,prior_ac)
     rt%E_ext(:,0)=-(rt%Ac_ext(:,1)-prior_ac(:,0))/(2d0*dt)
@@ -321,9 +309,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
-#ifdef USE_HSE
-  call lcfo_exx_direct_rotate(system,mg,info,spsi_in)
-#endif
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
@@ -530,7 +515,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
-     if((is_global_hybrid(xc)).and.yn_hse_lcfo_rt=='n')then
+     if((is_global_hybrid(xc)))then
        ! The reported GS energy remains the pre-kick reference, but the first
        ! nuclear half-kick must use the post-impulse electronic Hamiltonian.
        system%vec_Ac=rt%Ac_tot(:,0)

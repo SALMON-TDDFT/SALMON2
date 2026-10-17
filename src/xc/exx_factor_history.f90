@@ -17,6 +17,13 @@ module exx_factor_history
    import real64
    complex(real64),intent(inout)::a(:,:)
   end subroutine
+  subroutine alignment_callback(x,ref,status)
+   import real64
+   implicit none
+   complex(real64),intent(inout)::x(:,:)
+   complex(real64),intent(in)::ref(:,:)
+   integer,intent(out)::status
+  end subroutine
  end interface
 contains
 
@@ -49,8 +56,9 @@ contains
   complex(real64),intent(in)::ref(:,:)
   procedure(sum_callback)::sumgrid
   integer,intent(out)::status
-  complex(real64),allocatable::m(:,:),u(:,:),vh(:,:),r(:,:),work(:),row(:)
+  complex(real64),allocatable::m(:,:),u(:,:),vh(:,:),r(:,:),work(:),row(:),saved(:,:)
   real(real64),allocatable::s(:),rw(:)
+  real(real64)::svd_res,unit_u,unit_v,svd_scale
   complex(real64)::v,bad(1,1)
   integer::n,ng,i,j,k,info
   status=1;ng=size(x,1);n=size(x,2)
@@ -72,8 +80,30 @@ contains
   enddo
 !$omp end parallel do
   call sumgrid(m)
+  allocate(saved(n,n));saved=m
   call zgesvd('A','A',n,n,m,n,s,u,n,vh,n,work,size(work),rw,info)
-  if(info/=0)return
+  if(info/=0)then
+   write(*,'(a,i8)')'FACTOR_SVD_INFO ',info
+   return
+  endif
+  r=u
+  do j=1,n
+   r(:,j)=r(:,j)*s(j)
+  enddo
+  svd_scale=sqrt(sum(abs(saved)**2))
+  svd_res=sqrt(sum(abs(saved-matmul(r,vh))**2))/max(svd_scale,tiny(1d0))
+  r=matmul(conjg(transpose(u)),u)
+  m=matmul(vh,conjg(transpose(vh)))
+  do j=1,n
+   r(j,j)=r(j,j)-1d0
+   m(j,j)=m(j,j)-1d0
+  enddo
+  unit_u=sqrt(sum(abs(r)**2));unit_v=sqrt(sum(abs(m)**2))
+  write(*,'(a,i6,5es24.15)')'FACTOR_SVD_QUALITY n/residual/unit_u/unit_v/smin/smax: ', &
+    n,svd_res,unit_u,unit_v,minval(s),maxval(s)
+  if(.not.scalar_finite_real([svd_res,unit_u,unit_v,minval(s),maxval(s)]))return
+  if(svd_scale<=0d0.or.svd_res>1d-10)return
+  if(max(unit_u,unit_v)>1d-10*sqrt(dble(n)))return
   if(minval(s)<=maxval(s)*1d-12)return
   r=matmul(u,vh)
   ! Thread-private row workspace is only n elements; no extra local-grid frame.
@@ -91,13 +121,14 @@ contains
 !$omp end parallel
   status=0
  end subroutine
- subroutine history_accept(h,x,dv,step,sumgrid,status)
+ subroutine history_accept(h,x,dv,step,sumgrid,status,align)
   implicit none
   type(s_factor_history),intent(inout)::h
   complex(real64),intent(inout)::x(:,:)
   real(real64),intent(in)::dv
   integer,intent(in)::step
   procedure(sum_callback)::sumgrid
+  procedure(alignment_callback),optional::align
   integer,intent(out)::status
   complex(real64)::d(2),y,acc(6,1),bad(1,1)
   real(real64)::g(2,2),b(2),gg(2,2),rhs(2,1),ridge
@@ -115,7 +146,11 @@ contains
   if(h%count>0)then
    if(step-h%last/=h%interval)return
    if(any(shape(x)/=shape(h%x(:,:,1))))return
-   call factor_align(x,h%x(:,:,1),sumgrid,status)
+   if(present(align))then
+    call align(x,h%x(:,:,1),status)
+   else
+    call factor_align(x,h%x(:,:,1),sumgrid,status)
+   endif
    if(status/=0)return
   else
    allocate(h%x(size(x,1),size(x,2),3));h%x=0

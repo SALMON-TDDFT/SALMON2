@@ -307,8 +307,9 @@ contains
     integer,intent(in) :: comm_r,comm_o
     integer,intent(out) :: status
     integer,allocatable :: counts(:),target_counts(:)
-    complex(8),allocatable :: column(:),overlap(:),total(:)
-    integer :: first,rank,np,owner,i,j,g,bad,packed_mode
+    complex(8),allocatable :: panel(:,:),overlap(:,:),total(:,:)
+    integer,parameter :: panel_width=32
+    integer :: first,rank,np,owner,i,j,g,k,width,bad,packed_mode
     complex(8) :: dot
     status=1;action=0d0;bad=0
     packed_mode=merge(1,0,ace%packed)
@@ -333,26 +334,34 @@ contains
     if(bad/=0)return
     call orbital_layout(size(ace%factors,2),comm_r,comm_o,counts,first,bad)
     if(bad/=0)return
-    allocate(column(size(target,1)),overlap(size(target,2)),total(size(target,2)))
+    allocate(panel(size(target,1),panel_width))
+    allocate(overlap(size(target,2),panel_width),total(size(target,2),panel_width))
     call comm_get_groupinfo(comm_o,rank,np)
     do owner=0,np-1
-      do i=1,counts(owner)
-        if(rank==owner)column=ace%factors(:,i,1)
-        call comm_bcast(column,comm_o,owner)
-        ! Keep grid summation order within each independent target orbital.
-!$omp parallel do default(none) private(j,g,dot) shared(target,column,overlap,ace)
+      do i=1,counts(owner),panel_width
+        width=min(panel_width,counts(owner)-i+1)
+        panel=0d0
+        if(rank==owner)panel(:,:width)=ace%factors(:,i:i+width-1,1)
+        call comm_bcast(panel,comm_o,owner)
+        overlap=0d0
+        ! Preserve the grid sum and factor accumulation order while batching collectives.
+!$omp parallel do collapse(2) default(none) private(j,k,g,dot) shared(target,panel,overlap,ace,width)
+        do k=1,width
         do j=1,size(target,2)
           dot=0d0
           do g=1,size(target,1)
-            dot=dot+conjg(column(g))*target(g,j,1)
+            dot=dot+conjg(panel(g,k))*target(g,j,1)
           enddo
-          overlap(j)=dot*ace%dv
+          overlap(j,k)=dot*ace%dv
+        enddo
         enddo
 !$omp end parallel do
         call comm_summation(overlap,total,size(overlap),comm_r)
-!$omp parallel do default(none) private(j) shared(target,action,column,total)
+!$omp parallel do default(none) private(j,k) shared(target,action,panel,total,width)
         do j=1,size(target,2)
-          action(:,j,1)=action(:,j,1)-column*total(j)
+          do k=1,width
+            action(:,j,1)=action(:,j,1)-panel(:,k)*total(j,k)
+          enddo
         enddo
 !$omp end parallel do
       enddo
