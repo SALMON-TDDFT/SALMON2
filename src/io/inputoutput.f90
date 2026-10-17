@@ -292,6 +292,8 @@ contains
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
+      & exx_factor_mode,yn_exx_fft_orbits,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
+      & hse_sr_group_fft,yn_hse_sr_wave_first,yn_hse_sr_return_sum,yn_hse_sr_pair_symmetry,hse_sr_radius, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
@@ -760,6 +762,15 @@ contains
     exx_mlwf_tolerance = -huge(1d0)
     hse_mlwf_tolerance = -huge(1d0)
     exx_mlwf_radius = 0d0
+    exx_factor_mode = 'off'
+    yn_exx_fft_orbits = 'n'
+    yn_ace_shadow_diagnostic = 'n'
+    yn_ace_export_factors = 'n'
+    hse_sr_group_fft = 'off'
+    yn_hse_sr_wave_first = 'n'
+    yn_hse_sr_return_sum = 'y'
+    yn_hse_sr_pair_symmetry = 'n'
+    hse_sr_radius = 0d0
     exx_factor_history_frames = 3
     exx_factor_exact_interval = 8
     exx_factor_n_teach = 8
@@ -1387,6 +1398,24 @@ contains
     call string_lowercase(exx_ace_support)
     call comm_bcast(exx_pair_screening,nproc_group_global)
     call string_lowercase(exx_pair_screening)
+    call comm_bcast(exx_factor_mode,nproc_group_global)
+    call string_lowercase(exx_factor_mode)
+    call comm_bcast(yn_exx_fft_orbits,nproc_group_global)
+    call string_lowercase(yn_exx_fft_orbits)
+    call comm_bcast(yn_ace_shadow_diagnostic,nproc_group_global)
+    call string_lowercase(yn_ace_shadow_diagnostic)
+    call comm_bcast(yn_ace_export_factors,nproc_group_global)
+    call string_lowercase(yn_ace_export_factors)
+    call comm_bcast(hse_sr_group_fft,nproc_group_global)
+    call string_lowercase(hse_sr_group_fft)
+    call comm_bcast(yn_hse_sr_wave_first,nproc_group_global)
+    call string_lowercase(yn_hse_sr_wave_first)
+    call comm_bcast(yn_hse_sr_return_sum,nproc_group_global)
+    call string_lowercase(yn_hse_sr_return_sum)
+    call comm_bcast(yn_hse_sr_pair_symmetry,nproc_group_global)
+    call string_lowercase(yn_hse_sr_pair_symmetry)
+    call comm_bcast(hse_sr_radius,nproc_group_global)
+    hse_sr_radius=hse_sr_radius*ulength_to_au
     call comm_bcast(hse_sr_tolerance,nproc_group_global)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
     call comm_bcast(exx_kpoint_backend,nproc_group_global)
@@ -2383,6 +2412,15 @@ contains
       write(fh_variables_log, *) "# exx_pre_scf_steps=",exx_pre_scf_steps
       write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
+      write(fh_variables_log, *) "# exx_factor_mode=",exx_factor_mode
+      write(fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
+      write(fh_variables_log, *) "# yn_ace_shadow_diagnostic=",yn_ace_shadow_diagnostic
+      write(fh_variables_log, *) "# yn_ace_export_factors=",yn_ace_export_factors
+      write(fh_variables_log, *) "# hse_sr_group_fft=",hse_sr_group_fft
+      write(fh_variables_log, *) "# yn_hse_sr_wave_first=",yn_hse_sr_wave_first
+      write(fh_variables_log, *) "# yn_hse_sr_return_sum=",yn_hse_sr_return_sum
+      write(fh_variables_log, *) "# yn_hse_sr_pair_symmetry=",yn_hse_sr_pair_symmetry
+      write(fh_variables_log, *) "# hse_sr_radius=",hse_sr_radius*ulength_from_au
       write(fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
       write(fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
@@ -2959,11 +2997,8 @@ contains
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
-    character(32) :: history_mode
-    integer :: history_status
 
-    call get_environment_variable('SALMON_FACTOR_HISTORY',history_mode,status=history_status)
-    learned_mesh_checkpoint=history_status==0.and.trim(history_mode)=='learned'.and.xc=='hse06'.and. &
+    learned_mesh_checkpoint=exx_factor_mode=='learned'.and.xc=='hse06'.and. &
       yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
       product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
       exx_ace_support=='source'.and.nproc_ob==1.and.yn_self_checkpoint=='n'
@@ -3042,6 +3077,12 @@ contains
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
     call yn_argument_check(yn_hse_wannier)
+    call yn_argument_check(yn_exx_fft_orbits)
+    call yn_argument_check(yn_ace_shadow_diagnostic)
+    call yn_argument_check(yn_ace_export_factors)
+    call yn_argument_check(yn_hse_sr_wave_first)
+    call yn_argument_check(yn_hse_sr_return_sum)
+    call yn_argument_check(yn_hse_sr_pair_symmetry)
     call yn_argument_check(yn_hse_profile)
     call yn_argument_check(yn_hse_eigen_diagnostic)
     call yn_argument_check(yn_hse_solver_diagnostic)
@@ -3391,6 +3432,42 @@ contains
       if(yn_md/='n'.or.yn_opt/='n'.or. &
         (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
         error stop 'cuFFT EXX supports static SCF and fixed-ion native RT'
+    endif
+
+    if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned') &
+      error stop 'exx_factor_mode must be off, strict or learned'
+    if(hse_sr_group_fft/='off'.and.hse_sr_group_fft/='direct'.and.hse_sr_group_fft/='halo') &
+      error stop 'hse_sr_group_fft must be off, direct or halo'
+    if(.not.ieee_is_finite(hse_sr_radius).or.hse_sr_radius<0d0) &
+      error stop 'hse_sr_radius must be finite and nonnegative'
+    if(hse_sr_group_fft/='off')then
+#ifndef USE_MPI
+      error stop 'SR group FFT requires MPI'
+#endif
+      if(hse_sr_radius<=0d0.or.hse_sr_tolerance<=0d0) &
+        error stop 'SR group FFT requires positive radius and SR tolerance'
+    else if(hse_sr_radius/=0d0)then
+      error stop 'hse_sr_radius requires SR group FFT'
+    endif
+    if(yn_hse_sr_wave_first=='y'.and.hse_sr_group_fft=='off') &
+      error stop 'SR wave-first requires SR group FFT'
+    if(yn_hse_sr_pair_symmetry=='y'.and. &
+       (yn_hse_sr_wave_first/='y'.or.yn_hse_sr_return_sum/='y')) &
+      error stop 'SR pair symmetry requires wave-first and aggregated return'
+    if(yn_exx_fft_orbits=='y')then
+      if(xc/='hse06'.or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
+         any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or.yn_dc/='n') &
+        error stop 'FFT orbits require native CPU dense-k HSE symmetry with all q points'
+    endif
+    if(exx_factor_mode/='off')then
+      if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
+         propagator/='hse_taylor4'.or.yn_predictor_corrector/='y') &
+        error stop 'Factor history requires native static HSE Taylor4 predictor-corrector'
+    endif
+    if(yn_ace_shadow_diagnostic=='y'.or.yn_ace_export_factors=='y')then
+      if(exx_surrogate_mode/='trace')error stop 'ACE diagnostic switches require surrogate trace'
+      if(yn_ace_export_factors=='y'.and.(nelec/=2.or.nstate/=1)) &
+        error stop 'Raw factor export requires one-orbital H2 diagnostic'
     endif
 
     if(exx_factor_history_frames/=3) &

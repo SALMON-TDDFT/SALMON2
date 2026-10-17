@@ -430,6 +430,8 @@ contains
   subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o, &
                                screen_target_count,same_source)
 !$  use omp_lib, only: omp_get_max_threads
+    use salmon_global,only:yn_hse_sr_pair_symmetry,yn_hse_sr_return_sum,yn_hse_sr_wave_first, &
+      hse_sr_group_fft,hse_sr_radius
     implicit none
     type(spatial_exx_state),intent(inout) :: op
     integer,intent(in) :: n(3),dims(:),coords(:),comm(:),comm_r
@@ -453,9 +455,8 @@ contains
     real(8) :: pair_reduce_seconds,pair_tick,pair_fft_before(4)
     complex(8),allocatable :: wave_sources(:,:)
     integer(int64) :: wave_scratch,wave_peak,wave_return,wave_return_total
-    character(64) :: wave_env
-    character(64) :: radius_env,route_env
-    integer :: env_status,parse_status,wave_batch,batch_max,batch_negmax
+    integer,parameter :: wave_batch=16
+    integer :: batch_max,batch_negmax
     real(8) :: explicit_radius
     type(s_exx_sr) :: sr
     complex(8),allocatable :: compact_action(:,:)
@@ -476,13 +477,12 @@ contains
     integer(int64) :: sr_pairs,wf_pairs
     integer :: ng,nt,m(3),lo(3),x,y,z,g,p(3),i,j,first,nb,bad,owner,orb_rank,orb_size,count,counts_max,nt_max
     status=1;action=0d0;bad=0
-    group_active=.false.;halo_enabled=.true.;explicit_radius=0d0;wave_route=.false.
-    pair_requested=.false.;pair_route=.false.
-    call get_environment_variable('SALMON_HSE_SR_PAIR_SYMMETRY',wave_env,status=env_status)
-    if(env_status==0.and.len_trim(wave_env)>0)then
-      if(trim(wave_env)/='0'.and.trim(wave_env)/='1')bad=1
-      pair_requested=trim(wave_env)=='1'
-    endif
+    group_active=hse_sr_group_fft/='off'
+    halo_enabled=hse_sr_group_fft=='halo'
+    explicit_radius=hse_sr_radius
+    wave_route=yn_hse_sr_wave_first=='y'
+    return_sum=yn_hse_sr_return_sum=='y'
+    pair_requested=yn_hse_sr_pair_symmetry=='y';pair_route=.false.
     if(present(same_source))pair_route=pair_requested.and.same_source
     pair_flag=merge(1,0,pair_route);pair_negflag=-pair_flag
     call comm_get_max(pair_flag,comm_r);call comm_get_max(pair_negflag,comm_r)
@@ -490,43 +490,6 @@ contains
       call comm_get_max(pair_flag,comm_o);call comm_get_max(pair_negflag,comm_o)
     endif
     if(pair_flag/=-pair_negflag)bad=1
-    return_sum=.true.;wave_batch=8
-    call get_environment_variable('SALMON_HSE_SR_WAVE_BATCH',wave_env,status=env_status)
-    if(env_status==0.and.len_trim(wave_env)>0)then
-      if(trim(wave_env)=='8')then
-        wave_batch=8
-      else if(trim(wave_env)=='16')then
-        wave_batch=16
-      else
-        bad=1
-      endif
-    endif
-    call get_environment_variable('SALMON_HSE_SR_RETURN_SUM',wave_env,status=env_status)
-    if(env_status==0.and.len_trim(wave_env)>0)then
-      if(trim(wave_env)/='0'.and.trim(wave_env)/='1')bad=1
-      return_sum=trim(wave_env)=='1'
-    endif
-    call get_environment_variable('SALMON_HSE_SR_WAVE_FIRST',wave_env,status=env_status)
-    if(env_status==0.and.len_trim(wave_env)>0)then
-      if(trim(wave_env)/='0'.and.trim(wave_env)/='1')bad=1
-      wave_route=trim(wave_env)=='1'
-    endif
-    call get_environment_variable('SALMON_HSE_SR_GROUP_FFT',route_env,status=env_status)
-    if(env_status==0.and.len_trim(route_env)>0)then
-      if(trim(route_env)/='0'.and.trim(route_env)/='1')bad=1
-      halo_enabled=trim(route_env)=='1';group_active=.true.
-      call get_environment_variable('SALMON_HSE_SR_RADIUS_AU',radius_env,status=env_status)
-      if(env_status/=0)then
-        bad=1
-      else
-        read(radius_env,*,iostat=parse_status)explicit_radius
-        if(parse_status/=0)then
-          bad=1
-        else if(.not.ieee_is_finite(explicit_radius).or.explicit_radius<=0d0)then
-          bad=1
-        endif
-      endif
-    endif
     if(wave_route.and.(.not.group_active.or..not.wave_screen_supported(op%screen_mode,op%screen_tolerance)))bad=1
     if(group_active.and.(.not.op%compact.or.op%sr_tolerance<=0d0))bad=1
     pair_route=pair_route.and.wave_route

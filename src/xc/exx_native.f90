@@ -34,6 +34,7 @@ module exx_native
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
+    exx_factor_mode,yn_exx_fft_orbits,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
     yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance, &
     hse_sr_tolerance,hse_block_rows,hse_q_reduction, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
@@ -96,19 +97,14 @@ contains
     integer,intent(in),optional::total_steps
     real(8),intent(in)::step_dt
     logical,intent(in)::final_step
-    integer::status,h,env_status,factor_count
-    character(8)::shadow_env
+    integer::status,h,factor_count
     complex(8),allocatable::pred(:,:),truth(:,:),frozen(:,:),linear(:,:)
     real(8)::basis_leakage,basis_action_error
     if(exx_surrogate_mode=='off')return
     if(exx_freeze)error stop 'EXX trace cannot record frozen exchange'
     if(strict_trace%epoch<0)then
-      shadow_env=''
-      call get_environment_variable('SALMON_ACE_SHADOW_DIAGNOSTIC',shadow_env,status=env_status)
-      diagnostic_shadow=env_status==0.and.shadow_env=='1'
-      shadow_env=''
-      call get_environment_variable('SALMON_ACE_EXPORT_FACTORS',shadow_env,status=env_status)
-      export_factor_diagnostic=env_status==0.and.shadow_env=='1'
+      diagnostic_shadow=yn_ace_shadow_diagnostic=='y'
+      export_factor_diagnostic=yn_ace_export_factors=='y'
       if(export_factor_diagnostic.and.(nelec/=2.or.nstate/=1)) &
         error stop 'Raw factor export currently restricted to H2 one-orbital diagnostic'
       ! Layout and propagator are invariant within this fixed-ion trace epoch.
@@ -190,14 +186,12 @@ contains
     implicit none
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
-    character(32)::value
-    integer::stat,ik
+    integer::ik
     if(.not.factor_configured)then
-      call get_environment_variable('SALMON_FACTOR_HISTORY',value,status=stat)
-      factor_experiment=stat==0
+      factor_experiment=exx_factor_mode/='off'
       if(factor_experiment)then
-        if(trim(value)/='strict'.and.trim(value)/='learned')error stop 'Invalid factor history mode'
-        factor_learned=trim(value)=='learned'
+        if(exx_factor_mode/='strict'.and.exx_factor_mode/='learned')error stop 'Invalid factor history mode'
+        factor_learned=exx_factor_mode=='learned'
 
         if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
           propagator/='hse_taylor4'.or.yn_predictor_corrector/='y'.or. &
@@ -272,20 +266,15 @@ contains
     integer,intent(in)::step
     type(s_parallel_info),intent(in)::info
     logical,intent(in)::writing
-    character(32)::value
-    integer::env_status,mode,saved_mode,unit,status,total,ios,version,saved_step
+    integer::mode,saved_mode,unit,status,total,ios,version,saved_step
     logical::exists,has_history
-    mode=0;status=0;value=''
-    call get_environment_variable('SALMON_FACTOR_HISTORY',value,status=env_status)
-    if(env_status==0)then
-      select case(trim(value))
-      case('strict');mode=1
-      case('learned');mode=2
-      case default;status=1
-      end select
-    else if(env_status/=1)then
-      status=1
-    endif
+    mode=0;status=0
+    select case(exx_factor_mode)
+    case('off');mode=0
+    case('strict');mode=1
+    case('learned');mode=2
+    case default;status=1
+    end select
     call comm_summation(status,total,info%icomm_rko)
     if(total/=0)error stop 'Invalid factor mode at checkpoint/restart'
     if(info%id_rko==0)then
@@ -909,8 +898,6 @@ contains
     integer,intent(out) :: ierr
     integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np,j,index,total_error
     complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:)
-    character(16) :: orbit_mode
-    integer :: orbit_status
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
@@ -927,9 +914,8 @@ contains
         ierr=1;return
       endif
       allocate(rotated(size(source,1),size(source,2)))
-      ! Opt-in diagnostic route. Keep the established full route as the default.
-      call get_environment_variable('SALMON_EXX_FFT_ORBITS',orbit_mode,status=orbit_status)
-      if(orbit_status==0.and.trim(orbit_mode)=='1')then
+      ! Opt-in route. Keep the established full route as the default.
+      if(yn_exx_fft_orbits=='y')then
         call apply_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
           info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_density_selected,ierr)
         return

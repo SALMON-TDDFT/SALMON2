@@ -130,6 +130,12 @@ module salmon_global
   logical :: exx_pre_scf_active=.false. ! runtime only, never serialized as target GS
   character(8) :: exx_ace_support ! occupied/source ACE construction vectors
   character(8) :: exx_pair_screening ! off/diagnose/on; discrete hybrid pair bound
+  character(8) :: exx_factor_mode = 'off' ! off/strict/learned exact-factor history
+  character(1) :: yn_exx_fft_orbits = 'n'
+  character(1) :: yn_ace_shadow_diagnostic = 'n',yn_ace_export_factors = 'n'
+  character(8) :: hse_sr_group_fft = 'off' ! off/direct/halo
+  character(1) :: yn_hse_sr_wave_first = 'n',yn_hse_sr_return_sum = 'y',yn_hse_sr_pair_symmetry = 'n'
+  real(8) :: hse_sr_radius = 0d0 ! input length, converted to bohr
   real(8) :: hse_sr_tolerance ! erfc(omega*R), zero disables finite-range convolution
   real(8) :: exx_pair_tolerance ! raw exchange action Frobenius budget, atomic units
   character(8) :: exx_kpoint_backend ! cpu/cufft full k-mesh exchange convolution

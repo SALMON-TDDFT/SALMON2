@@ -48,6 +48,7 @@ subroutine rt_energy_reference_initialize(value)
 end subroutine
 
 subroutine rt_energy_reference_file(directory,step,info,writing)
+  use salmon_global,only:exx_factor_mode
   use structures,only:s_parallel_info
   use communication,only:comm_bcast
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -56,8 +57,7 @@ subroutine rt_energy_reference_file(directory,step,info,writing)
   integer,intent(in)::step
   type(s_parallel_info),intent(in)::info
   logical,intent(in)::writing
-  integer::unit,status,ios,version,saved_step,envstat
-  character(32)::mode
+  integer::unit,status,ios,version,saved_step
   logical::exists
   status=0
   if(info%id_rko==0)then
@@ -84,8 +84,7 @@ subroutine rt_energy_reference_file(directory,step,info,writing)
         if(ios/=0)status=1
       endif
     else
-      call get_environment_variable('SALMON_FACTOR_HISTORY',mode,status=envstat)
-      if(envstat==0.and.trim(mode)=='learned')status=1
+      if(exx_factor_mode=='learned')status=1
     endif
     rt_initial_energy_loaded=.not.writing.and.exists.and.status==0
   endif

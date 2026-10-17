@@ -8,6 +8,7 @@ module lcfo_mesh_stream
   public :: s_lcfo_cache, lcfo_cache_load, lcfo_cache_contract
   type :: s_lcfo_cache
     complex(8),allocatable :: basis(:,:),coeff(:,:)
+    integer(int64) :: workspace_bytes=0_int64 ! rank-local reconstruction memory estimate
   end type
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
   private :: salmon_all_finite,finite_real_1d

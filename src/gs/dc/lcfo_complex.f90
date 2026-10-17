@@ -1411,9 +1411,7 @@ contains
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
     complex(8), allocatable :: cached_local(:),cached_sum(:)
     type(s_lcfo_cache),allocatable :: cache(:)
-    integer(int64)::cache_bytes,cache_limit
-    integer::env_status,ios_cache,reject_cache
-    character(32)::cache_budget
+    integer(int64)::cache_bytes
 
 #if defined(USE_OPENACC) || defined(USE_CUDA)
     stop "DC-LCFO complex reconstruction: GPU/OpenACC/CUDA is unsupported."
@@ -1506,29 +1504,16 @@ contains
       write(*,*) "complex LCFO format v1; fragments/k/spins:",nfrag,nk,nspin
       write(*,*) 'DC_LCFO_CACHE fragment payloads loaded once; one-orbital global scratch'
     end if
-    ! A bounded, temporary one-orbital global workspace restores the original DC
-    ! reconstruction schedule without retaining a replicated global orbital matrix.
-    cache_limit=512_int64*1024*1024
-    cache_budget=''
-    call get_environment_variable('SALMON_LCFO_CACHE_MIB',cache_budget,status=env_status)
-    if(env_status==0)then
-      read(cache_budget,*,iostat=ios_cache)cache_limit
-      if(ios_cache/=0.or.cache_limit<1.or.cache_limit>4096)error stop 'Invalid LCFO cache budget'
-      cache_limit=cache_limit*1024*1024
-    endif
+    ! Temporary one-orbital workspace; retain the memory estimate internally.
+    ! Available memory is machine dependent, so impose no fixed budget.
     cache_bytes=32_int64*ngrid
     do f=1,nfrag
       if(.not.allocated(frag(f)%jxyz))cycle
       cache_bytes=cache_bytes+16_int64*int(maxval(n_basis_all(f,:,:)),int64)* &
         (int(meta(7),int64)*meta(8)*meta(9)+system%no)
     enddo
-    reject_cache=0
-    if(cache_bytes>cache_limit)reject_cache=1
-    call comm_summation(reject_cache,total_status,info%icomm_ro)
-    if(total_status/=0)error stop 'LCFO cache exceeds requested budget'
-    if(info%id_ro==0)write(*,'(a,2i16)') &
-      'DC_LCFO_CACHE rank0 bytes/budget=',cache_bytes,cache_limit
     allocate(cache(nfrag),cached_local(ngrid),cached_sum(ngrid))
+    cache(1)%workspace_bytes=cache_bytes
     do ik=info%ik_s,info%ik_e
       do ispin=1,nspin
         local_status=0

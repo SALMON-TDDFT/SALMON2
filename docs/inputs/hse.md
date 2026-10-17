@@ -444,11 +444,11 @@ physical kernel is made when switching FFT routes.
 
 ## Learned ACE: activation and defaults
 
-These controls belong to `&functional`. Learned ACE is **off by default**:
-setting the namelist parameters alone does not activate it. Enable prediction
-with the case-sensitive environment value `SALMON_FACTOR_HISTORY=learned` on
-all MPI ranks. `strict` keeps full exchange updates for a comparison run;
-unset the variable to use the ordinary ACE path.
+These controls belong to `&functional`. Learned ACE is **off by default**.
+Set `exx_factor_mode='learned'` to enable prediction, `'strict'` for exact
+endpoint history without prediction, or `'off'` for ordinary ACE.
+Environment switches are no longer read. See
+[feature selection](hse-feature-selection.md) for dense-k and SR route inputs.
 
 | Control | Code default | Meaning |
 |---|---|---|
@@ -501,11 +501,10 @@ Example for Gamma spatial MPI (add ordinary system/grid/pseudopotential input):
 ```
 
 ```sh
-export SALMON_FACTOR_HISTORY=learned
 mpiexec -n 8 /path/to/salmon < inputfile > output.log
 ```
 
-Ensure the launcher exports the variable to every rank. Check
+Set `exx_factor_mode='learned'` in `&functional`. Check
 `FACTOR_HISTORY learned`, `FACTOR_HISTORY step/predicted`, and `variables.log`.
 Compare currents, absorbed work and spectra with `strict` at the same physical
 conditions; a predicted ACE energy expectation is not an independently
@@ -530,8 +529,7 @@ more work. `1d-3` is the tested starting setting; validate it for the material.
 | `exx_local_fft` | `'auto'` | Select compatible local/neighborhood FFT work. |
 | `exx_local_backend` | `'cpu'` | CPU SR implementation. |
 
-Use the Gamma example above without the `exx_factor_*` entries and without
-`SALMON_FACTOR_HISTORY` to use SR with ordinary ACE. WF truncation is not
+Use the Gamma example above with `exx_factor_mode='off'` to use SR with ordinary ACE. WF truncation is not
 required: fraction 1 and radius 0 preserve full support. The current learned
 Gamma adapter specifically requires these values and SR tolerance `1d-3`.
 

@@ -39,6 +39,15 @@
  lloc_ps(1)=0
 /
 &functional
+ exx_factor_mode='OFF'
+ yn_exx_fft_orbits='N'
+ yn_ace_shadow_diagnostic='N'
+ yn_ace_export_factors='N'
+ hse_sr_group_fft='OFF'
+ yn_hse_sr_wave_first='N'
+ yn_hse_sr_return_sum='Y'
+ yn_hse_sr_pair_symmetry='N'
+ hse_sr_radius=0d0
  xc='hse06'
 /
 &rgrid

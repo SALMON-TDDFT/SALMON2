@@ -32,6 +32,15 @@ values=[float(line.split()[3]) for line in f.read_text().splitlines() if line.st
 if not (len(values) == 8 and all(map(math.isfinite, values))):
     print("Mismatch:", 'LCFO eigenvalues missing/nonfinite')
     sys.exit(-1)
+variables=Path('variables.log').read_text()
+for key,value in [('exx_factor_mode','off'),('yn_exx_fft_orbits','n'),
+                  ('yn_ace_shadow_diagnostic','n'),('yn_ace_export_factors','n'),
+                  ('hse_sr_group_fft','off'),('yn_hse_sr_wave_first','n'),
+                  ('yn_hse_sr_return_sum','y'),('yn_hse_sr_pair_symmetry','n')]:
+    if not any(line.split('=',1)[-1].strip()==value for line in variables.splitlines()
+               if line.strip().startswith('# '+key+'=')):
+        print('Mismatch: namelist value',key)
+        sys.exit(-1)
 print('DC-HSE converged; two k points, complex LCFO, core exchange accounting present')
 
 print("# Verification end")
