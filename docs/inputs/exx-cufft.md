@@ -54,8 +54,8 @@ necessary for a production calculation.
 The GPU option requires native hybrid orbitals at unshifted Gamma,
 `num_kgrid=1,1,1`, `nproc_k=1`, automatic local FFT selection, zero fixed radius,
 and an adaptive retained-norm fraction strictly between zero and one. Static
-SCF and fixed-ion native response/pulse RT are admitted; LCFO RT, moving-ion
-calculations, and multi-k GPU exchange are outside this backend's scope.
+SCF and fixed-ion native response/pulse RT are admitted; moving-ion
+calculations and multi-k GPU exchange are outside this backend's scope.
 Other native hybrid input restrictions still apply. Selecting `cufft` in a
 build without the backend is an error. A nonempty GPU call also errors when no
 NVIDIA device is available; it does not silently pass the GPU test on the CPU.

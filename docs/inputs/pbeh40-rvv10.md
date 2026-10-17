@@ -82,62 +82,11 @@ PBEh forces differentiate the same cubic radial projector and solid spherical ha
 - DC+rVV10 evaluates the **buffered fragment density in its own periodic cell**, including initial orbital preparation. It reuses the conventional XC evaluator and only the fragment spatial communicator for convolution; it does not convolve the assembled total density. The returned energy density is integrated over the core only, then scalar fragment energies are summed once (without orbital/k-point duplication). The potential acts throughout the core and buffer. Hartree remains a total-system calculation. Converge fragment/buffer size to control missing distant correlations and fragment periodic-image effects. The full-fragment potential is not asserted to be the functional derivative of the core-partitioned DC energy; direct truncated-fragment DC-MD remains disabled. Native mesh RT after DC initialization still evaluates rVV10 in its full propagation cell.
 - No production scaling, long liquid trajectory, diffusivity, RDF, density, or exchange-cutoff convergence claim follows from the bounded tests below.
 
-## DC-LCFO electronic response
+## DC LCFO initialization for real-space response
 
-A fixed-nuclei, Gamma-point, occupied-only response can now start from the
-complex LCFO files of a static DC calculation with the same `xc`. Set
-`theory='tddft_response'`, `yn_dc='n'`, `yn_conventional_from_dcdft='y'`,
-and `yn_hse_lcfo_rt='y'`. The historical LCFO flag name is retained.
-Omit electronic temperature and use `nstate=nelec/2`. Each spatial rank must
-match one saved fragment core; orbital MPI groups are supported. The default
-propagator is `hse_taylor4` with predictor/corrector. Use an impulse field.
-This is electronic response in a fixed LCFO subspace, with no initial SCF
-reconvergence; it does not enable DC-MD.
+A static DC calculation supplies complex LCFO files for initial real-space orbital reconstruction. Use `yn_dc='n'` and `yn_conventional_from_dcdft='y'` for the supported real-space response route described below. LCFO basis functions and coefficients are not retained during time propagation. Fixed-LCFO-subspace response and its former input controls have been removed.
 
-Both the projected exchange and its continuity diagnostic use 40% unscreened
-spherical-cutoff Coulomb exchange. Automatic Coulomb radius is half the shortest
-**fragment plus buffer** side. Transported MLWF sources and coefficient-space
-ACE use the existing LCFO algorithms. This first PBEh RT route requires
-`exx_mlwf_radius=0` in the generating GS and `hse_lcfo_wf_radius=0` in RT.
-A finite-source-radius RT model needs separate convergence/energy validation.
-
-For rVV10, the density gradient and potential divergence use the same halo
-exchange and finite-difference stencils as the spatially decomposed Laplacian.
-The convolution uses the same native pencil adapter as SCF/DC on compatible
-grids. Derivatives return to each owned core and enter the existing halo
-divergence. Orbital groups do not multiply nonlocal energy. The reference
-root FFT remains a compatibility fallback, as described above.
-
-New complex LCFO exports include a `functional.txt` per fragment, bound to the
-binary run ID. Reconstruction checks the functional, relevant exchange/rVV10
-parameters and source radius for every fragment. PBEh requires these files;
-legacy HSE data without them retain their previous route. Radius input values
-are compared after unit conversion (automatic zero and an explicit equivalent
-radius are deliberately distinct input settings). RT restart/checkpoint output
-remains unsupported.
-
-Run the integration fixture with:
-
-```
-python3 developer_tests/652_dc_lcfo/rt/test_pbeh_response.py \
-  --binary /absolute/path/to/salmon --pseudo /absolute/path/to/H_rps.dat
-```
-
-Direct distributed energy, density derivatives and full-potential comparisons
-against serial FFTW are available with:
-
-```
-python3 developer_tests/653_functional/test_distributed.py --build /absolute/path/to/build
-```
-
-This uses the configured MPI/HSE build objects and tests 2/4 ranks, individual
-and combined spatial axes, q grids of 8/16/32, OpenMP 1/2, collective rejection,
-fallback and preservation of independent Poisson FFT tables.
-
-Use `--xc pbeh40` for exchange-only hybrid coverage and `--axis y` or `--axis z`
-to exercise the corresponding domain boundaries. The fixture checks time-step
-refinement, orbital decomposition and functional metadata rejection, not a
-converged water absorption spectrum.
+Complex exports include a `functional.txt` per fragment, bound to the binary run ID. Reconstruction validates the functional, exchange/rVV10 settings and source radius. Keep these files with the corresponding binary fragment payloads.
 
 ## Build and verification
 
@@ -161,7 +110,7 @@ The standalone kernel tests currently use the same macOS Homebrew toolchain layo
 ## Reusable FFTW pencil backend
 
 Set `rvv10_fft='fftw'` in `&functional` to select cached FFTW transforms for
-SCF, static DC and the supported LCFO response route. FFTW uses measured
+SCF, static DC and supported real-space response. FFTW uses measured
 `plan_many` plans, serial FFTs per MPI rank, and batches of at most four channels.
 Plans and packing maps are reused until the grid, process coordinates or batch
 size changes. Calls must enter serially per rank; axis communicators must be
@@ -230,7 +179,7 @@ The existing zero-temperature and non-PBEh occupation paths are unchanged.
 ## DC initial state to real-space Ehrenfest
 
 A bounded native route now uses `theory='tddft_response'`, `yn_md='y'`,
-`yn_dc='n'`, `yn_conventional_from_dcdft='y'`, and `yn_hse_lcfo_rt='n'`.
+`yn_dc='n'`, `yn_conventional_from_dcdft='y'`, .
 The existing reader reconstructs DC-LCFO initial states onto the real-space
 mesh and checks functional/run metadata. Thereafter the wavefunction is the
 ordinary `spsi%zwf` mesh array; it is never projected back to the LCFO subspace.
@@ -295,7 +244,7 @@ The path requires an unshifted Gamma point, orthorhombic periodic cell,
 fully occupied spin pairs, `exx_mlwf_radius=0`, and the default Taylor4+ACE.
 The x dimension is complete on each pencil; y/z are distributed. Grid sizes
 must satisfy the FFTW pencil divisibility constraints. Static DC fragments,
-projected LCFO RT and multi-k calculations retain their prior layout support.
+multi-k calculations retain their prior layout support.
 
 MLWF localization reduces six band-overlap matrices; polar transport reduces
 the temporal overlap matrix. Each rank retains only local grid rows of the
@@ -321,8 +270,7 @@ Use `samples/pbeh40_rvv10/h4_ehrenfest_pulse_spatial.inp` after its matching GS.
 Native complex DC initialization first validates metadata, finite payloads and
 fragment coverage, recording per-spin/k file offsets. It then reads one needed
 coefficient column and contiguous source-grid runs into the destination domain.
-It does not retain fragment grid-by-band or band-by-orbital matrices. Projected
-LCFO RT still retains its basis and uses the existing resident loader.
+It does not retain fragment grid-by-band or band-by-orbital matrices.
 
 There is no fixed65,536-point cap,2 MiB cap or new memory-control input. The prior
 point cap was an arbitrary implementation choice and was removed at the user's

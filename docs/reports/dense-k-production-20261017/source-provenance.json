@@ -1,0 +1,28 @@
+{
+  "base_commit": "f69069552",
+  "source_SHA256": {
+    "src/xc/exx_native.f90": "7bde90e004aefe856685276f60829762561b6361bd22aba62a0a3e7e01fa52d3",
+    "src/xc/exx_factor_history.f90": "c41f92e68b0fc449733596e774d63d35fe295a6c2e11638bf36583b8ce50c163",
+    "src/rt/main_tddft.f90": "8e469087e453071a627533a74f72793bcf3411b172ff872fceca3029e60b47fe"
+  },
+  "source_archive_SHA256": "fb0a0aa757da45527e00891c324d159b1e40c626be4d95f30e4e5716075ec944",
+  "Fugaku_binary_SVD": "0248c444e44f59eeec767f083058468b8c7ac8645a13df3d9dcf34e4022a67cb",
+  "Fugaku_binary_step_timing": "b9b73e0d6747dd6c396a16fd08716b098815a18f9f20c6c4a8c2af1802cf2638",
+  "verification_date_JST": "2026-10-17",
+  "fresh_verification": [
+    "GNU MPI/OpenMP individual compilation of all3 changed sources against existing build modules",
+    "2rank history MPI existing layouts1/2/3, OMP1, OpenBLAS1",
+    "existing shifted/unshifted FFT reuse oracle",
+    "git diff --check"
+  ],
+  "MPI_results": [
+    "PASS history ranks/layout/error           2           1   8.4210416417818124E-013",
+    "PASS history ranks/layout/error           2           2   1.5271117703719028E-012",
+    "PASS history ranks/layout/error           2           3   1.5271117703719028E-012"
+  ],
+  "limits": [
+    "No full executable rebuild or heavy Mac simulation in this promotion",
+    "GPU/nonOpenMP paths not tested",
+    "Source hashes preserve exact Fugaku artifacts; existing jobs/binaries unchanged"
+  ]
+}

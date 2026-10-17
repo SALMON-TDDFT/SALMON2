@@ -184,7 +184,7 @@ limitations. The export records SCF and localization convergence separately.
 
 HSE now shares the PBEh Gamma spatial MLWF/FFTW/ACE implementation for
 `theory='tddft_response'` and `theory='tddft_pulse'` with
-`yn_dc='n'`, `yn_conventional_from_dcdft='y'`, `yn_hse_lcfo_rt='n'`.
+`yn_dc='n'`, `yn_conventional_from_dcdft='y'`.
 DC initializes the mesh orbitals; time propagation acts directly on those
 orbitals, without an LCFO projection. `yn_hse_wannier` is enabled automatically
 for spatial layouts; use `yn_hse_wannier='y'` for the serial reference.
@@ -221,7 +221,7 @@ kernel with distributed MLWF and ACE. Wannier activation is automatic when
 the spatial or orbital process count exceeds one. The Gamma,
 orthogonal-cell, FFT divisibility and full-support restrictions above apply.
 Use occupied-only states (`2*nstate=nelec`), fixed occupations (omit electronic
-temperature), fixed ions, and `yn_hse_lcfo_rt='n'`.
+temperature), and fixed ions.
 
 During this migration use `write_gs_restart_data='no'` and
 `yn_self_checkpoint='n'`. Restart, checkpoints, Wannier snapshots and the
@@ -343,8 +343,8 @@ layout of native MLWF/ACE exchange are unchanged by this assembly optimization.
 
 The Gamma native SCF/RT routes above support `nproc_ob > 1`, alone or combined
 with y/z spatial pencils. HSE RT remains fixed-ion; PBEh RT supports the existing
-Ehrenfest route with fixed electronic occupations. Finite-radius, multi-k,
-projected LCFO RT and conventional BOMD retain their previous restrictions.
+Ehrenfest route with fixed electronic occupations. Finite-radius and multi-k
+routes and conventional BOMD retain their previous restrictions.
 
 Local mesh orbitals, localized exchange sources, previous localized orbitals,
 exchange actions, caches and ACE factors contain only owned orbital columns.
@@ -469,8 +469,11 @@ accuracy guarantee. Forgetting-based prediction remains pending.
 
 The published route requires fixed-ion, non-DC HSE06, integer fully occupied
 spin pairs, Taylor4 with predictor/corrector, no pair screening or Wannier
-snapshot, and `nproc_ob=1`. Gamma requires the SR/source settings below. Multi-k
-requires a full uniform unreduced mesh, k-only MPI (`nproc_rgrid=1,1,1`),
+snapshot. Gamma supports spatial and orbital MPI decomposition. Orbital
+decomposition requires ScaLAPACK. The orbital metric and factor-alignment
+matrices stay block-cyclic distributed, while factor histories retain only local
+grid rows and orbital columns. Gamma requires the SR/source settings below. Multi-k
+requires a full uniform unreduced mesh, k-only MPI (`nproc_ob=1`, `nproc_rgrid=1,1,1`),
 `hse_sr_tolerance=0d0`, `exx_mlwf_norm_fraction=0d0`, and
 `exx_ace_support='occupied'`. Spatial SR localization is not implemented for
 this multi-k route. Extra empty states and a second Acos2 pulse are currently

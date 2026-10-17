@@ -38,7 +38,6 @@
 
 &functional
   xc ='pbeh40_rvv10'
-  yn_hse_lcfo_rt='n' ! reconstruct once, then propagate mesh orbitals
   rvv10_nq=32
   exx_mlwf_maxiter=100
   exx_mlwf_interval=5
