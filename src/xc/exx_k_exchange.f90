@@ -463,6 +463,7 @@ contains
     do p=1,np;do j=1,counts(p)
       slot(inverse(starts(p)+j-1))=j+(p-1)*km
     enddo;enddo
+    deallocate(inverse)
     if(allocated(op%accelerator))then
       call op%accelerator%prepare(op%n,op%mesh,b,op%kernel,op%point,op%shift,slot,km*np,ierr)
       valid_send=cmplx(merge(1,0,ierr/=0),0,c_double)

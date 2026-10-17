@@ -567,7 +567,6 @@ contains
       call collective_bad()
       if(bad/=0)return
     endif
-    allocate(source_column(ng))
     allocate(multiplier(ng));pi=acos(-1d0);g=0
     ! Every FFT preserves Cartesian xyz ownership, including two-axis callers.
     stride=[1,m(1),m(1)*m(2)]
@@ -646,6 +645,7 @@ contains
       envelope_norm=0d0
       if(size(global_norms)>0)envelope_norm=envelope_max*sqrt(product(h)*maxval(global_norms))
       if(present(comm_o))call max_scalar(envelope_norm,comm_o)
+      deallocate(source_norms,global_norms)
       envelope_factor=envelope_max*lambda*envelope_norm*(1d0+512d0*epsilon(1d0))
       threshold_floor=0d0
       if(ieee_is_finite(envelope_factor).and.envelope_factor>tiny(1d0)) &
@@ -687,6 +687,9 @@ contains
         sr%ready,sr%radius,sr%tail_l1,sr%tail_l2,sr%length
     endif
     if(wave_route)then
+      ! group_prepare and spatial_local_init own their copied kernels.
+      ! This route never executes the ordinary reciprocal-grid multiply.
+      deallocate(multiplier)
       if(gp%rank==0)write(*,*)'EXX_WAVE_BATCH ',wave_batch
       allocate(wave_sources(ng,wave_batch),compact_action(ng,nt));wave_peak=0;wave_return_total=0
       pair_fft_before=fftw_block_seconds
@@ -788,7 +791,7 @@ contains
     endif
     point_workers=1
 !$  point_workers=omp_get_max_threads()
-    allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
+    allocate(source_column(ng))
     ! Grid rows match across comm_o; stream one source column from its owner.
     ! Empty source/target partitions participate in all orbital collectives.
     do owner=0,orb_size-1
@@ -944,6 +947,8 @@ contains
           op%local_points=op%local_points+int(nselected,int64)*int(sr%peers,int64)*product(int(sr%length,int64))
           cycle
         endif
+        ! Compact, group and SR paths above do not need full-grid FFT scratch.
+        if(.not.allocated(density))allocate(density(ng,min(4,nt)),spectrum(ng,min(4,nt)))
         op%global_pairs=op%global_pairs+nselected
         do first=1,nselected,4
           nb=min(size(density,2),nselected-first+1)

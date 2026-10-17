@@ -53,7 +53,6 @@ contains
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     real(c_double) :: pi,scaled(3),v(3),length(3),angle,k0(3)
     ierr=1;action=zero
-    allocate(contracted(1,size(target,2)))
     ng=op%ng;nk=op%nk;b=op%block;np=size(starts);nsym=map%nsym
     nlocal=counts(rank+1);nt=size(target,2);nrep=size(target,3);ns=op%n*op%mesh
     local_error=0
@@ -86,7 +85,9 @@ contains
         owner(dest)=nfirst;operation(dest)=s
       enddo
     enddo
-    allocate(kperm(nk,nsym),lookup(nk),inverse(nk),slot(nk))
+    ! Ownership is complete; do not overlap this map with exchange scratch.
+    deallocate(forward)
+    allocate(kperm(nk,nsym),lookup(nk))
     lookup=0
     do i=1,nk
       scaled=(map%full_k(:,i)-k0)*length*op%mesh/(2*pi)
@@ -101,6 +102,7 @@ contains
       j=1+idx(1)+op%mesh(1)*(idx(2)+op%mesh(2)*idx(3));kperm(i,s)=lookup(j)
       if(kperm(i,s)<1)return
     enddo;enddo
+    deallocate(lookup)
     ! A star remains on one k owner, including all inverse-rotated targets.
     local_error=0
     do j=1,nrep
@@ -112,14 +114,18 @@ contains
     enddo
     call comm_summation(local_error,total_error,comm)
     if(total_error/=0)return
-    km=maxval(counts);nmsg=b*ng*km
-    allocate(send(nmsg*np),recv(nmsg*np),density(np*b,ng),points(np*b),t(ng,nt,nrep),row(1,ng),phase(27,nrep))
-    sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
-    fs(1:b,1:ng,1:km*np)=>send;fr(1:b,1:ng,1:km*np)=>recv
+    km=maxval(counts)
+    allocate(inverse(nk),slot(nk))
     do i=1,nk;inverse(op%order(i))=i;enddo
     do p=1,np;do j=1,counts(p)
       slot(inverse(starts(p)+j-1))=j+(p-1)*km
     enddo;enddo
+    deallocate(inverse)
+    nmsg=b*ng*km
+    allocate(send(nmsg*np),recv(nmsg*np),density(np*b,ng),points(np*b),t(ng,nt,nrep),row(1,ng),phase(27,nrep))
+    allocate(contracted(1,nt))
+    sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
+    fs(1:b,1:ng,1:km*np)=>send;fr(1:b,1:ng,1:km*np)=>recv
     do j=1,nrep
       global_k=map%first(rep_start+j-1);local_k=global_k-starts(rank+1)+1
       do i=1,nt;t(:,i,j)=target(:,i,j)*op%phase(:,local_k);enddo
