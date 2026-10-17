@@ -292,7 +292,7 @@ contains
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
-      & exx_factor_mode,yn_exx_fft_orbits,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
+      & exx_factor_mode,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
       & hse_sr_group_fft,yn_hse_sr_wave_first,yn_hse_sr_return_sum,yn_hse_sr_pair_symmetry,hse_sr_radius, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
@@ -764,6 +764,7 @@ contains
     exx_mlwf_radius = 0d0
     exx_factor_mode = 'off'
     yn_exx_fft_orbits = 'n'
+    yn_exx_k_pair_symmetry = 'y'
     yn_ace_shadow_diagnostic = 'n'
     yn_ace_export_factors = 'n'
     hse_sr_group_fft = 'off'
@@ -1402,6 +1403,8 @@ contains
     call string_lowercase(exx_factor_mode)
     call comm_bcast(yn_exx_fft_orbits,nproc_group_global)
     call string_lowercase(yn_exx_fft_orbits)
+    call comm_bcast(yn_exx_k_pair_symmetry,nproc_group_global)
+    call string_lowercase(yn_exx_k_pair_symmetry)
     call comm_bcast(yn_ace_shadow_diagnostic,nproc_group_global)
     call string_lowercase(yn_ace_shadow_diagnostic)
     call comm_bcast(yn_ace_export_factors,nproc_group_global)
@@ -2435,6 +2438,7 @@ contains
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_factor_mode=",exx_factor_mode
       write(fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
+      write(fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
       write(fh_variables_log, *) "# yn_ace_shadow_diagnostic=",yn_ace_shadow_diagnostic
       write(fh_variables_log, *) "# yn_ace_export_factors=",yn_ace_export_factors
       write(fh_variables_log, *) "# hse_sr_group_fft=",hse_sr_group_fft
@@ -3018,7 +3022,7 @@ contains
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
-    logical :: global_symmetry_route
+    logical :: global_symmetry_route,global_native_k_route
 
     learned_mesh_checkpoint=exx_factor_mode=='learned'.and.xc=='hse06'.and. &
       yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
@@ -3100,6 +3104,7 @@ contains
     call yn_argument_check(yn_exx_dc_mlwf)
     call yn_argument_check(yn_hse_wannier)
     call yn_argument_check(yn_exx_fft_orbits)
+    call yn_argument_check(yn_exx_k_pair_symmetry)
     call yn_argument_check(yn_ace_shadow_diagnostic)
     call yn_argument_check(yn_ace_export_factors)
     call yn_argument_check(yn_hse_sr_wave_first)
@@ -3552,6 +3557,14 @@ contains
          exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied') &
         error stop 'Global hybrid symmetry requires native full-support CPU k-only exchange with all q points'
     endif
+    ! Full-support CPU k-only exchange also admits Hermitian pairs without sym.dat.
+    ! Keep the same native representation when pair reuse is explicitly disabled.
+    global_native_k_route=global_symmetry_route.or.(is_global_hybrid(xc).and.product(num_kgrid)>1.and. &
+      index(yn_symmetry,'y')==0.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='n'.and. &
+      (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse').and. &
+      yn_hse_wannier=='n'.and.yn_md=='n'.and.temperature<0d0.and.nproc_ob==1.and.all(nproc_rgrid==1).and. &
+      all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.exx_mlwf_radius==0d0.and. &
+      exx_mlwf_norm_fraction==0d0.and.exx_ace_support=='occupied')
     pbeh_mesh_rt=(is_global_hybrid(xc)) &
       .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
       .and.yn_dc=='n'
@@ -3582,7 +3595,7 @@ contains
         error stop 'Conventional hybrid RT: occupied spin pairs and fixed occupations required'
     endif
     if(hybrid_mesh_rt)then
-      if(.not.global_symmetry_route)yn_hse_wannier='y'
+      if(.not.global_native_k_route)yn_hse_wannier='y'
       if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
         error stop 'Hybrid mesh RT: restart/snapshot unsupported'
       if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
@@ -3611,7 +3624,7 @@ contains
 #ifdef USE_OPENACC
       error stop 'PBEh40: OpenACC force/potential path not yet supported'
 #endif
-      if(.not.global_symmetry_route)yn_hse_wannier='y'
+      if(.not.global_native_k_route)yn_hse_wannier='y'
       if(theory/='dft'.and.theory/='dft_md'.and..not.pbeh_mesh_rt) &
         error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported real-space RT'
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &

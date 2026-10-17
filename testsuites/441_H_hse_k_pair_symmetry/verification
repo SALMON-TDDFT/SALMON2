@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+# No sym.dat: default Hermitian pairs must reproduce the full-pair GS energy.
+from pathlib import Path
+import math
+import re
+text = Path('outputfile').read_text()
+assert 'end SALMON' in text and 'GS converged at' in text
+match = re.search(r'EXX_K_PAIR_SYMMETRY unique/full pairs:\s+(\d+)\s+(\d+)', text)
+assert match and tuple(map(int, match.groups())) == (131328, 262144)
+variables = Path('variables.log').read_text()
+assert re.search(r'yn_exx_k_pair_symmetry=\s*y', variables)
+info = Path('H_dc_hse_info.data').read_text()
+energy = float(re.search(r'Total energy \(eV\) =\s+(\S+)', info)[1])
+assert math.isfinite(energy) and abs(energy - (-66.1866751141837)) < 1e-5
+print('Default dense-k Hermitian pairs reproduce the full-pair GS reference')

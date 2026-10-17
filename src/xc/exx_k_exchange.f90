@@ -20,6 +20,9 @@ module exx_k_exchange
     complex(c_double_complex), allocatable :: phase(:,:),work(:,:,:)
     real(c_double), allocatable :: kernel(:,:,:)
     type(c_ptr) :: forward=c_null_ptr, backward=c_null_ptr
+    type(c_ptr) :: pair_forward=c_null_ptr,pair_backward=c_null_ptr
+    integer :: pair_tail_count=0
+    integer(int64) :: pair_fft_pairs=0_int64
   end type
 interface exx_k_kernel_init
     module procedure init_cubic,init_rectangular
@@ -690,6 +693,10 @@ contains
     if(c_associated(op%forward))call fftw_destroy_plan(op%forward)
     if(c_associated(op%backward))call fftw_destroy_plan(op%backward)
     op%forward=c_null_ptr;op%backward=c_null_ptr
+    if(c_associated(op%pair_forward))call fftw_destroy_plan(op%pair_forward)
+    if(c_associated(op%pair_backward))call fftw_destroy_plan(op%pair_backward)
+    op%pair_forward=c_null_ptr;op%pair_backward=c_null_ptr
+    op%pair_tail_count=0;op%pair_fft_pairs=0_int64
     if(allocated(op%work))deallocate(op%work)
     if(allocated(op%distance_index))deallocate(op%distance_index)
     if(allocated(op%order))deallocate(op%order,op%point,op%shift,op%phase,op%kernel)

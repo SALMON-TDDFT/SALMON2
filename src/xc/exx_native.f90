@@ -844,6 +844,8 @@ contains
       if(info%id_k==0)then
         write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
         write(*,'(a,3i6,a,i10)')'EXX_Q_REDUCTION: ',hse_q_reduction,' q points=',kernel%nq
+        if(k_pairs_enabled())write(*,'(a,2i18)')'EXX_K_PAIR_SYMMETRY unique/full pairs: ', &
+          int(kernel%ng,int64)*(int(kernel%ng,int64)+1)/2,int(kernel%ng,int64)**2
         if(propagator=='hse_taylor4_full')write(*,'(a)')'EXX_DIRECT: ACE construction disabled'
       endif
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
@@ -890,7 +892,17 @@ contains
     call comm_summation(ex,exx_exchange_energy,info%icomm_k)
   end subroutine
 
+  ! Crystal reuse takes precedence. Unsupported backends retain their reference route.
+  logical function k_pairs_enabled()
+    use salmon_global, only: yn_exx_k_pair_symmetry
+    implicit none
+    k_pairs_enabled=yn_exx_k_pair_symmetry=='y'.and..not.use_symmetry.and.yn_dc=='n'.and. &
+      kernel%nk>1.and.kernel%nq==kernel%nk.and..not.allocated(kernel%accelerator).and. &
+      (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse')
+  end function k_pairs_enabled
+
   subroutine apply_distributed(source,target,action,info,ierr)
+    use exx_k_pairs, only: apply_k_pairs
     implicit none
     complex(8),intent(in) :: source(:,:,:),target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
@@ -939,7 +951,15 @@ contains
       endif
       return
     endif
-    if(temperature<0d0.and.yn_dc=='n')then
+    if(k_pairs_enabled())then
+      if(temperature<0d0)then
+        call apply_k_pairs(kernel,source(:,:nelec/2,:),target,action,layout(:np),layout(np+1:), &
+          info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+      else
+        call apply_k_pairs(kernel,source,target,action,layout(:np),layout(np+1:), &
+          info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+      endif
+    else if(temperature<0d0.and.yn_dc=='n')then
       call exx_k_kernel_apply_distributed(kernel,source(:,:nelec/2,:),target,action,layout(:np),layout(np+1:), &
         info%id_k,info%icomm_k,transpose_k_tiles,ierr)
     else

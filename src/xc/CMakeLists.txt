@@ -34,6 +34,7 @@ if(USE_HSE)
     exx_wannier.f90
     exx_symmetry.f90
     exx_k_exchange.f90
+    exx_k_pairs.f90
     exx_k_orbits.f90
     exx_ace.f90
     exx_surrogate_basis.f90
