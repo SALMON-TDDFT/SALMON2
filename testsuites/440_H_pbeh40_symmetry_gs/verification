@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+# Converged small-cell reference was independently checked with FFT reuse off.
+from pathlib import Path
+import math
+import re
+text=Path('outputfile').read_text()
+assert 'end SALMON' in text
+assert 'EXX_PRE_SCF PBE stage' in text
+assert 'EXX_PRE_SCF switch to target hybrid' in text
+match=re.search(r'GS converged at\s+\d+\s+:\s+(\S+)',text)
+assert match and float(match[1])<1e-8
+counts=re.findall(r'EXX_FFT_ORBITS first points/full:\s+(\d+)\s+(\d+)',text)
+assert counts and all(0<int(a)<int(b) for a,b in counts)
+info=Path('H_dc_hse_info.data').read_text()
+energy=float(re.search(r'Total energy \(eV\) =\s+(\S+)',info)[1])
+assert math.isfinite(energy) and abs(energy-(-64.34697527465298))<1e-6
+variables=Path('variables.log').read_text()
+assert re.search(r'yn_exx_fft_orbits=\s*y',variables)
+assert re.search(r'yn_hse_wannier=\s*n',variables)
+print('PBEh40 symmetric native GS converged; FFT work reduced and reference energy reproduced')

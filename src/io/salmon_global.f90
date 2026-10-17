@@ -125,7 +125,7 @@ module salmon_global
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
   character(1) :: yn_exx_dc_mlwf ! n: canonical full-fragment SCF exchange
-  real(8) :: exx_pre_scf_threshold ! 0 disables PBE warmup; selected density residual
+  real(8) :: exx_pre_scf_threshold ! automatic 1e-4 for eligible GS; explicit 0 disables PBE warmup
   integer :: exx_pre_scf_steps ! consecutive qualifying residuals
   logical :: exx_pre_scf_active=.false. ! runtime only, never serialized as target GS
   character(8) :: exx_ace_support ! occupied/source ACE construction vectors

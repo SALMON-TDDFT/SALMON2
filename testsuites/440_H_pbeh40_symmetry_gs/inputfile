@@ -1,0 +1,60 @@
+&calculation
+ theory='dft'
+ yn_dc='n'
+/
+&parallel
+ nproc_k=1
+ nproc_ob=1
+ nproc_rgrid=1,1,1
+/
+&control
+ sysname='H_dc_hse'
+ write_gs_restart_data='no'
+/
+&units
+ unit_system='a.u.'
+/
+&system
+ yn_periodic='y'
+ yn_symmetry='yyn'
+ al=8d0,8d0,8d0
+ nstate=2
+ nelec=4
+ nelem=1
+ natom=4
+/
+&pseudo
+ izatom(1)=1
+ file_pseudo(1)='H_rps.dat'
+ lmax_ps(1)=0
+ lloc_ps(1)=0
+/
+&functional
+ xc='pbeh40'
+ pbeh_coulomb_radius=4d0
+ yn_exx_fft_orbits='y'
+ hse_sr_tolerance=0d0
+ exx_ace_support='occupied'
+ exx_mlwf_norm_fraction=0d0
+ exx_factor_exact_interval=2
+ exx_factor_n_teach=8
+/
+&rgrid
+ num_rgrid=8,8,8
+/
+&kgrid
+ num_kgrid=2,2,2
+/
+&scf
+ nscf=400
+ ncg=4
+ threshold=1d-8
+ nscf_init_redistribution=0
+ nscf_init_no_diagonal=0
+/
+&atomic_coor
+ 'H' 2d0 3.3d0 4d0 1
+ 'H' 2d0 4.7d0 4d0 1
+ 'H' 6d0 3.3d0 4d0 1
+ 'H' 6d0 4.7d0 4d0 1
+/

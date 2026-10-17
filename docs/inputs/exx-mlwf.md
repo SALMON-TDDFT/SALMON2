@@ -226,8 +226,13 @@ do not invoke this localizer.
 /
 ```
 
-`exx_pre_scf_threshold=0` (default) disables this stage and retains the existing
-SCF route. A positive value is a threshold in the **selected density residual**
+Omitting `exx_pre_scf_threshold` enables this stage with `1d-4` for supported
+fresh static hybrid GS calculations. Explicit `exx_pre_scf_threshold=0` disables
+it and retains the direct hybrid SCF route. The automatic default resolves to
+zero for nonhybrids, RT, restart, MD/optimization, checkpoints/shutdown timers,
+diagnostic snapshots, unsupported density mixing/convergence, and DC without a
+positive electronic temperature. Explicit positive values retain the compatibility
+errors described below. A positive value is a threshold in the **selected density residual**
 (`rho_dne`, `norm_rho`, or `norm_rho_dng`), not an energy tolerance; the example
 is not a universal recommended accuracy. `exx_pre_scf_steps` defaults to 3 and
 requires that many consecutive residuals below the threshold. A failed residual

@@ -785,7 +785,7 @@ contains
     exx_local_backend = 'cpu'
     exx_gpu_batch_size = 8
     yn_exx_dc_mlwf = 'n'
-    exx_pre_scf_threshold = 0d0
+    exx_pre_scf_threshold = -huge(1d0) ! Omitted input; resolve after all broadcasts.
     exx_pre_scf_steps = 3
     exx_pre_scf_active = .false.
     exx_ace_support = 'occupied'
@@ -1900,6 +1900,27 @@ contains
     call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
     call comm_bcast(nq_mom, nproc_group_global)
     call comm_bcast(dq_mom, nproc_group_global)
+    ! Resolve the omitted pre-SCF input only for supported fresh static GS.
+    ! Explicit zero remains the opt-out, and explicit positive inputs retain
+    ! the compatibility checks in check_bad_input.
+    if(exx_pre_scf_threshold==-huge(1d0))then
+      exx_pre_scf_threshold=0d0
+      call string_lowercase(yn_restart)
+      call string_lowercase(yn_md)
+      call string_lowercase(yn_opt)
+      call string_lowercase(yn_dc)
+      call string_lowercase(yn_hse_wannier_snapshot)
+      call string_lowercase(yn_hse_eigen_diagnostic)
+      call string_lowercase(yn_hse_solver_diagnostic)
+#ifdef USE_HSE
+      if(is_hybrid(xc).and.theory=='dft'.and.yn_restart=='n'.and.yn_md=='n'.and.yn_opt=='n'.and. &
+         (yn_dc=='n'.or.temperature>0d0).and.checkpoint_interval<=0.and.time_shutdown<=0d0.and. &
+         yn_hse_wannier_snapshot=='n'.and.yn_hse_eigen_diagnostic=='n'.and.yn_hse_solver_diagnostic=='n'.and. &
+         method_mixing/='simple_potential'.and. &
+         (convergence=='rho_dne'.or.convergence=='norm_rho'.or.convergence=='norm_rho_dng')) &
+        exx_pre_scf_threshold=1d-4
+#endif
+    endif
     ! BEGIN automatic ACE warmup
     ! H factors supply the first increment example at endpoint H; each later endpoint adds one.
     if(exx_factor_history_frames/=3)error stop 'EXX factor history is fixed at 3 frames'
@@ -2997,6 +3018,7 @@ contains
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
+    logical :: global_symmetry_route
 
     learned_mesh_checkpoint=exx_factor_mode=='learned'.and.xc=='hse06'.and. &
       yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
@@ -3355,7 +3377,7 @@ contains
       error stop 'exx_pre_scf_threshold must be finite and nonnegative'
     if(exx_pre_scf_steps<1)error stop 'exx_pre_scf_steps must be positive'
     if(exx_pre_scf_threshold>0d0)then
-      if(theory/='dft'.or.yn_restart/='n'.or.yn_opt/='n'.or. &
+      if(theory/='dft'.or.yn_restart/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
          (.not.is_hybrid(xc))) &
         error stop 'PBE pre-SCF requires fresh static hybrid SCF'
       if(yn_dc=='y'.and.temperature<=0d0) &
@@ -3455,9 +3477,9 @@ contains
        (yn_hse_sr_wave_first/='y'.or.yn_hse_sr_return_sum/='y')) &
       error stop 'SR pair symmetry requires wave-first and aggregated return'
     if(yn_exx_fft_orbits=='y')then
-      if(xc/='hse06'.or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
+      if(.not.is_hybrid(xc).or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
          any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or.yn_dc/='n') &
-        error stop 'FFT orbits require native CPU dense-k HSE symmetry with all q points'
+        error stop 'FFT orbits require native CPU dense-k hybrid symmetry with all q points'
     endif
     if(exx_factor_mode/='off')then
       if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
@@ -3519,6 +3541,17 @@ contains
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
+    global_symmetry_route=is_global_hybrid(xc).and.product(num_kgrid)>1.and.index(yn_symmetry,'y')/=0
+    if(global_symmetry_route)then
+      ! Both the reference and FFT-reuse paths use the same representative orbitals.
+      ! The scalar Coulomb cutoff is invariant under the retained space group.
+      if(yn_md/='n'.or.theory=='dft_md')error stop 'Global hybrid symmetry requires fixed ions'
+      if(yn_dc/='n'.or.yn_conventional_from_dcdft/='n'.or.yn_hse_wannier/='n'.or. &
+         temperature>=0d0.or.nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+         any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied') &
+        error stop 'Global hybrid symmetry requires native full-support CPU k-only exchange with all q points'
+    endif
     pbeh_mesh_rt=(is_global_hybrid(xc)) &
       .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
       .and.yn_dc=='n'
@@ -3549,7 +3582,7 @@ contains
         error stop 'Conventional hybrid RT: occupied spin pairs and fixed occupations required'
     endif
     if(hybrid_mesh_rt)then
-      yn_hse_wannier='y'
+      if(.not.global_symmetry_route)yn_hse_wannier='y'
       if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
         error stop 'Hybrid mesh RT: restart/snapshot unsupported'
       if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
@@ -3578,7 +3611,7 @@ contains
 #ifdef USE_OPENACC
       error stop 'PBEh40: OpenACC force/potential path not yet supported'
 #endif
-      yn_hse_wannier='y'
+      if(.not.global_symmetry_route)yn_hse_wannier='y'
       if(theory/='dft'.and.theory/='dft_md'.and..not.pbeh_mesh_rt) &
         error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported real-space RT'
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &

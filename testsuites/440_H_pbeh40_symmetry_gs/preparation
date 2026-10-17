@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+cp ../pseudo/H_rps.dat ./
+cat > sym.dat <<'EOF'
+1 0 0 0
+0 1 0 0
+0 0 1 0
+-1 0 0 0
+0 1 0 0
+0 0 1 0
+EOF
