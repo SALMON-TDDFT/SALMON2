@@ -2,16 +2,16 @@
 ! This experimental path uses representative target k points and the existing
 ! occupied-projector callback. MPI remains outside threaded local loops.
 module exx_k_orbits
-  use communication, only: comm_summation
   use iso_c_binding
-  use exx_k_exchange, only: exx_k_kernel
-  use exx_symmetry, only: s_exx_symmetry_map
   implicit none
   private
   include 'fftw3.f03'
   public :: apply_k_orbits
 contains
   subroutine apply_k_orbits(op,map,target,action,starts,counts,rep_start,rank,comm,transpose_tiles,fill_density,ierr)
+    use communication, only: comm_summation
+    use exx_k_exchange, only: exx_k_kernel
+    use exx_symmetry, only: s_exx_symmetry_map
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     type(s_exx_symmetry_map),intent(in) :: map

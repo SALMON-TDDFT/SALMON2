@@ -7,11 +7,6 @@
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module exx_spatial
   use sr_wave_fft,only:wave_apply,wave_apply_pairs,wave_screen_supported
-  ! Integer(int64) reduction is not covered by communication.
-
-#ifdef USE_MPI
-  use mpi,only:MPI_SUM,MPI_Allreduce,MPI_INTEGER8
-#endif
   use misc_routines,only:pair_walltime=>get_wtime
   use sr_group_fft, only: group_plan,group_prepare,group_apply,group_destroy
   use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_valid,sparse_column,sparse_norms,sparse_clear
@@ -429,6 +424,10 @@ contains
   ! agree within comm_r, and the communicators form a spatial/orbital product.
   subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o, &
                                screen_target_count,same_source)
+    ! Integer(int64) reduction is not covered by communication.
+#ifdef USE_MPI
+    use mpi,only:MPI_SUM,MPI_Allreduce,MPI_INTEGER8
+#endif
 !$  use omp_lib, only: omp_get_max_threads
     use salmon_global,only:yn_hse_sr_pair_symmetry,yn_hse_sr_return_sum,yn_hse_sr_wave_first, &
       hse_sr_group_fft,hse_sr_radius
