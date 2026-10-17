@@ -16,6 +16,7 @@ module lcfo_mesh_stream
   end interface
 contains
   subroutine lcfo_cache_load(ub,uc,basis_pos,coef_pos,core,nb,norb,cache,status)
+    implicit none
     integer,intent(in)::ub,uc,core(3),nb,norb
     integer(int64),intent(in)::basis_pos,coef_pos
     type(s_lcfo_cache),intent(inout)::cache
@@ -40,6 +41,7 @@ contains
   end subroutine
 
   subroutine lcfo_cache_contract(cache,core,io,jxyz,lo,m,first,tile,status)
+    implicit none
     type(s_lcfo_cache),intent(in)::cache
     integer,intent(in)::core(3),io,jxyz(:,:),lo(3),m(3),first
     complex(8),intent(inout)::tile(:)
@@ -74,6 +76,7 @@ contains
   end subroutine
 
   subroutine read_values(unit,position,values,status)
+    implicit none
     integer,intent(in) :: unit
     integer(int64),intent(in) :: position
     complex(8),intent(out) :: values(:)

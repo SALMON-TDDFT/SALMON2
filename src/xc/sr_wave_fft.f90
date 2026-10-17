@@ -1,15 +1,28 @@
+#include "config.h"
 module sr_wave_fft
-use mpi
-use sr_group_fft,only:group_plan,ensure_halo_batch
+use misc_routines,only:sr_walltime=>get_wtime
+use communication,only:comm_get_max
+! MPI remains for operations/buffer ranks not covered by communication.
+#ifdef USE_MPI
+use mpi,only: &
+ MPI_Allreduce, &
+ MPI_DOUBLE_COMPLEX, &
+ MPI_INTEGER, &
+ MPI_MAX, &
+ MPI_MIN, &
+ MPI_Sendrecv, &
+ MPI_STATUS_IGNORE
+#endif
+use sr_group_fft,only:group_plan,ensure_halo_batch,sr_all_finite
 use sendrecv_grid_box,only:update_box_halo
 use fftw_blocks,only:mesh_transform
-use,intrinsic::ieee_arithmetic,only:ieee_is_finite
 use iso_fortran_env,only:int64
 implicit none
 private
 public::wave_apply,wave_apply_pairs,wave_screen_supported,prepare_wave_maps
 contains
 pure logical function wave_screen_supported(mode,tolerance)
+  implicit none
 integer,intent(in)::mode
 real(8),intent(in)::tolerance
 ! Zero-tolerance exact support can evaluate additional zero pairs without
@@ -18,6 +31,7 @@ wave_screen_supported=mode==0.or.(mode==2.and.tolerance==0d0)
 end function
 ! Fixed geometry maps persist for all source blocks of this group plan.
 subroutine point_intersection(p,sender,dest,source_index,tile_index)
+  implicit none
 type(group_plan),intent(in)::p
 integer,intent(in)::sender,dest
 integer,allocatable,intent(out)::source_index(:),tile_index(:)
@@ -52,6 +66,7 @@ enddo;enddo;enddo
 allocate(source_index(nfound),tile_index(nfound));source_index=si(:nfound);tile_index=ti(:nfound)
 end subroutine
 subroutine prepare_wave_maps(p)
+  implicit none
 type(group_plan),intent(inout)::p
 integer::peers,rank,partner
 integer,allocatable::si(:),ti(:)
@@ -72,11 +87,13 @@ enddo
 p%wave_maps_ready=.true.
 end subroutine
 subroutine packed_delivery(p,values,tile,status,halo)
+  implicit none
 type(group_plan),intent(inout)::p
 complex(8),intent(in)::values(:,:)
 complex(8),intent(out)::tile(:,:)
 integer,intent(out)::status
 complex(8),intent(in),optional::halo(0:,0:,0:,:)
+#ifdef USE_MPI
 complex(8),allocatable::sb(:,:),rb(:,:)
 logical::filled(product(p%fm))
 integer::peers,rank,comm,rounds,round,partner,ns,nr,nb,k,j,idx,x,y,z,e,bad
@@ -115,16 +132,21 @@ do round=0,rounds-1
  enddo
  deallocate(sb,rb)
 enddo
-bad=merge(0,1,all(filled));call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+bad=merge(0,1,all(filled));status=bad;call comm_get_max(status,p%world)
+#else
+tile=0d0;status=1
+#endif
 end subroutine
 ! Transfer one bounded wavefunction batch into the distributed FFT input layout.
 ! Identical coordinate/copy selection as density delivery; no convolution here.
 subroutine stage_waves(p,values,tile,status,packed)
+  implicit none
 type(group_plan),intent(inout)::p
 complex(8),intent(in)::values(:,:)
 complex(8),intent(out)::tile(:,:)
 integer,intent(out)::status
 logical,intent(in)::packed
+#ifdef USE_MPI
 integer::batch
 integer::nb,k,g,z,y,x,hc(3),ii,gr,j,partner,round,e,q(3),rounds,bad
 complex(8),allocatable::send(:,:),recv(:,:),halo_data(:,:,:,:),halo_chunk(:,:,:,:)
@@ -185,7 +207,7 @@ endif
     tile(ii,:nb)=halo_chunk(q(1),q(2),q(3),:nb);filled(ii)=.true.
    enddo;enddo;enddo
   enddo
-  bad=merge(0,1,all(filled));call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+  bad=merge(0,1,all(filled));status=bad;call comm_get_max(status,p%world)
   if(status/=0)return
  else
  if(packed)then
@@ -199,7 +221,8 @@ endif
   if(partner==p%rank)then
    recv=send
   else
-   call MPI_Sendrecv(send,size(send),MPI_DOUBLE_COMPLEX,partner,0,recv,size(recv),MPI_DOUBLE_COMPLEX,partner,0,p%world,MPI_STATUS_IGNORE,e)
+   call MPI_Sendrecv(send,size(send),MPI_DOUBLE_COMPLEX,partner,0,recv,size(recv),MPI_DOUBLE_COMPLEX,partner, &
+    0,p%world,MPI_STATUS_IGNORE,e)
    p%messages=p%messages+1;p%bytes=p%bytes+16_int64*size(send,kind=int64)
   endif
   g=0
@@ -210,8 +233,12 @@ endif
   enddo;enddo;enddo
  enddo
  endif
+#else
+tile=0d0;status=1
+#endif
 end subroutine
 subroutine wave_apply(p,sources,targets,action,status,scratch_bytes,aggregate_return,return_bytes,packed_transfer,batch_size)
+  implicit none
 type(group_plan),intent(inout)::p
 complex(8),intent(in)::sources(:,:),targets(:,:)
 complex(8),intent(out)::action(:,:)
@@ -219,6 +246,7 @@ integer,intent(out)::status
 integer(int64),intent(out),optional::scratch_bytes,return_bytes
 logical,intent(in),optional::aggregate_return,packed_transfer
 integer,intent(in),optional::batch_size
+#ifdef USE_MPI
 logical::aggregate,packed
 integer::flag,fmin,fmax
 integer(int64)::returned
@@ -231,19 +259,19 @@ batch=8
 if(present(batch_size))batch=batch_size
 if(batch/=8.and.batch/=16)bad=1
 call MPI_Allreduce(batch,fmin,1,MPI_INTEGER,MPI_MIN,p%world,e)
-call MPI_Allreduce(batch,fmax,1,MPI_INTEGER,MPI_MAX,p%world,e)
+fmax=batch;call comm_get_max(fmax,p%world)
 if(fmin/=fmax)bad=1
 if(present(aggregate_return))aggregate=aggregate_return
 packed=.true.
 if(present(packed_transfer))packed=packed_transfer
 flag=merge(1,0,packed)
 call MPI_Allreduce(flag,fmin,1,MPI_INTEGER,MPI_MIN,p%world,e)
-call MPI_Allreduce(flag,fmax,1,MPI_INTEGER,MPI_MAX,p%world,e)
+fmax=flag;call comm_get_max(fmax,p%world)
 if(fmin/=fmax)bad=1
 if(present(return_bytes))return_bytes=0
 flag=merge(1,0,aggregate)
 call MPI_Allreduce(flag,fmin,1,MPI_INTEGER,MPI_MIN,p%world,e)
-call MPI_Allreduce(flag,fmax,1,MPI_INTEGER,MPI_MAX,p%world,e)
+fmax=flag;call comm_get_max(fmax,p%world)
 if(fmin/=fmax)bad=1
 if(present(scratch_bytes))scratch_bytes=0
 if(.not.p%ready)bad=1
@@ -251,17 +279,17 @@ ns=size(sources,2);nt=size(targets,2)
 if(ns<0.or.ns>batch.or.nt<0)bad=1
 if(size(sources,1)/=product(p%m).or.size(targets,1)/=product(p%m))bad=1
 if(any(shape(action)/=shape(targets)))bad=1
-if(.not.all(ieee_is_finite(real(sources))).or..not.all(ieee_is_finite(aimag(sources))))bad=1
-if(.not.all(ieee_is_finite(real(targets))).or..not.all(ieee_is_finite(aimag(targets))))bad=1
-call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+if(.not.sr_all_finite(sources))bad=1
+if(.not.sr_all_finite(targets))bad=1
+status=bad;call comm_get_max(status,p%world)
 if(status/=0)return
-call MPI_Allreduce(ns,hi,1,MPI_INTEGER,MPI_MAX,p%world,e)
+hi=ns;call comm_get_max(hi,p%world)
 call MPI_Allreduce(ns,lo,1,MPI_INTEGER,MPI_MIN,p%world,e)
 if(hi/=lo)bad=1
-call MPI_Allreduce(nt,hi,1,MPI_INTEGER,MPI_MAX,p%world,e)
+hi=nt;call comm_get_max(hi,p%world)
 call MPI_Allreduce(nt,lo,1,MPI_INTEGER,MPI_MIN,p%world,e)
 if(hi/=lo)bad=1
-call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+status=bad;call comm_get_max(status,p%world)
 if(status/=0)return
 if(ns==0.or.nt==0)then
  status=0;return
@@ -283,48 +311,49 @@ if(present(scratch_bytes))then
   if(p%use_halo)scratch_bytes=scratch_bytes+32_int64*batch*product(int(p%halo_shape,int64))
  endif
 endif
-beg=MPI_Wtime();t=beg
+beg=sr_walltime();t=beg
 call stage_waves(p,sources,sw,status,packed)
 if(status/=0)return
-p%phase(1)=p%phase(1)+MPI_Wtime()-t
+p%phase(1)=p%phase(1)+sr_walltime()-t
 ! Keep these source tiles while visiting all target blocks. Pair products are local.
 do first=1,nt,batch
- nb=min(batch,nt-first+1);t=MPI_Wtime()
+ nb=min(batch,nt-first+1);t=sr_walltime()
  if(aggregate)accum=0
  call stage_waves(p,targets(:,first:first+nb-1),tw,status,packed)
  if(status/=0)return
- p%phase(1)=p%phase(1)+MPI_Wtime()-t
+ p%phase(1)=p%phase(1)+sr_walltime()-t
  do i=1,ns
   density=0
   do k=1,nb;density(:,k)=conjg(sw(:,i))*tw(:,k);enddo
-  t=MPI_Wtime()
+  t=sr_walltime()
   call mesh_transform(p%length,p%gd,p%gc,p%axis,density,spec,-1,bad)
-  call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+  status=bad;call comm_get_max(status,p%world)
   if(status/=0)return
-  p%phase(2)=p%phase(2)+MPI_Wtime()-t;t=MPI_Wtime()
+  p%phase(2)=p%phase(2)+sr_walltime()-t;t=sr_walltime()
   do k=1,nb;spec(:,k)=spec(:,k)*p%filter(:,1);enddo
-  p%phase(3)=p%phase(3)+MPI_Wtime()-t;t=MPI_Wtime()
+  p%phase(3)=p%phase(3)+sr_walltime()-t;t=sr_walltime()
   call mesh_transform(p%length,p%gd,p%gc,p%axis,spec,back,1,bad)
-  call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+  status=bad;call comm_get_max(status,p%world)
   if(status/=0)return
-  p%phase(2)=p%phase(2)+MPI_Wtime()-t;t=MPI_Wtime()
+  p%phase(2)=p%phase(2)+sr_walltime()-t;t=sr_walltime()
   if(aggregate)then
    do k=1,nb;accum(:,k)=accum(:,k)-sw(:,i)*back(:,k);enddo
   else
    call return_block(back,i,.false.)
   endif
-  p%phase(4)=p%phase(4)+MPI_Wtime()-t
+  p%phase(4)=p%phase(4)+sr_walltime()-t
  enddo
  if(aggregate)then
-  t=MPI_Wtime()
+  t=sr_walltime()
   call return_block(accum,0,.true.)
-  p%phase(4)=p%phase(4)+MPI_Wtime()-t
+  p%phase(4)=p%phase(4)+sr_walltime()-t
  endif
 enddo
 if(present(return_bytes))return_bytes=returned
-p%phase(5)=p%phase(5)+MPI_Wtime()-beg;status=0
+p%phase(5)=p%phase(5)+sr_walltime()-beg;status=0
 contains
 subroutine return_block(values,source_index,weighted)
+  implicit none
 complex(8),intent(in)::values(:,:)
 integer,intent(in)::source_index
 logical,intent(in)::weighted
@@ -361,17 +390,25 @@ logical,intent(in)::weighted
    enddo
   endif
 end subroutine
+#else
+action=0d0;status=1
+if(present(scratch_bytes))scratch_bytes=0
+if(present(return_bytes))return_bytes=0
+#endif
 end subroutine
 ! Same-source ACE only: one orientation of each unordered global orbital pair.
 ! The endpoint selected by parity balances the two orbital owners. Caller must
 ! reduce reverse_action to the source owner; no replicated global mesh is held.
 subroutine wave_apply_pairs(p,sources,targets,source_ids,target_ids,action,reverse_action,status,pairs,scratch_bytes,batch)
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
 type(group_plan),intent(inout)::p
 complex(8),intent(in)::sources(:,:),targets(:,:)
 integer,intent(in)::source_ids(:),target_ids(:),batch
 complex(8),intent(out)::action(:,:),reverse_action(:,:)
 integer,intent(out)::status
 integer(int64),intent(out)::pairs,scratch_bytes
+#ifdef USE_MPI
 integer::ns,nt,bad,e,hi,lo,first,nb,i,k,j,nsel,selected(16),chosen,g,x,y,z,q(3),idx
 integer,allocatable::imin(:),imax(:)
 complex(8),allocatable::sw(:,:),tw(:,:),density(:,:),spec(:,:),back(:,:),accum(:,:),raccum(:,:)
@@ -383,8 +420,8 @@ if(ns>batch.or.size(source_ids)/=ns.or.size(target_ids)/=nt)bad=1
 if(.not.p%ready.or.p%gpeers/=1)bad=1
 if(size(sources,1)/=product(p%m).or.size(targets,1)/=product(p%m))bad=1
 if(any(shape(action)/=shape(targets)).or.any(shape(reverse_action)/=shape(sources)))bad=1
-if(.not.all(ieee_is_finite(real(sources))).or..not.all(ieee_is_finite(aimag(sources))))bad=1
-if(.not.all(ieee_is_finite(real(targets))).or..not.all(ieee_is_finite(aimag(targets))))bad=1
+if(.not.sr_all_finite(sources))bad=1
+if(.not.sr_all_finite(targets))bad=1
 if(any(source_ids<1).or.any(target_ids<1))bad=1
 if(ns>1)then
  if(any(source_ids(2:)<=source_ids(:ns-1)))bad=1
@@ -392,18 +429,18 @@ endif
 if(nt>1)then
  if(any(target_ids(2:)<=target_ids(:nt-1)))bad=1
 endif
-call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+status=bad;call comm_get_max(status,p%world)
 if(status/=0)return
-call MPI_Allreduce(batch,hi,1,MPI_INTEGER,MPI_MAX,p%world,e)
+hi=batch;call comm_get_max(hi,p%world)
 call MPI_Allreduce(batch,lo,1,MPI_INTEGER,MPI_MIN,p%world,e)
 if(hi/=lo)bad=1
-call MPI_Allreduce(ns,hi,1,MPI_INTEGER,MPI_MAX,p%world,e)
+hi=ns;call comm_get_max(hi,p%world)
 call MPI_Allreduce(ns,lo,1,MPI_INTEGER,MPI_MIN,p%world,e)
 if(hi/=lo)bad=1
-call MPI_Allreduce(nt,hi,1,MPI_INTEGER,MPI_MAX,p%world,e)
+hi=nt;call comm_get_max(hi,p%world)
 call MPI_Allreduce(nt,lo,1,MPI_INTEGER,MPI_MIN,p%world,e)
 if(hi/=lo)bad=1
-call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+status=bad;call comm_get_max(status,p%world)
 if(status/=0)return
 allocate(imin(ns+nt),imax(ns+nt))
 call MPI_Allreduce([source_ids,target_ids],imin,ns+nt,MPI_INTEGER,MPI_MIN,p%world,e)
@@ -425,7 +462,7 @@ if(bad==0)then
   if(abs(p%filter(idx,1)-conjg(p%filter(j,1)))>128d0*epsilon(1d0)*scale)bad=1
  enddo;enddo;enddo
 endif
-call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+status=bad;call comm_get_max(status,p%world)
 if(status/=0)return
 if(ns==0.or.nt==0)then
  status=0;return
@@ -438,15 +475,15 @@ scratch_bytes=16_int64*batch*(7_int64*product(int(p%fm,int64))+2_int64*product(i
 scratch_bytes=scratch_bytes+16_int64*batch*(maxval([(size(p%wave_send(i)%idx),i=1,size(p%wave_send))])+ &
  maxval([(size(p%wave_recv(i)%idx),i=1,size(p%wave_recv))]))
 if(p%use_halo)scratch_bytes=scratch_bytes+16_int64*batch*product(int(p%halo_shape,int64))
-beg=MPI_Wtime();t=beg
+beg=sr_walltime();t=beg
 call stage_waves(p,sources,sw,status,.true.)
 if(status/=0)return
-p%phase(1)=p%phase(1)+MPI_Wtime()-t
+p%phase(1)=p%phase(1)+sr_walltime()-t
 do first=1,nt,batch
- nb=min(batch,nt-first+1);accum=0;t=MPI_Wtime()
+ nb=min(batch,nt-first+1);accum=0;t=sr_walltime()
  call stage_waves(p,targets(:,first:first+nb-1),tw,status,.true.)
  if(status/=0)return
- p%phase(1)=p%phase(1)+MPI_Wtime()-t
+ p%phase(1)=p%phase(1)+sr_walltime()-t
  do i=1,ns
   nsel=0
   do k=1,nb
@@ -459,37 +496,38 @@ do first=1,nt,batch
   if(nsel==0)cycle
   pairs=pairs+int(nsel,int64)
   do k=1,nsel;density(:,k)=conjg(sw(:,i))*tw(:,selected(k));enddo
-  t=MPI_Wtime()
+  t=sr_walltime()
   call mesh_transform(p%length,p%gd,p%gc,p%axis,density(:,:nsel),spec(:,:nsel),-1,bad)
-  call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+  status=bad;call comm_get_max(status,p%world)
   if(status/=0)return
-  p%phase(2)=p%phase(2)+MPI_Wtime()-t;t=MPI_Wtime()
+  p%phase(2)=p%phase(2)+sr_walltime()-t;t=sr_walltime()
   do k=1,nsel;spec(:,k)=spec(:,k)*p%filter(:,1);enddo
-  p%phase(3)=p%phase(3)+MPI_Wtime()-t;t=MPI_Wtime()
+  p%phase(3)=p%phase(3)+sr_walltime()-t;t=sr_walltime()
   call mesh_transform(p%length,p%gd,p%gc,p%axis,spec(:,:nsel),back(:,:nsel),1,bad)
-  call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+  status=bad;call comm_get_max(status,p%world)
   if(status/=0)return
-  p%phase(2)=p%phase(2)+MPI_Wtime()-t;t=MPI_Wtime()
+  p%phase(2)=p%phase(2)+sr_walltime()-t;t=sr_walltime()
   do k=1,nsel
    j=selected(k)
    accum(:,j)=accum(:,j)-sw(:,i)*back(:,k)
    if(source_ids(i)/=target_ids(first+j-1))raccum(:,i)=raccum(:,i)-tw(:,j)*conjg(back(:,k))
   enddo
-  p%phase(4)=p%phase(4)+MPI_Wtime()-t
+  p%phase(4)=p%phase(4)+sr_walltime()-t
  enddo
- t=MPI_Wtime()
+ t=sr_walltime()
  call crop(accum,action(:,first:first+nb-1))
- p%phase(4)=p%phase(4)+MPI_Wtime()-t
+ p%phase(4)=p%phase(4)+sr_walltime()-t
 enddo
-t=MPI_Wtime();call crop(raccum,reverse_action)
-p%phase(4)=p%phase(4)+MPI_Wtime()-t
-p%phase(5)=p%phase(5)+MPI_Wtime()-beg
+t=sr_walltime();call crop(raccum,reverse_action)
+p%phase(4)=p%phase(4)+sr_walltime()-t
+p%phase(5)=p%phase(5)+sr_walltime()-beg
 bad=0
-if(.not.all(ieee_is_finite(real(action))).or..not.all(ieee_is_finite(aimag(action))))bad=1
-if(.not.all(ieee_is_finite(real(reverse_action))).or..not.all(ieee_is_finite(aimag(reverse_action))))bad=1
-call MPI_Allreduce(bad,status,1,MPI_INTEGER,MPI_MAX,p%world,e)
+if(.not.sr_all_finite(action))bad=1
+if(.not.sr_all_finite(reverse_action))bad=1
+status=bad;call comm_get_max(status,p%world)
 contains
 subroutine crop(values,out)
+  implicit none
 complex(8),intent(in)::values(:,:)
 complex(8),intent(out)::out(:,:)
 integer::g,x,y,z,q(3),idx
@@ -501,6 +539,9 @@ do z=0,p%m(3)-1;do y=0,p%m(2)-1;do x=0,p%m(1)-1
  out(g,:)=values(idx,:size(out,2))
 enddo;enddo;enddo
 end subroutine
+#else
+action=0d0;reverse_action=0d0;status=1;pairs=0;scratch_bytes=0
+#endif
 end subroutine
 
 end module

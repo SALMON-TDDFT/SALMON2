@@ -16,9 +16,7 @@ module exx_native
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_k_orbits, only: apply_k_orbits
   use exx_ace
-  use exx_distributed_alignment,only:distributed_factor_align
-  use exx_distributed_metric,only:distributed_metric_available,distributed_metric_rotate
-  use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read,factor_align
+  use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
   use exx_surrogate_dense,only:surrogate_dense_basis_error
   use exx_surrogate_trace,only:s_surrogate_trace,trace_initialize,trace_candidate,trace_write_diagnostic, &
     trace_shadow_fit,trace_shadow_compare,s_factor_diagnostic,trace_factor_write
@@ -30,7 +28,8 @@ module exx_native
   use exx_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector, &
+    yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
     exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
@@ -186,6 +185,7 @@ contains
   end function native_integer_occupation
 
   subroutine factor_configure(system,info)
+    use exx_distributed_metric,only:distributed_metric_available
     use salmon_global, only: yn_restart
     implicit none
     type(s_dft_system),intent(in)::system
@@ -429,6 +429,7 @@ contains
   end function
 
   subroutine factor_materialize(info)
+    use exx_distributed_metric,only:distributed_metric_rotate
     implicit none
     type(s_parallel_info),intent(in)::info
     complex(8),allocatable::rowbuf(:),rotated(:,:)
@@ -491,6 +492,9 @@ contains
     factor_all_ready=total_not_ready==0
   contains
     subroutine aligngrid(x,ref,status)
+      use exx_distributed_alignment,only:distributed_factor_align
+      use exx_distributed_metric,only:distributed_metric_available
+      use exx_factor_history,only:factor_align
       implicit none
       complex(8),intent(inout)::x(:,:)
       complex(8),intent(in)::ref(:,:)
@@ -1288,7 +1292,8 @@ contains
     ! as for fraction=1, its exact action does not require a converged gauge.
     radius_covers_cell=exx_mlwf_radius>0d0.and. &
       exx_mlwf_radius>=sqrt(sum((.5d0*num_rgrid*system%hgs)**2))
-    adaptive_active=sr_canonical.or.(.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
+    adaptive_active=sr_canonical.or.(.not.dc_canonical().and. &
+      (exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.radius_covers_cell.or. &
        (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0)))
     if(adaptive_active.and..not.sr_canonical)then

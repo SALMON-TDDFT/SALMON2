@@ -15,6 +15,7 @@ type s_box_halo
 end type
 contains
 subroutine init_box_halo(p,rg,width,nb,comm,neig,status)
+  implicit none
 type(s_box_halo),intent(out)::p
 type(s_rgrid),intent(in)::rg
 integer,intent(in)::width(3),nb,comm,neig(2,3)
@@ -75,6 +76,7 @@ enddo
 p%ready=.true.;status=0
 end subroutine
 subroutine update_box_halo(p,rg,data)
+  implicit none
 type(s_box_halo),intent(inout)::p
 type(s_rgrid),intent(in)::rg
 complex(8),intent(inout)::data(rg%is_array(1):rg%ie_array(1),rg%is_array(2):rg%ie_array(2), &
@@ -88,6 +90,7 @@ do k=1,size(p%step)
 enddo
 end subroutine
 subroutine destroy_box_halo(p)
+  implicit none
 type(s_box_halo),intent(inout)::p
 integer::k
 if(.not.p%ready)return

@@ -670,7 +670,8 @@ contains
             do ix=mg%is(1),mg%ie(1)
               if (ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. &
                   iz <= dc%nxyz_domain(3)) &
-                sttpsi%zwf(ix,iy,iz,1:nspin,io,ik,1) = f_basis(ix-basis_origin(1)+1,iy-basis_origin(2)+1,iz-basis_origin(3)+1,1:nspin,io)
+                sttpsi%zwf(ix,iy,iz,1:nspin,io,ik,1) = f_basis(ix-basis_origin(1)+1,iy-basis_origin(2)+1, &
+                  iz-basis_origin(3)+1,1:nspin,io)
             end do
             end do
             end do
@@ -1116,7 +1117,8 @@ contains
           do ic=mg%is(3),hi(3)
           do ib=mg%is(2),hi(2)
           do ia=mg%is(1),hi(1)
-            local_h(io0,jo0,isp0)=local_h(io0,jo0,isp0)+hvol*conjg(basis(ia-basis_origin(1)+1,ib-basis_origin(2)+1,ic-basis_origin(3)+1,isp0,io0))* &
+            local_h(io0,jo0,isp0)=local_h(io0,jo0,isp0)+hvol*conjg(basis(ia-basis_origin(1)+1, &
+              ib-basis_origin(2)+1,ic-basis_origin(3)+1,isp0,io0))* &
               hf0(ia-mg%is(1)+1,ib-mg%is(2)+1,ic-mg%is(3)+1,isp0,jo0)
           end do
           end do
@@ -1225,6 +1227,7 @@ contains
     end subroutine assemble_halo_hamiltonian
 
     integer function halo_tag(ifg,dvec) result(tag0)
+      implicit none
       integer, intent(in) :: ifg,dvec(3)
       tag0 = (ifg-1)*27 + (dvec(1)+1)*9 + (dvec(2)+1)*3 + dvec(3) + 2
     end function halo_tag
@@ -2047,6 +2050,7 @@ contains
       ref_k,ref_wtk,ref_run,n_basis_all,fragment,cache,status)
     use lcfo_mesh_stream, only: s_lcfo_cache,lcfo_cache_load
     use structures, only: s_dft_system,s_rgrid
+    implicit none
     integer,intent(in) :: f,ik,ispin,ref_meta(20),n_basis_all(:,:,:)
     character(*),intent(in) :: bdir
     type(s_dft_system),intent(in) :: system

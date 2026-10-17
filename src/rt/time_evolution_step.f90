@@ -531,6 +531,7 @@ contains
   end subroutine predictor_corrector
 
   subroutine time_evolution_half_step_etrs
+    implicit none
     call nvtxStartRange('time_evolution_half_step_etrs', __LINE__)
 
     if(info%numo.ge.1)then

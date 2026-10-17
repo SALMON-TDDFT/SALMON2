@@ -1,8 +1,6 @@
 #include "config.h"
 ! Align real-space ACE columns without replicating an orbital-space matrix.
 module exx_distributed_alignment
-  use communication, only: comm_get_groupinfo,comm_bcast,comm_summation,comm_get_max
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   public :: distributed_factor_align
@@ -25,6 +23,8 @@ contains
   end subroutine
 
   subroutine factor_align_core(x,ref,comm_r,comm_o,comm,status)
+    use communication, only: comm_get_groupinfo,comm_bcast,comm_summation,comm_get_max
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     complex(8),intent(inout) :: x(:,:)
     complex(8),intent(in) :: ref(:,:)

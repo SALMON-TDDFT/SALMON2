@@ -87,6 +87,7 @@ end subroutine calc_emfields
 !===================================================================================================================================
 
 Subroutine calc_Ac_ext(t,Ac_ext)
+  implicit none
   real(8),intent(in) :: t
   real(8)            :: Ac_ext(1:3)
   real(8)            :: Ac_ext_t(1:3, 0:0)

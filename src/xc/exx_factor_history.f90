@@ -1,7 +1,6 @@
 ! Experimental local-row ACE factor prediction: three accepted endpoints only.
 module exx_factor_history
- use iso_fortran_env,only:real64,int64
- use,intrinsic::ieee_arithmetic
+ use iso_fortran_env,only:real64
  implicit none
  private
  public::s_factor_history,history_accept,history_predict,factor_align,history_write,history_read
@@ -15,6 +14,7 @@ module exx_factor_history
  abstract interface
   subroutine sum_callback(a)
    import real64
+    implicit none
    complex(real64),intent(inout)::a(:,:)
   end subroutine
   subroutine alignment_callback(x,ref,status)
@@ -28,6 +28,8 @@ module exx_factor_history
 contains
 
  logical function scalar_finite_real(a) result(ok)
+   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+   implicit none
   real(8),intent(in)::a(:)
   integer::i
   ok=.false.
@@ -38,6 +40,8 @@ contains
  end function
 
  logical function scalar_finite_complex(a) result(ok)
+   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+   implicit none
   complex(8),intent(in)::a(:,:)
   integer::i,j
   ok=.false.

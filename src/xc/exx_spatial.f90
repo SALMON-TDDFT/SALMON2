@@ -1,3 +1,4 @@
+#include "config.h"
 ! Gamma exchange on native Cartesian domains, with optional compact source action.
 ! Refresh and apply accept orbital-local columns through optional comm_o.
 ! Grid rows and FFT work are spatially local.
@@ -6,7 +7,12 @@
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module exx_spatial
   use sr_wave_fft,only:wave_apply,wave_apply_pairs,wave_screen_supported
-  use mpi,only:MPI_Reduce,MPI_DOUBLE_COMPLEX,MPI_SUM,MPI_Wtime,MPI_Allreduce,MPI_INTEGER8
+  ! Integer(int64) reduction is not covered by communication.
+
+#ifdef USE_MPI
+  use mpi,only:MPI_SUM,MPI_Allreduce,MPI_INTEGER8
+#endif
+  use misc_routines,only:pair_walltime=>get_wtime
   use sr_group_fft, only: group_plan,group_prepare,group_apply,group_destroy
   use exx_sparse_orbitals, only: s_sparse_orbitals,sparse_valid,sparse_column,sparse_norms,sparse_clear
   use iso_fortran_env, only: int64
@@ -784,16 +790,15 @@ contains
           endif
           action(:,:,1)=action(:,:,1)+compact_action
           if(pair_route)then
-            pair_tick=MPI_Wtime()
+            pair_tick=pair_walltime()
             if(present(comm_o))then
-              call MPI_Reduce(reverse_action(:,:nb),reverse_recv(:,:nb),ng*nb,MPI_DOUBLE_COMPLEX,MPI_SUM, &
-                owner,comm_o,mpi_error)
+              call comm_summation(reverse_action(:,:nb),reverse_recv(:,:nb),ng*nb,comm_o,owner)
               if(orb_rank/=owner)pair_reduction_bytes=pair_reduction_bytes+16_int64*ng*nb
             else
               reverse_recv(:,:nb)=reverse_action(:,:nb)
             endif
             if(orb_rank==owner)action(:,first:first+nb-1,1)=action(:,first:first+nb-1,1)+reverse_recv(:,:nb)
-            pair_reduce_seconds=pair_reduce_seconds+MPI_Wtime()-pair_tick
+            pair_reduce_seconds=pair_reduce_seconds+pair_walltime()-pair_tick
           endif
           wave_peak=max(wave_peak,wave_scratch)
           wave_return_total=wave_return_total+wave_return
@@ -803,7 +808,9 @@ contains
         gp%phase,gp%messages,gp%bytes,wave_peak
       if(gp%rank==0)write(*,*)'EXX_RETURN_SUM enabled/return_bytes ',return_sum,wave_return_total
       pair_total=pair_count
+#ifdef USE_MPI
       if(present(comm_o))call MPI_Allreduce(pair_count,pair_total,1,MPI_INTEGER8,MPI_SUM,comm_o,mpi_error)
+#endif
       if(gp%rank==0)write(*,*)'EXX_PAIR_SYMMETRY enabled/local/global pairs/reduction bytes/bcast calls bytes/reduce seconds ', &
         pair_route,pair_count,pair_total,pair_reduction_bytes,bcast_calls,bcast_bytes,pair_reduce_seconds
       write(*,*)'EXX_PAIR_COMM orbital/spatial/sym/phase/pairs/msg/bytes/scratch/reduce/calls/bcast/reduce_seconds/fft ', &
