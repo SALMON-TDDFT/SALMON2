@@ -28,6 +28,7 @@ contains
     use communication, only: comm_summation
     use sym_sub, only: use_symmetry,SymMatA,SymMatB
     use exx_symmetry, only: symmetry_spin_rotation
+    use salmon_global, only: xc
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_dft_system),intent(in) :: system
@@ -84,7 +85,7 @@ contains
     iz=size(den_mat,3)
     allocate( dmat_tmp(ix,iy,iz,2,2) ); dmat_tmp=den_mat
     call comm_summation( dmat_tmp, den_mat, size(dmat_tmp), info%icomm_ko )
-    if(use_symmetry)then
+    if(use_symmetry.and.xc=='hse06')then
       ! Reconstruct the density matrix, including its axial magnetization,
       ! from representative k points. Scalar averaging of eigenvalues loses
       ! the spin rotation and is insufficient for SOC.
