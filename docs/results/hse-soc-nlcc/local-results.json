@@ -1,0 +1,52 @@
+{
+  "threads": 2,
+  "binary_sha256": "877adaa12e7e5e526b4a88c3a0c27363feb7fc98f13505a416648fdd08a43fbc",
+  "pseudo_sha256": "9a274b3f50cd247d53e735b8ad1669d491286934b61c295bcd6e8b6ba555d80a",
+  "scope": "coarse two-atom periodic developer fixture",
+  "scalar-gs": {
+    "residual": 7.835657e-08,
+    "electrons": 7.999999999999997
+  },
+  "gs": {
+    "residual": 9.6304118e-08,
+    "electrons": 8.0
+  },
+  "gs-pre": {
+    "residual": 8.8522181e-08,
+    "electrons": 8.000000000000002
+  },
+  "rt-ace": {
+    "steps": 100,
+    "final_time_au": 2.0,
+    "energy_span_ha": 3.8387890199942376e-08
+  },
+  "rt-direct": {
+    "steps": 100,
+    "final_time_au": 2.0,
+    "energy_span_ha": 3.838789996990499e-08
+  },
+  "rt-zero": {
+    "steps": 100,
+    "final_time_au": 2.0,
+    "energy_span_ha": 2.899902540320909e-12
+  },
+  "rt-halfdt": {
+    "steps": 200,
+    "final_time_au": 2.0,
+    "energy_span_ha": 3.838661033483959e-08
+  },
+  "scalar-rt": {
+    "steps": 100,
+    "final_time_au": 2.0,
+    "energy_span_ha": 3.967647987934697e-08
+  },
+  "ace_direct_current_max_au": 3.4602711899374335e-12,
+  "halfdt_current_max_au": 2.2235344759857022e-11,
+  "pre_scf_initial_energy_difference_ha": 5.891598320317826e-10,
+  "time_order": {
+    "coarse_error": 8.485614258799774e-08,
+    "fine_error": 1.5536878533999477e-08,
+    "ratio": 5.461595287773304
+  },
+  "result": "PASS"
+}

@@ -4,7 +4,7 @@ module hybrid_semilocal
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: hse_semilocal_evaluate,pbeh_semilocal_evaluate
+  public :: hse_semilocal_evaluate,pbeh_semilocal_evaluate,hybrid_density_evaluate
   interface
     function xc_func_alloc() bind(C) result(p)
       import c_ptr
@@ -130,6 +130,80 @@ contains
     endif
     call xc_func_end(func);call xc_func_free(func)
   end subroutine
+
+  ! Fixed-core NLCC: differentiate E_xc[n_val+n_core] with respect to n_val.
+  ! The core is never a Fock source. gradient_derivative is +dE/d(grad n).
+  subroutine hybrid_density_evaluate(rho,gradient,core,core_gradient,energy,potential, &
+                                     gradient_derivative,ierr,screening,exchange_fraction)
+    implicit none
+    real(c_double),intent(in) :: rho(:,:),gradient(:,:,:),core(:),core_gradient(:,:)
+    real(c_double),intent(out) :: energy(:),potential(:,:),gradient_derivative(:,:,:)
+    integer,intent(out) :: ierr
+    real(c_double),intent(in),optional :: screening,exchange_fraction
+    real(c_double) :: r(size(rho,1),size(core)),g(size(rho,1),3,size(core))
+    real(c_double) :: sigma(2*size(rho,1)-1,size(core)),ep(size(core)),v(size(rho,1),size(core))
+    real(c_double) :: vs(2*size(rho,1)-1,size(core)),weight,omega
+    type(c_ptr) :: func
+    integer :: j,n,ns,part,id,axis
+    ierr=1;n=size(core);ns=size(rho,1)
+    if(ns/=1.and.ns/=2)return
+    if(size(rho,2)/=n.or.any(shape(gradient)/=[ns,3,n]).or.any(shape(core_gradient)/=[3,n]))return
+    if(size(energy)/=n.or.any(shape(potential)/=[ns,n]).or.any(shape(gradient_derivative)/=[ns,3,n]))return
+    if(.not.salmon_all_finite(core).or.any(core<0d0))return
+    do j=1,ns
+      if(.not.salmon_all_finite(rho(j,:)).or.any(rho(j,:)<-1d-12))return
+      r(j,:)=max(rho(j,:),0d0)+core/real(ns,c_double)
+      g(j,:,:)=gradient(j,:,:)+core_gradient/real(ns,c_double)
+    enddo
+    sigma(1,:)=sum(g(1,:,:)**2,dim=1)
+    if(ns==2)then
+      sigma(2,:)=sum(g(1,:,:)*g(2,:,:),dim=1)
+      sigma(3,:)=sum(g(2,:,:)**2,dim=1)
+    endif
+    do j=1,size(sigma,1)
+      if(.not.salmon_all_finite(sigma(j,:)))return
+    enddo
+    omega=.11d0
+    if(present(screening))omega=screening
+    if(.not.ieee_is_finite(omega).or.omega<=0d0)return
+    energy=0d0;potential=0d0;gradient_derivative=0d0
+    do part=1,merge(2,1,present(exchange_fraction))
+      id=428;weight=1d0
+      if(present(exchange_fraction))then
+        id=130
+        if(part==1)then
+          id=101;weight=1d0-exchange_fraction
+        endif
+      endif
+      func=xc_func_alloc();if(.not.c_associated(func))return
+      ierr=xc_func_init(func,int(id,c_int),int(ns,c_int))
+      if(ierr/=0)then
+        call xc_func_free(func);return
+      endif
+      if(id==428)call xc_func_set_ext_params(func,[.25d0,omega,omega])
+      call xc_gga_exc_vxc(func,int(n,c_size_t),r,sigma,ep,v,vs)
+      call xc_func_end(func);call xc_func_free(func)
+      energy=energy+weight*sum(r,dim=1)*ep
+      potential=potential+weight*v
+      do j=1,3
+        gradient_derivative(1,j,:)=gradient_derivative(1,j,:)+weight*2d0*vs(1,:)*g(1,j,:)
+        if(ns==2)then
+          gradient_derivative(1,j,:)=gradient_derivative(1,j,:)+weight*vs(2,:)*g(2,j,:)
+          gradient_derivative(2,j,:)=gradient_derivative(2,j,:)+ &
+            weight*(2d0*vs(3,:)*g(2,j,:)+vs(2,:)*g(1,j,:))
+        endif
+      enddo
+    enddo
+    ierr=1
+    if(.not.salmon_all_finite(energy))return
+    do j=1,ns
+      if(.not.salmon_all_finite(potential(j,:)))return
+      do axis=1,3
+        if(.not.salmon_all_finite(gradient_derivative(j,axis,:)))return
+      enddo
+    enddo
+    ierr=0
+  end subroutine hybrid_density_evaluate
 
   pure logical function finite_real_1d(values) result(finite)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite

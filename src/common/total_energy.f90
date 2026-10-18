@@ -798,7 +798,9 @@ CONTAINS
     energy%E_kin      = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
 #ifdef USE_HSE
-    if(exx_enabled())energy%E_ion_nloc=energy%E_ion_nloc-2d0*exx_exchange_energy
+    ! Scalar nonlocal energy is inferred from Hpsi and includes Fock exchange.
+    ! SOC evaluates pseudo_so directly, so its ionic energy has no Fock term.
+    if(exx_enabled().and.yn_spinorbit=='n')energy%E_ion_nloc=energy%E_ion_nloc-2d0*exx_exchange_energy
 #endif
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 

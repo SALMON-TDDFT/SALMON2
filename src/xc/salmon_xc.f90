@@ -25,7 +25,7 @@ module salmon_xc
   use structures, only: s_xc_functional, s_xc_operator_payload
 #ifdef USE_HSE
   use exx_native, only: exx_refresh,exx_enabled,exx_exchange_energy
-  use hybrid_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate
+  use hybrid_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate,hybrid_density_evaluate
   use rvv10, only: rvv10_evaluate
   use rvv10_distributed, only: rvv10_evaluate_distributed
 #endif
@@ -84,7 +84,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit,yn_dc,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft,exx_pre_scf_active
+    use salmon_global, only: yn_spinorbit,yn_dc,yn_md,yn_opt,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft,exx_pre_scf_active
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
     implicit none
@@ -129,9 +129,8 @@ contains
 
 #ifdef USE_HSE
     if(exx_enabled())then
-      if(allocated(ppn%rho_nlcc))then
-        if(maxval(abs(ppn%rho_nlcc))>1d-14)error stop 'HSE06: NLCC not yet supported'
-      endif
+      if(pp%flag_nlcc.and.(yn_md/='n'.or.yn_opt/='n')) &
+        error stop 'Hybrid NLCC: fixed-ion calculations only'
       call exx_refresh(system,mg,info,spsi)
     endif
 #endif
@@ -259,6 +258,12 @@ contains
       enddo
 !$omp end parallel do
 
+#ifdef USE_HSE
+      if(xc_func%xctype(1)==salmon_xctype_hse06)then
+        rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+          rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+ppn%rho_nlcc
+      endif
+#endif
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
@@ -289,6 +294,12 @@ contains
       enddo
 !$omp end parallel do
 
+#ifdef USE_HSE
+      if(xc_func%xctype(1)==salmon_xctype_hse06)then
+        rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+          rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+0.5d0*ppn%rho_nlcc
+      endif
+#endif
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
@@ -313,6 +324,12 @@ contains
       enddo
 !$omp end parallel do
 
+#ifdef USE_HSE
+      if(xc_func%xctype(1)==salmon_xctype_hse06)then
+        rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+          rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+0.5d0*ppn%rho_nlcc
+      endif
+#endif
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
@@ -863,7 +880,8 @@ contains
       
       case ('hse06','pbe0','pbeh40','pbeh40_rvv10')
 #ifdef USE_HSE
-        if(spin/='unpolarized')error stop 'HSE06: unpolarized only'
+        if(spin/='unpolarized'.and.(spin/='noncollinear'.or.lower(name)/='hse06')) &
+          error stop 'Hybrid: only scalar or HSE06 noncollinear spin supported'
         xc%xctype(1)=salmon_xctype_hse06
         xc%use_gradient=.true.
         return
@@ -1325,24 +1343,40 @@ contains
       use exx_functional, only: exx_fraction=>exchange_fraction
       use salmon_global, only: hse_omega,xc_name=>xc,exx_pre_scf_active
       implicit none
-      real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
-      integer :: status,j
-      if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
-        error stop 'Hybrid: unpolarized gradient inputs required'
-      r=reshape(rho,[nl]);grad=reshape(grho,[nl,3]);sigma=sum(grad**2,dim=2)
-      if(exx_pre_scf_active)then
-        call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status,exchange_fraction=0d0)
-      else if(xc_name=='hse06')then
-        call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
+      real(8) :: r(xc%ispin+1,nl),g(xc%ispin+1,3,nl),core(nl),zero_gradient(3,nl)
+      real(8) :: en(nl),v(xc%ispin+1,nl),dg(xc%ispin+1,3,nl)
+      integer :: status,j,is
+      core=0d0;zero_gradient=0d0
+      if(present(rho_nlcc))core=reshape(rho_nlcc,[nl])
+      ! exchange_correlation already differentiated both densities including core.
+      if(xc%ispin==0)then
+        r(1,:)=reshape(rho,[nl])
+        do j=1,3;g(1,j,:)=reshape(grho(:,:,:,j),[nl]);enddo
       else
-        call pbeh_semilocal_evaluate(r,sigma,ep,vr,vs,status,exchange_fraction=exx_fraction())
+        do is=1,2
+          r(is,:)=reshape(rho_s(:,:,:,is),[nl])
+          do j=1,3;g(is,j,:)=reshape(grho_s(:,:,:,is,j),[nl]);enddo
+        enddo
+      endif
+      if(exx_pre_scf_active)then
+        call hybrid_density_evaluate(r,g,core,zero_gradient,en,v,dg,status,exchange_fraction=0d0)
+      else if(xc_name=='hse06')then
+        call hybrid_density_evaluate(r,g,core,zero_gradient,en,v,dg,status,screening=hse_omega)
+      else
+        call hybrid_density_evaluate(r,g,core,zero_gradient,en,v,dg,status,exchange_fraction=exx_fraction())
       endif
       if(status/=0)error stop 'Hybrid: Libxc semilocal evaluation failed'
-      if(present(exc))exc=reshape(ep,[nx,ny,nz])
-      if(present(eexc))eexc=reshape(r*ep,[nx,ny,nz])
-      if(present(vxc))vxc=reshape(vr,[nx,ny,nz])
-      ! SALMON adds div(rdedd), so store the negative gradient derivative.
-      do j=1,3;rdedd(:,:,:,j)=reshape(-2d0*vs*grad(:,j),[nx,ny,nz]);enddo
+      if(present(exc))exc=reshape(en/max(sum(r,dim=1)+core,tiny(1d0)),[nx,ny,nz])
+      if(present(eexc))eexc=reshape(en,[nx,ny,nz])
+      if(xc%ispin==0)then
+        if(present(vxc))vxc=reshape(v(1,:),[nx,ny,nz])
+        do j=1,3;rdedd(:,:,:,j)=reshape(-dg(1,j,:),[nx,ny,nz]);enddo
+      else
+        do is=1,2
+          if(present(vxc_s))vxc_s(:,:,:,is)=reshape(v(is,:),[nx,ny,nz])
+          do j=1,3;rdedd_s(:,:,:,is,j)=reshape(-dg(is,j,:),[nx,ny,nz]);enddo
+        enddo
+      endif
     end subroutine
 #endif
 

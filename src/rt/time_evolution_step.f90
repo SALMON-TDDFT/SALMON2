@@ -22,6 +22,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
 #ifdef USE_HSE
+  use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
   use exx_ptcn, only: native_exx_step
   use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint
 #endif
@@ -455,12 +456,18 @@ contains
 
   subroutine predictor_corrector
     implicit none
+#ifdef USE_HSE
+    complex(8),allocatable :: xc_initial(:,:,:,:,:)
+#endif
     real(8) :: V_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin)
     complex(8) :: psi_tmp(mg%is_array(1):mg%ie_array(1), &
                         & mg%is_array(2):mg%ie_array(2), &
                         & mg%is_array(3):mg%ie_array(3), &
                         & 1:system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e)
     call nvtxStartRange('predictor_corrector', __LINE__)
+#ifdef USE_HSE
+    if(xc=='hse06'.and.yn_spinorbit=='y')call snapshot_xc_noncollinear(xc_initial)
+#endif
 
     !$omp workshare
     V_tmp(:,:,:,1) = V_local(1)%f
@@ -512,6 +519,9 @@ contains
       !$omp end workshare
     end if
     
+#ifdef USE_HSE
+    if(xc=='hse06'.and.yn_spinorbit=='y')call average_xc_noncollinear(xc_initial)
+#endif
     !$omp workshare
     spsi_in%zwf = psi_tmp
     !$omp end workshare

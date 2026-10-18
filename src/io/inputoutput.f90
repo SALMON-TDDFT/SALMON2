@@ -3650,8 +3650,23 @@ contains
 #ifndef USE_HSE
       error stop 'HSE06 requires USE_HSE=ON'
 #endif
-      if(xc=='hse06'.and.(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n')) &
+      if(xc=='hse06'.and.(yn_periodic/='y'.or.(spin/='unpolarized'.and.spin/='noncollinear').or.yn_md/='n'.or.yn_opt/='n')) &
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
+      if(yn_spinorbit=='y')then
+        if(xc/='hse06'.or.spin/='noncollinear'.or.yn_dc/='n'.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or.temperature>=0d0.or.nstate/=nelec.or. &
+           yn_hse_wannier/='n'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
+           hse_sr_tolerance/=0d0.or.index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
+           yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_factor_mode/='off'.or.exx_kpoint_backend/='cpu'.or. &
+           yn_conventional_from_dcdft/='n'.or.yn_hse_wannier_snapshot/='n'.or. &
+           exx_ace_support/='occupied'.or.exx_pair_screening/='off') &
+          error stop 'SOC HSE06: occupied spinors, full uniform CPU k-only mesh and no approximations required'
+        if(theory/='dft'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+          error stop 'SOC HSE06 RT: Taylor4 required'
+        if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0.or. &
+           yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+          error stop 'SOC HSE06: checkpoint continuation and diagnostics not certified'
+      endif
       if(yn_dc=='y')yn_hse_wannier='y'
       ! Fixed thermal occupations use the existing weighted canonical source.
       if(xc=='hse06'.and.yn_dc=='n'.and.temperature>=0d0)then
@@ -3698,7 +3713,7 @@ contains
         if(yn_dc=='y'.and.temperature<0d0) &
           error stop 'DC HSE: a nonnegative electronic temperature is required'
       endif
-      if(yn_dc/='y'.and..not.(xc=='hse06'.and.temperature>=0d0).and. &
+      if(yn_spinorbit=='n'.and.yn_dc/='y'.and..not.(xc=='hse06'.and.temperature>=0d0).and. &
          (yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
         if(nstate*2<nelec.or.mod(nelec,2)/=0.or.temperature>=0d0.or. &
            (product(num_kgrid)==1.and.nstate*2/=nelec)) &

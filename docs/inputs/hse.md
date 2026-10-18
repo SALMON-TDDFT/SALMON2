@@ -66,7 +66,8 @@ accuracy settings. HSE RT defaults to Taylor4 + ACE with predictor/corrector;
 the entire `&propagation` namelist may be omitted. No ACE switch is necessary.
 Explicitly incompatible polynomial orders or disabling predictor/corrector are
 rejected. Other functionals retain their existing propagation defaults. Current native restrictions include
-periodic, unpolarized, fixed-ion systems, occupied-only states and fixed occupations.
+periodic, fixed-ion systems, occupied-only states and fixed occupations. The scalar route is
+unpolarized; the CPU non-DC spinor route below also supports SOC.
 Do not add `xname` or `cname` to HSE.
 
 Use the same omega for the converged GS and subsequent RT. Changing it requires
@@ -601,3 +602,31 @@ Use the same reduction in GS and RT. Assess q-grid convergence separately
 from target-k convergence, particularly for excited-state spectra. Learned
 ACE checkpoint format 2 stores the reduction factors and rejects a changed
 reduction on restart. Format 1 remains readable with unit factors only.
+
+
+## CPU single-cell SOC and fixed-core NLCC
+
+Native HSE06 now supports the ordinary periodic noncollinear SOC path with
+`spin='noncollinear'`, `yn_spinorbit='y'`, `nstate=nelec`, negative electronic
+temperature (fixed integer occupations), and k-only MPI. Each occupied spinor
+has occupation one. Both spin components and off-diagonal exchange density
+blocks enter Fock and ACE; the hybrid fraction remains 0.25.
+
+NLCC is evaluated consistently with total density and total density gradients
+in semilocal XC; the frozen unpolarized core is split equally between local spin
+channels. Core density is never included in the Fock sources. Hybrid NLCC forces
+and moving nuclei remain unsupported. Use the original NC UPF/VPS core data;
+do not remove core correction by editing a potential file.
+
+The SOC path accepts full uniform CPU k meshes and fixed nuclei with no DC,
+orbital or spatial MPI decomposition, symmetry reduction, q reduction, learned
+ACE or finite-support approximations. `yn_gamma_centered='n'` preserves the
+uniform point count; `dk_shift` may select a uniform mesh containing Gamma.
+Only Taylor4 ACE and the direct Taylor4 reference are certified for RT;
+checkpoint continuation and diagnostic export are rejected. Fresh GS data can
+be written and read by RT with identical cell, grid, functional, potential,
+occupation and k settings.
+
+See [the reproducible small-cell GS/RT validation](../../samples/hse_soc_nlcc/README.md).
+These tests establish implementation behavior, not WSe2 spectral convergence or
+large dense-k performance. The existing DC/Wannier restrictions above still apply.

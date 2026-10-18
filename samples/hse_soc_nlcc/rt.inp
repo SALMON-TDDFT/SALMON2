@@ -1,0 +1,19 @@
+&calculation theory='tddft_response' /
+&control sysname='Si2',directory_read_data='../gs/data_for_restart/' /
+&units unit_system='au' /
+&system yn_periodic='y',al_vec1=0d0,5.13d0,5.13d0,al_vec2=5.13d0,0d0,5.13d0,al_vec3=5.13d0,5.13d0,0d0,
+ nelem=1,natom=2,nelec=8,nstate=8 ,spin='noncollinear',yn_spinorbit='y' /
+&pseudo izatom(1)=14,file_pseudo(1)='../Si_PBE19.vps' /
+&functional xc='hse06',exx_pre_scf_threshold=0d0 /
+&rgrid num_rgrid=8,8,8 /
+&kgrid num_kgrid=1,1,1 /
+&parallel nproc_k=1,nproc_ob=1,nproc_rgrid=1,1,1 /
+&scf nscf=500,ncg=12,threshold=1d-7,method_mixing='simple_dm',mixrate=0.25d0,method_init_density='wf' /
+&atomic_red_coor
+ 'Si' 0d0 0d0 0d0 1
+ 'Si' .25d0 .25d0 .25d0 1
+/
+
+&tgrid dt=.02d0,nt=100 /
+&emfield trans_longi='tr',ae_shape1='impulse',e_impulse=1d-4,epdir_re1=1d0,0d0,0d0 /
+&analysis out_rt_energy_step=1,yn_out_rt_energy_components='y',nenergy=200,de=.001d0 /

@@ -12,6 +12,7 @@ module noncollinear_module
   public :: calc_magnetization_decomposed
   public :: calc_spin_current
   public :: simple_mixing_so
+  public :: snapshot_xc_noncollinear,average_xc_noncollinear
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -96,6 +97,7 @@ contains
 
   subroutine rot_dm_noncollinear( rho, system, mg )
     use structures, only : s_dft_system, s_rgrid, s_scalar
+    use salmon_global, only: xc
     use communication, only : comm_summation
     implicit none
     type(s_dft_system),intent(in) :: system
@@ -117,18 +119,39 @@ contains
     b=2
 #ifdef USE_OPENACC
 !$acc kernels
-!#acc loop collapse(2) private(iz,iy,ix,phi,theta)
+!#acc loop collapse(2) private(iz,iy,ix,phi,theta,tmp,tmp1)
 #else
-!$omp parallel do collapse(2) default(shared) private(iz,iy,ix,phi,theta)
+!$omp parallel do collapse(2) default(shared) private(iz,iy,ix,phi,theta,tmp,tmp1)
 #endif
     do iz=mg%is(3),mg%ie(3)
     do iy=mg%is(2),mg%ie(2)
     do ix=mg%is(1),mg%ie(1)
 
-       phi = -atan( aimag(den_mat(ix,iy,iz,a,b))/dble(den_mat(ix,iy,iz,a,b)) )
-       theta = atan( 2.0d0*( dble(den_mat(ix,iy,iz,a,b))*cos(phi) &
-            -aimag(den_mat(ix,iy,iz,a,b))*sin(phi) ) &
-            /dble( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) ) )
+       ! atan(y/x) is undefined for closed-shell spin pairs (0/0), and
+       ! swaps local spin channels across quadrants. Use the Hermitian density
+       ! matrix eigenbasis, with a defined identity rotation at zero magnetization.
+       tmp=abs(den_mat(ix,iy,iz,a,b))
+       tmp1=dble(den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b))
+       phi=0d0;theta=0d0
+       if(xc=='hse06')then
+         ! GGA gradients require consistently ordered local spin eigenvalues.
+         if(tmp>0d0)phi=-atan2(aimag(den_mat(ix,iy,iz,a,b)),dble(den_mat(ix,iy,iz,a,b)))
+         if(tmp>0d0.or.tmp1/=0d0)theta=atan2(2d0*tmp,tmp1)
+       else
+         ! Preserve the established nonhybrid chart and arithmetic away from
+         ! its singular axes; only define the formerly undefined zero cases.
+         if(dble(den_mat(ix,iy,iz,a,b))/=0d0)then
+           phi=-atan(aimag(den_mat(ix,iy,iz,a,b))/dble(den_mat(ix,iy,iz,a,b)))
+         else if(tmp>0d0)then
+           phi=-sign(0.5d0*acos(-1d0),aimag(den_mat(ix,iy,iz,a,b)))
+         endif
+         tmp=2d0*(dble(den_mat(ix,iy,iz,a,b))*cos(phi)-aimag(den_mat(ix,iy,iz,a,b))*sin(phi))
+         if(tmp1/=0d0)then
+           theta=atan(tmp/tmp1)
+         else if(tmp/=0d0)then
+           theta=sign(0.5d0*acos(-1d0),tmp)
+         endif
+       endif
 
        rho(1)%f(ix,iy,iz) = 0.5d0*dble( den_mat(ix,iy,iz,a,a)+den_mat(ix,iy,iz,b,b) ) &
             + 0.5d0*dble( den_mat(ix,iy,iz,a,a)-den_mat(ix,iy,iz,b,b) )*cos(theta) &
@@ -210,6 +233,23 @@ contains
 
   end subroutine rot_vxc_noncollinear
 
+
+  ! The local XC matrix is applied outside V_local in the SOC Hamiltonian.
+  ! A predictor/corrector must time-center this matrix as well as Hartree.
+  subroutine snapshot_xc_noncollinear(snapshot)
+    implicit none
+    complex(8),allocatable,intent(out) :: snapshot(:,:,:,:,:)
+    if(.not.allocated(vxc_mat))error stop 'SOC XC matrix is not initialized'
+    snapshot=vxc_mat
+  end subroutine
+
+  subroutine average_xc_noncollinear(snapshot)
+    implicit none
+    complex(8),intent(in) :: snapshot(:,:,:,:,:)
+    if(.not.allocated(vxc_mat))error stop 'SOC XC matrix is not initialized'
+    if(any(shape(snapshot)/=shape(vxc_mat)))error stop 'SOC XC midpoint shape mismatch'
+    vxc_mat=0.5d0*(snapshot+vxc_mat)
+  end subroutine
 
   subroutine op_xc_noncollinear( tpsi, hpsi, info, mg )
     use structures, only : s_orbital, s_rgrid, s_parallel_info

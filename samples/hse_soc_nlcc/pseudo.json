@@ -1,0 +1,9 @@
+{
+  "file": "Si_PBE19.vps",
+  "source": "https://www.openmx-square.org/vps_pao2019/Si/Si_PBE19.vps",
+  "sha256": "9a274b3f50cd247d53e735b8ad1669d491286934b61c295bcd6e8b6ba555d80a",
+  "valence": 4,
+  "nlcc": true,
+  "fully_relativistic": true,
+  "note": "Download the original without altering its core density or SO channels."
+}

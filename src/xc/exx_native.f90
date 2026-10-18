@@ -14,6 +14,7 @@ module exx_native
   use structures
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
+  use exx_spinor, only: exx_spinor_apply_distributed
   use exx_k_orbits, only: apply_k_orbits
   use exx_ace
   use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
@@ -170,6 +171,11 @@ contains
     integer :: occupied
     occupied=nelec/2
     valid=.false.
+    if(yn_spinorbit=='y')then
+      if(temperature>=0d0.or.system%no/=nelec.or.nelec<1)return
+      if(maxval(abs(system%rocc-1d0))>1d-12)return
+      valid=.true.;return
+    endif
     if(temperature>=0d0)return
     if(mod(nelec,2)/=0.or.occupied<1.or.occupied>system%no)return
     if(maxval(abs(system%rocc(:occupied,:,:)-2d0))>1d-12)return
@@ -703,15 +709,15 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     complex(8),intent(out) :: a(:,:,:)
-    integer :: ik,io,ix,iy,iz,g
-!$omp parallel do collapse(4) default(none) schedule(static) &
-!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,psi,a)
-    do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
+    integer :: ik,io,ix,iy,iz,g,is,ng
+    ng=product(mg%num)
+!$omp parallel do collapse(3) default(shared) private(ik,io,is,ix,iy,iz,g) schedule(static)
+    do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e;do is=1,size(psi%zwf,4)
       do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
-        g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
-        a(g,io-info%io_s+1,ik-info%ik_s+1)=psi%zwf(ix,iy,iz,1,io,ik,1)
+        g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))+(is-1)*ng
+        a(g,io-info%io_s+1,ik-info%ik_s+1)=psi%zwf(ix,iy,iz,is,io,ik,1)
       enddo;enddo;enddo
-    enddo;enddo
+    enddo;enddo;enddo
 !$omp end parallel do
   end subroutine
 
@@ -721,15 +727,15 @@ contains
     type(s_orbital),intent(inout) :: psi
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
-    integer :: ik,io,ix,iy,iz,g
-!$omp parallel do collapse(4) default(none) schedule(static) &
-!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,psi,a)
-    do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e
+    integer :: ik,io,ix,iy,iz,g,is,ng
+    ng=product(mg%num)
+!$omp parallel do collapse(3) default(shared) private(ik,io,is,ix,iy,iz,g) schedule(static)
+    do ik=info%ik_s,info%ik_e;do io=info%io_s,info%io_e;do is=1,size(psi%zwf,4)
       do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
-        g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
-        psi%zwf(ix,iy,iz,1,io,ik,1)=a(g,io-info%io_s+1,ik-info%ik_s+1)
+        g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))+(is-1)*ng
+        psi%zwf(ix,iy,iz,is,io,ik,1)=a(g,io-info%io_s+1,ik-info%ik_s+1)
       enddo;enddo;enddo
-    enddo;enddo
+    enddo;enddo;enddo
 !$omp end parallel do
     psi%update_zwf_overlap=.false.
   end subroutine
@@ -751,14 +757,14 @@ contains
       if(factor_experiment)call factor_predicted_expectation(system,mg,info,psi)
       return
     endif
-    if(yn_periodic/='y'.or.system%nspin/=1.or..not.allocated(psi%zwf)) &
+    if(yn_periodic/='y'.or.(system%nspin/=1.and.yn_spinorbit/='y').or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
       if((.not.is_global_hybrid(xc)).or. &
          (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y') &
         error stop 'Hybrid: unsupported real-time ionic extension'
     endif
-    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.yn_symmetrized_stencil=='y') &
+    if(yn_jm/='n'.or.yn_symmetrized_stencil=='y') &
       error stop 'HSE06: unsupported Hamiltonian/ionic extension'
     if(PLUS_U_ON)error stop 'HSE06: DFT+U combination unsupported'
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
@@ -844,6 +850,7 @@ contains
       endif
       timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
+    if(yn_spinorbit=='y')ng=2*ng
     allocate(local(ng,no,info%numk))
     call exx_pack(psi,mg,info,local)
     ierr=1
@@ -890,7 +897,7 @@ contains
   logical function k_pairs_enabled()
     use salmon_global, only: yn_exx_k_pair_symmetry
     implicit none
-    k_pairs_enabled=yn_exx_k_pair_symmetry=='y'.and..not.use_symmetry.and.yn_dc=='n'.and. &
+    k_pairs_enabled=yn_spinorbit=='n'.and.yn_exx_k_pair_symmetry=='y'.and..not.use_symmetry.and.yn_dc=='n'.and. &
       kernel%nk>1.and.kernel%nq==kernel%nk.and..not.allocated(kernel%accelerator).and. &
       (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse')
   end function k_pairs_enabled
@@ -907,6 +914,12 @@ contains
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
+    if(yn_spinorbit=='y')then
+      call comm_summation(local_layout,layout,size(layout),info%icomm_k)
+      call exx_spinor_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
+        info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+      return
+    endif
     if(use_symmetry)then
       local_layout(info%id_k+1)=symmetry_map%first(info%ik_s)
       local_layout(np+info%id_k+1)=symmetry_map%first(info%ik_e+1)-symmetry_map%first(info%ik_s)
@@ -1052,7 +1065,7 @@ contains
       if(.not.exx_ace_ready(ace))error stop 'HSE06: occupied exchange source is not initialized'
     endif
     if(info%isize_o>1)orbital_comm=info%icomm_o
-    ng=product(mg%num)
+    ng=product(mg%num)*size(psi%zwf,4)
     if(ace%packed.and.product(num_kgrid)==1.and..not.exx_force_full_action.and. &
        .not.(taylor_active.and.propagator=='hse_taylor4_full'))then
       if(.not.(taylor_active.and.taylor_midpoint).or.initial_ace%packed)then
@@ -1177,21 +1190,19 @@ contains
       implicit none
       real(8),intent(in) :: weight
       integer,optional,intent(in) :: first,last
-      integer :: ix,iy,iz,io,ik,g,io_first,io_last
-      io_first=info%io_s;io_last=info%io_e
+      integer :: ix,iy,iz,io,ik,g,is,io_first,io_last,ngrid
+      io_first=info%io_s;io_last=info%io_e;ngrid=product(mg%num)
       if(present(first))io_first=info%io_s+first-1
       if(present(last))io_last=info%io_s+last-1
-!$omp parallel do collapse(4) default(none) schedule(static) &
-!$omp private(ik,io,iz,iy,ix,g) shared(info,mg,hpsi,weight,action_work,io_first,io_last)
-      do ik=info%ik_s,info%ik_e;do io=io_first,io_last
+!$omp parallel do collapse(3) default(shared) private(ik,io,is,ix,iy,iz,g) schedule(static)
+      do ik=info%ik_s,info%ik_e;do io=io_first,io_last;do is=1,size(hpsi%zwf,4)
         do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
-          g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))
-          hpsi%zwf(ix,iy,iz,1,io,ik,1)=hpsi%zwf(ix,iy,iz,1,io,ik,1) &
+          g=1+(ix-mg%is(1))+mg%num(1)*((iy-mg%is(2))+mg%num(2)*(iz-mg%is(3)))+(is-1)*ngrid
+          hpsi%zwf(ix,iy,iz,is,io,ik,1)=hpsi%zwf(ix,iy,iz,is,io,ik,1) &
             +weight*action_work(g,io-io_first+1,ik-info%ik_s+1)
         enddo;enddo;enddo
-      enddo;enddo
+      enddo;enddo;enddo
 !$omp end parallel do
-      hpsi%update_zwf_overlap=.false.
     end subroutine
     subroutine sum_spatial(a)
       implicit none
