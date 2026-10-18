@@ -38,9 +38,9 @@ program symmetry_exchange_probe
  if(ierr/=0)stop 3
  call exx_k_kernel_init(kernel,2,2,1d0,map%full_k,.11d0,3,ierr,1,8)
  if(ierr/=0)stop 4
- call exx_k_kernel_apply_distributed(kernel,expanded_source,expanded_target,reference,[1],[8],0,transpose_tiles,ierr)
+ call exx_k_kernel_apply_distributed(kernel,expanded_source,expanded_target,reference,[1],[8],0,0,transpose_tiles,ierr)
  if(ierr/=0)stop 5
- call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,callback_action,[1],[8],0, &
+ call exx_k_kernel_apply_distributed(kernel,expanded_target,expanded_target,callback_action,[1],[8],0,0, &
                                  transpose_tiles,ierr,fill_density)
  if(ierr/=0)stop 6
  err=maxval(abs(reference-callback_action))/maxval(abs(reference))
@@ -48,11 +48,11 @@ program symmetry_exchange_probe
  print *, 'symmetry exchange callback passed',err
  call exx_k_kernel_destroy(kernel)
 contains
- subroutine transpose_tiles(send,recv,count)
+ subroutine transpose_tiles(send,recv,count,comm)
  implicit none
  complex(8),intent(in)::send(:)
  complex(8),intent(out)::recv(:)
- integer,intent(in)::count
+ integer,intent(in)::count,comm
  if(count/=size(send))stop 8
  recv=send
  end subroutine

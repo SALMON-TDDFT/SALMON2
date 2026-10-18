@@ -24,9 +24,14 @@ class NativeSpinNLCCTest(unittest.TestCase):
         sources = ['exx_k_backend', 'exx_k_exchange', 'exx_spinor'] if spinor else ['hybrid_semilocal']
         if spinor and not mpi:
             sources.append('exx_ace')
+        if 'symmetry' in name:
+            sources.append('exx_symmetry')
         with tempfile.TemporaryDirectory() as directory:
             exe = Path(directory) / 'probe'
-            cmd = [compiler, '-O1', '-g', '-fcheck=all', '-fopenmp']
+            # Match the unoptimized production build for this reentrancy bug:
+            # optimization/bounds checks can incidentally hide static temporaries.
+            cmd = ([compiler, '-O0', '-g', '-fopenmp'] if 'ace_threads' in name else
+                   [compiler, '-O1', '-g', '-fcheck=all', '-fopenmp'])
             if spinor:
                 cmd += ['-I' + str(fftw / 'include')]
             cmd += [str(ROOT / 'src/xc' / (s + '.f90')) for s in sources]
@@ -42,11 +47,17 @@ class NativeSpinNLCCTest(unittest.TestCase):
             cmd = [str(exe)]
             if mpi:
                 cmd = [os.environ.get('MPIEXEC', 'mpiexec'), '-n', '2', str(exe)]
-            for suffix in ([], ['nan']) if mpi else ([],):
+            for suffix in ([], ['nan']) if mpi and 'symmetry' not in name else ([],):
                 result = subprocess.run(cmd + suffix, cwd=directory, env=env, capture_output=True,
                                         text=True, timeout=120)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn('PASS', result.stdout)
+
+    def test_spinor_ace_threaded_k_metric(self):
+        self.run_probe('native_spinor_ace_threads_probe')
+
+    def test_spinor_rectangular_symmetry_projector_fock(self):
+        self.run_probe('symmetry_spinor_probe')
 
     def test_fixed_core_libxc_and_variational_derivatives(self):
         self.run_probe('native_nlcc_probe')
@@ -56,6 +67,10 @@ class NativeSpinNLCCTest(unittest.TestCase):
 
     def test_spinor_offdiagonal_exchange_rotation_and_ace(self):
         self.run_probe('native_spinor_probe')
+
+    @unittest.skipUnless(os.environ.get('RUN_MPI_TESTS') == '1', 'Set RUN_MPI_TESTS=1 for MPI validation')
+    def test_spinor_symmetry_uneven_k_distribution(self):
+        self.run_probe('symmetry_spinor_mpi_probe', mpi=True)
 
     @unittest.skipUnless(os.environ.get('RUN_MPI_TESTS') == '1', 'Set RUN_MPI_TESTS=1 for MPI validation')
     def test_spinor_k_distribution(self):

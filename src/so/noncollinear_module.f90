@@ -26,6 +26,8 @@ contains
   subroutine calc_dm_noncollinear( psi, system, info, mg )
     use structures, only : s_dft_system, s_parallel_info, s_rgrid, s_orbital
     use communication, only: comm_summation
+    use sym_sub, only: use_symmetry,SymMatA,SymMatB
+    use exx_symmetry, only: symmetry_spin_rotation
     implicit none
     type(s_orbital),intent(in) :: psi
     type(s_dft_system),intent(in) :: system
@@ -33,7 +35,9 @@ contains
     type(s_rgrid),intent(in) :: mg
     integer :: io,ik,im,is,js,ix,iy,iz,m1,m2,m3,n1,n2,n3
     complex(8),allocatable :: ztmp(:,:,:),dmat_tmp(:,:,:,:,:)
-    real(8) :: occ
+    real(8) :: occ,frac(3),point(3)
+    complex(8)::spin(2,2)
+    integer::operation,stat,gridpoint(3)
 
     if ( .not.allocated(den_mat) ) then
        m1=mg%is(1); n1=mg%ie(1)
@@ -80,6 +84,32 @@ contains
     iz=size(den_mat,3)
     allocate( dmat_tmp(ix,iy,iz,2,2) ); dmat_tmp=den_mat
     call comm_summation( dmat_tmp, den_mat, size(dmat_tmp), info%icomm_ko )
+    if(use_symmetry)then
+      ! Reconstruct the density matrix, including its axial magnetization,
+      ! from representative k points. Scalar averaging of eigenvalues loses
+      ! the spin rotation and is insufficient for SOC.
+      if(any(mg%is/=1))then
+        error stop 'SOC symmetry density requires a full real-space grid'
+      endif
+      dmat_tmp=den_mat;den_mat=0d0
+      do operation=1,size(SymMatA,3)
+        call symmetry_spin_rotation(SymMatB(:,1:3,operation),spin,stat)
+        if(stat/=0)error stop 'SOC symmetry requires signed diagonal rotations'
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          frac=real([ix,iy,iz]-mg%is,8)/mg%num
+          point=matmul(transpose(SymMatA(:,1:3,operation)),frac-SymMatA(:,4,operation))*mg%num
+          if(maxval(abs(point-anint(point)))>1d-8)error stop 'SOC symmetry does not preserve real-space grid'
+          gridpoint=modulo(nint(point),mg%num)+1
+          den_mat(ix,iy,iz,:,:)=den_mat(ix,iy,iz,:,:)+matmul(spin, &
+            matmul(dmat_tmp(gridpoint(1),gridpoint(2),gridpoint(3),:,:),conjg(transpose(spin)))) &
+            /size(SymMatA,3)
+        enddo
+        enddo
+        enddo
+      enddo
+    endif
     deallocate( dmat_tmp )
 
     !m1=mg%is(1); n1=mg%ie(1)

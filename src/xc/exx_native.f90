@@ -799,9 +799,7 @@ contains
     if(use_symmetry)mesh=num_kgrid(1)
     if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
       error stop 'EXX: full uniform k mesh required'
-    if(use_symmetry.and.(any(mg%num/=n).or.any(num_kgrid/=mesh).or. &
-      maxval(abs(system%hgs-system%hgs(1)))>1d-12)) &
-      error stop 'EXX symmetry: cubic grid and cubic k mesh required'
+    if(use_symmetry.and.any(mg%num/=num_rgrid))error stop 'EXX symmetry requires the full real-space grid'
     offdiag=system%primitive_a
     do j=1,3;offdiag(j,j)=0;enddo
     if(use_symmetry.and.maxval(abs(offdiag))>1d-12) &
@@ -815,9 +813,8 @@ contains
       if(exx_kpoint_backend=='cufft')create_backend=>exx_k_cufft_create
       ! Keep representatives persistent; expand only rank-local stars for EXX.
       if(use_symmetry)then
-        if(any(num_kgrid/=mesh))error stop 'HSE symmetry: cubic full mesh required'
         call symmetry_init(symmetry_map,mg%num,system%hgs,system%vec_k(:,:nk),system%wtk(:nk), &
-          SymMatA,SymMatB,mesh,ierr)
+          SymMatA,SymMatB,num_kgrid,ierr)
         call comm_summation(ierr,total_error,info%icomm_rko)
         if(total_error/=0)error stop 'HSE symmetry: invalid grid, stars or weights'
         call symmetry_validate_atoms(symmetry_map,system%Rion,system%kion,ierr)
@@ -910,21 +907,37 @@ contains
     type(s_parallel_info),intent(in) :: info
     integer,intent(out) :: ierr
     integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np,j,index,total_error
-    complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:)
+    complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:),expanded_source(:,:,:)
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
-    if(yn_spinorbit=='y')then
-      call comm_summation(local_layout,layout,size(layout),info%icomm_k)
-      call exx_spinor_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
-        info%id_k,info%icomm_k,transpose_k_tiles,ierr)
-      return
-    endif
     if(use_symmetry)then
       local_layout(info%id_k+1)=symmetry_map%first(info%ik_s)
       local_layout(np+info%id_k+1)=symmetry_map%first(info%ik_e+1)-symmetry_map%first(info%ik_s)
     endif
     call comm_summation(local_layout,layout,size(layout),info%icomm_k)
+    if(yn_spinorbit=='y')then
+      if(use_symmetry)then
+        call symmetry_expand(symmetry_map,info%ik_s,source,target,expanded_source,expanded_target,ierr)
+        call comm_summation(ierr,total_error,info%icomm_k)
+        if(total_error/=0)then
+          ierr=1;return
+        endif
+        allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
+        call exx_spinor_apply_distributed(kernel,expanded_source,expanded_target,expanded_action,layout(:np), &
+          layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+        if(ierr==0)then
+          do j=1,info%numk
+            index=symmetry_map%first(info%ik_s+j-1)-symmetry_map%first(info%ik_s)+1
+            action(:,:,j)=expanded_action(:,:,index)
+          enddo
+        endif
+      else
+        call exx_spinor_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
+          info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+      endif
+      return
+    endif
     if(use_symmetry)then
       ierr=0
       if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))ierr=1

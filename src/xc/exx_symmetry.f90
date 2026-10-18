@@ -1,4 +1,4 @@
-! Unitary space-group star reconstruction for a complete cubic k mesh.
+! Unitary space-group star reconstruction for a complete orthogonal rectangular k mesh.
 ! Sources average little-group projectors, not individual orbital gauges.
 module exx_symmetry
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -17,21 +17,32 @@ module exx_symmetry
   interface salmon_all_finite
     module procedure finite_real_1d,finite_real_2d,finite_real_3d
   end interface
+ interface symmetry_init
+ module procedure symmetry_init_scalar,symmetry_init_vector
+ end interface
+ public :: symmetry_spin_rotation
 contains
- subroutine symmetry_init(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
+ subroutine symmetry_init_scalar(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
+ type(s_exx_symmetry_map),intent(out)::map
+ integer,intent(in)::n(3),mesh
+ real(8),intent(in)::h(3),krep(:,:),weights(:),SymMatA(:,:,:),SymMatB(:,:,:)
+ integer,intent(out)::ierr
+ call symmetry_init_vector(map,n,h,krep,weights,SymMatA,SymMatB,[mesh,mesh,mesh],ierr)
+ end subroutine
+ subroutine symmetry_init_vector(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
  implicit none
  type(s_exx_symmetry_map),intent(out)::map
- integer,intent(in):: n(3),mesh
+ integer,intent(in):: n(3),mesh(3)
  real(8),intent(in)::h(3),krep(:,:),weights(:),SymMatA(:,:,:),SymMatB(:,:,:)
  integer,intent(out)::ierr
  real(8):: L(3),pi2,ident(3,3),rot(3,3),v(3),f(3),offset(3),xyz(3)
  integer:: nr,ns,nf,ng,r,s,d,g,j,i,id,slot,base,c(3),c0(3),nstar,matches
  integer,allocatable::lookup(:),order(:),used(:)
  ierr=1
- if(any(n<1).or.mesh<1.or.any(h<=0).or..not.salmon_all_finite(h))return
+ if(any(n<1).or.any(mesh<1).or.any(h<=0).or..not.salmon_all_finite(h))return
  if(size(krep,1)/=3.or.size(SymMatA,1)/=3.or.size(SymMatA,2)/=4)return
  if(any(shape(SymMatA)/=shape(SymMatB)))return
- nr=size(krep,2);ns=size(SymMatA,3);nf=mesh**3;ng=product(n)
+ nr=size(krep,2);ns=size(SymMatA,3);nf=product(mesh);ng=product(n)
  if(nr<1.or.ns<1.or.size(weights)/=nr)return
  if(.not.salmon_all_finite(krep).or..not.salmon_all_finite(weights))return
  if(.not.salmon_all_finite(SymMatA).or..not.salmon_all_finite(SymMatB))return
@@ -39,13 +50,16 @@ contains
  do d=1,3
  ident(d,d)=1
  enddo
- if(maxval(abs(L-L(1)))>1d-10)return
+
  allocate(order(ns));id=0
  do s=1,ns
  rot=SymMatA(:,1:3,s)
  if(maxval(abs(rot-anint(rot)))>1d-10)return
  if(maxval(abs(matmul(transpose(rot),rot)-ident))>1d-10)return
  if(maxval(abs(rot-SymMatB(:,1:3,s)))>1d-10)return
+ do d=1,3
+ if(maxval(abs(rot(d,:)*(L-L(d))))>1d-10)return
+ enddo
  if(maxval(abs(rot-ident))<1d-10.and.maxval(abs(SymMatA(:,4,s)))<1d-10)id=s
  enddo
  ! A supplied operation list must be a finite group modulo lattice translations.
@@ -97,7 +111,7 @@ contains
  f=v*mesh-offset
  if(maxval(abs(f-anint(f)))>1d-8)return
  c=modulo(nint(f),mesh)
- j=1+c(1)+mesh*(c(2)+mesh*c(3))
+ j=1+c(1)+mesh(1)*(c(2)+mesh(2)*c(3))
  g=lookup(j)
  if(g==0)then
  i=i+1
@@ -168,16 +182,22 @@ contains
  complex(8),intent(in)::orbitals(:,:)
  complex(8),intent(out)::transformed(:,:)
  integer,intent(out)::ierr
- integer::ng,r,s,g,c(3)
+ integer::ng,r,s,g,c(3),nc
+ complex(8)::spin(2,2)
  real(8)::rk(3),Gvec(3),pos(3),angle
  complex(8)::phase
  ierr=1;ng=product(map%n)
  if(.not.allocated(map%multiplicity))return
  if(full_index<1.or.full_index>map%nfull)return
  if(operation_slot<1.or.operation_slot>map%multiplicity(full_index))return
- if(size(orbitals,1)/=ng.or.any(shape(orbitals)/=shape(transformed)))return
+ nc=size(orbitals,1)/ng
+ if((nc/=1.and.nc/=2).or.size(orbitals,1)/=nc*ng.or.any(shape(orbitals)/=shape(transformed)))return
  if(.not.salmon_all_finite(real(orbitals)).or..not.salmon_all_finite(aimag(orbitals)))return
  r=map%owner(full_index);s=map%operations(operation_slot,full_index)
+ if(nc==2)then
+ call symmetry_spin_rotation(map%rotation(:,:,s),spin,ierr)
+ if(ierr/=0)return
+ endif
  rk=matmul(map%rotation(:,:,s),map%rep_k(:,r))
  Gvec=rk-map%full_k(:,full_index)
  do g=1,ng
@@ -185,47 +205,71 @@ contains
  pos=c*map%h
  angle=dot_product(Gvec,pos)-dot_product(rk,map%translation(:,s)*map%n*map%h)
  phase=cmplx(cos(angle),sin(angle),8)
+ if(nc==1)then
  transformed(g,:)=phase*orbitals(map%grid(g,s),:)
+ else
+ transformed(g,:)=phase*(spin(1,1)*orbitals(map%grid(g,s),:)+spin(1,2)*orbitals(ng+map%grid(g,s),:))
+ transformed(ng+g,:)=phase*(spin(2,1)*orbitals(map%grid(g,s),:)+spin(2,2)*orbitals(ng+map%grid(g,s),:))
+ endif
  enddo
  ierr=0
  end subroutine
 
  subroutine symmetry_expand(map,rep_start,source,target,expanded_source,expanded_target,ierr)
- implicit none
  type(s_exx_symmetry_map),intent(in)::map
  integer,intent(in)::rep_start
  complex(8),intent(in)::source(:,:,:),target(:,:,:)
  complex(8),allocatable,intent(out)::expanded_source(:,:,:),expanded_target(:,:,:)
  integer,intent(out)::ierr
- integer::nr,ng,no,nv,lo,hi,j,l,r,s,g,m,c(3),q
- real(8)::rk(3),Gvec(3),pos(3),angle,scale
- complex(8)::phase
- ierr=1;ng=product(map%n);no=size(source,2);nv=size(target,2);nr=size(source,3)
+ integer::nr,ng,no,nv,lo,hi,j,l,r,m
+ real(8)::scale
+ ierr=1;ng=size(source,1);no=size(source,2);nv=size(target,2);nr=size(source,3)
  if(.not.allocated(map%first))return
  if(rep_start<1.or.rep_start+nr>map%nrep+1)return
- if(size(source,1)/=ng.or.size(target,1)/=ng.or.size(target,3)/=nr)return
+ if(size(target,1)/=ng.or.size(target,3)/=nr)return
  if(no<1.or.nv<1)return
- if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))return
- if(.not.salmon_all_finite(real(target)).or..not.salmon_all_finite(aimag(target)))return
  lo=map%first(rep_start);hi=map%first(rep_start+nr)-1
  allocate(expanded_source(ng,no*map%max_little,hi-lo+1),expanded_target(ng,nv,hi-lo+1))
  expanded_source=0;expanded_target=0
  do j=lo,hi
- r=map%owner(j);l=j-lo+1;scale=1/sqrt(real(map%multiplicity(j),8))
+ r=map%owner(j)-rep_start+1;l=j-lo+1;scale=1/sqrt(real(map%multiplicity(j),8))
  do m=1,map%multiplicity(j)
- s=map%operations(m,j)
- rk=matmul(map%rotation(:,:,s),map%rep_k(:,r))
- Gvec=rk-map%full_k(:,j)
- do g=1,ng
- c=[mod(g-1,map%n(1)),mod((g-1)/map%n(1),map%n(2)),(g-1)/(map%n(1)*map%n(2))]
- pos=c*map%h
- angle=dot_product(Gvec,pos)-dot_product(rk,map%translation(:,s)*map%n*map%h)
- phase=cmplx(cos(angle),sin(angle),8);q=map%grid(g,s)
- expanded_source(g,(m-1)*no+1:m*no,l)=phase*source(q,:,r-rep_start+1)*scale
- if(m==1)expanded_target(g,:,l)=phase*target(q,:,r-rep_start+1)
+ call symmetry_transform(map,j,m,source(:,:,r),expanded_source(:,(m-1)*no+1:m*no,l),ierr)
+ if(ierr/=0)return
+ expanded_source(:,(m-1)*no+1:m*no,l)=expanded_source(:,(m-1)*no+1:m*no,l)*scale
  enddo
+ call symmetry_transform(map,j,1,target(:,:,r),expanded_target(:,:,l),ierr)
+ if(ierr/=0)return
  enddo
+ ierr=0
+ end subroutine
+
+
+ ! Double-group representative for diagonal orthorhombic operations. Spin is
+ ! axial: improper R uses det(R)*R. Overall SU(2) signs cancel in projectors.
+ subroutine symmetry_spin_rotation(rotation,u,ierr)
+ real(8),intent(in)::rotation(3,3)
+ complex(8),intent(out)::u(2,2)
+ integer,intent(out)::ierr
+ real(8)::r(3),off(3,3),det
+ integer::i
+ ierr=1;u=0
+ if(.not.salmon_all_finite(rotation))return
+ off=rotation
+ do i=1,3
+ off(i,i)=0;r(i)=rotation(i,i)
  enddo
+ if(maxval(abs(off))>1d-12.or.any(abs(abs(r)-1d0)>1d-12))return
+ det=product(r);r=det*r
+ if(all(r>0))then
+ u(1,1)=1;u(2,2)=1
+ else if(r(1)>0)then
+ u(1,2)=(0d0,-1d0);u(2,1)=(0d0,-1d0)
+ else if(r(2)>0)then
+ u(1,2)=-1;u(2,1)=1
+ else
+ u(1,1)=(0d0,-1d0);u(2,2)=(0d0,1d0)
+ endif
  ierr=0
  end subroutine
 

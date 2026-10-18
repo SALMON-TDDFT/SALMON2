@@ -117,9 +117,8 @@ contains
     complex(c_double_complex) :: check(1,1)
     complex(c_double_complex),allocatable :: metric(:,:),work(:)
     real(c_double),allocatable :: e(:),rwork(:)
-    integer :: n,ng,nk,ik,status,workers,bad,thread_state(3),worker_state(3)
+    integer :: n,ng,nk,ik,status,workers,bad,thread_state(3)
     real(c_double) :: condition,one_condition
-    logical :: parallel_k
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     external :: zgemm,zheev
     ierr=1
@@ -136,45 +135,22 @@ contains
     workers=1;thread_state=0
 !$  workers=omp_get_max_threads()
 !$  if(omp_in_parallel())workers=1
-    parallel_k=nk>1.and..not.present(sum_grid).and.workers>1
-    if(present(thread_control).and.workers>1)then
-      if(parallel_k)then
-        call thread_control(1,thread_state)
-      else
-        call thread_control(workers,thread_state)
-      endif
-    endif
-    parallel_k=parallel_k.and.thread_state(1)>0
+    ! Build the small ACE matrices sequentially over k. Concurrent calls of
+    ! the internal eigensolver path produce non-Hermitian metrics in tested
+    ! unoptimized GNU builds; keep this path serial until reentrant. BLAS
+    ! may still use the requested team; the dominant exchange FFTs remain
+    ! parallel. Do not weaken the Hermiticity check to mask that corruption.
+    if(present(thread_control).and.workers>1)call thread_control(workers,thread_state)
     allocate(ace%factors(ng,n,nk))
     ace%dv=dv;ace%condition=0d0
     bad=0;condition=0d0
-    if(parallel_k)then
-      workers=min(workers,nk)
-!$omp parallel default(none) num_threads(workers) &
-!$omp shared(n,nk,ng,u,w,dv,ace) private(metric,work,e,rwork,ik,status,one_condition,worker_state) &
-!$omp reduction(max:bad,condition)
-      worker_state=0
-      call thread_control(1,worker_state)
-      allocate(metric(n,n),work(max(1,2*n)),e(n),rwork(max(1,3*n-2)))
-!$omp do schedule(static)
-      do ik=1,nk
-        call build_one(ik,metric,work,e,rwork,one_condition,status)
-        condition=max(condition,one_condition)
-        bad=max(bad,status)
-      enddo
-!$omp end do
-      deallocate(metric,work,e,rwork)
-      call thread_control(0,worker_state)
-!$omp end parallel
-    else
-      allocate(metric(n,n),work(max(1,2*n)),e(n),rwork(max(1,3*n-2)))
-      do ik=1,nk
-        call build_one(ik,metric,work,e,rwork,one_condition,status,sum_grid)
-        condition=max(condition,one_condition)
-        bad=max(bad,status)
-        if(bad/=0)exit
-      enddo
-    endif
+    allocate(metric(n,n),work(max(1,2*n)),e(n),rwork(max(1,3*n-2)))
+    do ik=1,nk
+      call build_one(ik,metric,work,e,rwork,one_condition,status,sum_grid)
+      condition=max(condition,one_condition)
+      bad=max(bad,status)
+      if(bad/=0)exit
+    enddo
     if(present(thread_control))call thread_control(0,thread_state)
     if(bad/=0)then
       deallocate(ace%factors)
@@ -231,8 +207,7 @@ contains
     complex(c_double_complex) :: check(1,1)
     complex(c_double_complex),allocatable :: overlap(:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
-    integer :: ng,no,nt,nk,ik,workers,thread_state(3),worker_state(3)
-    logical :: parallel_k
+    integer :: ng,no,nt,nk,ik,workers,thread_state(3)
     external :: zgemm
     ierr=1;action=zero
     check=0d0
@@ -249,37 +224,13 @@ contains
     workers=1;thread_state=0
 !$  workers=omp_get_max_threads()
 !$  if(omp_in_parallel())workers=1
-    parallel_k=nk>1.and..not.present(sum_grid).and.workers>1
-    if(present(thread_control).and.workers>1)then
-      if(parallel_k)then
-        call thread_control(1,thread_state)
-      else
-        call thread_control(workers,thread_state)
-      endif
-    endif
-    parallel_k=parallel_k.and.thread_state(1)>0
-    if(parallel_k)then
-      workers=min(workers,nk)
-!$omp parallel default(none) num_threads(workers) &
-!$omp shared(no,nt,nk,ng,ace,target,action) private(overlap,ik,worker_state)
-      worker_state=0
-      call thread_control(1,worker_state)
-      allocate(overlap(no,nt))
-!$omp do schedule(static)
-      do ik=1,nk
-        call apply_one(ik,overlap)
-      enddo
-!$omp end do
-      deallocate(overlap)
-      call thread_control(0,worker_state)
-!$omp end parallel
-    else
-      allocate(overlap(no,nt))
-      do ik=1,nk
-        call apply_one(ik,overlap,sum_grid)
-      enddo
-      deallocate(overlap)
-    endif
+    ! Same internal-procedure reentrancy guard as ACE construction above.
+    if(present(thread_control).and.workers>1)call thread_control(workers,thread_state)
+    allocate(overlap(no,nt))
+    do ik=1,nk
+      call apply_one(ik,overlap,sum_grid)
+    enddo
+    deallocate(overlap)
     if(present(thread_control))call thread_control(0,thread_state)
     ierr=0
   contains
