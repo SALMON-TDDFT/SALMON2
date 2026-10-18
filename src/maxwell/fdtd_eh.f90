@@ -3316,10 +3316,14 @@ contains
         call calc_poynting_vector(fs, fe, Spoynting)
         call calc_poynting_vector_div(fs, Spoynting, divS)
         u_energy(:,:,:) = u_energy(:,:,:) - divS(:,:,:)*dt_em
-        
-        u_energy_p = u_energy
+
+        ! The TTM source S(r,t) is the *instantaneous* absorbed power density,
+        ! -div(Poynting), not the time-accumulated absorbed energy u_energy.
+        ! ttm_main multiplies the source by dt, so passing u_energy made the
+        ! electron temperature keep rising even after the pulse had passed.
+        u_energy_p(:,:,:) = -divS(:,:,:)
         call ttm_penetration( fs%mg%is, u_energy_p )
-        
+
         call ttm_main( fs%srg_ng, fs%mg, u_energy_p )
         
         if( mod(iter,obs_samp_em) == 0 )then
@@ -3345,7 +3349,9 @@ contains
           
           dV=fs%hgs(1)*fs%hgs(2)*fs%hgs(3)
           tmp(3)=sum(u_energy)*dV*uenergy_from_au
-          tmp(4)=sum(u_energy_p)*dV*uenergy_from_au
+          ! u_energy_p now holds the absorbed power density; report the energy
+          ! deposited during this step (power * dt_em) for the ttm_rt.data column.
+          tmp(4)=sum(u_energy_p)*dt_em*dV*uenergy_from_au
           call comm_summation( tmp(3:4), tmp(1:2), 2, nproc_group_global )
           tmp(3)=sum(work1)/count(work1/=0.0d0)*hartree_kelvin_relationship
           tmp(4)=sum(work2)/count(work2/=0.0d0)*hartree_kelvin_relationship
