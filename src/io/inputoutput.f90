@@ -3656,11 +3656,11 @@ contains
         if(xc/='hse06'.or.spin/='noncollinear'.or.yn_dc/='n'.or. &
            nproc_ob/=1.or.any(nproc_rgrid/=1).or.temperature>=0d0.or.nstate/=nelec.or. &
            yn_hse_wannier/='n'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
-           hse_sr_tolerance/=0d0.or.index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
+           hse_sr_tolerance/=0d0.or.yn_exx_fft_orbits/='n'.or.trim(file_kw)/='none'.or. &
            yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_factor_mode/='off'.or.exx_kpoint_backend/='cpu'.or. &
            yn_conventional_from_dcdft/='n'.or.yn_hse_wannier_snapshot/='n'.or. &
            exx_ace_support/='occupied'.or.exx_pair_screening/='off') &
-          error stop 'SOC HSE06: occupied spinors, full uniform CPU k-only mesh and no approximations required'
+          error stop 'SOC HSE06: occupied spinors, native CPU k-only mesh and no approximations required'
         if(theory/='dft'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
           error stop 'SOC HSE06 RT: Taylor4 required'
         if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0.or. &
@@ -3741,7 +3741,7 @@ contains
         else
           if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06: unsupported field shape'
         endif
-        if(index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
+        if(yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
           error stop 'HSE symmetry: impulse must be z polarized'
         if(gram_schmidt_interval>0)error stop 'HSE06 requires no Gram-Schmidt rescaling'
         if(propagator=='hse_ptcn')then

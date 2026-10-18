@@ -41,7 +41,7 @@ contains
   end subroutine read_sw_symmetry
 
   subroutine init_sym_sub( Amat_in, Bmat_in )
-    use salmon_global, only: xc, theory
+    use salmon_global, only: xc, theory, yn_spinorbit, epdir_re1
     use exx_functional, only: is_hybrid
     implicit none
     real(8),intent(in) :: Amat_in(3,3), Bmat_in(3,3) ! Lattice vectors
@@ -119,14 +119,39 @@ contains
        SymMatB(1:3,4,isym)=SymMatR(1:3,4,isym)
     end do
     if (is_hybrid(xc)) call symmetry_validate_group()
+    if (is_hybrid(xc).and.yn_spinorbit=='y') call validate_diagonal_spinor_group()
     flag_init=.true.
     ! Test the retained Cartesian group, not just the requested axis flags.
     ! The bounded hybrid RT implementation supports the z-field little group.
     if (is_hybrid(xc).and. &
         (theory=='tddft_pulse'.or.theory=='tddft_response'.or.theory=='tddft')) &
-      call symmetry_validate_field([0d0,0d0,1d0])
+      then
+      if(yn_spinorbit=='y')then
+        call symmetry_validate_field(epdir_re1)
+      else
+        call symmetry_validate_field([0d0,0d0,1d0])
+      endif
+    endif
     if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
+
+  ! Bounded SOC path: signed Cartesian axes, including improper operations.
+  ! Non-diagonal spin rotations are not certified by this implementation.
+  subroutine validate_diagonal_spinor_group()
+    implicit none
+    real(8) :: rotation(3,3)
+    integer :: s,i
+    do s=1,size(SymMatA,3)
+      rotation=matmul(Amat,matmul(SymMatA(:,1:3,s),Ainv))
+      do i=1,3
+        if(abs(abs(rotation(i,i))-1d0)>1d-10) &
+          error stop 'SOC hybrid symmetry requires signed diagonal Cartesian rotations'
+        rotation(i,i)=0d0
+      enddo
+      if(maxval(abs(rotation))>1d-10) &
+        error stop 'SOC hybrid symmetry: non-diagonal spin rotations are not supported'
+    enddo
+  end subroutine validate_diagonal_spinor_group
 
 
   subroutine symmetry_validate_atoms_cartesian(rion,kion)
