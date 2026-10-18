@@ -619,13 +619,33 @@ and moving nuclei remain unsupported. Use the original NC UPF/VPS core data;
 do not remove core correction by editing a potential file.
 
 The SOC path accepts full uniform CPU k meshes and fixed nuclei with no DC,
-orbital or spatial MPI decomposition, symmetry reduction, q reduction, learned
+orbital or spatial MPI decomposition, q reduction, learned
 ACE or finite-support approximations. `yn_gamma_centered='n'` preserves the
 uniform point count; `dk_shift` may select a uniform mesh containing Gamma.
 Only Taylor4 ACE and the direct Taylor4 reference are certified for RT;
 checkpoint continuation and diagnostic export are rejected. Fresh GS data can
 be written and read by RT with identical cell, grid, functional, potential,
 occupation and k settings.
+
+For orthogonal cells, SOC symmetry also accepts signed diagonal Cartesian
+operations (axis mirrors and 180-degree rotations), including fractional
+translations that map the discrete grid exactly. General rotations and skew-cell
+symmetry remain unsupported. Spin transforms with the SU(2) representative of
+the axial rotation `det(R)*R`. Little-group projectors and off-diagonal spin
+density are averaged; representative weights reconstruct the complete uniform
+k mesh. Rectangular cells and rectangular k meshes are supported.
+
+Each RT group must preserve the actual applied field. Disable symmetry along
+the polarization axis (`nyy` for x, `yny` for y) and supply its matching
+`sym.dat`. A GS prepared with a larger group can have a different representative
+k list; prepare a separate GS with the RT subgroup rather than loading an
+incompatible reduced checkpoint. See the WSe2 preparation in
+`samples/wse2_hse_soc_nlcc/README_JA.md`.
+
+ACE's small metric/factor construction and application loop over k points are
+serialized after a compiled multi-thread regression exposed non-reentrant
+internal-procedure temporaries. BLAS teams and the dominant Fock density/FFT
+operations remain threaded. Dense WSe2 performance is not established.
 
 See [the reproducible small-cell GS/RT validation](../../samples/hse_soc_nlcc/README.md).
 These tests establish implementation behavior, not WSe2 spectral convergence or
