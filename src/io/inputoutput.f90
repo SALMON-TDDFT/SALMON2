@@ -3046,7 +3046,7 @@ contains
     learned_mesh_checkpoint=exx_factor_mode=='learned'.and.xc=='hse06'.and. &
       yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
       product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
-      exx_ace_support=='source'.and.nproc_ob==1.and.yn_self_checkpoint=='n'
+      exx_ace_support=='source'.and.yn_self_checkpoint=='n'
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)

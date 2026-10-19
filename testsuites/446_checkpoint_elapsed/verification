@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Compile the actual shutdown expression against measured Fugaku clock values."""
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+compiler, source = sys.argv[1:]
+text = Path(source).read_text()
+expression = re.search(r"is_shutdown_time\s*=([^\n]+)", text).group(1)
+# The broadcast must cover the exit decision as well as the checkpoint decision.
+assert re.search(r"call comm_bcast\(is_shutdown_time,\s*nproc_group_global\)", text)
+program = """program regression
+implicit none
+real(8) :: time_shutdown, elapsed
+integer,parameter :: LOG_TOTAL=0
+logical :: is_shutdown_time
+! Measured rank-zero elapsed and inter-node absolute offset from job 52482637.
+elapsed=7.32561350998003d0
+time_shutdown=1d-6
+call check(.true.)
+time_shutdown=10d0
+call check(.false.)
+time_shutdown=0d0
+call check(.false.)
+! Exact threshold remains a strict greater-than comparison.
+time_shutdown=elapsed
+call check(.false.)
+contains
+subroutine check(expected)
+implicit none
+logical,intent(in) :: expected
+is_shutdown_time = EXPRESSION
+if (is_shutdown_time .neqv. expected) stop 1
+end subroutine
+real(8) function timer_now(id)
+implicit none
+integer,intent(in) :: id
+timer_now=elapsed
+end function
+real(8) function adjust_elapse_time(t)
+implicit none
+real(8),intent(in) :: t
+adjust_elapse_time=t-123.6121805900475d0
+end function
+end program
+""".replace("EXPRESSION", expression)
+with tempfile.TemporaryDirectory() as directory:
+    path = Path(directory)
+    (path / "test.f90").write_text(program)
+    subprocess.run([compiler, str(path / "test.f90"), "-o", str(path / "test")], check=True)
+    subprocess.run([str(path / "test")], check=True)
+print("CHECKPOINT_ELAPSED_PASS")

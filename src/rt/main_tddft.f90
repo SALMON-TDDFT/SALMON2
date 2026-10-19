@@ -22,7 +22,7 @@ subroutine main_tddft
 use math_constants, only: pi
 use salmon_global
 use structures
-use parallelization, only: adjust_elapse_time, nproc_group_global
+use parallelization, only: nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
@@ -117,7 +117,9 @@ TE : do itt=Mit+1,nt
   step_wall_elapsed=step_wall_clock()-step_wall_start
   write(*,'(a,2i10,es24.15)') 'STEP_WALL rank/step/seconds: ',nproc_id_global,itt,step_wall_elapsed
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
-  is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+  ! timer_now is a local elapsed duration; absolute cross-node clock offsets cancel.
+  is_shutdown_time   = (time_shutdown > 0d0) .and. (timer_now(LOG_TOTAL) > time_shutdown)
+  call comm_bcast(is_shutdown_time,nproc_group_global)
 
   is_checkpoint = is_checkpoint_iter .or. is_shutdown_time
   call nvtxStartRange('comm_bcast', __LINE__)

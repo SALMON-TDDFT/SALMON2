@@ -322,6 +322,23 @@ contains
     factor_restart_step=step
   end subroutine
 
+  ! Persist the route selection as well as the physical SR radius. Transient FFT
+  ! plans and wave/source caches are reconstructed, never serialized.
+  subroutine factor_checkpoint_config(config)
+    implicit none
+    character(64),intent(out)::config(6)
+    character(40),parameter::names(6)=[character(40):: &
+      'SALMON_HSE_SR_RADIUS_AU','SALMON_HSE_SR_GROUP_FFT','SALMON_HSE_SR_WAVE_FIRST', &
+      'SALMON_HSE_SR_RETURN_SUM','SALMON_HSE_SR_WAVE_BATCH','SALMON_HSE_SR_PAIR_SYMMETRY']
+    integer::i,stat
+    config=''
+    do i=1,6
+      call get_environment_variable(trim(names(i)),config(i),status=stat)
+      if(stat==1)config(i)=''
+      if(stat/=0.and.stat/=1)error stop 'Invalid factor checkpoint route setting'
+    enddo
+  end subroutine
+
   subroutine exx_factor_checkpoint(directory,step,system,mg,info)
     implicit none
     character(*),intent(in)::directory
@@ -330,6 +347,7 @@ contains
     type(s_rgrid),intent(in)::mg
     type(s_parallel_info),intent(in)::info
     integer::unit,status,total,ik,ios
+    character(64)::checkpoint_config(6)
     character(600)::filename
     if(.not.factor_learned)return
     status=0
@@ -339,11 +357,14 @@ contains
     write(filename,'(a,a,i8.8,a)')trim(directory),'factor-history-',info%id_rko,'.bin'
     open(newunit=unit,file=trim(filename),form='unformatted',access='stream',status='replace',iostat=status)
     if(status==0)then
-      write(unit,iostat=status)2,step,mg%is,mg%ie,system%no,system%nk, &
+      write(unit,iostat=status)3,step,mg%is,mg%ie,system%no,system%nk, &
         info%isize_r,info%isize_k,info%isize_o,info%ik_s,info%numk, &
         exx_factor_exact_interval,exx_factor_warmup_steps,shape(ace%factors), &
         ace%dv,ace%condition,ace%grid_rows,factor_all_ready, &
         hse_sr_tolerance,exx_mlwf_norm_fraction,exx_mlwf_radius
+      call factor_checkpoint_config(checkpoint_config)
+      if(status==0)write(unit,iostat=status)info%io_s,info%numo,info%id_rko,info%id_r,info%id_o
+      if(status==0)write(unit,iostat=status)checkpoint_config
       if(status==0)write(unit,iostat=status)hse_q_reduction
       if(status==0)write(unit,iostat=status)ace%factors
       do ik=1,size(factor_history)
@@ -366,6 +387,8 @@ contains
     type(s_factor_history),allocatable::loaded(:)
     complex(8),allocatable::factors(:,:,:)
     integer::unit,status,total,ios,ik,version,step,header(15),expected(15),dims(3),rows,saved_q_reduction(3)
+    integer::saved_layout(5),expected_layout(5)
+    character(64)::saved_config(6),expected_config(6)
     real(8)::dv,condition,settings(3)
     logical::ready
     character(600)::filename
@@ -376,9 +399,20 @@ contains
     if(status==0)then
       read(unit,iostat=status)version,step,header,dims,dv,condition,rows,ready,settings
       saved_q_reduction=1
-      if(status==0.and.version==2)read(unit,iostat=status)saved_q_reduction
+      expected_layout=[info%io_s,info%numo,info%id_rko,info%id_r,info%id_o]
+      call factor_checkpoint_config(expected_config)
+      if(status==0.and.version==3)then
+        read(unit,iostat=status)saved_layout
+        if(status==0)read(unit,iostat=status)saved_config
+        if(status==0)then
+          if(any(saved_layout/=expected_layout).or.any(saved_config/=expected_config))status=1
+        endif
+      else if(status==0.and.info%isize_o/=1)then
+        status=1
+      endif
+      if(status==0.and.(version==2.or.version==3))read(unit,iostat=status)saved_q_reduction
       if(status==0)then
-        if((version/=1.and.version/=2).or.step/=factor_restart_step.or.any(header/=expected))status=1
+        if((version/=1.and.version/=2.and.version/=3).or.step/=factor_restart_step.or.any(header/=expected))status=1
         if(any(saved_q_reduction/=hse_q_reduction))status=1
         if(any(dims/=shape(ace%factors)))status=1
         if(.not.ieee_is_finite(dv).or..not.ieee_is_finite(condition))status=1
