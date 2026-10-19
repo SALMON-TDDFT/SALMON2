@@ -1,0 +1,29 @@
+{
+  "source_commit": "037c3012341a8c02ad44908fb582b43c81106c60",
+  "local_binary_sha256": "f38bd8b3fa24da683c444d6989e7140fbd8087a09c8b0dca0fe3a58031c3d2fe",
+  "bundle_sha256": "b1c81055b47260bba4bdaeee84033dd835ffef37d65932cbae8073cbf12af63f",
+  "regressions": {
+    "count": 17,
+    "mpi_ranks_pair": 8,
+    "status": "PASS"
+  },
+  "independent_review": "one integer narrowing guard corrected before conversion; no other must-fix",
+  "scope": "CPU full-q integer-occupation native HSE SOC NLCC; existing SU(2) expanded source retained; 4 spin density blocks; pair tiling without spatial orbit compression",
+  "fugaku_build": "PASS",
+  "production_wrapper_changed": true,
+  "jobs_cancelled": false,
+  "jobs_resubmitted": false,
+  "physical_convergence_verified": false,
+  "performance_verified": false,
+  "fugaku_binary_sha256": "eb0329041a9ddd121c9004fe6f8a1aaf53bb6097febfdf06e69fa8bddb303998",
+  "fugaku_source_commit": "037c3012341a8c02ad44908fb582b43c81106c60",
+  "verified_at_jst": "2026-10-19T13:55:49.061387+09:00",
+  "jobs": [
+    "52458963",
+    "52458965",
+    "52458967"
+  ],
+  "queue_after_install": "JOB_ID     JOB_NAME   MD ST  USER     START_DATE      ELAPSE_LIM            NODE_REQUIRE    VNODE  CORE V_MEM       \n52458963   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            117             -      -    -           \n52458965   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n52458967   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n",
+  "evidence_archive_sha256": "ce4d948c2bc664f67697485a0350b1c91f3e1a94a65845b2b08f4a0788e4f646",
+  "actual_execution_confirmed": false
+}

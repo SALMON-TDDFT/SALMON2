@@ -1,0 +1,42 @@
+{
+  "timestamp_jst": "2026-10-19T13:52:07.816073+09:00",
+  "binary": "/vol0001/hp260497/si-3d-weak-scaling/WSe2_HSE_SOC_NLCC_e1e1a89_20261018/pairfft-spinor-20261019/build/salmon",
+  "sha256": "eb0329041a9ddd121c9004fe6f8a1aaf53bb6097febfdf06e69fa8bddb303998",
+  "source_commit": "037c3012341a8c02ad44908fb582b43c81106c60",
+  "queue_before": "JOB_ID     JOB_NAME   MD ST  USER     START_DATE      ELAPSE_LIM            NODE_REQUIRE    VNODE  CORE V_MEM       \n52458963   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            117             -      -    -           \n52458965   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n52458967   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n",
+  "queue_immediately_before_install": "JOB_ID     JOB_NAME   MD ST  USER     START_DATE      ELAPSE_LIM            NODE_REQUIRE    VNODE  CORE V_MEM       \n52458963   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            117             -      -    -           \n52458965   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n52458967   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n",
+  "jobs": [
+    {
+      "case": "k24x18",
+      "job_id": "52458963",
+      "input_sha256": "aa695379874c13dbf35b48739de92cfddc3d166938f96c11e2de3f498aebf8a3",
+      "wrapper": "/vol0001/hp260497/si-3d-weak-scaling/WSe2_HSE_SOC_NLCC_e1e1a89_20261018/cases/k24x18/gs/rank-run-pair-52458963.sh",
+      "wrapper_sha256": "e2a56056dc07917d2a19632c280aa05cf68f1de3c26d146b46d0d4d327a4914a"
+    },
+    {
+      "case": "grid24x42x192",
+      "job_id": "52458965",
+      "input_sha256": "1e8478482b25641746920daa51cac5ab3fb1f072366127f0445a9ffb04b5d81e",
+      "wrapper": "/vol0001/hp260497/si-3d-weak-scaling/WSe2_HSE_SOC_NLCC_e1e1a89_20261018/cases/grid24x42x192/gs/rank-run-pair-52458965.sh",
+      "wrapper_sha256": "f9002e5d83ca8c0801ae5b0430bd57000afe5e981a2e9d156b0d16dd51b9c069"
+    },
+    {
+      "case": "grid28x48x216",
+      "job_id": "52458967",
+      "input_sha256": "05ad4c60c38b9ab697b271a2edf69a1197248d787c8c71230bd55316f40189a4",
+      "wrapper": "/vol0001/hp260497/si-3d-weak-scaling/WSe2_HSE_SOC_NLCC_e1e1a89_20261018/cases/grid28x48x216/gs/rank-run-pair-52458967.sh",
+      "wrapper_sha256": "ecfcf55775e76c47bd0a13e8908de98bd9339fdf0193b6ba6d92af539f7340c5"
+    }
+  ],
+  "dispatcher_sha256": "929e39bf8dd900f23647dfbdde64e86ed0f43aa802534d698a18c7aab1d4b362",
+  "no_job_cancellation_or_resubmission": true,
+  "physical_inputs_resources_unchanged": true,
+  "original_preflight_retained": true,
+  "actual_binary_and_input_checked_by_rank_wrapper": true,
+  "actual_execution_confirmed": false,
+  "verified_at_jst": "2026-10-19T13:55:49.061387+09:00",
+  "queue_after_install": "JOB_ID     JOB_NAME   MD ST  USER     START_DATE      ELAPSE_LIM            NODE_REQUIRE    VNODE  CORE V_MEM       \n52458963   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            117             -      -    -           \n52458965   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n52458967   WSe2gs     NM QUE u12194   (10/21 14:09)   0024:00:00            234             -      -    -           \n",
+  "build_exit": 0,
+  "binary_arch": "AArch64",
+  "verification": "PASS"
+}

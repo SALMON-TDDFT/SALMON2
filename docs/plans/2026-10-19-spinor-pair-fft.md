@@ -18,3 +18,10 @@ Build `cmake --build build-local -j4`. Use existing validate_symmetry.py short f
 
 ## Progress
 - Design selected: full-pair spinor backend, no spatial orbit compression; protects SU(2) correctness and keeps extension bounded.
+
+- Implementation committed as 037c301. Missing pair API failed before implementation; pair/full numerical tests passed after implementation. Added 8-rank empty-ownership, partial-pass, mixed route, NaN and oversized-tile validation. 17 regressions passed on final source.
+- Independent review: narrowing int64 tile count before bounds check must be fixed; corrected before conversion. No other must-fix findings.
+- Final local binary f38bd8b3…: all 3 GS residuals <1e-8, x/y 20-step symmetry and ACE/direct comparisons PASS, same saved GS pair/legacy differences 1.68e-16 and 1.90e-15.
+- Fugaku separate build source 037c301, exit 0, AArch64 SHA eb0329041a9ddd121c9004fe6f8a1aaf53bb6097febfdf06e69fa8bddb303998. Original WSe2 and Si binaries unchanged.
+- Automatic approval review initially rejected queued-job wrapper replacement for insufficient explicit authorization. User explicitly approved all 3 IDs in this chat; replacement then completed after fresh queued/unstarted checks. Inputs/resources/job IDs unchanged; no cancellation/requeue/new compute jobs. Queue and byte/hash evidence downloaded and verified.
+- Limits: full-pair backend retains SU(2) source expansion but does not compress spatial point orbits. WSe2 physical convergence, compute-node runtime/RSS and speedup remain unverified while 3 jobs are QUE.

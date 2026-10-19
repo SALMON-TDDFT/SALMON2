@@ -9,3 +9,7 @@
 この版は実空間点の対称性によるFFT削減を実装せず、全pairをタイル分配する。Si用pair FFTの性能結果は転用しない。WSe₂の数値収束・富岳実行時RSS・高速化率は未確認。GPU、q削減、学習ACEは今回追加していない。
 
 富岳の独立配置先は既存WSe₂領域のpairfft-spinor-20261019/。既存build/salmonとSi用binaryは保持する。ジョブ取消・再投入はしない。
+
+富岳の別ビルドは終了コード0。新binary SHA: eb0329041a9ddd121c9004fe6f8a1aaf53bb6097febfdf06e69fa8bddb303998。2026-10-19の明示承認を受け、ジョブ52458963・52458965・52458967の起動先を専用wrapperで切替えた。2026-10-19T13:55:49.061387+09:00の検証時は全件QUE。旧binary、wrapper、input、preflightは保持。入力・資源・ジョブIDは不変、取消・再投入なし。実使用ログ・全rank終了・RSSは計算開始後の確認事項。
+
+[富岳の切替検証原本](fugaku-records/deployment-verified.json)とビルド原本を回収し、転送前後のアーカイブSHA一致を確認済み。
