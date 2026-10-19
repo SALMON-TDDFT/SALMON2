@@ -1,0 +1,9 @@
+{
+  "same_binary": true,
+  "gs_pair_vs_previous_legacy_eV": {
+    "gs-off": 1.0000007932831068e-08,
+    "gs-on": 1.150000002780871e-06,
+    "gs-x": 0.0
+  },
+  "result": "PASS"
+}

@@ -1,0 +1,8 @@
+{
+  "binary_sha256": "f38bd8b3fa24da683c444d6989e7140fbd8087a09c8b0dca0fe3a58031c3d2fe",
+  "same_saved_gs": true,
+  "steps": 20,
+  "x_pair_legacy_max_difference": 1.682198962917568e-16,
+  "y_pair_legacy_max_difference": 1.9021918422861125e-15,
+  "result": "PASS"
+}
