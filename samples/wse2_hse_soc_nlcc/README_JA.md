@@ -56,8 +56,10 @@ run.lockやsubmission記録を確認して重複投入を避ける。ログイ�
 
 ## スピノルpair FFTの規約対応版（2026-10-19）
 
-`&functional` の `yn_exx_spinor_pair_fft='y'` で全pair分散を選択する。
-既定は `n`。GS・RT双方に明記し、`variables.log` で解決値を確認する。
+通常は最適化スイッチを省略する。`exx_k_algorithm` は既定 `auto` で、
+SOCでは性能確認済みになるまで従来経路を使う。比較時だけ `reference` または
+`pair` を指定する。旧 `yn_exx_spinor_pair_fft` は互換入力として残る。
+`variables.log` と `EXX_K_ALGORITHM` で解決値・選択理由を確認する。
 旧実験版の環境変数 `SALMON_EXX_FFT_ORBITS=pair` は、この修正版では読まない。
 CPU・全q点・既存SOC HSE06条件が必要。SU(2)展開を維持し、実空間点対称性での
 FFT削減は行わない。RTの偏光方向に対応する対称性は従来どおりOFF。

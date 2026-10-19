@@ -32,7 +32,7 @@
 &functional
  xc='pbeh40'
  pbeh_coulomb_radius=4d0
- yn_exx_fft_orbits='y'
+ exx_k_algorithm='orbits'
  hse_sr_tolerance=0d0
  exx_ace_support='occupied'
  exx_mlwf_norm_fraction=0d0

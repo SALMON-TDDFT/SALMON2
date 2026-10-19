@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from pathlib import Path
+assert 'EXX_K_SELECTION_PASS' in Path('outputfile').read_text()

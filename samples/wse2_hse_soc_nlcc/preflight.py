@@ -8,6 +8,19 @@ from pathlib import Path
 import re
 
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+def check_factor_mode(text):
+    # Accept the documented omitted/default value; inspect only &functional.
+    text = re.sub(r'!.*', '', text)
+    block = re.search(r'&functional\b(.*?)/', text, re.I | re.S)
+    assert block, 'functional namelist missing'
+    assignments = re.findall(r"\bexx_factor_mode\s*=\s*([^,\n]+)", block.group(1), re.I)
+    mode = 'off'
+    for value in assignments:
+        token = re.fullmatch(r"(['\"])(.*?)\1\s*", value.strip())
+        assert token, 'exx_factor_mode must be a quoted value'
+        mode = token.group(2).lower()
+    assert mode == 'off', 'WSe2 SOC input requires factor history off'
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--case',type=Path)
@@ -41,7 +54,8 @@ def main():
             mask='nyy' if phase in ('gs-x','rt-x') else ('yny' if phase=='rt-y' else 'yyy')
             assert "yn_symmetry='%s'"%mask in s and (case/phase/'sym.dat').is_file()
             assert 'nelec=48,nstate=48' in s and "yn_dc='n'" in s
-            assert 'hse_block_rows=1' in s and "exx_factor_mode='off'" in s
+            assert 'hse_block_rows=1' in s
+            check_factor_mode(s)
             for path in re.findall(r"file_pseudo\(\d\)='([^']+)'",s):
                 assert (case/phase/path).resolve().is_file()
             assert (case/phase/'job.sh').is_file()

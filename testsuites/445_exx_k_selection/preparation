@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+# No restart or pseudopotential dependencies.

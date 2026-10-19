@@ -210,6 +210,7 @@ contains
     use filesystem, only: get_filehandle
     use misc_routines, only: string_lowercase
     use exx_functional, only: is_hybrid
+    use exx_k_selection, only: resolve_k_algorithm
     implicit none
     integer :: ii
     real(8) :: norm
@@ -292,7 +293,7 @@ contains
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
-      & exx_factor_mode,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
+      & exx_factor_mode,exx_k_algorithm,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
       & yn_ace_shadow_diagnostic,yn_ace_export_factors, &
       & hse_sr_group_fft,yn_hse_sr_wave_first,yn_hse_sr_return_sum,yn_hse_sr_pair_symmetry,hse_sr_radius, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
@@ -764,9 +765,10 @@ contains
     hse_mlwf_tolerance = -huge(1d0)
     exx_mlwf_radius = 0d0
     exx_factor_mode = 'off'
-    yn_exx_spinor_pair_fft = 'n'
-    yn_exx_fft_orbits = 'n'
-    yn_exx_k_pair_symmetry = 'y'
+    exx_k_algorithm = 'auto'
+    yn_exx_spinor_pair_fft = ' '
+    yn_exx_fft_orbits = ' '
+    yn_exx_k_pair_symmetry = ' '
     yn_ace_shadow_diagnostic = 'n'
     yn_ace_export_factors = 'n'
     hse_sr_group_fft = 'off'
@@ -1403,6 +1405,8 @@ contains
     call string_lowercase(exx_pair_screening)
     call comm_bcast(exx_factor_mode,nproc_group_global)
     call string_lowercase(exx_factor_mode)
+    call comm_bcast(exx_k_algorithm,nproc_group_global)
+    call string_lowercase(exx_k_algorithm)
     call comm_bcast(yn_exx_spinor_pair_fft,nproc_group_global)
     call string_lowercase(yn_exx_spinor_pair_fft)
     call comm_bcast(yn_exx_fft_orbits,nproc_group_global)
@@ -1907,6 +1911,14 @@ contains
     call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
     call comm_bcast(nq_mom, nproc_group_global)
     call comm_bcast(dq_mom, nproc_group_global)
+    ! Resolve normalized, broadcast input once; legacy flags are blank only when omitted.
+    call string_lowercase(yn_spinorbit)
+    call resolve_k_algorithm(exx_k_algorithm,yn_spinorbit=='y',yn_exx_fft_orbits, &
+      yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii)
+    if(ii/=0)then
+      if(comm_is_root(nproc_id_global))write(*,'(a)')trim(exx_k_algorithm_reason)
+      error stop 'Invalid EXX k algorithm selection'
+    endif
     ! Resolve the omitted pre-SCF input only for supported fresh static GS.
     ! Explicit zero remains the opt-out, and explicit positive inputs retain
     ! the compatibility checks in check_bad_input.
@@ -2441,6 +2453,8 @@ contains
       write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_factor_mode=",exx_factor_mode
+      write(fh_variables_log, *) "# exx_k_algorithm=",exx_k_algorithm
+      write(fh_variables_log, *) "# exx_k_algorithm_reason=",trim(exx_k_algorithm_reason)
       write(fh_variables_log, *) "# yn_exx_spinor_pair_fft=",yn_exx_spinor_pair_fft
       write(fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
       write(fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
@@ -3108,6 +3122,20 @@ contains
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
     call yn_argument_check(yn_hse_wannier)
+    if(exx_k_algorithm=='pair'.or.exx_k_algorithm=='orbits')then
+      if(theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse') &
+        error stop 'Manual EXX k algorithm requires dft or fixed-ion RT'
+      if(.not.is_hybrid(xc).or.yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
+         exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1).or. &
+         any(nproc_rgrid/=1).or.nproc_ob/=1.or.temperature>=0d0.or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
+         yn_hse_wannier_snapshot/='n'.or.exx_factor_mode/='off') &
+        error stop 'Manual EXX k algorithm requires fixed-ion full-support CPU k-only native exchange'
+      if(yn_spinorbit=='n'.and.(product(num_kgrid)<2.or.2*nstate/=nelec)) &
+        error stop 'Manual scalar EXX k algorithm requires dense k mesh and occupied spin pairs'
+      if(exx_k_algorithm=='pair'.and.yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0) &
+        error stop 'Manual scalar pair algorithm requires crystal symmetry off'
+    endif
     call yn_argument_check(yn_exx_spinor_pair_fft)
     if(yn_exx_spinor_pair_fft=='y')then
       if(xc/='hse06'.or.yn_spinorbit/='y'.or.yn_dc/='n'.or. &

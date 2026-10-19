@@ -1,15 +1,14 @@
 # HSE feature selection
 
-All runtime HSE/ACE/SR feature switches are in `&functional`. Environment variables
-no longer override the input. Existing inputs without these keys retain disabled
-experimental routes. SR wave batches are fixed at 16 (the separate existing GPU
+HSE/ACE/SR settings are in `&functional`. Environment variables do not override
+the input. Native k-exchange optimization normally needs no switches: the
+omitted `exx_k_algorithm` selects the conservative `auto` policy. SR wave batches are fixed at 16 (the separate existing GPU
 batch input is unchanged).
 
 | Input | Default | Values / meaning | Replaces |
 |---|---|---|---|
 | `exx_factor_mode` | `off` | `off`, `strict` (exact endpoint history), `learned` (history prediction) | `SALMON_FACTOR_HISTORY` |
-| `yn_exx_spinor_pair_fft` | `n` | full real-space pair tiles for native CPU HSE06 spinors, all q points | experimental `SALMON_EXX_FFT_ORBITS=pair` |
-| `yn_exx_fft_orbits` | `n` | symmetry-equivalent dense-k hybrid exchange FFT reuse | `SALMON_EXX_FFT_ORBITS` |
+| `exx_k_algorithm` | `auto` | `auto`, `reference`, `pair`, `orbits`; native k-exchange strategy | three legacy exchange switches |
 | `yn_ace_shadow_diagnostic` | `n` | shadow comparisons within surrogate trace | `SALMON_ACE_SHADOW_DIAGNOSTIC` |
 | `yn_ace_export_factors` | `n` | raw one-orbital H2 factor diagnostic | `SALMON_ACE_EXPORT_FACTORS` |
 | `hse_sr_group_fft` | `off` | `off`, `direct` (group FFT without halo exchange), `halo` | absent / `0` / `1` in `SALMON_HSE_SR_GROUP_FFT` |
@@ -53,7 +52,8 @@ Example SR configuration (atomic units):
 /
 ```
 
-For a dense-k learned calculation, use `yn_exx_fft_orbits='y'` and
+For a dense-k learned calculation, use the compatibility switch
+`yn_exx_fft_orbits='y'` and
 `exx_factor_mode='learned'` with the previously validated k-only MPI, symmetry,
 occupied-support and predictor-corrector settings. `exx_factor_n_teach` defaults
 to 8, and warmup remains derived automatically.
@@ -74,16 +74,51 @@ zero for RT/restart, nonhybrids, moving ions, unsupported mixing/metrics,
 checkpoint/shutdown or diagnostic modes and DC without positive temperature.
 The input log records the resolved value. See [PBE pre-SCF](exx-mlwf.md).
 
-## Spinor full-pair tiles
+## Native k-exchange algorithm selection
 
-Set `yn_exx_spinor_pair_fft='y'` in `&functional` for the fixed-ion native
-HSE06 SOC route. The default `n` retains the row-distributed exchange backend.
-The switch is normalized, broadcast and recorded in `variables.log`; the old
-experimental `SALMON_EXX_FFT_ORBITS=pair` selector is no longer read.
-CPU exchange, all q points and the existing occupied-spinor/k-only constraints
-are required. Rectangular real-space and k meshes are supported. Each of the
-four spin density blocks uses full (r,r') pairs, with no spatial point-orbit
-compression or Hermitian-pair reduction. Existing SU(2) symmetry expansion and
-field-preserving RT subgroups still apply. This option changes workspace and
-communication only; it does not alter the screened kernel or restart format.
-Select the mode explicitly in both GS and RT inputs.
+Normal inputs omit `exx_k_algorithm` and all three legacy switches.
+
+| Selection | Behavior |
+|---|---|
+| `auto` | Existing scalar Hermitian pairs when eligible; reference for scalar symmetry/unsupported layouts and for SOC. |
+| `reference` | Disable these k-exchange reuse routes for comparisons. Physical settings and other backends are unchanged. |
+| `pair` | Scalar Hermitian pairs without crystal symmetry; full pairs for all four SOC spin blocks, including SU(2) crystal expansion. |
+| `orbits` | Existing scalar crystal-symmetry FFT reuse; existing mesh and symmetry restrictions apply. |
+
+The selector does not change physical kernels, precision, occupations, k points,
+SR cutoffs, ACE approximation settings or checkpoint formats. In particular it
+does not infer a finite SR cutoff from a requested optimization. SOC pair timing
+and RSS are not yet certified on Fugaku, so `auto` deliberately retains the
+reference route there. The same rules apply independently to GS and RT. RT still
+requires a field-preserving subgroup (`nyy` for x, `yny` for y in this fixture).
+
+Explicit `pair`/`orbits` require an eligible fixed-ion, full-support native CPU,
+k-only, full-q DFT/RT configuration. Scalar pair requires dense k points, occupied
+spin pairs and crystal symmetry off; SOC pair retains the existing SOC HSE06
+restrictions. Orbits do not support SOC. An unavailable explicit request fails
+instead of silently falling back. `reference` only controls native k-exchange
+reuse; it does not replace a selected Wannier, spatial or GPU backend.
+
+Old inputs with `yn_exx_fft_orbits`, `yn_exx_k_pair_symmetry` or
+`yn_exx_spinor_pair_fft` remain readable as compatibility overrides of `auto`.
+Omission is distinguished internally from explicit `n`. With a manual new
+selector, only consistent explicit legacy values are accepted. Invalid or
+contradictory combinations fail. Avoid mixing both styles in new inputs.
+`variables.log` records the request, resolved flags and policy reason. Native
+initialization prints `EXX_K_ALGORITHM requested=... selected=...` and the reason.
+No environment selector is read.
+
+Example comparison setting (omit for normal operation):
+
+```fortran
+&functional
+ xc='hse06'
+ exx_k_algorithm='pair'
+/
+```
+
+The `exx_factor_mode`, finite-range SR controls and diagnostics remain separate
+because they choose approximation/history behavior or explicit diagnostics, not
+an interchangeable native-k implementation. Historical learned/orbits inputs
+continue through the compatibility switch; the new manual selectors do not
+broaden the certified learned-route combinations.

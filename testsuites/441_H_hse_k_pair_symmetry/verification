@@ -4,7 +4,8 @@ from pathlib import Path
 import math
 import re
 text = Path('outputfile').read_text()
-assert 'end SALMON' in text and 'GS converged at' in text
+assert 'end SALMON' in text
+assert 'EXX_K_ALGORITHM requested=auto selected=scalar_pair' in text and 'GS converged at' in text
 match = re.search(r'EXX_K_PAIR_SYMMETRY unique/full pairs:\s+(\d+)\s+(\d+)', text)
 assert match and tuple(map(int, match.groups())) == (131328, 262144)
 variables = Path('variables.log').read_text()

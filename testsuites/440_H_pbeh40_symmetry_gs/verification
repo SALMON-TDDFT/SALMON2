@@ -5,6 +5,7 @@ import math
 import re
 text=Path('outputfile').read_text()
 assert 'end SALMON' in text
+assert 'EXX_K_ALGORITHM requested=orbits selected=orbits' in text
 assert 'EXX_PRE_SCF PBE stage' in text
 assert 'EXX_PRE_SCF switch to target hybrid' in text
 match=re.search(r'GS converged at\s+\d+\s+:\s+(\S+)',text)

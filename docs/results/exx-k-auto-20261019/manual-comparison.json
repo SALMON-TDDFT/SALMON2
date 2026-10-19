@@ -1,0 +1,56 @@
+{
+  "binary_sha256": "f440b276a0b8459e65aa08b20a0f279be9b19f2fdcfd04f690f010485e70356e",
+  "source_fixture": "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/.worktrees/codex/hse-nlcc-soc/validation/exx-k-auto-final-20261019",
+  "gs-pair": {
+    "residual": 9.5069358e-09,
+    "auto_energy_difference_eV": 1.0000007932831068e-08
+  },
+  "rt-x-auto": {
+    "steps": 20,
+    "max_auto_difference": 0.0
+  },
+  "rt-x-reference": {
+    "steps": 20,
+    "max_auto_difference": 0.0
+  },
+  "rt-x-pair": {
+    "steps": 20,
+    "max_auto_difference": 3.7146968715016243e-16
+  },
+  "rt-x-legacy-pair": {
+    "steps": 20,
+    "max_auto_difference": 3.7146968715016243e-16
+  },
+  "rt-y-auto": {
+    "steps": 20,
+    "max_auto_difference": 0.0
+  },
+  "rt-y-reference": {
+    "steps": 20,
+    "max_auto_difference": 0.0
+  },
+  "rt-y-pair": {
+    "steps": 20,
+    "max_auto_difference": 5.5236699850853225e-15
+  },
+  "rt-y-legacy-pair": {
+    "steps": 20,
+    "max_auto_difference": 5.5236699850853225e-15
+  },
+  "conflict": {
+    "rejected": "Conflicting exx_k_algorithm and legacy exchange switches"
+  },
+  "invalid": {
+    "rejected": "Invalid exx_k_algorithm or legacy yes/no value"
+  },
+  "soc-orbits": {
+    "rejected": "FFT orbits require native CPU dense-k hybrid symmetry"
+  },
+  "manual-theory": {
+    "rejected": "Manual EXX k algorithm requires dft or fixed-ion RT"
+  },
+  "scalar-pair-symmetry": {
+    "rejected": "Manual scalar pair algorithm requires crystal symmetry off"
+  },
+  "result": "PASS"
+}

@@ -6,10 +6,16 @@ set(SOURCES
     builtin_pw92.f90
     builtin_r2scan.f90
     builtin_tbmbj.f90
+    exx_k_selection.f90
     exx_functional.f90
     exx_gs_metadata.f90
     salmon_xc.f90
    )
+
+# The noncollinear density routine also imports the pure spin-rotation helper.
+if(NOT USE_HSE)
+  list(APPEND SOURCES exx_symmetry.f90)
+endif()
 
 if(USE_HSE)
   list(APPEND SOURCES

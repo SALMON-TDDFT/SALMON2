@@ -34,10 +34,8 @@ def common(case):
 &pseudo izatom=74,34,
  file_pseudo(1)='../../pseudo/W_PBE19.vps',
  file_pseudo(2)='../../pseudo/Se_PBE19.vps' /
-&functional xc='hse06',hse_omega=.11d0,exx_factor_mode='off',
- hse_block_rows=1,hse_q_reduction=1,1,1,
- yn_exx_fft_orbits='n',yn_exx_k_pair_symmetry='n',
- hse_sr_group_fft='off',exx_pre_scf_threshold=%s,exx_pre_scf_steps=3 /
+&functional xc='hse06',hse_omega=.11d0,
+ hse_block_rows=1,exx_pre_scf_threshold=%s /
 &rgrid num_rgrid=%s /
 &kgrid num_kgrid=%s,dk_shift=.5d0,.5d0,0d0,yn_gamma_centered='n' /
 &parallel nproc_k=%d,nproc_ob=1,nproc_rgrid=1,1,1 /

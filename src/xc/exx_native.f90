@@ -842,7 +842,9 @@ contains
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
       if(allocated(kernel%accelerator).and.info%id_k==0) &
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
+      call check_k_algorithm()
       if(info%id_k==0)then
+        call report_k_algorithm()
         write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
         write(*,'(a,3i6,a,i10)')'EXX_Q_REDUCTION: ',hse_q_reduction,' q points=',kernel%nq
         if(k_pairs_enabled())write(*,'(a,2i18)')'EXX_K_PAIR_SYMMETRY unique/full pairs: ', &
@@ -1064,6 +1066,37 @@ contains
     call comm_alltoall(send,recv,comm,count)
     if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
   end subroutine transpose_k_tiles
+
+  subroutine check_k_algorithm()
+    use salmon_global, only: exx_k_algorithm
+    implicit none
+    if(exx_k_algorithm=='pair')then
+      if(yn_spinorbit=='y')then
+        if(.not.spinor_pair_fft_requested())error stop 'Manual spinor pair algorithm was not selected'
+      else
+        if(.not.k_pairs_enabled())error stop 'Manual scalar pair algorithm is unavailable for this layout'
+      endif
+    else if(exx_k_algorithm=='orbits')then
+      if(.not.use_symmetry.or.yn_spinorbit=='y') &
+        error stop 'Manual orbit algorithm is unavailable for this layout'
+    endif
+  end subroutine check_k_algorithm
+
+  subroutine report_k_algorithm()
+    use salmon_global, only: exx_k_algorithm,exx_k_algorithm_reason
+    implicit none
+    character(16) :: selected
+    selected='reference'
+    if(yn_spinorbit=='y')then
+      if(spinor_pair_fft_requested())selected='spinor_pair'
+    else if(use_symmetry.and.yn_exx_fft_orbits=='y')then
+      selected='orbits'
+    else if(k_pairs_enabled())then
+      selected='scalar_pair'
+    endif
+    write(*,'(4a)')'EXX_K_ALGORITHM requested=',trim(exx_k_algorithm),' selected=',trim(selected)
+    write(*,'(2a)')'EXX_K_ALGORITHM reason=',trim(exx_k_algorithm_reason)
+  end subroutine report_k_algorithm
 
   logical function spinor_pair_fft_requested()
     use salmon_global, only: yn_exx_spinor_pair_fft
