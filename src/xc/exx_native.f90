@@ -30,7 +30,8 @@ module exx_native
   use exx_symmetry
   use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector,yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector,yn_symmetrized_stencil, &
+    propagator,num_kgrid,hse_omega, &
     exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
@@ -785,6 +786,8 @@ contains
       return
     endif
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
+    if(pair_fft_requested().and.exx_kpoint_backend/='cpu') &
+      error stop 'EXX pair FFT tiles require the CPU backend'
     if(use_symmetry.and.any(hse_q_reduction/=1))error stop 'HSE q reduction requires an unreduced k mesh'
     if(use_symmetry)mesh=num_kgrid(1)
     if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
@@ -819,7 +822,8 @@ contains
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
-          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction)
+          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
+          defer_fft=use_symmetry.and.pair_fft_requested())
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
@@ -908,6 +912,11 @@ contains
       allocate(rotated(size(source,1),size(source,2)))
       ! Opt-in diagnostic route. Keep the established full route as the default.
       call get_environment_variable('SALMON_EXX_FFT_ORBITS',orbit_mode,status=orbit_status)
+      if(orbit_status==0.and.trim(orbit_mode)=='pair')then
+        call apply_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
+          info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_density_selected,ierr,pair_columns=0)
+        return
+      endif
       if(orbit_status==0.and.trim(orbit_mode)=='1')then
         call apply_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
           info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_density_selected,ierr)
@@ -998,6 +1007,14 @@ contains
       enddo
     end subroutine
   end subroutine
+
+  logical function pair_fft_requested()
+    implicit none
+    character(16) :: mode
+    integer :: status
+    call get_environment_variable('SALMON_EXX_FFT_ORBITS',mode,status=status)
+    pair_fft_requested=status==0.and.trim(mode)=='pair'
+  end function pair_fft_requested
 
   subroutine transpose_k_tiles(send,recv,count,comm)
     ! Explicit context avoids a callback capturing an enclosing info argument.
@@ -1288,7 +1305,8 @@ contains
     ! as for fraction=1, its exact action does not require a converged gauge.
     radius_covers_cell=exx_mlwf_radius>0d0.and. &
       exx_mlwf_radius>=sqrt(sum((.5d0*num_rgrid*system%hgs)**2))
-    adaptive_active=sr_canonical.or.(.not.dc_canonical().and.(exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
+    adaptive_active=sr_canonical.or.(.not.dc_canonical().and. &
+      (exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.radius_covers_cell.or. &
        (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0)))
     if(adaptive_active.and..not.sr_canonical)then

@@ -31,23 +31,23 @@ interface exx_k_kernel_init
   end interface
 contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                        block_rows,profile,fft_layout,create_backend,coulomb_radius)
+                        block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n,mesh,block
     real(c_double),intent(in) :: h,k(:,:),omega
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count,block_rows
-    logical,optional,intent(in) :: profile
+    logical,optional,intent(in) :: profile,defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     real(c_double),optional,intent(in) :: coulomb_radius
     call init_rectangular(op,[n,n,n],[mesh,mesh,mesh],[h,h,h],k,omega,block,ierr, &
-      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius)
+      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft=defer_fft)
   end subroutine
 
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction)
+                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3),block
@@ -55,7 +55,7 @@ contains
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count
     integer,optional,intent(in) :: block_rows
-    logical,optional,intent(in) :: profile
+    logical,optional,intent(in) :: profile,defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     real(c_double),optional,intent(in) :: coulomb_radius
@@ -204,6 +204,13 @@ contains
       ! Device plans are prepared once the distributed slot layout is known.
       op%auto_fft=.false.;op%contiguous_fft=.true.
       ierr=0;return
+    endif
+    if(present(defer_fft))then
+      if(defer_fft)then
+        ! Pair tiles own their plans/workspace; retain the common kernel and phases only.
+        if(allocated(op%accelerator).or.any(reduce/=1))goto 900
+        op%auto_fft=.false.;ierr=0;return
+      endif
     endif
     allocate(op%work(op%block,ng,nk));dims=coarse(3:1:-1)
     ! Independent residue classes require separate reduced-mesh transforms.
