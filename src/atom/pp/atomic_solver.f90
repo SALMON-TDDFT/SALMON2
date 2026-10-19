@@ -22,6 +22,9 @@ module atomic_solver
 
   real(8), parameter :: r_max_atom=30d0
   integer, parameter :: nr_atom=1000
+  real(8), parameter :: scf_threshold = 1.0d-5
+  real(8), parameter :: scf_alpha = 0.3d0
+  integer, parameter :: nscf_max = 30
   ! Interior points; Dirichlet boundaries are at zero and r_max_atom.
   real(8), parameter :: dr_atom=r_max_atom/(nr_atom+1)
 contains
@@ -40,19 +43,17 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
   ! Do not subsequently overwrite upp_f with upp.
   type(s_pp_info), intent(inout) :: pp
   integer, intent(in) :: ik
+  ! Retained for call compatibility; upp is now scaled for both masking modes.
   logical, intent(in), optional :: with_masking
-  logical :: masked
   real(8) :: c_l,radius
-  real(8) :: r(nr_atom),rho(nr_atom),beta(nr_atom)
+  real(8) :: r(nr_atom),rho(nr_atom),rho_new(nr_atom),beta(nr_atom)
   real(8) :: v_eff(nr_atom),v_h(nr_atom),v_xc(nr_atom),v_loc(nr_atom)
   real(8) :: u(nr_atom,0:pp%mlps(ik)),eig(0:pp%mlps(ik))
   integer :: occ(0:pp%mlps(ik))
-  real(8) :: norm
+  real(8) :: norm,delta_rho
   real(8), allocatable :: h(:,:)
-  integer :: nloc,nnl,l,p,p0,iproj,i,j,info
+  integer :: nloc,nnl,l,p,p0,iproj,i,j,info,iscf,nscf
 
-  masked=.false.
-  if (present(with_masking)) masked=with_masking
 
   write(*, *) "Recalculating pseudo wavefunction (atomic_solver)"
   call check_input_tables()
@@ -61,49 +62,77 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
   do i=1,nr_atom
     r(i)=i*dr_atom
   end do
-  rho=interp_rho_in(pp,ik,nr_atom,r)
-  v_loc=interp_local_potential(pp,ik,nloc,nr_atom,r) 
-  v_h=calc_hartree_potential(nr_atom,r,rho)
-  v_xc= calc_exchange_correlation_potential(nr_atom,rho)
-  v_eff= v_loc + v_h + v_xc
 
-  ! Solve each angular channel with all of its KB projectors.
+  if (pp%has_rho_pp(ik)) then
+    rho=interp_rho_in(pp,ik,nr_atom,r)
+    nscf=1
+  else
+    call init_rho_gaussian(nr_atom,r,int(pp%zps(ik)),rho)
+    nscf=nscf_max
+  end if
+
   allocate(h(nr_atom,nr_atom))
-  p0=0
-  do l=0,pp%mlps(ik)
-    h=0d0
-    do i=1,nr_atom
-      h(i,i)=1d0/dr_atom**2+0.5d0*l*(l+1d0)/r(i)**2+v_eff(i)
-      if (i < nr_atom) then
-        h(i,i+1)=-0.5d0/dr_atom**2
-        h(i+1,i)=-0.5d0/dr_atom**2
-      end if
-    end do
-    do iproj=1,pp%nproj(l,ik)
-      p=p0+iproj-1
-      if (pp%inorm(p,ik) == 0) cycle
-      beta=interp_projector(pp,ik,l,p,nnl,nr_atom,r)
-      do j=1,nr_atom
-        do i=1,nr_atom
-          h(i,j)=h(i,j)+pp%inorm(p,ik)*beta(i)*beta(j)*dr_atom
+
+  do iscf = 1, nscf
+    v_loc=interp_local_potential(pp,ik,nloc,nr_atom,r)
+    v_h=calc_hartree_potential(nr_atom,r,rho)
+    v_xc=calc_exchange_correlation_potential(nr_atom,rho)
+    v_eff=v_loc+v_h+v_xc
+
+    ! Solve each angular channel with all of its KB projectors.
+    p0=0
+    do l=0,pp%mlps(ik)
+      h=0d0
+      do i=1,nr_atom
+        h(i,i)=1d0/dr_atom**2+0.5d0*l*(l+1d0)/r(i)**2+v_eff(i)
+        if (i < nr_atom) then
+          h(i,i+1)=-0.5d0/dr_atom**2
+          h(i+1,i)=-0.5d0/dr_atom**2
+        end if
+      end do
+      do iproj=1,pp%nproj(l,ik)
+        p=p0+iproj-1
+        if (pp%inorm(p,ik) == 0) cycle
+        beta=interp_projector(pp,ik,l,p,nnl,nr_atom,r)
+        do j=1,nr_atom
+          do i=1,nr_atom
+            h(i,j)=h(i,j)+pp%inorm(p,ik)*beta(i)*beta(j)*dr_atom
+          end do
         end do
       end do
+      p0=p0+pp%nproj(l,ik)
+      call calc_single_eigenpair(nr_atom,h,eig(l),u(:,l),info)
+      if (info /= 0) then
+        write(*,*) "atomic_solver: diagonalization failed: ik,l,info=",ik,l,info
+        error stop "atomic_solver: diagonalization failed"
+      end if
+      norm=sqrt(sum(u(:,l)**2)*dr_atom)
+      if (.not. ieee_is_finite(norm) .or. norm <= 0d0) &
+        error stop "atomic_solver: invalid wavefunction norm"
+      u(:,l)=u(:,l)/norm
+      if (u(maxloc(abs(u(:,l)),1),l) < 0d0) u(:,l)=-u(:,l)
     end do
-    p0=p0+pp%nproj(l,ik)
-    call calc_single_eigenpair(nr_atom,h,eig(l),u(:,l),info)
-    if (info /= 0) then
-      write(*,*) "atomic_solver: diagonalization failed: ik,l,info=",ik,l,info
-      error stop "atomic_solver: diagonalization failed"
-    end if
-    norm=sqrt(sum(u(:,l)**2)*dr_atom)
-    if (.not. ieee_is_finite(norm) .or. norm <= 0d0) error stop "atomic_solver: invalid wavefunction norm"
-    u(:,l)=u(:,l)/norm
-    if (u(maxloc(abs(u(:,l)),1),l) < 0d0) u(:,l)=-u(:,l)
+
+    occ=assign_orbital_occupations(pp%mlps(ik),eig,int(pp%zps(ik)))
+
+    rho_new=0.0d0
+    do l=0,pp%mlps(ik)
+      do i=1,nr_atom
+        rho_new(i)=rho_new(i)+occ(l)*u(i,l)**2/(4.0d0*pi*r(i)**2)
+      end do
+    end do
+
+    delta_rho=maxval(abs(rho_new-rho))
+    write(*,'(2x,a,i0,a,es10.3e2)') "iscf=",iscf," delta_rho=",delta_rho
+    if (delta_rho <= scf_threshold) exit
+    rho=(1.0d0-scf_alpha)*rho+scf_alpha*rho_new
   end do
 
-  occ = assign_orbital_occupations(pp%mlps(ik), eig, int(pp%zps(ik)))
-  do l = 0, pp%mlps(ik)
-    write(*,'(2x,a,i4,a,i3,a,f16.9,a,i3)') "ik=",ik," l=",l," eigval(Ha)=",eig(l), " occup=",occ(l)
+  deallocate(h)
+
+  do l=0,pp%mlps(ik)
+    write(*,'(2x,a,i4,a,i3,a,f16.9,a,i3)') "ik=",ik," l=",l, &
+      " eigval(Ha)=",eig(l)," occup=",occ(l)
   end do
 
   if (.not. pp%has_wf_pp(ik)) then
@@ -115,27 +144,52 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
       pp%upp(:,l)=pp%upp_f(:,l,ik)
     end do
 
-    if (.not. masked) then
-      do l=0,pp%mlps(ik)
-        c_l=sqrt((2d0*l+1d0)/(4d0*pi))
-        do i=1,min(ubound(pp%upp,1),pp%nrmax-1)
-          radius=pp%rad(i+1,ik)
-          if (radius > r_max_atom) exit
-          pp%upp(i,l)=pp%upp(i,l)*c_l/radius**(l+1)
-        end do
+    do l=0,pp%mlps(ik)
+      c_l=sqrt((2d0*l+1d0)/(4d0*pi))
+      do i=1,min(ubound(pp%upp,1),pp%nrmax-1)
+        radius=pp%rad(i+1,ik)
+        if (radius > r_max_atom) exit
+        pp%upp(i,l)=pp%upp(i,l)*c_l/radius**(l+1)
       end do
-    end if
+    end do
     pp%upp(0,:)=pp%upp(1,:)
 
     pp%has_wf_pp(ik) = .true.
   end if
 
+
+
   ! Existing density, derivative and DFT+U orbital tables are not rebuilt.
 contains
 
+  subroutine init_rho_gaussian(nr,r,nelec,rho)
+    use math_constants, only: pi
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    integer, intent(in) :: nr,nelec
+    real(8), intent(in) :: r(nr)
+    real(8), intent(out) :: rho(nr)
+    real(8) :: sigma,c,alpha,integral
+    integer :: i
+    ! Gaussian density rho(r) = c*exp(-alpha*r^2)
+    ! Estimate sigma from atomic radius; use as initial guess.
+    sigma=max(1.0d0,0.5d0*sqrt(dble(nelec)))
+    alpha=1.0d0/sigma**2
+    c=nelec*(alpha/pi)**(1.5d0)/sqrt(pi)
+    rho=c*exp(-alpha*r**2)
+    ! Normalize to nelec by trapezoid integration.
+    integral=0.0d0
+    do i=1,nr-1
+      integral=integral+0.5d0*(r(i+1)-r(i))*(4.0d0*pi*r(i)**2*rho(i)+ &
+                                              4.0d0*pi*r(i+1)**2*rho(i+1))
+    end do
+    if (ieee_is_finite(integral) .and. integral > 0.0d0) then
+      rho=rho*nelec/integral
+    end if
+  end subroutine init_rho_gaussian
+
   subroutine check_input_tables()
     implicit none
-    if (.not. pp%has_rho_pp(ik)) error stop "atomic_solver: valence density is required"
     nloc=pp%nrps(ik)
     if (pp%has_proj_pp(ik)) nloc=pp%mr(ik)
     ! Use the same nonlocal domain and coordinates as prep_pp/calc_uv.

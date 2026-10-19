@@ -276,6 +276,7 @@ module salmon_pp
     allocate( pp%nrps_ao(1:nelem) ); pp%nrps_ao=0
     allocate( pp%rps_ao(1:nelem) ); pp%rps_ao=0.0d0
     allocate( pp%upptbl_ao(nrmax,0:2*lmax+1,nelem) ); pp%upptbl_ao=0.0d0
+    allocate( pp%upptbl_ao_l(nrmax,0:lmax,nelem) ); pp%upptbl_ao_l=0.0d0
     allocate( pp%dupptbl_ao(nrmax,0:2*lmax+1,nelem) ); pp%dupptbl_ao=0.0d0
   
     pp%flag_nlcc=flag_nlcc
