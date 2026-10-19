@@ -1,0 +1,27 @@
+{
+  "binary_sha256": "206fe1398df56c6cbf6b937b9639edaf2553ead6cd87adf4cfc2ef18b1abceda",
+  "threads": 2,
+  "yn_exx_spinor_pair_fft": "y",
+  "fixture": "coarse rectangular bcc-like Si2 developer cell; no material accuracy claim",
+  "gs-off": {
+    "residual": 9.5069358e-09,
+    "printed_energy_eV": -317.35456204
+  },
+  "gs-on": {
+    "residual": 9.0906776e-09,
+    "printed_energy_eV": -317.35456318
+  },
+  "gs-x": {
+    "residual": 8.7184523e-09,
+    "printed_energy_eV": -317.35456336
+  },
+  "gs_on_off_energy_difference_eV": 1.13999999484804e-06,
+  "gs_x_off_energy_difference_eV": 1.3199999671087426e-06,
+  "x_steps": 20,
+  "x_rt_off_on_max_difference": 1.25803729161852e-10,
+  "x_rt_ace_direct_max_difference": 4.246304331004529e-11,
+  "y_steps": 20,
+  "y_rt_off_on_max_difference": 1.04539199969082e-10,
+  "y_rt_ace_direct_max_difference": 1.4625024610125423e-12,
+  "result": "PASS"
+}

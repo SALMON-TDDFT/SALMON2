@@ -53,3 +53,14 @@ run.lockやsubmission記録を確認して重複投入を避ける。ログイ�
 面内2D応答はepsilon_cellとLz*(epsilon_cell−1)を併記する。SIのシート分極率はepsilon0*Lz*(epsilon−1)。
 任意の厚さdで誘電率へ換算する場合はepsilon_layer=1+(Lz/d)*(epsilon_cell−1)とdを明記する。
 この式を面外成分に流用しない。compare_spectra.pyは原子単位の13列response表から面内シート量を比較する。
+
+## スピノルpair FFTの規約対応版（2026-10-19）
+
+`&functional` の `yn_exx_spinor_pair_fft='y'` で全pair分散を選択する。
+既定は `n`。GS・RT双方に明記し、`variables.log` で解決値を確認する。
+旧実験版の環境変数 `SALMON_EXX_FFT_ORBITS=pair` は、この修正版では読まない。
+CPU・全q点・既存SOC HSE06条件が必要。SU(2)展開を維持し、実空間点対称性での
+FFT削減は行わない。RTの偏光方向に対応する対称性は従来どおりOFF。
+
+富岳に配置済みの037c301は旧選択方法の版であり、今回の修正版とは区別する。
+今回の規約修正では既存バイナリ・ジョブの入力・起動先を変更していない。

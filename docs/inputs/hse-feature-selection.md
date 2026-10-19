@@ -8,6 +8,7 @@ batch input is unchanged).
 | Input | Default | Values / meaning | Replaces |
 |---|---|---|---|
 | `exx_factor_mode` | `off` | `off`, `strict` (exact endpoint history), `learned` (history prediction) | `SALMON_FACTOR_HISTORY` |
+| `yn_exx_spinor_pair_fft` | `n` | full real-space pair tiles for native CPU HSE06 spinors, all q points | experimental `SALMON_EXX_FFT_ORBITS=pair` |
 | `yn_exx_fft_orbits` | `n` | symmetry-equivalent dense-k hybrid exchange FFT reuse | `SALMON_EXX_FFT_ORBITS` |
 | `yn_ace_shadow_diagnostic` | `n` | shadow comparisons within surrogate trace | `SALMON_ACE_SHADOW_DIAGNOSTIC` |
 | `yn_ace_export_factors` | `n` | raw one-orbital H2 factor diagnostic | `SALMON_ACE_EXPORT_FACTORS` |
@@ -72,3 +73,17 @@ hybrid stage. This is an initialization threshold, not the final accuracy;
 zero for RT/restart, nonhybrids, moving ions, unsupported mixing/metrics,
 checkpoint/shutdown or diagnostic modes and DC without positive temperature.
 The input log records the resolved value. See [PBE pre-SCF](exx-mlwf.md).
+
+## Spinor full-pair tiles
+
+Set `yn_exx_spinor_pair_fft='y'` in `&functional` for the fixed-ion native
+HSE06 SOC route. The default `n` retains the row-distributed exchange backend.
+The switch is normalized, broadcast and recorded in `variables.log`; the old
+experimental `SALMON_EXX_FFT_ORBITS=pair` selector is no longer read.
+CPU exchange, all q points and the existing occupied-spinor/k-only constraints
+are required. Rectangular real-space and k meshes are supported. Each of the
+four spin density blocks uses full (r,r') pairs, with no spatial point-orbit
+compression or Hermitian-pair reduction. Existing SU(2) symmetry expansion and
+field-preserving RT subgroups still apply. This option changes workspace and
+communication only; it does not alter the screened kernel or restart format.
+Select the mode explicitly in both GS and RT inputs.

@@ -131,6 +131,7 @@ module salmon_global
   character(8) :: exx_ace_support ! occupied/source ACE construction vectors
   character(8) :: exx_pair_screening ! off/diagnose/on; discrete hybrid pair bound
   character(8) :: exx_factor_mode = 'off' ! off/strict/learned exact-factor history
+  character(1) :: yn_exx_spinor_pair_fft = 'n' ! Full-pair CPU spinor exchange
   character(1) :: yn_exx_fft_orbits = 'n'
   character(1) :: yn_exx_k_pair_symmetry = 'y' ! Hermitian pairs without crystal symmetry
   character(1) :: yn_ace_shadow_diagnostic = 'n',yn_ace_export_factors = 'n'

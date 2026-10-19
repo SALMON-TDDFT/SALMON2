@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from pathlib import Path
+text = Path("outputfile").read_text()
+assert "EXX_SPINOR_PAIR_FFT" in text, text
+assert "SPINOR_PAIR_DISTRIBUTED_PASS" in text, text

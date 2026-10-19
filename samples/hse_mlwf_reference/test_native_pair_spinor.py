@@ -1,6 +1,6 @@
-"""Compiled fixed-core variational and full-spinor exchange regressions.
+"""Compiled serial and MPI full-pair spinor exchange regressions.
 
-Set RUN_MPI_TESTS=1 to include two-rank k distribution (MPI sockets required).
+MPI sockets are required; PAIR_TEST_RANKS selects the rank count (default 4).
 Toolchain paths follow test_native_exchange.py.
 """
 import os

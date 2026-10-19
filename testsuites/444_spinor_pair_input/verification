@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from pathlib import Path
+text = Path('outputfile').read_text()
+assert 'Spinor pair FFT requires native CPU SOC HSE06 with all q points' in text, text
+assert 'end SALMON' not in text, text

@@ -1,8 +1,9 @@
 program probe
  use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan
- use mpi
- use exx_k_exchange
- use exx_spinor
+ use mpi, only: MPI_Init,MPI_Comm_rank,MPI_Comm_size,MPI_Abort,MPI_Finalize,MPI_Alltoall, &
+  MPI_Reduce,MPI_COMM_WORLD,MPI_DOUBLE_COMPLEX,MPI_SUM
+ use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init
+ use exx_spinor, only: exx_spinor_apply_distributed
  implicit none
  type(exx_k_kernel)::op,full_op
  integer::rank,np,err,status,first,nlocal,i,j,q
@@ -61,6 +62,7 @@ program probe
  call MPI_Finalize(status)
 contains
  subroutine transpose_tiles(send,recv,count,comm)
+  implicit none
   complex(8),intent(in)::send(:)
   complex(8),intent(out)::recv(:)
   integer,intent(in)::count,comm
@@ -68,6 +70,7 @@ contains
   call MPI_Alltoall(send,count,MPI_DOUBLE_COMPLEX,recv,count,MPI_DOUBLE_COMPLEX,comm,stat)
  end subroutine
  subroutine transpose_local(send,recv,count,comm)
+  implicit none
   complex(8),intent(in)::send(:)
   complex(8),intent(out)::recv(:)
   integer,intent(in)::count,comm

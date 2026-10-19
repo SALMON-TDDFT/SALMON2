@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+# No pseudopotential or restart files: this case compares exchange operators directly.

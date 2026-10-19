@@ -1,7 +1,7 @@
 program probe
- use exx_k_exchange
+ use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply
  use exx_spinor, only: exx_spinor_apply_distributed
- use exx_ace
+ use exx_ace, only: s_exx_ace,exx_ace_build,exx_ace_apply
  implicit none
  type(exx_k_kernel)::op
  type(s_exx_ace)::ace
@@ -66,6 +66,7 @@ program probe
  print *, 'SPINOR_FOCK_OFFDIAGONAL_SU2_ACE_CLOSED_SHELL_PASS'
 contains
  subroutine large_tile_rejection()
+  implicit none
   complex(8),allocatable::a(:,:,:),b(:,:,:)
   integer::n
   n=18*32*144;k=0d0
@@ -78,6 +79,7 @@ contains
   print *, 'LARGE_PAIR_TILE_REJECT_PASS'
  end subroutine
  subroutine transpose_tiles(send,recv,count,comm)
+  implicit none
   complex(8),intent(in)::send(:)
   complex(8),intent(out)::recv(:)
   integer,intent(in)::count,comm

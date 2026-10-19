@@ -1,13 +1,14 @@
 ! Full spin density matrix exchange. Rows pack (real-space point, spin),
 ! occupations are one per occupied spinor, with no closed-shell factor.
 module exx_spinor
- use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
- use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_apply_distributed,exx_k_kernel_apply_pair_distributed
  implicit none
  private
  public :: exx_spinor_apply_distributed
 contains
  subroutine exx_spinor_apply_distributed(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr,pair_tiles)
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_apply_distributed,exx_k_kernel_apply_pair_distributed
+  implicit none
   type(exx_k_kernel),intent(inout)::op
   complex(8),intent(in)::source(:,:,:),target(:,:,:)
   complex(8),intent(out)::action(:,:,:)
@@ -17,6 +18,7 @@ contains
   logical::use_pairs
   interface
    subroutine transpose_tiles(send,recv,count,comm)
+    implicit none
     complex(8),intent(in)::send(:)
     complex(8),intent(out)::recv(:)
     integer,intent(in)::count,comm
@@ -28,6 +30,7 @@ contains
   integer::ng,no,nk,s,t,j,b,i
   interface
    subroutine zgemm(ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc)
+    implicit none
     character(1),intent(in)::ta,tb
     integer,intent(in)::m,n,k,lda,ldb,ldc
     complex(8),intent(in)::alpha,beta,a(lda,*),b(ldb,*)
@@ -71,6 +74,7 @@ contains
   enddo;enddo
  contains
   subroutine fill_density(j,lo,rows,density)
+   implicit none
    integer,intent(in)::j,lo,rows
    complex(8),intent(out)::density(:,:)
    density=0d0

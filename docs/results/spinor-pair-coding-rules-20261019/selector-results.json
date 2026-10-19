@@ -1,0 +1,11 @@
+{
+  "default-old-env": {
+    "selected": "n",
+    "max_rt_difference": 1.682198962917568e-16
+  },
+  "uppercase": {
+    "selected": "y",
+    "max_rt_difference": 0.0
+  },
+  "status": "PASS"
+}

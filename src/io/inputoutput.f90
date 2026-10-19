@@ -292,7 +292,8 @@ contains
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
       & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
-      & exx_factor_mode,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
+      & exx_factor_mode,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
+      & yn_ace_shadow_diagnostic,yn_ace_export_factors, &
       & hse_sr_group_fft,yn_hse_sr_wave_first,yn_hse_sr_return_sum,yn_hse_sr_pair_symmetry,hse_sr_radius, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
@@ -763,6 +764,7 @@ contains
     hse_mlwf_tolerance = -huge(1d0)
     exx_mlwf_radius = 0d0
     exx_factor_mode = 'off'
+    yn_exx_spinor_pair_fft = 'n'
     yn_exx_fft_orbits = 'n'
     yn_exx_k_pair_symmetry = 'y'
     yn_ace_shadow_diagnostic = 'n'
@@ -1401,6 +1403,8 @@ contains
     call string_lowercase(exx_pair_screening)
     call comm_bcast(exx_factor_mode,nproc_group_global)
     call string_lowercase(exx_factor_mode)
+    call comm_bcast(yn_exx_spinor_pair_fft,nproc_group_global)
+    call string_lowercase(yn_exx_spinor_pair_fft)
     call comm_bcast(yn_exx_fft_orbits,nproc_group_global)
     call string_lowercase(yn_exx_fft_orbits)
     call comm_bcast(yn_exx_k_pair_symmetry,nproc_group_global)
@@ -2437,6 +2441,7 @@ contains
       write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
       write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
       write(fh_variables_log, *) "# exx_factor_mode=",exx_factor_mode
+      write(fh_variables_log, *) "# yn_exx_spinor_pair_fft=",yn_exx_spinor_pair_fft
       write(fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
       write(fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
       write(fh_variables_log, *) "# yn_ace_shadow_diagnostic=",yn_ace_shadow_diagnostic
@@ -3103,6 +3108,12 @@ contains
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
     call yn_argument_check(yn_hse_wannier)
+    call yn_argument_check(yn_exx_spinor_pair_fft)
+    if(yn_exx_spinor_pair_fft=='y')then
+      if(xc/='hse06'.or.yn_spinorbit/='y'.or.yn_dc/='n'.or. &
+         exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1)) &
+        error stop 'Spinor pair FFT requires native CPU SOC HSE06 with all q points'
+    endif
     call yn_argument_check(yn_exx_fft_orbits)
     call yn_argument_check(yn_exx_k_pair_symmetry)
     call yn_argument_check(yn_ace_shadow_diagnostic)

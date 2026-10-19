@@ -1066,10 +1066,9 @@ contains
   end subroutine transpose_k_tiles
 
   logical function spinor_pair_fft_requested()
-    character(16)::mode
-    integer::status
-    call get_environment_variable('SALMON_EXX_FFT_ORBITS',mode,status=status)
-    spinor_pair_fft_requested=yn_spinorbit=='y'.and.status==0.and.trim(mode)=='pair'
+    use salmon_global, only: yn_exx_spinor_pair_fft
+    implicit none
+    spinor_pair_fft_requested=yn_spinorbit=='y'.and.yn_exx_spinor_pair_fft=='y'
   end function
 
   subroutine exx_add_action(psi,hpsi,system,mg,info)

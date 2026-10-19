@@ -13,6 +13,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--salmon',type=Path,required=True);ap.add_argument('--pseudo',type=Path,required=True)
     ap.add_argument('--output',type=Path,required=True);ap.add_argument('--threads',type=int,default=2)
+    ap.add_argument('--pair-fft', choices=('y','n'), default='n')
     ap.add_argument('--resume',action='store_true',help='Reuse only completed directories with exactly identical input')
     ap.add_argument('--steps',type=int,default=100)
     ap.add_argument('--y-steps',type=int)
@@ -26,13 +27,13 @@ def main():
     if args.resume:
         assert pin.read_text().strip()==digest,'Cannot reuse results from a different binary'
     else:pin.write_text(digest+'\n')
-    report={'binary_sha256':digest,'threads':args.threads,
+    report={'binary_sha256':digest,'threads':args.threads,'yn_exx_spinor_pair_fft':args.pair_fft,
             'fixture':'coarse rectangular bcc-like Si2 developer cell; no material accuracy claim'}
     base="""&units unit_system='au' /
 &system yn_periodic='y',al=8d0,10d0,12d0,nelem=1,natom=2,nelec=8,nstate=8,
  spin='noncollinear',yn_spinorbit='y',yn_symmetry='MASK' /
 &pseudo izatom(1)=14,file_pseudo(1)='PP' /
-&functional xc='hse06',exx_pre_scf_threshold=0d0,hse_block_rows=1,yn_exx_k_pair_symmetry='n' /
+&functional xc='hse06',exx_pre_scf_threshold=0d0,hse_block_rows=1,yn_exx_k_pair_symmetry='n',yn_exx_spinor_pair_fft='PAIR' /
 &rgrid num_rgrid=8,8,8 /
 &kgrid num_kgrid=3,1,1 /
 &parallel nproc_k=1,nproc_ob=1,nproc_rgrid=1,1,1 /
@@ -40,7 +41,7 @@ def main():
  'Si' 0d0 0d0 0d0 1
  'Si' .5d0 .5d0 .5d0 1
 /
-""".replace('PP',str(pp))
+""".replace('PP',str(pp)).replace('PAIR',args.pair_fft)
     def run(name,text,sxlist):
         d=root/name
         if args.resume and d.exists():

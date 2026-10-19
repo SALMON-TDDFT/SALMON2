@@ -601,12 +601,14 @@ contains
     interface
       subroutine transpose_tiles(send,recv,count,comm)
         import c_double_complex
+        implicit none
         complex(c_double_complex),intent(in)::send(:)
         complex(c_double_complex),intent(out)::recv(:)
         integer,intent(in)::count,comm
       end subroutine
       subroutine fill_density(j,lo,rows,density)
         import c_double_complex
+        implicit none
         integer,intent(in)::j,lo,rows
         complex(c_double_complex),intent(out)::density(:,:)
       end subroutine
