@@ -2,17 +2,19 @@
 ! occupations are one per occupied spinor, with no closed-shell factor.
 module exx_spinor
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
- use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_apply_distributed
+ use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_apply_distributed,exx_k_kernel_apply_pair_distributed
  implicit none
  private
  public :: exx_spinor_apply_distributed
 contains
- subroutine exx_spinor_apply_distributed(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr)
+ subroutine exx_spinor_apply_distributed(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr,pair_tiles)
   type(exx_k_kernel),intent(inout)::op
   complex(8),intent(in)::source(:,:,:),target(:,:,:)
   complex(8),intent(out)::action(:,:,:)
   integer,intent(in)::starts(:),counts(:),rank,comm
   integer,intent(out)::ierr
+  logical,optional,intent(in)::pair_tiles
+  logical::use_pairs
   interface
    subroutine transpose_tiles(send,recv,count,comm)
     complex(8),intent(in)::send(:)
@@ -32,6 +34,8 @@ contains
     complex(8),intent(inout)::c(ldc,*)
    end subroutine
   end interface
+  use_pairs=.false.
+  if(present(pair_tiles))use_pairs=pair_tiles
   ierr=1;action=0d0
   ng=op%ng;no=size(source,2);nk=size(source,3)
   valid=size(source,1)==2*ng.and.size(target,1)==2*ng.and.all(shape(action)==shape(target))
@@ -44,9 +48,9 @@ contains
    if(.not.ieee_is_finite(real(target(i,b,j),8)).or..not.ieee_is_finite(aimag(target(i,b,j))))valid=.false.
   enddo;enddo;enddo
   ! All k peers agree before any callback can consume cross-spin density.
-  sent=cmplx(merge(0,1,valid),0d0,8)
+  sent=cmplx(merge(0,1,valid),merge(1,0,use_pairs),8)
   call transpose_tiles(sent,received,1,comm)
-  if(any(real(received)/=0d0))return
+  if(any(real(received)/=0d0).or.any(aimag(received)/=real(merge(1,0,use_pairs),8)))return
   allocate(left(ng,no,nk),right(ng,no,nk),part(ng,size(target,2),nk))
   do s=1,2;do t=1,2
    do j=1,nk;do b=1,no
@@ -55,8 +59,13 @@ contains
    enddo;enddo
    ! Callback supplies cross-spin density; scalar backend handles k transposes,
    ! the screened interaction, target phases and uniform Brillouin-zone weights.
+   if(use_pairs)then
+    call exx_k_kernel_apply_pair_distributed(op,target((t-1)*ng+1:t*ng,:,:),part, &
+     starts,counts,rank,comm,transpose_tiles,fill_density,ierr)
+   else
    call exx_k_kernel_apply_distributed(op,source((s-1)*ng+1:s*ng,:,:), &
     target((t-1)*ng+1:t*ng,:,:),part,starts,counts,rank,comm,transpose_tiles,ierr,fill_density)
+   endif
    if(ierr/=0)return
    action((s-1)*ng+1:s*ng,:,:)=action((s-1)*ng+1:s*ng,:,:)+part
   enddo;enddo

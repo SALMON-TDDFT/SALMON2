@@ -10,6 +10,7 @@ module exx_k_exchange
   private
   include 'fftw3.f03'
   public :: exx_k_kernel, exx_k_kernel_init, exx_k_kernel_apply, exx_k_kernel_destroy
+  public :: exx_k_kernel_apply_pair_distributed
   public :: exx_k_kernel_apply_distributed
   type exx_k_kernel
     class(s_exx_k_backend),allocatable :: accelerator
@@ -34,23 +35,23 @@ interface exx_k_kernel_init
   end interface
 contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                        block_rows,profile,fft_layout,create_backend,coulomb_radius)
+                        block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n,mesh,block
     real(c_double),intent(in) :: h,k(:,:),omega
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count,block_rows
-    logical,optional,intent(in) :: profile
+    logical,optional,intent(in) :: profile,defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     real(c_double),optional,intent(in) :: coulomb_radius
     call init_rectangular(op,[n,n,n],[mesh,mesh,mesh],[h,h,h],k,omega,block,ierr, &
-      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius)
+      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft=defer_fft)
   end subroutine
 
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction)
+                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft)
     implicit none
     type(exx_k_kernel),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3),block
@@ -58,7 +59,7 @@ contains
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count
     integer,optional,intent(in) :: block_rows
-    logical,optional,intent(in) :: profile
+    logical,optional,intent(in) :: profile,defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     real(c_double),optional,intent(in) :: coulomb_radius
@@ -207,6 +208,12 @@ contains
       ! Device plans are prepared once the distributed slot layout is known.
       op%auto_fft=.false.;op%contiguous_fft=.true.
       ierr=0;return
+    endif
+    if(present(defer_fft))then
+      if(defer_fft)then
+        if(allocated(op%accelerator).or.any(reduce/=1))goto 900
+        op%auto_fft=.false.;ierr=0;return
+      endif
     endif
     allocate(op%work(op%block,ng,nk));dims=coarse(3:1:-1)
     ! Independent residue classes require separate reduced-mesh transforms.
@@ -580,6 +587,169 @@ contains
     enddo
     ierr=0
   end subroutine
+
+  ! Full (r,r') pair partition. Source callback may contain a cross-spin block.
+  ! No point-orbit compression: SU(2) expansion belongs to the caller.
+  subroutine exx_k_kernel_apply_pair_distributed(op,target,action,starts,counts,rank,comm,transpose_tiles, &
+                                                fill_density,ierr)
+    implicit none
+    type(exx_k_kernel),intent(inout)::op
+    complex(c_double_complex),intent(in)::target(:,:,:)
+    complex(c_double_complex),intent(out)::action(:,:,:)
+    integer,intent(in)::starts(:),counts(:),rank,comm
+    integer,intent(out)::ierr
+    interface
+      subroutine transpose_tiles(send,recv,count,comm)
+        import c_double_complex
+        complex(c_double_complex),intent(in)::send(:)
+        complex(c_double_complex),intent(out)::recv(:)
+        integer,intent(in)::count,comm
+      end subroutine
+      subroutine fill_density(j,lo,rows,density)
+        import c_double_complex
+        integer,intent(in)::j,lo,rows
+        complex(c_double_complex),intent(out)::density(:,:)
+      end subroutine
+    end interface
+    complex(c_double_complex),allocatable,target::send(:),recv(:),flat(:)
+    complex(c_double_complex),pointer::sb(:,:,:),rb(:,:,:),cf(:,:),mf(:,:)
+    complex(c_double_complex),allocatable::density(:,:),t(:,:,:),contracted(:,:)
+    complex(c_double_complex)::hs(size(counts)),hr(size(counts)),value
+    integer,allocatable::inverse(:),slot(:)
+    integer::np,ng,nk,nlocal,nt,cols,km,nmsg,owned,lo,hi,rows
+    integer::i,j,p,c,ki,g,a,idx(3),dims(3),ns(3),span,npart
+    integer(int64)::capacity,total64,total,base,last,pair,cols64
+    logical::valid
+    type(c_ptr)::forward,backward
+    ierr=1;action=0;forward=c_null_ptr;backward=c_null_ptr
+    np=size(counts);ng=op%ng;nk=op%nk;nt=size(target,2)
+    if(np<1.or.rank<0.or.rank>=np.or.size(starts)/=np)return
+    nlocal=counts(rank+1);km=maxval(counts)
+    total64=int(ng,int64)*ng
+    valid=ng>0.and.nk>0.and.nt>0.and.op%block>0
+    valid=valid.and.op%nq==nk.and..not.allocated(op%accelerator)
+    valid=valid.and.all(counts>=0).and.sum(counts)==nk.and.starts(1)==1
+    do p=2,np
+      valid=valid.and.starts(p)==starts(p-1)+counts(p-1)
+    enddo
+    valid=valid.and.size(target,1)==ng.and.size(target,3)==nlocal.and.all(shape(action)==shape(target))
+    valid=valid.and.allocated(op%phase)
+    if(allocated(op%phase))valid=valid.and.op%phase_start==starts(rank+1).and.size(op%phase,2)==nlocal
+    valid=valid.and.salmon_all_finite(real(target)).and.salmon_all_finite(aimag(target))
+    cols64=max(1_int64,min(int(op%block,int64)*ng,(total64+np-1)/np))
+    valid=valid.and.cols64<=huge(cols)
+    cols=1
+    if(cols64<=huge(cols))cols=int(cols64)
+    capacity=int(cols,int64)*km*np
+    valid=valid.and.capacity<=huge(nmsg).and.int(cols,int64)*nk<=huge(nmsg)
+    valid=valid.and.int(cols,int64)*np<=huge(span)
+    hs=cmplx(cols,merge(0,-1,valid),c_double)
+    call transpose_tiles(hs,hr,1,comm)
+    if(any(real(hr)/=real(cols,c_double)).or.any(aimag(hr)/=0d0))return
+    total=total64;span=np*cols;nmsg=cols*km;ns=op%n*op%mesh
+    allocate(send(int(capacity)),recv(int(capacity)),flat(cols*nk),inverse(nk),slot(nk))
+    sb(1:cols,1:km,1:np)=>send;rb(1:cols,1:km,1:np)=>recv
+    cf(1:cols,1:nk)=>flat;mf(1:nk,1:cols)=>flat
+    allocate(density(min(ng,2+(span-1)/ng),ng),t(ng,nt,nlocal),contracted(1,nt))
+    do ki=1,nk;inverse(op%order(ki))=ki;enddo
+    do p=1,np;do j=1,counts(p)
+      slot(inverse(starts(p)+j-1))=j+(p-1)*km
+    enddo;enddo
+    do j=1,nlocal;do i=1,nt
+      t(:,i,j)=target(:,i,j)*op%phase(:,j)
+    enddo;enddo
+    dims=op%mesh(3:1:-1)
+    if(op%contiguous_fft)then
+      forward=fftw_plan_many_dft(3,dims,cols,flat,dims,1,nk,flat,dims,1,nk, &
+        FFTW_FORWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+      backward=fftw_plan_many_dft(3,dims,cols,flat,dims,1,nk,flat,dims,1,nk, &
+        FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+    else
+      forward=fftw_plan_many_dft(3,dims,cols,flat,dims,cols,1,flat,dims,cols,1, &
+        FFTW_FORWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+      backward=fftw_plan_many_dft(3,dims,cols,flat,dims,cols,1,flat,dims,cols,1, &
+        FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
+    endif
+    valid=c_associated(forward).and.c_associated(backward)
+    hs=cmplx(merge(0,1,valid),0,c_double)
+    call transpose_tiles(hs,hr,1,comm)
+    if(any(real(hr)/=0d0))goto 900
+    if(rank==0)write(*,'(a,4i18)')'EXX_SPINOR_PAIR_FFT pairs/columns/ranks/passes: ', &
+      total,cols,np,1+(total-1)/span
+    if(rank==0)write(*,'(a,3i18)')'EXX_SPINOR_PAIR_FFT buffer elements send/recv/FFT: ',capacity,capacity,int(cols,int64)*nk
+    do base=1_int64,total,int(span,int64)
+      last=min(total,base+span-1);lo=int(1+(base-1)/ng);hi=int(1+(last-1)/ng);rows=hi-lo+1
+      send=0
+      do j=1,nlocal
+        call fill_density(j,lo,rows,density(:rows,:))
+        do p=1,np;do c=1,cols
+          pair=base+(p-1)*cols+c-1
+          if(pair>last)exit
+          a=int(1+(pair-1)/ng);g=int(1+mod(pair-1,int(ng,int64)))
+          sb(c,j,p)=density(a-lo+1,g)
+        enddo;enddo
+      enddo
+      call transpose_tiles(send,recv,nmsg,comm)
+      owned=int(max(0_int64,min(int(cols,int64),total-base-rank*cols+1)))
+      if(owned>0)then
+        do ki=1,nk
+          p=1+(slot(ki)-1)/km;j=1+mod(slot(ki)-1,km)
+          do c=1,cols
+            if(op%contiguous_fft)then
+              mf(ki,c)=rb(c,j,p)
+            else
+              cf(c,ki)=rb(c,j,p)
+            endif
+          enddo
+        enddo
+        call fftw_execute_dft(forward,flat,flat)
+        do ki=1,nk;do c=1,owned
+          pair=base+rank*cols+c-1;a=int(1+(pair-1)/ng);g=int(1+mod(pair-1,int(ng,int64)))
+          idx=modulo(op%point(:,a)-op%point(:,g)-op%shift(:,ki),ns)
+          if(op%contiguous_fft)then
+            mf(ki,c)=mf(ki,c)*op%kernel(idx(1),idx(2),idx(3))
+          else
+            cf(c,ki)=cf(c,ki)*op%kernel(idx(1),idx(2),idx(3))
+          endif
+        enddo;enddo
+        send=0
+        call fftw_execute_dft(backward,flat,flat)
+        do ki=1,nk
+          p=1+(slot(ki)-1)/km;j=1+mod(slot(ki)-1,km)
+          do c=1,owned
+            if(op%contiguous_fft)then
+              sb(c,j,p)=mf(ki,c)
+            else
+              sb(c,j,p)=cf(c,ki)
+            endif
+          enddo
+        enddo
+      else
+        send=0
+      endif
+      call transpose_tiles(send,recv,nmsg,comm)
+      do p=1,np
+        c=1
+        do while(c<=cols)
+          pair=base+(p-1)*cols+c-1
+          if(pair>last)exit
+          a=int(1+(pair-1)/ng);g=int(1+mod(pair-1,int(ng,int64)))
+          npart=int(min(int(min(cols-c+1,ng-g+1),int64),last-pair+1))
+          do j=1,nlocal
+            value=-conjg(op%phase(a,j))/real(nk,c_double)
+            call zgemm('N','N',1,nt,npart,value,rb(c,j,p),1,t(g,1,j),ng, &
+              (0d0,0d0),contracted(1,1),1)
+            action(a,:,j)=action(a,:,j)+contracted(1,:)
+          enddo
+          c=c+npart
+        enddo
+      enddo
+    enddo
+    ierr=0
+900 continue
+    if(c_associated(forward))call fftw_destroy_plan(forward)
+    if(c_associated(backward))call fftw_destroy_plan(backward)
+  end subroutine exx_k_kernel_apply_pair_distributed
 
   subroutine transpose_contiguous(op,buffer,slot,unpack)
     implicit none

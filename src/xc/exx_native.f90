@@ -795,6 +795,8 @@ contains
       return
     endif
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
+    if(spinor_pair_fft_requested().and.(exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1))) &
+      error stop 'Spinor pair FFT requires CPU full-q native exchange'
     if(use_symmetry.and.any(hse_q_reduction/=1))error stop 'HSE q reduction requires an unreduced k mesh'
     if(use_symmetry)mesh=num_kgrid(1)
     if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
@@ -826,13 +828,15 @@ contains
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
-          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction)
+          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
+          defer_fft=spinor_pair_fft_requested())
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
-          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction)
+          cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
+          defer_fft=spinor_pair_fft_requested())
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
@@ -925,7 +929,7 @@ contains
         endif
         allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
         call exx_spinor_apply_distributed(kernel,expanded_source,expanded_target,expanded_action,layout(:np), &
-          layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+          layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr,pair_tiles=spinor_pair_fft_requested())
         if(ierr==0)then
           do j=1,info%numk
             index=symmetry_map%first(info%ik_s+j-1)-symmetry_map%first(info%ik_s)+1
@@ -934,7 +938,7 @@ contains
         endif
       else
         call exx_spinor_apply_distributed(kernel,source,target,action,layout(:np),layout(np+1:), &
-          info%id_k,info%icomm_k,transpose_k_tiles,ierr)
+          info%id_k,info%icomm_k,transpose_k_tiles,ierr,pair_tiles=spinor_pair_fft_requested())
       endif
       return
     endif
@@ -1060,6 +1064,13 @@ contains
     call comm_alltoall(send,recv,comm,count)
     if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
   end subroutine transpose_k_tiles
+
+  logical function spinor_pair_fft_requested()
+    character(16)::mode
+    integer::status
+    call get_environment_variable('SALMON_EXX_FFT_ORBITS',mode,status=status)
+    spinor_pair_fft_requested=yn_spinorbit=='y'.and.status==0.and.trim(mode)=='pair'
+  end function
 
   subroutine exx_add_action(psi,hpsi,system,mg,info)
     implicit none
