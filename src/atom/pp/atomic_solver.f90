@@ -105,6 +105,11 @@ subroutine calc_pseudo_wavefunction(pp,ik,with_masking)
   do l = 0, pp%mlps(ik)
     write(*,'(2x,a,i4,a,i3,a,f16.9,a,i3)') "ik=",ik," l=",l," eigval(Ha)=",eig(l), " occup=",occ(l)
   end do
+  pp%pseudo_wf_eigval(:,ik)=0d0
+  pp%pseudo_wf_occup(:,ik)=0d0
+  pp%pseudo_wf_eigval(0:pp%mlps(ik),ik)=eig
+  pp%pseudo_wf_occup(0:pp%mlps(ik),ik)=dble(occ)
+  pp%has_pseudo_wf(ik)=.true.
 
   if (.not. pp%has_wf_pp(ik)) then
     ! First store raw u=r*R on the PP mesh, then apply the upp convention.
