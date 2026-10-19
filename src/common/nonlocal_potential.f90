@@ -22,7 +22,129 @@ module nonlocal_potential
 
 ! WARNING: We must not call these except for hpsi routine.
 
+#if defined(USE_OPENACC)
+  ! Orbitals batched per thread by the phase-2 back-projection, OpenACC and
+  ! CUDA alike. Trades registers for that many independent FMA chains per
+  ! index load; the CUDA host grid sizing follows it.
+  integer, parameter :: zphase2_norb = 4
+#endif
+
 contains
+
+#if defined(USE_OPENACC) && defined(USE_CUDA)
+  ! Same element mapping as the OpenACC version, but addresses arrive as raw
+  ! pointers with host strides, so the loop reads no array descriptors.
+  attributes(global) subroutine zgather_cuda(jxyz, mps, wf, packed, nelem, nps, &
+      this_block, io_blk_s, ik, im, ispin, &
+      lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7, p2, p3)
+    use cudafor
+    implicit none
+    integer :: jxyz(*), mps(*)
+    complex(8) :: wf(*), packed(*)
+    integer, value :: nelem, nps, this_block, io_blk_s, ik, im, ispin
+    integer, value :: lb1, lb2, lb3, lb5, lb6, lb7
+    ! 64-bit: a flat offset into psi exceeds 2^31 once local orbitals times
+    ! grid points does, which a 4x4x4 cell reaches at four GPUs.
+    integer(8), value :: s2, s3, s4, s5, s6, s7, p2, p3
+    integer :: i, j, io_l, ia, jx, jy, jz
+    integer(8) :: offw, offp
+
+    i = (blockidx%x - 1) * blockdim%x + threadidx%x
+    if (i > nelem) return
+
+    j    = mod(i - 1, nps) + 1
+    io_l = mod((i - 1) / nps, this_block) + 1
+    ia   = (i - 1) / (nps * this_block) + 1
+
+    if (j <= mps(ia)) then
+      jx = jxyz((j - 1) * 3 + (ia - 1) * 3 * nps + 1)
+      jy = jxyz((j - 1) * 3 + (ia - 1) * 3 * nps + 2)
+      jz = jxyz((j - 1) * 3 + (ia - 1) * 3 * nps + 3)
+      offw = int(jx - lb1, 8) + int(jy - lb2, 8) * s2 + int(jz - lb3, 8) * s3 &
+           + int(ispin - 1, 8) * s4 + int(io_blk_s + io_l - 1 - lb5, 8) * s5 &
+           + int(ik - lb6, 8) * s6 + int(im - lb7, 8) * s7
+      offp = int(j - 1, 8) + int(io_l - 1, 8) * p2 + int(ia - 1, 8) * p3
+      packed(offp + 1) = wf(offw + 1)
+    end if
+  end subroutine zgather_cuda
+
+  ! zphase2_norb orbitals per thread: k2ilma/k2j/zekr_uV do not depend on the
+  ! orbital, so one index+projector load feeds that many independent FMA chains.
+  ! Accumulation order per orbital is unchanged, so results stay bit-exact.
+  ! nio counts this rank's orbitals; it is not an upper index.
+  attributes(global) subroutine zphase2_cuda_d(v2nlma, k2ilma, k2j, v2j, &
+      ubox, zekr, htpsi, nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s, &
+      ub2, ub3, ub4, ub5, z2, z3, ik_lb, &
+      lb1, lb2, lb3, lb5, lb6, lb7, s2, s3, s4, s5, s6, s7)
+    use cudafor
+    implicit none
+    integer :: v2nlma(*), k2ilma(*), k2j(*), v2j(*)
+    complex(8) :: ubox(*), zekr(*), htpsi(*)
+    integer, value :: nwork, max_vi, nspin, nioq, nio, nik, ik_s, im_s
+    integer(8), value :: ub2, ub3, ub4, ub5, z2, z3
+    integer, value :: ik_lb
+    integer, value :: lb1, lb2, lb3, lb5, lb6, lb7
+    integer(8), value :: s2, s3, s4, s5, s6, s7
+    integer :: i, vi, isp, ioq, ik_l, im_l, io0, io, ik, im, q
+    integer :: my_nlma, k, ilma, j, ix, iy, iz
+    integer(8) :: off, uo, zbase
+    integer :: o
+    complex(8) :: zk, wrk(zphase2_norb)
+
+    i = (blockidx%x - 1) * blockdim%x + threadidx%x
+    if (i > nwork) return
+
+    vi    = mod(i - 1, max_vi)
+    isp   = mod((i - 1) / max_vi, nspin) + 1
+    ioq   = mod((i - 1) / (max_vi * nspin), nioq) + 1
+    ! nik is a kernel argument, so this branch is warp-uniform and the
+    ! Gamma-only case skips the quotient split's integer division entirely.
+    q = (i - 1) / (max_vi * nspin * nioq)
+    if (nik == 1) then
+      ik_l = 1
+      im_l = q + 1
+    else
+      im_l = q / nik
+      ik_l = q - im_l * nik + 1
+      im_l = im_l + 1
+    end if
+
+    my_nlma = v2nlma(vi + 1)
+    if (my_nlma < 1) return
+
+    io0 = (ioq - 1) * zphase2_norb
+    ik  = ik_s + ik_l - 1
+    im  = im_s + im_l - 1
+    uo  = int(isp - 1, 8) * ub2 + int(ik - ik_s, 8) * ub4 + int(im - im_s, 8) * ub5
+    zbase = int(ik - ik_lb, 8) * z3
+
+    do o = 1, zphase2_norb
+      wrk(o) = (0d0, 0d0)
+    end do
+    do k = 1, my_nlma
+      ilma = k2ilma((k - 1) * max_vi + vi + 1)
+      j    = k2j((k - 1) * max_vi + vi + 1)
+      zk   = zekr(zbase + int(ilma - 1, 8) * z2 + int(j, 8))
+      do o = 1, zphase2_norb
+        io = io0 + o
+        if (io <= nio) wrk(o) = wrk(o) + ubox(uo + int(io - 1, 8) * ub3 + int(ilma, 8)) * zk
+      end do
+    end do
+
+    ix = v2j(vi * 3 + 1)
+    iy = v2j(vi * 3 + 2)
+    iz = v2j(vi * 3 + 3)
+    do o = 1, zphase2_norb
+      io = io0 + o
+      if (io <= nio) then
+        off = int(ix - lb1, 8) + int(iy - lb2, 8) * s2 + int(iz - lb3, 8) * s3 &
+            + int(isp - 1, 8) * s4 + int(io - 1, 8) * s5 &
+            + int(ik - lb6, 8) * s6 + int(im - lb7, 8) * s7
+        htpsi(off + 1) = htpsi(off + 1) + wrk(o)
+      end if
+    end do
+  end subroutine zphase2_cuda_d
+#endif
 
 subroutine dpseudo(tpsi,htpsi,info,nspin,ppg)
   use structures
@@ -226,41 +348,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   real(8) :: wrk_r
 #endif
   complex(8) :: IMAGINARY_UNIT = (0, 1)
-#if defined(USE_OPENACC) && defined(USE_CUDA)
-  integer :: n,natom
-  interface
-    subroutine zpseudo_cuda(htpsi_zwf,n,im_s,im_e,ik_s,ik_e,io_s,io_e,Nspin,Nlma,ppg_nps,natom,mg_is_array_1,mg_ie_array_1,mg_is_array_2,mg_ie_array_2,mg_is_array_3,mg_ie_array_3,ppg_ia_tbl,ppg_mps,ppg_jxyz,ppg_zekr_uV,ppg_rinv_uvu,tpsi_zwf) bind(c)
-      import
-      ! Input integer
-      integer(c_int), intent(in), value :: n
-      integer(c_int), intent(in), value :: im_s
-      integer(c_int), intent(in), value :: im_e
-      integer(c_int), intent(in), value :: ik_s
-      integer(c_int), intent(in), value :: ik_e
-      integer(c_int), intent(in), value :: io_s
-      integer(c_int), intent(in), value :: io_e
-      integer(c_int), intent(in), value :: Nspin
-      integer(c_int), intent(in), value :: Nlma
-      integer(c_int), intent(in), value :: ppg_nps
-      integer(c_int), intent(in), value :: natom
-      integer(c_int), intent(in), value :: mg_is_array_1
-      integer(c_int), intent(in), value :: mg_ie_array_1
-      integer(c_int), intent(in), value :: mg_is_array_2
-      integer(c_int), intent(in), value :: mg_ie_array_2
-      integer(c_int), intent(in), value :: mg_is_array_3
-      integer(c_int), intent(in), value :: mg_ie_array_3
-      ! Output
-      complex(c_double_complex), intent(inout) :: htpsi_zwf(mg_is_array_1:mg_ie_array_1, mg_is_array_2:mg_ie_array_2, mg_is_array_2:mg_ie_array_3, Nspin, io_e:io_s, ik_s:ik_e, im_s:im_e)
-      ! Input
-      integer(c_int)           , intent(in) :: ppg_ia_tbl(n * natom)
-      integer(c_int)           , intent(in) :: ppg_mps(natom)
-      integer(c_int)           , intent(in) :: ppg_jxyz(3, ppg_nps, natom)
-      complex(c_double_complex), intent(in) :: ppg_zekr_uV(ppg_nps, ppg_Nlma, ik_s:ik_e)
-      real(c_double)           , intent(in) :: ppg_rinv_uvu(n * natom)
-      complex(c_double_complex), intent(in) :: tpsi_zwf(mg_is_array_1:mg_ie_array_1, mg_is_array_2:mg_ie_array_2,mg_is_array_2:mg_ie_array_3, Nspin, io_e:io_s, ik_s:ik_e, im_s:im_e)
-    end subroutine zpseudo_cuda
-  end interface
-#endif
 #if defined(USE_OPENACC) && defined(USE_GEMM)
   ! Batched-GEMM reformulation of phase 1 (projection); phase 2 (back-projection) is unchanged below.
   integer, parameter :: gemm_io_block = 64
@@ -274,6 +361,18 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   integer :: gemm_ia, gemm_p, gemm_ilma, gemm_j, gemm_natom
   integer :: gemm_io_blk_s, gemm_this_block, gemm_io_local, gemm_stat
   integer :: mpi_ierr
+#endif
+#if defined(USE_OPENACC)
+  integer :: ioq, o, nioq
+  complex(8) :: zk, wrkb(zphase2_norb)
+#endif
+#if defined(USE_OPENACC) && defined(USE_GEMM) && defined(USE_CUDA)
+  integer :: zwf_nelem, zgather_grid
+  integer(8) :: zwf_s2, zwf_s3, zwf_s4, zwf_s5, zwf_s6, zwf_s7
+  integer(8) :: pk_p2, pk_p3
+  integer :: ph2_nioq, ph2_nik, ph2_nwork, ph2_grid
+  integer(8) :: ph2_ub2, ph2_ub3, ph2_ub4, ph2_ub5, ph2_z2, ph2_z3
+  integer(8) :: hs_s2, hs_s3, hs_s4, hs_s5, hs_s6, hs_s7
 #endif
 
 #ifdef FORTRAN_COMPILER_HAS_2MB_ALIGNED_ALLOCATION
@@ -396,6 +495,24 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     do while (gemm_io_blk_s <= io_e)
       gemm_this_block = min(gemm_io_block, io_e - gemm_io_blk_s + 1)
 
+#if defined(USE_CUDA)
+      zwf_nelem = gemm_natom * gemm_this_block * ppg%nps
+      zwf_s2 = int(size(tpsi%zwf, 1), 8)
+      zwf_s3 = zwf_s2 * size(tpsi%zwf, 2)
+      zwf_s4 = zwf_s3 * size(tpsi%zwf, 3)
+      zwf_s5 = zwf_s4 * size(tpsi%zwf, 4)
+      zwf_s6 = zwf_s5 * size(tpsi%zwf, 5)
+      zwf_s7 = zwf_s6 * size(tpsi%zwf, 6)
+      pk_p2  = int(size(gemm_wf_packed, 1), 8)
+      pk_p3  = pk_p2 * size(gemm_wf_packed, 2)
+      zgather_grid = ceiling(dble(zwf_nelem) / 128d0)
+      call zgather_cuda<<<zgather_grid, 128, 0, acc_get_cuda_stream(acc_async_sync)>>>( &
+          ppg%jxyz, ppg%mps, tpsi%zwf, gemm_wf_packed, zwf_nelem, ppg%nps, &
+          gemm_this_block, gemm_io_blk_s, ik, im, ispin, &
+          lbound(tpsi%zwf,1), lbound(tpsi%zwf,2), lbound(tpsi%zwf,3), &
+          lbound(tpsi%zwf,5), lbound(tpsi%zwf,6), lbound(tpsi%zwf,7), &
+          zwf_s2, zwf_s3, zwf_s4, zwf_s5, zwf_s6, zwf_s7, pk_p2, pk_p3)
+#else
 !$acc parallel loop collapse(3) present(tpsi,ppg,gemm_wf_packed)
       do gemm_ia = 1, gemm_natom
       do gemm_io_local = 1, gemm_this_block
@@ -408,6 +525,7 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
       end do
       end do
       end do
+#endif
 
 !$acc host_data use_device(gemm_zekr_packed, gemm_wf_packed, gemm_out_packed)
       gemm_stat = cublasZgemmStridedBatched(gemm_handle, CUBLAS_OP_C, CUBLAS_OP_N, &
@@ -508,34 +626,77 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   end if
 
   ! Phase 2 (back-projection): v2j-based scatter, no atomics.
+#if defined(USE_CUDA)
+      ph2_nioq = (io_e - io_s + 1 + zphase2_norb - 1) / zphase2_norb
+      ph2_nik = ik_e - ik_s + 1
+      ph2_nwork = (im_e - im_s + 1) * ph2_nik * ph2_nioq * Nspin * ppg%max_vi
+      ph2_ub2 = int(size(uVpsibox_acc, 1), 8)
+      ph2_ub3 = ph2_ub2 * size(uVpsibox_acc, 2)
+      ph2_ub4 = ph2_ub3 * size(uVpsibox_acc, 3)
+      ph2_ub5 = ph2_ub4 * size(uVpsibox_acc, 4)
+      ph2_z2 = int(size(ppg%zekr_uV, 1), 8)
+      ph2_z3 = ph2_z2 * size(ppg%zekr_uV, 2)
+      hs_s2 = int(size(htpsi%zwf, 1), 8)
+      hs_s3 = hs_s2 * size(htpsi%zwf, 2)
+      hs_s4 = hs_s3 * size(htpsi%zwf, 3)
+      hs_s5 = hs_s4 * size(htpsi%zwf, 4)
+      hs_s6 = hs_s5 * size(htpsi%zwf, 5)
+      hs_s7 = hs_s6 * size(htpsi%zwf, 6)
+      ph2_grid = ceiling(dble(ph2_nwork) / 128d0)
+      call zphase2_cuda_d<<<ph2_grid, 128, 0, acc_get_cuda_stream(acc_async_sync)>>>( &
+          ppg%v2nlma, ppg%k2ilma, ppg%k2j, ppg%v2j, uVpsibox_acc, ppg%zekr_uV, htpsi%zwf, &
+          ph2_nwork, ppg%max_vi, Nspin, ph2_nioq, io_e - io_s + 1, ph2_nik, ik_s, im_s, &
+          ph2_ub2, ph2_ub3, ph2_ub4, ph2_ub5, ph2_z2, ph2_z3, lbound(ppg%zekr_uV, 3), &
+          lbound(htpsi%zwf,1), lbound(htpsi%zwf,2), lbound(htpsi%zwf,3), &
+          lbound(htpsi%zwf,5), lbound(htpsi%zwf,6), lbound(htpsi%zwf,7), &
+          hs_s2, hs_s3, hs_s4, hs_s5, hs_s6, hs_s7)
+#else
+  ! k2ilma/k2j/zekr_uV do not depend on the orbital, so one thread handles
+  ! zphase2_norb of them: one index load feeds that many independent FMA chains.
+  ! Accumulation order per orbital is unchanged, so results are unaffected.
+  nioq = (io_e - io_s + zphase2_norb) / zphase2_norb
 !$acc kernels present(ppg,tpsi,htpsi,uVpsibox_acc)
-!$acc loop collapse(5) independent private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
+!$acc loop collapse(5) independent private(ilma,my_nlma,k,j,ix,iy,iz,io,o,zk,wrkb)
   do im=im_s,im_e
   do ik=ik_s,ik_e
-  do io=io_s,io_e
+  do ioq=0,nioq-1
   do ispin=1,Nspin
     do vi=0,ppg%max_vi-1
       my_nlma = ppg%v2nlma(vi)
       if (my_nlma < 1) cycle
 
-      wrk = 0d0
+!$acc loop seq
+      do o=1,zphase2_norb
+        wrkb(o) = (0d0,0d0)
+      end do
 !$acc loop seq
       do k=1,my_nlma
         ilma = ppg%k2ilma(vi,k)
         j    = ppg%k2j(vi,k)
-        wrk  = wrk + uVpsibox_acc(ilma,ispin,io,ik,im) * ppg%zekr_uV(j,ilma,ik)
+        zk   = ppg%zekr_uV(j,ilma,ik)
+!$acc loop seq
+        do o=1,zphase2_norb
+          io = io_s + ioq*zphase2_norb + o - 1
+          if (io <= io_e) wrkb(o) = wrkb(o) + uVpsibox_acc(ilma,ispin,io,ik,im) * zk
+        end do
       end do
 
       ix = ppg%v2j(1,vi)
       iy = ppg%v2j(2,vi)
       iz = ppg%v2j(3,vi)
-      htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrk
+!$acc loop seq
+      do o=1,zphase2_norb
+        io = io_s + ioq*zphase2_norb + o - 1
+        if (io <= io_e) htpsi%zwf(ix,iy,iz,ispin,io,ik,im) = &
+                        htpsi%zwf(ix,iy,iz,ispin,io,ik,im) + wrkb(o)
+      end do
     end do
   end do
   end do
   end do
   end do
 !$acc end kernels
+#endif
 
 #else
   if(info%if_divide_rspace) then
@@ -670,28 +831,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
 
   else
 #ifdef USE_OPENACC
-#ifdef USE_CUDA
-    natom=size(ppg%mps)
-    n=size(ppg%rinv_uvu)/natom
-    call zpseudo_cuda(htpsi%zwf,&
-        n,&
-        im_s,im_e,&
-        ik_s,ik_e,&
-        io_s,io_e,&
-        Nspin,&
-        Nlma,&
-        ppg%nps,&
-        natom,&
-        lbound(htpsi%zwf,1),ubound(htpsi%zwf,1),&
-        lbound(htpsi%zwf,2),ubound(htpsi%zwf,2),&
-        lbound(htpsi%zwf,3),ubound(htpsi%zwf,3),&
-        ppg%ia_tbl,&
-        ppg%mps,&
-        ppg%jxyz,&
-        ppg%zekr_uV,&
-        ppg%rinv_uvu,&
-        tpsi%zwf)
-#else
 !$acc kernels present(ppg,tpsi,htpsi,uVpsibox_acc)
 !$acc loop collapse(5) independent gang private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
     do im=im_s,im_e
@@ -743,7 +882,6 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
     end do
     end do
 !$acc end kernels
-#endif
 #else
 !$omp parallel do collapse(4) &
 !$omp             private(im,ik,io,ispin,ilma,ia,uVpsi,j,ix,iy,iz,wrk)

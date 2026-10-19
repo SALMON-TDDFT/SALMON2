@@ -35,12 +35,6 @@ else ()
           cublas_wrapper.f90
           cusolver_wrapper.f90
           )
-    if(USE_CUDA)
-        set(SOURCES ${SOURCES}
-            zpseudo.cu
-            stencil_current.cu
-            )
-    endif()
   endif()
 endif ()
 
