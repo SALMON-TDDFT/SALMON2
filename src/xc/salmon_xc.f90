@@ -23,10 +23,6 @@
 
 module salmon_xc
   use structures, only: s_xc_functional, s_xc_operator_payload
-#ifdef USE_HSE
-  use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
-  use hse_semilocal, only: hse_semilocal_evaluate
-#endif
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
@@ -78,6 +74,9 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
+#ifdef USE_HSE
+    use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
+#endif
     use communication, only: comm_summation
     use structures
     use sendrecv_grid, only: update_overlap_real8
@@ -1245,7 +1244,9 @@ contains
 
 #ifdef USE_HSE
     subroutine exec_hse_semilocal()
+      use hse_semilocal, only: hse_semilocal_evaluate
       use salmon_global, only: hse_omega
+      implicit none
       real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
       integer :: status,j
       if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
