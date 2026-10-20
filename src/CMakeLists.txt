@@ -24,6 +24,9 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/analysis)
 
 # Executable binary
 add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
+if(USE_FJMPI)
+  target_compile_definitions(${TARGET_NAME} PRIVATE USE_FJMPI)
+endif()
 target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
 if(EXTERNAL_PROJECT_TARGETS)
   add_dependencies(${TARGET_NAME} ${EXTERNAL_PROJECT_TARGETS})

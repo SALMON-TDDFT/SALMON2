@@ -15,6 +15,20 @@ For more information, please visit our website.
 
 http://salmon-tddft.jp/
 
+## Fujitsu MPI topology mapping
+
+The CMake option `USE_FJMPI` controls the Fujitsu MPI topology routines used for
+Tofu network-oriented process mapping. It defaults to `ON` when MPI is enabled
+and the Fujitsu compiler is detected, and to `OFF` otherwise.
+
+When using the Fujitsu compiler with another MPI implementation, pass
+`--disable-fjmpi` to `configure.py` (or `-DUSE_FJMPI=OFF` to CMake) to use the
+generic process mapping. `--enable-fjmpi` (or `-DUSE_FJMPI=ON`) requires
+`USE_MPI=ON` and an MPI installation providing the `mpi_ext` Fortran module and
+`FJMPI_Topology_*` routines. For builds using the GNU makefiles, define
+`USE_FJMPI` in the Fortran preprocessor flags only when these routines are
+available.
+
 ## License
 
 SALMON is available under Apache License version 2.0.
