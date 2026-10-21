@@ -461,6 +461,7 @@ contains
 
   subroutine gauge_jacobi_round(gauge,links,desc,weights,tolerance,round,status,times,accepted,row_comm,col_comm)
     use mpi
+!$  use omp_lib,only:omp_get_num_threads
     type(s_exx_gauge),intent(inout) :: gauge
     complex(8),intent(inout) :: links(:,:,:)
     integer,intent(in) :: desc(9),round
@@ -469,7 +470,7 @@ contains
     real(8),intent(out) :: times(4)
     integer(kind=8),intent(out) :: accepted
     integer,intent(in),optional :: row_comm,col_comm
-    integer :: n,m,nr,nc,nprow,npcol,myrow,mycol,rank,np,cr,cc,e,k,i,j,a,b,si,sj,istat,l
+    integer :: n,m,nr,nc,nprow,npcol,myrow,mycol,rank,np,cr,cc,e,k,i,j,a,b,si,sj,istat,l,team
     integer,allocatable :: mate(:),slot(:),sc(:),rc(:),sd(:),rd(:)
     complex(8),allocatable :: local_block(:,:,:,:),block(:,:,:,:),send(:),recv(:)
     real(8),allocatable :: local_rot(:,:),rot(:,:)
@@ -507,8 +508,10 @@ contains
     status=abs(istat);call comm_get_max(status,gauge%comm)
     if(status/=0)goto 900
     call jacobi_matching(n,round,mate,slot)
-    t=MPI_Wtime();local_block=0d0
+    t=MPI_Wtime();local_block=0d0;team=1
+    !$omp parallel do default(shared) private(j,b,k,sj,i,a,si) reduction(max:team) schedule(static)
     do j=1,nc
+!$    team=max(team,omp_get_num_threads())
       b=gauge%cols(j);if(b<1)cycle
       k=slot(b);if(k==0)cycle
       sj=merge(1,2,b<mate(b))
@@ -519,15 +522,19 @@ contains
         local_block(si,sj,:,k)=links(i,j,:)
       enddo
     enddo
+    !$omp end parallel do
+    if(rank==0.and.round==1)print *,"MLWF_JACOBI_THREADS",team
     call MPI_Allreduce(local_block,block,size(block),MPI_DOUBLE_COMPLEX,MPI_SUM,gauge%comm,e)
     call jacobi_mpi_fail_stop(e,gauge%comm)
     status=abs(e);call comm_get_max(status,gauge%comm)
     if(status/=0)goto 900
     times(1)=MPI_Wtime()-t;t=MPI_Wtime();local_rot=0d0
+    !$omp parallel do default(shared) private(k) schedule(static)
     do k=rank+1,m/2,np
       call jacobi_rotation(block(:,:,:,k),weights,n,tolerance,local_rot(:,k))
       if(sqrt(sum(local_rot(2:3,k)**2))<1d-15)local_rot(:3,k)=[1d0,0d0,0d0]
     enddo
+    !$omp end parallel do
     call MPI_Allreduce(local_rot,rot,size(rot),MPI_DOUBLE_PRECISION,MPI_SUM,gauge%comm,e)
     call jacobi_mpi_fail_stop(e,gauge%comm)
     status=abs(e)
@@ -568,7 +575,10 @@ contains
     end function
     subroutine exchange(axis)
       integer,intent(in) :: axis
-      integer :: peers,coord,comm,stride,ng,ns,d,g,src,dst,idx,ll,v,ii,jj,pos
+      integer :: peers,coord,comm,stride,ng,ns,d,g,src,dst,idx,ll,v,ii,jj,pos,kk
+      integer :: pack_offset(n),unpack_offset(n)
+      real(8) :: c_local
+      complex(8) :: s_local,f_local
       peers=npcol;coord=mycol;comm=cr;stride=nr*7
       if(axis==2)then;peers=nprow;coord=myrow;comm=cc;stride=nc*6;endif
       sc=0;rc=0;sd=0;rd=0
@@ -585,11 +595,26 @@ contains
       if(sum(sc(:peers-1))>size(send).or.sum(rc(:peers-1))>size(recv))status=1
       call comm_get_max(status,gauge%comm)
       if(status/=0)return
-      pos=0
+      pack_offset=-1;unpack_offset=-1;pos=0
       do d=0,peers-1
         do g=1,n
           if(.not.active(g))cycle
           if(owner(g,peers)/=d.or.owner(mate(g),peers)/=coord)cycle
+          pack_offset(g)=pos;pos=pos+stride
+        enddo
+      enddo
+      pos=0
+      do d=0,peers-1
+        do g=1,n
+          if(.not.active(g))cycle
+          if(owner(g,peers)/=coord.or.owner(mate(g),peers)/=d)cycle
+          unpack_offset(g)=pos;pos=pos+stride
+        enddo
+      enddo
+      !$omp parallel do default(shared) private(g,idx,ll,ii,jj,pos) schedule(static)
+      do g=1,n
+          if(pack_offset(g)<0)cycle
+          pos=pack_offset(g)
           idx=index_local(mate(g),peers)
           if(axis==1)then
             do ll=1,7;do ii=1,nr
@@ -602,35 +627,34 @@ contains
               pos=pos+1;send(pos)=links(idx,jj,ll)
             enddo;enddo
           endif
-        enddo
       enddo
+      !$omp end parallel do
       call MPI_Alltoallv(send,sc(:peers-1),sd(:peers-1),MPI_DOUBLE_COMPLEX, &
         recv,rc(:peers-1),rd(:peers-1),MPI_DOUBLE_COMPLEX,comm,e)
       call jacobi_mpi_fail_stop(e,gauge%comm)
       status=abs(e);call comm_get_max(status,gauge%comm)
       if(status/=0)return
-      pos=0
-      do d=0,peers-1
-        do g=1,n
-          if(.not.active(g))cycle
-          if(owner(g,peers)/=coord.or.owner(mate(g),peers)/=d)cycle
-          idx=index_local(g,peers);k=slot(g);cosine=rot(1,k)
-          sine=cmplx(rot(2,k),rot(3,k),8)
+      !$omp parallel do default(shared) private(g,idx,kk,c_local,s_local,f_local,ll,ii,jj,pos) schedule(static)
+      do g=1,n
+          if(unpack_offset(g)<0)cycle
+          pos=unpack_offset(g)
+          idx=index_local(g,peers);kk=slot(g);c_local=rot(1,kk)
+          s_local=cmplx(rot(2,kk),rot(3,kk),8)
           if(axis==1)then
-            factor=-conjg(sine);if(g<mate(g))factor=sine
+            f_local=-conjg(s_local);if(g<mate(g))f_local=s_local
             do ll=1,7;do ii=1,nr
               pos=pos+1
-              if(ll<=6)then;links(ii,idx,ll)=cosine*links(ii,idx,ll)+factor*recv(pos)
-              else;gauge%matrix(ii,idx)=cosine*gauge%matrix(ii,idx)+factor*recv(pos);endif
+              if(ll<=6)then;links(ii,idx,ll)=c_local*links(ii,idx,ll)+f_local*recv(pos)
+              else;gauge%matrix(ii,idx)=c_local*gauge%matrix(ii,idx)+f_local*recv(pos);endif
             enddo;enddo
           else
-            factor=-sine;if(g<mate(g))factor=conjg(sine)
+            f_local=-s_local;if(g<mate(g))f_local=conjg(s_local)
             do ll=1,6;do jj=1,nc
-              pos=pos+1;links(idx,jj,ll)=cosine*links(idx,jj,ll)+factor*recv(pos)
+              pos=pos+1;links(idx,jj,ll)=c_local*links(idx,jj,ll)+f_local*recv(pos)
             enddo;enddo
           endif
-        enddo
       enddo
+      !$omp end parallel do
     end subroutine
   end subroutine
 
@@ -706,7 +730,7 @@ contains
     call MPI_Comm_free(cc,e);call jacobi_mpi_fail_stop(e,gauge%comm)
   end subroutine
 
-  subroutine jacobi_rotation(block,weights,n,tolerance,rotation)
+  recursive subroutine jacobi_rotation(block,weights,n,tolerance,rotation)
     ! One rank chooses the angle so all peers follow the same collective path.
     implicit none
     complex(8),intent(in) :: block(2,2,6)
