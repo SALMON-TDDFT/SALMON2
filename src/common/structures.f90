@@ -464,8 +464,8 @@ module structures
   type s_unfold
     type(s_unfold_houston) :: houston
     ! phi_houston(N1,N2,N3,no_work,isk_s:isk_e): starting vectors of the eigenstate solver of the Houston basis on the grid of the
-    ! reference cell, for the reference k points of the k group. Only the process with id_o == 0 of the orbital communicator, which
-    ! solves, has them allocated.
+    ! reference cell, for the reference k points of the k group. Every process of the k group has them; for each reference k point
+    ! only the vectors of the process which solves it (id_o = mod(isk-isk_s,isize_o)) are used.
     complex(8),allocatable :: phi_houston(:,:,:,:,:)
     complex(8),allocatable :: psi_ref(:,:,:,:,:,:,:), psi_refG(:,:,:,:,:,:,:)
     ! vec_hrsk/nhrsk: reference-to-super-reference hat-kappa offset (note's

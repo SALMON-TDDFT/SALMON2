@@ -1620,8 +1620,9 @@ contains
 !     Every process holds it (it is small).
 !   - the starting vectors of the eigenstate solver for each reference k point of the k group: the no_ref states of
 !     reference/wfn.bin and unfold_nstate_buffer more vectors (buffer states), which are random (a fixed sequence for each
-!     reference k point and band, so that the vectors do not depend on the number of the processes). Only the process with
-!     id_o == 0 of the orbital communicator holds them: that is the process which solves.
+!     reference k point and band, so that the vectors do not depend on the number of the processes). Every process of the k group
+!     holds them (they are small); the reference k point isk is solved by the process with id_o = mod(isk-isk_s,info%isize_o) of
+!     the orbital communicator, and only the starting vectors of that process are used.
 ! The parameters of the solver are not stored: they are no_ref, unfold_nstate_buffer, unfold_threshold_projection, ncg and nscf
 ! (salmon_global).
 ! The basis is updated at each analysis step by update_dm_unfold_houston.
@@ -1666,32 +1667,30 @@ contains
 
     isk_s = (info%ik_s-1) * unfold%nhrsk + 1
     isk_e = info%ik_e * unfold%nhrsk
-    if (info%id_o == 0) then
-      allocate( unfold%phi_houston(ie_ref(1),ie_ref(2),ie_ref(3),no_work,isk_s:isk_e) )
-      do isk = isk_s, isk_e
-        do io = 1, no_ref
-          unfold%phi_houston(:,:,:,io,isk) = unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,io,isk,1)
+    allocate( unfold%phi_houston(ie_ref(1),ie_ref(2),ie_ref(3),no_work,isk_s:isk_e) )
+    do isk = isk_s, isk_e
+      do io = 1, no_ref
+        unfold%phi_houston(:,:,:,io,isk) = unfold%psi_ref(1:ie_ref(1),1:ie_ref(2),1:ie_ref(3),1,io,isk,1)
+      end do
+      do io = no_ref+1, no_work
+        ! Park-Miller generator: the sequence depends only on isk and io
+        iseed = mod(int(isk,8)*7919_8 + int(io,8)*104729_8 + 12345_8, 2147483646_8) + 1_8
+        do i = 1, 10
+          iseed = mod(16807_8*iseed, 2147483647_8)
         end do
-        do io = no_ref+1, no_work
-          ! Park-Miller generator: the sequence depends only on isk and io
-          iseed = mod(int(isk,8)*7919_8 + int(io,8)*104729_8 + 12345_8, 2147483646_8) + 1_8
-          do i = 1, 10
-            iseed = mod(16807_8*iseed, 2147483647_8)
-          end do
-          do ir3 = 1, ie_ref(3)
-          do ir2 = 1, ie_ref(2)
-          do ir1 = 1, ie_ref(1)
-            iseed = mod(16807_8*iseed, 2147483647_8)
-            xr = dble(iseed)/2147483647d0 - 0.5d0
-            iseed = mod(16807_8*iseed, 2147483647_8)
-            xi = dble(iseed)/2147483647d0 - 0.5d0
-            unfold%phi_houston(ir1,ir2,ir3,io,isk) = cmplx(xr,xi,kind=8)
-          end do
-          end do
-          end do
+        do ir3 = 1, ie_ref(3)
+        do ir2 = 1, ie_ref(2)
+        do ir1 = 1, ie_ref(1)
+          iseed = mod(16807_8*iseed, 2147483647_8)
+          xr = dble(iseed)/2147483647d0 - 0.5d0
+          iseed = mod(16807_8*iseed, 2147483647_8)
+          xi = dble(iseed)/2147483647d0 - 0.5d0
+          unfold%phi_houston(ir1,ir2,ir3,io,isk) = cmplx(xr,xi,kind=8)
+        end do
+        end do
         end do
       end do
-    end if
+    end do
 
     if (comm_is_root(nproc_id_global)) then
       write(*,"(A,I0,A,I0)") '  no_work = ', no_work, ',  no_conv = ', no_ref
@@ -1708,8 +1707,9 @@ contains
 ! ground state at the Bloch vector q = kappa_ref(isk) + A(t) (the vector potential of the analysis, vec_Ac_eval). The potential of
 ! H(q) is the fixed one of the ground state; A enters only through q. Replaced together (they are never mixed with the old ones):
 !   psi_ref, psi_refG, esp_ref, upu_ref, u_rVnl_Vnlr_u_ref
-! The eigenstates are calculated by the process with id_o == 0 of the orbital communicator, for the reference k points of its k
-! group, starting from the vectors of the last call (unfold%phi_houston), and sent to the other processes of the orbital
+! The eigenstates of the reference k points of the k group are calculated each by one process of the orbital communicator
+! (id_o = mod(isk-isk_s,info%isize_o), so that the reference k points are shared by the processes and solved at the same time),
+! starting from the vectors of the last call (unfold%phi_houston), and then sent to the other processes of the orbital
 ! communicator. psi_refG is calculated by every process as in init_dm_unfold, esp_ref is made complete again as in Phase B.
 ! The convergence is judged by the residual of the lowest no_ref states (unfold_threshold_projection). The calculation goes on
 ! when it is not reached: one line gives the number of the reference k points which are not converged and the maximum and the
@@ -1734,7 +1734,7 @@ contains
     type(s_parallel_info), intent(in)    :: info
     type(s_unfold),        intent(inout) :: unfold
     real(8),               intent(in)    :: kappa_ref(3,unfold%nsk), vec_Ac_eval(3)
-    integer :: n1, n2, n3, no_work, nsweep_max, isk_s, isk_e, isk, io, nsweep_done, n_nonconv_l, n_nonconv
+    integer :: n1, n2, n3, no_work, nsweep_max, isk_s, isk_e, isk, io, nsweep_done, n_nonconv_l, n_nonconv, iroot
     real(8) :: q(3), orth, omega_ref, rband, rall_l, rall, rmax_l, rmax, rmin_l, rmin
     logical :: converged
     integer :: n_gap_l, n_gap
@@ -1763,35 +1763,50 @@ contains
     rall_l = 0d0 ; rmax_l = 0d0 ; rmin_l = huge(1d0)
     n_gap_l = 0 ; gap_min_l = huge(1d0)
 
+    ! (1) Every process solves its own reference k points (id_o = mod(isk-isk_s,info%isize_o)), without communication so that the
+    !     processes of the orbital communicator work at the same time. The results are kept in unfold%phi_houston (the states),
+    !     unfold%upu_ref, unfold%u_rVnl_Vnlr_u_ref and esp_l.
     do isk = isk_s, isk_e
-      if (info%id_o == 0) then
-        q(1:3) = kappa_ref(1:3,isk) + vec_Ac_eval(1:3)
-        call solve_dm_unfold_reference(unfold%houston,q,no_work,no_ref,unfold%phi_houston(:,:,:,:,isk), &
-                                     & unfold_threshold_projection,nsweep_max,ncg,eps,res,orth,nsweep_done,converged)
-        nsw_sum_l = nsw_sum_l + nsweep_done
-        nsw_cnt_l = nsw_cnt_l + 1
-        nsw_max_l = max(nsw_max_l, dble(nsweep_done))
-        call calc_tm_dm_unfold_reference(unfold%houston,q,no_ref,unfold%phi_houston(:,:,:,1:no_ref,isk),upu_buf,urv_buf)
-        psi_buf(:,:,:,1:no_ref) = unfold%phi_houston(:,:,:,1:no_ref,isk)
-        rband = maxval(res(1:no_ref))
-        rall_l = max(rall_l, rband)
-        if (.not. converged) then
-          n_nonconv_l = n_nonconv_l + 1
-          rmax_l = max(rmax_l, rband)
-          rmin_l = min(rmin_l, rband)
-        end if
-        if (no_work > no_ref) then
-          gap = eps(no_ref+1) - eps(no_ref)
-          if (gap < gap_factor*unfold_threshold_projection) then
-            n_gap_l = n_gap_l + 1
-            gap_min_l = min(gap_min_l, gap)
-          end if
+      if (info%id_o /= mod(isk-isk_s, info%isize_o)) cycle
+      q(1:3) = kappa_ref(1:3,isk) + vec_Ac_eval(1:3)
+      call solve_dm_unfold_reference(unfold%houston,q,no_work,no_ref,unfold%phi_houston(:,:,:,:,isk), &
+                                   & unfold_threshold_projection,nsweep_max,ncg,eps,res,orth,nsweep_done,converged)
+      nsw_sum_l = nsw_sum_l + nsweep_done
+      nsw_cnt_l = nsw_cnt_l + 1
+      nsw_max_l = max(nsw_max_l, dble(nsweep_done))
+      call calc_tm_dm_unfold_reference(unfold%houston,q,no_ref,unfold%phi_houston(:,:,:,1:no_ref,isk), &
+                                     & unfold%upu_ref(:,:,:,isk),unfold%u_rVnl_Vnlr_u_ref(:,:,:,isk))
+      esp_l(1:no_ref,isk) = eps(1:no_ref)
+      rband = maxval(res(1:no_ref))
+      rall_l = max(rall_l, rband)
+      if (.not. converged) then
+        n_nonconv_l = n_nonconv_l + 1
+        rmax_l = max(rmax_l, rband)
+        rmin_l = min(rmin_l, rband)
+      end if
+      if (no_work > no_ref) then
+        gap = eps(no_ref+1) - eps(no_ref)
+        if (gap < gap_factor*unfold_threshold_projection) then
+          n_gap_l = n_gap_l + 1
+          gap_min_l = min(gap_min_l, gap)
         end if
       end if
-      call comm_bcast(psi_buf, info%icomm_o)
-      call comm_bcast(upu_buf, info%icomm_o)
-      call comm_bcast(urv_buf, info%icomm_o)
-      call comm_bcast(eps, info%icomm_o)
+    end do
+
+    ! (2) The results are sent from the process which solved each reference k point to the other processes of the orbital
+    !     communicator.
+    do isk = isk_s, isk_e
+      iroot = mod(isk-isk_s, info%isize_o)
+      if (info%id_o == iroot) then
+        psi_buf(:,:,:,1:no_ref) = unfold%phi_houston(:,:,:,1:no_ref,isk)
+        upu_buf = unfold%upu_ref(:,:,:,isk)
+        urv_buf = unfold%u_rVnl_Vnlr_u_ref(:,:,:,isk)
+        eps(1:no_ref) = esp_l(1:no_ref,isk)
+      end if
+      call comm_bcast(psi_buf, info%icomm_o, iroot)
+      call comm_bcast(upu_buf, info%icomm_o, iroot)
+      call comm_bcast(urv_buf, info%icomm_o, iroot)
+      call comm_bcast(eps, info%icomm_o, iroot)
       unfold%psi_ref(1:n1,1:n2,1:n3,1,1:no_ref,isk,1) = psi_buf(:,:,:,1:no_ref)
       unfold%upu_ref(:,:,:,isk) = upu_buf
       unfold%u_rVnl_Vnlr_u_ref(:,:,:,isk) = urv_buf
@@ -1809,7 +1824,8 @@ contains
     end do
     end do
 
-    ! one line about the convergence and, if needed, one about the gap at no_ref (id_o /= 0: nothing)
+    ! one line about the convergence and, if needed, one about the gap at no_ref
+    ! (a process which solves no reference k point: nothing)
     call comm_summation(n_nonconv_l, n_nonconv, nproc_group_global)
     call comm_summation(n_gap_l, n_gap, nproc_group_global)
     rall_l = -rall_l ; rmax_l = -rmax_l
