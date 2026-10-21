@@ -122,7 +122,7 @@ subroutine grad_k_array_nb2d_dcomplex(nb,nk,b_matrix,  &
     complex(8) :: grad_k_work(3,num_kgrid(1),num_kgrid(2),num_kgrid(3))
     real(8) :: bnmat(4,4)
     real(8) :: nabt(4,3)
-    real(8) :: w
+    complex(8) :: w
 
     do j=-3,num_kgrid(1)+4
         kdx(j) = mod(j+num_kgrid(1)-1,num_kgrid(1))+1
