@@ -1,12 +1,17 @@
 #include "config.h"
 ! Gamma MLWF matrices in unique block-cyclic tiles. Mesh functions stay local.
 module exx_distributed_gauge
+  use memory_trace,only:trace_memory
+  use small_symmetric3,only:symmetric3_eigen
   use communication, only: comm_get_groupinfo,comm_get_max,comm_summation,comm_bcast
   use exx_orbitals, only: orbital_layout,orbital_check
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   public :: s_exx_gauge,gauge_tiles_clear,gauge_tiles_refresh,gauge_tiles_rotate
+#ifdef USE_SCALAPACK
+  public :: jacobi_matching,gauge_jacobi_round,jacobi_rotation
+#endif
   type s_exx_gauge
     integer :: n=0,comm=0
     integer,allocatable :: rows(:),cols(:)
@@ -60,6 +65,7 @@ contains
     logical :: accepted,initialized
     status=1;retained=.false.;minimum=0d0
     spread=-1d0;gradient=-1d0;iterations=0;loc_status=2
+    call trace_memory('gauge.enter')
     call orbital_layout(size(psi,2),comm_r,comm_o,counts,first,bad)
     if(bad/=0.or.sum(counts)<1)return
     n=sum(counts);initialized=allocated(gauge%matrix)
@@ -85,6 +91,7 @@ contains
       call blacs_gridexit(context)
       return
     endif
+    call trace_memory('gauge.setup.done')
     nr=size(gauge%rows);nc=size(gauge%cols)
     if(initialized)then
       allocate(a(nr,nc))
@@ -101,13 +108,21 @@ contains
     accepted=retain.and.seed.and.last_status==0
     if(accepted)transported=gauge%matrix
     if(maxiter>0)then
+      call trace_memory('links.allocate.before')
       allocate(links(nr,nc,6),tmp(nr,nc),a(nr,nc))
+      ! BLACS does not write padding cells on ranks with partial/empty tiles.
+      links=0d0;tmp=0d0;a=0d0
+      call trace_memory('links.allocate.after')
       do axis=1,3
+        call trace_memory('overlap.before',axis)
         call overlap(gauge,psi,psi,dv,comm_o,counts,first,links(:,:,axis),phase(:,axis))
+        call trace_memory('overlap.after',axis)
         call pztranc(n,n,(1d0,0d0),links(:,:,axis),1,1,desc,(0d0,0d0),links(:,:,axis+3),1,1,desc)
       enddo
       if(seed.and.needed)then
+        call trace_memory('seed.before')
         call position_seed(gauge,links,desc,bad)
+        call trace_memory('seed.after')
         if(bad/=0)then
           call blacs_gridexit(context)
           return
@@ -121,7 +136,9 @@ contains
         links(:,:,axis)=a
       enddo
       deallocate(tmp,a)
+      call trace_memory('minimize.before')
       call minimize(gauge,links,desc,b,weights,maxiter,tolerance,spread,gradient,iterations,loc_status)
+      call trace_memory('minimize.after',iterations)
       if(loc_status/=0.and.accepted)then
         gauge%matrix=transported;retained=.true.
       else
@@ -319,9 +336,10 @@ contains
     integer,intent(out) :: status
     complex(8),allocatable :: a(:,:),tmp(:,:),work(:),partial(:),column(:)
     real(8),allocatable :: eigen(:),rwork(:)
+    integer,allocatable :: iwork(:)
     complex(8) :: coefficient,query(1),phase
     real(8) :: rquery(1),cw(3),sw(3)
-    integer :: n,i,j,k,axis,pivot
+    integer :: n,i,j,k,axis,pivot,lwork,lrwork,liwork,iquery(1),nprow,npcol,myrow,mycol
     n=gauge%n;cw=sqrt([2d0,3d0,5d0]);sw=sqrt([7d0,11d0,13d0])
     allocate(a(size(links,1),size(links,2)),tmp(size(links,1),size(links,2)),eigen(n))
     a=0d0;tmp=0d0
@@ -331,11 +349,25 @@ contains
     enddo
     call pztranc(n,n,(1d0,0d0),a,1,1,desc,(0d0,0d0),tmp,1,1,desc)
     a=.5d0*(a+tmp)
-    call pzheev('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc,query,-1,rquery,-1,status)
+    call pzheevd('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc,query,-1,rquery,-1,iquery,-1,status)
     status=abs(status);call comm_get_max(status,gauge%comm)
     if(status/=0)return
-    allocate(work(max(1,int(real(query(1))))),rwork(max(1,int(rquery(1)))))
-    call pzheev('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc,work,size(work),rwork,size(rwork),status)
+    ! PZHEEV's redistribution path corrupts the heap on the failing Fujitsu run.
+    ! Use the independently validated divide-and-conquer driver and retain its
+    ! queried sizes, with the same conservative local workspace floors as LCFO.
+    status=0
+    if(.not.ieee_is_finite(real(query(1),8)).or..not.ieee_is_finite(rquery(1)))status=1
+    if(real(query(1),8)<1d0.or.rquery(1)<1d0.or.iquery(1)<1)status=1
+    if(real(query(1),8)>dble(huge(lwork)-1).or.rquery(1)>dble(huge(lrwork)-1))status=1
+    call comm_get_max(status,gauge%comm)
+    if(status/=0)return
+    lwork=max(1,ceiling(real(query(1),8)))
+    lrwork=max(ceiling(rquery(1)),2*(1+8*n+2*size(a,1)*size(a,2)))
+    call blacs_gridinfo(desc(2),nprow,npcol,myrow,mycol)
+    liwork=max(iquery(1),2+7*n+8*npcol)
+    allocate(work(lwork),rwork(lrwork),iwork(liwork))
+    call pzheevd('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc, &
+      work,lwork,rwork,lrwork,iwork,liwork,status)
     status=abs(status)
     if(.not.finite_matrix(gauge%matrix))status=1
     call comm_get_max(status,gauge%comm)
@@ -411,112 +443,269 @@ contains
     if(.not.ieee_is_finite(gradient).or..not.ieee_is_finite(spread))status=1
   end subroutine
 
+  subroutine jacobi_matching(n,round,mate,slot)
+    integer,intent(in) :: n,round
+    integer,intent(out) :: mate(n),slot(n)
+    integer :: m,k,a,b,ia,ib
+    m=n+mod(n,2);slot=0
+    do k=1,n;mate(k)=k;enddo
+    do k=1,m/2
+      ia=k;ib=m+1-k
+      a=1;b=1
+      if(ia>1)a=2+modulo(ia-2-(round-1),m-1)
+      if(ib>1)b=2+modulo(ib-2-(round-1),m-1)
+      if(a>n.or.b>n)cycle
+      mate(a)=b;mate(b)=a;slot(a)=k;slot(b)=k
+    enddo
+  end subroutine
+
+  subroutine gauge_jacobi_round(gauge,links,desc,weights,tolerance,round,status,times,accepted,row_comm,col_comm)
+    use mpi
+    type(s_exx_gauge),intent(inout) :: gauge
+    complex(8),intent(inout) :: links(:,:,:)
+    integer,intent(in) :: desc(9),round
+    real(8),intent(in) :: weights(6),tolerance
+    integer,intent(out) :: status
+    real(8),intent(out) :: times(4)
+    integer(kind=8),intent(out) :: accepted
+    integer,intent(in),optional :: row_comm,col_comm
+    integer :: n,m,nr,nc,nprow,npcol,myrow,mycol,rank,np,cr,cc,e,k,i,j,a,b,si,sj,istat,l
+    integer,allocatable :: mate(:),slot(:),sc(:),rc(:),sd(:),rd(:)
+    complex(8),allocatable :: local_block(:,:,:,:),block(:,:,:,:),send(:),recv(:)
+    real(8),allocatable :: local_rot(:,:),rot(:,:)
+    real(8) :: t,cosine
+    complex(8) :: sine,factor
+    logical :: own_comms
+    n=gauge%n;m=n+mod(n,2);nr=size(links,1);nc=size(links,2)
+    status=0;times=0;accepted=0;own_comms=.not.present(row_comm)
+    call comm_get_groupinfo(gauge%comm,rank,np)
+    call blacs_gridinfo(desc(2),nprow,npcol,myrow,mycol)
+    if(present(row_comm).neqv.present(col_comm))status=1
+    if(n<1.or.round<1.or.round>m-1.or.size(links,3)/=6)status=1
+    if(any(shape(gauge%matrix)/=[nr,nc]))status=1
+    if(nprow*npcol/=np.or.myrow<0.or.mycol<0.or.desc(5)/=desc(6))status=1
+    if(desc(7)/=0.or.desc(8)/=0)status=1
+    if(.not.all(ieee_is_finite(weights)).or..not.ieee_is_finite(tolerance))status=1
+    if(tolerance<=0d0.or..not.finite_matrix(gauge%matrix))status=1
+    do l=1,size(links,3)
+      if(.not.finite_matrix(links(:,:,l)))status=1
+    enddo
+    call comm_get_max(status,gauge%comm)
+    if(status/=0)return
+    if(own_comms)then
+      call MPI_Comm_split(gauge%comm,myrow,mycol,cr,e)
+      call jacobi_mpi_fail_stop(e,gauge%comm)
+      call MPI_Comm_split(gauge%comm,mycol,myrow,cc,e)
+      call jacobi_mpi_fail_stop(e,gauge%comm)
+    else
+      cr=row_comm;cc=col_comm
+    endif
+    allocate(mate(n),slot(n),local_block(2,2,6,m/2),block(2,2,6,m/2), &
+      local_rot(4,m/2),rot(4,m/2),sc(0:max(nprow,npcol)-1),rc(0:max(nprow,npcol)-1), &
+      sd(0:max(nprow,npcol)-1),rd(0:max(nprow,npcol)-1), &
+      send(max(1,nr*nc*7)),recv(max(1,nr*nc*7)),stat=istat)
+    status=abs(istat);call comm_get_max(status,gauge%comm)
+    if(status/=0)goto 900
+    call jacobi_matching(n,round,mate,slot)
+    t=MPI_Wtime();local_block=0d0
+    do j=1,nc
+      b=gauge%cols(j);if(b<1)cycle
+      k=slot(b);if(k==0)cycle
+      sj=merge(1,2,b<mate(b))
+      do i=1,nr
+        a=gauge%rows(i);if(a<1)cycle
+        if(a/=b.and.a/=mate(b))cycle
+        si=merge(1,2,a<mate(a))
+        local_block(si,sj,:,k)=links(i,j,:)
+      enddo
+    enddo
+    call MPI_Allreduce(local_block,block,size(block),MPI_DOUBLE_COMPLEX,MPI_SUM,gauge%comm,e)
+    call jacobi_mpi_fail_stop(e,gauge%comm)
+    status=abs(e);call comm_get_max(status,gauge%comm)
+    if(status/=0)goto 900
+    times(1)=MPI_Wtime()-t;t=MPI_Wtime();local_rot=0d0
+    do k=rank+1,m/2,np
+      call jacobi_rotation(block(:,:,:,k),weights,n,tolerance,local_rot(:,k))
+      if(sqrt(sum(local_rot(2:3,k)**2))<1d-15)local_rot(:3,k)=[1d0,0d0,0d0]
+    enddo
+    call MPI_Allreduce(local_rot,rot,size(rot),MPI_DOUBLE_PRECISION,MPI_SUM,gauge%comm,e)
+    call jacobi_mpi_fail_stop(e,gauge%comm)
+    status=abs(e)
+    if(any(rot(4,:)/=0d0).or..not.all(ieee_is_finite(rot)))status=1
+    call comm_get_max(status,gauge%comm)
+    if(status/=0)goto 900
+    accepted=int(count(sqrt(sum(rot(2:3,:)**2,dim=1))>=1d-15),8)
+    times(2)=MPI_Wtime()-t;t=MPI_Wtime()
+    call exchange(1)
+    if(status/=0)goto 900
+    times(3)=MPI_Wtime()-t;t=MPI_Wtime()
+    call exchange(2)
+    times(4)=MPI_Wtime()-t
+    if(.not.finite_matrix(gauge%matrix))status=1
+    do l=1,6
+      if(.not.finite_matrix(links(:,:,l)))status=1
+    enddo
+    call comm_get_max(status,gauge%comm)
+900 continue
+    if(own_comms)then
+      call MPI_Comm_free(cr,e);call jacobi_mpi_fail_stop(e,gauge%comm)
+      call MPI_Comm_free(cc,e);call jacobi_mpi_fail_stop(e,gauge%comm)
+    endif
+  contains
+    integer function owner(g,peers)
+      integer,intent(in) :: g,peers
+      owner=mod((g-1)/desc(5),peers)
+    end function
+    integer function index_local(g,peers)
+      integer,intent(in) :: g,peers
+      index_local=((g-1)/(desc(5)*peers))*desc(5)+mod(g-1,desc(5))+1
+    end function
+    logical function active(g)
+      integer,intent(in) :: g
+      active=.false.
+      if(slot(g)==0)return
+      active=abs(cmplx(rot(2,slot(g)),rot(3,slot(g)),8))>=1d-15
+    end function
+    subroutine exchange(axis)
+      integer,intent(in) :: axis
+      integer :: peers,coord,comm,stride,ng,ns,d,g,src,dst,idx,ll,v,ii,jj,pos
+      peers=npcol;coord=mycol;comm=cr;stride=nr*7
+      if(axis==2)then;peers=nprow;coord=myrow;comm=cc;stride=nc*6;endif
+      sc=0;rc=0;sd=0;rd=0
+      do g=1,n
+        if(.not.active(g))cycle
+        src=owner(mate(g),peers);dst=owner(g,peers)
+        if(src==coord)sc(dst)=sc(dst)+stride
+        if(dst==coord)rc(src)=rc(src)+stride
+      enddo
+      do d=1,peers-1
+        sd(d)=sd(d-1)+sc(d-1);rd(d)=rd(d-1)+rc(d-1)
+      enddo
+      status=0
+      if(sum(sc(:peers-1))>size(send).or.sum(rc(:peers-1))>size(recv))status=1
+      call comm_get_max(status,gauge%comm)
+      if(status/=0)return
+      pos=0
+      do d=0,peers-1
+        do g=1,n
+          if(.not.active(g))cycle
+          if(owner(g,peers)/=d.or.owner(mate(g),peers)/=coord)cycle
+          idx=index_local(mate(g),peers)
+          if(axis==1)then
+            do ll=1,7;do ii=1,nr
+              pos=pos+1
+              if(ll<=6)then;send(pos)=links(ii,idx,ll)
+              else;send(pos)=gauge%matrix(ii,idx);endif
+            enddo;enddo
+          else
+            do ll=1,6;do jj=1,nc
+              pos=pos+1;send(pos)=links(idx,jj,ll)
+            enddo;enddo
+          endif
+        enddo
+      enddo
+      call MPI_Alltoallv(send,sc(:peers-1),sd(:peers-1),MPI_DOUBLE_COMPLEX, &
+        recv,rc(:peers-1),rd(:peers-1),MPI_DOUBLE_COMPLEX,comm,e)
+      call jacobi_mpi_fail_stop(e,gauge%comm)
+      status=abs(e);call comm_get_max(status,gauge%comm)
+      if(status/=0)return
+      pos=0
+      do d=0,peers-1
+        do g=1,n
+          if(.not.active(g))cycle
+          if(owner(g,peers)/=coord.or.owner(mate(g),peers)/=d)cycle
+          idx=index_local(g,peers);k=slot(g);cosine=rot(1,k)
+          sine=cmplx(rot(2,k),rot(3,k),8)
+          if(axis==1)then
+            factor=-conjg(sine);if(g<mate(g))factor=sine
+            do ll=1,7;do ii=1,nr
+              pos=pos+1
+              if(ll<=6)then;links(ii,idx,ll)=cosine*links(ii,idx,ll)+factor*recv(pos)
+              else;gauge%matrix(ii,idx)=cosine*gauge%matrix(ii,idx)+factor*recv(pos);endif
+            enddo;enddo
+          else
+            factor=-sine;if(g<mate(g))factor=conjg(sine)
+            do ll=1,6;do jj=1,nc
+              pos=pos+1;links(idx,jj,ll)=cosine*links(idx,jj,ll)+factor*recv(pos)
+            enddo;enddo
+          endif
+        enddo
+      enddo
+    end subroutine
+  end subroutine
+
+  subroutine jacobi_mpi_fail_stop(error,comm)
+    use mpi
+    integer,intent(in) :: error,comm
+    integer :: ignored
+    ! Also fail closed if the caller selected MPI_ERRORS_RETURN. Never use an
+    ! invalid communicator or an undefined collective output after an error.
+    if(error/=MPI_SUCCESS)call MPI_Abort(comm,max(1,abs(error)),ignored)
+  end subroutine
+
   subroutine minimize(gauge,links,desc,b,weights,maxiter,tolerance,spread,gradient,iterations,status)
-    implicit none
+    use mpi
     type(s_exx_gauge),intent(inout) :: gauge
     complex(8),intent(inout) :: links(:,:,:)
     integer,intent(in) :: desc(9),maxiter
     real(8),intent(in) :: b(3,6),weights(6),tolerance
     real(8),intent(out) :: spread,gradient
     integer,intent(out) :: iterations,status
-    complex(8),allocatable :: partial(:,:,:),pair(:,:,:)
-    complex(8) :: sine,local_block(2,2,6),block(2,2,6)
-    real(8) :: cosine,rotation(4)
-    integer :: n,i,j,a,c,ir,jc,r,col,istat,rank,np
-    n=gauge%n;status=1
+    integer :: rd,istat,nprow,npcol,myrow,mycol,cr,cc,e,rank,np
+    integer(kind=8) :: accepted,total_accepted
+    real(8) :: times(4),totals(4),maximum(4),t,wall,maxwall,orth,maxorth
+    complex(8),allocatable :: gram(:,:)
+    integer :: i,j
     call comm_get_groupinfo(gauge%comm,rank,np)
-    allocate(partial(n,2,7),pair(n,2,7))
+    call blacs_gridinfo(desc(2),nprow,npcol,myrow,mycol)
+    call MPI_Comm_split(gauge%comm,myrow,mycol,cr,e)
+    call jacobi_mpi_fail_stop(e,gauge%comm)
+    call MPI_Comm_split(gauge%comm,mycol,myrow,cc,e)
+    call jacobi_mpi_fail_stop(e,gauge%comm)
+    status=1
     do iterations=0,maxiter
       call functional(gauge,links,desc,b,weights,spread,gradient,istat)
-      if(istat/=0)return
-      if(gradient<tolerance.and.iterations>0)then
-        status=0;return
+      if(rank==0)then
+        print *,'MLWF_PARALLEL_FUNCTIONAL',iterations,spread,gradient,tolerance
+        flush(6)
       endif
-      if(iterations==maxiter)return
-      do j=2,n
-        do i=1,j-1
-          ! Test a pair using only its 2x2 blocks. Skip full row/column traffic
-          ! when the existing Jacobi criterion says no rotation is needed.
-          local_block=0d0
-          do col=1,size(gauge%cols)
-            jc=gauge%cols(col)
-            if(jc/=i.and.jc/=j)cycle
-            c=1
-            if(jc==j)c=2
-            do r=1,size(gauge%rows)
-              ir=gauge%rows(r)
-              if(ir/=i.and.ir/=j)cycle
-              a=1
-              if(ir==j)a=2
-              local_block(a,c,:)=links(r,col,:)
-            enddo
-          enddo
-          call comm_summation(local_block,block,size(block),gauge%comm)
-          if(rank==0)call jacobi_rotation(block,weights,n,tolerance,rotation)
-          call comm_bcast(rotation,gauge%comm,0)
-          if(rotation(4)/=0d0)return
-          cosine=rotation(1);sine=cmplx(rotation(2),rotation(3),8)
-          if(abs(sine)<1d-15)cycle
-          ! Columns i/j of six links and U; only O(N) buffers are replicated.
-          partial=0d0
-          do col=1,size(gauge%cols)
-            jc=gauge%cols(col)
-            if(jc/=i.and.jc/=j)cycle
-            c=1
-            if(jc==j)c=2
-            do r=1,size(gauge%rows)
-              ir=gauge%rows(r)
-              if(ir==0)cycle
-              partial(ir,c,:6)=links(r,col,:)
-              partial(ir,c,7)=gauge%matrix(r,col)
-            enddo
-          enddo
-          call comm_summation(partial,pair,size(pair),gauge%comm)
-          do col=1,size(gauge%cols)
-            jc=gauge%cols(col)
-            if(jc/=i.and.jc/=j)cycle
-            do r=1,size(gauge%rows)
-              ir=gauge%rows(r)
-              if(ir==0)cycle
-              if(jc==i)then
-                links(r,col,:)=cosine*pair(ir,1,:6)+sine*pair(ir,2,:6)
-                gauge%matrix(r,col)=cosine*pair(ir,1,7)+sine*pair(ir,2,7)
-              else
-                links(r,col,:)=-conjg(sine)*pair(ir,1,:6)+cosine*pair(ir,2,:6)
-                gauge%matrix(r,col)=-conjg(sine)*pair(ir,1,7)+cosine*pair(ir,2,7)
-              endif
-            enddo
-          enddo
-          ! Left multiplication uses rows after the right rotation above.
-          partial=0d0
-          do r=1,size(gauge%rows)
-            ir=gauge%rows(r)
-            if(ir/=i.and.ir/=j)cycle
-            a=1
-            if(ir==j)a=2
-            do col=1,size(gauge%cols)
-              jc=gauge%cols(col)
-              if(jc>0)partial(jc,a,:6)=links(r,col,:)
-            enddo
-          enddo
-          call comm_summation(partial,pair,size(pair),gauge%comm)
-          do r=1,size(gauge%rows)
-            ir=gauge%rows(r)
-            if(ir/=i.and.ir/=j)cycle
-            do col=1,size(gauge%cols)
-              jc=gauge%cols(col)
-              if(jc==0)cycle
-              if(ir==i)then
-                links(r,col,:)=cosine*pair(jc,1,:6)+conjg(sine)*pair(jc,2,:6)
-              else
-                links(r,col,:)=-sine*pair(jc,1,:6)+cosine*pair(jc,2,:6)
-              endif
-            enddo
-          enddo
-        enddo
+      if(istat/=0)exit
+      if(gradient<tolerance.and.iterations>0)then;status=0;exit;endif
+      if(iterations==maxiter)exit
+      t=MPI_Wtime();totals=0;total_accepted=0
+      do rd=1,gauge%n+mod(gauge%n,2)-1
+        call gauge_jacobi_round(gauge,links,desc,weights,tolerance,rd,istat,times,accepted,cr,cc)
+        if(istat/=0)exit
+        totals=totals+times;total_accepted=total_accepted+accepted
       enddo
+      if(istat/=0)exit
+      wall=MPI_Wtime()-t
+      call MPI_Allreduce(totals,maximum,4,MPI_DOUBLE_PRECISION,MPI_MAX,gauge%comm,e)
+      call jacobi_mpi_fail_stop(e,gauge%comm)
+      call MPI_Allreduce(wall,maxwall,1,MPI_DOUBLE_PRECISION,MPI_MAX,gauge%comm,e)
+      call jacobi_mpi_fail_stop(e,gauge%comm)
+      if(rank==0)then
+        print *,'MLWF_PARALLEL_SWEEP',iterations,total_accepted,maxwall,maximum
+        flush(6)
+      endif
     enddo
+    if(status==0)then
+      allocate(gram(size(gauge%rows),size(gauge%cols)))
+      gram=0d0
+      call pzgemm('C','N',gauge%n,gauge%n,gauge%n,(1d0,0d0),gauge%matrix,1,1,desc, &
+        gauge%matrix,1,1,desc,(0d0,0d0),gram,1,1,desc)
+      do j=1,size(gauge%cols);do i=1,size(gauge%rows)
+        if(gauge%rows(i)>0.and.gauge%rows(i)==gauge%cols(j))gram(i,j)=gram(i,j)-1d0
+      enddo;enddo
+      orth=maxval(abs(gram));call MPI_Allreduce(orth,maxorth,1,MPI_DOUBLE_PRECISION,MPI_MAX,gauge%comm,e)
+      call jacobi_mpi_fail_stop(e,gauge%comm)
+      if(rank==0)print *,'MLWF_PARALLEL_ORTHOGONAL',maxorth
+      if(.not.ieee_is_finite(maxorth).or.maxorth>1d-10)status=1
+    endif
+    call MPI_Comm_free(cr,e);call jacobi_mpi_fail_stop(e,gauge%comm)
+    call MPI_Comm_free(cc,e);call jacobi_mpi_fail_stop(e,gauge%comm)
   end subroutine
+
   subroutine jacobi_rotation(block,weights,n,tolerance,rotation)
     ! One rank chooses the angle so all peers follow the same collective path.
     implicit none
@@ -539,7 +728,7 @@ contains
       enddo
     enddo
     original=metric
-    call dsyev('V','U',3,metric,3,eval,work,size(work),status)
+    call symmetric3_eigen(original,metric,eval,status)
     rotation(4)=dble(status)
     if(status/=0)return
     scale=maxval(abs(original))
