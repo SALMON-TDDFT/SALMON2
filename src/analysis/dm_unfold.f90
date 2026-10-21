@@ -1738,6 +1738,8 @@ contains
     real(8) :: q(3), orth, omega_ref, rband, rall_l, rall, rmax_l, rmax, rmin_l, rmin
     logical :: converged
     integer :: n_gap_l, n_gap
+    integer :: nsw_sum_l, nsw_sum, nsw_cnt_l, nsw_cnt
+    real(8) :: nsw_max_l, nsw_max
     real(8) :: gap, gap_min_l, gap_min
     real(8), parameter :: gap_factor = 1d2 ! warning if eps(no_ref+1) - eps(no_ref) < gap_factor*unfold_threshold_projection
     real(8), allocatable :: eps(:), res(:), esp_l(:,:)
@@ -1757,6 +1759,7 @@ contains
     allocate( psi_buf(n1,n2,n3,no_ref), upu_buf(3,no_ref,no_ref), urv_buf(3,no_ref,no_ref) )
     esp_l = 0d0
     n_nonconv_l = 0
+    nsw_sum_l = 0 ; nsw_cnt_l = 0 ; nsw_max_l = 0d0
     rall_l = 0d0 ; rmax_l = 0d0 ; rmin_l = huge(1d0)
     n_gap_l = 0 ; gap_min_l = huge(1d0)
 
@@ -1765,6 +1768,9 @@ contains
         q(1:3) = kappa_ref(1:3,isk) + vec_Ac_eval(1:3)
         call solve_dm_unfold_reference(unfold%houston,q,no_work,no_ref,unfold%phi_houston(:,:,:,:,isk), &
                                      & unfold_threshold_projection,nsweep_max,ncg,eps,res,orth,nsweep_done,converged)
+        nsw_sum_l = nsw_sum_l + nsweep_done
+        nsw_cnt_l = nsw_cnt_l + 1
+        nsw_max_l = max(nsw_max_l, dble(nsweep_done))
         call calc_tm_dm_unfold_reference(unfold%houston,q,no_ref,unfold%phi_houston(:,:,:,1:no_ref,isk),upu_buf,urv_buf)
         psi_buf(:,:,:,1:no_ref) = unfold%phi_houston(:,:,:,1:no_ref,isk)
         rband = maxval(res(1:no_ref))
@@ -1812,7 +1818,14 @@ contains
     call comm_get_min(rmin_l, nproc_group_global)
     call comm_get_min(gap_min_l, nproc_group_global)
     rall = -rall_l ; rmax = -rmax_l ; rmin = rmin_l ; gap_min = gap_min_l
+    call comm_summation(nsw_sum_l, nsw_sum, nproc_group_global)
+    call comm_summation(nsw_cnt_l, nsw_cnt, nproc_group_global)
+    nsw_max_l = -nsw_max_l
+    call comm_get_min(nsw_max_l, nproc_group_global)
+    nsw_max = -nsw_max_l
     if (comm_is_root(nproc_id_global)) then
+      write(*,'(A,I0,A,I0,A,F7.2,A,I0,A)') 'dm_unfold houston basis: sweeps of the eigenstate solver  it=', itt, &
+        & '  max =', int(nsw_max), '  mean =', dble(nsw_sum)/dble(nsw_cnt), ' (ncg = ', ncg, ' per sweep)'
       if (n_nonconv == 0) then
         write(*,'(A,I0,A,ES10.3,A,ES10.3)') 'dm_unfold houston basis: all the reference k points are converged  it=', itt, &
           & '  max residual =', rall, '  tol =', unfold_threshold_projection
