@@ -729,6 +729,8 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
 end subroutine dt_evolve_bloch_lg
 
 subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
+    ! Jm = (1/V) sum_k Tr[rho v] with v_ij = i (e_i - e_j) d_ij, d = Berry connection;
+    ! same sign convention as calc_current_bloch (velocity gauge).
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -752,7 +754,7 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
             tmp1(jj) = tmp1(jj) + gs%grad_k_eigen(ib, jj, ik) *  &
                                & dble(sbe%qnm_new(ib, ib, ik)) * gs%kweight(ik)
         else
-            tmp1(jj) = tmp1(jj) + gs%delta_omega(ib, jb, ik) * &
+            tmp1(jj) = tmp1(jj) - gs%delta_omega(ib, jb, ik) * &
                                & abs(sbe%dnm_i(ib, jb, jj, ik)) * &
                                & aimag(sbe%qnm_new(jb, ib, ik)) * gs%kweight(ik)
         end if
@@ -762,7 +764,7 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
     end do
 
     call comm_summation(tmp1, tmp, 3, icomm)
-    jmat(:) = -dble(tmp(:)) / sum(gs%kweight(:)) / gs%volume
+    jmat(:) = dble(tmp(:)) / sum(gs%kweight(:)) / gs%volume
 
 end subroutine calc_current_bloch_lg
 
