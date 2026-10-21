@@ -1806,7 +1806,7 @@ contains
       call comm_bcast(psi_buf, info%icomm_o, iroot)
       call comm_bcast(upu_buf, info%icomm_o, iroot)
       call comm_bcast(urv_buf, info%icomm_o, iroot)
-      call comm_bcast(eps, info%icomm_o, iroot)
+      call comm_bcast(eps(1:no_ref), info%icomm_o, iroot)
       unfold%psi_ref(1:n1,1:n2,1:n3,1,1:no_ref,isk,1) = psi_buf(:,:,:,1:no_ref)
       unfold%upu_ref(:,:,:,isk) = upu_buf
       unfold%u_rVnl_Vnlr_u_ref(:,:,:,isk) = urv_buf
@@ -1841,7 +1841,7 @@ contains
     nsw_max = -nsw_max_l
     if (comm_is_root(nproc_id_global)) then
       write(*,'(A,I0,A,I0,A,F7.2,A,I0,A)') 'dm_unfold houston basis: sweeps of the eigenstate solver  it=', itt, &
-        & '  max =', int(nsw_max), '  mean =', dble(nsw_sum)/dble(nsw_cnt), ' (ncg = ', ncg, ' per sweep)'
+        & '  max =', int(nsw_max), '  mean =', dble(nsw_sum)/dble(nsw_cnt), ' (CG steps per sweep: at most ncg = ', ncg, ')'
       if (n_nonconv == 0) then
         write(*,'(A,I0,A,ES10.3,A,ES10.3)') 'dm_unfold houston basis: all the reference k points are converged  it=', itt, &
           & '  max residual =', rall, '  tol =', unfold_threshold_projection

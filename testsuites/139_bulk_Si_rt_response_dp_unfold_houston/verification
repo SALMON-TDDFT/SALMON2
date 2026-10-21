@@ -23,15 +23,26 @@
 # itt=10 only, so Si_dm_unfold.data contains exactly 2 data rows, which are
 # compared with the rows 1 and 10 of Si_rt.data.
 #
-# The current is compared at itt=10 only. The Houston basis is truncated to
-# no_ref (=32) states, and the impulsive kick of this test excites the
-# high-energy coherences (transitions into the bands above no_ref) coherently
-# just after the kick. They are missing in the truncated basis at itt=1
-# (Jz differs by about 15 %), and they are dephased at itt=10, where the two
-# currents agree to about 1e-8. The value at itt=1 is only printed.
+# The current is compared at itt=10 only. In this fixed condition (no_ref=32)
+# the two currents differ by about 7e-9 at itt=10, which is what is tested.
+# At itt=1 they differ by about 15 %; this is consistent with the missing
+# cross terms to the bands above no_ref in the truncated basis just after the
+# impulsive kick, but it has not been confirmed for this 64-atom system by a
+# decomposition or by increasing no_ref. The value at itt=1 is only printed.
+#
+# Besides the numbers, the script checks that all the values are finite, that
+# the times of the two files agree, and that the outputfile reports the
+# convergence of the eigenstate solver of the Houston basis at both analysis
+# steps without the warning of a non-converged reference k point (the gap
+# warning at no_ref is expected, no_ref=32 cuts a degenerate multiplet of
+# one reference k point).
+#
+# Preparation: the ground states of 136 and 137 must have been calculated
+# before (the tests are executed in the order of the numbers, as in 138).
 
 import sys
 import os
+import math
 
 print("#" * 60)
 print("# Verification start")
@@ -39,6 +50,7 @@ print("# Verification start")
 filelist = [
     "Si_dm_unfold.data",
     "Si_rt.data",
+    "outputfile",
 ]
 
 print("# Checking the existance of outputfile")
@@ -60,6 +72,7 @@ if len(rt_lines) < 10:
 
 print("# Checking calculated result")
 
+time_column = 0      # 0-indexed; column 1 = "Time[a.u.]" of both files
 tr_column = 4        # 0-indexed; column 5  = "Tr[rho(t)][none]" of Si_dm_unfold.data
 jz_dm_column = 28    # 0-indexed; column 29 = "Jz:rho[a.u.]"     of Si_dm_unfold.data
 jz_rt_column = 15    # 0-indexed; column 16 = "Jm_z[a.u.]"       of Si_rt.data
@@ -67,11 +80,31 @@ jz_rt_column = 15    # 0-indexed; column 16 = "Jm_z[a.u.]"       of Si_rt.data
 reference_value_tr = 32.0
 permissible_error_tr = 0.01
 permissible_error_j = 1e-7
+permissible_error_time = 1e-8
+
+# the solver of the Houston basis must have converged at both analysis steps
+outputlines = open("outputfile").read().splitlines()
+n_conv = sum(1 for l in outputlines if "all the reference k points are converged" in l)
+n_nonconv = sum(1 for l in outputlines if "houston basis: WARNING not converged" in l)
+print("Houston solver: converged at %d steps (expected 2), non-converged warnings = %d" % (n_conv, n_nonconv))
+if n_conv != 2 or n_nonconv != 0:
+    print("The eigenstate solver of the Houston basis did not converge as expected")
+    sys.exit(-1)  # Failure
 
 for row, itt in ((0, 1), (1, 10)):
     tr = float(dm_lines[row][tr_column])
     jz_dm = float(dm_lines[row][jz_dm_column])
     jz_rt = float(rt_lines[itt - 1][jz_rt_column])
+    t_dm = float(dm_lines[row][time_column])
+    t_rt = float(rt_lines[itt - 1][time_column])
+
+    if not all(math.isfinite(x) for x in (tr, jz_dm, jz_rt, t_dm, t_rt)):
+        print("Non-finite value at it=%d: Tr = %s, Jz(Houston) = %s, Jz(main) = %s, t = %s, %s"
+              % (itt, tr, jz_dm, jz_rt, t_dm, t_rt))
+        sys.exit(-1)  # Failure
+    if abs(t_dm - t_rt) > permissible_error_time:
+        print("Time mismatch at it=%d: Si_dm_unfold.data %e, Si_rt.data %e" % (itt, t_dm, t_rt))
+        sys.exit(-1)  # Failure
 
     print("Tr[rho(t)] it=%d = %e (Reference = %e)" % (itt, tr, reference_value_tr))
     if abs(tr - reference_value_tr) > permissible_error_tr:
