@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+
+# This verification script file is automatically executed after the SALMON.
+# If necessary, this script file can used for the verification of the result.
+# The script MUST indicate a "return-code 0", if the calculation is successful.
+# If a negative value is returned, it is treated as a test failure.
+#
+# This test is the same as 138 except for unfold_basis = 'houston': the basis
+# of the reference cell is not the ground-state one but the eigenstates of the
+# reference-cell Hamiltonian at the Bloch vector kappa + A(t), which are
+# calculated at every analysis step (the processes of the orbital group share
+# the reference k points). It uses the ground states of 136 (reference cell)
+# and 137 (super cell), and no primitive cell is given (P = I).
+#
+# The result is not compared with a stored number but with the current of the
+# TDDFT calculation itself: the total current of the Houston analysis
+# (Si_dm_unfold.data, column 29, "Jz:rho") must agree with the matter current
+# of the main code (Si_rt.data, column 16, "Jm_z") at the steps of the
+# analysis. Tr[rho(t)] must stay close to the number of the electrons of the
+# reference cell (32).
+#
+# With nt=10 and out_dm_unfold_step=10, dm_unfold() is called at itt=1 and
+# itt=10 only, so Si_dm_unfold.data contains exactly 2 data rows, which are
+# compared with the rows 1 and 10 of Si_rt.data.
+#
+# The current is compared at itt=10 only. The Houston basis is truncated to
+# no_ref (=32) states, and the impulsive kick of this test excites the
+# high-energy coherences (transitions into the bands above no_ref) coherently
+# just after the kick. They are missing in the truncated basis at itt=1
+# (Jz differs by about 15 %), and they are dephased at itt=10, where the two
+# currents agree to about 1e-8. The value at itt=1 is only printed.
+
+import sys
+import os
+
+print("#" * 60)
+print("# Verification start")
+
+filelist = [
+    "Si_dm_unfold.data",
+    "Si_rt.data",
+]
+
+print("# Checking the existance of outputfile")
+for item in filelist:
+    if not os.path.exists(item):
+        print("File not found: %s" % item)
+        sys.exit(-1)  # Failure
+
+dm_lines = [l.split() for l in open("Si_dm_unfold.data") if not l.startswith("#")]
+rt_lines = [l.split() for l in open("Si_rt.data") if not l.startswith("#")]
+
+print("# Checking number of data rows (expect 2 in Si_dm_unfold.data: itt=1 and itt=10)")
+if len(dm_lines) != 2:
+    print("Unexpected number of data rows: %d (expected 2)" % len(dm_lines))
+    sys.exit(-1)  # Failure
+if len(rt_lines) < 10:
+    print("Unexpected number of data rows in Si_rt.data: %d (expected 10)" % len(rt_lines))
+    sys.exit(-1)  # Failure
+
+print("# Checking calculated result")
+
+tr_column = 4        # 0-indexed; column 5  = "Tr[rho(t)][none]" of Si_dm_unfold.data
+jz_dm_column = 28    # 0-indexed; column 29 = "Jz:rho[a.u.]"     of Si_dm_unfold.data
+jz_rt_column = 15    # 0-indexed; column 16 = "Jm_z[a.u.]"       of Si_rt.data
+
+reference_value_tr = 32.0
+permissible_error_tr = 0.01
+permissible_error_j = 1e-7
+
+for row, itt in ((0, 1), (1, 10)):
+    tr = float(dm_lines[row][tr_column])
+    jz_dm = float(dm_lines[row][jz_dm_column])
+    jz_rt = float(rt_lines[itt - 1][jz_rt_column])
+
+    print("Tr[rho(t)] it=%d = %e (Reference = %e)" % (itt, tr, reference_value_tr))
+    if abs(tr - reference_value_tr) > permissible_error_tr:
+        print("Mismatch |%e - %e| > %e)" % (tr, reference_value_tr, permissible_error_tr))
+        sys.exit(-1)  # Failure
+
+    print("Jz it=%d : Houston = %e, main code = %e" % (itt, jz_dm, jz_rt))
+    if itt != 10:
+        continue   # truncated basis: compared at itt=10 only (see the header)
+    if abs(jz_dm - jz_rt) > permissible_error_j:
+        print("Mismatch |%e - %e| > %e)" % (jz_dm, jz_rt, permissible_error_j))
+        sys.exit(-1)  # Failure
+
+print("# Verification end")
+print("#" * 60)
+
+sys.exit(0)  # Success
