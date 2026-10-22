@@ -319,9 +319,10 @@ contains
     integer,intent(out) :: status
     complex(8),allocatable :: a(:,:),tmp(:,:),work(:),partial(:),column(:)
     real(8),allocatable :: eigen(:),rwork(:)
+    integer,allocatable :: iwork(:)
     complex(8) :: coefficient,query(1),phase
     real(8) :: rquery(1),cw(3),sw(3)
-    integer :: n,i,j,k,axis,pivot
+    integer :: n,i,j,k,axis,pivot,lwork,lrwork,liwork,iquery(1),nprow,npcol,myrow,mycol
     n=gauge%n;cw=sqrt([2d0,3d0,5d0]);sw=sqrt([7d0,11d0,13d0])
     allocate(a(size(links,1),size(links,2)),tmp(size(links,1),size(links,2)),eigen(n))
     a=0d0;tmp=0d0
@@ -331,11 +332,25 @@ contains
     enddo
     call pztranc(n,n,(1d0,0d0),a,1,1,desc,(0d0,0d0),tmp,1,1,desc)
     a=.5d0*(a+tmp)
-    call pzheev('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc,query,-1,rquery,-1,status)
+    call pzheevd('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc,query,-1,rquery,-1,iquery,-1,status)
     status=abs(status);call comm_get_max(status,gauge%comm)
     if(status/=0)return
-    allocate(work(max(1,int(real(query(1))))),rwork(max(1,int(rquery(1)))))
-    call pzheev('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc,work,size(work),rwork,size(rwork),status)
+    ! PZHEEV's redistribution path corrupts the heap on the failing Fujitsu run.
+    ! Use the independently validated divide-and-conquer driver and retain its
+    ! queried sizes, with the same conservative local workspace floors as LCFO.
+    status=0
+    if(.not.ieee_is_finite(real(query(1),8)).or..not.ieee_is_finite(rquery(1)))status=1
+    if(real(query(1),8)<1d0.or.rquery(1)<1d0.or.iquery(1)<1)status=1
+    if(real(query(1),8)>dble(huge(lwork)-1).or.rquery(1)>dble(huge(lrwork)-1))status=1
+    call comm_get_max(status,gauge%comm)
+    if(status/=0)return
+    lwork=max(1,ceiling(real(query(1),8)))
+    lrwork=max(ceiling(rquery(1)),2*(1+8*n+2*size(a,1)*size(a,2)))
+    call blacs_gridinfo(desc(2),nprow,npcol,myrow,mycol)
+    liwork=max(iquery(1),2+7*n+8*npcol)
+    allocate(work(lwork),rwork(lrwork),iwork(liwork))
+    call pzheevd('V','U',n,a,1,1,desc,eigen,gauge%matrix,1,1,desc, &
+      work,lwork,rwork,lrwork,iwork,liwork,status)
     status=abs(status)
     if(.not.finite_matrix(gauge%matrix))status=1
     call comm_get_max(status,gauge%comm)

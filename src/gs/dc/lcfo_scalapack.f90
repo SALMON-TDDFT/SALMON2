@@ -92,7 +92,8 @@ contains
     real(8),allocatable :: rwork(:),local_res(:),total_res(:)
     complex(8) :: query(1)
     real(8) :: rquery(1),scale,local_norm,norm
-    integer :: i,j,n,lwork,lrwork
+    integer :: i,j,n,lwork,lrwork,liwork,iquery(1)
+    integer,allocatable :: iwork(:)
     complex(8),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     n=s%n;status=0;hermitian=huge(1d0);orthogonal=huge(1d0);residual=huge(1d0)
     if(nt<1.or.nt>n)status=1
@@ -118,17 +119,26 @@ contains
       s%values(1)=norm;orthogonal=0d0;residual=0d0;return
     endif
     original=s%h
-    call pzheev('V','U',n,s%h,1,1,s%desc,s%values,s%vectors,1,1,s%desc,query,-1,rquery,-1,status)
+    call pzheevd('V','U',n,s%h,1,1,s%desc,s%values,s%vectors,1,1,s%desc,query,-1,rquery,-1,iquery,-1,status)
     status=abs(status)
     call comm_get_max(status,s%comm)
     if(status/=0)return
-    lwork=max(1,nint(real(query(1),8)));lrwork=max(1,nint(rquery(1)))
-    allocate(work(lwork),rwork(lrwork))
-    call pzheev('V','U',n,s%h,1,1,s%desc,s%values,s%vectors,1,1,s%desc,work,lwork,rwork,lrwork,status)
+    ! PZHEEV is prohibited on the supported Fugaku environment.
+    if(.not.ieee_is_finite(real(query(1),8)).or..not.ieee_is_finite(rquery(1)))status=1
+    if(real(query(1),8)<1d0.or.rquery(1)<1d0.or.iquery(1)<1)status=1
+    if(real(query(1),8)>dble(huge(lwork)-1).or.rquery(1)>dble(huge(lrwork)-1))status=1
+    call comm_get_max(status,s%comm)
+    if(status/=0)return
+    lwork=max(1,ceiling(real(query(1),8)))
+    lrwork=max(ceiling(rquery(1)),2*(1+8*n+2*max(1,s%nr)*max(1,s%nc)))
+    liwork=max(iquery(1),2+7*n+8*s%npcol)
+    allocate(work(lwork),rwork(lrwork),iwork(liwork))
+    call pzheevd('V','U',n,s%h,1,1,s%desc,s%values,s%vectors,1,1,s%desc, &
+      work,lwork,rwork,lrwork,iwork,liwork,status)
     status=abs(status)
     call comm_get_max(status,s%comm)
     if(status/=0)return
-    deallocate(work,rwork)
+    deallocate(work,rwork,iwork)
     ! Validate all returned eigenvectors, matching the LAPACK reference contract.
     call pzgemm('C','N',n,n,n,one,s%vectors,1,1,s%desc,s%vectors,1,1,s%desc,zero,s%h,1,1,s%desc)
     orthogonal=0d0
