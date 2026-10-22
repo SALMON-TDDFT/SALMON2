@@ -16,11 +16,12 @@ contains
     real(8) :: vtmp(3), Rvtmp(3)
     integer :: isym, nsym
     if ( .not.use_symmetry ) return
-    nsym = size(SymMatB,3)
+    nsym = size(SymMatA,3)
     vtmp = matmul( Ainv, vxyz )
     vxyz = 0.0d0
     do isym=1,nsym
-       Rvtmp = matmul( SymMatB(:,1:3,isym), vtmp )
+       ! Ainv expresses the Cartesian vector in the direct-lattice basis.
+       Rvtmp = matmul( SymMatA(:,1:3,isym), vtmp )
        vxyz = vxyz + Rvtmp
     end do
     vtmp = vxyz/nsym

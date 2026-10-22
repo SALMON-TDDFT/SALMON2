@@ -172,3 +172,13 @@ if(USE_HSE AND USE_MPI AND NOT USE_OPENACC)
   add_subdirectory(420_bulk_Si_hse_gs)
   add_subdirectory(421_bulk_Si_hse_rt)
 endif()
+
+# Focused CPU regression: Cartesian vectors and axial SOC spin densities in
+# skew primitive cells. NumPy is a test-only dependency of the reference code.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME symmetry_covariance
+    COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}"
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/449_symmetry_covariance/test_covariance.py)
+  set_tests_properties(symmetry_covariance PROPERTIES LABELS "symmetry;soc;unit" TIMEOUT 60)
+endif()

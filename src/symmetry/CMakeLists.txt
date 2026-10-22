@@ -3,6 +3,7 @@ set(SOURCES
     symmetry_kvector.f90
     symmetry_rho.f90
     symmetry_vector.f90
+    symmetry_spin_density.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
