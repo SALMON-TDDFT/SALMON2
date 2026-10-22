@@ -287,7 +287,7 @@ c no partial core if irPC=0
       enddo
 
 c all electron calculation
-      call All_Electron
+      call All_Electron(occA.gt.0.d0.or.AtoP.ne.0)
 
       call Pseudo_Potential(c2lo,c2hi,jpot,jwave,jenergy)
 
@@ -339,7 +339,7 @@ c write pseudo-potential file
       end
 
 C---------------------------------------------------------------------
-      SUBROUTINE All_Electron
+      SUBROUTINE All_Electron(needed)
       implicit none
 
       common /prm/HC,MC2,H2M,E2,ALP,Pi
@@ -363,7 +363,13 @@ c common
 c local
       integer mA,ix,jx,iter
       real*8 V_xc,E_xc,Etot,sum,energy,rhoA_old(0:2*Nx)
+      real*8 previous_energy
 
+c Unbound, unoccupied non-reference orbitals need no continuum state.
+      logical,intent(in)::needed(NAdim)
+      speA=0.d0
+      FA=0.d0
+      GA=0.d0
 c initial density
       do 10 ix=0,Nx
          rhoA(2*ix)=ZA*(0.5d0/Pi)**1.5d0*exp(-0.5d0*Rx(2*ix)**2)
@@ -421,7 +427,8 @@ c Total energy calculation
 c solve dirac equation
       do 100 mA=1,NA
          if(mA.le.2) energy=-ZA**2*13.6d0/(nodeA(mA)+lA(mA)+1)**2
-         call Solve_Dirac(mA,energy)
+         previous_energy=energy
+         call Solve_Dirac(mA,energy,needed(mA))
 
          write(*,*) mA,nodeA(mA),lA(mA),(jA(mA)-1),'/2   ',energy
          speA(mA)=energy
@@ -431,6 +438,9 @@ c solve dirac equation
             write(*,*) 'occupied orbitals energy is positive'
 c            stop
          endif
+c Preserve the bound-state seed for the next required orbital.
+         if(.not.needed(mA).and.speA(mA).gt.0.5d0)
+     &      energy=previous_energy
          do 110 ix=0,Nx
             rhoA(2*ix)=rhoA(2*ix)+(FA(ix,mA)**2+GA(ix,mA)**2)
      &                            /(4*Pi*Rx(2*ix)**2)*occA(mA)
@@ -448,7 +458,7 @@ c            stop
 
 c construct positive energy wave function for unbound orbitals
  130  do 140 mA=1,NA
-         if(speA(mA).gt.0.5d0) go to 150
+         if(needed(mA).and.speA(mA).gt.0.5d0) go to 150
  140  continue
       return
 
@@ -459,7 +469,7 @@ c construct positive energy wave function for unbound orbitals
  160  continue
 
       do 170 mA=1,NA
-         if(speA(mA).gt.0.5d0) then
+         if(needed(mA).and.speA(mA).gt.0.5d0) then
             call Cont_wave(mA,energy)
             speA(mA)=energy
          endif
@@ -470,7 +480,7 @@ c construct positive energy wave function for unbound orbitals
 
 C---------------------------------------------------------------------
 c solve radial Dirac equation by Runge-Kutta method
-      SUBROUTINE Solve_Dirac(mA,energy)
+      SUBROUTINE Solve_Dirac(mA,energy,required)
       implicit none
 
       common /prm/HC,MC2,H2M,E2,ALP,Pi
@@ -491,6 +501,7 @@ c common
       real*8 x0,xN,hx,Rx(0:2*Nx)
       real*8 rhoA(0:2*Nx),VA(0:2*Nx),speA(NAdim)
       real*8 FA(0:Nx,NAdim),GA(0:Nx,NAdim)
+      logical,intent(in)::required
 c local
       integer mA,kappa,node,ix,node0,Ntp,ncount,iter,Mx
       real*8 eps,eps0,s,energy,rke0,rke1,epslo,epshi
@@ -522,8 +533,15 @@ c classical turning point
 c when classical turning point cannot be found
       eps=eps*0.8d0
       if(eps.gt.-0.1d0) then
+         if(.not.required)then
+            write(*,*) 'UNUSED_ORBITAL_UNBOUND ',mA
+            FA(:,mA)=0.d0
+            GA(:,mA)=0.d0
+            energy=1.d0
+            return
+         endif
          write(*,*) 'failed to find classical turning point'
-         stop
+         stop 1
       endif
       go to 10
 

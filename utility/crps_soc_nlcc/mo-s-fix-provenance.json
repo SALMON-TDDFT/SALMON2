@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-22T15:15:00.066856+09:00",
+  "change": "Mo unused/unoccupied unbound4f repair; prior provenance.json records historicalW/Se inputautomation snapshot",
+  "source_sha256": "9ae2c43dae57267e309e7f6f604f4998deb7e8c67bf2bdc8bf467af9b1deec03",
+  "compiler": "GNU gfortran -std=legacy -O0 -fcheck=all -fbacktrace -Wno-align-commons",
+  "tests": "3 generator unit tests PASS; originalMo RED; finalMo finite12valence; W/Se byteidentical",
+  "review": "No critical/important scopedfinding",
+  "existing_W_Se_standards": "unchanged",
+  "production_acceptance": false,
+  "cloud_sync": "unverified"
+}

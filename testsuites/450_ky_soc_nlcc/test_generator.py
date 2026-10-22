@@ -2,6 +2,30 @@ from pathlib import Path
 import unittest,subprocess,tempfile,os,math,re
 ROOT=Path(__file__).resolve().parents[2];SOURCE=ROOT/'utility/crps_soc_nlcc'
 class Generator(unittest.TestCase):
+ def test_Mo_unused_empty_f_orbitals(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   p=Path(tmp)
+   q=subprocess.run([os.environ.get('FC','gfortran'),'-std=legacy','-O0','-fcheck=all',
+    '-Wno-align-commons',str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),
+    '-o',str(p/'crps')],cwd=p,capture_output=True,text=True)
+   self.assertEqual(q.returncode,0,q.stderr)
+   inp="""&crps ZA=42,
+ occA=2,2,2,4,2,2,4,4,6,2,2,4,2,3,0,0,1,9*0,
+ PtoA=17,11,12,13,14,cutoff_radius_bohr=5*2.6,
+ core_radius=.6,c2hi=7*5.0,output_file='Mo.dat' /
+"""
+   (p/'Mo.nml').write_text(inp)
+   q=subprocess.run([str(p/'crps'),'Mo.nml'],cwd=p,capture_output=True,text=True,timeout=120)
+   self.assertEqual(q.returncode,0,q.stderr+q.stdout[-1000:])
+   self.assertTrue((p/'Mo.dat').exists(),q.stdout[-1200:])
+   self.assertIn('CRPS_SOC_NLCC_WRITTEN',q.stdout)
+   self.assertNotIn('occupied orbitals energy is positive',q.stdout)
+   channels=(p/'Mo.dat').read_text().splitlines()[4:9]
+   self.assertTrue(all(float(x.split()[4])<0 for x in channels))
+   lines=(p/'Mo.dat').read_text().splitlines()
+   self.assertAlmostEqual(float(lines[0].split()[3]),12.)
+   for line in lines[9:-1]:
+    self.assertTrue(all(math.isfinite(float(x)) for x in line.split()))
  def test_even_origin_writer(self):
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp);(p/'fixture.f90').write_text('''program test
