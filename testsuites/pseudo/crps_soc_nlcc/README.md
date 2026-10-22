@@ -1,0 +1,43 @@
+# W・Se SOC+NLCC 標準選択
+
+2026-10-22のユーザー指定に基づく、このワークスペースの標準擬ポテンシャルです。共通ファイルは親ディレクトリの `W_rps.dat` と `Se_rps.dat` です。実行中のMPI2・LSDAメッシュ比較とバイト単位で同一です。
+
+| 元素 | s [Å] | p1/2, p3/2 [Å] | d3/2, d5/2 [Å] | f5/2, f7/2 [Å] | 価電子 | NLCC芯半径 [Å] | 局所l |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| W（radius2） | 1.59 | 1.01 | 1.38 | 1.59 | 12 | 0.65 | 0 |
+| Se | 1.38 | 1.43 | 1.22 | — | 6 | 0.50 | 2 |
+
+## 使用条件
+
+形式は拡張Yabana `KY_SOC_NLCC_V1`、半径はÅ、ポテンシャルはeVです。j分解されたSOCとNLCC芯密度・一次／二次微分を含みます。この形式に対応したreaderと `yn_spinorbit='y'` が必要です。従来KY形式だけを読むSALMON版にはそのまま渡せません。ファイルを追加しても古い実行ファイルが対応するわけではありません。
+
+現在の検証計算は非共線SOC、LSDA-PZ、電子温度300 Kです。生成器は元の相対論的LDA交換・PZ型相関を継承し、PBE生成データではありません。実行ディレクトリからの相対パスまたは絶対パスを `file_pseudo` に指定してください。
+
+```fortran
+&pseudo
+ izatom(1)=74, izatom(2)=34,
+ file_pseudo(1)='/path/to/SALMON/testsuites/pseudo/W_rps.dat',
+ file_pseudo(2)='/path/to/SALMON/testsuites/pseudo/Se_rps.dat'
+/
+```
+
+## 生成・来歴
+
+同梱の `crps_soc_nlcc.f` と `crps_output.f90` が生成ソース、`W.crps.nml` と `Se.crps.nml` が実際の入力です。c2探索範囲は全チャネル−10.5〜5.0、一意の符号変化区間だけを採用しています。NLCC一次微分の最初の正半径点にあった符号誤りは、このソースとデータでは修正済みです。過去の原本・生成ログ・旧データはwork配下に保存しています。
+
+```sh
+gfortran -std=legacy -O0 -fcheck=all -fbacktrace -Wno-align-commons \
+  crps_soc_nlcc.f crps_output.f90 -o crps
+# 元データを上書きしない空の作業ディレクトリで、入力を渡して実行する。
+/path/to/crps /path/to/W.crps.nml
+```
+
+正確なSHA256、元ファイル、全チャネル、格子・単位は `manifest.json` に記録しています。
+
+## 検証範囲
+
+有限値・形式・価電子数・指定半径・原点近傍のポテンシャル／擬波動関数の形状・NLCC微分整合性は確認済みです。「標準」はユーザーが選択した計算基準を意味します。散乱／ghost状態の網羅検証、固体の精度、メッシュ収束、5 fs電流比較の合格を意味しません。現在のMPI2メッシュ比較は進行中です。
+
+## 生成プログラムの共通配置
+
+生成プログラムは `utility/crps_soc_nlcc/` にも保存しています。ビルド・再生成手順は同ディレクトリのREADME、再生成したW・Seが標準データとバイト単位で一致した結果はprovenance.jsonを参照してください。

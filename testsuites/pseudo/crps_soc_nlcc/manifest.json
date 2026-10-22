@@ -1,0 +1,146 @@
+{
+  "at": "2026-10-22T10:50:46.212334+09:00",
+  "selection": "human selected workspace standard W radius2 and Se s1.38 p1.43 d1.22A, 2026-10-22",
+  "format": "KY_SOC_NLCC_V1",
+  "units": "Angstrom eV, reduced radial u(r), volume core density",
+  "generator": "CRPS large-component relativistic j-resolved, LDA/PZ-type correlation with inherited relativistic exchange; target solid calculations LSDA-PZ",
+  "reader_requirement": "extended KY_SOC_NLCC_V1 reader, yn_spinorbit=y; legacy KY readers cannot consume this format",
+  "validation": "finite format/header/charges/radii/near-origin V,u shape and corrected first-positive-point NLCC derivative verified; current MPI2 LSDA GS/5fs mesh campaign running, no claim completed physical transferability/grid/optical validation",
+  "files": {
+    "W": {
+      "file": "testsuites/pseudo/W_rps.dat",
+      "source": "work/elemental-w-se-rps-lsda-20261022/mesh-mpi2-5fs-20261022/cases/W-z-h0.32/gs/W_rps.dat",
+      "bytes": 989271,
+      "sha256": "42dcb43e1582dc90d138396ba35151cc8756c774784ab2814d05989b19c880e5",
+      "valence_electrons": 12,
+      "lmax": 3,
+      "channels": [
+        {
+          "l": 0,
+          "twoj": 1,
+          "rc_angstrom": 1.59,
+          "occupation": 2.0,
+          "reference_energy_eV": -5.887663274448081
+        },
+        {
+          "l": 1,
+          "twoj": 1,
+          "rc_angstrom": 1.01,
+          "occupation": 2.0,
+          "reference_energy_eV": -50.34391247820557
+        },
+        {
+          "l": 1,
+          "twoj": 3,
+          "rc_angstrom": 1.01,
+          "occupation": 4.0,
+          "reference_energy_eV": -40.51891502206063
+        },
+        {
+          "l": 2,
+          "twoj": 3,
+          "rc_angstrom": 1.3800000000000001,
+          "occupation": 1.6,
+          "reference_energy_eV": -5.16245409489626
+        },
+        {
+          "l": 2,
+          "twoj": 5,
+          "rc_angstrom": 1.3800000000000001,
+          "occupation": 2.4,
+          "reference_energy_eV": -4.428614707021916
+        },
+        {
+          "l": 3,
+          "twoj": 5,
+          "rc_angstrom": 1.59,
+          "occupation": 0.0,
+          "reference_energy_eV": -1.339188841239355
+        },
+        {
+          "l": 3,
+          "twoj": 7,
+          "rc_angstrom": 1.59,
+          "occupation": 0.0,
+          "reference_energy_eV": -1.339188841239355
+        }
+      ],
+      "core_radius_A": 0.65,
+      "local_l": 0,
+      "radial_points": 2001,
+      "radial_spacing_A": 0.01,
+      "origin_derivative_stencil_pass": true,
+      "all_finite": true
+    },
+    "Se": {
+      "file": "testsuites/pseudo/Se_rps.dat",
+      "source": "work/elemental-w-se-rps-lsda-20261022/mesh-mpi2-5fs-20261022/cases/Se-z-h0.32/gs/Se_rps.dat",
+      "bytes": 780995,
+      "sha256": "a37fb7e6151aa6144d0467ca8d21e0cd5f89d9fb27dd6b0b41273c41f937820e",
+      "valence_electrons": 6,
+      "lmax": 2,
+      "channels": [
+        {
+          "l": 0,
+          "twoj": 1,
+          "rc_angstrom": 1.3800000000000001,
+          "occupation": 2.0,
+          "reference_energy_eV": -17.44489795442559
+        },
+        {
+          "l": 1,
+          "twoj": 1,
+          "rc_angstrom": 1.43,
+          "occupation": 1.3333333333333333,
+          "reference_energy_eV": -6.921960602512829
+        },
+        {
+          "l": 1,
+          "twoj": 3,
+          "rc_angstrom": 1.43,
+          "occupation": 2.6666666666666665,
+          "reference_energy_eV": -6.536501245411357
+        },
+        {
+          "l": 2,
+          "twoj": 3,
+          "rc_angstrom": 1.22,
+          "occupation": 0.0,
+          "reference_energy_eV": -6.536501245411357
+        },
+        {
+          "l": 2,
+          "twoj": 5,
+          "rc_angstrom": 1.22,
+          "occupation": 0.0,
+          "reference_energy_eV": -6.536501245411357
+        }
+      ],
+      "core_radius_A": 0.5,
+      "local_l": 2,
+      "radial_points": 2001,
+      "radial_spacing_A": 0.01,
+      "origin_derivative_stencil_pass": true,
+      "all_finite": true
+    }
+  },
+  "cloud_sync": "unverified",
+  "reproduction_files": {
+    "crps_output.f90": {
+      "bytes": 1861,
+      "sha256": "0f6c74a7e93543282b14f7593fd5e5bbce4e8816f1411c9a06f7cab67faeb55a"
+    },
+    "Se.crps.nml": {
+      "bytes": 283,
+      "sha256": "f4a8c5659ba3c98cd38576f0866b516270d26b6481dcebdc7da1621310b079ab"
+    },
+    "W.crps.nml": {
+      "bytes": 277,
+      "sha256": "79a5d9b5cb1633d46fdf5cd831f4c442c994605149ef97d3551699cda2eb1550"
+    },
+    "crps_soc_nlcc.f": {
+      "bytes": 47283,
+      "sha256": "aaff94e9aee0f149ff9e087a24f6996e84689ab9071eb9e6da5f81838f5fdc8b"
+    }
+  }
+}

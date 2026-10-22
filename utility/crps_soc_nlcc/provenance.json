@@ -1,0 +1,76 @@
+{
+  "at": "2026-10-22T10:52:03.908265+09:00",
+  "source_snapshot": "selected corrected multi-element generator; trailing whitespace normalized for repository",
+  "files": {
+    "reproduction-Se.log": {
+      "bytes": 137115,
+      "sha256": "3e390e702b327872a8f63a28733bf6a63abfd0cf5d441f6a49fec6152974d4cb"
+    },
+    "crps_output.f90": {
+      "bytes": 1861,
+      "sha256": "0f6c74a7e93543282b14f7593fd5e5bbce4e8816f1411c9a06f7cab67faeb55a"
+    },
+    "reproduction-W.log": {
+      "bytes": 238838,
+      "sha256": "2971fbc239b72f3052d91c5b31f1efacfd50ea4ed57ff248b45cb6d6361b4d10"
+    },
+    "README.md": {
+      "bytes": 2546,
+      "sha256": "969f9e217f2edc838c50eab94e092ef87574d44a7b4965cfe8df1025f76a3544"
+    },
+    "crps_soc_nlcc.f": {
+      "bytes": 47283,
+      "sha256": "aaff94e9aee0f149ff9e087a24f6996e84689ab9071eb9e6da5f81838f5fdc8b"
+    },
+    "inputs/Se.nml": {
+      "bytes": 283,
+      "sha256": "f4a8c5659ba3c98cd38576f0866b516270d26b6481dcebdc7da1621310b079ab"
+    },
+    "inputs/W.nml": {
+      "bytes": 277,
+      "sha256": "79a5d9b5cb1633d46fdf5cd831f4c442c994605149ef97d3551699cda2eb1550"
+    }
+  },
+  "standard_files": {
+    "W": {
+      "path": "testsuites/pseudo/W_rps.dat",
+      "sha256": "42dcb43e1582dc90d138396ba35151cc8756c774784ab2814d05989b19c880e5"
+    },
+    "Se": {
+      "path": "testsuites/pseudo/Se_rps.dat",
+      "sha256": "a37fb7e6151aa6144d0467ca8d21e0cd5f89d9fb27dd6b0b41273c41f937820e"
+    }
+  },
+  "verification": {
+    "compile_command": [
+      "gfortran",
+      "-std=legacy",
+      "-O0",
+      "-fcheck=all",
+      "-fbacktrace",
+      "-Wno-align-commons",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/utility/crps_soc_nlcc/crps_soc_nlcc.f",
+      "/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/SALMON-v.2.2.2/utility/crps_soc_nlcc/crps_output.f90",
+      "-o",
+      "<temporary executable>"
+    ],
+    "compile_exit": 0,
+    "compiler": "GNU Fortran (Homebrew GCC 15.2.0_1) 15.2.0",
+    "species": {
+      "W": {
+        "exit": 0,
+        "byte_identical_to_standard": true,
+        "sha256": "42dcb43e1582dc90d138396ba35151cc8756c774784ab2814d05989b19c880e5",
+        "stderr": "Note: The following floating-point exceptions are signalling: IEEE_UNDERFLOW_FLAG\n"
+      },
+      "Se": {
+        "exit": 0,
+        "byte_identical_to_standard": true,
+        "sha256": "a37fb7e6151aa6144d0467ca8d21e0cd5f89d9fb27dd6b0b41273c41f937820e",
+        "stderr": "Note: The following floating-point exceptions are signalling: IEEE_UNDERFLOW_FLAG\n"
+      }
+    }
+  },
+  "cloud_sync": "unverified",
+  "verification_note": "Both generated outputs byte-identical to currently selected standards; compiler reports underflow flag on atomic tail, reproduced and preserved in logs; exported arrays finite as standard data validation."
+}
