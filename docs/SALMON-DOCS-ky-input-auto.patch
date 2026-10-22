@@ -1,0 +1,35 @@
+diff --git a/source/input_keyword_list.rst b/source/input_keyword_list.rst
+index b37816c..1117396 100644
+--- a/source/input_keyword_list.rst
++++ b/source/input_keyword_list.rst
+@@ -418 +418 @@ spin
+-character, default='unpolarized'
++character, default='auto'
+@@ -423 +423,2 @@ character, default='unpolarized'
+-   |   ``'unpolarized'`` / spin-unpolarized systems (default)
++   |   ``'auto'`` / resolve omitted spin controls from the extended KY header or an explicit SOC setting (default)
++   |   ``'unpolarized'`` / spin-unpolarized systems
+@@ -426,0 +428,4 @@ character, default='unpolarized'
++   | With ``KY_SOC_NLCC_V1`` pseudopotentials, omitted ``spin`` and ``yn_spinorbit`` resolve to ``'noncollinear'`` and ``'y'``.
++   | Without this header and without an explicit SOC/noncollinear request, omission retains ``'unpolarized'`` and ``'n'``.
++   | Explicit conflicting choices are rejected; they are never silently replaced. The resolved values are recorded in ``variables.log``.
++
+@@ -559 +564 @@ yn_spinorbit
+-character, default='n'
++character, default='a' (automatic)
+@@ -562 +567 @@ character, default='n'
+-   | Option for the spin-orbit coupling using the j-dependent pseudopotential formalism [Theurich & Hill, PRB 64, 073106 (2001)]. For pseudopotential(s), the UPF or VPS file format is required.
++   | Option for the spin-orbit coupling using the j-dependent pseudopotential formalism [Theurich & Hill, PRB 64, 073106 (2001)]. Supported j-dependent data include UPF, VPS and the extended ``KY_SOC_NLCC_V1`` format.
+@@ -565,2 +570,6 @@ character, default='n'
+-   |   ``'y'`` / enable (``spin='noncollinear'`` is required. For ``theory='dft’`` mode, ``method_mixing='simple’`` or ``method_mixing='simple_dm’`` is recommended.)
+-   |   ``'n'`` / disable (default)
++   |   ``'a'`` / infer SOC from the extended KY header or ``spin='noncollinear'`` (default; automatic header detection is limited to extended KY)
++   |   ``'y'`` / enable (an omitted ``spin`` is resolved to ``'noncollinear'``. For ``theory='dft’`` mode, ``method_mixing='simple’`` or ``method_mixing='simple_dm’`` is recommended.)
++   |   ``'n'`` / explicitly disable; incompatible with extended KY SOC data
++
++   | It is sufficient to specify either ``spin='noncollinear'`` or ``yn_spinorbit='y'`` when the other is omitted.
++   | Other formats retain the scalar default when both controls are omitted; this change does not infer SOC from UPF/VPS contents.
+@@ -682,0 +692,3 @@ integer, default=-1
++   | For ``KY_SOC_NLCC_V1`` data, omit this control: the local potential is stored explicitly in the file.
++   | This rule does not choose a local channel for legacy scalar KY data.
++

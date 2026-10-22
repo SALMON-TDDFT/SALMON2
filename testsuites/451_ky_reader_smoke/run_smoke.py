@@ -1,6 +1,6 @@
 from pathlib import Path
 import argparse,tempfile,subprocess,os,re,math,json,signal
-P=argparse.ArgumentParser();P.add_argument('--binary',required=True);P.add_argument('--mpi');P.add_argument('--np-flag',default='-n');args=P.parse_args()
+P=argparse.ArgumentParser();P.add_argument('--binary',required=True);P.add_argument('--mpi');P.add_argument('--auto-input',action='store_true');P.add_argument('--np-flag',default='-n');args=P.parse_args()
 root=Path(__file__).resolve().parents[2];energies={};results=[]
 # One SCF iteration exercises real init_pp/input_pp and MPI broadcasts; this is
 # a reader smoke, not a converged atomic/solid accuracy calculation.
@@ -26,6 +26,10 @@ for name,species,soc in [('legacy-Si',['Si'],'n'),('W-Se',['W','Se'],'y'),('W-Si
 /
 &scf method_init_density='wf',method_init_wf='random',nscf=1,ncg=1,ncg_init=1,nscf_init_no_diagonal=10 /
 '''
+  if args.auto_input:
+   s=s.replace(f"spin='{ 'noncollinear' if soc=='y' else 'unpolarized'}',yn_spinorbit='{soc}',",'')
+   for i,x in enumerate(sp):
+    if x!='Si':s=s.replace(f",lloc_ps({i+1})=0",'')
   assert all(len(l)<=256 for l in s.splitlines());(d/'inputfile').write_text(s)
   env={k:v for k,v in os.environ.items() if not k.startswith('SALMON_')};env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
   cmd=[args.binary]
@@ -40,6 +44,10 @@ for name,species,soc in [('legacy-Si',['Si'],'n'),('W-Se',['W','Se'],'y'),('W-Si
     raise RuntimeError(name+' reader smoke timeout')
   assert proc.returncode==0,(name,proc.returncode,text[-4000:]);assert 'end SALMON' in text,(name,text[-2000:])
   e=[float(x.replace('D','E')) for x in re.findall(r'iter=\s*\d+\s+Total Energy=\s*(\S+)',text)];assert e and all(math.isfinite(x) for x in e),(name,text[-2000:])
+  if args.auto_input:
+   variables=(d/'variables.log').read_text()
+   assert f"spin={'noncollinear' if soc=='y' else 'unpolarized'}" in variables
+   assert f"yn_spinorbit={soc}" in variables
   energies[name]=e[-1];results.append(dict(name=name,exit=proc.returncode,energy=e[-1],MPI=2 if args.mpi else 1))
 assert abs(energies['W-Si']-energies['Si-W'])<=1e-7,energies
 print(json.dumps(results,indent=2));print('KY_READER_FULL_SERIAL_MPI_SMOKE_PASS')

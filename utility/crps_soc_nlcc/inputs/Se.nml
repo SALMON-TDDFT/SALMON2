@@ -1,7 +1,7 @@
 &crps
- ZA=34,NA=14,Lmax=2,lloc=2,
+ ZA=34,
  occA=2,2,2,4,2,2,4,4,6,2,1.3333333333333333,2.6666666666666665,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
- PtoA=10,11,12,13,14,15,16,
- cutoff_radius_bohr=2.6,2.7,2.7,2.3,2.3,2.5,2.5,
- core_radius=0.5,c2lo=7*-10.5,c2hi=7*5.0,
- output_file='Se_soc_nlcc_rps.dat' /
+ PtoA=10,11,12,13,14,
+ cutoff_radius_bohr=2.6,2.7,2.7,2.3,2.3,
+ core_radius=0.5,c2hi=7*5.0
+ /

@@ -4,7 +4,7 @@
   "format": "KY_SOC_NLCC_V1",
   "units": "Angstrom eV, reduced radial u(r), volume core density",
   "generator": "CRPS large-component relativistic j-resolved, LDA/PZ-type correlation with inherited relativistic exchange; target solid calculations LSDA-PZ",
-  "reader_requirement": "Integrated KY_SOC_NLCC_V1 reader in this branch; yn_spinorbit=y required; legacy KY path retained",
+  "reader_requirement": "Integrated KY_SOC_NLCC_V1 reader; omitted spin/SOC controls inferred from header, explicit conflicts rejected; legacy scalar defaults retained",
   "validation": "Finite/header/radial-origin checks verified. Old MPI2 campaign human-stopped due SOC application zero-projector indexing bug; its mesh/current results unaccepted. Reader/unit and full serial/MPI smoke verified; not physical transferability acceptance.",
   "files": {
     "W": {

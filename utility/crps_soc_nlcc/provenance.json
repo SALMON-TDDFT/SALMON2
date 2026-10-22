@@ -1,6 +1,6 @@
 {
-  "at": "2026-10-22T02:17:43.836730+00:00",
-  "source_snapshot": "Coding Rules refactor: module writer, explicit search/j-channel arguments; output unchanged",
+  "at": "2026-10-22T13:00:19.657243+09:00",
+  "source_snapshot": "Automatic NA/Lmax/local-reference/output-name defaults; explicit and omitted W/Se inputs verified against the same standard tables",
   "files": {
     "reproduction-Se.log": {
       "bytes": 137115,
@@ -15,20 +15,20 @@
       "sha256": "2971fbc239b72f3052d91c5b31f1efacfd50ea4ed57ff248b45cb6d6361b4d10"
     },
     "README.md": {
-      "bytes": 3241,
-      "sha256": "3db4d6b5cae058c574935239913e775a9110ee9812d3c4e3d0a1bd84327a71e0"
+      "bytes": 5066,
+      "sha256": "f869730a45a8a51b2e1f698d52bc11ead91276c6311fdfcd34017ae4078995bc"
     },
     "crps_soc_nlcc.f": {
-      "bytes": 47656,
-      "sha256": "178ed5f3d9d1d79a9683e35fffa6a2f49d4d5823e03becdff60af654227c6988"
+      "bytes": 49166,
+      "sha256": "b06952f209c3285381327f966192911562bf4eeb2b5fe7f9e1f4418a6f5cb7ea"
     },
     "inputs/Se.nml": {
-      "bytes": 283,
-      "sha256": "f4a8c5659ba3c98cd38576f0866b516270d26b6481dcebdc7da1621310b079ab"
+      "bytes": 201,
+      "sha256": "497782720ee64d1d9d8a59c1aab1bc7f5ca720e442a268f5f7dd38d0ba9d4c27"
     },
     "inputs/W.nml": {
-      "bytes": 277,
-      "sha256": "79a5d9b5cb1633d46fdf5cd831f4c442c994605149ef97d3551699cda2eb1550"
+      "bytes": 224,
+      "sha256": "93d588ec381d37319f2e0430dcc9b17b3e5c47c4f1046d7b21974b46bba2f5f1"
     }
   },
   "standard_files": {

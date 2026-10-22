@@ -58,10 +58,11 @@ c common
       real*8 rhoPA(0:Nr),VPA(0:Nr),spePA(0:Ldim),uP(0:Nr,0:Ldim)
       real*8 VCP(0:Nr,0:Ldim),VLSP(0:Nr,0:Ldim),rhoPC(0:Nr)
 c local
-      integer ix,ir,mP,l,ios,jtwo(NPdim),lloc
+      integer ix,ir,mP,l,ios,jtwo(NPdim),lloc,nset,first,last
       character*256 config,output_file
       real*8 core_radius,c2lo(NPdim),c2hi(NPdim)
-      real*8 cutoff_radius_bohr(NPdim)
+      real*8 cutoff_radius_bohr(NPdim),default_cutoff(NPdim)
+      real*8,parameter::unset=-huge(1.d0)
       integer nodeA(NAdim),lA(NAdim),jA(NAdim),kA(NAdim)
       common /aob/nodeA,lA,jA,kA
       real*8 jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
@@ -202,11 +203,53 @@ c no partial core if irPC=0
       cutoff_radius_bohr=irRC*hr/0.529177210903d0
       call get_command_argument(1,config)
       if(len_trim(config).gt.0) then
+         NA=-1
+         Lmax=-1
+         lloc=-1
+         output_file=''
+         default_cutoff=cutoff_radius_bohr
+         cutoff_radius_bohr=unset
          open(99,file=trim(config),status='old',iostat=ios)
          if(ios.ne.0) stop 1
          read(99,nml=crps,iostat=ios)
          close(99)
          if(ios.ne.0) stop 1
+         nset=count(cutoff_radius_bohr.ne.unset)
+         if(Lmax.eq.-1) then
+            Lmax=3
+            if(nset.ne.0) then
+               if(nset.ne.3.and.nset.ne.5.and.nset.ne.7) then
+                  write(*,*)'Set Lmax for a partial radius list'
+                  stop 1
+               endif
+               if(any(cutoff_radius_bohr(1:nset).eq.unset))then
+                  write(*,*)'Set Lmax for a sparse radius list'
+                  stop 1
+               endif
+               Lmax=(nset-1)/2
+            endif
+         endif
+         where(cutoff_radius_bohr.eq.unset)
+            cutoff_radius_bohr=default_cutoff
+         endwhere
+         if(NA.eq.-1.and.Lmax.ge.1.and.Lmax.le.Ldim)
+     &      NA=maxval(PtoA(1:2*Lmax+1))
+         if(lloc.eq.-1)lloc=Lmax
+         if(len_trim(output_file).eq.0) then
+            first=1
+            do ix=1,len_trim(config)
+               if(config(ix:ix).eq.'/')first=ix+1
+            enddo
+            last=len_trim(config)
+            do ix=last,first,-1
+               if(config(ix:ix).eq.'.') then
+                  last=ix-1
+                  exit
+               endif
+            enddo
+            if(last.lt.first.or.last-first.gt.220)stop 1
+            output_file=config(first:last)//'_soc_nlcc_rps.dat'
+         endif
       endif
       if(Lmax.lt.1.or.Lmax.gt.Ldim) stop 1
       NP=2*Lmax+1

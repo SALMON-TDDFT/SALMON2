@@ -1,5 +1,5 @@
 from pathlib import Path
-import unittest,subprocess,tempfile,os,math
+import unittest,subprocess,tempfile,os,math,re
 ROOT=Path(__file__).resolve().parents[2];SOURCE=ROOT/'utility/crps_soc_nlcc'
 class Generator(unittest.TestCase):
  def test_even_origin_writer(self):
@@ -25,7 +25,10 @@ end program
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp);q=subprocess.run([os.environ.get('FC','gfortran'),'-std=legacy','-O0','-fcheck=all','-fbacktrace','-Wno-align-commons',str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),'-o',str(p/'crps')],cwd=p,capture_output=True,text=True);self.assertEqual(q.returncode,0,q.stderr)
    for sp in ['W','Se']:
-    d=p/sp;d.mkdir();q=subprocess.run([str(p/'crps'),str(SOURCE/'inputs'/f'{sp}.nml')],cwd=d,capture_output=True,text=True,timeout=120);self.assertEqual(q.returncode,0,q.stderr)
+    explicit=p/f'explicit-{sp}.nml'
+    explicit.write_text((SOURCE/'inputs'/f'{sp}.nml').read_text().replace('&crps',
+      f"&crps NA={26 if sp=='W' else 14},Lmax={3 if sp=='W' else 2},lloc={0 if sp=='W' else 2},output_file='{sp}_soc_nlcc_rps.dat',"))
+    d=p/sp;d.mkdir();q=subprocess.run([str(p/'crps'),str(explicit)],cwd=d,capture_output=True,text=True,timeout=120);self.assertEqual(q.returncode,0,q.stderr)
     actual=(d/f'{sp}_soc_nlcc_rps.dat').read_text().splitlines()
     expected=(ROOT/f'testsuites/pseudo/{sp}_rps.dat').read_text().splitlines()
     self.assertEqual(len(actual),len(expected))
@@ -38,6 +41,20 @@ end program
      for x,y in zip(av,bv):
       self.assertTrue(math.isfinite(x) and math.isfinite(y),(sp,lineno))
       self.assertLessEqual(abs(x-y),1e-8*max(1.,abs(y)),(sp,lineno,x,y))
+    # Omitted controls must resolve to exactly the explicit species definition.
+    minimal=(SOURCE/'inputs'/f'{sp}.nml').read_text()
+    minimal=re.sub(r'NA=\d+,?', '', minimal)
+    minimal=re.sub(r'Lmax=\d+,?', '', minimal)
+    minimal=re.sub(r"output_file='[^']*'", '', minimal)
+    if sp=='Se':
+     minimal=minimal.replace('PtoA=10,11,12,13,14,15,16','PtoA=10,11,12,13,14')
+     minimal=minimal.replace('cutoff_radius_bohr=2.6,2.7,2.7,2.3,2.3,2.5,2.5',
+                             'cutoff_radius_bohr=2.6,2.7,2.7,2.3,2.3')
+    auto=p/f'auto-{sp}.nml';auto.write_text(minimal)
+    ad=p/f'auto-{sp}';ad.mkdir()
+    q=subprocess.run([str(p/'crps'),str(auto)],cwd=ad,capture_output=True,text=True,timeout=120)
+    self.assertEqual(q.returncode,0,q.stderr+q.stdout[-1500:])
+    self.assertEqual((ad/f'auto-{sp}_soc_nlcc_rps.dat').read_text().splitlines(),actual)
     # Discrete header and channel identities are exact; libm-dependent radial
     # values use a portable tolerance. Byte identity is separate provenance.
     self.assertEqual(actual[0].split()[::2],expected[0].split()[::2])

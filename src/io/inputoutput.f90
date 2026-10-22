@@ -21,6 +21,7 @@ module inputoutput
   use phys_constants
   use salmon_global
   implicit none
+  private :: resolve_ky_spin_inputs
 !Physical constant
   real(8),parameter :: au_time_fs = 0.02418884326505d0
   real(8),parameter :: au_energy_ev = 27.21138505d0
@@ -718,7 +719,7 @@ contains
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
-    spin               = 'unpolarized'
+    spin               = 'auto'
     al                 = 0d0
     al_vec1            = 0d0
     al_vec2            = 0d0
@@ -732,7 +733,7 @@ contains
     natom              = 0
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
-    yn_spinorbit       = 'n'
+    yn_spinorbit       = 'a'
     yn_symmetry        = 'n'
     absorbing_boundary = 'none'
     imagnary_potential_w0 = 0d0
@@ -1238,6 +1239,9 @@ contains
 !! convert lowercase
     call string_lowercase(theory)
     call string_lowercase(spin)
+    call string_lowercase(yn_spinorbit)
+    if(comm_is_root(nproc_id_global)) &
+      call resolve_ky_spin_inputs(file_pseudo,nelem,spin,yn_spinorbit)
     call string_lowercase(xc)
     call string_lowercase(cname)
     call string_lowercase(xname)
@@ -1953,6 +1957,47 @@ contains
     exx_factor_warmup_steps=(exx_factor_history_frames+exx_factor_n_teach-1)*exx_factor_exact_interval
     ! END automatic ACE warmup
   end subroutine read_input_common
+
+  ! Resolve omitted controls before broadcasts and compatibility checks.
+  ! Extended KY explicitly declares j-resolved data; legacy formats retain
+  ! their scalar default. Explicit user choices are never silently overridden.
+  subroutine resolve_ky_spin_inputs(files,n,spin_mode,soc_mode)
+    implicit none
+    character(*),intent(in) :: files(:)
+    integer,intent(in) :: n
+    character(*),intent(inout) :: spin_mode,soc_mode
+    character(512) :: line
+    integer :: i,unit,ios,length
+    logical :: has_ky_soc,automatic
+    if(n<0.or.n>size(files))error stop 'Automatic KY spin: invalid element count'
+    has_ky_soc=.false.
+    automatic=spin_mode=='auto'.or.soc_mode=='a'
+    if(.not.automatic)return
+    do i=1,n
+      length=len_trim(files(i))
+      if(length<8)cycle
+      if(files(i)(length-7:length)/='_rps.dat')cycle
+      open(newunit=unit,file=trim(files(i)),status='old',action='read',iostat=ios)
+      if(ios/=0)error stop 'Automatic KY spin: cannot open pseudopotential'
+      read(unit,'(a)',iostat=ios)line
+      if(ios==0)read(unit,'(a)',iostat=ios)line
+      close(unit)
+      if(ios/=0)error stop 'Automatic KY spin: cannot read pseudopotential header'
+      if(trim(line)=='KY_SOC_NLCC_V1')has_ky_soc=.true.
+    enddo
+    if(soc_mode=='a')then
+      soc_mode='n'
+      if(has_ky_soc.or.spin_mode=='noncollinear')soc_mode='y'
+    endif
+    if(spin_mode=='auto')then
+      spin_mode='unpolarized'
+      if(soc_mode=='y')spin_mode='noncollinear'
+    endif
+    if(has_ky_soc.and.soc_mode=='n')error stop 'KY_SOC_NLCC conflicts with explicit yn_spinorbit=n'
+    if(soc_mode=='y'.and.spin_mode/='noncollinear') &
+      error stop 'SOC conflicts with explicit spin; noncollinear required'
+    write(*,'(a,a,a,a)')'Automatic KY spin: spin=',trim(spin_mode),', yn_spinorbit=',trim(soc_mode)
+  end subroutine resolve_ky_spin_inputs
 
   subroutine read_atomic_coordinates
     use parallelization
