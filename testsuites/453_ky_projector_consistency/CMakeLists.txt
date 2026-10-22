@@ -1,0 +1,11 @@
+# The probe reuses the real production objects and GNU Makefiles link command.
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+  if(USE_MPI)
+    set(TEST_COMMAND "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_projectors.py --build-dir ${CMAKE_BINARY_DIR} --mpi ${MPIEXEC_EXECUTABLE} --np-flag=${MPIEXEC_NUMPROC_FLAG}")
+  else()
+    set(TEST_COMMAND "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_projectors.py --build-dir ${CMAKE_BINARY_DIR}")
+  endif()
+  create_test()
+  set_tests_properties(run_453_ky_projector_consistency PROPERTIES FIXTURES_SETUP run_453_ky_projector_consistency TIMEOUT 180 PROCESSORS 2)
+  set_tests_properties(prep_453_ky_projector_consistency run_453_ky_projector_consistency verify_453_ky_projector_consistency PROPERTIES LABELS "pseudo;soc;mask;integration")
+endif()

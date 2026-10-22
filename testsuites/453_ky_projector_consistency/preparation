@@ -1,0 +1,3 @@
+#!/bin/sh
+# Temporary inputs, driver executable and output belong to the runner.
+exit 0

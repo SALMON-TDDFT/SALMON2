@@ -30,7 +30,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use salmon_global,only : file_pseudo, quiet, method_init_density
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
-    & yn_psmask
+    & yn_psmask, yn_spinorbit
   use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
@@ -238,6 +238,16 @@ subroutine input_pp(pp,hx,hy,hz)
       else
         stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
+
+      ! A scalar KY species is spin independent even in a spinor calculation.
+      ! Copy the completed tables: scalar KY supplies potentials/waves, whereas
+      ! j-resolved KY supplies beta projectors and must retain its separate j data.
+      if (yn_spinorbit=='y'.and.ps_format(ik)=='KY'.and..not.flag_beta_proj_is_given) then
+        pp%anorm_so(:,ik)=pp%anorm(:,ik)
+        pp%inorm_so(:,ik)=pp%inorm(:,ik)
+        pp%udvtbl_so(:,:,ik)=pp%udvtbl(:,:,ik)
+        pp%dudvtbl_so(:,:,ik)=pp%dudvtbl(:,:,ik)
+      endif
 
       pp%upp_f(:,:,ik)=pp%upp(:,:)
       pp%vpp_f(:,:,ik)=pp%vpp(:,:)
@@ -967,7 +977,7 @@ end subroutine read_ps_adpack
 subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
                           rhor_nlcc,flag_nlcc_element)
   use structures,only : s_pp_info
-  use salmon_global, only: ps_format, nelem, alpha_mask, eta_mask
+  use salmon_global, only: ps_format, nelem, alpha_mask, eta_mask, gamma_mask
   use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -1059,6 +1069,16 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   end do
   close(4)
 
+  ! Select support once, before filtering either j branch. The SO preparation
+  ! reuses it; ps_masking must not expand this shared radius a second time.
+  pp%rps(ik)=gamma_mask*pp%rps(ik)
+  do i=1,size(pp%rad,1)
+    if(pp%rad(i,ik)>pp%rps(ik))exit
+  enddo
+  if(i>size(pp%rad,1))error stop 'Pseudopotential mask radius exceeds radial grid'
+  pp%nrps(ik)=i
+  pp%rps(ik)=pp%rad(i,ik)
+
   call ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
 
   open(4,file="PSaftermask_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//".dat")
@@ -1145,7 +1165,7 @@ subroutine making_ps_with_masking_so(pp,hx,hy,hz,ik)
   real(8) :: uvpp(0:pp%nrmax0,0:2*pp%lmax0+1),duvpp(0:pp%nrmax0,0:2*pp%lmax0+1)
   real(8) :: grid_function(0:pp%nrmax0)
   integer :: i,l,ll,l0,mr
-  real(8) :: r1,r2,r3,r4
+  real(8) :: r1,r2,r3,r4,const
 
   ncounter = 0
   do i=0,pp%mr(ik)
@@ -1207,6 +1227,23 @@ subroutine making_ps_with_masking_so(pp,hx,hy,hz,ik)
 !                          vpploc(i),dvpploc(i),grid_function(i)
 !  end do
 !  close(4)
+
+  ! zylm uses regular solid harmonics, including r**ll. Convert radial
+  ! beta and its derivative exactly as in the scalar masked preparation.
+  l0=0
+  do ll=0,pp%mlps(ik)
+    const=sqrt((2d0*ll+1d0)/(4d0*pi))
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=1,pp%mr(ik)
+        uvpp(i,l)=uvpp(i,l)*const/pp%rad(i+1,ik)**(ll+1)
+        duvpp(i,l)=duvpp(i,l)*const/pp%rad(i+1,ik)**(ll+1) &
+                  -(ll+1)*uvpp(i,l)/pp%rad(i+1,ik)
+      enddo
+      uvpp(0,l)=2d0*uvpp(1,l)-uvpp(2,l)
+      duvpp(0,l)=2d0*duvpp(1,l)-duvpp(2,l)
+    enddo
+    l0=l
+  enddo
 
   if( flag_beta_proj_is_given )then
     l0=0
@@ -1420,7 +1457,7 @@ end subroutine making_ps_without_masking_so
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   use structures,only : s_pp_info
-  use salmon_global,only :ps_format,alpha_mask,gamma_mask
+  use salmon_global,only :ps_format,alpha_mask
   use salmon_math, only: xjl, dxjl
   use math_constants, only : pi
   implicit none
@@ -1440,13 +1477,7 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   real(8),allocatable :: mask(:),dmask(:)
 !Functions
 
-!Reconstruct radial coordinate Rps(ik) and NRps(ik)
-  pp%rps(ik) = gamma_mask*pp%rps(ik)
-  do i=1,pp%nrmax0
-    if (pp%rad(i,ik) > pp%rps(ik)) exit
-  end do
-  pp%nrps(ik)=i
-  pp%rps(ik) = pp%rad(pp%nrps(ik),ik)
+! Both j branches use the support already selected by the scalar preparation.
   allocate(mask(pp%nrps(ik)),dmask(pp%nrps(ik)))
 
   call make_mask_function(pp,mask,dmask,ik)

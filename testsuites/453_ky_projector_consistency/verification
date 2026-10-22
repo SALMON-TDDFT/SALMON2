@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from pathlib import Path
+text = Path('outputfile').read_text()
+assert 'Ran 3 tests' in text and '\nOK\n' in text
+assert 'FAILED' not in text and 'ERROR:' not in text
