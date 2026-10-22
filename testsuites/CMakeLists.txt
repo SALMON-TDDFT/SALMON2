@@ -183,9 +183,10 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
   set_tests_properties(symmetry_covariance PROPERTIES LABELS "symmetry;soc;unit" TIMEOUT 60)
 endif()
 
-# Extended KY format and standalone CRPS generator regression, independent of HSE.
+# Focused CPU regressions for extended KY data and periodic density grids.
 if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_subdirectory(450_ky_soc_nlcc)
   add_subdirectory(451_ky_reader_smoke)
+  add_subdirectory(452_symmetry_periodic_grid)
 endif()

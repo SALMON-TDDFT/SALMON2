@@ -24,7 +24,7 @@ contains
     integer,intent(in) :: num_(3),is_(3),ie_(3),icomm_r_
     integer :: i1,i2,i3,isym,j1,j2,j3
     integer,allocatable :: icheck(:,:,:),itmp(:),icheck1(:,:,:)
-    real(8) :: r1,r2,r3,t1,t2,t3,d1,d2,d3
+    real(8) :: r1,r2,r3,t1,t2,t3
 
     if ( .not.use_symmetry ) return
 
@@ -46,21 +46,9 @@ contains
           r1=t1*SymMatB(1,1,isym)+t2*SymMatB(2,1,isym)+t3*SymMatB(3,1,isym)
           r2=t1*SymMatB(1,2,isym)+t2*SymMatB(2,2,isym)+t3*SymMatB(3,2,isym)
           r3=t1*SymMatB(1,3,isym)+t2*SymMatB(2,3,isym)+t3*SymMatB(3,3,isym)
-          if ( r1 < 0.0d0 ) r1=r1+num(1)
-          if ( r2 < 0.0d0 ) r2=r2+num(2)
-          if ( r3 < 0.0d0 ) r3=r3+num(3)
-          if ( r1 > dble(num(1)) .or. r2 > dble(num(2)) .or. r3 > dble(num(3)) ) then
-             write(*,*) "xxxxx ",r1,r2,r3
-             stop "xxxxx"
-          end if
-!          write(*,'(1x,i4,2x,3i4,2x,3f8.3)') isym,i1,i2,i3,r1,r2,r3
-          j1=nint(r1); d1=abs(r1-j1)
-          j2=nint(r2); d2=abs(r2-j2)
-          j3=nint(r3); d3=abs(r3-j3)
-          if ( d1 > 1.d-3 .or. d2 > 1.d-3 .or. d3 > 1.d-3 ) then
-             write(*,*) "yyyyy",r1,r2,r3
-             stop "yyyyy"
-          end if
+          j1=periodic_grid_index(r1,num(1))
+          j2=periodic_grid_index(r2,num(2))
+          j3=periodic_grid_index(r3,num(3))
           if ( icheck(j1,j2,j3) == 0 ) then
              icheck(j1,j2,j3) = 1 + i1 + i2*num(1) + i3*num(1)*num(2)
           end if
@@ -180,7 +168,7 @@ write(*,*) "sym_rho(1)"
     implicit none
     real(8),intent(inout) :: rho(:,:,:)
     integer :: i1,i2,i3,j1,j2,j3,isym,is1,is2,is3
-    real(8) :: t1,t2,t3,r1,r2,r3,d1,d2,d3,fac
+    real(8) :: t1,t2,t3,r1,r2,r3,fac
     real(8),allocatable :: work(:,:,:),wtmp(:,:,:)
     if ( .not.use_symmetry ) return
     call nvtxStartRange('sym_rho', __LINE__)
@@ -198,7 +186,7 @@ write(*,*) "sym_rho(1)"
     is3=is(3)-1
     fac=1.0d0/nsym
 !$omp parallel do collapse(3) private(i1,i2,i3,isym)  &
-!$omp             private(t1,t2,t3,r1,r2,r3,j1,j2,j3,d1,d2,d3) &
+!$omp             private(t1,t2,t3,r1,r2,r3,j1,j2,j3) &
 !$omp             reduction(+:rho)
     do i3=is(3),ie(3)
     do i2=is(2),ie(2)
@@ -210,20 +198,9 @@ write(*,*) "sym_rho(1)"
           r1=t1*SymMatB(1,1,isym)+t2*SymMatB(2,1,isym)+t3*SymMatB(3,1,isym)
           r2=t1*SymMatB(1,2,isym)+t2*SymMatB(2,2,isym)+t3*SymMatB(3,2,isym)
           r3=t1*SymMatB(1,3,isym)+t2*SymMatB(2,3,isym)+t3*SymMatB(3,3,isym)
-          if ( r1 < 0.0d0 ) r1=r1+num(1)
-          if ( r2 < 0.0d0 ) r2=r2+num(2)
-          if ( r3 < 0.0d0 ) r3=r3+num(3)
-          if ( r1 >= dble(num(1)) .or. r2 >= dble(num(2)) .or. r3 >= dble(num(3)) ) then
-             write(*,*) "xxxxx ",r1,r2,r3
-             stop "xxxxx"
-          end if
-          j1=nint(r1); d1=abs(r1-j1)
-          j2=nint(r2); d2=abs(r2-j2)
-          j3=nint(r3); d3=abs(r3-j3)
-          if ( d1 > 1.d-3 .or. d2 > 1.d-3 .or. d3 > 1.d-3 ) then
-             write(*,*) "yyyyy",r1,r2,r3
-             stop "yyyyy"
-          end if
+          j1=periodic_grid_index(r1,num(1))
+          j2=periodic_grid_index(r2,num(2))
+          j3=periodic_grid_index(r3,num(3))
           rho(i1-is1,i2-is2,i3-is3)=rho(i1-is1,i2-is2,i3-is3)+fac*work(j1,j2,j3)
        end do
     end do
@@ -234,5 +211,26 @@ write(*,*) "sym_rho(1)"
     call nvtxEndRange
   end subroutine sym_rho
 #endif
+
+
+  integer function periodic_grid_index(coordinate,extent) result(index)
+    use,intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: coordinate
+    integer,intent(in) :: extent
+    integer :: nearest
+
+    if (.not.ieee_is_finite(coordinate).or.extent<=0) &
+      error stop 'density symmetry: invalid periodic grid coordinate or extent'
+    if (abs(coordinate)>=dble(huge(nearest))) &
+      error stop 'density symmetry: periodic grid coordinate exceeds integer range'
+    nearest=nint(coordinate)
+    if (abs(coordinate-dble(nearest))>1d-3) &
+      error stop 'density symmetry: operation is not commensurate with the grid'
+    ! Wrap after rounding: a tiny negative coordinate can round to N when
+    ! N is added in real arithmetic. Both initialization and application
+    ! must use the same0..N-1 periodic representative.
+    index=modulo(nearest,extent)
+  end function periodic_grid_index
 
 end module sym_rho_sub
