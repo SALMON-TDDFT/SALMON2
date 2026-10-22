@@ -1,0 +1,32 @@
+diff --git a/source/soc_exchange_workers.rst b/source/soc_exchange_workers.rst
+new file mode 100644
+--- /dev/null
++++ b/source/soc_exchange_workers.rst
+@@ -0,0 +1,27 @@
++SOC exchange MPI workers
++========================
++
++For static CPU SOC HSE06 with ordinary ACE, full q points, full spatial
++support, and an orthogonal symmetry-reduced k mesh, set ``nproc_k`` in
++``&parallel`` to the SCF owner count. Launch additional MPI ranks to assign
++r/rprime exchange blocks to workers. For example, ``nproc_k=4`` with 12 MPI
++ranks retains four SCF owners and uses all twelve ranks for exchange work.
++The total rank count may exceed the full or representative k-point count.
++Workers do not hold SCF wavefunctions or ACE factors. This route currently
++supports static GS only; it does not enable empty-k SCF or RT workers.
++Omitting ``nproc_k`` retains ordinary decomposition.
++
++``exx_worker_tile_divisor`` (integer, default 16) and
++``exx_worker_rprime_groups`` (integer, default 1) belong to ``&functional``.
++Both must be positive; the rprime group count must divide the total MPI
++rank count. Normally leave these controls at their defaults. Historical
++worker environment variables are not read. Unsupported helper layouts,
++including band unfolding, are rejected before workers enter their loop.
++
++``exx_k_algorithm='auto'`` now selects full spinor pairs for eligible native
++CPU full-q SOC HSE06; unsupported backends retain reference selection.
++Explicit ``reference`` and compatible legacy switches remain available.
++This changes the exchange implementation, not physical approximation
++parameters. The integrated implementation has local GNU MPI regression
++coverage; these tests do not certify large-scale capacity or Fujitsu
++production accuracy/performance.

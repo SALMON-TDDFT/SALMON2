@@ -26,6 +26,7 @@ module communication
   integer, public, parameter  :: COMM_PROC_NULL  = DEAD_BEEF
 
   ! call once
+  public :: comm_select_application
   public :: comm_init
   public :: comm_finalize
 
@@ -284,6 +285,12 @@ contains
   subroutine comm_init
     implicit none
     ! no operation
+  end subroutine
+
+  subroutine comm_select_application(nowners)
+    implicit none
+    integer,intent(in) :: nowners
+    if(nowners/=1)error stop 'Exchange helpers require an MPI-enabled build'
   end subroutine
 
   subroutine comm_finalize

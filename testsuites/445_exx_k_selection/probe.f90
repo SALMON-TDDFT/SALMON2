@@ -2,7 +2,11 @@ program probe
   use exx_k_selection, only: resolve_k_algorithm
   implicit none
   call check('auto',.false.,' ',' ',' ','nyn',0)
-  call check('auto',.true.,' ',' ',' ','nnn',0)
+  call check('auto',.true.,' ',' ',' ','nny',0)
+  call check('auto',.true.,'y',' ',' ','ynn',0)
+  call check('auto',.true.,' ',' ','n','nnn',0)
+  call check('auto',.true.,' ',' ',' ','nnn',0,supported=.false.)
+  call check('auto',.true.,'n','n','n','nnn',0)
   call check('reference',.false.,' ',' ',' ','nnn',0)
   call check('reference',.true.,' ',' ',' ','nnn',0)
   call check('pair',.false.,' ',' ',' ','nyn',0)
@@ -21,17 +25,18 @@ program probe
   call check('auto',.true.,'y',' ','y','nnn',1)
   print *, 'EXX_K_SELECTION_PASS'
 contains
-  subroutine check(mode,spinor,old_orbits,old_pairs,old_spinor,expected,error)
+  subroutine check(mode,spinor,old_orbits,old_pairs,old_spinor,expected,error,supported)
     implicit none
     character(*),intent(in) :: mode,expected
     character(1),intent(in) :: old_orbits,old_pairs,old_spinor
     logical,intent(in) :: spinor
     integer,intent(in) :: error
+    logical,optional,intent(in) :: supported
     character(1) :: orbits,pairs,spin_pairs
     character(120) :: reason
     integer :: ierr
     orbits=old_orbits;pairs=old_pairs;spin_pairs=old_spinor
-    call resolve_k_algorithm(mode,spinor,orbits,pairs,spin_pairs,reason,ierr)
+    call resolve_k_algorithm(mode,spinor,orbits,pairs,spin_pairs,reason,ierr,supported)
     if(ierr/=error)then
       print *, mode,old_orbits,old_pairs,old_spinor,reason,ierr,error
       stop 1

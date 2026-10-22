@@ -64,7 +64,7 @@ def main():
                 env=dict(os.environ,OMP_NUM_THREADS=str(args.threads),OPENBLAS_NUM_THREADS='1'),timeout=1800).returncode
         log=(d/'run.log').read_text()
         assert rc==0 and 'end SALMON' in log and 'ERROR STOP' not in log,name+' failed'
-        expected='spinor_pair' if args.k_algorithm=='pair' or args.pair_fft=='y' else 'reference'
+        expected='spinor_pair' if args.k_algorithm=='pair' or args.pair_fft=='y' or (args.k_algorithm=='auto' and args.pair_fft!='n') else 'reference'
         assert 'selected='+expected in log, name+' algorithm selection not logged'
         return d,log
     energies={}

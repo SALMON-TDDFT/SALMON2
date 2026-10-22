@@ -23,7 +23,11 @@ module communication
   integer, public, parameter :: ROOT_PROCID     = 0
   integer, public, parameter :: COMM_PROC_NULL  = MPI_PROC_NULL
 
+  ! Deliberately shared application context: helpers use MPI_COMM_WORLD directly.
+  integer, private, save :: application_comm = MPI_COMM_NULL
+
   ! call once
+  public :: comm_select_application
   public :: comm_init
   public :: comm_finalize
 
@@ -299,11 +303,38 @@ module communication
 
 contains
   subroutine comm_init
-    use mpi, only: MPI_THREAD_FUNNELED
+    use mpi, only: MPI_THREAD_FUNNELED,MPI_COMM_WORLD,MPI_Initialized
     implicit none
-    integer :: ierr
-    integer :: iprovided
-    MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED, iprovided, ierr))
+    integer :: ierr,iprovided
+    logical :: initialized
+    MPI_ERROR_CHECK(call MPI_Initialized(initialized,ierr))
+    if(.not.initialized)then
+      MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED,iprovided,ierr))
+    endif
+    if(application_comm==MPI_COMM_NULL)application_comm=MPI_COMM_WORLD
+  end subroutine
+
+  subroutine comm_select_application(nowners)
+    use mpi, only: MPI_COMM_WORLD,MPI_Comm_rank,MPI_Comm_size,MPI_Allreduce,MPI_INTEGER,MPI_MIN,MPI_MAX, &
+      MPI_Comm_split,MPI_Abort
+    implicit none
+    integer,intent(in) :: nowners
+    integer :: ierr,worldrank,worldsize,low,high,color
+    MPI_ERROR_CHECK(call MPI_Comm_rank(MPI_COMM_WORLD,worldrank,ierr))
+    MPI_ERROR_CHECK(call MPI_Comm_size(MPI_COMM_WORLD,worldsize,ierr))
+    MPI_ERROR_CHECK(call MPI_Allreduce(nowners,low,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr))
+    MPI_ERROR_CHECK(call MPI_Allreduce(nowners,high,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr))
+    if(low/=high.or.low<1.or.high>worldsize)then
+      if(worldrank==0)print *, 'Invalid exchange SCF owner count'
+      call MPI_Abort(MPI_COMM_WORLD,82,ierr)
+      return
+    endif
+    if(nowners==worldsize)then
+      application_comm=MPI_COMM_WORLD
+    else
+      color=merge(0,1,worldrank<nowners)
+      MPI_ERROR_CHECK(call MPI_Comm_split(MPI_COMM_WORLD,color,worldrank,application_comm,ierr))
+    endif
   end subroutine
 
   subroutine comm_finalize
@@ -313,10 +344,9 @@ contains
   end subroutine
 
   subroutine comm_get_globalinfo(ngid, npid, nprocs)
-    use mpi, only: MPI_COMM_WORLD
     implicit none
     integer, intent(out) :: ngid, npid, nprocs
-    ngid = MPI_COMM_WORLD
+    ngid = application_comm
     call get_rank(ngid, npid, nprocs)
   end subroutine
 
@@ -369,14 +399,13 @@ contains
   end subroutine
 
   subroutine comm_sync_all(ngid)
-    use mpi, only: MPI_COMM_WORLD
     implicit none
     integer, intent(in), optional :: ngid
     integer :: ierr
     if (present(ngid)) then
       MPI_ERROR_CHECK(call MPI_Barrier(ngid, ierr))
     else
-      MPI_ERROR_CHECK(call MPI_Barrier(MPI_COMM_WORLD, ierr))
+      MPI_ERROR_CHECK(call MPI_Barrier(application_comm, ierr))
     end if
   end subroutine
 

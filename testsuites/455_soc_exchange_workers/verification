@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import json
+assert 'SOC_NATIVE_HELPERS_PASS' in Path('outputfile').read_text()
+summary = json.loads(Path('comparison/summary.json').read_text())
+assert set(summary) == {'owners4', 'helpers8', 'helpers12'}
+assert all(case['exit'] == 0 for case in summary.values())

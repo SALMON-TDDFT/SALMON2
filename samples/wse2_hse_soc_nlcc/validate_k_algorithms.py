@@ -69,7 +69,7 @@ def main():
             setting = "exx_k_algorithm='%s'" % mode
             if mode == 'legacy-pair':
                 setting = "yn_exx_spinor_pair_fft='y'"
-            selected = 'spinor_pair' if mode in ('pair', 'legacy-pair') else 'reference'
+            selected = 'spinor_pair' if mode in ('auto', 'pair', 'legacy-pair') else 'reference'
             d, _ = run('rt-'+axis+'-'+mode, text.replace("xc='hse06'", "xc='hse06',"+setting),
                        original/'sym.dat', selected=selected)
             actual = rows(d/'Si_rt.data')

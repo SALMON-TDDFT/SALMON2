@@ -302,7 +302,8 @@ contains
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
       & yn_hse_profile, &
       & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
-      & hse_q_reduction, hse_block_rows, hse_fft_layout, hse_reference_export_directory, &
+      & hse_q_reduction, hse_block_rows, exx_worker_tile_divisor, exx_worker_rprime_groups, &
+      & hse_fft_layout, hse_reference_export_directory, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -804,6 +805,8 @@ contains
     yn_hse_wannier_snapshot = 'n'
     hse_q_reduction = 1
     hse_block_rows = 0
+    exx_worker_tile_divisor = 16
+    exx_worker_rprime_groups = 1
     hse_fft_layout = 'auto'
     hse_reference_export_directory = 'none'
     alibx = 'none'
@@ -1458,6 +1461,8 @@ contains
     call comm_bcast(yn_hse_wannier_snapshot,nproc_group_global)
     call comm_bcast(hse_q_reduction,nproc_group_global)
     call comm_bcast(hse_block_rows,nproc_group_global)
+    call comm_bcast(exx_worker_tile_divisor,nproc_group_global)
+    call comm_bcast(exx_worker_rprime_groups,nproc_group_global)
     call comm_bcast(hse_fft_layout,nproc_group_global)
     call string_lowercase(hse_fft_layout)
     call comm_bcast(hse_reference_export_directory,nproc_group_global)
@@ -1918,7 +1923,9 @@ contains
     ! Resolve normalized, broadcast input once; legacy flags are blank only when omitted.
     call string_lowercase(yn_spinorbit)
     call resolve_k_algorithm(exx_k_algorithm,yn_spinorbit=='y',yn_exx_fft_orbits, &
-      yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii)
+      yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii, &
+      spinor_pair_supported=xc=='hse06'.and.yn_dc=='n'.and.exx_kpoint_backend=='cpu'.and. &
+        all(hse_q_reduction==1))
     if(ii/=0)then
       if(comm_is_root(nproc_id_global))write(*,'(a)')trim(exx_k_algorithm_reason)
       error stop 'Invalid EXX k algorithm selection'
@@ -2535,6 +2542,8 @@ contains
       write(fh_variables_log, *) "# yn_hse_wannier_snapshot=",yn_hse_wannier_snapshot
       write(fh_variables_log, *) "# hse_q_reduction=",hse_q_reduction
       write(fh_variables_log, *) "# hse_block_rows=",hse_block_rows
+      write(fh_variables_log, *) "# exx_worker_tile_divisor=",exx_worker_tile_divisor
+      write(fh_variables_log, *) "# exx_worker_rprime_groups=",exx_worker_rprime_groups
       write(fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
       write(fh_variables_log, *) "# hse_reference_export_directory=",hse_reference_export_directory
 #ifdef USE_LIBXC
@@ -3453,6 +3462,8 @@ contains
         error stop 'HSE: q reduction requires non-DC integer full-k CPU exchange without spatial localization'
     endif
     if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
+    if(exx_worker_tile_divisor<1)error stop 'HSE: exx_worker_tile_divisor must be positive'
+    if(exx_worker_rprime_groups<1)error stop 'HSE: exx_worker_rprime_groups must be positive'
     if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
       error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
     if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'

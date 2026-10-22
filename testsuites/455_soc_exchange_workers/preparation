@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+# The comparison driver creates fresh cases; no GS restart dependencies.

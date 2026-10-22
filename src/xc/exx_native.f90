@@ -3,6 +3,9 @@
 ! Gamma hybrid SCF and native mesh RT preserve three-dimensional Cartesian spatial blocks.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
+#ifdef USE_MPI
+  use exx_worker_service, only: service_enabled,service_exchange
+#endif
   use exx_blas_threads, only: exx_blas_thread_control
   use exx_sparse_orbitals, only: sparse_pack,sparse_clear,sparse_column
   use exx_functional, only: exchange_fraction,exchange_screening
@@ -963,6 +966,13 @@ contains
         if(total_error/=0)then
           ierr=1;return
         endif
+#ifdef USE_MPI
+        if(service_enabled())then
+          call service_exchange(kernel,symmetry_map,expanded_source,target,action,layout(:np), &
+            layout(np+1:),info%ik_s,info%id_k,info%icomm_k,ierr)
+          return
+        endif
+#endif
         allocate(expanded_action(size(expanded_target,1),size(expanded_target,2),size(expanded_target,3)))
         call exx_spinor_apply_distributed(kernel,expanded_source,expanded_target,expanded_action,layout(:np), &
           layout(np+1:),info%id_k,info%icomm_k,transpose_k_tiles,ierr,pair_tiles=spinor_pair_fft_requested())

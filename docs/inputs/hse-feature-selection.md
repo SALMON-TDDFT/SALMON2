@@ -80,16 +80,14 @@ Normal inputs omit `exx_k_algorithm` and all three legacy switches.
 
 | Selection | Behavior |
 |---|---|
-| `auto` | Existing scalar Hermitian pairs when eligible; reference for scalar symmetry/unsupported layouts and for SOC. |
+| `auto` | Existing scalar Hermitian pairs when eligible; full SOC pairs on supported native CPU full-q HSE06; reference on unsupported automatic layouts. |
 | `reference` | Disable these k-exchange reuse routes for comparisons. Physical settings and other backends are unchanged. |
 | `pair` | Scalar Hermitian pairs without crystal symmetry; full pairs for all four SOC spin blocks, including SU(2) crystal expansion. |
 | `orbits` | Existing scalar crystal-symmetry FFT reuse; existing mesh and symmetry restrictions apply. |
 
 The selector does not change physical kernels, precision, occupations, k points,
 SR cutoffs, ACE approximation settings or checkpoint formats. In particular it
-does not infer a finite SR cutoff from a requested optimization. SOC pair timing
-and RSS are not yet certified on Fugaku, so `auto` deliberately retains the
-reference route there. The same rules apply independently to GS and RT. RT still
+does not infer a finite SR cutoff from a requested optimization. SOC pair performance and full-run memory require workload-specific measurement; automatic selection is not a speedup or capacity guarantee. The same rules apply independently to GS and RT. RT still
 requires a field-preserving subgroup (`nyy` for x, `yny` for y in this fixture).
 
 Explicit `pair`/`orbits` require an eligible fixed-ion, full-support native CPU,
@@ -122,3 +120,23 @@ because they choose approximation/history behavior or explicit diagnostics, not
 an interchangeable native-k implementation. Historical learned/orbits inputs
 continue through the compatibility switch; the new manual selectors do not
 broaden the certified learned-route combinations.
+
+## Additional SOC exchange MPI workers
+
+For static, fixed-ion, full-support SOC HSE06 with ordinary ACE, CPU/full-q
+and an eligible orthogonal crystal-symmetry k layout, `nproc_k` is the number
+of SCF owners. Launching more MPI ranks assigns the remaining ranks to bounded
+r/rprime exchange tasks; they hold no SCF wavefunctions or ACE factors.
+The owners retain their k, SCF, and ACE communicator. Native empty-k guards
+are not removed. This is an exchange-only service, not a full empty-k SCF layout.
+
+`exx_worker_tile_divisor=16` and `exx_worker_rprime_groups=1` are conservative
+namelist defaults; both can be specified in `&functional`. The latter must divide
+the total MPI rank count. Existing saved candidate environment variables are not
+read by this integrated implementation. Unsupported helper layouts are rejected
+collectively before service entry. No-helper inputs retain the normal path.
+
+This integration preserves the existing numerical kernel. Historical local
+helper comparisons passed, while the earlier Fujitsu build/layout-dependent
+SCF discrepancy remains documented and does not establish production acceptance
+for a newly built executable. Existing jobs/binaries are not replaced.

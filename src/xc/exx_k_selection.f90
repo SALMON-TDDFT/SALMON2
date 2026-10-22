@@ -4,28 +4,39 @@ module exx_k_selection
   private
   public :: resolve_k_algorithm
 contains
-  subroutine resolve_k_algorithm(mode,spinor,orbits,pairs,spin_pairs,reason,ierr)
+  subroutine resolve_k_algorithm(mode,spinor,orbits,pairs,spin_pairs,reason,ierr,spinor_pair_supported)
     implicit none
     character(*),intent(in) :: mode
     logical,intent(in) :: spinor
+    logical,optional,intent(in) :: spinor_pair_supported
     character(1),intent(inout) :: orbits,pairs,spin_pairs
     character(*),intent(out) :: reason
     integer,intent(out) :: ierr
     character(1) :: selected(3),legacy(3)
     integer :: i
-    logical :: explicit_legacy
+    logical :: explicit_legacy,eligible
     ierr=1;reason='Invalid exx_k_algorithm or legacy yes/no value'
     legacy=[orbits,pairs,spin_pairs]
     do i=1,3
       if(legacy(i)/=' '.and.legacy(i)/='y'.and.legacy(i)/='n')return
     enddo
     explicit_legacy=any(legacy/=' ')
+    eligible=.true.
+    if(present(spinor_pair_supported))eligible=spinor_pair_supported
     selected=['n','n','n']
     select case(mode)
     case('auto')
       if(.not.spinor)selected(2)='y'
       reason='auto: eligible scalar pairs; reference otherwise'
-      if(spinor)reason='auto: conservative spinor reference; pair performance not certified'
+      if(spinor)then
+        reason='auto: spinor reference for unsupported pair backend'
+        if(eligible)then
+          selected(3)='y'
+          reason='auto: full spinor real-space pairs'
+        endif
+      endif
+      ! An old orbit request predates automatic spinor pairs; do not add a conflicting route.
+      if(legacy(1)=='y'.and.legacy(3)==' ')selected(3)='n'
       do i=1,3
         if(legacy(i)/=' ')selected(i)=legacy(i)
       enddo
