@@ -60,12 +60,20 @@ subroutine input_pp(pp,hx,hy,hz)
   if (comm_is_root(nproc_id_global)) then
 
     do ik=1,nelem
-         
+      ! Format state and radial scratch belong to this species only.
+      flag_potential_is_given=.true.
+      flag_beta_proj_is_given=.false.
+      flag_so=.false.
+      rrc=0d0
+      rhor_nlcc=0d0
+      pp%vpp=0d0; pp%vpp_so=0d0; pp%upp=0d0
+      pp%anorm_so(:,ik)=0d0
+      pp%inorm_so(:,ik)=0
       ps_file = trim(file_pseudo(ik))
 
       select case (ps_format(ik))
       case('KY')
-        call read_ps_ky(pp,rrc,ik,ps_file)
+        call read_ps_ky(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
       case('ABINIT')
         call read_ps_abinit(pp,rrc,ik,ps_file)
       case('ABINITFHI')
@@ -285,9 +293,9 @@ subroutine input_pp(pp,hx,hy,hz)
   return
 end subroutine input_pp
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine read_ps_ky(pp,rrc,ik,ps_file)
+subroutine read_ps_ky(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   use structures,only : s_pp_info
-  use salmon_global,only : Lmax_ps
+  use salmon_global,only : Lmax_ps,nelem
   use inputoutput,only : au_length_aa, au_energy_ev
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -296,11 +304,23 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   real(8),intent(out) :: rrc(0:pp%lmax0)
   character(256),intent(in) :: ps_file
 !local variable
+  real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
+  logical,intent(inout) :: flag_nlcc_element(nelem)
+  character(512) :: header_line
   integer :: l,i,irPC
   real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps
 
+  rhor_nlcc=0d0
+  flag_nlcc_element(ik)=.false.
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
+  read(4,'(a)')header_line
+  if(trim(header_line)=='KY_SOC_NLCC_V1')then
+    close(4)
+    call read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+    return
+  endif
+  backspace(4)
   pp%zps(ik)=int(rzps+1d-10)
   if(pp%mr(ik) .gt.pp%nrmax0) stop 'Mr>Nrmax0 at Read_PS_KY'
   if(pp%mlps(ik).gt.pp%lmax0) stop 'Mlps(ik)>Lmax0 at Read_PS_KY'
@@ -339,6 +359,105 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
 
   return
 end subroutine read_ps_KY
+
+! CRPS j-resolved KB projectors. vpp is j=l+1/2, vpp_so is j=l-1/2;
+! these are NOT a scalar potential and an L.S coefficient in SALMON.
+subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+ use structures,only:s_pp_info
+ use salmon_global,only:nelem,Lmax_ps,yn_spinorbit
+ use inputoutput,only:au_length_aa,au_energy_ev
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ implicit none
+ type(s_pp_info),intent(inout)::pp
+ real(8),intent(out)::rrc(0:pp%lmax0),rhor_nlcc(0:pp%nrmax0,0:2)
+ logical,intent(inout)::flag_nlcc_element(nelem)
+ integer,intent(in)::ik
+ character(*),intent(in)::ps_file
+ integer::unit,ios,n,lm,nc,ipc,lloc,k,i,ll,jj,expected_l,expected_j
+ real(8)::h,zval,rc,oc,ep,r,vlocal,rho,drho,ddrho,norm,scale
+ character(512)::line
+ integer,allocatable::ls(:),js(:)
+ real(8),allocatable::wave(:,:),potential(:,:),vl(:),beta(:),occupation(:)
+ if(yn_spinorbit/='y') error stop 'KY_SOC_NLCC requires yn_spinorbit=y'
+ open(newunit=unit,file=ps_file,status='old',action='read')
+ read(unit,*,iostat=ios)n,h,lm,zval
+ if(ios/=0) error stop 'KY_SOC_NLCC invalid header'
+ if(n<4.or.n>pp%nrmax0.or.n+2>size(pp%rad,1).or.lm<0.or.lm>pp%lmax0.or.lm>pp%lmax) &
+  error stop 'KY_SOC_NLCC dimensions exceed allocation'
+ if(.not.ieee_is_finite(h).or..not.ieee_is_finite(zval)) error stop 'KY_SOC_NLCC nonfinite header'
+ if(h<=0d0.or.zval<=0d0.or.abs(zval-nint(zval))>1d-10) error stop 'KY_SOC_NLCC invalid charge/grid'
+ if(Lmax_ps(ik)>=0.and.Lmax_ps(ik)/=lm) error stop 'KY_SOC_NLCC channel truncation unsupported'
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='KY_SOC_NLCC_V1') error stop 'KY_SOC_NLCC version mismatch'
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='ANGSTROM EV U_R_INV_SQRT_ANGSTROM RHO_INV_ANGSTROM3') &
+  error stop 'KY_SOC_NLCC units mismatch'
+ read(unit,*,iostat=ios)ipc,lloc,nc
+ if(ios/=0) error stop 'KY_SOC_NLCC invalid channel header'
+ if(ipc<0.or.ipc>=n.or.lloc<0.or.lloc>lm.or.nc/=2*lm+1) error stop 'KY_SOC_NLCC invalid channels'
+ allocate(ls(nc),js(nc),occupation(nc),wave(0:n,nc),potential(0:n,nc),vl(0:n),beta(0:n))
+ rrc=0d0;rhor_nlcc=0d0
+ do k=1,nc
+  read(unit,*,iostat=ios)ll,jj,rc,oc,ep
+  if(ios/=0) error stop 'KY_SOC_NLCC incomplete channel'
+  expected_l=k/2;expected_j=2*expected_l-1
+  if(mod(k,2)==1)expected_j=2*expected_l+1
+  if(ll/=expected_l.or.jj/=expected_j)error stop 'KY_SOC_NLCC channel order mismatch'
+  if(.not.all(ieee_is_finite([rc,oc,ep])))error stop 'KY_SOC_NLCC nonfinite channel'
+  if(rc<=0d0.or.rc>n*h.or.oc<0d0.or.oc>jj+1d0+1d-10)error stop 'KY_SOC_NLCC invalid channel metadata'
+  ls(k)=ll;js(k)=jj;occupation(k)=oc
+  rrc(ll)=max(rrc(ll),rc/au_length_aa)
+ enddo
+ if(abs(sum(occupation)-zval)>1d-8)error stop 'KY_SOC_NLCC occupation/charge mismatch'
+ do i=0,n
+  read(unit,*,iostat=ios)r,vlocal,rho,drho,ddrho,(potential(i,k),wave(i,k),k=1,nc)
+  if(ios/=0)error stop 'KY_SOC_NLCC incomplete radial row'
+  if(.not.all(ieee_is_finite([r,vlocal,rho,drho,ddrho])).or.&
+     .not.all(ieee_is_finite(potential(i,:))).or..not.all(ieee_is_finite(wave(i,:)))) &
+   error stop 'KY_SOC_NLCC nonfinite radial data'
+  if(abs(r-i*h)>1d-10*max(1d0,r).or.rho<0d0)error stop 'KY_SOC_NLCC invalid radius/density'
+  if(ipc==0.and.any([rho,drho,ddrho]/=0d0))error stop 'KY_SOC_NLCC nonzero core-off density'
+  vl(i)=vlocal/au_energy_ev
+  rhor_nlcc(i,0)=rho*au_length_aa**3
+  rhor_nlcc(i,1)=drho*au_length_aa**4
+  rhor_nlcc(i,2)=ddrho*au_length_aa**5
+ enddo
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='END_KY_SOC_NLCC_V1')error stop 'KY_SOC_NLCC missing end marker'
+ read(unit,'(a)',iostat=ios)line
+ if(ios>=0)error stop 'KY_SOC_NLCC unexpected trailing data'
+ close(unit)
+ if(ipc>0.and.rhor_nlcc(0,0)<=0d0)error stop 'KY_SOC_NLCC empty enabled core'
+ pp%mr(ik)=n;pp%mlps(ik)=lm;pp%zps(ik)=nint(zval);pp%zion=zval
+ pp%nproj(:,ik)=0;pp%nproj(0:lm,ik)=1
+ pp%lref(ik)=ubound(pp%vpp,2)
+ pp%vpp=0d0;pp%vpp_so=0d0;pp%upp=0d0
+ pp%anorm(:,ik)=0d0;pp%anorm_so(:,ik)=0d0
+ do i=1,pp%nrmax
+  pp%rad(i,ik)=(i-1)*h/au_length_aa
+ enddo
+ pp%vpp(0:n,pp%lref(ik))=vl
+ potential=potential/au_energy_ev;wave=wave*sqrt(au_length_aa)
+ h=h/au_length_aa
+ do k=1,nc
+  ll=ls(k)
+  beta=(potential(:,k)-vl)*wave(:,k)
+  if(js(k)==2*ll+1)pp%upp(0:n,ll)=wave(:,k)
+  scale=maxval(abs(potential(:,k)-vl))
+  ! Exactly local channels have no projector; never divide their zero norm.
+  if(scale<=1d-12)cycle
+  norm=h*(sum(wave(:,k)*beta)-.5d0*(wave(0,k)*beta(0)+wave(n,k)*beta(n)))
+  if(.not.ieee_is_finite(norm).or.abs(norm)<=1d-12)error stop 'KY_SOC_NLCC singular KB norm'
+  if(js(k)==2*ll+1)then
+   pp%vpp(0:n,ll)=beta;pp%anorm(ll,ik)=1d0/norm;pp%upp(0:n,ll)=wave(:,k)
+  else
+   pp%vpp_so(0:n,ll)=beta;pp%anorm_so(ll,ik)=1d0/norm
+  endif
+ enddo
+ flag_beta_proj_is_given=.true.
+ flag_nlcc_element(ik)=ipc>0
+end subroutine read_ps_ky_soc
+
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine read_ps_abinit(pp,rrc,ik,ps_file)
   use structures,only : s_pp_info

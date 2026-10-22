@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+# No producer restart; each bounded reader smoke initializes its own wavefunctions.

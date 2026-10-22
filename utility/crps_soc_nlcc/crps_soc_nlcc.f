@@ -30,6 +30,7 @@ c       irPC     radius of partial core (int(radius*100.))
 c       ZPA      charge number of pseudo-atom
 c       occPA(l) occupation number in pseudo-atom
 c
+      use crps_output, only: crps_write_v1
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
 
@@ -65,11 +66,19 @@ c local
       common /aob/nodeA,lA,jA,kA
       real*8 jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
       real*8 joc(NPdim),jenergy(NPdim),vlocal(0:Nr)
-      common /crps_search/c2lo,c2hi
-      common /crps_jdata/jpot,jwave,jenergy
       logical write_legacy
       namelist /crps/ core_radius,c2lo,c2hi,output_file,lloc,
      & write_legacy,ZA,NA,occA,PtoA,cutoff_radius_bohr,Lmax
+
+      interface
+         subroutine Pseudo_Potential(c2lo,c2hi,jpot,jwave,jenergy)
+            import :: NPdim,Nr
+            implicit none
+            real(8),intent(in)::c2lo(NPdim),c2hi(NPdim)
+            real(8),intent(out)::jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
+            real(8),intent(out)::jenergy(NPdim)
+         end subroutine Pseudo_Potential
+      end interface
 
       AtoP=0
       call init
@@ -237,7 +246,7 @@ c no partial core if irPC=0
 c all electron calculation
       call All_Electron
 
-      call Pseudo_Potential
+      call Pseudo_Potential(c2lo,c2hi,jpot,jwave,jenergy)
 
 c Full j-resolved interchange before scalar pseudo-atom iteration.
       ZPA=sum(joc(1:NP))
@@ -795,7 +804,7 @@ c  integrate up to 2.5 times connection radius
       end
 
 C---------------------------------------------------------------------
-      SUBROUTINE Pseudo_Potential
+      SUBROUTINE Pseudo_Potential(c2lo,c2hi,jpot,jwave,jenergy)
       implicit none
 
       common /prm/HC,MC2,H2M,E2,ALP,Pi
@@ -836,11 +845,10 @@ c local
       real*8 p,pd,pdd,rr,vhP,vxcP,V_xc
       real*8 VPion(0:Nr,NPdim)
 
-      real*8 c2lo(NPdim),c2hi(NPdim),scanlo,scanhi,flo,fhi
-      real*8 jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
-      real*8 jenergy(NPdim)
-      common /crps_search/c2lo,c2hi
-      common /crps_jdata/jpot,jwave,jenergy
+      real(8),intent(in)::c2lo(NPdim),c2hi(NPdim)
+      real(8),intent(out)::jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
+      real(8),intent(out)::jenergy(NPdim)
+      real(8)::scanlo,scanhi,flo,fhi
 
       do 5 ix=0,Nx
          xa(ix)=Rx(2*ix)

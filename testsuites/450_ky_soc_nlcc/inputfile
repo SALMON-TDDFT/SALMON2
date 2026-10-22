@@ -1,0 +1,2 @@
+# Reader and generator regression uses fixed fixtures in testsuites/pseudo.
+# No ground-state or time-evolution production run is started by this test.

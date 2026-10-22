@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from pathlib import Path
+text=Path('outputfile').read_text()
+assert 'KY_SOC_NLCC_REGRESSION_PASS' in text,text
+assert 'FAILED (' not in text,text

@@ -1,0 +1,8 @@
+if(USE_MPI)
+  set(TEST_COMMAND "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_smoke.py --binary ${CMAKE_BINARY_DIR}/${TARGET_NAME} --mpi ${MPIEXEC_EXECUTABLE} --np-flag=${MPIEXEC_NUMPROC_FLAG}")
+else()
+  set(TEST_COMMAND "${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_smoke.py --binary ${CMAKE_BINARY_DIR}/${TARGET_NAME}")
+endif()
+create_test()
+set_tests_properties(run_451_ky_reader_smoke PROPERTIES FIXTURES_SETUP run_451_ky_reader_smoke TIMEOUT 480 PROCESSORS 2)
+set_tests_properties(prep_451_ky_reader_smoke run_451_ky_reader_smoke verify_451_ky_reader_smoke PROPERTIES LABELS "pseudo;soc;nlcc;integration")

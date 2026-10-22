@@ -1,3 +1,9 @@
+module crps_output
+ implicit none
+ private
+ public :: crps_write_v1
+contains
+
 ! Versioned CRPS interchange. Density is rho(r), NOT 4*pi*r^2*rho(r).
 subroutine crps_write_v1(path,n,h,lmax,zval,nc,ipc,lloc,ls,js,rc,occ,eps,rho,vl,v,u)
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -36,4 +42,6 @@ subroutine crps_write_v1(path,n,h,lmax,zval,nc,ipc,lloc,ls,js,rc,occ,eps,rho,vl,
  end do
  write(unit,'(a)')'END_KY_SOC_NLCC_V1'
  close(unit)
-end subroutine
+end subroutine crps_write_v1
+
+end module crps_output

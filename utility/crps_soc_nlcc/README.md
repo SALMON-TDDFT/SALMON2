@@ -13,7 +13,7 @@ GNU Fortranが必要です。以下はこのディレクトリから実行する
 
 ```sh
 gfortran -std=legacy -O0 -fcheck=all -fbacktrace -Wno-align-commons \
-  crps_soc_nlcc.f crps_output.f90 -o crps_soc_nlcc
+  crps_output.f90 crps_soc_nlcc.f -o crps_soc_nlcc
 mkdir W-run Se-run
 (cd W-run && ../crps_soc_nlcc ../inputs/W.nml > stdout.txt 2> stderr.txt)
 (cd Se-run && ../crps_soc_nlcc ../inputs/Se.nml > stdout.txt 2> stderr.txt)
@@ -27,6 +27,8 @@ c2探索範囲は入力の`c2lo/c2hi`（現在−10.5〜5.0）です。各チャ
 
 ## 使用と検証範囲
 
-生成ファイルの使用には`KY_SOC_NLCC_V1`対応readerとSOC設定が必要です。通常の数値ヘッダーだけの旧KY形式ではありません。ソース保存はSALMON本体の再ビルドや実行ファイルの変更を伴いません。
+生成ファイルの使用には`KY_SOC_NLCC_V1`対応readerとSOC設定が必要です。通常の数値ヘッダーだけの旧KY形式ではありません。本ブランチのSALMONには対応readerを統合しています。ファイルのヘッダーで旧KY／拡張形式を判別し、拡張形式だけはSOC有効時に読みます。SOC無効での暗黙の平均化は行わず拒否します。新readerを使うにはSALMON本体の再ビルドが必要です。稼働中の既存実行ファイルは変更しません。
 
 標準W・Seとの再生成照合結果と全ファイルのSHA256は`provenance.json`を参照してください。固体・メッシュ・光学精度の検証状況は`testsuites/pseudo/crps_soc_nlcc/README.md`に記録しています。元のcrpsAu.fと過去の失敗出力はwork配下に保存しており、変更していません。
+
+Coding Rules対応として出力writerをprivate既定のmoduleに置き、追加した探索範囲・jチャネル配列はCOMMONではなく明示引数とintentで渡しています。450はparser・生成器、451は本体serial／MPI読込の回帰試験です。通常CTestは有限値・構造・数値許容差で比較し、同一ツールチェーンでのバイト一致は来歴に別記します。

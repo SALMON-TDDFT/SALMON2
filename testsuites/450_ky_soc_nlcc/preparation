@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+# Fixtures are read from the source tree; all compiler outputs use temporary directories.

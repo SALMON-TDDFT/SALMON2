@@ -182,3 +182,10 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
       ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/449_symmetry_covariance/test_covariance.py)
   set_tests_properties(symmetry_covariance PROPERTIES LABELS "symmetry;soc;unit" TIMEOUT 60)
 endif()
+
+# Extended KY format and standalone CRPS generator regression, independent of HSE.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_subdirectory(450_ky_soc_nlcc)
+  add_subdirectory(451_ky_reader_smoke)
+endif()

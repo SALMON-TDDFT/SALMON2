@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from pathlib import Path
+assert 'KY_READER_FULL_SERIAL_MPI_SMOKE_PASS' in Path('outputfile').read_text()

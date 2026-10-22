@@ -262,6 +262,8 @@ contains
              l0=0
              do ll=0,pp%mlps(ik)
              do l=l0,l0+pp%nproj(ll,ik)-1
+                ! Match the active-projector indexing in set_nlma_so/set_lma_tbl.
+                if ( pp%inorm(l,ik) == 0 .and. pp%inorm_so(l,ik) == 0 ) cycle
 
                 select case( j_angular_momentum )
                 case( 1 )
