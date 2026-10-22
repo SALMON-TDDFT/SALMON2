@@ -72,8 +72,7 @@ contains
  else
  bad=1
  endif
- if(.not.all(ieee_is_finite(real(target))).or..not.all(ieee_is_finite(aimag(target))).or. &
-  .not.all(ieee_is_finite(real(es))).or..not.all(ieee_is_finite(aimag(es))))bad=1
+ if(.not.spinor_values_are_finite(target).or..not.spinor_values_are_finite(es))bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
  allocate(expected_layout(2*np));expected_layout=[starts,counts]
@@ -315,7 +314,7 @@ contains
  enddo
  enddo ! first row batches
  bad=0
- if(.not.all(ieee_is_finite(real(action))).or..not.all(ieee_is_finite(aimag(action))))bad=1
+ if(.not.spinor_values_are_finite(action))bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad==0)ierr=0
 900 continue
@@ -349,4 +348,17 @@ contains
  endif
  end subroutine
  end subroutine
+ logical function spinor_values_are_finite(a) result(ok)
+ implicit none
+ complex(8),intent(in)::a(:,:,:)
+ integer::i,j,k
+ ok=.true.
+ do k=1,size(a,3)
+ do j=1,size(a,2)
+ do i=1,size(a,1)
+  if(.not.ieee_is_finite(real(a(i,j,k))).or..not.ieee_is_finite(aimag(a(i,j,k))))ok=.false.
+ enddo
+ enddo
+ enddo
+ end function
 end module

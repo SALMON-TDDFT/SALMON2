@@ -413,7 +413,7 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   expected_l=k/2;expected_j=2*expected_l-1
   if(mod(k,2)==1)expected_j=2*expected_l+1
   if(ll/=expected_l.or.jj/=expected_j)error stop 'KY_SOC_NLCC channel order mismatch'
-  if(.not.all(ieee_is_finite([rc,oc,ep])))error stop 'KY_SOC_NLCC nonfinite channel'
+  if(.not.ieee_is_finite(rc).or..not.ieee_is_finite(oc).or..not.ieee_is_finite(ep))error stop 'KY_SOC_NLCC nonfinite channel'
   if(rc<=0d0.or.rc>n*h.or.oc<0d0.or.oc>jj+1d0+1d-10)error stop 'KY_SOC_NLCC invalid channel metadata'
   ls(k)=ll;js(k)=jj;occupation(k)=oc
   rrc(ll)=max(rrc(ll),rc/au_length_aa)
@@ -422,9 +422,13 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
  do i=0,n
   read(unit,*,iostat=ios)r,vlocal,rho,drho,ddrho,(potential(i,k),wave(i,k),k=1,nc)
   if(ios/=0)error stop 'KY_SOC_NLCC incomplete radial row'
-  if(.not.all(ieee_is_finite([r,vlocal,rho,drho,ddrho])).or.&
-     .not.all(ieee_is_finite(potential(i,:))).or..not.all(ieee_is_finite(wave(i,:)))) &
+  if(.not.ieee_is_finite(r).or..not.ieee_is_finite(vlocal).or..not.ieee_is_finite(rho).or.&
+     .not.ieee_is_finite(drho).or..not.ieee_is_finite(ddrho)) &
    error stop 'KY_SOC_NLCC nonfinite radial data'
+  do k=1,nc
+   if(.not.ieee_is_finite(potential(i,k)).or..not.ieee_is_finite(wave(i,k))) &
+    error stop 'KY_SOC_NLCC nonfinite radial data'
+  enddo
   if(abs(r-i*h)>1d-10*max(1d0,r).or.rho<0d0)error stop 'KY_SOC_NLCC invalid radius/density'
   if(ipc==0.and.any([rho,drho,ddrho]/=0d0))error stop 'KY_SOC_NLCC nonzero core-off density'
   vl(i)=vlocal/au_energy_ev

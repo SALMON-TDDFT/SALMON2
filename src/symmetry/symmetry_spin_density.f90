@@ -10,14 +10,25 @@ contains
     complex(8),allocatable::original(:,:,:,:,:)
     complex(8)::local(2,2),rotated(2,2)
     real(8)::rotation(3,3),axial(3,3),unit(3,3),determinant,point(3),frac(3),mag(3),n
-    integer::g(3),index(3),op,i,j,k,nsym,q
+    integer::g(3),index(3),op,i,j,k,nsym,q,isp,jsp
     if(.not.use_symmetry)return
     if(.not.allocated(SymMatA).or..not.allocated(SymMatB))error stop 'SOC density: symmetry unavailable'
     nsym=size(SymMatA,3)
     if(nsym<1.or.size(SymMatB,3)/=nsym)error stop 'SOC density: invalid symmetry count'
     if(size(dm,4)/=2.or.size(dm,5)/=2)error stop 'SOC density: spin matrix shape'
-    if(.not.all(ieee_is_finite(real(dm))).or..not.all(ieee_is_finite(aimag(dm)))) &
-      error stop 'SOC density: nonfinite matrix'
+    do jsp=1,2
+    do isp=1,2
+    do k=1,size(dm,3)
+    do j=1,size(dm,2)
+    do i=1,size(dm,1)
+      if(.not.ieee_is_finite(real(dm(i,j,k,isp,jsp))).or.&
+         .not.ieee_is_finite(aimag(dm(i,j,k,isp,jsp)))) &
+        error stop 'SOC density: nonfinite matrix'
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
     if(maxval(abs(dm(:,:,:,1,2)-conjg(dm(:,:,:,2,1))))>1d-10*max(1d0,maxval(abs(dm)))) &
       error stop 'SOC density: non-Hermitian matrix'
     g=shape(dm(:,:,:,1,1));unit=0d0
@@ -27,8 +38,8 @@ contains
     allocate(original,source=dm);dm=0d0
     do op=1,nsym
       rotation=matmul(Amat,matmul(SymMatA(:,1:3,op),Ainv))
-      if(.not.all(ieee_is_finite(rotation)).or..not.all(ieee_is_finite(SymMatB(:,:,op))).or. &
-         .not.all(ieee_is_finite(SymMatA(:,:,op)))) &
+      if(.not.matrix_is_finite(rotation).or..not.matrix_is_finite(SymMatB(:,:,op)).or. &
+         .not.matrix_is_finite(SymMatA(:,:,op))) &
         error stop 'SOC density: nonfinite operation'
       if(maxval(abs(matmul(transpose(rotation),rotation)-unit))>1d-10) &
         error stop 'SOC density: nonorthogonal Cartesian rotation'
@@ -59,4 +70,15 @@ contains
       enddo
     enddo
   end subroutine
+  logical function matrix_is_finite(a) result(ok)
+    implicit none
+    real(8),intent(in)::a(:,:)
+    integer::i,j
+    ok=.true.
+    do j=1,size(a,2)
+      do i=1,size(a,1)
+        if(.not.ieee_is_finite(a(i,j)))ok=.false.
+      enddo
+    enddo
+  end function
 end module

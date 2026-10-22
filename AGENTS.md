@@ -22,3 +22,9 @@ PZHEEV is prohibited by the human user's instruction (2026-10-22).
 - Do not modify, replace, cancel or resubmit existing remote production jobs or
   fixed binaries without the user's applicable authorization. Audit their actual
   execution paths and report any uncertainty instead of assuming they are safe.
+
+# Mandatory scalar IEEE inquiries
+
+- Use scalar arguments for IEEE inquiry predicates, including `ieee_is_finite` and `ieee_is_nan`. Array-valued inquiries, even inside `all`/`any`, are prohibited.
+- For arrays, use explicit element loops or helpers with scalar IEEE calls. Preserve precision, every-element coverage, thresholds, and collective rejection; do not remove checks to avoid compiler errors.
+- Test finite values and NaN/Infinity rejection and, where affected, Fujitsu compilation. See `CODING_RULES.md` in the active source repository for the complete policy.
