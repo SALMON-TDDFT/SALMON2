@@ -1,6 +1,7 @@
 ! Full periodic sampled hybrid exchange kernel. Unit one-spin source occupations;
 ! neither the hybrid mixing fraction nor a second spin factor is included.
 module exx_k_exchange
+  use exx_collinear_fft,only:collinear_fft_plans,collinear_fft_create,collinear_fft_execute,collinear_fft_destroy
 !$ use omp_lib, only: omp_get_num_threads,omp_get_max_threads
   use exx_k_backend, only: s_exx_k_backend,k_backend_factory
   use iso_fortran_env, only: int64
@@ -10,9 +11,11 @@ module exx_k_exchange
   private
   include 'fftw3.f03'
   public :: exx_k_kernel, exx_k_kernel_init, exx_k_kernel_apply, exx_k_kernel_destroy
+  public :: execute_kernel_fft
   public :: exx_k_kernel_apply_pair_distributed
   public :: exx_k_kernel_apply_distributed
   type exx_k_kernel
+    type(collinear_fft_plans) :: omp_fft,omp_pair_tail
     class(s_exx_k_backend),allocatable :: accelerator
     integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1, nq=0
     logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
@@ -37,7 +40,7 @@ contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
                         block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft)
     implicit none
-    type(exx_k_kernel),intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(in) :: n,mesh,block
     real(c_double),intent(in) :: h,k(:,:),omega
     integer,intent(out) :: ierr
@@ -53,7 +56,7 @@ contains
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
                              block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft)
     implicit none
-    type(exx_k_kernel),intent(inout) :: op
+    type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3),block
     real(c_double),intent(in) :: h(3),omega,k(:,:)
     integer,intent(out) :: ierr
@@ -70,6 +73,7 @@ contains
     real(c_double) :: pi,q2,q(3),scaled(3),radius,a(3,3),bvec(3,3),dual(3,3),position(3),limit
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
     type(c_ptr) :: plan
+    complex(c_double_complex),pointer,contiguous :: flat_work(:)
     ierr=1
     call exx_k_kernel_destroy(op,ierr)
     if(ierr/=0)return
@@ -236,6 +240,9 @@ contains
       op%work,dims,op%block*ng,1,FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
     endif
     if(.not.c_associated(op%forward).or..not.c_associated(op%backward))goto 900
+    flat_work(1:size(op%work))=>op%work
+    call collinear_fft_create(op%omp_fft,coarse,nk,op%block*ng,op%block*ng,op%contiguous_fft,flat_work,ierr)
+    if(ierr/=0)goto 900
     ierr=0;return
 900 call exx_k_kernel_destroy(op)
   end subroutine
@@ -791,15 +798,12 @@ contains
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     type(c_ptr),intent(in) :: plan
-    complex(c_double_complex),pointer :: flat(:)
-    integer :: group,offset,stride
+    complex(c_double_complex),pointer,contiguous :: flat(:)
+    integer :: direction
     flat(1:size(op%work))=>op%work
-    stride=op%block*op%ng
-    if(op%contiguous_fft)stride=1
-    do group=0,op%nk/op%nq-1
-      offset=1+group*op%nq*stride
-      call fftw_execute_dft(plan,flat(offset:),flat(offset:))
-    enddo
+    direction=FFTW_BACKWARD
+    if(c_associated(plan,op%forward))direction=FFTW_FORWARD
+    call collinear_fft_execute(op%omp_fft,flat,direction,op%threads_used)
   end subroutine
 
   subroutine multiply_kernel(op,lo,rows)
@@ -869,6 +873,8 @@ contains
     if(c_associated(op%pair_backward))call fftw_destroy_plan(op%pair_backward)
     op%pair_forward=c_null_ptr;op%pair_backward=c_null_ptr
     op%pair_tail_count=0;op%pair_fft_pairs=0_int64
+    call collinear_fft_destroy(op%omp_fft)
+    call collinear_fft_destroy(op%omp_pair_tail)
     if(allocated(op%work))deallocate(op%work)
     if(allocated(op%distance_index))deallocate(op%distance_index)
     if(allocated(op%order))deallocate(op%order,op%point,op%shift,op%phase,op%kernel)

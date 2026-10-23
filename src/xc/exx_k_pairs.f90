@@ -1,6 +1,7 @@
 ! Hermitian real-space pair reuse on a full uniform k mesh. Only upper
 ! triangular density entries are transformed; targets need not be sources.
 module exx_k_pairs
+  use exx_collinear_fft,only:collinear_fft_create,collinear_fft_execute
   use iso_c_binding
   implicit none
   private
@@ -10,7 +11,7 @@ contains
   subroutine apply_k_pairs(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr)
     use iso_fortran_env, only: int64
     use communication, only: comm_get_groupinfo,comm_summation,comm_bcast
-    use exx_k_exchange, only: exx_k_kernel
+    use exx_k_exchange, only: exx_k_kernel,execute_kernel_fft
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
@@ -30,11 +31,11 @@ contains
     complex(c_double_complex),allocatable :: s(:,:,:),t(:,:,:),reverse(:)
     complex(c_double_complex),allocatable,target :: send(:),recv(:)
     complex(c_double_complex),pointer :: sb(:,:,:),rb(:,:,:),wk(:,:),kw(:,:),pack(:)
+    complex(c_double_complex),pointer,contiguous :: flat_work(:)
     integer,allocatable :: rows(:,:),cols(:,:),active(:),inverse(:),slot(:),layout(:)
     integer :: np,id,ng,nk,batch,km,nmsg,nlocal,no,nt,bad,total_bad,p,j,i,a,r,c,ki,offset(3),dims(3)
     integer :: settings(13),expected(13),flags,tail,length,diagonal
     integer(int64) :: total_pairs,base,first,remaining,stride
-    type(c_ptr) :: forward,backward
     real(c_double) :: stamp
     external :: zgemm,zgeru
     ierr=1;action=zero
@@ -74,6 +75,7 @@ contains
     call comm_summation(bad,total_bad,comm)
     if(total_bad/=0)return
     batch=op%block*ng;nmsg=batch*km
+    flat_work(1:size(op%work))=>op%work
     total_pairs=int(ng,int64)*(int(ng,int64)+1)/2
     stride=int(np,int64)*batch
     ! Only one rank can own a partial final tile. Cache its exact FFT batch.
@@ -81,7 +83,7 @@ contains
     tail=int(max(0_int64,min(int(batch,int64),remaining)))
     if(tail>0.and.tail<batch)then
       if(tail/=op%pair_tail_count.or..not.c_associated(op%pair_forward).or. &
-         .not.c_associated(op%pair_backward))then
+         .not.c_associated(op%pair_backward).or..not.allocated(op%omp_pair_tail%forward))then
         if(c_associated(op%pair_forward))call fftw_destroy_plan(op%pair_forward)
         if(c_associated(op%pair_backward))call fftw_destroy_plan(op%pair_backward)
         dims=op%mesh(3:1:-1);flags=ior(FFTW_ESTIMATE,FFTW_UNALIGNED)
@@ -96,7 +98,12 @@ contains
           op%pair_backward=fftw_plan_many_dft(3,dims,tail,op%work,dims,batch,1, &
             op%work,dims,batch,1,FFTW_BACKWARD,flags)
         endif
-        op%pair_tail_count=tail
+        call collinear_fft_create(op%omp_pair_tail,op%mesh,nk,batch,tail,op%contiguous_fft,flat_work,bad)
+        if(bad==0)then
+          op%pair_tail_count=tail
+        else
+          op%pair_tail_count=0
+        endif
       endif
       if(.not.c_associated(op%pair_forward).or..not.c_associated(op%pair_backward))bad=1
     endif
@@ -162,12 +169,13 @@ contains
       enddo
       if(op%profile)call mark(5)
       if(active(id+1)>0)then
-        forward=op%forward;backward=op%backward
         if(active(id+1)<batch)then
-          forward=op%pair_forward;backward=op%pair_backward
+          call collinear_fft_execute(op%omp_pair_tail,flat_work,FFTW_FORWARD,op%threads_used)
+        else
+          call execute_kernel_fft(op,op%forward)
         endif
-        call fftw_execute_dft(forward,op%work,op%work)
         if(op%profile)call mark(3)
+        !$omp parallel do private(r,c,ki,offset) schedule(static)
         do a=1,active(id+1)
           r=rows(a,id+1);c=cols(a,id+1)
           do ki=1,nk
@@ -179,8 +187,13 @@ contains
             endif
           enddo
         enddo
+        !$omp end parallel do
         if(op%profile)call mark(4)
-        call fftw_execute_dft(backward,op%work,op%work)
+        if(active(id+1)<batch)then
+          call collinear_fft_execute(op%omp_pair_tail,flat_work,FFTW_BACKWARD,op%threads_used)
+        else
+          call execute_kernel_fft(op,op%backward)
+        endif
         if(op%profile)call mark(3)
         op%pair_fft_pairs=op%pair_fft_pairs+active(id+1)
       endif

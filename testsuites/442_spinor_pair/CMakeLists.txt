@@ -1,5 +1,6 @@
 add_executable(spinor_pair_probe_442
   ${PROJECT_SOURCE_DIR}/src/xc/exx_k_backend.f90
+  ${PROJECT_SOURCE_DIR}/src/xc/exx_collinear_fft.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_k_exchange.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_spinor.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_ace.f90
@@ -8,7 +9,7 @@ set_target_properties(spinor_pair_probe_442 PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testsuite-probes"
   Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/testsuite-probes/modules-442")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/testsuite-probes/modules-442")
-target_include_directories(spinor_pair_probe_442 PRIVATE "${CMAKE_BINARY_DIR}/testsuite-probes/modules-442")
+target_include_directories(spinor_pair_probe_442 BEFORE PRIVATE "${CMAKE_BINARY_DIR}/testsuite-probes/modules-442")
 target_link_libraries(spinor_pair_probe_442 PRIVATE ${EXTERNAL_LIBS})
 if(EXTERNAL_PROJECT_TARGETS)
   add_dependencies(spinor_pair_probe_442 ${EXTERNAL_PROJECT_TARGETS})

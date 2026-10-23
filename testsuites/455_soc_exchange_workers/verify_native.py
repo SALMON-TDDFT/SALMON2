@@ -1,7 +1,8 @@
 """Short native SOC owner/helper equivalence, not physical GS acceptance."""
 import argparse,json,os,re,subprocess,sys,time
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--output',required=True);p.add_argument('--mpiexec',default='mpiexec');args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--output',required=True);p.add_argument('--mpiexec',default='mpiexec');p.add_argument('--threads',type=int,default=1);args=p.parse_args()
+assert args.threads>0
 root=Path(__file__).resolve().parents[2];out=Path(args.output).resolve();out.mkdir(parents=True,exist_ok=False);exe=Path(args.binary).resolve()
 base="""&calculation theory='dft',yn_dc='n' /
 &control sysname='WSe2',yn_restart='n',write_gs_restart_data='no' /
@@ -43,7 +44,7 @@ peak=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
 Path('memory.rank-%d.json'%r).write_text(json.dumps({'maxrss_bytes':peak if sys.platform=='darwin' else peak*1024}))
 sys.exit(q.returncode if q.returncode>=0 else 128-q.returncode)
 """)
-env={k:v for k,v in os.environ.items() if not k.startswith(('SALMON_','OMPI_'))};env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',OMPI_MCA_btl='self,sm',OMPI_MCA_pml='ob1')
+env={k:v for k,v in os.environ.items() if not k.startswith(('SALMON_','OMPI_'))};env.update(OMP_NUM_THREADS=str(args.threads),OMP_DYNAMIC='FALSE',OPENBLAS_NUM_THREADS='1',OMPI_MCA_btl='self,sm',OMPI_MCA_pml='ob1')
 report={}
 for label,np,groups in [('owners4',4,1),('helpers8',8,1),('helpers12',12,2)]:
  d=out/label;d.mkdir();(d/'inputfile').write_text(base.replace('GROUPS',str(groups)));(d/'sym.dat').write_text('\n'.join(sym)+'\n');t=time.monotonic()
@@ -53,6 +54,8 @@ for label,np,groups in [('owners4',4,1),('helpers8',8,1),('helpers12',12,2)]:
  logs=[(d/('stdout.rank-%d'%r)).read_text() for r in range(np)]
  assert all((d/('exit.rank-%d'%r)).read_text()=='0' for r in range(np))
  assert 'end SALMON' in logs[0]
+ teams=[int(x) for log in logs for x in re.findall(r'WAVE_FFT_OMP_THREADS\s+(\d+)',log)]
+ if np>4:assert teams and all(x==args.threads for x in teams),(label,teams,args.threads)
  if np>4:
   assert all('EXX_SERVICE_COMPUTE' in x and 'EXX_SERVICE_STOP' in x for x in logs[4:])
  energy=[float(x) for x in re.findall(r'Total Energy=\s*(\S+)',logs[0])]
@@ -63,7 +66,7 @@ for label,np,groups in [('owners4',4,1),('helpers8',8,1),('helpers12',12,2)]:
   if fields:
    try:rows.append([float(x) for x in fields])
    except ValueError:pass
- report[label]={'exit':q.returncode,'MPI':np,'groups':groups,'wall_s':time.monotonic()-t,'energy_eV':energy,'eigen_rows':rows,
+ report[label]={'exit':q.returncode,'MPI':np,'OMP':args.threads,'groups':groups,'wall_s':time.monotonic()-t,'energy_eV':energy,'eigen_rows':rows,
   'max_rank_rss_bytes':max(json.loads((d/('memory.rank-%d.json'%r)).read_text())['maxrss_bytes'] for r in range(np))}
  if label!='owners4':
   a=report['owners4'];assert len(energy)==len(a['energy_eV']) and energy

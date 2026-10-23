@@ -18,7 +18,7 @@ if(NOT USE_HSE)
 endif()
 
 if(USE_HSE AND USE_MPI)
-  list(APPEND SOURCES exx_spinor_wave_workers.f90 exx_worker_service.f90)
+  list(APPEND SOURCES exx_spinor_wave_fft.f90 exx_spinor_wave_workers.f90 exx_worker_service.f90)
 endif()
 
 if(USE_HSE)
@@ -43,6 +43,7 @@ if(USE_HSE)
     exx_wannier_gauge.f90
     exx_wannier.f90
     exx_symmetry.f90
+    exx_collinear_fft.f90
     exx_k_exchange.f90
     exx_spinor.f90
     exx_k_pairs.f90

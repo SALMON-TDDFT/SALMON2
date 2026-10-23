@@ -10,7 +10,7 @@ module exx_k_orbits
 contains
   subroutine apply_k_orbits(op,map,target,action,starts,counts,rep_start,rank,comm,transpose_tiles,fill_density,ierr)
     use communication, only: comm_summation
-    use exx_k_exchange, only: exx_k_kernel
+    use exx_k_exchange, only: exx_k_kernel,execute_kernel_fft
     use exx_symmetry, only: s_exx_symmetry_map
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
@@ -154,8 +154,9 @@ contains
       else
         do ki=1,nk;op%work(:,:,ki)=fr(:,:,slot(ki));enddo
       endif
-      call fftw_execute_dft(op%forward,op%work,op%work)
+      call execute_kernel_fft(op,op%forward)
       rows=max(0,min(b,nfirst-base-rank*b+1))
+      !$omp parallel do collapse(2) private(r,a,offset) schedule(static)
       do ki=1,nk;do g=1,ng;do r=1,rows
         a=first(base+rank*b+r-1)
         offset=modulo(op%point(:,a)-op%point(:,g)-op%shift(:,ki),ns)
@@ -165,7 +166,8 @@ contains
           op%work(r,g,ki)=op%work(r,g,ki)*op%kernel(offset(1),offset(2),offset(3))
         endif
       enddo;enddo;enddo
-      call fftw_execute_dft(op%backward,op%work,op%work)
+      !$omp end parallel do
+      call execute_kernel_fft(op,op%backward)
       if(op%contiguous_fft)then
         do ki=1,nk;do g=1,ng;do r=1,b
           fs(r,g,slot(ki))=kw(ki,r,g)

@@ -6,6 +6,7 @@ module exx_spinor_wave_workers
  MPI_Abort,MPI_Gatherv,MPI_Comm_free,MPI_Send,MPI_Recv,MPI_COMM_NULL,MPI_INTEGER,MPI_MAX, &
  MPI_DOUBLE_COMPLEX,MPI_STATUS_SIZE
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ use exx_spinor_wave_fft,only:wave_fft_plans,wave_fft_create,wave_fft_execute,wave_fft_destroy
  use exx_k_exchange,only:exx_k_kernel
  use exx_symmetry,only:s_exx_symmetry_map,symmetry_spin_rotation
  implicit none
@@ -26,8 +27,8 @@ contains
  integer,optional,intent(in)::tile_divisor,rprime_group_count
  integer::np,ng,nk,nr,nt,nsym,b,chunk,divisor,width,widthmax,base,rows,nfirst,lo,nbatch
  integer::s,g,i,j,k,p,r,c,sl,sr,so,st,gi,gj,kg,q,owner_rank,jlocal,opid,d,nd,ndmax,totaldest
- integer::e,bad,globalbad,col,ncols,column_comm
- integer::settings(13),expected_settings(13),fft_dims(3)
+ integer::e,bad,globalbad,col,ncols,column_comm,fft_threads
+ integer::settings(13),expected_settings(13)
  integer::column_groups,row_groups,row_rank,column_rank,group_col,column_base,col_g,ncols_g, &
  ksource,delta(3),idx(3),cc(3),source_g,global_k,ii
  integer,allocatable::forward(:,:),wrap(:,:,:),owner(:),operation(:),first(:),kperm(:,:),lookup(:),inverse(:)
@@ -40,7 +41,7 @@ contains
  complex(8)::coefficient
  complex(8),parameter::one=(1d0,0d0),zero=(0d0,0d0)
  real(8)::length(3),pi,k0(3),v(3),scaled(3),angle
- type(c_ptr)::ff,bb
+ type(wave_fft_plans)::fft_plans
  interface
  subroutine zgemm(ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc)
  implicit none
@@ -172,12 +173,7 @@ contains
  size(tbuf,kind=int64)+size(col_owned,kind=int64)+size(target_owned,kind=int64)+size(rho,kind=int64)+ &
  size(partial,kind=int64)+size(packed,kind=int64)+ &
  size(gathered,kind=int64)+size(row,kind=int64)+size(tm,kind=int64)+size(contracted,kind=int64))
- fft_dims=op%mesh(3:1:-1)
- ff=fftw_plan_many_dft(3,fft_dims,b*chunk,rho(:,:,:,1),fft_dims,b*chunk,1, &
- rho(:,:,:,1),fft_dims,b*chunk,1,FFTW_FORWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
- bb=fftw_plan_many_dft(3,fft_dims,b*chunk,rho(:,:,:,1),fft_dims,b*chunk,1, &
- rho(:,:,:,1),fft_dims,b*chunk,1,FFTW_BACKWARD,ior(FFTW_ESTIMATE,FFTW_UNALIGNED))
- bad=merge(0,1,c_associated(ff).and.c_associated(bb))
+ call wave_fft_create(fft_plans,op%mesh,rho,bad)
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)goto 900
  call MPI_Comm_split(comm,column_rank,row_rank,column_comm,e)
@@ -235,15 +231,9 @@ contains
  enddo
  end block ki_block
  enddo;enddo
- do c=1,4
- call fftw_execute_dft(ff,rho(:,:,:,c),rho(:,:,:,c))
- do k=1,nk;do g=1,ncols;do r=1,rows
- gi=first(lo+r-1);idx=modulo(op%point(:,gi)-op%point(:,col+g-1)-op%shift(:,k),op%n*op%mesh)
- rho(r,g,k,c)=rho(r,g,k,c)*op%kernel(idx(1),idx(2),idx(3))
- enddo;enddo;enddo
- call fftw_execute_dft(bb,rho(:,:,:,c),rho(:,:,:,c))
- pairwork=pairwork+int(rows,int64)*ncols
- enddo
+ call wave_fft_execute(fft_plans,rho,op%n,op%point,op%shift,op%kernel,first,lo,col,rows,ncols,fft_threads)
+ if(base==1.and.column_base==1.and.rank==0)print *,'WAVE_FFT_OMP_THREADS',fft_threads
+ pairwork=pairwork+4_int64*rows*ncols
  ! Stream one representative target/operation tile. All workers contract their own destinations.
  do gj=1,nr
  owner_rank=-1
@@ -318,8 +308,7 @@ contains
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad==0)ierr=0
 900 continue
- if(c_associated(ff))call fftw_destroy_plan(ff)
- if(c_associated(bb))call fftw_destroy_plan(bb)
+ call wave_fft_destroy(fft_plans)
  if(column_comm/=MPI_COMM_NULL)call MPI_Comm_free(column_comm,e)
 contains
  subroutine route_column(tile,source,group,tag)
