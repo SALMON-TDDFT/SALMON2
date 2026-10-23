@@ -91,7 +91,7 @@ contains
       Vexc(i)=Vx_MBJ
       rhos=rho_s(i)
       call PWc(rhos,rhos,ec,dec_drhoa,dec_drhob)
-      Vexc(i)=Vexc(i)+ec+rho(i)*dec_drhoa
+      Vexc(i)=Vexc(i)+ec+2d0*rho_s(i)*dec_drhoa
       Eexc(i)=Eexc(i)+ec
       Eexc(i)=Eexc(i)*trho
     enddo
