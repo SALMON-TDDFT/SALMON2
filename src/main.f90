@@ -66,6 +66,8 @@ contains
     implicit none
     integer :: bad,total_bad,ierr
     logical :: supported
+    ! DC ranks belong to fragments, not to the exchange helper pool.
+    if(yn_dc=='y')return
     ! Ordinary orbital/spatial layouts retain their original decomposition.
     if(nproc_k<1.or.nproc_k>=nproc_size_global.or.nproc_ob/=1.or.any(nproc_rgrid/=1))return
     supported=theory=='dft'.and.xc=='hse06'.and.yn_spinorbit=='y'.and.spin=='noncollinear'.and. &

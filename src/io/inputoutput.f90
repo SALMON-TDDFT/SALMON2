@@ -776,7 +776,7 @@ contains
     hse_sr_group_fft = 'off'
     yn_hse_sr_wave_first = 'n'
     yn_hse_sr_return_sum = 'y'
-    yn_hse_sr_pair_symmetry = 'n'
+    yn_hse_sr_pair_symmetry = 'y'
     hse_sr_radius = 0d0
     exx_factor_history_frames = 3
     exx_factor_exact_interval = 8
@@ -1925,6 +1925,9 @@ contains
     call resolve_k_algorithm(exx_k_algorithm,yn_spinorbit=='y',yn_exx_fft_orbits, &
       yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii, &
       spinor_pair_supported=xc=='hse06'.and.yn_dc=='n'.and.exx_kpoint_backend=='cpu'.and. &
+        all(hse_q_reduction==1), &
+      crystal_reuse_supported=yn_spinorbit=='n'.and.is_hybrid(xc).and.yn_dc=='n'.and. &
+        product(num_kgrid)>1.and.index(yn_symmetry,'y')>0.and.exx_kpoint_backend=='cpu'.and. &
         all(hse_q_reduction==1))
     if(ii/=0)then
       if(comm_is_root(nproc_id_global))write(*,'(a)')trim(exx_k_algorithm_reason)
@@ -3573,9 +3576,8 @@ contains
     endif
     if(yn_hse_sr_wave_first=='y'.and.hse_sr_group_fft=='off') &
       error stop 'SR wave-first requires SR group FFT'
-    if(yn_hse_sr_pair_symmetry=='y'.and. &
-       (yn_hse_sr_wave_first/='y'.or.yn_hse_sr_return_sum/='y')) &
-      error stop 'SR pair symmetry requires wave-first and aggregated return'
+    if(yn_hse_sr_pair_symmetry=='y'.and.yn_hse_sr_wave_first=='y'.and.yn_hse_sr_return_sum/='y') &
+      error stop 'SR wave-first pair symmetry requires aggregated return'
     if(yn_exx_fft_orbits=='y')then
       if(.not.is_hybrid(xc).or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
          any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or.yn_dc/='n') &

@@ -4,17 +4,17 @@ module exx_k_selection
   private
   public :: resolve_k_algorithm
 contains
-  subroutine resolve_k_algorithm(mode,spinor,orbits,pairs,spin_pairs,reason,ierr,spinor_pair_supported)
+  subroutine resolve_k_algorithm(mode,spinor,orbits,pairs,spin_pairs,reason,ierr,spinor_pair_supported,crystal_reuse_supported)
     implicit none
     character(*),intent(in) :: mode
     logical,intent(in) :: spinor
-    logical,optional,intent(in) :: spinor_pair_supported
+    logical,optional,intent(in) :: spinor_pair_supported,crystal_reuse_supported
     character(1),intent(inout) :: orbits,pairs,spin_pairs
     character(*),intent(out) :: reason
     integer,intent(out) :: ierr
     character(1) :: selected(3),legacy(3)
     integer :: i
-    logical :: explicit_legacy,eligible
+    logical :: explicit_legacy,eligible,crystal
     ierr=1;reason='Invalid exx_k_algorithm or legacy yes/no value'
     legacy=[orbits,pairs,spin_pairs]
     do i=1,3
@@ -23,6 +23,8 @@ contains
     explicit_legacy=any(legacy/=' ')
     eligible=.true.
     if(present(spinor_pair_supported))eligible=spinor_pair_supported
+    crystal=.false.
+    if(present(crystal_reuse_supported))crystal=crystal_reuse_supported.and..not.spinor
     selected=['n','n','n']
     select case(mode)
     case('auto')
@@ -41,6 +43,11 @@ contains
         if(legacy(i)/=' ')selected(i)=legacy(i)
       enddo
       if(explicit_legacy)reason='legacy switches: compatibility override of auto policy'
+      if(crystal.and.legacy(1)/='n')selected(1)='y'
+      if(selected(1)=='y'.and..not.spinor)then
+        selected(2)='n'
+        reason='auto: crystal-symmetry FFT reuse takes precedence over Hermitian pairs'
+      endif
     case('reference')
       reason='manual reference: k-exchange reuse disabled'
     case('pair')

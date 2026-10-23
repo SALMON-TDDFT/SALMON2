@@ -57,6 +57,7 @@ if(USE_HSE)
     exx_orbitals.f90
     exx_distributed_gauge.f90
     hybrid_semilocal.f90
+    exx_gamma_pairs.f90
     exx_spatial.f90
     exx_factor_history.f90
     exx_native.f90

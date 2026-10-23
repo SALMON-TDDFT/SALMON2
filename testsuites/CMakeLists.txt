@@ -193,3 +193,7 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
   add_subdirectory(453_ky_projector_consistency)
   add_subdirectory(454_ky_input_auto)
 endif()
+
+if(USE_HSE AND USE_MPI AND NOT USE_OPENACC)
+  add_subdirectory(456_gamma_hermitian_pairs)
+endif()

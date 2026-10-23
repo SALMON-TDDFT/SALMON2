@@ -6,6 +6,7 @@
 ! band counts agree within spatial groups, and may differ across orbital groups.
 ! coords and local grid rows vary. Communicators follow spatial coordinate order.
 module exx_spatial
+  use exx_gamma_pairs,only:gamma_pair_action
   use sr_wave_fft,only:wave_apply,wave_apply_pairs,wave_screen_supported
   use misc_routines,only:pair_walltime=>get_wtime
   use sr_group_fft, only: group_plan,group_prepare,group_apply,group_destroy
@@ -15,7 +16,7 @@ module exx_spatial
   use exx_batch_backend, only: local_backend_factory
   use exx_spatial_local, only: s_exx_spatial_local,spatial_local_init,spatial_local_apply,spatial_local_destroy, &
     local_batch_action,s_exx_sr,sr_prepare,sr_apply,sr_destroy,sr_mask_kernel
-  use communication, only: comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
+  use communication, only: COMM_GROUP_SELF,comm_summation,comm_get_max,comm_bcast,comm_get_groupinfo
   use exx_orbitals, only: orbital_layout,orbital_check,orbital_overlap,orbital_rotate
   use exx_distributed_metric, only: distributed_metric_available
   use exx_distributed_gauge, only: s_exx_gauge,gauge_tiles_clear,gauge_tiles_refresh,gauge_tiles_rotate
@@ -423,7 +424,7 @@ contains
   ! target columns may have different (including zero) local counts. Counts must
   ! agree within comm_r, and the communicators form a spatial/orbital product.
   subroutine spatial_exx_apply(op,n,h,dims,coords,comm,comm_r,radius_input,target,action,status,omega,comm_o, &
-                               screen_target_count,same_source)
+                               screen_target_count,same_source,pair_weight)
     ! Integer(int64) reduction is not covered by communication.
 #ifdef USE_MPI
     use mpi,only:MPI_SUM,MPI_Allreduce,MPI_INTEGER8
@@ -437,7 +438,7 @@ contains
     integer,intent(in),optional :: comm_o,screen_target_count
     logical,intent(in),optional :: same_source
     real(8),intent(in) :: h(3),radius_input
-    real(8),intent(in),optional :: omega
+    real(8),intent(in),optional :: omega,pair_weight(:)
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     integer,intent(out) :: status
@@ -446,10 +447,11 @@ contains
     type(exx_pair_catalog) :: catalogue
     type(s_exx_spatial_local) :: compact_plan
     type(group_plan) :: gp
-    logical :: group_active,halo_enabled,wave_route,return_sum,pair_route,pair_requested
+    logical :: group_active,halo_enabled,wave_route,return_sum,pair_route,pair_requested,gamma_route
     integer,allocatable :: pair_counts(:),source_ids(:),target_ids(:)
     complex(8),allocatable :: reverse_action(:,:),reverse_recv(:,:)
     integer(int64) :: pair_count,pair_total,pair_part,pair_reduction_bytes,bcast_bytes,bcast_calls
+    integer :: gamma_comm
     integer :: pair_flag,pair_negflag,pair_hi,pair_lo,mpi_error
     real(8) :: pair_reduce_seconds,pair_tick,pair_fft_before(4)
     complex(8),allocatable :: wave_sources(:,:)
@@ -482,6 +484,13 @@ contains
     wave_route=yn_hse_sr_wave_first=='y'
     return_sum=yn_hse_sr_return_sum=='y'
     pair_requested=yn_hse_sr_pair_symmetry=='y';pair_route=.false.
+    gamma_route=pair_requested.and.present(pair_weight)
+    pair_flag=merge(1,0,gamma_route);pair_negflag=-pair_flag
+    call comm_get_max(pair_flag,comm_r);call comm_get_max(pair_negflag,comm_r)
+    if(present(comm_o))then
+      call comm_get_max(pair_flag,comm_o);call comm_get_max(pair_negflag,comm_o)
+    endif
+    if(pair_flag/=-pair_negflag)bad=1
     if(present(same_source))pair_route=pair_requested.and.same_source
     pair_flag=merge(1,0,pair_route);pair_negflag=-pair_flag
     call comm_get_max(pair_flag,comm_r);call comm_get_max(pair_negflag,comm_r)
@@ -555,6 +564,26 @@ contains
     endif
     call collective_bad()
     if(bad/=0)return
+    if(gamma_route)then
+      if(op%compact.or.op%sr_tolerance>0d0.or.op%screen_mode/=0.or.packed_source)bad=1
+      if(size(pair_weight)/=nt.or.nt/=no_source)bad=1
+      call collective_bad()
+      if(bad/=0)return
+      do j=1,nt
+        if(.not.ieee_is_finite(pair_weight(j)))then
+          bad=1
+        else if(pair_weight(j)<0d0.or.pair_weight(j)>1d0)then
+          bad=1
+        endif
+      enddo
+      call collective_bad()
+      if(bad/=0)return
+      do j=1,nt
+        if(any(op%source(:,j)/=target(:,j,1)*sqrt(pair_weight(j))))bad=1
+      enddo
+      call collective_bad()
+      if(bad/=0)return
+    endif
     if(pair_route)then
       if(packed_source.or..not.allocated(op%source))then
         bad=1
@@ -599,6 +628,16 @@ contains
         endif
       enddo;enddo;enddo
 !$omp end parallel do
+    endif
+    if(gamma_route)then
+      gamma_comm=COMM_GROUP_SELF
+      if(present(comm_o))gamma_comm=comm_o
+      call gamma_pair_action(n,dims,coords,comm,comm_r,gamma_comm,target,pair_weight,multiplier, &
+        action,status,pair_count,wave_peak)
+      op%local_pairs=0;op%local_points=0;op%global_pairs=pair_count
+      op%pair_products=pair_count
+      write(*,'(a,i0,a,i0)')'EXX_GAMMA_HERMITIAN local_pairs=',pair_count,' explicit_scratch_bytes=',wave_peak
+      return
     endif
     allocate(selected(nt),omitted(nt),broad_kept(nt));omitted=0d0;broad_kept=0;broad_sources=0
     if(op%screen_mode/=0)then

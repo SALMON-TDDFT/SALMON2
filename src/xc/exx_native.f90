@@ -39,7 +39,7 @@ module exx_native
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
     exx_factor_mode,yn_exx_fft_orbits,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
-    yn_exx_dc_mlwf,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance, &
+    yn_exx_dc_mlwf,yn_hse_sr_pair_symmetry,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance, &
     hse_sr_tolerance,hse_block_rows,hse_q_reduction, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
     yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
@@ -729,6 +729,12 @@ contains
     radius_warning_reported=.true.
   end subroutine warn_fixed_radius
 
+  logical function dc_gamma_pairs_requested()
+    implicit none
+    dc_gamma_pairs_requested=dc_canonical().and.product(num_kgrid)==1.and. &
+      yn_hse_sr_pair_symmetry=='y'.and.hse_sr_tolerance==0d0.and.yn_hse_wannier_snapshot/='y'
+  end function
+
   logical function dc_canonical()
     implicit none
     dc_canonical=yn_dc=='y'.and.yn_exx_dc_mlwf=='n'
@@ -808,7 +814,7 @@ contains
     ! Select occupation semantics before the integer-prefix native route.
     ! Nonnegative temperature retains the existing occupation-weighted source.
     if(temperature>=0d0)then
-      if(info%isize_r>1.or.info%isize_o>1.or. &
+      if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call refresh_spatial(system,mg,info,psi)
       else
@@ -817,7 +823,8 @@ contains
       return
     endif
     if((.not.factor_experiment.or.product(num_kgrid)==1).and. &
-       (info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
+       (info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
+        (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
        ((theory=='dft').or. &
         (yn_dc=='n'.and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)).and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
@@ -1185,7 +1192,8 @@ contains
     action_scale=exchange_fraction()
     if(timing_enabled)tick=exx_walltime()
     if(use_wannier_exchange().and.exx_force_full_action)then
-      if(info%isize_r>1.or.info%isize_o>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
+      if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
+         (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,target_work,action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
@@ -1620,7 +1628,12 @@ contains
       complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
       integer,allocatable :: counts(:)
       integer :: first,workers,thread_state(3)
-      if(requested_screen_mode==0)then
+      if(requested_screen_mode==0.and.dc_gamma_pairs_requested())then
+        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
+          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
+          pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm, &
+          pair_weight=.5d0*system%rocc(info%io_s:info%io_e,1,1))
+      else if(requested_screen_mode==0)then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)

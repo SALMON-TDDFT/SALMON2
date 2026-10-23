@@ -15,7 +15,7 @@ batch input is unchanged).
 | `hse_sr_radius` | `0` | positive group-FFT cutoff radius in the selected input length unit | `SALMON_HSE_SR_RADIUS_AU` (previously always bohr) |
 | `yn_hse_sr_wave_first` | `n` | wave-first SR group route | `SALMON_HSE_SR_WAVE_FIRST` |
 | `yn_hse_sr_return_sum` | `y` | aggregated SR returns | `SALMON_HSE_SR_RETURN_SUM` |
-| `yn_hse_sr_pair_symmetry` | `n` | conjugate-pair reuse for identical source/target sets | `SALMON_HSE_SR_PAIR_SYMMETRY` |
+| `yn_hse_sr_pair_symmetry` | `y` | exact Gamma Hermitian pairs for canonical DC; conjugate pairs for eligible SR wave training | `SALMON_HSE_SR_PAIR_SYMMETRY` |
 
 `SALMON_HSE_SR_WAVE_BATCH` is removed; batch16 is fixed. All character selections
 are case insensitive, broadcast to all MPI ranks, and recorded in `variables.log`.
@@ -80,7 +80,7 @@ Normal inputs omit `exx_k_algorithm` and all three legacy switches.
 
 | Selection | Behavior |
 |---|---|
-| `auto` | Existing scalar Hermitian pairs when eligible; full SOC pairs on supported native CPU full-q HSE06; reference on unsupported automatic layouts. |
+| `auto` | Eligible scalar crystal FFT reuse first, otherwise scalar Hermitian pairs; full SOC pairs on supported native CPU full-q HSE06; reference on unsupported automatic layouts. |
 | `reference` | Disable these k-exchange reuse routes for comparisons. Physical settings and other backends are unchanged. |
 | `pair` | Scalar Hermitian pairs without crystal symmetry; full pairs for all four SOC spin blocks, including SU(2) crystal expansion. |
 | `orbits` | Existing scalar crystal-symmetry FFT reuse; existing mesh and symmetry restrictions apply. |
@@ -96,6 +96,20 @@ spin pairs and crystal symmetry off; SOC pair retains the existing SOC HSE06
 restrictions. Orbits do not support SOC. An unavailable explicit request fails
 instead of silently falling back. `reference` only controls native k-exchange
 reuse; it does not replace a selected Wannier, spatial or GPU backend.
+
+In `auto`, eligible scalar crystal reuse wins over the scalar pair flag. Explicit
+`yn_exx_fft_orbits='n'` remains an opt-out for reference comparisons.
+
+For canonical Gamma DC (`yn_exx_dc_mlwf='n'`), Hermitian pairs are on by default,
+including finite temperature and orbital MPI. Explicit Wannier snapshot output
+retains its existing reference backend. Source weights are `rocc/2`; the
+reverse action uses the other orbital's weight, so zero/fractional occupations
+need no division or approximation. One convolution updates both directions.
+`yn_hse_sr_pair_symmetry='n'` selects the ordered-pair reference for this backend.
+This switch does not turn on SR truncation, wave-first FFT, or change occupations.
+The Gamma log records local pair counts and explicit scratch bytes; these are not
+whole-process RSS or a speedup guarantee. SR wave-pair reuse still requires
+identical source/target sets and aggregated return.
 
 Old inputs with `yn_exx_fft_orbits`, `yn_exx_k_pair_symmetry` or
 `yn_exx_spinor_pair_fft` remain readable as compatibility overrides of `auto`.
