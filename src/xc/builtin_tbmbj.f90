@@ -24,20 +24,25 @@ contains
   
   
   
-  subroutine exc_cor_tbmbj(nl, rho, rho_s,  grho_s, lrho_s, tau_s, j_s, cval, eexc, vexc)
+  ! With icomm (the real-space communicator), the c-value is the average over the
+  ! whole cell: the sum and the point count are reduced before the square root.
+  subroutine exc_cor_tbmbj(nl, rho, rho_s,  grho_s, lrho_s, tau_s, j_s, cval, eexc, vexc, icomm)
   !subroutine exc_cor_tbmbj(nl, rho, rho_s,  grho_s, lrho_s, tau_s, j_s, cval, eexc, vexc, Hxyz, aLxyz)
+    use communication, only: comm_summation
     implicit none
     integer, intent(in) :: nl
     real(8), intent(in) :: rho(nl), rho_s(nl)
     real(8), intent(in) :: grho_s(nl, 3), lrho_s(nl), tau_s(nl), j_s(nl, 3)
     real(8), intent(in) :: cval
     real(8), intent(out) :: eexc(nl), vexc(nl)
+    integer, intent(in), optional :: icomm
     !real(8), intent(in) :: Hxyz, aLxyz
     
     real(8),parameter :: alpha=-0.012d0,beta=1.023d0,gamma=0.80d0
     real(8),parameter :: rho_thr=1d-10 ! skip MBJ where the density is negligible
     real(8) :: c,tau_s_jrho,D_s_jrho,Q_s,rhs,x_s,b_s,Vx_BR,Vx_MBJ
     real(8) :: trho,rs,rhos,ec,dec_drhoa,dec_drhob
+    real(8) :: csum(2),csum_tot(2)
     integer :: i
     
     ! call rho_j_tau(GS_RT,rho_s,tau_s,j_s,grho_s,lrho_s)
@@ -60,7 +65,14 @@ contains
              c=c+sqrt(grho_s(i,1)**2+grho_s(i,2)**2+grho_s(i,3)**2)/rho_s(i)
            end if
          end do
-         c=c/dble(nl)
+         csum(1)=c
+         csum(2)=dble(nl)
+         if(present(icomm)) then
+           call comm_summation(csum,csum_tot,2,icomm)
+         else
+           csum_tot=csum
+         end if
+         c=csum_tot(1)/csum_tot(2)
          c=alpha+beta*sqrt(c)
        endif
     ! case('BJ_PW')
