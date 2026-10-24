@@ -29,6 +29,8 @@ module density_matrix_and_energy_plusU_sub
 contains
 
   subroutine calc_density_matrix_and_energy_plusU( psi, ppg, info, system, E_U )
+    ! For nspin=1, dm_mms_nla holds both spins (n = 2*n_sigma), so the
+    ! per-spin occupation n_sigma = occ_fac*dm_mms_nla enters E_U and V_eff.
     use structures, only: s_orbital, s_pp_grid, s_parallel_info, s_dft_system
     use communication, only: comm_summation
     implicit none
@@ -44,8 +46,11 @@ contains
     complex(8) :: phipsi,ztmp,ztmp2
     complex(8),allocatable :: phipsi_lma(:),dm_tmp(:,:,:,:,:,:)
     complex(8),parameter :: zero=(0.0d0,0.0d0)
+    real(8) :: occ_fac
 
     Nspin=system%nspin
+    occ_fac=1.0d0
+    if( Nspin == 1 ) occ_fac=0.5d0
     Nproj_pairs=size(ppg%proj_pairs_ao,2)
     Nlma=size(ppg%ia_tbl_ao)
 
@@ -137,8 +142,8 @@ contains
       do m2=-l,l
         ztmp = dm_mms_nla(m2,m2,ispin,n,l,a)
         do m1=-l,l
-          ztmp = ztmp - dm_mms_nla(m2,m1,ispin,n,l,a) &
-                      * dm_mms_nla(m1,m2,ispin,n,l,a)
+          ztmp = ztmp - occ_fac * dm_mms_nla(m2,m1,ispin,n,l,a) &
+                                * dm_mms_nla(m1,m2,ispin,n,l,a)
         end do !m1
         ztmp2 = ztmp2 + ztmp
       end do !m2
@@ -161,9 +166,9 @@ contains
         m1= ppg%proj_pairs_info_ao(4,iprj)
         m2= ppg%proj_pairs_info_ao(5,iprj)
         if( m1 == m2 )then
-           V_eff(iprj,ispin) = U_eff(n,l,a)*( 0.5d0 - dm_mms_nla(m1,m2,ispin,n,l,a) )
+           V_eff(iprj,ispin) = U_eff(n,l,a)*( 0.5d0 - occ_fac*dm_mms_nla(m1,m2,ispin,n,l,a) )
         else
-           V_eff(iprj,ispin) = U_eff(n,l,a)*( -dm_mms_nla(m1,m2,ispin,n,l,a) )
+           V_eff(iprj,ispin) = U_eff(n,l,a)*( -occ_fac*dm_mms_nla(m1,m2,ispin,n,l,a) )
         end if
       end do !iprj
     end do !ispin
