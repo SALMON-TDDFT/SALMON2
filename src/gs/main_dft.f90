@@ -147,7 +147,7 @@ block
   character(8) :: diagnostic_env
   integer :: diagnostic_flag,diagnostic_status,diagnostic_bad,diagnostic_total
   complex(8),allocatable :: diagnostic_psi(:,:,:),diagnostic_hpsi(:,:,:)
-  real(8) :: diagnostic_metrics(3),diagnostic_global(3)
+  real(8) :: diagnostic_metrics(5),diagnostic_global(5)
   diagnostic_flag=0
   if(comm_is_root(nproc_id_global))then
     call get_environment_variable('SALMON_HSE_STATIONARITY',diagnostic_env,status=diagnostic_status)
@@ -166,12 +166,13 @@ block
     call exx_pack(shpsi,mg,info,diagnostic_hpsi)
     call spinor_stationarity(diagnostic_psi,diagnostic_hpsi, &
       system%rocc(:,info%ik_s:info%ik_e,1),system%hvol, &
-      diagnostic_metrics(1),diagnostic_metrics(2),diagnostic_metrics(3),diagnostic_bad)
+      diagnostic_metrics(1),diagnostic_metrics(2),diagnostic_metrics(3),diagnostic_bad, &
+      diagnostic_metrics(4),diagnostic_metrics(5))
     call comm_summation(diagnostic_bad,diagnostic_total,info%icomm_rko)
     if(diagnostic_total/=0)error stop 'Invalid HSE stationarity diagnostic data'
-    call comm_get_max(diagnostic_metrics,diagnostic_global,3,info%icomm_rko)
+    call comm_get_max(diagnostic_metrics,diagnostic_global,5,info%icomm_rko)
     if(comm_is_root(nproc_id_global))then
-      write(*,'(a,3es24.16)') 'HSE_STATIONARITY gram_error/hermitian_error_Ha/commutator_Ha: ',diagnostic_global
+      write(*,'(a,5es24.16)') 'HSE_STATIONARITY gram_error/hermitian_error_Ha/commutator_Ha/outside_Ha/within_Ha: ',diagnostic_global
       write(*,'(a)') 'HSE_STATIONARITY diagnostic only; no SCF performed or state certified.'
     endif
     return

@@ -5,15 +5,18 @@ module exx_stationarity
  private
  public::spinor_stationarity
 contains
- subroutine spinor_stationarity(psi,hpsi,f,hvol,gram_error,hermitian_error,commutator,ierr)
+ subroutine spinor_stationarity(psi,hpsi,f,hvol,gram_error,hermitian_error,commutator,ierr,outside,within)
   complex(8),intent(in)::psi(:,:,:),hpsi(:,:,:)
   real(8),intent(in)::f(:,:),hvol
   real(8),intent(out)::gram_error,hermitian_error,commutator
   integer,intent(out)::ierr
+  real(8),optional,intent(out)::outside,within
   complex(8),allocatable::s(:,:),h(:,:),q(:,:)
-  real(8)::norm2,den,local
+  real(8)::norm2,den,local,qnorm2,bnorm2,qmetric,bmetric
   integer::i,j,k,n
   ierr=1;gram_error=0d0;hermitian_error=0d0;commutator=0d0
+  if(present(outside))outside=0d0
+  if(present(within))within=0d0
   if(any(shape(psi)/=shape(hpsi)).or.size(psi,1)<1.or.size(psi,2)<1.or.size(psi,3)<1)return
   n=size(psi,2)
   if(any(shape(f)/=[n,size(psi,3)]))return
@@ -37,18 +40,24 @@ contains
    enddo
    ! The commutator formula assumes an orthonormal input span and a Hermitian
    ! operator. Report those defects separately so it cannot certify either.
-   norm2=0d0;den=sum(f(:,k)**2)
+   qnorm2=0d0;bnorm2=0d0;den=sum(f(:,k)**2)
    do j=1,n
-    norm2=norm2+2d0*f(j,k)**2*sum(abs(q(:,j))**2)*hvol
+    qnorm2=qnorm2+2d0*f(j,k)**2*sum(abs(q(:,j))**2)*hvol
     do i=1,n
      gram_error=max(gram_error,abs(s(i,j)))
      hermitian_error=max(hermitian_error,abs(h(i,j)-conjg(h(j,i))))
-     norm2=norm2+(f(i,k)-f(j,k))**2*abs(h(i,j))**2
+     bnorm2=bnorm2+(f(i,k)-f(j,k))**2*abs(h(i,j))**2
     enddo
    enddo
+   norm2=qnorm2+bnorm2
    local=sqrt(norm2/max(den,tiny(1d0)))
+   qmetric=sqrt(qnorm2/max(den,tiny(1d0)))
+   bmetric=sqrt(bnorm2/max(den,tiny(1d0)))
    if(.not.ieee_is_finite(local))return
+   if(.not.ieee_is_finite(qmetric).or..not.ieee_is_finite(bmetric))return
    commutator=max(commutator,local)
+   if(present(outside))outside=max(outside,qmetric)
+   if(present(within))within=max(within,bmetric)
   enddo
   if(.not.ieee_is_finite(gram_error).or..not.ieee_is_finite(hermitian_error))return
   ierr=0

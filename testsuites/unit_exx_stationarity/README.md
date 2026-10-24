@@ -10,3 +10,5 @@ For each local k block, S=Psi^H Psi*dV, B=Psi^H H(Psi)*dV, Q=H(Psi)-Psi B. The o
 `sqrt((2 sum_i f_i^2 ||Q_i||^2*dV + sum_ij (f_i-f_j)^2 |B_ij|^2) / sum_i f_i^2)`.
 
 The commutator interpretation assumes an orthonormal trial span and a Hermitian operator; the separately reported defects must be checked first. Projected Hermiticity is not a proof for vectors outside the tested span. No acceptance threshold is imposed and no state is certified by this diagnostic. Initial mixed/restart-density input must be identified in the provenance; use an ordinary reset-wfn seed to reconstruct its density for a propagation-start check.
+
+The optional `outside` and `within` outputs report the separately normalized Q and occupation-difference contributions, each maximized over k independently. Their squared sum need not equal the square of the reported total maximum when the maxima occur at different k points. The native entry prints both alongside the original three metrics.
