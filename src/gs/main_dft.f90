@@ -147,6 +147,7 @@ call initialization2_dft( Miter, nspin, rion_update,  &
 block
   character(8) :: diagnostic_env
   integer :: diagnostic_flag,diagnostic_status,diagnostic_bad,diagnostic_total,diagnostic_stage
+  integer :: diagnostic_saved_ncg,diagnostic_remaining
   complex(8),allocatable :: diagnostic_psi(:,:,:),diagnostic_hpsi(:,:,:)
   real(8) :: diagnostic_metrics(5),diagnostic_global(5)
   diagnostic_flag=0
@@ -154,6 +155,7 @@ block
     call get_environment_variable('SALMON_HSE_STATIONARITY',diagnostic_env,status=diagnostic_status)
     if(diagnostic_status==0.and.trim(diagnostic_env)=='1')diagnostic_flag=1
     if(diagnostic_status==0.and.trim(diagnostic_env)=='solve')diagnostic_flag=2
+    if(diagnostic_status==0.and.trim(diagnostic_env)=='blocked')diagnostic_flag=3
   endif
   call comm_bcast(diagnostic_flag,nproc_group_global)
   if(diagnostic_flag>0)then
@@ -161,14 +163,26 @@ block
        info%isize_r/=1.or.info%isize_o/=1) &
       error stop 'HSE stationarity diagnostic requires native SOC k-only layout'
     call exx_refresh(system,mg,info,spsi)
-    if(diagnostic_flag==2.and.propagator/='hse_taylor4_full') &
+    if(diagnostic_flag>=2.and.propagator/='hse_taylor4_full') &
       error stop 'Fixed-H stationarity solve requires direct exchange'
     allocate(diagnostic_psi(2*product(mg%num),system%no,info%numk), &
              diagnostic_hpsi(2*product(mg%num),system%no,info%numk))
-    do diagnostic_stage=1,merge(3,1,diagnostic_flag==2)
+    do diagnostic_stage=1,merge(3,1,diagnostic_flag>=2)
     ! No density, potential, occupation or Fock-source refresh in these passes.
-    if(diagnostic_stage==2)call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,V_local, &
-      2,nscf_init_no_diagonal)
+    if(diagnostic_stage==2)then
+      diagnostic_saved_ncg=ncg
+      diagnostic_remaining=ncg
+      do
+        if(diagnostic_flag==3)ncg=min(8,diagnostic_remaining)
+        call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,V_local, &
+          2,nscf_init_no_diagonal)
+        if(diagnostic_flag/=3)exit
+        call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,V_local,srg)
+        diagnostic_remaining=diagnostic_remaining-ncg
+        if(diagnostic_remaining<=0)exit
+      enddo
+      ncg=diagnostic_saved_ncg
+    endif
     if(diagnostic_stage==3)call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,V_local,srg)
     call hpsi(spsi,shpsi,info,mg,V_local,system,stencil,srg,ppg)
     call exx_pack(spsi,mg,info,diagnostic_psi)
@@ -181,7 +195,7 @@ block
     if(diagnostic_total/=0)error stop 'Invalid HSE stationarity diagnostic data'
     call comm_get_max(diagnostic_metrics,diagnostic_global,5,info%icomm_rko)
     if(comm_is_root(nproc_id_global))then
-      if(diagnostic_flag==2)write(*,'(a,i0)') 'HSE_FIXED_H_STAGE initial/solver/finalRitz: ',diagnostic_stage
+      if(diagnostic_flag>=2)write(*,'(a,i0)') 'HSE_FIXED_H_STAGE initial/solver/finalRitz: ',diagnostic_stage
       write(*,'(a,5es24.16)') 'HSE_STATIONARITY gram_error/hermitian_error_Ha/commutator_Ha/outside_Ha/within_Ha: ',diagnostic_global
     endif
     enddo

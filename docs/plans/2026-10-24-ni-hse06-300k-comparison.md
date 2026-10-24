@@ -40,3 +40,23 @@ Actual Ni initial-Hamiltonian diagnostics: original mirror GS Gram1.11e-15/proje
 Stationarity decomposition (known-model RED/GREEN): original Ni state total2.89384e-3Ha, outside-span2.88245e-3Ha, inside occupation-commutator5.20390e-4Ha (independent k maxima). The outside-span contribution dominates. Next isolate the fixed-H orbital solver rather than changing mixing again. Code inspection notes solve_orbitals performs final Ritz after Gram-Schmidt only in DC; native thermal spinors also need consistent sorted states before occupation assignment. This is a hypothesis, not yet a validated fix.
 
 Fixed-H native solver diagnostic added behind the explicit `solve` environment mode. RED: old diagnostic binary with a safely capped one-SCF-step input lacked stage outputs. GREEN: direct frozen Fock, fields and occupations prints all three stages and exits without SCF. For actual Ni, CG8 lowered total commutator2.89384e-3 ->1.04488e-4Ha; final Ritz removes the tiny9.06e-8 internal term but leaves the outside term. A single CG32 pass instead deteriorated to3.67172Ha (2.40239Ha after final Ritz), despite preserved orthogonality and projected Hermiticity. Thus simply increasing CG count is unsafe. Hypothesis to test next: independent band CG develops collapse without intermediate orthogonalization/Ritz; short CG blocks separated by Gram-Schmidt/Ritz should be tested on the same fixed Hamiltonian before any SCF implementation change. This observation does not yet prove the sole root cause of all RT drift.
+
+### Native spinor CG stabilization (2026-10-24)
+
+Frozen physical-H countertest, with the same original mirror GS and fixed
+occupations, isolates a failure of a long independent-band CG pass. CG32
+followed by Ritz leaves a 2.40239 Ha occupied-density commutator residual;
+four CG8 passes separated by Gram/Ritz reduce it to 9.54035e-8 Ha.
+Implement bounded passes only for native complex SOC HSE (including HSE
+pre-SCF); retain DC/scalar/non-HSE solve behavior and all fixed operator and
+occupation semantics. Finish each pass in an orthonormal Ritz basis.
+No occupation-update change is justified by this experiment alone.
+
+The actual production `solve_orbitals` regression (`solve` diagnostic mode)
+passed the same numerical threshold after this change. Source/application
+objects audited; no PZHEEV. New temporary executable salmon-hse-v5-blocked,
+SHA256 f50f1bbcd918430fa57b60d84acbfce59cb0f7acbffa03fd9ea84263a99b86b7.
+The targeted log checker is testsuites/unit_hse_orbital_stability/check.py;
+its pre-fix RED and post-fix GREEN concern frozen-H stationarity only.
+Next validate a fresh Ni SCF and no-field RT before any HSE10fs run. Earlier
+GS data and failed trials remain transient and unchanged.
