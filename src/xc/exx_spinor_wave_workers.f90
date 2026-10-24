@@ -1,4 +1,4 @@
-! Exact SOC orbit exchange: k ownership is separate from r-block computation.
+! Exact scalar/SOC orbit exchange: k ownership is separate from r-block computation.
 module exx_spinor_wave_workers
  use iso_c_binding
  use iso_fortran_env,only:int64
@@ -25,10 +25,10 @@ contains
  integer,intent(out)::ierr
  integer(int64),intent(out)::payload,pairwork,densitywork,contractwork,scratchbytes
  integer,optional,intent(in)::tile_divisor,rprime_group_count
- integer::np,ng,nk,nr,nt,nsym,b,chunk,divisor,width,widthmax,base,rows,nfirst,lo,nbatch
+ integer::nc,np,ng,nk,nr,nt,nsym,b,chunk,divisor,width,widthmax,base,rows,nfirst,lo,nbatch
  integer::s,g,i,j,k,p,r,c,sl,sr,so,st,gi,gj,kg,q,owner_rank,jlocal,opid,d,nd,ndmax,totaldest
  integer::e,bad,globalbad,col,ncols,column_comm,fft_threads
- integer::settings(13),expected_settings(13)
+ integer::settings(14),expected_settings(14)
  integer::column_groups,row_groups,row_rank,column_rank,group_col,column_base,col_g,ncols_g, &
  ksource,delta(3),idx(3),cc(3),source_g,global_k,ii
  integer,allocatable::forward(:,:),wrap(:,:,:),owner(:),operation(:),first(:),kperm(:,:),lookup(:),inverse(:)
@@ -61,8 +61,11 @@ contains
  ng=op%ng;nk=op%nk;nr=map%nrep;nt=size(target,2);nsym=map%nsym;b=op%block
  bad=0
  if(min(ng,nk,nr,nt,nsym,b)<1)bad=1
- if(size(starts)/=np.or.size(counts)/=np.or.size(target,1)/=2*ng.or.nt<1.or. &
-  size(es,1)/=2*ng.or.size(es,3)/=counts(rank+1).or.any(shape(action)/=shape(target)))bad=1
+ nc=0
+ if(ng>0)nc=size(target,1)/ng
+ if(nc/=1.and.nc/=2)bad=1
+ if(size(starts)/=np.or.size(counts)/=np.or.size(target,1)/=nc*ng.or.nt<1.or. &
+  size(es,1)/=nc*ng.or.size(es,3)/=counts(rank+1).or.any(shape(action)/=shape(target)))bad=1
  if(op%nq/=nk.or.any(op%n/=map%n).or.sum(counts)/=nk.or.starts(1)/=1)bad=1
  do p=2,np
  if(starts(p)/=starts(p-1)+counts(p-1))bad=1
@@ -110,18 +113,22 @@ contains
  if(column_groups>0)then
  if(modulo(np,column_groups)/=0)bad=1
  endif
- settings=[op%n,op%mesh,nk,nr,nt,b,divisor,nsym,column_groups];expected_settings=settings
+ settings=[op%n,op%mesh,nk,nr,nt,b,divisor,nsym,column_groups,nc];expected_settings=settings
  call MPI_Bcast(expected_settings,size(settings),MPI_INTEGER,0,comm,e)
  if(any(settings/=expected_settings))bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
  row_groups=np/column_groups;row_rank=rank/column_groups;column_rank=modulo(rank,column_groups)
  chunk=1+(ng-1)/divisor
- allocate(forward(ng,nsym),wrap(3,ng,nsym),owner(ng),operation(ng),first(ng),gauge(ng,nsym),spin(2,2,nsym))
+ allocate(forward(ng,nsym),wrap(3,ng,nsym),owner(ng),operation(ng),first(ng),gauge(ng,nsym),spin(nc,nc,nsym))
  length=map%n*map%h;pi=acos(-1d0);k0=map%full_k(:,1)
  do s=1,nsym
+ if(nc==2)then
  call symmetry_spin_rotation(map%rotation(:,:,s),spin(:,:,s),bad)
  if(bad/=0)exit
+ else
+ spin(1,1,s)=one
+ endif
  do g=1,ng
  v=matmul(map%rotation(:,:,s),real(op%point(:,g),8)/op%n)+map%translation(:,s)
  cc=nint(v*op%n);wrap(:,g,s)=floor(real(cc,8)/op%n);cc=modulo(cc,op%n)
@@ -157,18 +164,18 @@ contains
  ! Batch more orbit rows to reuse column/target transfers, while bounding four-spin rho.
  b=max(1,min(16,1+(nfirst-1)/row_groups))
  ! Refuse if even the minimum single-pair four-spin rho cannot fit the declared cap.
- if(int(nk,int64)*64>67108864_int64)bad=1
+ if(int(nk,int64)*(16*nc*nc)>67108864_int64)bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
- b=min(b,int(67108864_int64/(int(nk,int64)*64)))
- chunk=max(1,min(chunk,int(67108864_int64/(int(b,int64)*nk*4*16))))
+ b=min(b,int(67108864_int64/(int(nk,int64)*(16*nc*nc))))
+ chunk=max(1,min(chunk,int(67108864_int64/(int(b,int64)*nk*nc*nc*16))))
  if(rank==0)print *,'WAVE_BATCH_ROWS_COLUMNS_GROUPS',b,chunk,row_groups,column_groups
  ndmax=b*nsym
- allocate(rowbuf(row_groups*b,widthmax,2),rowwf(b,widthmax,nk,2),colbuf(chunk,widthmax,2),tbuf(chunk,nt,2))
- allocate(col_owned(chunk,widthmax,2),target_owned(chunk,nt,2))
- allocate(rho(b,chunk,nk,4),partial(ndmax,nt,2,nr),dest(ndmax),dr(ndmax))
+ allocate(rowbuf(row_groups*b,widthmax,nc),rowwf(b,widthmax,nk,nc),colbuf(chunk,widthmax,nc),tbuf(chunk,nt,nc))
+ allocate(col_owned(chunk,widthmax,nc),target_owned(chunk,nt,nc))
+ allocate(rho(b,chunk,nk,nc*nc),partial(ndmax,nt,nc,nr),dest(ndmax),dr(ndmax))
  allocate(destcounts(np),displs(np),datacounts(np),datadispls(np),alldest(np*ndmax))
- allocate(packed(ndmax*nt*2),gathered(np*ndmax*nt*2),row(1,chunk),tm(chunk,nt),contracted(1,nt))
+ allocate(packed(ndmax*nt*nc),gathered(np*ndmax*nt*nc),row(1,chunk),tm(chunk,nt),contracted(1,nt))
  scratchbytes=16_int64*(size(rowbuf,kind=int64)+size(rowwf,kind=int64)+size(colbuf,kind=int64)+ &
  size(tbuf,kind=int64)+size(col_owned,kind=int64)+size(target_owned,kind=int64)+size(rho,kind=int64)+ &
  size(partial,kind=int64)+size(packed,kind=int64)+ &
@@ -184,7 +191,7 @@ contains
  do p=0,np-1;do j=1,counts(p+1)
  kg=starts(p+1)+j-1;rowbuf=zero
  if(rank==p)then
- do c=1,2;do g=1,nbatch
+ do c=1,nc;do g=1,nbatch
  gi=first(base+g-1)
  rowbuf(g,:width,c)=es(gi+(c-1)*ng,:,j)*op%phase(gi,j)
  enddo;enddo
@@ -203,7 +210,7 @@ contains
  do p=2,np;displs(p)=displs(p-1)+destcounts(p-1);enddo
  totaldest=sum(destcounts)
  call MPI_Allgatherv(dest,nd,MPI_INTEGER,alldest,destcounts,displs,MPI_INTEGER,comm,e)
- datacounts=destcounts*nt*2;datadispls=displs*nt*2
+ datacounts=destcounts*nt*nc;datadispls=displs*nt*nc
  partial=zero
  do column_base=1,ng,column_groups*chunk
  col=column_base+column_rank*chunk;ncols=max(0,min(chunk,ng-col+1));rho=zero
@@ -213,7 +220,7 @@ contains
  do group_col=0,column_groups-1
  col_g=column_base+group_col*chunk;ncols_g=max(0,min(chunk,ng-col_g+1));colbuf=zero
  if(rank==p)then
- do c=1,2;do g=1,ncols_g
+ do c=1,nc;do g=1,ncols_g
  gi=col_g+g-1;colbuf(g,:width,c)=es(gi+(c-1)*ng,:,j)*op%phase(gi,j)
  enddo;enddo
  endif
@@ -223,8 +230,8 @@ contains
  ki_block:block
  integer::ki
  ki=inverse(kg)
- do c=1,4
- sl=1+modulo(c-1,2);sr=1+(c-1)/2
+ do c=1,nc*nc
+ sl=1+modulo(c-1,nc);sr=1+(c-1)/nc
  if(rows>0)call zgemm('N','C',rows,ncols,widthmax,one,rowwf(1,1,kg,sl),b, &
  col_owned(1,1,sr),chunk,zero,rho(1,1,ki,c),b)
  densitywork=densitywork+int(rows,int64)*ncols
@@ -248,7 +255,7 @@ contains
  tbuf=zero
  if(rank==owner_rank)then
  jlocal=gj-rep_start+1;ii=global_k-starts(rank+1)+1
- do st=1,2;do g=1,ncols_g
+ do st=1,nc;do g=1,ncols_g
  gi=forward(col_g+g-1,opid)
  tbuf(g,:,st)=target(gi+(st-1)*ng,:,jlocal)*op%phase(gi,ii)
  enddo;enddo
@@ -259,14 +266,14 @@ contains
  do i=1,nd
  d=dest(i);if(operation(d)/=opid)cycle
  r=dr(i);gi=first(lo+r-1);ksource=kperm(global_k,opid);q=inverse(ksource)
- do c=1,4
- sl=1+modulo(c-1,2);sr=1+(c-1)/2
+ do c=1,nc*nc
+ sl=1+modulo(c-1,nc);sr=1+(c-1)/nc
  do g=1,ncols
  source_g=col+g-1;ii=forward(source_g,opid);delta=wrap(:,source_g,opid)-wrap(:,gi,opid)
  angle=sum(map%full_k(:,global_k)*length*delta)
  row(1,g)=rho(r,g,q,c)*exp(cmplx(0d0,angle,8))*gauge(d,opid)*conjg(gauge(ii,opid))
  enddo
- do so=1,2;do st=1,2
+ do so=1,nc;do st=1,nc
  coefficient=spin(so,sl,opid)*conjg(spin(st,sr,opid))
  ! Spin rotations can contain exact structural zeros; no numerical cutoff is applied.
  if(coefficient==zero)cycle
@@ -287,14 +294,14 @@ contains
  do p=0,np-1
  if(gj>=repstarts(p+1).and.gj<repstarts(p+1)+repcounts(p+1))owner_rank=p
  enddo
- packed(:nd*nt*2)=reshape(partial(:nd,:,:,gj),[nd*nt*2])
- call MPI_Gatherv(packed,nd*nt*2,MPI_DOUBLE_COMPLEX,gathered,datacounts,datadispls, &
+ packed(:nd*nt*nc)=reshape(partial(:nd,:,:,gj),[nd*nt*nc])
+ call MPI_Gatherv(packed,nd*nt*nc,MPI_DOUBLE_COMPLEX,gathered,datacounts,datadispls, &
  MPI_DOUBLE_COMPLEX,owner_rank,comm,e)
  if(rank==owner_rank)payload=payload+int(sum(datacounts)-datacounts(owner_rank+1),int64)*16
  if(rank==owner_rank)then
  jlocal=gj-rep_start+1
  do p=1,np
- do st=1,2;do j=1,nt;do i=1,destcounts(p)
+ do st=1,nc;do j=1,nt;do i=1,destcounts(p)
  ii=datadispls(p)+(st-1)*destcounts(p)*nt+(j-1)*destcounts(p)+i
  d=alldest(displs(p)+i)
  action(d+(st-1)*ng,j,jlocal)=action(d+(st-1)*ng,j,jlocal)+gathered(ii)

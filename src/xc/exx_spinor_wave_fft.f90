@@ -21,7 +21,7 @@ contains
  integer::workers,w,dims(3),start,flags
  call wave_fft_destroy(plans)
  ierr=1
- if(any(mesh<1).or.size(rho,1)<1.or.size(rho,2)<1.or.size(rho,4)/=4)return
+ if(any(mesh<1).or.size(rho,1)<1.or.size(rho,2)<1.or.(size(rho,4)/=1.and.size(rho,4)/=4))return
  if(product(mesh)/=size(rho,3))return
  plans%batch=size(rho,1)*size(rho,2);plans%nk=size(rho,3);plans%mesh=mesh
  workers=1
@@ -68,7 +68,7 @@ contains
  !$ threads=omp_get_num_threads()
  !$omp end single
  !$omp do collapse(2) schedule(static)
- do c=1,4
+ do c=1,size(rho,4)
  do w=1,size(plans%forward)
  start=plans%offset(w)+(c-1)*plans%batch*plans%nk
  call fftw_execute_dft(plans%forward(w),flat(start:),flat(start:))

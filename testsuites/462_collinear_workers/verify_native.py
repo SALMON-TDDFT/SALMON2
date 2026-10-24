@@ -1,8 +1,10 @@
 """Minimal scalar GS/learned RT ownership regression; not converged production acceptance."""
 from pathlib import Path
 import argparse,os,subprocess,sys,json,time,re,itertools,math
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--output',required=True);p.add_argument('--pseudo',required=True);p.add_argument('--threads',type=int,default=2);a=p.parse_args()
-out=Path(a.output).resolve();out.mkdir(parents=True,exist_ok=False);exe=Path(a.binary).resolve();pp=Path(a.pseudo).resolve()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--output',required=True);p.add_argument('--pseudo',required=True);p.add_argument('--threads',type=int,default=2);p.add_argument('--unique-output',action='store_true');a=p.parse_args()
+out=Path(a.output).resolve()
+if a.unique_output:out=out/('run-'+str(time.time_ns()))
+out.mkdir(parents=True,exist_ok=False);exe=Path(a.binary).resolve();pp=Path(a.pseudo).resolve()
 atoms=[(0,0,0),(1,1,1),(2,0,2),(0,2,2),(2,2,0),(3,1,3),(1,3,3),(3,3,1)]
 sym=[]
 for swap in [False,True]:
@@ -16,7 +18,7 @@ base="""&calculation theory='THEORY',yn_dc='n' /
 &control sysname='Si',yn_restart='n',CONTROL /
 &units unit_system='au' /
 &system yn_periodic='y',yn_symmetry='yyn',al=10.26d0,10.26d0,10.26d0,
- nstate=16,nelec=32,nelem=1,natom=8 /
+ nstate=32,nelec=32,nelem=1,natom=8 /
 &pseudo izatom(1)=14,file_pseudo(1)='PSEUDO',lmax_ps(1)=2,lloc_ps(1)=2 /
 &functional xc='hse06',yn_exx_fft_orbits='y',exx_pre_scf_threshold=0d0,
  exx_factor_mode='FACTOR',exx_factor_exact_interval=2,exx_factor_n_teach=2,
@@ -80,8 +82,19 @@ for label,np,groups in [('owners2',2,1),('helpers4',4,2),('helpers8',8,4)]:
   return rows
  cur=table(rt/'Si_rt.data');en=table(rt/'Si_rt_energy.data');assert len(cur)==32 and len(en)==33,(len(cur),len(en))
  eigen=table(gs/'Si_eigen.data');assert eigen
- svd=[float(x.replace('D','E')) for log in logs for line in log.splitlines() if 'SVD_QUALITY' in line for x in re.findall(r'[-+]?\d+\.\d+(?:[eEdD][-+]?\d+)?',line)]
- report[label]={'MPI':np,'OMP':a.threads,'GS_energy':energies,'eigen':eigen,'current':cur,'energy':en,'predicted':flags.count('T'),'exact':flags.count('F')}
+ svd=[]
+ for log in logs[:2]:
+  values=[]
+  for line in log.splitlines():
+   if 'FACTOR_SVD_QUALITY n/residual/unit_u/unit_v/smin/smax:' not in line:continue
+   vals=list(map(float,line.split(':',1)[1].split()));n=int(vals[0])
+   assert n>0 and all(math.isfinite(x) for x in vals)
+   assert vals[1]<=1e-10 and max(vals[2:4])<=1e-10*math.sqrt(n)
+   assert vals[4]>0 and vals[5]>=vals[4]
+   values.append(vals)
+  assert len(values)>=6,(label,'SVD records',len(values))
+  svd+=values
+ report[label]={'MPI':np,'OMP':a.threads,'GS_energy':energies,'eigen':eigen,'current':cur,'energy':en,'predicted':flags.count('T'),'exact':flags.count('F'),'SVD_records':len(svd),'SVD_max_residual':max(x[1] for x in svd)}
  if label!='owners2':
   ref=report['owners2']
   ed=max(abs(x-y) for x,y in zip(energies,ref['GS_energy']));assert ed<1e-6,(label,'GSenergy',ed)
@@ -90,4 +103,15 @@ for label,np,groups in [('owners2',2,1),('helpers4',4,2),('helpers8',8,4)]:
    diff=max(abs(x-y) for ra,rb in zip(aa,bb) for x,y in zip(ra,rb));assert diff<tol,(label,key,diff)
    report[label][key+'_maxabs']=diff
  (out/'summary.json').write_text(json.dumps(report,indent=2))
-print('SI_GS_RT_WORKERS_PASS')
+for label,old,new in [('reject-no-symmetry',"yn_symmetry='yyn'","yn_symmetry='nnn'"),
+                      ('reject-rt-full',"propagator='hse_taylor4'","propagator='hse_taylor4_full'")]:
+ d=out/label;d.mkdir()
+ text=base.replace('GROUPS','2').replace('THEORY','tddft_response').replace('FACTOR','learned')
+ text=text.replace('CONTROL',"directory_read_data='"+str(out/'owners2/gs/data_for_restart')+"/'").replace(old,new)
+ (d/'inputfile').write_text(text);(d/'sym.dat').write_text('\n'.join(sym)+'\n')
+ with (d/'inputfile').open() as f,(d/'launcher.log').open('x') as log:
+  q=subprocess.run(['mpiexec','--oversubscribe','--bind-to','none','-n','4',sys.executable,str(wrapper),str(exe)],cwd=d,env=env,stdin=f,stdout=log,stderr=subprocess.STDOUT,timeout=30)
+ assert q.returncode!=0,(label,'unsupported layout accepted')
+ reason='FFT orbits require native CPU dense-k hybrid symmetry with all q points' if label=='reject-no-symmetry' else 'Factor history requires native static HSE Taylor4 predictor-corrector'
+ assert reason in ''.join(x.read_text() for x in list(d.glob('stdout.rank-*'))+list(d.glob('stderr.rank-*'))),label
+print('SI_GS_RT_WORKERS_PASS',str(out))

@@ -65,14 +65,20 @@ contains
     use mpi, only: MPI_COMM_WORLD,MPI_INTEGER,MPI_MAX,MPI_Allreduce,MPI_Abort,MPI_Barrier
     implicit none
     integer :: bad,total_bad,ierr
-    logical :: supported
+    logical :: supported,scalar_mode,spinor_mode
     ! DC ranks belong to fragments, not to the exchange helper pool.
     if(yn_dc=='y')return
     ! Ordinary orbital/spatial layouts retain their original decomposition.
     if(nproc_k<1.or.nproc_k>=nproc_size_global.or.nproc_ob/=1.or.any(nproc_rgrid/=1))return
-    supported=theory=='dft'.and.xc=='hse06'.and.yn_spinorbit=='y'.and.spin=='noncollinear'.and. &
-      yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.yn_periodic=='y'.and.exx_factor_mode=='off'.and. &
-      propagator/='hse_taylor4_full'.and.yn_exx_spinor_pair_fft=='y'.and.index(yn_symmetry,'y')/=0.and. &
+    spinor_mode=theory=='dft'.and.yn_spinorbit=='y'.and.spin=='noncollinear'.and. &
+      exx_factor_mode=='off'.and.yn_exx_spinor_pair_fft=='y'
+    scalar_mode=yn_spinorbit=='n'.and.spin=='unpolarized'.and.yn_exx_fft_orbits=='y'.and. &
+      (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse').and. &
+      (exx_factor_mode=='off'.or.exx_factor_mode=='learned')
+    if(theory/='dft')scalar_mode=scalar_mode.and.propagator=='hse_taylor4'
+    supported=(spinor_mode.or.scalar_mode).and.xc=='hse06'.and. &
+      yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.yn_periodic=='y'.and. &
+      propagator/='hse_taylor4_full'.and.index(yn_symmetry,'y')/=0.and. &
       all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.temperature<0d0.and. &
       yn_jm=='n'.and.yn_symmetrized_stencil/='y'.and.yn_hse_wannier_snapshot/='y'.and. &
       exx_pair_screening=='off'.and.dm_unfold_option=='no'.and. &
@@ -84,7 +90,7 @@ contains
     call MPI_Allreduce(bad,total_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
     if(total_bad/=0)then
       if(nproc_id_global==0)print *, &
-        'EXX_SERVICE_UNSUPPORTED: helpers require static full-support CPU SOC HSE06 pair exchange with symmetry'
+        'EXX_SERVICE_UNSUPPORTED: helpers require supported full-support symmetric CPU HSE06 exchange'
       flush(output_unit)
       call MPI_Barrier(MPI_COMM_WORLD,ierr)
       call MPI_Abort(MPI_COMM_WORLD,86,ierr)

@@ -101,7 +101,7 @@ contains
  complex(8),intent(out)::action(:,:,:)
  integer,intent(in)::ownerstarts(:),ownercounts(:),rep_start,owner_rank,owner_comm
  integer,intent(out)::ierr
- integer::command,e,np,rank,bad,totalbad,width,nt
+ integer::command,e,np,rank,bad,totalbad,width,nt,nc
  integer,allocatable::starts(:),counts(:)
  integer(int64)::payload,pairs,density,contract,scratch
  real(8)::t,meta_start,metadata_seconds
@@ -112,8 +112,8 @@ contains
  call MPI_Allreduce(bad,totalbad,1,MPI_INTEGER,MPI_MAX,owner_comm,e)
  if(totalbad/=0)call MPI_Abort(MPI_COMM_WORLD,84,e)
  command=1;call wait_command(command)
- width=size(es,2);nt=size(target,2)
- call share_metadata(op,map,width,nt)
+ width=size(es,2);nt=size(target,2);nc=size(target,1)/op%ng
+ call share_metadata(op,map,width,nt,nc)
  allocate(starts(worldsize),counts(worldsize));starts=map%nfull+1;counts=0
  starts(:nowners)=ownerstarts;counts(:nowners)=ownercounts
  call MPI_Bcast(starts,worldsize,MPI_INTEGER,0,MPI_COMM_WORLD,e)
@@ -131,16 +131,16 @@ contains
  type(s_exx_symmetry_map)::map
  complex(8),allocatable::es(:,:,:),target(:,:,:),action(:,:,:)
  integer,allocatable::starts(:),counts(:)
- integer::width,nt,e,ierr
+ integer::width,nt,nc,e,ierr
  integer(int64)::payload,pairs,density,contract,scratch
  real(8)::t
- width=0;nt=0
- call share_metadata(op,map,width,nt)
+ width=0;nt=0;nc=0
+ call share_metadata(op,map,width,nt,nc)
  allocate(starts(worldsize),counts(worldsize))
  call MPI_Bcast(starts,worldsize,MPI_INTEGER,0,MPI_COMM_WORLD,e)
  call MPI_Bcast(counts,worldsize,MPI_INTEGER,0,MPI_COMM_WORLD,e)
  op%phase_start=starts(worldrank+1)
- allocate(op%phase(op%ng,0),es(2*op%ng,width,0),target(2*op%ng,nt,0),action(2*op%ng,nt,0))
+ allocate(op%phase(op%ng,0),es(nc*op%ng,width,0),target(nc*op%ng,nt,0),action(nc*op%ng,nt,0))
  t=MPI_Wtime()
  call apply_wave_workers(op,map,es,target,action,starts,counts,map%nrep+1,worldrank,MPI_COMM_WORLD,ierr, &
   payload,pairs,density,contract,scratch,service_divisor,service_column_groups)
@@ -148,16 +148,16 @@ contains
  print *,'EXX_SERVICE_COMPUTE',worldrank,calls,density,contract,scratch,payload,MPI_Wtime()-t
  if(ierr/=0)call MPI_Abort(MPI_COMM_WORLD,85,e)
  end subroutine
- subroutine share_metadata(op,map,width,nt)
+ subroutine share_metadata(op,map,width,nt,nc)
  implicit none
  type(exx_k_kernel),intent(inout)::op
  type(s_exx_symmetry_map),intent(inout)::map
- integer,intent(inout)::width,nt
- integer::meta(18),e,t
+ integer,intent(inout)::width,nt,nc
+ integer::meta(19),e,t
  logical::helper
  helper=worldrank>=nowners
  if(worldrank==0)meta=[op%n,op%mesh,op%ng,op%nk,op%nq,op%block,map%nfull,map%nrep,map%nsym, &
- map%max_little,shape(op%kernel),width]
+ map%max_little,shape(op%kernel),width,nc]
  call MPI_Bcast(meta,size(meta),MPI_INTEGER,0,MPI_COMM_WORLD,e)
  t=nt;call MPI_Bcast(t,1,MPI_INTEGER,0,MPI_COMM_WORLD,e)
  if(helper)then
@@ -185,7 +185,7 @@ contains
  call MPI_Bcast(map%grid,size(map%grid),MPI_INTEGER,0,MPI_COMM_WORLD,e)
  ! Helper shape values are returned through saved scalar storage, avoiding root-only arrays.
  if(helper)then
- width=meta(18);nt=t
+ width=meta(18);nt=t;nc=meta(19)
  endif
  end subroutine
 end module

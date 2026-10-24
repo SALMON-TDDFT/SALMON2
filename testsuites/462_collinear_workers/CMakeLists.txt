@@ -17,5 +17,13 @@ foreach(_np 2 4 8)
  add_test(NAME 462_collinear_worker_${_np} COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${_np}
   $<TARGET_FILE:collinear_worker_probe>)
  set_tests_properties(462_collinear_worker_${_np} PROPERTIES TIMEOUT 60 PROCESSORS ${_np}
-  LABELS "hybrid;soc;openmp;mpi" ENVIRONMENT "OMP_NUM_THREADS=4;OMP_DYNAMIC=FALSE;OPENBLAS_NUM_THREADS=1")
+  LABELS "hybrid;collinear;openmp;mpi" ENVIRONMENT "OMP_NUM_THREADS=4;OMP_DYNAMIC=FALSE;OPENBLAS_NUM_THREADS=1")
 endforeach()
+
+add_test(NAME 462_collinear_native_gs_rt
+ COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/verify_native.py
+ --binary $<TARGET_FILE:${TARGET_NAME}>
+ --output ${CMAKE_CURRENT_BINARY_DIR}/native --unique-output
+ --pseudo ${PROJECT_SOURCE_DIR}/testsuites/pseudo/Si_rps.dat --threads 2)
+set_tests_properties(462_collinear_native_gs_rt PROPERTIES TIMEOUT 600 PROCESSORS 16
+ LABELS "hybrid;collinear;openmp;mpi;native")

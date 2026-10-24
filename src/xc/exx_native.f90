@@ -1140,6 +1140,23 @@ contains
       if(total_error/=0)then
         ierr=1;return
       endif
+#ifdef USE_MPI
+      if(service_enabled())then
+        ! Keep the established one-spin occupied projector and little-group average.
+        ! Only exact exchange uses world workers; SCF and learned ACE stay on k owners.
+        index=size(source,2)
+        if(temperature<0d0.and.yn_dc=='n')index=nelec/2
+        call symmetry_expand(symmetry_map,info%ik_s,source(:,:index,:),target, &
+          expanded_source,expanded_target,ierr)
+        call comm_summation(ierr,total_error,info%icomm_k)
+        if(total_error/=0)then
+          ierr=1;return
+        endif
+        call service_exchange(kernel,symmetry_map,expanded_source,target,action,layout(:np), &
+          layout(np+1:),info%ik_s,info%id_k,info%icomm_k,ierr)
+        return
+      endif
+#endif
       allocate(rotated(size(source,1),size(source,2)))
       ! Opt-in route. Keep the established full route as the default.
       if(yn_exx_fft_orbits=='y')then
