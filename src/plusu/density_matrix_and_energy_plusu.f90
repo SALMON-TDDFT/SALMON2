@@ -24,6 +24,7 @@ module density_matrix_and_energy_plusU_sub
 
   private
   public :: calc_density_matrix_and_energy_plusU
+  public :: calc_energy_correction_plusU
   public :: PLUS_U_ON
 
 contains
@@ -170,5 +171,36 @@ contains
 
     return
   end subroutine calc_density_matrix_and_energy_plusU
+
+  subroutine calc_energy_correction_plusU( ppg, E_U, include_dc, dE )
+    ! dE = E_U - sum_sigma Tr(V_eff n): replaces the +U operator expectation value,
+    ! which hpsi puts into the band energy, by E_U (include_dc=.false.: dE = E_U).
+    use structures, only: s_pp_grid
+    implicit none
+    type(s_pp_grid),intent(in) :: ppg
+    real(8),intent(in) :: E_U
+    logical,intent(in) :: include_dc
+    real(8),intent(out) :: dE
+    integer :: ispin,iprj,a,l,n,m1,m2
+
+    dE=0.0d0
+    if( .not.allocated(V_eff) .or. .not.allocated(dm_mms_nla) ) return
+
+    dE=E_U
+    if( .not.include_dc ) return
+
+    do ispin=1,size(V_eff,2)
+      do iprj=1,size(ppg%proj_pairs_ao,2)
+        a = ppg%proj_pairs_info_ao(1,iprj)
+        l = ppg%proj_pairs_info_ao(2,iprj)
+        n = ppg%proj_pairs_info_ao(3,iprj)
+        m1= ppg%proj_pairs_info_ao(4,iprj)
+        m2= ppg%proj_pairs_info_ao(5,iprj)
+        dE = dE - V_eff(iprj,ispin)*dble( dm_mms_nla(m1,m2,ispin,n,l,a) )
+      end do !iprj
+    end do !ispin
+
+    return
+  end subroutine calc_energy_correction_plusU
 
 end module density_matrix_and_energy_plusU_sub
