@@ -70,7 +70,7 @@ program primitive_c3
  if(err/=0.or.maxval(abs(matmul(old%cell,old%inverse_cell)-id))>1d-13) stop 'general cell inverse mismatch'
  call symmetry_init(old,[4,4,4],[.25d0,.25d0,.25d0],k,wt,ops,ops,2,err,cell=badcell)
  if(err==0) stop 'nonisometric C3 accepted'
- print *,'primitive translated FCC C3 and legacy diagonal PASS' 
+ print *,'primitive translated FCC C3 and legacy diagonal PASS'
 contains
  function mag(v) result(m)
  complex(8),intent(in)::v(2)
