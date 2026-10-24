@@ -2123,7 +2123,7 @@ contains
        iflag_unit_charge == ntype_unit_charge_au &
          )then
       t_unit_conductivity%name  = '1/fs*V*Angstrom'
-      t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au
+      t_unit_conductivity%conv = 1.d0/utime_from_au/51.42206707d0/ulength_from_au**2
     else
       t_unit_conductivity%name  = 'a.u.'
       t_unit_conductivity%conv  = 1d0
