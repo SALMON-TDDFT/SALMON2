@@ -3208,9 +3208,11 @@ contains
         error stop 'Manual EXX k algorithm requires dft or fixed-ion RT'
       if(.not.is_hybrid(xc).or.yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
          exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1).or. &
-         any(nproc_rgrid/=1).or.nproc_ob/=1.or.temperature>=0d0.or. &
+         any(nproc_rgrid/=1).or.nproc_ob/=1.or.(temperature>=0d0.and.yn_spinorbit/='y').or. &
          exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
-         yn_hse_wannier_snapshot/='n'.or.exx_factor_mode/='off') &
+         yn_hse_wannier_snapshot/='n'.or. &
+         (exx_factor_mode/='off'.and..not.(yn_spinorbit=='y'.and.temperature>=0d0.and. &
+          exx_factor_mode=='learned'))) &
         error stop 'Manual EXX k algorithm requires fixed-ion full-support CPU k-only native exchange'
       if(yn_spinorbit=='n'.and.(product(num_kgrid)<2.or.2*nstate/=nelec)) &
         error stop 'Manual scalar EXX k algorithm requires dense k mesh and occupied spin pairs'
@@ -3775,22 +3777,38 @@ contains
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
       if(yn_spinorbit=='y')then
         if(xc/='hse06'.or.spin/='noncollinear'.or.yn_dc/='n'.or. &
-           nproc_ob/=1.or.any(nproc_rgrid/=1).or.temperature>=0d0.or.nstate/=nelec.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+           (temperature<0d0.and.nstate/=nelec).or.(temperature>=0d0.and.nstate<nelec).or. &
            yn_hse_wannier/='n'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
-           hse_sr_tolerance/=0d0.or.yn_exx_fft_orbits/='n'.or.trim(file_kw)/='none'.or. &
-           yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_factor_mode/='off'.or.exx_kpoint_backend/='cpu'.or. &
+           hse_sr_tolerance/=0d0.or.trim(file_kw)/='none'.or. &
+           yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
            yn_conventional_from_dcdft/='n'.or.yn_hse_wannier_snapshot/='n'.or. &
            exx_ace_support/='occupied'.or.exx_pair_screening/='off') &
           error stop 'SOC HSE06: occupied spinors, native CPU k-only mesh and no approximations required'
+        if(exx_factor_mode/='off')then
+          if(exx_factor_mode/='learned'.or.temperature<0d0.or.product(num_kgrid)<2.or. &
+             yn_restart/='n')error stop 'SOC learned ACE requires thermal fixed occupations and no history restart'
+        endif
         if(theory/='dft'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
           error stop 'SOC HSE06 RT: Taylor4 required'
-        if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0.or. &
+        ! A wavefunction-only GS seed resets the iteration and rebuilds all HSE
+        ! state. This does not enable checkpoint continuation or RT restart.
+        if(yn_restart=='y')then
+          if(theory/='dft'.or.read_gs_restart_data/='wfn'.or.yn_reset_step_restart/='y'.or. &
+             exx_pre_scf_threshold/=0d0) &
+            error stop 'SOC HSE06: restart requires a reset wavefunction-only GS seed'
+          ! The wfn reader also restores initial occupations. Re-equilibrate
+          ! them from the target hybrid spectrum in the first thermal SCF step.
+          if(temperature>=0d0.and.nscf_init_redistribution/=0) &
+            error stop 'Thermal SOC HSE seed requires immediate occupation redistribution'
+        endif
+        if(checkpoint_interval>0.or.time_shutdown>0d0.or. &
            yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
           error stop 'SOC HSE06: checkpoint continuation and diagnostics not certified'
       endif
       if(yn_dc=='y')yn_hse_wannier='y'
       ! Fixed thermal occupations use the existing weighted canonical source.
-      if(xc=='hse06'.and.yn_dc=='n'.and.temperature>=0d0)then
+      if(xc=='hse06'.and.yn_dc=='n'.and.temperature>=0d0.and.yn_spinorbit=='n')then
         if(nstate*2<nelec.or.nstate<1.or.mod(nelec,2)/=0.or. &
            nproc_ob/=1.or.any(nproc_rgrid/=1).or.exx_kpoint_backend/='cpu'.or. &
            index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &

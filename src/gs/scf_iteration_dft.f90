@@ -52,12 +52,16 @@ use checkpoint_restart_sub
 use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
-use noncollinear_module, only: calc_magnetization
+use noncollinear_module, only: calc_magnetization,snapshot_density_noncollinear
+use nc_mgga23_scf, only: nc23_scf_prepare,nc23_scf_residual,nc23_spin_density_residual
 use dcdft
 use hse_reference_export, only: export_hse_reference
 #ifdef USE_HSE
 use exx_native, only: exx_enabled,exx_freeze,exx_check_localization,exx_adaptive_ready,exx_support_changed
 use salmon_global, only: exx_mlwf_norm_fraction
+#endif
+#ifdef USE_HSE
+use exx_native, only: exx_scf_prepare,exx_scf_residual
 #endif
 use exx_functional, only: is_global_hybrid
 implicit none
@@ -67,6 +71,9 @@ integer :: ilevel_print !=3:print-all
                         !=1:print-minimum
                         !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
+type(s_nc_mgga23_payload) :: nc_scf_history
+complex(8),allocatable :: spin_density_before(:,:,:,:,:),spin_density_after(:,:,:,:,:)
+real(8) :: nc_scf_residual
 integer :: mixing_age
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
@@ -109,6 +116,7 @@ logical :: pre_scf_root
 #endif
 
 mixing_age=Miter
+nc_scf_history%active=.false.
 #ifdef USE_HSE
 pre_scf_count=0
 pre_scf_first_iteration=Miter+1
@@ -258,6 +266,18 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
+   ! The orbital-dependent XC bypasses rho mixing; damp its full gKS operator
+   ! only for the orbital solve. XC refresh below restores the physical payload
+   ! before energy/band evaluation and before writing the final state.
+#ifndef USE_OPENACC
+   if(calc_mode/='DFT_BAND'.and.yn_dc=='n'.and.yn_spinorbit=='y'.and.method_mixing=='simple_dm'.and. &
+      .not.system%nc_mgga23_payload%active) call snapshot_density_noncollinear(spin_density_before)
+#endif
+   if(calc_mode/='DFT_BAND') &
+     call nc23_scf_prepare(system%nc_mgga23_payload,nc_scf_history,mixing%mixrate)
+#ifdef USE_HSE
+   if(calc_mode/='DFT_BAND')call exx_scf_prepare(system,mg,info,spsi,mixing%mixrate)
+#endif
    call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
 #ifdef USE_HSE
    if(adaptive_exchange)then
@@ -373,6 +393,26 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if(yn_dc=='n') then
      call convergence_check(lg,mg,system,info,rho,V_local)
+     call nc23_scf_residual(system%nc_mgga23_payload,nc_scf_history,info%icomm_rko,nc_scf_residual)
+     sum1=max(sum1,nc_scf_residual)
+#ifdef USE_HSE
+     call exx_scf_residual(system,mg,info,spsi,nc_scf_residual)
+     sum1=max(sum1,nc_scf_residual)
+     if(nc_scf_residual>0d0.and.comm_is_root(nproc_id_global)) &
+       write(*,'(a,es24.16)') 'HSE full-Fock target-action residual: ',nc_scf_residual
+#endif
+#ifndef USE_OPENACC
+     if(allocated(spin_density_before)) then
+       call snapshot_density_noncollinear(spin_density_after)
+       call nc23_spin_density_residual(spin_density_after,spin_density_before,system%hvol, &
+         mixing%mixrate,info%icomm_r,nc_scf_residual)
+       sum1=max(sum1,nc_scf_residual)
+       if(comm_is_root(nproc_id_global)) &
+         write(*,'(a,es24.16)') 'SOC full-spin-density residual: ',nc_scf_residual
+     endif
+#endif
+     if(system%nc_mgga23_payload%active.and.comm_is_root(nproc_id_global)) &
+       write(*,'(a,es24.16)') 'NC_MGGA23 full-operator residual: ',nc_scf_residual
    else
    ! DC method
      call convergence_check(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot,dc%rho_tot,dc%vloc_tot)

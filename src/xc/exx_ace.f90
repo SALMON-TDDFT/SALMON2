@@ -4,6 +4,7 @@ module exx_ace
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
+  public :: exx_ace_scf_mix,exx_ace_action_residual
   public :: s_exx_ace,exx_ace_build,exx_ace_apply,exx_ace_average,exx_ace_clear,exx_ace_ready
   ! Spatial peers must share orbital/k dimensions, dv and collective call order.
   ! The callback sums a small matrix in place; grid rows are never gathered.
@@ -33,6 +34,55 @@ module exx_ace
     complex(c_double_complex),allocatable :: values(:),metric_factor(:,:)
   end type
 contains
+  subroutine exx_ace_action_residual(left,right,target,residual,ierr)
+    type(s_exx_ace),intent(in)::left,right
+    complex(c_double_complex),intent(in)::target(:,:,:)
+    real(c_double),intent(out)::residual
+    integer,intent(out)::ierr
+    complex(c_double_complex),allocatable::a(:,:,:),b(:,:,:)
+    real(c_double)::scale,den
+    residual=huge(1d0);ierr=1
+    allocate(a(size(target,1),size(target,2),size(target,3)),b(size(target,1),size(target,2),size(target,3)))
+    call exx_ace_apply(left,target,a,ierr)
+    if(ierr/=0)return
+    call exx_ace_apply(right,target,b,ierr)
+    if(ierr/=0)return
+    scale=max(maxval(abs(a)),maxval(abs(b)),tiny(1d0))
+    a=a/scale;b=b/scale
+    den=sqrt(sum(abs(a)**2))
+    residual=sqrt(sum(abs(a-b)**2))/max(den,tiny(1d0))
+    if(.not.ieee_is_finite(residual))then
+      ierr=1;return
+    endif
+    ierr=0
+  end subroutine
+
+  subroutine exx_ace_scf_mix(history,physical,target,alpha,mixed,residual,ierr)
+    type(s_exx_ace),intent(in)::history,physical
+    complex(c_double_complex),intent(in)::target(:,:,:)
+    real(c_double),intent(in)::alpha
+    type(s_exx_ace),intent(out)::mixed
+    real(c_double),intent(out)::residual
+    integer,intent(out)::ierr
+    complex(c_double_complex),allocatable::old(:,:,:),now(:,:,:)
+    residual=huge(1d0);ierr=1
+    if(.not.ieee_is_finite(alpha))return
+    if(alpha<=0d0.or.alpha>1d0)return
+    if(.not.exx_ace_ready(physical))return
+    if(.not.exx_ace_ready(history))then
+      mixed=physical;ierr=0;return
+    endif
+    call exx_ace_action_residual(physical,history,target,residual,ierr)
+    if(ierr/=0)return
+    allocate(old(size(target,1),size(target,2),size(target,3)),now(size(target,1),size(target,2),size(target,3)))
+    call exx_ace_apply(history,target,old,ierr)
+    if(ierr/=0)return
+    call exx_ace_apply(physical,target,now,ierr)
+    if(ierr/=0)return
+    now=(1d0-alpha)*old+alpha*now
+    call exx_ace_build(mixed,target,now,physical%dv,ierr)
+  end subroutine
+
   ! Scalar temporaries avoid the array IEEE-expression crash seen with frtpx.
   logical function finite_orbitals(values) result(finite)
     implicit none

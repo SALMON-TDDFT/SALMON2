@@ -11,6 +11,7 @@ set(SOURCES
     exx_gs_metadata.f90
     nc_mgga23_kernel.f90
     nc_mgga23_core.f90
+    nc_mgga23_scf.f90
     nc_mgga23.f90
     salmon_xc.f90
    )

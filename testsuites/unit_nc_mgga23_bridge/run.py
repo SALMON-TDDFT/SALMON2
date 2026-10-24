@@ -17,7 +17,10 @@ p.add_argument('--mpi', action='store_true')
 p.add_argument('--rspace', action='store_true', help='two-rank real-space regression (implies --mpi)')
 p.add_argument('--launcher', default='mpiexec')
 p.add_argument('--libs', default='-lopenblas')
+p.add_argument('--threads', type=int, default=1)
 a = p.parse_args()
+if a.threads < 1:
+    p.error('--threads must be positive')
 if a.rspace:
     a.mpi = True
 root = Path(__file__).resolve().parents[2]
@@ -40,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='nc-mgga23-bridge-') as tmp:
                     *shlex.split(a.libs), '-o', str(exe)], check=True)
     launch = [a.launcher, '-n', '2'] if a.mpi else []
     subprocess.run([*launch, str(exe)], check=True,
-                   env=dict(os.environ, OMP_NUM_THREADS='1'), cwd=tmp)
+                   env=dict(os.environ, OMP_NUM_THREADS=str(a.threads)), cwd=tmp)
 
     if a.rspace:
         raise SystemExit(0)
@@ -55,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='nc-mgga23-bridge-') as tmp:
     print('PASS actual write_rt_spin diagnostic:', rows[0])
     for mode in ['--nonzero-core', '--nonzero-core-tau']:
         rejected = subprocess.run([*launch, str(exe), mode], capture_output=True, text=True,
-                                  env=dict(os.environ, OMP_NUM_THREADS='1'), cwd=tmp)
+                                  env=dict(os.environ, OMP_NUM_THREADS=str(a.threads)), cwd=tmp)
         if rejected.returncode == 0 or 'consistent core tau/current model' not in rejected.stderr:
             raise SystemExit('expected explicit nonzero NLCC rejection: ' + mode)
         print('PASS explicit NLCC rejection:', mode)

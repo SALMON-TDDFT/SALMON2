@@ -135,21 +135,25 @@ contains
     if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
 
-  ! Bounded SOC path: signed Cartesian axes, including improper operations.
-  ! Non-diagonal spin rotations are not certified by this implementation.
+  ! Bounded SOC path: signed fractional and Cartesian permutations, including
+  ! the primitive FCC C3 subgroup. Cell isometry/group/field checks remain active.
   subroutine validate_diagonal_spinor_group()
     implicit none
-    real(8) :: rotation(3,3)
+    real(8) :: rotation(3,3),fractional(3,3),identity(3,3)
     integer :: s,i
+    identity=0d0
+    do i=1,3
+      identity(i,i)=1d0
+    enddo
     do s=1,size(SymMatA,3)
-      rotation=matmul(Amat,matmul(SymMatA(:,1:3,s),Ainv))
-      do i=1,3
-        if(abs(abs(rotation(i,i))-1d0)>1d-10) &
-          error stop 'SOC hybrid symmetry requires signed diagonal Cartesian rotations'
-        rotation(i,i)=0d0
-      enddo
-      if(maxval(abs(rotation))>1d-10) &
-        error stop 'SOC hybrid symmetry: non-diagonal spin rotations are not supported'
+      fractional=SymMatA(:,1:3,s)
+      if(maxval(abs(fractional-anint(fractional)))>1d-10.or. &
+         maxval(abs(matmul(transpose(fractional),fractional)-identity))>1d-10) &
+        error stop 'SOC hybrid symmetry requires grid-preserving fractional signed permutations'
+      rotation=matmul(Amat,matmul(fractional,Ainv))
+      if(maxval(abs(rotation-anint(rotation)))>1d-10.or. &
+         maxval(abs(matmul(transpose(rotation),rotation)-identity))>1d-10) &
+        error stop 'SOC hybrid symmetry requires signed Cartesian permutations preserving the cell'
     enddo
   end subroutine validate_diagonal_spinor_group
 

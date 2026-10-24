@@ -266,6 +266,10 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
         --fc ${CMAKE_Fortran_COMPILER} "--libs=${CORE23_TEST_LIBS}" ${CORE23_MPI_ARGS})
     set_tests_properties(nc_mgga23_core_bridge ky_core23_reader_grid PROPERTIES TIMEOUT 180 LABELS "xc;soc;nlcc;unit")
     if(NOT USE_MPI)
+      add_test(NAME nc_mgga23_scf_damping
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_scf/run.py
+          --build-dir ${CMAKE_BINARY_DIR} --fc ${CMAKE_Fortran_COMPILER} "--libs=${CORE23_TEST_LIBS}")
+      set_tests_properties(nc_mgga23_scf_damping PROPERTIES TIMEOUT 90 LABELS "xc;soc;scf;unit")
       add_test(NAME nc_mgga23_core_current
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_current/run.py
           --build-dir ${CMAKE_BINARY_DIR} --fc ${CMAKE_Fortran_COMPILER} "--libs=${CORE23_TEST_LIBS}")

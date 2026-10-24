@@ -255,22 +255,22 @@ contains
     type(s_orbital),intent(inout) :: htpsi
     type(s_stencil),intent(in) :: stencil
     type(s_sendrecv_grid),intent(inout) :: srg
-    complex(8),allocatable :: gp(:,:,:,:,:),flux(:,:,:,:,:,:,:,:),df(:,:,:,:)
-    complex(8) :: p(2),dp(2),q(2),f(2,3)
+    complex(8),allocatable :: gp(:,:,:,:,:),flux(:,:,:,:,:,:,:,:)
+    complex(8) :: p(2),dp(2),q(2),f(2,3),dq
     real(8) :: k(3)
-    integer :: x,y,z,c,d,sp,io,ik,im
+    integer :: x,y,z,c,d,sp,io,ik,im,ii
     if(.not.system%nc_mgga23_payload%active) return
-    allocate(gp(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2), &
-      mg%is_array(3):mg%ie_array(3),2))
-    allocate(df(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2), &
-      mg%is_array(3):mg%ie_array(3)))
     allocate(flux(mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2), &
       mg%is_array(3):mg%ie_array(3),2,info%io_s:info%io_e,info%ik_s:info%ik_e, &
       info%im_s:info%im_e,3)); flux=0d0
+    !$omp parallel default(shared) private(gp,p,dp,q,f,k,x,y,z,c,d,sp,io,ik,im)
+    allocate(gp(3,mg%is_array(1):mg%ie_array(1),mg%is_array(2):mg%ie_array(2), &
+      mg%is_array(3):mg%ie_array(3),2))
+    !$omp do collapse(3)
     do im=info%im_s,info%im_e
     do ik=info%ik_s,info%ik_e
-      k=system%vec_k(:,ik)
       do io=info%io_s,info%io_e
+        k=system%vec_k(:,ik)
         do sp=1,2
           call calc_gradient_psi(tpsi%zwf(:,:,:,sp,io,ik,im),gp(:,:,:,:,sp), &
             mg%is_array,mg%ie_array,mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab,system%rmatrix_B)
@@ -297,23 +297,40 @@ contains
       end do
     end do
     end do
+    !$omp end do
+    deallocate(gp)
+    !$omp end parallel
     do d=1,3
       if(info%if_divide_rspace) call update_overlap_complex8(srg,mg,flux(:,:,:,:,:,:,:,d))
-      do im=info%im_s,info%im_e
-      do ik=info%ik_s,info%ik_e
-      do io=info%io_s,info%io_e
-      do sp=1,2
-        ! Flux is already transformed into grid coordinates: use identity here.
-        call calc_gradient_psi(flux(:,:,:,sp,io,ik,im,d),df,mg%is_array,mg%ie_array, &
-          mg%is,mg%ie,mg%idx,mg%idy,mg%idz,stencil%coef_nab,identity())
-        htpsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),sp,io,ik,im)= &
-          htpsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),sp,io,ik,im) &
-          -df(d,mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))
-      end do
-      end do
-      end do
-      end do
-    end do
+    enddo
+    ! Flux is already in grid coordinates. Compute only each component's
+    ! matching directional derivative, not three complete gradients.
+    !$omp parallel do collapse(7) default(shared) private(im,ik,io,sp,z,y,x,ii,dq)
+    do im=info%im_s,info%im_e
+    do ik=info%ik_s,info%ik_e
+    do io=info%io_s,info%io_e
+    do sp=1,2
+    do z=mg%is(3),mg%ie(3)
+    do y=mg%is(2),mg%ie(2)
+    do x=mg%is(1),mg%ie(1)
+      dq=0d0
+      do ii=1,4
+        dq=dq+stencil%coef_nab(ii,1)*( &
+          flux(mg%idx(x+ii),y,z,sp,io,ik,im,1)-flux(mg%idx(x-ii),y,z,sp,io,ik,im,1)) &
+          +stencil%coef_nab(ii,2)*( &
+          flux(x,mg%idy(y+ii),z,sp,io,ik,im,2)-flux(x,mg%idy(y-ii),z,sp,io,ik,im,2)) &
+          +stencil%coef_nab(ii,3)*( &
+          flux(x,y,mg%idz(z+ii),sp,io,ik,im,3)-flux(x,y,mg%idz(z-ii),sp,io,ik,im,3))
+      enddo
+      htpsi%zwf(x,y,z,sp,io,ik,im)=htpsi%zwf(x,y,z,sp,io,ik,im)-dq
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
+    !$omp end parallel do
   end subroutine
   function identity() result(b)
     implicit none

@@ -1,0 +1,23 @@
+! Mac test mesh; k points and pseudopotential transferability not converged.
+! Match existing compatible checkpoint; use the same V2 pseudo for both.
+&calculation theory='tddft_pulse' /
+&control sysname='Ni_mgga23',directory_read_data='REPLACE_WITH_EXISTING_PRIMITIVE_mgga23_300K_CHECKPOINT/' /
+
+&units unit_system='A_eV_fs' /
+&system yn_periodic='y',spin='noncollinear',yn_spinorbit='y',yn_symmetry='n',
+ al_vec1=0d0,1.76d0,1.76d0,al_vec2=1.76d0,0d0,1.76d0,al_vec3=1.76d0,1.76d0,0d0,
+ nelem=1,natom=1,nelec=16,nstate=24,temperature_k=300d0 /
+&pseudo file_pseudo(1)='/Users/otobetoshihito/Library/CloudStorage/OneDrive-qst.go.jp/calc2026/ni-soc-nlcc-20261024/v2-aux-pauli-validated/Ni/Ni_soc_nlcc_rps.dat',izatom(1)=28,lloc_ps(1)=0 /
+&functional xc='nc_mgga23' /
+&rgrid num_rgrid=8,8,8 /
+&kgrid num_kgrid=2,2,2 /
+&parallel nproc_k=1,nproc_ob=1,nproc_rgrid=1,1,1 /
+&scf nscf=1200,ncg=8,threshold=1d-6,convergence='rho_dne',
+ method_mixing='simple_dm',mixrate=.03d0,method_init_wf='random',method_init_density='wf' /
+&atomic_red_coor
+ 'Ni' 0d0 0d0 0d0 1
+/
+&tgrid dt=.0005d0,nt=20000 /
+&propagation propagator='middlepoint',yn_predictor_corrector='y',yn_fix_func='n',n_hamil=8 /
+&emfield ae_shape1='Acos2',I_wcm2_1=1d11,tw1=10d0,omega1=1.55d0,epdir_re1=1d0,0d0,0d0 /
+&analysis out_rt_energy_step=20,out_rt_spin_step=20,yn_out_rt_energy_components='y' /

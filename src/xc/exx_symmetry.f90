@@ -1,4 +1,4 @@
-! Unitary space-group star reconstruction for a complete orthogonal rectangular k mesh.
+! Unitary space-group star reconstruction on an exact signed-permutation fractional grid.
 ! Sources average little-group projectors, not individual orbital gauges.
 module exx_symmetry
  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -9,6 +9,8 @@ module exx_symmetry
    integer :: nfull=0,nrep=0,nsym=0,max_little=0
    integer :: n(3)=0
    real(8) :: h(3)=0
+   real(8) :: cell(3,3)=0d0,inverse_cell(3,3)=0d0
+   real(8),allocatable :: cart_rotation(:,:,:)
    real(8),allocatable :: full_k(:,:),rep_k(:,:),rotation(:,:,:),translation(:,:)
    integer,allocatable :: first(:),owner(:),operations(:,:),multiplicity(:),grid(:,:)
  end type
@@ -22,20 +24,23 @@ module exx_symmetry
  end interface
  public :: symmetry_spin_rotation
 contains
- subroutine symmetry_init_scalar(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
+ subroutine symmetry_init_scalar(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr,cell)
+ implicit none
  type(s_exx_symmetry_map),intent(out)::map
  integer,intent(in)::n(3),mesh
  real(8),intent(in)::h(3),krep(:,:),weights(:),SymMatA(:,:,:),SymMatB(:,:,:)
  integer,intent(out)::ierr
- call symmetry_init_vector(map,n,h,krep,weights,SymMatA,SymMatB,[mesh,mesh,mesh],ierr)
+ real(8),intent(in),optional::cell(3,3)
+ call symmetry_init_vector(map,n,h,krep,weights,SymMatA,SymMatB,[mesh,mesh,mesh],ierr,cell)
  end subroutine
- subroutine symmetry_init_vector(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr)
+ subroutine symmetry_init_vector(map,n,h,krep,weights,SymMatA,SymMatB,mesh,ierr,cell)
  implicit none
  type(s_exx_symmetry_map),intent(out)::map
  integer,intent(in):: n(3),mesh(3)
  real(8),intent(in)::h(3),krep(:,:),weights(:),SymMatA(:,:,:),SymMatB(:,:,:)
  integer,intent(out)::ierr
- real(8):: L(3),pi2,ident(3,3),rot(3,3),v(3),f(3),offset(3),xyz(3)
+ real(8),intent(in),optional::cell(3,3)
+ real(8):: L(3),pi2,ident(3,3),rot(3,3),v(3),f(3),offset(3),xyz(3),cart(3,3),det,cell_scale
  integer:: nr,ns,nf,ng,r,s,d,g,j,i,id,slot,base,c(3),c0(3),nstar,matches
  integer,allocatable::lookup(:),order(:),used(:)
  ierr=1
@@ -51,15 +56,31 @@ contains
  ident(d,d)=1
  enddo
 
+ map%cell=0d0
+ do d=1,3
+ map%cell(d,d)=L(d)
+ enddo
+ if(present(cell))map%cell=cell
+ if(.not.salmon_all_finite(map%cell))return
+ cell_scale=maxval(abs(map%cell))
+ if(cell_scale==0d0)return
+ det=determinant3(map%cell/cell_scale)
+ if(.not.ieee_is_finite(det).or.abs(det)<=1d-14)return
+ call inverse3(map%cell/cell_scale,map%inverse_cell,det)
+ map%inverse_cell=map%inverse_cell/cell_scale
+ if(.not.salmon_all_finite(map%inverse_cell))return
+ allocate(map%cart_rotation(3,3,ns))
  allocate(order(ns));id=0
  do s=1,ns
  rot=SymMatA(:,1:3,s)
  if(maxval(abs(rot-anint(rot)))>1d-10)return
  if(maxval(abs(matmul(transpose(rot),rot)-ident))>1d-10)return
+ ! Fractional signed permutations have inverse transpose equal to themselves.
  if(maxval(abs(rot-SymMatB(:,1:3,s)))>1d-10)return
- do d=1,3
- if(maxval(abs(rot(d,:)*(L-L(d))))>1d-10)return
- enddo
+ cart=matmul(map%cell,matmul(rot,map%inverse_cell))
+ if(.not.salmon_all_finite(cart))return
+ if(maxval(abs(matmul(transpose(cart),cart)-ident))>1d-10)return
+ map%cart_rotation(:,:,s)=cart
  if(maxval(abs(rot-ident))<1d-10.and.maxval(abs(SymMatA(:,4,s)))<1d-10)id=s
  enddo
  ! A supplied operation list must be a finite group modulo lattice translations.
@@ -101,13 +122,13 @@ contains
  used(j)=1;map%grid(g,s)=j
  enddo
  enddo
- offset=krep(:,1)*L/pi2*mesh;offset=offset-floor(offset)
+ offset=matmul(transpose(map%cell),krep(:,1))/pi2*mesh;offset=offset-floor(offset)
  i=0
  do r=1,nr
  base=i;map%first(r)=i+1
  do slot=1,ns
  s=order(slot)
- v=matmul(SymMatB(:,1:3,s),krep(:,r)*L/pi2)
+ v=matmul(SymMatB(:,1:3,s),matmul(transpose(map%cell),krep(:,r))/pi2)
  f=v*mesh-offset
  if(maxval(abs(f-anint(f)))>1d-8)return
  c=modulo(nint(f),mesh)
@@ -120,7 +141,7 @@ contains
  if(slot==1)then
  map%full_k(:,g)=krep(:,r)
  else
- map%full_k(:,g)=(v-floor(v+0.5d0))*pi2/L
+ map%full_k(:,g)=pi2*matmul(transpose(map%inverse_cell),v-floor(v+0.5d0))
  endif
  else
  if(map%owner(g)/=r)return
@@ -146,23 +167,22 @@ contains
  integer,intent(out)::ierr
  integer::na,s,i,j,match,count_matches
  integer,allocatable::used(:)
- real(8)::L(3),v(3),delta(3)
+ real(8)::v(3),delta(3)
  ierr=1;na=size(kion)
  if(size(rion,1)/=3.or.size(rion,2)/=na.or.na<1)return
  if(.not.salmon_all_finite(rion))return
  if(.not.allocated(map%rotation).or..not.allocated(map%translation))return
- L=map%n*map%h
- if(any(L<=0))return
+ if(.not.salmon_all_finite(map%cell).or..not.salmon_all_finite(map%inverse_cell))return
  allocate(used(na))
  do s=1,map%nsym
  used=0
  do i=1,na
- v=matmul(map%rotation(:,:,s),rion(:,i)/L)+map%translation(:,s)
+ v=matmul(map%rotation(:,:,s),matmul(map%inverse_cell,rion(:,i)))+map%translation(:,s)
  count_matches=0;match=0
  do j=1,na
  if(kion(i)/=kion(j))cycle
- delta=v-rion(:,j)/L;delta=delta-anint(delta)
- if(maxval(abs(delta*L))<1d-7)then
+ delta=v-matmul(map%inverse_cell,rion(:,j));delta=delta-anint(delta)
+ if(sqrt(sum(matmul(map%cell,delta)**2))<1d-7)then
  count_matches=count_matches+1;match=j
  endif
  enddo
@@ -195,15 +215,15 @@ contains
  if(.not.salmon_all_finite(real(orbitals)).or..not.salmon_all_finite(aimag(orbitals)))return
  r=map%owner(full_index);s=map%operations(operation_slot,full_index)
  if(nc==2)then
- call symmetry_spin_rotation(map%rotation(:,:,s),spin,ierr)
+ call symmetry_spin_rotation(map%cart_rotation(:,:,s),spin,ierr)
  if(ierr/=0)return
  endif
- rk=matmul(map%rotation(:,:,s),map%rep_k(:,r))
+ rk=matmul(map%cart_rotation(:,:,s),map%rep_k(:,r))
  Gvec=rk-map%full_k(:,full_index)
  do g=1,ng
  c=[mod(g-1,map%n(1)),mod((g-1)/map%n(1),map%n(2)),(g-1)/(map%n(1)*map%n(2))]
- pos=c*map%h
- angle=dot_product(Gvec,pos)-dot_product(rk,map%translation(:,s)*map%n*map%h)
+ pos=matmul(map%cell,real(c,8)/map%n)
+ angle=dot_product(Gvec,pos)-dot_product(rk,matmul(map%cell,map%translation(:,s)))
  phase=cmplx(cos(angle),sin(angle),8)
  if(nc==1)then
  transformed(g,:)=phase*orbitals(map%grid(g,s),:)
@@ -245,22 +265,31 @@ contains
  end subroutine
 
 
- ! Double-group representative for diagonal orthorhombic operations. Spin is
- ! axial: improper R uses det(R)*R. Overall SU(2) signs cancel in projectors.
+ ! Axial SO(3) lift for proper/improper Cartesian isometries. The signed
+ ! diagonal branch retains the established gauge exactly; other operations use
+ ! a stable largest-diagonal quaternion. Overall SU(2) signs cancel in projectors.
  subroutine symmetry_spin_rotation(rotation,u,ierr)
+ implicit none
  real(8),intent(in)::rotation(3,3)
  complex(8),intent(out)::u(2,2)
  integer,intent(out)::ierr
- real(8)::r(3),off(3,3),det
- integer::i
+ real(8)::r(3),off(3,3),det,a(3,3),ident(3,3),q(4),t,norm
+ integer::i,j,k
  ierr=1;u=0
  if(.not.salmon_all_finite(rotation))return
+ ident=0d0
+ do i=1,3
+ ident(i,i)=1d0
+ enddo
+ if(maxval(abs(matmul(transpose(rotation),rotation)-ident))>1d-10)return
+ det=determinant3(rotation)
+ if(abs(abs(det)-1d0)>1d-10)return
  off=rotation
  do i=1,3
- off(i,i)=0;r(i)=rotation(i,i)
+ off(i,i)=0d0;r(i)=rotation(i,i)
  enddo
- if(maxval(abs(off))>1d-12.or.any(abs(abs(r)-1d0)>1d-12))return
- det=product(r);r=det*r
+ if(maxval(abs(off))<1d-12.and.all(abs(abs(r)-1d0)<1d-12))then
+ r=sign(1d0,det)*r
  if(all(r>0))then
  u(1,1)=1;u(2,2)=1
  else if(r(1)>0)then
@@ -270,7 +299,51 @@ contains
  else
  u(1,1)=(0d0,-1d0);u(2,2)=(0d0,1d0)
  endif
+ else
+ a=sign(1d0,det)*rotation
+ t=a(1,1)+a(2,2)+a(3,3)
+ if(t>0d0)then
+ t=2d0*sqrt(1d0+t)
+ q(1)=t/4d0
+ q(2)=(a(3,2)-a(2,3))/t
+ q(3)=(a(1,3)-a(3,1))/t
+ q(4)=(a(2,1)-a(1,2))/t
+ else
+ i=maxloc([a(1,1),a(2,2),a(3,3)],dim=1);j=mod(i,3)+1;k=mod(j,3)+1
+ t=2d0*sqrt(max(0d0,1d0+a(i,i)-a(j,j)-a(k,k)))
+ if(t<=1d-14)return
+ q(1)=(a(k,j)-a(j,k))/t;q(i+1)=t/4d0
+ q(j+1)=(a(j,i)+a(i,j))/t;q(k+1)=(a(k,i)+a(i,k))/t
+ endif
+ norm=sqrt(sum(q*q))
+ if(norm<=1d-14)return
+ q=q/norm
+ u(1,1)=cmplx(q(1),-q(4),8);u(2,2)=cmplx(q(1),q(4),8)
+ u(1,2)=cmplx(-q(3),-q(2),8);u(2,1)=cmplx(q(3),-q(2),8)
+ endif
  ierr=0
+ end subroutine
+
+ pure real(8) function determinant3(a) result(det)
+ implicit none
+ real(8),intent(in)::a(3,3)
+ det=a(1,1)*(a(2,2)*a(3,3)-a(2,3)*a(3,2)) &
+    -a(1,2)*(a(2,1)*a(3,3)-a(2,3)*a(3,1)) &
+    +a(1,3)*(a(2,1)*a(3,2)-a(2,2)*a(3,1))
+ end function
+ subroutine inverse3(a,b,det)
+ implicit none
+ real(8),intent(in)::a(3,3)
+ real(8),intent(out)::b(3,3),det
+ integer::i,j,k,l
+ det=determinant3(a);b=0d0
+ if(det==0d0)return
+ do i=1,3
+ j=mod(i,3)+1;k=mod(j,3)+1
+ do l=1,3
+ b(i,l)=(a(mod(l,3)+1,j)*a(mod(l+1,3)+1,k)-a(mod(l+1,3)+1,j)*a(mod(l,3)+1,k))/det
+ enddo
+ enddo
  end subroutine
 
 

@@ -1,10 +1,33 @@
 ! Full spin density matrix exchange. Rows pack (real-space point, spin),
-! occupations are one per occupied spinor, with no closed-shell factor.
+! sources may be weighted by sqrt(f), with no closed-shell factor.
 module exx_spinor
  implicit none
  private
- public :: exx_spinor_apply_distributed
+ public :: exx_spinor_apply_distributed,exx_spinor_weight_sources
 contains
+ subroutine exx_spinor_weight_sources(orbitals,occupation,source,ierr)
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  complex(8),intent(in)::orbitals(:,:,:)
+  real(8),intent(in)::occupation(:,:)
+  complex(8),intent(out)::source(:,:,:)
+  integer,intent(out)::ierr
+  integer::i,j,k
+  ierr=1;source=0d0
+  if(any(shape(source)/=shape(orbitals)))return
+  if(size(occupation,1)/=size(orbitals,2).or.size(occupation,2)/=size(orbitals,3))return
+  do k=1,size(occupation,2);do j=1,size(occupation,1)
+   if(.not.ieee_is_finite(occupation(j,k)))return
+   if(occupation(j,k)<0d0.or.occupation(j,k)>1d0)return
+   do i=1,size(orbitals,1)
+    if(.not.ieee_is_finite(real(orbitals(i,j,k),8)).or..not.ieee_is_finite(aimag(orbitals(i,j,k))))return
+   enddo
+  enddo;enddo
+  do k=1,size(occupation,2);do j=1,size(occupation,1)
+   source(:,j,k)=orbitals(:,j,k)*sqrt(occupation(j,k))
+  enddo;enddo
+  ierr=0
+ end subroutine
  subroutine exx_spinor_apply_distributed(op,source,target,action,starts,counts,rank,comm,transpose_tiles,ierr,pair_tiles)
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_apply_distributed,exx_k_kernel_apply_pair_distributed

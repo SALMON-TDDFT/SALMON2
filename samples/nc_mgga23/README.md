@@ -115,3 +115,21 @@ transformation, all three field derivatives, valence-only band subtraction,
 core-plus-valence gauge covariance, actual Ni V2 read/grid/operator integration,
 and macroscopic core current added exactly once. These tests pass in serial
 and, where applicable, two-rank MPI. Fujitsu compilation remains untested.
+
+For static `nc_mgga23` SCF, the full gKS coefficient matrices are linearly
+damped by `mixrate` before each orbital solve, because rho mixing alone does
+not damp orbital-derived tau/current fields. SCF convergence additionally
+requires the normalized full-operator fixed-point residual. Energy, band
+subtraction and the final payload are refreshed from physical orbitals;
+this damping does not apply to RT. Metal tests use `temperature_k=300d0`.
+
+The `Ni_primitive_*_rt.inp.template` pair uses a one-atom fcc primitive cell
+(a=3.52 Angstrom),8^3 grid,2^3 k points,24 states and electronic temperature
+300 K. The maximum singular grid step is0.44 Angstrom, below the minimum
+Rps/3=0.4939 Angstrom. Axial spacing alone is0.3111 Angstrom and does not
+measure the largest step of a skew grid. These are Mac test settings;
+k-point/grid convergence is not established. Use own-functional compatible
+SCF states. The paired10fs pulse is1.55eV,1e11W/cm^2 and x-polarized.
+Use matched no-pulse runs to assess initial-state drift.
+Eighth-order propagation and dt=.0005fs replace a failed sixth-order trial;
+short-time energy and half-step checks are required before long runs.

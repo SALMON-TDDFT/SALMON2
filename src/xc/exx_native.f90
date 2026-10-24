@@ -17,8 +17,8 @@ module exx_native
   use structures
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
-  use exx_spinor, only: exx_spinor_apply_distributed
-  use exx_k_orbits, only: apply_k_orbits
+  use exx_spinor, only: exx_spinor_apply_distributed,exx_spinor_weight_sources
+  use exx_k_orbits, only: apply_k_orbits,apply_spinor_k_orbits
   use exx_ace
   use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
   use exx_surrogate_dense,only:surrogate_dense_basis_error
@@ -65,12 +65,16 @@ module exx_native
   real(8),save::diagnostic_coeff(3,4)=0
   type(s_surrogate_trace),save :: strict_trace
   public :: exx_trace_corrected_endpoint
+  type(s_exx_ace),save :: scf_damped_ace
+  logical,save :: scf_operator_damped=.false.
+  public :: exx_scf_prepare,exx_scf_residual
   type(s_exx_ace),save :: ace
   ! Rank-local RT framework state; see docs/design/learned-ace-state-lifetime.md.
   ! Predictor trials never commit history.
   type(s_factor_history),allocatable,save::factor_history(:)
   logical,save::factor_initialized=.false.,factor_configured=.false.,factor_experiment=.false.,factor_learned=.false.
   logical,save::factor_prediction_installed=.false.,factor_all_ready=.false.
+  real(8),allocatable,save :: factor_occupation(:,:,:)
   integer,save::factor_step=0
   public::exx_factor_begin,exx_factor_endpoint,exx_factor_checkpoint,exx_factor_restart_pending
   public::exx_factor_mode_metadata
@@ -93,6 +97,54 @@ module exx_native
     module procedure finite_real_3d
   end interface
 contains
+  logical function thermal_scf_damping()
+    thermal_scf_damping=exx_enabled().and.theory=='dft'.and.yn_spinorbit=='y'.and. &
+      yn_dc=='n'.and.temperature>=0d0.and.propagator/='hse_taylor4_full'
+  end function
+
+  subroutine exx_scf_prepare(system,mg,info,psi,alpha)
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_orbital),intent(in)::psi
+    real(8),intent(in)::alpha
+    type(s_exx_ace)::mixed
+    complex(8),allocatable::targets(:,:,:)
+    real(8)::residual
+    integer::ierr,total_error
+    if(.not.thermal_scf_damping())return
+    allocate(targets(2*product(mg%num),system%no,info%numk))
+    call exx_pack(psi,mg,info,targets)
+    call exx_ace_scf_mix(scf_damped_ace,ace,targets,alpha,mixed,residual,ierr)
+    call comm_summation(ierr,total_error,info%icomm_k)
+    if(total_error/=0)error stop 'Thermal HSE SCF operator damping failed'
+    ace=mixed;scf_damped_ace=mixed;scf_operator_damped=.true.
+  end subroutine
+
+  subroutine exx_scf_residual(system,mg,info,psi,residual)
+    type(s_dft_system),intent(in)::system
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_orbital),intent(in)::psi
+    real(8),intent(out)::residual
+    complex(8),allocatable::targets(:,:,:)
+    real(8)::local,maximum(1)
+    integer::ierr,total_error
+    residual=0d0
+    if(.not.thermal_scf_damping())return
+    if(.not.exx_ace_ready(scf_damped_ace))then
+      residual=huge(1d0);return
+    endif
+    if(scf_operator_damped)error stop 'HSE SCF residual requires restored physical exchange'
+    allocate(targets(2*product(mg%num),system%no,info%numk))
+    call exx_pack(psi,mg,info,targets)
+    call exx_ace_action_residual(ace,scf_damped_ace,targets,local,ierr)
+    call comm_summation(ierr,total_error,info%icomm_k)
+    if(total_error/=0)error stop 'Thermal HSE SCF residual failed'
+    call comm_get_max([local],maximum,1,info%icomm_k)
+    residual=maximum(1)
+  end subroutine
+
   subroutine exx_trace_corrected_endpoint(system,info,step,step_dt,final_step,total_steps)
     implicit none
     type(s_dft_system),intent(in)::system
@@ -189,6 +241,43 @@ contains
     valid=.true.
   end function native_integer_occupation
 
+  ! Thermal spinor histories retain all target states; only their source weights
+  ! are fractional. The scalar integer-prefix contract remains separate.
+  logical function thermal_factor_supported(system,info) result(valid)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    valid=yn_spinorbit=='y'.and.temperature>=0d0.and.exx_factor_mode=='learned'.and. &
+      product(num_kgrid)>1.and.exx_kpoint_backend=='cpu'.and. &
+      info%isize_r==1.and.info%isize_o==1.and.info%numm==1.and. &
+      all(hse_q_reduction==1).and.factor_restart_step<0
+  end function
+
+  subroutine factor_check_occupation(system,info,initialize)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    logical,intent(in)::initialize
+    integer::i,j,k,bad,total
+    if(.not.factor_experiment.or.yn_spinorbit/='y'.or.temperature<0d0)return
+    if(.not.allocated(factor_occupation))then
+      if(.not.initialize)return
+      factor_occupation=system%rocc
+    endif
+    bad=0
+    if(any(shape(factor_occupation)/=shape(system%rocc)))then
+      bad=1
+    else
+      do k=1,size(system%rocc,3);do j=1,size(system%rocc,2);do i=1,size(system%rocc,1)
+        if(.not.ieee_is_finite(system%rocc(i,j,k)))then
+          bad=1
+        else if(abs(system%rocc(i,j,k)-factor_occupation(i,j,k))>1d-14)then
+          bad=1
+        endif
+      enddo;enddo;enddo
+    endif
+    call comm_summation(bad,total,info%icomm_rko)
+    if(total/=0)error stop 'Thermal SOC factor history requires fixed occupations'
+  end subroutine
+
   subroutine factor_configure(system,info)
     use exx_distributed_metric,only:distributed_metric_available
     implicit none
@@ -209,7 +298,8 @@ contains
           (product(num_kgrid)==1.and.(exx_mlwf_norm_fraction/=1d0.or.exx_ace_support/='source')).or. &
           (product(num_kgrid)>1.and.(exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied')).or. &
           exx_pair_screening/='off'.or. &
-          yn_hse_wannier_snapshot=='y'.or..not.native_integer_occupation(system)) &
+          yn_hse_wannier_snapshot=='y'.or. &
+          (.not.native_integer_occupation(system).and..not.thermal_factor_supported(system,info))) &
           error stop 'Factor history requires static full-support HSE, compatible k/SR settings and integer occupation'
         if(info%isize_o>1.and..not.distributed_metric_available(info%icomm_ro)) &
           error stop 'Orbital-distributed factor history requires ScaLAPACK'
@@ -249,6 +339,7 @@ contains
     if(.not.factor_initialized)then
       call factor_configure(system,info)
       if(factor_experiment)then
+        call factor_check_occupation(system,info,.true.)
         call factor_materialize(info)
         if(factor_restart_step>=0.and.factor_learned)then
           call exx_factor_restore(system,mg,info)
@@ -260,6 +351,7 @@ contains
       factor_initialized=.true.
     endif
     if(.not.factor_experiment)return
+    call factor_check_occupation(system,info,.false.)
     factor_step=step;factor_prediction_installed=.false.
     exx_freeze=factor_learned.and.step>exx_factor_warmup_steps.and. &
       mod(step,exx_factor_exact_interval)/=0.and.factor_all_ready
@@ -576,8 +668,8 @@ contains
       enddo
       factor_prediction_installed=.true.
     endif
-    if(.not.allocated(target_work))allocate(target_work(product(mg%num),info%numo,info%numk))
-    if(.not.allocated(action_work))allocate(action_work(product(mg%num),info%numo,info%numk))
+    if(.not.allocated(target_work))allocate(target_work(product(mg%num)*size(psi%zwf,4),info%numo,info%numk))
+    if(.not.allocated(action_work))allocate(action_work(product(mg%num)*size(psi%zwf,4),info%numo,info%numk))
     call exx_pack(psi,mg,info,target_work)
     if(info%isize_r>1.or.info%isize_o>1.or.ace%packed)then
       call orbital_ace_apply(ace,target_work,action_work,info%icomm_r,info%icomm_o,stat)
@@ -790,12 +882,14 @@ contains
     type(s_rgrid),intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(in) :: psi
-    complex(8),allocatable :: w(:,:,:),local(:,:,:)
-    real(8) :: ex,offdiag(3,3),tick,communication_before
+    complex(8),allocatable :: w(:,:,:),local(:,:,:),weighted(:,:,:)
+    real(8) :: ex,tick,communication_before,electrons
+    logical :: thermal_spinor
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
     procedure(k_backend_factory),pointer :: create_backend
     if(.not.exx_enabled())return
     if(theory=='tddft_response'.or.theory=='tddft_pulse')call factor_configure(system,info)
+    call factor_check_occupation(system,info,.false.)
     if(exx_freeze)then
       if(factor_experiment)call factor_predicted_expectation(system,mg,info,psi)
       return
@@ -813,7 +907,7 @@ contains
     if(allocated(system%Ac_micro%v))error stop 'HSE06: microscopic vector potential unsupported'
     ! Select occupation semantics before the integer-prefix native route.
     ! Nonnegative temperature retains the existing occupation-weighted source.
-    if(temperature>=0d0)then
+    if(temperature>=0d0.and.yn_spinorbit/="y")then
       if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call refresh_spatial(system,mg,info,psi)
@@ -846,13 +940,15 @@ contains
     if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
       error stop 'EXX: full uniform k mesh required'
     if(use_symmetry.and.any(mg%num/=num_rgrid))error stop 'EXX symmetry requires the full real-space grid'
-    offdiag=system%primitive_a
-    do j=1,3;offdiag(j,j)=0;enddo
-    if(use_symmetry.and.maxval(abs(offdiag))>1d-12) &
-      error stop 'HSE symmetry: orthogonal cell required'
-    if((.not.use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12).or. &
-      .not.native_integer_occupation(system)) &
-      error stop 'HSE06: uniform k weights and occupied-prefix spin pairs required'
+    thermal_spinor=yn_spinorbit=='y'.and.temperature>=0d0
+    if(.not.use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12) &
+      error stop 'HSE06: uniform k weights required'
+    if(.not.thermal_spinor.and..not.native_integer_occupation(system)) &
+      error stop 'HSE06: occupied-prefix spin pairs required'
+    if(thermal_spinor)then
+      if(any(hse_q_reduction/=1).or.info%isize_r/=1.or.info%isize_o/=1) &
+        error stop 'Thermal SOC HSE: full uniform k-only mesh required'
+    endif
     if(info%io_s/=1.or.info%io_e/=no.or.info%numk<1)error stop 'HSE06: unsupported orbital layout'
     if(all(kernel%n==0))then
       nullify(create_backend)
@@ -860,7 +956,7 @@ contains
       ! Keep representatives persistent; expand only rank-local stars for EXX.
       if(use_symmetry)then
         call symmetry_init(symmetry_map,mg%num,system%hgs,system%vec_k(:,:nk),system%wtk(:nk), &
-          SymMatA,SymMatB,num_kgrid,ierr)
+          SymMatA,SymMatB,num_kgrid,ierr,cell=system%primitive_a)
         call comm_summation(ierr,total_error,info%icomm_rko)
         if(total_error/=0)error stop 'HSE symmetry: invalid grid, stars or weights'
         call symmetry_validate_atoms(symmetry_map,system%Rion,system%kion,ierr)
@@ -873,14 +969,14 @@ contains
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
-          defer_fft=spinor_pair_fft_requested())
+          defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'))
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
-          defer_fft=spinor_pair_fft_requested())
+          defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'))
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
@@ -900,20 +996,56 @@ contains
     if(yn_spinorbit=='y')ng=2*ng
     allocate(local(ng,no,info%numk))
     call exx_pack(psi,mg,info,local)
+    if(thermal_spinor)then
+      allocate(weighted(ng,no,info%numk))
+      call exx_spinor_weight_sources(local,system%rocc(:,info%ik_s:info%ik_e,1),weighted,ierr)
+      call comm_summation(ierr,total_error,info%icomm_k)
+      if(total_error/=0)error stop 'Thermal SOC HSE: invalid source occupations/orbitals'
+      electrons=0d0
+      do j=1,system%nk
+        if(.not.ieee_is_finite(system%wtk(j)))error stop 'Thermal SOC HSE: nonfinite k weight'
+        electrons=electrons+sum(system%rocc(:,j,1))*system%wtk(j)
+      enddo
+      if(.not.ieee_is_finite(electrons))error stop 'Thermal SOC HSE: nonfinite electron count'
+      if(abs(electrons-nelec)>1d-8*max(1,nelec))error stop 'Thermal SOC HSE: electron count mismatch'
+    endif
     ierr=1
     if(allocated(cached_source))then
       if(all(shape(cached_source)==shape(local)))then
         if(all(cached_source==local))ierr=0
       endif
     endif
+    if(thermal_spinor)then
+      if(.not.allocated(cached_occupation))then
+        ierr=1
+      else if(any(shape(cached_occupation)/=shape(system%rocc(:,:,1))))then
+        ierr=1
+      else if(any(cached_occupation/=system%rocc(:,:,1)))then
+        ierr=1
+      endif
+    endif
+    ! A damped SCF ACE must be replaced by physical exchange even if psi
+    ! and occupations are unchanged (e.g. a zero-CG diagnostic).
+    if(scf_operator_damped)ierr=1
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error==0)return
+    scf_operator_damped=.false.
     allocate(w(ng,no,info%numk))
-    if(propagator=='hse_taylor4_full')full_source=local
+    if(propagator=='hse_taylor4_full')then
+      if(thermal_spinor)then
+        full_source=weighted
+      else
+        full_source=local
+      endif
+    endif
     if(timing_enabled)then
       tick=exx_walltime();communication_before=exx_timings(4)
     endif
-    call apply_distributed(local,local,w,info,ierr)
+    if(thermal_spinor)then
+      call apply_distributed(weighted,local,w,info,ierr)
+    else
+      call apply_distributed(local,local,w,info,ierr)
+    endif
     if(timing_enabled)exx_timings(1)=exx_timings(1)+exx_walltime()-tick-(exx_timings(4)-communication_before)
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
@@ -932,6 +1064,7 @@ contains
       if(total_error/=0)error stop 'HSE06: ACE metric failed'
     endif
     cached_source=local
+    if(thermal_spinor)cached_occupation=system%rocc(:,:,1)
     ex=0d0
     do j=1,info%numk
       ex=ex+.5d0*exchange_fraction()*sum(sum(real(conjg(local(:,:,j))*w(:,:,j),8),dim=1) &
@@ -972,6 +1105,11 @@ contains
         call comm_summation(ierr,total_error,info%icomm_k)
         if(total_error/=0)then
           ierr=1;return
+        endif
+        if(yn_exx_fft_orbits=='y')then
+          call apply_spinor_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
+            info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_spin_density,ierr)
+          return
         endif
 #ifdef USE_MPI
         if(service_enabled())then
@@ -1051,6 +1189,23 @@ contains
       call fill_density(j,lo,rows,density)
     end subroutine fill_density_contiguous
 
+    subroutine fill_spin_density(j,points,density,spin_left,spin_right,columns)
+      implicit none
+      integer,intent(in) :: j,points(:),spin_left,spin_right,columns(:)
+      complex(8),intent(out) :: density(:,:)
+      complex(8),allocatable :: left(:,:),right(:,:)
+      integer :: ng,no,g
+      ng=kernel%ng;no=size(expanded_source,2)
+      allocate(left(size(points),no),right(size(columns),no))
+      left=expanded_source(points+(spin_left-1)*ng,:,j)
+      right=expanded_source(columns+(spin_right-1)*ng,:,j)
+      do g=1,no
+        left(:,g)=left(:,g)*kernel%phase(points,j)
+        right(:,g)=right(:,g)*kernel%phase(columns,j)
+      enddo
+      density=matmul(left,conjg(transpose(right)))
+    end subroutine fill_spin_density
+
     subroutine fill_density_selected(j,points,density)
       implicit none
       integer,intent(in) :: j,points(:)
@@ -1128,7 +1283,7 @@ contains
         if(.not.k_pairs_enabled())error stop 'Manual scalar pair algorithm is unavailable for this layout'
       endif
     else if(exx_k_algorithm=='orbits')then
-      if(.not.use_symmetry.or.yn_spinorbit=='y') &
+      if(.not.use_symmetry) &
         error stop 'Manual orbit algorithm is unavailable for this layout'
     endif
   end subroutine check_k_algorithm
@@ -1140,6 +1295,7 @@ contains
     selected='reference'
     if(yn_spinorbit=='y')then
       if(spinor_pair_fft_requested())selected='spinor_pair'
+      if(use_symmetry.and.yn_exx_fft_orbits=='y')selected='spinor_orbits'
     else if(use_symmetry.and.yn_exx_fft_orbits=='y')then
       selected='orbits'
     else if(k_pairs_enabled())then
@@ -1322,6 +1478,10 @@ contains
   end subroutine
   logical function use_wannier_exchange()
     implicit none
+    if(yn_spinorbit=='y')then
+      use_wannier_exchange=.false.
+      return
+    endif
     ! Full-support ordinary multi-k exchange uses density-tile MPI for every
     ! hybrid. Retain Wannier for DC, fractional/empty states and localized support.
     use_wannier_exchange=temperature>=0d0.or.yn_dc=='y'.or.yn_hse_wannier_snapshot=='y'.or. &

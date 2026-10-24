@@ -12,7 +12,7 @@ module noncollinear_module
   public :: calc_magnetization_decomposed
   public :: calc_spin_current
   public :: simple_mixing_so
-  public :: snapshot_xc_noncollinear,average_xc_noncollinear
+  public :: snapshot_xc_noncollinear,average_xc_noncollinear,snapshot_density_noncollinear
 
   complex(8),allocatable :: den_mat(:,:,:,:,:)
   complex(8),allocatable :: vxc_mat(:,:,:,:,:)
@@ -246,6 +246,13 @@ contains
 
   ! The local XC matrix is applied outside V_local in the SOC Hamiltonian.
   ! A predictor/corrector must time-center this matrix as well as Hartree.
+  subroutine snapshot_density_noncollinear(snapshot)
+    implicit none
+    complex(8),allocatable,intent(out) :: snapshot(:,:,:,:,:)
+    if(.not.allocated(den_mat))error stop 'SOC density matrix is not initialized'
+    snapshot=den_mat
+  end subroutine
+
   subroutine snapshot_xc_noncollinear(snapshot)
     implicit none
     complex(8),allocatable,intent(out) :: snapshot(:,:,:,:,:)
@@ -341,13 +348,9 @@ contains
   
     call rot_dm_noncollinear( rho_s, system, mg )
     
-  ! update the density from the diagonal components
-  
-    !$omp workshare
-    rho_s(1)%f = dble(den_mat(:,:,:,1,1))
-    rho_s(2)%f = dble(den_mat(:,:,:,2,2))
-    !$omp end workshare
-  
+  ! Keep the local spin eigenchannel densities from rot_dm_noncollinear.
+  ! Lab-frame diagonals discard transverse polarization in LSDA/GGA.
+
   end subroutine simple_mixing_so
 
 
