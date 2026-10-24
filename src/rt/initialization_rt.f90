@@ -462,8 +462,21 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end do
     end do
     end do
+    if(system%nc_mgga23_payload%active) then
+      ! The impulse changes orbital gradients/current, so rebuild the complete
+      ! gKS operator before the first predictor. Density itself is unchanged.
+      spsi_in%update_zwf_overlap=.false.
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info, &
+        spsi_in,stencil,Vxc,energy%E_xc)
+    endif
   end if
   
+  ! Record the actual initial/restart sample, so comparison uses a known t_ref.
+  if(yn_spinorbit=='y') then
+    if(info%if_divide_rspace) call update_overlap_complex8(srg,mg,spsi_in%zwf)
+    call write_rt_spin(Mit,ofl,system,lg,mg,info,stencil,ppg,spsi_in)
+  endif
+
   rt%rIe(0)     = rbox_array2(4) * system%Hvol
   rt%dDp_e(:,0) = 0d0
   rt%Dp_e(:,0)  = 0d0

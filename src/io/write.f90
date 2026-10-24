@@ -2460,9 +2460,9 @@ contains
 
   subroutine write_rt_spin(itt,ofl,system,lg,mg,info,stencil,ppg,psi)
     use structures
-    use communication, only: comm_is_root
+    use communication, only: comm_is_root,comm_summation
     use parallelization, only: nproc_id_global
-    use salmon_global, only: dt,yn_spinorbit,base_directory,SYSname, &
+    use salmon_global, only: dt,yn_spinorbit,base_directory,SYSname,xc, &
     & yn_out_mag_decomposed_rt, yn_out_mag_micro_rt, &
     & yn_out_spin_current_decomposed,yn_out_spin_current_micro
     use filesystem, only: open_filehandle
@@ -2479,7 +2479,10 @@ contains
     type(s_pp_grid)         ,intent(in) :: ppg
     type(s_orbital)         ,intent(in) :: psi
     !
-    integer ik,io,i
+    integer ik,io,i,norm_unit
+    real(8) :: norm_local,norm_global,torque_local(3),torque_global(3),sv(3),vv(3)
+    integer :: nx,ny,nz
+    character(512) :: norm_file
     real(8) :: m(3),mag_orb(3,system%no,system%nk),spin_curr(3,0:3)
     real(8) :: m_micro(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:3)
     real(8) :: spin_curr_micro(3,0:3, &
@@ -2495,7 +2498,32 @@ contains
     
     call calc_magnetization(system,mg,info,m)
     if(yn_out_mag_decomposed_rt=='y') call calc_magnetization_decomposed(system,mg,info,psi,mag_orb)
-    if(yn_out_mag_micro_rt=='y') call calc_magnetization_micro(mg,m_micro)
+    call calc_magnetization_micro(mg,m_micro)
+    norm_local=0d0;torque_local=0d0
+    do nz=mg%is(3),mg%ie(3)
+    do ny=mg%is(2),mg%ie(2)
+    do nx=mg%is(1),mg%ie(1)
+      norm_local=norm_local+sqrt(sum(m_micro(nx,ny,nz,:)**2))*system%hvol
+      if(system%nc_mgga23_payload%active) then
+        ! Legacy output's y convention is opposite to the standard Pauli trace.
+        ! This stream labels the local commutator in the standard Pauli frame.
+        sv=[m_micro(nx,ny,nz,1),-m_micro(nx,ny,nz,2),m_micro(nx,ny,nz,3)]
+        vv=system%nc_mgga23_payload%local(nx,ny,nz,2:4)
+        torque_local=torque_local+2d0*system%hvol* &
+          [vv(2)*sv(3)-vv(3)*sv(2),vv(3)*sv(1)-vv(1)*sv(3),vv(1)*sv(2)-vv(2)*sv(1)]
+      endif
+    enddo
+    enddo
+    enddo
+    call comm_summation(norm_local,norm_global,info%icomm_r)
+    call comm_summation(torque_local,torque_global,3,info%icomm_r)
+    if(comm_is_root(nproc_id_global)) then
+      norm_file=trim(base_directory)//trim(SYSname)//'_rt_magnetization_norm.data'
+      open(newunit=norm_unit,file=trim(norm_file),status='old',position='append')
+      write(norm_unit,'(6(1x,es23.15e3))') dble(itt)*dt*t_unit_time%conv, &
+        sqrt(sum(m*m)),norm_global,torque_global
+      close(norm_unit)
+    endif
 
     call calc_spin_current(system,mg,stencil,info,psi,ppg,spin_curr_micro,spin_curr_band)
     
@@ -2553,12 +2581,24 @@ contains
       character(256) :: filename
       !
       if(comm_is_root(nproc_id_global))then
+        filename=trim(base_directory)//trim(SYSname)//'_rt_magnetization_norm.data'
+        open(newunit=fh,file=trim(filename),status='replace')
+        write(fh,'(a)') '# Native SALMON spin units; local commutator uses standard Pauli frame.'
+        write(fh,'(a)') '# Local commutator excludes tau/current terms; NOT total XC torque.'
+        write(fh,'(a)') '# LSDA local commutator is zero; no mu_B conversion applied.'
+        write(fh,'(a)') '# 1:Time['//trim(t_unit_time%name)// &
+          '] 2:abs_total_spin 3:integral_abs_local_spin 4:local_tx 5:local_ty 6:local_tz'
+        close(fh)
         !(header in SYSname_rt_spin.data)
         write(filename,"(2A,'_rt_spin.data')") trim(base_directory),trim(SYSname)
         ofl%fh_rt_spin = open_filehandle(filename)
         fh = ofl%fh_rt_spin
         open(fh,file=filename)
         write(fh, '("#",1X,A)') "Spin magnetization & Spin current density"
+        if(xc=='nc_mgga23') then
+          write(fh,'(a)') '# Current columns are bare kinetic+ionic diagnostics; exclude XC/core field response.'
+          write(fh,'(a)') '# Use the macroscopic RT current stream for charge current including frozen-core response.'
+        endif
         write(fh, '("#",1X,A,":",1X,A)') "mag_[xyz]", "Total magnetization"
         write(fh, '("#",1X,A,":",1X,A)') "spin_curr_i_[xyz]", "Spin current density with the Pauli matrix sigma_i (i=0,x,y,z)"
         write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &

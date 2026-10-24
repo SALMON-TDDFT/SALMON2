@@ -30,7 +30,8 @@ c       irPC     radius of partial core (int(radius*100.))
 c       ZPA      charge number of pseudo-atom
 c       occPA(l) occupation number in pseudo-atom
 c
-      use crps_output, only: crps_write_v1
+      use crps_output, only: crps_write_v1,crps_write_v2
+      use crps_core_aux, only: build_core_aux
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
 
@@ -67,9 +68,20 @@ c local
       common /aob/nodeA,lA,jA,kA
       real*8 jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
       real*8 joc(NPdim),jenergy(NPdim),vlocal(0:Nr)
-      logical write_legacy
+      logical write_legacy,write_core_aux
+      integer nbcore,core_ids(2*NAdim),core_l(2*NAdim)
+      integer core_lambda(2*NAdim)
+      real*8 core_q(2*NAdim),core_amp(0:Nr,2*NAdim)
+      real*8 core_damp(0:Nr,2*NAdim),core_tau(0:Nr)
+      real*8 core_cur(0:Nr)
+      real*8 HC,MC2,H2M,E2,ALP,Pi
+      common /prm/HC,MC2,H2M,E2,ALP,Pi
+      real*8 rhoA(0:2*Nx),VA(0:2*Nx),speA(NAdim)
+      real*8 FA(0:Nx,NAdim),GA(0:Nx,NAdim)
+      common /aer/rhoA,VA,speA,FA,GA
       namelist /crps/ core_radius,c2lo,c2hi,output_file,lloc,
-     & write_legacy,ZA,NA,occA,PtoA,cutoff_radius_bohr,Lmax
+     & write_legacy,write_core_aux,ZA,NA,occA,PtoA,
+     & cutoff_radius_bohr,Lmax
 
       interface
          subroutine Pseudo_Potential(c2lo,c2hi,jpot,jwave,jenergy)
@@ -81,6 +93,7 @@ c local
          end subroutine Pseudo_Potential
       end interface
 
+      write_core_aux=.true.
       AtoP=0
       call init
 
@@ -256,10 +269,14 @@ c no partial core if irPC=0
       if(.not.ieee_is_finite(ZA)) stop 1
       if(ZA.lt.1.d0.or.ZA.gt.118.d0.or.NA.lt.1.or.NA.gt.NAdim)
      & stop 1
-      if(.not.all(ieee_is_finite(occA))) stop 1
+      do ix=1,NAdim
+         if(.not.ieee_is_finite(occA(ix))) stop 1
+      enddo
       if(any(occA.lt.0.d0)) stop 1
       if(abs(sum(occA(1:NA))-ZA).gt.1.d-8) stop 1
-      if(.not.all(ieee_is_finite(cutoff_radius_bohr))) stop 1
+      do ix=1,NPdim
+         if(.not.ieee_is_finite(cutoff_radius_bohr(ix))) stop 1
+      enddo
       irRC=nint(cutoff_radius_bohr*0.529177210903d0/hr)
       if(any(irRC.lt.3).or.any(irRC.gt.Nr-3)) stop 1
       AtoP=0
@@ -272,8 +289,12 @@ c no partial core if irPC=0
       enddo
       write(*,*) 'SPECIES_INPUT_VALID ',ZA,NA
       if(.not.ieee_is_finite(core_radius)) stop 1
-      if(.not.all(ieee_is_finite(c2lo))) stop 1
-      if(.not.all(ieee_is_finite(c2hi))) stop 1
+      do ix=1,NPdim
+         if(.not.ieee_is_finite(c2lo(ix))) stop 1
+      enddo
+      do ix=1,NPdim
+         if(.not.ieee_is_finite(c2hi(ix))) stop 1
+      enddo
       if(core_radius.lt.0.d0.or.core_radius.ge.(Nr-2)*hr)
      &   stop 1
       irPC=nint(core_radius/hr)
@@ -302,9 +323,22 @@ c Local reference must retain Coulomb tail, even for empty channels.
       endif
       write(*,*) 'CORE_RANGE ',minval(rhoPC),maxval(rhoPC),
      & minloc(rhoPC)
+      if(write_core_aux) then
+         call build_core_aux(Nr,hr,irPC,Rx(0:2*Nx:2),FA,GA,
+     &    VA(0:2*Nx:2),speA,occA,AtoP,lA,kA,ZA,ALP,HC,
+     &    MC2,rhoPC,nbcore,core_ids,core_l,core_lambda,
+     &    core_q,core_amp,core_damp,core_tau,core_cur)
+         call crps_write_v2(trim(output_file),Nr,hr,Lmax,ZPA,
+     &    NP,irPC,lloc,lP,jtwo,irRC,joc,jenergy,rhoPC,vlocal,
+     &    jpot,jwave,nbcore,core_ids(1:nbcore),
+     &    core_l(1:nbcore),core_lambda(1:nbcore),
+     &    core_q(1:nbcore),core_amp(:,1:nbcore),
+     &    core_damp(:,1:nbcore),core_tau,core_cur)
+      else
       call crps_write_v1(trim(output_file),Nr,hr,Lmax,ZPA,
      & NP,irPC,lloc,lP,jtwo,irRC,joc,jenergy,rhoPC,vlocal,
      & jpot,jwave)
+      endif
       write(*,*) 'CRPS_SOC_NLCC_WRITTEN ',trim(output_file)
       if(.not.write_legacy) stop
 c non-relativisitic pseudo-atom calculation

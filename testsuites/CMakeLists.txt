@@ -204,3 +204,73 @@ endif()
 if(USE_HSE AND USE_MPI AND NOT USE_OPENACC)
   add_subdirectory(458_collinear_fft_omp)
 endif()
+
+# Corrected noncollinear MGGA: local functional, discrete orbital derivative,
+# Hamiltonian/Taylor integration and magnetization comparison (no GS producer).
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME nc_mgga23_kernel
+    COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}"
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23/run.py)
+  add_test(NAME compare_spin
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/test_compare_spin.py)
+  if(NOT USE_HSE AND NOT USE_MPI)
+    string(REPLACE ";" " " NC_MGGA23_TEST_LIBS "${LAPACK_LIBRARIES}")
+    add_test(NAME nc_mgga23_bridge
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_bridge/run.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --checker ${CMAKE_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py
+        --fc ${CMAKE_Fortran_COMPILER} "--libs=${NC_MGGA23_TEST_LIBS}")
+    set_tests_properties(nc_mgga23_bridge PROPERTIES TIMEOUT 120 LABELS "xc;soc;unit")
+  endif()
+  if(NOT USE_HSE AND USE_MPI)
+    string(REPLACE ";" " " NC_MGGA23_TEST_LIBS "${LAPACK_LIBRARIES}")
+    foreach(NC_MGGA23_LAYOUT IN ITEMS orbital rspace)
+      set(NC_MGGA23_LAYOUT_FLAG --mpi)
+      if(NC_MGGA23_LAYOUT STREQUAL "rspace")
+        set(NC_MGGA23_LAYOUT_FLAG --rspace)
+      endif()
+      add_test(NAME nc_mgga23_mpi_${NC_MGGA23_LAYOUT}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_bridge/run.py
+          --build-dir ${CMAKE_BINARY_DIR} --checker ${CMAKE_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py
+          --fc ${CMAKE_Fortran_COMPILER} "--libs=${NC_MGGA23_TEST_LIBS}"
+          ${NC_MGGA23_LAYOUT_FLAG} --launcher ${MPIEXEC_EXECUTABLE})
+      set_tests_properties(nc_mgga23_mpi_${NC_MGGA23_LAYOUT}
+        PROPERTIES TIMEOUT 120 LABELS "xc;soc;mpi;unit" PROCESSORS 2)
+    endforeach()
+  endif()
+  set_tests_properties(nc_mgga23_kernel compare_spin PROPERTIES TIMEOUT 60 LABELS "xc;soc;unit")
+endif()
+
+# Joint frozen-core Pauli NLCC: no physical GS producer.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
+  add_test(NAME nc_mgga23_core_helpers
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_core/run.py
+      --checker ${CMAKE_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py --fc ${CMAKE_Fortran_COMPILER})
+  add_test(NAME ky_core23_invalid_inputs
+    COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}"
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_ky_core23/test_reader.py)
+  if(NOT USE_HSE)
+    string(REPLACE ";" " " CORE23_TEST_LIBS "${LAPACK_LIBRARIES}")
+    set(CORE23_MPI_ARGS)
+    if(USE_MPI)
+      set(CORE23_MPI_ARGS --mpi --launcher ${MPIEXEC_EXECUTABLE})
+    endif()
+    add_test(NAME nc_mgga23_core_bridge
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_core/run.py
+        --checker ${CMAKE_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py --build-dir ${CMAKE_BINARY_DIR}
+        --fc ${CMAKE_Fortran_COMPILER} "--libs=${CORE23_TEST_LIBS}" ${CORE23_MPI_ARGS})
+    add_test(NAME ky_core23_reader_grid
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_ky_core23/run.py
+        --checker ${CMAKE_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py --build-dir ${CMAKE_BINARY_DIR}
+        --fc ${CMAKE_Fortran_COMPILER} "--libs=${CORE23_TEST_LIBS}" ${CORE23_MPI_ARGS})
+    set_tests_properties(nc_mgga23_core_bridge ky_core23_reader_grid PROPERTIES TIMEOUT 180 LABELS "xc;soc;nlcc;unit")
+    if(NOT USE_MPI)
+      add_test(NAME nc_mgga23_core_current
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_nc_mgga23_current/run.py
+          --build-dir ${CMAKE_BINARY_DIR} --fc ${CMAKE_Fortran_COMPILER} "--libs=${CORE23_TEST_LIBS}")
+      set_tests_properties(nc_mgga23_core_current PROPERTIES TIMEOUT 90 LABELS "xc;soc;nlcc;unit")
+    endif()
+  endif()
+  set_tests_properties(nc_mgga23_core_helpers ky_core23_invalid_inputs PROPERTIES TIMEOUT 90 LABELS "xc;soc;nlcc;unit")
+endif()

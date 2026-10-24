@@ -432,6 +432,16 @@ contains
     end do
     end do
 
+    ! The frozen ionic-rest core has explicit A/c dependence in MGGA23.
+    ! SALMON stores positive dE/d(A/c)/volume; add the integrated core
+    ! derivative once, not once per spin or orbital decomposition group.
+    if(system%nc_mgga23_payload%active) then
+      if(ngrid<1.or.system%hvol<=0d0) error stop 'nc_mgga23 current: invalid volume'
+      do im=info%im_s,info%im_e
+        curr(:,1,im)=curr(:,1,im)+system%nc_mgga23_payload%core_deda/(dble(ngrid)*system%hvol)
+      enddo
+    endif
+
     if (info%if_divide_rspace .and. yn_jm=='n' .and. .not. yn_spinorbit=='y') deallocate(uVpsibox,uVpsibox2,uVpsi)
 
     call nvtxEndRange

@@ -1993,7 +1993,7 @@ contains
       if(ios==0)read(unit,'(a)',iostat=ios)line
       close(unit)
       if(ios/=0)error stop 'Automatic KY spin: cannot read pseudopotential header'
-      if(trim(line)=='KY_SOC_NLCC_V1')has_ky_soc=.true.
+      if(trim(line)=='KY_SOC_NLCC_V1'.or.trim(line)=='KY_SOC_NLCC_V2')has_ky_soc=.true.
     enddo
     if(soc_mode=='a')then
       soc_mode='n'
@@ -2497,6 +2497,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
+      if(xc=='nc_mgga23') write(fh_variables_log,*) &
+        '# nc_mgga23: adiabatic gKS; PRB107165111+PRB110199902; gamma=0.8; vacuum_n<=1e-25 au'
       write(fh_variables_log, *) "# pbeh_coulomb_radius (bohr; 0=auto)=",pbeh_coulomb_radius
       write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
@@ -3104,6 +3106,28 @@ contains
       yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
       product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
       exx_ace_support=='source'.and.yn_self_checkpoint=='n'
+
+    if(xc=='nc_mgga23') then
+      if(spin/='noncollinear'.or.yn_spinorbit/='y') &
+        error stop 'nc_mgga23 requires noncollinear spinors and SOC representation'
+      if(yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or.yn_jm/='n') &
+        error stop 'nc_mgga23 supports conventional fixed-ion pseudopotential calculations only'
+      if(theory/='dft'.and.theory/='tddft_pulse'.and.theory/='tddft_response') &
+        error stop 'nc_mgga23: unsupported theory'
+      if(yn_fix_func/='n'.or.(yn_symmetry/='n'.and.yn_symmetry/='nnn').or.yn_symmetrized_stencil/='n') &
+        error stop 'nc_mgga23 requires self-consistent XC without symmetry reduction'
+      if(yn_out_rvf_rt=='y') error stop 'nc_mgga23 force output is not implemented'
+      if(yn_out_spin_current_decomposed=='y'.or.yn_out_spin_current_micro=='y') &
+        error stop 'nc_mgga23 decomposed/microscopic spin current is not implemented'
+      if(yn_out_micro_je=='y'.or.yn_out_current_decomposed=='y'.or.yn_out_intraband_current=='y') &
+        error stop 'nc_mgga23 supports macroscopic charge-current output only'
+      if(xname/='none'.or.cname/='none') error stop 'nc_mgga23 cannot be combined with separate xname/cname'
+      if(theory/='dft'.and.(propagator/='middlepoint'.or.yn_predictor_corrector/='y')) &
+        error stop 'nc_mgga23 requires middlepoint with yn_predictor_corrector=y'
+#ifdef USE_OPENACC
+      error stop 'nc_mgga23 is available on CPU only'
+#endif
+    endif
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)

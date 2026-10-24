@@ -264,6 +264,7 @@ CONTAINS
     if(yn_fix_func=='n' .or. theory(1:3)=='dft') then
       ! meta-GGA: e_tau correction to Etot
       Etot = Etot - system%xc_payload%e_tau
+      if(system%nc_mgga23_payload%active) Etot=Etot-system%nc_mgga23_payload%band_expectation
       Etot = Etot + sum2*system%Hvol + energy%E_xc + energy%E_ion_ion
       select case(method_poisson)
       case('ft')

@@ -1,0 +1,12 @@
+! Neutral spherical Ni: [Ar] 3d8 4s2; 16 valence electrons (3p6 3d8 4s2).
+! Fractional j occupations preserve the spherical d8 reference.
+! s-local selected after d-local and p-local radial ghost screens failed.
+! Larger radii lower core curvature without new extrema; p3.0/3.2 rejected
+! for additional shallow screened KB p states. See NI_VALIDATION.md.
+&crps lloc=0,write_core_aux=.true.,
+ ZA=28,
+ occA=2,2,2,4,2,2,4,3.2,4.8,2,16*0,
+ PtoA=10,6,7,8,9,
+ cutoff_radius_bohr=3.2,2.8,2.8,3.2,3.2,
+ core_radius=0.45,c2hi=7*5.0
+ /

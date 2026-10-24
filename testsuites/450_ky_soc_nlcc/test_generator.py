@@ -6,10 +6,10 @@ class Generator(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp)
    q=subprocess.run([os.environ.get('FC','gfortran'),'-std=legacy','-O0','-fcheck=all',
-    '-Wno-align-commons',str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),
+    '-Wno-align-commons',str(SOURCE/'crps_core_aux.f90'),str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),
     '-o',str(p/'crps')],cwd=p,capture_output=True,text=True)
    self.assertEqual(q.returncode,0,q.stderr)
-   inp="""&crps ZA=42,
+   inp="""&crps write_core_aux=.false.,ZA=42,
  occA=2,2,2,4,2,2,4,4,6,2,2,4,2,3,0,0,1,9*0,
  PtoA=17,11,12,13,14,cutoff_radius_bohr=5*2.6,
  core_radius=.6,c2hi=7*5.0,output_file='Mo.dat' /
@@ -26,6 +26,34 @@ class Generator(unittest.TestCase):
    self.assertAlmostEqual(float(lines[0].split()[3]),12.)
    for line in lines[9:-1]:
     self.assertTrue(all(math.isfinite(float(x)) for x in line.split()))
+ def test_default_all_core_information(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   p=Path(tmp)
+   q=subprocess.run([os.environ.get('FC','gfortran'),'-std=legacy','-O0','-fcheck=all',
+    '-Wno-align-commons',str(SOURCE/'crps_core_aux.f90'),str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),
+    '-o',str(p/'crps')],cwd=p,capture_output=True,text=True)
+   self.assertEqual(q.returncode,0,q.stderr)
+   for sp in ['Ni','W','Se']:
+    source=(SOURCE/'inputs'/f'{sp}.nml').read_text().replace('write_core_aux=.true.,','')
+    inp=p/f'{sp}.nml';inp.write_text(source)
+    out=p/sp;out.mkdir()
+    q=subprocess.run([str(p/'crps'),str(inp)],cwd=out,capture_output=True,text=True,timeout=120)
+    self.assertEqual(q.returncode,0,q.stderr+q.stdout[-2000:])
+    rows=(out/f'{sp}_soc_nlcc_rps.dat').read_text().splitlines()
+    self.assertEqual(rows[1],'KY_SOC_NLCC_V2')
+    self.assertIn('CORE_AUX_PAULI_V1',rows)
+    self.assertIn('PAULI_CLOSED_SHELL_V1 ATOMIC_UNITS TAU_NO_HALF',rows)
+    start=rows.index('CORE_AUX_PAULI_V1')
+    nr,nb,occ=rows[start+2].split();nb=int(nb)
+    self.assertGreater(nb,0);self.assertGreater(float(occ),0.)
+    data=rows[start+3+nb:-1]
+    self.assertEqual(len(data),int(nr))
+    for row in data:
+     values=list(map(float,row.split()))
+     self.assertEqual(len(values),4+2*nb)
+     self.assertTrue(all(math.isfinite(v) for v in values))
+    self.assertTrue(any(float(row.split()[2])>0 for row in data))
+    self.assertEqual(rows[-1],'END_KY_SOC_NLCC_V2')
  def test_even_origin_writer(self):
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp);(p/'fixture.f90').write_text('''program test
@@ -47,11 +75,11 @@ end program
    for r in rows[:7]:self.assertAlmostEqual(r[4],2.,delta=1e-9)
  def test_selected_W_Se_reproducible(self):
   with tempfile.TemporaryDirectory() as tmp:
-   p=Path(tmp);q=subprocess.run([os.environ.get('FC','gfortran'),'-std=legacy','-O0','-fcheck=all','-fbacktrace','-Wno-align-commons',str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),'-o',str(p/'crps')],cwd=p,capture_output=True,text=True);self.assertEqual(q.returncode,0,q.stderr)
+   p=Path(tmp);q=subprocess.run([os.environ.get('FC','gfortran'),'-std=legacy','-O0','-fcheck=all','-fbacktrace','-Wno-align-commons',str(SOURCE/'crps_core_aux.f90'),str(SOURCE/'crps_output.f90'),str(SOURCE/'crps_soc_nlcc.f'),'-o',str(p/'crps')],cwd=p,capture_output=True,text=True);self.assertEqual(q.returncode,0,q.stderr)
    for sp in ['W','Se']:
     explicit=p/f'explicit-{sp}.nml'
     explicit.write_text((SOURCE/'inputs'/f'{sp}.nml').read_text().replace('&crps',
-      f"&crps NA={26 if sp=='W' else 14},Lmax={3 if sp=='W' else 2},lloc={0 if sp=='W' else 2},output_file='{sp}_soc_nlcc_rps.dat',"))
+      f"&crps write_core_aux=.false.,NA={26 if sp=='W' else 14},Lmax={3 if sp=='W' else 2},lloc={0 if sp=='W' else 2},output_file='{sp}_soc_nlcc_rps.dat',"))
     d=p/sp;d.mkdir();q=subprocess.run([str(p/'crps'),str(explicit)],cwd=d,capture_output=True,text=True,timeout=120);self.assertEqual(q.returncode,0,q.stderr)
     actual=(d/f'{sp}_soc_nlcc_rps.dat').read_text().splitlines()
     expected=(ROOT/f'testsuites/pseudo/{sp}_rps.dat').read_text().splitlines()
@@ -66,7 +94,7 @@ end program
       self.assertTrue(math.isfinite(x) and math.isfinite(y),(sp,lineno))
       self.assertLessEqual(abs(x-y),1e-8*max(1.,abs(y)),(sp,lineno,x,y))
     # Omitted controls must resolve to exactly the explicit species definition.
-    minimal=(SOURCE/'inputs'/f'{sp}.nml').read_text()
+    minimal=(SOURCE/'inputs'/f'{sp}.nml').read_text().replace('&crps','&crps write_core_aux=.false.,')
     minimal=re.sub(r'NA=\d+,?', '', minimal)
     minimal=re.sub(r'Lmax=\d+,?', '', minimal)
     minimal=re.sub(r"output_file='[^']*'", '', minimal)

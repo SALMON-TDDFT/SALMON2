@@ -8,6 +8,8 @@ STUB='''module structures
  integer::mr(1),mlps(1),zps(1),lref(1),nproj(0:7,1)
  real(8)::zion,rad(2102,1),vpp(0:2100,0:7),vpp_so(0:2100,0:7),upp(0:2100,0:7)
  real(8)::anorm(0:7,1),anorm_so(0:7,1)
+ logical::core23_present(1)=.false.
+ real(8)::core23_tau_tbl(2102,1)=0d0,core23_current_tbl(2102,1)=0d0
  end type
 end module
 module salmon_global
@@ -51,7 +53,7 @@ class Reader(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   cls.tmp=tempfile.TemporaryDirectory();cls.d=Path(cls.tmp.name);text=(ROOT/'src/atom/pp/input_pp.f90').read_text()
-  source=STUB+extract(text,'read_ps_ky')+'\n'+extract(text,'read_ps_ky_soc')+'\nend module\n'+DRIVER
+  source=STUB+extract(text,'read_ps_ky')+'\n'+extract(text,'read_ps_ky_soc')+'\n'+extract(text,'read_ky_core23')+'\nend module\n'+DRIVER
   (cls.d/'probe.f90').write_text(source);cmd=[os.environ.get('FC','gfortran'),'-fcheck=all',str(cls.d/'probe.f90'),'-o',str(cls.d/'probe')]
   subprocess.run(cmd,cwd=cls.d,capture_output=True,text=True,check=True)
  @classmethod

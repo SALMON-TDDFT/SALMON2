@@ -46,6 +46,7 @@ module salmon_xc
   implicit none
 
 ! List of Exchange Correlation Functionals
+  integer, parameter :: salmon_xctype_nc_mgga23 = 10
   integer, parameter :: salmon_xctype_hse06 = 9
   integer, parameter :: salmon_xctype_none  = 0
   integer, parameter :: salmon_xctype_pz    = 1
@@ -87,6 +88,7 @@ contains
     use salmon_global, only: yn_spinorbit,yn_dc,yn_md,yn_opt,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft,exx_pre_scf_active
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
+    use nc_mgga23, only: nc_mgga23_refresh
     implicit none
     ! intent(inout): a meta-GGA leaves its kinetic-energy-density derivative on
     ! system%xc_payload, where the Hamiltonian picks it up.  Nothing else in this
@@ -139,6 +141,16 @@ contains
     system%xc_payload%vtau_has_shadow_values = .false.
     system%xc_payload%e_tau = 0d0
     if (allocated(system%xc_payload%vtau%f)) deallocate(system%xc_payload%vtau%f)
+
+    if (xc_func%xctype(1)==salmon_xctype_nc_mgga23) then
+      call nc_mgga23_refresh(system,mg,info,spsi,stencil,srg_scalar,srg,ppn,E_xc,eexc)
+      do is=1,system%nspin
+        Vxc(is)%f=0d0
+      end do
+      call nvtxEndRange()
+      return
+    end if
+    system%nc_mgga23_payload%active=.false.
 
     nspin = system%nspin
 
@@ -922,6 +934,18 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
+        return
+
+      case ('nc_mgga23')
+        if(spin/='noncollinear') error stop 'nc_mgga23 requires spin=noncollinear'
+#ifdef USE_OPENACC
+        error stop 'nc_mgga23: CPU implementation only'
+#endif
+        xc%xctype(1)=salmon_xctype_nc_mgga23
+        xc%use_gradient=.true.
+        xc%use_laplacian=.true.
+        xc%use_kinetic_energy=.true.
+        xc%use_current=.true.
         return
 
       case ('r2scan')

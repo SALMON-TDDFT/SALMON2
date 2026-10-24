@@ -287,6 +287,11 @@ subroutine input_pp(pp,hx,hy,hz)
   call comm_bcast(pp%rho_pp_tbl,nproc_group_global)
   call comm_bcast(pp%rho_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%tau_nlcc_tbl,nproc_group_global)
+  do ik=1,nelem
+    call comm_bcast(pp%core23_present(ik),nproc_group_global)
+  enddo
+  call comm_bcast(pp%core23_tau_tbl,nproc_group_global)
+  call comm_bcast(pp%core23_current_tbl,nproc_group_global)
   call comm_bcast(pp%flag_nlcc,nproc_group_global)
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) &
     & write(*,*)"flag_nlcc = ",pp%flag_nlcc
@@ -325,7 +330,7 @@ subroutine read_ps_ky(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
   read(4,'(a)')header_line
-  if(trim(header_line)=='KY_SOC_NLCC_V1')then
+  if(trim(header_line)=='KY_SOC_NLCC_V1'.or.trim(header_line)=='KY_SOC_NLCC_V2')then
     close(4)
     call read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
     return
@@ -386,6 +391,7 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
  integer::unit,ios,n,lm,nc,ipc,lloc,k,i,ll,jj,expected_l,expected_j
  real(8)::h,zval,rc,oc,ep,r,vlocal,rho,drho,ddrho,norm,scale
  character(512)::line
+ logical::version2
  integer,allocatable::ls(:),js(:)
  real(8),allocatable::wave(:,:),potential(:,:),vl(:),beta(:),occupation(:)
  if(yn_spinorbit/='y') error stop 'KY_SOC_NLCC requires yn_spinorbit=y'
@@ -398,7 +404,8 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
  if(h<=0d0.or.zval<=0d0.or.abs(zval-nint(zval))>1d-10) error stop 'KY_SOC_NLCC invalid charge/grid'
  if(Lmax_ps(ik)>=0.and.Lmax_ps(ik)/=lm) error stop 'KY_SOC_NLCC channel truncation unsupported'
  read(unit,'(a)',iostat=ios)line
- if(ios/=0.or.trim(line)/='KY_SOC_NLCC_V1') error stop 'KY_SOC_NLCC version mismatch'
+ version2=trim(line)=='KY_SOC_NLCC_V2'
+ if(ios/=0.or.(trim(line)/='KY_SOC_NLCC_V1'.and..not.version2)) error stop 'KY_SOC_NLCC version mismatch'
  read(unit,'(a)',iostat=ios)line
  if(ios/=0.or.trim(line)/='ANGSTROM EV U_R_INV_SQRT_ANGSTROM RHO_INV_ANGSTROM3') &
   error stop 'KY_SOC_NLCC units mismatch'
@@ -436,8 +443,16 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   rhor_nlcc(i,1)=drho*au_length_aa**4
   rhor_nlcc(i,2)=ddrho*au_length_aa**5
  enddo
+ if(version2) then
+  if(ipc<=0) error stop 'KY_SOC_NLCC_V2 requires enabled NLCC'
+  call read_ky_core23(unit,pp,ik,n,h/au_length_aa,rhor_nlcc(:,0))
+ endif
  read(unit,'(a)',iostat=ios)line
- if(ios/=0.or.trim(line)/='END_KY_SOC_NLCC_V1')error stop 'KY_SOC_NLCC missing end marker'
+ if(version2) then
+  if(ios/=0.or.trim(line)/='END_KY_SOC_NLCC_V2')error stop 'KY_SOC_NLCC_V2 missing end marker'
+ else
+  if(ios/=0.or.trim(line)/='END_KY_SOC_NLCC_V1')error stop 'KY_SOC_NLCC missing end marker'
+ endif
  read(unit,'(a)',iostat=ios)line
  if(ios>=0)error stop 'KY_SOC_NLCC unexpected trailing data'
  close(unit)
@@ -471,6 +486,121 @@ subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
  flag_beta_proj_is_given=.true.
  flag_nlcc_element(ik)=ipc>0
 end subroutine read_ps_ky_soc
+
+! Validate an explicitly identified closed-shell auxiliary-Pauli core. All
+! quantities here are atomic units; tau has NO conventional factor one half.
+subroutine read_ky_core23(unit,pp,ik,n,h,rho_reference)
+ use structures,only:s_pp_info
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ implicit none
+ integer,intent(in)::unit,ik,n
+ type(s_pp_info),intent(inout)::pp
+ real(8),intent(in)::h,rho_reference(0:)
+ integer::ios,nrows,nb,b,i,j,deg,npair
+ integer,allocatable::orb(:),ell(:),lambda(:)
+ real(8),allocatable::q(:),amp(:,:),deriv(:,:),rho(:),tau(:),cur(:)
+ real(8)::ncore,r,rr,tt,cc,angular,pi,tol,scale,check_deriv
+ character(512)::line
+ pi=acos(-1d0)
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='CORE_AUX_PAULI_V1') error stop 'KY core23 missing auxiliary model block'
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='PAULI_CLOSED_SHELL_V1 ATOMIC_UNITS TAU_NO_HALF') &
+  error stop 'KY core23 model/units mismatch'
+ read(unit,*,iostat=ios)nrows,nb,ncore
+ if(ios/=0) error stop 'KY core23 invalid dimensions'
+ if(nrows/=n+1.or.nb<2.or.nb>256.or.mod(nb,2)/=0) error stop 'KY core23 invalid dimensions'
+ if(.not.ieee_is_finite(ncore)) error stop 'KY core23 nonfinite occupancy'
+ if(ncore<=0d0) error stop 'KY core23 invalid occupancy'
+ allocate(orb(nb),ell(nb),lambda(nb),q(nb),amp(0:n,nb),deriv(0:n,nb),rho(0:n),tau(0:n),cur(0:n))
+ do b=1,nb
+  read(unit,*,iostat=ios)orb(b),ell(b),lambda(b),q(b)
+  if(ios/=0) error stop 'KY core23 incomplete shell metadata'
+  if(.not.ieee_is_finite(q(b))) error stop 'KY core23 nonfinite shell occupancy'
+  if(orb(b)<1.or.ell(b)<0.or.ell(b)>12) error stop 'KY core23 invalid angular metadata'
+  if(lambda(b)==ell(b)) then
+   deg=2*ell(b)+2
+  else if(lambda(b)==-ell(b)-1.and.ell(b)>0) then
+   deg=2*ell(b)
+  else
+   error stop 'KY core23 invalid spin angular eigenvalue'
+  endif
+  if(abs(q(b)-deg)>1d-10) error stop 'KY core23 requires completely occupied angular multiplets'
+ enddo
+ ! Each radial Dirac orbital supplies exactly two auxiliary Pauli blocks, with
+ ! complementary angular momenta and identical degeneracy/occupation.
+ rr=0d0
+ do b=1,nb
+  npair=0
+  do j=1,nb
+   if(orb(j)/=orb(b)) cycle
+   npair=npair+1
+   if(j==b) cycle
+   if(abs(ell(j)-ell(b))/=1.or.abs(q(j)-q(b))>1d-10) &
+    error stop 'KY core23 inconsistent paired angular blocks'
+  enddo
+  if(npair/=2) error stop 'KY core23 missing or duplicate radial partner'
+  rr=rr+0.5d0*q(b)
+ enddo
+ if(abs(rr-ncore)>1d-8) error stop 'KY core23 total occupancy mismatch'
+ do i=0,n
+  read(unit,*,iostat=ios)r,rho(i),tau(i),cur(i),(amp(i,b),deriv(i,b),b=1,nb)
+  if(ios/=0) error stop 'KY core23 incomplete radial row'
+  if(.not.ieee_is_finite(r).or..not.ieee_is_finite(rho(i)).or. &
+     .not.ieee_is_finite(tau(i)).or..not.ieee_is_finite(cur(i))) error stop 'KY core23 nonfinite radial data'
+  if(abs(r-i*h)>2d-9*max(1d0,r).or.rho(i)<0d0.or.tau(i)<0d0) &
+   error stop 'KY core23 invalid radial radius/density/tau'
+  rr=0d0;tt=0d0;cc=0d0
+  do b=1,nb
+   if(.not.ieee_is_finite(amp(i,b)).or..not.ieee_is_finite(deriv(i,b))) &
+    error stop 'KY core23 nonfinite primitive'
+   angular=0d0
+   if(i>0) then
+    angular=amp(i,b)/r
+   else if(ell(b)==1) then
+    angular=deriv(i,b)
+   else if(ell(b)>1.and.abs(deriv(i,b))>1d-10) then
+    error stop 'KY core23 nonregular high-l primitive origin'
+   endif
+   if(i==0.and.ell(b)==0.and.abs(deriv(i,b))>1d-8) &
+    error stop 'KY core23 nonregular s primitive origin'
+   if(i==0.and.ell(b)>0.and.abs(amp(i,b))>1d-10) &
+    error stop 'KY core23 nonregular angular primitive origin'
+   rr=rr+q(b)*amp(i,b)**2/(4d0*pi)
+   tt=tt+q(b)*(deriv(i,b)**2+ell(b)*(ell(b)+1)*angular**2)/(4d0*pi)
+   if(i>0) cc=cc+q(b)*lambda(b)*amp(i,b)**2/(8d0*pi*r)
+  enddo
+  tol=2d-9
+  if(abs(rr-rho(i))>tol*max(1d0,rr,rho(i)).or. &
+     abs(tt-tau(i))>tol*max(1d0,tt,tau(i)).or. &
+     abs(cc-cur(i))>tol*max(1d0,abs(cc),abs(cur(i)))) &
+   error stop 'KY core23 primitive invariant mismatch'
+  ! Legacy ANGSTROM rows and the auxiliary AU block retain different
+  ! published Bohr-radius constants (relative difference 4.4e-10).
+  if(abs(rho(i)-rho_reference(i))>2d-8*max(1d0,rho(i),rho_reference(i))) &
+   error stop 'KY core23 density differs from NLCC density'
+ enddo
+ ! Require a resolved negligible endpoint, never an arbitrary interior threshold.
+ if(rho(n)>1d-12.or.tau(n)>1d-12.or.abs(cur(n))>1d-12) error stop 'KY core23 unresolved support tail'
+ ! Derivatives are part of one regular primitive, rather than independent data.
+ ! A centered finite-difference residual resolves the table spacing; omit only
+ ! endpoints, whose one-sided error is substantially larger for tight core states.
+ do b=1,nb
+  scale=max(1d0,maxval(abs(deriv(:,b))))
+  do i=1,n-1
+   if(i>=2.and.i<=n-2) then
+    check_deriv=(-amp(i+2,b)+8d0*amp(i+1,b)-8d0*amp(i-1,b)+amp(i-2,b))/(12d0*h)
+   else
+    check_deriv=(amp(i+1,b)-amp(i-1,b))/(2d0*h)
+   endif
+   if(abs(check_deriv-deriv(i,b))>1d-3*scale) error stop 'KY core23 primitive derivative mismatch'
+  enddo
+ enddo
+ pp%core23_tau_tbl(:,ik)=0d0;pp%core23_current_tbl(:,ik)=0d0
+ pp%core23_tau_tbl(1:n+1,ik)=tau
+ pp%core23_current_tbl(1:n+1,ik)=cur
+ pp%core23_present(ik)=.true.
+end subroutine read_ky_core23
 
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine read_ps_abinit(pp,rrc,ik,ps_file)
@@ -1149,11 +1279,20 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
   if(.not.flag_nlcc_element(ik))return
 !  do i=1,pp%nrps(ik)
+  if(pp%core23_present(ik)) then
+    ! V2 carries a joint orbital model: density may not be independently cut.
+    pp%rho_nlcc_tbl(1:pp%mr(ik)+1,ik)=rhor_nlcc(0:pp%mr(ik),0)
+    do i=1,pp%mr(ik)+1
+      if(rhor_nlcc(i-1,0)>0d0) &
+        pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
+    enddo
+  else
   do i=1,pp%mr(ik)
     if(rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7)exit
     pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
   end do
+  endif
 
   return
 end subroutine making_ps_with_masking
@@ -1398,11 +1537,20 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 
   if ( .not.flag_nlcc_element(ik) ) return
 
+  if(pp%core23_present(ik)) then
+    ! V2 carries a joint orbital model: density may not be independently cut.
+    pp%rho_nlcc_tbl(1:pp%mr(ik)+1,ik)=rhor_nlcc(0:pp%mr(ik),0)
+    do i=1,pp%mr(ik)+1
+      if(rhor_nlcc(i-1,0)>0d0) &
+        pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
+    enddo
+  else
   do i=1,pp%mr(ik)
     if ( rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7 ) exit
     pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
   end do
+  endif
 
   return
 end subroutine making_ps_without_masking

@@ -1,9 +1,9 @@
 # CRPS SOC+NLCC 擬ポテンシャル生成器
 
-2026-10-22に標準選択したW・Seを生成するソースと入力です。
+W・Se・Niなどを生成する現行ソースと入力です。新規生成は全芯情報付きV2を標準にします。
 
 - `crps_soc_nlcc.f`：元のcrpsAu.fから拡張した多元素・j分解SOC生成器。
-- `crps_output.f90`：`KY_SOC_NLCC_V1`出力。NLCCの原点近傍一次微分の符号修正を含みます。
+- `crps_output.f90`：`KY_SOC_NLCC_V2`出力（V1再現出力も保持）。NLCCの原点近傍一次微分の符号修正を含みます。
 - `inputs/W.nml`：W radius2、s1.59/p1.01/d1.38/f1.59 Å、価電子12、NLCC芯半径0.65 Å。
 - `inputs/Se.nml`：Se s1.38/p1.43/d1.22 Å、価電子6、NLCC芯半径0.50 Å。
 
@@ -13,7 +13,7 @@ GNU Fortranが必要です。以下はこのディレクトリから実行する
 
 ```sh
 gfortran -std=legacy -O0 -fcheck=all -fbacktrace -Wno-align-commons \
-  crps_output.f90 crps_soc_nlcc.f -o crps_soc_nlcc
+  crps_core_aux.f90 crps_output.f90 crps_soc_nlcc.f -o crps_soc_nlcc
 mkdir W-run Se-run
 (cd W-run && ../crps_soc_nlcc ../inputs/W.nml > stdout.txt 2> stderr.txt)
 (cd Se-run && ../crps_soc_nlcc ../inputs/Se.nml > stdout.txt 2> stderr.txt)
@@ -27,7 +27,7 @@ c2探索範囲は入力の`c2lo/c2hi`（現在−10.5〜5.0）です。各チャ
 
 ## 使用と検証範囲
 
-生成ファイルの使用には`KY_SOC_NLCC_V1`対応readerとSOC設定が必要です。通常の数値ヘッダーだけの旧KY形式ではありません。本ブランチのSALMONには対応readerを統合しています。ファイルのヘッダーで旧KY／拡張形式を判別し、拡張形式だけはSOC有効時に読みます。SOC無効での暗黙の平均化は行わず拒否します。新readerを使うにはSALMON本体の再ビルドが必要です。稼働中の既存実行ファイルは変更しません。
+新規生成ファイルの使用には`KY_SOC_NLCC_V2`対応readerとSOC設定が必要です。通常の数値ヘッダーだけの旧KY形式ではありません。本ブランチのSALMONには対応readerを統合しています。ファイルのヘッダーで旧KY／拡張形式を判別し、拡張形式だけはSOC有効時に読みます。SOC無効での暗黙の平均化は行わず拒否します。新readerを使うにはSALMON本体の再ビルドが必要です。稼働中の既存実行ファイルは変更しません。
 
 標準W・Seとの再生成照合結果と全ファイルのSHA256は`provenance.json`を参照してください。固体・メッシュ・光学精度の検証状況は`testsuites/pseudo/crps_soc_nlcc/README.md`に記録しています。元のcrpsAu.fと過去の失敗出力はwork配下に保存しており、変更していません。
 
@@ -74,3 +74,18 @@ S s3.2/p3.2/d3.2 bohrです。Mo s3.0/3.2 bohrはc2解が複数のため拒否�
 `testsuites/pseudo/crps_soc_nlcc`と既存zipは以前のW/Se生成用の固定スナップショットです。
 Mo用にはこのディレクトリの修正版を使用し、古いスナップショットの内容・manifestを
 書き換えて過去の来歴を変えないでください。
+
+## V2 auxiliary-Pauli NLCC
+
+The generator defaults to `write_core_aux=.true.` and always supplies the
+same-shell density/tau/spin-current primitives in its standard
+`KY_SOC_NLCC_V2` output. SALMON selects what to use: LSDA uses core density;
+`nc_mgga23` uses coherent density, kinetic density and current, including their
+field response. The file is not specialized to one consuming functional.
+`write_core_aux=.false.` is retained only for explicit historical V1 reproduction;
+it is not the way to select NLCC quantities for a new calculation.
+Both output modes require compiling
+`crps_core_aux.f90` before `crps_soc_nlcc.f`, as shown above.
+See [CORE_AUX_PAULI_V1.md](CORE_AUX_PAULI_V1.md) for the model, exact format,
+far-tail continuation and independent validation. No existing V1 file is
+converted in place or overwritten.

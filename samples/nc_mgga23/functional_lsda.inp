@@ -1,0 +1,10 @@
+! Use the same physical system, pulse, grid, occupations and time step.
+&functional
+ xc='pz'
+/
+&system
+ spin='noncollinear', yn_spinorbit='y', yn_symmetry='n'
+/
+&propagation
+ propagator='middlepoint', yn_predictor_corrector='y', yn_fix_func='n'
+/

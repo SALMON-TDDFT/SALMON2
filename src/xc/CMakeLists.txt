@@ -9,6 +9,9 @@ set(SOURCES
     exx_k_selection.f90
     exx_functional.f90
     exx_gs_metadata.f90
+    nc_mgga23_kernel.f90
+    nc_mgga23_core.f90
+    nc_mgga23.f90
     salmon_xc.f90
    )
 

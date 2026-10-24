@@ -1,0 +1,11 @@
+! Merge these groups into a complete conventional fixed-ion RT input.
+! This is a functional fragment, not a standalone material calculation.
+&functional
+ xc='nc_mgga23'
+/
+&system
+ spin='noncollinear', yn_spinorbit='y', yn_symmetry='n'
+/
+&propagation
+ propagator='middlepoint', yn_predictor_corrector='y', yn_fix_func='n'
+/
