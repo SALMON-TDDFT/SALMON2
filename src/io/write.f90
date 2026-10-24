@@ -1600,6 +1600,7 @@ contains
 !===================================================================================================================================
 
   subroutine write_dos(system,energy)
+    ! wspin: occupancy per orbital; with spin-orbit each spinor is stored in both spin columns.
     use structures
     use math_constants, only: pi
     use parallelization, only: nproc_id_global
@@ -1614,7 +1615,7 @@ contains
     !
     integer :: iob,iik,is
     real(8) :: dos_l(1:out_dos_nenergy,system%nspin)
-    real(8) :: fk,ww,dw
+    real(8) :: fk,ww,dw,wspin
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
     character(100) :: filename
@@ -1639,6 +1640,14 @@ contains
     out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
 
+    if(yn_spinorbit=='y') then
+      wspin = 0.5d0
+    else if(system%nspin==2) then
+      wspin = 1.d0
+    else
+      wspin = 2.d0
+    end if
+
     dos_l = 0.d0
 
     do is=1,system%nspin
@@ -1646,13 +1655,13 @@ contains
     do iob=1,system%no
       select case (out_dos_function)
       case('lorentzian')
-        fk=2.d0*out_dos_width/pi
+        fk=wspin*out_dos_width/pi
         do iw=1,out_dos_nenergy
           ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,is)
           dos_l(iw,is)=dos_l(iw,is)+system%wtk(iik)*fk/(ww**2+out_dos_width**2)
         end do
       case('gaussian')
-        fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
+        fk=wspin/(sqrt(2.d0*pi)*out_dos_width)
         do iw=1,out_dos_nenergy
           ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,is)
           dos_l(iw,is)=dos_l(iw,is)+system%wtk(iik)*fk*exp(-(0.5d0/out_dos_width**2)*ww**2)
@@ -1685,6 +1694,7 @@ contains
 !===================================================================================================================================
   
   subroutine write_pdos(lg,mg,system,info,pp,energy,tpsi)
+    ! wspin: occupancy per orbital (spin-orbit: spinor components are summed over ispin).
     use structures
     use math_constants      ,only: pi,zi
     use salmon_math         ,only: ylm
@@ -1718,7 +1728,7 @@ contains
     real(8) :: pdos_l_tmp(out_dos_nenergy,0:4,natom)
     real(8) :: pdos_l(out_dos_nenergy,0:4,natom)
     character(100) :: Outfile
-    real(8) :: fk,ww,dw
+    real(8) :: fk,ww,dw,wspin
     integer :: iw,index_vbm
     real(8) :: ene_min,ene_max,eshift
     character(20) :: fileNumber
@@ -1747,6 +1757,12 @@ contains
     out_dos_start = max(out_dos_start,ene_min-0.25d0*(ene_max-ene_min)-eshift)
     out_dos_end = min(out_dos_end,ene_max+0.25d0*(ene_max-ene_min)-eshift)
     dw=(out_dos_end-out_dos_start)/dble(out_dos_nenergy-1)
+
+    if(system%nspin==2) then
+      wspin = 1.d0
+    else
+      wspin = 2.d0
+    end if
 
     pdos_l_tmp=0.d0
 
@@ -1794,14 +1810,14 @@ contains
           do lm=L**2+1,(L+1)**2
             select case (out_dos_function)
             case('lorentzian')
-              fk=2.d0*out_dos_width/pi
+              fk=wspin*out_dos_width/pi
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
                   +abs(rbox_pdos2(lm,iatom))**2*fk/(ww**2+out_dos_width**2)
               end do
             case('gaussian')
-              fk=2.d0/(sqrt(2.d0*pi)*out_dos_width)
+              fk=wspin/(sqrt(2.d0*pi)*out_dos_width)
               do iw=1,out_dos_nenergy
                 ww=out_dos_start+dble(iw-1)*dw+eshift-energy%esp(iob,iik,ispin)
                 pdos_l_tmp(iw,L,iatom)=pdos_l_tmp(iw,L,iatom)  &
