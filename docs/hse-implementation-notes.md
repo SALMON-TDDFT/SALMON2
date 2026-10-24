@@ -117,3 +117,9 @@ No grid, k-mesh or long-time accuracy convergence is claimed by these checks.
 This change enables the integer-occupation full-k route. Fractional-occupation,
 Wannier, spatial-neighborhood/SR localization and symmetry-reduced routes keep
 their existing geometry restrictions. DC remains orthogonal only.
+
+## Official latest parallel implementations (human designation, 2026-10-24)
+
+For dense-k exchange, the latest route partitions the full (r,r-prime) blocks across MPI ranks and uses OpenMP within each rank for independent FFT batches and packing work. The pair route (`src/xc/exx_k_pairs.f90`, `SALMON_EXX_K_FFT_ORBITS=pair`) is an MPI + OpenMP hybrid; describing it as MPI-only is incorrect. MPI communication remains outside application OpenMP regions. This implementation is present on `codex/fix-cartesian-soc-symmetry` including fda550b5.
+
+MLWF localization separately uses the officially designated latest MPI + OpenMP Jacobi implementation on `mlwf-jacobi-omp-20261022` (body 23d701094). These are two distinct algorithmic routes; this designation does not merge the branches or claim completed pending performance tests. Existing remote jobs and fixed binaries are unchanged.
