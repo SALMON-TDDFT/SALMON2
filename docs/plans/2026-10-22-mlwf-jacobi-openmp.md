@@ -1,3 +1,11 @@
+# Official latest MLWF Jacobi implementation: MPI + OpenMP
+
+Human designation, 2026-10-24: the hybrid MPI + OpenMP implementation is the official latest MLWF Jacobi code. Its maintained branch is `mlwf-jacobi-omp-20261022`; implementation commit `23d701094` extends MPI round-parallel Jacobi `c8ec8181a`.
+
+The MPI-only branch remains a comparison reference. This designation does not claim completed Fugaku performance validation or merge unrelated SALMON feature branches. Existing jobs and fixed executables are unchanged; queued hybrid comparison job 52745397 continues as submitted. Numerical, completion and capacity evidence remain required under the latest human monitoring policy.
+
+## Original implementation plan and validation scope
+
 # Jacobi OpenMP comparison (experimental)
 
 Independent worktree based on c8ec8181a. Existing remote jobs and fixed binaries preserved. No push. PZHEEV forbidden in source and every linked application object; audits pass.
