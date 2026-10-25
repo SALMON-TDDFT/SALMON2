@@ -30,14 +30,6 @@ message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
 include(cmakefiles/check_build_environments.cmake)
 
-if(USE_OPENACC)
-  if(USE_CUDA)
-    option(CMAKE_CUDA_ARCHITECTURES "80") # Dummy variable
-    enable_language(CUDA)
-  endif()
-endif()
-
-
 # Bulid options
 ## For third party libraries
 option_set(USE_MPI       "Use MPI parallelization" OFF)
@@ -50,6 +42,23 @@ option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)"
 ## OpenACC/CUDA GPU libraries (only meaningful when USE_OPENACC is on)
 option_set(USE_GEMM      "Use cuBLAS batched-GEMM for pseudo-pt" ON)
 option_set(USE_NCCL      "Use NCCL for the pseudo-pt allreduce"  ON)
+
+# USE_CUDA selects the CUDA C++ kernels, which run on OpenACC's stream and data.
+if (USE_CUDA AND NOT USE_OPENACC)
+  message(FATAL_ERROR "USE_CUDA requires USE_OPENACC")
+endif ()
+
+if (USE_CUDA)
+  # The same architectures as the OpenACC -gpu= list.
+  set(CMAKE_CUDA_ARCHITECTURES "80;90;100;120")
+  # nvfortran -cuda links the shared runtime; a second, static copy would split CUDA state.
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+  enable_language(CUDA)
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -c++libs")
+  # The preset passes -DUSE_CUDA in its flags; CMake's Fortran dependency scan only sees definitions.
+  add_compile_definitions(USE_CUDA)
+endif ()
 
 ## Optimization for stencil compitations
 option_set(USE_OPT_ARRAY_PADDING           "Enable array padding for the stencil"          ON)

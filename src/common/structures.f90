@@ -337,6 +337,7 @@ module structures
     integer,allocatable :: ilocal_nlma2ilma(:) ! ilocal_nlma to global nlma
     integer,allocatable :: ilocal_nlma2ia(:)   ! ilocal_nlma to atom number (ia_tbl)
     ! for optimizing OpenACC
+    integer                :: vi_tables_version = 0 ! changes whenever the tables below are rebuilt
     integer                :: max_vi
     integer,allocatable    :: v2nlma(:)
     integer,allocatable    :: k2ilma(:,:)
