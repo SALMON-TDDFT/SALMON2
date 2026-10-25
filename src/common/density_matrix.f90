@@ -221,6 +221,9 @@ contains
     use timer
     use iso_c_binding
     use nvtx_wrapper
+#ifdef USE_CUDA
+    use stencil_cuda, only: current_stencil_cuda
+#endif
 #if defined(USE_OPENACC) && defined(USE_GEMM)
     use cudafor
     use cublas
@@ -302,6 +305,12 @@ contains
       jy = 0d0
       jz = 0d0
       call timer_begin(LOG_CALC_STENCIL_CURRENT)
+#ifdef USE_CUDA
+      if (current_stencil_cuda(system,mg,stencil,info,psi,BT,ispin,im,jx,jy,jz)) then
+!$acc enter data copyin(jx,jy,jz)
+!$acc update device(system%vec_Ac)
+      else
+#endif
 !$acc enter data copyin(jx,jy,jz)
 !$acc update device(system%vec_Ac)
 
@@ -346,6 +355,9 @@ contains
       end do
       end do
 !$acc end kernels
+#ifdef USE_CUDA
+      end if
+#endif
       call timer_end(LOG_CALC_STENCIL_CURRENT)
       
       if ( yn_jm == 'n' ) then
