@@ -13,7 +13,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 //
-// Host-side checks shared by the CUDA stencil kernels.
+// Host-side checks shared by the CUDA kernels.
 // A kernel that cannot run here reports a status and the caller uses OpenACC.
 #pragma once
 #include <cuda_runtime.h>

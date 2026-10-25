@@ -184,6 +184,9 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   use cublas
   use openacc
   use cudafor
+#ifdef USE_CUDA
+  use nonlocal_cuda, only: back_projection_cuda
+#endif
   use mpi, only: MPI_DOUBLE_COMPLEX, MPI_SUM, MPI_IN_PLACE
 #ifdef USE_NCCL
   use nccl
@@ -473,6 +476,9 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   end if
 
   ! Phase 2 (back-projection): v2j-based scatter, no atomics.
+#ifdef USE_CUDA
+  if (.not. back_projection_cuda(ppg,uVpsibox_acc,htpsi,Nspin,io_s,io_e,ik_s,ik_e,im_s,im_e)) then
+#endif
 !$acc kernels present(ppg,tpsi,htpsi,uVpsibox_acc)
 !$acc loop collapse(5) independent private(ilocal,ilma,ia,uVpsi,vi,my_nlma,k,j,ix,iy,iz,wrk)
   do im=im_s,im_e
@@ -501,6 +507,9 @@ subroutine zpseudo(tpsi,htpsi,info,nspin,ppg)
   end do
   end do
 !$acc end kernels
+#ifdef USE_CUDA
+  end if
+#endif
 
 #else
   if(info%if_divide_rspace) then
