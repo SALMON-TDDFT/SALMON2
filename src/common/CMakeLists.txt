@@ -35,6 +35,9 @@ else ()
           cublas_wrapper.f90
           cusolver_wrapper.f90
           )
+      if(USE_CUDA)
+          set(SOURCES ${SOURCES} hpsi_stencil.cu stencil_cuda.f90)
+      endif()
   endif()
 endif ()
 
