@@ -270,8 +270,8 @@ contains
       enddo
 !$omp end parallel do
 
-#ifdef USE_HSE
-      if(xc_func%xctype(1)==salmon_xctype_hse06)then
+#if defined(USE_HSE) || defined(USE_LIBXC)
+      if(xc_func%xctype(1)==salmon_xctype_hse06.or.any(xc_func%xctype==salmon_xctype_libxc))then
         rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
           rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+ppn%rho_nlcc
       endif
@@ -306,8 +306,8 @@ contains
       enddo
 !$omp end parallel do
 
-#ifdef USE_HSE
-      if(xc_func%xctype(1)==salmon_xctype_hse06)then
+#if defined(USE_HSE) || defined(USE_LIBXC)
+      if(xc_func%xctype(1)==salmon_xctype_hse06.or.any(xc_func%xctype==salmon_xctype_libxc))then
         rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
           rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+0.5d0*ppn%rho_nlcc
       endif
@@ -336,8 +336,8 @@ contains
       enddo
 !$omp end parallel do
 
-#ifdef USE_HSE
-      if(xc_func%xctype(1)==salmon_xctype_hse06)then
+#if defined(USE_HSE) || defined(USE_LIBXC)
+      if(xc_func%xctype(1)==salmon_xctype_hse06.or.any(xc_func%xctype==salmon_xctype_libxc))then
         rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
           rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+0.5d0*ppn%rho_nlcc
       endif
@@ -1867,9 +1867,8 @@ contains
       integer(c_size_t) :: np
 #endif
 
-      if(pp%flag_nlcc)then
-        stop "libxc for spin-polarised systems with nlcc is currently not implemented."
-      end if
+      if(pp%flag_nlcc.and..not.present(rho_nlcc)) &
+        error stop 'Spin Libxc NLCC requires core density'
 
       do iz=1,nz
       do iy=1,ny
@@ -1879,6 +1878,9 @@ contains
          gvxc_tmp_1d=0.d0
          rho_1d(1) = rho_s(ix,iy,iz,1)
          rho_1d(2) = rho_s(ix,iy,iz,2)
+         ! Frozen unpolarized core contributes equally to both local spin channels.
+         ! grho_s already contains the matching half-core gradients from calc_xc.
+         if(pp%flag_nlcc)rho_1d=rho_1d+0.5d0*rho_nlcc(ix,iy,iz)
          if (xc%use_gradient) then
            sigma_1d(1) = grho_s(ix,iy,iz,1,1)**2+grho_s(ix,iy,iz,1,2)**2+grho_s(ix,iy,iz,1,3)**2
            sigma_1d(2) = grho_s(ix,iy,iz,1,1)*grho_s(ix,iy,iz,2,1) &
