@@ -75,7 +75,9 @@ contains
     scalar_mode=yn_spinorbit=='n'.and.spin=='unpolarized'.and.yn_exx_fft_orbits=='y'.and. &
       (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse').and. &
       (exx_factor_mode=='off'.or.exx_factor_mode=='learned')
-    if(theory/='dft')scalar_mode=scalar_mode.and.propagator=='hse_taylor4'
+    if(theory/='dft')scalar_mode=scalar_mode.and.(propagator=='hse_taylor4'.or. &
+      (propagator=='hse_ptcn'.and.yn_predictor_corrector=='n'.and.yn_restart=='n'.and. &
+       exx_factor_mode=='learned'.and.exx_factor_exact_interval==1.and.ae_shape2=='none'))
     supported=(spinor_mode.or.scalar_mode).and.xc=='hse06'.and. &
       yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.yn_periodic=='y'.and. &
       propagator/='hse_taylor4_full'.and.index(yn_symmetry,'y')/=0.and. &

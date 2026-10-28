@@ -21,10 +21,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
+#if defined(USE_HSE) || defined(USE_SCALAPACK)
+  use ptcn_native,only:native_ptcn_step
+#endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
-  use exx_ptcn, only: native_exx_step
-  use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint
+  use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint,exx_ptcn_report_step
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -134,7 +136,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   case(3)
     if(.not.singlescale%flag_use) then
-      if(propagator == 'middlepoint'.or.propagator == 'hse_ptcn'.or. &
+      if(propagator == 'middlepoint'.or.propagator=='ptcn_mgga23'.or.propagator == 'hse_ptcn'.or. &
          propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
         system%vec_Ac(1:3) = 0.5d0* (rt%Ac_tot(1:3,itt)+rt%Ac_tot(1:3,itt-1))
       else if(propagator == 'aetrs') then
@@ -172,12 +174,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
+#if defined(USE_HSE) || defined(USE_SCALAPACK)
+  if(propagator=='hse_ptcn'.or.propagator=='ptcn_mgga23')then
+    call native_ptcn_step(dt,rt%Ac_tot(:,itt-1),rt%Ac_tot(:,itt),lg,mg,system,info,stencil,xc_func, &
+      srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
+  else
+#endif
 
 #ifdef USE_HSE
-  if(propagator=='hse_ptcn')then
-    call native_exx_step(dt,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
-      spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
-  else
     if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') &
       call exx_taylor_stage(0)
 #endif
@@ -194,6 +198,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     
 #ifdef USE_HSE
     if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call exx_taylor_stage(2)
+#endif
+#if defined(USE_HSE) || defined(USE_SCALAPACK)
   endif
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
@@ -461,6 +467,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #ifdef USE_HSE
   ! One capture per completed step; predictor stages never call the collector.
   call exx_factor_endpoint(system,info,itt)
+  call exx_ptcn_report_step(itt,info)
   call exx_trace_corrected_endpoint(system,info,itt,dt,itt==itotNtime,itotNtime)
 #endif
   call nvtxEndRange

@@ -57,9 +57,8 @@ module salmon_xc
   integer, parameter :: salmon_xctype_vs98  = 6
   integer, parameter :: salmon_xctype_pw    = 7
   integer, parameter :: salmon_xctype_r2scan = 8
-#ifdef USE_LIBXC
+! The identifier is also inspected by HSE-only NLCC gradient handling.
   integer, parameter :: salmon_xctype_libxc = 101
-#endif
 
   ! workspace used in exchange_correlation
   real(8),allocatable :: rho_tmp(:,:,:)

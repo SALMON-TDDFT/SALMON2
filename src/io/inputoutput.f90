@@ -3107,6 +3107,7 @@ contains
       product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
       exx_ace_support=='source'.and.yn_self_checkpoint=='n'
 
+    if(propagator=='ptcn_mgga23'.and.xc/='nc_mgga23')error stop 'ptcn_mgga23 requires nc_mgga23'
     if(xc=='nc_mgga23') then
       if(spin/='noncollinear'.or.yn_spinorbit/='y') &
         error stop 'nc_mgga23 requires noncollinear spinors and SOC representation'
@@ -3122,8 +3123,19 @@ contains
       if(yn_out_micro_je=='y'.or.yn_out_current_decomposed=='y'.or.yn_out_intraband_current=='y') &
         error stop 'nc_mgga23 supports macroscopic charge-current output only'
       if(xname/='none'.or.cname/='none') error stop 'nc_mgga23 cannot be combined with separate xname/cname'
-      if(theory/='dft'.and.(propagator/='middlepoint'.or.yn_predictor_corrector/='y')) &
-        error stop 'nc_mgga23 requires middlepoint with yn_predictor_corrector=y'
+      if(theory/='dft')then
+        if(propagator=='ptcn_mgga23')then
+#ifndef USE_SCALAPACK
+          error stop 'MGGA23 PT-CN requires a ScaLAPACK build'
+#endif
+          if(yn_predictor_corrector/='n'.or.gram_schmidt_interval>0) &
+            error stop 'MGGA23 PT-CN requires no external predictor or Gram-Schmidt'
+          if(yn_periodic/='y'.or.any(nproc_rgrid/=1)) &
+            error stop 'MGGA23 PT-CN requires periodic full local spatial domain'
+        else if(propagator/='middlepoint'.or.yn_predictor_corrector/='y')then
+          error stop 'nc_mgga23 requires middlepoint-PC or ptcn_mgga23'
+        endif
+      endif
 #ifdef USE_OPENACC
       error stop 'nc_mgga23 is available on CPU only'
 #endif
@@ -3610,9 +3622,21 @@ contains
         error stop 'FFT orbits require native CPU dense-k hybrid symmetry with all q points'
     endif
     if(exx_factor_mode/='off')then
-      if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
-         propagator/='hse_taylor4'.or.yn_predictor_corrector/='y') &
-        error stop 'Factor history requires native static HSE Taylor4 predictor-corrector'
+      if(propagator=='hse_ptcn')then
+        if(xc/='hse06'.or.exx_factor_mode/='learned'.or.exx_factor_exact_interval/=1.or. &
+          yn_dc/='n'.or.yn_md/='n'.or. &
+          yn_predictor_corrector/='n'.or.yn_restart/='n'.or.yn_spinorbit/='n'.or. &
+          product(num_kgrid)<=1.or.nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+          temperature>=0d0.or.yn_hse_wannier=='y'.or.exx_mlwf_radius/=0d0.or. &
+          exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied'.or. &
+          exx_pair_screening/='off'.or.hse_sr_tolerance/=0d0.or.any(hse_q_reduction/=1).or. &
+          exx_kpoint_backend/='cpu'.or.(theory/='tddft_response'.and.theory/='tddft_pulse')) &
+          error stop 'Learned CN requires fresh static integer native CPU dense-k HSE with full support'
+      else
+        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
+           propagator/='hse_taylor4'.or.yn_predictor_corrector/='y') &
+          error stop 'Factor history requires native static HSE Taylor4 predictor-corrector or certified learned CN'
+      endif
     endif
     if(yn_ace_shadow_diagnostic=='y'.or.yn_ace_export_factors=='y')then
       if(exx_surrogate_mode/='trace')error stop 'ACE diagnostic switches require surrogate trace'
@@ -3866,8 +3890,11 @@ contains
         if(trans_longi/='tr')error stop 'HSE06 native RT requires transverse fields'
         if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
         if(ae_shape1=='Acos2')then
-          if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
-            error stop 'HSE06 laser requires Taylor4'
+          if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn') &
+            error stop 'HSE06 laser requires Taylor4 or endpoint-checked PT-CN'
+          if(propagator=='hse_ptcn'.and.(ae_shape2/='none'.or.yn_restart=='y'.or. &
+             yn_spinorbit/='n'.or.temperature>=0d0.or.nproc_ob/=1.or.any(nproc_rgrid/=1))) &
+            error stop 'HSE06 laser PT-CN requires fresh scalar full-local k-only single pulse'
           if(ae_shape2/='none'.and.ae_shape2/='impulse')error stop 'HSE06 laser: unsupported probe'
           ! A z-polarized pulse may use its field-preserving spatial group.
           ! init_sym_sub validates every retained operation against that field.

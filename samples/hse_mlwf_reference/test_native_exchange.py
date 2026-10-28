@@ -46,7 +46,7 @@ class NativeExchangeTest(unittest.TestCase):
   self.assertTrue(source.exists(),'Native PT-CN module has not been implemented')
   exe=self.directory/'ptcn'
   blas=Path(os.environ.get('OPENBLAS_ROOT','/opt/homebrew/opt/openblas'))
-  result=subprocess.run([os.environ.get('FC','gfortran'),str(source),str(ROOT/'samples/hse_mlwf_reference/native_ptcn_probe.f90'),'-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)],cwd=self.directory,capture_output=True,text=True)
+  result=subprocess.run([os.environ.get('FC','gfortran'),str(ROOT/'src/rt/ptcn_core.f90'),str(source),str(ROOT/'samples/hse_mlwf_reference/native_ptcn_probe.f90'),'-L'+str(blas/'lib'),'-lopenblas','-o',str(exe)],cwd=self.directory,capture_output=True,text=True)
   self.assertEqual(result.returncode,0,result.stderr)
   values=np.loadtxt(subprocess.run([str(exe)],check=True,capture_output=True,text=True).stdout.splitlines())
   u=np.array([1,.2+.1j,-.1+.3j]).reshape(1,1,3);u/=np.linalg.norm(u)

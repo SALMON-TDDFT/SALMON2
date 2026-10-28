@@ -9,7 +9,15 @@ set(SOURCES
    )
 
 if(USE_HSE)
-  list(APPEND SOURCES exx_ptcn_core.f90 exx_ptcn.f90)
+  list(APPEND SOURCES exx_ptcn.f90)
+endif()
+
+if(USE_HSE OR USE_SCALAPACK)
+  list(APPEND SOURCES ptcn_core.f90 exx_ptcn_core.f90 ptcn_native.f90 ptcn_mgga23.f90
+    ptcn_rectangular_fft.f90 ptcn_kinetic_preconditioner.f90)
+endif()
+if(USE_SCALAPACK)
+  list(APPEND SOURCES ptcn_distributed_matrix.f90 ptcn_native_matrix.f90)
 endif()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

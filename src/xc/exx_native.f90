@@ -80,6 +80,13 @@ module exx_native
   public::exx_factor_mode_metadata
   character(512),save::factor_restart_directory=""
   integer,save::factor_restart_step=-1
+  ! CN history is independent from Taylor's trial/predictor lifecycle.
+  type(s_factor_history),allocatable,save::ptcn_history(:)
+  integer,save::ptcn_accepted_step=0
+  logical,save::ptcn_attempted=.false.,ptcn_predicted=.false.
+  real(8),save::ptcn_history_dt=0d0
+  integer(int64),save::exx_native_rebuilds=0,ptcn_rebuild_start=0
+  public::exx_ptcn_begin,exx_ptcn_predict_inner,exx_ptcn_accept,exx_ptcn_report_step
   type(s_exx_ace),save :: initial_ace,midpoint_ace
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
@@ -284,6 +291,8 @@ contains
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
     integer::ik
+    ! Dedicated CN history never uses Taylor's frozen-expectation hook.
+    if(propagator=='hse_ptcn')return
     if(.not.factor_configured)then
       factor_experiment=exx_factor_mode/='off'
       if(factor_experiment)then
@@ -688,6 +697,100 @@ contains
     call comm_summation(ex,exx_exchange_energy,info%icomm_rko)
   end subroutine
 
+  subroutine exx_ptcn_begin(dt)
+    real(8),intent(in)::dt
+    ptcn_rebuild_start=exx_native_rebuilds
+    ptcn_attempted=.false.;ptcn_predicted=.false.
+    if(exx_factor_mode/='learned')return
+    if(.not.ieee_is_finite(dt).or.dt<=0d0)error stop 'Learned CN requires finite positive dt'
+    if(ptcn_history_dt==0d0)ptcn_history_dt=dt
+    if(abs(dt-ptcn_history_dt)>1d-14*ptcn_history_dt)error stop 'Learned CN requires constant dt'
+  end subroutine
+
+  subroutine ptcn_collect_exact(system,info,step)
+    use exx_distributed_alignment,only:distributed_factor_align
+    use exx_distributed_metric,only:distributed_metric_available
+    use exx_factor_history,only:factor_align
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    integer,intent(in)::step
+    integer::k,status,bad
+    complex(8),allocatable::aligned(:,:,:)
+    if(exx_freeze.or.scf_operator_damped)error stop 'CN teacher must be physical exact exchange'
+    call factor_materialize(info)
+    if(.not.allocated(ace%factors))error stop 'CN teacher missing dense ACE'
+    if(.not.allocated(ptcn_history))then
+      allocate(ptcn_history(info%numk));ptcn_history%interval=1
+      ptcn_history%n_teach=exx_factor_n_teach
+    endif
+    aligned=ace%factors
+    do k=1,info%numk
+      call history_accept(ptcn_history(k),aligned(:,:,k),system%hvol,step,sumgrid,status,aligngrid)
+      bad=abs(status);call comm_get_max(bad,info%icomm_rko)
+      if(bad/=0)error stop 'CN exact teacher alignment failed'
+    enddo
+    ace%factors=aligned
+  contains
+    subroutine sumgrid(a)
+      complex(8),intent(inout)::a(:,:)
+      complex(8)::total(size(a,1),size(a,2))
+      call comm_summation(a,total,size(a),info%icomm_ro);a=total
+    end subroutine
+    subroutine aligngrid(x,ref,status)
+      complex(8),intent(inout)::x(:,:)
+      complex(8),intent(in)::ref(:,:)
+      integer,intent(out)::status
+      if(distributed_metric_available(info%icomm_ro))then
+        call distributed_factor_align(x,ref,info%icomm_r,info%icomm_o,info%icomm_ro,status)
+      else
+        call factor_align(x,ref,sumgrid,status)
+      endif
+    end subroutine
+  end subroutine
+
+  subroutine exx_ptcn_predict_inner(system,info)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    complex(8),allocatable::prediction(:,:,:)
+    integer::k,status,bad
+    if(exx_factor_mode/='learned'.or.ptcn_attempted)return
+    ptcn_attempted=.true.
+    ! The first exact RHS action already installed H[u_n]; record only step zero.
+    if(.not.allocated(ptcn_history))call ptcn_collect_exact(system,info,0)
+    bad=count(.not.ptcn_history%ready);call comm_get_max(bad,info%icomm_rko)
+    if(bad/=0)return
+    prediction=ace%factors
+    bad=0
+    do k=1,info%numk
+      call history_predict(ptcn_history(k),1,prediction(:,:,k),status)
+      bad=max(bad,abs(status))
+    enddo
+    call comm_get_max(bad,info%icomm_rko)
+    if(bad/=0)return ! Collective exact-ACE fallback; never install a partial prediction.
+    ace%factors=prediction;ptcn_predicted=.true.
+    ! Invalidate the physical-source cache even if endpoint psi equals input psi.
+    ! The next fresh action MUST reconstruct physical exchange, not return a cache hit.
+    scf_operator_damped=.true.
+  end subroutine
+
+  subroutine exx_ptcn_accept(system,info)
+    type(s_dft_system),intent(in)::system
+    type(s_parallel_info),intent(in)::info
+    if(exx_factor_mode/='learned')return
+    ! Caller invokes only after fresh residual, Gram and electron gates succeeded.
+    call ptcn_collect_exact(system,info,ptcn_accepted_step+1)
+    ptcn_accepted_step=ptcn_accepted_step+1
+  end subroutine
+
+  subroutine exx_ptcn_report_step(step,info)
+    integer,intent(in)::step
+    type(s_parallel_info),intent(in)::info
+    if(propagator/='hse_ptcn')return
+    if(info%id_rko==0)write(*,'(a,i0,a,i0,a,l1)') &
+      'HSE_PT_CN_EXACT step=',step,' rebuilds=',exx_native_rebuilds-ptcn_rebuild_start, &
+      ' predicted=',ptcn_predicted
+  end subroutine
+
   subroutine exx_check_localization()
     implicit none
     if(dc_canonical())return
@@ -1029,6 +1132,7 @@ contains
     if(scf_operator_damped)ierr=1
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error==0)return
+    exx_native_rebuilds=exx_native_rebuilds+1
     scf_operator_damped=.false.
     allocate(w(ng,no,info%numk))
     if(propagator=='hse_taylor4_full')then
