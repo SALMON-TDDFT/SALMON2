@@ -63,12 +63,13 @@ def run(d,text,np):
   teams=[int(x) for log in logs for x in re.findall(r'WAVE_FFT_OMP_THREADS\s+(\d+)',log)]
   assert teams and all(x==a.threads for x in teams),(str(d),teams)
  return logs
-for label,np,groups in [('owners2',2,1),('helpers4',4,2),('helpers8',8,4)]:
+for label,np,groups in [('owners2',2,1),('helpers4',4,2),('helpers8',8,4),('helpers4auto',4,0),('helpers8auto',8,0),('helpers8default',8,None)]:
  gs=out/label/'gs';rt=out/label/'rt'
- text=base.replace('GROUPS',str(groups)).replace('THEORY','dft').replace('CONTROL',"write_gs_restart_data='wfn'").replace('FACTOR','off')
+ casebase=base if groups is not None else base.replace('exx_worker_rprime_groups=GROUPS,','')
+ text=casebase.replace('GROUPS',str(groups)).replace('THEORY','dft').replace('CONTROL',"write_gs_restart_data='wfn'").replace('FACTOR','off')
  logs=run(gs,text,np)
  energies=[float(x) for x in re.findall(r'Total Energy=\s*(\S+)',logs[0])];assert len(energies)==4,(label,energies)
- text=base.replace('GROUPS',str(groups)).replace('THEORY','tddft_response').replace('CONTROL',"directory_read_data='"+str(gs/'data_for_restart')+"/'").replace('FACTOR','learned')
+ text=casebase.replace('GROUPS',str(groups)).replace('THEORY','tddft_response').replace('CONTROL',"directory_read_data='"+str(gs/'data_for_restart')+"/'").replace('FACTOR','learned')
  logs=run(rt,text,np)
  flags=re.findall(r'FACTOR_HISTORY step/predicted:\s+\d+\s+([TF])',logs[0]);assert 'T' in flags and 'F' in flags,(label,flags)
  def table(path):

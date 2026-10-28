@@ -31,6 +31,7 @@ add_executable(soc_wave_worker_omp_probe
   ${PROJECT_SOURCE_DIR}/src/xc/exx_symmetry.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_spinor_wave_fft.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_spinor_wave_workers.f90 worker_probe.f90)
+target_sources(soc_wave_worker_omp_probe PRIVATE ${PROJECT_SOURCE_DIR}/src/xc/exx_worker_layout.f90)
 set(_worker_modules "${CMAKE_BINARY_DIR}/testsuite-probes/modules-457-worker")
 file(MAKE_DIRECTORY "${_worker_modules}")
 set_target_properties(soc_wave_worker_omp_probe PROPERTIES

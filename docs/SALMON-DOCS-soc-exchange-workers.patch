@@ -2,7 +2,7 @@ diff --git a/source/soc_exchange_workers.rst b/source/soc_exchange_workers.rst
 new file mode 100644
 --- /dev/null
 +++ b/source/soc_exchange_workers.rst
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,36 @@
 +SOC exchange MPI workers
 +========================
 +
@@ -16,12 +16,21 @@ new file mode 100644
 +supports static GS only; it does not enable empty-k SCF or RT workers.
 +Omitting ``nproc_k`` retains ordinary decomposition.
 +
-+``exx_worker_tile_divisor`` (integer, default 16) and
-+``exx_worker_rprime_groups`` (integer, default 1) belong to ``&functional``.
-+Both must be positive; the rprime group count must divide the total MPI
-+rank count. Normally leave these controls at their defaults. Historical
-+worker environment variables are not read. Unsupported helper layouts,
-+including band unfolding, are rejected before workers enter their loop.
++``exx_worker_tile_divisor`` and ``exx_worker_rprime_groups`` (integers,
++both default 0) belong to ``&functional``. Zero selects automatic layout;
++positive values retain manual control. Negative values are invalid. A
++positive rprime group count must divide the total exchange MPI rank count.
++The selector uses the actual symmetry-reduced r representative count and
++all rprime grid points, independently of k-point ownership. It enumerates
++rank factorizations and minimizes the maximum cumulative grid-pair work,
++then maximizes active ranks; ties use fewer column groups. Row batches and
++column chunks retain the 64 MiB density scratch cap. A zero tile divisor
++follows the selected column group count. This is a work-balance model, not
++a guarantee of optimal communication time. Selected geometry and workload
++are printed in ``WAVE_BATCH_ROWS_COLUMNS_GROUPS`` and
++``WAVE_LAYOUT_R_RPRIME_PEAK_ACTIVE``. Historical worker environment
++variables are not read. Unsupported helper layouts, including band
++unfolding, are rejected before workers enter their loop.
 +
 +``exx_k_algorithm='auto'`` now selects full spinor pairs for eligible native
 +CPU full-q SOC HSE06; unsupported backends retain reference selection.

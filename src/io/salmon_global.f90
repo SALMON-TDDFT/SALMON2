@@ -159,8 +159,8 @@ module salmon_global
   character(1) :: yn_hse_solver_diagnostic
   character(1) :: yn_hse_wannier_snapshot
   integer :: hse_q_reduction(3)
-  integer :: exx_worker_tile_divisor ! bounded exchange worker scratch divisor
-  integer :: exx_worker_rprime_groups ! number of column subgroups in exchange service
+  integer :: exx_worker_tile_divisor ! bounded scratch divisor; 0 follows chosen column groups
+  integer :: exx_worker_rprime_groups ! column subgroups; 0 selects symmetry-aware balanced layout
   integer :: hse_block_rows
   character(64) :: hse_fft_layout
   character(256) :: hse_reference_export_directory

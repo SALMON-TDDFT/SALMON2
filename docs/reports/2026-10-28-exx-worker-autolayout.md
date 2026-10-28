@@ -1,0 +1,15 @@
+# Symmetry-aware worker layout validation
+
+The user approved automatic factor enumeration on 2026-10-28. Zero or omitted worker controls now select a layout from the actual symmetry-reduced r count and full r-prime count. Positive controls remain explicit overrides. The objective is maximum cumulative grid-pair work, then active ranks, then fewer column groups; communication-optimal performance is not claimed.
+
+GNU MPI/OpenMP full application and scalar/SOC worker probes built successfully. Source and all linked application objects passed the mandatory forbidden-eigensolver checks, including CMake's retained build/link guards. No new IEEE inquiries were introduced. The integer layout module uses 64-bit counts and bounds each density tile by the existing 64 MiB cap.
+
+RED: the new automatic-mode scalar action test compiled against the previous implementation, then rejected `tile_divisor=0,rprime_group_count=0` with `AUTO_LAYOUT_REJECTED`/MPI abort 14. GREEN: 2/4/8-rank action tests pass, as do scalar NaN/Inf and one-rank negative/mismatched settings rejection. SOC 2/4-rank action comparisons pass. The independent literal-loop oracle passes 173 cases covering production geometries, primes, partial tiles, manual overrides, memory caps, invalid values and 64-bit work counts.
+
+Seven registered focused tests pass. A further native GS(4 SCF)/learned RT(32 steps) regression includes explicit 2/4/8-rank layouts, automatic 4/8-rank layouts and an 8-rank case omitting both controls. All child exits are zero; automatic/default current difference versus two-owner reference is at most 6.084e-17 au, energy at most 1.066e-13 Ha, eigenvalues at most 3.298e-14 Ha. Every learned case records 12 predicted and 20 exact steps and 32 owner SVD records; maximum residual is 4.024e-15. Unsupported no-symmetry/full-Taylor helper routes still reject. This is a short code-path comparison, not converged GS or long-time physical accuracy acceptance.
+
+Test build: `/tmp/exx-autolayout-20261028/full`; executable SHA256 `ce70e71517803162dbaf6ab2e46604f4d88bd1a6de2aea19a8174bd5e2bc0505`. Logs and summary are retained separately under the canonical calc2026 results directory. Read-only whole-change review found no critical or important issue.
+
+Remote job 52847533 remained QUE/unstarted during its explicit equivalent change from row80/column16/tile16 to row16/column80/tile80: maximum per-rank grid pairs 768 -> 572, all 671744 pairs covered. Its validated binary, job ID, GS dependencies and physical conditions remain unchanged; strict static and GS SHA checks pass before/after. Job 52911342 retains its separately corrected row27/column1024/tile1024 configuration. Running Nr20 52847537 is unchanged.
+
+Fujitsu compilation, production-sized runtime speed and remote deployment of the new automatic executable are not verified. Existing production binaries were not replaced. Their positive input settings do not activate the new automatic code. No new scheduler operation was performed for this implementation. No GS/restart/checkpoint/wavefunction payload was collected and cloud synchronization is unverified.

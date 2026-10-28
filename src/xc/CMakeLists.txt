@@ -22,7 +22,7 @@ if(NOT USE_HSE)
 endif()
 
 if(USE_HSE AND USE_MPI)
-  list(APPEND SOURCES exx_spinor_wave_fft.f90 exx_spinor_wave_workers.f90 exx_worker_service.f90)
+  list(APPEND SOURCES exx_worker_layout.f90 exx_spinor_wave_fft.f90 exx_spinor_wave_workers.f90 exx_worker_service.f90)
 endif()
 
 if(USE_HSE)

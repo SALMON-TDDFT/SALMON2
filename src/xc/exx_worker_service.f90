@@ -52,7 +52,7 @@ contains
  call MPI_Comm_size(MPI_COMM_WORLD,worldsize,e)
  settings=[owner_ranks,tile_divisor,rprime_group_count]
  bad=0
- if(owner_ranks<1.or.owner_ranks>worldsize.or.tile_divisor<1.or.rprime_group_count<1)bad=1
+ if(owner_ranks<1.or.owner_ranks>worldsize.or.tile_divisor<0.or.rprime_group_count<0)bad=1
  if(rprime_group_count>0)then
    if(modulo(worldsize,rprime_group_count)/=0)bad=1
  endif

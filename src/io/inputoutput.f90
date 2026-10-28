@@ -805,8 +805,8 @@ contains
     yn_hse_wannier_snapshot = 'n'
     hse_q_reduction = 1
     hse_block_rows = 0
-    exx_worker_tile_divisor = 16
-    exx_worker_rprime_groups = 1
+    exx_worker_tile_divisor = 0
+    exx_worker_rprime_groups = 0
     hse_fft_layout = 'auto'
     hse_reference_export_directory = 'none'
     alibx = 'none'
@@ -3503,8 +3503,8 @@ contains
         error stop 'HSE: q reduction requires non-DC integer full-k CPU exchange without spatial localization'
     endif
     if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
-    if(exx_worker_tile_divisor<1)error stop 'HSE: exx_worker_tile_divisor must be positive'
-    if(exx_worker_rprime_groups<1)error stop 'HSE: exx_worker_rprime_groups must be positive'
+    if(exx_worker_tile_divisor<0)error stop 'HSE: exx_worker_tile_divisor must be nonnegative (0=automatic)'
+    if(exx_worker_rprime_groups<0)error stop 'HSE: exx_worker_rprime_groups must be nonnegative (0=automatic)'
     if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
       error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
     if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'

@@ -9,6 +9,7 @@ module exx_spinor_wave_workers
  use exx_spinor_wave_fft,only:wave_fft_plans,wave_fft_create,wave_fft_execute,wave_fft_destroy
  use exx_k_exchange,only:exx_k_kernel
  use exx_symmetry,only:s_exx_symmetry_map,symmetry_spin_rotation
+ use exx_worker_layout,only:choose_worker_layout
  implicit none
  private
  include 'fftw3.f03'
@@ -31,6 +32,7 @@ contains
  integer::settings(14),expected_settings(14)
  integer::column_groups,row_groups,row_rank,column_rank,group_col,column_base,col_g,ncols_g, &
  ksource,delta(3),idx(3),cc(3),source_g,global_k,ii
+ integer(int64)::peak_pairs,active_ranks
  integer,allocatable::forward(:,:),wrap(:,:,:),owner(:),operation(:),first(:),kperm(:,:),lookup(:),inverse(:)
  integer,allocatable::repstarts(:),repcounts(:),widths(:),dest(:),dr(:),destcounts(:),displs(:),alldest(:)
  integer,allocatable::datacounts(:),datadispls(:),expected_layout(:)
@@ -102,14 +104,14 @@ contains
  if(starts(rank+1)/=map%first(rep_start))bad=1
  if(counts(rank+1)/=map%first(rep_start+size(target,3))-map%first(rep_start))bad=1
  endif
- divisor=16
+ divisor=0
  if(present(tile_divisor))divisor=tile_divisor
- if(divisor<1)bad=1
+ if(divisor<0)bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
- column_groups=1
+ column_groups=0
  if(present(rprime_group_count))column_groups=rprime_group_count
- if(column_groups<1)bad=1
+ if(column_groups<0)bad=1
  if(column_groups>0)then
  if(modulo(np,column_groups)/=0)bad=1
  endif
@@ -118,8 +120,6 @@ contains
  if(any(settings/=expected_settings))bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
- row_groups=np/column_groups;row_rank=rank/column_groups;column_rank=modulo(rank,column_groups)
- chunk=1+(ng-1)/divisor
  allocate(forward(ng,nsym),wrap(3,ng,nsym),owner(ng),operation(ng),first(ng),gauge(ng,nsym),spin(nc,nc,nsym))
  length=map%n*map%h;pi=acos(-1d0);k0=map%full_k(:,1)
  do s=1,nsym
@@ -161,14 +161,13 @@ contains
  scaled=(v-k0)*length*op%mesh/(2*pi);idx=modulo(nint(scaled),op%mesh)
  j=1+idx(1)+op%mesh(1)*(idx(2)+op%mesh(2)*idx(3));kperm(i,s)=lookup(j)
  enddo;enddo
- ! Batch more orbit rows to reuse column/target transfers, while bounding four-spin rho.
- b=max(1,min(16,1+(nfirst-1)/row_groups))
- ! Refuse if even the minimum single-pair four-spin rho cannot fit the declared cap.
- if(int(nk,int64)*(16*nc*nc)>67108864_int64)bad=1
+ ! Select only after counting actual symmetry-reduced r rows. K ownership is independent.
+ call choose_worker_layout(nfirst,ng,nk,nc,np,column_groups,divisor, &
+  row_groups,ii,b,chunk,peak_pairs,active_ranks,bad)
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
- b=min(b,int(67108864_int64/(int(nk,int64)*(16*nc*nc))))
- chunk=max(1,min(chunk,int(67108864_int64/(int(b,int64)*nk*nc*nc*16))))
+ column_groups=ii;row_rank=rank/column_groups;column_rank=modulo(rank,column_groups)
+ if(rank==0)print *,'WAVE_LAYOUT_R_RPRIME_PEAK_ACTIVE',nfirst,ng,peak_pairs,active_ranks
  if(rank==0)print *,'WAVE_BATCH_ROWS_COLUMNS_GROUPS',b,chunk,row_groups,column_groups
  ndmax=b*nsym
  allocate(rowbuf(row_groups*b,widthmax,nc),rowwf(b,widthmax,nk,nc),colbuf(chunk,widthmax,nc),tbuf(chunk,nt,nc))

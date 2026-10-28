@@ -4,6 +4,7 @@ add_executable(collinear_worker_probe
   ${PROJECT_SOURCE_DIR}/src/xc/exx_k_exchange.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_symmetry.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_spinor_wave_fft.f90
+  ${PROJECT_SOURCE_DIR}/src/xc/exx_worker_layout.f90
   ${PROJECT_SOURCE_DIR}/src/xc/exx_spinor_wave_workers.f90 worker_probe.f90)
 set(_worker_modules "${CMAKE_BINARY_DIR}/testsuite-probes/modules-462-worker")
 file(MAKE_DIRECTORY "${_worker_modules}")
@@ -19,6 +20,17 @@ foreach(_np 2 4 8)
  set_tests_properties(462_collinear_worker_${_np} PROPERTIES TIMEOUT 60 PROCESSORS ${_np}
   LABELS "hybrid;collinear;openmp;mpi" ENVIRONMENT "OMP_NUM_THREADS=4;OMP_DYNAMIC=FALSE;OPENBLAS_NUM_THREADS=1")
 endforeach()
+
+add_executable(worker_layout_probe ${PROJECT_SOURCE_DIR}/src/xc/exx_worker_layout.f90 layout_probe.f90)
+set(_layout_modules "${CMAKE_BINARY_DIR}/testsuite-probes/modules-462-layout")
+file(MAKE_DIRECTORY "${_layout_modules}")
+set_target_properties(worker_layout_probe PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testsuite-probes"
+  Fortran_MODULE_DIRECTORY "${_layout_modules}")
+salmon_guard_eigensolver_target(worker_layout_probe)
+add_test(NAME 462_worker_layout_oracle COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/test_layout.py
+  --binary $<TARGET_FILE:worker_layout_probe>)
+set_tests_properties(462_worker_layout_oracle PROPERTIES TIMEOUT 60 LABELS "hybrid;layout")
 
 add_test(NAME 462_collinear_native_gs_rt
  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/verify_native.py

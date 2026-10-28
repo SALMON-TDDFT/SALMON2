@@ -87,7 +87,8 @@ contains
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.hse_sr_radius==0d0.and.hse_sr_tolerance==0d0.and. &
       al_vec1(2)==0d0.and.al_vec1(3)==0d0.and.al_vec2(1)==0d0.and. &
       al_vec2(3)==0d0.and.al_vec3(1)==0d0.and.al_vec3(2)==0d0
-    supported=supported.and.modulo(nproc_size_global,exx_worker_rprime_groups)==0
+    if(exx_worker_rprime_groups>0) &
+      supported=supported.and.modulo(nproc_size_global,exx_worker_rprime_groups)==0
     bad=merge(0,1,supported)
     call MPI_Allreduce(bad,total_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
     if(total_bad/=0)then

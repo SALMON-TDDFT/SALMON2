@@ -52,6 +52,15 @@ program worker_probe
  diff=maxval(abs(action-ref));if(repcount==0)diff=0
  call MPI_Allreduce(diff,totaldiff,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,rc)
  if(.not.ieee_is_finite(totaldiff).or.totaldiff>1d-11)call MPI_Abort(MPI_COMM_WORLD,8,rc)
+ ! Automatic scalar/SOC layout must preserve the explicit exchange action.
+ call apply_wave_workers(op,map,local_es,target,action,starts,counts,rep,rank,MPI_COMM_WORLD,err, &
+ metrics(1),metrics(2),metrics(3),metrics(4),metrics(5),tile_divisor=0,rprime_group_count=0)
+ if(err/=0)call MPI_Abort(MPI_COMM_WORLD,14,rc)
+ diff=0
+ if(repcount>0)diff=maxval(abs(action-ref))
+ call MPI_Allreduce(diff,totaldiff,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,rc)
+ if(.not.ieee_is_finite(totaldiff).or.totaldiff>1d-10)call MPI_Abort(MPI_COMM_WORLD,15,rc)
+ if(rank==0)print *,'AUTO_LAYOUT_SOC_ACTION_PASS',np,totaldiff
  ! Existing worker collective finite guards must still reject source NaN and Inf.
  do mode=1,2
  if(rank==0)then
