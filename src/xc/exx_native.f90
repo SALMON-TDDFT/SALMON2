@@ -300,7 +300,7 @@ contains
         factor_learned=exx_factor_mode=='learned'
 
         if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
-          propagator/='hse_taylor4'.or.yn_predictor_corrector/='y'.or. &
+          propagator/='hse_taylor4'.or. &
           (product(num_kgrid)==1.and.hse_sr_tolerance<0d0).or. &
           (product(num_kgrid)>1.and.hse_sr_tolerance/=0d0).or. &
           exx_mlwf_radius/=0d0.or. &

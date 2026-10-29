@@ -3634,8 +3634,8 @@ contains
           error stop 'Learned CN requires fresh static integer native CPU dense-k HSE with full support'
       else
         if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
-           propagator/='hse_taylor4'.or.yn_predictor_corrector/='y') &
-          error stop 'Factor history requires native static HSE Taylor4 predictor-corrector or certified learned CN'
+           propagator/='hse_taylor4') &
+          error stop 'Factor history requires native static HSE Taylor4 or certified learned CN'
       endif
     endif
     if(yn_ace_shadow_diagnostic=='y'.or.yn_ace_export_factors=='y')then
@@ -3913,8 +3913,8 @@ contains
         if(propagator=='hse_ptcn')then
           if(yn_predictor_corrector=='y')error stop 'HSE06 PT-CN requires no external predictor-corrector'
         else
-          if(n_hamil/=4.or.yn_predictor_corrector/='y') &
-            error stop 'HSE Taylor4 requires n_hamil=4 and predictor-corrector'
+          if(n_hamil/=4) &
+            error stop 'HSE Taylor4 requires n_hamil=4'
         endif
       else if(theory/='dft'.and..not.(theory=='dft_md'.and.xc/='hse06'))then
         error stop 'Hybrid: unsupported calculation theory'
