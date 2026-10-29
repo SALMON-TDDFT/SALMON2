@@ -61,6 +61,23 @@ program worker_probe
  call MPI_Allreduce(diff,totaldiff,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,rc)
  if(.not.ieee_is_finite(totaldiff).or.totaldiff>1d-10)call MPI_Abort(MPI_COMM_WORLD,15,rc)
  if(rank==0)print *,'AUTO_LAYOUT_SOC_ACTION_PASS',np,totaldiff
+ ! Opt-in balanced strips reject insufficient ranks and otherwise reproduce the same action.
+ call apply_wave_workers(op,map,local_es,target,action,starts,counts,rep,rank,MPI_COMM_WORLD,err, &
+ metrics(1),metrics(2),metrics(3),metrics(4),metrics(5),balanced_pairs=.true.)
+ if(np<8)then
+ if(err==0)call MPI_Abort(MPI_COMM_WORLD,20,rc)
+ else
+ if(err/=0)call MPI_Abort(MPI_COMM_WORLD,21,rc)
+ diff=0
+ if(repcount>0)diff=maxval(abs(action-ref))
+ call MPI_Allreduce(diff,totaldiff,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,rc)
+ if(.not.ieee_is_finite(totaldiff).or.totaldiff>1d-10)call MPI_Abort(MPI_COMM_WORLD,22,rc)
+ if(rank==0)print *,'BALANCED_STRIP_ACTION_PASS',np,totaldiff
+ endif
+ ! Mixed opt-in flags must reject on every rank, before point-to-point traffic.
+ call apply_wave_workers(op,map,local_es,target,action,starts,counts,rep,rank,MPI_COMM_WORLD,err, &
+ metrics(1),metrics(2),metrics(3),metrics(4),metrics(5),balanced_pairs=rank==0)
+ if(err==0)call MPI_Abort(MPI_COMM_WORLD,23,rc)
  ! Existing worker collective finite guards must still reject source NaN and Inf.
  do mode=1,2
  if(rank==0)then
@@ -70,6 +87,9 @@ program worker_probe
  call apply_wave_workers(op,map,local_es,target,action,starts,counts,rep,rank,MPI_COMM_WORLD,err, &
  metrics(1),metrics(2),metrics(3),metrics(4),metrics(5))
  if(err==0)call MPI_Abort(MPI_COMM_WORLD,9,rc)
+ call apply_wave_workers(op,map,local_es,target,action,starts,counts,rep,rank,MPI_COMM_WORLD,err, &
+ metrics(1),metrics(2),metrics(3),metrics(4),metrics(5),balanced_pairs=.true.)
+ if(err==0)call MPI_Abort(MPI_COMM_WORLD,24,rc)
  enddo
  if(rank==0)print *,'WAVE_WORKER_OMP_ACTION_PASS',np,totaldiff,' FINITE_REJECTION_PASS'
  call exx_k_kernel_destroy(op)

@@ -40,7 +40,7 @@ set_target_properties(soc_wave_worker_omp_probe PROPERTIES
 target_include_directories(soc_wave_worker_omp_probe BEFORE PRIVATE "${_worker_modules}" "${HSE_FFTW_INCLUDE}")
 target_link_libraries(soc_wave_worker_omp_probe PRIVATE ${EXTERNAL_LIBS})
 salmon_guard_eigensolver_target(soc_wave_worker_omp_probe)
-foreach(_np 2 4)
+foreach(_np 2 4 8 16 33)
  add_test(NAME 457_soc_wave_worker_omp_${_np} COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} ${_np}
   $<TARGET_FILE:soc_wave_worker_omp_probe>)
  set_tests_properties(457_soc_wave_worker_omp_${_np} PROPERTIES TIMEOUT 60 PROCESSORS ${_np}

@@ -1,7 +1,7 @@
 """Minimal scalar GS/learned RT ownership regression; not converged production acceptance."""
 from pathlib import Path
 import argparse,os,subprocess,sys,json,time,re,itertools,math
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--output',required=True);p.add_argument('--pseudo',required=True);p.add_argument('--threads',type=int,default=2);p.add_argument('--unique-output',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--output',required=True);p.add_argument('--pseudo',required=True);p.add_argument('--threads',type=int,default=2);p.add_argument('--unique-output',action='store_true');p.add_argument('--balanced',action='store_true');a=p.parse_args()
 out=Path(a.output).resolve()
 if a.unique_output:out=out/('run-'+str(time.time_ns()))
 out.mkdir(parents=True,exist_ok=False);exe=Path(a.binary).resolve();pp=Path(a.pseudo).resolve()
@@ -63,7 +63,10 @@ def run(d,text,np):
   teams=[int(x) for log in logs for x in re.findall(r'WAVE_FFT_OMP_THREADS\s+(\d+)',log)]
   assert teams and all(x==a.threads for x in teams),(str(d),teams)
  return logs
-for label,np,groups in [('owners2',2,1),('helpers4',4,2),('helpers8',8,4),('helpers4auto',4,0),('helpers8auto',8,0),('helpers8default',8,None)]:
+layouts=[('owners2',2,1),('helpers4',4,2),('helpers8',8,4),('helpers4auto',4,0),('helpers8auto',8,0),('helpers8default',8,None)]
+if a.balanced:layouts=[('owners2',2,1),('helpers41balanced',41,0)]
+for label,np,groups in layouts:
+ env['SALMON_EXX_WORKER_BALANCED_PAIRS']='1' if label.endswith('balanced') else '0'
  gs=out/label/'gs';rt=out/label/'rt'
  casebase=base if groups is not None else base.replace('exx_worker_rprime_groups=GROUPS,','')
  text=casebase.replace('GROUPS',str(groups)).replace('THEORY','dft').replace('CONTROL',"write_gs_restart_data='wfn'").replace('FACTOR','off')
@@ -104,6 +107,7 @@ for label,np,groups in [('owners2',2,1),('helpers4',4,2),('helpers8',8,4),('help
    diff=max(abs(x-y) for ra,rb in zip(aa,bb) for x,y in zip(ra,rb));assert diff<tol,(label,key,diff)
    report[label][key+'_maxabs']=diff
  (out/'summary.json').write_text(json.dumps(report,indent=2))
+env['SALMON_EXX_WORKER_BALANCED_PAIRS']='0'
 for label,old,new in [('reject-no-symmetry',"yn_symmetry='yyn'","yn_symmetry='nnn'"),
                       ('reject-rt-full',"propagator='hse_taylor4'","propagator='hse_taylor4_full'")]:
  d=out/label;d.mkdir()

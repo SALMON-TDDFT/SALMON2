@@ -3,7 +3,7 @@ module exx_worker_layout
  use iso_fortran_env,only:int64
  implicit none
  private
- public::choose_worker_layout
+ public::choose_worker_layout,choose_balanced_strips
  integer(int64),parameter::density_cap=67108864_int64
 contains
  subroutine choose_worker_layout(nfirst,ng,nk,nc,np,requested_groups,requested_divisor, &
@@ -60,6 +60,47 @@ contains
  peak_pairs=work;active_ranks=active
  end subroutine consider
  end subroutine choose_worker_layout
+
+ subroutine choose_balanced_strips(nfirst,ng,nk,nc,np,row_index,col_start,col_count, &
+  group_id,leaders,groups,chunk,peak_pairs,active_ranks,ierr)
+ implicit none
+ integer,intent(in)::nfirst,ng,nk,nc,np
+ integer,intent(out)::row_index(:),col_start(:),col_count(:),group_id(:),leaders(:),groups,chunk,ierr
+ integer(int64),intent(out)::peak_pairs,active_ranks
+ integer::q,extra,r,fanout,j,k,offset,idbase,small,large
+ integer(int64)::pair_bytes
+ ierr=1;groups=0;chunk=0;peak_pairs=0;active_ranks=0
+ row_index=0;col_start=0;col_count=0;group_id=0;leaders=0
+ if(min(nfirst,ng,nk,np)<1.or.(nc/=1.and.nc/=2))return
+ if(min(size(row_index),size(col_start),size(col_count),size(group_id),size(leaders))<np)return
+ if(np<nfirst)return
+ q=np/nfirst;extra=modulo(np,nfirst)
+ if(q+merge(1,0,extra>0)>ng)return
+ pair_bytes=int(nk,int64)*16_int64*nc*nc
+ offset=0
+ do r=1,nfirst
+  fanout=q+merge(1,0,r<=extra)
+  idbase=0
+  if(r>extra.and.extra>0)idbase=q+1
+  do j=0,fanout-1
+   k=offset+j+1
+   row_index(k)=r
+   ! Quotient/remainder partition without default-integer products of grid/rank counts.
+   col_count(k)=ng/fanout+merge(1,0,j<modulo(ng,fanout))
+   col_start(k)=1+j*(ng/fanout)+min(j,modulo(ng,fanout))
+   group_id(k)=idbase+j
+   if(r==1.or.r==extra+1)leaders(idbase+j+1)=k-1
+  enddo
+  offset=offset+fanout
+ enddo
+ groups=q
+ if(extra>0)groups=2*q+1
+ if(extra==nfirst)groups=q+1
+ small=minval(col_count(:np));large=maxval(col_count(:np))
+ if(small<1.or.large-small>1)return
+ if(int(large,int64)>density_cap/pair_bytes)return
+ chunk=large;peak_pairs=int(large,int64);active_ranks=int(np,int64);ierr=0
+ end subroutine choose_balanced_strips
 
  pure function axis_max(points,groups,block) result(count)
  implicit none
