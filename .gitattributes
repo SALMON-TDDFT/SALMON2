@@ -1,0 +1,3 @@
+# Internal validation drivers are not part of public source archives.
+/tools/development-tests export-ignore
+/tools/development-tests/** export-ignore

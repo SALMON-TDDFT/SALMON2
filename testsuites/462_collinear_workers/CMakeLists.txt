@@ -28,17 +28,6 @@ set_target_properties(worker_layout_probe PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testsuite-probes"
   Fortran_MODULE_DIRECTORY "${_layout_modules}")
 salmon_guard_eigensolver_target(worker_layout_probe)
-add_test(NAME 462_worker_layout_oracle COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/test_layout.py
-  --binary $<TARGET_FILE:worker_layout_probe>)
-set_tests_properties(462_worker_layout_oracle PROPERTIES TIMEOUT 60 LABELS "hybrid;layout")
-
-add_test(NAME 462_collinear_native_gs_rt
- COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/verify_native.py
- --binary $<TARGET_FILE:${TARGET_NAME}>
- --output ${CMAKE_CURRENT_BINARY_DIR}/native --unique-output
- --pseudo ${PROJECT_SOURCE_DIR}/testsuites/pseudo/Si_rps.dat --threads 2)
-set_tests_properties(462_collinear_native_gs_rt PROPERTIES TIMEOUT 600 PROCESSORS 16
- LABELS "hybrid;collinear;openmp;mpi;native")
 
 add_executable(balanced_strip_probe ${PROJECT_SOURCE_DIR}/src/xc/exx_worker_layout.f90 balanced_probe.f90)
 set(_balanced_modules "${CMAKE_BINARY_DIR}/testsuite-probes/modules-462-balanced")
@@ -46,6 +35,13 @@ file(MAKE_DIRECTORY "${_balanced_modules}")
 set_target_properties(balanced_strip_probe PROPERTIES
  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testsuite-probes" Fortran_MODULE_DIRECTORY "${_balanced_modules}")
 salmon_guard_eigensolver_target(balanced_strip_probe)
-add_test(NAME 462_balanced_strip_oracle COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/test_balanced.py
- --binary $<TARGET_FILE:balanced_strip_probe>)
-set_tests_properties(462_balanced_strip_oracle PROPERTIES TIMEOUT 60 LABELS "hybrid;layout;balanced")
+
+# Python-based development checks are opt-in and absent from public source archives.
+option(SALMON_ENABLE_DEVELOPMENT_TESTS "Enable development regression checks" OFF)
+set(_development_tests "${PROJECT_SOURCE_DIR}/tools/development-tests/462_collinear_workers")
+if(SALMON_ENABLE_DEVELOPMENT_TESTS)
+ if(NOT EXISTS "${_development_tests}/CMakeLists.txt")
+  message(FATAL_ERROR "Development tests are unavailable in this source distribution")
+ endif()
+ add_subdirectory("${_development_tests}" "${CMAKE_CURRENT_BINARY_DIR}/development")
+endif()
