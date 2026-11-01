@@ -279,3 +279,12 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND NOT USE_OPENACC)
   endif()
   set_tests_properties(nc_mgga23_core_helpers ky_core23_invalid_inputs PROPERTIES TIMEOUT 90 LABELS "xc;soc;nlcc;unit")
 endif()
+
+# Deterministic rank timing fixtures exercise the production performance logger.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND USE_MPI AND NOT USE_OPENACC)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME perflog_zero_timer
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_perflog/run.py
+      --compiler ${MPI_Fortran_COMPILER} --mpiexec ${MPIEXEC_EXECUTABLE})
+  set_tests_properties(perflog_zero_timer PROPERTIES LABELS "timer;mpi;unit" TIMEOUT 120)
+endif()
