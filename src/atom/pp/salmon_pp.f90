@@ -73,6 +73,7 @@ module salmon_pp
     allocate(pp%num_orb(nelem)); pp%num_orb=0
     allocate(pp%has_rho_pp(nelem)); pp%has_rho_pp=.false.
     allocate(pp%has_wf_pp(nelem)); pp%has_wf_pp=.false.
+    allocate(pp%has_pseudo_wf(nelem)); pp%has_pseudo_wf=.false.
     allocate(pp%has_proj_pp(nelem)); pp%has_proj_pp=.false.
 
     if (comm_is_root(nproc_id_global)) then
@@ -265,6 +266,8 @@ module salmon_pp
     pp%vpp=0d0; pp%upp=0d0
     allocate(pp%dvpp(0:nrmax0,0:2*lmax0+2),pp%dupp(0:nrmax0,0:2*lmax0+1))
     allocate(pp%vpp_f(0:nrmax0,0:2*lmax0+2,nelem),pp%upp_f(0:nrmax0,0:2*lmax0+1,nelem))
+    allocate(pp%pseudo_wf_eigval(0:2*lmax0+1,nelem)); pp%pseudo_wf_eigval=0d0
+    allocate(pp%pseudo_wf_occup(0:2*lmax0+1,nelem)); pp%pseudo_wf_occup=0d0
 
     allocate( pp%anorm_so(0:2*lmax+1,nelem) ); pp%anorm_so=0.0d0
     allocate( pp%inorm_so(0:2*lmax+1,nelem) ); pp%inorm_so=0
