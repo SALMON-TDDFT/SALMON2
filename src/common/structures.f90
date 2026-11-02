@@ -265,7 +265,8 @@ module structures
     real(8),allocatable :: pseudo_wf_rho(:,:)  ! charge density pseudo_wf(:,l,ik)
     real(8),allocatable :: rho_nlcc_tbl(:,:) ! nonlinear core charge density for each element
     real(8),allocatable :: tau_nlcc_tbl(:,:) ! NLCC kinetic-energy density correction, (rho_c')^2/(4*rho_c)
-    real(8),allocatable :: upp_f(:,:,:) ! per-element copy of upp used by PDOS
+    ! Scheduled for deprecation; retained for temporary PAW input storage and legacy consumers.
+    real(8),allocatable :: upp_f(:,:,:) ! legacy per-element copy of upp
     real(8),allocatable :: vpp_f(:,:,:) ! per-element copy of vpp used for isolated-system local potentials
     real(8),allocatable :: vpp_f_so(:,:,:) ! spin-orbit potential copy (currently unused)
     real(8),allocatable :: upp(:,:) ! working pseudo wavefunctions u_l(r)=r*R_l(r)
@@ -279,6 +280,9 @@ module structures
     real(8),allocatable :: rps_ao(:) ! radial cutoff for DFT+U atomic orbitals
     integer,allocatable :: nrps_ao(:) ! radial endpoint for DFT+U atomic orbitals
     real(8),allocatable :: upptbl_ao(:,:,:) ! pseudo wavefunctions tabulated for DFT+U
+    ! Atomic-orbital radial factor c_l*u_l(r)/r**(l+1), c_l=sqrt((2*l+1)/(4*pi)), for r>0.
+    ! Indexed by (ir,l,ik): rad(ir,ik), angular momentum l (not projector number), element ik.
+    real(8),allocatable :: upptbl_ao_l(:,:,:)
     real(8),allocatable :: dupptbl_ao(:,:,:) ! derivatives of the DFT+U pseudo-wavefunction table (unused)
   end type s_pp_info
 
@@ -797,6 +801,7 @@ contains
     DEAL(pp%rho_nlcc_tbl)
     DEAL(pp%tau_nlcc_tbl)
     DEAL(pp%upp_f)
+    DEAL(pp%upptbl_ao_l)
     DEAL(pp%vpp_f)
     DEAL(pp%upp)
     DEAL(pp%dupp)
