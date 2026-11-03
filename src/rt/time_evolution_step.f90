@@ -455,6 +455,18 @@ contains
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+    if(iperiodic==0 .and. ihpsieff==1) then
+!$OMP parallel do collapse(3) private(is,iz,iy,ix)
+      do is=1,nspin
+      do iz=mg%is(3),mg%ie(3)
+      do iy=mg%is(2),mg%ie(2)
+      do ix=mg%is(1),mg%ie(1)
+        V_local(is)%f(ix,iy,iz) = V_local(is)%f(ix,iy,iz) + Vbox%f(ix,iy,iz)
+      end do
+      end do
+      end do
+      end do
+    end if
     
     !$omp workshare
     V_local(1)%f = 0.5d0* ( V_tmp(:,:,:,1) + V_local(1)%f )
