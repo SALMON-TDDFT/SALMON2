@@ -666,16 +666,14 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
       end if
     else
     ! qnm (off-diagonal part)
-      sbe%dqnm_stock(ib, jb, ik, am_s) = - sbe%qnm(ib, jb, ik)/t_2
+      sbe%dqnm_stock(ib, jb, ik, am_s) = - sbe%qnm(ib, jb, ik)/t_2 &
+        & - zi * gs%delta_omega(ib, jb, ik) * sbe%qnm(ib, jb, ik)
       if(abs_E >= 1.d-13) then
         sbe%dqnm_stock(ib, jb, ik, am_s) = &
           & sbe%dqnm_stock(ib, jb, ik, am_s) + &
           & E(1) * sbe%grad_qnm(ib, jb, 1, ik) + &
           & E(2) * sbe%grad_qnm(ib, jb, 2, ik) + &
           & E(3) * sbe%grad_qnm(ib, jb, 3, ik)
-        sbe%dqnm_stock(ib, jb, ik, am_s) = &
-          & sbe%dqnm_stock(ib, jb, ik, am_s) - &
-          & zi * gs%delta_omega(ib, jb, ik) * sbe%qnm(ib, jb, ik)
         sbe%dqnm_stock(ib, jb, ik, am_s) = &
           & sbe%dqnm_stock(ib, jb, ik, am_s) - &
           & zi * (E(1) * shift_vector(1) + &
