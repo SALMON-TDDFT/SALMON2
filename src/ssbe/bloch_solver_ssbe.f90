@@ -510,7 +510,7 @@ subroutine prepare_qnm(sbe, gs, icomm)
     sbe%qnm_new(ib, jb, ik) = 0.d0
     dnm(ib, jb, ik)=0.d0
     sbe%abs_dnm(ib, jb, ik)=0.d0
-    sbe%exp_iphi(ib, jb, ik)=0.d0
+    sbe%exp_iphi(ib, jb, ik)=(1d0,0d0)
   end do
   end do
   end do
@@ -729,6 +729,7 @@ subroutine dt_evolve_bloch_lg(sbe, gs, E, bj_am, dt, icomm)
 end subroutine dt_evolve_bloch_lg
 
 subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
+    ! Interband part: Re[rho_ji v_ij] per Cartesian component, rho_ji = exp_iphi_ji * qnm_ji.
     implicit none
     type(s_sbe_bloch_solver), intent(in) :: sbe
     type(s_sbe_gs_info), intent(in) :: gs
@@ -752,9 +753,9 @@ subroutine calc_current_bloch_lg(sbe, gs, jmat, icomm)
             tmp1(jj) = tmp1(jj) + gs%grad_k_eigen(ib, jj, ik) *  &
                                & dble(sbe%qnm_new(ib, ib, ik)) * gs%kweight(ik)
         else
-            tmp1(jj) = tmp1(jj) + gs%delta_omega(ib, jb, ik) * &
-                               & abs(sbe%dnm_i(ib, jb, jj, ik)) * &
-                               & aimag(sbe%qnm_new(jb, ib, ik)) * gs%kweight(ik)
+            tmp1(jj) = tmp1(jj) + dble(gs%p_mod_matrix(ib, jb, jj, ik) * &
+                               & sbe%exp_iphi(jb, ib, ik) * &
+                               & sbe%qnm_new(jb, ib, ik)) * gs%kweight(ik)
         end if
     end do
     end do
