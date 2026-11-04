@@ -10,6 +10,7 @@ module kli_periodic
   type kli_frame
     type(s_exx_wannier)::w
     type(isolated_box)::box,check_box
+    real(8)::initial_pz_residual=0d0
     real(8)::audit(7)=0d0
     integer,allocatable::image_shift(:,:)
   end type
@@ -79,6 +80,7 @@ contains
         enddo
         locerr=max(locerr,maxval(abs(h)))
       enddo
+      if(iter==0)f%initial_pz_residual=locerr
       if(locerr<=ltol)exit
       if(iter>=maxiter)return
       old=f%w%gauge;eold=energy;alpha=4d0

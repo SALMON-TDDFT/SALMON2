@@ -63,6 +63,10 @@ contains
       if(info%id_ko==0)write(*,'(a,4i8,3es18.9)')'KLI spin/status/iter/FFT E/loc/boundary: ',s,istat,iter,ffts,energy,locerr,edge
       if(info%id_ko==0)write(*,'(a,7es16.7)')'KLI orth/rho/Slater/row/compat/solve/box: ',frame(s)%audit
       if(istat/=0)error stop 'KLI rejected gauge, density, localization, or linear solve'
+      if(present(horb).and.info%id_ko==0)then
+        write(*,'(a,1x,a,1x,i0,3es23.14)') 'KLI RT localization',merge('predictor','corrector',trial), &
+          iter,frame(s)%initial_pz_residual,locerr,frame(s)%w%min_singular
+      endif
       g=0
       do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
         g=g+1;vxc(s)%f(ix,iy,iz)=vxc(s)%f(ix,iy,iz)+v(g)

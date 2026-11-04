@@ -75,6 +75,34 @@ def main():
         signal=float(np.max(abs(fine[:,13:16])))
         if signal<=1e-8 or delta>0.01*signal: raise ValueError('unresolved pulse response')
         result[mode+'_current_dt_error']=delta
+    # Drive the occupied subspace far enough to exercise both paths with the
+    # same GS checkpoint and production tolerance used by the zero-field case.
+    name = 'instantaneous-relocalize'
+    inp = (suite/'si-instantaneous.inp').read_text().replace('I_wcm2_1 = 0d0', 'I_wcm2_1 = 1d12')
+    directory, log = run(name, inp)
+    rows = [line.split()[3:] for line in log.splitlines() if line.startswith('KLI RT localization ')]
+    stages = ['predictor', 'corrector'] * 32
+    if [row[0] for row in rows] != stages:
+        raise ValueError('missing or misordered dynamic KLI evaluations')
+    for stage in ('predictor', 'corrector'):
+        values = np.array([[float(x) for x in row[1:]] for row in rows if row[0] == stage])
+        iterations, initial, final, sigma = values.T
+        rotated = iterations > 0
+        if not np.all(np.isfinite(values)) or not np.all(sigma > 1e-8):
+            raise ValueError('invalid transported gauge')
+        if not (np.any(rotated) and np.any(~rotated)):
+            raise ValueError(stage + ': expected both reuse and additional localization')
+        if not np.array_equal(rotated, initial > 1e-5) or np.any(final > 1e-5):
+            raise ValueError(stage + ': PZ residual/iteration mismatch')
+        result['runs'][name][stage] = dict(rotated=int(sum(rotated)), reused=int(sum(~rotated)),
+            max_iter=int(max(iterations)), max_initial=float(max(initial)), max_final=float(max(final)))
+    endpoint = np.array([[float(x) for x in line.split()] for line in
+                         re.findall(r'KLI RT density/orthogonality/potential: (.*)', log)])
+    rt = np.loadtxt(directory/'Si_rt.data')
+    if (endpoint.shape != (33, 3) or rt.shape[0] != 32 or not np.isfinite(endpoint).all()
+            or not np.isfinite(rt).all() or endpoint[:, 1].max() > 1e-8 or endpoint[:, 2].max() <= 1e-6):
+        raise ValueError('invalid driven real-space trajectory')
+    result['runs'][name].update(max_orth=float(endpoint[:, 1].max()), max_v=float(endpoint[:, 2].max()))
     (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 if __name__=='__main__': main()
