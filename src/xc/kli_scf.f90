@@ -1,16 +1,59 @@
 module kli_scf
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use structures
-  use kli_periodic
+  use exx_symmetry, only: s_exx_symmetry_map
+  use kli_periodic, only: kli_frame
   implicit none
   private
   public :: apply_kli_scf,kli_write,kli_read,apply_frozen,kli_diagnostics
+  ! Shared between SCF updates, checkpoint I/O and RT predictor/corrector calls.
   real(8),allocatable,save::cached_v(:,:),cached_e(:)
+  type(s_exx_symmetry_map),save :: star
   type(kli_frame),save :: frame(2)
 contains
+  subroutine prepare_star(sys,mg)
+    use structures, only: s_dft_system,s_rgrid
+    use sym_sub, only: use_symmetry,SymMatA,SymMatB,symmetry_validate_field
+    use exx_symmetry, only: symmetry_init,symmetry_validate_atoms
+    use salmon_global, only: num_kgrid,theory,epdir_re1,epdir_im1
+    implicit none
+    type(s_dft_system),intent(in)::sys
+    type(s_rgrid),intent(in)::mg
+    integer::status
+    if(.not.use_symmetry.or.star%nfull/=0)return
+    call symmetry_init(star,mg%num,sys%hgs,sys%vec_k(:,:sys%nk),sys%wtk(:sys%nk), &
+                       SymMatA,SymMatB,num_kgrid,status,sys%primitive_a)
+    if(status/=0)error stop 'KLI: incompatible crystal symmetry, grid or k mesh'
+    call symmetry_validate_atoms(star,sys%Rion,sys%kion,status)
+    if(status/=0)error stop 'KLI: symmetry does not preserve ions'
+    if(theory/='dft')then
+      call symmetry_validate_field(epdir_re1)
+      call symmetry_validate_field(epdir_im1)
+    endif
+  end subroutine
+
+  subroutine expand_star(orbitals)
+    use sym_sub, only: use_symmetry
+    use exx_symmetry, only: symmetry_transform
+    implicit none
+    complex(8),allocatable,intent(inout)::orbitals(:,:,:)
+    complex(8),allocatable::full(:,:,:)
+    integer::k,status
+    if(.not.use_symmetry)return
+    allocate(full(size(orbitals,1),size(orbitals,2),star%nfull))
+    do k=1,star%nfull
+      call symmetry_transform(star,k,1,orbitals(:,:,star%owner(k)),full(:,:,k),status)
+      if(status/=0)error stop 'KLI: failed Bloch star expansion'
+    enddo
+    call move_alloc(full,orbitals)
+  end subroutine
+
   subroutine apply_kli_scf(sys,mg,info,orb,vxc,exc,horb,predictor)
-    use salmon_global, only: num_kgrid,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter
-    use communication,only:comm_summation
+    use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital,s_scalar
+    use kli_periodic, only: evaluate_kli
+    use sym_sub, only: use_symmetry
+    use ieee_arithmetic, only: ieee_is_finite
+    use salmon_global, only: num_kgrid,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter,yn_kli_rt_box_check
+    use communication, only: comm_is_root,comm_summation
+    implicit none
     type(s_dft_system),intent(in)::sys
     type(s_rgrid),intent(in)::mg
     type(s_parallel_info),intent(in)::info
@@ -23,15 +66,23 @@ contains
     complex(8),allocatable::prev(:,:,:),gu(:,:,:),hp(:,:,:),hsum(:,:,:)
     integer,allocatable::oldcut(:,:)
     logical::trial
-    real(8),allocatable::v(:)
+    real(8),allocatable::v(:),full_k(:,:)
     real(8)::energy,locerr,edge,occ
     integer::s,n(3),nb,ng,ik,io,ix,iy,iz,g,iter,ffts,istat
     n=mg%ie-mg%is+1;ng=product(n)
     if(info%isize_r/=1.or.sys%if_real_orbital)error stop 'KLI requires a full complex primitive grid on each k rank'
-    if(any(abs(sys%wtk-1d0/sys%nk)>1d-12))error stop 'KLI requires equal weights'
+    call prepare_star(sys,mg)
+    if(.not.use_symmetry.and.any(abs(sys%wtk(:sys%nk)-1d0/sys%nk)>1d-12))error stop 'KLI requires equal weights'
+    if(use_symmetry)then
+      full_k=star%full_k
+    else
+      full_k=sys%vec_k(:,:sys%nk)
+    endif
     trial=.false.;if(present(predictor))trial=predictor
     occ=real(3-sys%nspin,8)
     allocate(v(ng))
+    if(use_symmetry.and.comm_is_root(info%id_ko).and..not.allocated(cached_v)) &
+      write(*,*) "KLI representative/full k points:",sys%nk,star%nfull
     if(.not.allocated(cached_v))allocate(cached_v(ng,sys%nspin),cached_e(sys%nspin))
     do s=1,sys%nspin
       nb=count(sys%rocc(:,1,s)==occ)
@@ -45,6 +96,7 @@ contains
         enddo;enddo;enddo
       enddo;enddo
       call comm_summation(part,psi,size(part),info%icomm_ko)
+      call expand_star(psi)
       if(present(horb))then
         if(trial)oldcut=frame(s)%image_shift
         prev=frame(s)%w%previous;gu=frame(s)%w%gauge
@@ -53,19 +105,40 @@ contains
           hp(:,io,ik)=reshape(horb%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),s,io,ik,1),[ng])
         enddo;enddo
         call comm_summation(hp,hsum,size(hp),info%icomm_ko)
-        do ik=1,sys%nk
+        call expand_star(hsum)
+        do ik=1,size(psi,3)
           call canonical(psi(:,:,ik),hsum(:,:,ik),sys%hvol,matmul(prev(:,:,ik),conjg(transpose(gu(:,:,ik)))))
         enddo
         deallocate(hp,hsum)
       endif
-      call evaluate_kli(frame(s),psi,n,num_kgrid,sys%primitive_a,sys%vec_k,sys%hvol,kli_local_tol,kli_solve_tol, &
-                        kli_hartree_tol,kli_maxiter,v,energy,locerr,edge,iter,ffts,istat)
-      if(info%id_ko==0)write(*,'(a,4i8,3es18.9)')'KLI spin/status/iter/FFT E/loc/boundary: ',s,istat,iter,ffts,energy,locerr,edge
-      if(info%id_ko==0)write(*,'(a,7es16.7)')'KLI orth/rho/Slater/row/compat/solve/box: ',frame(s)%audit
+      call evaluate_kli(frame(s),psi,n,num_kgrid,sys%primitive_a,full_k,sys%hvol,kli_local_tol,kli_solve_tol, &
+                        kli_hartree_tol,kli_maxiter,v,energy,locerr,edge,iter,ffts,istat,info%icomm_ko,info%id_ko,info%isize_ko, &
+                        check_box=.not.present(horb).or.yn_kli_rt_box_check=='y')
+      if(comm_is_root(info%id_ko))write(*,'(a,4i8,3es18.9)') &
+        'KLI spin/status/iter/FFT E/loc/boundary: ',s,istat,iter,ffts,energy,locerr,edge
+      if(comm_is_root(info%id_ko))write(*,'(a,7es16.7)')'KLI orth/rho/Slater/row/compat/solve/box: ',frame(s)%audit
       if(istat/=0)error stop 'KLI rejected gauge, density, localization, or linear solve'
-      if(present(horb).and.info%id_ko==0)then
+      if(present(horb).and.comm_is_root(info%id_ko))then
         write(*,'(a,1x,a,1x,i0,3es23.14)') 'KLI RT localization',merge('predictor','corrector',trial), &
           iter,frame(s)%initial_pz_residual,locerr,frame(s)%w%min_singular
+      endif
+      if(use_symmetry)then
+        ! The local Hamiltonian used on a representative must commute with
+        ! the retained operations. Average numerical gauge noise only.
+        block
+          real(8)::average(ng),defect
+          integer::op
+          average=0d0
+          do op=1,star%nsym
+            average=average+v(star%grid(:,op))
+          enddo
+          average=average/star%nsym
+          defect=maxval(abs(v-average))
+          if(comm_is_root(info%id_ko))write(*,'(a,es14.6)') 'KLI potential symmetry defect [Ha]: ',defect
+          if(.not.ieee_is_finite(defect).or.defect>kli_local_tol) &
+            error stop 'KLI localized solution breaks requested symmetry; use full k mesh'
+          v=average
+        end block
       endif
       g=0
       do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
@@ -83,6 +156,7 @@ contains
   end subroutine
   subroutine canonical(psi,hpsi,dv,ref)
     use exx_wannier_gauge, only:gauge_transport
+    implicit none
     complex(8),intent(inout)::psi(:,:)
     complex(8),intent(in)::hpsi(:,:),ref(:,:)
     real(8),intent(in)::dv
@@ -113,7 +187,10 @@ contains
     enddo
   end subroutine
   subroutine kli_diagnostics(sys,mg,info,orb,rho,rho0)
-    use communication,only:comm_get_max
+    use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital,s_scalar
+    use sym_sub, only: use_symmetry
+    use communication, only: comm_is_root,comm_get_max
+    implicit none
     type(s_dft_system),intent(in)::sys
     type(s_rgrid),intent(in)::mg
     type(s_parallel_info),intent(in)::info
@@ -122,7 +199,7 @@ contains
     real(8),allocatable,save::v0(:,:)
     real(8)::orth,dens,orthmax(1)
     complex(8),allocatable::a(:,:),over(:,:)
-    integer::k,s,nb,i,ng
+    integer::k,s,nb,i,ng,kfull
     logical::first
     first=.not.allocated(v0)
     if(first)v0=cached_v
@@ -134,7 +211,9 @@ contains
       do k=info%ik_s,info%ik_e
         a=reshape(orb%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),s,1:nb,k,1),[ng,nb])
         if(first)then
-          over=sys%hvol*matmul(conjg(transpose(a)),frame(s)%w%previous(:,:,k))
+          kfull=k
+          if(use_symmetry)kfull=star%first(k)
+          over=sys%hvol*matmul(conjg(transpose(a)),frame(s)%w%previous(:,:,kfull))
           over=matmul(over,conjg(transpose(over)))
           do i=1,nb
             over(i,i)=over(i,i)-1d0
@@ -149,15 +228,20 @@ contains
       enddo
     enddo
     call comm_get_max([orth],orthmax,1,info%icomm_ko);orth=orthmax(1)
-    if(info%id_ko==0)write(*,'(a,3es20.10)')'KLI RT density/orthogonality/potential: ',dens,orth,maxval(abs(cached_v-v0))
+    if(comm_is_root(info%id_ko))write(*,'(a,3es20.10)')'KLI RT density/orthogonality/potential: ',dens,orth,maxval(abs(cached_v-v0))
   end subroutine
   subroutine kli_write(dir,sys,mg)
+    use structures, only: s_dft_system,s_rgrid
+    use sym_sub, only: use_symmetry,SymMatA
+    implicit none
     character(*),intent(in)::dir
     type(s_dft_system),intent(in)::sys
     type(s_rgrid),intent(in)::mg
     integer::u,s
     open(newunit=u,file=trim(dir)//'kli-v1.bin',access='stream',form='unformatted',status='replace')
-    write(u)'KLI1',mg%ie-mg%is+1,sys%nspin,sys%nk,sys%no,sys%nion,sys%primitive_a,sys%vec_k,sys%rocc,sys%Rion
+    write(u)merge('KLS1','KLI1',use_symmetry),mg%ie-mg%is+1,sys%nspin,sys%nk,sys%no,sys%nion, &
+      sys%primitive_a,sys%vec_k(:,:sys%nk),sys%rocc,sys%Rion
+    if(use_symmetry)write(u)star%nfull,star%nsym,star%full_k,SymMatA
     write(u)cached_v,cached_e
     do s=1,sys%nspin
       write(u)frame(s)%w%previous,frame(s)%w%gauge,frame(s)%image_shift
@@ -166,23 +250,36 @@ contains
   end subroutine
 
   subroutine kli_read(dir,sys,mg)
+    use structures, only: s_dft_system,s_rgrid
+    use sym_sub, only: use_symmetry,SymMatA
+    use ieee_arithmetic, only: ieee_is_finite
+    implicit none
     character(*),intent(in)::dir
     type(s_dft_system),intent(in)::sys
     type(s_rgrid),intent(in)::mg
     character(4)::magic
-    integer::u,dims(7),n(3),nb,s,ng,i
+    integer::u,dims(7),n(3),nb,s,ng,i,nfull,nsym
     real(8)::cell(3,3),k(3,sys%nk),ions(3,sys%nion)
-    real(8),allocatable::occ(:,:,:)
+    real(8),allocatable::occ(:,:,:),saved_k(:,:),ops(:,:,:)
     n=mg%ie-mg%is+1;ng=product(n)
     open(newunit=u,file=trim(dir)//'kli-v1.bin',access='stream',form='unformatted',status='old',action='read')
     read(u)magic,dims
-    if(magic/='KLI1'.or.any(dims(1:5)/=[n,sys%nspin,sys%nk]).or.dims(6)<sys%no.or.dims(7)/=sys%nion) &
+    if(magic/=merge('KLS1','KLI1',use_symmetry).or.any(dims(1:5)/=[n,sys%nspin,sys%nk]).or.dims(6)<sys%no.or.dims(7)/=sys%nion) &
       error stop 'KLI checkpoint grid mismatch'
     allocate(occ(dims(6),sys%nk,sys%nspin))
     read(u)cell,k,occ,ions
-    if(any(cell/=sys%primitive_a).or.any(k/=sys%vec_k).or.any(occ(:sys%no,:,:)/=sys%rocc).or. &
+    if(any(cell/=sys%primitive_a).or.any(k/=sys%vec_k(:,:sys%nk)).or.any(occ(:sys%no,:,:)/=sys%rocc).or. &
        any(occ(sys%no+1:,:,:)/=0d0).or.any(ions/=sys%Rion)) &
       error stop 'KLI checkpoint crystal or occupation mismatch'
+    nfull=sys%nk
+    if(use_symmetry)then
+      call prepare_star(sys,mg)
+      read(u)nfull,nsym
+      if(nfull/=star%nfull.or.nsym/=star%nsym)error stop 'KLI restart symmetry size mismatch'
+      allocate(saved_k(3,nfull),ops(3,4,nsym))
+      read(u)saved_k,ops
+      if(any(saved_k/=star%full_k).or.any(ops/=SymMatA))error stop 'KLI restart symmetry changed'
+    endif
     allocate(cached_v(ng,sys%nspin),cached_e(sys%nspin))
     read(u)cached_v,cached_e
     do s=1,sys%nspin
@@ -191,12 +288,14 @@ contains
         if(.not.ieee_is_finite(cached_v(i,s)))error stop 'KLI checkpoint contains nonfinite potential'
       enddo
       nb=count(occ(:,1,s)>0)
-      allocate(frame(s)%w%previous(ng,nb,sys%nk),frame(s)%w%gauge(nb,nb,sys%nk),frame(s)%image_shift(3,nb))
+      allocate(frame(s)%w%previous(ng,nb,nfull),frame(s)%w%gauge(nb,nb,nfull),frame(s)%image_shift(3,nb))
       read(u)frame(s)%w%previous,frame(s)%w%gauge,frame(s)%image_shift
     enddo
     close(u)
   end subroutine
   subroutine apply_frozen(vxc,exc)
+    use structures, only: s_scalar
+    implicit none
     type(s_scalar),intent(inout)::vxc(:)
     real(8),intent(inout)::exc
     integer::s

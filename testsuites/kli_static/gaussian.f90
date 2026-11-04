@@ -1,6 +1,6 @@
 program gaussian
-  use kli_self_hartree
-  use ieee_arithmetic
+  use kli_self_hartree, only: isolated_box,prepare_box,self_hartree,release_box
+  use, intrinsic :: ieee_arithmetic, only: ieee_value,ieee_quiet_nan,ieee_positive_inf
   implicit none
   integer,parameter::n=24
   type(isolated_box)::box

@@ -34,15 +34,20 @@ def main():
             raise ValueError(name+': incomplete SALMON execution')
         return d,log
     d,log=run('off',(suite/'si-off.inp').read_text())
-    # Upstream regression 131 also compares an empty conduction level. This
-    # occupied-only smoke checks the same total energy and valence splitting.
     eoff=float(re.search(r'Total energy \(eV\)\s*=\s*(\S+)',(d/'Si_info.data').read_text())[1])
     bands=np.loadtxt([line for line in (d/'Si_eigen.data').read_text().splitlines()
                       if line.strip() and line.strip()[0].isdigit()])
     if abs(eoff+214.113848465987)>0.001 or abs(bands[1,1]-bands[0,1]-.271266)>4e-5:
-        raise ValueError("occupied-only LSDA reference")
-    if bands.shape!=(32,3) or not np.all(bands[:,2]==2): raise ValueError("GS occupied-band count")
-    d,log=run('warm',(suite/'si.inp').read_text())
+        raise ValueError("LSDA reference")
+    if bands.shape!=(64,3) or not np.all(bands[:,2].reshape(8,8)==[2,2,2,2,0,0,0,0]):
+        raise ValueError("expected four occupied and four empty GS bands at each k point")
+    # Exercise the namelist's case normalization on a real GS restart.
+    warm=(suite/'si.inp').read_text().replace("kli_mode='static'", "kli_mode='StAtIc'\n  yn_kli_rt_box_check='N'")
+    d,log=run('warm',warm)
+    variables=(d/'variables.log').read_text()
+    for key,value in [('kli_mode','static'),('yn_kli_rt_box_check','n')]:
+        if re.search(rf'#\s*{key}=\s*(\S+)',variables)[1]!=value:
+            raise ValueError('incorrectly normalized '+key)
     m=re.search(r'#GS converged at\s+(\d+)\s+:\s+(\S+)',log)
     if not m or not (d/'data_for_restart/kli-v1.bin').is_file():
         raise ValueError('GS did not converge with a KLI checkpoint')
@@ -65,6 +70,10 @@ def main():
             if mode=='instantaneous':
                 loc=np.array([[float(x) for x in line.split()] for line in re.findall(r'KLI spin/status/iter/FFT E/loc/boundary: (.*)',log)])
                 if len(loc)!=2*nt: raise ValueError('missing predictor or endpoint')
+                box = [float(row.split()[-1]) for row in log.splitlines()
+                       if row.startswith('KLI orth/rho/Slater/row/compat/solve/box:')]
+                if len(box)!=2*nt or any(value!=-1 for value in box):
+                    raise ValueError('RT default should skip the auxiliary box check')
                 stats.update(max_iter=int(max(loc[:,2])),ffts=int(sum(loc[:,3])))
                 if case=='zero' and stats['max_iter']!=0: raise ValueError('unexpected localization iterations')
             if not np.all(np.isfinite(diag)) or not np.all(np.isfinite(rt)) or stats['max_orth']>1e-8: raise ValueError(name)
@@ -78,7 +87,7 @@ def main():
     # Drive the occupied subspace far enough to exercise both paths with the
     # same GS checkpoint and production tolerance used by the zero-field case.
     name = 'instantaneous-relocalize'
-    inp = (suite/'si-instantaneous.inp').read_text().replace('I_wcm2_1 = 0d0', 'I_wcm2_1 = 1d12')
+    inp = (suite/'si-instantaneous.inp').read_text().replace('I_wcm2_1 = 0d0', 'I_wcm2_1 = 1d14')
     directory, log = run(name, inp)
     rows = [line.split()[3:] for line in log.splitlines() if line.startswith('KLI RT localization ')]
     stages = ['predictor', 'corrector'] * 32

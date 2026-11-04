@@ -21,7 +21,7 @@
   al_vec2 = 0.0, 5.13, 5.13
   al_vec3 = 5.13, 0.0, 5.13
   al_vec1 = 5.13, 5.13, 0.0
-  nstate = 4
+  nstate = 8
   nelec = 8
   nelem = 1
   natom = 2
@@ -54,6 +54,7 @@
 
 &scf
   method_init_wf="random"
+  yn_subspace_diagonalization='y'
   nscf_init_no_diagonal=0
   ncg = 4
   nscf = 120

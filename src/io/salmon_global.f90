@@ -124,6 +124,7 @@ module salmon_global
   integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
+  character(1) :: yn_kli_rt_box_check
   character(16) :: kli_mode
   real(8) :: kli_local_tol,kli_solve_tol,kli_hartree_tol
   integer :: kli_maxiter

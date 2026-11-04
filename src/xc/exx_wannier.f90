@@ -18,6 +18,7 @@ module exx_wannier
   public :: s_exx_wannier,wannier_init,wannier_destroy,wannier_localize
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
   type s_exx_wannier
+    integer,allocatable :: mesh_order(:),cell_index(:)
     integer :: n(3)=0,mesh(3)=0,ns(3)=0,ng=0,nk=0,ngs=0,updates=0
     integer(int64) :: fft_pairs_total=0_int64,fft_pairs_executed=0_int64,fft_batches_executed=0_int64
     integer(int64) :: pair_product_points=0_int64,pair_accumulation_points=0_int64
@@ -79,12 +80,13 @@ contains
     op=empty
   end subroutine
 
-  subroutine wannier_init(op,n,mesh,h,k,omega,status,coulomb_radius)
+  subroutine wannier_init(op,n,mesh,h,k,omega,status,coulomb_radius,mesh_fft)
     implicit none
     type(s_exx_wannier),intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3)
     real(8),intent(in) :: h(3),k(:,:),omega
     integer,intent(out) :: status
+    logical,intent(in),optional :: mesh_fft
     real(8),intent(in),optional :: coulomb_radius
     real(8) :: radius
     integer :: x,y,z,g,ik,j,axis,offset(3),index(3),flat,ns(3),p(3),r(3),ic
@@ -123,7 +125,15 @@ contains
       enddo
     enddo
     allocate(op%point(3,op%ngs),op%primitive_point(op%ngs),op%position(3,op%ng))
-    allocate(op%cell(3,op%nk),op%phase(op%ngs,op%nk))
+    allocate(op%cell(3,op%nk))
+    if(present(mesh_fft))then
+      if(mesh_fft)op%mesh_order=order
+    endif
+    if(allocated(op%mesh_order))then
+      allocate(op%phase(op%ng,op%nk),op%cell_index(op%ngs))
+    else
+      allocate(op%phase(op%ngs,op%nk))
+    endif
     g=0
     do z=0,n(3)-1;do y=0,n(2)-1;do x=0,n(1)-1
       g=g+1;op%position(:,g)=[x,y,z]*h
@@ -132,6 +142,15 @@ contains
     do z=0,ns(3)-1;do y=0,ns(2)-1;do x=0,ns(1)-1
       g=g+1;op%point(:,g)=[x,y,z];p=modulo([x,y,z],n)
       op%primitive_point(g)=1+p(1)+n(1)*(p(2)+n(2)*p(3))
+      if(allocated(op%mesh_order))then
+        r=[x,y,z]/n
+        op%cell_index(g)=1+r(1)+mesh(1)*(r(2)+mesh(2)*r(3))
+        if(any(r/=0))cycle
+        do ik=1,op%nk
+          op%phase(op%primitive_point(g),ik)=exp(cmplx(0d0,sum((k(:,ik)-k(:,1))*p*h),8))
+        enddo
+        cycle
+      endif
       do ik=1,op%nk
         op%phase(g,ik)=exp(cmplx(0d0,sum((k(:,ik)-k(:,1))*[x,y,z]*h),8))
       enddo
@@ -172,6 +191,10 @@ contains
     complex(8),intent(in) :: bloch(:,:,:)
     complex(8),intent(out) :: home(:,:)
     integer :: ik,j,g,p
+    if(allocated(op%mesh_order))then
+      call cell_fft_forward(op,bloch,home)
+      return
+    endif
     home=0d0
     do ik=1,op%nk
       do j=1,size(bloch,2)
@@ -189,6 +212,10 @@ contains
     complex(8),intent(in) :: home(:,:)
     complex(8),intent(out) :: bloch(:,:,:)
     integer :: ik,j,g,p
+    if(allocated(op%mesh_order))then
+      call cell_fft_backward(op,home,bloch)
+      return
+    endif
     bloch=0d0
     do ik=1,op%nk
       do j=1,size(home,2)
@@ -198,6 +225,50 @@ contains
         enddo
       enddo
     enddo
+  end subroutine
+
+  ! One uniformly sampled lattice Fourier transform per primitive point and band.
+  subroutine cell_fft_forward(op,bloch,home)
+    implicit none
+    type(s_exx_wannier),intent(in)::op
+    complex(8),intent(in)::bloch(:,:,:)
+    complex(8),intent(out)::home(:,:)
+    complex(8),allocatable::buf(:,:,:)
+    type(c_ptr)::plan
+    integer::g,j,i,k,m(3),nb
+    nb=size(home,2);m=op%mesh(3:1:-1)
+    allocate(buf(op%nk,op%ng,nb))
+    plan=fftw_plan_many_dft(3,m,op%ng*nb,buf,m,1,op%nk,buf,m,1,op%nk,FFTW_BACKWARD,FFTW_ESTIMATE)
+    if(.not.c_associated(plan))error stop 'Wannier cell FFT plan failed'
+    do j=1,nb;do g=1,op%ng;do i=1,op%nk
+      k=op%mesh_order(i);buf(i,g,j)=bloch(g,j,k)*op%phase(g,k)/op%nk
+    enddo;enddo;enddo
+    call fftw_execute_dft(plan,buf,buf)
+    do j=1,nb;do g=1,op%ngs
+      home(g,j)=buf(op%cell_index(g),op%primitive_point(g),j)
+    enddo;enddo
+    call fftw_destroy_plan(plan)
+  end subroutine
+  subroutine cell_fft_backward(op,home,bloch)
+    implicit none
+    type(s_exx_wannier),intent(in)::op
+    complex(8),intent(in)::home(:,:)
+    complex(8),intent(out)::bloch(:,:,:)
+    complex(8),allocatable::buf(:,:,:)
+    type(c_ptr)::plan
+    integer::g,j,i,k,m(3),nb
+    nb=size(home,2);m=op%mesh(3:1:-1)
+    allocate(buf(op%nk,op%ng,nb))
+    plan=fftw_plan_many_dft(3,m,op%ng*nb,buf,m,1,op%nk,buf,m,1,op%nk,FFTW_FORWARD,FFTW_ESTIMATE)
+    if(.not.c_associated(plan))error stop 'Wannier cell FFT plan failed'
+    do j=1,nb;do g=1,op%ngs
+      buf(op%cell_index(g),op%primitive_point(g),j)=home(g,j)
+    enddo;enddo
+    call fftw_execute_dft(plan,buf,buf)
+    do j=1,nb;do g=1,op%ng;do i=1,op%nk
+      k=op%mesh_order(i);bloch(g,j,k)=buf(i,g,j)*conjg(op%phase(g,k))
+    enddo;enddo;enddo
+    call fftw_destroy_plan(plan)
   end subroutine
 
   subroutine wannier_refresh_source(op,psi,occupation,maxiter,tolerance,status,localize)

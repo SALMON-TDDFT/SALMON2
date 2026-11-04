@@ -288,7 +288,7 @@ contains
       & eta_mask
 
     namelist/functional/ &
-      & kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter, &
+      & yn_kli_rt_box_check,kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter, &
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
       & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
@@ -759,7 +759,12 @@ contains
     rvv10_fft='ffte'
     rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
-    kli_mode='off';kli_local_tol=1d-5;kli_solve_tol=1d-8;kli_hartree_tol=1d-3;kli_maxiter=128
+    yn_kli_rt_box_check='n'
+    kli_mode='off'
+    kli_local_tol=1d-5*uenergy_from_au
+    kli_hartree_tol=1d-3*uenergy_from_au
+    kli_solve_tol=1d-8
+    kli_maxiter=128
     yn_hse_wannier = 'n'
     exx_mlwf_interval = -huge(1)
     hse_mlwf_interval = -huge(1)
@@ -1379,9 +1384,14 @@ contains
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(yn_kli_rt_box_check,nproc_group_global)
+    call string_lowercase(yn_kli_rt_box_check)
     call comm_bcast(kli_mode,nproc_group_global)
+    call string_lowercase(kli_mode)
     call comm_bcast(kli_local_tol,nproc_group_global)
+    kli_local_tol=kli_local_tol*uenergy_to_au
     call comm_bcast(kli_hartree_tol,nproc_group_global)
+    kli_hartree_tol=kli_hartree_tol*uenergy_to_au
     call comm_bcast(kli_solve_tol,nproc_group_global)
     call comm_bcast(kli_maxiter,nproc_group_global)
     call comm_bcast(yn_hse_wannier,nproc_group_global)
@@ -2510,8 +2520,12 @@ contains
       write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
-      write(fh_variables_log, *) "# KLI mode / PZ, KLI, Hartree tolerances / maxiter: ", &
-        kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter
+      write(fh_variables_log, *) "# yn_kli_rt_box_check=",yn_kli_rt_box_check
+      write(fh_variables_log, *) "# kli_mode=",kli_mode
+      write(fh_variables_log, *) "# kli_local_tol=",kli_local_tol
+      write(fh_variables_log, *) "# kli_solve_tol=",kli_solve_tol
+      write(fh_variables_log, *) "# kli_hartree_tol=",kli_hartree_tol
+      write(fh_variables_log, *) "# kli_maxiter=",kli_maxiter
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
       write(fh_variables_log, *) "# yn_exx_dc_mlwf=",yn_exx_dc_mlwf
       write(fh_variables_log, *) "# exx_pre_scf_threshold=",exx_pre_scf_threshold
@@ -3223,6 +3237,7 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
+    call yn_argument_check(yn_kli_rt_box_check)
     if(kli_mode/='off')then
 #ifndef USE_HSE
       error stop 'KLI requires the build with native Wannier and FFTW support'
@@ -3240,8 +3255,12 @@ contains
         error stop 'Unknown KLI mode'
       end select
       if(yn_dc/='n'.or.yn_periodic/='y'.or.yn_spinorbit/='n'.or.yn_md/='n')error stop 'KLI: periodic collinear fixed ions only'
-      if(yn_opt=='y'.or.yn_out_rvf_rt=='y'.or.yn_jm=='y'.or.index(yn_symmetry,'y')/=0) &
-        error stop 'KLI excludes forces, jellium and symmetry reduction'
+      if(yn_opt=='y'.or.yn_out_rvf_rt=='y'.or.yn_jm=='y') &
+        error stop 'KLI excludes forces and jellium'
+      if(index(yn_symmetry,'y')/=0.and.(file_kw/='none'.or.ae_shape2/='none')) &
+        error stop 'KLI symmetry requires the standard mesh and a single field'
+      if(.not.ieee_is_finite(kli_local_tol).or..not.ieee_is_finite(kli_solve_tol).or..not.ieee_is_finite(kli_hartree_tol)) &
+        error stop 'KLI tolerances must be finite'
       if(.not.(kli_hartree_tol>0))error stop 'KLI requires positive auxiliary box tolerance'
       if(xc/='pz'.and.xc/='PZ')error stop 'KLI requires built-in PZ LSDA'
       if(temperature>=0.or.any(nproc_rgrid>1))error stop 'KLI requires integer occupancy and unsplit spatial grid'

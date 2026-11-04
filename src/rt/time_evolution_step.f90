@@ -26,8 +26,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
-  use kli_scf, only: apply_frozen,apply_kli_scf,kli_diagnostics
-  use hamiltonian, only: hpsi
+  use kli_scf, only: apply_frozen,kli_diagnostics
   use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint,exx_ptcn_report_step
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -484,6 +483,9 @@ contains
 
 #ifdef USE_HSE
   subroutine instant(trial_step)
+    use hamiltonian, only: hpsi
+    use kli_scf, only: apply_kli_scf
+    implicit none
     logical,intent(in)::trial_step
     type(s_scalar)::refv(system%nspin)
     type(s_orbital)::acted

@@ -58,6 +58,9 @@ if (USE_OPENACC)
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/602_bulk_Si_gs_gramschmidt_blas_n")
 else () 
 ### Testsuites for CPU ###
+  if(USE_HSE)
+    add_subdirectory(463_kli_input_units)
+  endif()
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/101_C2H2_gs")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/102_C2H2_rt_response")
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/103_C2H2_rt_pulse")
@@ -287,4 +290,17 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND USE_MPI AND NOT USE_OPENACC)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/unit_perflog/run.py
       --compiler ${MPI_Fortran_COMPILER} --mpiexec ${MPIEXEC_EXECUTABLE})
   set_tests_properties(perflog_zero_timer PROPERTIES LABELS "timer;mpi;unit" TIMEOUT 120)
+endif()
+
+# Standalone KLI algebra and isolated-density probes; no GS restart is needed.
+if(USE_HSE AND HSE_FFTW_INCLUDE AND HSE_FFTW_LIBRARY AND LAPACK_LIBRARIES AND NOT CMAKE_CROSSCOMPILING)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  string(REPLACE ";" " " KLI_TEST_LAPACK "${LAPACK_LIBRARIES}")
+  add_test(NAME kli_static_formulas
+    COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}"
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/kli_static/formulas.py
+      --checker ${CMAKE_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py
+      "--fftw-includes=-I${HSE_FFTW_INCLUDE}" "--fftw-libs=${HSE_FFTW_LIBRARY}"
+      "--lapack-flags=${KLI_TEST_LAPACK}")
+  set_tests_properties(kli_static_formulas PROPERTIES LABELS "xc;kli;unit" TIMEOUT 180)
 endif()
