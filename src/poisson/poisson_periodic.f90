@@ -25,6 +25,9 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   use communication, only: comm_summation
   use math_constants, only : pi
   use nvtx_wrapper
+#ifdef USE_CUDA
+  use poisson_cuda, only: poisson_fft_cuda
+#endif
   implicit none
   type(s_rgrid)          ,intent(in) :: lg
   type(s_rgrid)          ,intent(in) :: mg
@@ -36,6 +39,13 @@ subroutine poisson_ft(lg,mg,info,fg,rho,Vh,poisson)
   !
   integer :: ix,iy,iz,kx,ky,kz
   call nvtxStartRange('poission_ft', __LINE__)
+
+#ifdef USE_CUDA
+  if (poisson_fft_cuda(lg,mg,fg,rho,Vh,poisson)) then
+    call nvtxEndRange
+    return
+  end if
+#endif
 
 #ifdef USE_OPENACC
 !$acc data copyin(poisson, fg, rho, mg, lg, vh)

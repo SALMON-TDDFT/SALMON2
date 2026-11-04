@@ -55,7 +55,7 @@ if (USE_CUDA)
   set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
   enable_language(CUDA)
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -c++libs")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -c++libs -cudalib=cufft")
   # The preset passes -DUSE_CUDA in its flags; CMake's Fortran dependency scan only sees definitions.
   add_compile_definitions(USE_CUDA)
 endif ()
