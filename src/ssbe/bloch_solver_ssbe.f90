@@ -162,7 +162,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                             if(nb /= ib .and. nb /= jb) then
                                 if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
                                    abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
-                                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+                                    tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
                                         sbe%rho(nb, nb, ik) / &
                                         gs%delta_omega(ib, nb, ik) / &
                                         gs%delta_omega(jb, nb, ik) * &
@@ -173,7 +173,7 @@ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
                         end do
                         if(nb /= ib) then
                             if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
-                                tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+                                tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
                                     sbe%rho(nb, nb, ik) * &
                                     (2.d0 * pnn_Ac * dble(pni(idir) * pin_Ac) + &
                                     pnn(idir)*abs(pni_Ac)**2) / &
