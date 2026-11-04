@@ -130,7 +130,10 @@ end subroutine solve_orbitals
 subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,vlocal,mixing,energy )
   use structures
-  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc
+#ifdef USE_HSE
+  use kli_scf, only: apply_kli_scf
+#endif
+  use salmon_global, only: method_mixing,yn_jm,yn_spinorbit,yn_dc,kli_mode
   use timer
   use mixing_sub
   use hartree_sub, only: hartree
@@ -191,6 +194,9 @@ subroutine update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+    if(kli_mode=='static')call apply_kli_scf(system,mg,info,spsi,Vxc,energy%E_xc)
+#endif
     call timer_end(LOG_CALC_EXC_COR)
 
     if(method_mixing=='simple_potential')then

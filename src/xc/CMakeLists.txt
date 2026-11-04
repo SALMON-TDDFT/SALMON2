@@ -1,4 +1,5 @@
 set(SOURCES
+    kli_diagonal.f90
     builtin_pz.f90
     builtin_pzm.f90
     builtin_pz_sp.f90
@@ -27,6 +28,9 @@ endif()
 
 if(USE_HSE)
   list(APPEND SOURCES
+    kli_self_hartree.f90
+    kli_periodic.f90
+    kli_scf.f90
     exx_blas_threads.f90
     exx_sparse_orbitals.f90
     exx_k_backend.f90

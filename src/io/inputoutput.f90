@@ -288,6 +288,7 @@ contains
       & eta_mask
 
     namelist/functional/ &
+      & kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter, &
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
       & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
@@ -758,6 +759,7 @@ contains
     rvv10_fft='ffte'
     rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
+    kli_mode='off';kli_local_tol=1d-5;kli_solve_tol=1d-8;kli_hartree_tol=1d-3;kli_maxiter=128
     yn_hse_wannier = 'n'
     exx_mlwf_interval = -huge(1)
     hse_mlwf_interval = -huge(1)
@@ -1377,6 +1379,11 @@ contains
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(kli_mode,nproc_group_global)
+    call comm_bcast(kli_local_tol,nproc_group_global)
+    call comm_bcast(kli_hartree_tol,nproc_group_global)
+    call comm_bcast(kli_solve_tol,nproc_group_global)
+    call comm_bcast(kli_maxiter,nproc_group_global)
     call comm_bcast(yn_hse_wannier,nproc_group_global)
     call comm_bcast(hse_mlwf_interval,nproc_group_global)
     call comm_bcast(exx_mlwf_interval,nproc_group_global)
@@ -2503,6 +2510,8 @@ contains
       write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
+      write(fh_variables_log, *) "# KLI mode / PZ, KLI, Hartree tolerances / maxiter: ", &
+        kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter
       write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
       write(fh_variables_log, *) "# yn_exx_dc_mlwf=",yn_exx_dc_mlwf
       write(fh_variables_log, *) "# exx_pre_scf_threshold=",exx_pre_scf_threshold
@@ -3214,6 +3223,30 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
+    if(kli_mode/='off')then
+#ifndef USE_HSE
+      error stop 'KLI requires the build with native Wannier and FFTW support'
+#endif
+      select case(kli_mode)
+      case('static')
+        if(theory/='dft')error stop 'Static KLI requires DFT'
+        if(yn_restart/='y'.or.read_gs_restart_data/='wfn'.or.nscf_init_no_diagonal/=0) &
+          error stop 'KLI needs a converged integer-occupied LSDA wfn start and nscf_init_no_diagonal=0'
+      case('frozen','instantaneous')
+        if(theory/='tddft_pulse'.and.theory/='tddft_response')error stop 'KLI frozen requires single-cell RT'
+        if(yn_restart/='n'.or.nproc_ob>1.or.yn_fix_func/='n'.or.propagator/='middlepoint'.or.yn_predictor_corrector/='y') &
+          error stop 'KLI RT requires GS start, updating XC and midpoint predictor/corrector'
+      case default
+        error stop 'Unknown KLI mode'
+      end select
+      if(yn_dc/='n'.or.yn_periodic/='y'.or.yn_spinorbit/='n'.or.yn_md/='n')error stop 'KLI: periodic collinear fixed ions only'
+      if(yn_opt=='y'.or.yn_out_rvf_rt=='y'.or.yn_jm=='y'.or.index(yn_symmetry,'y')/=0) &
+        error stop 'KLI excludes forces, jellium and symmetry reduction'
+      if(.not.(kli_hartree_tol>0))error stop 'KLI requires positive auxiliary box tolerance'
+      if(xc/='pz'.and.xc/='PZ')error stop 'KLI requires built-in PZ LSDA'
+      if(temperature>=0.or.any(nproc_rgrid>1))error stop 'KLI requires integer occupancy and unsplit spatial grid'
+      if(any(num_kgrid<1).or.kli_maxiter<0.or..not.(kli_local_tol>0.and.kli_solve_tol>0))error stop 'Invalid KLI mesh or tolerance'
+    endif
     call yn_argument_check(yn_hse_wannier)
     if(exx_k_algorithm=='pair'.or.exx_k_algorithm=='orbits')then
       if(theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse') &

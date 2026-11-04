@@ -58,6 +58,9 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use em_field, only: set_vonf,calc_Ac_ext_t
   use dip, only: calc_dip
   use sendrecv_grid
+#ifdef USE_HSE
+  use kli_scf, only: kli_read,apply_frozen,kli_diagnostics
+#endif
   use salmon_global, only: quiet
   use gram_schmidt_orth, only: gram_schmidt
   use jellium, only: make_rho_jm
@@ -309,6 +312,15 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+  if(kli_mode=='frozen'.or.kli_mode=='instantaneous')then
+    if(any(system%rocc<=0d0))error stop 'KLI real-space RT requires occupied orbitals only in each spin channel'
+    if(comm_is_root(nproc_id_global))write(*,'(a,i0)')'KLI real-space occupied orbitals per k/spin: ',system%no
+    call kli_read(directory_read_data,system,mg)
+    call apply_frozen(Vxc,energy%E_xc)
+    call kli_diagnostics(system,mg,info,spsi_in,rho_s,rt%rho0_s)
+  endif
+#endif
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f

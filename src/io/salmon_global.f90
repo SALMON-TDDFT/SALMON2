@@ -124,6 +124,9 @@ module salmon_global
   integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
+  character(16) :: kli_mode
+  real(8) :: kli_local_tol,kli_solve_tol,kli_hartree_tol
+  integer :: kli_maxiter
   character(1) :: yn_exx_dc_mlwf ! n: canonical full-fragment SCF exchange
   real(8) :: exx_pre_scf_threshold ! automatic 1e-4 for eligible GS; explicit 0 disables PBE warmup
   integer :: exx_pre_scf_steps ! consecutive qualifying residuals

@@ -185,7 +185,11 @@ use band_dft_sub
 use init_gs, only: init_wf
 use jellium, only: make_rho_jm
 use lcfo, only: init_conventional_from_dcdft
-implicit none
+#ifdef USE_HSE
+  use kli_scf, only: apply_kli_scf
+  use salmon_global, only: kli_mode
+#endif
+  implicit none
 type(s_rgrid) :: lg
 type(s_rgrid) :: mg
 type(s_parallel_info) :: info
@@ -296,6 +300,10 @@ real(8) :: rNe0,rNe
 
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+  if(kli_mode=='static'.and.yn_restart=='y'.and.read_gs_restart_data=='wfn') &
+    call apply_kli_scf(system,mg,info,spsi,Vxc,energy%E_xc)
+#endif
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
 
   select case(iperiodic)

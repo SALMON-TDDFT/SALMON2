@@ -26,6 +26,8 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
+  use kli_scf, only: apply_frozen,apply_kli_scf,kli_diagnostics
+  use hamiltonian, only: hpsi
   use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint,exx_ptcn_report_step
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -298,6 +300,11 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+      if(kli_mode=='frozen')call apply_frozen(Vxc,energy%E_xc)
+      if(kli_mode=='instantaneous')call instant(.false.)
+      if(kli_mode/='off')call kli_diagnostics(system,mg,info,spsi_out,rho_s,rt%rho0_s)
+#endif
     call timer_end(LOG_CALC_EXC_COR)
     
   end if
@@ -475,6 +482,28 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   
 contains
 
+#ifdef USE_HSE
+  subroutine instant(trial_step)
+    logical,intent(in)::trial_step
+    type(s_scalar)::refv(system%nspin)
+    type(s_orbital)::acted
+    integer::s
+    real(8)::ac(3),unused
+    ! At the predicted/corrected endpoint use endpoint Hartree/XC and A,
+    ! and the last committed SIC (explicit potential in projected H).
+    ac=system%vec_Ac;system%vec_Ac=rt%Ac_tot(:,itt)
+    call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+    do s=1,system%nspin
+      call allocate_scalar(mg,refv(s));refv(s)%f=Vxc(s)%f+Vh%f+Vpsl%f
+    enddo
+    unused=0;call apply_frozen(refv,unused)
+    call allocate_orbital_complex(system%nspin,mg,info,acted)
+    call hpsi(spsi_out,acted,info,mg,refv,system,stencil,srg,ppg)
+    call apply_kli_scf(system,mg,info,spsi_out,Vxc,energy%E_xc,acted,trial_step)
+    call deallocate_orbital(acted)
+    system%vec_Ac=ac;call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+  end subroutine
+#endif
   subroutine predictor_corrector
     implicit none
     type(s_nc_mgga23_payload) :: nc_initial
@@ -527,6 +556,10 @@ contains
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+      if(kli_mode=='frozen')call apply_frozen(Vxc,energy%E_xc)
+      if(kli_mode=='instantaneous')call instant(.true.)
+#endif
     end if
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     

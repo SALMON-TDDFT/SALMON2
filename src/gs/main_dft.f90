@@ -50,6 +50,7 @@ use dcdft
 use dc_force, only: report_dc_frozen_force
 use lcfo
 #ifdef USE_HSE
+use kli_scf, only: kli_write
 use exx_native, only: exx_export_snapshot,exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_refresh
 use exx_native, only: exx_enabled,exx_pack
 use exx_stationarity,only:spinor_stationarity
@@ -307,7 +308,7 @@ end if
      call report_dc_frozen_force(dc,system,info,mg,pp,ppg,spsi,ewald,energy)
    endif
    ! force
-   if(yn_jm=='n' .and. yn_dc=="n")then
+   if(yn_jm=='n' .and. yn_dc=="n".and.kli_mode=='off')then
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
      if(comm_is_root(nproc_id_global))then
         write(*,*) "===== force ====="
@@ -429,7 +430,13 @@ if(write_gs_restart_data=="no") then
       write(*,'(a)')"  no restart data writing."
 else if(write_gs_restart_data.ne."checkpoint_only") then
    if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
+#ifdef USE_HSE
+   if(kli_mode=='static'.and..not.(sum1<threshold))error stop 'KLI: refusing unconverged GS restart'
+#endif
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
+#ifdef USE_HSE
+   if(kli_mode=='static'.and.comm_is_root(nproc_id_global))call kli_write(ofl%dir_out_restart,system,mg)
+#endif
    call comm_sync_all
    if(yn_opt=='y') then
       if(.not.flag_opt_conv) then
