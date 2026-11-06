@@ -1675,7 +1675,7 @@ contains
       endif
 
       if (present(eexc)) then
-        eexc = eexc + reshape(exc_tmp_1d, (/nx, ny, nz/)) * rho
+        eexc = eexc + reshape(exc_tmp_1d * rho_1d, (/nx, ny, nz/))
       endif
 
       if (present(vxc)) then
