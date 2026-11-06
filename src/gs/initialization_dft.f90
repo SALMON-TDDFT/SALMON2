@@ -255,7 +255,7 @@ real(8) :: rNe0,rNe
 
         if( read_gs_restart_data=='rho' .or. &
             read_gs_restart_data(1:9)=='rho_inout')then
-           call init_wf(lg,mg,system,info,spsi)
+           call init_wf(lg,mg,system,info,pp,spsi)
         endif
      endif
 
@@ -266,7 +266,7 @@ real(8) :: rNe0,rNe
     ! new calculation
     Miter = 0        ! Miter: Iteration counter set to zero
     if(yn_conventional_from_dcdft=='n') then
-      call init_wf(lg,mg,system,info,spsi)
+      call init_wf(lg,mg,system,info,pp,spsi)
     else
     ! conventional DFT but wavefunctions are reconstructed from DC-LCFO data
       call init_conventional_from_dcdft(lg,mg,system,info,spsi)
