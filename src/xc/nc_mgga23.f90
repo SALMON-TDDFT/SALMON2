@@ -255,6 +255,9 @@ contains
     type(s_orbital),intent(inout) :: htpsi
     type(s_stencil),intent(in) :: stencil
     type(s_sendrecv_grid),intent(inout) :: srg
+#ifdef USE_OPENACC
+    if(system%nc_mgga23_payload%active) error stop 'nc_mgga23 is available on CPU only'
+#else
     complex(8),allocatable :: gp(:,:,:,:,:),flux(:,:,:,:,:,:,:,:)
     complex(8) :: p(2),dp(2),q(2),f(2,3),dq
     real(8) :: k(3)
@@ -331,6 +334,7 @@ contains
     enddo
     enddo
     !$omp end parallel do
+#endif
   end subroutine
   function identity() result(b)
     implicit none

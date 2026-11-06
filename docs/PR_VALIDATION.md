@@ -42,3 +42,20 @@ normalizes only the build-directory pathname. The exported source configured
 successfully with MPI/HSE enabled. Source and all linked application-object
 subtrees passed the prohibition checker. No additional regression system is
 included in the proposal.
+
+## OpenACC compile guard follow-up
+
+The merged upstream OpenACC fixes (including PR1292) are retained. A subsequent
+source audit found a new CPU-only MGGA action with an unguarded rank-eight
+`flux` declaration. It now follows upstream's `add_xc_tau_operator` pattern:
+OpenACC compiles a CPU-only rejection branch, with no operation for an inactive
+payload; the original declarations and action remain in the CPU branch.
+
+GNU preprocessing of111 changed Fortran files found no rank-eight-or-higher
+assumed/deferred-shape declarations in the OpenACC view. A focused check failed
+before the guard and passed afterward; CPU preprocessed nonblank lines remain
+identical. The OpenACC view of this module passed GNU syntax checking against
+the existing interfaces, and the CPU Release rebuild and object audit passed.
+These are local compile-structure checks, not NVHPC/Miyabi compilation or GPU
+execution. No additional public regression system was introduced. The fresh Si
+result above predates this guard-only change; its CPU action is unchanged.
