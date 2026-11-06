@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 !=======================================================================
+#include "config.h"
 module scf_iteration_sub
   implicit none
 
@@ -21,12 +22,16 @@ contains
 
 subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vlocal,  &
             &   miter,nscf_init_no_diagonal)
-  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init
+  use salmon_global, only: yn_subspace_diagonalization,ncg,ncg_init,yn_dc,exx_pre_scf_active,yn_spinorbit
   use structures
   use timer
   use gram_schmidt_orth, only: gram_schmidt
   use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
   use subspace_diagonalization, only: ssdg
+#ifdef USE_HSE
+  use exx_native, only: exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_enabled
+  use hamiltonian, only: hpsi
+#endif
   implicit none
   type(s_rgrid),          intent(in)    :: mg
   type(s_dft_system),     intent(in)    :: system
@@ -40,7 +45,21 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   integer,                intent(in)    :: miter
   integer,                intent(in)    :: nscf_init_no_diagonal
   !
-  integer :: nncg
+  integer :: nncg,cg_remaining,cg_block
+  logical :: stabilize_spinor
+#ifdef USE_HSE
+  logical :: diagnose
+#endif
+  stabilize_spinor=.false.
+#ifdef USE_HSE
+  stabilize_spinor=yn_spinorbit=='y'.and.yn_dc=='n'.and..not.system%if_real_orbital.and. &
+    (exx_enabled().or.exx_pre_scf_active)
+  diagnose=exx_eigen_diagnostic_enabled(info,solver=.true.)
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'before_subspace')
+  endif
+#endif
 
   if(miter==1) then
     nncg = ncg_init
@@ -56,18 +75,55 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     end if
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)
+#ifdef USE_HSE
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_subspace')
+  endif
+#endif
 
+! Independent-band CG can collapse different bands toward the same state
+! during a long solve. Bound each native HSE spinor pass, then restore an
+! orthonormal Ritz basis before continuing with the same frozen operator.
+  cg_remaining=nncg
+  do
+  cg_block=cg_remaining
+  if(stabilize_spinor)cg_block=min(8,cg_remaining)
 ! conjugate gradient method
   call timer_begin(LOG_CALC_MINIMIZATION)
   if(system%if_real_orbital) then
-    call gscg_rwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
+    call gscg_rwf(cg_block,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   else
-    call gscg_zwf(nncg,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
+    call gscg_zwf(cg_block,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
+#ifdef USE_HSE
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_cg')
+  endif
+#endif
 
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
+#ifdef USE_HSE
+  ! CG minimizes bands independently; orthogonalization can rotate them away
+  ! from the eigenbasis. Return sorted Ritz states before DC assigns occupations.
+  if(stabilize_spinor.or.(yn_dc=='y'.and.(exx_enabled().or.exx_pre_scf_active)))then
+    call timer_begin(LOG_CALC_SUBSPACE_DIAG)
+    call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
+    call timer_end(LOG_CALC_SUBSPACE_DIAG)
+  endif
+  if(diagnose)then
+    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
+    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_orthogonalization')
+  endif
+#endif
+
+  if(.not.stabilize_spinor)exit
+  cg_remaining=cg_remaining-cg_block
+  if(cg_remaining<=0)exit
+  enddo
 
 end subroutine solve_orbitals
 

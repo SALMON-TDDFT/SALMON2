@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 
+# Use extraction time so changed dependency archives trigger rebuilds.
+# Guard the policy to retain support for CMake 3.14 through 3.23.
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 if ("${CMAKE_CURRENT_SOURCE_DIR}" MATCHES "${CMAKE_CURRENT_BINARY_DIR}")
   message(FATAL_ERROR
   [[in-source build does not support
@@ -15,6 +21,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmakefiles/Modules)
 include(${CMAKE_SOURCE_DIR}/cmakefiles/misc.cmake)
 
 
+include(${CMAKE_SOURCE_DIR}/cmakefiles/select_platform.cmake)
+
 ### Project settings
 enable_testing()
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -28,7 +36,6 @@ message(STATUS "user-defined FFLAGS  = ${CMAKE_Fortran_FLAGS}")
 message(STATUS "user-defined CFLAGS  = ${CMAKE_C_FLAGS}")
 message(STATUS "user-defined LDFLAGS = ${CMAKE_EXE_LINKER_FLAGS}")
 
-include(cmakefiles/check_build_environments.cmake)
 
 if(USE_OPENACC)
   if(USE_CUDA)
@@ -45,7 +52,12 @@ option_set(USE_SCALAPACK "Use ScaLAPACK Library"   OFF)
 option_set(USE_EIGENEXA  "Use EigenExa Library"    OFF)
 option_set(USE_LIBXC     "Use Libxc library"       OFF)
 option_set(USE_FFTW      "Use FFTW library"        OFF)
-option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)" OFF)
+if(USE_OPENACC)
+  set(_hse_default OFF)
+else()
+  set(_hse_default ON)
+endif()
+option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)" ${_hse_default})
 
 ## OpenACC/CUDA GPU libraries (only meaningful when USE_OPENACC is on)
 option_set(USE_GEMM      "Use cuBLAS batched-GEMM for pseudo-pt" ON)
@@ -64,6 +76,8 @@ if (USE_OPENACC AND USE_NCCL)
 endif ()
 
 
+include(cmakefiles/check_build_environments.cmake)
+
 # variables
 set(TARGET_NAME "salmon")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -77,11 +91,58 @@ if(USE_HSE AND USE_OPENACC)
   message(FATAL_ERROR "Native HSE requires a CPU build; use USE_HSE=OFF for accelerators")
 endif()
 
+# A local exchange accelerator, independent of the generic SALMON OpenACC route.
+option(USE_EXX_CUFFT "Experimental OpenACC/cuFFT exchange backends" OFF)
+if(USE_EXX_CUFFT)
+  if(NOT USE_HSE OR USE_OPENACC)
+    message(FATAL_ERROR "USE_EXX_CUFFT requires USE_HSE=ON and USE_OPENACC=OFF")
+  endif()
+  if(NOT CMAKE_Fortran_COMPILER_ID MATCHES "^(NVHPC|PGI)$")
+    message(FATAL_ERROR "USE_EXX_CUFFT requires the NVIDIA HPC Fortran compiler")
+  endif()
+  message(STATUS "Experimental EXX GPU backends; other native hybrid work remains on CPU")
+endif()
+
 # for third party libraries
 include(${CMAKE_SOURCE_DIR}/cmakefiles/build_required_packages.cmake)
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 
+
+# Detect optional thread control with the actual selected numerical libraries.
+foreach(provider OPENBLAS NVPL FUJITSU)
+  unset(HAVE_EXX_${provider}_THREADS CACHE)
+  unset(HAVE_EXX_${provider}_THREADS)
+endforeach()
+if(USE_HSE)
+  include(CheckCSourceCompiles)
+  include(CMakePushCheckState)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_LIBRARIES ${LAPACK_LIBRARIES})
+  check_c_source_compiles("extern int nvpl_blas_set_num_threads_local(int);
+extern int nvpl_lapack_set_num_threads_local(int);
+int main(void) { return nvpl_blas_set_num_threads_local(1) + nvpl_lapack_set_num_threads_local(1); }"
+    HAVE_EXX_NVPL_THREADS)
+  if(NOT HAVE_EXX_NVPL_THREADS)
+    check_c_source_compiles("extern int openblas_get_num_threads(void);
+extern void openblas_set_num_threads(int);
+extern int openblas_get_parallel(void);
+int main(void) { int n=openblas_get_num_threads(); openblas_set_num_threads(n); return openblas_get_parallel(); }"
+      HAVE_EXX_OPENBLAS_THREADS)
+  endif()
+  cmake_pop_check_state()
+  if(HAVE_EXX_NVPL_THREADS)
+    message(STATUS "EXX thread control: NVPL BLAS and LAPACK (thread-local)")
+  elseif(HAVE_EXX_OPENBLAS_THREADS)
+    message(STATUS "EXX thread control: OpenBLAS (parent scope)")
+  elseif(CMAKE_Fortran_COMPILER_ID MATCHES "^Fujitsu" AND
+         "${EXTERNAL_FLAGS} ${CMAKE_Fortran_FLAGS}" MATCHES "-SSL2BLAMP")
+    set(HAVE_EXX_FUJITSU_THREADS ON)
+    message(STATUS "EXX thread control: Fujitsu SSL2BLAMP (OpenMP task scope)")
+  else()
+    message(STATUS "EXX thread control: unavailable; keep vendor settings and sequential k loop")
+  endif()
+endif()
 
 # Generate configure header
 configure_file(
@@ -102,6 +163,7 @@ configure_file(
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/src)        # sources
 add_subdirectory(${CMAKE_SOURCE_DIR}/testsuites) # tests
+
 
 
 

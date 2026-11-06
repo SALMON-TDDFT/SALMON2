@@ -22,8 +22,8 @@ contains
   ! a device-only symbol from ordinary host code, depending on the calling
   ! subroutine's shape. Callers import this under the name ieee_is_finite
   ! (use ieee_finite_check, only: ieee_is_finite => is_finite) so every call
-  ! site -- scalar or, by elemental broadcast, any array shape -- is unchanged.
-  elemental logical function is_finite(x) result(r)
+  ! site is scalar; array validation must explicitly visit every element.
+  pure logical function is_finite(x) result(r)
     use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     real(8), intent(in) :: x
     r = ieee_is_finite(x)

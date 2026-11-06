@@ -15,6 +15,7 @@
 !
 !=======================================================================
 
+#include "config.h"
 subroutine scf_iteration_dft( Miter,rion_update,sum1,  &
                               system,energy,ewald,  &
                               lg,mg,  &
@@ -34,6 +35,7 @@ use inputoutput
 use parallelization, only: nproc_id_global,adjust_elapse_time
 use communication, only: comm_is_root, comm_summation, comm_bcast, comm_sync_all
 use salmon_xc
+use hamiltonian, only: update_vlocal
 use timer
 use scf_iteration_sub
 use density_matrix, only: calc_density
@@ -45,13 +47,23 @@ use code_optimization
 use initialization_sub
 use occupation
 use prep_pp_sub
-use mixing_sub, only: check_mixing_half, copy_density
+use mixing_sub, only: check_mixing_half, copy_density, reset_mixing_rate
 use checkpoint_restart_sub
 use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
-use noncollinear_module, only: calc_magnetization
+use noncollinear_module, only: calc_magnetization,snapshot_density_noncollinear
+use nc_mgga23_scf, only: nc23_scf_prepare,nc23_scf_residual,nc23_spin_density_residual
 use dcdft
+use hse_reference_export, only: export_hse_reference
+#ifdef USE_HSE
+use exx_native, only: exx_enabled,exx_freeze,exx_check_localization,exx_adaptive_ready,exx_support_changed
+use salmon_global, only: exx_mlwf_norm_fraction
+#endif
+#ifdef USE_HSE
+use exx_native, only: exx_scf_prepare,exx_scf_residual
+#endif
+use exx_functional, only: is_global_hybrid
 implicit none
 integer :: ix,iy,iz,ik,is
 integer :: ilevel_print !=3:print-all
@@ -59,6 +71,10 @@ integer :: ilevel_print !=3:print-all
                         !=1:print-minimum
                         !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
+type(s_nc_mgga23_payload) :: nc_scf_history
+complex(8),allocatable :: spin_density_before(:,:,:,:,:),spin_density_after(:,:,:,:,:)
+real(8) :: nc_scf_residual
+integer :: mixing_age
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
 
@@ -93,6 +109,30 @@ real(8) :: rNe
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
+#ifdef USE_HSE
+logical :: saved_hse_freeze,adaptive_exchange,support_event,iteration_support_changed
+integer :: adaptive_comm,not_ready_local,not_ready_total,pre_scf_count,pre_scf_first_iteration
+logical :: pre_scf_root
+#endif
+
+mixing_age=Miter
+nc_scf_history%active=.false.
+#ifdef USE_HSE
+pre_scf_count=0
+pre_scf_first_iteration=Miter+1
+pre_scf_root=comm_is_root(nproc_id_global)
+if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
+adaptive_comm=info%icomm_rko
+if(yn_dc=='y')adaptive_comm=dc%icomm_tot
+adaptive_exchange=(exx_enabled().or.exx_pre_scf_active).and. &
+  ((exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0).or. &
+   (exx_mlwf_radius>0d0.and.(info%isize_r>1.or.info%isize_o>1))).and. &
+  .not.(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')
+if(adaptive_exchange)then
+  ! Each static SCF starts with the full exchange operator.
+  exx_adaptive_ready=.false.
+endif
+#endif
 
 call init_convergence_check
 
@@ -149,7 +189,59 @@ sum1=1d9
 !DFT_Iteration : do iter=1,nscf
 DFT_Iteration : do iter=Miter+1,nscf
 
-   if( sum1 < threshold ) then
+#ifdef USE_HSE
+   iteration_support_changed=.false.
+   if(exx_pre_scf_active)then
+     not_ready_local=0
+     if(iter==pre_scf_first_iteration.or..not.(sum1<exx_pre_scf_threshold))not_ready_local=1
+     call comm_summation(not_ready_local,not_ready_total,adaptive_comm)
+     if(not_ready_total==0)then
+       pre_scf_count=pre_scf_count+1
+     else
+       pre_scf_count=0
+     endif
+     if(iter>1.and.pre_scf_root) &
+       write(*,'(a,es24.16,1x,i0)') 'EXX_PRE_SCF residual/count: ',sum1,pre_scf_count
+     if(pre_scf_count>=exx_pre_scf_steps)then
+       exx_pre_scf_active=.false.
+       call reset_mixing_rate(mixing)
+       exx_adaptive_ready=.true.
+       mixing_age=0
+       sum1=huge(sum1)
+       iteration_support_changed=.true.
+       if(pre_scf_root) &
+         write(*,'(a,i0)') 'EXX_PRE_SCF switch to target hybrid before iteration ',iter
+       ! No ACE/gauge/cache was built during the PBE stage. Rebuild the full
+       ! target local potential and its first EXX/ACE before solving orbitals.
+       if(yn_dc=='y')then
+         call calc_vlocal_fragment_dcdft(system,mg,info,stencil,xc_func,srg_scalar,srg,rho_s, &
+           pp,ppn,spsi,Vxc,energy,dc,V_local)
+       else
+         call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi,stencil,Vxc,energy%E_xc)
+         call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+       endif
+     endif
+   endif
+   if(adaptive_exchange.and..not.exx_pre_scf_active.and..not.exx_adaptive_ready)then
+     ! Every fragment must reach the warm-up tolerance before any switches.
+     ! This uses the selected SCF metric (density or potential), as does the
+     ! final convergence test; readiness stays latched after this transition.
+     not_ready_local=0
+     if(.not.(sum1<sqrt(threshold)))not_ready_local=1
+     call comm_summation(not_ready_local,not_ready_total,adaptive_comm)
+     if(not_ready_total==0)then
+       exx_adaptive_ready=.true.
+       mixing_age=0
+       sum1=huge(sum1)
+       iteration_support_changed=.true.
+     endif
+   endif
+#endif
+
+   if( sum1 < threshold .and. .not.exx_pre_scf_active ) then
+#ifdef USE_HSE
+      call exx_check_localization()
+#endif
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
          write(*,'(a,i6,a,e15.8)') "  #GS converged at",iter, "  :",sum1
@@ -164,6 +256,7 @@ DFT_Iteration : do iter=Miter+1,nscf
    end if
 
    Miter=Miter+1
+   mixing_age=mixing_age+1
 
    if(calc_mode/='DFT_BAND')then
       ! for calc_total_energy_periodic
@@ -173,19 +266,52 @@ DFT_Iteration : do iter=Miter+1,nscf
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
+   ! The orbital-dependent XC bypasses rho mixing; damp its full gKS operator
+   ! only for the orbital solve. XC refresh below restores the physical payload
+   ! before energy/band evaluation and before writing the final state.
+#ifndef USE_OPENACC
+   if(calc_mode/='DFT_BAND'.and.yn_dc=='n'.and.yn_spinorbit=='y'.and.method_mixing=='simple_dm'.and. &
+      .not.system%nc_mgga23_payload%active) call snapshot_density_noncollinear(spin_density_before)
+#endif
+   if(calc_mode/='DFT_BAND') &
+     call nc23_scf_prepare(system%nc_mgga23_payload,nc_scf_history,mixing%mixrate)
+#ifdef USE_HSE
+   if(calc_mode/='DFT_BAND')call exx_scf_prepare(system,mg,info,spsi,mixing%mixrate)
+#endif
    call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,miter,nscf_init_no_diagonal)
+#ifdef USE_HSE
+   if(adaptive_exchange)then
+     call consume_support_event(support_event)
+     if(support_event)then
+       ! Discard extrapolation across a change of exchange operator.
+       mixing_age=1
+       iteration_support_changed=.true.
+     endif
+   endif
+#endif
    if(calc_mode/='DFT_BAND' .and. yn_dc=='n') then
-     call copy_density(Miter,system%nspin,mg,rho_s,mixing)
+     call copy_density(mixing_age,system%nspin,mg,rho_s,mixing)
      call timer_begin(LOG_CALC_RHO)
      call calc_density(system,rho_s,spsi,info,mg)
      call timer_end(LOG_CALC_RHO)
-     call update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,iter, &
+     call update_density_and_potential(lg,mg,system,info,stencil,xc_func,pp,ppn,mixing_age, &
                spsi,srg,srg_scalar,poisson,fg,rho,rho_s,rho_jm,Vpsl,Vh,Vxc,v_local,mixing,energy)
    else if(yn_dc=='y') then
    ! Divide-and-Conquer method
-     call copy_density(Miter,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
+     call copy_density(mixing_age,system%nspin,dc%mg_tot,dc%rho_tot_s,mixing)
      ! occupation
      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution) then
+#ifdef USE_HSE
+       if(exx_enabled().or.exx_pre_scf_active)then
+         ! Occupations must use the current Ritz states and their fixed-H
+         ! energies, not the previous iteration's spectrum. Do not rebuild
+         ! exchange with old occupations after rotating the states.
+         saved_hse_freeze=exx_freeze
+         exx_freeze=.true.
+         call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
+         exx_freeze=saved_hse_freeze
+       endif
+#endif
        call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
      end if
      ! rho_s for fragments
@@ -196,7 +322,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_rho_total_dcdft(system%nspin,lg,mg,info,rho_s,dc)
      ! mixing & local KS potential (total system)
      call update_density_and_potential(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot, &
-     & stencil,xc_func,pp,ppn,iter, &
+     & stencil,xc_func,pp,ppn,mixing_age, &
      & spsi,srg,srg_scalar, & ! dummy
      & dc%poisson_tot,dc%fg_tot,dc%rho_tot,dc%rho_tot_s, &
      & rho_jm, & ! dummy
@@ -225,6 +351,17 @@ DFT_Iteration : do iter=Miter+1,nscf
      call calc_total_energy_dcdft(mg,system,info,stencil,srg,v_local,spsi,shpsi,sttpsi,ewald,pp,rion_update,dc,energy)
    end if
    call timer_end(LOG_CALC_TOTAL_ENERGY)
+#ifdef USE_HSE
+   if(adaptive_exchange)then
+     ! Energy evaluation may refresh exchange after density mixing. Its event
+     ! invalidates this residual and restarts mixing on the following step.
+     call consume_support_event(support_event)
+     if(support_event)then
+       mixing_age=0
+       iteration_support_changed=.true.
+     endif
+   endif
+#endif
    if(calc_mode=='DFT_BAND')then
       esp_old=abs(esp_old-energy%esp)
       band%check_conv_esp(:,:,:)=.false.
@@ -256,6 +393,26 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if(yn_dc=='n') then
      call convergence_check(lg,mg,system,info,rho,V_local)
+     call nc23_scf_residual(system%nc_mgga23_payload,nc_scf_history,info%icomm_rko,nc_scf_residual)
+     sum1=max(sum1,nc_scf_residual)
+#ifdef USE_HSE
+     call exx_scf_residual(system,mg,info,spsi,nc_scf_residual)
+     sum1=max(sum1,nc_scf_residual)
+     if(nc_scf_residual>0d0.and.comm_is_root(nproc_id_global)) &
+       write(*,'(a,es24.16)') 'HSE full-Fock target-action residual: ',nc_scf_residual
+#endif
+#ifndef USE_OPENACC
+     if(allocated(spin_density_before)) then
+       call snapshot_density_noncollinear(spin_density_after)
+       call nc23_spin_density_residual(spin_density_after,spin_density_before,system%hvol, &
+         mixing%mixrate,info%icomm_r,nc_scf_residual)
+       sum1=max(sum1,nc_scf_residual)
+       if(comm_is_root(nproc_id_global)) &
+         write(*,'(a,es24.16)') 'SOC full-spin-density residual: ',nc_scf_residual
+     endif
+#endif
+     if(system%nc_mgga23_payload%active.and.comm_is_root(nproc_id_global)) &
+       write(*,'(a,es24.16)') 'NC_MGGA23 full-operator residual: ',nc_scf_residual
    else
    ! DC method
      call convergence_check(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot,dc%rho_tot,dc%vloc_tot)
@@ -381,6 +538,11 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    end if !calc_mode/=DFT_BAND
 
+#ifdef USE_HSE
+   ! Never accept a residual spanning two exchange support definitions.
+   if(iteration_support_changed)sum1=huge(sum1)
+#endif
+
    if(theory=='dft' .and. yn_opt=='n')then
      is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(Miter,checkpoint_interval) == 0)
      is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -401,6 +563,22 @@ DFT_Iteration : do iter=Miter+1,nscf
    endif
 
 end do DFT_Iteration
+#ifdef USE_HSE
+if(exx_pre_scf_active)error stop 'PBE pre-SCF unfinished; no hybrid ground state'
+if(exx_pre_scf_threshold>0d0.and..not.(sum1<threshold)) &
+  error stop 'Hybrid SCF after PBE pre-SCF not converged; ground state rejected'
+if(exx_pre_scf_threshold>0d0.and..not.flag_conv)then
+  flag_conv=.true.
+  if(ilevel_print>=3.and.comm_is_root(nproc_id_global)) &
+    write(*,'(a,i6,a,e15.8)') '  #GS converged at',Miter,' (last allowed iteration):',sum1
+endif
+call exx_check_localization()
+#endif
+
+! A BOMD step is not valid without a self-consistent electronic ground state.
+if(theory=='dft_md'.and.(is_global_hybrid(xc)))then
+  if(.not.(sum1<threshold))error stop 'PBEh40 BOMD: SCF not converged; ionic step rejected'
+endif
 
 if(calc_mode/='DFT_BAND')then
 if(.not.flag_conv) then
@@ -410,7 +588,23 @@ if(.not.flag_conv) then
 endif
 endif
 
+call export_hse_reference(lg,mg,system,info,stencil,srg,ppg,ppn,spsi,shpsi, &
+                          rho,V_local,Vh,Vxc,Vpsl,energy,Miter,flag_conv)
+
 contains
+
+#ifdef USE_HSE
+  subroutine consume_support_event(changed)
+    logical,intent(out) :: changed
+    integer :: local_event,total_events
+    local_event=0
+    if(exx_support_changed)local_event=1
+    call comm_summation(local_event,total_events,adaptive_comm)
+    changed=total_events>0
+    ! exx_native latches this flag until every SCF rank has seen the event.
+    exx_support_changed=.false.
+  end subroutine consume_support_event
+#endif
 
   subroutine init_convergence_check()
     implicit none

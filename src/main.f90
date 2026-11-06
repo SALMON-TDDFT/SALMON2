@@ -1,3 +1,4 @@
+#include "config.h"
   program main
   use salmon_global
   use parallelization
@@ -17,6 +18,9 @@
   endif
 
   call read_input
+#if defined(USE_HSE) && defined(USE_MPI)
+  call start_exchange_helpers
+#endif
   call set_basic_flag(theory)
 
   call read_Hubbard_parameters  !should move into read_input subroutine!
@@ -47,8 +51,67 @@
 
   if (nproc_id_global == 0) print '(A)',"end SALMON"
 
+#if defined(USE_HSE) && defined(USE_MPI)
+  call stop_exchange_helpers
+#endif
   call end_parallel
 contains
+
+#if defined(USE_HSE) && defined(USE_MPI)
+  subroutine start_exchange_helpers
+    use iso_fortran_env, only: output_unit
+    use communication, only: comm_select_application
+    use exx_worker_service, only: service_enter
+    use mpi, only: MPI_COMM_WORLD,MPI_INTEGER,MPI_MAX,MPI_Allreduce,MPI_Abort,MPI_Barrier
+    implicit none
+    integer :: bad,total_bad,ierr
+    logical :: supported,scalar_mode,spinor_mode
+    ! DC ranks belong to fragments, not to the exchange helper pool.
+    if(yn_dc=='y')return
+    ! Ordinary orbital/spatial layouts retain their original decomposition.
+    if(nproc_k<1.or.nproc_k>=nproc_size_global.or.nproc_ob/=1.or.any(nproc_rgrid/=1))return
+    spinor_mode=theory=='dft'.and.yn_spinorbit=='y'.and.spin=='noncollinear'.and. &
+      exx_factor_mode=='off'.and.yn_exx_spinor_pair_fft=='y'
+    scalar_mode=yn_spinorbit=='n'.and.spin=='unpolarized'.and.yn_exx_fft_orbits=='y'.and. &
+      (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse').and. &
+      (exx_factor_mode=='off'.or.exx_factor_mode=='learned')
+    if(theory/='dft')scalar_mode=scalar_mode.and.(propagator=='hse_taylor4'.or. &
+      (propagator=='hse_ptcn'.and.yn_predictor_corrector=='n'.and.yn_restart=='n'.and. &
+       exx_factor_mode=='learned'.and.exx_factor_exact_interval==1.and.ae_shape2=='none'))
+    supported=(spinor_mode.or.scalar_mode).and.xc=='hse06'.and. &
+      yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.yn_periodic=='y'.and. &
+      propagator/='hse_taylor4_full'.and.index(yn_symmetry,'y')/=0.and. &
+      all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.temperature<0d0.and. &
+      yn_jm=='n'.and.yn_symmetrized_stencil/='y'.and.yn_hse_wannier_snapshot/='y'.and. &
+      exx_pair_screening=='off'.and.dm_unfold_option=='no'.and. &
+      exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.hse_sr_radius==0d0.and.hse_sr_tolerance==0d0.and. &
+      al_vec1(2)==0d0.and.al_vec1(3)==0d0.and.al_vec2(1)==0d0.and. &
+      al_vec2(3)==0d0.and.al_vec3(1)==0d0.and.al_vec3(2)==0d0
+    if(exx_worker_rprime_groups>0) &
+      supported=supported.and.modulo(nproc_size_global,exx_worker_rprime_groups)==0
+    bad=merge(0,1,supported)
+    call MPI_Allreduce(bad,total_bad,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,ierr)
+    if(total_bad/=0)then
+      if(nproc_id_global==0)print *, &
+        'EXX_SERVICE_UNSUPPORTED: helpers require supported full-support symmetric CPU HSE06 exchange'
+      flush(output_unit)
+      call MPI_Barrier(MPI_COMM_WORLD,ierr)
+      call MPI_Abort(MPI_COMM_WORLD,86,ierr)
+      return
+    endif
+    call comm_select_application(nproc_k)
+    call service_enter(nproc_k,exx_worker_tile_divisor,exx_worker_rprime_groups)
+    ! Only SCF owners return; refresh their rank context and clock offset.
+    call setup_parallel
+  end subroutine start_exchange_helpers
+
+  subroutine stop_exchange_helpers
+    use exx_worker_service, only: service_stop
+    implicit none
+    call service_stop
+  end subroutine stop_exchange_helpers
+#endif
+
 
   subroutine set_basic_flag(theory)
     implicit none

@@ -121,7 +121,51 @@ module salmon_global
 !! &functional
   character(64)  :: xc !, xcname
   character(64)  :: xname
+  real(8) :: pbeh_coulomb_radius,rvv10_b,rvv10_c
+  character(8) :: rvv10_fft
+  integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
+  character(1) :: yn_hse_wannier
+  character(1) :: yn_exx_dc_mlwf ! n: canonical full-fragment SCF exchange
+  real(8) :: exx_pre_scf_threshold ! automatic 1e-4 for eligible GS; explicit 0 disables PBE warmup
+  integer :: exx_pre_scf_steps ! consecutive qualifying residuals
+  logical :: exx_pre_scf_active=.false. ! runtime only, never serialized as target GS
+  character(8) :: exx_ace_support ! occupied/source ACE construction vectors
+  character(8) :: exx_pair_screening ! off/diagnose/on; discrete hybrid pair bound
+  character(8) :: exx_factor_mode = 'off' ! off/strict/learned exact-factor history
+  character(16) :: exx_k_algorithm = 'auto'
+  character(120) :: exx_k_algorithm_reason = '' ! Derived input policy, not a namelist item
+  character(1) :: yn_exx_spinor_pair_fft = ' ' ! Full-pair CPU spinor exchange
+  character(1) :: yn_exx_fft_orbits = ' '
+  character(1) :: yn_exx_k_pair_symmetry = ' ' ! Hermitian pairs without crystal symmetry
+  character(1) :: yn_ace_shadow_diagnostic = 'n',yn_ace_export_factors = 'n'
+  character(8) :: hse_sr_group_fft = 'off' ! off/direct/halo
+  character(1) :: yn_hse_sr_wave_first = 'n',yn_hse_sr_return_sum = 'y',yn_hse_sr_pair_symmetry = 'n'
+  real(8) :: hse_sr_radius = 0d0 ! input length, converted to bohr
+  real(8) :: hse_sr_tolerance ! erfc(omega*R), zero disables finite-range convolution
+  real(8) :: exx_pair_tolerance ! raw exchange action Frobenius budget, atomic units
+  character(8) :: exx_kpoint_backend ! cpu/cufft full k-mesh exchange convolution
+  character(8) :: exx_local_backend ! cpu/cufft compact exchange implementation
+  integer :: exx_gpu_batch_size ! maximum local target batch per GPU rank
+  character(8) :: exx_local_fft ! auto: exact compact convolution; off: full grid
+  character(8) :: exx_surrogate_mode ! off or diagnostic trace; no ACTIVE propagation
+  integer :: exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach
+  integer :: exx_surrogate_capacity,exx_surrogate_rank_max
+  real(8) :: exx_surrogate_rank_rtol
+  integer :: exx_mlwf_interval,exx_mlwf_maxiter
+  real(8) :: exx_mlwf_radius ! input length, converted to bohr; 0=full support
+  real(8) :: exx_mlwf_norm_fraction ! 0 disabled; otherwise per-source retained norm
+  real(8) :: exx_mlwf_tolerance
+  character(1) :: yn_hse_profile
+  character(1) :: yn_hse_eigen_diagnostic
+  character(1) :: yn_hse_solver_diagnostic
+  character(1) :: yn_hse_wannier_snapshot
+  integer :: hse_q_reduction(3)
+  integer :: exx_worker_tile_divisor ! bounded scratch divisor; 0 follows chosen column groups
+  integer :: exx_worker_rprime_groups ! column subgroups; 0 selects symmetry-aware balanced layout
+  integer :: hse_block_rows
+  character(64) :: hse_fft_layout
+  character(256) :: hse_reference_export_directory
   character(64)  :: cname
   character(64)  :: alibx
   character(64)  :: alibc
@@ -451,6 +495,7 @@ character(256),allocatable :: atom_name(:)
   character(1)   :: yn_out_dc_fragment_coor
   real(8)        :: xi_dc
   character(1)   :: yn_dc_lcfo
+  character(1)   :: yn_dc_force_diagnostic
   character(1)   :: yn_dc_lcfo_diag
   character(16)  :: lcfo_eigensolver
   integer        :: lcfo_diag_chefsi_filter_degree

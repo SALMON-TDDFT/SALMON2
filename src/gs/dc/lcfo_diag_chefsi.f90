@@ -64,6 +64,11 @@ module lcfo_diag_chefsi
 
   public :: diag_chefsi
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
 
   subroutine diag_chefsi(dc,nspin,filter_degree,filter_chunk_size,max_cycle, &
@@ -381,7 +386,7 @@ contains
       offset = sum(n_basis(1:dc%i_frag-1,s))
       if(dc%id_frag==0) value_local(offset+1:offset+nb) = value
       call comm_summation(value_local,value_global,n_mat(s),dc%icomm_tot)
-      if(any(.not.ieee_is_finite(value_global))) then
+      if(.not.salmon_all_finite(value_global)) then
         stop "DC-LCFO CheFSI: non-finite initial eigenvalue."
       end if
       allocate(order(n_mat(s)))
@@ -575,8 +580,8 @@ contains
               workspace%q1(:,1:nchunk) = workspace%q2(:,1:nchunk)
             end do
 
-            if(any(.not.ieee_is_finite( &
-            & workspace%q1(:,1:nchunk)))) then
+            if(.not.salmon_all_finite( &
+            & workspace%q1(:,1:nchunk))) then
               unstable_chunk = 1
             else
               max_amplitude = maxval(abs(workspace%q1(:,1:nchunk)))
@@ -1338,5 +1343,35 @@ contains
     if(left<j) call sort_eigenvalue_index(value,index,left,j)
     if(i<right) call sort_eigenvalue_index(value,index,i,right)
   end subroutine sort_eigenvalue_index
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module lcfo_diag_chefsi

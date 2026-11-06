@@ -78,3 +78,17 @@ These rules apply to new and modified code. Existing legacy code may not fully c
 - For MPI-sensitive changes, also verify an MPI-enabled build and a representative MPI run.
 - For optional-library paths, test the affected configuration when feasible and state untested combinations clearly.
 - Before submitting a PR, report the build options and tests that were run.
+
+## Scalar IEEE Inquiries (Mandatory)
+
+- Call IEEE inquiry predicates such as `ieee_is_finite` and `ieee_is_nan` with scalar arguments only. Do not pass arrays, array constructors, or array sections, including inside `all(...)` or `any(...)`.
+- Check arrays with explicit element loops, or a rank-specific helper whose IEEE calls each receive one scalar element. Preserve the original precision, complete element coverage, invalid-input rejection, and MPI collective failure behavior.
+- Do not remove finite-value checks or weaken acceptance thresholds to work around compiler failures. Verify finite inputs and NaN/Infinity rejection, including the affected target compiler when practical. Fujitsu compilation can fail on array-valued IEEE inquiries even without optimization.
+
+## Forbidden Eigensolver (Mandatory)
+
+- `PZHEEV` is prohibited, including workspace queries, reproductions, diagnostics, optional branches, and fallback paths. `PZHEEVD` is a distinct permitted driver; replacements still require numerical and memory-capacity validation.
+- Before building any SALMON source tree, including historical snapshots and extracted archives, run this workspace's `tools/check_forbidden_eigensolvers.py --source-root <tree>/src`. Stop on prohibited references, unavailable cloud-only files, or inspection errors.
+- Before transferring or submitting a new executable, use `--object-tree` to inspect every linked application object and application archive. Ad-hoc links must include objects outside the main build directory. Binary names and hashes do not establish compliance; unused vendor-library exports alone do not establish an application call.
+- Keep the prohibition checks enabled during CMake configuration and incremental builds. Never bypass them to build old code. Preserve historical sources, logs, archives, and failed binaries as evidence without mass-rewriting them; they are not approved for execution or reuse.
+- Do not replace, cancel, modify, or resubmit existing remote production jobs or fixed binaries without applicable user authorization. Audit the actual execution path and report uncertainty.

@@ -22,7 +22,7 @@ subroutine main_tddft
 use math_constants, only: pi
 use salmon_global
 use structures
-use parallelization, only: adjust_elapse_time, nproc_group_global
+use parallelization, only: nproc_group_global
 use communication, only: comm_is_root, comm_sync_all, comm_bcast
 use salmon_xc, only: finalize_xc
 use timer
@@ -32,6 +32,7 @@ use checkpoint_restart_sub
 use jellium, only: check_condition_jm
 use nvtx_wrapper
 use parallelization, only: nproc_id_global
+use misc_routines, only: step_wall_clock => get_wtime
 implicit none
 
 type(s_rgrid) :: lg
@@ -59,6 +60,7 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
+real(8) :: step_wall_start,step_wall_elapsed
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
@@ -98,9 +100,11 @@ call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,nt
+  step_wall_start=step_wall_clock()
   call nvtxStartRange('main loop', itt)
 
-  if(mod(itt,2)==1)then
+  ! Initialization always loads spsi_in, also for an odd restart step Mit.
+  if(mod(itt-Mit,2)==1)then
     call time_evolution_step(Mit,nt,itt,lg,mg,system,rt,info,stencil,xc_func &
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
@@ -110,8 +114,12 @@ TE : do itt=Mit+1,nt
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
 
+  step_wall_elapsed=step_wall_clock()-step_wall_start
+  write(*,'(a,2i10,es24.15)') 'STEP_WALL rank/step/seconds: ',nproc_id_global,itt,step_wall_elapsed
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
-  is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+  ! timer_now is a local elapsed duration; absolute cross-node clock offsets cancel.
+  is_shutdown_time   = (time_shutdown > 0d0) .and. (timer_now(LOG_TOTAL) > time_shutdown)
+  call comm_bcast(is_shutdown_time,nproc_group_global)
 
   is_checkpoint = is_checkpoint_iter .or. is_shutdown_time
   call nvtxStartRange('comm_bcast', __LINE__)
@@ -126,7 +134,7 @@ TE : do itt=Mit+1,nt
 
     call timer_begin(LOG_CHECKPOINT_SYNC)
     call timer_begin(LOG_CHECKPOINT_SELF)
-    if (mod(itt,2)==1) then
+    if (mod(itt-Mit,2)==1) then
       call checkpoint_rt(lg,mg,system,info,spsi_out,itt,rt,Vh_stock1,Vh_stock2,singlescale)
     else
       call checkpoint_rt(lg,mg,system,info,spsi_in, itt,rt,Vh_stock1,Vh_stock2,singlescale)

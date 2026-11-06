@@ -24,7 +24,7 @@ contains
 SUBROUTINE init_wf(lg,mg,system,info,pp,spsi)
   use structures
   use inputoutput, only: au_length_aa, method_init_wf
-  use salmon_global, only: yn_periodic,natom,Rion,yn_jm
+  use salmon_global, only: yn_periodic,natom,Rion,yn_jm,exx_mlwf_radius,xc
   use gram_schmidt_orth
   implicit none
 
@@ -194,19 +194,34 @@ SUBROUTINE init_wf(lg,mg,system,info,pp,spsi)
 CONTAINS
 
   ! cf. RSDFT
-  subroutine init_wf_rand
+  subroutine init_wf_rand(physical_k)
     use salmon_global, only: iseed_number_change
+    use exx_functional, only: is_hybrid
     implicit none
-    integer :: s,k,n,i,llen
+    integer,intent(in),optional :: physical_k
+    integer :: s,k,n,i,llen,seed_k
     integer,allocatable :: iseed(:)
 
     call random_seed(size = n)
     allocate(iseed(n))
     llen = product(lg%num)
-    iseed(:) = (info%ik_s * system%no + info%io_s - 1) * llen &
+    seed_k=info%ik_s
+    ! Finite-support EXX is gauge dependent: changing MPI k distribution must
+    ! not change the starting orbitals and hence the localization trajectory.
+    ! Gaussian initialization visits ALL global k points on each process.
+    if(exx_mlwf_radius>0d0)seed_k=1
+    if(present(physical_k))seed_k=physical_k
+    iseed(:) = (seed_k * system%no + info%io_s - 1) * llen &
              + (mg%is(3) - lg%is(3) + 1) * lg%num(2) * lg%num(1) &
              + (mg%is(2) - lg%is(2) + 1) * lg%num(1) &
              + (mg%is(1) - lg%is(1) + 1) + iseed_number_change
+    ! Gaussian centers describe global orbitals, not independent local tiles.
+    ! Keep the serial seed on every spatial/orbital rank for hybrid exchange.
+    if(index(method_init_wf,'gauss')==1.and.(info%isize_r>1.or.info%isize_o>1).and. &
+       (is_hybrid(xc)))then
+      iseed(:)=seed_k*system%no*llen &
+        +lg%num(2)*lg%num(1)+lg%num(1)+1+iseed_number_change
+    endif
     call random_seed(put = iseed)
     deallocate(iseed)
   end subroutine
@@ -240,6 +255,8 @@ CONTAINS
 
     do ip=lbound(spsi%zwf,7),ubound(spsi%zwf,7)
     do ik=lbound(spsi%zwf,6),ubound(spsi%zwf,6)
+    ! Random initialization visits only local k points; reseed by physical k.
+    if(exx_mlwf_radius>0d0)call init_wf_rand(ik)
     do io=lbound(spsi%zwf,5),ubound(spsi%zwf,5)
     do is=lbound(spsi%zwf,4),ubound(spsi%zwf,4)
     do iz=lbound(spsi%zwf,3),ubound(spsi%zwf,3)

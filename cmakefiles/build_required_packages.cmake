@@ -20,6 +20,6 @@ if (USE_LIBXC OR USE_HSE)
   include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_libxc.cmake)
 endif ()
 
-if(USE_HSE)
+if(USE_HSE OR USE_SCALAPACK)
   include(${CMAKE_SOURCE_DIR}/cmakefiles/Builder/build_hse_fftw.cmake)
 endif()

@@ -23,6 +23,12 @@
 
 module salmon_xc
   use structures, only: s_xc_functional, s_xc_operator_payload
+#ifdef USE_HSE
+  use exx_native, only: exx_refresh,exx_enabled,exx_exchange_energy
+  use hybrid_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate,hybrid_density_evaluate
+  use rvv10, only: rvv10_evaluate
+  use rvv10_distributed, only: rvv10_evaluate_distributed
+#endif
   use builtin_pz, only: exc_cor_pz
   use builtin_pz_sp, only: exc_cor_pz_sp
   use builtin_pzm, only: exc_cor_pzm
@@ -40,6 +46,7 @@ module salmon_xc
   implicit none
 
 ! List of Exchange Correlation Functionals
+  integer, parameter :: salmon_xctype_nc_mgga23 = 10
   integer, parameter :: salmon_xctype_hse06 = 9
   integer, parameter :: salmon_xctype_none  = 0
   integer, parameter :: salmon_xctype_pz    = 1
@@ -50,9 +57,8 @@ module salmon_xc
   integer, parameter :: salmon_xctype_vs98  = 6
   integer, parameter :: salmon_xctype_pw    = 7
   integer, parameter :: salmon_xctype_r2scan = 8
-#ifdef USE_LIBXC
+! The identifier is also inspected by HSE-only NLCC gradient handling.
   integer, parameter :: salmon_xctype_libxc = 101
-#endif
 
   ! workspace used in exchange_correlation
   real(8),allocatable :: rho_tmp(:,:,:)
@@ -74,16 +80,14 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
-#ifdef USE_HSE
-    use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
-#endif
-    use communication, only: comm_summation
+    use communication, only: comm_summation,comm_bcast,comm_get_max
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit,yn_dc,yn_md,yn_opt,xc_name=>xc,rvv10_b,rvv10_c,rvv10_nq,rvv10_fft,exx_pre_scf_active
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
+    use nc_mgga23, only: nc_mgga23_refresh
     implicit none
     ! intent(inout): a meta-GGA leaves its kinetic-energy-density derivative on
     ! system%xc_payload, where the Hamiltonian picks it up.  Nothing else in this
@@ -103,6 +107,13 @@ contains
     type(s_scalar)          ,optional   :: eexc
     !
     integer :: ix,iy,iz,is,nspin,idir
+#ifdef USE_HSE
+    integer :: rv_status,rv_ng,rv_shape(3),rv_lo(3),rv_hi(3)
+    logical :: rv_used
+    logical,save :: rv_reported=.false.
+    real(8),allocatable :: rv_r(:),rv_s(:),rv_e(:),rv_v(:),rv_w(:)
+    real(8),allocatable :: rv_local(:,:,:),rv_global(:,:,:)
+#endif
     real(8) :: tot_exc
     ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
@@ -118,11 +129,10 @@ contains
     call nvtxStartRange('exchange_correlation', __LINE__)
 
 #ifdef USE_HSE
-    if(hse_enabled())then
-      if(allocated(ppn%rho_nlcc))then
-        if(maxval(abs(ppn%rho_nlcc))>1d-14)error stop 'HSE06: NLCC not yet supported'
-      endif
-      call hse_refresh(system,mg,info,spsi)
+    if(exx_enabled())then
+      if(pp%flag_nlcc.and.(yn_md/='n'.or.yn_opt/='n')) &
+        error stop 'Hybrid NLCC: fixed-ion calculations only'
+      call exx_refresh(system,mg,info,spsi)
     endif
 #endif
     ! Payload reset each call; a functional without a tau derivative leaves no stale one behind.
@@ -130,6 +140,16 @@ contains
     system%xc_payload%vtau_has_shadow_values = .false.
     system%xc_payload%e_tau = 0d0
     if (allocated(system%xc_payload%vtau%f)) deallocate(system%xc_payload%vtau%f)
+
+    if (xc_func%xctype(1)==salmon_xctype_nc_mgga23) then
+      call nc_mgga23_refresh(system,mg,info,spsi,stencil,srg_scalar,srg,ppn,E_xc,eexc)
+      do is=1,system%nspin
+        Vxc(is)%f=0d0
+      end do
+      call nvtxEndRange()
+      return
+    end if
+    system%nc_mgga23_payload%active=.false.
 
     nspin = system%nspin
 
@@ -249,6 +269,12 @@ contains
       enddo
 !$omp end parallel do
 
+#if defined(USE_HSE) || defined(USE_LIBXC)
+      if(xc_func%xctype(1)==salmon_xctype_hse06.or.any(xc_func%xctype==salmon_xctype_libxc))then
+        rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+          rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+ppn%rho_nlcc
+      endif
+#endif
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
@@ -279,6 +305,12 @@ contains
       enddo
 !$omp end parallel do
 
+#if defined(USE_HSE) || defined(USE_LIBXC)
+      if(xc_func%xctype(1)==salmon_xctype_hse06.or.any(xc_func%xctype==salmon_xctype_libxc))then
+        rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+          rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+0.5d0*ppn%rho_nlcc
+      endif
+#endif
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
@@ -303,6 +335,12 @@ contains
       enddo
 !$omp end parallel do
 
+#if defined(USE_HSE) || defined(USE_LIBXC)
+      if(xc_func%xctype(1)==salmon_xctype_hse06.or.any(xc_func%xctype==salmon_xctype_libxc))then
+        rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3)) = &
+          rhd(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3))+0.5d0*ppn%rho_nlcc
+      endif
+#endif
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
       call calc_laplacian_field(mg,stencil,rhd,lrho(1:mg%num(1),1:mg%num(2),1:mg%num(3)))
@@ -338,6 +376,74 @@ contains
         call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
     end if
+
+#ifdef USE_HSE
+    if(xc_name=='pbeh40_rvv10'.and..not.exx_pre_scf_active)then
+      if(nspin/=1)error stop 'rVV10: unpolarized density required'
+      ! In DC these are the buffered fragment density, cell and communicator.
+      ! The caller integrates eexc over its core only for global DC energy.
+      ! Each orbital group has one complete real-space communicator. Do not
+      ! sum over orbitals: that would multiply the density and nonlocal energy.
+      rv_shape=mg%ie
+      do idir=1,3
+        call comm_get_max(rv_shape(idir),info%icomm_r)
+      enddo
+      rv_ng=product(mg%num)
+      allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
+      rv_r=reshape(rho_tmp,[rv_ng]);rv_s=reshape(sum(delr**2,dim=4),[rv_ng])
+      call rvv10_evaluate_distributed(rv_shape,mg%is,mg%num, &
+        [info%isize_x,info%isize_y,info%isize_z],[info%id_x,info%id_y,info%id_z], &
+        [info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,system%hgs,rv_r,rv_s, &
+        rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_used,rv_status,rvv10_fft=='fftw')
+      if(rv_used)then
+        if(rv_status/=0)error stop 'rVV10: distributed evaluation failed'
+        eexc_tmp=eexc_tmp+reshape(rv_e,mg%num)
+        vxc_tmp=vxc_tmp+reshape(rv_v,mg%num)
+        do idir=1,3
+          rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir)-2*reshape(rv_w,mg%num)*delr(:,:,:,idir)
+        enddo
+      else
+        deallocate(rv_r,rv_s,rv_e,rv_v,rv_w)
+        rv_lo=mg%is;rv_hi=mg%ie;rv_ng=product(rv_shape)
+        allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
+        allocate(rv_local(rv_shape(1),rv_shape(2),rv_shape(3)),rv_global(rv_shape(1),rv_shape(2),rv_shape(3)))
+        rv_local=0d0
+        rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=rho_tmp
+        call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
+        rv_r=reshape(rv_global,[rv_ng]);rv_local=0d0
+        rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=sum(delr**2,dim=4)
+        call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
+        rv_s=reshape(rv_global,[rv_ng]);rv_status=0
+        if(info%id_r==0) &
+          call rvv10_evaluate(rv_shape,system%hgs,rv_r,rv_s,rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_status)
+        call comm_bcast(rv_status,info%icomm_r,0)
+        if(rv_status/=0)error stop 'rVV10: nonlocal evaluation failed'
+        call comm_bcast(rv_e,info%icomm_r,0)
+        call comm_bcast(rv_v,info%icomm_r,0)
+        call comm_bcast(rv_w,info%icomm_r,0)
+        rv_global=reshape(rv_e,rv_shape)
+        eexc_tmp=eexc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+        rv_global=reshape(rv_v,rv_shape)
+        vxc_tmp=vxc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+        rv_global=reshape(rv_w,rv_shape)
+        do idir=1,3
+          rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir) &
+            -2*rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))*delr(:,:,:,idir)
+        enddo
+      endif
+      if(.not.rv_reported.and.info%id_rko==0)then
+        if(yn_dc=='y')write(*,'(a,3i8)')'DC rVV10 fragment periodic grid: ',rv_shape
+        if(rv_used)then
+          write(*,'(2a)')'rVV10 backend: ',trim(rvv10_fft)
+          write(*,'(a,3i6)')'rVV10 FFT: native pencils, x replication/y/z ranks:', &
+            info%isize_x,info%isize_y,info%isize_z
+        else
+          write(*,'(a)')'rVV10 FFT: root reference fallback (grid/layout unsupported by FFTE)'
+        endif
+        rv_reported=.true.
+      endif
+    endif
+#endif
 
 !!!!To include the sigma contribution to GGA Vxc potential !!!!!!!
     if (xc_func%use_gradient) then
@@ -475,7 +581,7 @@ contains
 
     call comm_summation(tot_exc,E_xc,info%icomm_r)
 #ifdef USE_HSE
-    if(hse_enabled())E_xc=E_xc+hse_exchange_energy
+    if(exx_enabled().and.yn_dc/='y')E_xc=E_xc+exx_exchange_energy
 #endif
     
     if(present(eexc)) then
@@ -783,9 +889,10 @@ contains
 #endif         
         return
       
-      case ('hse06')
+      case ('hse06','pbe0','pbeh40','pbeh40_rvv10')
 #ifdef USE_HSE
-        if(spin/='unpolarized')error stop 'HSE06: unpolarized only'
+        if(spin/='unpolarized'.and.(spin/='noncollinear'.or.lower(name)/='hse06')) &
+          error stop 'Hybrid: only scalar or HSE06 noncollinear spin supported'
         xc%xctype(1)=salmon_xctype_hse06
         xc%use_gradient=.true.
         return
@@ -826,6 +933,18 @@ contains
         xc%use_laplacian = .true.
         xc%use_kinetic_energy = .true.
         xc%use_current = .true.
+        return
+
+      case ('nc_mgga23')
+        if(spin/='noncollinear') error stop 'nc_mgga23 requires spin=noncollinear'
+#ifdef USE_OPENACC
+        error stop 'nc_mgga23: CPU implementation only'
+#endif
+        xc%xctype(1)=salmon_xctype_nc_mgga23
+        xc%use_gradient=.true.
+        xc%use_laplacian=.true.
+        xc%use_kinetic_energy=.true.
+        xc%use_current=.true.
         return
 
       case ('r2scan')
@@ -1169,7 +1288,7 @@ contains
     select case (xc%xctype(1))
 #ifdef USE_HSE
     case(salmon_xctype_hse06)
-      call exec_hse_semilocal()
+      call exec_hybrid_semilocal()
 #endif
     case(salmon_xctype_pz)
       call exec_builtin_pz()
@@ -1243,22 +1362,44 @@ contains
     end subroutine exec_builtin_calc_axpy
 
 #ifdef USE_HSE
-    subroutine exec_hse_semilocal()
-      use hse_semilocal, only: hse_semilocal_evaluate
-      use salmon_global, only: hse_omega
+    subroutine exec_hybrid_semilocal()
+      use exx_functional, only: exx_fraction=>exchange_fraction
+      use salmon_global, only: hse_omega,xc_name=>xc,exx_pre_scf_active
       implicit none
-      real(8) :: r(nl),sigma(nl),ep(nl),vr(nl),vs(nl),grad(nl,3)
-      integer :: status,j
-      if(xc%ispin/=0.or..not.present(grho).or..not.present(rdedd)) &
-        error stop 'HSE06: unpolarized gradient inputs required'
-      r=reshape(rho,[nl]);grad=reshape(grho,[nl,3]);sigma=sum(grad**2,dim=2)
-      call hse_semilocal_evaluate(r,sigma,ep,vr,vs,status,hse_omega)
-      if(status/=0)error stop 'HSE06: Libxc semilocal evaluation failed'
-      if(present(exc))exc=reshape(ep,[nx,ny,nz])
-      if(present(eexc))eexc=reshape(r*ep,[nx,ny,nz])
-      if(present(vxc))vxc=reshape(vr,[nx,ny,nz])
-      ! SALMON adds div(rdedd), so store the negative gradient derivative.
-      do j=1,3;rdedd(:,:,:,j)=reshape(-2d0*vs*grad(:,j),[nx,ny,nz]);enddo
+      real(8) :: r(xc%ispin+1,nl),g(xc%ispin+1,3,nl),core(nl),zero_gradient(3,nl)
+      real(8) :: en(nl),v(xc%ispin+1,nl),dg(xc%ispin+1,3,nl)
+      integer :: status,j,is
+      core=0d0;zero_gradient=0d0
+      if(present(rho_nlcc))core=reshape(rho_nlcc,[nl])
+      ! exchange_correlation already differentiated both densities including core.
+      if(xc%ispin==0)then
+        r(1,:)=reshape(rho,[nl])
+        do j=1,3;g(1,j,:)=reshape(grho(:,:,:,j),[nl]);enddo
+      else
+        do is=1,2
+          r(is,:)=reshape(rho_s(:,:,:,is),[nl])
+          do j=1,3;g(is,j,:)=reshape(grho_s(:,:,:,is,j),[nl]);enddo
+        enddo
+      endif
+      if(exx_pre_scf_active)then
+        call hybrid_density_evaluate(r,g,core,zero_gradient,en,v,dg,status,exchange_fraction=0d0)
+      else if(xc_name=='hse06')then
+        call hybrid_density_evaluate(r,g,core,zero_gradient,en,v,dg,status,screening=hse_omega)
+      else
+        call hybrid_density_evaluate(r,g,core,zero_gradient,en,v,dg,status,exchange_fraction=exx_fraction())
+      endif
+      if(status/=0)error stop 'Hybrid: Libxc semilocal evaluation failed'
+      if(present(exc))exc=reshape(en/max(sum(r,dim=1)+core,tiny(1d0)),[nx,ny,nz])
+      if(present(eexc))eexc=reshape(en,[nx,ny,nz])
+      if(xc%ispin==0)then
+        if(present(vxc))vxc=reshape(v(1,:),[nx,ny,nz])
+        do j=1,3;rdedd(:,:,:,j)=reshape(-dg(1,j,:),[nx,ny,nz]);enddo
+      else
+        do is=1,2
+          if(present(vxc_s))vxc_s(:,:,:,is)=reshape(v(is,:),[nx,ny,nz])
+          do j=1,3;rdedd_s(:,:,:,is,j)=reshape(-dg(is,j,:),[nx,ny,nz]);enddo
+        enddo
+      endif
     end subroutine
 #endif
 
@@ -1725,9 +1866,8 @@ contains
       integer(c_size_t) :: np
 #endif
 
-      if(pp%flag_nlcc)then
-        stop "libxc for spin-polarised systems with nlcc is currently not implemented."
-      end if
+      if(pp%flag_nlcc.and..not.present(rho_nlcc)) &
+        error stop 'Spin Libxc NLCC requires core density'
 
       do iz=1,nz
       do iy=1,ny
@@ -1737,6 +1877,9 @@ contains
          gvxc_tmp_1d=0.d0
          rho_1d(1) = rho_s(ix,iy,iz,1)
          rho_1d(2) = rho_s(ix,iy,iz,2)
+         ! Frozen unpolarized core contributes equally to both local spin channels.
+         ! grho_s already contains the matching half-core gradients from calc_xc.
+         if(pp%flag_nlcc)rho_1d=rho_1d+0.5d0*rho_nlcc(ix,iy,iz)
          if (xc%use_gradient) then
            sigma_1d(1) = grho_s(ix,iy,iz,1,1)**2+grho_s(ix,iy,iz,1,2)**2+grho_s(ix,iy,iz,1,3)**2
            sigma_1d(2) = grho_s(ix,iy,iz,1,1)*grho_s(ix,iy,iz,2,1) &

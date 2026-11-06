@@ -21,6 +21,7 @@ module inputoutput
   use phys_constants
   use salmon_global
   implicit none
+  private :: resolve_ky_spin_inputs
 !Physical constant
   real(8),parameter :: au_time_fs = 0.02418884326505d0
   real(8),parameter :: au_energy_ev = 27.21138505d0
@@ -108,6 +109,11 @@ module inputoutput
   type(unit_t) :: t_unit_polarizability
   type(unit_t) :: t_unit_conductivity
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d
+  interface salmon_all_finite
+    module procedure finite_real_1d
+  end interface
 contains
   subroutine read_input
     implicit none
@@ -204,9 +210,14 @@ contains
     use communication
     use filesystem, only: get_filehandle
     use misc_routines, only: string_lowercase
+    use exx_functional, only: is_hybrid
+    use exx_k_selection, only: resolve_k_algorithm
     implicit none
     integer :: ii
     real(8) :: norm
+    ! Read-only compatibility aliases; computational modules use EXX names.
+    integer :: hse_mlwf_interval,hse_mlwf_maxiter
+    real(8) :: hse_mlwf_tolerance
 
     namelist/calculation/ &
       & theory, &
@@ -280,8 +291,21 @@ contains
 
     namelist/functional/ &
       & xc, &
-      & cname, &
-      & hse_omega, &
+      & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
+      & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
+      & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
+      & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
+      & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
+      & exx_factor_mode,exx_k_algorithm,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
+      & yn_ace_shadow_diagnostic,yn_ace_export_factors, &
+      & hse_sr_group_fft,yn_hse_sr_wave_first,yn_hse_sr_return_sum,yn_hse_sr_pair_symmetry,hse_sr_radius, &
+      & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
+      & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
+      & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
+      & yn_hse_profile, &
+      & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
+      & hse_q_reduction, hse_block_rows, exx_worker_tile_divisor, exx_worker_rprime_groups, &
+      & hse_fft_layout, hse_reference_export_directory, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -605,7 +629,7 @@ contains
       & file_atom_coor_frag, &
       & yn_out_dc_fragment_coor, &
       & xi_dc, &
-      & yn_dc_lcfo, &
+      & yn_dc_lcfo, yn_dc_force_diagnostic, &
       & yn_dc_lcfo_diag, &
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
@@ -699,7 +723,7 @@ contains
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
-    spin               = 'unpolarized'
+    spin               = 'auto'
     al                 = 0d0
     al_vec1            = 0d0
     al_vec2            = 0d0
@@ -713,7 +737,7 @@ contains
     natom              = 0
     file_atom_coor     = 'none'
     file_atom_red_coor = 'none'
-    yn_spinorbit       = 'n'
+    yn_spinorbit       = 'a'
     yn_symmetry        = 'n'
     absorbing_boundary = 'none'
     imagnary_potential_w0 = 0d0
@@ -734,7 +758,61 @@ contains
     ! xcname = 'PZ'
     xname = 'none'
     cname = 'none'
+    pbeh_coulomb_radius=0d0
+    rvv10_fft='ffte'
+    rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
+    yn_hse_wannier = 'n'
+    exx_mlwf_interval = -huge(1)
+    hse_mlwf_interval = -huge(1)
+    exx_mlwf_maxiter = -huge(1)
+    hse_mlwf_maxiter = -huge(1)
+    exx_mlwf_tolerance = -huge(1d0)
+    hse_mlwf_tolerance = -huge(1d0)
+    exx_mlwf_radius = 0d0
+    exx_factor_mode = 'off'
+    exx_k_algorithm = 'auto'
+    yn_exx_spinor_pair_fft = ' '
+    yn_exx_fft_orbits = ' '
+    yn_exx_k_pair_symmetry = ' '
+    yn_ace_shadow_diagnostic = 'n'
+    yn_ace_export_factors = 'n'
+    hse_sr_group_fft = 'off'
+    yn_hse_sr_wave_first = 'n'
+    yn_hse_sr_return_sum = 'y'
+    yn_hse_sr_pair_symmetry = 'y'
+    hse_sr_radius = 0d0
+    exx_factor_history_frames = 3
+    exx_factor_exact_interval = 8
+    exx_factor_n_teach = 8
+    exx_factor_warmup_steps = 0 ! Deprecated input; derived after reading the namelist.
+    exx_surrogate_mode = 'off'
+    exx_surrogate_capacity = 64
+    exx_surrogate_rank_max = 256
+    exx_surrogate_rank_rtol = 1d-12
+    exx_mlwf_norm_fraction = 0d0
+    exx_local_fft = 'auto'
+    exx_kpoint_backend = 'cpu'
+    exx_local_backend = 'cpu'
+    exx_gpu_batch_size = 8
+    yn_exx_dc_mlwf = 'n'
+    exx_pre_scf_threshold = -huge(1d0) ! Omitted input; resolve after all broadcasts.
+    exx_pre_scf_steps = 3
+    exx_pre_scf_active = .false.
+    exx_ace_support = 'occupied'
+    exx_pair_screening = 'off'
+    hse_sr_tolerance = 0d0
+    exx_pair_tolerance = 0d0
+    yn_hse_profile = 'n'
+    yn_hse_eigen_diagnostic = 'n'
+    yn_hse_solver_diagnostic = 'n'
+    yn_hse_wannier_snapshot = 'n'
+    hse_q_reduction = 1
+    hse_block_rows = 0
+    exx_worker_tile_divisor = 0
+    exx_worker_rprime_groups = 0
+    hse_fft_layout = 'auto'
+    hse_reference_export_directory = 'none'
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
@@ -1052,6 +1130,7 @@ contains
     file_atom_coor_frag = 'none'
     yn_out_dc_fragment_coor = 'n'
     xi_dc = -1d0
+    yn_dc_force_diagnostic = 'n'
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
 #ifdef USE_EIGENEXA
@@ -1167,6 +1246,9 @@ contains
 !! convert lowercase
     call string_lowercase(theory)
     call string_lowercase(spin)
+    call string_lowercase(yn_spinorbit)
+    if(comm_is_root(nproc_id_global)) &
+      call resolve_ky_spin_inputs(file_pseudo,nelem,spin,yn_spinorbit)
     call string_lowercase(xc)
     call string_lowercase(cname)
     call string_lowercase(xname)
@@ -1302,6 +1384,102 @@ contains
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(yn_hse_wannier,nproc_group_global)
+    call comm_bcast(hse_mlwf_interval,nproc_group_global)
+    call comm_bcast(exx_mlwf_interval,nproc_group_global)
+    if(hse_mlwf_interval/=-huge(1))then
+      if(exx_mlwf_interval/=-huge(1).and.exx_mlwf_interval/=hse_mlwf_interval) &
+        error stop 'conflicting EXX/legacy MLWF interval'
+      exx_mlwf_interval=hse_mlwf_interval
+    endif
+    if(exx_mlwf_interval==-huge(1))exx_mlwf_interval=10
+    call comm_bcast(hse_mlwf_maxiter,nproc_group_global)
+    call comm_bcast(exx_mlwf_maxiter,nproc_group_global)
+    if(hse_mlwf_maxiter/=-huge(1))then
+      if(exx_mlwf_maxiter/=-huge(1).and.exx_mlwf_maxiter/=hse_mlwf_maxiter) &
+        error stop 'conflicting EXX/legacy MLWF maxiter'
+      exx_mlwf_maxiter=hse_mlwf_maxiter
+    endif
+    if(exx_mlwf_maxiter==-huge(1))exx_mlwf_maxiter=200
+    call comm_bcast(hse_mlwf_tolerance,nproc_group_global)
+    call comm_bcast(exx_mlwf_tolerance,nproc_group_global)
+    if(hse_mlwf_tolerance/=-huge(1d0))then
+      if(exx_mlwf_tolerance/=-huge(1d0).and.exx_mlwf_tolerance/=hse_mlwf_tolerance) &
+        error stop 'conflicting EXX/legacy MLWF tolerance'
+      exx_mlwf_tolerance=hse_mlwf_tolerance
+    endif
+    if(exx_mlwf_tolerance==-huge(1d0))exx_mlwf_tolerance=1d-6
+    call comm_bcast(yn_exx_dc_mlwf,nproc_group_global)
+    call string_lowercase(yn_exx_dc_mlwf)
+    call comm_bcast(exx_pre_scf_threshold,nproc_group_global)
+    call comm_bcast(exx_pre_scf_steps,nproc_group_global)
+    call comm_bcast(exx_ace_support,nproc_group_global)
+    call string_lowercase(exx_ace_support)
+    call comm_bcast(exx_pair_screening,nproc_group_global)
+    call string_lowercase(exx_pair_screening)
+    call comm_bcast(exx_factor_mode,nproc_group_global)
+    call string_lowercase(exx_factor_mode)
+    call comm_bcast(exx_k_algorithm,nproc_group_global)
+    call string_lowercase(exx_k_algorithm)
+    call comm_bcast(yn_exx_spinor_pair_fft,nproc_group_global)
+    call string_lowercase(yn_exx_spinor_pair_fft)
+    call comm_bcast(yn_exx_fft_orbits,nproc_group_global)
+    call string_lowercase(yn_exx_fft_orbits)
+    call comm_bcast(yn_exx_k_pair_symmetry,nproc_group_global)
+    call string_lowercase(yn_exx_k_pair_symmetry)
+    call comm_bcast(yn_ace_shadow_diagnostic,nproc_group_global)
+    call string_lowercase(yn_ace_shadow_diagnostic)
+    call comm_bcast(yn_ace_export_factors,nproc_group_global)
+    call string_lowercase(yn_ace_export_factors)
+    call comm_bcast(hse_sr_group_fft,nproc_group_global)
+    call string_lowercase(hse_sr_group_fft)
+    call comm_bcast(yn_hse_sr_wave_first,nproc_group_global)
+    call string_lowercase(yn_hse_sr_wave_first)
+    call comm_bcast(yn_hse_sr_return_sum,nproc_group_global)
+    call string_lowercase(yn_hse_sr_return_sum)
+    call comm_bcast(yn_hse_sr_pair_symmetry,nproc_group_global)
+    call string_lowercase(yn_hse_sr_pair_symmetry)
+    call comm_bcast(hse_sr_radius,nproc_group_global)
+    hse_sr_radius=hse_sr_radius*ulength_to_au
+    call comm_bcast(hse_sr_tolerance,nproc_group_global)
+    call comm_bcast(exx_pair_tolerance,nproc_group_global)
+    call comm_bcast(exx_kpoint_backend,nproc_group_global)
+    call string_lowercase(exx_kpoint_backend)
+    call comm_bcast(exx_local_backend,nproc_group_global)
+    call string_lowercase(exx_local_backend)
+    call comm_bcast(exx_gpu_batch_size,nproc_group_global)
+    call comm_bcast(exx_local_fft,nproc_group_global)
+    call string_lowercase(exx_local_fft)
+    call comm_bcast(exx_factor_n_teach,nproc_group_global)
+    call comm_bcast(exx_factor_history_frames,nproc_group_global)
+    call comm_bcast(exx_factor_exact_interval,nproc_group_global)
+    call comm_bcast(exx_factor_warmup_steps,nproc_group_global)
+    call comm_bcast(exx_surrogate_mode,nproc_group_global)
+    call string_lowercase(exx_surrogate_mode)
+    call comm_bcast(exx_surrogate_capacity,nproc_group_global)
+    call comm_bcast(exx_surrogate_rank_max,nproc_group_global)
+    call comm_bcast(exx_surrogate_rank_rtol,nproc_group_global)
+    call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
+    call comm_bcast(exx_mlwf_radius,nproc_group_global)
+    exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
+    call comm_bcast(yn_hse_profile,nproc_group_global)
+    call comm_bcast(yn_hse_eigen_diagnostic,nproc_group_global)
+    call comm_bcast(yn_hse_solver_diagnostic,nproc_group_global)
+    call comm_bcast(yn_hse_wannier_snapshot,nproc_group_global)
+    call comm_bcast(hse_q_reduction,nproc_group_global)
+    call comm_bcast(hse_block_rows,nproc_group_global)
+    call comm_bcast(exx_worker_tile_divisor,nproc_group_global)
+    call comm_bcast(exx_worker_rprime_groups,nproc_group_global)
+    call comm_bcast(hse_fft_layout,nproc_group_global)
+    call string_lowercase(hse_fft_layout)
+    call comm_bcast(hse_reference_export_directory,nproc_group_global)
+    call comm_bcast(pbeh_coulomb_radius,nproc_group_global)
+    pbeh_coulomb_radius=pbeh_coulomb_radius*ulength_to_au
+    call comm_bcast(rvv10_b,nproc_group_global)
+    call comm_bcast(rvv10_c,nproc_group_global)
+    call comm_bcast(rvv10_nq,nproc_group_global)
+    call comm_bcast(rvv10_fft,nproc_group_global)
+    call string_lowercase(rvv10_fft)
     call comm_bcast(hse_omega    ,nproc_group_global)
     hse_omega = hse_omega / ulength_to_au ! internal bohr^-1
     call comm_bcast(xname        ,nproc_group_global)
@@ -1335,12 +1513,12 @@ contains
     ! to validation rather than being silently overwritten.
     if(propagator=='')then
       propagator='middlepoint'
-      if(xc=='hse06'.and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
+      if((is_hybrid(xc)).and.(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')) &
         propagator='hse_taylor4'
     endif
     if(yn_predictor_corrector=='')then
       yn_predictor_corrector='n'
-      if(xc=='hse06'.and.propagator=='hse_taylor4') &
+      if((is_hybrid(xc)).and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
         yn_predictor_corrector='y'
     endif
 !! == bcast for &scf
@@ -1726,6 +1904,7 @@ contains
     call comm_bcast(file_atom_coor_frag, nproc_group_global)
     call comm_bcast(yn_out_dc_fragment_coor, nproc_group_global)
     call comm_bcast(xi_dc, nproc_group_global)
+    call comm_bcast(yn_dc_force_diagnostic, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
@@ -1748,7 +1927,94 @@ contains
     call comm_bcast(out_mom_distr_rt_step, nproc_group_global)
     call comm_bcast(nq_mom, nproc_group_global)
     call comm_bcast(dq_mom, nproc_group_global)
+    ! Resolve normalized, broadcast input once; legacy flags are blank only when omitted.
+    call string_lowercase(yn_spinorbit)
+    call resolve_k_algorithm(exx_k_algorithm,yn_spinorbit=='y',yn_exx_fft_orbits, &
+      yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft,exx_k_algorithm_reason,ii, &
+      spinor_pair_supported=xc=='hse06'.and.yn_dc=='n'.and.exx_kpoint_backend=='cpu'.and. &
+        all(hse_q_reduction==1), &
+      crystal_reuse_supported=yn_spinorbit=='n'.and.is_hybrid(xc).and.yn_dc=='n'.and. &
+        product(num_kgrid)>1.and.index(yn_symmetry,'y')>0.and.exx_kpoint_backend=='cpu'.and. &
+        all(hse_q_reduction==1))
+    if(ii/=0)then
+      if(comm_is_root(nproc_id_global))write(*,'(a)')trim(exx_k_algorithm_reason)
+      error stop 'Invalid EXX k algorithm selection'
+    endif
+    ! Resolve the omitted pre-SCF input only for supported fresh static GS.
+    ! Explicit zero remains the opt-out, and explicit positive inputs retain
+    ! the compatibility checks in check_bad_input.
+    if(exx_pre_scf_threshold==-huge(1d0))then
+      exx_pre_scf_threshold=0d0
+      call string_lowercase(yn_restart)
+      call string_lowercase(yn_md)
+      call string_lowercase(yn_opt)
+      call string_lowercase(yn_dc)
+      call string_lowercase(yn_hse_wannier_snapshot)
+      call string_lowercase(yn_hse_eigen_diagnostic)
+      call string_lowercase(yn_hse_solver_diagnostic)
+#ifdef USE_HSE
+      if(is_hybrid(xc).and.theory=='dft'.and.yn_restart=='n'.and.yn_md=='n'.and.yn_opt=='n'.and. &
+         (yn_dc=='n'.or.temperature>0d0).and.checkpoint_interval<=0.and.time_shutdown<=0d0.and. &
+         yn_hse_wannier_snapshot=='n'.and.yn_hse_eigen_diagnostic=='n'.and.yn_hse_solver_diagnostic=='n'.and. &
+         method_mixing/='simple_potential'.and. &
+         (convergence=='rho_dne'.or.convergence=='norm_rho'.or.convergence=='norm_rho_dng')) &
+        exx_pre_scf_threshold=1d-4
+#endif
+    endif
+    ! BEGIN automatic ACE warmup
+    ! H factors supply the first increment example at endpoint H; each later endpoint adds one.
+    if(exx_factor_history_frames/=3)error stop 'EXX factor history is fixed at 3 frames'
+    if(exx_factor_n_teach<1)error stop 'EXX factor teacher count must be positive'
+    if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
+    if(exx_factor_n_teach>huge(exx_factor_n_teach)-(exx_factor_history_frames-1)) &
+      error stop 'EXX factor teacher count overflows warmup'
+    if(exx_factor_n_teach+exx_factor_history_frames-1> &
+      huge(exx_factor_warmup_steps)/exx_factor_exact_interval) &
+      error stop 'EXX factor warmup exceeds integer range'
+    exx_factor_warmup_steps=(exx_factor_history_frames+exx_factor_n_teach-1)*exx_factor_exact_interval
+    ! END automatic ACE warmup
   end subroutine read_input_common
+
+  ! Resolve omitted controls before broadcasts and compatibility checks.
+  ! Extended KY explicitly declares j-resolved data; legacy formats retain
+  ! their scalar default. Explicit user choices are never silently overridden.
+  subroutine resolve_ky_spin_inputs(files,n,spin_mode,soc_mode)
+    implicit none
+    character(*),intent(in) :: files(:)
+    integer,intent(in) :: n
+    character(*),intent(inout) :: spin_mode,soc_mode
+    character(512) :: line
+    integer :: i,unit,ios,length
+    logical :: has_ky_soc,automatic
+    if(n<0.or.n>size(files))error stop 'Automatic KY spin: invalid element count'
+    has_ky_soc=.false.
+    automatic=spin_mode=='auto'.or.soc_mode=='a'
+    if(.not.automatic)return
+    do i=1,n
+      length=len_trim(files(i))
+      if(length<8)cycle
+      if(files(i)(length-7:length)/='_rps.dat')cycle
+      open(newunit=unit,file=trim(files(i)),status='old',action='read',iostat=ios)
+      if(ios/=0)error stop 'Automatic KY spin: cannot open pseudopotential'
+      read(unit,'(a)',iostat=ios)line
+      if(ios==0)read(unit,'(a)',iostat=ios)line
+      close(unit)
+      if(ios/=0)error stop 'Automatic KY spin: cannot read pseudopotential header'
+      if(trim(line)=='KY_SOC_NLCC_V1'.or.trim(line)=='KY_SOC_NLCC_V2')has_ky_soc=.true.
+    enddo
+    if(soc_mode=='a')then
+      soc_mode='n'
+      if(has_ky_soc.or.spin_mode=='noncollinear')soc_mode='y'
+    endif
+    if(spin_mode=='auto')then
+      spin_mode='unpolarized'
+      if(soc_mode=='y')spin_mode='noncollinear'
+    endif
+    if(has_ky_soc.and.soc_mode=='n')error stop 'KY_SOC_NLCC conflicts with explicit yn_spinorbit=n'
+    if(soc_mode=='y'.and.spin_mode/='noncollinear') &
+      error stop 'SOC conflicts with explicit spin; noncollinear required'
+    write(*,'(a,a,a,a)')'Automatic KY spin: spin=',trim(spin_mode),', yn_spinorbit=',trim(soc_mode)
+  end subroutine resolve_ky_spin_inputs
 
   subroutine read_atomic_coordinates
     use parallelization
@@ -1756,6 +2022,7 @@ contains
     use filesystem, only: get_filehandle
     use salmon_global, only: directory_read_data,yn_restart,yn_self_checkpoint
     use checkpoint_restart_sub, only: generate_restart_directory_name
+    implicit none
     character(256) :: filename_tmp,char_atom, gdir,wdir
     integer :: icount,i
     logical :: if_error, if_cartesian, iself
@@ -2239,7 +2506,60 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
+      if(xc=='nc_mgga23') write(fh_variables_log,*) &
+        '# nc_mgga23: adiabatic gKS; PRB107165111+PRB110199902; gamma=0.8; vacuum_n<=1e-25 au'
+      write(fh_variables_log, *) "# pbeh_coulomb_radius (bohr; 0=auto)=",pbeh_coulomb_radius
+      write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
+      write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
+      write(fh_variables_log, *) "# yn_hse_wannier=",yn_hse_wannier
+      write(fh_variables_log, *) "# yn_exx_dc_mlwf=",yn_exx_dc_mlwf
+      write(fh_variables_log, *) "# exx_pre_scf_threshold=",exx_pre_scf_threshold
+      write(fh_variables_log, *) "# exx_pre_scf_steps=",exx_pre_scf_steps
+      write(fh_variables_log, *) "# exx_ace_support=",exx_ace_support
+      write(fh_variables_log, *) "# exx_pair_screening=",exx_pair_screening
+      write(fh_variables_log, *) "# exx_factor_mode=",exx_factor_mode
+      write(fh_variables_log, *) "# exx_k_algorithm=",exx_k_algorithm
+      write(fh_variables_log, *) "# exx_k_algorithm_reason=",trim(exx_k_algorithm_reason)
+      write(fh_variables_log, *) "# yn_exx_spinor_pair_fft=",yn_exx_spinor_pair_fft
+      write(fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
+      write(fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
+      write(fh_variables_log, *) "# yn_ace_shadow_diagnostic=",yn_ace_shadow_diagnostic
+      write(fh_variables_log, *) "# yn_ace_export_factors=",yn_ace_export_factors
+      write(fh_variables_log, *) "# hse_sr_group_fft=",hse_sr_group_fft
+      write(fh_variables_log, *) "# yn_hse_sr_wave_first=",yn_hse_sr_wave_first
+      write(fh_variables_log, *) "# yn_hse_sr_return_sum=",yn_hse_sr_return_sum
+      write(fh_variables_log, *) "# yn_hse_sr_pair_symmetry=",yn_hse_sr_pair_symmetry
+      write(fh_variables_log, *) "# hse_sr_radius=",hse_sr_radius*ulength_from_au
+      write(fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
+      write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
+      write(fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
+      write(fh_variables_log, *) "# exx_local_backend=",exx_local_backend
+      write(fh_variables_log, *) "# exx_gpu_batch_size=",exx_gpu_batch_size
+      write(fh_variables_log, *) "# exx_local_fft=",exx_local_fft
+      write(fh_variables_log, *) "# exx_factor_n_teach=",exx_factor_n_teach
+      write(fh_variables_log, *) "# exx_factor_history_frames=",exx_factor_history_frames
+      write(fh_variables_log, *) "# exx_factor_exact_interval=",exx_factor_exact_interval
+      write(fh_variables_log, *) "# exx_factor_warmup_steps=",exx_factor_warmup_steps
+      write(fh_variables_log, *) "# exx_surrogate_mode=",exx_surrogate_mode
+      write(fh_variables_log, *) "# exx_surrogate_capacity=",exx_surrogate_capacity
+      write(fh_variables_log, *) "# exx_surrogate_rank_max=",exx_surrogate_rank_max
+      write(fh_variables_log, *) "# exx_surrogate_rank_rtol=",exx_surrogate_rank_rtol
+      write(fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
+      write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
+      write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
+      write(fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
+      write(fh_variables_log, *) "# exx_mlwf_tolerance=",exx_mlwf_tolerance
+      write(fh_variables_log, *) "# yn_hse_profile=",yn_hse_profile
+      write(fh_variables_log, *) "# yn_hse_eigen_diagnostic=",yn_hse_eigen_diagnostic
+      write(fh_variables_log, *) "# yn_hse_solver_diagnostic=",yn_hse_solver_diagnostic
+      write(fh_variables_log, *) "# yn_hse_wannier_snapshot=",yn_hse_wannier_snapshot
+      write(fh_variables_log, *) "# hse_q_reduction=",hse_q_reduction
+      write(fh_variables_log, *) "# hse_block_rows=",hse_block_rows
+      write(fh_variables_log, *) "# exx_worker_tile_divisor=",exx_worker_tile_divisor
+      write(fh_variables_log, *) "# exx_worker_rprime_groups=",exx_worker_rprime_groups
+      write(fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
+      write(fh_variables_log, *) "# hse_reference_export_directory=",hse_reference_export_directory
 #ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
@@ -2728,6 +3048,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_out_dc_fragment_coor", yn_out_dc_fragment_coor
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
+      write(fh_variables_log, *) "# yn_dc_force_diagnostic=",yn_dc_force_diagnostic
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
@@ -2783,10 +3104,51 @@ contains
     use ieee_finite_check, only: ieee_is_finite => is_finite
     use parallelization
     use communication
+    use exx_functional, only: is_global_hybrid,is_hybrid
     implicit none
-    integer :: i,round_phi
+    integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
-    logical :: if_orthogonal_tmp
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
+    logical :: global_symmetry_route,global_native_k_route
+
+    learned_mesh_checkpoint=exx_factor_mode=='learned'.and.xc=='hse06'.and. &
+      yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
+      product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
+      exx_ace_support=='source'.and.yn_self_checkpoint=='n'
+
+    if(propagator=='ptcn_mgga23'.and.xc/='nc_mgga23')error stop 'ptcn_mgga23 requires nc_mgga23'
+    if(xc=='nc_mgga23') then
+      if(spin/='noncollinear'.or.yn_spinorbit/='y') &
+        error stop 'nc_mgga23 requires noncollinear spinors and SOC representation'
+      if(yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or.yn_jm/='n') &
+        error stop 'nc_mgga23 supports conventional fixed-ion pseudopotential calculations only'
+      if(theory/='dft'.and.theory/='tddft_pulse'.and.theory/='tddft_response') &
+        error stop 'nc_mgga23: unsupported theory'
+      if(yn_fix_func/='n'.or.(yn_symmetry/='n'.and.yn_symmetry/='nnn').or.yn_symmetrized_stencil/='n') &
+        error stop 'nc_mgga23 requires self-consistent XC without symmetry reduction'
+      if(yn_out_rvf_rt=='y') error stop 'nc_mgga23 force output is not implemented'
+      if(yn_out_spin_current_decomposed=='y'.or.yn_out_spin_current_micro=='y') &
+        error stop 'nc_mgga23 decomposed/microscopic spin current is not implemented'
+      if(yn_out_micro_je=='y'.or.yn_out_current_decomposed=='y'.or.yn_out_intraband_current=='y') &
+        error stop 'nc_mgga23 supports macroscopic charge-current output only'
+      if(xname/='none'.or.cname/='none') error stop 'nc_mgga23 cannot be combined with separate xname/cname'
+      if(theory/='dft')then
+        if(propagator=='ptcn_mgga23')then
+#ifndef USE_SCALAPACK
+          error stop 'MGGA23 PT-CN requires a ScaLAPACK build'
+#endif
+          if(yn_predictor_corrector/='n'.or.gram_schmidt_interval>0) &
+            error stop 'MGGA23 PT-CN requires no external predictor or Gram-Schmidt'
+          if(yn_periodic/='y'.or.any(nproc_rgrid/=1)) &
+            error stop 'MGGA23 PT-CN requires periodic full local spatial domain'
+        else if(propagator/='middlepoint'.or.yn_predictor_corrector/='y')then
+          error stop 'nc_mgga23 requires middlepoint-PC or ptcn_mgga23'
+        endif
+      endif
+#ifdef USE_OPENACC
+      error stop 'nc_mgga23 is available on CPU only'
+#endif
+    endif
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)
@@ -2862,6 +3224,42 @@ contains
     call yn_argument_check(yn_out_mom_distr_rt)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
+    call yn_argument_check(yn_exx_dc_mlwf)
+    call yn_argument_check(yn_hse_wannier)
+    if(exx_k_algorithm=='pair'.or.exx_k_algorithm=='orbits')then
+      if(theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse') &
+        error stop 'Manual EXX k algorithm requires dft or fixed-ion RT'
+      if(.not.is_hybrid(xc).or.yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
+         exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1).or. &
+         any(nproc_rgrid/=1).or.nproc_ob/=1.or.(temperature>=0d0.and.yn_spinorbit/='y').or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
+         yn_hse_wannier_snapshot/='n'.or. &
+         (exx_factor_mode/='off'.and..not.(yn_spinorbit=='y'.and.temperature>=0d0.and. &
+          exx_factor_mode=='learned'))) &
+        error stop 'Manual EXX k algorithm requires fixed-ion full-support CPU k-only native exchange'
+      if(yn_spinorbit=='n'.and.(product(num_kgrid)<2.or.2*nstate/=nelec)) &
+        error stop 'Manual scalar EXX k algorithm requires dense k mesh and occupied spin pairs'
+      if(exx_k_algorithm=='pair'.and.yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0) &
+        error stop 'Manual scalar pair algorithm requires crystal symmetry off'
+    endif
+    call yn_argument_check(yn_exx_spinor_pair_fft)
+    if(yn_exx_spinor_pair_fft=='y')then
+      if(xc/='hse06'.or.yn_spinorbit/='y'.or.yn_dc/='n'.or. &
+         exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1)) &
+        error stop 'Spinor pair FFT requires native CPU SOC HSE06 with all q points'
+    endif
+    call yn_argument_check(yn_exx_fft_orbits)
+    call yn_argument_check(yn_exx_k_pair_symmetry)
+    call yn_argument_check(yn_ace_shadow_diagnostic)
+    call yn_argument_check(yn_ace_export_factors)
+    call yn_argument_check(yn_hse_sr_wave_first)
+    call yn_argument_check(yn_hse_sr_return_sum)
+    call yn_argument_check(yn_hse_sr_pair_symmetry)
+    call yn_argument_check(yn_hse_profile)
+    call yn_argument_check(yn_hse_eigen_diagnostic)
+    call yn_argument_check(yn_hse_solver_diagnostic)
+    call yn_argument_check(yn_hse_wannier_snapshot)
+    call yn_argument_check(yn_dc_force_diagnostic)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
@@ -2883,6 +3281,10 @@ contains
 #else
       stop 'lcfo_eigensolver=eigenexa requires a build with EigenExa support.'
 #endif
+    case('scalapack')
+#ifndef USE_SCALAPACK
+      error stop 'lcfo_eigensolver=scalapack requires a build with ScaLAPACK support.'
+#endif
     case('chefsi')
 #ifdef USE_SCALAPACK
       if(lcfo_diag_chefsi_filter_degree<1) then
@@ -2902,7 +3304,7 @@ contains
       stop 'lcfo_eigensolver=chefsi requires a build with ScaLAPACK support.'
 #endif
     case default
-      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', or 'chefsi'."
+      stop "lcfo_eigensolver must be 'lapack', 'eigenexa', 'scalapack', or 'chefsi'."
     end select
     
     if(yn_periodic=='n' .and. num_kgrid(1)*num_kgrid(2)*num_kgrid(3)/=1) then
@@ -3110,44 +3512,433 @@ contains
       stop "either yn_ffte or yn_fftw can be specified"
     end if
 
-    if(xc=='hse06')then
+    if(any(hse_q_reduction<1))error stop 'HSE: q reduction factors must be positive'
+    if(any(modulo(num_kgrid,hse_q_reduction)/=0)) &
+      error stop 'HSE: q reduction factors must divide the k mesh'
+    if(any(hse_q_reduction/=1))then
+      if(xc/='hse06'.or.yn_dc/='n'.or.temperature>=0d0.or. &
+         yn_hse_wannier/='n'.or.exx_mlwf_norm_fraction/=0d0.or.exx_mlwf_radius/=0d0.or. &
+         hse_sr_tolerance/=0d0.or.exx_kpoint_backend/='cpu') &
+        error stop 'HSE: q reduction requires non-DC integer full-k CPU exchange without spatial localization'
+    endif
+    if(hse_block_rows<0)error stop 'HSE: hse_block_rows must be nonnegative'
+    if(exx_worker_tile_divisor<0)error stop 'HSE: exx_worker_tile_divisor must be nonnegative (0=automatic)'
+    if(exx_worker_rprime_groups<0)error stop 'HSE: exx_worker_rprime_groups must be nonnegative (0=automatic)'
+    if(hse_fft_layout/='auto'.and.hse_fft_layout/='strided'.and.hse_fft_layout/='contiguous') &
+      error stop 'HSE: hse_fft_layout must be auto, strided or contiguous'
+    if(rvv10_fft/='ffte'.and.rvv10_fft/='fftw')error stop 'rvv10_fft must be ffte or fftw'
+
+    if(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')then
+      if(exx_mlwf_radius>0d0.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0).or. &
+         exx_pair_screening/='off'.or.yn_hse_wannier_snapshot=='y') &
+        error stop 'DC canonical exchange requires full support; opt into yn_exx_dc_mlwf=y for localization'
+    endif
+    if(.not.ieee_is_finite(exx_pre_scf_threshold).or.exx_pre_scf_threshold<0d0) &
+      error stop 'exx_pre_scf_threshold must be finite and nonnegative'
+    if(exx_pre_scf_steps<1)error stop 'exx_pre_scf_steps must be positive'
+    if(exx_pre_scf_threshold>0d0)then
+      if(theory/='dft'.or.yn_restart/='n'.or.yn_md/='n'.or.yn_opt/='n'.or. &
+         (.not.is_hybrid(xc))) &
+        error stop 'PBE pre-SCF requires fresh static hybrid SCF'
+      if(yn_dc=='y'.and.temperature<=0d0) &
+        error stop 'PBE pre-SCF in DC requires positive electronic temperature (e.g. temperature_k=300)'
+      if(checkpoint_interval>0.or.time_shutdown>0d0.or.yn_hse_wannier_snapshot=='y'.or. &
+         yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+        error stop 'PBE pre-SCF stage is not supported by checkpoints or diagnostic snapshots'
+      if(method_mixing=='simple_potential'.or. &
+         (convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')) &
+        error stop 'PBE pre-SCF requires density mixing and a density convergence metric'
+    endif
+    if(exx_ace_support/='occupied'.and.exx_ace_support/='source') &
+      error stop 'exx_ace_support must be occupied or source'
+    if(exx_ace_support=='source')then
+      if((theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_md=='y'.or.yn_dc=='y') &
+        error stop 'source-support ACE requires fixed-ion native RT'
+      if(.not.is_hybrid(xc))error stop 'source-support ACE requires a hybrid functional'
+      if(exx_pair_screening/='off')error stop 'source-support ACE uses exact support pairs; set exx_pair_screening=off'
+      if(exx_mlwf_norm_fraction<=0d0)error stop 'source-support ACE requires adaptive support'
+    endif
+    if(exx_pair_screening/='off'.and.exx_pair_screening/='diagnose'.and.exx_pair_screening/='on') &
+      error stop 'exx_pair_screening must be off, diagnose or on'
+    if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &
+      error stop 'exx_pair_tolerance must be finite and nonnegative'
+    if(exx_pair_screening/='off')then
+      if(.not.is_hybrid(xc)) &
+        error stop 'pair screening requires HSE06 or PBEh'
+      if(xc=='hse06'.and.hse_omega<=0d0)error stop 'HSE pair screening requires positive omega'
+      if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
+      if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
+    endif
+    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance<0d0.or.hse_sr_tolerance>=1d0) &
+      error stop 'hse_sr_tolerance must be finite and in [0,1)'
+    if(hse_sr_tolerance>0d0)then
+      if(xc/='hse06'.or.exx_ace_support/='source'.or.product(num_kgrid)/=1.or. &
+         exx_local_fft/='auto'.or.exx_local_backend/='cpu') &
+        error stop 'HSE finite range requires Gamma HSE source-support ACE and CPU local FFT'
+    endif
+    if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
+    if(exx_kpoint_backend/='cpu'.and.exx_kpoint_backend/='cufft') &
+      error stop 'exx_kpoint_backend must be cpu or cufft'
+    if(exx_kpoint_backend=='cufft')then
+#ifndef USE_EXX_CUFFT
+      error stop 'exx_kpoint_backend=cufft requires USE_EXX_CUFFT=ON'
+#endif
+      if(.not.is_hybrid(xc).or.yn_dc/='n') &
+        error stop 'k-point cuFFT requires native hybrid exchange without DC'
+      if(temperature>=0d0.or.(nstate>0.and.nstate*2/=nelec).or.yn_hse_wannier_snapshot=='y') &
+        error stop 'k-point cuFFT requires occupied spin pairs without Wannier snapshots'
+      if(any(num_kgrid<1).or.product(num_kgrid)<2.or. &
+         index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none') &
+        error stop 'k-point cuFFT requires a full uniform mesh with more than one k point'
+      if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.nproc_k<1) &
+        error stop 'k-point cuFFT requires k-only MPI distribution'
+      if(exx_local_backend/='cpu'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
+        error stop 'k-point cuFFT is incompatible with localized exchange support'
+      if(yn_md/='n'.or.yn_opt/='n'.or. &
+         (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'k-point cuFFT supports static SCF and fixed-ion native RT'
+    endif
+    if(exx_local_backend/='cpu'.and.exx_local_backend/='cufft') &
+      error stop 'exx_local_backend must be cpu or cufft'
+    if(exx_gpu_batch_size<1)error stop 'exx_gpu_batch_size must be positive'
+    if(exx_local_backend=='cufft')then
+#ifndef USE_EXX_CUFFT
+      error stop 'exx_local_backend=cufft requires USE_EXX_CUFFT=ON'
+#endif
+      if(.not.is_hybrid(xc))error stop 'cuFFT EXX requires native hybrid orbitals'
+      if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12).or.nproc_k/=1) &
+        error stop 'cuFFT EXX requires unshifted Gamma and nproc_k=1'
+      if(exx_local_fft/='auto'.or.exx_mlwf_radius/=0d0.or. &
+        .not.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0)) &
+        error stop 'cuFFT EXX requires auto local FFT and adaptive support fraction in (0,1)'
+      if(yn_md/='n'.or.yn_opt/='n'.or. &
+        (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'cuFFT EXX supports static SCF and fixed-ion native RT'
+    endif
+
+    if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned') &
+      error stop 'exx_factor_mode must be off, strict or learned'
+    if(hse_sr_group_fft/='off'.and.hse_sr_group_fft/='direct'.and.hse_sr_group_fft/='halo') &
+      error stop 'hse_sr_group_fft must be off, direct or halo'
+    if(.not.ieee_is_finite(hse_sr_radius).or.hse_sr_radius<0d0) &
+      error stop 'hse_sr_radius must be finite and nonnegative'
+    if(hse_sr_group_fft/='off')then
+#ifndef USE_MPI
+      error stop 'SR group FFT requires MPI'
+#endif
+      if(hse_sr_radius<=0d0.or.hse_sr_tolerance<=0d0) &
+        error stop 'SR group FFT requires positive radius and SR tolerance'
+    else if(hse_sr_radius/=0d0)then
+      error stop 'hse_sr_radius requires SR group FFT'
+    endif
+    if(yn_hse_sr_wave_first=='y'.and.hse_sr_group_fft=='off') &
+      error stop 'SR wave-first requires SR group FFT'
+    if(yn_hse_sr_pair_symmetry=='y'.and.yn_hse_sr_wave_first=='y'.and.yn_hse_sr_return_sum/='y') &
+      error stop 'SR wave-first pair symmetry requires aggregated return'
+    if(yn_exx_fft_orbits=='y')then
+      if(.not.is_hybrid(xc).or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
+         any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or.yn_dc/='n') &
+        error stop 'FFT orbits require native CPU dense-k hybrid symmetry with all q points'
+    endif
+    if(exx_factor_mode/='off')then
+      if(propagator=='hse_ptcn')then
+        if(xc/='hse06'.or.exx_factor_mode/='learned'.or.exx_factor_exact_interval/=1.or. &
+          yn_dc/='n'.or.yn_md/='n'.or. &
+          yn_predictor_corrector/='n'.or.yn_restart/='n'.or.yn_spinorbit/='n'.or. &
+          product(num_kgrid)<=1.or.nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+          temperature>=0d0.or.yn_hse_wannier=='y'.or.exx_mlwf_radius/=0d0.or. &
+          exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied'.or. &
+          exx_pair_screening/='off'.or.hse_sr_tolerance/=0d0.or.any(hse_q_reduction/=1).or. &
+          exx_kpoint_backend/='cpu'.or.(theory/='tddft_response'.and.theory/='tddft_pulse')) &
+          error stop 'Learned CN requires fresh static integer native CPU dense-k HSE with full support'
+      else
+        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
+           propagator/='hse_taylor4') &
+          error stop 'Factor history requires native static HSE Taylor4 or certified learned CN'
+      endif
+    endif
+    if(yn_ace_shadow_diagnostic=='y'.or.yn_ace_export_factors=='y')then
+      if(exx_surrogate_mode/='trace')error stop 'ACE diagnostic switches require surrogate trace'
+      if(yn_ace_export_factors=='y'.and.(nelec/=2.or.nstate/=1)) &
+        error stop 'Raw factor export requires one-orbital H2 diagnostic'
+    endif
+
+    if(exx_factor_history_frames/=3) &
+      error stop 'EXX factor history is fixed at 3 frames'
+    if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
+    if(exx_factor_warmup_steps<0)error stop 'EXX factor warmup steps must be nonnegative'
+    if(exx_surrogate_mode/='off'.and.exx_surrogate_mode/='trace') &
+      error stop 'exx_surrogate_mode: only off/trace implemented'
+    if(exx_surrogate_mode=='trace')then
+      if(propagator/='hse_taylor4'.or.yn_fix_func/='n'.or.yn_restart=='y'.or. &
+         yn_dc=='y'.or.yn_md=='y'.or.any(num_kgrid/=1).or. &
+         product(nproc_rgrid)/=1.or.nproc_ob/=1.or.any(abs(dk_shift)>1d-12).or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
+        error stop 'EXX trace requires nonrestart serial Gamma dense Taylor4 RT'
+      if(theory/='tddft_response'.and.theory/='tddft_pulse') &
+        error stop 'EXX trace requires RT theory'
+    endif
+    if(exx_surrogate_capacity<1.or.exx_surrogate_rank_max<1) &
+      error stop 'EXX surrogate trace capacity/rank must be positive'
+    if(.not.ieee_is_finite(exx_surrogate_rank_rtol).or.exx_surrogate_rank_rtol<=0d0.or. &
+       exx_surrogate_rank_rtol>=1d0)error stop 'EXX surrogate rank rtol must be in (0,1)'
+#ifndef USE_HSE
+    if(exx_surrogate_mode/='off')error stop 'EXX surrogate trace requires USE_HSE'
+#endif
+    if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
+      error stop 'exx_mlwf_radius must be finite and nonnegative'
+    if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &
+      error stop 'exx_mlwf_norm_fraction must be in [0,1]'
+    if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)then
+      if(any(num_kgrid/=1).or.any(abs(dk_shift)>1d-12)) &
+        error stop 'adaptive EXX support requires unshifted Gamma'
+    endif
+    if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0)then
+      if(yn_md=='y'.or.yn_opt=='y'.or. &
+        (theory/='dft'.and.theory/='tddft_response'.and.theory/='tddft_pulse')) &
+        error stop 'finite EXX support requires static SCF or fixed-ion native RT'
+      if(theory/='dft')then
+        if(yn_dc=='y'.or.(yn_conventional_from_dcdft/='y'.and..not.is_global_hybrid(xc))) &
+          error stop 'finite EXX RT requires DC or conventional hybrid mesh orbitals'
+        if(any(abs(dk_shift)>1d-12)) &
+          error stop 'EXX RT requires unshifted native mesh orbitals'
+        if(exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction<1d0)then
+          if(any(num_kgrid/=1))error stop 'finite EXX RT requires Gamma'
+        endif
+      endif
+      if(.not.is_hybrid(xc)) &
+        error stop 'EXX MLWF radius requires HSE06 or PBEh40'
+      if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
+        error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
+      yn_hse_wannier='y'
+    endif
+    global_symmetry_route=is_global_hybrid(xc).and.product(num_kgrid)>1.and.index(yn_symmetry,'y')/=0
+    if(global_symmetry_route)then
+      ! Both the reference and FFT-reuse paths use the same representative orbitals.
+      ! The scalar Coulomb cutoff is invariant under the retained space group.
+      if(yn_md/='n'.or.theory=='dft_md')error stop 'Global hybrid symmetry requires fixed ions'
+      if(yn_dc/='n'.or.yn_conventional_from_dcdft/='n'.or.yn_hse_wannier/='n'.or. &
+         temperature>=0d0.or.nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+         any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
+         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied') &
+        error stop 'Global hybrid symmetry requires native full-support CPU k-only exchange with all q points'
+    endif
+    ! Full-support CPU k-only exchange also admits Hermitian pairs without sym.dat.
+    ! Keep the same native representation when pair reuse is explicitly disabled.
+    global_native_k_route=global_symmetry_route.or.(is_global_hybrid(xc).and.product(num_kgrid)>1.and. &
+      index(yn_symmetry,'y')==0.and.yn_dc=='n'.and.yn_conventional_from_dcdft=='n'.and. &
+      (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse').and. &
+      yn_hse_wannier=='n'.and.yn_md=='n'.and.temperature<0d0.and.nproc_ob==1.and.all(nproc_rgrid==1).and. &
+      all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.exx_mlwf_radius==0d0.and. &
+      exx_mlwf_norm_fraction==0d0.and.exx_ace_support=='occupied')
+    pbeh_mesh_rt=(is_global_hybrid(xc)) &
+      .and.(theory=='tddft_response'.or.theory=='tddft_pulse') &
+      .and.yn_dc=='n'
+    hybrid_mesh_rt=pbeh_mesh_rt.or.(xc=='hse06'.and. &
+      (yn_hse_wannier=='y'.or.product(nproc_rgrid)>1.or.nproc_ob>1).and. &
+      (theory=='tddft_response'.or.theory=='tddft_pulse').and.yn_dc=='n'.and. &
+      yn_conventional_from_dcdft=='y')
+    hybrid_spatial_scf=(is_hybrid(xc)).and.theory=='dft'.and. &
+      (product(nproc_rgrid)>1.or.nproc_ob>1.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))
+    if(hybrid_spatial_scf)then
+      yn_hse_wannier='y'
+      if(yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)) &
+        error stop 'Spatial hybrid SCF: occupied spin pairs required'
+      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
+        error stop 'Spatial hybrid SCF: restart/snapshot/checkpoint unsupported'
+      if(yn_self_checkpoint=='y')error stop 'Spatial hybrid SCF: use yn_self_checkpoint=n'
+      if(write_gs_restart_data/='no')then
+        if(.not.is_global_hybrid(xc).or.yn_dc/='n'.or.write_gs_restart_data/='wfn') &
+          error stop 'Spatial hybrid SCF: use write_gs_restart_data=no; conventional global hybrids also allow wfn'
+      endif
+      if(yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+        error stop 'Spatial hybrid SCF: full-grid eigen/solver diagnostics unsupported'
+    endif
+    if(pbeh_mesh_rt.and.yn_conventional_from_dcdft=='n')then
+      if(yn_md/='n'.or.yn_opt/='n') &
+        error stop 'Conventional hybrid RT: fixed ions required'
+      if(temperature>=0d0.or.nstate*2/=nelec) &
+        error stop 'Conventional hybrid RT: occupied spin pairs and fixed occupations required'
+    endif
+    if(hybrid_mesh_rt)then
+      if(.not.global_native_k_route)yn_hse_wannier='y'
+      if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
+        error stop 'Hybrid mesh RT: restart/snapshot unsupported'
+      if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
+        error stop 'Hybrid mesh RT: impulse or Acos2 without a second field required'
+      if(.not.ieee_is_finite(dt).or.dt<=0d0.or.nt<1) &
+        error stop 'Hybrid mesh RT: positive finite dt and nt required'
+      if(ae_shape1=='Acos2')then
+        if(.not.salmon_all_finite([omega1,tw1,t1_start,E_amplitude1,I_wcm2_1,phi_CEP1])) &
+          error stop 'Hybrid mesh RT: finite pulse parameters required'
+        if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
+          error stop 'Hybrid mesh RT: positive frequency/width and nonnegative pulse start required'
+      endif
+      if(((checkpoint_interval>0.or.time_shutdown>0d0).and..not.learned_mesh_checkpoint).or.write_rt_wfn_k=='y') &
+        error stop 'Hybrid mesh RT: checkpoint output not supported'
+      if(yn_md=='y')then
+        if(ensemble/='NVE'.or.step_velocity_scaling>=1.or.yn_stop_system_momt=='y') &
+          error stop 'PBEh40 mesh Ehrenfest: unmodified NVE velocities required'
+        if(step_update_ps/=1.or.out_rt_energy_step/=1) &
+          error stop 'PBEh40 mesh Ehrenfest: update pseudopotentials and energy every step'
+      endif
+    endif
+    if(is_global_hybrid(xc))then
+#ifndef USE_HSE
+      error stop 'PBEh40 requires USE_HSE=ON'
+#endif
+#ifdef USE_OPENACC
+      error stop 'PBEh40: OpenACC force/potential path not yet supported'
+#endif
+      if(.not.global_native_k_route)yn_hse_wannier='y'
+      if(theory/='dft'.and.theory/='dft_md'.and..not.pbeh_mesh_rt) &
+        error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported real-space RT'
+      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
+        error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
+      if(yn_hse_wannier_snapshot=='y') &
+        error stop 'PBEh40: legacy HSE Wannier snapshot cannot encode Coulomb cutoff'
+      if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
+      if(yn_dc=='y'.and.theory=='dft_md') &
+        error stop 'PBEh40: DC MD is not yet supported'
+      if(yn_conventional_from_dcdft=='y'.and..not.pbeh_mesh_rt) &
+        error stop 'PBEh40: reconstruction requires supported real-space response'
+      if(xname/='none'.or.cname/='none')error stop 'PBEh40: extra xname/cname unsupported'
+      if(.not.ieee_is_finite(pbeh_coulomb_radius).or.pbeh_coulomb_radius<0d0) &
+        error stop 'PBEh40: invalid Coulomb radius'
+      if(.not.ieee_is_finite(rvv10_b).or.rvv10_b<=0d0.or. &
+         .not.ieee_is_finite(rvv10_c).or.rvv10_c<0d0.or.rvv10_nq<8.or.rvv10_nq>128) &
+        error stop 'PBEh40: invalid rVV10 parameters'
+    endif
+    if(is_hybrid(xc))then
       if(.not.ieee_is_finite(hse_omega).or.hse_omega<=0d0) &
         error stop 'HSE: hse_omega must be finite and positive (bohr^-1)'
       if(xname/='none'.or.cname/='none')error stop 'HSE06 must not be combined with extra xname/cname'
 #ifndef USE_HSE
       error stop 'HSE06 requires USE_HSE=ON'
 #endif
-      if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_md/='n'.or.yn_opt/='n') &
+      if(xc=='hse06'.and.(yn_periodic/='y'.or.(spin/='unpolarized'.and.spin/='noncollinear').or.yn_md/='n'.or.yn_opt/='n')) &
         error stop 'HSE06 requires fixed-ion unpolarized periodic system'
-      if(nstate*2/=nelec.or.temperature>=0d0) &
-        error stop 'HSE06 initial support requires occupied-only states and fixed occupations'
+      if(yn_spinorbit=='y')then
+        if(xc/='hse06'.or.spin/='noncollinear'.or.yn_dc/='n'.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or. &
+           (temperature<0d0.and.nstate/=nelec).or.(temperature>=0d0.and.nstate<nelec).or. &
+           yn_hse_wannier/='n'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
+           hse_sr_tolerance/=0d0.or.trim(file_kw)/='none'.or. &
+           yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
+           yn_conventional_from_dcdft/='n'.or.yn_hse_wannier_snapshot/='n'.or. &
+           exx_ace_support/='occupied'.or.exx_pair_screening/='off') &
+          error stop 'SOC HSE06: occupied spinors, native CPU k-only mesh and no approximations required'
+        if(exx_factor_mode/='off')then
+          if(exx_factor_mode/='learned'.or.temperature<0d0.or.product(num_kgrid)<2.or. &
+             yn_restart/='n')error stop 'SOC learned ACE requires thermal fixed occupations and no history restart'
+        endif
+        if(theory/='dft'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
+          error stop 'SOC HSE06 RT: Taylor4 required'
+        ! A wavefunction-only GS seed resets the iteration and rebuilds all HSE
+        ! state. This does not enable checkpoint continuation or RT restart.
+        if(yn_restart=='y')then
+          if(theory/='dft'.or.read_gs_restart_data/='wfn'.or.yn_reset_step_restart/='y'.or. &
+             exx_pre_scf_threshold/=0d0) &
+            error stop 'SOC HSE06: restart requires a reset wavefunction-only GS seed'
+          ! The wfn reader also restores initial occupations. Re-equilibrate
+          ! them from the target hybrid spectrum in the first thermal SCF step.
+          if(temperature>=0d0.and.nscf_init_redistribution/=0) &
+            error stop 'Thermal SOC HSE seed requires immediate occupation redistribution'
+        endif
+        if(checkpoint_interval>0.or.time_shutdown>0d0.or. &
+           yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+          error stop 'SOC HSE06: checkpoint continuation and diagnostics not certified'
+      endif
+      if(yn_dc=='y')yn_hse_wannier='y'
+      ! Fixed thermal occupations use the existing weighted canonical source.
+      if(xc=='hse06'.and.yn_dc=='n'.and.temperature>=0d0.and.yn_spinorbit=='n')then
+        if(nstate*2<nelec.or.nstate<1.or.mod(nelec,2)/=0.or. &
+           nproc_ob/=1.or.any(nproc_rgrid/=1).or.exx_kpoint_backend/='cpu'.or. &
+           index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
+           exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.hse_sr_tolerance/=0d0.or. &
+           yn_hse_wannier_snapshot=='y'.or.yn_conventional_from_dcdft=='y') &
+          error stop 'Thermal HSE: full-support CPU k-only exchange required'
+        if(theory/='dft'.and.propagator/='hse_taylor4') &
+          error stop 'Thermal HSE RT: Taylor4 ACE required'
+        yn_hse_wannier='y'
+      endif
+      if(yn_hse_wannier=='y')then
+        if(exx_mlwf_interval<1.or.exx_mlwf_maxiter<1.or. &
+          .not.ieee_is_finite(exx_mlwf_tolerance).or.exx_mlwf_tolerance<=0d0) &
+          error stop 'HSE Wannier: invalid localization controls'
+      endif
+      if(yn_hse_wannier=='y')then
+        if(index(yn_symmetry,'y')>0.or.trim(file_kw)/='none') &
+          error stop 'HSE Wannier: use a full standard k mesh without symmetry reduction'
+        if((hybrid_mesh_rt.or.hybrid_spatial_scf).and.(product(nproc_rgrid)>1.or.nproc_ob>1.or. &
+          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0.and.exx_mlwf_radius==0d0)))then
+          if(nproc_ob<1.or.nproc_k/=1.or.any(num_kgrid/=1)) &
+            error stop 'Spatial EXX: Gamma spatial domains required'
+          if(yn_dc=='n'.and.nstate>0.and.nproc_ob>nstate) &
+            error stop 'Spatial EXX: each orbital group must own at least one state'
+          if(yn_dc=='y'.and.nstate_frag>0.and.nproc_ob>nstate_frag) &
+            error stop 'Spatial EXX: each orbital group must own at least one state'
+          exx_grid=num_rgrid
+          if(yn_dc=='y')then
+            if(any(num_fragment<1))error stop 'Spatial EXX: positive fragment counts required'
+            exx_grid=num_rgrid/num_fragment+2*num_rgrid_buffer
+          endif
+          if(any(nproc_rgrid<1))error stop 'Spatial EXX: positive Cartesian process counts required'
+          if(any(modulo(exx_grid,nproc_rgrid)/=0)) &
+            error stop 'Spatial EXX: incompatible Cartesian grid'
+        else
+          if(nproc_ob/=1.or.product(nproc_rgrid)/=1) &
+            error stop 'HSE Wannier: only k parallelism within each fragment is supported'
+        endif
+        if(propagator=='hse_taylor4_full'.or.propagator=='hse_ptcn') &
+          error stop 'HSE Wannier RT: use the default Taylor4+ACE propagator'
+        if(yn_dc=='y'.and.temperature<0d0) &
+          error stop 'DC HSE: a nonnegative electronic temperature is required'
+      endif
+      if(yn_spinorbit=='n'.and.yn_dc/='y'.and..not.(xc=='hse06'.and.temperature>=0d0).and. &
+         (yn_hse_wannier/='y'.or.(theory/='dft'.and.theory/='dft_md')))then
+        if(nstate*2<nelec.or.mod(nelec,2)/=0.or.temperature>=0d0.or. &
+           (product(num_kgrid)==1.and.nstate*2/=nelec)) &
+          error stop 'HSE06 native support requires integer occupied states and fixed occupations'
+      endif
       if(theory=='tddft_response'.or.theory=='tddft_pulse'.or.theory=='tddft')then
-        if(propagator/='hse_taylor4') &
+        if(propagator/='hse_ptcn'.and.propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full') &
           error stop 'HSE06: omit propagator to use Taylor4 + ACE'
-        if(yn_out_rvf_rt=='y')error stop 'HSE06: RT force output not yet certified'
+        if(yn_out_rvf_rt=='y'.and..not.pbeh_mesh_rt)error stop 'HSE06: RT force output not yet certified'
         if(yn_fix_func/='n')error stop 'HSE06 requires self-consistent functional updates'
         if(trans_longi/='tr')error stop 'HSE06 native RT requires transverse fields'
         if(yn_reset_step_restart=='y')error stop 'HSE06: resetting restart time unsupported'
         if(ae_shape1=='Acos2')then
-          if(propagator/='hse_taylor4') &
-            error stop 'HSE06 laser requires Taylor4'
+          if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full'.and.propagator/='hse_ptcn') &
+            error stop 'HSE06 laser requires Taylor4 or endpoint-checked PT-CN'
+          if(propagator=='hse_ptcn'.and.(ae_shape2/='none'.or.yn_restart=='y'.or. &
+             yn_spinorbit/='n'.or.temperature>=0d0.or.nproc_ob/=1.or.any(nproc_rgrid/=1))) &
+            error stop 'HSE06 laser PT-CN requires fresh scalar full-local k-only single pulse'
           if(ae_shape2/='none'.and.ae_shape2/='impulse')error stop 'HSE06 laser: unsupported probe'
-          if(index(yn_symmetry,'y')/=0)error stop 'HSE06 laser: full k mesh required'
+          ! A z-polarized pulse may use its field-preserving spatial group.
+          ! init_sym_sub validates every retained operation against that field.
+          if(index(yn_symmetry,'y')/=0.and.trim(yn_symmetry)/='yyn') &
+            error stop 'HSE06 laser symmetry requires the z-field subgroup yyn'
           ! Pulse parameters are not covered by the legacy impulse restart metadata.
-          if(yn_restart=='y')error stop 'HSE06 laser RT restart is not yet supported'
+          if(yn_restart=='y'.and.((propagator/='hse_taylor4_full'.and.propagator/='hse_taylor4').or.ae_shape2/='none')) &
+            error stop 'HSE laser restart requires direct Taylor4 and a single pulse'
           if(maxval(abs(epdir_im1))>1d-12)error stop 'HSE06 laser: linear polarization required'
         else
           if(ae_shape1/='impulse'.or.ae_shape2/='none')error stop 'HSE06: unsupported field shape'
         endif
-        if(index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
+        if(yn_spinorbit=='n'.and.index(yn_symmetry,'y')/=0.and.maxval(abs(epdir_re1(1:2)))>1d-12) &
           error stop 'HSE symmetry: impulse must be z polarized'
         if(gram_schmidt_interval>0)error stop 'HSE06 requires no Gram-Schmidt rescaling'
-        if(n_hamil/=4.or.yn_predictor_corrector/='y') &
-          error stop 'HSE Taylor4 requires n_hamil=4 and predictor-corrector'
-      else if(theory/='dft')then
-        error stop 'HSE06 initial support: dft or tddft only'
+        if(propagator=='hse_ptcn')then
+          if(yn_predictor_corrector=='y')error stop 'HSE06 PT-CN requires no external predictor-corrector'
+        else
+          if(n_hamil/=4) &
+            error stop 'HSE Taylor4 requires n_hamil=4'
+        endif
+      else if(theory/='dft'.and..not.(theory=='dft_md'.and.xc/='hse06'))then
+        error stop 'Hybrid: unsupported calculation theory'
       endif
-    else if(propagator=='hse_taylor4')then
+    else if(propagator=='hse_ptcn'.or.propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')then
       error stop 'HSE propagation modes require xc=hse06'
     endif
 
@@ -3155,6 +3946,12 @@ contains
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if
     
+    if(yn_dc_force_diagnostic=='y')then
+      if(yn_dc/='y'.or.theory/='dft'.or.(.not.is_global_hybrid(xc))) &
+        error stop 'DC force diagnostic requires static DC PBEh'
+      if(exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction>0d0.or.file_atom_coor_frag/='none') &
+        error stop 'DC force diagnostic requires full MLWF support and automatic atom maps'
+    endif
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"
@@ -3247,5 +4044,19 @@ contains
       call yn_argument_check( str(i:i) )
     end do
   end subroutine yyynnn_argument_check
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
 
 end module inputoutput

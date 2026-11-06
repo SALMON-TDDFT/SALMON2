@@ -14,6 +14,7 @@
 !  limitations under the License.
 !
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
+#include "config.h"
 module dcdft
   implicit none
 contains
@@ -21,7 +22,8 @@ contains
   subroutine init_dcdft(dc,pp,mixing,ewald)
     use structures
     use salmon_global, only: nproc_k, nproc_ob, nproc_rgrid, nproc_rgrid_tot &
-    & , nstate, nelec, yn_dc, nstate_frag
+    & , nstate, nelec, yn_dc, nstate_frag, temperature, xc, num_fragment
+    use exx_functional, only: is_hybrid
     implicit none
     type(s_dcdft)        ,intent(inout) :: dc
     type(s_pp_info)      ,intent(inout) :: pp
@@ -31,6 +33,11 @@ contains
     integer :: nproc_k_tmp,nproc_ob_tmp, nproc_rgrid_tmp(3)
 
     call check_dcdft_complex_options
+    ! Catch impossible capacity before fragment initialization fills occupations.
+    if(temperature>0d0.and.(is_hybrid(xc)))then
+      if(2d0*dble(nstate_frag)*dble(product(num_fragment))<dble(nelec)) &
+        error stop 'DC thermal occupations: insufficient weighted state capacity; increase nstate_frag'
+    endif
     
     nproc_k_tmp = nproc_k
     nproc_ob_tmp = nproc_ob
@@ -178,14 +185,19 @@ contains
       implicit none
       integer :: i_frag,n,i,j,k,ii,jj,kk
       integer :: iatom,iatom_frag
+      integer :: own_id(natom),own_image(3,natom)
       integer :: kion_frag(natom,dc%n_frag),natom_frag(dc%n_frag)
       real(8) :: dr
-      real(8) :: r1(3),r2(3),r(3)
+      real(8) :: r1(3),r2(3),r(3),boundary_tol(3)
       real(8) :: ldomain(3),lbuffer(3)
       real(8) :: rion_frag(3,natom,dc%n_frag)
     
     ! length of domain
       ldomain(1:3) = al(1:3) / dble(num_fragment(1:3))
+      ! Use the same roundoff allowance on every fragment boundary, including
+      ! periodic images. Treat near-boundary atoms as lying on the boundary:
+      ! include the lower face and exclude the upper face. Do not move atoms.
+      boundary_tol = 32d0 * epsilon(1d0) * al
       do n=1,3 ! x,y,z
       ! rion --> rion = [0:al] (total system)
         do i=1,natom
@@ -240,10 +252,13 @@ contains
             r(1) = r(1) + dble(ii)*al(1)
             r(2) = r(2) + dble(jj)*al(2)
             r(3) = r(3) + dble(kk)*al(3)
-            if( r1(1) <= r(1) .and. r(1) < r2(1)  .and. &
-            &   r1(2) <= r(2) .and. r(2) < r2(2)  .and. &
-            &   r1(3) <= r(3) .and. r(3) < r2(3)  ) then
+            if( all(r1-boundary_tol <= r) .and. all(r < r2-boundary_tol) ) then
               iatom_frag = iatom_frag + 1
+              if(iatom_frag>natom)error stop 'DC fragment atom image capacity exceeded'
+              if(i_frag==dc%i_frag)then
+                own_id(iatom_frag)=iatom
+                own_image(:,iatom_frag)=[ii,jj,kk]
+              endif
               rion_frag(1:3,iatom_frag,i_frag) = r(1:3) - dc%rxyz_frag(1:3,i_frag)
               kion_frag(iatom_frag,i_frag) = kion(iatom)
             end if
@@ -256,6 +271,12 @@ contains
       end do
       end do
       end do
+    ! Preserve global identity before global atom arrays become fragment arrays.
+      if(file_atom_coor_frag=='none')then
+        allocate(dc%atom_global(natom_frag(dc%i_frag)),dc%atom_image(3,natom_frag(dc%i_frag)))
+        dc%atom_global=own_id(:natom_frag(dc%i_frag))
+        dc%atom_image=own_image(:,:natom_frag(dc%i_frag))
+      endif
     ! set variables for own fragment
     
     ! nelec (total system) --> nelec (fragment)
@@ -482,7 +503,7 @@ contains
     type(s_scalar),       intent(in)    :: rho_s(system%nspin)
     type(s_scalar),       intent(inout) :: Vxc(system%nspin)
     type(s_dft_energy),   intent(inout) :: energy
-    type(s_dcdft),        intent(in)    :: dc
+    type(s_dcdft),        intent(inout) :: dc
     type(s_scalar)                      :: v_local(system%nspin)
 
     !
@@ -505,6 +526,7 @@ contains
     sum_exc = 0d0
     if(info%id_rko==0) sum_exc = energy%E_xc ! info%id_rko == 0 : representative process of each fragment
     call comm_summation(sum_exc,energy%E_xc,dc%icomm_tot) ! total system
+
     call timer_end(LOG_CALC_EXC_COR)
     
   ! v_h + v_psl (total)
@@ -571,6 +593,9 @@ contains
   SUBROUTINE ne2mu_dcdft(mg,info,energy,spsi,dc,system)
     use structures
     use communication, only: comm_summation
+    use salmon_global, only: temperature,xc
+    use dc_thermal, only: solve_dc_thermal,dc_thermal_capacity
+    use exx_functional, only: is_hybrid
     implicit none
     type(s_rgrid),        intent(in) :: mg
     type(s_parallel_info),intent(in) :: info
@@ -579,7 +604,9 @@ contains
     type(s_dcdft),        intent(in) :: dc
     type(s_dft_system),intent(inout) :: system
     !
-    real(8) :: wspin,emax,emin
+    real(8) :: wspin,emax,emin,thermal_ts
+    integer :: ik,thermal_status
+    real(8) :: thermal_f(system%no*system%nk*system%nspin*dc%n_frag)
     real(8) :: ne_each(system%no,system%nk,system%nspin)
     real(8),dimension(system%no,system%nk,system%nspin,dc%n_frag) :: &
       rocc,esp,ne_frag_orb,wrk1,wrk2
@@ -602,7 +629,22 @@ contains
 
     emin = minval(esp)
     emax = maxval(esp)
-    call ne2mu_core(dc%elec_num_tot,emax,emin,system%mu)
+    ! Use the same charge-converged Fermi solver for all hybrid DC SCF.
+    if(temperature>0d0.and.(is_hybrid(xc)))then
+      wrk1=ne_frag_orb
+      do ik=1,system%nk
+        wrk1(:,ik,:,:)=wrk1(:,ik,:,:)*system%wtk(ik)
+      enddo
+      call solve_dc_thermal(reshape(esp,[size(esp)]),reshape(wrk1,[size(wrk1)]), &
+        temperature,wspin,dc%elec_num_tot,system%mu,thermal_f,thermal_ts,thermal_status)
+      ! All ranks hold identical global arrays and take the same failure path.
+      if(thermal_status==dc_thermal_capacity) &
+        error stop 'DC thermal occupations: insufficient weighted state capacity; increase nstate_frag'
+      if(thermal_status/=0)error stop 'DC thermal occupations: invalid input or chemical potential not converged'
+      rocc=wspin*reshape(thermal_f,shape(rocc))
+    else
+      call ne2mu_core(dc%elec_num_tot,emax,emin,system%mu)
+    endif
 
     system%rocc(:,:,:) = rocc(:,:,:,dc%i_frag)
 
@@ -777,6 +819,9 @@ contains
     use hamiltonian, only: add_xc_tau_operator
     use sendrecv_grid, only: update_overlap_real8, update_overlap_complex8
     use Total_Energy, only: calc_Total_Energy_periodic
+#ifdef USE_HSE
+    use exx_native, only: exx_enabled,exx_core_exchange
+#endif
     use salmon_global, only: kion !!!!!! future work: remove (kion --> system%kion)
     implicit none
     type(s_rgrid),        intent(in) :: mg
@@ -796,7 +841,7 @@ contains
     !
     integer :: ispin,io,ik
     integer,dimension(3) :: is,ie
-    real(8) :: E_tmp,E_local(2),E_sum(2)
+    real(8) :: E_tmp,E_local(2),E_sum(2),exchange_core,exchange_total
     type(s_orbital) :: staupsi
 
     is(1:3) = mg%is(1:3)
@@ -912,6 +957,17 @@ contains
       
     energy%E_kin = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
+#ifdef USE_HSE
+    if(exx_enabled())then
+      call exx_core_exchange(system,mg,info,spsi,dc%nxyz_domain,exchange_core)
+      E_tmp=0d0
+      if(info%id_rko==0)E_tmp=exchange_core
+      call comm_summation(E_tmp,exchange_total,dc%icomm_tot)
+      energy%E_ion_nloc=energy%E_ion_nloc-2d0*exchange_total
+      energy%E_xc=energy%E_xc+exchange_total
+      if(dc%id_tot==0)write(*,'(a,es24.15)')'DC_HSE_CORE exchange Ha = ',exchange_total
+    endif
+#endif
     
   ! override (fragment --> total)
     deallocate(kion)

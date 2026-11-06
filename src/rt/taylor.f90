@@ -1,3 +1,4 @@
+#include "config.h"
 !
 !  Copyright 2019-2020 SALMON developers
 !

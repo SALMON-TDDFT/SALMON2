@@ -1,3 +1,4 @@
+#include "config.h"
 !
 !  Copyright 2019-2020 SALMON developers
 !
@@ -49,7 +50,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use salmon_pp, only: calc_nlcc, read_pslfile
   use force_sub, only: calc_force
   use hamiltonian
-  use md_sub, only: init_md
+  use md_sub, only: init_md,cal_Tion_Temperature_ion
   use fdtd_coulomb_gauge, only: init_singlescale
   use checkpoint_restart_sub
   use hartree_sub, only: hartree
@@ -62,6 +63,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use jellium, only: make_rho_jm
   use filesystem, only: open_filehandle
   use lcfo, only: init_conventional_from_dcdft
+  use exx_functional, only: is_global_hybrid,is_hybrid
   implicit none
   integer,parameter :: Nd = 4
 
@@ -100,9 +102,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   real(8),allocatable :: R1(:,:,:)
   character(10) :: fileLaser
   character(100):: comment_line
-  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3)
+  real(8) :: curr_e_tmp(3,2), curr_i_tmp(3),prior_ac(3,0:0)
   integer :: itt
-  logical :: rion_update
+  logical :: rion_update,pbeh_mesh_md
+
+  pbeh_mesh_md=yn_md=='y'.and.(is_global_hybrid(xc))
+
 
   call nvtxStartRange('initialization_rt', __LINE__)
 
@@ -185,6 +190,16 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   do itt = 0, nt
     rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
   end do
+  if(((xc=='hse06'.and.yn_hse_wannier=='y').or.is_global_hybrid(xc)) &
+     .and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)) &
+     .and.ae_shape1=='Acos2')then
+    ! Endpoint E for the imposed transverse pulse, including the initial force.
+    call calc_Ac_ext_t(-dt,0d0,0,0,prior_ac)
+    rt%E_ext(:,0)=-(rt%Ac_ext(:,1)-prior_ac(:,0))/(2d0*dt)
+    do itt=1,nt
+      rt%E_ext(:,itt)=-(rt%Ac_ext(:,itt+1)-rt%Ac_ext(:,itt-1))/(2d0*dt)
+    enddo
+  endif
   rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
   
   rt%Ac_tot(1:3, 0:nt+1) = rt%Ac_ext(1:3, 0:nt+1)
@@ -246,7 +261,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call timer_begin(LOG_RESTART_SYNC)
   call timer_begin(LOG_RESTART_SELF)
-  if(yn_conventional_from_dcdft=='n') then
+  if(yn_conventional_from_dcdft=='n'.or.yn_restart=='y') then
     call restart_rt(lg,mg,system,info,spsi_in,Mit,rt,Vh_stock1=Vh_stock1,Vh_stock2=Vh_stock2)
   else
   ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data
@@ -258,7 +273,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call timer_end(LOG_RESTART_SYNC)
   if(yn_restart=='n') Mit=0
 
-  if(gram_schmidt_interval==0.and.xc/='hse06')then
+  if(gram_schmidt_interval==0.and..not.is_hybrid(xc))then
     call gram_schmidt(system, mg, info, spsi_in)
   end if
 
@@ -346,6 +361,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
      call calc_Total_Energy_periodic(mg,ewald,system,info,pp,ppg,fg,poisson,rion_update,energy)
   end select
   energy%E_tot0 = energy%E_tot
+  call rt_energy_reference_initialize(energy%E_tot0)
   
   call timer_begin(LOG_INIT_RT)
   
@@ -375,6 +391,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   case(3) ; call write_rt_data_3d(-1,ofl,dt,system,curr_e_tmp,curr_i_tmp)
   end select
 
+  if(pbeh_mesh_md)then
+    ! Include supplied velocities in the initial energy output, not only t>0.
+    call init_md(system,md)
+    call cal_Tion_Temperature_ion(md%Tene,md%Temperature,system)
+  endif
   !(header of SYSname_rt_energy.data)
   call write_rt_energy_data(-1,ofl,dt,energy,md)
   
@@ -441,8 +462,21 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end do
     end do
     end do
+    if(system%nc_mgga23_payload%active) then
+      ! The impulse changes orbital gradients/current, so rebuild the complete
+      ! gKS operator before the first predictor. Density itself is unchanged.
+      spsi_in%update_zwf_overlap=.false.
+      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info, &
+        spsi_in,stencil,Vxc,energy%E_xc)
+    endif
   end if
   
+  ! Record the actual initial/restart sample, so comparison uses a known t_ref.
+  if(yn_spinorbit=='y') then
+    if(info%if_divide_rspace) call update_overlap_complex8(srg,mg,spsi_in%zwf)
+    call write_rt_spin(Mit,ofl,system,lg,mg,info,stencil,ppg,spsi_in)
+  endif
+
   rt%rIe(0)     = rbox_array2(4) * system%Hvol
   rt%dDp_e(:,0) = 0d0
   rt%Dp_e(:,0)  = 0d0
@@ -461,7 +495,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
       end if
     end do
   
-  if(yn_md=='y') call init_md(system,md)
+  if(yn_md=='y'.and..not.pbeh_mesh_md) call init_md(system,md)
   
   ! preparation for projection
   if(projection_option/='no') then
@@ -494,7 +528,18 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   !(force at initial step)
   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
+     if((is_global_hybrid(xc)))then
+       ! The reported GS energy remains the pre-kick reference, but the first
+       ! nuclear half-kick must use the post-impulse electronic Hamiltonian.
+       system%vec_Ac=rt%Ac_tot(:,0)
+       call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+     endif
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
+     if(pbeh_mesh_md.and.ae_shape1=='Acos2')then
+       do jj=1,system%nion
+         system%Force(:,jj)=system%Force(:,jj)+pp%Zps(system%kion(jj))*rt%E_tot(:,0)
+       enddo
+     endif
   
      !open trj file for coordinate, velocity, and force (rvf) in xyz format
      write(comment_line,10) -1, 0.0d0

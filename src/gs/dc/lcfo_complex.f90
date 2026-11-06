@@ -16,6 +16,7 @@
 
 #include "config.h"
 module lcfo_complex
+  use iso_fortran_env, only: int64
   implicit none
 
   private
@@ -53,8 +54,14 @@ module lcfo_complex
   type :: s_complex_lcfo_fragment
     integer, allocatable :: n_basis(:), jxyz(:,:)
     complex(8), allocatable :: basis(:,:,:,:,:), coef(:,:,:)
+    integer(int64),allocatable :: basis_pos(:,:),coef_pos(:,:)
   end type s_complex_lcfo_fragment
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d
+  end interface
 contains
 
   subroutine open_complex_lcfo_files(lg,dc,writer,do_diag,local_status)
@@ -62,6 +69,7 @@ contains
     use filesystem, only: get_filehandle
     use ieee_arithmetic, only: ieee_support_datatype
     use iso_fortran_env, only: int32,int64,real64,file_storage_size
+    use exx_functional, only: lcfo_write_functional
     use salmon_global, only: base_directory,num_fragment
     use structures, only: s_dcdft,s_rgrid
     implicit none
@@ -94,6 +102,8 @@ contains
     call comm_bcast(writer%run_id,dc%icomm_tot,0)
 
     if (dc%id_frag /= 0) return
+    call lcfo_write_functional(trim(base_directory)//'functional.txt',writer%run_id,local_status)
+    if(local_status/=0)return
     writer%file_basis = trim(base_directory)//'basis_functions.bin'
     writer%file_coeff = trim(base_directory)//'wavefunctions.bin'
     writer%file_hamiltonian = trim(base_directory)//'hamiltonian_local.bin'
@@ -517,12 +527,12 @@ contains
     if (yn_dc_lcfo_diag == 'y') then
       select case(trim(lcfo_eigensolver))
       case('lapack')
-      case('chefsi')
+      case('chefsi','scalapack')
 #ifndef USE_SCALAPACK
-        stop "DC-LCFO complex: lcfo_eigensolver='chefsi' requires ScaLAPACK."
+        stop "DC-LCFO complex: distributed eigensolver requires ScaLAPACK."
 #endif
       case default
-        stop "DC-LCFO complex: supported eigensolvers are 'lapack' and 'chefsi'."
+        stop "DC-LCFO complex: supported eigensolvers are 'lapack', 'scalapack' and 'chefsi'."
       end select
     end if
     if (system%if_real_orbital) stop "DC-LCFO complex: complex orbitals are required."
@@ -593,12 +603,13 @@ contains
     integer, allocatable :: id_array(:),n_basis(:,:,:),n_mat(:,:),index_basis(:,:,:,:)
     integer, allocatable :: req_send(:),req_recv(:)
     real(8), allocatable :: esp_tot(:,:,:)
-    complex(8), allocatable :: f_basis(:,:,:,:,:),work_basis(:,:,:,:,:)
-    complex(8), allocatable :: hf(:,:,:,:,:),work_hf(:,:,:,:,:)
+    complex(8), allocatable :: f_basis(:,:,:,:,:)
+    complex(8), allocatable :: hf(:,:,:,:,:)
     complex(8), allocatable :: mat_h_local(:,:,:)
     complex(8), allocatable :: hsend(:,:),hmat(:,:),vmat(:,:)
     complex(8), allocatable :: coef_frag(:,:,:)
     real(8), allocatable :: eval(:)
+    integer :: basis_origin(3),basis_shape(3)
     integer :: n_halo,ik,ispin,io,ix,iy,iz,n,nactive,istat,global_status
     integer :: nspin,nk,m,pass,j,ifrag,i,jj,src_frag,tag,ios
     integer, allocatable :: nb(:)
@@ -612,7 +623,7 @@ contains
     if (.not.ieee_is_finite(system%mu)) stop "DC-LCFO complex: chemical potential is not finite."
     if (any(shape(energy%esp) /= [system%no,system%nk,system%nspin])) &
       stop "DC-LCFO complex: SCF eigenvalue shape is inconsistent."
-    if (any(.not.ieee_is_finite(energy%esp))) &
+    if (.not.salmon_all_finite(energy%esp)) &
       stop "DC-LCFO complex: SCF eigenvalues are not finite."
 
     if (dc%id_tot == 0) write(*,*) "start DC-LCFO complex"
@@ -637,7 +648,12 @@ contains
 
     do ik=1,nk
       owns_ik = (info%ik_s <= ik .and. ik <= info%ik_e)
-      allocate(f_basis(dc%nxyz_domain(1),dc%nxyz_domain(2),dc%nxyz_domain(3),nspin,m))
+      basis_origin=mg%is
+      basis_shape=max(0,min(mg%ie,dc%nxyz_domain)-mg%is+1)
+      if(dc%id_frag==0)then
+        basis_origin=1;basis_shape=dc%nxyz_domain
+      endif
+      allocate(f_basis(basis_shape(1),basis_shape(2),basis_shape(3),nspin,m))
       allocate(nb(nspin))
       call build_basis(ik,f_basis,nb,basis_err)
       call collect_basis_dimensions(ik,nb)
@@ -654,7 +670,8 @@ contains
             do ix=mg%is(1),mg%ie(1)
               if (ix <= dc%nxyz_domain(1) .and. iy <= dc%nxyz_domain(2) .and. &
                   iz <= dc%nxyz_domain(3)) &
-                sttpsi%zwf(ix,iy,iz,1:nspin,io,ik,1) = f_basis(ix,iy,iz,1:nspin,io)
+                sttpsi%zwf(ix,iy,iz,1:nspin,io,ik,1) = f_basis(ix-basis_origin(1)+1,iy-basis_origin(2)+1, &
+                  iz-basis_origin(3)+1,1:nspin,io)
             end do
             end do
             end do
@@ -662,27 +679,18 @@ contains
         end do
       end if
 
-      allocate(hf(lg%num(1),lg%num(2),lg%num(3),nspin,m))
-      allocate(work_hf(lg%num(1),lg%num(2),lg%num(3),nspin,m))
+      ! Retain H times basis only on this rank's real-space grid.
+      allocate(hf(mg%num(1),mg%num(2),mg%num(3),nspin,m))
       call hpsi(sttpsi,shpsi,info,mg,v_local,system,stencil,srg,ppg)
-      work_hf = (0d0,0d0)
+      hf = (0d0,0d0)
       if (owns_ik) then
-        do io=info%io_s,info%io_e
-          if (io <= m) then
-            do ispin=1,nspin
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              work_hf(ix,iy,iz,ispin,io) = shpsi%zwf(ix,iy,iz,ispin,io,ik,1)
-            end do
-            end do
-            end do
-            end do
-          end if
+        do io=info%io_s,min(info%io_e,m)
+          hf(:,:,:,:,io)=shpsi%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2), &
+                                  mg%is(3):mg%ie(3),1:nspin,io,ik,1)
         end do
       end if
-      call comm_summation(work_hf,hf,size(hf),info%icomm_rko)
-      deallocate(work_hf)
+      if(dc%id_frag==0.and.ik==1)write(*,'(a,2i18)') &
+        'DC_LCFO_HPSI local/global grid points: ',product(mg%num),product(lg%num)
 
       allocate(mat_h_local(m,m,nspin))
       call assemble_halo_hamiltonian(ik,f_basis,hf,mat_h_local,n_halo,halo,nactive, &
@@ -694,7 +702,13 @@ contains
       call check_collective_status(istat,"write complex LCFO Hamiltonian",ik,0)
 
       if (yn_dc_lcfo_diag == 'y') then
-      if (trim(lcfo_eigensolver) == 'chefsi') then
+      if (trim(lcfo_eigensolver) == 'scalapack') then
+#ifdef USE_SCALAPACK
+        call diag_scalapack_complex_driver(ik)
+#else
+        stop 'DC-LCFO complex: ScaLAPACK build required.'
+#endif
+      else if (trim(lcfo_eigensolver) == 'chefsi') then
 #ifdef USE_SCALAPACK
         call diag_chefsi_complex_driver(ik)
 #else
@@ -780,6 +794,61 @@ contains
 
   contains
 
+#ifdef USE_SCALAPACK
+    subroutine diag_scalapack_complex_driver(ik0)
+      use lcfo_scalapack
+      implicit none
+      integer,intent(in) :: ik0
+      type(lcfo_dense_state) :: dense
+      complex(8),allocatable :: block(:,:),coeff(:,:)
+      integer :: spin0,f,h,source,nh,nbf,nbs,start_f,start_s,status0
+      real(8) :: he,oe,re
+      allocate(block(m,m))
+      do spin0=1,nspin
+        call lcfo_dense_init(dense,n_mat(spin0,ik0),dc%icomm_tot,status0)
+        call check_collective_status(status0,'ScaLAPACK layout',ik0,spin0)
+        do f=1,dc%n_frag
+          nbf=n_basis(f,spin0,ik0)
+          start_f=1+sum(n_basis(:f-1,spin0,ik0))
+          block=0d0
+          if(dc%id_tot==id_array(f))block=mat_h_local(:,:,spin0)
+          call comm_bcast(block,dc%icomm_tot,id_array(f))
+          call lcfo_dense_add(dense,start_f,start_f,block(:nbf,:nbf))
+          nh=n_halo
+          call comm_bcast(nh,dc%icomm_tot,id_array(f))
+          do h=1,nh
+            source=0;block=0d0
+            if(dc%id_tot==id_array(f))then
+              source=halo(h)%ifrag_src
+              if(allocated(halo(h)%mat_h_local))block=halo(h)%mat_h_local(:,:,spin0)
+            endif
+            call comm_bcast(source,dc%icomm_tot,id_array(f))
+            call comm_bcast(block,dc%icomm_tot,id_array(f))
+            nbs=n_basis(source,spin0,ik0)
+            start_s=1+sum(n_basis(:source-1,spin0,ik0))
+            call lcfo_dense_add(dense,start_s,start_f,.5d0*block(:nbs,:nbf))
+            call lcfo_dense_add(dense,start_f,start_s,.5d0*conjg(transpose(block(:nbs,:nbf))))
+          enddo
+        enddo
+        call lcfo_dense_solve(dense,dc%nstate_tot,he,oe,re,status0)
+        call check_collective_status(status0,'PZHEEV/residual',ik0,spin0)
+        if(dc%id_tot==0)write(*,'(a,2i6,4es16.7,a)') &
+          'complex LCFO k/spin, hermitian/basis/eigen/residual: ',ik0,spin0,he,basis_err,oe,re,' LCFO_SCALAPACK'
+        esp_tot(:,spin0,ik0)=dense%values(:dc%nstate_tot)
+        do f=1,dc%n_frag
+          nbf=n_basis(f,spin0,ik0);start_f=1+sum(n_basis(:f-1,spin0,ik0))
+          allocate(coeff(nbf,dc%nstate_tot))
+          call lcfo_dense_rows(dense,start_f,nbf,dc%nstate_tot,id_array(f),coeff)
+          if(dc%id_tot==id_array(f))coef_frag(:nbf,:,spin0)=coeff
+          deallocate(coeff)
+        enddo
+        ! Only the own-fragment coefficient rows are shared inside that fragment.
+        call comm_bcast(coef_frag(:,:,spin0),info%icomm_rko,0)
+        call lcfo_dense_free(dense)
+      enddo
+    end subroutine
+#endif
+
     subroutine init_fragment_roots(ids)
       use communication, only: comm_summation
       implicit none
@@ -850,123 +919,157 @@ contains
     end subroutine init_halo
 
     subroutine build_basis(ik0,basis,nb0,basis_err0)
-      use communication, only: comm_bcast,comm_summation
+      use communication, only: comm_bcast,comm_summation,comm_isend,comm_irecv,comm_wait
       use eigen_subdiag_sub, only: eigen_zheev
       implicit none
       integer, intent(in) :: ik0
       complex(8), intent(out) :: basis(:,:,:,:,:)
       integer, intent(out) :: nb0(:)
       real(8), intent(out) :: basis_err0
-      complex(8), allocatable :: local(:,:,:,:,:),work(:,:,:,:,:),smat(:,:,:),umat(:,:,:)
+      complex(8), allocatable :: local(:,:,:,:,:),work(:,:,:,:,:),phi(:,:,:,:,:)
+      complex(8), allocatable :: smat(:,:,:),partial(:,:,:),umat(:,:,:),recv_column(:,:,:)
       real(8), allocatable :: lambda(:,:)
-      integer :: io0,jo0,isp0,ix0,iy0,iz0,ieig,ib,pass0,status0
-      complex(8) :: coeff
-      real(8) :: norm2
+      integer :: io0,jo0,isp0,ix0,iy0,iz0,ieig,ib,pass0,status0,extent(3),hi(3)
+      integer :: peer,request,lo_peer(3),hi_peer(3),peer_extent(3),send_points,recv_points
+      integer,allocatable :: local_tiles(:,:),tiles(:,:)
+      complex(8) :: coeff,local_coeff
+      real(8) :: norm2,local_norm
 
-      allocate(local(size(basis,1),size(basis,2),size(basis,3),nspin,m))
-      allocate(work(size(basis,1),size(basis,2),size(basis,3),nspin,m))
-      allocate(smat(m,m,nspin),umat(m,m,nspin),lambda(m,nspin))
-      local = (0d0,0d0)
-      do io0=info%io_s,info%io_e
-        if (io0 <= m .and. info%ik_s <= ik0 .and. ik0 <= info%ik_e) then
-          do isp0=1,nspin
-          do iz0=mg%is(3),mg%ie(3)
-          do iy0=mg%is(2),mg%ie(2)
-          do ix0=mg%is(1),mg%ie(1)
-            if (ix0 <= dc%nxyz_domain(1) .and. iy0 <= dc%nxyz_domain(2) .and. &
-                iz0 <= dc%nxyz_domain(3)) then
-              if (energy%esp(io0,ik0,isp0)-system%mu < energy_cut) &
-                local(ix0,iy0,iz0,isp0,io0) = spsi%zwf(ix0,iy0,iz0,isp0,io0,ik0,1)
-            end if
-          end do
-          end do
-          end do
-          end do
-        end if
-      end do
-      call comm_summation(local,basis,size(basis),info%icomm_rko)
-      deallocate(local)
-      smat = (0d0,0d0)
-      umat = (0d0,0d0)
-      lambda = 0d0
-      status0 = 0
-      if (dc%id_frag == 0) then
-        status0 = 0
+      hi=min(mg%ie,dc%nxyz_domain);extent=max(0,hi-mg%is+1)
+      allocate(local(extent(1),extent(2),extent(3),nspin,m), &
+               work(extent(1),extent(2),extent(3),nspin,m), &
+               phi(extent(1),extent(2),extent(3),nspin,m))
+      allocate(smat(m,m,nspin),partial(m,m,nspin),umat(m,m,nspin),lambda(m,nspin))
+      local=(0d0,0d0)
+      do io0=info%io_s,min(info%io_e,m)
+        if(info%ik_s>ik0.or.ik0>info%ik_e)cycle
         do isp0=1,nspin
-        do io0=1,m
-        do jo0=1,m
-          smat(io0,jo0,isp0) = hvol*sum(conjg(basis(:,:,:,isp0,io0))*basis(:,:,:,isp0,jo0))
-        end do
-        end do
-        end do
-        status0 = 0
+          if(energy%esp(io0,ik0,isp0)-system%mu>=energy_cut)cycle
+          local(:,:,:,isp0,io0)=spsi%zwf(mg%is(1):hi(1),mg%is(2):hi(2), &
+                                       mg%is(3):hi(3),isp0,io0,ik0,1)
+        enddo
+      enddo
+      ! k/orbital peers share these spatial rows; never sum grid rows here.
+      call comm_summation(local,work,size(work),info%icomm_ko)
+      deallocate(local)
+      partial=(0d0,0d0)
+      do isp0=1,nspin
+      do io0=1,m
+      do jo0=1,m
+        partial(io0,jo0,isp0)=hvol*sum(conjg(work(:,:,:,isp0,io0))*work(:,:,:,isp0,jo0))
+      enddo
+      enddo
+      enddo
+      call comm_summation(partial,smat,size(smat),info%icomm_r)
+      umat=0d0;lambda=0d0;status0=0
+      if(dc%id_frag==0)then
         do isp0=1,nspin
           call eigen_zheev(smat(:,:,isp0),lambda(:,isp0),umat(:,:,isp0),lapack_info=status0)
-          if (status0 /= 0) exit
-          if (any(.not.ieee_is_finite(lambda(:,isp0))) .or. &
-              minval(lambda(:,isp0)) < -lcfo_tol*max(1d0,maxval(abs(lambda(:,isp0))))) then
-            status0 = 1
-            exit
-          end if
-        end do
-      end if
+          if(status0/=0)exit
+          if(.not.salmon_all_finite(lambda(:,isp0)).or. &
+             minval(lambda(:,isp0)) < -lcfo_tol*max(1d0,maxval(abs(lambda(:,isp0)))))then
+            status0=1;exit
+          endif
+        enddo
+      endif
       call check_collective_status(status0,"fragment overlap ZHEEV",ik0,0)
-      work = basis
-      basis = (0d0,0d0)
-      nb0 = 0
-      if (dc%id_frag == 0) then
-        do isp0=1,nspin
-          ib = 0
-          do ieig=m,1,-1
-            if (lambda(ieig,isp0) > lambda_cut) then
-              ib = ib + 1
-              do jo0=1,m
-                basis(:,:,:,isp0,ib) = basis(:,:,:,isp0,ib) + &
-                     work(:,:,:,isp0,jo0)*umat(jo0,ieig,isp0)/sqrt(lambda(ieig,isp0))
-              end do
-            end if
-          end do
-          nb0(isp0) = ib
-        end do
-        do pass0=1,2
-          do isp0=1,nspin
-            ib = count(lambda(:,isp0) > lambda_cut)
-            do io0=1,ib
-              do jo0=1,io0-1
-                coeff = hvol*sum(conjg(basis(:,:,:,isp0,jo0))*basis(:,:,:,isp0,io0))
-                basis(:,:,:,isp0,io0) = basis(:,:,:,isp0,io0) - &
-                     basis(:,:,:,isp0,jo0)*coeff
-              end do
-              norm2 = hvol*sum(abs(basis(:,:,:,isp0,io0))**2)
-              if (.not.ieee_is_finite(norm2) .or. norm2 <= 100d0*epsilon(1d0)) then
-                status0 = 1
-                exit
-              end if
-              basis(:,:,:,isp0,io0) = basis(:,:,:,isp0,io0)/sqrt(norm2)
-            end do
-          end do
-        end do
-      end if
+      call comm_bcast(lambda,info%icomm_rko,0)
+      call comm_bcast(umat,info%icomm_rko,0)
+      phi=0d0;nb0=0
+      do isp0=1,nspin
+        ib=0
+        do ieig=m,1,-1
+          if(lambda(ieig,isp0)<=lambda_cut)cycle
+          ib=ib+1
+          do jo0=1,m
+            phi(:,:,:,isp0,ib)=phi(:,:,:,isp0,ib)+ &
+              work(:,:,:,isp0,jo0)*umat(jo0,ieig,isp0)/sqrt(lambda(ieig,isp0))
+          enddo
+        enddo
+        nb0(isp0)=ib
+      enddo
+      deallocate(work)
+      status0=0
+      do pass0=1,2
+      do isp0=1,nspin
+      do io0=1,nb0(isp0)
+        do jo0=1,io0-1
+          local_coeff=hvol*sum(conjg(phi(:,:,:,isp0,jo0))*phi(:,:,:,isp0,io0))
+          call comm_summation(local_coeff,coeff,info%icomm_r)
+          phi(:,:,:,isp0,io0)=phi(:,:,:,isp0,io0)-phi(:,:,:,isp0,jo0)*coeff
+        enddo
+        local_norm=hvol*sum(abs(phi(:,:,:,isp0,io0))**2)
+        call comm_summation(local_norm,norm2,info%icomm_r)
+        if(.not.ieee_is_finite(norm2).or.norm2<=100d0*epsilon(1d0))then
+          status0=1;norm2=1d0
+        endif
+        phi(:,:,:,isp0,io0)=phi(:,:,:,isp0,io0)/sqrt(norm2)
+      enddo
+      enddo
+      enddo
       call check_collective_status(status0,"Gram-Schmidt",ik0,0)
-      basis_err0 = 0d0
-      if (dc%id_frag == 0) then
-        do isp0=1,nspin
-          do io0=1,nb0(isp0)
-          do jo0=1,nb0(isp0)
-            coeff = hvol*sum(conjg(basis(:,:,:,isp0,io0))*basis(:,:,:,isp0,jo0))
-            if (io0 == jo0) coeff = coeff-(1d0,0d0)
-            basis_err0 = max(basis_err0,abs(coeff))
-          end do
-          end do
-        end do
-      end if
-      call comm_bcast(basis_err0,info%icomm_rko,0)
-      status0 = 0
-      if (basis_err0 > lcfo_tol .or. .not.ieee_is_finite(basis_err0)) status0 = 1
+      basis_err0=0d0
+      do isp0=1,nspin
+      do io0=1,nb0(isp0)
+      do jo0=1,nb0(isp0)
+        local_coeff=hvol*sum(conjg(phi(:,:,:,isp0,io0))*phi(:,:,:,isp0,jo0))
+        call comm_summation(local_coeff,coeff,info%icomm_r)
+        if(io0==jo0)coeff=coeff-(1d0,0d0)
+        basis_err0=max(basis_err0,abs(coeff))
+      enddo
+      enddo
+      enddo
+      status0=0
+      if(basis_err0>lcfo_tol.or..not.ieee_is_finite(basis_err0))status0=1
       call check_collective_status(status0,"fragment basis orthogonality",ik0,0)
-      call comm_bcast(nb0,info%icomm_rko,0)
-      call comm_bcast(basis,info%icomm_rko,0)
-      deallocate(lambda,umat,smat,work)
+      basis=0d0
+      if(dc%id_frag/=0)basis=phi
+      ! Only k/orbital representative ranks supply spatial tiles. No full-core
+      ! send column is allocated; root receives one actual tile column at a time.
+      allocate(local_tiles(7,0:info%isize_rko-1),tiles(7,0:info%isize_rko-1))
+      local_tiles=0
+      if(info%id_ko==0)then
+        local_tiles(1:3,info%id_rko)=mg%is
+        local_tiles(4:6,info%id_rko)=hi
+        local_tiles(7,info%id_rko)=1
+      endif
+      call comm_summation(local_tiles,tiles,size(tiles),info%icomm_rko)
+      send_points=0;recv_points=0
+      do peer=0,info%isize_rko-1
+        if(tiles(7,peer)==0)cycle
+        lo_peer=tiles(1:3,peer);hi_peer=tiles(4:6,peer)
+        peer_extent=max(0,hi_peer-lo_peer+1)
+        if(any(peer_extent==0))cycle
+        if(peer==0)then
+          if(dc%id_frag==0)basis(lo_peer(1):hi_peer(1),lo_peer(2):hi_peer(2), &
+                                lo_peer(3):hi_peer(3),:,:)=phi
+          cycle
+        endif
+        if(dc%id_frag==0)then
+          allocate(recv_column(peer_extent(1),peer_extent(2),peer_extent(3)))
+          recv_points=max(recv_points,product(peer_extent))
+        endif
+        do isp0=1,nspin
+        do io0=1,nb0(isp0)
+          if(info%id_rko==peer)then
+            request=comm_isend(phi(:,:,:,isp0,io0),0,19001,info%icomm_rko)
+            call comm_wait(request)
+            send_points=product(extent)
+          else if(dc%id_frag==0)then
+            request=comm_irecv(recv_column,peer,19001,info%icomm_rko)
+            call comm_wait(request)
+            basis(lo_peer(1):hi_peer(1),lo_peer(2):hi_peer(2),lo_peer(3):hi_peer(3),isp0,io0)=recv_column
+          endif
+        enddo
+        enddo
+        if(dc%id_frag==0)deallocate(recv_column)
+      enddo
+      if(ik0==1)then
+        write(*,'(a,3i18)')'DC_LCFO_BASIS rank/local/stored grid points: ', &
+          dc%id_frag,product(extent),product(basis_shape)
+        write(*,'(a,3i18)')'DC_LCFO_GATHER rank/send/receive grid points: ',dc%id_frag,send_points,recv_points
+      endif
+      deallocate(local_tiles,tiles,phi,lambda,umat,smat,partial)
     end subroutine build_basis
 
     subroutine collect_basis_dimensions(ik0,nb0)
@@ -990,7 +1093,7 @@ contains
     end subroutine collect_basis_dimensions
 
     subroutine assemble_halo_hamiltonian(ik0,basis,hf0,diag_h,nh,halos,nact,rs,rr)
-      use communication, only: comm_irecv,comm_isend,comm_wait_all
+      use communication, only: comm_irecv,comm_isend,comm_wait_all,comm_wait,comm_summation
       implicit none
       integer, intent(in) :: ik0,nh
       complex(8), intent(in) :: basis(:,:,:,:,:),hf0(:,:,:,:,:)
@@ -998,21 +1101,41 @@ contains
       type(s_lcfo_complex_halo), intent(inout) :: halos(:)
       integer, intent(out) :: nact
       integer, allocatable, intent(out) :: rs(:),rr(:)
-      integer :: h,ia,ib,ic,isp0,io0,jo0,jj0,k0,tag_send,tag_recv
-      integer :: l(3),d(3),nreq
+      integer :: h,ia,ib,ic,isp0,io0,jo0,tag_send,tag_recv
+      integer :: l(3),d(3),nreq,lo(3),hi(3),ix0,iy0,iz0
+      integer :: peer,request,peer_lo(3),peer_hi(3),tile_extent(3),max_tile,max_halo
+      integer,allocatable :: local_domains(:,:),domains(:,:)
+      complex(8),allocatable :: tile(:,:,:,:,:),send_tile(:,:,:,:,:)
+      complex(8) :: local_h(m,m,nspin)
 
-      diag_h = (0d0,0d0)
-      if (dc%id_frag == 0) then
+      local_h = (0d0,0d0)
+      if (owns_ik) then
+        hi=min(mg%ie,dc%nxyz_domain)
         do isp0=1,nspin
+        do jo0=max(1,info%io_s),min(info%io_e,n_basis(dc%i_frag,isp0,ik0))
         do io0=1,n_basis(dc%i_frag,isp0,ik0)
-        do jo0=1,n_basis(dc%i_frag,isp0,ik0)
-          diag_h(io0,jo0,isp0) = hvol*sum(conjg(basis(:,:,:,isp0,io0))* &
-               hf0(1:dc%nxyz_domain(1),1:dc%nxyz_domain(2),1:dc%nxyz_domain(3),isp0,jo0))
+          do ic=mg%is(3),hi(3)
+          do ib=mg%is(2),hi(2)
+          do ia=mg%is(1),hi(1)
+            local_h(io0,jo0,isp0)=local_h(io0,jo0,isp0)+hvol*conjg(basis(ia-basis_origin(1)+1, &
+              ib-basis_origin(2)+1,ic-basis_origin(3)+1,isp0,io0))* &
+              hf0(ia-mg%is(1)+1,ib-mg%is(2)+1,ic-mg%is(3)+1,isp0,jo0)
+          end do
+          end do
+          end do
         end do
         end do
         end do
       end if
+      call comm_summation(local_h,diag_h,size(diag_h),info%icomm_rko)
 
+      allocate(local_domains(7,0:info%isize_rko-1),domains(7,0:info%isize_rko-1))
+      local_domains=0
+      local_domains(1:3,info%id_rko)=mg%is
+      local_domains(4:6,info%id_rko)=mg%ie
+      if(owns_ik.and.info%io_s<=m.and.info%io_e>=info%io_s)local_domains(7,info%id_rko)=1
+      call comm_summation(local_domains,domains,size(domains),info%icomm_rko)
+      max_tile=0;max_halo=0
       nact = 0
       do h=1,nh
         if (all(halos(h)%length > 0)) nact = nact + 1
@@ -1043,36 +1166,68 @@ contains
           call comm_wait_all(rr(1:nreq))
           call comm_wait_all(rs(1:nreq))
         end if
-        nreq = 0
-        do h=1,nh
-          if (.not.all(halos(h)%length > 0)) cycle
-          nreq = nreq + 1
-          l = halos(h)%length
-          d = halos(h)%dsp_recv
-          allocate(halos(h)%mat_h_local(m,m,nspin))
-          halos(h)%mat_h_local = (0d0,0d0)
-          do isp0=1,nspin
-          do jo0=1,m
-          do io0=1,m
-            do ic=1,l(3)
-            do ib=1,l(2)
-            do ia=1,l(1)
-              halos(h)%mat_h_local(jo0,io0,isp0) = halos(h)%mat_h_local(jo0,io0,isp0) + &
-                   hvol*conjg(halos(h)%buf_recv(ia,ib,ic,isp0,jo0))* &
-                   hf0(d(1)+ia,d(2)+ib,d(3)+ic,isp0,io0)
-            end do
-            end do
-            end do
-          end do
-          end do
-          end do
-          deallocate(halos(h)%buf_send,halos(h)%buf_recv)
-        end do
       end if
-      deallocate(rs,rr)
+      do h=1,nh
+        if (.not.all(halos(h)%length > 0)) cycle
+        l=halos(h)%length;d=halos(h)%dsp_recv
+        max_halo=max(max_halo,product(l))
+        lo=max(mg%is,d+1);hi=min(mg%ie,d+l)
+        if(domains(7,info%id_rko)==1.and.all(hi>=lo))then
+          tile_extent=hi-lo+1
+          allocate(tile(tile_extent(1),tile_extent(2),tile_extent(3),nspin,m))
+          max_tile=max(max_tile,product(tile_extent))
+          if(dc%id_frag==0)tile=halos(h)%buf_recv(lo(1)-d(1):hi(1)-d(1), &
+            lo(2)-d(2):hi(2)-d(2),lo(3)-d(3):hi(3)-d(3),:,:)
+        endif
+        do peer=1,info%isize_rko-1
+          if(domains(7,peer)==0)cycle
+          peer_lo=max(domains(1:3,peer),d+1);peer_hi=min(domains(4:6,peer),d+l)
+          if(any(peer_hi<peer_lo))cycle
+          if(dc%id_frag==0)then
+            tile_extent=peer_hi-peer_lo+1
+            allocate(send_tile(tile_extent(1),tile_extent(2),tile_extent(3),nspin,m))
+            send_tile=halos(h)%buf_recv(peer_lo(1)-d(1):peer_hi(1)-d(1), &
+              peer_lo(2)-d(2):peer_hi(2)-d(2),peer_lo(3)-d(3):peer_hi(3)-d(3),:,:)
+            request=comm_isend(send_tile,peer,19002,info%icomm_rko)
+            call comm_wait(request)
+            deallocate(send_tile)
+          else if(info%id_rko==peer)then
+            request=comm_irecv(tile,0,19002,info%icomm_rko)
+            call comm_wait(request)
+          endif
+        enddo
+        local_h=(0d0,0d0)
+        ! Integrate only the local intersection received above.
+        if(allocated(tile))then
+          do isp0=1,nspin
+          do io0=max(1,info%io_s),min(info%io_e,m)
+          do jo0=1,m
+            do ic=lo(3),hi(3)
+            do ib=lo(2),hi(2)
+            do ia=lo(1),hi(1)
+              ix0=ia-mg%is(1)+1;iy0=ib-mg%is(2)+1;iz0=ic-mg%is(3)+1
+              local_h(jo0,io0,isp0)=local_h(jo0,io0,isp0)+ &
+                hvol*conjg(tile(ia-lo(1)+1,ib-lo(2)+1,ic-lo(3)+1,isp0,jo0))* &
+                hf0(ix0,iy0,iz0,isp0,io0)
+            end do
+            end do
+            end do
+          end do
+          end do
+          end do
+        endif
+        allocate(halos(h)%mat_h_local(m,m,nspin))
+        call comm_summation(local_h,halos(h)%mat_h_local,size(local_h),info%icomm_rko)
+        if(allocated(tile))deallocate(tile)
+        if(allocated(halos(h)%buf_recv))deallocate(halos(h)%buf_recv)
+        if(allocated(halos(h)%buf_send))deallocate(halos(h)%buf_send)
+      end do
+      if(ik0==1)write(*,'(a,3i18)')'DC_LCFO_HALO rank/tile/full grid points: ',dc%id_frag,max_tile,max_halo
+      deallocate(rs,rr,local_domains,domains)
     end subroutine assemble_halo_hamiltonian
 
     integer function halo_tag(ifg,dvec) result(tag0)
+      implicit none
       integer, intent(in) :: ifg,dvec(3)
       tag0 = (ifg-1)*27 + (dvec(1)+1)*9 + (dvec(2)+1)*3 + dvec(3) + 2
     end function halo_tag
@@ -1236,6 +1391,8 @@ contains
   end subroutine dc_lcfo_complex
 
   subroutine init_conventional_from_dcdft_complex(lg,mg,system,info,spsi)
+    use lcfo_mesh_tile, only: lcfo_tile_coverage
+    use lcfo_mesh_stream, only: s_lcfo_cache,lcfo_cache_contract
     use communication, only: comm_summation,comm_bcast
     use salmon_global, only: num_fragment
     use structures, only: s_dft_system,s_orbital,s_parallel_info,s_rgrid
@@ -1244,15 +1401,17 @@ contains
     type(s_dft_system), intent(in) :: system
     type(s_parallel_info), intent(in) :: info
     type(s_orbital), intent(inout) :: spsi
-    integer, allocatable :: n_basis_all(:,:,:),n_basis_wire(:),coverage(:,:,:),coverage_sum(:,:,:)
-    integer :: meta(20),local_status,total_status,f,ik,ispin,io,j,ix,iy,iz
-    integer :: nfrag,nspin,nk,ngrid
+    integer, allocatable :: n_basis_all(:,:,:),n_basis_wire(:),coverage(:),coverage_sum(:),tiles(:,:)
+    integer :: meta(20),local_status,total_status,f,ik,ispin,io,ix,iy,iz
+    integer :: nfrag,nspin,nk,ngrid,dest,lo(3),m(3),first,count,scratch_points,g
     real(8) :: geom(10)
     real(8), allocatable :: vec_k(:,:),wtk(:)
     character(96) :: run_id
     character(32), parameter :: bdir='./data_dcdft/fragments/'
     type(s_complex_lcfo_fragment), allocatable :: frag(:)
-    complex(8), allocatable :: wrk_local(:,:,:),wrk_sum(:,:,:)
+    complex(8), allocatable :: cached_local(:),cached_sum(:)
+    type(s_lcfo_cache),allocatable :: cache(:)
+    integer(int64)::cache_bytes
 
 #if defined(USE_OPENACC) || defined(USE_CUDA)
     stop "DC-LCFO complex reconstruction: GPU/OpenACC/CUDA is unsupported."
@@ -1296,75 +1455,104 @@ contains
     call comm_bcast(n_basis_wire,info%icomm_ro,0)
     n_basis_all = reshape(n_basis_wire,shape(n_basis_all))
 
-    allocate(frag(nfrag),coverage(lg%num(1),lg%num(2),lg%num(3)))
-    allocate(coverage_sum(lg%num(1),lg%num(2),lg%num(3)))
-    coverage = 0
+    allocate(frag(nfrag))
     local_status = 0
     do f=1,nfrag
       if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
       call validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
-           run_id,n_basis_all,frag(f)%jxyz,coverage,local_status)
+           run_id,n_basis_all,frag(f)%jxyz,local_status,frag(f)%basis_pos,frag(f)%coef_pos)
       if (local_status /= 0) exit
     end do
     call comm_summation(local_status,total_status,info%icomm_ro)
     if (total_status /= 0) stop "DC-LCFO complex reconstruction: fragment preflight failed."
-    call comm_summation(coverage,coverage_sum,ngrid,info%icomm_ro)
-    if (any(coverage_sum /= 1)) then
-      if (info%id_ro == 0) write(*,*) &
-           "DC-LCFO complex reconstruction: fragment cores do not cover the total grid exactly once."
-      stop "DC-LCFO complex reconstruction: invalid rgrid coverage."
-    end if
-
-    allocate(wrk_local(lg%num(1),lg%num(2),lg%num(3)))
-    allocate(wrk_sum(lg%num(1),lg%num(2),lg%num(3)))
+    ! Each destination advertises only its grid bounds and owned orbital range.
+    ! Size work to one destination domain; no fixed grid-point or memory cap.
+    allocate(tiles(8,0:info%isize_ro-1));tiles=0;scratch_points=0
+    do dest=0,info%isize_ro-1
+      if(info%id_ro==dest)tiles(:,dest)=[mg%is,mg%num,info%io_s,info%io_e]
+      call comm_bcast(tiles(:,dest),info%icomm_ro,dest)
+      lo=tiles(1:3,dest);m=tiles(4:6,dest)
+      if(any(m<1).or.any(lo<1).or.any(lo+m-1>lg%num)) &
+        error stop 'DC-LCFO complex reconstruction: invalid destination grid'
+      scratch_points=max(scratch_points,product(m))
+    enddo
+    allocate(coverage(scratch_points),coverage_sum(scratch_points))
+    local_status=0
+    do dest=0,info%isize_ro-1
+      lo=tiles(1:3,dest);m=tiles(4:6,dest);count=product(m);first=1
+      coverage(:count)=0
+      do f=1,nfrag
+        if(.not.allocated(frag(f)%jxyz))cycle
+        call lcfo_tile_coverage(meta(7:9),frag(f)%jxyz,lo,m,first,coverage(:count))
+      enddo
+      call comm_summation(coverage(:count),coverage_sum(:count),count,info%icomm_ro,dest)
+      if(info%id_ro==dest)then
+        if(any(coverage_sum(:count)/=1))local_status=1
+      endif
+    enddo
+    call comm_summation(local_status,total_status,info%icomm_ro)
+    if(total_status/=0)then
+      if(info%id_ro==0)write(*,*) &
+        'DC-LCFO complex reconstruction: fragment cores do not cover the total grid exactly once.'
+      error stop 'DC-LCFO complex reconstruction: invalid rgrid coverage.'
+    endif
+    deallocate(coverage,coverage_sum)
+    if(info%id_ro==0)write(*,'(a,2i14)') &
+      'DC_LCFO_TILE scratch_points/global_points: ',scratch_points,ngrid
     if (info%id_ro == 0) then
       write(*,*) "start complex DC-LCFO wavefunction reconstruction"
       write(*,*) "complex LCFO format v1; fragments/k/spins:",nfrag,nk,nspin
+      write(*,*) 'DC_LCFO_CACHE fragment payloads loaded once; one-orbital global scratch'
     end if
+    ! Temporary one-orbital workspace; retain the memory estimate internally.
+    ! Available memory is machine dependent, so impose no fixed budget.
+    cache_bytes=32_int64*ngrid
+    do f=1,nfrag
+      if(.not.allocated(frag(f)%jxyz))cycle
+      cache_bytes=cache_bytes+16_int64*int(maxval(n_basis_all(f,:,:)),int64)* &
+        (int(meta(7),int64)*meta(8)*meta(9)+system%no)
+    enddo
+    allocate(cache(nfrag),cached_local(ngrid),cached_sum(ngrid))
+    cache(1)%workspace_bytes=cache_bytes
     do ik=info%ik_s,info%ik_e
-      do f=1,nfrag
-        if (mod(f-1,info%isize_ro) /= info%id_ro) cycle
-        call load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,meta,geom,vec_k,wtk, &
-             run_id,n_basis_all,frag(f),local_status)
-        if (local_status /= 0) exit
-      end do
-      call comm_summation(local_status,total_status,info%icomm_ro)
-      if (total_status /= 0) stop "DC-LCFO complex reconstruction: k-record read failed."
       do ispin=1,nspin
+        local_status=0
+        do f=1,nfrag
+          if(.not.allocated(frag(f)%jxyz))cycle
+          call load_complex_lcfo_cache(f,ik,ispin,bdir,system,lg,meta,geom,vec_k,wtk,run_id, &
+            n_basis_all,frag(f),cache(f),local_status)
+          if(local_status/=0)exit
+        enddo
+        call comm_summation(local_status,total_status,info%icomm_ro)
+        if(total_status/=0)error stop 'DC-LCFO cached payload load failed'
         do io=1,system%no
-          wrk_local = (0d0,0d0)
+          cached_local=0;local_status=0
           do f=1,nfrag
-            if (.not.allocated(frag(f)%basis)) cycle
-            do j=1,frag(f)%n_basis(ispin)
-              do iz=1,meta(9)
-              do iy=1,meta(8)
-              do ix=1,meta(7)
-                wrk_local(frag(f)%jxyz(ix,1),frag(f)%jxyz(iy,2),frag(f)%jxyz(iz,3)) = &
-                     wrk_local(frag(f)%jxyz(ix,1),frag(f)%jxyz(iy,2),frag(f)%jxyz(iz,3)) + &
-                     frag(f)%basis(ix,iy,iz,ispin,j)*frag(f)%coef(j,io,ispin)
-              end do
-              end do
-              end do
-            end do
-          end do
-          call comm_summation(wrk_local,wrk_sum,ngrid,info%icomm_ro)
-          if (info%io_s <= io .and. io <= info%io_e) then
-            do iz=mg%is(3),mg%ie(3)
-            do iy=mg%is(2),mg%ie(2)
-            do ix=mg%is(1),mg%ie(1)
-              spsi%zwf(ix,iy,iz,ispin,io,ik,1) = wrk_sum(ix,iy,iz)
-            end do
-            end do
-            end do
-          end if
-        end do
-      end do
-      do f=1,nfrag
-        if (allocated(frag(f)%basis)) deallocate(frag(f)%basis,frag(f)%coef,frag(f)%n_basis)
-      end do
-    end do
+            if(.not.allocated(frag(f)%jxyz))cycle
+            call lcfo_cache_contract(cache(f),meta(7:9),io,frag(f)%jxyz,[1,1,1],lg%num,1, &
+              cached_local,local_status)
+            if(local_status/=0)exit
+          enddo
+          call comm_summation(local_status,total_status,info%icomm_ro)
+          if(total_status/=0)error stop 'DC-LCFO cached contraction failed'
+          call comm_summation(cached_local,cached_sum,ngrid,info%icomm_ro)
+          if(io>=info%io_s.and.io<=info%io_e)then
+            do iz=mg%is(3),mg%ie(3);do iy=mg%is(2),mg%ie(2);do ix=mg%is(1),mg%ie(1)
+              g=ix+lg%num(1)*(iy-1+lg%num(2)*(iz-1))
+              spsi%zwf(ix,iy,iz,ispin,io,ik,1)=cached_sum(g)
+            enddo;enddo;enddo
+          endif
+          if(info%id_ro==0.and.(mod(io,32)==0.or.io==system%no)) &
+            write(*,'(a,4i10)')'DC_LCFO_CACHE k/spin/orbital/total: ',ik,ispin,io,system%no
+        enddo
+        do f=1,nfrag
+          if(allocated(cache(f)%basis))deallocate(cache(f)%basis,cache(f)%coeff)
+        enddo
+      enddo
+    enddo
+    deallocate(cache,cached_local,cached_sum)
     if (info%id_ro == 0) write(*,*) "end complex DC-LCFO wavefunction reconstruction"
-    deallocate(wrk_sum,wrk_local,coverage_sum,coverage,frag,n_basis_wire,n_basis_all,wtk,vec_k)
+    deallocate(tiles,frag,n_basis_wire,n_basis_all,wtk,vec_k)
   end subroutine init_conventional_from_dcdft_complex
 
   subroutine open_complex_lcfo_read(path,file_kind,system,lg,unit,meta,geom,vec_k,wtk,run_id,file_size,status)
@@ -1414,8 +1602,8 @@ contains
     if (abs(geom(10)-system%hvol) > 1d-12*max(1d0,abs(geom(10)))) goto 900
     if (any(abs(vec_k-system%vec_k) > 1d-12*max(1d0,maxval(abs(vec_k)))) .or. &
         any(abs(wtk-system%wtk) > 1d-12*max(1d0,maxval(abs(wtk))))) goto 900
-    if (any(.not.ieee_is_finite(geom)) .or. any(.not.ieee_is_finite(vec_k)) .or. &
-        any(.not.ieee_is_finite(wtk))) goto 900
+    if (.not.salmon_all_finite(geom) .or. .not.salmon_all_finite(vec_k) .or. &
+        .not.salmon_all_finite(wtk)) goto 900
     inquire(unit=unit,size=file_size,iostat=ios)
     if (ios /= 0 .or. file_size < header_bytes+124_int64) goto 900
     status = 0
@@ -1427,6 +1615,7 @@ contains
 
   subroutine skip_complex_lcfo_reals(unit,nreal,status)
     use iso_fortran_env, only: real64,int64
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     integer, intent(in) :: unit
     integer(int64), intent(in) :: nreal
@@ -1447,6 +1636,9 @@ contains
         status = 1
         return
       end if
+      if(.not.salmon_all_finite(buffer(:n)))then
+        status=1;return
+      endif
       remain = remain-int(n,int64)
     end do
   end subroutine skip_complex_lcfo_reals
@@ -1608,7 +1800,8 @@ contains
   end subroutine read_complex_lcfo_reference
 
   subroutine validate_complex_lcfo_fragment(f,bdir,system,lg,nfrag,ref_meta,ref_geom,ref_k, &
-       ref_wtk,ref_run,n_basis_all,jxyz,coverage,status)
+       ref_wtk,ref_run,n_basis_all,jxyz,status,basis_pos,coef_pos)
+    use exx_functional, only: lcfo_check_functional
     use filesystem, only: get_filehandle
     use iso_fortran_env, only: int32,int64,real64
     use structures, only: s_dft_system,s_rgrid
@@ -1620,7 +1813,7 @@ contains
     real(real64), intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
     character(96), intent(in) :: ref_run
     integer, allocatable, intent(out) :: jxyz(:,:)
-    integer, intent(inout) :: coverage(:,:,:)
+    integer(int64),allocatable,intent(out) :: basis_pos(:,:),coef_pos(:,:)
     integer, intent(out) :: status
     character(256) :: filename
     character(16) :: footer_basis,footer_coeff
@@ -1634,6 +1827,9 @@ contains
     real(real64) :: w_b(size(ref_wtk)),w_c(size(ref_wtk))
     integer(int64) :: footer_bytes_b,footer_bytes_c
 
+    write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','functional.txt'
+    call lcfo_check_functional(filename,ref_run,status)
+    if(status/=0)return
     status = 1
     write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','basis_functions.bin'
     call open_complex_lcfo_read(filename,1,system,lg,ub,meta_b,geom_b,vk_b,w_b, &
@@ -1678,6 +1874,8 @@ contains
     close(ur,iostat=close_ios)
     if (ios /= 0 .or. close_ios /= 0) goto 900
 
+    allocate(basis_pos(system%nspin,system%nk),coef_pos(system%nspin,system%nk))
+    basis_pos=0;coef_pos=0
     do ik=1,system%nk
       read(ub,iostat=ios) ikb,payload_b
       if (ios /= 0) exit
@@ -1690,6 +1888,8 @@ contains
           ios = 1
           exit
         end if
+        inquire(unit=ub,pos=basis_pos(ispin,ik),iostat=ios)
+        if(ios/=0)exit
         nreal = 2_int64
         do d=7,9
           if (int(meta_b(d),int64) > huge(nreal)/nreal) then
@@ -1739,6 +1939,8 @@ contains
           end if
         end do
         if (ios /= 0) exit
+        inquire(unit=uc,pos=coef_pos(ispin,ik),iostat=ios)
+        if(ios/=0)exit
         call skip_complex_lcfo_reals(uc,2_int64*int(nb_wire,int64)* &
              int(meta_c(20),int64),ios)
         if (ios /= 0) exit
@@ -1761,14 +1963,6 @@ contains
     inquire(unit=uc,pos=end_c,iostat=ios)
     if (ios /= 0 .or. footer_coeff /= 'SLCFO_DONE_V1' .or. run_coeff /= ref_run .or. &
         footer_kc /= system%nk .or. footer_bytes_c /= size_c .or. end_c-1_int64 /= size_c) goto 900
-    do iz=1,meta_b(9)
-    do iy=1,meta_b(8)
-    do ix=1,meta_b(7)
-      coverage(jxyz(ix,1),jxyz(iy,2),jxyz(iz,3)) = &
-           coverage(jxyz(ix,1),jxyz(iy,2),jxyz(iz,3))+1
-    end do
-    end do
-    end do
     status = 0
 900 continue
     close(ub,iostat=close_ios)
@@ -1826,7 +2020,7 @@ contains
         status=1
         return
       end if
-      if (any(.not.ieee_is_finite(wire(1:2*n)))) then
+      if (.not.salmon_all_finite(wire(1:2*n))) then
         status=1
         return
       end if
@@ -1837,121 +2031,95 @@ contains
     end do
   end subroutine read_wire_complex_values
 
-  subroutine load_complex_lcfo_fragment_k(f,ik,bdir,system,lg,nfrag,ref_meta,ref_geom, &
-       ref_k,ref_wtk,ref_run,n_basis_all,fragment,status)
-    use iso_fortran_env, only: int32,int64,real64
+  subroutine load_complex_lcfo_cache(f,ik,ispin,bdir,system,lg,ref_meta,ref_geom, &
+      ref_k,ref_wtk,ref_run,n_basis_all,fragment,cache,status)
+    use lcfo_mesh_stream, only: s_lcfo_cache,lcfo_cache_load
     use structures, only: s_dft_system,s_rgrid
     implicit none
-    integer, intent(in) :: f,ik,nfrag,ref_meta(20),n_basis_all(:,:,:)
-    character(*), intent(in) :: bdir
-    type(s_dft_system), intent(in) :: system
-    type(s_rgrid), intent(in) :: lg
-    real(real64), intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
-    character(96), intent(in) :: ref_run
-    type(s_complex_lcfo_fragment), intent(inout) :: fragment
-    integer, intent(out) :: status
+    integer,intent(in) :: f,ik,ispin,ref_meta(20),n_basis_all(:,:,:)
+    character(*),intent(in) :: bdir
+    type(s_dft_system),intent(in) :: system
+    type(s_rgrid),intent(in) :: lg
+    real(8),intent(in) :: ref_geom(10),ref_k(:,:),ref_wtk(:)
+    character(96),intent(in) :: ref_run
+    type(s_complex_lcfo_fragment),intent(in) :: fragment
+    type(s_lcfo_cache),intent(inout)::cache
+    integer,intent(out) :: status
     character(256) :: filename
     character(96) :: run_b,run_c
-    integer :: ub,uc,ios,ispin,nb,ik0,jrow,prefix,meta_b(20),meta_c(20),stage
-    integer(int32) :: ikwire,spinwire,nbwire,nmatwire,counts(size(n_basis_all,1)),row
-    integer(int64) :: size_b,size_c,payload_b,payload_c,nreal
-    real(real64) :: geom_b(10),geom_c(10),vk_b(3,size(ref_k,2)),vk_c(3,size(ref_k,2))
-    real(real64) :: w_b(size(ref_wtk)),w_c(size(ref_wtk))
-    complex(8), allocatable :: values(:),matrix_tmp(:,:)
-
+    integer :: ub,uc,ios,meta_b(20),meta_c(20)
+    integer(int64) :: size_b,size_c
+    real(8) :: geom_b(10),geom_c(10),vk_b(3,size(ref_k,2)),vk_c(3,size(ref_k,2))
+    real(8) :: w_b(size(ref_wtk)),w_c(size(ref_wtk))
     status=1
-    stage=1
-    if (ik < 1 .or. ik > system%nk .or. .not.allocated(fragment%jxyz)) return
-    write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','basis_functions.bin'
+    write(filename,'(a,i6.6,2a)')trim(bdir),f,'/','basis_functions.bin'
     call open_complex_lcfo_read(filename,1,system,lg,ub,meta_b,geom_b,vk_b,w_b,run_b,size_b,ios)
-    if (ios /= 0) return
-    write(filename,'(a,i6.6,2a)') trim(bdir),f,'/','wavefunctions.bin'
+    if(ios/=0)return
+    write(filename,'(a,i6.6,2a)')trim(bdir),f,'/','wavefunctions.bin'
     call open_complex_lcfo_read(filename,2,system,lg,uc,meta_c,geom_c,vk_c,w_c,run_c,size_c,ios)
-    if (ios /= 0) then
-      close(ub)
-      return
-    end if
-    if (.not.complex_lcfo_headers_match(meta_b,geom_b,vk_b,w_b,run_b, &
-        meta_c,geom_c,vk_c,w_c,run_c,ref_meta,ref_geom,ref_k,ref_wtk,ref_run)) goto 900
-    if (meta_b(16) /= f) goto 900
-    stage=2
-    do ik0=1,ik
-      stage=3
-      read(ub,iostat=ios) ikwire,payload_b
-      if (ios /= 0 .or. ikwire /= ik0 .or. payload_b < 0_int64) goto 900
-      if (ik0 < ik) then
-        call skip_complex_lcfo_bytes(ub,payload_b,ios)
-        if (ios /= 0) goto 900
-      else
-        allocate(fragment%n_basis(system%nspin))
-        allocate(fragment%basis(meta_b(7),meta_b(8),meta_b(9),system%nspin,meta_b(19)))
-        fragment%n_basis=0
-        fragment%basis=(0d0,0d0)
-        do ispin=1,system%nspin
-          read(ub,iostat=ios) spinwire,nbwire
-          if (ios /= 0 .or. spinwire /= ispin .or. nbwire /= n_basis_all(f,ispin,ik)) goto 900
-          nb=int(nbwire)
-          fragment%n_basis(ispin)=nb
-          nreal=2_int64*int(meta_b(7),int64)*int(meta_b(8),int64)*int(meta_b(9),int64)*int(nb,int64)
-          if (nb > 0) then
-            if (nreal/2_int64 > int(huge(1),int64)) goto 900
-            allocate(values(int(nreal/2_int64)))
-            call read_wire_complex_values(ub,values,ios)
-            if (ios /= 0) goto 900
-            fragment%basis(:,:,:,ispin,1:nb)=reshape(values, &
-                 [meta_b(7),meta_b(8),meta_b(9),nb])
-            deallocate(values)
-          end if
-        end do
-      end if
-      stage=4
-      read(uc,iostat=ios) ikwire,payload_c
-      if (ios /= 0 .or. ikwire /= ik0 .or. payload_c < 0_int64) goto 900
-      if (ik0 < ik) then
-        call skip_complex_lcfo_bytes(uc,payload_c,ios)
-        if (ios /= 0) goto 900
-      else
-        allocate(fragment%coef(meta_c(19),meta_c(20),system%nspin))
-        fragment%coef=(0d0,0d0)
-        do ispin=1,system%nspin
-          stage=5
-          read(uc,iostat=ios) spinwire,nbwire,nmatwire
-          if (ios /= 0) goto 900
-          read(uc,iostat=ios) counts
-          if (ios /= 0) goto 900
-          nb=int(nbwire)
-          if (spinwire /= ispin .or. nb /= n_basis_all(f,ispin,ik) .or. &
-              any(counts /= n_basis_all(:,ispin,ik)) .or. nmatwire /= sum(counts)) goto 900
-          prefix=sum(counts(1:f-1))
-          do jrow=1,nb
-            read(uc,iostat=ios) row
-            if (ios /= 0 .or. row /= prefix+jrow) goto 900
-          end do
-          if (nb > 0) then
-            if (int(nb,int64)*int(meta_c(20),int64) > int(huge(1),int64)) goto 900
-            allocate(values(nb*meta_c(20)),matrix_tmp(nb,meta_c(20)))
-            call read_wire_complex_values(uc,values,ios)
-            if (ios /= 0) goto 900
-            matrix_tmp=reshape(values,[nb,meta_c(20)])
-            fragment%coef(1:nb,1:system%no,ispin)=matrix_tmp(:,1:system%no)
-            deallocate(matrix_tmp,values)
-          end if
-        end do
-      end if
-    end do
-    status=0
-900 continue
-    if (status /= 0) write(*,*) &
-         "DC-LCFO complex reconstruction: k record load failed (fragment,k,stage,io):",f,ik,stage,ios
+    if(ios/=0)then
+      close(ub);return
+    endif
+    if(complex_lcfo_headers_match(meta_b,geom_b,vk_b,w_b,run_b, &
+      meta_c,geom_c,vk_c,w_c,run_c,ref_meta,ref_geom,ref_k,ref_wtk,ref_run).and.meta_b(16)==f)then
+      call lcfo_cache_load(ub,uc,fragment%basis_pos(ispin,ik),fragment%coef_pos(ispin,ik), &
+        ref_meta(7:9),n_basis_all(f,ispin,ik),system%no,cache,status)
+    endif
     close(ub,iostat=ios)
-    if (ios /= 0) status=1
+    if(ios/=0)status=1
     close(uc,iostat=ios)
-    if (ios /= 0) status=1
-    if (status /= 0) then
-      if (allocated(fragment%n_basis)) deallocate(fragment%n_basis)
-      if (allocated(fragment%basis)) deallocate(fragment%basis)
-      if (allocated(fragment%coef)) deallocate(fragment%coef)
-    end if
-  end subroutine load_complex_lcfo_fragment_k
+    if(ios/=0)status=1
+  end subroutine
+
+
+
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module lcfo_complex

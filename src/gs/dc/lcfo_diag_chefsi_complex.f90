@@ -35,6 +35,13 @@ module lcfo_diag_chefsi_complex
 
   public :: diag_chefsi_complex
 
+  ! Inspect complex elements directly: REAL/AIMAG array arguments allocate large temporaries.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d,finite_real_4d
+  private :: finite_complex_2d,finite_complex_3d,finite_complex_4d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d,finite_real_3d,finite_real_4d
+    module procedure finite_complex_2d,finite_complex_3d,finite_complex_4d
+  end interface
 contains
 
   subroutine diag_chefsi_complex(dc,ik,nspin,filter_degree,filter_chunk_size, &
@@ -111,10 +118,8 @@ contains
     call prepare_blocks
     if(status/=0) goto 900
     flag=0
-    if(any(.not.ieee_is_finite(real(hdiag_sym,8))) .or. &
-       any(.not.ieee_is_finite(aimag(hdiag_sym))) .or. &
-       any(.not.ieee_is_finite(real(hrow,8))) .or. &
-       any(.not.ieee_is_finite(aimag(hrow)))) flag=1
+    if(.not.salmon_all_finite(hdiag_sym) .or. &
+       .not.salmon_all_finite(hrow)) flag=1
     call sync_status(flag)
     if(flag/=0) then
       status=1
@@ -200,8 +205,7 @@ contains
                   q0(:,1:nchunk)=q1(:,1:nchunk)
                   q1(:,1:nchunk)=q2(:,1:nchunk)
                 end do
-                if(any(.not.ieee_is_finite(real(q1(:,1:nchunk),8))) .or. &
-                   any(.not.ieee_is_finite(aimag(q1(:,1:nchunk))))) then
+                if(.not.salmon_all_finite(q1(:,1:nchunk))) then
                   flag=1
                 else
                   max_amplitude=maxval(abs(q1(:,1:nchunk)))
@@ -516,6 +520,7 @@ contains
     end subroutine distributed_qr
 
     subroutine rayleigh_ritz(s,n,nlocked,layout_n,layout_d,layout_g,vector,eigenvalue,istat)
+      implicit none
       integer, intent(in) :: s,n,nlocked
       type(s_layout), intent(in) :: layout_n,layout_d,layout_g
       complex(8), intent(inout) :: vector(:,:)
@@ -526,7 +531,9 @@ contains
       real(8) :: rwork_query(1)
       complex(8), allocatable :: work0(:)
       real(8), allocatable :: rwork0(:)
-      integer :: lwork0,lrwork0,info0,nactive
+      integer :: lwork0,lrwork0,liwork0,info0,nactive
+      integer :: iwork_query(1)
+      integer, allocatable :: iwork0(:)
       nactive=n-nlocked
       call initialize_active_layouts(nactive,layout_d,layout_g,layout_active,layout_small,istat)
       if(istat/=0) return
@@ -539,22 +546,24 @@ contains
       zero_c=(0d0,0d0)
       call pzgemm('C','N',nactive,nactive,npadded,one_c,xd,1,1,layout_active%desc, &
         hxd,1,1,layout_active%desc,zero_c,projected,1,1,layout_small%desc)
-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,info0)
+      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
+        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,iwork_query,-1,info0)
       istat=merge(1,0,info0/=0)
       call sync_status(istat)
       if(istat/=0) return
       lwork0=max(1,ceiling(real(work_query(1),8)))
-      lrwork0=max(1,ceiling(rwork_query(1)))
+      lwork0=max(lwork0,nactive+(layout_small%nrow+layout_small%ncol+block_size)*block_size)
+      lrwork0=max(ceiling(rwork_query(1)),2*(1+8*nactive+2*layout_small%nrow*layout_small%ncol))
+      liwork0=max(ceiling(real(iwork_query(1),8)),2+7*nactive+8*dense%npcol)
       call comm_get_max(lwork0,dc%icomm_tot)
       call comm_get_max(lrwork0,dc%icomm_tot)
-      allocate(work0(lwork0),rwork0(lrwork0))
-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,info0)
+      allocate(work0(lwork0),rwork0(lrwork0),iwork0(liwork0))
+      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
+        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,iwork0,liwork0,info0)
       istat=merge(1,0,info0/=0)
-      if(any(.not.ieee_is_finite(eigenvalue(nlocked+1:n)))) istat=1
+      if(.not.salmon_all_finite(eigenvalue(nlocked+1:n))) istat=1
       call sync_status(istat)
-      deallocate(work0,rwork0)
+      deallocate(work0,rwork0,iwork0)
       if(istat/=0) return
       call comm_bcast(eigenvalue(nlocked+1:n),dc%icomm_tot,0)
       xrot=(0d0,0d0)
@@ -705,8 +714,7 @@ contains
       error=max_out(1)
       istat=0
       if(.not.ieee_is_finite(error) .or. &
-         any(.not.ieee_is_finite(real(gram,8))) .or. &
-         any(.not.ieee_is_finite(aimag(gram)))) istat=1
+         .not.salmon_all_finite(gram)) istat=1
       call sync_status(istat)
     end subroutine calculate_orthogonality
 
@@ -1027,5 +1035,130 @@ contains
     if(left<j) call sort_values(value,index,left,j)
     if(i<right) call sort_values(value,index,i,right)
   end subroutine sort_values
+
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:)
+    real(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(value))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_4d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:,:,:)
+    real(8) :: value
+    integer :: i,j,k,l
+    finite=.false.
+    do l=1,size(values,4)
+      do k=1,size(values,3)
+        do j=1,size(values,2)
+          do i=1,size(values,1)
+            value=values(i,j,k,l)
+            if(.not.ieee_is_finite(value))return
+          enddo
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_complex_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    complex(8),intent(in) :: values(:,:)
+    complex(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(real(value,8)))return
+        if(.not.ieee_is_finite(aimag(value)))return
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_complex_3d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    complex(8),intent(in) :: values(:,:,:)
+    complex(8) :: value
+    integer :: i,j,k
+    finite=.false.
+    do k=1,size(values,3)
+      do j=1,size(values,2)
+        do i=1,size(values,1)
+          value=values(i,j,k)
+          if(.not.ieee_is_finite(real(value,8)))return
+          if(.not.ieee_is_finite(aimag(value)))return
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_complex_4d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    complex(8),intent(in) :: values(:,:,:,:)
+    complex(8) :: value
+    integer :: i,j,k,l
+    finite=.false.
+    do l=1,size(values,4)
+      do k=1,size(values,3)
+        do j=1,size(values,2)
+          do i=1,size(values,1)
+            value=values(i,j,k,l)
+            if(.not.ieee_is_finite(real(value,8)))return
+            if(.not.ieee_is_finite(aimag(value)))return
+          enddo
+        enddo
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module lcfo_diag_chefsi_complex

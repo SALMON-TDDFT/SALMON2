@@ -31,7 +31,7 @@ subroutine input_pp(pp,hx,hy,hz)
   use salmon_global,only : file_pseudo, quiet, method_init_density
   use salmon_global,only : n_Yabana_Bertsch_psformat,n_ABINIT_psformat&
     &,n_ABINITFHI_psformat,n_FHI_psformat,ps_format,nelem,base_directory, &
-    & yn_psmask, yn_pseudo_atomic_orbital
+    & yn_psmask, yn_spinorbit, yn_pseudo_atomic_orbital
   use parallelization, only: nproc_group_global, nproc_id_global
   use communication, only: comm_bcast, comm_is_root
   use math_constants, only : pi
@@ -65,12 +65,20 @@ subroutine input_pp(pp,hx,hy,hz)
   if (comm_is_root(nproc_id_global)) then
 
     do ik=1,nelem
-         
+      ! Format state and radial scratch belong to this species only.
+      flag_potential_is_given=.true.
+      flag_beta_proj_is_given=.false.
+      flag_so=.false.
+      rrc=0d0
+      rhor_nlcc=0d0
+      pp%vpp=0d0; pp%vpp_so=0d0; pp%upp=0d0
+      pp%anorm_so(:,ik)=0d0
+      pp%inorm_so(:,ik)=0
       ps_file = trim(file_pseudo(ik))
 
       select case (ps_format(ik))
       case('KY')
-        call read_ps_ky(pp,rrc,ik,ps_file)
+        call read_ps_ky(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
         pp%has_wf_pp(ik)=.true.
       case('ABINIT')
         call read_ps_abinit(pp,rrc,ik,ps_file)
@@ -241,6 +249,16 @@ subroutine input_pp(pp,hx,hy,hz)
         stop 'Wrong yn_psmask at input_pseudopotential_YS'
       end if
 
+      ! A scalar KY species is spin independent even in a spinor calculation.
+      ! Copy the completed tables: scalar KY supplies potentials/waves, whereas
+      ! j-resolved KY supplies beta projectors and must retain its separate j data.
+      if (yn_spinorbit=='y'.and.ps_format(ik)=='KY'.and..not.flag_beta_proj_is_given) then
+        pp%anorm_so(:,ik)=pp%anorm(:,ik)
+        pp%inorm_so(:,ik)=pp%inorm(:,ik)
+        pp%udvtbl_so(:,:,ik)=pp%udvtbl(:,:,ik)
+        pp%dudvtbl_so(:,:,ik)=pp%dudvtbl(:,:,ik)
+      endif
+
 ! vloctbl and udvtbl are ready after the masking and SO preprocessing above.
 ! Generated orbitals have distinct upp and upp_f conventions; keep the solver's upp_f.
       wf_from_file = pp%has_wf_pp(ik)
@@ -319,6 +337,11 @@ subroutine input_pp(pp,hx,hy,hz)
   end do
   call comm_bcast(pp%rho_nlcc_tbl,nproc_group_global)
   call comm_bcast(pp%tau_nlcc_tbl,nproc_group_global)
+  do ik=1,nelem
+    call comm_bcast(pp%core23_present(ik),nproc_group_global)
+  enddo
+  call comm_bcast(pp%core23_tau_tbl,nproc_group_global)
+  call comm_bcast(pp%core23_current_tbl,nproc_group_global)
   call comm_bcast(pp%flag_nlcc,nproc_group_global)
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) &
     & write(*,*)"flag_nlcc = ",pp%flag_nlcc
@@ -336,9 +359,9 @@ subroutine input_pp(pp,hx,hy,hz)
   return
 end subroutine input_pp
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
-subroutine read_ps_ky(pp,rrc,ik,ps_file)
+subroutine read_ps_ky(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
   use structures,only : s_pp_info
-  use salmon_global,only : Lmax_ps
+  use salmon_global,only : Lmax_ps,nelem
   use inputoutput,only : au_length_aa, au_energy_ev
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -347,11 +370,23 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
   real(8),intent(out) :: rrc(0:pp%lmax0)
   character(256),intent(in) :: ps_file
 !local variable
+  real(8),intent(out) :: rhor_nlcc(0:pp%nrmax0,0:2)
+  logical,intent(inout) :: flag_nlcc_element(nelem)
+  character(512) :: header_line
   integer :: l,i,irPC
   real(8) :: step,rPC,r,rhopp(0:pp%nrmax0),rzps
 
+  rhor_nlcc=0d0
+  flag_nlcc_element(ik)=.false.
   open(4,file=ps_file,status='old')
   read(4,*) pp%mr(ik),step,pp%mlps(ik),rzps
+  read(4,'(a)')header_line
+  if(trim(header_line)=='KY_SOC_NLCC_V1'.or.trim(header_line)=='KY_SOC_NLCC_V2')then
+    close(4)
+    call read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+    return
+  endif
+  backspace(4)
   pp%zps(ik)=int(rzps+1d-10)
   if(pp%mr(ik) .gt.pp%nrmax0) stop 'Mr>Nrmax0 at Read_PS_KY'
   if(pp%mlps(ik).gt.pp%lmax0) stop 'Mlps(ik)>Lmax0 at Read_PS_KY'
@@ -390,6 +425,234 @@ subroutine read_ps_ky(pp,rrc,ik,ps_file)
 
   return
 end subroutine read_ps_KY
+
+! CRPS j-resolved KB projectors. vpp is j=l+1/2, vpp_so is j=l-1/2;
+! these are NOT a scalar potential and an L.S coefficient in SALMON.
+subroutine read_ps_ky_soc(pp,rrc,rhor_nlcc,flag_nlcc_element,ik,ps_file)
+ use structures,only:s_pp_info
+ use salmon_global,only:nelem,Lmax_ps,yn_spinorbit
+ use inputoutput,only:au_length_aa,au_energy_ev
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ implicit none
+ type(s_pp_info),intent(inout)::pp
+ real(8),intent(out)::rrc(0:pp%lmax0),rhor_nlcc(0:pp%nrmax0,0:2)
+ logical,intent(inout)::flag_nlcc_element(nelem)
+ integer,intent(in)::ik
+ character(*),intent(in)::ps_file
+ integer::unit,ios,n,lm,nc,ipc,lloc,k,i,ll,jj,expected_l,expected_j
+ real(8)::h,zval,rc,oc,ep,r,vlocal,rho,drho,ddrho,norm,scale
+ character(512)::line
+ logical::version2
+ integer,allocatable::ls(:),js(:)
+ real(8),allocatable::wave(:,:),potential(:,:),vl(:),beta(:),occupation(:)
+ if(yn_spinorbit/='y') error stop 'KY_SOC_NLCC requires yn_spinorbit=y'
+ open(newunit=unit,file=ps_file,status='old',action='read')
+ read(unit,*,iostat=ios)n,h,lm,zval
+ if(ios/=0) error stop 'KY_SOC_NLCC invalid header'
+ if(n<4.or.n>pp%nrmax0.or.n+2>size(pp%rad,1).or.lm<0.or.lm>pp%lmax0.or.lm>pp%lmax) &
+  error stop 'KY_SOC_NLCC dimensions exceed allocation'
+ if(.not.ieee_is_finite(h).or..not.ieee_is_finite(zval)) error stop 'KY_SOC_NLCC nonfinite header'
+ if(h<=0d0.or.zval<=0d0.or.abs(zval-nint(zval))>1d-10) error stop 'KY_SOC_NLCC invalid charge/grid'
+ if(Lmax_ps(ik)>=0.and.Lmax_ps(ik)/=lm) error stop 'KY_SOC_NLCC channel truncation unsupported'
+ read(unit,'(a)',iostat=ios)line
+ version2=trim(line)=='KY_SOC_NLCC_V2'
+ if(ios/=0.or.(trim(line)/='KY_SOC_NLCC_V1'.and..not.version2)) error stop 'KY_SOC_NLCC version mismatch'
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='ANGSTROM EV U_R_INV_SQRT_ANGSTROM RHO_INV_ANGSTROM3') &
+  error stop 'KY_SOC_NLCC units mismatch'
+ read(unit,*,iostat=ios)ipc,lloc,nc
+ if(ios/=0) error stop 'KY_SOC_NLCC invalid channel header'
+ if(ipc<0.or.ipc>=n.or.lloc<0.or.lloc>lm.or.nc/=2*lm+1) error stop 'KY_SOC_NLCC invalid channels'
+ allocate(ls(nc),js(nc),occupation(nc),wave(0:n,nc),potential(0:n,nc),vl(0:n),beta(0:n))
+ rrc=0d0;rhor_nlcc=0d0
+ do k=1,nc
+  read(unit,*,iostat=ios)ll,jj,rc,oc,ep
+  if(ios/=0) error stop 'KY_SOC_NLCC incomplete channel'
+  expected_l=k/2;expected_j=2*expected_l-1
+  if(mod(k,2)==1)expected_j=2*expected_l+1
+  if(ll/=expected_l.or.jj/=expected_j)error stop 'KY_SOC_NLCC channel order mismatch'
+  if(.not.ieee_is_finite(rc).or..not.ieee_is_finite(oc).or..not.ieee_is_finite(ep))error stop 'KY_SOC_NLCC nonfinite channel'
+  if(rc<=0d0.or.rc>n*h.or.oc<0d0.or.oc>jj+1d0+1d-10)error stop 'KY_SOC_NLCC invalid channel metadata'
+  ls(k)=ll;js(k)=jj;occupation(k)=oc
+  rrc(ll)=max(rrc(ll),rc/au_length_aa)
+ enddo
+ if(abs(sum(occupation)-zval)>1d-8)error stop 'KY_SOC_NLCC occupation/charge mismatch'
+ do i=0,n
+  read(unit,*,iostat=ios)r,vlocal,rho,drho,ddrho,(potential(i,k),wave(i,k),k=1,nc)
+  if(ios/=0)error stop 'KY_SOC_NLCC incomplete radial row'
+  if(.not.ieee_is_finite(r).or..not.ieee_is_finite(vlocal).or..not.ieee_is_finite(rho).or.&
+     .not.ieee_is_finite(drho).or..not.ieee_is_finite(ddrho)) &
+   error stop 'KY_SOC_NLCC nonfinite radial data'
+  do k=1,nc
+   if(.not.ieee_is_finite(potential(i,k)).or..not.ieee_is_finite(wave(i,k))) &
+    error stop 'KY_SOC_NLCC nonfinite radial data'
+  enddo
+  if(abs(r-i*h)>1d-10*max(1d0,r).or.rho<0d0)error stop 'KY_SOC_NLCC invalid radius/density'
+  if(ipc==0.and.any([rho,drho,ddrho]/=0d0))error stop 'KY_SOC_NLCC nonzero core-off density'
+  vl(i)=vlocal/au_energy_ev
+  rhor_nlcc(i,0)=rho*au_length_aa**3
+  rhor_nlcc(i,1)=drho*au_length_aa**4
+  rhor_nlcc(i,2)=ddrho*au_length_aa**5
+ enddo
+ if(version2) then
+  if(ipc<=0) error stop 'KY_SOC_NLCC_V2 requires enabled NLCC'
+  call read_ky_core23(unit,pp,ik,n,h/au_length_aa,rhor_nlcc(:,0))
+ endif
+ read(unit,'(a)',iostat=ios)line
+ if(version2) then
+  if(ios/=0.or.trim(line)/='END_KY_SOC_NLCC_V2')error stop 'KY_SOC_NLCC_V2 missing end marker'
+ else
+  if(ios/=0.or.trim(line)/='END_KY_SOC_NLCC_V1')error stop 'KY_SOC_NLCC missing end marker'
+ endif
+ read(unit,'(a)',iostat=ios)line
+ if(ios>=0)error stop 'KY_SOC_NLCC unexpected trailing data'
+ close(unit)
+ if(ipc>0.and.rhor_nlcc(0,0)<=0d0)error stop 'KY_SOC_NLCC empty enabled core'
+ pp%mr(ik)=n;pp%mlps(ik)=lm;pp%zps(ik)=nint(zval);pp%zion=zval
+ pp%nproj(:,ik)=0;pp%nproj(0:lm,ik)=1
+ pp%lref(ik)=ubound(pp%vpp,2)
+ pp%vpp=0d0;pp%vpp_so=0d0;pp%upp=0d0
+ pp%anorm(:,ik)=0d0;pp%anorm_so(:,ik)=0d0
+ do i=1,pp%nrmax
+  pp%rad(i,ik)=(i-1)*h/au_length_aa
+ enddo
+ pp%vpp(0:n,pp%lref(ik))=vl
+ potential=potential/au_energy_ev;wave=wave*sqrt(au_length_aa)
+ h=h/au_length_aa
+ do k=1,nc
+  ll=ls(k)
+  beta=(potential(:,k)-vl)*wave(:,k)
+  if(js(k)==2*ll+1)pp%upp(0:n,ll)=wave(:,k)
+  scale=maxval(abs(potential(:,k)-vl))
+  ! Exactly local channels have no projector; never divide their zero norm.
+  if(scale<=1d-12)cycle
+  norm=h*(sum(wave(:,k)*beta)-.5d0*(wave(0,k)*beta(0)+wave(n,k)*beta(n)))
+  if(.not.ieee_is_finite(norm).or.abs(norm)<=1d-12)error stop 'KY_SOC_NLCC singular KB norm'
+  if(js(k)==2*ll+1)then
+   pp%vpp(0:n,ll)=beta;pp%anorm(ll,ik)=1d0/norm;pp%upp(0:n,ll)=wave(:,k)
+  else
+   pp%vpp_so(0:n,ll)=beta;pp%anorm_so(ll,ik)=1d0/norm
+  endif
+ enddo
+ flag_beta_proj_is_given=.true.
+ flag_nlcc_element(ik)=ipc>0
+end subroutine read_ps_ky_soc
+
+! Validate an explicitly identified closed-shell auxiliary-Pauli core. All
+! quantities here are atomic units; tau has NO conventional factor one half.
+subroutine read_ky_core23(unit,pp,ik,n,h,rho_reference)
+ use structures,only:s_pp_info
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ implicit none
+ integer,intent(in)::unit,ik,n
+ type(s_pp_info),intent(inout)::pp
+ real(8),intent(in)::h,rho_reference(0:)
+ integer::ios,nrows,nb,b,i,j,deg,npair
+ integer,allocatable::orb(:),ell(:),lambda(:)
+ real(8),allocatable::q(:),amp(:,:),deriv(:,:),rho(:),tau(:),cur(:)
+ real(8)::ncore,r,rr,tt,cc,angular,pi,tol,scale,check_deriv
+ character(512)::line
+ pi=acos(-1d0)
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='CORE_AUX_PAULI_V1') error stop 'KY core23 missing auxiliary model block'
+ read(unit,'(a)',iostat=ios)line
+ if(ios/=0.or.trim(line)/='PAULI_CLOSED_SHELL_V1 ATOMIC_UNITS TAU_NO_HALF') &
+  error stop 'KY core23 model/units mismatch'
+ read(unit,*,iostat=ios)nrows,nb,ncore
+ if(ios/=0) error stop 'KY core23 invalid dimensions'
+ if(nrows/=n+1.or.nb<2.or.nb>256.or.mod(nb,2)/=0) error stop 'KY core23 invalid dimensions'
+ if(.not.ieee_is_finite(ncore)) error stop 'KY core23 nonfinite occupancy'
+ if(ncore<=0d0) error stop 'KY core23 invalid occupancy'
+ allocate(orb(nb),ell(nb),lambda(nb),q(nb),amp(0:n,nb),deriv(0:n,nb),rho(0:n),tau(0:n),cur(0:n))
+ do b=1,nb
+  read(unit,*,iostat=ios)orb(b),ell(b),lambda(b),q(b)
+  if(ios/=0) error stop 'KY core23 incomplete shell metadata'
+  if(.not.ieee_is_finite(q(b))) error stop 'KY core23 nonfinite shell occupancy'
+  if(orb(b)<1.or.ell(b)<0.or.ell(b)>12) error stop 'KY core23 invalid angular metadata'
+  if(lambda(b)==ell(b)) then
+   deg=2*ell(b)+2
+  else if(lambda(b)==-ell(b)-1.and.ell(b)>0) then
+   deg=2*ell(b)
+  else
+   error stop 'KY core23 invalid spin angular eigenvalue'
+  endif
+  if(abs(q(b)-deg)>1d-10) error stop 'KY core23 requires completely occupied angular multiplets'
+ enddo
+ ! Each radial Dirac orbital supplies exactly two auxiliary Pauli blocks, with
+ ! complementary angular momenta and identical degeneracy/occupation.
+ rr=0d0
+ do b=1,nb
+  npair=0
+  do j=1,nb
+   if(orb(j)/=orb(b)) cycle
+   npair=npair+1
+   if(j==b) cycle
+   if(abs(ell(j)-ell(b))/=1.or.abs(q(j)-q(b))>1d-10) &
+    error stop 'KY core23 inconsistent paired angular blocks'
+  enddo
+  if(npair/=2) error stop 'KY core23 missing or duplicate radial partner'
+  rr=rr+0.5d0*q(b)
+ enddo
+ if(abs(rr-ncore)>1d-8) error stop 'KY core23 total occupancy mismatch'
+ do i=0,n
+  read(unit,*,iostat=ios)r,rho(i),tau(i),cur(i),(amp(i,b),deriv(i,b),b=1,nb)
+  if(ios/=0) error stop 'KY core23 incomplete radial row'
+  if(.not.ieee_is_finite(r).or..not.ieee_is_finite(rho(i)).or. &
+     .not.ieee_is_finite(tau(i)).or..not.ieee_is_finite(cur(i))) error stop 'KY core23 nonfinite radial data'
+  if(abs(r-i*h)>2d-9*max(1d0,r).or.rho(i)<0d0.or.tau(i)<0d0) &
+   error stop 'KY core23 invalid radial radius/density/tau'
+  rr=0d0;tt=0d0;cc=0d0
+  do b=1,nb
+   if(.not.ieee_is_finite(amp(i,b)).or..not.ieee_is_finite(deriv(i,b))) &
+    error stop 'KY core23 nonfinite primitive'
+   angular=0d0
+   if(i>0) then
+    angular=amp(i,b)/r
+   else if(ell(b)==1) then
+    angular=deriv(i,b)
+   else if(ell(b)>1.and.abs(deriv(i,b))>1d-10) then
+    error stop 'KY core23 nonregular high-l primitive origin'
+   endif
+   if(i==0.and.ell(b)==0.and.abs(deriv(i,b))>1d-8) &
+    error stop 'KY core23 nonregular s primitive origin'
+   if(i==0.and.ell(b)>0.and.abs(amp(i,b))>1d-10) &
+    error stop 'KY core23 nonregular angular primitive origin'
+   rr=rr+q(b)*amp(i,b)**2/(4d0*pi)
+   tt=tt+q(b)*(deriv(i,b)**2+ell(b)*(ell(b)+1)*angular**2)/(4d0*pi)
+   if(i>0) cc=cc+q(b)*lambda(b)*amp(i,b)**2/(8d0*pi*r)
+  enddo
+  tol=2d-9
+  if(abs(rr-rho(i))>tol*max(1d0,rr,rho(i)).or. &
+     abs(tt-tau(i))>tol*max(1d0,tt,tau(i)).or. &
+     abs(cc-cur(i))>tol*max(1d0,abs(cc),abs(cur(i)))) &
+   error stop 'KY core23 primitive invariant mismatch'
+  ! Legacy ANGSTROM rows and the auxiliary AU block retain different
+  ! published Bohr-radius constants (relative difference 4.4e-10).
+  if(abs(rho(i)-rho_reference(i))>2d-8*max(1d0,rho(i),rho_reference(i))) &
+   error stop 'KY core23 density differs from NLCC density'
+ enddo
+ ! Require a resolved negligible endpoint, never an arbitrary interior threshold.
+ if(rho(n)>1d-12.or.tau(n)>1d-12.or.abs(cur(n))>1d-12) error stop 'KY core23 unresolved support tail'
+ ! Derivatives are part of one regular primitive, rather than independent data.
+ ! A centered finite-difference residual resolves the table spacing; omit only
+ ! endpoints, whose one-sided error is substantially larger for tight core states.
+ do b=1,nb
+  scale=max(1d0,maxval(abs(deriv(:,b))))
+  do i=1,n-1
+   if(i>=2.and.i<=n-2) then
+    check_deriv=(-amp(i+2,b)+8d0*amp(i+1,b)-8d0*amp(i-1,b)+amp(i-2,b))/(12d0*h)
+   else
+    check_deriv=(amp(i+1,b)-amp(i-1,b))/(2d0*h)
+   endif
+   if(abs(check_deriv-deriv(i,b))>1d-3*scale) error stop 'KY core23 primitive derivative mismatch'
+  enddo
+ enddo
+ pp%core23_tau_tbl(:,ik)=0d0;pp%core23_current_tbl(:,ik)=0d0
+ pp%core23_tau_tbl(1:n+1,ik)=tau
+ pp%core23_current_tbl(1:n+1,ik)=cur
+ pp%core23_present(ik)=.true.
+end subroutine read_ky_core23
+
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine read_ps_abinit(pp,rrc,ik,ps_file)
   use structures,only : s_pp_info
@@ -902,7 +1165,7 @@ end subroutine read_ps_adpack
 subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
                           rhor_nlcc,flag_nlcc_element)
   use structures,only : s_pp_info
-  use salmon_global, only: ps_format, nelem, alpha_mask, eta_mask
+  use salmon_global, only: ps_format, nelem, alpha_mask, eta_mask, gamma_mask
   use math_constants, only : pi
   implicit none
   type(s_pp_info),intent(inout) :: pp
@@ -994,6 +1257,16 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   end do
   close(4)
 
+  ! Select support once, before filtering either j branch. The SO preparation
+  ! reuses it; ps_masking must not expand this shared radius a second time.
+  pp%rps(ik)=gamma_mask*pp%rps(ik)
+  do i=1,size(pp%rad,1)
+    if(pp%rad(i,ik)>pp%rps(ik))exit
+  enddo
+  if(i>size(pp%rad,1))error stop 'Pseudopotential mask radius exceeds radial grid'
+  pp%nrps(ik)=i
+  pp%rps(ik)=pp%rad(i,ik)
+
   call ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
 
   open(4,file="PSaftermask_"//trim(pp%atom_symbol(ik))//"_"//trim(ps_format(ik))//".dat")
@@ -1063,11 +1336,20 @@ subroutine making_ps_with_masking(pp,hx,hy,hz,ik, &
   pp%rho_nlcc_tbl(:,ik)=0d0; pp%tau_nlcc_tbl(:,ik)=0d0
   if(.not.flag_nlcc_element(ik))return
 !  do i=1,pp%nrps(ik)
+  if(pp%core23_present(ik)) then
+    ! V2 carries a joint orbital model: density may not be independently cut.
+    pp%rho_nlcc_tbl(1:pp%mr(ik)+1,ik)=rhor_nlcc(0:pp%mr(ik),0)
+    do i=1,pp%mr(ik)+1
+      if(rhor_nlcc(i-1,0)>0d0) &
+        pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
+    enddo
+  else
   do i=1,pp%mr(ik)
     if(rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7)exit
     pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
   end do
+  endif
 
   return
 end subroutine making_ps_with_masking
@@ -1083,7 +1365,7 @@ subroutine making_ps_with_masking_so(pp,hx,hy,hz,ik)
   real(8) :: uvpp(0:pp%nrmax0,0:2*pp%lmax0+1),duvpp(0:pp%nrmax0,0:2*pp%lmax0+1)
   real(8) :: grid_function(0:pp%nrmax0)
   integer :: i,l,ll,l0,mr
-  real(8) :: r1,r2,r3,r4
+  real(8) :: r1,r2,r3,r4,const
 
   ncounter = 0
   do i=0,pp%mr(ik)
@@ -1145,6 +1427,23 @@ subroutine making_ps_with_masking_so(pp,hx,hy,hz,ik)
 !                          vpploc(i),dvpploc(i),grid_function(i)
 !  end do
 !  close(4)
+
+  ! zylm uses regular solid harmonics, including r**ll. Convert radial
+  ! beta and its derivative exactly as in the scalar masked preparation.
+  l0=0
+  do ll=0,pp%mlps(ik)
+    const=sqrt((2d0*ll+1d0)/(4d0*pi))
+    do l=l0,l0+pp%nproj(ll,ik)-1
+      do i=1,pp%mr(ik)
+        uvpp(i,l)=uvpp(i,l)*const/pp%rad(i+1,ik)**(ll+1)
+        duvpp(i,l)=duvpp(i,l)*const/pp%rad(i+1,ik)**(ll+1) &
+                  -(ll+1)*uvpp(i,l)/pp%rad(i+1,ik)
+      enddo
+      uvpp(0,l)=2d0*uvpp(1,l)-uvpp(2,l)
+      duvpp(0,l)=2d0*duvpp(1,l)-duvpp(2,l)
+    enddo
+    l0=l
+  enddo
 
   if( flag_beta_proj_is_given )then
     l0=0
@@ -1287,11 +1586,20 @@ subroutine making_ps_without_masking(pp,ik,flag_nlcc_element,rhor_nlcc)
 
   if ( .not.flag_nlcc_element(ik) ) return
 
+  if(pp%core23_present(ik)) then
+    ! V2 carries a joint orbital model: density may not be independently cut.
+    pp%rho_nlcc_tbl(1:pp%mr(ik)+1,ik)=rhor_nlcc(0:pp%mr(ik),0)
+    do i=1,pp%mr(ik)+1
+      if(rhor_nlcc(i-1,0)>0d0) &
+        pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
+    enddo
+  else
   do i=1,pp%mr(ik)
     if ( rhor_nlcc(i-1,0)/rhor_nlcc(0,0) < 1d-7 ) exit
     pp%rho_nlcc_tbl(i,ik)=rhor_nlcc(i-1,0)
     pp%tau_nlcc_tbl(i,ik)=0.25d0*rhor_nlcc(i-1,1)**2/rhor_nlcc(i-1,0)
   end do
+  endif
 
   return
 end subroutine making_ps_without_masking
@@ -1399,7 +1707,7 @@ end subroutine making_ps_without_masking_so
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   use structures,only : s_pp_info
-  use salmon_global,only :ps_format,alpha_mask,gamma_mask
+  use salmon_global,only :ps_format,alpha_mask
   use salmon_math, only: xjl, dxjl
   use math_constants, only : pi
   implicit none
@@ -1419,13 +1727,7 @@ subroutine ps_masking(pp,uvpp,duvpp,ik,hx,hy,hz)
   real(8),allocatable :: mask(:),dmask(:)
 !Functions
 
-!Reconstruct radial coordinate Rps(ik) and NRps(ik)
-  pp%rps(ik) = gamma_mask*pp%rps(ik)
-  do i=1,pp%nrmax0
-    if (pp%rad(i,ik) > pp%rps(ik)) exit
-  end do
-  pp%nrps(ik)=i
-  pp%rps(ik) = pp%rad(pp%nrps(ik),ik)
+! Both j branches use the support already selected by the scalar preparation.
   allocate(mask(pp%nrps(ik)),dmask(pp%nrps(ik)))
 
   call make_mask_function(pp,mask,dmask,ik)

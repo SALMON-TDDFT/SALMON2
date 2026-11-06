@@ -20,11 +20,13 @@ module communication
   integer, private, parameter :: DEAD_BEEF       = int(z'7FFFDEAD')
   integer, private, parameter :: COMM_WORLD_ID   = int(z'7FFFFFFF')
 
+  integer, public, parameter  :: COMM_GROUP_SELF = COMM_WORLD_ID
   integer, public, parameter  :: COMM_GROUP_NULL = DEAD_BEEF
   integer, public, parameter  :: ROOT_PROCID     = 0
   integer, public, parameter  :: COMM_PROC_NULL  = DEAD_BEEF
 
   ! call once
+  public :: comm_select_application
   public :: comm_init
   public :: comm_finalize
 
@@ -283,6 +285,12 @@ contains
   subroutine comm_init
     implicit none
     ! no operation
+  end subroutine
+
+  subroutine comm_select_application(nowners)
+    implicit none
+    integer,intent(in) :: nowners
+    if(nowners/=1)error stop 'Exchange helpers require an MPI-enabled build'
   end subroutine
 
   subroutine comm_finalize

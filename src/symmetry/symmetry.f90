@@ -20,6 +20,11 @@ module sym_sub
   real(8),public :: Bmat(3,3), Binv(3,3) !   is the (reciprocal) lattice vector
   logical :: flag_init=.false.
 
+  ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
+  private :: salmon_all_finite,finite_real_1d,finite_real_2d
+  interface salmon_all_finite
+    module procedure finite_real_1d,finite_real_2d
+  end interface
 contains
 
 
@@ -36,7 +41,8 @@ contains
   end subroutine read_sw_symmetry
 
   subroutine init_sym_sub( Amat_in, Bmat_in )
-    use salmon_global, only: xc, theory
+    use salmon_global, only: xc, theory, yn_spinorbit, epdir_re1
+    use exx_functional, only: is_hybrid
     implicit none
     real(8),intent(in) :: Amat_in(3,3), Bmat_in(3,3) ! Lattice vectors
     real(8) :: tmpmat(3,3), pi2
@@ -112,19 +118,49 @@ contains
        SymMatB(1:3,1:3,isym)=matmul( Binv, tmpmat )
        SymMatB(1:3,4,isym)=SymMatR(1:3,4,isym)
     end do
-    if (xc=='hse06') call symmetry_validate_group()
+    if (is_hybrid(xc)) call symmetry_validate_group()
+    if (is_hybrid(xc).and.yn_spinorbit=='y') call validate_diagonal_spinor_group()
     flag_init=.true.
     ! Test the retained Cartesian group, not just the requested axis flags.
-    ! The bounded HSE RT implementation supports the z-field little group.
-    if ((xc=='hse06').and. &
+    ! The bounded hybrid RT implementation supports the z-field little group.
+    if (is_hybrid(xc).and. &
         (theory=='tddft_pulse'.or.theory=='tddft_response'.or.theory=='tddft')) &
-      call symmetry_validate_field([0d0,0d0,1d0])
+      then
+      if(yn_spinorbit=='y')then
+        call symmetry_validate_field(epdir_re1)
+      else
+        call symmetry_validate_field([0d0,0d0,1d0])
+      endif
+    endif
     if ( DISPLAY ) write(*,'(a60)') repeat("-",42)//" init_sym_sub(end)"
   end subroutine init_sym_sub
+
+  ! Bounded SOC path: signed fractional and Cartesian permutations, including
+  ! the primitive FCC C3 subgroup. Cell isometry/group/field checks remain active.
+  subroutine validate_diagonal_spinor_group()
+    implicit none
+    real(8) :: rotation(3,3),fractional(3,3),identity(3,3)
+    integer :: s,i
+    identity=0d0
+    do i=1,3
+      identity(i,i)=1d0
+    enddo
+    do s=1,size(SymMatA,3)
+      fractional=SymMatA(:,1:3,s)
+      if(maxval(abs(fractional-anint(fractional)))>1d-10.or. &
+         maxval(abs(matmul(transpose(fractional),fractional)-identity))>1d-10) &
+        error stop 'SOC hybrid symmetry requires grid-preserving fractional signed permutations'
+      rotation=matmul(Amat,matmul(fractional,Ainv))
+      if(maxval(abs(rotation-anint(rotation)))>1d-10.or. &
+         maxval(abs(matmul(transpose(rotation),rotation)-identity))>1d-10) &
+        error stop 'SOC hybrid symmetry requires signed Cartesian permutations preserving the cell'
+    enddo
+  end subroutine validate_diagonal_spinor_group
 
 
   subroutine symmetry_validate_atoms_cartesian(rion,kion)
     use ieee_finite_check, only: ieee_is_finite => is_finite
+    implicit none
     real(8),intent(in) :: rion(:,:)
     integer,intent(in) :: kion(:)
     real(8),allocatable :: fractional(:,:)
@@ -136,7 +172,7 @@ contains
     if (.not.flag_init) error stop 'Symmetry atom check before initialization'
     na=size(kion)
     if(size(rion,1)/=3.or.size(rion,2)/=na) error stop 'Symmetry: invalid atom layout'
-    if(.not.all(ieee_is_finite(rion))) error stop 'Symmetry: nonfinite atom position'
+    if(.not.salmon_all_finite(rion)) error stop 'Symmetry: nonfinite atom position'
     allocate(fractional(3,na),used(na))
     fractional=matmul(Ainv,rion)
     do s=1,size(SymMatA,3)
@@ -158,12 +194,23 @@ contains
 
   subroutine symmetry_validate_group()
     use ieee_finite_check, only: ieee_is_finite => is_finite
+    implicit none
     real(8) :: rotation(3,3),translation(3),delta(3),cartesian(3,3),identity(3,3),determinant
-    integer :: a,b,c,nsym
+    real(8) :: operation_element
+    integer :: a,b,c,nsym,i,j,k
     logical :: found
     nsym=size(SymMatA,3)
     if (nsym==0) error stop 'Symmetry: empty retained group'
-    if (.not.all(ieee_is_finite(SymMatA))) error stop 'Symmetry: nonfinite operation'
+    ! NVHPC 25.9 can resolve the whole allocatable array to a device IEEE
+    ! routine in host code. Check a local scalar instead, including translations.
+    do k=1,nsym
+      do j=1,size(SymMatA,2)
+        do i=1,size(SymMatA,1)
+          operation_element=SymMatA(i,j,k)
+          if (.not.ieee_is_finite(operation_element)) error stop 'Symmetry: nonfinite operation'
+        end do
+      end do
+    end do
     identity=0d0
     do a=1,3
       identity(a,a)=1d0
@@ -177,7 +224,7 @@ contains
         +rotation(1,3)*(rotation(2,1)*rotation(3,2)-rotation(2,2)*rotation(3,1))
       if(abs(abs(determinant)-1d0)>1d-10) error stop 'Symmetry: nonunimodular lattice rotation'
       cartesian=matmul(Amat,matmul(rotation,Ainv))
-      if(.not.all(ieee_is_finite(cartesian))) error stop 'Symmetry: nonfinite Cartesian rotation'
+      if(.not.salmon_all_finite(cartesian)) error stop 'Symmetry: nonfinite Cartesian rotation'
       if(maxval(abs(matmul(transpose(cartesian),cartesian)-identity))>1d-10) &
         error stop 'Symmetry: operation is not a Cartesian isometry'
     enddo
@@ -208,16 +255,17 @@ contains
 
   subroutine symmetry_validate_field(direction)
     use ieee_finite_check, only: ieee_is_finite => is_finite
+    implicit none
     real(8),intent(in) :: direction(3)
     real(8) :: rotated(3)
     integer :: isym
     if (.not.use_symmetry) return
     if (.not.flag_init.or..not.allocated(SymMatB)) error stop 'Symmetry field check before initialization'
     if (size(SymMatB,3)==0) error stop 'Symmetry: empty retained group'
-    if (.not.all(ieee_is_finite(direction))) error stop 'Symmetry: nonfinite field direction'
+    if (.not.salmon_all_finite(direction)) error stop 'Symmetry: nonfinite field direction'
     do isym=1,size(SymMatB,3)
       rotated=matmul(Bmat,matmul(SymMatB(:,1:3,isym),matmul(Binv,direction)))
-      if (.not.all(ieee_is_finite(rotated))) error stop 'Symmetry: nonfinite field transformation'
+      if (.not.salmon_all_finite(rotated)) error stop 'Symmetry: nonfinite field transformation'
       if (maxval(abs(rotated-direction))>1d-10*max(1d0,maxval(abs(direction)))) &
         error stop 'Symmetry: retained operation changes the RT field direction'
     end do
@@ -265,5 +313,34 @@ contains
 
   end subroutine read_SymMat
 
+  pure logical function finite_real_1d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:)
+    real(8) :: value
+    integer :: i
+    finite=.false.
+    do i=1,size(values,1)
+      value=values(i)
+      if(.not.ieee_is_finite(value))return
+    enddo
+    finite=.true.
+  end function
+
+  pure logical function finite_real_2d(values) result(finite)
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    implicit none
+    real(8),intent(in) :: values(:,:)
+    real(8) :: value
+    integer :: i,j
+    finite=.false.
+    do j=1,size(values,2)
+      do i=1,size(values,1)
+        value=values(i,j)
+        if(.not.ieee_is_finite(value))return
+      enddo
+    enddo
+    finite=.true.
+  end function
 
 end module sym_sub

@@ -1,0 +1,282 @@
+# PBEh(40)+rVV10 through MLWF and ACE
+
+> 2026-10-06：本記録中の`developer_tests`は当時のローカル開発検証です。GitHub配布から除外しました。通常の回帰試験は`testsuites`を使用します。
+
+Experimental implementation on `pbeh40-rvv10-water-md`, based on `dc-hse-mlwf-ace` (`4048d67f`).
+
+## Model and inputs
+
+```
+&functional
+  xc='pbeh40_rvv10'        ! or 'pbeh40' to omit nonlocal correlation
+  pbeh_coulomb_radius=0    ! input length; 0 selects half the shortest BvK supercell side
+  rvv10_b=5.3
+  rvv10_c=0.0093
+  rvv10_nq=32
+  exx_mlwf_interval=5
+  exx_mlwf_maxiter=100
+  exx_mlwf_tolerance=1d-7
+  exx_mlwf_radius=0        ! input length; 0 retains full orbital support
+  exx_local_fft='auto'    ! exact local convolution when compact support is cheaper
+/
+&parallel
+  nproc_rgrid=1,1,1
+  nproc_ob=1
+  nproc_k=1
+/
+```
+
+The functional is 0.4 Fock exchange + 0.6 PBE exchange + PBE correlation + rVV10 nonlocal correlation. It is not HSE06 with a modified mixing fraction. `hse_omega` is not used for the PBEh exchange kernel. MLWF is enabled automatically for both PBEh functional names; the inherited occupation weighting, gauge transport, localization updates, full-support pair-density FFT and ACE remain in use.
+
+The short-range damping parameter `b=5.3` is the water-hybrid choice; `C=0.0093` is dimensionless. Check the parameter convention against the target study. For example, see [Evolution of Aqueous Electron with Varying Temperature](https://chemrxiv.org/engage/api-gateway/chemrxiv/assets/orp/resource/item/62ab9df7f5524a36fb1528e8/original/evolution-of-aqueous-electron-with-varying-temperature.pdf).
+
+### Exchange boundary convention
+
+The unscreened Coulomb interaction is spherically truncated at R:
+
+`v(G) = 8*pi*sin(|G|*R/2)^2 / |G|^2`, `v(0)=2*pi*R^2`.
+
+R must not exceed half the shortest side of the Born–von Karman supercell (`num_rgrid*num_kgrid*hgs`). The default is that upper bound, printed in bohr. Positive input radii are converted from the selected input length unit. The kernel includes Coulomb within R without HSE screening. A finite R is still an approximation to the infinite periodic global hybrid: converge **cell/k mesh and radius together**. Never interpret this cutoff as evidence for converged full-range exchange in a small cell. No arbitrary zeroing of the G=0 exchange term occurs.
+
+MLWF gauge localization by itself retains full support. `exx_mlwf_radius>0`
+selects the shared [EXX spherical source approximation](exx-mlwf.md) for static
+DFT. This radius truncates occupation-weighted Wannier sources; it is distinct
+from `pbeh_coulomb_radius`, which changes the interaction kernel. At radius 0,
+localization iteration-limit messages do not invalidate full-support exchange.
+Finite-radius results depend on localization and must be converged against the
+support radius. ACE reproduces the chosen (possibly masked) operator on its
+reference subspace; it does not remove the truncation error.
+
+### rVV10 evaluation
+
+In Hartree atomic units:
+
+- `omega0 = sqrt(4*pi*n/3 + C*sigma^2/n^4)`, `sigma=|grad n|^2`.
+- `kappa = (3*pi/2)*b*(n/(9*pi))^(1/6)`, `q=omega0/kappa`, `theta=n/kappa^(3/2)`.
+- `Phi(q,q',r)=-3/[2*(1+q*r^2)*(1+q'*r^2)*(2+(q+q')*r^2)]`.
+- `E_nl = 1/2 integral theta(r)*Phi*theta(r') dr dr' + beta integral n dr`, `beta=(3/b^2)^(3/4)/32`.
+
+The implementation uses natural cubic spline channels, a logarithmic q grid from 1e-4 to 0.5, and the usual 12-term smooth q saturation. Increase `rvv10_nq` (8–128) to check interpolation convergence. Values below the lower q bound are clamped with zero q derivative. Points at density <=1e-18 bohr^-3 contribute only the beta term. The energy and potential differentiate this same regularized discrete functional.
+
+The rational kernel's analytic three-dimensional Fourier transform is used, including its G=0 value and equal-q limit. No radial table or image cutoff is needed. Periodic convolution costs O(nq^2*G+nq*G*log G), not a G-by-G pair matrix.
+
+Compatible grids now use the native Poisson FFTE layout: full x lines and distributed y/z pencils. Density and sigma are collected only within the x communicator. Channel storage per rank is O(nq*G/(Py*Pz)); the work is replicated across Px. **Use y and/or z decomposition to reduce per-rank FFT memory.** An x-only decomposition retains full channel storage on each rank. FFT tables are private to rVV10 and do not alter the Poisson solver's saved tables.
+
+The automatic path requires uniform block decomposition, 2/3/5-smooth grid dimensions from 2 through 4096, and FFTE transpose divisibility (Nx divisible by Py, Ny divisible by Pz, in addition to each dimension's own process count). Incompatible grids retain the root FFTW reference path. The chosen backend and x/y/z process counts are logged. The optional `rvv10_fft='ffte'|'fftw'` selects the compatible-grid backend; the default is `ffte`. Both choices preserve this fallback contract.
+
+DC evaluates the mixed **total** density with native halo gradients and divergence; the global nonlocal energy is summed once. Its scalar potential is still assembled globally for fragment/buffer mapping. Thus DC still holds full scalar grids, while the nq-channel convolution is distributed. This does not by itself establish whole-program weak scaling.
+
+`vrho` and `vsigma` are added before SALMON's GGA divergence. Density gradients and the corresponding negative divergence therefore use the same finite-difference operator. The formula follows [Sabatini, Gorni and de Gironcoli, PRB 87, 041108(R) (2013)](https://doi.org/10.1103/PhysRevB.87.041108).
+
+## Fixed-cell water dynamics
+
+Keep `exx_mlwf_radius=0` and set `theory='dft_md'` for Born–Oppenheimer MD. A fresh calculation performs its initial SCF; restart input is currently rejected. The supplied archived water_md.inp (not distributed) is a **small consistency fixture**, not an equilibrated liquid or a converged production setting. Copy `H_rps.dat` and `O_rps.dat` from `testsuites/pseudo` to its run directory. For scientific water simulations, choose and validate appropriate pseudopotentials, grid, supercell, exchange cutoff, SCF tolerance and timestep.
+
+PBEh forces differentiate the same cubic radial projector and solid spherical harmonics used in the Hamiltonian. This avoids the finite-grid inconsistency of moving the nonlocal projector derivative onto a finite-difference orbital gradient. All other functionals retain their existing force path. At full support (`exx_mlwf_radius=0`), no explicit ionic derivative of exchange/rVV10 is needed for fixed-cell, fixed-grid, fully self-consistent orbitals without NLCC. A PBEh BOMD run stops if an SCF does not converge, before accepting an ionic step.
+
+## Supported and rejected combinations
+
+- Periodic, orthorhombic, unpolarized conventional DFT and fixed-cell BOMD, CPU, k-only MPI; uniform full k meshes.
+- Static `pbeh40` and `pbeh40_rvv10` use the inherited DC MLWF+ACE exchange path; DC convergence against fragment/buffer size is still needed.
+- **Not supported:** direct truncated-fragment MD, conventional-GS Ehrenfest and unrestricted RT, ionic optimization, spin polarization, NLCC, OpenACC, variable-cell stress/NPT, restarting PBEh checkpoints, or legacy HSE Wannier snapshot export. Projector angular momentum above f is rejected by the PBEh force routine.
+- DC+rVV10 evaluates the **buffered fragment density in its own periodic cell**, including initial orbital preparation. It reuses the conventional XC evaluator and only the fragment spatial communicator for convolution; it does not convolve the assembled total density. The returned energy density is integrated over the core only, then scalar fragment energies are summed once (without orbital/k-point duplication). The potential acts throughout the core and buffer. Hartree remains a total-system calculation. Converge fragment/buffer size to control missing distant correlations and fragment periodic-image effects. The full-fragment potential is not asserted to be the functional derivative of the core-partitioned DC energy; direct truncated-fragment DC-MD remains disabled. Native mesh RT after DC initialization still evaluates rVV10 in its full propagation cell.
+- No production scaling, long liquid trajectory, diffusivity, RDF, density, or exchange-cutoff convergence claim follows from the bounded tests below.
+
+## DC LCFO initialization for real-space response
+
+A static DC calculation supplies complex LCFO files for initial real-space orbital reconstruction. Use `yn_dc='n'` and `yn_conventional_from_dcdft='y'` for the supported real-space response route described below. LCFO basis functions and coefficients are not retained during time propagation. Fixed-LCFO-subspace response and its former input controls have been removed.
+
+Complex exports include a `functional.txt` per fragment, bound to the binary run ID. Reconstruction validates the functional, exchange/rVV10 settings and source radius. Keep these files with the corresponding binary fragment payloads.
+
+## Build and verification
+
+Build with `USE_HSE=ON` (FFTW, Libxc and BLAS/LAPACK). Existing HSE dependency discovery is reused; `USE_LIBXC=ON` is not additionally required for this C-ABI semilocal evaluator. Example local configuration:
+
+Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
+
+
+The standalone kernel tests currently use the same macOS Homebrew toolchain layout as existing native HSE tests. Run directories must be fresh. Results and limitations are recorded in archived validation results (not distributed).
+
+## Reusable FFTW pencil backend
+
+Set `rvv10_fft='fftw'` in `&functional` to select cached FFTW transforms for
+SCF, static DC and supported real-space response. FFTW uses measured
+`plan_many` plans, serial FFTs per MPI rank, and batches of at most four channels.
+Plans and packing maps are reused until the grid, process coordinates or batch
+size changes. Calls must enter serially per rank; axis communicators must be
+coordinate ordered and collective dimensions/channel counts must agree.
+The forward transform now retains Z pencils with contiguous z lines and
+local shape `(Nz,Nx/Py,Ny/Pz)` in z,x,y order. The rVV10 kernel uses the
+corresponding physical wavevectors; inverse FFTs run in z,y,x order and
+return the original real-space layout. This halves redistribution calls
+from eight to four per forward/inverse pair. The generic transform still
+supports its original X-to-X layout for reference comparisons.
+No FFTW MPI or FFTW threads library is required. The backend does not change
+the functional metadata or enable DC-MD.
+
+FFTE remains the default. Benchmark the selected adapter: transform speed
+and complete-functional speed can differ, and packing/communication still matter. Measure the complete functional on the
+target machine before selecting a backend. Setup, warm forward/inverse pairs,
+local FFT, communication, packing and full rVV10 timings are separated by:
+
+Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
+
+
+The grids are 32x24x16 and 64x48x32, with 32 channels, 2/4 MPI ranks and one
+OpenMP thread. FFTE timings include its current per-transform private-table
+initialization; these compare implemented paths, not isolated library speed.
+Use `--fft-backend fftw` with the LCFO integration fixture to check that route.
+
+## Static DC force diagnostics (direct fragment MD remains disabled)
+
+For static PBEh DC calculations, `yn_dc_force_diagnostic='y'` in `&dc` prints
+a separately labelled frozen-orbital nuclear derivative in Hartree/bohr. It
+requires a converged SCF, full MLWF support, and automatic fragment atom lists.
+It sums total-grid electrostatics and the two derivatives of each
+core-restricted nonlocal projector product, with global atom identities.
+It does not populate the regular ionic force or advance any ion.
+
+The diagnostic also reports total electron residual, core-weighted occupation
+`TS`, and `E-TS`. These are diagnostic quantities; stationarity of `E-TS` for
+truncated fragments has not been established. Fragment orbital and occupation
+response terms are absent from the printed force. Periodic-image bookkeeping
+is present, but moving atom-list updates and boundary-crossing MD are not.
+
+Run the reproducible small H4 audit with:
+
+Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
+
+
+At 300 K electronic temperature, full-cell buffers agree with energy finite
+differences. Truncated buffers leave about 0.05–0.08 eV/angstrom disagreement
+even after the tested core-weighted entropy term is subtracted. Therefore
+`theory='dft_md', yn_dc='y'` is still rejected. This diagnostic is preparation
+for an energy-consistent DC force, not production MD support.
+
+For positive `temperature_k`, PBEh DC occupations now enforce the core-weighted
+electron count with a bounded chemical-potential solve. Insufficient weighted
+state capacity stops with a request to increase `nstate_frag`; failure is no
+longer silently accepted. The finite-temperature response formulation keeps
+electronic temperature fixed and differentiates E-TS at fixed total electron
+count. Occupation/entropy derivative kernels are available internally, but the
+coupled orbital/density force correction and ionic integration are still pending.
+The existing zero-temperature and non-PBEh occupation paths are unchanged.
+
+## DC initial state to real-space Ehrenfest
+
+A bounded native route now uses `theory='tddft_response'`, `yn_md='y'`,
+`yn_dc='n'`, `yn_conventional_from_dcdft='y'`, .
+The existing reader reconstructs DC-LCFO initial states onto the real-space
+mesh and checks functional/run metadata. Thereafter the wavefunction is the
+ordinary `spsi%zwf` mesh array; it is never projected back to the LCFO subspace.
+MLWF/ACE accelerates the time-dependent exchange action. Initial integer
+occupations stay fixed; no electronic-temperature fitting or SCF occurs in RT.
+
+Use `ensemble='NVE'`, `step_update_ps=1`, `out_rt_energy_step=1`, full EXX support,
+occupied-only states, the default hybrid Taylor4 predictor/corrector, and
+`ae_shape1='impulse'` or `ae_shape1='Acos2'` without a second field. For Acos2,
+use `theory='tddft_pulse'`, positive `omega1` and `tw1`, nonnegative `t1_start`,
+and linear transverse polarization. Supply initial velocities normally.
+Checkpoint continuation/output remain rejected in this route. Initial force uses the post-impulse nonlocal phases. The initial
+energy output retains SALMON's pre-impulse electronic reference; evaluate
+post-excitation conservation using Eall+Tion after the kick. E_work in the RT
+file is ionic mechanical work, not laser work.
+
+Ionic positions are advanced by the existing Verlet steps. During electronic
+propagation, local/nonlocal pseudopotentials use midpoint positions; endpoint
+pseudopotentials are rebuilt before energy and force evaluation. There are no
+moving-basis terms in this fixed real-space mesh representation.
+
+See archived water_ehrenfest_gs.inp example (not distributed) and
+`water_ehrenfest_rt.inp` for a verified small water setup. Native exchange now supports the Gamma y/z spatial layout described below.
+Orbital distribution, finite EXX support and long trajectories are not certified.
+This is DC preparation followed by total-grid Ehrenfest, not propagation of
+independent truncated-fragment forces. The old direct DC-BOMD guard remains.
+
+For Acos2, propagation uses midpoint A and nuclear positions; energy, current
+and forces use endpoint A. The ionic electric field is the centered difference
+`E(t)=-(A(t+dt)-A(t-dt))/(2*dt)`, including initialization. Ionic current uses
+completed Verlet velocities. Independently integrate
+`volume*(Jion-Jmatter) dot E` to compare external work against Eall+Tion.
+No electronic temperature is assigned during excitation. The H4 pulse fixture
+shows second-order energy/work and final-current convergence; this does not
+establish long-time or liquid-water accuracy.
+
+
+### Spatial ACE algebra (development stage)
+
+`hse_ace_build` and `hse_ace_apply` accept an optional `sum_grid` callback,
+which sums a complex matrix over the spatial communicator in place. Each rank
+stores only its local grid rows of factors, sources and targets. Construction
+reduces the occupied-state metric before factorization; application reduces
+factor/target overlaps before the local action. No full-grid array is gathered.
+Peers must use matching orbital/k dimensions, grid volume and call order;
+local row counts may differ and may be zero. Average ACE combines local factor
+columns and retains the same spatial partition. Memory is O(local_grid *
+ACE_rank * local_k), with small replicated metric/overlap matrices; all occupied
+columns remain present locally, so this does not provide orbital decomposition.
+
+This API is verified independently with MPI1/2/4, complex states, non-unit grid
+volume, unequal/empty partitions, midpoint operators, zero exchange and bad
+local data. It is also used by the Gamma spatial mesh RT route below; other layouts
+retain their existing admission restrictions.
+
+
+### Gamma spatial mesh Ehrenfest RT
+
+For DC-initialized PBEh40/PBEh40+rVV10 native mesh RT, set `nproc_k=1`,
+`nproc_ob=1`, and for example `nproc_rgrid=1,2,2` with four MPI ranks.
+The path requires an unshifted Gamma point, orthorhombic periodic cell,
+fully occupied spin pairs, `exx_mlwf_radius=0`, and the default Taylor4+ACE.
+The x dimension is complete on each pencil; y/z are distributed. Grid sizes
+must satisfy the FFTW pencil divisibility constraints. Static DC fragments,
+multi-k calculations retain their prior layout support.
+
+MLWF localization reduces six band-overlap matrices; polar transport reduces
+the temporal overlap matrix. Each rank retains only local grid rows of the
+localized source and previous frame. An identity initial gauge replaces the
+serial pivoted seed; at full support this changes localization history but not
+the exchange operator. The usual exx_mlwf_interval/maxiter/tolerance apply.
+The full-support pair convolution uses the existing distributed FFTW backend,
+with up to four target columns per batch and the same spherical Coulomb cutoff
+as the serial path. ACE construction and action reduce only small band matrices.
+No full wavefunction-grid gather occurs during these exchange RT operations.
+`exx_local_fft` does not select compact source convolutions on this path.
+
+Native DC-to-mesh reconstruction streams the required payload into destination
+domains as described below; fragment basis/coefficient matrices are not retained.
+All occupied columns remain local to each spatial rank, and small band matrices
+are replicated. The verified MPI1/2/4 H4 pulse and MPI1/2 water smoke cases are
+correctness checks, not evidence for giant-system timing or long-time accuracy.
+Use archived h4_ehrenfest_pulse_spatial.inp example (not distributed) after its matching GS.
+
+
+### Domain-sized DC-to-mesh reconstruction
+
+Native complex DC initialization first validates metadata, finite payloads and
+fragment coverage, recording per-spin/k file offsets. It then reads one needed
+coefficient column and contiguous source-grid runs into the destination domain.
+It does not retain fragment grid-by-band or band-by-orbital matrices.
+
+There is no fixed65,536-point cap,2 MiB cap or new memory-control input. The prior
+point cap was an arbitrary implementation choice and was removed at the user's
+request. Two reduction vectors follow the largest destination grid size in the
+r/o communicator. Source/target index arrays follow the current destination;
+the coefficient vector follows the fragment's retained-band count; complex and
+real-wire read buffers follow the actual contiguous run. These are temporary
+arrays, not a total-process memory budget. The wavefunctions, index metadata,
+MPI buffers and the rest of the simulation use additional memory.
+
+`DC_LCFO_TILE scratch_points/global_points` reports reduction-vector capacity
+and global grid size. `DC_LCFO_STREAM` identifies native payload streaming.
+Complete preflight rejects NaNs even in saved orbitals not requested by RT.
+No new parameter is needed. Repeated file opens and seeks can cost I/O time;
+no universal optimal read size or large-system startup speed is claimed.
+
+## Conventional GS to fixed-ion real-space RT
+
+PBE0, PBEh40, and PBEh40+rVV10 can read ordinary GS wavefunctions without DC.
+The supported route uses fresh GS metadata and fixed ions, with Gamma spatial
+parallelism or a complete uniform k mesh with k-only MPI. See
+[conventional GS to RT](conventional-hybrid-rt.md). RT continuation and
+conventional-GS moving-ion RT remain unsupported.

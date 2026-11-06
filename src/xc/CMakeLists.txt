@@ -6,11 +6,70 @@ set(SOURCES
     builtin_pw92.f90
     builtin_r2scan.f90
     builtin_tbmbj.f90
+    exx_k_selection.f90
+    exx_functional.f90
+    exx_gs_metadata.f90
+    nc_mgga23_kernel.f90
+    nc_mgga23_core.f90
+    nc_mgga23_scf.f90
+    nc_mgga23.f90
     salmon_xc.f90
    )
 
+# The noncollinear density routine also imports the pure spin-rotation helper.
+if(NOT USE_HSE)
+  list(APPEND SOURCES exx_symmetry.f90)
+endif()
+
+if(USE_HSE AND USE_MPI)
+  list(APPEND SOURCES exx_worker_layout.f90 exx_spinor_wave_fft.f90 exx_spinor_wave_workers.f90 exx_worker_service.f90)
+endif()
+
 if(USE_HSE)
-  list(APPEND SOURCES hse_symmetry.f90 hse_exchange.f90 hse_ace.f90 hse_semilocal.f90 hse_native.f90)
+  list(APPEND SOURCES
+    exx_blas_threads.f90
+    exx_sparse_orbitals.f90
+    exx_k_backend.f90
+    exx_k_cufft.f90
+    exx_batch_backend.f90
+    exx_cufft.f90
+    exx_local_fft.f90
+    exx_adaptive_support.f90
+    exx_pair_candidates.f90
+    exx_spatial_local.f90
+    rvv10.f90
+    fftw_blocks.f90
+    sr_group_fft.f90
+    sr_wave_fft.f90
+    rvv10_distributed.f90
+    rvv10_native.f90
+    rvv10_ffte.f
+    exx_wannier_gauge.f90
+    exx_wannier.f90
+    exx_symmetry.f90
+    exx_collinear_fft.f90
+    exx_k_exchange.f90
+    exx_fft_consensus.f90
+    exx_spinor.f90
+    exx_stationarity.f90
+    exx_k_pairs.f90
+    exx_k_orbits.f90
+    exx_ace.f90
+    exx_surrogate_basis.f90
+    exx_surrogate_dense.f90
+    exx_surrogate_model.f90
+    exx_surrogate_trace.f90
+    exx_distributed_metric.f90
+    exx_distributed_alignment.f90
+    exx_orbitals.f90
+    exx_distributed_gauge.f90
+    hybrid_semilocal.f90
+    exx_gamma_pairs.f90
+    exx_spatial.f90
+    exx_factor_history.f90
+    exx_native.f90
+    lcfo_wf_support.f90
+  )
 endif()
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})

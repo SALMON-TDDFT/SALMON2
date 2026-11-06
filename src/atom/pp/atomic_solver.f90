@@ -270,8 +270,10 @@ function interp_rho_in(pp,ik,nr,r) result(rho)
   real(8) :: rho(nr),tmp
   integer :: i,nt
   nt=pp%mr(ik)
-  if (any(.not. ieee_is_finite(pp%rho_pp_tbl(1:nt,ik))) .or. &
-      any(pp%rho_pp_tbl(1:nt,ik) < 0d0)) error stop "atomic_solver: invalid valence density"
+  do i=1,nt
+    if (.not.ieee_is_finite(pp%rho_pp_tbl(i,ik))) error stop "atomic_solver: invalid valence density"
+    if (pp%rho_pp_tbl(i,ik)<0d0) error stop "atomic_solver: invalid valence density"
+  end do
   do i=1,nr
     tmp=0d0
     if (r(i) <= pp%rad(1,ik)) then

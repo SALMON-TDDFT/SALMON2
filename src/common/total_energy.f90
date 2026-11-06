@@ -16,6 +16,9 @@
 !--------10--------20--------30--------40--------50--------60--------70--------80--------90--------100-------110-------120-------130
 #include "config.h"
 MODULE Total_Energy
+#ifdef USE_HSE
+  use exx_native, only: exx_enabled,exx_refresh,exx_exchange_energy
+#endif
 implicit none
 
 CONTAINS
@@ -261,6 +264,7 @@ CONTAINS
     if(yn_fix_func=='n' .or. theory(1:3)=='dft') then
       ! meta-GGA: e_tau correction to Etot
       Etot = Etot - system%xc_payload%e_tau
+      if(system%nc_mgga23_payload%active) Etot=Etot-system%nc_mgga23_payload%band_expectation
       Etot = Etot + sum2*system%Hvol + energy%E_xc + energy%E_ion_ion
       select case(method_poisson)
       case('ft')
@@ -526,14 +530,11 @@ CONTAINS
 
 ! eigen energies (esp), kinetic energy (E_kin), & nonlocal part of electron-ion energy (E_ion_nloc)
   Subroutine calc_eigen_energy(energy,tpsi,htpsi,ttpsi,system,info,mg,V_local,stencil,srg,ppg)
-#ifdef USE_HSE
-    use hse_native, only: hse_enabled,hse_refresh,hse_exchange_energy
-#endif
     use structures
     use communication, only: comm_summation
     use hamiltonian, only: hpsi
     use pseudo_pt_so_sub, only: pseudo_so
-    use salmon_global, only: yn_spinorbit
+    use salmon_global, only: yn_spinorbit,yn_dc
     use timer
     use nvtx_wrapper
     implicit none
@@ -566,9 +567,9 @@ CONTAINS
 
     call timer_begin(LOG_EIGEN_ENERGY_HPSI)
 #ifdef USE_HSE
-    if(hse_enabled())energy%E_xc=energy%E_xc-hse_exchange_energy
-    call hse_refresh(system,mg,info,tpsi)
-    if(hse_enabled())energy%E_xc=energy%E_xc+hse_exchange_energy
+    if(exx_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc-exx_exchange_energy
+    call exx_refresh(system,mg,info,tpsi)
+    if(exx_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc+exx_exchange_energy
 #endif
     call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_EIGEN_ENERGY_HPSI)
@@ -801,7 +802,9 @@ CONTAINS
     energy%E_kin      = E_sum(1)
     energy%E_ion_nloc = E_sum(2)
 #ifdef USE_HSE
-    if(hse_enabled())energy%E_ion_nloc=energy%E_ion_nloc-2d0*hse_exchange_energy
+    ! Scalar nonlocal energy is inferred from Hpsi and includes Fock exchange.
+    ! SOC evaluates pseudo_so directly, so its ionic energy has no Fock term.
+    if(exx_enabled().and.yn_spinorbit=='n')energy%E_ion_nloc=energy%E_ion_nloc-2d0*exx_exchange_energy
 #endif
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 

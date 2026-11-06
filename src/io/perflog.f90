@@ -37,11 +37,13 @@ contains
     real(8) :: tmin(nsize),tmax(nsize),tdif(nsize),trel(nsize)
     real(8) :: tavg(nsize),tnorm(nsize),tstdev(nsize)
     integer :: i
+    logical :: relative_defined(nsize)
 
     call comm_get_min(tsrc,tmin,nsize,nproc_group_global)
     call comm_get_max(tsrc,tmax,nsize,nproc_group_global)
     call comm_summation(tsrc,tavg,nsize,nproc_group_global)
 
+    relative_defined = .false.
     do i=1,nsize
       if (is_zero(tmax(i))) then
         tdif(i) = 0.d0
@@ -49,13 +51,22 @@ contains
         tavg(i) = 0.d0
       else
         tdif(i) = tmax(i) - tmin(i)
-        trel(i) = tmax(i) / tmin(i)
+        ! Timer resolution can leave one rank at zero. Do not divide by
+        ! zero or overflow the ratio; retain the measured times and print N/A.
+        trel(i) = 0.d0
+        if (tmin(i)>0.d0) then
+          if (tmin(i)>=tmax(i)/huge(trel(i))) then
+            trel(i) = tmax(i) / tmin(i)
+            relative_defined(i) = .true.
+          end if
+        end if
         tavg(i) = tavg(i) / nproc_size_global
       end if
     end do
 
     ! Centre before squaring; sum(x**2)-mean**2 cancels to noise and NaNs the sqrt.
     do i=1,nsize
+      ! Center first to avoid a negative variance from cancellation.
       tnorm(i) = (tsrc(i) - tavg(i))**2
     end do
 
@@ -72,11 +83,21 @@ contains
         write (fd,'(a,",",5(a,","),a)') trim(headers(0)),'min','max','average','std. dev.','difference','relative'
       end if
       do i=1,nsize
-        if (.not. is_zero(trel(i))) then
+        if (.not. is_zero(tmax(i))) then
           if (write_mode == write_mode_readable) then
-            write (fd,'(a30,6(e12.5e2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            if (relative_defined(i)) then
+              write (fd,'(a30,6(e12.5e2))') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            else
+              write (fd,'(a30,5(e12.5e2),a12)') headers(i),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),'N/A'
+            end if
           else
-            write (fd,'(a,",",5(e12.5e2,","),e12.5e2)') trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            if (relative_defined(i)) then
+              write (fd,'(a,",",5(e12.5e2,","),e12.5e2)') &
+                trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),trel(i)
+            else
+              write (fd,'(a,",",5(e12.5e2,","),a)') &
+                trim(headers(i)),tmin(i),tmax(i),tavg(i),tstdev(i),tdif(i),'N/A'
+            end if
           end if
         end if
       end do
