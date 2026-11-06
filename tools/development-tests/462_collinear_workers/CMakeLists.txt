@@ -25,3 +25,13 @@ foreach(_factor off learned)
  set_tests_properties(462_collinear_native_no_pc_${_factor} PROPERTIES TIMEOUT 600 PROCESSORS 82
   LABELS "hybrid;collinear;openmp;mpi;native;balanced;no-pc")
 endforeach()
+
+# Unequal row fanouts imply a global strip-size spread greater than one.
+foreach(_ranks 17 25)
+  add_test(NAME 462_uneven_strip_action_${_ranks}
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${_ranks}
+      $<TARGET_FILE:collinear_worker_probe>)
+  set_tests_properties(462_uneven_strip_action_${_ranks} PROPERTIES
+    TIMEOUT 90 PROCESSORS ${_ranks} LABELS "hybrid;layout;balanced;mpi"
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+endforeach()

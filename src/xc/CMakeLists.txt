@@ -49,6 +49,7 @@ if(USE_HSE)
     exx_symmetry.f90
     exx_collinear_fft.f90
     exx_k_exchange.f90
+    exx_fft_consensus.f90
     exx_spinor.f90
     exx_stationarity.f90
     exx_k_pairs.f90

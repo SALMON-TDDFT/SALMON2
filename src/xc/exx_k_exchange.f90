@@ -36,9 +36,18 @@ interface exx_k_kernel_init
   interface salmon_all_finite
     module procedure finite_real_1d,finite_real_2d,finite_real_3d
   end interface
+abstract interface
+    subroutine fft_layout_synchronizer(times,contiguous,status,automatic)
+      import c_double
+      real(c_double),intent(inout) :: times(2)
+      logical,intent(inout) :: contiguous
+      logical,intent(in) :: automatic
+      integer,intent(inout) :: status
+    end subroutine
+  end interface
 contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                        block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft)
+                        block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft,fft_layout_sync)
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(in) :: n,mesh,block
@@ -48,13 +57,16 @@ contains
     logical,optional,intent(in) :: profile,defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
+    procedure(fft_layout_synchronizer),optional :: fft_layout_sync
     real(c_double),optional,intent(in) :: coulomb_radius
     call init_rectangular(op,[n,n,n],[mesh,mesh,mesh],[h,h,h],k,omega,block,ierr, &
-      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft=defer_fft)
+      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft=defer_fft, &
+      fft_layout_sync=fft_layout_sync)
   end subroutine
 
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft)
+                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft, &
+                             fft_layout_sync)
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(in) :: n(3),mesh(3),block
@@ -65,25 +77,28 @@ contains
     logical,optional,intent(in) :: profile,defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
+    procedure(fft_layout_synchronizer),optional :: fft_layout_sync
     real(c_double),optional,intent(in) :: coulomb_radius
     real(c_double),optional,intent(in) :: cell(3,3),reciprocal(3,3)
     integer,optional,intent(in) :: q_reduction(3)
     integer :: ns(3),nk,ng,i,j,x,y,z,ix,iy,iz,index,idx(3),dims(3),first,nphase,chosen,axis
+    logical :: plans_deferred,sync_completed
     integer :: reduce(3),coarse(3),residue(3),group,coarse_index
     real(c_double) :: pi,q2,q(3),scaled(3),radius,a(3,3),bvec(3,3),dual(3,3),position(3),limit
     complex(c_double_complex),allocatable :: spectrum(:,:,:)
     type(c_ptr) :: plan
     complex(c_double_complex),pointer,contiguous :: flat_work(:)
+    plans_deferred=.false.;sync_completed=.false.
     ierr=1
     call exx_k_kernel_destroy(op,ierr)
-    if(ierr/=0)return
+    if(ierr/=0)goto 900
     ierr=1
-    if(any(n<1).or.any(mesh<1).or.block<1.or.any(h<=0).or.omega<0) return
-    if(.not.salmon_all_finite(h).or..not.ieee_is_finite(omega))return
+    if(any(n<1).or.any(mesh<1).or.block<1.or.any(h<=0).or.omega<0) goto 900
+    if(.not.salmon_all_finite(h).or..not.ieee_is_finite(omega))goto 900
     reduce=1
     if(present(q_reduction))reduce=q_reduction
-    if(any(reduce<1))return
-    if(any(modulo(mesh,reduce)/=0))return
+    if(any(reduce<1))goto 900
+    if(any(modulo(mesh,reduce)/=0))goto 900
     coarse=mesh/reduce
     op%nq=product(coarse)
     pi=acos(-1d0)
@@ -92,15 +107,15 @@ contains
       a(axis,axis)=n(axis)*h(axis)
       bvec(axis,axis)=2*pi/a(axis,axis)
     enddo
-    if(present(cell).neqv.present(reciprocal))return
+    if(present(cell).neqv.present(reciprocal))goto 900
     if(present(cell).and.present(reciprocal))then
-      if(.not.salmon_all_finite(cell).or..not.salmon_all_finite(reciprocal))return
+      if(.not.salmon_all_finite(cell).or..not.salmon_all_finite(reciprocal))goto 900
       a=cell;bvec=reciprocal
       dual=matmul(transpose(a),bvec)/(2*pi)
       do axis=1,3
         dual(axis,axis)=dual(axis,axis)-1d0
       enddo
-      if(maxval(abs(dual))>1d-10)return
+      if(maxval(abs(dual))>1d-10)goto 900
     endif
     ! Half the shortest separation between opposite supercell faces.
     limit=huge(1d0)
@@ -109,13 +124,13 @@ contains
     enddo
     radius=limit
     if(present(coulomb_radius))then
-      if(.not.ieee_is_finite(coulomb_radius).or.coulomb_radius<0d0)return
+      if(.not.ieee_is_finite(coulomb_radius).or.coulomb_radius<0d0)goto 900
       if(coulomb_radius>0d0)radius=coulomb_radius
     endif
-    if(omega==0d0.and.radius>limit*(1d0+1d-12))return
+    if(omega==0d0.and.radius>limit*(1d0+1d-12))goto 900
     chosen=block
     if(present(block_rows))then
-      if(block_rows<0.or.block_rows>product(n))return
+      if(block_rows<0.or.block_rows>product(n))goto 900
       if(block_rows>0)chosen=block_rows
     endif
     op%profile=.false.
@@ -131,15 +146,15 @@ contains
         op%auto_fft=.false.
         op%contiguous_fft=.true.
       case default
-        return
+        goto 900
       end select
     endif
     nk=product(mesh);ng=product(n);ns=n*coarse;pi=acos(-1d0)
-    if(size(k,1)/=3.or.size(k,2)/=nk.or..not.salmon_all_finite(k))return
+    if(size(k,1)/=3.or.size(k,2)/=nk.or..not.salmon_all_finite(k))goto 900
     first=1;nphase=nk
     if(present(phase_start))first=phase_start
     if(present(phase_count))nphase=phase_count
-    if(first<1.or.nphase<0.or.first+nphase-1>nk)return
+    if(first<1.or.nphase<0.or.first+nphase-1>nk)goto 900
     op%phase_start=first
     op%n=n;op%mesh=mesh;op%ng=ng;op%nk=nk;op%block=min(chosen,ng)
     allocate(op%order(nk),op%point(3,ng),op%shift(3,nk),op%phase(ng,nphase),op%kernel(0:ns(1)-1,0:ns(2)-1,0:ns(3)-1))
@@ -211,22 +226,31 @@ contains
     if(allocated(op%accelerator))then
       ! Device plans are prepared once the distributed slot layout is known.
       op%auto_fft=.false.;op%contiguous_fft=.true.
-      ierr=0;return
+      plans_deferred=.true.;ierr=0;goto 810
     endif
     if(present(defer_fft))then
       if(defer_fft)then
         if(allocated(op%accelerator).or.any(reduce/=1))goto 900
-        op%auto_fft=.false.;ierr=0;return
+        op%auto_fft=.false.;plans_deferred=.true.;ierr=0;goto 810
       endif
     endif
     allocate(op%work(op%block,ng,nk));dims=coarse(3:1:-1)
     ! Independent residue classes require separate reduced-mesh transforms.
     if(any(reduce/=1))op%auto_fft=.false.
-    if(op%auto_fft)then
+810 if(op%auto_fft)then
       call choose_fft_layout(op,ierr)
-      if(ierr/=0)goto 900
-      ierr=1
+    else
+      ierr=0
     endif
+    ! Every participating rank reaches the same callback, including explicit or
+    ! deferred modes. Mixed automatic/manual choices reject collectively.
+    if(present(fft_layout_sync))then
+      sync_completed=.true.
+      call fft_layout_sync(op%fft_trial_seconds,op%contiguous_fft,ierr,op%auto_fft)
+    endif
+    if(ierr/=0)goto 900
+    if(plans_deferred)return
+    ierr=1
     if(op%contiguous_fft)then
       ! Same allocation volume, interpreted as (nk,block,ng) during FFT work.
       op%forward=fftw_plan_many_dft(3,dims,op%block*ng,op%work,dims,1,nk, &
@@ -244,7 +268,12 @@ contains
     call collinear_fft_create(op%omp_fft,coarse,nk,op%block*ng,op%block*ng,op%contiguous_fft,flat_work,ierr)
     if(ierr/=0)goto 900
     ierr=0;return
-900 call exx_k_kernel_destroy(op)
+900 if(present(fft_layout_sync).and..not.sync_completed)then
+      ! A local input/kernel failure must join peers' pending agreement as well.
+      ierr=1
+      call fft_layout_sync(op%fft_trial_seconds,op%contiguous_fft,ierr,op%auto_fft)
+    endif
+    call exx_k_kernel_destroy(op)
   end subroutine
 
   ! Synthetic scratch only: no physical density or orbital is read here.

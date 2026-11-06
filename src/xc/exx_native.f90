@@ -1072,14 +1072,16 @@ contains
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
-          defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'))
+          defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'), &
+          fft_layout_sync=synchronize_fft_layout)
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
-          defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'))
+          defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'), &
+          fft_layout_sync=synchronize_fft_layout)
       endif
       call comm_summation(ierr,total_error,info%icomm_rko)
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
@@ -1175,6 +1177,16 @@ contains
         *system%rocc(:,info%ik_s+j-1,1))*system%hvol*system%wtk(info%ik_s+j-1)
     enddo
     call comm_summation(ex,exx_exchange_energy,info%icomm_k)
+  contains
+    subroutine synchronize_fft_layout(times,contiguous,status,automatic)
+      use exx_fft_consensus,only:agree_fft_layout
+      implicit none
+      real(8),intent(inout)::times(2)
+      logical,intent(inout)::contiguous
+      logical,intent(in)::automatic
+      integer,intent(inout)::status
+      call agree_fft_layout(times,contiguous,status,info%icomm_k,automatic)
+    end subroutine
   end subroutine
 
   ! Crystal reuse takes precedence. Unsupported backends retain their reference route.

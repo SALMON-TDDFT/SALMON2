@@ -291,3 +291,7 @@ if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU" AND USE_MPI AND NOT USE_OPENACC)
       --compiler ${MPI_Fortran_COMPILER} --mpiexec ${MPIEXEC_EXECUTABLE})
   set_tests_properties(perflog_zero_timer PROPERTIES LABELS "timer;mpi;unit" TIMEOUT 120)
 endif()
+
+if(USE_HSE AND USE_MPI)
+  add_subdirectory(unit_exx_fft_consensus)
+endif()

@@ -97,7 +97,9 @@ contains
  if(extra>0)groups=2*q+1
  if(extra==nfirst)groups=q+1
  small=minval(col_count(:np));large=maxval(col_count(:np))
- if(small<1.or.large-small>1)return
+ ! Each row uses quotient/remainder strips, with fanouts differing by one.
+ ! Different fanouts can imply a larger global spread; coverage stays exact.
+ if(small<1)return
  if(int(large,int64)>density_cap/pair_bytes)return
  chunk=large;peak_pairs=int(large,int64);active_ranks=int(np,int64);ierr=0
  end subroutine choose_balanced_strips

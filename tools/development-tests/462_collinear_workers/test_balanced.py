@@ -2,9 +2,9 @@
 import argparse, subprocess
 from collections import defaultdict
 p=argparse.ArgumentParser();p.add_argument('--binary',required=True);a=p.parse_args()
-cases=[(164,4096,4096,1,27648,True),(164,4096,512,1,1280,False),
-       (8,8,3,1,8,True),(8,8,3,2,16,True),(8,8,3,2,52,True),
-       (3,10,3,1,7,False),(9,10,3,1,8,False),(1,3,3,1,4,False),
+cases=[(164,4096,4096,1,27648,True),(164,4096,512,1,1280,True),
+       (8,8,3,1,8,True),(8,8,3,2,16,True),(8,8,3,2,52,True),(8,8,3,1,17,True),(8,8,3,2,25,True),
+       (3,10,3,1,7,True),(9,10,3,1,8,False),(1,3,3,1,4,False),
        (1,1024,1048576,2,1,False),(1,3,3,1,1,True),(0,3,3,1,1,False)]
 for n,ng,nk,nc,np,ok in cases:
  out=subprocess.check_output([a.binary],input=f'{n} {ng} {nk} {nc} {np}\n',text=True)
@@ -25,8 +25,14 @@ for n,ng,nk,nc,np,ok in cases:
   end=1
   for lo,hi in sorted(intervals):assert lo==end;end=hi
   assert end==ng+1
- assert sum(work)==n*ng and max(work)-min(work)<=1
- assert min(work)==n*ng//np and max(work)==(n*ng+np-1)//np
+ assert sum(work)==n*ng
+ # Each row is split as evenly as its rank fanout permits. Different row
+ # fanouts can necessarily produce a larger global spread (e.g. 3x10/7).
+ fanouts=[len(intervals) for intervals in rows.values()]
+ assert max(fanouts)-min(fanouts)<=1
+ for intervals in rows.values():
+  sizes=[hi-lo for lo,hi in intervals]
+  assert max(sizes)-min(sizes)<=1
  assert active==np and peak==chunk==max(work)
  assert chunk*nk*16*nc*nc<=67108864
  print('BALANCED_COVERAGE_PASS',n,ng,np,min(work),max(work),groups)
