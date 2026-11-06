@@ -255,6 +255,7 @@ contains
       & yn_gramschmidt_blas, &
       & yn_eigenexa, &
       & yn_diagonalization_red_mem, &
+      & yn_nccl_reduction, &
       & process_allocation
 
     namelist/system/ &
@@ -283,6 +284,7 @@ contains
       & lloc_ps, &
       & izatom, &
       & yn_psmask, &
+      & yn_pseudo_atomic_orbital, &
       & alpha_mask, &
       & gamma_mask, &
       & eta_mask
@@ -717,6 +719,7 @@ contains
     yn_gramschmidt_blas  = 'y'
     yn_eigenexa          = 'n'
     yn_diagonalization_red_mem = 'n'
+    yn_nccl_reduction    = 'n'
     process_allocation   = 'grid_sequential'
 !! == default for &system
     yn_periodic        = 'n'
@@ -746,6 +749,7 @@ contains
     lloc_ps     = -1
     izatom      = -1
     yn_psmask   = 'n'
+    yn_pseudo_atomic_orbital = 'n'
     alpha_mask  = 0.8d0
     gamma_mask  = 1.8d0
     eta_mask    = 15d0
@@ -1260,6 +1264,7 @@ contains
     call string_lowercase(method_mixing)
     call string_lowercase(convergence)
     call string_lowercase(method_init_density)
+    call string_lowercase(yn_pseudo_atomic_orbital)
     call string_lowercase(trans_longi)
     call string_lowercase(method_singlescale)
     call string_lowercase(boundary_em(1,1))
@@ -1326,6 +1331,7 @@ contains
     call comm_bcast(yn_gramschmidt_blas ,nproc_group_global)
     call comm_bcast(yn_eigenexa         ,nproc_group_global)
     call comm_bcast(yn_diagonalization_red_mem,nproc_group_global)
+    call comm_bcast(yn_nccl_reduction   ,nproc_group_global)
     call comm_bcast(process_allocation  ,nproc_group_global)
 !! == bcast for &system
     call comm_bcast(yn_periodic,nproc_group_global)
@@ -1365,6 +1371,7 @@ contains
     call comm_bcast(lloc_ps      ,nproc_group_global)
     call comm_bcast(izatom       ,nproc_group_global)
     call comm_bcast(yn_psmask,nproc_group_global)
+    call comm_bcast(yn_pseudo_atomic_orbital,nproc_group_global)
     call comm_bcast(alpha_mask   ,nproc_group_global)
     call comm_bcast(gamma_mask   ,nproc_group_global)
     call comm_bcast(eta_mask     ,nproc_group_global)
@@ -2448,6 +2455,7 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_gramschmidt_blas', yn_gramschmidt_blas
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_eigenexa', yn_eigenexa
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_diagonalization_red_mem', yn_diagonalization_red_mem
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_nccl_reduction', yn_nccl_reduction
       write(fh_variables_log, '("#",4X,A,"=",A)') 'process_allocation', process_allocation
 
       if(inml_system >0)ierr_nml = ierr_nml +1
@@ -2488,6 +2496,7 @@ contains
         write(fh_variables_log, '("#",4X,A,I2,A,"=",I4)') 'izatom(',i,')', izatom(i)
       end do
       write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_psmask', yn_psmask
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_pseudo_atomic_orbital', yn_pseudo_atomic_orbital
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'alpha_mask', alpha_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'gamma_mask', gamma_mask
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'eta_mask', eta_mask
@@ -3092,7 +3101,7 @@ contains
   end subroutine dump_input_common
 
   subroutine check_bad_input
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     use parallelization
     use communication
     use exx_functional, only: is_global_hybrid,is_hybrid
@@ -3158,8 +3167,10 @@ contains
     call yn_argument_check(yn_gramschmidt_blas)
     call yn_argument_check(yn_eigenexa)
     call yn_argument_check(yn_diagonalization_red_mem)
+    call yn_argument_check(yn_nccl_reduction)
     call yn_argument_check(yn_periodic)
     call yn_argument_check(yn_psmask)
+    call yn_argument_check(yn_pseudo_atomic_orbital)
     call yn_argument_check(yn_fix_func)
     call yn_argument_check(yn_predictor_corrector)
     call yn_argument_check(yn_auto_mixing)
@@ -3315,7 +3326,8 @@ contains
     select case(method_init_wf)
     case ('gauss','random') ; continue
     case ('gauss2','gauss3','gauss4','gauss5','gauss10') ; continue
-    case default            ; stop 'method_init_wf must be gauss or random'
+    case ('pp') ; continue
+    case default            ; stop 'method_init_wf must be gauss, random or pp'
     end select
 
     select case(convergence)
@@ -3382,6 +3394,13 @@ contains
 
     if (yn_eigenexa == 'y' .and. yn_scalapack == 'y') then
       stop "both yn_scalapack and yn_eigenexa is specified 'y'"
+    end if
+
+    if (yn_nccl_reduction == 'y') then
+#ifdef USE_NCCL
+#else
+      stop 'NCCL is not supported, please reconfiguration and rebuild it.'
+#endif
     end if
     
     select case(spin)

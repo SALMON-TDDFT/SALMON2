@@ -304,11 +304,18 @@ module communication
 contains
   subroutine comm_init
     use mpi, only: MPI_THREAD_FUNNELED,MPI_COMM_WORLD,MPI_Initialized
+#ifdef USE_OPENACC
+    use openacc
+#endif
     implicit none
     integer :: ierr,iprovided
     logical :: initialized
     MPI_ERROR_CHECK(call MPI_Initialized(initialized,ierr))
     if(.not.initialized)then
+#ifdef USE_OPENACC
+      ! Establish the device context before MPI bootstraps GPU collectives.
+      call acc_init(acc_device_nvidia)
+#endif
       MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED,iprovided,ierr))
     endif
     if(application_comm==MPI_COMM_NULL)application_comm=MPI_COMM_WORLD

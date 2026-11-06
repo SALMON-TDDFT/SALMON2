@@ -1,8 +1,9 @@
 set(SOURCES
+   hse_reference_export.f90
+   atomic_orbital.f90
    broyden.f90
    const.f90
    hamiltonian.f90
-   hse_reference_export.f90
    initialization.f90
    stencil.f90
    nonlocal_potential.f90
@@ -14,6 +15,7 @@ set(SOURCES
    total_energy.f90
    lattice.f90
    force.f90
+   ieee_finite_check.f90
    )
 
 if (IS_FUJITSU_COMPILER)

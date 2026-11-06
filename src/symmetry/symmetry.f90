@@ -159,6 +159,7 @@ contains
 
 
   subroutine symmetry_validate_atoms_cartesian(rion,kion)
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     implicit none
     real(8),intent(in) :: rion(:,:)
     integer,intent(in) :: kion(:)
@@ -192,7 +193,7 @@ contains
   end subroutine symmetry_validate_atoms_cartesian
 
   subroutine symmetry_validate_group()
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     implicit none
     real(8) :: rotation(3,3),translation(3),delta(3),cartesian(3,3),identity(3,3),determinant
     real(8) :: operation_element
@@ -253,6 +254,7 @@ contains
   end subroutine symmetry_validate_group
 
   subroutine symmetry_validate_field(direction)
+    use ieee_finite_check, only: ieee_is_finite => is_finite
     implicit none
     real(8),intent(in) :: direction(3)
     real(8) :: rotated(3)

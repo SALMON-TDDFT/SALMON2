@@ -276,6 +276,7 @@ contains
           !write(*,*) ckey(1:12)
 
           read(g,*) cdd(1:nrr)
+          pp%has_rho_pp(ik) = .true.
           !exit
 
        end if

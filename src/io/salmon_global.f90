@@ -83,6 +83,7 @@ module salmon_global
   character(1)   :: yn_gramschmidt_blas
   character(1)   :: yn_eigenexa
   character(1)   :: yn_diagonalization_red_mem
+  character(1)   :: yn_nccl_reduction
   character(32)  :: process_allocation
 
 !! &system
@@ -112,6 +113,7 @@ module salmon_global
   integer        :: lloc_ps(maxmki)
   integer        :: izatom(maxmki)
   character(1)   :: yn_psmask
+  character(1)   :: yn_pseudo_atomic_orbital ! calculate approximate pseudo atomic orbitals
   real(8)        :: alpha_mask
   real(8)        :: gamma_mask
   real(8)        :: eta_mask

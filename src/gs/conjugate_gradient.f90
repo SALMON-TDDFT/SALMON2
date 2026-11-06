@@ -45,6 +45,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   real(8),parameter :: c1  = 2.0d0
   real(8) :: rwork(9),W(2),c
   real(8),allocatable :: rb(:,:),E(:,:),E1(:,:),gkgk(:,:),bk(:,:),res(:,:)
+  logical,allocatable :: stuck(:,:)
   real(8),allocatable :: utmp3(:,:,:),wtmp2(:,:,:)
   real(8) :: utmp2(2,2),btmp2(2,2)
 
@@ -72,7 +73,9 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   allocate(wtmp2(6,system%nspin,system%no))
   allocate(utmp3(2,system%nspin,system%no))
   allocate(res(system%nspin,system%no))
+  allocate(stuck(system%nspin,system%no))
   res = 0.0d0
+  stuck = .false.
   
   call timer_end(LOG_GSCG_ISOLATED_CALC)
 
@@ -190,6 +193,12 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
 
     do io=io_s,io_e
     do ispin=1,nspin
+      if ( stuck(ispin,io) ) then ! rejected by the guard in this call: not updated any more (hxk, gk are not restored)
+        utmp3(1,ispin,io) = 1.0d0
+        utmp3(2,ispin,io) = 0.0d0
+        E1(ispin,io) = E(ispin,io)
+        cycle
+      end if
       btmp2(1,1)=wtmp2(1,ispin,io)
       btmp2(2,1)=wtmp2(2,ispin,io)
       btmp2(1,2)=wtmp2(2,ispin,io)
@@ -243,9 +252,10 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
     bk = -1d0
     do io=io_s,io_e
     do ispin=1,nspin
-      if ( rb(ispin,io)/res(ispin,io)>1.0d8 ) then
+      if ( stuck(ispin,io) .or. rb(ispin,io)/res(ispin,io)>1.0d8 ) then
         E(ispin,io) = E1(ispin,io)
         bk(ispin,io) = 1d0
+        stuck(ispin,io) = .true.
       end if
     end do
     end do
@@ -272,7 +282,7 @@ subroutine gscg_rwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   end do ! icg
   
   deallocate( utmp3,wtmp2 )
-  deallocate( bk,gkgk,E1,E,rb,res )
+  deallocate( bk,gkgk,E1,E,rb,res,stuck )
 
   call timer_end(LOG_GSCG_ISOLATED_CALC)
 
@@ -392,6 +402,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   real(8),parameter :: c1  = 2.0d0
   real(8) :: rwork(9),W(2),r,c,d
   real(8),allocatable :: rb(:,:,:),E(:,:,:),E1(:,:,:),gkgk(:,:,:),bk(:,:,:),res(:,:,:)
+  logical,allocatable :: stuck(:,:,:)
   complex(8),allocatable :: utmp3(:,:,:,:),wtmp2(:,:,:,:),zb(:,:,:)
   complex(8) :: utmp2(2,2),btmp2(2,2)
   complex(8) :: work(9),zphase,ztmp
@@ -423,7 +434,9 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   allocate(bk     (system%nspin,system%no,system%nk))
   allocate(wtmp2(6,system%nspin,system%no,system%nk))
   allocate(utmp3(2,system%nspin,system%no,system%nk))
+  allocate(stuck(system%nspin,system%no,system%nk))
   res = 0.0d0
+  stuck = .false.
 
   E1 = 1.0d10
 
@@ -561,6 +574,12 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
+      if ( stuck(ispin,io,ik) ) then ! rejected by the guard in this call: not updated any more (hxk, gk are not restored)
+        utmp3(1,ispin,io,ik) = 1.0d0
+        utmp3(2,ispin,io,ik) = 0.0d0
+        E1(ispin,io,ik) = E(ispin,io,ik)
+        cycle
+      end if
       btmp2(1,1)=wtmp2(1,ispin,io,ik)
       btmp2(2,1)=wtmp2(2,ispin,io,ik)
       btmp2(1,2)=wtmp2(2,ispin,io,ik)
@@ -627,9 +646,10 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
     do ik=ik_s,ik_e
     do io=io_s,io_e
     do ispin=1,nspin
-      if ( rb(ispin,io,ik)/res(ispin,io,ik)>1.0d8 ) then
+      if ( stuck(ispin,io,ik) .or. rb(ispin,io,ik)/res(ispin,io,ik)>1.0d8 ) then
         E(ispin,io,ik) = E1(ispin,io,ik)
         bk(ispin,io,ik) = 1d0
+        stuck(ispin,io,ik) = .true.
       end if
     end do
     end do
@@ -659,7 +679,7 @@ subroutine gscg_zwf(ncg,mg,system,info,stencil,ppg,vlocal,srg,xk,hxk,gk,cg)
   end do ! icg
 
   deallocate( utmp3,wtmp2 )
-  deallocate( bk,gkgk,E1,E,rb,res )
+  deallocate( bk,gkgk,E1,E,rb,res,stuck )
   deallocate( zb )
 
   call timer_end(LOG_GSCG_PERIODIC_CALC)

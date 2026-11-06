@@ -1,1 +1,2 @@
 create_test()
+set_tests_properties(run_111_bulk_Si_gs_dp PROPERTIES FIXTURES_SETUP "run_111_bulk_Si_gs_dp;bulk_si_dp_gs_ready")

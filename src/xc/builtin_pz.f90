@@ -33,7 +33,9 @@ contains
     ! if(flag_nlcc)rho_s = rho_s + 0.5d0*rho_nlcc
     
 #ifdef USE_OPENACC
-!$acc kernels loop private(i,trho,e_xc,de_xc_drho)
+    ! Without independent, a compiler can infer a false cross-iteration
+    ! dependence here and serialize the loop onto a single thread.
+!$acc kernels loop independent private(i,trho,e_xc,de_xc_drho)
 #else
 !$omp parallel do private(i,trho,e_xc,de_xc_drho)
 #endif
