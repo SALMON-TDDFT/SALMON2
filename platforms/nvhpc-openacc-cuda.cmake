@@ -7,11 +7,6 @@ set(General_C_FLAGS             "-Wall -alias=ansi")
 
 # OpenACC and CUDA
 set(OpenACC_FLAGS               "-acc=strict -gpu=cc80,cc90,cc100,cc120,managed,ptxinfo -cudalib=cublas,cusolver -cuda -Minfo=accel -DUSE_OPENACC -DUSE_CUDA")
-set(CMAKE_CUDA_FLAGS            "${CUDA_NVCC_FLAGS} -std=c++17 -rdc=false")
-foreach(arch 80 90 100 120)
-	set(CMAKE_CUDA_FLAGS          "${CMAKE_CUDA_FLAGS} -gencode arch=compute_${arch},code=sm_${arch}")
-endforeach()
-
 set(CMAKE_Fortran_FLAGS_DEBUG   "-O2 -g -traceback ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG         "-O2 -g -traceback ${General_C_FLAGS} ${OpenACC_FLAGS}")
 set(CMAKE_Fortran_FLAGS_RELEASE "-O3 ${General_Fortran_FLAGS} ${OpenACC_FLAGS}")
