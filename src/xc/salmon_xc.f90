@@ -74,6 +74,7 @@ contains
 
 ! wrapper for calc_xc
   subroutine exchange_correlation(system, xc_func, mg, srg_scalar, srg, rho_s, pp, ppn, info, spsi, stencil, Vxc, E_xc, eexc)
+    ! Partial core (NLCC): n, grad n and Laplacian include rho_nlcc; tau is valence-only.
 #ifdef USE_HSE
     use hse_native, only: hse_refresh,hse_enabled,hse_exchange_energy
 #endif
@@ -248,6 +249,19 @@ contains
       enddo
       enddo
 !$omp end parallel do
+#ifndef SALMON_DEBUG_NEGLECT_NLCC
+      if (allocated(ppn%rho_nlcc)) then
+!$omp parallel do collapse(2) private(ix,iy,iz)
+        do iz=mg%is(3),mg%ie(3)
+        do iy=mg%is(2),mg%ie(2)
+        do ix=mg%is(1),mg%ie(1)
+          rhd(ix,iy,iz)=rhd(ix,iy,iz)+ppn%rho_nlcc(ix,iy,iz)
+        enddo
+        enddo
+        enddo
+!$omp end parallel do
+      end if
+#endif
 
       if(info%if_divide_rspace) call update_overlap_real8(srg_scalar, mg, rhd)
       call calc_gradient_field(mg,stencil%coef_nab,system%rmatrix_B,rhd,grho)
@@ -1520,8 +1534,6 @@ contains
       allocate(rho_1d(nl), rho_s_1d(nl), grho_norm_1d(nl), tau_s_1d(nl), &
                eexc_1d(nl), vexc_1d(nl), vtau_1d(nl), vgrad_1d(nl))
 
-      ! Partial core (NLCC): n includes core density; |grad n| and tau remain
-      ! valence-only, matching existing convention.
       rho_1d = reshape(rho, (/nl/))
 #ifndef SALMON_DEBUG_NEGLECT_NLCC
       if (present(rho_nlcc)) then
