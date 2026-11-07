@@ -295,7 +295,7 @@ contains
                         !     & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik) +  gs%rvnl_tm_matrix(ib, jb, 1:3, ik)) &
                         !     & / gs%delta_omega(ib, jb, ik)
                         gs%d_matrix(ib, jb, 1:3, ik) = &
-                            & zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
+                            & - zi * (gs%p_mod_matrix(ib, jb, 1:3, ik)) &
                             & / gs%delta_omega(ib, jb, ik)
                     else
                         gs%d_matrix(ib, jb, 1:3, ik) = 0d0
