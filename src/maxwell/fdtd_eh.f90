@@ -377,7 +377,7 @@ contains
     case('A_eV_fs')
       !see E_amplitude1 or E_amplitude2 in src/io/iunputoutput.f90
       fe%uVperm_from_au=1.0d0/(uenergy_to_au/ulength_to_au/ucharge_to_au)
-      fe%uAperm_from_au=fe%uVperm_from_au
+      fe%uAperm_from_au=fe%uVperm_from_au/376.730313668d0
     end select
     
     !*** prepare mpi, gird, and sendrecv environments *********************************************************!
