@@ -1157,7 +1157,7 @@ subroutine poisson_isolated_ft(lg,mg,info,fg,rho,Vh,poisson)
   do kz = ifgz_s,ifgz_e
   do ky = ifgy_s,ifgy_e
   do kx = ifgx_s,ifgx_e
-    poisson%zrhoG_ele(kx,ky,kz) = poisson%ff4z(kx,ky,kz)
+    poisson%zrhoG_ele(kx,ky,kz) = poisson%ff2(kx,ky,kz)
     poisson%ff3z(kx,ky,kz) = fg%coef(kx,ky,kz)*poisson%ff2(kx,ky,kz)
   end do
   end do
