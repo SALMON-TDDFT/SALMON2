@@ -56,7 +56,7 @@ module communication
   public :: comm_bcast
   public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
-  public :: comm_alltoall
+  public :: comm_alltoall, comm_alltoallv_complex
   public :: comm_get_min
   public :: comm_get_max
 
@@ -1284,6 +1284,16 @@ contains
     outvalue(1+displs(1):1+displs(1)+ncounts(1)-1) = invalue(1+0:1+ncounts(1)-1)
   end subroutine
 
+
+  subroutine comm_alltoallv_complex(send, send_counts, send_offsets, recv, recv_counts, recv_offsets, ngroup)
+    implicit none
+    complex(8), intent(in) :: send(:)
+    complex(8), intent(out) :: recv(:)
+    integer, intent(in) :: send_counts(:),send_offsets(:),recv_counts(:),recv_offsets(:),ngroup
+    UNUSED_VARIABLE(ngroup)
+    recv(recv_offsets(1)+1:recv_offsets(1)+recv_counts(1)) = &
+      send(send_offsets(1)+1:send_offsets(1)+send_counts(1))
+  end subroutine comm_alltoallv_complex
 
   subroutine comm_alltoall_array1d_complex(invalue, outvalue, ngroup, ncount)
     implicit none

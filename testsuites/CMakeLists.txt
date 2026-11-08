@@ -304,3 +304,66 @@ if(USE_HSE AND HSE_FFTW_INCLUDE AND HSE_FFTW_LIBRARY AND LAPACK_LIBRARIES AND NO
       "--lapack-flags=${KLI_TEST_LAPACK}")
   set_tests_properties(kli_static_formulas PROPERTIES LABELS "xc;kli;unit" TIMEOUT 180)
 endif()
+
+if(USE_HSE AND NOT CMAKE_CROSSCOMPILING)
+  find_package(Python3 COMPONENTS Interpreter NumPy QUIET)
+  if(Python3_NumPy_FOUND)
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+      add_test(NAME hsex_projected_velocity
+        COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}" "HSEX_BLAS_FLAGS=${KLI_TEST_LAPACK}"
+          ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_velocity.py)
+      if(USE_MPI AND CMAKE_GENERATOR STREQUAL "Unix Makefiles")
+        add_test(NAME hsex_lattice_velocity
+          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_lattice_velocity.py
+            --build ${CMAKE_BINARY_DIR} --ranks 1)
+        set_tests_properties(hsex_lattice_velocity PROPERTIES LABELS "xc;hsex;integration" TIMEOUT 120)
+      endif()
+      set_tests_properties(hsex_projected_velocity PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 90)
+    endif()
+    add_test(NAME hsex_static_screening
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_screen.py)
+    execute_process(COMMAND ${Python3_EXECUTABLE} -c "import scipy.linalg"
+      RESULT_VARIABLE HSEX_SCIPY_STATUS OUTPUT_QUIET ERROR_QUIET)
+    if(HSEX_SCIPY_STATUS EQUAL 0)
+      if(USE_MPI AND CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        set(HSEX_SCREEN_TEST_BLAS "${KLI_TEST_LAPACK}")
+        if(APPLE)
+          set(HSEX_SCREEN_TEST_BLAS "-framework Accelerate")
+        endif()
+        add_test(NAME hsex_fortran_screening
+          COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}" "SCREEN_BLAS=${HSEX_SCREEN_TEST_BLAS}"
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/run_fortran_screen_tests.py)
+        set_tests_properties(hsex_fortran_screening PROPERTIES LABELS "xc;hsex;mpi" TIMEOUT 300)
+      endif()
+      execute_process(COMMAND ${Python3_EXECUTABLE} -c "import mpmath"
+        RESULT_VARIABLE HSEX_MPMATH_STATUS OUTPUT_QUIET ERROR_QUIET)
+      if(HSEX_MPMATH_STATUS EQUAL 0 AND CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+        set(HSEX_ORIGINAL_H_BLAS "${KLI_TEST_LAPACK}")
+        if(APPLE)
+          set(HSEX_ORIGINAL_H_BLAS "-framework Accelerate")
+        endif()
+        add_test(NAME hsex_original_h_refinement
+          COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}" "Q_BLAS_FLAGS=${HSEX_ORIGINAL_H_BLAS}"
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/run_original_h_tests.py)
+        set_tests_properties(hsex_original_h_refinement PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 300)
+      endif()
+      foreach(case box_factors distributed_boxes prepare_distributed q_openmp)
+        add_test(NAME hsex_${case} COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_${case}.py)
+        set_tests_properties(hsex_${case} PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 120)
+      endforeach()
+      # Compensated original-H pump references exceed the shorter unit-test limit.
+      set_tests_properties(hsex_prepare_distributed PROPERTIES TIMEOUT 600)
+      add_test(NAME hsex_population_head COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_population_head.py)
+      add_test(NAME hsex_metal_head COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_metal_head.py)
+      add_test(NAME hsex_pump_screen COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_pump_screen.py)
+      add_test(NAME hsex_sternheimer COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_sternheimer.py)
+      set_tests_properties(hsex_sternheimer hsex_pump_screen hsex_metal_head hsex_population_head PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 90)
+    endif()
+    set_tests_properties(hsex_static_screening PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 60)
+  endif()
+endif()

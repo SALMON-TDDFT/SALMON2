@@ -61,7 +61,7 @@ module communication
   public :: comm_bcast
   public :: comm_allgather
   public :: comm_allgatherv ! not implemented in no-mpi environment
-  public :: comm_alltoall
+  public :: comm_alltoall, comm_alltoallv_complex
   public :: comm_get_min
   public :: comm_get_max
 
@@ -1659,6 +1659,18 @@ contains
     call error_check(ierr)
   end subroutine
 
+
+  subroutine comm_alltoallv_complex(send, send_counts, send_offsets, recv, recv_counts, recv_offsets, ngroup)
+    use mpi, only: MPI_DOUBLE_COMPLEX
+    implicit none
+    complex(8), intent(in) :: send(:)
+    complex(8), intent(out) :: recv(:)
+    integer, intent(in) :: send_counts(:),send_offsets(:),recv_counts(:),recv_offsets(:),ngroup
+    integer :: ierr
+    call MPI_Alltoallv(send,send_counts,send_offsets,MPI_DOUBLE_COMPLEX, &
+                       recv,recv_counts,recv_offsets,MPI_DOUBLE_COMPLEX,ngroup,ierr)
+    call error_check(ierr)
+  end subroutine comm_alltoallv_complex
 
   subroutine comm_alltoall_array1d_complex(invalue, outvalue, ngroup, ncount)
     use mpi, only: MPI_DOUBLE_COMPLEX

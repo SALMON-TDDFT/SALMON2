@@ -25,6 +25,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/analysis)
 
 # Executable binary
 add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
+if(USE_HSE)
+  # The Fortran dependency scanner must see the conditional BLAS module use.
+  target_compile_definitions(${TARGET_NAME} PRIVATE HSEX_SALMON)
+endif()
 salmon_guard_eigensolver_target(${TARGET_NAME})
 target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
 if(USE_EXX_CUFFT)

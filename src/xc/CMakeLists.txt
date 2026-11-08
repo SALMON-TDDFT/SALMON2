@@ -31,6 +31,14 @@ if(USE_HSE)
     kli_self_hartree.f90
     kli_periodic.f90
     kli_scf.f90
+    hsex_velocity.f90
+    hsex_k_fft.f90
+    ../../tools/hsex/native/q_response.f90
+    hsex_screen_math.f90
+    hsex_sternheimer.f90
+    hsex_screen_driver.f90
+    hsex_internal.f90
+    kli_hsex.f90
     exx_blas_threads.f90
     exx_sparse_orbitals.f90
     exx_k_backend.f90

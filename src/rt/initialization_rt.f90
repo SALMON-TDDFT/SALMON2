@@ -59,7 +59,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use dip, only: calc_dip
   use sendrecv_grid
 #ifdef USE_HSE
-  use kli_scf, only: kli_read,apply_frozen,kli_diagnostics
+  use kli_hsex, only: hsex_init,hsex_restore,hsex_induced_energy
+  use kli_scf, only: kli_export_hamiltonian,kli_read,apply_frozen,kli_diagnostics
 #endif
   use salmon_global, only: quiet
   use gram_schmidt_orth, only: gram_schmidt
@@ -68,6 +69,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   use lcfo, only: init_conventional_from_dcdft
   use exx_functional, only: is_global_hybrid,is_hybrid
   implicit none
+  integer :: hsex_restart_step
   integer,parameter :: Nd = 4
 
   real(8)       :: debye2au   ! [D]  -> [a.u.]
@@ -270,6 +272,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   ! conventional TDDFT but wavefunctions are reconstructed from DC-LCFO data
     call init_conventional_from_dcdft(lg,mg,system,info,spsi_in)
   end if
+  hsex_restart_step=Mit
   if(yn_reset_step_restart=='y' ) Mit=0
   call timer_end(LOG_RESTART_SELF)
   call comm_sync_all
@@ -313,15 +316,33 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
   call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_in,stencil,Vxc,energy%E_xc)
 #ifdef USE_HSE
-  if(kli_mode=='frozen'.or.kli_mode=='instantaneous')then
+  if(kli_mode/='off')then
     if(any(system%rocc<=0d0))error stop 'KLI real-space RT requires occupied orbitals only in each spin channel'
     if(comm_is_root(nproc_id_global))write(*,'(a,i0)')'KLI real-space occupied orbitals per k/spin: ',system%no
-    call kli_read(directory_read_data,system,mg)
-    call apply_frozen(Vxc,energy%E_xc)
-    call kli_diagnostics(system,mg,info,spsi_in,rho_s,rt%rho0_s)
+    if(xc_func%xctype(1)/=salmon_xctype_tbmbj)then
+      call kli_read(directory_read_data,system,mg)
+      call apply_frozen(Vxc,energy%E_xc)
+      call kli_diagnostics(system,mg,info,spsi_in,rho_s,rt%rho0_s)
+    endif
+    if(kli_mode=='hsex'.or.kli_mode=='hsex_hartree')then
+      if(info%isize_r/=1.or.info%isize_o/=1.or.system%nspin/=1.or.any(abs(system%wtk(:system%nk)*system%nk-1)>1d-10)) &
+        error stop 'invalid HSEX decomposition or weights'
+      if(xc_func%xctype(1)==salmon_xctype_tbmbj)then
+        call hsex_init(system,mg,info,spsi_in,energy%E_xc,kli_mode=='hsex',Vxc(1),yn_restart=='y')
+      else
+        call hsex_init(system,mg,info,spsi_in,energy%E_xc,kli_mode=='hsex',restarting=yn_restart=='y')
+      endif
+      if(yn_restart=='y'.and.kli_mode=='hsex')then
+        call hsex_restore(directory_read_data,hsex_restart_step,system,mg,info,spsi_in)
+        energy%E_xc=energy%E_xc+hsex_induced_energy()
+      endif
+    endif
   endif
 #endif
   call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
+#ifdef USE_HSE
+  if(yn_out_kli_hamiltonian=='y')call kli_export_hamiltonian(system,mg,info,V_local,stencil,srg,ppg,spsi_out,tpsi)
+#endif
   if(yn_restart=='y')then
     Vh_stock1%f=Vh%f
   else if(yn_restart=='n')then

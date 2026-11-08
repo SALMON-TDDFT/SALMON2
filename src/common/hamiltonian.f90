@@ -22,6 +22,20 @@ module hamiltonian
   use exx_native, only: exx_add_action
 #endif
   implicit none
+#ifdef USE_HSE
+  abstract interface
+    subroutine projection_action_interface(sys,mg,info,orb,hpsi_out)
+      use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital
+      implicit none
+      type(s_dft_system),intent(in)::sys
+      type(s_rgrid),intent(in)::mg
+      type(s_parallel_info),intent(in)::info
+      type(s_orbital),intent(in)::orb
+      type(s_orbital),intent(inout)::hpsi_out
+    end subroutine
+  end interface
+  procedure(projection_action_interface),pointer :: projection_action => null()
+#endif
   integer,private,parameter :: Nd = 4
 
 contains
@@ -475,6 +489,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
 
 #ifdef USE_HSE
   call exx_add_action(tpsi,htpsi,system,mg,info)
+  if(associated(projection_action))call projection_action(system,mg,info,tpsi,htpsi)
 #endif
   call timer_end(LOG_UHPSI_ALL)
   call nvtxEndRange()

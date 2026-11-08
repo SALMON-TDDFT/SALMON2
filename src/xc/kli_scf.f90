@@ -3,12 +3,81 @@ module kli_scf
   use kli_periodic, only: kli_frame
   implicit none
   private
+  public :: kli_export_hamiltonian,kli_check_reference,kli_get_reference
   public :: apply_kli_scf,kli_write,kli_read,apply_frozen,kli_diagnostics
   ! Shared between SCF updates, checkpoint I/O and RT predictor/corrector calls.
   real(8),allocatable,save::cached_v(:,:),cached_e(:)
   type(s_exx_symmetry_map),save :: star
   type(kli_frame),save :: frame(2)
 contains
+  ! Grid-column export for the direct Sternheimer reference solver, one file per k.
+  ! Probe hpsi itself, including finite differences and the actual pseudopotential.
+  subroutine kli_export_hamiltonian(sys,mg,info,vl,stencil,srg,ppg,x,hx,tbxc)
+    use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_scalar,s_stencil,s_pp_grid,s_orbital
+    use sendrecv_grid, only: s_sendrecv_grid
+    use hamiltonian, only: hpsi
+    use salmon_global, only: cval
+    implicit none
+    type(s_dft_system),intent(in)::sys
+    type(s_rgrid),intent(in)::mg
+    type(s_parallel_info),intent(in)::info
+    type(s_scalar),intent(in)::vl(:)
+    type(s_stencil),intent(in)::stencil
+    type(s_sendrecv_grid),intent(inout)::srg
+    type(s_pp_grid),intent(in)::ppg
+    type(s_orbital),intent(inout)::x,hx
+    complex(8),allocatable :: column(:)
+    integer::u(info%ik_s:info%ik_e),k,g,j,col,ix,iy,iz,n(3),ng
+    type(s_scalar),optional,intent(in)::tbxc
+    character(48)::name
+    if(info%isize_r/=1.or.info%isize_o/=1.or.sys%nspin/=1.or.any(sys%vec_Ac/=0d0)) &
+      error stop 'Sternheimer export needs field-free closed-shell k-only layout'
+    n=mg%ie-mg%is+1;ng=product(n)
+    do k=info%ik_s,info%ik_e
+      write(name,'("kli-hamiltonian-",i6.6,".bin")')k
+      open(newunit=u(k),file=trim(name),status='new',form='unformatted',access='stream',action='write')
+      if(present(tbxc))then
+        write(u(k))'TSH2',n,k,sys%vec_k(:,k),sys%primitive_a,cval,tbxc%f
+      else
+        write(u(k))'KSH2',n,k,sys%vec_k(:,k),sys%primitive_a,cached_e(1),cached_v(:,1)
+      endif
+    enddo
+    allocate(column(ng))
+    do g=1,ng,sys%no
+      x%zwf=0
+      do j=1,min(sys%no,ng-g+1)
+        col=g+j-2
+        ix=mg%is(1)+mod(col,n(1));iy=mg%is(2)+mod(col/n(1),n(2));iz=mg%is(3)+col/(n(1)*n(2))
+        x%zwf(ix,iy,iz,1,j,:,1)=1
+      enddo
+      x%update_zwf_overlap=.false.
+      call hpsi(x,hx,info,mg,vl,sys,stencil,srg,ppg)
+      do k=info%ik_s,info%ik_e
+        do j=1,min(sys%no,ng-g+1)
+          column=reshape(hx%zwf(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1,j,k,1),[ng])
+          write(u(k))column(g+j-1:ng)
+        enddo
+      enddo
+    enddo
+    do k=info%ik_s,info%ik_e
+      close(u(k))
+    enddo
+  end subroutine
+
+  subroutine kli_get_reference(v,e)
+    implicit none
+    real(8),intent(out) :: v(:),e
+    if(.not.allocated(cached_v).or..not.allocated(cached_e))error stop 'KLI reference unavailable'
+    if(size(cached_v,1)/=size(v))error stop 'KLI reference grid mismatch'
+    v=cached_v(:,1);e=cached_e(1)
+  end subroutine kli_get_reference
+
+  subroutine kli_check_reference(v,e)
+    implicit none
+    real(8),intent(in)::v(:),e
+    if(any(v/=cached_v(:,1)).or.e/=cached_e(1))error stop 'W does not match static KLI restart'
+  end subroutine
+
   subroutine prepare_star(sys,mg)
     use structures, only: s_dft_system,s_rgrid
     use sym_sub, only: use_symmetry,SymMatA,SymMatB,symmetry_validate_field

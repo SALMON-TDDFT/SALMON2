@@ -124,7 +124,13 @@ module salmon_global
   integer :: rvv10_nq
   real(8) :: hse_omega ! Short-range screening, always in bohr^-1
   character(1) :: yn_hse_wannier
-  character(1) :: yn_kli_rt_box_check
+  character(1) :: yn_hsex_update_w,yn_hsex_prepare_w
+  integer :: hsex_w_qgrid(3),hsex_w_boxes
+  character(1) :: yn_hsex_head_only
+  real(8) :: hsex_w_cutoff,hsex_w_eta,hsex_w_head_tol,hsex_w_eta_tol
+  integer :: hsex_screen_step
+  character(256) :: hsex_probe_w
+  character(1) :: yn_kli_rt_box_check,yn_out_kli_hamiltonian
   character(16) :: kli_mode
   real(8) :: kli_local_tol,kli_solve_tol,kli_hartree_tol
   integer :: kli_maxiter

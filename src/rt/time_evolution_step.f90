@@ -26,6 +26,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
+  use kli_hsex, only: hsex_stage,hsex_current,hsex_xc_energy,hsex_induced_energy
   use kli_scf, only: apply_frozen,kli_diagnostics
   use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint,exx_ptcn_report_step
 #endif
@@ -186,6 +187,9 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') &
       call exx_taylor_stage(0)
 #endif
+#ifdef USE_HSE
+  if(kli_mode=='hsex')call hsex_stage(system,mg,info,spsi_in,system%vec_Ac,0)
+#endif
   if(propagator == 'aetrs')then
     call time_evolution_half_step_etrs
   else if(yn_predictor_corrector=='y' .or. xc_func%xctype(1)==salmon_xctype_tbmbj) then
@@ -298,11 +302,25 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call timer_end(LOG_CALC_HARTREE)
 
     call timer_begin(LOG_CALC_EXC_COR)
+#ifdef USE_HSE
+    if(kli_mode=='hsex'.or.kli_mode=='hsex_hartree')then
+      if(kli_mode=='hsex')call hsex_stage(system,mg,info,spsi_out,rt%Ac_tot(:,itt),2)
+      if(xc_func%xctype(1)==salmon_xctype_tbmbj)then
+        call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+        energy%E_xc=energy%E_xc+hsex_induced_energy()
+      else
+        energy%E_xc=hsex_xc_energy(Vxc(1),rho_s(1),rt%rho0_s(1),system%hvol)
+      endif
+    else
+#endif
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+    endif
+#endif
 #ifdef USE_HSE
       if(kli_mode=='frozen')call apply_frozen(Vxc,energy%E_xc)
       if(kli_mode=='instantaneous')call instant(.false.)
-      if(kli_mode/='off')call kli_diagnostics(system,mg,info,spsi_out,rho_s,rt%rho0_s)
+      if(kli_mode=='frozen'.or.kli_mode=='instantaneous')call kli_diagnostics(system,mg,info,spsi_out,rho_s,rt%rho0_s)
 #endif
     call timer_end(LOG_CALC_EXC_COR)
     
@@ -312,14 +330,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 ! result
 
-  if(hybrid_mesh_rt.or.xc=='hse06'.or.(xc=='nc_mgga23'.and.iperiodic==3))then
+  if(hybrid_mesh_rt.or.kli_mode=='hsex'.or.xc=='hse06'.or.(xc=='nc_mgga23'.and.iperiodic==3))then
     ! Propagation uses midpoint A, but energy/current/force describe t_{n+1}.
     system%vec_Ac=rt%Ac_tot(:,itt)
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   endif
 
   call timer_begin(LOG_CALC_PROJECTION)
-  if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
+  if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.itt==hsex_screen_step.or.mod(itt,out_projection_step)==0)) then
     call projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
@@ -359,11 +377,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
       ! Propagation uses midpoint A; current uses endpoint A. Refresh both
       ! kinetic and nonlocal phases for the validated HSE laser path as well.
-      if (propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
+      if (propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full'.or.index(kli_mode,'hsex')==1) then
         if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
       end if
       call calc_current(system,mg,stencil,info,srg,spsi_out,ppg,curr_e_tmp(1:3,1:nspin))
       spsi_out%update_zwf_overlap = .true.
+#ifdef USE_HSE
+      if(kli_mode=='hsex')call hsex_current(curr_e_tmp(:,1))
+#endif
       call calc_emfields(itt,nspin,curr_e_tmp(1:3,1:nspin),rt)
       system%vec_Ac_ext(1:3) = rt%Ac_ext(1:3,itt)
       system%vec_E_ext(1:3)  = rt%E_ext (1:3,itt)
@@ -557,7 +578,17 @@ contains
     
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+#ifdef USE_HSE
+      if(kli_mode=='hsex'.or.kli_mode=='hsex_hartree')then
+        if(kli_mode=='hsex')call hsex_stage(system,mg,info,spsi_out,system%vec_Ac,1)
+        if(xc_func%xctype(1)==salmon_xctype_tbmbj) &
+          call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+      else
+#endif
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
+#ifdef USE_HSE
+      endif
+#endif
 #ifdef USE_HSE
       if(kli_mode=='frozen')call apply_frozen(Vxc,energy%E_xc)
       if(kli_mode=='instantaneous')call instant(.true.)

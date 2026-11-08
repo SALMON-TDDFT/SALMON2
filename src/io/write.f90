@@ -2123,6 +2123,11 @@ contains
     use structures
     use communication, only: comm_is_root
     use parallelization, only: nproc_id_global
+#ifdef USE_HSE
+    use hamiltonian, only: projection_action
+    use kli_hsex, only: hsex_add,hsex_snapshot,hsex_replace_w,hsex_update_internal,hsex_stage,hsex_induced_energy
+    use salmon_global, only: kli_mode,hsex_screen_step,hsex_probe_w,yn_hsex_update_w
+#endif
     use salmon_global, only: projection_option,ncg,nelec,yn_spinorbit,nscf,yn_out_intraband_current,threshold_projection
     use inputoutput, only: t_unit_time
     use subspace_diagonalization, only: ssdg
@@ -2149,7 +2154,13 @@ contains
     real(8) :: coef(rt%system_proj%no,system%nk,system%nspin)
     real(8) :: nee, neh, wspin, dE
     complex(8) :: cbox
-      
+    real(8) :: old_hsex_energy
+    logical :: screen_projection
+
+    screen_projection=.false.
+#ifdef USE_HSE
+    screen_projection=itt==hsex_screen_step
+#endif
     if(info%im_s/=1 .or. info%im_e/=1) stop "error: im/=1 @ projection"
     
     rt%system_proj%vec_Ac(1:3) = system%vec_Ac(1:3) ! vector potential @ time itt
@@ -2184,6 +2195,9 @@ contains
     end if
 
     if(projection_option=='td') then
+#ifdef USE_HSE
+      if(kli_mode=='hsex')projection_action=>hsex_add
+#endif
       do ispin=1,nspin
         rt%vloc0(ispin)%f = V_local(ispin)%f ! the local potential for the time-dependent Hamiltonian
       end do
@@ -2207,7 +2221,7 @@ contains
     call calc_eigen_energy(energy,rt%tpsi0,rt%htpsi0,rt%ttpsi0 &
     & ,rt%system_proj,rt%info_proj,mg,rt%vloc0,stencil,rt%srg_proj,ppg)
     dE = energy%E_kin - rt%E_old
-    if(abs(dE) < min(threshold_projection,1e-12)) then
+    if(.not.screen_projection.and.abs(dE) < min(threshold_projection,1e-12)) then
       if(comm_is_root(nproc_id_global)) write(*,*) "projection: already converged, E_kin(new)-E_kin(old)=",dE
     else
       ! Reference the kinetic energy of this step's starting orbitals (energy%E_kin
@@ -2227,7 +2241,11 @@ contains
         dE = energy%E_kin - rt%E_old
         rt%E_old = energy%E_kin
         if(comm_is_root(nproc_id_global)) write(*,'(a,i6,e20.10)') "projection: ",iter_GS,dE
-        if(abs(dE) < threshold_projection) exit
+        if(screen_projection)then
+          if(projection_residual()<1d-5)exit
+        else if(abs(dE) < threshold_projection)then
+          exit
+        endif
       end do
     end if
     
@@ -2250,6 +2268,25 @@ contains
     end do
     end do
 
+#ifdef USE_HSE
+    old_hsex_energy=hsex_induced_energy()
+    if(itt==hsex_screen_step.and.yn_hsex_update_w=='y')then
+      call hsex_update_internal(itt,rt%system_proj,mg,rt%info_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0, &
+        energy%esp(:,:,1),coef(:,:,1),rt%vloc0,stencil,rt%srg_proj,ppg)
+    endif
+    if(itt==hsex_screen_step.and.hsex_probe_w=='none'.and.yn_hsex_update_w=='n')then
+      call hsex_snapshot(itt,rt%system_proj,mg,rt%info_proj,rt%tpsi0,rt%htpsi0,rt%ttpsi0, &
+        energy%esp(:,:,1),coef(:,:,1),rt%vloc0,stencil,rt%srg_proj,ppg)
+    endif
+    if(itt==hsex_screen_step.and.hsex_probe_w/='none')then
+      call hsex_replace_w(hsex_probe_w,itt,rt%system_proj,mg,rt%info_proj,energy%esp(:,:,1),coef(:,:,1))
+    endif
+    if(itt==hsex_screen_step.and.(yn_hsex_update_w=='y'.or.hsex_probe_w/='none'))then
+      call hsex_stage(system,mg,info,psi_t,system%vec_Ac,2)
+      energy%E_xc=energy%E_xc-old_hsex_energy+hsex_induced_energy()
+    endif
+    nullify(projection_action)
+#endif
     nee = 0d0
     neh = dble(nelec)
     do ispin=1,nspin_tmp
@@ -2287,6 +2324,25 @@ contains
     
   contains
   
+    real(8) function projection_residual() result(residual)
+      use communication, only: comm_get_max
+      implicit none
+      real(8)::worst(1),global_worst(1),r
+      integer::k,b
+      worst=0d0
+      do k=rt%info_proj%ik_s,rt%info_proj%ik_e
+        do b=1,no0
+          associate(x=>rt%tpsi0%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,b,k,1), &
+                    hx=>rt%htpsi0%zwf(is(1):ie(1),is(2):ie(2),is(3):ie(3),1,b,k,1))
+            r=sqrt(system%hvol*sum(abs(hx-energy%esp(b,k,1)*x)**2))
+          end associate
+          worst(1)=max(worst(1),r)
+        enddo
+      enddo
+      call comm_get_max(worst,global_worst,1,rt%info_proj%icomm_rko)
+      residual=global_worst(1)
+    end function
+
     subroutine inner_product(psi1,psi2,mat)
       use communication, only: comm_summation, comm_bcast
       use pack_unpack, only: copy_data
@@ -2353,11 +2409,17 @@ contains
     subroutine write_intraband_current
       use density_matrix, only:calc_current_decomposed
       use inputoutput, only: t_unit_current
+#ifdef USE_HSE
+      use kli_hsex, only: hsex_current_decomposed
+#endif
       implicit none
       real(8) :: curr_intra(3,nspin)
       real(8) :: curr_decomp(3,nspin,no0,nk)
       
       call calc_current_decomposed(rt%system_proj,mg,stencil,rt%info_proj,rt%srg_proj,rt%tpsi0,ppg,curr_decomp)
+#ifdef USE_HSE
+      if(kli_mode=='hsex')call hsex_current_decomposed(rt%system_proj,mg,rt%info_proj,rt%tpsi0,curr_decomp)
+#endif
       
       curr_intra = 0d0
       do ispin=1,nspin_tmp

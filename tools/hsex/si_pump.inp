@@ -1,0 +1,86 @@
+&calculation
+  theory='tddft_pulse'
+/
+
+&control
+  directory_read_data='../gs/data_for_restart/'
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&parallel
+  nproc_k=8
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec2 = 0.0, 5.13, 5.13
+  al_vec3 = 5.13, 0.0, 5.13
+  al_vec1 = 5.13, 5.13, 0.0
+  nstate = 8
+  nelec = 8
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'tbmbj'
+  kli_mode='hsex'
+ hsex_screen_step=400
+/
+
+&rgrid
+  num_rgrid = 12, 12, 12
+/
+
+&kgrid
+  num_kgrid = 4, 4, 4
+/
+
+&tgrid
+  nt = 400
+  gram_schmidt_interval=1
+  dt = 0.05
+/
+
+&propagation
+  propagator='middlepoint'
+  yn_predictor_corrector='y'
+/
+&scf
+  ncg = 8
+  nscf = 3500
+  threshold = 1.d-9
+/
+
+&emfield
+ trans_longi='tr'
+ ae_shape1='Acos2'
+ tw1=20, omega1=0.114, E_amplitude1=0.00065, t1_t2=10, epdir_re2=0,0,1
+ ae_shape2='none'
+ e_impulse=0.0001
+ epdir_re1=0,0,1
+/
+
+&analysis
+ projection_option='td', out_projection_step=100000
+  nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+/

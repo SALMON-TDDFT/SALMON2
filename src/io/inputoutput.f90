@@ -288,7 +288,9 @@ contains
       & eta_mask
 
     namelist/functional/ &
-      & yn_kli_rt_box_check,kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter, &
+      & hsex_screen_step,hsex_probe_w,yn_hsex_update_w,yn_hsex_prepare_w,hsex_w_qgrid,hsex_w_boxes,hsex_w_cutoff, &
+      & hsex_w_eta,hsex_w_head_tol,hsex_w_eta_tol,yn_hsex_head_only, &
+      & yn_out_kli_hamiltonian,yn_kli_rt_box_check,kli_mode,kli_local_tol,kli_solve_tol,kli_hartree_tol,kli_maxiter, &
       & xc, &
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
       & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
@@ -759,6 +761,18 @@ contains
     rvv10_fft='ffte'
     rvv10_b=5.3d0;rvv10_c=.0093d0;rvv10_nq=32
     hse_omega = .11d0 / ulength_from_au ! inverse input length
+    yn_hsex_update_w='n'
+    yn_hsex_prepare_w='n'
+    hsex_w_boxes=6
+    hsex_w_qgrid=0
+    hsex_w_cutoff=3d0*uenergy_from_au
+    hsex_w_eta=1d-3*uenergy_from_au
+    yn_hsex_head_only='n'
+    hsex_w_head_tol=.05d0
+    hsex_w_eta_tol=.02d0
+    hsex_screen_step=0
+    hsex_probe_w='none'
+    yn_out_kli_hamiltonian='n'
     yn_kli_rt_box_check='n'
     kli_mode='off'
     kli_local_tol=1d-5*uenergy_from_au
@@ -1384,6 +1398,21 @@ contains
 #endif
     call comm_bcast(xc           ,nproc_group_global)
     call comm_bcast(cname        ,nproc_group_global)
+    call comm_bcast(yn_hsex_update_w,nproc_group_global)
+    call comm_bcast(yn_hsex_prepare_w,nproc_group_global)
+    call comm_bcast(hsex_w_boxes,nproc_group_global)
+    call comm_bcast(hsex_w_qgrid,nproc_group_global)
+    call comm_bcast(hsex_w_cutoff,nproc_group_global)
+    call comm_bcast(hsex_w_eta,nproc_group_global)
+    call comm_bcast(yn_hsex_head_only,nproc_group_global)
+    call comm_bcast(hsex_w_head_tol,nproc_group_global)
+    call comm_bcast(hsex_w_eta_tol,nproc_group_global)
+    hsex_w_cutoff=hsex_w_cutoff*uenergy_to_au
+    hsex_w_eta=hsex_w_eta*uenergy_to_au
+    call comm_bcast(hsex_screen_step,nproc_group_global)
+    call comm_bcast(hsex_probe_w,nproc_group_global)
+    call comm_bcast(yn_out_kli_hamiltonian,nproc_group_global)
+    call string_lowercase(yn_out_kli_hamiltonian)
     call comm_bcast(yn_kli_rt_box_check,nproc_group_global)
     call string_lowercase(yn_kli_rt_box_check)
     call comm_bcast(kli_mode,nproc_group_global)
@@ -2520,6 +2549,18 @@ contains
       write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
       write(fh_variables_log, *) "# hse_omega (bohr^-1)=", hse_omega
+      write(fh_variables_log, *) "# yn_hsex_prepare_w=",yn_hsex_prepare_w
+      write(fh_variables_log, *) "# hsex_w_boxes=",hsex_w_boxes
+      write(fh_variables_log, *) "# yn_hsex_update_w=",yn_hsex_update_w
+      write(fh_variables_log, *) "# hsex_w_qgrid=",hsex_w_qgrid
+      write(fh_variables_log, *) "# hsex_w_cutoff=",hsex_w_cutoff
+      write(fh_variables_log, *) "# hsex_w_eta=",hsex_w_eta
+      write(fh_variables_log, *) "# yn_hsex_head_only=",yn_hsex_head_only
+      write(fh_variables_log, *) "# hsex_w_head_tol=",hsex_w_head_tol
+      write(fh_variables_log, *) "# hsex_w_eta_tol=",hsex_w_eta_tol
+      write(fh_variables_log, *) "# hsex_screen_step=",hsex_screen_step
+      write(fh_variables_log, *) "# hsex_probe_w=",trim(hsex_probe_w)
+      write(fh_variables_log, *) "# yn_out_kli_hamiltonian=",yn_out_kli_hamiltonian
       write(fh_variables_log, *) "# yn_kli_rt_box_check=",yn_kli_rt_box_check
       write(fh_variables_log, *) "# kli_mode=",kli_mode
       write(fh_variables_log, *) "# kli_local_tol=",kli_local_tol
@@ -3119,7 +3160,10 @@ contains
     use parallelization
     use communication
     use exx_functional, only: is_global_hybrid,is_hybrid
+    use misc_routines, only: string_lowercase
     implicit none
+    character(len(xc)) :: xc_key
+    logical :: spinor_gs_screen
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
     logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
@@ -3237,6 +3281,54 @@ contains
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_exx_dc_mlwf)
+    xc_key=xc
+    call string_lowercase(xc_key)
+    call yn_argument_check(yn_out_kli_hamiltonian)
+    call yn_argument_check(yn_hsex_update_w)
+    call yn_argument_check(yn_hsex_prepare_w)
+    if(yn_hsex_update_w=='y')then
+      if(hsex_probe_w/='none'.or.hsex_screen_step<1)error stop 'internal W update needs a screen step and no external W'
+    endif
+    spinor_gs_screen=yn_hsex_prepare_w=='y'.and.spin=='noncollinear'.and.yn_spinorbit=='y'.and. &
+      xc_key=='pz'.and.kli_mode=='off'.and.temperature>0d0
+    call yn_argument_check(yn_hsex_head_only)
+    if(yn_hsex_head_only=='y'.and..not.spinor_gs_screen) &
+      error stop 'head-only screening requires finite-temperature PZ SOC GS preparation'
+    if(yn_hsex_prepare_w=='y')then
+      if(theory/='dft'.or..not.(kli_mode=='static'.or.(xc_key=='tbmbj'.and.kli_mode=='off').or. &
+          spinor_gs_screen))error stop 'internal GS screening requires static KLI, TB-mBJ, or finite-temperature PZ SOC GS'
+      if(hsex_w_boxes<1)error stop 'positive screening box count required'
+      if(any(mod(num_rgrid,hsex_w_boxes)/=0))error stop 'screening boxes must divide real-space grid'
+    endif
+    if(yn_hsex_update_w=='y'.or.yn_hsex_prepare_w=='y')then
+#ifndef USE_HSE
+      error stop 'internal screening requires USE_HSE'
+#endif
+      if((spin/='unpolarized'.and..not.spinor_gs_screen).or.yn_periodic/='y'.or.index(yn_symmetry,'y')>0.or. &
+         nproc_ob/=1.or.any(nproc_rgrid/=1))error stop 'internal screening needs full grid, full k mesh and k MPI'
+      if(.not.ieee_is_finite(hsex_w_cutoff).or..not.ieee_is_finite(hsex_w_eta).or. &
+         .not.ieee_is_finite(hsex_w_head_tol).or..not.ieee_is_finite(hsex_w_eta_tol)) &
+         error stop 'nonfinite screening input'
+      if(all(hsex_w_qgrid==0))hsex_w_qgrid=num_kgrid
+      if(spinor_gs_screen.and.any(hsex_w_qgrid<6))error stop 'spinor metal W requires q mesh >=6 in every direction'
+      if(any(hsex_w_qgrid<1))error stop 'positive screening q grid required'
+      if(any(mod(num_kgrid,hsex_w_qgrid)/=0).or.product(hsex_w_qgrid)<2)error stop 'screening q grid must divide k grid'
+      if(.not.(hsex_w_cutoff>0d0.and.hsex_w_eta>0d0))error stop 'positive screening cutoff and eta required'
+      if(.not.(hsex_w_head_tol>0d0.and.hsex_w_head_tol<1d0.and. &
+        hsex_w_eta_tol>0d0.and.hsex_w_eta_tol<1d0))error stop 'screening tolerances must lie between zero and one'
+    endif
+    if(hsex_screen_step/=0.or.hsex_probe_w/='none')then
+      if(hsex_screen_step<1.or.hsex_screen_step>nt.or.kli_mode/='hsex'.or.projection_option/='td'.or. &
+         xc_key/='tbmbj'.or.nstate<=nelec/2)error stop 'pump screening requires TD projection with conduction bands and TB-mBJ HSEX'
+    endif
+    if(yn_out_kli_hamiltonian=='y')then
+#ifndef USE_HSE
+      error stop 'screening Hamiltonian export requires USE_HSE'
+#endif
+      if(.not.(kli_mode=='static'.or.kli_mode=='frozen'.or. &
+         (xc_key=='tbmbj'.and.kli_mode=='off'.and.theory=='dft')).or.spin/='unpolarized'.or. &
+         index(yn_symmetry,'y')/=0.or.nproc_ob>1)error stop 'KLI Hamiltonian output needs a full-mesh static or frozen run'
+    endif
     call yn_argument_check(yn_kli_rt_box_check)
     if(kli_mode/='off')then
 #ifndef USE_HSE
@@ -3247,9 +3339,16 @@ contains
         if(theory/='dft')error stop 'Static KLI requires DFT'
         if(yn_restart/='y'.or.read_gs_restart_data/='wfn'.or.nscf_init_no_diagonal/=0) &
           error stop 'KLI needs a converged integer-occupied LSDA wfn start and nscf_init_no_diagonal=0'
-      case('frozen','instantaneous')
+      case('frozen','instantaneous','hsex','hsex_hartree')
+        if(kli_mode=='hsex'.or.kli_mode=='hsex_hartree')then
+          if((theory/='tddft_response'.and.theory/='tddft_pulse').or.spin/='unpolarized'.or.index(yn_symmetry,'y')/=0.or. &
+             any(nproc_rgrid>1).or.nproc_ob>1.or.yn_jm/='n'.or. &
+             (theory=='tddft_response'.and.ae_shape1/='impulse').or.trans_longi/='tr') &
+            error stop 'HSEX requires a closed-shell, full-mesh, transverse impulse, k-only MPI response'
+        endif
         if(theory/='tddft_pulse'.and.theory/='tddft_response')error stop 'KLI frozen requires single-cell RT'
-        if(yn_restart/='n'.or.nproc_ob>1.or.yn_fix_func/='n'.or.propagator/='middlepoint'.or.yn_predictor_corrector/='y') &
+        if((yn_restart/='n'.and..not.(kli_mode=='hsex'.and.xc_key=='tbmbj')).or.nproc_ob>1.or. &
+           yn_fix_func/='n'.or.propagator/='middlepoint'.or.yn_predictor_corrector/='y') &
           error stop 'KLI RT requires GS start, updating XC and midpoint predictor/corrector'
       case default
         error stop 'Unknown KLI mode'
@@ -3262,7 +3361,8 @@ contains
       if(.not.ieee_is_finite(kli_local_tol).or..not.ieee_is_finite(kli_solve_tol).or..not.ieee_is_finite(kli_hartree_tol)) &
         error stop 'KLI tolerances must be finite'
       if(.not.(kli_hartree_tol>0))error stop 'KLI requires positive auxiliary box tolerance'
-      if(xc/='pz'.and.xc/='PZ')error stop 'KLI requires built-in PZ LSDA'
+      if(xc_key/='pz'.and..not.(xc_key=='tbmbj'.and.index(kli_mode,'hsex')==1)) &
+        error stop 'static KLI requires PZ; HSEX supports PZ-KLI or TB-mBJ'
       if(temperature>=0.or.any(nproc_rgrid>1))error stop 'KLI requires integer occupancy and unsplit spatial grid'
       if(any(num_kgrid<1).or.kli_maxiter<0.or..not.(kli_local_tol>0.and.kli_solve_tol>0))error stop 'Invalid KLI mesh or tolerance'
     endif

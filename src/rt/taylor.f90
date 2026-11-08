@@ -21,6 +21,10 @@ contains
 
 subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
                   ppg,V_local,rt)
+#ifdef USE_HSE
+  use kli_hsex, only: hsex_add
+  use salmon_global, only: kli_mode
+#endif
   use inputoutput, only: n_hamil
   use structures
   use hamiltonian, only: hpsi
@@ -47,6 +51,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
   do nn=1,n_hamil
     if(mod(nn,2)==1)then
       call hpsi(tspsi_in,sshtpsi,info,mg,V_local,system,stencil,srg,ppg)
+#ifdef USE_HSE
+      if(kli_mode=='hsex')call hsex_add(system,mg,info,tspsi_in,sshtpsi)
+#endif
       if (nn==1) then
 #ifdef USE_OPENACC
 !$acc kernels
@@ -97,6 +104,9 @@ subroutine taylor(mg,system,info,stencil,srg,tspsi_in,tspsi_out,sshtpsi,   &
       end if
     else
       call hpsi(sshtpsi,tspsi_in,info,mg,V_local,system,stencil,srg,ppg)
+#ifdef USE_HSE
+      if(kli_mode=='hsex')call hsex_add(system,mg,info,sshtpsi,tspsi_in)
+#endif
 #ifdef USE_OPENACC
 !$acc parallel loop collapse(6) private(ik,io,is,iz,iy,ix)
 #else

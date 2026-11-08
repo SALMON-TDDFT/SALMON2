@@ -316,6 +316,7 @@ end subroutine restart_opt
 subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,singlescale,idir)
 #ifdef USE_HSE
   use exx_native, only: exx_factor_checkpoint,exx_factor_mode_metadata
+  use kli_hsex, only: hsex_checkpoint
 #endif
   use structures, only: s_rgrid, s_dft_system, s_parallel_info, s_orbital, s_scalar, s_singlescale, s_rt
   use filesystem, only: atomic_create_directory,create_directory
@@ -364,6 +365,7 @@ subroutine checkpoint_rt(lg,mg,system,info,spsi,iter,rt,Vh_stock1,Vh_stock2,sing
   call rt_energy_reference_file(wdir,iter,info,.true.)
 #ifdef USE_HSE
   call exx_factor_checkpoint(wdir,iter,system,mg,info)
+  call hsex_checkpoint(gdir,iter,system,info)
 #endif
   call write_rtdata(wdir,iter,lg,mg,system,info,iself,rt)
   call write_rho0_s(wdir,lg,mg,system,info,rt%rho0_s,iself)

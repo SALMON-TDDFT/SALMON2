@@ -97,6 +97,13 @@ set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${EXTERNAL_FLAGS}")
 set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} ${EXTERNAL_FLAGS}")
 
 
+# GNU Fortran and the Homebrew OpenMP OpenBLAS can load separate runtimes.
+# Concurrent calls failed in vendor shutdown in the HSEX Si regression.
+set(HAVE_HSEX_APPLE_GNU OFF)
+if(APPLE AND CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(HAVE_HSEX_APPLE_GNU ON)
+endif()
+
 # Detect optional thread control with the actual selected numerical libraries.
 foreach(provider OPENBLAS NVPL FUJITSU)
   unset(HAVE_EXX_${provider}_THREADS CACHE)

@@ -1,0 +1,91 @@
+&calculation
+  theory='tddft_pulse'
+/
+
+&control
+ checkpoint_interval=1,yn_self_checkpoint='n'
+  directory_read_data='@RESTART@'
+  sysname = 'Si'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&parallel
+  nproc_k=4
+  nproc_ob=1
+  nproc_rgrid=1,1,1
+/
+
+&system
+  yn_periodic = 'y'
+  al_vec2 = 0.0, 5.13, 5.13
+  al_vec3 = 5.13, 0.0, 5.13
+  al_vec1 = 5.13, 5.13, 0.0
+  nstate = 8
+  nelec = 8
+  nelem = 1
+  natom = 2
+/
+
+&pseudo
+  izatom(1) = 14
+  file_pseudo(1) = './Si_rps.dat'
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'tbmbj'
+  kli_mode='hsex'
+ @UPDATE@
+ hsex_w_qgrid=2,2,2, hsex_w_cutoff=1.0, hsex_w_eta=0.01
+
+/
+
+&rgrid
+  num_rgrid = 8, 8, 8
+/
+
+&kgrid
+  num_kgrid = 2, 2, 2
+/
+
+&tgrid
+  nt = 3
+  gram_schmidt_interval=1
+  dt = 0.01
+/
+
+&propagation
+  propagator='middlepoint'
+  yn_predictor_corrector='y'
+/
+&scf
+  ncg = 4
+  nscf = 350
+  threshold = 1.d-9
+/
+
+&emfield
+ trans_longi='tr'
+ ae_shape1='impulse'
+ e_impulse=0.00001
+ epdir_re1=0,0,1
+ ! Delayed verification probe: zero through the step-1 W update.
+ ae_shape2='Acos2', epdir_re2=0,0,1
+ tw1=0, t1_t2=0.02, tw2=0.02
+ omega2=1, E_amplitude2=0.01, phi_cep2=0.25
+/
+
+&analysis
+ projection_option='td', out_projection_step=1, yn_out_intraband_current='y'
+  nenergy = 1000
+  de = 0.001
+/
+
+&atomic_coor
+  'Si'	.0	.0	.0	1
+  'Si'	2.565	2.565	2.565	1
+/

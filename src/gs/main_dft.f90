@@ -50,7 +50,8 @@ use dcdft
 use dc_force, only: report_dc_frozen_force
 use lcfo
 #ifdef USE_HSE
-use kli_scf, only: kli_write
+use kli_scf, only: kli_write,kli_export_hamiltonian,kli_get_reference
+use hsex_internal, only: hsex_compute_internal,hsex_save_internal
 use exx_native, only: exx_export_snapshot,exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_refresh
 use exx_native, only: exx_enabled,exx_pack
 use exx_stationarity,only:spinor_stationarity
@@ -423,6 +424,10 @@ if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scal
 
 call timer_end(LOG_WRITE_GS_RESULTS)
 
+#ifdef USE_HSE
+if(yn_hsex_prepare_w=='y'.and..not.(sum1<threshold)) &
+  error stop 'refusing unconverged internal screening reference'
+#endif
 ! write GS: binary data for restart
 call timer_begin(LOG_WRITE_GS_DATA)
 if(write_gs_restart_data=="no") then
@@ -435,6 +440,23 @@ else if(write_gs_restart_data.ne."checkpoint_only") then
 #endif
    call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
 #ifdef USE_HSE
+   if(yn_out_kli_hamiltonian=='y')then
+     if(.not.(sum1<threshold))error stop 'refusing unconverged screening reference'
+     if(xc_func%xctype(1)==salmon_xctype_tbmbj)then
+       block
+         integer::u
+         if(comm_is_root(nproc_id_global))then
+           open(newunit=u,file=trim(ofl%dir_out_restart)//'tbmbj-wref.bin',access='stream',form='unformatted',status='new')
+           write(u)'TBM1',mg%ie-mg%is+1,system%nspin,system%nk,system%no,system%nion, &
+             system%primitive_a,system%vec_k(:,:system%nk),system%rocc,system%Rion,Vxc(1)%f,cval
+           close(u)
+         endif
+       end block
+       call kli_export_hamiltonian(system,mg,info,V_local,stencil,srg,ppg,shpsi,sttpsi,Vxc(1))
+     else
+       call kli_export_hamiltonian(system,mg,info,V_local,stencil,srg,ppg,shpsi,sttpsi)
+     endif
+   endif
    if(kli_mode=='static'.and.comm_is_root(nproc_id_global))call kli_write(ofl%dir_out_restart,system,mg)
 #endif
    call comm_sync_all
@@ -461,6 +483,48 @@ if(yn_self_checkpoint=='y') then
 endif
 if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing completed."
 call timer_end(LOG_WRITE_GS_DATA)
+
+#ifdef USE_HSE
+if(yn_hsex_prepare_w=='y')then
+  block
+    real(8),allocatable :: screened(:,:),reference_v(:)
+    real(8) :: reference_e,screen_eta
+    integer :: pair_first,pair_count,rows,npairs,nfilled
+    character(24) :: screen_path
+    character(4) :: tag
+    npairs=hsex_w_boxes**6
+    rows=(npairs+info%isize_ko-1)/info%isize_ko
+    pair_first=1+info%id_ko*rows;pair_count=max(0,min(rows,npairs-pair_first+1))
+    allocate(reference_v(product(mg%ie-mg%is+1)))
+    nfilled=nelec/2
+    screen_eta=0d0
+    screen_path='hsex-w.bin'
+    if(yn_spinorbit=='y')then
+      ! SOC occupations in the second component duplicate the first.
+      nfilled=nelec
+      screen_eta=hsex_w_eta
+      screen_path='hsex-spinor-w.bin'
+      reference_v=0d0
+      reference_e=0d0
+      tag='HXN1'
+    else if(xc_func%xctype(1)==salmon_xctype_tbmbj)then
+      reference_v=reshape(Vxc(1)%f,[size(reference_v)]);reference_e=cval;tag='HXT1'
+    else
+      call kli_get_reference(reference_v,reference_e)
+      tag='HXR1'
+    endif
+    call hsex_compute_internal(system,mg,info,spsi,shpsi,sttpsi,energy%esp(:,:,1),system%rocc(:,:,1), &
+      nfilled,hsex_w_boxes,screen_eta,V_local,stencil,srg,ppg,pair_first,pair_count,screened)
+    if(yn_hsex_head_only=='y')then
+      if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_GS_HEAD_PASS'
+    else
+      call hsex_save_internal(trim(screen_path),tag,0,system,mg,info,hsex_w_boxes,nfilled,reference_v,reference_e, &
+        energy%esp(:,:,1),system%rocc(:,:,1),pair_first,screened)
+      if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_GS_W_PASS'
+    endif
+  end block
+endif
+#endif
 
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
 !call timer_end(LOG_WRITE_GS_INFO)

@@ -29,3 +29,6 @@
 #cmakedefine USE_OPT_EXPLICIT_VECTORIZATION
 
 #endif
+
+/* Restrict concurrent OpenMP OpenBLAS calls on the tested Apple/GNU combination. */
+#cmakedefine HAVE_HSEX_APPLE_GNU
