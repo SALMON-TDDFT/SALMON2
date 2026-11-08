@@ -38,7 +38,7 @@ subroutine init_communicator_dft(comm,info)
   integer :: i1,i2,i3,i4,i5,ix,iy,iz,nl,io2,io3,io4
   integer,allocatable :: iranklists(:)
 
-#ifdef __FUJITSU
+#ifdef USE_FJMPI
   integer :: iret
 #endif
 
@@ -62,7 +62,7 @@ subroutine init_communicator_dft(comm,info)
                      0:nproc_k-1))
 
 ! communicator r,o,k,ro,ko
-#ifdef __FUJITSU
+#ifdef USE_FJMPI
   call tofu_network_oriented_mapping(iret)
   if (iret < 0) then
     if (comm_is_root(info%id_rko)) then
@@ -109,7 +109,7 @@ subroutine init_communicator_dft(comm,info)
 
     if (nl /= info%isize_rko-1) &
       stop '[FATAL ERROR] init_communicator_dft'
-#ifdef __FUJITSU
+#ifdef USE_FJMPI
   end if
 #endif
 
@@ -459,7 +459,7 @@ subroutine init_communicator_dft(comm,info)
   end if
 #endif
 
-#ifdef __FUJITSU
+#ifdef USE_FJMPI
 contains
   subroutine tofu_network_oriented_mapping(iret)
     use mpi_ext
