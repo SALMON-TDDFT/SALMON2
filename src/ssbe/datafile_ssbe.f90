@@ -89,8 +89,8 @@ subroutine write_sbe_nex_header(fh)
     write(fh,'(a)') "# nhole: Number of excited holes"
     write(fh, '("#",99(1X,I0,":",A,"[",A,"]"))') &
         & 1, "time", trim(t_unit_time%name), &
-        & 2, "nelec", trim(t_unit_length%name)//"^-3", &
-        & 3, "nhole", trim(t_unit_length%name)//"^-3"
+        & 2, "nelec", "none", &
+        & 3, "nhole", "none"
     return
 end subroutine write_sbe_nex_header
 
@@ -103,8 +103,8 @@ subroutine write_sbe_nex_line(fh, t, nelec, nhole)
     real(8), intent(in) :: t, nelec, nhole
     write(fh, '(F16.8,99(1X,E23.15E3))') &
         & t * t_unit_time%conv, &
-        & nelec * (t_unit_length%conv ** (-3)), &
-        & nhole * (t_unit_length%conv ** (-3))
+        & nelec, &
+        & nhole
     return
 end subroutine write_sbe_nex_line
 
