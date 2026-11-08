@@ -333,7 +333,7 @@ if(USE_HSE AND NOT CMAKE_CROSSCOMPILING)
         add_test(NAME hsex_fortran_screening
           COMMAND ${CMAKE_COMMAND} -E env "FC=${CMAKE_Fortran_COMPILER}" "SCREEN_BLAS=${HSEX_SCREEN_TEST_BLAS}"
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/run_fortran_screen_tests.py)
-        set_tests_properties(hsex_fortran_screening PROPERTIES LABELS "xc;hsex;mpi" TIMEOUT 300)
+        set_tests_properties(hsex_fortran_screening PROPERTIES LABELS "xc;hsex;mpi" TIMEOUT 300 PROCESSORS 5)
       endif()
       execute_process(COMMAND ${Python3_EXECUTABLE} -c "import mpmath"
         RESULT_VARIABLE HSEX_MPMATH_STATUS OUTPUT_QUIET ERROR_QUIET)

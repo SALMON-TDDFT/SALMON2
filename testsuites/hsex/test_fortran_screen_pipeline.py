@@ -25,7 +25,8 @@ def main():
             occ=np.tile(np.r_[2.,2.,np.zeros(nb-2)],(nk,1))
             for qm in (2,4):
                 ref=path/f'ref-{pump}-{qm}'
-                prepare(path,ref,mesh,boxes,.2,qmesh=[qm]*3,**({'pump':path,'eta':eta} if pump else {'hamiltonians':path}))
+                reference_input = {'pump': path, 'eta': eta} if pump else {'hamiltonians': path}
+                prepare(path, ref, mesh, boxes, .2, qmesh=[qm]*3, workers=nr, **reference_input)
                 with (path/'pipeline.bin').open('wb') as f:
                     np.r_[n,mesh,[qm]*3,boxes,2,nb].astype('i4').tofile(f)
                     np.r_[.2,eta,cell.T.ravel()].astype('f8').tofile(f)

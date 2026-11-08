@@ -2,7 +2,6 @@
 ! converged target eigenpairs; omitted target bands must be empty and above
 ! the source energy. The Hamiltonian callback acts on a flattened spinor.
 module hsex_sternheimer
-  use hsex_screen_math, only: screen_finite
   implicit none
   private
   public :: sternheimer_band
@@ -18,6 +17,7 @@ module hsex_sternheimer
 contains
   subroutine sternheimer_band(apply, target, levels, occupations, energy, occupation, temperature, &
                               vertices, response, status)
+    use hsex_screen_math, only: screen_finite
     implicit none
     procedure(apply_h) :: apply
     complex(8), intent(in) :: target(:,:), vertices(:,:)

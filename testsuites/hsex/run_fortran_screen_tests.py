@@ -21,4 +21,4 @@ with tempfile.TemporaryDirectory(prefix='salmon-fortran-screen-') as temporary:
     subprocess.run([sys.executable, str(root/'testsuites/hsex/test_distributed_spinor.py'),
                     str(build/'pipeline')], check=True)
     subprocess.run([sys.executable, str(root/'testsuites/hsex/test_fortran_screen_pipeline.py'),
-                    str(build/'pipeline'), '1', '1'], check=True)
+                    str(build/'pipeline'), '5', '1'], check=True)
