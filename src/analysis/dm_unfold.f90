@@ -30,7 +30,7 @@ contains
   use salmon_global, only: dm_unfold_option, no_ref, base_directory, sysname, natom, izatom, kion, &
                          & yn_out_mom_distr_gs, dq_mom, nq_mom, num_kgrid, &
                          & al_pr, al_vec1_pr, al_vec2_pr, al_vec3_pr, unfold_egap_threshold, &
-                         & unfold_tc_tol
+                         & unfold_tc_tol, yn_out_dm_unfold_band
   use filesystem, only: open_filehandle
   use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
   use math_constants, only: zI,pi
@@ -466,7 +466,7 @@ contains
     write(ofl%file_dm_unfold,"(2A,'_dm_unfold.data')") trim(base_directory),trim(SYSname)
     ofl%fh_dm_unfold = open_filehandle(ofl%file_dm_unfold)
     open(ofl%fh_dm_unfold,file=ofl%file_dm_unfold)
-        write(ofl%fh_dm_unfold, '("#",99(1X,I0,":",A,"[",A,"]"))') &
+        write(ofl%fh_dm_unfold, '("#",120(1X,I0,":",A,"[",A,"]"))') &
         & 1,  "Time", trim(t_unit_time%name), &
         & 2,  "Ac_tot_x", trim(t_unit_ac%name), &
         & 3,  "Ac_tot_y", trim(t_unit_ac%name), &
@@ -576,7 +576,34 @@ contains
         & 88, "C_diag_known", "none", &
         & 89, "C_intra", "none", &
         & 90, "C_inter", "none", &
-        & 91, "C_unknown", "none"
+        & 91, "C_unknown", "none", &
+        & 92,  "Jx:vv", trim(t_unit_current%name), &
+        & 93,  "Jy:vv", trim(t_unit_current%name), &
+        & 94,  "Jz:vv", trim(t_unit_current%name), &
+        & 95,  "Jx:cc", trim(t_unit_current%name), &
+        & 96,  "Jy:cc", trim(t_unit_current%name), &
+        & 97,  "Jz:cc", trim(t_unit_current%name), &
+        & 98,  "Jx:vc", trim(t_unit_current%name), &
+        & 99,  "Jy:vc", trim(t_unit_current%name), &
+        & 100, "Jz:vc", trim(t_unit_current%name), &
+        & 101, "nex", "none", &
+        & 102, "nex_trunc", "none"
+
+    ! band-resolved file: newly written at the start of each run (like _dm_unfold.data), appended to at each analysis step
+    if( yn_out_dm_unfold_band == 'y' ) then
+    iofile = trim(base_directory)//trim(sysname)//"_dm_unfold_band.data"
+    open(274,file=iofile,status='replace')
+    write(274,'(A)') "# band-resolved k-summed quantities of the unfolded density matrix (reference-cell total, "// &
+                   & "like columns 5-29 of *_dm_unfold.data)"
+    write(274,'(A)') "# rows i<=j at each analysis step, separated by two blank lines. J = (Jx,Jy,Jz): J_ij + J_ji "// &
+                   & "for i<j, J_ii (with the k-term and the A-term) for i=j; "// &
+                   & "the sum of all rows is the total current (columns 27-29 of *_dm_unfold.data)."
+    write(274,'(A)') "# N: i=j: population sum_k wtk eta_ii (sum over i is Tr[rho], column 5); i<j: "// &
+                   & "sum_k wtk |eta_ij|^2 (the single element (i,j))."
+    write(274,'(A)') "# 1:Time["//trim(t_unit_time%name)//"] 2:i 3:j 4:Jx["//trim(t_unit_current%name)// &
+                   & "] 5:Jy["//trim(t_unit_current%name)//"] 6:Jz["//trim(t_unit_current%name)//"] 7:N[none]"
+    close(274)
+    end if
 
   end if
 
@@ -1872,7 +1899,8 @@ contains
     use communication, only: comm_is_root, comm_summation
     use parallelization, only: nproc_id_global
     use salmon_global, only: no_ref, dt, num_kgrid, num_skgrid, sysname, base_directory, natom,izatom,kion, &
-                            & dq_mom, nq_mom, yn_out_mom_distr_rt, out_mom_distr_rt_step, unfold_basis
+                            & dq_mom, nq_mom, yn_out_mom_distr_rt, out_mom_distr_rt_step, unfold_basis, &
+                            & yn_out_dm_unfold_isk, yn_out_dm_unfold_band
     use inputoutput, only: t_unit_time, t_unit_ac, t_unit_current
     use math_constants, only: zI, pi
     use lattice, only: calc_inverse
@@ -1924,6 +1952,19 @@ contains
                                                                ! (direct, sector-cross: lab1>0,lab2>0,lab1/=lab2)
     real(8) :: cdiagknown,cintra,cinter,cunknown               ! coherence-norm diagnostics (see notes 053/054)
     real(8) :: cdiagknown_l,cintra_l,cinter_l,cunknown_l
+    ! Block decomposition by the occupation of the reference states (occupied-weighted vv,
+    ! unoccupied-weighted cc, mixed vc) and the excited-electron numbers nex / nex_trunc.
+    ! See the comment at the point of computation.
+    real(8),parameter :: wspin = 2d0   ! spin weight of rocc_ref (nspin = 1 is required by dm_unfold)
+    complex(8) :: zjvv(3),zjcc(3),zjvc(3),zjvv_l(3),zjcc_l(3),zjvc_l(3),zt(3)
+    real(8) :: ff1,ff2,wvv,wcc,wvc
+    real(8) :: nex,nex_l,nex_trunc,nex_trunc_l
+    ! Band-resolved output (_dm_unfold_band.data): k-summed J_ij and |eta_ij|^2 (see the comment at the point of computation)
+    complex(8) :: zacc(3)
+    real(8) :: cacc
+    complex(8),allocatable :: zjband_l(:,:,:),zjband(:,:,:)
+    real(8),allocatable :: nband_l(:,:),nband(:,:)
+    character(256) :: iofile_band
     ! Stage-1 diagnostic (note 066): per-isk breakdown of the same four
     ! coherence-norm quantities, plus a representative k-vector per isk,
     ! to identify which isk (k-points) dominate C_intra/C_inter (notes
@@ -2425,13 +2466,188 @@ contains
     zj3d = zj3d / omega_ref
     zj4d = zj4d / omega_ref
 
+    ! ================================================================
+    ! Block decomposition of the current by the occupation of the
+    ! reference states (vv, cc, vc) and the numbers of excited electrons.
+    !
+    ! f = rocc_ref/wspin is the occupation (0 <= f <= 1) assigned to the
+    ! reference state (io_ref,isk). The matrix element (io_ref1,
+    ! io_ref2) is distributed over the blocks with the weights
+    !   vv : f1*f2,   cc : (1-f1)*(1-f2),   vc : f1*(1-f2) + (1-f1)*f2
+    ! whose sum is exactly 1 for every pair, so that
+    !   J_vv + J_cc + J_vc = zj1+zj2+zj3+zj4+zj5+zj6  (columns 27-29).
+    ! For integer f this is the decomposition by the occupied (v) and
+    ! unoccupied (c) subspaces of the reference states. For a fractional
+    ! f (finite temperature, metals) it is a definition by these weights
+    ! (F^2 /= F: not a projection onto orthogonal subspaces): e.g. the
+    ! diagonal element of a state with 0<f<1 contributes to vc with
+    ! 2 f (1-f), so that vc is then not purely the interband coherence.
+    ! The k-term (zj5) and the A-term (zj6) are diagonal in the band
+    ! index and are distributed with the diagonal weights.
+    !
+    ! Interpretation: J_vv is the current (velocity expectation value, no
+    ! charge factor) of the electrons weighted by the occupied side, not
+    ! of the holes. The velocity contribution of the missing electrons
+    ! is defined only relative to a reference: with D_h = D_ref,v - D_vv
+    ! it is Tr(D_h V)/Omega, and J_vv equals minus this when the current
+    ! of the reference occupation D_ref,v is zero at the same A. J_cc
+    ! includes a thermal background when f is fractional.
+    !
+    ! Convention of the label: f of (io_ref,isk) is the occupation read
+    ! from occupation.bin for the band of the same index at the initial
+    ! kappa_ref. It is not rotated with the states in Phase B (which runs
+    ! only if |det(pmat)|>1), and in the Houston basis the energy-ordered
+    ! band index keeps this initial f. The blocks are therefore not
+    ! invariant under the mixing of states with different f, and in metals
+    ! the label need not follow the same state after a band crossing. This
+    ! has no effect when the f of all the mixed states are equal, e.g. at
+    ! zero temperature for rotations within the occupied subspace or within
+    ! the unoccupied subspace only (the range of the mixing and the values
+    ! of f decide, not the kind of the material); where the f differ (metals,
+    ! finite temperature, clusters containing both occupied and unoccupied
+    ! states) take it as a diagnostic by the weights f.
+    !
+    ! nex       = sum wtk_ref f (wspin - eta_nn)    excited electrons counted
+    !             by the holes in the occupied-weighted states (nhole of the
+    !             projection in write.f90); the states with f=0 do not enter
+    ! nex_trunc = sum wtk_ref (1-f) eta_nn          excited electrons in the
+    !             kept (unoccupied-weighted) states (nelec = nee in write.f90)
+    ! nex - nex_trunc = R - Tr[eta], R = sum wtk_ref rocc_ref (the number of
+    ! electrons of the reference ground state per reference cell). It is the
+    ! electron number missing from the reference basis if the number of
+    ! electrons of the super cell per reference cell is R and the other
+    ! errors (norm, numerics) are negligible; it then vanishes for a
+    ! complete basis. Both are per reference cell, like Tr[eta] (column 5).
+    ! For eta_nn = wspin f (thermal state), nex = nex_trunc =
+    ! wspin sum wtk_ref f(1-f) /= 0: a thermal background, not an
+    ! excitation by the field.
+    ! ================================================================
+    zjvv_l(:) = 0d0 ; zjcc_l(:) = 0d0 ; zjvc_l(:) = 0d0
+    nex_l = 0d0 ; nex_trunc_l = 0d0
+  !$omp parallel do private(ilk,ihk,isk,io_ref1,io_ref2,ff1,ff2,wvv,wcc,wvc,zt) &
+  !$omp reduction(+:zjvv_l,zjcc_l,zjvc_l,nex_l,nex_trunc_l) collapse(2)
+    do ilk = info%ik_s, info%ik_e
+    do ihk = 1, unfold%nhrsk
+      isk = unfold%isk_tbl(ilk,ihk)
+    do io_ref1 = 1, no_ref
+      ff1 = unfold%rocc_ref(io_ref1,isk,1) / wspin
+      nex_l       = nex_l       + ff1 * ( wspin - real(eta(io_ref1,io_ref1,isk)) ) * unfold%wtk_ref(isk)
+      nex_trunc_l = nex_trunc_l + (1d0-ff1) * real(eta(io_ref1,io_ref1,isk)) * unfold%wtk_ref(isk)
+      ! diagonal element (including the k-term and the A-term)
+      zt(:) = eta(io_ref1,io_ref1,isk) * unfold%wtk_ref(isk) &
+        & * ( unfold%upu_ref(:,io_ref1,io_ref1,isk) + unfold%u_rVnl_Vnlr_u_ref(:,io_ref1,io_ref1,isk) &
+        &     + kappa_ref(:,isk) + vec_Ac_eval(:) )
+      wvv = ff1*ff1 ; wcc = (1d0-ff1)*(1d0-ff1) ; wvc = 2d0*ff1*(1d0-ff1)
+      zjvv_l(:) = zjvv_l(:) + wvv * zt(:)
+      zjcc_l(:) = zjcc_l(:) + wcc * zt(:)
+      zjvc_l(:) = zjvc_l(:) + wvc * zt(:)
+    do io_ref2 = 1, no_ref
+      if( io_ref1 == io_ref2 ) cycle
+      ff2 = unfold%rocc_ref(io_ref2,isk,1) / wspin
+      zt(:) = eta(io_ref2,io_ref1,isk) * unfold%wtk_ref(isk) &
+        & * ( unfold%upu_ref(:,io_ref1,io_ref2,isk) + unfold%u_rVnl_Vnlr_u_ref(:,io_ref1,io_ref2,isk) )
+      wvv = ff1*ff2 ; wcc = (1d0-ff1)*(1d0-ff2) ; wvc = ff1*(1d0-ff2) + (1d0-ff1)*ff2
+      zjvv_l(:) = zjvv_l(:) + wvv * zt(:)
+      zjcc_l(:) = zjcc_l(:) + wcc * zt(:)
+      zjvc_l(:) = zjvc_l(:) + wvc * zt(:)
+    end do
+    end do
+    end do
+    end do
+
+    zjvv(:) = 0d0 ; zjcc(:) = 0d0 ; zjvc(:) = 0d0
+    nex = 0d0 ; nex_trunc = 0d0
+    call comm_summation(zjvv_l,zjvv,3,icomm)
+    call comm_summation(zjcc_l,zjcc,3,icomm)
+    call comm_summation(zjvc_l,zjvc,3,icomm)
+    call comm_summation(nex_l,nex,icomm)
+    call comm_summation(nex_trunc_l,nex_trunc,icomm)
+    zjvv = zjvv / omega_ref
+    zjcc = zjcc / omega_ref
+    zjvc = zjvc / omega_ref
+
+    ! ================================================================
+    ! Band-resolved quantities of the unfolded density matrix, summed
+    ! over the reference k-points (with wtk_ref), written to
+    ! _dm_unfold_band.data:
+    !   J_ij : the contribution of the pair (io_ref1=i, io_ref2=j) to the
+    !          current, eta(j,i) * [ upu(i,j) + u[r,V]u(i,j) ] * wtk_ref / omega_ref;
+    !          for i=j the k-term and the A-term are included. The rows
+    !          i<=j are written, with J_ij + J_ji for i<j, so that the
+    !          sum of all the rows is the total current (columns 27-29
+    !          of _dm_unfold.data). J_ij is independent of the phase
+    !          convention of the reference states.
+    !   N_ii = sum wtk_ref eta_ii (population),
+    !   N_ij = sum wtk_ref |eta_ij|^2 (i/=j; the single element (i,j), not
+    !          the pair). The off-diagonal eta_ij itself is not written
+    !          because it depends on the phase of the reference states
+    !          at each k-point and its sum over k has no meaning.
+    ! Each element (i,j) is accumulated by one thread, so no reduction
+    ! over threads is needed. Only if yn_out_dm_unfold_band == 'y' (the
+    ! arrays, the sums and the communication are skipped otherwise).
+    ! ================================================================
+    if( yn_out_dm_unfold_band == 'y' ) then
+    allocate( zjband_l(3,no_ref,no_ref), zjband(3,no_ref,no_ref) )
+    allocate( nband_l(no_ref,no_ref), nband(no_ref,no_ref) )
+  !$omp parallel do private(io_ref1,io_ref2,ilk,ihk,isk,zacc,cacc) collapse(2)
+    do io_ref1 = 1, no_ref
+    do io_ref2 = 1, no_ref
+      zacc(:) = 0d0
+      cacc = 0d0
+      do ilk = info%ik_s, info%ik_e
+      do ihk = 1, unfold%nhrsk
+        isk = unfold%isk_tbl(ilk,ihk)
+        if( io_ref1 == io_ref2 ) then
+          zacc(:) = zacc(:) + eta(io_ref1,io_ref1,isk) * unfold%wtk_ref(isk) &
+            & * ( unfold%upu_ref(:,io_ref1,io_ref1,isk) + unfold%u_rVnl_Vnlr_u_ref(:,io_ref1,io_ref1,isk) &
+            &     + kappa_ref(:,isk) + vec_Ac_eval(:) )
+          cacc = cacc + real(eta(io_ref1,io_ref1,isk)) * unfold%wtk_ref(isk)
+        else
+          zacc(:) = zacc(:) + eta(io_ref2,io_ref1,isk) * unfold%wtk_ref(isk) &
+            & * ( unfold%upu_ref(:,io_ref1,io_ref2,isk) + unfold%u_rVnl_Vnlr_u_ref(:,io_ref1,io_ref2,isk) )
+          cacc = cacc + abs(eta(io_ref2,io_ref1,isk))**2 * unfold%wtk_ref(isk)
+        end if
+      end do
+      end do
+      zjband_l(:,io_ref1,io_ref2) = zacc(:)
+      nband_l(io_ref1,io_ref2) = cacc
+    end do
+    end do
+    zjband = 0d0 ; nband = 0d0
+    call comm_summation(zjband_l,zjband,3*no_ref*no_ref,icomm)
+    call comm_summation(nband_l,nband,no_ref*no_ref,icomm)
+    zjband = zjband / omega_ref
+    if(comm_is_root(nproc_id_global))then
+      iofile_band = trim(base_directory)//trim(sysname)//"_dm_unfold_band.data"
+      open(274,file=iofile_band,position='append')
+      do io_ref1 = 1, no_ref
+      do io_ref2 = io_ref1, no_ref
+        if( io_ref1 == io_ref2 ) then
+          zt(:) = zjband(:,io_ref1,io_ref1)
+        else
+          zt(:) = zjband(:,io_ref1,io_ref2) + zjband(:,io_ref2,io_ref1)
+        end if
+        write(274,'(f16.8,2(1x,i6),4(1x,es17.9e3))') itt*dt*t_unit_time%conv, io_ref1, io_ref2, &
+          & real(zt(1:3))*t_unit_current%conv, nband(io_ref1,io_ref2)
+      end do
+      end do
+      write(274,*)
+      write(274,*)
+      close(274)
+    end if
+    deallocate( zjband_l, zjband, nband_l, nband )
+    end if
+
   if(comm_is_root(nproc_id_global))then
     write(*,'(A,2x,i7,2x,A,3f17.12)') 'dm_unfold  it=', itt, '     Ac(t)=',vec_Ac_eval(:)
     write(*,'(A,7x,f17.12)')          'N:Tr[rho(t)]             ', real(zsum)
     write(*,'(A,7x,3f17.12)')         'J:rho(t)<unk|i[h,r]|unk> ', real(zj1(:)+zj2(:)+zj3(:)+zj4(:)+zj5(:)+zj6(:))
+    write(*,'(A,7x,2f17.12)')         'N:nex, nex_trunc         ', nex, nex_trunc
   end if
 
-  if(comm_is_root(nproc_id_global))then
+  ! The two k-point resolved files (this one and _dm_unfold_isk_current.data below) are large
+  ! (nsk rows per output step); they are written only if yn_out_dm_unfold_isk == 'y'.
+  if(comm_is_root(nproc_id_global) .and. yn_out_dm_unfold_isk == 'y')then
     ! Stage-1 diagnostic (notes 066/067): write the per-isk coherence-norm
     ! breakdown to a standalone file, following the same open/write/close
     ! pattern as the existing _momgs.cube writer elsewhere in this
@@ -2492,7 +2708,7 @@ contains
     close(fp)
   end if
 
-  if(comm_is_root(nproc_id_global))then
+  if(comm_is_root(nproc_id_global) .and. yn_out_dm_unfold_isk == 'y')then
     ! Per-isk k-term current diagnostic (notes 105-108): breaks down the
     ! explicit k-term zj5 (*_dm_unfold.data columns 18-20, Jx:k/Jy:k/
     ! Jz:k) by isk, using the same kappa_ref as the production zj5
@@ -2801,7 +3017,7 @@ contains
 
   if(comm_is_root(nproc_id_global))then
 
-    write(ofl%fh_dm_unfold,'(91f17.12)') itt*dt*t_unit_time%conv, vec_Ac_eval(1:3)*t_unit_ac%conv, &
+    write(ofl%fh_dm_unfold,'(102f17.12)') itt*dt*t_unit_time%conv, vec_Ac_eval(1:3)*t_unit_ac%conv, &
     & real(zsum),real(zj1(1:3))*t_unit_current%conv,real(zj2(1:3))*t_unit_current%conv,real(zj3(1:3))*t_unit_current%conv, &
     & real(zj4(1:3))*t_unit_current%conv,real(zj5(1:3))*t_unit_current%conv,real(zj6(1:3))*t_unit_current%conv, &
     & real(zj1(1:3)+zj3(1:3)+zj5(1:3)+zj6(1:3))*t_unit_current%conv, &
@@ -2817,7 +3033,9 @@ contains
     & real(zj3b(1:3))*t_unit_current%conv,real(zj4b(1:3))*t_unit_current%conv, &
     & real(zj3c(1:3))*t_unit_current%conv,real(zj4c(1:3))*t_unit_current%conv, &
     & real(zj3d(1:3))*t_unit_current%conv,real(zj4d(1:3))*t_unit_current%conv, &
-    & cdiagknown,cintra,cinter,cunknown
+    & cdiagknown,cintra,cinter,cunknown, &
+    & real(zjvv(1:3))*t_unit_current%conv,real(zjcc(1:3))*t_unit_current%conv,real(zjvc(1:3))*t_unit_current%conv, &
+    & nex,nex_trunc
 
     ! Match the write_rt_energy_data (src/io/write.f90) convention of
     ! flushing after every per-step write, so that _dm_unfold.data

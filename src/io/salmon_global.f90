@@ -467,6 +467,8 @@ character(256),allocatable :: atom_name(:)
   integer        :: num_skgrid(3)
   integer        :: no_ref
   integer        :: out_dm_unfold_step
+  character(1)   :: yn_out_dm_unfold_isk
+  character(1)   :: yn_out_dm_unfold_band
   real(8)        :: unfold_egap_threshold
   real(8)        :: unfold_tc_tol
   character(16)  :: unfold_basis

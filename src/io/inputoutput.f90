@@ -622,6 +622,8 @@ contains
       & num_skgrid, &
       & no_ref, &
       & out_dm_unfold_step, &
+      & yn_out_dm_unfold_isk, &
+      & yn_out_dm_unfold_band, &
       & unfold_egap_threshold, &
       & unfold_tc_tol, &
       & unfold_basis, &
@@ -1079,6 +1081,9 @@ contains
     num_skgrid = 1
     no_ref = 0
     out_dm_unfold_step = 100
+    yn_out_dm_unfold_band = 'y' ! dm_unfold_option='super': output of _dm_unfold_band.data (size ~ no_ref**2 per output step)
+    yn_out_dm_unfold_isk = 'n' ! dm_unfold_option='super': output of the k-point resolved files
+                               ! _dm_unfold_isk_coherence.data and _dm_unfold_isk_current.data (large)
     unfold_egap_threshold = -1d0  ! sentinel: unset. Given in whatever
                                   ! unit_energy the run's unit_system
                                   ! implies (converted to a.u. below, like
@@ -1814,6 +1819,8 @@ contains
     call comm_bcast(num_skgrid, nproc_group_global)
     call comm_bcast(no_ref, nproc_group_global)
     call comm_bcast(out_dm_unfold_step, nproc_group_global)
+    call comm_bcast(yn_out_dm_unfold_isk, nproc_group_global)
+    call comm_bcast(yn_out_dm_unfold_band, nproc_group_global)
     call comm_bcast(unfold_egap_threshold, nproc_group_global)
     if( unfold_egap_threshold > 0d0 ) unfold_egap_threshold = unfold_egap_threshold * uenergy_to_au
     call comm_bcast(unfold_tc_tol, nproc_group_global)
@@ -2847,6 +2854,8 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'num_skgrid(3)', num_skgrid(3)
       write(fh_variables_log, '("#",4X,A,"=",I4)') 'no_ref', no_ref
       write(fh_variables_log, '("#",4X,A,"=",I6)') 'out_dm_unfold_step', out_dm_unfold_step
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dm_unfold_isk', yn_out_dm_unfold_isk
+      write(fh_variables_log, '("#",4X,A,"=",A)') 'yn_out_dm_unfold_band', yn_out_dm_unfold_band
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_egap_threshold', unfold_egap_threshold
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'unfold_tc_tol', unfold_tc_tol
       write(fh_variables_log, '("#",4X,A,"=",A)') 'unfold_basis', trim(unfold_basis)
@@ -2963,6 +2972,8 @@ contains
     call yn_argument_check(yn_spinorbit)
     call yn_argument_check(yn_out_mom_distr_gs)
     call yn_argument_check(yn_out_mom_distr_rt)
+    call yn_argument_check(yn_out_dm_unfold_isk)
+    call yn_argument_check(yn_out_dm_unfold_band)
     call yyynnn_argument_check(yn_symmetry)
     call yn_argument_check(yn_out_dc_fragment_coor)
     call yn_argument_check(yn_dc_lcfo)
