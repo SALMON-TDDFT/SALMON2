@@ -442,7 +442,7 @@ contains
     integer,               intent(in)    :: num_super(3), nmul(3)
     type(s_stencil) :: st_chk
     integer :: i, comm_self
-    real(8) :: tol
+    real(8) :: tol, dmax
     logical :: quiet_save
     character(256) :: msg
     integer, parameter :: nd_ref = 4 ! half width of the finite-difference stencil (fixed in hpsi); the same in read
@@ -482,7 +482,11 @@ contains
         msg = 'the number of grid points of the super cell is not nmul times that of the reference cell in the file.'
         exit
       else if (any(abs(primitive_a_super(:,i) - dble(nmul(i))*ref%system%primitive_a(:,i)) > tol)) then
-        msg = 'the lattice vectors of the super cell are not nmul times those of the reference cell in the file.'
+        ! the usual cause is too few digits of the lattice constants in the input of the super cell run
+        dmax = maxval(abs(primitive_a_super(:,i) - dble(nmul(i))*ref%system%primitive_a(:,i)))
+        write(msg,'(a,i0,a,es9.2,a,es9.2,a)') &
+          & 'the lattice vectors of the super cell are not nmul times those of the reference cell in the file (axis ', i, &
+          & ': max difference ', dmax, ', allowed ', tol, ' in a.u.). Give the super cell lattice with enough digits.'
         exit
       else if (abs(hgs_super(i) - ref%system%hgs(i)) > 1d-8*ref%system%hgs(i)) then
         msg = 'the grid spacing of the super cell differs from that of the reference cell in the file.'
