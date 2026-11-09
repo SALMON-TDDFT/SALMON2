@@ -1,6 +1,7 @@
 set(SOURCES
     dm_unfold.f90
     dm_unfold_reference.f90
+    pdos_atomic_orbital.f90
    )
 
 list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
