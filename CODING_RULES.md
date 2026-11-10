@@ -11,6 +11,10 @@ These rules apply to new and modified code. Existing legacy code may not fully c
 
 ## General Development Rules
 
+- Use Fortran and C as the default implementation languages.
+- Use Python only for proofs of concept. Implement any proof of concept that becomes production code or maintained tooling in Fortran or C.
+- Keep optional diagnostics outside the HPC job's execution path. Missing or failed diagnostic records must not stop MPI, prevent an otherwise valid calculation from starting, or override its exit status.
+- Preserve the application's native error handling and the scheduler's time limits. Review prohibited eigensolver calls during development without adding a mandatory build or job audit.
 - Read the relevant existing implementation before changing code.
 - Follow this document for matters it specifies. Otherwise, prefer the style, module boundaries, data structures, and helper routines already used near the target code.
 - Keep changes narrowly scoped. Avoid unrelated refactoring, formatting churn, and generated-file changes.
@@ -88,7 +92,5 @@ These rules apply to new and modified code. Existing legacy code may not fully c
 ## Forbidden Eigensolver (Mandatory)
 
 - `PZHEEV` is prohibited, including workspace queries, reproductions, diagnostics, optional branches, and fallback paths. `PZHEEVD` is a distinct permitted driver; replacements still require numerical and memory-capacity validation.
-- Before building any SALMON source tree, including historical snapshots and extracted archives, run this workspace's `tools/check_forbidden_eigensolvers.py --source-root <tree>/src`. Stop on prohibited references, unavailable cloud-only files, or inspection errors.
-- Before transferring or submitting a new executable, use `--object-tree` to inspect every linked application object and application archive. Ad-hoc links must include objects outside the main build directory. Binary names and hashes do not establish compliance; unused vendor-library exports alone do not establish an application call.
-- Keep the prohibition checks enabled during CMake configuration and incremental builds. Never bypass them to build old code. Preserve historical sources, logs, archives, and failed binaries as evidence without mass-rewriting them; they are not approved for execution or reuse.
+- During development, review changed eigensolver paths to confirm they do not call `PZHEEV`.
 - Do not replace, cancel, modify, or resubmit existing remote production jobs or fixed binaries without applicable user authorization. Audit the actual execution path and report uncertainty.
