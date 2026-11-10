@@ -1,17 +1,70 @@
+#include "config.h"
 ! CPU space-group reuse of full-q exchange FFTs, in bounded first-coordinate tiles.
-! This experimental path uses representative target k points and the existing
+! This path uses representative target k points and the existing
 ! occupied-projector callback. MPI remains outside threaded local loops.
 module exx_k_orbits
+  use communication, only: comm_summation
   use iso_c_binding
+  use exx_k_exchange, only: exx_k_kernel,execute_kernel_fft
+  use exx_symmetry, only: s_exx_symmetry_map
+  use exx_blas_threads, only: exx_blas_thread_control
+!$  use omp_lib, only: omp_get_max_threads,omp_get_thread_num,omp_get_num_threads
   implicit none
   private
   include 'fftw3.f03'
   public :: apply_k_orbits,apply_spinor_k_orbits
 contains
+  subroutine execute_strided_lanes(op,fr,fs,slot,pair_delta,rows,ns,done)
+    type(exx_k_kernel),target,intent(inout) :: op
+    complex(c_double_complex),intent(in) :: fr(:,:,:)
+    complex(c_double_complex),intent(inout) :: fs(:,:,:)
+    integer,intent(in) :: slot(:),pair_delta(:,:,:),rows,ns(3)
+    logical,intent(out) :: done
+    complex(c_double_complex),pointer,contiguous :: work(:)
+    integer :: b,lanes,workers,w,lo,hi,ki,lane,r,g,offset(3),at
+    done=.false.
+    if(op%contiguous_fft)return
+    if(.not.allocated(op%omp_fft%forward))return
+    if(op%omp_fft%groups/=1)return
+    workers=size(op%omp_fft%forward)
+    if(workers<2)return
+    b=op%block;lanes=b*op%ng
+    work(1:size(op%work))=>op%work
+    done=.true.
+    !$omp parallel do schedule(static) num_threads(workers) private(lo,hi,ki,lane,r,g,offset,at)
+    do w=1,workers
+!$    if(w==1)op%threads_used=omp_get_num_threads()
+      lo=op%omp_fft%offset(w)
+      hi=lanes
+      if(w<workers)hi=op%omp_fft%offset(w+1)-1
+      do ki=1,op%nk
+        do lane=lo,hi
+          r=1+modulo(lane-1,b);g=1+(lane-1)/b
+          work(lane+(ki-1)*lanes)=fr(r,g,slot(ki))
+        enddo
+      enddo
+      call fftw_execute_dft(op%omp_fft%forward(w),work(lo:),work(lo:))
+      do ki=1,op%nk
+        do lane=lo,hi
+          r=1+modulo(lane-1,b);g=1+(lane-1)/b
+          if(r>rows)cycle
+          offset=modulo(pair_delta(:,g,r)-op%shift(:,ki),ns)
+          at=lane+(ki-1)*lanes
+          work(at)=work(at)*op%kernel(offset(1),offset(2),offset(3))
+        enddo
+      enddo
+      call fftw_execute_dft(op%omp_fft%backward(w),work(lo:),work(lo:))
+      do ki=1,op%nk
+        do lane=lo,hi
+          r=1+modulo(lane-1,b);g=1+(lane-1)/b
+          fs(r,g,slot(ki))=work(lane+(ki-1)*lanes)
+        enddo
+      enddo
+    enddo
+    !$omp end parallel do
+  end subroutine
+
   subroutine apply_k_orbits(op,map,target,action,starts,counts,rep_start,rank,comm,transpose_tiles,fill_density,ierr)
-    use communication, only: comm_summation
-    use exx_k_exchange, only: exx_k_kernel,execute_kernel_fft
-    use exx_symmetry, only: s_exx_symmetry_map
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     type(s_exx_symmetry_map),intent(in) :: map
@@ -44,9 +97,12 @@ contains
     end interface
     integer :: ng,nk,b,np,km,nmsg,nfirst,nsym,nlocal,nt,nrep,ns(3),i,j,g,s,p,r,base,nactive,lo,rows,ki
     integer :: local_error,total_error
-    integer :: a,dest,source_g,first_id,global_k,source_k,local_k,op_id,ip,offset(3),delta(3),c(3),idx(3)
+    integer :: workers,worker,blas_state(3)
+    logical :: fused_fft
+    integer :: a,dest,source_g,first_id,global_k,local_k,op_id,ip,offset(3),delta(3),c(3),idx(3)
     integer,allocatable :: forward(:,:),wrap(:,:,:),first(:),owner(:),operation(:),kperm(:,:),lookup(:)
     integer,allocatable :: inverse(:),slot(:),points(:)
+    integer,allocatable :: pair_delta(:,:,:),target_k(:,:),reference_k(:)
     complex(c_double_complex),allocatable,target :: send(:),recv(:)
     complex(c_double_complex),pointer :: sb(:,:,:,:),rb(:,:,:,:),fs(:,:,:),fr(:,:,:),kw(:,:,:)
     complex(c_double_complex),allocatable :: density(:,:),t(:,:,:),row(:,:),contracted(:,:),gauge(:,:),phase(:,:)
@@ -85,7 +141,6 @@ contains
         owner(dest)=nfirst;operation(dest)=s
       enddo
     enddo
-    ! Ownership is complete; do not overlap this map with exchange scratch.
     deallocate(forward)
     allocate(kperm(nk,nsym),lookup(nk))
     lookup=0
@@ -104,30 +159,37 @@ contains
     enddo;enddo
     deallocate(lookup)
     ! A star remains on one k owner, including all inverse-rotated targets.
+    allocate(target_k(nsym,nrep),reference_k(nrep))
     local_error=0
     do j=1,nrep
       global_k=map%first(rep_start+j-1)
+      reference_k(j)=global_k-starts(rank+1)+1
       do s=1,nsym
         local_k=kperm(global_k,s)-starts(rank+1)+1
+        target_k(s,j)=local_k
         if(local_k<1.or.local_k>nlocal)local_error=1
       enddo
     enddo
     call comm_summation(local_error,total_error,comm)
     if(total_error/=0)return
-    km=maxval(counts)
+    km=maxval(counts);nmsg=b*ng*km
+    workers=1
+#if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_OPENBLAS_THREADS)
+!$  if(nrep>0)workers=min(ng,omp_get_max_threads())
+#endif
+    allocate(send(nmsg*np),recv(nmsg*np),density(np*b,ng),points(np*b),t(ng,nt,nrep),phase(27,nrep))
+    allocate(row(ng,workers),contracted(nt,workers))
+    allocate(pair_delta(3,ng,b))
+    sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
+    fs(1:b,1:ng,1:km*np)=>send;fr(1:b,1:ng,1:km*np)=>recv
     allocate(inverse(nk),slot(nk))
     do i=1,nk;inverse(op%order(i))=i;enddo
     do p=1,np;do j=1,counts(p)
       slot(inverse(starts(p)+j-1))=j+(p-1)*km
     enddo;enddo
     deallocate(inverse)
-    nmsg=b*ng*km
-    allocate(send(nmsg*np),recv(nmsg*np),density(np*b,ng),points(np*b),t(ng,nt,nrep),row(1,ng),phase(27,nrep))
-    allocate(contracted(1,nt))
-    sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
-    fs(1:b,1:ng,1:km*np)=>send;fr(1:b,1:ng,1:km*np)=>recv
     do j=1,nrep
-      global_k=map%first(rep_start+j-1);local_k=global_k-starts(rank+1)+1
+      global_k=map%first(rep_start+j-1);local_k=reference_k(j)
       do i=1,nt;t(:,i,j)=target(:,i,j)*op%phase(:,local_k);enddo
       do i=1,27
         delta=[mod(i-1,3)-1,mod((i-1)/3,3)-1,(i-1)/9-1]
@@ -146,20 +208,39 @@ contains
         enddo
       enddo
       call transpose_tiles(send,recv,nmsg,comm)
+      rows=max(0,min(b,nfirst-base-rank*b+1))
+      if(rows==0)then
+        ! This rank owns k points but has no FFT rows in this tile.
+        ! Its reply is padding; it still participates in both transposes.
+        send=zero
+      else
+      ! The point-pair displacement is independent of the FFT k index.
+      do r=1,rows
+        a=first(base+rank*b+r-1)
+        do g=1,ng
+          pair_delta(:,g,r)=op%point(:,a)-op%point(:,g)
+        enddo
+      enddo
+      call execute_strided_lanes(op,fr,fs,slot,pair_delta,rows,ns,fused_fft)
+      if(.not.fused_fft)then
       if(op%contiguous_fft)then
         kw(1:nk,1:b,1:ng)=>op%work
-        do ki=1,nk;do g=1,ng;do r=1,b
-          kw(ki,r,g)=fr(r,g,slot(ki))
-        enddo;enddo;enddo
+        !$omp parallel do private(ki,r) schedule(static)
+        do g=1,ng
+          do r=1,b;do ki=1,nk
+            kw(ki,r,g)=fr(r,g,slot(ki))
+          enddo;enddo
+        enddo
+        !$omp end parallel do
       else
+        !$omp parallel do schedule(static)
         do ki=1,nk;op%work(:,:,ki)=fr(:,:,slot(ki));enddo
+        !$omp end parallel do
       endif
       call execute_kernel_fft(op,op%forward)
-      rows=max(0,min(b,nfirst-base-rank*b+1))
-      !$omp parallel do collapse(2) private(r,a,offset) schedule(static)
+      !$omp parallel do collapse(2) private(r,offset) schedule(static)
       do ki=1,nk;do g=1,ng;do r=1,rows
-        a=first(base+rank*b+r-1)
-        offset=modulo(op%point(:,a)-op%point(:,g)-op%shift(:,ki),ns)
+        offset=modulo(pair_delta(:,g,r)-op%shift(:,ki),ns)
         if(op%contiguous_fft)then
           kw(ki,r,g)=kw(ki,r,g)*op%kernel(offset(1),offset(2),offset(3))
         else
@@ -169,35 +250,70 @@ contains
       !$omp end parallel do
       call execute_kernel_fft(op,op%backward)
       if(op%contiguous_fft)then
-        do ki=1,nk;do g=1,ng;do r=1,b
-          fs(r,g,slot(ki))=kw(ki,r,g)
-        enddo;enddo;enddo
+        !$omp parallel do private(g,r) schedule(static)
+        do ki=1,nk
+          do g=1,ng;do r=1,b
+            fs(r,g,slot(ki))=kw(ki,r,g)
+          enddo;enddo
+        enddo
+        !$omp end parallel do
       else
+        !$omp parallel do schedule(static)
         do ki=1,nk;fs(:,:,slot(ki))=op%work(:,:,ki);enddo
+        !$omp end parallel do
+      endif
+      endif
       endif
       call transpose_tiles(send,recv,nmsg,comm)
       ! Reconstruct only representative-target rows; no expanded target/action.
+      if(nrep==0)cycle
+#ifdef HAVE_EXX_OPENBLAS_THREADS
+      blas_state=0
+      if(workers>1)then
+        call exx_blas_thread_control(1,blas_state)
+        if(blas_state(1)==0)workers=1
+      endif
+#endif
+      !$omp parallel if(workers>1) num_threads(workers) &
+      !$omp private(worker,first_id,p,r,a,op_id,j,local_k,g,source_g,delta,ip) &
+#if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS)
+      !$omp private(blas_state)
+      blas_state=0
+      if(workers>1)call exx_blas_thread_control(1,blas_state)
+#else
+      !$omp shared(blas_state)
+#endif
+      worker=1
+!$    worker=omp_get_thread_num()+1
+      !$omp do schedule(static)
       do dest=1,ng
         first_id=owner(dest)
         if(first_id<base.or.first_id>=base+nactive)cycle
         p=(first_id-base)/b+1;r=mod(first_id-base,b)+1
         a=first(first_id);op_id=operation(dest)
         do j=1,nrep
-          global_k=map%first(rep_start+j-1);source_k=kperm(global_k,op_id)
-          local_k=source_k-starts(rank+1)+1
+          local_k=target_k(op_id,j)
           do g=1,ng
             source_g=map%grid(g,op_id)
             delta=wrap(:,source_g,op_id)-wrap(:,a,op_id)
             if(any(abs(delta)>1))error stop 'EXX orbit wrap exceeds one cell'
             ip=1+delta(1)+1+3*(delta(2)+1+3*(delta(3)+1))
-            row(1,g)=rb(r,source_g,local_k,p)*phase(ip,j)*gauge(dest,op_id)*conjg(gauge(g,op_id))
+            row(g,worker)=rb(r,source_g,local_k,p)*phase(ip,j)*gauge(dest,op_id)*conjg(gauge(g,op_id))
           enddo
-          call zgemm('N','N',1,nt,ng,-one/real(nk,c_double),row,1,t(1,1,j),ng,zero,contracted,1)
-          action(dest,:,j)=contracted(1,:)
-          local_k=global_k-starts(rank+1)+1
+          call zgemm('N','N',1,nt,ng,-one/real(nk,c_double),row(1,worker),1,t(1,1,j),ng,zero,contracted(1,worker),1)
+          action(dest,:,j)=contracted(:,worker)
+          local_k=reference_k(j)
           action(dest,:,j)=action(dest,:,j)*conjg(op%phase(dest,local_k))
         enddo
       enddo
+      !$omp end do nowait
+#if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS)
+      call exx_blas_thread_control(0,blas_state)
+#endif
+      !$omp end parallel
+#ifdef HAVE_EXX_OPENBLAS_THREADS
+      call exx_blas_thread_control(0,blas_state)
+#endif
     enddo
     ierr=0
   end subroutine
