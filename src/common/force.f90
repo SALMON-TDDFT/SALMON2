@@ -63,11 +63,6 @@ contains
     complex(8),allocatable :: zF_tmp(:,:)
     complex(8) :: ztmp
     integer :: Norb,iorb,ilocal
-#ifdef USE_OPENACC
-    real(8),allocatable :: F_tmp_local(:,:)
-
-    allocate( F_tmp_local(3, ppg%ilocal_nlma) )
-#endif
 
     call timer_begin(LOG_CALC_ION_FORCE)
 
@@ -197,6 +192,15 @@ contains
     call timer_begin(LOG_CALC_FORCE_ELEC_ION)
     kAc = 0d0
 
+#ifdef USE_OPENACC
+    ! Without spin-orbit coupling, all local orbitals are done in one device pass;
+    ! the spin-orbit force keeps the orbital loop below.
+    if( yn_spinorbit=='n' )then
+      call calc_force_nonlocal_gpu(system,info,mg,stencil,ppg,tpsi%zwf,uVpsibox2,F_tmp)
+      if(yn_periodic=='n') call calc_dden_gpu(system,info,mg,stencil,tpsi%zwf,dden)
+    else
+#endif
+
 #ifndef USE_OPENACC
 !$omp parallel default(none) &
 !$omp   firstprivate(kAc) &
@@ -270,39 +274,6 @@ contains
            F_tmp(3,ia) = F_tmp(3,ia) - rtmp*dble( conjg(duVpsi(3)) * ztmp )
          end do
        else
-#ifdef USE_OPENACC
-!$acc parallel loop private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w)
-       do ilocal=1,ppg%ilocal_nlma
-          ilma=ppg%ilocal_nlma2ilma(ilocal)
-          ia  =ppg%ilocal_nlma2ia  (ilocal)
-          duVpsi = 0d0
-          do j=1,ppg%mps(ia)
-             ix = ppg%jxyz(1,j,ia)
-             iy = ppg%jxyz(2,j,ia)
-             iz = ppg%jxyz(3,j,ia)
-             w(1) = gtpsi(1,ix,iy,iz) + zI* kAc(1) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-             w(2) = gtpsi(2,ix,iy,iz) + zI* kAc(2) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-             w(3) = gtpsi(3,ix,iy,iz) + zI* kAc(3) * tpsi%zwf(ix,iy,iz,ispin,io,ik,im)
-             duVpsi(1) = duVpsi(1) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(1) ! < uV | exp(ikr) (nabla) | psi >
-             duVpsi(2) = duVpsi(2) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(2) ! < uV | exp(ikr) (nabla) | psi >
-             duVpsi(3) = duVpsi(3) + conjg(ppg%zekr_uV(j,ilma,ik)) * w(3) ! < uV | exp(ikr) (nabla) | psi >
-          end do
-          F_tmp_local(1,ilocal) = rtmp * dble( conjg(duVpsi(1)) * uVpsibox2(ispin,io,ik,im,ilma) )
-          F_tmp_local(2,ilocal) = rtmp * dble( conjg(duVpsi(2)) * uVpsibox2(ispin,io,ik,im,ilma) )
-          F_tmp_local(3,ilocal) = rtmp * dble( conjg(duVpsi(3)) * uVpsibox2(ispin,io,ik,im,ilma) )
-       end do
-
-       !$acc kernels
-       !$acc loop seq
-       do ilocal=1,ppg%ilocal_nlma
-          ia  =ppg%ilocal_nlma2ia  (ilocal)
-
-          F_tmp(1,ia) = F_tmp(1,ia) - F_tmp_local(1,ilocal)
-          F_tmp(2,ia) = F_tmp(2,ia) - F_tmp_local(2,ilocal)
-          F_tmp(3,ia) = F_tmp(3,ia) - F_tmp_local(3,ilocal)
-       end do
-       !$acc end kernels
-#else
 #ifndef __NVCOMPILER_LLVM__ 
 ! FIXME: NVIDIA compiler crashes with nested omp parallel clause.
 !$omp parallel do private(ilocal,ilma,ia,duVpsi,j,ix,iy,iz,w) reduction(+:F_tmp)
@@ -331,7 +302,6 @@ contains
 #ifndef __NVCOMPILER_LLVM__ 
 ! FIXME: NVIDIA compiler crashes with nested omp parallel clause.
 !$omp end parallel do
-#endif
 #endif
        end if
        !call timer_end(LOG_CALC_FORCE_NONLOCAL)
@@ -385,6 +355,9 @@ contains
 
 #ifndef USE_OPENACC
 !$omp end parallel
+#endif
+#ifdef USE_OPENACC
+    end if
 #endif
     call timer_end(LOG_CALC_FORCE_ELEC_ION)
 
@@ -447,13 +420,232 @@ contains
 !      deallocate( dphipsi_lma )
 !      deallocate( zF_tmp )
     end if 
-#ifdef USE_OPENACC
-    deallocate(F_tmp_local)
-#endif
 
     call timer_end(LOG_CALC_ION_FORCE)
     return
   end subroutine calc_force
+
+#ifdef USE_OPENACC
+!===================================================================================================================================
+
+  ! Nonlocal part of the electron-ion force for all local orbitals at once (OpenACC builds).
+  ! One device thread per (orbital, local projector) forms B^T (nabla) psi at the projector's grid points
+  ! with the stencil of calc_gradient_psi, so no gradient of a whole orbital is stored, and accumulates
+  ! < uV | exp(ikr) (nabla + i(k+A/c)) | psi >. The pair contributions are summed over orbitals per projector
+  ! on the device, and over the projectors of each atom on the host.
+  subroutine calc_force_nonlocal_gpu(system,info,mg,stencil,ppg,zwf,uVpsibox2,F_tmp)
+    use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_stencil, s_pp_grid
+    use math_constants, only: zi
+    use salmon_global, only: yn_periodic
+    implicit none
+    type(s_dft_system)   ,intent(in)    :: system
+    type(s_parallel_info),intent(in)    :: info
+    type(s_rgrid)        ,intent(in)    :: mg
+    type(s_stencil)      ,intent(in)    :: stencil
+    type(s_pp_grid)      ,intent(in)    :: ppg
+    complex(8)           ,intent(in)    :: zwf(mg%is_array(1):mg%ie_array(1) &
+                                              ,mg%is_array(2):mg%ie_array(2) &
+                                              ,mg%is_array(3):mg%ie_array(3) &
+                                              ,system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e)
+    complex(8)           ,intent(in)    :: uVpsibox2(system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e &
+                                                    ,info%im_s:info%im_e,ppg%nlma)
+    real(8)              ,intent(inout) :: F_tmp(3,system%nion)
+    !
+    integer :: ik,io,ispin,im,ik_s,ik_e,io_s,io_e,nspin,nlocal,ilocal,ilma,ia,j,ix,iy,iz,ic
+    logical :: if_kAc
+    real(8) :: nab(4,3),bmat(3,3),vec_Ac(3),hvol,rtmp,kAc1,kAc2,kAc3,fsum
+    complex(8) :: psi,g1,g2,g3,w1,w2,w3,duVpsi1,duVpsi2,duVpsi3
+    real(8),allocatable :: F_lma(:,:,:,:,:),F_ilocal(:,:)
+
+    im = info%im_s
+    ik_s = info%ik_s
+    ik_e = info%ik_e
+    io_s = info%io_s
+    io_e = info%io_e
+    nspin = system%nspin
+    nlocal = ppg%ilocal_nlma
+    nab = stencil%coef_nab
+    bmat = system%rmatrix_B
+    vec_Ac = system%vec_Ac
+    hvol = system%Hvol
+    if_kAc = (yn_periodic=='y')
+
+    allocate(F_lma(3,nlocal,nspin,io_s:io_e,ik_s:ik_e),F_ilocal(3,nlocal))
+
+!$acc data create(F_lma) copyout(F_ilocal) copyin(nab,bmat,vec_Ac)
+
+!$acc parallel loop collapse(4) gang vector &
+!$acc   private(ik,io,ispin,ilocal,ilma,ia,j,ix,iy,iz,rtmp,kAc1,kAc2,kAc3,psi,g1,g2,g3,w1,w2,w3) &
+!$acc   private(duVpsi1,duVpsi2,duVpsi3)
+    do ik=ik_s,ik_e
+    do io=io_s,io_e
+    do ispin=1,nspin
+    do ilocal=1,nlocal
+      ilma = ppg%ilocal_nlma2ilma(ilocal)
+      ia   = ppg%ilocal_nlma2ia  (ilocal)
+      if(if_kAc) then
+        kAc1 = system%vec_k(1,ik) + vec_Ac(1)
+        kAc2 = system%vec_k(2,ik) + vec_Ac(2)
+        kAc3 = system%vec_k(3,ik) + vec_Ac(3)
+      else
+        kAc1 = 0d0
+        kAc2 = 0d0
+        kAc3 = 0d0
+      end if
+      rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * hvol
+      duVpsi1 = 0d0
+      duVpsi2 = 0d0
+      duVpsi3 = 0d0
+!$acc loop seq
+      do j=1,ppg%mps(ia)
+        ix = ppg%jxyz(1,j,ia)
+        iy = ppg%jxyz(2,j,ia)
+        iz = ppg%jxyz(3,j,ia)
+        ! (nabla) psi at (ix,iy,iz), as in calc_gradient_psi
+        g1 = nab(1,1)*(zwf(mg%idx(ix+1),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-1),iy,iz,ispin,io,ik,im)) &
+           + nab(2,1)*(zwf(mg%idx(ix+2),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-2),iy,iz,ispin,io,ik,im)) &
+           + nab(3,1)*(zwf(mg%idx(ix+3),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-3),iy,iz,ispin,io,ik,im)) &
+           + nab(4,1)*(zwf(mg%idx(ix+4),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-4),iy,iz,ispin,io,ik,im))
+        g2 = nab(1,2)*(zwf(ix,mg%idy(iy+1),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-1),iz,ispin,io,ik,im)) &
+           + nab(2,2)*(zwf(ix,mg%idy(iy+2),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-2),iz,ispin,io,ik,im)) &
+           + nab(3,2)*(zwf(ix,mg%idy(iy+3),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-3),iz,ispin,io,ik,im)) &
+           + nab(4,2)*(zwf(ix,mg%idy(iy+4),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-4),iz,ispin,io,ik,im))
+        g3 = nab(1,3)*(zwf(ix,iy,mg%idz(iz+1),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-1),ispin,io,ik,im)) &
+           + nab(2,3)*(zwf(ix,iy,mg%idz(iz+2),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-2),ispin,io,ik,im)) &
+           + nab(3,3)*(zwf(ix,iy,mg%idz(iz+3),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-3),ispin,io,ik,im)) &
+           + nab(4,3)*(zwf(ix,iy,mg%idz(iz+4),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-4),ispin,io,ik,im))
+        psi = zwf(ix,iy,iz,ispin,io,ik,im)
+        ! B^T (nabla) psi + i(k+A/c) psi
+        w1 = ( bmat(1,1)*g1 + bmat(2,1)*g2 + bmat(3,1)*g3 ) + zI*kAc1*psi
+        w2 = ( bmat(1,2)*g1 + bmat(2,2)*g2 + bmat(3,2)*g3 ) + zI*kAc2*psi
+        w3 = ( bmat(1,3)*g1 + bmat(2,3)*g2 + bmat(3,3)*g3 ) + zI*kAc3*psi
+        duVpsi1 = duVpsi1 + conjg(ppg%zekr_uV(j,ilma,ik)) * w1 ! < uV | exp(ikr) (nabla) | psi >
+        duVpsi2 = duVpsi2 + conjg(ppg%zekr_uV(j,ilma,ik)) * w2
+        duVpsi3 = duVpsi3 + conjg(ppg%zekr_uV(j,ilma,ik)) * w3
+      end do
+      F_lma(1,ilocal,ispin,io,ik) = rtmp * dble( conjg(duVpsi1) * uVpsibox2(ispin,io,ik,im,ilma) )
+      F_lma(2,ilocal,ispin,io,ik) = rtmp * dble( conjg(duVpsi2) * uVpsibox2(ispin,io,ik,im,ilma) )
+      F_lma(3,ilocal,ispin,io,ik) = rtmp * dble( conjg(duVpsi3) * uVpsibox2(ispin,io,ik,im,ilma) )
+    end do
+    end do
+    end do
+    end do
+!$acc end parallel
+
+    ! sum over the local orbitals, one gang per projector and component
+!$acc parallel loop collapse(2) gang private(ilocal,ic,fsum)
+    do ilocal=1,nlocal
+    do ic=1,3
+      fsum = 0d0
+!$acc loop vector collapse(3) reduction(+:fsum)
+      do ik=ik_s,ik_e
+      do io=io_s,io_e
+      do ispin=1,nspin
+        fsum = fsum + F_lma(ic,ilocal,ispin,io,ik)
+      end do
+      end do
+      end do
+      F_ilocal(ic,ilocal) = fsum
+    end do
+    end do
+!$acc end parallel
+
+!$acc end data
+
+    do ilocal=1,nlocal
+      ia = ppg%ilocal_nlma2ia(ilocal)
+      F_tmp(1,ia) = F_tmp(1,ia) - F_ilocal(1,ilocal)
+      F_tmp(2,ia) = F_tmp(2,ia) - F_ilocal(2,ilocal)
+      F_tmp(3,ia) = F_tmp(3,ia) - F_ilocal(3,ilocal)
+    end do
+
+    deallocate(F_lma,F_ilocal)
+  end subroutine calc_force_nonlocal_gpu
+
+!===================================================================================================================================
+
+  ! Density-gradient term of the local force for isolated systems, for all local orbitals at once (OpenACC builds).
+  ! One device thread per grid point sums 2 f_n w_k Re[ (B^T (nabla) psi)^* psi ] over the local orbitals in the order
+  ! of the orbital loop in calc_force, so the result per grid point is that of the original accumulation.
+  subroutine calc_dden_gpu(system,info,mg,stencil,zwf,dden)
+    use structures, only: s_dft_system, s_parallel_info, s_rgrid, s_stencil
+    implicit none
+    type(s_dft_system)   ,intent(in)    :: system
+    type(s_parallel_info),intent(in)    :: info
+    type(s_rgrid)        ,intent(in)    :: mg
+    type(s_stencil)      ,intent(in)    :: stencil
+    complex(8)           ,intent(in)    :: zwf(mg%is_array(1):mg%ie_array(1) &
+                                              ,mg%is_array(2):mg%ie_array(2) &
+                                              ,mg%is_array(3):mg%ie_array(3) &
+                                              ,system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e)
+    real(8)              ,intent(inout) :: dden(3,mg%is_array(1):mg%ie_array(1) &
+                                               ,mg%is_array(2):mg%ie_array(2) &
+                                               ,mg%is_array(3):mg%ie_array(3))
+    !
+    integer :: ik,io,ispin,im,ik_s,ik_e,io_s,io_e,nspin,ix,iy,iz,ixs,ixe,iys,iye,izs,ize
+    real(8) :: nab(4,3),bmat(3,3),hvol,rtmp,d1,d2,d3
+    complex(8) :: psi,g1,g2,g3
+
+    im = info%im_s
+    ik_s = info%ik_s
+    ik_e = info%ik_e
+    io_s = info%io_s
+    io_e = info%io_e
+    nspin = system%nspin
+    ixs = mg%is(1)
+    ixe = mg%ie(1)
+    iys = mg%is(2)
+    iye = mg%ie(2)
+    izs = mg%is(3)
+    ize = mg%ie(3)
+    nab = stencil%coef_nab
+    bmat = system%rmatrix_B
+    hvol = system%Hvol
+
+!$acc parallel loop collapse(3) gang vector copyin(nab,bmat) &
+!$acc   private(ix,iy,iz,ik,io,ispin,rtmp,psi,g1,g2,g3,d1,d2,d3)
+    do iz=izs,ize
+    do iy=iys,iye
+    do ix=ixs,ixe
+      d1 = dden(1,ix,iy,iz)
+      d2 = dden(2,ix,iy,iz)
+      d3 = dden(3,ix,iy,iz)
+!$acc loop seq
+      do ik=ik_s,ik_e
+!$acc loop seq
+      do io=io_s,io_e
+!$acc loop seq
+      do ispin=1,nspin
+        rtmp = 2d0 * system%rocc(io,ik,ispin) * system%wtk(ik) * hvol
+        g1 = nab(1,1)*(zwf(mg%idx(ix+1),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-1),iy,iz,ispin,io,ik,im)) &
+           + nab(2,1)*(zwf(mg%idx(ix+2),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-2),iy,iz,ispin,io,ik,im)) &
+           + nab(3,1)*(zwf(mg%idx(ix+3),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-3),iy,iz,ispin,io,ik,im)) &
+           + nab(4,1)*(zwf(mg%idx(ix+4),iy,iz,ispin,io,ik,im) - zwf(mg%idx(ix-4),iy,iz,ispin,io,ik,im))
+        g2 = nab(1,2)*(zwf(ix,mg%idy(iy+1),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-1),iz,ispin,io,ik,im)) &
+           + nab(2,2)*(zwf(ix,mg%idy(iy+2),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-2),iz,ispin,io,ik,im)) &
+           + nab(3,2)*(zwf(ix,mg%idy(iy+3),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-3),iz,ispin,io,ik,im)) &
+           + nab(4,2)*(zwf(ix,mg%idy(iy+4),iz,ispin,io,ik,im) - zwf(ix,mg%idy(iy-4),iz,ispin,io,ik,im))
+        g3 = nab(1,3)*(zwf(ix,iy,mg%idz(iz+1),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-1),ispin,io,ik,im)) &
+           + nab(2,3)*(zwf(ix,iy,mg%idz(iz+2),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-2),ispin,io,ik,im)) &
+           + nab(3,3)*(zwf(ix,iy,mg%idz(iz+3),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-3),ispin,io,ik,im)) &
+           + nab(4,3)*(zwf(ix,iy,mg%idz(iz+4),ispin,io,ik,im) - zwf(ix,iy,mg%idz(iz-4),ispin,io,ik,im))
+        psi = zwf(ix,iy,iz,ispin,io,ik,im)
+        d1 = d1 + rtmp * dble( conjg( bmat(1,1)*g1 + bmat(2,1)*g2 + bmat(3,1)*g3 ) * psi )
+        d2 = d2 + rtmp * dble( conjg( bmat(1,2)*g1 + bmat(2,2)*g2 + bmat(3,2)*g3 ) * psi )
+        d3 = d3 + rtmp * dble( conjg( bmat(1,3)*g1 + bmat(2,3)*g2 + bmat(3,3)*g3 ) * psi )
+      end do
+      end do
+      end do
+      dden(1,ix,iy,iz) = d1
+      dden(2,ix,iy,iz) = d2
+      dden(3,ix,iy,iz) = d3
+    end do
+    end do
+    end do
+!$acc end parallel
+
+  end subroutine calc_dden_gpu
+#endif
   
 !===================================================================================================================================
 
