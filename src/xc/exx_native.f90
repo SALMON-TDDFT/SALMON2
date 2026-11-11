@@ -1206,6 +1206,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     integer,intent(out) :: ierr
     integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np,j,index,total_error
+    integer :: band,ng
     complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:),expanded_source(:,:,:)
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
@@ -1223,8 +1224,17 @@ contains
           ierr=1;return
         endif
         if(yn_exx_fft_orbits=='y')then
-          call apply_spinor_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
-            info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_spin_density,ierr)
+          ng=kernel%ng
+          !$omp parallel do collapse(2) schedule(static)
+          do j=1,size(expanded_source,3)
+            do band=1,size(expanded_source,2)
+              expanded_source(:ng,band,j)=expanded_source(:ng,band,j)*kernel%phase(:,j)
+              expanded_source(ng+1:,band,j)=expanded_source(ng+1:,band,j)*kernel%phase(:,j)
+            enddo
+          enddo
+          !$omp end parallel do
+          call apply_spinor_k_orbits(kernel,symmetry_map,expanded_source,target,action,layout(:np),layout(np+1:), &
+            info%ik_s,info%id_k,info%icomm_k,transpose_orbit_tiles,ierr)
           return
         endif
 #ifdef USE_MPI
@@ -1273,13 +1283,15 @@ contains
         return
       endif
 #endif
-      allocate(rotated(size(source,1),size(source,2)))
       ! Opt-in route. Keep the established full route as the default.
       if(yn_exx_fft_orbits=='y')then
-        call apply_k_orbits(kernel,symmetry_map,target,action,layout(:np),layout(np+1:), &
-          info%ik_s,info%id_k,info%icomm_k,transpose_k_tiles,fill_density_selected,ierr)
+        index=size(source,2)
+        if(temperature<0d0.and.yn_dc=='n')index=nelec/2
+        call apply_k_orbits(kernel,symmetry_map,source(:,:index,:),target,action,layout(:np),layout(np+1:), &
+          info%ik_s,info%id_k,info%icomm_k,transpose_orbit_tiles,ierr)
         return
       endif
+      allocate(rotated(size(source,1),size(source,2)))
       allocate(expanded_target(size(target,1),size(target,2),layout(np+info%id_k+1)))
       do j=1,size(expanded_target,3)
         index=layout(info%id_k+1)+j-1
@@ -1322,36 +1334,10 @@ contains
       call fill_density(j,lo,rows,density)
     end subroutine fill_density_contiguous
 
-    subroutine fill_spin_density(j,points,density,spin_left,spin_right,columns)
-      implicit none
-      integer,intent(in) :: j,points(:),spin_left,spin_right,columns(:)
-      complex(8),intent(out) :: density(:,:)
-      complex(8),allocatable :: left(:,:),right(:,:)
-      integer :: ng,no,g
-      ng=kernel%ng;no=size(expanded_source,2)
-      allocate(left(size(points),no),right(size(columns),no))
-      left=expanded_source(points+(spin_left-1)*ng,:,j)
-      right=expanded_source(columns+(spin_right-1)*ng,:,j)
-      do g=1,no
-        left(:,g)=left(:,g)*kernel%phase(points,j)
-        right(:,g)=right(:,g)*kernel%phase(columns,j)
-      enddo
-      density=matmul(left,conjg(transpose(right)))
-    end subroutine fill_spin_density
-
-    subroutine fill_density_selected(j,points,density)
-      implicit none
-      integer,intent(in) :: j,points(:)
-      complex(8),intent(out) :: density(:,:)
-      call fill_density(j,1,size(points),density,points)
-    end subroutine fill_density_selected
-
-    subroutine fill_density(j,lo,rows,density,points)
+    subroutine fill_density(j,lo,rows,density)
       implicit none
       integer,intent(in) :: j,lo,rows
       complex(8),intent(out) :: density(:,:)
-      integer,intent(in),optional :: points(:)
-      complex(8),allocatable :: selected(:,:)
       integer :: full_index,rep,op,g,stat,ng,no,blas_state(3)
       complex(8) :: coefficient
   ! BLAS explicit interface: sequence association preserves strided row offsets.
@@ -1370,7 +1356,6 @@ contains
       full_index=layout(info%id_k+1)+j-1
       rep=symmetry_map%owner(full_index)-info%ik_s+1
       coefficient=cmplx(1d0/symmetry_map%multiplicity(full_index),0d0,8)
-      if(present(points))allocate(selected(rows,no))
       density=0d0
       blas_state=0
       call exx_blas_thread_control(1,blas_state)
@@ -1381,14 +1366,8 @@ contains
         do g=1,no
           rotated(:,g)=rotated(:,g)*kernel%phase(:,j)
         enddo
-        if(present(points))then
-          selected=rotated(points,:no)
-          call zgemm('N','C',rows,ng,no,coefficient,selected,rows,rotated,ng, &
-            (1d0,0d0),density,size(density,1))
-        else
         call zgemm('N','C',rows,ng,no,coefficient,rotated(lo,1),ng,rotated(1,1),ng, &
           (1d0,0d0),density,size(density,1))
-        endif
       enddo
       call exx_blas_thread_control(0,blas_state)
     end subroutine
@@ -1405,6 +1384,28 @@ contains
     call comm_alltoall(send,recv,comm,count)
     if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
   end subroutine transpose_k_tiles
+
+  subroutine transpose_orbit_tiles(send,recv,sendcounts,recvcounts,displs,comm)
+#ifdef USE_MPI
+    use mpi
+#endif
+    implicit none
+    complex(8),intent(in) :: send(:)
+    complex(8),intent(out) :: recv(:)
+    integer,intent(in) :: sendcounts(:),recvcounts(:),displs(:),comm
+#ifdef USE_MPI
+    integer :: ierr
+#endif
+    real(8) :: start
+    if(timing_enabled)start=exx_walltime()
+#ifdef USE_MPI
+    call MPI_Alltoallv(send,sendcounts,displs,MPI_DOUBLE_COMPLEX,recv,recvcounts,displs,MPI_DOUBLE_COMPLEX,comm,ierr)
+    if(ierr/=MPI_SUCCESS)error stop 'HSE orbit transpose failed'
+#else
+    recv(:recvcounts(1))=send(:sendcounts(1))
+#endif
+    if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
+  end subroutine transpose_orbit_tiles
 
   subroutine check_k_algorithm()
     use salmon_global, only: exx_k_algorithm

@@ -15,7 +15,9 @@ module exx_k_exchange
   public :: exx_k_kernel_apply_pair_distributed
   public :: exx_k_kernel_apply_distributed
   type exx_k_kernel
-    type(collinear_fft_plans) :: omp_fft,omp_pair_tail
+    type(collinear_fft_plans) :: omp_fft,omp_pair_tail,omp_orbit_tile
+    integer :: orbit_tile_lanes=0,orbit_tile_workers=0
+    logical :: orbit_tile_contiguous=.false.
     class(s_exx_k_backend),allocatable :: accelerator
     integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1, nq=0
     logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
@@ -904,6 +906,8 @@ contains
     op%pair_tail_count=0;op%pair_fft_pairs=0_int64
     call collinear_fft_destroy(op%omp_fft)
     call collinear_fft_destroy(op%omp_pair_tail)
+    call collinear_fft_destroy(op%omp_orbit_tile)
+    op%orbit_tile_lanes=0;op%orbit_tile_workers=0;op%orbit_tile_contiguous=.false.
     if(allocated(op%work))deallocate(op%work)
     if(allocated(op%distance_index))deallocate(op%distance_index)
     if(allocated(op%order))deallocate(op%order,op%point,op%shift,op%phase,op%kernel)
