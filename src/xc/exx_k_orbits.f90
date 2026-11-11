@@ -7,7 +7,7 @@ module exx_k_orbits
   use iso_c_binding
   use exx_k_exchange, only: exx_k_kernel,execute_kernel_fft
   use exx_collinear_fft, only: collinear_fft_plans,collinear_fft_create
-  use exx_symmetry, only: s_exx_symmetry_map,symmetry_transform
+  use exx_symmetry, only: s_exx_symmetry_map,symmetry_transform,symmetry_cache_phases
   use exx_blas_threads, only: exx_blas_thread_control
 !$  use omp_lib, only: omp_get_max_threads,omp_get_thread_num,omp_get_num_threads
   implicit none
@@ -82,9 +82,14 @@ contains
   end subroutine
 
   subroutine apply_k_orbits(op,map,source,target,action,starts,counts,rep_start,rank,comm,transpose_tiles,ierr)
+    use communication, only: comm_bcast
+#ifdef USE_MPI
+    use mpi, only: MPI_Irecv,MPI_Isend,MPI_Waitall,MPI_DOUBLE_COMPLEX,MPI_SUCCESS, &
+      MPI_REQUEST_NULL,MPI_STATUSES_IGNORE
+#endif
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
-    type(s_exx_symmetry_map),intent(in) :: map
+    type(s_exx_symmetry_map),intent(inout) :: map
     complex(c_double_complex),intent(in) :: source(:,:,:),target(:,:,:)
     complex(c_double_complex),intent(out) :: action(:,:,:)
     integer,intent(in) :: starts(:),counts(:),rep_start,rank,comm
@@ -111,15 +116,25 @@ contains
     integer :: sendcounts(size(starts)),recvcounts(size(starts)),displs(size(starts))
     integer :: workers,worker,blas_state(3)
     integer :: density_workers,no,nops,symop,full_index,rep,stat,band,active_blocks
+    integer :: groups,chunk,row_blocks,tile,first_col,local_cols,block_id,col,tile_workers
+    integer :: density_blocks,density_rows,batch_end,block,block_rows,row_offset,cache_phases
+    character(16) :: group_setting
+    logical :: overlap
+#ifdef USE_MPI
+    integer :: overlap_setting,peer,mpi_error,first_element
+    integer,allocatable,asynchronous :: send_requests(:),recv_requests(:)
+#endif
     complex(c_double_complex) :: weight,beta
     logical :: fused_fft
     integer :: a,dest,source_g,first_id,global_k,local_k,op_id,ip,offset(3),delta(3),c(3),idx(3)
     integer,allocatable :: forward(:,:),wrap(:,:,:),first(:),owner(:),operation(:),kperm(:,:),lookup(:)
     integer,allocatable :: inverse(:),slot(:),points(:)
     integer,allocatable :: pair_delta(:,:,:),target_k(:,:),reference_k(:)
-    complex(c_double_complex),allocatable,target :: send(:),recv(:)
+    complex(c_double_complex),allocatable,target :: tile_work(:),fft_result(:)
+    complex(c_double_complex),allocatable,target,asynchronous :: send(:),recv(:)
     complex(c_double_complex),pointer :: sb(:,:,:,:),rb(:,:,:,:),fs(:,:,:),fr(:,:,:),kw(:,:,:)
     complex(c_double_complex),allocatable :: rotated(:,:,:),selected(:,:,:),t(:,:,:),row(:,:),contracted(:,:),gauge(:,:),phase(:,:)
+    complex(c_double_complex),allocatable :: density_tile(:,:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     real(c_double) :: pi,scaled(3),v(3),length(3),angle,k0(3)
     real(c_double) :: stamp,stage_seconds(4),slowest(4)
@@ -187,7 +202,54 @@ contains
     enddo
     call comm_summation(local_error,total_error,comm)
     if(total_error/=0)return
-    km=maxval(counts);nmsg=b*ng*km
+    groups=3
+    if(rank==0)then
+      call get_environment_variable('SALMON_EXX_ORBIT_COLUMN_GROUPS',group_setting,status=stat)
+      if(stat==0)then
+        read(group_setting,*,iostat=stat)groups
+        if(stat/=0)groups=1
+      endif
+    endif
+    call comm_bcast(groups,comm,0)
+    groups=max(1,min(groups,np,ng))
+    chunk=1+(ng-1)/groups
+    groups=1+(ng-1)/chunk
+    row_blocks=np/groups
+    density_blocks=1
+    if(rank==0)then
+      call get_environment_variable('SALMON_EXX_ORBIT_DENSITY_ROWS',group_setting,status=stat)
+      if(stat==0)then
+        read(group_setting,*,iostat=stat)density_blocks
+        if(stat/=0)density_blocks=1
+      endif
+    endif
+    call comm_bcast(density_blocks,comm,0)
+    density_blocks=max(1,min(density_blocks,row_blocks))
+    density_rows=b*density_blocks
+    cache_phases=1
+    if(rank==0)then
+      call get_environment_variable('SALMON_EXX_SYMMETRY_CACHE',group_setting,status=stat)
+      if(stat==0.and.trim(group_setting)=='0')cache_phases=0
+    endif
+    call comm_bcast(cache_phases,comm,0)
+    if(cache_phases==1)call symmetry_cache_phases(map,starts(rank+1),nlocal)
+    overlap=.false.
+#ifdef USE_MPI
+    if(groups>1)then
+      overlap_setting=1
+      if(rank==0)then
+        call get_environment_variable('SALMON_EXX_ORBIT_OVERLAP',group_setting,status=stat)
+        if(stat==0.and.trim(group_setting)=='0')overlap_setting=0
+      endif
+      call comm_bcast(overlap_setting,comm,0)
+      overlap=overlap_setting==1
+    endif
+    if(overlap)then
+      allocate(send_requests(np),recv_requests(np))
+  allocate(fft_result(b*chunk*maxval(counts)*np))
+    endif
+#endif
+    km=maxval(counts);nmsg=b*chunk*km
     displs=[((p-1)*nmsg,p=1,np)]
     workers=1
 #if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_OPENBLAS_THREADS)
@@ -199,14 +261,34 @@ contains
     enddo
     density_workers=1
 #if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_OPENBLAS_THREADS)
-!$  density_workers=min(max(1,nlocal*min(np,(nfirst+b-1)/b)),omp_get_max_threads())
+!$  density_workers=min(max(1,nlocal*groups*min(row_blocks,(nfirst+b-1)/b)),omp_get_max_threads())
 #endif
-    allocate(send(nmsg*np),recv(nmsg*np),points(np*b),t(ng,nt,nrep),phase(27,nrep))
-    allocate(rotated(ng,no,nlocal),selected(b,no,density_workers))
+    allocate(send(nmsg*np),recv(nmsg*np),points(row_blocks*b),t(ng,nt,nrep),phase(27,nrep))
+    allocate(rotated(ng,no,nlocal),selected(density_rows,no,density_workers))
+    if(density_blocks>1)allocate(density_tile(density_rows,chunk,density_workers))
     allocate(row(ng,workers),contracted(nt,workers))
-    allocate(pair_delta(3,ng,b))
-    sb(1:b,1:ng,1:km,1:np)=>send;rb(1:b,1:ng,1:km,1:np)=>recv
-    fs(1:b,1:ng,1:km*np)=>send;fr(1:b,1:ng,1:km*np)=>recv
+    allocate(pair_delta(3,chunk,b))
+    if(groups>1)then
+      tile_workers=1
+!$    tile_workers=min(b*chunk,omp_get_max_threads())
+      allocate(tile_work(b*chunk*nk))
+      local_error=0
+      if(rank<row_blocks*groups)then
+        if(op%orbit_tile_lanes/=b*chunk.or.op%orbit_tile_workers/=tile_workers.or. &
+           (op%orbit_tile_contiguous.neqv.op%contiguous_fft))then
+          call collinear_fft_create(op%omp_orbit_tile,op%mesh,nk,b*chunk,b*chunk,op%contiguous_fft,tile_work,local_error)
+          op%orbit_tile_lanes=0
+          if(local_error==0)op%orbit_tile_lanes=b*chunk
+          op%orbit_tile_workers=tile_workers
+          op%orbit_tile_contiguous=op%contiguous_fft
+        endif
+      endif
+      call comm_summation(local_error,total_error,comm)
+      if(total_error/=0)return
+    endif
+    sb(1:b,1:chunk,1:km,1:np)=>send;rb(1:b,1:chunk,1:km,1:np)=>recv
+    fs(1:b,1:chunk,1:km*np)=>send;fr(1:b,1:chunk,1:km*np)=>recv
+    if(overlap)fs(1:b,1:chunk,1:km*np)=>fft_result
     allocate(inverse(nk),slot(nk))
     do i=1,nk;inverse(op%order(i))=i;enddo
     do p=1,np;do j=1,counts(p)
@@ -223,13 +305,15 @@ contains
       enddo
     enddo
     if(rank==0)write(*,'(a,2i12)')'EXX_FFT_ORBITS first points/full: ',nfirst,ng
-    do base=1,nfirst,np*b
+    if(rank==0.and.groups>1)write(*,'(a,2i8)')'EXX_ORBIT_COLUMN_GROUPS groups/columns: ',groups,chunk
+    if(rank==0.and.overlap)write(*,'(a)')'EXX_ORBIT_OVERLAP nonblocking forward transpose'
+    do base=1,nfirst,row_blocks*b
       if(op%profile)stamp=clock_now()
-      nactive=min(np*b,nfirst-base+1);points(:nactive)=first(base:base+nactive-1)
+      nactive=min(row_blocks*b,nfirst-base+1);points(:nactive)=first(base:base+nactive-1)
       active_blocks=(nactive+b-1)/b
       sendcounts=0;recvcounts=0
-      sendcounts(:active_blocks)=b*ng*nlocal
-      if(rank<active_blocks)recvcounts=b*ng*counts
+      sendcounts(:active_blocks*groups)=b*chunk*nlocal
+      if(rank<active_blocks*groups)recvcounts=b*chunk*counts
 #ifdef HAVE_EXX_OPENBLAS_THREADS
       blas_state=0
       if(density_workers>1)then
@@ -238,7 +322,8 @@ contains
       endif
 #endif
       !$omp parallel if(density_workers>1) num_threads(density_workers) &
-      !$omp private(worker,symop,j,p,full_index,rep,stat,band,lo,rows,r,weight,beta) &
+      !$omp private(worker,symop,j,p,full_index,rep,stat,band,lo,rows,r,weight,beta,block_id,first_col,local_cols) &
+      !$omp private(batch_end,block,block_rows,row_offset,tile) &
 #if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS)
       !$omp private(blas_state)
       blas_state=0
@@ -249,13 +334,17 @@ contains
       worker=1
 !$  worker=omp_get_thread_num()+1
       !$omp do collapse(2) schedule(static)
-      do p=1,active_blocks
+      do p=1,active_blocks*groups
         do j=1,nlocal
+          block_id=(p-1)/groups
+          rows=min(b,nactive-block_id*b)
+          first_col=1+mod(p-1,groups)*chunk
+          local_cols=min(chunk,ng-first_col+1)
           if(no==0)then
             sb(:,:,j,p)=zero
-          else if(p==active_blocks)then
-            rows=nactive-(p-1)*b
+          else
             sb(rows+1:,:,j,p)=zero
+            sb(:rows,local_cols+1:,j,p)=zero
           endif
         enddo
       enddo
@@ -277,18 +366,41 @@ contains
         beta=one
         if(symop==1)beta=zero
         !$omp do collapse(2) schedule(static)
-        do p=1,active_blocks
+        do p=1,((active_blocks+density_blocks-1)/density_blocks)*groups
           do j=1,nlocal
             full_index=starts(rank+1)+j-1
             if(symop>map%multiplicity(full_index).or.no==0)cycle
-            lo=(p-1)*b+1;rows=min(b,nactive-lo+1)
+            block_id=((p-1)/groups)*density_blocks
+            batch_end=min(active_blocks,block_id+density_blocks)
+            lo=block_id*b+1;rows=min(batch_end*b,nactive)-lo+1
+            tile=mod(p-1,groups)
+            first_col=1+tile*chunk
+            local_cols=min(chunk,ng-first_col+1)
             weight=cmplx(1d0/map%multiplicity(full_index),0d0,c_double)
             do band=1,no
               do r=1,rows
                 selected(r,band,worker)=rotated(points(lo+r-1),band,j)
               enddo
             enddo
-            call zgemm('N','C',rows,ng,no,weight,selected(1,1,worker),b,rotated(1,1,j),ng,beta,sb(:,:,j,p),b)
+            if(density_blocks==1)then
+              call zgemm('N','C',rows,local_cols,no,weight,selected(1,1,worker),b, &
+                rotated(first_col,1,j),ng,beta,sb(:,:,j,p),b)
+            else
+              call zgemm('N','C',rows,local_cols,no,weight,selected(1,1,worker),density_rows, &
+                rotated(first_col,1,j),ng,zero,density_tile(1,1,worker),density_rows)
+              do block=block_id,batch_end-1
+                row_offset=(block-block_id)*b
+                block_rows=min(b,rows-row_offset)
+                if(symop==1)then
+                  sb(:block_rows,:local_cols,j,block*groups+tile+1)= &
+                    density_tile(row_offset+1:row_offset+block_rows,:local_cols,worker)
+                else
+                  sb(:block_rows,:local_cols,j,block*groups+tile+1)= &
+                    sb(:block_rows,:local_cols,j,block*groups+tile+1)+ &
+                    density_tile(row_offset+1:row_offset+block_rows,:local_cols,worker)
+                endif
+              enddo
+            endif
           enddo
         enddo
         !$omp end do
@@ -301,17 +413,47 @@ contains
       call exx_blas_thread_control(0,blas_state)
 #endif
       if(op%profile)call mark(1)
-      call transpose_tiles(send,recv,sendcounts,recvcounts,displs,comm)
+      block_id=rank/groups;tile=mod(rank,groups)
+      first_col=1+tile*chunk;local_cols=min(chunk,ng-first_col+1)
+      rows=max(0,min(b,nactive-block_id*b))
+#ifdef USE_MPI
+      if(overlap)then
+        recv_requests=MPI_REQUEST_NULL;send_requests=MPI_REQUEST_NULL
+        do peer=1,np
+          if(recvcounts(peer)==0)cycle
+          first_element=displs(peer)+1
+          call MPI_Irecv(recv(first_element:),recvcounts(peer),MPI_DOUBLE_COMPLEX,peer-1,0,comm, &
+            recv_requests(peer),mpi_error)
+          if(mpi_error/=MPI_SUCCESS)error stop "HSE orbit nonblocking receive failed"
+        enddo
+        do peer=1,np
+          if(sendcounts(peer)==0)cycle
+          first_element=displs(peer)+1
+          call MPI_Isend(send(first_element:),sendcounts(peer),MPI_DOUBLE_COMPLEX,peer-1,0,comm, &
+            send_requests(peer),mpi_error)
+          if(mpi_error/=MPI_SUCCESS)error stop "HSE orbit nonblocking send failed"
+        enddo
+        call MPI_Waitall(np,recv_requests,MPI_STATUSES_IGNORE,mpi_error)
+        if(mpi_error/=MPI_SUCCESS)error stop "HSE orbit receive completion failed"
+      else
+#endif
+        call transpose_tiles(send,recv,sendcounts,recvcounts,displs,comm)
+#ifdef USE_MPI
+      endif
+#endif
       if(op%profile)call mark(2)
-      rows=max(0,min(b,nfirst-base-rank*b+1))
       if(rows>0)then
       ! The point-pair displacement is independent of the FFT k index.
       do r=1,rows
-        a=first(base+rank*b+r-1)
-        do g=1,ng
-          pair_delta(:,g,r)=op%point(:,a)-op%point(:,g)
+        a=first(base+block_id*b+r-1)
+        do g=1,local_cols
+          pair_delta(:,g,r)=op%point(:,a)-op%point(:,first_col+g-1)
         enddo
       enddo
+      if(groups>1)then
+        call execute_orbit_lanes(op%omp_orbit_tile,tile_work,fr,fs,slot,pair_delta,rows,local_cols,ns, &
+          op%shift,op%kernel,op%contiguous_fft,op%threads_used)
+      else
       call execute_strided_lanes(op,fr,fs,slot,pair_delta,rows,ns,fused_fft)
       if(.not.fused_fft)then
       if(op%contiguous_fft)then
@@ -355,8 +497,19 @@ contains
       endif
       endif
       endif
+      endif
       if(op%profile)call mark(3)
-      call transpose_tiles(send,recv,recvcounts,sendcounts,displs,comm)
+#ifdef USE_MPI
+      if(overlap)then
+        call MPI_Waitall(np,send_requests,MPI_STATUSES_IGNORE,mpi_error)
+        if(mpi_error/=MPI_SUCCESS)error stop 'HSE orbit forward completion failed'
+        call transpose_tiles(fft_result,recv,recvcounts,sendcounts,displs,comm)
+      else
+#endif
+        call transpose_tiles(send,recv,recvcounts,sendcounts,displs,comm)
+#ifdef USE_MPI
+      endif
+#endif
       if(op%profile)call mark(2)
       ! Reconstruct only representative-target rows; no expanded target/action.
       if(nrep==0)cycle
@@ -368,7 +521,7 @@ contains
       endif
 #endif
       !$omp parallel if(workers>1) num_threads(workers) &
-      !$omp private(worker,first_id,p,r,a,op_id,j,local_k,g,source_g,delta,ip) &
+      !$omp private(worker,first_id,p,r,a,op_id,j,local_k,g,source_g,delta,ip,col,tile) &
 #if defined(HAVE_EXX_FUJITSU_THREADS) || defined(HAVE_EXX_NVPL_THREADS)
       !$omp private(blas_state)
       blas_state=0
@@ -391,7 +544,9 @@ contains
             delta=wrap(:,source_g,op_id)-wrap(:,a,op_id)
             if(any(abs(delta)>1))error stop 'EXX orbit wrap exceeds one cell'
             ip=1+delta(1)+1+3*(delta(2)+1+3*(delta(3)+1))
-            row(g,worker)=rb(r,source_g,local_k,p)*phase(ip,j)*gauge(dest,op_id)*conjg(gauge(g,op_id))
+            col=1+mod(source_g-1,chunk)
+            tile=(source_g-1)/chunk
+            row(g,worker)=rb(r,col,local_k,(p-1)*groups+tile+1)*phase(ip,j)*gauge(dest,op_id)*conjg(gauge(g,op_id))
           enddo
           call zgemm('N','N',1,nt,ng,-one/real(nk,c_double),row(1,worker),1,t(1,1,j),ng,zero,contracted(1,worker),1)
           action(dest,:,j)=contracted(:,worker)

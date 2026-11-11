@@ -5,6 +5,7 @@ module exx_symmetry
  implicit none
  private
  public :: s_exx_symmetry_map,symmetry_init,symmetry_expand,symmetry_validate_atoms,symmetry_transform
+ public :: symmetry_cache_phases
  type s_exx_symmetry_map
    integer :: nfull=0,nrep=0,nsym=0,max_little=0
    integer :: n(3)=0
@@ -13,6 +14,9 @@ module exx_symmetry
    real(8),allocatable :: cart_rotation(:,:,:)
    real(8),allocatable :: full_k(:,:),rep_k(:,:),rotation(:,:,:),translation(:,:)
    integer,allocatable :: first(:),owner(:),operations(:,:),multiplicity(:),grid(:,:)
+   integer :: cached_first=1,cached_count=0
+   integer,allocatable :: phase_offset(:)
+   complex(8),allocatable :: cached_phase(:,:)
  end type
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
   private :: salmon_all_finite,finite_real_1d,finite_real_2d,finite_real_3d
@@ -195,6 +199,45 @@ contains
  end subroutine
 
  ! Transform one representative orbital block; no little-group normalization.
+ ! The map owns these coefficients. symmetry_init replaces the map and releases
+ ! the cache whenever the cell, mesh, k points or symmetry operations change.
+ subroutine symmetry_cache_phases(map,first_full,count_full)
+ implicit none
+ type(s_exx_symmetry_map),intent(inout)::map
+ integer,intent(in)::first_full,count_full
+ integer::j,full_index,slot,s,r,g,c(3),ng,column
+ real(8)::rk(3),Gvec(3),pos(3),angle
+ if(allocated(map%cached_phase))then
+   if(map%cached_first==first_full.and.map%cached_count==count_full)return
+   deallocate(map%cached_phase,map%phase_offset)
+ endif
+ ng=product(map%n)
+ allocate(map%phase_offset(count_full+1))
+ map%phase_offset(1)=0
+ do j=1,count_full
+   map%phase_offset(j+1)=map%phase_offset(j)+map%multiplicity(first_full+j-1)
+ enddo
+ allocate(map%cached_phase(ng,map%phase_offset(count_full+1)))
+ do j=1,count_full
+   full_index=first_full+j-1
+   r=map%owner(full_index)
+   do slot=1,map%multiplicity(full_index)
+     s=map%operations(slot,full_index)
+     column=map%phase_offset(j)+slot
+     rk=matmul(map%cart_rotation(:,:,s),map%rep_k(:,r))
+     Gvec=rk-map%full_k(:,full_index)
+     do g=1,ng
+       c=[mod(g-1,map%n(1)),mod((g-1)/map%n(1),map%n(2)),(g-1)/(map%n(1)*map%n(2))]
+       pos=matmul(map%cell,real(c,8)/map%n)
+       angle=dot_product(Gvec,pos)-dot_product(rk,matmul(map%cell,map%translation(:,s)))
+       map%cached_phase(g,column)=cmplx(cos(angle),sin(angle),8)
+     enddo
+   enddo
+ enddo
+ map%cached_first=first_full
+ map%cached_count=count_full
+ end subroutine
+
  subroutine symmetry_transform(map,full_index,operation_slot,orbitals,transformed,ierr)
  implicit none
  type(s_exx_symmetry_map),intent(in)::map
@@ -202,7 +245,7 @@ contains
  complex(8),intent(in)::orbitals(:,:)
  complex(8),intent(out)::transformed(:,:)
  integer,intent(out)::ierr
- integer::ng,r,s,g,c(3),nc
+ integer::ng,r,s,g,c(3),nc,column,j
  complex(8)::spin(2,2)
  real(8)::rk(3),Gvec(3),pos(3),angle
  complex(8)::phase
@@ -217,6 +260,23 @@ contains
  if(nc==2)then
  call symmetry_spin_rotation(map%cart_rotation(:,:,s),spin,ierr)
  if(ierr/=0)return
+ endif
+ if(allocated(map%cached_phase))then
+   j=full_index-map%cached_first+1
+   if(j>=1.and.j<=map%cached_count)then
+     column=map%phase_offset(j)+operation_slot
+     do g=1,ng
+       phase=map%cached_phase(g,column)
+       if(nc==1)then
+         transformed(g,:)=phase*orbitals(map%grid(g,s),:)
+       else
+         transformed(g,:)=phase*(spin(1,1)*orbitals(map%grid(g,s),:)+spin(1,2)*orbitals(ng+map%grid(g,s),:))
+         transformed(ng+g,:)=phase*(spin(2,1)*orbitals(map%grid(g,s),:)+spin(2,2)*orbitals(ng+map%grid(g,s),:))
+       endif
+     enddo
+     ierr=0
+     return
+   endif
  endif
  rk=matmul(map%cart_rotation(:,:,s),map%rep_k(:,r))
  Gvec=rk-map%full_k(:,full_index)
