@@ -1,20 +1,26 @@
+#include "config.h"
 ! Exact scalar/SOC orbit exchange: k ownership is separate from r-block computation.
 module exx_spinor_wave_workers
  use iso_c_binding
  use iso_fortran_env,only:int64
+ !$ use omp_lib,only:omp_get_max_threads,omp_get_thread_num
  use mpi,only:MPI_Comm_size,MPI_Allreduce,MPI_Bcast,MPI_Allgather,MPI_Comm_split,MPI_Allgatherv, &
- MPI_Abort,MPI_Gatherv,MPI_Comm_free,MPI_Send,MPI_Recv,MPI_COMM_NULL,MPI_INTEGER,MPI_MAX, &
- MPI_DOUBLE_COMPLEX,MPI_STATUS_SIZE
- use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ MPI_Gatherv,MPI_Comm_free,MPI_Send,MPI_Recv,MPI_COMM_NULL,MPI_INTEGER,MPI_MAX, &
+ MPI_DOUBLE_COMPLEX,MPI_STATUS_SIZE,MPI_STATUS_IGNORE
  use exx_spinor_wave_fft,only:wave_fft_plans,wave_fft_create,wave_fft_execute,wave_fft_destroy
  use exx_k_exchange,only:exx_k_kernel
  use exx_symmetry,only:s_exx_symmetry_map,symmetry_spin_rotation
  use exx_worker_layout,only:choose_worker_layout,choose_balanced_strips
+ use exx_blas_threads,only:exx_blas_thread_control
  implicit none
  private
  include 'fftw3.f03'
- public::apply_wave_workers
+ public::apply_wave_workers,release_worker_fft
+ type(wave_fft_plans),save::fft_plans
 contains
+ subroutine release_worker_fft
+ call wave_fft_destroy(fft_plans)
+ end subroutine
  subroutine apply_wave_workers(op,map,es,target,action,starts,counts,rep_start,rank,comm,ierr, &
   payload,pairwork,densitywork,contractwork,scratchbytes,tile_divisor,rprime_group_count,balanced_pairs)
  implicit none
@@ -34,6 +40,13 @@ contains
  integer::nc,np,ng,nk,nr,nt,nsym,b,chunk,divisor,width,widthmax,base,rows,nfirst,lo,nbatch
  integer::s,g,i,j,k,p,r,c,sl,sr,so,st,gi,gj,kg,q,owner_rank,jlocal,opid,d,nd,ndmax,totaldest
  integer::e,bad,globalbad,col,ncols,column_comm,fft_threads
+ integer::contract_threads,contract_team,thread,requested_column_groups
+ integer::density_threads
+#ifdef HAVE_EXX_OPENBLAS_THREADS
+ integer::density_blas_state(3)
+#endif
+ integer::row_comm,row_group,row_leader,row_members,jfirst,jcount,message_count,k_batch
+ integer,allocatable::row_leaders(:)
  integer::settings(15),expected_settings(15)
  integer::column_groups,row_groups,row_rank,column_rank,group_col,column_base,col_g,ncols_g, &
  ksource,delta(3),idx(3),cc(3),source_g,global_k,ii
@@ -41,14 +54,15 @@ contains
  integer,allocatable::forward(:,:),wrap(:,:,:),owner(:),operation(:),first(:),kperm(:,:),lookup(:),inverse(:)
  integer,allocatable::repstarts(:),repcounts(:),widths(:),dest(:),dr(:),destcounts(:),displs(:),alldest(:)
  integer,allocatable::datacounts(:),datadispls(:),expected_layout(:)
+ integer,allocatable::rep_owner(:)
  complex(8),allocatable::gauge(:,:),spin(:,:,:),rowbuf(:,:,:),rowwf(:,:,:,:),colbuf(:,:,:),tbuf(:,:,:)
- complex(8),allocatable::col_owned(:,:,:),target_owned(:,:,:)
- complex(8),allocatable::partial(:,:,:,:),packed(:),gathered(:),row(:,:),contracted(:,:),tm(:,:)
+ complex(8),allocatable::target_owned(:,:,:,:)
+ complex(8),allocatable::row_message(:,:,:)
+ complex(8),allocatable::partial(:,:,:,:),packed(:),gathered(:),row(:,:),contracted(:,:)
  complex(8),allocatable,target::rho(:,:,:,:)
- complex(8)::coefficient
+ complex(8)::coefficient,output_phase
  complex(8),parameter::one=(1d0,0d0),zero=(0d0,0d0)
  real(8)::length(3),pi,k0(3),v(3),scaled(3),angle
- type(wave_fft_plans)::fft_plans
  interface
  subroutine zgemm(ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc)
  implicit none
@@ -59,6 +73,7 @@ contains
  end subroutine
  end interface
  column_comm=MPI_COMM_NULL
+ row_comm=MPI_COMM_NULL
  ierr=1;payload=0;pairwork=0;densitywork=0;contractwork=0;scratchbytes=0;action=zero
  call MPI_Comm_size(comm,np,e)
  bad=0
@@ -83,7 +98,6 @@ contains
  else
  bad=1
  endif
- if(.not.spinor_values_are_finite(target).or..not.spinor_values_are_finite(es))bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
  allocate(expected_layout(2*np));expected_layout=[starts,counts]
@@ -96,13 +110,19 @@ contains
  i=size(target,3);call MPI_Allgather(i,1,MPI_INTEGER,repcounts,1,MPI_INTEGER,comm,e)
  width=size(es,2);call MPI_Allgather(width,1,MPI_INTEGER,widths,1,MPI_INTEGER,comm,e)
  widthmax=maxval(widths)
- do j=1,nr
- i=0
+ allocate(rep_owner(nr))
+ rep_owner=-1
  do p=1,np
- if(j>=repstarts(p).and.j<repstarts(p)+repcounts(p))i=i+1
+ if(repcounts(p)==0)cycle
+ i=repstarts(p);j=i+repcounts(p)-1
+ if(i<1.or.j>nr.or.j<i)then
+ bad=1
+ cycle
+ endif
+ if(any(rep_owner(i:j)/=-1))bad=1
+ rep_owner(i:j)=p-1
  enddo
- if(i/=1)bad=1
- enddo
+ if(any(rep_owner<0))bad=1
  if(rep_start<1.or.rep_start+size(target,3)>nr+1)then
  bad=1
  else
@@ -183,11 +203,17 @@ contains
  ! Select only after counting actual symmetry-reduced r rows. K ownership is independent.
  allocate(leaders(np),group_sizes(np));leaders=0;group_sizes=0
  if(balanced)then
+ requested_column_groups=column_groups
  allocate(balanced_row(np),balanced_col(np),balanced_count(np),balanced_group(np))
  call choose_balanced_strips(nfirst,ng,nk,nc,np,balanced_row,balanced_col,balanced_count,balanced_group, &
   leaders,column_groups,chunk,peak_pairs,active_ranks,bad)
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
- if(globalbad/=0)return
+ if(globalbad/=0)then
+ balanced=.false.
+ column_groups=requested_column_groups
+ endif
+ endif
+ if(balanced)then
  b=1;row_groups=nfirst;column_rank=balanced_group(rank+1);row_rank=balanced_row(rank+1)-1
  do p=1,np
  group_sizes(balanced_group(p)+1)=group_sizes(balanced_group(p)+1)+1
@@ -210,23 +236,83 @@ contains
  if(rank==0)print *,'WAVE_LAYOUT_R_RPRIME_PEAK_ACTIVE',nfirst,ng,peak_pairs,active_ranks
  if(rank==0)print *,'WAVE_BATCH_ROWS_COLUMNS_GROUPS',b,chunk,row_groups,column_groups
  ndmax=b*nsym
- allocate(rowbuf(row_capacity,widthmax,nc),rowwf(b,widthmax,nk,nc),colbuf(chunk,widthmax,nc),tbuf(chunk,nt,nc))
- allocate(col_owned(chunk,widthmax,nc),target_owned(chunk,nt,nc))
+ contract_threads=1
+#if defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_OPENBLAS_THREADS) || defined(HAVE_EXX_FUJITSU_THREADS)
+ !$ contract_threads=min(ndmax,omp_get_max_threads())
+#endif
+ k_batch=min(16,maxval(counts))
+ allocate(rowbuf(row_capacity,widthmax,nc),rowwf(b,widthmax,nk,nc),colbuf(chunk,widthmax,nc*k_batch),tbuf(chunk,nt,nc))
+ allocate(target_owned(chunk,nt,nc,nsym))
  allocate(rho(b,chunk,nk,nc*nc),partial(ndmax,nt,nc,nr),dest(ndmax),dr(ndmax))
  allocate(destcounts(np),displs(np),datacounts(np),datadispls(np),alldest(np*ndmax))
- allocate(packed(ndmax*nt*nc),gathered(np*ndmax*nt*nc),row(1,chunk),tm(chunk,nt),contracted(1,nt))
+ allocate(packed(ndmax*nt*nc),gathered(np*ndmax*nt*nc),row(chunk,contract_threads),contracted(nt,contract_threads))
  scratchbytes=16_int64*(size(rowbuf,kind=int64)+size(rowwf,kind=int64)+size(colbuf,kind=int64)+ &
- size(tbuf,kind=int64)+size(col_owned,kind=int64)+size(target_owned,kind=int64)+size(rho,kind=int64)+ &
+ size(tbuf,kind=int64)+size(target_owned,kind=int64)+size(rho,kind=int64)+ &
  size(partial,kind=int64)+size(packed,kind=int64)+ &
- size(gathered,kind=int64)+size(row,kind=int64)+size(tm,kind=int64)+size(contracted,kind=int64))
+ size(gathered,kind=int64)+size(row,kind=int64)+size(contracted,kind=int64))
  call wave_fft_create(fft_plans,op%mesh,rho,bad)
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)goto 900
  call MPI_Comm_split(comm,column_rank,row_rank,column_comm,e)
+ if(balanced)then
+ allocate(row_leaders(row_groups))
+ do p=np,1,-1
+ row_leaders(balanced_row(p))=p-1
+ enddo
+ call MPI_Comm_split(comm,row_rank,rank,row_comm,e)
+ call MPI_Comm_size(row_comm,row_members,e)
+ allocate(row_message(widthmax,nc,k_batch))
+ scratchbytes=scratchbytes+16_int64*size(row_message,kind=int64)
+ endif
+ density_threads=1
+#if defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_OPENBLAS_THREADS) || defined(HAVE_EXX_FUJITSU_THREADS)
+ !$ density_threads=min(k_batch,omp_get_max_threads())
+#endif
+#ifdef HAVE_EXX_OPENBLAS_THREADS
+ ! OpenBLAS uses process-wide control; set and restore it outside the teams.
+ density_blas_state=0
+ if(max(density_threads,contract_threads)>1)then
+ call exx_blas_thread_control(1,density_blas_state)
+ if(density_blas_state(1)==0)then
+ density_threads=1
+ contract_threads=1
+ endif
+ endif
+#endif
  do base=1,nfirst,row_stride
  lo=base+row_rank*b;rows=max(0,min(b,nfirst-lo+1));nbatch=min(row_groups*b,nfirst-base+1)
  rowwf=zero
- ! Only a small row tile is broadcast; retain only this worker's rows.
+ if(balanced)then
+ do p=0,np-1
+ do jfirst=1,counts(p+1),size(row_message,3)
+ jcount=min(size(row_message,3),counts(p+1)-jfirst+1)
+ message_count=widthmax*nc*jcount
+ do row_group=1,row_groups
+ row_leader=row_leaders(row_group)
+ if(rank==p)then
+ gi=first(base+row_group-1)
+ row_message(:,:,:jcount)=zero
+ do j=1,jcount;do c=1,nc
+ row_message(:width,c,j)=es(gi+(c-1)*ng,:,jfirst+j-1)*op%phase(gi,jfirst+j-1)
+ enddo;enddo
+ if(p/=row_leader)then
+ call MPI_Send(row_message,message_count,MPI_DOUBLE_COMPLEX,row_leader,700,comm,e)
+ payload=payload+16_int64*message_count
+ endif
+ else if(rank==row_leader)then
+ call MPI_Recv(row_message,message_count,MPI_DOUBLE_COMPLEX,p,700,comm,MPI_STATUS_IGNORE,e)
+ endif
+ if(row_rank+1==row_group)then
+ call MPI_Bcast(row_message,message_count,MPI_DOUBLE_COMPLEX,0,row_comm,e)
+ if(rank==row_leader)payload=payload+16_int64*message_count*(row_members-1)
+ do j=1,jcount
+ kg=starts(p+1)+jfirst+j-2
+ rowwf(1,:,kg,:)=row_message(:,:,j)
+ enddo
+ endif
+ enddo
+ enddo;enddo
+ else
  do p=0,np-1;do j=1,counts(p+1)
  kg=starts(p+1)+j-1;rowbuf=zero
  if(rank==p)then
@@ -239,6 +325,7 @@ contains
  if(rank==p)payload=payload+int(size(rowbuf),int64)*16*(np-1)
  if(rows>0)rowwf(:rows,:,kg,:)=rowbuf(row_rank*b+1:row_rank*b+rows,:,:)
  enddo;enddo
+ endif
  nd=0
  do d=1,ng
  if(owner(d)<lo.or.owner(d)>=lo+rows)cycle
@@ -258,42 +345,58 @@ contains
  endif
  rho=zero
  ! Stream each full-k source column tile, never all source columns/full WFs.
- do p=0,np-1;do j=1,counts(p+1)
- kg=starts(p+1)+j-1
+ do p=0,np-1;do jfirst=1,counts(p+1),k_batch
+ jcount=min(k_batch,counts(p+1)-jfirst+1)
  do group_col=0,column_groups-1
  col_g=column_base+group_col*chunk;ncols_g=max(0,min(chunk,ng-col_g+1))
  if(balanced)then
  col_g=balanced_col(leaders(group_col+1)+1);ncols_g=balanced_count(leaders(group_col+1)+1)
- endif;colbuf=zero
- if(rank==p)then
- do c=1,nc;do g=1,ncols_g
- gi=col_g+g-1;colbuf(g,:width,c)=es(gi+(c-1)*ng,:,j)*op%phase(gi,j)
- enddo;enddo
  endif
- call route_column(colbuf,p,group_col,701)
- if(group_col==column_rank)col_owned=colbuf
- enddo
+ if(rank==p)then
+ colbuf(:,:,:nc*jcount)=zero
+ do j=1,jcount;do c=1,nc;do g=1,ncols_g
+ gi=col_g+g-1
+ colbuf(g,:width,(j-1)*nc+c)=es(gi+(c-1)*ng,:,jfirst+j-1)*op%phase(gi,jfirst+j-1)
+ enddo;enddo;enddo
+ endif
+ call route_column(colbuf(:,:,:nc*jcount),p,group_col,701)
+ if(group_col/=column_rank)cycle
+ if(rows==0.or.ncols==0)cycle
+ ! Each k point writes to a distinct rho plane. MPI runs on the caller.
+ !$omp parallel if(min(jcount,density_threads)>1) num_threads(min(jcount,density_threads)) private(kg,c,sl,sr)
+#if defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_FUJITSU_THREADS)
+ block
+ integer::density_blas_state(3)
+ call exx_blas_thread_control(1,density_blas_state)
+#endif
+ !$omp do schedule(static)
+ do j=1,jcount
+ kg=starts(p+1)+jfirst+j-2
  ki_block:block
  integer::ki
  ki=inverse(kg)
  do c=1,nc*nc
  sl=1+modulo(c-1,nc);sr=1+(c-1)/nc
- if(rows>0)call zgemm('N','C',rows,ncols,widthmax,one,rowwf(1,1,kg,sl),b, &
- col_owned(1,1,sr),chunk,zero,rho(1,1,ki,c),b)
- densitywork=densitywork+int(rows,int64)*ncols
+ call zgemm('N','C',rows,ncols,widthmax,one,rowwf(1,1,kg,sl),b, &
+ colbuf(1,1,(j-1)*nc+sr),chunk,zero,rho(1,1,ki,c),b)
  enddo
  end block ki_block
+ enddo
+ !$omp end do nowait
+#if defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_FUJITSU_THREADS)
+ call exx_blas_thread_control(0,density_blas_state)
+ end block
+#endif
+ !$omp end parallel
+ densitywork=densitywork+int(rows,int64)*ncols*jcount*nc*nc
+ enddo
  enddo;enddo
  call wave_fft_execute(fft_plans,rho,op%n,op%point,op%shift,op%kernel,first,lo,col,rows,ncols,fft_threads)
  if(base==1.and.column_base==1.and.rank==0)print *,'WAVE_FFT_OMP_THREADS',fft_threads
  pairwork=pairwork+4_int64*rows*ncols
- ! Stream one representative target/operation tile. All workers contract their own destinations.
+ ! Route all operations for one representative before threading over destinations.
  do gj=1,nr
- owner_rank=-1
- do p=0,np-1
- if(gj>=repstarts(p+1).and.gj<repstarts(p+1)+repcounts(p+1))owner_rank=p
- enddo
- if(owner_rank<0)call MPI_Abort(comm,91,e)
+ owner_rank=rep_owner(gj)
  global_k=map%first(gj)
  do opid=1,nsym
  do group_col=0,column_groups-1
@@ -310,39 +413,57 @@ contains
  enddo;enddo
  endif
  call route_column(tbuf,owner_rank,group_col,702)
- if(group_col==column_rank)target_owned=tbuf
+ if(group_col==column_rank)target_owned(:,:,:,opid)=tbuf
  enddo
+ enddo
+ if(nd==0.or.ncols==0)cycle
+ contract_team=min(nd,contract_threads)
+ !$omp parallel if(contract_team>1) num_threads(contract_team) &
+ !$omp private(d,opid,r,gi,ksource,q,c,sl,sr,g,source_g,ii,delta,angle,so,st,coefficient,output_phase,thread) &
+ !$omp reduction(+:contractwork)
+#if defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_FUJITSU_THREADS)
+ block
+ integer::contract_blas_state(3)
+ contract_blas_state=0
+ if(contract_team>1)call exx_blas_thread_control(1,contract_blas_state)
+#endif
+ !$omp do schedule(static)
  do i=1,nd
- d=dest(i);if(operation(d)/=opid)cycle
+ thread=1
+ !$ thread=omp_get_thread_num()+1
+ d=dest(i);opid=operation(d)
  r=dr(i);gi=first(lo+r-1);ksource=kperm(global_k,opid);q=inverse(ksource)
+ angle=sum((map%full_k(:,global_k)-k0)*map%h*op%point(:,d))
+ output_phase=exp(cmplx(0d0,-angle,8))
  do c=1,nc*nc
  sl=1+modulo(c-1,nc);sr=1+(c-1)/nc
  do g=1,ncols
  source_g=col+g-1;ii=forward(source_g,opid);delta=wrap(:,source_g,opid)-wrap(:,gi,opid)
  angle=sum(map%full_k(:,global_k)*length*delta)
- row(1,g)=rho(r,g,q,c)*exp(cmplx(0d0,angle,8))*gauge(d,opid)*conjg(gauge(ii,opid))
+ row(g,thread)=rho(r,g,q,c)*exp(cmplx(0d0,angle,8))*gauge(d,opid)*conjg(gauge(ii,opid))
  enddo
  do so=1,nc;do st=1,nc
  coefficient=spin(so,sl,opid)*conjg(spin(st,sr,opid))
  ! Spin rotations can contain exact structural zeros; no numerical cutoff is applied.
  if(coefficient==zero)cycle
- tm=target_owned(:,:,st)
- call zgemm('N','N',1,nt,ncols,-coefficient/real(nk,8),row,1,tm,chunk,zero,contracted,1)
- angle=sum((map%full_k(:,global_k)-k0)*map%h*op%point(:,d))
- partial(i,:,so,gj)=partial(i,:,so,gj)+contracted(1,:)*exp(cmplx(0d0,-angle,8))
+ call zgemm('N','N',1,nt,ncols,-coefficient/real(nk,8),row(1,thread),1, &
+ target_owned(1,1,st,opid),chunk,zero,contracted(1,thread),1)
+ partial(i,:,so,gj)=partial(i,:,so,gj)+contracted(:,thread)*output_phase
  contractwork=contractwork+int(ncols,int64)*nt
  enddo;enddo
  enddo
  enddo
- enddo
+ !$omp end do nowait
+#if defined(HAVE_EXX_NVPL_THREADS) || defined(HAVE_EXX_FUJITSU_THREADS)
+ call exx_blas_thread_control(0,contract_blas_state)
+ end block
+#endif
+ !$omp end parallel
  enddo
  enddo ! columns
  ! Return bounded partial actions only to their k owner, no action replica on helpers.
  do gj=1,nr
- owner_rank=-1
- do p=0,np-1
- if(gj>=repstarts(p+1).and.gj<repstarts(p+1)+repcounts(p+1))owner_rank=p
- enddo
+ owner_rank=rep_owner(gj)
  packed(:nd*nt*nc)=reshape(partial(:nd,:,:,gj),[nd*nt*nc])
  call MPI_Gatherv(packed,nd*nt*nc,MPI_DOUBLE_COMPLEX,gathered,datacounts,datadispls, &
  MPI_DOUBLE_COMPLEX,owner_rank,comm,e)
@@ -359,12 +480,12 @@ contains
  endif
  enddo
  enddo ! first row batches
- bad=0
- if(.not.spinor_values_are_finite(action))bad=1
- call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
- if(globalbad==0)ierr=0
+#ifdef HAVE_EXX_OPENBLAS_THREADS
+ call exx_blas_thread_control(0,density_blas_state)
+#endif
+ ierr=0
 900 continue
- call wave_fft_destroy(fft_plans)
+ if(row_comm/=MPI_COMM_NULL)call MPI_Comm_free(row_comm,e)
  if(column_comm/=MPI_COMM_NULL)call MPI_Comm_free(column_comm,e)
 contains
  subroutine route_column(tile,source,group,tag)
@@ -393,17 +514,4 @@ contains
  endif
  end subroutine
  end subroutine
- logical function spinor_values_are_finite(a) result(ok)
- implicit none
- complex(8),intent(in)::a(:,:,:)
- integer::i,j,k
- ok=.true.
- do k=1,size(a,3)
- do j=1,size(a,2)
- do i=1,size(a,1)
-  if(.not.ieee_is_finite(real(a(i,j,k))).or..not.ieee_is_finite(aimag(a(i,j,k))))ok=.false.
- enddo
- enddo
- enddo
- end function
 end module

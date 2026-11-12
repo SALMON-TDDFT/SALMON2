@@ -14,6 +14,7 @@ These rules apply to new and modified code. Existing legacy code may not fully c
 - Use Fortran and C as the default implementation languages.
 - Use Python only for proofs of concept. Implement any proof of concept that becomes production code or maintained tooling in Fortran or C.
 - Keep optional diagnostics outside the HPC job's execution path. Missing or failed diagnostic records must not stop MPI, prevent an otherwise valid calculation from starting, or override its exit status.
+- Emit routine logs and diagnostics from MPI rank 0. Allow per-rank diagnostic output only in an explicitly enabled debug mode that is off by default.
 - Preserve the application's native error handling and the scheduler's time limits. Review prohibited eigensolver calls during development without adding a mandatory build or job audit.
 - Read the relevant existing implementation before changing code.
 - Follow this document for matters it specifies. Otherwise, prefer the style, module boundaries, data structures, and helper routines already used near the target code.

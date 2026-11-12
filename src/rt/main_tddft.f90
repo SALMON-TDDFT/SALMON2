@@ -32,7 +32,6 @@ use checkpoint_restart_sub
 use jellium, only: check_condition_jm
 use nvtx_wrapper
 use parallelization, only: nproc_id_global
-use misc_routines, only: step_wall_clock => get_wtime
 implicit none
 
 type(s_rgrid) :: lg
@@ -60,7 +59,6 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
-real(8) :: step_wall_start,step_wall_elapsed
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
@@ -100,7 +98,6 @@ call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,nt
-  step_wall_start=step_wall_clock()
   call nvtxStartRange('main loop', itt)
 
   ! Initialization always loads spsi_in, also for an odd restart step Mit.
@@ -114,8 +111,6 @@ TE : do itt=Mit+1,nt
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
 
-  step_wall_elapsed=step_wall_clock()-step_wall_start
-  write(*,'(a,2i10,es24.15)') 'STEP_WALL rank/step/seconds: ',nproc_id_global,itt,step_wall_elapsed
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   ! timer_now is a local elapsed duration; absolute cross-node clock offsets cancel.
   is_shutdown_time   = (time_shutdown > 0d0) .and. (timer_now(LOG_TOTAL) > time_shutdown)

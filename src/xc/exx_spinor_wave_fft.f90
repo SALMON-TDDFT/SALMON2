@@ -19,14 +19,21 @@ contains
  integer,intent(out)::ierr
  complex(c_double_complex),pointer,contiguous::flat(:)
  integer::workers,w,dims(3),start,flags
- call wave_fft_destroy(plans)
  ierr=1
  if(any(mesh<1).or.size(rho,1)<1.or.size(rho,2)<1.or.(size(rho,4)/=1.and.size(rho,4)/=4))return
  if(product(mesh)/=size(rho,3))return
- plans%batch=size(rho,1)*size(rho,2);plans%nk=size(rho,3);plans%mesh=mesh
  workers=1
  !$ workers=omp_get_max_threads()
- workers=max(1,min(workers,plans%batch))
+ workers=max(1,min(workers,size(rho,1)*size(rho,2)))
+ if(allocated(plans%forward))then
+ if(plans%batch==size(rho,1)*size(rho,2).and.plans%nk==size(rho,3).and. &
+    all(plans%mesh==mesh).and.size(plans%forward)==workers)then
+ ierr=0
+ return
+ endif
+ call wave_fft_destroy(plans)
+ endif
+ plans%batch=size(rho,1)*size(rho,2);plans%nk=size(rho,3);plans%mesh=mesh
  allocate(plans%forward(workers),plans%backward(workers),plans%offset(workers),plans%count(workers))
  plans%forward=c_null_ptr;plans%backward=c_null_ptr
  call c_f_pointer(c_loc(rho),flat,[size(rho)])

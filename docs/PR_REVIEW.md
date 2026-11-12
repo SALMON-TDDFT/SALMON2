@@ -9,7 +9,7 @@ uses only one small Si system through the existing420 GS /421 RT cases.
 
 | Area | Main entry points | Review focus |
 |---|---|---|
-| Build and safeguards | `CMakeLists.txt`, `cmakefiles/`, `tools/check_forbidden_eigensolvers.py` | CPU defaults, optional-library linkage, source/object guards |
+| Build | `CMakeLists.txt`, `cmakefiles/` | CPU defaults and optional-library linkage |
 | Native hybrid exchange | `src/xc/exx_native.f90`, `exx_k_exchange.f90`, `exx_ace.f90`, `hybrid_semilocal.f90` | kernel/semilocal consistency and distributed ownership |
 | Symmetry and worker layouts | `exx_symmetry.f90`, `exx_spinor_wave_workers.f90`, `exx_worker_layout.f90`, `exx_fft_consensus.f90` | scalar/SOC reconstruction, exact coverage and collective failures |
 | RT and restart | `src/rt/`, `src/io/`, `src/xc/exx_factor_history.f90` | propagation, finite-temperature/occupation constraints and saved-state compatibility |
@@ -19,6 +19,13 @@ uses only one small Si system through the existing420 GS /421 RT cases.
 Some optional exchange/functional paths share these dependencies. No unrelated
 runtime source module was removed merely to reduce the file count. Input changes
 and restrictions are documented under [inputs](inputs/hse.md).
+
+## Standalone Si512 snapshot
+
+The adopted Si512 owner-exchange modules are preserved separately under
+[modules/si512_owner](../modules/si512_owner/README.md). They are not linked into
+the SALMON runtime; their sampled-tile validation does not establish native RT
+or SOC integration. Pending optimization candidates are excluded.
 
 ## What is deliberately excluded
 
