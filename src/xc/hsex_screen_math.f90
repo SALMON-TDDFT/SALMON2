@@ -3,7 +3,7 @@ module hsex_screen_math
   implicit none
   private
   public :: screen_sites,screen_geometry,screen_forms,screen_assemble,screen_channels
-  public :: screen_metal_head,screen_transform,screen_population,screen_finite
+  public :: screen_metal_head,screen_transform,screen_population,screen_finite,screen_inverse
   interface screen_finite
     module procedure finite_real,finite_complex,finite_real2,finite_complex2,finite_complex3
   end interface
@@ -124,6 +124,53 @@ contains
     enddo
   end subroutine
 
+  ! Static dielectric matrices are Hermitian. Avoid complex LU reciprocal
+  ! kernels that raise spurious IEEE exceptions for real diagonal pivots.
+  subroutine screen_inverse(matrix,inverse,status)
+    implicit none
+    complex(8),intent(in) :: matrix(:,:)
+    complex(8),intent(out) :: inverse(:,:)
+    integer,intent(out) :: status
+    complex(8),allocatable :: factor(:,:),work(:)
+    integer,allocatable :: piv(:)
+    integer :: n,i,j,info
+    real(8) :: norm,difference
+    status=1;inverse=0d0;n=size(matrix,1)
+    if(n<1.or.size(matrix,2)/=n.or.any(shape(inverse)/=[n,n]))return
+    if(.not.screen_finite(matrix))return
+    norm=1d0;difference=0d0
+    do j=1,n
+      do i=1,n
+        norm=max(norm,magnitude(matrix(i,j)))
+        difference=max(difference,magnitude(matrix(i,j)-conjg(matrix(j,i))))
+      enddo
+    enddo
+    if(difference>1d-10*norm)return
+    allocate(factor(n,n),piv(n),work(max(1,64*n)))
+    factor=matrix
+    do i=1,n
+      inverse(i,i)=1d0
+    enddo
+    call zhetrf('L',n,factor,n,piv,work,size(work),info)
+    if(info/=0)return
+    call zhetrs('L',n,n,factor,n,piv,inverse,n,info)
+    if(info/=0.or..not.screen_finite(inverse))return
+    status=0
+  contains
+    real(8) function magnitude(z)
+      implicit none
+      complex(8),intent(in) :: z
+      real(8) :: scale,a,b,square
+      ! Relaxed complex ABS may divide by zero for z=0 on Fujitsu.
+      ! Scaling by at least TINY keeps even a reciprocal transformation finite.
+      a=abs(real(z,8));b=abs(aimag(z));magnitude=0d0
+      if(max(a,b)==0d0)return
+      scale=max(a,b,tiny(1d0));square=(a/scale)**2+(b/scale)**2
+      ! The floor only affects zero if the compiler speculates past RETURN.
+      magnitude=scale*sqrt(max(square,tiny(1d0)))
+    end function magnitude
+  end subroutine screen_inverse
+
   subroutine screen_assemble(n,boxes,q,rec,vol,nk,chi,pump,mat,head,qhead,status)
     implicit none
     integer,intent(in)::n(3),boxes,nk
@@ -135,7 +182,6 @@ contains
     integer,intent(out)::status
     complex(8),allocatable::eps(:,:),inv(:,:),forms(:,:),tmp(:,:),work(:)
     real(8),allocatable::b(:),q2(:),levels(:),rwork(:)
-    integer,allocatable::piv(:)
     integer::g,i,j,l,na,info
     g=size(q,2);na=boxes**3;status=1;head=0d0;qhead=0d0
     if(g<1.or.vol<=0d0.or.nk<1.or.boxes<1)return
@@ -143,7 +189,7 @@ contains
     if(.not.screen_finite(chi))return
     if(.not.screen_finite(q))return
     if(.not.screen_finite(rec).or..not.screen_finite([vol]))return
-    allocate(eps(g,g),inv(g,g),forms(na,g),tmp(na,g),b(g),q2(g),piv(g))
+    allocate(eps(g,g),inv(g,g),forms(na,g),tmp(na,g),b(g),q2(g))
     do i=1,g
       q2(i)=sum(matmul(rec,q(:,i))**2)
       b(i)=0d0
@@ -163,11 +209,7 @@ contains
       if(info/=0)return
       if(minval(levels)<=1d-10)return
     endif
-    inv=0d0
-    do i=1,g
-      inv(i,i)=1d0
-    enddo
-    call zgesv(g,g,eps,g,piv,inv,g,info)
+    call screen_inverse(eps,inv,info)
     if(info/=0)return
     if(all(q2>=1d-14))then
       l=minloc(q2,dim=1);head=real(inv(l,l),8);qhead=q2(l)

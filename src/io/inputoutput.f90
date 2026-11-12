@@ -3313,7 +3313,6 @@ contains
          .not.ieee_is_finite(hsex_w_head_tol).or..not.ieee_is_finite(hsex_w_eta_tol)) &
          error stop 'nonfinite screening input'
       if(all(hsex_w_qgrid==0))hsex_w_qgrid=num_kgrid
-      if(spinor_gs_screen.and.any(hsex_w_qgrid<6))error stop 'spinor metal W requires q mesh >=6 in every direction'
       if(any(hsex_w_qgrid<1))error stop 'positive screening q grid required'
       if(any(mod(num_kgrid,hsex_w_qgrid)/=0).or.product(hsex_w_qgrid)<2)error stop 'screening q grid must divide k grid'
       if(.not.(hsex_w_cutoff>0d0.and.hsex_w_eta>0d0))error stop 'positive screening cutoff and eta required'

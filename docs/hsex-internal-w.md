@@ -21,6 +21,34 @@ k meshes and k-only MPI. It retains the real-space Hamiltonian, finite-grid box
 factors and local-field dielectric matrix. It does not require a large conduction
 manifold. Normal GS partial diagonalization still uses its configured empty states.
 
+For a filled gapped manifold, the native path computes the optical head and
+wings from occupied-state Sternheimer solves with the analytic real-space
+`dH/dk` action. This includes the finite-difference kinetic operator and the
+nonlocal pseudopotential, including spinors. An internal RT update also includes
+the derivative of the staged projected HSEX operator. The dielectric tensor
+uses the full local-field Schur complement. Its tensor and the shortest-q
+dielectric estimate are printed separately as `HSEX_W_EPS_LONGWAVE` and
+`HSEX_W_EPS_FINITE_Q`.
+
+The Gamma cell uses the existing equal-volume sphere. The analytic head,
+wings and constant finite-G body are projected onto the auxiliary boxes and
+integrated with successively refined angular and radial quadratures. The
+relative change of the projected cell average must be below 1e-7. This is a
+long-wavelength cell approximation, whose accuracy still depends on the
+electronic k mesh. The optical tensor also controls the interpolation tail.
+Partially occupied spinor metals use the guarded metallic closure.
+
+Static dielectric inversions check Hermiticity and use LAPACK `ZHETRF/ZHETRS`.
+This avoids the spurious invalid/zero-divide exceptions reproduced in the
+complex LU path on macOS, without disabling IEEE exception traps. The dedicated inverse
+regression enables invalid, zero-divide and overflow traps around the production
+inversion. Reference arithmetic stays outside this region because relaxed
+complex division/ABS can itself raise flags on some compilers. The optical
+regression also checks an indefinite two-by-two pivot and rejects singular,
+non-Hermitian and nonfinite matrices. Hermiticity uses scaled real-component norms, retaining the same 1e-10
+relative threshold while avoiding relaxed complex-ABS exceptions at zero.
+Finite-q screening remains checked against an independent LU-based reference.
+
 For finite-temperature PZ SOC ground states, `yn_hsex_prepare_w='y'` and
 `yn_hsex_head_only='y'` run the static Sternheimer solver only at the finite-q
 points in the nested head-fit stencils. Source orbitals remain k-distributed.
@@ -75,7 +103,13 @@ The complete Si integration test is documented in
 `testsuites/hsex/internal_si/README.md`. It checks GS W, projected pump W,
 restart and propagation with external Python-reference W at 4 MPI × 12 OMP.
 Its small mesh and short trajectory test implementation equivalence, not Si
-spectral convergence. The default integration fixture now uses eta=0.001 Ha;
+spectral convergence. The legacy Python oracle retains its finite-q Gamma
+rule. When the analytic closure is active, this oracle is compared at every
+nonzero q. The optical unit test independently checks Sternheimer against an
+explicit conduction-state sum, the local-field finite-q limit, and the
+isotropic mini-sphere normalization. The external replacement test reads the
+native updated W to check propagation through the file-loading path.
+The default integration fixture now uses eta=0.001 Ha;
 `--eta 0.01` retains the earlier fixture. Neither the eta convergence check nor
 the W/current comparison thresholds are relaxed.
 

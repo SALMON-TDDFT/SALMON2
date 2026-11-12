@@ -15,6 +15,8 @@ with tempfile.TemporaryDirectory(prefix='salmon-fortran-screen-') as temporary:
     subprocess.run(['bash', str(root/'testsuites/hsex/build_fortran_screen.sh'), str(build)],
                    env=env, check=True)
     subprocess.run([str(build/'static_sternheimer')], check=True)
+    subprocess.run([str(build/'longwave')], check=True)
+    subprocess.run([str(build/'dielectric_inverse')], check=True)
     for script, executable in [('test_fortran_screen.py', 'assembly'),
                                ('test_fortran_screen_head.py', 'head')]:
         subprocess.run([sys.executable, str(root/'testsuites/hsex'/script), str(build/executable)], check=True)

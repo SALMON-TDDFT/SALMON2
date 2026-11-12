@@ -27,7 +27,14 @@ program test_pipeline
   allocate(w(count,nk),full(boxes**6,nk),part(boxes**6,nk))
   call get_command_argument(3,mode)
   distributed=mode=='distributed'
-  if(mode=='dense-distributed')then
+  if(mode=='insulating-distributed')then
+    call screen_compute(n,mesh,qmesh,boxes,cutoff,cell,k,levels,pop,states(:,:,lo:hi),nv,eta,.05d0,.02d0,threads, &
+      lo,hi,MPI_COMM_WORLD,rank,np,load_h,first,count,w,status,apply_h,0.002d0, &
+      distributed_states=.true.,apply_velocity=zero_velocity)
+  else if(mode=='insulating-replicated')then
+    call screen_compute(n,mesh,qmesh,boxes,cutoff,cell,k,levels,pop,states,nv,eta,.05d0,.02d0,threads, &
+      lo,hi,MPI_COMM_WORLD,rank,np,load_h,first,count,w,status,apply_h,0.002d0,apply_velocity=zero_velocity)
+  else if(mode=='dense-distributed')then
     call screen_compute(n,mesh,qmesh,boxes,cutoff,cell,k,levels,pop,states(:,:,lo:hi),nv,eta,.05d0,.02d0,threads, &
       lo,hi,MPI_COMM_WORLD,rank,np,load_h,first,count,w,status,distributed_states=.true.)
   else if(distributed)then
@@ -53,6 +60,14 @@ program test_pipeline
   endif
   call MPI_Finalize(err)
 contains
+  subroutine zero_velocity(j,x,y,status)
+    implicit none
+    integer,intent(in) :: j
+    complex(8),intent(in) :: x(:)
+    complex(8),intent(out) :: y(:,:)
+    integer,intent(out) :: status
+    y=0d0;status=0
+  end subroutine
   subroutine apply_h(j,x,y,status)
     implicit none
     integer,intent(in)::j

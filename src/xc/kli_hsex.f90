@@ -350,6 +350,7 @@ contains
     use hsex_internal, only: hsex_compute_internal,hsex_save_internal
     use salmon_global, only: hsex_w_eta,nelec
     use communication, only: comm_bcast,comm_is_root
+    use hsex_k_fft, only: hsex_backward
     implicit none
     integer,intent(in) :: step
     type(s_dft_system),intent(in) :: sys
@@ -363,8 +364,9 @@ contains
     type(s_sendrecv_grid),intent(inout) :: srg
     type(s_pp_grid),intent(in) :: ppg
     real(8),allocatable :: next_w(:,:),pop(:,:),vref(:)
+    complex(8),allocatable :: kernel(:,:),act(:,:),derivative(:,:,:,:)
     real(8) :: cell(3,3),k(3,nk),ions(3,sys%nion),eref
-    integer :: ik,u,ios,dims(9),boxes
+    integer :: ik,u,ios,dims(9),boxes,axis,l
     character(4) :: magic
     character(64) :: path
     allocate(pop(sys%no,nk),vref(ng))
@@ -372,8 +374,20 @@ contains
       pop(:,ik)=weighted_occ(:,ik)/sys%wtk(ik)
     enddo
     boxes=nint(real(na,8)**(1d0/3d0))
+    allocate(kernel(size(w,1),nk),act(na*na,info%ik_s:info%ik_e),derivative(na,na,3,info%ik_s:info%ik_e))
+    do axis=1,3
+      do l=1,nk
+        kernel(:,l)=exchange_kernel(:,l)*cmplx(0d0,translation(axis,l),8)
+      enddo
+      call hsex_backward(kernel,offset,info%icomm_ko,act)
+      do ik=info%ik_s,info%ik_e
+        derivative(:,:,axis,ik)=reshape(act(:,ik),[na,na])
+        derivative(:,:,axis,ik)=.5d0*(derivative(:,:,axis,ik)+conjg(transpose(derivative(:,:,axis,ik))))
+      enddo
+    enddo
+    deallocate(kernel,act)
     call hsex_compute_internal(sys,mg,info,states,x,hx,eigen,pop,nelec/2,boxes,hsex_w_eta, &
-      vl,stencil,srg,ppg,pair_start,size(w,1),next_w)
+      vl,stencil,srg,ppg,pair_start,size(w,1),next_w,extra_velocity)
     ios=0
     if(comm_is_root(info%id_ko))then
       open(newunit=u,file='hsex-w.bin',status='old',access='stream',form='unformatted',iostat=ios)
@@ -390,6 +404,28 @@ contains
     call move_alloc(next_w,w)
     have_endpoint=.false.
     if(comm_is_root(info%id_ko))write(*,*)'HSEX_INTERNAL_W_UPDATE_PASS step=',step,' projection states=',sys%no
+  contains
+    subroutine extra_velocity(index,vector,action,status)
+      implicit none
+      integer,intent(in) :: index
+      complex(8),intent(in) :: vector(:)
+      complex(8),intent(out) :: action(:,:)
+      integer,intent(out) :: status
+      complex(8) :: p(na,1),rp(na,1),hp(na),dp(na)
+      integer :: axis,g
+      call project_grid(reshape(vector,[ng,1]),projector(:,index),p)
+      hp=matmul(sigma(:,:,index),p(:,1))
+      do axis=1,3
+        call project_grid(reshape(vector,[ng,1]), &
+          projector(:,index)*(local_xyz(:,axis)+position(axis,box)),rp)
+        dp=matmul(derivative(:,:,axis,index),p(:,1))+cmplx(0d0,1d0,8)*matmul(sigma(:,:,index),rp(:,1))
+        do g=1,ng
+          action(g,axis)=conjg(projector(g,index))*(dp(box(g))- &
+            cmplx(0d0,local_xyz(g,axis)+position(axis,box(g)),8)*hp(box(g)))
+        enddo
+      enddo
+      status=0
+    end subroutine extra_velocity
   end subroutine hsex_update_internal
 
   subroutine hsex_replace_w(path,step,sys,mg,info,eigen,weighted_occ)

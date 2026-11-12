@@ -25,7 +25,7 @@ if test "$stage" = restart; then
   ln -s "$root/gs/data_for_restart" restart
 fi
 if test "$stage" = external; then
-  cp "$root/reference/pump.bin" python-pump.bin
+  cp "$root/updated/hsex-updated-000000001.bin" validated-pump.bin
 fi
 # Redirect on each rank: Fujitsu mpiexec need not forward launcher stdin.
 status=0

@@ -19,15 +19,20 @@ $fc $flags -c "$root/src/parallel/communication.f90" -o comm.o
 $fc $flags $native_flags -c "$root/tools/hsex/native/q_response.f90" -o q.o
 $fc $flags -c "$root/src/xc/hsex_screen_math.f90" -o math.o
 $fc $flags -c "$root/src/xc/hsex_sternheimer.f90" -o sternheimer.o
+$fc $flags -c "$root/src/xc/hsex_longwave.f90" -o longwave.o
 $fc $flags -c "$root/src/xc/hsex_screen_driver.f90" -o driver.o
 for name in driver head pipeline refine; do
   $fc $flags -c "$root/testsuites/hsex/fortran_screen_${name}.f90" -o "test_${name}.o"
 done
 $fc $flags -c "$root/testsuites/hsex/fortran_sternheimer_static.f90" -o test_static.o
+$fc $flags -c "$root/testsuites/hsex/fortran_longwave.f90" -o test_longwave.o
+$fc $flags -c "$root/testsuites/hsex/fortran_dielectric_inverse.f90" -o test_inverse.o
 python3 "$root/tools/check_forbidden_eigensolvers.py" --object-tree "$out"
 $fc $flags test_driver.o math.o $blas -o assembly
 $fc $flags test_head.o math.o $blas -o head
-$fc $flags test_pipeline.o driver.o sternheimer.o math.o q.o comm.o nvtx.o $blas -o pipeline
+$fc $flags test_pipeline.o driver.o longwave.o sternheimer.o math.o q.o comm.o nvtx.o $blas -o pipeline
 
 $fc $flags test_refine.o q.o $blas -o refine
 $fc $flags test_static.o sternheimer.o math.o $blas -o static_sternheimer
+$fc $flags test_longwave.o longwave.o math.o $blas -o longwave
+$fc $flags test_inverse.o math.o $blas -o dielectric_inverse

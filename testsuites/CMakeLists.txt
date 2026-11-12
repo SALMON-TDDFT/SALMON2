@@ -317,6 +317,10 @@ if(USE_HSE AND NOT CMAKE_CROSSCOMPILING)
           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_lattice_velocity.py
             --build ${CMAKE_BINARY_DIR} --ranks 1)
         set_tests_properties(hsex_lattice_velocity PROPERTIES LABELS "xc;hsex;integration" TIMEOUT 120)
+        add_test(NAME hsex_grid_velocity
+          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/hsex/test_grid_velocity.py
+            --build ${CMAKE_BINARY_DIR})
+        set_tests_properties(hsex_grid_velocity PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 120)
       endif()
       set_tests_properties(hsex_projected_velocity PROPERTIES LABELS "xc;hsex;unit" TIMEOUT 90)
     endif()

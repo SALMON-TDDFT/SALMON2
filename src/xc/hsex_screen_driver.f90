@@ -23,22 +23,32 @@ module hsex_screen_driver
       complex(8),intent(out)::y(:)
       integer,intent(out)::status
     end subroutine
+    subroutine velocity_action(j,x,y,status)
+      implicit none
+      integer,intent(in) :: j
+      complex(8),intent(in) :: x(:)
+      complex(8),intent(out) :: y(:,:)
+      integer,intent(out) :: status
+    end subroutine
   end interface
 contains
   subroutine screen_compute(n,mesh,qmesh,boxes,cutoff,cell,k,levels,pop,states,nv,eta,head_tol,eta_tol, &
-      nthreads,ik_s,ik_e,icomm,rank,nproc,load_h,first_pair,nlocal,w,status,apply_h,temperature,head_only,distributed_states)
+      nthreads,ik_s,ik_e,icomm,rank,nproc,load_h,first_pair,nlocal,w,status,apply_h,temperature,head_only, &
+      distributed_states,apply_velocity)
     use, intrinsic :: iso_fortran_env, only: error_unit,output_unit
     use communication, only: comm_summation,comm_bcast,comm_get_max,comm_is_root,comm_alltoallv_complex
     use hsex_screen_math, only: screen_sites,screen_geometry,screen_assemble,screen_population,screen_channels, &
       screen_metal_head,screen_forms,screen_transform,screen_finite
     use hsex_q_response, only: hsex_q_solve
     use hsex_sternheimer, only: sternheimer_band
+    use hsex_longwave, only: longwave_band,longwave_cell
     implicit none
     integer,intent(in)::n(3),mesh(3),qmesh(3),boxes,nv,nthreads,ik_s,ik_e,icomm,rank,nproc,first_pair,nlocal
     real(8),intent(in)::cutoff,cell(3,3),k(:,:),levels(:,:),pop(:,:),eta,head_tol,eta_tol
     complex(8),intent(in)::states(:,:,:)
     procedure(h_loader)::load_h
     procedure(h_action),optional::apply_h
+    procedure(velocity_action),optional :: apply_velocity
     real(8),intent(in),optional::temperature
     complex(8),allocatable::vertex(:,:),band_response(:,:)
     logical,intent(in),optional::head_only,distributed_states
@@ -62,6 +72,10 @@ contains
     complex(8),allocatable::buf(:,:,:),coarse_origin(:,:),coarse_point(:,:),current(:,:),partner(:,:)
     real(8),allocatable::Qcoords(:,:)
     logical::pump,insulating
+    logical :: optical
+    integer,allocatable :: optical_g(:,:),optical_reverse(:)
+    complex(8),allocatable :: optical_chi(:,:),optical_total(:,:),optical_h(:,:)
+    real(8) :: macro(3,3)
     integer(8)::clock_start,clock_response,clock_assembly,clock_end,clock_rate
     real(8)::timing(3),timing_max(3),max_residual
     call system_clock(clock_start,clock_rate)
@@ -126,6 +140,10 @@ contains
         if(any(levels(2:,:)-levels(:nb-1,:)<-1d-10)) local_error=1
         if(minval(pop)<-1d-10.or.maxval(pop)>1d0+1d-7) local_error=1
         if(abs(sum(pop)/nk-nv)>1d-4) local_error=1
+        if(nb>nv.and.present(apply_velocity))then
+          insulating=maxval(abs(pop(:nv,:)-1d0))<1d-12.and.maxval(abs(pop(nv+1:,:)))<1d-12
+          insulating=insulating.and.minval(levels(nv+1,:))-maxval(levels(nv,:))>1d-8
+        endif
       endif
     endif
     if(.not.screen_finite(states))local_error=1
@@ -133,6 +151,8 @@ contains
       if(any(pop(:nv,:)/=2d0).or.any(pop(nv+1:,:)/=0d0))local_error=1
       insulating=.true.
     endif
+    optical=insulating.and.present(apply_velocity)
+    if(only_head.and.optical)local_error=1
     if(comm_is_root(rank).and.pump.and.ncomponent==1)then
       write(*,'(a,l1,a,es12.4,a,es12.4)')'HSEX_W_POP insulating=',insulating, &
         ' max per-k missing=',maxval(abs(sum(pop,dim=1)-2*nv)), &
@@ -259,6 +279,23 @@ contains
       etas(1)=eta
       if(pump)etas(2)=eta/2d0
     endif
+    if(optical)then
+      mg=size(blocks(1)%g,2)-1
+      allocate(optical_g(3,mg),optical_reverse(mg+3),optical_chi(mg+3,mg+3),optical_total(mg+3,mg+3))
+      mg=0
+      do i=1,size(blocks(1)%g,2)
+        if(all(blocks(1)%g(:,i)==0))cycle
+        mg=mg+1;optical_g(:,mg)=blocks(1)%g(:,i)
+      enddo
+      optical_reverse(:3)=[1,2,3]
+      do i=1,mg
+        do a=1,mg
+          if(all(optical_g(:,a)==-optical_g(:,i)))optical_reverse(i+3)=a+3
+        enddo
+      enddo
+      optical_chi=0d0
+      if(.not.matrix_free)allocate(optical_h(ng,ng))
+    endif
     stage=50
     rmax=0d0
     k_slots=local_k
@@ -338,6 +375,9 @@ contains
         if(distributed)call comm_get_max(local_error,icomm)
         if(local_error/=0)exit
       endif
+      if(optical.and.matrix_free.and.j<=ik_e)call accumulate_optical()
+      if(distributed)call comm_get_max(local_error,icomm)
+      if(local_error/=0)exit
       beg=1
       do while(beg<=nq)
         if(.not.active_q(beg))then
@@ -511,6 +551,33 @@ contains
     einv=einv/i
     allocate(point(na,na),origin(na,na));point=0d0;origin=0d0
     stage=70
+    if(optical)then
+      call comm_summation(optical_chi,optical_total,size(optical_chi),icomm)
+      do b=1,size(optical_chi,2)
+        do a=1,size(optical_chi,1)
+          optical_chi(a,b)=optical_total(a,b)+merge(-1d0,1d0,(a<=3).neqv.(b<=3))* &
+            conjg(optical_total(optical_reverse(a),optical_reverse(b)))
+        enddo
+      enddo
+      if(comm_is_root(rank))then
+        call longwave_cell(n,boxes,optical_g,rec,vol,nk,optical_chi,macro,point,origin,local_error)
+        if(local_error==0)then
+          write(output_unit,'(a,3es18.9)')'HSEX_W_EPS_LONGWAVE diagonal ',(macro(a,a),a=1,3)
+          write(output_unit,'(a,es18.9)')'HSEX_W_EPS_FINITE_Q ',1d0/einv
+        else
+          write(error_unit,*)'HSEX_LONGWAVE_REJECT status=',local_error
+        endif
+      endif
+      call comm_get_max(local_error,icomm)
+      if(local_error/=0)then
+        status=stage
+        return
+      endif
+      call comm_bcast(macro,icomm,0)
+      call comm_bcast(point,icomm,0)
+      call comm_bcast(origin,icomm,0)
+      if(rank==blocks(1)%owner)blocks(1)%box(:,:,nc)=point
+    endif
     if(.not.insulating)then
       ! Gather only the finite-q head stencil, never the full Nq*Na^2 kernel.
       if(comm_is_root(rank))allocate(head_samples(na,na,nsel,2))
@@ -595,13 +662,13 @@ contains
       enddo
       deallocate(tail)
     endif
-    if(.not.insulating)then
+    if(.not.insulating.or.optical)then
       do i=1,nlocal
         ia=mod(first_pair+i-2,na)+1;ib=(first_pair+i-2)/na+1;values(i,1)=origin(ia,ib)
       enddo
     endif
     call screen_transform(values,mesh)
-    if(insulating)then
+    if(insulating.and..not.optical)then
       qc=(6d0*acos(-1d0)**2/(vol*nk))**(1d0/3d0)
       values=values+12d0*acos(-1d0)*einv/(qc*qc*vol*nk)
     endif
@@ -651,6 +718,11 @@ contains
       if(maxval(abs(h-transpose(conjg(h))))>1d-9)then
         local_error=1;return
       endif
+      if(optical)then
+        optical_h=h
+        call accumulate_optical()
+        if(local_error/=0)return
+      endif
       allocate(hu(ng,merge(nb,nv,pump)),gram(merge(nb,nv,pump),merge(nb,nv,pump)))
       i=size(hu,2)
       call zgemm('N','N',ng,i,ng,cmplx(1d0,0d0,8),h,ng,states(:,:,j-orbital_offset),ng,cmplx(0d0,0d0,8),hu,ng)
@@ -698,6 +770,46 @@ contains
       endif
       adj=transpose(conjg(adj))
     end subroutine prepare_dense_target
+
+    subroutine apply_longwave_target(vector,action,ierr)
+      implicit none
+      complex(8),intent(in) :: vector(:)
+      complex(8),intent(out) :: action(:)
+      integer,intent(out) :: ierr
+      if(matrix_free)then
+        call apply_h(j,vector,action,ierr)
+      else
+        action=matmul(optical_h,vector)
+        ierr=0
+      endif
+    end subroutine
+
+    subroutine accumulate_optical()
+      implicit none
+      complex(8) :: body(ng,size(optical_g,2)),velocity(ng,3),response(size(optical_chi,1),size(optical_chi,2))
+      integer :: band,g,site,comp,code
+      real(8) :: pos(3)
+      do band=1,nv
+        call apply_velocity(j,states(:,band,j-orbital_offset),velocity,code)
+        if(code/=0)then
+          local_error=1;return
+        endif
+        do g=1,size(optical_g,2)
+          do comp=1,ncomponent
+            do site=0,nreal-1
+              pos=dble([mod(site,n(1)),mod(site/n(1),n(2)),site/(n(1)*n(2))])/n
+              body(site+1+(comp-1)*nreal,g)=states(site+1+(comp-1)*nreal,band,j-orbital_offset)* &
+                exp(cmplx(0d0,2d0*acos(-1d0)*sum(pos*optical_g(:,g)),8))
+            enddo
+          enddo
+        enddo
+        call longwave_band(apply_longwave_target,states(:,:nv,j-orbital_offset),levels(band,j),velocity,body,response,code)
+        if(code/=0)then
+          local_error=1;return
+        endif
+        optical_chi=optical_chi+.5d0*pop(band,j)*response
+      enddo
+    end subroutine
 
     integer function source_k(destination,q_index) result(source_index)
       implicit none
@@ -823,7 +935,7 @@ contains
       complex(8),intent(out)::result(:)
       complex(8),allocatable::forms(:,:)
       real(8),allocatable::coords(:,:),bare(:)
-      real(8)::norm2
+      real(8)::norm2,cartesian_q(3)
       integer::g,count_g,p,left,right
       result=0d0
       if(.not.insulating)return
@@ -837,7 +949,12 @@ contains
         norm2=sum(matmul(rec,gall(:,g)+qfrac)**2)
         if(norm2<=1d-14.or.norm2>2d0*cutoff)cycle
         count_g=count_g+1;coords(:,count_g)=gall(:,g)+qfrac
-        bare(count_g)=4d0*acos(-1d0)*einv/(vol*norm2)
+        if(optical)then
+          cartesian_q=matmul(rec,coords(:,count_g))
+          bare(count_g)=4d0*acos(-1d0)/(vol*dot_product(cartesian_q,matmul(macro,cartesian_q)))
+        else
+          bare(count_g)=4d0*acos(-1d0)*einv/(vol*norm2)
+        endif
       enddo
       call screen_forms(n,boxes,coords,forms)
       do p=1,nlocal

@@ -4,9 +4,18 @@ module hsex_internal
   implicit none
   private
   public :: hsex_compute_internal,hsex_save_internal
+  abstract interface
+    subroutine extra_velocity_action(ik,vector,action,status)
+      implicit none
+      integer,intent(in) :: ik
+      complex(8),intent(in) :: vector(:)
+      complex(8),intent(out) :: action(:,:)
+      integer,intent(out) :: status
+    end subroutine
+  end interface
 contains
   subroutine hsex_compute_internal(sys,mg,info,states,x,hx,eigen,pop,nv,boxes,eta,vl,stencil,srg,ppg, &
-                                   first,nlocal,result)
+                                   first,nlocal,result,extra_velocity)
     use structures, only: s_dft_system,s_rgrid,s_parallel_info,s_orbital,s_scalar,s_stencil,s_pp_grid
     use sendrecv_grid, only: s_sendrecv_grid
     use hamiltonian, only: hpsi
@@ -27,6 +36,7 @@ contains
     type(s_stencil),intent(in) :: stencil
     type(s_sendrecv_grid),intent(inout) :: srg
     type(s_pp_grid),intent(in) :: ppg
+    procedure(extra_velocity_action),optional :: extra_velocity
     real(8),allocatable,intent(out) :: result(:,:)
     complex(8),allocatable :: screen_states(:,:,:)
     type(s_parallel_info) :: target_info
@@ -67,12 +77,12 @@ contains
       call screen_compute(n,num_kgrid,hsex_w_qgrid,boxes,hsex_w_cutoff,sys%primitive_a, &
       sys%vec_k(:,:sys%nk),eigen(:nkeep,:),pop(:nkeep,:),screen_states,nv,eta,hsex_w_head_tol,hsex_w_eta_tol,threads, &
       info%ik_s,info%ik_e,info%icomm_ko,info%id_ko,info%isize_ko,load_h,first,nlocal,result,status, &
-      apply_spinor,temperature,yn_hsex_head_only=='y',distributed_states=.true.)
+      apply_spinor,temperature,yn_hsex_head_only=='y',distributed_states=.true.,apply_velocity=velocity_total)
     else
       call screen_compute(n,num_kgrid,hsex_w_qgrid,boxes,hsex_w_cutoff,sys%primitive_a, &
       sys%vec_k(:,:sys%nk),eigen,pop,screen_states,nv,eta,hsex_w_head_tol,hsex_w_eta_tol,threads, &
       info%ik_s,info%ik_e,info%icomm_ko,info%id_ko,info%isize_ko,load_h,first,nlocal,result,status, &
-      distributed_states=.true.)
+      distributed_states=.true.,apply_velocity=velocity_total)
     endif
     call comm_get_max(status,info%icomm_ko)
     if(status/=0)then
@@ -80,6 +90,22 @@ contains
       error stop 'internal screening rejected W; previous W preserved'
     endif
   contains
+    subroutine velocity_total(index,vector,action,ierr)
+      use hsex_grid_velocity, only: grid_velocity
+      implicit none
+      integer,intent(in) :: index
+      complex(8),intent(in) :: vector(:)
+      complex(8),intent(out) :: action(:,:)
+      integer,intent(out) :: ierr
+      complex(8) :: extra(size(vector),3)
+      call grid_velocity(sys,mg,stencil,ppg,index,vector,action)
+      ierr=0
+      if(present(extra_velocity))then
+        call extra_velocity(index,vector,extra,ierr)
+        if(ierr/=0)return
+        action=action+extra
+      endif
+    end subroutine
     subroutine apply_spinor(index,vector,action,ierr)
       implicit none
       integer,intent(in) :: index

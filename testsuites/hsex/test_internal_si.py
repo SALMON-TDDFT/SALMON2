@@ -36,7 +36,7 @@ def prepare(args):
         'updated':("yn_hsex_update_w='y', hsex_screen_step=1",restart),
         'snapshot':("yn_hsex_update_w='n', hsex_screen_step=1",restart),
         'restart':("yn_hsex_update_w='y', hsex_screen_step=1",str(work/'updated/checkpoint_rt_000001')+'/'),
-        'external':("yn_hsex_update_w='n', hsex_screen_step=1, hsex_probe_w='python-pump.bin'",restart),
+        'external':("yn_hsex_update_w='n', hsex_screen_step=1, hsex_probe_w='validated-pump.bin'",restart),
     }
     for stage in ('gs',*variants):
         directory=work/stage;directory.mkdir()
@@ -85,7 +85,7 @@ def read_w(path):
     return data[:offset],np.frombuffer(data,'=f8',count=nk*na*na,offset=offset),data[end:]
 
 
-def compare_w(actual,reference):
+def compare_w(actual,reference,finite_q_only=False):
     ah,a,at=read_w(actual);bh,b,bt=read_w(reference)
     if ah!=bh:raise AssertionError(f'W grid/reference metadata differs: {actual}')
     if not np.isfinite(a).all() or not np.isfinite(b).all():raise AssertionError('Nonfinite W')
@@ -96,6 +96,13 @@ def compare_w(actual,reference):
         ta=np.frombuffer(at,'=f8',offset=8);tb=np.frombuffer(bt,'=f8',offset=8)
         if not np.isfinite(ta).all() or not np.isfinite(tb).all():raise AssertionError('Nonfinite pump metadata')
         np.testing.assert_allclose(ta,tb,rtol=0,atol=1e-7,equal_nan=False)
+    if finite_q_only:
+        # The legacy Python oracle uses a finite-q head. Compare every
+        # nonzero-q Fourier coefficient; the analytic Gamma closure has its
+        # independent explicit-state and Coulomb-integral unit tests.
+        nk=int(np.prod(np.frombuffer(ah,'=i4',count=9,offset=4)[3:6]))
+        a=a.reshape(nk,-1);b=b.reshape(nk,-1)
+        a=a-a.mean(axis=0);b=b-b.mean(axis=0)
     np.testing.assert_allclose(a,b,atol=ATOL,rtol=RTOL,equal_nan=False)
     return dict(max_absolute_error=float(np.max(abs(a-b))),
                 maximum_tolerance_ratio=float(np.max(abs(a-b)/(ATOL+RTOL*abs(b)))))
@@ -147,9 +154,13 @@ def check(args):
     if effect<=5*CURRENT_ATOL:raise AssertionError('W update has no resolved effect on current')
     gsref=args.gs_reference or p/'reference/gs.bin'
     pumpref=args.pump_reference or p/'reference/pump.bin'
-    report=dict(gs_w=compare_w(p/'gs/hsex-w.bin',gsref),
-        pump_w=compare_w(p/args.updated/'hsex-updated-000000001.bin',pumpref),
+    optical_gs='HSEX_W_EPS_LONGWAVE' in (p/'gs/run.log').read_text()
+    optical_pump='HSEX_W_EPS_LONGWAVE' in (p/args.updated/args.updated_log).read_text()
+    report=dict(gs_w=compare_w(p/'gs/hsex-w.bin',gsref,finite_q_only=optical_gs),
+        pump_w=compare_w(p/args.updated/'hsex-updated-000000001.bin',pumpref,finite_q_only=optical_pump),
         restart_current=compare_current(p/args.restart/'Si_rt.data',p/args.updated/'Si_rt.data',[2,3]))
+    report['analytic_gamma']=dict(gs=optical_gs,pump=optical_pump,
+        legacy_oracle_scope='All nonzero q when analytic Gamma is active')
     if args.skip_external:
         report['external_w_current']='NOT RUN'
     else:
