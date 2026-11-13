@@ -1713,8 +1713,8 @@ contains
     real(8) :: xx,yy,zz
     real(8) :: xxxx,yyyy,zzzz,rinv
     integer :: lm
-    real(8) :: rbox_pdos(25,natom)
-    real(8) :: rbox_pdos2(25,natom)
+    complex(8) :: rbox_pdos(25,natom)
+    complex(8) :: rbox_pdos2(25,natom)
     real(8) :: pdos_l_tmp(out_dos_nenergy,0:4,natom)
     real(8) :: pdos_l(out_dos_nenergy,0:4,natom)
     character(100) :: Outfile
