@@ -30,3 +30,12 @@ class TDDFTLoaderTests(unittest.TestCase):
             root=Path(tmp);(root/'input').write_text('test')
             with self.assertRaises(ValueError):
                 TDDFTInitialState.from_salmon(root,'input',executable=SalmonExecutable(root/'s','0'*64))
+
+
+    def test_snapshot_cannot_recursively_copy_itself(self):
+        from salmonpy.tddft import _copy_bundle
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            with self.assertRaisesRegex(ValueError,'outside'):
+                _copy_bundle(root,root/'nested')
+            self.assertFalse((root/'nested').exists())

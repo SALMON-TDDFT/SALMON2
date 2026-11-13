@@ -1,3 +1,4 @@
+#include "config.h"
 ! Optional SALMONpy process-isolated endpoint-A protocol; ordinary runs are unchanged.
 module tddft_worker
   implicit none

@@ -27,6 +27,8 @@ def _digest(path):
 
 
 def _copy_bundle(source,dest):
+    if dest.resolve().is_relative_to(source.resolve()):
+        raise ValueError('snapshot destination must be outside the input bundle')
     dest.mkdir()
     records=[]
     for path in sorted(source.rglob('*')):
