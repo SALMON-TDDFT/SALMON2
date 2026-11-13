@@ -46,7 +46,14 @@ def main():
     if not all((source/f).is_file() for f in ('src/rt/embedded_tddft.f90','src/maxwell/embedded_eh.f90')):
         p.error('prepare a runtime with embedded TDDFT and E/H support')
     out.mkdir(parents=True,exist_ok=False);build=out/'build'
+    # CMake's executable PIC property emits -fPIE, which is insufficient when
+    # these objects are subsequently linked into a Linux shared library.
+    # Directory compile options follow that generated flag, so require -fPIC
+    # for both languages without replacing caller optimization/toolchain flags.
+    pic_options=out/'embedded-pic.cmake'
+    pic_options.write_text('add_compile_options(-fPIC)\n')
     command=['cmake','-G','Unix Makefiles','-S',str(source),'-B',str(build),*a.cmake_arg,
+             '-DCMAKE_PROJECT_SALMON_INCLUDE='+str(pic_options),
              '-DUSE_MPI=ON','-DCMAKE_POSITION_INDEPENDENT_CODE=ON']
     with (out/'build.log').open('w') as log:
         subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True)
