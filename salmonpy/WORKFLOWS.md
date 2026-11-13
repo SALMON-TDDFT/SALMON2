@@ -107,7 +107,8 @@ common laboratory-frame atomic-unit convention at the adapter boundary.
 
 `crystal.respond(initial, A_samples)` creates a new state and calls that same step
 method for each sample. It validates uniform times, current shape/finiteness and
-backend time advancement. It preserves the backend's initial current rather than
+backend time advancement. Accumulated floating-point time roundoff is tolerated
+with a bound capped at 0.001 time steps; a materially wrong step is rejected. It preserves the backend's initial current rather than
 assuming it is zero. A backend must guarantee independent states and atomic step
 failures; Python cannot enforce those promises for arbitrary external engines.
 

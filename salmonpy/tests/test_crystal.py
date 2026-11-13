@@ -27,3 +27,16 @@ class CrystalTests(unittest.TestCase):
         class Initial:
             def new_state(self,**kwargs): raise AssertionError('must not initialize')
         with self.assertRaises(ValueError): respond(Initial(),FieldSamples([0,1,3],np.zeros((3,3)),'A'))
+
+    def test_accumulated_time_roundoff(self):
+        t=1e6+np.arange(1025)*.1
+        result=respond(TestInitialState(),FieldSamples(t,np.zeros((len(t),3)),'A'))
+        self.assertEqual(len(result.time),len(t))
+
+    def test_wrong_backend_timestep_rejected(self):
+        class Wrong(TestInitialState):
+            def new_state(self,**kwargs):
+                kwargs['dt']*=1.01
+                return super().new_state(**kwargs)
+        with self.assertRaisesRegex(ValueError,'backend time'):
+            respond(Wrong(),FieldSamples(np.arange(4)*.1,np.zeros((4,3)),'A'))

@@ -60,6 +60,10 @@ def respond(initial: AInitialState, drive: FieldSamples) -> CrystalResponse:
     for i,t in enumerate(drive.time):
         if i==0: current[i]=_array(state.current,'initial current',(3,))
         else: current[i]=_array(state.step(drive.values[i].copy()),'current',(3,))
-        if not np.isfinite(state.time) or not np.isclose(state.time,t,rtol=0,atol=max(1e-12,abs(dt[0])*1e-8)):
+        # Permit roundoff from repeated time += dt, bounded far below one step.
+        scale=max(abs(float(t)),abs(float(drive.time[0])),abs(float(dt[0])))
+        roundoff=8*np.finfo(float).eps*(i+1)*scale
+        tolerance=min(abs(float(dt[0]))*1e-3,max(abs(float(dt[0]))*1e-8,roundoff))
+        if not np.isfinite(state.time) or not np.isclose(state.time,t,rtol=0,atol=tolerance):
             raise ValueError('backend time does not match the common A grid')
     return CrystalResponse(drive.time,_readonly(current),backend,float(dt[0]))
