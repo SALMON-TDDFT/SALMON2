@@ -15,7 +15,7 @@ p.add_argument('runtime'); p.add_argument('directory')
 a = p.parse_args()
 # Replace these synthetic coefficients with validated material data.
 # Frequencies and damping are in atomic units. Each material can have a
-# different number of poles. Dielectric(epsilon=..., mu=..., sigma=...) is
+# different number of poles. Dielectric(epsilon=..., mu=..., conductivity=...) is
 # also accepted in this tuple for non-dispersive isotropic materials.
 metal = LorentzDrude(plasma_frequency=20., strength=[1.], resonance=[0.], damping=[2.])
 resonant = LorentzDrude(plasma_frequency=15., strength=[.7, .3],

@@ -1,6 +1,6 @@
 # Custom FDTD materials and interfaces
 
-[日本語](FDTD_MATERIALS.md) · Topic: `fdtd_materials` · Paired revision: `2026-11-13.4`
+[日本語](FDTD_MATERIALS.md) · Topic: `fdtd_materials` · Paired revision: `2026-11-13.5`
 
 Run `python -m salmonpy.examples.fdtd_layers MANAGED_RUNTIME NEW_DIRECTORY`
 with a verified runtime v2. This one-process, one-thread example contains two
@@ -11,7 +11,7 @@ strength=[...], resonance=[...], damping=[...])`. All quantities use atomic unit
 frequency and damping are angular frequencies. Each material may have its own
 number of poles. A zero resonance describes a Drude pole. Use validated material
 coefficients; SALMONpy does not fit experimental data or guarantee convergence.
-For a constant isotropic medium use `Dielectric(epsilon=..., mu=..., sigma=...)`.
+For a constant isotropic medium use `Dielectric(epsilon=..., mu=..., conductivity=...)`.
 See [LD conventions](README.en.md) before translating coefficients from another
 code. The example coefficients are deliberately synthetic.
 

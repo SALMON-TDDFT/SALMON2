@@ -1,9 +1,12 @@
 # Python samples
 
-[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-13.4`
+[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-13.5`
 
 Use the same Python environment in which the wheel was installed. All samples
 below ship in the wheel. The code is shared by both language editions.
+
+LD and built-in SBE use the native library bundled in the wheel. Pulse creation and analysis need no solver.
+For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'` and `unit_system='au'`.
 
 | Module under `salmonpy.examples` | Purpose / additional input |
 |---|---|
@@ -49,8 +52,9 @@ counts and lattice must match the actual dataset. Argument-based examples suppor
 
 Use a compatible audited full SALMON, not an arbitrary installed binary. See
 [setup and scope](../README.en.md). Choose a new output location outside the code
-checkout. BLAS threads also count against your CPU budget. Python DFT/bands/TDDFT solver launches
-use one MPI rank; the MPI FDTD example explicitly launches its spatial ranks. Sample grid/time values are demonstrations, not convergence or
+checkout. BLAS threads also count against your CPU budget. Python DFT/bands and process-isolated `salmonpy.tddft` solver launches
+use one MPI rank. Internally parallel TDDFT uses the separate `mpi_coupled_tddft` entry.
+The MPI FDTD example explicitly launches its spatial ranks. Sample grid/time values are demonstrations, not convergence or
 memory guarantees. TDDFT's short pulse is a connection smoke test. The Calculator
 sample does not automatically start an optimization. Adapt plotting assumptions
 for datasets other than the specified cubic Si example.

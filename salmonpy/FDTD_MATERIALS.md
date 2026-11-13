@@ -1,13 +1,13 @@
 # FDTDの独自材料と界面
 
-[English](FDTD_MATERIALS.en.md) · Topic: `fdtd_materials` · Paired revision: `2026-11-13.4`
+[English](FDTD_MATERIALS.en.md) · Topic: `fdtd_materials` · Paired revision: `2026-11-13.5`
 
 検証済みv2ランタイムで、`python -m salmonpy.examples.fdtd_layers MANAGED_RUNTIME NEW_DIRECTORY`
 を実行します。1プロセス・1スレッドの人工的な有限サイズ二層の例であり、収束した無限多層膜の光学計算ではありません。
 
 等方的な分散材料は `LorentzDrude(plasma_frequency=..., strength=[...], resonance=[...], damping=[...])`
 で定義します。すべて原子単位で、周波数・減衰率は角周波数です。材料ごとに極数を変えられ、共鳴周波数0がDrude極です。
-定数の等方媒質には `Dielectric(epsilon=..., mu=..., sigma=...)` を使います。
+定数の等方媒質には `Dielectric(epsilon=..., mu=..., conductivity=...)` を使います。
 別コードの係数を移す前に[LDの規約](README.md)を確認してください。係数は利用者が検証したものを指定します。
 実験値へのフィッティングや収束保証は行いません。サンプル係数は人工的なものです。
 

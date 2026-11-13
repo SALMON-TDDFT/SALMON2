@@ -1,7 +1,7 @@
 # Individual research tasks with SALMONpy
 
 All new numerical inputs are atomic units. These Python helpers are included in
-wheels; only standalone LD requires the bundled native library. Full FDTD uses
+wheels; standalone LD and built-in SBE require the bundled native library. Full FDTD uses
 an explicitly supplied, separately built SALMON executable.
 
 ## Geometry and FDTD

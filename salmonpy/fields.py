@@ -34,7 +34,7 @@ class FieldSamples:
         return FieldSamples(self.time[1:],-np.diff(self.values,axis=0)/np.diff(self.time)[:,None],'E')
 
     def write_salmon(self,path):
-        """Write four columns for SALMON ae_shape='read', unit_system='au'."""
+        """Write four columns for SALMON ae_shape1='input', unit_system='au'."""
         if self.kind!='A': raise ValueError('SALMON input file requires A samples')
         # Existing files are preserved; explicit choice of a new path is required.
         with open(path,'x',encoding='utf-8') as f:

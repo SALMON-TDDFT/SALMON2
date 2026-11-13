@@ -1,6 +1,6 @@
 # Pythonサンプル集
 
-[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-13.4`
+[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-13.5`
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
 LD/SBEには構築済みのネイティブライブラリが必要です。import時にコンパイルは行いません。
 下記の `python` はSALMONpyをインストールした環境のPythonを指します。
@@ -8,6 +8,9 @@ LD/SBEには構築済みのネイティブライブラリが必要です。impor
 まず、使ってよい総メモリ・CPUコア数・目的を決めてください。以下の格子や時間刻みは
 APIの使い方を示す例です。メモリ上限や物理量の収束を保証するものではありません。
 出力先は作業用ディレクトリを指定してください。生成したデータをコードツリーへ保存しません。
+
+LDと内蔵SBEはwheel同梱のネイティブライブラリを使います。波形の作成・解析はソルバー不要です。
+`FieldSamples.write_salmon` の出力をSALMONで使う場合は `ae_shape1='input'`、`unit_system='au'` を指定します。
 
 | 目的 | サンプル | 追加で必要なもの |
 |---|---|---|
@@ -57,7 +60,8 @@ python -m salmonpy.examples.fdtd_dielectric EXECUTABLE SHA256 NEW_FDTD
 
 各引数付きサンプルの `--help` で必要な入力を確認できます。空白を含むパスは引用符で囲みます。
 全コアを自動使用しません。BLASなどのスレッド数も利用環境で調整し、許可された総並列数に
-収めてください。現在のPython DFT/バンド/TDDFT入口は単一MPIランクです。
+収めてください。DFT/バンドとプロセス分離型 `salmonpy.tddft` のソルバー起動は単一MPIランクです。
+内部MPIのTDDFTは別の `mpi_coupled_tddft` 入口を使います。
 TDDFT例は同じGSから2回を順次実行し、励起履歴を共有しません。
 
 実材料SBEローダーの例：
