@@ -29,8 +29,7 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   use Conjugate_Gradient, only: gscg_zwf,gscg_rwf
   use subspace_diagonalization, only: ssdg
 #ifdef USE_HSE
-  use exx_native, only: exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_enabled
-  use hamiltonian, only: hpsi
+  use exx_native, only: exx_enabled
 #endif
   implicit none
   type(s_rgrid),          intent(in)    :: mg
@@ -47,18 +46,10 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
   !
   integer :: nncg,cg_remaining,cg_block
   logical :: stabilize_spinor
-#ifdef USE_HSE
-  logical :: diagnose
-#endif
   stabilize_spinor=.false.
 #ifdef USE_HSE
   stabilize_spinor=yn_spinorbit=='y'.and.yn_dc=='n'.and..not.system%if_real_orbital.and. &
     (exx_enabled().or.exx_pre_scf_active)
-  diagnose=exx_eigen_diagnostic_enabled(info,solver=.true.)
-  if(diagnose)then
-    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'before_subspace')
-  endif
 #endif
 
   if(miter==1) then
@@ -75,12 +66,6 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     end if
   end if
   call timer_end(LOG_CALC_SUBSPACE_DIAG)
-#ifdef USE_HSE
-  if(diagnose)then
-    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_subspace')
-  endif
-#endif
 
 ! Independent-band CG can collapse different bands toward the same state
 ! during a long solve. Bound each native HSE spinor pass, then restore an
@@ -97,12 +82,6 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     call gscg_zwf(cg_block,mg,system,info,stencil,ppg,vlocal,srg,spsi,shpsi,sttpsi,cg)
   end if
   call timer_end(LOG_CALC_MINIMIZATION)
-#ifdef USE_HSE
-  if(diagnose)then
-    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_cg')
-  endif
-#endif
 
 ! Gram Schmidt orghonormalization
   call gram_schmidt(system, mg, info, spsi)
@@ -113,10 +92,6 @@ subroutine solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,vl
     call timer_begin(LOG_CALC_SUBSPACE_DIAG)
     call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,vlocal,srg)
     call timer_end(LOG_CALC_SUBSPACE_DIAG)
-  endif
-  if(diagnose)then
-    call hpsi(spsi,shpsi,info,mg,vlocal,system,stencil,srg,ppg)
-    call exx_export_eigen_pair(system,mg,info,spsi,shpsi,'after_orthogonalization')
   endif
 #endif
 

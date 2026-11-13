@@ -137,8 +137,7 @@ contains
     complex(c_double_complex),allocatable :: density_tile(:,:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
     real(c_double) :: pi,scaled(3),v(3),length(3),angle,k0(3)
-    real(c_double) :: stamp,stage_seconds(4),slowest(4)
-    ierr=1;action=zero;stage_seconds=0d0
+    ierr=1;action=zero
     ng=op%ng;nk=op%nk;b=op%block;np=size(starts);nsym=map%nsym
     nlocal=counts(rank+1);nt=size(target,2);nrep=size(target,3);ns=op%n*op%mesh
     local_error=0
@@ -308,7 +307,6 @@ contains
     if(rank==0.and.groups>1)write(*,'(a,2i8)')'EXX_ORBIT_COLUMN_GROUPS groups/columns: ',groups,chunk
     if(rank==0.and.overlap)write(*,'(a)')'EXX_ORBIT_OVERLAP nonblocking forward transpose'
     do base=1,nfirst,row_blocks*b
-      if(op%profile)stamp=clock_now()
       nactive=min(row_blocks*b,nfirst-base+1);points(:nactive)=first(base:base+nactive-1)
       active_blocks=(nactive+b-1)/b
       sendcounts=0;recvcounts=0
@@ -412,7 +410,6 @@ contains
 #ifdef HAVE_EXX_OPENBLAS_THREADS
       call exx_blas_thread_control(0,blas_state)
 #endif
-      if(op%profile)call mark(1)
       block_id=rank/groups;tile=mod(rank,groups)
       first_col=1+tile*chunk;local_cols=min(chunk,ng-first_col+1)
       rows=max(0,min(b,nactive-block_id*b))
@@ -441,7 +438,6 @@ contains
 #ifdef USE_MPI
       endif
 #endif
-      if(op%profile)call mark(2)
       if(rows>0)then
       ! The point-pair displacement is independent of the FFT k index.
       do r=1,rows
@@ -498,7 +494,6 @@ contains
       endif
       endif
       endif
-      if(op%profile)call mark(3)
 #ifdef USE_MPI
       if(overlap)then
         call MPI_Waitall(np,send_requests,MPI_STATUSES_IGNORE,mpi_error)
@@ -510,7 +505,6 @@ contains
 #ifdef USE_MPI
       endif
 #endif
-      if(op%profile)call mark(2)
       ! Reconstruct only representative-target rows; no expanded target/action.
       if(nrep==0)cycle
 #ifdef HAVE_EXX_OPENBLAS_THREADS
@@ -562,21 +556,8 @@ contains
 #ifdef HAVE_EXX_OPENBLAS_THREADS
       call exx_blas_thread_control(0,blas_state)
 #endif
-      if(op%profile)call mark(4)
     enddo
-    if(op%profile)then
-      call comm_get_max(stage_seconds,slowest,4,comm)
-      if(rank==0)write(*,"(a,4es14.5)") "HSE_ORBIT_PROFILE max-rank seconds density transpose fft_pack_kernel action=",slowest
-    endif
     ierr=0
-  contains
-    subroutine mark(stage)
-      integer,intent(in) :: stage
-      real(c_double) :: now
-      now=clock_now()
-      stage_seconds(stage)=stage_seconds(stage)+now-stamp
-      stamp=now
-    end subroutine
   end subroutine
 
   subroutine apply_spinor_k_orbits(op,map,source,target,action,starts,counts, &
@@ -630,9 +611,8 @@ contains
     complex(c_double_complex),pointer :: sb(:,:,:,:),rb(:,:,:,:),fs(:,:,:),fr(:,:,:)
     complex(c_double_complex),allocatable :: left(:,:,:),t(:,:,:),row(:,:),contracted(:,:),gauge(:,:),phase(:,:)
     complex(c_double_complex),parameter :: one=(1d0,0d0),zero=(0d0,0d0)
-    real(c_double) :: pi,scaled(3),v(3),angle,k0(3),stamp
-    ierr=1;action=zero;op%seconds=0d0;op%threads_used=1;op%pair_fft_pairs=0_int64
-    stamp=clock_now()
+    real(c_double) :: pi,scaled(3),v(3),angle,k0(3)
+    ierr=1;action=zero;op%threads_used=1;op%pair_fft_pairs=0_int64
     ng=op%ng;nk=op%nk;b=op%block;np=size(starts);nsym=map%nsym
     nt=size(target,2);nrep=size(target,3);ns=op%n*op%mesh
     local_error=0
@@ -780,7 +760,6 @@ contains
     if(total_error/=0)return
     if(rank==0)write(*,'(a,2i12)')'EXX_SPINOR_ORBIT_TILE divisor/columns: ',divisor,chunk
     if(rank==0)write(*,'(a,2i12)')'EXX_SPINOR_FFT_ORBITS first points/full: ',nfirst,ng
-    if(op%profile)call mark(5)
     do base=1,nfirst,np*b
       nactive=min(np*b,nfirst-base+1);points(:nactive)=first(base:base+nactive-1)
       active_blocks=(nactive+b-1)/b
@@ -845,18 +824,14 @@ contains
 #ifdef HAVE_EXX_OPENBLAS_THREADS
       call exx_blas_thread_control(0,blas_state)
 #endif
-      if(op%profile)call mark(1)
       call transpose_tiles(send,recv,sendcounts,recvcounts,displs,comm)
-      if(op%profile)call mark(2)
       if(rows>0)then
         call execute_orbit_lanes(op%omp_orbit_tile,flat,fr,fs,slot,pair_delta,rows,ncols,ns, &
           op%shift,op%kernel,op%contiguous_fft,op%threads_used)
         op%pair_fft_pairs=op%pair_fft_pairs+int(rows,int64)*ncols
       endif
       ! Packing, FFTs and kernel multiplication share one OpenMP region.
-      if(op%profile)call mark(3)
       call transpose_tiles(send,recv,recvcounts,sendcounts,displs,comm)
-      if(op%profile)call mark(2)
       ! Linearity permits one spin block at a time: U rho U-dagger is
       ! contracted componentwise, avoiding four retained communication buffers.
 #ifdef HAVE_EXX_OPENBLAS_THREADS
@@ -918,22 +893,9 @@ contains
 #ifdef HAVE_EXX_OPENBLAS_THREADS
       call exx_blas_thread_control(0,blas_state)
 #endif
-      if(op%profile)call mark(6)
       enddo
       enddo
     enddo
     ierr=0
-  contains
-    subroutine mark(stage)
-      integer,intent(in) :: stage
-      real(c_double) :: now
-      now=clock_now();op%seconds(stage)=op%seconds(stage)+now-stamp;stamp=now
-    end subroutine
   end subroutine
-  real(c_double) function clock_now()
-    use iso_fortran_env, only: int64
-    integer(int64) :: tick,rate
-    call system_clock(tick,rate)
-    clock_now=real(tick,c_double)/real(rate,c_double)
-  end function
 end module

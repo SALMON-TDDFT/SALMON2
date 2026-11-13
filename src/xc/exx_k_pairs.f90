@@ -36,11 +36,8 @@ contains
     integer :: np,id,ng,nk,batch,km,nmsg,nlocal,no,nt,bad,total_bad,p,j,i,a,r,c,ki,offset(3),dims(3)
     integer :: settings(13),expected(13),flags,tail,length,diagonal
     integer(int64) :: total_pairs,base,first,remaining,stride
-    real(c_double) :: stamp
     external :: zgemm,zgeru
     ierr=1;action=zero
-    op%seconds=0d0;stamp=0d0
-    if(op%profile)stamp=walltime()
     call comm_get_groupinfo(comm,id,np)
     bad=0
     if(size(starts)/=np.or.size(counts)/=np.or.rank/=id)bad=1
@@ -130,7 +127,6 @@ contains
         t(:,i,j)=target(:,i,j)*op%phase(:,j)
       enddo
     enddo
-    if(op%profile)call mark(5)
     op%pair_fft_pairs=0_int64;op%threads_used=1
     do base=1_int64,total_pairs,stride
       send=zero
@@ -156,9 +152,7 @@ contains
           enddo
         enddo
       enddo
-      if(op%profile)call mark(1)
       call transpose_tiles(send,recv,nmsg,comm)
-      if(op%profile)call mark(2)
       do ki=1,nk
         p=(slot(ki)-1)/km+1;j=modulo(slot(ki)-1,km)+1
         if(op%contiguous_fft)then
@@ -167,14 +161,12 @@ contains
           wk(:,ki)=rb(:,j,p)
         endif
       enddo
-      if(op%profile)call mark(5)
       if(active(id+1)>0)then
         if(active(id+1)<batch)then
           call collinear_fft_execute(op%omp_pair_tail,flat_work,FFTW_FORWARD,op%threads_used)
         else
           call execute_kernel_fft(op,op%forward)
         endif
-        if(op%profile)call mark(3)
         !$omp parallel do private(r,c,ki,offset) schedule(static)
         do a=1,active(id+1)
           r=rows(a,id+1);c=cols(a,id+1)
@@ -188,13 +180,11 @@ contains
           enddo
         enddo
         !$omp end parallel do
-        if(op%profile)call mark(4)
         if(active(id+1)<batch)then
           call collinear_fft_execute(op%omp_pair_tail,flat_work,FFTW_BACKWARD,op%threads_used)
         else
           call execute_kernel_fft(op,op%backward)
         endif
-        if(op%profile)call mark(3)
         op%pair_fft_pairs=op%pair_fft_pairs+active(id+1)
       endif
       do ki=1,nk
@@ -205,9 +195,7 @@ contains
           sb(:,j,p)=wk(:,ki)
         endif
       enddo
-      if(op%profile)call mark(5)
       call transpose_tiles(send,recv,nmsg,comm)
-      if(op%profile)call mark(2)
       ! A contiguous upper-row segment contributes to both Hermitian rows.
       ! BLAS stays outside application OpenMP regions and owns its threading.
       do p=1,np
@@ -228,33 +216,15 @@ contains
           enddo
         enddo
       enddo
-      if(op%profile)call mark(6)
     enddo
     do j=1,nlocal
       do i=1,nt
         action(:,i,j)=action(:,i,j)*conjg(op%phase(:,j))
       enddo
     enddo
-    if(op%profile)call mark(5)
     ierr=0
-  contains
-    subroutine mark(stage)
-      implicit none
-      integer,intent(in) :: stage
-      real(c_double) :: now
-      now=walltime()
-      op%seconds(stage)=op%seconds(stage)+now-stamp
-      stamp=now
-    end subroutine mark
   end subroutine apply_k_pairs
 
-  real(c_double) function walltime()
-    use iso_fortran_env, only: int64
-    implicit none
-    integer(int64) :: count,rate
-    call system_clock(count,rate)
-    walltime=real(count,c_double)/real(rate,c_double)
-  end function walltime
 
   subroutine unrank_pair(ng,index,r,c)
     use iso_fortran_env, only: int64

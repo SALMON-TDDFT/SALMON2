@@ -49,14 +49,9 @@ if(USE_HSE)
     exx_k_exchange.f90
     exx_fft_consensus.f90
     exx_spinor.f90
-    exx_stationarity.f90
     exx_k_pairs.f90
     exx_k_orbits.f90
     exx_ace.f90
-    exx_surrogate_basis.f90
-    exx_surrogate_dense.f90
-    exx_surrogate_model.f90
-    exx_surrogate_trace.f90
     exx_distributed_metric.f90
     exx_distributed_alignment.f90
     exx_orbitals.f90

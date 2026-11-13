@@ -175,11 +175,6 @@ all retained states remain targets of the full action and ACE construction.
 This is an exact density-rank reduction, not spatial pair screening. For a zero
 density, one zero-weight source is retained to represent the zero operator.
 
-For diagnostic export set the environment variable
-`SALMON_HSE_WANNIER_SNAPSHOT=1`. A collective final refresh writes
-`hse_wannier_snapshot.bin` in each fragment directory before LCFO processing.
-This is a development binary diagnostic, not a public regression fixture. The export records SCF and localization convergence separately.
-
 ## Spatial mesh RT from DC initialization
 
 HSE now shares the PBEh Gamma spatial MLWF/FFTW/ACE implementation for
@@ -224,8 +219,7 @@ Use occupied-only states (`2*nstate=nelec`), fixed occupations (omit electronic
 temperature), and fixed ions.
 
 During this migration use `write_gs_restart_data='no'` and
-`yn_self_checkpoint='n'`. Restart, checkpoints, Wannier snapshots and the
-full-grid eigen/solver diagnostic exporters are not supported by this route.
+`yn_self_checkpoint='n'`. Restart and checkpoints are not supported by this route.
 Final SCF energy and eigenvalue text outputs remain available.
 No additional H4 fixture is shipped with this proposal.
 

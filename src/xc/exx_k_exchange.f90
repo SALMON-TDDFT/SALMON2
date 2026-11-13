@@ -20,8 +20,8 @@ module exx_k_exchange
     logical :: orbit_tile_contiguous=.false.
     class(s_exx_k_backend),allocatable :: accelerator
     integer :: n(3)=0, mesh(3)=0, ng=0, nk=0, block=0, phase_start=1, threads_used=1, nq=0
-    logical :: profile=.false.,contiguous_fft=.false.,auto_fft=.true.
-    real(c_double) :: seconds(6)=0d0,fft_trial_seconds(2)=0d0
+    logical :: contiguous_fft=.false.,auto_fft=.true.
+    real(c_double) :: fft_trial_seconds(2)=0d0
     integer, allocatable :: order(:), point(:,:),shift(:,:),distance_index(:,:,:,:)
     complex(c_double_complex), allocatable :: phase(:,:),work(:,:,:)
     real(c_double), allocatable :: kernel(:,:,:)
@@ -49,25 +49,25 @@ abstract interface
   end interface
 contains
   subroutine init_cubic(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                        block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft,fft_layout_sync)
+                        block_rows,fft_layout,create_backend,coulomb_radius,defer_fft,fft_layout_sync)
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
     integer,intent(in) :: n,mesh,block
     real(c_double),intent(in) :: h,k(:,:),omega
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count,block_rows
-    logical,optional,intent(in) :: profile,defer_fft
+    logical,optional,intent(in) :: defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     procedure(fft_layout_synchronizer),optional :: fft_layout_sync
     real(c_double),optional,intent(in) :: coulomb_radius
     call init_rectangular(op,[n,n,n],[mesh,mesh,mesh],[h,h,h],k,omega,block,ierr, &
-      phase_start,phase_count,block_rows,profile,fft_layout,create_backend,coulomb_radius,defer_fft=defer_fft, &
+      phase_start,phase_count,block_rows,fft_layout,create_backend,coulomb_radius,defer_fft=defer_fft, &
       fft_layout_sync=fft_layout_sync)
   end subroutine
 
   subroutine init_rectangular(op,n,mesh,h,k,omega,block,ierr,phase_start,phase_count, &
-                             block_rows,profile,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft, &
+                             block_rows,fft_layout,create_backend,coulomb_radius,cell,reciprocal,q_reduction,defer_fft, &
                              fft_layout_sync)
     implicit none
     type(exx_k_kernel),target,intent(inout) :: op
@@ -76,7 +76,7 @@ contains
     integer,intent(out) :: ierr
     integer,optional,intent(in) :: phase_start,phase_count
     integer,optional,intent(in) :: block_rows
-    logical,optional,intent(in) :: profile,defer_fft
+    logical,optional,intent(in) :: defer_fft
     character(*),optional,intent(in) :: fft_layout
     procedure(k_backend_factory),pointer,optional :: create_backend
     procedure(fft_layout_synchronizer),optional :: fft_layout_sync
@@ -135,9 +135,6 @@ contains
       if(block_rows<0.or.block_rows>product(n))goto 900
       if(block_rows>0)chosen=block_rows
     endif
-    op%profile=.false.
-    if(present(profile))op%profile=profile
-    op%seconds=0d0
     op%contiguous_fft=.false.;op%auto_fft=.true.;op%fft_trial_seconds=0d0
     if(present(fft_layout))then
       select case(trim(fft_layout))
@@ -465,12 +462,8 @@ contains
     complex(c_double_complex) :: valid_send(size(counts)),valid_recv(size(counts))
     logical :: valid
     integer :: batch_rows,active_rows
-    real(c_double) :: stamp
     external :: zgemm
     ierr=1;action=zero
-    op%seconds=0d0
-    stamp=0d0
-    if(op%profile)stamp=kernel_walltime()
     np=size(counts);ng=op%ng;nk=op%nk;b=op%block
     if(np<1.or.rank<0.or.rank>=np.or.size(starts)/=np)return
     ! All communicator members must participate even if one has invalid data.
@@ -536,7 +529,6 @@ contains
     enddo
     !$omp end do
     !$omp end parallel
-    if(op%profile)call mark_stage(op,5,stamp)
     do base=1,ng,np*b
       send=zero
       ! Reconstruct each source only once for all destination rows this round.
@@ -561,9 +553,7 @@ contains
           enddo
         enddo
       endif
-      if(op%profile)call mark_stage(op,1,stamp)
       call transpose_tiles(send,recv,nmsg,comm)
-      if(op%profile)call mark_stage(op,2,stamp)
       if(allocated(op%accelerator))then
         lo=base+rank*b;rows=max(0,min(b,ng-lo+1))
         call op%accelerator%apply(lo,rows,flat_recv,flat_send,ierr)
@@ -574,7 +564,6 @@ contains
         if(any(real(valid_recv)/=0d0))ierr=1
         if(ierr/=0)return
         ! Device packing/FFT/kernel/transfers are a combined measured stage.
-        if(op%profile)call mark_stage(op,3,stamp)
       else
       ! Every k tile (including padded rows) is overwritten below.
       if(op%contiguous_fft)then
@@ -586,14 +575,10 @@ contains
       enddo
       !$omp end parallel do
       endif
-      if(op%profile)call mark_stage(op,5,stamp)
       call execute_kernel_fft(op,op%forward)
-      if(op%profile)call mark_stage(op,3,stamp)
       lo=base+rank*b;rows=min(b,ng-lo+1)
       call multiply_kernel(op,lo,rows)
-      if(op%profile)call mark_stage(op,4,stamp)
       call execute_kernel_fft(op,op%backward)
-      if(op%profile)call mark_stage(op,3,stamp)
       ! Reuse send storage: useful entries are all overwritten; padded k
       ! entries remain defined from the density stage and are never consumed.
       if(op%contiguous_fft)then
@@ -605,10 +590,8 @@ contains
       enddo
       !$omp end parallel do
       endif
-      if(op%profile)call mark_stage(op,5,stamp)
       endif
       call transpose_tiles(send,recv,nmsg,comm)
-      if(op%profile)call mark_stage(op,2,stamp)
       ! BLAS owns threading here; call only outside application OpenMP regions.
       do p=0,np-1
         lo=base+p*b;rows=min(b,ng-lo+1)
@@ -621,7 +604,6 @@ contains
           enddo
         enddo
       enddo
-      if(op%profile)call mark_stage(op,6,stamp)
     enddo
     ierr=0
   end subroutine
@@ -873,18 +855,6 @@ contains
     call system_clock(count,rate)
     kernel_walltime=real(count,c_double)/real(rate,c_double)
   end function
-
-  ! Callers guard this helper so disabled profiling makes no timing calls.
-  subroutine mark_stage(op,stage,stamp)
-    implicit none
-    type(exx_k_kernel),intent(inout) :: op
-    integer,intent(in) :: stage
-    real(c_double),intent(inout) :: stamp
-    real(c_double) :: now
-    now=kernel_walltime()
-    op%seconds(stage)=op%seconds(stage)+now-stamp
-    stamp=now
-  end subroutine
 
   subroutine exx_k_kernel_destroy(op,status)
     implicit none

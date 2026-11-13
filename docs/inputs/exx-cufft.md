@@ -111,61 +111,17 @@ visible GPU list makes them share a device; this is not automatic distribution.
 The host exchanges compact arrays through MPI; GPU-aware MPI is not required
 by this backend.
 
-## Verification
+## Validation scope
 
-CPU stub validation needs GNU Fortran (`GNU_FC` may override `gfortran`):
-
-Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
-
-
-This explicitly skips GPU parity. It checks that disabled nonempty work fails,
-empty work is a no-op, and invalid shapes/indices are rejected. To additionally
-fault-inject the host fatal callback on one MPI rank while another waits in a
-barrier (without needing a GPU), set `SALMON_TEST_MPIEXEC=/path/to/mpiexec` when
-running the same test. This checks job termination, not registration with the
-real OpenACC runtime.
-
-On an NVIDIA system, request the actual device test:
-
-Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
-
-
-Alternatively set `SALMON_TEST_CUFFT_GPU=1`. An explicitly requested GPU test
-fails if the compiler, FFTW dependency or functioning device is absent. FFTW
-flags may instead be supplied through both `FFTW_FFLAGS` and `FFTW_LIBS`, or
-resolved through `pkg-config fftw3`. `CUFFT_TEST_FFLAGS` accepts additional
-NVHPC flags, such as the site's GPU architecture setting. Configure runtime
-library paths as required by the site's FFTW installation.
-
-The device fixture compares the production cuFFT batch with the production
-FFTW scalar convolution on unequal padded dimensions `3 x 5 x 8`, irregular
-periodic support indices, complex sources and targets, a zero column, multiple
-batch sizes/tails, repeated calls, and an empty batch. It compares normalized
-complex actions at a tolerance of `2e-12`. The stateful fixture also checks
-operation counters: repeated prepare leaves uploads unchanged, source/filter/
-index changes upload only that data, and tail batches reuse the plan. Capacity
-and geometry changes, repeated release, and owner finalization are covered.
-
-The independent CPU MPI callback test exercises the selected-pair batching and
-scatter path without requiring CUDA:
-
-Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
-
-
-Its callback and stateful oracle use real FFTW transforms and check skipped/zero
-targets, partial batches, conserved pair counters, one prepare per source,
-changed-source results, and collective propagation of prepare/apply errors.
-A negative release failure on one rank is tested during reinitialization; the
-pair-screen fixture also tests release failures at the exchange-action boundary.
-It validates CPU dispatch and MPI handling; it does not validate cuFFT itself.
+The standard CPU Si regression does not validate this experimental GPU backend.
+Actual device compilation and CPU/GPU numerical comparison are required for the
+selected compiler, GPU and MPI layout before using it for production results.
 
 ## Full k-mesh hybrid route
 
 The separate `exx_kpoint_backend='cufft'` now accelerates the distributed
 k-mesh density convolution. It does not relax the compact Gamma backend's
-restrictions. See Si CPU/GPU tests（ローカル測定記録）
-for supported inputs, resident data lifetime and MIYABI-G jobs. This route also
-requires actual NVHPC/GPU validation before numerical or performance claims.
+restrictions. This route requires actual NVHPC/GPU validation before numerical or performance claims.
 
 The common `exx_k_exchange` density-tile engine handles HSE06, PBE0, PBEh(40)
 and PBEh(40)+rVV10 with the same MPI layout. The screened or spherical Coulomb

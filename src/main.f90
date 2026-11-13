@@ -82,7 +82,7 @@ contains
       yn_dc=='n'.and.yn_md=='n'.and.yn_opt=='n'.and.yn_periodic=='y'.and. &
       propagator/='hse_taylor4_full'.and.index(yn_symmetry,'y')/=0.and. &
       all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.temperature<0d0.and. &
-      yn_jm=='n'.and.yn_symmetrized_stencil/='y'.and.yn_hse_wannier_snapshot/='y'.and. &
+      yn_jm=='n'.and.yn_symmetrized_stencil/='y'.and. &
       exx_pair_screening=='off'.and.dm_unfold_option=='no'.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.hse_sr_tolerance==0d0.and. &
       al_vec1(2)==0d0.and.al_vec1(3)==0d0.and.al_vec2(1)==0d0.and. &

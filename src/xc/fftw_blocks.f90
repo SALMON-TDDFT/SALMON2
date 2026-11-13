@@ -16,15 +16,7 @@ module fftw_blocks
     type(c_ptr) :: batch_forward=c_null_ptr,batch_backward=c_null_ptr
   end type
   type(axis_workspace),save :: cache(3)
-  real(8),save,public :: fftw_block_seconds(4)=0d0 ! setup, FFT, MPI, packing/copies
-  real(8),save,public :: fftw_block_fused_seconds=0d0 ! local gather + FFT + scatter
 contains
-  real(8) function stamp()
-    implicit none
-    integer(int64) :: count,rate
-    call system_clock(count,rate)
-    stamp=real(count,8)/real(rate,8)
-  end function
   subroutine mesh_transform(n,dims,coords,comm,input,output,sign,status)
     use communication, only: COMM_GROUP_SELF
     implicit none
@@ -159,7 +151,6 @@ contains
     integer :: first,last,batch_base
     type(c_ptr) :: plan,batch_plan
     integer(int64) :: total_lines
-    real(8) :: started
     other=pack([1,2,3],[1,2,3]/=axis)
     total_lines=int(m(other(1)),int64)*m(other(2))*size(field,2)
     if(total_lines>int(huge(0),int64))then
@@ -168,12 +159,9 @@ contains
     cross=m(other(1))*m(other(2));lines=int(total_lines)
     full_slots=lines/peers;tail_lines=lines-full_slots*peers
     nowned=full_slots+min(1,tail_lines)
-    started=stamp()
     call prepare(p,n(axis),m(axis),nowned,peers,status)
     call comm_get_max(status,comm)
     if(status/=0)return
-    fftw_block_seconds(1)=fftw_block_seconds(1)+stamp()-started
-    started=stamp()
     count=nowned*m(axis)
     if(peers==1.and.axis==1)then
       ! The contiguous, unpartitioned axis can transform the field in place.
@@ -187,7 +175,6 @@ contains
         call fftw_execute_dft(plan,field(base:base+n(1)-1,b),field(base:base+n(1)-1,b))
       enddo
 !$omp end parallel do
-      fftw_block_seconds(2)=fftw_block_seconds(2)+stamp()-started
       return
     endif
     if(peers==1)then
@@ -234,14 +221,13 @@ contains
         enddo
       enddo
 !$omp end parallel do
-      fftw_block_fused_seconds=fftw_block_fused_seconds+stamp()-started
       return
     endif
     plan=p%forward
     if(sign==1)plan=p%backward
     ! Reuse one team across packing/FFT/restoration; only the master calls MPI.
 !$omp parallel default(none) private(ell,b,t,point,owner,slot,i,g,j,s,base,q) &
-!$omp shared(peers,lines,nowned,cross,other,m,n,axis,count,p,field,plan,comm,started,fftw_block_seconds) &
+!$omp shared(peers,lines,nowned,cross,other,m,n,axis,count,p,field,plan,comm) &
 !$omp shared(full_slots,tail_lines)
       ! Rectangular full slots preserve OMP parallelism even with few peers.
 !$omp do collapse(2) schedule(static)
@@ -276,11 +262,7 @@ contains
       do owner=lines-(nowned-1)*peers,peers-1
         p%send(1+owner*count+full_slots*m(axis):owner*count+nowned*m(axis))=0d0
       enddo
-      fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
-      started=stamp()
       call comm_alltoall(p%send,p%recv,comm,count)
-      fftw_block_seconds(3)=fftw_block_seconds(3)+stamp()-started
-      started=stamp()
 !$omp end master
 !$omp barrier
 !$omp do collapse(2) schedule(static)
@@ -292,12 +274,6 @@ contains
         enddo
       enddo
 !$omp end do
-!$omp master
-      fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
-!$omp end master
-!$omp master
-    started=stamp()
-!$omp end master
     ! FFTW new-array execution is thread safe; plans are created outside OMP.
 !$omp do schedule(static)
     do s=0,nowned-1
@@ -305,10 +281,6 @@ contains
       call fftw_execute_dft(plan,p%work(base:base+n(axis)-1),p%work(base:base+n(axis)-1))
     enddo
 !$omp end do
-!$omp master
-    fftw_block_seconds(2)=fftw_block_seconds(2)+stamp()-started
-    started=stamp()
-!$omp end master
 !$omp do collapse(2) schedule(static)
       do j=0,peers-1
         do s=0,nowned-1
@@ -319,11 +291,7 @@ contains
       enddo
 !$omp end do
 !$omp master
-      fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
-      started=stamp()
       call comm_alltoall(p%send,p%recv,comm,count)
-      fftw_block_seconds(3)=fftw_block_seconds(3)+stamp()-started
-      started=stamp()
 !$omp end master
 !$omp barrier
 !$omp do collapse(2) schedule(static)
@@ -354,9 +322,6 @@ contains
           field(g,b)=p%recv(1+owner*count+slot*m(axis)+i)
         enddo
       enddo
-!$omp end master
-!$omp master
-    fftw_block_seconds(4)=fftw_block_seconds(4)+stamp()-started
 !$omp end master
 !$omp end parallel
   end subroutine

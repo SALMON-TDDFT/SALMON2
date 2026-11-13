@@ -14,7 +14,7 @@ module exx_wannier
   implicit none
   private
   include 'fftw3.f03'
-  public :: wannier_snapshot,wannier_refresh_source,wannier_truncate_source
+  public :: wannier_refresh_source,wannier_truncate_source
   public :: s_exx_wannier,wannier_init,wannier_destroy,wannier_localize
   public :: wannier_set_source,wannier_apply,wannier_forward,wannier_backward
   type s_exx_wannier
@@ -46,28 +46,6 @@ module exx_wannier
     module procedure finite_real_1d,finite_real_2d
   end interface
 contains
-  subroutine wannier_snapshot(op,occupation,omega,exchange,residual,iteration,converged,path,status)
-    use iso_fortran_env, only: int32
-    implicit none
-    type(s_exx_wannier),intent(in) :: op
-    real(8),intent(in) :: occupation(:,:),omega,exchange,residual
-    integer,intent(in) :: iteration
-    logical,intent(in) :: converged
-    character(*),intent(in) :: path
-    integer,intent(out) :: status
-    integer :: iu,close_status
-    status=1
-    if(.not.allocated(op%source).or..not.allocated(op%previous).or..not.allocated(op%gauge))return
-    if(any(shape(occupation)/=[size(op%gauge,1),op%nk]))return
-    open(newunit=iu,file=path,status='replace',access='stream',form='unformatted',iostat=status)
-    if(status/=0)return
-    write(iu,iostat=status)int([16909060,1,op%n,op%mesh,size(op%gauge,1),op%updates, &
-      op%localization_iterations,op%localization_status,iteration,merge(1,0,converged)],int32)
-    if(status==0)write(iu,iostat=status)op%h,omega,op%spread,op%gradient,op%min_singular,exchange,residual
-    if(status==0)write(iu,iostat=status)occupation,op%gauge,op%previous,op%source
-    close(iu,iostat=close_status)
-    if(status==0)status=close_status
-  end subroutine
   subroutine wannier_destroy(op)
     implicit none
     type(s_exx_wannier),intent(inout) :: op

@@ -1,5 +1,4 @@
 set(SOURCES
-   hse_reference_export.f90
    atomic_orbital.f90
    broyden.f90
    const.f90

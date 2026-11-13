@@ -55,7 +55,6 @@ use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_pl
 use noncollinear_module, only: calc_magnetization,snapshot_density_noncollinear
 use nc_mgga23_scf, only: nc23_scf_prepare,nc23_scf_residual,nc23_spin_density_residual
 use dcdft
-use hse_reference_export, only: export_hse_reference
 #ifdef USE_HSE
 use exx_native, only: exx_enabled,exx_freeze,exx_check_localization,exx_adaptive_ready,exx_support_changed
 use salmon_global, only: exx_mlwf_norm_fraction
@@ -588,8 +587,6 @@ if(.not.flag_conv) then
 endif
 endif
 
-call export_hse_reference(lg,mg,system,info,stencil,srg,ppg,ppn,spsi,shpsi, &
-                          rho,V_local,Vh,Vxc,Vpsl,energy,Miter,flag_conv)
 
 contains
 

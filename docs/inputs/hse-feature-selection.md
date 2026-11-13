@@ -10,8 +10,6 @@ Ordinary Gamma full-support exchange remains available.
 |---|---|---|---|
 | `exx_factor_mode` | `off` | `off`, `strict` (exact endpoint history), `learned` (history prediction) | `SALMON_FACTOR_HISTORY` |
 | `exx_k_algorithm` | `auto` | `auto`, `reference`, `pair`, `orbits`; native k-exchange strategy | three legacy exchange switches |
-| `yn_ace_shadow_diagnostic` | `n` | shadow comparisons within surrogate trace | `SALMON_ACE_SHADOW_DIAGNOSTIC` |
-| `yn_ace_export_factors` | `n` | raw one-orbital H2 factor diagnostic | `SALMON_ACE_EXPORT_FACTORS` |
 | `yn_hse_sr_pair_symmetry` | `y` | Exact Gamma Hermitian pairs for canonical DC; legacy name retained | `SALMON_HSE_SR_PAIR_SYMMETRY` |
 
 All character selections are case insensitive, broadcast to all MPI ranks,
@@ -51,7 +49,7 @@ hybrid stage. This is an initialization threshold, not the final accuracy;
 `threshold` still controls final hybrid convergence. Explicit
 `exx_pre_scf_threshold=0` requests direct hybrid SCF. The automatic default is
 zero for RT/restart, nonhybrids, moving ions, unsupported mixing/metrics,
-checkpoint/shutdown or diagnostic modes and DC without positive temperature.
+checkpoint/shutdown modes and DC without positive temperature.
 The input log records the resolved value. See [PBE pre-SCF](exx-mlwf.md).
 
 ## Native k-exchange algorithm selection
@@ -81,8 +79,7 @@ In `auto`, eligible scalar crystal reuse wins over the scalar pair flag. Explici
 `yn_exx_fft_orbits='n'` remains an opt-out for reference comparisons.
 
 For canonical Gamma DC (`yn_exx_dc_mlwf='n'`), Hermitian pairs are on by default,
-including finite temperature and orbital MPI. Explicit Wannier snapshot output
-retains its existing reference backend. Source weights are `rocc/2`; the
+including finite temperature and orbital MPI. Source weights are `rocc/2`; the
 reverse action uses the other orbital's weight, so zero/fractional occupations
 need no division or approximation. One convolution updates both directions.
 `yn_hse_sr_pair_symmetry='n'` selects the ordered-pair reference for this backend.
@@ -108,9 +105,8 @@ Example comparison setting (omit for normal operation):
 /
 ```
 
-The `exx_factor_mode` and diagnostics remain separate
-because they choose approximation/history behavior or explicit diagnostics, not
-an interchangeable native-k implementation. Historical learned/orbits inputs
+The `exx_factor_mode` controls history prediction independently of the native-k
+implementation. Historical learned/orbits inputs
 continue through the compatibility switch; the new manual selectors do not
 broaden the certified learned-route combinations.
 

@@ -47,14 +47,7 @@ use init_gs, only: init_wf
 use initialization_dft
 use jellium, only: check_condition_jm
 use dcdft
-use dc_force, only: report_dc_frozen_force
 use lcfo
-#ifdef USE_HSE
-use exx_native, only: exx_export_snapshot,exx_eigen_diagnostic_enabled,exx_export_eigen_pair,exx_refresh
-use exx_native, only: exx_enabled,exx_pack
-use exx_stationarity,only:spinor_stationarity
-use subspace_diagonalization,only:ssdg
-#endif
 use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
 implicit none
 integer :: ix,iy,iz
@@ -142,70 +135,6 @@ call initialization2_dft( Miter, nspin, rion_update,  &
                           pp, ppg, ppn,   &
                           xc_func, mixing )
 
-#ifdef USE_HSE
-! Explicit opt-in, read-only diagnostic: evaluate the initial physical
-! Hamiltonian, print scalar metrics, and return before any SCF iteration.
-block
-  character(8) :: diagnostic_env
-  integer :: diagnostic_flag,diagnostic_status,diagnostic_bad,diagnostic_total,diagnostic_stage
-  integer :: diagnostic_saved_ncg,diagnostic_remaining
-  complex(8),allocatable :: diagnostic_psi(:,:,:),diagnostic_hpsi(:,:,:)
-  real(8) :: diagnostic_metrics(5),diagnostic_global(5)
-  diagnostic_flag=0
-  if(comm_is_root(nproc_id_global))then
-    call get_environment_variable('SALMON_HSE_STATIONARITY',diagnostic_env,status=diagnostic_status)
-    if(diagnostic_status==0.and.trim(diagnostic_env)=='1')diagnostic_flag=1
-    if(diagnostic_status==0.and.trim(diagnostic_env)=='solve')diagnostic_flag=2
-    if(diagnostic_status==0.and.trim(diagnostic_env)=='blocked')diagnostic_flag=3
-  endif
-  call comm_bcast(diagnostic_flag,nproc_group_global)
-  if(diagnostic_flag>0)then
-    if(.not.exx_enabled().or.yn_spinorbit/='y'.or.yn_dc/='n'.or. &
-       info%isize_r/=1.or.info%isize_o/=1) &
-      error stop 'HSE stationarity diagnostic requires native SOC k-only layout'
-    call exx_refresh(system,mg,info,spsi)
-    if(diagnostic_flag>=2.and.propagator/='hse_taylor4_full') &
-      error stop 'Fixed-H stationarity solve requires direct exchange'
-    allocate(diagnostic_psi(2*product(mg%num),system%no,info%numk), &
-             diagnostic_hpsi(2*product(mg%num),system%no,info%numk))
-    do diagnostic_stage=1,merge(3,1,diagnostic_flag>=2)
-    ! No density, potential, occupation or Fock-source refresh in these passes.
-    if(diagnostic_stage==2)then
-      diagnostic_saved_ncg=ncg
-      diagnostic_remaining=ncg
-      do
-        if(diagnostic_flag==3)ncg=min(8,diagnostic_remaining)
-        call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,V_local, &
-          2,nscf_init_no_diagonal)
-        if(diagnostic_flag/=3)exit
-        call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,V_local,srg)
-        diagnostic_remaining=diagnostic_remaining-ncg
-        if(diagnostic_remaining<=0)exit
-      enddo
-      ncg=diagnostic_saved_ncg
-    endif
-    if(diagnostic_stage==3)call ssdg(mg,system,info,stencil,spsi,shpsi,ppg,V_local,srg)
-    call hpsi(spsi,shpsi,info,mg,V_local,system,stencil,srg,ppg)
-    call exx_pack(spsi,mg,info,diagnostic_psi)
-    call exx_pack(shpsi,mg,info,diagnostic_hpsi)
-    call spinor_stationarity(diagnostic_psi,diagnostic_hpsi, &
-      system%rocc(:,info%ik_s:info%ik_e,1),system%hvol, &
-      diagnostic_metrics(1),diagnostic_metrics(2),diagnostic_metrics(3),diagnostic_bad, &
-      diagnostic_metrics(4),diagnostic_metrics(5))
-    call comm_summation(diagnostic_bad,diagnostic_total,info%icomm_rko)
-    if(diagnostic_total/=0)error stop 'Invalid HSE stationarity diagnostic data'
-    call comm_get_max(diagnostic_metrics,diagnostic_global,5,info%icomm_rko)
-    if(comm_is_root(nproc_id_global))then
-      if(diagnostic_flag>=2)write(*,'(a,i0)') 'HSE_FIXED_H_STAGE initial/solver/finalRitz: ',diagnostic_stage
-      write(*,'(a,5es24.16)') 'HSE_STATIONARITY gram_error/hermitian_error_Ha/commutator_Ha/outside_Ha/within_Ha: ',diagnostic_global
-    endif
-    enddo
-    if(comm_is_root(nproc_id_global)) &
-      write(*,'(a)') 'HSE_STATIONARITY diagnostic only; no SCF performed or state certified.'
-    return
-  endif
-end block
-#endif
 
 Miopt = 0
 nopt_max = 1
@@ -303,10 +232,6 @@ if(yn_out_tm  == 'y'.or. yn_out_tm_bin == 'y'.or.yn_out_gs_sgm_eps=='y') then
   end select
 end if
 
-   if(yn_dc_force_diagnostic=='y')then
-     if(.not.(sum1<threshold))error stop 'DC force diagnostic: SCF not converged'
-     call report_dc_frozen_force(dc,system,info,mg,pp,ppg,spsi,ewald,energy)
-   endif
    ! force
    if(yn_jm=='n' .and. yn_dc=="n")then
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
@@ -391,14 +316,6 @@ call fipp_stop ! performance profiling
 #endif
 
 
-#ifdef USE_HSE
-call exx_export_snapshot(system,mg,info,spsi,Miter,sum1,sum1<threshold)
-if(exx_eigen_diagnostic_enabled(info))then
-  call exx_refresh(system,mg,info,spsi)
-  call hpsi(spsi,shpsi,info,mg,V_local,system,stencil,srg,ppg,sttpsi)
-  call exx_export_eigen_pair(system,mg,info,spsi,shpsi)
-end if
-#endif
 !------------ Writing part -----------
 call timer_begin(LOG_WRITE_GS_RESULTS)
 

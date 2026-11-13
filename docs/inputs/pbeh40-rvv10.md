@@ -92,10 +92,10 @@ Complex exports include a `functional.txt` per fragment, bound to the binary run
 
 Build with `USE_HSE=ON` (FFTW, Libxc and BLAS/LAPACK). Existing HSE dependency discovery is reused; `USE_LIBXC=ON` is not additionally required for this C-ABI semilocal evaluator. Example local configuration:
 
-Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
+Use the [small Si GS/RT regression](../../testsuites/420_bulk_Si_hse_gs/README.md) for the standard CPU smoke check.
 
 
-The standalone kernel tests currently use the same macOS Homebrew toolchain layout as existing native HSE tests. Run directories must be fresh. Results and limitations are recorded in archived validation results (not distributed).
+Use fresh run directories. The small Si regression does not certify every optional functional or parallel layout.
 
 ## Reusable FFTW pencil backend
 
@@ -119,48 +119,13 @@ and complete-functional speed can differ, and packing/communication still matter
 target machine before selecting a backend. Setup, warm forward/inverse pairs,
 local FFT, communication, packing and full rVV10 timings are separated by:
 
-Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
+Use the [small Si GS/RT regression](../../testsuites/420_bulk_Si_hse_gs/README.md) for the standard CPU smoke check.
 
 
 The grids are 32x24x16 and 64x48x32, with 32 channels, 2/4 MPI ranks and one
 OpenMP thread. FFTE timings include its current per-transform private-table
 initialization; these compare implemented paths, not isolated library speed.
 Use `--fft-backend fftw` with the LCFO integration fixture to check that route.
-
-## Static DC force diagnostics (direct fragment MD remains disabled)
-
-For static PBEh DC calculations, `yn_dc_force_diagnostic='y'` in `&dc` prints
-a separately labelled frozen-orbital nuclear derivative in Hartree/bohr. It
-requires a converged SCF, full MLWF support, and automatic fragment atom lists.
-It sums total-grid electrostatics and the two derivatives of each
-core-restricted nonlocal projector product, with global atom identities.
-It does not populate the regular ionic force or advance any ion.
-
-The diagnostic also reports total electron residual, core-weighted occupation
-`TS`, and `E-TS`. These are diagnostic quantities; stationarity of `E-TS` for
-truncated fragments has not been established. Fragment orbital and occupation
-response terms are absent from the printed force. Periodic-image bookkeeping
-is present, but moving atom-list updates and boundary-crossing MD are not.
-
-Run the reproducible small H4 audit with:
-
-Historical development-only commands are not shipped. Use the single [Si testsuite regression](../PR_VALIDATION.md) for the submitted check.
-
-
-At 300 K electronic temperature, full-cell buffers agree with energy finite
-differences. Truncated buffers leave about 0.05–0.08 eV/angstrom disagreement
-even after the tested core-weighted entropy term is subtracted. Therefore
-`theory='dft_md', yn_dc='y'` is still rejected. This diagnostic is preparation
-for an energy-consistent DC force, not production MD support.
-
-For positive `temperature_k`, PBEh DC occupations now enforce the core-weighted
-electron count with a bounded chemical-potential solve. Insufficient weighted
-state capacity stops with a request to increase `nstate_frag`; failure is no
-longer silently accepted. The finite-temperature response formulation keeps
-electronic temperature fixed and differentiates E-TS at fixed total electron
-count. Occupation/entropy derivative kernels are available internally, but the
-coupled orbital/density force correction and ionic integration are still pending.
-The existing zero-temperature and non-PBEh occupation paths are unchanged.
 
 ## DC initial state to real-space Ehrenfest
 

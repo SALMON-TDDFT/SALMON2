@@ -26,7 +26,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
-  use exx_native, only: exx_taylor_stage,exx_trace_corrected_endpoint,exx_factor_begin,exx_factor_endpoint,exx_ptcn_report_step
+  use exx_native, only: exx_taylor_stage,exx_factor_begin,exx_factor_endpoint
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
   use density_matrix, only: calc_density, calc_current, calc_microscopic_current
@@ -467,8 +467,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 #ifdef USE_HSE
   ! One capture per completed step; predictor stages never call the collector.
   call exx_factor_endpoint(system,info,itt)
-  call exx_ptcn_report_step(itt,info)
-  call exx_trace_corrected_endpoint(system,info,itt,dt,itt==itotNtime,itotNtime)
 #endif
   call nvtxEndRange
   return

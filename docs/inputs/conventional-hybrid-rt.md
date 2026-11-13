@@ -120,8 +120,7 @@ accepted. PBE0/PBEh retain the analytic spherical-Coulomb G=0 term and the exist
 `pbeh_coulomb_radius` convention (zero selects half the shortest BvK cell length).
 This is a kernel choice, not an MLWF support radius.
 
-DC, fractional/extra-state GS, explicitly localized support and requested HSE
-Wannier snapshots retain the occupation-aware Wannier/spatial paths. Gamma
-spatial exchange is unchanged. Legacy `hse_block_rows`, `hse_fft_layout` and
-`yn_hse_profile` input names still control the common k engine for compatibility.
+DC, fractional/extra-state GS and explicitly localized support retain the occupation-aware Wannier/spatial paths. Gamma
+spatial exchange is unchanged. Legacy `hse_block_rows` and `hse_fft_layout`
+input names still control the common k engine for compatibility.
 The `EXX_DISTRIBUTED_K` log marker identifies the shared path.

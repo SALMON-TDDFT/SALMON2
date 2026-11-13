@@ -294,18 +294,14 @@ contains
       & cname, pbeh_coulomb_radius, rvv10_b, rvv10_c, rvv10_nq, rvv10_fft, hse_omega, yn_hse_wannier, &
       & exx_mlwf_interval, exx_mlwf_maxiter, exx_mlwf_tolerance, &
       & hse_mlwf_interval,hse_mlwf_maxiter,hse_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
-      & exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
       & exx_factor_mode,exx_k_algorithm,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
-      & yn_ace_shadow_diagnostic,yn_ace_export_factors, &
       & yn_hse_sr_pair_symmetry, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
-      & yn_hse_profile, &
-      & yn_hse_eigen_diagnostic, yn_hse_solver_diagnostic, yn_hse_wannier_snapshot, &
       & hse_q_reduction, hse_block_rows, exx_worker_tile_divisor, exx_worker_rprime_groups, &
-      & hse_fft_layout, hse_reference_export_directory, &
+      & hse_fft_layout, &
       & xname, &
 #ifdef USE_LIBXC
       & alibx, &
@@ -629,7 +625,7 @@ contains
       & file_atom_coor_frag, &
       & yn_out_dc_fragment_coor, &
       & xi_dc, &
-      & yn_dc_lcfo, yn_dc_force_diagnostic, &
+      & yn_dc_lcfo, &
       & yn_dc_lcfo_diag, &
       & lcfo_eigensolver, &
       & lcfo_diag_chefsi_filter_degree, &
@@ -775,17 +771,11 @@ contains
     yn_exx_spinor_pair_fft = ' '
     yn_exx_fft_orbits = ' '
     yn_exx_k_pair_symmetry = ' '
-    yn_ace_shadow_diagnostic = 'n'
-    yn_ace_export_factors = 'n'
     yn_hse_sr_pair_symmetry = 'y'
     exx_factor_history_frames = 3
     exx_factor_exact_interval = 8
     exx_factor_n_teach = 8
     exx_factor_warmup_steps = 0 ! Deprecated input; derived after reading the namelist.
-    exx_surrogate_mode = 'off'
-    exx_surrogate_capacity = 64
-    exx_surrogate_rank_max = 256
-    exx_surrogate_rank_rtol = 1d-12
     exx_mlwf_norm_fraction = 0d0
     exx_local_fft = 'auto'
     exx_kpoint_backend = 'cpu'
@@ -799,16 +789,11 @@ contains
     exx_pair_screening = 'off'
     hse_sr_tolerance = 0d0
     exx_pair_tolerance = 0d0
-    yn_hse_profile = 'n'
-    yn_hse_eigen_diagnostic = 'n'
-    yn_hse_solver_diagnostic = 'n'
-    yn_hse_wannier_snapshot = 'n'
     hse_q_reduction = 1
     hse_block_rows = 0
     exx_worker_tile_divisor = 0
     exx_worker_rprime_groups = 0
     hse_fft_layout = 'auto'
-    hse_reference_export_directory = 'none'
     alibx = 'none'
     alibc = 'none'
     alibxc= 'none'
@@ -1126,7 +1111,6 @@ contains
     file_atom_coor_frag = 'none'
     yn_out_dc_fragment_coor = 'n'
     xi_dc = -1d0
-    yn_dc_force_diagnostic = 'n'
     yn_dc_lcfo = 'y'
     yn_dc_lcfo_diag = 'y'
 #ifdef USE_EIGENEXA
@@ -1423,10 +1407,6 @@ contains
     call string_lowercase(yn_exx_fft_orbits)
     call comm_bcast(yn_exx_k_pair_symmetry,nproc_group_global)
     call string_lowercase(yn_exx_k_pair_symmetry)
-    call comm_bcast(yn_ace_shadow_diagnostic,nproc_group_global)
-    call string_lowercase(yn_ace_shadow_diagnostic)
-    call comm_bcast(yn_ace_export_factors,nproc_group_global)
-    call string_lowercase(yn_ace_export_factors)
     call comm_bcast(yn_hse_sr_pair_symmetry,nproc_group_global)
     call string_lowercase(yn_hse_sr_pair_symmetry)
     call comm_bcast(hse_sr_tolerance,nproc_group_global)
@@ -1442,25 +1422,15 @@ contains
     call comm_bcast(exx_factor_history_frames,nproc_group_global)
     call comm_bcast(exx_factor_exact_interval,nproc_group_global)
     call comm_bcast(exx_factor_warmup_steps,nproc_group_global)
-    call comm_bcast(exx_surrogate_mode,nproc_group_global)
-    call string_lowercase(exx_surrogate_mode)
-    call comm_bcast(exx_surrogate_capacity,nproc_group_global)
-    call comm_bcast(exx_surrogate_rank_max,nproc_group_global)
-    call comm_bcast(exx_surrogate_rank_rtol,nproc_group_global)
     call comm_bcast(exx_mlwf_norm_fraction,nproc_group_global)
     call comm_bcast(exx_mlwf_radius,nproc_group_global)
     exx_mlwf_radius=exx_mlwf_radius*ulength_to_au
-    call comm_bcast(yn_hse_profile,nproc_group_global)
-    call comm_bcast(yn_hse_eigen_diagnostic,nproc_group_global)
-    call comm_bcast(yn_hse_solver_diagnostic,nproc_group_global)
-    call comm_bcast(yn_hse_wannier_snapshot,nproc_group_global)
     call comm_bcast(hse_q_reduction,nproc_group_global)
     call comm_bcast(hse_block_rows,nproc_group_global)
     call comm_bcast(exx_worker_tile_divisor,nproc_group_global)
     call comm_bcast(exx_worker_rprime_groups,nproc_group_global)
     call comm_bcast(hse_fft_layout,nproc_group_global)
     call string_lowercase(hse_fft_layout)
-    call comm_bcast(hse_reference_export_directory,nproc_group_global)
     call comm_bcast(pbeh_coulomb_radius,nproc_group_global)
     pbeh_coulomb_radius=pbeh_coulomb_radius*ulength_to_au
     call comm_bcast(rvv10_b,nproc_group_global)
@@ -1892,7 +1862,6 @@ contains
     call comm_bcast(file_atom_coor_frag, nproc_group_global)
     call comm_bcast(yn_out_dc_fragment_coor, nproc_group_global)
     call comm_bcast(xi_dc, nproc_group_global)
-    call comm_bcast(yn_dc_force_diagnostic, nproc_group_global)
     call comm_bcast(yn_dc_lcfo, nproc_group_global)
     call comm_bcast(yn_dc_lcfo_diag, nproc_group_global)
     call comm_bcast(lcfo_eigensolver, nproc_group_global)
@@ -1937,13 +1906,9 @@ contains
       call string_lowercase(yn_md)
       call string_lowercase(yn_opt)
       call string_lowercase(yn_dc)
-      call string_lowercase(yn_hse_wannier_snapshot)
-      call string_lowercase(yn_hse_eigen_diagnostic)
-      call string_lowercase(yn_hse_solver_diagnostic)
 #ifdef USE_HSE
       if(is_hybrid(xc).and.theory=='dft'.and.yn_restart=='n'.and.yn_md=='n'.and.yn_opt=='n'.and. &
          (yn_dc=='n'.or.temperature>0d0).and.checkpoint_interval<=0.and.time_shutdown<=0d0.and. &
-         yn_hse_wannier_snapshot=='n'.and.yn_hse_eigen_diagnostic=='n'.and.yn_hse_solver_diagnostic=='n'.and. &
          method_mixing/='simple_potential'.and. &
          (convergence=='rho_dne'.or.convergence=='norm_rho'.or.convergence=='norm_rho_dng')) &
         exx_pre_scf_threshold=1d-4
@@ -2512,8 +2477,6 @@ contains
       write(fh_variables_log, *) "# yn_exx_spinor_pair_fft=",yn_exx_spinor_pair_fft
       write(fh_variables_log, *) "# yn_exx_fft_orbits=",yn_exx_fft_orbits
       write(fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
-      write(fh_variables_log, *) "# yn_ace_shadow_diagnostic=",yn_ace_shadow_diagnostic
-      write(fh_variables_log, *) "# yn_ace_export_factors=",yn_ace_export_factors
       write(fh_variables_log, *) "# yn_hse_sr_pair_symmetry=",yn_hse_sr_pair_symmetry
       write(fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
@@ -2525,25 +2488,16 @@ contains
       write(fh_variables_log, *) "# exx_factor_history_frames=",exx_factor_history_frames
       write(fh_variables_log, *) "# exx_factor_exact_interval=",exx_factor_exact_interval
       write(fh_variables_log, *) "# exx_factor_warmup_steps=",exx_factor_warmup_steps
-      write(fh_variables_log, *) "# exx_surrogate_mode=",exx_surrogate_mode
-      write(fh_variables_log, *) "# exx_surrogate_capacity=",exx_surrogate_capacity
-      write(fh_variables_log, *) "# exx_surrogate_rank_max=",exx_surrogate_rank_max
-      write(fh_variables_log, *) "# exx_surrogate_rank_rtol=",exx_surrogate_rank_rtol
       write(fh_variables_log, *) "# exx_mlwf_norm_fraction=",exx_mlwf_norm_fraction
       write(fh_variables_log, *) "# exx_mlwf_radius (bohr; 0=full)=",exx_mlwf_radius
       write(fh_variables_log, *) "# exx_mlwf_interval=",exx_mlwf_interval
       write(fh_variables_log, *) "# exx_mlwf_maxiter=",exx_mlwf_maxiter
       write(fh_variables_log, *) "# exx_mlwf_tolerance=",exx_mlwf_tolerance
-      write(fh_variables_log, *) "# yn_hse_profile=",yn_hse_profile
-      write(fh_variables_log, *) "# yn_hse_eigen_diagnostic=",yn_hse_eigen_diagnostic
-      write(fh_variables_log, *) "# yn_hse_solver_diagnostic=",yn_hse_solver_diagnostic
-      write(fh_variables_log, *) "# yn_hse_wannier_snapshot=",yn_hse_wannier_snapshot
       write(fh_variables_log, *) "# hse_q_reduction=",hse_q_reduction
       write(fh_variables_log, *) "# hse_block_rows=",hse_block_rows
       write(fh_variables_log, *) "# exx_worker_tile_divisor=",exx_worker_tile_divisor
       write(fh_variables_log, *) "# exx_worker_rprime_groups=",exx_worker_rprime_groups
       write(fh_variables_log, *) "# hse_fft_layout=",hse_fft_layout
-      write(fh_variables_log, *) "# hse_reference_export_directory=",hse_reference_export_directory
 #ifdef USE_LIBXC
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibxc', trim(alibxc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'alibx', trim(alibx)
@@ -3032,7 +2986,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') "file_atom_coor_frag", file_atom_coor_frag
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_out_dc_fragment_coor", yn_out_dc_fragment_coor
       write(fh_variables_log, '("#",4X,A,"=",ES12.5)') 'xi_dc', xi_dc
-      write(fh_variables_log, *) "# yn_dc_force_diagnostic=",yn_dc_force_diagnostic
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo",yn_dc_lcfo
       write(fh_variables_log, '("#",4X,A,"=",A)') "yn_dc_lcfo_diag",yn_dc_lcfo_diag
       write(fh_variables_log, '("#",4X,A,"=",A)') "lcfo_eigensolver",trim(lcfo_eigensolver)
@@ -3218,7 +3171,6 @@ contains
          exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1).or. &
          any(nproc_rgrid/=1).or.nproc_ob/=1.or.(temperature>=0d0.and.yn_spinorbit/='y').or. &
          exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
-         yn_hse_wannier_snapshot/='n'.or. &
          (exx_factor_mode/='off'.and..not.(yn_spinorbit=='y'.and.temperature>=0d0.and. &
           exx_factor_mode=='learned'))) &
         error stop 'Manual EXX k algorithm requires fixed-ion full-support CPU k-only native exchange'
@@ -3235,14 +3187,7 @@ contains
     endif
     call yn_argument_check(yn_exx_fft_orbits)
     call yn_argument_check(yn_exx_k_pair_symmetry)
-    call yn_argument_check(yn_ace_shadow_diagnostic)
-    call yn_argument_check(yn_ace_export_factors)
     call yn_argument_check(yn_hse_sr_pair_symmetry)
-    call yn_argument_check(yn_hse_profile)
-    call yn_argument_check(yn_hse_eigen_diagnostic)
-    call yn_argument_check(yn_hse_solver_diagnostic)
-    call yn_argument_check(yn_hse_wannier_snapshot)
-    call yn_argument_check(yn_dc_force_diagnostic)
     call yn_argument_check(yn_dc_lcfo)
     call yn_argument_check(yn_dc_lcfo_diag)
 
@@ -3513,7 +3458,7 @@ contains
 
     if(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')then
       if(exx_mlwf_radius>0d0.or.(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_norm_fraction<1d0).or. &
-         exx_pair_screening/='off'.or.yn_hse_wannier_snapshot=='y') &
+         exx_pair_screening/='off') &
         error stop 'DC canonical exchange requires full support; opt into yn_exx_dc_mlwf=y for localization'
     endif
     if(.not.ieee_is_finite(exx_pre_scf_threshold).or.exx_pre_scf_threshold<0d0) &
@@ -3525,8 +3470,7 @@ contains
         error stop 'PBE pre-SCF requires fresh static hybrid SCF'
       if(yn_dc=='y'.and.temperature<=0d0) &
         error stop 'PBE pre-SCF in DC requires positive electronic temperature (e.g. temperature_k=300)'
-      if(checkpoint_interval>0.or.time_shutdown>0d0.or.yn_hse_wannier_snapshot=='y'.or. &
-         yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+      if(checkpoint_interval>0.or.time_shutdown>0d0) &
         error stop 'PBE pre-SCF stage is not supported by checkpoints or diagnostic snapshots'
       if(method_mixing=='simple_potential'.or. &
          (convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')) &
@@ -3553,7 +3497,7 @@ contains
 #endif
       if(.not.is_hybrid(xc).or.yn_dc/='n') &
         error stop 'k-point cuFFT requires native hybrid exchange without DC'
-      if(temperature>=0d0.or.(nstate>0.and.nstate*2/=nelec).or.yn_hse_wannier_snapshot=='y') &
+      if(temperature>=0d0.or.(nstate>0.and.nstate*2/=nelec)) &
         error stop 'k-point cuFFT requires occupied spin pairs without Wannier snapshots'
       if(any(num_kgrid<1).or.product(num_kgrid)<2.or. &
          index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none') &
@@ -3608,34 +3552,10 @@ contains
           error stop 'Factor history requires native static HSE Taylor4 or certified learned CN'
       endif
     endif
-    if(yn_ace_shadow_diagnostic=='y'.or.yn_ace_export_factors=='y')then
-      if(exx_surrogate_mode/='trace')error stop 'ACE diagnostic switches require surrogate trace'
-      if(yn_ace_export_factors=='y'.and.(nelec/=2.or.nstate/=1)) &
-        error stop 'Raw factor export requires one-orbital H2 diagnostic'
-    endif
-
     if(exx_factor_history_frames/=3) &
       error stop 'EXX factor history is fixed at 3 frames'
     if(exx_factor_exact_interval<1)error stop 'EXX factor exact interval must be positive'
     if(exx_factor_warmup_steps<0)error stop 'EXX factor warmup steps must be nonnegative'
-    if(exx_surrogate_mode/='off'.and.exx_surrogate_mode/='trace') &
-      error stop 'exx_surrogate_mode: only off/trace implemented'
-    if(exx_surrogate_mode=='trace')then
-      if(propagator/='hse_taylor4'.or.yn_fix_func/='n'.or.yn_restart=='y'.or. &
-         yn_dc=='y'.or.yn_md=='y'.or.any(num_kgrid/=1).or. &
-         product(nproc_rgrid)/=1.or.nproc_ob/=1.or.any(abs(dk_shift)>1d-12).or. &
-         exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0) &
-        error stop 'EXX trace requires nonrestart serial Gamma dense Taylor4 RT'
-      if(theory/='tddft_response'.and.theory/='tddft_pulse') &
-        error stop 'EXX trace requires RT theory'
-    endif
-    if(exx_surrogate_capacity<1.or.exx_surrogate_rank_max<1) &
-      error stop 'EXX surrogate trace capacity/rank must be positive'
-    if(.not.ieee_is_finite(exx_surrogate_rank_rtol).or.exx_surrogate_rank_rtol<=0d0.or. &
-       exx_surrogate_rank_rtol>=1d0)error stop 'EXX surrogate rank rtol must be in (0,1)'
-#ifndef USE_HSE
-    if(exx_surrogate_mode/='off')error stop 'EXX surrogate trace requires USE_HSE'
-#endif
     if(.not.ieee_is_finite(exx_mlwf_radius).or.exx_mlwf_radius<0d0) &
       error stop 'exx_mlwf_radius must be finite and nonnegative'
     if(.not.ieee_is_finite(exx_mlwf_norm_fraction).or.exx_mlwf_norm_fraction<0d0.or.exx_mlwf_norm_fraction>1d0) &
@@ -3659,7 +3579,7 @@ contains
       endif
       if(.not.is_hybrid(xc)) &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
-      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
+      if(yn_restart=='y') &
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
@@ -3695,15 +3615,14 @@ contains
       yn_hse_wannier='y'
       if(yn_dc=='n'.and.(nstate*2/=nelec.or.temperature>=0d0)) &
         error stop 'Spatial hybrid SCF: occupied spin pairs required'
-      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
+      if(yn_restart=='y'.or.checkpoint_interval>0.or.time_shutdown>0d0) &
         error stop 'Spatial hybrid SCF: restart/snapshot/checkpoint unsupported'
       if(yn_self_checkpoint=='y')error stop 'Spatial hybrid SCF: use yn_self_checkpoint=n'
       if(write_gs_restart_data/='no')then
         if(.not.is_global_hybrid(xc).or.yn_dc/='n'.or.write_gs_restart_data/='wfn') &
           error stop 'Spatial hybrid SCF: use write_gs_restart_data=no; conventional global hybrids also allow wfn'
       endif
-      if(yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
-        error stop 'Spatial hybrid SCF: full-grid eigen/solver diagnostics unsupported'
+
     endif
     if(pbeh_mesh_rt.and.yn_conventional_from_dcdft=='n')then
       if(yn_md/='n'.or.yn_opt/='n') &
@@ -3713,7 +3632,7 @@ contains
     endif
     if(hybrid_mesh_rt)then
       if(.not.global_native_k_route)yn_hse_wannier='y'
-      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
+      if(yn_restart=='y') &
         error stop 'Hybrid mesh RT: restart/snapshot unsupported'
       if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
         error stop 'Hybrid mesh RT: impulse or Acos2 without a second field required'
@@ -3746,8 +3665,7 @@ contains
         error stop 'Global hybrid: requires DFT, fixed-cell BOMD or supported real-space RT'
       if(yn_periodic/='y'.or.spin/='unpolarized'.or.yn_opt/='n') &
         error stop 'PBEh40: periodic unpolarized fixed-cell calculation required'
-      if(yn_hse_wannier_snapshot=='y') &
-        error stop 'PBEh40: legacy HSE Wannier snapshot cannot encode Coulomb cutoff'
+
       if(yn_restart=='y')error stop 'PBEh40: checkpoint parameter validation not yet supported'
       if(yn_dc=='y'.and.theory=='dft_md') &
         error stop 'PBEh40: DC MD is not yet supported'
@@ -3776,7 +3694,7 @@ contains
            yn_hse_wannier/='n'.or.exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or. &
            hse_sr_tolerance/=0d0.or.trim(file_kw)/='none'.or. &
            yn_gamma_centered/='n'.or.any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or. &
-           yn_conventional_from_dcdft/='n'.or.yn_hse_wannier_snapshot/='n'.or. &
+           yn_conventional_from_dcdft/='n'.or. &
            exx_ace_support/='occupied'.or.exx_pair_screening/='off') &
           error stop 'SOC HSE06: occupied spinors, native CPU k-only mesh and no approximations required'
         if(exx_factor_mode/='off')then
@@ -3796,8 +3714,7 @@ contains
           if(temperature>=0d0.and.nscf_init_redistribution/=0) &
             error stop 'Thermal SOC HSE seed requires immediate occupation redistribution'
         endif
-        if(checkpoint_interval>0.or.time_shutdown>0d0.or. &
-           yn_hse_eigen_diagnostic=='y'.or.yn_hse_solver_diagnostic=='y') &
+        if(checkpoint_interval>0.or.time_shutdown>0d0) &
           error stop 'SOC HSE06: checkpoint continuation and diagnostics not certified'
       endif
       if(yn_dc=='y')yn_hse_wannier='y'
@@ -3807,7 +3724,7 @@ contains
            nproc_ob/=1.or.any(nproc_rgrid/=1).or.exx_kpoint_backend/='cpu'.or. &
            index(yn_symmetry,'y')/=0.or.trim(file_kw)/='none'.or. &
            exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction/=0d0.or.hse_sr_tolerance/=0d0.or. &
-           yn_hse_wannier_snapshot=='y'.or.yn_conventional_from_dcdft=='y') &
+           yn_conventional_from_dcdft=='y') &
           error stop 'Thermal HSE: full-support CPU k-only exchange required'
         if(theory/='dft'.and.propagator/='hse_taylor4') &
           error stop 'Thermal HSE RT: Taylor4 ACE required'
@@ -3897,12 +3814,6 @@ contains
       stop "yn_out_rt_energy_components=y is supported for periodic systems only"
     end if
     
-    if(yn_dc_force_diagnostic=='y')then
-      if(yn_dc/='y'.or.theory/='dft'.or.(.not.is_global_hybrid(xc))) &
-        error stop 'DC force diagnostic requires static DC PBEh'
-      if(exx_mlwf_radius/=0d0.or.exx_mlwf_norm_fraction>0d0.or.file_atom_coor_frag/='none') &
-        error stop 'DC force diagnostic requires full MLWF support and automatic atom maps'
-    endif
     if(yn_dc=='y') then
       if(theory/='dft') stop "DC method (yn_dc=y): theory must be dft"
       if(yn_conventional_from_dcdft=='y') stop "contradiction: yn_dc=y & yn_conventional_from_dcdft=y"

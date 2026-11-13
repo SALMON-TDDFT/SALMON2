@@ -574,7 +574,6 @@ contains
         action,status,pair_count,pair_scratch)
       op%local_pairs=0;op%local_points=0;op%global_pairs=pair_count
       op%pair_products=pair_count
-      write(*,'(a,i0,a,i0)')'EXX_GAMMA_HERMITIAN local_pairs=',pair_count,' explicit_scratch_bytes=',pair_scratch
       return
     endif
     allocate(selected(nt),omitted(nt),broad_kept(nt));omitted=0d0;broad_kept=0;broad_sources=0

@@ -7,7 +7,7 @@ module exx_native
   use exx_worker_service, only: service_enabled,service_exchange
 #endif
   use exx_blas_threads, only: exx_blas_thread_control
-  use exx_sparse_orbitals, only: sparse_pack,sparse_clear
+  use exx_sparse_orbitals, only: sparse_clear
   use exx_functional, only: exchange_fraction,exchange_screening
   use exx_cufft, only: exx_cufft_create
   use exx_k_backend, only: k_backend_factory
@@ -21,9 +21,6 @@ module exx_native
   use exx_k_orbits, only: apply_k_orbits,apply_spinor_k_orbits
   use exx_ace
   use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
-  use exx_surrogate_dense,only:surrogate_dense_basis_error
-  use exx_surrogate_trace,only:s_surrogate_trace,trace_initialize,trace_candidate,trace_write_diagnostic, &
-    trace_shadow_fit,trace_shadow_compare,s_factor_diagnostic,trace_factor_write
   use exx_distributed_gauge, only: gauge_tiles_rotate
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
   use exx_adaptive_support, only: adaptive_source_mask
@@ -34,21 +31,19 @@ module exx_native
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector, &
     yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
-    exx_surrogate_mode,exx_surrogate_capacity,exx_surrogate_rank_max,exx_surrogate_rank_rtol, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
-    exx_factor_mode,yn_exx_fft_orbits,yn_ace_shadow_diagnostic,yn_ace_export_factors, &
+    exx_factor_mode,yn_exx_fft_orbits, &
     yn_exx_dc_mlwf,yn_hse_sr_pair_symmetry,exx_pre_scf_active,exx_ace_support,exx_pair_screening,exx_pair_tolerance, &
     hse_sr_tolerance,hse_block_rows,hse_q_reduction, &
     exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
-    yn_hse_profile,hse_fft_layout,yn_hse_eigen_diagnostic,yn_hse_solver_diagnostic,yn_hse_wannier_snapshot
+    hse_fft_layout
   implicit none
   private
-  public :: exx_export_snapshot,exx_eigen_diagnostic_enabled,exx_export_eigen_pair
   public :: exx_check_localization
   public :: exx_enabled,exx_refresh,exx_add_action,exx_exchange_energy,exx_freeze
-  public :: exx_pack,exx_unpack,exx_timings,exx_walltime
+  public :: exx_pack,exx_unpack
   public :: exx_taylor_stage,exx_core_exchange,exx_force_full_action
   type(s_exx_symmetry_map),save :: symmetry_map
   type(exx_k_kernel),save :: kernel
@@ -60,11 +55,6 @@ module exx_native
   logical,save,public :: exx_adaptive_ready=.false.,exx_support_changed=.false.
   logical,save :: adaptive_active=.false.,cached_adaptive_ready=.false.
   logical,save :: exx_force_full_action=.false.
-  logical,save::diagnostic_shadow=.false.,diagnostic_ready(4)=.false.,export_factor_diagnostic=.false.
-  type(s_factor_diagnostic),save::factor_diag
-  real(8),save::diagnostic_coeff(3,4)=0
-  type(s_surrogate_trace),save :: strict_trace
-  public :: exx_trace_corrected_endpoint
   type(s_exx_ace),save :: scf_damped_ace
   logical,save :: scf_operator_damped=.false.
   public :: exx_scf_prepare,exx_scf_residual
@@ -85,19 +75,13 @@ module exx_native
   integer,save::ptcn_accepted_step=0
   logical,save::ptcn_attempted=.false.,ptcn_predicted=.false.
   real(8),save::ptcn_history_dt=0d0
-  integer(int64),save::exx_native_rebuilds=0,ptcn_rebuild_start=0
-  public::exx_ptcn_begin,exx_ptcn_predict_inner,exx_ptcn_accept,exx_ptcn_report_step
+  public::exx_ptcn_begin,exx_ptcn_predict_inner,exx_ptcn_accept
   type(s_exx_ace),save :: initial_ace,midpoint_ace
   complex(8),allocatable,save :: full_source(:,:,:),initial_source(:,:,:)
   logical,save :: taylor_active=.false.,taylor_midpoint=.false.
   complex(8),allocatable,save :: cached_source(:,:,:),target_work(:,:,:),action_work(:,:,:)
-  ! Experimental inverse blocking: no RSS benefit in the first real-workload comparison.
-  logical,parameter :: use_blocked_inverse=.false.
-  ! Storage is compact, but the first whole-process RSS comparison did not improve.
-  logical,parameter :: use_sparse_source=.false.
   real(8),save :: exx_exchange_energy=0d0
-  real(8),save :: exx_timings(4)=0d0 ! full EXX, ACE build, ACE apply, EXX collectives
-  logical,save :: exx_freeze=.false.,reported_team=.false.,timing_enabled=.false.
+  logical,save :: exx_freeze=.false.,reported_team=.false.
   ! Rank-specific loops keep IEEE inquiries scalar on Fujitsu compilers.
   private :: salmon_all_finite,finite_real_3d
   interface salmon_all_finite
@@ -152,78 +136,6 @@ contains
     residual=maximum(1)
   end subroutine
 
-  subroutine exx_trace_corrected_endpoint(system,info,step,step_dt,final_step,total_steps)
-    implicit none
-    type(s_dft_system),intent(in)::system
-    type(s_parallel_info),intent(in)::info
-    integer,intent(in)::step
-    integer,intent(in),optional::total_steps
-    real(8),intent(in)::step_dt
-    logical,intent(in)::final_step
-    integer::status,h,factor_count
-    complex(8),allocatable::pred(:,:),truth(:,:),frozen(:,:),linear(:,:)
-    real(8)::basis_leakage,basis_action_error
-    if(exx_surrogate_mode=='off')return
-    if(exx_freeze)error stop 'EXX trace cannot record frozen exchange'
-    if(strict_trace%epoch<0)then
-      diagnostic_shadow=yn_ace_shadow_diagnostic=='y'
-      export_factor_diagnostic=yn_ace_export_factors=='y'
-      if(export_factor_diagnostic.and.(nelec/=2.or.nstate/=1)) &
-        error stop 'Raw factor export currently restricted to H2 one-orbital diagnostic'
-      ! Layout and propagator are invariant within this fixed-ion trace epoch.
-      if(.not.exx_enabled().or.propagator/='hse_taylor4') &
-        error stop 'EXX trace requires corrected exact Taylor4 ACE'
-      if(info%isize_r/=1.or.info%isize_o/=1.or.info%isize_k/=1.or.info%numm/=1.or.system%nk/=1.or. &
-         yn_dc=='y'.or.yn_md=='y'.or.use_wannier_exchange()) &
-        error stop 'EXX trace currently requires serial Gamma dense ACE'
-      call trace_initialize(strict_trace,0,step_dt,exx_surrogate_rank_max,exx_surrogate_capacity, &
-                            exx_surrogate_rank_rtol,status)
-      if(status/=0)error stop 'EXX trace initialization failed'
-    endif
-    ! Diagnostic bounded capture; no surrogate action or physical accuracy claim.
-    if(strict_trace%count>=strict_trace%capacity)return
-    call trace_candidate(strict_trace,ace,step,step,.true.,status)
-    if(status/=0)error stop 'EXX strict corrected endpoint capture failed'
-    call surrogate_dense_basis_error(ace,strict_trace%q,basis_leakage,basis_action_error,status)
-    if(status/=0)error stop 'EXX fixed-Q representation diagnostic failed'
-    write(*,'(a,i8,2es24.15)')'EXX fixed-Q step/leakage/action-error:',step,basis_leakage,basis_action_error
-    if(diagnostic_shadow)then
-      if(step==40)then
-        do h=1,4
-          call trace_shadow_fit(strict_trace,40,h,0d0,diagnostic_coeff(:,h),status)
-          diagnostic_ready(h)=status==0
-          if(diagnostic_ready(h))then
-            write(*,'(a,i4,3es24.15)')'EXX shadow coefficients horizon:',h,diagnostic_coeff(:,h)
-          else
-            write(*,'(a,i4)')'EXX shadow unavailable (rank-deficient fit) horizon:',h
-          endif
-        enddo
-      endif
-      if(step>=72)then
-        allocate(pred(strict_trace%rank,strict_trace%rank),truth(strict_trace%rank,strict_trace%rank), &
-                 frozen(strict_trace%rank,strict_trace%rank),linear(strict_trace%rank,strict_trace%rank))
-        do h=1,4
-          if(.not.diagnostic_ready(h))cycle
-          call trace_shadow_compare(strict_trace,h,diagnostic_coeff(:,h),pred,truth,frozen,linear,status)
-          if(status/=0)error stop 'EXX diagnostic shadow comparison failed'
-          write(*,'(a,2i8,3es24.15)')'EXX shadow step/horizon/learned/frozen/linear:',step,h, &
-            sqrt(sum(abs(pred-truth)**2)),sqrt(sum(abs(frozen-truth)**2)),sqrt(sum(abs(linear-truth)**2))
-        enddo
-      endif
-    endif
-    if(export_factor_diagnostic)then
-      if(.not.present(total_steps))error stop 'Factor diagnostic requires total RT count'
-      factor_count=min(strict_trace%capacity,total_steps)
-      call trace_factor_write(factor_diag,'exx_factor_diagnostic.bin',ace,step,step_dt, &
-        factor_count,step==factor_count,status)
-      if(status/=0)error stop 'EXX raw factor diagnostic write failed'
-    endif
-    write(*,*)'EXX diagnostic candidate (unaccepted) step/rank/count:',step,strict_trace%rank,strict_trace%count
-    if(strict_trace%count==strict_trace%capacity.or.final_step)then
-      call trace_write_diagnostic(strict_trace,'exx_surrogate_diagnostic.dat',status)
-      if(status/=0)error stop 'EXX diagnostic output failed or already exists'
-    endif
-  end subroutine exx_trace_corrected_endpoint
 
 
   ! Experimental canonical factor history: Gamma/grid or full k-only MPI.
@@ -305,7 +217,6 @@ contains
           exx_mlwf_radius/=0d0.or. &
           exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied'.or. &
           exx_pair_screening/='off'.or. &
-          yn_hse_wannier_snapshot=='y'.or. &
           (.not.native_integer_occupation(system).and..not.thermal_factor_supported(system,info))) &
           error stop 'Factor history requires static full-support dense-k HSE and compatible occupations'
         if(info%isize_o>1.and..not.distributed_metric_available(info%icomm_ro)) &
@@ -697,7 +608,6 @@ contains
 
   subroutine exx_ptcn_begin(dt)
     real(8),intent(in)::dt
-    ptcn_rebuild_start=exx_native_rebuilds
     ptcn_attempted=.false.;ptcn_predicted=.false.
     if(exx_factor_mode/='learned')return
     if(.not.ieee_is_finite(dt).or.dt<=0d0)error stop 'Learned CN requires finite positive dt'
@@ -780,15 +690,6 @@ contains
     ptcn_accepted_step=ptcn_accepted_step+1
   end subroutine
 
-  subroutine exx_ptcn_report_step(step,info)
-    integer,intent(in)::step
-    type(s_parallel_info),intent(in)::info
-    if(propagator/='hse_ptcn')return
-    if(info%id_rko==0)write(*,'(a,i0,a,i0,a,l1)') &
-      'HSE_PT_CN_EXACT step=',step,' rebuilds=',exx_native_rebuilds-ptcn_rebuild_start, &
-      ' predicted=',ptcn_predicted
-  end subroutine
-
   subroutine exx_check_localization()
     implicit none
     if(dc_canonical())return
@@ -799,86 +700,6 @@ contains
       error stop 'EXX MLWF finite support: localization not converged; SCF result rejected'
   end subroutine exx_check_localization
 
-  logical function exx_eigen_diagnostic_enabled(info,solver) result(enabled)
-    use communication, only: comm_bcast
-    implicit none
-    type(s_parallel_info),intent(in) :: info
-    logical,optional,intent(in) :: solver
-    integer :: flag
-    enabled=.false.
-    if(.not.exx_enabled())return
-    flag=0
-    if(info%id_rko==0)then
-      if(yn_hse_eigen_diagnostic=='y')flag=1
-      if(present(solver))then
-        if(solver)then
-          flag=0
-          if(yn_hse_solver_diagnostic=='y')flag=1
-        endif
-      endif
-    endif
-    call comm_bcast(flag,info%icomm_rko,0)
-    enabled=flag==1
-  end function
-
-  subroutine exx_export_eigen_pair(system,mg,info,psi,hpsi,tag)
-    use iso_fortran_env, only: int32
-    use salmon_global, only: base_directory
-    implicit none
-    type(s_dft_system),intent(in) :: system
-    type(s_rgrid),intent(in) :: mg
-    type(s_parallel_info),intent(in) :: info
-    type(s_orbital),intent(in) :: psi,hpsi
-    character(*),optional,intent(in) :: tag
-    character(:),allocatable :: filename
-    complex(8),allocatable :: p(:,:,:),hp(:,:,:)
-    integer :: iu,status,closed,total,ng,no
-    ! Diagnostic format deliberately supports only a full Gamma fragment.
-    if(system%nk/=1.or.info%isize_r/=1.or.info%isize_o/=1) &
-      error stop 'HSE eigen diagnostic requires Gamma and full grid/orbitals'
-    ng=product(mg%num);no=system%no
-    allocate(p(ng,no,1),hp(ng,no,1))
-    call exx_pack(psi,mg,info,p);call exx_pack(hpsi,mg,info,hp)
-    filename=trim(base_directory)//'hse_eigen_pair.bin'
-    if(present(tag))filename=trim(base_directory)//'hse_eigen_'//tag//'.bin'
-    open(newunit=iu,file=filename, &
-      status='replace',access='stream',form='unformatted',iostat=status)
-    if(status==0)then
-      write(iu,iostat=status)int([16909060,1,ng,no,1],int32)
-      if(status==0)write(iu,iostat=status)system%hvol,system%rocc(:,:,1),p,hp
-      close(iu,iostat=closed)
-      if(status==0)status=closed
-    endif
-    call comm_summation(abs(status),total,info%icomm_rko)
-    if(total/=0)error stop 'HSE eigen diagnostic write failed'
-  end subroutine
-
-  subroutine exx_export_snapshot(system,mg,info,psi,iteration,residual,converged)
-    use salmon_global, only: base_directory
-    use communication, only: comm_bcast
-    implicit none
-    type(s_dft_system),intent(in) :: system
-    type(s_rgrid),intent(in) :: mg
-    type(s_parallel_info),intent(in) :: info
-    type(s_orbital),intent(in) :: psi
-    integer,intent(in) :: iteration
-    real(8),intent(in) :: residual
-    logical,intent(in) :: converged
-    integer :: status,enabled
-    if(.not.exx_enabled().or..not.use_wannier_exchange())return
-    enabled=0
-    if(info%id_k==0)then
-      if(yn_hse_wannier_snapshot=='y')enabled=1
-    endif
-    call comm_bcast(enabled,info%icomm_k,0)
-    if(enabled==0)return
-    call exx_refresh(system,mg,info,psi)
-    status=0
-    if(info%id_k==0)call wannier_snapshot(wannier,wannier%source_occupation,hse_omega,exx_exchange_energy, &
-      residual,iteration,converged,trim(base_directory)//'hse_wannier_snapshot.bin',status)
-    call comm_bcast(status,info%icomm_k,0)
-    if(status/=0)error stop 'HSE Wannier snapshot: write failed'
-  end subroutine
   subroutine exx_taylor_stage(stage)
     implicit none
     integer,intent(in) :: stage
@@ -903,12 +724,6 @@ contains
     end select
   end subroutine
 
-  real(8) function exx_walltime()
-    implicit none
-    integer(int64) :: count,rate
-    call system_clock(count,rate)
-    exx_walltime=real(count,8)/real(rate,8)
-  end function
 
   subroutine warn_fixed_radius(max_loss)
     implicit none
@@ -925,7 +740,7 @@ contains
   logical function dc_gamma_pairs_requested()
     implicit none
     dc_gamma_pairs_requested=dc_canonical().and.product(num_kgrid)==1.and. &
-      yn_hse_sr_pair_symmetry=='y'.and.hse_sr_tolerance==0d0.and.yn_hse_wannier_snapshot/='y'
+      yn_hse_sr_pair_symmetry=='y'.and.hse_sr_tolerance==0d0
   end function
 
   logical function dc_canonical()
@@ -984,7 +799,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     type(s_orbital),intent(in) :: psi
     complex(8),allocatable :: w(:,:,:),local(:,:,:),weighted(:,:,:)
-    real(8) :: ex,tick,communication_before,electrons
+    real(8) :: ex,electrons
     logical :: thermal_spinor
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
     procedure(k_backend_factory),pointer :: create_backend
@@ -1067,7 +882,7 @@ contains
         count_full=symmetry_map%first(info%ik_e+1)-first_full
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,symmetry_map%full_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
-          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
+          block_rows=hse_block_rows,fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
           defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'), &
@@ -1075,7 +890,7 @@ contains
       else
         call exx_k_kernel_init(kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
-          block_rows=hse_block_rows,profile=yn_hse_profile=='y',fft_layout=hse_fft_layout, &
+          block_rows=hse_block_rows,fft_layout=hse_fft_layout, &
           create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
           defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'), &
@@ -1094,7 +909,6 @@ contains
           int(kernel%ng,int64)*(int(kernel%ng,int64)+1)/2,int(kernel%ng,int64)**2
         if(propagator=='hse_taylor4_full')write(*,'(a)')'EXX_DIRECT: ACE construction disabled'
       endif
-      timing_enabled=kernel%profile.or.propagator=='hse_ptcn'
     endif
     if(yn_spinorbit=='y')ng=2*ng
     allocate(local(ng,no,info%numk))
@@ -1132,7 +946,6 @@ contains
     if(scf_operator_damped)ierr=1
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error==0)return
-    exx_native_rebuilds=exx_native_rebuilds+1
     scf_operator_damped=.false.
     allocate(w(ng,no,info%numk))
     if(propagator=='hse_taylor4_full')then
@@ -1142,28 +955,18 @@ contains
         full_source=local
       endif
     endif
-    if(timing_enabled)then
-      tick=exx_walltime();communication_before=exx_timings(4)
-    endif
     if(thermal_spinor)then
       call apply_distributed(weighted,local,w,info,ierr)
     else
       call apply_distributed(local,local,w,info,ierr)
     endif
-    if(timing_enabled)exx_timings(1)=exx_timings(1)+exx_walltime()-tick-(exx_timings(4)-communication_before)
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
-    if(kernel%profile.and.info%id_k==0)write(*,'(a,i0,a,6es14.5)') &
-      'HSE_PROFILE rank0 block=',kernel%block,' density comm fft kernel packing action=',kernel%seconds
     if(.not.reported_team.and.info%id_k==0)write(*,'(a,i0)')'HSE_OPENMP threads=',kernel%threads_used
     if(.not.reported_team.and.info%id_k==0)write(*,'(a,l1)')'HSE_FFT_CONTIGUOUS=',kernel%contiguous_fft
-    if(.not.reported_team.and.info%id_k==0.and.kernel%auto_fft) &
-      write(*,'(a,2es14.5)')'HSE_FFT_AUTO trial strided contiguous seconds=',kernel%fft_trial_seconds
     reported_team=.true.
     if(propagator/='hse_taylor4_full')then
-      if(timing_enabled)tick=exx_walltime()
       call exx_ace_build(ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
-      if(timing_enabled)exx_timings(2)=exx_timings(2)+exx_walltime()-tick
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE06: ACE metric failed'
     endif
@@ -1377,10 +1180,7 @@ contains
     complex(8),intent(in) :: send(:)
     complex(8),intent(out) :: recv(:)
     integer,intent(in) :: count,comm
-    real(8) :: start
-    if(timing_enabled)start=exx_walltime()
     call comm_alltoall(send,recv,comm,count)
-    if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
   end subroutine transpose_k_tiles
 
   subroutine transpose_orbit_tiles(send,recv,sendcounts,recvcounts,displs,comm)
@@ -1394,15 +1194,12 @@ contains
 #ifdef USE_MPI
     integer :: ierr
 #endif
-    real(8) :: start
-    if(timing_enabled)start=exx_walltime()
 #ifdef USE_MPI
     call MPI_Alltoallv(send,sendcounts,displs,MPI_DOUBLE_COMPLEX,recv,recvcounts,displs,MPI_DOUBLE_COMPLEX,comm,ierr)
     if(ierr/=MPI_SUCCESS)error stop 'HSE orbit transpose failed'
 #else
     recv(:recvcounts(1))=send(:sendcounts(1))
 #endif
-    if(timing_enabled)exx_timings(4)=exx_timings(4)+exx_walltime()-start
   end subroutine transpose_orbit_tiles
 
   subroutine check_k_algorithm()
@@ -1452,7 +1249,7 @@ contains
     type(s_parallel_info),intent(in) :: info
     integer :: ierr,ng,total_error,info_error
     integer,allocatable :: orbital_comm
-    real(8) :: tick,communication_before,action_scale
+    real(8) :: action_scale
     if(.not.exx_enabled())return
     if(propagator=='hse_taylor4_full')then
       if(.not.allocated(full_source))error stop 'EXX: direct exchange source is not initialized'
@@ -1478,7 +1275,6 @@ contains
     if(.not.allocated(action_work))allocate(action_work(ng,info%numo,info%numk))
     call exx_pack(psi,mg,info,target_work)
     action_scale=exchange_fraction()
-    if(timing_enabled)tick=exx_walltime()
     if(use_wannier_exchange().and.exx_force_full_action)then
       if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
@@ -1495,7 +1291,6 @@ contains
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'EXX: full trial action failed'
     else if(propagator=='hse_taylor4_full')then
-      communication_before=exx_timings(4)
       if(taylor_active.and.taylor_midpoint)then
         ! Keep occupied-prefix selection separate for the two endpoint sources.
         call apply_distributed(initial_source,target_work,action_work,info,ierr)
@@ -1511,7 +1306,6 @@ contains
       endif
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE Taylor full target action failed'
-      if(timing_enabled)exx_timings(1)=exx_timings(1)+exx_walltime()-tick-(exx_timings(4)-communication_before)
     else
       if(taylor_active.and.taylor_midpoint)then
         call apply_endpoint(initial_ace)
@@ -1520,7 +1314,6 @@ contains
         action_scale=.5d0*exchange_fraction()
       endif
       call apply_endpoint(ace)
-      if(timing_enabled)exx_timings(3)=exx_timings(3)+exx_walltime()-tick
     endif
     if(ierr/=0)error stop 'HSE06: ACE application failed'
     call add_mesh_action(action_scale)
@@ -1532,7 +1325,6 @@ contains
       real(8) :: block_weight
       largest=info%numo
       call comm_get_max(largest,info%icomm_ro)
-      if(timing_enabled)tick=exx_walltime()
       do first=1,largest,block_size
         count=max(0,min(block_size,info%numo-first+1))
         ! Zero-column orbital ranks still join every packed-ACE collective.
@@ -1569,7 +1361,6 @@ contains
         if(ierr/=0)error stop 'EXX: block ACE application failed'
         call add_mesh_action(block_weight,first,first+count-1)
       enddo
-      if(timing_enabled)exx_timings(3)=exx_timings(3)+exx_walltime()-tick
     end subroutine apply_packed_blocks
     subroutine apply_endpoint(state)
       implicit none
@@ -1616,7 +1407,7 @@ contains
     endif
     ! Full-support ordinary multi-k exchange uses density-tile MPI for every
     ! hybrid. Retain Wannier for DC, fractional/empty states and localized support.
-    use_wannier_exchange=temperature>=0d0.or.yn_dc=='y'.or.yn_hse_wannier_snapshot=='y'.or. &
+    use_wannier_exchange=temperature>=0d0.or.yn_dc=='y'.or. &
       exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0.or. &
       (yn_hse_wannier=='y'.and.(product(num_kgrid)==1.or.temperature>=0d0.or. &
         (nstate>0.and.nstate*2/=nelec)))
@@ -1737,14 +1528,6 @@ contains
         endif
       endif
     endif
-    if(use_sparse_source.and.adaptive_active.and..not.radius_covers_cell.and. &
-       (exx_mlwf_norm_fraction<1d0.or.exx_mlwf_radius>0d0))then
-      call sparse_pack(spatial%sparse_source,spatial%source)
-      deallocate(spatial%source)
-      if(spatial%updates==1.and.info%id_ro==0)write(*,'(a,2i18)') &
-        'EXX_SOURCE sparse local entries/dense entries: ',size(spatial%sparse_source%value,kind=int64), &
-        int(product(mg%num),int64)*info%numo
-    endif
     if(exx_mlwf_radius>0d0)finite_support_localized=adaptive_active
     if(adaptive_active.neqv.was_active)exx_support_changed=.true.
     cached_adaptive_ready=exx_adaptive_ready
@@ -1803,8 +1586,6 @@ contains
       'EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0): ', &
       fft_work
     cached_occupation=system%rocc(:,:,1)
-    if(spatial%updates==1)write(*,'(a,4i10)')'EXX_ORBITALS rank/local/global/grid: ', &
-      info%id_ro,info%numo,system%no,product(mg%num)
     ex=0d0
     do j=1,info%numo
       io=info%io_s+j-1
@@ -1838,9 +1619,6 @@ contains
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
           pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
-      else if(use_blocked_inverse.and..not.allocated(spatial%gauge_tiles%matrix))then
-        call apply_localized_blocks()
-        return
       else
         allocate(localized_action(size(w,1),size(w,2),1))
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
@@ -1870,86 +1648,6 @@ contains
       endif
       call record_fft_work()
     end subroutine
-    subroutine apply_localized_blocks()
-!$    use omp_lib, only: omp_get_max_threads,omp_in_parallel
-      implicit none
-      integer,parameter :: block_size=32
-      complex(8),allocatable :: block_action(:,:,:),wire(:,:),rotation(:,:)
-      integer,allocatable :: counts(:)
-      integer :: first_owned,begin_col,nlocal,owner,nowner,j,k,global_col,ngrid,lo_col
-      integer(int64) :: stats(5)
-      integer :: workers,thread_state(3)
-      real(8) :: bound,cpu_seconds,bound_scale
-  ! BLAS explicit interface: sequence association preserves strided row offsets.
-  interface
-    subroutine zgemm(transa,transb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc)
-      implicit none
-      character(1),intent(in) :: transa,transb
-      integer,intent(in) :: m,n,k,lda,ldb,ldc
-      complex(8),intent(in) :: alpha,beta,a(lda,*),b(ldb,*)
-      complex(8),intent(inout) :: c(ldc,*)
-    end subroutine zgemm
-  end interface
-
-      call orbital_layout(info%numo,info%icomm_r,info%icomm_o,counts,first_owned,status)
-      if(status/=0)return
-      workers=1
-!$    workers=omp_get_max_threads()
-!$    if(omp_in_parallel())workers=1
-      ngrid=size(w,1);w=0d0;stats=0;bound=0d0;cpu_seconds=0d0
-      allocate(rotation(min(block_size,maxval(counts)),info%numo))
-      if(size(counts)>1)allocate(wire(ngrid,min(block_size,maxval(counts))))
-      do begin_col=1,maxval(counts),block_size
-        nlocal=max(0,min(block_size,info%numo-begin_col+1))
-        ! Clamp an empty orbital rank's section to its legal zero-sized endpoint.
-        lo_col=min(begin_col,info%numo+1)
-        allocate(block_action(ngrid,nlocal,1))
-        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
-          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,spatial%previous(:,lo_col:lo_col+nlocal-1,:),block_action,status, &
-          omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm,screen_target_count=sum(counts))
-        if(status/=0)return
-        call record_fft_work()
-        stats=stats+[spatial%screen_candidates,spatial%screen_skipped,spatial%pair_products, &
-                     spatial%pair_catalog_entries,spatial%pair_product_points]
-        bound_scale=max(bound,spatial%screen_bound)
-        if(bound_scale>0d0)bound=bound_scale*sqrt((bound/bound_scale)**2+(spatial%screen_bound/bound_scale)**2)
-        cpu_seconds=cpu_seconds+spatial%screen_cpu_seconds
-        ! The exchange action above uses its own threading; scope only the inverse product.
-        thread_state=0
-        if(workers>1)call exx_blas_thread_control(workers,thread_state)
-        ! Accumulate K(WF) U^H, broadcasting only each owner's current block.
-        do owner=0,size(counts)-1
-          nowner=max(0,min(block_size,counts(owner)-begin_col+1))
-          if(nowner==0)cycle
-          if(size(counts)>1)then
-            if(info%id_o==owner)wire(:,:nowner)=block_action(:,:,1)
-            call comm_bcast(wire(:,:nowner),info%icomm_o,owner)
-          endif
-          global_col=sum(counts(:owner-1))+begin_col
-          do j=1,info%numo
-            do k=1,nowner
-              rotation(k,j)=conjg(spatial%gauge(first_owned+j-1,global_col+k-1,1))
-            enddo
-          enddo
-          if(info%numo>0)then
-            if(size(counts)>1)then
-              call zgemm('N','N',ngrid,info%numo,nowner,(1d0,0d0),wire,ngrid, &
-                rotation,size(rotation,1),(1d0,0d0),w,ngrid)
-            else
-              call zgemm('N','N',ngrid,info%numo,nowner,(1d0,0d0),block_action,ngrid, &
-                rotation,size(rotation,1),(1d0,0d0),w,ngrid)
-            endif
-          endif
-        enddo
-        call exx_blas_thread_control(0,thread_state)
-        deallocate(block_action)
-      enddo
-      spatial%screen_candidates=stats(1);spatial%screen_skipped=stats(2)
-      spatial%pair_products=stats(3);spatial%pair_catalog_entries=stats(4);spatial%pair_product_points=stats(5)
-      spatial%screen_bound=bound;spatial%screen_cpu_seconds=cpu_seconds
-      status=0
-    end subroutine apply_localized_blocks
     subroutine record_fft_work()
       ! Count rejected ACE attempts too: each exchange call resets its counters.
       implicit none
