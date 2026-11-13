@@ -1,0 +1,140 @@
+# MPI TDDFT coupled to native E/H FDTD (experimental)
+
+[日本語](COUPLED.md) · Topic: `coupled` · Paired revision: `2026-11-13.5`
+
+Split one Python MPI job into a field group and material groups, with **one material
+and one macro point per material group**. Every member of a material group participates
+in native TDDFT; k-point, orbital and real-space decomposition stays inside that group.
+There is no subprocess or nested MPI launch. Native FDTD retains many local LD states.
+
+The entries are `NativeTDDFTMaterialProvider`, `NativeTDDFTBackend`, `NativeEHField`
+and `CoupledStepper`; the latter two live in `salmonpy.coupled`. Existing serial-worker
+TDDFT and batch FDTD remain available with their own restrictions.
+
+## Choosing dimension and response model
+
+Three-dimensional fields and macro-point layouts are possible, but TDDFT keeps an
+electronic state at every macro point. **Start with one-dimensional propagation or
+layered structures for practical TDDFT work.** This refers to the electromagnetic/
+macro layout, not reducing the microscopic DFT/TDDFT electronic problem to 1D.
+
+**For three-dimensional calculations with electronic feedback, recommend SBE or a
+user-written current solver.** Three-dimensional TDDFT is allowed, but choose it only
+after assessing the required physics, independent state count, memory and runtime.
+SBE/custom models must still satisfy their physical validity range, independent
+point-state ownership and A/c-to-charge-current-density contract. This recommendation
+does not imply an implemented SBE coupling adapter or automatic 1D reduction.
+Standalone three-dimensional LD FDTD is a separate workflow.
+
+The current 40³-grid/two-TDDFT-point sample is a connection regression, not a general
+3D TDDFT recommendation or a transversely uniform 1D multilayer implementation.
+Simply reducing transverse grid counts to one does not implement a 1D solver.
+
+## Preparation and resources
+
+First establish intent, total memory allowance and CPU concurrency. The standard
+sample uses two field ranks plus two two-rank material groups: six ranks and two
+electronic states. Start with one OpenMP/BLAS thread per rank. Memory estimation and
+hard enforcement are not implemented; measure a small GS before scaling.
+
+Explicitly build a **shared library against the host MPI**. Portable serial runtimes
+and the communication-only bridge cannot substitute for it. Nothing builds on import.
+The current build route targets macOS/Linux and GNU-compatible compilers.
+
+```sh
+python tools/prepare_salmon_runtime.py UPSTREAM_CHECKOUT NEW_SOURCE
+python tools/build_embedded_tddft.py NEW_SOURCE NEW_BUILD --jobs 2 \
+  --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
+  --cmake-arg=-DCMAKE_C_COMPILER=mpicc \
+  --cmake-arg=-DBLA_VENDOR=OpenBLAS \
+  --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
+  --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+  --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+```
+
+Resolve compiler/BLAS locations for the host. The C wrapper must accept the selected
+OpenMP flags too. The tool enables MPI/PIC, audits sources and objects for forbidden
+eigensolvers, and records library SHA256, source hashes and commands in `build.json`.
+Tools also ship under `salmonpy/_runtime_source/tools`; locate them with
+`importlib.resources.files('salmonpy').joinpath('_runtime_source')`.
+
+mpi4py and the library must use the same MPI. This host-specific library is not a
+portable wheel runtime. Request a Libxc-enabled build explicitly if needed; current
+inner-decomposition numerical validation covers PZ and TB-mBJ.
+
+## Sample
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.mpi_coupled_tddft \
+  NEW_BUILD/build.json GS_BUNDLE RT_INPUT NEW_OUTPUT
+```
+
+The self-contained `GS_BUNDLE` contains saved GS records, relative pseudopotentials
+and the RT input named by `RT_INPUT`. Match GS functional/grid/settings. The loader
+does not run DFT or convert restart formats. `NEW_OUTPUT` must be a new location on
+a filesystem shared by all members of each group.
+
+The sample uses a 40³ field grid and two adjacent electronic macro cells with an
+artificial pulse. It is a connection example, not converged film optics. Using
+`--field-ranks 1 --material-ranks 2` requires five total ranks. Inner decomposition
+is `(k, orbital, x, y, z)` and its product must equal material-group size; choose
+counts compatible with the actual k points, bands and real-space grid. The sample
+splits orbitals.
+
+Providers and response backends in `MaterialBinding` remain replaceable user objects.
+Loading/preparing material data is separate from A-to-J physics. Return physical
+**charge-current density**, avoiding double conversion of electronic-current sign.
+Group collectives use the supplied `solver_comm`.
+
+## Temporal and spatial contract
+
+The new scheme is `salmonpy.eh-centered-current/1`. It is a different discretization
+from the Weyl multiscale path; bitwise equivalence between those schemes is not
+claimed. Native E/H ordering and incident-source evaluation times are retained.
+
+| Quantity | Field clock |
+|---|---|
+| E after update n; native saved E/H (H is time-averaged) | n·dt |
+| New A and J; raw updated H | (n+1/2)·dt |
+| Previous J consumed by E update | (n−1/2)·dt |
+
+Electronic local time zero corresponds to field time dt/2. Initial E, H, A and
+feedback J are zero. A nonzero computed initial GS current does not replace that
+initial feedback. The sequence is previous J → native E/H update → A update →
+TDDFT J update. `A_new = A_old − dt * S(E_n)`; crystal drive is always A/c.
+
+S matches native observation collocation: Ex averages edges `(i,j,k)` and
+`(i−1,j,k)`; Ey/Ez use the corresponding previous y/z edge. Deposit J using S transpose,
+half to each corresponding edge. Each macro point represents one uniform grid-cell
+volume, so no extra volume multiplier applies. Each field rank adds only to edges it owns.
+
+Coupled points stay at least ten cells from boundaries and clear of the incident
+source plane/support and nonvacuum constitutive edges. The surrounding 3³ background
+cells must be vacuum. LD may occupy other regions.
+
+## State, outputs and limitations
+
+- One native state lifetime per process. No reinitialization, multiple states in
+  one process or thread sharing. Two groups may evolve independent copies of the
+  same GS. Start a fresh MPI job for another trial.
+- Input, initial state, dt and decomposition are fixed at creation; only A or
+  previous J varies per step.
+- Calls temporarily switch the process working directory for legacy relative I/O
+  and restore it afterward. Main thread only; do not perform concurrent relative
+  file I/O in the same process.
+- Advancing a field/material independently after coupling is rejected as lost
+  synchronization. Post-native errors invalidate the state; no retry or rollback.
+- Collectively close response, field, then Python context. Fortran does not finalize
+  MPI. Native hangs/failures require launcher timeouts; the sample aborts the job on error.
+- Restart, nonzero initial fields, impulse sources, rotations, unequal macro volumes,
+  subcycling and TTM are not supported by this entry.
+
+`response.json` stores point-ordered A/c, sampled E, previous/new charge currents
+and both clocks. `salmonpy-coupled-field.json` records mapping, MPI decomposition,
+library and completion status. Material work copies/native outputs remain available.
+Select large spatial outputs and sampling intervals in the RT input. These JSON
+files are not complete restart checkpoints.
+
+Local regressions check original vacuum/LD FDTD parity, current injection at MPI
+boundaries in all three directions, one/two field-rank parity and TDDFT A-history
+replay. Physical grid/time/GS convergence and production scaling remain separate work.

@@ -105,5 +105,7 @@ engine = SalmonExecutable(record['executable'], record['sha256'])
 ```
 
 MPI runtimes must match the cluster's MPI stack and remain explicit site builds.
-The current Python adapters' single-rank scope is unchanged. This acquisition
+DFT/bands and process-isolated TDDFT retain their single-rank scope. FDTD can use its existing spatial MPI decomposition through FDTDMPI; see FDTD_MATERIALS.en.md. This acquisition
 layer does not alter the DFT/TDDFT update order, state isolation or A→J interface.
+
+Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.

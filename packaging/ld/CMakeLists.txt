@@ -44,6 +44,7 @@ install(FILES "${ROOT}/NOTICE" "${ROOT}/LICENSE" "${ROOT}/LICENSE.THIRD-PARTY" D
 
 # Explicit runtime setup must also work from an installed wheel, without Git history.
 install(FILES "${ROOT}/salmonpy/runtime.py" "${ROOT}/salmonpy/runtime_catalog.json"
+  "${ROOT}/salmonpy/FDTD_MATERIALS.md" "${ROOT}/salmonpy/FDTD_MATERIALS.en.md"
   "${ROOT}/salmonpy/RUNTIME.md" "${ROOT}/salmonpy/RUNTIME.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/tools/prepare_salmon_runtime.py" "${ROOT}/tools/check_forbidden_eigensolvers.py"
   DESTINATION salmonpy/_runtime_source/tools)
@@ -51,3 +52,11 @@ install(DIRECTORY "${ROOT}/runtime/" DESTINATION salmonpy/_runtime_source/runtim
   FILES_MATCHING PATTERN "*.json" PATTERN "*.patch")
 install(DIRECTORY "${ROOT}/native/" DESTINATION salmonpy/_runtime_source/native
   FILES_MATCHING PATTERN "*.f90")
+
+install(FILES "${ROOT}/salmonpy/distributed.py" "${ROOT}/salmonpy/material_response.py"
+  "${ROOT}/salmonpy/DISTRIBUTED.md" "${ROOT}/salmonpy/DISTRIBUTED.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/tools/build_parallel_bridge.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/embedded_tddft.py" "${ROOT}/salmonpy/coupled.py"
+  "${ROOT}/salmonpy/COUPLED.md" "${ROOT}/salmonpy/COUPLED.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/tools/build_embedded_tddft.py" DESTINATION salmonpy/_runtime_source/tools)

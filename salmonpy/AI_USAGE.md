@@ -12,11 +12,11 @@ E,Hを扱うFDTDとA駆動の結晶の間には結合処理を置きます。単
 
 ## 今回利用できるFortran境界
 
-`native/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `tests/native/test_ld.f90` と `src/maxwell/fdtd_eh.f90` を参照してください。
+`native/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `tests/native/test_ld.f90` と、外部に準備したSALMONソースの `src/maxwell/fdtd_eh.f90` を参照してください。
 
 `ld_coefficients` の累積先は呼び出し前にゼロ初期化します。`ld_store_old` と `ld_update` は既存演算順を保つため分割E成分を受け取ります。`rj*_fdtd_ld` は物理電流の単純和ではなく補助量Qです。
 
-`fdtd_eh_kernel.f90` は差分演算 `eh_fd` を提供します。`fdtd_eh` は引き続き時間ループ、境界、通信、観測、再開ファイルを調整します。Python向け単一ステップAPIはまだありません。
+`fdtd_eh_kernel.f90` は差分演算 `eh_fd` を提供します。`fdtd_eh` は引き続き時間ループ、境界、通信、観測、再開ファイルを調整します。実験的な単一ステップ・結合入口は `salmonpy.coupled.NativeEHField`。COUPLED.mdの範囲に限定します。
 
 ## 変更してはいけない更新順
 
@@ -42,7 +42,7 @@ INPUT_CONTRACT.md に従います。材料係数はモデル作成時、dtと初
 
 wheelの構築と修復・OS別検証は PACKAGING.md に従います。検証済み環境とCI設定のみの環境を混同しません。wheel利用者にはFortranコンパイラを要求せず、ソース構築時のみ要求します。
 
-構造・波形・解析の単独入口は WORKFLOWS.md に記載しています。FDTDの一ステップAPI、周期構造、斜め入射、未対応のTDDFT計算方式を対応済みとして例示しないでください。共通Acos2パルスとFDTD側のCEP規約の差はアダプターで0.25周期補正します。
+構造・波形・解析の単独入口は WORKFLOWS.md に記載しています。FDTDの一ステップAPIはCOUPLED.mdの条件のみ例示できます。周期構造、斜め入射、未対応のTDDFT計算方式を対応済みとして例示しないでください。共通Acos2パルスとFDTD側のCEP規約の差はアダプターで0.25周期補正します。
 
 
 ## SBEの接続
@@ -127,3 +127,25 @@ manual.jsonの `beginner_intake` を必ず適用します。新しい計算を�
 目的別一覧を示して目的を確認し、対応不能とは即断しません。
 
 本リポジトリはSALMONpy専用です。本体のsrcパスは `runtime/README.md` の手順で準備した外部ツリーを指します。SALMON本体を本リポジトリへ復元・同梱しないでください。
+
+## 並列経路を選ぶ
+
+LD中心の光伝播には `fdtd_mpi` タスクを選び、既存MPI FDTDの各ランク内で多数のLD状態を管理します。
+起動元は直列Pythonです。MPI版の完成ビルド記録が必要で、配布用直列ランタイムとは区別します。
+所定のAに対する独自応答は `distributed_response`、二点TDDFTは `distributed_tddft` を選びます。
+これらはPythonを一度MPI起動し、標準例では一物質群に一物質・一マクロ点を割り当てます。
+内部MPIのTDDFTとE/Hフィードバックには `native_coupled` タスクとCOUPLED.mdを使います。
+これは一群一点・一プロセス一回のネイティブ寿命に限定した実験的APIです。
+既存FDTDバッチと応答サービスを並べるだけで結合したと説明しません。
+ネイティブ結合のE時刻n·dtと電子時刻(n+1/2)·dtを混同しません。再開、回転、サブサイクルは未対応です。
+実行前に不足する資源予算を確認し、例のランク・スレッド・状態数と、未測定のメモリ使用量を明示します。
+機能ごとの実行例・出力形式は examples/README.md / README.en.md にあります。
+
+## 次元選択の推奨
+
+電子応答を結合する計算では、TDDFTは負荷が大きいため、まず1次元の伝播・層構造を提案します。
+3次元を推奨するのはSBEまたはユーザー作成のカレント計算コードを使う場合です。
+3次元TDDFTが不可能とは説明せず、必要性と状態数・メモリ・時間の予算を確認します。
+ここでの次元は場・マクロ配置で、微視的な電子状態の次元ではありません。
+現行40³・二点サンプルは接続回帰用です。自動1次元化、未実装SBE結合アダプター、
+周期境界を対応済みとして案内せず、実在する入口の制約を確認してください。LD単独FDTDは別の経路です。

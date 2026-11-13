@@ -3,6 +3,11 @@ import importlib
 from salmonpy.manual import load, search
 
 class ManualTest(unittest.TestCase):
+    def test_material_guides_are_packaged(self):
+        from importlib.resources import files
+        for name in ('FDTD_MATERIALS.md', 'FDTD_MATERIALS.en.md', 'DISTRIBUTED.md', 'DISTRIBUTED.en.md'):
+            self.assertTrue(files('salmonpy').joinpath(name).is_file(), name)
+
     def test_tasks_and_examples(self):
         d=load()
         self.assertEqual(len({t['id'] for t in d['tasks']}),len(d['tasks']))

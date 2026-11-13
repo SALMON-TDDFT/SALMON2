@@ -7,7 +7,7 @@ Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source
 > the pinned external upstream checkout. Historical validation commands below
 > describe the old source layout and are not current build instructions.
 
-[English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`
+[English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.4`
 LD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。
 対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。
 現在はpreview版で、PyPI公開済みではありません。
@@ -41,10 +41,24 @@ Pythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグ�
 | バンド計算・描画 | `salmonpy.bands` | 対応外部SALMON・基底状態・Matplotlib |
 | ASEの構造・経路・energy/forces | `salmonpy.ase` / `salmonpy.ase_calculator` | 上記に加え任意のASE依存 |
 
-[14本のPythonサンプルと実行方法](examples/README.md)から始めてください。
+[Pythonサンプルと実行方法](examples/README.md)から始めてください。
 各機能の対応範囲は [WORKFLOWS.md](WORKFLOWS.md)、[DFT.md](DFT.md)、
 [ASE_CALCULATOR.md](ASE_CALCULATOR.md) に記載しています。
 wheel内のLD/SBEと、別途準備が必要なSALMON本体は区別してください。
+
+## 並列計算の選び方
+
+| 目的 | 起動方法 | 現在の範囲 |
+|---|---|---|
+| 多材料LDの光伝播 | 直列Pythonから `fdtd_mpi_layers` | 既存MPI FDTDが空間分割し、各ランクが多数のLD状態を管理 |
+| 自作A→Jモデルの群内並列 | `mpiexec -n 5` で `mpi_response` | 二つの物質群、各2ランク・一物質・一マクロ点 |
+| 保存GSから二点のTDDFT応答 | `mpiexec -n 3` で `mpi_tddft` | 二つの1ランク物質群、各点に独立した直列ワーカー |
+
+[材料とMPI FDTD](FDTD_MATERIALS.md)、[応答サービス](DISTRIBUTED.md)、
+[実行コマンドと出力](examples/README.md)を参照してください。後二者の場役は所定のAを配ります。
+TDDFT内部MPIとE/H結合には、別入口の[実験的なネイティブ結合](COUPLED.md)を使います。
+標準例は `mpi_coupled_tddft`（場2＋物質2群×2＝6ランク）です。
+バッチFDTDの起動をMPIジョブ内で入れ子に呼びません。
 
 ## AIに依頼する場合
 
@@ -167,3 +181,5 @@ python -m unittest discover -s salmonpy/tests -v
 AIカタログの詳細技術説明はまだ言語が混在しており、全リファレンスの翻訳完了ではありません。
 
 公開版SALMON VRへの接続は [SALMON_VR.md](SALMON_VR.md) を参照してください。
+
+電子応答を結合する実用計算では、TDDFTはまず1次元の伝播・層構造を推奨します。3次元はSBEまたはユーザー作成の電流計算コードを使う場合に推奨します。対応可否とは別の計算負荷に基づく方針です。詳しくは[次元の選択](COUPLED.md)を参照してください。

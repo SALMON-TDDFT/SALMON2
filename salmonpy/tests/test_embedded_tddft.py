@@ -1,0 +1,86 @@
+import importlib.util
+import unittest
+
+
+class EmbeddedTDDFTTest(unittest.TestCase):
+    def test_collective_backend_is_available(self):
+        self.assertIsNotNone(importlib.util.find_spec('salmonpy.embedded_tddft'),
+                             'embedded TDDFT backend is missing')
+        from salmonpy.embedded_tddft import NativeTDDFTBackend
+        self.assertEqual(NativeTDDFTBackend.execution, 'collective')
+        self.assertEqual(NativeTDDFTBackend.reduction, 'leader')
+
+    def test_loader_detects_changed_assets(self):
+        import tempfile
+        from pathlib import Path
+        from salmonpy.embedded_tddft import NativeTDDFTMaterialProvider
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'data_for_restart').mkdir()
+            for name in ('info.bin','occupation.bin','wfn.bin'):
+                (root/'data_for_restart'/name).write_bytes(b'loader-only fixture')
+            (root/'rt.inp').write_text('&calculation\n theory="tddft_pulse"\n/\n')
+            provider=NativeTDDFTMaterialProvider(root,'rt.inp',max_steps=4)
+            self.assertEqual(provider.prepare(None).max_steps,4)
+            (root/'data_for_restart/wfn.bin').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'changed'):provider.prepare(None)
+            with self.assertRaisesRegex(ValueError,'relative'):
+                NativeTDDFTMaterialProvider(root,'../rt.inp')
+
+    def test_import_does_not_initialize_mpi(self):
+        import subprocess,sys
+        code="import sys; import salmonpy.embedded_tddft; assert 'mpi4py.MPI' not in sys.modules"
+        subprocess.run([sys.executable,'-c',code],check=True)
+
+    def test_native_eh_field_interface_is_available(self):
+        self.assertIsNotNone(importlib.util.find_spec('salmonpy.coupled'),
+                             'native E/H coupling module is missing')
+        from salmonpy.coupled import NativeEHField
+        self.assertEqual(NativeEHField.scheme,'salmonpy.eh-centered-current/1')
+
+    def test_coupling_rejects_out_of_band_advancement_before_field_update(self):
+        from types import SimpleNamespace
+        from salmonpy.coupled import NativeEHField,CoupledStepper
+        context=SimpleNamespace(group=SimpleNamespace(role='field'),plan=SimpleNamespace(point_ids=(1,)))
+        def agree(error):
+            if error:raise ValueError(error)
+        response=SimpleNamespace(context=context,dt=.1,step_index=0,closed=False,failed=False,_agree=agree)
+        field=object.__new__(NativeEHField)
+        field.context=context;field.dt=.1;field.point_ids=(1,);field.step_index=0;field.closed=False;field.failed=False
+        def forbidden_update(current):raise AssertionError('field must not be mutated')
+        field.advance=forbidden_update
+        stepper=CoupledStepper(response,field)
+        response.step_index=1
+        with self.assertRaisesRegex(ValueError,'synchron'):
+            stepper.step()
+        self.assertTrue(response.failed)
+
+    def test_coupled_sites_cannot_overlap_incident_source(self):
+        from types import SimpleNamespace
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.fdtd import FDTD,PlaneWave
+        from salmonpy.geometry import Grid,Geometry
+        from salmonpy.fields import AcosPulse
+        comm=SimpleNamespace(size=1,allgather=lambda x:[x])
+        context=SimpleNamespace(solver_comm=comm,group=SimpleNamespace(role='field'),plan=SimpleNamespace(point_ids=(1,)))
+        calculation=FDTD(Geometry(Grid((40,40,40),(2.,2.,2.))),(),.003,2,
+                         source=PlaneWave(AcosPulse(.001,20.,.15),0,-1.))
+        with self.assertRaisesRegex(ValueError,'source'):
+            NativeEHField(context,calculation,'unused-record','unused-output',points={1:(19,20,20)},grid=(1,1,1))
+
+    def test_field_cannot_retry_a_failed_native_step(self):
+        from types import SimpleNamespace
+        import numpy as np
+        from salmonpy.coupled import NativeEHField
+        field=object.__new__(NativeEHField)
+        field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
+        field.lib=SimpleNamespace(sp_eh_step=object());field.capacity=4;field.point_ids=(1,)
+        field.A=np.zeros((1,3));field.E=field.A.copy();field.dt=.1
+        field.step_index=0;field.closed=False;field.failed=False;field.manifest={}
+        calls=[]
+        def broken_native(fn,n,j,e):
+            calls.append(1);e[:]=np.nan;return 0
+        field._call=broken_native
+        with self.assertRaises(ValueError):field.advance(np.zeros((1,3)))
+        self.assertTrue(field.failed)
+        with self.assertRaises(ValueError):field.advance(np.zeros((1,3)))
+        self.assertEqual(len(calls),1)

@@ -7,7 +7,7 @@ Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source
 > the pinned external upstream checkout. Historical validation commands below
 > describe the old source layout and are not current build instructions.
 
-[日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`
+[日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.4`
 
 SALMONpy provides independent material-response and analysis components. It is a
 preview, not a published PyPI release. The project is intended to move to its own
@@ -61,6 +61,21 @@ python -m salmonpy.doctor --lang en --executable PATH_TO_SALMON --sha256 VALIDAT
 format or successful execution. Build requirements and historical platform
 validation are in [PACKAGING.md](PACKAGING.md).
 
+## Choosing a parallel workflow
+
+| Goal | Launch | Available scope |
+|---|---|---|
+| Light propagation through multiple LD materials | Serial Python, `fdtd_mpi_layers` | Existing spatial MPI FDTD; many local LD states per field rank |
+| Your own internally parallel A-to-J model | `mpiexec -n 5`, `mpi_response` | Two material groups, each with two ranks and one material/point |
+| Two TDDFT responses from a saved GS | `mpiexec -n 3`, `mpi_tddft` | Two one-rank material groups; independent serial worker per point |
+
+See [materials and MPI FDTD](FDTD_MATERIALS.en.md), [response service](DISTRIBUTED.en.md),
+and [commands and outputs](examples/README.en.md). The field role in the latter two
+supplies prescribed A. For internal-MPI TDDFT and E/H coupling use the separate
+[experimental native coupling](COUPLED.en.md) and `mpi_coupled_tddft` sample
+(two field ranks plus two two-rank material groups = six ranks).
+Do not nest the batch FDTD launcher inside an MPI job.
+
 ## Units, state and supported scope
 
 - Core APIs use atomic units. Frequencies are angular frequencies; do not pass
@@ -71,14 +86,15 @@ validation are in [PACKAGING.md](PACKAGING.md).
   the bridge performs explicit conversion.
 - Models and initial states fix physical settings. Each `new_state` creates
   independent evolution; dt is fixed per state. Each `respond` starts afresh.
-- Python DFT/bands/TDDFT launches currently use one MPI rank. Do not infer arbitrary
-  MPI scaling from native SALMON support. TDDFT states own separate processes.
+- The `salmonpy.dft`, `bands` and process-isolated `tddft` entries use one MPI rank.
+  The separate `embedded_tddft` entry supplies internal MPI with the restrictions
+  in [COUPLED.en.md](COUPLED.en.md).
 - DFT: periodic, fixed ions, unpolarized, PZ/Libxc-PZ/Libxc-PBE. TDDFT also supports
   native TB-mBJ from a matching converged GS; midpoint propagation only.
 - ASE Calculator: PZ with scalar KY potentials, energy and forces only, no stress.
   Establish grid, k-point and SCF convergence; egg-box effects affect force checks.
-- FDTD's public entry is batch execution; a Python single-step E/H API, periodic
-  boundaries and oblique incidence are not exposed.
+- FDTD has a batch entry and a separate restricted native E/H step/coupling entry
+  in [COUPLED.en.md](COUPLED.en.md). Periodic boundaries and oblique incidence are not exposed.
 
 ## Budgets and failures
 
@@ -114,3 +130,5 @@ For source development, see [PACKAGING.md](PACKAGING.md); source-only build/test
 commands require a checkout. Restart Python after rebuilding native libraries.
 
 Public desktop visualization: [SALMON_VR.en.md](SALMON_VR.en.md).
+
+For practical electronic-feedback calculations, start TDDFT with 1D propagation/layered structures. Recommend 3D with SBE or a user-written current solver. This is a cost-based recommendation, not a capability restriction; see [dimension selection](COUPLED.en.md).

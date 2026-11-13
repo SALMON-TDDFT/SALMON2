@@ -2,11 +2,12 @@
   "upstream_repository": "https://github.com/SALMON-TDDFT/SALMON2.git",
   "upstream_commit": "3322d0561c0cad5180679136b3eddbe8b909487c",
   "patch": "patches/salmonpy-runtime.patch",
-  "patch_sha256": "9b54125931e3de2fbca043582d99c4480189c1e7ea8705ea0081f5f2616b45ed",
+  "patch_sha256": "14b82f79f73d589f9be92327e70c183d0a72a63f9a8a06812a6e0a66b6e744f7",
   "integration_commit": "d0b80d397a0fba8bffb3b189c4a47632dbc75522",
   "shared_kernels": {
     "native/lorentz_drude.f90": "src/maxwell/lorentz_drude.f90",
     "native/sbe_types.f90": "src/ssbe/sbe_types.f90",
     "native/sbe_velocity_kernel.f90": "src/ssbe/sbe_velocity_kernel.f90"
-  }
+  },
+  "interface_revision": "salmonpy-runtime/2"
 }

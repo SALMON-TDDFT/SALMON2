@@ -12,6 +12,7 @@ license = {file = "LICENSE"}
 dependencies = ["numpy>=1.23.5"]
 
 [project.optional-dependencies]
+mpi = ["mpi4py>=4,<5"]
 plot = ["matplotlib>=3.6"]
 ase = ["ase>=3.26,<4", "f90nml>=1.4,<2"]
 
@@ -19,7 +20,7 @@ ase = ["ase>=3.26,<4", "f90nml>=1.4,<2"]
 minimum-version = "0.10"
 cmake.source-dir = "packaging/ld"
 wheel.packages = []
-sdist.include = ["README.md", "AGENTS.md", "salmonpy/**", "packaging/ld/**", "tools/check_forbidden_eigensolvers.py", "tools/repair_ld_wheel.py", "tools/test_installed_ld.py", "native/**", "runtime/**", "tools/prepare_salmon_runtime.py", "tools/test_runtime_preparation.py", "tools/package_salmon_runtime.py", "tests/native/**", "LICENSE", "NOTICE", "LICENSE.THIRD-PARTY"]
+sdist.include = ["README.md", "AGENTS.md", "salmonpy/**", "packaging/ld/**", "tools/check_forbidden_eigensolvers.py", "tools/repair_ld_wheel.py", "tools/test_installed_ld.py", "native/**", "runtime/**", "tools/prepare_salmon_runtime.py", "tools/test_runtime_preparation.py", "tools/package_salmon_runtime.py", "tools/build_parallel_bridge.py", "tools/build_embedded_tddft.py", "tests/native/**", "LICENSE", "NOTICE", "LICENSE.THIRD-PARTY"]
 sdist.exclude = ["src/**", "samples/**", "platforms/**", "cmakefiles/**", "testsuites/**", "utility/**", "gnu_makefiles/**", "upstream-salmon/**", "salmonpy/_native/**", "**/__pycache__/**", "**/*.pyc", "dist/**", "wheelhouse/**"]
 
 [tool.cibuildwheel]

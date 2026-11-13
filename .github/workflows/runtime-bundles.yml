@@ -2,7 +2,7 @@ name: Full runtime bundles
 on:
   workflow_dispatch:
   push:
-    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'tools/*runtime*.py', '.github/workflows/runtime-bundles.yml']
+    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
 permissions:
   contents: read
 jobs:
@@ -57,9 +57,46 @@ jobs:
           SALMONPY_RUNTIME_SOURCE: ${{ runner.temp }}/runtime-build/source
         run: |
           python -m unittest salmonpy.tests.test_runtime -v
+          python tools/test_fdtd_material_interfaces.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/material-interfaces"
           python tools/test_band_path_native.py "$SALMONPY_RUNTIME_SOURCE"
           python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-test"
           SALMONPY_TEST_PC=y python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-pc-test"
+      - name: Native MPI material corner regression (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMPI_MCA_rmaps_base_oversubscribe: '1'
+        run: |
+          sudo apt-get install -y libopenmpi-dev openmpi-bin
+          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/mpi-build" --jobs 2 \
+            --cmake-arg=-DUSE_MPI=ON --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
+            --cmake-arg=-DCMAKE_C_COMPILER=mpicc --cmake-arg=-DBLA_VENDOR=OpenBLAS \
+            --cmake-arg=-DOPENMP_FLAGS=-fopenmp --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+            --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+          python tools/test_fdtd_material_mpi.py "$RUNNER_TEMP/mpi-build/build/salmon" "$RUNNER_TEMP/material-interfaces/magnetic_dielectric_0" "$RUNNER_TEMP/mpi-material-interfaces"
+          PYTHONPATH=. python tools/test_fdtd_mpi_entrypoint.py "$RUNNER_TEMP/mpi-build/build.json" "$RUNNER_TEMP/fdtd-local-ld"
+          python -m pip install mpi4py
+          python -m salmonpy.build_native
+          python tools/build_parallel_bridge.py "$RUNNER_TEMP/mpi-build/source" "$RUNNER_TEMP/parallel-bridge"
+          PYTHONPATH=. python tools/run_parallel_mpi_tests.py "$RUNNER_TEMP/parallel-bridge/build.json" "$RUNNER_TEMP/parallel-tests" --tddft-runtime "$RUNNER_TEMP/relocated" --tddft-bundle "$RUNNER_TEMP/relocation-test/bundle"
+
+      - name: Embedded TDDFT and E/H coupling regression (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          PYTHONPATH: .
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+          OMPI_MCA_rmaps_base_oversubscribe: '1'
+        run: |
+          python tools/build_embedded_tddft.py "$RUNNER_TEMP/mpi-build/source" "$RUNNER_TEMP/embedded-build" --jobs 2 \
+            --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort --cmake-arg=-DCMAKE_C_COMPILER=mpicc \
+            --cmake-arg=-DBLA_VENDOR=OpenBLAS --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
+            --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+            --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+          python tools/run_coupled_mpi_tests.py "$RUNNER_TEMP/embedded-build/build.json" "$RUNNER_TEMP/relocated" "$RUNNER_TEMP/relocation-test/bundle" "$RUNNER_TEMP/coupled-tests"
+
       - name: Upload tested branch artifacts (not an upstream SALMON release)
         uses: actions/upload-artifact@v4
         with:

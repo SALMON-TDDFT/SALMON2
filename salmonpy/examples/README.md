@@ -1,6 +1,6 @@
 # Pythonサンプル集
 
-[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-13.1`
+[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-13.4`
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
 LD/SBEには構築済みのネイティブライブラリが必要です。import時にコンパイルは行いません。
 下記の `python` はSALMONpyをインストールした環境のPythonを指します。
@@ -76,3 +76,52 @@ python -m salmonpy.examples.sbe_from_salmon BUNDLE SYSNAME NEW_SBE --bands 32 --
 必要ファイルとバージョンを確認し、サンプルの物理条件と一致させて使用してください。
 
 SALMON VR用書き出し: [salmon_vr_export.py](salmon_vr_export.py)。詳細は [SALMON_VR.md](../SALMON_VR.md)。
+
+## 多材料・MPIサンプル
+
+大文字の引数は利用環境のパスへ置き換えます。`RUNTIME` は管理済み**直列**ランタイム、
+`MPI_BUILD_JSON` はMPIビルド完了時の `build.json` です。相互に代用できません。
+`GS_BUNDLE` はRT入力・擬ポテンシャル・再開データを含む自己完結したディレクトリです。
+`RT_INPUT` はその中の入力ファイル名です。保存GSと汎関数・格子などを一致させてください。
+
+| サンプル | 配置・資源 | 出力 |
+|---|---|---|
+| [fdtd_layers.py](fdtd_layers.py) | 直列FDTD、人工的なLD二層、1スレッド | 観測ログ、入力、実行記録 |
+| [fdtd_mpi_layers.py](fdtd_mpi_layers.py) | FDTD 4ランク、各1スレッド、LD三材料・計768物質セル | 観測ログ、入力、MPI分割を含む実行記録 |
+| [mpi_response.py](mpi_response.py) | 場役1＋物質群2×2＝5ランク、一群一物質・一点 | 点ID 10/20のA/cと電荷電流密度JのJSON |
+| [mpi_tddft.py](mpi_tddft.py) | 場役1＋物質群2×1＝3ランク、直列TDDFTワーカー2個 | 点ID 1/2のA/cと電荷電流密度JのJSON |
+
+```sh
+python -m salmonpy.examples.fdtd_layers RUNTIME NEW_LD_DIRECTORY
+python -m salmonpy.examples.fdtd_mpi_layers MPI_BUILD_JSON NEW_MPI_DIRECTORY --grid 2 2 1 --threads 1
+mpiexec -n 5 python -m salmonpy.examples.mpi_response NEW_CUSTOM_JSON
+mpiexec -n 3 python -m salmonpy.examples.mpi_tddft RUNTIME GS_BUNDLE RT_INPUT NEW_TDDFT_JSON
+```
+
+FDTD例は**新しい直列Pythonから**起動します。後二つはPython自体をMPI起動します。
+`mpi_response` の `MyMaterial.prepare` を自分のローダーに、`MyResponse.create_state` を自分の
+応答計算に置き換えられます。群内の通信には渡された `solver_comm` を使います。
+`mpi_tddft` の二点は同じGSから作りますが、励起履歴は共有しません。
+いずれもメモリ上限の自動検査はありません。全状態・ワーカー分のメモリとBLASスレッドも予算に含めます。
+
+FDTDの `salmonpy-run.json` で終了状態・ランク数・分割・実行ファイルを確認します。
+応答JSONの `history` は原子単位の `time`, `A_over_c`, `J_charge` で、行順は `point_ids` です。
+これは後処理用データで、波動関数や全内部状態を含む再開ファイルではありません。
+
+LD例は有限サイズの人工構造、独自応答例は人工的な履歴則です。TDDFT例も短いAランプの接続確認で、
+物理的に収束した多層膜の計算ではありません。後二つはFDTD伝播を行わず、TDDFT内部MPIも未対応です。
+対応範囲は[材料と界面](../FDTD_MATERIALS.md)と[二階層MPI](../DISTRIBUTED.md)を確認してください。
+
+## E/H FDTDと内部MPI TDDFTを結合する
+
+[mpi_coupled_tddft.py](mpi_coupled_tddft.py) は場2ランク＋物質2群×2ランクの6ランク例です。
+[ホスト共有ライブラリの準備・時刻と状態の契約](../COUPLED.md)に従います。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.examples.mpi_coupled_tddft BUILD_JSON GS_BUNDLE RT_INPUT NEW_OUTPUT
+```
+
+`response.json` は二点のA/E/Jと二つの時計、場ディレクトリは実行記録と観測ログを保持します。
+一プロセス一回のネイティブ生成に限定され、別の試行は新しいMPIジョブで開始します。
+
+TDDFTでは実用上1次元の伝播・層構造を推奨し、電子応答を結合する3次元はSBEまたはユーザー作成の電流計算コードを推奨します。この40³・二点の例は接続回帰用で、1次元化や3次元TDDFTの標準的な研究条件を示すものではありません。

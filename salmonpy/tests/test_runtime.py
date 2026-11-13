@@ -15,7 +15,7 @@ class RuntimeTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.host = {'system': 'linux', 'machine': 'x86_64', 'version': '2.35', 'libc': 'glibc'}
-        self.meta = {'schema': 'salmonpy.runtime/1', 'interface': 'salmonpy-runtime/1',
+        self.meta = {'schema': 'salmonpy.runtime/1', 'interface': runtime.INTERFACE,
                      'platform': dict(self.host), 'features': ['dft', 'tddft', 'pz'],
                      'executable': 'bin/salmon', 'files': {'bin/salmon': hashlib.sha256(b'binary').hexdigest()},
                      'provenance': {'test': 'synthetic fixture'}}
@@ -27,7 +27,7 @@ class RuntimeTests(unittest.TestCase):
             z.writestr('runtime.json', json.dumps(self.meta))
             z.writestr('bin/salmon', b'binary')
             if extra: z.writestr(extra, b'bad')
-        self.entry = {'id': 'test-runtime', 'interface': 'salmonpy-runtime/1',
+        self.entry = {'id': 'test-runtime', 'interface': runtime.INTERFACE,
                       'platform': self.host, 'features': self.meta['features'],
                       'url': 'https://example.invalid/runtime.zip',
                       'sha256': hashlib.sha256(self.archive.read_bytes()).hexdigest()}

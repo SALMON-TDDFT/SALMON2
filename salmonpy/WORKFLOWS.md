@@ -56,7 +56,7 @@ Execution-only choices (new output directory, timeout and thread count) belong t
 `run`. Every run records settings, binary/input SHA256 and status. Existing output
 directories are never overwritten. Hashes identify a binary, not establish its
 safety: source/object audits belong to its build/validation. This is a batch
-interface, not an in-process FDTD step API or an MPI launcher.
+interface, not an in-process FDTD step API. Existing native MPI FDTD can be launched with FDTDMPI; see FDTD_MATERIALS.en.md.
 
 ## Pulse creation independent of a solver
 
@@ -247,3 +247,5 @@ Optional, independent ASE structure/path/band-result bridge: [ASE.md](ASE.md).
 Prepare a converged GS from ASE or plain arrays: [DFT.md](DFT.md).
 
 Optional ASE Calculator with native PZ/KY forces: [ASE_CALCULATOR.md](ASE_CALCULATOR.md).
+
+Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.

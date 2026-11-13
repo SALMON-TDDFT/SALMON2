@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 import zipfile
 
-INTERFACE = 'salmonpy-runtime/1'
+INTERFACE = 'salmonpy-runtime/2'
 _MAX_ARCHIVE = 1024 * 1024 * 1024
 
 
@@ -255,6 +255,9 @@ def build_runtime(upstream, directory, *, jobs, cmake_args=()):
             for command in commands:
                 subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         executable = work/'build'/('salmon.exe' if os.name == 'nt' else 'salmon')
+        config=(work/'build/config.h').read_text()
+        record['build_configuration']={'mpi_enabled':bool(re.search(r'^\s*#define\s+USE_MPI(?:\s|$)',config,re.M)),
+                                       'config_sha256':_hash(work/'build/config.h')}
         record.update(status='built-and-audited', executable=str(executable), sha256=_hash(executable))
         record['source'] = json.loads((work/'source/salmonpy-runtime-source.json').read_text())
         return record

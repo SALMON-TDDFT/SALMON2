@@ -193,6 +193,50 @@ class FDTDResult:
 
 
 @dataclass(frozen=True,slots=True)
+class FDTDMPI:
+    """Spatial decomposition of native FDTD; LD states stay on owning grid ranks."""
+    grid: tuple
+    launcher: tuple=('mpiexec',)
+
+    def __post_init__(self):
+        grid=tuple(self.grid)
+        if len(grid)!=3: raise ValueError('three MPI grid dimensions required')
+        object.__setattr__(self,'grid',tuple(_integer(v,'MPI grid') for v in grid))
+        launcher=tuple(self.launcher)
+        if isinstance(self.launcher,str) or not launcher or any(not isinstance(x,str) or not x or '\x00' in x for x in launcher):
+            raise ValueError('launcher must be a nonempty argument tuple')
+        object.__setattr__(self,'launcher',launcher)
+        if self.ranks>2**31-1: raise ValueError('too many MPI ranks')
+
+    @property
+    def ranks(self):
+        import math
+        return math.prod(self.grid)
+
+    def input_text(self,calculation):
+        if any(n//p<2 for n,p in zip(calculation.geometry.grid.counts,self.grid)):
+            raise ValueError('each rank needs at least two grid cells per direction')
+        return calculation.input_text()+'\n&parallel\n nproc_k = 1\n nproc_ob = 1\n nproc_rgrid = '+', '.join(map(str,self.grid))+'\n/\n'
+
+
+def _run_fdtd_mpi(command,inp,*,cwd,log,env,timeout):
+    import signal
+    with subprocess.Popen(command,stdin=subprocess.PIPE,stdout=log,stderr=subprocess.STDOUT,
+                          text=True,cwd=cwd,env=env,start_new_session=True) as process:
+        try: process.communicate(inp,timeout=timeout)
+        except BaseException:
+            try: os.killpg(process.pid,signal.SIGTERM)
+            except ProcessLookupError: pass
+            try: process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try: os.killpg(process.pid,signal.SIGKILL)
+                except ProcessLookupError: pass
+                process.wait()
+            raise
+        return process.returncode
+
+
+@dataclass(frozen=True,slots=True)
 class SalmonExecutable:
     """An externally built/validated SALMON executable identified by SHA256.
 
@@ -200,39 +244,76 @@ class SalmonExecutable:
     """
     path: Path
     sha256: str
+    mpi_enabled: bool=False
 
     def __post_init__(self):
         object.__setattr__(self,'path',Path(self.path).expanduser().resolve())
+        if type(self.mpi_enabled) is not bool: raise TypeError('mpi_enabled must be boolean')
         if not re.fullmatch(r'[0-9a-f]{64}',self.sha256): raise ValueError('expected lowercase SHA256')
 
-    def run(self,calculation,directory,*,timeout=300.,threads=1):
+    @classmethod
+    def from_mpi_build(cls,build_record):
+        """Load a trusted explicit runtime build record; reject serial builds."""
+        record_path=Path(build_record).expanduser().resolve()
+        record=json.loads(record_path.read_text())
+        executable=Path(record.get('executable','')).resolve()
+        if record.get('status')!='built-and-audited' or executable!=record_path.parent/'build/salmon':
+            raise ValueError('expected an audited runtime build.json')
+        if record.get('build_configuration',{}).get('mpi_enabled') is not True:
+            raise ValueError('runtime was not built with MPI or lacks completed MPI capability record; rebuild explicitly')
+        if hashlib.sha256(executable.read_bytes()).hexdigest()!=record.get('sha256'):
+            raise ValueError('MPI runtime differs from audited build')
+        return cls(executable,record['sha256'],mpi_enabled=True)
+
+    def run(self,calculation,directory,*,timeout=300.,threads=1,mpi=None):
         if not isinstance(calculation,FDTD): raise TypeError('calculation must be FDTD')
         timeout=_positive(timeout,'timeout');threads=_integer(threads,'threads')
         if hashlib.sha256(self.path.read_bytes()).hexdigest()!=self.sha256:
             raise ValueError('executable SHA256 does not match the validated binary')
+        if mpi is not None:
+            if not isinstance(mpi,FDTDMPI): raise TypeError('mpi must be FDTDMPI')
+            if not self.mpi_enabled: raise ValueError('MPI requires an audited MPI-enabled executable; use from_mpi_build')
+            if os.name!='posix': raise ValueError('MPI launcher currently supports macOS/Linux')
+        if self.mpi_enabled:
+            import sys
+            imported_mpi=sys.modules.get('mpi4py.MPI')
+            mpi_active=imported_mpi is not None and imported_mpi.Is_initialized() and not imported_mpi.Is_finalized()
+            if mpi_active or any(k in os.environ for k in ('OMPI_COMM_WORLD_RANK','PMI_RANK','PMIX_RANK','MPI_LOCALRANKID','SLURM_PROCID')):
+                raise ValueError('launch FDTD MPI from a fresh serial Python process, not inside an MPI rank or initialized MPI')
+        inp=calculation.input_text() if mpi is None else mpi.input_text(calculation)
+        command=[str(self.path)] if mpi is None else [*mpi.launcher,'-n',str(mpi.ranks),str(self.path)]
         directory=Path(directory).expanduser().resolve();directory.mkdir(parents=True,exist_ok=False)
-        inp=calculation.input_text();(directory/'inputfile').write_text(inp)
+        (directory/'inputfile').write_text(inp)
         record=dict(config=asdict(calculation),units='atomic_gaussian',executable=str(self.path),
                     executable_sha256=self.sha256,input_sha256=hashlib.sha256(inp.encode()).hexdigest(),
-                    threads=threads,timeout=timeout,status='started')
+                    threads=threads,timeout=timeout,status='started',command=command,
+                    mpi=None if mpi is None else asdict(mpi),mpi_ranks=1 if mpi is None else mpi.ranks)
         manifest=directory/'salmonpy-run.json'
         manifest.write_text(json.dumps(record,indent=2))
         try:
             with (directory/'stdout.log').open('w') as log:
-                completed=subprocess.run([str(self.path)],input=inp,text=True,cwd=directory,stdout=log,
-                                         stderr=subprocess.STDOUT,timeout=timeout,
-                                         env={**os.environ,'OMP_NUM_THREADS':str(threads)},check=False)
+                env={**os.environ,'OMP_NUM_THREADS':str(threads)}
+                if mpi is None:
+                    completed=subprocess.run(command,input=inp,text=True,cwd=directory,stdout=log,
+                                             stderr=subprocess.STDOUT,timeout=timeout,env=env,check=False)
+                    returncode=completed.returncode
+                else:
+                    returncode=_run_fdtd_mpi(command,inp,cwd=directory,log=log,env=env,timeout=timeout)
             output=(directory/'stdout.log').read_text()
-            if completed.returncode or 'FDTD end' not in output or 'end SALMON' not in output:
+            if returncode or 'FDTD end' not in output or 'end SALMON' not in output:
                 raise RuntimeError(f'SALMON did not finish; see {directory / "stdout.log"}')
+            if len(calculation.materials)>1 and 'SALMONPY_FDTD_INTERFACE_V2' not in output:
+                raise RuntimeError('multiple materials require the material-ID-independent v2 runtime; rebuild or obtain a new bundle')
+            record['interface_assignment']='geometric-staircase-v2' if 'SALMONPY_FDTD_INTERFACE_V2' in output else 'legacy-single-material'
             tables=tuple(read_table(directory/f'obs{i}_at_point_rt.data')
                          for i in range(1,len(calculation.observations)+1))
             expected=calculation.steps//calculation.observation_stride
             if any(len(t.values)!=expected for t in tables): raise RuntimeError('incomplete observation output')
             record['status']='complete'
             return FDTDResult(directory,tables)
-        except Exception as exc:
-            record['status']='failed';record['error']=str(exc)
+        except BaseException as exc:
+            record['status']='failed' if isinstance(exc,Exception) else 'cancelled'
+            record['error']=str(exc) or type(exc).__name__
             raise
         finally:
             manifest.write_text(json.dumps(record,indent=2))

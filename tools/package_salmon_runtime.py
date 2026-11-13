@@ -56,6 +56,8 @@ def package(build, source, destination, *, base_url=None, license_dirs=()):
     if not record_path.is_file():
         raise ValueError('package only fresh outputs of python -m salmonpy.runtime build (build.json required)')
     record = json.loads(record_path.read_text())
+    if record.get('build_configuration',{}).get('mpi_enabled') is not False:
+        raise ValueError('portable bundle requires a completed serial capability record; rebuild explicitly')
     if (record.get('status') != 'built-and-audited' or record.get('source') != expected
             or Path(record.get('executable', '')).resolve() != build/'salmon'
             or record.get('sha256') != digest(build/'salmon')
@@ -105,7 +107,7 @@ def package(build, source, destination, *, base_url=None, license_dirs=()):
         shutil.copytree(path, license_root/f'additional-{i}')
     if enabled('USE_LIBXC') and not license_dirs:
         raise ValueError('Libxc build requires --license-dir with the Libxc license')
-    features = ['dft', 'tddft', 'fdtd', 'bands', 'pz', 'tbmbj', 'single-rank']
+    features = ['dft', 'tddft', 'fdtd', 'bands', 'pz', 'tbmbj', 'single-rank', 'material-id-independent']
     if enabled('USE_LIBXC'): features += ['libxc', 'libxc-pz', 'libxc-pbe']
     name = 'salmonpy-runtime-'+platform['system']+'-'+platform['machine']
     meta = {'schema': 'salmonpy.runtime/1', 'interface': INTERFACE,

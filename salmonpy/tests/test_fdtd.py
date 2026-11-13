@@ -69,3 +69,86 @@ class FDTDTests(unittest.TestCase):
         g=Geometry(Grid((24,24,24),(1,1,1)),(Shape('box',(1,1,1),center=(-3.5,0,0)),))
         with self.assertRaisesRegex(ValueError,'intersects'):
             FDTD(g,(self.calculation().materials[0],),.001,10)
+
+    def test_multimaterial_rejects_old_runtime(self):
+        from dataclasses import replace
+        import types
+        with tempfile.TemporaryDirectory() as tmp:
+            exe=Path(tmp)/'salmon';exe.write_bytes(b'fixture')
+            engine=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest())
+            c=self.calculation();c=replace(c,materials=c.materials*2)
+            def old_run(*args,**kwargs):
+                kwargs['stdout'].write('FDTD end\nend SALMON\n');kwargs['stdout'].flush()
+                return types.SimpleNamespace(returncode=0)
+            with patch('salmonpy.fdtd.subprocess.run',side_effect=old_run):
+                with self.assertRaisesRegex(RuntimeError,'material-ID-independent'):
+                    engine.run(c,Path(tmp)/'result')
+
+    def test_mpi_grid_configuration(self):
+        import salmonpy.fdtd as f
+        self.assertTrue(hasattr(f,'FDTDMPI'),'FDTD MPI launch configuration missing')
+        mpi=f.FDTDMPI((1,2,2))
+        self.assertEqual(mpi.ranks,4)
+        self.assertIn('nproc_rgrid = 1, 2, 2',mpi.input_text(self.calculation()))
+        with self.assertRaises(ValueError): f.FDTDMPI((1,0,2))
+        with self.assertRaises(ValueError): f.FDTDMPI((True,1,2))
+        with self.assertRaises(ValueError): f.FDTDMPI((1,1))
+        with self.assertRaises(ValueError): f.FDTDMPI((1,1,100)).input_text(self.calculation())
+
+    def test_mpi_rejects_serial_and_nested_launch_before_output(self):
+        import os,json
+        from salmonpy.fdtd import FDTDMPI
+        with tempfile.TemporaryDirectory() as tmp:
+            exe=Path(tmp)/'salmon';exe.write_bytes(b'fixture')
+            engine=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest())
+            dest=Path(tmp)/'run'
+            with self.assertRaisesRegex(ValueError,'MPI-enabled'):
+                engine.run(self.calculation(),dest,mpi=FDTDMPI((1,2,2)))
+            self.assertFalse(dest.exists())
+            if os.name=='posix':
+                engine=SalmonExecutable(exe,engine.sha256,mpi_enabled=True)
+                with patch.dict(os.environ,{'OMPI_COMM_WORLD_RANK':'0'}):
+                    with self.assertRaisesRegex(ValueError,'inside an MPI rank'):
+                        engine.run(self.calculation(),dest,mpi=FDTDMPI((1,2,2)))
+                self.assertFalse(dest.exists())
+
+    def test_mpi_build_record_checks_capability_and_hash(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);build=root/'build';build.mkdir();exe=build/'salmon';exe.write_bytes(b'fixture')
+            record={'status':'built-and-audited','executable':str(exe),'sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'build_configuration':{'mpi_enabled':False}}
+            (root/'build.json').write_text(json.dumps(record));cache=build/'CMakeCache.txt'
+            cache.write_text('USE_MPI:BOOL=OFF\n')
+            with self.assertRaisesRegex(ValueError,'not built with MPI'): SalmonExecutable.from_mpi_build(root/'build.json')
+            cache.write_text('USE_MPI:BOOL=ON\n')
+            with self.assertRaisesRegex(ValueError,'not built with MPI'): SalmonExecutable.from_mpi_build(root/'build.json')
+            record['build_configuration']['mpi_enabled']=True
+            (root/'build.json').write_text(json.dumps(record))
+            self.assertTrue(SalmonExecutable.from_mpi_build(root/'build.json').mpi_enabled)
+            exe.write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'differs'): SalmonExecutable.from_mpi_build(root/'build.json')
+
+    @unittest.skipUnless(__import__('os').name=='posix','POSIX MPI launcher')
+    def test_mpi_interrupt_records_cancelled(self):
+        import json
+        from salmonpy.fdtd import FDTDMPI
+        with tempfile.TemporaryDirectory() as tmp:
+            exe=Path(tmp)/'salmon';exe.write_bytes(b'fixture')
+            engine=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest(),mpi_enabled=True)
+            dest=Path(tmp)/'run'
+            with patch('salmonpy.fdtd._run_fdtd_mpi',side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt): engine.run(self.calculation(),dest,mpi=FDTDMPI((1,1,1)))
+            self.assertEqual(json.loads((dest/'salmonpy-run.json').read_text())['status'],'cancelled')
+
+
+    @unittest.skipUnless(__import__('os').name=='posix','POSIX MPI launcher')
+    def test_initialized_mpi_rejected_even_without_launcher(self):
+        import sys,types
+        fake=types.SimpleNamespace(Is_initialized=lambda:True,Is_finalized=lambda:False)
+        with tempfile.TemporaryDirectory() as tmp:
+            exe=Path(tmp)/'salmon';exe.write_bytes(b'fixture')
+            engine=SalmonExecutable(exe,hashlib.sha256(exe.read_bytes()).hexdigest(),mpi_enabled=True)
+            with patch.dict(sys.modules,{'mpi4py.MPI':fake}), patch('salmonpy.fdtd.subprocess.run') as run:
+                with self.assertRaisesRegex(ValueError,'MPI'):
+                    engine.run(self.calculation(),Path(tmp)/'run')
+                run.assert_not_called()

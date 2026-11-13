@@ -12,3 +12,5 @@ This project is intended for a separate repository; do not create a PR or merge
 into SALMON itself. Use README.en.md / README.md for English / Japanese onboarding.
 
 This is a standalone SALMONpy layout. Bundled kernels live in native/. Full SALMON is an optional externally prepared runtime; see runtime/README.md in the source checkout.
+
+Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.

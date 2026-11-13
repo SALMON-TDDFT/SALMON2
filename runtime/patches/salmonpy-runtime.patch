@@ -1,5 +1,5 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 37d96980..a5c9fb74 100644
+index 37d9698..a5c9fb7 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
 @@ -1,3 +1,4 @@
@@ -16,7 +16,7 @@ index 37d96980..a5c9fb74 100644
  if(EXTERNAL_PROJECT_TARGETS)
    add_dependencies(${TARGET_NAME} ${EXTERNAL_PROJECT_TARGETS})
 diff --git a/src/gs/band_dft.f90 b/src/gs/band_dft.f90
-index 63090d9a..4de7ff6c 100644
+index 63090d9..4de7ff6 100644
 --- a/src/gs/band_dft.f90
 +++ b/src/gs/band_dft.f90
 @@ -26,11 +26,13 @@ subroutine init_band_dft(system,band)
@@ -185,7 +185,7 @@ index 63090d9a..4de7ff6c 100644
     end if
  
 diff --git a/src/gs/dc/lcfo_diag_chefsi_complex.f90 b/src/gs/dc/lcfo_diag_chefsi_complex.f90
-index d3efeedd..8ee9c051 100644
+index d3efeed..8ee9c05 100644
 --- a/src/gs/dc/lcfo_diag_chefsi_complex.f90
 +++ b/src/gs/dc/lcfo_diag_chefsi_complex.f90
 @@ -524,9 +524,11 @@ contains
@@ -256,7 +256,7 @@ index d3efeedd..8ee9c051 100644
        call comm_bcast(eigenvalue(nlocked+1:n),dc%icomm_tot,0)
        xrot=(0d0,0d0)
 diff --git a/src/gs/main_dft.f90 b/src/gs/main_dft.f90
-index d9b7791b..f4410798 100644
+index d9b7791..f441079 100644
 --- a/src/gs/main_dft.f90
 +++ b/src/gs/main_dft.f90
 @@ -51,7 +51,7 @@ use lcfo
@@ -293,7 +293,7 @@ index d9b7791b..f4410798 100644
          do iatom=1,natom
             select case(unit_system)
 diff --git a/src/gs/scf_iteration_dft.f90 b/src/gs/scf_iteration_dft.f90
-index 283181cf..c5cbb9da 100644
+index 283181c..c5cbb9d 100644
 --- a/src/gs/scf_iteration_dft.f90
 +++ b/src/gs/scf_iteration_dft.f90
 @@ -58,7 +58,7 @@ integer :: ilevel_print !=3:print-all
@@ -325,31 +325,54 @@ index 283181cf..c5cbb9da 100644
  
    subroutine init_convergence_check()
 diff --git a/src/io/inputoutput.f90 b/src/io/inputoutput.f90
-index 8d6bbf7f..8e333438 100644
+index 8d6bbf7..1cab88b 100644
 --- a/src/io/inputoutput.f90
 +++ b/src/io/inputoutput.f90
-@@ -110,10 +110,12 @@ module inputoutput
+@@ -109,11 +109,15 @@ module inputoutput
+   type(unit_t) :: t_unit_conductivity
  
  contains
-   subroutine read_input
+-  subroutine read_input
++  subroutine read_input(input_path)
 +    use tddft_worker, only: worker_configure
      implicit none
  
-     call read_stdin
+-    call read_stdin
++    character(*),optional,intent(in) :: input_path
++
++    call read_stdin(input_path)
      call read_input_common ! Should be renamed properly later
 +    call worker_configure()
      call read_atomic_coordinates
      call dump_input_common ! Should be renamed properly later
      call check_bad_input
-@@ -122,6 +124,7 @@ contains
+@@ -121,11 +125,14 @@ contains
+   end subroutine read_input
  
  
-   subroutine read_stdin
+-  subroutine read_stdin
++  subroutine read_stdin(input_path)
 +    use tddft_worker, only: worker_requested
      use parallelization, only: nproc_id_global
      use communication, only: comm_is_root
      use filesystem, only: get_filehandle
-@@ -154,6 +157,7 @@ contains
+     implicit none
++    character(*),optional,intent(in) :: input_path
++    integer :: input_fh
+     integer :: cur
+     integer :: ret = 0
+     character(256) :: buff, text
+@@ -147,13 +154,16 @@ contains
+       fh_reentrance = get_filehandle()
+       open(fh_reentrance, file='.reenetrance.tmp', status='replace')
+ 
++      input_fh=5
++      if(present(input_path)) open(newunit=input_fh,file=input_path,status="old",action="read")
+       cur = fh_namelist
+       do while (.true.)
+-        read(*, '(a)', iostat=ret) buff
++        read(input_fh, '(a)', iostat=ret) buff
+         if (ret < 0) then
            exit
          else
            text = trim(adjustl(buff))
@@ -357,7 +380,15 @@ index 8d6bbf7f..8e333438 100644
            ! Comment lines
            if (text(1:1) == '!') cycle
           !! Beginning of 'atomic_species' part
-@@ -576,6 +580,7 @@ contains
+@@ -187,6 +197,7 @@ contains
+         end if
+       end do
+ 
++      if(present(input_path)) close(input_fh)
+       close(fh_namelist)
+       close(fh_atomic_coor)
+       close(fh_atomic_red_coor)
+@@ -576,6 +587,7 @@ contains
        & force_openmp_mode
  
      namelist/band/ &
@@ -365,7 +396,7 @@ index 8d6bbf7f..8e333438 100644
        & lattice, &
        & nref_band, &
        & tol_esp_diff, &
-@@ -1023,6 +1028,7 @@ contains
+@@ -1023,6 +1035,7 @@ contains
      current_openmp_mode = 'auto'
      force_openmp_mode   = 'auto'
  !! == default for &band
@@ -373,7 +404,7 @@ index 8d6bbf7f..8e333438 100644
      lattice =''
      nref_band = 0
      tol_esp_diff = 1.0d-5
-@@ -1692,6 +1698,7 @@ contains
+@@ -1692,6 +1705,7 @@ contains
      call comm_bcast(current_openmp_mode                    ,nproc_group_global)
      call comm_bcast(force_openmp_mode                      ,nproc_group_global)
  !! == bcast for band
@@ -382,7 +413,7 @@ index 8d6bbf7f..8e333438 100644
      call comm_bcast(nref_band       ,nproc_group_global)
      call comm_bcast(num_of_segments ,nproc_group_global)
 diff --git a/src/io/posix.c b/src/io/posix.c
-index f8d51e6d..d2b92410 100644
+index f8d51e6..d2b9241 100644
 --- a/src/io/posix.c
 +++ b/src/io/posix.c
 @@ -23,7 +23,7 @@
@@ -395,7 +426,7 @@ index f8d51e6d..d2b92410 100644
  
  #include <sys/stat.h>
 diff --git a/src/io/salmon_global.f90 b/src/io/salmon_global.f90
-index 4c21c1d6..9a9e182e 100644
+index 4c21c1d..9a9e182 100644
 --- a/src/io/salmon_global.f90
 +++ b/src/io/salmon_global.f90
 @@ -421,6 +421,7 @@ character(256),allocatable :: atom_name(:)
@@ -407,10 +438,10 @@ index 4c21c1d6..9a9e182e 100644
    integer :: nref_band
    real(8) :: tol_esp_diff
 diff --git a/src/maxwell/CMakeLists.txt b/src/maxwell/CMakeLists.txt
-index c151dbad..08c25530 100644
+index c151dba..ad0c915 100644
 --- a/src/maxwell/CMakeLists.txt
 +++ b/src/maxwell/CMakeLists.txt
-@@ -1,5 +1,7 @@
+@@ -1,11 +1,17 @@
  set(SOURCES
      common_maxwell.f90
 +    lorentz_drude.f90
@@ -418,8 +449,152 @@ index c151dbad..08c25530 100644
      fdtd_eh.f90
      main_maxwell.f90
      fdtd_weyl_gauge.f90
+     fdtd_coulomb_gauge.f90
+     )
+ 
++if(USE_MPI)
++  list(APPEND SOURCES embedded_eh.f90)
++endif()
++
+ list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
+ list(APPEND SALMON_SOURCES ${SOURCES})
+ set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)
+diff --git a/src/maxwell/embedded_eh.f90 b/src/maxwell/embedded_eh.f90
+new file mode 100644
+index 0000000..51f2597
+--- /dev/null
++++ b/src/maxwell/embedded_eh.f90
+@@ -0,0 +1,128 @@
++!
++!  Copyright 2019-2020 SALMON developers
++!
++!  Licensed under the Apache License, Version 2.0 (the "License");
++!  you may not use this file except in compliance with the License.
++!  You may obtain a copy of the License at
++!
++!      http://www.apache.org/licenses/LICENSE-2.0
++!
++!  Unless required by applicable law or agreed to in writing, software
++!  distributed under the License is distributed on an "AS IS" BASIS,
++!  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++!  See the License for the specific language governing permissions and
++!  limitations under the License.
++!
++
++!=======================================================================
++
++! Explicit E/H stepping on a supplied field communicator.
++! Native E_n clock, A/J at (n+1/2)dt; sample map matches eh_sendrecv('s').
++#include "config.h"
++module salmonpy_eh_context
++  use iso_c_binding
++  use structures, only: s_fdtd_system
++  use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
++  use lorentz_drude, only: s_ld_state,ld_finalize
++  use sendrecv_grid, only: dealloc_cache
++  use communication, only: comm_summation
++  use parallelization, only: setup_parallel,nproc_group_global
++  implicit none
++  private
++  public :: sp_eh_init,sp_eh_step,sp_eh_close
++  type :: field_context
++    type(s_fdtd_system) :: fs
++    type(ls_fdtd_eh) :: fe
++    type(s_ld_state) :: ld
++    integer,allocatable :: points(:,:)
++    real(8),allocatable :: current(:,:,:,:)
++    integer :: step=0,capacity
++  end type
++  type(field_context),allocatable,save :: state
++  logical,save :: used=.false.
++contains
++  integer(c_int) function sp_eh_init(path,npoints,indices) bind(C)
++    use inputoutput, only: read_input
++    use math_constants, only: set_math_constants
++    use salmon_global, only: theory,nt_em,yn_restart
++    character(c_char),intent(in) :: path(*)
++    integer(c_int),value :: npoints
++    integer(c_int),intent(in) :: indices(3,npoints)
++    character(4096) :: filename
++    integer :: i,p,lo(3),hi(3)
++    sp_eh_init=1
++    if(used.or.npoints<1) return
++    used=.true.;filename=''
++    do i=1,len(filename)
++      if(path(i)==c_null_char) exit
++      filename(i:i)=path(i)
++    end do
++    if(i>len(filename)) return
++    call set_math_constants
++    call setup_parallel
++    call read_input(trim(filename))
++    if(theory/='maxwell'.or.yn_restart/='n') return
++    allocate(state)
++    call eh_init(state%fs,state%fe,state%ld)
++    state%capacity=nt_em
++    allocate(state%points(3,npoints))
++    do p=1,npoints
++      state%points(:,p)=state%fs%lg%is+indices(:,p)
++    end do
++    lo=state%fs%mg%is_array;hi=state%fs%mg%ie_array
++    allocate(state%current(3,lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    state%current=0d0
++    sp_eh_init=0
++  end function
++
++  integer(c_int) function sp_eh_step(npoints,J,E) bind(C)
++    integer(c_int),value :: npoints
++    real(c_double),intent(in) :: J(3,npoints)
++    real(c_double),intent(out) :: E(3,npoints)
++    real(8) :: local_E(3,npoints)
++    integer :: p,d,side,index(3),i,jj,k
++    sp_eh_step=1
++    if(.not.allocated(state)) return
++    if(state%step>=state%capacity.or.npoints/=size(state%points,2)) return
++    state%current=0d0
++    ! S transpose: each macro density contributes half to each adjacent edge.
++    ! One macro point per grid cell, equal cell volumes; no extra volume factor.
++    do p=1,npoints
++      do d=1,3
++        do side=0,1
++          index=state%points(:,p);index(d)=index(d)-side
++          if(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)) &
++            state%current(d,index(1),index(2),index(3))= &
++            state%current(d,index(1),index(2),index(3))+.5d0*J(d,p)
++        end do
++      end do
++    end do
++    state%step=state%step+1
++    state%fe%iter_sta=state%step;state%fe%iter_end=state%step
++    call eh_calc(state%fs,state%fe,state%ld,state%current)
++    local_E=0d0
++    do p=1,npoints
++      index=state%points(:,p)
++      if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie))) cycle
++      i=index(1);jj=index(2);k=index(3)
++      local_E(1,p)=.5d0*(state%fe%ex_y(i,jj,k)+state%fe%ex_z(i,jj,k) &
++                       +state%fe%ex_y(i-1,jj,k)+state%fe%ex_z(i-1,jj,k))
++      local_E(2,p)=.5d0*(state%fe%ey_z(i,jj,k)+state%fe%ey_x(i,jj,k) &
++                       +state%fe%ey_z(i,jj-1,k)+state%fe%ey_x(i,jj-1,k))
++      local_E(3,p)=.5d0*(state%fe%ez_x(i,jj,k)+state%fe%ez_y(i,jj,k) &
++                       +state%fe%ez_x(i,jj,k-1)+state%fe%ez_y(i,jj,k-1))
++    end do
++    call comm_summation(local_E,E,3*npoints,nproc_group_global)
++    sp_eh_step=0
++  end function
++
++  integer(c_int) function sp_eh_close() bind(C)
++    sp_eh_close=1
++    if(.not.allocated(state)) return
++    if(state%step==state%capacity) call eh_finalize(state%fs,state%fe,state%ld)
++    call ld_finalize(state%ld)
++    call dealloc_cache(state%fs%srg_ng)
++    deallocate(state)
++    sp_eh_close=0
++  end function
++end module
 diff --git a/src/maxwell/fdtd_eh.f90 b/src/maxwell/fdtd_eh.f90
-index b248eb06..133329a2 100644
+index b248eb0..a13c000 100644
 --- a/src/maxwell/fdtd_eh.f90
 +++ b/src/maxwell/fdtd_eh.f90
 @@ -15,11 +15,12 @@
@@ -594,7 +769,16 @@ index b248eb06..133329a2 100644
      end if
      
      !*** set fdtd coeffient and light speed for media ID = 0 **************************************************!
-@@ -1555,44 +1493,44 @@ contains
+@@ -776,6 +714,8 @@ contains
+     do ii=0,media_num
+       call eh_coeff
+     end do
++    call eh_coeff_h_geometry
++    if(comm_is_root(nproc_id_global)) write(*,'(A)') 'SALMONPY_FDTD_INTERFACE_V2'
+     
+     !*** check TTM On/Off, and initialization *****************************************************************!
+     if(comm_is_root(nproc_id_global)) write(*,*)
+@@ -1555,44 +1495,47 @@ contains
        end if
        
        !set initial current density
@@ -610,7 +794,8 @@ index b248eb06..133329a2 100644
 -          if(fe%c1_jx_ld(ix,iy,iz,ij)>0.0d0) then
 -            fe%rjx_ld(ix,iy,iz,ij)   = fe%rjx_ld(ix,iy,iz,ij)                                        &
 -                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
-+          if(ld%c1_jx_ld(ix,iy,iz,ij)>0.0d0) then
++          ! Only the edge's owning LD material contributes to this pole.
++          if(ld%c1_jx_ld(ix,iy,iz,ij)>0.0d0.and.fs%imedia(ix,iy,iz)==ld%media_ld(ii)) then
 +            ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
 +                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                        /(4.0d0*pi)*tmp_x1
@@ -629,7 +814,8 @@ index b248eb06..133329a2 100644
 -          if(fe%c1_jy_ld(ix,iy,iz,ij)>0.0d0) then
 -            fe%rjy_ld(ix,iy,iz,ij)   = fe%rjy_ld(ix,iy,iz,ij)                                        &
 -                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
-+          if(ld%c1_jy_ld(ix,iy,iz,ij)>0.0d0) then
++          ! Only the edge's owning LD material contributes to this pole.
++          if(ld%c1_jy_ld(ix,iy,iz,ij)>0.0d0.and.fs%imedia(ix,iy,iz)==ld%media_ld(ii)) then
 +            ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
 +                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                        /(4.0d0*pi)*tmp_y1
@@ -648,7 +834,8 @@ index b248eb06..133329a2 100644
 -          if(fe%c1_jz_ld(ix,iy,iz,ij)>0.0d0) then
 -            fe%rjz_ld(ix,iy,iz,ij)   = fe%rjz_ld(ix,iy,iz,ij)                                        &
 -                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
-+          if(ld%c1_jz_ld(ix,iy,iz,ij)>0.0d0) then
++          ! Only the edge's owning LD material contributes to this pole.
++          if(ld%c1_jz_ld(ix,iy,iz,ij)>0.0d0.and.fs%imedia(ix,iy,iz)==ld%media_ld(ii)) then
 +            ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
 +                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                        /(4.0d0*pi)*tmp_z1
@@ -666,7 +853,7 @@ index b248eb06..133329a2 100644
            end if
          end do
          end do
-@@ -2208,31 +2146,31 @@ contains
+@@ -2208,31 +2151,31 @@ contains
        call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_y',&
                            r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
        call eh_sendrecv(fs,fe,'e'); call eh_sendrecv(fs,fe,'h');
@@ -709,7 +896,30 @@ index b248eb06..133329a2 100644
        end if
        if(fe%flag_lr) then
          is5(1) = 1; ie5(1) = nt_em;
-@@ -2640,9 +2578,9 @@ contains
+@@ -2550,9 +2493,7 @@ contains
+     !+ set fdtd coefficient ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+     subroutine eh_coeff
+       implicit none
+-      integer  :: i_ld_tmp
+-      real(8)  :: c1_e,c2_e_x,c2_e_y,c2_e_z,c2_j,c1_h,c2_h_x,c2_h_y,c2_h_z,&
+-                  c1_e_mid,c2_e_x_mid,c2_e_y_mid,c2_e_z_mid,c2_j_mid
++      real(8)  :: c1_e,c2_e_x,c2_e_y,c2_e_z,c2_j,c1_h,c2_h_x,c2_h_y,c2_h_z
+       
+       !prepare coefficient
+       select case(media_type(ii))
+@@ -2631,169 +2572,56 @@ contains
+         do ix=fs%mg%is(1),fs%mg%ie(1)
+           if(fs%imedia(ix,iy,iz)==ii) then
+             !------ ex and jx --------------------------------------------------!
+-            if( (fs%imedia(ix+1,iy,iz)==ii) &
+-                .or.                        &
+-                (fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)<ii) ) then
++            ! Geometric staircase ownership: lower-coordinate cell, never ID priority.
++            ! A vacuum endpoint retains the legacy single-material boundary.
++            if(fs%imedia(ix+1,iy,iz)/=0) then
+               fe%c1_ex_y(ix,iy,iz) =  c1_e; fe%c2_ex_y(ix,iy,iz) =  c2_e_y;
+               fe%c1_ex_z(ix,iy,iz) =  c1_e; fe%c2_ex_z(ix,iy,iz) = -c2_e_z;
+               fe%c2_jx(ix,iy,iz)   = -c2_j;
                select case(media_type(ii))
                case('lorentz-drude')
                  do ij=1,pole_num_ld(ii)
@@ -721,123 +931,251 @@ index b248eb06..133329a2 100644
 +                  ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                  end do
                end select
-             elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
-@@ -2650,8 +2588,8 @@ contains
-               case('pec')
-                 c1_e_mid=0.0d0; c2_e_y_mid=0.0d0; c2_e_z_mid=0.0d0; c2_j_mid=0.0d0;
-               case('lorentz-drude')
+-            elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
+-              select case(media_type(fs%imedia(ix+1,iy,iz)))
+-              case('pec')
+-                c1_e_mid=0.0d0; c2_e_y_mid=0.0d0; c2_e_z_mid=0.0d0; c2_j_mid=0.0d0;
+-              case('lorentz-drude')
 -                do ij=1,fe%num_ld
 -                  if(fe%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
-+                do ij=1,ld%num_ld
-+                  if(ld%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
-                     i_ld_tmp = ij
-                   end if
-                 end do
-@@ -2660,9 +2598,9 @@ contains
-                 c2_e_z_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(3)
-                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
-                 do ij=1,pole_num_ld(fs%imedia(ix+1,iy,iz))
+-                    i_ld_tmp = ij
+-                  end if
+-                end do
+-                c1_e_mid   = tmp_c5_ld(i_ld_tmp)  / tmp_c4_ld(i_ld_tmp)
+-                c2_e_y_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(2)
+-                c2_e_z_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(3)
+-                c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
+-                do ij=1,pole_num_ld(fs%imedia(ix+1,iy,iz))
 -                  fe%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
 -                  fe%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
 -                  fe%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
-+                  ld%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
-+                  ld%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
-+                  ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
-                 end do
-               case default
-                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
-@@ -2691,9 +2629,9 @@ contains
+-                end do
+-              case default
+-                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em)
+-                c2_e_y_mid = (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+-                            /fs%hgs(2)
+-                c2_e_z_mid = (cspeed_au/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+-                            /fs%hgs(3)
+-                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em)
+-              end select
+-              fe%c1_ex_y(ix,iy,iz) =  c1_e_mid; fe%c2_ex_y(ix,iy,iz) =  c2_e_y_mid;
+-              fe%c1_ex_z(ix,iy,iz) =  c1_e_mid; fe%c2_ex_z(ix,iy,iz) = -c2_e_z_mid;
+-              fe%c2_jx(ix,iy,iz)   = -c2_j_mid;
+             end if
+             
+             !------ ey and jy --------------------------------------------------!
+-            if( (fs%imedia(ix,iy+1,iz)==ii) &
+-                .or.                        &
+-                (fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)<ii) ) then
++            ! Geometric staircase ownership: lower-coordinate cell, never ID priority.
++            ! A vacuum endpoint retains the legacy single-material boundary.
++            if(fs%imedia(ix,iy+1,iz)/=0) then
+               fe%c1_ey_z(ix,iy,iz) =  c1_e; fe%c2_ey_z(ix,iy,iz) =  c2_e_z;
+               fe%c1_ey_x(ix,iy,iz) =  c1_e; fe%c2_ey_x(ix,iy,iz) = -c2_e_x;
+               fe%c2_jy(ix,iy,iz)   = -c2_j;
                select case(media_type(ii))
                case('lorentz-drude')
                  do ij=1,pole_num_ld(ii)
 -                  fe%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
 -                  fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
 -                  fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+-                end do
+-              end select
+-            elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
+-              select case(media_type(fs%imedia(ix,iy+1,iz)))
+-              case('pec')
+-                c1_e_mid=0.0d0; c2_e_z_mid=0.0d0; c2_e_x_mid=0.0d0; c2_j_mid=0.0d0;
+-              case('lorentz-drude')
+-                do ij=1,fe%num_ld
+-                  if(fe%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
+-                    i_ld_tmp = ij
+-                  end if
 +                  ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
 +                  ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
 +                  ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                  end do
-               end select
-             elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
-@@ -2701,8 +2639,8 @@ contains
-               case('pec')
-                 c1_e_mid=0.0d0; c2_e_z_mid=0.0d0; c2_e_x_mid=0.0d0; c2_j_mid=0.0d0;
-               case('lorentz-drude')
--                do ij=1,fe%num_ld
--                  if(fe%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
-+                do ij=1,ld%num_ld
-+                  if(ld%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
-                     i_ld_tmp = ij
-                   end if
-                 end do
-@@ -2711,9 +2649,9 @@ contains
-                 c2_e_x_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(1)
-                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
-                 do ij=1,pole_num_ld(fs%imedia(ix,iy+1,iz))
+-                c1_e_mid   = tmp_c5_ld(i_ld_tmp)  / tmp_c4_ld(i_ld_tmp)
+-                c2_e_z_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(3)
+-                c2_e_x_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(1)
+-                c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
+-                do ij=1,pole_num_ld(fs%imedia(ix,iy+1,iz))
 -                  fe%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
 -                  fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
 -                  fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
-+                  ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
-+                  ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
-+                  ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
-                 end do
-               case default
-                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
-@@ -2742,9 +2680,9 @@ contains
+-                end do
+-              case default
+-                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em)
+-                c2_e_z_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+-                            /fs%hgs(3)
+-                c2_e_x_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+-                            /fs%hgs(1)
+-                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em)
+               end select
+-              fe%c1_ey_z(ix,iy,iz) =  c1_e_mid; fe%c2_ey_z(ix,iy,iz) =  c2_e_z_mid;
+-              fe%c1_ey_x(ix,iy,iz) =  c1_e_mid; fe%c2_ey_x(ix,iy,iz) = -c2_e_x_mid;
+-              fe%c2_jy(ix,iy,iz)   = -c2_j_mid;
+             end if
+             
+             !------ ez and jz --------------------------------------------------!
+-            if( (fs%imedia(ix,iy,iz+1)==ii) &
+-                .or.                        &
+-                (fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)<ii) ) then
++            ! Geometric staircase ownership: lower-coordinate cell, never ID priority.
++            ! A vacuum endpoint retains the legacy single-material boundary.
++            if(fs%imedia(ix,iy,iz+1)/=0) then
+               fe%c1_ez_x(ix,iy,iz) =  c1_e; fe%c2_ez_x(ix,iy,iz) =  c2_e_x;
+               fe%c1_ez_y(ix,iy,iz) =  c1_e; fe%c2_ez_y(ix,iy,iz) = -c2_e_y;
+               fe%c2_jz(ix,iy,iz)   = -c2_j;
                select case(media_type(ii))
                case('lorentz-drude')
                  do ij=1,pole_num_ld(ii)
 -                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
 -                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
 -                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+-                end do
+-              end select
+-            elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
+-              select case(media_type(fs%imedia(ix,iy,iz+1)))
+-              case('pec')
+-                c1_e_mid=0.0d0; c2_e_x_mid=0.0d0; c2_e_y_mid=0.0d0; c2_j_mid=0.0d0;
+-              case('lorentz-drude')
+-                do ij=1,fe%num_ld
+-                  if(fe%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
+-                    i_ld_tmp = ij
+-                  end if
+-                end do
+-                c1_e_mid   = tmp_c5_ld(i_ld_tmp)  / tmp_c4_ld(i_ld_tmp)
+-                c2_e_x_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(1)
+-                c2_e_y_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(2)
+-                c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
+-                do ij=1,pole_num_ld(fs%imedia(ix,iy,iz+1))
+-                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+-                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+-                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
 +                  ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
 +                  ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
 +                  ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                  end do
+-              case default
+-                c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
+-                c2_e_x_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+-                            /fs%hgs(1)
+-                c2_e_y_mid = (cspeed_au/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+-                            /fs%hgs(2)
+-                c2_j_mid   = (4.0d0*pi/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+-                            /(1.0d0+2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em)
                end select
-             elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
-@@ -2752,8 +2690,8 @@ contains
-               case('pec')
-                 c1_e_mid=0.0d0; c2_e_x_mid=0.0d0; c2_e_y_mid=0.0d0; c2_j_mid=0.0d0;
-               case('lorentz-drude')
--                do ij=1,fe%num_ld
--                  if(fe%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
-+                do ij=1,ld%num_ld
-+                  if(ld%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
-                     i_ld_tmp = ij
-                   end if
-                 end do
-@@ -2762,9 +2700,9 @@ contains
-                 c2_e_y_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(2)
-                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
-                 do ij=1,pole_num_ld(fs%imedia(ix,iy,iz+1))
--                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
--                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
--                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
-+                  ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
-+                  ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
-+                  ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
-                 end do
-               case default
-                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
-@@ -3202,7 +3140,7 @@ contains
+-              fe%c1_ez_x(ix,iy,iz) =  c1_e_mid; fe%c2_ez_x(ix,iy,iz) =  c2_e_x_mid;
+-              fe%c1_ez_y(ix,iy,iz) =  c1_e_mid; fe%c2_ez_y(ix,iy,iz) = -c2_e_y_mid;
+-              fe%c2_jz(ix,iy,iz)   = -c2_j_mid;
+             end if
+             
+-            !hx
+-            fe%c1_hx_y(ix,iy-1:iy,iz-1:iz)=c1_h; fe%c2_hx_y(ix,iy-1:iy,iz-1:iz)=-c2_h_y;
+-            fe%c1_hx_z(ix,iy-1:iy,iz-1:iz)=c1_h; fe%c2_hx_z(ix,iy-1:iy,iz-1:iz)= c2_h_z;
+-            
+-            !hy
+-            fe%c1_hy_z(ix-1:ix,iy,iz-1:iz)=c1_h; fe%c2_hy_z(ix-1:ix,iy,iz-1:iz)=-c2_h_z;
+-            fe%c1_hy_x(ix-1:ix,iy,iz-1:iz)=c1_h; fe%c2_hy_x(ix-1:ix,iy,iz-1:iz)= c2_h_x;
+-            
+-            !hz
+-            fe%c1_hz_x(ix-1:ix,iy-1:iy,iz)=c1_h; fe%c2_hz_x(ix-1:ix,iy-1:iy,iz)=-c2_h_x;
+-            fe%c1_hz_y(ix-1:ix,iy-1:iy,iz)=c1_h; fe%c2_hz_y(ix-1:ix,iy-1:iy,iz)= c2_h_y;
+           end if
+         end do
+         end do
+@@ -2810,6 +2638,56 @@ contains
+     end subroutine eh_coeff
+     
+     !+ CONTAINED IN eh_init ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++    ! H sites touch four material cells. Choose the first non-vacuum cell
++    ! in a fixed geometrical order. Do not let media registration order overwrite mu.
++    ! For a single material this assigns exactly the same legacy coefficients.
++    subroutine eh_coeff_h_geometry
++      implicit none
++      integer :: i,j,k,n,m,axis,ids(4)
++      real(8) :: cx,cy,cz
++      do k=fs%mg%is(3),fs%mg%ie(3)
++      do j=fs%mg%is(2),fs%mg%ie(2)
++      do i=fs%mg%is(1),fs%mg%ie(1)
++        do axis=1,3
++          select case(axis)
++          case(1)
++            ids=(/fs%imedia(i,j,k),fs%imedia(i,j+1,k), &
++                  fs%imedia(i,j,k+1),fs%imedia(i,j+1,k+1)/)
++          case(2)
++            ids=(/fs%imedia(i,j,k),fs%imedia(i+1,j,k), &
++                  fs%imedia(i,j,k+1),fs%imedia(i+1,j,k+1)/)
++          case(3)
++            ids=(/fs%imedia(i,j,k),fs%imedia(i+1,j,k), &
++                  fs%imedia(i,j+1,k),fs%imedia(i+1,j+1,k)/)
++          end select
++          m=0
++          do n=1,4
++            if(ids(n)/=0) then
++              m=ids(n)
++              exit
++            end if
++          end do
++          if(m==0) cycle
++          cx=cspeed_au/fe%rmu(m)*dt_em/fs%hgs(1)
++          cy=cspeed_au/fe%rmu(m)*dt_em/fs%hgs(2)
++          cz=cspeed_au/fe%rmu(m)*dt_em/fs%hgs(3)
++          select case(axis)
++          case(1)
++            fe%c1_hx_y(i,j,k)=1.0d0; fe%c2_hx_y(i,j,k)=-cy
++            fe%c1_hx_z(i,j,k)=1.0d0; fe%c2_hx_z(i,j,k)= cz
++          case(2)
++            fe%c1_hy_z(i,j,k)=1.0d0; fe%c2_hy_z(i,j,k)=-cz
++            fe%c1_hy_x(i,j,k)=1.0d0; fe%c2_hy_x(i,j,k)= cx
++          case(3)
++            fe%c1_hz_x(i,j,k)=1.0d0; fe%c2_hz_x(i,j,k)=-cx
++            fe%c1_hz_y(i,j,k)=1.0d0; fe%c2_hz_y(i,j,k)= cy
++          end select
++        end do
++      end do
++      end do
++      end do
++    end subroutine eh_coeff_h_geometry
++
+     !+ check media +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+     subroutine eh_check_media_type(rep,rmu,sig,cm_type,cm_name)
+       implicit none
+@@ -3202,7 +3080,7 @@ contains
    
    !===========================================================================================
    != calculate eh-FDTD =======================================================================
 -  subroutine eh_calc(fs,fe)
-+  subroutine eh_calc(fs,fe,ld)
++  subroutine eh_calc(fs,fe,ld,external_current)
      use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                 base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
                                 E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
-@@ -3216,6 +3154,7 @@ contains
+@@ -3216,8 +3094,13 @@ contains
      use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
      use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
      implicit none
 +    type(s_ld_state), intent(inout) :: ld
      type(s_fdtd_system),intent(inout) :: fs
      type(ls_fdtd_eh),   intent(inout) :: fe
++    ! Optional physical charge current on native E edges. No effect on CLI runs.
++    real(8),optional,intent(in) :: external_current(3, &
++      fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2), &
++      fs%mg%is_array(3):fs%mg%ie_array(3))
      integer            :: iter,ii,ix,iy,iz
-@@ -3239,7 +3178,8 @@ contains
+     integer            :: is5(5),ie5(5)
+     real(8)            :: elapsed_time
+@@ -3239,7 +3122,8 @@ contains
        end if
        
        !sotre old variables
@@ -847,12 +1185,16 @@ index b248eb06..133329a2 100644
        
        !update e
        call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
-@@ -3264,11 +3204,12 @@ contains
+@@ -3264,11 +3148,16 @@ contains
                                                   fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
                                                   fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
        end if
 -      if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
 +      if(ld%enabled) call eh_add_curr(ld%rjx_fdtd_ld(:,:,:),ld%rjy_fdtd_ld(:,:,:),ld%rjz_fdtd_ld(:,:,:))
++      if(present(external_current)) then
++        if(any(external_current/=0d0)) call eh_add_curr(external_current(1,:,:,:), &
++          external_current(2,:,:,:),external_current(3,:,:,:))
++      end if
        call eh_sendrecv(fs,fe,'e')
        
        !update lorentz-drude
@@ -862,7 +1204,7 @@ index b248eb06..133329a2 100644
        
        !calculate linear response
        if(fe%flag_lr) call eh_calc_lr
-@@ -3466,31 +3407,31 @@ contains
+@@ -3466,31 +3355,31 @@ contains
            call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_x',r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
            call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_x',r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
            call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_y',r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
@@ -905,7 +1247,7 @@ index b248eb06..133329a2 100644
            end if
            if(fe%flag_lr) then
              is5(1) = 1; ie5(1) = nt_em;
-@@ -3759,104 +3700,11 @@ contains
+@@ -3759,104 +3648,11 @@ contains
      
      !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
      !+ store old variables +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1012,7 +1354,7 @@ index b248eb06..133329a2 100644
      
      !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
      !+ calculate linear response +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-@@ -3871,16 +3719,16 @@ contains
+@@ -3871,16 +3667,16 @@ contains
        if(yn_periodic=='n') then
          !calculate dipolemoment
          sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
@@ -1034,7 +1376,7 @@ index b248eb06..133329a2 100644
              end do
              end do
              end do
-@@ -3893,16 +3741,16 @@ contains
+@@ -3893,16 +3689,16 @@ contains
        elseif(yn_periodic=='y') then
          !calculate average current density
          sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
@@ -1056,7 +1398,7 @@ index b248eb06..133329a2 100644
              end do
              end do
              end do
-@@ -4638,7 +4486,7 @@ contains
+@@ -4638,7 +4434,7 @@ contains
    
    !===========================================================================================
    != finalize eh-FDTD ========================================================================
@@ -1065,7 +1407,7 @@ index b248eb06..133329a2 100644
      use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,                          &
                                 nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,                   &
                                 obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ase_ene_min_em,ase_wav_min_em,&
-@@ -4650,6 +4498,7 @@ contains
+@@ -4650,6 +4446,7 @@ contains
      use phys_constants,  only: cspeed_au
      use math_constants,  only: pi,zi
      implicit none
@@ -1073,7 +1415,7 @@ index b248eb06..133329a2 100644
      type(s_fdtd_system),intent(in)    :: fs
      type(ls_fdtd_eh),   intent(inout) :: fe
      complex(8),allocatable :: z_ex1(:,:),z_ey1(:,:),z_ez1(:,:),z_ex2(:,:),z_ey2(:,:),z_ez2(:,:),&
-@@ -5578,6 +5427,7 @@ contains
+@@ -5578,6 +5375,7 @@ contains
      end if
      
      return
@@ -1081,7 +1423,48 @@ index b248eb06..133329a2 100644
    end subroutine eh_finalize
    
    !===========================================================================================
-@@ -5772,124 +5622,7 @@ contains
+@@ -5665,13 +5463,14 @@ contains
+   !===========================================================================================
+   != send and receive eh =====================================================================
+   subroutine eh_sendrecv(fs,fe,var)
+-    use sendrecv_grid,  only: update_overlap_real8
++    use sendrecv_grid,  only: update_overlap_real8,init_sendrecv_grid,dealloc_cache,s_sendrecv_grid
+     use structures,     only: s_fdtd_system
+     implicit none
+     type(s_fdtd_system),intent(inout) :: fs
+     type(ls_fdtd_eh), intent(inout)   :: fe
+     character(1),intent(in)           :: var
+-    integer                           :: ix,iy,iz
++    integer                           :: ix,iy,iz,idir,iaxis,ipass
++    type(s_sendrecv_grid)              :: material_halo
+     real(8),allocatable               :: f1(:,:,:),f2(:,:,:),f3(:,:,:)
+     
+     if(var=='e') then
+@@ -5689,7 +5488,22 @@ contains
+       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_x)
+       call update_overlap_real8(fs%srg_ng,fs%mg,fe%hz_y)
+     elseif(var=='r') then
+-      call update_overlap_real8(fs%srg_ng,fs%mg,fe%rmedia)
++      ! Material ownership at H sites needs edge/corner ghosts, not just faces.
++      ! Use a separate initialization-only cache; field communication is unchanged.
++      call init_sendrecv_grid(material_halo,fs%mg,1,fs%srg_ng%icomm,fs%srg_ng%neig)
++      do idir=1,3
++        do iaxis=1,3
++          if(iaxis==idir) cycle
++          material_halo%is_block(iaxis,:,:,idir)=fs%mg%is_array(iaxis)
++          material_halo%ie_block(iaxis,:,:,idir)=fs%mg%ie_array(iaxis)
++        end do
++      end do
++      ! Each completed exchange advances information across one process face.
++      ! Three passes fill faces, edges and corners, including periodic neighbors.
++      do ipass=1,3
++        call update_overlap_real8(material_halo,fs%mg,fe%rmedia)
++      end do
++      call dealloc_cache(material_halo)
+     elseif(var=='s') then
+       !allocate temporary variable
+       allocate(f1(fs%mg%is_array(1):fs%mg%ie_array(1),&
+@@ -5772,124 +5586,7 @@ contains
    
    !===========================================================================================
    != calculate finite difference in eh =======================================================
@@ -1209,7 +1592,7 @@ index b248eb06..133329a2 100644
    != calculate incident pulse ================================================================
 diff --git a/src/maxwell/fdtd_eh_kernel.f90 b/src/maxwell/fdtd_eh_kernel.f90
 new file mode 100644
-index 00000000..c82113bd
+index 0000000..c82113b
 --- /dev/null
 +++ b/src/maxwell/fdtd_eh_kernel.f90
 @@ -0,0 +1,125 @@
@@ -1340,7 +1723,7 @@ index 00000000..c82113bd
 +end module fdtd_eh_kernel
 diff --git a/src/maxwell/lorentz_drude.f90 b/src/maxwell/lorentz_drude.f90
 new file mode 100644
-index 00000000..893d4b15
+index 0000000..893d4b1
 --- /dev/null
 +++ b/src/maxwell/lorentz_drude.f90
 @@ -0,0 +1,234 @@
@@ -1579,7 +1962,7 @@ index 00000000..893d4b15
 +  end subroutine ld_finalize
 +end module lorentz_drude
 diff --git a/src/maxwell/main_maxwell.f90 b/src/maxwell/main_maxwell.f90
-index 835ad071..4009aa7b 100644
+index 835ad07..4009aa7 100644
 --- a/src/maxwell/main_maxwell.f90
 +++ b/src/maxwell/main_maxwell.f90
 @@ -18,17 +18,19 @@ subroutine main_maxwell
@@ -1605,8 +1988,153 @@ index 835ad071..4009aa7b 100644
    elapsed_time=get_wtime()-elapsed_time
    if(comm_is_root(nproc_id_global)) then
      write(*,'(A,f16.8)') " elapsed time [s] = ", elapsed_time
+diff --git a/src/parallel/communication.f90 b/src/parallel/communication.f90
+index 754b063..d4769fa 100644
+--- a/src/parallel/communication.f90
++++ b/src/parallel/communication.f90
+@@ -22,6 +22,10 @@ module communication
+   integer, public, parameter :: ROOT_PROCID     = 0
+   integer, public, parameter :: COMM_PROC_NULL  = MPI_PROC_NULL
+ 
++  integer, private :: embedded_comm = MPI_COMM_NULL
++  integer, allocatable, private :: embedded_children(:)
++  public :: comm_attach, comm_detach
++
+   ! call once
+   public :: comm_init
+   public :: comm_finalize
+@@ -297,6 +301,60 @@ module communication
+ #define UNUSED_VARIABLE(VAR)      if(.false.) call salmon_unusedvar(VAR)
+ 
+ contains
++  ! One solver group per process; point states must be owned separately.
++  ! Attachment never initializes MPI and owns only its duplicated communicator.
++  subroutine comm_attach(parent, ierr)
++    use mpi, only: MPI_SUCCESS, MPI_ERR_OTHER, MPI_INTEGER, MPI_MAX
++    integer, intent(in) :: parent
++    integer, intent(out) :: ierr
++    logical :: initialized, finalized, inter
++    integer :: local_error, group_error
++    call MPI_Initialized(initialized,ierr)
++    call MPI_Finalized(finalized,ierr)
++    if(.not.initialized.or.finalized.or.parent==MPI_COMM_NULL) then
++      ierr=MPI_ERR_OTHER
++      return
++    end if
++    call MPI_Comm_test_inter(parent,inter,ierr)
++    if(inter) then
++      ierr=MPI_ERR_OTHER
++      return
++    end if
++    local_error=0
++    if(embedded_comm/=MPI_COMM_NULL) local_error=1
++    call MPI_Allreduce(local_error,group_error,1,MPI_INTEGER,MPI_MAX,parent,ierr)
++    if(group_error/=0) then
++      ierr=MPI_ERR_OTHER
++      return
++    end if
++    call MPI_Comm_dup(parent,embedded_comm,ierr)
++    if(ierr==MPI_SUCCESS) allocate(embedded_children(0))
++  end subroutine
++
++  subroutine comm_detach(ierr)
++    use mpi, only: MPI_SUCCESS, MPI_ERR_OTHER
++    integer, intent(out) :: ierr
++    integer :: i
++    if(embedded_comm==MPI_COMM_NULL) then
++      ierr=MPI_ERR_OTHER
++      return
++    end if
++    ! Descendants are created and closed in collective native order. Free them
++    ! before the attached parent, after all state request caches are finalized.
++    do i=size(embedded_children),1,-1
++      if(embedded_children(i)/=MPI_COMM_NULL) call MPI_Comm_free(embedded_children(i),ierr)
++    end do
++    deallocate(embedded_children)
++    call MPI_Comm_free(embedded_comm,ierr)
++  end subroutine
++
++  subroutine track_embedded_group(group)
++    integer,intent(in) :: group
++    if(embedded_comm/=MPI_COMM_NULL.and.group/=MPI_COMM_NULL) then
++      embedded_children=[embedded_children,group]
++    end if
++  end subroutine
++
+   subroutine comm_init
+     use mpi, only: MPI_THREAD_FUNNELED
+ #ifdef USE_OPENACC
+@@ -311,12 +369,18 @@ contains
+     ! which later hangs multi-node collectives.
+     call acc_init(acc_device_nvidia)
+ #endif
++    if(embedded_comm/=MPI_COMM_NULL) return
+     MPI_ERROR_CHECK(call MPI_Init_thread(MPI_THREAD_FUNNELED, iprovided, ierr))
+   end subroutine
+ 
+   subroutine comm_finalize
+     implicit none
+     integer :: ierr
++    if(embedded_comm/=MPI_COMM_NULL) then
++      call comm_detach(ierr)
++      call error_check(ierr)
++      return
++    end if
+     MPI_ERROR_CHECK(call MPI_Finalize(ierr))
+   end subroutine
+ 
+@@ -325,6 +389,7 @@ contains
+     implicit none
+     integer, intent(out) :: ngid, npid, nprocs
+     ngid = MPI_COMM_WORLD
++    if(embedded_comm/=MPI_COMM_NULL) ngid=embedded_comm
+     call get_rank(ngid, npid, nprocs)
+   end subroutine
+ 
+@@ -340,6 +405,7 @@ contains
+     integer, intent(in) :: ngid, nprocs, key
+     integer :: ngid_dst, ierr
+     MPI_ERROR_CHECK(call MPI_Comm_split(ngid, nprocs, key, ngid_dst, ierr))
++    call track_embedded_group(ngid_dst)
+   end function
+ 
+   function comm_create_group_byid(iparent, idlists) result(ichild)
+@@ -352,14 +418,22 @@ contains
+     MPI_ERROR_CHECK(call MPI_Group_incl(igroup_parent, size(idlists), idlists, igroup_child, ierr))
+     MPI_ERROR_CHECK(call MPI_Comm_create(iparent, igroup_child, ichild, ierr))
+     MPI_ERROR_CHECK(call MPI_Group_free(igroup_child, ierr))
++    MPI_ERROR_CHECK(call MPI_Group_free(igroup_parent, ierr))
++    call track_embedded_group(ichild)
+   end function
+ 
+   subroutine comm_free_group(igroup)
+     implicit none
+     integer, intent(in) :: igroup
+-    integer :: ierr
++    integer :: ierr, i, owned_group
+     if (igroup /= MPI_COMM_NULL) then
+-      MPI_ERROR_CHECK(call MPI_Comm_free(igroup, ierr))
++      if(allocated(embedded_children)) then
++        do i=1,size(embedded_children)
++          if(embedded_children(i)==igroup) embedded_children(i)=MPI_COMM_NULL
++        end do
++      end if
++      owned_group=igroup
++      MPI_ERROR_CHECK(call MPI_Comm_free(owned_group, ierr))
+     end if
+   end subroutine
+ 
+@@ -383,6 +457,8 @@ contains
+     integer :: ierr
+     if (present(ngid)) then
+       MPI_ERROR_CHECK(call MPI_Barrier(ngid, ierr))
++    else if(embedded_comm/=MPI_COMM_NULL) then
++      MPI_ERROR_CHECK(call MPI_Barrier(embedded_comm, ierr))
+     else
+       MPI_ERROR_CHECK(call MPI_Barrier(MPI_COMM_WORLD, ierr))
+     end if
 diff --git a/src/rt/CMakeLists.txt b/src/rt/CMakeLists.txt
-index 11b919ff..f429300e 100644
+index 11b919f..35dc1b0 100644
 --- a/src/rt/CMakeLists.txt
 +++ b/src/rt/CMakeLists.txt
 @@ -1,4 +1,5 @@
@@ -1615,8 +2143,203 @@ index 11b919ff..f429300e 100644
      dip.f90
      em_field.f90
      initialization_rt.f90
+@@ -8,6 +9,10 @@ set(SOURCES
+     time_evolution_step.f90
+    )
+ 
++if(USE_MPI)
++  list(APPEND SOURCES embedded_tddft.f90 ../salmonpy/parallel_bridge.f90)
++endif()
++
+ list_prepend(SOURCES ${CMAKE_CURRENT_SOURCE_DIR})
+ list(APPEND SALMON_SOURCES ${SOURCES})
+ set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)
+diff --git a/src/rt/embedded_tddft.f90 b/src/rt/embedded_tddft.f90
+new file mode 100644
+index 0000000..a86dece
+--- /dev/null
++++ b/src/rt/embedded_tddft.f90
+@@ -0,0 +1,178 @@
++!
++!  Copyright 2019-2020 SALMON developers
++!
++!  Licensed under the Apache License, Version 2.0 (the "License");
++!  you may not use this file except in compliance with the License.
++!  You may obtain a copy of the License at
++!
++!      http://www.apache.org/licenses/LICENSE-2.0
++!
++!  Unless required by applicable law or agreed to in writing, software
++!  distributed under the License is distributed on an "AS IS" BASIS,
++!  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++!  See the License for the specific language governing permissions and
++!  limitations under the License.
++!
++
++!=======================================================================
++
++! SALMONpy one-point embedded TDDFT. Native physics uses existing RT kernels.
++#include "config.h"
++module salmonpy_tddft_context
++use tddft_worker
++use density_matrix, only: calc_current
++use hamiltonian, only: update_kvector_nonlocalpt
++use math_constants, only: pi
++use salmon_global
++use structures
++use parallelization, only: adjust_elapse_time, nproc_group_global
++use communication, only: comm_is_root, comm_sync_all, comm_bcast
++use salmon_xc, only: finalize_xc
++use timer
++use write_sub, only: write_response_0d,write_response_3d,write_pulse_0d,write_pulse_3d
++use initialization_rt_sub
++use checkpoint_restart_sub
++use jellium, only: check_condition_jm
++use nvtx_wrapper
++use parallelization, only: nproc_id_global
++use iso_c_binding
++use sendrecv_grid, only: dealloc_cache
++implicit none
++private
++public :: sp_tddft_init,sp_tddft_step,sp_tddft_close
++type :: rt_context
++type(s_rgrid) :: lg
++type(s_rgrid) :: mg
++type(s_dft_system)  :: system
++type(s_rt) :: rt
++type(s_parallel_info) :: info
++type(s_poisson) :: poisson
++type(s_stencil) :: stencil
++type(s_xc_functional) :: xc_func
++type(s_reciprocal_grid) :: fg
++type(s_ewald_ion_ion) :: ewald
++type(s_dft_energy) :: energy
++type(s_md) :: md
++type(s_ofile) :: ofl
++type(s_scalar) :: Vpsl
++type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox
++type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
++type(s_orbital) :: spsi_in,spsi_out
++type(s_orbital) :: tpsi ! temporary wavefunctions
++type(s_sendrecv_grid) :: srg,srg_scalar
++type(s_pp_info) :: pp
++type(s_pp_grid) :: ppg
++type(s_pp_nlcc) :: ppn
++type(s_singlescale) :: singlescale
++type(s_unfold) :: unfold
++
++real(8) :: worker_A(3),worker_current(3,2)
++integer :: Mit, itt
++logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
++
++end type
++type(rt_context),allocatable,save :: state
++logical,save :: used=.false.
++real(8),save :: accepted_A(3)=0d0
++contains
++integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition, J) bind(C)
++  use inputoutput, only: read_input
++  use parallelization, only: setup_parallel
++  use math_constants, only: set_math_constants
++  use sym_sub, only: read_sw_symmetry
++  character(c_char),intent(in) :: path(*)
++  real(c_double),value :: timestep
++  integer(c_int),value :: capacity
++  real(c_double),intent(in) :: A(3)
++  integer(c_int),intent(in) :: decomposition(5)
++  real(c_double),intent(out) :: J(3)
++  character(4096) :: filename
++  integer :: i
++  sp_tddft_init=1
++  if(used) return
++  used=.true.
++  filename=''
++  do i=1,len(filename)
++    if(path(i)==c_null_char) exit
++    filename(i:i)=path(i)
++  end do
++  if(i>len(filename)) return
++  worker_embedded=.true.
++  worker_initial_A=A; embedded_dt=timestep; embedded_steps=capacity
++  embedded_decomposition=decomposition
++  call set_math_constants
++  call setup_parallel
++  call read_input(trim(filename))
++  calc_mode='RT'
++  call read_sw_symmetry(yn_symmetry)
++  call timer_initialize
++  quiet=.false.
++  allocate(state)
++call timer_begin(LOG_TOTAL)
++
++call initialization_rt( state%Mit, state%system, state%energy, state%ewald, state%rt, state%md, &
++                        state%singlescale,  &
++                        state%stencil, state%fg, state%poisson,  &
++                        state%lg, state%mg,   &
++                        state%info,  &
++                        state%xc_func, state%ofl,  &
++                        state%srg, state%srg_scalar,  &
++                        state%spsi_in, state%spsi_out, state%tpsi, state%rho, state%rho_jm, state%rho_s,  &
++                        state%V_local, state%Vbox, state%Vh, state%Vh_stock1, state%Vh_stock2, state%Vxc, state%Vpsl,&
++                        state%pp, state%ppg, state%ppn, state%unfold )
++
++if(worker_requested()) then
++  state%system%vec_Ac=worker_initial_A
++  call update_kvector_nonlocalpt(state%info%ik_s,state%info%ik_e,state%system,state%ppg)
++  call calc_current(state%system,state%mg,state%stencil,state%info,state%srg,state%spsi_in,state%ppg,state%worker_current(:,1:state%system%nspin))
++  state%spsi_in%update_zwf_overlap=.true.
++  J=sum(state%worker_current(:,1:state%system%nspin),dim=2)
++end if
++
++  state%itt=state%Mit
++  call comm_sync_all
++  call timer_enable_sub
++  call timer_begin(LOG_RT_ITERATION)
++
++  accepted_A=A
++  sp_tddft_init=0
++end function
++integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
++  real(c_double),intent(in) :: Aold(3),Anew(3)
++  real(c_double),intent(out) :: J(3)
++  sp_tddft_step=1
++  if(.not.allocated(state)) return
++  if(any(Aold/=accepted_A).or.state%itt>=nt) return
++  state%itt=state%itt+1
++  state%rt%Ac_ext(:,state%itt)=Anew
++  state%rt%Ac_tot(:,state%itt)=Anew
++  if(mod(state%itt,2)==1)then
++    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
++     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_in,state%spsi_out,state%tpsi,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
++     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
++  else
++    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
++     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_out,state%spsi_in,state%tpsi,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
++     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
++  end if
++
++  J=state%rt%curr(:,state%itt)
++
++  accepted_A=Anew
++  sp_tddft_step=0
++end function
++integer(c_int) function sp_tddft_close() bind(C)
++  sp_tddft_close=1
++  if(.not.allocated(state)) return
++  call timer_end(LOG_RT_ITERATION)
++  call timer_disable_sub
++  close(030)
++  if(comm_is_root(nproc_id_global)) close(state%ofl%fh_rt)
++  call finalize_xc(state%xc_func)
++  call dealloc_cache(state%srg)
++  call dealloc_cache(state%srg_scalar)
++  deallocate(state)
++  ! Other SALMON module configuration remains process-owned. Do not reopen.
++  sp_tddft_close=0
++end function
++end module
 diff --git a/src/rt/initialization_rt.f90 b/src/rt/initialization_rt.f90
-index 0c5d69fa..1d4b846a 100644
+index 0c5d69f..1d4b846 100644
 --- a/src/rt/initialization_rt.f90
 +++ b/src/rt/initialization_rt.f90
 @@ -31,6 +31,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
@@ -1641,7 +2364,7 @@ index 0c5d69fa..1d4b846a 100644
      rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
    end do
 diff --git a/src/rt/main_tddft.f90 b/src/rt/main_tddft.f90
-index c5e6ac68..8f605665 100644
+index c5e6ac6..8f60566 100644
 --- a/src/rt/main_tddft.f90
 +++ b/src/rt/main_tddft.f90
 @@ -19,6 +19,9 @@
@@ -1714,23 +2437,27 @@ index c5e6ac68..8f605665 100644
  !
 diff --git a/src/rt/tddft_worker.f90 b/src/rt/tddft_worker.f90
 new file mode 100644
-index 00000000..5e19ffe9
+index 0000000..ff09b82
 --- /dev/null
 +++ b/src/rt/tddft_worker.f90
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,128 @@
 +#include "config.h"
 +! Optional SALMONpy process-isolated endpoint-A protocol; ordinary runs are unchanged.
 +module tddft_worker
 +  implicit none
 +  private
 +  public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
++  ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
++  logical,public,save :: worker_embedded=.false.
++  real(8),public,save :: embedded_dt
++  integer,public,save :: embedded_steps,embedded_decomposition(5)
 +  real(8), save :: worker_initial_A(3)=0d0
 +contains
 +  logical function worker_requested()
 +    character(8) :: value
 +    integer :: status
 +    call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-+    worker_requested=status==0.and.trim(value)=='1'
++    worker_requested=worker_embedded.or.(status==0.and.trim(value)=='1')
 +  end function
 +
 +  subroutine worker_configure()
@@ -1742,7 +2469,7 @@ index 00000000..5e19ffe9
 +    integer :: ios,i
 +    logical :: plus_u_file
 +    if(.not.worker_requested()) return
-+    if(nproc_size_global/=1) error stop 'SALMONpy TDDFT requires one MPI rank'
++    if(.not.worker_embedded.and.nproc_size_global/=1) error stop 'SALMONpy TDDFT requires one MPI rank'
 +    if(theory/='tddft_pulse'.or.yn_periodic/='y'.or.yn_md/='n') &
 +      error stop 'SALMONpy TDDFT requires periodic fixed-ion tddft_pulse'
 +    if(propagator/='middlepoint'.or.trans_longi/='tr') &
@@ -1778,7 +2505,14 @@ index 00000000..5e19ffe9
 +    do i=1,nelem
 +      call relative_file(file_pseudo(i))
 +    end do
-+    read(*,*,iostat=ios) command,dt,nt,worker_initial_A
++    if(worker_embedded) then
++      dt=embedded_dt; nt=embedded_steps
++      nproc_k=embedded_decomposition(1); nproc_ob=embedded_decomposition(2)
++      nproc_rgrid=embedded_decomposition(3:5)
++      ios=0; command='INIT'
++    else
++      read(*,*,iostat=ios) command,dt,nt,worker_initial_A
++    end if
 +    if(ios/=0.or.trim(command)/='INIT') error stop 'SALMONpy: expected INIT dt capacity A'
 +    if(.not.ieee_is_finite(dt)) error stop 'SALMONpy: invalid dt'
 +    if(dt<=0d0.or.nt<1) error stop 'SALMONpy: invalid dt/capacity'
@@ -1835,8 +2569,72 @@ index 00000000..5e19ffe9
 +    flush(output_unit)
 +  end subroutine
 +end module
+diff --git a/src/salmonpy/parallel_bridge.f90 b/src/salmonpy/parallel_bridge.f90
+new file mode 100644
+index 0000000..1a6696f
+--- /dev/null
++++ b/src/salmonpy/parallel_bridge.f90
+@@ -0,0 +1,58 @@
++! SALMONpy MPI attachment ABI v1. Explicitly built against the host MPI.
++module salmonpy_parallel_bridge
++  use iso_c_binding
++  use communication
++  implicit none
++contains
++  integer(c_int) function sp_attach(handle) bind(C)
++    integer(c_int64_t),value :: handle
++    integer :: ierr
++    ! Current SALMON uses default INTEGER MPI handles. Reject incompatible kinds.
++    if(kind(0)/=c_int.or.handle>huge(0).or.handle<(-int(huge(0),c_int64_t)-1)) then
++      sp_attach=-1
++      return
++    end if
++    call comm_attach(int(handle),ierr)
++    sp_attach=ierr
++  end function
++  integer(c_int) function sp_detach() bind(C)
++    integer :: ierr
++    call comm_detach(ierr)
++    sp_detach=ierr
++  end function
++  subroutine sp_info(rank,n) bind(C)
++    integer(c_int),intent(out) :: rank,n
++    integer :: comm,r,s
++    call comm_get_globalinfo(comm,r,s)
++    rank=r; n=s
++  end subroutine
++  subroutine sp_barrier() bind(C)
++    call comm_sync_all
++  end subroutine
++  real(c_double) function sp_sum(value) bind(C)
++    real(c_double),value :: value
++    integer :: comm,rank,n
++    real(8) :: output
++    call comm_get_globalinfo(comm,rank,n)
++    call comm_summation(value,output,comm)
++    sp_sum=output
++  end function
++  subroutine sp_library(buffer,capacity,initialized) bind(C)
++    use mpi, only: MPI_MAX_LIBRARY_VERSION_STRING
++    integer(c_int),value :: capacity
++    character(c_char),intent(out) :: buffer(capacity)
++    integer(c_int),intent(out) :: initialized
++    character(MPI_MAX_LIBRARY_VERSION_STRING) :: version
++    integer :: n,i,ierr
++    logical :: active,finished
++    call MPI_Initialized(active,ierr)
++    call MPI_Finalized(finished,ierr)
++    initialized=0
++    if(active.and..not.finished) initialized=1
++    call MPI_Get_library_version(version,n,ierr)
++    do i=1,min(n,capacity-1)
++      buffer(i)=version(i:i)
++    end do
++    buffer(min(n,capacity-1)+1)=c_null_char
++  end subroutine
++end module
 diff --git a/src/ssbe/CMakeLists.txt b/src/ssbe/CMakeLists.txt
-index 54d4b76b..a57083f2 100644
+index 54d4b76..a57083f 100644
 --- a/src/ssbe/CMakeLists.txt
 +++ b/src/ssbe/CMakeLists.txt
 @@ -1,4 +1,6 @@
@@ -1847,7 +2645,7 @@ index 54d4b76b..a57083f2 100644
      datafile_ssbe.f90
      input_checker_sbe.f90
 diff --git a/src/ssbe/bloch_solver_ssbe.f90 b/src/ssbe/bloch_solver_ssbe.f90
-index 11a4ed2d..d8414e33 100644
+index 11a4ed2..d8414e3 100644
 --- a/src/ssbe/bloch_solver_ssbe.f90
 +++ b/src/ssbe/bloch_solver_ssbe.f90
 @@ -1,4 +1,6 @@
@@ -2231,7 +3029,7 @@ index 11a4ed2d..d8414e33 100644
      use communication
      use salmon_global
 diff --git a/src/ssbe/gs_info_ssbe.f90 b/src/ssbe/gs_info_ssbe.f90
-index cf5f06cb..1ca895f3 100644
+index cf5f06c..1ca895f 100644
 --- a/src/ssbe/gs_info_ssbe.f90
 +++ b/src/ssbe/gs_info_ssbe.f90
 @@ -1,33 +1,11 @@
@@ -2272,7 +3070,7 @@ index cf5f06cb..1ca895f3 100644
  contains
 diff --git a/src/ssbe/sbe_types.f90 b/src/ssbe/sbe_types.f90
 new file mode 100644
-index 00000000..977d5353
+index 0000000..977d535
 --- /dev/null
 +++ b/src/ssbe/sbe_types.f90
 @@ -0,0 +1,42 @@
@@ -2320,7 +3118,7 @@ index 00000000..977d5353
 +end module
 diff --git a/src/ssbe/sbe_velocity_kernel.f90 b/src/ssbe/sbe_velocity_kernel.f90
 new file mode 100644
-index 00000000..5e45d088
+index 0000000..5e45d08
 --- /dev/null
 +++ b/src/ssbe/sbe_velocity_kernel.f90
 @@ -0,0 +1,341 @@
@@ -2667,7 +3465,7 @@ index 00000000..5e45d088
 +end module
 diff --git a/tools/check_forbidden_eigensolvers.py b/tools/check_forbidden_eigensolvers.py
 new file mode 100644
-index 00000000..48d6d568
+index 0000000..48d6d56
 --- /dev/null
 +++ b/tools/check_forbidden_eigensolvers.py
 @@ -0,0 +1,132 @@
@@ -2805,7 +3603,7 @@ index 00000000..48d6d568
 +    sys.exit(main())
 diff --git a/tools/pzheev_guard.cmake b/tools/pzheev_guard.cmake
 new file mode 100644
-index 00000000..90aa5759
+index 0000000..90aa575
 --- /dev/null
 +++ b/tools/pzheev_guard.cmake
 @@ -0,0 +1,23 @@
