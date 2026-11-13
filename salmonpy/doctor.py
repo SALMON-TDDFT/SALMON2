@@ -54,7 +54,7 @@ def diagnose(*, executable=None, sha256=None, lang='ja'):
         next_steps.append('描画を使う場合のみMatplotlibを導入してください。')
     if any(optional[n] == 'missing' for n in ('ase', 'f90nml')):
         next_steps.append('ASE連携を使う場合はASE.mdの追加依存を導入してください。')
-    next_steps.append('DFT/TDDFT/バンド/FDTD: 対応する外部SALMONと監査済みSHA256、入力データを準備してください。ハッシュ一致だけでは機能対応・実行可能性を判定できません。')
+    next_steps.append('DFT/TDDFT/バンド/FDTD: RUNTIME.mdに従い既存品か対応する配布品を優先し、なければ明示的にbuildします。監査済みSHA256と入力データが必要です。ハッシュ一致だけでは機能対応・実行可能性を判定できません。')
     if lang == 'en':
         next_steps = ['Confirm purpose, total memory budget and allowed CPU cores; detected cores are not permission to use them.']
         if any(v['status'] != 'loadable' for v in native.values()):
@@ -65,7 +65,7 @@ def diagnose(*, executable=None, sha256=None, lang='ja'):
             next_steps.append('Install Matplotlib only if plotting is needed.')
         if any(optional[n] == 'missing' for n in ('ase', 'f90nml')):
             next_steps.append('For ASE integration install the optional dependencies listed in README.en.md.')
-        next_steps.append('DFT/TDDFT/bands/FDTD need a compatible audited SALMON executable, its recorded SHA256 and input data. A hash match does not certify supported features or successful execution.')
+        next_steps.append('DFT/TDDFT/bands/FDTD: follow RUNTIME.en.md; prefer an existing/prebuilt runtime and build explicitly only if unavailable. Recorded SHA256 and input data are required. A hash match does not certify supported features or successful execution.')
     return {'schema_version': 'salmonpy.doctor/1',
             'environment': {'python': platform.python_version(), 'platform': platform.platform(),
                             'interpreter': sys.executable},

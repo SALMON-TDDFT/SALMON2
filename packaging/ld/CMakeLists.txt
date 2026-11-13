@@ -41,3 +41,13 @@ install(DIRECTORY "${ROOT}/salmonpy/examples/" DESTINATION salmonpy/examples
   FILES_MATCHING PATTERN "*.py" PATTERN "*.md" PATTERN "__pycache__" EXCLUDE)
 
 install(FILES "${ROOT}/NOTICE" "${ROOT}/LICENSE" "${ROOT}/LICENSE.THIRD-PARTY" DESTINATION salmonpy/licenses)
+
+# Explicit runtime setup must also work from an installed wheel, without Git history.
+install(FILES "${ROOT}/salmonpy/runtime.py" "${ROOT}/salmonpy/runtime_catalog.json"
+  "${ROOT}/salmonpy/RUNTIME.md" "${ROOT}/salmonpy/RUNTIME.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/tools/prepare_salmon_runtime.py" "${ROOT}/tools/check_forbidden_eigensolvers.py"
+  DESTINATION salmonpy/_runtime_source/tools)
+install(DIRECTORY "${ROOT}/runtime/" DESTINATION salmonpy/_runtime_source/runtime
+  FILES_MATCHING PATTERN "*.json" PATTERN "*.patch")
+install(DIRECTORY "${ROOT}/native/" DESTINATION salmonpy/_runtime_source/native
+  FILES_MATCHING PATTERN "*.f90")

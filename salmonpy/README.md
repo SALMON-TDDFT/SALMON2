@@ -1,5 +1,7 @@
 # SALMONpy：Pythonから使うSALMONの計算・解析部品
 
+Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
+
 > Standalone layout: full SALMON sources are no longer bundled. Source-checkout
 > runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
 > the pinned external upstream checkout. Historical validation commands below

@@ -19,10 +19,12 @@ ase = ["ase>=3.26,<4", "f90nml>=1.4,<2"]
 minimum-version = "0.10"
 cmake.source-dir = "packaging/ld"
 wheel.packages = []
-sdist.include = ["README.md", "AGENTS.md", "salmonpy/**", "packaging/ld/**", "tools/check_forbidden_eigensolvers.py", "tools/repair_ld_wheel.py", "tools/test_installed_ld.py", "native/**", "runtime/**", "tools/prepare_salmon_runtime.py", "tools/test_runtime_preparation.py", "tests/native/**", "LICENSE", "NOTICE", "LICENSE.THIRD-PARTY"]
+sdist.include = ["README.md", "AGENTS.md", "salmonpy/**", "packaging/ld/**", "tools/check_forbidden_eigensolvers.py", "tools/repair_ld_wheel.py", "tools/test_installed_ld.py", "native/**", "runtime/**", "tools/prepare_salmon_runtime.py", "tools/test_runtime_preparation.py", "tools/package_salmon_runtime.py", "tests/native/**", "LICENSE", "NOTICE", "LICENSE.THIRD-PARTY"]
 sdist.exclude = ["src/**", "samples/**", "platforms/**", "cmakefiles/**", "testsuites/**", "utility/**", "gnu_makefiles/**", "upstream-salmon/**", "salmonpy/_native/**", "**/__pycache__/**", "**/*.pyc", "dist/**", "wheelhouse/**"]
 
 [tool.cibuildwheel]
+# Test released binary dependencies; never compile NumPy/SciPy accidentally.
+environment = { PIP_ONLY_BINARY = "numpy,scipy,matplotlib" }
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_* *-win32"
 archs = ["native"]

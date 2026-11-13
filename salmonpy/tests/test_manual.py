@@ -16,7 +16,7 @@ class ManualTest(unittest.TestCase):
                 for name in parts[2:]: obj=getattr(obj,name)
             for code in task['examples']: compile(code,task['id'],'exec')
     def test_search(self):
-        for query,expected in [('バンド図を描きたい','bands'),('TDDFT','tddft'),('ドルーデ','ld')]:
+        for query,expected in [('バンド図を描きたい','bands'),('TDDFT','tddft'),('ドルーデ','ld'),('runtime','runtime')]:
             self.assertEqual(search(query)['tasks'][0]['id'],expected)
         self.assertEqual(search('unrecognizedxyz')['tasks'],[])
         with self.assertRaises(ValueError):search('')

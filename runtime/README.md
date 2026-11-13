@@ -1,5 +1,7 @@
 # Optional full SALMON runtime / 外部SALMON実行環境
 
+Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](../salmonpy/RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
+
 SALMONpy's wheel contains LD/SBE kernels only. DFT, TDDFT, FDTD and band workflows
 need a compatible **external** full executable. The full SALMON source is not
 part of this repository's working tree. It is prepared outside the checkout.

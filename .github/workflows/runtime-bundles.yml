@@ -1,0 +1,78 @@
+name: Full runtime bundles
+on:
+  workflow_dispatch:
+  push:
+    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'tools/*runtime*.py', '.github/workflows/runtime-bundles.yml']
+permissions:
+  contents: read
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy delocate
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev patchelf
+      - name: macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install gcc openblas
+          echo "FC=$(brew --prefix)/bin/gfortran" >> "$GITHUB_ENV"
+          echo "CC=$(brew --prefix)/bin/gcc-$(gfortran -dumpversion | cut -d. -f1)" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix openblas)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: SALMON-TDDFT/SALMON2
+          ref: 3322d0561c0cad5180679136b3eddbe8b909487c
+          path: upstream-salmon
+      - name: Explicit build using the public command
+        shell: bash
+        run: |
+          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/runtime-build" --jobs 2 \
+            --cmake-arg=-DCMAKE_Fortran_COMPILER="${FC:-gfortran}" \
+            --cmake-arg=-DCMAKE_C_COMPILER="${CC:-gcc}" \
+            --cmake-arg=-DBLA_VENDOR=OpenBLAS \
+            --cmake-arg=-DOPENMP_FLAGS=-fopenmp \
+            --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
+            --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
+      - name: Bundle dependencies and install into a different directory
+        shell: bash
+        run: |
+          python tools/package_salmon_runtime.py "$RUNNER_TEMP/runtime-build/build" "$RUNNER_TEMP/runtime-build/source" "$RUNNER_TEMP/distribution"
+          archive=$(find "$RUNNER_TEMP/distribution" -maxdepth 1 -name '*.zip')
+          python -m salmonpy.runtime install "$RUNNER_TEMP/relocated" --catalog "$RUNNER_TEMP/distribution/catalog.json" --archive "$archive" --require tddft
+      - name: Test relocated native runtime
+        shell: bash
+        env:
+          PYTHONPATH: .
+          OPENBLAS_NUM_THREADS: '1'
+          SALMONPY_RUNTIME_SOURCE: ${{ runner.temp }}/runtime-build/source
+        run: |
+          python -m unittest salmonpy.tests.test_runtime -v
+          python tools/test_band_path_native.py "$SALMONPY_RUNTIME_SOURCE"
+          python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-test"
+          SALMONPY_TEST_PC=y python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-pc-test"
+      - name: Upload tested branch artifacts (not an upstream SALMON release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: salmonpy-runtime-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/distribution/*.zip
+            ${{ runner.temp }}/distribution/catalog.json
+          if-no-files-found: error
+      - name: Build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-build-log-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/runtime-build/build.log
+            ${{ runner.temp }}/runtime-build/build.json

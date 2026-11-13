@@ -1,0 +1,5 @@
+{
+  "schema": "salmonpy.runtimes/1",
+  "artifacts": [],
+  "note": "No published assets are registered yet. Use a trusted release catalog with --catalog. CI artifacts alone are not public releases."
+}

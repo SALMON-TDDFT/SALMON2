@@ -38,6 +38,8 @@ INPUT_CONTRACT.md に従います。材料係数はモデル作成時、dtと初
 
 ## 配布
 
+本体ランタイムの準備は RUNTIME.md / RUNTIME.en.md と manual.json の `runtime` タスクに従います。既存の監査済みランタイムを再利用し、次にOS・CPU・必要機能に合う配布物を探します。対応品がない場合だけ明示的な `python -m salmonpy.runtime build` を案内します。importやinstall失敗を理由に自動ビルドしません。現ブランチのActions配布物と将来の公開Releasesを区別し、公開URLを作り話で補わないでください。Libxcを必要とする計算には `--require libxc` を付け、PZ版に勝手に代替しません。取得・検証した `load_runtime` の戻り値を既存の `executable=` に渡します。
+
 wheelの構築と修復・OS別検証は PACKAGING.md に従います。検証済み環境とCI設定のみの環境を混同しません。wheel利用者にはFortranコンパイラを要求せず、ソース構築時のみ要求します。
 
 構造・波形・解析の単独入口は WORKFLOWS.md に記載しています。FDTDの一ステップAPI、周期構造、斜め入射、未対応のTDDFT計算方式を対応済みとして例示しないでください。共通Acos2パルスとFDTD側のCEP規約の差はアダプターで0.25周期補正します。
@@ -63,7 +65,7 @@ SALMONの既存ローダーが行います。各 `new_state` は専用プロセ�
 波動関数、Vh履歴、予測子修正子、XCや通信の共有変数を他の計算と共有しません。
 `with` で解放してください。共通 `respond` は成功・失敗とも自動的に解放します。
 PZ／TB-mBJ／Libxc-PZ／Libxc-PBE、周期系、固定イオン、非スピン分極、中点伝播、CPU一MPIランクが対象です。
-実行ファイルは別途構築・監査し、SHA256を指定します。wheelだけでTDDFTが動くとは
+実行ファイルは検証済み配布物を取得するか、明示的に構築・監査し、SHA256を指定します。wheelだけでTDDFTが動くとは
 説明しないでください。dt、最大ステップ数、初期Aは状態作成時に固定します。
 共通JはSALMONの電子物質電流です。Maxwell側で電荷電流が必要なら符号は−Jです。
 異常終了時は受理済みA履歴を再実行して復元し、復元失敗時は状態を閉じます。

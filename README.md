@@ -1,5 +1,7 @@
 # SALMONpy
 
+Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](salmonpy/RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
+
 Python components for material response, electronic dynamics, electromagnetic
 simulation and visualization. This repository is being prepared for independent
 SALMONpy distribution; it is not a SALMON application source checkout.

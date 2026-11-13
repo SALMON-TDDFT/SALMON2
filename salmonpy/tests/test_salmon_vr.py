@@ -72,10 +72,11 @@ class VRTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'missing'):
                     result.launch()
                 binary.write_text('fixture');binary.chmod(0o644)
+                original_mode=binary.stat().st_mode
                 with patch('salmonpy.salmon_vr.os.access',return_value=False):
                     with self.assertRaisesRegex(PermissionError,'chmod'):
                         result.launch()
-                self.assertEqual(binary.stat().st_mode & 0o777,0o644)
+                self.assertEqual(binary.stat().st_mode,original_mode)
                 launch.assert_not_called()
                 with patch('salmonpy.salmon_vr.os.access',return_value=True):
                     result.launch()

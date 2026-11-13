@@ -4,6 +4,76 @@
   "search_entrypoint": "python -m salmonpy.manual QUERY",
   "tasks": [
     {
+      "id": "runtime",
+      "intent": "計算ランタイムを取得・検証する。対応品がない場合だけ明示的に構築する",
+      "intent_i18n": {
+        "en": "Obtain and verify a prebuilt solver runtime; explicitly build only when unavailable",
+        "ja": "計算ランタイムの取得・検証と明示的ビルド"
+      },
+      "keywords": [
+        "runtime",
+        "prebuilt",
+        "download",
+        "install",
+        "build",
+        "compile",
+        "ランタイム",
+        "配布",
+        "取得",
+        "ビルド",
+        "コンパイル"
+      ],
+      "api": [
+        "salmonpy.runtime.inspect_runtime",
+        "salmonpy.runtime.install_runtime",
+        "salmonpy.runtime.load_runtime",
+        "salmonpy.runtime.build_runtime"
+      ],
+      "inputs": "User memory/CPU budget and intent, platform, required features, trusted catalog or audited existing executable",
+      "outputs": "Verified SalmonExecutable; explicit build produces build.log/build.json with provenance and SHA256",
+      "guide": "RUNTIME.md",
+      "guides": {
+        "ja": "RUNTIME.md",
+        "en": "RUNTIME.en.md"
+      },
+      "examples": [
+        "from salmonpy.runtime import inspect_runtime\nstatus = inspect_runtime(required=['tddft', 'libxc'])\nprint(status)\n",
+        "from salmonpy.runtime import install_runtime, load_runtime\nengine = install_runtime('new-runtime', catalog='downloaded/catalog.json', archive='downloaded/runtime.zip', required=['tddft'])\nengine = load_runtime('new-runtime', required=['tddft'])\n# Pass executable=engine to DFT/TDDFT/band entry points.\n"
+      ],
+      "instructions": [
+        {
+          "heading": "日本語",
+          "text": "# 計算ランタイムの準備\n\nLD／SBEのwheelには共有ライブラリを同梱しています。DFT／TDDFT／FDTD／バンド計算には、リンク済み実行ファイルと依存ライブラリを使います。オブジェクトファイルだけでは利用者側でリンクが必要になります。import時のダウンロード・コンパイルはありません。\n\n## まず既存品・配布品を使う\n\n利用者のメモリ上限・CPU数・目的を確認し、OS・CPU種別と必要機能を調べます。検証済み実行ファイルがある場合は、記録済みSHA256で `SalmonExecutable` を作れます。管理された配布物は次で再検証します。\n\n```python\nfrom salmonpy.runtime import load_runtime\nengine = load_runtime('my-runtime', required=['tddft', 'libxc'])\n# DFT／TDDFT／バンドの入口へ executable=engine として渡す。\n# FDTDは engine.run(calculation, 'new-output', threads=2)。\n```\n\n公開カタログを使う場合の手順です。`CATALOG_URL` は公開元から得たURLに置き換えます。\n\n```sh\npython -m salmonpy.runtime status --catalog CATALOG_URL --require tddft libxc\npython -m salmonpy.runtime install my-runtime --catalog CATALOG_URL --require tddft libxc\npython -m salmonpy.runtime verify my-runtime --require tddft libxc\n```\n\n**独立リポジトリは未作成で、公開カタログはまだありません。** 同梱カタログも空です。URLを推測しないでください。候補が複数なら `--artifact ID` で指定します。対応品がなければエラーとbuild入口を返し、勝手にコンパイルしたりLibxcを外したりしません。保存先は新規ディレクトリです。HTTPS、ZIPと全ファイルのSHA256、展開パスを検査します。ハッシュは署名ではないので、カタログは信頼できる配布元から取得します。\n\n## 現在のブランチから取得する\n\nActionsの **Full runtime bundles** はLinux x86_64・macOS arm64・Intel Mac用のビルドを設定しています。別の場所へ移した実行ファイルでTDDFT接続テストが成功した場合のみ配布物を保存します。設定済みと実行成功は区別してください。これらは単一MPIランク・PZ／TB-mBJ用で、Libxcを含みません。手元で検証したmacOS arm64のLibxc版は別プロファイルです。Windows本体ランタイムは未提供です（LD／SBEのWindows wheelとは別）。\n\n現在のブランチの成功したActions実行から `salmonpy-runtime-...` を取得します。**Actionsの外側ZIPを展開**し、中のランタイムZIPと `catalog.json` を使います。\n\n```sh\npython -m salmonpy.runtime status --catalog downloaded/catalog.json --require tddft\npython -m salmonpy.runtime install my-runtime --catalog downloaded/catalog.json --archive downloaded/RUNTIME_ZIP --require tddft\n```\n\n`RUNTIME_ZIP` は実際のファイル名です。ブランチの配布物には公開URLがないため `--archive` が必要です。利用者側のコンパイラやリンカーは不要です。ビルド環境より古いOSは保守的に対象外とします。計算入力・擬ポテンシャルは別途必要です。\n\n## 対応品がない場合だけ明示的にビルドする\n\n必要な開発環境と利用者の計算資源を確認してから実行します。\n\n```sh\ngit clone https://github.com/SALMON-TDDFT/SALMON2.git UPSTREAM\npython -m salmonpy.runtime build UPSTREAM NEW_BUILD --jobs 2 \\\n  --cmake-arg=-DCMAKE_Fortran_COMPILER=gfortran \\\n  --cmake-arg=-DCMAKE_C_COMPILER=gcc \\\n  --cmake-arg=-DBLA_VENDOR=OpenBLAS \\\n  --cmake-arg=-DOPENMP_FLAGS=-fopenmp \\\n  --cmake-arg=-DCMAKE_BUILD_TYPE=Release \\\n  --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'\n```\n\nこれはGNUコンパイラ用の例です。macOSではGNU Cコンパイラの実際のパスを指定します。通常 `/usr/bin/gcc` はApple Clangです。Git・CMake 3.22以上・GNU Fortran/C・LP64 OpenBLASは事前に必要です。システムへの自動インストールはしません。Windows本体の直接ビルドは未検証で、Linux／WSLや別途検証した環境を使います。`--jobs` はビルド並列数で、計算スレッド数やメモリ制限ではありません。\n\nLibxcが必要なら互換性のあるFortran対応Libxcを準備し、`--cmake-arg=-DUSE_LIBXC=ON` と `--cmake-arg=-DLIBXC_INSTALLDIR=LIBXC_PREFIX` を追加します。\n\n固定版パッチ・共有カーネル参照・監査ツールはwheelにも含めるため、SALMONpyのGitチェックアウトは不要です。`build.log` と `build.json` にコマンド・成否・実行ファイルのハッシュを保存します。失敗してもログとソースを保持し、新しい場所で再試行します。成功はビルドとオブジェクト監査の完了を表し、科学的精度の検証ではありません。対象ワークフローの回帰検証後、記録したハッシュを使います。\n\n```python\nimport json\nfrom pathlib import Path\nfrom salmonpy.fdtd import SalmonExecutable\nrecord = json.loads(Path('NEW_BUILD/build.json').read_text())\nif record['status'] != 'built-and-audited':\n    raise RuntimeError('runtime build did not complete')\nengine = SalmonExecutable(record['executable'], record['sha256'])\n```\n\nMPI版は計算機のMPI環境に合わせて明示的に構築します。Python側の単一ランクの対応範囲は変わりません。今回の準備機能は、計算順序・独立状態・A→Jの境界を変更しません。\n"
+        },
+        {
+          "heading": "English",
+          "text": "# Full solver runtime\n\nLD/SBE wheels already include their compiled library. DFT, TDDFT, FDTD and band\ncalculations use a **linked executable plus its runtime libraries**. An object\nfile alone would still require a linker and dependencies on the user's machine.\nImporting SALMONpy never downloads or builds anything.\n\n## Prefer an existing or prebuilt runtime\n\nFirst establish the user's memory limit, CPU budget and desired workflow. Check\nOS/architecture and required features; LD wheel compatibility does not establish\nfull-runtime compatibility. Reuse a previously audited executable via\n`SalmonExecutable(path, recorded_sha256)`, or verify a managed runtime:\n\n```python\nfrom salmonpy.runtime import load_runtime\nengine = load_runtime('my-runtime', required=['tddft', 'libxc'])\n# Pass executable=engine to the existing DFT/TDDFT/band loaders.\n# For FDTD: engine.run(calculation, 'new-output', threads=2).\n```\n\nFor public releases, use the trusted publisher's catalog URL:\n\n```sh\npython -m salmonpy.runtime status --catalog CATALOG_URL --require tddft libxc\npython -m salmonpy.runtime install my-runtime --catalog CATALOG_URL --require tddft libxc\npython -m salmonpy.runtime verify my-runtime --require tddft libxc\n```\n\n`CATALOG_URL` is an explicit placeholder, not a currently published URL. The\nbundled catalog is currently empty. Public hosting awaits the independent\nSALMONpy repository; do not invent a download URL or claim an asset is published.\nMultiple matches require `--artifact ID`. Destinations must be new. A missing\nmatch raises `RuntimeUnavailable` and prints the explicit build entry point;\nit never silently drops Libxc, changes architecture or starts compilation.\nDownloads use HTTPS and SHA256. Archive paths and all installed files are checked.\nCatalogs must come from a trusted publisher: their hashes are not signatures.\n\n## Current branch artifacts\n\nThe **Full runtime bundles** Actions workflow builds macOS arm64, macOS x86_64\nand Linux x86_64 profiles and uploads a bundle only after relocation and native\nTDDFT tests succeed. A configured runner is not evidence of a passing run. These\nprofiles use a single MPI rank and PZ/TB-mBJ; they do not include Libxc. Windows\nfull-runtime bundles are not yet provided (Windows LD/SBE wheels are separate).\nThe locally tested macOS arm64 Libxc bundle is a separate artifact/profile.\n\nDownload the matching successful run's `salmonpy-runtime-...` artifact from the\ncurrent branch's Actions page. Extract the **outer Actions ZIP**, retaining the\ninner runtime ZIP and `catalog.json`. Then:\n\n```sh\npython -m salmonpy.runtime status --catalog downloaded/catalog.json --require tddft\npython -m salmonpy.runtime install my-runtime --catalog downloaded/catalog.json --archive downloaded/RUNTIME_ZIP --require tddft\n```\n\n`RUNTIME_ZIP` means the actual ZIP filename inside that artifact. CI catalogs\nhave no public asset URL; installation requires this local archive. No compiler\nor linker is needed. OS versions older than the recorded build baseline are\nrejected conservatively. Native calculations still need compatible inputs and\npseudopotentials, which are not part of the executable bundle.\n\n## Explicit fallback build\n\nOnly offer a build when no appropriate prebuilt/existing runtime is available.\nExplain required tools and confirm the user's CPU/memory budget. Obtain the\npinned upstream source, then explicitly build in a new directory:\n\n```sh\ngit clone https://github.com/SALMON-TDDFT/SALMON2.git UPSTREAM\npython -m salmonpy.runtime build UPSTREAM NEW_BUILD --jobs 2 \\\n  --cmake-arg=-DCMAKE_Fortran_COMPILER=gfortran \\\n  --cmake-arg=-DCMAKE_C_COMPILER=gcc \\\n  --cmake-arg=-DBLA_VENDOR=OpenBLAS \\\n  --cmake-arg=-DOPENMP_FLAGS=-fopenmp \\\n  --cmake-arg=-DCMAKE_BUILD_TYPE=Release \\\n  --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'\n```\n\nThese are GNU compiler options, not universal platform flags. Supply the actual\nGNU C compiler path on macOS; `/usr/bin/gcc` is normally Apple Clang. Install\nCMake >=3.22, Git, GNU Fortran/C and LP64 OpenBLAS beforehand. The command never installs\nsystem dependencies. Windows native full-solver support is unvalidated; use a\nsupported Linux environment/WSL or a separately validated site build.\n`--jobs` controls build concurrency, not simulation threads or a memory limit.\nFor Libxc supply `--cmake-arg=-DUSE_LIBXC=ON` and\n`--cmake-arg=-DLIBXC_INSTALLDIR=LIBXC_PREFIX` for a compatible Fortran-enabled Libxc.\n\nThe wheel includes the pinned patch, shared-kernel references and audit scripts,\nso no SALMONpy checkout is needed. Source preparation, compilation and object\nchecks are logged in `NEW_BUILD/build.log`; `build.json` records status, exact\ncommands and the resulting executable SHA256. Failures preserve the log and\nsource; retry in a new directory. Success means **built and object-audited**,\nnot independently validated scientific accuracy. Run the relevant native\nregression before production and use the recorded hash:\n\n```python\nimport json\nfrom pathlib import Path\nfrom salmonpy.fdtd import SalmonExecutable\nrecord = json.loads(Path('NEW_BUILD/build.json').read_text())\nif record['status'] != 'built-and-audited':\n    raise RuntimeError('runtime build did not complete')\nengine = SalmonExecutable(record['executable'], record['sha256'])\n```\n\nMPI runtimes must match the cluster's MPI stack and remain explicit site builds.\nThe current Python adapters' single-rank scope is unchanged. This acquisition\nlayer does not alter the DFT/TDDFT update order, state isolation or A→J interface.\n"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "requires_full_salmon": false,
+        "validation_scope": "Synthetic installer tests; local macOS arm64 relocated Libxc TDDFT comparison. CI target configuration is not a completed run."
+      },
+      "decision_order": [
+        "reuse known memory/CPU budgets and intended workflow",
+        "reuse and verify existing audited runtime",
+        "select catalog artifact by interface, OS, CPU, OS/libc baseline and required features",
+        "install into new directory and verify hashes",
+        "if unavailable: explain toolchain and run explicit build only",
+        "validate relevant workflow before production"
+      ],
+      "forbidden": [
+        "compile or download on import",
+        "silently remove Libxc requirement",
+        "claim Windows full runtime support based on LD wheels",
+        "invent a public URL",
+        "treat hash-only audit as scientific validation"
+      ],
+      "publication_status": "branch CI artifacts; independent repository not created; bundled public catalog empty"
+    },
+    {
       "id": "bands",
       "intent": "初期状態からバンドを計算・保存・描画する",
       "keywords": [
@@ -1284,7 +1354,8 @@
     "Separate immutable model, per-state dt, and per-step drive.",
     "Read task instructions and limitations before executing examples.",
     "Large native outputs are opt-in.",
-    "Resolve paths and executable identity for the current machine. Host-specific validation records are evidence, not setup defaults."
+    "Resolve paths and executable identity for the current machine. Host-specific validation records are evidence, not setup defaults.",
+    "Full runtime setup: follow the runtime task. Prefer existing/prebuilt compatible binaries; no implicit build. Current branch artifacts require a local ZIP and catalog; do not invent published URLs."
   ],
   "audience": "ai_agents",
   "purpose": "Machine-readable task discovery and execution guidance for AI agents.",
