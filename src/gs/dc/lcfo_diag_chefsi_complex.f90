@@ -524,9 +524,11 @@ contains
       type(s_layout) :: layout_active,layout_small
       complex(8) :: work_query(1),one_c,zero_c
       real(8) :: rwork_query(1)
+      integer :: iwork_query(1)
+      integer, allocatable :: iwork0(:)
       complex(8), allocatable :: work0(:)
       real(8), allocatable :: rwork0(:)
-      integer :: lwork0,lrwork0,info0,nactive
+      integer :: lwork0,lrwork0,liwork0,info0,nactive,i,alloc_status
       nactive=n-nlocked
       call initialize_active_layouts(nactive,layout_d,layout_g,layout_active,layout_small,istat)
       if(istat/=0) return
@@ -539,22 +541,44 @@ contains
       zero_c=(0d0,0d0)
       call pzgemm('C','N',nactive,nactive,npadded,one_c,xd,1,1,layout_active%desc, &
         hxd,1,1,layout_active%desc,zero_c,projected,1,1,layout_small%desc)
-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,info0)
+      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
+        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,iwork_query,-1,info0)
       istat=merge(1,0,info0/=0)
       call sync_status(istat)
       if(istat/=0) return
-      lwork0=max(1,ceiling(real(work_query(1),8)))
-      lrwork0=max(1,ceiling(rwork_query(1)))
+      ! Check scalar query values before converting to the default integer ABI.
+      if(.not.ieee_is_finite(real(work_query(1),8))) istat=1
+      if(.not.ieee_is_finite(rwork_query(1))) istat=1
+      call sync_status(istat)
+      if(istat/=0) return
+      if(real(work_query(1),8)<1d0 .or. rwork_query(1)<1d0 .or. iwork_query(1)<1) istat=1
+      if(real(work_query(1),8)>real(huge(lwork0)-1,8)) istat=1
+      if(rwork_query(1)>real(huge(lrwork0)-1,8)) istat=1
+      call sync_status(istat)
+      if(istat/=0) return
+      lwork0=ceiling(real(work_query(1),8))
+      lrwork0=ceiling(rwork_query(1))
+      liwork0=iwork_query(1)
       call comm_get_max(lwork0,dc%icomm_tot)
       call comm_get_max(lrwork0,dc%icomm_tot)
-      allocate(work0(lwork0),rwork0(lrwork0))
-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,info0)
-      istat=merge(1,0,info0/=0)
-      if(any(.not.ieee_is_finite(eigenvalue(nlocked+1:n)))) istat=1
+      call comm_get_max(liwork0,dc%icomm_tot)
+      allocate(work0(lwork0),rwork0(lrwork0),iwork0(liwork0),stat=alloc_status)
+      istat=merge(1,0,alloc_status/=0)
       call sync_status(istat)
-      deallocate(work0,rwork0)
+      if(istat/=0) then
+        if(allocated(work0)) deallocate(work0)
+        if(allocated(rwork0)) deallocate(rwork0)
+        if(allocated(iwork0)) deallocate(iwork0)
+        return
+      end if
+      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
+        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,iwork0,liwork0,info0)
+      istat=merge(1,0,info0/=0)
+      do i=nlocked+1,n
+        if(.not.ieee_is_finite(eigenvalue(i))) istat=1
+      end do
+      call sync_status(istat)
+      deallocate(work0,rwork0,iwork0)
       if(istat/=0) return
       call comm_bcast(eigenvalue(nlocked+1:n),dc%icomm_tot,0)
       xrot=(0d0,0d0)

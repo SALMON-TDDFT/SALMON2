@@ -1,0 +1,6 @@
+Binary wheels repaired with GNU Fortran may include libgfortran and libgcc
+(GPL version 3 with GCC Runtime Library Exception 3.1) and libquadmath
+(LGPL version 2.1 or later). The corresponding license texts are included here.
+GCC source releases: https://gcc.gnu.org/releases.html
+These libraries are separate from SALMON's Apache-2.0 source code.
+Inspect each platform's repair output for additional bundled dependencies.
