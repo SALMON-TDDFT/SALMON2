@@ -40,3 +40,23 @@ class CrystalTests(unittest.TestCase):
                 return super().new_state(**kwargs)
         with self.assertRaisesRegex(ValueError,'backend time'):
             respond(Wrong(),FieldSamples(np.arange(4)*.1,np.zeros((4,3)),'A'))
+
+    def test_batch_closes_owned_backend_on_success_and_failure(self):
+        closed=[]
+        class Initial:
+            backend='lifecycle-test'
+            def new_state(self,*,dt,time0,initial_A):
+                class State:
+                    time=time0
+                    current=np.zeros(3)
+                    def step(self,A):
+                        if A[0]<0: raise ValueError('test failure')
+                        self.time+=dt
+                        return self.current
+                    def close(self): closed.append(True)
+                return State()
+        respond(Initial(),FieldSamples([0.,.1],np.zeros((2,3)),'A'))
+        self.assertEqual(len(closed),1)
+        with self.assertRaisesRegex(ValueError,'test failure'):
+            respond(Initial(),FieldSamples([0.,.1],[[0,0,0],[-1,0,0]],'A'))
+        self.assertEqual(len(closed),2)

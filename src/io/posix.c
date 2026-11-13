@@ -1,3 +1,4 @@
+#include <stdio.h> /* snprintf declaration required by C99 */
 /*
  *  Copyright 2019-2020 SALMON developers
  *

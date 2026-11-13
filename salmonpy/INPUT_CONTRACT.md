@@ -58,3 +58,12 @@ correction order and nonlocal-correction flag belong to immutable SBEInitialStat
 `step`. Density, previous A and current belong to each individual state. Failed
 validation or nonfinite native output does not commit a step. Independent states
 never share mutable density matrices.
+
+
+TDDFT: the loaded bundle, executable identity, OpenMP thread count and response
+ timeout are immutable factory settings. Every state fixes dt, zero time origin,
+initial A and maximum step capacity. Only Anew is a per-step input. Copies of the
+complete input bundle and process-owned native data ensure independence, including
+module globals. Direct states require close/context-manager ownership; common
+respond closes automatically. Native failures replay accepted history before
+returning an error, or explicitly close the state if replay fails.

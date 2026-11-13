@@ -1,4 +1,5 @@
 set(SOURCES
+    tddft_worker.f90
     dip.f90
     em_field.f90
     initialization_rt.f90

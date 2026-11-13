@@ -68,7 +68,8 @@ check temporal convergence. A single state must not be shared between threads.
 The step adapter reconstructs a small native context each call; it is intended
 for prototyping, not high-throughput grid coupling. Batch calculations reuse one
 native context. FDTD has an external-executable batch wrapper. The built-in SBE adapter is `salmonpy.sbe.SBEInitialState`; see the loader and
-independent-trajectory example in WORKFLOWS.md. The TDDFT adapter is pending.
+independent-trajectory example in WORKFLOWS.md. A process-isolated PZ TDDFT adapter is available as `salmonpy.tddft.TDDFTInitialState`
+with a separately built worker-enabled SALMON executable.
 Crystalline TDDFT/SBE interfaces remain A-driven only.
 
 See [AI_USAGE.md](AI_USAGE.md) for extension rules and the legacy FDTD boundary.

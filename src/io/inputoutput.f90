@@ -110,10 +110,12 @@ module inputoutput
 
 contains
   subroutine read_input
+    use tddft_worker, only: worker_configure
     implicit none
 
     call read_stdin
     call read_input_common ! Should be renamed properly later
+    call worker_configure()
     call read_atomic_coordinates
     call dump_input_common ! Should be renamed properly later
     call check_bad_input
@@ -122,6 +124,7 @@ contains
 
 
   subroutine read_stdin
+    use tddft_worker, only: worker_requested
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: get_filehandle
@@ -154,6 +157,7 @@ contains
           exit
         else
           text = trim(adjustl(buff))
+          if(worker_requested().and.text=="!SALMONPY_END_INPUT") exit
           ! Comment lines
           if (text(1:1) == '!') cycle
          !! Beginning of 'atomic_species' part

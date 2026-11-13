@@ -113,7 +113,7 @@ assuming it is zero. A backend must guarantee independent states and atomic step
 failures; Python cannot enforce those promises for arbitrary external engines.
 
 The built-in velocity-gauge SBE adapter and text loader are described below.
-The TDDFT adapter is not yet implemented. Common-interface tests also use an
+The process-isolated TDDFT adapter is described below. Common-interface tests also use an
 explicit test double; SBE has separate native reference tests.
 The next extraction must retain native initial-state formats, MPI ownership,
 wavefunction/density-matrix histories, rotations, gauge and time alignment. DFT
@@ -161,5 +161,59 @@ Python SBE is serial, with independent per-state arrays and no global native
 calculation state. Each step currently copies initial arrays into a temporary
 Fortran context; this first adapter prioritizes equivalence over large-system
 throughput. A single evolving state should not be stepped concurrently.
-The native TDDFT adapter, length gauge and restart/checkpoint loading remain
+SBE length gauge and excited-state restart/checkpoint loading remain
 unimplemented. This loader creates a fresh ground-state density, not a restart.
+
+## Native TDDFT with isolated state
+
+`TDDFTInitialState` implements the same `new_state`/`step(Anew)` contract as SBE.
+It keeps one persistent SALMON process per evolving state because the complete
+solver still owns module globals, communication scratch space and XC histories.
+The existing `initialization_rt` and `time_evolution_step` execute unchanged inside
+that process. This is not a TDDFT shared library bundled in the wheel.
+
+Prepare a self-contained directory with a valid periodic RT input, pseudopotential
+files and `data_for_restart/{info.bin,occupation.bin,wfn.bin,...}` from GS. Use
+relative paths for all assets and a plain `sysname`. The initial-state loader
+copies this bundle and records hashes. Each new state gets its own private copy;
+changes to the original files do not change the loaded initial state. Binary
+records are read by SALMON itself and retain its compiler/format constraints.
+
+```python
+from salmonpy.fdtd import SalmonExecutable
+from salmonpy.tddft import TDDFTInitialState
+from salmonpy.crystal import respond
+
+# Use the SHA256 of your source/object-audited, worker-enabled executable.
+executable = SalmonExecutable('/path/to/salmon', validated_sha256)
+with TDDFTInitialState.from_salmon(
+    'prepared_bundle', 'rt.inp', executable=executable,
+    max_steps=len(drive.time)-1, threads=1, timeout=300.) as initial:
+    result = respond(initial, drive)  # closes its process, also on failure
+    with initial.new_state(dt=0.05) as a, initial.new_state(dt=0.05) as b:
+        Ja = a.step([0.001, 0., 0.])
+        Jb = b.step([0.002, 0., 0.])  # no state or native globals shared with a
+```
+
+Current supported scope: periodic, unpolarized, fixed ions, **PZ**, CPU, one MPI
+rank with optional OpenMP, `middlepoint`, transverse supplied total A/c, fresh GS
+rather than an excited RT checkpoint. The existing predictor-corrector option is
+retained. Other functionals, AETRS/HSE, longitudinal/internal-Maxwell feedback,
+spin-orbit, +U, projection/unfolding and moving ions are rejected. `time0` must
+be zero; `dt`, capacity and initial A are fixed when creating a state. Capacity
+controls native history-array allocation and cannot be enlarged mid-run.
+
+The input's pulse, base directory and restart output settings are replaced only
+in worker mode; the public drive is exclusively supplied endpoint A. The existing
+midpoint Hamiltonian, predictor-corrector, density/potential/history updates,
+and endpoint-current calculation retain their order, including existing
+nonlocal-phase conventions. J uses SALMON's electronic **matter-current** sign,
+as does SBE; electronic charge current is **−J**. No numerical integrator or
+unitarity correction is introduced.
+
+Always close direct states, preferably with `with`. `respond` does this for you.
+Invalid A leaves the state unchanged. On worker failure the adapter reconstructs
+and replays accepted A samples before raising; if recovery fails it closes the
+state explicitly. Replay is expensive and is not a scientific checkpoint format.
+Snapshots and per-process copies also require disk space. Existing states survive
+closing the initial loader, since each owns its own input copy.

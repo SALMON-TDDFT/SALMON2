@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "salmonpy"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "SALMON material response, FDTD orchestration and optical workflow tools"
 readme = "salmonpy/README.md"
 requires-python = ">=3.10"
