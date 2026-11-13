@@ -9,10 +9,10 @@ for each platform, with the same Python interface.
 
 | Platform | Architecture | CPython | Status |
 | --- | --- | --- | --- |
-| macOS | arm64 | 3.10–3.14 | Local 3.14/macOS 26 wheel verified; CI configured |
-| macOS | x86_64 | 3.10–3.14 | CI configured; execution pending |
-| Linux manylinux_2_28 | x86_64 | 3.10–3.14 | CI configured; execution pending |
-| Windows | AMD64 | 3.10–3.14 | CI configured; execution pending |
+| macOS | arm64 | 3.10–3.14 | CI passed (macOS 15) |
+| macOS | x86_64 | 3.10–3.14 | CI passed |
+| Linux manylinux_2_28 | x86_64 | 3.10–3.14 | CI passed |
+| Windows | AMD64 | 3.10–3.14 | CI passed |
 
 The CI macOS deployment target is 15.0; dependent runtimes can impose additional
 requirements, which the repair/test stage must validate. Linux arm64, Windows
@@ -57,9 +57,13 @@ and the sdist as artifacts; it does not publish to PyPI.
 Local verification on 2026-11-13: gfortran 15, CPython 3.14, macOS arm64; built
 from sdist, repaired with delocate, installed in a separate venv, and all 13 API
 and numerical tests passed outside the source checkout. Wheel-record repair
-checks cover .dll/.so/.dylib names. Other OS results require actual CI execution;
-configuration alone is not evidence of support.
+checks cover .dll/.so/.dylib names. Windows AMD64, Linux x86_64 and both macOS architectures subsequently passed
+all CPython 3.10–3.14 builds and installed-wheel tests in run 43354726041.
 
 The wheel includes AI_USAGE.md and INPUT_CONTRACT.md. Development examples and
 tests live in the source distribution. Restart the interpreter after rebuilding
 native code. No upload/public release has been performed.
+
+Verified CI: https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43354726041
+Code commit: 887391751b6918c7edc6ac819e49fc07dc82202a.
+20 wheels, each with 13 passing tests; source-distribution rebuild also passed.
