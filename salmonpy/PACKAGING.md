@@ -11,7 +11,7 @@ for each platform, with the same Python interface.
 | --- | --- | --- | --- |
 | macOS | arm64 | 3.10–3.14 | Local 3.14/macOS 26 wheel verified; CI configured |
 | macOS | x86_64 | 3.10–3.14 | CI configured; execution pending |
-| Linux manylinux2014 | x86_64 | 3.10–3.14 | CI configured; execution pending |
+| Linux manylinux_2_28 | x86_64 | 3.10–3.14 | CI configured; execution pending |
 | Windows | AMD64 | 3.10–3.14 | CI configured; execution pending |
 
 The CI macOS deployment target is 15.0; dependent runtimes can impose additional
