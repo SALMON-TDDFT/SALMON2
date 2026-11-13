@@ -34,6 +34,7 @@ jobs:
           "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" >> $env:GITHUB_PATH
           "FC=${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin/gfortran.exe" >> $env:GITHUB_ENV
           "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
+          "CMAKE_PREFIX_PATH=${{ steps.msys2.outputs.msys2-location }}/ucrt64" >> $env:GITHUB_ENV
       - name: macOS Fortran toolchain
         if: runner.os == 'macOS'
         run: |

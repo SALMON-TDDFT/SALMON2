@@ -112,8 +112,9 @@ with a bound capped at 0.001 time steps; a materially wrong step is rejected. It
 assuming it is zero. A backend must guarantee independent states and atomic step
 failures; Python cannot enforce those promises for arbitrary external engines.
 
-SALMON TDDFT/SBE adapters and initial-file loaders are **not yet implemented**.
-The tests use explicit interface test doubles, not physical TDDFT/SBE models.
+The built-in velocity-gauge SBE adapter and text loader are described below.
+The TDDFT adapter is not yet implemented. Common-interface tests also use an
+explicit test double; SBE has separate native reference tests.
 The next extraction must retain native initial-state formats, MPI ownership,
 wavefunction/density-matrix histories, rotations, gauge and time alignment. DFT
 initial-state generation remains a separate stage; never advertise a fake solver
