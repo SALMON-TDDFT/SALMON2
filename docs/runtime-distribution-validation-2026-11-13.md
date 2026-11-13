@@ -38,3 +38,25 @@ PZ/TB-mBJ and no Libxc. Windows full runtime, MPI distribution and broad Libxc
 functional support are not claimed. CI uploads only after relocated native tests.
 Current branch assets are not upstream SALMON releases. The public catalog stays
 empty until assets are actually published in the future independent repository.
+
+## Completed branch CI
+
+Implementation commit: `6fcfe2d5945ac90482cb3c72091803b183b55cdf`.
+
+- [LD wheels run 43391897851](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43391897851):
+  Ubuntu 22.04, Windows 2022, macOS 15 arm64, macOS 15 Intel, and sdist all passed.
+  This includes installed-wheel tests with extras and a separate no-extras run.
+- [Full runtime bundles run 43391897849](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43391897849):
+  all three Linux/macOS profiles passed explicit builds, source/object audits,
+  packaging, archive installation, band-path checks and relocated TDDFT tests
+  (ordinary and predictor-corrector). The artifacts are approximately 10–14 MB.
+- [TDDFT native worker run 43391897760](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43391897760):
+  passed on Ubuntu.
+
+Runtime artifacts are named `salmonpy-runtime-ubuntu-22.04`,
+`salmonpy-runtime-macos-15`, and `salmonpy-runtime-macos-15-intel`. Download through
+that run's Actions page; the outer ZIP contains `catalog.json` and the inner
+runtime ZIP. Follow RUNTIME.md with `--catalog` and `--archive`. These are branch
+artifacts with GitHub retention, not permanent release URLs. The three CI runtime
+profiles do not include Libxc; the separate locally tested Libxc profile must not
+be confused with them. Windows wheel success does not imply a Windows full solver.
