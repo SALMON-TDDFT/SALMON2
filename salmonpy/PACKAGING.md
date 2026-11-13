@@ -67,3 +67,9 @@ native code. No upload/public release has been performed.
 Verified CI: https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43354726041
 Code commit: 887391751b6918c7edc6ac819e49fc07dc82202a.
 20 wheels, each with 13 passing tests; source-distribution rebuild also passed.
+
+Version 0.1.0a2 adds non-LD Python workflow tools. Its final code commit
+045f34faef532ceb106ea00274319a70d27eca8d passed the same 20-wheel matrix,
+27 tests per wheel (540 checks):
+https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43357199430
+Full FDTD executable integration is a separate local test, not part of the wheel CI.
