@@ -1,5 +1,6 @@
 # Pythonサンプル集
 
+[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-13.1`
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
 LD/SBEには構築済みのネイティブライブラリが必要です。import時にコンパイルは行いません。
 下記の `python` はSALMONpyをインストールした環境のPythonを指します。
@@ -73,3 +74,5 @@ python -m salmonpy.examples.sbe_from_salmon BUNDLE SYSNAME NEW_SBE --bands 32 --
 
 公式入力例の参照先はAIマニュアルの `sources` に登録したSALMON-inputsです。
 必要ファイルとバージョンを確認し、サンプルの物理条件と一致させて使用してください。
+
+SALMON VR用書き出し: [salmon_vr_export.py](salmon_vr_export.py)。詳細は [SALMON_VR.md](../SALMON_VR.md)。

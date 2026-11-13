@@ -7,3 +7,6 @@ Start with manual.json or `python -m salmonpy.manual QUERY` to find tasks, APIs,
 `manual.json` is exclusively the AI-facing task catalog. Human-facing documentation is separate; do not present JSON search results as the user manual.
 
 For beginner workflows, apply manual.json beginner_intake before choosing calculation scale: ask only missing memory/CPU budgets and intent, then state measured/estimated/unknown capability limits.
+
+This project is intended for a separate repository; do not create a PR or merge
+into SALMON itself. Use README.en.md / README.md for English / Japanese onboarding.

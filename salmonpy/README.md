@@ -1,5 +1,6 @@
 # SALMONpy：Pythonから使うSALMONの計算・解析部品
 
+[English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`
 LD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。
 対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。
 現在はpreview版で、PyPI公開済みではありません。
@@ -33,7 +34,7 @@ Pythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグ�
 | バンド計算・描画 | `salmonpy.bands` | 対応外部SALMON・基底状態・Matplotlib |
 | ASEの構造・経路・energy/forces | `salmonpy.ase` / `salmonpy.ase_calculator` | 上記に加え任意のASE依存 |
 
-[13本のPythonサンプルと実行方法](examples/README.md)から始めてください。
+[14本のPythonサンプルと実行方法](examples/README.md)から始めてください。
 各機能の対応範囲は [WORKFLOWS.md](WORKFLOWS.md)、[DFT.md](DFT.md)、
 [ASE_CALCULATOR.md](ASE_CALCULATOR.md) に記載しています。
 wheel内のLD/SBEと、別途準備が必要なSALMON本体は区別してください。
@@ -150,3 +151,12 @@ full SALMON executable. See PACKAGING.md for the version-specific validation mat
 python -m salmonpy.build_native
 python -m unittest discover -s salmonpy/tests -v
 ```
+
+## 独立配布と日英ドキュメント
+
+将来は独立リポジトリとして配布し、このブランチをSALMON本体へマージしない方針です。
+`python -m salmonpy.manual --lang en "I want to run TDDFT"` と
+`python -m salmonpy.doctor --lang en` で英語の開始案内・環境診断を利用できます。
+AIカタログの詳細技術説明はまだ言語が混在しており、全リファレンスの翻訳完了ではありません。
+
+公開版SALMON VRへの接続は [SALMON_VR.md](SALMON_VR.md) を参照してください。

@@ -131,3 +131,28 @@ class OutputTests(unittest.TestCase):
             self.assertEqual(Path(caught.exception.recovery_directory),work)
         finally:shutil.rmtree(work,ignore_errors=True)
 
+    def test_reject_missing_duplicate_and_inconsistent_array_index(self):
+        import json
+        from salmonpy.outputs import save_arrays, OutputArchive
+        with tempfile.TemporaryDirectory() as tmp:
+            dest=Path(tmp)/'result'
+            save_arrays(dest,{'J':np.arange(3.)},metadata={})
+            path=dest/'manifest.json'
+            original=json.loads(path.read_text())
+            import copy
+            cases=[]
+            for kind in ('missing','duplicate','shape','dtype','name'):
+                bad=copy.deepcopy(original)
+                if kind=='missing': bad['files']=[]
+                if kind=='duplicate': bad['files']*=2
+                if kind=='shape': bad['arrays']['J']['shape']=[4]
+                if kind=='dtype': bad['arrays']['J']['dtype']='int64'
+                if kind=='name': bad['arrays']['other']=bad['arrays'].pop('J')
+                cases.append(bad)
+            for bad in cases:
+                path.write_text(json.dumps(bad))
+                for verify in (True,False):
+                    with self.subTest(manifest=bad,verify=verify),self.assertRaises(ValueError):
+                        OutputArchive.open(dest,verify=verify)
+            path.write_text(json.dumps(original))
+            np.testing.assert_array_equal(OutputArchive.open(dest).array('J'),np.arange(3.))

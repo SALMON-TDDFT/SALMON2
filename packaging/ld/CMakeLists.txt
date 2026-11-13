@@ -33,8 +33,8 @@ install(TARGETS salmonpy_ld LIBRARY DESTINATION salmonpy/_native RUNTIME DESTINA
 install(FILES "$<TARGET_FILE:salmonpy_ld>.sha256" DESTINATION salmonpy/_native)
 install(FILES "${ROOT}/salmonpy/__init__.py" "${ROOT}/salmonpy/ld.py"
   "${ROOT}/salmonpy/fields.py" "${ROOT}/salmonpy/geometry.py"
-  "${ROOT}/salmonpy/doctor.py" "${ROOT}/salmonpy/AGENTS.md" "${ROOT}/salmonpy/manual.py" "${ROOT}/salmonpy/manual.json" "${ROOT}/salmonpy/ase_calculator.py" "${ROOT}/salmonpy/dft.py" "${ROOT}/salmonpy/ase.py" "${ROOT}/salmonpy/bands.py" "${ROOT}/salmonpy/analysis.py" "${ROOT}/salmonpy/outputs.py" "${ROOT}/salmonpy/fdtd.py" "${ROOT}/salmonpy/crystal.py" "${ROOT}/salmonpy/sbe.py" "${ROOT}/salmonpy/tddft.py"
-  "${ROOT}/salmonpy/ASE_CALCULATOR.md" "${ROOT}/salmonpy/DFT.md" "${ROOT}/salmonpy/ASE.md" "${ROOT}/salmonpy/BANDS.md" "${ROOT}/salmonpy/WORKFLOWS.md" "${ROOT}/salmonpy/OUTPUTS.md" "${ROOT}/salmonpy/PACKAGING.md" "${ROOT}/salmonpy/README.md" "${ROOT}/salmonpy/AI_USAGE.md" "${ROOT}/salmonpy/INPUT_CONTRACT.md"
+  "${ROOT}/salmonpy/salmon_vr.py" "${ROOT}/salmonpy/SALMON_VR.md" "${ROOT}/salmonpy/SALMON_VR.en.md" "${ROOT}/salmonpy/doctor.py" "${ROOT}/salmonpy/AGENTS.md" "${ROOT}/salmonpy/manual.py" "${ROOT}/salmonpy/manual.json" "${ROOT}/salmonpy/ase_calculator.py" "${ROOT}/salmonpy/dft.py" "${ROOT}/salmonpy/ase.py" "${ROOT}/salmonpy/bands.py" "${ROOT}/salmonpy/analysis.py" "${ROOT}/salmonpy/outputs.py" "${ROOT}/salmonpy/fdtd.py" "${ROOT}/salmonpy/crystal.py" "${ROOT}/salmonpy/sbe.py" "${ROOT}/salmonpy/tddft.py"
+  "${ROOT}/salmonpy/ASE_CALCULATOR.md" "${ROOT}/salmonpy/DFT.md" "${ROOT}/salmonpy/ASE.md" "${ROOT}/salmonpy/BANDS.md" "${ROOT}/salmonpy/WORKFLOWS.md" "${ROOT}/salmonpy/OUTPUTS.md" "${ROOT}/salmonpy/PACKAGING.md" "${ROOT}/salmonpy/README.md" "${ROOT}/salmonpy/README.en.md" "${ROOT}/salmonpy/AI_USAGE.md" "${ROOT}/salmonpy/INPUT_CONTRACT.md"
   DESTINATION salmonpy)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION salmonpy/licenses)
 

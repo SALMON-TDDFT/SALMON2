@@ -154,3 +154,17 @@ Native TB-mBJ does not need Libxc. Import-time compilation is not used.
 The optional full-runtime wheel and capability-selection flow in
 `docs/plans/2026-11-13-runtime-distribution-proposal.md` are proposals, not
 currently available install commands or APIs.
+
+## Current CI scope and independent distribution
+
+The worker CI now compares ordinary and interactive execution of the same audited
+current build. It no longer references an unavailable historical commit. This
+checks adapter equivalence, not historical solver regression. A historical
+comparison needs an independently obtainable, audited baseline artifact.
+Wheel CI installs ASE and plotting extras for the full suite, then separately
+checks the CPython 3.12 wheel in an environment without optional dependencies.
+These are configured checks; historical runs above do not certify the current revision.
+
+SALMONpy is intended for a separate repository, not a merge into the SALMON main
+repository. Native source provenance and full-executable compatibility must be
+preserved when moving it. The current source layout still includes SALMON sources.

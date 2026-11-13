@@ -33,3 +33,16 @@ class DoctorTests(unittest.TestCase):
             result = diagnose()
         self.assertEqual(result['native']['ld']['status'], 'unavailable')
         self.assertIn('missing runtime', result['native']['ld']['detail'])
+
+    def test_english_diagnosis_preserves_status_codes(self):
+        report = diagnose(lang='en')
+        self.assertEqual(report['external_salmon']['status'], 'not_configured')
+        self.assertTrue(all(s.isascii() for s in report['next_steps']))
+        with self.assertRaises(ValueError): diagnose(lang='xx')
+
+    def test_english_cli_help(self):
+        import subprocess, sys
+        result=subprocess.run([sys.executable,'-m','salmonpy.doctor','--lang','en','--help'],
+                              capture_output=True,text=True,check=True)
+        self.assertIn('External SALMON',result.stdout)
+        self.assertTrue(result.stdout.isascii())

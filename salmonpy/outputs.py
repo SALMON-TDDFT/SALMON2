@@ -103,25 +103,65 @@ def _member(root,name):
     return target
 
 
+def _validate_array(value,spec,name):
+    if list(value.shape)!=spec['shape'] or str(value.dtype)!=spec['dtype']:
+        raise ValueError('array shape or dtype differs from manifest: '+name)
+    if value.dtype.kind not in 'biufc' or not np.isfinite(value).all():
+        raise ValueError('finite numerical array required: '+name)
+
+
 @dataclass(frozen=True)
 class OutputArchive:
     directory: Path
     metadata: dict
     files: tuple
+    arrays: dict
 
     @classmethod
     def open(cls,directory,*,verify=True):
         root=Path(directory).expanduser().resolve()
         manifest=json.loads((root/'manifest.json').read_text())
         if manifest.get('schema')!='salmonpy.outputs/1': raise ValueError('unsupported output schema')
-        for entry in manifest['files']:
-            p=_member(root,entry['path'])
-            if verify and _digest(p)!=entry['sha256']: raise ValueError('output checksum mismatch: '+entry['path'])
-        return cls(root,manifest['metadata'],tuple(manifest['files']))
+        entries=manifest.get('files')
+        specs=manifest.get('arrays')
+        if not isinstance(entries,list) or not isinstance(specs,dict):
+            raise ValueError('archive file and array indexes are required')
+        names=[]
+        for entry in entries:
+            if not isinstance(entry,dict) or not isinstance(entry.get('path'),str):
+                raise ValueError('invalid archive file entry')
+            name=entry['path']
+            if name in names: raise ValueError('duplicate archive file entry: '+name)
+            names.append(name)
+            p=_member(root,name)
+            if not p.is_file(): raise ValueError('missing archive file: '+name)
+            if not isinstance(entry.get('sha256'),str) or not re.fullmatch('[0-9a-f]{64}',entry['sha256']):
+                raise ValueError('invalid archive checksum: '+name)
+            if verify and _digest(p)!=entry['sha256']: raise ValueError('output checksum mismatch: '+name)
+        if 'arrays.npz' not in names:
+            raise ValueError('arrays.npz must be indexed exactly once')
+        for name,spec in specs.items():
+            if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*',name) or not isinstance(spec,dict):
+                raise ValueError('invalid array index')
+            shape=spec.get('shape')
+            if not isinstance(shape,list) or any(type(n) is not int or n<0 for n in shape):
+                raise ValueError('invalid array shape: '+name)
+            if not isinstance(spec.get('dtype'),str): raise ValueError('invalid array dtype: '+name)
+        with np.load(root/'arrays.npz',allow_pickle=False) as data:
+            if len(data.files)!=len(specs) or set(data.files)!=set(specs):
+                raise ValueError('array names differ from manifest')
+            for name in data.files:
+                _validate_array(data[name],specs[name],name)
+        return cls(root,manifest['metadata'],tuple(entries),specs)
 
     def array(self,name):
-        with np.load(self.directory/'arrays.npz',allow_pickle=False) as data:
+        if name not in self.arrays: raise ValueError('array is not indexed: '+str(name))
+        path=_member(self.directory,'arrays.npz')
+        if 'arrays.npz' not in {entry['path'] for entry in self.files}:
+            raise ValueError('arrays.npz is not indexed')
+        with np.load(path,allow_pickle=False) as data:
             value=data[name].copy()
+        _validate_array(value,self.arrays[name],name)
         value.setflags(write=False)
         return value
 

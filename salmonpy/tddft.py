@@ -166,7 +166,31 @@ class TDDFTState:
         self._current=self._receive(0)
 
     def _send(self,text):
-        self._proc.stdin.write(text+'\n');self._proc.stdin.flush()
+        # A monitored writer works with pipes on Windows as well as POSIX.
+        # Capture this process: recovery must never redirect an old writer.
+        proc = self._proc
+        done = queue.Queue()
+        def write():
+            try:
+                proc.stdin.write(text+'\n')
+                proc.stdin.flush()
+                done.put(None)
+            except BaseException as error:
+                done.put(error)
+        writer = threading.Thread(target=write, daemon=True)
+        writer.start()
+        try:
+            error = done.get(timeout=self._timeout)
+        except queue.Empty as exc:
+            # Do not send CLOSE to a worker whose input pipe is already blocked.
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+            writer.join()
+            raise TimeoutError('SALMON TDDFT worker input timed out') from exc
+        writer.join()
+        if error is not None:
+            raise error
 
     def _receive(self,index):
         try: line=self._events.get(timeout=self._timeout)

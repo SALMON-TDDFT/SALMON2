@@ -39,3 +39,22 @@ class TDDFTLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'outside'):
                 _copy_bundle(root,root/'nested')
             self.assertFalse((root/'nested').exists())
+
+    def test_send_timeout_kills_nonreading_worker(self):
+        import subprocess, sys, time
+        from salmonpy.tddft import TDDFTState
+        state = object.__new__(TDDFTState)
+        state._closed = True
+        state._timeout = .1
+        state._proc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+        start = time.monotonic()
+        try:
+            with self.assertRaises(TimeoutError):
+                state._send('x' * 1000000)
+            self.assertLess(time.monotonic()-start, 3.)
+            self.assertIsNotNone(state._proc.poll())
+        finally:
+            if state._proc.poll() is None: state._proc.kill()
+            state._proc.wait()
+            state._proc.stdin.close()

@@ -45,6 +45,15 @@ jobs:
         uses: pypa/cibuildwheel@v3.4.0
         env:
           CIBW_ENVIRONMENT_PASS_LINUX: FC
+      - name: Verify without optional dependencies
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/no-extras"
+          if [ "$RUNNER_OS" = Windows ]; then py="$RUNNER_TEMP/no-extras/Scripts/python.exe"; else py="$RUNNER_TEMP/no-extras/bin/python"; fi
+          "$py" -m pip install numpy
+          "$py" -m pip install --no-deps --no-index --find-links wheelhouse salmonpy
+          cd "$RUNNER_TEMP"
+          "$py" "$GITHUB_WORKSPACE/tools/test_installed_ld.py" "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
           name: ld-wheels-${{ matrix.os }}

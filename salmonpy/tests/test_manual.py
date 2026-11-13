@@ -46,3 +46,10 @@ class ManualTest(unittest.TestCase):
             self.assertIn('dft', {t['id'] for t in result['task_catalog']})
         ids = {t['id'] for t in search('レーザーによる電子の動き')['tasks']}
         self.assertTrue({'sbe', 'tddft'}.issubset(ids))
+
+    def test_english_intents_and_language(self):
+        self.assertEqual(search('I want to run TDDFT')['tasks'][0]['id'], 'tddft')
+        self.assertEqual(search('What can I do?')['tasks'], [])
+        self.assertTrue({'sbe','tddft'} <= {t['id'] for t in search('laser induced current')['tasks']})
+        self.assertEqual(search('初めて', lang='en')['language'], 'en')
+        self.assertTrue(search('初めて', lang='en')['getting_started']['first_action'].isascii())
