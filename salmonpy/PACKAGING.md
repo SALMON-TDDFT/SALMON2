@@ -1,9 +1,13 @@
-# LD wheels
+# LD and SBE wheels
 
-The package uses scikit-build-core and a separate CMake project. Only the LD
-kernel, C ABI adapter and Python API are installed; the SALMON executable, MPI,
-BLAS and ground-state functionality are not required. Native libraries are built
+The package uses scikit-build-core and a separate CMake project. LD and velocity-gauge SBE kernels, C ABI adapters and Python APIs are installed.
+The SALMON executable and MPI are not required. SBE links system Accelerate on
+macOS and bundled OpenBLAS on Linux/Windows. Source builds on Linux/Windows
+require an LP64 OpenBLAS development installation. Native libraries are built
 for each platform, with the same Python interface.
+
+The table below records the previous 0.1.0a2 CI. The new 0.1.0a3 SBE build
+requires a fresh run before extending those claims.
 
 ## Target matrix
 

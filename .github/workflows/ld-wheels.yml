@@ -2,9 +2,9 @@ name: LD wheels
 on:
   workflow_dispatch:
   push:
-    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'src/maxwell/lorentz_drude.f90', '.github/workflows/ld-wheels.yml']
+    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'src/maxwell/lorentz_drude.f90', 'src/ssbe/**', '.github/workflows/ld-wheels.yml']
   pull_request:
-    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'src/maxwell/lorentz_drude.f90', '.github/workflows/ld-wheels.yml']
+    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'src/maxwell/lorentz_drude.f90', 'src/ssbe/**', '.github/workflows/ld-wheels.yml']
 permissions:
   contents: read
 jobs:
@@ -25,7 +25,7 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          install: mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-binutils
+          install: mingw-w64-ucrt-x86_64-gcc-fortran mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-openblas
           path-type: inherit
       - name: Export Windows toolchain
         if: runner.os == 'Windows'
@@ -58,7 +58,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install build
       - run: python tools/test_ld_packaging.py
-      - run: sudo apt-get update && sudo apt-get install -y gfortran
+      - run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev
       - run: python -m build
       - uses: actions/upload-artifact@v4
         with:

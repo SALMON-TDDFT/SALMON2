@@ -51,3 +51,10 @@ save/load API is implemented in this preview.
 Output selection must not alter the physical update. An observable requiring
 history or online accumulation must be enabled before that history begins;
 requesting it late must not imply that missing past samples can be reconstructed.
+
+SBE: eigenvalues, momentum/nonlocal matrices, weights, lattice, electron count,
+correction order and nonlocal-correction flag belong to immutable SBEInitialState.
+`new_state` fixes dt, time0 and initial A; only the next endpoint A is passed to
+`step`. Density, previous A and current belong to each individual state. Failed
+validation or nonfinite native output does not commit a step. Independent states
+never share mutable density matrices.

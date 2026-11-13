@@ -4,3 +4,6 @@ Binary wheels repaired with GNU Fortran may include libgfortran and libgcc
 GCC source releases: https://gcc.gnu.org/releases.html
 These libraries are separate from SALMON's Apache-2.0 source code.
 Inspect each platform's repair output for additional bundled dependencies.
+
+Linux and Windows SBE wheels also bundle OpenBLAS (BSD-3-Clause); see
+OpenBLAS-LICENSE.txt. macOS uses the system Accelerate framework.

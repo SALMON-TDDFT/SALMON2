@@ -118,3 +118,47 @@ The next extraction must retain native initial-state formats, MPI ownership,
 wavefunction/density-matrix histories, rotations, gauge and time alignment. DFT
 initial-state generation remains a separate stage; never advertise a fake solver
 or silently substitute LD for electronic dynamics.
+
+## Built-in velocity-gauge SBE
+
+```python
+import numpy as np
+from salmonpy.sbe import SBEInitialState
+from salmonpy.crystal import respond
+from salmonpy.fields import AcosPulse
+
+initial = SBEInitialState.from_salmon(
+    'gs_export', 'Si', bands=32, kpoints=512, electrons=32,
+    lattice=np.diag([10.26]*3), active_bands=32,
+    correction_order=0, nonlocal_correction=False)
+drive = AcosPulse(amplitude=0.01, omega=0.056, duration=100.).sample(
+    np.arange(2001)*0.05)
+result = respond(initial, drive)
+# Independent repeat: no excitation history is carried over.
+repeat = respond(initial, drive)
+a = initial.new_state(dt=0.05, initial_A=drive.values[0])
+b = initial.new_state(dt=0.05, initial_A=drive.values[0])
+J = a.step(drive.values[1])  # b remains at its initial state
+```
+
+Lattice vectors are columns, all quantities are in atomic units, and `A` is
+SALMON's `Ac=A/c`. `density` and `current` return immutable snapshots.
+The loader reads single-spin, orthogonal-format SALMON text exports with
+`esp[a.u.]`; eV and nonorthogonal-format files are rejected. Array construction
+accepts any right-handed lattice and uses `(band,k)` energies and
+`(band,band,xyz,k)` matrix elements. Occupations are exactly SALMON SBE's closed
+shell rule: two electrons in each of the first `electrons/2` bands, irrespective
+of the export's occupation column. `active_bands` defaults to all file bands.
+
+The shared Fortran kernel preserves four sequential Taylor terms at midpoint A,
+then computes endpoint J, including correction orders 0–3 and optional nonlocal
+velocity corrections. This is not an exactly unitary propagator; no adaptive
+step or norm correction is introduced. `dt` must be checked for convergence.
+The initial output is the physical current at initial A, not a forced zero.
+
+Python SBE is serial, with independent per-state arrays and no global native
+calculation state. Each step currently copies initial arrays into a temporary
+Fortran context; this first adapter prioritizes equivalence over large-system
+throughput. A single evolving state should not be stepped concurrently.
+The native TDDFT adapter, length gauge and restart/checkpoint loading remain
+unimplemented. This loader creates a fresh ground-state density, not a restart.

@@ -1,6 +1,7 @@
 """Common A-driven orchestration for user-provided crystalline backends.
 
-Built-in SALMON TDDFT/SBE adapters are not yet implemented. A is SALMON Ac=A/c;
+The built-in velocity-gauge SBE adapter is salmonpy.sbe.SBEInitialState.
+The TDDFT adapter is not yet implemented. A is SALMON Ac=A/c;
 J is macroscopic current density in common laboratory coordinates, atomic units.
 """
 from dataclasses import dataclass
