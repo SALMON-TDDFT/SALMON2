@@ -1,6 +1,6 @@
 # SALMONpy: AI向け利用・実装ガイド
 
-LD単独利用のPython試作APIを提供しています。実際の入口は `LorentzDrude` の `respond`、`new_state`、`permittivity` です。構築方法・単位・時間位置は README.md と examples/ld_response.py を参照してください。FDTD・TDDFT・SBEのPython APIは未実装です。存在しないAPIを例示しないでください。
+LD単独利用のPython試作APIを提供しています。実際の入口は `LorentzDrude` の `respond`、`new_state`、`permittivity` です。構築方法・単位・時間位置は README.md と examples/ld_response.py を参照してください。FDTDには外部実行ファイルを使うバッチ入口があります。WORKFLOWS.mdを参照してください。結晶は共通A駆動インターフェースのみで、内蔵TDDFT・SBE接続は未実装です。存在しないAPIを例示しないでください。
 
 ## 物質応答の境界
 
@@ -39,3 +39,5 @@ INPUT_CONTRACT.md に従います。材料係数はモデル作成時、dtと初
 ## 配布
 
 wheelの構築と修復・OS別検証は PACKAGING.md に従います。検証済み環境とCI設定のみの環境を混同しません。wheel利用者にはFortranコンパイラを要求せず、ソース構築時のみ要求します。
+
+構造・波形・解析の単独入口は WORKFLOWS.md に記載しています。FDTDの一ステップAPI、周期構造、斜め入射、TDDFT/SBEの実装済みバックエンドを捏造しないでください。共通Acos2パルスとFDTD側のCEP規約の差はアダプターで0.25周期補正します。

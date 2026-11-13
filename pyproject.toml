@@ -4,8 +4,8 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "salmonpy"
-version = "0.1.0a1"
-description = "Standalone SALMON Lorentz-Drude material response"
+version = "0.1.0a2"
+description = "SALMON material response, FDTD orchestration and optical workflow tools"
 readme = "salmonpy/README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
