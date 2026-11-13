@@ -2,7 +2,7 @@ name: TDDFT native worker
 on:
   workflow_dispatch:
   push:
-    paths: ['salmonpy/**', 'src/rt/**', 'src/io/inputoutput.f90', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
+    paths: ['salmonpy/**', 'src/**', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
 permissions:
   contents: read
 jobs:
