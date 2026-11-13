@@ -1,7 +1,9 @@
 # Next native crystalline adapters: ownership and exact timing
 
-Status: common Python A-only protocols and batch orchestrator implemented;
-SALMON-native adapters and initial-state file loaders not implemented.
+Status: common Python A-only protocols, native velocity-gauge SBE and a
+process-isolated PZ middlepoint TDDFT adapter are implemented. SBE text and TDDFT
+GS-bundle initial loaders are available. Reentrant TDDFT library contexts remain
+a future refactor; current state isolation includes globals by process ownership.
 
 SBE first adapter should expose the velocity-gauge path already present in
 src/ssbe/realtime_ssbe.f90. Its exact interval convention is:

@@ -178,6 +178,9 @@ relative paths for all assets and a plain `sysname`. The initial-state loader
 copies this bundle and records hashes. Each new state gets its own private copy;
 changes to the original files do not change the loaded initial state. Binary
 records are read by SALMON itself and retain its compiler/format constraints.
+GS and RT records share formats: the caller must supply a GS bundle; the loader
+does not infer ground-state convergence or automatically classify arbitrary
+wavefunctions as GS versus excited states.
 
 ```python
 from salmonpy.fdtd import SalmonExecutable

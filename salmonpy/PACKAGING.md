@@ -6,12 +6,15 @@ macOS and bundled OpenBLAS on Linux/Windows. Source builds on Linux/Windows
 require an LP64 OpenBLAS development installation. Native libraries are built
 for each platform, with the same Python interface.
 
-The table below is verified for 0.1.0a3 including native SBE.
-[CI run 43360481717](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43360481717)
-passed all four platform jobs and the source-distribution build at commit
-`bd9abdbe819a8a83c21d96d1f223205d6303f043`. Each of 20 installed wheels
-(CPython 3.10–3.14) passed 30 tests, including the pre-extraction SBE reference.
-Windows OpenBLAS discovery required CMAKE_PREFIX_PATH pointing to UCRT64.
+The table below is verified for 0.1.0a4, including the Python TDDFT adapter.
+[CI run 43363121675](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43363121675)
+passed all four platform jobs and the source-distribution build at `e837ebac`.
+Each of 20 installed wheels (CPython 3.10–3.14) passed 34 tests (680 total).
+Windows OpenBLAS discovery uses CMAKE_PREFIX_PATH pointing to UCRT64.
+
+The separately built TDDFT worker executable is not included in these wheels.
+Its native regression passed on Linux CI and local macOS arm64; Windows and
+Intel macOS native TDDFT execution are not claimed by wheel test results.
 
 ## Target matrix
 
