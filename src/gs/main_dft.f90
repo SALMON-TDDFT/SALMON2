@@ -51,7 +51,7 @@ use lcfo
 use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
 implicit none
 integer :: ix,iy,iz
-integer :: Miter,iatom,jj,nspin
+integer :: Miter,iatom,jj,nspin,force_status_unit
 real(8) :: sum1
 character(100) :: comment_line
 
@@ -198,6 +198,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
 
 if(theory=='dft_band')then
    call write_band(system,energy)
+   call write_band_status(iter_band_kpt,system,band)
 end if
 
 ! output the wavefunctions for next GS calculations
@@ -227,6 +228,15 @@ end if
    if(yn_jm=='n' .and. yn_dc=="n")then
      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
      if(comm_is_root(nproc_id_global))then
+        if (theory=='dft' .and. yn_opt=='n' .and. yn_md=='n') then
+           open(newunit=force_status_unit,file='gs_forces.dat',status='replace')
+           write(force_status_unit,'(a)') 'SALMONPY_FORCES_V1'
+           write(force_status_unit,*) natom
+           do iatom=1,natom
+              write(force_status_unit,'(3es26.17e3)') system%Force(:,iatom)
+           end do
+           close(force_status_unit)
+        end if
         write(*,*) "===== force ====="
         do iatom=1,natom
            select case(unit_system)

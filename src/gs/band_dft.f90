@@ -26,11 +26,13 @@ subroutine init_band_dft(system,band)
   implicit none
   type(s_dft_system), intent(inout)  :: system
   type(s_band_dft), intent(inout) ::band
+  integer :: i
 
   system%wtk(:) = 0.0d0
   
   call get_band_kpt( band%band_kpt, band%nref_band, system )
   
+  if (band%nref_band < 1 .or. band%nref_band > system%no) error stop "invalid nref_band"
   band%num_band_kpt = size( band%band_kpt, 2 )
   !write(*,*) "num_band_kpt=",band%num_band_kpt
 
@@ -42,7 +44,14 @@ subroutine init_band_dft(system,band)
      write(100,*) "Number_of_Bands:",system%no
      write(100,*) "Number_of_kpt_in_each_block:",system%nk
      write(100,*) "Number_of_blocks:",band%num_band_kpt/system%nk
-     close(100) 
+     close(100)
+     open(100,file='band_status.dat',status='replace')
+     write(100,'(a)') 'SALMONPY_BANDS_V1'
+     do i=1,3
+        write(100,'(3es24.16)') system%primitive_b(:,i)
+     end do
+     write(100,*) system%nk,band%nref_band
+     close(100)
  end if
 
 
@@ -59,13 +68,13 @@ subroutine calc_band_write(iter_band_kpt,system,band,info)
    band%check_conv_esp=.false.
    do ik=1,system%nk
       if ( info%ik_s <= ik .and. ik <= info%ik_e ) then
-         system%vec_k(:,ik) = matmul( system%primitive_b, band%band_kpt(:,iter_band_kpt+ik-1) )
+         system%vec_k(:,ik) = band%band_kpt(:,iter_band_kpt+ik-1)
       end if
    end do
   
    if( comm_is_root(nproc_id_global) ) then
       write(*,10) iter_band_kpt, iter_band_kpt+system%nk-1
-      write(*,20) "kpoints","kpoints in Cartesian"
+      write(*,20) "path Cartesian (1/bohr)","kpoints in Cartesian"
       open(100,file='band.dat',position="append")
       do ik=iter_band_kpt,iter_band_kpt+system%nk-1
          write(*,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
@@ -75,7 +84,7 @@ subroutine calc_band_write(iter_band_kpt,system,band,info)
    end if
 10 format(1x,"iter_band_kpt=",i3," to",i3)
 20 format(1x,3x,2x,a30,2x,a30)
-30 format(1x,i3,2x,3f10.5,2x,3f10.5)
+30 format(1x,i8,2x,3es24.16,2x,3es24.16)
 
 end subroutine calc_band_write
 
@@ -97,6 +106,19 @@ subroutine write_band(system,energy)
   end if
 
 end subroutine write_band
+
+subroutine write_band_status(first,system,band)
+  use structures, only: s_dft_system,s_band_dft
+  implicit none
+  integer,intent(in) :: first
+  type(s_dft_system),intent(in) :: system
+  type(s_band_dft),intent(in) :: band
+  if (comm_is_root(nproc_id_global)) then
+     open(100,file='band_status.dat',position='append')
+     write(100,*) first,system%nk,merge(1,0,all(band%check_conv_esp))
+     close(100)
+  end if
+end subroutine write_band_status
 
 subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label )
   use salmon_global, only: lattice_nml => lattice &
@@ -131,13 +153,15 @@ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label
   end if
   !read(unit,*) num_of_segments
   num_of_segments=num_of_segments_nml
+  if (num_of_segments < 1 .or. num_of_segments >= size(kpt_nml,2)) error stop "invalid band segments"
   allocate( ndiv_segment(num_of_segments) ); ndiv_segment=0
   allocate( kpt(3,num_of_segments+1)      ); kpt=0.0d0
   allocate( kpt_label(num_of_segments+1)  ); kpt_label=""
   !read(unit,*) ndiv_segment(:)
   ndiv_segment=ndiv_segment_nml(1:num_of_segments)
-  kpt=kpt_nml(:,1:num_of_segments)
-  kpt_label=kpt_label_nml(1:num_of_segments)
+  if (any(ndiv_segment < 1)) error stop "band subdivisions must be positive"
+  kpt=kpt_nml(:,1:num_of_segments+1)
+  kpt_label=kpt_label_nml(1:num_of_segments+1)
   !call check_data_format( unit, iformat )
   !select case( iformat )
   !case( 0 )
@@ -169,7 +193,40 @@ subroutine check_data_format( unit, iformat )
 9 iformat=0 ! 3 data
 end subroutine check_data_format
 
+! Explicit fractional k points are supplied by external path generators.
+! No interpolation or symmetry transformation is applied; only endpoint padding.
+subroutine read_explicit_band_kpt(filename,system,kpt)
+  use structures, only: s_dft_system
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  character(*),intent(in) :: filename
+  type(s_dft_system),intent(in) :: system
+  real(8),allocatable,intent(out) :: kpt(:,:)
+  real(8) :: fractional(3)
+  integer :: unit,npoints,nstored,i,j,ios
+  open(newunit=unit,file=filename,status='old',action='read',iostat=ios)
+  if (ios /= 0) error stop 'cannot open explicit band k points'
+  read(unit,*,iostat=ios) npoints
+  if (ios /= 0) error stop 'invalid explicit band point count'
+  if (npoints < 2 .or. npoints > 1000000) error stop 'explicit band point count out of range'
+  nstored=((npoints+system%nk-1)/system%nk)*system%nk
+  allocate(kpt(3,nstored))
+  do i=1,npoints
+     read(unit,*,iostat=ios) fractional
+     if (ios /= 0) error stop 'incomplete explicit band k points'
+     do j=1,3
+        if (.not.ieee_is_finite(fractional(j))) error stop 'nonfinite explicit band k point'
+     end do
+     kpt(:,i)=matmul(system%primitive_b,fractional)
+  end do
+  close(unit)
+  do i=npoints+1,nstored
+     kpt(:,i)=kpt(:,npoints)
+  end do
+end subroutine read_explicit_band_kpt
+
 subroutine get_band_kpt( kpt, nref_band, system )
+   use salmon_global, only: file_band_kpoints, input_nref_band => nref_band
    use structures, only: s_dft_system
    use parallelization, only: nproc_id_global
    use communication, only: comm_is_root
@@ -189,6 +246,12 @@ subroutine get_band_kpt( kpt, nref_band, system )
 
    if ( comm_is_root(nproc_id_global) ) then
       write(*,'(a60)') repeat("-",41)//"get_band_kpt(start)"
+   end if
+
+   if (file_band_kpoints /= 'none') then
+      nref_band=input_nref_band
+      call read_explicit_band_kpt(file_band_kpoints,system,kpt)
+      return
    end if
 
    pi=acos(-1.0d0)
@@ -285,7 +348,7 @@ subroutine get_band_kpt( kpt, nref_band, system )
    end if
 
    nk=system%nk
-   nnk=sum( ndiv_segment(1:num_of_segments) )
+   nnk=sum( ndiv_segment(1:num_of_segments) )+1
    if ( mod(nnk,nk) /= 0 ) nnk=nnk-mod(nnk,nk)+nk
 
    allocate( kpt(3,nnk) ); kpt=0.0d0
@@ -307,7 +370,7 @@ subroutine get_band_kpt( kpt, nref_band, system )
    end if
    if ( i < nnk ) then
       do ik=i+1,nnk
-         kpt(:,ik)=kpt(:,ik-1)+dk(:)
+         kpt(:,ik)=kpt(:,i) ! padding repeats the endpoint
       end do
    end if
 

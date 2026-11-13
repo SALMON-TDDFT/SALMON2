@@ -58,7 +58,7 @@ integer :: ilevel_print !=3:print-all
                         !=2:print-only energy & convergence
                         !=1:print-minimum
                         !=0:no-print
-integer :: iter,Miter,iob,p1,p2,p5
+integer :: iter,Miter,iob,p1,p2,p5,gs_status_unit
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
 
@@ -409,6 +409,18 @@ if(.not.flag_conv) then
    endif
 endif
 endif
+
+! Report the existing native convergence flag without changing the iteration order.
+if (theory=='dft' .and. yn_opt=='n' .and. yn_md=='n' .and. yn_dc=='n') then
+   if (comm_is_root(nproc_id_global)) then
+      open(newunit=gs_status_unit,file='gs_status.dat',status='replace')
+      write(gs_status_unit,'(a)') 'SALMONPY_GS_V1'
+      write(gs_status_unit,*) merge(1,0,flag_conv),Miter
+      write(gs_status_unit,'(3es26.17e3)') sum1,threshold,energy%E_tot
+      write(gs_status_unit,'(a)') trim(convergence)
+      close(gs_status_unit)
+   end if
+end if
 
 contains
 

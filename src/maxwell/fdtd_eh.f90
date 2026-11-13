@@ -15,11 +15,12 @@
 !
 !-----------------------------------------------------------------------------------------
 module fdtd_eh
+  use lorentz_drude, only: s_ld_state, ld_allocate, ld_coefficients, ld_store_old, ld_update, ld_finalize
+  use fdtd_eh_kernel, only: eh_fd
   implicit none
   
   type ls_fdtd_eh
     logical             :: flag_pml        !pml  option: work for a_bc = 'pml'
-    logical             :: flag_ld         !LD   option: work for num_ld > 0
     logical             :: flag_lr         !LR   option: work for ae_shape1 = 'impulse'or ae_shape2 = 'impulse'
     logical             :: flag_obs        !obs. option: work for obs_num_em > 0
     logical             :: flag_ase        !ase  option: work for ase_num_em > 0
@@ -93,30 +94,6 @@ module fdtd_eh
     real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)     !e for save
     real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)     !h for save
     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)  !coeff. for general curr. dens.
-    integer             :: num_ld                                  !LD: number of LD media
-    integer             :: max_pole_num_ld                         !LD: maximum of pole_num_ld
-    integer,allocatable :: media_ld(:)                             !LD: imedia number for LD model(num_ld)
-    real(8),allocatable ::   rjx_ld(:,:,:,:),rjx_old_ld(:,:,:,:),& !LD: poparization current density J
-                             rjy_ld(:,:,:,:),rjy_old_ld(:,:,:,:),& !    and its stock
-                             rjz_ld(:,:,:,:),rjz_old_ld(:,:,:,:)   !    (x,y,z,max_pole_num_ld)
-    real(8),allocatable ::    px_ld(:,:,:,:),&                     !LD: poparization vector P
-                              py_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
-                              pz_ld(:,:,:,:)                       !
-    real(8),allocatable :: c1_jx_ld(:,:,:,:),&                     !LD: coefficient for Jx
-                           c2_jx_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
-                           c3_jx_ld(:,:,:,:)                       !
-    real(8),allocatable :: c1_jy_ld(:,:,:,:),&                     !LD: coefficient for Jy
-                           c2_jy_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
-                           c3_jy_ld(:,:,:,:)                       !
-    real(8),allocatable :: c1_jz_ld(:,:,:,:),&                     !LD: coefficient for Jz
-                           c2_jz_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
-                           c3_jz_ld(:,:,:,:)                       !
-    real(8),allocatable :: rjx_fdtd_ld(:,:,:),&                    !LD: J substituted into FDTD
-                           rjy_fdtd_ld(:,:,:),&                    !    (x,y,z)
-                           rjz_fdtd_ld(:,:,:)                      !
-    real(8),allocatable :: ex_old_ld(:,:,:),&                      !LD: old E
-                           ey_old_ld(:,:,:),&                      !    (x,y,z)
-                           ez_old_ld(:,:,:)                        !
     real(8),allocatable :: rmedia(:,:,:)                           !Material information for tmp.
     real(8),allocatable :: time_lr(:)                              !LR: time
     real(8),allocatable :: fr_lr(:,:)                              !LR: Re[f]
@@ -193,7 +170,7 @@ contains
   
   !===========================================================================================
   != initialize eh-FDTD ======================================================================
-  subroutine eh_init(fs,fe)
+  subroutine eh_init(fs,fe,ld)
     use salmon_global,   only: al_em,dl_em,num_rgrid_em,at_em,dt_em,nt_em,boundary_em,yn_periodic,         &
                                base_directory,media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,   &
                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
@@ -224,6 +201,7 @@ contains
                                txtfile_copy_em
     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
     implicit none
+    type(s_ld_state), intent(inout) :: ld
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer             :: nsg_p          !yn_restart='y': nproc_size_global used in the previous calc.
@@ -252,17 +230,17 @@ contains
     fe%flag_pml = .false.
     
     !LD option: calculate Lorentz-Drude model
-    fe%num_ld=0
+    ld%num_ld=0
     do ii=0,media_num
       select case(media_type(ii))
       case('lorentz-drude')
-        fe%num_ld=fe%num_ld+1
+        ld%num_ld=ld%num_ld+1
       end select
     end do
-    if(fe%num_ld>0) then
-      fe%flag_ld = .true.
+    if(ld%num_ld>0) then
+      ld%enabled = .true.
     else
-      fe%flag_ld = .false.
+      ld%enabled = .false.
     end if
     
     !LR option: execute linear response calculation under the dipole approximation
@@ -691,17 +669,17 @@ contains
     end if
     
     !*** prepare Lorentz-Drude ********************************************************************************!
-    if(fe%flag_ld) then
+    if(ld%enabled) then
       !set counter, make media_ld, make max_pole_num_ld, and check pole_num_ld & other conditions
-      icount_ld=1; fe%max_pole_num_ld=0;
-      allocate(fe%media_ld(fe%num_ld))
-      fe%media_ld(:)=0;
+      icount_ld=1; ld%max_pole_num_ld=0;
+      allocate(ld%media_ld(ld%num_ld))
+      ld%media_ld(:)=0;
       do ii=0,media_num
         select case(media_type(ii))
         case('lorentz-drude')
-          fe%media_ld(icount_ld) = ii
+          ld%media_ld(icount_ld) = ii
           icount_ld              = icount_ld+1
-          if(fe%max_pole_num_ld<pole_num_ld(ii)) fe%max_pole_num_ld=pole_num_ld(ii)
+          if(ld%max_pole_num_ld<pole_num_ld(ii)) ld%max_pole_num_ld=pole_num_ld(ii)
           if(pole_num_ld(ii)<=0) then
             call stop_em('For media_type = lorentz-drude, pole_num_ld must be equal to or larger than 1.')
           end if
@@ -716,55 +694,15 @@ contains
       icount_ld = 1
       
       !set temporal LD coefficients (will be used later)
-      allocate(tmp_c0_ld(fe%max_pole_num_ld,fe%num_ld),tmp_c1_ld(fe%max_pole_num_ld,fe%num_ld),&
-               tmp_c2_ld(fe%max_pole_num_ld,fe%num_ld),tmp_c3_ld(fe%max_pole_num_ld,fe%num_ld),&
-               tmp_c4_ld(                   fe%num_ld),tmp_c5_ld(                   fe%num_ld))
+      allocate(tmp_c0_ld(ld%max_pole_num_ld,ld%num_ld),tmp_c1_ld(ld%max_pole_num_ld,ld%num_ld),&
+               tmp_c2_ld(ld%max_pole_num_ld,ld%num_ld),tmp_c3_ld(ld%max_pole_num_ld,ld%num_ld),&
+               tmp_c4_ld(                   ld%num_ld),tmp_c5_ld(                   ld%num_ld))
       tmp_c0_ld(:,:) = 0.0d0; tmp_c1_ld(:,:) = 0.0d0; tmp_c2_ld(:,:) = 0.0d0; tmp_c3_ld(:,:) = 0.0d0;
       tmp_c4_ld(  :) = 0.0d0; tmp_c5_ld(  :) = 0.0d0;
-      do ii = 1,fe%num_ld
-        do ij = 1,pole_num_ld(fe%media_ld(ii))
-          tmp_c0_ld(ij,ii) = 1.0d0                                          &
-                             + ( gamma_ld(fe%media_ld(ii),ij)*dt_em/2.0d0 ) &
-                             + ((omega_ld(fe%media_ld(ii),ij)*dt_em)**2.0d0)/4.0d0
-          tmp_c1_ld(ij,ii) = 1.0d0                                          &
-                             - ( gamma_ld(fe%media_ld(ii),ij)*dt_em/2.0d0 ) &
-                             - ((omega_ld(fe%media_ld(ii),ij)*dt_em)**2.0d0)/4.0d0
-          tmp_c1_ld(ij,ii) = tmp_c1_ld(ij,ii) / tmp_c0_ld(ij,ii)
-          tmp_c2_ld(ij,ii) = f_ld(fe%media_ld(ii),ij)*(omega_p_ld(fe%media_ld(ii))**2.0d0)*dt_em &
-                             /(8.0d0*pi*tmp_c0_ld(ij,ii))
-          tmp_c3_ld(ij,ii) = (omega_ld(fe%media_ld(ii),ij)**2.0d0)*dt_em/tmp_c0_ld(ij,ii)
-          tmp_c4_ld(ii) = tmp_c4_ld(ii) + tmp_c2_ld(ij,ii)
-          tmp_c5_ld(ii) = tmp_c5_ld(ii) + tmp_c2_ld(ij,ii)
-        end do
-        tmp_c4_ld(ii) = 1.0d0 + 2.0d0*pi*dt_em*tmp_c4_ld(ii)
-        tmp_c5_ld(ii) = 1.0d0 - 2.0d0*pi*dt_em*tmp_c5_ld(ii)
-      end do
-      
-      !allocate LD variables
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_ld     )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_ld     )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_ld     )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_old_ld )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_old_ld )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_old_ld )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%px_ld      )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%py_ld      )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%pz_ld      )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jx_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jx_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jx_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jy_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jy_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jy_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jz_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jz_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jz_ld   )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjx_fdtd_ld)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjy_fdtd_ld)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjz_fdtd_ld)
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ex_old_ld  )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ey_old_ld  )
-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ez_old_ld  )
+      call ld_coefficients(ld%media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
+                           tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld)
+      ! LD owns its allocations and zero initialization, including halo values.
+      call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array)
     end if
     
     !*** set fdtd coeffient and light speed for media ID = 0 **************************************************!
@@ -1555,44 +1493,44 @@ contains
       end if
       
       !set initial current density
-      if(fe%flag_ld) then
-        do ii = 1,fe%num_ld
-        do ij = 1,pole_num_ld(fe%media_ld(ii))
+      if(ld%enabled) then
+        do ii = 1,ld%num_ld
+        do ij = 1,pole_num_ld(ld%media_ld(ii))
         do iz=fs%mg%is(3),fs%mg%ie(3)
         do iy=fs%mg%is(2),fs%mg%ie(2)
         do ix=fs%mg%is(1),fs%mg%ie(1)
-          if(fe%c1_jx_ld(ix,iy,iz,ij)>0.0d0) then
-            fe%rjx_ld(ix,iy,iz,ij)   = fe%rjx_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
+          if(ld%c1_jx_ld(ix,iy,iz,ij)>0.0d0) then
+            ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
+                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_x1
-            fe%rjx_ld(ix,iy,iz,ij)   = fe%rjx_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
+            ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
+                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_x2
-            fe%rjx_fdtd_ld(ix,iy,iz) = fe%rjx_fdtd_ld(ix,iy,iz)                                          &
-                                      +0.5d0*( (1.0d0+fe%c1_jx_ld(ix,iy,iz,ij)) * fe%rjx_ld(ix,iy,iz,ij) &
-                                                     -fe%c3_jx_ld(ix,iy,iz,ij)  * fe%px_ld(ix,iy,iz,ij) )
+            ld%rjx_fdtd_ld(ix,iy,iz) = ld%rjx_fdtd_ld(ix,iy,iz)                                          &
+                                      +0.5d0*( (1.0d0+ld%c1_jx_ld(ix,iy,iz,ij)) * ld%rjx_ld(ix,iy,iz,ij) &
+                                                     -ld%c3_jx_ld(ix,iy,iz,ij)  * ld%px_ld(ix,iy,iz,ij) )
           end if
-          if(fe%c1_jy_ld(ix,iy,iz,ij)>0.0d0) then
-            fe%rjy_ld(ix,iy,iz,ij)   = fe%rjy_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
+          if(ld%c1_jy_ld(ix,iy,iz,ij)>0.0d0) then
+            ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
+                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_y1
-            fe%rjy_ld(ix,iy,iz,ij)   = fe%rjy_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
+            ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
+                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_y2
-            fe%rjy_fdtd_ld(ix,iy,iz) = fe%rjy_fdtd_ld(ix,iy,iz)                                          &
-                                      +0.5d0*( (1.0d0+fe%c1_jy_ld(ix,iy,iz,ij)) * fe%rjy_ld(ix,iy,iz,ij) &
-                                                     -fe%c3_jy_ld(ix,iy,iz,ij)  * fe%py_ld(ix,iy,iz,ij) )
+            ld%rjy_fdtd_ld(ix,iy,iz) = ld%rjy_fdtd_ld(ix,iy,iz)                                          &
+                                      +0.5d0*( (1.0d0+ld%c1_jy_ld(ix,iy,iz,ij)) * ld%rjy_ld(ix,iy,iz,ij) &
+                                                     -ld%c3_jy_ld(ix,iy,iz,ij)  * ld%py_ld(ix,iy,iz,ij) )
           end if
-          if(fe%c1_jz_ld(ix,iy,iz,ij)>0.0d0) then
-            fe%rjz_ld(ix,iy,iz,ij)   = fe%rjz_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
+          if(ld%c1_jz_ld(ix,iy,iz,ij)>0.0d0) then
+            ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
+                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_z1
-            fe%rjz_ld(ix,iy,iz,ij)   = fe%rjz_ld(ix,iy,iz,ij)                                        &
-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
+            ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
+                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
                                       /(4.0d0*pi)*tmp_z2
-            fe%rjz_fdtd_ld(ix,iy,iz) = fe%rjz_fdtd_ld(ix,iy,iz)                                          &
-                                      +0.5d0*( (1.0d0+fe%c1_jz_ld(ix,iy,iz,ij)) * fe%rjz_ld(ix,iy,iz,ij) &
-                                                     -fe%c3_jz_ld(ix,iy,iz,ij)  * fe%pz_ld(ix,iy,iz,ij) )
+            ld%rjz_fdtd_ld(ix,iy,iz) = ld%rjz_fdtd_ld(ix,iy,iz)                                          &
+                                      +0.5d0*( (1.0d0+ld%c1_jz_ld(ix,iy,iz,ij)) * ld%rjz_ld(ix,iy,iz,ij) &
+                                                     -ld%c3_jz_ld(ix,iy,iz,ij)  * ld%pz_ld(ix,iy,iz,ij) )
           end if
         end do
         end do
@@ -2208,31 +2146,31 @@ contains
       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_y',&
                           r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
       call eh_sendrecv(fs,fe,'e'); call eh_sendrecv(fs,fe,'h');
-      if(fe%flag_ld) then                     
+      if(ld%enabled) then
         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
         is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)       ;
         is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3)       ;
-        is5(4) = 1          ; ie5(4) = fe%max_pole_num_ld;
+        is5(4) = 1          ; ie5(4) = ld%max_pole_num_ld;
         is5(5) = 1          ; ie5(5) = 1                 ;
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_ld',&
-                            r4d=fe%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d=ld%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_ld',&
-                            r4d=fe%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d=ld%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_ld',&
-                            r4d=fe%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d=ld%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','px_ld' ,&
-                            r4d= fe%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d= ld%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','py_ld' ,&
-                            r4d= fe%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d= ld%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','pz_ld' ,&
-                            r4d= fe%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                            r4d= ld%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
         is5(4) = 1; ie5(4) = 1;
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_fdtd_ld',&
-                            r3d=fe%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                            r3d=ld%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_fdtd_ld',&
-                            r3d=fe%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                            r3d=ld%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_fdtd_ld',&
-                            r3d=fe%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                            r3d=ld%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
       end if
       if(fe%flag_lr) then
         is5(1) = 1; ie5(1) = nt_em;
@@ -2640,9 +2578,9 @@ contains
               select case(media_type(ii))
               case('lorentz-drude')
                 do ij=1,pole_num_ld(ii)
-                  fe%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
-                  fe%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
-                  fe%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+                  ld%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
+                  ld%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+                  ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                 end do
               end select
             elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
@@ -2650,8 +2588,8 @@ contains
               case('pec')
                 c1_e_mid=0.0d0; c2_e_y_mid=0.0d0; c2_e_z_mid=0.0d0; c2_j_mid=0.0d0;
               case('lorentz-drude')
-                do ij=1,fe%num_ld
-                  if(fe%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
+                do ij=1,ld%num_ld
+                  if(ld%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
                     i_ld_tmp = ij
                   end if
                 end do
@@ -2660,9 +2598,9 @@ contains
                 c2_e_z_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(3)
                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
                 do ij=1,pole_num_ld(fs%imedia(ix+1,iy,iz))
-                  fe%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
-                  fe%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
-                  fe%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
+                  ld%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+                  ld%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+                  ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
                 end do
               case default
                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
@@ -2691,9 +2629,9 @@ contains
               select case(media_type(ii))
               case('lorentz-drude')
                 do ij=1,pole_num_ld(ii)
-                  fe%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
-                  fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
-                  fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+                  ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
+                  ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+                  ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                 end do
               end select
             elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
@@ -2701,8 +2639,8 @@ contains
               case('pec')
                 c1_e_mid=0.0d0; c2_e_z_mid=0.0d0; c2_e_x_mid=0.0d0; c2_j_mid=0.0d0;
               case('lorentz-drude')
-                do ij=1,fe%num_ld
-                  if(fe%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
+                do ij=1,ld%num_ld
+                  if(ld%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
                     i_ld_tmp = ij
                   end if
                 end do
@@ -2711,9 +2649,9 @@ contains
                 c2_e_x_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(1)
                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
                 do ij=1,pole_num_ld(fs%imedia(ix,iy+1,iz))
-                  fe%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
-                  fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
-                  fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
+                  ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+                  ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+                  ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
                 end do
               case default
                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
@@ -2742,9 +2680,9 @@ contains
               select case(media_type(ii))
               case('lorentz-drude')
                 do ij=1,pole_num_ld(ii)
-                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
-                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
-                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+                  ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
+                  ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+                  ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
                 end do
               end select
             elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
@@ -2752,8 +2690,8 @@ contains
               case('pec')
                 c1_e_mid=0.0d0; c2_e_x_mid=0.0d0; c2_e_y_mid=0.0d0; c2_j_mid=0.0d0;
               case('lorentz-drude')
-                do ij=1,fe%num_ld
-                  if(fe%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
+                do ij=1,ld%num_ld
+                  if(ld%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
                     i_ld_tmp = ij
                   end if
                 end do
@@ -2762,9 +2700,9 @@ contains
                 c2_e_y_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(2)
                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
                 do ij=1,pole_num_ld(fs%imedia(ix,iy,iz+1))
-                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
-                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
-                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
+                  ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+                  ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+                  ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
                 end do
               case default
                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
@@ -3202,7 +3140,7 @@ contains
   
   !===========================================================================================
   != calculate eh-FDTD =======================================================================
-  subroutine eh_calc(fs,fe)
+  subroutine eh_calc(fs,fe,ld)
     use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
@@ -3216,6 +3154,7 @@ contains
     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
     implicit none
+    type(s_ld_state), intent(inout) :: ld
     type(s_fdtd_system),intent(inout) :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     integer            :: iter,ii,ix,iy,iz
@@ -3239,7 +3178,8 @@ contains
       end if
       
       !sotre old variables
-      call eh_store_old
+      call ld_store_old(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
+        fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
       
       !update e
       call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
@@ -3264,11 +3204,12 @@ contains
                                                  fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
       end if
-      if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
+      if(ld%enabled) call eh_add_curr(ld%rjx_fdtd_ld(:,:,:),ld%rjy_fdtd_ld(:,:,:),ld%rjz_fdtd_ld(:,:,:))
       call eh_sendrecv(fs,fe,'e')
       
       !update lorentz-drude
-      if(fe%flag_ld) call eh_update_ld
+      if(ld%enabled) call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
+        fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
       
       !calculate linear response
       if(fe%flag_lr) call eh_calc_lr
@@ -3466,31 +3407,31 @@ contains
           call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_x',r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
           call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_x',r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
           call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_y',r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
-          if(fe%flag_ld) then                     
+          if(ld%enabled) then
             is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
             is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)       ;
             is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3)       ;
-            is5(4) = 1          ; ie5(4) = fe%max_pole_num_ld;
+            is5(4) = 1          ; ie5(4) = ld%max_pole_num_ld;
             is5(5) = 1          ; ie5(5) = 1                 ;
             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_ld',&
-                                 r4d=fe%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                                 r4d=ld%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_ld',&
-                                 r4d=fe%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                                 r4d=ld%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_ld',&
-                                 r4d=fe%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                                 r4d=ld%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','px_ld' ,&
-                                 r4d= fe%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                                 r4d= ld%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','py_ld' ,&
-                                 r4d= fe%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                                 r4d= ld%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','pz_ld' ,&
-                                 r4d= fe%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+                                 r4d= ld%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
             is5(4) = 1; ie5(4) = 1;
             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_fdtd_ld',&
-                                 r3d=fe%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                                 r3d=ld%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_fdtd_ld',&
-                                 r3d=fe%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                                 r3d=ld%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_fdtd_ld',&
-                                 r3d=fe%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+                                 r3d=ld%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
           end if
           if(fe%flag_lr) then
             is5(1) = 1; ie5(1) = nt_em;
@@ -3759,104 +3700,11 @@ contains
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ store old variables +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine eh_store_old
-      implicit none
-      
-      if(fe%flag_ld) then
-!$omp parallel
-!$omp do private(ii,ix,iy,iz) collapse(3)
-        do ii=1,fe%max_pole_num_ld
-        do iz=fs%mg%is(3),fs%mg%ie(3)
-        do iy=fs%mg%is(2),fs%mg%ie(2)
-        do ix=fs%mg%is(1),fs%mg%ie(1)
-          fe%rjx_old_ld(ix,iy,iz,ii) = fe%rjx_ld(ix,iy,iz,ii)
-          fe%rjy_old_ld(ix,iy,iz,ii) = fe%rjy_ld(ix,iy,iz,ii)
-          fe%rjz_old_ld(ix,iy,iz,ii) = fe%rjz_ld(ix,iy,iz,ii)
-        end do
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=fs%mg%is(3),fs%mg%ie(3)
-        do iy=fs%mg%is(2),fs%mg%ie(2)
-        do ix=fs%mg%is(1),fs%mg%ie(1)
-          fe%ex_old_ld(ix,iy,iz) = fe%ex_y(ix,iy,iz) + fe%ex_z(ix,iy,iz);
-          fe%ey_old_ld(ix,iy,iz) = fe%ey_z(ix,iy,iz) + fe%ey_x(ix,iy,iz);
-          fe%ez_old_ld(ix,iy,iz) = fe%ez_x(ix,iy,iz) + fe%ez_y(ix,iy,iz);
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      end if
-      
-      return
-    end subroutine eh_store_old
+
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ update lorentz-drude ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    subroutine eh_update_ld
-      implicit none
-      
-      !initialize
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-      do iz=fs%mg%is(3),fs%mg%ie(3)
-      do iy=fs%mg%is(2),fs%mg%ie(2)
-      do ix=fs%mg%is(1),fs%mg%ie(1)
-        fe%rjx_fdtd_ld(ix,iy,iz)=0.0d0; fe%rjy_fdtd_ld(ix,iy,iz)=0.0d0; fe%rjz_fdtd_ld(ix,iy,iz)=0.0d0;
-      end do
-      end do
-      end do
-!$omp end do
-!$omp end parallel
-      
-      !update LD polarization current & vector and FDTD current
-      do ii=1,fe%max_pole_num_ld
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=fs%mg%is(3),fs%mg%ie(3)
-        do iy=fs%mg%is(2),fs%mg%ie(2)
-        do ix=fs%mg%is(1),fs%mg%ie(1)
-          fe%rjx_ld(ix,iy,iz,ii) = fe%c1_jx_ld(ix,iy,iz,ii)*fe%rjx_old_ld(ix,iy,iz,ii)            &
-                                  +fe%c2_jx_ld(ix,iy,iz,ii)*( fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz) &
-                                                             +fe%ex_old_ld(ix,iy,iz) )            &
-                                  -fe%c3_jx_ld(ix,iy,iz,ii)*fe%px_ld(ix,iy,iz,ii)
-          fe%rjy_ld(ix,iy,iz,ii) = fe%c1_jy_ld(ix,iy,iz,ii)*fe%rjy_old_ld(ix,iy,iz,ii)            &
-                                  +fe%c2_jy_ld(ix,iy,iz,ii)*( fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz) &
-                                                             +fe%ey_old_ld(ix,iy,iz) )            &
-                                  -fe%c3_jy_ld(ix,iy,iz,ii)*fe%py_ld(ix,iy,iz,ii)
-          fe%rjz_ld(ix,iy,iz,ii) = fe%c1_jz_ld(ix,iy,iz,ii)*fe%rjz_old_ld(ix,iy,iz,ii)            &
-                                  +fe%c2_jz_ld(ix,iy,iz,ii)*( fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz) &
-                                                             +fe%ez_old_ld(ix,iy,iz) )            &
-                                  -fe%c3_jz_ld(ix,iy,iz,ii)*fe%pz_ld(ix,iy,iz,ii)
-          fe%px_ld(ix,iy,iz,ii)  = fe%px_ld(ix,iy,iz,ii) &
-                                  +0.5d0*dt_em*( fe%rjx_ld(ix,iy,iz,ii) + fe%rjx_old_ld(ix,iy,iz,ii) )
-          fe%py_ld(ix,iy,iz,ii)  = fe%py_ld(ix,iy,iz,ii) &
-                                  +0.5d0*dt_em*( fe%rjy_ld(ix,iy,iz,ii) + fe%rjy_old_ld(ix,iy,iz,ii) )
-          fe%pz_ld(ix,iy,iz,ii)  = fe%pz_ld(ix,iy,iz,ii) &
-                                  +0.5d0*dt_em*( fe%rjz_ld(ix,iy,iz,ii) + fe%rjz_old_ld(ix,iy,iz,ii) )
-          fe%rjx_fdtd_ld(ix,iy,iz)  = fe%rjx_fdtd_ld(ix,iy,iz)                                          &
-                                     +0.5d0*( (1.0d0+fe%c1_jx_ld(ix,iy,iz,ii)) * fe%rjx_ld(ix,iy,iz,ii) &
-                                                    -fe%c3_jx_ld(ix,iy,iz,ii)  * fe%px_ld(ix,iy,iz,ii) )
-          fe%rjy_fdtd_ld(ix,iy,iz)  = fe%rjy_fdtd_ld(ix,iy,iz)                                          &
-                                     +0.5d0*( (1.0d0+fe%c1_jy_ld(ix,iy,iz,ii)) * fe%rjy_ld(ix,iy,iz,ii) &
-                                                    -fe%c3_jy_ld(ix,iy,iz,ii)  * fe%py_ld(ix,iy,iz,ii) )
-          fe%rjz_fdtd_ld(ix,iy,iz)  = fe%rjz_fdtd_ld(ix,iy,iz)                                          &
-                                     +0.5d0*( (1.0d0+fe%c1_jz_ld(ix,iy,iz,ii)) * fe%rjz_ld(ix,iy,iz,ii) &
-                                                    -fe%c3_jz_ld(ix,iy,iz,ii)  * fe%pz_ld(ix,iy,iz,ii) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      end do
-      
-      return
-    end subroutine eh_update_ld
+
     
     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     !+ calculate linear response +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -3871,16 +3719,16 @@ contains
       if(yn_periodic=='n') then
         !calculate dipolemoment
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
-        if(fe%flag_ld) then
-          do ii=1,fe%max_pole_num_ld
+        if(ld%enabled) then
+          do ii=1,ld%max_pole_num_ld
 !$omp parallel
 !$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr )
             do iz=fs%mg%is(3),fs%mg%ie(3)
             do iy=fs%mg%is(2),fs%mg%ie(2)
             do ix=fs%mg%is(1),fs%mg%ie(1)
-              sum_lr(1) = sum_lr(1) + fe%px_ld(ix,iy,iz,ii)
-              sum_lr(2) = sum_lr(2) + fe%py_ld(ix,iy,iz,ii)
-              sum_lr(3) = sum_lr(3) + fe%pz_ld(ix,iy,iz,ii)
+              sum_lr(1) = sum_lr(1) + ld%px_ld(ix,iy,iz,ii)
+              sum_lr(2) = sum_lr(2) + ld%py_ld(ix,iy,iz,ii)
+              sum_lr(3) = sum_lr(3) + ld%pz_ld(ix,iy,iz,ii)
             end do
             end do
             end do
@@ -3893,16 +3741,16 @@ contains
       elseif(yn_periodic=='y') then
         !calculate average current density
         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
-        if(fe%flag_ld) then
-          do ii=1,fe%max_pole_num_ld
+        if(ld%enabled) then
+          do ii=1,ld%max_pole_num_ld
 !$omp parallel
 !$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr )
             do iz=fs%mg%is(3),fs%mg%ie(3)
             do iy=fs%mg%is(2),fs%mg%ie(2)
             do ix=fs%mg%is(1),fs%mg%ie(1)
-              sum_lr(1) = sum_lr(1) + fe%rjx_ld(ix,iy,iz,ii)
-              sum_lr(2) = sum_lr(2) + fe%rjy_ld(ix,iy,iz,ii)
-              sum_lr(3) = sum_lr(3) + fe%rjz_ld(ix,iy,iz,ii)
+              sum_lr(1) = sum_lr(1) + ld%rjx_ld(ix,iy,iz,ii)
+              sum_lr(2) = sum_lr(2) + ld%rjy_ld(ix,iy,iz,ii)
+              sum_lr(3) = sum_lr(3) + ld%rjz_ld(ix,iy,iz,ii)
             end do
             end do
             end do
@@ -4638,7 +4486,7 @@ contains
   
   !===========================================================================================
   != finalize eh-FDTD ========================================================================
-  subroutine eh_finalize(fs,fe)
+  subroutine eh_finalize(fs,fe,ld)
     use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,                          &
                                nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,                   &
                                obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ase_ene_min_em,ase_wav_min_em,&
@@ -4650,6 +4498,7 @@ contains
     use phys_constants,  only: cspeed_au
     use math_constants,  only: pi,zi
     implicit none
+    type(s_ld_state), intent(inout) :: ld
     type(s_fdtd_system),intent(in)    :: fs
     type(ls_fdtd_eh),   intent(inout) :: fe
     complex(8),allocatable :: z_ex1(:,:),z_ey1(:,:),z_ez1(:,:),z_ex2(:,:),z_ey2(:,:),z_ez2(:,:),&
@@ -5578,6 +5427,7 @@ contains
     end if
     
     return
+    call ld_finalize(ld)
   end subroutine eh_finalize
   
   !===========================================================================================
@@ -5772,124 +5622,7 @@ contains
   
   !===========================================================================================
   != calculate finite difference in eh =======================================================
-  subroutine eh_fd(ista,iend,ng_is,ng_ie,Nd,c1,c2,f1,f2,f3,var,dir,&
-                   cb_x,cb_y,cb_z)
-    implicit none
-    integer,     intent(in)          :: ista(3),iend(3),ng_is(3),ng_ie(3)
-    integer,     intent(in)          :: Nd
-    real(8),     intent(in)          :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
-                                        c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                           ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),     intent(inout)       :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                           ng_is(3)-Nd:ng_ie(3)+Nd)
-    real(8),     intent(in)          :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
-                                        f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
-                                           ng_is(3)-Nd:ng_ie(3)+Nd)
-    character(1),intent(in)          :: var,dir
-    real(8),     intent(in),optional :: cb_x(ng_is(1)-Nd:ng_ie(1)+Nd), &
-                                        cb_y(ng_is(2)-Nd:ng_ie(2)+Nd), &
-                                        cb_z(ng_is(3)-Nd:ng_ie(3)+Nd)
-    integer :: ix,iy,iz
-    
-    if(var=='e') then
-      if(dir=='x') then
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=ista(3),iend(3)
-        do iy=ista(2),iend(2)
-        do ix=ista(1),iend(1)
-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
-                       +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_x(ix-1)*(f2(ix-1,iy,iz)+f3(ix-1,iy,iz)) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      elseif(dir=='y') then
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=ista(3),iend(3)
-        do iy=ista(2),iend(2)
-        do ix=ista(1),iend(1)
-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
-                       +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_y(iy-1)*(f2(ix,iy-1,iz)+f3(ix,iy-1,iz)) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      elseif(dir=='z') then
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=ista(3),iend(3)
-        do iy=ista(2),iend(2)
-        do ix=ista(1),iend(1)
-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
-                       +c2(ix,iy,iz)*( &
-                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_z(iz-1)*(f2(ix,iy,iz-1)+f3(ix,iy,iz-1)) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      end if
-    elseif(var=='h') then
-      if(dir=='x') then
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=ista(3),iend(3)
-        do iy=ista(2),iend(2)
-        do ix=ista(1),iend(1)
-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
-                       +c2(ix,iy,iz)*( &
-                       cb_x(ix+1)*(f2(ix+1,iy,iz)+f3(ix+1,iy,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      elseif(dir=='y') then
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=ista(3),iend(3)
-        do iy=ista(2),iend(2)
-        do ix=ista(1),iend(1)
-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
-                       +c2(ix,iy,iz)*( &
-                       cb_y(iy+1)*(f2(ix,iy+1,iz)+f3(ix,iy+1,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      elseif(dir=='z') then
-!$omp parallel
-!$omp do private(ix,iy,iz) collapse(2)
-        do iz=ista(3),iend(3)
-        do iy=ista(2),iend(2)
-        do ix=ista(1),iend(1)
-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
-                       +c2(ix,iy,iz)*( &
-                       cb_z(iz+1)*(f2(ix,iy,iz+1)+f3(ix,iy,iz+1)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
-        end do
-        end do
-        end do
-!$omp end do
-!$omp end parallel
-      end if
-    end if
-    
-    return
-  end subroutine eh_fd
+
   
   !===========================================================================================
   != calculate incident pulse ================================================================

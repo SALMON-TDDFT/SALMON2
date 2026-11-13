@@ -421,6 +421,7 @@ character(256),allocatable :: atom_name(:)
   character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
 
 !! &band
+  character(256) :: file_band_kpoints
   character(3) :: lattice
   integer :: nref_band
   real(8) :: tol_esp_diff

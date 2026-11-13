@@ -110,10 +110,12 @@ module inputoutput
 
 contains
   subroutine read_input
+    use tddft_worker, only: worker_configure
     implicit none
 
     call read_stdin
     call read_input_common ! Should be renamed properly later
+    call worker_configure()
     call read_atomic_coordinates
     call dump_input_common ! Should be renamed properly later
     call check_bad_input
@@ -122,6 +124,7 @@ contains
 
 
   subroutine read_stdin
+    use tddft_worker, only: worker_requested
     use parallelization, only: nproc_id_global
     use communication, only: comm_is_root
     use filesystem, only: get_filehandle
@@ -154,6 +157,7 @@ contains
           exit
         else
           text = trim(adjustl(buff))
+          if(worker_requested().and.text=="!SALMONPY_END_INPUT") exit
           ! Comment lines
           if (text(1:1) == '!') cycle
          !! Beginning of 'atomic_species' part
@@ -576,6 +580,7 @@ contains
       & force_openmp_mode
 
     namelist/band/ &
+      & file_band_kpoints, &
       & lattice, &
       & nref_band, &
       & tol_esp_diff, &
@@ -1023,6 +1028,7 @@ contains
     current_openmp_mode = 'auto'
     force_openmp_mode   = 'auto'
 !! == default for &band
+    file_band_kpoints = 'none'
     lattice =''
     nref_band = 0
     tol_esp_diff = 1.0d-5
@@ -1692,6 +1698,7 @@ contains
     call comm_bcast(current_openmp_mode                    ,nproc_group_global)
     call comm_bcast(force_openmp_mode                      ,nproc_group_global)
 !! == bcast for band
+    call comm_bcast(file_band_kpoints,nproc_group_global)
     call comm_bcast(lattice         ,nproc_group_global)
     call comm_bcast(nref_band       ,nproc_group_global)
     call comm_bcast(num_of_segments ,nproc_group_global)

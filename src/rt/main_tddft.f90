@@ -19,6 +19,9 @@
 #include "config.h"
 
 subroutine main_tddft
+use tddft_worker
+use density_matrix, only: calc_current
+use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
 use salmon_global
 use structures
@@ -59,6 +62,7 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
+real(8) :: worker_A(3),worker_current(3,2)
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
@@ -77,6 +81,14 @@ call initialization_rt( Mit, system, energy, ewald, rt, md, &
                         spsi_in, spsi_out, tpsi, rho, rho_jm, rho_s,  &
                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                         pp, ppg, ppn, unfold )
+
+if(worker_requested()) then
+  system%vec_Ac=worker_initial_A
+  call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
+  call calc_current(system,mg,stencil,info,srg,spsi_in,ppg,worker_current(:,1:system%nspin))
+  spsi_in%update_zwf_overlap=.true.
+  call worker_reply(0,sum(worker_current(:,1:system%nspin),dim=2))
+end if
 
 #ifdef __FUJITSU
 call fapp_start('time_evol',1,0) ! performance profiling
@@ -98,6 +110,11 @@ call comm_sync_all
 call timer_enable_sub
 call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,nt
+  if(worker_requested()) then
+    if(.not.worker_next_A(worker_A)) exit TE
+    rt%Ac_ext(:,itt)=worker_A
+    rt%Ac_tot(:,itt)=worker_A
+  end if
   call nvtxStartRange('main loop', itt)
 
   if(mod(itt,2)==1)then
@@ -109,6 +126,8 @@ TE : do itt=Mit+1,nt
      & ,srg,srg_scalar,pp,ppg,ppn,spsi_out,spsi_in,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc &
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
+
+  if(worker_requested()) call worker_reply(itt,rt%curr(:,itt))
 
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
@@ -156,6 +175,13 @@ close(030) ! laser
 
 !------------ Writing part -----------
 
+
+! Worker outputs are consumed at each endpoint. Do not analyze uncomputed tail.
+if(worker_requested()) then
+  if(comm_is_root(nproc_id_global)) close(ofl%fh_rt)
+  call finalize_xc(xc_func)
+  return
+end if
 
 call timer_begin(LOG_WRITE_RT_RESULTS)
 

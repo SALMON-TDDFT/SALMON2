@@ -1,4 +1,6 @@
 set(SOURCES
+    sbe_types.f90
+    sbe_velocity_kernel.f90
     util_ssbe.f90
     datafile_ssbe.f90
     input_checker_sbe.f90

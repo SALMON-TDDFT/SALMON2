@@ -1,5 +1,7 @@
 set(SOURCES
     common_maxwell.f90
+    lorentz_drude.f90
+    fdtd_eh_kernel.f90
     fdtd_eh.f90
     main_maxwell.f90
     fdtd_weyl_gauge.f90

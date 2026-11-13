@@ -1,0 +1,37 @@
+[build-system]
+requires = ["scikit-build-core>=0.10,<2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "salmonpy"
+version = "0.1.0a4"
+description = "SALMON material response, FDTD orchestration and optical workflow tools"
+readme = "salmonpy/README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+dependencies = ["numpy>=1.23.5"]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.6"]
+ase = ["ase>=3.26,<4", "f90nml>=1.4,<2"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.source-dir = "packaging/ld"
+wheel.packages = []
+sdist.include = ["salmonpy/**", "packaging/ld/**", "tools/check_forbidden_eigensolvers.py", "tools/repair_ld_wheel.py", "tools/test_installed_ld.py", "src/maxwell/lorentz_drude.f90", "src/ssbe/sbe_types.f90", "src/ssbe/sbe_velocity_kernel.f90", "LICENSE", "LICENSE.THIRD-PARTY"]
+sdist.exclude = ["salmonpy/_native/**", "**/__pycache__/**", "**/*.pyc", "dist/**", "wheelhouse/**"]
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_* *-win32"
+archs = ["native"]
+test-command = "python {project}/tools/test_installed_ld.py {project}"
+repair-wheel-command = "python {project}/tools/repair_ld_wheel.py {wheel} {dest_dir}"
+
+[tool.cibuildwheel.linux]
+before-all = "yum install -y gcc-gfortran openblas-devel"
+manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel"

@@ -1,0 +1,1198 @@
+{
+  "schema_version": "salmonpy.manual/1",
+  "language": "ja+en",
+  "search_entrypoint": "python -m salmonpy.manual QUERY",
+  "tasks": [
+    {
+      "id": "bands",
+      "intent": "初期状態からバンドを計算・保存・描画する",
+      "keywords": [
+        "band",
+        "bands",
+        "バンド",
+        "固有値"
+      ],
+      "api": [
+        "salmonpy.bands.BandPath",
+        "salmonpy.bands.BandInitialState.from_salmon",
+        "salmonpy.bands.BandInitialState.run",
+        "salmonpy.bands.BandRun.plot",
+        "salmonpy.bands.BandStructure.from_salmon",
+        "salmonpy.bands.BandStructure.plot",
+        "salmonpy.bands.ExplicitKPoints"
+      ],
+      "inputs": "Calculation: original DFT input + self-contained GS bundle + audited executable + fractional BandPath + requested bands. Plot: band.dat + explicit reference_ev.",
+      "outputs": "BandRun; result/ NPZ and metadata; native/ input, log, raw output; band-run.json status; optional plot",
+      "guide": "BANDS.md",
+      "examples": [
+        "from salmonpy.bands import BandStructure\nb = BandStructure.from_salmon('band.dat')\nax = b.plot(reference_ev=0.0)  # 明示的に絶対エネルギーのまま表示\nax.figure.savefig('bands.png', dpi=160)\n",
+        "from salmonpy.bands import BandInitialState, BandPath\nfrom salmonpy.fdtd import SalmonExecutable\n\n# この環境の監査済み実行ファイルと記録済みSHA256を利用者が指定する。\nengine = SalmonExecutable(executable_path, validated_sha256)\npath = BandPath(\n    vertices=[[0, 0, 0], [.5, 0, 0], [.5, .5, 0], [.5, .5, .5], [0, 0, 0]],\n    intervals=[4, 4, 4, 4], labels=['Γ', 'X', 'M', 'R', 'Γ'],\n)\nwith BandInitialState.from_salmon('gs-bundle', 'gs.inp', executable=engine) as gs:\n    result = gs.run(path, 'new-band-run', bands=24,\n                    tolerance=1e-5, max_iterations=300, threads=2)\n# 任意の明示的なエネルギー基準。0.0なら絶対エネルギー表示。\nax = result.plot(reference_ev=0.0)\nax.figure.savefig('bands.png', dpi=160)\n"
+      ],
+      "instructions": [
+        {
+          "heading": "バンド図",
+          "text": "\n`salmonpy.bands.BandStructure.from_salmon('band.dat')` はSALMONの\n`theory='dft_band'` のブロック形式を読みます。`k_cartesian` は実際に計算した\nCartesian k (bohr⁻¹)、`energies` は (k, band, spin) のHartree値です。\n`plot(reference_ev=..., ticks=[(index,label), ...])` はMatplotlibのAxesを返します。\n描画には追加依存のMatplotlibが必要です。対応する配布wheelをインストールした環境で\n`python -m pip install matplotlib` を実行します。PyPI公開は未実施です。\nソースからの構築では `python -m pip install \".[plot]\"` も使用できますが、\nFortranなどのビルド環境が別途必要です。import時のコンパイルはありません。\n\n```python\nfrom salmonpy.bands import BandStructure\nb = BandStructure.from_salmon('band.dat')\nax = b.plot(reference_ev=0.0)  # 明示的に絶対エネルギーのまま表示\nax.figure.savefig('bands.png', dpi=160)\n```\n"
+        },
+        {
+          "heading": "計算",
+          "text": "\n現在は別途構築したSALMON実行ファイルを使用します。既存のGS入力と擬ポテンシャルを\n独立した作業ディレクトリへコピーし、収束済み `data_for_restart` を `seed/` にコピーします。\nGSと同じ格子、セル、状態数、汎関数、擬ポテンシャル、k点数を維持し、次を変更します。\n\n```\n&calculation\n theory='dft_band'\n/\n&control\n sysname='Si', yn_restart='y', directory_read_data='./seed/',\n yn_reset_step_restart='y'\n/\n&band\n lattice='non', nref_band=24, num_of_segments=4,\n ndiv_segment(1:4)=4,4,4,4,\n kpt(:,1)=0,0,0, kpt(:,2)=.5,0,0,\n kpt(:,3)=.5,.5,0, kpt(:,4)=.5,.5,.5, kpt(:,5)=0,0,0,\n tol_esp_diff=1d-5\n/\n```\n\nこの例は8原子の立方Siセル用。kptはそのセルの逆格子基底の分数座標です。\n原始FCCセルの経路とは異なり、折り畳まれたバンドになります。\n通常のSCFと異なり、バンド反復では読み込んだ密度からのポテンシャルを固定します。\n終了ログだけでなく、各k点ブロックの必要バンドの収束を確認してください。\n`nref_band=24` なら最初の24バンドまでが収束判定対象です。\n\n今回の本体修正では、最後の頂点の読み落としと逆格子変換の重複を修正し、\n最後の終点を必ず含めました。計算単位に合わせた余剰点は終点の複製です。\n4区間×4分割なら17点を描画し、残りの余剰点を除きます。\n旧実行ファイルにはこの修正がないため、同じ入力から同じ経路を得られません。\nローダーは旧形式も読めますが、誤った経路で計算済みの固有値を修復することはできません。\n\n`examples/plot_bands.py band.dat bands.png` はこのSi例を描きます。\n32電子・非スピン分極の占有16バンドの経路上の最高エネルギーを0 eVにします。\nこれは全Brillouin域のVBMやFermi準位の自動推定ではありません。\n今回の12³格子・粗い経路は接続確認用であり、定量的なギャップの収束計算ではありません。\nこの入口自体は対称点探索・unfolding・金属の占有判定を行いません。\nGS作成はDFT.md、ASEによる経路生成はASE.mdを参照してください。\n"
+        },
+        {
+          "heading": "初期状態から計算する",
+          "text": "\n`BandInitialState` は読み込み時の自己完結したGSディレクトリをコピーして保持します。\n入力はそのGSを生成した元のDFT入力です。再開データは `data_for_restart/`、\n擬ポテンシャルなどは同じ束の中に相対パスで置いてください。\nバイナリの生成条件と入力の物理的一致は利用者が確認します。ハッシュ検査だけでは\n異なる計算由来のGSを判別できません。\n\n```python\nfrom salmonpy.bands import BandInitialState, BandPath\nfrom salmonpy.fdtd import SalmonExecutable\n"
+        },
+        {
+          "heading": "この環境の監査済み実行ファイルと記録済みSHA256を利用者が指定する。",
+          "text": "engine = SalmonExecutable(executable_path, validated_sha256)\npath = BandPath(\n    vertices=[[0, 0, 0], [.5, 0, 0], [.5, .5, 0], [.5, .5, .5], [0, 0, 0]],\n    intervals=[4, 4, 4, 4], labels=['Γ', 'X', 'M', 'R', 'Γ'],\n)\nwith BandInitialState.from_salmon('gs-bundle', 'gs.inp', executable=engine) as gs:\n    result = gs.run(path, 'new-band-run', bands=24,\n                    tolerance=1e-5, max_iterations=300, threads=2)"
+        },
+        {
+          "heading": "任意の明示的なエネルギー基準。0.0なら絶対エネルギー表示。",
+          "text": "ax = result.plot(reference_ev=0.0)\nax.figure.savefig('bands.png', dpi=160)\n```\n\n- `vertices` は当該セルの逆格子の分数座標、`intervals` は各区間の分割数。\n  最大10区間。始点と最後の終点を含め、描画用の余剰点は自動的に取り除きます。\n- `bands` は必要な収束バンド数。`tolerance` は固有値変化の許容値（Hartree）。\n  これは離散化・k点数・擬ポテンシャル由来の誤差限界ではありません。\n- 保存先は初期束の外にある新規ディレクトリ。`native/` にコピーした初期ファイル、\n  実際の入力、ログ、未加工の出力を、`result/` に配列と単位・条件を保存します。\n  追加の図は `result.plot` で生成します。図の失敗で完了済みの計算を失いません。\n- 同じ `gs` から異なる `path` を何回でも計算できます。前の計算の状態は再利用しません。\n  `with` の終了で保持した初期コピーを解放します。計算結果の保存先は残ります。\n- 正常終了に加え、全k点ブロックの `bands` 本が収束し、実際のk座標が指定と一致した\n  場合だけ結果を返します。未収束・中断・旧実行ファイルで判定情報がない場合はエラー。\n  失敗時も `band-run.json` と `native/stdout.log` を残します。\n\nこの入口の対応範囲は固定イオン・周期系・非スピン分極のPZ／Libxc-PZ／Libxc-PBEです。\nLibxcには対応する別途構築のSALMONが必要です。TB-mBJ、SOC、DC、構造最適化、\nMPI起動はこの入口では未対応です。元入力の解析出力と並列配置は引き継がず、\n単一MPIランクのバンド計算として実行します。ソルバーの反復設定は引き継ぎ、\n`nscf` は `max_iterations` に置き換えます。この回数は本体の規約どおり\n全k点ブロックにわたる累積反復数の上限であり、ブロックごとの回数ではありません。\n\n本体には `band_status.dat` の `SALMONPY_BANDS_V1` 出力を含む今回の修正が必要です。\n旧wheelの対応OS一覧は、この外部実行ファイルの動作保証ではありません。\n実GS結合テストはmacOS arm64で実施しました。斜交セルの検証は本体の経路生成・\nk設定処理の単体テストであり、斜交セルのGS全体を検証したものではありません。\n"
+        },
+        {
+          "heading": "任意のk点列",
+          "text": "\n`ExplicitKPoints(kpoints)` はASEに依存しない、分数座標 `(nk,3)` の読み取り専用コピーです。\n`BandInitialState.run` に `BandPath` の代わりに渡せます。本体には\n`&band/file_band_kpoints` を使い、点数に続く3列の分数座標を読み込ませます。\n再補間は行わず、末尾の計算用余剰点だけを追加・除去します。\nこの列自体は経路の切れ目やラベルを持たないので、`BandRun.plot` では描画せず、\nASEなどの経路情報を持つ側で描画します。ASE接続は独立した [ASE.md](ASE.md) を参照。"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": true,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct",
+        "native_calculation": "Requires SALMONPY_BANDS_V1 native report. Single rank launcher; macOS arm64 PZ real-GS integration tested. Libxc-PZ/PBE accepted but not tested in this band-runner integration."
+      },
+      "parameter_lifetimes": {
+        "initial_state": [
+          "GS snapshot",
+          "executable identity"
+        ],
+        "path": [
+          "vertices",
+          "intervals",
+          "labels"
+        ],
+        "per_run": [
+          "new output directory",
+          "bands",
+          "tolerance_Ha",
+          "max_iterations cumulative across blocks",
+          "threads",
+          "timeout"
+        ],
+        "plot": [
+          "reference_ev",
+          "Axes styling"
+        ]
+      },
+      "sample_files": [
+        {
+          "path": "examples/bands_from_gs.py",
+          "module": "salmonpy.examples.bands_from_gs"
+        },
+        {
+          "path": "examples/plot_bands.py",
+          "module": "salmonpy.examples.plot_bands"
+        }
+      ]
+    },
+    {
+      "id": "ld",
+      "intent": "ドルーデ・ローレンツ応答を計算する",
+      "keywords": [
+        "LD",
+        "Drude",
+        "Lorentz",
+        "誘電率",
+        "ドルーデ"
+      ],
+      "api": [
+        "salmonpy.ld.LorentzDrude"
+      ],
+      "inputs": "plasma_frequency, strength, resonance, damping; E and dt",
+      "outputs": "permittivity or P/J time series",
+      "guide": "README.md",
+      "examples": [
+        "import numpy as np\nfrom salmonpy import LorentzDrude\n\nmaterial = LorentzDrude(\n    plasma_frequency=0.5,\n    strength=[0.8, 0.2],\n    resonance=[0.0, 0.3],\n    damping=[0.01, 0.02],\n)\nE = np.zeros((101, 3))\nE[:, 0] = 1e-3\nresult = material.respond(E, dt=0.1)\n\nstate = material.new_state(dt=0.1, initial_field=E[0])\nP, J = state.step(E[1])  # fields at t=0.1; returns physical P and J\n"
+      ],
+      "instructions": [
+        {
+          "heading": "SALMONpy: modular workflow preview",
+          "text": "\nThe native Python interface provides isotropic Lorentz–Drude material response\nand SALMON velocity-gauge SBE with reusable initial states.\nAdditional standalone helpers cover geometry, pulses, tables/spectra, batch FDTD\nand a common A→J contract: see [WORKFLOWS.md](WORKFLOWS.md).\nIt calls SALMON's shared Fortran kernels; no SALMON\nexecutable, MPI, ground-state calculation or FDTD grid is needed.\n\nFrom the repository root, with Python 3.10+, NumPy, CMake and gfortran available\n(and LP64 OpenBLAS development libraries on Linux/Windows):\n\n```sh\npython -m salmonpy.build_native\npython -m unittest discover -s salmonpy/tests -v\npython -m salmonpy.examples.ld_response\n```\n\nSet `FC` to the compiler executable if needed. The build is local and explicit;\nimporting the package never compiles code. The native library checksum is checked\non first use and its handle is cached. Restart Python (including notebook kernels)\nafter rebuilding the library. This is a preview with wheel packaging, not a PyPI release. Repaired wheel files\ncan be installed with `python -m pip install \"wheelhouse/REPLACE_WITH_COMPATIBLE_WHEEL.whl\"`. See\n[PACKAGING.md](PACKAGING.md) for platform targets, CI and verified status.\n\n```python\nimport numpy as np\nfrom salmonpy import LorentzDrude\n\nmaterial = LorentzDrude(\n    plasma_frequency=0.5,\n    strength=[0.8, 0.2],\n    resonance=[0.0, 0.3],\n    damping=[0.01, 0.02],\n)\nE = np.zeros((101, 3))\nE[:, 0] = 1e-3\nresult = material.respond(E, dt=0.1)"
+        },
+        {
+          "heading": "result.time: (101,), result.polarization/current: (101, 3)",
+          "text": "\nstate = material.new_state(dt=0.1, initial_field=E[0])\nP, J = state.step(E[1])  # fields at t=0.1; returns physical P and J\n```\n\nAll values use SALMON atomic/Gaussian units: angular frequency, damping and plasma\nfrequency in inverse atomic time, time in atomic time, E/P/J in the corresponding\natomic units. Do not pass eV energies or femtoseconds without conversion. Pole\nstrengths are dimensionless. Each pole obeys\n\n```\ndP/dt = J\ndJ/dt = f * wp**2 * E / (4*pi) - gamma*J - w0**2*P\n```\n\n`respond` starts with P=J=0 at the first supplied E sample. Sample zero is the\ninitial condition, not an update. `step` takes E at the next time, using the stored\nprevious E. Time step is fixed for each state. Every call to `respond` starts a\nfresh state; separate `new_state` objects do not share histories. Observed P/J are\nsummed over poles. They are not the auxiliary FDTD quantity Q.\n\n`permittivity(omega)` evaluates the continuous model with exp(-i omega t):\n`1 + sum(f*wp**2 / (w0**2 - omega**2 - i*gamma*omega))`.\nThe instantaneous background is fixed at 1; anisotropy, active media, fitting,\nand unit conversion are not included. An exact real-axis pole raises ValueError.\nFinite-step time propagation approximates this continuous response; reduce dt to\ncheck temporal convergence. A single state must not be shared between threads.\n\nThe step adapter reconstructs a small native context each call; it is intended\nfor prototyping, not high-throughput grid coupling. Batch calculations reuse one\nnative context. FDTD has an external-executable batch wrapper. The built-in SBE adapter is `salmonpy.sbe.SBEInitialState`; see the loader and\nindependent-trajectory example in WORKFLOWS.md. A process-isolated PZ TDDFT adapter is available as `salmonpy.tddft.TDDFTInitialState`\nwith a separately built worker-enabled SALMON executable.\nCrystalline TDDFT/SBE interfaces remain A-driven only.\n\nSee [AI_USAGE.md](AI_USAGE.md) for extension rules and the legacy FDTD boundary.\n\nInput ownership, immutable resolved settings and failure behavior are specified in\n[INPUT_CONTRACT.md](INPUT_CONTRACT.md). Inspect `material.config` and `state.config`\nfor all effective settings. Python 3.10 or newer is required.\n"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/ld_response.py",
+          "module": "salmonpy.examples.ld_response"
+        }
+      ]
+    },
+    {
+      "id": "fdtd",
+      "intent": "FDTDで光伝播を計算する",
+      "keywords": [
+        "FDTD",
+        "Maxwell",
+        "光伝播"
+      ],
+      "api": [
+        "salmonpy.fdtd.FDTD",
+        "salmonpy.fdtd.SalmonExecutable.run"
+      ],
+      "inputs": "geometry, materials, source, dt, steps; audited executable",
+      "outputs": "native output directory and observation tables",
+      "guide": "WORKFLOWS.md",
+      "examples": [],
+      "instructions": [
+        {
+          "heading": "Geometry and FDTD",
+          "text": "\n```python\nfrom salmonpy.geometry import Grid, Shape, Geometry\nfrom salmonpy.fields import AcosPulse\nfrom salmonpy.fdtd import FDTD, Dielectric, PlaneWave, SalmonExecutable\n\ngrid = Grid(counts=(32, 32, 32), spacing=(2., 2., 2.))\ngeometry = Geometry(grid, (Shape('ellipsoid', size=(8., 8., 8.)),))\nmaterial_ids = geometry.material_ids()   # independent material-grid preview\nxy = geometry.slice(axis=2, index=16)   # usable with a plotting library\npulse = AcosPulse(amplitude=.001, omega=10., duration=.05)\ncalculation = FDTD(\n    geometry, materials=(Dielectric(epsilon=2.),), dt=.001, steps=200,\n    source=PlaneWave(pulse, axis=0, position=-12.),\n)\nprint(calculation.input_text())          # review/export without running"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": true,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/fdtd_dielectric.py",
+          "module": "salmonpy.examples.fdtd_dielectric"
+        }
+      ]
+    },
+    {
+      "id": "geometry",
+      "intent": "物質構造と格子を確認する",
+      "keywords": [
+        "構造",
+        "geometry",
+        "格子"
+      ],
+      "api": [
+        "salmonpy.geometry.Geometry.material_ids",
+        "salmonpy.geometry.Geometry.slice"
+      ],
+      "inputs": "Grid and ordered Shapes",
+      "outputs": "material ID grid or slice",
+      "guide": "WORKFLOWS.md",
+      "examples": [],
+      "instructions": [
+        {
+          "heading": "Geometry and FDTD",
+          "text": "\n```python\nfrom salmonpy.geometry import Grid, Shape, Geometry\nfrom salmonpy.fields import AcosPulse\nfrom salmonpy.fdtd import FDTD, Dielectric, PlaneWave, SalmonExecutable\n\ngrid = Grid(counts=(32, 32, 32), spacing=(2., 2., 2.))\ngeometry = Geometry(grid, (Shape('ellipsoid', size=(8., 8., 8.)),))\nmaterial_ids = geometry.material_ids()   # independent material-grid preview\nxy = geometry.slice(axis=2, index=16)   # usable with a plotting library\npulse = AcosPulse(amplitude=.001, omega=10., duration=.05)\ncalculation = FDTD(\n    geometry, materials=(Dielectric(epsilon=2.),), dt=.001, steps=200,\n    source=PlaneWave(pulse, axis=0, position=-12.),\n)\nprint(calculation.input_text())          # review/export without running"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/geometry_preview.py",
+          "module": "salmonpy.examples.geometry_preview"
+        }
+      ]
+    },
+    {
+      "id": "pulse",
+      "intent": "光パルスを作る",
+      "keywords": [
+        "波形",
+        "パルス",
+        "pulse"
+      ],
+      "api": [
+        "salmonpy.fields.AcosPulse",
+        "salmonpy.fields.sample_pulses"
+      ],
+      "inputs": "pulse parameters; time grid",
+      "outputs": "FieldSamples: time and A/c",
+      "guide": "WORKFLOWS.md",
+      "examples": [],
+      "instructions": [
+        {
+          "heading": "Pulse creation independent of a solver",
+          "text": "\n```python\nimport numpy as np\nfrom salmonpy.fields import AcosPulse, sample_pulses\npulses = [AcosPulse(.01, .2, 100., start=10.),\n          AcosPulse(.01, .2, 100., start=130.)]\nA = sample_pulses(pulses, np.arange(0., 250., .1))\nE = A.electric_field()"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/pulse_spectrum.py",
+          "module": "salmonpy.examples.pulse_spectrum"
+        }
+      ]
+    },
+    {
+      "id": "sbe",
+      "intent": "SBEでAからJを計算する",
+      "keywords": [
+        "SBE",
+        "結晶",
+        "A→J",
+        "電子の動き",
+        "レーザー",
+        "電子ダイナミクス"
+      ],
+      "api": [
+        "salmonpy.sbe.SBEInitialState.from_salmon",
+        "salmonpy.crystal.respond"
+      ],
+      "inputs": "eigen/k/tm files and model parameters; A/c samples",
+      "outputs": "electronic matter J; charge current = -J",
+      "guide": "WORKFLOWS.md",
+      "examples": [],
+      "instructions": [
+        {
+          "heading": "A-only crystalline backend contract",
+          "text": "\n`crystal.AInitialState` and `AResponseState` are typing protocols for replaceable\nbackends. `initial.new_state(dt=..., time0=..., initial_A=...)` must create an\nindependent state without modifying the reusable initial condition. The state\nowns wavefunctions/density matrices, history, previous A and current, and exposes\n`step(A_new)`, `current`, `time`. Only A is an input; E is not an alternative.\nBackend coordinates, gauge and J volume normalization must be converted to the\ncommon laboratory-frame atomic-unit convention at the adapter boundary.\n\n`crystal.respond(initial, A_samples)` creates a new state and calls that same step\nmethod for each sample. It validates uniform times, current shape/finiteness and\nbackend time advancement. Accumulated floating-point time roundoff is tolerated\nwith a bound capped at 0.001 time steps; a materially wrong step is rejected. It preserves the backend's initial current rather than\nassuming it is zero. A backend must guarantee independent states and atomic step\nfailures; Python cannot enforce those promises for arbitrary external engines.\n\nThe built-in velocity-gauge SBE adapter and text loader are described below.\nThe process-isolated TDDFT adapter is described below. Common-interface tests also use an\nexplicit test double; SBE has separate native reference tests.\nThe next extraction must retain native initial-state formats, MPI ownership,\nwavefunction/density-matrix histories, rotations, gauge and time alignment. DFT\ninitial-state generation remains a separate stage; never advertise a fake solver\nor silently substitute LD for electronic dynamics.\n"
+        },
+        {
+          "heading": "Built-in velocity-gauge SBE",
+          "text": "\n```python\nimport numpy as np\nfrom salmonpy.sbe import SBEInitialState\nfrom salmonpy.crystal import respond\nfrom salmonpy.fields import AcosPulse\n\ninitial = SBEInitialState.from_salmon(\n    'gs_export', 'Si', bands=32, kpoints=512, electrons=32,\n    lattice=np.diag([10.26]*3), active_bands=32,\n    correction_order=0, nonlocal_correction=False)\ndrive = AcosPulse(amplitude=0.01, omega=0.056, duration=100.).sample(\n    np.arange(2001)*0.05)\nresult = respond(initial, drive)"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/sbe_response.py",
+          "module": "salmonpy.examples.sbe_response"
+        },
+        {
+          "path": "examples/sbe_from_salmon.py",
+          "module": "salmonpy.examples.sbe_from_salmon"
+        }
+      ]
+    },
+    {
+      "id": "tddft",
+      "intent": "TDDFTでAからJを計算する",
+      "keywords": [
+        "TDDFT",
+        "初期状態",
+        "A→J",
+        "電子の動き",
+        "レーザー",
+        "電子ダイナミクス"
+      ],
+      "api": [
+        "salmonpy.tddft.TDDFTInitialState.from_salmon",
+        "salmonpy.crystal.respond"
+      ],
+      "inputs": "self-contained GS bundle, input, audited worker; A/c samples",
+      "outputs": "independent state per run; electronic matter J",
+      "guide": "WORKFLOWS.md",
+      "examples": [],
+      "instructions": [
+        {
+          "heading": "A-only crystalline backend contract",
+          "text": "\n`crystal.AInitialState` and `AResponseState` are typing protocols for replaceable\nbackends. `initial.new_state(dt=..., time0=..., initial_A=...)` must create an\nindependent state without modifying the reusable initial condition. The state\nowns wavefunctions/density matrices, history, previous A and current, and exposes\n`step(A_new)`, `current`, `time`. Only A is an input; E is not an alternative.\nBackend coordinates, gauge and J volume normalization must be converted to the\ncommon laboratory-frame atomic-unit convention at the adapter boundary.\n\n`crystal.respond(initial, A_samples)` creates a new state and calls that same step\nmethod for each sample. It validates uniform times, current shape/finiteness and\nbackend time advancement. Accumulated floating-point time roundoff is tolerated\nwith a bound capped at 0.001 time steps; a materially wrong step is rejected. It preserves the backend's initial current rather than\nassuming it is zero. A backend must guarantee independent states and atomic step\nfailures; Python cannot enforce those promises for arbitrary external engines.\n\nThe built-in velocity-gauge SBE adapter and text loader are described below.\nThe process-isolated TDDFT adapter is described below. Common-interface tests also use an\nexplicit test double; SBE has separate native reference tests.\nThe next extraction must retain native initial-state formats, MPI ownership,\nwavefunction/density-matrix histories, rotations, gauge and time alignment. DFT\ninitial-state generation remains a separate stage; never advertise a fake solver\nor silently substitute LD for electronic dynamics.\n"
+        },
+        {
+          "heading": "Native TDDFT with isolated state",
+          "text": "\n`TDDFTInitialState` implements the same `new_state`/`step(Anew)` contract as SBE.\nIt keeps one persistent SALMON process per evolving state because the complete\nsolver still owns module globals, communication scratch space and XC histories.\nThe existing `initialization_rt` and `time_evolution_step` execute unchanged inside\nthat process. This is not a TDDFT shared library bundled in the wheel.\n\nPrepare a self-contained directory with a valid periodic RT input, pseudopotential\nfiles and `data_for_restart/{info.bin,occupation.bin,wfn.bin,...}` from GS. Use\nrelative paths for all assets and a plain `sysname`. The initial-state loader\ncopies this bundle and records hashes. Each new state gets its own private copy;\nchanges to the original files do not change the loaded initial state. Binary\nrecords are read by SALMON itself and retain its compiler/format constraints.\nGS and RT records share formats: the caller must supply a GS bundle; the loader\ndoes not infer ground-state convergence or automatically classify arbitrary\nwavefunctions as GS versus excited states.\n\n```python\nfrom salmonpy.fdtd import SalmonExecutable\nfrom salmonpy.tddft import TDDFTInitialState\nfrom salmonpy.crystal import respond\n"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": true,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/tddft_response.py",
+          "module": "salmonpy.examples.tddft_response"
+        }
+      ]
+    },
+    {
+      "id": "outputs",
+      "intent": "後処理用データを保存・読む",
+      "keywords": [
+        "後処理",
+        "出力",
+        "密度",
+        "cube",
+        "保存"
+      ],
+      "api": [
+        "salmonpy.outputs.OutputArchive.open",
+        "salmonpy.tddft.TDDFTState.finish"
+      ],
+      "inputs": "new output directory; optional native analysis flags",
+      "outputs": "NPZ, manifest, selected native files; not a restart",
+      "guide": "OUTPUTS.md",
+      "examples": [
+        "from salmonpy.crystal import respond\nfrom salmonpy.outputs import OutputArchive\n\nresult = respond(initial, drive, output_directory='run-001')\narchive = OutputArchive.open('run-001')\ntime = archive.array('time')\nA = archive.array('A')             # SALMON Ac=A/c、原子単位\nJ = archive.array('J')             # 電子のmatter current。電荷電流は -J\n",
+        "energy = archive.table('native/Si_rt_energy.data')\ndensity = archive.cube('native/Si_dns_000008.cube')\nrho = density.values              # (nx, ny, nz)\norigin, axes = density.origin, density.axes\n# 座標 = origin + [ix, iy, iz] @ axes\nprint(density.unit_note)          # 本体の単位コメントを保持。自動変換しない\n\nbands = archive.decomposed_current('native/Si_current_decomposed.data')\nt_band = bands.step * archive.metadata['dt']\nJ_total = bands.current.sum(axis=1)\n# indices の列は k点・バンド・スピン。占有数・k点重みは本体ですでに乗算済み。\n",
+        "from salmonpy.outputs import save_arrays\nsave_arrays('ld-run', {'time':response.time, 'E':E,\n                     'P':response.polarization, 'J':response.current},\n            metadata={'units':{'time':'a.u.','E':'a.u.','P':'a.u.','J':'a.u.'},\n                      'description':'LD response; model parameters recorded separately'})\n"
+      ],
+      "instructions": [
+        {
+          "heading": "後処理用の出力と実行場所",
+          "text": ""
+        },
+        {
+          "heading": "プロセス／CPUの分離",
+          "text": "\nTDDFTの状態ごとに専用プロセスと作業ディレクトリを持ちます。同一マシンの\nFDTDプロセスと2つのTDDFTプロセスを接続し、通常の2 MPIランクのマルチスケール\n実行と比較済みです。OSが各プロセスを実行するコアを選びます。コア固定や別ソケット\nへの配置を検証したわけではありません。1つの状態に同時にstepを呼ばないでください。\nSBE/LDの状態も独立に作成します。同じ状態を複数スレッドで更新する契約はありません。\n\n別ノード用の通信・配置APIは未実装です。将来も波動関数は担当プロセスに置き、\n結合には時刻・ステップ・点ID・A/c・Jを交換する構成にします。場の更新は必要な\n全点の応答がそろってから進め、遅延した電流を別のステップに混ぜません。\n出力も各状態が別のディレクトリへ書く設計とし、複数プロセスによる同一ファイルへの\n同時書き込みを避けます。BLAS/OpenMPスレッド数はプロセス数と合わせて設定します。\n"
+        },
+        {
+          "heading": "出力の入口",
+          "text": "\n共通A駆動のバッチ計算では、保存先を明示します（省略時は従来どおり保存しません）。\n\n```python\nfrom salmonpy.crystal import respond\nfrom salmonpy.outputs import OutputArchive\n\nresult = respond(initial, drive, output_directory='run-001')\narchive = OutputArchive.open('run-001')\ntime = archive.array('time')\nA = archive.array('A')             # SALMON Ac=A/c、原子単位\nJ = archive.array('J')             # 電子のmatter current。電荷電流は -J\n```\n\n`time`, `A`, `J`は初期状態を含む端点サンプルです。TDDFTでは、正常にプロセスを\n終了してファイルをフラッシュした後、ワーカーファイルも保存します。\n手動ステップの場合は `state.finish('point-001')` で保存してその状態を閉じます。\n単なる `state.close()` は保存しません。初期状態ローダーは別の計算に再利用できます。\n\n保存先は新規ディレクトリでなければなりません。保存に失敗すると `OutputSaveError`\nが発生し、`error.recovery_directory` に元のワーカーファイルを保持します。\nその中の `run/` が生データです。可能であれば `accepted-response.npz` と\n`recovery.json` も書きます。共通respondの後始末やオブジェクト破棄でも保持されます。\n回収したら利用者が削除してください。これは一時領域なのでOSの清掃までは保証しません。\n\nアーカイブは再開チェックポイントではありません。変更されていない\n`data_for_restart/` の大きなGSデータは複製せず、ハッシュを記録します。\nその他のファイルは保持します。初期ディレクトリに以前の出力が含まれている場合も\n捨てず、索引の `content_matches_initial_bundle` で元ファイルと同じ内容かを示します。\n入力と出力の混在を避けるため、通常はGSデータと入力だけの初期ディレクトリを使います。\n"
+        },
+        {
+          "heading": "TDDFTで選べる出力",
+          "text": "\n初期状態のSALMON入力の `&analysis` で選択します。この設定と保存間隔は\n状態作成後に変更せず、別条件には新しい初期状態を用意します。\n\n| 物理量 | 有効化・間隔 | 後処理 |\n|---|---|---|\n| A・電子電流・時刻 | 共通APIで常時記録 | `archive.array(...)` |\n| 全エネルギーと内訳 | 本体の `_rt_energy.data` | `archive.table(...)` |\n| 電子密度・初期密度との差 | `yn_out_dns_rt='y'`, `out_dns_rt_step` | `archive.cube(...)` |\n| 微視的電流3成分 | `yn_out_micro_je='y'`, `out_micro_je_step` | CUBE |\n| ELF | `yn_out_elf_rt='y'`, `out_elf_rt_step` | CUBE |\n| 静電場3成分 | `yn_out_estatic_rt='y'`, `out_estatic_rt_step` | CUBE |\n| k点・バンド・スピン別電流 | `yn_out_current_decomposed='y'`, `out_current_decomposed_step` | 専用ブロック読み込み |\n| 入力・ログ・実行ファイルハッシュ・初期ファイルハッシュ | アーカイブ保存時 | `input.inp`, `manifest.json`, `native/` |\n\n例（空間分布は8ステップごと、形式はCUBE）:\n\n```text\n&analysis\n format_voxel_data='cube'\n out_rt_energy_step=8\n yn_out_dns_rt='y', out_dns_rt_step=8\n yn_out_micro_je='y', out_micro_je_step=8\n yn_out_elf_rt='y', out_elf_rt_step=8\n yn_out_estatic_rt='y', out_estatic_rt_step=8\n yn_out_current_decomposed='y', out_current_decomposed_step=8\n/\n```\n\n`out_rt_energy_step` は本体の固有エネルギー再計算の間隔で、エネルギーファイルを\nその間隔だけに間引く指定ではありません。TB-mBJの出力エネルギーを変分的な\nTB-mBJエネルギー汎関数の検証値と解釈しないでください。\n静電場は本体のVh勾配の出力で、全Maxwell場そのものではありません。\n微視的電流とセル平均Jでは非局所擬ポテンシャルの扱いも含め定義を確認してください。\n\n```python\nenergy = archive.table('native/Si_rt_energy.data')\ndensity = archive.cube('native/Si_dns_000008.cube')\nrho = density.values              # (nx, ny, nz)\norigin, axes = density.origin, density.axes"
+        },
+        {
+          "heading": "座標 = origin + [ix, iy, iz] @ axes",
+          "text": "print(density.unit_note)          # 本体の単位コメントを保持。自動変換しない\n\nbands = archive.decomposed_current('native/Si_current_decomposed.data')\nt_band = bands.step * archive.metadata['dt']\nJ_total = bands.current.sum(axis=1)"
+        },
+        {
+          "heading": "indices の列は k点・バンド・スピン。占有数・k点重みは本体ですでに乗算済み。",
+          "text": "```\n\n時刻・単位・符号を推測して書き換えません。ネイティブ表の列情報と元ヘッダーも\n索引に残します。CUBEはSALMONの正の格子数を持つスカラー形式に対応します。\nAVS/VTKは生ファイルを保持できますが、このモジュールに専用リーダーはありません。\n\nRT波動関数チェックポイント、射影・unfoldingの出力は現在のワーカーでは未対応です。\n`write_rt_wfn_k='y'` は明示的に拒否します。終了時の本体の自動FFT・pulse出力も\n呼ばないため、保存したA/Jから解析します。収束済みGSの波動関数をRT最終波動関数と\n誤って扱わないでください。\n"
+        },
+        {
+          "heading": "LD・SBE・FDTDの選択保存",
+          "text": "\n`save_arrays` は実数・複素数の選択配列を保存できます。単位と条件は呼び出し側が\n明示し、ライブラリは物理的意味を推測しません。例えばLD:\n\n```python\nfrom salmonpy.outputs import save_arrays\nsave_arrays('ld-run', {'time':response.time, 'E':E,\n                     'P':response.polarization, 'J':response.current},\n            metadata={'units':{'time':'a.u.','E':'a.u.','P':'a.u.','J':'a.u.'},\n                      'description':'LD response; model parameters recorded separately'})\n```\n\n- LD: E・P・J、周波数と複素誘電率を選択保存できます。\n- SBE: 共通A/J時系列に加え、手動stepで選んだ時刻の `state.density` をコピーして\n  密度行列・占有・コヒーレンス解析に使えます。全時刻の密度行列は自動保存しません。\n- FDTD: バッチ実行の観測点E/H・材料格子・入力は既に実行ディレクトリに残ります。\n  NumPy配列に整理して同じ保存関数で出せます。2点マルチスケール検証用のA/J履歴は\n  検証成果物に保存済みですが、公開E/H単一ステップAPIはまだありません。\n- DFT: 通常SALMONのエネルギー・密度・固有値・k点・遷移行列などを元の出力として\n  保持します。GS計算・保存・再読み込みはDFT.mdに対応します。全形式の統一リーダーではありません。\n- スペクトル: `salmonpy.analysis.spectrum` の複素結果と `dict(result.config)` を\n  一緒に保存すると窓・フーリエ符号・規格化・単位を残せます。\n\n容量の大きい分布・行列は保存間隔と対象を選び、後から復元できない情報を優先します。\nハッシュ検証は `OutputArchive.open` で既定有効です。利用者が意図的に編集した\nアーカイブを読む場合のみ `verify=False` を指定できます。"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/outputs_roundtrip.py",
+          "module": "salmonpy.examples.outputs_roundtrip"
+        }
+      ]
+    },
+    {
+      "id": "spectrum",
+      "intent": "スペクトルを解析する",
+      "keywords": [
+        "FFT",
+        "スペクトル",
+        "spectrum"
+      ],
+      "api": [
+        "salmonpy.analysis.read_table",
+        "salmonpy.analysis.spectrum"
+      ],
+      "inputs": "uniform time and values; units and window",
+      "outputs": "positive-sign Fourier spectrum with configuration",
+      "guide": "WORKFLOWS.md",
+      "examples": [],
+      "instructions": [
+        {
+          "heading": "Output and reproducible spectra",
+          "text": "\n`analysis.read_table(path)` handles numbered SALMON column headers, retained\nunit labels and Fortran D exponents. It makes no silent unit conversions.\n\n```python\nfrom salmonpy.analysis import read_table, spectrum"
+        }
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "units": "See task-specific units; do not infer from OS",
+        "paths": "Caller-supplied, writable; resolve relative paths from current working directory",
+        "requires_full_salmon": false,
+        "requires_matplotlib": false,
+        "validation_scope": "See PACKAGING.md: wheel validation and external executable validation are distinct"
+      },
+      "sample_files": [
+        {
+          "path": "examples/pulse_spectrum.py",
+          "module": "salmonpy.examples.pulse_spectrum"
+        }
+      ]
+    },
+    {
+      "id": "ase",
+      "intent": "ASEの構造と経路でバンドを計算しASE形式で保存・描画する",
+      "keywords": [
+        "ASE",
+        "Atoms",
+        "BandPath",
+        "BandStructure",
+        "ASE連携",
+        "途切れた経路"
+      ],
+      "api": [
+        "salmonpy.ase.atoms_from_initial",
+        "salmonpy.ase.validate_structure",
+        "salmonpy.ase.explicit_path",
+        "salmonpy.ase.run_bands",
+        "salmonpy.ase.to_ase_band_structure",
+        "salmonpy.ase.dft_from_atoms"
+      ],
+      "inputs": "BandInitialState + matching ASE Atoms + ASE BandPath + explicit reference_ev; conversion-only accepts existing BandStructure",
+      "outputs": "ASEBandRun with native result and ASE BandStructure; ase-bands.json and ase-input.json",
+      "guide": "ASE.md",
+      "instructions": [
+        {
+          "heading": "ASEとの独立したバンド連携",
+          "text": "\n`salmonpy.ase` は任意の連携モジュールです。ASEとの構造・経路の照合と結果変換を\n担当し、計算の実行・初期状態の保護はASEに依存しない `salmonpy.bands` が担当します。\nLD・SBE・TDDFT・FDTDの通常利用にはASEもf90nmlも不要です。\n`salmonpy.ase` のimportだけでもこれらの依存ライブラリは読み込みません。\n\n対応するSALMONpy wheelをインストールした環境で、追加依存を導入します。\n\n```\npython -m pip install \"ase>=3.26,<4\" \"f90nml>=1.4,<2\"\n```\n\nソースから構築する場合は `python -m pip install \".[ase]\"`。\nこの操作には別途ビルド環境が必要です。PyPI公開済みとはしていません。\n本体の `&band/file_band_kpoints` 対応と `SALMONPY_BANDS_V1` 報告を含む、\n監査済みの外部SALMON実行ファイルを用意してください。\n"
+        },
+        {
+          "heading": "使い方",
+          "text": "\n```python\nfrom salmonpy.bands import BandInitialState\nfrom salmonpy.fdtd import SalmonExecutable\nfrom salmonpy.ase import atoms_from_initial, run_bands\n"
+        },
+        {
+          "heading": "利用環境で監査した実行ファイルとSHA256を指定。",
+          "text": "engine = SalmonExecutable(executable_path, validated_sha256)\nwith BandInitialState.from_salmon('gs-bundle', 'gs.inp', executable=engine) as gs:\n    atoms = atoms_from_initial(gs)  # 元のGS入力から新しいASE Atomsを作る\n    # 8原子の立方Siセルの例。別のセルではそのセルに適した経路を選ぶ。\n    path = atoms.cell.bandpath('GX,MR', npoints=17)\n    result = run_bands(gs, atoms, path, 'new-ase-bands',\n                       bands=24, reference_ev=0.0, threads=2)\nresult.plot(filename='bands.png', show=False)"
+        },
+        {
+          "heading": "ASE標準の形式を直接利用可能。",
+          "text": "ase_bands = result.band_structure\n```\n\nGUIのない環境では描画前にMatplotlibの `Agg` backendを選びます。\n例の0 eVは絶対エネルギー基準です。`reference_ev` は明示的に指定し、\nFermi準位や価電子帯上端を推定して設定することはしません。\n\n利用者がASEで用意した `atoms` も渡せます。その場合、元のGS入力と同じセル、\n原子順・元素、原子位置、3次元周期境界であることを確認します。位置は整数倍の\n格子並進を同一視します。セル成分と原子位置の照合許容差は1e-8 Åで、計算後のk点照合にも同じセル精度を反映します。\nセルの変換、原始胞化、原子の並べ替えは自動では行いません。\nセル・位置を変えた系は、それに対応するGSを用意してください。\n"
+        },
+        {
+          "heading": "経路と結果",
+          "text": "\n- ASEの `path.kpts` の順序・値をそのまま本体へ渡します。再補間しません。\n- `GX,MR` のコンマによる区間の切れ目、対称点名、セルをASE結果に保持します。\n  計算単位に合わせた末尾の余剰点だけを確認して除きます。\n- `ase-bands.json` はASEの `BandStructure` JSON、`ase-input.json` は構造・経路・\n  エネルギー基準・換算係数の記録です。`native/` と `result/` も従来どおり保存します。\n- `to_ase_band_structure(bands, path, reference_ev=...)` は既存のSALMONpy結果を\n  変換するだけの入口です。実際のCartesian kとASE側のセル・k点が一致しなければ拒否します。\n- ASEの可変な構造・経路・エネルギー配列をコピーし、呼び出し側のオブジェクトを変更しません。\n\nASEではセルは行ベクトル（Å）、k点は逆格子の分数座標、エネルギー配列は\n`(spin, k, band)` のeVです。SALMONpyの `(k, band, spin)` Hartreeから変換します。\n逆格子の2πと転置は連携側で明示的に扱います。長さはSALMON入力の換算値\n1 bohr = 0.52917721067 Å、エネルギーは既存SALMONpyの\n1 Hartree = 27.211386245988 eVを使い、記録します。ASE既定のCODATA値に暗黙置換しません。\n"
+        },
+        {
+          "heading": "現在の範囲",
+          "text": "\n- 元入力からの構造読み込み：`al`／`al_vec1..3`／`dl*num_rgrid`、原子単位または\n  `A_eV_fs`、inlineまたは束内ファイルのCartesian／分数原子座標。明示した原子配置が必要です。\n- 固定イオン・周期・非スピン分極。PZ／Libxc-PZ／Libxc-PBEは既存バンド入口に準拠。\n- バイナリGS自体の生成条件を解析して入力と照合する機能ではありません。\n  GSと元入力・擬ポテンシャルの一致は利用者が確認します。\n- PZ/KYのASE Calculator・力・固定セル最適化は独立した [ASE_CALCULATOR.md](ASE_CALCULATOR.md) に対応。応力・MPI起動は未実装。\n  構造からのGS計算と全エネルギー取得は別途 [DFT.md](DFT.md) に対応。\n- ASE 3.29.0とmacOS arm64上で実GSの結合を検証。斜交セルは変換と本体経路処理の\n  単体検証であり、斜交セルの実GS全体の検証ではありません。\n\n仕様の参照先：\nhttps://docs.ase-lib.org/ase/dft/kpoints.html\nhttps://docs.ase-lib.org/_modules/ase/spectrum/band_structure.html\n"
+        },
+        {
+          "heading": "構造からGSを用意する",
+          "text": "\n`dft_from_atoms` でASE非依存のDFTモデルを作れます。詳細は [DFT.md](DFT.md)。"
+        }
+      ],
+      "examples": [
+        "from salmonpy.bands import BandInitialState\nfrom salmonpy.fdtd import SalmonExecutable\nfrom salmonpy.ase import atoms_from_initial, run_bands\n\n# 利用環境で監査した実行ファイルとSHA256を指定。\nengine = SalmonExecutable(executable_path, validated_sha256)\nwith BandInitialState.from_salmon('gs-bundle', 'gs.inp', executable=engine) as gs:\n    atoms = atoms_from_initial(gs)  # 元のGS入力から新しいASE Atomsを作る\n    # 8原子の立方Siセルの例。別のセルではそのセルに適した経路を選ぶ。\n    path = atoms.cell.bandpath('GX,MR', npoints=17)\n    result = run_bands(gs, atoms, path, 'new-ase-bands',\n                       bands=24, reference_ev=0.0, threads=2)\nresult.plot(filename='bands.png', show=False)\n# ASE標準の形式を直接利用可能。\nase_bands = result.band_structure\n"
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "python": ">=3.10",
+        "optional_dependencies": [
+          "ase>=3.26,<4",
+          "f90nml>=1.4,<2"
+        ],
+        "module_boundary": "Independent salmonpy.ase; core bands and other physics modules do not import ASE",
+        "native_calculation": "External audited executable with file_band_kpoints and SALMONPY_BANDS_V1; no executable needed for conversion-only",
+        "validation": "ASE 3.29.0; macOS arm64 PZ real-GS integration; skew-cell geometry/coordinates tested separately"
+      },
+      "constraints": [
+        "No implicit primitive-cell conversion or atom reordering",
+        "GS binary provenance must match supplied original input",
+        "Unchanged native solver order and single-rank launch",
+        "Cell/positions tolerance 1e-8 Angstrom; propagate cell precision into k validation",
+        "ASE Calculator and native forces are in the separate ase_calculator task; no stress."
+      ],
+      "sample_files": [
+        {
+          "path": "examples/ase_bands.py",
+          "module": "salmonpy.examples.ase_bands"
+        }
+      ]
+    },
+    {
+      "id": "dft",
+      "intent": "ASE構造または配列から収束済みGSを作りバンドやTDDFTへ再利用する",
+      "keywords": [
+        "DFT",
+        "GS",
+        "基底状態",
+        "SCF",
+        "全エネルギー",
+        "初期状態作成"
+      ],
+      "api": [
+        "salmonpy.dft.Pseudopotential.from_file",
+        "salmonpy.dft.SCFSettings",
+        "salmonpy.dft.DFT",
+        "salmonpy.dft.DFT.run",
+        "salmonpy.ase.dft_from_atoms",
+        "salmonpy.dft.GroundStateResult.open",
+        "salmonpy.dft.GroundStateResult.band_initial_state",
+        "salmonpy.dft.GroundStateResult.tddft_initial_state"
+      ],
+      "inputs": "Geometry, scalar pseudopotentials, explicit even valence electron count, states, real grid, k mesh, XC, audited executable and new directory",
+      "outputs": "Converged GroundStateResult with native outputs/restart, energy in Hartree, updates count, hashes; failed runs retain logs",
+      "guide": "DFT.md",
+      "instructions": [
+        {
+          "heading": "構造から基底状態を計算する",
+          "text": "\nGS計算本体の入口はASEに依存しない `salmonpy.dft` です。\n`salmonpy.ase.dft_from_atoms` はASE構造をこのモデルへコピーする薄い変換です。\nASEを使わない場合は `DFT` に原子番号、行ベクトルのセル（bohr）、分数座標を直接渡せます。\n"
+        },
+        {
+          "heading": "ASEからの使用例",
+          "text": "\n```python\nfrom ase.build import bulk\nfrom salmonpy.ase import dft_from_atoms\nfrom salmonpy.dft import Pseudopotential, SCFSettings\nfrom salmonpy.fdtd import SalmonExecutable\n\natoms = bulk('Si', 'diamond', a=5.43, cubic=True)\npseudo = Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)\nmodel = dft_from_atoms(\n    atoms, pseudopotentials=[pseudo], electrons=32, states=32,\n    grid=(16, 16, 16), kmesh=(2, 2, 2), xc='pz',\n)\nengine = SalmonExecutable(executable_path, validated_sha256)\ngs = model.run(engine, 'new-gs',\n               scf=SCFSettings(max_iterations=300, tolerance=1e-9), threads=2)\nprint(gs.energy_hartree, gs.iterations)\n```\n\nこの格子・k点は接続用の例であり、任意の物性に対する収束を保証しません。\n電子数は擬ポテンシャルの価電子数に合わせて明示します。原子番号の総和からは推定しません。\n対応形式はKYの `_rps.dat` とスカラー・ノルム保存UPFです。UPFのPAW、ultrasoft、SOCは拒否します。\n擬ポテンシャルの元素・価電子数・生成汎関数と計算条件の整合は利用者が確認してください。\n擬ポテンシャルをダウンロードする処理はありません。\n\nASEの初期電荷・磁気モーメント指定はこの入口では受け付けません。\n閉殻・非スピン分極として偶数の電子数と十分な軌道数を指定してください。\nセルの変換や原子の並べ替えは行わず、セル・座標をASEのÅから原子単位へ変換します。\n"
+        },
+        {
+          "heading": "設定の寿命",
+          "text": "\n- モデル作成時に固定：構造、擬ポテンシャルのバイト列、電子数、軌道数、格子、k点、汎関数。\n  元のAtomsや擬ポテンシャルファイルを後から変更しても、モデルは変わりません。\n- 計算ごとに指定：SCFの累積反復上限、`rho_dne` 収束許容値、実行ファイル、新規保存先、スレッド数、タイムアウト。\n- `model.run` は毎回新規GS計算。既存の保存先を上書きしません。再開・warm startのAPIではありません。\n\n収束判定は本体の既存フラグを使います。固有状態の更新・混合・計算順は変更しません。\n正常終了だけでは成功とみなさず、収束報告と再開データを確認します。\n`iterations` は本体のMiter（更新回数）で、収束を検出した次のループ番号とは異なる場合があります。\n失敗時も `ground-state.json` の失敗状態と `native/stdout.log` を残します。\n"
+        },
+        {
+          "heading": "保存・再利用",
+          "text": "\n```python\nfrom salmonpy.dft import GroundStateResult\nfrom salmonpy.bands import BandPath\n\ngs = GroundStateResult.open('new-gs')\nwith gs.band_initial_state(executable=engine) as initial:\n    result = initial.run(\n        BandPath([[0, 0, 0], [.5, 0, 0]], [10], ['Γ', 'X']),\n        'new-bands', bands=24,\n    )\n\nwith gs.tddft_initial_state(executable=engine, max_steps=1000) as initial:\n    with initial.new_state(dt=0.02) as state:\n        J = state.step([1e-4, 0., 0.])  # 新しい端点のA/c、原子単位\n```\n\n`ground-state.json` に設定・入力・実行ファイルの識別情報・収束結果・nativeファイルの\nハッシュを記録します。`native/` に入力・擬ポテンシャル・出力・再開データを保持します。\nディレクトリ全体を移動して `open` できます。native内の変更・追加・欠落ファイルや\nシンボリックリンクを拒否します。自分のメモや後処理結果はnativeの外へ置いてください。\nハッシュは改変検出用であり、第三者による改ざんに対する電子署名ではありません。\n\n初期状態への変換も独立コピーを作り、保存したGSを変更しません。\nTDDFT用入力は元の物理条件を保持して生成します。dtは `new_state`、A/cは各stepで指定します。\n現在のTDDFT初期化は中点伝播・予測子修正子なしです。\n"
+        },
+        {
+          "heading": "環境と対応範囲",
+          "text": "\n任意のASE依存の導入方法はASE.mdを参照してください。外部SALMON実行ファイルは別途必要で、\n`SALMONPY_GS_V1` 収束報告と `SALMONPY_FORCES_V1` 力報告を出す本体を監査して指定します。\nバンド／TDDFTへ接続する実行ファイルにも各入口の対応機能が必要です。\nバイナリ再開形式の互換性は任意の異なるビルド間で保証しません。\n\n固定イオン・3次元周期・非スピン分極、PZ／Libxc-PZ／Libxc-PBE、CPU単一MPIランクが対象。\nLibxcには対応ビルドが必要です。今回の実GS一貫テストはmacOS arm64・PZ Siです。\n本体の力は `gs.forces_hartree_per_bohr` で取得できます。力の格子収束は別途確認します。\nASE Calculatorと固定セル最適化への接続は独立したASE_CALCULATOR.mdに従ってください。\nTB-mBJの新規GS作成、分子・孤立系、応力、MPI起動はこの入口には含みません。既存のTB-mBJ GSを使うTDDFT入口は引き続き利用できます。"
+        }
+      ],
+      "examples": [
+        "from ase.build import bulk\nfrom salmonpy.ase import dft_from_atoms\nfrom salmonpy.dft import Pseudopotential, SCFSettings\nfrom salmonpy.fdtd import SalmonExecutable\n\natoms = bulk('Si', 'diamond', a=5.43, cubic=True)\npseudo = Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)\nmodel = dft_from_atoms(\n    atoms, pseudopotentials=[pseudo], electrons=32, states=32,\n    grid=(16, 16, 16), kmesh=(2, 2, 2), xc='pz',\n)\nengine = SalmonExecutable(executable_path, validated_sha256)\ngs = model.run(engine, 'new-gs',\n               scf=SCFSettings(max_iterations=300, tolerance=1e-9), threads=2)\nprint(gs.energy_hartree, gs.iterations)\n",
+        "from salmonpy.dft import GroundStateResult\nfrom salmonpy.bands import BandPath\n\ngs = GroundStateResult.open('new-gs')\nwith gs.band_initial_state(executable=engine) as initial:\n    result = initial.run(\n        BandPath([[0, 0, 0], [.5, 0, 0]], [10], ['Γ', 'X']),\n        'new-bands', bands=24,\n    )\n\nwith gs.tddft_initial_state(executable=engine, max_steps=1000) as initial:\n    with initial.new_state(dt=0.02) as state:\n        J = state.step([1e-4, 0., 0.])  # 新しい端点のA/c、原子単位\n"
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "module_boundary": "salmonpy.dft has no ASE dependency; salmonpy.ase converts Atoms only",
+        "runtime": "Separate audited SALMON with SALMONPY_GS_V1 report; matching checkpoint-compatible executables for later consumers",
+        "validated": "macOS arm64 PZ Si end-to-end; other platforms and XC not verified in this workflow"
+      },
+      "parameter_lifetimes": {
+        "model": [
+          "geometry",
+          "pseudopotential bytes",
+          "electrons",
+          "states",
+          "grid",
+          "kmesh",
+          "xc"
+        ],
+        "per_run": [
+          "SCF settings",
+          "executable",
+          "new output directory",
+          "threads",
+          "timeout"
+        ]
+      },
+      "constraints": [
+        "Fixed ions, 3D periodic, unpolarized, one rank",
+        "PZ/Libxc-PZ/Libxc-PBE; Libxc requires compatible build",
+        "No implicit pseudopotential download or valence/XC inference",
+        "Check physical convergence separately",
+        "ASE Calculator and native forces are in the separate ase_calculator task; no stress."
+      ],
+      "sample_files": [
+        {
+          "path": "examples/dft_si.py",
+          "module": "salmonpy.examples.dft_si"
+        }
+      ]
+    },
+    {
+      "id": "ase_calculator",
+      "intent": "ASE Calculatorで全エネルギーと力を取得し固定セル構造最適化に接続する",
+      "keywords": [
+        "Calculator",
+        "力",
+        "forces",
+        "BFGS",
+        "構造最適化",
+        "eggbox",
+        "egg-box"
+      ],
+      "api": [
+        "salmonpy.ase_calculator.SalmonCalculator",
+        "salmonpy.dft.GroundStateResult.forces_hartree_per_bohr"
+      ],
+      "inputs": "ASE Atoms, explicit PZ/KY model settings, audited executable, directory; test force/grid convergence independently",
+      "outputs": "energy in eV, native forces in eV/Angstrom, last_ground_state, separate retained GS directories",
+      "guide": "ASE_CALCULATOR.md",
+      "instructions": [
+        {
+          "heading": "ASE Calculator：全エネルギーと本体の力",
+          "text": "\n`salmonpy.ase_calculator.SalmonCalculator` は独立した任意モジュールです。\nこのモジュールのimportにはASEが必要ですが、SALMONpyの通常のimportやLDなどには不要です。\n対応する物理量は `energy`（eV）と `forces`（eV/Å）。応力・free_energyは公開しません。\n初期対応範囲は3次元周期・固定イオンSCF・非スピン分極・PZ＋スカラーKY擬ポテンシャルです。\nLibxc/UPFやTB-mBJの力をこのCalculatorで対応済みとはしていません。\n\n```python\nfrom ase.build import bulk\nfrom ase.optimize import BFGS\nfrom salmonpy.ase_calculator import SalmonCalculator\nfrom salmonpy.dft import Pseudopotential, SCFSettings\nfrom salmonpy.fdtd import SalmonExecutable\n\natoms = bulk('Si', 'diamond', a=5.43, cubic=True)\natoms.calc = SalmonCalculator(\n    executable=SalmonExecutable(executable_path, validated_sha256),\n    directory='ase-calculations',\n    pseudopotentials=[Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)],\n    electrons=32, states=32, grid=(32, 32, 32), kmesh=(2, 2, 2),\n    scf=SCFSettings(max_iterations=500, tolerance=1e-12), threads=2,\n)\nenergy = atoms.get_potential_energy()\nforces = atoms.get_forces()"
+        },
+        {
+          "heading": "格子・k点・SCF精度を目的の力の精度に対して確認してから使用。",
+          "text": ""
+        },
+        {
+          "heading": "BFGS(atoms, logfile='opt.log', maxstep=0.01).run(fmax=0.05, steps=100)",
+          "text": "gs = atoms.calc.last_ground_state\n```\n\n上の格子はSiの例であり、任意の系や目標精度への推奨値ではありません。\n実行ファイルにはGS収束報告と `gs_forces.dat` の `SALMONPY_FORCES_V1` 報告を含めます。\n監査と実行環境の準備はDFT.md、追加依存はASE.mdを参照してください。\n"
+        },
+        {
+          "heading": "状態・保存・失敗",
+          "text": "\n同じ構造へのenergy/forces問い合わせはASEのキャッシュを使います。位置・セル・元素・\n周期境界・初期電荷/磁気設定が変われば、新しいGS計算を行います。初期電荷・磁気設定に\n非ゼロ値があれば現在の非スピン分極入口では拒否します。前のGSの流用はしません。\n\n各計算は指定ディレクトリ内の新規 `gs-...` に保存し、以前の結果を上書きしません。\nこのため長い最適化では保存量が増えます。結果の保持・削除は利用者が管理します。\n同じCalculatorインスタンスを複数スレッドから同時使用することは想定しません。\n\nモデル設定は構築時に固定し、`set(...)` による変更は拒否します。格子などを変更する場合は\n新しいCalculatorを作って `atoms.calc` に設定します。未収束・失敗時は結果と\n`last_ground_state` を消去し、古い力を返しません。失敗ログは計算ディレクトリに残ります。\n\n`GroundStateResult.forces_hartree_per_bohr` で本体の力を原子単位で読み出せます。\nこのプロパティには新しい力報告ファイルが必要です。過去の報告なしGSを読み直せても、\nそこからこのプロパティを取得できるとは限りません。\n"
+        },
+        {
+          "heading": "egg-box効果と力の検証",
+          "text": "\n実空間格子では、原子と格子の相対位置によって全エネルギーが揺れることがあります。\nそのエネルギーを有限差分した力にも揺れが含まれます。本体の軌道微分による力を\n有限差分値に置き換える実装にはしていません。\n\n検証では次の三つを分けます。\n\n1. 本体の力を正しい原子順・符号・単位で渡しているか。\n2. 全原子の剛体並進に対するエネルギーの揺れが、格子間隔とともに小さくなるか。\n3. 本体の力とエネルギー微分が、SCF精度・格子・変位幅に対してどう収束するか。\n\n今回の変位Siでは16³の半格子並進で約0.27 eV、24³で約0.044 eVのエネルギー差があり、\n1格子並進では元のエネルギーに戻りました。粗い格子の数値微分だけで本体の力の良否を\n判定しないでください。実際の数値と条件は検証記録を参照してください。\n\nソース中の `tools/check_force_grid.py` で同じSi診断を再実行できます。\n`tools/test_ase_calculator.py` は24³格子・固定セル・一部原子固定のBFGSを1ステップ実行し、\nエネルギー低下と接続動作を確認するテストです。構造最適化の収束や物性精度の保証ではありません。\n\n参考： https://pubs.rsc.org/en/content/articlehtml/2015/cp/c5cp00351b"
+        }
+      ],
+      "examples": [
+        "from ase.build import bulk\nfrom ase.optimize import BFGS\nfrom salmonpy.ase_calculator import SalmonCalculator\nfrom salmonpy.dft import Pseudopotential, SCFSettings\nfrom salmonpy.fdtd import SalmonExecutable\n\natoms = bulk('Si', 'diamond', a=5.43, cubic=True)\natoms.calc = SalmonCalculator(\n    executable=SalmonExecutable(executable_path, validated_sha256),\n    directory='ase-calculations',\n    pseudopotentials=[Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)],\n    electrons=32, states=32, grid=(32, 32, 32), kmesh=(2, 2, 2),\n    scf=SCFSettings(max_iterations=500, tolerance=1e-12), threads=2,\n)\nenergy = atoms.get_potential_energy()\nforces = atoms.get_forces()\n# 格子・k点・SCF精度を目的の力の精度に対して確認してから使用。\n# BFGS(atoms, logfile='opt.log', maxstep=0.01).run(fmax=0.05, steps=100)\ngs = atoms.calc.last_ground_state\n"
+      ],
+      "external_input_source": "salmon-inputs",
+      "environment": {
+        "import_requires": [
+          "ase"
+        ],
+        "optional_dependencies": [
+          "ase>=3.26,<4"
+        ],
+        "module_boundary": "Separate optional module; not imported by base salmonpy or salmonpy.ase",
+        "native": "Requires GS and force versioned reports; CPU single rank",
+        "validated": "Mac PZ/KY Si; optimizer smoke is not a converged structure"
+      },
+      "constraints": [
+        "Only energy/forces; no stress or free_energy",
+        "PZ and scalar KY potentials only",
+        "Changed geometry launches fresh GS; failed calculation clears cache",
+        "Native forces unchanged; do not treat coarse-grid energy derivatives as exact",
+        "Settings fixed at construction; new calculator for new model settings"
+      ],
+      "sample_files": [
+        {
+          "path": "examples/ase_energy_forces.py",
+          "module": "salmonpy.examples.ase_energy_forces"
+        }
+      ]
+    }
+  ],
+  "documents": {
+    "AGENTS.md": {
+      "sections": [
+        {
+          "heading": "SALMONpy development",
+          "text": "\nRead AI_USAGE.md before using or extending these interfaces. Crystalline TDDFT and SBE interfaces are A-driven only. The LD Python preview is available; FDTD has a batch executable adapter; the built-in velocity-gauge SBE adapter and text loader are available; a process-isolated PZ/TB-mBJ/Libxc-PZ/Libxc-PBE middlepoint TDDFT adapter is available with a separately audited worker executable. Read WORKFLOWS.md for supported scope.\n\nStart with manual.json or `python -m salmonpy.manual QUERY` to find tasks, APIs, examples and constraints. Consult the registered SALMON-inputs repository for published input examples, checking version and required files.\n\n`manual.json` is exclusively the AI-facing task catalog. Human-facing documentation is separate; do not present JSON search results as the user manual.\n\nFor beginner workflows, apply manual.json beginner_intake before choosing calculation scale: ask only missing memory/CPU budgets and intent, then state measured/estimated/unknown capability limits.\n"
+        }
+      ]
+    },
+    "AI_USAGE.md": {
+      "sections": [
+        {
+          "heading": "SALMONpy: AI向け利用・実装ガイド",
+          "text": "\nLD単独利用のPython試作APIを提供しています。実際の入口は `LorentzDrude` の `respond`、`new_state`、`permittivity` です。構築方法・単位・時間位置は README.md と examples/ld_response.py を参照してください。FDTDには外部実行ファイルを使うバッチ入口があります。WORKFLOWS.mdを参照してください。結晶は共通A駆動インターフェースを持ち、内蔵SBE速度ゲージと初期状態ローダーを提供します。TDDFTはPZ／TB-mBJ／Libxc-PZ／Libxc-PBE・中点伝播のプロセス分離型接続を提供します。存在しないAPIを例示しないでください。\n\n"
+        },
+        {
+          "heading": "物質応答の境界",
+          "text": "\n結晶の公開インターフェースはA駆動のみです。TDDFTとSBEは、内部状態と新旧Aを受けて時間発展しJを返す交換可能な物質応答として設計します。結晶にE駆動の選択肢を追加しないでください。SBEは既存の演算順を保った共有Fortranカーネルに接続しています。\n\nE,Hを扱うFDTDとA駆動の結晶の間には結合処理を置きます。単位、ゲージ、時間位置、符号、座標回転、Jの体積規格化は現行マルチスケール実装に準拠して確定し、アダプターで明示します。Aの積分履歴は結合側、波動関数・密度行列は物質側が保持します。\n\nドルーデ＝ローレンツはE駆動の構成則として独立させます。結晶用A駆動APIに合わせるための数式変更はしません。\n\n"
+        },
+        {
+          "heading": "今回利用できるFortran境界",
+          "text": "\n`src/maxwell/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `testsuites/unit_ld/test_ld.f90` と `src/maxwell/fdtd_eh.f90` を参照してください。\n\n`ld_coefficients` の累積先は呼び出し前にゼロ初期化します。`ld_store_old` と `ld_update` は既存演算順を保つため分割E成分を受け取ります。`rj*_fdtd_ld` は物理電流の単純和ではなく補助量Qです。\n\n`fdtd_eh_kernel.f90` は差分演算 `eh_fd` を提供します。`fdtd_eh` は引き続き時間ループ、境界、通信、観測、再開ファイルを調整します。Python向け単一ステップAPIはまだありません。\n\n"
+        },
+        {
+          "heading": "変更してはいけない更新順",
+          "text": "\n旧J/E保存 → E更新（LD係数を含む）→ 光源 → 旧Q注入 → E通信 → LDのJ/P/Q更新 → 線形応答 → 旧H保存 → H更新 → H通信 → TTM → 観測・保存。\n\nLDは電流を返すだけでは分離できません。E更新係数への寄与も必要です。係数を固定したまま時間刻みを変更しないでください。独立計算には別々の状態インスタンスを使います。\n\n"
+        },
+        {
+          "heading": "検証と禁止事項",
+          "text": "\nビルド前に `python tools/check_forbidden_eigensolvers.py --source-root src` を実行します。構成・増分ビルド時の検査を外しません。新規実行ファイルは全アプリケーションオブジェクトを検査し、再利用時は記録されたSHA256と照合します。禁止された固有値ドライバーへのフォールバックはありません。PZHEEVDの検証には固有値、残差、直交性、ワークスペース容量を含めます。\n\nIEEE判定は各要素へのスカラー呼び出しに限定します。GSデータを収集しません。計算結果は利用者が指定した書き込み可能な出力先へ保存し、コードツリーに格納しません。\n\n変更後は独立LDの旧演算との比較とFDTD全体の比較を行います。単一スレッドのビット一致と並列の数値許容差検証を区別します。再開互換性や未検証の計算機での動作を推定だけで保証しないでください。\n\n"
+        },
+        {
+          "heading": "入力の寿命",
+          "text": "\nINPUT_CONTRACT.md に従います。材料係数はモデル作成時、dtと初期条件は状態作成時、Eは各stepで指定します。`material.config` と `state.config` は確定値の読み取り専用レコードです。設定変更は新しいモデル・状態の作成で行い、private属性を書き換えません。`respond` は毎回新規状態です。設定レコードはチェックポイントではありません。\n\n"
+        },
+        {
+          "heading": "配布",
+          "text": "\nwheelの構築と修復・OS別検証は PACKAGING.md に従います。検証済み環境とCI設定のみの環境を混同しません。wheel利用者にはFortranコンパイラを要求せず、ソース構築時のみ要求します。\n\n構造・波形・解析の単独入口は WORKFLOWS.md に記載しています。FDTDの一ステップAPI、周期構造、斜め入射、未対応のTDDFT計算方式を対応済みとして例示しないでください。共通Acos2パルスとFDTD側のCEP規約の差はアダプターで0.25周期補正します。\n\n\n"
+        },
+        {
+          "heading": "SBEの接続",
+          "text": "\n`salmonpy.sbe.SBEInitialState.from_salmon` は原子単位・単一スピンの\n`_k.data`, `_eigen.data`, `_tm.data` を読みます。`bands` はファイルの全バンド数、\n`active_bands` は任意の伝播バンド数です。占有数は現行SBEと同じ閉殻規約です。\n`new_state(dt=..., initial_A=...)` ごとに独立した密度行列を生成します。\n結晶はA/c駆動のみ。中点Aで四次Taylor伝播、新しい端点AでJ評価の順を保持します。\n補正次数と非局所補正は初期モデルで固定し、dtは状態作成時に固定します。\nSBEの長さゲージ・バイナリ再開は未対応です。四次Taylor法なので厳密な\nユニタリー性や自動誤差制御を保証しません。APIは刻み幅を自動変更しません。\n\n\n"
+        },
+        {
+          "heading": "TDDFTの接続と寿命",
+          "text": "\n`salmonpy.tddft.TDDFTInitialState.from_salmon` は自己完結した入力ディレクトリを\n複製し、ハッシュ付きの初期スナップショットを所有します。初期GSのバイナリ解釈は\nSALMONの既存ローダーが行います。各 `new_state` は専用プロセスと作業コピーを所有し、\n波動関数、Vh履歴、予測子修正子、XCや通信の共有変数を他の計算と共有しません。\n`with` で解放してください。共通 `respond` は成功・失敗とも自動的に解放します。\nPZ／TB-mBJ／Libxc-PZ／Libxc-PBE、周期系、固定イオン、非スピン分極、中点伝播、CPU一MPIランクが対象です。\n実行ファイルは別途構築・監査し、SHA256を指定します。wheelだけでTDDFTが動くとは\n説明しないでください。dt、最大ステップ数、初期Aは状態作成時に固定します。\n共通JはSALMONの電子物質電流です。Maxwell側で電荷電流が必要なら符号は−Jです。\n異常終了時は受理済みA履歴を再実行して復元し、復元失敗時は状態を閉じます。\n実GSによる検証と合成波動関数による接続回帰を区別してください。\n\nLibxc-PZ/PBEには `USE_LIBXC=ON` の外部SALMONが必要です。Libxc全汎関数の対応ではありません。GSとRTで汎関数・擬ポテンシャルを一致させてください。現ローダーはGS生成条件との整合を自動判定しません。PBEの検証はヘッダーでPBE・NC・スカラー相対論・NLCCありを確認したSi UPFを使用しました。詳細は docs/libxc-validation-2026-11-13.md を参照してください。\n\n"
+        },
+        {
+          "heading": "後処理用アーカイブ",
+          "text": "\nOUTPUTS.md に従います。`crystal.respond(..., output_directory=...)`、\n`TDDFTState.finish(directory)`、`outputs.OutputArchive` と `outputs.save_arrays` が\n実在する入口です。TDDFTのfinishは状態を閉じ、初期ファイルハッシュと選択した\n本体出力を残します。大きい分布は初期入力のanalysisで選択・間引きます。\n波動関数チェックポイントとprojection/unfoldingは未対応です。NPZアーカイブを\nrestartファイルとして渡さないでください。別ノード通信やコア固定は未実装・未検証です。\n\n"
+        },
+        {
+          "heading": "バンド図",
+          "text": "\nBANDS.mdを参照してください。`bands.BandStructure.from_salmon` と `.plot` が入口です。\n固有値の単位、実際のCartesian k、セルの選択、余剰点、収束対象バンド、エネルギー基準を\n明示してください。経路上の価電子帯上端を全域のVBMと呼ばないでください。\n\nバンドの計算入口は `BandInitialState.from_salmon` → `run(BandPath, ...)`。\n初期束の外の新規保存先、対応した監査済み実行ファイルを使い、未収束を成功扱いしません。\n\nASE連携は任意の独立モジュール `salmonpy.ase`。ASE.mdを参照。\n`run_bands` は構造を照合し、ASEのk点列をそのまま計算します。Calculator・力は独立したASE_CALCULATOR.mdの対応範囲を参照してください。\n\nGS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DFT.mdに従い、電子数・擬ポテンシャル・格子を明示します。\n収束済み `GroundStateResult` からバンド／TDDFT初期状態を作れます。PZ/KYのCalculatorと本体の力はASE_CALCULATOR.mdを参照してください。\n\n`salmonpy.ase_calculator.SalmonCalculator` は任意依存の独立モジュール。energy/forcesのみ、PZ/KY・単一ランクが対象です。\n粗い格子のエネルギー有限差分はegg-box効果を含むため正解と仮定せず、剛体並進と格子収束を調べます。\n\n"
+        },
+        {
+          "heading": "初心者への最初の案内",
+          "text": "\nmanual.jsonの `beginner_intake` を必ず適用します。新しい計算を選ぶ前に、未回答の\n「使ってよい総メモリ」「使ってよいCPU並列数」「やりたいこと」を短くまとめて聞きます。\n既に回答された条件は再質問せず、「不明」も受け付けます。装置の全メモリ・全コア数を\n自動的に利用許可と解釈しません。目的に応じて構造規模・精度・所要時間の希望を補います。\n\n最初に、今できること／追加準備が必要なこと／未対応と、予算内で始められる小規模例を示します。\n計算規模の上限は実測・暫定見積もり・不明を区別します。未測定の原子数上限などを断言しません。\n必要なら予算に収まる小規模試行でピークメモリ・時間・保存量を測定し、条件を記録して更新します。\n見積もりはメモリ強制制限ではありません。自動容量推定器・ハードメモリ制限は現状未実装です。\n\nプロセスとスレッドを合計したCPU使用量、全子プロセスを含むメモリ、保存容量を扱います。\nメモリの余裕は許可された上限の内側に確保します。現在のPython起動が単一MPIランクである\n機能を、任意のMPI並列数で実行可能と案内しません。収まる計算規模と物理的な収束精度は別です。\n\n実行可能な用途別Pythonサンプルと必要な入力は [examples/README.md](examples/README.md) を参照してください。AI検索の各taskの `sample_files` からも辿れます。\n\n"
+        },
+        {
+          "heading": "初見の環境診断と検索",
+          "text": "\n`python -m salmonpy.doctor --json` でライブラリの読み込み可否、追加依存の所在、\n任意指定した外部実行ファイルのハッシュ照合を確認できます。計算・コンパイル・導入は行いません。\n外部SALMONの `hash_matches` を機能対応や実行成功と読み替えないでください。\n`manual.search` は常に `getting_started` と `task_catalog` を返します。一致しない検索語では\n目的別一覧を示して目的を確認し、対応不能とは即断しません。\n"
+        }
+      ]
+    },
+    "BANDS.md": {
+      "sections": [
+        {
+          "heading": "バンド図",
+          "text": "\n`salmonpy.bands.BandStructure.from_salmon('band.dat')` はSALMONの\n`theory='dft_band'` のブロック形式を読みます。`k_cartesian` は実際に計算した\nCartesian k (bohr⁻¹)、`energies` は (k, band, spin) のHartree値です。\n`plot(reference_ev=..., ticks=[(index,label), ...])` はMatplotlibのAxesを返します。\n描画には追加依存のMatplotlibが必要です。対応する配布wheelをインストールした環境で\n`python -m pip install matplotlib` を実行します。PyPI公開は未実施です。\nソースからの構築では `python -m pip install \".[plot]\"` も使用できますが、\nFortranなどのビルド環境が別途必要です。import時のコンパイルはありません。\n\n```python\nfrom salmonpy.bands import BandStructure\nb = BandStructure.from_salmon('band.dat')\nax = b.plot(reference_ev=0.0)  # 明示的に絶対エネルギーのまま表示\nax.figure.savefig('bands.png', dpi=160)\n```\n"
+        },
+        {
+          "heading": "計算",
+          "text": "\n現在は別途構築したSALMON実行ファイルを使用します。既存のGS入力と擬ポテンシャルを\n独立した作業ディレクトリへコピーし、収束済み `data_for_restart` を `seed/` にコピーします。\nGSと同じ格子、セル、状態数、汎関数、擬ポテンシャル、k点数を維持し、次を変更します。\n\n```\n&calculation\n theory='dft_band'\n/\n&control\n sysname='Si', yn_restart='y', directory_read_data='./seed/',\n yn_reset_step_restart='y'\n/\n&band\n lattice='non', nref_band=24, num_of_segments=4,\n ndiv_segment(1:4)=4,4,4,4,\n kpt(:,1)=0,0,0, kpt(:,2)=.5,0,0,\n kpt(:,3)=.5,.5,0, kpt(:,4)=.5,.5,.5, kpt(:,5)=0,0,0,\n tol_esp_diff=1d-5\n/\n```\n\nこの例は8原子の立方Siセル用。kptはそのセルの逆格子基底の分数座標です。\n原始FCCセルの経路とは異なり、折り畳まれたバンドになります。\n通常のSCFと異なり、バンド反復では読み込んだ密度からのポテンシャルを固定します。\n終了ログだけでなく、各k点ブロックの必要バンドの収束を確認してください。\n`nref_band=24` なら最初の24バンドまでが収束判定対象です。\n\n今回の本体修正では、最後の頂点の読み落としと逆格子変換の重複を修正し、\n最後の終点を必ず含めました。計算単位に合わせた余剰点は終点の複製です。\n4区間×4分割なら17点を描画し、残りの余剰点を除きます。\n旧実行ファイルにはこの修正がないため、同じ入力から同じ経路を得られません。\nローダーは旧形式も読めますが、誤った経路で計算済みの固有値を修復することはできません。\n\n`examples/plot_bands.py band.dat bands.png` はこのSi例を描きます。\n32電子・非スピン分極の占有16バンドの経路上の最高エネルギーを0 eVにします。\nこれは全Brillouin域のVBMやFermi準位の自動推定ではありません。\n今回の12³格子・粗い経路は接続確認用であり、定量的なギャップの収束計算ではありません。\nこの入口自体は対称点探索・unfolding・金属の占有判定を行いません。\nGS作成はDFT.md、ASEによる経路生成はASE.mdを参照してください。\n"
+        },
+        {
+          "heading": "初期状態から計算する",
+          "text": "\n`BandInitialState` は読み込み時の自己完結したGSディレクトリをコピーして保持します。\n入力はそのGSを生成した元のDFT入力です。再開データは `data_for_restart/`、\n擬ポテンシャルなどは同じ束の中に相対パスで置いてください。\nバイナリの生成条件と入力の物理的一致は利用者が確認します。ハッシュ検査だけでは\n異なる計算由来のGSを判別できません。\n\n```python\nfrom salmonpy.bands import BandInitialState, BandPath\nfrom salmonpy.fdtd import SalmonExecutable\n"
+        },
+        {
+          "heading": "この環境の監査済み実行ファイルと記録済みSHA256を利用者が指定する。",
+          "text": "engine = SalmonExecutable(executable_path, validated_sha256)\npath = BandPath(\n    vertices=[[0, 0, 0], [.5, 0, 0], [.5, .5, 0], [.5, .5, .5], [0, 0, 0]],\n    intervals=[4, 4, 4, 4], labels=['Γ', 'X', 'M', 'R', 'Γ'],\n)\nwith BandInitialState.from_salmon('gs-bundle', 'gs.inp', executable=engine) as gs:\n    result = gs.run(path, 'new-band-run', bands=24,\n                    tolerance=1e-5, max_iterations=300, threads=2)"
+        },
+        {
+          "heading": "任意の明示的なエネルギー基準。0.0なら絶対エネルギー表示。",
+          "text": "ax = result.plot(reference_ev=0.0)\nax.figure.savefig('bands.png', dpi=160)\n```\n\n- `vertices` は当該セルの逆格子の分数座標、`intervals` は各区間の分割数。\n  最大10区間。始点と最後の終点を含め、描画用の余剰点は自動的に取り除きます。\n- `bands` は必要な収束バンド数。`tolerance` は固有値変化の許容値（Hartree）。\n  これは離散化・k点数・擬ポテンシャル由来の誤差限界ではありません。\n- 保存先は初期束の外にある新規ディレクトリ。`native/` にコピーした初期ファイル、\n  実際の入力、ログ、未加工の出力を、`result/` に配列と単位・条件を保存します。\n  追加の図は `result.plot` で生成します。図の失敗で完了済みの計算を失いません。\n- 同じ `gs` から異なる `path` を何回でも計算できます。前の計算の状態は再利用しません。\n  `with` の終了で保持した初期コピーを解放します。計算結果の保存先は残ります。\n- 正常終了に加え、全k点ブロックの `bands` 本が収束し、実際のk座標が指定と一致した\n  場合だけ結果を返します。未収束・中断・旧実行ファイルで判定情報がない場合はエラー。\n  失敗時も `band-run.json` と `native/stdout.log` を残します。\n\nこの入口の対応範囲は固定イオン・周期系・非スピン分極のPZ／Libxc-PZ／Libxc-PBEです。\nLibxcには対応する別途構築のSALMONが必要です。TB-mBJ、SOC、DC、構造最適化、\nMPI起動はこの入口では未対応です。元入力の解析出力と並列配置は引き継がず、\n単一MPIランクのバンド計算として実行します。ソルバーの反復設定は引き継ぎ、\n`nscf` は `max_iterations` に置き換えます。この回数は本体の規約どおり\n全k点ブロックにわたる累積反復数の上限であり、ブロックごとの回数ではありません。\n\n本体には `band_status.dat` の `SALMONPY_BANDS_V1` 出力を含む今回の修正が必要です。\n旧wheelの対応OS一覧は、この外部実行ファイルの動作保証ではありません。\n実GS結合テストはmacOS arm64で実施しました。斜交セルの検証は本体の経路生成・\nk設定処理の単体テストであり、斜交セルのGS全体を検証したものではありません。\n"
+        },
+        {
+          "heading": "任意のk点列",
+          "text": "\n`ExplicitKPoints(kpoints)` はASEに依存しない、分数座標 `(nk,3)` の読み取り専用コピーです。\n`BandInitialState.run` に `BandPath` の代わりに渡せます。本体には\n`&band/file_band_kpoints` を使い、点数に続く3列の分数座標を読み込ませます。\n再補間は行わず、末尾の計算用余剰点だけを追加・除去します。\nこの列自体は経路の切れ目やラベルを持たないので、`BandRun.plot` では描画せず、\nASEなどの経路情報を持つ側で描画します。ASE接続は独立した [ASE.md](ASE.md) を参照。"
+        }
+      ]
+    },
+    "INPUT_CONTRACT.md": {
+      "sections": [
+        {
+          "heading": "Input parameter lifecycle",
+          "text": "\nThis is the SALMONpy public interface rule. LD implements it now; other backends\nmust adopt it when their Python interfaces are introduced.\n\n| Lifetime | LD example | Allowed change |\n| --- | --- | --- |\n| Material/model | plasma frequency, pole strengths/resonances/damping | Construct a new material |\n| Evolution state | dt, initial E, initial P/J, integration method | Construct a new state |\n| Call | E at the next step | Supply each call |\n| Query | Frequencies for permittivity, current P/J | Query without advancing state |\n\nOne parameter has one owner; `step` does not accept material settings or dt.\n`respond(field, dt=...)` is a convenience operation that creates a fresh state\neach call, not an override of an existing state's dt.\n\n`material.config` and `state.config` expose frozen resolved records. Sequence\nvalues are tuples, and `dataclasses.asdict(config)` produces an independent copy\nfor records/JSON serialization. The state configuration records initial settings;\n`state.time`, `state.current` and `state.polarization` report evolving quantities.\nDefaults (units, background permittivity, initial zero P/J and integration method)\nare explicit in the records. They are fixed implementation choices, not options.\n\n```python\nfrom dataclasses import asdict\nprint(asdict(material.config))\nstate = material.new_state(dt=0.1)\nprint(asdict(state.config))"
+        },
+        {
+          "heading": "state.dt = 0.2        # AttributeError; create another state instead",
+          "text": ""
+        },
+        {
+          "heading": "state.step(E, dt=.2)  # TypeError; E is the only step parameter",
+          "text": "```\n\nNumeric scalars must be real, finite numeric scalars; strings, booleans, complex\nnumbers and length-one arrays are not accepted as scalar settings. Pole arrays\nmust be nonempty, have identical one-dimensional shapes and nonnegative finite\nvalues. The initial E and each step's E must have shape (3,). The batch field must\nhave shape (N,3), N>=1. Inputs are copied so caller mutation cannot alter the model\nor stored field. Public settings have no setters; private underscore attributes\nare implementation details and must not be modified.\n\nValidation failure, native-library failure and nonfinite native output do not\ncommit a step. P/J, previous E and step count are preserved. Step time is implicit:\nthe new E is at `state.time + state.dt`. No automatic reset or interpolation is\nperformed. The API cannot detect a caller supplying the wrong physical time.\n\nFor future backends, restart loading must check model, units, state schema and\ntime-evolution settings before accepting state. Configuration records alone are\nnot checkpoints: per-pole P/J and previous E are also required. No checkpoint\nsave/load API is implemented in this preview.\n\nOutput selection must not alter the physical update. An observable requiring\nhistory or online accumulation must be enabled before that history begins;\nrequesting it late must not imply that missing past samples can be reconstructed.\n\nSBE: eigenvalues, momentum/nonlocal matrices, weights, lattice, electron count,\ncorrection order and nonlocal-correction flag belong to immutable SBEInitialState.\n`new_state` fixes dt, time0 and initial A; only the next endpoint A is passed to\n`step`. Density, previous A and current belong to each individual state. Failed\nvalidation or nonfinite native output does not commit a step. Independent states\nnever share mutable density matrices.\n\n\nTDDFT: the loaded bundle, executable identity, OpenMP thread count and response\n timeout are immutable factory settings. Every state fixes dt, zero time origin,\ninitial A and maximum step capacity. Only Anew is a per-step input. Copies of the\ncomplete input bundle and process-owned native data ensure independence, including\nmodule globals. Direct states require close/context-manager ownership; common\nrespond closes automatically. Native failures replay accepted history before\nreturning an error, or explicitly close the state if replay fails."
+        }
+      ]
+    },
+    "OUTPUTS.md": {
+      "sections": [
+        {
+          "heading": "後処理用の出力と実行場所",
+          "text": ""
+        },
+        {
+          "heading": "プロセス／CPUの分離",
+          "text": "\nTDDFTの状態ごとに専用プロセスと作業ディレクトリを持ちます。同一マシンの\nFDTDプロセスと2つのTDDFTプロセスを接続し、通常の2 MPIランクのマルチスケール\n実行と比較済みです。OSが各プロセスを実行するコアを選びます。コア固定や別ソケット\nへの配置を検証したわけではありません。1つの状態に同時にstepを呼ばないでください。\nSBE/LDの状態も独立に作成します。同じ状態を複数スレッドで更新する契約はありません。\n\n別ノード用の通信・配置APIは未実装です。将来も波動関数は担当プロセスに置き、\n結合には時刻・ステップ・点ID・A/c・Jを交換する構成にします。場の更新は必要な\n全点の応答がそろってから進め、遅延した電流を別のステップに混ぜません。\n出力も各状態が別のディレクトリへ書く設計とし、複数プロセスによる同一ファイルへの\n同時書き込みを避けます。BLAS/OpenMPスレッド数はプロセス数と合わせて設定します。\n"
+        },
+        {
+          "heading": "出力の入口",
+          "text": "\n共通A駆動のバッチ計算では、保存先を明示します（省略時は従来どおり保存しません）。\n\n```python\nfrom salmonpy.crystal import respond\nfrom salmonpy.outputs import OutputArchive\n\nresult = respond(initial, drive, output_directory='run-001')\narchive = OutputArchive.open('run-001')\ntime = archive.array('time')\nA = archive.array('A')             # SALMON Ac=A/c、原子単位\nJ = archive.array('J')             # 電子のmatter current。電荷電流は -J\n```\n\n`time`, `A`, `J`は初期状態を含む端点サンプルです。TDDFTでは、正常にプロセスを\n終了してファイルをフラッシュした後、ワーカーファイルも保存します。\n手動ステップの場合は `state.finish('point-001')` で保存してその状態を閉じます。\n単なる `state.close()` は保存しません。初期状態ローダーは別の計算に再利用できます。\n\n保存先は新規ディレクトリでなければなりません。保存に失敗すると `OutputSaveError`\nが発生し、`error.recovery_directory` に元のワーカーファイルを保持します。\nその中の `run/` が生データです。可能であれば `accepted-response.npz` と\n`recovery.json` も書きます。共通respondの後始末やオブジェクト破棄でも保持されます。\n回収したら利用者が削除してください。これは一時領域なのでOSの清掃までは保証しません。\n\nアーカイブは再開チェックポイントではありません。変更されていない\n`data_for_restart/` の大きなGSデータは複製せず、ハッシュを記録します。\nその他のファイルは保持します。初期ディレクトリに以前の出力が含まれている場合も\n捨てず、索引の `content_matches_initial_bundle` で元ファイルと同じ内容かを示します。\n入力と出力の混在を避けるため、通常はGSデータと入力だけの初期ディレクトリを使います。\n"
+        },
+        {
+          "heading": "TDDFTで選べる出力",
+          "text": "\n初期状態のSALMON入力の `&analysis` で選択します。この設定と保存間隔は\n状態作成後に変更せず、別条件には新しい初期状態を用意します。\n\n| 物理量 | 有効化・間隔 | 後処理 |\n|---|---|---|\n| A・電子電流・時刻 | 共通APIで常時記録 | `archive.array(...)` |\n| 全エネルギーと内訳 | 本体の `_rt_energy.data` | `archive.table(...)` |\n| 電子密度・初期密度との差 | `yn_out_dns_rt='y'`, `out_dns_rt_step` | `archive.cube(...)` |\n| 微視的電流3成分 | `yn_out_micro_je='y'`, `out_micro_je_step` | CUBE |\n| ELF | `yn_out_elf_rt='y'`, `out_elf_rt_step` | CUBE |\n| 静電場3成分 | `yn_out_estatic_rt='y'`, `out_estatic_rt_step` | CUBE |\n| k点・バンド・スピン別電流 | `yn_out_current_decomposed='y'`, `out_current_decomposed_step` | 専用ブロック読み込み |\n| 入力・ログ・実行ファイルハッシュ・初期ファイルハッシュ | アーカイブ保存時 | `input.inp`, `manifest.json`, `native/` |\n\n例（空間分布は8ステップごと、形式はCUBE）:\n\n```text\n&analysis\n format_voxel_data='cube'\n out_rt_energy_step=8\n yn_out_dns_rt='y', out_dns_rt_step=8\n yn_out_micro_je='y', out_micro_je_step=8\n yn_out_elf_rt='y', out_elf_rt_step=8\n yn_out_estatic_rt='y', out_estatic_rt_step=8\n yn_out_current_decomposed='y', out_current_decomposed_step=8\n/\n```\n\n`out_rt_energy_step` は本体の固有エネルギー再計算の間隔で、エネルギーファイルを\nその間隔だけに間引く指定ではありません。TB-mBJの出力エネルギーを変分的な\nTB-mBJエネルギー汎関数の検証値と解釈しないでください。\n静電場は本体のVh勾配の出力で、全Maxwell場そのものではありません。\n微視的電流とセル平均Jでは非局所擬ポテンシャルの扱いも含め定義を確認してください。\n\n```python\nenergy = archive.table('native/Si_rt_energy.data')\ndensity = archive.cube('native/Si_dns_000008.cube')\nrho = density.values              # (nx, ny, nz)\norigin, axes = density.origin, density.axes"
+        },
+        {
+          "heading": "座標 = origin + [ix, iy, iz] @ axes",
+          "text": "print(density.unit_note)          # 本体の単位コメントを保持。自動変換しない\n\nbands = archive.decomposed_current('native/Si_current_decomposed.data')\nt_band = bands.step * archive.metadata['dt']\nJ_total = bands.current.sum(axis=1)"
+        },
+        {
+          "heading": "indices の列は k点・バンド・スピン。占有数・k点重みは本体ですでに乗算済み。",
+          "text": "```\n\n時刻・単位・符号を推測して書き換えません。ネイティブ表の列情報と元ヘッダーも\n索引に残します。CUBEはSALMONの正の格子数を持つスカラー形式に対応します。\nAVS/VTKは生ファイルを保持できますが、このモジュールに専用リーダーはありません。\n\nRT波動関数チェックポイント、射影・unfoldingの出力は現在のワーカーでは未対応です。\n`write_rt_wfn_k='y'` は明示的に拒否します。終了時の本体の自動FFT・pulse出力も\n呼ばないため、保存したA/Jから解析します。収束済みGSの波動関数をRT最終波動関数と\n誤って扱わないでください。\n"
+        },
+        {
+          "heading": "LD・SBE・FDTDの選択保存",
+          "text": "\n`save_arrays` は実数・複素数の選択配列を保存できます。単位と条件は呼び出し側が\n明示し、ライブラリは物理的意味を推測しません。例えばLD:\n\n```python\nfrom salmonpy.outputs import save_arrays\nsave_arrays('ld-run', {'time':response.time, 'E':E,\n                     'P':response.polarization, 'J':response.current},\n            metadata={'units':{'time':'a.u.','E':'a.u.','P':'a.u.','J':'a.u.'},\n                      'description':'LD response; model parameters recorded separately'})\n```\n\n- LD: E・P・J、周波数と複素誘電率を選択保存できます。\n- SBE: 共通A/J時系列に加え、手動stepで選んだ時刻の `state.density` をコピーして\n  密度行列・占有・コヒーレンス解析に使えます。全時刻の密度行列は自動保存しません。\n- FDTD: バッチ実行の観測点E/H・材料格子・入力は既に実行ディレクトリに残ります。\n  NumPy配列に整理して同じ保存関数で出せます。2点マルチスケール検証用のA/J履歴は\n  検証成果物に保存済みですが、公開E/H単一ステップAPIはまだありません。\n- DFT: 通常SALMONのエネルギー・密度・固有値・k点・遷移行列などを元の出力として\n  保持します。GS計算・保存・再読み込みはDFT.mdに対応します。全形式の統一リーダーではありません。\n- スペクトル: `salmonpy.analysis.spectrum` の複素結果と `dict(result.config)` を\n  一緒に保存すると窓・フーリエ符号・規格化・単位を残せます。\n\n容量の大きい分布・行列は保存間隔と対象を選び、後から復元できない情報を優先します。\nハッシュ検証は `OutputArchive.open` で既定有効です。利用者が意図的に編集した\nアーカイブを読む場合のみ `verify=False` を指定できます。"
+        }
+      ]
+    },
+    "PACKAGING.md": {
+      "sections": [
+        {
+          "heading": "LD and SBE wheels",
+          "text": "\nThe package uses scikit-build-core and a separate CMake project. LD and velocity-gauge SBE kernels, C ABI adapters and Python APIs are installed.\nThe SALMON executable and MPI are not required. SBE links system Accelerate on\nmacOS and bundled OpenBLAS on Linux/Windows. Source builds on Linux/Windows\nrequire an LP64 OpenBLAS development installation. Native libraries are built\nfor each platform, with the same Python interface.\n\nThe table below is verified for 0.1.0a4, including the Python TDDFT adapter.\n[CI run 43363121675](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43363121675)\npassed all four platform jobs and the source-distribution build at `e837ebac`.\nEach of 20 installed wheels (CPython 3.10–3.14) passed 34 tests (680 total).\nWindows OpenBLAS discovery uses CMAKE_PREFIX_PATH pointing to UCRT64.\n\nThe separately built TDDFT worker executable is not included in these wheels.\nIts native regression passed on Linux CI and local macOS arm64; Windows and\nIntel macOS native TDDFT execution are not claimed by wheel test results.\n\n"
+        },
+        {
+          "heading": "Target matrix",
+          "text": "\n| Platform | Architecture | CPython | Status |\n| --- | --- | --- | --- |\n| macOS | arm64 | 3.10–3.14 | CI passed (macOS 15) |\n| macOS | x86_64 | 3.10–3.14 | CI passed |\n| Linux manylinux_2_28 | x86_64 | 3.10–3.14 | CI passed |\n| Windows | AMD64 | 3.10–3.14 | CI passed |\n\nThe CI macOS deployment target is 15.0; dependent runtimes can impose additional\nrequirements, which the repair/test stage must validate. Linux arm64, Windows\narm64, musl, free-threaded Python and PyPy are not initial release targets.\n\n"
+        },
+        {
+          "heading": "Build and install",
+          "text": "\nWith a Fortran compiler, CMake and Python available:\n\n```sh\npython -m pip install build\npython -m build\n```\n\nThis builds an sdist and then builds the wheel from that sdist. For compiler\nselection set FC before configuring. Source builds require the compiler's `nm`\ntool for mandatory application-object inspection (Windows CI uses MSYS2 UCRT64\nGNU tools). Existing SALMON build configurations are unaffected.\n\nA raw wheel may still depend on compiler libraries on the build host. Before\nredistribution, repair it using the appropriate tool installed in the build\nenvironment: delocate on macOS, auditwheel on Linux, delvewheel on Windows.\n\n```sh\npython tools/repair_ld_wheel.py dist/<wheel-name>.whl wheelhouse\npython -m pip install wheelhouse/<repaired-wheel-name>.whl\n```\n\nThe repair step bundles dependencies, refreshes the LD checksum after relocation,\nand updates the wheel RECORD hashes. The checksum is an integrity check, not a\nsignature. Windows repair explicitly analyzes the ctypes-loaded DLL. Compiler\nruntime license notices must accompany redistributed dependencies according to\ntheir licenses; review release artifacts before public distribution.\n\n"
+        },
+        {
+          "heading": "CI and testing",
+          "text": "\n`.github/workflows/ld-wheels.yml` uses cibuildwheel to build, repair and install\nwheels, then runs all numerical and input-lifecycle tests against the installed\npackage. The runner rejects imports from the source checkout. CI stores wheels\nand the sdist as artifacts; it does not publish to PyPI.\n\nLocal verification on 2026-11-13: gfortran 15, CPython 3.14, macOS arm64; built\nfrom sdist, repaired with delocate, installed in a separate venv, and all 13 API\nand numerical tests passed outside the source checkout. Wheel-record repair\nchecks cover .dll/.so/.dylib names. Windows AMD64, Linux x86_64 and both macOS architectures subsequently passed\nall CPython 3.10–3.14 builds and installed-wheel tests in run 43354726041.\n\nThe wheel includes AI_USAGE.md, AGENTS.md, INPUT_CONTRACT.md, the manual search,\nenvironment diagnosis and examples. Tests and build tools remain in the source distribution. Restart the interpreter after rebuilding\nnative code. No upload/public release has been performed.\n\nVerified CI: https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43354726041\nCode commit: 887391751b6918c7edc6ac819e49fc07dc82202a.\n20 wheels, each with 13 passing tests; source-distribution rebuild also passed.\n\nVersion 0.1.0a2 adds non-LD Python workflow tools. Its final code commit\n045f34faef532ceb106ea00274319a70d27eca8d passed the same 20-wheel matrix,\n27 tests per wheel (540 checks):\nhttps://github.com/SALMON-TDDFT/SALMON2/actions/runs/43357199430\nFull FDTD executable integration is a separate local test, not part of the wheel CI.\n\n\n"
+        },
+        {
+          "heading": "Local Mac full GS-to-TDDFT validation (2026-11-13)",
+          "text": "\nThe full GNU Fortran SALMON executable must use LP64 OpenBLAS on the tested\nApple Silicon Mac. Accelerate passed the LD/SBE and synthetic TDDFT checks but\nits ZDOTC complex-return interface crashed in a minimal GNU Fortran probe and\nin full GS initialization. The same probe returned 30+0i with OpenBLAS.\nDo not infer full-GS compatibility from the smaller wheel kernels.\n\nThe following paths are the Apple Silicon validation host’s paths, not portable defaults.\nFor another host, locate its compiler and LP64 OpenBLAS installation explicitly.\nFor a new full application build on that host, use CMake LAPACK discovery with\n`-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/openblas -DBLA_VENDOR=OpenBLAS\n-DBLA_SIZEOF_INTEGER=4`, and leave LAPACK_VENDOR_FLAGS unset (no Accelerate).\nThe verified compiler is `/opt/homebrew/bin/gfortran`; use GNU C for the OpenMP\nbuild. Run both source and complete application-object audits before execution.\nKeep `OPENBLAS_NUM_THREADS=1` when running OpenMP SALMON to avoid nested threading.\n\nWith this configuration a real Si GS converged in 37 iterations, and the\n1000-step TDDFT and SBE Python/native comparisons passed. See the local-run\nsection of `docs/tddft-validation-2026-11-13.md` for numerical evidence.\n\n"
+        },
+        {
+          "heading": "Optional Libxc for the full TDDFT executable (Mac validation)",
+          "text": "\nThe external SALMON worker now accepts `pz`, `tbmbj`, `libxc_pz`, and `libxc_pbe`.\nThe two Libxc choices require `USE_LIBXC=ON`. They are not bundled into the\nLD/SBE wheel, and this does not enable arbitrary Libxc functionals in the worker.\nThe installed Mac Libxc lacked `libxcf90`/`xc_f90_lib_m.mod`; the tested compatible\ninstallation is Libxc **5.2.3**, built separately with the same GNU Fortran compiler.\nDo not combine that f90 module with a different Libxc library installation.\n\nAfter obtaining and extracting the official Libxc 5.2.3 source archive:\n\nThe following Python driver avoids shell-specific line continuation. Run it in\nan explicitly selected build workspace with the extracted source at `libxc-5.2.3`.\nSet `compiler` to the actual compiler path if it is not available on PATH.\nThis is a portable invocation pattern, not verification of full SALMON on every OS.\n\n```python\nfrom pathlib import Path\nimport shutil\nimport subprocess\n\ncompiler = shutil.which('gfortran')\nif compiler is None:\n    raise RuntimeError('Select an installed GNU Fortran compiler')\nsource = Path('libxc-5.2.3').resolve()\nbuild = Path('libxc-build').resolve()\nprefix = Path('libxc-install').resolve()\nsubprocess.run(['cmake', '-S', str(source), '-B', str(build),\n    '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',\n    f'-DCMAKE_INSTALL_PREFIX={prefix}', f'-DCMAKE_Fortran_COMPILER={compiler}',\n    '-DENABLE_FORTRAN=ON', '-DENABLE_XHOST=OFF', '-DBUILD_TESTING=OFF',\n    '-DCMAKE_BUILD_TYPE=Release'], check=True)\nsubprocess.run(['cmake', '--build', str(build), '--config', 'Release', '--parallel', '4'], check=True)\nsubprocess.run(['cmake', '--install', str(build), '--config', 'Release'], check=True)\n```\n\nAdd `-DUSE_LIBXC=ON` and `-DLIBXC_INSTALLDIR=<absolute prefix selected above>` to the\nfull OpenBLAS-backed SALMON configuration above. Check configuration reports\n`Found Libxc version 5.2.3`, then audit source and all application objects before\nrunning. The source archive SHA256 used here was\n`851a45aee9ddaafea49f684fe3e3ab2fbd79f1c1289b8c1cea216330b27e887b`.\nSee `docs/libxc-validation-2026-11-13.md` for actual tests and limitations.\n\nNative TB-mBJ does not need Libxc. Import-time compilation is not used.\nThe optional full-runtime wheel and capability-selection flow in\n`docs/plans/2026-11-13-runtime-distribution-proposal.md` are proposals, not\ncurrently available install commands or APIs.\n"
+        }
+      ]
+    },
+    "README.md": {
+      "sections": [
+        {
+          "heading": "SALMONpy：Pythonから使うSALMONの計算・解析部品",
+          "text": "\nLD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。\n対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。\n現在はpreview版で、PyPI公開済みではありません。\n\n"
+        },
+        {
+          "heading": "最初の使い方",
+          "text": "\n配布された、自分のOS・CPU・Pythonに対応する**修復済みwheel**を導入します。\nwheel利用ではFortranコンパイラは不要です。import時のコンパイルも行いません。\n\n```sh\npython -m pip install \"PATH_TO_COMPATIBLE_WHEEL.whl\"\npython -m salmonpy.doctor\npython -m salmonpy.examples.ld_response\n```\n\n`PATH_TO_COMPATIBLE_WHEEL.whl` は実際のファイルに置き換えます。`python` は導入先環境の\nPythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグにも適合する必要があります。\n診断はライブラリの読み込みと依存パッケージの所在を確認します。インストールや計算は行いません。\n追加依存の実動作、外部SALMONの機能対応、計算規模の上限を保証するものではありません。\n\n"
+        },
+        {
+          "heading": "目的から選ぶ",
+          "text": "\n| やりたいこと | 入口 | 必要な準備 |\n|---|---|---|\n| 材料の誘電率・Eに対するP/J | `salmonpy.LorentzDrude` | wheel |\n| 結晶のA→J（SBE） | `salmonpy.sbe` | wheel、実材料にはバンド・遷移行列データ |\n| 光パルス・構造・解析・結果読み込み | `fields` / `geometry` / `analysis` / `outputs` | NumPy、描画にはMatplotlib |\n| DFTの基底状態・力 | `salmonpy.dft` | 対応外部SALMON・擬ポテンシャル |\n| 結晶のA→J（TDDFT） | `salmonpy.tddft` | 対応外部SALMON・整合する基底状態 |\n| 光伝播（FDTD） | `salmonpy.fdtd` | 対応外部SALMON |\n| バンド計算・描画 | `salmonpy.bands` | 対応外部SALMON・基底状態・Matplotlib |\n| ASEの構造・経路・energy/forces | `salmonpy.ase` / `salmonpy.ase_calculator` | 上記に加え任意のASE依存 |\n\n[13本のPythonサンプルと実行方法](examples/README.md)から始めてください。\n各機能の対応範囲は [WORKFLOWS.md](WORKFLOWS.md)、[DFT.md](DFT.md)、\n[ASE_CALCULATOR.md](ASE_CALCULATOR.md) に記載しています。\nwheel内のLD/SBEと、別途準備が必要なSALMON本体は区別してください。\n\n"
+        },
+        {
+          "heading": "AIに依頼する場合",
+          "text": "\nまず [AI_USAGE.md](AI_USAGE.md) と `manual.json` を読み、既に回答された条件を再利用して、\n不足する「目的・使ってよい総メモリ・CPUコア数」を確認します。\n\n```sh\npython -m salmonpy.manual 初めて\npython -m salmonpy.manual レーザーによる電子の動き\npython -m salmonpy.doctor --json\n```\n\n検索で一致しない場合も `task_catalog` と `getting_started` に案内があります。\n`sample_files` が実行例、`beginner_intake` が資源上限の確認手順です。\n環境診断で検出したCPU数を、そのまま利用許可と解釈しません。\nメモリ自動見積もり・ハード上限の強制機能は未実装です。\n\n外部SALMONを確認する場合は、監査済みの記録値を指定します。\n\n```sh\npython -m salmonpy.doctor --executable PATH_TO_SALMON --sha256 VALIDATED_SHA256\n```\n\nハッシュ一致はファイルの同一性だけを示します。対応機能・バイナリ互換性や実行成功は\n検証しません。準備・OS別検証状況は [PACKAGING.md](PACKAGING.md) を参照してください。\n\n"
+        },
+        {
+          "heading": "LDのPython API",
+          "text": "\n```python\nimport numpy as np\nfrom salmonpy import LorentzDrude\n\nmaterial = LorentzDrude(\n    plasma_frequency=0.5,\n    strength=[0.8, 0.2],\n    resonance=[0.0, 0.3],\n    damping=[0.01, 0.02],\n)\nE = np.zeros((101, 3))\nE[:, 0] = 1e-3\nresult = material.respond(E, dt=0.1)\n"
+        },
+        {
+          "heading": "result.time: (101,), result.polarization/current: (101, 3)",
+          "text": "\nstate = material.new_state(dt=0.1, initial_field=E[0])\nP, J = state.step(E[1])  # fields at t=0.1; returns physical P and J\n```\n\nAll values use SALMON atomic/Gaussian units: angular frequency, damping and plasma\nfrequency in inverse atomic time, time in atomic time, E/P/J in the corresponding\natomic units. Do not pass eV energies or femtoseconds without conversion. Pole\nstrengths are dimensionless. Each pole obeys\n\n```\ndP/dt = J\ndJ/dt = f * wp**2 * E / (4*pi) - gamma*J - w0**2*P\n```\n\n`respond` starts with P=J=0 at the first supplied E sample. Sample zero is the\ninitial condition, not an update. `step` takes E at the next time, using the stored\nprevious E. Time step is fixed for each state. Every call to `respond` starts a\nfresh state; separate `new_state` objects do not share histories. Observed P/J are\nsummed over poles. They are not the auxiliary FDTD quantity Q.\n\n`permittivity(omega)` evaluates the continuous model with exp(-i omega t):\n`1 + sum(f*wp**2 / (w0**2 - omega**2 - i*gamma*omega))`.\nThe instantaneous background is fixed at 1; anisotropy, active media, fitting,\nand unit conversion are not included. An exact real-axis pole raises ValueError.\nFinite-step time propagation approximates this continuous response; reduce dt to\ncheck temporal convergence. A single state must not be shared between threads.\n\nThe step adapter reconstructs a small native context each call; it is intended\nfor prototyping, not high-throughput grid coupling. Batch calculations reuse one\nnative context. FDTD has an external-executable batch wrapper. The built-in SBE adapter is `salmonpy.sbe.SBEInitialState`; see the loader and\nindependent-trajectory example in WORKFLOWS.md. A process-isolated PZ/TB-mBJ/Libxc-PZ/Libxc-PBE TDDFT adapter is available as `salmonpy.tddft.TDDFTInitialState`\nwith a separately built worker-enabled SALMON executable.\nCrystalline TDDFT/SBE interfaces remain A-driven only.\n\nSee [AI_USAGE.md](AI_USAGE.md) for extension rules and the legacy FDTD boundary.\n\nInput ownership, immutable resolved settings and failure behavior are specified in\n[INPUT_CONTRACT.md](INPUT_CONTRACT.md). Inspect `material.config` and `state.config`\nfor all effective settings. Python 3.10 or newer is required.\n\n"
+        },
+        {
+          "heading": "Execution environment",
+          "text": "\nCommands use `python` for the interpreter in the active environment (Python 3.10+).\nUse that environment's interpreter name or full path if different; do not assume\n`python3` exists on Windows. Run repository-only commands from the checkout root;\n`build_native`, `tools/` and tests are source-checkout commands. The examples are included in wheels and run with `python -m salmonpy.examples.NAME`.\nReplace example executable paths and hashes with the selected platform's audited\nSALMON executable (including `.exe` on Windows where applicable). `executable_path`\nand `validated_sha256` in examples are caller-supplied values, not detected defaults.\nUse new, writable output directories. Relative paths resolve from the process's\nworking directory, not the installed package directory.\n\nPure Python analysis needs NumPy; plotting additionally needs Matplotlib. On a\nheadless machine select its `Agg` backend before plotting (e.g.\n`import matplotlib; matplotlib.use('Agg')`). No GUI is needed to save a figure.\nInstalled-wheel compatibility does not establish compatibility of an external\nfull SALMON executable. See PACKAGING.md for the version-specific validation matrix.\n\n\n実行可能な用途別Pythonサンプルと必要な入力は [examples/README.md](examples/README.md) を参照してください。AI検索の各taskの `sample_files` からも辿れます。\n\n"
+        },
+        {
+          "heading": "ソースから開発する場合",
+          "text": "\nソース構築のコンパイラ・BLAS要件は [PACKAGING.md](PACKAGING.md) を参照してください。\nリポジトリのルートで明示的に構築します。再構築後はPythonを再起動します。\n\n```sh\npython -m salmonpy.build_native\npython -m unittest discover -s salmonpy/tests -v\n```\n"
+        }
+      ]
+    },
+    "WORKFLOWS.md": {
+      "sections": [
+        {
+          "heading": "Individual research tasks with SALMONpy",
+          "text": "\nAll new numerical inputs are atomic units. These Python helpers are included in\nwheels; only standalone LD requires the bundled native library. Full FDTD uses\nan explicitly supplied, separately built SALMON executable.\n"
+        },
+        {
+          "heading": "Geometry and FDTD",
+          "text": "\n```python\nfrom salmonpy.geometry import Grid, Shape, Geometry\nfrom salmonpy.fields import AcosPulse\nfrom salmonpy.fdtd import FDTD, Dielectric, PlaneWave, SalmonExecutable\n\ngrid = Grid(counts=(32, 32, 32), spacing=(2., 2., 2.))\ngeometry = Geometry(grid, (Shape('ellipsoid', size=(8., 8., 8.)),))\nmaterial_ids = geometry.material_ids()   # independent material-grid preview\nxy = geometry.slice(axis=2, index=16)   # usable with a plotting library\npulse = AcosPulse(amplitude=.001, omega=10., duration=.05)\ncalculation = FDTD(\n    geometry, materials=(Dielectric(epsilon=2.),), dt=.001, steps=200,\n    source=PlaneWave(pulse, axis=0, position=-12.),\n)\nprint(calculation.input_text())          # review/export without running"
+        },
+        {
+          "heading": "engine = SalmonExecutable(executable_path, validated_sha256)",
+          "text": ""
+        },
+        {
+          "heading": "result = engine.run(calculation, '/new/output/directory')",
+          "text": ""
+        },
+        {
+          "heading": "table = result.observations[0]",
+          "text": ""
+        },
+        {
+          "heading": "Ez = table.column('E_z')",
+          "text": "```\n\n`Shape.size` is full diameter/width, not radius. Coordinates are isolated SALMON\nmaterial-grid centers; staggered E/H component locations differ. Later shapes\nreplace earlier material IDs. Only axis-aligned boxes/ellipsoids are exposed.\nThe preview was compared to SALMON's emitted cube files, including mixed odd/even\nnoncubic grids. Use material IDs 1..len(materials); 0 is vacuum.\n\n`Boundaries` specifies six faces in x-,x+,y-,y+,z-,z+ order, each PML or PEC.\nThe legacy solver's PML is fixed at eight cells; clearance includes the interface\nplane that receives its coefficients. Material/PML overlap is rejected because\nthis initial interface assumes vacuum PML. Periodic structures, rotated geometry,\nnonvacuum PML, oblique incidence and adjustable PML thickness are not yet exposed.\n\nFDTD accepts an `Impulse` with LD media, or a `PlaneWave` Acos2 pulse with LD or\nconstant `Dielectric` media. The actual SALMON impulse mode does not support\nconstant dielectric objects, so this is rejected before execution. Plane sources\nmust be transverse, inside the nonabsorbing region, and clear of matter. Positive\nx/y/z propagation axes only. Source planes are snapped by the legacy solver to\nits grid; inspect stdout.log for resolved coordinates.\n\nThe common pulse follows TDDFT's Acos2 convention. FDTD's existing cos-carrier\nconvention differs by a quarter cycle; the adapter adds 0.25 cycles to its CEP so\nthe same Python pulse represents the same continuous waveform. Kernels are not\nchanged. `amplitude` is an envelope scale, not an exact peak electric field.\n\nModel, source, grid, dt and observations are fixed in the immutable FDTD object.\nExecution-only choices (new output directory, timeout and thread count) belong to\n`run`. Every run records settings, binary/input SHA256 and status. Existing output\ndirectories are never overwritten. Hashes identify a binary, not establish its\nsafety: source/object audits belong to its build/validation. This is a batch\ninterface, not an in-process FDTD step API or an MPI launcher.\n"
+        },
+        {
+          "heading": "Pulse creation independent of a solver",
+          "text": "\n```python\nimport numpy as np\nfrom salmonpy.fields import AcosPulse, sample_pulses\npulses = [AcosPulse(.01, .2, 100., start=10.),\n          AcosPulse(.01, .2, 100., start=130.)]\nA = sample_pulses(pulses, np.arange(0., 250., .1))\nE = A.electric_field()"
+        },
+        {
+          "heading": "A.write_salmon('new-pulse.data')  # four columns for ae_shape1='input', unit_system='au'",
+          "text": "```\n\nA means SALMON `Ac=A/c`, so E=-dAc/dt. The discrete electric field uses backward\ndifferences at A.time[1:], as SALMON does; it is an interval-average field assigned\nto the new endpoint. No initial E is invented. CEP is in cycles. Pulse arrays\nare read-only copies. SALMON's file interpolation returns zero outside the file's\nrange (including its final endpoint); make exported A zero at the endpoints.\nComposed pulse files are not yet accepted by the FDTD wrapper.\n"
+        },
+        {
+          "heading": "Output and reproducible spectra",
+          "text": "\n`analysis.read_table(path)` handles numbered SALMON column headers, retained\nunit labels and Fortran D exponents. It makes no silent unit conversions.\n\n```python\nfrom salmonpy.analysis import read_table, spectrum"
+        },
+        {
+          "heading": "table = read_table('obs1_at_point_rt.data')",
+          "text": ""
+        },
+        {
+          "heading": "spec = spectrum(table.column('Time'), table.column('E_z'), window='hann',",
+          "text": ""
+        },
+        {
+          "heading": "                time_unit=table.units[0], value_unit=table.units[3])",
+          "text": "```\n\nThe transform is dt*sum(w*x*exp(+i omega t)), including the actual time origin.\nOnly nonnegative frequencies are returned. There is no automatic DC subtraction,\nwindow gain correction, one-sided doubling, or conversion to HHG/emission power.\n`spec.config` records the window, sign, normalization, grid and units. Irregular\nsampling is rejected rather than silently resampled.\n"
+        },
+        {
+          "heading": "A-only crystalline backend contract",
+          "text": "\n`crystal.AInitialState` and `AResponseState` are typing protocols for replaceable\nbackends. `initial.new_state(dt=..., time0=..., initial_A=...)` must create an\nindependent state without modifying the reusable initial condition. The state\nowns wavefunctions/density matrices, history, previous A and current, and exposes\n`step(A_new)`, `current`, `time`. Only A is an input; E is not an alternative.\nBackend coordinates, gauge and J volume normalization must be converted to the\ncommon laboratory-frame atomic-unit convention at the adapter boundary.\n\n`crystal.respond(initial, A_samples)` creates a new state and calls that same step\nmethod for each sample. It validates uniform times, current shape/finiteness and\nbackend time advancement. Accumulated floating-point time roundoff is tolerated\nwith a bound capped at 0.001 time steps; a materially wrong step is rejected. It preserves the backend's initial current rather than\nassuming it is zero. A backend must guarantee independent states and atomic step\nfailures; Python cannot enforce those promises for arbitrary external engines.\n\nThe built-in velocity-gauge SBE adapter and text loader are described below.\nThe process-isolated TDDFT adapter is described below. Common-interface tests also use an\nexplicit test double; SBE has separate native reference tests.\nThe next extraction must retain native initial-state formats, MPI ownership,\nwavefunction/density-matrix histories, rotations, gauge and time alignment. DFT\ninitial-state generation remains a separate stage; never advertise a fake solver\nor silently substitute LD for electronic dynamics.\n"
+        },
+        {
+          "heading": "Built-in velocity-gauge SBE",
+          "text": "\n```python\nimport numpy as np\nfrom salmonpy.sbe import SBEInitialState\nfrom salmonpy.crystal import respond\nfrom salmonpy.fields import AcosPulse\n\ninitial = SBEInitialState.from_salmon(\n    'gs_export', 'Si', bands=32, kpoints=512, electrons=32,\n    lattice=np.diag([10.26]*3), active_bands=32,\n    correction_order=0, nonlocal_correction=False)\ndrive = AcosPulse(amplitude=0.01, omega=0.056, duration=100.).sample(\n    np.arange(2001)*0.05)\nresult = respond(initial, drive)"
+        },
+        {
+          "heading": "Independent repeat: no excitation history is carried over.",
+          "text": "repeat = respond(initial, drive)\na = initial.new_state(dt=0.05, initial_A=drive.values[0])\nb = initial.new_state(dt=0.05, initial_A=drive.values[0])\nJ = a.step(drive.values[1])  # b remains at its initial state\n```\n\nLattice vectors are columns, all quantities are in atomic units, and `A` is\nSALMON's `Ac=A/c`. `density` and `current` return immutable snapshots.\nThe loader reads single-spin, orthogonal-format SALMON text exports with\n`esp[a.u.]`; eV and nonorthogonal-format files are rejected. Array construction\naccepts any right-handed lattice and uses `(band,k)` energies and\n`(band,band,xyz,k)` matrix elements. Occupations are exactly SALMON SBE's closed\nshell rule: two electrons in each of the first `electrons/2` bands, irrespective\nof the export's occupation column. `active_bands` defaults to all file bands.\n\nThe shared Fortran kernel preserves four sequential Taylor terms at midpoint A,\nthen computes endpoint J, including correction orders 0–3 and optional nonlocal\nvelocity corrections. This is not an exactly unitary propagator; no adaptive\nstep or norm correction is introduced. `dt` must be checked for convergence.\nThe initial output is the physical current at initial A, not a forced zero.\n\nPython SBE is serial, with independent per-state arrays and no global native\ncalculation state. Each step currently copies initial arrays into a temporary\nFortran context; this first adapter prioritizes equivalence over large-system\nthroughput. A single evolving state should not be stepped concurrently.\nSBE length gauge and excited-state restart/checkpoint loading remain\nunimplemented. This loader creates a fresh ground-state density, not a restart.\n"
+        },
+        {
+          "heading": "Native TDDFT with isolated state",
+          "text": "\n`TDDFTInitialState` implements the same `new_state`/`step(Anew)` contract as SBE.\nIt keeps one persistent SALMON process per evolving state because the complete\nsolver still owns module globals, communication scratch space and XC histories.\nThe existing `initialization_rt` and `time_evolution_step` execute unchanged inside\nthat process. This is not a TDDFT shared library bundled in the wheel.\n\nPrepare a self-contained directory with a valid periodic RT input, pseudopotential\nfiles and `data_for_restart/{info.bin,occupation.bin,wfn.bin,...}` from GS. Use\nrelative paths for all assets and a plain `sysname`. The initial-state loader\ncopies this bundle and records hashes. Each new state gets its own private copy;\nchanges to the original files do not change the loaded initial state. Binary\nrecords are read by SALMON itself and retain its compiler/format constraints.\nGS and RT records share formats: the caller must supply a GS bundle; the loader\ndoes not infer ground-state convergence or automatically classify arbitrary\nwavefunctions as GS versus excited states.\n\n```python\nfrom salmonpy.fdtd import SalmonExecutable\nfrom salmonpy.tddft import TDDFTInitialState\nfrom salmonpy.crystal import respond\n"
+        },
+        {
+          "heading": "Use the SHA256 of your source/object-audited, worker-enabled executable.",
+          "text": "executable = SalmonExecutable(executable_path, validated_sha256)\nwith TDDFTInitialState.from_salmon(\n    'prepared_bundle', 'rt.inp', executable=executable,\n    max_steps=len(drive.time)-1, threads=1, timeout=300.) as initial:\n    result = respond(initial, drive)  # closes its process, also on failure\n    with initial.new_state(dt=0.05) as a, initial.new_state(dt=0.05) as b:\n        Ja = a.step([0.001, 0., 0.])\n        Jb = b.step([0.002, 0., 0.])  # no state or native globals shared with a\n```\n\nCurrent supported scope: periodic, unpolarized, fixed ions, **PZ, TB-mBJ, Libxc-PZ or Libxc-PBE**, CPU, one MPI\nrank with optional OpenMP, `middlepoint`, transverse supplied total A/c, fresh GS\nrather than an excited RT checkpoint. The existing predictor-corrector option is\nretained. `libxc_pz` and `libxc_pbe` require a separately built SALMON with\n`USE_LIBXC=ON`; use the same functional and pseudopotential for GS and RT.\nThe loader does not certify GS provenance or detect a GS/RT functional mismatch.\nOther functionals, AETRS/HSE, longitudinal/internal-Maxwell feedback,\nspin-orbit, +U, projection/unfolding and moving ions are rejected. `time0` must\nbe zero; `dt`, capacity and initial A are fixed when creating a state. Capacity\ncontrols native history-array allocation and cannot be enlarged mid-run.\n\nThe input's pulse, base directory and restart output settings are replaced only\nin worker mode; the public drive is exclusively supplied endpoint A. The existing\nmidpoint Hamiltonian, predictor-corrector, density/potential/history updates,\nand endpoint-current calculation retain their order, including existing\nnonlocal-phase conventions. J uses SALMON's electronic **matter-current** sign,\nas does SBE; electronic charge current is **−J**. No numerical integrator or\nunitarity correction is introduced.\n\nAlways close direct states, preferably with `with`. `respond` does this for you.\nInvalid A leaves the state unchanged. On worker failure the adapter reconstructs\nand replays accepted A samples before raising; if recovery fails it closes the\nstate explicitly. Replay is expensive and is not a scientific checkpoint format.\nSnapshots and per-process copies also require disk space. Existing states survive\nclosing the initial loader, since each owns its own input copy.\n\nFor native TB-mBJ use `xc='tbmbj'`; Libxc is not required. The native\n`cval` policy is preserved (positive fixed value, otherwise density-derived).\nKeep this policy fixed in the initial bundle. Native TB-mBJ uses predictor-corrector\neven if `yn_predictor_corrector='n'`. On the tested coarse Si grid, default\nGaussian initial orbitals produced NaNs; a converged PZ wavefunction used as an\ninitial guess followed by full TB-mBJ SCF convergence succeeded. The worker must\nload the resulting TB-mBJ GS, not merely relabel a PZ GS. See\n`docs/tbmbj-validation-2026-11-13.md`.\n"
+        },
+        {
+          "heading": "Postprocessing outputs",
+          "text": "\nSee OUTPUTS.md for `respond(..., output_directory=...)`, `state.finish(directory)`,\nselected native spatial outputs and the versioned `OutputArchive` readers.\nNative TDDFT save failure retains a recovery directory rather than discarding\ncompleted outputs. Existing run directories are never overwritten.\n\nバンド計算・描画は [BANDS.md](BANDS.md) を参照してください。\n\nOptional, independent ASE structure/path/band-result bridge: [ASE.md](ASE.md).\n\nPrepare a converged GS from ASE or plain arrays: [DFT.md](DFT.md).\n\nOptional ASE Calculator with native PZ/KY forces: [ASE_CALCULATOR.md](ASE_CALCULATOR.md)."
+        }
+      ]
+    },
+    "ASE.md": {
+      "sections": [
+        {
+          "heading": "ASEとの独立したバンド連携",
+          "text": "\n`salmonpy.ase` は任意の連携モジュールです。ASEとの構造・経路の照合と結果変換を\n担当し、計算の実行・初期状態の保護はASEに依存しない `salmonpy.bands` が担当します。\nLD・SBE・TDDFT・FDTDの通常利用にはASEもf90nmlも不要です。\n`salmonpy.ase` のimportだけでもこれらの依存ライブラリは読み込みません。\n\n対応するSALMONpy wheelをインストールした環境で、追加依存を導入します。\n\n```\npython -m pip install \"ase>=3.26,<4\" \"f90nml>=1.4,<2\"\n```\n\nソースから構築する場合は `python -m pip install \".[ase]\"`。\nこの操作には別途ビルド環境が必要です。PyPI公開済みとはしていません。\n本体の `&band/file_band_kpoints` 対応と `SALMONPY_BANDS_V1` 報告を含む、\n監査済みの外部SALMON実行ファイルを用意してください。\n"
+        },
+        {
+          "heading": "使い方",
+          "text": "\n```python\nfrom salmonpy.bands import BandInitialState\nfrom salmonpy.fdtd import SalmonExecutable\nfrom salmonpy.ase import atoms_from_initial, run_bands\n"
+        },
+        {
+          "heading": "利用環境で監査した実行ファイルとSHA256を指定。",
+          "text": "engine = SalmonExecutable(executable_path, validated_sha256)\nwith BandInitialState.from_salmon('gs-bundle', 'gs.inp', executable=engine) as gs:\n    atoms = atoms_from_initial(gs)  # 元のGS入力から新しいASE Atomsを作る\n    # 8原子の立方Siセルの例。別のセルではそのセルに適した経路を選ぶ。\n    path = atoms.cell.bandpath('GX,MR', npoints=17)\n    result = run_bands(gs, atoms, path, 'new-ase-bands',\n                       bands=24, reference_ev=0.0, threads=2)\nresult.plot(filename='bands.png', show=False)"
+        },
+        {
+          "heading": "ASE標準の形式を直接利用可能。",
+          "text": "ase_bands = result.band_structure\n```\n\nGUIのない環境では描画前にMatplotlibの `Agg` backendを選びます。\n例の0 eVは絶対エネルギー基準です。`reference_ev` は明示的に指定し、\nFermi準位や価電子帯上端を推定して設定することはしません。\n\n利用者がASEで用意した `atoms` も渡せます。その場合、元のGS入力と同じセル、\n原子順・元素、原子位置、3次元周期境界であることを確認します。位置は整数倍の\n格子並進を同一視します。セル成分と原子位置の照合許容差は1e-8 Åで、計算後のk点照合にも同じセル精度を反映します。\nセルの変換、原始胞化、原子の並べ替えは自動では行いません。\nセル・位置を変えた系は、それに対応するGSを用意してください。\n"
+        },
+        {
+          "heading": "経路と結果",
+          "text": "\n- ASEの `path.kpts` の順序・値をそのまま本体へ渡します。再補間しません。\n- `GX,MR` のコンマによる区間の切れ目、対称点名、セルをASE結果に保持します。\n  計算単位に合わせた末尾の余剰点だけを確認して除きます。\n- `ase-bands.json` はASEの `BandStructure` JSON、`ase-input.json` は構造・経路・\n  エネルギー基準・換算係数の記録です。`native/` と `result/` も従来どおり保存します。\n- `to_ase_band_structure(bands, path, reference_ev=...)` は既存のSALMONpy結果を\n  変換するだけの入口です。実際のCartesian kとASE側のセル・k点が一致しなければ拒否します。\n- ASEの可変な構造・経路・エネルギー配列をコピーし、呼び出し側のオブジェクトを変更しません。\n\nASEではセルは行ベクトル（Å）、k点は逆格子の分数座標、エネルギー配列は\n`(spin, k, band)` のeVです。SALMONpyの `(k, band, spin)` Hartreeから変換します。\n逆格子の2πと転置は連携側で明示的に扱います。長さはSALMON入力の換算値\n1 bohr = 0.52917721067 Å、エネルギーは既存SALMONpyの\n1 Hartree = 27.211386245988 eVを使い、記録します。ASE既定のCODATA値に暗黙置換しません。\n"
+        },
+        {
+          "heading": "現在の範囲",
+          "text": "\n- 元入力からの構造読み込み：`al`／`al_vec1..3`／`dl*num_rgrid`、原子単位または\n  `A_eV_fs`、inlineまたは束内ファイルのCartesian／分数原子座標。明示した原子配置が必要です。\n- 固定イオン・周期・非スピン分極。PZ／Libxc-PZ／Libxc-PBEは既存バンド入口に準拠。\n- バイナリGS自体の生成条件を解析して入力と照合する機能ではありません。\n  GSと元入力・擬ポテンシャルの一致は利用者が確認します。\n- PZ/KYのASE Calculator・力・固定セル最適化は独立した [ASE_CALCULATOR.md](ASE_CALCULATOR.md) に対応。応力・MPI起動は未実装。\n  構造からのGS計算と全エネルギー取得は別途 [DFT.md](DFT.md) に対応。\n- ASE 3.29.0とmacOS arm64上で実GSの結合を検証。斜交セルは変換と本体経路処理の\n  単体検証であり、斜交セルの実GS全体の検証ではありません。\n\n仕様の参照先：\nhttps://docs.ase-lib.org/ase/dft/kpoints.html\nhttps://docs.ase-lib.org/_modules/ase/spectrum/band_structure.html\n"
+        },
+        {
+          "heading": "構造からGSを用意する",
+          "text": "\n`dft_from_atoms` でASE非依存のDFTモデルを作れます。詳細は [DFT.md](DFT.md)。"
+        }
+      ]
+    },
+    "DFT.md": {
+      "sections": [
+        {
+          "heading": "構造から基底状態を計算する",
+          "text": "\nGS計算本体の入口はASEに依存しない `salmonpy.dft` です。\n`salmonpy.ase.dft_from_atoms` はASE構造をこのモデルへコピーする薄い変換です。\nASEを使わない場合は `DFT` に原子番号、行ベクトルのセル（bohr）、分数座標を直接渡せます。\n"
+        },
+        {
+          "heading": "ASEからの使用例",
+          "text": "\n```python\nfrom ase.build import bulk\nfrom salmonpy.ase import dft_from_atoms\nfrom salmonpy.dft import Pseudopotential, SCFSettings\nfrom salmonpy.fdtd import SalmonExecutable\n\natoms = bulk('Si', 'diamond', a=5.43, cubic=True)\npseudo = Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)\nmodel = dft_from_atoms(\n    atoms, pseudopotentials=[pseudo], electrons=32, states=32,\n    grid=(16, 16, 16), kmesh=(2, 2, 2), xc='pz',\n)\nengine = SalmonExecutable(executable_path, validated_sha256)\ngs = model.run(engine, 'new-gs',\n               scf=SCFSettings(max_iterations=300, tolerance=1e-9), threads=2)\nprint(gs.energy_hartree, gs.iterations)\n```\n\nこの格子・k点は接続用の例であり、任意の物性に対する収束を保証しません。\n電子数は擬ポテンシャルの価電子数に合わせて明示します。原子番号の総和からは推定しません。\n対応形式はKYの `_rps.dat` とスカラー・ノルム保存UPFです。UPFのPAW、ultrasoft、SOCは拒否します。\n擬ポテンシャルの元素・価電子数・生成汎関数と計算条件の整合は利用者が確認してください。\n擬ポテンシャルをダウンロードする処理はありません。\n\nASEの初期電荷・磁気モーメント指定はこの入口では受け付けません。\n閉殻・非スピン分極として偶数の電子数と十分な軌道数を指定してください。\nセルの変換や原子の並べ替えは行わず、セル・座標をASEのÅから原子単位へ変換します。\n"
+        },
+        {
+          "heading": "設定の寿命",
+          "text": "\n- モデル作成時に固定：構造、擬ポテンシャルのバイト列、電子数、軌道数、格子、k点、汎関数。\n  元のAtomsや擬ポテンシャルファイルを後から変更しても、モデルは変わりません。\n- 計算ごとに指定：SCFの累積反復上限、`rho_dne` 収束許容値、実行ファイル、新規保存先、スレッド数、タイムアウト。\n- `model.run` は毎回新規GS計算。既存の保存先を上書きしません。再開・warm startのAPIではありません。\n\n収束判定は本体の既存フラグを使います。固有状態の更新・混合・計算順は変更しません。\n正常終了だけでは成功とみなさず、収束報告と再開データを確認します。\n`iterations` は本体のMiter（更新回数）で、収束を検出した次のループ番号とは異なる場合があります。\n失敗時も `ground-state.json` の失敗状態と `native/stdout.log` を残します。\n"
+        },
+        {
+          "heading": "保存・再利用",
+          "text": "\n```python\nfrom salmonpy.dft import GroundStateResult\nfrom salmonpy.bands import BandPath\n\ngs = GroundStateResult.open('new-gs')\nwith gs.band_initial_state(executable=engine) as initial:\n    result = initial.run(\n        BandPath([[0, 0, 0], [.5, 0, 0]], [10], ['Γ', 'X']),\n        'new-bands', bands=24,\n    )\n\nwith gs.tddft_initial_state(executable=engine, max_steps=1000) as initial:\n    with initial.new_state(dt=0.02) as state:\n        J = state.step([1e-4, 0., 0.])  # 新しい端点のA/c、原子単位\n```\n\n`ground-state.json` に設定・入力・実行ファイルの識別情報・収束結果・nativeファイルの\nハッシュを記録します。`native/` に入力・擬ポテンシャル・出力・再開データを保持します。\nディレクトリ全体を移動して `open` できます。native内の変更・追加・欠落ファイルや\nシンボリックリンクを拒否します。自分のメモや後処理結果はnativeの外へ置いてください。\nハッシュは改変検出用であり、第三者による改ざんに対する電子署名ではありません。\n\n初期状態への変換も独立コピーを作り、保存したGSを変更しません。\nTDDFT用入力は元の物理条件を保持して生成します。dtは `new_state`、A/cは各stepで指定します。\n現在のTDDFT初期化は中点伝播・予測子修正子なしです。\n"
+        },
+        {
+          "heading": "環境と対応範囲",
+          "text": "\n任意のASE依存の導入方法はASE.mdを参照してください。外部SALMON実行ファイルは別途必要で、\n`SALMONPY_GS_V1` 収束報告と `SALMONPY_FORCES_V1` 力報告を出す本体を監査して指定します。\nバンド／TDDFTへ接続する実行ファイルにも各入口の対応機能が必要です。\nバイナリ再開形式の互換性は任意の異なるビルド間で保証しません。\n\n固定イオン・3次元周期・非スピン分極、PZ／Libxc-PZ／Libxc-PBE、CPU単一MPIランクが対象。\nLibxcには対応ビルドが必要です。今回の実GS一貫テストはmacOS arm64・PZ Siです。\n本体の力は `gs.forces_hartree_per_bohr` で取得できます。力の格子収束は別途確認します。\nASE Calculatorと固定セル最適化への接続は独立したASE_CALCULATOR.mdに従ってください。\nTB-mBJの新規GS作成、分子・孤立系、応力、MPI起動はこの入口には含みません。既存のTB-mBJ GSを使うTDDFT入口は引き続き利用できます。"
+        }
+      ]
+    },
+    "ASE_CALCULATOR.md": {
+      "sections": [
+        {
+          "heading": "ASE Calculator：全エネルギーと本体の力",
+          "text": "\n`salmonpy.ase_calculator.SalmonCalculator` は独立した任意モジュールです。\nこのモジュールのimportにはASEが必要ですが、SALMONpyの通常のimportやLDなどには不要です。\n対応する物理量は `energy`（eV）と `forces`（eV/Å）。応力・free_energyは公開しません。\n初期対応範囲は3次元周期・固定イオンSCF・非スピン分極・PZ＋スカラーKY擬ポテンシャルです。\nLibxc/UPFやTB-mBJの力をこのCalculatorで対応済みとはしていません。\n\n```python\nfrom ase.build import bulk\nfrom ase.optimize import BFGS\nfrom salmonpy.ase_calculator import SalmonCalculator\nfrom salmonpy.dft import Pseudopotential, SCFSettings\nfrom salmonpy.fdtd import SalmonExecutable\n\natoms = bulk('Si', 'diamond', a=5.43, cubic=True)\natoms.calc = SalmonCalculator(\n    executable=SalmonExecutable(executable_path, validated_sha256),\n    directory='ase-calculations',\n    pseudopotentials=[Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)],\n    electrons=32, states=32, grid=(32, 32, 32), kmesh=(2, 2, 2),\n    scf=SCFSettings(max_iterations=500, tolerance=1e-12), threads=2,\n)\nenergy = atoms.get_potential_energy()\nforces = atoms.get_forces()"
+        },
+        {
+          "heading": "格子・k点・SCF精度を目的の力の精度に対して確認してから使用。",
+          "text": ""
+        },
+        {
+          "heading": "BFGS(atoms, logfile='opt.log', maxstep=0.01).run(fmax=0.05, steps=100)",
+          "text": "gs = atoms.calc.last_ground_state\n```\n\n上の格子はSiの例であり、任意の系や目標精度への推奨値ではありません。\n実行ファイルにはGS収束報告と `gs_forces.dat` の `SALMONPY_FORCES_V1` 報告を含めます。\n監査と実行環境の準備はDFT.md、追加依存はASE.mdを参照してください。\n"
+        },
+        {
+          "heading": "状態・保存・失敗",
+          "text": "\n同じ構造へのenergy/forces問い合わせはASEのキャッシュを使います。位置・セル・元素・\n周期境界・初期電荷/磁気設定が変われば、新しいGS計算を行います。初期電荷・磁気設定に\n非ゼロ値があれば現在の非スピン分極入口では拒否します。前のGSの流用はしません。\n\n各計算は指定ディレクトリ内の新規 `gs-...` に保存し、以前の結果を上書きしません。\nこのため長い最適化では保存量が増えます。結果の保持・削除は利用者が管理します。\n同じCalculatorインスタンスを複数スレッドから同時使用することは想定しません。\n\nモデル設定は構築時に固定し、`set(...)` による変更は拒否します。格子などを変更する場合は\n新しいCalculatorを作って `atoms.calc` に設定します。未収束・失敗時は結果と\n`last_ground_state` を消去し、古い力を返しません。失敗ログは計算ディレクトリに残ります。\n\n`GroundStateResult.forces_hartree_per_bohr` で本体の力を原子単位で読み出せます。\nこのプロパティには新しい力報告ファイルが必要です。過去の報告なしGSを読み直せても、\nそこからこのプロパティを取得できるとは限りません。\n"
+        },
+        {
+          "heading": "egg-box効果と力の検証",
+          "text": "\n実空間格子では、原子と格子の相対位置によって全エネルギーが揺れることがあります。\nそのエネルギーを有限差分した力にも揺れが含まれます。本体の軌道微分による力を\n有限差分値に置き換える実装にはしていません。\n\n検証では次の三つを分けます。\n\n1. 本体の力を正しい原子順・符号・単位で渡しているか。\n2. 全原子の剛体並進に対するエネルギーの揺れが、格子間隔とともに小さくなるか。\n3. 本体の力とエネルギー微分が、SCF精度・格子・変位幅に対してどう収束するか。\n\n今回の変位Siでは16³の半格子並進で約0.27 eV、24³で約0.044 eVのエネルギー差があり、\n1格子並進では元のエネルギーに戻りました。粗い格子の数値微分だけで本体の力の良否を\n判定しないでください。実際の数値と条件は検証記録を参照してください。\n\nソース中の `tools/check_force_grid.py` で同じSi診断を再実行できます。\n`tools/test_ase_calculator.py` は24³格子・固定セル・一部原子固定のBFGSを1ステップ実行し、\nエネルギー低下と接続動作を確認するテストです。構造最適化の収束や物性精度の保証ではありません。\n\n参考： https://pubs.rsc.org/en/content/articlehtml/2015/cp/c5cp00351b"
+        }
+      ]
+    },
+    "examples/README.md": {
+      "sections": [
+        {
+          "heading": "Pythonサンプル集",
+          "text": "\n対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、\nLD/SBEには構築済みのネイティブライブラリが必要です。import時にコンパイルは行いません。\n下記の `python` はSALMONpyをインストールした環境のPythonを指します。\n\nまず、使ってよい総メモリ・CPUコア数・目的を決めてください。以下の格子や時間刻みは\nAPIの使い方を示す例です。メモリ上限や物理量の収束を保証するものではありません。\n出力先は作業用ディレクトリを指定してください。生成したデータをコードツリーへ保存しません。\n\n| 目的 | サンプル | 追加で必要なもの |\n|---|---|---|\n| LDの時間応答・誘電率 | [ld_response.py](ld_response.py) | wheel内のLDライブラリ |\n| パルス作成・スペクトル | [pulse_spectrum.py](pulse_spectrum.py) | なし |\n| 形状・材料ID・PMLとの接触確認 | [geometry_preview.py](geometry_preview.py) | 新規.npz保存先 |\n| FDTDの誘電体光伝播 | [fdtd_dielectric.py](fdtd_dielectric.py) | 対応SALMON実行ファイル |\n| SBEのA→J・独立状態 | [sbe_response.py](sbe_response.py) | wheel内のSBEライブラリ。合成模型 |\n| SBEの初期状態読み込み | [sbe_from_salmon.py](sbe_from_salmon.py) | SALMONテキスト出力・格子ベクトル |\n| DFTのGS・エネルギー・力 | [dft_si.py](dft_si.py) | 対応SALMON・Siの4価電子PZ/KY擬ポテンシャル |\n| GS再利用・TDDFTのA→J | [tddft_response.py](tddft_response.py) | 対応SALMON・保存済みGS |\n| GSからバンド計算・描画 | [bands_from_gs.py](bands_from_gs.py) | 対応SALMON・立方Si GS・Matplotlib |\n| 既存band.dataの描画 | [plot_bands.py](plot_bands.py) | 指定形式の出力・Matplotlib |\n| 配列の保存・読み込み | [outputs_roundtrip.py](outputs_roundtrip.py) | wheel内のLDライブラリ |\n| ASE経路からバンド図 | [ase_bands.py](ase_bands.py) | 対応SALMON・立方Si GS・ASE・f90nml・Matplotlib |\n| ASE Calculatorのenergy/forces | [ase_energy_forces.py](ase_energy_forces.py) | 対応SALMON・Si PZ/KY擬ポテンシャル・ASE |\n\n"
+        },
+        {
+          "heading": "追加データなしで試す",
+          "text": "\n```sh\npython -m salmonpy.examples.ld_response\npython -m salmonpy.examples.pulse_spectrum\npython -m salmonpy.examples.geometry_preview material-grid.npz\npython -m salmonpy.examples.sbe_response new-sbe-output\npython -m salmonpy.examples.outputs_roundtrip new-ld-output\n```\n\nSBEの合成模型はAPI学習用で、実材料のスペクトルを表しません。結晶への入力はA/c、\n出力Jは電子物質電流です（電子の電荷電流は−J）。LDはE駆動です。\n格子ベクトルはDFTでは行、SBEでは列です。各コード内の単位指定を確認してください。\n\n"
+        },
+        {
+          "heading": "外部SALMONを使う",
+          "text": "\n`EXECUTABLE`、`SHA256`、`SI_RPS`、`NEW_GS`などを自分の環境の値に置き換えます。\nSHA256にはソース・オブジェクトを監査した実行ファイルの記録値を指定します。\n準備方法と対応範囲は [DFT.md](../DFT.md)、[WORKFLOWS.md](../WORKFLOWS.md)、\n[PACKAGING.md](../PACKAGING.md) を参照してください。wheelには完全なSALMON本体は含まれません。\n\n```sh\npython -m salmonpy.examples.dft_si EXECUTABLE SHA256 SI_RPS NEW_GS --threads 1\npython -m salmonpy.examples.tddft_response EXECUTABLE SHA256 NEW_GS NEW_RT --threads 1\npython -m salmonpy.examples.bands_from_gs EXECUTABLE SHA256 NEW_GS NEW_BANDS --threads 1\npython -m salmonpy.examples.ase_bands EXECUTABLE SHA256 NEW_GS NEW_ASE_BANDS --threads 1\npython -m salmonpy.examples.ase_energy_forces EXECUTABLE SHA256 SI_RPS NEW_CALCULATIONS --threads 1\npython -m salmonpy.examples.fdtd_dielectric EXECUTABLE SHA256 NEW_FDTD\n```\n\n各引数付きサンプルの `--help` で必要な入力を確認できます。空白を含むパスは引用符で囲みます。\n全コアを自動使用しません。BLASなどのスレッド数も利用環境で調整し、許可された総並列数に\n収めてください。現在のPython DFT/バンド/TDDFT入口は単一MPIランクです。\nTDDFT例は同じGSから2回を順次実行し、励起履歴を共有しません。\n\n実材料SBEローダーの例：\n\n```sh\npython -m salmonpy.examples.sbe_from_salmon BUNDLE SYSNAME NEW_SBE --bands 32 --kpoints 8 --electrons 32 --lattice lattice-columns-bohr.txt\n```\n\nこの数値は例です。実際の全バンド数・k点数・電子数・格子に合わせてください。\n既存band.data描画例は17物理k点・24バンド・32電子の8原子立方Si専用です。\n他の出力では点数やエネルギー基準をコード内で変更します。\n力の利用ではegg-box効果と格子・k点・SCF収束を確認してください。Calculator例は\n自動的に最適化を開始しません。詳細は [ASE_CALCULATOR.md](../ASE_CALCULATOR.md)。\n\n公式入力例の参照先はAIマニュアルの `sources` に登録したSALMON-inputsです。\n必要ファイルとバージョンを確認し、サンプルの物理条件と一致させて使用してください。\n"
+        }
+      ]
+    }
+  },
+  "sources": {
+    "salmon-inputs": {
+      "url": "https://github.com/SALMON-TDDFT/SALMON-inputs",
+      "inputs_url": "https://github.com/SALMON-TDDFT/SALMON-inputs/tree/master/inputfiles",
+      "verified_date": "2026-11-13",
+      "purpose": "Published-paper input examples; reference, not SALMONpy compatibility certification",
+      "usage": [
+        "Search inputfiles by system, purpose and method.",
+        "Read the example README for publication DOI and SALMON version.",
+        "Inspect the actual input and required pseudopotential/restart files before adapting.",
+        "Record exact commit and file path for reproducibility.",
+        "Do not treat external examples as tested SALMONpy inputs; check current wrapper restrictions."
+      ]
+    }
+  },
+  "global_rules": [
+    "Beginner intake: reuse known memory budget, CPU concurrency and intent; ask missing items, then show supported capabilities and evidence-based scale limits before starting.",
+    "Crystal TDDFT/SBE: A/c drive only; charge current is minus electronic matter J.",
+    "Do not compile on import. Full SALMON executable is separately built and audited.",
+    "Separate immutable model, per-state dt, and per-step drive.",
+    "Read task instructions and limitations before executing examples.",
+    "Large native outputs are opt-in.",
+    "Resolve paths and executable identity for the current machine. Host-specific validation records are evidence, not setup defaults."
+  ],
+  "audience": "ai_agents",
+  "purpose": "Machine-readable task discovery and execution guidance for AI agents.",
+  "human_documentation": {
+    "separate": true,
+    "status": "existing topic guides available; dedicated user manual to be prepared separately",
+    "policy": "Do not present this JSON catalog as the human user manual."
+  },
+  "environment": {
+    "interpreter": "Active environment Python; commands use python, not OS-specific python3",
+    "package_distribution": "Preview wheels; no public PyPI release claimed",
+    "source_only": [
+      "salmonpy.build_native",
+      "tools/",
+      "salmonpy/tests/",
+      "salmonpy/examples/"
+    ],
+    "headless_plotting": "Select matplotlib Agg backend before pyplot import",
+    "historical_records": "Host-specific paths in dated validation reports describe past runs; never use them as default runtime paths",
+    "documentation_paths": "Bundled guide names resolve relative to the salmonpy package; docs/ and examples/ references require the source repository."
+  },
+  "beginner_intake": {
+    "audience": "AI agents guiding a beginner",
+    "when": "Before selecting a new calculation workflow or launching its first calculation",
+    "reuse_known_answers": true,
+    "questions": [
+      {
+        "id": "memory_budget",
+        "question_ja": "この計算に使ってよいメモリは最大何GBですか？ 分からなければ「不明」で大丈夫です。",
+        "meaning": "Allowed total memory for this job, not automatically all installed RAM. Clarify GB/GiB and total/per-node scope when necessary."
+      },
+      {
+        "id": "parallel_budget",
+        "question_ja": "この計算に使ってよいCPUコア数はいくつですか？ 分からなければ「不明」で大丈夫です。",
+        "meaning": "Allowed total CPU concurrency across all processes and threads. Do not require MPI terminology from a beginner."
+      },
+      {
+        "id": "intent",
+        "question_ja": "何を計算・確認したいですか？ 例：バンド図、光に対する電流、光の伝播、構造最適化、既存結果の解析。",
+        "meaning": "Identify the desired result first; ask system size and accuracy/time expectations only as needed for this purpose."
+      }
+    ],
+    "question_policy": [
+      "Ask only unanswered items. Reuse explicit session budgets and intent; do not repeatedly ask the same questions.",
+      "Present the three short questions together where possible. Accept unknown; suggest read-only environment inspection and a conservative budget choice instead of forcing technical answers.",
+      "Detected installed RAM and CPU counts are hardware facts, not authorization to use all resources.",
+      "Do not reinterpret a per-job budget as a per-process allowance. For multi-node jobs record both per-node and total budgets."
+    ],
+    "workflow": [
+      "Search task APIs and current support constraints. Establish required runtime/optional libraries and supported launch mode before suggesting scale.",
+      "Explain what is available now, what needs setup, and what is unsupported within this budget, in plain language.",
+      "Report a small starting case and an estimated upper practical envelope for this task only when evidence supports it. Otherwise mark the scale ceiling unknown and describe a bounded pilot needed to determine it.",
+      "A capacity pilot must fit the user budget and have an appropriate resource bound or a defensible small known footprint; an estimate is not memory enforcement. If no bounded test is available, do not launch a large speculative job.",
+      "Measure process/job peak memory, wall time and output size for the pilot. Record OS-specific units and aggregation scope, including subprocesses and shared-memory accounting.",
+      "Re-estimate before scaling grid, bands, k points, time steps or independent workers. State extrapolation assumptions and distinguish measured feasible size from untested estimates.",
+      "Prefer reducing simultaneous workers, output volume or reusing a validated GS before degrading physical resolution. Explain accuracy tradeoffs instead of silently reducing required grid/k/band accuracy."
+    ],
+    "budget_rules": [
+      "Total process count times per-process threads must fit the allowed CPU concurrency; include numerical-library threads and independent TDDFT workers.",
+      "Reserve headroom within the user memory allowance. A provisional 20% reserve can be proposed, but is a heuristic, not a guarantee and not additional permitted memory.",
+      "Memory capacity is not physical convergence. Report scientific accuracy requirements separately from what fits.",
+      "The current Python DFT, band, TDDFT and ASE Calculator launches are single MPI rank. Do not promise two-level MPI launch or arbitrary MPI parallel scaling through these APIs.",
+      "Include result/checkpoint disk usage, especially per-geometry GS directories and optional density/current/wavefunction outputs."
+    ],
+    "capacity_report_fields": [
+      "intent",
+      "available_features",
+      "unsupported_or_missing",
+      "memory_budget_and_scope",
+      "cpu_budget_and_process_thread_layout",
+      "small_starting_case",
+      "estimated_scale_ceiling_or_unknown",
+      "peak_memory_and_headroom",
+      "estimated_time_and_disk",
+      "evidence",
+      "accuracy_limits",
+      "next_step"
+    ],
+    "evidence_labels": [
+      "measured on this environment",
+      "estimated from a stated pilot/model",
+      "unknown"
+    ],
+    "implementation_status": {
+      "automatic_capacity_estimator": "not_implemented",
+      "hard_memory_enforcement": "not_implemented",
+      "resource_dialogue": "AI instruction policy; not an autonomous scheduler"
+    },
+    "user_facing_style": "Lead with what the user can accomplish. Explain limits in atoms, grid, bands, duration and elapsed time relevant to the task. Avoid dumping internal implementation terms."
+  },
+  "getting_started": {
+    "first_action": "初心者の未回答の目的・メモリ上限・CPU数を確認する。beginner_intakeに従う。",
+    "diagnostic_command": "python -m salmonpy.doctor --json",
+    "human_guide": "README.md",
+    "sample_index": "examples/README.md",
+    "no_match": "一致する機能が見つからない場合はtask_catalogを提示し、目的を確認する。未対応と即断しない。",
+    "limits": "診断は容量推定や計算成功の保証ではない。"
+  }
+}
