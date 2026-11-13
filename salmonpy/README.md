@@ -1,12 +1,14 @@
 # SALMONpy: modular workflow preview
 
-The native Python interface provides isotropic Lorentz–Drude material response.
+The native Python interface provides isotropic Lorentz–Drude material response
+and SALMON velocity-gauge SBE with reusable initial states.
 Additional standalone helpers cover geometry, pulses, tables/spectra, batch FDTD
-and a user-backend A→J contract: see [WORKFLOWS.md](WORKFLOWS.md).
-It calls SALMON's extracted Fortran coefficient and time-update kernels; no SALMON
+and a common A→J contract: see [WORKFLOWS.md](WORKFLOWS.md).
+It calls SALMON's shared Fortran kernels; no SALMON
 executable, MPI, ground-state calculation or FDTD grid is needed.
 
-From the repository root, with Python 3.10+, NumPy, CMake and gfortran available:
+From the repository root, with Python 3.10+, NumPy, CMake and gfortran available
+(and LP64 OpenBLAS development libraries on Linux/Windows):
 
 ```sh
 python3 -m salmonpy.build_native
@@ -65,8 +67,8 @@ check temporal convergence. A single state must not be shared between threads.
 
 The step adapter reconstructs a small native context each call; it is intended
 for prototyping, not high-throughput grid coupling. Batch calculations reuse one
-native context. FDTD has an external-executable batch wrapper. Built-in crystalline solver
-adapters are not provided yet.
+native context. FDTD has an external-executable batch wrapper. The built-in SBE adapter is `salmonpy.sbe.SBEInitialState`; see the loader and
+independent-trajectory example in WORKFLOWS.md. The TDDFT adapter is pending.
 Crystalline TDDFT/SBE interfaces remain A-driven only.
 
 See [AI_USAGE.md](AI_USAGE.md) for extension rules and the legacy FDTD boundary.

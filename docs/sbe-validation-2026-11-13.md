@@ -13,6 +13,8 @@ Local macOS arm64 / GNU Fortran 15 / Accelerate results:
 - Full SALMON executable: 16 configurations including both 2- and 3-band
   propagation. Current, energy and excitation output files byte-identical
   before/after extraction, OMP_NUM_THREADS=1.
+- OpenMP 4-thread full-application comparison: the same 16 configurations
+  pass at rtol=3e-13, atol=3e-15 for all output quantities.
 - Python loader + common A→J entry: currents agree with full SALMON output
   in all 16 configurations (`rtol=3e-13`, `atol=3e-15`).
 - Python suite: 30 tests pass, including independent states, failure atomicity,
@@ -30,9 +32,23 @@ Reproduce the integration test with previously audited executables:
 
 ```
 PYTHONPATH=. python tools/test_sbe_entrypoint.py BEFORE AFTER NEW_DIRECTORY
+SALMONPY_TEST_THREADS=4 PYTHONPATH=. python tools/test_sbe_entrypoint.py BEFORE AFTER OTHER_NEW_DIRECTORY
 ```
 
 Fixtures are synthetic, not a physical material prediction or new GS calculation.
 No exact-unitarity, adaptive-error, MPI reproducibility or length-gauge claim is
 made. SALMON's existing MPI reduction stays outside the extracted local-current
 kernel. The native Python adapter is serial and uses independent work arrays.
+
+## Wheel CI
+
+[Run 43360481717](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43360481717)
+passed all 5 jobs at code commit `bd9abdbe819a8a83c21d96d1f223205d6303f043`.
+Windows AMD64, Linux x86_64, Intel macOS and Apple Silicon macOS each built
+CPython 3.10–3.14 wheels and ran 30 tests per installed wheel (600 total).
+Tests explicitly refuse imports from the checkout. The source-distribution
+build also passed. Cross-platform comparisons use numerical tolerances; bitwise
+equality is claimed only for the local matching-compiler/BLAS baseline above.
+
+The first Windows run failed to locate OpenBLAS. Adding UCRT64 to
+CMAKE_PREFIX_PATH fixed discovery; repaired wheels passed all five Python versions.

@@ -12,6 +12,8 @@ from salmonpy.fields import FieldSamples
 from salmonpy.crystal import respond
 
 before,after,dest=map(Path,sys.argv[1:]);dest.mkdir(exist_ok=False)
+threads=int(os.environ.get('SALMONPY_TEST_THREADS','1'))
+if threads<1: raise ValueError('thread count must be positive')
 fixture=Path(__file__).resolve().parents[1]/'salmonpy/tests/sbe_reference.npz'
 with np.load(fixture) as data:
     nb,nk=data['eigen'].shape
@@ -50,15 +52,20 @@ with np.load(fixture) as data:
 /
 '''
                     (d/'input.inp').write_text(inp)
-                    result=subprocess.run([str(exe)],input=inp,text=True,cwd=d,env=dict(os.environ,OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1'),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
+                    result=subprocess.run([str(exe)],input=inp,text=True,cwd=d,env=dict(os.environ,OMP_NUM_THREADS=str(threads),OPENBLAS_NUM_THREADS='1'),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
                     (d/'run.log').write_text(result.stdout)
                     if result.returncode or not (d/'test_sbe_rt.data').exists():
                         raise RuntimeError(f'{d}: {result.stdout[-2000:]}')
                 for name in ('test_sbe_rt.data','test_sbe_rt_energy.data','test_sbe_nex.data'):
-                    assert (dirs[0]/name).read_bytes()==(dirs[1]/name).read_bytes(),name
+                    if threads==1:
+                        assert (dirs[0]/name).read_bytes()==(dirs[1]/name).read_bytes(),name
+                    else:
+                        np.testing.assert_allclose(np.loadtxt(dirs[0]/name),np.loadtxt(dirs[1]/name),rtol=3e-13,atol=3e-15)
                 initial=SBEInitialState.from_salmon(dirs[1],'test',bands=3,kpoints=2,electrons=2,lattice=data['lattice'],active_bands=active,correction_order=order,nonlocal_correction=vnl)
                 rt=np.loadtxt(dirs[1]/'test_sbe_rt.data'); assert len(rt)==40
                 drive=FieldSamples(np.arange(41)*.013,np.vstack([np.zeros(3),rt[:,1:4]]),'A')
                 actual=respond(initial,drive)
                 np.testing.assert_allclose(actual.current[1:],rt[:,13:16],rtol=3e-13,atol=3e-15)
-print('16 full-application configurations: output files byte-identical; Python currents agree')
+print(f'16 full-application configurations, threads={threads}: '+
+      ('output files byte-identical' if threads==1 else 'outputs agree within tolerance')+
+      '; Python currents agree')
