@@ -27,7 +27,7 @@ jobs:
           for variant in baseline current; do
             if [ "$variant" = baseline ]; then source_dir="$RUNNER_TEMP/baseline"; else source_dir="$GITHUB_WORKSPACE"; fi
             python tools/check_forbidden_eigensolvers.py --source-root "$source_dir/src"
-            cmake -S "$source_dir" -B "$RUNNER_TEMP/build-$variant" -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_C_COMPILER=gcc -DOPENMP_FLAGS=-fopenmp -DCMAKE_BUILD_TYPE=Release '-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch' -DLAPACK_VENDOR_FLAGS=-lopenblas
+            cmake -S "$source_dir" -B "$RUNNER_TEMP/build-$variant" -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_C_COMPILER=gcc -DOPENMP_FLAGS=-fopenmp -DCMAKE_BUILD_TYPE=Release '-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch' -DBLA_VENDOR=OpenBLAS
             cmake --build "$RUNNER_TEMP/build-$variant" --target salmon -j 2
             python tools/check_forbidden_eigensolvers.py --object-tree "$RUNNER_TEMP/build-$variant/src"
           done
