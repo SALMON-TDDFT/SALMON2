@@ -130,7 +130,7 @@ module salmon_global
   real(8) :: exx_pre_scf_threshold ! automatic 1e-4 for eligible GS; explicit 0 disables PBE warmup
   integer :: exx_pre_scf_steps ! consecutive qualifying residuals
   logical :: exx_pre_scf_active=.false. ! runtime only, never serialized as target GS
-  character(8) :: exx_ace_support ! occupied/source ACE construction vectors
+  character(8) :: exx_ace_support ! occupied ACE construction vectors
   character(8) :: exx_pair_screening ! off/diagnose/on; discrete hybrid pair bound
   character(8) :: exx_factor_mode = 'off' ! off/strict/learned exact-factor history
   character(16) :: exx_k_algorithm = 'auto'
@@ -139,10 +139,8 @@ module salmon_global
   character(1) :: yn_exx_fft_orbits = ' '
   character(1) :: yn_exx_k_pair_symmetry = ' ' ! Hermitian pairs without crystal symmetry
   character(1) :: yn_ace_shadow_diagnostic = 'n',yn_ace_export_factors = 'n'
-  character(8) :: hse_sr_group_fft = 'off' ! off/direct/halo
-  character(1) :: yn_hse_sr_wave_first = 'n',yn_hse_sr_return_sum = 'y',yn_hse_sr_pair_symmetry = 'n'
-  real(8) :: hse_sr_radius = 0d0 ! input length, converted to bohr
-  real(8) :: hse_sr_tolerance ! erfc(omega*R), zero disables finite-range convolution
+  character(1) :: yn_hse_sr_pair_symmetry = 'n' ! canonical DC Gamma Hermitian pairs
+  real(8) :: hse_sr_tolerance ! zero only; retained for input/restart compatibility
   real(8) :: exx_pair_tolerance ! raw exchange action Frobenius budget, atomic units
   character(8) :: exx_kpoint_backend ! cpu/cufft full k-mesh exchange convolution
   character(8) :: exx_local_backend ! cpu/cufft compact exchange implementation

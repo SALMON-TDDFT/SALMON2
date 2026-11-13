@@ -103,10 +103,13 @@ These CPU/MPI/HSE-enabled CTest cases generate fresh GS data and require its
 verification before preparing RT. They check completion, finite currents and
 energies, and electron-number conservation. archived development checks
 also compares one-rank and two-rank propagation for all three functionals,
-checks zero-field stability and Gamma adaptive 99.9% source ACE, and rejects
+historically checked zero-field stability and Gamma adaptive source ACE, and rejected
 missing/mismatched saved data.
 Set `SALMON_TEST_EXE` and `SALMON_TEST_MPIEXEC` to run that integration suite.
 These small tests do not establish k-mesh, time-step, or spectral convergence.
+
+The Gamma source-support ACE route is excluded from this PR preparation.
+Use occupied-support ACE; the historical tests above do not certify this reduced tree.
 
 ## Common full-support k-point exchange
 

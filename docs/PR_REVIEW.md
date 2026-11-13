@@ -2,6 +2,9 @@
 
 This proposal targets `develop-2.0.0` at `376635ebd939687959021a2c4e87747802401c4a`.
 It contains the accumulated HSE/SOC development, not merely the latest FFT fix.
+The 2026-11-13 preparation excludes developmental giant-Gamma source-support
+ACE and finite-range SR group/wave FFT. Ordinary Gamma full-support exchange
+is retained. See [scope and September comparison](hse-pr-scope-20261113.md).
 The ordinary upstream tests remain unchanged; the proposed hybrid regression
 uses only one small Si system through the existing420 GS /421 RT cases.
 
@@ -20,12 +23,15 @@ Some optional exchange/functional paths share these dependencies. No unrelated
 runtime source module was removed merely to reduce the file count. Input changes
 and restrictions are documented under [inputs](inputs/hse.md).
 
-## Standalone Si512 snapshot
+## Deferred standalone Si512 work
 
-The adopted Si512 owner-exchange modules are preserved separately under
-[modules/si512_owner](../modules/si512_owner/README.md). They are not linked into
-the SALMON runtime; their sampled-tile validation does not establish native RT
-or SOC integration. Pending optimization candidates are excluded.
+The standalone giant-Gamma Si512 owner-exchange snapshots and their later
+optimization candidates are outside this proposal. They are preserved unchanged
+under `modules/si512_owner` in the original base commit `5926312f` and its
+original worktree. No SALMON source, build or test depends on them. Their
+standalone validation is preserved; native SALMON/RT/SOC integration remains
+separate work. Their exclusion is a scope decision, not a rejection of the
+standalone numerical or performance results.
 
 ## What is deliberately excluded
 

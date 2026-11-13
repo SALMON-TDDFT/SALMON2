@@ -298,7 +298,7 @@ contains
       & exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_history_frames,exx_factor_n_teach, &
       & exx_factor_mode,exx_k_algorithm,yn_exx_fft_orbits,yn_exx_k_pair_symmetry,yn_exx_spinor_pair_fft, &
       & yn_ace_shadow_diagnostic,yn_ace_export_factors, &
-      & hse_sr_group_fft,yn_hse_sr_wave_first,yn_hse_sr_return_sum,yn_hse_sr_pair_symmetry,hse_sr_radius, &
+      & yn_hse_sr_pair_symmetry, &
       & exx_local_backend,exx_gpu_batch_size,exx_kpoint_backend, &
       & exx_ace_support,exx_pair_screening,exx_pair_tolerance,hse_sr_tolerance, &
       & exx_pre_scf_threshold,exx_pre_scf_steps,yn_exx_dc_mlwf, &
@@ -777,11 +777,7 @@ contains
     yn_exx_k_pair_symmetry = ' '
     yn_ace_shadow_diagnostic = 'n'
     yn_ace_export_factors = 'n'
-    hse_sr_group_fft = 'off'
-    yn_hse_sr_wave_first = 'n'
-    yn_hse_sr_return_sum = 'y'
     yn_hse_sr_pair_symmetry = 'y'
-    hse_sr_radius = 0d0
     exx_factor_history_frames = 3
     exx_factor_exact_interval = 8
     exx_factor_n_teach = 8
@@ -1431,16 +1427,8 @@ contains
     call string_lowercase(yn_ace_shadow_diagnostic)
     call comm_bcast(yn_ace_export_factors,nproc_group_global)
     call string_lowercase(yn_ace_export_factors)
-    call comm_bcast(hse_sr_group_fft,nproc_group_global)
-    call string_lowercase(hse_sr_group_fft)
-    call comm_bcast(yn_hse_sr_wave_first,nproc_group_global)
-    call string_lowercase(yn_hse_sr_wave_first)
-    call comm_bcast(yn_hse_sr_return_sum,nproc_group_global)
-    call string_lowercase(yn_hse_sr_return_sum)
     call comm_bcast(yn_hse_sr_pair_symmetry,nproc_group_global)
     call string_lowercase(yn_hse_sr_pair_symmetry)
-    call comm_bcast(hse_sr_radius,nproc_group_global)
-    hse_sr_radius=hse_sr_radius*ulength_to_au
     call comm_bcast(hse_sr_tolerance,nproc_group_global)
     call comm_bcast(exx_pair_tolerance,nproc_group_global)
     call comm_bcast(exx_kpoint_backend,nproc_group_global)
@@ -2526,11 +2514,7 @@ contains
       write(fh_variables_log, *) "# yn_exx_k_pair_symmetry=",yn_exx_k_pair_symmetry
       write(fh_variables_log, *) "# yn_ace_shadow_diagnostic=",yn_ace_shadow_diagnostic
       write(fh_variables_log, *) "# yn_ace_export_factors=",yn_ace_export_factors
-      write(fh_variables_log, *) "# hse_sr_group_fft=",hse_sr_group_fft
-      write(fh_variables_log, *) "# yn_hse_sr_wave_first=",yn_hse_sr_wave_first
-      write(fh_variables_log, *) "# yn_hse_sr_return_sum=",yn_hse_sr_return_sum
       write(fh_variables_log, *) "# yn_hse_sr_pair_symmetry=",yn_hse_sr_pair_symmetry
-      write(fh_variables_log, *) "# hse_sr_radius=",hse_sr_radius*ulength_from_au
       write(fh_variables_log, *) "# hse_sr_tolerance=",hse_sr_tolerance
       write(fh_variables_log, *) "# exx_pair_tolerance (au)=",exx_pair_tolerance
       write(fh_variables_log, *) "# exx_kpoint_backend=",exx_kpoint_backend
@@ -3108,13 +3092,14 @@ contains
     implicit none
     integer :: i,round_phi,exx_grid(3)
     real(8) :: udp_phi  ! udp: under dicimal point
-    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf,learned_mesh_checkpoint
+    logical :: if_orthogonal_tmp,pbeh_mesh_rt,hybrid_mesh_rt,hybrid_spatial_scf
     logical :: global_symmetry_route,global_native_k_route
 
-    learned_mesh_checkpoint=exx_factor_mode=='learned'.and.xc=='hse06'.and. &
-      yn_dc=='n'.and.yn_md=='n'.and.propagator=='hse_taylor4'.and.yn_predictor_corrector=='y'.and. &
-      product(num_kgrid)==1.and.exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0.and. &
-      exx_ace_support=='source'.and.yn_self_checkpoint=='n'
+    ! The giant-Gamma source/SR algorithms remain on the development branches.
+    ! Reject their inputs before any restart or pseudopotential data is loaded.
+    if(exx_ace_support=='source')error stop 'source-support ACE is deferred'
+    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance/=0d0) &
+      error stop 'Finite-range Gamma exchange is deferred; hse_sr_tolerance must be zero'
 
     if(propagator=='ptcn_mgga23'.and.xc/='nc_mgga23')error stop 'ptcn_mgga23 requires nc_mgga23'
     if(xc=='nc_mgga23') then
@@ -3252,8 +3237,6 @@ contains
     call yn_argument_check(yn_exx_k_pair_symmetry)
     call yn_argument_check(yn_ace_shadow_diagnostic)
     call yn_argument_check(yn_ace_export_factors)
-    call yn_argument_check(yn_hse_sr_wave_first)
-    call yn_argument_check(yn_hse_sr_return_sum)
     call yn_argument_check(yn_hse_sr_pair_symmetry)
     call yn_argument_check(yn_hse_profile)
     call yn_argument_check(yn_hse_eigen_diagnostic)
@@ -3549,15 +3532,7 @@ contains
          (convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')) &
         error stop 'PBE pre-SCF requires density mixing and a density convergence metric'
     endif
-    if(exx_ace_support/='occupied'.and.exx_ace_support/='source') &
-      error stop 'exx_ace_support must be occupied or source'
-    if(exx_ace_support=='source')then
-      if((theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_md=='y'.or.yn_dc=='y') &
-        error stop 'source-support ACE requires fixed-ion native RT'
-      if(.not.is_hybrid(xc))error stop 'source-support ACE requires a hybrid functional'
-      if(exx_pair_screening/='off')error stop 'source-support ACE uses exact support pairs; set exx_pair_screening=off'
-      if(exx_mlwf_norm_fraction<=0d0)error stop 'source-support ACE requires adaptive support'
-    endif
+    if(exx_ace_support/='occupied')error stop 'exx_ace_support must be occupied'
     if(exx_pair_screening/='off'.and.exx_pair_screening/='diagnose'.and.exx_pair_screening/='on') &
       error stop 'exx_pair_screening must be off, diagnose or on'
     if(.not.ieee_is_finite(exx_pair_tolerance).or.exx_pair_tolerance<0d0) &
@@ -3568,13 +3543,6 @@ contains
       if(xc=='hse06'.and.hse_omega<=0d0)error stop 'HSE pair screening requires positive omega'
       if(exx_mlwf_norm_fraction<=0d0)error stop 'pair screening requires exx_mlwf_norm_fraction > 0'
       if(exx_mlwf_radius>0d0)error stop 'pair screening with fixed EXX radius is not yet supported'
-    endif
-    if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance<0d0.or.hse_sr_tolerance>=1d0) &
-      error stop 'hse_sr_tolerance must be finite and in [0,1)'
-    if(hse_sr_tolerance>0d0)then
-      if(xc/='hse06'.or.exx_ace_support/='source'.or.product(num_kgrid)/=1.or. &
-         exx_local_fft/='auto'.or.exx_local_backend/='cpu') &
-        error stop 'HSE finite range requires Gamma HSE source-support ACE and CPU local FFT'
     endif
     if(exx_local_fft/='auto'.and.exx_local_fft/='off')error stop 'exx_local_fft must be auto or off'
     if(exx_kpoint_backend/='cpu'.and.exx_kpoint_backend/='cufft') &
@@ -3618,23 +3586,6 @@ contains
 
     if(exx_factor_mode/='off'.and.exx_factor_mode/='strict'.and.exx_factor_mode/='learned') &
       error stop 'exx_factor_mode must be off, strict or learned'
-    if(hse_sr_group_fft/='off'.and.hse_sr_group_fft/='direct'.and.hse_sr_group_fft/='halo') &
-      error stop 'hse_sr_group_fft must be off, direct or halo'
-    if(.not.ieee_is_finite(hse_sr_radius).or.hse_sr_radius<0d0) &
-      error stop 'hse_sr_radius must be finite and nonnegative'
-    if(hse_sr_group_fft/='off')then
-#ifndef USE_MPI
-      error stop 'SR group FFT requires MPI'
-#endif
-      if(hse_sr_radius<=0d0.or.hse_sr_tolerance<=0d0) &
-        error stop 'SR group FFT requires positive radius and SR tolerance'
-    else if(hse_sr_radius/=0d0)then
-      error stop 'hse_sr_radius requires SR group FFT'
-    endif
-    if(yn_hse_sr_wave_first=='y'.and.hse_sr_group_fft=='off') &
-      error stop 'SR wave-first requires SR group FFT'
-    if(yn_hse_sr_pair_symmetry=='y'.and.yn_hse_sr_wave_first=='y'.and.yn_hse_sr_return_sum/='y') &
-      error stop 'SR wave-first pair symmetry requires aggregated return'
     if(yn_exx_fft_orbits=='y')then
       if(.not.is_hybrid(xc).or.product(num_kgrid)<2.or.index(yn_symmetry,'y')==0.or. &
          any(hse_q_reduction/=1).or.exx_kpoint_backend/='cpu'.or.yn_dc/='n') &
@@ -3708,7 +3659,7 @@ contains
       endif
       if(.not.is_hybrid(xc)) &
         error stop 'EXX MLWF radius requires HSE06 or PBEh40'
-      if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
+      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
         error stop 'finite EXX MLWF radius: restart/snapshot metadata unsupported'
       yn_hse_wannier='y'
     endif
@@ -3762,7 +3713,7 @@ contains
     endif
     if(hybrid_mesh_rt)then
       if(.not.global_native_k_route)yn_hse_wannier='y'
-      if((yn_restart=='y'.and..not.learned_mesh_checkpoint).or.yn_hse_wannier_snapshot=='y') &
+      if(yn_restart=='y'.or.yn_hse_wannier_snapshot=='y') &
         error stop 'Hybrid mesh RT: restart/snapshot unsupported'
       if((ae_shape1/='impulse'.and.ae_shape1/='Acos2').or.ae_shape2/='none') &
         error stop 'Hybrid mesh RT: impulse or Acos2 without a second field required'
@@ -3774,7 +3725,7 @@ contains
         if(omega1<=0d0.or.tw1<=0d0.or.t1_start<0d0) &
           error stop 'Hybrid mesh RT: positive frequency/width and nonnegative pulse start required'
       endif
-      if(((checkpoint_interval>0.or.time_shutdown>0d0).and..not.learned_mesh_checkpoint).or.write_rt_wfn_k=='y') &
+      if(checkpoint_interval>0.or.time_shutdown>0d0.or.write_rt_wfn_k=='y') &
         error stop 'Hybrid mesh RT: checkpoint output not supported'
       if(yn_md=='y')then
         if(ensemble/='NVE'.or.step_velocity_scaling>=1.or.yn_stop_system_momt=='y') &

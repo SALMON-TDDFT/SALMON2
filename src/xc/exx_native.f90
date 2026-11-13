@@ -7,7 +7,7 @@ module exx_native
   use exx_worker_service, only: service_enabled,service_exchange
 #endif
   use exx_blas_threads, only: exx_blas_thread_control
-  use exx_sparse_orbitals, only: sparse_pack,sparse_clear,sparse_column
+  use exx_sparse_orbitals, only: sparse_pack,sparse_clear
   use exx_functional, only: exchange_fraction,exchange_screening
   use exx_cufft, only: exx_cufft_create
   use exx_k_backend, only: k_backend_factory
@@ -301,15 +301,13 @@ contains
 
         if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
           propagator/='hse_taylor4'.or. &
-          (product(num_kgrid)==1.and.hse_sr_tolerance<0d0).or. &
-          (product(num_kgrid)>1.and.hse_sr_tolerance/=0d0).or. &
+          product(num_kgrid)<2.or.hse_sr_tolerance/=0d0.or. &
           exx_mlwf_radius/=0d0.or. &
-          (product(num_kgrid)==1.and.(exx_mlwf_norm_fraction/=1d0.or.exx_ace_support/='source')).or. &
-          (product(num_kgrid)>1.and.(exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied')).or. &
+          exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied'.or. &
           exx_pair_screening/='off'.or. &
           yn_hse_wannier_snapshot=='y'.or. &
           (.not.native_integer_occupation(system).and..not.thermal_factor_supported(system,info))) &
-          error stop 'Factor history requires static full-support HSE, compatible k/SR settings and integer occupation'
+          error stop 'Factor history requires static full-support dense-k HSE and compatible occupations'
         if(info%isize_o>1.and..not.distributed_metric_available(info%icomm_ro)) &
           error stop 'Orbital-distributed factor history requires ScaLAPACK'
         if(product(num_kgrid)>1)then
@@ -1637,7 +1635,7 @@ contains
     real(8),allocatable :: radii(:),loss(:)
     logical,allocatable :: protected(:)
     integer(int64) :: fft_work(3)
-    logical :: was_active,screen_fallback,radius_covers_cell,support_accepted,sr_canonical
+    logical :: was_active,screen_fallback,radius_covers_cell
     integer :: requested_screen_mode
     real(8) :: correction_norm,accepted_bound
     integer :: adaptive_bad
@@ -1690,22 +1688,12 @@ contains
       maxiter=exx_mlwf_maxiter
     spatial%seed_localized=exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0
     spatial%retain_accepted_gauge=theory/='dft'
-    ! Uniform occupied spin pairs allow any unitary occupied frame. Full
-    ! support with a fixed SR kernel needs no localization or transport.
-    sr_canonical=yn_dc=='n'.and.xc=='hse06'.and.hse_sr_tolerance>0d0.and.exx_mlwf_radius==0d0.and. &
-      (exx_mlwf_norm_fraction==0d0.or.exx_mlwf_norm_fraction==1d0).and. &
-      yn_hse_wannier_snapshot/='y'.and.exx_pair_screening=='off'.and.exx_ace_support=='source'.and. &
-      all(abs(system%rocc-2d0)<1d-12)
-    if(dc_canonical().or.sr_canonical)then
+    if(dc_canonical())then
       maxiter=0
       call spatial_exx_canonical_source(spatial,local,system%rocc(info%io_s:info%io_e,:,1), &
         info%icomm_r,status,comm_o=orbital_comm)
       if(info%id_ro==0.and.spatial%updates==1)then
-        if(sr_canonical)then
-          write(*,'(a)')'EXX_SR canonical occupied source; MLWF bypassed'
-        else
-          write(*,'(a)')'EXX_DC canonical full-fragment source (spatial)'
-        endif
+        write(*,'(a)')'EXX_DC canonical full-fragment source (spatial)'
       endif
     else
     call spatial_exx_refresh(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
@@ -1725,11 +1713,11 @@ contains
     ! as for fraction=1, its exact action does not require a converged gauge.
     radius_covers_cell=exx_mlwf_radius>0d0.and. &
       exx_mlwf_radius>=sqrt(sum((.5d0*num_rgrid*system%hgs)**2))
-    adaptive_active=sr_canonical.or.(.not.dc_canonical().and. &
+    adaptive_active=.not.dc_canonical().and. &
       (exx_mlwf_norm_fraction>0d0.or.exx_mlwf_radius>0d0).and.exx_adaptive_ready.and. &
       (spatial%last_localization_status==0.or.radius_covers_cell.or. &
-       (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0)))
-    if(adaptive_active.and..not.sr_canonical)then
+       (exx_mlwf_norm_fraction==1d0.and.exx_mlwf_radius==0d0))
+    if(adaptive_active)then
       allocate(radii(info%numo),loss(info%numo),protected(info%numo))
       call adaptive_source_mask(num_rgrid,system%hgs,mg%is-1,mg%num,info%icomm_r,spatial%source, &
         merge(exx_mlwf_norm_fraction,.999d0,exx_mlwf_norm_fraction>0d0),radii,loss,protected,status, &
@@ -1749,7 +1737,7 @@ contains
         endif
       endif
     endif
-    if(use_sparse_source.and.adaptive_active.and..not.sr_canonical.and..not.radius_covers_cell.and. &
+    if(use_sparse_source.and.adaptive_active.and..not.radius_covers_cell.and. &
        (exx_mlwf_norm_fraction<1d0.or.exx_mlwf_radius>0d0))then
       call sparse_pack(spatial%sparse_source,spatial%source)
       deallocate(spatial%source)
@@ -1772,7 +1760,6 @@ contains
     if(exx_pair_screening=='diagnose')requested_screen_mode=1
     if(exx_pair_screening=='on')requested_screen_mode=2
     if(dc_canonical())requested_screen_mode=0
-    spatial%sr_tolerance=hse_sr_tolerance
     spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
     fft_work=0_int64
     if(allocated(action_work))then
@@ -1783,54 +1770,35 @@ contains
       endif
     endif
     if(.not.allocated(w))allocate(w(product(mg%num),info%numo,1))
-    support_accepted=.false.
-    if(exx_ace_support=='source')then
-      if(.not.adaptive_active)error stop 'Source-support ACE requires active MLWF support'
-      call build_source_support_ace(support_accepted)
-      if(sr_canonical.and..not.support_accepted) &
-        error stop 'SR canonical source ACE rejected; no full-kernel fallback'
-      ! Fixed-ion source ACE never uses the full-action DC route. Its next
-      ! refresh regenerates source from the mesh; only transport previous persists.
-      if(support_accepted)then
-        if(allocated(spatial%source))deallocate(spatial%source)
-        call sparse_clear(spatial%sparse_source)
-      endif
-      if(info%id_ro==0)write(*,'(a,l1,a)')'EXX_SUPPORT_ACE accepted: ',support_accepted, &
-        ' (failure falls back to occupied-vector ACE)'
+    call apply_exchange_action()
+    if(status/=0)error stop 'Spatial EXX: exchange action failed'
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i2,2i18,2es18.9)') &
+      'EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds: ',requested_screen_mode, &
+      spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,2i18)') &
+      'EXX_PAIR generated grid products/catalogue entries: ',spatial%pair_products,spatial%pair_catalog_entries
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i18)') &
+      'EXX_PAIR evaluated product points: ',spatial%pair_product_points
+    correction_norm=0d0;accepted_bound=0d0
+    if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
+      call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
+        exx_pair_tolerance-spatial%screen_bound,correction_norm,status)
+      accepted_bound=spatial%screen_bound+correction_norm
     endif
-    if(.not.support_accepted)then
-      spatial%sr_tolerance=0d0 ! Never retain a failed finite-range ACE approximation.
-      spatial%screen_mode=requested_screen_mode;spatial%screen_tolerance=exx_pair_tolerance/2d0
+    if(status==0)call build_exchange_ace()
+    screen_fallback=status/=0.and.requested_screen_mode==2.and.spatial%screen_skipped>0
+    if(screen_fallback)then
+      ! Pair-dependent omissions need not define a Hermitian input metric.
+      ! Never relax the existing Hermitian/positive ACE validation to accept them.
+      spatial%screen_mode=0;accepted_bound=0d0
       call apply_exchange_action()
-      if(status/=0)error stop 'Spatial EXX: exchange action failed'
-      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i2,2i18,2es18.9)') &
-        'EXX_PAIR mode/candidates/skipped/action bound/max rank CPU seconds: ',requested_screen_mode, &
-        spatial%screen_candidates,spatial%screen_skipped,spatial%screen_bound,spatial%screen_cpu_seconds
-      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,2i18)') &
-        'EXX_PAIR generated grid products/catalogue entries: ',spatial%pair_products,spatial%pair_catalog_entries
-      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,i18)') &
-        'EXX_PAIR evaluated product points: ',spatial%pair_product_points
-      correction_norm=0d0;accepted_bound=0d0
-      if(requested_screen_mode==2.and.spatial%screen_skipped>0)then
-        call orbital_hermitian_action(local,w,system%hvol,info%icomm_r,info%icomm_o, &
-          exx_pair_tolerance-spatial%screen_bound,correction_norm,status)
-        accepted_bound=spatial%screen_bound+correction_norm
-      endif
-      if(status==0)call build_exchange_ace()
-      screen_fallback=status/=0.and.requested_screen_mode==2.and.spatial%screen_skipped>0
-      if(screen_fallback)then
-        ! Pair-dependent omissions need not define a Hermitian input metric.
-        ! Never relax the existing Hermitian/positive ACE validation to accept them.
-        spatial%screen_mode=0;accepted_bound=0d0
-        call apply_exchange_action()
-        if(status/=0)error stop 'Spatial EXX: unscreened fallback action failed'
-        call build_exchange_ace()
-      endif
-      if(status/=0)error stop 'Spatial EXX: ACE build failed'
-      if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,l1,a,es18.9)') &
-        'EXX_PAIR unscreened ACE fallback: ',screen_fallback,' accepted action bound: ', &
-        accepted_bound
-    endif ! occupied-vector ACE, including support-ACE fallback
+      if(status/=0)error stop 'Spatial EXX: unscreened fallback action failed'
+      call build_exchange_ace()
+    endif
+    if(status/=0)error stop 'Spatial EXX: ACE build failed'
+    if(requested_screen_mode/=0.and.info%id_ro==0)write(*,'(a,l1,a,es18.9)') &
+      'EXX_PAIR unscreened ACE fallback: ',screen_fallback,' accepted action bound: ', &
+      accepted_bound
     if(adaptive_active.and.info%id_ro==0)write(*,'(a,3i18)') &
       'EXX_ADAPTIVE local/global pairs/local FFT points (orbital group 0): ', &
       fft_work
@@ -1851,71 +1819,10 @@ contains
       if(allocated(cached_action))deallocate(cached_action)
       call move_alloc(w,action_work)
     endif
-    if(.not.dc_canonical().and..not.sr_canonical.and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
+    if(.not.dc_canonical().and.info%id_ro==0.and.(spatial%updates==1.or.maxiter>0)) &
       write(*,'(a,3i8,3es16.7)')'EXX_SPATIAL refresh/iterations/status/spread/gradient/overlap: ', &
       spatial%updates,spatial%iterations,spatial%localization_status,spatial%spread,spatial%gradient,spatial%min_singular
   contains
-    subroutine build_source_support_ace(accepted)
-      implicit none
-      logical,intent(out) :: accepted
-      complex(8),pointer :: training(:,:,:)
-      accepted=.false.
-      spatial%screen_mode=2;spatial%screen_tolerance=0d0
-      if(allocated(spatial%sparse_source%offset))then
-        call apply_sparse_training()
-      else
-        ! Alias full support without an extra mesh copy.
-        training(1:size(spatial%source,1),1:size(spatial%source,2),1:1)=>spatial%source
-        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
-          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,training,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm,same_source=.true.)
-        call record_fft_work()
-      endif
-      if(status/=0)error stop 'Source-support ACE: exchange action failed'
-      if(info%id_ro==0)write(*,'(a,4i18)')'EXX_SUPPORT_ACE products/skipped/catalogue/product points: ', &
-        spatial%pair_products,spatial%screen_skipped,spatial%pair_catalog_entries,spatial%pair_product_points
-      if(allocated(spatial%sparse_source%offset))then
-        ! sparse_u replaces the training values; w supplies only u's dimensions.
-        call orbital_ace_build(ace,w,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.not.factor_experiment, &
-          comm_matrix=info%icomm_ro,sparse_u=spatial%sparse_source)
-      else
-        call orbital_ace_build(ace,training,w,system%hvol,info%icomm_r,info%icomm_o,status,packed=.not.factor_experiment, &
-          comm_matrix=info%icomm_ro)
-      endif
-      call comm_summation(status,adaptive_bad,info%icomm_ro)
-      if(adaptive_bad/=0)return
-      call orbital_ace_apply(ace,local,w,info%icomm_r,info%icomm_o,status)
-      if(status/=0)error stop 'Source-support ACE: occupied mesh action failed'
-      accepted=.true.
-    end subroutine
-    subroutine apply_sparse_training()
-      implicit none
-      integer,parameter :: block_size=32
-      complex(8),allocatable :: targets(:,:,:)
-      integer :: largest,first,count,j,lo
-      integer(int64) :: stats(5)
-      largest=info%numo;stats=0
-      call comm_get_max(largest,info%icomm_ro)
-      do first=1,largest,block_size
-        count=max(0,min(block_size,info%numo-first+1));lo=min(first,info%numo+1)
-        allocate(targets(size(w,1),count,1))
-        do j=1,count
-          call sparse_column(spatial%sparse_source,first+j-1,targets(:,j,1))
-        enddo
-        call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
-          [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,targets,w(:,lo:lo+count-1,:),status, &
-          omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm,screen_target_count=system%no)
-        if(status/=0)return
-        call record_fft_work()
-        stats=stats+[spatial%screen_candidates,spatial%screen_skipped,spatial%pair_products, &
-                     spatial%pair_catalog_entries,spatial%pair_product_points]
-        deallocate(targets)
-      enddo
-      spatial%screen_candidates=stats(1);spatial%screen_skipped=stats(2)
-      spatial%pair_products=stats(3);spatial%pair_catalog_entries=stats(4);spatial%pair_product_points=stats(5)
-      status=0
-    end subroutine apply_sparse_training
     subroutine apply_exchange_action()
 !$    use omp_lib, only: omp_get_max_threads,omp_in_parallel
       implicit none

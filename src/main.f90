@@ -84,7 +84,7 @@ contains
       all(hse_q_reduction==1).and.exx_kpoint_backend=='cpu'.and.temperature<0d0.and. &
       yn_jm=='n'.and.yn_symmetrized_stencil/='y'.and.yn_hse_wannier_snapshot/='y'.and. &
       exx_pair_screening=='off'.and.dm_unfold_option=='no'.and. &
-      exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.hse_sr_radius==0d0.and.hse_sr_tolerance==0d0.and. &
+      exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.hse_sr_tolerance==0d0.and. &
       al_vec1(2)==0d0.and.al_vec1(3)==0d0.and.al_vec2(1)==0d0.and. &
       al_vec2(3)==0d0.and.al_vec3(1)==0d0.and.al_vec3(2)==0d0
     if(exx_worker_rprime_groups>0) &

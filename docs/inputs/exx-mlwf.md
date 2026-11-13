@@ -298,22 +298,9 @@ periodic cell is exact and does not require converged localization. The existing
 ambiguous-center protection still leaves such sources uncut. This correction
 does not add fixed-radius RT/MD or fixed-radius pair-screening support.
 
-## 局所支持軌道で構築する ACE（検証用・固定イオン RT）
+## 今回のPRから除外する開発ルート
 
-`exx_ace_support='source'` は、切り詰め済み MLWF `S` と交換作用 `K_S S` で ACE を構築する。
-既定値は `'occupied'`（従来方式）。`exx_mlwf_norm_fraction=0.999d0` と組み合わせる。
-支持が重ならない対を誤差ゼロで除外するが、ACE の構築空間を変える近似は別に存在する。
-99.9% の規格化条件を交換作用・電流・エネルギーの誤差上限とは解釈しない。
-
-時間発展する軌道は実空間メッシュのままで、元の占有軌道に ACE を作用させて交換エネルギーも計算する。
-非直交支持軌道の ACE 計量に従来と同じ Hermitian・正定値・条件数検査を適用し、
-構築できなければ従来の占有軌道 ACE に戻る。各更新の `EXX_SUPPORT_ACE accepted` で確認できる。
-全支持（fraction=1）では従来 ACE と一致する。
-
-初期実装は完全占有の native 固定イオン RT に限定する。DC-SCF、LCFO 基底 RT、MD では使用しない。
-`exx_pair_screening='off'` が必要（内部では支持の厳密なゼロだけを利用する）。
-source モードでは交換作用 W の厳密な非ゼロ要素と計量の因子 A を保持し、
-`-W A A† W†`（内積には格子体積を含む）として作用させる。密な ACE 因子は展開しない。
-計量の逆行列を明示的に作らず、従来の条件数制限を維持する。
-実空間軌道とゲージ運搬用軌道は密なまま、計量因子は軌道数の二乗の格納を要するため、
-総メモリの線形スケーリングを保証しない。
+巨大Γ点向けのsource-support ACEと有限範囲SR group/wave FFTは今回の対象外。
+`exx_ace_support='occupied'` と `hse_sr_tolerance=0d0` を使用する。
+通常Γ点の全範囲交換・DCのcanonical交換・占有軌道ACEは残す。
+開発実装と検証記録は元の開発ブランチに保存されている。

@@ -39,8 +39,6 @@ if(USE_HSE)
     exx_spatial_local.f90
     rvv10.f90
     fftw_blocks.f90
-    sr_group_fft.f90
-    sr_wave_fft.f90
     rvv10_distributed.f90
     rvv10_native.f90
     rvv10_ffte.f

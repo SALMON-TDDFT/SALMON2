@@ -1,3 +1,4 @@
+include("${PROJECT_SOURCE_DIR}/cmakefiles/pzheev_guard.cmake")
 # SALMON sources
 set(SALMON_SOURCES)
 
@@ -24,6 +25,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/analysis)
 
 # Executable binary
 add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
+salmon_guard_eigensolver_target(${TARGET_NAME})
 target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
 if(USE_EXX_CUFFT)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/xc/exx_cufft.f90

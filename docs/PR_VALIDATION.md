@@ -14,12 +14,19 @@ energy drift and native dielectric/conductivity output. It is not a converged
 optical spectrum and is not a performance acceptance test.
 
 ```sh
+python3 tools/check_forbidden_eigensolvers.py --source-root src &&
 cmake -S . -B build -DUSE_HSE=ON -DUSE_MPI=ON -DCMAKE_BUILD_TYPE=Release &&
 cmake --build build --parallel 4 &&
 OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 ctest --test-dir build -R '42[01]_bulk_Si_hse' --output-on-failure -j1
 ```
 
 ## Evidence and boundaries
+
+The 2026-11-13 preparation deliberately excludes developmental giant-Gamma
+routes. Its fresh verification is recorded in
+[the reduced-tree scope report](hse-pr-scope-20261113.md#verification-on-the-reduced-tree).
+No new GS data was collected; the Si trajectory results below describe the
+earlier proposal and do not certify this reduced tree.
 
 Before submission cleanup, GNU15 CPU serial/MPI builds, application-object audits,
 40 focused checks, six automatic-layout starts and the64-step Si RT passed.

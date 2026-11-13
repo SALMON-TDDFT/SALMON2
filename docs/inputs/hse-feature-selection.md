@@ -2,8 +2,9 @@
 
 HSE/ACE/SR settings are in `&functional`. Environment variables do not override
 the input. Native k-exchange optimization normally needs no switches: the
-omitted `exx_k_algorithm` selects the conservative `auto` policy. SR wave batches are fixed at 16 (the separate existing GPU
-batch input is unchanged).
+omitted `exx_k_algorithm` selects the conservative `auto` policy.
+The developmental giant-Gamma SR and source-support ACE routes are excluded.
+Ordinary Gamma full-support exchange remains available.
 
 | Input | Default | Values / meaning | Replaces |
 |---|---|---|---|
@@ -11,19 +12,13 @@ batch input is unchanged).
 | `exx_k_algorithm` | `auto` | `auto`, `reference`, `pair`, `orbits`; native k-exchange strategy | three legacy exchange switches |
 | `yn_ace_shadow_diagnostic` | `n` | shadow comparisons within surrogate trace | `SALMON_ACE_SHADOW_DIAGNOSTIC` |
 | `yn_ace_export_factors` | `n` | raw one-orbital H2 factor diagnostic | `SALMON_ACE_EXPORT_FACTORS` |
-| `hse_sr_group_fft` | `off` | `off`, `direct` (group FFT without halo exchange), `halo` | absent / `0` / `1` in `SALMON_HSE_SR_GROUP_FFT` |
-| `hse_sr_radius` | `0` | positive group-FFT cutoff radius in the selected input length unit | `SALMON_HSE_SR_RADIUS_AU` (previously always bohr) |
-| `yn_hse_sr_wave_first` | `n` | wave-first SR group route | `SALMON_HSE_SR_WAVE_FIRST` |
-| `yn_hse_sr_return_sum` | `y` | aggregated SR returns | `SALMON_HSE_SR_RETURN_SUM` |
-| `yn_hse_sr_pair_symmetry` | `y` | exact Gamma Hermitian pairs for canonical DC; conjugate pairs for eligible SR wave training | `SALMON_HSE_SR_PAIR_SYMMETRY` |
+| `yn_hse_sr_pair_symmetry` | `y` | Exact Gamma Hermitian pairs for canonical DC; legacy name retained | `SALMON_HSE_SR_PAIR_SYMMETRY` |
 
-`SALMON_HSE_SR_WAVE_BATCH` is removed; batch16 is fixed. All character selections
-are case insensitive, broadcast to all MPI ranks, and recorded in `variables.log`.
-The radius follows `unit_system` and is converted to bohr internally. Existing
-`hse_sr_tolerance` still controls finite-range convolution; it is not replaced.
-
-Group FFT requires an MPI build, positive radius and SR tolerance. Wave-first
-requires group FFT; pair symmetry additionally requires aggregated return.
+All character selections are case insensitive, broadcast to all MPI ranks,
+and recorded in `variables.log`. `exx_ace_support` accepts only `occupied`.
+`hse_sr_tolerance` is retained at zero for input/restart compatibility;
+nonzero or nonfinite values fail before loading calculation data.
+The group FFT, wave-first, return-sum and SR radius inputs have been removed.
 Dense-k FFT reuse supports HSE06, PBE0, PBEh40 and PBEh40+rVV10 with native CPU
 exchange, crystal symmetry, and all q points. Global hybrids require fixed ions,
 integer occupations, occupied-support ACE, no WF truncation and k-only MPI.
@@ -36,21 +31,6 @@ localization is added to the global-hybrid kernel.
 Learned history retains the previous static HSE Taylor4 predictor-corrector,
 occupation and layout restrictions. Checkpoint mode IDs remain 0/1/2 for
 `off`/`strict`/`learned`, so select the same mode when restarting.
-
-Example SR configuration (atomic units):
-
-```fortran
-&functional
- xc='hse06'
- exx_ace_support='source'
- exx_mlwf_norm_fraction=1d0
- hse_sr_tolerance=1d-1
- hse_sr_group_fft='halo'
- hse_sr_radius=10d0
- yn_hse_sr_wave_first='y'
- yn_hse_sr_pair_symmetry='y'
-/
-```
 
 For a dense-k learned calculation, use the compatibility switch
 `yn_exx_fft_orbits='y'` and
@@ -106,10 +86,9 @@ retains its existing reference backend. Source weights are `rocc/2`; the
 reverse action uses the other orbital's weight, so zero/fractional occupations
 need no division or approximation. One convolution updates both directions.
 `yn_hse_sr_pair_symmetry='n'` selects the ordered-pair reference for this backend.
-This switch does not turn on SR truncation, wave-first FFT, or change occupations.
+This switch does not change the kernel or occupations.
 The Gamma log records local pair counts and explicit scratch bytes; these are not
-whole-process RSS or a speedup guarantee. SR wave-pair reuse still requires
-identical source/target sets and aggregated return.
+whole-process RSS or a speedup guarantee.
 
 Old inputs with `yn_exx_fft_orbits`, `yn_exx_k_pair_symmetry` or
 `yn_exx_spinor_pair_fft` remain readable as compatibility overrides of `auto`.
@@ -129,7 +108,7 @@ Example comparison setting (omit for normal operation):
 /
 ```
 
-The `exx_factor_mode`, finite-range SR controls and diagnostics remain separate
+The `exx_factor_mode` and diagnostics remain separate
 because they choose approximation/history behavior or explicit diagnostics, not
 an interchangeable native-k implementation. Historical learned/orbits inputs
 continue through the compatibility switch; the new manual selectors do not
