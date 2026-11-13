@@ -462,13 +462,6 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
     end do
     end do
     end do
-    if(system%nc_mgga23_payload%active) then
-      ! The impulse changes orbital gradients/current, so rebuild the complete
-      ! gKS operator before the first predictor. Density itself is unchanged.
-      spsi_in%update_zwf_overlap=.false.
-      call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info, &
-        spsi_in,stencil,Vxc,energy%E_xc)
-    endif
   end if
   
   ! Record the actual initial/restart sample, so comparison uses a known t_ref.

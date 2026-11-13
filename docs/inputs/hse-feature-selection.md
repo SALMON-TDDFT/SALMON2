@@ -119,9 +119,11 @@ r/rprime exchange tasks; they hold no SCF wavefunctions or ACE factors.
 The owners retain their k, SCF, and ACE communicator. Native empty-k guards
 are not removed. This is an exchange-only service, not a full empty-k SCF layout.
 
-`exx_worker_tile_divisor=16` and `exx_worker_rprime_groups=1` are conservative
-namelist defaults; both can be specified in `&functional`. The latter must divide
-the total MPI rank count. Existing saved candidate environment variables are not
+`exx_worker_tile_divisor=0` and `exx_worker_rprime_groups=0` select automatic
+layout by default; both can be specified in `&functional`. A positive
+`exx_worker_rprime_groups` must divide the total MPI rank count. Automatic
+selection accounts for symmetry-reduced work and the bounded scratch capacity.
+Existing saved candidate environment variables are not
 read by this integrated implementation. Unsupported helper layouts are rejected
 collectively before service entry. No-helper inputs retain the normal path.
 

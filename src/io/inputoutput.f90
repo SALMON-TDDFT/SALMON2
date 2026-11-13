@@ -2459,8 +2459,6 @@ contains
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xc', trim(xc)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'xname', trim(xname)
       write(fh_variables_log, '("#",4X,A,"=",A)') 'cname', trim(cname)
-      if(xc=='nc_mgga23') write(fh_variables_log,*) &
-        '# nc_mgga23: adiabatic gKS; PRB107165111+PRB110199902; gamma=0.8; vacuum_n<=1e-25 au'
       write(fh_variables_log, *) "# pbeh_coulomb_radius (bohr; 0=auto)=",pbeh_coulomb_radius
       write(fh_variables_log, *) "# rvv10_fft=",rvv10_fft
       write(fh_variables_log, *) "# rvv10_b,c,nq=",rvv10_b,rvv10_c,rvv10_nq
@@ -3054,39 +3052,11 @@ contains
     if(.not.ieee_is_finite(hse_sr_tolerance).or.hse_sr_tolerance/=0d0) &
       error stop 'Finite-range Gamma exchange is deferred; hse_sr_tolerance must be zero'
 
-    if(propagator=='ptcn_mgga23'.and.xc/='nc_mgga23')error stop 'ptcn_mgga23 requires nc_mgga23'
-    if(xc=='nc_mgga23') then
-      if(spin/='noncollinear'.or.yn_spinorbit/='y') &
-        error stop 'nc_mgga23 requires noncollinear spinors and SOC representation'
-      if(yn_dc/='n'.or.yn_md/='n'.or.yn_opt/='n'.or.yn_jm/='n') &
-        error stop 'nc_mgga23 supports conventional fixed-ion pseudopotential calculations only'
-      if(theory/='dft'.and.theory/='tddft_pulse'.and.theory/='tddft_response') &
-        error stop 'nc_mgga23: unsupported theory'
-      if(yn_fix_func/='n'.or.(yn_symmetry/='n'.and.yn_symmetry/='nnn').or.yn_symmetrized_stencil/='n') &
-        error stop 'nc_mgga23 requires self-consistent XC without symmetry reduction'
-      if(yn_out_rvf_rt=='y') error stop 'nc_mgga23 force output is not implemented'
-      if(yn_out_spin_current_decomposed=='y'.or.yn_out_spin_current_micro=='y') &
-        error stop 'nc_mgga23 decomposed/microscopic spin current is not implemented'
-      if(yn_out_micro_je=='y'.or.yn_out_current_decomposed=='y'.or.yn_out_intraband_current=='y') &
-        error stop 'nc_mgga23 supports macroscopic charge-current output only'
-      if(xname/='none'.or.cname/='none') error stop 'nc_mgga23 cannot be combined with separate xname/cname'
-      if(theory/='dft')then
-        if(propagator=='ptcn_mgga23')then
-#ifndef USE_SCALAPACK
-          error stop 'MGGA23 PT-CN requires a ScaLAPACK build'
-#endif
-          if(yn_predictor_corrector/='n'.or.gram_schmidt_interval>0) &
-            error stop 'MGGA23 PT-CN requires no external predictor or Gram-Schmidt'
-          if(yn_periodic/='y'.or.any(nproc_rgrid/=1)) &
-            error stop 'MGGA23 PT-CN requires periodic full local spatial domain'
-        else if(propagator/='middlepoint'.or.yn_predictor_corrector/='y')then
-          error stop 'nc_mgga23 requires middlepoint-PC or ptcn_mgga23'
-        endif
-      endif
-#ifdef USE_OPENACC
-      error stop 'nc_mgga23 is available on CPU only'
-#endif
-    endif
+    select case(propagator)
+    case('middlepoint','aetrs','hse_ptcn','hse_taylor4','hse_taylor4_full')
+    case default
+      error stop 'Unsupported propagator'
+    end select
 
     !! Add wrong input keyword or wrong/unavailable input combinations here
     !! (now only a few)

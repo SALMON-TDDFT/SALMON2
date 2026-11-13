@@ -30,8 +30,7 @@ c       irPC     radius of partial core (int(radius*100.))
 c       ZPA      charge number of pseudo-atom
 c       occPA(l) occupation number in pseudo-atom
 c
-      use crps_output, only: crps_write_v1,crps_write_v2
-      use crps_core_aux, only: build_core_aux
+      use crps_output, only: crps_write_v1
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
 
@@ -68,19 +67,9 @@ c local
       common /aob/nodeA,lA,jA,kA
       real*8 jpot(0:Nr,NPdim),jwave(0:Nr,NPdim)
       real*8 joc(NPdim),jenergy(NPdim),vlocal(0:Nr)
-      logical write_legacy,write_core_aux
-      integer nbcore,core_ids(2*NAdim),core_l(2*NAdim)
-      integer core_lambda(2*NAdim)
-      real*8 core_q(2*NAdim),core_amp(0:Nr,2*NAdim)
-      real*8 core_damp(0:Nr,2*NAdim),core_tau(0:Nr)
-      real*8 core_cur(0:Nr)
-      real*8 HC,MC2,H2M,E2,ALP,Pi
-      common /prm/HC,MC2,H2M,E2,ALP,Pi
-      real*8 rhoA(0:2*Nx),VA(0:2*Nx),speA(NAdim)
-      real*8 FA(0:Nx,NAdim),GA(0:Nx,NAdim)
-      common /aer/rhoA,VA,speA,FA,GA
+      logical write_legacy
       namelist /crps/ core_radius,c2lo,c2hi,output_file,lloc,
-     & write_legacy,write_core_aux,ZA,NA,occA,PtoA,
+     & write_legacy,ZA,NA,occA,PtoA,
      & cutoff_radius_bohr,Lmax
 
       interface
@@ -93,7 +82,6 @@ c local
          end subroutine Pseudo_Potential
       end interface
 
-      write_core_aux=.true.
       AtoP=0
       call init
 
@@ -323,22 +311,9 @@ c Local reference must retain Coulomb tail, even for empty channels.
       endif
       write(*,*) 'CORE_RANGE ',minval(rhoPC),maxval(rhoPC),
      & minloc(rhoPC)
-      if(write_core_aux) then
-         call build_core_aux(Nr,hr,irPC,Rx(0:2*Nx:2),FA,GA,
-     &    VA(0:2*Nx:2),speA,occA,AtoP,lA,kA,ZA,ALP,HC,
-     &    MC2,rhoPC,nbcore,core_ids,core_l,core_lambda,
-     &    core_q,core_amp,core_damp,core_tau,core_cur)
-         call crps_write_v2(trim(output_file),Nr,hr,Lmax,ZPA,
-     &    NP,irPC,lloc,lP,jtwo,irRC,joc,jenergy,rhoPC,vlocal,
-     &    jpot,jwave,nbcore,core_ids(1:nbcore),
-     &    core_l(1:nbcore),core_lambda(1:nbcore),
-     &    core_q(1:nbcore),core_amp(:,1:nbcore),
-     &    core_damp(:,1:nbcore),core_tau,core_cur)
-      else
       call crps_write_v1(trim(output_file),Nr,hr,Lmax,ZPA,
      & NP,irPC,lloc,lP,jtwo,irRC,joc,jenergy,rhoPC,vlocal,
      & jpot,jwave)
-      endif
       write(*,*) 'CRPS_SOC_NLCC_WRITTEN ',trim(output_file)
       if(.not.write_legacy) stop
 c non-relativisitic pseudo-atom calculation

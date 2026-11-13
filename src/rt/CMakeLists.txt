@@ -13,7 +13,7 @@ if(USE_HSE)
 endif()
 
 if(USE_HSE OR USE_SCALAPACK)
-  list(APPEND SOURCES ptcn_core.f90 exx_ptcn_core.f90 ptcn_native.f90 ptcn_mgga23.f90
+  list(APPEND SOURCES ptcn_core.f90 exx_ptcn_core.f90 ptcn_native.f90
     ptcn_rectangular_fft.f90 ptcn_kinetic_preconditioner.f90)
 endif()
 if(USE_SCALAPACK)

@@ -98,6 +98,8 @@ contains
  else
  bad=1
  endif
+ if(.not.spinor_values_are_finite(es))bad=1
+ if(.not.spinor_values_are_finite(target))bad=1
  call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
  if(globalbad/=0)return
  allocate(expected_layout(2*np));expected_layout=[starts,counts]
@@ -483,7 +485,10 @@ contains
 #ifdef HAVE_EXX_OPENBLAS_THREADS
  call exx_blas_thread_control(0,density_blas_state)
 #endif
- ierr=0
+ bad=0
+ if(.not.spinor_values_are_finite(action))bad=1
+ call MPI_Allreduce(bad,globalbad,1,MPI_INTEGER,MPI_MAX,comm,e)
+ if(globalbad==0)ierr=0
 900 continue
  if(row_comm/=MPI_COMM_NULL)call MPI_Comm_free(row_comm,e)
  if(column_comm/=MPI_COMM_NULL)call MPI_Comm_free(column_comm,e)
@@ -514,4 +519,19 @@ contains
  endif
  end subroutine
  end subroutine
+ logical function spinor_values_are_finite(a) result(ok)
+ use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+ implicit none
+ complex(8),intent(in)::a(:,:,:)
+ integer::i,j,k
+ ok=.true.
+ do k=1,size(a,3)
+ do j=1,size(a,2)
+ do i=1,size(a,1)
+ if(.not.ieee_is_finite(real(a(i,j,k))))ok=.false.
+ if(.not.ieee_is_finite(aimag(a(i,j,k))))ok=.false.
+ enddo
+ enddo
+ enddo
+ end function spinor_values_are_finite
 end module

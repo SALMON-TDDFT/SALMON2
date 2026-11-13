@@ -1,5 +1,5 @@
 #include "config.h"
-! Experimental semilocal spinor PT-CN adapter. Full local real-space domain.
+! Native HSE PT-CN adapter. Full local real-space domain.
 module ptcn_native
  implicit none
  private
@@ -57,9 +57,8 @@ contains
  character(12)::label
  if(info%isize_r/=1.or.any(mg%num/=lg%num))error stop 'Native PT-CN requires full local spatial domain'
  hybrid=xc=='hse06'
- if(.not.hybrid.and.xc/='nc_mgga23')error stop 'Native PT-CN: unsupported functional'
- label='MGGA23_PT_CN'
- if(hybrid)label='HSE_PT_CN'
+ if(.not.hybrid)error stop 'Native PT-CN: unsupported functional'
+ label='HSE_PT_CN'
 #ifndef USE_HSE
  if(hybrid)error stop 'Native PT-CN: HSE not built'
 #endif

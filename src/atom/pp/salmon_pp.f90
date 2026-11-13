@@ -261,9 +261,7 @@ module salmon_pp
 
     allocate(pp%rho_nlcc_tbl(nrmax,nelem))
     allocate(pp%tau_nlcc_tbl(nrmax,nelem))
-    allocate(pp%core23_present(nelem));pp%core23_present=.false.
-    allocate(pp%core23_tau_tbl(nrmax,nelem));pp%core23_tau_tbl=0d0
-    allocate(pp%core23_current_tbl(nrmax,nelem));pp%core23_current_tbl=0d0
+    allocate(pp%full_nlcc_support(nelem));pp%full_nlcc_support=.false.
   
     allocate(pp%vpp(0:nrmax0,0:2*lmax0+2),pp%upp(0:nrmax0,0:2*lmax0+1))
     pp%vpp=0d0; pp%upp=0d0
@@ -389,13 +387,11 @@ module salmon_pp
     integer :: irepr_min, irepr_max
     real(8) :: Rion_repr(3)
     real(8) :: r, rc, r1, r2, r3, u, v, w
-    real(8) :: ratio1, ratio2, core_tau, core_c, rh(3), crossnorm, plane_distance
+    real(8) :: ratio1, ratio2, rh(3), crossnorm, plane_distance
     real(8) :: cv(3),cell_cross(3)
-    logical :: flag_cuboid, species_core23
+    logical :: flag_cuboid, species_full_nlcc
     real(8) :: rho_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
     real(8) :: tau_nlcc_tmp(rg%is(1):rg%ie(1), rg%is(2):rg%ie(2), rg%is(3):rg%ie(3))
-    real(8) :: core23_tau_tmp(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
-    real(8) :: core23_current_tmp(4,3,rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3))
     call nvtxStartRange('calc_nlcc', __LINE__)
     
     if(allocated(ppn%rho_nlcc)) deallocate(ppn%rho_nlcc,ppn%tau_nlcc)
@@ -410,22 +406,6 @@ module salmon_pp
       & rg%is(2):rg%ie(2), &
       & rg%is(3):rg%ie(3)))
 
-    if(allocated(ppn%core23_tau)) deallocate(ppn%core23_tau)
-    if(allocated(ppn%core23_current)) deallocate(ppn%core23_current)
-    allocate(ppn%core23_tau(rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
-    allocate(ppn%core23_current(4,3,rg%is(1):rg%ie(1),rg%is(2):rg%ie(2),rg%is(3):rg%ie(3)))
-    ppn%core23_tau=0d0;ppn%core23_current=0d0
-    ppn%core23_complete=.true.
-    do a=1,sys%nion
-      ik=kion(a)
-      if(maxval(abs(pp%rho_nlcc_tbl(:,ik)))==0d0) cycle
-      if(.not.allocated(pp%core23_present)) then
-        ppn%core23_complete=.false.
-      else if(.not.pp%core23_present(ik)) then
-        ppn%core23_complete=.false.
-      endif
-    enddo
-    core23_tau_tmp=0d0;core23_current_tmp=0d0
     ppn%rho_nlcc = 0d0
     ppn%tau_nlcc = 0d0  
 
@@ -461,19 +441,19 @@ module salmon_pp
 
 !$omp parallel do &
 !$omp   private(a,ik,rc,i,i1,i2,i3,j1,j2,j3,u,v,w,r1,r2,r3,r,ir,intr,ratio1,ratio2,Rion_repr) &
-!$omp   private(species_core23,core_tau,core_c,rh,irepr_min,irepr_max,cell_cross,cv,crossnorm,plane_distance) &
-!$omp   reduction(+:rho_nlcc_tmp,tau_nlcc_tmp,core23_tau_tmp,core23_current_tmp)
+!$omp   private(species_full_nlcc,rh,irepr_min,irepr_max,cell_cross,cv,crossnorm,plane_distance) &
+!$omp   reduction(+:rho_nlcc_tmp,tau_nlcc_tmp)
     do a=1, sys%nion
       ik = Kion(a)
-      species_core23=.false.
-      if(allocated(pp%core23_present)) species_core23=pp%core23_present(ik)
+      species_full_nlcc=.false.
+      if(allocated(pp%full_nlcc_support)) species_full_nlcc=pp%full_nlcc_support(ik)
       if(iperiodic==0) then
         irepr_min=0;irepr_max=0
       else
         irepr_min=-2;irepr_max=2
       endif
-      if(species_core23) then
-        ! Complete joint support: never select an interior small-density row.
+      if(species_full_nlcc) then
+        ! Preserve the complete density support declared by the V2 table.
         rc=pp%rad(pp%mr(ik)+1,ik)
         if(iperiodic==3) then
           ! Bound images by the smallest lattice-plane spacing. This also
@@ -532,9 +512,9 @@ module salmon_pp
           endif
           r = sqrt(r1**2 + r2**2 + r3**2)
           if (r <= rc) then
-            if(species_core23.and.r>=rc) cycle
-            if(species_core23) then
-              ! V2 KY has a validated uniform radial grid. Avoid a full table
+            if(species_full_nlcc.and.r>=rc) cycle
+            if(species_full_nlcc) then
+              ! V2 KY uses the validated uniform radial grid. Avoid a full table
               ! scan for every point of every periodic image.
               intr=min(pp%mr(ik),int(r/(pp%rad(2,ik)-pp%rad(1,ik)))+1)
             else
@@ -550,20 +530,6 @@ module salmon_pp
               +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
             tau_nlcc_tmp(j1, j2, j3) = tau_nlcc_tmp(j1, j2, j3) & ! iwata
               +ratio1*pp%tau_nlcc_tbl(intr+1,ik)+ratio2*pp%tau_nlcc_tbl(intr,ik)
-            if(species_core23) then
-              core_tau=ratio1*pp%core23_tau_tbl(intr+1,ik)+ratio2*pp%core23_tau_tbl(intr,ik)
-              core_c=ratio1*pp%core23_current_tbl(intr+1,ik)+ratio2*pp%core23_current_tbl(intr,ik)
-              core23_tau_tmp(j1,j2,j3)=core23_tau_tmp(j1,j2,j3)+core_tau
-              rh=0d0
-              if(r>0d0) rh=[r1,r2,r3]/r
-              ! J_i^a = C epsilon_(i,a,b) rhat_b. First Pauli row is charge.
-              core23_current_tmp(2,2,j1,j2,j3)=core23_current_tmp(2,2,j1,j2,j3)-core_c*rh(3)
-              core23_current_tmp(2,3,j1,j2,j3)=core23_current_tmp(2,3,j1,j2,j3)+core_c*rh(2)
-              core23_current_tmp(3,1,j1,j2,j3)=core23_current_tmp(3,1,j1,j2,j3)+core_c*rh(3)
-              core23_current_tmp(3,3,j1,j2,j3)=core23_current_tmp(3,3,j1,j2,j3)-core_c*rh(1)
-              core23_current_tmp(4,1,j1,j2,j3)=core23_current_tmp(4,1,j1,j2,j3)-core_c*rh(2)
-              core23_current_tmp(4,2,j1,j2,j3)=core23_current_tmp(4,2,j1,j2,j3)+core_c*rh(1)
-            endif
             !ppn%rho_nlcc(j1, j2, j3) = ppn%rho_nlcc(j1, j2, j3) & ! iwata
             !  +ratio1*pp%rho_nlcc_tbl(intr+1,ik)+ratio2*pp%rho_nlcc_tbl(intr,ik)
             !ppn%tau_nlcc(j1, j2, j3) = ppn%tau_nlcc(j1, j2, j3) & ! iwata
@@ -580,8 +546,6 @@ module salmon_pp
   
     ppn%rho_nlcc = rho_nlcc_tmp
     ppn%tau_nlcc = tau_nlcc_tmp
-    ppn%core23_tau=core23_tau_tmp
-    ppn%core23_current=core23_current_tmp
 
     call nvtxEndRange
     return

@@ -53,7 +53,6 @@ use total_energy
 use init_gs, only: init_wf
 use density_matrix_and_energy_plusU_sub, only: calc_density_matrix_and_energy_plusU, PLUS_U_ON
 use noncollinear_module, only: calc_magnetization,snapshot_density_noncollinear
-use nc_mgga23_scf, only: nc23_scf_prepare,nc23_scf_residual,nc23_spin_density_residual
 use dcdft
 #ifdef USE_HSE
 use exx_native, only: exx_enabled,exx_freeze,exx_check_localization,exx_adaptive_ready,exx_support_changed
@@ -70,9 +69,8 @@ integer :: ilevel_print !=3:print-all
                         !=1:print-minimum
                         !=0:no-print
 integer :: iter,Miter,iob,p1,p2,p5
-type(s_nc_mgga23_payload) :: nc_scf_history
 complex(8),allocatable :: spin_density_before(:,:,:,:,:),spin_density_after(:,:,:,:,:)
-real(8) :: nc_scf_residual
+real(8) :: operator_residual
 integer :: mixing_age
 real(8) :: sum1
 real(8) :: rNebox1,rNebox2
@@ -115,7 +113,6 @@ logical :: pre_scf_root
 #endif
 
 mixing_age=Miter
-nc_scf_history%active=.false.
 #ifdef USE_HSE
 pre_scf_count=0
 pre_scf_first_iteration=Miter+1
@@ -269,11 +266,9 @@ DFT_Iteration : do iter=Miter+1,nscf
    ! only for the orbital solve. XC refresh below restores the physical payload
    ! before energy/band evaluation and before writing the final state.
 #ifndef USE_OPENACC
-   if(calc_mode/='DFT_BAND'.and.yn_dc=='n'.and.yn_spinorbit=='y'.and.method_mixing=='simple_dm'.and. &
-      .not.system%nc_mgga23_payload%active) call snapshot_density_noncollinear(spin_density_before)
+   if(calc_mode/='DFT_BAND'.and.yn_dc=='n'.and.yn_spinorbit=='y'.and.method_mixing=='simple_dm') &
+     call snapshot_density_noncollinear(spin_density_before)
 #endif
-   if(calc_mode/='DFT_BAND') &
-     call nc23_scf_prepare(system%nc_mgga23_payload,nc_scf_history,mixing%mixrate)
 #ifdef USE_HSE
    if(calc_mode/='DFT_BAND')call exx_scf_prepare(system,mg,info,spsi,mixing%mixrate)
 #endif
@@ -392,26 +387,22 @@ DFT_Iteration : do iter=Miter+1,nscf
 
    if(yn_dc=='n') then
      call convergence_check(lg,mg,system,info,rho,V_local)
-     call nc23_scf_residual(system%nc_mgga23_payload,nc_scf_history,info%icomm_rko,nc_scf_residual)
-     sum1=max(sum1,nc_scf_residual)
 #ifdef USE_HSE
-     call exx_scf_residual(system,mg,info,spsi,nc_scf_residual)
-     sum1=max(sum1,nc_scf_residual)
-     if(nc_scf_residual>0d0.and.comm_is_root(nproc_id_global)) &
-       write(*,'(a,es24.16)') 'HSE full-Fock target-action residual: ',nc_scf_residual
+     call exx_scf_residual(system,mg,info,spsi,operator_residual)
+     sum1=max(sum1,operator_residual)
+     if(operator_residual>0d0.and.comm_is_root(nproc_id_global)) &
+       write(*,'(a,es24.16)') 'HSE full-Fock target-action residual: ',operator_residual
 #endif
 #ifndef USE_OPENACC
      if(allocated(spin_density_before)) then
        call snapshot_density_noncollinear(spin_density_after)
-       call nc23_spin_density_residual(spin_density_after,spin_density_before,system%hvol, &
-         mixing%mixrate,info%icomm_r,nc_scf_residual)
-       sum1=max(sum1,nc_scf_residual)
+       call spin_density_residual(spin_density_after,spin_density_before,system%hvol, &
+         mixing%mixrate,info%icomm_r,operator_residual)
+       sum1=max(sum1,operator_residual)
        if(comm_is_root(nproc_id_global)) &
-         write(*,'(a,es24.16)') 'SOC full-spin-density residual: ',nc_scf_residual
+         write(*,'(a,es24.16)') 'SOC full-spin-density residual: ',operator_residual
      endif
 #endif
-     if(system%nc_mgga23_payload%active.and.comm_is_root(nproc_id_global)) &
-       write(*,'(a,es24.16)') 'NC_MGGA23 full-operator residual: ',nc_scf_residual
    else
    ! DC method
      call convergence_check(dc%lg_tot,dc%mg_tot,dc%system_tot,dc%info_tot,dc%rho_tot,dc%vloc_tot)
@@ -602,6 +593,61 @@ contains
     exx_support_changed=.false.
   end subroutine consume_support_event
 #endif
+
+  subroutine spin_density_residual(now,before,hvol,alpha,comm,residual)
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  complex(8),intent(in)::now(:,:,:,:,:),before(:,:,:,:,:)
+  real(8),intent(in)::hvol,alpha
+  integer,intent(in)::comm
+  real(8),intent(out)::residual
+  real(8)::v(2),g(2)
+  integer::bad,global_bad,i
+  if(.not.ieee_is_finite(alpha))error stop 'SOC SCF: nonfinite mixing rate'
+  if(alpha<=0d0.or.alpha>1d0)error stop 'SOC SCF: mixing rate must be in (0,1]'
+  ! For simple_dm only: undo its exact linear alpha suppression. The full
+  ! density matrix includes charge-invisible transverse spin changes.
+  bad=0
+  if(.not.spin_density_finite5(now))bad=1
+  if(.not.spin_density_finite5(before))bad=1
+  if(.not.ieee_is_finite(hvol))bad=1
+  if(hvol<=0d0)bad=1
+  call comm_summation(bad,global_bad,comm)
+  if(global_bad/=0)error stop 'SOC SCF: nonfinite density or invalid volume'
+  v(1)=sum(abs(now-before))*hvol/alpha
+  v(2)=sum(real(now(:,:,:,1,1)+now(:,:,:,2,2),8))*hvol
+  do i=1,2
+   if(.not.ieee_is_finite(v(i)))bad=1
+  enddo
+  call comm_summation(bad,global_bad,comm)
+  if(global_bad/=0)error stop 'SOC SCF: nonfinite density residual'
+  call comm_summation(v,g,2,comm)
+  do i=1,2
+   if(.not.ieee_is_finite(g(i)))error stop 'SOC SCF: nonfinite global density residual'
+  enddo
+  if(g(2)<=0d0)error stop 'SOC SCF: nonpositive electron count'
+  residual=g(1)/g(2)
+ end subroutine
+
+ logical function spin_density_finite5(a) result(ok)
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  complex(8),intent(in)::a(:,:,:,:,:)
+  integer::i,j,k,l,m
+  ok=.true.
+  do m=1,size(a,5)
+  do l=1,size(a,4)
+  do k=1,size(a,3)
+  do j=1,size(a,2)
+  do i=1,size(a,1)
+   if(.not.ieee_is_finite(real(a(i,j,k,l,m),8)))ok=.false.
+   if(.not.ieee_is_finite(aimag(a(i,j,k,l,m))))ok=.false.
+  enddo
+  enddo
+  enddo
+  enddo
+  enddo
+ end function
 
   subroutine init_convergence_check()
     implicit none

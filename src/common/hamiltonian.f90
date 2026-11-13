@@ -35,7 +35,6 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
   use pseudo_pt_plusU_sub, only: pseudo_plusU, PLUS_U_ON
   use pseudo_pt_so_sub, only: pseudo_so
   use noncollinear_module, only: op_xc_noncollinear
-  use nc_mgga23, only: nc_mgga23_add_action
   use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8
   use salmon_global, only: yn_want_communication_overlapping,yn_periodic,yn_jm,yn_symmetrized_stencil, &
           absorbing_boundary, yn_spinorbit
@@ -451,7 +450,7 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call nvtxStartRange('nonlocal potential', __LINE__)
     if(yn_jm=='n') then
       if ( yn_spinorbit=='y' ) then
-        if (.not.system%nc_mgga23_payload%active) call op_xc_noncollinear( tpsi, htpsi, info, mg )
+        call op_xc_noncollinear( tpsi, htpsi, info, mg )
         call pseudo_so(tpsi,htpsi,info,nspin,ppg,mg)
       else
       ! pseudopotential
@@ -462,9 +461,6 @@ SUBROUTINE hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
       end if
     end if
     call nvtxEndRange()
-
-    if (system%nc_mgga23_payload%active) &
-      call nc_mgga23_add_action(system,mg,info,tpsi,htpsi,stencil,srg)
 
     ! meta-GGA: tau-operator part of Vxc
     if (system%xc_payload%use_tau_operator) then

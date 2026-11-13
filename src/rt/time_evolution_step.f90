@@ -136,7 +136,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     end if
   case(3)
     if(.not.singlescale%flag_use) then
-      if(propagator == 'middlepoint'.or.propagator=='ptcn_mgga23'.or.propagator == 'hse_ptcn'.or. &
+      if(propagator == 'middlepoint'.or.propagator == 'hse_ptcn'.or. &
          propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full') then
         system%vec_Ac(1:3) = 0.5d0* (rt%Ac_tot(1:3,itt)+rt%Ac_tot(1:3,itt-1))
       else if(propagator == 'aetrs') then
@@ -166,16 +166,10 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      endif
   endif
 
-  if(system%nc_mgga23_payload%active.and.ppn%core23_complete) then
-    ! The reference-core phase changes with A/c even before the orbitals move.
-    ! Build the incoming-state operator at this step's midpoint field.
-    call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info, &
-      spsi_in,stencil,Vxc,energy%E_xc)
-  endif
 
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 #if defined(USE_HSE) || defined(USE_SCALAPACK)
-  if(propagator=='hse_ptcn'.or.propagator=='ptcn_mgga23')then
+  if(propagator=='hse_ptcn')then
     call native_ptcn_step(dt,rt%Ac_tot(:,itt-1),rt%Ac_tot(:,itt),lg,mg,system,info,stencil,xc_func, &
       srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
   else
@@ -268,12 +262,6 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call calc_microscopic_current(system,mg,stencil,info,spsi_out,rt%j_e)
   end if
 
-  if(system%nc_mgga23_payload%active.and.ppn%core23_complete.and.iperiodic==3) then
-    ! Endpoint energy and core current need endpoint A, not the midpoint
-    ! used for propagation. Refresh all XC coefficients below at that field.
-    system%vec_Ac=rt%Ac_tot(:,itt)
-    if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
-  endif
 
   if(yn_fix_func=='n') then
   
@@ -306,7 +294,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 ! result
 
-  if(hybrid_mesh_rt.or.xc=='hse06'.or.(xc=='nc_mgga23'.and.iperiodic==3))then
+  if(hybrid_mesh_rt.or.xc=='hse06')then
     ! Propagation uses midpoint A, but energy/current/force describe t_{n+1}.
     system%vec_Ac=rt%Ac_tot(:,itt)
     call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
@@ -475,7 +463,6 @@ contains
 
   subroutine predictor_corrector
     implicit none
-    type(s_nc_mgga23_payload) :: nc_initial
     complex(8),allocatable :: xc_initial(:,:,:,:,:)
     real(8) :: V_tmp(mg%is(1):mg%ie(1),mg%is(2):mg%ie(2),mg%is(3):mg%ie(3),1:system%nspin)
     complex(8) :: psi_tmp(mg%is_array(1):mg%ie_array(1), &
@@ -483,8 +470,7 @@ contains
                         & mg%is_array(3):mg%ie_array(3), &
                         & 1:system%nspin,info%io_s:info%io_e,info%ik_s:info%ik_e,info%im_s:info%im_e)
     call nvtxStartRange('predictor_corrector', __LINE__)
-    if(system%nc_mgga23_payload%active) nc_initial=system%nc_mgga23_payload
-    if(yn_spinorbit=='y'.and..not.system%nc_mgga23_payload%active) &
+    if(yn_spinorbit=='y') &
       call snapshot_xc_noncollinear(xc_initial)
 
     !$omp workshare
@@ -538,11 +524,6 @@ contains
     end if
     
     if(allocated(xc_initial)) call average_xc_noncollinear(xc_initial)
-    if(nc_initial%active) then
-      system%nc_mgga23_payload%local=0.5d0*(nc_initial%local+system%nc_mgga23_payload%local)
-      system%nc_mgga23_payload%tau=0.5d0*(nc_initial%tau+system%nc_mgga23_payload%tau)
-      system%nc_mgga23_payload%current=0.5d0*(nc_initial%current+system%nc_mgga23_payload%current)
-    endif
     !$omp workshare
     spsi_in%zwf = psi_tmp
     !$omp end workshare

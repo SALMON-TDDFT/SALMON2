@@ -57,14 +57,6 @@ module structures
     type(s_vector) :: uvel         ! u, local grid (mg%is:mg%ie)
   end type s_xc_operator_payload
 
-  ! Pauli trace coefficients; local matrix is v(1) I + v(2:4).sigma.
-  type s_nc_mgga23_payload
-    real(8) :: band_expectation = 0d0
-    real(8) :: core_deda(3) = 0d0 ! explicit frozen-core dE_xc/d(A/c), integrated
-    logical :: active = .false.
-    real(8),allocatable :: local(:,:,:,:), tau(:,:,:,:), current(:,:,:,:,:)
-  end type s_nc_mgga23_payload
-
   type s_dft_system
     logical :: if_real_orbital
     integer :: ngrid,nspin,no,nk,nion ! # of r-grid points, spin indices, orbitals, k points, and ions
@@ -89,7 +81,6 @@ module structures
     real(8) :: vec_E_ext(3)  ! external electric potential for output
   ! meta-GGA: kinetic-energy-density derivative of E_xc
     type(s_xc_operator_payload) :: xc_payload
-    type(s_nc_mgga23_payload) :: nc_mgga23_payload
   end type s_dft_system
 
   type s_dft_energy
@@ -293,8 +284,7 @@ module structures
     ! Indexed by (ir,l,ik): rad(ir,ik), angular momentum l (not projector number), element ik.
     real(8),allocatable :: upptbl_ao_l(:,:,:)
     real(8),allocatable :: dupptbl_ao(:,:,:) ! derivatives of the DFT+U pseudo-wavefunction table (unused)
-    logical,allocatable :: core23_present(:)
-    real(8),allocatable :: core23_tau_tbl(:,:),core23_current_tbl(:,:)
+    logical,allocatable :: full_nlcc_support(:) ! preserve the complete density support in extended KY tables
   end type s_pp_info
 
 ! pseudopotential on r-space grid
@@ -367,10 +357,6 @@ module structures
   type s_pp_nlcc
     real(8), allocatable :: rho_nlcc(:,:,:)
     real(8), allocatable :: tau_nlcc(:,:,:)
-    ! Closed-shell auxiliary-Pauli reference core, tau WITHOUT 1/2.
-    ! core23_current carries Pauli traces (0,x,y,z), Cartesian direction, grid.
-    logical :: core23_complete = .false.
-    real(8),allocatable :: core23_tau(:,:,:),core23_current(:,:,:,:,:)
   end type s_pp_nlcc
 
 ! exchange-correlation functional
@@ -816,9 +802,7 @@ contains
     DEAL(pp%dudvtbl)
     DEAL(pp%rho_nlcc_tbl)
     DEAL(pp%tau_nlcc_tbl)
-    DEAL(pp%core23_present)
-    DEAL(pp%core23_tau_tbl)
-    DEAL(pp%core23_current_tbl)
+    DEAL(pp%full_nlcc_support)
     DEAL(pp%upp_f)
     DEAL(pp%pseudo_wf_eigval)
     DEAL(pp%pseudo_wf_occup)
