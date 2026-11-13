@@ -1,0 +1,10 @@
+SALMONpy
+Derived from SALMON, Copyright SALMON developers.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Bundled LD/SBE kernels and independent regression references originate from
+SALMON-TDDFT/SALMON2. Exact upstream and integration revisions are recorded in
+runtime/source.json. The upstream application is obtained separately when needed.
+
+Binary wheels may bundle compiler/BLAS runtimes under their respective licenses;
+see packaging/ld/licenses and LICENSE.THIRD-PARTY.

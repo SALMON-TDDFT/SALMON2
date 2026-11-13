@@ -3,9 +3,8 @@ project(salmonpy_ld LANGUAGES Fortran)
 find_package(Python REQUIRED COMPONENTS Interpreter)
 get_filename_component(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 set(CHECKER "${ROOT}/tools/check_forbidden_eigensolvers.py")
-# Scan before compilation and on incremental builds; the source-only distribution
-# may contain only the LD source, while a checkout scans all application sources.
-foreach(source "${ROOT}/src" "${ROOT}/salmonpy")
+# Audit the bundled kernels; the optional runtime is audited after preparation.
+foreach(source "${ROOT}/native" "${ROOT}/salmonpy")
   execute_process(COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${source}"
     RESULT_VARIABLE status)
   if(NOT status EQUAL 0)
@@ -13,10 +12,10 @@ foreach(source "${ROOT}/src" "${ROOT}/salmonpy")
   endif()
 endforeach()
 add_custom_target(ld_audit ALL
-  COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/src"
+  COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/native"
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
-add_library(salmonpy_ld SHARED "${ROOT}/src/maxwell/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90"
-  "${ROOT}/src/ssbe/sbe_types.f90" "${ROOT}/src/ssbe/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90")
+add_library(salmonpy_ld SHARED "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90"
+  "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90")
 if(APPLE)
   target_link_libraries(salmonpy_ld PRIVATE "-framework Accelerate")
 else()
@@ -40,3 +39,5 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/licenses/" DESTINATION salmonpy/l
 
 install(DIRECTORY "${ROOT}/salmonpy/examples/" DESTINATION salmonpy/examples
   FILES_MATCHING PATTERN "*.py" PATTERN "*.md" PATTERN "__pycache__" EXCLUDE)
+
+install(FILES "${ROOT}/NOTICE" "${ROOT}/LICENSE" "${ROOT}/LICENSE.THIRD-PARTY" DESTINATION salmonpy/licenses)

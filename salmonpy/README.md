@@ -1,5 +1,10 @@
 # SALMONpy：Pythonから使うSALMONの計算・解析部品
 
+> Standalone layout: full SALMON sources are no longer bundled. Source-checkout
+> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
+> the pinned external upstream checkout. Historical validation commands below
+> describe the old source layout and are not current build instructions.
+
 [English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`
 LD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。
 対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。

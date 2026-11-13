@@ -1,0 +1,2834 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 37d96980..a5c9fb74 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,3 +1,4 @@
++include("${PROJECT_SOURCE_DIR}/tools/pzheev_guard.cmake")
+ # SALMON sources
+ set(SALMON_SOURCES)
+ 
+@@ -24,6 +25,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/analysis)
+ 
+ # Executable binary
+ add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
++salmon_guard_eigensolver_target(${TARGET_NAME})
+ target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
+ if(EXTERNAL_PROJECT_TARGETS)
+   add_dependencies(${TARGET_NAME} ${EXTERNAL_PROJECT_TARGETS})
+diff --git a/src/gs/band_dft.f90 b/src/gs/band_dft.f90
+index 63090d9a..4de7ff6c 100644
+--- a/src/gs/band_dft.f90
++++ b/src/gs/band_dft.f90
+@@ -26,11 +26,13 @@ subroutine init_band_dft(system,band)
+   implicit none
+   type(s_dft_system), intent(inout)  :: system
+   type(s_band_dft), intent(inout) ::band
++  integer :: i
+ 
+   system%wtk(:) = 0.0d0
+   
+   call get_band_kpt( band%band_kpt, band%nref_band, system )
+   
++  if (band%nref_band < 1 .or. band%nref_band > system%no) error stop "invalid nref_band"
+   band%num_band_kpt = size( band%band_kpt, 2 )
+   !write(*,*) "num_band_kpt=",band%num_band_kpt
+ 
+@@ -42,7 +44,14 @@ subroutine init_band_dft(system,band)
+      write(100,*) "Number_of_Bands:",system%no
+      write(100,*) "Number_of_kpt_in_each_block:",system%nk
+      write(100,*) "Number_of_blocks:",band%num_band_kpt/system%nk
+-     close(100) 
++     close(100)
++     open(100,file='band_status.dat',status='replace')
++     write(100,'(a)') 'SALMONPY_BANDS_V1'
++     do i=1,3
++        write(100,'(3es24.16)') system%primitive_b(:,i)
++     end do
++     write(100,*) system%nk,band%nref_band
++     close(100)
+  end if
+ 
+ 
+@@ -59,13 +68,13 @@ subroutine calc_band_write(iter_band_kpt,system,band,info)
+    band%check_conv_esp=.false.
+    do ik=1,system%nk
+       if ( info%ik_s <= ik .and. ik <= info%ik_e ) then
+-         system%vec_k(:,ik) = matmul( system%primitive_b, band%band_kpt(:,iter_band_kpt+ik-1) )
++         system%vec_k(:,ik) = band%band_kpt(:,iter_band_kpt+ik-1)
+       end if
+    end do
+   
+    if( comm_is_root(nproc_id_global) ) then
+       write(*,10) iter_band_kpt, iter_band_kpt+system%nk-1
+-      write(*,20) "kpoints","kpoints in Cartesian"
++      write(*,20) "path Cartesian (1/bohr)","kpoints in Cartesian"
+       open(100,file='band.dat',position="append")
+       do ik=iter_band_kpt,iter_band_kpt+system%nk-1
+          write(*,30) ik, band%band_kpt(:,ik), system%vec_k(:,ik-iter_band_kpt+1)
+@@ -75,7 +84,7 @@ subroutine calc_band_write(iter_band_kpt,system,band,info)
+    end if
+ 10 format(1x,"iter_band_kpt=",i3," to",i3)
+ 20 format(1x,3x,2x,a30,2x,a30)
+-30 format(1x,i3,2x,3f10.5,2x,3f10.5)
++30 format(1x,i8,2x,3es24.16,2x,3es24.16)
+ 
+ end subroutine calc_band_write
+ 
+@@ -98,6 +107,19 @@ subroutine write_band(system,energy)
+ 
+ end subroutine write_band
+ 
++subroutine write_band_status(first,system,band)
++  use structures, only: s_dft_system,s_band_dft
++  implicit none
++  integer,intent(in) :: first
++  type(s_dft_system),intent(in) :: system
++  type(s_band_dft),intent(in) :: band
++  if (comm_is_root(nproc_id_global)) then
++     open(100,file='band_status.dat',position='append')
++     write(100,*) first,system%nk,merge(1,0,all(band%check_conv_esp))
++     close(100)
++  end if
++end subroutine write_band_status
++
+ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label )
+   use salmon_global, only: lattice_nml => lattice &
+                          , nref_band_nml => nref_band &
+@@ -131,13 +153,15 @@ subroutine read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt, kpt_label
+   end if
+   !read(unit,*) num_of_segments
+   num_of_segments=num_of_segments_nml
++  if (num_of_segments < 1 .or. num_of_segments >= size(kpt_nml,2)) error stop "invalid band segments"
+   allocate( ndiv_segment(num_of_segments) ); ndiv_segment=0
+   allocate( kpt(3,num_of_segments+1)      ); kpt=0.0d0
+   allocate( kpt_label(num_of_segments+1)  ); kpt_label=""
+   !read(unit,*) ndiv_segment(:)
+   ndiv_segment=ndiv_segment_nml(1:num_of_segments)
+-  kpt=kpt_nml(:,1:num_of_segments)
+-  kpt_label=kpt_label_nml(1:num_of_segments)
++  if (any(ndiv_segment < 1)) error stop "band subdivisions must be positive"
++  kpt=kpt_nml(:,1:num_of_segments+1)
++  kpt_label=kpt_label_nml(1:num_of_segments+1)
+   !call check_data_format( unit, iformat )
+   !select case( iformat )
+   !case( 0 )
+@@ -169,7 +193,40 @@ subroutine check_data_format( unit, iformat )
+ 9 iformat=0 ! 3 data
+ end subroutine check_data_format
+ 
++! Explicit fractional k points are supplied by external path generators.
++! No interpolation or symmetry transformation is applied; only endpoint padding.
++subroutine read_explicit_band_kpt(filename,system,kpt)
++  use structures, only: s_dft_system
++  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
++  implicit none
++  character(*),intent(in) :: filename
++  type(s_dft_system),intent(in) :: system
++  real(8),allocatable,intent(out) :: kpt(:,:)
++  real(8) :: fractional(3)
++  integer :: unit,npoints,nstored,i,j,ios
++  open(newunit=unit,file=filename,status='old',action='read',iostat=ios)
++  if (ios /= 0) error stop 'cannot open explicit band k points'
++  read(unit,*,iostat=ios) npoints
++  if (ios /= 0) error stop 'invalid explicit band point count'
++  if (npoints < 2 .or. npoints > 1000000) error stop 'explicit band point count out of range'
++  nstored=((npoints+system%nk-1)/system%nk)*system%nk
++  allocate(kpt(3,nstored))
++  do i=1,npoints
++     read(unit,*,iostat=ios) fractional
++     if (ios /= 0) error stop 'incomplete explicit band k points'
++     do j=1,3
++        if (.not.ieee_is_finite(fractional(j))) error stop 'nonfinite explicit band k point'
++     end do
++     kpt(:,i)=matmul(system%primitive_b,fractional)
++  end do
++  close(unit)
++  do i=npoints+1,nstored
++     kpt(:,i)=kpt(:,npoints)
++  end do
++end subroutine read_explicit_band_kpt
++
+ subroutine get_band_kpt( kpt, nref_band, system )
++   use salmon_global, only: file_band_kpoints, input_nref_band => nref_band
+    use structures, only: s_dft_system
+    use parallelization, only: nproc_id_global
+    use communication, only: comm_is_root
+@@ -191,6 +248,12 @@ subroutine get_band_kpt( kpt, nref_band, system )
+       write(*,'(a60)') repeat("-",41)//"get_band_kpt(start)"
+    end if
+ 
++   if (file_band_kpoints /= 'none') then
++      nref_band=input_nref_band
++      call read_explicit_band_kpt(file_band_kpoints,system,kpt)
++      return
++   end if
++
+    pi=acos(-1.0d0)
+ 
+    call read_bandcalc_param( lattice, nref_band, ndiv_segment, kpt_, kpt_label )
+@@ -285,7 +348,7 @@ subroutine get_band_kpt( kpt, nref_band, system )
+    end if
+ 
+    nk=system%nk
+-   nnk=sum( ndiv_segment(1:num_of_segments) )
++   nnk=sum( ndiv_segment(1:num_of_segments) )+1
+    if ( mod(nnk,nk) /= 0 ) nnk=nnk-mod(nnk,nk)+nk
+ 
+    allocate( kpt(3,nnk) ); kpt=0.0d0
+@@ -307,7 +370,7 @@ subroutine get_band_kpt( kpt, nref_band, system )
+    end if
+    if ( i < nnk ) then
+       do ik=i+1,nnk
+-         kpt(:,ik)=kpt(:,ik-1)+dk(:)
++         kpt(:,ik)=kpt(:,i) ! padding repeats the endpoint
+       end do
+    end if
+ 
+diff --git a/src/gs/dc/lcfo_diag_chefsi_complex.f90 b/src/gs/dc/lcfo_diag_chefsi_complex.f90
+index d3efeedd..8ee9c051 100644
+--- a/src/gs/dc/lcfo_diag_chefsi_complex.f90
++++ b/src/gs/dc/lcfo_diag_chefsi_complex.f90
+@@ -524,9 +524,11 @@ contains
+       type(s_layout) :: layout_active,layout_small
+       complex(8) :: work_query(1),one_c,zero_c
+       real(8) :: rwork_query(1)
++      integer :: iwork_query(1)
++      integer, allocatable :: iwork0(:)
+       complex(8), allocatable :: work0(:)
+       real(8), allocatable :: rwork0(:)
+-      integer :: lwork0,lrwork0,info0,nactive
++      integer :: lwork0,lrwork0,liwork0,info0,nactive,i,alloc_status
+       nactive=n-nlocked
+       call initialize_active_layouts(nactive,layout_d,layout_g,layout_active,layout_small,istat)
+       if(istat/=0) return
+@@ -539,22 +541,44 @@ contains
+       zero_c=(0d0,0d0)
+       call pzgemm('C','N',nactive,nactive,npadded,one_c,xd,1,1,layout_active%desc, &
+         hxd,1,1,layout_active%desc,zero_c,projected,1,1,layout_small%desc)
+-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
+-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,info0)
++      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
++        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work_query,-1,rwork_query,-1,iwork_query,-1,info0)
+       istat=merge(1,0,info0/=0)
+       call sync_status(istat)
+       if(istat/=0) return
+-      lwork0=max(1,ceiling(real(work_query(1),8)))
+-      lrwork0=max(1,ceiling(rwork_query(1)))
++      ! Check scalar query values before converting to the default integer ABI.
++      if(.not.ieee_is_finite(real(work_query(1),8))) istat=1
++      if(.not.ieee_is_finite(rwork_query(1))) istat=1
++      call sync_status(istat)
++      if(istat/=0) return
++      if(real(work_query(1),8)<1d0 .or. rwork_query(1)<1d0 .or. iwork_query(1)<1) istat=1
++      if(real(work_query(1),8)>real(huge(lwork0)-1,8)) istat=1
++      if(rwork_query(1)>real(huge(lrwork0)-1,8)) istat=1
++      call sync_status(istat)
++      if(istat/=0) return
++      lwork0=ceiling(real(work_query(1),8))
++      lrwork0=ceiling(rwork_query(1))
++      liwork0=iwork_query(1)
+       call comm_get_max(lwork0,dc%icomm_tot)
+       call comm_get_max(lrwork0,dc%icomm_tot)
+-      allocate(work0(lwork0),rwork0(lrwork0))
+-      call pzheev('V','L',nactive,projected,1,1,layout_small%desc, &
+-        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,info0)
++      call comm_get_max(liwork0,dc%icomm_tot)
++      allocate(work0(lwork0),rwork0(lrwork0),iwork0(liwork0),stat=alloc_status)
++      istat=merge(1,0,alloc_status/=0)
++      call sync_status(istat)
++      if(istat/=0) then
++        if(allocated(work0)) deallocate(work0)
++        if(allocated(rwork0)) deallocate(rwork0)
++        if(allocated(iwork0)) deallocate(iwork0)
++        return
++      end if
++      call pzheevd('V','L',nactive,projected,1,1,layout_small%desc, &
++        eigenvalue(nlocked+1:n),z,1,1,layout_small%desc,work0,lwork0,rwork0,lrwork0,iwork0,liwork0,info0)
+       istat=merge(1,0,info0/=0)
+-      if(any(.not.ieee_is_finite(eigenvalue(nlocked+1:n)))) istat=1
++      do i=nlocked+1,n
++        if(.not.ieee_is_finite(eigenvalue(i))) istat=1
++      end do
+       call sync_status(istat)
+-      deallocate(work0,rwork0)
++      deallocate(work0,rwork0,iwork0)
+       if(istat/=0) return
+       call comm_bcast(eigenvalue(nlocked+1:n),dc%icomm_tot,0)
+       xrot=(0d0,0d0)
+diff --git a/src/gs/main_dft.f90 b/src/gs/main_dft.f90
+index d9b7791b..f4410798 100644
+--- a/src/gs/main_dft.f90
++++ b/src/gs/main_dft.f90
+@@ -51,7 +51,7 @@ use lcfo
+ use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
+ implicit none
+ integer :: ix,iy,iz
+-integer :: Miter,iatom,jj,nspin
++integer :: Miter,iatom,jj,nspin,force_status_unit
+ real(8) :: sum1
+ character(100) :: comment_line
+ 
+@@ -198,6 +198,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
+ 
+ if(theory=='dft_band')then
+    call write_band(system,energy)
++   call write_band_status(iter_band_kpt,system,band)
+ end if
+ 
+ ! output the wavefunctions for next GS calculations
+@@ -227,6 +228,15 @@ end if
+    if(yn_jm=='n' .and. yn_dc=="n")then
+      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+      if(comm_is_root(nproc_id_global))then
++        if (theory=='dft' .and. yn_opt=='n' .and. yn_md=='n') then
++           open(newunit=force_status_unit,file='gs_forces.dat',status='replace')
++           write(force_status_unit,'(a)') 'SALMONPY_FORCES_V1'
++           write(force_status_unit,*) natom
++           do iatom=1,natom
++              write(force_status_unit,'(3es26.17e3)') system%Force(:,iatom)
++           end do
++           close(force_status_unit)
++        end if
+         write(*,*) "===== force ====="
+         do iatom=1,natom
+            select case(unit_system)
+diff --git a/src/gs/scf_iteration_dft.f90 b/src/gs/scf_iteration_dft.f90
+index 283181cf..c5cbb9da 100644
+--- a/src/gs/scf_iteration_dft.f90
++++ b/src/gs/scf_iteration_dft.f90
+@@ -58,7 +58,7 @@ integer :: ilevel_print !=3:print-all
+                         !=2:print-only energy & convergence
+                         !=1:print-minimum
+                         !=0:no-print
+-integer :: iter,Miter,iob,p1,p2,p5
++integer :: iter,Miter,iob,p1,p2,p5,gs_status_unit
+ real(8) :: sum1
+ real(8) :: rNebox1,rNebox2
+ 
+@@ -410,6 +410,18 @@ if(.not.flag_conv) then
+ endif
+ endif
+ 
++! Report the existing native convergence flag without changing the iteration order.
++if (theory=='dft' .and. yn_opt=='n' .and. yn_md=='n' .and. yn_dc=='n') then
++   if (comm_is_root(nproc_id_global)) then
++      open(newunit=gs_status_unit,file='gs_status.dat',status='replace')
++      write(gs_status_unit,'(a)') 'SALMONPY_GS_V1'
++      write(gs_status_unit,*) merge(1,0,flag_conv),Miter
++      write(gs_status_unit,'(3es26.17e3)') sum1,threshold,energy%E_tot
++      write(gs_status_unit,'(a)') trim(convergence)
++      close(gs_status_unit)
++   end if
++end if
++
+ contains
+ 
+   subroutine init_convergence_check()
+diff --git a/src/io/inputoutput.f90 b/src/io/inputoutput.f90
+index 8d6bbf7f..8e333438 100644
+--- a/src/io/inputoutput.f90
++++ b/src/io/inputoutput.f90
+@@ -110,10 +110,12 @@ module inputoutput
+ 
+ contains
+   subroutine read_input
++    use tddft_worker, only: worker_configure
+     implicit none
+ 
+     call read_stdin
+     call read_input_common ! Should be renamed properly later
++    call worker_configure()
+     call read_atomic_coordinates
+     call dump_input_common ! Should be renamed properly later
+     call check_bad_input
+@@ -122,6 +124,7 @@ contains
+ 
+ 
+   subroutine read_stdin
++    use tddft_worker, only: worker_requested
+     use parallelization, only: nproc_id_global
+     use communication, only: comm_is_root
+     use filesystem, only: get_filehandle
+@@ -154,6 +157,7 @@ contains
+           exit
+         else
+           text = trim(adjustl(buff))
++          if(worker_requested().and.text=="!SALMONPY_END_INPUT") exit
+           ! Comment lines
+           if (text(1:1) == '!') cycle
+          !! Beginning of 'atomic_species' part
+@@ -576,6 +580,7 @@ contains
+       & force_openmp_mode
+ 
+     namelist/band/ &
++      & file_band_kpoints, &
+       & lattice, &
+       & nref_band, &
+       & tol_esp_diff, &
+@@ -1023,6 +1028,7 @@ contains
+     current_openmp_mode = 'auto'
+     force_openmp_mode   = 'auto'
+ !! == default for &band
++    file_band_kpoints = 'none'
+     lattice =''
+     nref_band = 0
+     tol_esp_diff = 1.0d-5
+@@ -1692,6 +1698,7 @@ contains
+     call comm_bcast(current_openmp_mode                    ,nproc_group_global)
+     call comm_bcast(force_openmp_mode                      ,nproc_group_global)
+ !! == bcast for band
++    call comm_bcast(file_band_kpoints,nproc_group_global)
+     call comm_bcast(lattice         ,nproc_group_global)
+     call comm_bcast(nref_band       ,nproc_group_global)
+     call comm_bcast(num_of_segments ,nproc_group_global)
+diff --git a/src/io/posix.c b/src/io/posix.c
+index f8d51e6d..d2b92410 100644
+--- a/src/io/posix.c
++++ b/src/io/posix.c
+@@ -23,7 +23,7 @@
+     && defined(SYSTEM_HAS_POSIX_MKDIR) \
+     && defined(SYSTEM_HAS_POSIX_NFTW)
+ 
+-#define _XOPEN_SOURCE    500
++#define _XOPEN_SOURCE    700 /* POSIX.1-2008: nftw and C99 snprintf */
+ #define NFTW_SUPPORT_FD  8
+ 
+ #include <sys/stat.h>
+diff --git a/src/io/salmon_global.f90 b/src/io/salmon_global.f90
+index 4c21c1d6..9a9e182e 100644
+--- a/src/io/salmon_global.f90
++++ b/src/io/salmon_global.f90
+@@ -421,6 +421,7 @@ character(256),allocatable :: atom_name(:)
+   character(10) :: force_openmp_mode    ! 'auto', 'orbital', 'rgrid'
+ 
+ !! &band
++  character(256) :: file_band_kpoints
+   character(3) :: lattice
+   integer :: nref_band
+   real(8) :: tol_esp_diff
+diff --git a/src/maxwell/CMakeLists.txt b/src/maxwell/CMakeLists.txt
+index c151dbad..08c25530 100644
+--- a/src/maxwell/CMakeLists.txt
++++ b/src/maxwell/CMakeLists.txt
+@@ -1,5 +1,7 @@
+ set(SOURCES
+     common_maxwell.f90
++    lorentz_drude.f90
++    fdtd_eh_kernel.f90
+     fdtd_eh.f90
+     main_maxwell.f90
+     fdtd_weyl_gauge.f90
+diff --git a/src/maxwell/fdtd_eh.f90 b/src/maxwell/fdtd_eh.f90
+index b248eb06..133329a2 100644
+--- a/src/maxwell/fdtd_eh.f90
++++ b/src/maxwell/fdtd_eh.f90
+@@ -15,11 +15,12 @@
+ !
+ !-----------------------------------------------------------------------------------------
+ module fdtd_eh
++  use lorentz_drude, only: s_ld_state, ld_allocate, ld_coefficients, ld_store_old, ld_update, ld_finalize
++  use fdtd_eh_kernel, only: eh_fd
+   implicit none
+   
+   type ls_fdtd_eh
+     logical             :: flag_pml        !pml  option: work for a_bc = 'pml'
+-    logical             :: flag_ld         !LD   option: work for num_ld > 0
+     logical             :: flag_lr         !LR   option: work for ae_shape1 = 'impulse'or ae_shape2 = 'impulse'
+     logical             :: flag_obs        !obs. option: work for obs_num_em > 0
+     logical             :: flag_ase        !ase  option: work for ase_num_em > 0
+@@ -93,30 +94,6 @@ module fdtd_eh
+     real(8),allocatable :: ex_s(:,:,:),ey_s(:,:,:),ez_s(:,:,:)     !e for save
+     real(8),allocatable :: hx_s(:,:,:),hy_s(:,:,:),hz_s(:,:,:)     !h for save
+     real(8),allocatable :: c2_jx(:,:,:),c2_jy(:,:,:),c2_jz(:,:,:)  !coeff. for general curr. dens.
+-    integer             :: num_ld                                  !LD: number of LD media
+-    integer             :: max_pole_num_ld                         !LD: maximum of pole_num_ld
+-    integer,allocatable :: media_ld(:)                             !LD: imedia number for LD model(num_ld)
+-    real(8),allocatable ::   rjx_ld(:,:,:,:),rjx_old_ld(:,:,:,:),& !LD: poparization current density J
+-                             rjy_ld(:,:,:,:),rjy_old_ld(:,:,:,:),& !    and its stock
+-                             rjz_ld(:,:,:,:),rjz_old_ld(:,:,:,:)   !    (x,y,z,max_pole_num_ld)
+-    real(8),allocatable ::    px_ld(:,:,:,:),&                     !LD: poparization vector P
+-                              py_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
+-                              pz_ld(:,:,:,:)                       !
+-    real(8),allocatable :: c1_jx_ld(:,:,:,:),&                     !LD: coefficient for Jx
+-                           c2_jx_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
+-                           c3_jx_ld(:,:,:,:)                       !
+-    real(8),allocatable :: c1_jy_ld(:,:,:,:),&                     !LD: coefficient for Jy
+-                           c2_jy_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
+-                           c3_jy_ld(:,:,:,:)                       !
+-    real(8),allocatable :: c1_jz_ld(:,:,:,:),&                     !LD: coefficient for Jz
+-                           c2_jz_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
+-                           c3_jz_ld(:,:,:,:)                       !
+-    real(8),allocatable :: rjx_fdtd_ld(:,:,:),&                    !LD: J substituted into FDTD
+-                           rjy_fdtd_ld(:,:,:),&                    !    (x,y,z)
+-                           rjz_fdtd_ld(:,:,:)                      !
+-    real(8),allocatable :: ex_old_ld(:,:,:),&                      !LD: old E
+-                           ey_old_ld(:,:,:),&                      !    (x,y,z)
+-                           ez_old_ld(:,:,:)                        !
+     real(8),allocatable :: rmedia(:,:,:)                           !Material information for tmp.
+     real(8),allocatable :: time_lr(:)                              !LR: time
+     real(8),allocatable :: fr_lr(:,:)                              !LR: Re[f]
+@@ -193,7 +170,7 @@ contains
+   
+   !===========================================================================================
+   != initialize eh-FDTD ======================================================================
+-  subroutine eh_init(fs,fe)
++  subroutine eh_init(fs,fe,ld)
+     use salmon_global,   only: al_em,dl_em,num_rgrid_em,at_em,dt_em,nt_em,boundary_em,yn_periodic,         &
+                                base_directory,media_num,shape_file,epsilon_em,mu_em,sigma_em,media_type,   &
+                                pole_num_ld,omega_p_ld,f_ld,gamma_ld,omega_ld,                              &
+@@ -224,6 +201,7 @@ contains
+                                txtfile_copy_em
+     use ttm,             only: use_ttm, init_ttm_parameters, init_ttm_grid, init_ttm_alloc
+     implicit none
++    type(s_ld_state), intent(inout) :: ld
+     type(s_fdtd_system),intent(inout) :: fs
+     type(ls_fdtd_eh),   intent(inout) :: fe
+     integer             :: nsg_p          !yn_restart='y': nproc_size_global used in the previous calc.
+@@ -252,17 +230,17 @@ contains
+     fe%flag_pml = .false.
+     
+     !LD option: calculate Lorentz-Drude model
+-    fe%num_ld=0
++    ld%num_ld=0
+     do ii=0,media_num
+       select case(media_type(ii))
+       case('lorentz-drude')
+-        fe%num_ld=fe%num_ld+1
++        ld%num_ld=ld%num_ld+1
+       end select
+     end do
+-    if(fe%num_ld>0) then
+-      fe%flag_ld = .true.
++    if(ld%num_ld>0) then
++      ld%enabled = .true.
+     else
+-      fe%flag_ld = .false.
++      ld%enabled = .false.
+     end if
+     
+     !LR option: execute linear response calculation under the dipole approximation
+@@ -691,17 +669,17 @@ contains
+     end if
+     
+     !*** prepare Lorentz-Drude ********************************************************************************!
+-    if(fe%flag_ld) then
++    if(ld%enabled) then
+       !set counter, make media_ld, make max_pole_num_ld, and check pole_num_ld & other conditions
+-      icount_ld=1; fe%max_pole_num_ld=0;
+-      allocate(fe%media_ld(fe%num_ld))
+-      fe%media_ld(:)=0;
++      icount_ld=1; ld%max_pole_num_ld=0;
++      allocate(ld%media_ld(ld%num_ld))
++      ld%media_ld(:)=0;
+       do ii=0,media_num
+         select case(media_type(ii))
+         case('lorentz-drude')
+-          fe%media_ld(icount_ld) = ii
++          ld%media_ld(icount_ld) = ii
+           icount_ld              = icount_ld+1
+-          if(fe%max_pole_num_ld<pole_num_ld(ii)) fe%max_pole_num_ld=pole_num_ld(ii)
++          if(ld%max_pole_num_ld<pole_num_ld(ii)) ld%max_pole_num_ld=pole_num_ld(ii)
+           if(pole_num_ld(ii)<=0) then
+             call stop_em('For media_type = lorentz-drude, pole_num_ld must be equal to or larger than 1.')
+           end if
+@@ -716,55 +694,15 @@ contains
+       icount_ld = 1
+       
+       !set temporal LD coefficients (will be used later)
+-      allocate(tmp_c0_ld(fe%max_pole_num_ld,fe%num_ld),tmp_c1_ld(fe%max_pole_num_ld,fe%num_ld),&
+-               tmp_c2_ld(fe%max_pole_num_ld,fe%num_ld),tmp_c3_ld(fe%max_pole_num_ld,fe%num_ld),&
+-               tmp_c4_ld(                   fe%num_ld),tmp_c5_ld(                   fe%num_ld))
++      allocate(tmp_c0_ld(ld%max_pole_num_ld,ld%num_ld),tmp_c1_ld(ld%max_pole_num_ld,ld%num_ld),&
++               tmp_c2_ld(ld%max_pole_num_ld,ld%num_ld),tmp_c3_ld(ld%max_pole_num_ld,ld%num_ld),&
++               tmp_c4_ld(                   ld%num_ld),tmp_c5_ld(                   ld%num_ld))
+       tmp_c0_ld(:,:) = 0.0d0; tmp_c1_ld(:,:) = 0.0d0; tmp_c2_ld(:,:) = 0.0d0; tmp_c3_ld(:,:) = 0.0d0;
+       tmp_c4_ld(  :) = 0.0d0; tmp_c5_ld(  :) = 0.0d0;
+-      do ii = 1,fe%num_ld
+-        do ij = 1,pole_num_ld(fe%media_ld(ii))
+-          tmp_c0_ld(ij,ii) = 1.0d0                                          &
+-                             + ( gamma_ld(fe%media_ld(ii),ij)*dt_em/2.0d0 ) &
+-                             + ((omega_ld(fe%media_ld(ii),ij)*dt_em)**2.0d0)/4.0d0
+-          tmp_c1_ld(ij,ii) = 1.0d0                                          &
+-                             - ( gamma_ld(fe%media_ld(ii),ij)*dt_em/2.0d0 ) &
+-                             - ((omega_ld(fe%media_ld(ii),ij)*dt_em)**2.0d0)/4.0d0
+-          tmp_c1_ld(ij,ii) = tmp_c1_ld(ij,ii) / tmp_c0_ld(ij,ii)
+-          tmp_c2_ld(ij,ii) = f_ld(fe%media_ld(ii),ij)*(omega_p_ld(fe%media_ld(ii))**2.0d0)*dt_em &
+-                             /(8.0d0*pi*tmp_c0_ld(ij,ii))
+-          tmp_c3_ld(ij,ii) = (omega_ld(fe%media_ld(ii),ij)**2.0d0)*dt_em/tmp_c0_ld(ij,ii)
+-          tmp_c4_ld(ii) = tmp_c4_ld(ii) + tmp_c2_ld(ij,ii)
+-          tmp_c5_ld(ii) = tmp_c5_ld(ii) + tmp_c2_ld(ij,ii)
+-        end do
+-        tmp_c4_ld(ii) = 1.0d0 + 2.0d0*pi*dt_em*tmp_c4_ld(ii)
+-        tmp_c5_ld(ii) = 1.0d0 - 2.0d0*pi*dt_em*tmp_c5_ld(ii)
+-      end do
+-      
+-      !allocate LD variables
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_ld     )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_ld     )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_ld     )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjx_old_ld )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjy_old_ld )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%rjz_old_ld )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%px_ld      )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%py_ld      )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%pz_ld      )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jx_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jx_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jx_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jy_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jy_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jy_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c1_jz_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c2_jz_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r4d',num4d=fe%max_pole_num_ld,r4d=fe%c3_jz_ld   )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjx_fdtd_ld)
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjy_fdtd_ld)
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%rjz_fdtd_ld)
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ex_old_ld  )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ey_old_ld  )
+-      call eh_allocate(fs%mg%is_array,fs%mg%ie_array,'r3d',                         r3d=fe%ez_old_ld  )
++      call ld_coefficients(ld%media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
++                           tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld)
++      ! LD owns its allocations and zero initialization, including halo values.
++      call ld_allocate(ld,fs%mg%is_array,fs%mg%ie_array)
+     end if
+     
+     !*** set fdtd coeffient and light speed for media ID = 0 **************************************************!
+@@ -1555,44 +1493,44 @@ contains
+       end if
+       
+       !set initial current density
+-      if(fe%flag_ld) then
+-        do ii = 1,fe%num_ld
+-        do ij = 1,pole_num_ld(fe%media_ld(ii))
++      if(ld%enabled) then
++        do ii = 1,ld%num_ld
++        do ij = 1,pole_num_ld(ld%media_ld(ii))
+         do iz=fs%mg%is(3),fs%mg%ie(3)
+         do iy=fs%mg%is(2),fs%mg%ie(2)
+         do ix=fs%mg%is(1),fs%mg%ie(1)
+-          if(fe%c1_jx_ld(ix,iy,iz,ij)>0.0d0) then
+-            fe%rjx_ld(ix,iy,iz,ij)   = fe%rjx_ld(ix,iy,iz,ij)                                        &
+-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
++          if(ld%c1_jx_ld(ix,iy,iz,ij)>0.0d0) then
++            ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
++                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*tmp_x1
+-            fe%rjx_ld(ix,iy,iz,ij)   = fe%rjx_ld(ix,iy,iz,ij)                                        &
+-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
++            ld%rjx_ld(ix,iy,iz,ij)   = ld%rjx_ld(ix,iy,iz,ij)                                        &
++                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*tmp_x2
+-            fe%rjx_fdtd_ld(ix,iy,iz) = fe%rjx_fdtd_ld(ix,iy,iz)                                          &
+-                                      +0.5d0*( (1.0d0+fe%c1_jx_ld(ix,iy,iz,ij)) * fe%rjx_ld(ix,iy,iz,ij) &
+-                                                     -fe%c3_jx_ld(ix,iy,iz,ij)  * fe%px_ld(ix,iy,iz,ij) )
++            ld%rjx_fdtd_ld(ix,iy,iz) = ld%rjx_fdtd_ld(ix,iy,iz)                                          &
++                                      +0.5d0*( (1.0d0+ld%c1_jx_ld(ix,iy,iz,ij)) * ld%rjx_ld(ix,iy,iz,ij) &
++                                                     -ld%c3_jx_ld(ix,iy,iz,ij)  * ld%px_ld(ix,iy,iz,ij) )
+           end if
+-          if(fe%c1_jy_ld(ix,iy,iz,ij)>0.0d0) then
+-            fe%rjy_ld(ix,iy,iz,ij)   = fe%rjy_ld(ix,iy,iz,ij)                                        &
+-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
++          if(ld%c1_jy_ld(ix,iy,iz,ij)>0.0d0) then
++            ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
++                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*tmp_y1
+-            fe%rjy_ld(ix,iy,iz,ij)   = fe%rjy_ld(ix,iy,iz,ij)                                        &
+-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
++            ld%rjy_ld(ix,iy,iz,ij)   = ld%rjy_ld(ix,iy,iz,ij)                                        &
++                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*tmp_y2
+-            fe%rjy_fdtd_ld(ix,iy,iz) = fe%rjy_fdtd_ld(ix,iy,iz)                                          &
+-                                      +0.5d0*( (1.0d0+fe%c1_jy_ld(ix,iy,iz,ij)) * fe%rjy_ld(ix,iy,iz,ij) &
+-                                                     -fe%c3_jy_ld(ix,iy,iz,ij)  * fe%py_ld(ix,iy,iz,ij) )
++            ld%rjy_fdtd_ld(ix,iy,iz) = ld%rjy_fdtd_ld(ix,iy,iz)                                          &
++                                      +0.5d0*( (1.0d0+ld%c1_jy_ld(ix,iy,iz,ij)) * ld%rjy_ld(ix,iy,iz,ij) &
++                                                     -ld%c3_jy_ld(ix,iy,iz,ij)  * ld%py_ld(ix,iy,iz,ij) )
+           end if
+-          if(fe%c1_jz_ld(ix,iy,iz,ij)>0.0d0) then
+-            fe%rjz_ld(ix,iy,iz,ij)   = fe%rjz_ld(ix,iy,iz,ij)                                        &
+-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
++          if(ld%c1_jz_ld(ix,iy,iz,ij)>0.0d0) then
++            ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
++                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*tmp_z1
+-            fe%rjz_ld(ix,iy,iz,ij)   = fe%rjz_ld(ix,iy,iz,ij)                                        &
+-                                      -(f_ld(fe%media_ld(ii),ij)*omega_p_ld(fe%media_ld(ii))**2.0d0) &
++            ld%rjz_ld(ix,iy,iz,ij)   = ld%rjz_ld(ix,iy,iz,ij)                                        &
++                                      -(f_ld(ld%media_ld(ii),ij)*omega_p_ld(ld%media_ld(ii))**2.0d0) &
+                                       /(4.0d0*pi)*tmp_z2
+-            fe%rjz_fdtd_ld(ix,iy,iz) = fe%rjz_fdtd_ld(ix,iy,iz)                                          &
+-                                      +0.5d0*( (1.0d0+fe%c1_jz_ld(ix,iy,iz,ij)) * fe%rjz_ld(ix,iy,iz,ij) &
+-                                                     -fe%c3_jz_ld(ix,iy,iz,ij)  * fe%pz_ld(ix,iy,iz,ij) )
++            ld%rjz_fdtd_ld(ix,iy,iz) = ld%rjz_fdtd_ld(ix,iy,iz)                                          &
++                                      +0.5d0*( (1.0d0+ld%c1_jz_ld(ix,iy,iz,ij)) * ld%rjz_ld(ix,iy,iz,ij) &
++                                                     -ld%c3_jz_ld(ix,iy,iz,ij)  * ld%pz_ld(ix,iy,iz,ij) )
+           end if
+         end do
+         end do
+@@ -2208,31 +2146,31 @@ contains
+       call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','hz_y',&
+                           r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+       call eh_sendrecv(fs,fe,'e'); call eh_sendrecv(fs,fe,'h');
+-      if(fe%flag_ld) then                     
++      if(ld%enabled) then
+         is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
+         is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)       ;
+         is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3)       ;
+-        is5(4) = 1          ; ie5(4) = fe%max_pole_num_ld;
++        is5(4) = 1          ; ie5(4) = ld%max_pole_num_ld;
+         is5(5) = 1          ; ie5(5) = 1                 ;
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_ld',&
+-                            r4d=fe%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                            r4d=ld%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_ld',&
+-                            r4d=fe%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                            r4d=ld%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_ld',&
+-                            r4d=fe%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                            r4d=ld%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','px_ld' ,&
+-                            r4d= fe%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                            r4d= ld%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','py_ld' ,&
+-                            r4d= fe%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                            r4d= ld%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','pz_ld' ,&
+-                            r4d= fe%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                            r4d= ld%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+         is5(4) = 1; ie5(4) = 1;
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjx_fdtd_ld',&
+-                            r3d=fe%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
++                            r3d=ld%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjy_fdtd_ld',&
+-                            r3d=fe%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
++                            r3d=ld%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+         call input_r_bin_em(fe%ifn,is5,ie5,nsg_p,flag_same_p,'all','rjz_fdtd_ld',&
+-                            r3d=fe%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
++                            r3d=ld%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+       end if
+       if(fe%flag_lr) then
+         is5(1) = 1; ie5(1) = nt_em;
+@@ -2640,9 +2578,9 @@ contains
+               select case(media_type(ii))
+               case('lorentz-drude')
+                 do ij=1,pole_num_ld(ii)
+-                  fe%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
+-                  fe%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+-                  fe%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
++                  ld%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
++                  ld%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
++                  ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+                 end do
+               end select
+             elseif(fs%imedia(ix+1,iy,iz)/=0.and.fs%imedia(ix+1,iy,iz)>ii) then
+@@ -2650,8 +2588,8 @@ contains
+               case('pec')
+                 c1_e_mid=0.0d0; c2_e_y_mid=0.0d0; c2_e_z_mid=0.0d0; c2_j_mid=0.0d0;
+               case('lorentz-drude')
+-                do ij=1,fe%num_ld
+-                  if(fe%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
++                do ij=1,ld%num_ld
++                  if(ld%media_ld(ij)==fs%imedia(ix+1,iy,iz)) then
+                     i_ld_tmp = ij
+                   end if
+                 end do
+@@ -2660,9 +2598,9 @@ contains
+                 c2_e_z_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(3)
+                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
+                 do ij=1,pole_num_ld(fs%imedia(ix+1,iy,iz))
+-                  fe%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+-                  fe%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+-                  fe%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
++                  ld%c1_jx_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
++                  ld%c2_jx_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
++                  ld%c3_jx_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
+                 end do
+               case default
+                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix+1,iy,iz))/fe%rep(fs%imedia(ix+1,iy,iz))*dt_em) &
+@@ -2691,9 +2629,9 @@ contains
+               select case(media_type(ii))
+               case('lorentz-drude')
+                 do ij=1,pole_num_ld(ii)
+-                  fe%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
+-                  fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+-                  fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
++                  ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
++                  ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
++                  ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+                 end do
+               end select
+             elseif(fs%imedia(ix,iy+1,iz)/=0.and.fs%imedia(ix,iy+1,iz)>ii) then
+@@ -2701,8 +2639,8 @@ contains
+               case('pec')
+                 c1_e_mid=0.0d0; c2_e_z_mid=0.0d0; c2_e_x_mid=0.0d0; c2_j_mid=0.0d0;
+               case('lorentz-drude')
+-                do ij=1,fe%num_ld
+-                  if(fe%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
++                do ij=1,ld%num_ld
++                  if(ld%media_ld(ij)==fs%imedia(ix,iy+1,iz)) then
+                     i_ld_tmp = ij
+                   end if
+                 end do
+@@ -2711,9 +2649,9 @@ contains
+                 c2_e_x_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(1)
+                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
+                 do ij=1,pole_num_ld(fs%imedia(ix,iy+1,iz))
+-                  fe%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+-                  fe%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+-                  fe%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
++                  ld%c1_jy_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
++                  ld%c2_jy_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
++                  ld%c3_jy_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
+                 end do
+               case default
+                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy+1,iz))/fe%rep(fs%imedia(ix,iy+1,iz))*dt_em) &
+@@ -2742,9 +2680,9 @@ contains
+               select case(media_type(ii))
+               case('lorentz-drude')
+                 do ij=1,pole_num_ld(ii)
+-                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
+-                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
+-                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
++                  ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,icount_ld)
++                  ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,icount_ld)
++                  ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,icount_ld)
+                 end do
+               end select
+             elseif(fs%imedia(ix,iy,iz+1)/=0.and.fs%imedia(ix,iy,iz+1)>ii) then
+@@ -2752,8 +2690,8 @@ contains
+               case('pec')
+                 c1_e_mid=0.0d0; c2_e_x_mid=0.0d0; c2_e_y_mid=0.0d0; c2_j_mid=0.0d0;
+               case('lorentz-drude')
+-                do ij=1,fe%num_ld
+-                  if(fe%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
++                do ij=1,ld%num_ld
++                  if(ld%media_ld(ij)==fs%imedia(ix,iy,iz+1)) then
+                     i_ld_tmp = ij
+                   end if
+                 end do
+@@ -2762,9 +2700,9 @@ contains
+                 c2_e_y_mid = cspeed_au*dt_em      / tmp_c4_ld(i_ld_tmp) / fs%hgs(2)
+                 c2_j_mid   =  4.0d0*pi*dt_em      / tmp_c4_ld(i_ld_tmp)
+                 do ij=1,pole_num_ld(fs%imedia(ix,iy,iz+1))
+-                  fe%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
+-                  fe%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
+-                  fe%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
++                  ld%c1_jz_ld(ix,iy,iz,ij) = tmp_c1_ld(ij,i_ld_tmp)
++                  ld%c2_jz_ld(ix,iy,iz,ij) = tmp_c2_ld(ij,i_ld_tmp)
++                  ld%c3_jz_ld(ix,iy,iz,ij) = tmp_c3_ld(ij,i_ld_tmp)
+                 end do
+               case default
+                 c1_e_mid   = (1.0d0-2.0d0*pi*fe%sig(fs%imedia(ix,iy,iz+1))/fe%rep(fs%imedia(ix,iy,iz+1))*dt_em) &
+@@ -3202,7 +3140,7 @@ contains
+   
+   !===========================================================================================
+   != calculate eh-FDTD =======================================================================
+-  subroutine eh_calc(fs,fe)
++  subroutine eh_calc(fs,fe,ld)
+     use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
+                                base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
+                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
+@@ -3216,6 +3154,7 @@ contains
+     use common_maxwell,  only: output_r_txt_em,output_r_bin_em,txtfile_copy_em
+     use ttm,             only: use_ttm,ttm_penetration,ttm_main,ttm_get_temperatures
+     implicit none
++    type(s_ld_state), intent(inout) :: ld
+     type(s_fdtd_system),intent(inout) :: fs
+     type(ls_fdtd_eh),   intent(inout) :: fe
+     integer            :: iter,ii,ix,iy,iz
+@@ -3239,7 +3178,8 @@ contains
+       end if
+       
+       !sotre old variables
+-      call eh_store_old
++      call ld_store_old(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
++        fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
+       
+       !update e
+       call eh_fd(fe%iex_y_is,fe%iex_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
+@@ -3264,11 +3204,12 @@ contains
+                                                  fe%gbeam_width_xy2,fe%gbeam_width_yz2,fe%gbeam_width_xz2, &
+                                                  fe%gbeam_width_x2 ,fe%gbeam_width_y2 ,fe%gbeam_width_z2 )
+       end if
+-      if(fe%flag_ld) call eh_add_curr(fe%rjx_fdtd_ld(:,:,:),fe%rjy_fdtd_ld(:,:,:),fe%rjz_fdtd_ld(:,:,:))
++      if(ld%enabled) call eh_add_curr(ld%rjx_fdtd_ld(:,:,:),ld%rjy_fdtd_ld(:,:,:),ld%rjz_fdtd_ld(:,:,:))
+       call eh_sendrecv(fs,fe,'e')
+       
+       !update lorentz-drude
+-      if(fe%flag_ld) call eh_update_ld
++      if(ld%enabled) call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
++        fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
+       
+       !calculate linear response
+       if(fe%flag_lr) call eh_calc_lr
+@@ -3466,31 +3407,31 @@ contains
+           call output_r_bin_em(fe%ifn,is5,ie5,'all','hy_x',r3d=fe%hy_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+           call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_x',r3d=fe%hz_x(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+           call output_r_bin_em(fe%ifn,is5,ie5,'all','hz_y',r3d=fe%hz_y(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+-          if(fe%flag_ld) then                     
++          if(ld%enabled) then
+             is5(1) = fs%mg%is(1); ie5(1) = fs%mg%ie(1)       ;
+             is5(2) = fs%mg%is(2); ie5(2) = fs%mg%ie(2)       ;
+             is5(3) = fs%mg%is(3); ie5(3) = fs%mg%ie(3)       ;
+-            is5(4) = 1          ; ie5(4) = fe%max_pole_num_ld;
++            is5(4) = 1          ; ie5(4) = ld%max_pole_num_ld;
+             is5(5) = 1          ; ie5(5) = 1                 ;
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_ld',&
+-                                 r4d=fe%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                                 r4d=ld%rjx_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_ld',&
+-                                 r4d=fe%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                                 r4d=ld%rjy_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_ld',&
+-                                 r4d=fe%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                                 r4d=ld%rjz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','px_ld' ,&
+-                                 r4d= fe%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                                 r4d= ld%px_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','py_ld' ,&
+-                                 r4d= fe%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                                 r4d= ld%py_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','pz_ld' ,&
+-                                 r4d= fe%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
++                                 r4d= ld%pz_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3),is5(4):ie5(4)))
+             is5(4) = 1; ie5(4) = 1;
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjx_fdtd_ld',&
+-                                 r3d=fe%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
++                                 r3d=ld%rjx_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjy_fdtd_ld',&
+-                                 r3d=fe%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
++                                 r3d=ld%rjy_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+             call output_r_bin_em(fe%ifn,is5,ie5,'all','rjz_fdtd_ld',&
+-                                 r3d=fe%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
++                                 r3d=ld%rjz_fdtd_ld(is5(1):ie5(1),is5(2):ie5(2),is5(3):ie5(3)))
+           end if
+           if(fe%flag_lr) then
+             is5(1) = 1; ie5(1) = nt_em;
+@@ -3759,104 +3700,11 @@ contains
+     
+     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+     !+ store old variables +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-    subroutine eh_store_old
+-      implicit none
+-      
+-      if(fe%flag_ld) then
+-!$omp parallel
+-!$omp do private(ii,ix,iy,iz) collapse(3)
+-        do ii=1,fe%max_pole_num_ld
+-        do iz=fs%mg%is(3),fs%mg%ie(3)
+-        do iy=fs%mg%is(2),fs%mg%ie(2)
+-        do ix=fs%mg%is(1),fs%mg%ie(1)
+-          fe%rjx_old_ld(ix,iy,iz,ii) = fe%rjx_ld(ix,iy,iz,ii)
+-          fe%rjy_old_ld(ix,iy,iz,ii) = fe%rjy_ld(ix,iy,iz,ii)
+-          fe%rjz_old_ld(ix,iy,iz,ii) = fe%rjz_ld(ix,iy,iz,ii)
+-        end do
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=fs%mg%is(3),fs%mg%ie(3)
+-        do iy=fs%mg%is(2),fs%mg%ie(2)
+-        do ix=fs%mg%is(1),fs%mg%ie(1)
+-          fe%ex_old_ld(ix,iy,iz) = fe%ex_y(ix,iy,iz) + fe%ex_z(ix,iy,iz);
+-          fe%ey_old_ld(ix,iy,iz) = fe%ey_z(ix,iy,iz) + fe%ey_x(ix,iy,iz);
+-          fe%ez_old_ld(ix,iy,iz) = fe%ez_x(ix,iy,iz) + fe%ez_y(ix,iy,iz);
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      end if
+-      
+-      return
+-    end subroutine eh_store_old
++
+     
+     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+     !+ update lorentz-drude ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-    subroutine eh_update_ld
+-      implicit none
+-      
+-      !initialize
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-      do iz=fs%mg%is(3),fs%mg%ie(3)
+-      do iy=fs%mg%is(2),fs%mg%ie(2)
+-      do ix=fs%mg%is(1),fs%mg%ie(1)
+-        fe%rjx_fdtd_ld(ix,iy,iz)=0.0d0; fe%rjy_fdtd_ld(ix,iy,iz)=0.0d0; fe%rjz_fdtd_ld(ix,iy,iz)=0.0d0;
+-      end do
+-      end do
+-      end do
+-!$omp end do
+-!$omp end parallel
+-      
+-      !update LD polarization current & vector and FDTD current
+-      do ii=1,fe%max_pole_num_ld
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=fs%mg%is(3),fs%mg%ie(3)
+-        do iy=fs%mg%is(2),fs%mg%ie(2)
+-        do ix=fs%mg%is(1),fs%mg%ie(1)
+-          fe%rjx_ld(ix,iy,iz,ii) = fe%c1_jx_ld(ix,iy,iz,ii)*fe%rjx_old_ld(ix,iy,iz,ii)            &
+-                                  +fe%c2_jx_ld(ix,iy,iz,ii)*( fe%ex_y(ix,iy,iz)+fe%ex_z(ix,iy,iz) &
+-                                                             +fe%ex_old_ld(ix,iy,iz) )            &
+-                                  -fe%c3_jx_ld(ix,iy,iz,ii)*fe%px_ld(ix,iy,iz,ii)
+-          fe%rjy_ld(ix,iy,iz,ii) = fe%c1_jy_ld(ix,iy,iz,ii)*fe%rjy_old_ld(ix,iy,iz,ii)            &
+-                                  +fe%c2_jy_ld(ix,iy,iz,ii)*( fe%ey_z(ix,iy,iz)+fe%ey_x(ix,iy,iz) &
+-                                                             +fe%ey_old_ld(ix,iy,iz) )            &
+-                                  -fe%c3_jy_ld(ix,iy,iz,ii)*fe%py_ld(ix,iy,iz,ii)
+-          fe%rjz_ld(ix,iy,iz,ii) = fe%c1_jz_ld(ix,iy,iz,ii)*fe%rjz_old_ld(ix,iy,iz,ii)            &
+-                                  +fe%c2_jz_ld(ix,iy,iz,ii)*( fe%ez_x(ix,iy,iz)+fe%ez_y(ix,iy,iz) &
+-                                                             +fe%ez_old_ld(ix,iy,iz) )            &
+-                                  -fe%c3_jz_ld(ix,iy,iz,ii)*fe%pz_ld(ix,iy,iz,ii)
+-          fe%px_ld(ix,iy,iz,ii)  = fe%px_ld(ix,iy,iz,ii) &
+-                                  +0.5d0*dt_em*( fe%rjx_ld(ix,iy,iz,ii) + fe%rjx_old_ld(ix,iy,iz,ii) )
+-          fe%py_ld(ix,iy,iz,ii)  = fe%py_ld(ix,iy,iz,ii) &
+-                                  +0.5d0*dt_em*( fe%rjy_ld(ix,iy,iz,ii) + fe%rjy_old_ld(ix,iy,iz,ii) )
+-          fe%pz_ld(ix,iy,iz,ii)  = fe%pz_ld(ix,iy,iz,ii) &
+-                                  +0.5d0*dt_em*( fe%rjz_ld(ix,iy,iz,ii) + fe%rjz_old_ld(ix,iy,iz,ii) )
+-          fe%rjx_fdtd_ld(ix,iy,iz)  = fe%rjx_fdtd_ld(ix,iy,iz)                                          &
+-                                     +0.5d0*( (1.0d0+fe%c1_jx_ld(ix,iy,iz,ii)) * fe%rjx_ld(ix,iy,iz,ii) &
+-                                                    -fe%c3_jx_ld(ix,iy,iz,ii)  * fe%px_ld(ix,iy,iz,ii) )
+-          fe%rjy_fdtd_ld(ix,iy,iz)  = fe%rjy_fdtd_ld(ix,iy,iz)                                          &
+-                                     +0.5d0*( (1.0d0+fe%c1_jy_ld(ix,iy,iz,ii)) * fe%rjy_ld(ix,iy,iz,ii) &
+-                                                    -fe%c3_jy_ld(ix,iy,iz,ii)  * fe%py_ld(ix,iy,iz,ii) )
+-          fe%rjz_fdtd_ld(ix,iy,iz)  = fe%rjz_fdtd_ld(ix,iy,iz)                                          &
+-                                     +0.5d0*( (1.0d0+fe%c1_jz_ld(ix,iy,iz,ii)) * fe%rjz_ld(ix,iy,iz,ii) &
+-                                                    -fe%c3_jz_ld(ix,iy,iz,ii)  * fe%pz_ld(ix,iy,iz,ii) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      end do
+-      
+-      return
+-    end subroutine eh_update_ld
++
+     
+     !+ CONTAINED IN eh_calc ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+     !+ calculate linear response +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+@@ -3871,16 +3719,16 @@ contains
+       if(yn_periodic=='n') then
+         !calculate dipolemoment
+         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
+-        if(fe%flag_ld) then
+-          do ii=1,fe%max_pole_num_ld
++        if(ld%enabled) then
++          do ii=1,ld%max_pole_num_ld
+ !$omp parallel
+ !$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr )
+             do iz=fs%mg%is(3),fs%mg%ie(3)
+             do iy=fs%mg%is(2),fs%mg%ie(2)
+             do ix=fs%mg%is(1),fs%mg%ie(1)
+-              sum_lr(1) = sum_lr(1) + fe%px_ld(ix,iy,iz,ii)
+-              sum_lr(2) = sum_lr(2) + fe%py_ld(ix,iy,iz,ii)
+-              sum_lr(3) = sum_lr(3) + fe%pz_ld(ix,iy,iz,ii)
++              sum_lr(1) = sum_lr(1) + ld%px_ld(ix,iy,iz,ii)
++              sum_lr(2) = sum_lr(2) + ld%py_ld(ix,iy,iz,ii)
++              sum_lr(3) = sum_lr(3) + ld%pz_ld(ix,iy,iz,ii)
+             end do
+             end do
+             end do
+@@ -3893,16 +3741,16 @@ contains
+       elseif(yn_periodic=='y') then
+         !calculate average current density
+         sum_lr(:)=0.0d0; sum_lr2(:)=0.0d0;
+-        if(fe%flag_ld) then
+-          do ii=1,fe%max_pole_num_ld
++        if(ld%enabled) then
++          do ii=1,ld%max_pole_num_ld
+ !$omp parallel
+ !$omp do private(ix,iy,iz) collapse(2) reduction( + : sum_lr )
+             do iz=fs%mg%is(3),fs%mg%ie(3)
+             do iy=fs%mg%is(2),fs%mg%ie(2)
+             do ix=fs%mg%is(1),fs%mg%ie(1)
+-              sum_lr(1) = sum_lr(1) + fe%rjx_ld(ix,iy,iz,ii)
+-              sum_lr(2) = sum_lr(2) + fe%rjy_ld(ix,iy,iz,ii)
+-              sum_lr(3) = sum_lr(3) + fe%rjz_ld(ix,iy,iz,ii)
++              sum_lr(1) = sum_lr(1) + ld%rjx_ld(ix,iy,iz,ii)
++              sum_lr(2) = sum_lr(2) + ld%rjy_ld(ix,iy,iz,ii)
++              sum_lr(3) = sum_lr(3) + ld%rjz_ld(ix,iy,iz,ii)
+             end do
+             end do
+             end do
+@@ -4638,7 +4486,7 @@ contains
+   
+   !===========================================================================================
+   != finalize eh-FDTD ========================================================================
+-  subroutine eh_finalize(fs,fe)
++  subroutine eh_finalize(fs,fe,ld)
+     use salmon_global,   only: dt_em,unit_system,yn_periodic,e_impulse,sysname,                          &
+                                nt_em,nenergy,de,base_directory,obs_num_em,obs_samp_em,                   &
+                                obs_plane_ene_em,yn_obs_plane_em,ase_num_em,ase_ene_min_em,ase_wav_min_em,&
+@@ -4650,6 +4498,7 @@ contains
+     use phys_constants,  only: cspeed_au
+     use math_constants,  only: pi,zi
+     implicit none
++    type(s_ld_state), intent(inout) :: ld
+     type(s_fdtd_system),intent(in)    :: fs
+     type(ls_fdtd_eh),   intent(inout) :: fe
+     complex(8),allocatable :: z_ex1(:,:),z_ey1(:,:),z_ez1(:,:),z_ex2(:,:),z_ey2(:,:),z_ez2(:,:),&
+@@ -5578,6 +5427,7 @@ contains
+     end if
+     
+     return
++    call ld_finalize(ld)
+   end subroutine eh_finalize
+   
+   !===========================================================================================
+@@ -5772,124 +5622,7 @@ contains
+   
+   !===========================================================================================
+   != calculate finite difference in eh =======================================================
+-  subroutine eh_fd(ista,iend,ng_is,ng_ie,Nd,c1,c2,f1,f2,f3,var,dir,&
+-                   cb_x,cb_y,cb_z)
+-    implicit none
+-    integer,     intent(in)          :: ista(3),iend(3),ng_is(3),ng_ie(3)
+-    integer,     intent(in)          :: Nd
+-    real(8),     intent(in)          :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+-                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
+-                                        c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+-                                           ng_is(3)-Nd:ng_ie(3)+Nd)
+-    real(8),     intent(inout)       :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
+-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+-                                           ng_is(3)-Nd:ng_ie(3)+Nd)
+-    real(8),     intent(in)          :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
+-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+-                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
+-                                        f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
+-                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
+-                                           ng_is(3)-Nd:ng_ie(3)+Nd)
+-    character(1),intent(in)          :: var,dir
+-    real(8),     intent(in),optional :: cb_x(ng_is(1)-Nd:ng_ie(1)+Nd), &
+-                                        cb_y(ng_is(2)-Nd:ng_ie(2)+Nd), &
+-                                        cb_z(ng_is(3)-Nd:ng_ie(3)+Nd)
+-    integer :: ix,iy,iz
+-    
+-    if(var=='e') then
+-      if(dir=='x') then
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=ista(3),iend(3)
+-        do iy=ista(2),iend(2)
+-        do ix=ista(1),iend(1)
+-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
+-                       +c2(ix,iy,iz)*( &
+-                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_x(ix-1)*(f2(ix-1,iy,iz)+f3(ix-1,iy,iz)) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      elseif(dir=='y') then
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=ista(3),iend(3)
+-        do iy=ista(2),iend(2)
+-        do ix=ista(1),iend(1)
+-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
+-                       +c2(ix,iy,iz)*( &
+-                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_y(iy-1)*(f2(ix,iy-1,iz)+f3(ix,iy-1,iz)) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      elseif(dir=='z') then
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=ista(3),iend(3)
+-        do iy=ista(2),iend(2)
+-        do ix=ista(1),iend(1)
+-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
+-                       +c2(ix,iy,iz)*( &
+-                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_z(iz-1)*(f2(ix,iy,iz-1)+f3(ix,iy,iz-1)) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      end if
+-    elseif(var=='h') then
+-      if(dir=='x') then
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=ista(3),iend(3)
+-        do iy=ista(2),iend(2)
+-        do ix=ista(1),iend(1)
+-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
+-                       +c2(ix,iy,iz)*( &
+-                       cb_x(ix+1)*(f2(ix+1,iy,iz)+f3(ix+1,iy,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      elseif(dir=='y') then
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=ista(3),iend(3)
+-        do iy=ista(2),iend(2)
+-        do ix=ista(1),iend(1)
+-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
+-                       +c2(ix,iy,iz)*( &
+-                       cb_y(iy+1)*(f2(ix,iy+1,iz)+f3(ix,iy+1,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      elseif(dir=='z') then
+-!$omp parallel
+-!$omp do private(ix,iy,iz) collapse(2)
+-        do iz=ista(3),iend(3)
+-        do iy=ista(2),iend(2)
+-        do ix=ista(1),iend(1)
+-          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
+-                       +c2(ix,iy,iz)*( &
+-                       cb_z(iz+1)*(f2(ix,iy,iz+1)+f3(ix,iy,iz+1)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
+-        end do
+-        end do
+-        end do
+-!$omp end do
+-!$omp end parallel
+-      end if
+-    end if
+-    
+-    return
+-  end subroutine eh_fd
++
+   
+   !===========================================================================================
+   != calculate incident pulse ================================================================
+diff --git a/src/maxwell/fdtd_eh_kernel.f90 b/src/maxwell/fdtd_eh_kernel.f90
+new file mode 100644
+index 00000000..c82113bd
+--- /dev/null
++++ b/src/maxwell/fdtd_eh_kernel.f90
+@@ -0,0 +1,125 @@
++! Copyright 2026 SALMON developers. Apache-2.0.
++module fdtd_eh_kernel
++  implicit none
++  private
++  public :: eh_fd
++contains
++  subroutine eh_fd(ista,iend,ng_is,ng_ie,Nd,c1,c2,f1,f2,f3,var,dir,&
++                   cb_x,cb_y,cb_z)
++    implicit none
++    integer,     intent(in)          :: ista(3),iend(3),ng_is(3),ng_ie(3)
++    integer,     intent(in)          :: Nd
++    real(8),     intent(in)          :: c1(ng_is(1)-Nd:ng_ie(1)+Nd, &
++                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
++                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
++                                        c2(ng_is(1)-Nd:ng_ie(1)+Nd, &
++                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
++                                           ng_is(3)-Nd:ng_ie(3)+Nd)
++    real(8),     intent(inout)       :: f1(ng_is(1)-Nd:ng_ie(1)+Nd, &
++                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
++                                           ng_is(3)-Nd:ng_ie(3)+Nd)
++    real(8),     intent(in)          :: f2(ng_is(1)-Nd:ng_ie(1)+Nd, &
++                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
++                                           ng_is(3)-Nd:ng_ie(3)+Nd),&
++                                        f3(ng_is(1)-Nd:ng_ie(1)+Nd, &
++                                           ng_is(2)-Nd:ng_ie(2)+Nd, &
++                                           ng_is(3)-Nd:ng_ie(3)+Nd)
++    character(1),intent(in)          :: var,dir
++    real(8),     intent(in),optional :: cb_x(ng_is(1)-Nd:ng_ie(1)+Nd), &
++                                        cb_y(ng_is(2)-Nd:ng_ie(2)+Nd), &
++                                        cb_z(ng_is(3)-Nd:ng_ie(3)+Nd)
++    integer :: ix,iy,iz
++    
++    if(var=='e') then
++      if(dir=='x') then
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
++                       +c2(ix,iy,iz)*( &
++                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_x(ix-1)*(f2(ix-1,iy,iz)+f3(ix-1,iy,iz)) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      elseif(dir=='y') then
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
++                       +c2(ix,iy,iz)*( &
++                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_y(iy-1)*(f2(ix,iy-1,iz)+f3(ix,iy-1,iz)) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      elseif(dir=='z') then
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
++                       +c2(ix,iy,iz)*( &
++                       (f2(ix,iy,iz)+f3(ix,iy,iz)) - cb_z(iz-1)*(f2(ix,iy,iz-1)+f3(ix,iy,iz-1)) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      end if
++    elseif(var=='h') then
++      if(dir=='x') then
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
++                       +c2(ix,iy,iz)*( &
++                       cb_x(ix+1)*(f2(ix+1,iy,iz)+f3(ix+1,iy,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      elseif(dir=='y') then
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
++                       +c2(ix,iy,iz)*( &
++                       cb_y(iy+1)*(f2(ix,iy+1,iz)+f3(ix,iy+1,iz)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      elseif(dir=='z') then
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          f1(ix,iy,iz)= c1(ix,iy,iz)*f1(ix,iy,iz) &
++                       +c2(ix,iy,iz)*( &
++                       cb_z(iz+1)*(f2(ix,iy,iz+1)+f3(ix,iy,iz+1)) - (f2(ix,iy,iz)+f3(ix,iy,iz)) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      end if
++    end if
++    
++    return
++  end subroutine eh_fd
++end module fdtd_eh_kernel
+diff --git a/src/maxwell/lorentz_drude.f90 b/src/maxwell/lorentz_drude.f90
+new file mode 100644
+index 00000000..893d4b15
+--- /dev/null
++++ b/src/maxwell/lorentz_drude.f90
+@@ -0,0 +1,234 @@
++! Copyright 2026 SALMON developers. Apache-2.0.
++! Extracted from fdtd_eh; keep arithmetic and loop order for reproducibility.
++module lorentz_drude
++  implicit none
++  private
++  public :: s_ld_state, ld_allocate, ld_coefficients, ld_store_old, ld_update, ld_finalize
++  type s_ld_state
++    logical :: enabled=.false.
++    integer             :: num_ld=0                                !LD: number of LD media
++    integer             :: max_pole_num_ld=0                       !LD: maximum of pole_num_ld
++    integer,allocatable :: media_ld(:)                             !LD: imedia number for LD model(num_ld)
++    real(8),allocatable ::   rjx_ld(:,:,:,:),rjx_old_ld(:,:,:,:),& !LD: poparization current density J
++                             rjy_ld(:,:,:,:),rjy_old_ld(:,:,:,:),& !    and its stock
++                             rjz_ld(:,:,:,:),rjz_old_ld(:,:,:,:)   !    (x,y,z,max_pole_num_ld)
++    real(8),allocatable ::    px_ld(:,:,:,:),&                     !LD: poparization vector P
++                              py_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
++                              pz_ld(:,:,:,:)                       !
++    real(8),allocatable :: c1_jx_ld(:,:,:,:),&                     !LD: coefficient for Jx
++                           c2_jx_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
++                           c3_jx_ld(:,:,:,:)                       !
++    real(8),allocatable :: c1_jy_ld(:,:,:,:),&                     !LD: coefficient for Jy
++                           c2_jy_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
++                           c3_jy_ld(:,:,:,:)                       !
++    real(8),allocatable :: c1_jz_ld(:,:,:,:),&                     !LD: coefficient for Jz
++                           c2_jz_ld(:,:,:,:),&                     !    (x,y,z,max_pole_num_ld)
++                           c3_jz_ld(:,:,:,:)                       !
++    real(8),allocatable :: rjx_fdtd_ld(:,:,:),&                    !LD: J substituted into FDTD
++                           rjy_fdtd_ld(:,:,:),&                    !    (x,y,z)
++                           rjz_fdtd_ld(:,:,:)                      !
++    real(8),allocatable :: ex_old_ld(:,:,:),&                      !LD: old E
++                           ey_old_ld(:,:,:),&                      !    (x,y,z)
++                           ez_old_ld(:,:,:)                        !
++  end type s_ld_state
++contains
++  subroutine ld_allocate(ld,lo,hi)
++    type(s_ld_state), intent(inout) :: ld
++    integer, intent(in) :: lo(3),hi(3)
++    allocate(ld%rjx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%rjx_ld=0.0d0
++    allocate(ld%rjx_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%rjx_old_ld=0.0d0
++    allocate(ld%rjy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%rjy_ld=0.0d0
++    allocate(ld%rjy_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%rjy_old_ld=0.0d0
++    allocate(ld%rjz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%rjz_ld=0.0d0
++    allocate(ld%rjz_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%rjz_old_ld=0.0d0
++    allocate(ld%px_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%px_ld=0.0d0
++    allocate(ld%py_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%py_ld=0.0d0
++    allocate(ld%pz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%pz_ld=0.0d0
++    allocate(ld%c1_jx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c1_jx_ld=0.0d0
++    allocate(ld%c2_jx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c2_jx_ld=0.0d0
++    allocate(ld%c3_jx_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c3_jx_ld=0.0d0
++    allocate(ld%c1_jy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c1_jy_ld=0.0d0
++    allocate(ld%c2_jy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c2_jy_ld=0.0d0
++    allocate(ld%c3_jy_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c3_jy_ld=0.0d0
++    allocate(ld%c1_jz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c1_jz_ld=0.0d0
++    allocate(ld%c2_jz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c2_jz_ld=0.0d0
++    allocate(ld%c3_jz_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),ld%max_pole_num_ld))
++    ld%c3_jz_ld=0.0d0
++    allocate(ld%rjx_fdtd_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    ld%rjx_fdtd_ld=0.0d0
++    allocate(ld%rjy_fdtd_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    ld%rjy_fdtd_ld=0.0d0
++    allocate(ld%rjz_fdtd_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    ld%rjz_fdtd_ld=0.0d0
++    allocate(ld%ex_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    ld%ex_old_ld=0.0d0
++    allocate(ld%ey_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    ld%ey_old_ld=0.0d0
++    allocate(ld%ez_old_ld(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)))
++    ld%ez_old_ld=0.0d0
++  end subroutine ld_allocate
++  subroutine ld_coefficients(media_ld,pole_num_ld,gamma_ld,omega_ld,f_ld,omega_p_ld,dt_em,pi, &
++                             tmp_c0_ld,tmp_c1_ld,tmp_c2_ld,tmp_c3_ld,tmp_c4_ld,tmp_c5_ld)
++    integer, intent(in) :: media_ld(:),pole_num_ld(0:)
++    real(8), intent(in) :: gamma_ld(0:,:),omega_ld(0:,:),f_ld(0:,:),omega_p_ld(0:),dt_em,pi
++    real(8), intent(inout) :: tmp_c0_ld(:,:),tmp_c1_ld(:,:),tmp_c2_ld(:,:),tmp_c3_ld(:,:)
++    real(8), intent(inout) :: tmp_c4_ld(:),tmp_c5_ld(:)
++    integer :: ii,ij
++      do ii = 1,size(media_ld)
++        do ij = 1,pole_num_ld(media_ld(ii))
++          tmp_c0_ld(ij,ii) = 1.0d0                                          &
++                             + ( gamma_ld(media_ld(ii),ij)*dt_em/2.0d0 ) &
++                             + ((omega_ld(media_ld(ii),ij)*dt_em)**2.0d0)/4.0d0
++          tmp_c1_ld(ij,ii) = 1.0d0                                          &
++                             - ( gamma_ld(media_ld(ii),ij)*dt_em/2.0d0 ) &
++                             - ((omega_ld(media_ld(ii),ij)*dt_em)**2.0d0)/4.0d0
++          tmp_c1_ld(ij,ii) = tmp_c1_ld(ij,ii) / tmp_c0_ld(ij,ii)
++          tmp_c2_ld(ij,ii) = f_ld(media_ld(ii),ij)*(omega_p_ld(media_ld(ii))**2.0d0)*dt_em &
++                             /(8.0d0*pi*tmp_c0_ld(ij,ii))
++          tmp_c3_ld(ij,ii) = (omega_ld(media_ld(ii),ij)**2.0d0)*dt_em/tmp_c0_ld(ij,ii)
++          tmp_c4_ld(ii) = tmp_c4_ld(ii) + tmp_c2_ld(ij,ii)
++          tmp_c5_ld(ii) = tmp_c5_ld(ii) + tmp_c2_ld(ij,ii)
++        end do
++        tmp_c4_ld(ii) = 1.0d0 + 2.0d0*pi*dt_em*tmp_c4_ld(ii)
++        tmp_c5_ld(ii) = 1.0d0 - 2.0d0*pi*dt_em*tmp_c5_ld(ii)
++      end do
++      
++  end subroutine ld_coefficients
++    subroutine ld_store_old(ld,lo,hi,ista,iend,dt_em,ex_y,ex_z,ey_z,ey_x,ez_x,ez_y)
++      implicit none
++      integer, intent(in) :: lo(3),hi(3),ista(3),iend(3)
++      type(s_ld_state), intent(inout) :: ld
++      real(8), intent(in) :: dt_em
++      real(8), intent(in) :: ex_y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ex_z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ey_z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ey_x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ez_x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ez_y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3))
++      integer :: ii,ix,iy,iz
++      
++      if(ld%enabled) then
++!$omp parallel
++!$omp do private(ii,ix,iy,iz) collapse(3)
++        do ii=1,ld%max_pole_num_ld
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          ld%rjx_old_ld(ix,iy,iz,ii) = ld%rjx_ld(ix,iy,iz,ii)
++          ld%rjy_old_ld(ix,iy,iz,ii) = ld%rjy_ld(ix,iy,iz,ii)
++          ld%rjz_old_ld(ix,iy,iz,ii) = ld%rjz_ld(ix,iy,iz,ii)
++        end do
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          ld%ex_old_ld(ix,iy,iz) = ex_y(ix,iy,iz) + ex_z(ix,iy,iz);
++          ld%ey_old_ld(ix,iy,iz) = ey_z(ix,iy,iz) + ey_x(ix,iy,iz);
++          ld%ez_old_ld(ix,iy,iz) = ez_x(ix,iy,iz) + ez_y(ix,iy,iz);
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      end if
++      
++      return
++    end subroutine ld_store_old
++    subroutine ld_update(ld,lo,hi,ista,iend,dt_em,ex_y,ex_z,ey_z,ey_x,ez_x,ez_y)
++      implicit none
++      integer, intent(in) :: lo(3),hi(3),ista(3),iend(3)
++      type(s_ld_state), intent(inout) :: ld
++      real(8), intent(in) :: dt_em
++      real(8), intent(in) :: ex_y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ex_z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ey_z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ey_x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ez_x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)), &
++                            ez_y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3))
++      integer :: ii,ix,iy,iz
++      
++      !initialize
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++      do iz=ista(3),iend(3)
++      do iy=ista(2),iend(2)
++      do ix=ista(1),iend(1)
++        ld%rjx_fdtd_ld(ix,iy,iz)=0.0d0; ld%rjy_fdtd_ld(ix,iy,iz)=0.0d0; ld%rjz_fdtd_ld(ix,iy,iz)=0.0d0;
++      end do
++      end do
++      end do
++!$omp end do
++!$omp end parallel
++      
++      !update LD polarization current & vector and FDTD current
++      do ii=1,ld%max_pole_num_ld
++!$omp parallel
++!$omp do private(ix,iy,iz) collapse(2)
++        do iz=ista(3),iend(3)
++        do iy=ista(2),iend(2)
++        do ix=ista(1),iend(1)
++          ld%rjx_ld(ix,iy,iz,ii) = ld%c1_jx_ld(ix,iy,iz,ii)*ld%rjx_old_ld(ix,iy,iz,ii)            &
++                                  +ld%c2_jx_ld(ix,iy,iz,ii)*( ex_y(ix,iy,iz)+ex_z(ix,iy,iz) &
++                                                             +ld%ex_old_ld(ix,iy,iz) )            &
++                                  -ld%c3_jx_ld(ix,iy,iz,ii)*ld%px_ld(ix,iy,iz,ii)
++          ld%rjy_ld(ix,iy,iz,ii) = ld%c1_jy_ld(ix,iy,iz,ii)*ld%rjy_old_ld(ix,iy,iz,ii)            &
++                                  +ld%c2_jy_ld(ix,iy,iz,ii)*( ey_z(ix,iy,iz)+ey_x(ix,iy,iz) &
++                                                             +ld%ey_old_ld(ix,iy,iz) )            &
++                                  -ld%c3_jy_ld(ix,iy,iz,ii)*ld%py_ld(ix,iy,iz,ii)
++          ld%rjz_ld(ix,iy,iz,ii) = ld%c1_jz_ld(ix,iy,iz,ii)*ld%rjz_old_ld(ix,iy,iz,ii)            &
++                                  +ld%c2_jz_ld(ix,iy,iz,ii)*( ez_x(ix,iy,iz)+ez_y(ix,iy,iz) &
++                                                             +ld%ez_old_ld(ix,iy,iz) )            &
++                                  -ld%c3_jz_ld(ix,iy,iz,ii)*ld%pz_ld(ix,iy,iz,ii)
++          ld%px_ld(ix,iy,iz,ii)  = ld%px_ld(ix,iy,iz,ii) &
++                                  +0.5d0*dt_em*( ld%rjx_ld(ix,iy,iz,ii) + ld%rjx_old_ld(ix,iy,iz,ii) )
++          ld%py_ld(ix,iy,iz,ii)  = ld%py_ld(ix,iy,iz,ii) &
++                                  +0.5d0*dt_em*( ld%rjy_ld(ix,iy,iz,ii) + ld%rjy_old_ld(ix,iy,iz,ii) )
++          ld%pz_ld(ix,iy,iz,ii)  = ld%pz_ld(ix,iy,iz,ii) &
++                                  +0.5d0*dt_em*( ld%rjz_ld(ix,iy,iz,ii) + ld%rjz_old_ld(ix,iy,iz,ii) )
++          ld%rjx_fdtd_ld(ix,iy,iz)  = ld%rjx_fdtd_ld(ix,iy,iz)                                          &
++                                     +0.5d0*( (1.0d0+ld%c1_jx_ld(ix,iy,iz,ii)) * ld%rjx_ld(ix,iy,iz,ii) &
++                                                    -ld%c3_jx_ld(ix,iy,iz,ii)  * ld%px_ld(ix,iy,iz,ii) )
++          ld%rjy_fdtd_ld(ix,iy,iz)  = ld%rjy_fdtd_ld(ix,iy,iz)                                          &
++                                     +0.5d0*( (1.0d0+ld%c1_jy_ld(ix,iy,iz,ii)) * ld%rjy_ld(ix,iy,iz,ii) &
++                                                    -ld%c3_jy_ld(ix,iy,iz,ii)  * ld%py_ld(ix,iy,iz,ii) )
++          ld%rjz_fdtd_ld(ix,iy,iz)  = ld%rjz_fdtd_ld(ix,iy,iz)                                          &
++                                     +0.5d0*( (1.0d0+ld%c1_jz_ld(ix,iy,iz,ii)) * ld%rjz_ld(ix,iy,iz,ii) &
++                                                    -ld%c3_jz_ld(ix,iy,iz,ii)  * ld%pz_ld(ix,iy,iz,ii) )
++        end do
++        end do
++        end do
++!$omp end do
++!$omp end parallel
++      end do
++      
++      return
++    end subroutine ld_update
++  subroutine ld_finalize(ld)
++    type(s_ld_state), intent(inout) :: ld
++    type(s_ld_state) :: empty
++    ld=empty
++  end subroutine ld_finalize
++end module lorentz_drude
+diff --git a/src/maxwell/main_maxwell.f90 b/src/maxwell/main_maxwell.f90
+index 835ad071..4009aa7b 100644
+--- a/src/maxwell/main_maxwell.f90
++++ b/src/maxwell/main_maxwell.f90
+@@ -18,17 +18,19 @@ subroutine main_maxwell
+   use parallelization, only: nproc_id_global
+   use communication,   only: comm_is_root
+   use structures,      only: s_fdtd_system
++  use lorentz_drude, only: s_ld_state
+   use fdtd_eh,         only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
+   use misc_routines,   only: get_wtime
+   implicit none
++  type(s_ld_state) :: ld
+   type(s_fdtd_system) :: fs
+   type(ls_fdtd_eh)    :: fe
+   real(8)             :: elapsed_time
+   
+   elapsed_time=get_wtime()
+-  call eh_init(fs,fe)
+-  call eh_calc(fs,fe)
+-  call eh_finalize(fs,fe)
++  call eh_init(fs,fe,ld)
++  call eh_calc(fs,fe,ld)
++  call eh_finalize(fs,fe,ld)
+   elapsed_time=get_wtime()-elapsed_time
+   if(comm_is_root(nproc_id_global)) then
+     write(*,'(A,f16.8)') " elapsed time [s] = ", elapsed_time
+diff --git a/src/rt/CMakeLists.txt b/src/rt/CMakeLists.txt
+index 11b919ff..f429300e 100644
+--- a/src/rt/CMakeLists.txt
++++ b/src/rt/CMakeLists.txt
+@@ -1,4 +1,5 @@
+ set(SOURCES
++    tddft_worker.f90
+     dip.f90
+     em_field.f90
+     initialization_rt.f90
+diff --git a/src/rt/initialization_rt.f90 b/src/rt/initialization_rt.f90
+index 0c5d69fa..1d4b846a 100644
+--- a/src/rt/initialization_rt.f90
++++ b/src/rt/initialization_rt.f90
+@@ -31,6 +31,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
+                      pp, ppg, ppn, unfold  )
+   use inputoutput
++  use tddft_worker, only: worker_requested,worker_initial_A
+   use math_constants, only: pi, zi
+   use structures
+   use parallelization, only: nproc_id_global, nproc_group_global
+@@ -182,6 +183,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+   
+   call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:, 0:nt+1))
+ 
++  if(worker_requested()) then
++    do itt=0,nt+1
++      rt%Ac_ext(:,itt)=worker_initial_A
++    end do
++  end if
++
+   do itt = 0, nt
+     rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
+   end do
+diff --git a/src/rt/main_tddft.f90 b/src/rt/main_tddft.f90
+index c5e6ac68..8f605665 100644
+--- a/src/rt/main_tddft.f90
++++ b/src/rt/main_tddft.f90
+@@ -19,6 +19,9 @@
+ #include "config.h"
+ 
+ subroutine main_tddft
++use tddft_worker
++use density_matrix, only: calc_current
++use hamiltonian, only: update_kvector_nonlocalpt
+ use math_constants, only: pi
+ use salmon_global
+ use structures
+@@ -59,6 +62,7 @@ type(s_pp_nlcc) :: ppn
+ type(s_singlescale) :: singlescale
+ type(s_unfold) :: unfold
+ 
++real(8) :: worker_A(3),worker_current(3,2)
+ integer :: Mit, itt
+ logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
+ 
+@@ -78,6 +82,14 @@ call initialization_rt( Mit, system, energy, ewald, rt, md, &
+                         V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
+                         pp, ppg, ppn, unfold )
+ 
++if(worker_requested()) then
++  system%vec_Ac=worker_initial_A
++  call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
++  call calc_current(system,mg,stencil,info,srg,spsi_in,ppg,worker_current(:,1:system%nspin))
++  spsi_in%update_zwf_overlap=.true.
++  call worker_reply(0,sum(worker_current(:,1:system%nspin),dim=2))
++end if
++
+ #ifdef __FUJITSU
+ call fapp_start('time_evol',1,0) ! performance profiling
+ #endif
+@@ -98,6 +110,11 @@ call comm_sync_all
+ call timer_enable_sub
+ call timer_begin(LOG_RT_ITERATION)
+ TE : do itt=Mit+1,nt
++  if(worker_requested()) then
++    if(.not.worker_next_A(worker_A)) exit TE
++    rt%Ac_ext(:,itt)=worker_A
++    rt%Ac_tot(:,itt)=worker_A
++  end if
+   call nvtxStartRange('main loop', itt)
+ 
+   if(mod(itt,2)==1)then
+@@ -110,6 +127,8 @@ TE : do itt=Mit+1,nt
+      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
+   end if
+ 
++  if(worker_requested()) call worker_reply(itt,rt%curr(:,itt))
++
+   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
+   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
+ 
+@@ -157,6 +176,13 @@ close(030) ! laser
+ !------------ Writing part -----------
+ 
+ 
++! Worker outputs are consumed at each endpoint. Do not analyze uncomputed tail.
++if(worker_requested()) then
++  if(comm_is_root(nproc_id_global)) close(ofl%fh_rt)
++  call finalize_xc(xc_func)
++  return
++end if
++
+ call timer_begin(LOG_WRITE_RT_RESULTS)
+ 
+ !
+diff --git a/src/rt/tddft_worker.f90 b/src/rt/tddft_worker.f90
+new file mode 100644
+index 00000000..5e19ffe9
+--- /dev/null
++++ b/src/rt/tddft_worker.f90
+@@ -0,0 +1,117 @@
++#include "config.h"
++! Optional SALMONpy process-isolated endpoint-A protocol; ordinary runs are unchanged.
++module tddft_worker
++  implicit none
++  private
++  public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
++  real(8), save :: worker_initial_A(3)=0d0
++contains
++  logical function worker_requested()
++    character(8) :: value
++    integer :: status
++    call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
++    worker_requested=status==0.and.trim(value)=='1'
++  end function
++
++  subroutine worker_configure()
++    use salmon_global
++    use parallelization, only: nproc_size_global
++    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
++    implicit none
++    character(32) :: command
++    integer :: ios,i
++    logical :: plus_u_file
++    if(.not.worker_requested()) return
++    if(nproc_size_global/=1) error stop 'SALMONpy TDDFT requires one MPI rank'
++    if(theory/='tddft_pulse'.or.yn_periodic/='y'.or.yn_md/='n') &
++      error stop 'SALMONpy TDDFT requires periodic fixed-ion tddft_pulse'
++    if(propagator/='middlepoint'.or.trans_longi/='tr') &
++      error stop 'SALMONpy TDDFT requires middlepoint and transverse supplied total A'
++    if(yn_restart/='n'.or.yn_dc/='n'.or.yn_conventional_from_dcdft/='n') &
++      error stop 'SALMONpy TDDFT requires a fresh conventional GS initial state'
++    if(yn_spinorbit/='n'.or.yn_jm/='n'.or.spin/='unpolarized') &
++      error stop 'SALMONpy TDDFT requires unpolarized scalar pseudopotentials'
++    if(xname/='none'.or.cname/='none') error stop 'SALMONpy: separate exchange/correlation unsupported'
++    select case(xc)
++    case('pz','tbmbj')
++    case('libxc_pz','libxc_pbe')
++#ifndef USE_LIBXC
++      error stop 'SALMONpy TDDFT: Libxc functional requires USE_LIBXC=ON'
++#endif
++    case default
++      error stop 'SALMONpy TDDFT supports pz, tbmbj, libxc_pz and libxc_pbe only'
++    end select
++    if(projection_option/='no'.or.dm_unfold_option/='no') &
++      error stop 'SALMONpy TDDFT worker does not support projection/unfolding'
++    if(write_rt_wfn_k/='n') &
++      error stop 'SALMONpy TDDFT worker does not support RT wavefunction checkpoints'
++    inquire(file='hubbard_param.dat',exist=plus_u_file)
++    if(plus_u_file) error stop 'SALMONpy TDDFT worker does not support +U inputs'
++    if(len_trim(sysname)==0.or.index(sysname,'/')/=0.or.index(sysname,achar(92))/=0.or. &
++       index(sysname,':')/=0.or.index(sysname,'..')/=0) error stop 'SALMONpy: sysname must be a filename stem'
++    call relative_file(file_kw)
++#ifdef USE_OPENACC
++    error stop 'SALMONpy TDDFT worker currently supports CPU execution'
++#endif
++    call relative_file(file_atom_coor)
++    call relative_file(file_atom_red_coor)
++    do i=1,nelem
++      call relative_file(file_pseudo(i))
++    end do
++    read(*,*,iostat=ios) command,dt,nt,worker_initial_A
++    if(ios/=0.or.trim(command)/='INIT') error stop 'SALMONpy: expected INIT dt capacity A'
++    if(.not.ieee_is_finite(dt)) error stop 'SALMONpy: invalid dt'
++    if(dt<=0d0.or.nt<1) error stop 'SALMONpy: invalid dt/capacity'
++    do i=1,3
++      if(.not.ieee_is_finite(worker_initial_A(i))) error stop 'SALMONpy: invalid initial A'
++    end do
++    ! No external field or restart-output path can own the evolving state.
++    base_directory='./'
++    directory_read_data='./data_for_restart/'
++    ae_shape1='none'; ae_shape2='none'
++    checkpoint_interval=-1; time_shutdown=-1d0; write_rt_wfn_k='n'
++  end subroutine
++
++  subroutine relative_file(path)
++    character(*), intent(in) :: path
++    if(len_trim(path)==0) return
++    if(path(1:1)=='/'.or.index(path,'..')/=0.or.index(path,':')/=0.or.index(path,achar(92))/=0) &
++      error stop 'SALMONpy: input assets must use relative bundle paths'
++  end subroutine
++
++  logical function worker_next_A(A)
++    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
++    implicit none
++    real(8), intent(out) :: A(3)
++    character(512) :: line
++    character(32) :: command
++    integer :: ios,i
++    worker_next_A=.false.
++    read(*,'(a)',iostat=ios) line
++    if(ios<0) return
++    if(ios/=0) error stop 'SALMONpy: command read failed'
++    read(line,*,iostat=ios) command
++    if(ios/=0) error stop 'SALMONpy: missing command'
++    if(trim(command)=='CLOSE') return
++    read(line,*,iostat=ios) command,A
++    if(ios/=0.or.trim(command)/='STEP') error stop 'SALMONpy: expected STEP A'
++    do i=1,3
++      if(.not.ieee_is_finite(A(i))) error stop 'SALMONpy: invalid A'
++    end do
++    worker_next_A=.true.
++  end function
++
++  subroutine worker_reply(step,J)
++    use iso_fortran_env, only: output_unit
++    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
++    implicit none
++    integer,intent(in) :: step
++    real(8),intent(in) :: J(3)
++    integer :: i
++    do i=1,3
++      if(.not.ieee_is_finite(J(i))) error stop 'SALMONpy: nonfinite current'
++    end do
++    write(output_unit,'(a,1x,i0,3(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J
++    flush(output_unit)
++  end subroutine
++end module
+diff --git a/src/ssbe/CMakeLists.txt b/src/ssbe/CMakeLists.txt
+index 54d4b76b..a57083f2 100644
+--- a/src/ssbe/CMakeLists.txt
++++ b/src/ssbe/CMakeLists.txt
+@@ -1,4 +1,6 @@
+ set(SOURCES
++    sbe_types.f90
++    sbe_velocity_kernel.f90
+     util_ssbe.f90
+     datafile_ssbe.f90
+     input_checker_sbe.f90
+diff --git a/src/ssbe/bloch_solver_ssbe.f90 b/src/ssbe/bloch_solver_ssbe.f90
+index 11a4ed2d..d8414e33 100644
+--- a/src/ssbe/bloch_solver_ssbe.f90
++++ b/src/ssbe/bloch_solver_ssbe.f90
+@@ -1,4 +1,6 @@
+ module bloch_solver_ssbe
++    use sbe_types, only: s_sbe_bloch_solver
++    use sbe_velocity_kernel, only: velocity_evolve, velocity_current_local
+     use math_constants, only: pi, zi
+     use communication, only: comm_get_groupinfo, comm_summation
+     use gs_info_ssbe
+@@ -7,20 +9,7 @@ module bloch_solver_ssbe
+ 
+ 
+ 
+-    type s_sbe_bloch_solver
+-        !k-points for real-time SBE calculation
+-        integer :: nk, nb
+-        integer :: ik_max, ik_min
+-        complex(8), allocatable :: rho(:, :, :)
+-        logical :: flag_vnl_correction
+-        complex(8), allocatable :: qnm(:, :, :)
+-        complex(8), allocatable :: grad_qnm(:, :, :, :)
+-        complex(8), allocatable :: qnm_new(:, :, :)
+-        complex(8), allocatable :: dqnm_stock(:, :, :, :)
+-        complex(8), allocatable :: dnm_i(:, :, :, :)
+-        real(8), allocatable    :: abs_dnm(:, :, :)
+-        complex(8), allocatable :: exp_iphi(:, :, :)
+-    end type
++
+ 
+ 
+ 
+@@ -65,263 +54,13 @@ end subroutine
+ 
+ subroutine calc_current_bloch(sbe, gs, Ac, jmat, icomm)
+     use salmon_global, only: norder_correction
+-    implicit none
+     type(s_sbe_bloch_solver), intent(in) :: sbe
+     type(s_sbe_gs_info), intent(in) :: gs
+-    real(8), intent(in) :: Ac(1:3)
+-    real(8), intent(out) :: jmat(1:3)
++    real(8), intent(in) :: Ac(3)
++    real(8), intent(out) :: jmat(3)
+     integer, intent(in) :: icomm
+-    integer :: ik, idir, ib, jb, kb, nb, ierr
+-    complex(8) :: tmp1(1:3), tmp(1:3)
+-    complex(8) :: sum1(1:3)
+-    complex(8) :: pnn(1:3),pni(1:3),pin(1:3)
+-    complex(8) :: pnj(1:3),pjn(1:3),pnk(1:3),pkn(1:3)
+-    complex(8) :: pij(1:3),pji(1:3),pik(1:3),pki(1:3),pjk(1:3),pkj(1:3)
+-    complex(8) :: pnn_Ac,pni_Ac,pin_Ac
+-    complex(8) :: pnj_Ac,pjn_Ac,pnk_Ac,pkn_Ac
+-    complex(8) :: pij_Ac,pji_Ac,pik_Ac,pki_Ac,pjk_Ac,pkj_Ac
+-
+-    tmp1(1:3) = 0d0
+-
+-    !$omp parallel do default(shared) private(ik,ib,jb,idir) reduction(+:tmp1)
+-    do ik = sbe%ik_min, sbe%ik_max
+-        do idir = 1, 3
+-            do ib = 1, sbe%nb
+-                do jb = 1, sbe%nb
+-                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
+-                        & gs%p_tm_matrix(ib, jb, idir, ik) &
+-                    & )
+-                    if (sbe%flag_vnl_correction) then
+-                        tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
+-                            & gs%rvnl_tm_matrix(ib, jb, idir, ik) &
+-                        & )
+-                    endif
+-                end do
+-            end do
+-        end do
+-    end do
+-    !$omp end parallel do
+-
+-    if(norder_correction>=1)then
+-        do ik = sbe%ik_min, sbe%ik_max
+-            do idir = 1, 3
+-                do nb = 1, gs%ne/2
+-                    do ib = 1, sbe%nb
+-                        pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
+-                        pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+-                                 gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+-                                 gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+-                        if (sbe%flag_vnl_correction) then
+-                            ! Consideration of nonlocal momentum components
+-                            pin(idir) = pin(idir) &
+-                                + gs%rvnl_tm_matrix(ib, nb, idir, ik)
+-                            pni_Ac = pni_Ac &
+-                                + gs%rvnl_tm_matrix(nb, ib, 1, ik) * Ac(1) &
+-                                + gs%rvnl_tm_matrix(nb, ib, 2, ik) * Ac(2) &
+-                                + gs%rvnl_tm_matrix(nb, ib, 3, ik) * Ac(3)
+-                        end if
+-                        if(nb /= ib) then
+-                            if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
+-                                ! Bug fix: sign problem
+-                                tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+-                                    2.d0 * gs%occup(nb, ik) * &
+-                                    dble(pni_Ac*pin(idir)) / gs%delta_omega(ib, nb, ik)
+-                            end if
+-                        end if
+-                    end do
+-                end do
+-            end do
+-        end do
+-    end if
+-
+-    if(norder_correction>=2)then
+-        do ik = sbe%ik_min, sbe%ik_max
+-            do idir = 1, 3
+-                do nb = 1, sbe%nb
+-                    pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
+-                    pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
+-                             gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
+-                             gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
+-                    do ib = 1, sbe%nb
+-                        pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
+-                        pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+-                                 gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+-                                 gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+-                        pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
+-                                 gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
+-                                 gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
+-                        do jb = 1, sbe%nb
+-                            pjn(idir) = gs%p_tm_matrix(jb, nb, idir, ik)
+-                            pij(idir) = gs%p_tm_matrix(ib, jb, idir, ik)
+-                            pij_Ac = gs%p_tm_matrix(ib, jb, 1, ik) * Ac(1) + &
+-                                     gs%p_tm_matrix(ib, jb, 2, ik) * Ac(2) + &
+-                                     gs%p_tm_matrix(ib, jb, 3, ik) * Ac(3)
+-                            pjn_Ac = gs%p_tm_matrix(jb, nb, 1, ik) * Ac(1) + &
+-                                     gs%p_tm_matrix(jb, nb, 2, ik) * Ac(2) + &
+-                                     gs%p_tm_matrix(jb, nb, 3, ik) * Ac(3)
+-                            if(nb /= ib .and. nb /= jb) then
+-                                if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
+-                                   abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
+-                                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+-                                        sbe%rho(nb, nb, ik) / &
+-                                        gs%delta_omega(ib, nb, ik) / &
+-                                        gs%delta_omega(jb, nb, ik) * &
+-                                        (pjn(idir) * pij_Ac * pni_Ac &
+-                                       + pjn_Ac * (pij(idir) * pni_Ac  + pni(idir) * pij_Ac))
+-                                end if
+-                            end if
+-                        end do
+-                        if(nb /= ib) then
+-                            if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
+-                                tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+-                                    sbe%rho(nb, nb, ik) * &
+-                                    (2.d0 * pnn_Ac * dble(pni(idir) * pin_Ac) + &
+-                                    pnn(idir)*abs(pni_Ac)**2) / &
+-                                    gs%delta_omega(ib, nb, ik)**2
+-                            end if
+-                        end if
+-                    end do
+-                end do
+-            end do
+-        end do
+-    end if
+-
+-    if(norder_correction>=3)then
+-      do ik = sbe%ik_min, sbe%ik_max
+-        do idir = 1, 3
+-          do nb = 1, sbe%nb
+-            pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
+-            pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
+-                     gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
+-                     gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
+-            do ib = 1, sbe%nb
+-              pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
+-              pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
+-              pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+-                       gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+-                       gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+-              pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
+-                       gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
+-                       gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
+-              do jb = 1, sbe%nb
+-                pnj(idir) = gs%p_tm_matrix(nb, jb, idir, ik)
+-                pjn(idir) = gs%p_tm_matrix(jb, nb, idir, ik)
+-                pij(idir) = gs%p_tm_matrix(ib, jb, idir, ik)
+-                pji(idir) = gs%p_tm_matrix(jb, ib, idir, ik)
+-                pnj_Ac = gs%p_tm_matrix(nb, jb, 1, ik) * Ac(1) + &
+-                         gs%p_tm_matrix(nb, jb, 2, ik) * Ac(2) + &
+-                         gs%p_tm_matrix(nb, jb, 3, ik) * Ac(3)
+-                pjn_Ac = gs%p_tm_matrix(jb, nb, 1, ik) * Ac(1) + &
+-                         gs%p_tm_matrix(jb, nb, 2, ik) * Ac(2) + &
+-                         gs%p_tm_matrix(jb, nb, 3, ik) * Ac(3)
+-                pij_Ac = gs%p_tm_matrix(ib, jb, 1, ik) * Ac(1) + &
+-                         gs%p_tm_matrix(ib, jb, 2, ik) * Ac(2) + &
+-                         gs%p_tm_matrix(ib, jb, 3, ik) * Ac(3)
+-                pji_Ac = gs%p_tm_matrix(jb, ib, 1, ik) * Ac(1) + &
+-                         gs%p_tm_matrix(jb, ib, 2, ik) * Ac(2) + &
+-                         gs%p_tm_matrix(jb, ib, 3, ik) * Ac(3)
+-                do kb = 1, sbe%nb
+-                  pnk(idir) = gs%p_tm_matrix(nb, kb, idir, ik)
+-                  pkn(idir) = gs%p_tm_matrix(kb, nb, idir, ik)
+-                  pik(idir) = gs%p_tm_matrix(ib, kb, idir, ik)
+-                  pki(idir) = gs%p_tm_matrix(kb, ib, idir, ik)
+-                  pjk(idir) = gs%p_tm_matrix(jb, kb, idir, ik)
+-                  pkj(idir) = gs%p_tm_matrix(kb, jb, idir, ik)
+-                  pnk_Ac = gs%p_tm_matrix(nb, kb, 1, ik) * Ac(1) + &
+-                           gs%p_tm_matrix(nb, kb, 2, ik) * Ac(2) + &
+-                           gs%p_tm_matrix(nb, kb, 3, ik) * Ac(3)
+-                  pkn_Ac = gs%p_tm_matrix(kb, nb, 1, ik) * Ac(1) + &
+-                           gs%p_tm_matrix(kb, nb, 2, ik) * Ac(2) + &
+-                           gs%p_tm_matrix(kb, nb, 3, ik) * Ac(3)
+-                  pik_Ac = gs%p_tm_matrix(ib, kb, 1, ik) * Ac(1) + &
+-                           gs%p_tm_matrix(ib, kb, 2, ik) * Ac(2) + &
+-                           gs%p_tm_matrix(ib, kb, 3, ik) * Ac(3)
+-                  pki_Ac = gs%p_tm_matrix(kb, ib, 1, ik) * Ac(1) + &
+-                           gs%p_tm_matrix(kb, ib, 2, ik) * Ac(2) + &
+-                           gs%p_tm_matrix(kb, ib, 3, ik) * Ac(3)
+-                  pjk_Ac = gs%p_tm_matrix(jb, kb, 1, ik) * Ac(1) + &
+-                           gs%p_tm_matrix(jb, kb, 2, ik) * Ac(2) + &
+-                           gs%p_tm_matrix(jb, kb, 3, ik) * Ac(3)
+-                  pkj_Ac = gs%p_tm_matrix(kb, jb, 1, ik) * Ac(1) + &
+-                           gs%p_tm_matrix(kb, jb, 2, ik) * Ac(2) + &
+-                           gs%p_tm_matrix(kb, jb, 3, ik) * Ac(3)
+-                  if(nb /= ib .and. nb /= jb .and. nb /= kb) then
+-                    if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
+-                       abs(gs%delta_omega(jb, nb, ik))> 1.d-3 .and. &
+-                       abs(gs%delta_omega(kb, nb, ik))> 1.d-3)then
+-                      tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
+-                                   sbe%rho(nb, nb, ik) / &
+-                                   gs%delta_omega(ib, nb, ik) / &
+-                                   gs%delta_omega(jb, nb, ik) / &
+-                                   gs%delta_omega(kb, nb, ik) * &
+-                                   dble(pji_Ac * ( pnk_Ac * ( pin(idir) * pkj_Ac + &
+-                                                              pkj(idir) * pin_Ac ) + &
+-                                                   pnk(idir) * pin_Ac * pkj_Ac ) + &
+-                                        pji(idir) * pin_Ac * pkj_Ac * pnk_Ac)
+-                    end if
+-                  end if
+-                end do
+-                if(nb /= ib .and. nb /= jb) then
+-                  if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
+-                     abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
+-                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
+-                                 sbe%rho(nb, nb, ik) * &
+-                                 (gs%delta_omega(ib, nb, ik) + gs%delta_omega(jb, nb, ik)) / &
+-                                 2.d0 / &
+-                                 gs%delta_omega(ib, nb, ik)**2 / &
+-                                 gs%delta_omega(jb, nb, ik)**2 * &
+-                                 (pji(idir) * pnn_Ac * pin_Ac * pnj_Ac + &
+-                                  pjn(idir) * pni_Ac * (pin_Ac * pnj_Ac + &
+-                                                        pnn_Ac * pij_Ac) + &
+-                                  pji_Ac * (pnn_Ac * (pin(idir) * pnj_Ac + &
+-                                                      pnj(idir) * pin_Ac) + &
+-                                            pnn(idir) * pin_Ac * pnj_Ac) + &
+-                                  pjn_Ac * (pni(idir) * ( pin_Ac * pnj_Ac + &
+-                                                          pnn_Ac * pij_Ac ) + &
+-                                            pni_Ac * (pij(idir) * pnn_Ac + &
+-                                                      pin(idir) * pnj_Ac + &
+-                                                      pnj(idir) * pin_Ac + &
+-                                                      pnn(idir) * pij_Ac)))
+-                  end if
+-                end if
+-              end do
+-            end do
+-          end do
+-        end do
+-      end do
+-      do ik = sbe%ik_min, sbe%ik_max
+-        do idir = 1, 3
+-          do nb = 1, sbe%nb
+-            pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
+-            pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
+-                     gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
+-                     gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
+-            sum1 = 0.d0
+-            do ib = 1, sbe%nb
+-              pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
+-              pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
+-              pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
+-                       gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
+-                       gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
+-              pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
+-                       gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
+-                       gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
+-              if(nb /= ib) then
+-                if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
+-                  sum1(idir) = sum1(idir) + &
+-                          (pni(idir) * pnn_Ac * pin_Ac + &
+-                           pni_Ac * (pin(idir) * pnn_Ac + &
+-                                    2.d0 * pnn(idir) * pin_Ac)) / &
+-                           gs%delta_omega(ib, nb, ik)**3
+-                end if
+-              end if
+-            end do
+-            tmp1(idir) = tmp1(idir) - gs%kweight(ik) * sbe%rho(nb, nb, ik) * pnn_Ac * sum1(idir)
+-          end do
+-        end do
+-      end do
+-    end if
+-
++    complex(8) :: tmp1(3), tmp(3)
++    call velocity_current_local(sbe, gs, Ac, norder_correction, tmp1)
+     call comm_summation(tmp1, tmp, 3, icomm)
+ 
+     jmat(:) = real(tmp(1:3)) / sum(gs%kweight(:)) / gs%volume
+@@ -335,79 +74,13 @@ end subroutine calc_current_bloch
+ 
+ 
+ subroutine dt_evolve_bloch(sbe, gs, Ac, dt)
+-    implicit none
+     type(s_sbe_bloch_solver), intent(inout) :: sbe
+     type(s_sbe_gs_info), intent(inout) :: gs
+-    real(8), intent(in) :: Ac(1:3)
+-    real(8), intent(in) :: dt
+-    complex(8), parameter :: zi = dcmplx(0d0, 1d0)
+-    integer :: nb, nk, ik
+-
+-    complex(8) :: hrho1_k(1:sbe%nb, 1:sbe%nb)
+-    complex(8) :: hrho2_k(1:sbe%nb, 1:sbe%nb)
+-    complex(8) :: hrho3_k(1:sbe%nb, 1:sbe%nb)
+-    complex(8) :: hrho4_k(1:sbe%nb, 1:sbe%nb)
+-    complex(8) :: p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3)
+-
+-    nb = sbe%nb 
+-    nk = sbe%nk
+-
+-    !$omp parallel do default(shared) private(ik, p_rvnl_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k)
+-    do ik = sbe%ik_min, sbe%ik_max
+-        p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
+-        if (sbe%flag_vnl_correction) then
+-            p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) =  p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) &
+-                & + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
+-        end if
+-
+-        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
+-        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, hrho2_k)
+-        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, hrho3_k)
+-        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, hrho4_k)
+-
+-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho1_k * (- zi * dt)
+-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
+-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
+-        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
+-    end do
+-    return
+-
+-contains
+-
+-
+-    !Calculate [H, rho] commutation:
+-    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
+-        implicit none
+-        integer, intent(in) :: ik
+-        complex(8), intent(in) :: rho_k(nb, nb)
+-        complex(8), intent(in) :: p_k(nb, nb, 1:3)
+-        complex(8), intent(out) :: hrho_k(nb, nb)
+-        integer :: idir
+-        !hrho = hrho + Ac(t) * (p * rho - rho * p)
+-        hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
+-        do idir=1, 3 !1:x, 2:y, 3:z
+-            ! hrho(1:nb, 1:nb, ik) = hrho(1:nb, 1:nb, ik) + Ac(idir) * (&
+-            ! & + matmul(gs%p_mod_matrix(1:nb, 1:nb, idir, ik), rho(1:nb, 1:nb, ik)) &
+-            ! & - matmul(rho(1:nb, 1:nb, ik), gs%p_mod_matrix(1:nb, 1:nb, idir, ik)) &
+-            ! & )
+-
+-            call ZGEMM("N","N", nb, nb, nb, &
+-                dcmplx(+Ac(idir), 0d0), &
+-                p_k(:, :, idir),nb, &
+-                rho_k(:, :), nb, &
+-                dcmplx(1d0, 0d0), hrho_k(:, :),nb)
+-
+-            call ZGEMM("N","N", nb, nb, nb, &
+-                dcmplx(-Ac(idir), 0d0), &
+-                rho_k(:, :), nb, &
+-                p_k(:, :, idir),nb, &
+-                dcmplx(1d0, 0d0), hrho_k(:, :), nb)
+-
+-        end do !idir
+-        return
+-    end subroutine calc_hrho_bloch_k
++    real(8), intent(in) :: Ac(3), dt
++    call velocity_evolve(sbe, gs, Ac, dt)
+ end subroutine
+ 
++
+ function calc_trace(sbe, gs, nb_max, icomm) result(tr)
+     use communication
+     use salmon_global
+diff --git a/src/ssbe/gs_info_ssbe.f90 b/src/ssbe/gs_info_ssbe.f90
+index cf5f06cb..1ca895f3 100644
+--- a/src/ssbe/gs_info_ssbe.f90
++++ b/src/ssbe/gs_info_ssbe.f90
+@@ -1,33 +1,11 @@
+ ! Ground State Date Storage Module:
+ 
+ module gs_info_ssbe
++    use sbe_types, only: s_sbe_gs_info
+     use math_constants, only: pi, zI
+     implicit none
+ 
+-    type s_sbe_gs_info
+-        !Lattice information
+-        real(8) :: a_matrix(1:3, 1:3)
+-        real(8) :: b_matrix(1:3, 1:3)
+-        real(8) :: volume
+-
+-        !Ground state (GS) electronic system information
+-        integer :: nk, nb, ne
+-        real(8), allocatable :: kpoint(:, :), kweight(:)
+-        real(8), allocatable :: eigen(:, :)
+-        real(8), allocatable :: occup(:, :)
+-        real(8), allocatable :: delta_omega(:, :, :)
+-        complex(8), allocatable :: p_mod_matrix(:, :, :, :)
+-        ! p_tm_matrix = <u|p|u>
+-        complex(8), allocatable :: p_tm_matrix(:, :, :, :)
+-        ! rvnl_tm_matrix = <u|-i[r, Vnl]|u>
+-        complex(8), allocatable :: rvnl_tm_matrix(:, :, :, :)
+-        complex(8), allocatable :: d_matrix(:, :, :, :)
+-        real(8), allocatable :: grad_k_eigen(:, :, :)
+-
+-        !k-space grid and geometry information
+-        !NOTE: prepred for uniformally distributed k-grid....
+-        !integer :: num_kgrid(1:3)
+-    end type
++
+ 
+ 
+ contains
+diff --git a/src/ssbe/sbe_types.f90 b/src/ssbe/sbe_types.f90
+new file mode 100644
+index 00000000..977d5353
+--- /dev/null
++++ b/src/ssbe/sbe_types.f90
+@@ -0,0 +1,42 @@
++! Shared state layout; no global calculation state.
++module sbe_types
++ implicit none
++    type s_sbe_gs_info
++        !Lattice information
++        real(8) :: a_matrix(1:3, 1:3)
++        real(8) :: b_matrix(1:3, 1:3)
++        real(8) :: volume
++
++        !Ground state (GS) electronic system information
++        integer :: nk, nb, ne
++        real(8), allocatable :: kpoint(:, :), kweight(:)
++        real(8), allocatable :: eigen(:, :)
++        real(8), allocatable :: occup(:, :)
++        real(8), allocatable :: delta_omega(:, :, :)
++        complex(8), allocatable :: p_mod_matrix(:, :, :, :)
++        ! p_tm_matrix = <u|p|u>
++        complex(8), allocatable :: p_tm_matrix(:, :, :, :)
++        ! rvnl_tm_matrix = <u|-i[r, Vnl]|u>
++        complex(8), allocatable :: rvnl_tm_matrix(:, :, :, :)
++        complex(8), allocatable :: d_matrix(:, :, :, :)
++        real(8), allocatable :: grad_k_eigen(:, :, :)
++
++        !k-space grid and geometry information
++        !NOTE: prepred for uniformally distributed k-grid....
++        !integer :: num_kgrid(1:3)
++    end type
++    type s_sbe_bloch_solver
++        !k-points for real-time SBE calculation
++        integer :: nk, nb
++        integer :: ik_max, ik_min
++        complex(8), allocatable :: rho(:, :, :)
++        logical :: flag_vnl_correction
++        complex(8), allocatable :: qnm(:, :, :)
++        complex(8), allocatable :: grad_qnm(:, :, :, :)
++        complex(8), allocatable :: qnm_new(:, :, :)
++        complex(8), allocatable :: dqnm_stock(:, :, :, :)
++        complex(8), allocatable :: dnm_i(:, :, :, :)
++        real(8), allocatable    :: abs_dnm(:, :, :)
++        complex(8), allocatable :: exp_iphi(:, :, :)
++    end type
++end module
+diff --git a/src/ssbe/sbe_velocity_kernel.f90 b/src/ssbe/sbe_velocity_kernel.f90
+new file mode 100644
+index 00000000..5e45d088
+--- /dev/null
++++ b/src/ssbe/sbe_velocity_kernel.f90
+@@ -0,0 +1,341 @@
++! Extracted from bloch_solver_ssbe: preserve arithmetic and loop order.
++module sbe_velocity_kernel
++ use sbe_types
++ implicit none
++ private
++ public :: velocity_evolve, velocity_current_local
++contains
++subroutine velocity_current_local(sbe, gs, Ac, norder_correction, tmp1)
++    implicit none
++    type(s_sbe_bloch_solver), intent(in) :: sbe
++    type(s_sbe_gs_info), intent(in) :: gs
++    real(8), intent(in) :: Ac(1:3)
++    complex(8), intent(out) :: tmp1(3)
++    integer, intent(in) :: norder_correction
++    integer :: ik, idir, ib, jb, kb, nb, ierr
++    complex(8) :: sum1(1:3)
++    complex(8) :: pnn(1:3),pni(1:3),pin(1:3)
++    complex(8) :: pnj(1:3),pjn(1:3),pnk(1:3),pkn(1:3)
++    complex(8) :: pij(1:3),pji(1:3),pik(1:3),pki(1:3),pjk(1:3),pkj(1:3)
++    complex(8) :: pnn_Ac,pni_Ac,pin_Ac
++    complex(8) :: pnj_Ac,pjn_Ac,pnk_Ac,pkn_Ac
++    complex(8) :: pij_Ac,pji_Ac,pik_Ac,pki_Ac,pjk_Ac,pkj_Ac
++
++    tmp1(1:3) = 0d0
++
++    !$omp parallel do default(shared) private(ik,ib,jb,idir) reduction(+:tmp1)
++    do ik = sbe%ik_min, sbe%ik_max
++        do idir = 1, 3
++            do ib = 1, sbe%nb
++                do jb = 1, sbe%nb
++                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
++                        & gs%p_tm_matrix(ib, jb, idir, ik) &
++                    & )
++                    if (sbe%flag_vnl_correction) then
++                        tmp1(idir) = tmp1(idir) + gs%kweight(ik) * sbe%rho(jb, ib, ik) * ( &
++                            & gs%rvnl_tm_matrix(ib, jb, idir, ik) &
++                        & )
++                    endif
++                end do
++            end do
++        end do
++    end do
++    !$omp end parallel do
++
++    if(norder_correction>=1)then
++        do ik = sbe%ik_min, sbe%ik_max
++            do idir = 1, 3
++                do nb = 1, gs%ne/2
++                    do ib = 1, sbe%nb
++                        pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
++                        pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
++                                 gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
++                                 gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
++                        if (sbe%flag_vnl_correction) then
++                            ! Consideration of nonlocal momentum components
++                            pin(idir) = pin(idir) &
++                                + gs%rvnl_tm_matrix(ib, nb, idir, ik)
++                            pni_Ac = pni_Ac &
++                                + gs%rvnl_tm_matrix(nb, ib, 1, ik) * Ac(1) &
++                                + gs%rvnl_tm_matrix(nb, ib, 2, ik) * Ac(2) &
++                                + gs%rvnl_tm_matrix(nb, ib, 3, ik) * Ac(3)
++                        end if
++                        if(nb /= ib) then
++                            if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
++                                ! Bug fix: sign problem
++                                tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
++                                    2.d0 * gs%occup(nb, ik) * &
++                                    dble(pni_Ac*pin(idir)) / gs%delta_omega(ib, nb, ik)
++                            end if
++                        end if
++                    end do
++                end do
++            end do
++        end do
++    end if
++
++    if(norder_correction>=2)then
++        do ik = sbe%ik_min, sbe%ik_max
++            do idir = 1, 3
++                do nb = 1, sbe%nb
++                    pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
++                    pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
++                             gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
++                             gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
++                    do ib = 1, sbe%nb
++                        pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
++                        pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
++                                 gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
++                                 gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
++                        pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
++                                 gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
++                                 gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
++                        do jb = 1, sbe%nb
++                            pjn(idir) = gs%p_tm_matrix(jb, nb, idir, ik)
++                            pij(idir) = gs%p_tm_matrix(ib, jb, idir, ik)
++                            pij_Ac = gs%p_tm_matrix(ib, jb, 1, ik) * Ac(1) + &
++                                     gs%p_tm_matrix(ib, jb, 2, ik) * Ac(2) + &
++                                     gs%p_tm_matrix(ib, jb, 3, ik) * Ac(3)
++                            pjn_Ac = gs%p_tm_matrix(jb, nb, 1, ik) * Ac(1) + &
++                                     gs%p_tm_matrix(jb, nb, 2, ik) * Ac(2) + &
++                                     gs%p_tm_matrix(jb, nb, 3, ik) * Ac(3)
++                            if(nb /= ib .and. nb /= jb) then
++                                if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
++                                   abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
++                                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
++                                        sbe%rho(nb, nb, ik) / &
++                                        gs%delta_omega(ib, nb, ik) / &
++                                        gs%delta_omega(jb, nb, ik) * &
++                                        (pjn(idir) * pij_Ac * pni_Ac &
++                                       + pjn_Ac * (pij(idir) * pni_Ac  + pni(idir) * pij_Ac))
++                                end if
++                            end if
++                        end do
++                        if(nb /= ib) then
++                            if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
++                                tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
++                                    sbe%rho(nb, nb, ik) * &
++                                    (2.d0 * pnn_Ac * dble(pni(idir) * pin_Ac) + &
++                                    pnn(idir)*abs(pni_Ac)**2) / &
++                                    gs%delta_omega(ib, nb, ik)**2
++                            end if
++                        end if
++                    end do
++                end do
++            end do
++        end do
++    end if
++
++    if(norder_correction>=3)then
++      do ik = sbe%ik_min, sbe%ik_max
++        do idir = 1, 3
++          do nb = 1, sbe%nb
++            pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
++            pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
++                     gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
++                     gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
++            do ib = 1, sbe%nb
++              pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
++              pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
++              pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
++                       gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
++                       gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
++              pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
++                       gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
++                       gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
++              do jb = 1, sbe%nb
++                pnj(idir) = gs%p_tm_matrix(nb, jb, idir, ik)
++                pjn(idir) = gs%p_tm_matrix(jb, nb, idir, ik)
++                pij(idir) = gs%p_tm_matrix(ib, jb, idir, ik)
++                pji(idir) = gs%p_tm_matrix(jb, ib, idir, ik)
++                pnj_Ac = gs%p_tm_matrix(nb, jb, 1, ik) * Ac(1) + &
++                         gs%p_tm_matrix(nb, jb, 2, ik) * Ac(2) + &
++                         gs%p_tm_matrix(nb, jb, 3, ik) * Ac(3)
++                pjn_Ac = gs%p_tm_matrix(jb, nb, 1, ik) * Ac(1) + &
++                         gs%p_tm_matrix(jb, nb, 2, ik) * Ac(2) + &
++                         gs%p_tm_matrix(jb, nb, 3, ik) * Ac(3)
++                pij_Ac = gs%p_tm_matrix(ib, jb, 1, ik) * Ac(1) + &
++                         gs%p_tm_matrix(ib, jb, 2, ik) * Ac(2) + &
++                         gs%p_tm_matrix(ib, jb, 3, ik) * Ac(3)
++                pji_Ac = gs%p_tm_matrix(jb, ib, 1, ik) * Ac(1) + &
++                         gs%p_tm_matrix(jb, ib, 2, ik) * Ac(2) + &
++                         gs%p_tm_matrix(jb, ib, 3, ik) * Ac(3)
++                do kb = 1, sbe%nb
++                  pnk(idir) = gs%p_tm_matrix(nb, kb, idir, ik)
++                  pkn(idir) = gs%p_tm_matrix(kb, nb, idir, ik)
++                  pik(idir) = gs%p_tm_matrix(ib, kb, idir, ik)
++                  pki(idir) = gs%p_tm_matrix(kb, ib, idir, ik)
++                  pjk(idir) = gs%p_tm_matrix(jb, kb, idir, ik)
++                  pkj(idir) = gs%p_tm_matrix(kb, jb, idir, ik)
++                  pnk_Ac = gs%p_tm_matrix(nb, kb, 1, ik) * Ac(1) + &
++                           gs%p_tm_matrix(nb, kb, 2, ik) * Ac(2) + &
++                           gs%p_tm_matrix(nb, kb, 3, ik) * Ac(3)
++                  pkn_Ac = gs%p_tm_matrix(kb, nb, 1, ik) * Ac(1) + &
++                           gs%p_tm_matrix(kb, nb, 2, ik) * Ac(2) + &
++                           gs%p_tm_matrix(kb, nb, 3, ik) * Ac(3)
++                  pik_Ac = gs%p_tm_matrix(ib, kb, 1, ik) * Ac(1) + &
++                           gs%p_tm_matrix(ib, kb, 2, ik) * Ac(2) + &
++                           gs%p_tm_matrix(ib, kb, 3, ik) * Ac(3)
++                  pki_Ac = gs%p_tm_matrix(kb, ib, 1, ik) * Ac(1) + &
++                           gs%p_tm_matrix(kb, ib, 2, ik) * Ac(2) + &
++                           gs%p_tm_matrix(kb, ib, 3, ik) * Ac(3)
++                  pjk_Ac = gs%p_tm_matrix(jb, kb, 1, ik) * Ac(1) + &
++                           gs%p_tm_matrix(jb, kb, 2, ik) * Ac(2) + &
++                           gs%p_tm_matrix(jb, kb, 3, ik) * Ac(3)
++                  pkj_Ac = gs%p_tm_matrix(kb, jb, 1, ik) * Ac(1) + &
++                           gs%p_tm_matrix(kb, jb, 2, ik) * Ac(2) + &
++                           gs%p_tm_matrix(kb, jb, 3, ik) * Ac(3)
++                  if(nb /= ib .and. nb /= jb .and. nb /= kb) then
++                    if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
++                       abs(gs%delta_omega(jb, nb, ik))> 1.d-3 .and. &
++                       abs(gs%delta_omega(kb, nb, ik))> 1.d-3)then
++                      tmp1(idir) = tmp1(idir) - gs%kweight(ik) * &
++                                   sbe%rho(nb, nb, ik) / &
++                                   gs%delta_omega(ib, nb, ik) / &
++                                   gs%delta_omega(jb, nb, ik) / &
++                                   gs%delta_omega(kb, nb, ik) * &
++                                   dble(pji_Ac * ( pnk_Ac * ( pin(idir) * pkj_Ac + &
++                                                              pkj(idir) * pin_Ac ) + &
++                                                   pnk(idir) * pin_Ac * pkj_Ac ) + &
++                                        pji(idir) * pin_Ac * pkj_Ac * pnk_Ac)
++                    end if
++                  end if
++                end do
++                if(nb /= ib .and. nb /= jb) then
++                  if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3 .and. &
++                     abs(gs%delta_omega(jb, nb, ik))> 1.d-3)then
++                    tmp1(idir) = tmp1(idir) + gs%kweight(ik) * &
++                                 sbe%rho(nb, nb, ik) * &
++                                 (gs%delta_omega(ib, nb, ik) + gs%delta_omega(jb, nb, ik)) / &
++                                 2.d0 / &
++                                 gs%delta_omega(ib, nb, ik)**2 / &
++                                 gs%delta_omega(jb, nb, ik)**2 * &
++                                 (pji(idir) * pnn_Ac * pin_Ac * pnj_Ac + &
++                                  pjn(idir) * pni_Ac * (pin_Ac * pnj_Ac + &
++                                                        pnn_Ac * pij_Ac) + &
++                                  pji_Ac * (pnn_Ac * (pin(idir) * pnj_Ac + &
++                                                      pnj(idir) * pin_Ac) + &
++                                            pnn(idir) * pin_Ac * pnj_Ac) + &
++                                  pjn_Ac * (pni(idir) * ( pin_Ac * pnj_Ac + &
++                                                          pnn_Ac * pij_Ac ) + &
++                                            pni_Ac * (pij(idir) * pnn_Ac + &
++                                                      pin(idir) * pnj_Ac + &
++                                                      pnj(idir) * pin_Ac + &
++                                                      pnn(idir) * pij_Ac)))
++                  end if
++                end if
++              end do
++            end do
++          end do
++        end do
++      end do
++      do ik = sbe%ik_min, sbe%ik_max
++        do idir = 1, 3
++          do nb = 1, sbe%nb
++            pnn(idir) = gs%p_tm_matrix(nb, nb, idir, ik)
++            pnn_Ac = gs%p_tm_matrix(nb, nb, 1, ik) * Ac(1) + &
++                     gs%p_tm_matrix(nb, nb, 2, ik) * Ac(2) + &
++                     gs%p_tm_matrix(nb, nb, 3, ik) * Ac(3)
++            sum1 = 0.d0
++            do ib = 1, sbe%nb
++              pni(idir) = gs%p_tm_matrix(nb, ib, idir, ik)
++              pin(idir) = gs%p_tm_matrix(ib, nb, idir, ik)
++              pni_Ac = gs%p_tm_matrix(nb, ib, 1, ik) * Ac(1) + &
++                       gs%p_tm_matrix(nb, ib, 2, ik) * Ac(2) + &
++                       gs%p_tm_matrix(nb, ib, 3, ik) * Ac(3)
++              pin_Ac = gs%p_tm_matrix(ib, nb, 1, ik) * Ac(1) + &
++                       gs%p_tm_matrix(ib, nb, 2, ik) * Ac(2) + &
++                       gs%p_tm_matrix(ib, nb, 3, ik) * Ac(3)
++              if(nb /= ib) then
++                if(abs(gs%delta_omega(ib, nb, ik))> 1.d-3)then
++                  sum1(idir) = sum1(idir) + &
++                          (pni(idir) * pnn_Ac * pin_Ac + &
++                           pni_Ac * (pin(idir) * pnn_Ac + &
++                                    2.d0 * pnn(idir) * pin_Ac)) / &
++                           gs%delta_omega(ib, nb, ik)**3
++                end if
++              end if
++            end do
++            tmp1(idir) = tmp1(idir) - gs%kweight(ik) * sbe%rho(nb, nb, ik) * pnn_Ac * sum1(idir)
++          end do
++        end do
++      end do
++    end if
++
++end subroutine
++
++subroutine velocity_evolve(sbe, gs, Ac, dt)
++    implicit none
++    type(s_sbe_bloch_solver), intent(inout) :: sbe
++    type(s_sbe_gs_info), intent(inout) :: gs
++    real(8), intent(in) :: Ac(1:3)
++    real(8), intent(in) :: dt
++    complex(8), parameter :: zi = dcmplx(0d0, 1d0)
++    integer :: nb, nk, ik
++
++    complex(8) :: hrho1_k(1:sbe%nb, 1:sbe%nb)
++    complex(8) :: hrho2_k(1:sbe%nb, 1:sbe%nb)
++    complex(8) :: hrho3_k(1:sbe%nb, 1:sbe%nb)
++    complex(8) :: hrho4_k(1:sbe%nb, 1:sbe%nb)
++    complex(8) :: p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3)
++
++    nb = sbe%nb 
++    nk = sbe%nk
++
++    !$omp parallel do default(shared) private(ik, p_rvnl_k, hrho1_k, hrho2_k, hrho3_k, hrho4_k)
++    do ik = sbe%ik_min, sbe%ik_max
++        p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) = gs%p_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
++        if (sbe%flag_vnl_correction) then
++            p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) =  p_rvnl_k(1:sbe%nb, 1:sbe%nb, 1:3) &
++                & + gs%rvnl_tm_matrix(1:sbe%nb, 1:sbe%nb, 1:3, ik)
++        end if
++
++        call calc_hrho_bloch_k(ik, sbe%rho(:, :, ik), p_rvnl_k, hrho1_k)
++        call calc_hrho_bloch_k(ik, hrho1_k, p_rvnl_k, hrho2_k)
++        call calc_hrho_bloch_k(ik, hrho2_k, p_rvnl_k, hrho3_k)
++        call calc_hrho_bloch_k(ik, hrho3_k, p_rvnl_k, hrho4_k)
++
++        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho1_k * (- zi * dt)
++        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho2_k * (- zi * dt) ** 2 * (1d0 / 2d0)
++        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho3_k * (- zi * dt) ** 3 * (1d0 / 6d0)
++        sbe%rho(:, :, ik) = sbe%rho(:, :, ik) + hrho4_k * (- zi * dt) ** 4 * (1d0 / 24d0)
++    end do
++    return
++
++contains
++
++
++    !Calculate [H, rho] commutation:
++    subroutine calc_hrho_bloch_k(ik, rho_k, p_k, hrho_k)
++        implicit none
++        integer, intent(in) :: ik
++        complex(8), intent(in) :: rho_k(nb, nb)
++        complex(8), intent(in) :: p_k(nb, nb, 1:3)
++        complex(8), intent(out) :: hrho_k(nb, nb)
++        integer :: idir
++        !hrho = hrho + Ac(t) * (p * rho - rho * p)
++        hrho_k(1:nb, 1:nb) = gs%delta_omega(1:nb, 1:nb, ik) * rho_k(1:nb, 1:nb)
++        do idir=1, 3 !1:x, 2:y, 3:z
++            ! hrho(1:nb, 1:nb, ik) = hrho(1:nb, 1:nb, ik) + Ac(idir) * (&
++            ! & + matmul(gs%p_mod_matrix(1:nb, 1:nb, idir, ik), rho(1:nb, 1:nb, ik)) &
++            ! & - matmul(rho(1:nb, 1:nb, ik), gs%p_mod_matrix(1:nb, 1:nb, idir, ik)) &
++            ! & )
++
++            call ZGEMM("N","N", nb, nb, nb, &
++                dcmplx(+Ac(idir), 0d0), &
++                p_k(:, :, idir),nb, &
++                rho_k(:, :), nb, &
++                dcmplx(1d0, 0d0), hrho_k(:, :),nb)
++
++            call ZGEMM("N","N", nb, nb, nb, &
++                dcmplx(-Ac(idir), 0d0), &
++                rho_k(:, :), nb, &
++                p_k(:, :, idir),nb, &
++                dcmplx(1d0, 0d0), hrho_k(:, :), nb)
++
++        end do !idir
++        return
++    end subroutine calc_hrho_bloch_k
++end subroutine
++
++end module
+diff --git a/tools/check_forbidden_eigensolvers.py b/tools/check_forbidden_eigensolvers.py
+new file mode 100644
+index 00000000..48d6d568
+--- /dev/null
++++ b/tools/check_forbidden_eigensolvers.py
+@@ -0,0 +1,132 @@
++#!/usr/bin/env python3
++"""Fail closed on prohibited PZHEEV references; PZHEEVD is allowed."""
++import argparse
++import os
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++SYMBOL = re.compile(r'(?<![A-Za-z0-9_])_?pzheev_?(?![A-Za-z0-9_])', re.I)
++SUFFIXES = {'.f', '.f90', '.f95', '.f03', '.for', '.c', '.cc', '.cpp', '.h', '.hpp'}
++
++def fortran_code(text, fixed=False, literals=False):
++    result = []
++    for line in text.splitlines():
++        if fixed and line and line[0] in 'cC*!':
++            continue
++        out = []; quote = None; i = 0
++        while i < len(line):
++            c = line[i]
++            if quote:
++                if literals: out.append(c)
++                if c == quote:
++                    if i + 1 < len(line) and line[i+1] == quote:
++                        if literals: out.append(line[i+1])
++                        i += 2; continue
++                    quote = None
++            elif c in "\"'":
++                quote = c
++                if literals: out.append(c)
++            elif c == '!':
++                break
++            else:
++                out.append(c)
++            i += 1
++        result.append(''.join(out))
++    return re.sub(r'&[ \t]*\n[ \t]*&?', '', '\n'.join(result))
++
++def strict_files(root):
++    def fail(error):
++        raise error
++    for directory, dirs, files in os.walk(str(root), onerror=fail):
++        for name in dirs:
++            if Path(directory, name).is_symlink():
++                raise RuntimeError('directory symlink cannot be verified: ' + str(Path(directory, name)))
++        for name in sorted(files):
++            yield Path(directory, name)
++
++def dynamic_reference(code):
++    # Tokenize strings as indivisible tokens so documentation cannot look like code.
++    tokens = re.findall(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_][A-Za-z_0-9]*|[()]', code)
++    for i, token in enumerate(tokens[:-1]):
++        if token.lower() not in {'bind', 'dlsym'} or tokens[i+1] != '(':
++            continue
++        depth = 0
++        for item in tokens[i+1:]:
++            if item == '(': depth += 1
++            elif item == ')':
++                depth -= 1
++                if depth == 0: break
++            elif item[:1] in {'"', "'"} and SYMBOL.fullmatch(item[1:-1]):
++                return True
++    return False
++
++def source_findings(root):
++    root = Path(root)
++    if not root.is_dir():
++        raise RuntimeError('source root does not exist: ' + str(root))
++    hits = []
++    for p in strict_files(root):
++        if p.suffix.lower() not in SUFFIXES or not p.is_file():
++            continue
++        if getattr(p.stat(), 'st_flags', 0) & 0x40000000:
++            raise RuntimeError('cloud-only source cannot be verified: ' + str(p))
++        text = p.read_text(encoding='utf-8')
++        if p.suffix.lower() in {'.f', '.f90', '.f95', '.f03', '.for'}:
++            fixed = p.suffix.lower() in {'.f', '.for'}
++            preserved = fortran_code(text, fixed, literals=True)
++            code = fortran_code(text, fixed)
++        else:
++            lexical = r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
++            preserved = re.sub(lexical, lambda m: '' if m.group().startswith(('/',)) else m.group(), text, flags=re.S)
++            code = re.sub(lexical, '', text, flags=re.S)
++        bindings = dynamic_reference(preserved)
++        if SYMBOL.search(code) or bindings:
++            hits.append(str(p))
++    return hits
++
++def object_findings(paths):
++    hits = []
++    for p in paths:
++        result = subprocess.run(['nm', '-u', str(p)], stdout=subprocess.PIPE,
++                                stderr=subprocess.PIPE, universal_newlines=True)
++        if result.returncode:
++            raise RuntimeError('cannot inspect object ' + str(p) + ': ' + result.stderr.strip())
++        if any(SYMBOL.fullmatch(line.split()[-1]) for line in result.stdout.splitlines() if line.split()):
++            hits.append(str(p))
++    return hits
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--source-root', type=Path)
++    parser.add_argument('--object-tree', type=Path)
++    parser.add_argument('--built-executable', type=Path, help='new build output to make non-executable if inspection fails')
++    args = parser.parse_args()
++    if not args.source_root and not args.object_tree:
++        parser.error('provide --source-root or --object-tree')
++    def quarantine():
++        if args.built_executable and args.built_executable.exists():
++            args.built_executable.chmod(args.built_executable.stat().st_mode & ~0o111)
++    try:
++        hits = source_findings(args.source_root) if args.source_root else []
++        if args.object_tree:
++            if not args.object_tree.is_dir():
++                raise RuntimeError('object tree does not exist: ' + str(args.object_tree))
++            objects = sorted(p for p in strict_files(args.object_tree) if p.suffix.lower() in {'.o', '.obj'})
++            if not objects:
++                raise RuntimeError('no application objects found: ' + str(args.object_tree))
++            hits += object_findings(objects)
++        if hits:
++            quarantine()
++            print('ERROR: PZHEEV is prohibited. Use a validated PZHEEVD implementation.\n' + '\n'.join(hits), file=sys.stderr)
++            return 1
++        print('PZHEEV prohibition check PASS')
++        return 0
++    except (OSError, UnicodeError, RuntimeError) as exc:
++        quarantine()
++        print('ERROR: prohibition check could not verify safety: ' + str(exc), file=sys.stderr)
++        return 2
++
++if __name__ == '__main__':
++    sys.exit(main())
+diff --git a/tools/pzheev_guard.cmake b/tools/pzheev_guard.cmake
+new file mode 100644
+index 00000000..90aa5759
+--- /dev/null
++++ b/tools/pzheev_guard.cmake
+@@ -0,0 +1,23 @@
++# User policy: PZHEEV is prohibited, including workspace-query calls.
++find_package(Python3 COMPONENTS Interpreter REQUIRED)
++set(SALMON_EIGENSOLVER_GUARD "${PROJECT_SOURCE_DIR}/tools/check_forbidden_eigensolvers.py")
++execute_process(
++  COMMAND "${Python3_EXECUTABLE}" "${SALMON_EIGENSOLVER_GUARD}"
++          --source-root "${PROJECT_SOURCE_DIR}/src"
++  RESULT_VARIABLE _salmon_guard_result)
++if(NOT _salmon_guard_result EQUAL 0)
++  message(FATAL_ERROR "PZHEEV prohibition check failed; configure/build is blocked.")
++endif()
++add_custom_target(salmon_check_forbidden_eigensolvers ALL
++  COMMAND "${Python3_EXECUTABLE}" "${SALMON_EIGENSOLVER_GUARD}"
++          --source-root "${PROJECT_SOURCE_DIR}/src"
++  VERBATIM)
++function(salmon_guard_eigensolver_target target)
++  add_dependencies(${target} salmon_check_forbidden_eigensolvers)
++  # Only application objects, not vendor archives that export unused routines.
++  add_custom_command(TARGET ${target} POST_BUILD
++    COMMAND "${Python3_EXECUTABLE}" "${SALMON_EIGENSOLVER_GUARD}"
++            --object-tree "${CMAKE_CURRENT_BINARY_DIR}"
++            --built-executable "$<TARGET_FILE:${target}>"
++    VERBATIM)
++endfunction()

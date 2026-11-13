@@ -12,7 +12,7 @@ E,Hを扱うFDTDとA駆動の結晶の間には結合処理を置きます。単
 
 ## 今回利用できるFortran境界
 
-`src/maxwell/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `testsuites/unit_ld/test_ld.f90` と `src/maxwell/fdtd_eh.f90` を参照してください。
+`native/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `tests/native/test_ld.f90` と `src/maxwell/fdtd_eh.f90` を参照してください。
 
 `ld_coefficients` の累積先は呼び出し前にゼロ初期化します。`ld_store_old` と `ld_update` は既存演算順を保つため分割E成分を受け取ります。`rj*_fdtd_ld` は物理電流の単純和ではなく補助量Qです。
 
@@ -26,7 +26,7 @@ LDは電流を返すだけでは分離できません。E更新係数への寄�
 
 ## 検証と禁止事項
 
-ビルド前に `python tools/check_forbidden_eigensolvers.py --source-root src` を実行します。構成・増分ビルド時の検査を外しません。新規実行ファイルは全アプリケーションオブジェクトを検査し、再利用時は記録されたSHA256と照合します。禁止された固有値ドライバーへのフォールバックはありません。PZHEEVDの検証には固有値、残差、直交性、ワークスペース容量を含めます。
+ビルド前に `python tools/check_forbidden_eigensolvers.py --source-root native` を実行します。構成・増分ビルド時の検査を外しません。新規実行ファイルは全アプリケーションオブジェクトを検査し、再利用時は記録されたSHA256と照合します。禁止された固有値ドライバーへのフォールバックはありません。PZHEEVDの検証には固有値、残差、直交性、ワークスペース容量を含めます。
 
 IEEE判定は各要素へのスカラー呼び出しに限定します。GSデータを収集しません。計算結果は利用者が指定した書き込み可能な出力先へ保存し、コードツリーに格納しません。
 
@@ -123,3 +123,5 @@ manual.jsonの `beginner_intake` を必ず適用します。新しい計算を�
 外部SALMONの `hash_matches` を機能対応や実行成功と読み替えないでください。
 `manual.search` は常に `getting_started` と `task_catalog` を返します。一致しない検索語では
 目的別一覧を示して目的を確認し、対応不能とは即断しません。
+
+本リポジトリはSALMONpy専用です。本体のsrcパスは `runtime/README.md` の手順で準備した外部ツリーを指します。SALMON本体を本リポジトリへ復元・同梱しないでください。

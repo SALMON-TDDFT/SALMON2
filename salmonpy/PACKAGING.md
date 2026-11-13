@@ -1,5 +1,10 @@
 # LD and SBE wheels
 
+> Standalone layout: full SALMON sources are no longer bundled. Source-checkout
+> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
+> the pinned external upstream checkout. Historical validation commands below
+> describe the old source layout and are not current build instructions.
+
 The package uses scikit-build-core and a separate CMake project. LD and velocity-gauge SBE kernels, C ABI adapters and Python APIs are installed.
 The SALMON executable and MPI are not required. SBE links system Accelerate on
 macOS and bundled OpenBLAS on Linux/Windows. Source builds on Linux/Windows
@@ -167,4 +172,4 @@ These are configured checks; historical runs above do not certify the current re
 
 SALMONpy is intended for a separate repository, not a merge into the SALMON main
 repository. Native source provenance and full-executable compatibility must be
-preserved when moving it. The current source layout still includes SALMON sources.
+preserved when moving it. Only the three LD/SBE kernels are bundled in native/. Full SALMON source is prepared externally from runtime/source.json and its compatibility patch.

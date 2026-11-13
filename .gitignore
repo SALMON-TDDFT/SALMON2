@@ -109,3 +109,8 @@ __pycache__/
 *.pyc
 /dist/
 /wheelhouse/
+
+# External runtime source/builds must remain outside package distributions
+/upstream-salmon/
+/runtime-build/
+/build/

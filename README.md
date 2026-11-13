@@ -1,34 +1,41 @@
-# SALMON: Scalable Ab-initio Light-Matter simulator for Optics and Nanoscience
+# SALMONpy
 
-SALMON is an open-source software based on first-principles time-dependent density functional theory
-to describe optical responses and electron dynamics in matters induced by light electromagnetic fields.
+Python components for material response, electronic dynamics, electromagnetic
+simulation and visualization. This repository is being prepared for independent
+SALMONpy distribution; it is not a SALMON application source checkout.
 
-SALMON has been tested and optimized to run in the following supercomputer platforms:
+- [English guide](salmonpy/README.en.md) · [日本語ガイド](salmonpy/README.md)
+- [Python examples](salmonpy/examples/README.en.md) · [サンプル集](salmonpy/examples/README.md)
+- [Optional full SALMON runtime](runtime/README.md)
+- [AI task catalog](salmonpy/manual.json)
 
-- K-computer (It is scheduled to be permanently shut down at the end of August, 2019)
-- Fujitsu FX100 supercomputer system
-- Fujitsu supercomputer (Fugaku, FX1000, FX700) with A64FX processor
-- Linux PC Cluster with Intel Xeon Phi (Knights Landing architecture)
-- Linux PC Cluster with x86-64 CPU
+The wheel bundles only the LD/SBE native kernels. DFT, TDDFT, bands and FDTD use
+a separately built compatible SALMON executable. No compilation occurs on import.
 
-For more information, please visit our website.
+## Repository layout
 
-http://salmon-tddft.jp/
+| Directory | Purpose |
+|---|---|
+| `salmonpy/` | Python APIs, C ABI wrappers, examples, bilingual guides and tests |
+| `native/` | Three shared LD/SBE Fortran kernel files |
+| `packaging/` | Wheel build/repair configuration and runtime license notices |
+| `runtime/` | Pinned upstream revision and compatibility patch for optional full SALMON |
+| `tests/native/` | Independent numerical reference routines and native checks |
+| `tools/` | SALMONpy packaging, runtime preparation and integration checks |
+| `docs/` | Design and validation history; older source paths describe past layouts |
 
-## License
+## Developer checks
 
-SALMON is available under Apache License version 2.0.
+```sh
+python -m salmonpy.build_native
+python -m unittest discover -s salmonpy/tests -v
+python tools/test_ld_packaging.py
+python tools/check_forbidden_eigensolvers.py --source-root native
+```
 
-    Copyright 2017-2026 SALMON developers
+Use `python -m build` for source/wheel distribution; see
+[packaging](salmonpy/PACKAGING.md) for compilers, BLAS and wheel repair.
+Do not commit build products, ground states or visualization datasets.
 
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
+SALMONpy is derived from SALMON (Apache-2.0). See [LICENSE](LICENSE),
+[NOTICE](NOTICE) and [third-party notices](LICENSE.THIRD-PARTY).

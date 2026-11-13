@@ -1,5 +1,10 @@
 # SALMONpy — getting started
 
+> Standalone layout: full SALMON sources are no longer bundled. Source-checkout
+> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
+> the pinned external upstream checkout. Historical validation commands below
+> describe the old source layout and are not current build instructions.
+
 [日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`
 
 SALMONpy provides independent material-response and analysis components. It is a

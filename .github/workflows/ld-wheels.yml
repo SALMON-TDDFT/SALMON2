@@ -2,9 +2,9 @@ name: LD wheels
 on:
   workflow_dispatch:
   push:
-    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'src/maxwell/lorentz_drude.f90', 'src/ssbe/**', '.github/workflows/ld-wheels.yml']
+    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', '.github/workflows/ld-wheels.yml']
   pull_request:
-    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'src/maxwell/lorentz_drude.f90', 'src/ssbe/**', '.github/workflows/ld-wheels.yml']
+    paths: ['salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', '.github/workflows/ld-wheels.yml']
 permissions:
   contents: read
 jobs:

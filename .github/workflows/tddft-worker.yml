@@ -2,7 +2,7 @@ name: TDDFT native worker
 on:
   workflow_dispatch:
   push:
-    paths: ['salmonpy/**', 'src/**', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
+    paths: ['salmonpy/**', 'native/**', 'runtime/**', 'tools/prepare_salmon_runtime.py', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
 permissions:
   contents: read
 jobs:
@@ -17,11 +17,21 @@ jobs:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev
       - run: python -m pip install numpy
+      - name: Obtain pinned upstream SALMON source
+        uses: actions/checkout@v4
+        with:
+          repository: SALMON-TDDFT/SALMON2
+          ref: 3322d0561c0cad5180679136b3eddbe8b909487c
+          path: upstream-salmon
+      - name: Test runtime preparation
+        run: python tools/test_runtime_preparation.py upstream-salmon
+      - name: Prepare optional external runtime
+        run: python tools/prepare_salmon_runtime.py upstream-salmon "$RUNNER_TEMP/salmon-runtime"
       - name: Build and audit current executable
         shell: bash
         run: |
-          python tools/check_forbidden_eigensolvers.py --source-root src
-          cmake -S . -B "$RUNNER_TEMP/build-current" -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_C_COMPILER=gcc -DOPENMP_FLAGS=-fopenmp -DCMAKE_BUILD_TYPE=Release '-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch' -DBLA_VENDOR=OpenBLAS
+          python tools/check_forbidden_eigensolvers.py --source-root "$RUNNER_TEMP/salmon-runtime/src"
+          cmake -S "$RUNNER_TEMP/salmon-runtime" -B "$RUNNER_TEMP/build-current" -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_C_COMPILER=gcc -DOPENMP_FLAGS=-fopenmp -DCMAKE_BUILD_TYPE=Release '-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch' -DBLA_VENDOR=OpenBLAS
           cmake --build "$RUNNER_TEMP/build-current" --target salmon -j 2
           python tools/check_forbidden_eigensolvers.py --object-tree "$RUNNER_TEMP/build-current/src"
       # Adapter equivalence: ordinary and worker paths of the same audited build.
@@ -30,6 +40,7 @@ jobs:
         env:
           PYTHONPATH: .
           OPENBLAS_NUM_THREADS: '1'
+          SALMONPY_RUNTIME_SOURCE: ${{ runner.temp }}/salmon-runtime
         run: |
           python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/build-current/salmon" "$RUNNER_TEMP/build-current/salmon" "$RUNNER_TEMP/tddft-regression"
           SALMONPY_TEST_PC=y python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/build-current/salmon" "$RUNNER_TEMP/build-current/salmon" "$RUNNER_TEMP/tddft-predictor"

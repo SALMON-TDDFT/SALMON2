@@ -1,7 +1,8 @@
 """Compile the actual band path code against minimal types; test skew basis/padding."""
 from pathlib import Path
-import os,shutil,subprocess,tempfile
-root=Path(__file__).resolve().parents[1]
+import os,shutil,subprocess,tempfile,sys
+if len(sys.argv)!=2: raise SystemExit('usage: python tools/test_band_path_native.py PREPARED_RUNTIME_SOURCE')
+root=Path(sys.argv[1]).resolve()
 compiler=shutil.which(os.environ.get('FC','gfortran'))
 if compiler is None: raise SystemExit('gfortran required for native path test')
 stubs='''

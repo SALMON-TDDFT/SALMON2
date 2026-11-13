@@ -28,7 +28,9 @@ psi=np.empty((8,8,8,2),dtype='=c16',order='F')
 psi[:,:,:,0]=1/np.sqrt(8.**3)
 psi[:,:,:,1]=np.exp(2j*np.pi*x/8)/np.sqrt(8.**3)
 (restart/'wfn.bin').write_bytes(psi.tobytes(order='F'))
-shutil.copy2(root/'samples/exercise_06_bulkSi_rt/Si_rps.dat',bundle/'Si_rps.dat')
+runtime_source=os.environ.get('SALMONPY_RUNTIME_SOURCE')
+if not runtime_source: raise RuntimeError('Set SALMONPY_RUNTIME_SOURCE to the prepared external runtime source')
+shutil.copy2(Path(runtime_source)/'samples/exercise_06_bulkSi_rt/Si_rps.dat',bundle/'Si_rps.dat')
 inp='''&calculation
  theory='tddft_pulse'
 /

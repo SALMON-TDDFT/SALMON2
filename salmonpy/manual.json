@@ -820,7 +820,7 @@
       "sections": [
         {
           "heading": "SALMONpy development",
-          "text": "\nRead AI_USAGE.md before using or extending these interfaces. Crystalline TDDFT and SBE interfaces are A-driven only. The LD Python preview is available; FDTD has a batch executable adapter; the built-in velocity-gauge SBE adapter and text loader are available; a process-isolated PZ/TB-mBJ/Libxc-PZ/Libxc-PBE middlepoint TDDFT adapter is available with a separately audited worker executable. Read WORKFLOWS.md for supported scope.\n\nStart with manual.json or `python -m salmonpy.manual QUERY` to find tasks, APIs, examples and constraints. Consult the registered SALMON-inputs repository for published input examples, checking version and required files.\n\n`manual.json` is exclusively the AI-facing task catalog. Human-facing documentation is separate; do not present JSON search results as the user manual.\n\nFor beginner workflows, apply manual.json beginner_intake before choosing calculation scale: ask only missing memory/CPU budgets and intent, then state measured/estimated/unknown capability limits.\n\nThis project is intended for a separate repository; do not create a PR or merge\ninto SALMON itself. Use README.en.md / README.md for English / Japanese onboarding.\n"
+          "text": "\nRead AI_USAGE.md before using or extending these interfaces. Crystalline TDDFT and SBE interfaces are A-driven only. The LD Python preview is available; FDTD has a batch executable adapter; the built-in velocity-gauge SBE adapter and text loader are available; a process-isolated PZ/TB-mBJ/Libxc-PZ/Libxc-PBE middlepoint TDDFT adapter is available with a separately audited worker executable. Read WORKFLOWS.md for supported scope.\n\nStart with manual.json or `python -m salmonpy.manual QUERY` to find tasks, APIs, examples and constraints. Consult the registered SALMON-inputs repository for published input examples, checking version and required files.\n\n`manual.json` is exclusively the AI-facing task catalog. Human-facing documentation is separate; do not present JSON search results as the user manual.\n\nFor beginner workflows, apply manual.json beginner_intake before choosing calculation scale: ask only missing memory/CPU budgets and intent, then state measured/estimated/unknown capability limits.\n\nThis project is intended for a separate repository; do not create a PR or merge\ninto SALMON itself. Use README.en.md / README.md for English / Japanese onboarding.\n\nThis is a standalone SALMONpy layout. Bundled kernels live in native/. Full SALMON is an optional externally prepared runtime; see runtime/README.md in the source checkout.\n"
         }
       ]
     },
@@ -836,7 +836,7 @@
         },
         {
           "heading": "今回利用できるFortran境界",
-          "text": "\n`src/maxwell/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `testsuites/unit_ld/test_ld.f90` と `src/maxwell/fdtd_eh.f90` を参照してください。\n\n`ld_coefficients` の累積先は呼び出し前にゼロ初期化します。`ld_store_old` と `ld_update` は既存演算順を保つため分割E成分を受け取ります。`rj*_fdtd_ld` は物理電流の単純和ではなく補助量Qです。\n\n`fdtd_eh_kernel.f90` は差分演算 `eh_fd` を提供します。`fdtd_eh` は引き続き時間ループ、境界、通信、観測、再開ファイルを調整します。Python向け単一ステップAPIはまだありません。\n\n"
+          "text": "\n`native/lorentz_drude.f90` の `s_ld_state` がP、J、旧J、旧E、係数、次の電場更新用の補助量Qを所有します。公開関数は `ld_allocate`、`ld_coefficients`、`ld_store_old`、`ld_update`、`ld_finalize` です。具体的な配列形状・呼び方は `tests/native/test_ld.f90` と `src/maxwell/fdtd_eh.f90` を参照してください。\n\n`ld_coefficients` の累積先は呼び出し前にゼロ初期化します。`ld_store_old` と `ld_update` は既存演算順を保つため分割E成分を受け取ります。`rj*_fdtd_ld` は物理電流の単純和ではなく補助量Qです。\n\n`fdtd_eh_kernel.f90` は差分演算 `eh_fd` を提供します。`fdtd_eh` は引き続き時間ループ、境界、通信、観測、再開ファイルを調整します。Python向け単一ステップAPIはまだありません。\n\n"
         },
         {
           "heading": "変更してはいけない更新順",
@@ -844,7 +844,7 @@
         },
         {
           "heading": "検証と禁止事項",
-          "text": "\nビルド前に `python tools/check_forbidden_eigensolvers.py --source-root src` を実行します。構成・増分ビルド時の検査を外しません。新規実行ファイルは全アプリケーションオブジェクトを検査し、再利用時は記録されたSHA256と照合します。禁止された固有値ドライバーへのフォールバックはありません。PZHEEVDの検証には固有値、残差、直交性、ワークスペース容量を含めます。\n\nIEEE判定は各要素へのスカラー呼び出しに限定します。GSデータを収集しません。計算結果は利用者が指定した書き込み可能な出力先へ保存し、コードツリーに格納しません。\n\n変更後は独立LDの旧演算との比較とFDTD全体の比較を行います。単一スレッドのビット一致と並列の数値許容差検証を区別します。再開互換性や未検証の計算機での動作を推定だけで保証しないでください。\n\n"
+          "text": "\nビルド前に `python tools/check_forbidden_eigensolvers.py --source-root native` を実行します。構成・増分ビルド時の検査を外しません。新規実行ファイルは全アプリケーションオブジェクトを検査し、再利用時は記録されたSHA256と照合します。禁止された固有値ドライバーへのフォールバックはありません。PZHEEVDの検証には固有値、残差、直交性、ワークスペース容量を含めます。\n\nIEEE判定は各要素へのスカラー呼び出しに限定します。GSデータを収集しません。計算結果は利用者が指定した書き込み可能な出力先へ保存し、コードツリーに格納しません。\n\n変更後は独立LDの旧演算との比較とFDTD全体の比較を行います。単一スレッドのビット一致と並列の数値許容差検証を区別します。再開互換性や未検証の計算機での動作を推定だけで保証しないでください。\n\n"
         },
         {
           "heading": "入力の寿命",
@@ -876,7 +876,7 @@
         },
         {
           "heading": "初見の環境診断と検索",
-          "text": "\n`python -m salmonpy.doctor --json` でライブラリの読み込み可否、追加依存の所在、\n任意指定した外部実行ファイルのハッシュ照合を確認できます。計算・コンパイル・導入は行いません。\n外部SALMONの `hash_matches` を機能対応や実行成功と読み替えないでください。\n`manual.search` は常に `getting_started` と `task_catalog` を返します。一致しない検索語では\n目的別一覧を示して目的を確認し、対応不能とは即断しません。\n"
+          "text": "\n`python -m salmonpy.doctor --json` でライブラリの読み込み可否、追加依存の所在、\n任意指定した外部実行ファイルのハッシュ照合を確認できます。計算・コンパイル・導入は行いません。\n外部SALMONの `hash_matches` を機能対応や実行成功と読み替えないでください。\n`manual.search` は常に `getting_started` と `task_catalog` を返します。一致しない検索語では\n目的別一覧を示して目的を確認し、対応不能とは即断しません。\n\n本リポジトリはSALMONpy専用です。本体のsrcパスは `runtime/README.md` の手順で準備した外部ツリーを指します。SALMON本体を本リポジトリへ復元・同梱しないでください。\n"
         }
       ]
     },
@@ -964,7 +964,7 @@
       "sections": [
         {
           "heading": "LD and SBE wheels",
-          "text": "\nThe package uses scikit-build-core and a separate CMake project. LD and velocity-gauge SBE kernels, C ABI adapters and Python APIs are installed.\nThe SALMON executable and MPI are not required. SBE links system Accelerate on\nmacOS and bundled OpenBLAS on Linux/Windows. Source builds on Linux/Windows\nrequire an LP64 OpenBLAS development installation. Native libraries are built\nfor each platform, with the same Python interface.\n\nThe table below is verified for 0.1.0a4, including the Python TDDFT adapter.\n[CI run 43363121675](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43363121675)\npassed all four platform jobs and the source-distribution build at `e837ebac`.\nEach of 20 installed wheels (CPython 3.10–3.14) passed 34 tests (680 total).\nWindows OpenBLAS discovery uses CMAKE_PREFIX_PATH pointing to UCRT64.\n\nThe separately built TDDFT worker executable is not included in these wheels.\nIts native regression passed on Linux CI and local macOS arm64; Windows and\nIntel macOS native TDDFT execution are not claimed by wheel test results.\n\n"
+          "text": "\n> Standalone layout: full SALMON sources are no longer bundled. Source-checkout\n> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with\n> the pinned external upstream checkout. Historical validation commands below\n> describe the old source layout and are not current build instructions.\n\nThe package uses scikit-build-core and a separate CMake project. LD and velocity-gauge SBE kernels, C ABI adapters and Python APIs are installed.\nThe SALMON executable and MPI are not required. SBE links system Accelerate on\nmacOS and bundled OpenBLAS on Linux/Windows. Source builds on Linux/Windows\nrequire an LP64 OpenBLAS development installation. Native libraries are built\nfor each platform, with the same Python interface.\n\nThe table below is verified for 0.1.0a4, including the Python TDDFT adapter.\n[CI run 43363121675](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43363121675)\npassed all four platform jobs and the source-distribution build at `e837ebac`.\nEach of 20 installed wheels (CPython 3.10–3.14) passed 34 tests (680 total).\nWindows OpenBLAS discovery uses CMAKE_PREFIX_PATH pointing to UCRT64.\n\nThe separately built TDDFT worker executable is not included in these wheels.\nIts native regression passed on Linux CI and local macOS arm64; Windows and\nIntel macOS native TDDFT execution are not claimed by wheel test results.\n\n"
         },
         {
           "heading": "Target matrix",
@@ -988,7 +988,7 @@
         },
         {
           "heading": "Current CI scope and independent distribution",
-          "text": "\nThe worker CI now compares ordinary and interactive execution of the same audited\ncurrent build. It no longer references an unavailable historical commit. This\nchecks adapter equivalence, not historical solver regression. A historical\ncomparison needs an independently obtainable, audited baseline artifact.\nWheel CI installs ASE and plotting extras for the full suite, then separately\nchecks the CPython 3.12 wheel in an environment without optional dependencies.\nThese are configured checks; historical runs above do not certify the current revision.\n\nSALMONpy is intended for a separate repository, not a merge into the SALMON main\nrepository. Native source provenance and full-executable compatibility must be\npreserved when moving it. The current source layout still includes SALMON sources.\n"
+          "text": "\nThe worker CI now compares ordinary and interactive execution of the same audited\ncurrent build. It no longer references an unavailable historical commit. This\nchecks adapter equivalence, not historical solver regression. A historical\ncomparison needs an independently obtainable, audited baseline artifact.\nWheel CI installs ASE and plotting extras for the full suite, then separately\nchecks the CPython 3.12 wheel in an environment without optional dependencies.\nThese are configured checks; historical runs above do not certify the current revision.\n\nSALMONpy is intended for a separate repository, not a merge into the SALMON main\nrepository. Native source provenance and full-executable compatibility must be\npreserved when moving it. Only the three LD/SBE kernels are bundled in native/. Full SALMON source is prepared externally from runtime/source.json and its compatibility patch.\n"
         }
       ]
     },
@@ -996,7 +996,7 @@
       "sections": [
         {
           "heading": "SALMONpy：Pythonから使うSALMONの計算・解析部品",
-          "text": "\n[English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`\nLD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。\n対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。\n現在はpreview版で、PyPI公開済みではありません。\n\n"
+          "text": "\n> Standalone layout: full SALMON sources are no longer bundled. Source-checkout\n> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with\n> the pinned external upstream checkout. Historical validation commands below\n> describe the old source layout and are not current build instructions.\n\n[English](README.en.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`\nLD・SBEの物質応答、構造・光パルスの作成、解析を単独で利用できます。\n対応する外部SALMONを用意すれば、DFT・TDDFT・FDTD・バンド計算にも接続できます。\n現在はpreview版で、PyPI公開済みではありません。\n\n"
         },
         {
           "heading": "最初の使い方",
@@ -1208,7 +1208,7 @@
       "sections": [
         {
           "heading": "SALMONpy — getting started",
-          "text": "\n[日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`\n\nSALMONpy provides independent material-response and analysis components. It is a\npreview, not a published PyPI release. The project is intended to move to its own\nrepository; this branch is not intended for merging into SALMON itself.\n\n"
+          "text": "\n> Standalone layout: full SALMON sources are no longer bundled. Source-checkout\n> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with\n> the pinned external upstream checkout. Historical validation commands below\n> describe the old source layout and are not current build instructions.\n\n[日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.1`\n\nSALMONpy provides independent material-response and analysis components. It is a\npreview, not a published PyPI release. The project is intended to move to its own\nrepository; this branch is not intended for merging into SALMON itself.\n\n"
         },
         {
           "heading": "Install and diagnose",
@@ -1550,5 +1550,13 @@
     "technical_reference_translation": "partial",
     "repository_policy": "independent repository planned; do not merge into SALMON",
     "paired_revision": "2026-11-13.1"
+  },
+  "repository_layout": {
+    "bundled_kernels": "native/",
+    "external_runtime": "runtime/source.json + runtime/patches/salmonpy-runtime.patch",
+    "preparation": "python tools/prepare_salmon_runtime.py UPSTREAM_CHECKOUT NEW_DIRECTORY",
+    "full_salmon_sources_bundled": false,
+    "upstream_repository": "https://github.com/SALMON-TDDFT/SALMON2.git",
+    "upstream_commit": "3322d0561c0cad5180679136b3eddbe8b909487c"
   }
 }

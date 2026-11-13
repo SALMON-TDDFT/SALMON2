@@ -12,9 +12,7 @@ import tempfile
 root=Path(__file__).resolve().parents[1]
 os.chdir(root)
 work=tempfile.TemporaryDirectory(prefix='sbe-oracle-'); d=Path(work.name)
-b=subprocess.check_output(['git','show','3322d0561c0cad5180679136b3eddbe8b909487c:src/ssbe/bloch_solver_ssbe.f90'],text=True)
-start=b.index('subroutine calc_current_bloch(');end=b.index('function calc_energy(',start)
-procs=b[start:end]
+procs=(root/'tests/native/sbe_legacy_procedures.f90').read_text()
 (d/'oracle.f90').write_text('''module salmon_global
  integer :: norder_correction=0
  character(32) :: gauge_sbe='velocity_gauge'
@@ -49,7 +47,7 @@ c=c[:a]+'''  norder_correction=order
   call calc_current_bloch(sbe,gs,anew,j,0)
 '''+c[z:]
 (d/'api.f90').write_text(c)
-subprocess.run([os.environ.get('FC','gfortran'),'-shared','-fPIC','-O3','-J'+str(d),'-I'+str(d),str(root/'src/ssbe/sbe_types.f90'),str(d/'oracle.f90'),str(d/'api.f90'),*(['-framework','Accelerate'] if sys.platform=='darwin' else ['-lopenblas']),'-o',str(d/'oracle.dylib')],check=True)
+subprocess.run([os.environ.get('FC','gfortran'),'-shared','-fPIC','-O3','-J'+str(d),'-I'+str(d),str(root/'native/sbe_types.f90'),str(d/'oracle.f90'),str(d/'api.f90'),*(['-framework','Accelerate'] if sys.platform=='darwin' else ['-lopenblas']),'-o',str(d/'oracle.dylib')],check=True)
 
 import ctypes as ct
 from pathlib import Path
