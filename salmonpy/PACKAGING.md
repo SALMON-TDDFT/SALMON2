@@ -14,7 +14,7 @@ for each platform, with the same Python interface.
 | Linux manylinux2014 | x86_64 | 3.10–3.14 | CI configured; execution pending |
 | Windows | AMD64 | 3.10–3.14 | CI configured; execution pending |
 
-The CI macOS deployment target is 14.0; dependent runtimes can impose additional
+The CI macOS deployment target is 15.0; dependent runtimes can impose additional
 requirements, which the repair/test stage must validate. Linux arm64, Windows
 arm64, musl, free-threaded Python and PyPy are not initial release targets.
 
