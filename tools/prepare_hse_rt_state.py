@@ -9,16 +9,24 @@ import argparse,hashlib,json,os,re,shutil,subprocess,sys,tarfile,tempfile
 from pathlib import Path,PurePosixPath
 
 
-def prepare(source,directory,*,reference_only=False):
+def prepare(source,directory,*,reference_only=False,explicit_routing=False):
     root=Path(__file__).resolve().parents[1];spec=json.loads((root/'runtime/hse-rt-state.json').read_text())
     patch=root/'runtime'/spec['patch'];checker=Path(__file__).with_name('check_forbidden_eigensolvers.py')
     if hashlib.sha256(patch.read_bytes()).hexdigest()!=spec['patch_sha256']:raise ValueError('HSE overlay hash changed')
+    routing=None
+    if explicit_routing:
+        if reference_only:raise ValueError('explicit routing cannot use reference-only preparation')
+        routing=json.loads((root/'runtime/hse-explicit-routing.json').read_text())
+        if routing['parent_patch_sha256']!=spec['patch_sha256'] or routing['base_commit']!=spec['upstream_commit']:
+            raise ValueError('explicit routing requires its pinned parent overlay')
+        child=root/'runtime'/routing['patch']
+        if hashlib.sha256(child.read_bytes()).hexdigest()!=routing['patch_sha256']:raise ValueError('routing overlay hash changed')
     source=Path(source).resolve();dest=Path(directory).resolve()
     if dest.is_relative_to(source) or dest.is_relative_to(root):raise ValueError('new external directory required')
     commit=spec['upstream_commit']
     if subprocess.check_output(['git','-C',str(source),'rev-parse',commit+'^{commit}'],text=True).strip()!=commit:raise ValueError('pinned PR commit unavailable')
     dest.mkdir(parents=True,exist_ok=False);marker=dest/'salmonpy-hse-rt-state.json'
-    record={**spec,'status':'preparing','overlay_applied':not reference_only}
+    record={**spec,'status':'preparing','overlay_applied':not reference_only,'explicit_rt_routing':explicit_routing}
     marker.write_text(json.dumps(record,indent=2)+'\n')
     try:
         with tempfile.TemporaryFile() as raw:
@@ -42,6 +50,10 @@ def prepare(source,directory,*,reference_only=False):
             env['GIT_CEILING_DIRECTORIES']=str(dest.parent)
             subprocess.run(['git','apply','--check',str(patch)],cwd=dest,env=env,check=True)
             subprocess.run(['git','apply','--whitespace=nowarn',str(patch)],cwd=dest,env=env,check=True)
+            if routing is not None:
+                subprocess.run(['git','apply','--check',str(child)],cwd=dest,env=env,check=True)
+                subprocess.run(['git','apply','--whitespace=nowarn',str(child)],cwd=dest,env=env,check=True)
+                record['routing_overlay']=routing
         # User-mandated build audits override the upstream PR's omission of them.
         (dest/'tools').mkdir(exist_ok=True);shutil.copy2(checker,dest/'tools/check_forbidden_eigensolvers.py')
         guard=dest/'cmakefiles/salmonpy_prohibition.cmake'
@@ -74,5 +86,5 @@ add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('source');p.add_argument('output');p.add_argument('--reference-only',action='store_true')
-    a=p.parse_args();print(prepare(a.source,a.output,reference_only=a.reference_only))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('source');p.add_argument('output');p.add_argument('--reference-only',action='store_true');p.add_argument('--explicit-routing',action='store_true')
+    a=p.parse_args();print(prepare(a.source,a.output,reference_only=a.reference_only,explicit_routing=a.explicit_routing))

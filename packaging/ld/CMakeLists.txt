@@ -117,3 +117,6 @@ install(FILES "${ROOT}/tests/native/test_rt_step_config.f90" DESTINATION salmonp
 install(FILES "${ROOT}/tools/prepare_hse_rt_state.py" "${ROOT}/tools/test_hse_rt_state.py"
   "${ROOT}/tools/test_hse_rt_state_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_hse_rt_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/test_hse_explicit_state.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_explicit_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)

@@ -139,3 +139,13 @@ A separate HSE profile pins the user's PR-intended revision `c9e8ce431f43eefd4a8
 This stage groups ACE factors, accepted prediction histories, PT-CN history/dt, Taylor trials and action caches under `s_exx_rt_state`. Lifecycle operations take explicit state arguments and reject invalid dt/stages before mutation. Optional owned-allocation byte accounting includes allocated history-array descriptors/fixed fields and nested buffers; it is not RSS.
 
 The legacy HSE adapter still uses one default state. Geometry/kernel/Wannier resources, public legacy flags and input settings remain shared, so this does not provide full native multi-material contexts or concurrent calls. Fast exchange paths are retained; synthetic numerical regression does not establish real-material accuracy or a speed improvement. FDTD coupling still requires a common dt.
+
+## Experimental explicit HSE RT routing
+
+Add `--explicit-routing` to the preceding preparation command to apply a child overlay after verifying its parent hash. It cannot be combined with `--reference-only`. Default preparation and existing calls remain unchanged.
+
+Twenty-four exchange/history procedures forward a caller-supplied RT state through their internal calls. Resolution uses local references, without switching a process-wide active state or copying all arrays. Public legacy flags/energy are state-owned; old names are aliases to the default owner only. Reassociating those aliases is unsupported.
+
+The certified routing scope is common exchange configuration, serial CPU scalar dense ACE action and lifecycle. Nondefault refresh, direct/full, packed/distributed and spin routes are rejected before shared resources are reached. With optional `rt_status`, `exx_refresh`/`exx_add_action` return nonzero for this capability mismatch without changing accepted state/output. Without it native errors may terminate the process. This is not general failure atomicity or material C ABI conformance.
+
+This route is not yet bound to each TDDFT electronic state or different material configurations. Kernel/Wannier/geometry/input ownership remains to be extracted. FDTD common dt, the process-isolated API and fixed jobs remain unchanged.
