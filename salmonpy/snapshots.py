@@ -1,4 +1,4 @@
-"""Versioned, immutable, process-local snapshots of the lightweight states.
+"""Versioned, immutable, process-local snapshots of accepted states.
 
 Tokens are created by state.snapshot(), not constructed or edited by callers.
 They retain the originating model. They are not a disk checkpoint format.

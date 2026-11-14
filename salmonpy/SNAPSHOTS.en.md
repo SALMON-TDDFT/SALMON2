@@ -1,16 +1,19 @@
-# Saving and restoring lightweight states
+# Saving and restoring states
 
-[日本語](SNAPSHOTS.md) · Topic: `snapshots` · Paired revision: `2026-11-14.1`
+[日本語](SNAPSHOTS.md) · Topic: `snapshots` · Paired revision: `2026-11-14.2`
 
 `state.snapshot()` returns an immutable `StateSnapshot` token.
 `state.restore(token)` replaces the accepted state and returns `None`.
 These operations are process-local, fixed-dt, in-memory operations. They do not
-execute a numerical step, read/write a file, invoke MPI or compile/load a solver.
+advance the accepted time. Lightweight restore copies arrays; process-isolated
+TDDFT restore starts a fresh audited solver and replays accepted steps using
+private temporary files. Neither API builds a solver or invokes MPI.
 
 ## Supported history
 
 | State | Saved evolution history |
 |---|---|
+| `TDDFTState` (process isolated) | Initial A/current, accepted A/current history and counter |
 | `LDState` | Per-pole P/J, previous E and step counter |
 | `SBEState` | Density matrix, previous A/c, cached native matter current and counter |
 | `Transverse` state | A and step counter |
@@ -63,6 +66,27 @@ fields. It needs installed LD/SBE kernels but no full SALMON runtime. The sample
 checks exact replay locally; it does not claim cross-platform bitwise identity
 or physical convergence. Ordinary scientific regression tolerances remain valid.
 
+## Process-isolated TDDFT replay
+
+Use `saved = state.snapshot()` and `state.restore(saved)` on a state returned by
+`TDDFTInitialState.new_state`. The same initial model object, fixed dt, initial A,
+capacity, executable checksum and thread count are required. Closed states reject
+both operations. Existing states retain their own initial bundle after the model
+loader closes.
+
+Restore starts a separate worker and replays every accepted A, checking initial
+and endpoint matter currents with rtol=1e-12, atol=1e-14. Only after validation
+succeeds is the old worker replaced. A replay failure raises `SnapshotError` and
+preserves the original live branch. The actual replayed current is retained.
+The accepted branch's output files are regenerated, so a later `finish()` exports
+the restored branch. Discarded trial outputs are not merged into it.
+
+Snapshot costs O(saved steps) memory; restore costs a fresh initialization plus
+O(saved steps) evolution and temporarily holds two workers and their files.
+The token does not store wavefunctions and cannot survive a Python restart.
+Same-machine single-thread tests check bitwise continuation; cross-platform or
+parallel bitwise equality is not promised. Coupled hosts must also rewind fields.
+
 ## Explicit exclusions
 
 This is not the handoff's Zarr GS archive, an output NPZ, a persistent restart,
@@ -71,8 +95,7 @@ serialize/edit tokens or pass output archives to `restore`. Snapshot public
 metadata (`kind`, `schema`, `version`, `step_index`, `time`) is diagnostic only;
 private fields are not an editable checkpoint schema.
 
-TDDFT workers, embedded TDDFT, native E/H FDTD and MPI sessions do not gain this
-API. A host manually coupling supported material/field states must save and
+Embedded TDDFT, native E/H FDTD and MPI sessions do not gain this API. A host manually coupling supported material/field states must save and
 restore **both at the same accepted coupling boundary**. There is no automatic
 transaction across components; a single state's atomic restore does not provide
 MPI/global rollback. `couple()` still creates and closes its own states.

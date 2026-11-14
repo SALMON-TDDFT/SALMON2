@@ -5,7 +5,8 @@ The initial bundle contains a valid RT input, data_for_restart and relative asse
 States return the electric (charge) current density j; the worker's SALMON
 electronic matter current J is kept internally (``matter_current``), j = -J.
 """
-from .errors import InputError, InputTypeError, RuntimeFailure
+from .errors import InputError, InputTypeError, RuntimeFailure, SnapshotError
+from .snapshots import _SnapshotMixin, _fingerprint
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -119,7 +120,7 @@ def _read_output(stream,events,log):
         stream.close();events.put(None)
 
 
-class TDDFTState:
+class TDDFTState(_SnapshotMixin):
     """One live SALMON process. Use a context manager or close explicitly.
 
     Only step(Anew) mutates the calculation. On a worker failure the accepted
@@ -127,6 +128,7 @@ class TDDFTState:
     replay itself fails the state is closed and cannot silently continue.
     """
     def __init__(self,initial,dt,A):
+        self._model=initial
         self._dt=dt;self._steps=0;self._history=[];self._A0=A.copy()
         self._executable=initial.executable;self._capacity=initial.max_steps
         self._threads=initial.threads;self._timeout=initial.timeout;self._input=initial._input
@@ -223,7 +225,7 @@ class TDDFTState:
             if proc.poll() is None:
                 try:
                     self._send('CLOSE');proc.wait(timeout=min(self._timeout,5.))
-                except (OSError,subprocess.TimeoutExpired):
+                except (OSError,TimeoutError,subprocess.TimeoutExpired):
                     proc.kill();proc.wait()
             if proc.stdin:
                 try: proc.stdin.close()
@@ -259,6 +261,124 @@ class TDDFTState:
             raise RuntimeFailure('TDDFT step failed; previous accepted state restored') from exc
         self._current=current;self._history.append(A.copy());self._curr_history.append(current.copy());self._steps+=1
         return self.current
+
+    _snapshot_kind = 'TDDFT-process-replay'
+    _snapshot_counter = '_steps'
+
+    def _snapshot_owner(self): return self._model
+
+    def _snapshot_settings(self):
+        return _fingerprint((self.dt, self._capacity, self._threads,
+                             self._executable.sha256, self._input,
+                             tuple(sorted(self._initial_hashes.items()))), (self._A0,))
+
+    def _snapshot_arrays(self):
+        return {'_A0': self._A0, '_J0': self._J0, '_current': self._current,
+                '_history': np.asarray(self._history, dtype=float).reshape(-1, 3),
+                '_curr_history': np.asarray(self._curr_history, dtype=float).reshape(-1, 3)}
+
+    def snapshot(self):
+        """Save immutable accepted A/current history for in-memory replay.
+
+        No worker is advanced. This is not a native wavefunction checkpoint.
+        """
+        if self._closed: raise SnapshotError('TDDFT state is closed')
+        return super().snapshot()
+
+    @staticmethod
+    def _retire_replay_worker(state):
+        """Best-effort retirement cannot turn a committed restore into failure.
+
+        Keep diagnostics on the surviving state if ordinary close failed. The
+        captured handles allow cleanup even after close partially changed state.
+        """
+        proc, work, owner = state._proc, state._work, state._owner
+        errors = []
+        try:
+            state.close()
+            return ()
+        except Exception as exc:
+            errors.append(repr(exc))
+        actions = []
+        if proc is not None:
+            def terminate():
+                if proc.poll() is None: proc.kill()
+                proc.wait(timeout=5.)
+            actions.append(terminate)
+            if proc.stdin is not None: actions.append(proc.stdin.close)
+        if state._reader is not None:
+            actions.append(lambda: state._reader.join(timeout=5.))
+        if proc is not None and proc.stdout is not None: actions.append(proc.stdout.close)
+        if work is not None: actions.append(work.cleanup)
+        if owner is not None: actions.append(owner.cleanup)
+        for action in actions:
+            try: action()
+            except Exception as exc: errors.append(repr(exc))
+        state._proc = state._work = state._owner = state._reader = None
+        state._closed = True
+        return tuple(errors)
+
+    def restore(self, snapshot):
+        """Replay a token in a new worker, then replace this accepted branch.
+
+        Requires the same initial model object, dt, initial A, capacity, threads
+        and executable. Cost grows with saved step count; both workers coexist
+        during validation. Replay currents must match within rtol=1e-12,
+        atol=1e-14. A failed replay leaves this worker and history untouched.
+        """
+        from types import SimpleNamespace
+        from .snapshots import StateSnapshot
+        if self._closed: raise SnapshotError('TDDFT state is closed')
+        if type(snapshot) is not StateSnapshot:
+            raise SnapshotError('expected StateSnapshot from state.snapshot()')
+        n = snapshot.step_index
+        if type(n) is not int or not 0 <= n <= self._capacity:
+            raise SnapshotError('invalid snapshot step index')
+        # Reuse the common schema/integrity checks, allowing variable history size.
+        expected = {name: np.empty((n, 3) if name in ('_history', '_curr_history') else (3,))
+                    for name in self._snapshot_arrays()}
+        validated = SimpleNamespace(dt=self.dt, _snapshot_kind=self._snapshot_kind,
+            _snapshot_counter='_steps', _snapshot_capacity=self._capacity,
+            _snapshot_owner=self._snapshot_owner, _snapshot_settings=self._snapshot_settings,
+            _snapshot_arrays=lambda: expected)
+        _SnapshotMixin.restore(validated, snapshot)
+        if (not np.array_equal(validated._A0, self._A0)
+                or not np.allclose(validated._J0, self._J0, rtol=1e-12, atol=1e-14)
+                or not np.array_equal(validated._current,
+                                      validated._curr_history[-1] if n else validated._J0)):
+            raise SnapshotError('inconsistent TDDFT snapshot history')
+        candidate = object.__new__(TDDFTState)
+        candidate.__dict__ = self.__dict__.copy()
+        candidate._proc = candidate._work = candidate._reader = candidate._owner = None
+        candidate._retain_outputs = False
+        try:
+            candidate._owner = tempfile.TemporaryDirectory(prefix='salmonpy-tddft-state-')
+            candidate._bundle = Path(candidate._owner.name)/'bundle'
+            if _copy_bundle(self._bundle, candidate._bundle) != tuple(sorted(self._initial_hashes.items())):
+                raise SnapshotError('initial-state bundle changed')
+            candidate._spawn()
+            if not np.allclose(candidate._current, validated._J0, rtol=1e-12, atol=1e-14):
+                raise SnapshotError('initial replay current differs')
+            candidate._J0 = candidate._current.copy()
+            replayed_currents = []
+            for index, (A, J) in enumerate(zip(validated._history, validated._curr_history), 1):
+                candidate._send('STEP '+' '.join(format(v, '.17e') for v in A))
+                candidate._current = candidate._receive(index)
+                if not np.allclose(candidate._current, J, rtol=1e-12, atol=1e-14):
+                    raise SnapshotError(f'replay current differs at step {index}')
+                replayed_currents.append(candidate._current.copy())
+            candidate._steps = n
+            candidate._history = [a.copy() for a in validated._history]
+            candidate._curr_history = replayed_currents
+            # Keep the replayed native endpoint current, rather than hiding drift.
+        except BaseException as exc:
+            self._restore_cleanup_errors = self._retire_replay_worker(candidate)
+            if not isinstance(exc, Exception): raise
+            raise SnapshotError('TDDFT replay failed; original state preserved') from exc
+        # Reader threads capture their state's queue/log. Transfer them without
+        # rebinding their state object: each reader was started with explicit queue/log arguments.
+        self.__dict__, candidate.__dict__ = candidate.__dict__, self.__dict__
+        self._restore_cleanup_errors = self._retire_replay_worker(candidate)
 
     def finish(self,directory):
         """Close cleanly and archive accepted A/J history and generated native files.
@@ -310,7 +430,7 @@ class TDDFTState:
         self._closed=True
         try: self._stop()
         finally:
-            if hasattr(self,'_owner'): self._owner.cleanup()
+            if getattr(self,'_owner',None) is not None: self._owner.cleanup()
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
     def __del__(self):
