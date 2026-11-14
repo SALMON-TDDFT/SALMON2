@@ -69,6 +69,14 @@ The following findings come from the safe prepared runtime examined on 2026-11-1
 
 Move fields in compilable groups rather than pretending that changing the top-level derived type removes all global dependencies. Track remaining accesses to state/config module data in the supported dependency closure. Preserve legacy CLI output/numerics via a frontend-owned context; do not rewrite historical snapshots.
 
+## HSE source baseline and additional state (2026-11-15 clarification)
+
+The user requires the fast PR-intended HSE implementation as the HSE baseline, rather than treating the older public implementation's speed as representative. Read-only checks of the local `PR用ブランチを確認` chat and checkout identify `codex/hse-pr-cleanup-20261113` at `c9e8ce431f43eefd4a88998134adb4796f8ec837`. This is a verified local revision, not a fresh remote-head assertion. Keep it unchanged; importing a source definition does not authorize PR/upstream merging or replacing jobs/binaries.
+
+Its `src/xc/exx_native.f90` has module-owned symmetry/kernel/spatial/Wannier state, occupation/action caches, ACE factors, Taylor initial/midpoint factors/sources, accepted factor history and a separate PT-CN history including its dt. The HSE context boundary must own these histories and mutable workspaces for each electronic state. Accepted/trial factor histories cannot leak across models, dt values or predictor attempts. Treat immutable kernel/plans as shareable only after proving geometry/backend/communicator compatibility and ownership; preserve the PR version's fast paths.
+
+The current RT step-config extraction is validated with PZ only and its overlay is pinned to the existing SALMONpy runtime profile. It is not an HSE benchmark and is not automatically applicable to the PR branch (which uses exx_* names and a different integration base). Porting requires a separate explicit profile, source/application-object prohibition audits with retained CMake checks, numerical and history-lifetime validation, and like-for-like timing on the fast PR revision. The PR chat describes the huge-Gamma-only route as outside that PR; do not conflate it with the separate owner/neighbor-cell development line.
+
 ## Errors and transactional state
 
 Validate handles, A shape/finiteness (scalar IEEE predicates), capacity and caller settings before mutation. Rejection must preserve current, time and owned resources. A failed creation returns handle0 and releases only its allocations/units/XC objects.

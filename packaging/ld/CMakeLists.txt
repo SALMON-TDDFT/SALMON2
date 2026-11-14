@@ -107,3 +107,8 @@ install(DIRECTORY "${ROOT}/salmonpy/native_adapters/" DESTINATION salmonpy/nativ
 install(FILES "${ROOT}/tools/build_gs_restart_converter.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/salmonpy/_gs_export.py" DESTINATION salmonpy)
+
+# Opt-in RT configuration extraction; default pinned runtime remains unchanged.
+install(FILES "${ROOT}/tools/prepare_rt_step_config.py" "${ROOT}/tools/test_rt_step_config.py"
+  "${ROOT}/tools/test_rt_step_config_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_rt_step_config.f90" DESTINATION salmonpy/_runtime_source/tests/native)

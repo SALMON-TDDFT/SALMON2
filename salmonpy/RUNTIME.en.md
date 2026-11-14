@@ -123,3 +123,11 @@ to `tools/package_salmon_runtime.py`. The relocated executable reruns the applic
 regression and receives its own binary binding. Import never builds or runs a solver.
 This is implementation regression evidence; material grid/k-point/SCF/force
 convergence remains the caller's responsibility.
+
+## Experimental RT-owned step configuration
+
+The default runtime is unchanged. Explicitly apply `_runtime_source/tools/prepare_rt_step_config.py BASE NEW_DIRECTORY` to a matching externally prepared runtime; in a development checkout use `python tools/prepare_rt_step_config.py BASE NEW_DIRECTORY`. Only a new external directory is created. Inputs/fixed executables remain unchanged; failed preparations are retained with status and are not approved for execution.
+
+This first extraction gives each RT state its dt, Taylor order, propagation and field-integration settings. Validation uses synthetic PZ inputs; full native multi-material contexts are not implemented. Isolated calcVbox, ionic motion, single-scale Maxwell and other shared settings remain outside this milestone. FDTD coupling still requires a common dt.
+
+The user's fast PR-intended implementation is the HSE baseline. This PZ regression is not an HSE speed/accuracy benchmark and the overlay is not automatically applicable to that PR branch. HSE ACE factors, prediction histories and mutable workspaces need separate ownership/validation. Explicit builds must resolve matching dependencies/compiler flags and retain source/all-application-object prohibition audits and CMake checks.

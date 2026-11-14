@@ -1,0 +1,16 @@
+{
+  "schema": "salmonpy.rt-step-config-overlay/1",
+  "upstream_commit": "3322d0561c0cad5180679136b3eddbe8b909487c",
+  "base_patch_sha256": "62817e02b40eb7db00132a8affcdb179b15b9c5445598c2ea371105bb46f6c7a",
+  "patch": "patches/tddft-step-config.patch",
+  "patch_sha256": "5b55a3f32414cff21d72c05bf70b43bdafba72f54a6c6e1891db8a48f8b8cb1a",
+  "scope": "experimental RT-owned timestep/Taylor/field settings; not full native context isolation",
+  "modified_sources": [
+    "src/common/structures.f90",
+    "src/rt/initialization_rt.f90",
+    "src/rt/taylor.f90",
+    "src/rt/time_evolution_step.f90",
+    "src/rt/em_field.f90",
+    "src/rt/dip.f90"
+  ]
+}
