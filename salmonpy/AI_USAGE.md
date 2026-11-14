@@ -237,6 +237,8 @@ TDDFTの保存用GSは状態の参照で保持し、初期モデルclose後も�
 
 ## GS/2配列アーカイブ
 
-`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。GS/1→GS/2書き出し・SCF収束の認定は未対応です。GS/2からのTDDFTはΓ点・直列GNUランタイムに固定した監査済みGammaRestartConverterを明示指定した場合だけ利用できます。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。
+`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。SALMONpy DFT生成のΓ点GS/1はGroundStateResult.export_archiveでGS/2へ書き出せます。SCF収束の再認定は行いません。GS/2からのTDDFTはΓ点・直列GNUランタイムに固定した監査済みGammaRestartConverterを明示指定した場合だけ利用できます。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。
 
 Γ点GS変換ではgs_native.GammaRestartConverterを使い、対象実行ファイルSHA256・実コンパイラ/Fortran_FLAGS・擬ポテンシャルhash・GFORTRAN_CONVERT_UNITを照合します。MPI／多k／別ABIの汎用変換とは説明しません。合成軌道での実ランタイム接続試験と物理的なGS検証を区別します。
+
+GS書き出しは新しいexporter付きGammaRestartConverterを明示指定します。実数/複素数の直列Γ点のみ、原子単位のgs_eigen.dataとネイティブ占有数の一致を必須にします。密度は軌道と占有数から再構成し、混合履歴の保存と呼びません。provenanceに由来・元GS等のhash・局所チャネルを記録し、再入力時の局所チャネルも検査します。実GSを収集せず合成データで接続試験することと物理検証を区別します。

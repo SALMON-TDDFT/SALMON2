@@ -55,7 +55,7 @@ def main():
             # Audit full referenced SALMON source BEFORE extracting/compiling its procedures.
             run([sys.executable,checker,'--source-root',source/'src'])
             snapshot=out/'sources';snapshot.mkdir()
-            for name in ('gs_gamma_converter.f90','gs_gamma_probe.f90'):shutil.copy2(package/'native_adapters'/name,snapshot/name)
+            for name in ('gs_gamma_converter.f90','gs_gamma_exporter.f90','gs_gamma_probe.f90'):shutil.copy2(package/'native_adapters'/name,snapshot/name)
             shutil.copy2(package/'include/salmonpy_gs_stream.f90',snapshot/'salmonpy_gs_stream.f90')
             native=source/'src/io/checkpoint_restart.f90';text=native.read_text()
             for name in ('read_wavefunction','write_wavefunction'):
@@ -64,11 +64,12 @@ def main():
                 (snapshot/(name+'.f90')).write_text('! Extracted unchanged from audited external SALMON source.\n'+match.group(0)+'\n')
             run([sys.executable,checker,'--source-root',snapshot])
             opts=[*flags,'-cpp','-UUSE_MPI','-J'+str(out),'-I'+str(out)]
-            for name in ('salmonpy_gs_stream','gs_gamma_converter','gs_gamma_probe','read_wavefunction','write_wavefunction'):
+            for name in ('salmonpy_gs_stream','gs_gamma_converter','gs_gamma_exporter','gs_gamma_probe','read_wavefunction','write_wavefunction'):
                 run([fc,*opts,'-c',snapshot/(name+'.f90'),'-o',out/(name+'.o')])
             run([sys.executable,checker,'--object-tree',out])
-            converter=out/'gs_gamma_converter';probe=out/'native_probe'
+            converter=out/'gs_gamma_converter';exporter=out/'gs_gamma_exporter';probe=out/'native_probe'
             run([fc,*flags,out/'salmonpy_gs_stream.o',out/'gs_gamma_converter.o','-o',converter])
+            run([fc,*flags,out/'salmonpy_gs_stream.o',out/'gs_gamma_exporter.o','-o',exporter])
             run([fc,*flags,*[out/(n+'.o') for n in ('gs_gamma_probe','read_wavefunction','write_wavefunction')],'-o',probe])
             converted=out/'synthetic-converted';reference=out/'synthetic-reference'
             (converted/'data_for_restart').mkdir(parents=True);reference.mkdir()
@@ -84,7 +85,21 @@ def main():
             run([probe,'read',str(converted/'data_for_restart')+os.sep])
             for name in ('info.bin','occupation.bin','wfn.bin'):
                 if (converted/'data_for_restart'/name).read_bytes()!=(reference/name).read_bytes():raise ValueError('native writer bytes differ: '+name)
+            for kind in ('complex','real'):
+                native_case=out/('native-export-'+kind);native_case.mkdir()
+                (native_case/'native_input').mkdir()
+                run([probe,'write' if kind=='complex' else 'write-real',str(native_case/'native_input')+os.sep])
+                (native_case/'request.txt').write_text('8 8 8 2\n2\n0\n')
+                commands.append([str(exporter)])
+                subprocess.run([str(exporter)],cwd=native_case,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=60,env=environment)
+                expected_real=np.asarray((i+1000*b)/1024,dtype='<f8').tobytes()
+                expected_imag=np.asarray((i-1000*b)/2048,dtype='<f8').tobytes() if kind=='complex' else bytes(8*512*2)
+                if (native_case/'portable_real.bin').read_bytes()!=expected_real or (native_case/'portable_imag.bin').read_bytes()!=expected_imag:
+                    raise ValueError('native export bits differ: '+kind)
+                if (native_case/'portable_occupations.bin').read_bytes()!=np.array([2.,0.],dtype='<f8').tobytes():
+                    raise ValueError('native occupation export differs')
             state.update(status='built-audited-and-probed',converter=str(converter),sha256=digest(converter),
+                         exporter=str(exporter),exporter_sha256=digest(exporter),native_export_parity=True,
                          probe=str(probe),probe_sha256=digest(probe),compiler=str(fc),compiler_sha256=digest(fc),compiler_version=version,
                          flags=flags,flags_make_sha256=digest(flags_path),runtime_build_sha256=digest(rp),
                          native_source_sha256=digest(native),sources={p.name:digest(p) for p in snapshot.glob('*.f90')},

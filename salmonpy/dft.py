@@ -288,6 +288,16 @@ class GroundStateResult:
         record=json.loads((verified.directory/'ground-state.json').read_text())
         return _read_forces(verified.directory/'native/gs_forces.dat',len(record['numbers']))
 
+    def export_archive(self,directory,*,converter,orbital_block=16,timeout=300.):
+        """Export verified serial Gamma native GS to GS/2; density is reconstructed.
+
+        Requires a matching explicit compiler-paired exporter and AU eigenvalue
+        output. Does not run SCF or preserve density-mixing/RT histories.
+        """
+        from .gs_native import GammaRestartConverter
+        if not isinstance(converter,GammaRestartConverter):raise InputTypeError('GammaRestartConverter required')
+        return converter.export_archive(self,directory,orbital_block=orbital_block,timeout=timeout)
+
     def band_initial_state(self,*,executable):
         from .bands import BandInitialState
         verified=self.open(self.directory)

@@ -113,7 +113,8 @@ def _metadata(m):
     keys={'n_kpoints','n_bands','n_atoms','grid_zyx','orbital_block','electrons','energy_hartree','xc',
           'pseudopotentials','boundary','spin','wavefunction_convention','cell_convention',
           'grid_convention','bloch_phase','reciprocal_convention'}
-    if type(m) is not dict or set(m)!=keys:raise InputError('invalid GS metadata')
+    if type(m) is not dict or not keys<=set(m) or set(m)-keys-{'provenance'}:raise InputError('invalid GS metadata')
+    if 'provenance' in m:_export_provenance(m['provenance'])
     for name in ('n_kpoints','n_bands','n_atoms','orbital_block'):_integer(m[name],name)
     if type(m['grid_zyx']) is not list or len(m['grid_zyx'])!=3:raise InputError('invalid GS grid')
     for n in m['grid_zyx']:_integer(n,'grid dimension')
@@ -128,6 +129,25 @@ def _metadata(m):
     _scalar(m['energy_hartree'],'energy')
 
 
+def _export_provenance(p):
+    keys={'schema','source_manifest_sha256','target_sha256','exporter_sha256','density_source',
+          'eigenvalue_source','native_real_orbital','local_channels','record_environment'}
+    if type(p) is not dict or set(p)!=keys or p['schema']!='salmonpy.gs-native-export/1':raise InputError('invalid GS export provenance')
+    if any(not _sha(p[k]) for k in ('source_manifest_sha256','target_sha256','exporter_sha256')):raise InputError('invalid GS export provenance hashes')
+    if (p['density_source']!='reconstructed_from_native_orbitals' or p['eigenvalue_source']!='native/gs_eigen.data'
+            or type(p['native_real_orbital']) is not bool):raise InputError('unsupported GS export semantics')
+    channels=p['local_channels'];seen=set()
+    if type(channels) is not list or not channels:raise InputError('invalid local channels')
+    for c in channels:
+        if (type(c) is not dict or set(c)!={'atomic_number','local_channel'} or type(c['atomic_number']) is not int
+                or not 1<=c['atomic_number']<=118 or c['atomic_number'] in seen or type(c['local_channel']) is not int
+                or not 0<=c['local_channel']<=4):raise InputError('invalid local channels')
+        seen.add(c['atomic_number'])
+    env=p['record_environment']
+    if type(env) is not dict or set(env)!={'GFORTRAN_CONVERT_UNIT'} or type(env['GFORTRAN_CONVERT_UNIT']) is not str:raise InputError('invalid GS record environment')
+    if env['GFORTRAN_CONVERT_UNIT'].lower() not in ('','native','swap','big_endian','little_endian'):raise InputError('unsupported GS record environment')
+
+
 def _physical(arrays,m):
     cell=arrays['cell_bohr'];weights=arrays['weights'];occ=arrays['occupations'];numbers=arrays['atomic_numbers']
     if not np.isfinite(np.linalg.det(cell)) or np.linalg.det(cell)<=0:raise InputError('cell must have positive finite volume')
@@ -138,11 +158,13 @@ def _physical(arrays,m):
     if np.any(numbers<1) or np.any(numbers>118):raise InputError('invalid atomic numbers')
     if np.any(arrays['density']<0):raise InputError('density must be nonnegative')
     _references(m['pseudopotentials'],set(map(int,numbers)))
+    if 'provenance' in m and {c['atomic_number'] for c in m['provenance']['local_channels']}!=set(map(int,numbers)):
+        raise InputError('local channels do not cover archive species')
 
 
 def save_ground_state(directory,*,wavefunctions,density,eigenvalues,occupations,kpoints,weights,
                       cell_bohr,fractional_positions,atomic_numbers,electrons,energy_hartree,xc,pseudopotentials,
-                      orbital_block=16):
+                      orbital_block=16,provenance=None):
     """Write caller-supplied GS arrays, manifest last; return verified lazy archive.
 
     Waves are complex128 cell-periodic u[k,band,z,y,x]. No norm/orthogonality,
@@ -165,6 +187,7 @@ def save_ground_state(directory,*,wavefunctions,density,eigenvalues,occupations,
            wavefunction_convention='cell_periodic_u',cell_convention='row_lattice_vectors',
            grid_convention='fractional_origin_zero_endpoint_excluded',
            bloch_phase='exp(+i*k_cartesian_dot_r)',reciprocal_convention='2pi_inverse_transpose_row_lattice')
+    if provenance is not None:m['provenance']=json.loads(_json(provenance))
     _metadata(m);specs=_specs(m)
     arrays={'wavefunction_real':waves.real,'wavefunction_imag':waves.imag,'atomic_numbers':numbers}
     supplied=dict(density=density,eigenvalues=eigenvalues,occupations=occupations,kpoints=kpoints,weights=weights,

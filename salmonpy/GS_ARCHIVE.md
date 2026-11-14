@@ -1,6 +1,6 @@
 # GS配列の可搬アーカイブ（GS/2）
 
-`salmonpy.gs_archive` は、呼び出し側が用意したGS配列をZarr v3互換形式へ保存する部品です。`save_ground_state` と `GroundStateArchive.open` を使います。既存の `GroundStateResult`（`salmonpy.gs/1`）とは別の入口です。SALMONのネイティブGSからの自動書き出しとSCFの収束認定は未対応です。GS/2からのTDDFT初期化は、末尾のΓ点・専用変換器の条件で利用できます。
+`salmonpy.gs_archive` は、呼び出し側が用意したGS配列をZarr v3互換形式へ保存する部品です。`save_ground_state` と `GroundStateArchive.open` を使います。既存の `GroundStateResult`（`salmonpy.gs/1`）とは別の入口です。SALMONpy生成のΓ点GS/1からの明示的書き出しに対応します。SCFの再実行や収束の再認定は行いません。GS/2からのTDDFT初期化は、末尾のΓ点・専用変換器の条件で利用できます。
 
 ## 合成配列での例
 
@@ -61,7 +61,7 @@ k点重みは非負で和1、占有数は各軌道0〜2、電子数は `sum_k,b 
 
 Pythonチャンク `(1,block,nz,ny,nx)` のC順序は、Fortranの `(nx,ny,nz,block)` と同じx最速のバイト順です。呼び出し側で平坦バッファの長さを `nx*ny*nz*block` にして渡します。JSON生成・ハッシュ照合・配列の再構成はこの小モジュールには含めません。
 
-既存SALMONの `wfn.bin` はstream形式の分岐がありますが、実数/複素数・MPI分割・スピン等の配置確認が必要です。`info.bin` と `occupation.bin` は逐次非書式レコードです。GS/1→GS/2書き出しと複数k点・MPI分割の変換は未対応です。GS/2をそのまま既存のrestartディレクトリへ渡さず、次の専用変換器を使います。
+既存SALMONの `wfn.bin` はstream形式の分岐がありますが、実数/複素数・MPI分割・スピン等の配置確認が必要です。`info.bin` と `occupation.bin` は逐次非書式レコードです。GS/1→GS/2書き出しは下記の厳密なΓ点条件で対応し、複数k点・MPI分割の変換は未対応です。GS/2をそのまま既存のrestartディレクトリへ渡さず、次の専用変換器を使います。
 
 形式の根拠: [Zarr core specification](https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html)。NumPy以外の実行時依存は増やしていません。独立したZarr実装との互換性は合成配列で検証します。
 
@@ -103,3 +103,28 @@ GNUのレコードI/O設定GFORTRAN_CONVERT_UNITも記録し、後の起動・�
 合成の直交規格化軌道で、元のSALMON読取処理と変換器の一致、および実ランタイムのTDDFT初期化・独立状態・復元後電流の一致を検証します。実材料のSCF収束や物理量の精度を認定したものではありません。
 
 擬ポテンシャルのhashはファイルと元素を照合するもので、元GSのHamiltonianの一致まで認定しません。local_channel、擬ポテンシャルとXCの整合、元GSの物理的な正当性は利用者が確認してください。変換中は実部・虚部の一時ストリーム合計16×格子点数×軌道数バイトと、同量のネイティブ複素出力が必要です。一時ストリームは完了後に削除し、波動関数のhash照合は1MiBずつ読みます。
+
+## 既存のΓ点GS/1を書き出す
+
+```python
+from salmonpy.dft import GroundStateResult
+from salmonpy.gs_native import GammaRestartConverter
+
+converter = GammaRestartConverter.from_build('NEW_CONVERTER_DIRECTORY/build.json')
+gs = GroundStateResult.open('existing-native-gs-result')
+archive = gs.export_archive('new-portable-gs', converter=converter, orbital_block=16)
+```
+
+書き出し側も同じGNUコンパイラ・対象ランタイムに固定した専用プログラムです。古いimport専用変換器では利用できず、新しい変換器を明示的にビルドしてください。以前の変換器・固定バイナリを上書きしません。
+
+対象はSALMONpyのDFTが生成したGS/1、Γ点1個、非スピン分極、直列ランタイム、実数または複素数の単一wfn.binです。元の全ファイルhash、実行ファイルSHA256、info.binの軌道数・k点数・反復数・ランク数、占有数と電子数、格子・構造・XC・擬ポテンシャルとgs.inpの物理設定を照合します。手編集した入力や別の入力書式は推測せず拒否します。密度混合履歴を使わない初期推定波動関数による再開入力も、既知の形式のみ対応します。
+
+固有値はnative/gs_eigen.dataの単一k点・単一スピン・原子単位の表から取得し、表の占有数とバイナリの占有数も一致させます。ファイル欠損・eV表・非有限値・不一致は拒否し、0や推定値では埋めません。
+
+密度は`rho(r)=sum_b occ[b]*abs(u_b(r))**2`を軌道順に加算して再構成します。元GSの混合密度をそのまま保存した値ではありません。全エネルギーと固有値は元の報告値で、再構成密度から再計算しません。波動関数と占有数の値は保持しますが、密度混合・反復履歴を含む完全なSCFチェックポイントではありません。
+
+`metadata['provenance']`に再構成密度の由来、元GSマニフェスト・ランタイム・書き出しプログラムのhash、実数/複素数の別、局所チャネル、レコードI/O設定を記録します。この任意フィールドがない既存GS/2も読み込めます。書き出したアーカイブを再入力するときは局所チャネルも自動照合します。hashは元GSの真正性や物理的妥当性を認証するものではありません。
+
+元GSは変更せず、検証した3つのネイティブレコードを私有一時領域へコピーします。書き出しプログラムは1軌道ずつ処理し、Python側は分割実数ストリームと複素数の作業ファイルをメモリマップして、全軌道を一括でヒープ確保しません。メモリマップのページキャッシュはOS管理でRSS上限ではなく、一時ディスク領域も必要です。完了・失敗の両方で一時領域とマップを解放し、失敗時は作成中の出力のみを削除します。
+
+実数・複素数の合成ネイティブレコードで、元SALMONの読み書きとの値の一致と、GS/2経由で再入力したTDDFTの電流・保存復元の一致を検証します。合成試験用のGS/1完了メタデータはAPI検査用であり、SCFを収束させた実材料の結果ではありません。

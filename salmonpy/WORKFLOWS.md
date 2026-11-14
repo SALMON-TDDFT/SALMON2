@@ -268,3 +268,5 @@ Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [
 Persistent standalone LD ownership, fixed-dt coefficients and close/context-manager usage: [LD.en.md](LD.en.md).
 
 Portable caller-supplied GS arrays (GS/2), separate from native GS/1; explicit paired Gamma converter supports serial TDDFT initialization: [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).
+
+DFT-generated serial Gamma GS/1 export: GroundStateResult.export_archive with a new paired exporter; real/complex orbitals retained, density reconstructed and provenance recorded. See GS_ARCHIVE.en.md.

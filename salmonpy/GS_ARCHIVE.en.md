@@ -1,6 +1,6 @@
 # Portable GS array archive (GS/2)
 
-`salmonpy.gs_archive.save_ground_state` writes caller-supplied arrays; `GroundStateArchive.open` provides verified metadata and lazy reads. This is separate from native `GroundStateResult` (`salmonpy.gs/1`). Native GS→GS/2 export and SCF convergence certification are unimplemented. GS/2→TDDFT initialization is available under the explicit Gamma converter conditions below.
+`salmonpy.gs_archive.save_ground_state` writes caller-supplied arrays; `GroundStateArchive.open` provides verified metadata and lazy reads. This is separate from native `GroundStateResult` (`salmonpy.gs/1`). Explicit export of DFT-generated Gamma GS/1 is supported below; SCF is not rerun or recertified. GS/2→TDDFT initialization is available under the explicit Gamma converter conditions below.
 
 ```python
 from salmonpy.gs_archive import GroundStateArchive
@@ -35,7 +35,7 @@ No arbitrary machine-wide capacity ceiling. Optional `open(max_bytes=...)` bound
 
 Bundled `include/salmonpy_gs_stream.f90` supports little-endian IEEE real64 hosts. `gs_read_chunk(path,values,status)` and `gs_write_chunk(path,values,status)` operate on flat real64 buffers. Status0 success,1 format/I/O/unsupported host,3 allocation failure,4 nonfinite data. Rejected reads leave caller values intact; writes refuse overwriting existing files. Big-endian hosts are rejected; Fujitsu compilation is not yet verified. The module does not implement JSON, hashes or full archive publication.
 
-Python C-order(1,block,nz,ny,nx) chunk bytes match Fortran(nx,ny,nz,block), x fastest. Supply a flat buffer of nx*ny*nz*block values. SALMON native wfn.bin has stream branches but real/complex, MPI layout and spin conventions must be handled explicitly. info.bin/occupation.bin use compiler-dependent sequential records. Native GS/1→GS/2 export and multi-k/MPI conversion remain unsupported. Do not pass this archive directly as a native restart directory; use the explicit Gamma adapter below.
+Python C-order(1,block,nz,ny,nx) chunk bytes match Fortran(nx,ny,nz,block), x fastest. Supply a flat buffer of nx*ny*nz*block values. SALMON native wfn.bin has stream branches but real/complex, MPI layout and spin conventions must be handled explicitly. info.bin/occupation.bin use compiler-dependent sequential records. Native GS/1→GS/2 export supports the strict Gamma conditions below; multi-k/MPI conversion remains unsupported. Do not pass this archive directly as a native restart directory; use the explicit Gamma adapter below.
 
 Format basis: [Zarr core specification](https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html). Runtime dependencies remain NumPy only; an independent Zarr reader is used for synthetic compatibility validation.
 
@@ -52,3 +52,13 @@ The converter is paired to one runtime SHA256. The supplied `Pseudopotential` ob
 GNU GFORTRAN_CONVERT_UNIT global settings are recorded and must remain unchanged at every later spawn/replay; unit-specific settings are rejected. Compiler/runtime profile is caller-trusted provenance, not cryptographic publisher authentication. MPI runtimes, other target hashes and non-GNU profiles are rejected in this first version. Synthetic orthonormal orbital tests cover actual runtime initialization and bitwise independent/restored currents; they do not establish SCF convergence or real-material accuracy.
 
 Potential hashes bind bytes/species, not the original Hamiltonian: local_channel, pseudopotential/XC consistency and physical GS provenance remain caller responsibilities. Conversion temporarily needs real+imaginary streams totaling16*grid_points*bands bytes in addition to the native complex output of the same size; these streams are removed afterward. Hashing native wavefunctions is streamed in1MiB buffers.
+
+## Export existing Gamma GS/1
+
+Use `gs = GroundStateResult.open('existing-native-gs-result')`, then `archive = gs.export_archive('new-portable-gs', converter=converter, orbital_block=16)`. Explicitly rebuild a new converter with native export support; old import-only build records remain usable for import but cannot export. Existing outputs/binaries are not overwritten.
+
+Only SALMONpy DFT-generated Γ/serial/unpolarized GS/1 with one real or complex wfn.bin is supported. Verify full source hashes, paired runtime, header k/band/iteration/rank counts, occupations/electrons, physical input groups and metadata. Hand-edited/foreign input layouts are rejected. The known wavefunction-only warm-start input variant is supported; mixing history is not migrated. Eigenvalues come from native/gs_eigen.data in atomic units; missing/eV/nonfinite/inconsistent tables are rejected. Table occupations must equal native occupation records.
+
+Density is reconstructed in band order as `sum_b occ[b]*abs(u_b(r))**2`, rather than copied from the mixed native density. Reported energies/eigenvalues are retained, not recomputed. This is not a complete SCF-state checkpoint. Optional typed metadata.provenance records source/runtime/exporter hashes, derived-density origin, native orbital kind, local channels and I/O environment. Existing GS/2 without provenance still loads; reimport enforces recorded local channels. Provenance/hashes do not authenticate a publisher or certify physical correctness.
+
+Source GS is unchanged; three verified records are copied privately. Native export holds one orbital; Python maps split streams and a complex scratch file rather than heap-allocating all wavefunctions. OS-managed mapped pages can still consume RSS; temporary disk is required. Mappings/temp files are released after success/failure. Only a newly claimed incomplete output is removed on failure. Synthetic native real/complex and end-to-end TDDFT tests validate value/current/replay parity, not converged-material SCF accuracy.

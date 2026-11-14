@@ -58,6 +58,8 @@ class GammaRestartConverter:
     sha256:str
     target_sha256:str
     build_record:Path
+    exporter:Path | None=None
+    exporter_sha256:str | None=None
 
     @classmethod
     def from_build(cls,record):
@@ -68,7 +70,12 @@ class GammaRestartConverter:
         if not converter.is_file() or _digest(converter)!=r['sha256']:raise InputError('converter differs from audited executable')
         engine=Path(r['target_executable']).resolve()
         if not engine.is_file() or _digest(engine)!=r['target_sha256']:raise InputError('paired runtime differs from build record')
-        return cls(converter,r['sha256'],r['target_sha256'],p)
+        exporter=None;exporter_sha=None
+        if 'exporter' in r:
+            exporter=Path(r['exporter']).resolve();exporter_sha=r.get('exporter_sha256')
+            if r.get('native_export_parity') is not True or not exporter.is_file() or _digest(exporter)!=exporter_sha:
+                raise InputError('native exporter differs from audited/probed build')
+        return cls(converter,r['sha256'],r['target_sha256'],p,exporter,exporter_sha)
 
     def write_bundle(self,archive,directory,*,executable,pseudopotentials,timeout=300.):
         """Create a new self-contained RT bundle; does not start TDDFT.
@@ -96,6 +103,9 @@ class GammaRestartConverter:
         if any(not isinstance(p,Pseudopotential) for p in potentials):raise InputTypeError('explicit Pseudopotential objects required')
         refs={p['atomic_number']:p['sha256'] for p in m['pseudopotentials']}
         if len(potentials)!=len(refs) or {p.atomic_number:p.sha256 for p in potentials}!=refs:raise InputError('supplied pseudopotentials do not match archive species/hashes')
+        if 'provenance' in m:
+            channels={c['atomic_number']:c['local_channel'] for c in m['provenance']['local_channels']}
+            if {p.atomic_number:p.local_channel for p in potentials}!=channels:raise InputError('local channels differ from source GS')
         model=DFT(tuple(map(int,archive.array('atomic_numbers'))),archive.array('cell_bohr'),archive.array('fractional_positions'),
                   potentials,int(n),m['n_bands'],tuple(reversed(m['grid_zyx'])),(1,1,1),m['xc'])
         from .bands import _input_groups
@@ -136,6 +146,11 @@ class GammaRestartConverter:
             return root.resolve()
         except BaseException:
             shutil.rmtree(root);raise
+
+    def export_archive(self,result,directory,*,orbital_block=16,timeout=300.):
+        """Export verified native Gamma GS/1 to GS/2 with reconstructed density."""
+        from ._gs_export import export_gamma
+        return export_gamma(self,result,directory,orbital_block=orbital_block,timeout=timeout)
 
     def tddft_initial_state(self,archive,*,executable,pseudopotentials,max_steps=1000,threads=1,timeout=300.):
         """Convert into owned immutable TDDFT baseline; no evolving solver starts yet."""
