@@ -3,7 +3,7 @@
 All linked application objects (including the new test object) are audited.
 No full runtime rebuild, prohibited driver, GS calculation or state export.
 """
-import argparse,hashlib,json,os,shlex,subprocess
+import argparse,hashlib,json,os,shlex,subprocess,shutil
 from pathlib import Path
 
 p=argparse.ArgumentParser(description=__doc__)
@@ -11,6 +11,7 @@ p.add_argument('build',type=Path);p.add_argument('output',type=Path)
 p.add_argument('--test',default='test_nlcc_xc_variation')
 p.add_argument('--expect-failure',action='store_true')
 p.add_argument('--ranks',type=int,nargs='+',default=[1])
+p.add_argument('--mpiexec',default='mpiexec',help='MPI launcher name or path')
 a=p.parse_args();root=Path(__file__).resolve().parents[1];build=a.build.resolve()
 source=dict(line.split('=',1) for line in (build/'CMakeCache.txt').read_text().splitlines()
             if '=' in line and not line.startswith(('#','//')))['CMAKE_HOME_DIRECTORY:INTERNAL']
@@ -36,11 +37,16 @@ for arg in link:
     cmd.append(arg)
 cmd += [str(obj),'-o',str(exe)]
 subprocess.run(cmd,cwd=build/'src',check=True)
-record={'test':a.test,'source_root':source,'executable_sha256':hashlib.sha256(exe.read_bytes()).hexdigest()}
+source_spec=json.loads((Path(source)/'salmonpy-runtime-source.json').read_text())
+record={'test':a.test,'source_root':source,'executable_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
+        'runtime_executable_sha256':hashlib.sha256((build/'salmon').read_bytes()).hexdigest(),
+        'runtime_source_patch_sha256':source_spec['patch_sha256']}
 results=[]
 for ranks in a.ranks:
  for threads in (1,2):
-    command=[str(exe)] if ranks==1 else ['/opt/homebrew/bin/mpiexec','--bind-to','none','-n',str(ranks),str(exe)]
+    launcher=shutil.which(a.mpiexec) if ranks>1 else None
+    if ranks>1 and launcher is None: raise FileNotFoundError('MPI launcher not found: '+a.mpiexec)
+    command=[str(exe)] if ranks==1 else [launcher,'--bind-to','none','-n',str(ranks),str(exe)]
     run=subprocess.run(command,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
         env={**os.environ,'OMP_NUM_THREADS':str(threads),'OPENBLAS_NUM_THREADS':'1'},timeout=120)
     print(run.stdout,flush=True)
