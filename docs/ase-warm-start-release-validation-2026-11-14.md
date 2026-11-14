@@ -66,3 +66,16 @@ recorded as null, not a calculation failure. The 4 GiB budget was recorded,
 not enforced by the operating system.
 
 Validated wheel SHA256: `93d2022219447d28ab63669a94a71a38eb137ec73929b963b018e79ce0953f51`.
+
+## Post-push CI verification
+
+At implementation commit `097285ed69e48c9686252e1dc7e8f3e20913dfb5`:
+
+- [LD wheels 43556387938](https://github.com/otobetomohito/SALMONpy/actions/runs/43556387938): success, four jobs (Linux, Windows, Apple Silicon and Intel macOS).
+- [Full runtime bundles 43556387880](https://github.com/otobetomohito/SALMONpy/actions/runs/43556387880): success, three jobs, including the new PZ warm-start regression on each platform and the existing Linux MPI material/embedded TDDFT–E/H tests.
+- [TDDFT native worker 43556387894](https://github.com/otobetomohito/SALMONpy/actions/runs/43556387894): success.
+
+These final statuses were observed in authenticated GitHub UI after push.
+The published preview runtime stays pinned to `8006261b`; its assets were not
+silently replaced by newer CI builds. Libxc warm-start/force validation remains
+the local three-XC matrix above, not a claim of Libxc CI coverage.

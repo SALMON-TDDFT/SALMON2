@@ -35,3 +35,11 @@ Transverse prescribed-A operation is the basic bulk workflow. Longitudinal
 feedback is an explicit field selection, not the default material behavior.
 Acceptance must compare serial and MPI use of the same custom model and retain
 existing SALMON update-order and two-point TDDFT regressions.
+
+Review probe: a local user-written inertial-current model with two Python
+classes was run through both `crystal.respond` and `couple(Transverse(...))`.
+Eleven samples agreed with analytic j=-0.01 A to 1e-16, both routes agreed,
+and stepping one state left another unchanged. This verifies the serial entry
+only, not arbitrary MPI or native-code substitution. Current `TimeSpec` checks
+quantity/time/sign declarations; it does not detect a numerical SI-versus-atomic
+unit mismatch. A future conformance checker must not promise to infer units.
