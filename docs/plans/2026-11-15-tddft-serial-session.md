@@ -8,7 +8,11 @@
 
 **Tech Stack:** Existing external fixed SALMON source + compatibility patch, a separately distributed small adapter, explicit audited fresh GNU/PIC build, ctypes experimental Python wrapper. No full solver import or production changes.
 
-## Accepted design
+## Superseded scope
+
+The user subsequently selected design for different materials and dt in one process. See `2026-11-15-tddft-independent-contexts-design.md`. The local same-configuration prototype was unvalidated, its build stopped, and its files retained outside the checkout; no public feature was delivered. The tasks below are historical planning, not completion claims.
+
+## Original accepted design
 
 User approved the same material/grid/XC/dt scope after review of the context audit. Work proceeds inline in the existing worktree. Start with PZ and prove ownership before extending XC. Keep the baseline (and thus N+1 electronic copies) until session close; do not optimize sharing mutable substructures prematurely. Initialize legacy input only once; never shallow-copy external XC resources. Separate scratch units avoid legacy output collisions. Session close refuses live states; closing/recreating states does not reinitialize global configuration. Handles are monotonic 64-bit IDs and stale handles never refer to a replacement.
 
