@@ -25,7 +25,7 @@ print(gs.energy_hartree, gs.iterations)
 ```
 
 この格子・k点は接続用の例であり、任意の物性に対する収束を保証しません。
-電子数は擬ポテンシャルの価電子数に合わせて明示します。原子番号の総和からは推定しません。
+ASE入口では電子数を省略すると擬ポテンシャルの価電子数から中性系の値を決定し、明示値との一致を確認します。直接DFTを作る場合は電子数を明示します。原子番号の総和からは推定しません。
 対応形式はKYの `_rps.dat` とスカラー・ノルム保存UPFです。UPFのPAW、ultrasoft、SOCは拒否します。
 擬ポテンシャルの元素・価電子数・生成汎関数と計算条件の整合は利用者が確認してください。
 擬ポテンシャルをダウンロードする処理はありません。
@@ -39,7 +39,7 @@ ASEの初期電荷・磁気モーメント指定はこの入口では受け付�
 - モデル作成時に固定：構造、擬ポテンシャルのバイト列、電子数、軌道数、格子、k点、汎関数。
   元のAtomsや擬ポテンシャルファイルを後から変更しても、モデルは変わりません。
 - 計算ごとに指定：SCFの累積反復上限、`rho_dne` 収束許容値、実行ファイル、新規保存先、スレッド数、タイムアウト。
-- `model.run` は毎回新規GS計算。既存の保存先を上書きしません。再開・warm startのAPIではありません。
+- `model.run` は既定で新規GS計算。`initial_guess=completed_gs` を明示すると、検証済みの波動関数を初期値としてSCFを再実行します。既存の保存先を上書きしません。
 
 収束判定は本体の既存フラグを使います。固有状態の更新・混合・計算順は変更しません。
 正常終了だけでは成功とみなさず、収束報告と再開データを確認します。
@@ -61,7 +61,7 @@ with gs.band_initial_state(executable=engine) as initial:
 
 with gs.tddft_initial_state(executable=engine, max_steps=1000) as initial:
     with initial.new_state(dt=0.02) as state:
-        J = state.step([1e-4, 0., 0.])  # 新しい端点のA/c、原子単位
+        j = state.step([1e-4, 0., 0.])  # 新しい端点のA/c、原子単位
 ```
 
 `ground-state.json` に設定・入力・実行ファイルの識別情報・収束結果・nativeファイルの
@@ -86,3 +86,9 @@ Libxcには対応ビルドが必要です。今回の実GS一貫テストはmacO
 本体の力は `gs.forces_hartree_per_bohr` で取得できます。力の格子収束は別途確認します。
 ASE Calculatorと固定セル最適化への接続は独立したASE_CALCULATOR.mdに従ってください。
 TB-mBJの新規GS作成、分子・孤立系、応力、MPI起動はこの入口には含みません。既存のTB-mBJ GSを使うTDDFT入口は引き続き利用できます。
+
+## 波動関数を初期値として再利用する
+
+`model.run(engine, NEW_DIRECTORY, initial_guess=previous_gs)` は、セル・格子・k点・元素順・電子数・軌道数・汎関数・擬ポテンシャルの内容と局所チャンネル・実行ファイルのSHA256が一致する場合に利用できます。原子位置のみ変更可能です。不一致やファイル破損は本体を起動する前に拒否します。新しい保存先は元GSの外に置きます。
+
+`info.bin`、`occupation.bin`、`wfn.bin` を専用領域へコピーし、`read_gs_restart_data='wfn'` と反復数リセットを使います。旧原子位置や混合履歴は読み込みません。SCFは新しい原子位置で密度を再計算して始め、元のGSは変更しません。出力の `ground-state.json/initial_guess` に元GSとハッシュを記録します。warm startで必ず高速化するとは限らず、別の局所解への収束や物理量の収束確認は別途必要です。

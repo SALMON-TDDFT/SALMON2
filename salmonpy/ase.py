@@ -1,6 +1,6 @@
-"""Optional ASE bridge. DFT model creation and band bridging; no Calculator or force API is implied.
+"""Optional ASE bridge for structures, bands and A-driven TDDFT initial states.
 
-ASE and f90nml are imported on use; all native execution stays in salmonpy.bands.
+ASE and f90nml are imported on use; native execution stays in the physics modules.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,19 +169,55 @@ def run_bands(initial,atoms,path,directory,*,reference_ev,**run_options):
     return ASEBandRun(native,result)
 
 
-def dft_from_atoms(atoms,*,pseudopotentials,electrons,states,grid,kmesh,xc='pz'):
+def dft_from_atoms(atoms,*,pseudopotentials,states,grid,kmesh,electrons=None,xc='pz'):
     """Copy ASE geometry into an independent DFT model; no calculation is launched.
 
-    ASE cell/positions use Å. Electron count is explicit and is not inferred from
-    atomic numbers (pseudopotentials remove core electrons). Charged/magnetic ASE
-    initial states are rejected by this initial closed-shell interface.
+    ASE cell/positions use Å. Electrons default to the neutral pseudopotential
+    valence sum; an explicit count must match. Grid, states and kmesh stay
+    explicit and need convergence checks. Charged/magnetic states are rejected.
     """
-    from .dft import DFT
+    from .dft import DFT, Pseudopotential
+    from .sbe import _integer
     Atoms,_,_=_ase_types()
     if not isinstance(atoms,Atoms): raise TypeError('expected ASE Atoms')
     atoms=atoms.copy()
     if not np.all(atoms.pbc): raise ValueError('three-dimensional periodic boundary conditions required')
     if np.any(atoms.get_initial_magnetic_moments()!=0) or np.any(atoms.get_initial_charges()!=0):
-        raise ValueError('ASE initial charge/spin settings are unsupported; specify electron count explicitly for a closed-shell model')
+        raise ValueError('ASE initial charge/spin settings are unsupported; neutral closed-shell model required')
+    pseudopotentials = tuple(pseudopotentials)
+    if any(not isinstance(p, Pseudopotential) for p in pseudopotentials):
+        raise TypeError('expected Pseudopotential objects')
+    by_number = {p.atomic_number: p for p in pseudopotentials}
+    if len(by_number) != len(pseudopotentials) or set(by_number) != set(atoms.numbers):
+        raise ValueError('exactly one pseudopotential per atomic species required')
+    valences = {z: p.valence_electrons for z, p in by_number.items()}
+    neutral = sum(valences[z] for z in atoms.numbers)
+    if electrons is not None and _integer(electrons, 'electrons', 2, 2**31-1) != neutral:
+        raise ValueError(f'electrons must equal neutral pseudopotential valence sum ({neutral}); charged ASE systems are unsupported')
+    electrons = neutral
     return DFT(atoms.numbers,atoms.cell.array/BOHR_ANGSTROM,atoms.get_scaled_positions(wrap=False),
                pseudopotentials,electrons=electrons,states=states,grid=grid,kmesh=kmesh,xc=xc)
+
+
+def tddft_from_atoms(atoms, directory, *, executable, pseudopotentials, states,
+                     grid, kmesh, electrons=None, xc='pz', scf=None,
+                     max_steps=1000, threads=1, timeout=600.):
+    """Run GS in a new directory and return a context-managed TDDFT initial state.
+
+    Uses the existing DFT/GS loader without changing propagation. The audited
+    executable must support both DFT and the TDDFT worker. GS files remain in
+    directory, also on failure. Each initial.new_state creates an independent
+    A/c-driven calculation. No runtime acquisition or compilation is implicit.
+    """
+    from .dft import SCFSettings
+    from .sbe import _integer
+    from .ld import _positive
+    max_steps = _integer(max_steps, 'max_steps', 1, 2**31-2)
+    threads = _integer(threads, 'threads', 1, 2**31-1)
+    timeout = _positive(timeout, 'timeout')
+    scf = SCFSettings() if scf is None else scf
+    model = dft_from_atoms(atoms, pseudopotentials=pseudopotentials, states=states,
+                           grid=grid, kmesh=kmesh, electrons=electrons, xc=xc)
+    gs = model.run(executable, directory, scf=scf, threads=threads, timeout=timeout)
+    return gs.tddft_initial_state(executable=executable, max_steps=max_steps,
+                                  threads=threads, timeout=timeout)

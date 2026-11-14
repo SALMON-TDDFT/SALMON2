@@ -133,3 +133,9 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.example
 一プロセス一回のネイティブ生成に限定され、別の試行は新しいMPIジョブで開始します。
 
 TDDFTでは実用上1次元の伝播・層構造を推奨し、電子応答を結合する3次元はSBEまたはユーザー作成の電流計算コードを推奨します。この40³・二点の例は接続回帰用で、1次元化や3次元TDDFTの標準的な研究条件を示すものではありません。
+
+## ASEからSiの電流を計算
+
+`python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence`
+
+ASE・f90nmlと、DFT/TDDFT/PZ対応の監査済みランタイムが必要です。[ASEガイド](../ASE.md)を参照。中性電子数を自動決定し、短いSi接続試験を1スレッドで実行します。光学物性の収束例ではありません。

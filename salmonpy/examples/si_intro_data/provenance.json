@@ -9,10 +9,43 @@
     "license": "Apache-2.0; upstream repository LICENSE copied as LICENSE.txt",
     "note": "KY Si file distributed with upstream PZ Si GS example; generator metadata not encoded in this legacy file"
   },
-  "runtime_commit": "6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c",
-  "runtime_run_url": "https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653",
-  "expires_at": "2027-02-12T01:37:54Z",
   "runtime_artifacts": [
+    {
+      "name": "salmonpy-runtime-macos-15",
+      "release_url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15.zip",
+      "platform": {
+        "system": "darwin",
+        "machine": "arm64",
+        "libc": "",
+        "version": "15.8.2"
+      },
+      "outer_sha256": "29054a6ce55f2eb95606cfd0484d321df2838022010b58edbff72bf221d5b8c2",
+      "archive_member": "salmonpy-runtime-darwin-arm64.zip"
+    },
+    {
+      "name": "salmonpy-runtime-macos-15-intel",
+      "release_url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15-intel.zip",
+      "platform": {
+        "system": "darwin",
+        "machine": "x86_64",
+        "libc": "",
+        "version": "15.7.9"
+      },
+      "outer_sha256": "303e462f750b9539b87e183243bc3693ff807a084902d159641a04a47a0efaf6",
+      "archive_member": "salmonpy-runtime-darwin-x86_64.zip"
+    },
+    {
+      "name": "salmonpy-runtime-ubuntu-22.04",
+      "release_url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-ubuntu-22.04.zip",
+      "platform": {
+        "system": "linux",
+        "machine": "x86_64",
+        "libc": "glibc",
+        "version": "2.35"
+      },
+      "outer_sha256": "cade44714392596664ce11441f1b768c00985c1e90c1ec8dc0ab63569626e48d",
+      "archive_member": "salmonpy-runtime-linux-x86_64.zip"
+    },
     {
       "name": "salmonpy-runtime-macos-15",
       "artifact_id": 14092143545,
@@ -40,5 +73,13 @@
     "input.json": "62a4139648f23212ea2c5fbb543c49e86838abacd1d6fc499955fe685de147fc",
     "expected.json": "c5a838a801720457a47f2579daffcd266ad93db88b3c5c815b85b1cf9cf0a976",
     "LICENSE.txt": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
-  }
+  },
+  "reference_runtime": {
+    "runtime_commit": "6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c",
+    "runtime_run_url": "https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653",
+    "expires_at": "2027-02-12T01:37:54Z"
+  },
+  "runtime_commit": "8006261b9e48541b591e496a813b3f06ca5fc1b1",
+  "runtime_run_url": "https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676",
+  "runtime_release_url": "https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14"
 }

@@ -38,7 +38,7 @@ INPUT_CONTRACT.md に従います。材料係数はモデル作成時、dtと初
 
 ## 配布
 
-本体ランタイムの準備は RUNTIME.md / RUNTIME.en.md と manual.json の `runtime` タスクに従います。既存の監査済みランタイムを再利用し、次にOS・CPU・必要機能に合う配布物を探します。対応品がない場合だけ明示的な `python -m salmonpy.runtime build` を案内します。importやinstall失敗を理由に自動ビルドしません。現ブランチのActions配布物と将来の公開Releasesを区別し、公開URLを作り話で補わないでください。Libxcを必要とする計算には `--require libxc` を付け、PZ版に勝手に代替しません。取得・検証した `load_runtime` の戻り値を既存の `executable=` に渡します。
+本体ランタイムの準備は RUNTIME.md / RUNTIME.en.md と manual.json の `runtime` タスクに従います。既存の監査済みランタイムを再利用し、次にOS・CPU・必要機能に合う配布物を探します。対応品がない場合だけ明示的な `python -m salmonpy.runtime build` を案内します。importやinstall失敗を理由に自動ビルドしません。独立SALMONpyの非公開Releaseと期限付きActions配布物を区別し、公開URLを作り話で補わないでください。Libxcを必要とする計算には `--require libxc` を付け、PZ版に勝手に代替しません。取得・検証した `load_runtime` の戻り値を既存の `executable=` に渡します。
 
 wheelの構築と修復・OS別検証は PACKAGING.md に従います。検証済み環境とCI設定のみの環境を混同しません。wheel利用者にはFortranコンパイラを要求せず、ソース構築時のみ要求します。
 
@@ -94,10 +94,13 @@ BANDS.mdを参照してください。`bands.BandStructure.from_salmon` と `.pl
 ASE連携は任意の独立モジュール `salmonpy.ase`。ASE.mdを参照。
 `run_bands` は構造を照合し、ASEのk点列をそのまま計算します。Calculator・力は独立したASE_CALCULATOR.mdの対応範囲を参照してください。
 
-GS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DFT.mdに従い、電子数・擬ポテンシャル・格子を明示します。
-収束済み `GroundStateResult` からバンド／TDDFT初期状態を作れます。PZ/KYのCalculatorと本体の力はASE_CALCULATOR.mdを参照してください。
+GS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DFT.mdに従います。ASE入口の電子数はKY/NC-UPFの価電子数から中性系として決定・照合します。直接DFTでは電子数を明示します。軌道数・格子・k点は必須で、収束保証のある自動既定値はありません。
+`salmonpy.ase.tddft_from_atoms` はGSを保存して既存TDDFT初期状態を返します。ASE.en.mdとexamples/ase_tddft.pyも参照してください。結晶はA/c駆動、戻り値は電荷電流j。状態は独立で、ランタイムの自動取得・コンパイルはしません。
+収束済み `GroundStateResult` からバンド／TDDFT初期状態を作れます。PZ／Libxc-PZ／Libxc-PBE・KY／NC-UPFのCalculatorと本体の力はASE_CALCULATOR.mdを参照してください。
 
-`salmonpy.ase_calculator.SalmonCalculator` は任意依存の独立モジュール。energy/forcesのみ、PZ/KY・単一ランクが対象です。
+`salmonpy.ase_calculator.SalmonCalculator` は任意依存の独立モジュール。energy/forcesのみ、PZ／Libxc-PZ／Libxc-PBEとKY／NC-UPF・単一ランクが対象です。Libxc対応ランタイムと擬ポテンシャルの整合を確認します。
+`warm_start=True` は直前の互換なGSの波動関数だけを再利用し、既定Falseです。セル・計算条件が変われば新規SCF、元データが破損すればエラーです。旧原子位置・混合履歴は再利用しません。
+結晶TDDFTの基本はtransverse（trans_longi=tr）。Longitudinalは明示的な場の選択です。孤立系・non-collinear・Ehrenfestは初版の目標として残しますが、今回のASE APIの対応済み機能には含めません。
 粗い格子のエネルギー有限差分はegg-box効果を含むため正解と仮定せず、剛体並進と格子収束を調べます。
 
 ## 初心者への最初の案内

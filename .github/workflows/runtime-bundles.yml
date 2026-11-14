@@ -2,7 +2,7 @@ name: Full runtime bundles
 on:
   workflow_dispatch:
   push:
-    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*ms1d*.py', 'tools/test_longitudinal_salmon.py', 'salmonpy/maxwell.py', 'salmonpy/timing.py', 'salmonpy/examples/mpi_multiscale_tddft.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
+    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'salmonpy/dft.py', 'salmonpy/ase*.py', 'tools/test_ase_warm_start.py', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*ms1d*.py', 'tools/test_longitudinal_salmon.py', 'salmonpy/maxwell.py', 'salmonpy/timing.py', 'salmonpy/examples/mpi_multiscale_tddft.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
 permissions:
   contents: read
 jobs:
@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install numpy delocate
+      - run: python -m pip install numpy delocate 'ase>=3.26,<4' 'f90nml>=1.4,<2'
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev patchelf
@@ -61,6 +61,15 @@ jobs:
           python tools/test_band_path_native.py "$SALMONPY_RUNTIME_SOURCE"
           python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-test"
           SALMONPY_TEST_PC=y python tools/test_tddft_entrypoint.py "$RUNNER_TEMP/runtime-build/build/salmon" "$RUNNER_TEMP/relocated/bin/salmon" "$RUNNER_TEMP/relocation-pc-test"
+      - name: ASE PZ warm-start regression
+        shell: bash
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: |
+          python tools/test_ase_warm_start.py "$RUNNER_TEMP/relocated/bin/salmon" \
+            salmonpy/examples/si_intro_data/Si_rps.dat salmonpy/examples/si_intro_data/Si_rps.dat \
+            "$RUNNER_TEMP/ase-warm-start" --xc pz
       - name: Native MPI material corner regression (Linux)
         if: runner.os == 'Linux'
         shell: bash

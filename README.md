@@ -3,8 +3,8 @@
 Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](salmonpy/RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
 
 Python components for material response, electronic dynamics, electromagnetic
-simulation and visualization. This repository is being prepared for independent
-SALMONpy distribution; it is not a SALMON application source checkout.
+simulation and visualization. This is the independent SALMONpy repository; it is not a SALMON application
+source checkout.
 
 - [English guide](salmonpy/README.en.md) · [日本語ガイド](salmonpy/README.md)
 - [Python examples](salmonpy/examples/README.en.md) · [サンプル集](salmonpy/examples/README.md)
@@ -41,3 +41,11 @@ Do not commit build products, ground states or visualization datasets.
 
 SALMONpy is derived from SALMON (Apache-2.0). See [LICENSE](LICENSE),
 [NOTICE](NOTICE) and [third-party notices](LICENSE.THIRD-PARTY).
+
+## Migration provenance
+
+Moved from `SALMON-TDDFT/SALMON2:salmonpy-field-components` on 2026-11-14 at
+`8006261b9e48541b591e496a813b3f06ca5fc1b1`, retaining the full 5,282-commit history.
+The Si starter milestones include `78e06940` and `811bbe1c`; see [NOTICE](NOTICE).
+A shallow clone hides earlier history. `runtime/source.json` deliberately retains
+the pinned upstream SALMON source URL; it is not a distribution link.

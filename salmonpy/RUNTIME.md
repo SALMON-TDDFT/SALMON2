@@ -21,7 +21,7 @@ python -m salmonpy.runtime install my-runtime --catalog CATALOG_URL --require td
 python -m salmonpy.runtime verify my-runtime --require tddft libxc
 ```
 
-**独立リポジトリは未作成で、公開カタログはまだありません。** 同梱カタログも空です。URLを推測しないでください。候補が複数なら `--artifact ID` で指定します。対応品がなければエラーとbuild入口を返し、勝手にコンパイルしたりLibxcを外したりしません。保存先は新規ディレクトリです。HTTPS、ZIPと全ファイルのSHA256、展開パスを検査します。ハッシュは署名ではないので、カタログは信頼できる配布元から取得します。
+**[独立SALMONpyの試用版Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14)を配布しています。** 同梱カタログには3環境を登録しました。非公開リポジトリなので、認証済みブラウザで `catalog.json` と対応するOS・CPU名の内側ZIPをダウンロードし、下記の `--archive` で導入します。URLによる匿名ダウンロードは利用できません。Libxc版はこのReleaseに含みません。候補が複数なら `--artifact ID` で指定します。対応品がなければエラーとbuild入口を返し、勝手にコンパイルしたりLibxcを外したりしません。保存先は新規ディレクトリです。HTTPS、ZIPと全ファイルのSHA256、展開パスを検査します。ハッシュは署名ではないので、カタログは信頼できる配布元から取得します。
 
 ## 現在のブランチから取得する
 

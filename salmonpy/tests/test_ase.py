@@ -86,7 +86,7 @@ class ASEBridgeTest(unittest.TestCase):
         from salmonpy.ase import dft_from_atoms,BOHR_ANGSTROM
         from salmonpy.dft import Pseudopotential
         atoms=Atoms('Si',positions=[[0,0,0]],cell=np.eye(3)*5,pbc=True)
-        pseudo=Pseudopotential(14,2,'_rps.dat',b'fixture')
+        pseudo=Pseudopotential(14,2,'_rps.dat',b'2000 .01 2 4.0\n')
         args=dict(pseudopotentials=[pseudo],electrons=4,states=8,grid=[12]*3,kmesh=[2]*3)
         model=dft_from_atoms(atoms,**args)
         atoms.positions[0,0]=1
@@ -101,3 +101,44 @@ class OptionalDependencyTest(unittest.TestCase):
     def test_import_does_not_load_ase(self):
         import subprocess,sys
         subprocess.run([sys.executable,'-c',"import sys; import salmonpy.ase; assert 'ase' not in sys.modules; assert 'f90nml' not in sys.modules"],check=True)
+
+@unittest.skipUnless(HAS_ASE, 'optional ASE dependencies')
+class ASEOpticalTest(unittest.TestCase):
+    def inputs(self):
+        from ase import Atoms
+        from salmonpy.dft import Pseudopotential
+        atoms = Atoms('Si2', scaled_positions=[[0,0,0],[.25,.25,.25]], cell=np.eye(3)*5, pbc=True)
+        options = dict(pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'2000 .01 2 4.0\n')],
+                       states=8, grid=(12,12,12), kmesh=(2,2,2))
+        return atoms, options
+
+    def test_neutral_count_and_explicit_mismatch(self):
+        from salmonpy.ase import dft_from_atoms
+        atoms, options = self.inputs()
+        self.assertEqual(dft_from_atoms(atoms, **options).electrons, 8)
+        self.assertEqual(dft_from_atoms(atoms, electrons=8, **options).electrons, 8)
+        for count in (4, 10, True, 8.5):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                dft_from_atoms(atoms, electrons=count, **options)
+
+    def test_optical_entry_composes_existing_runner(self):
+        from unittest.mock import patch
+        from salmonpy.ase import tddft_from_atoms
+        from salmonpy.dft import DFT, GroundStateResult, SCFSettings
+        from salmonpy.fdtd import SalmonExecutable
+        atoms, options = self.inputs()
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = SalmonExecutable(Path(tmp)/'fake', '0'*64)
+            gs = GroundStateResult(Path(tmp)/'gs', -1., 10)
+            marker = object()
+            scf = SCFSettings(tolerance=1e-10)
+            with patch.object(DFT, 'run', return_value=gs) as run, patch.object(GroundStateResult, 'tddft_initial_state', return_value=marker) as load:
+                initial = tddft_from_atoms(atoms, gs.directory, executable=engine, max_steps=20,
+                                          threads=2, timeout=60., scf=scf, **options)
+                self.assertIs(initial, marker)
+                run.assert_called_once_with(engine, gs.directory, scf=scf, threads=2, timeout=60.)
+                load.assert_called_once_with(executable=engine, max_steps=20, threads=2, timeout=60.)
+            for extra in ({'max_steps':0}, {'threads':0}, {'electrons':4}):
+                with patch.object(DFT, 'run') as run, self.assertRaises(ValueError):
+                    tddft_from_atoms(atoms, gs.directory, executable=engine, **options, **extra)
+                run.assert_not_called()

@@ -1,6 +1,6 @@
 # Si: from an installed wheel to charge current
 
-[日本語](SI_INTRO.md) · Topic: `si_intro` · Paired revision: `2026-11-14.1`
+[日本語](SI_INTRO.md) · Topic: `si_intro` · Paired revision: `2026-11-14.2`
 
 This starter calculates a real self-consistent Si ground state, then propagates
 it under a prescribed A/c pulse and checks the charge current against a fixed
@@ -33,26 +33,15 @@ Windows LD/SBE wheels do not establish Windows TDDFT support.
 
 ## 2. Download the matching prebuilt runtime
 
-Use the exact artifact from [successful runtime run 43541732653](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653),
-commit `6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c`:
+Download from the [SALMONpy runtime preview Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14). All three platform jobs passed in [CI run 43554502676](https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676), commit `8006261b9e48541b591e496a813b3f06ca5fc1b1`.
 
-| Machine | Artifact |
+| Machine / 環境 | ZIP |
 |---|---|
-| Apple Silicon Mac | [salmonpy-runtime-macos-15](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653/artifacts/14092143545) |
-| Intel Mac | [salmonpy-runtime-macos-15-intel](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653/artifacts/14091993925) |
-| Linux x86_64 / glibc | [salmonpy-runtime-ubuntu-22.04](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653/artifacts/14092432957) |
+| Apple Silicon Mac | [salmonpy-runtime-macos-15.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15.zip) |
+| Intel Mac | [salmonpy-runtime-macos-15-intel.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15-intel.zip) |
+| Linux x86_64 / glibc | [salmonpy-runtime-ubuntu-22.04.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-ubuntu-22.04.zip) |
 
-GitHub may require sign-in to download Actions artifacts. These are branch
-artifacts, not permanent public Releases. Their recorded expiry is 2027-02-12;
-if unavailable, request a replacement starter with new verified provenance.
-Do not substitute a different run or disable checksum validation. Runtime OS
-compatibility is checked during preparation (the arm64 Mac baseline is 15.8.2).
-These profiles provide PZ/TB-mBJ and one MPI rank, without Libxc. This fixed
-starter uses PZ; it does not require Libxc.
-
-Keep the downloaded **outer Actions ZIP** intact. You do not need to unpack the
-inner runtime ZIP or edit a catalog. In the next command `RUNTIME_ARTIFACT.zip`
-means this outer ZIP, using its actual downloaded name.
+This is a private repository: sign in with an account granted access. Release assets do not have the Actions artifact expiry. Keep the outer ZIP intact; do not pass an automatically extracted directory. Use its actual filename for `RUNTIME_ARTIFACT.zip`. These single-rank PZ/TB-mBJ runtimes do not include Libxc. OS compatibility is checked during preparation (macOS arm64 >=15.8.2, Intel >=15.7.9, Linux glibc >=2.35). Do not disable checksums or substitute unverified archives.
 
 ## 3. Prepare and calculate
 

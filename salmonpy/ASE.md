@@ -1,4 +1,4 @@
-# ASEとの独立したバンド連携
+# ASEとの構造・バンド・光応答連携
 
 `salmonpy.ase` は任意の連携モジュールです。ASEとの構造・経路の照合と結果変換を
 担当し、計算の実行・初期状態の保護はASEに依存しない `salmonpy.bands` が担当します。
@@ -70,7 +70,7 @@ ASEではセルは行ベクトル（Å）、k点は逆格子の分数座標、�
 - 固定イオン・周期・非スピン分極。PZ／Libxc-PZ／Libxc-PBEは既存バンド入口に準拠。
 - バイナリGS自体の生成条件を解析して入力と照合する機能ではありません。
   GSと元入力・擬ポテンシャルの一致は利用者が確認します。
-- PZ/KYのASE Calculator・力・固定セル最適化は独立した [ASE_CALCULATOR.md](ASE_CALCULATOR.md) に対応。応力・MPI起動は未実装。
+- PZ／Libxc-PZ／Libxc-PBE・KY／NC-UPFのASE Calculator・力・固定セル最適化は独立した [ASE_CALCULATOR.md](ASE_CALCULATOR.md) に対応。応力・MPI起動は未実装。
   構造からのGS計算と全エネルギー取得は別途 [DFT.md](DFT.md) に対応。
 - ASE 3.29.0とmacOS arm64上で実GSの結合を検証。斜交セルは変換と本体経路処理の
   単体検証であり、斜交セルの実GS全体の検証ではありません。
@@ -82,3 +82,58 @@ https://docs.ase-lib.org/_modules/ase/spectrum/band_structure.html
 ## 構造からGSを用意する
 
 `dft_from_atoms` でASE非依存のDFTモデルを作れます。詳細は [DFT.md](DFT.md)。
+
+## 中性系の電子数と光応答
+
+`dft_from_atoms` と `SalmonCalculator` の `electrons` は省略できます。
+KYの先頭行の第4項、またはNC-UPFの `PP_HEADER/z_valence` を読み、原子数を掛けて
+中性系の電子数を決めます。`Pseudopotential.valence_electrons` でも参照できます。
+明示した電子数がこの合計と異なる場合、計算開始前に拒否します。読めないヘッダー、
+非整数の価電子数、奇数電子の閉殻系も拒否し、原子番号からの推測や丸めは行いません。
+KYには元素名の自己確認情報がないため、`atomic_number` と実際のファイルの対応、
+生成汎関数は引き続き利用者が確認します。
+
+`states`・`grid`・`kmesh` は必須です。資源予算と目的から候補を選び、格子・k点・
+非占有状態数・時間刻みを変えて対象物理量の収束を調べてください。中性電子数が正しい
+ことと、物性が収束していることは別です。以下の16³格子はSi接続試験の条件です。
+
+```python
+from salmonpy.ase import tddft_from_atoms
+from salmonpy.crystal import respond
+from salmonpy.dft import SCFSettings
+
+# atoms、pseudo、監査済みengine、A/c波形driveを先に用意する。
+with tddft_from_atoms(
+    atoms, 'new-gs', executable=engine, pseudopotentials=[pseudo],
+    states=32, grid=(16, 16, 16), kmesh=(2, 2, 2),
+    scf=SCFSettings(max_iterations=500, tolerance=1e-10),
+    max_steps=20, threads=1,
+) as initial:
+    response = respond(initial, drive, output_directory='new-current')
+    # 別の計算は独立状態から始まる。stepも同じA→j契約。
+    with initial.new_state(dt=0.02) as state:
+        j = state.step([0.0, 0.0, 1e-4])
+```
+
+`tddft_from_atoms` はGS計算と既存の初期状態ローダーを呼び、
+`TDDFTInitialState` を返します。`with` で初期スナップショットを解放しても、
+`new-gs` の基底状態とログは残ります。再利用には `GroundStateResult.open` を使います。
+実行ファイルにはDFTとTDDFT workerの両方が必要です。実行時の自動取得・コンパイルはありません。
+周期・中性・非スピン分極・固定イオン・一MPIランク、PZ/Libxc-PZ/Libxc-PBEが対象です。
+TB-mBJのGS生成、孤立系、non-collinear、イオン運動、応力は今回追加しません。Calculatorの明示的なwarm startはASE_CALCULATOR.mdを参照してください。
+Aは原子単位のA/c、戻り値は**電荷電流密度j**（SALMON物質電流Jの負号）です。
+
+実行可能な例は [examples/ase_tddft.py](examples/ase_tddft.py)。
+[Si入門例](SI_INTRO.md)で取得・展開したランタイムを再利用できます。
+
+```sh
+python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence
+```
+
+8原子Si・16³格子・2³ k点・20ステップを1スレッドで計算します。
+`gs/`、`rt/`、`current.npz`（time, A, current）、`report.json` を保存し、
+許容誤差付きの既存Si期待値と比較します。独立性検査は逆波形と元波形を順番に再計算します。
+短い接続試験であり、収束した光学スペクトルの例ではありません。
+資源計測は別扱いで、サンプル自体はピークメモリを測定・強制制限しません。
+
+結晶TDDFTの標準は **transverse**（`trans_longi='tr'`）です。Longitudinalは明示的に場の部品を選ぶ場合だけ使います。孤立系・non-collinear・Ehrenfestは初版の目標に含まれますが、現時点のこの入口では未対応です。

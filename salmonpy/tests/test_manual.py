@@ -65,3 +65,15 @@ class ManualTest(unittest.TestCase):
         self.assertTrue({'sbe','tddft'} <= {t['id'] for t in search('laser induced current')['tasks']})
         self.assertEqual(search('初めて', lang='en')['language'], 'en')
         self.assertTrue(search('初めて', lang='en')['getting_started']['first_action'].isascii())
+
+    def test_ase_optical_task_and_guides(self):
+        from importlib.resources import files
+        d = load()
+        task = next(t for t in d['tasks'] if t['id'] == 'ase_tddft')
+        self.assertIn('salmonpy.ase.tddft_from_atoms', task['api'])
+        self.assertEqual(task['guides']['en'], 'ASE.en.md')
+        self.assertIn('ase_tddft', {t['id'] for t in search('Atoms current')['tasks']})
+        self.assertTrue(files('salmonpy').joinpath('examples/ase_tddft.py').is_file())
+        for name in ('ASE.md', 'ASE.en.md', 'DFT.md', 'ASE_CALCULATOR.md', 'AI_USAGE.md'):
+            self.assertEqual(d['documents'][name]['sections'][0]['text'],
+                             files('salmonpy').joinpath(name).read_text(encoding='utf-8'))

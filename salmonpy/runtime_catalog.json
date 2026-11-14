@@ -1,5 +1,72 @@
 {
   "schema": "salmonpy.runtimes/1",
-  "artifacts": [],
-  "note": "No published assets are registered yet. Use a trusted release catalog with --catalog. CI artifacts alone are not public releases."
+  "artifacts": [
+    {
+      "id": "salmonpy-runtime-darwin-arm64",
+      "interface": "salmonpy-runtime/2",
+      "platform": {
+        "system": "darwin",
+        "machine": "arm64",
+        "libc": "",
+        "version": "15.8.2"
+      },
+      "features": [
+        "dft",
+        "tddft",
+        "fdtd",
+        "bands",
+        "pz",
+        "tbmbj",
+        "single-rank",
+        "material-id-independent"
+      ],
+      "url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-darwin-arm64.zip",
+      "sha256": "9d3a8adec666186349c6d6facf29fec94ee8fa4ef51084993bece7972021f605"
+    },
+    {
+      "id": "salmonpy-runtime-darwin-x86_64",
+      "interface": "salmonpy-runtime/2",
+      "platform": {
+        "system": "darwin",
+        "machine": "x86_64",
+        "libc": "",
+        "version": "15.7.9"
+      },
+      "features": [
+        "dft",
+        "tddft",
+        "fdtd",
+        "bands",
+        "pz",
+        "tbmbj",
+        "single-rank",
+        "material-id-independent"
+      ],
+      "url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-darwin-x86_64.zip",
+      "sha256": "e2e52ace0b4e827edb563fc91e275da743a6319812e5dabd1ca78158a100d01e"
+    },
+    {
+      "id": "salmonpy-runtime-linux-x86_64",
+      "interface": "salmonpy-runtime/2",
+      "platform": {
+        "system": "linux",
+        "machine": "x86_64",
+        "libc": "glibc",
+        "version": "2.35"
+      },
+      "features": [
+        "dft",
+        "tddft",
+        "fdtd",
+        "bands",
+        "pz",
+        "tbmbj",
+        "single-rank",
+        "material-id-independent"
+      ],
+      "url": "https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-linux-x86_64.zip",
+      "sha256": "1328e58f6b5407de3a24c38266e282adc92c3a276006d7d84b6e2e1e5a987b59"
+    }
+  ],
+  "note": "Private SALMONpy Release: download with repository access; use --archive for local installation without CLI GitHub authentication."
 }

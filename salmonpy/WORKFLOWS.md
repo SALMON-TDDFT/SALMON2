@@ -247,7 +247,7 @@ Optional, independent ASE structure/path/band-result bridge: [ASE.md](ASE.md).
 
 Prepare a converged GS from ASE or plain arrays: [DFT.md](DFT.md).
 
-Optional ASE Calculator with native PZ/KY forces: [ASE_CALCULATOR.md](ASE_CALCULATOR.md).
+Optional ASE Calculator with native PZ/Libxc-PZ/Libxc-PBE forces (KY/NC-UPF) and opt-in wavefunction warm start: [ASE_CALCULATOR.md](ASE_CALCULATOR.md).
 
 Field components with the j→A protocol (SALMON tr / lo / 2d and 1D multiscale propagation) and the `couple` driver: [FIELDS.en.md](FIELDS.en.md). Interfaces exchange the charge current j; components declare their time layout (salmonpy.time/1), checked by `couple`.
 

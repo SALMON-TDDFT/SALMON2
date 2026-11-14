@@ -3,8 +3,8 @@
 `salmonpy.ase_calculator.SalmonCalculator` は独立した任意モジュールです。
 このモジュールのimportにはASEが必要ですが、SALMONpyの通常のimportやLDなどには不要です。
 対応する物理量は `energy`（eV）と `forces`（eV/Å）。応力・free_energyは公開しません。
-初期対応範囲は3次元周期・固定イオンSCF・非スピン分極・PZ＋スカラーKY擬ポテンシャルです。
-Libxc/UPFやTB-mBJの力をこのCalculatorで対応済みとはしていません。
+対応範囲は3次元周期・中性・固定イオンSCF・非スピン分極、PZ／Libxc-PZ／Libxc-PBEとスカラーKY／NC-UPF擬ポテンシャルです。
+Libxcには対応したランタイムが必要です。擬ポテンシャルの生成汎関数・元素との整合を確認してください。TB-mBJの力は対象外です。
 
 ```python
 from ase.build import bulk
@@ -28,6 +28,8 @@ forces = atoms.get_forces()
 gs = atoms.calc.last_ground_state
 ```
 
+`electrons` は省略可能です。各構造の擬ポテンシャル価電子数の合計から決定し、明示値が異なればネイティブ計算前に拒否します。`states`・`grid`・`kmesh` は明示指定です。
+
 上の格子はSiの例であり、任意の系や目標精度への推奨値ではありません。
 実行ファイルにはGS収束報告と `gs_forces.dat` の `SALMONPY_FORCES_V1` 報告を含めます。
 監査と実行環境の準備はDFT.md、追加依存はASE.mdを参照してください。
@@ -36,7 +38,7 @@ gs = atoms.calc.last_ground_state
 
 同じ構造へのenergy/forces問い合わせはASEのキャッシュを使います。位置・セル・元素・
 周期境界・初期電荷/磁気設定が変われば、新しいGS計算を行います。初期電荷・磁気設定に
-非ゼロ値があれば現在の非スピン分極入口では拒否します。前のGSの流用はしません。
+非ゼロ値があれば現在の非スピン分極入口では拒否します。既定では前のGSを流用しません。`warm_start=True` の場合は下記の条件で波動関数を再利用します。
 
 各計算は指定ディレクトリ内の新規 `gs-...` に保存し、以前の結果を上書きしません。
 このため長い最適化では保存量が増えます。結果の保持・削除は利用者が管理します。
@@ -71,3 +73,11 @@ gs = atoms.calc.last_ground_state
 エネルギー低下と接続動作を確認するテストです。構造最適化の収束や物性精度の保証ではありません。
 
 参考： https://pubs.rsc.org/en/content/articlehtml/2015/cp/c5cp00351b
+
+## warm start（明示的に有効化）
+
+`SalmonCalculator(..., warm_start=True)` を指定すると、直前の成功したGSと計算条件が一致する場合、波動関数を新しい原子位置のSCF初期値にします。セル・格子・k点・元素順・擬ポテンシャル・電子数・軌道数・XCが異なる場合は新規SCFです。元ファイルの破損はエラーとして扱い、黙って新規SCFへ切り替えません。失敗後は古いエネルギー・力・初期値候補を返しません。
+
+混合履歴・旧原子位置は引き継がず、反復数をリセットします。状態と出力先は各計算で独立です。`warm_start` は既定Falseで、従来の更新経路を維持します。SCFの同一許容誤差で新規計算とのエネルギー・力を比較してから、最適化に使ってください。高速化は系によって変わります。
+
+結晶TDDFTの基本は **transverse**（`trans_longi='tr'`）。Longitudinalは誘起場を扱う別の明示的な選択で、Calculatorの既定ではありません。ASEの固定セル最適化／Born–Oppenheimer MDと、電子・イオンを同時伝播するEhrenfestは別です。初版の目標には孤立系・non-collinear・Ehrenfestを残し、今回の対応済み範囲と区別します。

@@ -46,6 +46,28 @@ class Pseudopotential:
     @property
     def sha256(self): return hashlib.sha256(self.data).hexdigest()
 
+    @property
+    def valence_electrons(self):
+        """Integer ionic charge from KY or NC-UPF metadata, never atomic Z.
+
+        This checks the charge header only, not the entire potential or its XC
+        provenance. Fractional charges are unsupported by the neutral ASE path.
+        """
+        try:
+            if self.suffix == '_rps.dat':
+                # SALMON Read_PS_KY: mr, step, mlps, rzps.
+                header = self.data.decode('utf-8').splitlines()[0]
+                value = header.split('!', 1)[0].replace(',', ' ').split()[3]
+            else:
+                import xml.etree.ElementTree as ET
+                value = ET.fromstring(self.data).find('PP_HEADER').get('z_valence')
+            charge = float(value.replace('D', 'e').replace('d', 'e'))
+            if not np.isfinite(charge) or not charge.is_integer() or not 1 <= charge <= self.atomic_number:
+                raise ValueError('unsupported ionic charge')
+        except (ValueError, IndexError, AttributeError, UnicodeError) as exc:
+            raise ValueError('pseudopotential requires a valid integer valence charge') from exc
+        return int(charge)
+
 
 @dataclass(frozen=True)
 class SCFSettings:
@@ -159,13 +181,37 @@ class DFT:
 /
 """
 
-    def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.):
+    def _restart_signature(self):
+        """Physical/discretization identity; only ionic positions may change."""
+        return {'xc': self.xc, 'electrons': self.electrons, 'states': self.states,
+                'grid': list(self.grid), 'kmesh': list(self.kmesh),
+                'cell_bohr': self.cell.tolist(), 'numbers': list(self.numbers),
+                'pseudopotentials': [{'atomic_number': p.atomic_number,
+                                     'sha256': p.sha256, 'local_channel': p.local_channel}
+                                    for p in self.pseudopotentials]}
+
+    def run(self,executable,directory,*,scf=SCFSettings(),threads=1,timeout=600.,initial_guess=None):
         import os,subprocess
+        import shutil
         if not isinstance(executable,SalmonExecutable): raise TypeError('expected SalmonExecutable')
         text=self.input_text(scf)
         threads=_integer(threads,'threads',1,2**31-1);timeout=_positive(timeout,'timeout')
         if _digest(executable.path)!=executable.sha256: raise ValueError('executable checksum mismatch')
-        dest=Path(directory).expanduser().resolve();dest.mkdir(parents=True,exist_ok=False)
+        dest=Path(directory).expanduser().resolve()
+        source = None
+        if initial_guess is not None:
+            if not isinstance(initial_guess, GroundStateResult):
+                raise TypeError('initial_guess must be a completed GroundStateResult')
+            source = GroundStateResult.open(initial_guess.directory)
+            source_record = json.loads((source.directory/'ground-state.json').read_text())
+            signature = dict(self._restart_signature(), executable_sha256=executable.sha256)
+            if any(source_record.get(key) != value for key, value in signature.items()):
+                raise ValueError('initial guess requires matching executable, cell, grid, kmesh, species, potentials, electrons, states and XC')
+            if dest.is_relative_to(source.directory):
+                raise ValueError('initial guess output must be outside its source directory')
+            text = text.replace("yn_restart='n'", "yn_restart='y', read_gs_restart_data='wfn', "
+                                "yn_reset_step_restart='y', directory_read_data='./initial_guess/'", 1)
+        dest.mkdir(parents=True,exist_ok=False)
         work=dest/'native';work.mkdir()
         record={'schema':'salmonpy.gs/1','status':'started','executable_sha256':executable.sha256,
                 'xc':self.xc,'electrons':self.electrons,'states':self.states,'grid':self.grid,'kmesh':self.kmesh,
@@ -174,6 +220,17 @@ class DFT:
                 'max_iterations':scf.max_iterations,'tolerance':scf.tolerance,'threads':threads}
         manifest=dest/'ground-state.json'
         try:
+            if source is not None:
+                guess = work/'initial_guess'
+                guess.mkdir()
+                for name in ('info.bin', 'occupation.bin', 'wfn.bin'):
+                    relative = 'native/data_for_restart/'+name
+                    shutil.copy2(source.directory/relative, guess/name)
+                    if _digest(guess/name) != source_record['files'][relative]:
+                        raise ValueError('initial guess changed while copying')
+                record['initial_guess'] = {'mode': 'wavefunction',
+                    'source_directory': str(source.directory),
+                    'manifest_sha256': _digest(source.directory/'ground-state.json')}
             (work/'gs.inp').write_text(text)
             for i,p in enumerate(self.pseudopotentials): (work/self._pseudo_name(i)).write_bytes(p.data)
             record['input_sha256']=_digest(work/'gs.inp');manifest.write_text(json.dumps(record,indent=2))

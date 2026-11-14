@@ -27,9 +27,7 @@ python -m salmonpy.runtime install my-runtime --catalog CATALOG_URL --require td
 python -m salmonpy.runtime verify my-runtime --require tddft libxc
 ```
 
-`CATALOG_URL` is an explicit placeholder, not a currently published URL. The
-bundled catalog is currently empty. Public hosting awaits the independent
-SALMONpy repository; do not invent a download URL or claim an asset is published.
+The [independent SALMONpy preview Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14) is available and the bundled catalog registers three platforms. This repository is private: download `catalog.json` and the matching OS/CPU runtime ZIP through an authenticated browser, then use `--archive` below. Anonymous URL downloads cannot access private assets. This Release does not include Libxc. `CATALOG_URL` above illustrates a public publisher only.
 Multiple matches require `--artifact ID`. Destinations must be new. A missing
 match raises `RuntimeUnavailable` and prints the explicit build entry point;
 it never silently drops Libxc, changes architecture or starts compilation.

@@ -18,7 +18,7 @@ class ASECalculatorTest(unittest.TestCase):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as tmp:
             calc=SalmonCalculator(executable=SalmonExecutable(Path(tmp)/'fake','0'*64),directory=Path(tmp)/'runs',
-                 pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'fixture')],electrons=4,states=8,grid=[12]*3,kmesh=[2]*3)
+                 pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'2000 .01 2 4.0\n')],electrons=4,states=8,grid=[12]*3,kmesh=[2]*3)
             atoms=Atoms('Si',positions=[[0,0,0]],cell=np.eye(3)*5,pbc=True);atoms.calc=calc
             fake=SimpleNamespace(energy_hartree=-1.,forces_hartree_per_bohr=np.array([[.1,.2,.3]]))
             with patch.object(DFT,'run',return_value=fake) as run:
@@ -37,3 +37,65 @@ class ASECalculatorTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'unconverged'):atoms.get_forces()
             self.assertEqual(calc.results,{})
             self.assertIsNone(calc.last_ground_state)
+
+    def test_neutral_inference_and_mismatch_before_native_run(self):
+        from ase import Atoms
+        from salmonpy.ase_calculator import SalmonCalculator
+        from salmonpy.dft import DFT, Pseudopotential
+        from salmonpy.fdtd import SalmonExecutable
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            args = dict(executable=SalmonExecutable(Path(tmp)/'fake','0'*64), directory=Path(tmp)/'runs',
+                        pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'2000 .01 2 4.0\n')],
+                        states=8, grid=(12,)*3, kmesh=(2,)*3)
+            atoms = Atoms('Si', cell=np.eye(3)*5, pbc=True)
+            atoms.calc = SalmonCalculator(**args)
+            fake = SimpleNamespace(energy_hartree=-1., forces_hartree_per_bohr=np.zeros((1,3)))
+            with patch.object(DFT, 'run', autospec=True, return_value=fake) as run:
+                atoms.get_potential_energy()
+                self.assertEqual(run.call_args.args[0].electrons, 4)
+            atoms.calc = SalmonCalculator(electrons=6, **args)
+            with patch.object(DFT, 'run') as run, self.assertRaisesRegex(ValueError, 'neutral'):
+                atoms.get_potential_energy()
+            run.assert_not_called()
+
+    def test_opt_in_warm_start_uses_only_compatible_success(self):
+        from ase import Atoms
+        from types import SimpleNamespace
+        from salmonpy.dft import DFT, Pseudopotential
+        from salmonpy.ase_calculator import SalmonCalculator
+        from salmonpy.fdtd import SalmonExecutable
+        with tempfile.TemporaryDirectory() as tmp:
+            calc = SalmonCalculator(executable=SalmonExecutable(Path(tmp)/'fake','0'*64), directory=tmp,
+                    pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'20 .01 2 4\n')],
+                    states=8, grid=(12,)*3, kmesh=(2,)*3, warm_start=True)
+            atoms = Atoms('Si', cell=np.eye(3)*5, pbc=True); atoms.calc=calc
+            fake = SimpleNamespace(energy_hartree=-1.,forces_hartree_per_bohr=np.zeros((1,3)))
+            with patch.object(DFT,'run',return_value=fake) as run:
+                atoms.get_potential_energy()
+                self.assertNotIn('initial_guess',run.call_args.kwargs)
+                atoms.positions[0,0]+=.01; atoms.get_potential_energy()
+                self.assertIs(run.call_args.kwargs['initial_guess'],fake)
+                atoms.cell[0,0]+=.01; atoms.get_potential_energy()
+                self.assertNotIn('initial_guess',run.call_args.kwargs)
+            atoms.positions[0,0]+=.01
+            with patch.object(DFT,'run',side_effect=RuntimeError('unconverged')):
+                with self.assertRaises(RuntimeError): atoms.get_potential_energy()
+            atoms.positions[0,0]+=.01
+            with patch.object(DFT,'run',return_value=fake) as run:
+                atoms.get_potential_energy()
+                self.assertNotIn('initial_guess',run.call_args.kwargs)
+
+    def test_libxc_and_nc_upf_scope(self):
+        from salmonpy.ase_calculator import SalmonCalculator
+        from salmonpy.dft import Pseudopotential
+        from salmonpy.fdtd import SalmonExecutable
+        with tempfile.TemporaryDirectory() as tmp:
+            options = dict(executable=SalmonExecutable(Path(tmp)/'fake','0'*64), directory=tmp,
+                           states=8, grid=(12,)*3, kmesh=(2,)*3)
+            for xc, suffix, data in [('libxc_pz','_rps.dat',b'20 .01 2 4\n'),
+                                    ('libxc_pbe','.upf',b'<UPF><PP_HEADER pseudo_type="NC" z_valence="4"/></UPF>')]:
+                calc = SalmonCalculator(xc=xc, pseudopotentials=[Pseudopotential(14,2,suffix,data)], **options)
+                self.assertEqual(calc.settings['xc'],xc)
+            with self.assertRaises(ValueError):
+                SalmonCalculator(xc='tbmbj',pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'20 .01 2 4')],**options)

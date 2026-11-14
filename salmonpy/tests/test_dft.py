@@ -55,3 +55,74 @@ class DFTTest(unittest.TestCase):
             with self.assertRaises(ValueError):_read_forces(p,3)
             p.write_text('SALMONPY_FORCES_V1\n1\nnan 0 0\n')
             with self.assertRaises(ValueError):_read_forces(p,1)
+
+class ValenceTest(unittest.TestCase):
+    def test_ky_and_upf_charge(self):
+        ky = Pseudopotential(14, 2, '_rps.dat', b'2000 .01 2 4.0D+0\n')
+        self.assertEqual(ky.valence_electrons, 4)
+        upf = Pseudopotential(14, 2, '.upf', b'<UPF><PP_HEADER pseudo_type="NC" z_valence="4.0"/></UPF>')
+        self.assertEqual(upf.valence_electrons, 4)
+
+    def test_no_guessing_or_rounding(self):
+        for header in (b'fixture', b'20 .01 2 nan', b'20 .01 2 3.5', b'20 .01 2 0', b'20 .01 2 15'):
+            with self.subTest(header=header), self.assertRaisesRegex(ValueError, 'valence'):
+                Pseudopotential(14, 2, '_rps.dat', header).valence_electrons
+        with self.assertRaisesRegex(ValueError, 'valence'):
+            Pseudopotential(14, 2, '.upf', b'<UPF><PP_HEADER pseudo_type="NC"/></UPF>').valence_electrons
+
+class WarmStartTest(unittest.TestCase):
+    def test_wavefunction_only_copy_and_compatibility_before_launch(self):
+        import hashlib, json
+        from dataclasses import replace
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from salmonpy.fdtd import SalmonExecutable
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe = root/'salmon'; exe.write_bytes(b'test executable')
+            engine = SalmonExecutable(exe, hashlib.sha256(exe.read_bytes()).hexdigest())
+            model = DFT([14], np.eye(3)*10, [[0,0,0]],
+                        [Pseudopotential(14,2,'_rps.dat',b'20 .01 2 4\n')],
+                        electrons=4, states=8, grid=(12,)*3, kmesh=(2,)*3)
+            def native(*args, **kw):
+                work = Path(kw['cwd'])
+                kw['stdout'].write('end SALMON\n'); kw['stdout'].flush()
+                (work/'gs_status.dat').write_text('SALMONPY_GS_V1\n1 5\n1e-12 1e-9 -1.0\nrho_dne\n')
+                (work/'gs_forces.dat').write_text('SALMONPY_FORCES_V1\n1\n0 0 0\n')
+                restart = work/'data_for_restart'; restart.mkdir()
+                for name in ('info.bin','occupation.bin','wfn.bin'):
+                    (restart/name).write_bytes(name.encode())
+                return SimpleNamespace(returncode=0)
+            with patch('subprocess.run', side_effect=native):
+                source = model.run(engine, root/'source')
+            original = (source.directory/'ground-state.json').read_bytes()
+            displaced = replace(model, fractional_positions=[[.01,0,0]])
+            with patch('subprocess.run', side_effect=native) as run:
+                result = displaced.run(engine, root/'warm', initial_guess=source)
+                text = run.call_args.kwargs['input']
+                for flag in ("yn_restart='y'", "read_gs_restart_data='wfn'", "yn_reset_step_restart='y'", "directory_read_data='./initial_guess/'"):
+                    self.assertIn(flag, text)
+            self.assertEqual({p.name for p in (result.directory/'native/initial_guess').iterdir()},
+                             {'info.bin','occupation.bin','wfn.bin'})
+            self.assertEqual(json.loads((result.directory/'ground-state.json').read_text())['initial_guess']['mode'], 'wavefunction')
+            GroundStateResult.open(source.directory)
+            self.assertEqual((source.directory/'ground-state.json').read_bytes(), original)
+            def load_transverse(bundle, name, **options):
+                text = (Path(bundle)/name).read_text()
+                self.assertIn("trans_longi='tr'", text)
+                self.assertIn("yn_restart='n'", text)
+                return object()
+            with patch('salmonpy.tddft.TDDFTInitialState.from_salmon', side_effect=load_transverse):
+                result.tddft_initial_state(executable=engine)
+            for change in ({'cell':np.eye(3)*11}, {'grid':(16,)*3}, {'kmesh':(1,)*3},
+                           {'states':9}, {'electrons':6}, {'xc':'libxc_pz'},
+                           {'pseudopotentials':[Pseudopotential(14,2,'_rps.dat',b'changed')]}):
+                with self.subTest(change=change), patch('subprocess.run') as run:
+                    with self.assertRaisesRegex(ValueError, 'initial guess'):
+                        replace(model, **change).run(engine, root/'rejected', initial_guess=source)
+                    run.assert_not_called()
+                    self.assertFalse((root/'rejected').exists())
+            (source.directory/'native/data_for_restart/wfn.bin').write_bytes(b'tamper')
+            with patch('subprocess.run') as run, self.assertRaisesRegex(ValueError, 'checksum'):
+                displaced.run(engine, root/'tampered', initial_guess=source)
+            run.assert_not_called()

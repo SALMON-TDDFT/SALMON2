@@ -119,3 +119,9 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.example
 the manifest and observations. One native lifetime per process; another trial needs a fresh MPI job.
 
 For practical TDDFT, prefer 1D propagation/layered structures; recommend 3D electronic feedback with SBE or a user-written current solver. This 40³/two-point example is a connection regression, not a 1D reduction or recommended production 3D TDDFT setup.
+
+## ASE to Si current
+
+`python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence`
+
+Requires ASE/f90nml and an audited DFT/TDDFT/PZ runtime. See the [ASE guide](../ASE.en.md). Infers neutral electron count and runs a short Si connection test with one thread, not converged optical physics.

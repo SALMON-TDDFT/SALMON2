@@ -92,7 +92,7 @@ Do not nest the batch FDTD launcher inside an MPI job.
   in [COUPLED.en.md](COUPLED.en.md).
 - DFT: periodic, fixed ions, unpolarized, PZ/Libxc-PZ/Libxc-PBE. TDDFT also supports
   native TB-mBJ from a matching converged GS; midpoint propagation only.
-- ASE Calculator: PZ with scalar KY potentials, energy and forces only, no stress.
+- ASE Calculator: PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF potentials; energy/forces, opt-in wavefunction warm start, no stress.
   Establish grid, k-point and SCF convergence; egg-box effects affect force checks.
 - FDTD has a batch entry and a separate restricted native E/H step/coupling entry
   in [COUPLED.en.md](COUPLED.en.md). Periodic boundaries and oblique incidence are not exposed.

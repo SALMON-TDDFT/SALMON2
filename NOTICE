@@ -8,3 +8,17 @@ runtime/source.json. The upstream application is obtained separately when needed
 
 Binary wheels may bundle compiler/BLAS runtimes under their respective licenses;
 see packaging/ld/licenses and LICENSE.THIRD-PARTY.
+
+Independent repository migration (2026-11-14):
+  Destination: https://github.com/otobetomohito/SALMONpy
+  Source branch: SALMON-TDDFT/SALMON2, salmonpy-field-components
+  Last pre-migration commit: 8006261b9e48541b591e496a813b3f06ca5fc1b1
+  Earlier starter/provenance milestones:
+    78e06940 (verified Si starter and charge-current documentation)
+    811bbe1c (pinned Si pseudopotential included in distribution)
+  The full reachable Git history was preserved, not squashed (5,282 commits at
+  migration). A shallow clone may show only one commit; fetch full history to
+  inspect earlier work. Historical validation dates/links identify the original
+  environment and do not certify a later build or platform.
+  runtime/source.json continues to identify the separate upstream application
+  source and compatibility patch, not the SALMONpy distribution repository.

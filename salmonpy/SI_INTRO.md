@@ -1,6 +1,6 @@
 # Si入門：wheel導入から電荷電流まで
 
-[English](SI_INTRO.en.md) · Topic: `si_intro` · Paired revision: `2026-11-14.1`
+[English](SI_INTRO.en.md) · Topic: `si_intro` · Paired revision: `2026-11-14.2`
 
 実際のSi基底状態をSCF計算し、指定したA/cパルスで時間発展させ、電荷電流を固定の
 期待値と比較する入門例です。入力・Si擬ポテンシャル・期待値・出典はwheelに含めます。
@@ -30,24 +30,15 @@ python -m salmonpy.examples.si_intro --help
 
 ## 2. 対応するビルド済みランタイムを取得する
 
-[成功したランタイムCI 43541732653](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653)
-（コミット `6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c`）から、次の成果物を選びます。
+[SALMONpyランタイム試用版Release](https://github.com/otobetomohito/SALMONpy/releases/tag/runtime-2026.11.14)から取得します。[CI 43554502676](https://github.com/otobetomohito/SALMONpy/actions/runs/43554502676)で3環境が成功したコミット `8006261b9e48541b591e496a813b3f06ca5fc1b1` の配布物です。
 
-| 環境 | 成果物 |
+| Machine / 環境 | ZIP |
 |---|---|
-| Apple Silicon Mac | [salmonpy-runtime-macos-15](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653/artifacts/14092143545) |
-| Intel Mac | [salmonpy-runtime-macos-15-intel](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653/artifacts/14091993925) |
-| Linux x86_64／glibc | [salmonpy-runtime-ubuntu-22.04](https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653/artifacts/14092432957) |
+| Apple Silicon Mac | [salmonpy-runtime-macos-15.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15.zip) |
+| Intel Mac | [salmonpy-runtime-macos-15-intel.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-macos-15-intel.zip) |
+| Linux x86_64 / glibc | [salmonpy-runtime-ubuntu-22.04.zip](https://github.com/otobetomohito/SALMONpy/releases/download/runtime-2026.11.14/salmonpy-runtime-ubuntu-22.04.zip) |
 
-GitHubへのログインが必要な場合があります。これらはブランチのActions成果物で、恒久的な
-Releasesではありません。記録上の有効期限は2027-02-12です。取得できなくなったら、
-新しい出典・ハッシュで検証された入門セットを配布者に求めてください。別runへの置換や
-ハッシュ検査の無効化で進めません。OS互換性は準備時に検査します（arm64 Macの基準は15.8.2）。
-このランタイムはPZ／TB-mBJ、単一MPIランク用で、Libxcは含みません。固定の入門例はPZを
-使うためLibxcを必要としません。
-
-ダウンロードした**外側のActions ZIP**をそのまま使います。内側ZIPの展開やカタログ編集は
-不要です。以下の `RUNTIME_ARTIFACT.zip` は、その外側ZIPの実際のファイル名に置き換えます。
+非公開リポジトリのため、アクセス権のあるアカウントでログインします。Release資産にはActions成果物の有効期限はありません。**外側ZIPをそのまま保持**し、自動展開されたフォルダは渡さないでください。`RUNTIME_ARTIFACT.zip` は実際のファイル名に置き換えます。単一ランク・PZ／TB-mBJ用でLibxcは含みません。準備時にOS互換性を検査します（arm64 Mac >=15.8.2、Intel Mac >=15.7.9、Linux glibc >=2.35）。ハッシュ検査を無効化したり未検証のZIPで代用したりしません。
 
 ## 3. 準備して計算する
 
