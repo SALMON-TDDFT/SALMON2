@@ -1,0 +1,2 @@
+# Immutable reference inputs: preserve original bytes for provenance SHA256.
+salmonpy/examples/si_intro_data/* -text
