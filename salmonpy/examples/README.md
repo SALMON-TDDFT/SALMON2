@@ -147,3 +147,5 @@ python -m salmonpy.examples.snapshot_restore
 ```
 
 LD・SBEと4種類のPythonの場を検査します。導入済みカーネルが必要で、SALMON本体は不要です。[保存と復元](../SNAPSHOTS.md)を参照してください。
+
+自作A駆動モデルは直列・MPIで同じ契約を使えます。[作り方と適合チェッカー](../MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。

@@ -84,3 +84,5 @@ install(FILES "${ROOT}/salmonpy/_version.py" "${ROOT}/salmonpy/errors.py"
 
 install(FILES "${ROOT}/salmonpy/_tddft_checkpoint.py" "${ROOT}/salmonpy/_runtime_capabilities.py" "${ROOT}/salmonpy/_nlcc_reference.json"
   DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/materials.py" "${ROOT}/salmonpy/MATERIALS.md" "${ROOT}/salmonpy/MATERIALS.en.md" DESTINATION salmonpy)

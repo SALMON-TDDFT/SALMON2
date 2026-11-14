@@ -1,6 +1,6 @@
 # Public Python API and compatibility
 
-[日本語](API.md) · Topic: `public_api` · Paired revision: `2026-11-14.1`
+[日本語](API.md) · Topic: `public_api` · Paired revision: `2026-11-14.2`
 
 Version **0.1.0a5** exposes `salmonpy.__version__`. The distribution metadata has
 the same version. This is a preview, not a stable 1.0 API or a public C ABI.
@@ -15,7 +15,7 @@ field states is not. `StateSnapshot` is a token type, not a caller constructor.
 
 | Modules | Intended entry |
 |---|---|
-| `ld`, `sbe`, `crystal` | Materials, initial states and A-driven response |
+| `ld`, `sbe`, `crystal`, `materials` | Materials, initial states and A-driven response |
 | `maxwell`, `timing` | Field factories, coupling and time declarations |
 | `fields`, `geometry`, `analysis`, `outputs` | Pulses, structures, analysis and archives |
 | `dft`, `bands`, `tddft`, `fdtd`, `runtime` | Explicit external solver execution and setup |
@@ -76,3 +76,5 @@ Process-isolated `TDDFTState` also exposes `save_checkpoint(directory)` and
 `restore_checkpoint(directory, max_bytes=None)`. Supply an identical initial
 model explicitly to resume from Zarr history in another process. GS payloads are
 not included. See [state persistence](SNAPSHOTS.en.md).
+
+For one serial model contract, the explicit conformance checker and the point-MPI adapter, see [MATERIALS.en.md](MATERIALS.en.md).

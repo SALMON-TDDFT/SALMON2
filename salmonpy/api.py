@@ -58,6 +58,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                                 'TDDFTPreparedState',
                                 'TDDFTMaterialProvider',
                                 'TDDFTResponseBackend'),
+ 'salmonpy.materials': ('MaterialCheck', 'bind_material', 'check_material'),
  'salmonpy.maxwell': ('SPEED_OF_LIGHT', 'FieldStateConfig',
                       'Transverse',
                       'Longitudinal',

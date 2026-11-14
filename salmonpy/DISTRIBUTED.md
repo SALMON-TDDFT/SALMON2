@@ -1,6 +1,6 @@
 # 二階層MPI応答の基盤（実験的API）
 
-[English](DISTRIBUTED.en.md) · Topic: `distributed` · Paired revision: `2026-11-13.4`
+[English](DISTRIBUTED.en.md) · Topic: `distributed` · Paired revision: `2026-11-14.1`
 
 Pythonが起動済みMPIジョブを計算群に分けます。各物質群は一つ以上のマクロ点IDを担当し、各点が独立した状態を持ちます。
 場を担当する群がA/cを配り、点ID順に物理的な電荷電流密度Jを回収します。単位は原子単位、時刻は固定dtの端点、初期Aは0です。
@@ -43,7 +43,7 @@ closeして既知の初期状態から再開してください。ネイティブ
 
 `LDMaterialProvider(model)` と `LDResponseBackend()` は既存LD状態を使い、E_new=−(A_new−A_old)/dtをLDState.stepへ渡して物理Jを返します。
 方式名は `salmonpy.ld.a-endpoints/1`。**既存FDTDの半陰的なLD係数・Q結合ではなく、その更新処理には置き換えられません**。
-TDDFT/SBEの電子数電流も各アダプターで符号変換が必要です。このサービスは利用者のJの意味を推測して符号を変えません。
+公開TDDFTState/SBEStateのcurrentは既に電荷電流jなので、再度反転しません。生のJ_matterを使う場合のみ明示宣言した変換を一度行います。このサービスは利用者の電流の意味を推測しません。
 
 ## Fortranへの群の受け渡し
 
@@ -94,3 +94,5 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_tddft RUNTIME GS_BUNDLE RT_INPUT NE
 独自ローダーから既存のTDDFTInitialStateを渡す場合は `TDDFTPreparedState(initial, managed_runtime)` で包みます。バックエンド側でも直列ランタイムの機能とバイナリハッシュを再確認し、未検証・不一致の初期状態は起動前に拒否します。
 
 当面の電子計算は、一つのMPI計算群に一物質・一マクロ点を割り当てます。将来用の独立複数状態機能は残しますが、標準TDDFT例は一群一点です。LD中心のMaxwell計算では、既存FDTDの空間MPI分割の各ランクが多数のLD状態を管理します。FDTD_MATERIALS.mdを参照してください。両者は別の実行経路です。
+
+直列モデルの共通契約、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。

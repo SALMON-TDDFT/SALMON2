@@ -139,3 +139,5 @@ For practical electronic-feedback calculations, start TDDFT with 1D propagation/
 See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
 LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.
 This does not add native FDTD/TDDFT/MPI restart or change current/time conventions.
+
+Custom A-driven models can use one serial/MPI contract and an explicit conformance checker: [authoring guide](MATERIALS.en.md), `python -m salmonpy.examples.custom_material`.

@@ -1,6 +1,6 @@
 # 公開Python APIと互換性
 
-[English](API.en.md) · Topic: `public_api` · Paired revision: `2026-11-14.1`
+[English](API.en.md) · Topic: `public_api` · Paired revision: `2026-11-14.2`
 
 版は **0.1.0a5** です。`salmonpy.__version__` と配布メタデータに同じ版を示します。
 プレビュー版であり、安定した1.0 APIや公開C ABIを宣言するものではありません。
@@ -14,7 +14,7 @@
 
 | モジュール | 主な用途 |
 |---|---|
-| `ld`, `sbe`, `crystal` | 物質・初期状態・A駆動応答 |
+| `ld`, `sbe`, `crystal`, `materials` | 物質・初期状態・A駆動応答 |
 | `maxwell`, `timing` | 場の生成・結合・時刻宣言 |
 | `fields`, `geometry`, `analysis`, `outputs` | パルス・構造・解析・出力 |
 | `dft`, `bands`, `tddft`, `fdtd`, `runtime` | 外部ソルバーの明示的実行・準備 |
@@ -66,3 +66,5 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 `restore_checkpoint(directory, max_bytes=None)`も公開します。
 同じ内容の初期モデルを明示的に用意し、Zarr履歴から別プロセスで再開できます。
 初期GS本体は保存しません。詳細は[状態保存](SNAPSHOTS.md)を参照してください。
+
+直列モデルの共通契約、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。

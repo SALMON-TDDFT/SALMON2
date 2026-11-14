@@ -133,3 +133,5 @@ python -m salmonpy.examples.snapshot_restore
 ```
 
 Checks LD/SBE and all four Python fields; installed kernels, no full SALMON required. See [snapshots](../SNAPSHOTS.en.md).
+
+Custom A-driven models can use one serial/MPI contract and an explicit conformance checker: [authoring guide](../MATERIALS.en.md), `python -m salmonpy.examples.custom_material`.

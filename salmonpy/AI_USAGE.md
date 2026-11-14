@@ -189,8 +189,8 @@ SalmonpyErrorになるとは説明しません。詳細はAPI.md/API.en.md。
 保存はメモリ上の不変コピーで、失敗したrestoreは状態を変えません。保存数と状態サイズの
 分だけ追加メモリが必要です。トークンは編集・シリアライズせず、Zarr GSや出力NPZと混同しません。
 手動結合では同じ受理済み時刻で場と物質を両方保存します。MPI全体の原子的復元、可変dt、
-埋め込みTDDFTやネイティブE/Hの復元、永続再開は未対応です。これまでの「再開未対応」の説明は永続再開・
-外部ソルバーに関するもので、軽い部品の今回のメモリ上の復元と区別してください。
+埋め込みTDDFTやネイティブE/Hの復元は未対応です。プロセス分離TDDFTのディスク再開は下記の専用APIで対応し、
+出力アーカイブやネイティブ波動関数checkpointとは区別してください。
 examples/snapshot_restore.pyは実行可能な例です。結晶の基本はtransverse・A/c駆動です。
 
 プロセス分離TDDFTのrestoreは別ワーカーでA履歴を再生し、各端点電流をrtol=1e-12・atol=1e-14で照合後に切替えます。失敗時は元ワーカーを保持します。同一初期モデル・dt・初期A・容量・実行ファイル・スレッド数を要求し、復元コストは履歴長に比例、検証中は2ワーカー分の資源が必要です。SNAPSHOTS.mdを参照。
@@ -202,3 +202,11 @@ TDDFTState.save_checkpoint(directory)とrestore_checkpoint(directory, max_bytes=
 利用者が同じ初期バンドル・実行ファイル・dt・初期A・capacity・threadsを用意し、別Pythonプロセスから再開できます。
 全履歴再生の費用は残り、物質電流を内部保存し公開値は電荷電流です。既定上限は受信モデルの最大ステップ数×48バイトと形式の管理量から算出し、max_bytesは利用者の追加予算です。全RSS上限ではありません。
 破損・不一致・再生失敗では現状態を保持します。場やMPIを含む一括再開は未対応です。SNAPSHOTS.md/enを参照してください。
+
+## 自作物質モデル
+
+materials.check_material(initial, drive)で利用者指定A波形について独立性・再現性・有限値・端点時刻・入力所有権を検査します。
+materials.bind_material(initial, key=..., identity=...)は同じnew_state/step(A)モデルをMaterialBindingへ変換します。明示TimeSpecが必要です。
+MPIは1ランク/物質群の計算点分散であり、単一の直列モデルの内部並列化ではありません。identityは作者が版・全設定・初期データを識別して指定します。
+宣言されたJ_matterのみjへ変換し、物理精度やfailure atomicityを証明しません。本番でチェッカーを暗黙実行しません。
+native TDDFTは既存のmanaged provider、LDは既存E駆動adapterを使います。MATERIALS.md/enとexamples/custom_material.pyを参照してください。

@@ -190,3 +190,5 @@ AIカタログの詳細技術説明はまだ言語が混在しており、全リ
 [公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
 0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
 ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+
+自作A駆動モデルは直列・MPIで同じ契約を使えます。[作り方と適合チェッカー](MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。

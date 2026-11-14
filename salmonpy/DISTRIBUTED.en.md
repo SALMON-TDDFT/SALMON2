@@ -1,6 +1,6 @@
 # Two-level MPI response foundation (experimental)
 
-[日本語](DISTRIBUTED.md) · Topic: `distributed` · Paired revision: `2026-11-13.4`
+[日本語](DISTRIBUTED.md) · Topic: `distributed` · Paired revision: `2026-11-14.1`
 
 Python splits the launched MPI job into solver groups. A material group owns one
 or more stable macro-point IDs. Each point gets an independent response state.
@@ -67,8 +67,9 @@ before closing ParallelContext. MPI finalization belongs to the Python job owner
 They compute E_new=-(A_new-A_old)/dt and return physical J from LDState.step.
 Their identity is `salmonpy.ld.a-endpoints/1`; this **does not implement the
 semi-implicit legacy FDTD LD coefficients/Q coupling**. Do not substitute it into
-that update schedule. TDDFT/SBE electron-number current also needs its adapter's
-sign conversion; this response service never guesses or negates user J.
+that update schedule. The public TDDFTState/SBEState current is already charge
+current j; do not negate it again. A raw J_matter observable needs one explicitly
+declared conversion. The response service never guesses the meaning of user current.
 
 ## Fortran subgroup attachment
 
@@ -138,3 +139,5 @@ The example aborts its entire MPI job on an error to avoid stranded peer ranks.
 Custom loaders returning an existing TDDFTInitialState must wrap it in `TDDFTPreparedState(initial, managed_runtime)`. The TDDFT backend independently rechecks serial-runtime capability and executable checksum before spawning. An unwrapped or mismatched initial state is rejected.
 
 Current working profile: one material and one macro point per electronic MPI group. The API retains independent multi-state capability for future work, but the standard TDDFT sample assigns one point per group. LD-dominated Maxwell calculations instead use native spatial MPI FDTD with many local LD states; see FDTD_MATERIALS.en.md. These are distinct execution paths.
+
+For one serial model contract, the explicit conformance checker and the point-MPI adapter, see [MATERIALS.en.md](MATERIALS.en.md).
