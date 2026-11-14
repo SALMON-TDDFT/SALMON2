@@ -1,5 +1,8 @@
 # SALMONpy repository
 
+Current direction, decisions and next steps: docs/plans/2026-11-14-handoff.md
+(read it first; it records the project lead's decisions and how to verify).
+
 Read salmonpy/AGENTS.md and salmonpy/AI_USAGE.md before changing public APIs.
 This repository is for independent SALMONpy distribution. Do not merge it into
 SALMON upstream or restore the full SALMON application source tree here.
