@@ -20,7 +20,9 @@ multiscale solver (``maxwell/fdtd_weyl_gauge.f90``, ``ms/main_ms.f90``). As in
 SALMON, the current at t=0 is not fed back: the first step returns A at dt from
 the external/incident field alone.
 """
+from .errors import InputError, InputTypeError, NumericalError
 from dataclasses import dataclass, field, asdict
+from .snapshots import _SnapshotMixin, _fingerprint
 import numpy as np
 from .fields import AcosPulse, FieldSamples
 from .ld import _array, _positive
@@ -37,7 +39,7 @@ __all__ = ['SPEED_OF_LIGHT', 'Transverse', 'Longitudinal', 'ThinFilm', 'Multisca
 
 def _steps(value):
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or not 1 <= value <= 2**31-3:
-        raise ValueError('steps must be an integer in [1, 2**31-3]')
+        raise InputError('steps must be an integer in [1, 2**31-3]')
     return int(value)
 
 
@@ -45,11 +47,11 @@ def _drive(value, name):
     """Accept None, an AcosPulse, a sequence of AcosPulse, FieldSamples(kind='A') or a callable."""
     if value is None or isinstance(value, (AcosPulse, FieldSamples)) or callable(value):
         if isinstance(value, FieldSamples) and value.kind != 'A':
-            raise ValueError(f'{name} samples must be A, not E')
+            raise InputError(f'{name} samples must be A, not E')
         return value
     if isinstance(value, (tuple, list)) and value and all(isinstance(p, AcosPulse) for p in value):
         return tuple(value)
-    raise TypeError(f'{name} must be None, AcosPulse, a sequence of AcosPulse, FieldSamples(kind="A") or a callable')
+    raise InputTypeError(f'{name} must be None, AcosPulse, a sequence of AcosPulse, FieldSamples(kind="A") or a callable')
 
 
 def _describe(value):
@@ -65,7 +67,7 @@ def _pulse_values(pulse, t):
     order = np.argsort(t, kind='stable')
     ts = t[order]
     if np.any(np.diff(ts) <= 0):
-        raise ValueError('pulse evaluation times must be distinct')
+        raise InputError('pulse evaluation times must be distinct')
     padded = ts if len(ts) > 1 else np.array([ts[0], ts[0]+1.])
     v = pulse.sample(padded).values[:len(ts)]
     out = np.empty((len(t), 3)); out[order] = v
@@ -83,16 +85,16 @@ def _evaluate(drive, t, *, dt=None):
         return sum(_pulse_values(p, t) for p in drive)
     if isinstance(drive, FieldSamples):
         if dt is None:
-            raise ValueError('FieldSamples are accepted only for uniform (single-point) fields')
+            raise InputError('FieldSamples are accepted only for uniform (single-point) fields')
         index = np.rint(t/dt).astype(int)
         if np.any(index < 0) or np.any(index >= len(drive.time)):
-            raise ValueError(f'external A samples must cover t=0..{t[-1]:.17g} on the dt grid')
+            raise InputError(f'external A samples must cover t=0..{t[-1]:.17g} on the dt grid')
         if not np.allclose(drive.time[index], t, rtol=0, atol=1e-9*dt):
-            raise ValueError('external A samples must lie on the n*dt grid starting at t=0')
+            raise InputError('external A samples must lie on the n*dt grid starting at t=0')
         return np.array(drive.values[index])
     values = np.array(drive(t.copy()), dtype=float)
     if values.shape != (len(t), 3) or not np.isfinite(values).all():
-        raise ValueError('callable drive must return finite A with shape (len(t), 3)')
+        raise InputError('callable drive must return finite A with shape (len(t), 3)')
     return values
 
 
@@ -113,9 +115,23 @@ class FieldStateConfig:
     units: str = field(default='atomic units; Ac=A/c; laboratory frame', init=False)
 
 
-class _FieldState:
+class _FieldState(_SnapshotMixin):
     """Common step bookkeeping. Subclasses implement _advance(J) -> (A_new, commit)."""
-    __slots__ = ('_config', '_n', '_A')
+    __slots__ = ('_config', '_n', '_A', '_snapshot_model')
+    _snapshot_counter = '_n'
+
+    @property
+    def _snapshot_kind(self): return self.config.model
+    @property
+    def _snapshot_capacity(self): return self.config.steps
+    def _snapshot_owner(self): return self._snapshot_model
+    def _snapshot_settings(self):
+        drive = self._ext if hasattr(self, '_ext') else self._inc
+        return _fingerprint(self.config, (drive,))
+    def _snapshot_arrays(self):
+        names = ('_A', '_ind', '_ref', '_old', '_cur', '_new', '_j')
+        return {name: getattr(self, name) for name in names if hasattr(self, name)}
+
     _HISTORY = ''
     _INTEGRATOR = ''
 
@@ -147,10 +163,10 @@ class _FieldState:
         """
         J = _array(J, 'J', (self.points, 3))
         if self._n >= self._config.steps:
-            raise ValueError('field state capacity (steps) is exhausted')
+            raise InputError('field state capacity (steps) is exhausted')
         A_new, commit = self._advance(J)
         if not np.isfinite(A_new).all():
-            raise FloatingPointError('field update became nonfinite; state unchanged')
+            raise NumericalError('field update became nonfinite; state unchanged')
         commit()
         self._A = A_new
         self._n += 1
@@ -182,6 +198,7 @@ class _TransverseState(_FieldState):
     __slots__ = ('_ext',)
     _INTEGRATOR = "SALMON trans_longi='tr': A(n) = A_ext(n)"
     def __init__(self, model, dt, steps):
+        self._snapshot_model = model
         self._config = FieldStateConfig('transverse', dt, steps, 1,
                                         (('external', _describe(model.external)),))
         self._ext = _uniform_external(model.external, dt, steps)
@@ -215,6 +232,7 @@ class _LongitudinalState(_FieldState):
     _HISTORY = 'Ac_ind(0) = Ac_ind(1) = 0'
     _INTEGRATOR = "SALMON trans_longi='lo' leapfrog"
     def __init__(self, model, dt, steps):
+        self._snapshot_model = model
         self._config = FieldStateConfig('longitudinal', dt, steps, 1,
                                         (('external', _describe(model.external)),))
         self._ext = _uniform_external(model.external, dt, steps)
@@ -254,7 +272,7 @@ class ThinFilm:
         object.__setattr__(self, 'thickness', _positive(self.thickness, 'thickness'))
         object.__setattr__(self, 'external', _drive(self.external, 'external'))
         eps = _array(self.epsilon, 'epsilon', (2,))
-        if np.any(eps <= 0): raise ValueError('epsilon must be positive')
+        if np.any(eps <= 0): raise InputError('epsilon must be positive')
         object.__setattr__(self, 'epsilon', tuple(map(float, eps)))
 
     def new_state(self, *, dt, steps):
@@ -269,6 +287,7 @@ class _ThinFilmState(_FieldState):
     _INTEGRATOR = "SALMON trans_longi='2d', 100 equal substeps"
 
     def __init__(self, model, dt, steps):
+        self._snapshot_model = model
         self._config = FieldStateConfig('thin_film', dt, steps, 1, (
             ('external', _describe(model.external)), ('thickness', model.thickness),
             ('epsilon', model.epsilon), ('substeps', self._SUBSTEPS)))
@@ -331,24 +350,24 @@ class Multiscale1D:
 
     def __post_init__(self):
         if isinstance(self.cells, (bool, np.bool_)) or not isinstance(self.cells, (int, np.integer)) or self.cells < 1:
-            raise ValueError('cells must be a positive integer')
+            raise InputError('cells must be a positive integer')
         object.__setattr__(self, 'cells', int(self.cells))
         object.__setattr__(self, 'spacing', _positive(self.spacing, 'spacing'))
         vac = tuple(self.vacuum)
         if len(vac) != 2 or any(isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, np.integer)) or v < 0 for v in vac):
-            raise ValueError('vacuum must be two nonnegative integers (left, right)')
+            raise InputError('vacuum must be two nonnegative integers (left, right)')
         object.__setattr__(self, 'vacuum', tuple(map(int, vac)))
         inc = _drive(self.incident, 'incident')
         if isinstance(inc, FieldSamples):
-            raise TypeError('incident must be evaluable at arbitrary times: AcosPulse(s) or a callable')
+            raise InputTypeError('incident must be evaluable at arbitrary times: AcosPulse(s) or a callable')
         object.__setattr__(self, 'incident', inc)
         bc = tuple(self.boundaries)
         if len(bc) != 2 or any(b not in _BOUNDARIES for b in bc):
-            raise ValueError(f'boundaries must be two of {_BOUNDARIES}')
+            raise InputError(f'boundaries must be two of {_BOUNDARIES}')
         if (bc[0] == 'periodic') != (bc[1] == 'periodic'):
-            raise ValueError('periodic boundaries must be used on both sides')
+            raise InputError('periodic boundaries must be used on both sides')
         if inc is not None and bc[0] != 'abc':
-            raise ValueError('incident wave requires an abc left boundary')
+            raise InputError('incident wave requires an abc left boundary')
         object.__setattr__(self, 'boundaries', bc)
 
     @property
@@ -360,7 +379,7 @@ class Multiscale1D:
     def new_state(self, *, dt, steps):
         dt = _positive(dt, 'dt'); steps = _steps(steps)
         if SPEED_OF_LIGHT*dt > self.spacing*(1+1e-12):
-            raise ValueError('unstable: c*dt must not exceed spacing')
+            raise InputError('unstable: c*dt must not exceed spacing')
         return _Multiscale1DState(self, dt, steps)
 
 
@@ -370,6 +389,7 @@ class _Multiscale1DState(_FieldState):
     _INTEGRATOR = "SALMON 1D Weyl gauge (fdtd_weyl_gauge.f90), centered E at (n-1)*dt"
 
     def __init__(self, model, dt, steps):
+        self._snapshot_model = model
         self._config = FieldStateConfig('multiscale_1d', dt, steps, model.cells, (
             ('cells', model.cells), ('spacing', model.spacing), ('vacuum', model.vacuum),
             ('incident', _describe(model.incident)), ('boundaries', model.boundaries)))
@@ -381,7 +401,7 @@ class _Multiscale1DState(_FieldState):
         n = np.arange(-1, steps+3)
         self._inc = _evaluate(model.incident, n*dt - (self._is-0.5)*h/c)
         if np.any(self._inc[:, 0] != 0):
-            raise ValueError('incident wave must be transverse: x is the propagation axis')
+            raise InputError('incident wave must be transverse: x is the propagation axis')
         # Prefill i = is-1 .. 0 with the incoming wave at t = -dt, -2dt, -3dt.
         self._new = np.zeros((size, 3)); self._cur = np.zeros((size, 3)); self._old = np.zeros((size, 3))
         left = np.arange(self._is-1, 1)
@@ -486,7 +506,7 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
     fstate = field_model.new_state(dt=dt, steps=steps)
     dt = fstate.dt; steps = fstate.config.steps; P = fstate.points
     if isinstance(matter, (list, tuple)):
-        if len(matter) != P: raise ValueError(f'expected {P} matter initial states, one per field point')
+        if len(matter) != P: raise InputError(f'expected {P} matter initial states, one per field point')
         initials = tuple(matter)
     else:
         initials = (matter,)*P
@@ -503,7 +523,7 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
         A[0] = fstate.A
         for p, initial in enumerate(initials):
             state = initial.new_state(dt=dt, time0=0., initial_A=A[0, p].copy())
-            if any(state is s for s in states): raise ValueError('matter backend reused one state for two points')
+            if any(state is s for s in states): raise InputError('matter backend reused one state for two points')
             states.append(state)
             spec = matter_timing(state, dt)
             sign = charge_sign(spec)
@@ -518,7 +538,7 @@ def couple(matter, field_model, *, dt, steps, output_directory=None):
             for p, state in enumerate(states):
                 J[n+1, p] = signs[p]*_array(state.step(A[n+1, p].copy()), 'current', (3,))
                 if not np.isfinite(state.time) or not np.isclose(state.time, t, rtol=0, atol=max(1e-8*dt, 16*np.finfo(float).eps*(n+1)*max(t, dt))):
-                    raise ValueError('matter state time does not match the field clock')
+                    raise InputError('matter state time does not match the field clock')
         time = np.arange(steps+1)*dt
         timing = {'field': field_timing.to_dict(), 'matter': matter_records}
         if output_path is not None:

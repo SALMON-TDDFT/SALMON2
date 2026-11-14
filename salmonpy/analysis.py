@@ -1,4 +1,5 @@
 """SALMON table reading and explicitly normalized Fourier transforms."""
+from .errors import InputError
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -37,11 +38,11 @@ def read_table(path):
             continue
         clean=re.split(r'[#!]',line,maxsplit=1)[0]
         rows.append([float(x.replace('D','E').replace('d','e')) for x in clean.split()])
-    if not rows: raise ValueError('table contains no samples')
+    if not rows: raise InputError('table contains no samples')
     data=_array(rows,'table')
-    if data.ndim!=2 or data.shape[1]==0: raise ValueError('table must be rectangular')
+    if data.ndim!=2 or data.shape[1]==0: raise InputError('table must be rectangular')
     names=tuple(labels.get(i,(f'column_{i+1}',None))[0] for i in range(data.shape[1]))
-    if len(set(names))!=len(names): raise ValueError('column names must be unique')
+    if len(set(names))!=len(names): raise InputError('column names must be unique')
     units=tuple(labels.get(i,('',None))[1] for i in range(data.shape[1]))
     return Table(names,units,_readonly(data),tuple(headers),str(path.resolve()))
 
@@ -60,14 +61,14 @@ def spectrum(time,values,*,window='hann',time_unit='a.u.',value_unit='a.u.'):
     This is a signal spectrum, not an automatically normalized optical observable.
     """
     t=_times(time);x=_array(values,'values');dt=np.diff(t)
-    if x.ndim not in (1,2) or len(x)!=len(t): raise ValueError('values must have shape (N,) or (N,M)')
+    if x.ndim not in (1,2) or len(x)!=len(t): raise InputError('values must have shape (N,) or (N,M)')
     if not np.allclose(dt,dt[0],rtol=1e-8,atol=1e-12*abs(dt[0])):
-        raise ValueError('uniform time samples are required')
+        raise InputError('uniform time samples are required')
     if window=='none': w=np.ones(len(t))
     elif window=='hann':
-        if len(t)<3: raise ValueError('hann requires at least three samples')
+        if len(t)<3: raise InputError('hann requires at least three samples')
         w=np.hanning(len(t))
-    else: raise ValueError('window must be none or hann')
+    else: raise InputError('window must be none or hann')
     xw=x*w if x.ndim==1 else x*w[:,None]
     omega=2*np.pi*np.fft.rfftfreq(len(t),dt[0])
     values=np.conj(np.fft.rfft(xw,axis=0))*dt[0]

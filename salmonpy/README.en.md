@@ -133,3 +133,9 @@ commands require a checkout. Restart Python after rebuilding native libraries.
 Public desktop visualization: [SALMON_VR.en.md](SALMON_VR.en.md).
 
 For practical electronic-feedback calculations, start TDDFT with 1D propagation/layered structures. Recommend 3D with SBE or a user-written current solver. This is a cost-based recommendation, not a capability restriction; see [dimension selection](COUPLED.en.md).
+
+## Host API and state snapshots
+
+See [public API and errors](API.en.md) and [in-memory snapshots](SNAPSHOTS.en.md).
+LD, SBE and the four Python fields support fixed-dt snapshot/restore since 0.1.0a5.
+This does not add native FDTD/TDDFT/MPI restart or change current/time conventions.

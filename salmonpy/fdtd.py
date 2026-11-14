@@ -2,6 +2,7 @@
 
 No FDTD equations are reimplemented here. All physical inputs are atomic units.
 """
+from .errors import InputError, InputTypeError, RuntimeFailure
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import hashlib
@@ -18,7 +19,7 @@ from .fields import AcosPulse
 
 def _integer(v,name):
     if isinstance(v,bool) or not isinstance(v,(int,np.integer)) or v<1:
-        raise ValueError(f'{name} must be a positive integer')
+        raise InputError(f'{name} must be a positive integer')
     return int(v)
 
 
@@ -34,7 +35,7 @@ class Boundaries:
     def __post_init__(self):
         faces=tuple(self.faces)
         if len(faces)!=6 or any(x not in ('pml','pec') for x in faces):
-            raise ValueError('six pml/pec faces required; periodic support is not yet exposed')
+            raise InputError('six pml/pec faces required; periodic support is not yet exposed')
         object.__setattr__(self,'faces',faces)
 
 
@@ -48,7 +49,7 @@ class Dielectric:
         for key in ('epsilon','mu','conductivity'):
             object.__setattr__(self,key,_positive(getattr(self,key),key,zero=(key=='conductivity')))
         # Restrict initial API to media no faster than vacuum; use vacuum CFL.
-        if self.epsilon*self.mu<1: raise ValueError('initial API requires epsilon*mu >= 1')
+        if self.epsilon*self.mu<1: raise InputError('initial API requires epsilon*mu >= 1')
 
 
 @dataclass(frozen=True,slots=True)
@@ -60,7 +61,7 @@ class Impulse:
         object.__setattr__(self,'amplitude',_positive(self.amplitude,'amplitude'))
         p=vector(self.polarization,'polarization')
         if not np.isclose(np.linalg.norm(p),1.,atol=1e-12,rtol=0):
-            raise ValueError('polarization must be a unit vector')
+            raise InputError('polarization must be a unit vector')
         object.__setattr__(self,'polarization',p)
 
 
@@ -72,12 +73,12 @@ class PlaneWave:
     position: float
 
     def __post_init__(self):
-        if not isinstance(self.pulse,AcosPulse): raise TypeError('pulse must be AcosPulse')
-        if isinstance(self.axis,bool) or not isinstance(self.axis,(int,np.integer)) or self.axis not in (0,1,2): raise ValueError('axis must be 0,1,2')
+        if not isinstance(self.pulse,AcosPulse): raise InputTypeError('pulse must be AcosPulse')
+        if isinstance(self.axis,bool) or not isinstance(self.axis,(int,np.integer)) or self.axis not in (0,1,2): raise InputError('axis must be 0,1,2')
         object.__setattr__(self,'axis',int(self.axis))
-        if self.pulse.polarization[self.axis]!=0: raise ValueError('polarization must be transverse')
+        if self.pulse.polarization[self.axis]!=0: raise InputError('polarization must be transverse')
         if np.asarray(self.position).shape!=() or np.asarray(self.position).dtype.kind not in 'iuf' or not np.isfinite(self.position):
-            raise ValueError('position must be a finite real numeric scalar')
+            raise InputError('position must be a finite real numeric scalar')
         object.__setattr__(self,'position',float(self.position))
 
 
@@ -94,36 +95,36 @@ class FDTD:
     name: str='fdtd'
 
     def __post_init__(self):
-        if not isinstance(self.geometry,Geometry): raise TypeError('geometry must be Geometry')
-        if not isinstance(self.boundaries,Boundaries): raise TypeError('boundaries must be Boundaries')
-        if not isinstance(self.source,(Impulse,PlaneWave)): raise TypeError('source must be Impulse or PlaneWave')
+        if not isinstance(self.geometry,Geometry): raise InputTypeError('geometry must be Geometry')
+        if not isinstance(self.boundaries,Boundaries): raise InputTypeError('boundaries must be Boundaries')
+        if not isinstance(self.source,(Impulse,PlaneWave)): raise InputTypeError('source must be Impulse or PlaneWave')
         materials=tuple(m.config if isinstance(m,LorentzDrude) else m for m in self.materials)
         if len(materials)>200 or any(not isinstance(m,(Dielectric,LDModelConfig)) for m in materials):
-            raise ValueError('up to 200 Dielectric or LD materials required')
+            raise InputError('up to 200 Dielectric or LD materials required')
         # Revalidate configs constructed directly rather than obtained from material.config.
         for m in materials:
             if isinstance(m,LDModelConfig):
                 LorentzDrude(plasma_frequency=m.plasma_frequency,strength=m.strength,
                              resonance=m.resonance,damping=m.damping)
-                if len(m.strength)>100: raise ValueError('at most 100 LD poles supported by SALMON')
+                if len(m.strength)>100: raise InputError('at most 100 LD poles supported by SALMON')
         materials=tuple(LorentzDrude(plasma_frequency=m.plasma_frequency,strength=m.strength,
                                     resonance=m.resonance,damping=m.damping).config
                         if isinstance(m,LDModelConfig) else m for m in materials)
         object.__setattr__(self,'materials',materials)
         if isinstance(self.source,Impulse) and any(isinstance(m,Dielectric) for m in materials):
-            raise ValueError('SALMON impulse excitation requires LD materials; use PlaneWave for dielectrics')
+            raise InputError('SALMON impulse excitation requires LD materials; use PlaneWave for dielectrics')
         dt=_positive(self.dt,'dt');object.__setattr__(self,'dt',dt)
         for key in ('steps','observation_stride'):
             object.__setattr__(self,key,_integer(getattr(self,key),key))
-        if self.observation_stride>self.steps: raise ValueError('observation_stride exceeds steps')
+        if self.observation_stride>self.steps: raise InputError('observation_stride exceeds steps')
         cfl=1/(137.035999084*np.sqrt(sum(1/d**2 for d in self.geometry.grid.spacing)))
-        if dt>=cfl: raise ValueError(f'dt must be below vacuum CFL limit {cfl:.17g} a.u.')
+        if dt>=cfl: raise InputError(f'dt must be below vacuum CFL limit {cfl:.17g} a.u.')
         if any(s.material>len(materials) for s in self.geometry.shapes):
-            raise ValueError('shape refers to an undefined material')
+            raise InputError('shape refers to an undefined material')
         contacts=self.geometry.boundary_contacts(self.boundaries.faces)
-        if contacts: raise ValueError(f'matter intersects vacuum PML on {contacts}; enlarge the grid')
+        if contacts: raise InputError(f'matter intersects vacuum PML on {contacts}; enlarge the grid')
         observations=tuple(vector(x,'observation') for x in self.observations)
-        if not observations or len(observations)>200: raise ValueError('1..200 observation points required')
+        if not observations or len(observations)>200: raise InputError('1..200 observation points required')
         coords=self.geometry.grid.coordinates
         if isinstance(self.source,PlaneWave):
             axis=self.source.axis;axis_coords=coords[axis]
@@ -131,13 +132,13 @@ class FDTD:
             low=9 if self.boundaries.faces[2*axis]=='pml' else 1
             high=len(axis_coords)-10 if self.boundaries.faces[2*axis+1]=='pml' else len(axis_coords)-2
             if not axis_coords[low]<=self.source.position<=axis_coords[high]:
-                raise ValueError('source plane must lie inside the domain, clear of boundaries')
+                raise InputError('source plane must lie inside the domain, clear of boundaries')
             if np.any(np.take(self.geometry.material_ids(),[i-1,i,i+1],axis=axis)):
-                raise ValueError('source plane and adjacent grid planes must be vacuum')
+                raise InputError('source plane and adjacent grid planes must be vacuum')
         if any(any(x<a[0] or x>a[-1] for x,a in zip(p,coords)) for p in observations):
-            raise ValueError('observation is outside the material grid')
+            raise InputError('observation is outside the material grid')
         object.__setattr__(self,'observations',observations)
-        if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,39}',self.name): raise ValueError('invalid calculation name')
+        if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,39}',self.name): raise InputError('invalid calculation name')
 
     @property
     def config(self): return self
@@ -200,13 +201,13 @@ class FDTDMPI:
 
     def __post_init__(self):
         grid=tuple(self.grid)
-        if len(grid)!=3: raise ValueError('three MPI grid dimensions required')
+        if len(grid)!=3: raise InputError('three MPI grid dimensions required')
         object.__setattr__(self,'grid',tuple(_integer(v,'MPI grid') for v in grid))
         launcher=tuple(self.launcher)
         if isinstance(self.launcher,str) or not launcher or any(not isinstance(x,str) or not x or '\x00' in x for x in launcher):
-            raise ValueError('launcher must be a nonempty argument tuple')
+            raise InputError('launcher must be a nonempty argument tuple')
         object.__setattr__(self,'launcher',launcher)
-        if self.ranks>2**31-1: raise ValueError('too many MPI ranks')
+        if self.ranks>2**31-1: raise InputError('too many MPI ranks')
 
     @property
     def ranks(self):
@@ -215,7 +216,7 @@ class FDTDMPI:
 
     def input_text(self,calculation):
         if any(n//p<2 for n,p in zip(calculation.geometry.grid.counts,self.grid)):
-            raise ValueError('each rank needs at least two grid cells per direction')
+            raise InputError('each rank needs at least two grid cells per direction')
         return calculation.input_text()+'\n&parallel\n nproc_k = 1\n nproc_ob = 1\n nproc_rgrid = '+', '.join(map(str,self.grid))+'\n/\n'
 
 
@@ -248,8 +249,8 @@ class SalmonExecutable:
 
     def __post_init__(self):
         object.__setattr__(self,'path',Path(self.path).expanduser().resolve())
-        if type(self.mpi_enabled) is not bool: raise TypeError('mpi_enabled must be boolean')
-        if not re.fullmatch(r'[0-9a-f]{64}',self.sha256): raise ValueError('expected lowercase SHA256')
+        if type(self.mpi_enabled) is not bool: raise InputTypeError('mpi_enabled must be boolean')
+        if not re.fullmatch(r'[0-9a-f]{64}',self.sha256): raise InputError('expected lowercase SHA256')
 
     @classmethod
     def from_mpi_build(cls,build_record):
@@ -258,28 +259,28 @@ class SalmonExecutable:
         record=json.loads(record_path.read_text())
         executable=Path(record.get('executable','')).resolve()
         if record.get('status')!='built-and-audited' or executable!=record_path.parent/'build/salmon':
-            raise ValueError('expected an audited runtime build.json')
+            raise InputError('expected an audited runtime build.json')
         if record.get('build_configuration',{}).get('mpi_enabled') is not True:
-            raise ValueError('runtime was not built with MPI or lacks completed MPI capability record; rebuild explicitly')
+            raise InputError('runtime was not built with MPI or lacks completed MPI capability record; rebuild explicitly')
         if hashlib.sha256(executable.read_bytes()).hexdigest()!=record.get('sha256'):
-            raise ValueError('MPI runtime differs from audited build')
+            raise InputError('MPI runtime differs from audited build')
         return cls(executable,record['sha256'],mpi_enabled=True)
 
     def run(self,calculation,directory,*,timeout=300.,threads=1,mpi=None):
-        if not isinstance(calculation,FDTD): raise TypeError('calculation must be FDTD')
+        if not isinstance(calculation,FDTD): raise InputTypeError('calculation must be FDTD')
         timeout=_positive(timeout,'timeout');threads=_integer(threads,'threads')
         if hashlib.sha256(self.path.read_bytes()).hexdigest()!=self.sha256:
-            raise ValueError('executable SHA256 does not match the validated binary')
+            raise InputError('executable SHA256 does not match the validated binary')
         if mpi is not None:
-            if not isinstance(mpi,FDTDMPI): raise TypeError('mpi must be FDTDMPI')
-            if not self.mpi_enabled: raise ValueError('MPI requires an audited MPI-enabled executable; use from_mpi_build')
-            if os.name!='posix': raise ValueError('MPI launcher currently supports macOS/Linux')
+            if not isinstance(mpi,FDTDMPI): raise InputTypeError('mpi must be FDTDMPI')
+            if not self.mpi_enabled: raise InputError('MPI requires an audited MPI-enabled executable; use from_mpi_build')
+            if os.name!='posix': raise InputError('MPI launcher currently supports macOS/Linux')
         if self.mpi_enabled:
             import sys
             imported_mpi=sys.modules.get('mpi4py.MPI')
             mpi_active=imported_mpi is not None and imported_mpi.Is_initialized() and not imported_mpi.Is_finalized()
             if mpi_active or any(k in os.environ for k in ('OMPI_COMM_WORLD_RANK','PMI_RANK','PMIX_RANK','MPI_LOCALRANKID','SLURM_PROCID')):
-                raise ValueError('launch FDTD MPI from a fresh serial Python process, not inside an MPI rank or initialized MPI')
+                raise InputError('launch FDTD MPI from a fresh serial Python process, not inside an MPI rank or initialized MPI')
         inp=calculation.input_text() if mpi is None else mpi.input_text(calculation)
         command=[str(self.path)] if mpi is None else [*mpi.launcher,'-n',str(mpi.ranks),str(self.path)]
         directory=Path(directory).expanduser().resolve();directory.mkdir(parents=True,exist_ok=False)
@@ -301,14 +302,14 @@ class SalmonExecutable:
                     returncode=_run_fdtd_mpi(command,inp,cwd=directory,log=log,env=env,timeout=timeout)
             output=(directory/'stdout.log').read_text()
             if returncode or 'FDTD end' not in output or 'end SALMON' not in output:
-                raise RuntimeError(f'SALMON did not finish; see {directory / "stdout.log"}')
+                raise RuntimeFailure(f'SALMON did not finish; see {directory / "stdout.log"}')
             if len(calculation.materials)>1 and 'SALMONPY_FDTD_INTERFACE_V2' not in output:
-                raise RuntimeError('multiple materials require the material-ID-independent v2 runtime; rebuild or obtain a new bundle')
+                raise RuntimeFailure('multiple materials require the material-ID-independent v2 runtime; rebuild or obtain a new bundle')
             record['interface_assignment']='geometric-staircase-v2' if 'SALMONPY_FDTD_INTERFACE_V2' in output else 'legacy-single-material'
             tables=tuple(read_table(directory/f'obs{i}_at_point_rt.data')
                          for i in range(1,len(calculation.observations)+1))
             expected=calculation.steps//calculation.observation_stride
-            if any(len(t.values)!=expected for t in tables): raise RuntimeError('incomplete observation output')
+            if any(len(t.values)!=expected for t in tables): raise RuntimeFailure('incomplete observation output')
             record['status']='complete'
             return FDTDResult(directory,tables)
         except BaseException as exc:

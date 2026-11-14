@@ -1,4 +1,5 @@
 """Read native dft_band output and plot explicitly referenced band energies."""
+from .errors import InputError, InputTypeError, RuntimeFailure
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
@@ -20,11 +21,11 @@ class BandStructure:
         k = np.array(self.k_cartesian, dtype=float, copy=True)
         e = np.array(self.energies, dtype=float, copy=True)
         if k.ndim != 2 or k.shape[1] != 3 or len(k) < 2:
-            raise ValueError('k_cartesian must have shape (at least 2, 3)')
+            raise InputError('k_cartesian must have shape (at least 2, 3)')
         if e.ndim != 3 or e.shape[0] != len(k) or min(e.shape[1:]) < 1:
-            raise ValueError('energies must have shape (k, band, spin)')
+            raise InputError('energies must have shape (k, band, spin)')
         if not np.isfinite(k).all() or not np.isfinite(e).all():
-            raise ValueError('band data must be finite')
+            raise InputError('band data must be finite')
         for name, arr in [('k_cartesian', k), ('energies', e)]:
             frozen = np.frombuffer(arr.tobytes(), dtype=arr.dtype).reshape(arr.shape)
             object.__setattr__(self, name, frozen)
@@ -42,31 +43,31 @@ class BandStructure:
             for key in ('Number_of_Bands:', 'Number_of_kpt_in_each_block:', 'Number_of_blocks:'):
                 row = next(lines).split()
                 if len(row) != 2 or row[0] != key:
-                    raise ValueError('invalid band.dat header')
+                    raise InputError('invalid band.dat header')
                 dims.append(int(row[1]))
             nb, nk, blocks = dims
             if min(dims) < 1:
-                raise ValueError('band dimensions must be positive')
+                raise InputError('band dimensions must be positive')
             coords, energies = [], []
             for block in range(blocks):
                 for ik in range(nk):
                     row = next(lines).split()
                     if len(row) != 7 or int(row[0]) != block*nk+ik+1:
-                        raise ValueError('invalid k-point record')
+                        raise InputError('invalid k-point record')
                     coords.append([float(x.replace('D', 'E')) for x in row[4:]])
                 for ik in range(nk):
                     bands = []
                     for ib in range(nb):
                         row = next(lines).split()
                         if len(row) not in (3, 4) or [int(x) for x in row[:2]] != [ik+1, ib+1]:
-                            raise ValueError('invalid eigenvalue record')
+                            raise InputError('invalid eigenvalue record')
                         bands.append([float(x.replace('D', 'E')) for x in row[2:]])
                     energies.append(bands)
             if any(line.strip() for line in lines):
-                raise ValueError('unexpected trailing band data')
+                raise InputError('unexpected trailing band data')
             return cls(coords, energies)
         except StopIteration as exc:
-            raise ValueError('truncated band.dat') from exc
+            raise InputError('truncated band.dat') from exc
 
     @property
     def distance(self):
@@ -80,11 +81,11 @@ class BandStructure:
         this is not necessarily the global valence-band maximum.
         """
         if not np.isfinite(reference_ev):
-            raise ValueError('reference_ev must be finite')
+            raise InputError('reference_ev must be finite')
         ticks = list(ticks)
         for index, label in ticks:
             if not isinstance(index, (int, np.integer)) or not 0 <= index < len(self.energies):
-                raise ValueError('tick index outside band path')
+                raise InputError('tick index outside band path')
         import matplotlib.pyplot as plt
         if ax is None:
             _, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
@@ -112,12 +113,12 @@ class BandPath:
         from .sbe import _integer
         v=np.asarray(self.vertices,dtype=float)
         if v.ndim!=2 or v.shape[1]!=3 or not 2<=len(v)<=11 or not np.isfinite(v).all():
-            raise ValueError('vertices must be finite (2..11, 3)')
+            raise InputError('vertices must be finite (2..11, 3)')
         n=tuple(_integer(x,'intervals',1,1000000) for x in self.intervals)
         labels=tuple(self.labels)
         if len(n)!=len(v)-1 or len(labels)!=len(v) or any(not isinstance(x,str) or not x for x in labels):
-            raise ValueError('one interval count per segment and one label per vertex required')
-        if sum(n)>1000000: raise ValueError('path exceeds one million intervals')
+            raise InputError('one interval count per segment and one label per vertex required')
+        if sum(n)>1000000: raise InputError('path exceeds one million intervals')
         object.__setattr__(self,'vertices',np.frombuffer(v.tobytes(),dtype=float).reshape(v.shape))
         object.__setattr__(self,'intervals',n)
         object.__setattr__(self,'labels',labels)
@@ -131,7 +132,7 @@ class BandPath:
         """reciprocal[:, i] is reciprocal basis vector i, in bohr^-1 (includes 2π)."""
         b=np.asarray(reciprocal,dtype=float)
         if b.shape!=(3,3) or not np.isfinite(b).all() or abs(np.linalg.det(b))<1e-15:
-            raise ValueError('reciprocal basis must be finite and nonsingular')
+            raise InputError('reciprocal basis must be finite and nonsingular')
         return self.fractional @ b.T
 
     @property
@@ -147,7 +148,7 @@ class ExplicitKPoints:
     def __post_init__(self):
         v=np.asarray(self.kpoints,dtype=float)
         if v.ndim!=2 or v.shape[1]!=3 or not 2<=len(v)<=1000000 or not np.isfinite(v).all():
-            raise ValueError('kpoints must be finite (2..1000000, 3)')
+            raise InputError('kpoints must be finite (2..1000000, 3)')
         object.__setattr__(self,'kpoints',np.frombuffer(v.tobytes(),dtype=float).reshape(v.shape))
 
     @property
@@ -156,7 +157,7 @@ class ExplicitKPoints:
     def cartesian(self,reciprocal):
         b=np.asarray(reciprocal,dtype=float)
         if b.shape!=(3,3) or not np.isfinite(b).all() or abs(np.linalg.det(b))<1e-15:
-            raise ValueError('reciprocal basis must be finite and nonsingular')
+            raise InputError('reciprocal basis must be finite and nonsingular')
         return self.fractional @ b.T
 
 
@@ -164,18 +165,18 @@ def _check_report(filename, stored_points, bands):
     """Require versioned native block convergence, not exit code or log heuristics."""
     try:
         rows=Path(filename).read_text().splitlines()
-        if rows[0]!='SALMONPY_BANDS_V1': raise ValueError('unsupported report')
+        if rows[0]!='SALMONPY_BANDS_V1': raise InputError('unsupported report')
         reciprocal=np.array([[float(x) for x in line.split()] for line in rows[1:4]]).T
         nk,nref=map(int,rows[4].split())
         if nk<1 or nref!=bands or stored_points%nk or len(rows)!=5+stored_points//nk:
-            raise ValueError('incomplete report')
+            raise InputError('incomplete report')
         for first,line in zip(range(1,stored_points+1,nk),rows[5:]):
             if list(map(int,line.split()))!=[first,nk,1]:
-                raise ValueError('unconverged or inconsistent block')
-        if reciprocal.shape!=(3,3) or not np.isfinite(reciprocal).all(): raise ValueError('invalid basis')
+                raise InputError('unconverged or inconsistent block')
+        if reciprocal.shape!=(3,3) or not np.isfinite(reciprocal).all(): raise InputError('invalid basis')
         return reciprocal
     except (OSError,ValueError,IndexError) as exc:
-        raise RuntimeError('Band convergence report missing, incomplete or unconverged; inspect native run') from exc
+        raise RuntimeFailure('Band convergence report missing, incomplete or unconverged; inspect native run') from exc
 
 
 def _input_groups(text):
@@ -191,12 +192,12 @@ def _input_groups(text):
         v=m.group()
         if v.startswith(('!',"'",'"')): continue
         if v.startswith('&'):
-            if name is not None: raise ValueError('nested or unterminated input group')
+            if name is not None: raise InputError('nested or unterminated input group')
             name=v[1:].lower();start=m.end()
-            if name in groups: raise ValueError('duplicate input group')
+            if name in groups: raise InputError('duplicate input group')
         elif name is not None:
             groups[name]=text[start:m.start()];name=None
-    if name is not None: raise ValueError('unterminated input group')
+    if name is not None: raise InputError('unterminated input group')
     return groups
 
 
@@ -215,16 +216,16 @@ def _validate_gs_input(text,root):
     groups=_input_groups(text)
     allowed={'calculation','control','units','system','pseudo','functional','rgrid','kgrid',
              'atomic_coor','atomic_red_coor','scf','analysis','parallel','band'}
-    if set(groups)-allowed: raise ValueError('unsupported GS input groups: '+str(set(groups)-allowed))
+    if set(groups)-allowed: raise InputError('unsupported GS input groups: '+str(set(groups)-allowed))
     system=groups.get('system','');calc=groups.get('calculation','')
-    if _scalar(calc,'theory')!='dft': raise ValueError('supply the original DFT ground-state input')
+    if _scalar(calc,'theory')!='dft': raise InputError('supply the original DFT ground-state input')
     if any(_scalar(calc,k,'n')!='n' for k in ['yn_md','yn_opt','yn_dc','yn_conventional_from_dcdft']):
-        raise ValueError('fixed-ion conventional DFT required')
+        raise InputError('fixed-ion conventional DFT required')
     if _scalar(system,'yn_periodic')!='y' or _scalar(system,'spin','unpolarized')!='unpolarized':
-        raise ValueError('periodic unpolarized ground state required')
-    if _scalar(system,'yn_spinorbit','n')!='n': raise ValueError('spin-orbit unsupported')
+        raise InputError('periodic unpolarized ground state required')
+    if _scalar(system,'yn_spinorbit','n')!='n': raise InputError('spin-orbit unsupported')
     if _scalar(groups.get('functional',''),'xc','pz') not in ('pz','libxc_pz','libxc_pbe'):
-        raise ValueError('band runner supports PZ, Libxc-PZ and Libxc-PBE')
+        raise InputError('band runner supports PZ, Libxc-PZ and Libxc-PBE')
     # Validate every supplied asset path in retained groups; no implicit external reads.
     for key,body in groups.items():
         if key in ('control','analysis','band','parallel'): continue
@@ -234,15 +235,15 @@ def _validate_gs_input(text,root):
             if any(x in value for x in ('/','\\')) or value.startswith('~'):
                 path=Path(value)
                 if path.is_absolute() or PureWindowsPath(value).drive or '\\' in value or '..' in path.parts or value.startswith('~'):
-                    raise ValueError('input assets must be bundle-relative paths')
-                if not (root/path).is_file(): raise ValueError('missing relative asset: '+value)
+                    raise InputError('input assets must be bundle-relative paths')
+                if not (root/path).is_file(): raise InputError('missing relative asset: '+value)
     # Bare filenames are paths too (file_pseudo array or scalar coordinate files).
     for body in groups.values():
         body=re.sub(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|![^\n]*",
                     lambda m: '' if m[0].startswith('!') else m[0],body)
         for m in re.finditer(r'''\b(file_pseudo|file_atom_coor|file_atom_red_coor|file_kgrid)\s*(?:\([^)]*\))?\s*=\s*(['"])(.*?)\2''',body,re.I):
             if m[1].lower() in ('file_atom_coor','file_atom_red_coor') and m[3]=='none': continue
-            if not (root/m[3]).is_file(): raise ValueError('missing input asset: '+m[3])
+            if not (root/m[3]).is_file(): raise InputError('missing input asset: '+m[3])
     return groups
 
 
@@ -254,7 +255,7 @@ class BandRun:
 
     def plot(self, *, reference_ev, **kwargs):
         if isinstance(self.path,ExplicitKPoints):
-            raise ValueError('explicit k points need external path metadata; use the ASE result plot')
+            raise InputError('explicit k points need external path metadata; use the ASE result plot')
         return self.bands.plot(reference_ev=reference_ev,ticks=self.path.ticks,**kwargs)
 
 
@@ -277,11 +278,11 @@ class BandInitialState:
         import tempfile
         from .fdtd import SalmonExecutable
         from .tddft import _copy_bundle
-        if not isinstance(executable,SalmonExecutable): raise TypeError('expected SalmonExecutable')
+        if not isinstance(executable,SalmonExecutable): raise InputTypeError('expected SalmonExecutable')
         root=Path(directory).expanduser().resolve();inp=Path(input_file)
-        if inp.is_absolute() or '..' in inp.parts: raise ValueError('input_file must be bundle-relative')
+        if inp.is_absolute() or '..' in inp.parts: raise InputError('input_file must be bundle-relative')
         for name in ('info.bin','occupation.bin','wfn.bin'):
-            if not (root/'data_for_restart'/name).is_file(): raise ValueError('missing GS record: '+name)
+            if not (root/'data_for_restart'/name).is_file(): raise InputError('missing GS record: '+name)
         owner=tempfile.TemporaryDirectory(prefix='salmonpy-band-initial-');snapshot=Path(owner.name)/'bundle'
         try:
             manifest=_copy_bundle(root,snapshot);text=(snapshot/inp).read_text()
@@ -300,19 +301,19 @@ class BandInitialState:
         from .sbe import _integer
         from .ld import _positive
         from .outputs import save_arrays
-        if not isinstance(path,(BandPath,ExplicitKPoints)): raise TypeError('expected BandPath or ExplicitKPoints')
+        if not isinstance(path,(BandPath,ExplicitKPoints)): raise InputTypeError('expected BandPath or ExplicitKPoints')
         bands=_integer(bands,'bands',1,2**31-1)
         iterations=_integer(max_iterations,'max_iterations',1,2**31-1)
         threads=_integer(threads,'threads',1,2**31-1)
         tolerance=_positive(tolerance,'tolerance');timeout=_positive(timeout,'timeout')
-        if not self._snapshot.exists(): raise RuntimeError('initial state is closed')
-        if _digest(self.executable.path)!=self.executable.sha256: raise ValueError('executable checksum mismatch')
+        if not self._snapshot.exists(): raise RuntimeFailure('initial state is closed')
+        if _digest(self.executable.path)!=self.executable.sha256: raise InputError('executable checksum mismatch')
         groups=_validate_gs_input(self._input,self._snapshot)
         nstate=_scalar(groups.get('system',''),'nstate')
-        if nstate is None or bands>int(nstate): raise ValueError('bands must not exceed explicit nstate')
+        if nstate is None or bands>int(nstate): raise InputError('bands must not exceed explicit nstate')
         dest=Path(directory).expanduser().resolve()
         if dest.is_relative_to(self._origin) or dest.is_relative_to(self._snapshot):
-            raise ValueError('output must be outside the initial bundle')
+            raise InputError('output must be outside the initial bundle')
         dest.mkdir(parents=True,exist_ok=False)
         record={'schema':'salmonpy.band-run/1','status':'started','executable_sha256':self.executable.sha256,
                 'initial_files':dict(self.manifest),'fractional_kpoints':path.fractional.tolist(),
@@ -323,7 +324,7 @@ class BandInitialState:
         manifest=dest/'band-run.json'
         try:
             work=dest/'native'
-            if _copy_bundle(self._snapshot,work)!=self.manifest: raise ValueError('initial snapshot changed')
+            if _copy_bundle(self._snapshot,work)!=self.manifest: raise InputError('initial snapshot changed')
             for name in ('band.dat','band_status.dat'):
                 (work/name).unlink(missing_ok=True)
             groups['calculation']="\n theory='dft_band'\n"
@@ -351,18 +352,18 @@ class BandInitialState:
                 completed=subprocess.run([str(self.executable.path)],input=text,text=True,cwd=work,stdout=log,
                                          stderr=subprocess.STDOUT,timeout=timeout,env=env,check=False)
             if completed.returncode or 'end SALMON' not in (work/'stdout.log').read_text():
-                raise RuntimeError('SALMON did not finish; inspect '+str(work/'stdout.log'))
+                raise RuntimeFailure('SALMON did not finish; inspect '+str(work/'stdout.log'))
             raw=BandStructure.from_salmon(work/'band.dat')
             if raw.energies.shape[1]<bands or raw.energies.shape[2]!=1:
-                raise RuntimeError('unexpected native band/spin dimensions')
+                raise RuntimeFailure('unexpected native band/spin dimensions')
             reciprocal=_check_report(work/'band_status.dat',len(raw.energies),bands)
             expected=path.cartesian(reciprocal);count=len(expected)
             nk=int((work/'band_status.dat').read_text().splitlines()[4].split()[0])
-            if len(raw.energies)!=((count+nk-1)//nk)*nk: raise RuntimeError('unexpected path/padding size')
+            if len(raw.energies)!=((count+nk-1)//nk)*nk: raise RuntimeFailure('unexpected path/padding size')
             if not np.allclose(raw.k_cartesian[:count],expected,rtol=1e-12,atol=1e-12):
-                raise RuntimeError('native k path differs from requested reciprocal path')
+                raise RuntimeFailure('native k path differs from requested reciprocal path')
             if not np.allclose(raw.k_cartesian[count:],expected[-1],rtol=1e-12,atol=1e-12):
-                raise RuntimeError('invalid endpoint padding')
+                raise RuntimeFailure('invalid endpoint padding')
             result=BandStructure(raw.k_cartesian[:count],raw.energies[:count,:bands])
             record.update(status='complete',physical_points=count,stored_points=len(raw.energies),
                           reciprocal_columns_bohr_inverse=reciprocal.tolist())

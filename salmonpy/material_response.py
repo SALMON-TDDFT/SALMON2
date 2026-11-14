@@ -3,6 +3,7 @@
 This is a response service, not an E/H FDTD integrator. dt is fixed. A failed
 backend step invalidates the session; no cross-group rollback is promised.
 """
+from .errors import InputError, InputTypeError, RuntimeFailure
 from dataclasses import dataclass
 import numpy as np
 import time
@@ -83,20 +84,20 @@ class ResponseSession:
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
-            if not np.isfinite(dt) or dt<=0: raise ValueError('positive finite dt required')
-            if set(bindings)!=set(context.plan.point_ids): raise ValueError('binding required for every point')
+            if not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt required')
+            if set(bindings)!=set(context.plan.point_ids): raise InputError('binding required for every point')
             descriptors=[]
             keys={}
             for p in context.plan.point_ids:
                 b=bindings[p]
                 if b.key in keys and keys[b.key] is not b:
-                    raise ValueError('reuse the same MaterialBinding instance for one material key')
+                    raise InputError('reuse the same MaterialBinding instance for one material key')
                 keys[b.key]=b
                 mode=b.backend.execution;reduction=b.backend.reduction
-                if not b.key or not b.provider.identity or not b.backend.identity: raise ValueError('stable binding identities required')
-                if mode not in ('collective','leader_only') or reduction not in ('sum','leader'): raise ValueError('unsupported execution/reduction')
+                if not b.key or not b.provider.identity or not b.backend.identity: raise InputError('stable binding identities required')
+                if mode not in ('collective','leader_only') or reduction not in ('sum','leader'): raise InputError('unsupported execution/reduction')
                 owner=next(g for g in context.plan.groups if p in g.point_ids)
-                if mode=='leader_only' and len(owner.ranks)!=1: raise ValueError('leader-only backends require one rank per group')
+                if mode=='leader_only' and len(owner.ranks)!=1: raise InputError('leader-only backends require one rank per group')
                 descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt)))
         except Exception as exc: error=str(exc)
         self._agree(error)
@@ -119,7 +120,7 @@ class ResponseSession:
             if any(errors): error=str(errors);break
             try:
                 state=b.backend.create_state(cache[b.key],point,dt,callback_context)
-                if any(state is old for old in self.states.values()): raise ValueError('backend reused mutable state across points')
+                if any(state is old for old in self.states.values()): raise InputError('backend reused mutable state across points')
             except Exception as exc: error=str(exc)
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
@@ -150,7 +151,7 @@ class ResponseSession:
             failure=next((e for e in errors if e),None)
         else: failure=None
         failure=c.solver_comm.bcast(failure,root=0)
-        if failure: raise ValueError(failure)
+        if failure: raise InputError(failure)
 
     _agree = agree  # Compatibility for existing callers.
 
@@ -182,7 +183,7 @@ class ResponseSession:
                 if value is not None:
                     value = np.array(value, dtype=float, copy=True)
                     if value.shape != (3,) or not np.isfinite(value).all():
-                        raise ValueError('initial current must be a finite 3-vector')
+                        raise InputError('initial current must be a finite 3-vector')
             except Exception as exc:
                 error = str(exc)
             statuses = c.solver_comm.allgather((error, value is not None))
@@ -229,12 +230,12 @@ class ResponseSession:
         from mpi4py import MPI
         c=self.context;error=None
         try:
-            if self.closed or self.failed or c.closed: raise ValueError('session is not usable')
+            if self.closed or self.failed or c.closed: raise InputError('session is not usable')
             if c.group.role=='field' and c.is_leader:
                 values=np.array(A,dtype=np.float64,order='C',copy=True)
-                if values.shape!=self._A.shape or not np.isfinite(values).all(): raise ValueError('finite A array of shape (points,3) required')
+                if values.shape!=self._A.shape or not np.isfinite(values).all(): raise InputError('finite A array of shape (points,3) required')
             else:
-                if A is not None: raise ValueError('only field leader supplies A')
+                if A is not None: raise InputError('only field leader supplies A')
                 values=np.empty_like(self._A)
         except Exception as exc: error=str(exc)
         self._agree(error)
@@ -248,7 +249,7 @@ class ResponseSession:
             k=c.plan.point_ids.index(point);b=self.bindings[point]
             try:
                 j=np.array(self._adapters[point].step(values[k].copy()),dtype=np.float64,order="C",copy=True)
-                if j.shape!=(3,) or not np.isfinite(j).all(): raise ValueError('backend must return finite physical current density (3,)')
+                if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
             except Exception as exc: error=str(exc)
             errors=c.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
@@ -297,7 +298,7 @@ class LDMaterialProvider:
         import hashlib,json
         from dataclasses import asdict
         from .ld import LorentzDrude
-        if not isinstance(model,LorentzDrude): raise TypeError('LorentzDrude model required')
+        if not isinstance(model,LorentzDrude): raise InputTypeError('LorentzDrude model required')
         self._config=model.config
         self.identity='salmonpy.ld/'+hashlib.sha256(json.dumps(asdict(self._config),sort_keys=True).encode()).hexdigest()
 
@@ -356,16 +357,16 @@ class TDDFTMaterialProvider:
         self._executable=load_runtime(self._runtime,required=['tddft','single-rank'])
         self._directory=Path(directory).expanduser().resolve()
         self._input=Path(input_file)
-        if self._input.is_absolute() or '..' in self._input.parts: raise ValueError('relative bundle input required')
-        if not (self._directory/self._input).is_file(): raise ValueError('missing TDDFT input file')
+        if self._input.is_absolute() or '..' in self._input.parts: raise InputError('relative bundle input required')
+        if not (self._directory/self._input).is_file(): raise InputError('missing TDDFT input file')
         self._max_steps=_integer(max_steps,'max_steps',1,2**31-2)
         self._threads=_integer(threads,'threads',1,2**31-1)
         self._timeout=_positive(timeout,'timeout')
         manifest=[]
         for p in sorted(self._directory.rglob('*')):
-            if p.is_symlink(): raise ValueError('bundle symlinks are unsupported')
+            if p.is_symlink(): raise InputError('bundle symlinks are unsupported')
             if p.is_file(): manifest.append((str(p.relative_to(self._directory)),_digest(p)))
-            elif not p.is_dir(): raise ValueError('nonregular bundle entry')
+            elif not p.is_dir(): raise InputError('nonregular bundle entry')
         self._manifest=tuple(manifest)
         record={'files':self._manifest,'input':str(self._input),'binary':self._executable.sha256,
                 'max_steps':self._max_steps,'threads':self._threads,'timeout':self._timeout}
@@ -377,13 +378,13 @@ class TDDFTMaterialProvider:
 
     def prepare(self,context):
         from .tddft import TDDFTInitialState
-        if self._closed: raise RuntimeError('TDDFT material provider is closed')
+        if self._closed: raise RuntimeFailure('TDDFT material provider is closed')
         if self._initial is None:
             initial=TDDFTInitialState.from_salmon(self._directory,self._input,executable=self._executable,
                       max_steps=self._max_steps,threads=self._threads,timeout=self._timeout)
             if initial.manifest!=self._manifest:
                 initial.close()
-                raise ValueError('initial bundle changed after material identity was established')
+                raise InputError('initial bundle changed after material identity was established')
             self._initial=initial
         return TDDFTPreparedState(self._initial,self._runtime)
 
@@ -410,17 +411,17 @@ class TDDFTResponseBackend:
         from .tddft import TDDFTInitialState
         from .runtime import load_runtime
         if not isinstance(initial,TDDFTPreparedState) or not isinstance(initial.initial,TDDFTInitialState):
-            raise TypeError('TDDFTPreparedState with managed serial runtime required')
+            raise InputTypeError('TDDFTPreparedState with managed serial runtime required')
         verified=load_runtime(initial.runtime,required=['tddft','single-rank'])
         if verified.sha256!=initial.initial.executable.sha256:
-            raise ValueError('initial-state executable differs from verified serial runtime')
+            raise InputError('initial-state executable differs from verified serial runtime')
         from dataclasses import replace
         worker=replace(initial.initial,executable=verified).new_state(dt=dt)
         class State:
             timing=_response_timing(dt,'SALMON middlepoint TDDFT worker; charge current j')
             def __init__(self): self.A=np.zeros(3)
             def advance(self,old,new):
-                if not np.array_equal(old,self.A): raise ValueError('old A differs from accepted TDDFT state')
+                if not np.array_equal(old,self.A): raise InputError('old A differs from accepted TDDFT state')
                 current=worker.step(new)  # TDDFTState returns charge current j
                 self.A=np.array(new,copy=True)
                 return current

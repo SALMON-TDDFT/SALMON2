@@ -6,6 +6,8 @@ SALMON electronic matter current J is kept internally (``matter_current``); j = 
 Initial arrays use Fortran index order: (band, k), (band, band, xyz, k).
 Closed-shell occupations match SALMON: two electrons in each of ne/2 bands.
 """
+from .errors import InputError, NumericalError, RuntimeFailure
+from .snapshots import _SnapshotMixin, _fingerprint
 import ctypes as ct
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -20,13 +22,13 @@ from .ld import _array, _positive
 def _frozen(value, dtype=float):
     a = np.array(value, dtype=dtype, order='F')
     if not np.isfinite(a).all():
-        raise ValueError('initial data must be finite')
+        raise InputError('initial data must be finite')
     return np.frombuffer(a.tobytes(order='F'), dtype=a.dtype).reshape(a.shape, order='F')
 
 
 def _integer(value, name, low, high):
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or not low <= value <= high:
-        raise ValueError(f'{name} must be an integer in [{low}, {high}]')
+        raise InputError(f'{name} must be an integer in [{low}, {high}]')
     return int(value)
 
 
@@ -49,22 +51,22 @@ class SBEInitialState:
         for name in ('momentum','nonlocal_velocity'):
             object.__setattr__(self,name,_frozen(getattr(self,name),complex))
         if self.eigen.ndim != 2 or min(self.eigen.shape)<1:
-            raise ValueError('eigen must have shape (bands, kpoints)')
+            raise InputError('eigen must have shape (bands, kpoints)')
         nb,nk=self.eigen.shape
         if self.momentum.shape != (nb,nb,3,nk) or self.nonlocal_velocity.shape != (nb,nb,3,nk):
-            raise ValueError('matrix shape must be (bands, bands, 3, kpoints)')
+            raise InputError('matrix shape must be (bands, bands, 3, kpoints)')
         if self.weights.shape != (nk,) or np.any(self.weights<0) or not np.isfinite(self.weights.sum()) or self.weights.sum()<=0:
-            raise ValueError('weights must be nonnegative with positive finite sum')
+            raise InputError('weights must be nonnegative with positive finite sum')
         if self.lattice.shape != (3,3):
-            raise ValueError('lattice must contain three column vectors')
+            raise InputError('lattice must contain three column vectors')
         volume=float(np.dot(np.cross(self.lattice[:,0],self.lattice[:,1]),self.lattice[:,2]))
         object.__setattr__(self,'volume',_positive(volume,'right-handed cell volume'))
         ne=_integer(self.electrons,'electrons',0,2*nb)
-        if ne%2: raise ValueError('SALMON SBE requires an even closed-shell electron count')
+        if ne%2: raise InputError('SALMON SBE requires an even closed-shell electron count')
         object.__setattr__(self,'electrons',ne)
         object.__setattr__(self,'correction_order',_integer(self.correction_order,'correction_order',0,3))
         if not isinstance(self.nonlocal_correction,(bool,np.bool_)):
-            raise ValueError('nonlocal_correction must be boolean')
+            raise InputError('nonlocal_correction must be boolean')
 
     def new_state(self, *, dt, time0=0., initial_A=(0.,0.,0.)):
         return SBEState(self,dt,time0,initial_A)
@@ -79,7 +81,7 @@ class SBEInitialState:
         """
         nb=_integer(bands,'bands',1,2**31-1); nk=_integer(kpoints,'kpoints',1,2**31-1)
         if not isinstance(sysname,str) or not sysname or Path(sysname).name!=sysname:
-            raise ValueError('sysname must be a filename stem')
+            raise InputError('sysname must be a filename stem')
         root=Path(directory)
         def lines(suffix): return iter((root/(sysname+suffix)).read_text().splitlines())
         def skip(it,n):
@@ -87,31 +89,31 @@ class SBEInitialState:
         def row(it,indices,count):
             fields=next(it).replace('D','E').replace('d','e').split()
             if len(fields)!=len(indices)+count or [int(x) for x in fields[:len(indices)]]!=list(indices):
-                raise ValueError('SALMON export indices or column count mismatch')
+                raise InputError('SALMON export indices or column count mismatch')
             values=np.array(fields[len(indices):],float)
-            if not np.isfinite(values).all(): raise ValueError('nonfinite export value')
+            if not np.isfinite(values).all(): raise InputError('nonfinite export value')
             return values
         def end(it):
-            if any(s.strip() for s in it): raise ValueError('unexpected trailing data (multiple spins are unsupported)')
+            if any(s.strip() for s in it): raise InputError('unexpected trailing data (multiple spins are unsupported)')
         try:
             it=lines('_k.data'); first=next(it)
             if 'nonorthogonal' in first:
-                raise ValueError('nonorthogonal k exports are not supported by the legacy SBE text loader')
+                raise InputError('nonorthogonal k exports are not supported by the legacy SBE text loader')
             skip(it,4)
             weights=np.array([row(it,(ik+1,),4)[3] for ik in range(nk)])
             tail=[line for line in it if line.strip()]
             if tail:
                 if len(tail)!=2 or tail[0].strip()!='# coefficients (2*pi/a [a.u.]) in kx, ky, kz':
-                    raise ValueError('unexpected k export footer')
+                    raise InputError('unexpected k export footer')
                 _array([float(x.replace('D','E').replace('d','e')) for x in tail[1].split()], 'reciprocal coefficients',(3,))
             it=lines('_eigen.data'); header=[next(it) for _ in range(3)]
-            if 'esp[a.u.]' not in header[2]: raise ValueError('eigen export must explicitly declare esp[a.u.]')
+            if 'esp[a.u.]' not in header[2]: raise InputError('eigen export must explicitly declare esp[a.u.]')
             eigen=np.empty((nb,nk))
             for ik in range(nk):
                 block=next(it)
                 match=re.fullmatch(r'\s*k=\s*(\d+)\s*,\s*spin=\s*(\d+)\s*',block)
                 if not match or tuple(map(int,match.groups()))!=(ik+1,1):
-                    raise ValueError('expected sequential k blocks with spin=1')
+                    raise InputError('expected sequential k blocks with spin=1')
                 for ib in range(nb): eigen[ib,ik]=row(it,(ib+1,),2)[0]
             end(it)
             it=lines('_tm.data'); skip(it,3); matrices=[]
@@ -126,7 +128,7 @@ class SBEInitialState:
                 matrices.append(p)
             end(it)
         except (StopIteration,IndexError) as exc:
-            raise ValueError('truncated SALMON SBE export') from exc
+            raise InputError('truncated SALMON SBE export') from exc
         active=nb if active_bands is None else _integer(active_bands,'active_bands',1,nb)
         return cls(eigen[:active],matrices[0][:active,:active],matrices[1][:active,:active],
                    weights,lattice,electrons,correction_order,nonlocal_correction)
@@ -136,19 +138,27 @@ class SBEInitialState:
 def _native():
     suffix={'darwin':'.dylib','win32':'.dll'}.get(sys.platform,'.so')
     path=Path(__file__).parent/'_native'/('libsalmonpy_ld'+suffix)
-    if not path.exists(): raise RuntimeError('Build native kernels: python -m salmonpy.build_native')
+    if not path.exists(): raise RuntimeFailure('Build native kernels: python -m salmonpy.build_native')
     digest=path.with_suffix(path.suffix+'.sha256')
     if not digest.exists() or digest.read_text().strip()!=hashlib.sha256(path.read_bytes()).hexdigest():
-        raise RuntimeError('Native library checksum mismatch; rebuild')
+        raise RuntimeFailure('Native library checksum mismatch; rebuild')
     lib=ct.CDLL(str(path)); fn=lib.salmonpy_sbe
     fn.argtypes=[ct.c_int]*5+[ct.c_double]*2+[ct.c_void_p]*7+[ct.c_int,ct.c_void_p]
     fn.restype=None
     return fn
 
 
-class SBEState:
+class SBEState(_SnapshotMixin):
     """Independent density matrix; fixed dt/model; step accepts only the next A/c."""
     __slots__=('_initial','_dt','_time0','_steps','_A','_rho','_current')
+    _snapshot_kind = 'sbe'
+    _snapshot_counter = '_steps'
+
+    def _snapshot_owner(self): return self._initial
+    def _snapshot_settings(self): return _fingerprint((self.dt, self._time0))
+    def _snapshot_arrays(self):
+        return {name: getattr(self, name) for name in ('_A', '_rho', '_current')}
+
     def __init__(self,initial,dt,time0,initial_A):
         self._initial=initial; self._dt=_positive(dt,'dt')
         self._time0=float(_array(time0,'time0',()))
@@ -183,12 +193,12 @@ class SBEState:
         _native()(nb,nk,i.electrons,i.correction_order,int(i.nonlocal_correction),i.volume,self.dt,
                   *(a.ctypes.data for a in arrays),int(advance),j.ctypes.data)
         if not np.isfinite(rho).all() or not np.isfinite(j).all():
-            raise FloatingPointError('SBE evolution produced nonfinite values; state unchanged')
+            raise NumericalError('SBE evolution produced nonfinite values; state unchanged')
         return j
     def step(self,Anew):
         A=_array(Anew,'Anew',(3,))
         if not np.isfinite(self._time0+(self._steps+1)*self.dt):
-            raise ValueError('time overflow')
+            raise InputError('time overflow')
         rho=self._rho.copy(order='F'); j=self._evaluate(rho,A,True)
         self._rho=rho; self._A=A; self._current=j; self._steps+=1
         return self.current

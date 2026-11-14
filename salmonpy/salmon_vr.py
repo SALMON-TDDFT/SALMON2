@@ -4,6 +4,7 @@ Independent of the native solver and optional graphics libraries. CUBE inputs
 must use atomic units and represent the same fixed-ion grid. No fields are
 inferred from filenames; the caller explicitly pairs files and native steps.
 """
+from .errors import InputError, RuntimeFailure
 from dataclasses import dataclass
 from pathlib import Path
 import json
@@ -21,11 +22,11 @@ AU_TIME_FS = 0.024188843265857
 
 def _same_grid(reference, grid):
     if reference.values.shape != grid.values.shape:
-        raise ValueError('CUBE grid shape differs between frames/fields')
+        raise InputError('CUBE grid shape differs between frames/fields')
     for name in ('origin', 'axes', 'atoms'):
         a, b = getattr(reference, name), getattr(grid, name)
         if a.shape != b.shape or not np.allclose(a, b, rtol=0., atol=1e-10):
-            raise ValueError('CUBE grid or fixed atoms differ: '+name)
+            raise InputError('CUBE grid or fixed atoms differ: '+name)
 
 
 def _write_cube(path, grid, values, label):
@@ -49,21 +50,21 @@ class VRExport:
 
     def launch(self):
         """Explicitly launch the copied macOS app; never change OS security settings."""
-        if sys.platform != 'darwin': raise RuntimeError('public desktop launch currently supports macOS only')
+        if sys.platform != 'darwin': raise RuntimeFailure('public desktop launch currently supports macOS only')
         if self.application is None or not self.application.is_dir():
-            raise ValueError('export with application=path_to_public_app before launching')
+            raise InputError('export with application=path_to_public_app before launching')
         info = self.application/'Contents/Info.plist'
         try:
             with info.open('rb') as stream:
                 metadata = plistlib.load(stream)
         except (OSError, ValueError, plistlib.InvalidFileException) as exc:
-            raise ValueError('missing or invalid application Contents/Info.plist') from exc
+            raise InputError('missing or invalid application Contents/Info.plist') from exc
         name = metadata.get('CFBundleExecutable') if isinstance(metadata, dict) else None
         if not isinstance(name, str) or not name or name in ('.', '..') or '/' in name or '\\' in name:
-            raise ValueError('invalid application CFBundleExecutable')
+            raise InputError('invalid application CFBundleExecutable')
         binary = self.application/'Contents/MacOS'/name
         if not binary.is_file():
-            raise ValueError('application executable is missing: '+str(binary))
+            raise InputError('application executable is missing: '+str(binary))
         if not os.access(binary, os.X_OK):
             raise PermissionError(
                 'Application executable has no execute permission. Follow the public Mac manual; '
@@ -85,24 +86,24 @@ def export_cubes(density_files, directory, *, steps, dt_au, ac_files=None,
     """
     density = tuple(Path(p).expanduser().resolve() for p in density_files)
     ids = tuple(steps)
-    if not density or len(ids) != len(density): raise ValueError('one step per density CUBE is required')
+    if not density or len(ids) != len(density): raise InputError('one step per density CUBE is required')
     if any(isinstance(i, (bool,np.bool_)) or not isinstance(i, (int,np.integer)) or not 0<=i<=999999 for i in ids):
-        raise ValueError('steps must be integers in 0..999999 for the public viewer')
-    if any(b<=a for a,b in zip(ids,ids[1:])): raise ValueError('steps must be strictly increasing')
+        raise InputError('steps must be integers in 0..999999 for the public viewer')
+    if any(b<=a for a,b in zip(ids,ids[1:])): raise InputError('steps must be strictly increasing')
     dt = float(dt_au)
-    if isinstance(dt_au, (bool,np.bool_)) or not np.isfinite(dt) or dt<=0: raise ValueError('positive finite dt_au required')
-    if component not in ('x','y','z'): raise ValueError('component must be x, y or z')
+    if isinstance(dt_au, (bool,np.bool_)) or not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt_au required')
+    if component not in ('x','y','z'): raise InputError('component must be x, y or z')
     if isinstance(steps_per_second,bool) or not isinstance(steps_per_second,(int,np.integer)) or steps_per_second<=0:
-        raise ValueError('steps_per_second must be a positive integer')
-    if missing_ac not in ('error','zero'): raise ValueError('missing_ac must be error or zero')
+        raise InputError('steps_per_second must be a positive integer')
+    if missing_ac not in ('error','zero'): raise InputError('missing_ac must be error or zero')
     ac = None if ac_files is None else tuple(Path(p).expanduser().resolve() for p in ac_files)
-    if ac is None and missing_ac!='zero': raise ValueError('A unavailable: explicitly select missing_ac="zero" for display placeholders')
-    if ac is not None and len(ac)!=len(density): raise ValueError('one A CUBE per density frame is required')
+    if ac is None and missing_ac!='zero': raise InputError('A unavailable: explicitly select missing_ac="zero" for display placeholders')
+    if ac is not None and len(ac)!=len(density): raise InputError('one A CUBE per density frame is required')
     app = None if application is None else Path(application).expanduser().resolve()
     if app is not None and (app.suffix!='.app' or not (app/'Contents/MacOS').is_dir()):
-        raise ValueError('application must be the public macOS .app bundle')
+        raise InputError('application must be the public macOS .app bundle')
     dest = Path(directory).expanduser().resolve()
-    if app is not None and dest.is_relative_to(app): raise ValueError('export must be outside the application bundle')
+    if app is not None and dest.is_relative_to(app): raise InputError('export must be outside the application bundle')
     dest.mkdir(parents=True,exist_ok=False)
     try:
         cubes=dest/'Ac_Je_drho_CUBE';cubes.mkdir()
@@ -110,10 +111,10 @@ def export_cubes(density_files, directory, *, steps, dt_au, ac_files=None,
         for index,(source,step) in enumerate(zip(density,ids)):
             grid=read_cube(source)
             if np.any(np.diag(grid.axes)<=0) or not np.allclose(grid.axes,np.diag(np.diag(grid.axes)),rtol=0.,atol=1e-12):
-                raise ValueError('public viewer bridge requires a positive axis-aligned grid')
+                raise InputError('public viewer bridge requires a positive axis-aligned grid')
             if reference is None: reference=grid
             else: _same_grid(reference,grid)
-            if np.any(grid.atoms[:,0]!=np.floor(grid.atoms[:,0])): raise ValueError('integer atomic numbers required')
+            if np.any(grid.atoms[:,0]!=np.floor(grid.atoms[:,0])): raise InputError('integer atomic numbers required')
             prefix=f'it{step:06d}'
             _write_cube(cubes/(prefix+'_drho.cube'),grid,grid.values,'Density change; SALMONpy export')
             if ac is None:

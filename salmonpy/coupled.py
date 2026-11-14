@@ -3,6 +3,7 @@
 E is at native time n*dt. Electronic local time n*dt corresponds to field clock
 (n+1/2)*dt; native saved H is centered at E time, not the raw H endpoint.
 """
+from .errors import InputError, InputTypeError
 from pathlib import Path
 import ctypes as c
 import json
@@ -22,7 +23,7 @@ ELECTRONIC_CLOCK_OFFSET='1/2'
 
 def _agree(comm,error):
     errors=comm.allgather(error)
-    if any(errors):raise ValueError(str(errors))
+    if any(errors):raise InputError(str(errors))
 
 
 class NativeEHField:
@@ -38,34 +39,34 @@ class NativeEHField:
     def __init__(self,context,calculation,build_record,directory,*,points,grid):
         comm=context.solver_comm;error=None
         try:
-            if context.group.role!='field':raise ValueError('field group required')
-            if embedded._used:raise ValueError('one native lifetime per process')
-            if threading.current_thread() is not threading.main_thread():raise ValueError('main thread required')
+            if context.group.role!='field':raise InputError('field group required')
+            if embedded._used:raise InputError('one native lifetime per process')
+            if threading.current_thread() is not threading.main_thread():raise InputError('main thread required')
             if not isinstance(calculation,FDTD) or not isinstance(calculation.source,PlaneWave):
-                raise ValueError('zero-initialized plane-wave FDTD required')
+                raise InputError('zero-initialized plane-wave FDTD required')
             parallel=FDTDMPI(tuple(grid))
-            if parallel.ranks!=comm.size:raise ValueError('field decomposition must match group size')
+            if parallel.ranks!=comm.size:raise InputError('field decomposition must match group size')
             text=parallel.input_text(calculation)
             self.point_ids=context.plan.point_ids
-            if set(points)!=set(self.point_ids):raise ValueError('one field index per material point required')
+            if set(points)!=set(self.point_ids):raise InputError('one field index per material point required')
             indices=np.asarray([points[p] for p in self.point_ids])
-            if indices.shape!=(len(self.point_ids),3) or indices.dtype.kind not in 'iu':raise ValueError('integer grid triples required')
+            if indices.shape!=(len(self.point_ids),3) or indices.dtype.kind not in 'iu':raise InputError('integer grid triples required')
             counts=np.array(calculation.geometry.grid.counts)
-            if np.any(indices<10) or np.any(indices>=counts-10):raise ValueError('coupled cells must be at least ten cells from boundaries')
-            if len({tuple(p) for p in indices})!=len(indices):raise ValueError('one macro state per field cell required')
+            if np.any(indices<10) or np.any(indices>=counts-10):raise InputError('coupled cells must be at least ten cells from boundaries')
+            if len({tuple(p) for p in indices})!=len(indices):raise InputError('one macro state per field cell required')
             axis=calculation.source.axis
             source_index=int(np.argmin(np.abs(calculation.geometry.grid.coordinates[axis]-calculation.source.position)))
             if np.any(np.abs(indices[:,axis]-source_index)<=2):
-                raise ValueError('coupled cells must be clear of the incident source plane and its support')
+                raise InputError('coupled cells must be clear of the incident source plane and its support')
             ids=calculation.geometry.material_ids()
             for point in indices:
                 # Conservative guard covers all constitutive cells touching mapped edges.
                 i,j,k=point
-                if np.any(ids[i-1:i+2,j-1:j+2,k-1:k+2]):raise ValueError('coupled cells require a vacuum constitutive neighborhood')
+                if np.any(ids[i-1:i+2,j-1:j+2,k-1:k+2]):raise InputError('coupled cells require a vacuum constitutive neighborhood')
             record=json.loads(Path(build_record).read_text())
-            if record.get('schema')!='salmonpy.embedded-tddft/1':raise ValueError('embedded host library record required')
+            if record.get('schema')!='salmonpy.embedded-tddft/1':raise InputError('embedded host library record required')
             library=Path(record['library']);sha=record['sha256']
-            if _digest(library)!=sha:raise ValueError('native library checksum mismatch')
+            if _digest(library)!=sha:raise InputError('native library checksum mismatch')
             lib=c.CDLL(str(library))
             ints=np.ctypeslib.ndpointer(dtype=np.int32,ndim=2,flags='C_CONTIGUOUS')
             floats=np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS')
@@ -87,7 +88,7 @@ class NativeEHField:
         _agree(comm,error)
         error=None
         try:
-            if (self.directory/'inputfile').read_text()!=text:raise ValueError('shared field directory required')
+            if (self.directory/'inputfile').read_text()!=text:raise InputError('shared field directory required')
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
@@ -137,10 +138,10 @@ class NativeEHField:
     def advance(self,J_previous):
         comm=self.context.solver_comm;error=None
         try:
-            if self.closed or self.failed or self.step_index>=self.capacity:raise ValueError('closed, failed or exhausted field')
+            if self.closed or self.failed or self.step_index>=self.capacity:raise InputError('closed, failed or exhausted field')
             J=np.array(J_previous,dtype=np.float64,order='C')
-            if J.shape!=self.A.shape or not np.isfinite(J).all():raise ValueError('finite point currents required')
-            if self.step_index==0 and np.any(J):raise ValueError('initial feedback current must be zero')
+            if J.shape!=self.A.shape or not np.isfinite(J).all():raise InputError('finite point currents required')
+            if self.step_index==0 and np.any(J):raise InputError('initial feedback current must be zero')
         except Exception as exc:error=str(exc)
         _agree(comm,error)
         values=comm.allgather(J.tolist())
@@ -185,18 +186,18 @@ class MultiscaleField:
     def __init__(self, context, state):
         from .maxwell import _Multiscale1DState
         if context.group.role != 'field' or context.solver_comm.size != 1:
-            raise ValueError('Multiscale1D requires exactly one field rank')
+            raise InputError('Multiscale1D requires exactly one field rank')
         if not isinstance(state, _Multiscale1DState):
-            raise TypeError('Multiscale1D.new_state result required')
+            raise InputTypeError('Multiscale1D.new_state result required')
         if state.step_index != 0 or state.points != len(context.plan.point_ids):
-            raise ValueError('fresh field with one material cell per plan point required')
+            raise InputError('fresh field with one material cell per plan point required')
         self.context = context
         self.state = state
         self.point_ids = context.plan.point_ids
         self.closed = self.failed = False
         for point, A in zip(self.point_ids, state.A):
             if np.any(A != 0):
-                raise ValueError(f'point {point} has nonzero A(0)={A.tolist()}; '
+                raise InputError(f'point {point} has nonzero A(0)={A.tolist()}; '
                                  'increase left vacuum cells or delay the incident pulse')
 
     @property
@@ -216,7 +217,7 @@ class MultiscaleField:
 
     def advance(self, j):
         if self.closed or self.failed:
-            raise ValueError('field is not usable')
+            raise InputError('field is not usable')
         return self.state.step(j)
 
     def close(self):
@@ -244,7 +245,7 @@ class CoupledStepper:
                 adapter = MultiscaleField(context, field)
                 dt = adapter.dt
             elif field is not None:
-                raise ValueError('material ranks must not provide a field')
+                raise InputError('material ranks must not provide a field')
         except Exception as exc:
             error = str(exc)
         errors = context.solver_comm.allgather(error)
@@ -252,7 +253,7 @@ class CoupledStepper:
         failures = context.leaders.allgather(local) if context.is_leader else None
         failures = context.solver_comm.bcast(failures, root=0)
         if any(failures):
-            raise ValueError(next(e for e in failures if e))
+            raise InputError(next(e for e in failures if e))
         if context.is_leader:
             dt = context.leaders.bcast(dt, root=context.field_group)
         dt = context.solver_comm.bcast(dt, root=0)
@@ -292,14 +293,14 @@ class CoupledStepper:
         result=None;error=None
         try:
             if context.group.role=='field':
-                if set(matter)!=set(context.plan.point_ids):raise ValueError('timing missing for some points')
+                if set(matter)!=set(context.plan.point_ids):raise InputError('timing missing for some points')
                 for point,record in matter.items():
                     try:
                         spec = TimeSpec.from_dict(record)
                         if spec.output('j') is None:
-                            raise ValueError('response service requires physical charge current j')
+                            raise InputError('response service requires physical charge current j')
                         check_loop(field.timing,spec.shifted(field.electronic_clock_offset))
-                    except ValueError as exc:raise ValueError(f'point {point}: {exc}') from None
+                    except ValueError as exc:raise InputError(f'point {point}: {exc}') from None
                 result={'field':field.timing.to_dict(),'matter':matter,'electronic_clock_offset':field.electronic_clock_offset}
         except Exception as exc:error=str(exc)
         response.agree(error)

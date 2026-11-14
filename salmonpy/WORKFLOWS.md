@@ -252,3 +252,9 @@ Optional ASE Calculator with native PZ/Libxc-PZ/Libxc-PBE forces (KY/NC-UPF) and
 Field components with the j→A protocol (SALMON tr / lo / 2d and 1D multiscale propagation) and the `couple` driver: [FIELDS.en.md](FIELDS.en.md). Interfaces exchange the charge current j; components declare their time layout (salmonpy.time/1), checked by `couple`.
 
 Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.
+
+## ホスト向けAPIと状態保存
+
+[公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
+0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
+ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。

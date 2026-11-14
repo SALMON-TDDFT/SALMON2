@@ -3,6 +3,7 @@
 This module explicitly requires ASE. It is not imported by the core package or
 by salmonpy.ase. Model settings are fixed at construction; geometry is ASE-owned.
 """
+from .errors import InputError, InputTypeError, RuntimeFailure
 from pathlib import Path
 from types import MappingProxyType
 from uuid import uuid4
@@ -33,22 +34,22 @@ class SalmonCalculator(Calculator):
     def __init__(self,*,executable,directory,pseudopotentials,states,grid,kmesh,electrons=None,
                  xc='pz',scf=SCFSettings(tolerance=1e-10),threads=1,timeout=600.,atoms=None,
                  warm_start=False):
-        if not isinstance(executable,SalmonExecutable): raise TypeError('expected SalmonExecutable')
+        if not isinstance(executable,SalmonExecutable): raise InputTypeError('expected SalmonExecutable')
         pseudos=tuple(pseudopotentials)
-        if not pseudos or any(not isinstance(p,Pseudopotential) for p in pseudos): raise TypeError('expected pseudopotentials')
+        if not pseudos or any(not isinstance(p,Pseudopotential) for p in pseudos): raise InputTypeError('expected pseudopotentials')
         if xc.lower() not in ('pz', 'libxc_pz', 'libxc_pbe'):
-            raise ValueError('Calculator supports PZ, Libxc-PZ and Libxc-PBE with scalar KY/NC-UPF potentials')
+            raise InputError('Calculator supports PZ, Libxc-PZ and Libxc-PBE with scalar KY/NC-UPF potentials')
         if not isinstance(warm_start, bool):
-            raise TypeError('warm_start must be a bool')
+            raise InputTypeError('warm_start must be a bool')
         self._warm_start = warm_start
-        if not isinstance(scf,SCFSettings): raise TypeError('expected SCFSettings')
+        if not isinstance(scf,SCFSettings): raise InputTypeError('expected SCFSettings')
         grid=tuple(_integer(v,'grid',8,2**20) for v in grid)
         kmesh=tuple(_integer(v,'kmesh',1,2**20) for v in kmesh)
-        if len(grid)!=3 or len(kmesh)!=3: raise ValueError('three grid/kmesh dimensions required')
+        if len(grid)!=3 or len(kmesh)!=3: raise InputError('three grid/kmesh dimensions required')
         states=_integer(states,'states',1,2**31-1)
         if electrons is not None:
             electrons=_integer(electrons,'electrons',2,2**31-1)
-            if electrons%2 or states<electrons//2: raise ValueError('closed shell and enough states required')
+            if electrons%2 or states<electrons//2: raise InputError('closed shell and enough states required')
         self._settings=MappingProxyType(dict(pseudopotentials=pseudos,electrons=electrons,states=states,
                                              grid=grid,kmesh=kmesh,xc=xc.lower()))
         self._engine=executable;self._scf=scf
@@ -67,7 +68,7 @@ class SalmonCalculator(Calculator):
     def warm_start(self): return self._warm_start
 
     def set(self,**kwargs):
-        if kwargs: raise ValueError('Calculator settings are immutable; construct a new calculator')
+        if kwargs: raise InputError('Calculator settings are immutable; construct a new calculator')
         return {}
 
     def calculate(self,atoms=None,properties=('energy',),system_changes=all_changes):
@@ -87,7 +88,7 @@ class SalmonCalculator(Calculator):
         energy=float(result.energy_hartree*HARTREE_EV)
         forces=np.array(result.forces_hartree_per_bohr,copy=True)*HARTREE_EV/BOHR_ANGSTROM
         if forces.shape!=(len(self.atoms),3) or not np.isfinite(forces).all() or not np.isfinite(energy):
-            raise RuntimeError('invalid native energy/force result')
+            raise RuntimeFailure('invalid native energy/force result')
         self.results={'energy':energy,'forces':forces}
         self._last_ground_state=result
         self._last_model=model

@@ -74,3 +74,10 @@ install(DIRECTORY "${ROOT}/salmonpy/examples/si_intro_data/"
   FILES_MATCHING PATTERN "*.json" PATTERN "*.dat" PATTERN "*.txt")
 install(FILES "${ROOT}/salmonpy/SI_INTRO.md" "${ROOT}/salmonpy/SI_INTRO.en.md"
   DESTINATION salmonpy)
+
+# Public Python integration contract and in-memory state snapshots.
+install(FILES "${ROOT}/salmonpy/_version.py" "${ROOT}/salmonpy/errors.py"
+  "${ROOT}/salmonpy/api.py" "${ROOT}/salmonpy/snapshots.py"
+  "${ROOT}/salmonpy/API.md" "${ROOT}/salmonpy/API.en.md"
+  "${ROOT}/salmonpy/SNAPSHOTS.md" "${ROOT}/salmonpy/SNAPSHOTS.en.md"
+  DESTINATION salmonpy)

@@ -77,3 +77,12 @@ class ManualTest(unittest.TestCase):
         for name in ('ASE.md', 'ASE.en.md', 'DFT.md', 'ASE_CALCULATOR.md', 'AI_USAGE.md'):
             self.assertEqual(d['documents'][name]['sections'][0]['text'],
                              files('salmonpy').joinpath(name).read_text(encoding='utf-8'))
+
+    def test_all_embedded_guides_match_packaged_text(self):
+        from importlib.resources import files
+        d=load()
+        for name,document in d['documents'].items():
+            self.assertEqual(document['sections'][0]['text'],
+                             files('salmonpy').joinpath(name).read_text(encoding='utf-8'),name)
+        for query,id_ in [('snapshot restore','snapshots'),('公開API','public_api')]:
+            self.assertIn(id_,{t['id'] for t in search(query)['tasks']})

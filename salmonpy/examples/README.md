@@ -139,3 +139,11 @@ TDDFTでは実用上1次元の伝播・層構造を推奨し、電子応答を�
 `python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence`
 
 ASE・f90nmlと、DFT/TDDFT/PZ対応の監査済みランタイムが必要です。[ASEガイド](../ASE.md)を参照。中性電子数を自動決定し、短いSi接続試験を1スレッドで実行します。光学物性の収束例ではありません。
+
+## snapshotの再実行
+
+```sh
+python -m salmonpy.examples.snapshot_restore
+```
+
+LD・SBEと4種類のPythonの場を検査します。導入済みカーネルが必要で、SALMON本体は不要です。[保存と復元](../SNAPSHOTS.md)を参照してください。

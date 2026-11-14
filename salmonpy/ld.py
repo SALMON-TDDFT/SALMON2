@@ -1,5 +1,7 @@
 """Isotropic passive Lorentz–Drude model; angular frequencies and atomic units."""
+from .errors import InputError, NumericalError, RuntimeFailure
 import ctypes
+from .snapshots import _SnapshotMixin, _fingerprint
 from dataclasses import dataclass, field
 import hashlib
 from functools import lru_cache
@@ -10,20 +12,20 @@ import numpy as np
 
 def _array(value, name, shape=None):
     if np.iscomplexobj(value):
-        raise ValueError(f'{name} must be real-valued')
+        raise InputError(f'{name} must be real-valued')
     a = np.array(value, dtype=np.float64, order='C', copy=True)
     if not np.isfinite(a).all() or (shape is not None and a.shape != shape):
-        raise ValueError(f'{name}: expected finite values with shape {shape}')
+        raise InputError(f'{name}: expected finite values with shape {shape}')
     return a
 
 
 def _positive(value, name, zero=False):
     a = np.asarray(value)
     if a.ndim != 0 or a.dtype.kind not in 'iuf':
-        raise ValueError(f'{name} must be a real numeric scalar')
+        raise InputError(f'{name} must be a real numeric scalar')
     value = float(value)
     if not np.isfinite(value) or (value < 0 if zero else value <= 0):
-        raise ValueError(f'{name} must be finite and {"nonnegative" if zero else "positive"}')
+        raise InputError(f'{name} must be finite and {"nonnegative" if zero else "positive"}')
     return value
 
 
@@ -69,11 +71,11 @@ class LorentzDrude:
         self._wp = _positive(plasma_frequency, 'plasma_frequency', zero=True)
         self._f = _array(strength, 'strength')
         if self._f.ndim != 1 or not self._f.size:
-            raise ValueError('strength must be a nonempty one-dimensional array')
+            raise InputError('strength must be a nonempty one-dimensional array')
         self._w = _array(resonance, 'resonance', self._f.shape)
         self._g = _array(damping, 'damping', self._f.shape)
         if any(np.any(a < 0) for a in (self._f, self._w, self._g)):
-            raise ValueError('strength, resonance and damping must be nonnegative')
+            raise InputError('strength, resonance and damping must be nonnegative')
         self._config = LDModelConfig(self._wp, tuple(map(float, self._f)),
                                      tuple(map(float, self._w)), tuple(map(float, self._g)))
         # Immutable byte-backed arrays cannot be made writable by NumPy callers.
@@ -93,7 +95,7 @@ class LorentzDrude:
                 continue
             denominator = w*w - omega*omega - 1j*g*omega
             if np.any(denominator == 0):
-                raise ValueError('permittivity is singular at a requested frequency')
+                raise InputError('permittivity is singular at a requested frequency')
             result += f*self._wp**2/denominator
         return result
 
@@ -105,15 +107,23 @@ class LorentzDrude:
         """E samples of shape (N,3) at t=0,dt,...; output includes initial zeros."""
         field = _array(field, 'field')
         if field.ndim != 2 or field.shape[1] != 3 or len(field) == 0:
-            raise ValueError('field must have shape (N,3), N >= 1')
+            raise InputError('field must have shape (N,3), N >= 1')
         state = self.new_state(dt=dt, initial_field=field[0])
         p, j = state._advance(field)
         return Response(np.arange(len(field))*state.dt, p, j)
 
 
-class LDState:
+class LDState(_SnapshotMixin):
     """Independent explicit per-pole history. A state is not thread-shareable."""
     __slots__ = ('_config', '_material', '_field', '_p', '_j', '_steps')
+    _snapshot_kind = 'ld'
+    _snapshot_counter = '_steps'
+
+    def _snapshot_owner(self): return self._material
+    def _snapshot_settings(self): return _fingerprint(self.config)
+    def _snapshot_arrays(self):
+        return {name: getattr(self, name) for name in ('_field', '_p', '_j')}
+
 
     def __init__(self, material, dt, initial_field):
         dt = _positive(dt, 'dt')
@@ -155,7 +165,7 @@ class LDState:
         args = [a.ctypes.data_as(ptr) for a in (m._f,m._w,m._g,field,pp,jj,p,j)]
         native(len(m._f), len(field), self.dt, m._wp, *args)
         if not all(np.isfinite(a).all() for a in (pp,jj,p,j)):
-            raise FloatingPointError('LD response became nonfinite; state unchanged')
+            raise NumericalError('LD response became nonfinite; state unchanged')
         self._p, self._j = pp, jj
         self._field = field[-1].copy()
         self._steps += len(field)-1
@@ -167,10 +177,10 @@ def _native():
     suffix = {'darwin': '.dylib', 'win32': '.dll'}.get(sys.platform, '.so')
     path = Path(__file__).parent / '_native' / ('libsalmonpy_ld'+suffix)
     if not path.exists():
-        raise RuntimeError('Build the LD library first: python3 -m salmonpy.build_native')
+        raise RuntimeFailure('Build the LD library first: python3 -m salmonpy.build_native')
     record = path.with_suffix(path.suffix+'.sha256')
     if not record.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != record.read_text().strip():
-        raise RuntimeError('LD library checksum differs; rebuild with salmonpy.build_native')
+        raise RuntimeFailure('LD library checksum differs; rebuild with salmonpy.build_native')
     lib = ctypes.CDLL(str(path))
     fn = lib.salmonpy_ld
     fn.argtypes = [ctypes.c_int,ctypes.c_int,ctypes.c_double,ctypes.c_double] + [ctypes.POINTER(ctypes.c_double)]*8

@@ -4,6 +4,7 @@ One native electronic lifetime per Python process, on its main thread. SALMON
 module configuration is not reentrant: start a fresh MPI job for another run.
 A shared writable work root is required across members of each material group.
 """
+from .errors import InputError, InputTypeError, RuntimeFailure
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
@@ -20,9 +21,9 @@ _used = False
 def _manifest(root):
     records=[]
     for path in sorted(root.rglob('*')):
-        if path.is_symlink(): raise ValueError('bundle symlinks are unsupported')
+        if path.is_symlink(): raise InputError('bundle symlinks are unsupported')
         if path.is_file(): records.append((str(path.relative_to(root)),_digest(path)))
-        elif not path.is_dir(): raise ValueError('non-regular bundle asset')
+        elif not path.is_dir(): raise InputError('non-regular bundle asset')
     return tuple(records)
 
 
@@ -42,12 +43,12 @@ class NativeTDDFTMaterialProvider:
     """
     def __init__(self, directory, input_file, *, max_steps=1000):
         root=Path(directory).expanduser().resolve();inp=Path(input_file)
-        if inp.is_absolute() or '..' in inp.parts: raise ValueError('relative input filename required')
+        if inp.is_absolute() or '..' in inp.parts: raise InputError('relative input filename required')
         for name in ('info.bin','occupation.bin','wfn.bin'):
-            if not (root/'data_for_restart'/name).is_file(): raise ValueError('missing GS record: '+name)
+            if not (root/'data_for_restart'/name).is_file(): raise InputError('missing GS record: '+name)
         text=(root/inp).read_text()
         if '!SALMONPY_END_INPUT' in text or any(len(line)>256 for line in text.splitlines()):
-            raise ValueError('unsupported input marker or line length')
+            raise InputError('unsupported input marker or line length')
         steps=_integer(max_steps,'max_steps',1,2**31-2)
         self.initial=NativeTDDFTInitialState(root,str(inp),_manifest(root),steps)
         self.identity='salmonpy.embedded-initial/1/'+hashlib.sha256(json.dumps(
@@ -55,7 +56,7 @@ class NativeTDDFTMaterialProvider:
 
     def prepare(self, context):
         if _manifest(self.initial.directory)!=self.initial.manifest:
-            raise ValueError('initial bundle changed after preparation')
+            raise InputError('initial bundle changed after preparation')
         return self.initial
 
 
@@ -70,13 +71,13 @@ class NativeTDDFTBackend:
 
     def __init__(self, build_record, work_root, *, decomposition):
         record=json.loads(Path(build_record).read_text())
-        if record.get('schema')!='salmonpy.embedded-tddft/1': raise ValueError('embedded TDDFT build record required')
+        if record.get('schema')!='salmonpy.embedded-tddft/1': raise InputError('embedded TDDFT build record required')
         self.library=Path(record['library']).resolve();self.sha256=record['sha256']
-        if _digest(self.library)!=self.sha256: raise ValueError('native library checksum mismatch')
+        if _digest(self.library)!=self.sha256: raise InputError('native library checksum mismatch')
         self.work_root=Path(work_root).expanduser().resolve()
-        if not self.work_root.is_dir(): raise ValueError('existing shared work root required')
+        if not self.work_root.is_dir(): raise InputError('existing shared work root required')
         self.decomposition=tuple(_integer(v,'decomposition',1,2**31-1) for v in decomposition)
-        if len(self.decomposition)!=5: raise ValueError('decomposition requires k, orbital, x, y, z')
+        if len(self.decomposition)!=5: raise InputError('decomposition requires k, orbital, x, y, z')
         self.identity='salmonpy.embedded-tddft/1/'+hashlib.sha256(json.dumps(
             [self.sha256,self.decomposition,str(self.work_root)]).encode()).hexdigest()
 
@@ -89,19 +90,19 @@ class NativeTDDFTBackend:
         comm=context.solver_comm
         error=None
         try:
-            if _used: raise ValueError('one native electronic lifetime per process; start a fresh MPI job')
-            if threading.current_thread() is not threading.main_thread(): raise ValueError('main thread required')
-            if len(context.point_ids)!=1: raise ValueError('native TDDFT requires one point per group')
-            if math.prod(self.decomposition)!=comm.size: raise ValueError('inner decomposition must match group size')
-            if not isinstance(initial,NativeTDDFTInitialState): raise TypeError('NativeTDDFTInitialState required')
+            if _used: raise InputError('one native electronic lifetime per process; start a fresh MPI job')
+            if threading.current_thread() is not threading.main_thread(): raise InputError('main thread required')
+            if len(context.point_ids)!=1: raise InputError('native TDDFT requires one point per group')
+            if math.prod(self.decomposition)!=comm.size: raise InputError('inner decomposition must match group size')
+            if not isinstance(initial,NativeTDDFTInitialState): raise InputTypeError('NativeTDDFTInitialState required')
             _integer(initial.max_steps,'max_steps',1,2**31-2)
             inp=Path(initial.input_file)
             if inp.is_absolute() or '..' in inp.parts or '\x00' in initial.input_file:
-                raise ValueError('relative input filename required')
-            if not (initial.directory/inp).is_file():raise ValueError('missing native input')
-            if not np.isfinite(dt) or dt<=0: raise ValueError('positive finite dt required')
-            if _manifest(initial.directory)!=initial.manifest: raise ValueError('initial bundle changed')
-            if _digest(self.library)!=self.sha256: raise ValueError('native library changed')
+                raise InputError('relative input filename required')
+            if not (initial.directory/inp).is_file():raise InputError('missing native input')
+            if not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt required')
+            if _manifest(initial.directory)!=initial.manifest: raise InputError('initial bundle changed')
+            if _digest(self.library)!=self.sha256: raise InputError('native library changed')
             lib=c.CDLL(str(self.library))
             vec=np.ctypeslib.ndpointer(dtype=np.float64,ndim=1,shape=(3,),flags='C_CONTIGUOUS')
             dec=np.ctypeslib.ndpointer(dtype=np.int32,ndim=1,shape=(5,),flags='C_CONTIGUOUS')
@@ -110,27 +111,27 @@ class NativeTDDFTBackend:
             lib.sp_tddft_close.argtypes=[];lib.sp_tddft_close.restype=c.c_int
         except Exception as exc: error=str(exc)
         errors=comm.allgather(error)
-        if any(errors): raise ValueError(str(errors))
+        if any(errors): raise InputError(str(errors))
         work=None;error=None
         if comm.rank==0:
             try:
                 work=Path(tempfile.mkdtemp(prefix='point-'+str(point_id)+'-',dir=self.work_root))
                 if _copy_bundle(initial.directory,work/'bundle')!=initial.manifest:
-                    raise ValueError('initial bundle changed during copy')
+                    raise InputError('initial bundle changed during copy')
             except Exception as exc:
                 error=str(exc)
                 if work is not None: shutil.rmtree(work)
         error,work=comm.bcast((error,str(work) if work else None),root=0)
-        if error: raise ValueError(error)
+        if error: raise InputError(error)
         work=Path(work)/'bundle'
         error=None
         try:
-            if _manifest(work)!=initial.manifest: raise ValueError('work root must be shared by all group ranks')
+            if _manifest(work)!=initial.manifest: raise InputError('work root must be shared by all group ranks')
         except Exception as exc:error=str(exc)
         errors=comm.allgather(error)
         if any(errors):
             if comm.rank==0:shutil.rmtree(work.parent)
-            raise ValueError(str(errors))
+            raise InputError(str(errors))
         owner=SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
         native=NativeParallelContext(owner,self.library,self.sha256)
         _used=True
@@ -144,7 +145,7 @@ class NativeTDDFTBackend:
             state.timing=_response_timing(float(dt),'embedded SALMON middlepoint TDDFT; charge current -J_native')
             outcomes=comm.allgather((int(code),bool(np.isfinite(J).all())))
             if any(code or not finite for code,finite in outcomes):
-                raise RuntimeError('native initialization failed: '+str(outcomes))
+                raise RuntimeFailure('native initialization failed: '+str(outcomes))
             state.initial_current=-J
             return state
         except BaseException:
@@ -173,19 +174,19 @@ class _NativeState:
         error=None
         try:
             old=np.array(old,dtype=np.float64,order='C');new=np.array(new,dtype=np.float64,order='C')
-            if self.closed or self.steps>=self.capacity:raise ValueError('closed or exhausted native state')
-            if old.shape!=(3,) or new.shape!=(3,) or not np.isfinite(new).all():raise ValueError('finite A vectors required')
-            if not np.array_equal(old,self.A):raise ValueError('stale A endpoint')
+            if self.closed or self.steps>=self.capacity:raise InputError('closed or exhausted native state')
+            if old.shape!=(3,) or new.shape!=(3,) or not np.isfinite(new).all():raise InputError('finite A vectors required')
+            if not np.array_equal(old,self.A):raise InputError('stale A endpoint')
         except Exception as exc:error=str(exc)
         comm=self.native.context.solver_comm
         errors=comm.allgather(error)
-        if any(errors):raise ValueError(str(errors))
+        if any(errors):raise InputError(str(errors))
         values=comm.allgather((old.tolist(),new.tolist()))
-        if any(v!=values[0] for v in values):raise ValueError('A endpoints differ within group')
+        if any(v!=values[0] for v in values):raise InputError('A endpoints differ within group')
         J=np.empty(3)
         code=self._call(self.lib.sp_tddft_step,old,new,J)
         outcomes=comm.allgather((int(code),bool(np.isfinite(J).all())))
-        if any(code or not finite for code,finite in outcomes):raise RuntimeError('native step failed: '+str(outcomes))
+        if any(code or not finite for code,finite in outcomes):raise RuntimeFailure('native step failed: '+str(outcomes))
         self.A=new.copy();self.steps+=1
         return -J  # Physical charge-current density, converted exactly once.
 
@@ -195,6 +196,6 @@ class _NativeState:
         if self.initialized:
             code=self._call(self.lib.sp_tddft_close)
         codes=self.native.context.solver_comm.allgather(int(code))
-        if any(codes):raise RuntimeError('native close failed: '+str(codes))
+        if any(codes):raise RuntimeFailure('native close failed: '+str(codes))
         self.native.close();self.closed=True
         # Keep native files for diagnosis/postprocessing; caller owns work_root.

@@ -125,3 +125,11 @@ For practical TDDFT, prefer 1D propagation/layered structures; recommend 3D elec
 `python -m salmonpy.examples.ase_tddft RUNTIME_DIRECTORY NEW_OUTPUT_DIRECTORY --verify-independence`
 
 Requires ASE/f90nml and an audited DFT/TDDFT/PZ runtime. See the [ASE guide](../ASE.en.md). Infers neutral electron count and runs a short Si connection test with one thread, not converged optical physics.
+
+## Snapshot replay
+
+```sh
+python -m salmonpy.examples.snapshot_restore
+```
+
+Checks LD/SBE and all four Python fields; installed kernels, no full SALMON required. See [snapshots](../SNAPSHOTS.en.md).

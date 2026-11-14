@@ -175,3 +175,19 @@ wheelからの利用テストはソース側の `docs/wheel-user-test.md` / `.en
 LD・合成SBE・波形・形状・保存の公式例を実行します。ソースビルドへ自動切替せず、
 wheelハッシュと実際の読込元を記録します。これはスモークテストであり、先行Notebookの
 追加の解析解・保存則検証や、外部SALMON・MPIの検証を含みません。
+
+## 公開契約とメモリ上の状態保存（0.1.0a5）
+
+`public_api` と `snapshots` タスクを参照。公開名は `salmonpy.api.PUBLIC_API`、
+版は `salmonpy.__version__`。例外は `salmonpy.errors` の親と分類を使い、
+既存の組込み例外による捕捉も維持します。OS・依存・コールバックの例外がすべて
+SalmonpyErrorになるとは説明しません。詳細はAPI.md/API.en.md。
+
+LD・SBE・Pythonの4種類の場だけが `snapshot()`／`restore(token)` に対応します。
+同じモデルオブジェクト、同じdt・開始時刻と場の容量・駆動条件を要求します。
+保存はメモリ上の不変コピーで、失敗したrestoreは状態を変えません。保存数と状態サイズの
+分だけ追加メモリが必要です。トークンは編集・シリアライズせず、Zarr GSや出力NPZと混同しません。
+手動結合では同じ受理済み時刻で場と物質を両方保存します。MPI全体の原子的復元、可変dt、
+TDDFTやネイティブE/Hの再開は未対応です。これまでの「再開未対応」の説明は永続再開・
+外部ソルバーに関するもので、軽い部品の今回のメモリ上の復元と区別してください。
+examples/snapshot_restore.pyは実行可能な例です。結晶の基本はtransverse・A/c駆動です。

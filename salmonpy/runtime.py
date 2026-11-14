@@ -3,6 +3,7 @@
 Catalogs are a trust boundary: use publisher-provided catalogs, not arbitrary
 third-party URLs. Hashes establish integrity, not scientific correctness.
 """
+from .errors import InputError, RuntimeFailure
 import argparse
 import hashlib
 import json
@@ -23,7 +24,7 @@ INTERFACE = 'salmonpy-runtime/2'
 _MAX_ARCHIVE = 1024 * 1024 * 1024
 
 
-class RuntimeUnavailable(RuntimeError):
+class RuntimeUnavailable(RuntimeFailure):
     """No compatible published binary; build is never started implicitly."""
 
 
@@ -42,7 +43,7 @@ def host_platform():
 
 def _version(value):
     if not re.fullmatch(r'\d+(\.\d+)*', value):
-        raise ValueError('missing or invalid platform version')
+        raise InputError('missing or invalid platform version')
     return tuple(int(p) for p in value.split('.'))
 
 
@@ -68,7 +69,7 @@ def _hash(path):
 def _https(url):
     parsed = urlparse(url)
     if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password:
-        raise ValueError('runtime downloads require an HTTPS URL without credentials')
+        raise InputError('runtime downloads require an HTTPS URL without credentials')
 
 
 def _download(url, target):
@@ -79,7 +80,7 @@ def _download(url, target):
         while block := response.read(1024*1024):
             size += len(block)
             if size > _MAX_ARCHIVE:
-                raise ValueError('runtime archive exceeds size limit')
+                raise InputError('runtime archive exceeds size limit')
             out.write(block)
 
 
@@ -96,7 +97,7 @@ def _catalog(catalog=None):
     else:
         data = json.loads(Path(catalog).read_text(encoding='utf-8'))
     if data.get('schema') != 'salmonpy.runtimes/1' or not isinstance(data.get('artifacts'), list):
-        raise ValueError('unsupported runtime catalog')
+        raise InputError('unsupported runtime catalog')
     return data
 
 
@@ -114,10 +115,10 @@ def inspect_runtime(catalog=None, *, required=(), host=None):
 
 def _relative(name):
     if not isinstance(name, str) or not name or '\\' in name or ':' in name:
-        raise ValueError('unsafe runtime path')
+        raise InputError('unsafe runtime path')
     path = PurePosixPath(name)
     if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')):
-        raise ValueError('unsafe runtime path')
+        raise InputError('unsafe runtime path')
     return path
 
 
@@ -125,23 +126,23 @@ def _manifest(directory, *, required=(), host=None):
     directory = Path(directory).expanduser().resolve()
     meta = json.loads((directory/'runtime.json').read_text(encoding='utf-8'))
     if meta.get('schema') != 'salmonpy.runtime/1' or meta.get('interface') != INTERFACE:
-        raise ValueError('unsupported runtime interface')
+        raise InputError('unsupported runtime interface')
     if not _compatible(meta.get('platform', {}), host_platform() if host is None else host):
         raise RuntimeUnavailable('runtime platform is incompatible with this host')
     if not set(required).issubset(meta.get('features', [])):
         raise RuntimeUnavailable('runtime lacks required features')
     files = meta.get('files')
     if not isinstance(files, dict) or meta.get('executable') not in files:
-        raise ValueError('runtime manifest lacks executable inventory')
+        raise InputError('runtime manifest lacks executable inventory')
     for name, expected in files.items():
         path = directory.joinpath(*_relative(name).parts)
         if any(p.is_symlink() for p in [path, *path.parents] if p != directory.parent):
-            raise ValueError('runtime symlinks are not supported')
+            raise InputError('runtime symlinks are not supported')
         if not path.is_file() or _hash(path) != expected:
-            raise ValueError('runtime file checksum mismatch: '+name)
+            raise InputError('runtime file checksum mismatch: '+name)
     actual = {p.relative_to(directory).as_posix() for p in directory.rglob('*') if p.is_file()}
     if actual != set(files) | {'runtime.json'}:
-        raise ValueError('runtime contains unlisted files')
+        raise InputError('runtime contains unlisted files')
     return meta
 
 
@@ -151,7 +152,7 @@ def load_runtime(directory, *, required=(), host=None):
     meta = _manifest(directory, required=required, host=host)
     path = Path(directory).expanduser().resolve()/meta['executable']
     if not os.access(path, os.X_OK):
-        raise ValueError('runtime executable is not executable')
+        raise InputError('runtime executable is not executable')
     return SalmonExecutable(path, meta['files'][meta['executable']])
 
 
@@ -167,7 +168,7 @@ def install_runtime(directory, *, catalog=None, required=(), artifact=None, host
         raise RuntimeUnavailable('No compatible prebuilt runtime. Use an audited existing runtime, '
                                  'or explicitly run: python -m salmonpy.runtime build --help')
     if len(matches) != 1:
-        raise ValueError('Multiple compatible runtimes; select an explicit artifact ID')
+        raise InputError('Multiple compatible runtimes; select an explicit artifact ID')
     entry = matches[0]
     if archive is None:
         if not entry.get('url'):
@@ -183,7 +184,7 @@ def install_runtime(directory, *, catalog=None, required=(), artifact=None, host
         else:
             shutil.copyfile(local_archive, archive)
         if _hash(archive) != entry['sha256']:
-            raise ValueError('runtime archive checksum mismatch')
+            raise InputError('runtime archive checksum mismatch')
         stage.mkdir()
         with zipfile.ZipFile(archive) as z:
             names = set()
@@ -193,18 +194,18 @@ def install_runtime(directory, *, catalog=None, required=(), artifact=None, host
                 _relative(name)
                 mode = info.external_attr >> 16
                 if name in names or info.is_dir() or stat.S_ISLNK(mode) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG)):
-                    raise ValueError('unsupported or duplicate runtime archive member')
+                    raise InputError('unsupported or duplicate runtime archive member')
                 names.add(name)
                 total += info.file_size
                 if total > _MAX_ARCHIVE:
-                    raise ValueError('expanded runtime exceeds size limit')
+                    raise InputError('expanded runtime exceeds size limit')
                 target = stage.joinpath(*PurePosixPath(name).parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with z.open(info) as source, target.open('wb') as out:
                     shutil.copyfileobj(source, out)
             meta = _manifest(stage, host=host)
             if any(meta.get(k) != entry.get(k) for k in ('interface', 'platform', 'features')):
-                raise ValueError('runtime catalog and manifest disagree')
+                raise InputError('runtime catalog and manifest disagree')
             (stage/meta['executable']).chmod(0o755)
         # Reserve destination without replacing an existing runtime, even in a race.
         dest.mkdir(exist_ok=False)
@@ -224,20 +225,20 @@ def build_runtime(upstream, directory, *, jobs, cmake_args=()):
     a claim that all scientific workflows have been validated on this machine.
     """
     if isinstance(jobs, bool) or not isinstance(jobs, int) or jobs < 1:
-        raise ValueError('jobs must be a positive integer chosen for the memory budget')
+        raise InputError('jobs must be a positive integer chosen for the memory budget')
     if any(not s.startswith('-D') or '=' not in s for s in cmake_args):
-        raise ValueError('CMake options must be explicit -DNAME=VALUE definitions')
+        raise InputError('CMake options must be explicit -DNAME=VALUE definitions')
     resources = Path(__file__).with_name('_runtime_source')
     if not resources.exists():
         resources = Path(__file__).resolve().parents[1]
     prepare = resources/'tools/prepare_salmon_runtime.py'
     checker = resources/'tools/check_forbidden_eigensolvers.py'
     if not prepare.is_file() or not checker.is_file():
-        raise RuntimeError('runtime build resources missing; reinstall a complete SALMONpy wheel')
+        raise RuntimeFailure('runtime build resources missing; reinstall a complete SALMONpy wheel')
     work = Path(directory).expanduser().resolve()
     upstream = Path(upstream).expanduser().resolve()
     if work.is_relative_to(upstream) or work.is_relative_to(resources):
-        raise ValueError('build directory must be outside source checkouts')
+        raise InputError('build directory must be outside source checkouts')
     work.mkdir(parents=True, exist_ok=False)
     commands = [
         [sys.executable, str(prepare), str(upstream), str(work/'source')],

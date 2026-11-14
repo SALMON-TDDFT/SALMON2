@@ -122,3 +122,9 @@ SALMON 本体との直接比較は `tools/test_longitudinal_salmon.py` で行い
 SALMONpy の TDDFT ワーカー（`tr`）＋場の部品で計算します。400 ステップで A と電流の差は
 相対 3×10⁻¹⁵ 以下で、SALMON の出力桁と一致しました。1次元では格子全体の A も一致します。
 記録は `docs/maxwell-field-validation-2026-11-14.md` にあります。
+
+## ホスト向けAPIと状態保存
+
+[公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
+0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
+ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。

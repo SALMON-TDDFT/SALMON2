@@ -5,6 +5,7 @@ The initial bundle contains a valid RT input, data_for_restart and relative asse
 States return the electric (charge) current density j; the worker's SALMON
 electronic matter current J is kept internally (``matter_current``), j = -J.
 """
+from .errors import InputError, InputTypeError, RuntimeFailure
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -21,7 +22,7 @@ from .ld import _array, _positive
 from .sbe import _integer, _frozen
 
 
-class OutputSaveError(RuntimeError):
+class OutputSaveError(RuntimeFailure):
     """Output export failed; raw worker files remain at recovery_directory."""
     def __init__(self,directory):
         self.recovery_directory=Path(directory)
@@ -43,17 +44,17 @@ def _digest(path):
 
 def _copy_bundle(source,dest):
     if dest.resolve().is_relative_to(source.resolve()):
-        raise ValueError('snapshot destination must be outside the input bundle')
+        raise InputError('snapshot destination must be outside the input bundle')
     dest.mkdir()
     records=[]
     for path in sorted(source.rglob('*')):
-        if path.is_symlink(): raise ValueError('bundle symlinks are unsupported; supply actual files')
+        if path.is_symlink(): raise InputError('bundle symlinks are unsupported; supply actual files')
         target=dest/path.relative_to(source)
         if path.is_dir(): target.mkdir(exist_ok=True)
         elif path.is_file():
             shutil.copy2(path,target)
             records.append((str(path.relative_to(source)),_digest(target)))
-        else: raise ValueError('bundle contains a non-regular file')
+        else: raise InputError('bundle contains a non-regular file')
     return tuple(records)
 
 
@@ -76,16 +77,16 @@ class TDDFTInitialState:
 
     @classmethod
     def from_salmon(cls,directory,input_file,*,executable,max_steps=1000,threads=1,timeout=300.):
-        if not isinstance(executable,SalmonExecutable): raise TypeError('expected SalmonExecutable')
+        if not isinstance(executable,SalmonExecutable): raise InputTypeError('expected SalmonExecutable')
         max_steps=_integer(max_steps,'max_steps',1,2**31-2)
         threads=_integer(threads,'threads',1,2**31-1);timeout=_positive(timeout,'timeout')
         root=Path(directory).expanduser().resolve(); inp=Path(input_file)
-        if inp.is_absolute() or '..' in inp.parts: raise ValueError('input_file must be relative to the bundle')
+        if inp.is_absolute() or '..' in inp.parts: raise InputError('input_file must be relative to the bundle')
         for name in ('info.bin','occupation.bin','wfn.bin'):
-            if not (root/'data_for_restart'/name).is_file(): raise ValueError(f'missing GS record: {name}')
+            if not (root/'data_for_restart'/name).is_file(): raise InputError(f'missing GS record: {name}')
         text=(root/inp).read_text()
         if '!SALMONPY_END_INPUT' in text or any(len(line)>256 for line in text.splitlines()):
-            raise ValueError('input contains worker marker or a line longer than SALMON accepts')
+            raise InputError('input contains worker marker or a line longer than SALMON accepts')
         owner=tempfile.TemporaryDirectory(prefix='salmonpy-tddft-initial-')
         snapshot=Path(owner.name)/'bundle'
         try:
@@ -99,8 +100,8 @@ class TDDFTInitialState:
     def new_state(self,*,dt,time0=0.,initial_A=(0.,0.,0.)):
         dt=_positive(dt,'dt');time0=float(_array(time0,'time0',()))
         A=_array(initial_A,'initial_A',(3,))
-        if time0!=0.: raise ValueError('fresh TDDFT GS states start at time0=0')
-        if not self._snapshot.exists(): raise RuntimeError('initial snapshot is closed')
+        if time0!=0.: raise InputError('fresh TDDFT GS states start at time0=0')
+        if not self._snapshot.exists(): raise RuntimeFailure('initial snapshot is closed')
         return TDDFTState(self,dt,A)
 
     def close(self): self._owner.cleanup()
@@ -136,7 +137,7 @@ class TDDFTState:
         self._bundle=Path(self._owner.name)/'bundle'
         try:
             if _copy_bundle(initial._snapshot,self._bundle)!=initial.manifest:
-                raise ValueError('initial snapshot checksum mismatch')
+                raise InputError('initial snapshot checksum mismatch')
             self._spawn()
             self._J0=self._current.copy()
         except BaseException:
@@ -165,7 +166,7 @@ class TDDFTState:
 
     def _spawn(self):
         if _digest(self._executable.path)!=self._executable.sha256:
-            raise ValueError('executable SHA256 differs from the audited binary')
+            raise InputError('executable SHA256 differs from the audited binary')
         self._work=_WorkingDirectory()
         work=Path(self._work.name)/'run';_copy_bundle(self._bundle,work)
         self._events=queue.Queue()
@@ -210,9 +211,9 @@ class TDDFTState:
         except queue.Empty as exc: raise TimeoutError('SALMON TDDFT worker response timed out') from exc
         if line is None:
             log=Path(self._work.name)/'run/worker.log'
-            raise RuntimeError('SALMON TDDFT worker exited before reply:\n'+log.read_text()[-6000:])
+            raise RuntimeFailure('SALMON TDDFT worker exited before reply:\n'+log.read_text()[-6000:])
         fields=line.split()
-        if len(fields)!=5 or int(fields[1])!=index: raise RuntimeError('TDDFT worker protocol sequence mismatch')
+        if len(fields)!=5 or int(fields[1])!=index: raise RuntimeFailure('TDDFT worker protocol sequence mismatch')
         return _array([float(x) for x in fields[2:]],'worker current',(3,))
 
     def _stop(self,*,cleanup=True):
@@ -234,10 +235,10 @@ class TDDFTState:
         return returncode
 
     def step(self,Anew):
-        if self._closed: raise RuntimeError('TDDFT state is closed')
+        if self._closed: raise RuntimeFailure('TDDFT state is closed')
         A=_array(Anew,'Anew',(3,))
-        if self._steps>=self._capacity: raise ValueError('TDDFT max_steps reached; create a new state with larger capacity')
-        if not np.isfinite((self._steps+1)*self.dt): raise ValueError('time overflow')
+        if self._steps>=self._capacity: raise InputError('TDDFT max_steps reached; create a new state with larger capacity')
+        if not np.isfinite((self._steps+1)*self.dt): raise InputError('time overflow')
         previous=self._current.copy()
         try:
             self._send('STEP '+' '.join(f'{v:.17e}' for v in A))
@@ -250,12 +251,12 @@ class TDDFTState:
                     self._send('STEP '+' '.join(f'{v:.17e}' for v in oldA))
                     self._current=self._receive(index)
                 if not np.allclose(self._current,previous,rtol=1e-12,atol=1e-14):
-                    raise RuntimeError('TDDFT replay differs from the accepted state')
+                    raise RuntimeFailure('TDDFT replay differs from the accepted state')
                 self._current=previous
             except Exception as recovery:
                 self.close()
-                raise RuntimeError('TDDFT worker failed and recovery failed; state closed') from recovery
-            raise RuntimeError('TDDFT step failed; previous accepted state restored') from exc
+                raise RuntimeFailure('TDDFT worker failed and recovery failed; state closed') from recovery
+            raise RuntimeFailure('TDDFT step failed; previous accepted state restored') from exc
         self._current=current;self._history.append(A.copy());self._curr_history.append(current.copy());self._steps+=1
         return self.current
 
@@ -267,14 +268,14 @@ class TDDFTState:
         are retained, including outputs already present in the initial bundle.
         This archive is for postprocessing, not a restart checkpoint.
         """
-        if self._closed: raise RuntimeError('TDDFT state is closed')
+        if self._closed: raise RuntimeFailure('TDDFT state is closed')
         dest=Path(directory).expanduser().resolve()
         if dest.exists(): raise FileExistsError(dest)
         for parent in (Path(self._work.name),Path(self._owner.name)):
-            if dest.is_relative_to(parent): raise ValueError('archive must be outside temporary state directories')
+            if dest.is_relative_to(parent): raise InputError('archive must be outside temporary state directories')
         from .outputs import _write_archive
         try:
-            if self._stop(cleanup=False)!=0: raise RuntimeError('worker did not exit cleanly; output not finalized')
+            if self._stop(cleanup=False)!=0: raise RuntimeFailure('worker did not exit cleanly; output not finalized')
             metadata={'backend':'SALMON-TDDFT-middlepoint','dt':self.dt,'steps':self._steps,
                 'units':{'time':'a.u.','A':'Ac=A/c, a.u.','current':'electric (charge) current density, a.u.'},
                 'time_location':'A and current are accepted endpoint samples; first sample is the initial state',

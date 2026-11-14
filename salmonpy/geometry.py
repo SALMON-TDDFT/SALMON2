@@ -1,4 +1,5 @@
 """Material-grid previews for isolated, unrotated SALMON FDTD geometries."""
+from .errors import InputError, InputTypeError
 from dataclasses import dataclass
 import numpy as np
 from .ld import _array
@@ -6,7 +7,7 @@ from .ld import _array
 
 def vector(value,name,positive=False):
     a=_array(value,name,(3,))
-    if positive and np.any(a<=0): raise ValueError(f'{name} must be positive')
+    if positive and np.any(a<=0): raise InputError(f'{name} must be positive')
     return tuple(map(float,a))
 
 
@@ -18,7 +19,7 @@ class Grid:
     def __post_init__(self):
         n=np.asarray(self.counts)
         if n.shape!=(3,) or n.dtype.kind not in 'iu' or np.any(n<2):
-            raise ValueError('counts must be three integers >= 2')
+            raise InputError('counts must be three integers >= 2')
         object.__setattr__(self,'counts',tuple(map(int,n)))
         object.__setattr__(self,'spacing',vector(self.spacing,'spacing',True))
 
@@ -38,11 +39,11 @@ class Shape:
     material: int=1
 
     def __post_init__(self):
-        if self.kind not in ('box','ellipsoid'): raise ValueError('kind must be box or ellipsoid')
+        if self.kind not in ('box','ellipsoid'): raise InputError('kind must be box or ellipsoid')
         object.__setattr__(self,'size',vector(self.size,'size',True))
         object.__setattr__(self,'center',vector(self.center,'center'))
         if isinstance(self.material,bool) or not isinstance(self.material,(int,np.integer)) or self.material<1:
-            raise ValueError('material must be a positive integer')
+            raise InputError('material must be a positive integer')
         object.__setattr__(self,'material',int(self.material))
 
 
@@ -52,10 +53,10 @@ class Geometry:
     shapes: tuple=()
 
     def __post_init__(self):
-        if not isinstance(self.grid,Grid): raise TypeError('grid must be Grid')
+        if not isinstance(self.grid,Grid): raise InputTypeError('grid must be Grid')
         shapes=tuple(self.shapes)
         if len(shapes)>1000 or any(not isinstance(s,Shape) for s in shapes):
-            raise ValueError('up to 1000 Shape objects are supported')
+            raise InputError('up to 1000 Shape objects are supported')
         object.__setattr__(self,'shapes',shapes)
 
     def material_ids(self):
@@ -70,16 +71,16 @@ class Geometry:
         return ids
 
     def slice(self,axis,index):
-        if axis not in (0,1,2): raise ValueError('axis must be 0,1,2')
+        if axis not in (0,1,2): raise InputError('axis must be 0,1,2')
         return np.take(self.material_ids(),index,axis=axis)
 
     def boundary_contacts(self,faces):
         """Return PML face names containing matter; current SALMON uses 8 cells."""
         ids=self.material_ids();found=[]
-        if len(faces)!=6: raise ValueError('six boundary faces are required')
+        if len(faces)!=6: raise InputError('six boundary faces are required')
         for i,face in enumerate(faces):
             if face!='pml': continue
             axis=i//2;indices=range(9) if i%2==0 else range(ids.shape[axis]-9,ids.shape[axis])
-            if ids.shape[axis]<19: raise ValueError('PML with clear interfaces needs at least 19 cells along its axis')
+            if ids.shape[axis]<19: raise InputError('PML with clear interfaces needs at least 19 cells along its axis')
             if np.any(np.take(ids,list(indices),axis=axis)!=0): found.append(('x-','x+','y-','y+','z-','z+')[i])
         return tuple(found)

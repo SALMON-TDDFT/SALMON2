@@ -7,6 +7,7 @@ coordinates, atomic units (contract since 2026-11-14). Backends may keep SALMON'
 electronic matter current J = -j internally; fixed ions contribute zero.
 Backends declare their time layout with a ``timing`` attribute (salmonpy.time/1).
 """
+from .errors import InputError
 from dataclasses import dataclass
 from typing import Protocol
 import numpy as np
@@ -55,12 +56,12 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
     rejected. The first output is the backend's initial current, not forced zero.
     """
     if not isinstance(drive,FieldSamples) or drive.kind!='A':
-        raise ValueError('crystalline response requires FieldSamples(kind="A")')
+        raise InputError('crystalline response requires FieldSamples(kind="A")')
     dt=np.diff(drive.time)
     if not np.allclose(dt,dt[0],rtol=1e-8,atol=1e-12*abs(dt[0])):
-        raise ValueError('uniform A samples are required')
+        raise InputError('uniform A samples are required')
     backend=initial.backend
-    if not isinstance(backend,str) or not backend: raise ValueError('backend identifier must be nonempty')
+    if not isinstance(backend,str) or not backend: raise InputError('backend identifier must be nonempty')
     output_path=None
     if output_directory is not None:
         from pathlib import Path
@@ -72,7 +73,7 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
         spec=matter_timing(state,float(dt[0]),float(drive.time[0]))
         port=spec.input('A')
         if port is None or spec.clock_offset+port.offset!=0 or port.sampling!='point':
-            raise ValueError('respond supplies point A samples at n*dt; the backend declares otherwise')
+            raise InputError('respond supplies point A samples at n*dt; the backend declares otherwise')
         sign=charge_sign(spec);timing=spec.to_dict()
         current=np.empty_like(drive.values)
         for i,t in enumerate(drive.time):
@@ -83,7 +84,7 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
             roundoff=8*np.finfo(float).eps*(i+1)*scale
             tolerance=min(abs(float(dt[0]))*1e-3,max(abs(float(dt[0]))*1e-8,roundoff))
             if not np.isfinite(state.time) or not np.isclose(state.time,t,rtol=0,atol=tolerance):
-                raise ValueError('backend time does not match the common A grid')
+                raise InputError('backend time does not match the common A grid')
         if output_path is not None:
             finish=getattr(state,'finish',None)
             if finish is not None:
