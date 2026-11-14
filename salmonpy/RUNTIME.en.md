@@ -131,3 +131,11 @@ The default runtime is unchanged. Explicitly apply `_runtime_source/tools/prepar
 This first extraction gives each RT state its dt, Taylor order, propagation and field-integration settings. Validation uses synthetic PZ inputs; full native multi-material contexts are not implemented. Isolated calcVbox, ionic motion, single-scale Maxwell and other shared settings remain outside this milestone. FDTD coupling still requires a common dt.
 
 The user's fast PR-intended implementation is the HSE baseline. This PZ regression is not an HSE speed/accuracy benchmark and the overlay is not automatically applicable to that PR branch. HSE ACE factors, prediction histories and mutable workspaces need separate ownership/validation. Explicit builds must resolve matching dependencies/compiler flags and retain source/all-application-object prohibition audits and CMake checks.
+
+## Experimental fast-PR HSE RT state extraction
+
+A separate HSE profile pins the user's PR-intended revision `c9e8ce431f43eefd4a88998134adb4796f8ec837`. Run `python tools/prepare_hse_rt_state.py LOCAL_PR_GIT NEW_DIRECTORY` to prepare a new external overlaid source, or add `--reference-only` for the unchanged numerical reference. Both retain mandatory source/object audits in CMake configure/incremental builds. The PR checkout and default SALMONpy runtime are unchanged.
+
+This stage groups ACE factors, accepted prediction histories, PT-CN history/dt, Taylor trials and action caches under `s_exx_rt_state`. Lifecycle operations take explicit state arguments and reject invalid dt/stages before mutation. Optional owned-allocation byte accounting includes allocated history-array descriptors/fixed fields and nested buffers; it is not RSS.
+
+The legacy HSE adapter still uses one default state. Geometry/kernel/Wannier resources, public legacy flags and input settings remain shared, so this does not provide full native multi-material contexts or concurrent calls. Fast exchange paths are retained; synthetic numerical regression does not establish real-material accuracy or a speed improvement. FDTD coupling still requires a common dt.

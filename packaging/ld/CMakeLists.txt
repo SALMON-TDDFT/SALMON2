@@ -112,3 +112,8 @@ install(FILES "${ROOT}/salmonpy/_gs_export.py" DESTINATION salmonpy)
 install(FILES "${ROOT}/tools/prepare_rt_step_config.py" "${ROOT}/tools/test_rt_step_config.py"
   "${ROOT}/tools/test_rt_step_config_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_rt_step_config.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+# Separate opt-in fast-PR HSE profile; no full solver is bundled.
+install(FILES "${ROOT}/tools/prepare_hse_rt_state.py" "${ROOT}/tools/test_hse_rt_state.py"
+  "${ROOT}/tools/test_hse_rt_state_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_rt_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
