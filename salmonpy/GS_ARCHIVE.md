@@ -128,3 +128,23 @@ archive = gs.export_archive('new-portable-gs', converter=converter, orbital_bloc
 元GSは変更せず、検証した3つのネイティブレコードを私有一時領域へコピーします。書き出しプログラムは1軌道ずつ処理し、Python側は分割実数ストリームと複素数の作業ファイルをメモリマップして、全軌道を一括でヒープ確保しません。メモリマップのページキャッシュはOS管理でRSS上限ではなく、一時ディスク領域も必要です。完了・失敗の両方で一時領域とマップを解放し、失敗時は作成中の出力のみを削除します。
 
 実数・複素数の合成ネイティブレコードで、元SALMONの読み書きとの値の一致と、GS/2経由で再入力したTDDFTの電流・保存復元の一致を検証します。合成試験用のGS/1完了メタデータはAPI検査用であり、SCFを収束させた実材料の結果ではありません。
+
+## 複数k点：明示的な直列変換器
+
+`SerialRestartConverter.from_build('NEW_BUILD/build.json')`で、複数k点まで検証した新しいGNU変換器を明示指定します。既存の`GammaRestartConverter`はΓ点限定のままです。古い変換器の動作も変更せず、新しい変換器のビルドは別ディレクトリで行います。同じ`GroundStateResult.export_archive`と`GroundStateArchive.tddft_initial_state`に渡せます。
+
+対象は座標軸に沿った正の対角セル、周期系・非スピン分極・固定イオン・CPU直列1ランクです。書き出しはSALMONpy DFT生成の通常メッシュに限定し、native/gs_k.dataの直交・逆格子係数形式を必須にします。逆格子、k点の順序と座標、等重みを入力kmeshと照合します（座標atol1e-14、重みrtol1e-14）。非直交セルのCartesian形式や、手指定file_kwを使った既存GSの書き出しは拒否します。読み込み側は、明示的な逆格子係数と非負・和1の重みを受け取り、不均一重みも扱います。
+
+ネイティブではk点を外側・軌道を内側に保持し、占有数はFortranの(軌道,k点)順、GS/2は(k,軌道,z,y,x)順です。密度は`sum_k,b weights[k]*occupations[k,b]*abs(u[k,b])**2`をk点・軌道順に加算して再構成します。重み付き電子数と16×格子点数×軌道数×k点数のサイズを検査し、添字・容量計算は64ビットを使います。ネイティブの波動関数作業領域は1軌道分、占有数と重みの領域はk点数に応じて増えます。
+
+再入力はkpoints.datをfile_kwで明示し、そのhashもreceiptに記録・照合します。レコードI/O環境の固定、元データの保護、独立ワーカーの条件は従来どおりです。provenanceには任意のkpoint_source='native/gs_k.data'が追加されます。
+
+波動関数と占有数はネイティブのビットを保持します。一方、k点テキストの桁数制限とfile_kwでの重み再規格化があるため、一般のk点・重み・電流のビット一致は保証しません。元GSと再入力の電流比較はrtol1e-12、atol1e-14で判定します。実ランタイムの合成試験では2点・8点と不均一重み2点がビット一致し、3点・6点の差は約1e-18でした。同一の再入力状態の復元後はビット一致しました。これはSCF収束や実材料の物理精度の認定ではありません。
+
+```python
+from salmonpy.gs_native import SerialRestartConverter
+converter = SerialRestartConverter.from_build('NEW_MULTIK_CONVERTER/build.json')
+archive = gs.export_archive('new-portable-multik-gs', converter=converter)
+initial = archive.tddft_initial_state(converter=converter, executable=engine,
+                                    pseudopotentials=potentials, max_steps=1000)
+```

@@ -1,4 +1,4 @@
-"""Explicit compiler-bound Gamma GS/2→native TDDFT bundle bridge.
+"""Explicit compiler-bound serial GS/2→native TDDFT bundle bridge.
 
 No compilation, downloads or solver launch during conversion. An independently
 built, audited and probed converter must match the caller's runtime hash.
@@ -10,7 +10,7 @@ import numpy as np
 from .errors import InputError,InputTypeError,RuntimeFailure
 from .fdtd import SalmonExecutable
 
-__all__=['GammaRestartConverter']
+__all__=['GammaRestartConverter','SerialRestartConverter']
 RECEIPT='salmonpy-native-gs.json'
 ENVIRONMENT=('GFORTRAN_CONVERT_UNIT',)
 
@@ -35,7 +35,7 @@ def _receipt_environment(root,engine):
     if not p.exists():return None
     try:
         r=json.loads(p.read_text())
-        if r['schema']!='salmonpy.gs-gamma-bundle/1' or r['target_sha256']!=engine.sha256:raise InputError('native GS receipt requires its paired runtime')
+        if r['schema'] not in ('salmonpy.gs-gamma-bundle/1','salmonpy.gs-serial-bundle/1') or r['target_sha256']!=engine.sha256:raise InputError('native GS receipt requires its paired runtime')
         env=r['record_environment']
         if type(env) is not dict or set(env)!=set(ENVIRONMENT) or any(type(v) is not str for v in env.values()):raise InputError('invalid native GS record environment')
         expected=r['native_files']
@@ -45,6 +45,9 @@ def _receipt_environment(root,engine):
             raise InputError('native GS files differ from conversion receipt')
         if env['GFORTRAN_CONVERT_UNIT'].lower() not in ('','native','swap','big_endian','little_endian'):
             raise InputError('unit-specific record settings are unsupported')
+        if r['schema']=='salmonpy.gs-serial-bundle/1':
+            if r.get('kpoints_file')!='kpoints.dat' or _digest(root/'kpoints.dat')!=r.get('kpoints_sha256'):
+                raise InputError('native k-point file differs from conversion receipt')
         return tuple(sorted(env.items()))
     except (KeyError,TypeError,ValueError) as exc:
         if isinstance(exc,InputError):raise
@@ -60,6 +63,7 @@ class GammaRestartConverter:
     build_record:Path
     exporter:Path | None=None
     exporter_sha256:str | None=None
+    _multi_k=False
 
     @classmethod
     def from_build(cls,record):
@@ -95,8 +99,14 @@ class GammaRestartConverter:
         if _digest(self.path)!=self.sha256:raise InputError('converter hash changed')
         # Reverify all source bytes, including non-wave metadata, before producing a bundle.
         archive=GroundStateArchive.open(archive.directory);m=archive.metadata
-        if (archive.wavefunction_shape[0]!=1 or not np.array_equal(archive.array('kpoints'),np.zeros((1,3)))
-                or not np.array_equal(archive.array('weights'),np.ones(1))):raise InputError('native bridge supports exact Gamma with weight one only')
+        nk=archive.wavefunction_shape[0];kpoints=archive.array('kpoints');weights=archive.array('weights')
+        if not self._multi_k:
+            if nk!=1 or not np.array_equal(kpoints,np.zeros((1,3))) or not np.array_equal(weights,np.ones(1)):
+                raise InputError('native bridge supports exact Gamma with weight one only')
+        else:
+            cell=archive.array('cell_bohr')
+            if not np.array_equal(cell,np.diag(np.diag(cell))) or np.any(np.diag(cell)<=0):
+                raise InputError('serial multi-k bridge requires aligned positive orthogonal cell')
         n=m['electrons']
         if not float(n).is_integer():raise InputError('native bridge requires integer closed-shell electrons')
         potentials=tuple(pseudopotentials)
@@ -111,6 +121,7 @@ class GammaRestartConverter:
         from .bands import _input_groups
         groups=_input_groups(model.input_text());groups['calculation']="\n theory='tddft_pulse'\n"
         groups['control']="\n sysname='rt', base_directory='./', directory_read_data='./data_for_restart/', yn_restart='n', yn_self_checkpoint='n'\n"
+        if self._multi_k:groups['kgrid']="\n file_kw='kpoints.dat'\n"
         groups.pop('scf',None);groups['tgrid']='\n dt=0.02, nt=1\n'
         groups['emfield']="\n ae_shape1='none', trans_longi='tr'\n"
         groups['propagation']="\n propagator='middlepoint', yn_predictor_corrector='n'\n"
@@ -122,33 +133,40 @@ class GammaRestartConverter:
         try:
             (root/'data_for_restart').mkdir()
             nx,ny,nz=model.grid;nb=model.states
-            (root/'request.txt').write_text(f'{nx} {ny} {nz} {nb}\n{int(n)}\n')
-            (root/'portable_occupations.bin').write_bytes(np.asarray(archive.array('occupations')[0],dtype='<f8').tobytes())
+            (root/'request.txt').write_text(f'{nx} {ny} {nz} {nb}\n{int(n)}\n'+(f'{nk}\n' if self._multi_k else ''))
+            (root/'portable_occupations.bin').write_bytes(np.asarray(archive.array('occupations'),dtype='<f8').tobytes())
+            if self._multi_k:
+                (root/'portable_weights.bin').write_bytes(np.asarray(weights,dtype='<f8').tobytes())
+                lines=[str(nk)]+[str(k+1)+' '+' '.join(format(float(x),'.17e') for x in (*kpoints[k],weights[k])) for k in range(nk)]
+                (root/'kpoints.dat').write_text('\n'.join(lines)+'\n')
             block=m['orbital_block']
             with (root/'portable_real.bin').open('wb') as real,(root/'portable_imag.bin').open('wb') as imag:
-                for lo in range(0,nb,block):
-                    waves=archive.wavefunctions(0,lo,min(lo+block,nb))
-                    real.write(np.asarray(waves.real,dtype='<f8').tobytes(order='C'))
-                    imag.write(np.asarray(waves.imag,dtype='<f8').tobytes(order='C'))
+                for k in range(nk):
+                    for lo in range(0,nb,block):
+                        waves=archive.wavefunctions(k,lo,min(lo+block,nb))
+                        real.write(np.asarray(waves.real,dtype='<f8').tobytes(order='C'))
+                        imag.write(np.asarray(waves.imag,dtype='<f8').tobytes(order='C'))
             del waves
             with (root/'converter.log').open('w') as log:
                 result=subprocess.run([str(self.path)],cwd=root,stdout=log,stderr=subprocess.STDOUT,timeout=timeout,check=False,env=process_environment)
             if result.returncode:raise RuntimeFailure('native GS conversion failed: '+(root/'converter.log').read_text()[-4000:])
             files={name:_digest(root/'data_for_restart'/name) for name in ('info.bin','occupation.bin','wfn.bin')}
-            if (root/'data_for_restart/wfn.bin').stat().st_size!=16*nx*ny*nz*nb:raise RuntimeFailure('converted complex wavefunction size mismatch')
+            if (root/'data_for_restart/wfn.bin').stat().st_size!=16*nx*ny*nz*nb*nk:raise RuntimeFailure('converted complex wavefunction size mismatch')
+            if self._multi_k:(root/'portable_weights.bin').unlink()
             for name in ('request.txt','portable_occupations.bin','portable_real.bin','portable_imag.bin'):(root/name).unlink()
             (root/'rt.inp').write_text(text)
             for i,p in enumerate(potentials):(root/model._pseudo_name(i)).write_bytes(p.data)
             receipt={'schema':'salmonpy.gs-gamma-bundle/1','target_sha256':self.target_sha256,'converter_sha256':self.sha256,
                      'portable_manifest_sha256':_digest(archive.directory/'manifest.json'),'native_files':files,
                      'record_environment':dict(environment),'scope':'Gamma, serial CPU, periodic unpolarized fixed ions; not SCF certification'}
+            if self._multi_k:receipt.update(schema='salmonpy.gs-serial-bundle/1',kpoints_file='kpoints.dat',kpoints_sha256=_digest(root/'kpoints.dat'),scope='aligned orthogonal cell, serial CPU, periodic unpolarized fixed ions; not SCF certification')
             (root/RECEIPT).write_text(json.dumps(receipt,indent=2)+'\n')
             return root.resolve()
         except BaseException:
             shutil.rmtree(root);raise
 
     def export_archive(self,result,directory,*,orbital_block=16,timeout=300.):
-        """Export verified native Gamma GS/1 to GS/2 with reconstructed density."""
+        """Export verified native GS/1 in this converter scope; reconstruct density."""
         from ._gs_export import export_gamma
         return export_gamma(self,result,directory,orbital_block=orbital_block,timeout=timeout)
 
@@ -159,3 +177,15 @@ class GammaRestartConverter:
             bundle=self.write_bundle(archive,Path(tmp)/'bundle',executable=executable,pseudopotentials=pseudopotentials,timeout=timeout)
             initial=TDDFTInitialState.from_salmon(bundle,'rt.inp',executable=executable,max_steps=max_steps,threads=threads,timeout=timeout)
             return replace(initial,_source_root=archive.directory)
+
+
+class SerialRestartConverter(GammaRestartConverter):
+    """Opt-in aligned orthogonal multi-k bridge; Gamma API remains restricted."""
+    _multi_k=True
+
+    @classmethod
+    def from_build(cls,record):
+        converter=super().from_build(record)
+        if json.loads(converter.build_record.read_text()).get('multi_k_byte_parity') is not True:
+            raise InputError('explicitly build a converter with probed multi-k capability')
+        return converter

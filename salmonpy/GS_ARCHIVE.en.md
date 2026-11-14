@@ -62,3 +62,24 @@ Only SALMONpy DFT-generated Γ/serial/unpolarized GS/1 with one real or complex 
 Density is reconstructed in band order as `sum_b occ[b]*abs(u_b(r))**2`, rather than copied from the mixed native density. Reported energies/eigenvalues are retained, not recomputed. This is not a complete SCF-state checkpoint. Optional typed metadata.provenance records source/runtime/exporter hashes, derived-density origin, native orbital kind, local channels and I/O environment. Existing GS/2 without provenance still loads; reimport enforces recorded local channels. Provenance/hashes do not authenticate a publisher or certify physical correctness.
 
 Source GS is unchanged; three verified records are copied privately. Native export holds one orbital; Python maps split streams and a complex scratch file rather than heap-allocating all wavefunctions. OS-managed mapped pages can still consume RSS; temporary disk is required. Mappings/temp files are released after success/failure. Only a newly claimed incomplete output is removed on failure. Synthetic native real/complex and end-to-end TDDFT tests validate value/current/replay parity, not converged-material SCF accuracy.
+
+## Opt-in serial multi-k conversion
+
+`SerialRestartConverter.from_build('NEW_BUILD/build.json')` enables multi-k support only with a newly built/probed multi-k-capable GNU converter. Existing `GammaRestartConverter` remains exact-Gamma and old import-only records keep their previous behavior. Pass the new converter to the same `GroundStateResult.export_archive` and `GroundStateArchive.tddft_initial_state` methods.
+
+Current multi-k scope: axis-aligned positive-diagonal cells, periodic unpolarized fixed ions, one serial CPU rank. Export supports the strict DFT-generated regular mesh, requires native/gs_k.data in its orthogonal reduced-coordinate format, verifies reciprocal vectors, point order/coordinates and uniform weights against input kmesh (k coordinate atol1e-14; weight rtol1e-14). Nonorthogonal/Cartesian k exports and custom native file_kw source exports are rejected. Import supports caller-supplied reduced k coordinates and normalized nonnegative weights, including nonuniform distributions.
+
+Native files keep k-major/band-minor order and occupations[band,k] as Fortran records. Portable arrays keep(k,band,z,y,x); density becomes `sum_k,b weights[k]*occupations[k,b]*abs(u[k,b])**2` in fixed k/band order. Native conversion checks weighted electron count and16*gridpoints*bands*kpoints sizes, with64-bit indices/capacity arithmetic. One orbital's native scratch is retained; occupation/weight storage scales with k×bands.
+
+Import creates an explicit reduced-coordinate `kpoints.dat` referenced by file_kw, whose hash is part of the conversion receipt and checked before loading. GNU record environment binding and source/archive protection remain in force. Weights are normalized by the native file_kw loader. Exported GS/2 provenance adds optional kpoint_source='native/gs_k.data'.
+
+Wavefunctions and occupations retain their native bits. Native k-table text has limited decimal precision and file_kw renormalizes weights, so general k/weight/current bit equality is not promised. Actual-runtime synthetic tests use rtol1e-12,atol1e-14 for original vs reimport currents.2/8 grids and nonuniform2-point import matched bitwise;3/6 grids gave differences around1e-18. Restoring the same imported trajectory matched bitwise. These are synthetic integration tests, not SCF/real-material accuracy certification. MPI/spin/nonorthogonal/other compilers remain future work.
+
+```python
+from salmonpy.gs_native import SerialRestartConverter
+converter = SerialRestartConverter.from_build('NEW_MULTIK_CONVERTER/build.json')
+archive = gs.export_archive('new-portable-multik-gs', converter=converter)
+# Same explicit paired engine and matching potentials as the Gamma example:
+initial = archive.tddft_initial_state(converter=converter, executable=engine,
+                                    pseudopotentials=potentials, max_steps=1000)
+```

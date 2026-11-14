@@ -5,10 +5,10 @@ program gs_gamma_exporter
   use, intrinsic :: ieee_arithmetic,only:ieee_is_finite
   use salmonpy_gs_stream,only:gs_write_chunk
   implicit none
-  integer :: nx,ny,nz,nb,expected_iter,nk,mo,iter,nprocs,u,uw,ur,ui,ios,err,b,extra
-  integer(int64) :: ng,bytes,i,factor
-  real(real64) :: electrons,total,v
-  real(real64),allocatable :: occ(:),real_wave(:)
+  integer :: nx,ny,nz,nb,expected_iter,nk,mo,iter,nprocs,u,uw,ur,ui,ios,err,extra,expected_nk
+  integer(int64) :: ng,bytes,i,factor,nc,idx,b,k
+  real(real64) :: electrons,total,v,weight_sum
+  real(real64),allocatable :: occ(:),real_wave(:),weights(:)
   complex(real64),allocatable :: wave(:)
   integer(int8),allocatable :: raw(:)
   logical :: real_orbital
@@ -20,15 +20,20 @@ program gs_gamma_exporter
   if(ios/=0)stop 3
   read(u,*,iostat=ios)expected_iter
   if(ios/=0)stop 4
+  expected_nk=1
+  read(u,*,iostat=ios)expected_nk
+  if(ios>0)stop 43
+  if(ios<0)expected_nk=1
   close(u)
-  if(min(nx,ny,nz,nb)<1 .or. expected_iter<0)stop 5
+  if(min(nx,ny,nz,nb,expected_nk)<1 .or. expected_iter<0)stop 5
   if(.not.ieee_is_finite(electrons))stop 6
+  if(electrons<=0)stop 6
   ng=int(nx,int64)
   if(ng>huge(ng)/ny)stop 7
   ng=ng*ny
   if(ng>huge(ng)/nz)stop 8
   ng=ng*nz
-  if(ng>huge(ng)/16/nb)stop 9
+  if(ng>huge(ng)/16/nb/expected_nk)stop 9
   open(newunit=u,file='native_input/info.bin',status='old',form='unformatted',iostat=ios)
   if(ios/=0)stop 10
   read(u,iostat=ios)nk
@@ -44,13 +49,14 @@ program gs_gamma_exporter
   read(u,iostat=ios)extra
   if(ios>=0)stop 16
   close(u)
-  if(nk/=1 .or. mo/=nb .or. iter/=expected_iter .or. nprocs/=1)stop 17
+  if(nk/=expected_nk .or. mo/=nb .or. iter/=expected_iter .or. nprocs/=1)stop 17
   factor=16
   if(real_orbital)factor=8
   inquire(file='native_input/wfn.bin',size=bytes,iostat=ios)
   if(ios/=0)stop 18
-  if(bytes/=factor*ng*nb)stop 19
-  allocate(occ(nb),raw(8*ng),stat=err)
+  if(bytes/=factor*ng*nb*nk)stop 19
+  nc=int(nb,int64)*nk
+  allocate(occ(nc),weights(nk),raw(8*ng),stat=err)
   if(err/=0)stop 20
   if(real_orbital)then
     allocate(real_wave(ng),stat=err)
@@ -65,12 +71,28 @@ program gs_gamma_exporter
   read(u,iostat=ios)extra
   if(ios>=0)stop 23
   close(u)
-  total=0
-  do b=1,nb
-    if(.not.ieee_is_finite(occ(b)))stop 24
-    if(occ(b)<0 .or. occ(b)>2)stop 25
-    total=total+occ(b)
+  weights=1.d0
+  if(nk>1)then
+    call read_weights()
+  end if
+  weight_sum=0
+  do k=1,nk
+    if(.not.ieee_is_finite(weights(k)))stop 45
+    if(weights(k)<0)stop 46
+    weight_sum=weight_sum+weights(k)
   end do
+  if(.not.ieee_is_finite(weight_sum))stop 47
+  if(abs(weight_sum-1.d0)>1.d-12)stop 48
+  total=0
+  do k=1,nk
+  do b=1,nb
+    idx=int(k-1,int64)*nb+b
+    if(.not.ieee_is_finite(occ(idx)))stop 24
+    if(occ(idx)<0 .or. occ(idx)>2)stop 25
+    total=total+weights(k)*occ(idx)
+  end do
+  end do
+  if(.not.ieee_is_finite(total))stop 49
   if(abs(total-electrons)>1.d-12*max(1.d0,electrons))stop 26
   call gs_write_chunk('portable_occupations.bin',occ,ios)
   if(ios/=0)stop 27
@@ -80,6 +102,7 @@ program gs_gamma_exporter
   if(ios/=0)stop 29
   open(newunit=ui,file='portable_imag.bin',status='new',access='stream',form='unformatted',iostat=ios)
   if(ios/=0)stop 30
+  do k=1,nk
   do b=1,nb
     if(real_orbital)then
       read(uw,iostat=ios)real_wave
@@ -108,6 +131,7 @@ program gs_gamma_exporter
     write(ui,iostat=ios)raw
     if(ios/=0)stop 36
   end do
+  end do
   close(uw,iostat=ios)
   if(ios/=0)stop 37
   close(ur,iostat=ios)
@@ -125,4 +149,10 @@ program gs_gamma_exporter
   close(u,iostat=ios)
   if(ios/=0)stop 42
   print *, 'SALMONPY_GS_GAMMA_EXPORTER_V1 PASS'
+contains
+  subroutine read_weights()
+    use salmonpy_gs_stream,only:gs_read_chunk
+    call gs_read_chunk('portable_weights.bin',weights,ios)
+    if(ios/=0)stop 44
+  end subroutine
 end program

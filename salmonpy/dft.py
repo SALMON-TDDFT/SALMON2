@@ -289,7 +289,7 @@ class GroundStateResult:
         return _read_forces(verified.directory/'native/gs_forces.dat',len(record['numbers']))
 
     def export_archive(self,directory,*,converter,orbital_block=16,timeout=300.):
-        """Export verified serial Gamma native GS to GS/2; density is reconstructed.
+        """Export verified serial native GS in converter scope; density is reconstructed.
 
         Requires a matching explicit compiler-paired exporter and AU eigenvalue
         output. Does not run SCF or preserve density-mixing/RT histories.

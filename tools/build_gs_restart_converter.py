@@ -98,12 +98,36 @@ def main():
                     raise ValueError('native export bits differ: '+kind)
                 if (native_case/'portable_occupations.bin').read_bytes()!=np.array([2.,0.],dtype='<f8').tobytes():
                     raise ValueError('native occupation export differs')
+            for nk in (2,8):
+                case=out/('multi-k-'+str(nk));case.mkdir();(case/'native_input').mkdir()
+                run([probe,'write',str(case/'native_input')+os.sep,str(nk)])
+                (case/'request.txt').write_text(f'8 8 8 2\n2\n0\n{nk}\n')
+                (case/'portable_weights.bin').write_bytes(np.full(nk,1./nk,dtype='<f8').tobytes())
+                subprocess.run([str(exporter)],cwd=case,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=60,env=environment)
+                kk=np.arange(nk)[:,None,None];ii=np.arange(1,513)[None,None,:];bb=np.arange(1,3)[None,:,None]
+                er=np.asarray((ii+1000*bb+10000*kk)/1024,dtype='<f8').tobytes()
+                ei=np.asarray((ii-1000*bb-5000*kk)/2048,dtype='<f8').tobytes()
+                if (case/'portable_real.bin').read_bytes()!=er or (case/'portable_imag.bin').read_bytes()!=ei:raise ValueError('multi-k export order differs')
+                if (case/'portable_occupations.bin').read_bytes()!=np.tile(np.array([2.,0.],dtype='<f8'),nk).tobytes():raise ValueError('multi-k occupations differ')
+                (case/'request.txt').write_text(f'8 8 8 2\n2\n{nk}\n');(case/'data_for_restart').mkdir()
+                subprocess.run([str(converter)],cwd=case,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=60,env=environment)
+                run([probe,'read',str(case/'data_for_restart')+os.sep,str(nk)])
+                for name in ('info.bin','occupation.bin','wfn.bin'):
+                    if (case/'native_input'/name).read_bytes()!=(case/'data_for_restart'/name).read_bytes():raise ValueError('multi-k native round trip differs')
+            weighted=out/'multi-k-weighted';weighted.mkdir();(weighted/'data_for_restart').mkdir()
+            shutil.copy2(out/'multi-k-2/portable_real.bin',weighted/'portable_real.bin')
+            shutil.copy2(out/'multi-k-2/portable_imag.bin',weighted/'portable_imag.bin')
+            (weighted/'portable_weights.bin').write_bytes(np.array([.25,.75],dtype='<f8').tobytes())
+            (weighted/'portable_occupations.bin').write_bytes(np.array([[2.,0.],[2.,2.]],dtype='<f8').tobytes())
+            (weighted/'request.txt').write_text('8 8 8 2\n3.5\n2\n')
+            subprocess.run([str(converter)],cwd=weighted,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=60,env=environment)
+            run([probe,'read-weighted',str(weighted/'data_for_restart')+os.sep,'2'])
             state.update(status='built-audited-and-probed',converter=str(converter),sha256=digest(converter),
                          exporter=str(exporter),exporter_sha256=digest(exporter),native_export_parity=True,
                          probe=str(probe),probe_sha256=digest(probe),compiler=str(fc),compiler_sha256=digest(fc),compiler_version=version,
                          flags=flags,flags_make_sha256=digest(flags_path),runtime_build_sha256=digest(rp),
                          native_source_sha256=digest(native),sources={p.name:digest(p) for p in snapshot.glob('*.f90')},
-                         objects={p.name:digest(p) for p in out.glob('*.o')},native_byte_parity=True,commands=commands)
+                         objects={p.name:digest(p) for p in out.glob('*.o')},native_byte_parity=True,multi_k_byte_parity=True,commands=commands)
         except BaseException as exc:
             state.update(status='failed',error=str(exc),commands=commands);raise
         finally:(out/'build.json').write_text(json.dumps(state,indent=2)+'\n')

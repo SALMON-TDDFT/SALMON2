@@ -270,3 +270,5 @@ Persistent standalone LD ownership, fixed-dt coefficients and close/context-mana
 Portable caller-supplied GS arrays (GS/2), separate from native GS/1; explicit paired Gamma converter supports serial TDDFT initialization: [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).
 
 DFT-generated serial Gamma GS/1 export: GroundStateResult.export_archive with a new paired exporter; real/complex orbitals retained, density reconstructed and provenance recorded. See GS_ARCHIVE.en.md.
+
+SerialRestartConverter opts into aligned orthogonal multi-k native/portable GS conversion with explicit verified k-point files and weighted density; GammaRestartConverter stays Gamma-only. See GS_ARCHIVE.en.md for regular-source vs explicit-import scope and current tolerances.

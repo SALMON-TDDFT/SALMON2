@@ -132,10 +132,11 @@ def _metadata(m):
 def _export_provenance(p):
     keys={'schema','source_manifest_sha256','target_sha256','exporter_sha256','density_source',
           'eigenvalue_source','native_real_orbital','local_channels','record_environment'}
-    if type(p) is not dict or set(p)!=keys or p['schema']!='salmonpy.gs-native-export/1':raise InputError('invalid GS export provenance')
+    if type(p) is not dict or not keys<=set(p) or set(p)-keys-{'kpoint_source'} or p['schema']!='salmonpy.gs-native-export/1':raise InputError('invalid GS export provenance')
     if any(not _sha(p[k]) for k in ('source_manifest_sha256','target_sha256','exporter_sha256')):raise InputError('invalid GS export provenance hashes')
     if (p['density_source']!='reconstructed_from_native_orbitals' or p['eigenvalue_source']!='native/gs_eigen.data'
             or type(p['native_real_orbital']) is not bool):raise InputError('unsupported GS export semantics')
+    if 'kpoint_source' in p and p['kpoint_source']!='native/gs_k.data':raise InputError('unsupported kpoint provenance')
     channels=p['local_channels'];seen=set()
     if type(channels) is not list or not channels:raise InputError('invalid local channels')
     for c in channels:
