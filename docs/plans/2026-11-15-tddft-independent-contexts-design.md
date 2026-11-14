@@ -14,6 +14,14 @@ Keep the existing process-isolated TDDFT API, replay checkpoints and current con
 2. Save/restore every global module before/after each call. This might shorten an initial demonstration, but missing even one allocatable, hidden cache, file unit or opaque handle causes cross-talk. Copying unowned external resources is unsafe. Do not use whole-module swapping as the final design.
 3. Keep separate worker processes. Already supported and retained as the reference and robust fallback. This does not establish multiple contexts in a single native process. Repeatedly loading renamed shared libraries is also not a portable ownership solution.
 
+## FDTD clock policy (confirmed 2026-11-15)
+
+Different materials may use different fixed dt only when they are independent states or belong to different coupling loops. Within one current FDTD/TDDFT loop, **every material state uses the same dt as the field**, even when materials, grids or XC differ. Preserve the existing admission checks; reject dt mismatch before any coupled step. Integer ratios such as dt_TDDFT=dt_FDTD/2 do not imply supported subcycling.
+
+For native Yee E/H, E is at n*dt_FDTD, A/current are associated with the field's half-step clock, and the field consumes the previous current with lag1. A phase offset is not a remedy for unequal dt. A future multirate adapter needs its own clock/ratio declaration, A sampling/interpolation, returned-current timing/deposition and conservation/convergence tests. It is excluded from this context-extraction implementation; the backend must not silently repeat/skip steps, resample A, average j or override a state's dt.
+
+Acceptance includes two different material timing declarations sharing field dt, mismatch at either finer or coarser integer/noninteger ratios, and equal-dt but wrong-half-step rejection. Clock tests are interface tests; they do not certify a multirate physical scheme.
+
 ## Ownership and interfaces
 
 | Object | Owns | Lifetime |

@@ -67,3 +67,44 @@ class MultiscaleCouplingTests(unittest.TestCase):
         self.assertIsNone(measurement.seconds['A_distribution'])
         self.assertEqual(measurement.calls['A_distribution'], 1)
         self.assertTrue(measurement.errors)
+
+
+class FDTDCommonClockTests(unittest.TestCase):
+    """Clock admission only: no field/native solver or MPI process is started."""
+    def check(self, records):
+        from salmonpy.coupled import CoupledStepper, NativeEHField
+        class LocalComm:
+            def bcast(self, value, root=0): return value
+        context = SimpleNamespace(group=SimpleNamespace(role='field'),
+            plan=SimpleNamespace(point_ids=(19, 4)), is_leader=True, field_group=0,
+            leaders=LocalComm(), solver_comm=LocalComm())
+        def agree(error):
+            if error: raise ValueError(error)
+        response = SimpleNamespace(context=context, timing_records=lambda: records, agree=agree)
+        field = object.__new__(NativeEHField)
+        field.dt = .02
+        return CoupledStepper._check_timing(response, field)
+
+    def records(self, second_dt=.02, second_clock=0):
+        from salmonpy.timing import TimeSpec, InputPort, OutputPort
+        return {19: TimeSpec(.02, (InputPort('A'),), (OutputPort('j'),),
+                    integrator='material one').to_dict(),
+                4: TimeSpec(second_dt, (InputPort('A'),), (OutputPort('j'),),
+                    clock_offset=second_clock, integrator='material two').to_dict()}
+
+    def test_distinct_materials_share_fdtd_clock_and_half_step(self):
+        record = self.check(self.records())
+        self.assertEqual(record['electronic_clock_offset'], '1/2')
+        self.assertEqual(record['field']['inputs']['j']['offset'], '1/2')
+        self.assertEqual(record['field']['inputs']['j']['lag'], 1)
+        self.assertEqual(set(record['matter']), {19, 4})
+        self.assertNotEqual(record['matter'][19]['integrator'], record['matter'][4]['integrator'])
+
+    def test_integer_subcycle_ratios_are_rejected_without_an_adapter(self):
+        for dt in (.01, .04, .015):
+            with self.subTest(dt=dt), self.assertRaisesRegex(ValueError, 'point 4:.*dt differ'):
+                self.check(self.records(second_dt=dt))
+
+    def test_equal_dt_does_not_hide_wrong_half_step(self):
+        with self.assertRaisesRegex(ValueError, 'point 4:.*offset'):
+            self.check(self.records(second_clock='1/2'))

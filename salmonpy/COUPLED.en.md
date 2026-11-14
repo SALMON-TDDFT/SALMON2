@@ -200,3 +200,9 @@ files are not complete restart checkpoints.
 Local regressions check original vacuum/LD FDTD parity, current injection at MPI
 boundaries in all three directions, one/two field-rank parity and TDDFT A-history
 replay. Physical grid/time/GS convergence and production scaling remain separate work.
+
+## Different materials and time steps
+
+All material states connected to the same current FDTD loop use the field's common dt, even when their material, grid or XC differ. Independent states having separate dt values does not imply multirate coupling support. The coupler checks every point's timing declaration before stepping and rejects mismatched dt. An integer ratio, such as a material step half the field step, is also rejected without a separately validated adapter.
+
+Preserve the native Yee half-step clock and lag1 current feedback. Equal dt does not permit a mismatched half-step phase. Subcycling, intermediate A interpolation and time-averaged current feedback are not implemented or applied automatically. Different dt requires independent runs or a future explicitly validated temporal adapter.
