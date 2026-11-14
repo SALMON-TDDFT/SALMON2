@@ -19,3 +19,11 @@ ACKNOWLEDGEMENTS, obtained from the pinned upstream source. Its FFTE, bundled
 linear algebra, Libxc and other application-specific notices are not replaced
 by this package notice. No FFTE, full LAPACK or full SALMON application sources
 are bundled in SALMONpy's native/ directory.
+
+The Si introductory example includes the unmodified Si_rps.dat distributed at
+samples/exercise_04_bulkSi_gs/Si_rps.dat in SALMON2 commit
+3322d0561c0cad5180679136b3eddbe8b909487c. Its upstream Apache-2.0 LICENSE and
+source/hash provenance are retained in salmonpy/examples/si_intro_data/.
+This legacy KY data file does not encode pseudopotential-generator metadata;
+the starter follows its accompanying upstream PZ example and does not certify
+transferability or convergence for other conditions.

@@ -1,0 +1,44 @@
+{
+  "schema": "salmonpy.si-intro-provenance/1",
+  "scope": "real SCF-converged Si starter; grid/k/time convergence not certified",
+  "upstream_commit": "3322d0561c0cad5180679136b3eddbe8b909487c",
+  "pseudopotential": {
+    "path": "samples/exercise_04_bulkSi_gs/Si_rps.dat",
+    "source_url": "https://github.com/SALMON-TDDFT/SALMON2/blob/3322d0561c0cad5180679136b3eddbe8b909487c/samples/exercise_04_bulkSi_gs/Si_rps.dat",
+    "sha256": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
+    "license": "Apache-2.0; upstream repository LICENSE copied as LICENSE.txt",
+    "note": "KY Si file distributed with upstream PZ Si GS example; generator metadata not encoded in this legacy file"
+  },
+  "runtime_commit": "6f8b36c6c04f7f1f3be4e68e718a35cd22f6453c",
+  "runtime_run_url": "https://github.com/SALMON-TDDFT/SALMON2/actions/runs/43541732653",
+  "expires_at": "2027-02-12T01:37:54Z",
+  "runtime_artifacts": [
+    {
+      "name": "salmonpy-runtime-macos-15",
+      "artifact_id": 14092143545,
+      "platform": "macOS arm64 >=15.8.2",
+      "outer_sha256": "ec98ba8df91dc26fd4389232dc66273d649da0977e2cb76bf22b30f81da4888c",
+      "archive_member": "salmonpy-runtime-darwin-arm64.zip"
+    },
+    {
+      "name": "salmonpy-runtime-macos-15-intel",
+      "artifact_id": 14091993925,
+      "platform": "macOS x86_64",
+      "outer_sha256": "ef1b5751d2ae1f0d3248aa27b199669a274cfa119c11136b03ad85b5964d5731",
+      "archive_member": "salmonpy-runtime-darwin-x86_64.zip"
+    },
+    {
+      "name": "salmonpy-runtime-ubuntu-22.04",
+      "artifact_id": 14092432957,
+      "platform": "Linux x86_64 glibc",
+      "outer_sha256": "54188c7dbd23ee9e67cfd455aaaa05802ce6d44ee59fe28e58f4c39ce89ff12e",
+      "archive_member": "salmonpy-runtime-linux-x86_64.zip"
+    }
+  ],
+  "files": {
+    "Si_rps.dat": "8c51fbf4341de256a868ab446bdb3ed19eef1d1dcc3813cfe5214c07213b8c7c",
+    "input.json": "62a4139648f23212ea2c5fbb543c49e86838abacd1d6fc499955fe685de147fc",
+    "expected.json": "c5a838a801720457a47f2579daffcd266ad93db88b3c5c815b85b1cf9cf0a976",
+    "LICENSE.txt": "809fa1ed21450f59827d1e9aec720bbc4b687434fa22283c6cb5dd82a47ab9c0"
+  }
+}

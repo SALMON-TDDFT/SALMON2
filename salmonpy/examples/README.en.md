@@ -1,6 +1,8 @@
 # Python samples
 
-[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-13.5`
+[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-14.1`
+
+[Si starter: wheel to current](../SI_INTRO.en.md) includes a fixed pseudopotential, input and reference, and explicitly selects a prebuilt runtime.
 
 Use the same Python environment in which the wheel was installed. All samples
 below ship in the wheel. The code is shared by both language editions.

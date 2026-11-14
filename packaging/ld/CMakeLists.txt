@@ -67,3 +67,10 @@ install(FILES "${ROOT}/salmonpy/maxwell.py" "${ROOT}/salmonpy/timing.py" "${ROOT
 install(FILES "${ROOT}/salmonpy/embedded_tddft.py" "${ROOT}/salmonpy/coupled.py"
   "${ROOT}/salmonpy/COUPLED.md" "${ROOT}/salmonpy/COUPLED.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/tools/build_embedded_tddft.py" DESTINATION salmonpy/_runtime_source/tools)
+
+# Fixed starter input, pseudopotential provenance and reference data.
+install(DIRECTORY "${ROOT}/salmonpy/examples/si_intro_data/"
+  DESTINATION salmonpy/examples/si_intro_data
+  FILES_MATCHING PATTERN "*.json" PATTERN "*.dat" PATTERN "*.txt")
+install(FILES "${ROOT}/salmonpy/SI_INTRO.md" "${ROOT}/salmonpy/SI_INTRO.en.md"
+  DESTINATION salmonpy)

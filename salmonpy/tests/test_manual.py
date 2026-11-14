@@ -21,6 +21,12 @@ class ManualTest(unittest.TestCase):
                 obj=importlib.import_module('.'.join(parts[:2]))
                 for name in parts[2:]: obj=getattr(obj,name)
             for code in task['examples']: compile(code,task['id'],'exec')
+    def test_tddft_current_sign_is_charge_current(self):
+        task = next(t for t in load()['tasks'] if t['id'] == 'tddft')
+        self.assertIn('physical charge-current density j', task['outputs'])
+        self.assertIn('J = -j', task['outputs'])
+        self.assertIn('do not negate again', task['outputs'])
+
     def test_search(self):
         for query,expected in [('バンド図を描きたい','bands'),('TDDFT','tddft'),('ドルーデ','ld'),('runtime','runtime')]:
             self.assertEqual(search(query)['tasks'][0]['id'],expected)

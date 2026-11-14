@@ -1,7 +1,9 @@
 # Pythonサンプル集
 
-[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-13.5`
+[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-14.1`
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
+[Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済みランタイムを明示して使う手順です。
+
 LD/SBEには構築済みのネイティブライブラリが必要です。import時にコンパイルは行いません。
 下記の `python` はSALMONpyをインストールした環境のPythonを指します。
 
