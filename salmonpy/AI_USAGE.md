@@ -237,4 +237,6 @@ TDDFTの保存用GSは状態の参照で保持し、初期モデルclose後も�
 
 ## GS/2配列アーカイブ
 
-`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。GS/1の自動変換・TDDFT初期化・SCF収束の認定は未対応です。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。
+`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。GS/1→GS/2書き出し・SCF収束の認定は未対応です。GS/2からのTDDFTはΓ点・直列GNUランタイムに固定した監査済みGammaRestartConverterを明示指定した場合だけ利用できます。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。
+
+Γ点GS変換ではgs_native.GammaRestartConverterを使い、対象実行ファイルSHA256・実コンパイラ/Fortran_FLAGS・擬ポテンシャルhash・GFORTRAN_CONVERT_UNITを照合します。MPI／多k／別ABIの汎用変換とは説明しません。合成軌道での実ランタイム接続試験と物理的なGS検証を区別します。

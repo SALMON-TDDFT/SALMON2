@@ -101,3 +101,7 @@ install(FILES "${ROOT}/salmonpy/_ld_handles.py" "${ROOT}/salmonpy/LD.md" "${ROOT
 
 install(FILES "${ROOT}/salmonpy/gs_archive.py" "${ROOT}/salmonpy/GS_ARCHIVE.md" "${ROOT}/salmonpy/GS_ARCHIVE.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/include/salmonpy_gs_stream.f90" DESTINATION salmonpy/include)
+
+install(FILES "${ROOT}/salmonpy/gs_native.py" DESTINATION salmonpy)
+install(DIRECTORY "${ROOT}/salmonpy/native_adapters/" DESTINATION salmonpy/native_adapters FILES_MATCHING PATTERN "*.f90")
+install(FILES "${ROOT}/tools/build_gs_restart_converter.py" DESTINATION salmonpy/_runtime_source/tools)

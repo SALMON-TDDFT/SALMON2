@@ -260,6 +260,13 @@ class GroundStateArchive:
             if isinstance(exc,InputError):raise
             raise InputError('invalid or unreadable GS archive') from exc
 
+    def tddft_initial_state(self,*,converter,executable,pseudopotentials,max_steps=1000,threads=1,timeout=300.):
+        """Explicit Γ-only native conversion; requires paired audited converter/runtime."""
+        from .gs_native import GammaRestartConverter
+        if not isinstance(converter,GammaRestartConverter):raise InputError('GammaRestartConverter required')
+        return converter.tddft_initial_state(self,executable=executable,pseudopotentials=pseudopotentials,
+                                            max_steps=max_steps,threads=threads,timeout=timeout)
+
     def _read(self,name,key):
         p=self.directory/name/key
         if p.is_symlink() or any(parent.is_symlink() for parent in p.parents):raise InputError('archive path changed to symlink')

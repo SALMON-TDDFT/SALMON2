@@ -267,4 +267,4 @@ Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [
 
 Persistent standalone LD ownership, fixed-dt coefficients and close/context-manager usage: [LD.en.md](LD.en.md).
 
-Portable caller-supplied GS arrays (GS/2), separate from native GS/1 and not yet a TDDFT restart source: [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).
+Portable caller-supplied GS arrays (GS/2), separate from native GS/1; explicit paired Gamma converter supports serial TDDFT initialization: [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).

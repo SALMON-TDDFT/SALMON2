@@ -131,6 +131,7 @@ class TDDFTInitialState:
     _owner: object=field(repr=False)
     backend: str=field(default='SALMON-TDDFT-middlepoint',init=False)
     _source_root: Path | None = field(default=None,repr=False)
+    _record_environment: tuple | None = field(default=None,repr=False)
 
     @classmethod
     def from_salmon(cls,directory,input_file,*,executable,max_steps=1000,threads=1,timeout=300.):
@@ -150,7 +151,10 @@ class TDDFTInitialState:
             manifest=_copy_bundle(root,snapshot)
             # Read the copied input so its bytes and the manifest describe one snapshot.
             text=(snapshot/inp).read_text()
-            return cls(executable,max_steps,threads,timeout,manifest,text,snapshot,owner,_source_root=root)
+            from .gs_native import _receipt_environment
+            record_environment=_receipt_environment(snapshot,executable)
+            return cls(executable,max_steps,threads,timeout,manifest,text,snapshot,owner,
+                       _source_root=root,_record_environment=record_environment)
         except BaseException:
             owner.cleanup();raise
 
@@ -221,6 +225,10 @@ class TDDFTState(_SnapshotMixin):
     def max_steps(self): return self._capacity
 
     def _spawn(self):
+        environment=dict(os.environ)
+        expected=self._model._record_environment
+        if expected is not None and any(environment.get(k,'')!=v for k,v in expected):
+            raise InputError('native GS record I/O environment differs from conversion')
         if _digest(self._executable.path)!=self._executable.sha256:
             raise InputError('executable SHA256 differs from the audited binary')
         self._work=_WorkingDirectory()
@@ -230,7 +238,7 @@ class TDDFTState(_SnapshotMixin):
         self._events=queue.Queue()
         self._proc=subprocess.Popen([str(self._executable.path)],cwd=work,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,
-            env={**os.environ,'SALMONPY_TDDFT_WORKER':'1','OMP_NUM_THREADS':str(self._threads)})
+            env={**environment,'SALMONPY_TDDFT_WORKER':'1','OMP_NUM_THREADS':str(self._threads)})
         self._reader=threading.Thread(target=_read_output,args=(self._proc.stdout,self._events,work/'worker.log'),daemon=True)
         self._reader.start()
         self._send(self._input.rstrip()+'\n!SALMONPY_END_INPUT\n'+

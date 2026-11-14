@@ -1,6 +1,6 @@
 # GS配列の可搬アーカイブ（GS/2）
 
-`salmonpy.gs_archive` は、呼び出し側が用意したGS配列をZarr v3互換形式へ保存する部品です。`save_ground_state` と `GroundStateArchive.open` を使います。既存の `GroundStateResult`（`salmonpy.gs/1`）とは別の入口です。SALMONのネイティブバイナリの自動変換、SCFの収束認定、GS/2からのTDDFT初期化はまだありません。
+`salmonpy.gs_archive` は、呼び出し側が用意したGS配列をZarr v3互換形式へ保存する部品です。`save_ground_state` と `GroundStateArchive.open` を使います。既存の `GroundStateResult`（`salmonpy.gs/1`）とは別の入口です。SALMONのネイティブGSからの自動書き出しとSCFの収束認定は未対応です。GS/2からのTDDFT初期化は、末尾のΓ点・専用変換器の条件で利用できます。
 
 ## 合成配列での例
 
@@ -61,8 +61,45 @@ k点重みは非負で和1、占有数は各軌道0〜2、電子数は `sum_k,b 
 
 Pythonチャンク `(1,block,nz,ny,nx)` のC順序は、Fortranの `(nx,ny,nz,block)` と同じx最速のバイト順です。呼び出し側で平坦バッファの長さを `nx*ny*nz*block` にして渡します。JSON生成・ハッシュ照合・配列の再構成はこの小モジュールには含めません。
 
-既存SALMONの `wfn.bin` はstream形式の分岐がありますが、実数/複素数・MPI分割・スピン等の配置確認が必要です。`info.bin` と `occupation.bin` は逐次非書式レコードです。実際のGS/1→GS/2変換とGS/2→SALMON初期化には、次段階で監査済みランタイム側の明示的アダプターが必要です。GS/2をそのまま既存のrestartディレクトリへ渡さないでください。
+既存SALMONの `wfn.bin` はstream形式の分岐がありますが、実数/複素数・MPI分割・スピン等の配置確認が必要です。`info.bin` と `occupation.bin` は逐次非書式レコードです。GS/1→GS/2書き出しと複数k点・MPI分割の変換は未対応です。GS/2をそのまま既存のrestartディレクトリへ渡さず、次の専用変換器を使います。
 
 形式の根拠: [Zarr core specification](https://zarr-specs.readthedocs.io/en/latest/v3/core/index.html)。NumPy以外の実行時依存は増やしていません。独立したZarr実装との互換性は合成配列で検証します。
 
 保存入力がcomplex128でなければ、NumPy変換で波動関数全体のcomplex128コピーを作る場合があります。1軌道だけの読み出しでも軌道チャンク全体を読むため、max_bytesはその一時バッファを制限しません。Fortran helperはint8の生バイトI/Oを使い、実数のバイト順を変えるランタイム設定の影響を避けます。IEEE real64と8bitのファイル記憶単位を検査します。
+
+## Γ点GS/2からTDDFTへ
+
+初版は周期系・Γ点1個（k=0、重み1）・非スピン分極・固定イオン・CPU直列ランタイムです。格子は各軸8点以上、電子数は偶数、XCは既存DFT入口のpz／libxc_pz／libxc_pbeです。Libxcには対応するランタイムが必要です。アーカイブの密度・固有値はネイティブ再開レコードにはせず、波動関数と占有数からSALMONが密度・ポテンシャルを再構成します。収束状態かどうかは呼び出し側が保証してください。
+
+専用変換器は、使用する監査済み直列ランタイムのbuild.jsonと残っているソース・CMakeビルド情報を指定して明示的に構築します。初版はGNUコンパイラ・Unix Makefilesのビルド情報が対象です。ランタイムの実際のFortran_FLAGSとコンパイラを引き継ぎ、対象実行ファイルのSHA256へ固定します。元の波動関数read/write手続きを外部ソースから変更せずに切り出した合成試験で、作成ファイルが一致することを確認します。ソース・全オブジェクトの禁止関数監査を省略しません。
+
+```text
+python tools/build_gs_restart_converter.py RUNTIME_BUILD_JSON NEW_CONVERTER_DIRECTORY
+```
+
+wheel内のスクリプトは `salmonpy/_runtime_source/tools/build_gs_restart_converter.py` にあります。importや変換時に自動ビルドしません。記録と同じGNUコンパイラ／実行時I/O設定が必要です。MPI版ランタイム、別のSHA256の実行ファイル、Fujitsuのコンパイラプロファイルは現版では拒否します。
+
+```python
+from salmonpy.gs_native import GammaRestartConverter
+from salmonpy.gs_archive import GroundStateArchive
+from salmonpy.dft import Pseudopotential
+from salmonpy.fdtd import SalmonExecutable
+
+converter = GammaRestartConverter.from_build('NEW_CONVERTER_DIRECTORY/build.json')
+engine = SalmonExecutable('AUDITED_SALMON_EXECUTABLE', converter.target_sha256)
+archive = GroundStateArchive.open('existing-gs-array-archive')
+# species/local_channelと実ファイルは利用者が指定。SHA256はアーカイブと照合されます。
+potential = Pseudopotential.from_file('Si_rps.dat', atomic_number=14, local_channel=2)
+with archive.tddft_initial_state(converter=converter, executable=engine,
+        pseudopotentials=[potential], max_steps=1000) as initial:
+    with initial.new_state(dt=0.02) as state:
+        current = state.step([0., 0., 0.001])
+```
+
+`write_bundle(archive, NEW_DIRECTORY, executable=..., pseudopotentials=...)` は独立したrt.inp・擬ポテンシャル・ネイティブ再開レコードを作るだけです。TDDFTプロセスはnew_stateで初めて起動します。変換中だけ実部・虚部の一時ストリームを保持し、完了後は削除します。元のアーカイブは変更せず、上書きしません。
+
+GNUのレコードI/O設定GFORTRAN_CONVERT_UNITも記録し、後の起動・復元時に変更されていれば拒否します。unitごとの変換指定は未対応です。変換器とランタイムのビルド記録は利用者が信頼できるものを指定してください。ハッシュは配布者認証ではありません。
+
+合成の直交規格化軌道で、元のSALMON読取処理と変換器の一致、および実ランタイムのTDDFT初期化・独立状態・復元後電流の一致を検証します。実材料のSCF収束や物理量の精度を認定したものではありません。
+
+擬ポテンシャルのhashはファイルと元素を照合するもので、元GSのHamiltonianの一致まで認定しません。local_channel、擬ポテンシャルとXCの整合、元GSの物理的な正当性は利用者が確認してください。変換中は実部・虚部の一時ストリーム合計16×格子点数×軌道数バイトと、同量のネイティブ複素出力が必要です。一時ストリームは完了後に削除し、波動関数のhash照合は1MiBずつ読みます。
