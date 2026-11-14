@@ -2,7 +2,7 @@
   "upstream_repository": "https://github.com/SALMON-TDDFT/SALMON2.git",
   "upstream_commit": "3322d0561c0cad5180679136b3eddbe8b909487c",
   "patch": "patches/salmonpy-runtime.patch",
-  "patch_sha256": "14b82f79f73d589f9be92327e70c183d0a72a63f9a8a06812a6e0a66b6e744f7",
+  "patch_sha256": "0f9faa9db8365cad1ecb457e5672d43c8618b440a6eaac63b3ee782229f4ae7f",
   "integration_commit": "d0b80d397a0fba8bffb3b189c4a47632dbc75522",
   "shared_kernels": {
     "native/lorentz_drude.f90": "src/maxwell/lorentz_drude.f90",

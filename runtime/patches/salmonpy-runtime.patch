@@ -2156,10 +2156,10 @@ index 11b919f..35dc1b0 100644
  set(SALMON_SOURCES ${SALMON_SOURCES} PARENT_SCOPE)
 diff --git a/src/rt/embedded_tddft.f90 b/src/rt/embedded_tddft.f90
 new file mode 100644
-index 0000000..a86dece
+index 0000000..7265400
 --- /dev/null
 +++ b/src/rt/embedded_tddft.f90
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,181 @@
 +!
 +!  Copyright 2019-2020 SALMON developers
 +!
@@ -2286,7 +2286,8 @@ index 0000000..a86dece
 +if(worker_requested()) then
 +  state%system%vec_Ac=worker_initial_A
 +  call update_kvector_nonlocalpt(state%info%ik_s,state%info%ik_e,state%system,state%ppg)
-+  call calc_current(state%system,state%mg,state%stencil,state%info,state%srg,state%spsi_in,state%ppg,state%worker_current(:,1:state%system%nspin))
++  call calc_current(state%system,state%mg,state%stencil,state%info,state%srg,state%spsi_in,state%ppg, &
++     & state%worker_current(:,1:state%system%nspin))
 +  state%spsi_in%update_zwf_overlap=.true.
 +  J=sum(state%worker_current(:,1:state%system%nspin),dim=2)
 +end if
@@ -2310,11 +2311,13 @@ index 0000000..a86dece
 +  state%rt%Ac_tot(:,state%itt)=Anew
 +  if(mod(state%itt,2)==1)then
 +    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
-+     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_in,state%spsi_out,state%tpsi,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
++     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_in,state%spsi_out,state%tpsi &
++     & ,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
 +     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
 +  else
 +    call time_evolution_step(state%Mit,nt,state%itt,state%lg,state%mg,state%system,state%rt,state%info,state%stencil,state%xc_func &
-+     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_out,state%spsi_in,state%tpsi,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
++     & ,state%srg,state%srg_scalar,state%pp,state%ppg,state%ppn,state%spsi_out,state%spsi_in,state%tpsi &
++     & ,state%rho,state%rho_jm,state%rho_s,state%V_local,state%Vbox,state%Vh,state%Vh_stock1,state%Vh_stock2,state%Vxc &
 +     & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
 +  end if
 +
