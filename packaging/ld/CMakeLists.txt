@@ -15,7 +15,7 @@ add_custom_target(ld_audit ALL
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/native"
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --source-root "${ROOT}/salmonpy")
 add_library(salmonpy_ld SHARED "${ROOT}/native/lorentz_drude.f90" "${ROOT}/salmonpy/ld_c_api.f90"
-  "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90")
+  "${ROOT}/native/sbe_types.f90" "${ROOT}/native/sbe_velocity_kernel.f90" "${ROOT}/salmonpy/sbe_c_api.f90" "${ROOT}/salmonpy/sbe_handles.f90")
 if(APPLE)
   target_link_libraries(salmonpy_ld PRIVATE "-framework Accelerate")
 else()
@@ -94,3 +94,5 @@ install(DIRECTORY "${ROOT}/salmonpy/include/" DESTINATION salmonpy/include
 install(DIRECTORY "${ROOT}/salmonpy/examples/c_material/" DESTINATION salmonpy/examples/c_material
   FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.f90")
 install(FILES "${ROOT}/tools/build_c_material_example.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/_sbe_handles.py" "${ROOT}/salmonpy/SBE.md" "${ROOT}/salmonpy/SBE.en.md" DESTINATION salmonpy)

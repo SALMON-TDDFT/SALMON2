@@ -219,3 +219,12 @@ CMaterialは共通respond/check_material/bind_materialで使え、モデルclose
 ライブラリは信頼できる実行コードで、SHA照合は障害隔離ではありません。ロード済みファイルは置換せず版ごとに別ファイル、全native呼出しはprocess-wide直列化、Pythonモデル/状態の同時呼出しは未対応です。
 C++/Fortranホスト例は明示build、ソース/全object監査を保持。Cプラグインの製造解検証であり、LD/SBE永続handle化や複数native TDDFT contextを実装済みと説明しません。
 C_ABI.md/enを参照。MPI collective C ABI、波動関数checkpoint、GPUは別作業です。
+
+## SBE永続ハンドル
+
+SBEInitialStateのモデル配列を一度ネイティブへ準備し、状態は独立したaccepted/trial密度を持ちます。
+通常stepはA/J3成分だけ渡し、density/snapshot時だけ全密度をexportします。close/context managerと補助GC解放に対応。
+初期モデルはdata-onlyのasdict/pickle/deepcopyを維持し、nativecacheは外部weak-key登録で移送しません。
+shared velocity kernels/演算順序/既存OMP外側k分割は不変。常駐メモリはモデルnativecopyと各状態のrho2枚を必要とします。
+明示サイズoverflow/allocateエラーは拒否しますが、未変更kernelの自動work領域OOMを回復可能とは説明しません。
+既存固定nativebinaryを上書きせず、新規build/installで検証できます。SBE.md/enを参照。LD/TDDFTのhandle移行を実装済みとしません。

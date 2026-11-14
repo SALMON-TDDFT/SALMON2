@@ -157,10 +157,11 @@ velocity corrections. This is not an exactly unitary propagator; no adaptive
 step or norm correction is introduced. `dt` must be checked for convergence.
 The initial output is the physical current at initial A, not a forced zero.
 
-Python SBE is serial, with independent per-state arrays and no global native
-calculation state. Each step currently copies initial arrays into a temporary
-Fortran context; this first adapter prioritizes equivalence over large-system
-throughput. A single evolving state should not be stepped concurrently.
+Python SBE uses one cached native read-only model and independent persistent
+state/trial density buffers. Normal steps exchange small vectors; density and
+snapshots explicitly export arrays. Use state.close or a context manager; GC
+also releases abandoned states. See SBE.md/SBE.en.md for ownership and memory
+tradeoffs. A single evolving state should not be stepped concurrently.
 SBE length gauge and excited-state restart/checkpoint loading remain
 unimplemented. This loader creates a fresh ground-state density, not a restart.
 

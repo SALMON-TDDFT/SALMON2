@@ -148,3 +148,6 @@ transaction across components; a single state's atomic restore does not provide
 MPI/global rollback. `couple()` still creates and closes its own states.
 Changing dt, adding adaptive stepping/subcycles or making native TDDFT reentrant
 requires separate work. Transverse prescribed-A use remains the basic workflow.
+
+SBE now keeps native model/density handles; snapshot export and atomic restore
+retain the same contract. See [SBE ownership](SBE.en.md) for close/GC and memory tradeoffs.
