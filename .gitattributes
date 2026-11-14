@@ -1,2 +1,6 @@
 # Immutable reference inputs: preserve original bytes for provenance SHA256.
 salmonpy/examples/si_intro_data/* -text
+
+# Pinned overlays and shared kernels are verified by their exact bytes.
+runtime/patches/*.patch -text
+native/*.f90 -text

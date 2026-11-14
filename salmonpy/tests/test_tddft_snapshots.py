@@ -41,7 +41,8 @@ class TDDFTSnapshots(unittest.TestCase):
         # Windows CreateProcess cannot execute shebang scripts directly.
         popen=subprocess.Popen
         def launch(args,**kwargs):
-            if args==[str(worker)]: args=[sys.executable,str(worker)]
+            if len(args)==1 and Path(args[0]).resolve()==worker.resolve():
+                args=[sys.executable,str(worker)]
             return popen(args,**kwargs)
         launcher=patch('salmonpy.tddft.subprocess.Popen',side_effect=launch)
         launcher.start();self.addCleanup(launcher.stop)

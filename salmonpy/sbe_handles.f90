@@ -6,6 +6,8 @@ module sbe_handles
   use sbe_velocity_kernel
   implicit none
   private
+  public :: sp_sbe_model_create,sp_sbe_model_destroy,sp_sbe_state_create
+  public :: sp_sbe_step,sp_sbe_density,sp_sbe_set,sp_sbe_state_destroy
   type model_node
     integer(c_int64_t) :: id=0,live=0
     integer :: order=0

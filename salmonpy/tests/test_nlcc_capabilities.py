@@ -39,7 +39,9 @@ class NLCCCapabilities(unittest.TestCase):
     def test_completed_matching_build_can_enable_and_scope_is_immutable(self):
         engine=runtime.load_validated_build(*self.records())
         self.assertIn('libxc_pbe',engine.nlcc_force_xc)
-        with self.assertRaises(AttributeError):engine.nlcc_force_xc=()
+        before=engine.nlcc_force_xc
+        with self.assertRaises((AttributeError,TypeError)):engine.nlcc_force_xc=()
+        self.assertEqual(engine.nlcc_force_xc,before)
         from dataclasses import replace
         self.assertEqual(replace(engine).nlcc_force_xc,())
     def test_wrong_binary_source_failed_or_nonfinite_proofs_are_rejected(self):
