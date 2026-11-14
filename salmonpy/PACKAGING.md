@@ -175,3 +175,9 @@ These are configured checks; historical runs above do not certify the current re
 SALMONpy is intended for a separate repository, not a merge into the SALMON main
 repository. Native source provenance and full-executable compatibility must be
 preserved when moving it. Only the three LD/SBE kernels are bundled in native/. Full SALMON source is prepared externally from runtime/source.json and its compatibility patch.
+
+Native checksums are generated after CMake installs the shared library, including
+its RPATH/install-name changes. Direct source installation therefore does not
+require wheel repair for checksum validity. Portable redistribution still needs
+dependency repair; that step refreshes the checksum and RECORD again.
+The sdist CI checks and installs the unrepaired source-built wheel as well.

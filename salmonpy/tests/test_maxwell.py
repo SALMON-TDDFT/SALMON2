@@ -49,6 +49,29 @@ def impulse(t):
 
 
 class UniformFieldTests(unittest.TestCase):
+    def test_exact_endpoint_samples_cover_all_steps(self):
+        dt = .1
+        samples = FieldSamples(np.arange(11)*dt, np.zeros((11, 3)), 'A')
+        for model in (Transverse(samples), Longitudinal(samples), ThinFilm(1., samples)):
+            with self.subTest(model=type(model).__name__):
+                state = model.new_state(dt=dt, steps=10)
+                for _ in range(10):
+                    np.testing.assert_array_equal(state.step(np.zeros((1, 3))), np.zeros((1, 3)))
+                self.assertAlmostEqual(state.time, 1.)
+                with self.assertRaises(ValueError):
+                    state.step(np.zeros((1, 3)))
+                with self.assertRaises(ValueError):
+                    model.new_state(dt=dt, steps=11)
+
+    def test_incident_requires_left_absorbing_boundary(self):
+        pulse = AcosPulse(.001, .2, 10.)
+        for boundaries in (('pec', 'abc'), ('periodic', 'periodic')):
+            with self.subTest(boundaries=boundaries):
+                with self.assertRaisesRegex(ValueError, 'incident.*abc'):
+                    Multiscale1D(1, 1., incident=pulse, boundaries=boundaries)
+                Multiscale1D(1, 1., boundaries=boundaries).new_state(dt=.001, steps=2)
+        Multiscale1D(1, 1., incident=pulse, boundaries=('abc', 'pec')).new_state(dt=.001, steps=2)
+
     def test_transverse_returns_external_and_ignores_current(self):
         pulse = AcosPulse(amplitude=1e-3, omega=.2, duration=20., polarization=(1, 0, 0))
         state = Transverse(pulse).new_state(dt=.1, steps=300)
@@ -106,7 +129,7 @@ class UniformFieldTests(unittest.TestCase):
         samples = FieldSamples(np.arange(12)*.1, np.ones((12, 3)), 'A')
         state = Transverse(samples).new_state(dt=.1, steps=10)
         np.testing.assert_array_equal(state.step(np.zeros((1, 3))), [[1, 1, 1]])
-        with self.assertRaises(ValueError): Transverse(samples).new_state(dt=.1, steps=11)
+        with self.assertRaises(ValueError): Transverse(samples).new_state(dt=.1, steps=12)
         with self.assertRaises(ValueError): Transverse(samples).new_state(dt=.07, steps=5)
         with self.assertRaises(ValueError): Transverse(FieldSamples(np.arange(3.), np.ones((3, 3)), 'E'))
 

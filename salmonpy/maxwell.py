@@ -162,7 +162,7 @@ class _FieldState:
 # ---------------------------------------------------------------------------
 
 def _uniform_external(external, dt, steps):
-    return _evaluate(external, np.arange(steps+2)*dt, dt=dt)  # Ac_ext(0:nt+1)
+    return _evaluate(external, np.arange(steps+1)*dt, dt=dt)  # Only endpoints 0..steps are consumed.
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,6 +347,8 @@ class Multiscale1D:
             raise ValueError(f'boundaries must be two of {_BOUNDARIES}')
         if (bc[0] == 'periodic') != (bc[1] == 'periodic'):
             raise ValueError('periodic boundaries must be used on both sides')
+        if inc is not None and bc[0] != 'abc':
+            raise ValueError('incident wave requires an abc left boundary')
         object.__setattr__(self, 'boundaries', bc)
 
     @property

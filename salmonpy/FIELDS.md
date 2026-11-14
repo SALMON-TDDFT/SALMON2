@@ -1,6 +1,6 @@
 # 場の部品（j→A）と物質との結合
 
-[English](FIELDS.en.md) · Topic: `macro-field` · Paired revision: `2026-11-14.1`
+[English](FIELDS.en.md) · Topic: `macro-field` · Paired revision: `2026-11-14.2`
 
 `salmonpy.maxwell` は、光と物質の結合ループを場の側から閉じる部品です。
 物質の部品（TDDFT、SBE、利用者のモデル）は A を受けて電流を返します（A→J）。
@@ -36,13 +36,14 @@ j_0 = 物質(A_0)  →  A_1 = 場(j_0)  →  j_1 = 物質(A_1)  →  A_2 = 場(j
 
 `external` と `incident` には、`AcosPulse`、その列、`FieldSamples(kind='A')`（一様な場のみ。n·dt の格子上）、
 または時刻配列を受けて (N,3) を返す関数を渡せます。
+一様な場でNステップ進めるには、t=0からN·dtまでのN+1サンプルが必要です。
 
 ### Multiscale1D の詳細
 
 - セル i の座標は x = i·spacing です。`vacuum=(左, 右)` は真空セルの数です。
 - 入射波 A_inc(t − x/c) は左境界から入ります。初期の場は SALMON の `incident()` と同じ方法で作ります
   （左側を −3dt, −2dt, −dt で充填したあと、1回更新して t=0 の場にする）。
-- 境界は `'abc'`（1次 Mur）、`'pec'`、`'periodic'` です。
+- 境界は `'abc'`（1次 Mur）、`'pec'`、`'periodic'` です。入射波を指定する場合、左境界は必ず `'abc'` にします。非ABC境界は `incident=None` のときだけ使えます。
 - x は伝播方向なので、入射波に x 成分があるとエラーになります。
 - 安定条件は c·dt ≤ spacing です。c·dt = spacing なら真空での数値分散がありません。
 - `state.grid_A` は格子全体の A、`state.grid_E` は SALMON と同じ中心差分の E（時刻 (n−1)·dt）です。

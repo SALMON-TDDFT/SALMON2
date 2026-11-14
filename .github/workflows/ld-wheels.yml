@@ -70,6 +70,12 @@ jobs:
       - run: python tools/test_ld_packaging.py
       - run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev
       - run: python -m build
+      - name: Verify source-built wheel before repair
+        shell: bash
+        run: |
+          python tools/test_wheel_native_hash.py dist/*.whl
+          python -m pip install dist/*.whl
+          python -I tools/test_installed_ld.py "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
           name: ld-sdist

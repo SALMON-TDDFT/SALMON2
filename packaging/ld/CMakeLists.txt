@@ -29,7 +29,13 @@ add_custom_command(TARGET salmonpy_ld POST_BUILD
   COMMAND "${Python_EXECUTABLE}" "${CHECKER}" --object-tree "${CMAKE_CURRENT_BINARY_DIR}"
   COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/hash_native.py" "$<TARGET_FILE:salmonpy_ld>")
 install(TARGETS salmonpy_ld LIBRARY DESTINATION salmonpy/_native RUNTIME DESTINATION salmonpy/_native)
-install(FILES "$<TARGET_FILE:salmonpy_ld>.sha256" DESTINATION salmonpy/_native)
+# install(TARGETS) may change RPATH/install names. Hash the installed bytes,
+# including staged DESTDIR installs; wheel repair recalculates again if needed.
+install(CODE [[
+  set(native_file "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/salmonpy/_native/$<TARGET_FILE_NAME:salmonpy_ld>")
+  file(SHA256 "${native_file}" native_sha)
+  file(WRITE "${native_file}.sha256" "${native_sha}\n")
+]])
 install(FILES "${ROOT}/salmonpy/__init__.py" "${ROOT}/salmonpy/ld.py"
   "${ROOT}/salmonpy/fields.py" "${ROOT}/salmonpy/geometry.py"
   "${ROOT}/salmonpy/salmon_vr.py" "${ROOT}/salmonpy/SALMON_VR.md" "${ROOT}/salmonpy/SALMON_VR.en.md" "${ROOT}/salmonpy/doctor.py" "${ROOT}/salmonpy/AGENTS.md" "${ROOT}/salmonpy/manual.py" "${ROOT}/salmonpy/manual.json" "${ROOT}/salmonpy/ase_calculator.py" "${ROOT}/salmonpy/dft.py" "${ROOT}/salmonpy/ase.py" "${ROOT}/salmonpy/bands.py" "${ROOT}/salmonpy/analysis.py" "${ROOT}/salmonpy/outputs.py" "${ROOT}/salmonpy/fdtd.py" "${ROOT}/salmonpy/crystal.py" "${ROOT}/salmonpy/sbe.py" "${ROOT}/salmonpy/tddft.py"

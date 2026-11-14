@@ -1,6 +1,6 @@
 # Field components (j→A) and coupling to matter
 
-[日本語](FIELDS.md) · Topic: `macro-field` · Paired revision: `2026-11-14.1`
+[日本語](FIELDS.md) · Topic: `macro-field` · Paired revision: `2026-11-14.2`
 
 `salmonpy.maxwell` closes the light–matter loop from the field side. Matter
 components (TDDFT, SBE, user models) take A and return a current (A→J). Field
@@ -138,3 +138,6 @@ SALMON with `trans_longi='lo'` / `'2d'` / 1D multiscale (one point) and by the
 SALMONpy TDDFT worker (`tr`) plus a field component. Over 400 steps, A and the
 current agree within 3×10⁻¹⁵ relative, i.e. to SALMON's printed digits; in 1D
 the whole-grid A agrees as well. See `docs/maxwell-field-validation-2026-11-14.md`.
+
+Uniform fields need at least N+1 endpoint samples, from t=0 through N*dt, for N steps.
+An incident wave requires an `abc` left boundary. Other left boundaries require `incident=None`.
