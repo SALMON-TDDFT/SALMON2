@@ -1,4 +1,4 @@
-"""Diagnostic force/energy consistency along one real-space grid interval.
+"""Diagnostic force/energy consistency along a grid interval or fixed physical path.
 
 No solver build or restart/wavefunction/density archive. Inputs and scalar native
 reports are retained. Run only with an unchanged built-and-audited runtime record.
@@ -19,6 +19,9 @@ import numpy as np
 from salmonpy.dft import DFT, Pseudopotential, SCFSettings, _read_status, _read_forces
 
 SCALAR_FILES = ('gs.inp', 'stdout.log', 'gs_status.dat', 'gs_forces.dat')
+RESUME_KEYS = ('executable_sha256','original_pseudo_sha256','effective_pseudo_sha256','xc',
+               'mode','rigid','threads','grid_list','intervals','tolerance',
+               'lattice_bohr','states','kmesh')
 
 
 def ordered_samples(rows, intervals):
@@ -62,6 +65,26 @@ def run_scalar_only(exe, text, pseudo_bytes, directory, env, launcher=(), pseudo
                 if (work/name).is_file(): shutil.copy2(work/name, directory/name)
 
 
+def path_length(grid, explicit=None, lattice=10.26):
+    length=lattice/grid if explicit is None else explicit
+    if isinstance(length,bool) or not np.isfinite(length) or length<=0:
+        raise ValueError('finite positive path length required')
+    return float(length)
+
+
+def path_lengths(meta):
+    """Normalize legacy one-grid-period metadata before resume comparison."""
+    if 'path_lengths_bohr' in meta:
+        return {str(g):path_length(g,meta['path_lengths_bohr'][str(g)]) for g in meta['grid_list']}
+    return {str(g):path_length(g,lattice=meta['lattice_bohr']) for g in meta['grid_list']}
+
+
+def validate_resume(old, new):
+    for key in RESUME_KEYS:
+        if old.get(key)!=new[key]: raise ValueError('resume settings differ: '+key)
+    if path_lengths(old)!=path_lengths(new): raise ValueError('resume settings differ: path lengths')
+
+
 def simpson(values, length):
     y=np.asarray(values,dtype=float)
     n=len(y)-1
@@ -88,6 +111,7 @@ def main():
     parser.add_argument('build_record',type=Path);parser.add_argument('pseudo',type=Path)
     parser.add_argument('output',type=Path);parser.add_argument('--grids',type=int,nargs='+',default=[16,24])
     parser.add_argument('--intervals',type=int,default=16)
+    parser.add_argument('--path-length-bohr',type=float,help='fixed physical displacement shared by all grids')
     parser.add_argument('--mode',choices=['nlcc','no-nlcc-control'],default='nlcc')
     parser.add_argument('--xc',choices=['pz','libxc_pz','libxc_pbe'],default='libxc_pbe',
                         help='non-PBE with this PBE UPF is a diagnostic implementation comparison only')
@@ -101,6 +125,7 @@ def main():
     if args.intervals<8 or args.intervals%8: parser.error('intervals must be a positive multiple of eight')
     if args.point_indices is not None and any(i<0 or i>args.intervals for i in args.point_indices):
         parser.error('point index outside path')
+    lengths={str(g):path_length(g,args.path_length_bohr) for g in args.grids}
     build=json.loads(args.build_record.read_text())
     if build.get('status')!='built-and-audited': raise ValueError('audited build record required')
     exe=Path(build['executable'])
@@ -119,15 +144,12 @@ def main():
     meta=dict(executable=str(exe),executable_sha256=build['sha256'],source_build_record=str(args.build_record),
               original_pseudo_sha256=args.pseudo_sha256,effective_pseudo_sha256=pseudo.sha256,
               xc=args.xc,pseudo_generating_xc='PBE',physical_xc_pairing=args.xc=='libxc_pbe',mode=args.mode,rigid=args.rigid,threads=args.threads,
-              grid_list=args.grids,intervals=args.intervals,tolerance=args.tolerance,
+              grid_list=args.grids,path_lengths_bohr=lengths,intervals=args.intervals,tolerance=args.tolerance,
               lattice_bohr=10.26,states=32,kmesh=[2,2,2],restart_output=False,
               point_indices=args.point_indices,script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     if args.resume:
         old=json.loads((args.output/'provenance.json').read_text())
-        for key in ('executable_sha256','original_pseudo_sha256','effective_pseudo_sha256','xc',
-                    'mode','rigid','threads','grid_list','intervals','tolerance',
-                    'lattice_bohr','states','kmesh'):
-            if old.get(key)!=meta[key]: raise ValueError('resume settings differ: '+key)
+        validate_resume(old,meta)
         record=args.output/f'resume-{time.time_ns()}.json'
     else:
         args.output.mkdir(parents=True,exist_ok=False)
@@ -140,7 +162,7 @@ def main():
     base[0,0]+=.12/10.26
     summary={}
     for grid in args.grids:
-        length=10.26/grid;rows=[]
+        length=lengths[str(grid)];rows=[]
         samples=args.output/f'grid{grid}'/'samples.json'
         if args.resume and samples.exists(): rows=ordered_samples(json.loads(samples.read_text()),args.intervals)
         accepted={r['index'] for r in rows}
