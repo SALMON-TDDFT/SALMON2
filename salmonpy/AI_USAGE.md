@@ -210,3 +210,12 @@ materials.bind_material(initial, key=..., identity=...)は同じnew_state/step(A
 MPIは1ランク/物質群の計算点分散であり、単一の直列モデルの内部並列化ではありません。identityは作者が版・全設定・初期データを識別して指定します。
 宣言されたJ_matterのみjへ変換し、物理精度やfailure atomicityを証明しません。本番でチェッカーを暗黙実行しません。
 native TDDFTは既存のmanaged provider、LDは既存E駆動adapterを使います。MATERIALS.md/enとexamples/custom_material.pyを参照してください。
+
+## 自作ネイティブ物質のC ABIプレビュー1
+
+c_material.CMaterial(library, sha256, configuration_bytes)は公開ヘッダinclude/salmonpy_material.hのABI1を読みます。
+モデル/状態は独立int64 handles、固定dtの端点Ac→電荷電流j、明示TimeSpec、statusコード、失敗時原子性が契約です。
+CMaterialは共通respond/check_material/bind_materialで使え、モデルclose後も既存状態が閉じるまでnativeモデル解放を延期します。
+ライブラリは信頼できる実行コードで、SHA照合は障害隔離ではありません。ロード済みファイルは置換せず版ごとに別ファイル、全native呼出しはprocess-wide直列化、Pythonモデル/状態の同時呼出しは未対応です。
+C++/Fortranホスト例は明示build、ソース/全object監査を保持。Cプラグインの製造解検証であり、LD/SBE永続handle化や複数native TDDFT contextを実装済みと説明しません。
+C_ABI.md/enを参照。MPI collective C ABI、波動関数checkpoint、GPUは別作業です。

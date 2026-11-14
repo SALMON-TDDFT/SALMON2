@@ -1,9 +1,9 @@
 # Public Python API and compatibility
 
-[日本語](API.md) · Topic: `public_api` · Paired revision: `2026-11-14.2`
+[日本語](API.md) · Topic: `public_api` · Paired revision: `2026-11-14.3`
 
 Version **0.1.0a5** exposes `salmonpy.__version__`. The distribution metadata has
-the same version. This is a preview, not a stable 1.0 API or a public C ABI.
+the same version. This is a preview, not a stable 1.0 API. The material C ABI preview1 is documented in [C_ABI.en.md](C_ABI.en.md).
 
 ## Public boundary
 

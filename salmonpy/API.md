@@ -1,9 +1,9 @@
 # 公開Python APIと互換性
 
-[English](API.en.md) · Topic: `public_api` · Paired revision: `2026-11-14.2`
+[English](API.en.md) · Topic: `public_api` · Paired revision: `2026-11-14.3`
 
 版は **0.1.0a5** です。`salmonpy.__version__` と配布メタデータに同じ版を示します。
-プレビュー版であり、安定した1.0 APIや公開C ABIを宣言するものではありません。
+プレビュー版であり、安定した1.0 APIを宣言するものではありません。物質C ABIのプレビュー1は[C_ABI.md](C_ABI.md)を参照してください。
 
 ## 公開範囲
 

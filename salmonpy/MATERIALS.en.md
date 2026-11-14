@@ -1,6 +1,6 @@
 # Author one material model for serial and MPI use
 
-[日本語](MATERIALS.md) · Topic: `materials` · Paired revision: `2026-11-14.1`
+[日本語](MATERIALS.md) · Topic: `materials` · Paired revision: `2026-11-14.2`
 
 Implement one serial material contract. Use `crystal.respond` for a waveform,
 and `materials.bind_material` to connect it to the existing MPI response service.
@@ -105,4 +105,4 @@ See [DISTRIBUTED.en.md](DISTRIBUTED.en.md).
 Native TDDFT retains TDDFTMaterialProvider/TDDFTResponseBackend with managed-runtime
 validation. LD remains E-driven and uses LDMaterialProvider/LDResponseBackend.
 This entry does not implement whole-MPI rollback, collective checkpoint restore
-or a public C ABI.
+or an MPI-wide C ABI. For serial native material plugins, see [C_ABI.en.md](C_ABI.en.md).

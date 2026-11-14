@@ -1,6 +1,6 @@
 # 自作物質モデルを直列とMPIで使う
 
-[English](MATERIALS.en.md) · Topic: `materials` · Paired revision: `2026-11-14.1`
+[English](MATERIALS.en.md) · Topic: `materials` · Paired revision: `2026-11-14.2`
 
 物質モデルは一つの直列契約で書きます。`crystal.respond`で波形への応答を求め、
 `materials.bind_material`で既存のMPI応答サービスへ接続できます。
@@ -98,4 +98,4 @@ MPIでは全群でセッションが無効になります。既に進んだ他�
 ネイティブTDDFTは検証済みランタイムを扱う既存の`TDDFTMaterialProvider`と
 `TDDFTResponseBackend`を使います。LDはE駆動のため既存の`LDMaterialProvider`と
 `LDResponseBackend`を使います。場と物質のMPI全体の巻き戻し、checkpointの一括適用、
-公開C ABIは今回の入口に含みません。
+MPI全体の公開C ABIは今回の入口に含みません。直列のネイティブ物質プラグインは[C_ABI.md](C_ABI.md)を参照してください。

@@ -23,6 +23,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                     'ExplicitKPoints',
                     'BandRun',
                     'BandInitialState'),
+ 'salmonpy.c_material': ('CMaterial', 'CABIError'),
  'salmonpy.coupled': ('NativeEHField', 'MultiscaleField', 'CoupledStepper'),
  'salmonpy.crystal': ('AResponseState', 'AInitialState', 'CrystalResponse', 'respond'),
  'salmonpy.dft': ('Pseudopotential', 'SCFSettings', 'DFT', 'GroundStateResult'),

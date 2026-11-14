@@ -86,3 +86,11 @@ install(FILES "${ROOT}/salmonpy/_tddft_checkpoint.py" "${ROOT}/salmonpy/_runtime
   DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/materials.py" "${ROOT}/salmonpy/MATERIALS.md" "${ROOT}/salmonpy/MATERIALS.en.md" DESTINATION salmonpy)
+
+# Preview public C material ABI; only declarations/examples, no implicit plugin build.
+install(FILES "${ROOT}/salmonpy/c_material.py" "${ROOT}/salmonpy/C_ABI.md" "${ROOT}/salmonpy/C_ABI.en.md" DESTINATION salmonpy)
+install(DIRECTORY "${ROOT}/salmonpy/include/" DESTINATION salmonpy/include
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.f90")
+install(DIRECTORY "${ROOT}/salmonpy/examples/c_material/" DESTINATION salmonpy/examples/c_material
+  FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.f90")
+install(FILES "${ROOT}/tools/build_c_material_example.py" DESTINATION salmonpy/_runtime_source/tools)
