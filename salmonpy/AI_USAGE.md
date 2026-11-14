@@ -99,7 +99,7 @@ GS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DF
 収束済み `GroundStateResult` からバンド／TDDFT初期状態を作れます。PZ／Libxc-PZ／Libxc-PBE・KY／NC-UPFのCalculatorと本体の力はASE_CALCULATOR.mdを参照してください。
 
 `salmonpy.ase_calculator.SalmonCalculator` は任意依存の独立モジュール。energy/forcesのみ、PZ／Libxc-PZ／Libxc-PBEとKY／NC-UPF・単一ランクが対象です。Libxc対応ランタイムと擬ポテンシャルの整合を確認します。
-NLCC付きUPFの力は未検証のためCalculatorでは拒否します。エネルギーのみ利用でき、構造最適化には対応するPZ＋KYを使います。UPFヘッダーまたはPP_NLCC要素で検出し、力要求は計算前にPropertyNotImplementedErrorとなります。互換パッチには非スピン分極NCのLibxc-NLCCについて全密度のXCエネルギー重み・GGA勾配と明示的コア力の修正を追加しています。外側OMPは原子単位、コア力は空間MPIだけで集約します。既存バイナリへ自動適用される変更ではなく、検証済みランタイムの識別が整うまでCalculatorの拒否は維持します。メタGGAの力やOpenACCのNLCC力の検証済み対応を推測しません。
+NLCC付きUPFの力は検証記録なしではCalculatorが計算前に拒否します。信頼できるバンドルをload_runtime(..., required=['nlcc-forces'])、または監査済みビルドと検証記録をload_validated_buildで読み込んだ場合のみCPU・非スピン分極NC・PZ/Libxc-PZ/PBEの力を有効にします。SalmonExecutable(path,sha256)だけでは無効です。記録はバイナリ・既知パッチ・微分検査・固定Si8実行検査に結び付け、移動後にも実行検査します。互換パッチのXC重み・全密度勾配・明示的コア力の修正は旧バイナリに自動適用されません。実装回帰と物理的な収束を区別し、メタGGA・OpenACC・スピン分極Libxcの力を検証済みと説明しないでください。
 `warm_start=True` は直前の互換なGSの波動関数だけを再利用し、既定Falseです。セル・計算条件が変われば新規SCF、元データが破損すればエラーです。旧原子位置・混合履歴は再利用しません。
 結晶TDDFTの基本はtransverse（trans_longi=tr）。Longitudinalは明示的な場の選択です。孤立系・non-collinear・Ehrenfestは初版の目標として残しますが、今回のASE APIの対応済み機能には含めません。
 粗い格子のエネルギー有限差分はegg-box効果を含むため正解と仮定せず、剛体並進と格子収束を調べます。

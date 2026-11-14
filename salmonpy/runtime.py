@@ -153,7 +153,48 @@ def load_runtime(directory, *, required=(), host=None):
     path = Path(directory).expanduser().resolve()/meta['executable']
     if not os.access(path, os.X_OK):
         raise InputError('runtime executable is not executable')
-    return SalmonExecutable(path, meta['files'][meta['executable']])
+    engine = SalmonExecutable(path, meta['files'][meta['executable']])
+    claims = meta.get('validated_capabilities', {})
+    if type(claims) is not dict: raise InputError('invalid runtime capability inventory')
+    record = claims.get('nlcc-forces')
+    feature = 'nlcc-forces' in meta.get('features', [])
+    if feature != (record is not None): raise InputError('NLCC feature requires a validation record')
+    if record is not None:
+        if type(record) is not str: raise InputError('invalid NLCC validation path')
+        relative = _relative(record)
+        if relative.as_posix() not in meta['files']: raise InputError('unverified NLCC validation record')
+        receipt = json.loads((Path(directory).expanduser().resolve()/relative).read_text())
+        from ._runtime_capabilities import validate_nlcc_receipt
+        scope = validate_nlcc_receipt(receipt, executable_sha256=engine.sha256,
+            source_patch_sha256=meta.get('provenance', {}).get('patch_sha256'))
+        object.__setattr__(engine, '_nlcc_force_xc', scope)
+    return engine
+
+
+def load_validated_build(build_record, validation_record):
+    """Load an audited serial build plus binary-bound NLCC validation.
+
+    Records must come from trusted explicit build/validation commands. This does
+    not run a solver or promise material convergence. Ordinary executables and
+    old runtime bundles keep an empty NLCC capability.
+    """
+    from .fdtd import SalmonExecutable
+    from ._runtime_capabilities import validate_nlcc_receipt
+    path = Path(build_record).expanduser().resolve()
+    record = json.loads(path.read_text())
+    exe = Path(record.get('executable','')).resolve()
+    if (record.get('status') != 'built-and-audited' or exe != path.parent/'build/salmon'
+            or record.get('build_configuration',{}).get('mpi_enabled') is not False
+            or not exe.is_file() or _hash(exe) != record.get('sha256')):
+        raise InputError('expected unchanged audited serial runtime build')
+    receipt = json.loads(Path(validation_record).read_text())
+    if receipt.get('build_executable_sha256') != record['sha256']:
+        raise InputError('NLCC evidence belongs to another build')
+    scope = validate_nlcc_receipt(receipt, executable_sha256=record['sha256'],
+                                source_patch_sha256=record.get('source',{}).get('patch_sha256'))
+    engine = SalmonExecutable(exe,record['sha256'])
+    object.__setattr__(engine,'_nlcc_force_xc',scope)
+    return engine
 
 
 def install_runtime(directory, *, catalog=None, required=(), artifact=None, host=None, archive=None):

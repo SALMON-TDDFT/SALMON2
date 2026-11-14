@@ -37,9 +37,12 @@ def linux_dependencies(binary):
     return result
 
 
-def package(build, source, destination, *, base_url=None, license_dirs=()):
+def package(build, source, destination, *, base_url=None, license_dirs=(),
+            nlcc_validation=None, nlcc_potential=None):
     root = Path(__file__).resolve().parents[1]
     build, source, dest = (Path(p).resolve() for p in (build, source, destination))
+    if (nlcc_validation is None) != (nlcc_potential is None):
+        raise ValueError('NLCC validation record and test potential must be provided together')
     if base_url is not None and not base_url.startswith('https://'):
         raise ValueError('base URL must be the HTTPS release asset directory')
     if sys.platform not in ('darwin', 'linux'):
@@ -109,11 +112,28 @@ def package(build, source, destination, *, base_url=None, license_dirs=()):
         raise ValueError('Libxc build requires --license-dir with the Libxc license')
     features = ['dft', 'tddft', 'fdtd', 'bands', 'pz', 'tbmbj', 'single-rank', 'material-id-independent']
     if enabled('USE_LIBXC'): features += ['libxc', 'libxc-pz', 'libxc-pbe']
+    capabilities = {}
+    if nlcc_validation is not None:
+        from salmonpy._runtime_capabilities import validate_nlcc_receipt
+        from validate_nlcc_runtime import certify_relocated
+        receipt = json.loads(Path(nlcc_validation).read_text())
+        validate_nlcc_receipt(receipt, executable_sha256=record['sha256'],
+                              source_patch_sha256=expected['patch_sha256'])
+        # Relocation changes bytes: re-run the complete scalar application check
+        # against the relocated binary instead of merely rewriting its hash.
+        receipt = certify_relocated(receipt, executable, nlcc_potential,
+                                    dest/'nlcc-relocation-check')
+        (bundle/'validation').mkdir()
+        relative = 'validation/nlcc-forces.json'
+        (bundle/relative).write_text(json.dumps(receipt, indent=2)+'\n')
+        features.append('nlcc-forces')
+        capabilities['nlcc-forces'] = relative
     name = 'salmonpy-runtime-'+platform['system']+'-'+platform['machine']
     meta = {'schema': 'salmonpy.runtime/1', 'interface': INTERFACE,
             'platform': platform, 'features': features, 'executable': 'bin/salmon',
             'provenance': provenance, 'validation': 'object-audited; native relocation tests required before publication',
             'files': {p.relative_to(bundle).as_posix(): digest(p) for p in sorted(bundle.rglob('*')) if p.is_file()}}
+    if capabilities: meta['validated_capabilities'] = capabilities
     (bundle/'runtime.json').write_text(json.dumps(meta, indent=2)+'\n')
     load_runtime(bundle)
     archive = dest/(name+'.zip')
@@ -131,5 +151,8 @@ if __name__ == '__main__':
     p.add_argument('build'); p.add_argument('source'); p.add_argument('destination')
     p.add_argument('--base-url', help='omit for branch CI artifacts without a public release URL')
     p.add_argument('--license-dir', action='append', default=[])
+    p.add_argument('--nlcc-validation', help='completed binary-bound validation.json')
+    p.add_argument('--nlcc-potential', help='checksum-matching UPF for relocated application validation')
     a = p.parse_args()
-    package(a.build, a.source, a.destination, base_url=a.base_url, license_dirs=a.license_dir)
+    package(a.build, a.source, a.destination, base_url=a.base_url, license_dirs=a.license_dir,
+            nlcc_validation=a.nlcc_validation, nlcc_potential=a.nlcc_potential)

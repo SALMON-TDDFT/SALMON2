@@ -79,6 +79,9 @@ Piecewise-linear radial knots and the existing hard core cutoff need not be
 differentiable; tests distinguish interior derivatives from boundary crossings.
 Spin-polarized Libxc-NLCC remains unsupported. Meta-GGA force validation is not
 claimed, and an OpenACC NLCC-force path explicitly fails as unvalidated.
-Existing binary bundles are not changed by this source patch. The Calculator's
-NLCC force guard remains until a validated runtime capability can be identified;
-source/object audit alone does not authorize an old binary's NLCC forces.
+Existing binary bundles are not changed by this source patch. The Calculator
+enables NLCC forces only when a matching validation receipt is loaded with
+`load_validated_build` or `load_runtime`. The receipt binds the executable and
+patch hashes to native checks and a whole-application regression; relocation
+requires repeating the latter. Source/object audit alone does not authorize an
+old binary's NLCC forces. This capability does not certify physical convergence.

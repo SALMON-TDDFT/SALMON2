@@ -3,7 +3,7 @@
 No FDTD equations are reimplemented here. All physical inputs are atomic units.
 """
 from .errors import InputError, InputTypeError, RuntimeFailure
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 import hashlib
 import json
@@ -246,6 +246,12 @@ class SalmonExecutable:
     path: Path
     sha256: str
     mpi_enabled: bool=False
+    _nlcc_force_xc: tuple = field(default=(), init=False, repr=False, compare=False)
+
+    @property
+    def nlcc_force_xc(self):
+        """XC names with matching completed NLCC implementation validation."""
+        return self._nlcc_force_xc
 
     def __post_init__(self):
         object.__setattr__(self,'path',Path(self.path).expanduser().resolve())

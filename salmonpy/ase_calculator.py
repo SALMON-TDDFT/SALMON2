@@ -40,7 +40,7 @@ class SalmonCalculator(Calculator):
     PZ/Libxc-PZ/Libxc-PBE with scalar KY/NC-UPF pseudopotentials. Opt-in
     warm_start reuses compatible wavefunctions, not mixing history. Native forces
     are not replaced by derivatives of a possibly egg-box-contaminated energy.
-    NLCC UPF potentials support energy only; their native forces are unvalidated.
+    NLCC UPF forces require matching completed runtime implementation validation.
     Users must establish grid and SCF convergence for their optimization target.
     """
     implemented_properties=['energy','forces']
@@ -56,7 +56,8 @@ class SalmonCalculator(Calculator):
         if not isinstance(warm_start, bool):
             raise InputTypeError('warm_start must be a bool')
         self._nlcc = any(_has_nlcc(p) for p in pseudos)
-        self.implemented_properties = ['energy'] if self._nlcc else ['energy', 'forces']
+        self._nlcc_forces = xc.lower() in executable.nlcc_force_xc
+        self.implemented_properties = ['energy'] if self._nlcc and not self._nlcc_forces else ['energy', 'forces']
         self._warm_start = warm_start
         if not isinstance(scf,SCFSettings): raise InputTypeError('expected SCFSettings')
         grid=tuple(_integer(v,'grid',8,2**20) for v in grid)
@@ -88,9 +89,9 @@ class SalmonCalculator(Calculator):
         return {}
 
     def _check_nlcc_forces(self, properties):
-        if self._nlcc and 'forces' in properties:
+        if self._nlcc and not self._nlcc_forces and 'forces' in properties:
             raise PropertyNotImplementedError(
-                'NLCC UPF forces are not validated and are disabled; '
+                'NLCC UPF forces require matching completed runtime validation; '
                 'use matching PZ + KY potentials for structural optimization')
 
     def get_property(self, name, atoms=None, allow_calculation=True):
@@ -115,7 +116,7 @@ class SalmonCalculator(Calculator):
         energy=float(result.energy_hartree*HARTREE_EV)
         if not np.isfinite(energy): raise RuntimeFailure('invalid native energy result')
         values={'energy':energy}
-        if not self._nlcc:
+        if not self._nlcc or self._nlcc_forces:
             forces=np.array(result.forces_hartree_per_bohr,copy=True)*HARTREE_EV/BOHR_ANGSTROM
             if forces.shape!=(len(self.atoms),3) or not np.isfinite(forces).all():
                 raise RuntimeFailure('invalid native force result')

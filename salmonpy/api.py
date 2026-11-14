@@ -75,6 +75,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                       'host_platform',
                       'inspect_runtime',
                       'load_runtime',
+                      'load_validated_build',
                       'install_runtime',
                       'build_runtime'),
  'salmonpy.salmon_vr': ('VRExport', 'export_cubes'),

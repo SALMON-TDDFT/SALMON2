@@ -70,3 +70,18 @@ engine = SalmonExecutable(record['executable'], record['sha256'])
 MPI版は計算機のMPI環境に合わせて明示的に構築します。DFT/バンドとプロセス分離TDDFTは単一ランクのままです。FDTDはFDTDMPIから既存の空間MPI分割を利用できます。FDTD_MATERIALS.mdを参照してください。今回の準備機能は、計算順序・独立状態・A→Jの境界を変更しません。
 
 Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.md](COUPLED.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.
+
+## NLCC力の検証記録
+
+`load_runtime(directory, required=['nlcc-forces'])`は、ハッシュで確認したバンドル内の
+検証記録が実行ファイル・対応パッチ・CPU非スピン分極NCの範囲に一致した場合だけ、
+CalculatorのNLCC力を有効にします。通常の実行ファイル指定や機能名だけでは有効になりません。
+自分で検証したビルドには`load_validated_build(build_json, validation_json)`を使います。
+詳しくは[Calculator](ASE_CALCULATOR.md)を参照してください。
+
+開発者向けの明示的な手順は、`tools/run_nlcc_native_tests.py`でXC・コア力検査を実行し、
+`tools/validate_nlcc_runtime.py BUILD_JSON XC_TEST_JSON CORE_TEST_JSON PBE_UPF NEW_CHECKS_DIRECTORY`
+で固定Si8の実行検査と記録作成を行います。同梱時は`tools/package_salmon_runtime.py`へ
+`--nlcc-validation CHECKS/validation.json --nlcc-potential PBE_UPF`を追加します。
+同梱後のバイナリでも実行検査を行い、新しいSHA256へ結び付けます。import時にビルドや計算はしません。
+これは実装回帰の記録であり、実材料の格子・k点・SCF・力の収束確認は別途必要です。

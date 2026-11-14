@@ -107,3 +107,19 @@ DFT/bands and process-isolated TDDFT retain their single-rank scope. FDTD can us
 layer does not alter the DFT/TDDFT update order, state isolation or A→J interface.
 
 Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.
+
+## Validated NLCC force capability
+
+`load_runtime(directory, required=['nlcc-forces'])` enables Calculator NLCC forces
+only with checksum-verified evidence matching the binary, supported patch and
+CPU/unpolarized/NC scope. A feature name or ordinary executable constructor alone
+is insufficient. For a trusted local build, use
+`load_validated_build(build_json, validation_json)`. See [Calculator](ASE_CALCULATOR.en.md).
+
+Developers explicitly run XC/core tests with `tools/run_nlcc_native_tests.py`, then
+`tools/validate_nlcc_runtime.py BUILD_JSON XC_TEST_JSON CORE_TEST_JSON PBE_UPF NEW_CHECKS_DIRECTORY`.
+For a bundle, pass `--nlcc-validation CHECKS/validation.json --nlcc-potential PBE_UPF`
+to `tools/package_salmon_runtime.py`. The relocated executable reruns the application
+regression and receives its own binary binding. Import never builds or runs a solver.
+This is implementation regression evidence; material grid/k-point/SCF/force
+convergence remains the caller's responsibility.

@@ -8,24 +8,38 @@ Libxcには対応したランタイムが必要です。擬ポテンシャルの
 
 ## NLCC付きUPFの力
 
-**Libxc-PBE＋NLCC付きUPFの力は未検証です。構造最適化にはPZ＋KYを使ってください。**
-擬ポテンシャルと汎関数を対応させ、格子・k点・SCFの収束も別途確認してください。
+**既存・未検証ランタイムのLibxc-PBE＋NLCC付きUPFの力は拒否します。**
+通常の`SalmonExecutable(path, sha256)`だけではNLCC力は有効になりません。
+検証記録のない環境で構造最適化を行う場合は、対応するPZ＋KYを使い、
+格子・k点・SCF精度を確認してください。
 
-CalculatorはUPFの有効または不明な`core_correction`指定、もしくは`PP_NLCC`要素を検出すると、
-汎関数にかかわらず力を無効にします。`atoms.get_forces()`と直接の力要求は
-`PropertyNotImplementedError`となり、その要求によるSCFを開始しません。
-エネルギー計算は引き続き利用できますが、力は読み出し・キャッシュしません。
-不明なフラグやゼロ値だけの`PP_NLCC`要素も保守的に対象とします。
+実装検証を終えたランタイムは、次の入口で読み込みます。
 
-エネルギーを取得できることは、NLCCのエネルギーが検証済みであることを意味しません。
-既存Libxcランタイムでは、NLCCを加えた密度と価電子のみのエネルギー重み・GGA勾配の混在が
-確認されています。互換パッチにはXC整合性と明示的NLCC力の修正を追加していますが、
-既存の実行ファイルがこの修正を含むと推測してはいけません。
+```python
+from salmonpy.runtime import load_runtime, load_validated_build
 
-このPython保護自体は本体の力を補正しません。検証済みランタイムを識別できる仕組みが
-整うまでは、CalculatorのNLCC力の拒否を維持します。
-低水準の`GroundStateResult.forces_hartree_per_bohr`から読み出せる値も、
-NLCCの場合に検証済みの力とは解釈しないでください。
+engine = load_runtime('my-runtime', required=['nlcc-forces'])
+# または、自分で監査・検証したビルドと、その検証記録を指定する。
+# engine = load_validated_build('work/build.json', 'checks/validation.json')
+print(engine.nlcc_force_xc)  # ('pz', 'libxc_pz', 'libxc_pbe')
+```
+
+この`engine`をCalculatorへ渡すと、対応範囲のNLCC力を取得できます。
+実行ファイルのSHA256・修正パッチ・XC/コア力の微分検査・固定Si8の実行検査が
+結び付いた記録を要求します。別の場所へ同梱するときも実行検査をやり直します。
+対象はCPU・非スピン分極・スカラーNC-UPFです。記録は信頼できるビルドと検証の
+コマンドで生成したものを使い、手で有効化フラグを付けません。
+
+**これは実装の回帰検証であり、利用する物質の力の収束を保証しません。**
+支持表の線形補間・切断境界、格子・k点・SCFの収束は別途確認してください。
+旧Libxc-NLCCの密度重み・GGA勾配の不整合と明示的コア力は互換パッチで修正していますが、
+既存の実行ファイルへ自動適用される変更ではありません。
+
+検証記録がない場合、UPFの有効または不明な`core_correction`指定、もしくは
+`PP_NLCC`要素を検出すると、力要求は計算開始前に`PropertyNotImplementedError`となります。
+エネルギーのみ利用でき、力はキャッシュしません。エネルギー取得可能と物理的な検証済みを
+混同しないでください。低水準の`GroundStateResult.forces_hartree_per_bohr`も、
+ランタイムの妥当性を自動認定する入口ではありません。
 
 ```python
 from ase.build import bulk

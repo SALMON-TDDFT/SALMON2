@@ -9,26 +9,39 @@ free_energy, charged cells and partial periodic boundaries are unsupported.
 
 ## NLCC UPF forces
 
-**Forces with Libxc-PBE plus an NLCC UPF are unvalidated. Use matching PZ + KY
-potentials for structural optimization**, and establish grid, k-point and SCF
-convergence separately.
+**Existing or unvalidated runtimes cannot provide Calculator NLCC forces.**
+An ordinary `SalmonExecutable(path, sha256)` does not enable them. Use matching
+PZ + KY potentials when optimizing without a validated NLCC runtime, and check
+grid, k-point and SCF convergence.
 
-If an UPF has an enabled or unrecognized `core_correction` flag, or contains
-a `PP_NLCC` element, Calculator disables forces for every XC. `atoms.get_forces()` and direct force requests
-raise `PropertyNotImplementedError` before launching SCF. Energy remains
-available; forces are neither read nor cached. Unknown flags and even zero-only
-`PP_NLCC` blocks are conservatively guarded.
+Load a runtime with completed implementation validation:
 
-Energy availability does not certify NLCC energies. Existing Libxc runtimes
-were found to mix a core-corrected density with valence-only energy weighting
-and GGA gradients. The compatibility patch now corrects this and adds the explicit
-core force, but existing binaries must not be assumed to contain those changes.
+```python
+from salmonpy.runtime import load_runtime, load_validated_build
 
-The Python guard itself does not correct native forces. It remains until
-a validated runtime capability can be identified.
+engine = load_runtime('my-runtime', required=['nlcc-forces'])
+# Or use your trusted audited build and its completed validation record:
+# engine = load_validated_build('work/build.json', 'checks/validation.json')
+print(engine.nlcc_force_xc)  # ('pz', 'libxc_pz', 'libxc_pbe')
+```
 
-Values read through the lower-level `GroundStateResult.forces_hartree_per_bohr`
-must not be interpreted as validated NLCC forces.
+Pass this engine to Calculator to obtain NLCC forces in the validated scope:
+CPU, unpolarized scalar NC-UPF, PZ/Libxc-PZ/PBE. The record binds executable SHA256,
+source patch, XC/core finite-variation tests and a fixed Si8 application regression.
+Bundling at a different location reruns the application check. Generate records
+with trusted explicit build/validation commands; a feature label alone is insufficient.
+
+**Implementation regression does not guarantee material force convergence.**
+Check radial interpolation/cutoff boundaries, real-space grid, k points and SCF
+convergence for your system. The compatibility patch corrects the old Libxc-NLCC
+energy weighting/GGA gradients and adds the explicit core force. Existing binaries
+are not updated automatically.
+
+Without matching validation, a truthy/unrecognized `core_correction` flag or any
+`PP_NLCC` element disables forces before SCF with `PropertyNotImplementedError`.
+Energy remains available without caching forces. Availability alone does not
+certify energy accuracy. Lower-level raw `GroundStateResult` force access also
+does not certify its runtime.
 
 ```python
 from salmonpy.ase_calculator import SalmonCalculator
