@@ -176,8 +176,9 @@ that process. This is not a TDDFT shared library bundled in the wheel.
 Prepare a self-contained directory with a valid periodic RT input, pseudopotential
 files and `data_for_restart/{info.bin,occupation.bin,wfn.bin,...}` from GS. Use
 relative paths for all assets and a plain `sysname`. The initial-state loader
-copies this bundle and records hashes. Each new state gets its own private copy;
-changes to the original files do not change the loaded initial state. Binary
+copies this bundle once and records hashes. States lease that shared baseline;
+each worker receives an independent writable copy whose complete manifest is
+verified before launch. Changes to the original files do not change the loaded initial state. Binary
 records are read by SALMON itself and retain its compiler/format constraints.
 GS and RT records share formats: the caller must supply a GS bundle; the loader
 does not infer ground-state convergence or automatically classify arbitrary
@@ -223,8 +224,12 @@ Always close direct states, preferably with `with`. `respond` does this for you.
 Invalid A leaves the state unchanged. On worker failure the adapter reconstructs
 and replays accepted A samples before raising; if recovery fails it closes the
 state explicitly. Replay is expensive and is not a scientific checkpoint format.
-Snapshots and per-process copies also require disk space. Existing states survive
-closing the initial loader, since each owns its own input copy.
+Snapshots and per-process copies also require disk space. N live states retain
+N+1 managed bundles (one shared baseline plus N worker copies), excluding the
+caller input and retained output archives. Closing the initial loader refuses new
+states but existing leases keep replay available. The baseline is removed after
+the loader and final state release it. During restore an extra worker copy exists;
+the replay candidate shares the same baseline. No symlinks/hardlinks are used.
 
 For native TB-mBJ use `xc='tbmbj'`; Libxc is not required. The native
 `cval` policy is preserved (positive fixed value, otherwise density-derived).

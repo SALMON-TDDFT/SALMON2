@@ -64,7 +64,7 @@ class TDDFTSnapshots(unittest.TestCase):
             np.testing.assert_array_equal(b.step(v),j)
         a.restore(initial);self.assertEqual(a.time,0.)
         np.testing.assert_array_equal(a.current,np.zeros(3))
-        # Independent owned bundles permit replay after the initial loader closes.
+        # Retained baseline leases permit replay after the initial loader closes.
         self.model.close();b.restore(saved);np.testing.assert_array_equal(b.current,at_save)
     def test_incompatible_and_corrupt_tokens_preserve_worker(self):
         a=self.state();a.step([.1,.2,.3]);saved=a.snapshot()

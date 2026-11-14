@@ -36,6 +36,60 @@ class _WorkingDirectory:
     def cleanup(self): shutil.rmtree(self.name,ignore_errors=True)
 
 
+class _BundleStore:
+    """One private baseline, retained until loader and every lease release it."""
+    def __init__(self):
+        self._lock=threading.RLock()
+        self._directory=tempfile.TemporaryDirectory(prefix='salmonpy-tddft-initial-')
+        self.name=self._directory.name
+        self._closed=False;self._users=0
+
+    @property
+    def closed(self):
+        with self._lock:return self._closed
+
+    def _acquire_locked(self):
+        count=self._users+1
+        lease=_BundleLease(self)
+        self._users=count;lease._released=False
+        return lease
+
+    def acquire(self):
+        with self._lock:
+            if self._closed:raise RuntimeFailure('initial snapshot is closed')
+            return self._acquire_locked()
+
+    def _cleanup_unused(self):
+        if self._closed and self._users==0:self._directory.cleanup()
+
+    def cleanup(self):
+        with self._lock:
+            self._closed=True
+            self._cleanup_unused()
+
+
+class _BundleLease:
+    """Idempotent lifetime reference; an existing state can fork after loader close."""
+    def __init__(self,store):
+        self._released=True;self._store=store;self.name=store.name
+
+    def fork(self):
+        with self._store._lock:
+            if self._released:raise RuntimeFailure('TDDFT bundle lease is closed')
+            return self._store._acquire_locked()
+
+    def cleanup(self):
+        with self._store._lock:
+            if not self._released:
+                self._released=True;self._store._users-=1
+            self._store._cleanup_unused()
+
+    def __del__(self):
+        try:
+            if not getattr(self,'_released',True):self.cleanup()
+        except Exception:pass
+
+
 def _digest(path):
     digest=hashlib.sha256()
     with path.open('rb') as stream:
@@ -64,7 +118,8 @@ class TDDFTInitialState:
     """Owned immutable snapshot; loading native binary records is done by SALMON.
 
     Use from_salmon, and close the snapshot when no further new states are needed.
-    Each existing state owns another independent copy and survives snapshot close.
+    States lease this baseline and own independent writable worker copies.
+    Existing states survive loader close; the final release removes the baseline.
     """
     executable: SalmonExecutable
     max_steps: int
@@ -89,7 +144,7 @@ class TDDFTInitialState:
         text=(root/inp).read_text()
         if '!SALMONPY_END_INPUT' in text or any(len(line)>256 for line in text.splitlines()):
             raise InputError('input contains worker marker or a line longer than SALMON accepts')
-        owner=tempfile.TemporaryDirectory(prefix='salmonpy-tddft-initial-')
+        owner=_BundleStore()
         snapshot=Path(owner.name)/'bundle'
         try:
             manifest=_copy_bundle(root,snapshot)
@@ -103,7 +158,7 @@ class TDDFTInitialState:
         dt=_positive(dt,'dt');time0=float(_array(time0,'time0',()))
         A=_array(initial_A,'initial_A',(3,))
         if time0!=0.: raise InputError('fresh TDDFT GS states start at time0=0')
-        if not self._snapshot.exists(): raise RuntimeFailure('initial snapshot is closed')
+        if self._owner.closed or not self._snapshot.exists(): raise RuntimeFailure('initial snapshot is closed')
         return TDDFTState(self,dt,A)
 
     def close(self): self._owner.cleanup()
@@ -136,11 +191,9 @@ class TDDFTState(_SnapshotMixin):
         self._closed=False;self._proc=None;self._work=None;self._reader=None
         self._retain_outputs=False
         self._initial_hashes=dict(initial.manifest);self._curr_history=[]
-        self._owner=tempfile.TemporaryDirectory(prefix='salmonpy-tddft-state-')
-        self._bundle=Path(self._owner.name)/'bundle'
+        self._owner=None;self._bundle=initial._snapshot
         try:
-            if _copy_bundle(initial._snapshot,self._bundle)!=initial.manifest:
-                raise InputError('initial snapshot checksum mismatch')
+            self._owner=initial._owner.acquire()
             self._spawn()
             self._J0=self._current.copy()
         except BaseException:
@@ -171,7 +224,9 @@ class TDDFTState(_SnapshotMixin):
         if _digest(self._executable.path)!=self._executable.sha256:
             raise InputError('executable SHA256 differs from the audited binary')
         self._work=_WorkingDirectory()
-        work=Path(self._work.name)/'run';_copy_bundle(self._bundle,work)
+        work=Path(self._work.name)/'run'
+        if _copy_bundle(self._bundle,work)!=tuple(sorted(self._initial_hashes.items())):
+            raise InputError('initial snapshot checksum mismatch')
         self._events=queue.Queue()
         self._proc=subprocess.Popen([str(self._executable.path)],cwd=work,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,
@@ -371,10 +426,8 @@ class TDDFTState(_SnapshotMixin):
         candidate._proc = candidate._work = candidate._reader = candidate._owner = None
         candidate._retain_outputs = False
         try:
-            candidate._owner = tempfile.TemporaryDirectory(prefix='salmonpy-tddft-state-')
-            candidate._bundle = Path(candidate._owner.name)/'bundle'
-            if _copy_bundle(self._bundle, candidate._bundle) != tuple(sorted(self._initial_hashes.items())):
-                raise SnapshotError('initial-state bundle changed')
+            candidate._owner = self._owner.fork()
+            candidate._bundle = self._bundle
             candidate._spawn()
             if not np.allclose(candidate._current, validated._J0, rtol=1e-12, atol=1e-14):
                 raise SnapshotError('initial replay current differs')

@@ -71,8 +71,13 @@ or physical convergence. Ordinary scientific regression tolerances remain valid.
 Use `saved = state.snapshot()` and `state.restore(saved)` on a state returned by
 `TDDFTInitialState.new_state`. The same initial model object, fixed dt, initial A,
 capacity, executable checksum and thread count are required. Closed states reject
-both operations. Existing states retain their own initial bundle after the model
-loader closes.
+both operations. Existing states retain a lease on one shared baseline after
+the model loader closes; each worker owns an independent writable copy. N live
+states retain N+1 managed bundles, excluding caller input and saved outputs.
+Restore temporarily adds one worker copy, sharing the same baseline. Closing
+the loader refuses new states; releasing the final state then removes the
+baseline. Every spawn verifies the copied complete manifest before process
+launch. Worker file changes do not propagate to the baseline or other workers.
 
 Restore starts a separate worker and replays every accepted A, checking initial
 and endpoint matter currents with rtol=1e-12, atol=1e-14. Only after validation
