@@ -2,7 +2,8 @@
 
 A separately built, audited SALMON executable with worker support is required.
 The initial bundle contains a valid RT input, data_for_restart and relative assets.
-J is SALMON's electronic matter current (charge current is its negative).
+States return the electric (charge) current density j; the worker's SALMON
+electronic matter current J is kept internally (``matter_current``), j = -J.
 """
 from dataclasses import dataclass, field
 import hashlib
@@ -144,9 +145,21 @@ class TDDFTState:
     @property
     def dt(self): return self._dt
     @property
+    def timing(self):
+        """salmonpy.time/1 declaration (crystal contract; SALMON middlepoint)."""
+        from .timing import TimeSpec,InputPort,OutputPort
+        return TimeSpec(self._dt,(InputPort('A'),),(OutputPort('j'),),
+            integrator='SALMON middlepoint: H at (A_n+A_{n+1})/2; J at A_{n+1}')
+    @property
     def time(self): return self._steps*self.dt
     @property
-    def current(self): return _frozen(self._current)
+    def current(self):
+        """Electric (charge) current density j = -J_matter at the current time."""
+        return _frozen(-self._current)
+    @property
+    def matter_current(self):
+        """SALMON electronic matter current J (internal representation)."""
+        return _frozen(self._current)
     @property
     def max_steps(self): return self._capacity
 
@@ -263,13 +276,13 @@ class TDDFTState:
         try:
             if self._stop(cleanup=False)!=0: raise RuntimeError('worker did not exit cleanly; output not finalized')
             metadata={'backend':'SALMON-TDDFT-middlepoint','dt':self.dt,'steps':self._steps,
-                'units':{'time':'a.u.','A':'Ac=A/c, a.u.','J':'electronic matter-current density, a.u.'},
-                'time_location':'A and J are accepted endpoint samples; first sample is the initial state',
-                'charge_current':'-J','executable_sha256':self._executable.sha256,'threads':self._threads,
+                'units':{'time':'a.u.','A':'Ac=A/c, a.u.','current':'electric (charge) current density, a.u.'},
+                'time_location':'A and current are accepted endpoint samples; first sample is the initial state',
+                'matter_current':'-current','executable_sha256':self._executable.sha256,'threads':self._threads,
                 'initial_files':self._initial_hashes,'native_output_semantics':'original SALMON headers/input; no inferred units or time shifts',
                 'restart_checkpoint':False}
             return _write_archive(dest,{'time':np.arange(self._steps+1)*self.dt,
-                'A':np.array([self._A0]+self._history),'J':np.array([self._J0]+self._curr_history)},
+                'A':np.array([self._A0]+self._history),'current':-np.array([self._J0]+self._curr_history)},
                 metadata,native_source=Path(self._work.name)/'run',initial_hashes=self._initial_hashes,input_text=self._input)
         except BaseException as exc:
             self._retain_outputs=True
@@ -278,7 +291,7 @@ class TDDFTState:
             # small recovery records. Never delete the only copy after save failure.
             try:
                 np.savez_compressed(recovery/'accepted-response.npz',time=np.arange(self._steps+1)*self.dt,
-                    A=np.array([self._A0]+self._history),J=np.array([self._J0]+self._curr_history))
+                    A=np.array([self._A0]+self._history),J_matter=np.array([self._J0]+self._curr_history))
                 (recovery/'recovery.json').write_text(json.dumps({'error':str(exc),
                     'executable_sha256':self._executable.sha256,'steps':self._steps,
                     'dt':self.dt,'initial_files':self._initial_hashes,'input':self._input},indent=2))

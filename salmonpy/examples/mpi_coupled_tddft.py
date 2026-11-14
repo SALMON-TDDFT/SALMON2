@@ -61,7 +61,7 @@ try:
     context.close()
     if world.rank==0:
         (output/'response.json').write_text(json.dumps({'scheme':NativeEHField.scheme,'units':'atomic',
-            'point_ids':plan.point_ids,'history':history},indent=2)+'\n')
+            'point_ids':plan.point_ids,'timing':coupled.timing,'history':history},indent=2)+'\n')
         print(output/'response.json')
 except BaseException:
     # Native failures cannot be rolled back collectively; do not enter context

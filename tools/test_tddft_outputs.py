@@ -43,7 +43,7 @@ with TDDFTInitialState.from_salmon(clean,'rt.inp',executable=SalmonExecutable(ex
  with initial.new_state(dt=.05) as state:
   state.step(drive.values[1]);state.finish(dest/'partial')
   with np.testing.assert_raises(RuntimeError):state.step(drive.values[2])
-archive=OutputArchive.open(dest/'archive');np.testing.assert_allclose(archive.array('J')[1:],selected[:,13:16],rtol=1e-10,atol=1e-13)
+archive=OutputArchive.open(dest/'archive');np.testing.assert_allclose(-archive.array('current')[1:],selected[:,13:16],rtol=1e-10,atol=1e-13)
 assert len(archive.array('time'))==25 and len(OutputArchive.open(dest/'partial').array('time'))==2
 files=[]
 for p in sorted((dest/'selected').glob('Si*')):
@@ -61,4 +61,4 @@ assert any('_elf_' in n for n in files)
 assert any('_Exsta_' in n for n in files)
 assert 'Si_current_decomposed.data' in files
 assert not (archive.directory/'native/data_for_restart/wfn.bin').exists()
-print(json.dumps({'native_files_byte_equal':files,'output_selection_current_max_difference':float(np.max(abs(selected[:,13:16]-plain[:,13:16]))),'worker_current_max_difference':float(np.max(abs(archive.array('J')[1:]-selected[:,13:16]))),'initial_assets_omitted':True,'partial_finish':True},indent=2))
+print(json.dumps({'native_files_byte_equal':files,'output_selection_current_max_difference':float(np.max(abs(selected[:,13:16]-plain[:,13:16]))),'worker_current_max_difference':float(np.max(abs(-archive.array('current')[1:]-selected[:,13:16]))),'initial_assets_omitted':True,'partial_finish':True},indent=2))

@@ -22,6 +22,12 @@ class MaterialBinding:
     backend: object
 
 
+def _response_timing(dt,integrator):
+    """Response-service contract: endpoint A at n*dt in, charge current j at n*dt out."""
+    from .timing import TimeSpec,InputPort,OutputPort
+    return TimeSpec(dt,(InputPort('A'),),(OutputPort('j'),),integrator=integrator)
+
+
 class ResponseSession:
     """All context ranks participate, including the field group.
 
@@ -191,6 +197,7 @@ class LDResponseBackend:
     def create_state(self,initial,point_id,dt,context):
         state=initial.new_state(dt=dt)
         class State:
+            timing=_response_timing(dt,'LD driven by E_new = -(A_new-A_old)/dt; physical polarization current')
             def advance(self,old,new): return state.step(-(new-old)/dt)[1]
             def close(self): pass
         return State()
@@ -267,7 +274,8 @@ class TDDFTMaterialProvider:
 class TDDFTResponseBackend:
     """Existing one-process-per-point TDDFT, not embedded subgroup MPI TDDFT.
 
-    Returns physical charge-current density (-SALMON electronic J), exactly once.
+    Returns the physical charge-current density that TDDFTState already reports
+    (j = -SALMON electronic J); no further sign change here.
     Legacy middlepoint order/worker recovery remain owned by TDDFTState.
     """
     identity='salmonpy.tddft.middlepoint.process.charge/1'
@@ -285,10 +293,11 @@ class TDDFTResponseBackend:
         from dataclasses import replace
         worker=replace(initial.initial,executable=verified).new_state(dt=dt)
         class State:
+            timing=_response_timing(dt,'SALMON middlepoint TDDFT worker; charge current j')
             def __init__(self): self.A=np.zeros(3)
             def advance(self,old,new):
                 if not np.array_equal(old,self.A): raise ValueError('old A differs from accepted TDDFT state')
-                current=-worker.step(new)
+                current=worker.step(new)  # TDDFTState returns charge current j
                 self.A=np.array(new,copy=True)
                 return current
             def close(self): worker.close()

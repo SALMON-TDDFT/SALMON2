@@ -92,7 +92,7 @@ exe=SalmonExecutable(after,hashlib.sha256(after.read_bytes()).hexdigest())
 with TDDFTInitialState.from_salmon(bundle,'rt.inp',executable=exe,max_steps=8,timeout=60) as initial:
     drive=FieldSamples(np.arange(9)*.001,np.vstack([np.zeros(3),rt[:,1:4]]),'A')
     result=respond(initial,drive)
-    np.testing.assert_allclose(result.current[1:],rt[:,13:16],rtol=1e-12,atol=1e-14)
+    np.testing.assert_allclose(result.current[1:],-rt[:,13:16],rtol=1e-12,atol=1e-14)  # rt.data Jm = matter current
     with initial.new_state(dt=.001) as a, initial.new_state(dt=.001) as b:
         assert a._proc.pid!=b._proc.pid
         for i,A in enumerate(drive.values[1:],1):

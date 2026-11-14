@@ -213,8 +213,9 @@ The input's pulse, base directory and restart output settings are replaced only
 in worker mode; the public drive is exclusively supplied endpoint A. The existing
 midpoint Hamiltonian, predictor-corrector, density/potential/history updates,
 and endpoint-current calculation retain their order, including existing
-nonlocal-phase conventions. J uses SALMON's electronic **matter-current** sign,
-as does SBE; electronic charge current is **−J**. No numerical integrator or
+nonlocal-phase conventions. Since 2026-11-14 the state returns the electric
+(**charge**) current density j, as does SBE; SALMON's electronic matter current
+J = −j stays internal (`state.matter_current`). No numerical integrator or
 unitarity correction is introduced.
 
 Always close direct states, preferably with `with`. `respond` does this for you.
@@ -247,5 +248,7 @@ Optional, independent ASE structure/path/band-result bridge: [ASE.md](ASE.md).
 Prepare a converged GS from ASE or plain arrays: [DFT.md](DFT.md).
 
 Optional ASE Calculator with native PZ/KY forces: [ASE_CALCULATOR.md](ASE_CALCULATOR.md).
+
+Field components with the j→A protocol (SALMON tr / lo / 2d and 1D multiscale propagation) and the `couple` driver: [FIELDS.en.md](FIELDS.en.md). Interfaces exchange the charge current j; components declare their time layout (salmonpy.time/1), checked by `couple`.
 
 Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [COUPLED.en.md](COUPLED.en.md). One point per solver group and one native lifetime per process; do not infer unrestricted reentrancy or restart support.

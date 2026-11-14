@@ -1,5 +1,8 @@
 """SALMON velocity-gauge SBE. Atomic units; driving A denotes A/c.
 
+States return the electric (charge) current density j. The native kernel's
+SALMON electronic matter current J is kept internally (``matter_current``); j = -J.
+
 Initial arrays use Fortran index order: (band, k), (band, band, xyz, k).
 Closed-shell occupations match SALMON: two electrons in each of ne/2 bands.
 """
@@ -159,9 +162,21 @@ class SBEState:
     @property
     def time(self): return self._time0+self._steps*self._dt
     @property
+    def timing(self):
+        """salmonpy.time/1 declaration (crystal contract; Taylor step at midpoint A)."""
+        from .timing import TimeSpec,InputPort,OutputPort
+        return TimeSpec(self._dt,(InputPort('A'),),(OutputPort('j'),),t0=self._time0,
+            integrator='4th-order Taylor with midpoint A; J evaluated at the new endpoint A')
+    @property
     def density(self): return _frozen(self._rho,complex)
     @property
-    def current(self): return _frozen(self._current)
+    def current(self):
+        """Electric (charge) current density j = -J_matter at the current time."""
+        return _frozen(-self._current)
+    @property
+    def matter_current(self):
+        """SALMON electronic matter current J (internal representation)."""
+        return _frozen(self._current)
     def _evaluate(self,rho,A,advance):
         i=self._initial; nb,nk=i.eigen.shape; j=np.empty(3)
         arrays=(i.eigen,i.weights,i.momentum,i.nonlocal_velocity,rho,self._A,A)

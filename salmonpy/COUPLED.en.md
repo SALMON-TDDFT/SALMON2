@@ -103,6 +103,13 @@ feedback J are zero. A nonzero computed initial GS current does not replace that
 initial feedback. The sequence is previous J → native E/H update → A update →
 TDDFT J update. `A_new = A_old − dt * S(E_n)`; crystal drive is always A/c.
 
+This table is declared in `salmonpy.time/1` form (`NativeEHField.timing`: j in at
+offset ½ with lag 1 and t=0 unused, A out at offset ½). `CoupledStepper` gathers
+every point's matter declaration over MPI, places it on the electronic clock
+(field clock + ½, `ELECTRONIC_CLOCK_OFFSET`) and rejects mismatches before the
+first step; `stepper.timing` and `response.json` record both. See
+[FIELDS.en.md](FIELDS.en.md).
+
 S matches native observation collocation: Ex averages edges `(i,j,k)` and
 `(i−1,j,k)`; Ey/Ez use the corresponding previous y/z edge. Deposit J using S transpose,
 half to each corresponding edge. Each macro point represents one uniform grid-cell

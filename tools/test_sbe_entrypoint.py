@@ -65,7 +65,7 @@ with np.load(fixture) as data:
                 rt=np.loadtxt(dirs[1]/'test_sbe_rt.data'); assert len(rt)==40
                 drive=FieldSamples(np.arange(41)*.013,np.vstack([np.zeros(3),rt[:,1:4]]),'A')
                 actual=respond(initial,drive)
-                np.testing.assert_allclose(actual.current[1:],rt[:,13:16],rtol=3e-13,atol=3e-15)
+                np.testing.assert_allclose(actual.current[1:],-rt[:,13:16],rtol=3e-13,atol=3e-15)  # rt.data Jm = matter current
 print(f'16 full-application configurations, threads={threads}: '+
       ('output files byte-identical' if threads==1 else 'outputs agree within tolerance')+
       '; Python currents agree')

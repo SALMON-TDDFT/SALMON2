@@ -13,6 +13,10 @@ from . import embedded_tddft as embedded
 from .distributed import NativeParallelContext
 from .fdtd import FDTD,FDTDMPI,PlaneWave
 from .tddft import _digest
+from .timing import TimeSpec,InputPort,OutputPort,matter_timing,check_loop
+
+#: Electronic local time n*dt is field clock (n+1/2)*dt in the native E/H scheme.
+ELECTRONIC_CLOCK_OFFSET='1/2'
 
 
 def _agree(comm,error):
@@ -94,7 +98,8 @@ class NativeEHField:
             'deposit_map':'transpose of sample_map, equal cell volumes',
             'native_E_time':'n*dt','native_saved_H_time':'n*dt',
             'electronic_local_time':'n*dt','electronic_field_clock':'(n+0.5)*dt',
-            'initial_feedback_current':'zero; not substituted with initial GS current'}
+            'initial_feedback_current':'zero; not substituted with initial GS current',
+            'timing':self.timing.to_dict(),'electronic_clock_offset':ELECTRONIC_CLOCK_OFFSET}
         self._write_manifest()
         self.native=NativeParallelContext(context,library,sha)
         embedded._used=True
@@ -105,6 +110,13 @@ class NativeEHField:
         except BaseException:
             self.failed=True
             self.close();raise
+
+    @property
+    def timing(self):
+        """salmonpy.time/1: j at (n+1/2)dt (lag 1, t=0 unused) -> A at (n+1/2)dt from E at n*dt."""
+        return TimeSpec(self.dt,(InputPort('j',offset='1/2',lag=1,uses_t0=False),),(OutputPort('A',offset='1/2'),),
+            history='zero-initialized plane-wave field; initial feedback current zero',
+            integrator='native Yee: E at n*dt, saved H centered at E time; A_new = A_old - dt*S(E)')
 
     def _write_manifest(self):
         error=None
@@ -181,7 +193,37 @@ class CoupledStepper:
                 error='field/response dt and point order must match'
         elif field is not None:error='material ranks must not provide a field'
         response._agree(error)
+        self.timing=self._check_timing(response,field)
         self.J=np.zeros((len(context.plan.point_ids),3))
+
+    @staticmethod
+    def _check_timing(response,field):
+        """Collect every point's matter declaration and check it against the field's.
+
+        The electronic clock is placed ELECTRONIC_CLOCK_OFFSET after the field clock.
+        Returns {'field', 'matter' (by point), 'electronic_clock_offset'} on all ranks.
+        """
+        context=response.context;records=None;error=None
+        try:
+            if context.group.role!='field':
+                records={p:matter_timing(response.states[p],response.dt).to_dict() for p in context.group.point_ids}
+        except Exception as exc:error=str(exc)
+        response._agree(error)
+        gathered=context.leaders.allgather(records) if context.is_leader else None
+        gathered=context.solver_comm.bcast(gathered,root=0)
+        matter={p:spec for group in gathered if group for p,spec in group.items()}
+        result=None;error=None
+        try:
+            if context.group.role=='field':
+                if set(matter)!=set(context.plan.point_ids):raise ValueError('timing missing for some points')
+                for point,record in matter.items():
+                    try:check_loop(field.timing,TimeSpec.from_dict(record).shifted(ELECTRONIC_CLOCK_OFFSET))
+                    except ValueError as exc:raise ValueError(f'point {point}: {exc}') from None
+                result={'field':field.timing.to_dict(),'matter':matter,'electronic_clock_offset':ELECTRONIC_CLOCK_OFFSET}
+        except Exception as exc:error=str(exc)
+        response._agree(error)
+        if context.is_leader:result=context.leaders.bcast(result,root=context.field_group)
+        return context.solver_comm.bcast(result,root=0)
 
     def step(self):
         r=self.response;context=r.context;A=None;error=None

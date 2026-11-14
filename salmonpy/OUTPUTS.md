@@ -26,10 +26,10 @@ result = respond(initial, drive, output_directory='run-001')
 archive = OutputArchive.open('run-001')
 time = archive.array('time')
 A = archive.array('A')             # SALMON Ac=A/c、原子単位
-J = archive.array('J')             # 電子のmatter current。電荷電流は -J
+j = archive.array('current')       # 電荷電流密度 j（SALMONの物質電流は -j）
 ```
 
-`time`, `A`, `J`は初期状態を含む端点サンプルです。TDDFTでは、正常にプロセスを
+`time`, `A`, `current`は初期状態を含む端点サンプルです（2026-11-14 以前のアーカイブでは `J` = 物質電流）。TDDFTでは、正常にプロセスを
 終了してファイルをフラッシュした後、ワーカーファイルも保存します。
 手動ステップの場合は `state.finish('point-001')` で保存してその状態を閉じます。
 単なる `state.close()` は保存しません。初期状態ローダーは別の計算に再利用できます。

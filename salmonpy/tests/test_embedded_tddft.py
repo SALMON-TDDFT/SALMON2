@@ -37,15 +37,43 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         from salmonpy.coupled import NativeEHField
         self.assertEqual(NativeEHField.scheme,'salmonpy.eh-centered-current/1')
 
-    def test_coupling_rejects_out_of_band_advancement_before_field_update(self):
+    @staticmethod
+    def _fake_coupling(matter_record):
+        """Single field rank; leaders.allgather also returns one material group's record."""
         from types import SimpleNamespace
-        from salmonpy.coupled import NativeEHField,CoupledStepper
-        context=SimpleNamespace(group=SimpleNamespace(role='field'),plan=SimpleNamespace(point_ids=(1,)))
+        from salmonpy.coupled import NativeEHField
+        one=SimpleNamespace(bcast=lambda x,root=0:x)
+        leaders=SimpleNamespace(allgather=lambda x:[x,{1:matter_record}],bcast=lambda x,root=0:x)
+        context=SimpleNamespace(group=SimpleNamespace(role='field'),plan=SimpleNamespace(point_ids=(1,)),
+                                is_leader=True,leaders=leaders,solver_comm=one,field_group=0)
         def agree(error):
             if error:raise ValueError(error)
         response=SimpleNamespace(context=context,dt=.1,step_index=0,closed=False,failed=False,_agree=agree)
         field=object.__new__(NativeEHField)
         field.context=context;field.dt=.1;field.point_ids=(1,);field.step_index=0;field.closed=False;field.failed=False
+        return response,field
+
+    def test_coupling_checks_matter_timing_on_the_electronic_clock(self):
+        from salmonpy.coupled import CoupledStepper
+        from salmonpy.material_response import _response_timing
+        from salmonpy.timing import TimeSpec,InputPort,OutputPort
+        good=_response_timing(.1,'test').to_dict()
+        response,field=self._fake_coupling(good)
+        stepper=CoupledStepper(response,field)
+        self.assertEqual(stepper.timing['electronic_clock_offset'],'1/2')
+        self.assertEqual(stepper.timing['field']['outputs']['A']['offset'],'1/2')
+        # A backend already on the half-step clock would be shifted to 1: rejected.
+        shifted=TimeSpec(.1,(InputPort('A'),),(OutputPort('j'),),clock_offset='1/2').to_dict()
+        # A backend that samples A as an interval average does not match the field's point A.
+        averaged=TimeSpec(.1,(InputPort('A',sampling='interval_average'),),(OutputPort('j'),)).to_dict()
+        for bad in (shifted,averaged):
+            response,field=self._fake_coupling(bad)
+            with self.assertRaises(ValueError):CoupledStepper(response,field)
+
+    def test_coupling_rejects_out_of_band_advancement_before_field_update(self):
+        from salmonpy.coupled import CoupledStepper
+        from salmonpy.material_response import _response_timing
+        response,field=self._fake_coupling(_response_timing(.1,'test').to_dict())
         def forbidden_update(current):raise AssertionError('field must not be mutated')
         field.advance=forbidden_update
         stepper=CoupledStepper(response,field)

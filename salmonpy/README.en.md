@@ -35,6 +35,7 @@ not calculate, install software or start the external SALMON executable.
 |---|---|---|
 | Permittivity and E-driven P/J | `salmonpy.LorentzDrude` | Wheel |
 | Crystalline A-to-J with SBE | `salmonpy.sbe` | Wheel; band/transition data for real materials |
+| Field components (j→A) coupled to matter: tr / lo / thin film / 1D propagation | `salmonpy.maxwell` | NumPy and a matter component; [FIELDS.en.md](FIELDS.en.md) |
 | Pulses, geometry and analysis | `fields`, `geometry`, `analysis`, `outputs` | NumPy; Matplotlib for plots |
 | Ground-state DFT and forces | `salmonpy.dft` | Compatible full SALMON and pseudopotentials |
 | Crystalline A-to-J with TDDFT | `salmonpy.tddft` | Compatible full SALMON and matching GS |
@@ -80,7 +81,7 @@ Do not nest the batch FDTD launcher inside an MPI job.
 
 - Core APIs use atomic units. Frequencies are angular frequencies; do not pass
   eV or fs directly. Crystalline input is **A/c**, with E = −d(A/c)/dt.
-- SBE/TDDFT return electronic matter current J; electronic charge current is −J.
+- SBE/TDDFT return the electric (charge) current density j. SALMON's electronic matter current J = −j stays internal (`state.matter_current`). Until 2026-11-14 they returned J.
   LD is E-driven and returns physical P and J, not FDTD's auxiliary Q.
 - DFT cells have row vectors; SBE lattice vectors are columns. ASE uses Å and eV;
   the bridge performs explicit conversion.

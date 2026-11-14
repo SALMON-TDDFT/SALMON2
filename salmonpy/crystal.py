@@ -2,8 +2,10 @@
 
 The built-in velocity-gauge SBE adapter is salmonpy.sbe.SBEInitialState.
 The process-isolated native TDDFT adapter is salmonpy.tddft.TDDFTInitialState. A is SALMON Ac=A/c;
-J is SALMON electronic matter-current density in laboratory coordinates, atomic
-units. Electronic charge-current density is -J; fixed ions contribute zero.
+The returned current is the electric (charge) current density j in laboratory
+coordinates, atomic units (contract since 2026-11-14). Backends may keep SALMON's
+electronic matter current J = -j internally; fixed ions contribute zero.
+Backends declare their time layout with a ``timing`` attribute (salmonpy.time/1).
 """
 from dataclasses import dataclass
 from typing import Protocol
@@ -19,7 +21,7 @@ class AResponseState(Protocol):
     @property
     def current(self) -> np.ndarray: ...
     def step(self, A: np.ndarray) -> np.ndarray:
-        """Advance using the new endpoint Ac; return SALMON electronic matter current at the new time."""
+        """Advance using the new endpoint Ac; return the charge-current density j at the new time."""
         ...
 
 
@@ -41,8 +43,9 @@ class CrystalResponse:
     current: np.ndarray
     backend: str
     dt: float
-    field_convention: str='Ac=A/c; E=-dAc/dt; atomic units; laboratory frame; electronic matter current (charge current=-J)'
+    field_convention: str='Ac=A/c; E=-dAc/dt; atomic units; laboratory frame; electric (charge) current density j (= -SALMON matter current)'
     output_directory: str | None=None
+    timing: dict | None=None
 
 
 def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=None) -> CrystalResponse:
@@ -65,10 +68,16 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
         if Path(output_path).exists(): raise FileExistsError(output_path)
     state=initial.new_state(dt=float(dt[0]),time0=float(drive.time[0]),initial_A=drive.values[0].copy())
     try:
+        from .timing import matter_timing,charge_sign
+        spec=matter_timing(state,float(dt[0]),float(drive.time[0]))
+        port=spec.input('A')
+        if port is None or spec.clock_offset+port.offset!=0 or port.sampling!='point':
+            raise ValueError('respond supplies point A samples at n*dt; the backend declares otherwise')
+        sign=charge_sign(spec);timing=spec.to_dict()
         current=np.empty_like(drive.values)
         for i,t in enumerate(drive.time):
-            if i==0: current[i]=_array(state.current,'initial current',(3,))
-            else: current[i]=_array(state.step(drive.values[i].copy()),'current',(3,))
+            if i==0: current[i]=sign*_array(state.current,'initial current',(3,))
+            else: current[i]=sign*_array(state.step(drive.values[i].copy()),'current',(3,))
             # Permit roundoff from repeated time += dt, bounded far below one step.
             scale=max(abs(float(t)),abs(float(drive.time[0])),abs(float(dt[0])))
             roundoff=8*np.finfo(float).eps*(i+1)*scale
@@ -81,11 +90,11 @@ def respond(initial: AInitialState, drive: FieldSamples, *, output_directory=Non
                 finish(output_path)
             else:
                 from .outputs import save_arrays
-                save_arrays(output_path,{'time':drive.time,'A':drive.values,'J':current},metadata={
+                save_arrays(output_path,{'time':drive.time,'A':drive.values,'current':current},metadata={
                     'backend':backend,'dt':float(dt[0]),'units':{'time':'a.u.','A':'Ac=A/c, a.u.',
-                    'J':'electronic matter-current density, a.u.'},'time_location':'endpoint samples',
-                    'charge_current':'-J','restart_checkpoint':False})
+                    'current':'electric (charge) current density, a.u.'},'time_location':'endpoint samples',
+                    'matter_current':'-current','timing':timing,'restart_checkpoint':False})
     finally:
         close=getattr(state,'close',None)
         if close is not None: close()
-    return CrystalResponse(drive.time,_readonly(current),backend,float(dt[0]),output_directory=output_path)
+    return CrystalResponse(drive.time,_readonly(current),backend,float(dt[0]),output_directory=output_path,timing=timing)

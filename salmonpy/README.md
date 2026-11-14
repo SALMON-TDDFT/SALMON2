@@ -34,6 +34,7 @@ Pythonです。Python 3.10以上が必要ですが、wheelのPython・OSタグ�
 |---|---|---|
 | 材料の誘電率・Eに対するP/J | `salmonpy.LorentzDrude` | wheel |
 | 結晶のA→J（SBE） | `salmonpy.sbe` | wheel、実材料にはバンド・遷移行列データ |
+| 場の部品（j→A）と物質の結合：tr／lo／薄膜／1次元伝播 | `salmonpy.maxwell` | NumPy、物質側の部品。[FIELDS.md](FIELDS.md) |
 | 光パルス・構造・解析・結果読み込み | `fields` / `geometry` / `analysis` / `outputs` | NumPy、描画にはMatplotlib |
 | DFTの基底状態・力 | `salmonpy.dft` | 対応外部SALMON・擬ポテンシャル |
 | 結晶のA→J（TDDFT） | `salmonpy.tddft` | 対応外部SALMON・整合する基底状態 |

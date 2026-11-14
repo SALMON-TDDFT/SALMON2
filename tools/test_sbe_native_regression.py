@@ -66,7 +66,7 @@ for order in range(4):
    old=np.ascontiguousarray(A[max(it-1,0)]);new=np.ascontiguousarray(A[it]);j=np.empty(3)
    arrays=(initial.eigen,initial.weights,initial.momentum,initial.nonlocal_velocity,rho,old,new)
    fn(nb,nk,2,order,int(vnl),initial.volume,dt,*(x.ctypes.data for x in arrays),int(it>0),j.ctypes.data)
-   actual=state.current if it==0 else state.step(new)
+   actual=-(state.current if it==0 else state.step(new))  # oracle j is the matter current
    np.testing.assert_array_equal(actual,j)
    np.testing.assert_array_equal(state.density,rho)
    js.append(j.copy());rs.append(rho.copy())

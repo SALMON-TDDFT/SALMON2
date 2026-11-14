@@ -92,6 +92,10 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.example
 更新は「前回JでE/H更新 → EからA更新 → TDDFTでJ更新」の順です。
 `A_new = A_old − dt * S(E_n)` で、結晶に渡す量は常にA/cです。
 
+この表は `salmonpy.time/1` の形で宣言しています（`NativeEHField.timing`：入力 j は offset ½・lag 1・t=0 不使用、出力 A は offset ½）。
+`CoupledStepper` は全点の物質側の宣言を MPI で集め、電子系の時計（場の時計 + ½、`ELECTRONIC_CLOCK_OFFSET`）に置いて照合し、
+食い違いがあれば最初のステップの前に拒否します。照合結果は `stepper.timing` と `response.json` に残ります。[FIELDS.md](FIELDS.md) を参照してください。
+
 Sは既存FDTDの観測位置への補間と同じです。例えばExは `(i,j,k)` と `(i−1,j,k)` の辺の平均、
 Ey/Ezはそれぞれy/z方向の隣接辺の平均です。電流はその転置写像で、対応する二辺へ半分ずつ戻します。
 各マクロ点が一様格子の一セル体積を代表するため、追加の体積係数はありません。

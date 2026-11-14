@@ -33,7 +33,8 @@ class OutputTests(unittest.TestCase):
             dest=Path(tmp)/'run';result=respond(Initial(),drive,output_directory=dest)
             archive=OutputArchive.open(dest)
             np.testing.assert_array_equal(archive.array('A'),drive.values)
-            np.testing.assert_array_equal(archive.array('J'),result.current)
+            np.testing.assert_array_equal(archive.array('current'),result.current)
+            self.assertEqual(archive.metadata['timing']['outputs']['j']['at_t0'],'physical')
             self.assertEqual(result.output_directory,str(dest.resolve()))
 
     def test_generated_native_files_only(self):

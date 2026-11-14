@@ -27,7 +27,7 @@ try:
         with TDDFTInitialState.from_salmon(bundle,'rt.inp',executable=exe,max_steps=4,threads=1) as initial:
             for p in range(2):
                 with initial.new_state(dt=.02) as state:
-                    for s in range(4):expected[s,p]=-state.step(drives[s,p])
+                    for s in range(4):expected[s,p]=state.step(drives[s,p])  # TDDFTState returns charge current j
     plan=ParallelPlan((SolverGroup('field',(0,),role='field'),
                        SolverGroup('left',tuple(range(1,world.size-2)),point_ids=(1,)),SolverGroup('right',(world.size-2,world.size-1),point_ids=(2,))))
     provider=NativeTDDFTMaterialProvider(bundle,'rt.inp',max_steps=4)

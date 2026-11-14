@@ -140,6 +140,8 @@ class NativeTDDFTBackend:
             code=state._call(lib.sp_tddft_init,os.fsencode(initial.input_file),float(dt),initial.max_steps,
                              np.zeros(3),np.array(self.decomposition,dtype=np.int32),J)
             state.initialized=(code==0)
+            from .material_response import _response_timing
+            state.timing=_response_timing(float(dt),'embedded SALMON middlepoint TDDFT; charge current -J_native')
             outcomes=comm.allgather((int(code),bool(np.isfinite(J).all())))
             if any(code or not finite for code,finite in outcomes):
                 raise RuntimeError('native initialization failed: '+str(outcomes))
@@ -152,6 +154,7 @@ class NativeTDDFTBackend:
 
 class _NativeState:
     def __init__(self,native,lib,work,capacity):
+        self.timing=None  # declared once dt is known (create_state)
         self.lib=lib
         self.native=native;self.work=work;self.capacity=capacity
         self.closed=False;self.initialized=False;self.steps=0;self.A=np.zeros(3)

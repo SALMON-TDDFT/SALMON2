@@ -14,6 +14,7 @@ For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'
 | `pulse_spectrum` | Pulses and Fourier spectrum; no solver |
 | `geometry_preview` | Material IDs, middle slice, PML contact; new NPZ path |
 | `sbe_response` | Synthetic two-band A-to-J and independent states; new directory |
+| `field_coupling` | Field components (tr / lo / 1D propagation) coupled to synthetic SBE; new directory |
 | `sbe_from_salmon` | Real-material loader; `_k/_eigen/_tm.data` and column lattice |
 | `outputs_roundtrip` | Save/read selected LD arrays with units; new directory |
 | `fdtd_dielectric` | Dielectric propagation; audited external SALMON |
@@ -29,12 +30,13 @@ python -m salmonpy.examples.ld_response
 python -m salmonpy.examples.pulse_spectrum
 python -m salmonpy.examples.geometry_preview new-grid.npz
 python -m salmonpy.examples.sbe_response new-sbe-output
+python -m salmonpy.examples.field_coupling new-field-coupling-output
 python -m salmonpy.examples.outputs_roundtrip new-ld-output
 ```
 
 These five examples need no external input dataset. Synthetic SBE data illustrates
 the API, not an actual material. Core units are atomic units; A means A/c and
-crystalline electronic charge current is −J. LD is E-driven.
+crystalline outputs are the electric (charge) current density j (SALMON matter current = −j). LD is E-driven.
 
 ```sh
 python -m salmonpy.examples.dft_si EXECUTABLE SHA256 SI_RPS NEW_GS --threads 1

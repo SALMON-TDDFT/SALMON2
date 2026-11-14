@@ -54,7 +54,7 @@ with ParallelContext.create(MPI.COMM_WORLD,plan) as context:
                     actual=session.advance(A if context.group.role=='field' else None)
                     if actual is not None:
                         if repeat==0:
-                            expected=np.array([-state.step(a) for state,a in zip(references,A)])
+                            expected=np.array([state.step(a) for state,a in zip(references,A)])  # charge current j
                             histories.append(expected.copy())
                         else: expected=histories[step-1]
                         np.testing.assert_array_equal(actual,expected)

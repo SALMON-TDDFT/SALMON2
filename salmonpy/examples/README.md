@@ -19,6 +19,7 @@ LDと内蔵SBEはwheel同梱のネイティブライブラリを使います。�
 | 形状・材料ID・PMLとの接触確認 | [geometry_preview.py](geometry_preview.py) | 新規.npz保存先 |
 | FDTDの誘電体光伝播 | [fdtd_dielectric.py](fdtd_dielectric.py) | 対応SALMON実行ファイル |
 | SBEのA→J・独立状態 | [sbe_response.py](sbe_response.py) | wheel内のSBEライブラリ。合成模型 |
+| 場の部品（tr／lo／1次元伝播）とSBEの結合 | [field_coupling.py](field_coupling.py) | wheel内のSBEライブラリ。合成模型、新規出力先 |
 | SBEの初期状態読み込み | [sbe_from_salmon.py](sbe_from_salmon.py) | SALMONテキスト出力・格子ベクトル |
 | DFTのGS・エネルギー・力 | [dft_si.py](dft_si.py) | 対応SALMON・Siの4価電子PZ/KY擬ポテンシャル |
 | GS再利用・TDDFTのA→J | [tddft_response.py](tddft_response.py) | 対応SALMON・保存済みGS |
@@ -35,11 +36,12 @@ python -m salmonpy.examples.ld_response
 python -m salmonpy.examples.pulse_spectrum
 python -m salmonpy.examples.geometry_preview material-grid.npz
 python -m salmonpy.examples.sbe_response new-sbe-output
+python -m salmonpy.examples.field_coupling new-field-coupling-output
 python -m salmonpy.examples.outputs_roundtrip new-ld-output
 ```
 
 SBEの合成模型はAPI学習用で、実材料のスペクトルを表しません。結晶への入力はA/c、
-出力Jは電子物質電流です（電子の電荷電流は−J）。LDはE駆動です。
+出力は電荷電流密度 j です（SALMONの電子物質電流は −j。2026-11-14 以前は物質電流を返していました）。LDはE駆動です。
 格子ベクトルはDFTでは行、SBEでは列です。各コード内の単位指定を確認してください。
 
 ## 外部SALMONを使う

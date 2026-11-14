@@ -22,7 +22,7 @@ def main():
         for i, amplitude in enumerate((.001, .002)):
             drive = AcosPulse(amplitude, .2, .4).sample(np.arange(21)*.02)
             result = respond(initial, drive, output_directory=output/f'run-{i}')
-            print('電子物質電流 [a.u.]:', result.current[-1])
+            print('電荷電流密度 j [a.u.]:', result.current[-1])
     # 短い接続試験用波形。物理評価にはパルス・dt・伝播時間の収束確認が必要。
 
 

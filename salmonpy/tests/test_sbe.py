@@ -37,7 +37,8 @@ class SBE(unittest.TestCase):
                             electrons=2,correction_order=order,nonlocal_correction=vnl)
                         index=2*order+int(vnl)
                         result=crystal.respond(initial,drive)
-                        np.testing.assert_allclose(result.current,data['current'][index],rtol=2e-13,atol=2e-15)
+                        # Reference holds SALMON matter current J; the crystal contract returns j = -J.
+                        np.testing.assert_allclose(result.current,-data['current'][index],rtol=2e-13,atol=2e-15)
                         state=initial.new_state(dt=dt,initial_A=data['A'][0])
                         for it,A in enumerate(data['A'][1:],1):
                             state.step(A)

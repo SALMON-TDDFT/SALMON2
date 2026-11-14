@@ -121,8 +121,8 @@ one MPI rank**. One group may own several points, processed sequentially. Every
 point retains a separate resident serial subprocess and its memory/files. Budget
 memory for every point and CPU threads for active workers; the MPI rank count is
 not the count of all OS processes. This serial-worker backend does not provide
-internal MPI; use the [separate native backend](COUPLED.en.md) for that and E/H coupling. The service converts
-native electronic J to physical charge-current density once, J_charge=-J.
+internal MPI; use the [separate native backend](COUPLED.en.md) for that and E/H coupling. `TDDFTState` already
+returns the physical charge-current density j = −J_native; the service does not negate again.
 The supported XC/propagator scope is exactly that of the existing TDDFT worker.
 It loads a prepared GS; it does not run DFT preparation automatically.
 

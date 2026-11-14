@@ -57,6 +57,7 @@ install(FILES "${ROOT}/salmonpy/distributed.py" "${ROOT}/salmonpy/material_respo
   "${ROOT}/salmonpy/DISTRIBUTED.md" "${ROOT}/salmonpy/DISTRIBUTED.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/tools/build_parallel_bridge.py" DESTINATION salmonpy/_runtime_source/tools)
 
+install(FILES "${ROOT}/salmonpy/maxwell.py" "${ROOT}/salmonpy/timing.py" "${ROOT}/salmonpy/FIELDS.md" "${ROOT}/salmonpy/FIELDS.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/embedded_tddft.py" "${ROOT}/salmonpy/coupled.py"
   "${ROOT}/salmonpy/COUPLED.md" "${ROOT}/salmonpy/COUPLED.en.md" DESTINATION salmonpy)
 install(FILES "${ROOT}/tools/build_embedded_tddft.py" DESTINATION salmonpy/_runtime_source/tools)

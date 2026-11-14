@@ -84,7 +84,7 @@ try:
             with TDDFTInitialState.from_salmon(bundle,'rt.inp',executable=load_runtime(runtime),max_steps=steps,threads=1) as initial:
                 for p in range(2):
                     with initial.new_state(dt=dt) as state:
-                        for n,frame in enumerate(history):replay[n,p]=-state.step(frame['A_over_c'][p])
+                        for n,frame in enumerate(history):replay[n,p]=state.step(frame['A_over_c'][p])  # TDDFTState returns charge current j
             actual=np.array([f['J_charge'] for f in history])
             np.testing.assert_allclose(actual,replay,rtol=2e-10,atol=2e-12)
             previous=np.zeros((2,3));old_A=np.zeros((2,3))
