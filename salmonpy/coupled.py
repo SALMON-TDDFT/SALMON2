@@ -8,12 +8,13 @@ import ctypes as c
 import json
 import os
 import threading
+from fractions import Fraction
 import numpy as np
 from . import embedded_tddft as embedded
 from .distributed import NativeParallelContext
 from .fdtd import FDTD,FDTDMPI,PlaneWave
 from .tddft import _digest
-from .timing import TimeSpec,InputPort,OutputPort,matter_timing,check_loop
+from .timing import TimeSpec,InputPort,OutputPort,check_loop
 
 #: Electronic local time n*dt is field clock (n+1/2)*dt in the native E/H scheme.
 ELECTRONIC_CLOCK_OFFSET='1/2'
@@ -32,6 +33,7 @@ class NativeEHField:
     may occupy other regions. Only zero-initialized plane-wave runs are supported.
     """
     scheme='salmonpy.eh-centered-current/1'
+    electronic_clock_offset = ELECTRONIC_CLOCK_OFFSET
 
     def __init__(self,context,calculation,build_record,directory,*,points,grid):
         comm=context.solver_comm;error=None
@@ -99,7 +101,7 @@ class NativeEHField:
             'native_E_time':'n*dt','native_saved_H_time':'n*dt',
             'electronic_local_time':'n*dt','electronic_field_clock':'(n+0.5)*dt',
             'initial_feedback_current':'zero; not substituted with initial GS current',
-            'timing':self.timing.to_dict(),'electronic_clock_offset':ELECTRONIC_CLOCK_OFFSET}
+            'timing':self.timing.to_dict(),'electronic_clock_offset':self.electronic_clock_offset}
         self._write_manifest()
         self.native=NativeParallelContext(context,library,sha)
         embedded._used=True
@@ -172,27 +174,109 @@ class NativeEHField:
     def __exit__(self,*args):self.close()
 
 
+class MultiscaleField:
+    """Single-rank execution of an existing Multiscale1D state.
+
+    Plan point order maps to material cells 1..N. The original field owns its
+    arrays, boundary update and initial zero-feedback rule.
+    """
+    electronic_clock_offset = '0'
+
+    def __init__(self, context, state):
+        from .maxwell import _Multiscale1DState
+        if context.group.role != 'field' or context.solver_comm.size != 1:
+            raise ValueError('Multiscale1D requires exactly one field rank')
+        if not isinstance(state, _Multiscale1DState):
+            raise TypeError('Multiscale1D.new_state result required')
+        if state.step_index != 0 or state.points != len(context.plan.point_ids):
+            raise ValueError('fresh field with one material cell per plan point required')
+        self.context = context
+        self.state = state
+        self.point_ids = context.plan.point_ids
+        self.closed = self.failed = False
+        for point, A in zip(self.point_ids, state.A):
+            if np.any(A != 0):
+                raise ValueError(f'point {point} has nonzero A(0)={A.tolist()}; '
+                                 'increase left vacuum cells or delay the incident pulse')
+
+    @property
+    def dt(self): return self.state.dt
+    @property
+    def step_index(self): return self.state.step_index
+    @property
+    def timing(self): return self.state.timing
+    @property
+    def A(self): return self.state.A
+    @property
+    def capacity(self): return self.state.config.steps
+    @property
+    def E(self):
+        start = dict(self.state.config.parameters)['vacuum'][0]
+        return self.state.grid_E[start:start+len(self.point_ids)].copy()
+
+    def advance(self, j):
+        if self.closed or self.failed:
+            raise ValueError('field is not usable')
+        return self.state.step(j)
+
+    def close(self):
+        self.closed = True
+
+
 class CoupledStepper:
     """Collective outer schedule; material implementations remain replaceable.
 
     Construct ResponseSession on every rank; pass NativeEHField on field ranks
-    and None on material ranks. Call step everywhere. Close the response, field,
+    and None on material ranks, or use from_multiscale. Call step everywhere. Close the response, field,
     and ParallelContext in that order. A step failure invalidates the response.
     """
+    @classmethod
+    def from_multiscale(cls, context, bindings, field=None):
+        """Collective factory. Only the single field rank supplies a fresh state.
+
+        Validate A(0) before creating any material state. All ranks call step,
+        response.close and field/context cleanup as for native E/H coupling.
+        """
+        from .material_response import ResponseSession
+        adapter = None; error = None; dt = None
+        try:
+            if context.group.role == 'field':
+                adapter = MultiscaleField(context, field)
+                dt = adapter.dt
+            elif field is not None:
+                raise ValueError('material ranks must not provide a field')
+        except Exception as exc:
+            error = str(exc)
+        errors = context.solver_comm.allgather(error)
+        local = next((e for e in errors if e), None)
+        failures = context.leaders.allgather(local) if context.is_leader else None
+        failures = context.solver_comm.bcast(failures, root=0)
+        if any(failures):
+            raise ValueError(next(e for e in failures if e))
+        if context.is_leader:
+            dt = context.leaders.bcast(dt, root=context.field_group)
+        dt = context.solver_comm.bcast(dt, root=0)
+        response = ResponseSession(context, bindings, dt=dt)
+        try:
+            return cls(response, adapter)
+        except BaseException:
+            response.close()
+            raise
+
     def __init__(self,response,field=None):
         self.response=response;self.field=field;self.step_index=0
         context=response.context;error=None
         if response.closed or response.failed or response.step_index!=0:
             error='coupling requires a fresh response session'
         if context.group.role=='field':
-            if not isinstance(field,NativeEHField) or field.context is not context:
-                error='matching NativeEHField required on field ranks'
+            if not isinstance(field,(NativeEHField,MultiscaleField)) or field.context is not context:
+                error='matching field adapter required on field ranks'
             elif field.closed or field.failed or field.step_index!=0:
                 error='coupling requires a fresh field'
             elif field.dt!=response.dt or field.point_ids!=context.plan.point_ids:
                 error='field/response dt and point order must match'
         elif field is not None:error='material ranks must not provide a field'
-        response._agree(error)
+        response.agree(error)
         self.timing=self._check_timing(response,field)
         self.J=np.zeros((len(context.plan.point_ids),3))
 
@@ -200,28 +284,25 @@ class CoupledStepper:
     def _check_timing(response,field):
         """Collect every point's matter declaration and check it against the field's.
 
-        The electronic clock is placed ELECTRONIC_CLOCK_OFFSET after the field clock.
+        The field adapter declares the electronic clock offset (0 or 1/2).
         Returns {'field', 'matter' (by point), 'electronic_clock_offset'} on all ranks.
         """
-        context=response.context;records=None;error=None
-        try:
-            if context.group.role!='field':
-                records={p:matter_timing(response.states[p],response.dt).to_dict() for p in context.group.point_ids}
-        except Exception as exc:error=str(exc)
-        response._agree(error)
-        gathered=context.leaders.allgather(records) if context.is_leader else None
-        gathered=context.solver_comm.bcast(gathered,root=0)
-        matter={p:spec for group in gathered if group for p,spec in group.items()}
+        context=response.context
+        matter = response.timing_records()
         result=None;error=None
         try:
             if context.group.role=='field':
                 if set(matter)!=set(context.plan.point_ids):raise ValueError('timing missing for some points')
                 for point,record in matter.items():
-                    try:check_loop(field.timing,TimeSpec.from_dict(record).shifted(ELECTRONIC_CLOCK_OFFSET))
+                    try:
+                        spec = TimeSpec.from_dict(record)
+                        if spec.output('j') is None:
+                            raise ValueError('response service requires physical charge current j')
+                        check_loop(field.timing,spec.shifted(field.electronic_clock_offset))
                     except ValueError as exc:raise ValueError(f'point {point}: {exc}') from None
-                result={'field':field.timing.to_dict(),'matter':matter,'electronic_clock_offset':ELECTRONIC_CLOCK_OFFSET}
+                result={'field':field.timing.to_dict(),'matter':matter,'electronic_clock_offset':field.electronic_clock_offset}
         except Exception as exc:error=str(exc)
-        response._agree(error)
+        response.agree(error)
         if context.is_leader:result=context.leaders.bcast(result,root=context.field_group)
         return context.solver_comm.bcast(result,root=0)
 
@@ -230,18 +311,18 @@ class CoupledStepper:
         if r.closed or r.failed:error='response is not usable'
         if r.step_index!=self.step_index or (self.field is not None and self.field.step_index!=self.step_index):
             error='field and response histories are not synchronized'
-        try:r._agree(error)
+        try:r.agree(error)
         except Exception:
             r.failed=True
             raise
         if self.field is not None:
             try:A=self.field.advance(self.J)
             except Exception as exc:error=str(exc)
-        try:r._agree(error)
+        try:r.agree(error)
         except Exception:
             r.failed=True
             raise
-        try:J=r.advance(A if context.group.role=='field' and context.is_leader else None)
+        try:J=r.step(A if context.group.role=='field' and context.is_leader else None)
         except BaseException:
             r.failed=True
             raise
@@ -250,6 +331,8 @@ class CoupledStepper:
             previous=self.J.copy();self.J=J
             n=self.field.step_index;dt=self.field.dt
             return {'field_time':n*dt,'electronic_local_time':n*dt,
-                    'electronic_field_clock':(n+.5)*dt,'A_over_c':A.copy(),
-                    'E_at_points':self.field.E.copy(),'J_previous':previous,'J_charge':J.copy()}
+                    'electronic_field_clock':(n+float(Fraction(self.timing['electronic_clock_offset'])))*dt,'A_over_c':A.copy(),
+                    'E_at_points':self.field.E.copy(),
+                    'E_time':(n-1 if isinstance(self.field,MultiscaleField) else n)*dt,
+                    'J_previous':previous,'J_charge':J.copy()}
         return None

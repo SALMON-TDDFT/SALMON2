@@ -1,6 +1,6 @@
-# MPI TDDFT coupled to native E/H FDTD (experimental)
+# MPI TDDFT coupled to Multiscale1D or native E/H FDTD (experimental)
 
-[日本語](COUPLED.md) · Topic: `coupled` · Paired revision: `2026-11-13.5`
+[日本語](COUPLED.md) · Topic: `coupled` · Paired revision: `2026-11-14.1`
 
 Split one Python MPI job into a field group and material groups, with **one material
 and one macro point per material group**. Every member of a material group participates
@@ -86,7 +86,62 @@ Loading/preparing material data is separate from A-to-J physics. Return physical
 **charge-current density**, avoiding double conversion of electronic-current sign.
 Group collectives use the supplied `solver_comm`.
 
-## Temporal and spatial contract
+## One-rank Multiscale1D with distributed TDDFT
+
+`CoupledStepper.from_multiscale(context, bindings, field=None)` connects a Python
+`Multiscale1D` state to the same material groups. Construct the field state with
+`model.new_state(dt=dt, steps=steps)` on the single field rank; pass `None` on
+material ranks. All ranks call the factory and then `step()`. Material cells
+1 through N map to `context.plan.point_ids` in that order. Two independent
+material groups may prepare the same GS; each owns its own evolving state.
+One field rank plus two two-rank material groups requires five MPI ranks.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 5 python -m salmonpy.examples.mpi_multiscale_tddft \
+  NEW_BUILD/build.json GS_BUNDLE RT_INPUT NEW_OUTPUT --material-ranks 2 --steps 400
+```
+
+Use `--material-ranks 1` with three total ranks. The sample uses two material
+cells, spacing 5 a.u., vacuum (300, 50), dt=0.02 a.u. and a z-polarized artificial
+pulse. Its orbital decomposition must fit the supplied GS. `response.json`
+contains endpoint A/j histories and time declarations, `field.npz` contains the
+whole-grid A history including t=0, and `communication.json` contains measurements.
+Outputs are not restart files. The sample does not build or prepare a GS.
+
+The factory checks material-site A(0) before creating native states. A nonzero
+value is rejected with its point/value: increase the left vacuum cells or delay
+the incident pulse. Incident A in vacuum may be nonzero. Do not silently zero
+material A(0) or substitute an initially illuminated GS. This first connection
+supports only zero initial material A and one native lifetime per process.
+
+The update remains previous j → Multiscale1D field step → new A → material step.
+Initial feedback is zero. Both clocks are at n·dt (offset 0); the E/H half-step
+adapter does not apply. `step()` returns point-ordered `A_over_c` and `J_charge`
+on the field rank. Keep the original field state to read its `grid_A` and
+`grid_E`; the latter retains its centered-difference time (n−1)·dt.
+Each returned frame declares `E_time`: Multiscale1D's centered E is at
+(n−1)·dt while A is at n·dt; native E/H reports E at n·dt. Do not align E and A
+by array index alone. `coupled.response.initial_current` is a point-ID dictionary
+of physical t=0 currents; a custom state that does not expose one gives `None`.
+This observable is separate from zero initial field feedback. The sample records
+it as `initial_current` in `response.json`.
+
+Close `coupled.response`, then `coupled.field` where present, then the Python
+context. A failure after evolution invalidates the coupling; this is not a
+cross-group atomic transaction or a restart checkpoint.
+
+Call `coupled.response.communication_report()` collectively for per-rank
+communication measurements. A distribution and current collection are measured
+separately from material execution; these elapsed times can include waiting for
+other ranks and must not be interpreted as pure network latency. A timing failure
+is a measurement failure, not evidence of a failed calculation. Report unavailable
+measurements explicitly. Single-host timings do not establish multi-node scaling.
+
+Acceptance compares full-grid A and each material point's j against two-point
+SALMON Weyl multiscale output, alongside serial-worker and rank-count parity.
+A synthetic GS checks the interface/update order, not physical convergence.
+
+## Native E/H temporal and spatial contract
 
 The new scheme is `salmonpy.eh-centered-current/1`. It is a different discretization
 from the Weyl multiscale path; bitwise equivalence between those schemes is not
@@ -119,7 +174,7 @@ Coupled points stay at least ten cells from boundaries and clear of the incident
 source plane/support and nonvacuum constitutive edges. The surrounding 3³ background
 cells must be vacuum. LD may occupy other regions.
 
-## State, outputs and limitations
+## Native E/H state, outputs and limitations
 
 - One native state lifetime per process. No reinitialization, multiple states in
   one process or thread sharing. Two groups may evolve independent copies of the

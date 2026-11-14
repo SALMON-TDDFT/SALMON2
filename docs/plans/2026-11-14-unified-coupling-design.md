@@ -1,6 +1,6 @@
 # Proposal: field × material × execution
 
-Status: design for review, not an implemented API. Existing numerical updates and
+Status: approved design; first MPI Multiscale1D milestone in implementation. Existing numerical updates and
 `salmonpy.time/1` declarations remain authoritative. No upstream source import or
 merge is part of this work.
 
@@ -68,7 +68,8 @@ advance a state. Declare whether current is physical or zero explicitly.
 
 Distribute field A(0) before creating material states. The current native MPI
 backend accepts zero initial A only; first milestone rejects nonzero material-site
-A(0) before native setup. Pulses initially supported lie in vacuum so material A(0)
+A(0) before native setup. Report the point ID and value and suggest increasing
+the left vacuum cells or delaying the pulse. Never silently zero A(0). Pulses initially supported lie in vacuum so material A(0)
 is zero. Supporting initially illuminated matter requires an explicit extension
 and comparison with the native initialization, not silently replacing A(0).
 
@@ -93,7 +94,10 @@ advertise that guarantee before implementing and testing those capabilities.
    point IDs, multiple material ranks, wrong shape/time/sign declarations.
 2. Multiscale1D + distributed TDDFT: zero feedback, two independent points from
    the same GS, comparison to serial workers and saved-A replay. Test rank-count
-   parity, initialization rejection and failure invalidation.
+   parity, initialization rejection and failure invalidation. Extend
+   `tools/test_longitudinal_salmon.py` ms1d to at least two points and compare
+   each point's j plus the entire field A grid against SALMON itself. Align
+   native saved feedback j(n-1) with endpoint histories explicitly.
 3. E/H migration: preserve all existing 13 coupling regressions, both clocks,
    LD coexistence and all-axis MPI-boundary deposition.
 4. Keep physical convergence tests separate from interface parity. First add
@@ -103,3 +107,13 @@ advertise that guarantee before implementing and testing those capabilities.
 Only then retire duplicate scheduling code. Persistent Fortran handles, GS v2
 and copy reduction are separate milestones; do not enlarge this first migration
 into a simultaneous runtime rewrite.
+
+## Communication measurements
+
+Measure A distribution and j collection separately from material execution,
+recording per-rank elapsed times, call counts and logical payload bytes. MPI
+call elapsed times may include waiting; do not claim isolated network latency.
+Collection/reduction scope must be named explicitly in the report. Measurement
+errors mark metrics unavailable without turning a successful calculation into
+a failed calculation. First acceptance records one-host results for two material
+points and multiple inner rank counts; multi-node scaling remains unverified.

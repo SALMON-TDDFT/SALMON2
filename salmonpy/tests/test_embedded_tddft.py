@@ -48,7 +48,8 @@ class EmbeddedTDDFTTest(unittest.TestCase):
                                 is_leader=True,leaders=leaders,solver_comm=one,field_group=0)
         def agree(error):
             if error:raise ValueError(error)
-        response=SimpleNamespace(context=context,dt=.1,step_index=0,closed=False,failed=False,_agree=agree)
+        response=SimpleNamespace(context=context,dt=.1,step_index=0,closed=False,failed=False,agree=agree,
+                                 timing_records=lambda:{1:matter_record})
         field=object.__new__(NativeEHField)
         field.context=context;field.dt=.1;field.point_ids=(1,);field.step_index=0;field.closed=False;field.failed=False
         return response,field

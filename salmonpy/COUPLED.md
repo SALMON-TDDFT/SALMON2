@@ -1,6 +1,6 @@
-# MPI TDDFTとE/H FDTDの結合（実験的）
+# MPI TDDFTとMultiscale1D／E/H FDTDの結合（実験的）
 
-[English](COUPLED.en.md) · Topic: `coupled` · Paired revision: `2026-11-13.5`
+[English](COUPLED.en.md) · Topic: `coupled` · Paired revision: `2026-11-14.1`
 
 PythonのMPIジョブを場群と物質群へ分け、**各物質群に一物質・一マクロ点**を置きます。
 物質群の全ランクがSALMONの電子計算に参加し、k点・軌道・実空間の内部分割はその群内に閉じます。
@@ -76,7 +76,55 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 6 python -m salmonpy.example
 初期物質の読み込みとA→Jの物理計算は別の契約です。物理的な**電荷電流密度**を返し、
 電子数電流の符号変換を二重に行わないでください。群内通信は渡された `solver_comm` に限定します。
 
-## 時間・空間の契約
+## 1ランクのMultiscale1Dと分散TDDFT
+
+`CoupledStepper.from_multiscale(context, bindings, field=None)` はPythonの
+`Multiscale1D` 状態を同じ物質群へ接続します。場群は1ランクに限定し、そのランクで
+`model.new_state(dt=dt, steps=steps)` を作り、物質ランクでは `None` を渡します。
+全ランクでfactoryと `step()` を呼びます。物質セル1〜Nを
+`context.plan.point_ids` の順に対応付けます。同じGSを二つの物質群に渡しても、
+時間発展中の状態は独立です。場1ランク＋物質2群×2ランクなら計5ランクです。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 5 python -m salmonpy.examples.mpi_multiscale_tddft \
+  NEW_BUILD/build.json GS_BUNDLE RT_INPUT NEW_OUTPUT --material-ranks 2 --steps 400
+```
+
+`--material-ranks 1` なら計3ランクで起動します。物質2セル、間隔5原子単位、
+真空(300, 50)、dt=0.02原子単位、z偏光の人工パルスを使います。軌道分割は用意したGSに
+適合させてください。`response.json` に端点A/j履歴と時刻宣言、`field.npz` にt=0を含む
+格子全体のA履歴、`communication.json` に計測を保存します。再開ファイルではありません。
+サンプルはビルドやGS準備を自動実行しません。
+
+factoryはネイティブ状態を作る前に物質点のA(0)を検査します。非ゼロなら点と値を示して拒否します。
+左側の真空セルを増やすか、入射パルスを遅らせてください。真空中の入射Aは非ゼロでも構いません。
+物質点のA(0)を黙ってゼロへ置き換えません。初版は物質点の初期Aがゼロの場合に限定し、
+ネイティブ状態は一プロセス一回の生成という制約を保持します。
+
+更新順は「前回j → Multiscale1Dの場更新 → 新しいA → 物質更新」です。
+初回フィードバックはゼロです。場と物質の時計はともにn·dt（offset 0）で、
+E/H用の半ステップ変換は適用しません。`step()` は場ランクで点順の
+`A_over_c` と `J_charge` を返します。元の場状態を保持すれば `grid_A` と `grid_E`
+を読めます。後者は中心差分で時刻(n−1)·dtです。
+返される各frameの `E_time` にEの時刻を明記します。Multiscale1Dの中心差分Eは
+(n−1)·dt、Aはn·dtで、ネイティブE/HのEはn·dtです。配列の添字だけでEとAを同時刻と扱わないでください。
+`coupled.response.initial_current` は点IDをキーとする物理的なt=0電流の辞書です。
+独自状態が初期電流を公開しない場合は `None` です。この観測量と初回のゼロフィードバックは区別します。
+サンプルは `response.json` の `initial_current` に保存します。
+
+終了は `coupled.response`、存在するランクの `coupled.field`、Pythonコンテキストの順です。
+時間発展後の失敗では結合を無効にし、群をまたいだ原子的な巻き戻しや再開は保証しません。
+
+`coupled.response.communication_report()` は全ランクで呼び、ランク別の通信計測を取得します。
+A配布とj回収を物質計算とは別に測ります。通信呼び出し時間には他ランクの待ち時間も入り得るため、
+純粋なネットワーク遅延とは解釈しません。計測の失敗と計算の失敗を分け、取得不能な値はその旨を残します。
+単一ホストの計測から複数ノードでの拡張性能を主張しません。
+
+受け入れ検査はSALMONの二点Weylマルチスケール出力に対する格子全体のAと各点のjの比較、
+直列ワーカーとの比較、ランク数を変えた一致確認です。合成GSによる検査は接続と更新順の検証で、
+物理的な収束検証とは区別します。
+
+## ネイティブE/Hの時間・空間の契約
 
 新しい方式名は `salmonpy.eh-centered-current/1`。従来のWeyl形式のマルチスケールとは
 離散化が異なるため、両者のビット一致は主張しません。通常のFDTD更新順と光源の評価時刻は維持します。
@@ -104,7 +152,7 @@ MPI境界では各場ランクが自分の所有する辺へ加算します。
 マクロ点は境界から10セル以上離し、光源面・その周囲と、背景のLD/誘電体の構成則が使われる辺を避けます。
 周囲3³セルが真空であることを検査します。LDを別の場所に置くことはできます。
 
-## 状態・出力・制約
+## ネイティブE/Hの状態・出力・制約
 
 - 一プロセスにつきネイティブ状態の生成は一回です。同じプロセスで再初期化・複数状態・スレッド共有はできません。
   同じGSから独立した二群の計算は可能です。別の試行は新しいMPIジョブで始めます。

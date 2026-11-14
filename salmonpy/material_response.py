@@ -5,6 +5,7 @@ backend step invalidates the session; no cross-group rollback is promised.
 """
 from dataclasses import dataclass
 import numpy as np
+import time
 
 
 @dataclass(frozen=True)
@@ -28,18 +29,57 @@ def _response_timing(dt,integrator):
     return TimeSpec(dt,(InputPort('A'),),(OutputPort('j'),),integrator=integrator)
 
 
+class _StepAdapter:
+    """Retain accepted A for legacy two-endpoint callbacks."""
+    def __init__(self, state):
+        self.state = state
+        self.A = np.zeros(3)
+
+    def step(self, A):
+        callback = getattr(self.state, 'step', None)
+        result = callback(A.copy()) if callback is not None else self.state.advance(self.A.copy(), A.copy())
+        self.A = A.copy()
+        return result
+
+
+class _Measurements:
+    """Optional wall times; broken clocks never change the collective schedule."""
+    def __init__(self):
+        self.seconds = dict.fromkeys(('A_distribution', 'material', 'j_collection'), 0.)
+        self.calls = dict.fromkeys(self.seconds, 0)
+        self.errors = []
+
+    def start(self):
+        try:
+            return time.perf_counter()
+        except Exception as exc:
+            self.errors.append(str(exc))
+            return None
+
+    def stop(self, name, start):
+        self.calls[name] += 1
+        end = self.start()
+        if start is None or end is None or not np.isfinite(end-start) or end < start:
+            self.seconds[name] = None
+        elif self.seconds[name] is not None:
+            self.seconds[name] += end-start
+
+
 class ResponseSession:
     """All context ranks participate, including the field group.
 
     Providers implement identity, prepare(context). Backends implement identity,
     execution ('collective' or 'leader_only'), reduction ('sum' or 'leader'),
     create_state(initial, point_id, dt, context). States implement
-    advance(A_old,A_new) -> 3-vector physical charge-current density and close().
+    step(A_new) -> 3-vector physical charge-current density and close().
+    Legacy advance(A_old,A_new) callbacks are adapted with owned accepted A.
     Every result is tagged implicitly by the fixed plan's point IDs and accepted
     step index. Initial A is zero; current is at the new endpoint. All units a.u.
     """
     def __init__(self,context,bindings,*,dt):
         self.context=context;self.dt=dt;self.step_index=0;self.failed=False;self.closed=False;self._registered=False
+        self._measurements = _Measurements()
+        self._adapters = {}
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
@@ -84,6 +124,7 @@ class ResponseSession:
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             self.states[point]=state
+            self._adapters[point] = _StepAdapter(state)
         try: self._agree(error)
         except Exception:
             self.failed=True
@@ -92,8 +133,15 @@ class ResponseSession:
             self.close()
             raise
         context._dependents+=1;self._registered=True
+        try:
+            self.initial_current = self._initial_current_records()
+        except BaseException:
+            self.failed = True
+            self.close()
+            raise
 
-    def _agree(self,error):
+    def agree(self,error):
+        """Collective validation agreement on all context ranks."""
         c=self.context
         errors=c.solver_comm.allgather(error)
         group_error=next((e for e in errors if e),None)
@@ -104,7 +152,75 @@ class ResponseSession:
         failure=c.solver_comm.bcast(failure,root=0)
         if failure: raise ValueError(failure)
 
-    def advance(self,A):
+    _agree = agree  # Compatibility for existing callers.
+
+    def timing_records(self):
+        """Collective point timing declarations, returned on every rank."""
+        from .timing import matter_timing
+        records = {}; error = None
+        try:
+            records = {p: matter_timing(s, self.dt).to_dict() for p, s in self.states.items()}
+        except Exception as exc:
+            error = str(exc)
+        self.agree(error)
+        c = self.context
+        groups = c.leaders.allgather(records) if c.is_leader else None
+        groups = c.solver_comm.bcast(groups, root=0)
+        return {p: spec for group in groups for p, spec in group.items()}
+
+    def _initial_current_records(self):
+        """Read physical t=0 current without stepping; None means unavailable."""
+        from mpi4py import MPI
+        c = self.context
+        records = {}; error = None
+        for p, state in self.states.items():
+            value = None
+            try:
+                value = getattr(state, 'initial_current', None)
+                if value is None:
+                    value = getattr(state, 'current', None)
+                if value is not None:
+                    value = np.array(value, dtype=float, copy=True)
+                    if value.shape != (3,) or not np.isfinite(value).all():
+                        raise ValueError('initial current must be a finite 3-vector')
+            except Exception as exc:
+                error = str(exc)
+            statuses = c.solver_comm.allgather((error, value is not None))
+            if any(e for e, _ in statuses):
+                error = next(e for e, _ in statuses if e)
+                break
+            if len({present for _, present in statuses}) != 1:
+                error = 'initial current availability differs within material group'
+                break
+            if value is not None and self.bindings[p].backend.reduction == 'sum':
+                value = c.solver_comm.allreduce(value, op=MPI.SUM)
+            records[p] = None if value is None else value.tolist()
+        self.agree(error)
+        groups = c.leaders.allgather(records) if c.is_leader else None
+        groups = c.solver_comm.bcast(groups, root=0)
+        return {p: value for group in groups for p, value in group.items()}
+
+    def communication_report(self):
+        """Collective per-rank wall times (including collective wait, no barriers).
+
+        Payload bytes are logical arrays per step, not network traffic. Material
+        time includes backend work, its subgroup reductions and error agreement.
+        Clock failure yields null times and does not fail a calculation.
+        """
+        c = self.context
+        m = self._measurements
+        local = {'group': c.group.name, 'solver_rank': c.solver_comm.rank,
+                 'seconds': dict(m.seconds), 'calls': dict(m.calls),
+                 'measurement_errors': list(m.errors)}
+        rows = c.solver_comm.gather(local, root=0)
+        groups = c.leaders.allgather(rows) if c.is_leader else None
+        groups = c.solver_comm.bcast(groups, root=0)
+        return {'schema': 'salmonpy.communication/1', 'steps': self.step_index,
+                'logical_A_bytes_per_step': len(c.plan.point_ids)*3*8,
+                'logical_j_bytes_per_step': len(c.plan.point_ids)*3*8,
+                'ranks': [row for group in groups for row in group]}
+
+    def step(self,A):
         """Collective everywhere. Only field leader supplies (points,3) A.
 
         Returns ordered physical current on every field rank, None on material
@@ -122,13 +238,16 @@ class ResponseSession:
                 values=np.empty_like(self._A)
         except Exception as exc: error=str(exc)
         self._agree(error)
+        started = self._measurements.start()
         if c.is_leader: c.leaders.Bcast(values,root=c.field_group)
         c.solver_comm.Bcast(values,root=0)
+        self._measurements.stop('A_distribution', started)
+        started = self._measurements.start()
         currents=np.zeros((len(c.group.point_ids),3));error=None
         for i,point in enumerate(c.group.point_ids):
             k=c.plan.point_ids.index(point);b=self.bindings[point]
             try:
-                j=np.array(self.states[point].advance(self._A[k].copy(),values[k].copy()),dtype=np.float64,order="C",copy=True)
+                j=np.array(self._adapters[point].step(values[k].copy()),dtype=np.float64,order="C",copy=True)
                 if j.shape!=(3,) or not np.isfinite(j).all(): raise ValueError('backend must return finite physical current density (3,)')
             except Exception as exc: error=str(exc)
             errors=c.solver_comm.allgather(error)
@@ -142,6 +261,8 @@ class ResponseSession:
         except ValueError:
             self.failed=True
             raise
+        self._measurements.stop('material', started)
+        started = self._measurements.start()
         result=None
         if c.is_leader:
             counts=[len(g.point_ids)*3 for g in c.plan.groups]
@@ -151,8 +272,11 @@ class ResponseSession:
                 order=[p for g in c.plan.groups for p in g.point_ids]
                 result=np.array([packed.reshape(-1,3)[order.index(p)] for p in c.plan.point_ids])
         if c.group.role=='field': result=c.solver_comm.bcast(result,root=0)
+        self._measurements.stop('j_collection', started)
         self._A=values;self.step_index+=1
         return result
+
+    advance = step  # Existing prescribed-A entry point.
 
     def close(self):
         if self.closed: return

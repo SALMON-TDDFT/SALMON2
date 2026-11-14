@@ -2,7 +2,7 @@ name: Full runtime bundles
 on:
   workflow_dispatch:
   push:
-    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
+    paths: ['runtime/**', 'native/**', 'salmonpy/runtime*', 'tools/*runtime*.py', 'tools/test_fdtd_material*.py', 'tools/test_fdtd_mpi_entrypoint.py', 'salmonpy/fdtd.py', 'salmonpy/distributed.py', 'salmonpy/material_response.py', 'salmonpy/embedded_tddft.py', 'salmonpy/coupled.py', 'salmonpy/examples/mpi_coupled_tddft.py', 'salmonpy/tests/test_embedded_tddft.py', 'tools/*embedded*.py', 'tools/*coupled*.py', 'tools/*ms1d*.py', 'tools/test_longitudinal_salmon.py', 'salmonpy/maxwell.py', 'salmonpy/timing.py', 'salmonpy/examples/mpi_multiscale_tddft.py', 'tools/*parallel*.py', 'tools/test_distributed_mpi.py', 'tools/test_ld_distributed_mpi.py', 'tools/test_tddft_distributed_mpi.py', '.github/workflows/runtime-bundles.yml']
 permissions:
   contents: read
 jobs:
@@ -96,6 +96,7 @@ jobs:
             --cmake-arg=-DCMAKE_BUILD_TYPE=Release \
             --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
           python tools/run_coupled_mpi_tests.py "$RUNNER_TEMP/embedded-build/build.json" "$RUNNER_TEMP/relocated" "$RUNNER_TEMP/relocation-test/bundle" "$RUNNER_TEMP/coupled-tests"
+          python tools/run_ms1d_mpi_tests.py "$RUNNER_TEMP/embedded-build/build.json" "$RUNNER_TEMP/mpi-build/source" "$RUNNER_TEMP/ms1d-tests"
 
       - name: Upload tested branch artifacts (not an upstream SALMON release)
         uses: actions/upload-artifact@v4
@@ -111,5 +112,7 @@ jobs:
         with:
           name: runtime-build-log-${{ matrix.os }}
           path: |
+            ${{ runner.temp }}/ms1d-tests/*.log
+            ${{ runner.temp }}/ms1d-tests/summary.json
             ${{ runner.temp }}/runtime-build/build.log
             ${{ runner.temp }}/runtime-build/build.json
