@@ -61,3 +61,8 @@ a5への移行で更新式・電流規約は変更しません。結晶は **A/c
 例外の型だけから計算全体の巻き戻しを推測しません。内蔵LD・SBE・Pythonの場のstep／restoreは
 失敗時に受理済み状態を保持します。MPI応答・結合の失敗はセッションを無効化し得ます。
 FortranのSTOP／abortを回復可能なPython例外にする変更ではありません。
+
+プロセス分離`TDDFTState`は`save_checkpoint(directory)`と
+`restore_checkpoint(directory, max_bytes=None)`も公開します。
+同じ内容の初期モデルを明示的に用意し、Zarr履歴から別プロセスで再開できます。
+初期GS本体は保存しません。詳細は[状態保存](SNAPSHOTS.md)を参照してください。

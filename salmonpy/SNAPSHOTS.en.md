@@ -1,6 +1,6 @@
 # Saving and restoring states
 
-[日本語](SNAPSHOTS.md) · Topic: `snapshots` · Paired revision: `2026-11-14.2`
+[日本語](SNAPSHOTS.md) · Topic: `snapshots` · Paired revision: `2026-11-14.3`
 
 `state.snapshot()` returns an immutable `StateSnapshot` token.
 `state.restore(token)` replaces the accepted state and returns `None`.
@@ -87,10 +87,57 @@ The token does not store wavefunctions and cannot survive a Python restart.
 Same-machine single-thread tests check bitwise continuation; cross-platform or
 parallel bitwise equality is not promised. Coupled hosts must also rewind fields.
 
+## TDDFT disk checkpoints
+
+```python
+# state is an existing TDDFTState. The destination must be new.
+state.save_checkpoint('checkpoint-0005')
+
+# In another Python process, explicitly supply the identical initial bundle
+# and an audited executable. No solver or initial model is loaded from disk.
+from salmonpy.tddft import TDDFTInitialState
+with TDDFTInitialState.from_salmon(
+        'existing-initial-bundle', 'rt.inp', executable=engine,
+        max_steps=1000, threads=1) as model:
+    with model.new_state(dt=0.02) as resumed:
+        resumed.restore_checkpoint('checkpoint-0005')
+        current = resumed.step([0.1, 0., 0.])
+```
+
+`save_checkpoint(directory)` and `restore_checkpoint(directory, max_bytes=None)`
+are TDDFTState-only methods returning None. Saving refuses existing destinations
+and paths inside the original input bundle or either owned initial bundle. Disk restore allows a separately
+constructed model with identical contents. Exact package version, input, all
+initial-file hashes, executable hash, dt, initial A, capacity and thread count
+must match; rejection preserves the current worker and accepted state.
+
+Storage is Zarr v3 with uncompressed little-endian float64 arrays, time-chunked
+A/current histories and a final manifest.json hashing metadata and every chunk.
+No Zarr Python dependency is required. Initial GS/potential payloads are not
+copied: only initial filenames and hashes are recorded. Retain the existing
+initial bundle separately. Stored current is internal matter current J;
+the public current property continues to return charge current j.
+
+Ordinary save failures clean up the new destination. Incomplete writes left by
+forced termination are rejected. Power-loss durability, concurrent writers and
+external edits during loading are not promised. The default byte ceiling is
+derived from the receiving model capacity: 48 bytes per step plus edge-chunk
+padding, fixed vectors, metadata and hash inventory. It is not a machine-wide
+fixed number. Optional max_bytes also applies the caller budget to stored files
+and decoded array payload. Required files/directories follow the format; extra
+entries are rejected. Neither bound is a process RSS limit: additional copies, two replay
+workers and GS memory are excluded. Restore still replays the entire accepted history with
+existing current checks, so its cost grows with saved step count. Replay failure
+preserves the original worker.
+
+Same-machine single-thread synthetic regressions check byte-identical 20-step
+continuation from another Python process; these are interface tests, not
+converged-GS physical validation. Coupled hosts must also rewind field states.
+
 ## Explicit exclusions
 
-This is not the handoff's Zarr GS archive, an output NPZ, a persistent restart,
-a cross-version/cross-process format, a C ABI or a variable-dt method. Do not
+This is not the handoff's Zarr GS archive, an output NPZ, a cross-version
+restart, a C ABI or a variable-dt method. Do not
 serialize/edit tokens or pass output archives to `restore`. Snapshot public
 metadata (`kind`, `schema`, `version`, `step_index`, `time`) is diagnostic only;
 private fields are not an editable checkpoint schema.

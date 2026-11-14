@@ -1,6 +1,6 @@
 # 状態保存と復元
 
-[English](SNAPSHOTS.en.md) · Topic: `snapshots` · Paired revision: `2026-11-14.2`
+[English](SNAPSHOTS.en.md) · Topic: `snapshots` · Paired revision: `2026-11-14.3`
 
 `state.snapshot()` は不変の `StateSnapshot` トークンを返します。
 `state.restore(token)` は受理済み状態を置き換え、`None`を返します。
@@ -81,9 +81,53 @@ rtol=1e-12、atol=1e-14で照合してから切り替えます。失敗時は`Sn
 Python終了後の再開には使えません。同一環境・1スレッドの回帰試験ではビット一致を検査しますが、
 異機種・並列でのビット一致は保証しません。結合する場も同じ時刻へ戻してください。
 
+## TDDFTのディスク保存と再開
+
+```python
+# stateは既存のTDDFTState。新しい保存先に、受理済み履歴を保存します。
+state.save_checkpoint('checkpoint-0005')
+
+# 別のPythonプロセスで、同じ初期バンドルと監査済み実行ファイルを明示します。
+from salmonpy.tddft import TDDFTInitialState
+with TDDFTInitialState.from_salmon(
+        'existing-initial-bundle', 'rt.inp', executable=engine,
+        max_steps=1000, threads=1) as model:
+    with model.new_state(dt=0.02) as resumed:
+        resumed.restore_checkpoint('checkpoint-0005')
+        current = resumed.step([0.1, 0., 0.])
+```
+
+`save_checkpoint(directory)`、`restore_checkpoint(directory, max_bytes=None)`は
+`TDDFTState`専用で、成功時は`None`を返します。保存先は新規ディレクトリに限り、
+既存先を上書きしません。元の入力バンドルと所有している初期バンドルの内側にも保存できません。
+ディスク版はモデルオブジェクトが別でも、内容が一致すれば復元できます。
+パッケージ版・入力・全初期ファイルのSHA256・実行ファイルSHA256・dt・初期A・
+最大ステップ数・スレッド数が一致しなければ、元の状態を変更せず拒否します。
+チェックポイントから実行ファイルや初期モデルを自動取得・構築しません。
+
+形式はZarr v3の無圧縮・little-endian float64で、A／電流の履歴を時間方向に分割し、
+メタデータと各チャンクのSHA256を`manifest.json`に記録します。
+初期GS・擬ポテンシャルの本体は複製せず、初期ファイル名とハッシュのみ参照します。
+そのため既存の初期バンドルを別途保持する必要があります。履歴は物質電流Jで保存し、
+公開の`current`は従来どおり電荷電流jを返します。Zarrライブラリの追加導入は不要です。
+
+保存途中の通常の例外では新規保存先を片付けます。強制終了で残った不完全な保存先は
+読込み時に拒否します。停電時の永続性、並行書込み、読込み中の外部編集は保証しません。
+既定の上限は、復元先の最大ステップ数×48バイトに、チャンク端の余白・固定ベクトル・
+メタデータ・ハッシュ一覧を加えた形式上の最大量から計算します。マシン共通の固定値ではありません。
+`max_bytes`を指定すると、その利用者予算も保存ファイル総量と復号配列サイズに適用します。
+読込みに必要なファイルとディレクトリは形式から求め、余分な項目は拒否します。
+Pythonの全メモリ、配列コピー、再生中の2ワーカー、
+初期GSのメモリを含む上限ではありません。ファイル検証後も既存の全履歴再生を行うため、
+復元時間はステップ数に比例します。再生失敗時も元のワーカーを保持します。
+
+同一環境・1スレッドで、別Pythonプロセスから復元後の20ステップがビット一致する
+合成入力の回帰試験を実施しています。収束済みGSの物理検証とは区別します。
+場を結合している場合は、場の状態も同じ受理済み時刻へ戻す必要があります。
+
 ## 対象外
 
-引き継ぎ指示書のZarr GSアーカイブ、出力NPZ、永続的な再開ファイル、異なる版・プロセス間の形式、
+引き継ぎ指示書のZarr GSアーカイブ、出力NPZ、異なる版にまたがる再開、
 C ABI、可変dtの実装ではありません。トークンをシリアライズ・編集したり、出力アーカイブを
 restoreへ渡したりしません。公開メタデータ `kind`、`schema`、`version`、`step_index`、`time` は
 診断用です。非公開フィールドは編集可能なチェックポイント仕様ではありません。

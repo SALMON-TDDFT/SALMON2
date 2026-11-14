@@ -71,3 +71,8 @@ An exception family does not imply rollback for a whole calculation. Built-in
 LD/SBE/Python-field step and restore failures preserve the accepted state;
 MPI response/coupling failures may invalidate the session. Native STOP/abort is
 not converted into a recoverable Python error by this change.
+
+Process-isolated `TDDFTState` also exposes `save_checkpoint(directory)` and
+`restore_checkpoint(directory, max_bytes=None)`. Supply an identical initial
+model explicitly to resume from Zarr history in another process. GS payloads are
+not included. See [state persistence](SNAPSHOTS.en.md).

@@ -75,6 +75,7 @@ class TDDFTInitialState:
     _snapshot: Path=field(repr=False)
     _owner: object=field(repr=False)
     backend: str=field(default='SALMON-TDDFT-middlepoint',init=False)
+    _source_root: Path | None = field(default=None,repr=False)
 
     @classmethod
     def from_salmon(cls,directory,input_file,*,executable,max_steps=1000,threads=1,timeout=300.):
@@ -94,7 +95,7 @@ class TDDFTInitialState:
             manifest=_copy_bundle(root,snapshot)
             # Read the copied input so its bytes and the manifest describe one snapshot.
             text=(snapshot/inp).read_text()
-            return cls(executable,max_steps,threads,timeout,manifest,text,snapshot,owner)
+            return cls(executable,max_steps,threads,timeout,manifest,text,snapshot,owner,_source_root=root)
         except BaseException:
             owner.cleanup();raise
 
@@ -284,6 +285,24 @@ class TDDFTState(_SnapshotMixin):
         """
         if self._closed: raise SnapshotError('TDDFT state is closed')
         return super().snapshot()
+
+    def save_checkpoint(self, directory):
+        """Write accepted replay history to a new Zarr directory, without GS data."""
+        from ._tddft_checkpoint import save
+        save(self, directory)
+
+    def restore_checkpoint(self, directory, *, max_bytes=None):
+        """Validate a disk checkpoint and replay atomically in this supplied model.
+
+        Identical model contents, executable, dt, initial A, threads and capacity
+        are required; model object identity may differ across Python processes.
+        Initial GS files must be supplied separately. Cost grows with history.
+        The default file bound follows configured capacity and archive layout.
+        max_bytes adds a caller budget for files/decoded payload, not total RSS.
+        """
+        if self._closed: raise SnapshotError('TDDFT state is closed')
+        from ._tddft_checkpoint import load
+        self.restore(load(self, directory, max_bytes))
 
     @staticmethod
     def _retire_replay_worker(state):
