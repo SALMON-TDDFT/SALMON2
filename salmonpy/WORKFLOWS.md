@@ -266,3 +266,5 @@ Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [
 ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
 
 Persistent standalone LD ownership, fixed-dt coefficients and close/context-manager usage: [LD.en.md](LD.en.md).
+
+Portable caller-supplied GS arrays (GS/2), separate from native GS/1 and not yet a TDDFT restart source: [GS_ARCHIVE.en.md](GS_ARCHIVE.en.md).

@@ -49,6 +49,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                    'FDTDMPI',
                    'SalmonExecutable'),
  'salmonpy.fields': ('FieldSamples', 'AcosPulse', 'sample_pulses'),
+ 'salmonpy.gs_archive': ('GroundStateArchive', 'save_ground_state'),
  'salmonpy.geometry': ('vector', 'Grid', 'Shape', 'Geometry'),
  'salmonpy.ld': ('LDModelConfig', 'LDStateConfig', 'Response', 'LorentzDrude', 'LDState'),
  'salmonpy.material_response': ('SolverContext',

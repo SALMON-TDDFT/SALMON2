@@ -234,3 +234,7 @@ shared velocity kernels/演算順序/既存OMP外側k分割は不変。常駐メ
 LD.md／LD.en.mdに従います。係数と極ごとの履歴は状態ごとに保持し、stepではEと総P/Jだけを受け渡します。close／withで解放し、respondとMPI応答サービスも所有状態を解放します。固定のメモリ上限はありません。snapshot／restoreは同一モデル・固定dtでのみ利用し、状態そのもののpickleは案内しません。共有LDカーネルと物理的P/Jの規約は不変です。
 
 TDDFTの保存用GSは状態の参照で保持し、初期モデルclose後も既存状態の再生に使えます。初期モデルclose後のnew_stateは拒否し、最後の状態解放後に保存用も削除します。N状態でN+1組、restore検証中は追加の作業用コピーが必要です。論理コピー量と実ファイルシステム上の物理占有量は区別します。
+
+## GS/2配列アーカイブ
+
+`salmonpy.gs_archive.save_ground_state`／`GroundStateArchive.open` は明示的に渡した周期・非スピン分極のGS配列のZarr v3入出力です。GS_ARCHIVE.md／GS_ARCHIVE.en.mdに従い、k,band,z,y,xのセル周期u、reduced逆格子k、原点0・端点なしの格子を使います。GS/1の自動変換・TDDFT初期化・SCF収束の認定は未対応です。擬ポテンシャルは参照だけで自動取得しません。Fortran stream helperはチャンクの実数I/Oだけで、完全なSALMONアダプターではありません。

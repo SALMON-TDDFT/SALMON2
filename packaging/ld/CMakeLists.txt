@@ -98,3 +98,6 @@ install(FILES "${ROOT}/tools/build_c_material_example.py" DESTINATION salmonpy/_
 install(FILES "${ROOT}/salmonpy/_sbe_handles.py" "${ROOT}/salmonpy/SBE.md" "${ROOT}/salmonpy/SBE.en.md" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/_ld_handles.py" "${ROOT}/salmonpy/LD.md" "${ROOT}/salmonpy/LD.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/gs_archive.py" "${ROOT}/salmonpy/GS_ARCHIVE.md" "${ROOT}/salmonpy/GS_ARCHIVE.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/include/salmonpy_gs_stream.f90" DESTINATION salmonpy/include)
