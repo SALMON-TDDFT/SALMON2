@@ -114,3 +114,6 @@ __pycache__/
 /upstream-salmon/
 /runtime-build/
 /build/
+
+# Fixed, licensed Si starter input; other calculation outputs remain ignored.
+!salmonpy/examples/si_intro_data/Si_rps.dat
