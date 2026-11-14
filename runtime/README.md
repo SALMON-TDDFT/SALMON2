@@ -59,3 +59,26 @@ record its new hash in source.json; preparation rejects mismatched copies.
 Updating the upstream commit requires explicitly revalidating all native adapters.
 Keep upstream LICENSE, LICENSE.THIRD-PARTY and acknowledgements in the prepared
 runtime; do not substitute SALMONpy's narrower third-party notice for them.
+
+## NLCC consistency patch (CPU, unpolarized NC)
+
+The current compatibility patch aligns Libxc's NLCC energy weighting and GGA
+core-density gradients, and adds the explicit force from the sampled core-density
+interpolant. Atoms are the outer OpenMP work items. The core force is reduced
+over spatial ranks only, before force symmetry, without k/orbital multiplicity.
+Invalid scalar/table values and arithmetic overflow are rejected collectively.
+
+Validation tools are `tools/run_nlcc_native_tests.py` with the prescribed-density
+programs in `tests/runtime/`, and scalar-only Si probes in
+`tools/measure_nlcc_force_work.py`, `tools/test_nlcc_mpi_scf.py` and
+`tools/test_nlcc_no_core_regression.py`. Each newly linked test executable audits
+all application objects. Solver probes discard temporary eigen/k/info outputs;
+only requested scalar reports are exported.
+
+Piecewise-linear radial knots and the existing hard core cutoff need not be
+differentiable; tests distinguish interior derivatives from boundary crossings.
+Spin-polarized Libxc-NLCC remains unsupported. Meta-GGA force validation is not
+claimed, and an OpenACC NLCC-force path explicitly fails as unvalidated.
+Existing binary bundles are not changed by this source patch. The Calculator's
+NLCC force guard remains until a validated runtime capability can be identified;
+source/object audit alone does not authorize an old binary's NLCC forces.

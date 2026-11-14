@@ -7,6 +7,29 @@ Libxc requires a matching audited runtime. Check the potential's element/XC
 provenance; no functional fallback is performed. TB-mBJ forces, stress,
 free_energy, charged cells and partial periodic boundaries are unsupported.
 
+## NLCC UPF forces
+
+**Forces with Libxc-PBE plus an NLCC UPF are unvalidated. Use matching PZ + KY
+potentials for structural optimization**, and establish grid, k-point and SCF
+convergence separately.
+
+If an UPF has an enabled or unrecognized `core_correction` flag, or contains
+a `PP_NLCC` element, Calculator disables forces for every XC. `atoms.get_forces()` and direct force requests
+raise `PropertyNotImplementedError` before launching SCF. Energy remains
+available; forces are neither read nor cached. Unknown flags and even zero-only
+`PP_NLCC` blocks are conservatively guarded.
+
+Energy availability does not certify NLCC energies. Existing Libxc runtimes
+were found to mix a core-corrected density with valence-only energy weighting
+and GGA gradients. The compatibility patch now corrects this and adds the explicit
+core force, but existing binaries must not be assumed to contain those changes.
+
+The Python guard itself does not correct native forces. It remains until
+a validated runtime capability can be identified.
+
+Values read through the lower-level `GroundStateResult.forces_hartree_per_bohr`
+must not be interpreted as validated NLCC forces.
+
 ```python
 from salmonpy.ase_calculator import SalmonCalculator
 from salmonpy.dft import SCFSettings
@@ -14,14 +37,14 @@ from salmonpy.dft import SCFSettings
 atoms.calc = SalmonCalculator(
     executable=engine, directory='new-calculations',
     pseudopotentials=[pseudo], states=32, grid=(16, 16, 16), kmesh=(2, 2, 2),
-    xc='libxc_pbe', scf=SCFSettings(max_iterations=500, tolerance=1e-11),
+    xc='pz', scf=SCFSettings(max_iterations=500, tolerance=1e-11),
     threads=1, warm_start=True,
 )
 energy_ev = atoms.get_potential_energy()
 forces_ev_per_angstrom = atoms.get_forces()
 ```
 
-Prepare `atoms`, a matching PBE `pseudo`, and the audited Libxc `engine` first.
+Prepare `atoms`, a matching PZ KY `pseudo`, and the audited `engine` first.
 These grid/band/k-point values are small Si connection-test values, not general
 accuracy defaults. `electrons` may be omitted: the neutral pseudopotential valence
 sum is inferred and explicit counts must agree. States/grid/kmesh remain required.

@@ -99,3 +99,60 @@ class ASECalculatorTest(unittest.TestCase):
                 self.assertEqual(calc.settings['xc'],xc)
             with self.assertRaises(ValueError):
                 SalmonCalculator(xc='tbmbj',pseudopotentials=[Pseudopotential(14,2,'_rps.dat',b'20 .01 2 4')],**options)
+
+    def test_nlcc_blocks_forces_but_preserves_energy_and_cache(self):
+        from ase import Atoms
+        from ase.calculators.calculator import PropertyNotImplementedError
+        from salmonpy.ase_calculator import SalmonCalculator
+        from salmonpy.dft import DFT, Pseudopotential
+        from salmonpy.fdtd import SalmonExecutable
+        from types import SimpleNamespace
+        headers = ('core_correction="T"', 'core_correction="true"',
+                   'core_correction=".TRUE."', 'core_correction="1"', 'core_correction="unknown"')
+        data = [f'<UPF><PP_HEADER pseudo_type="NC" z_valence="4" {h}/></UPF>'.encode()
+                for h in headers]
+        # SALMON reads PP_NLCC itself; a false/missing header must not bypass protection.
+        data += [b'<UPF><PP_HEADER pseudo_type="NC" z_valence="4" core_correction="F"/>'
+                 b'<PP_NLCC size="1">1.0</PP_NLCC></UPF>',
+                 b'<UPF><PP_HEADER pseudo_type="NC" z_valence="4"/><PP_NLCC/></UPF>']
+        for raw in data:
+            for xc in ('pz','libxc_pz','libxc_pbe'):
+                with self.subTest(raw=raw,xc=xc),tempfile.TemporaryDirectory() as tmp:
+                    calc=SalmonCalculator(executable=SalmonExecutable(Path(tmp)/'fake','0'*64),
+                        directory=tmp,pseudopotentials=[Pseudopotential(14,2,'.upf',raw)],
+                        states=8,grid=(12,)*3,kmesh=(2,)*3,xc=xc)
+                    atoms=Atoms('Si',cell=np.eye(3)*5,pbc=True);atoms.calc=calc
+                    # No force attribute: an energy request must not read forces.
+                    fake=SimpleNamespace(energy_hartree=-1.)
+                    with patch.object(DFT,'run',return_value=fake) as run:
+                        with self.assertRaisesRegex(PropertyNotImplementedError,'NLCC'):
+                            atoms.get_forces()
+                        run.assert_not_called()
+                        energy=atoms.get_potential_energy()
+                        self.assertTrue(np.isfinite(energy));self.assertEqual(run.call_count,1)
+                        self.assertNotIn('forces',calc.results)
+                        self.assertNotIn('forces',calc.implemented_properties)
+                        with self.assertRaisesRegex(PropertyNotImplementedError,'NLCC'):
+                            atoms.get_forces()
+                        with self.assertRaisesRegex(PropertyNotImplementedError,'NLCC'):
+                            calc.calculate(atoms,properties=['energy','forces'])
+                        self.assertEqual(run.call_count,1)
+                        self.assertEqual(atoms.get_potential_energy(),energy)
+
+    def test_non_nlcc_upf_still_returns_forces(self):
+        from ase import Atoms
+        from salmonpy.ase_calculator import SalmonCalculator
+        from salmonpy.dft import DFT, Pseudopotential
+        from salmonpy.fdtd import SalmonExecutable
+        from types import SimpleNamespace
+        for flag in ('', 'core_correction="F"', 'core_correction="false"',
+                     'core_correction=".FALSE."', 'core_correction="0"'):
+            with self.subTest(flag=flag),tempfile.TemporaryDirectory() as tmp:
+                data=f'<UPF><PP_HEADER pseudo_type="NC" z_valence="4" {flag}/></UPF>'.encode()
+                calc=SalmonCalculator(executable=SalmonExecutable(Path(tmp)/'fake','0'*64),
+                    directory=tmp,pseudopotentials=[Pseudopotential(14,2,'.upf',data)],
+                    states=8,grid=(12,)*3,kmesh=(2,)*3,xc='libxc_pbe')
+                atoms=Atoms('Si',cell=np.eye(3)*5,pbc=True);atoms.calc=calc
+                fake=SimpleNamespace(energy_hartree=-1.,forces_hartree_per_bohr=np.zeros((1,3)))
+                with patch.object(DFT,'run',return_value=fake):
+                    np.testing.assert_array_equal(atoms.get_forces(),np.zeros((1,3)))

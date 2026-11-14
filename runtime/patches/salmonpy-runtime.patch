@@ -256,10 +256,9 @@ index d3efeed..8ee9c05 100644
        call comm_bcast(eigenvalue(nlocked+1:n),dc%icomm_tot,0)
        xrot=(0d0,0d0)
 diff --git a/src/gs/main_dft.f90 b/src/gs/main_dft.f90
-index d9b7791..f441079 100644
 --- a/src/gs/main_dft.f90
 +++ b/src/gs/main_dft.f90
-@@ -51,7 +51,7 @@ use lcfo
+@@ -51,7 +51,7 @@
  use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
  implicit none
  integer :: ix,iy,iz
@@ -268,7 +267,7 @@ index d9b7791..f441079 100644
  real(8) :: sum1
  character(100) :: comment_line
  
-@@ -198,6 +198,7 @@ call scf_iteration_dft( Miter,rion_update,sum1,  &
+@@ -198,6 +198,7 @@
  
  if(theory=='dft_band')then
     call write_band(system,energy)
@@ -276,9 +275,12 @@ index d9b7791..f441079 100644
  end if
  
  ! output the wavefunctions for next GS calculations
-@@ -227,6 +228,15 @@ end if
+@@ -225,8 +226,17 @@
+ 
+    ! force
     if(yn_jm=='n' .and. yn_dc=="n")then
-      call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
++     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald,Vxc)
       if(comm_is_root(nproc_id_global))then
 +        if (theory=='dft' .and. yn_opt=='n' .and. yn_md=='n') then
 +           open(newunit=force_status_unit,file='gs_forces.dat',status='replace')
@@ -2342,10 +2344,9 @@ index 0000000..7265400
 +end function
 +end module
 diff --git a/src/rt/initialization_rt.f90 b/src/rt/initialization_rt.f90
-index 0c5d69f..1d4b846 100644
 --- a/src/rt/initialization_rt.f90
 +++ b/src/rt/initialization_rt.f90
-@@ -31,6 +31,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+@@ -31,6 +31,7 @@
                       V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                       pp, ppg, ppn, unfold  )
    use inputoutput
@@ -2353,7 +2354,7 @@ index 0c5d69f..1d4b846 100644
    use math_constants, only: pi, zi
    use structures
    use parallelization, only: nproc_id_global, nproc_group_global
-@@ -182,6 +183,12 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
+@@ -182,6 +183,12 @@
    
    call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:, 0:nt+1))
  
@@ -2366,6 +2367,15 @@ index 0c5d69f..1d4b846 100644
    do itt = 0, nt
      rt%E_ext(:, itt) = -(rt%Ac_ext(:, itt+1) - rt%Ac_ext(:, itt)) / dt
    end do
+@@ -494,7 +501,7 @@
+   
+   !(force at initial step)
+   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then
+-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald)
++     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_in,ewald,Vxc)
+   
+      !open trj file for coordinate, velocity, and force (rvf) in xyz format
+      write(comment_line,10) -1, 0.0d0
 diff --git a/src/rt/main_tddft.f90 b/src/rt/main_tddft.f90
 index c5e6ac6..8f60566 100644
 --- a/src/rt/main_tddft.f90
@@ -3633,3 +3643,298 @@ index 0000000..90aa575
 +            --built-executable "$<TARGET_FILE:${target}>"
 +    VERBATIM)
 +endfunction()
+diff --git a/src/atom/pp/salmon_pp.f90 b/src/atom/pp/salmon_pp.f90
+--- a/src/atom/pp/salmon_pp.f90
++++ b/src/atom/pp/salmon_pp.f90
+@@ -517,4 +517,171 @@
+   end subroutine calc_nlcc
+   
+ 
++  ! Explicit derivative of calc_nlcc's sampled piecewise-linear core density.
++  ! Local grid contribution only: caller reduces over icomm_r, never rko.
++  ! At r=0 use the central symmetry convention. At knots/cutoff the sampled
++  ! density need not be differentiable; finite-difference tests avoid crossings.
++  subroutine calc_nlcc_force(pp,sys,rg,Vxc,force,istat)
++    use salmon_global, only: kion,iperiodic
++    use structures, only: s_pp_info,s_dft_system,s_rgrid,s_scalar
++    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
++    implicit none
++    type(s_pp_info),intent(in) :: pp
++    type(s_dft_system),intent(in) :: sys
++    type(s_rgrid),intent(in) :: rg
++    type(s_scalar),intent(in) :: Vxc(sys%Nspin)
++    real(8),intent(out) :: force(3,sys%nion)
++    integer,intent(out) :: istat
++    real(8),allocatable :: rc(:),slope(:,:)
++    integer,allocatable :: cutoff(:)
++    integer :: nk,ik,i,j,a,ispin,j1,j2,j3,i1,i2,i3,lo,hi,mid,intr
++    integer :: irepr_min,irepr_max
++    real(8) :: spacing,r,u,v,w,rion_repr(3),point(3),d(3),force3(3),vcore
++    logical :: flag_cuboid
++
++    force=0d0
++    istat=0
++    if(.not.pp%flag_nlcc) return
++    if(sys%Nspin/=1 .and. sys%Nspin/=2) then
++      istat=1; return
++    end if
++    if(.not.ieee_is_finite(sys%Hvol) .or. sys%Hvol<=0d0) then
++      istat=1; return
++    end if
++    do i=1,3
++      if(.not.ieee_is_finite(sys%hgs(i))) istat=1
++      do j=1,3
++        if(.not.ieee_is_finite(sys%primitive_a(i,j))) istat=1
++        if(.not.ieee_is_finite(sys%rmatrix_a(i,j))) istat=1
++      end do
++      do a=1,sys%nion
++        if(.not.ieee_is_finite(sys%Rion(i,a))) istat=1
++      end do
++    end do
++    if(istat/=0) return
++    if(.not.allocated(pp%rad) .or. .not.allocated(pp%rho_nlcc_tbl) .or. &
++       .not.allocated(pp%tau_nlcc_tbl)) then
++      istat=2; return
++    end if
++    nk=size(pp%rho_nlcc_tbl,2)
++    if(pp%nrmax<2 .or. size(pp%rad,1)<pp%nrmax .or. size(pp%rad,2)/=nk .or. &
++       size(pp%rho_nlcc_tbl,1)<pp%nrmax .or. size(pp%tau_nlcc_tbl,1)<pp%nrmax .or. &
++       size(pp%tau_nlcc_tbl,2)/=nk) then
++      istat=2; return
++    end if
++    allocate(rc(nk),cutoff(nk),slope(pp%nrmax-1,nk))
++    rc=0d0; cutoff=0; slope=0d0
++    ! Validate used table entries before OMP; IEEE inquiries are scalar.
++    do ik=1,nk
++      do i=1,pp%nrmax
++        if(.not.ieee_is_finite(pp%rho_nlcc_tbl(i,ik))) istat=2
++        if(.not.ieee_is_finite(pp%tau_nlcc_tbl(i,ik))) istat=2
++        if(.not.ieee_is_finite(pp%rad(i,ik))) istat=2
++        if(istat/=0) return
++        if(pp%rho_nlcc_tbl(i,ik)+pp%tau_nlcc_tbl(i,ik)<1d-6) then
++          cutoff(ik)=i; rc(ik)=pp%rad(i,ik); exit
++        end if
++      end do
++      if(cutoff(ik)<1 .or. cutoff(ik)>=pp%nrmax) then
++        istat=2; return
++      end if
++      if(cutoff(ik)==1) cycle ! This species has no core contribution.
++      if(pp%rad(1,ik)/=0d0) then
++        istat=2; return ! The original density lookup otherwise permits intr=0.
++      end if
++      do i=1,cutoff(ik)
++        if(.not.ieee_is_finite(pp%rad(i+1,ik))) istat=2
++        if(.not.ieee_is_finite(pp%rho_nlcc_tbl(i+1,ik))) istat=2
++        spacing=pp%rad(i+1,ik)-pp%rad(i,ik)
++        if(.not.ieee_is_finite(spacing) .or. spacing<=0d0) istat=2
++        if(istat/=0) return
++        slope(i,ik)=(pp%rho_nlcc_tbl(i+1,ik)-pp%rho_nlcc_tbl(i,ik))/spacing
++        if(.not.ieee_is_finite(slope(i,ik))) then
++          istat=2; return
++        end if
++      end do
++    end do
++    do a=1,sys%nion
++      if(kion(a)<1 .or. kion(a)>nk) istat=2
++    end do
++    if(istat/=0) return
++    do ispin=1,sys%Nspin
++    do j3=rg%is(3),rg%ie(3)
++    do j2=rg%is(2),rg%ie(2)
++    do j1=rg%is(1),rg%ie(1)
++      if(.not.ieee_is_finite(Vxc(ispin)%f(j1,j2,j3))) istat=3
++    end do
++    end do
++    end do
++    end do
++    if(istat/=0) return
++    if(iperiodic==0) then
++      irepr_min=0; irepr_max=0
++    else if(iperiodic==3) then
++      irepr_min=-2; irepr_max=2
++    else
++      istat=1; return
++    end if
++    flag_cuboid=.not.(abs(sys%primitive_a(1,2))>=1d-10 .or. &
++      abs(sys%primitive_a(1,3))>=1d-10 .or. abs(sys%primitive_a(2,3))>=1d-10 .or. &
++      abs(sys%primitive_a(2,1))>=1d-10 .or. abs(sys%primitive_a(3,1))>=1d-10 .or. &
++      abs(sys%primitive_a(3,2))>=1d-10)
++
++!$omp parallel do default(none) &
++!$omp shared(pp,sys,rg,Vxc,force,rc,cutoff,slope,kion,irepr_min,irepr_max,flag_cuboid) &
++!$omp private(a,ik,i1,i2,i3,j1,j2,j3,u,v,w,rion_repr,point,d,r,lo,hi,mid,intr,force3,vcore,ispin)
++    do a=1,sys%nion
++      ik=kion(a)
++      if(cutoff(ik)==1) cycle
++      force3=0d0
++      do i1=irepr_min,irepr_max
++      do i2=irepr_min,irepr_max
++      do i3=irepr_min,irepr_max
++        rion_repr=sys%Rion(:,a)+i1*sys%primitive_a(:,1) &
++                 +i2*sys%primitive_a(:,2)+i3*sys%primitive_a(:,3)
++        do j1=rg%is(1),rg%ie(1)
++          u=(j1-1)*sys%hgs(1)
++        do j2=rg%is(2),rg%ie(2)
++          v=(j2-1)*sys%hgs(2)
++        do j3=rg%is(3),rg%ie(3)
++          w=(j3-1)*sys%hgs(3)
++          if(flag_cuboid) then
++            point=[u,v,w]
++          else
++            point=sys%rmatrix_a(:,1)*u+sys%rmatrix_a(:,2)*v+sys%rmatrix_a(:,3)*w
++          end if
++          d=point-rion_repr
++          r=sqrt(sum(d*d))
++          if(r>rc(ik) .or. r==0d0) cycle
++          ! Strict upper bound matches calc_nlcc at radial knots.
++          lo=1; hi=cutoff(ik)+1
++          do while(lo<hi)
++            mid=(lo+hi)/2
++            if(pp%rad(mid,ik)>r) then
++              hi=mid
++            else
++              lo=mid+1
++            end if
++          end do
++          intr=lo-1
++          vcore=Vxc(1)%f(j1,j2,j3)
++          if(sys%Nspin==2) vcore=.5d0*vcore+.5d0*Vxc(2)%f(j1,j2,j3)
++          force3=force3+vcore*slope(intr,ik)*d/r
++        end do
++        end do
++        end do
++      end do
++      end do
++      end do
++      force(:,a)=force3*sys%Hvol
++    end do
++!$omp end parallel do
++    do a=1,sys%nion
++    do i=1,3
++      if(.not.ieee_is_finite(force(i,a))) istat=4
++    end do
++    end do
++    if(istat/=0) force=0d0
++  end subroutine calc_nlcc_force
++
+ end module salmon_pp
+diff --git a/src/common/force.f90 b/src/common/force.f90
+--- a/src/common/force.f90
++++ b/src/common/force.f90
+@@ -21,8 +21,9 @@
+ 
+ !===================================================================================================================================
+ 
+-  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald)
++  subroutine calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,tpsi,ewald,Vxc)
+     use structures
++    use salmon_pp, only: calc_nlcc_force
+     use math_constants,only : zi,pi
+     use sendrecv_grid, only: s_sendrecv_grid, update_overlap_real8, update_overlap_complex8, dealloc_cache
+     use communication, only: comm_summation
+@@ -46,6 +47,7 @@
+     type(s_sendrecv_grid)   ,intent(inout) :: srg
+     type(s_pp_grid)         ,intent(in)    :: ppg
+     type(s_orbital)         ,intent(inout) :: tpsi
++    type(s_scalar),intent(in) :: Vxc(system%Nspin)
+     type(s_ewald_ion_ion)   ,intent(in)    :: ewald
+     !
+     integer :: ix,iy,iz,ia,nion,im,Nspin,ik_s,ik_e,io_s,io_e,nlma,ik,io,ispin,ilma,j
+@@ -62,7 +64,7 @@
+     complex(8),parameter :: zero=(0.0d0,0.0d0)
+     complex(8),allocatable :: zF_tmp(:,:)
+     complex(8) :: ztmp
+-    integer :: Norb,iorb,ilocal
++    integer :: Norb,iorb,ilocal,nlcc_status,nlcc_status_all
+ #ifdef USE_OPENACC
+     real(8),allocatable :: F_tmp_local(:,:)
+ 
+@@ -434,6 +436,22 @@
+ !$omp end parallel do
+ #endif
+ !
++    if(pp%flag_nlcc) then
++#ifdef USE_OPENACC
++      error stop 'NLCC core force: OpenACC implementation not validated'
++#endif
++      call calc_nlcc_force(pp,system,mg,Vxc,F_tmp,nlcc_status)
++      ! Status is collective over all solver replicas; force is grid-only.
++      call comm_summation(nlcc_status,nlcc_status_all,info%icomm_rko)
++      if(nlcc_status_all/=0) error stop 'invalid input to NLCC force'
++      call comm_summation(F_tmp,F_sum,3*nion,info%icomm_r)
++!$omp parallel do private(ia)
++      do ia=1,nion
++        system%Force(:,ia)=system%Force(:,ia)+F_sum(:,ia)
++      end do
++!$omp end parallel do
++    end if
++
+     if (use_symmetry) then
+       call sym_vector_force_xyz( system%Force, system%Rion )
+     end if
+diff --git a/src/gs/initialization_dft.f90 b/src/gs/initialization_dft.f90
+--- a/src/gs/initialization_dft.f90
++++ b/src/gs/initialization_dft.f90
+@@ -408,7 +408,7 @@
+                           pp,ppg,ppn,  &
+                           band, 2 )
+ 
+-  call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
++  call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald,Vxc)
+ 
+   md%Uene0 = energy%E_tot
+   md%E_tot0= energy%E_tot + md%Tene
+diff --git a/src/gs/main_dft_md.f90 b/src/gs/main_dft_md.f90
+--- a/src/gs/main_dft_md.f90
++++ b/src/gs/main_dft_md.f90
+@@ -171,7 +171,7 @@
+                            band,2 )
+ 
+    ! force
+-   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
++   call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald,Vxc)
+ 
+    call time_evolution_step_md_part2(system,md)
+ 
+diff --git a/src/rt/time_evolution_step.f90 b/src/rt/time_evolution_step.f90
+--- a/src/rt/time_evolution_step.f90
++++ b/src/rt/time_evolution_step.f90
+@@ -321,7 +321,7 @@
+ 
+   !(force)
+   if(yn_md=='y' .or. yn_out_rvf_rt=='y')then  ! and or rvf flag in future
+-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_out,ewald)
++     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi_out,ewald,Vxc)
+ 
+      !force on ion directly from field --- should put in calc_force?
+ !$omp parallel do private(iatom)
+diff --git a/src/xc/salmon_xc.f90 b/src/xc/salmon_xc.f90
+--- a/src/xc/salmon_xc.f90
++++ b/src/xc/salmon_xc.f90
+@@ -244,6 +244,12 @@
+       do iy=mg%is(2),mg%ie(2)
+       do ix=mg%is(1),mg%ie(1)
+         rhd(ix,iy,iz)=dble(rho_s(1)%f(ix,iy,iz))
++#ifdef USE_LIBXC
++        ! Libxc's sigma/laplacian must describe the same total density as rho_1d.
++        ! Keep the non-NLCC path arithmetically unchanged.
++        if(pp%flag_nlcc .and. any(xc_func%xctype==salmon_xctype_libxc)) &
++          rhd(ix,iy,iz)=rhd(ix,iy,iz)+ppn%rho_nlcc(ix,iy,iz)
++#endif
+       enddo
+       enddo
+       enddo
+@@ -1675,7 +1681,13 @@
+       endif
+ 
+       if (present(eexc)) then
++        if(pp%flag_nlcc .and. present(rho_nlcc)) then
++          ! Libxc returns epsilon per electron of rho_1d=rho+rho_core.
++          ! The same density must weight the energy whose derivative is vxc.
++          eexc = eexc + reshape(exc_tmp_1d*rho_1d, (/nx, ny, nz/))
++        else
+         eexc = eexc + reshape(exc_tmp_1d, (/nx, ny, nz/)) * rho
++        end if
+       endif
+ 
+       if (present(vxc)) then

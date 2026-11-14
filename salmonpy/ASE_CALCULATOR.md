@@ -6,6 +6,27 @@
 対応範囲は3次元周期・中性・固定イオンSCF・非スピン分極、PZ／Libxc-PZ／Libxc-PBEとスカラーKY／NC-UPF擬ポテンシャルです。
 Libxcには対応したランタイムが必要です。擬ポテンシャルの生成汎関数・元素との整合を確認してください。TB-mBJの力は対象外です。
 
+## NLCC付きUPFの力
+
+**Libxc-PBE＋NLCC付きUPFの力は未検証です。構造最適化にはPZ＋KYを使ってください。**
+擬ポテンシャルと汎関数を対応させ、格子・k点・SCFの収束も別途確認してください。
+
+CalculatorはUPFの有効または不明な`core_correction`指定、もしくは`PP_NLCC`要素を検出すると、
+汎関数にかかわらず力を無効にします。`atoms.get_forces()`と直接の力要求は
+`PropertyNotImplementedError`となり、その要求によるSCFを開始しません。
+エネルギー計算は引き続き利用できますが、力は読み出し・キャッシュしません。
+不明なフラグやゼロ値だけの`PP_NLCC`要素も保守的に対象とします。
+
+エネルギーを取得できることは、NLCCのエネルギーが検証済みであることを意味しません。
+既存Libxcランタイムでは、NLCCを加えた密度と価電子のみのエネルギー重み・GGA勾配の混在が
+確認されています。互換パッチにはXC整合性と明示的NLCC力の修正を追加していますが、
+既存の実行ファイルがこの修正を含むと推測してはいけません。
+
+このPython保護自体は本体の力を補正しません。検証済みランタイムを識別できる仕組みが
+整うまでは、CalculatorのNLCC力の拒否を維持します。
+低水準の`GroundStateResult.forces_hartree_per_bohr`から読み出せる値も、
+NLCCの場合に検証済みの力とは解釈しないでください。
+
 ```python
 from ase.build import bulk
 from ase.optimize import BFGS
