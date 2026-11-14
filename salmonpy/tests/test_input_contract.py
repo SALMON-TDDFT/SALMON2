@@ -50,7 +50,7 @@ class InputContractTests(unittest.TestCase):
             np.testing.assert_array_equal(s.current,before[1])
             np.testing.assert_array_equal(s.polarization,before[2])
             self.assertEqual(s.config,before[3])
-        with patch('salmonpy.ld._native',side_effect=RuntimeError('unavailable')):
+        with patch.object(s._native_state,'advance',side_effect=RuntimeError('unavailable')):
             with self.assertRaises(RuntimeError): s.step([2,0,0])
         np.testing.assert_array_equal(s.step([2,0,0]),ref.step([2,0,0]))
 
@@ -62,11 +62,11 @@ class InputContractTests(unittest.TestCase):
         s=self.model().new_state(dt=.1); ref=self.model().new_state(dt=.1)
         s.step([1,0,0]); ref.step([1,0,0])
         before=(s.time,s.current.copy(),s.polarization.copy())
-        def bad_native(*args):
-            args[-4][0]=99.  # modified temporary per-pole P
-            args[-2][0]=float('nan')  # invalid output P
-        with patch('salmonpy.ld._native',return_value=bad_native):
-            with self.assertRaises(FloatingPointError): s.step([2,0,0])
+        # Exercise the real native transactional batch: the second huge field
+        # overflows E_new+E_old after the first internal step has succeeded.
+        huge=np.finfo(float).max
+        with self.assertRaises(FloatingPointError):
+            s._advance(np.array([s._field,[huge]*3,[huge]*3]))
         self.assertEqual(s.time,before[0])
         np.testing.assert_array_equal(s.current,before[1])
         np.testing.assert_array_equal(s.polarization,before[2])

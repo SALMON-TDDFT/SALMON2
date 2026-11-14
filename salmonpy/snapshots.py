@@ -72,7 +72,7 @@ class _SnapshotMixin:
         """Restore atomically into this state; incompatible tokens are rejected.
 
         A compatible state uses the same model object, dt, time origin and field
-        capacity/drive. No native solver is invoked and no model is modified.
+        capacity/drive. Validation does not advance time or modify the model.
         """
         if type(snapshot) is not StateSnapshot:
             raise SnapshotError('expected StateSnapshot from state.snapshot()')

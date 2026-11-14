@@ -1,5 +1,5 @@
 """Isotropic passive Lorentz–Drude model; angular frequencies and atomic units."""
-from .errors import InputError, NumericalError, RuntimeFailure
+from .errors import InputError, NumericalError, RuntimeFailure, SnapshotError
 import ctypes
 from .snapshots import _SnapshotMixin, _fingerprint
 from dataclasses import dataclass, field
@@ -109,67 +109,112 @@ class LorentzDrude:
         if field.ndim != 2 or field.shape[1] != 3 or len(field) == 0:
             raise InputError('field must have shape (N,3), N >= 1')
         state = self.new_state(dt=dt, initial_field=field[0])
-        p, j = state._advance(field)
-        return Response(np.arange(len(field))*state.dt, p, j)
+        try:
+            p, j = state._advance(field)
+            return Response(np.arange(len(field))*state.dt, p, j)
+        finally:
+            state.close()
 
 
 class LDState(_SnapshotMixin):
-    """Independent explicit per-pole history. A state is not thread-shareable."""
-    __slots__ = ('_config', '_material', '_field', '_p', '_j', '_steps')
+    """Independent native per-pole history. A state is not thread-shareable."""
+    __slots__ = ('_config', '_material', '_field', '_polarization', '_current',
+                 '_steps', '_native_state', '_closed')
     _snapshot_kind = 'ld'
     _snapshot_counter = '_steps'
 
     def _snapshot_owner(self): return self._material
     def _snapshot_settings(self): return _fingerprint(self.config)
     def _snapshot_arrays(self):
-        return {name: getattr(self, name) for name in ('_field', '_p', '_j')}
-
+        p,j=self._native_state.export()
+        return {'_field':self._field,'_p':p,'_j':j}
 
     def __init__(self, material, dt, initial_field):
         dt = _positive(dt, 'dt')
         self._material = material
         self._field = _array(initial_field, 'initial_field', (3,))
         self._config = LDStateConfig(material.config, dt, tuple(map(float, self._field)))
-        self._p = np.zeros((len(material._f), 3))
-        self._j = np.zeros_like(self._p)
-        self._steps = 0
+        self._polarization=np.zeros(3);self._current=np.zeros(3)
+        self._steps = 0;self._closed=False
+        from ._ld_handles import NativeState
+        self._native_state=NativeState(_handles_api(),material,dt,self._field)
 
     @property
     def dt(self): return self._config.dt
-
     @property
     def config(self): return self._config
-
     @property
     def time(self): return self._steps*self.dt
-
     @property
-    def current(self): return self._j.sum(axis=0)
-
+    def current(self): return self._current.copy()
     @property
-    def polarization(self): return self._p.sum(axis=0)
+    def polarization(self): return self._polarization.copy()
+
+    def _require_open(self):
+        if self._closed:raise RuntimeFailure('LD state is closed')
 
     def step(self, field):
         """Advance dt using E at the new time; return (P, J), not FDTD Q."""
+        self._require_open()
         field = _array(field, 'field', (3,))
-        p, j = self._advance(np.stack((self._field, field)))
-        return p[-1].copy(), j[-1].copy()
+        p=np.empty((2,3));j=np.empty_like(p)
+        # Allocate accepted metadata and return values before committing native history.
+        accepted_p=np.empty(3);accepted_j=np.empty(3);steps=self._steps+1
+        result=(p[-1],j[-1]);incoming=field.reshape(1,3)
+        self._native_state.advance(incoming,p,j)
+        np.copyto(accepted_p,result[0]);np.copyto(accepted_j,result[1])
+        self._polarization=accepted_p;self._current=accepted_j
+        self._field=field;self._steps=steps
+        return result
 
     def _advance(self, field):
-        m = self._material
-        p = np.empty_like(field); j = np.empty_like(field)
-        # Work on copies so a rejected nonfinite output does not corrupt the state.
-        pp = self._p.copy(); jj = self._j.copy()
-        native = _native()
-        ptr = ctypes.POINTER(ctypes.c_double)
-        args = [a.ctypes.data_as(ptr) for a in (m._f,m._w,m._g,field,pp,jj,p,j)]
-        native(len(m._f), len(field), self.dt, m._wp, *args)
-        if not all(np.isfinite(a).all() for a in (pp,jj,p,j)):
-            raise NumericalError('LD response became nonfinite; state unchanged')
-        self._p, self._j = pp, jj
-        self._field = field[-1].copy()
-        self._steps += len(field)-1
-        return p, j
+        self._require_open()
+        if np.iscomplexobj(field):raise InputError('field must be real-valued')
+        field=np.ascontiguousarray(field,dtype=np.float64)
+        if field.ndim!=2 or field.shape[1]!=3 or not len(field):
+            raise InputError('field must have shape (N,3), N >= 1')
+        if not np.array_equal(field[0],self._field):
+            raise InputError('batch must begin at the accepted field')
+        if len(field)>2**31-1:raise InputError('too many LD samples')
+        p=np.empty_like(field);j=np.empty_like(field)
+        accepted_p=np.empty(3);accepted_j=np.empty(3);last=field[-1].copy();steps=self._steps+len(field)-1
+        last_p=p[-1];last_j=j[-1];result=(p,j)
+        self._native_state.advance(field[1:],p,j)
+        np.copyto(accepted_p,last_p);np.copyto(accepted_j,last_j)
+        # Separate totals prevent returned response arrays from changing accepted history.
+        self._polarization=accepted_p;self._current=accepted_j
+        self._field=last;self._steps=steps
+        return result
+
+    def snapshot(self):
+        if self._closed:raise SnapshotError('cannot snapshot a closed LD state')
+        return super().snapshot()
+
+    def restore(self,snapshot):
+        if self._closed:raise SnapshotError('cannot restore a closed LD state')
+        from types import SimpleNamespace
+        proxy=SimpleNamespace(dt=self.dt,_steps=self._steps,
+            _snapshot_kind=self._snapshot_kind,_snapshot_counter=self._snapshot_counter,
+            _snapshot_owner=self._snapshot_owner,_snapshot_settings=self._snapshot_settings,
+            _snapshot_arrays=lambda:{'_field':self._field,'_p':np.empty((self._native_state.n,3)),
+                                     '_j':np.empty((self._native_state.n,3))})
+        _SnapshotMixin.restore(proxy,snapshot)
+        try:p,j=self._native_state.replace(proxy._field,proxy._p,proxy._j)
+        except (InputError,NumericalError) as exc:raise SnapshotError('invalid LD snapshot history') from exc
+        self._field=proxy._field;self._steps=proxy._steps
+        self._polarization=p;self._current=j
+
+    def close(self):
+        if not self._closed:
+            self._native_state.close();self._closed=True
+
+    def __enter__(self):self._require_open();return self
+    def __exit__(self,*args):self.close()
+
+
+def _handles_api():
+    from ._ld_handles import default_api
+    return default_api()
 
 
 @lru_cache(maxsize=1)

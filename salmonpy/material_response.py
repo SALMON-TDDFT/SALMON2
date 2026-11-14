@@ -324,7 +324,7 @@ class LDResponseBackend:
         class State:
             timing=_response_timing(dt,'LD driven by E_new = -(A_new-A_old)/dt; physical polarization current')
             def advance(self,old,new): return state.step(-(new-old)/dt)[1]
-            def close(self): pass
+            def close(self): state.close()
         return State()
 
 

@@ -259,3 +259,5 @@ Experimental host-MPI TDDFT and native E/H coupling now have a separate entry: [
 [公開API・例外](API.md)と[メモリ上のsnapshot／restore](SNAPSHOTS.md)を参照してください。
 0.1.0a5からLD・SBE・4種類のPythonの場で固定dtの保存・復元を使えます。
 ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
+
+Persistent standalone LD ownership, fixed-dt coefficients and close/context-manager usage: [LD.en.md](LD.en.md).

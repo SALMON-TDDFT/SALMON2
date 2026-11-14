@@ -103,8 +103,8 @@ E[:, 0] = 1e-3
 result = material.respond(E, dt=0.1)
 # result.time: (101,), result.polarization/current: (101, 3)
 
-state = material.new_state(dt=0.1, initial_field=E[0])
-P, J = state.step(E[1])  # fields at t=0.1; returns physical P and J
+with material.new_state(dt=0.1, initial_field=E[0]) as state:
+    P, J = state.step(E[1])  # fields at t=0.1; physical P and J
 ```
 
 All values use SALMON atomic/Gaussian units: angular frequency, damping and plasma
@@ -192,3 +192,5 @@ AIカタログの詳細技術説明はまだ言語が混在しており、全リ
 ネイティブFDTD・TDDFT・MPIの再開を追加するものではなく、電流・時刻規約も変更しません。
 
 自作A駆動モデルは直列・MPIで同じ契約を使えます。[作り方と適合チェッカー](MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。
+
+LDの状態保持・解放は [LD.md](LD.md) を参照してください。

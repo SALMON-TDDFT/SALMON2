@@ -228,3 +228,7 @@ SBEInitialStateのモデル配列を一度ネイティブへ準備し、状態�
 shared velocity kernels/演算順序/既存OMP外側k分割は不変。常駐メモリはモデルnativecopyと各状態のrho2枚を必要とします。
 明示サイズoverflow/allocateエラーは拒否しますが、未変更kernelの自動work領域OOMを回復可能とは説明しません。
 既存固定nativebinaryを上書きせず、新規build/installで検証できます。SBE.md/enを参照。LD/TDDFTのhandle移行を実装済みとしません。
+
+## LDの状態保持
+
+LD.md／LD.en.mdに従います。係数と極ごとの履歴は状態ごとに保持し、stepではEと総P/Jだけを受け渡します。close／withで解放し、respondとMPI応答サービスも所有状態を解放します。固定のメモリ上限はありません。snapshot／restoreは同一モデル・固定dtでのみ利用し、状態そのもののpickleは案内しません。共有LDカーネルと物理的P/Jの規約は不変です。

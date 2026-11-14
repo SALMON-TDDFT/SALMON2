@@ -151,3 +151,5 @@ requires separate work. Transverse prescribed-A use remains the basic workflow.
 
 SBE now keeps native model/density handles; snapshot export and atomic restore
 retain the same contract. See [SBE ownership](SBE.en.md) for close/GC and memory tradeoffs.
+
+LD retains native pole histories and transfers them only for snapshots/restoration. See [LD.en.md](LD.en.md) for ownership and memory.
