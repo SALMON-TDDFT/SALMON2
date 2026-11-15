@@ -22,6 +22,7 @@ p.add_argument('build_record');p.add_argument('bundle');p.add_argument('input');
 p.add_argument('--field-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--material-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--steps',type=int,default=64)
+p.add_argument('--sample-h',action='store_true',help='collect raw half-step H; requires H-enabled native ABI')
 a=p.parse_args()
 from mpi4py import MPI
 world=MPI.COMM_WORLD
@@ -52,15 +53,27 @@ try:
     backend=NativeTDDFTBackend(a.build_record,output,decomposition=(1,nm,1,1,1))
     binding=MaterialBinding('crystal',provider,backend)
     response=ResponseSession(context,{1:binding,2:binding},dt=dt)
-    coupled=CoupledStepper(response,field);history=[]
+    coupled=CoupledStepper(response,field);history=[];sample_history=[]
     for _ in range(a.steps):
         frame=coupled.step()
+        magnetic=field.sample_magnetic_field() if a.sample_h and field is not None else None
         if world.rank==0:
+            samples=field.sample_fields()
+            if magnetic is not None:samples['H']=magnetic
+            sample_history.append(samples)
             history.append({k:v.tolist() if isinstance(v,np.ndarray) else v for k,v in frame.items()})
     response.close()
     if field is not None:field.close()
     context.close()
     if world.rank==0:
+        np.savez(output/'field_samples.npz',
+                 A=np.concatenate([s['A'].values for s in sample_history]),
+                 E=np.concatenate([s['E'].values for s in sample_history]),
+                 A_time=np.concatenate([s['A'].times for s in sample_history]),
+                 E_time=np.concatenate([s['E'].times for s in sample_history]),
+                 positions=sample_history[0]['E'].positions,point_ids=plan.point_ids,
+                 **({'H':np.concatenate([s['H'].values for s in sample_history]),
+                     'H_time':np.concatenate([s['H'].times for s in sample_history])} if a.sample_h else {}))
         (output/'response.json').write_text(json.dumps({'scheme':NativeEHField.scheme,'units':'atomic',
             'point_ids':plan.point_ids,'timing':coupled.timing,'history':history},indent=2)+'\n')
         print(output/'response.json')

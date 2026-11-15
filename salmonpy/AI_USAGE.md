@@ -475,7 +475,7 @@ Noneとゼロを区別。TimeSpec・単位・ゲージ・位置をFieldContract�
 AはA/c、HはBではありません。結晶はAのまま、LDはE。長さゲージはE必須ですが、native孤立系の接続完了ではありません。
 既存stepへの橋はlegacy_quantityを明示し、A/c:auまたはE:auの端点値だけを渡します。
 自作step_fieldsには宣言成分だけ渡し、半ステップや単位・位置を検査します。補間・微分・単位変換はしません。
-現MPIはA通信のみ。E/H転送や磁気物理の対応を推測しません。状態は借用、backend例外でadapterは無効です。
+MPIのA/E/H転送は後述の明示的なpacket経路を使います。磁気物理の対応はbackendごとに確認します。状態は借用、backend例外でadapterは無効です。
 
 ## 孤立系E-workerの現在の範囲
 
@@ -484,7 +484,7 @@ PZ・固定イオン・中点伝播の双極子を比較する開発用接続で
 渡したり、検証用driverを公開初期状態ローダーとして案内したりしないでください。
 公開入口はISOLATED_TDDFT.mdのload_isolated_runtimeとIsolatedTDDFTInitialStateです。
 ローカル検証記録に結び付いたバイナリに限定し、メモリ上のsnapshot/restoreを提供します。
-既存配布runtimeの自動対応、電流密度への暗黙変換、MPI E通信は未対応です。孤立系のsave_checkpoint/restore_checkpointは専用E/dipoleスキーマで履歴再実行を行います。GSとruntimeは別途指定し、同一容量・dt・位置・版などを照合します。周期系形式と混同しないでください。
+既存配布runtimeの自動対応、電流密度への暗黙変換、孤立系ローダーのMPI応答サービスへの直結は未対応です。孤立系のsave_checkpoint/restore_checkpointは専用E/dipoleスキーマで履歴再実行を行います。GSとruntimeは別途指定し、同一容量・dt・位置・版などを照合します。周期系形式と混同しないでください。
 
 分子双極子からFDTDへの一方向接続はDIPOLE_RADIATION.mdを参照してください。電荷双極子、
 FDTDセル体積、配向・個数を明示し、最初の区間電流をゼロにする保持時間を隠さないでください。
@@ -495,3 +495,20 @@ ResponseSessionのfield_contractsとstep_fieldsで明示的なA/E/Hを転送で�
 FIELD_INPUT.md/enとmpi_field_inputs.pyを参照。戻り値は電荷電流密度jです。
 孤立系の双極子を自動で規格化したり、場の時空間補間を推測しないでください。
 既存step(A)との混在・MPI全体のrollback・native結合driverへの自動接続は未対応です。
+
+場の補間にはfield_sampling.SampledField/sample_packetを使えます。
+利用者が選ぶ空間の凸重みとexact/linear時間方針を明示し、範囲外へ外挿しません。
+成分の時計・単位を保ち、Hを推定で補いません。native結合は後述の明示された時刻配置に限定します。
+
+NativeEHField/MultiscaleFieldのsample_fields()で1ステップ後からA/E標本を取得できます。
+nativeではA=(n+1/2)dt、E=n*dt、1DではA=n*dt、E=(n-1)dtです。
+Hをゼロで補わないこと。sample_fields自体は履歴を蓄積せず、結合更新もしません。
+
+H対応native ABIではsample_magnetic_field()を全fieldランクから明示的に呼べます。
+raw Hは(n+1/2)dt、保存用の時間平均Hはn*dtです。両者を混同しないでください。
+旧ABIのH欠落を0で補わず、対応runtimeを明示ビルドするかHを必要としない経路を選びます。
+
+PacketCoupledStepperは宣言済みの直接標本に限りpacket往復結合を提供します。
+NativeEHではA/Hとjがoffset1/2、Eが0。1DではA/jが0、Eがlag1です。
+t0/clock_offsetは0、位置・単位は厳密一致。一般補間や既存電子providerの自動変換はしません。
+FIELD_INPUTの表とmpi_packet_coupling例を参照。双極子をjとみなさないでください。

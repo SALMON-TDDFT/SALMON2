@@ -1,6 +1,7 @@
 # Native field sampling follow-up (F4b)
 
-Code audit after explicit packet transport; this document is not implementation.
+Code audit after explicit packet transport. Pure point-sample interpolation is
+now implemented; native sampling and feedback integration below remain open.
 
 Current evidence from coupled.py:
 
@@ -33,3 +34,27 @@ Next implementation boundaries:
 Acceptance: old A-only driver parity, manufactured time/space interpolation,
 missing-stencil/port/clock rejection before material updates, one-/two-field-rank
 sample equality, and bounded local MPI tests. No new physical convergence sweep.
+
+Implemented subset: field_sampling.SampledField/sample_packet. Caller supplies
+point positions, source histories and nonnegative weights summing to one that
+reproduce the target position (componentwise roundoff bounds). Explicit exact or
+linear temporal policy; no extrapolation, conversion or interval-average relabeling.
+FieldPacket retains each port clock. See ../field-sampling-validation-2026-11-15.md.
+
+A/E extraction implemented through field.sample_fields() after n>=1. Returns
+detached SampledField values with original clocks, point order and macro positions;
+no H key, no update, no history retained automatically. Native and one-dimensional
+fields share the method, not a substituted clock. Native 1/2-field-rank regression
+checks values and metadata. H ABI and closed-loop packet schedule remain open.
+
+H accessor now implemented as optional sp_eh_sample_h / sample_magnetic_field.
+It reads raw split H, averages four transverse owned Yee faces, and globally
+reduces within the field group. Timestamp is (n+1/2)dt; this is not saved
+observation H at n dt. No modification to eh_calc or update order. Python
+liveness and ABI preflight occurs before entering the Fortran collective.
+Packet feedback/current-clock scheduling remains open.
+
+Exact-sample feedback now uses PacketCoupledStepper: native A/H and j offset1/2,
+E offset0; Multiscale A/j offset0, E lag1. It checks physical positions and phases
+before advance. General interpolation/subcycling and existing electronic-provider
+adapters remain outside this driver. See packet-coupling-validation record.

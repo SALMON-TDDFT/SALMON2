@@ -135,10 +135,10 @@ class ResponseSession:
                     if not isinstance(contract,FieldContract) or contract.timing.dt != dt:
                         raise InputError('FieldContract with session dt required')
                     outputs=contract.timing.outputs
-                    if (len(outputs)!=1 or outputs[0].quantity!='j' or outputs[0].offset!=0
+                    if (len(outputs)!=1 or outputs[0].quantity!='j' or outputs[0].offset not in (0,.5)
                             or outputs[0].sampling!='point' or contract.timing.clock_offset!=0
                             or contract.timing.t0!=0):
-                        raise InputError('packet response requires endpoint charge j at n*dt from zero')
+                        raise InputError('packet response requires point charge j at n*dt or (n+1/2)*dt from zero')
                     contract_record.append((point,contract.timing.to_dict(),dict(contract.units),
                                             contract.position.tolist(),contract.position_unit,contract.gauge))
             descriptors=[]

@@ -180,3 +180,7 @@ See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 MPIサンプルも通常のPythonから `--help` を表示できます。実計算には mpi4py と互換MPIが必要です。MPIの既定ランク数が予算を超える場合は、そのまま実行せず、対応するランク数指定を確認してください。
 
 [mpi_field_inputs.py](mpi_field_inputs.py): 3ランクで異なるA/E/H契約を持つ合成物質を計算。入力不一致の更新前拒否も確認します。
+
+[field_sampling.py](field_sampling.py): 合成場の時刻差と明示的な空間重みを使う補間。外部データ・ソルバー不要。
+
+[mpi_packet_coupling.py](mpi_packet_coupling.py): 合成物質と1D／native場のpacket往復結合。3ランク（nativeは4ランクも可）。

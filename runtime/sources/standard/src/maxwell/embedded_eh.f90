@@ -29,7 +29,7 @@ module salmonpy_eh_context
   use parallelization, only: setup_parallel,nproc_group_global
   implicit none
   private
-  public :: sp_eh_init,sp_eh_step,sp_eh_close
+  public :: sp_eh_init,sp_eh_step,sp_eh_close,sp_eh_sample_h
   type :: field_context
     type(s_fdtd_system) :: fs
     type(ls_fdtd_eh) :: fe
@@ -114,6 +114,42 @@ contains
     end do
     call comm_summation(local_E,E,3*npoints,nproc_group_global)
     sp_eh_step=0
+  end function
+
+  ! Read raw H at (step+1/2)*dt, centered spatially on each macro cell.
+  ! Each rank contributes only owned Yee faces; no diagonal halo assumption.
+  integer(c_int) function sp_eh_sample_h(npoints,H) bind(C)
+    integer(c_int),value :: npoints
+    real(c_double),intent(out) :: H(3,npoints)
+    real(8) :: local_H(3,npoints),value
+    integer :: p,d,a,b,s1,s2,index(3),i,j,k
+    sp_eh_sample_h=1
+    if(.not.allocated(state)) return
+    if(state%step<1.or.npoints/=size(state%points,2)) return
+    local_H=0d0
+    do p=1,npoints
+      do d=1,3
+        a=mod(d,3)+1;b=mod(d+1,3)+1
+        do s1=0,1
+          do s2=0,1
+            index=state%points(:,p);index(a)=index(a)-s1;index(b)=index(b)-s2
+            if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie))) cycle
+            i=index(1);j=index(2);k=index(3)
+            select case(d)
+            case(1)
+              value=state%fe%hx_y(i,j,k)+state%fe%hx_z(i,j,k)
+            case(2)
+              value=state%fe%hy_z(i,j,k)+state%fe%hy_x(i,j,k)
+            case(3)
+              value=state%fe%hz_x(i,j,k)+state%fe%hz_y(i,j,k)
+            end select
+            local_H(d,p)=local_H(d,p)+.25d0*value
+          end do
+        end do
+      end do
+    end do
+    call comm_summation(local_H,H,3*npoints,nproc_group_global)
+    sp_eh_sample_h=0
   end function
 
   integer(c_int) function sp_eh_close() bind(C)

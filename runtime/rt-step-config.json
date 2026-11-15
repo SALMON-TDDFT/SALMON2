@@ -15,5 +15,5 @@
   "replacements": "source-trees/rt-step-config-replacements.json",
   "replacements_sha256": "767f0195a857f373d205a86a713aea8dd3fe6e1ecfb7f07a1f8ea45632bdf9ed",
   "patch_sha256_role": "historical migration identity; no patch is applied",
-  "base_source_tree_sha256": "2d39c65a92c95b24b05f5cd303d66b6554528d0b568c3bdec7d06f636a95f993"
+  "base_source_tree_sha256": "e8b7934f3304c1aef92d2e7c34f4ae908b4f8e388855878db457c9cb2eade667"
 }

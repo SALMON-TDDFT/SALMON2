@@ -152,3 +152,5 @@ install(FILES "${ROOT}/salmonpy/field_input.py" "${ROOT}/salmonpy/FIELD_INPUT.md
 install(FILES "${ROOT}/salmonpy/dipole_source.py" "${ROOT}/salmonpy/DIPOLE_RADIATION.md" "${ROOT}/salmonpy/DIPOLE_RADIATION.en.md" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/isolated_tddft.py" "${ROOT}/salmonpy/ISOLATED_TDDFT.md" "${ROOT}/salmonpy/ISOLATED_TDDFT.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/field_sampling.py" DESTINATION salmonpy)

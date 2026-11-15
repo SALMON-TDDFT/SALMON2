@@ -166,3 +166,7 @@ Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../
 MPI samples also display `--help` from ordinary Python. Computation requires mpi4py and compatible MPI. Check rank options before launching; some defaults exceed a four-core budget.
 
 [mpi_field_inputs.py](mpi_field_inputs.py): three ranks with distinct A/E/H contracts and synthetic currents; verifies rejection before updates.
+
+[field_sampling.py](field_sampling.py): explicit spatial weights and staggered-time interpolation of synthetic fields; no solver/data required.
+
+[mpi_packet_coupling.py](mpi_packet_coupling.py): synthetic packet feedback with 1D/native fields; three ranks (native also supports four).

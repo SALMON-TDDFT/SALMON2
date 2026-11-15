@@ -96,8 +96,20 @@ M6c evidence: `../point-checkpoint-validation-2026-11-15.md`. MPI whole-session 
 - [x] F4a: explicit MPI A/E/H packet transport and per-point required-port,
   position/time/unit agreement; current-sign/output declaration checks; legacy A
   regression. See `../mpi-field-packet-validation-2026-11-15.md`.
-- [ ] F4b: explicit field-position/time interpolation adapters and native coupling
-  driver integration; do not infer molecular dipole-to-current conversion.
+- [x] F4b1 (point samples): immutable SampledField and sample_packet with explicit
+  convex spatial weights and exact/bracketed-linear temporal sampling. Manufactured
+  affine fields, separate port clocks and off-stencil rejection verified.
+- [x] F4b2a: local detached A/E samples from native E/H and MultiscaleField,
+  preserving separate clocks and mapped positions; native 1/2-field-rank checks.
+  Evidence: `../field-extraction-validation-2026-11-15.md`.
+- [x] F4b2b-H: explicit collective raw-H accessor at (n+1/2)dt, owned-face
+  averaging, old ABI rejection and rank-local preflight failure propagation.
+  Evidence: `../native-h-sampling-validation-2026-11-15.md`.
+- [x] F4b2c (exact mapped samples): PacketCoupledStepper with native/1D port
+  and current clock admission, legacy-A parity and synthetic E/H feedback.
+  Evidence: `../packet-coupling-validation-2026-11-15.md`.
+- [ ] F4b2d: general interpolated/subcycled schedules and explicit adapters for
+  existing electronic/dipole providers. No implicit normalization or magnetic model.
 
 F1/F2 evidence: `../field-input-validation-2026-11-15.md`. These do not complete native E/H physics or MPI transport.
 

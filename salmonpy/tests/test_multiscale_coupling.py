@@ -23,6 +23,60 @@ class MultiscaleCouplingTests(unittest.TestCase):
         self.assertEqual(field.electronic_clock_offset, '0')
         self.assertEqual(field.point_ids, (19, 4))
 
+    def test_sample_fields_preserves_clocks_positions_and_state(self):
+        from salmonpy.errors import InputError
+        field=MultiscaleField(self.context(),Multiscale1D(2,5.,vacuum=(3,4)).new_state(dt=.02,steps=3))
+        with self.assertRaises(InputError):field.sample_fields()
+        field.advance(np.zeros((2,3)))
+        first=field.sample_fields()
+        np.testing.assert_array_equal(first['A'].positions,[[5,0,0],[10,0,0]])
+        self.assertEqual(first['A'].times[0],.02)
+        self.assertEqual(first['E'].times[0],0.)
+        self.assertNotIn('H',first)
+        old=first['A'].values.copy()
+        field.advance(np.ones((2,3)))
+        np.testing.assert_array_equal(first['A'].values,old)
+        np.testing.assert_array_equal(field.sample_fields()['E'].values[0],field.E)
+        self.assertEqual(field.step_index,2)
+        field.close()
+        with self.assertRaises(InputError):field.sample_fields()
+
+    def test_old_native_library_rejects_H_without_update(self):
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.errors import InputError
+        field=object.__new__(NativeEHField)
+        field.closed=field.failed=False;field.step_index=1
+        field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
+        field.lib=SimpleNamespace()
+        with self.assertRaisesRegex(InputError,'lacks sp_eh_sample_h'):
+            field.sample_magnetic_field()
+        self.assertEqual(field.step_index,1)
+
+    def test_H_native_liveness_checked_before_collective_read(self):
+        from salmonpy.coupled import NativeEHField
+        from salmonpy.errors import InputError
+        field=object.__new__(NativeEHField)
+        field.closed=field.failed=False;field.step_index=1
+        field.context=SimpleNamespace(solver_comm=SimpleNamespace(allgather=lambda x:[x]))
+        field.lib=SimpleNamespace(sp_eh_sample_h=lambda *args: self.fail('must not enter native read'))
+        def not_live(): raise RuntimeError('wrong native thread')
+        field.native=SimpleNamespace(_live=not_live)
+        with self.assertRaisesRegex(InputError,'wrong native thread'):
+            field.sample_magnetic_field()
+
+    def test_native_sample_metadata_without_native_update(self):
+        from salmonpy.coupled import NativeEHField
+        field=object.__new__(NativeEHField)
+        field.closed=field.failed=False;field.step_index=2;field.dt=.02
+        field.sample_positions=np.array([[1.,2.,3.]])
+        field.A=np.array([[4.,5.,6.]]);field.E=np.array([[7.,8.,9.]])
+        samples=field.sample_fields()
+        self.assertEqual(samples['A'].times[0],.05)
+        self.assertEqual(samples['E'].times[0],.04)
+        np.testing.assert_array_equal(samples['A'].values[0],field.A)
+        field.A[:]=0
+        np.testing.assert_array_equal(samples['A'].values[0],[[4,5,6]])
+
     def test_material_E_indices_use_integers(self):
         for spacing in (.1, .3, 1.1):
             state = Multiscale1D(2, spacing, vacuum=(300, 50)).new_state(dt=.0001, steps=2)

@@ -99,8 +99,8 @@ MPI packet通信は次節を参照。ビルド済みcatalog配布は残作業で
 全ランクで同一の契約を指定し、点ごとの必要成分・単位・時刻・位置・ゲージを状態作成前に照合します。
 入力mappingを渡すのは場のleaderだけで、他ランクはNoneです。点IDはplanの整数transport IDです。
 全点の入力を更新前に検査し、受信側でも不変packetを再構築・検査します。
-物質stateはstep_fieldsを実装し、t=0始まりの整数時刻n*dtにおける電荷電流密度jの3成分を返します。
-出力契約はpoint標本・offset=0のjを1つ指定し、backendにも宣言があれば一致を検査します。
+物質stateはstep_fieldsを実装し、ゼロ起点で宣言した整数または半ステップ時刻の電荷電流密度jの3成分を返します。
+出力契約はpoint標本・offset=0または1/2のjを1つ指定し、backendにも宣言があれば一致を検査します。
 既存FieldAdapterでstateが宣言する時刻との整合も検査します。余分な成分は転送しません。
 従来のstep(A)は維持し、同じsessionで両方式を混在させません。
 
@@ -113,3 +113,79 @@ A/E変換、空間・時間補間、双極子から電流への規格化は自�
 FieldContractに合う標本を呼び出し側で明示して用意します。
 backend更新の失敗はsessionを無効化し、全物質の巻き戻しは保証しません。
 通信計測のfield value bytesは数値3成分のみで、packetのメタデータ通信量を含みません。
+
+## 明示的な時空間補間
+
+`salmonpy.field_sampling.SampledField(quantity, times, positions, values, unit)`
+は不変の点標本を保持します。valuesは[時刻,位置,3]です。
+`sample(time=..., position=..., weights=..., temporal='exact'|'linear')` で
+FieldValueを得ます。空間の重みは利用者が指定し、非負・合計1・指定位置の再現を検査します。
+これは選択したステンシルの補間であり、適切な物理ステンシルの自動判定ではありません。
+時間はexactでは保存時刻と厳密一致、linearでは履歴の範囲内だけ許可します。
+範囲外への外挿、最近傍への丸め、単位変換はしません。
+
+`sample_packet(contract, step_index=..., histories=..., weights=..., temporal=...)`
+は成分ごとの時計を使いFieldPacketを作ります。historiesとweightsは必要成分名のmappingです。
+点標本のみ対応し、区間平均への読み替えは拒否します。Hが必要ならH履歴が必要です。
+
+```sh
+python -m salmonpy.examples.field_sampling
+```
+
+このサンプルは合成場です。A/E標本の取得は次節を参照してください。電流の戻し時刻を含む
+結合driverは後述の対応時刻配置に限定します。補間だけで任意の結合が成立するとは扱いません。
+
+## 結合場のA/E標本を取得
+
+`NativeEHField.sample_fields()` と `MultiscaleField.sample_fields()` は、
+少なくとも1ステップ進めた使用可能な場から、A/EのSampledFieldを返します。
+これはローカルの読取操作で、通信や更新をしません。返り値は元の場から独立した不変コピーです。
+行順はfield.point_ids、位置はbohrです。Hのキーはありません。
+
+- native E/H：Aは(n+1/2)dt、Eはn*dt。位置は登録したマクロセルの中心。
+- Multiscale1D：Aはn*dt、Eは(n-1)dt。位置は物質セルのx座標、y=z=0。
+
+各時刻のsamplesを保持し、同じquantity・unit・positionsを持つ標本のtimesとvaluesを
+連結してSampledFieldを作れば、前節の明示補間へ渡せます。場を進める前の標本や閉じた場は拒否します。
+`mpi_coupled_tddft` はfield_samples.npzにA/E、A_time/E_time、positions、point_idsを保存します。
+このファイルは原子単位の点標本で、Hや波動関数restartではありません。
+Hの取得は次節を参照してください。packet方式の結合は後述のPacketCoupledStepperを参照してください。
+
+## native Hの明示的な集合読取
+
+H対応ABIを明示的にビルドした場合、全fieldランクで
+`magnetic = field.sample_magnetic_field()` を呼びます。
+1ステップ後から、時刻(n+1/2)dtのraw Hをマクロ点へ空間平均したSampledFieldを返します。
+これはn*dtへ時間平均された観測ファイルのHとは異なる標本です。
+ステップは進めません。観測出力の間隔にも依存しません。
+必要な`sp_eh_sample_h`がない旧ライブラリは全fieldランクで明示的に拒否します。
+ローカル読取のsample_fields()とは異なり、leaderだけで呼んではいけません。
+結合サンプルは`--sample-h`でH/H_timeをfield_samples.npzへ追加します。
+磁気応答模型・H→B変換・双方向packet結合を自動的に有効にする機能ではありません。
+
+## 明示packet結合ドライバ
+
+`PacketCoupledStepper(response, field)` を全contextランクで構築し、step()を全員で呼びます。
+responseはfield_contracts付きResponseSession、fieldは場ランクのみで指定します。
+場のマクロ点と物質点は1対1、位置・単位は一致させます。対応時刻は次のとおりです。
+
+| 場 | 入力port | 戻りj |
+|---|---|---|
+| NativeEHField | A/H: offset=1/2、E: offset=0、すべてlag=0 | offset=1/2 |
+| MultiscaleField | A: offset=0 lag=0、E: offset=0 lag=1、H不可 | offset=0 |
+
+TimeSpecのt0とclock_offsetは0、標本はpoint、dtは共通です。状態のローカル時計はn*dt、
+各portとjの物理時刻はoffset/lagを加えて宣言します。backend出力宣言があれば一致が必要です。
+Hを使う場合はH対応runtimeを開始前に確認します。未来標本・位置不一致は開始前に拒否します。
+初期feedbackは明示的にゼロ。各stepは場(previous j)→標本→物質→次のfeedbackの順です。
+計算中の異常はresponseを無効化し、全体の巻き戻しは保証しません。
+戻り辞書にfield_time、current_time、成分ごとのSampledFieldとJ_chargeを保持します。
+
+```sh
+mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_OUTPUT
+mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field native --build BUILD_JSON --ports eh
+```
+
+例の物質は合成電流模型です。孤立系の双極子を直接jとして返さず、磁気応答や自己場を自動推定しません。
+既存A駆動用CoupledStepperは維持します。新driverは明示packetを返すbackend向けで、
+既存TDDFT/SBEプロバイダーを黙ってpacket形式へ変換しません。一般の時空間補間やサブサイクルは後続です。

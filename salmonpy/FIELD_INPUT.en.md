@@ -115,8 +115,8 @@ transport point IDs from the plan. Required ports, clocks, units, positions and
 gauge agree before state creation. All inputs are checked before updates;
 receivers reconstruct immutable packets and validate them again. Backend states
 implement step_fields and return three-component physical charge-current density
-j at integer n*dt from t=0. Declare exactly one j output with point sampling and
-zero offset; any backend output declaration must match. FieldAdapter also checks declared backend timing. Undeclared ports are omitted.
+j at the explicitly declared integer/half-step time from zero. Declare exactly one j output with point sampling and
+offset zero or one-half; any backend output declaration must match. FieldAdapter also checks declared backend timing. Undeclared ports are omitted.
 The legacy step(A) remains available without contracts; modes cannot be mixed.
 
 ```sh
@@ -129,3 +129,82 @@ or dipole normalization is inferred: supply explicitly sampled fields matching
 FieldContract. Backend failure invalidates the session without whole-session
 rollback. Reported field-value bytes exclude packet metadata and are not measured
 network traffic. Native field/coupling drivers do not automatically use this API.
+
+## Explicit time and space interpolation
+
+`salmonpy.field_sampling.SampledField(quantity, times, positions, values, unit)`
+retains immutable point samples with values[time,site,3].
+`sample(time=..., position=..., weights=..., temporal='exact'|'linear')` returns
+FieldValue. Supply nonnegative spatial weights summing to one and reproducing the
+requested position. This validates a chosen stencil, not its physical suitability.
+Exact sampling requires a stored timestamp; linear sampling requires bracketing
+history. No extrapolation, nearest-time snapping, or unit conversion occurs.
+
+`sample_packet(contract, step_index=..., histories=..., weights=..., temporal=...)`
+uses each required port's own clock to construct FieldPacket. Histories and
+weights are mappings keyed by required quantities. Only point sampling is
+supported; interval averages are not relabeled. Required H needs an H history.
+
+```sh
+python -m salmonpy.examples.field_sampling
+```
+
+The example uses synthetic affine fields. A/E extraction is described below; the feedback driver supports only the schedules documented below. H extraction is described below.
+Interpolation alone does not establish a self-consistent feedback scheme.
+
+## Extract A/E samples from a coupled field
+
+`NativeEHField.sample_fields()` and `MultiscaleField.sample_fields()` return
+A/E SampledField objects after at least one successful step. This is a local
+read without communication or updates. Samples are detached immutable copies;
+rows follow field.point_ids and positions are in bohr. No H key is returned.
+
+- Native E/H: A at (n+1/2)dt, E at n*dt; registered macro-cell centers.
+- Multiscale1D: A at n*dt, E at (n-1)dt; material-cell x, y=z=0.
+
+Retain samples over time and concatenate times/values with identical quantity,
+units and positions into SampledField for explicit interpolation. Initial,
+closed or failed fields are rejected. mpi_coupled_tddft saves field_samples.npz
+with A/E, A_time/E_time, positions and point_ids, in atomic point-sample units.
+This is not H data or a wavefunction restart. Native H extraction is described below; packet feedback is available through the limited schedules below.
+
+## Explicit collective native H read
+
+With an explicitly built H-enabled ABI, every field rank calls
+`magnetic = field.sample_magnetic_field()`. After the first step it returns raw
+H at (n+1/2)dt, spatially averaged to macro points, as SampledField. This differs
+from native observation-file H, which is temporally centered at n*dt.
+Reading does not advance the field or depend on observation stride. Libraries
+without sp_eh_sample_h reject collectively. Unlike local sample_fields(), this
+method must not be called only by the field leader.
+The coupling example's --sample-h adds H/H_time to field_samples.npz. This does
+not enable magnetic material physics, H-to-B conversion or packet feedback.
+
+## Explicit packet feedback driver
+
+Construct PacketCoupledStepper(response, field) and call step() on every context
+rank. The response needs field_contracts; field is supplied only on field ranks.
+Mapped material positions are one-to-one and must match exactly in atomic units.
+
+| Field | Input port timing | Returned j |
+|---|---|---|
+| NativeEHField | A/H offset 1/2, E offset 0; all lag 0 | offset 1/2 |
+| MultiscaleField | A offset 0 lag 0, E offset 0 lag 1; no H | offset 0 |
+
+TimeSpec t0/clock_offset are zero; dt matches and sampling is point. State-local
+time remains n*dt; physical port/output time includes its offset/lag. Declared
+backend output must agree. H capability, unavailable future samples and position
+mismatch are checked before advancing. Initial feedback is explicitly zero.
+Order is field(previous j), sample, material, next feedback. A runtime failure
+invalidates response without global rollback. Results retain field_time,
+current_time, per-component SampledField values, and J_charge.
+
+```sh
+mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_OUTPUT
+mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field native --build BUILD_JSON --ports eh
+```
+
+Models in this example are synthetic. Dipoles are not current density, and no
+magnetic material/self-field physics is inferred. Legacy CoupledStepper remains.
+The new driver requires explicit packet backends; it does not silently adapt
+existing TDDFT/SBE providers. General interpolation/subcycling remain follow-up.

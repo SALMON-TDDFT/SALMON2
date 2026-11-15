@@ -94,8 +94,11 @@ class NativeEHField:
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
         self.step_index=0;self.A=np.zeros((len(self.point_ids),3));self.E=np.zeros_like(self.A)
         self.closed=False;self.initialized=False;self.failed=False
+        from .field_input import _real
+        xyz=np.column_stack([calculation.geometry.grid.coordinates[d][indices[:,d]] for d in range(3)])
+        self.sample_positions=_real(xyz,(len(self.point_ids),3),'macro sample positions')
         self.manifest={'schema':self.scheme,'status':'started','point_ids':self.point_ids,
-            'grid_indices':indices.tolist(),'cell_volume':float(np.prod(calculation.geometry.grid.spacing)),
+            'grid_indices':indices.tolist(),'sample_positions_bohr':self.sample_positions.tolist(),'cell_volume':float(np.prod(calculation.geometry.grid.spacing)),
             'dt':self.dt,'steps':self.capacity,'field_ranks':comm.size,'field_grid':list(grid),
             'library_sha256':sha,'sample_map':'half of same-index and previous-axis E edges',
             'deposit_map':'transpose of sample_map, equal cell volumes',
@@ -120,6 +123,47 @@ class NativeEHField:
         return TimeSpec(self.dt,(InputPort('j',offset='1/2',lag=1,uses_t0=False),),(OutputPort('A',offset='1/2'),),
             history='zero-initialized plane-wave field; initial feedback current zero',
             integrator='native Yee: E at n*dt, saved H centered at E time; A_new = A_old - dt*S(E)')
+
+    def sample_fields(self):
+        """Read detached A/E point samples after a step; no collectives or update.
+
+        A is at (n+1/2)dt, E at n*dt. Read H via sample_magnetic_field collectively.
+        Positions follow plan.point_ids and the mapped macro-cell centers.
+        """
+        if self.closed or self.failed or self.step_index<1:
+            raise InputError('field samples require a usable field after its first step')
+        from .field_sampling import SampledField
+        return {'A':SampledField('A',[(self.step_index+.5)*self.dt],self.sample_positions,
+                                 self.A[None,:,:],'A/c:au'),
+                'E':SampledField('E',[self.step_index*self.dt],self.sample_positions,
+                                 self.E[None,:,:],'E:au')}
+
+    def sample_magnetic_field(self):
+        """Collective field-group read of macro-centered raw H at (n+1/2)dt.
+
+        Requires the optional sp_eh_sample_h ABI; old libraries reject explicitly.
+        Every field rank must call. No time advance or saved-H averaging occurs.
+        """
+        comm=self.context.solver_comm;error=None;fn=None
+        try:
+            if self.closed or self.failed or self.step_index<1:
+                raise InputError('H samples require a usable field after its first step')
+            fn=getattr(self.lib,'sp_eh_sample_h',None)
+            if fn is None:raise InputError('runtime lacks sp_eh_sample_h; explicitly build an H-enabled runtime')
+            self.native._live()
+            fn.argtypes=[c.c_int,np.ctypeslib.ndpointer(dtype=np.float64,ndim=2,flags='C_CONTIGUOUS')]
+            fn.restype=c.c_int
+            H=np.empty_like(self.A)
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        _agree(comm,error)
+        error=None
+        try:
+            code=self._call(fn,len(self.point_ids),H)
+            if code or not np.isfinite(H).all():error='native H sampling failed'
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        _agree(comm,error)
+        from .field_sampling import SampledField
+        return SampledField('H',[(self.step_index+.5)*self.dt],self.sample_positions,H[None,:,:],'H:au')
 
     def _write_manifest(self):
         error=None
@@ -214,6 +258,17 @@ class MultiscaleField:
     def E(self):
         start = dict(self.state.config.parameters)['vacuum'][0]
         return self.state.grid_E[start:start+len(self.point_ids)].copy()
+
+    def sample_fields(self):
+        """Read detached A(n dt)/E((n-1)dt) samples in point order; H absent."""
+        if self.closed or self.failed or self.step_index<1:
+            raise InputError('field samples require a usable field after its first step')
+        from .field_sampling import SampledField
+        start=dict(self.state.config.parameters)['vacuum'][0]
+        positions=np.zeros((len(self.point_ids),3))
+        positions[:,0]=self.state.x[start:start+len(self.point_ids)]
+        return {'A':SampledField('A',[self.step_index*self.dt],positions,self.A[None,:,:],'A/c:au'),
+                'E':SampledField('E',[(self.step_index-1)*self.dt],positions,self.E[None,:,:],'E:au')}
 
     def advance(self, j):
         if self.closed or self.failed:
@@ -338,4 +393,116 @@ class CoupledStepper:
                     'E_at_points':self.field.E.copy(),
                     'E_time':(n-1 if isinstance(self.field,MultiscaleField) else n)*dt,
                     'J_previous':previous,'J_charge':J.copy()}
+        return None
+
+
+class PacketCoupledStepper:
+    """Exact native samples -> explicit packet current -> next field update.
+
+    All context ranks participate. No interpolation, implicit dipole conversion
+    or whole-session rollback. Initial feedback is zero, as in CoupledStepper.
+    """
+    def __init__(self,response,field=None):
+        from .field_input import FieldContract
+        self.response=response;self.field=field;self.step_index=0
+        cxt=response.context;error=None;record=None
+        try:
+            contracts=response._field_contracts
+            if response.closed or response.failed or response.step_index!=0 or contracts is None:
+                raise InputError('fresh packet response session required')
+            if cxt.group.role=='field':
+                if not isinstance(field,(NativeEHField,MultiscaleField)) or field.context is not cxt:
+                    raise InputError('matching native/1D field required')
+                if field.closed or field.failed or field.step_index!=0 or field.dt!=response.dt or field.point_ids!=cxt.plan.point_ids:
+                    raise InputError('fresh field with matching dt/point order required')
+                native=isinstance(field,NativeEHField)
+                if native:
+                    positions=field.sample_positions
+                    phase=.5
+                    available={'A':(.5,0),'E':(0,0),'H':(.5,0)}
+                else:
+                    start=dict(field.state.config.parameters)['vacuum'][0]
+                    positions=np.zeros((len(field.point_ids),3))
+                    positions[:,0]=field.state.x[start:start+len(field.point_ids)]
+                    phase=0.
+                    available={'A':(0,0),'E':(0,1)}
+                needs_H=False
+                for i,point in enumerate(field.point_ids):
+                    contract=contracts[point]
+                    if (contract.position_unit!='bohr' or not np.array_equal(contract.position,positions[i])
+                            or contract.timing.t0!=0 or contract.timing.clock_offset!=0):
+                        raise InputError('packet coupling requires exact mapped position and zero local clock origin')
+                    output=contract.timing.output('j')
+                    if output is None or float(output.offset)!=phase or output.sampling!='point':
+                        raise InputError('current output phase differs from field feedback schedule')
+                    for port in contract.timing.inputs:
+                        if (port.quantity not in available or (float(port.offset),port.lag)!=available[port.quantity]
+                                or port.sampling!='point' or contract.units[port.quantity]!={'A':'A/c:au','E':'E:au','H':'H:au'}[port.quantity]):
+                            raise InputError('port clock/unit is unavailable without explicit interpolation')
+                        needs_H |= port.quantity=='H'
+                if needs_H:
+                    field.native._live()
+                    if getattr(field.lib,'sp_eh_sample_h',None) is None:
+                        raise InputError('H-enabled runtime required before packet coupling')
+                record={'schema':'salmonpy.packet-coupling/1','current_offset':phase,'needs_H':needs_H,
+                        'field_kind':'native-EH' if native else 'Multiscale1D',
+                        'initial_feedback':'zero; not a measured ground-state current',
+                        'positions_bohr':positions.tolist(),
+                        'point_contracts':{p:contracts[p].timing.to_dict() for p in field.point_ids}}
+            elif field is not None:raise InputError('material ranks must not supply field')
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        response.agree(error)
+        if cxt.is_leader:record=cxt.leaders.bcast(record,root=cxt.field_group)
+        self.timing=cxt.solver_comm.bcast(record,root=0)
+        self.J=np.zeros((len(cxt.plan.point_ids),3))
+
+    def step(self):
+        from .field_input import FieldPacket,FieldValue
+        r=self.response;cxt=r.context;error=None;packets=None;samples=None
+        try:
+            if r.closed or r.failed or r.step_index!=self.step_index:
+                raise InputError('packet response is unusable or out of sync')
+            if self.field is not None:
+                if self.field.closed or self.field.failed or self.field.step_index!=self.step_index or self.step_index>=self.field.capacity:
+                    raise InputError('packet field is unusable, exhausted or out of sync')
+                if self.timing['needs_H']:self.field.native._live()
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        r.agree(error)
+        try:
+            error=None
+            if self.field is not None:
+                try:
+                    self.field.advance(self.J)
+                    samples=self.field.sample_fields()
+                except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            r.agree(error)
+            # Do not enter the H collective if any field rank failed local sampling.
+            error=None
+            if self.field is not None and self.timing['needs_H']:
+                try:samples['H']=self.field.sample_magnetic_field()
+                except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            r.agree(error)
+            error=None
+            if self.field is not None and cxt.is_leader:
+                try:
+                    packets={}
+                    for i,point in enumerate(self.field.point_ids):
+                        components={}
+                        for q in r._field_contracts[point].units:
+                            sample=samples[q]
+                            components[q]=FieldValue(sample.values[0,i],time=sample.times[0],
+                                position=sample.positions[i],unit=sample.unit)
+                        packets[point]=FieldPacket(**components)
+                except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+            r.agree(error)
+            current=r.step_fields(packets)
+        except BaseException:
+            r.failed=True
+            raise
+        self.step_index+=1
+        if self.field is not None:
+            previous=self.J.copy();self.J=current
+            return {'field_time':self.step_index*r.dt,
+                    'current_time':(self.step_index+self.timing['current_offset'])*r.dt,
+                    'samples':samples,'J_previous':previous,'J_charge':current.copy()}
         return None

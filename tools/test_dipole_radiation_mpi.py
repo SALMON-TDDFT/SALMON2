@@ -73,6 +73,15 @@ try:
                         raise AssertionError('rank-local trajectory mismatch accepted')
                     assert field.step_index == 0
                 result = drive_native_dipoles(field,mapping,p,dt=dt)
+                samples=field.sample_fields()
+                assert set(samples)=={'A','E'}
+                assert samples['A'].times[0]==(steps+.5)*dt
+                assert samples['E'].times[0]==steps*dt
+                np.testing.assert_array_equal(samples['E'].values[0],result['E'][-1])
+                np.testing.assert_array_equal(samples['A'].values[0],field.A)
+                np.testing.assert_array_equal(samples['E'].positions,observations)
+                sample_records=context.solver_comm.allgather(samples['E'].values.tolist())
+                assert all(r==sample_records[0] for r in sample_records)
                 if len(sys.argv) == 3:
                     expected = np.array([0,0,-4*np.pi*dt*.5e-4])
                     np.testing.assert_allclose(result['E'][2,0],expected,rtol=2.e-13,atol=1.e-18)

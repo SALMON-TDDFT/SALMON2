@@ -9,7 +9,7 @@ class ExampleCLITests(unittest.TestCase):
     def test_mpi_help_without_mpi(self):
         for name in ('mpi_response', 'mpi_tddft', 'mpi_coupled_tddft',
                      'mpi_multiscale_tddft', 'mpi_recorded_material',
-                     'mpi_configured_native', 'mpi_field_inputs'):
+                     'mpi_configured_native', 'mpi_field_inputs', 'mpi_packet_coupling'):
             with self.subTest(name=name):
                 # Block MPI even on developer machines where it is installed.
                 script = '''import runpy, sys
