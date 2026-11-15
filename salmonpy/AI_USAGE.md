@@ -543,3 +543,11 @@ SALMON固有の更新順・固定dt・資源予算やユーザー所有の物理
 非DCのrho_dneの分母0以下は初期化前にstatus=1。通常は取り込んだ値を変更しません。
 これは電子数・電荷・占有数を変更するPython APIではありません。物質入力の全面独立化とは案内しません。
 二倍の分母で残差だけ半分にする診断と、通常条件で元SALMONとの一致確認を区別します。
+
+### 状態が保持する占有数入力
+
+内部`s_dft_system%occupation_input`はnelec、nelec_spin、nstate、spin、spinorbit、temperature、redistribution_delayを初期化時にコピーします。初期充填・通常ne2mu・通常GS再分配条件・ギャップの占有バンド番号はその値を使います。未初期化systemには従来入力の互換経路があります。温度は内部原子単位です。
+
+生存中の値は変更しません。gs_runの新しい占有数上書きAPIではありません。HSE交換・DC専用ソルバー・並列配置等には共有入力が残り、任意の電子数・温度の同時GS実行を保証しません。
+
+検証: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT`、`tools/test_gs_occupation_runtime.py BUILD_RECORD REFERENCE_RECORD NEW_OUTPUT`。前回の未コミットファイルは再起動後に見つからず、会話から再構成しました。復旧後の証拠は`docs/gs-occupation-recovery-validation-2026-11-16.md`です。

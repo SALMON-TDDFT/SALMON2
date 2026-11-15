@@ -108,6 +108,7 @@ character(32) :: scf_metric
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_scalar) :: rho_old,Vlocal_old
 real(8) :: rNe
+type(s_occupation_config) :: occupation_input
 
 real(8),allocatable :: esp_old(:,:,:)
 real(8) :: ene_gap, magnetization(3)
@@ -117,6 +118,7 @@ integer :: adaptive_comm,not_ready_local,not_ready_total,phase_status
 logical :: pre_scf_root,pre_scf_ready
 #endif
 
+call get_occupation_input(system,occupation_input)
 max_iterations=nscf;scf_threshold=threshold;scf_metric=convergence
 if(system%gs_input_owned)then
  max_iterations=system%gs_input%max_iterations
@@ -272,7 +274,7 @@ DFT_Iteration : do iter=Miter+1,max_iterations
       ! for calc_total_energy_periodic
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
   
-      if(temperature>=0.d0 .and. Miter>nscf_init_redistribution .and. yn_dc=='n') then
+      if(occupation_input%temperature>=0.d0.and.Miter>occupation_input%redistribution_delay.and.yn_dc=='n')then
          call ne2mu(energy,system,ilevel_print)
       end if
    end if
@@ -755,15 +757,20 @@ end subroutine scf_iteration_dft
 
 subroutine  get_band_gap(system,energy,gap)
   use structures
-  use salmon_global, only: nelec,yn_spinorbit
+  use occupation,only:get_occupation_input
   use inputoutput, only: au_energy_ev
   use communication, only: comm_is_root
   implicit none
   type(s_dft_system),intent(in) :: system
   type(s_dft_energy),intent(in) :: energy
+  type(s_occupation_config)::value
+  integer :: nelec
+  character(1)::yn_spinorbit
   integer :: ik, index_vbm
   real(8) :: gap
   real(8),dimension(system%nk) :: esp_vb_max, esp_cb_min
+  call get_occupation_input(system,value)
+  nelec=value%nelec;yn_spinorbit=value%spinorbit
   if( yn_spinorbit=='y' )then
      index_vbm=nelec
   else

@@ -115,7 +115,16 @@ module structures
     real(8) :: threshold=0d0,pre_scf_threshold=0d0
   end type
 
+  type s_occupation_config
+    integer :: nelec=0,nelec_spin(2)=0,nstate=0,redistribution_delay=0
+    real(8) :: temperature=-1d0
+    character(32) :: spin='unpolarized'
+    character(1) :: spinorbit='n'
+  end type
+
   type s_dft_system
+    type(s_occupation_config) :: occupation_input
+    logical :: occupation_input_ready=.false.
     type(s_gs_run_config) :: gs_input
     logical :: gs_input_owned=.false.
     type(s_pre_scf_state) :: pre_scf

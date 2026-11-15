@@ -545,3 +545,11 @@ not finish material-input isolation or establish tested polarized/DC operation.
 the second state's divisor: its density residual must halve while electronic
 outputs remain unchanged. Evidence and limits are recorded in
 `docs/gs-normalization-config-validation-2026-11-16.md`.
+
+### State-owned occupation inputs
+
+Internal `s_dft_system%occupation_input` captures nelec, nelec_spin, nstate, spin, spinorbit, temperature and redistribution_delay at initialization. Initial filling, ordinary ne2mu, the ordinary GS redistribution gate and occupied-band index for gap reporting use that value. Uninitialized systems retain the legacy-input fallback. Temperature uses internal atomic units.
+
+Do not modify a live state's record. This is not a new occupation override for gs_run. HSE exchange, the separate DC solver and parallel setup still reference shared inputs; arbitrary different-count/temperature concurrent GS is not established.
+
+Tests: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT` and `tools/test_gs_occupation_runtime.py BUILD_RECORD REFERENCE_RECORD NEW_OUTPUT`. The previous uncommitted files were unavailable after reboot and reconstructed from the conversation. Fresh evidence: `docs/gs-occupation-recovery-validation-2026-11-16.md`.

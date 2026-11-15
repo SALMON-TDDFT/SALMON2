@@ -226,3 +226,6 @@ implemented in their documented scope; do not list them as wholly unimplemented.
 - [x] Capture normalization in retained trace and synchronize Japanese/English/AI instructions.
 - Still shared: occupation/gap/material initialization inputs and parallel/timer controls. No general concurrent GS claim.
 - Evidence: `docs/gs-normalization-config-validation-2026-11-16.md`.
+
+## Recovery 2026-11-16
+Occupation snapshot and tests reconstructed after temporary checkout loss; fresh persistent evidence in docs/gs-occupation-recovery-validation-2026-11-16.md. HSE shared-input work follows this checkpoint.

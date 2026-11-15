@@ -178,8 +178,9 @@ end subroutine resolve_cell
 subroutine init_dft_system(lg,system,stencil,unfold)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,natom,nelem,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & Rion,Rion_red,kion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit,xc, &
+  use occupation,only:occupation_input_config,initialize_occupations
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,natom,nelem,iperiodic,num_kgrid,num_rgrid,dl, &
+  & Rion,Rion_red,kion,calc_mode,xc, &
   & iflag_atom_coor,ntype_atom_coor_reduced,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
@@ -195,9 +196,18 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   type(s_cell_config)::cell_input
   type(s_cell_geometry)::cell
   integer::cell_status
+  integer :: nelec,nelec_spin(2),nstate
+  real(8) :: temperature
+  character(32) :: spin
+  character(1) :: yn_spinorbit
   integer :: ii,jj
   real(8) :: rsize(3),hgs(3),cnmat(0:12,12),bnmat(4,4)
 
+  call occupation_input_config(system%occupation_input)
+  system%occupation_input_ready=.true.
+  nelec=system%occupation_input%nelec;nelec_spin=system%occupation_input%nelec_spin
+  nstate=system%occupation_input%nstate;temperature=system%occupation_input%temperature
+  spin=system%occupation_input%spin;yn_spinorbit=system%occupation_input%spinorbit
   call xc_input_config(system%xc_input)
   system%xc_input_ready=.true.
   cell_input%lengths=al;cell_input%spacing=dl;cell_input%points=num_rgrid
@@ -276,31 +286,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   system%Rion = Rion
   system%kion = kion
 
-! initial value of occupation
-  system%rocc = 0d0
-  if ( yn_spinorbit=='y' ) then
-    system%rocc(1:nelec,:,:) = 1.0d0
-  else
-    select case(system%nspin)
-    case(1)
-      system%rocc(1:nelec/2,:,1) = 2d0
-      if(mod(nelec,2)==1) system%rocc(nelec/2+1,:,1) = 1d0
-    case(2)
-      if ( nelec > 0 ) then
-        if ( mod(nelec,2) == 0 ) then
-          system%rocc(1:nelec/2,:,1:2) = 1d0
-        else
-          system%rocc(1:(nelec-1)/2,:,1:2) = 1d0
-          system%rocc((nelec-1)/2+1,:,1  ) = 1d0
-        end if
-      else if ( any(nelec_spin>0) ) then
-        system%rocc(1:nelec_spin(1),:,1) = 1d0
-        system%rocc(1:nelec_spin(2),:,2) = 1d0
-      else
-        write(*,*) "nelect or nelec_spin should be specified in input"
-      end if
-    end select
-  end if
+  call initialize_occupations(system)
 
   call set_bn(bnmat)
   call set_cn(cnmat)

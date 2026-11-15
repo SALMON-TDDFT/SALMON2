@@ -14,7 +14,7 @@
     "src/common/structures.f90": {
       "before_sha256": "8e4043f129a0e80deee56b50ab629b540d126a13c7455df8979c872b18414d8c",
       "source": "overrides/hse-explicit-routing/src/common/structures.f90",
-      "after_sha256": "702043dd444191350125553fd26b6e04828e93424f77ac6e05eb9b124e20e1be"
+      "after_sha256": "772b234deb5c22250749ebdacc81e612eee4090faa4a323f50f09baffa2e0e4d"
     },
     "src/common/total_energy.f90": {
       "before_sha256": "728942434e850be1dfe2833b42ed50d9d516d946343947a01b6f6ae3c49626c2",
@@ -94,7 +94,7 @@
     "src/common/initialization.f90": {
       "before_sha256": "3f6a9b0a78787c7e20d082da1c6898518ee51e3ca2975af4f441b19f177a3453",
       "source": "overrides/hse-explicit-routing/src/common/initialization.f90",
-      "after_sha256": "34d8d9ea5bbbb00161857f5b650012d871e752a70d138a86260f76be202c5d28"
+      "after_sha256": "487e3240e4d9866aa450f336eed4585661a3f00e68704a62e541a713e8991886"
     },
     "src/symmetry/symmetry_kvector.f90": {
       "before_sha256": "762ced38511d9c8bfaa377a98f55248f460c3d24367d207709f02698638b34d5",
@@ -124,7 +124,7 @@
     "src/gs/scf_iteration_dft.f90": {
       "before_sha256": "5ae736b113ff779e1488fdffd6c62ed8232b11c028b1ed38d8f37e6781f84888",
       "source": "overrides/hse-explicit-routing/src/gs/scf_iteration_dft.f90",
-      "after_sha256": "9869a04f1a4bac179ebd42f26e5a99be93bb23b0fbf68be2b33e623075037b36"
+      "after_sha256": "c7c99af89ebb774c405365fad6959e95ed7f6e1cdc21928b9a015415b789ba73"
     },
     "src/gs/scf_iteration.f90": {
       "before_sha256": "dd2b28fc4ab7772559d854edf522a7cb0776be9d8526c775e7a715b80c35c041",
@@ -134,7 +134,7 @@
     "src/gs/main_dft.f90": {
       "before_sha256": "bc6856c1e9f105c35a8ea8bfc815320c060c9854596871c4498ba4df3907f4ba",
       "source": "overrides/hse-explicit-routing/src/gs/main_dft.f90",
-      "after_sha256": "90ec4c9b7439384cb7eef107f394b906787e437cd2af4069e7548c978a09e7d3"
+      "after_sha256": "45613ce8b2afa1c1ff9612d4d1628110e8ab70bc5ec64e634cd41908a289b1ad"
     },
     "src/xc/exx_gs_metadata.f90": {
       "before_sha256": "2baba09fe7a1efed27f1ddefd66ddf5b15c8a7039bca7c1b8991b7f5e2d73aba",
@@ -150,6 +150,11 @@
       "before_sha256": "182ea26bdaf0e9292000093fb1b252b148c09554ff9ed1f758c6caca85026351",
       "source": "overrides/hse-explicit-routing/src/gs/mixing.f90",
       "after_sha256": "1b44ea33404414365267484102e8c36b0c6183ed82ab207b2bd57a6ae74630ba"
+    },
+    "src/gs/occupation.f90": {
+      "before_sha256": "eaedfbb883690d02f104321eb5389c09796dbfa98c8f5acf2092013cd102a764",
+      "source": "overrides/hse-explicit-routing/src/gs/occupation.f90",
+      "after_sha256": "f12e519e5e23e6de39d52f87c16620f67c77c7233a97041ce9d44f2210232494"
     }
   }
 }

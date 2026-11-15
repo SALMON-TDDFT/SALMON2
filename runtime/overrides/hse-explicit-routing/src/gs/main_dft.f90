@@ -509,6 +509,7 @@ subroutine gs_probe_write(ctx,unit)
  write(unit)ctx%iterations,ctx%energy%E_tot,ctx%energy%E_xc
  write(unit)ctx%spsi%zwf,ctx%rho%f,ctx%vh%f,ctx%vpsl%f
  write(unit)ctx%system%rocc,ctx%system%Force
+ write(unit)ctx%system%occupation_input,ctx%system%occupation_input_ready
  write(unit)ctx%system%gs_input%normalization
  write(unit)ctx%mixing%input,ctx%mixing%input_owned,ctx%mixing%num_rho_stock,ctx%mixing%flag_mix_zero
  write(unit)ctx%mixing%mixrate,ctx%mixing%alpha_mb,ctx%mixing%beta_p,ctx%mixing%convergence_value_prev
