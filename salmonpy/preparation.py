@@ -1,0 +1,229 @@
+"""Explicit local input staging and offline transfer verification.
+
+No acquisition, installation, solver execution or backend discovery. Trusted
+configuration resolvers run only during prepare_inputs, not verify_inputs.
+"""
+import argparse
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import tempfile
+import unicodedata
+
+from .config import _copy_json, resolve_materials
+from .errors import InputError
+
+__all__ = ['prepare_inputs', 'verify_inputs']
+_SCHEMA = 'salmonpy.input-bundle/1'
+_GENERATED = {'materials.json', 'resolved.json', 'manifest.json'}
+_DIGEST = re.compile(r'[0-9a-f]{64}\Z')
+
+
+def _relative(name):
+    if not isinstance(name, str) or not name or '\\' in name:
+        raise InputError('asset name must be a portable relative POSIX path')
+    path = PurePosixPath(name)
+    if path.is_absolute() or path.as_posix() != name:
+        raise InputError(f'unsafe asset name: {name!r}')
+    for part in name.split('/'):
+        stem = part.split('.')[0].upper()
+        if (part in ('', '.', '..') or part.endswith((' ', '.'))
+                or any(c in '<>:"|?*' or ord(c) < 32 for c in part)
+                or stem in {'CON', 'PRN', 'AUX', 'NUL'}
+                or re.fullmatch(r'(COM|LPT)[1-9]', stem)):
+            raise InputError(f'unsafe asset name: {name!r}')
+    return path
+
+
+def _names(names, *, assets=False):
+    """Reject cross-platform filename and parent-directory collisions."""
+    canonical = {}
+    files = set(names)
+    for name in names:
+        path = _relative(name)
+        if assets and path.parts[0].casefold() in _GENERATED:
+            raise InputError(f'reserved asset name: {name}')
+        for i in range(1, len(path.parts) + 1):
+            prefix = '/'.join(path.parts[:i])
+            key = unicodedata.normalize('NFC', prefix).casefold()
+            if key in canonical and canonical[key] != prefix:
+                raise InputError(f'case-colliding asset path: {name}')
+            canonical[key] = prefix
+            if i < len(path.parts) and prefix in files:
+                raise InputError(f'file/directory collision: {name}')
+
+
+def _hash(path):
+    digest = hashlib.sha256()
+    size = 0
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+            size += len(block)
+    return digest.hexdigest(), size
+
+
+def _record(path, provenance):
+    digest, size = _hash(path)
+    return {'sha256': digest, 'size': size, 'provenance': provenance}
+
+
+def _write(path, data):
+    path.write_text(json.dumps(data, ensure_ascii=False, allow_nan=False,
+                               sort_keys=True, indent=2) + '\n', encoding='utf-8')
+
+
+def _read(path):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise InputError(f'duplicate JSON key: {key!r}')
+            result[key] = value
+        return result
+    try:
+        if path.stat().st_size > 16 * 1024 * 1024:
+            raise InputError('input bundle manifest exceeds 16 MiB')
+        return _copy_json(json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=pairs))
+    except (ValueError, RecursionError) as exc:
+        raise InputError(f'invalid input bundle manifest: {exc}') from exc
+
+
+def prepare_inputs(data, directory, *, registry, base_directory, files, provenance=None):
+    """Prepare a NEW local directory and return its absolute Path.
+
+    ``files`` maps desired relative paths to explicitly selected local source
+    paths (relative to base_directory unless absolute). No directory recursion,
+    symlinks, URL fetching or inferred file dependencies. ``provenance`` optionally
+    maps the same paths to JSON objects; omitted provenance is marked unknown.
+    Model resolvers receive the staged directory as base_directory and must check
+    their references there. This is not an automatic dependency/physics validator.
+    """
+    dest = Path(directory).absolute()
+    if dest.exists() or dest.is_symlink():
+        raise FileExistsError(dest)
+    if type(files) is not dict:
+        raise InputError('files: expected relative-name to source-path mapping')
+    _names(files, assets=True)
+    try:
+        recipe = _copy_json(data)
+        metadata = _copy_json({} if provenance is None else provenance)
+    except RecursionError as exc:
+        raise InputError('input nesting is too deep') from exc
+    if type(metadata) is not dict or set(metadata) - set(files):
+        raise InputError('provenance: expected metadata only for declared assets')
+    if any(type(value) is not dict for value in metadata.values()):
+        raise InputError('provenance: each entry must be a JSON object')
+    base = Path(base_directory).resolve()
+    sources = {}
+    missing = []
+    for name, source in files.items():
+        try:
+            path = base / source
+        except TypeError as exc:
+            raise InputError(f'files[{name!r}]: expected local source path') from exc
+        if path.is_symlink() or not path.is_file():
+            missing.append(f'{name}: {source}')
+        else:
+            sources[name] = path
+    if missing:
+        raise InputError('missing or non-regular input files: ' + '; '.join(missing))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.salmonpy-input-', dir=dest.parent) as temporary:
+        stage = Path(temporary)
+        entries = {}
+        for name, source in sources.items():
+            target = stage/name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+            entries[name] = _record(target, metadata.get(name, {'source': 'unknown'}))
+        catalog = resolve_materials(recipe, registry=registry, base_directory=stage)
+        _write(stage/'materials.json', recipe)
+        _write(stage/'resolved.json', catalog.as_dict())
+        for name in ('materials.json', 'resolved.json'):
+            entries[name] = _record(stage/name, {'source': 'salmonpy.preparation'})
+        _write(stage/'manifest.json', {'schema': _SCHEMA, 'files': entries})
+        verify_inputs(stage)
+        # mkdir reserves the new name; never overwrite even if another job won a race.
+        dest.mkdir(exist_ok=False)
+        try:
+            for child in stage.iterdir():
+                child.rename(dest/child.name)
+        except BaseException:
+            shutil.rmtree(dest)
+            raise
+    return dest
+
+
+def verify_inputs(directory, *, manifest_sha256=None):
+    """Check inventory, sizes and SHA256 without importing/calling any backend.
+
+    Returns a detached manifest dictionary. Optional externally recorded manifest
+    hash anchors the transferred manifest. Without it this is an internal
+    consistency check, not authentication. Does not certify solver compatibility,
+    semantic completeness, physical accuracy or package dependencies.
+    """
+    root = Path(directory).absolute()
+    if root.is_symlink() or not root.is_dir():
+        raise InputError('input bundle must be a real directory')
+    manifest = root/'manifest.json'
+    if manifest.is_symlink() or not manifest.is_file():
+        raise InputError('missing or non-regular manifest.json')
+    if manifest_sha256 is not None:
+        if not isinstance(manifest_sha256, str) or not _DIGEST.fullmatch(manifest_sha256):
+            raise InputError('manifest_sha256: expected lowercase SHA256')
+        if _hash(manifest)[0] != manifest_sha256:
+            raise InputError('manifest SHA256 mismatch')
+    data = _read(manifest)
+    if type(data) is not dict or set(data) != {'schema', 'files'} or data['schema'] != _SCHEMA:
+        raise InputError('unsupported input bundle manifest')
+    entries = data['files']
+    if type(entries) is not dict or not {'materials.json', 'resolved.json'} <= entries.keys():
+        raise InputError('manifest must inventory materials.json and resolved.json')
+    if 'manifest.json' in entries:
+        raise InputError('manifest cannot inventory itself')
+    _names([*entries, 'manifest.json'])
+    directories = set()
+    for name, entry in entries.items():
+        if (type(entry) is not dict or set(entry) != {'sha256', 'size', 'provenance'}
+                or type(entry['size']) is not int or entry['size'] < 0
+                or type(entry['sha256']) is not str or not _DIGEST.fullmatch(entry['sha256'])
+                or type(entry['provenance']) is not dict):
+            raise InputError(f'invalid manifest entry: {name}')
+        directories.update(str(parent) for parent in PurePosixPath(name).parents if str(parent) != '.')
+    found = set()
+    for path in root.rglob('*'):
+        name = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            raise InputError(f'symlink in input bundle: {name}')
+        if path.is_dir():
+            if name not in directories:
+                raise InputError(f'unexpected directory: {name}')
+        elif path.is_file():
+            found.add(name)
+        else:
+            raise InputError(f'non-regular bundle member: {name}')
+    expected = set(entries) | {'manifest.json'}
+    if found != expected:
+        raise InputError(f'input inventory mismatch; missing={sorted(expected-found)}, extra={sorted(found-expected)}')
+    for name, entry in entries.items():
+        actual, size = _hash(root/name)
+        if actual != entry['sha256'] or size != entry['size']:
+            raise InputError(f'input checksum/size mismatch: {name}')
+    return data
+
+
+def _main():
+    parser = argparse.ArgumentParser(description='Verify a transferred input bundle without network access.')
+    parser.add_argument('directory')
+    parser.add_argument('--manifest-sha256')
+    args = parser.parse_args()
+    record = verify_inputs(args.directory, manifest_sha256=args.manifest_sha256)
+    print(json.dumps({'verified': True, 'files': len(record['files']),
+                      'scope': 'file integrity only'}, sort_keys=True))
+
+
+if __name__ == '__main__':
+    _main()

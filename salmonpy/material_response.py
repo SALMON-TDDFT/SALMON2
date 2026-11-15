@@ -7,6 +7,8 @@ from .errors import InputError, InputTypeError, RuntimeFailure
 from dataclasses import dataclass
 import numpy as np
 import time
+from collections.abc import Mapping
+from .config import _copy_json, _freeze, _identifier
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,7 @@ class SolverContext:
     solver_comm: object
     group_name: str
     point_ids: tuple
+    point_records: object = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,36 @@ class MaterialBinding:
     key: str
     provider: object
     backend: object
+    material_record: object = None
+
+    def __post_init__(self):
+        if self.material_record is not None:
+            from .point_runs import _identity
+            if not isinstance(self.material_record, Mapping):
+                raise InputError('material_record must be an identity mapping')
+            object.__setattr__(self, 'material_record', _freeze(_identity(dict(self.material_record))))
+
+
+def _point_metadata(plan, record, mapping):
+    if record is None and mapping is None:
+        return None
+    from .point_runs import _record
+    if record is None or not isinstance(mapping, Mapping):
+        raise InputError('point_record and point_map must be supplied together')
+    checked = _record(record)
+    if any(type(p) is not int for p in mapping) or set(mapping) != set(plan.point_ids):
+        raise InputError('point_map must cover exactly the integer transport points')
+    for value in mapping.values():
+        _identifier(value, 'point_map value')
+    names = [entry['point_id'] for entry in checked['points']]
+    if [mapping[p] for p in plan.point_ids] != names:
+        raise InputError('point record order must match explicit point_map in transport order')
+    owners = []
+    for p in plan.point_ids:
+        group = next(g for g in plan.groups if p in g.point_ids)
+        owners.append({'transport_point_id': p, 'point_id': mapping[p],
+                       'group_name': group.name, 'ranks': list(group.ranks)})
+    return {'point_run': checked, 'mpi_point_map': owners}
 
 
 def _response_timing(dt,integrator):
@@ -77,31 +110,42 @@ class ResponseSession:
     Every result is tagged implicitly by the fixed plan's point IDs and accepted
     step index. Initial A is zero; current is at the new endpoint. All units a.u.
     """
-    def __init__(self,context,bindings,*,dt):
+    def __init__(self,context,bindings,*,dt,point_record=None,point_map=None):
         self.context=context;self.dt=dt;self.step_index=0;self.failed=False;self.closed=False;self._registered=False
         self._measurements = _Measurements()
         self._adapters = {}
+        self._point_metadata = None
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
             if not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt required')
             if set(bindings)!=set(context.plan.point_ids): raise InputError('binding required for every point')
+            self._point_metadata = _point_metadata(context.plan, point_record, point_map)
             descriptors=[]
             keys={}
+            identities={}
             for p in context.plan.point_ids:
                 b=bindings[p]
                 if b.key in keys and keys[b.key] is not b:
                     raise InputError('reuse the same MaterialBinding instance for one material key')
                 keys[b.key]=b
+                if self._point_metadata is not None:
+                    entry = self._point_metadata['point_run']['points'][len(descriptors)]
+                    identity = {k: v for k, v in entry.items() if k != 'point_id'}
+                    if b.material_record is not None and dict(b.material_record) != identity:
+                        raise InputError('point identity differs from recorded binding')
+                    if identities.setdefault(b.key, identity) != identity:
+                        raise InputError('one cached binding key cannot identify different initial/material data')
                 mode=b.backend.execution;reduction=b.backend.reduction
                 if not b.key or not b.provider.identity or not b.backend.identity: raise InputError('stable binding identities required')
                 if mode not in ('collective','leader_only') or reduction not in ('sum','leader'): raise InputError('unsupported execution/reduction')
                 owner=next(g for g in context.plan.groups if p in g.point_ids)
                 if mode=='leader_only' and len(owner.ranks)!=1: raise InputError('leader-only backends require one rank per group')
                 descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt)))
-        except Exception as exc: error=str(exc)
+        except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         # Metadata agreement catches mismatched backend selection before callbacks.
+        descriptors = (descriptors, self._point_metadata)
         local=context.solver_comm.allgather(descriptors)
         mismatch=any(v!=descriptors for v in local)
         if context.is_leader:
@@ -109,19 +153,25 @@ class ResponseSession:
             mismatch=mismatch or any(v!=descriptors for v in all_descriptors)
         self._agree('binding descriptors differ across ranks' if mismatch else None)
         cache={}
-        callback_context=SolverContext(context.solver_comm,context.group.name,context.group.point_ids)
+        callback_records = None
+        if self._point_metadata is not None:
+            record = self._point_metadata['point_run']
+            callback_records = _freeze({p: {'run_id': record['run_id'], **entry}
+                                        for p, entry in zip(context.plan.point_ids, record['points'])
+                                        if p in context.group.point_ids})
+        callback_context=SolverContext(context.solver_comm,context.group.name,context.group.point_ids,callback_records)
         for point in context.group.point_ids:
             b=bindings[point];error=None
             try:
                 if b.key not in cache: cache[b.key]=b.provider.prepare(callback_context)
-            except Exception as exc: error=str(exc)
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             # Group-only agreement: groups can own different numbers of points.
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             try:
                 state=b.backend.create_state(cache[b.key],point,dt,callback_context)
                 if any(state is old for old in self.states.values()): raise InputError('backend reused mutable state across points')
-            except Exception as exc: error=str(exc)
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             self.states[point]=state
@@ -155,6 +205,49 @@ class ResponseSession:
 
     _agree = agree  # Compatibility for existing callers.
 
+    def identity_record(self):
+        """Detached agreed point/ownership metadata, or None on the legacy path."""
+        return _copy_json(self._point_metadata)
+
+    def save_arrays(self, directory=None, arrays=None, *, point_axes=None, metadata=None):
+        """Collective output; only field leader provides arguments and receives archive.
+
+        No additional stepping or units conversion. Errors propagate to every rank.
+        Output must follow plan.point_ids order. Does not create a restart.
+        """
+        from .point_runs import _axes
+        from .outputs import save_arrays
+        c = self.context
+        writer = c.group.role == 'field' and c.is_leader
+        error = None
+        checked = info = None
+        try:
+            if self.closed or self.failed or self._point_metadata is None:
+                raise InputError('saving point arrays requires an active identified session')
+            if writer:
+                if directory is None or not isinstance(arrays, Mapping):
+                    raise InputError('field leader must supply directory and arrays')
+                checked = {name: np.asarray(value) for name, value in arrays.items()}
+                axes = _axes(point_axes, {name: value.shape for name, value in checked.items()}, len(c.plan.point_ids))
+                info = _copy_json({} if metadata is None else metadata)
+                if type(info) is not dict or set(info) & {'point_run', 'point_axes', 'mpi_point_map'}:
+                    raise InputError('reserved point identity metadata keys')
+                info.update(self.identity_record(), point_axes=axes)
+            elif any(v is not None for v in (directory, arrays, point_axes, metadata)):
+                raise InputError('only field leader supplies output arguments')
+        except Exception as exc:
+            error = f'{type(exc).__name__}: {exc}'
+        self.agree(error)
+        archive = None
+        error = None
+        if writer:
+            try:
+                archive = save_arrays(directory, checked, metadata=info)
+            except Exception as exc:
+                error = f'{type(exc).__name__}: {exc}'
+        self.agree(error)
+        return archive
+
     def timing_records(self):
         """Collective point timing declarations, returned on every rank."""
         from .timing import matter_timing
@@ -162,7 +255,7 @@ class ResponseSession:
         try:
             records = {p: matter_timing(s, self.dt).to_dict() for p, s in self.states.items()}
         except Exception as exc:
-            error = str(exc)
+            error = f'{type(exc).__name__}: {exc}'
         self.agree(error)
         c = self.context
         groups = c.leaders.allgather(records) if c.is_leader else None
@@ -185,7 +278,7 @@ class ResponseSession:
                     if value.shape != (3,) or not np.isfinite(value).all():
                         raise InputError('initial current must be a finite 3-vector')
             except Exception as exc:
-                error = str(exc)
+                error = f'{type(exc).__name__}: {exc}'
             statuses = c.solver_comm.allgather((error, value is not None))
             if any(e for e, _ in statuses):
                 error = next(e for e, _ in statuses if e)
@@ -237,7 +330,7 @@ class ResponseSession:
             else:
                 if A is not None: raise InputError('only field leader supplies A')
                 values=np.empty_like(self._A)
-        except Exception as exc: error=str(exc)
+        except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         started = self._measurements.start()
         if c.is_leader: c.leaders.Bcast(values,root=c.field_group)
@@ -250,7 +343,7 @@ class ResponseSession:
             try:
                 j=np.array(self._adapters[point].step(values[k].copy()),dtype=np.float64,order="C",copy=True)
                 if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
-            except Exception as exc: error=str(exc)
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=c.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
             if b.backend.reduction=='sum': c.solver_comm.Allreduce(j,currents[i],op=MPI.SUM)
@@ -285,7 +378,7 @@ class ResponseSession:
         for point in self.context.group.point_ids:
             if point in self.states:
                 try: self.states[point].close()
-                except Exception as exc: error=str(exc)
+                except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self.closed=True
         if self._registered:
             self.context._dependents-=1;self._registered=False

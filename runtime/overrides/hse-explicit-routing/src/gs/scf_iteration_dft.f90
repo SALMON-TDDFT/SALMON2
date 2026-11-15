@@ -57,7 +57,8 @@ use dcdft
 #ifdef USE_HSE
 use exx_native, only: exx_pre_scf_initialize,exx_pre_scf_begin,exx_pre_scf_not_ready, &
   exx_pre_scf_count_ready,exx_pre_scf,exx_set_phase
-use exx_native, only: exx_enabled,exx_freeze,exx_check_localization,exx_adaptive_ready,exx_support_changed
+use exx_native, only: exx_enabled,exx_check_localization,exx_set_scf_flags, &
+  exx_adaptive_is_ready,exx_is_frozen,exx_support_has_changed
 use salmon_global, only: exx_mlwf_norm_fraction
 #endif
 #ifdef USE_HSE
@@ -101,7 +102,8 @@ type(s_band_dft) :: band
 type(s_dcdft),optional :: dc
 
 logical :: rion_update, flag_conv,pre_scf_pending
-integer :: i,j, icnt_conv_nomix
+integer :: i,j, icnt_conv_nomix,max_iterations
+real(8) :: scf_threshold
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_scalar) :: rho_old,Vlocal_old
 real(8) :: rNe
@@ -114,6 +116,11 @@ integer :: adaptive_comm,not_ready_local,not_ready_total,phase_status
 logical :: pre_scf_root,pre_scf_ready
 #endif
 
+max_iterations=nscf;scf_threshold=threshold
+if(system%gs_input_owned)then
+ max_iterations=system%gs_input%max_iterations
+ scf_threshold=system%gs_input%threshold
+endif
 mixing_age=Miter
 #ifdef USE_HSE
 if(.not.system%pre_scf%initialized)then
@@ -131,7 +138,7 @@ adaptive_exchange=(exx_enabled(system).or.exx_pre_scf(system)).and. &
   .not.(yn_dc=='y'.and.yn_exx_dc_mlwf=='n')
 if(adaptive_exchange)then
   ! Each static SCF starts with the full exchange operator.
-  exx_adaptive_ready=.false.
+  call exx_set_scf_flags(system,adaptive_ready=.false.)
 endif
 #endif
 
@@ -187,8 +194,8 @@ endif
 flag_conv = .false.
 sum1=1d9
 
-!DFT_Iteration : do iter=1,nscf
-DFT_Iteration : do iter=Miter+1,nscf
+!DFT_Iteration : do iter=1,max_iterations
+DFT_Iteration : do iter=Miter+1,max_iterations
 
 #ifdef USE_HSE
    iteration_support_changed=.false.
@@ -201,7 +208,7 @@ DFT_Iteration : do iter=Miter+1,nscf
      if(pre_scf_ready)then
        call exx_set_phase(system,.false.)
        call reset_mixing_rate(mixing)
-       exx_adaptive_ready=.true.
+       call exx_set_scf_flags(system,adaptive_ready=.true.)
        mixing_age=0
        sum1=huge(sum1)
        iteration_support_changed=.true.
@@ -218,15 +225,15 @@ DFT_Iteration : do iter=Miter+1,nscf
        endif
      endif
    endif
-   if(adaptive_exchange.and..not.exx_pre_scf(system).and..not.exx_adaptive_ready)then
+   if(adaptive_exchange.and..not.exx_pre_scf(system).and..not.exx_adaptive_is_ready(system))then
      ! Every fragment must reach the warm-up tolerance before any switches.
      ! This uses the selected SCF metric (density or potential), as does the
      ! final convergence test; readiness stays latched after this transition.
      not_ready_local=0
-     if(.not.(sum1<sqrt(threshold)))not_ready_local=1
+     if(.not.(sum1<sqrt(scf_threshold)))not_ready_local=1
      call comm_summation(not_ready_local,not_ready_total,adaptive_comm)
      if(not_ready_total==0)then
-       exx_adaptive_ready=.true.
+       call exx_set_scf_flags(system,adaptive_ready=.true.)
        mixing_age=0
        sum1=huge(sum1)
        iteration_support_changed=.true.
@@ -239,9 +246,9 @@ DFT_Iteration : do iter=Miter+1,nscf
 #else
    pre_scf_pending=.false.
 #endif
-   if( sum1 < threshold .and. .not.pre_scf_pending ) then
+   if( sum1 < scf_threshold .and. .not.pre_scf_pending ) then
 #ifdef USE_HSE
-      call exx_check_localization()
+      call exx_check_localization(system=system)
 #endif
       flag_conv = .true.
       if( ilevel_print.ge.3 .and. comm_is_root(nproc_id_global)) then
@@ -305,10 +312,10 @@ DFT_Iteration : do iter=Miter+1,nscf
          ! Occupations must use the current Ritz states and their fixed-H
          ! energies, not the previous iteration's spectrum. Do not rebuild
          ! exchange with old occupations after rotating the states.
-         saved_hse_freeze=exx_freeze
-         exx_freeze=.true.
+         saved_hse_freeze=exx_is_frozen(system)
+         call exx_set_scf_flags(system,freeze=.true.)
          call calc_eigen_energy(energy,spsi,shpsi,sttpsi,system,info,mg,V_local,stencil,srg,ppg)
-         exx_freeze=saved_hse_freeze
+         call exx_set_scf_flags(system,freeze=saved_hse_freeze)
        endif
 #endif
        call ne2mu_dcdft(mg,info,energy,spsi,dc,system)
@@ -560,19 +567,19 @@ DFT_Iteration : do iter=Miter+1,nscf
 end do DFT_Iteration
 #ifdef USE_HSE
 if(exx_pre_scf(system))error stop 'PBE pre-SCF unfinished; no hybrid ground state'
-if(system%pre_scf%threshold>0d0.and..not.(sum1<threshold)) &
+if(system%pre_scf%threshold>0d0.and..not.(sum1<scf_threshold)) &
   error stop 'Hybrid SCF after PBE pre-SCF not converged; ground state rejected'
 if(system%pre_scf%threshold>0d0.and..not.flag_conv)then
   flag_conv=.true.
   if(ilevel_print>=3.and.comm_is_root(nproc_id_global)) &
     write(*,'(a,i6,a,e15.8)') '  #GS converged at',Miter,' (last allowed iteration):',sum1
 endif
-call exx_check_localization()
+call exx_check_localization(system=system)
 #endif
 
 ! A BOMD step is not valid without a self-consistent electronic ground state.
 if(theory=='dft_md'.and.(is_global_hybrid(xc)))then
-  if(.not.(sum1<threshold))error stop 'PBEh40 BOMD: SCF not converged; ionic step rejected'
+  if(.not.(sum1<scf_threshold))error stop 'PBEh40 BOMD: SCF not converged; ionic step rejected'
 endif
 
 if(calc_mode/='DFT_BAND')then
@@ -591,11 +598,11 @@ contains
     logical,intent(out) :: changed
     integer :: local_event,total_events
     local_event=0
-    if(exx_support_changed)local_event=1
+    if(exx_support_has_changed(system))local_event=1
     call comm_summation(local_event,total_events,adaptive_comm)
     changed=total_events>0
     ! exx_native latches this flag until every SCF rank has seen the event.
-    exx_support_changed=.false.
+    call exx_set_scf_flags(system,support_changed=.false.)
   end subroutine consume_support_event
 #endif
 

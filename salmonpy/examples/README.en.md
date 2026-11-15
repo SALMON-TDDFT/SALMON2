@@ -135,3 +135,15 @@ python -m salmonpy.examples.snapshot_restore
 Checks LD/SBE and all four Python fields; installed kernels, no full SALMON required. See [snapshots](../SNAPSHOTS.en.md).
 
 Custom A-driven models can use one serial/MPI contract and an explicit conformance checker: [authoring guide](../MATERIALS.en.md), `python -m salmonpy.examples.custom_material`.
+
+Validate material IDs and custom settings with [material_config.py](material_config.py). No extra data; configuration only, no simulation.
+
+See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
+
+Stage local input files with [prepare_inputs.py](prepare_inputs.py); see the [guide](../PREPARATION.en.md). Supply a synthetic coefficient JSON and a new output directory.
+
+Prepare a structure/grid input bundle with [prepare_structure.py](prepare_structure.py); see [guide](../STRUCTURE.en.md). Requires ASE.
+
+Run two LD materials with explicit IDs: [configured_ld.py](configured_ld.py). Requires a new output directory and installed native library.
+
+Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../DFT_CONFIG.en.md). Requires an existing runtime and ASE/f90nml.

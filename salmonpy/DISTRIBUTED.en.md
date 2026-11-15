@@ -141,3 +141,6 @@ Custom loaders returning an existing TDDFTInitialState must wrap it in `TDDFTPre
 Current working profile: one material and one macro point per electronic MPI group. The API retains independent multi-state capability for future work, but the standard TDDFT sample assigns one point per group. LD-dominated Maxwell calculations instead use native spatial MPI FDTD with many local LD states; see FDTD_MATERIALS.en.md. These are distinct execution paths.
 
 For one serial model contract, the explicit conformance checker and the point-MPI adapter, see [MATERIALS.en.md](MATERIALS.en.md).
+
+For explicit identity propagation/output in MPI response sessions see
+[MPI_IDENTITY.en.md](MPI_IDENTITY.en.md). PointRun itself remains serial; restart is not provided.

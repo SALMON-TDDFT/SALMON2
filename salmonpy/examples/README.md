@@ -149,3 +149,15 @@ python -m salmonpy.examples.snapshot_restore
 LD・SBEと4種類のPythonの場を検査します。導入済みカーネルが必要で、SALMON本体は不要です。[保存と復元](../SNAPSHOTS.md)を参照してください。
 
 自作A駆動モデルは直列・MPIで同じ契約を使えます。[作り方と適合チェッカー](../MATERIALS.md)、`python -m salmonpy.examples.custom_material`を参照してください。
+
+物質ID・自作バックエンドの設定検証は [material_config.py](material_config.py)。追加データ不要で、設定だけを検証します。
+
+See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
+
+入力ファイルを転送用にまとめる例：[prepare_inputs.py](prepare_inputs.py)。[手順](../PREPARATION.md)に従い、ローカルの合成係数JSONと新規出力先を指定します。
+
+構造ファイル・物質ID・幅指定から転送用入力を作る例：[prepare_structure.py](prepare_structure.py)。[手順](../STRUCTURE.md)。ASEが必要です。
+
+物質ID付き設定からLD二物質を実行：[configured_ld.py](configured_ld.py)。新規出力先と同梱nativeライブラリが必要です。
+
+物質設定からSiのDFT→TDDFTを実行：[configured_si.py](configured_si.py)。[手順](../DFT_CONFIG.md)。既存ランタイムとASE/f90nmlが必要です。

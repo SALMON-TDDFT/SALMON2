@@ -232,7 +232,7 @@ class CoupledStepper:
     and ParallelContext in that order. A step failure invalidates the response.
     """
     @classmethod
-    def from_multiscale(cls, context, bindings, field=None):
+    def from_multiscale(cls, context, bindings, field=None, *, point_record=None, point_map=None):
         """Collective factory. Only the single field rank supplies a fresh state.
 
         Validate A(0) before creating any material state. All ranks call step,
@@ -257,7 +257,7 @@ class CoupledStepper:
         if context.is_leader:
             dt = context.leaders.bcast(dt, root=context.field_group)
         dt = context.solver_comm.bcast(dt, root=0)
-        response = ResponseSession(context, bindings, dt=dt)
+        response = ResponseSession(context, bindings, dt=dt, point_record=point_record, point_map=point_map)
         try:
             return cls(response, adapter)
         except BaseException:

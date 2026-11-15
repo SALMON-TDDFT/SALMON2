@@ -29,7 +29,7 @@ module exx_native
   use exx_wannier
   use exx_symmetry
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
-  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector, &
+  use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_opt,yn_predictor_corrector, &
     yn_symmetrized_stencil,propagator,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
@@ -51,6 +51,8 @@ module exx_native
   type(spatial_exx_state),target,save :: spatial
   type(s_exx_wannier),save :: wannier
   public :: exx_scf_prepare,exx_scf_residual
+  public :: exx_bind_gs_system
+  public :: exx_set_scf_flags,exx_adaptive_is_ready,exx_is_frozen,exx_support_has_changed
   public::exx_factor_begin,exx_factor_endpoint,exx_factor_checkpoint,exx_factor_restart_pending
   public::exx_factor_mode_metadata
   public::exx_ptcn_begin,exx_ptcn_predict_inner,exx_ptcn_accept
@@ -192,6 +194,17 @@ contains
     system%salmonpy_hse_owner=>owner
     status=0
   end subroutine
+  subroutine exx_bind_gs_system(system,info,owner,status)
+    type(s_dft_system),intent(inout)::system
+    type(s_parallel_info),intent(in)::info
+    type(s_exx_rt_state),target,intent(inout)::owner
+    integer,intent(out)::status
+    ! 2 means the GS entry retains the legacy owner; 1 is a binding conflict.
+    status=2
+    if(theory/='dft'.or.yn_opt/='n')return
+    if(.not.native_owner_supported(system,info))return
+    call exx_bind_system(system,owner,status)
+  end subroutine
   subroutine exx_unbind_system(system)
     type(s_dft_system),intent(inout)::system
     nullify(system%salmonpy_hse_owner)
@@ -229,6 +242,37 @@ contains
       owner=>rt_owned
     endif
   end function resolve_rt_context
+  subroutine exx_set_scf_flags(system,adaptive_ready,freeze,support_changed)
+    type(s_dft_system),intent(in)::system
+    logical,optional,intent(in)::adaptive_ready,freeze,support_changed
+    type(s_exx_rt_state),pointer::owner
+    owner=>resolve_rt_context(system=system)
+    if(present(adaptive_ready))owner%exx_adaptive_ready=adaptive_ready
+    if(present(freeze))owner%exx_freeze=freeze
+    if(present(support_changed))owner%exx_support_changed=support_changed
+  end subroutine
+
+  logical function exx_adaptive_is_ready(system)
+    type(s_dft_system),intent(in)::system
+    type(s_exx_rt_state),pointer::owner
+    owner=>resolve_rt_context(system=system)
+    exx_adaptive_is_ready=owner%exx_adaptive_ready
+  end function
+
+  logical function exx_is_frozen(system)
+    type(s_dft_system),intent(in)::system
+    type(s_exx_rt_state),pointer::owner
+    owner=>resolve_rt_context(system=system)
+    exx_is_frozen=owner%exx_freeze
+  end function
+
+  logical function exx_support_has_changed(system)
+    type(s_dft_system),intent(in)::system
+    type(s_exx_rt_state),pointer::owner
+    owner=>resolve_rt_context(system=system)
+    exx_support_has_changed=owner%exx_support_changed
+  end function
+
   logical function thermal_scf_damping(system)
     type(s_dft_system),intent(in) :: system
     thermal_scf_damping=exx_enabled(system).and.theory=='dft'.and.yn_spinorbit=='y'.and. &
@@ -906,11 +950,12 @@ contains
     exx_state_owner%ptcn_accepted_step=exx_state_owner%ptcn_accepted_step+1
   end subroutine
 
-  subroutine exx_check_localization(rt_context)
+  subroutine exx_check_localization(rt_context,system)
     implicit none
+    type(s_dft_system),optional,intent(in)::system
     type(s_exx_rt_state),target,optional,intent(inout)::rt_context
     type(s_exx_rt_state),pointer::exx_state_owner
-    exx_state_owner=>resolve_rt_context(rt_context)
+    exx_state_owner=>resolve_rt_context(rt_context,system)
     if(dc_canonical())return
     ! A density criterion cannot certify a gauge-dependent truncated operator.
     if(exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0.and..not.exx_state_owner%adaptive_active) &

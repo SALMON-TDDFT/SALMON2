@@ -87,7 +87,15 @@ def run(mode):
             expect_collective_error(world, lambda: CoupledStepper.from_multiscale(context, bindings, field), 'point 19')
             assert context._dependents == 0, 'rejected timing must release the response'
             return None
-        coupled = CoupledStepper.from_multiscale(context, bindings, field)
+        kwargs = {}
+        if mode == 'identified':
+            record = {'schema': 'salmonpy.point-run/1', 'run_id': 'ms1d-test', 'points': [
+                {'point_id': name, 'material_id': name, 'definition_digest': 'a'*64}
+                for name in ('right', 'left')]}
+            kwargs = {'point_record': record, 'point_map': {4: 'right', 19: 'left'}}
+        coupled = CoupledStepper.from_multiscale(context, bindings, field, **kwargs)
+        if mode == 'identified':
+            assert coupled.response.identity_record()['point_run'] == record
         frames = []
         old_clock = response_module.time.perf_counter
         try:
@@ -130,6 +138,8 @@ def main():
     run('initial_A')
     run('timing_failure')
     normal = run('normal')
+    identified = run('identified')
+    if world.rank == 0: np.testing.assert_array_equal(normal, identified)
     broken = run('clock_failure')
     if world.rank == 0: np.testing.assert_array_equal(normal, broken)
     run('backend_failure')

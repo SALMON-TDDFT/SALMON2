@@ -28,7 +28,7 @@ rejected, never rounded or inferred from atomic numbers. The supplied atomic
 number and potential/XC identity still need verification; KY does not identify
 its element in this charge header. Odd-electron closed shells are unsupported.
 
-`states`, `grid` and `kmesh` remain required. No automatic setting can guarantee
+`states` and `kmesh` remain required. Specify either `grid` or `grid_spacing` with `grid_spacing_unit`; see [structure/grid preparation](STRUCTURE.en.md). No automatic setting can guarantee
 convergence. Choose initial values against the purpose and memory/CPU budget,
 then check the target observable against grid, k-point, band and time-step changes.
 The ASE Calculator also accepts omitted electrons, resolving/checking them for

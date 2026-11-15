@@ -17,7 +17,62 @@
 
 #include "config.h"
 
-subroutine main_dft
+module salmonpy_gs_context
+use structures
+use salmon_xc,only:finalize_xc
+#ifdef USE_HSE
+use exx_rt_state,only:s_exx_rt_state,rt_state_clear
+use exx_native,only:exx_unbind_system
+#endif
+implicit none
+private
+public::s_gs_context,gs_run,gs_close,gs_probe_write,gs_input_config
+! Internal retained GS storage. Actual contexts must have TARGET and a stable address.
+! Never copy a live context; global inputs remain shared.
+type s_gs_context
+ private
+ logical::active=.false.
+ integer::iterations=0
+type(s_rgrid) :: lg
+type(s_rgrid) :: mg
+type(s_parallel_info) :: info
+type(s_sendrecv_grid) :: srg, srg_scalar
+type(s_orbital) :: spsi,shpsi,sttpsi
+type(s_dft_system) :: system
+type(s_poisson) :: poisson
+type(s_stencil) :: stencil
+type(s_xc_functional) :: xc_func
+type(s_scalar) :: rho,rho_jm,Vh,Vpsl
+type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
+type(s_reciprocal_grid) :: fg
+type(s_pp_info) :: pp
+type(s_pp_grid) :: ppg
+type(s_pp_nlcc) :: ppn
+type(s_dft_energy) :: energy
+type(s_ewald_ion_ion) :: ewald
+type(s_cg)     :: cg
+type(s_mixing) :: mixing
+type(s_ofile)  :: ofl
+type(s_band_dft) ::band
+type(s_opt) :: opt
+type(s_dcdft) :: dc
+type(s_unfold) :: unfold
+
+#ifdef USE_HSE
+ type(s_exx_rt_state)::hse
+ logical::hse_bound=.false.
+#endif
+end type
+contains
+subroutine gs_input_config(value)
+ use salmon_global,only:nscf,threshold,exx_pre_scf_threshold,exx_pre_scf_steps
+ type(s_gs_run_config),intent(out)::value
+ value%max_iterations=nscf;value%threshold=threshold
+ value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
+end subroutine
+subroutine gs_run(ctx,status,config)
+use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+use exx_functional,only:is_hybrid
 use math_constants, only: pi, zi
 use structures
 use inputoutput
@@ -50,9 +105,17 @@ use dcdft
 use lcfo
 use atomic_orbital, only: verify_atomic_orbital_consistency !!DEBUG
 #ifdef USE_HSE
-use exx_native,only:exx_pre_scf_initialize,exx_pre_scf,exx_set_phase
+use exx_native,only:exx_pre_scf_initialize,exx_pre_scf,exx_set_phase,exx_bind_gs_system,exx_unbind_system
+use exx_rt_state,only:s_exx_rt_state,rt_state_clear
 #endif
 implicit none
+type(s_gs_context),target,intent(inout)::ctx
+integer,intent(out)::status
+type(s_gs_run_config),optional,intent(in)::config
+type(s_gs_run_config)::selected
+#ifdef USE_HSE
+ integer :: gs_hse_status
+#endif
 integer :: phase_status
 integer :: ix,iy,iz
 integer :: Miter,iatom,jj,nspin
@@ -60,30 +123,6 @@ logical :: pre_scf_root
 real(8) :: sum1
 character(100) :: comment_line
 
-type(s_rgrid) :: lg
-type(s_rgrid) :: mg
-type(s_parallel_info) :: info
-type(s_sendrecv_grid) :: srg, srg_scalar
-type(s_orbital) :: spsi,shpsi,sttpsi
-type(s_dft_system) :: system
-type(s_poisson) :: poisson
-type(s_stencil) :: stencil
-type(s_xc_functional) :: xc_func
-type(s_scalar) :: rho,rho_jm,Vh,Vpsl
-type(s_scalar),allocatable :: V_local(:),rho_s(:),Vxc(:)
-type(s_reciprocal_grid) :: fg
-type(s_pp_info) :: pp
-type(s_pp_grid) :: ppg
-type(s_pp_nlcc) :: ppn
-type(s_dft_energy) :: energy
-type(s_ewald_ion_ion) :: ewald
-type(s_cg)     :: cg
-type(s_mixing) :: mixing
-type(s_ofile)  :: ofl
-type(s_band_dft) ::band
-type(s_opt) :: opt
-type(s_dcdft) :: dc
-type(s_unfold) :: unfold
 
 logical :: rion_update
 logical :: flag_opt_conv
@@ -92,10 +131,32 @@ integer :: iter_band_kpt, iter_band_kpt_end, iter_band_kpt_stride
 logical :: is_checkpoint_iter, is_shutdown_time
 integer :: ilevel_print
 
+status=1
+if(ctx%active)return
+if(present(config))then
+ selected=config
+else
+ call gs_input_config(selected)
+endif
+if(selected%max_iterations<1.or.selected%max_iterations>=huge(0))return
+if(selected%pre_scf_steps<1)return
+if(.not.ieee_is_finite(selected%threshold))return
+if(.not.ieee_is_finite(selected%pre_scf_threshold))return
+if(selected%threshold<0d0.or.selected%pre_scf_threshold<0d0)return
+! Explicit values must satisfy the same semantic requirements as namelist inputs.
+if(selected%pre_scf_threshold>0d0)then
+ if(theory/='dft'.or.yn_restart/='n'.or.yn_md/='n'.or.yn_opt/='n'.or..not.is_hybrid(xc))return
+ if(yn_dc=='y'.and.temperature<=0d0)return
+ if(checkpoint_interval>0.or.time_shutdown>0d0)return
+ if(method_mixing=='simple_potential')return
+ if(convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')return
+endif
 if(theory=='dft_band'.and.iperiodic/=3) return
+ctx%active=.true.
+ctx%system%gs_input=selected;ctx%system%gs_input_owned=.true.
 
 if(yn_dc=='y') then
-  call init_dcdft(dc,pp,mixing,ewald)
+  call init_dcdft(ctx%dc,ctx%pp,ctx%mixing,ctx%ewald)
   ilevel_print = 0
 else
   ilevel_print = 3
@@ -106,47 +167,54 @@ if(yn_jm=='y') call check_condition_jm
 
 ! Set the temporary functional before initialization evaluates any potential.
 #ifdef USE_HSE
-call exx_pre_scf_initialize(system,exx_pre_scf_threshold,exx_pre_scf_steps,phase_status)
+call exx_pre_scf_initialize(ctx%system,selected%pre_scf_threshold,selected%pre_scf_steps,phase_status)
 if(phase_status/=0)error stop 'Invalid pre-SCF configuration'
-if(yn_dc=='y')call exx_set_phase(dc%system_tot,exx_pre_scf(system))
+if(yn_dc=='y')call exx_set_phase(ctx%dc%system_tot,exx_pre_scf(ctx%system))
 pre_scf_root=comm_is_root(nproc_id_global)
-if(yn_dc=='y')pre_scf_root=comm_is_root(dc%id_tot)
-if(exx_pre_scf(system).and.pre_scf_root) &
-  write(*,'(a,es14.6,a,i0)') 'EXX_PRE_SCF PBE stage: threshold=',system%pre_scf%threshold, &
-                          ' consecutive steps=',system%pre_scf%required_steps
+if(yn_dc=='y')pre_scf_root=comm_is_root(ctx%dc%id_tot)
+if(exx_pre_scf(ctx%system).and.pre_scf_root) &
+  write(*,'(a,es14.6,a,i0)') 'EXX_PRE_SCF PBE stage: threshold=',ctx%system%pre_scf%threshold, &
+                          ' consecutive steps=',ctx%system%pre_scf%required_steps
 #endif
-call init_xc(xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
+call init_xc(ctx%xc_func, spin, cval, xcname=xc, xname=xname, cname=cname)
 
 call timer_begin(LOG_TOTAL)
 call timer_begin(LOG_INIT_GS)
 
 
 ! please move folloings into initialization_dft
-call init_dft(nproc_group_global,info,lg,mg,system,stencil,fg,poisson,srg,srg_scalar,ofl,unfold)
-allocate( rho_s(system%nspin),V_local(system%nspin),Vxc(system%nspin) )
+call init_dft(nproc_group_global,ctx%info,ctx%lg,ctx%mg,ctx%system,ctx%stencil,ctx%fg,ctx%poisson, &
+  ctx%srg,ctx%srg_scalar,ctx%ofl,ctx%unfold)
+#ifdef USE_HSE
+call exx_bind_gs_system(ctx%system,ctx%info,ctx%hse,gs_hse_status)
+if(gs_hse_status==1)error stop 'GS HSE owner binding conflict'
+ctx%hse_bound=gs_hse_status==0
+if(ctx%hse_bound.and.comm_is_root(nproc_id_global))write(*,'(a)')'EXX_GS_OWNER explicit'
+#endif
+allocate( ctx%rho_s(ctx%system%nspin),ctx%v_local(ctx%system%nspin),ctx%vxc(ctx%system%nspin) )
 
-call initialization1_dft( system, energy, stencil, fg, poisson,  &
-                          lg, mg,   &
-                          info,  &
-                          srg, srg_scalar,  &
-                          rho, rho_jm, rho_s, Vh, V_local, Vpsl, Vxc,  &
-                          spsi, shpsi, sttpsi,  &
-                          pp, ppg, ppn,  &
-                          ofl )
+call initialization1_dft( ctx%system, ctx%energy, ctx%stencil, ctx%fg, ctx%poisson,  &
+                          ctx%lg, ctx%mg,   &
+                          ctx%info,  &
+                          ctx%srg, ctx%srg_scalar,  &
+                          ctx%rho, ctx%rho_jm, ctx%rho_s, ctx%vh, ctx%v_local, ctx%vpsl, ctx%vxc,  &
+                          ctx%spsi, ctx%shpsi, ctx%sttpsi,  &
+                          ctx%pp, ctx%ppg, ctx%ppn,  &
+                          ctx%ofl )
 
 call initialization2_dft( Miter, nspin, rion_update,  &
-                          system, energy, ewald, stencil, fg, poisson,&
-                          lg, mg, info,   &
-                          srg, srg_scalar,  &
-                          rho, rho_jm, rho_s, Vh,V_local, Vpsl, Vxc,  &
-                          spsi, shpsi, sttpsi,  &
-                          pp, ppg, ppn,   &
-                          xc_func, mixing )
+                          ctx%system, ctx%energy, ctx%ewald, ctx%stencil, ctx%fg, ctx%poisson,&
+                          ctx%lg, ctx%mg, ctx%info,   &
+                          ctx%srg, ctx%srg_scalar,  &
+                          ctx%rho, ctx%rho_jm, ctx%rho_s, ctx%vh,ctx%v_local, ctx%vpsl, ctx%vxc,  &
+                          ctx%spsi, ctx%shpsi, ctx%sttpsi,  &
+                          ctx%pp, ctx%ppg, ctx%ppn,   &
+                          ctx%xc_func, ctx%mixing )
 
 
 Miopt = 0
 nopt_max = 1
-if(yn_opt=='y') call initialization_opt(Miopt,opt,system,flag_opt_conv,nopt_max,ofl)
+if(yn_opt=='y') call initialization_opt(Miopt,ctx%opt,ctx%system,flag_opt_conv,nopt_max,ctx%ofl)
 
 call timer_end(LOG_INIT_GS)
 
@@ -163,19 +231,19 @@ if(iopt>=2)then
   call timer_begin(LOG_INIT_GS)
   Miter = 0        ! Miter: Iteration counter set to zero
   rion_update = .true.
-  call dealloc_init_ps(ppg)
-  call init_ps(lg,mg,system,info,fg,poisson,pp,ppg,Vpsl)
-  call calc_nlcc(pp, system, mg, ppn)
-  if(yn_auto_mixing=='y') call reset_mixing_rate(mixing)
+  call dealloc_init_ps(ctx%ppg)
+  call init_ps(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%fg,ctx%poisson,ctx%pp,ctx%ppg,ctx%vpsl)
+  call calc_nlcc(ctx%pp, ctx%system, ctx%mg, ctx%ppn)
+  if(yn_auto_mixing=='y') call reset_mixing_rate(ctx%mixing)
   call timer_end(LOG_INIT_GS)
 end if
 
 !---------------------------------------- Band Iteration
 
 if(theory=='dft_band')then
-   call init_band_dft(system,band) ! --> system%wtk=0.0
-   iter_band_kpt_end    = band%num_band_kpt
-   iter_band_kpt_stride = system%nk
+   call init_band_dft(ctx%system,ctx%band) ! --> system%wtk=0.0
+   iter_band_kpt_end    = ctx%band%num_band_kpt
+   iter_band_kpt_stride = ctx%system%nk
 else
    iter_band_kpt_end    = 1
    iter_band_kpt_stride = 1
@@ -186,7 +254,7 @@ call timer_enable_sub
 Band_Iteration : do iter_band_kpt= 1, iter_band_kpt_end, iter_band_kpt_stride
 
 if(theory=='dft_band')then
-   call calc_band_write(iter_band_kpt,system,band,info)
+   call calc_band_write(iter_band_kpt,ctx%system,ctx%band,ctx%info)
 end if
 
 
@@ -199,29 +267,29 @@ call timer_begin(LOG_GS_ITERATION)
 !------------------------------------ SCF Iteration
 !Iteration loop for SCF (DFT_Iteration)
 call scf_iteration_dft( Miter,rion_update,sum1,  &
-                        system,energy,ewald,  &
-                        lg,mg,  &
-                        info,  &
-                        poisson,fg,  &
-                        cg,mixing,  &
-                        stencil,  &
-                        srg,srg_scalar,   &
-                        spsi,shpsi,sttpsi,  &
-                        rho,rho_jm,rho_s,  &
-                        V_local,Vh,Vxc,Vpsl,xc_func,  &
-                        pp,ppg,ppn,  &
-                        band, ilevel_print, dc)
+                        ctx%system,ctx%energy,ctx%ewald,  &
+                        ctx%lg,ctx%mg,  &
+                        ctx%info,  &
+                        ctx%poisson,ctx%fg,  &
+                        ctx%cg,ctx%mixing,  &
+                        ctx%stencil,  &
+                        ctx%srg,ctx%srg_scalar,   &
+                        ctx%spsi,ctx%shpsi,ctx%sttpsi,  &
+                        ctx%rho,ctx%rho_jm,ctx%rho_s,  &
+                        ctx%v_local,ctx%vh,ctx%vxc,ctx%vpsl,ctx%xc_func,  &
+                        ctx%pp,ctx%ppg,ctx%ppn,  &
+                        ctx%band, ilevel_print, ctx%dc)
 
 
 if(theory=='dft_band')then
-   call write_band(system,energy)
+   call write_band(ctx%system,ctx%energy)
 end if
 
 ! output the wavefunctions for next GS calculations
 if(write_gs_wfn_k == 'y') then !this input keyword is going to be removed....
    select case(iperiodic)
    case(3)
-      call write_wfn(lg,mg,spsi,info,system)
+      call write_wfn(ctx%lg,ctx%mg,ctx%spsi,ctx%info,ctx%system)
       ! Experimental Implementation of Inner-Product Outputs:
       ! call write_prod_dk_data(lg, mg, system, info, spsi)
    case(0)
@@ -233,8 +301,8 @@ end if
 if(yn_out_tm  == 'y'.or. yn_out_tm_bin == 'y'.or.yn_out_gs_sgm_eps=='y') then
    select case(iperiodic)
    case(3)
-      call write_k_data(system,stencil)  !need? (probably remove later)
-      call write_tm_data(spsi,system,info,mg,stencil,srg,ppg,energy)
+      call write_k_data(ctx%system,ctx%stencil)  !need? (probably remove later)
+      call write_tm_data(ctx%spsi,ctx%system,ctx%info,ctx%mg,ctx%stencil,ctx%srg,ctx%ppg,ctx%energy)
    case(0)
      write(*,*) "error: yn_out_tm='y','yn_out_tm_bin='y',yn_out_gs_sgm_eps='y' & iperiodic=0"
   end select
@@ -242,13 +310,13 @@ end if
 
    ! force
    if(yn_jm=='n' .and. yn_dc=="n")then
-     call calc_force(system,pp,fg,info,mg,stencil,poisson,srg,ppg,spsi,ewald)
+     call calc_force(ctx%system,ctx%pp,ctx%fg,ctx%info,ctx%mg,ctx%stencil,ctx%poisson,ctx%srg,ctx%ppg,ctx%spsi,ctx%ewald)
      if(comm_is_root(nproc_id_global))then
         write(*,*) "===== force ====="
         do iatom=1,natom
            select case(unit_system)
-           case('au','a.u.'); write(*,300)iatom,(system%Force(ix,iatom),ix=1,3)
-           case('A_eV_fs'  ); write(*,300)iatom,(system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
+           case('au','a.u.'); write(*,300)iatom,(ctx%system%Force(ix,iatom),ix=1,3)
+           case('A_eV_fs'  ); write(*,300)iatom,(ctx%system%Force(ix,iatom)*au_energy_ev/au_length_aa,ix=1,3)
            end select
         end do
 300   format(i6,3e16.8)
@@ -263,40 +331,40 @@ call timer_disable_sub
 
 call timer_begin(LOG_DEINIT_GS_ITERATION)
 if(yn_opt=='y') then
-   call structure_opt_check(iopt,flag_opt_conv,system%Force)
-   if(.not.flag_opt_conv) call structure_opt(opt,iopt,system)
+   call structure_opt_check(iopt,flag_opt_conv,ctx%system%Force)
+   if(.not.flag_opt_conv) call structure_opt(ctx%opt,iopt,ctx%system)
    !! Rion is old variables to be removed
    !! but currently it is used in many subroutines.
    !!Rion(:,:) = system%Rion(:,:)
 
    write(comment_line,10) iopt
-   call write_xyz(comment_line,"add","r  ",system,ofl)
+   call write_xyz(comment_line,"add","r  ",ctx%system,ctx%ofl)
 10 format("#opt iteration step=",i5)
 
    if(comm_is_root(nproc_id_global))then
       write(*,*) "atomic coordinate"
       do iatom=1,natom
          write(*,20) "'"//trim(atom_name(iatom))//"'",  &
-                   (system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
+                   (ctx%system%Rion(jj,iatom)*ulength_from_au,jj=1,3), &
                    Kion(iatom), flag_opt_atom(iatom)
       end do
 20    format(a5,3f16.8,i3,a3)
    end if
 
    if(flag_opt_conv) then
-      call structure_opt_fin(opt)
+      call structure_opt_fin(ctx%opt)
    else
       is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(iopt,checkpoint_interval) == 0)
       is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)
 
       if(is_checkpoint_iter .or. is_shutdown_time) then
-         if (is_shutdown_time .and. comm_is_root(info%id_rko)) then
+         if (is_shutdown_time .and. comm_is_root(ctx%info%id_rko)) then
            print *, 'shutdown the calculation, iopt =', iopt
          end if
 
-         call checkpoint_gs(lg,mg,system,info,spsi,iopt,mixing)
+         call checkpoint_gs(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%spsi,iopt,ctx%mixing)
          call comm_sync_all
-         call checkpoint_opt(iopt,opt)
+         call checkpoint_opt(iopt,ctx%opt)
          if(comm_is_root(nproc_id_global))then
             write(*,'(a,i5)')"  checkpoint data is printed: iopt=", iopt
          endif
@@ -328,23 +396,24 @@ call fipp_stop ! performance profiling
 call timer_begin(LOG_WRITE_GS_RESULTS)
 
 if(yn_dc=='y') then
-  if(yn_dc_lcfo == 'y') call dc_lcfo(lg,mg,system,info,stencil,ppg,energy,v_local,spsi,shpsi,sttpsi,srg,dc)
-  call write_total_dcdft(system,dc)
+  if(yn_dc_lcfo == 'y') call dc_lcfo(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%stencil,ctx%ppg,ctx%energy, &
+    ctx%v_local,ctx%spsi,ctx%shpsi,ctx%sttpsi,ctx%srg,ctx%dc)
+  call write_total_dcdft(ctx%system,ctx%dc)
 end if
 
 ! write GS: basic data
-if(yn_dc=='n') call write_band_information(system,energy)
-call write_eigen(ofl,system,energy)
-call write_info_data(Miter,system,energy,pp)
-call write_k_data(system,stencil)
-if(yn_spinorbit=='y') call write_mag_decomposed_gs(system,mg,info,spsi)
+if(yn_dc=='n') call write_band_information(ctx%system,ctx%energy)
+call write_eigen(ctx%ofl,ctx%system,ctx%energy)
+call write_info_data(Miter,ctx%system,ctx%energy,ctx%pp)
+call write_k_data(ctx%system,ctx%stencil)
+if(yn_spinorbit=='y') call write_mag_decomposed_gs(ctx%system,ctx%mg,ctx%info,ctx%spsi)
 
 ! write GS: analysis option
-if(yn_out_psi =='y') call write_psi(lg,mg,system,info,spsi)
-if(yn_out_dns =='y') call write_dns(lg,mg,system,info,rho_s)
-if(yn_out_dos =='y') call write_dos(system,energy)
-if(yn_out_pdos=='y') call write_pdos(lg,mg,system,info,pp,energy,spsi)
-if(yn_out_elf =='y') call write_elf(0,lg,mg,system,info,stencil,rho,srg,srg_scalar,spsi)
+if(yn_out_psi =='y') call write_psi(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%spsi)
+if(yn_out_dns =='y') call write_dns(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%rho_s)
+if(yn_out_dos =='y') call write_dos(ctx%system,ctx%energy)
+if(yn_out_pdos=='y') call write_pdos(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%pp,ctx%energy,ctx%spsi)
+if(yn_out_elf =='y') call write_elf(0,ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%stencil,ctx%rho,ctx%srg,ctx%srg_scalar,ctx%spsi)
 
 ! if(comm_is_root(nproc_id_global)) call verify_atomic_orbital_consistency(system,pp,lg,mg,nproc_id_global) !!DEBUG
 
@@ -357,12 +426,12 @@ if(write_gs_restart_data=="no") then
       write(*,'(a)')"  no restart data writing."
 else if(write_gs_restart_data.ne."checkpoint_only") then
    if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing restart data..."
-   call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing,ofl%dir_out_restart)
+   call checkpoint_gs(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%spsi,Miter,ctx%mixing,ctx%ofl%dir_out_restart)
    call comm_sync_all
    if(yn_opt=='y') then
       if(.not.flag_opt_conv) then
          call comm_sync_all
-         call checkpoint_opt(nopt_max,opt,ofl%dir_out_restart)
+         call checkpoint_opt(nopt_max,ctx%opt,ctx%ofl%dir_out_restart)
          call comm_sync_all
       endif
    endif
@@ -377,7 +446,7 @@ endif
 if(yn_self_checkpoint=='y') then
    if(comm_is_root(nproc_id_global)) &
    write(*,'(a)')"  writing restart data in checkpoint format ..."
-   call checkpoint_gs(lg,mg,system,info,spsi,Miter,mixing)
+   call checkpoint_gs(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%spsi,Miter,ctx%mixing)
    call comm_sync_all
 endif
 if(comm_is_root(nproc_id_global)) write(*,'(a)')"  writing completed."
@@ -386,17 +455,111 @@ call timer_end(LOG_WRITE_GS_DATA)
 !call timer_begin(LOG_WRITE_GS_INFO)  !if needed, please take back, sory: AY
 !call timer_end(LOG_WRITE_GS_INFO)
 
-call finalize_xc(xc_func)
+! Owned XC/HSE resources remain live until gs_close.
 
 if(yn_dc=='y') then
 ! override (restore)
-  nproc_group_global = dc%icomm_tot
-  nproc_id_global = dc%id_tot
-  nproc_size_global = dc%isize_tot
+  nproc_group_global = ctx%dc%icomm_tot
+  nproc_id_global = ctx%dc%id_tot
+  nproc_size_global = ctx%dc%isize_tot
   call comm_sync_all
 end if
 
 call timer_end(LOG_TOTAL)
 
 
-end subroutine main_dft
+ctx%iterations=Miter
+status=0
+end subroutine gs_run
+
+subroutine gs_close(ctx)
+ type(s_gs_context),target,intent(inout)::ctx
+ type(s_gs_context)::empty
+ if(.not.ctx%active)return
+ call finalize_xc(ctx%xc_func)
+#ifdef USE_HSE
+ if(ctx%hse_bound)then
+  call exx_unbind_system(ctx%system)
+  call rt_state_clear(ctx%hse)
+ endif
+#endif
+ ctx=empty
+end subroutine
+subroutine gs_probe_write(ctx,unit)
+ type(s_gs_context),intent(in)::ctx
+ integer,intent(in)::unit
+ integer::i,j
+ if(.not.ctx%active)error stop 'GS probe requires a live context'
+ write(unit)ctx%iterations,ctx%energy%E_tot,ctx%energy%E_xc
+ write(unit)ctx%spsi%zwf,ctx%rho%f,ctx%vh%f,ctx%vpsl%f
+ write(unit)ctx%system%rocc,ctx%system%Force
+ if(allocated(ctx%mixing%rho_in))then
+  do i=1,size(ctx%mixing%rho_in)
+   if(allocated(ctx%mixing%rho_in(i)%f))write(unit)ctx%mixing%rho_in(i)%f
+  enddo
+ endif
+ if(allocated(ctx%mixing%rho_out))then
+  do i=1,size(ctx%mixing%rho_out)
+   if(allocated(ctx%mixing%rho_out(i)%f))write(unit)ctx%mixing%rho_out(i)%f
+  enddo
+ endif
+ if(allocated(ctx%mixing%Vh_in))then
+  do i=1,size(ctx%mixing%Vh_in)
+   if(allocated(ctx%mixing%Vh_in(i)%f))write(unit)ctx%mixing%Vh_in(i)%f
+  enddo
+ endif
+ if(allocated(ctx%mixing%Vh_out))then
+  do i=1,size(ctx%mixing%Vh_out)
+   if(allocated(ctx%mixing%Vh_out(i)%f))write(unit)ctx%mixing%Vh_out(i)%f
+  enddo
+ endif
+ if(allocated(ctx%mixing%rho_s_in))then
+  do j=1,size(ctx%mixing%rho_s_in,2)
+   do i=1,size(ctx%mixing%rho_s_in,1)
+    if(allocated(ctx%mixing%rho_s_in(i,j)%f))write(unit)ctx%mixing%rho_s_in(i,j)%f
+   enddo
+  enddo
+ endif
+ if(allocated(ctx%mixing%rho_s_out))then
+  do j=1,size(ctx%mixing%rho_s_out,2)
+   do i=1,size(ctx%mixing%rho_s_out,1)
+    if(allocated(ctx%mixing%rho_s_out(i,j)%f))write(unit)ctx%mixing%rho_s_out(i,j)%f
+   enddo
+  enddo
+ endif
+ if(allocated(ctx%mixing%Vxc_in))then
+  do j=1,size(ctx%mixing%Vxc_in,2)
+   do i=1,size(ctx%mixing%Vxc_in,1)
+    if(allocated(ctx%mixing%Vxc_in(i,j)%f))write(unit)ctx%mixing%Vxc_in(i,j)%f
+   enddo
+  enddo
+ endif
+ if(allocated(ctx%mixing%Vxc_out))then
+  do j=1,size(ctx%mixing%Vxc_out,2)
+   do i=1,size(ctx%mixing%Vxc_out,1)
+    if(allocated(ctx%mixing%Vxc_out(i,j)%f))write(unit)ctx%mixing%Vxc_out(i,j)%f
+   enddo
+  enddo
+ endif
+ do i=1,size(ctx%vxc)
+  write(unit)ctx%vxc(i)%f,ctx%v_local(i)%f,ctx%rho_s(i)%f
+ enddo
+#ifdef USE_HSE
+ if(allocated(ctx%hse%cached_source))write(unit)ctx%hse%cached_source
+ if(allocated(ctx%hse%cached_action))write(unit)ctx%hse%cached_action
+ if(allocated(ctx%hse%ace%factors))write(unit)ctx%hse%ace%factors
+#endif
+end subroutine
+end module salmonpy_gs_context
+
+subroutine main_dft
+ use salmon_global,only:theory,iperiodic
+ use salmonpy_gs_context,only:s_gs_context,gs_run,gs_close
+ implicit none
+ type(s_gs_context),target::ctx
+ integer::status
+ if(theory=='dft_band'.and.iperiodic/=3)return
+ call gs_run(ctx,status)
+ if(status/=0)error stop 'Invalid GS run configuration'
+ call gs_close(ctx)
+end subroutine

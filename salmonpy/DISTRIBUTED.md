@@ -96,3 +96,6 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_tddft RUNTIME GS_BUNDLE RT_INPUT NE
 当面の電子計算は、一つのMPI計算群に一物質・一マクロ点を割り当てます。将来用の独立複数状態機能は残しますが、標準TDDFT例は一群一点です。LD中心のMaxwell計算では、既存FDTDの空間MPI分割の各ランクが多数のLD状態を管理します。FDTD_MATERIALS.mdを参照してください。両者は別の実行経路です。
 
 直列モデルの共通契約、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。
+
+MPI応答サービスでの明示的なID継承・出力は[MPI_IDENTITY.md](MPI_IDENTITY.md)を参照。
+PointRun自体の直列専用という制約やrestart未対応は維持します。

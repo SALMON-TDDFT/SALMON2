@@ -95,7 +95,14 @@ module structures
     integer :: required_steps=1,count=0,first_iteration=1
   end type
 
+  type s_gs_run_config
+    integer :: max_iterations=1,pre_scf_steps=1
+    real(8) :: threshold=0d0,pre_scf_threshold=0d0
+  end type
+
   type s_dft_system
+    type(s_gs_run_config) :: gs_input
+    logical :: gs_input_owned=.false.
     type(s_pre_scf_state) :: pre_scf
     type(s_xc_config) :: xc_input
     logical :: xc_input_ready=.false.

@@ -118,9 +118,33 @@ install(FILES "${ROOT}/tools/prepare_hse_rt_state.py" "${ROOT}/tools/test_hse_rt
   "${ROOT}/tools/test_hse_rt_state_runtime.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_hse_rt_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
-install(FILES "${ROOT}/tools/test_pp_grid_config.py" "${ROOT}/tools/test_kpoint_config.py" "${ROOT}/tools/test_pp_input_config.py" "${ROOT}/tools/test_xc_input_config.py" "${ROOT}/tools/test_pre_scf_state.py" "${ROOT}/tools/test_pre_scf_runtime.py" "${ROOT}/tools/test_cell_config.py" "${ROOT}/tools/test_grid_config.py" "${ROOT}/tools/test_owned_workspaces.py" "${ROOT}/tools/test_tddft_contexts.py" "${ROOT}/tools/test_hse_explicit_state.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_pp_grid_config.py" "${ROOT}/tools/test_kpoint_config.py" "${ROOT}/tools/test_pp_input_config.py" "${ROOT}/tools/test_xc_input_config.py" "${ROOT}/tools/test_pre_scf_state.py" "${ROOT}/tools/test_pre_scf_runtime.py" "${ROOT}/tools/test_gs_lifecycle.py" "${ROOT}/tools/test_cell_config.py" "${ROOT}/tools/test_grid_config.py" "${ROOT}/tools/test_owned_workspaces.py" "${ROOT}/tools/test_tddft_contexts.py" "${ROOT}/tools/test_hse_explicit_state.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_hse_explicit_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
-install(FILES "${ROOT}/tests/native/test_pp_grid_config.f90" "${ROOT}/tests/native/test_kpoint_config.f90" "${ROOT}/tests/native/test_pp_input_config.f90" "${ROOT}/tests/native/test_xc_input_config.f90" "${ROOT}/tests/native/test_pre_scf_state.f90" "${ROOT}/tests/native/test_cell_config.f90" "${ROOT}/tests/native/test_grid_config.f90" "${ROOT}/tests/native/test_owned_workspaces.f90" "${ROOT}/tests/native/test_tddft_contexts.f90" "${ROOT}/tests/native/test_hse_native_resources.f90" "${ROOT}/tests/native/test_hse_resource_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+install(FILES "${ROOT}/tests/native/test_pp_grid_config.f90" "${ROOT}/tests/native/test_kpoint_config.f90" "${ROOT}/tests/native/test_pp_input_config.f90" "${ROOT}/tests/native/test_xc_input_config.f90" "${ROOT}/tests/native/test_pre_scf_state.f90" "${ROOT}/tests/native/test_gs_lifecycle.f90" "${ROOT}/tests/native/test_cell_config.f90" "${ROOT}/tests/native/test_grid_config.f90" "${ROOT}/tests/native/test_owned_workspaces.f90" "${ROOT}/tests/native/test_tddft_contexts.f90" "${ROOT}/tests/native/test_hse_native_resources.f90" "${ROOT}/tests/native/test_hse_resource_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
 install(FILES "${ROOT}/tools/runtime_sources.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/config.py" "${ROOT}/salmonpy/CONFIG.md" "${ROOT}/salmonpy/CONFIG.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/preparation.py" "${ROOT}/salmonpy/PREPARATION.md" "${ROOT}/salmonpy/PREPARATION.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/structure.py" "${ROOT}/salmonpy/STRUCTURE.md" "${ROOT}/salmonpy/STRUCTURE.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/builtin_materials.py" "${ROOT}/salmonpy/BUILTIN_MATERIALS.md" "${ROOT}/salmonpy/BUILTIN_MATERIALS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/DFT_CONFIG.md" "${ROOT}/salmonpy/DFT_CONFIG.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/initial_states.py" "${ROOT}/salmonpy/INITIAL_STATES.md" "${ROOT}/salmonpy/INITIAL_STATES.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/point_runs.py" "${ROOT}/salmonpy/POINT_RUNS.md" "${ROOT}/salmonpy/POINT_RUNS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/MPI_IDENTITY.md" "${ROOT}/salmonpy/MPI_IDENTITY.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/RECORDED_MATERIALS.md" "${ROOT}/salmonpy/RECORDED_MATERIALS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/CONFIGURED_NATIVE.md" "${ROOT}/salmonpy/CONFIGURED_NATIVE.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/_point_checkpoint.py" "${ROOT}/salmonpy/POINT_CHECKPOINTS.md" "${ROOT}/salmonpy/POINT_CHECKPOINTS.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/field_input.py" "${ROOT}/salmonpy/FIELD_INPUT.md" "${ROOT}/salmonpy/FIELD_INPUT.en.md" DESTINATION salmonpy)

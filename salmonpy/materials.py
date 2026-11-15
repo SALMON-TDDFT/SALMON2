@@ -11,7 +11,7 @@ from .fields import FieldSamples
 from .ld import _array
 from .timing import TimeSpec, InputPort, OutputPort, charge_sign
 
-__all__ = ['MaterialCheck', 'bind_material', 'check_material']
+__all__ = ['MaterialCheck', 'bind_material', 'check_material', 'bind_recorded_material', 'response_identity', 'bind_configured_ld_endpoints', 'bind_configured_tddft']
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +150,11 @@ def bind_material(initial, *, key, identity):
     automatically inferred from Python object addresses. Reuse one binding for
     all points with its key. One MPI rank per material group; no internal MPI.
     """
+    from .builtin_materials import ConfiguredMaterial
+    raw = initial.model if isinstance(initial, ConfiguredMaterial) else initial
+    from .tddft import TDDFTInitialState
+    if isinstance(raw, TDDFTInitialState):
+        raise InputError('use TDDFTMaterialProvider and TDDFTResponseBackend for managed native workers')
     _model(initial)
     for label,value in (('key',key),('identity',identity)):
         if not isinstance(value,str) or not value.strip():raise InputError('nonempty material '+label+' required')
@@ -160,6 +165,79 @@ def bind_material(initial, *, key, identity):
     declared=hashlib.sha256(json.dumps([initial.backend,identity],ensure_ascii=True).encode()).hexdigest()
     from .material_response import MaterialBinding
     return MaterialBinding(key,_Provider(initial,'salmonpy.serial-material/'+declared),_Backend())
+
+
+@dataclass(frozen=True)
+class _RecordedProvider:
+    initial: object
+    record: object
+    provider: object
+    identity: str
+
+    def prepare(self, context):
+        from .point_runs import _identity
+        if _identity(self.initial.record()) != dict(self.record):
+            raise InputError('material identity changed after binding')
+        prepared = self.provider.prepare(context)
+        prepared.initial = _RecordedInitial(self.initial, self.record)
+        return prepared
+
+
+@dataclass(frozen=True)
+class _RecordedInitial:
+    initial: object
+    record: object
+
+    def new_state(self, **kwargs):
+        from .point_runs import _identity
+        if _identity(self.initial.record()) != dict(self.record):
+            raise InputError('material identity changed before state creation')
+        return self.initial.new_state(**kwargs)
+
+
+def bind_recorded_material(initial, *, key):
+    """Bind a recorded endpoint-A model without hand-copying its identity.
+
+    One rank per material group; no implicit LD conversion or managed TDDFT bypass.
+    Prepared models are borrowed. record() must follow PointRun's identity contract.
+    """
+    import json
+    from .point_runs import _identity
+    from .config import _freeze
+    from .material_response import MaterialBinding
+    if not callable(getattr(initial, 'record', None)):
+        raise InputError('recorded material requires record()')
+    record = _identity(initial.record())
+    binding = bind_material(initial, key=key, identity=json.dumps(record, sort_keys=True, ensure_ascii=True))
+    frozen = _freeze(record)
+    provider = _RecordedProvider(initial, frozen, binding.provider, binding.provider.identity)
+    return MaterialBinding(binding.key, provider, binding.backend, frozen)
+
+
+def response_identity(bindings, point_map, *, run_id):
+    """Build point-run/1 metadata from recorded bindings in sorted transport order.
+
+    Pure local validation, no MPI/model execution. All ranks use the same run ID.
+    Pass the returned record and same point_map explicitly to ResponseSession.
+    """
+    from collections.abc import Mapping
+    from .config import _identifier
+    from .point_runs import _identity, _record
+    from .material_response import MaterialBinding
+    if not isinstance(bindings, Mapping) or not bindings or not isinstance(point_map, Mapping):
+        raise InputError('nonempty bindings and explicit point_map mappings required')
+    if any(type(p) is not int or p < 0 for p in bindings) or any(type(p) is not int for p in point_map):
+        raise InputError('transport IDs must be nonnegative integers')
+    if set(bindings) != set(point_map):
+        raise InputError('point_map must cover every binding')
+    points = []
+    for p in sorted(bindings):
+        binding = bindings[p]
+        if not isinstance(binding, MaterialBinding) or binding.material_record is None:
+            raise InputError('use recorded material bindings')
+        point = _identifier(point_map[p], 'point_id')
+        points.append({'point_id': point, **_identity(dict(binding.material_record))})
+    return _record({'schema': 'salmonpy.point-run/1', 'run_id': run_id, 'points': points})
 
 
 def check_material(initial, drive, *, rtol=1e-12, atol=1e-14):
@@ -213,3 +291,82 @@ def check_material(initial, drive, *, rtol=1e-12, atol=1e-14):
             if active_error is None:raise RuntimeFailure(message)
             if hasattr(active_error,'add_note'):active_error.add_note(message)
             else:active_error.material_cleanup_error=message
+
+
+@dataclass(frozen=True)
+class _ConfiguredProvider:
+    material: object
+    record: object
+    model: object
+    identity: str
+    delegate: object = None
+    runtime: object = None
+
+    def prepare(self, context):
+        if self.material.model is not self.model or self.material.record() != dict(self.record):
+            raise InputError('configured material changed after binding')
+        if self.delegate is not None:
+            return self.delegate.prepare(context)
+        from .material_response import TDDFTPreparedState
+        from .runtime import load_runtime
+        verified = load_runtime(self.runtime, required=['tddft', 'single-rank'])
+        if verified.sha256 != self.model.executable.sha256:
+            raise InputError('initial-state executable differs from verified serial runtime')
+        return TDDFTPreparedState(self.model, self.runtime)
+
+
+def _configured_record(material, model_type, key):
+    from .builtin_materials import ConfiguredMaterial
+    from .point_runs import _identity
+    from .config import _freeze, _identifier
+    if not isinstance(material, ConfiguredMaterial) or not isinstance(material.model, model_type):
+        raise InputError('matching ConfiguredMaterial required')
+    _identifier(key, 'binding key')
+    return _freeze(_identity(material.record()))
+
+
+def _provider_identity(kind, record, details):
+    import hashlib, json
+    payload = json.dumps({'record': dict(record), 'details': details}, sort_keys=True,
+                         ensure_ascii=True, allow_nan=False)
+    return kind + '/' + hashlib.sha256(payload.encode()).hexdigest()
+
+
+def bind_configured_ld_endpoints(material, *, key):
+    """Explicitly drive configured LD with E_new=-(A_new-A_old)/dt.
+
+    Reuses LDResponseBackend; not the semi-implicit native E/H coupling route.
+    One rank per material group. No state creation or MPI initialization here.
+    """
+    from .ld import LorentzDrude
+    from .material_response import LDMaterialProvider, LDResponseBackend, MaterialBinding
+    record = _configured_record(material, LorentzDrude, key)
+    delegate = LDMaterialProvider(material.model)
+    identity = _provider_identity('salmonpy.configured-ld-endpoints/1', record, delegate.identity)
+    provider = _ConfiguredProvider(material, record, material.model, identity, delegate=delegate)
+    return MaterialBinding(key, provider, LDResponseBackend(), record)
+
+
+def bind_configured_tddft(material, *, key, runtime):
+    """Borrow configured TDDFT initial data using a verified managed runtime.
+
+    No SCF, worker, extra snapshot or implicit download. Keep the material alive
+    until sessions close. Uses one serial child worker per point, not group-MPI
+    TDDFT. A/c and charge-current conventions/updates remain with existing backend.
+    """
+    from pathlib import Path
+    from .tddft import TDDFTInitialState
+    from .runtime import load_runtime
+    from .material_response import MaterialBinding, TDDFTResponseBackend
+    record = _configured_record(material, TDDFTInitialState, key)
+    path = Path(runtime).expanduser().resolve()
+    verified = load_runtime(path, required=['tddft', 'single-rank'])
+    initial = material.model
+    if verified.sha256 != initial.executable.sha256:
+        raise InputError('initial-state executable differs from verified serial runtime')
+    details = {'executable': verified.sha256, 'manifest': initial.manifest,
+               'input': initial._input, 'max_steps': initial.max_steps,
+               'threads': initial.threads, 'timeout': initial.timeout}
+    identity = _provider_identity('salmonpy.configured-tddft/1', record, details)
+    provider = _ConfiguredProvider(material, record, initial, identity, runtime=path)
+    return MaterialBinding(key, provider, TDDFTResponseBackend(), record)

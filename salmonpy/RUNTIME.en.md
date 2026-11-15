@@ -5,6 +5,37 @@ calculations use a **linked executable plus its runtime libraries**. An object
 file alone would still require a linker and dependencies on the user's machine.
 Importing SALMONpy never downloads or builds anything.
 
+## Compute nodes without internet access
+
+Do not assume compute nodes can reach external services. Separate acquisition
+from execution: prepare files on an internet-connected workstation or a preparation
+host permitted by the facility, then transfer them. Login nodes may also be offline;
+follow the facility's access policy.
+
+1. **Identify the target first:** record OS, CPU, Python version, required features,
+   MPI implementation and site modules. A wheel/runtime for a local Mac will not
+   run on a Linux compute node.
+2. **Stage all dependencies:** obtain compatible SALMONpy/NumPy wheels and optional
+   dependencies such as ASE, required runtime ZIPs and trusted catalogs, structure/
+   supercell files, pseudopotentials, inputs and initial states. Include referenced
+   files; record versions, sources, licenses and SHA256 hashes. Check which MPI,
+   BLAS, Libxc or other libraries are bundled and which the site must supply.
+   Do not embed access credentials in calculation inputs.
+3. **Verify after transfer:** check hashes and preserve relative references. Install
+   Python packages from the local wheel collection with package-index access disabled.
+   Install runtimes with both a local `--catalog` and `--archive`, then run `verify`
+   and a small example on the actual compute node. Success on a login node alone
+   does not establish compute-node compatibility.
+4. **Resolve missing files before submission:** use downloaded structure files, not
+   live database URLs during execution. Report missing dependencies explicitly;
+   do not silently download or switch to source builds. If no compatible runtime
+   exists, explicitly build in a site-compatible environment with dependencies
+   already staged.
+
+This guidance is not an automatic offline bundle/dependency resolver. Custom
+backends must also be prepared to execute without network acquisition. SALMONpy
+import is offline; it does not sandbox network calls made by user callbacks.
+
 ## Prefer an existing or prebuilt runtime
 
 First establish the user's memory limit, CPU budget and desired workflow. Check
@@ -441,3 +472,31 @@ GS/DC pre-SCF controllers now retain threshold, consecutive-success count, requi
 Systems without explicit phase ownership and no-argument `exx_enabled()` retain the legacy fallback. DC communicator/material swapping, adaptive exchange controls and legacy exchange caches remain shared. This is not full GS/DC isolation or arbitrary concurrent-call support.
 
 Run `tools/test_pre_scf_state.py HSE_BUILD_RECORD NEW_OUTPUT` for independent controller checks, and `tools/test_pre_scf_runtime.py HSE_BUILD_RECORD ORIGINAL_FAST_HSE_RECORD NEW_OUTPUT` for four tiny serial GS comparisons. The latter uses deliberately loose thresholds: it verifies transitions and scalar outputs, not physical convergence. Add `--dc-ranks 2` or `--dc-ranks 4` and use MPI-enabled build records to compare two DC fragments, each on one or two spatial ranks (`--mpiexec PATH` selects the launcher). The tool disables restart output for spatial hybrid calculations and limits OpenMP/BLAS to one thread per rank. All eight DC/MPI cases matched the original fast-HSE build locally; this does not establish concurrent independent solver isolation. See `docs/xc-phase-validation-2026-11-15.md` and `docs/pre-scf-validation-2026-11-15.md`.
+
+### SCF exchange-control routing
+
+Internal `exx_set_scf_flags(system, ...)`, `exx_adaptive_is_ready(system)`, `exx_is_frozen(system)` and `exx_support_has_changed(system)` resolve the system-bound HSE resource owner. GS SCF uses these for adaptive readiness, temporary exchange freezing and support-event consumption; `exx_check_localization(system=system)` validates that same owner. Collective reductions and freeze/restore ordering are unchanged. Unbound systems still use the legacy owner. This routes existing controls; it does not construct independent full GS solvers, isolate the remaining configuration globals, or enable concurrent calls.
+
+### GS-owned HSE resources
+
+The GS entry now creates a local HSE resource owner and binds it after system initialization when the existing native-owner predicate accepts the configuration. The initial scope is ordinary `theory='dft'`, no geometry optimization, periodic unpolarized non-spinor HSE06, full-support CPU exchange, no Wannier/symmetry reduction, negative temperature setting (integer-occupation route), and one rank in each electronic decomposition. DC, distributed/thermal/localized exchange and other configurations retain the legacy owner. This does not broaden solver physics support.
+
+A selected owner is reported as `EXX_GS_OWNER explicit`; it survives through result/checkpoint output, then is unbound and cleared. `tools/test_pre_scf_runtime.py ... --require-gs-owner` additionally requires that branch in the current build. Full GS state and configuration are not yet independently encapsulated; no concurrent GS API is provided.
+
+The remaining same-input GS lifecycle check is provided by `tools/test_gs_lifecycle.py HSE_BUILD_RECORD ORIGINAL_FAST_HSE_RECORD NEW_OUTPUT`. It explicitly compiles a serial probe, runs two GS solves in one process, and compares both with the original executable. Four pre-SCF configurations match scalar results and every generated restart payload byte, including wavefunctions and density-mixing history. Payloads are deleted after comparison; hashes and logs are retained. This verifies sequential reuse for the tiny fixed-input fixture only, not different-input reuse, concurrent GS contexts, or checkpoint import into TDDFT. See `docs/gs-lifecycle-validation-2026-11-15.md`.
+
+### Retained GS storage (internal Fortran)
+
+`salmonpy_gs_context` provides `s_gs_context`, `gs_run(ctx, status)` and `gs_close(ctx)`. The context retains the former GS work objects: orbitals, densities/potentials, occupations/forces, mixing and pseudopotential data, XC handles and the eligible HSE owner. **Declare actual contexts with `TARGET`, keep their address stable, and never copy a live context.** Close explicitly before discarding one. The external `main_dft` remains a run/close wrapper.
+
+`gs_run` rejects an already live context with status 1 before mutation; successful completion returns 0. `gs_close` is idempotent. Native errors can still terminate the process. Input, parallel and timer globals remain shared; this is not a stable public ABI, an explicit-input GS API, or concurrency support. Only the documented same-input scalar-HSE case is validated for multiple retained contexts. The lifecycle probe compares retained A before/after B's run and close, including electronic arrays, occupations/forces, mixing histories and selected HSE caches; it is not an exhaustive memory comparison.
+
+### Explicit GS SCF controls
+
+`gs_input_config(value)` captures the legacy maximum SCF iterations, convergence threshold, pre-SCF threshold and consecutive-step requirement into `s_gs_run_config`. Pass it as `gs_run(ctx, status, config=value)`; the context validates and copies it before initialization. Omitting it captures the same inputs once for compatibility. `max_iterations` must be positive and below the integer maximum, both thresholds finite and nonnegative, and `pre_scf_steps` positive. Invalid configuration returns status 1 before activating the context.
+
+SCF loop bounds and convergence checks use the owned values, including adaptive-exchange readiness thresholds. Mutating the caller's value or those four legacy globals does not change the selected settings. The convergence metric, mixing options, initial no-mixing stage, geometry/material inputs and other global controls are not extracted by this change. No general different-input/concurrent GS claim follows.
+
+An explicitly positive pre-SCF threshold must also satisfy the original fresh-static-hybrid prerequisites: no restart/MD/optimization, positive temperature for DC, no checkpoint interval/shutdown request, and density mixing/convergence. These are checked again at the context boundary. The legacy executable wrapper reports invalid run configuration as a nonzero failure instead of silently skipping the calculation.
+
+For Python support collecting local files, see [PREPARATION.en.md](PREPARATION.en.md). It does not resolve target compatibility/dependencies or install packages.

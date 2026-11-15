@@ -4,6 +4,8 @@ program probe
  use structures
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_state_bytes
  use exx_native,only:exx_refresh,exx_add_action,exx_bind_system,exx_unbind_system,exx_set_phase,exx_pre_scf
+ use exx_native,only:exx_set_scf_flags,exx_adaptive_is_ready,exx_is_frozen,exx_support_has_changed, &
+   exx_check_localization,exx_bind_gs_system
  use salmon_global
  use sym_sub,only:use_symmetry
  use communication,only:COMM_GROUP_SELF
@@ -56,10 +58,28 @@ program probe
   target(i,j,k)=cmplx(.01d0*i,.02d0*j*k,8)
  enddo;enddo;enddo
  call get_command_argument(2,isolated)
- call exx_bind_system(sa,a,status);if(status/=0)stop 1
+ theory='dft';yn_opt='n'
+ call exx_bind_gs_system(sa,info,a,status);if(status/=0)stop 1
+ info%isize_r=2
+ call exx_bind_gs_system(sb,info,b,status)
+ if(status/=2.or.associated(sb%salmonpy_hse_owner).or.b%native_resources_enabled)stop 35
+ info%isize_r=1;theory='tddft_response'
  call exx_bind_system(sb,b,status);if(status/=0)stop 2
  call exx_bind_system(sref,reference,status);if(status/=0)stop 3
  call exx_bind_system(srefb,reference_b,status);if(status/=0)stop 12
+ call exx_set_scf_flags(sa,adaptive_ready=.true.,freeze=.true.,support_changed=.true.)
+ if(.not.exx_adaptive_is_ready(sa).or..not.exx_is_frozen(sa).or..not.exx_support_has_changed(sa))stop 30
+ if(exx_adaptive_is_ready(sb).or.exx_is_frozen(sb).or.exx_support_has_changed(sb))stop 31
+ call exx_set_scf_flags(legacy,adaptive_ready=.true.,freeze=.true.,support_changed=.true.)
+ if(exx_adaptive_is_ready(sb).or.exx_is_frozen(sb).or.exx_support_has_changed(sb))stop 32
+ call exx_set_scf_flags(sa,support_changed=.false.)
+ if(exx_support_has_changed(sa).or..not.exx_is_frozen(sa).or..not.exx_adaptive_is_ready(sa))stop 33
+ if(.not.exx_support_has_changed(legacy))stop 34
+ call exx_set_scf_flags(sa,adaptive_ready=.false.,freeze=.false.)
+ call exx_set_scf_flags(legacy,adaptive_ready=.false.,freeze=.false.,support_changed=.false.)
+ exx_mlwf_radius=1d0;a%finite_support_localized=.true.
+ call exx_check_localization(system=sa)
+ a%finite_support_localized=.false.;exx_mlwf_radius=0d0
  call rt_state_bytes(a,state_bytes,status)
  if(status/=2.or.state_bytes/=-1)stop 14
  call exx_bind_system(sa,b,status);if(status==0)stop 15

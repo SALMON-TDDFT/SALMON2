@@ -94,7 +94,7 @@ BANDS.mdを参照してください。`bands.BandStructure.from_salmon` と `.pl
 ASE連携は任意の独立モジュール `salmonpy.ase`。ASE.mdを参照。
 `run_bands` は構造を照合し、ASEのk点列をそのまま計算します。Calculator・力は独立したASE_CALCULATOR.mdの対応範囲を参照してください。
 
-GS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DFT.mdに従います。ASE入口の電子数はKY/NC-UPFの価電子数から中性系として決定・照合します。直接DFTでは電子数を明示します。軌道数・格子・k点は必須で、収束保証のある自動既定値はありません。
+GS作成は `salmonpy.dft.DFT`、ASE変換は `salmonpy.ase.dft_from_atoms`。DFT.mdに従います。ASE入口の電子数はKY/NC-UPFの価電子数から中性系として決定・照合します。直接DFTでは電子数を明示します。軌道数・格子条件・k点は必須で、収束保証のある自動既定値はありません。
 `salmonpy.ase.tddft_from_atoms` はGSを保存して既存TDDFT初期状態を返します。ASE.en.mdとexamples/ase_tddft.pyも参照してください。結晶はA/c駆動、戻り値は電荷電流j。状態は独立で、ランタイムの自動取得・コンパイルはしません。
 収束済み `GroundStateResult` からバンド／TDDFT初期状態を作れます。PZ／Libxc-PZ／Libxc-PBE・KY／NC-UPFのCalculatorと本体の力はASE_CALCULATOR.mdを参照してください。
 
@@ -330,3 +330,149 @@ GNUの-fopenmpを使う構成ではCコンパイラもGNUに合わせます。MP
 検査はtools/test_pre_scf_state.pyとtools/test_pre_scf_runtime.py、記録はdocs/pre-scf-validation-2026-11-15.mdを参照します。
 
 評価フェーズの変更はbind済み独立HSE ownerの資源・履歴を無効化します。共有交換キャッシュの転用はしません。
+
+GSの適応交換準備・交換固定・支持領域変更フラグと局在化検査はsystemに結び付いたHSE ownerへ振り分けます。
+未結合なら従来の共有ownerを使います。完全なGS独立化・残る設定の分離・同時呼び出し対応とは案内しません。
+内部APIはexx_set_scf_flagsと3つの問い合わせ関数、exx_check_localization(system=system)です。
+
+通常GSの限定構成ではHSE資源をGS内部で生成・結合し、結果/checkpoint出力後に解除・解放します。
+判定はexx_bind_gs_systemで、status=0は結合成功、2は対象外で従来owner維持、1は結合衝突です。
+対象は構造最適化なしの通常DFT、周期・スカラーHSE06、全支持領域CPU交換、Wannier/対称性縮約なし、
+整数占有（temperature<0）、各電子分割1ランクです。DC/有限温度/空間分割は対象外です。
+ログEXX_GS_OWNER explicitで選択を確認できます。GS全体の独立化や並行実行対応とは説明しません。
+
+GSの同一入力・同一プロセス2回連続実行と元コードの別プロセス実行は、
+tools/test_gs_lifecycle.pyでスカラー結果と全生成restartファイルを比較します。
+4条件で一致していますが、異なる入力の併存、同時実行、TDDFTへのrestart読込の検証とは区別してください。
+比較後にrestart実体は削除し、ハッシュを保持します。
+
+内部GSコンテキストsalmonpy_gs_contextは、実引数をTARGET付きで宣言して安定したアドレスを保ちます。
+生存中のs_gs_contextをコピーせず、破棄前にgs_closeを呼びます。gs_runの再実行はstatus=1で拒否、正常終了は0です。
+入力・並列・タイマーなどの共有は残るため、明示入力のGS API完成や並行実行対応とは案内しません。
+複数状態保持の検証は同一入力のスカラーHSEに限定します。
+
+内部GSの4つのSCF設定はgs_input_configでs_gs_run_configに取り込み、gs_run(config=value)へ渡します。
+max_iterationsは正かつ整数最大値未満、threshold/pre_scf_thresholdは有限・非負、pre_scf_stepsは正です。
+不正値は初期化前にstatus=1、正常設定はコピーして使います。省略時は共有入力を一度取り込みます。
+この分離は反復上限・収束閾値・pre-SCFの2設定だけで、収束指標や混合・構造・物質入力の分離完了とは説明しません。
+
+明示pre-SCF設定も入力読込と同じ適用条件を再検査します。restart/MD/最適化、checkpoint指定や密度以外の収束などを
+設定構造体で迂回しないでください。不正な実行設定は内部status=1、従来実行入口では非ゼロ終了になります。
+
+## 物質IDと設定カタログ
+
+`material_config`タスクとCONFIG.md/enに従います。実装済みは`salmonpy.materials/1`の
+設定検証・不変化だけ。明示登録したPython resolverを使い、JSONからimportや計算起動をしません。
+初期状態は参照IDとsource/prepareの形だけを検証し、読み込み・物理整合の検証済みとは扱いません。
+構造と幅の独立アダプターは後述のstructure_gridを参照。全計算の`salmonpy.simulation/1`、MPI配置、
+出力/restartへのID継承は後続です。スーパーセルは別の構造ファイルを参照する設計です。
+MateriAppsを構造取得APIと呼ばず、実際の提供元と出典を記録します。数値例を物性データと扱いません。
+
+## オフライン計算ノードへの案内
+
+計算ノードのインターネット接続を前提にしません。未確認なら接続可否と準備・転送先を確認し、
+既知の施設制約は再質問しません。RUNTIME.md/enの手順で取得と実行を分け、計算先に合う
+wheelと依存、ローカルカタログとランタイムZIP、構造/スーパーセル・擬ポテンシャル・入力・
+初期状態と全参照データを事前準備します。版・出典・hashを記録し、転送後の照合と実計算ノードでの
+小規模確認を案内します。実行時のDB検索・URL取得、暗黙ダウンロードや自動ビルドを提案しません。
+不足物を列挙して準備段階へ戻します。ログインノードの通信可否も推測しません。
+オフライン一式の自動収集・依存解決、ユーザーcallbackの通信遮断は未実装です。
+
+明示的なローカルファイル収集は`offline_inputs`タスクの`salmonpy.preparation.prepare_inputs`、
+転送後の照合は`verify_inputs`です。PREPARATION.md/enに従い、登録済みresolverと
+コピー先相対名→元ファイルの一覧を指定します。汎用収集器が自動で依存探索・構造解釈・格子幅解決・科学的妥当性検証を行うとは説明しません。検証器はbackendを呼ばず通信しません。
+manifestのhashを別経路で保存し、出力は入力一式の外へ置きます。
+
+## 構造ファイルと格子幅
+
+`structure_grid`タスクとSTRUCTURE.md/enを参照。StructureInputはASE Atomsまたは
+明示形式cif/extxyz・非負frame番号でローカル構造を読み、独立コピーと出典hashを保持します。
+CIF対称性展開はASE読込に含まれますが、追加スーパーセル化・標準化・折り返しはしません。
+grid_from_spacingは正の軸方向直交セルに限定し、幅の単位はangstrom/bohrを明示。
+ceilと最低点数/明示倍数で切り上げ、実際の幅と点数を保存します。MPI数から変更しません。
+ASEのdft_from_atoms/tddft_from_atomsはgridまたはgrid_spacing＋grid_spacing_unitを選択し、
+両指定を拒否。直接DFT/Calculatorは従来どおり点数を渡します。格子生成を収束・資源保証と扱いません。
+examples.prepare_structureが既存オフライン収集APIへの明示登録例です。自動backend登録、
+擬ポテンシャル選択、実DFTの準備完了とは説明しません。混合・部分占有は代表元素で計算せず拒否します。直接ASE幅指定は採用点数のみ保持し、希望値等を保存する場合はヘルパーのレポートを記録します。
+
+## 組み込み物質の設定接続
+
+`builtin_materials`タスクとBUILTIN_MATERIALS.md/enに従います。builtin_material_registryを
+明示作成し、resolve/load_materials→material_from_catalog→new_stateへ接続します。
+LD/SBEに加えDFT設定接続とGS→TDDFTの橋渡しは下記を参照。LDはE、SBEはA/c駆動で、符号や更新順は既存と同じです。
+SBEは既存の3種類のSALMONテキストをhash付きで読み、変更時は再解決を要求します。
+モデル/状態にmaterial_idとdefinition_digestを保持しますが、point/run ID、MPI割当、
+出力/restartの自動ID継承やinitial_statesレシピの選択は未対応。record()を結果と明示保存します。
+状態作成で導入済みnativeが必要です。登録/解決/モデル作成にnative起動・通信・コンパイルはありません。
+
+## DFT物質設定からTDDFTへ
+
+`dft_material_config`タスクとDFT_CONFIG.md/enに従います。salmonpy.dft/dftを明示登録し、
+ローカル構造・PP・XC・states・kmesh・点数/幅から既存DFTを作成します。UPF元素は原子番号と照合し、
+KY元素やPPのXC由来まで自動認定したとは説明しません。固定入力と実行時SCF/threads/runtimeは分離します。
+ConfiguredMaterial.run→ConfiguredGroundState.tddft_initial_state→new_stateでIDと定義hashを継承。
+既存GS検証とtransverse・A/c→j、独立workerを維持します。warm startは結果ラッパーを展開して既存検査を通します。
+任意GSのJSON選択・point/run ID・ディスクID自動保存・MPI接続は後続です。configured_siは短い接続検査です。
+
+## 保存GSをIDで選ぶ
+
+`saved_gs_selection`とINITIAL_STATES.md/enに従い、tddft_from_catalogを明示呼出します。
+GS/1のsource相対パスとground-state.jsonのSHA256、DFT material_idを指定。全nativeファイルと
+構造/PP/ライセンスを管理ノードで収集・転送し、verify_inputsで照合します。GS生成時と同じ
+実行ファイルhashを要求し、機種間restart互換性やSCF再実行は暗黙に提供しません。
+material/initial_state IDと各digestはモデル・状態に保持し、record()を結果に保存します。
+既存の「initial_states未対応」は汎用factoryと任意レシピに関する制約です。この入口は
+完了したSALMONpy GS/1のみ対応し、prepare、GS/2、point/run IDやMPI自動割当は対象外です。
+サンプルのAはA/c、返す電流は電荷電流密度j = -J_SALMONです。収束・メモリ保証とは区別します。
+
+## 直列の点・run対応表
+
+`point_runs`とPOINT_RUNS.md/enを参照。PointRunに順序付きpoint_id→準備済みモデルを明示し、
+一つのrun/pointに一状態だけ作成します。物質と初期状態のID/hashを保持し、save_arraysで
+配列のpoint_axesを明示して保存、open_point_arraysで対応表を検査します。LDはE、結晶はA/c。
+自作モデルにもrecord/new_stateで接続できますが、隠れた状態共有・実行能力は認定しません。
+既存ガイドのpoint/run未対応は従来API・MPI・restart自動継承の制約です。この入口は直列出力
+に限定し、時刻同期、点の自動並べ替え、checkpoint再開やMPI割当を提供しません。
+
+## MPIの利用者ID
+
+`mpi_point_identity`とMPI_IDENTITY.md/enに従い、ResponseSessionまたは
+CoupledStepper.from_multiscaleへ同一point_record/point_mapを全ランクから明示指定します。
+整数通信番号は既存のまま、利用者の文字列point_idへ明示対応します。run_idをランクごとに生成しません。
+prepare/create前に全ランクの一致を検査し、自群のSolverContext.point_recordsでIDを参照できます。
+session.save_arraysは集団呼出しで、引数は場leaderだけです。open_point_arraysで対応表も検証します。
+metadataは宣言値の整合性検査でありproviderの実体・物理・restart互換性の認定ではありません。
+従来ガイドのMPI ID未対応は省略時の自動継承やrestartについての制約で、この入口は明示的な継承です。
+
+## 記録付きモデルのMPI binding
+
+`recorded_material_binding`とRECORDED_MATERIALS.md/enを参照。設定済みSBE/自作端点Aモデルを
+bind_recorded_materialで接続し、response_identityでIDを手で写さず点記録を生成します。
+物質群は1ランク。全ランクで同じrun_id/point_mapを指定し、モデルをセッションより長く保持します。
+recordは準備と状態生成で再照合しますが、虚偽のhash宣言は検出しません。LDのE変換は明示の専用経路、
+TDDFTは管理ランタイム専用providerを使います。設定済みTDDFTの専用factoryは後続です。
+
+## 設定済みTDDFT/LD専用binding
+
+`configured_native_binding`とCONFIGURED_NATIVE.md/enを参照。bind_configured_tddftは
+管理runtimeを明示しsnapshotを借用します。binding/prepareではコピーもworker起動もしません。
+bind_configured_ld_endpointsは既存のA端点差分→E変換を明示的に選ぶ入口です。
+response_identityでIDを継承し、物質群は各1ランク、TDDFTは独立子worker。準備モデルはセッション解放後にclose。
+群内native MPIや半陰的E/H結合・資源上限・物理収束の保証へ拡張解釈しません。
+
+## 点ID付きTDDFT checkpoint
+
+`point_checkpoint`とPOINT_CHECKPOINTS.md/enを参照。PointStateのsave_checkpoint/restore_checkpointは
+既存TDDFT履歴に厳密なrun/point/material/initial ID照合を重ねます。再開時は同じrun_idを明示。
+別点/runへの分岐やMPI全体の再開は未対応。初期GS/runtimeは別途検証して用意し、archiveから自動取得しません。
+復元は履歴再計算で最大2worker、max_bytesは内部archive予算でRSS保証ではありません。
+LD/SBEや自作backendのディスクserializerとして案内しません。生TDDFT archiveはPointStateへ直接渡せません。
+
+## 共通A/E/Hローカル入力
+
+`field_input`とFIELD_INPUT.md/enを参照。FieldPacketは任意A/E/HをFieldValueで持ち、
+Noneとゼロを区別。TimeSpec・単位・ゲージ・位置をFieldContractで宣言し、FieldAdapter.step_fieldsへ渡します。
+AはA/c、HはBではありません。結晶はAのまま、LDはE。長さゲージはE必須ですが、native孤立系の接続完了ではありません。
+既存stepへの橋はlegacy_quantityを明示し、A/c:auまたはE:auの端点値だけを渡します。
+自作step_fieldsには宣言成分だけ渡し、半ステップや単位・位置を検査します。補間・微分・単位変換はしません。
+現MPIはA通信のみ。E/H転送や磁気物理の対応を推測しません。状態は借用、backend例外でadapterは無効です。

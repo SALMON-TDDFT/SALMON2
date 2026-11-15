@@ -31,6 +31,8 @@ def main():
     parser.add_argument('--dc-ranks', type=int, choices=(2, 4),
                         help='two DC fragments, with one or two spatial ranks each')
     parser.add_argument('--mpiexec', default='mpiexec')
+    parser.add_argument('--require-gs-owner', action='store_true',
+                        help='require explicit GS HSE owner in the current build only')
     args = parser.parse_args()
     records = [audited(p) for p in (args.build, args.reference)]
     root = Path(__file__).resolve().parents[1]
@@ -115,6 +117,8 @@ def main():
                                    stdin=inp, stdout=log, stderr=subprocess.STDOUT,
                                    timeout=120, check=True)
                 log = (directory / 'run.log').read_text()
+                if label == 'current' and args.require_gs_owner and 'EXX_GS_OWNER explicit' not in log:
+                    raise AssertionError('current GS did not select explicit HSE ownership')
                 marker = 'end SALMON' if args.dc_ranks else '#GS converged'
                 if marker not in log or re.search(r'\b(?:NaN|Infinity)\b', log, re.I):
                     raise AssertionError(f'invalid GS result: {directory}')
@@ -146,7 +150,7 @@ def main():
                         'phase_and_energy_trace_equal': True})
     report = {'schema': 'salmonpy.pre-scf-regression/1', 'status': 'passed',
               'scope': 'tiny GS/DC control-flow; not physical convergence or concurrent-state isolation',
-              'mpi_ranks': args.dc_ranks or 0,
+              'mpi_ranks': args.dc_ranks or 0, 'require_gs_owner': args.require_gs_owner,
               'builds': [record for record, _ in records], 'cases': results}
     (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
     print(f'GS pre-SCF comparison PASS (4 cases, MPI ranks={args.dc_ranks or 0})')

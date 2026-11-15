@@ -170,19 +170,31 @@ def run_bands(initial,atoms,path,directory,*,reference_ev,**run_options):
     return ASEBandRun(native,result)
 
 
-def dft_from_atoms(atoms,*,pseudopotentials,states,grid,kmesh,electrons=None,xc='pz'):
+def dft_from_atoms(atoms,*,pseudopotentials,states,kmesh,grid=None,
+                   grid_spacing=None,grid_spacing_unit=None,electrons=None,xc='pz'):
     """Copy ASE geometry into an independent DFT model; no calculation is launched.
 
     ASE cell/positions use Å. Electrons default to the neutral pseudopotential
-    valence sum; an explicit count must match. Grid, states and kmesh stay
-    explicit and need convergence checks. Charged/magnetic states are rejected.
+    valence sum; an explicit count must match. Choose grid counts or grid_spacing with an explicit unit. States and kmesh
+    remain explicit; grid rounding is not a convergence check. Charged/magnetic states are rejected.
     """
     from .dft import DFT, Pseudopotential
     from .sbe import _integer
     Atoms,_,_=_ase_types()
     if not isinstance(atoms,Atoms): raise InputTypeError('expected ASE Atoms')
+    from .structure import _validate_occupancy
+    _validate_occupancy(atoms)
     atoms=atoms.copy()
     if not np.all(atoms.pbc): raise InputError('three-dimensional periodic boundary conditions required')
+    if grid_spacing is not None:
+        if grid is not None:
+            raise InputError('specify grid or grid_spacing, not both')
+        from .structure import grid_from_spacing
+        grid = grid_from_spacing(atoms.cell.array, spacing=grid_spacing,
+                                 unit=grid_spacing_unit).counts
+    elif grid is None or grid_spacing_unit is not None:
+        raise InputError('specify grid counts or grid_spacing with grid_spacing_unit')
+
     if np.any(atoms.get_initial_magnetic_moments()!=0) or np.any(atoms.get_initial_charges()!=0):
         raise InputError('ASE initial charge/spin settings are unsupported; neutral closed-shell model required')
     pseudopotentials = tuple(pseudopotentials)
@@ -201,7 +213,8 @@ def dft_from_atoms(atoms,*,pseudopotentials,states,grid,kmesh,electrons=None,xc=
 
 
 def tddft_from_atoms(atoms, directory, *, executable, pseudopotentials, states,
-                     grid, kmesh, electrons=None, xc='pz', scf=None,
+                     kmesh, grid=None, grid_spacing=None, grid_spacing_unit=None,
+                     electrons=None, xc='pz', scf=None,
                      max_steps=1000, threads=1, timeout=600.):
     """Run GS in a new directory and return a context-managed TDDFT initial state.
 
@@ -218,7 +231,8 @@ def tddft_from_atoms(atoms, directory, *, executable, pseudopotentials, states,
     timeout = _positive(timeout, 'timeout')
     scf = SCFSettings() if scf is None else scf
     model = dft_from_atoms(atoms, pseudopotentials=pseudopotentials, states=states,
-                           grid=grid, kmesh=kmesh, electrons=electrons, xc=xc)
+                           grid=grid, grid_spacing=grid_spacing, grid_spacing_unit=grid_spacing_unit,
+                           kmesh=kmesh, electrons=electrons, xc=xc)
     gs = model.run(executable, directory, scf=scf, threads=threads, timeout=timeout)
     return gs.tddft_initial_state(executable=executable, max_steps=max_steps,
                                   threads=threads, timeout=timeout)
