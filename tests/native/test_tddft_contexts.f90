@@ -58,6 +58,8 @@ program probe
   call rt_open(a,'invalid_dt',code,delta_t=ieee_value(0d0,ieee_quiet_nan))
   if(code==0.or.associated(a))stop 9
   call rt_open(a,'a',code,config=config_a);if(code/=0)stop 1
+  ! Another legacy calculation entering warmup must not affect A, B or reopened RT states.
+  if(mode/='solo_a'.and.mode/='native')exx_pre_scf_active=.true.
   open(newunit=ua,file='a_trace.bin',access='stream',form='unformatted',status='new')
  endif
  if(mode/='solo_a'.and.mode/='native')then

@@ -27,7 +27,12 @@
     "src/common/lattice.f90",
     "src/atom/pp/input_pp.f90",
     "src/atom/pp/salmon_pp.f90",
-    "src/atom/pp/prep_pp.f90"
+    "src/atom/pp/prep_pp.f90",
+    "src/gs/scf_iteration_dft.f90",
+    "src/gs/scf_iteration.f90",
+    "src/gs/main_dft.f90",
+    "src/xc/exx_gs_metadata.f90",
+    "src/gs/dc/dcdft.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -57,6 +62,6 @@
   ],
   "scope": "explicit serial full-support fast HSE native system ownership; common immutable global configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "774c5a99c4c0c3f45b99336a22bd8ded9c1c6a0776724ec5350203306fd5106d",
+  "replacements_sha256": "181eb1f438de8cbc7a3ac3f23ab1649ba1c6d98d73aabfe2ddcc4e46d9f43988",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

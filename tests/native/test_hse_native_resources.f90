@@ -3,13 +3,13 @@ program probe
  use iso_fortran_env,only:int64
  use structures
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_state_bytes
- use exx_native,only:exx_refresh,exx_add_action,exx_bind_system,exx_unbind_system
+ use exx_native,only:exx_refresh,exx_add_action,exx_bind_system,exx_unbind_system,exx_set_phase,exx_pre_scf
  use salmon_global
  use sym_sub,only:use_symmetry
  use communication,only:COMM_GROUP_SELF
  implicit none
  type(s_exx_rt_state),target::a,b,reference,reference_b
- type(s_dft_system)::sa,sb,sref,srefb
+ type(s_dft_system)::sa,sb,sref,srefb,legacy
  type(s_rgrid)::mg
  type(s_parallel_info)::info
  type(s_orbital)::psi,hpsi
@@ -41,6 +41,7 @@ program probe
  sa%xc_input_ready=.true.;sa%xc_input%xcname='hse06'
  sa%xc_input%exchange_fraction=.25d0;sa%xc_input%screened_exchange=.true.
  sa%xc_input%hse_omega=.11d0
+ call exx_set_phase(sa,.false.)
  sb=sa;sref=sa
  sb%xc_input%hse_omega=.17d0
  sb%hgs=1.2d0;sb%hvol=1.2d0**3
@@ -80,9 +81,22 @@ program probe
  endif
  ! Owned inputs must survive unrelated legacy input changes between calls.
  num_kgrid=[9,9,9];use_symmetry=.true.;xc='pz';hse_omega=9d0;pbeh_coulomb_radius=7d0
+ exx_pre_scf_active=.true.
  call refresh(sb,v/sqrt(sb%hvol));call refresh(srefb,v/sqrt(sb%hvol));call action(sa,actual)
  if(any(actual/=expected))stop 4
  call action(sb,saved)
+ b%exx_freeze=.true.
+ call exx_set_phase(sb,.true.)
+ call action(sb,actual);if(any(actual/=(0d0,0d0)))stop 22
+ call action(sa,actual);if(any(actual/=expected))stop 23
+ if(exx_pre_scf(sa).or..not.exx_pre_scf(sb))stop 24
+ if(.not.exx_pre_scf(legacy))stop 25
+ call exx_set_phase(sb,.false.)
+ call refresh(sb,u/sqrt(sb%hvol));call refresh(srefb,u/sqrt(sb%hvol))
+ call action(sb,actual);call action(srefb,expected)
+ if(any(actual/=expected))stop 27
+ call refresh(sb,v/sqrt(sb%hvol));call refresh(srefb,v/sqrt(sb%hvol))
+ call action(sb,actual);if(any(actual/=saved))stop 26
  call save_action('b_native.dat',saved)
  call action(srefb,actual);if(any(actual/=saved))stop 13
  call refresh(sa,v);call refresh(sref,v)

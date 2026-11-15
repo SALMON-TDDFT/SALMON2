@@ -120,6 +120,8 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   pbeh_mesh_md=yn_md=='y'.and.(is_global_hybrid(xc))
 
 
+  ! A real-time state always evaluates the target functional, never PBE warmup.
+  system%xc_phase_owned=.true.;system%xc_pre_scf_active=.false.
   call nvtxStartRange('initialization_rt', __LINE__)
 
   call timer_begin(LOG_INIT_RT)

@@ -24,7 +24,7 @@
 module salmon_xc
   use structures, only: s_xc_config, s_xc_functional, s_xc_operator_payload, s_xc_workspace, s_xc_pz_workspace
 #ifdef USE_HSE
-  use exx_native,only:exx_context,exx_system_energy
+  use exx_native,only:exx_context,exx_system_energy,exx_pre_scf
   use exx_native, only: exx_refresh,exx_enabled,exx_exchange_energy
   use hybrid_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate,hybrid_density_evaluate
   use rvv10, only: rvv10_evaluate
@@ -85,7 +85,7 @@ contains
     use structures
     use sendrecv_grid, only: update_overlap_real8
     use stencil_sub, only: calc_gradient_field, calc_laplacian_field
-    use salmon_global, only: yn_spinorbit,yn_dc,yn_md,yn_opt,exx_pre_scf_active
+    use salmon_global, only: yn_spinorbit,yn_dc,yn_md,yn_opt
     use noncollinear_module, only: rot_vxc_noncollinear
     use nvtx_wrapper
     implicit none
@@ -113,6 +113,7 @@ contains
     real(8),allocatable :: rv_r(:),rv_s(:),rv_e(:),rv_v(:),rv_w(:)
     real(8),allocatable :: rv_local(:,:,:),rv_global(:,:,:)
 #endif
+    logical :: pre_scf_phase
     real(8) :: tot_exc
     ! real(8) :: system%xc_work%rho_tmp(mg%num(1), mg%num(2), mg%num(3))
     ! real(8) :: system%xc_work%rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
@@ -125,6 +126,10 @@ contains
     real(8),allocatable :: delr_s(:,:,:,:,:),j_s(:,:,:,:,:),tau_s(:,:,:,:)
     real(8),allocatable :: rdedd_tmp_s(:,:,:,:,:),drdedd_s(:,:,:,:)
     
+    pre_scf_phase=.false.
+#ifdef USE_HSE
+    pre_scf_phase=exx_pre_scf(system)
+#endif
     system%xc_input=xc_func%config
     system%xc_input_ready=.true.
     call nvtxStartRange('exchange_correlation', __LINE__)
@@ -345,28 +350,28 @@ contains
     if (xc_func%use_gradient) then
 !      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       if(nspin==1)then
-        call calc_xc(xc_func, pp, pre_scf_active=exx_pre_scf_active, workspace=system%xc_work%pz, rho=system%xc_work%rho_tmp, &
+        call calc_xc(xc_func, pp, pre_scf_active=pre_scf_phase, workspace=system%xc_work%pz, rho=system%xc_work%rho_tmp, &
     & eexc=system%xc_work%eexc_tmp, vxc=system%xc_work%vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
                &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=system%xc_payload)
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
-        call calc_xc(xc_func, pp, pre_scf_active=exx_pre_scf_active, workspace=system%xc_work%pz, &
+        call calc_xc(xc_func, pp, pre_scf_active=pre_scf_phase, workspace=system%xc_work%pz, &
           & rho_s=system%xc_work%rho_s_tmp, grho_s=delr_s, &
          & eexc=system%xc_work%eexc_tmp,vxc_s=system%xc_work%vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc) 
 !               &     rlrho_s=lrho_s, tau_s=tau_s, rj_s=j_s, rho_nlcc=ppn%rho_nlcc)
       endif 
     else
       if(nspin==1)then
-        call calc_xc(xc_func, pp, pre_scf_active=exx_pre_scf_active, workspace=system%xc_work%pz, rho=system%xc_work%rho_tmp, &
+        call calc_xc(xc_func, pp, pre_scf_active=pre_scf_phase, workspace=system%xc_work%pz, rho=system%xc_work%rho_tmp, &
     & eexc=system%xc_work%eexc_tmp, vxc=system%xc_work%vxc_tmp, rho_nlcc=ppn%rho_nlcc)
       else if(nspin==2)then
-        call calc_xc(xc_func, pp, pre_scf_active=exx_pre_scf_active, workspace=system%xc_work%pz, rho_s=system%xc_work%rho_s_tmp, &
+        call calc_xc(xc_func, pp, pre_scf_active=pre_scf_phase, workspace=system%xc_work%pz, rho_s=system%xc_work%rho_s_tmp, &
     & eexc=system%xc_work%eexc_tmp, vxc_s=system%xc_work%vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
     end if
 
 #ifdef USE_HSE
-    if(xc_func%config%use_rvv10.and..not.exx_pre_scf_active)then
+    if(xc_func%config%use_rvv10.and..not.pre_scf_phase)then
       if(nspin/=1)error stop 'rVV10: unpolarized density required'
       ! In DC these are the buffered fragment density, cell and communicator.
       ! The caller integrates eexc over its core only for global DC energy.

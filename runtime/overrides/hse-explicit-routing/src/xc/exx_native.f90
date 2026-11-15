@@ -20,7 +20,7 @@ module exx_native
   use exx_spinor, only: exx_spinor_apply_distributed,exx_spinor_weight_sources
   use exx_k_orbits, only: apply_k_orbits,apply_spinor_k_orbits
   use exx_ace
-  use exx_rt_state,only:s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin
+  use exx_rt_state,only:s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear
   use exx_factor_history,only:s_factor_history,history_accept,history_predict,history_write,history_read
   use exx_distributed_gauge, only: gauge_tiles_rotate
   use exx_orbitals, only: orbital_ace_build,orbital_ace_apply,orbital_layout,orbital_rotate,orbital_hermitian_action
@@ -41,6 +41,8 @@ module exx_native
     hse_fft_layout
   implicit none
   private
+  public :: exx_set_phase,exx_pre_scf
+  public :: exx_pre_scf_initialize,exx_pre_scf_begin,exx_pre_scf_not_ready,exx_pre_scf_count_ready
   public :: exx_bind_system,exx_unbind_system,exx_context,exx_system_energy
   public :: exx_check_localization
   public :: exx_enabled,exx_refresh,exx_add_action,exx_exchange_energy,exx_freeze
@@ -69,6 +71,76 @@ contains
     type(s_dft_system),intent(in)::system
     type(s_exx_rt_state),pointer::owner
     owner=>resolve_rt_context(system=system)
+  end function
+  subroutine exx_pre_scf_initialize(system,threshold,steps,status)
+    type(s_dft_system),intent(inout) :: system
+    real(8),intent(in) :: threshold
+    integer,intent(in) :: steps
+    integer,intent(out) :: status
+    status=1
+    if(.not.ieee_is_finite(threshold))return
+    if(threshold<0d0.or.steps<1)return
+    call exx_set_phase(system,threshold>0d0)
+    system%pre_scf=s_pre_scf_state()
+    system%pre_scf%threshold=threshold;system%pre_scf%required_steps=steps
+    system%pre_scf%initialized=.true.
+    status=0
+  end subroutine
+  subroutine exx_pre_scf_begin(system,completed_iterations)
+    type(s_dft_system),intent(inout) :: system
+    integer,intent(in) :: completed_iterations
+    if(.not.system%pre_scf%initialized)error stop 'Uninitialized pre-SCF state'
+    if(completed_iterations<0.or.completed_iterations==huge(0))error stop 'Invalid SCF iteration'
+    system%pre_scf%count=0
+    system%pre_scf%first_iteration=completed_iterations+1
+  end subroutine
+  integer function exx_pre_scf_not_ready(system,iteration,residual) result(not_ready)
+    type(s_dft_system),intent(in) :: system
+    integer,intent(in) :: iteration
+    real(8),intent(in) :: residual
+    not_ready=0
+    if(iteration==system%pre_scf%first_iteration.or..not.(residual<system%pre_scf%threshold))not_ready=1
+  end function
+  logical function exx_pre_scf_count_ready(system,not_ready_total) result(ready)
+    type(s_dft_system),intent(inout) :: system
+    integer,intent(in) :: not_ready_total
+    if(not_ready_total==0)then
+      system%pre_scf%count=system%pre_scf%count+1
+    else
+      system%pre_scf%count=0
+    endif
+    ready=system%pre_scf%count>=system%pre_scf%required_steps
+  end function
+  subroutine exx_set_phase(system,pre_scf)
+    type(s_dft_system),intent(inout) :: system
+    logical,intent(in) :: pre_scf
+    logical :: binding_enabled
+    ! Phase transitions invalidate only this explicitly bound owner's operator/history.
+    ! Unbound systems can select a phase before binding; they must not reuse legacy caches.
+    if(exx_pre_scf(system).neqv.pre_scf)then
+      if(associated(system%salmonpy_hse_owner))then
+        select type(owner=>system%salmonpy_hse_owner)
+        type is(s_exx_rt_state)
+          binding_enabled=owner%native_resources_enabled
+          call rt_state_clear(owner)
+          owner%native_resources_enabled=binding_enabled
+        class default
+          error stop 'Invalid HSE owner for phase transition'
+        end select
+      endif
+    endif
+    ! The caller must refresh exchange after returning to production.
+    system%xc_pre_scf_active=pre_scf
+    system%xc_phase_owned=.true.
+  end subroutine
+  logical function exx_pre_scf(system) result(active)
+    type(s_dft_system),intent(in) :: system
+    if(system%xc_phase_owned)then
+      active=system%xc_pre_scf_active
+    else
+      ! Compatibility boundary for unextracted GS/DC phase state machines.
+      active=exx_pre_scf_active
+    endif
   end function
   function system_functional(system) result(name)
     type(s_dft_system),intent(in) :: system
@@ -157,8 +229,9 @@ contains
       owner=>rt_owned
     endif
   end function resolve_rt_context
-  logical function thermal_scf_damping()
-    thermal_scf_damping=exx_enabled().and.theory=='dft'.and.yn_spinorbit=='y'.and. &
+  logical function thermal_scf_damping(system)
+    type(s_dft_system),intent(in) :: system
+    thermal_scf_damping=exx_enabled(system).and.theory=='dft'.and.yn_spinorbit=='y'.and. &
       yn_dc=='n'.and.temperature>=0d0.and.propagator/='hse_taylor4_full'
   end function
 
@@ -177,7 +250,7 @@ contains
     real(8)::residual
     integer::ierr,total_error
     exx_state_owner=>resolve_rt_context(rt_context,system)
-    if(.not.thermal_scf_damping())return
+    if(.not.thermal_scf_damping(system))return
     allocate(targets(2*product(mg%num),system%no,info%numk))
     call exx_pack(psi,mg,info,targets)
     call exx_ace_scf_mix(exx_state_owner%scf_damped_ace,exx_state_owner%ace,targets,alpha,mixed,residual,ierr)
@@ -201,7 +274,7 @@ contains
     integer::ierr,total_error
     exx_state_owner=>resolve_rt_context(rt_context,system)
     residual=0d0
-    if(.not.thermal_scf_damping())return
+    if(.not.thermal_scf_damping(system))return
     if(.not.exx_ace_ready(exx_state_owner%scf_damped_ace))then
       residual=huge(1d0);return
     endif
@@ -890,7 +963,7 @@ contains
     implicit none
     type(s_dft_system),optional,intent(in) :: system
     if(present(system))then
-      exx_enabled=is_hybrid(system_functional(system)).and..not.exx_pre_scf_active
+      exx_enabled=is_hybrid(system_functional(system)).and..not.exx_pre_scf(system)
     else
       exx_enabled=is_hybrid(xc).and..not.exx_pre_scf_active
     endif

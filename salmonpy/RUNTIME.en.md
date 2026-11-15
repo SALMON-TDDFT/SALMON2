@@ -426,3 +426,18 @@ Atom count/species come from `system`, and species count from loaded PP arrays. 
 Cache, interpolation and projector communication-table helpers use owned array sizes. NLCC grid placement reads `system%kion` and the periodicity captured by the radial loader.
 
 The explicitly independent path is scalar, without +U. Legacy SOC/+U entries remain, but their specialized shared state has not been extracted. MPI resource ownership, global timers and heterogeneous full-TDDFT restrictions remain. Run `tools/test_pp_grid_config.py HSE_BUILD_RECORD NEW_OUTPUT` for the focused probe.
+
+
+### Owned XC evaluation phase
+
+The internal fast-HSE entry `exx_set_phase(system, pre_scf)` gives that system an explicit evaluation phase.
+`exx_pre_scf(system)` resolves it consistently for HSE enablement, thermal SCF helpers, semilocal XC and rVV10.
+RT initialization owns production phase regardless of the legacy flag: another calculation entering pre-SCF cannot change an existing or newly initialized RT state's evaluation.
+A phase change clears only the explicitly bound HSE owner’s exchange resources and prediction history. Unbound systems may select a phase before binding, but must not reuse legacy shared exchange caches.
+After explicitly returning from pre-SCF to production, refresh exchange from the current orbitals with `exx_refresh` before using its action.
+
+GS/DC pre-SCF controllers now retain threshold, consecutive-success count, required steps and first iteration in each system. GS, orbital solves, DC fragment/total energy and hybrid metadata consult the same phase. The local readiness check, collective reduction, count update, diagnostic, transition and potential rebuild retain their original order. Each SCF invocation resets its count and start iteration; it does not reactivate a completed pre-SCF phase.
+
+Systems without explicit phase ownership and no-argument `exx_enabled()` retain the legacy fallback. DC communicator/material swapping, adaptive exchange controls and legacy exchange caches remain shared. This is not full GS/DC isolation or arbitrary concurrent-call support.
+
+Run `tools/test_pre_scf_state.py HSE_BUILD_RECORD NEW_OUTPUT` for independent controller checks, and `tools/test_pre_scf_runtime.py HSE_BUILD_RECORD ORIGINAL_FAST_HSE_RECORD NEW_OUTPUT` for four tiny serial GS comparisons. The latter uses deliberately loose thresholds: it verifies transitions and scalar outputs, not physical convergence. Add `--dc-ranks 2` or `--dc-ranks 4` and use MPI-enabled build records to compare two DC fragments, each on one or two spatial ranks (`--mpiexec PATH` selects the launcher). The tool disables restart output for spatial hybrid calculations and limits OpenMP/BLAS to one thread per rank. All eight DC/MPI cases matched the original fast-HSE build locally; this does not establish concurrent independent solver isolation. See `docs/xc-phase-validation-2026-11-15.md` and `docs/pre-scf-validation-2026-11-15.md`.

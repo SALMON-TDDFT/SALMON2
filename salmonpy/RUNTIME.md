@@ -352,3 +352,31 @@ NLCCの格子配置は、`system%kion`と読み込み時に保持した周期性
 明示的に独立な入口はスカラー・+Uなしです。従来のSOC/+U入口は残しますが、専用モジュールの
 共有状態を分離したとは説明しません。MPI通信資源・グローバルなタイマー・異物質TDDFT全体の
 制約も残ります。検査は`tools/test_pp_grid_config.py HSE_BUILD_RECORD NEW_OUTPUT`です。
+
+
+### XC評価フェーズの独立性
+
+高速HSEの内部入口`exx_set_phase(system, pre_scf)`は、そのsystemの評価フェーズを固定します。
+`exx_pre_scf(system)`で取得し、HSEの有効判定・熱的SCF補助処理・半局所XC・rVV10は同じフェーズを使います。
+RT初期化は、共有フラグにかかわらず本計算フェーズを所有します。別の計算がpre-SCFに入っても、
+作成済みRT状態や新しく作るRT状態の評価を切り替えません。
+フェーズ変更時はbind済みの独立HSE ownerだけの交換資源・予測履歴を破棄します。未bindの状態は
+作成前のフェーズ指定に使えますが、既存の共有交換キャッシュを転用してはいけません。
+pre-SCFから本計算へ戻す明示的な利用者は、現在の軌道から`exx_refresh`を実行してから交換作用を使います。
+
+GS/DCのpre-SCF制御は、閾値・必要連続回数・現在の連続回数・開始反復を各systemに保持します。
+GS、軌道計算、DC断片／全体系エネルギー、hybridメタデータは同じフェーズを参照します。
+局所判定→集団通信→回数更新→診断→切替→ポテンシャル再構築の順序は従来どおりです。
+SCF呼び出しごとに回数と開始反復をリセットしますが、完了したpre-SCFを再開させません。
+
+フェーズ未所有のsystemと引数なし`exx_enabled()`には互換の共有フラグ参照が残ります。
+DCの通信・物質情報交換、適応交換制御、従来の交換キャッシュは共有です。
+GS/DC全体の独立化や任意の並行実行対応とは説明しません。
+
+`tools/test_pre_scf_state.py HSE_BUILD_RECORD NEW_OUTPUT`で制御状態の独立性を、
+`tools/test_pre_scf_runtime.py HSE_BUILD_RECORD ORIGINAL_FAST_HSE_RECORD NEW_OUTPUT`で小さいGS計算4条件を検査します。
+後者の閾値は意図的に緩く、切替とスカラー出力の回帰検査です。物理収束の検証ではありません。
+MPI有効ビルドの記録を渡し、`--dc-ranks 2`または`--dc-ranks 4`を加えると、2断片を各1または2空間ランクで比較します。
+`--mpiexec PATH`でランチャーを指定できます。空間分割HSEの要件に従いrestart出力を無効にし、各ランクのOpenMP／BLASを1スレッドに制限します。
+ローカルでDC/MPI計8条件が元の高速HSEと一致しました。複数ソルバーの同時独立実行を保証する検査ではありません。
+記録は`docs/xc-phase-validation-2026-11-15.md`と`docs/pre-scf-validation-2026-11-15.md`です。

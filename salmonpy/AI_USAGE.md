@@ -316,3 +316,17 @@ SOC/+U専用状態、MPI資源、タイマー、異物質TDDFT全体の共有解
 検証はdocs/pp-grid-validation-2026-11-15.mdとtools/test_pp_grid_config.pyを参照してください。
 
 PP格子を更新する間、読み込んだradial数値表と格子形状は不変です。表内容は毎stepで再hashせず、設定・構成のみ検査します。
+
+
+内部HSEのexx_set_phase(system, pre_scf)とexx_pre_scf(system)で評価フェーズを明示所有できます。
+RT初期化は本計算フェーズを所有し、共有pre-SCFフラグ変更の影響を受けません。
+明示的にpre-SCFから戻す際は現軌道でexx_refresh後に交換作用を使います。
+GS/DCのpre-SCF閾値・連続回数・必要回数・開始反復も各systemが所有し、集団通信と切替・再構築順は維持します。
+DC通信・物質情報交換、適応交換制御、従来交換キャッシュは共有のため、全SCF制御の独立化・並行実行対応とは案内しません。
+小さいGSの4条件比較とDC/MPIの8条件比較は切替・数値の回帰検査で、物理収束や複数ソルバーの同時独立実行の保証ではありません。
+DC比較はMPI有効ビルド記録を渡し、tools/test_pre_scf_runtime.pyに--dc-ranks 2または4を指定します。
+空間分割HSEではwrite_gs_restart_data='no'が必要です。MacではMPI CラッパーがApple Clangを選ぶ場合があり、
+GNUの-fopenmpを使う構成ではCコンパイラもGNUに合わせます。MPIソケット起動の制限は計算失敗と区別します。
+検査はtools/test_pre_scf_state.pyとtools/test_pre_scf_runtime.py、記録はdocs/pre-scf-validation-2026-11-15.mdを参照します。
+
+評価フェーズの変更はbind済み独立HSE ownerの資源・履歴を無効化します。共有交換キャッシュの転用はしません。

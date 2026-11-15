@@ -89,9 +89,17 @@ module structures
  character(32) :: rvv10_fft='ffte'
   end type
 
+  type s_pre_scf_state
+    logical :: initialized=.false.
+    real(8) :: threshold=0d0
+    integer :: required_steps=1,count=0,first_iteration=1
+  end type
+
   type s_dft_system
+    type(s_pre_scf_state) :: pre_scf
     type(s_xc_config) :: xc_input
     logical :: xc_input_ready=.false.
+    logical :: xc_phase_owned=.false.,xc_pre_scf_active=.false.
     integer :: kmesh(3)=[1,1,1]
     type(s_kpoint_config) :: kpoint_input
     type(s_xc_workspace) :: xc_work
