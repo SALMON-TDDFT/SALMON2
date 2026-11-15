@@ -144,9 +144,46 @@ Add `--explicit-routing` to the preceding preparation command to copy the comple
 
 Twenty-four exchange/history procedures forward a caller-supplied RT state through their internal calls. Resolution uses local references, without switching a process-wide active state or copying all arrays. Public legacy flags/energy are state-owned; old names are aliases to the default owner only. Reassociating those aliases is unsupported.
 
-The certified routing scope is common exchange configuration, serial CPU scalar dense ACE action and lifecycle. Nondefault refresh, direct/full, packed/distributed and spin routes are rejected before shared resources are reached. With optional `rt_status`, `exx_refresh`/`exx_add_action` return nonzero for this capability mismatch without changing accepted state/output. Without it native errors may terminate the process. This is not general failure atomicity or material C ABI conformance.
+Without a system binding, the state-only routing scope remains common exchange configuration, serial CPU scalar dense ACE action and lifecycle. Nondefault refresh, direct/full, packed/distributed and spin routes are rejected before shared resources are reached. With optional `rt_status`, `exx_refresh`/`exx_add_action` return nonzero for this capability mismatch without changing accepted state/output. Without it native errors may terminate the process. This is not general failure atomicity or material C ABI conformance.
 
-This route is not yet bound to each TDDFT electronic state or different material configurations. Kernel/Wannier/geometry/input ownership remains to be extracted. FDTD common dt, the process-isolated API and fixed jobs remain unchanged.
+The integrated development route binds an explicit owner using
+`exx_bind_system(system, owner, status)`. The native Hamiltonian, XC/total energy,
+Taylor lifecycle, PT-CN freeze/history and restart metadata resolve that owner.
+Each owner keeps its own optimized fast-PR kernel, ACE, trial buffers and histories;
+there is no process-wide active-owner switch or generic-kernel substitution.
+`SALMONPY_HSE_CONTEXT=1` opts the full `main_tddft` driver into this route for
+explicit regression runs. Existing binaries and the Python TDDFT API are unchanged.
+
+Scope: serial CPU, periodic scalar/non-spin-polarized HSE, full real-space grid,
+full-support exchange and common immutable process settings. The native refresh
+and action reject spatial/orbital/k MPI, Wannier, symmetry and spin paths for
+bound owners. States can own different cell spacings with the same grid/k counts,
+but changing global XC, mesh, propagator or factor settings between calls is
+unsupported. Global configuration is a caller precondition, not a fully isolated
+configuration object. FDTD still requires common dt.
+
+Keep `owner` alive and never copy/assign it or a bound `system`. Calls must be
+serialized. After all calls, use `exx_unbind_system(system)` then
+`rt_state_clear(owner)`; clearing destroys the owned FFT plans. A second binding
+to an already enabled owner is rejected; clear before reopening. These are
+internal Fortran development interfaces, not a stable C/Python multi-instance API.
+Native numerical/allocation failures may still stop the process. `rt_state_bytes`
+returns status 2 and bytes -1 for resource-enabled owners because opaque FFT-plan
+allocation sizes are unavailable; do not interpret this as zero memory usage.
+
+```sh
+python tools/test_hse_explicit_state.py HSE_BUILD_RECORD NEW_OUTPUT --native-resources --threads 2
+python tools/test_hse_rt_state_runtime.py HSE_BUILD_RECORD REFERENCE_RECORD FIXTURES NEW_OUTPUT --native-context --threads 2
+```
+
+The first probe compares interleaved ACE and direct actions for different cells
+with separate-process references and checks close/reopen isolation. The second
+runs the actual TDDFT driver through 32 synthetic k-mesh/dt/propagator/factor
+cases and compares current, energy and prediction/solver traces. Together they
+check native HSE ownership plus full-driver numerical regression; they do not
+prove interleaving of complete independent TDDFT solvers or physical convergence.
+The standalone `test_hse_rt_state.py` applies only to the parent RT-only profile;
+use the full-build probes above for the integrated profile.
 
 ## Experimental independent HSE resource primitive
 
@@ -204,4 +241,4 @@ content. NLCC loading additionally rejects unknown source-tree identities when
 present. Future numerical source changes require new scientific validation.
 Update sources, inventories and their hashes in the same reviewed commit; verify
 shared native kernels and rebuild/test affected profiles before distribution.
-The independent HSE resource primitive is still not bound to full native TDDFT.
+The optimized native HSE owner is connected as described above; the standalone generic resource primitive remains a separate diagnostic component.

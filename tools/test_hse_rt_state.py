@@ -13,6 +13,8 @@ def main():
     for name in ['source','reference','output']:p.add_argument(name,type=Path)
     p.add_argument('--fc',default='gfortran');p.add_argument('--blas',type=Path,required=True)
     a=p.parse_args();a.source=a.source.resolve();a.reference=a.reference.resolve();a.output=a.output.resolve();a.blas=a.blas.resolve()
+    if 'native_kernel' in (a.source/'src/xc/exx_rt_state.f90').read_text():
+        raise ValueError('this standalone probe is parent-profile-only; use test_hse_explicit_state.py BUILD NEW_OUTPUT --native-resources for the integrated profile')
     if not a.blas.is_file():raise ValueError('explicit existing BLAS/LAPACK library required')
     root=Path(__file__).resolve().parents[1];checker=Path(__file__).with_name('check_forbidden_eigensolvers.py')
     for tree in [a.source,a.reference]:subprocess.run([sys.executable,str(checker),'--source-root',str(tree/'src')],check=True)

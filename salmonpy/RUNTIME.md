@@ -107,9 +107,41 @@ HSEは利用者のPR予定版`c9e8ce431f43eefd4a88998134adb4796f8ec837`を別プ
 
 交換・履歴処理の24手続きは、指定されたRT状態を内部呼び出しにも渡します。各呼び出しのローカル参照を使い、プロセス全体のactive状態を切り替えたり全配列をコピーしたりしません。公開legacyフラグと交換エネルギーはRT状態が所有し、旧名は標準状態だけを参照する互換用aliasです。aliasの関連先を利用者が変更することは対応範囲外です。
 
-検証対象は共通の交換設定を使う直列CPU・scalar dense ACE作用と寿命管理です。非標準状態によるrefresh、直接/full交換、packed・分散・spin経路は未対応で、共有資源へ到達する前に拒否します。`exx_refresh`と`exx_add_action`で`rt_status`を指定した場合、この能力不一致は非ゼロを返して状態/出力を保ちます。省略時のnativeエラーはプロセス停止になり得ます。一般的な失敗原子性や公開C ABIへの適合ではありません。
+systemへ結合しない従来の状態単独入口では、対象は共通の交換設定を使う直列CPU・scalar dense ACE作用と寿命管理です。非標準状態によるrefresh、直接/full交換、packed・分散・spin経路は未対応で、共有資源へ到達する前に拒否します。`exx_refresh`と`exx_add_action`で`rt_status`を指定した場合、この能力不一致は非ゼロを返して状態/出力を保ちます。省略時のnativeエラーはプロセス停止になり得ます。一般的な失敗原子性や公開C ABIへの適合ではありません。
 
-この経路はまだ各TDDFT電子状態や異なる材料設定へ接続していません。kernel/Wannier/幾何・入力設定等の分離が必要です。FDTDの共通dt、旧来のプロセス分離API、固定ジョブは変更しません。
+本体へ接続する開発用入口は `exx_bind_system(system, owner, status)` です。
+Hamiltonian、XC/全エネルギー、Taylorの試行状態、PT-CNのfreeze/履歴、再開情報が
+systemに結び付いた所有者を使います。高速PR版のkernel、ACE、試行配列、履歴を
+所有者ごとに保持し、プロセス全体のactiveポインタ切替や汎用kernelへの置換はしません。
+`SALMONPY_HSE_CONTEXT=1` を指定した明示的な検証実行では、本体のmain_tddftも
+この入口を使います。既存バイナリやPython TDDFT APIは変更しません。
+
+対象は直列CPU・周期・非スピン分極HSE・全実空間格子・全支持交換で、プロセスの
+入力設定は共通かつ不変とします。結合済み所有者のrefresh/actionは空間・軌道・k点MPI、
+Wannier、対称性、spin経路を拒否します。同じ格子点数/k点数で格子間隔の違う状態は
+所有できますが、呼び出しの途中でglobalなXC・mesh・伝播法・factor設定を切り替える
+使い方は未対応です。設定不変は呼出側の前提であり、設定全体を独立化したわけではありません。
+FDTDの共通dtは維持します。
+
+ownerは全呼び出しが終わるまで生存させ、ownerや結合済みsystemのコピー・代入を
+しないでください。同時呼び出しは不可です。終了時は `exx_unbind_system(system)`、
+続いて `rt_state_clear(owner)` を呼び、所有FFT計画を解放します。使用中のownerへの
+二重bindは拒否し、再利用前にclearを要求します。内部Fortranの開発用入口であり、
+安定したC/Pythonの複数TDDFT APIではありません。native内部の数値・確保エラーは
+プロセス停止になり得ます。FFT計画の確保量が不明なため、資源付きownerに対する
+`rt_state_bytes` はstatus=2・bytes=-1を返します。使用量0と解釈しません。
+
+```sh
+python tools/test_hse_explicit_state.py HSE_BUILD_RECORD NEW_OUTPUT --native-resources --threads 2
+python tools/test_hse_rt_state_runtime.py HSE_BUILD_RECORD REFERENCE_RECORD FIXTURES NEW_OUTPUT --native-context --threads 2
+```
+
+前者はセルの違う状態のACE/直接交換を交互実行し、別プロセス参照と比較して、破棄・
+再構築による干渉も検査します。後者は本体TDDFTを32ケースの合成kmesh/dt/伝播法/factor設定で
+動かし、電流・エネルギー・予測/solver診断を比較します。HSE資源の独立性と本体の数値回帰を
+検証するもので、TDDFT全体の複数状態の交互実行や実材料の収束精度を保証しません。
+単独コンパイル用の `test_hse_rt_state.py` はRT状態のみの親プロファイル用であり、
+本体接続済みプロファイルには上の全objectを使う検査を用います。
 
 ## 実験用：独立したHSE資源の部品
 
@@ -161,4 +193,4 @@ source_tree_sha256 は同梱ツリーの一覧、replacements_sha256 は段階�
 新しいソースの検証済み証明には使いません。NLCCの読込はsource-tree識別子が存在する場合、
 未知の値を追加で拒否します。今後の数値変更には改めて検証が必要です。
 ソース・一覧・ハッシュは同じコミットで更新し、共有カーネルの一致と影響するプロファイルの
-ビルド・回帰を確認します。独立HSE資源部品と本体TDDFTの接続は引き続き次段階です。
+ビルド・回帰を確認します。高速HSEの本体接続は上記の所有者経路を使い、独立した汎用資源部品は診断用として別に保持します。

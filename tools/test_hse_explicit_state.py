@@ -18,6 +18,7 @@ def digest(path):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('build',type=Path);p.add_argument('output',type=Path);p.add_argument('--threads',type=int,default=1)
     p.add_argument('--resource-context',action='store_true',help='test the standalone resource-ownership primitive')
+    p.add_argument('--native-resources',action='store_true',help='test integrated optimized refresh/action owners')
     a=p.parse_args();record=json.loads(a.build.read_text());engine=Path(record['executable']).resolve();build=engine.parent;source=Path(record['source_root']).resolve()
     if record.get('schema')!='salmonpy.hse-rt-state-build/1' or record.get('status')!='built-and-audited' or digest(engine)!=record['sha256']:raise ValueError('unchanged audited HSE build required')
     if a.threads<1:raise ValueError('positive threads required')
@@ -27,7 +28,7 @@ def main():
     root=Path(__file__).resolve().parents[1];checker=Path(__file__).with_name('check_forbidden_eigensolvers.py');out=a.output.resolve()
     if out.is_relative_to(source) or out.is_relative_to(build) or out.is_relative_to(root):raise ValueError('new external output required')
     subprocess.run([sys.executable,str(checker),'--source-root',str(source/'src')],check=True)
-    out.mkdir(parents=True,exist_ok=False);src=out/'src';src.mkdir();shutil.copy2(root/('tests/native/test_hse_resource_context.f90' if a.resource_context else 'tests/native/test_hse_explicit_state.f90'),src/'probe.f90')
+    out.mkdir(parents=True,exist_ok=False);src=out/'src';src.mkdir();shutil.copy2(root/('tests/native/test_hse_native_resources.f90' if a.native_resources else 'tests/native/test_hse_resource_context.f90' if a.resource_context else 'tests/native/test_hse_explicit_state.f90'),src/'probe.f90')
     if a.resource_context:
         adapter=root/'salmonpy/native_adapters/hse_resource_context.f90'
         if not adapter.exists():
@@ -57,8 +58,20 @@ def main():
         if a.resource_context:
             link.insert(1,str(out/'context.o'));linked.append(out/'context.o')
         run(link,cwd=build/'src')
-        run([out/'probe'],cwd=out,env={**os.environ,'OMP_NUM_THREADS':str(a.threads),'OPENBLAS_NUM_THREADS':'1'})
-    (out/'result.json').write_text(json.dumps(dict(status='passed',scope=('standalone serial HSE kernel/ACE ownership and refresh; not integrated native TDDFT' if a.resource_context else 'real dense ACE adapter explicit RT routing at common material configuration; not full native multi-material'),threads=a.threads,commands=commands,probe_sha256=digest(out/'probe'),linked_application_objects={str(f):digest(f) for f in linked+[out/'probe.o']}),indent=2)+'\n');print('Explicit-state HSE adapter probe passed')
+        env={**os.environ,'OMP_NUM_THREADS':str(a.threads),'OPENBLAS_NUM_THREADS':'1'}
+        if a.native_resources:
+            for mode in ['ace','full']:
+                work=out/mode;work.mkdir()
+                run([out/'probe',mode],cwd=work,env=env)
+                for label in ['a','b']:
+                    solo=out/(mode+'-solo-'+label);solo.mkdir()
+                    run([out/'probe',mode,'solo_'+label],cwd=solo,env=env)
+                    name=label+'_native.dat'
+                    if (solo/name).read_bytes()!=(work/name).read_bytes():
+                        raise ValueError('interleaved native action differs from independent process: '+label)
+        else:
+            run([out/'probe'],cwd=out,env=env)
+    (out/'result.json').write_text(json.dumps(dict(status='passed',scope=('integrated native optimized HSE refresh/action and independent kernel/ACE ownership; not full TDDFT context interleaving' if a.native_resources else 'standalone serial HSE kernel/ACE ownership and refresh; not integrated native TDDFT' if a.resource_context else 'real dense ACE adapter explicit RT routing at common material configuration; not full native multi-material'),threads=a.threads,commands=commands,probe_sha256=digest(out/'probe'),linked_application_objects={str(f):digest(f) for f in linked+[out/'probe.o']}),indent=2)+'\n');print('Explicit-state HSE adapter probe passed')
 
 
 if __name__=='__main__':main()

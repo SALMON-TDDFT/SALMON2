@@ -4,12 +4,18 @@
 ! are cloned or released here; ACE's metric communicator identifiers are borrowed.
 module exx_rt_state
  use iso_fortran_env,only:int64
+ use exx_k_exchange,only:exx_k_kernel,exx_k_kernel_destroy
+ use exx_symmetry,only:s_exx_symmetry_map
  use exx_ace,only:s_exx_ace
  use exx_factor_history,only:s_factor_history
  implicit none
  private
  public::s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear,rt_state_bytes
  type s_exx_rt_state
+  ! FFT owners are never intrinsically copied. Close before releasing this state.
+  logical :: native_resources_enabled=.false.
+  type(exx_k_kernel),allocatable :: native_kernel
+  type(s_exx_symmetry_map) :: native_symmetry
   logical::exx_freeze=.false.,exx_force_full_action=.false.
   logical::exx_adaptive_ready=.false.,exx_support_changed=.false.
   real(8)::exx_exchange_energy=0d0
@@ -91,6 +97,10 @@ contains
   implicit none
   type(s_exx_rt_state),intent(inout)::state
   type(s_exx_rt_state)::empty
+  if(allocated(state%native_kernel))then
+   call exx_k_kernel_destroy(state%native_kernel)
+   deallocate(state%native_kernel)
+  endif
   state=empty
  end subroutine
  subroutine rt_state_bytes(state,bytes,status)
@@ -100,6 +110,10 @@ contains
   integer,intent(out)::status
   integer::i
   bytes=0;status=0
+  ! FFT plans do not expose complete allocation sizes; do not report a false total.
+  if(state%native_resources_enabled.or.allocated(state%native_kernel))then
+   bytes=-1;status=2;return
+  endif
   call ace_bytes(state%ace);call ace_bytes(state%scf_damped_ace)
   call ace_bytes(state%initial_ace);call ace_bytes(state%midpoint_ace)
   if(allocated(state%cached_occupation))call add(size(state%cached_occupation,kind=int64),8_int64)

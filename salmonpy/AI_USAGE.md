@@ -248,3 +248,13 @@ GS書き出しは新しいexporter付きGammaRestartConverterを明示指定し�
 ## 本体ソースの管理（2026-11-15）
 
 本体ソースはruntime/sourcesに同梱し、段階別完成形はruntime/overridesで管理します。外部SALMONのcloneや互換パッチ適用を案内せず、`python -m salmonpy.runtime build NEW_BUILD --jobs N`を明示的ビルド入口にします。HSEは高速PR版のみ。標準版でUSE_HSEを有効にして代替しません。元コミット・ライセンス・全ファイルのハッシュを保持し、import時はビルドしません。旧patch_sha256は由来と過去記録の互換用識別子で、新しいソースの認証ではありません。新規数値変更はsource-tree/replacementsのハッシュと対応する検証を更新します。
+
+## 高速HSEの本体接続（開発用）
+
+RUNTIME.md/enのnative owner経路に従います。`--explicit-routing`で準備した高速版は、
+明示的な検証時に`SALMONPY_HSE_CONTEXT=1`でTDDFT本体へ独立HSE ownerを結合します。
+FFT・ACE・履歴の交互実行検査と、本体電流/エネルギーの32ケース比較を区別します。
+共通かつ不変のglobal設定、直列・非スピン分極・全支持の範囲です。TDDFT全体の複数状態・
+異なるglobal XC/dt・MPI/Wannierの完全な独立性や、Pythonからの新規HSE APIを案内しません。
+owner/結合済みsystemはコピーせず、unbind後clearで解放します。資源付き状態のbytes=-1・
+status=2は計測不可です。GitHub Actionsは利用枠節約のため、新規起動せずローカル検証を優先します。

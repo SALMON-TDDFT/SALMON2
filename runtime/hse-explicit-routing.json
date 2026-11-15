@@ -5,7 +5,14 @@
   "patch_sha256": "55482bcc735b542fc81e059d58e8154d60254a6cdb04b9d73d53fa719ed64af9",
   "modified_sources": [
     "src/xc/exx_native.f90",
-    "src/xc/exx_rt_state.f90"
+    "src/xc/exx_rt_state.f90",
+    "src/common/structures.f90",
+    "src/common/total_energy.f90",
+    "src/io/checkpoint_restart.f90",
+    "src/rt/main_tddft.f90",
+    "src/rt/ptcn_native.f90",
+    "src/rt/time_evolution_step.f90",
+    "src/xc/salmon_xc.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -33,8 +40,8 @@
     "thermal_factor_supported",
     "warn_fixed_radius"
   ],
-  "scope": "explicit serial dense ACE/lifecycle RT routing; nondefault refresh/direct/shared-geometry paths rejected",
+  "scope": "explicit serial full-support fast HSE native system ownership; common immutable global configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "4e617ca92b8cf10932628bec3f2e1c5d5000285a3d6e1bad176c02f9d74a02e5",
+  "replacements_sha256": "9cbe653ebc24d55c34d777230267b35d564a1d259a5b79fc5eb10207a27d068f",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

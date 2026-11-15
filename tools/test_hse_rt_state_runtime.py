@@ -33,6 +33,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['build','reference','fixtures','output']:p.add_argument(name,type=Path)
     p.add_argument('--threads',type=int,default=1)
+    p.add_argument('--native-context',action='store_true',help='require explicit native owner in the changed solver')
     a=p.parse_args()
     if a.threads<1:raise ValueError('positive thread count required')
     a.output.mkdir(parents=True,exist_ok=False)
@@ -68,7 +69,8 @@ def main():
                     start=time.perf_counter()
                     with (work/'run.log').open('w') as log,(work/'inputfile').open() as inp:
                         run=subprocess.run([build['executable']],cwd=work,stdin=inp,stdout=log,stderr=subprocess.STDOUT,
-                            env={**os.environ,'OMP_NUM_THREADS':str(a.threads),'OPENBLAS_NUM_THREADS':'1'},timeout=120)
+                            env={**os.environ,'OMP_NUM_THREADS':str(a.threads),'OPENBLAS_NUM_THREADS':'1',
+                                 'SALMONPY_HSE_CONTEXT': '1' if a.native_context and label=='changed' else '0'},timeout=120)
                     elapsed.append(time.perf_counter()-start)
                     if run.returncode:raise RuntimeError(f'{work}: native exit {run.returncode}; see run.log')
                     rt=np.loadtxt(work/'rt_rt.data');energy=np.loadtxt(work/'rt_rt_energy.data')
@@ -77,6 +79,8 @@ def main():
                     np.testing.assert_allclose(rt[:,0],dt*np.arange(1,13),rtol=0,atol=1e-10)
                     tables.append((rt,energy))
                     lines=(work/'run.log').read_text().splitlines()
+                    if a.native_context and label=='changed' and 'SALMONPY_HSE_NATIVE_CONTEXT active' not in lines:
+                        raise ValueError('explicit native owner was not exercised')
                     scientific.append([line.strip() for line in lines if line.strip().startswith(('FACTOR_HISTORY step/predicted:', 'FACTOR_HISTORY k/teacher/step/count/coeff/ready:', 'HSE_PT_CN residual=', 'HSE_PT_CN_ORTH pre_gram='))])
                 for one,two in zip(tables[0],tables[1]):np.testing.assert_allclose(one,two,rtol=1e-12,atol=1e-14)
                 predictions=_check_scientific_trace(scientific[0],scientific[1],mode,learned)
@@ -96,7 +100,7 @@ def main():
                     shutil.rmtree(case/label/'data_for_restart')
                     (case/label/'pseudo1_rps.dat').unlink()
     (a.output/'result.json').write_text(json.dumps(dict(scope='synthetic fast-PR HSE formatted-output numerical regression; not internal-bit, converged GS, full contexts or speed benchmark',
-        reference_sha256=builds[0]['sha256'],changed_sha256=builds[1]['sha256'],cases=results),indent=2)+'\n')
+        native_context=a.native_context,reference_sha256=builds[0]['sha256'],changed_sha256=builds[1]['sha256'],cases=results),indent=2)+'\n')
 
 
 if __name__=='__main__':main()
