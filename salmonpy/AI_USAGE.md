@@ -358,7 +358,7 @@ convergence_metricはrho_dne/norm_rho/norm_rho_dng/norm_pot/norm_pot_dng。指�
 GS混合はs_gs_run_config%mixingにmethod/mixrate/alpha_mb/beta_p/nmemory_p/auto_mixing/update_ratio/initial_no_mix_stepsを保持します。
 初期化前にコピーし、適応係数と履歴は各状態で独立です。係数は有限、nmemory_pは1〜21、無混合回数は0以上・整数最大値未満。
 methodはsimple/broyden/pulay/simple_potential/simple_dm、auto_mixingはy/n。simple_dmにはspin-orbitが必要です。
-内部Fortranのみ。規格化用電子数・構造・物質入力の分離完了、DFT-MD設定の独立化や並行GS対応とは説明しません。
+内部Fortranのみ。占有数用電子数・構造・物質入力の分離完了、DFT-MD設定の独立化や並行GS対応とは説明しません。
 同じ物質で異なる混合条件の二状態を元SALMONと比較します。物理収束の保証ではありません。
 
 明示pre-SCF設定も入力読込と同じ適用条件を再検査します。restart/MD/最適化、checkpoint指定や密度以外の収束などを
@@ -537,3 +537,9 @@ DIPOLE_RADIATION.md/enとmolecular_field_selection例を参照してください
 結合仕事の差が1次で減るだけで、結合全体の保存則は未達です。振動子単体の約2次精度と
 混同せず、孤立系TDDFTの双方向対応を宣言しません。新しい検証スキルの一般判定も、
 SALMON固有の更新順・固定dt・資源予算やユーザー所有の物理収束判断を上書きしません。
+
+内部GSの収束規格化はs_gs_run_config%normalization（nelec/nelec_spin）に取り込み、状態へコピーします。
+非分極はnelec、分極は正のnelec_spin和を優先し、DCは状態内elec_num_totを優先します。
+非DCのrho_dneの分母0以下は初期化前にstatus=1。通常は取り込んだ値を変更しません。
+これは電子数・電荷・占有数を変更するPython APIではありません。物質入力の全面独立化とは案内しません。
+二倍の分母で残差だけ半分にする診断と、通常条件で元SALMONとの一致確認を区別します。

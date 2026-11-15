@@ -217,3 +217,12 @@ implemented in their documented scope; do not list them as wholly unimplemented.
 - [x] Japanese/English runtime and AI guides synchronized.
 - Remaining: normalization electron counts, initialization/material and parallel/timer inputs; concurrent/general different-material GS not implemented. DFT-MD global auto switch remains.
 - Evidence: `docs/gs-mixing-config-validation-2026-11-16.md`. Molecular work stays paused.
+
+### 2026-11-16: GS normalization inputs
+
+- [x] Capture normalization nelec/nelec_spin in the owned GS config.
+- [x] Preserve spin fallback and DC state-count precedence; reject nonpositive non-DC rho_dne divisor before activation.
+- [x] Original equality across five metrics/14 cases; second-state divisor doubling across4 cases changes only its residual.
+- [x] Capture normalization in retained trace and synchronize Japanese/English/AI instructions.
+- Still shared: occupation/gap/material initialization inputs and parallel/timer controls. No general concurrent GS claim.
+- Evidence: `docs/gs-normalization-config-validation-2026-11-16.md`.

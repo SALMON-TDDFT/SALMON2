@@ -102,7 +102,13 @@ module structures
     real(8) :: mixrate=0.5d0,alpha_mb=0.75d0,beta_p=0.75d0,update_ratio=3d0
   end type
 
+  ! Convergence normalization only; these values never set orbital occupations.
+  type s_gs_normalization_config
+    integer :: nelec=0,nelec_spin(2)=0
+  end type
+
   type s_gs_run_config
+    type(s_gs_normalization_config) :: normalization
     type(s_mixing_config) :: mixing
     character(32) :: convergence_metric='rho_dne'
     integer :: max_iterations=1,pre_scf_steps=1
@@ -734,6 +740,18 @@ module structures
 !===================================================================================================================================
 
 contains
+
+  pure real(8) function gs_density_normalization(value,nspin) result(count)
+    use,intrinsic :: iso_fortran_env,only:int64
+    type(s_gs_normalization_config),intent(in) :: value
+    integer,intent(in) :: nspin
+    integer(int64) :: spin_total
+    count=dble(value%nelec)
+    if(nspin==2)then
+      spin_total=sum(int(value%nelec_spin,int64))
+      if(spin_total>0)count=dble(spin_total)
+    endif
+  end function
 
   subroutine allocate_scalar(rg,field)
     implicit none

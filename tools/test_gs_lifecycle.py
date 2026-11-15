@@ -5,6 +5,7 @@ BUILD_RECORD REFERENCE_RECORD NEW_OUTPUT. Explicit local compilation only; no do
 import argparse
 import hashlib
 import json
+from decimal import Decimal
 import os
 from pathlib import Path
 import re
@@ -26,7 +27,10 @@ def main():
     parser.add_argument('--auto-mixing', action='store_true')
     parser.add_argument('--distinct-mixing', action='store_true')
     parser.add_argument('--initial-no-mix-steps', type=int, default=1)
+    parser.add_argument('--different-normalization', action='store_true')
     args = parser.parse_args()
+    if args.different_normalization and (args.convergence!='rho_dne' or args.distinct_mixing):
+        parser.error('different normalization requires rho_dne and no distinct mixing')
     root = Path(__file__).resolve().parents[1]
     record = json.loads(args.build.read_text())
     executable = Path(record['executable'])
@@ -93,7 +97,7 @@ def main():
         reference_input = text.replace("base_directory='./'", "base_directory='./reference/'")
         try:
             with (directory / 'probe.log').open('w') as log:
-                subprocess.run([str(output / 'probe'), *(['distinct'] if args.distinct_mixing else [])], input=text, text=True, cwd=directory,
+                subprocess.run([str(output / 'probe'), *(['normalization'] if args.different_normalization else ['distinct'] if args.distinct_mixing else [])], input=text, text=True, cwd=directory,
                                env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
             with (directory / 'reference.log').open('w') as log:
                 subprocess.run([str(reference_executable)], input=reference_input, text=True, cwd=directory,
@@ -110,7 +114,20 @@ def main():
             def residuals(text):
                 return [line.split() for line in text.splitlines() if line.strip().startswith('iter and ')]
             reference_residuals=residuals((directory/'reference.log').read_text())
-            if not reference_residuals or residuals(log)!=reference_residuals+residuals((directory/'reference_second.log').read_text()):
+            observed=residuals(log)
+            second_residuals=residuals((directory/'reference_second.log').read_text())
+            if not reference_residuals or not second_residuals:
+                raise AssertionError('both references must contain convergence residuals')
+            if args.different_normalization:
+                if observed[:len(reference_residuals)]!=reference_residuals or len(observed)!=len(reference_residuals)+len(second_residuals):
+                    raise AssertionError('normalization changed iteration count or first state')
+                for actual, expected in zip(observed[len(reference_residuals):],second_residuals):
+                    actual_value,expected_value=Decimal(actual[-1]),Decimal(expected[-1])
+                    # Each E-format value was independently rounded to its last printed digit.
+                    rounding=Decimal(10)**actual_value.as_tuple().exponent/2 + Decimal(10)**expected_value.as_tuple().exponent/4
+                    if actual[:-1]!=expected[:-1] or abs(actual_value-expected_value/2)>rounding:
+                        raise AssertionError('second state density residual must be halved (printed precision)')
+            elif not reference_residuals or observed!=reference_residuals+second_residuals:
                 raise AssertionError('per-iteration convergence labels/residuals differ from reference')
             trace = (directory / 'a_before.bin').read_bytes()
             if not trace or any((directory / name).read_bytes() != trace
@@ -131,7 +148,7 @@ def main():
                         raise AssertionError(f'{steps}: {label}/{name} differs from original')
                 hashes[name] = hashlib.sha256(expected).hexdigest()
                 second_hashes[name] = hashlib.sha256((directory/'reference_second'/name).read_bytes()).hexdigest()
-            cases.append({'initial_no_mix_steps':args.initial_no_mix_steps, 'distinct_mixing':args.distinct_mixing, 'mixing_method':args.mixing, 'auto_mixing':args.auto_mixing, 'convergence_metric':args.convergence, 'pre_scf_steps': steps, 'two_sequential_calls_equal_reference': True, 'retained_a_unchanged': True,
+            cases.append({'different_normalization':args.different_normalization, 'observed_residuals':observed, 'initial_no_mix_steps':args.initial_no_mix_steps, 'distinct_mixing':args.distinct_mixing, 'mixing_method':args.mixing, 'auto_mixing':args.auto_mixing, 'convergence_metric':args.convergence, 'pre_scf_steps': steps, 'two_sequential_calls_equal_reference': True, 'retained_a_unchanged': True,
                           'reference_file_sha256': hashes, 'reference_residuals':reference_residuals,
                           'reference_second_file_sha256':second_hashes,
                           'reference_second_residuals':residuals((directory/'reference_second.log').read_text())})

@@ -1,7 +1,7 @@
 ! Sequential GS lifecycle regression, not a concurrent GS context API.
 program probe
  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
- use structures,only:s_gs_run_config,s_mixing
+ use structures,only:s_gs_run_config,s_mixing,gs_density_normalization
  use mixing_sub,only:reset_mixing_rate,check_mixing_half
  use salmon_global
  use parallelization
@@ -26,6 +26,16 @@ program probe
  call timer_initialize
  if(theory/='dft'.or.yn_dc/='n'.or.yn_opt/='n')stop 1
  call gs_input_config(config_a);config_b=config_a
+ ! Count selection is independent of all legacy module variables.
+ config_a%normalization%nelec=4;config_a%normalization%nelec_spin=[2,3]
+ if(gs_density_normalization(config_a%normalization,1)/=4d0)stop 19
+ if(gs_density_normalization(config_a%normalization,2)/=5d0)stop 20
+ config_a%normalization%nelec_spin=[0,0]
+ if(gs_density_normalization(config_a%normalization,2)/=4d0)stop 21
+ config_a=config_b;config_a%convergence_metric='rho_dne'
+ config_a%normalization%nelec=0;config_a%normalization%nelec_spin=0
+ call gs_run(a,status,config=config_a);if(status/=1)stop 22
+ config_a=config_b
  config_a%max_iterations=0
  call gs_run(a,status,config=config_a);if(status/=1)stop 5
  config_a=config_b;config_a%max_iterations=huge(0)
@@ -57,6 +67,7 @@ program probe
  config_a=config_b
  config_b%max_iterations=config_b%max_iterations+2
  call get_command_argument(1,mode)
+ if(mode=='normalization')config_b%normalization%nelec=2*config_b%normalization%nelec
  if(mode=='distinct')then
   config_b%mixing%mixrate=0.175d0
   config_b%mixing%alpha_mb=0.325d0
@@ -82,6 +93,7 @@ program probe
  call gs_run(a,status);if(status/=1)stop 3
  open(newunit=unit,file='a_before.bin',access='stream',form='unformatted',status='new')
  call gs_probe_write(a,unit);close(unit)
+ config_a%normalization%nelec=-1;config_a%normalization%nelec_spin=-1
  config_a%mixing%method='invalid-caller';config_a%mixing%mixrate=-1d0
  config_a%max_iterations=1;config_a%threshold=0d0;config_a%convergence_metric='invalid-caller'
  base_directory='./second/'

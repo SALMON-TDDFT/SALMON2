@@ -65,10 +65,11 @@ type(s_unfold) :: unfold
 end type
 contains
 subroutine gs_input_config(value)
- use salmon_global,only:nscf,threshold,exx_pre_scf_threshold,exx_pre_scf_steps,convergence
+ use salmon_global,only:nscf,threshold,exx_pre_scf_threshold,exx_pre_scf_steps,convergence,nelec,nelec_spin
  use mixing_sub,only:mixing_input_config
  type(s_gs_run_config),intent(out)::value
  call mixing_input_config(value%mixing)
+ value%normalization%nelec=nelec;value%normalization%nelec_spin=nelec_spin
  value%convergence_metric=convergence
  value%max_iterations=nscf;value%threshold=threshold
  value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
@@ -146,6 +147,9 @@ case('rho_dne','norm_rho','norm_rho_dng','norm_pot','norm_pot_dng')
 case default
  return
 end select
+if(selected%convergence_metric=='rho_dne'.and.yn_dc/='y')then
+ if(gs_density_normalization(selected%normalization,merge(1,2,spin=='unpolarized'))<=0d0)return
+endif
 if(.not.valid_mixing_input(selected%mixing))return
 if(selected%mixing%method=='simple_dm'.and.yn_spinorbit/='y')return
 if(selected%max_iterations<1.or.selected%max_iterations>=huge(0))return
@@ -505,6 +509,7 @@ subroutine gs_probe_write(ctx,unit)
  write(unit)ctx%iterations,ctx%energy%E_tot,ctx%energy%E_xc
  write(unit)ctx%spsi%zwf,ctx%rho%f,ctx%vh%f,ctx%vpsl%f
  write(unit)ctx%system%rocc,ctx%system%Force
+ write(unit)ctx%system%gs_input%normalization
  write(unit)ctx%mixing%input,ctx%mixing%input_owned,ctx%mixing%num_rho_stock,ctx%mixing%flag_mix_zero
  write(unit)ctx%mixing%mixrate,ctx%mixing%alpha_mb,ctx%mixing%beta_p,ctx%mixing%convergence_value_prev
  if(allocated(ctx%mixing%rho_in))then

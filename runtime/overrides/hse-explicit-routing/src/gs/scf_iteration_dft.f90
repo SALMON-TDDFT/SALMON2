@@ -666,16 +666,16 @@ contains
   subroutine init_convergence_check()
     implicit none
     
-    if(system%nspin==1) then
-      rNe = dble(nelec)
-    else if(system%nspin==2)then
-      if(sum(nelec_spin(:))>0)then
-        rNe = dble(sum(nelec_spin(:)))
-      else
-        rNe = dble(nelec)
-      end if
-    end if
-    
+    type(s_gs_normalization_config) :: normalization
+
+    if(system%gs_input_owned)then
+      normalization=system%gs_input%normalization
+    else
+      normalization%nelec=nelec
+      normalization%nelec_spin=nelec_spin
+    endif
+    rNe=gs_density_normalization(normalization,system%nspin)
+
     call allocate_scalar(mg,rho_old)
     call allocate_scalar(mg,Vlocal_old)
 

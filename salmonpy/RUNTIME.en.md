@@ -495,7 +495,7 @@ The remaining same-input GS lifecycle check is provided by `tools/test_gs_lifecy
 
 `gs_input_config(value)` captures the legacy maximum SCF iterations, convergence metric, convergence threshold, pre-SCF threshold and consecutive-step requirement into `s_gs_run_config`. Pass it as `gs_run(ctx, status, config=value)`; the context validates and copies it before initialization. Omitting it captures the same inputs once for compatibility. `max_iterations` must be positive and below the integer maximum, both thresholds finite and nonnegative, and `pre_scf_steps` positive. Invalid configuration returns status 1 before activating the context.
 
-SCF loop bounds and convergence checks use the owned values, including adaptive-exchange readiness thresholds. Mutating the caller's value or the corresponding legacy globals does not change the selected settings. Electron-count normalization inputs, geometry/material inputs and other global controls remain shared. No general different-input/concurrent GS claim follows.
+SCF loop bounds and convergence checks use the owned values, including adaptive-exchange readiness thresholds. Mutating the caller's value or the corresponding legacy globals does not change the selected settings. Occupation-setting inputs, geometry/material inputs and other global controls remain shared. No general different-input/concurrent GS claim follows.
 
 An explicitly positive pre-SCF threshold must also satisfy the original fresh-static-hybrid prerequisites: no restart/MD/optimization, positive temperature for DC, no checkpoint interval/shutdown request, and density mixing/convergence. These are checked again at the context boundary. The legacy executable wrapper reports invalid run configuration as a nonzero failure instead of silently skipping the calculation.
 
@@ -528,3 +528,20 @@ Use `tools/test_gs_lifecycle.py ... --mixing pulay --auto-mixing --distinct-mixi
 to compare two states with different mixing settings for the same material against
 the original executable under each setting. See
 `docs/gs-mixing-config-validation-2026-11-16.md` for evidence and untested scope.
+
+### Electron-count normalization of GS convergence
+
+`s_gs_run_config%normalization` owns `nelec` and `nelec_spin(2)`, captured by
+`gs_input_config` and copied by `gs_run`. The original selection is retained:
+unpolarized uses nelec; polarized uses the sum of nelec_spin when positive,
+otherwise nelec. DC still overrides this with its state-owned `dc%elec_num_tot`.
+For non-DC rho_dne, a nonpositive divisor returns status 1 before initialization.
+Other metrics and their grid normalization are unchanged.
+
+These are convergence-normalization inputs, **not material electron count,
+charge or occupation setters**. Normally retain the captured values. This does
+not finish material-input isolation or establish tested polarized/DC operation.
+`tools/test_gs_lifecycle.py ... --different-normalization` diagnostically doubles
+the second state's divisor: its density residual must halve while electronic
+outputs remain unchanged. Evidence and limits are recorded in
+`docs/gs-normalization-config-validation-2026-11-16.md`.
