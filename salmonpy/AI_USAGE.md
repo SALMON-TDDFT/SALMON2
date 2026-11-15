@@ -512,3 +512,12 @@ PacketCoupledStepperは宣言済みの直接標本に限りpacket往復結合を
 NativeEHではA/Hとjがoffset1/2、Eが0。1DではA/jが0、Eがlag1です。
 t0/clock_offsetは0、位置・単位は厳密一致。一般補間や既存電子providerの自動変換はしません。
 FIELD_INPUTの表とmpi_packet_coupling例を参照。双極子をjとみなさないでください。
+
+既存A駆動bindingのpacket化はpacketize_A_bindingを明示的に呼びます。
+field_phaseはendpoint（1D）またはyee_half_step（native E/H）を必須指定。
+元の端点A/j宣言、ゼロ初期Aを要求し、電荷電流の符号を再反転しません。
+絶対時刻依存の自作モデルへ機械的に適用せず、時刻対応を確認します。
+response.timing_recordsに元/変換後の宣言が残ります。FIELD_INPUT.md/enと
+mpi_packet_couplingの--adapt-a、--runtime/--bundleを参照してください。
+
+packetize_A_bindingはleader_only・一物質群1ランクに限定し、collective物質backendを拒否します。

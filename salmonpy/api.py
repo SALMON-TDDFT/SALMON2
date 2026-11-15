@@ -63,6 +63,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
  'salmonpy.ld': ('LDModelConfig', 'LDStateConfig', 'Response', 'LorentzDrude', 'LDState'),
  'salmonpy.material_response': ('SolverContext',
                                 'MaterialBinding',
+                                'packetize_A_binding',
                                 'ResponseSession',
                                 'LDMaterialProvider',
                                 'LDResponseBackend',

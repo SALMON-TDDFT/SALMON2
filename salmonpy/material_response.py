@@ -190,7 +190,7 @@ class ResponseSession:
             if any(errors): error=str(errors);break
             try:
                 state=b.backend.create_state(cache[b.key],point,dt,callback_context)
-                if any(state is old for old in self.states.values()): raise InputError('backend reused mutable state across points')
+                _admit_response_state(state, self.states)
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=context.solver_comm.allgather(error)
             if any(errors): error=str(errors);break
@@ -285,6 +285,9 @@ class ResponseSession:
         try:
             records = {p: (self._field_contracts[p].timing if self._field_contracts is not None
                            else matter_timing(s, self.dt)).to_dict() for p, s in self.states.items()}
+            for p, state in self.states.items():
+                if isinstance(state, _APacketState):
+                    records[p]['clock_mapping'] = state.clock_mapping
         except Exception as exc:
             error = f'{type(exc).__name__}: {exc}'
         self.agree(error)
@@ -605,3 +608,142 @@ class TDDFTResponseBackend:
                 return current
             def close(self): worker.close()
         return State()
+
+
+class _APacketState:
+    def __init__(self, raw, dt, phase, owner):
+        from dataclasses import replace
+        from .timing import TimeSpec, InputPort, OutputPort
+        from .field_input import _real
+        spec = getattr(raw, 'timing', None)
+        if (not isinstance(spec, TimeSpec) or spec.dt != dt or spec.t0 != 0
+                or spec.clock_offset != 0 or len(spec.inputs) != 1
+                or len(spec.outputs) != 1 or spec.inputs[0] != InputPort('A')
+                or spec.outputs[0] != OutputPort('j')):
+            raise InputError('packet A binding requires explicit endpoint A/j timing')
+        if not (callable(getattr(raw, 'step', None)) or callable(getattr(raw, 'advance', None))):
+            raise InputError('A backend requires step or advance')
+        initial_A = getattr(raw, 'A', np.zeros(3))
+        if np.any(_real(initial_A, (3,), 'initial A') != 0):
+            raise InputError('packet A binding requires zero initial A')
+        self._raw = raw
+        self._owner = owner
+        self._phase = phase
+        self._original = spec
+        self._steps = 0
+        self._closed = False
+        self._failed = False
+        self._adapter = _StepAdapter(raw)
+        offset = 0 if phase == 'endpoint' else .5
+        self.timing = replace(spec, inputs=(replace(spec.inputs[0], offset=offset),),
+            outputs=(replace(spec.outputs[0], offset=offset),),
+            integrator='explicit A packet '+phase+': '+spec.integrator)
+        self._check_clock()
+
+    @property
+    def time(self):
+        return self._steps*self.timing.dt
+
+    @property
+    def clock_mapping(self):
+        return {'schema':'salmonpy.A-packet-clock/1', 'field_phase':self._phase,
+                'original':self._original.to_dict(), 'mapped':self.timing.to_dict()}
+
+    @property
+    def initial_current(self):
+        value = getattr(self._raw, 'initial_current', None)
+        if value is None and self._steps == 0:
+            value = getattr(self._raw, 'current', None)
+        return None if value is None else np.array(value, copy=True)
+
+    def _check_clock(self):
+        from .field_input import _real
+        if getattr(self._raw, 'timing', None) != self._original:
+            raise InputError('wrapped backend timing changed')
+        actual = float(_real(getattr(self._raw, 'time', self.time), (), 'backend time'))
+        tolerance = min(self.timing.dt*1e-3, max(self.timing.dt*1e-9,
+            8*np.finfo(float).eps*max(abs(self.time), self.timing.dt)))
+        if abs(actual-self.time) > tolerance:
+            raise InputError('wrapped backend clock differs')
+
+    def step_fields(self, packet):
+        from .field_input import FieldPacket, FieldContract, _real
+        if self._closed or self._failed:
+            raise InputError('packet A state is closed or invalidated')
+        self._check_clock()
+        if not isinstance(packet, FieldPacket) or packet.A is None or packet.E is not None or packet.H is not None:
+            raise InputError('packet A state requires only A')
+        # Spatial matching is owned by the session's per-point contract.
+        contract = FieldContract(self.timing, {'A':'A/c:au'}, packet.A.position, 'velocity')
+        contract.validate(packet, step_index=self._steps+1)
+        try:
+            result = _real(self._adapter.step(packet.A.value), (3,), 'charge current')
+            self._steps += 1
+            self._check_clock()
+        except BaseException:
+            self._failed = True
+            raise
+        return result
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            try:
+                self._raw.close()
+            finally:
+                self._owner._live[:] = [s for s in self._owner._live if s is not self._raw]
+
+
+class _APacketBackend:
+    def __init__(self, backend, phase):
+        self._backend = backend
+        self._live = []
+        self._phase = phase
+        self.identity = backend.identity+'/packet-A/'+phase+'/1'
+        self.execution = backend.execution
+        self.reduction = backend.reduction
+
+    def create_state(self, initial, point_id, dt, context):
+        raw = self._backend.create_state(initial, point_id, dt, context)
+        if any(raw is state for state in self._live):
+            raise InputError('backend reused a live mutable state across packet points')
+        try:
+            state = _APacketState(raw, dt, self._phase, self)
+            self._live.append(raw)
+            return state
+        except BaseException:
+            raw.close()
+            raise
+
+
+def packetize_A_binding(binding, *, field_phase):
+    """Explicitly map an endpoint A/j binding onto packet clocks.
+
+    field_phase is 'endpoint' (1D) or 'yee_half_step' (native E/H). This
+    preserves the numerical A history and charge-current sign; it does not
+    interpolate, change the worker clock, or add magnetic/length-gauge physics.
+    The provider and material identity are borrowed unchanged. Requires zero
+    initial A and an explicit endpoint TimeSpec from every created state.
+    Only leader_only backends (one rank per material group) are supported.
+    """
+    if not isinstance(binding, MaterialBinding):
+        raise InputTypeError('MaterialBinding required')
+    if binding.backend.execution != 'leader_only':
+        raise InputError('packet A adapter requires leader_only backend and one rank per material group')
+    if field_phase not in ('endpoint', 'yee_half_step'):
+        raise InputError('choose endpoint or yee_half_step explicitly')
+    return MaterialBinding(binding.key, binding.provider,
+        _APacketBackend(binding.backend, field_phase), binding.material_record)
+
+
+def _admit_response_state(state, existing):
+    """Reject aliases hidden by distinct packet wrappers within one session."""
+    raw = state._raw if isinstance(state, _APacketState) else state
+    for old in existing.values():
+        owned = old._raw if isinstance(old, _APacketState) else old
+        if raw is owned:
+            if isinstance(state, _APacketState) and state is not old:
+                # Abandon only the alias wrapper; the first owner must stay live.
+                state._closed = True
+                state._owner._live[:] = [s for s in state._owner._live if s is not raw]
+            raise InputError('backend reused mutable state across response points')

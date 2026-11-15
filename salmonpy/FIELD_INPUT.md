@@ -189,3 +189,27 @@ mpiexec -n 3 python -m salmonpy.examples.mpi_packet_coupling NEW_NATIVE --field 
 例の物質は合成電流模型です。孤立系の双極子を直接jとして返さず、磁気応答や自己場を自動推定しません。
 既存A駆動用CoupledStepperは維持します。新driverは明示packetを返すbackend向けで、
 既存TDDFT/SBEプロバイダーを黙ってpacket形式へ変換しません。一般の時空間補間やサブサイクルは後続です。
+
+### 既存のA駆動binding
+
+`salmonpy.material_response.packetize_A_binding(binding, field_phase='endpoint')`
+で既存のA→j bindingを明示的に包み、Multiscale1Dへ接続します。native E/H結合では
+`field_phase='yee_half_step'`を選びます。ResponseSessionには上記と同様、対応する
+点ごとの`field_contracts`を渡します。provider・物質ID・実行方式・電流符号を維持し、
+各状態が別々の受理済みA履歴を持ちます。元の状態は`step(A)`または
+`advance(A_old, A_new)`と、端点A/jの時刻宣言を実装します。
+
+物理ポートの時刻対応を明示する処理で、workerのローカル時計や数値更新順は変えません。
+初期Aはゼロです。Aを取得できないbackendも、この初期化契約を守る必要があります。
+絶対時刻に依存する自作モデルは、この対応の意味を利用者が確認してください。
+`response.timing_records()`に元と変換後の時刻を記録します。E/H変換・補間・双極子の
+規格化は行いません。
+
+既存サンプルに`--adapt-a`を付けると明示アダプター、`--legacy`で比較経路を選べます。
+`--runtime RUNTIME --bundle GS_BUNDLE`を追加すると二つの独立した管理TDDFT workerを
+使います。bundleには`rt.inp`とrestartデータが必要です。3ランク、worker各1スレッドで
+実行してください。短い接続回帰であり、物理的な収束検証ではありません。native経路は
+さらに`--field native --build BUILD_JSON`が必要です。取得・ビルドは明示操作のままです。
+
+このアダプターはleader_only backend・物質群あたり1ランクに限定します。
+群内collective backendは起動前に拒否します。FDTD側のMPI並列とは別の制限です。

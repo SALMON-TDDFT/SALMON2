@@ -170,3 +170,9 @@ Developer work supplies numerical regression, interface checks and usable sample
 it does not continue the radiation refinement study as a prerequisite for API work.
 This is an active-work audit, not a declaration that the wider historical backlog
 (non-collinear/Ehrenfest, broader XC/platform coverage, etc.) is complete.
+
+
+- [x] F4b2d-A: explicit existing A/j binding adapter, endpoint/Yee mappings,
+  independent SBE states and two-point managed TDDFT legacy parity in 1D/native
+  E/H. Evidence: `../electronic-packet-adapter-validation-2026-11-15.md`.
+  General interpolation/subcycling and dipole adapters remain open.

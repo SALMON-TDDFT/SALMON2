@@ -208,3 +208,30 @@ Models in this example are synthetic. Dipoles are not current density, and no
 magnetic material/self-field physics is inferred. Legacy CoupledStepper remains.
 The new driver requires explicit packet backends; it does not silently adapt
 existing TDDFT/SBE providers. General interpolation/subcycling remain follow-up.
+
+### Existing A-driven bindings
+
+Use `packetize_A_binding(binding, field_phase='endpoint')` from
+`salmonpy.material_response` to explicitly wrap an existing A→j binding for
+Multiscale1D. Select `field_phase='yee_half_step'` for native E/H coupling.
+Supply the matching per-point `field_contracts` to `ResponseSession` as above.
+The provider, material identity, execution/reduction policy and current sign are
+preserved. Each state owns its accepted A history. Wrapped callbacks may implement
+`step(A)` or `advance(A_old, A_new)` and must declare endpoint A/j timing.
+
+This changes the declared physical port phase, not the worker's local clock or
+numerical update sequence. Zero initial A is required; backends without an A
+accessor must honor that initialization contract. Do not apply this mapping to
+an absolute-time-dependent custom model without checking its interpretation.
+`response.timing_records()` includes both original and mapped clocks. No E/H
+conversion, interpolation, or dipole normalization occurs.
+
+Run the existing sample with `--adapt-a` for the explicit adapter, or `--legacy`
+for comparison. Add `--runtime RUNTIME --bundle GS_BUNDLE` to use two independent
+managed TDDFT workers (the bundle must contain `rt.inp` and restart data).
+Use three ranks, one thread per worker; this small regression is not a physical
+convergence test. The native route additionally requires `--field native --build
+BUILD_JSON`. Runtime loading/building remains explicit.
+
+This adapter requires leader_only execution and one rank per material group.
+Collective material backends are rejected before startup; field-side MPI is separate.
