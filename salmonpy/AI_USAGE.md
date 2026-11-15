@@ -484,8 +484,14 @@ PZ・固定イオン・中点伝播の双極子を比較する開発用接続で
 渡したり、検証用driverを公開初期状態ローダーとして案内したりしないでください。
 公開入口はISOLATED_TDDFT.mdのload_isolated_runtimeとIsolatedTDDFTInitialStateです。
 ローカル検証記録に結び付いたバイナリに限定し、メモリ上のsnapshot/restoreを提供します。
-既存配布runtimeの自動対応、電流密度への暗黙変換、ディスクcheckpoint、MPI E通信は未対応です。
+既存配布runtimeの自動対応、電流密度への暗黙変換、MPI E通信は未対応です。孤立系のsave_checkpoint/restore_checkpointは専用E/dipoleスキーマで履歴再実行を行います。GSとruntimeは別途指定し、同一容量・dt・位置・版などを照合します。周期系形式と混同しないでください。
 
 分子双極子からFDTDへの一方向接続はDIPOLE_RADIATION.mdを参照してください。電荷双極子、
 FDTDセル体積、配向・個数を明示し、最初の区間電流をゼロにする保持時間を隠さないでください。
 双方向の自己場帰還や静的双極子の静電場を計算済みとは案内しないでください。
+
+## MPI場packet
+ResponseSessionのfield_contractsとstep_fieldsで明示的なA/E/Hを転送できます。
+FIELD_INPUT.md/enとmpi_field_inputs.pyを参照。戻り値は電荷電流密度jです。
+孤立系の双極子を自動で規格化したり、場の時空間補間を推測しないでください。
+既存step(A)との混在・MPI全体のrollback・native結合driverへの自動接続は未対応です。

@@ -60,6 +60,20 @@ class MultiscaleCouplingTests(unittest.TestCase):
         state.step(np.ones(3)*3)
         np.testing.assert_array_equal(seen[-1], np.ones(3))
 
+    def test_packet_session_rejected_before_field_advances(self):
+        from salmonpy.coupled import CoupledStepper
+        from salmonpy.errors import InputError
+        context=self.context()
+        state=Multiscale1D(2,5.).new_state(dt=.02,steps=2)
+        field=MultiscaleField(context,state)
+        def agree(error):
+            if error: raise InputError(error)
+        response=SimpleNamespace(context=context,closed=False,failed=False,
+                                 step_index=0,dt=.02,_field_contracts={},agree=agree)
+        with self.assertRaisesRegex(InputError,'explicit sampling'):
+            CoupledStepper(response,field)
+        self.assertEqual(state.step_index,0)
+
     def test_measurement_failure_does_not_fail_work(self):
         measurement = _Measurements()
         with patch('salmonpy.material_response.time.perf_counter', side_effect=OSError('clock unavailable')):

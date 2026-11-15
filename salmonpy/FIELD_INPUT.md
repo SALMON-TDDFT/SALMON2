@@ -4,7 +4,7 @@
 結晶はA/c、LDはEのままです。長さゲージのモデルはEを宣言し、自作モデルはA・E・Hの必要な
 組合せを宣言できます。Hは磁場強度でBではありません。磁気構成則やH→B変換は推定しません。
 この型だけでnative孤立系TDDFTや磁気相互作用が有効になるわけではなく、
-MPI ResponseSessionの通信は現時点ではAだけです。
+MPIでは後述の明示的なfield_contractsとstep_fieldsを使います。
 
 `FieldValue(value, time=..., position=..., unit=...)`は有限実数3ベクトルと位置の不変コピーを持ちます。
 時刻は常に原子単位です。position_unitは既定bohrで、別単位も明示宣言できます。
@@ -64,8 +64,7 @@ python -m salmonpy.examples.field_inputs
 ```
 
 wheelサンプルはnative LDの直接呼出しとの一致と、自作の時間差付きE/H受渡しを確認します。
-native SBEの直接計算との一致もテスト対象です。孤立系native TDDFT長さゲージとMPI E/H通信は
-後続の接続作業であり、この検証で実装済みとは扱いません。
+native SBEの直接計算との一致もテスト対象です。孤立系native接続とMPI通信は、後述の別APIと検証範囲を参照してください。
 
 ## 実験的な孤立系native E接続（ソース作業コピー）
 
@@ -89,6 +88,28 @@ snapshot/restore APIではありません。backend異常時は子プロセス�
 
 ソースを検査して明示的にビルドした実行ファイルを使用します。既存の配布済みランタイムが
 自動的にE対応するわけではありません。公開ローダーとメモリ上の復元APIはISOLATED_TDDFT.mdを参照してください。
-ローカルのバイナリ別検証記録で対応を判定します。ビルド済みcatalog配布、ディスクcheckpoint、
-MPI E通信は残作業です。ソース内の
+ローカルのバイナリ別検証記録で対応を判定します。ディスク再開はISOLATED_TDDFT.md、
+MPI packet通信は次節を参照。ビルド済みcatalog配布は残作業です。ソース内の
 `docs/isolated-worker-validation-2026-11-15.md`に検証記録があります。
+
+## MPIでの明示的なA/E/H転送
+
+`ResponseSession(..., field_contracts={point_id: contract, ...})` と
+`session.step_fields({point_id: FieldPacket(...), ...})` を使います。
+全ランクで同一の契約を指定し、点ごとの必要成分・単位・時刻・位置・ゲージを状態作成前に照合します。
+入力mappingを渡すのは場のleaderだけで、他ランクはNoneです。点IDはplanの整数transport IDです。
+全点の入力を更新前に検査し、受信側でも不変packetを再構築・検査します。
+物質stateはstep_fieldsを実装し、t=0始まりの整数時刻n*dtにおける電荷電流密度jの3成分を返します。
+出力契約はpoint標本・offset=0のjを1つ指定し、backendにも宣言があれば一致を検査します。
+既存FieldAdapterでstateが宣言する時刻との整合も検査します。余分な成分は転送しません。
+従来のstep(A)は維持し、同じsessionで両方式を混在させません。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.mpi_field_inputs
+```
+
+これは合成電流模型による通信例です。孤立系TDDFTの双極子を直接jとして返すことはできません。
+A/E変換、空間・時間補間、双極子から電流への規格化は自動化しません。
+FieldContractに合う標本を呼び出し側で明示して用意します。
+backend更新の失敗はsessionを無効化し、全物質の巻き戻しは保証しません。
+通信計測のfield value bytesは数値3成分のみで、packetのメタデータ通信量を含みません。

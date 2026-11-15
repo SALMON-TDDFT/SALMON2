@@ -63,7 +63,7 @@ dt・位置・容量・スレッド数・バイナリが必要です。候補プ
 step異常時は直前の受理済み状態の再構成を試み、RuntimeFailureを返します。
 回復も失敗すると状態を閉じます。入力検査だけの失敗は状態を進めません。
 外側のFieldAdapterはbackend例外で無効化される従来契約なので、必要なら作り直します。
-公開のディスクcheckpoint、native波動関数snapshot、MPI全体の復元、同一Fortranプロセス内の
+native波動関数snapshot、MPI全体の復元、同一Fortranプロセス内の
 複数contextを提供するものではありません。復元コストは履歴の長さに依存します。
 
 ## 出力サンプルとFDTD
@@ -77,3 +77,26 @@ E_NPZにはdt,2dt,...のE[steps,3]と正のスカラーdtを原子単位で保�
 一方向放射にはframe.dipoleをDipoleMapへ渡します（DIPOLE_RADIATION.md）。
 周期系電流の符号反転や、TDDFTの真空セル体積での除算は行いません。
 自己場の帰還モデルは別途選択するもので、自動的には有効にしません。
+
+## ディスクへの保存と再開
+
+```python
+# 初期bundleの外にある新規ディレクトリを指定します。
+state.save_checkpoint('new-isolated-checkpoint')
+# 同じ初期データから別途作った状態へ復元できます。
+resumed.restore_checkpoint('new-isolated-checkpoint', max_bytes=16*1024*1024)
+```
+
+形式は `salmonpy.isolated-tddft-checkpoint/1`、非圧縮Zarr v3の限定形式です。
+E0・dipoles0・dipoles・E_history・dipole_historyを保存します。双極子6成分は
+前半がelectronic_change、後半が全電荷双極子、単位はe*bohrです。
+波動関数や後処理archiveではなく、受理済み履歴の再実行用記録です。
+GSと検証済みruntimeは別途必要です。初期ファイル・実行ファイルのハッシュ、dt、容量、
+スレッド数、位置、パッケージ版を照合します。初期モデルのオブジェクトは作り直せます。
+周期系Aのcheckpointは拒否します。ハッシュ・配置・サイズ検査後に候補workerで
+再実行し、失敗時は元の状態を保持します。max_bytesはファイル・復号データの上限であり、
+RSS上限ではありません。省略時は設定容量から上限を計算します。保存先の上書きはしません。
+
+応答サンプルの `--checkpoint NEW_DIRECTORY` で最終状態も保存できます。
+容量いっぱいまで計算した記録はその終了点までの復元専用です。続きを計算する用途では、
+自分のコードで必要な総容量を最初に確保し、同じ容量で復元してください。

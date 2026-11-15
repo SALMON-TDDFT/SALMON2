@@ -164,3 +164,5 @@ Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../
 | [dipole_radiation.py](dipole_radiation.py) | Dipole-to-current mapping for FDTD | No data, or --archive and --cell-volume; no FDTD propagation |
 
 MPI samples also display `--help` from ordinary Python. Computation requires mpi4py and compatible MPI. Check rank options before launching; some defaults exceed a four-core budget.
+
+[mpi_field_inputs.py](mpi_field_inputs.py): three ranks with distinct A/E/H contracts and synthetic currents; verifies rejection before updates.

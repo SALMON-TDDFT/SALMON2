@@ -19,6 +19,20 @@ NAMES = {'A0':'_A0', 'J0':'_J0', 'current':'_current',
          'history':'_history', 'current_history':'_curr_history'}
 
 
+
+def _format(state):
+    if state._snapshot_kind == 'isolated-TDDFT-E-dipole-replay':
+        return ('salmonpy.isolated-tddft-checkpoint/1',
+                {'E0':'_A0', 'dipoles0':'_J0', 'dipoles':'_current',
+                 'E_history':'_history', 'dipole_history':'_curr_history'}, 6)
+    return SCHEMA, NAMES, 3
+
+
+def _shape(private, rows, width):
+    columns = 3 if private in ('_A0', '_history') else width
+    return (rows, columns) if private in ('_history', '_curr_history') else (columns,)
+
+
 def _json(data):
     return (json.dumps(data, sort_keys=True, allow_nan=False, indent=2)+'\n').encode('utf-8')
 
@@ -46,26 +60,29 @@ def _binding(state):
 def _limits(state):
     """Format-derived byte ceilings for this explicitly configured capacity.
 
-    Six float64 values per step, three fixed vectors, full edge chunks,
+    Input and observation float64 values, three fixed vectors, full edge chunks,
     metadata and every hash entry are counted. No machine/RSS estimate is used.
     """
+    schema,names,width=_format(state)
     capacity=state._capacity
     count=(capacity+CHUNK_ROWS-1)//CHUNK_ROWS
     file_count=9+2*count
-    arrays={name:_layout((capacity,3),(CHUNK_ROWS,3)) if name.endswith('history')
-            else _layout((3,),(3,)) for name in NAMES}
-    template=dict(schema=SCHEMA,version=__version__,kind=state._snapshot_kind,
+    arrays={}
+    for name,private in names.items():
+        shape=_shape(private,capacity,width)
+        arrays[name]=_layout(shape,(CHUNK_ROWS,shape[-1]) if len(shape)==2 else shape)
+    template=dict(schema=schema,version=__version__,kind=state._snapshot_kind,
                   step_index=capacity,time=0.,binding=_binding(state),arrays=arrays,files={})
-    longest=max(['current_history/c/'+str(max(count-1,0))+'/0',
-                 *[name+'/zarr.json' for name in NAMES]],key=len)
+    longest=max([*[name+'/c/'+str(max(count-1,0))+'/0' for name in names],
+                 *[name+'/zarr.json' for name in names]],key=len)
     # Each JSON hash entry is shorter than this standalone one-entry object.
     entry_size=len(_json({longest:'f'*64}))
     # A finite IEEE binary64 JSON clock fits within 32 characters.
     manifest_size=len(_json(template))+32+file_count*entry_size
-    group_size=len(_json({'zarr_format':3,'node_type':'group','attributes':{'schema':SCHEMA}}))
+    group_size=len(_json({'zarr_format':3,'node_type':'group','attributes':{'schema':schema}}))
     metadata_size=sum(len(_json(spec)) for spec in arrays.values())
     padded=capacity if capacity<=CHUNK_ROWS else count*CHUNK_ROWS
-    return manifest_size+group_size+metadata_size+72+48*padded,manifest_size
+    return manifest_size+group_size+metadata_size+8*(3+2*width)+8*(3+width)*padded,manifest_size
 
 
 def _chunks(shape, chunk):
@@ -77,6 +94,7 @@ def _chunks(shape, chunk):
 
 
 def save(state, directory):
+    schema,names,width=_format(state)
     token=state.snapshot()
     root=Path(directory).expanduser()
     for source in (state._bundle,state._model._snapshot,state._model._source_root):
@@ -85,19 +103,19 @@ def save(state, directory):
     # mkdir claims only a new destination; never clean somebody else's directory.
     root.mkdir(parents=True, exist_ok=False)
     try:
-        manifest=dict(schema=SCHEMA, version=__version__, kind=token.kind,
+        manifest=dict(schema=schema, version=__version__, kind=token.kind,
                       step_index=token.step_index, time=token.time, binding=_binding(state),
                       arrays={}, files={})
         def put(name,raw):
             _write(root/name,raw)
             manifest['files'][name]=hashlib.sha256(raw).hexdigest()
-        put('zarr.json',_json({'zarr_format':3,'node_type':'group','attributes':{'schema':SCHEMA}}))
+        put('zarr.json',_json({'zarr_format':3,'node_type':'group','attributes':{'schema':schema}}))
         # Use the immutable token, rather than rereading live arrays during I/O.
         frozen={name:np.frombuffer(raw,dtype=dtype).reshape(shape,order=order)
                 for name,shape,dtype,order,raw in token._data}
-        for public, private in NAMES.items():
+        for public, private in names.items():
             a=frozen[private]
-            chunk=(3,) if a.ndim==1 else (min(max(a.shape[0],1),CHUNK_ROWS),3)
+            chunk=a.shape if a.ndim==1 else (min(max(a.shape[0],1),CHUNK_ROWS),a.shape[1])
             spec=_layout(a.shape,chunk);manifest['arrays'][public]=spec
             put(f'{public}/zarr.json',_json(spec))
             for key, rows, extent in _chunks(a.shape,chunk):
@@ -116,6 +134,7 @@ def save(state, directory):
 def load(state, directory, max_bytes):
     if max_bytes is not None and (type(max_bytes) is not int or max_bytes<=0):
         raise SnapshotError('max_bytes must be None or a positive integer')
+    schema,names,width=_format(state)
     root=Path(directory).expanduser()
     try:
         ceiling,manifest_ceiling=_limits(state)
@@ -126,23 +145,23 @@ def load(state, directory, max_bytes):
                 or manifest_path.stat().st_size>min(budget,manifest_ceiling)):
             raise SnapshotError('missing or oversized checkpoint manifest')
         m=json.loads(manifest_path.read_bytes())
-        if (type(m) is not dict or m.get('schema')!=SCHEMA or m.get('version')!=__version__
+        if (type(m) is not dict or m.get('schema')!=schema or m.get('version')!=__version__
                 or m.get('kind')!=state._snapshot_kind or m.get('binding')!=_binding(state)):
             raise SnapshotError('checkpoint requires identical model, dt, capacity, threads and executable')
         n=m['step_index'];clock=m['time']
         if (type(n) is not int or not 0<=n<=state._capacity or type(clock) not in (int,float)
                 or not math.isfinite(clock) or clock!=n*state.dt):
             raise SnapshotError('invalid checkpoint clock')
-        shapes={name:((n,3) if name.endswith('history') else (3,)) for name in NAMES}
-        if type(m['arrays']) is not dict or set(m['arrays'])!=set(NAMES):raise SnapshotError('invalid checkpoint array names')
+        shapes={name:_shape(private,n,width) for name,private in names.items()}
+        if type(m['arrays']) is not dict or set(m['arrays'])!=set(names):raise SnapshotError('invalid checkpoint array names')
         hashes=m['files']
         count=(n+CHUNK_ROWS-1)//CHUNK_ROWS
         if type(hashes) is not dict or len(hashes)!=9+2*count:
             raise SnapshotError('checkpoint declares an invalid file count')
-        if 72+48*n>budget:raise SnapshotError('checkpoint arrays exceed max_bytes')
+        if 8*(3+2*width)+8*(3+width)*n>budget:raise SnapshotError('checkpoint arrays exceed max_bytes')
         expected={'zarr.json':None};specs={}
         for name,shape in shapes.items():
-            chunk=(3,) if len(shape)==1 else (min(max(n,1),CHUNK_ROWS),3)
+            chunk=shape if len(shape)==1 else (min(max(n,1),CHUNK_ROWS),shape[1])
             if m['arrays'][name]!=_layout(shape,chunk):raise SnapshotError('unsupported checkpoint array layout')
             expected[f'{name}/zarr.json']=None;specs[name]=(shape,chunk)
             for key,_,extent in _chunks(shape,chunk):expected[f'{name}/{key}']=math.prod(extent)*8
@@ -173,12 +192,12 @@ def load(state, directory, max_bytes):
             raw=path.read_bytes()
             if hashlib.sha256(raw).hexdigest()!=hashes[name]:raise SnapshotError('checkpoint checksum mismatch')
             if name=='zarr.json':
-                if json.loads(raw)!={'zarr_format':3,'node_type':'group','attributes':{'schema':SCHEMA}}:
+                if json.loads(raw)!={'zarr_format':3,'node_type':'group','attributes':{'schema':schema}}:
                     raise SnapshotError('invalid checkpoint group metadata')
             elif name.endswith('/zarr.json') and json.loads(raw)!=m['arrays'][name.split('/')[0]]:
                 raise SnapshotError('checkpoint array metadata differs')
         data=[]
-        for name,private in NAMES.items():
+        for name,private in names.items():
             shape,chunk=specs[name];a=np.empty(shape,dtype=float)
             for key,rows,extent in _chunks(shape,chunk):
                 raw=files[f'{name}/{key}'].read_bytes()

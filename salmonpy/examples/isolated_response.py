@@ -13,6 +13,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for key in ('executable','validation','bundle','input_file','E_npz','output'):
         parser.add_argument(key)
+    parser.add_argument('--checkpoint',help='new replay checkpoint directory (separate from output)')
     a=parser.parse_args()
     with np.load(a.E_npz,allow_pickle=False) as data:
         E=data['E'].copy();raw_dt=data['dt']
@@ -27,6 +28,7 @@ def main():
         with model.new_state(dt=dt) as state:
             frames=[state.observables]
             for value in E:frames.append(state.step(value))
+            if a.checkpoint: state.save_checkpoint(a.checkpoint)
     save_arrays(a.output,{'time':np.array([f.time for f in frames]),
                          'E':np.vstack((np.zeros(3),E)),
                          'dipole':np.array([f.dipole for f in frames]),

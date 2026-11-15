@@ -151,6 +151,14 @@ class IsolatedTDDFTState:
 
     def snapshot(self): return self._engine.snapshot()
     def restore(self,snapshot): self._engine.restore(snapshot)
+    def save_checkpoint(self,directory):
+        """Save accepted E/dipole replay history; GS files remain separate."""
+        self._engine.save_checkpoint(directory)
+
+    def restore_checkpoint(self,directory,*,max_bytes=None):
+        """Validate matching initial data/settings and atomically replay disk history."""
+        self._engine.restore_checkpoint(directory,max_bytes=max_bytes)
+
     def close(self): self._engine.close()
     def __enter__(self): return self
     def __exit__(self,*args): self.close()

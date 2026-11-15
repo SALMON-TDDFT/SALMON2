@@ -62,7 +62,7 @@ class IsolatedTDDFTTests(unittest.TestCase):
         np.testing.assert_array_equal(a.step([0,0,.2]).dipole,expected)
         np.testing.assert_array_equal(b.step([0,0,.2]).dipole,expected)
         self.assertFalse(hasattr(a,'current'))
-        self.assertFalse(hasattr(a,'save_checkpoint'))
+        self.assertTrue(callable(a.save_checkpoint))
 
     def test_bad_packet_snapshot_and_failed_step(self):
         from salmonpy.field_input import FieldPacket,FieldValue
@@ -122,3 +122,47 @@ class IsolatedTDDFTTests(unittest.TestCase):
             with self.assertRaises(SnapshotError):a.restore(replace(a.snapshot(),kind='TDDFT-process-replay'))
         self.assertIs(a._engine._proc,proc)
         self.assertEqual(a.time,0.)
+
+    def test_disk_checkpoint_rebuilt_model_and_rejections(self):
+        from salmonpy.isolated_tddft import IsolatedTDDFTInitialState
+        checkpoint=Path(self.tmp.name)/'checkpoint'
+        with self.model.new_state(dt=.02) as a:
+            for i in range(5): a.step([0.,0.,.001*i])
+            a.save_checkpoint(checkpoint)
+            expected=a.step([0.,0.,.007]).dipole
+        manifest=json.loads((checkpoint/'manifest.json').read_text())
+        self.assertEqual(manifest['schema'],'salmonpy.isolated-tddft-checkpoint/1')
+        self.assertEqual(set(manifest['arrays']),{'E0','dipoles0','dipoles','E_history','dipole_history'})
+        with IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=self.runtime,max_steps=25) as rebuilt:
+            with rebuilt.new_state(dt=.02) as b:
+                b.restore_checkpoint(checkpoint)
+                np.testing.assert_array_equal(b.step([0.,0.,.007]).dipole,expected)
+                before=b.observables.dipole.copy();clock=b.time
+                with patch.object(b._engine,'_spawn',side_effect=AssertionError('must reject before spawn')):
+                    with self.assertRaises(SnapshotError): b.restore_checkpoint(checkpoint,max_bytes=1)
+                    chunk=checkpoint/'dipoles/c/0';raw=chunk.read_bytes();chunk.write_bytes(b'x'+raw[1:])
+                    with self.assertRaises(SnapshotError): b.restore_checkpoint(checkpoint)
+                    chunk.write_bytes(raw)
+                np.testing.assert_array_equal(b.observables.dipole,before)
+                self.assertEqual(b.time,clock)
+            with rebuilt.new_state(dt=.02,position=(1.,0.,0.)) as c:
+                with patch.object(c._engine,'_spawn',side_effect=AssertionError('must reject before spawn')):
+                    with self.assertRaises(SnapshotError): c.restore_checkpoint(checkpoint)
+
+    def test_disk_empty_and_chunk_boundary(self):
+        from salmonpy.isolated_tddft import IsolatedTDDFTInitialState
+        with IsolatedTDDFTInitialState.from_salmon(self.bundle,'rt.inp',runtime=self.runtime,max_steps=1025) as model:
+            with model.new_state(dt=.02) as state:
+                empty=Path(self.tmp.name)/'empty'
+                state.save_checkpoint(empty)
+                state.step([0.,0.,.001])
+                state.restore_checkpoint(empty)
+                self.assertEqual(state.time,0.)
+                for _ in range(1025): state.step([0.,0.,.001])
+                expected=state.observables.dipole.copy()
+                full=Path(self.tmp.name)/'full'
+                state.save_checkpoint(full)
+                state.restore_checkpoint(empty)
+                state.restore_checkpoint(full)
+                np.testing.assert_array_equal(state.observables.dipole,expected)
+                self.assertEqual(state.time,1025*.02)

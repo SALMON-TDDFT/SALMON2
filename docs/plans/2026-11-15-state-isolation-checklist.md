@@ -89,8 +89,15 @@ M6c evidence: `../point-checkpoint-validation-2026-11-15.md`. MPI whole-session 
 - [x] F2 (local adapter): explicit legacy endpoint A/E compatibility and custom multiport step_fields; declared backend clocks checked; native LD/SBE direct parity. No implicit conversions or magnetic-physics claim.
 - [x] F3a (experimental standard runtime): dedicated E1/STEP_E protocol, PZ isolated fixed-ion midpoint, dipole observables; FieldPacket driver and reference/interleaved/history-replay checks. Validation-only tools, not an installed public loader.
 - [x] F3b (local E1 scope): binary-bound validation loader, public isolated native initial-state snapshot, independent E states and in-memory atomic replay restore.
-- [ ] F3c: published E-enabled runtime catalog and isolated disk checkpoints; self-field physics remains caller-selected.
-- [ ] F4: extend MPI field payloads/required-port agreement and explicit field-position/time interpolation, preserving A-only crystal paths.
+- [x] F3c1 (local replay): isolated E/dipole disk checkpoints with rebuilt-model
+  compatibility checks and candidate-worker atomic restore. See
+  `../isolated-disk-checkpoint-validation-2026-11-15.md`.
+- [ ] F3c2: published E-enabled runtime catalog; self-field physics remains caller-selected.
+- [x] F4a: explicit MPI A/E/H packet transport and per-point required-port,
+  position/time/unit agreement; current-sign/output declaration checks; legacy A
+  regression. See `../mpi-field-packet-validation-2026-11-15.md`.
+- [ ] F4b: explicit field-position/time interpolation adapters and native coupling
+  driver integration; do not infer molecular dipole-to-current conversion.
 
 F1/F2 evidence: `../field-input-validation-2026-11-15.md`. These do not complete native E/H physics or MPI transport.
 
@@ -138,9 +145,11 @@ subtasks are unimplemented. Preserve the scoped completion records above:
 
 Sample evidence: `../examples-audit-2026-11-15.md`.
 
-Recommended continuation within the approved work: F3c isolated disk checkpoints,
-then F4 MPI A/E/H transport.
-Publishing an E-enabled runtime is a separate part of F3c and requires its own
+Recommended continuation within the approved work: F4b explicit sampling/native
+coupling integration; see `2026-11-15-native-field-sampling.md` for the audited
+clock/accessor gaps. F3c1 and F4a additions have completed local review and
+validation and are recorded in a separate local commit (no push/Actions).
+Publishing an E-enabled runtime is F3c2 and requires its own
 packaging/platform evidence. The original native GS/TDDFT isolation objective
 above remains open; the process-isolated Python APIs do not complete it.
 

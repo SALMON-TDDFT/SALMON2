@@ -74,8 +74,7 @@ new states but does not stop existing ones.
 A failed step attempts to reconstruct the previous accepted state and raises
 RuntimeFailure; if recovery fails the state closes. Input validation does not
 advance it. FieldAdapter itself still invalidates on backend exceptions, so
-rebuild an outer adapter if needed. There is no public disk checkpoint, native
-wavefunction snapshot, MPI whole-session restoration, or multi-context Fortran
+rebuild an outer adapter if needed. There is no native wavefunction snapshot, MPI whole-session restoration, or multi-context Fortran
 process guarantee here. Replay cost increases with history length.
 
 ## Archive example and FDTD
@@ -89,3 +88,28 @@ units. The archive includes time, E (including zero at t0), named dipoles and un
 Use frame.dipole with DipoleMap for one-way radiation; see DIPOLE_RADIATION.en.md.
 Do not apply the periodic current sign reversal or divide by the TDDFT vacuum
 volume. Self-field feedback is a separate model choice, not enabled automatically.
+
+## Disk replay checkpoint
+
+```python
+# On a live state; use a new directory outside the initial bundle.
+state.save_checkpoint('new-isolated-checkpoint')
+# A new state from a separately reconstructed identical initial model:
+resumed.restore_checkpoint('new-isolated-checkpoint', max_bytes=16*1024*1024)
+```
+
+`salmonpy.isolated-tddft-checkpoint/1` stores E0, dipoles0, dipoles, E_history
+and dipole_history in the strict uncompressed Zarr v3 subset. Dipole vectors have
+six components: electronic_change followed by total charge dipole, in e*bohr.
+It is a replay record, not a wavefunction checkpoint or postprocessing archive.
+GS files and the validated runtime must be supplied separately. Initial file
+hashes, executable hash, dt, capacity, threads, position and package version must
+match; initial-model object identity may differ. A periodic A checkpoint is rejected.
+Hash/layout/size checks precede candidate replay; failure leaves the live state
+unchanged. max_bytes bounds archive/decoded payload, not process RSS. Default
+limits follow configured capacity. Only new destinations are accepted.
+
+The response sample accepts `--checkpoint NEW_DIRECTORY` to save its final state.
+To continue later, recreate the same capacity/settings, restore, then supply the
+remaining E steps. A sample saved at its capacity can only replay up to that end;
+plan extra capacity in your own run when further propagation is required.

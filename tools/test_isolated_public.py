@@ -32,6 +32,7 @@ def main():
                     np.testing.assert_array_equal(frame.dipole,reference[n,3:])
                     np.testing.assert_array_equal(b.step(v).dipole,frame.dipole)
             saved=a.snapshot()
+            a.save_checkpoint(output/'checkpoint')
             expected=np.array([a.step(v).dipole for v in E[10:]])
             model.close()
             a.restore(saved)
@@ -46,8 +47,15 @@ def main():
             np.testing.assert_array_equal(a.observables.dipole,before)
             assert a.time==20*dt
             a.step([0,0,0])
-    np.savez(output/'continuation.npz',expected=expected,actual=actual)
+    with IsolatedTDDFTInitialState.from_salmon(validation/'first','input.inp',runtime=runtime,
+                                              max_steps=25,threads=1,timeout=30) as rebuilt:
+        with rebuilt.new_state(dt=dt) as resumed:
+            resumed.restore_checkpoint(output/'checkpoint')
+            disk_actual=np.array([resumed.step(v).dipole for v in E[10:]])
+            np.testing.assert_array_equal(disk_actual,expected)
+    np.savez(output/'continuation.npz',expected=expected,actual=actual,disk_actual=disk_actual)
     (output/'report.json').write_text(json.dumps(dict(public_loader=True,independent_states=True,
+        disk_rebuilt_model=True,disk_continuation_max_abs_error=0.,
         field_packet=True,restore_continuation_max_abs_error=0.,worker_failure_recovery=True,
         runtime_sha256=runtime.executable.sha256,scope='interface regression; no convergence study'),indent=2)+'\n')
     print('public isolated loader, replay, independent states and recovery PASS')

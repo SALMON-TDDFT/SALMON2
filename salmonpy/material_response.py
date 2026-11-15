@@ -106,21 +106,41 @@ class ResponseSession:
     execution ('collective' or 'leader_only'), reduction ('sum' or 'leader'),
     create_state(initial, point_id, dt, context). States implement
     step(A_new) -> 3-vector physical charge-current density and close().
+    Optional field_contracts selects explicit step_fields(FieldPacket) -> j.
     Legacy advance(A_old,A_new) callbacks are adapted with owned accepted A.
     Every result is tagged implicitly by the fixed plan's point IDs and accepted
     step index. Initial A is zero; current is at the new endpoint. All units a.u.
     """
-    def __init__(self,context,bindings,*,dt,point_record=None,point_map=None):
+    def __init__(self,context,bindings,*,dt,point_record=None,point_map=None,field_contracts=None):
         self.context=context;self.dt=dt;self.step_index=0;self.failed=False;self.closed=False;self._registered=False
         self._measurements = _Measurements()
         self._adapters = {}
         self._point_metadata = None
+        self._field_contracts = None
         self.states={};self.bindings=dict(bindings);self._A=np.zeros((len(context.plan.point_ids),3))
         error=None;descriptors=None
         try:
             if not np.isfinite(dt) or dt<=0: raise InputError('positive finite dt required')
             if set(bindings)!=set(context.plan.point_ids): raise InputError('binding required for every point')
             self._point_metadata = _point_metadata(context.plan, point_record, point_map)
+            contract_record = None
+            if field_contracts is not None:
+                from .field_input import FieldContract
+                if not isinstance(field_contracts, Mapping) or set(field_contracts)!=set(context.plan.point_ids):
+                    raise InputError('field contracts required for every point')
+                self._field_contracts = dict(field_contracts)
+                contract_record = []
+                for point in context.plan.point_ids:
+                    contract = self._field_contracts[point]
+                    if not isinstance(contract,FieldContract) or contract.timing.dt != dt:
+                        raise InputError('FieldContract with session dt required')
+                    outputs=contract.timing.outputs
+                    if (len(outputs)!=1 or outputs[0].quantity!='j' or outputs[0].offset!=0
+                            or outputs[0].sampling!='point' or contract.timing.clock_offset!=0
+                            or contract.timing.t0!=0):
+                        raise InputError('packet response requires endpoint charge j at n*dt from zero')
+                    contract_record.append((point,contract.timing.to_dict(),dict(contract.units),
+                                            contract.position.tolist(),contract.position_unit,contract.gauge))
             descriptors=[]
             keys={}
             identities={}
@@ -145,7 +165,7 @@ class ResponseSession:
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         # Metadata agreement catches mismatched backend selection before callbacks.
-        descriptors = (descriptors, self._point_metadata)
+        descriptors = (descriptors, self._point_metadata, contract_record)
         local=context.solver_comm.allgather(descriptors)
         mismatch=any(v!=descriptors for v in local)
         if context.is_leader:
@@ -176,6 +196,16 @@ class ResponseSession:
             if any(errors): error=str(errors);break
             self.states[point]=state
             self._adapters[point] = _StepAdapter(state)
+            if self._field_contracts is not None:
+                try:
+                    from .field_input import FieldAdapter
+                    self._adapters[point]=FieldAdapter(state,self._field_contracts[point])
+                    declared=getattr(state,'timing',None)
+                    if declared is not None and declared.outputs!=self._field_contracts[point].timing.outputs:
+                        raise InputError('backend output timing differs from charge-current contract')
+                except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+            errors=context.solver_comm.allgather(error)
+            if any(errors): error=str(errors);break
         try: self._agree(error)
         except Exception:
             self.failed=True
@@ -253,7 +283,8 @@ class ResponseSession:
         from .timing import matter_timing
         records = {}; error = None
         try:
-            records = {p: matter_timing(s, self.dt).to_dict() for p, s in self.states.items()}
+            records = {p: (self._field_contracts[p].timing if self._field_contracts is not None
+                           else matter_timing(s, self.dt)).to_dict() for p, s in self.states.items()}
         except Exception as exc:
             error = f'{type(exc).__name__}: {exc}'
         self.agree(error)
@@ -310,11 +341,14 @@ class ResponseSession:
         groups = c.leaders.allgather(rows) if c.is_leader else None
         groups = c.solver_comm.bcast(groups, root=0)
         return {'schema': 'salmonpy.communication/1', 'steps': self.step_index,
-                'logical_A_bytes_per_step': len(c.plan.point_ids)*3*8,
+                'logical_A_bytes_per_step': len(c.plan.point_ids)*3*8 if self._field_contracts is None else None,
+                'logical_field_value_bytes_per_step': (len(c.plan.point_ids)*3*8 if self._field_contracts is None
+                    else sum(len(v.units) for v in self._field_contracts.values())*3*8),
+                'field_metadata_bytes_counted': False,
                 'logical_j_bytes_per_step': len(c.plan.point_ids)*3*8,
                 'ranks': [row for group in groups for row in group]}
 
-    def step(self,A):
+    def _step(self,A,*,field_packets=False):
         """Collective everywhere. Only field leader supplies (points,3) A.
 
         Returns ordered physical current on every field rank, None on material
@@ -324,7 +358,11 @@ class ResponseSession:
         c=self.context;error=None
         try:
             if self.closed or self.failed or c.closed: raise InputError('session is not usable')
-            if c.group.role=='field' and c.is_leader:
+            if field_packets != (self._field_contracts is not None):
+                raise InputError('use step_fields with declared field contracts, otherwise step(A)')
+            if field_packets:
+                values=self._pack_fields(A)
+            elif c.group.role=='field' and c.is_leader:
                 values=np.array(A,dtype=np.float64,order='C',copy=True)
                 if values.shape!=self._A.shape or not np.isfinite(values).all(): raise InputError('finite A array of shape (points,3) required')
             else:
@@ -333,15 +371,29 @@ class ResponseSession:
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         started = self._measurements.start()
-        if c.is_leader: c.leaders.Bcast(values,root=c.field_group)
-        c.solver_comm.Bcast(values,root=0)
+        if field_packets:
+            if c.is_leader: values=c.leaders.bcast(values,root=c.field_group)
+            values=c.solver_comm.bcast(values,root=0)
+            from .field_input import FieldPacket, FieldValue
+            error=None
+            try:
+                values={p:FieldPacket(**{q:FieldValue(**v) for q,v in packet.items()})
+                        for p,packet in values.items()}
+                for p,contract in self._field_contracts.items():
+                    contract.validate(values[p],step_index=self.step_index+1)
+            except Exception as exc: error=f'{type(exc).__name__}: {exc}'
+            self._agree(error)
+        else:
+            if c.is_leader: c.leaders.Bcast(values,root=c.field_group)
+            c.solver_comm.Bcast(values,root=0)
         self._measurements.stop('A_distribution', started)
         started = self._measurements.start()
         currents=np.zeros((len(c.group.point_ids),3));error=None
         for i,point in enumerate(c.group.point_ids):
             k=c.plan.point_ids.index(point);b=self.bindings[point]
             try:
-                j=np.array(self._adapters[point].step(values[k].copy()),dtype=np.float64,order="C",copy=True)
+                raw = self._adapters[point].step_fields(values[point]) if field_packets else self._adapters[point].step(values[k].copy())
+                j=np.array(raw,dtype=np.float64,order="C",copy=True)
                 if j.shape!=(3,) or not np.isfinite(j).all(): raise InputError('backend must return finite physical current density (3,)')
             except Exception as exc: error=f'{type(exc).__name__}: {exc}'
             errors=c.solver_comm.allgather(error)
@@ -367,8 +419,41 @@ class ResponseSession:
                 result=np.array([packed.reshape(-1,3)[order.index(p)] for p in c.plan.point_ids])
         if c.group.role=='field': result=c.solver_comm.bcast(result,root=0)
         self._measurements.stop('j_collection', started)
-        self._A=values;self.step_index+=1
+        if not field_packets: self._A=values
+        self.step_index+=1
         return result
+
+    def _pack_fields(self,fields):
+        from .field_input import FieldPacket
+        c=self.context
+        if c.group.role!='field' or not c.is_leader:
+            if fields is not None: raise InputError('only field leader supplies fields')
+            return None
+        if not isinstance(fields,Mapping) or set(fields)!=set(c.plan.point_ids):
+            raise InputError('FieldPacket mapping must cover exactly transport point IDs')
+        packed={}
+        for point,contract in self._field_contracts.items():
+            packet=fields[point]
+            contract.validate(packet,step_index=self.step_index+1)
+            packed[point]={}
+            for q in contract.units:
+                v=getattr(packet,q)
+                packed[point][q]=dict(value=v.value.tolist(),time=v.time,position=v.position.tolist(),
+                    unit=v.unit,position_unit=v.position_unit,sampling=v.sampling)
+        return packed
+
+    def step(self,A):
+        """Collective legacy A/c endpoint input, supplied only by field leader."""
+        return self._step(A)
+
+    def step_fields(self,fields):
+        """Collective explicit per-point A/E/H packets; returns charge current j.
+
+        Contracts are required at construction. No interpolation, conversion or
+        dipole-to-current normalization is performed. Only field leader supplies
+        a mapping keyed by transport point IDs; all other ranks supply None.
+        """
+        return self._step(fields,field_packets=True)
 
     advance = step  # Existing prescribed-A entry point.
 

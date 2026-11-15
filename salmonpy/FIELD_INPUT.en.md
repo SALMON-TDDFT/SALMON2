@@ -5,7 +5,7 @@ legacy adapters. Crystals still use A/c; LD uses E. A length-gauge model declare
 A user model can require any declared subset of A, E and H. H is field intensity,
 not B; neither a magnetic constitutive law nor an H-to-B conversion is inferred.
 This interface does not by itself add isolated-system TDDFT or magnetic coupling
-to any native solver. MPI ResponseSession still transports A only.
+to any native solver. MPI transport uses the explicit contracts and step_fields API below.
 
 `FieldValue(value, time=..., position=..., unit=...)` owns an immutable real finite
 3-vector and position. Time is always atomic time; position_unit defaults to bohr
@@ -76,9 +76,7 @@ python -m salmonpy.examples.field_inputs
 ```
 
 The installed-wheel example verifies native LD/direct equality and custom staggered
-E/H delivery. Local native SBE/direct parity is covered by tests. Isolated native
-TDDFT length-gauge connection and MPI E/H transport are follow-up implementation,
-not capabilities established by these tests.
+E/H delivery. Local native SBE/direct parity is covered by tests. Isolated native connection and MPI transport use separate APIs and validation described below.
 
 ## Experimental isolated native E connection (source checkout)
 
@@ -106,4 +104,28 @@ The tests do not establish optical convergence or full solver reentrancy.
 Use an explicitly built, source-audited executable; existing release runtimes do
 not thereby gain E support. The public isolated loader and in-memory replay are now documented in
 ISOLATED_TDDFT.en.md, requiring a local binary-bound validation receipt.
-Prebuilt catalog distribution, disk checkpoints and MPI E transport remain pending. See `docs/isolated-worker-validation-2026-11-15.md` in the source checkout.
+Disk replay is documented in ISOLATED_TDDFT.en.md; MPI packets are described below. Prebuilt catalog distribution remains pending. See `docs/isolated-worker-validation-2026-11-15.md` in the source checkout.
+
+## Explicit MPI A/E/H transport
+
+Construct `ResponseSession(..., field_contracts={point_id: contract, ...})` on
+all ranks, then call `session.step_fields({point_id: FieldPacket(...), ...})`.
+Only the field leader supplies the mapping; others pass None. Keys are integer
+transport point IDs from the plan. Required ports, clocks, units, positions and
+gauge agree before state creation. All inputs are checked before updates;
+receivers reconstruct immutable packets and validate them again. Backend states
+implement step_fields and return three-component physical charge-current density
+j at integer n*dt from t=0. Declare exactly one j output with point sampling and
+zero offset; any backend output declaration must match. FieldAdapter also checks declared backend timing. Undeclared ports are omitted.
+The legacy step(A) remains available without contracts; modes cannot be mixed.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.mpi_field_inputs
+```
+
+The sample uses synthetic current models. An isolated TDDFT dipole is not a
+current-density return value. No A/E conversion, temporal/spatial interpolation,
+or dipole normalization is inferred: supply explicitly sampled fields matching
+FieldContract. Backend failure invalidates the session without whole-session
+rollback. Reported field-value bytes exclude packet metadata and are not measured
+network traffic. Native field/coupling drivers do not automatically use this API.

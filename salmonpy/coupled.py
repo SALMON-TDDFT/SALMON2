@@ -277,6 +277,8 @@ class CoupledStepper:
             elif field.dt!=response.dt or field.point_ids!=context.plan.point_ids:
                 error='field/response dt and point order must match'
         elif field is not None:error='material ranks must not provide a field'
+        if getattr(response,'_field_contracts',None) is not None:
+            error='field packet sessions require explicit sampling; CoupledStepper currently requires legacy A response'
         response.agree(error)
         self.timing=self._check_timing(response,field)
         self.J=np.zeros((len(context.plan.point_ids),3))
