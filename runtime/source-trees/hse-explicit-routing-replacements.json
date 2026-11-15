@@ -14,7 +14,7 @@
     "src/common/structures.f90": {
       "before_sha256": "8e4043f129a0e80deee56b50ab629b540d126a13c7455df8979c872b18414d8c",
       "source": "overrides/hse-explicit-routing/src/common/structures.f90",
-      "after_sha256": "d53d84f0b03da50f8e3ce86b46828b4cf428e6c4247028d0547c0759723c4e5e"
+      "after_sha256": "af0912e35c61d64eaf2dc31f6be53764497c61122551c1a2cbd35f36a7b49a5d"
     },
     "src/common/total_energy.f90": {
       "before_sha256": "728942434e850be1dfe2833b42ed50d9d516d946343947a01b6f6ae3c49626c2",
@@ -124,17 +124,17 @@
     "src/gs/scf_iteration_dft.f90": {
       "before_sha256": "5ae736b113ff779e1488fdffd6c62ed8232b11c028b1ed38d8f37e6781f84888",
       "source": "overrides/hse-explicit-routing/src/gs/scf_iteration_dft.f90",
-      "after_sha256": "9c535d2f9a4904836d28efb4adb179e653217afd22351cc3b361ad7da7fe0d42"
+      "after_sha256": "d9e63d80278b7da8cd95df0747797e3d9c2bbb8ab8292dc8b732656280cb94c6"
     },
     "src/gs/scf_iteration.f90": {
       "before_sha256": "dd2b28fc4ab7772559d854edf522a7cb0776be9d8526c775e7a715b80c35c041",
       "source": "overrides/hse-explicit-routing/src/gs/scf_iteration.f90",
-      "after_sha256": "bd0c1b80b893acedbfae58f6ba17b893774c42da29e57aa870951e3945932a6a"
+      "after_sha256": "476d44a142b545e7c33a30e1640e29fe6fc8cfd99c3f2cd24dba10da1aab3b90"
     },
     "src/gs/main_dft.f90": {
       "before_sha256": "bc6856c1e9f105c35a8ea8bfc815320c060c9854596871c4498ba4df3907f4ba",
       "source": "overrides/hse-explicit-routing/src/gs/main_dft.f90",
-      "after_sha256": "54c7e97339ddfda03259fb31d01bb3e52a2d3ce868b3382e2c2fa133af6428f0"
+      "after_sha256": "aeec1bca7c256782f54c8274c1cb70a3291710c070f075dca56364bf122a174a"
     },
     "src/xc/exx_gs_metadata.f90": {
       "before_sha256": "2baba09fe7a1efed27f1ddefd66ddf5b15c8a7039bca7c1b8991b7f5e2d73aba",
@@ -145,6 +145,11 @@
       "before_sha256": "c808a8c997d80cbc91fba7c39c7fc0cd5fc8c2e2c43dc2406a1a3930f830a7cc",
       "source": "overrides/hse-explicit-routing/src/gs/dc/dcdft.f90",
       "after_sha256": "96818de3c047b9ad919c083c19fb260c82657694ecde253497e45b1aac282b3b"
+    },
+    "src/gs/mixing.f90": {
+      "before_sha256": "182ea26bdaf0e9292000093fb1b252b148c09554ff9ed1f758c6caca85026351",
+      "source": "overrides/hse-explicit-routing/src/gs/mixing.f90",
+      "after_sha256": "1b44ea33404414365267484102e8c36b0c6183ed82ab207b2bd57a6ae74630ba"
     }
   }
 }

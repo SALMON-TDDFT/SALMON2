@@ -447,17 +447,37 @@ nativeエラーによるプロセス停止は残ります。入力・並列・�
 
 ### GSの明示SCF設定
 
-`gs_input_config(value)`は共有入力のSCF反復上限・収束閾値・pre-SCF閾値・必要連続回数を`s_gs_run_config`へ取り込みます。
+`gs_input_config(value)`は共有入力のSCF反復上限・収束指標・収束閾値・pre-SCF閾値・必要連続回数を`s_gs_run_config`へ取り込みます。
 `gs_run(ctx,status,config=value)`は初期化前に検証・コピーします。省略時も同じ入力を一度取り込む互換経路です。
 `max_iterations`は正かつ整数最大値未満、両閾値は有限・非負、`pre_scf_steps`は正が必要です。
 不正設定はコンテキストを有効化する前にstatus=1で拒否します。
 
 SCF反復上限と収束判定（適応交換の準備判定閾値を含む）は保持した設定を使います。
-渡した値や該当する4つの共有入力を後から変えても、選択済み設定は変わりません。
-収束指標、混合法、初期の無混合反復、構造・物質などの設定は未分離です。異なる入力全般の独立化や並行実行を保証しません。
+渡した値や該当する共有入力を後から変えても、選択済み設定は変わりません。
+`convergence_metric`はrho_dne/norm_rho/norm_rho_dng/norm_pot/norm_pot_dngの5方式です。
+指標値の演算・規格化と表示も保持した設定に従います。閾値は選んだ指標に対応する内部原子単位で渡します。
+電子数による規格化の入力、構造・物質などの設定は未分離です。異なる入力全般の独立化や並行実行を保証しません。
 
 明示設定でpre-SCFを有効にする場合も、従来の条件（新規・静的hybrid、restart/MD/構造最適化なし、
 DCでは正の温度、checkpoint間隔・終了時刻指定なし、密度混合と密度収束指標）を入口で再検査します。
 従来実行入口でも不正な実行設定は非ゼロ終了として報告し、計算を飛ばして正常終了させません。
 
 ローカルファイルをまとめるPython入口は[PREPARATION.md](PREPARATION.md)です。対応環境・依存の自動解決やインストールは行いません。
+
+### GSの状態別混合設定
+
+内部の`s_gs_run_config%mixing`（`s_mixing_config`）には`method`、`mixrate`、`alpha_mb`、
+`beta_p`、`nmemory_p`、`auto_mixing`、`update_ratio`、`initial_no_mix_steps`を保持します。
+`gs_input_config`で取り込み、必要なら値を変更して`gs_run`へ渡します。初期化前にコピーし、
+実行中の係数・前回残差・密度／ポテンシャル履歴は各状態の`s_mixing`が別々に保持します。
+自動半減とpre-SCF等での係数リセットは、この状態の初期係数を使います。
+
+`method`はsimple/broyden/pulay/simple_potential/simple_dm、`auto_mixing`はy/n。
+係数とupdate_ratioは有限値、Pulay履歴長は1〜21、無混合反復数は0以上・整数最大値未満です。
+simple_dmは従来どおりspin-orbit有効時のみ。履歴の格納容量21と演算順は変更していません。
+これは内部Fortran設定であり、新しいPython APIや一般の並行GS実行を提供するものではありません。
+legacy初期化は入力をその時点で取り込みます。別入口のDFT-MDの自動混合判定は共有入力のままです。
+
+検証: `tools/test_gs_lifecycle.py ... --mixing pulay --auto-mixing --distinct-mixing`。
+同じ物質で混合条件だけ異なる二状態を、元の実行ファイルの各条件と比較します。
+詳細と未検証範囲は`docs/gs-mixing-config-validation-2026-11-16.md`を参照してください。

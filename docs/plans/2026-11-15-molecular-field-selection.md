@@ -1,6 +1,6 @@
 # Explicit molecular drive selection: next implementation boundary
 
-Status: design, not a public implemented API. Builds on
+Status: pure selection API implemented; native/reference causal scheduling remains open. Builds on
 2026-11-15-molecular-self-field.md; does not enable two-way TDDFT by itself.
 
 ## First increment

@@ -21,6 +21,11 @@ def main():
     parser.add_argument('build', type=Path)
     parser.add_argument('reference', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--convergence', choices=('rho_dne','norm_rho','norm_rho_dng','norm_pot','norm_pot_dng'), default='rho_dne')
+    parser.add_argument('--mixing', choices=('simple','broyden','pulay','simple_potential'), default='simple')
+    parser.add_argument('--auto-mixing', action='store_true')
+    parser.add_argument('--distinct-mixing', action='store_true')
+    parser.add_argument('--initial-no-mix-steps', type=int, default=1)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     record = json.loads(args.build.read_text())
@@ -74,26 +79,39 @@ def main():
         root_pseudo = root.parent / 'examples/si_intro_data/Si_rps.dat'
     env = dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1')
     cases = []
-    for steps in (0, 1, 2, 3):
+    for steps in ((0,) if args.convergence.startswith('norm_pot') or args.mixing=='simple_potential' else (0, 1, 2, 3)):
         directory = output / f'steps-{steps}'
         directory.mkdir()
-        for name in ('first', 'second', 'reference'):
+        for name in ('first', 'second', 'reference', 'reference_second'):
             (directory / name).mkdir()
         shutil.copy2(root_pseudo, directory / 'Si_rps.dat')
-        text = INPUT.replace('exx_pre_scf_threshold=1d8', f'exx_pre_scf_threshold={1e8 if steps else 0}')
+        text = INPUT.replace("convergence='rho_dne'", f"convergence='{args.convergence}'").replace('exx_pre_scf_threshold=1d8', f'exx_pre_scf_threshold={1e8 if steps else 0}')
+        text = text.replace('&scf\n', f"&scf\n method_mixing='{args.mixing}', yn_auto_mixing='{'y' if args.auto_mixing else 'n'}', update_mixing_ratio=0, mixrate=0.35, alpha_mb=0.65, beta_p=0.55, nmemory_p=2,\n")
         text = text.replace('exx_pre_scf_steps=2', f'exx_pre_scf_steps={max(1, steps)}')
+        text=text.replace('nscf_init_mix_zero=1', f'nscf_init_mix_zero={args.initial_no_mix_steps}')
         (directory / 'gs.inp').write_text(text)
         reference_input = text.replace("base_directory='./'", "base_directory='./reference/'")
         try:
             with (directory / 'probe.log').open('w') as log:
-                subprocess.run([str(output / 'probe')], input=text, text=True, cwd=directory,
+                subprocess.run([str(output / 'probe'), *(['distinct'] if args.distinct_mixing else [])], input=text, text=True, cwd=directory,
                                env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
             with (directory / 'reference.log').open('w') as log:
                 subprocess.run([str(reference_executable)], input=reference_input, text=True, cwd=directory,
                                env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
+            second_input=reference_input.replace('./reference/', './reference_second/')
+            if args.distinct_mixing:
+                second_input=second_input.replace('mixrate=0.35','mixrate=0.175').replace('alpha_mb=0.65','alpha_mb=0.325').replace('beta_p=0.55','beta_p=0.275').replace('nmemory_p=2','nmemory_p=1')
+            with (directory / 'reference_second.log').open('w') as log:
+                subprocess.run([str(reference_executable)], input=second_input, text=True, cwd=directory,
+                               env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120, check=True)
             log = (directory / 'probe.log').read_text()
             if log.count('EXX_GS_OWNER explicit') != 2 or 'Sequential GS lifecycle PASS' not in log:
                 raise AssertionError('both GS calls must use an explicit owner and complete')
+            def residuals(text):
+                return [line.split() for line in text.splitlines() if line.strip().startswith('iter and ')]
+            reference_residuals=residuals((directory/'reference.log').read_text())
+            if not reference_residuals or residuals(log)!=reference_residuals+residuals((directory/'reference_second.log').read_text()):
+                raise AssertionError('per-iteration convergence labels/residuals differ from reference')
             trace = (directory / 'a_before.bin').read_bytes()
             if not trace or any((directory / name).read_bytes() != trace
                                 for name in ('a_after.bin', 'a_after_close.bin')):
@@ -105,16 +123,20 @@ def main():
                 raise AssertionError('reference checkpoint payload incomplete')
             files += ['data_for_restart/' + name for name in payloads]
             hashes = {}
+            second_hashes = {}
             for name in files:
                 expected = (directory / 'reference' / name).read_bytes()
                 for label in ('first', 'second'):
-                    if (directory / label / name).read_bytes() != expected:
+                    if (directory / label / name).read_bytes() != (directory / ('reference' if label=='first' else 'reference_second') / name).read_bytes():
                         raise AssertionError(f'{steps}: {label}/{name} differs from original')
                 hashes[name] = hashlib.sha256(expected).hexdigest()
-            cases.append({'pre_scf_steps': steps, 'two_sequential_calls_equal_reference': True, 'retained_a_unchanged': True,
-                          'reference_file_sha256': hashes})
+                second_hashes[name] = hashlib.sha256((directory/'reference_second'/name).read_bytes()).hexdigest()
+            cases.append({'initial_no_mix_steps':args.initial_no_mix_steps, 'distinct_mixing':args.distinct_mixing, 'mixing_method':args.mixing, 'auto_mixing':args.auto_mixing, 'convergence_metric':args.convergence, 'pre_scf_steps': steps, 'two_sequential_calls_equal_reference': True, 'retained_a_unchanged': True,
+                          'reference_file_sha256': hashes, 'reference_residuals':reference_residuals,
+                          'reference_second_file_sha256':second_hashes,
+                          'reference_second_residuals':residuals((directory/'reference_second.log').read_text())})
         finally:
-            for name in ('first', 'second', 'reference'):
+            for name in ('first', 'second', 'reference', 'reference_second'):
                 shutil.rmtree(directory / name / 'data_for_restart', ignore_errors=True)
             (directory / 'Si_rps.dat').unlink(missing_ok=True)
             for name in ('a_before.bin', 'a_after.bin', 'a_after_close.bin'):
@@ -133,7 +155,7 @@ def main():
         'scope': 'same-input serial GS reuse and checkpoint equivalence; not concurrency or physical convergence',
         'commands': commands, 'build': record, 'reference': reference,
         'probe_sha256': hashlib.sha256((source / 'probe.f90').read_bytes()).hexdigest()}, indent=2) + '\n')
-    print('Sequential GS and checkpoint comparison PASS (4 cases)')
+    print(f'Sequential GS/checkpoint/residual comparison PASS ({len(cases)} cases, {args.convergence})')
 
 
 if __name__ == '__main__':

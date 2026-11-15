@@ -176,3 +176,44 @@ This is an active-work audit, not a declaration that the wider historical backlo
   independent SBE states and two-point managed TDDFT legacy parity in 1D/native
   E/H. Evidence: `../electronic-packet-adapter-validation-2026-11-15.md`.
   General interpolation/subcycling and dipole adapters remain open.
+
+
+- [x] R4b-selection: pure explicit molecular drive selection, own-source vacuum
+  reference provenance and exact sample checks, immutable records and examples.
+  Evidence: `../molecular-field-selection-validation-2026-11-15.md`.
+- [ ] R4b-schedule: causal native/reference oscillator loop and source-work
+  accounting before attaching isolated TDDFT. R4b as a whole remains open.
+
+
+- [x] R4b-causal-fixture: separate native/reference oscillator loop, illumination
+  baseline, source-work diagnostics and temporal-error isolation. Evidence:
+  `../molecular-feedback-schedule-validation-2026-11-16.md`.
+- [ ] R4b-energy: held-drive work discrepancy is first order and remains large;
+  design and verify centered coupling before isolated TDDFT attachment. Native
+  energy/flux conservation and material-scattering validation remain unclaimed.
+
+## User priority update — 2026-11-16
+
+Molecular work is paused at the user's explicit request. Preserve R4b evidence
+and open limitations, but do not continue molecular feedback, energy-schedule
+refinement or isolated molecular extensions until requested again.
+Return focus to complete GS/TDDFT explicit input ownership, collective native
+backend contracts, recoverable errors/handle ABI and whole-session restart.
+Existing GS/2 serial multi-k conversion and process-isolated replay are already
+implemented in their documented scope; do not list them as wholly unimplemented.
+
+- [x] GS metric selection: convergence_metric joins owned GS SCF settings;
+  all five residual definitions and restart outputs match the original fast-HSE
+  reference with poisoned shared controls. Evidence:
+  `../gs-convergence-config-validation-2026-11-16.md`.
+  Mixing/normalization inputs and general material initialization remain open.
+
+### 2026-11-16: GS mixing settings
+
+- [x] Capture method/rates/Pulay memory/auto adjustment/no-mixing stage per retained GS state.
+- [x] Preserve capacity21 and formulas/order; reject malformed explicit values before activation.
+- [x] Compare 13 two-state cases (different mixing coefficients/history length) with original solver outputs, restart bytes and residuals.
+- [x] Retained settings/adaptive rates/history independence; separate halving/reset check.
+- [x] Japanese/English runtime and AI guides synchronized.
+- Remaining: normalization electron counts, initialization/material and parallel/timer inputs; concurrent/general different-material GS not implemented. DFT-MD global auto switch remains.
+- Evidence: `docs/gs-mixing-config-validation-2026-11-16.md`. Molecular work stays paused.

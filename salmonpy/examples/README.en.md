@@ -170,3 +170,5 @@ MPI samples also display `--help` from ordinary Python. Computation requires mpi
 [field_sampling.py](field_sampling.py): explicit spatial weights and staggered-time interpolation of synthetic fields; no solver/data required.
 
 [mpi_packet_coupling.py](mpi_packet_coupling.py): synthetic packet feedback with 1D/native fields; three ranks (native also supports four).
+
+- `molecular_field_selection.py`: explicit own-source vacuum field subtraction on synthetic samples; no solver required.

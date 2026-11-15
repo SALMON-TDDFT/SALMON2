@@ -65,8 +65,11 @@ type(s_unfold) :: unfold
 end type
 contains
 subroutine gs_input_config(value)
- use salmon_global,only:nscf,threshold,exx_pre_scf_threshold,exx_pre_scf_steps
+ use salmon_global,only:nscf,threshold,exx_pre_scf_threshold,exx_pre_scf_steps,convergence
+ use mixing_sub,only:mixing_input_config
  type(s_gs_run_config),intent(out)::value
+ call mixing_input_config(value%mixing)
+ value%convergence_metric=convergence
  value%max_iterations=nscf;value%threshold=threshold
  value%pre_scf_threshold=exx_pre_scf_threshold;value%pre_scf_steps=exx_pre_scf_steps
 end subroutine
@@ -138,6 +141,13 @@ if(present(config))then
 else
  call gs_input_config(selected)
 endif
+select case(selected%convergence_metric)
+case('rho_dne','norm_rho','norm_rho_dng','norm_pot','norm_pot_dng')
+case default
+ return
+end select
+if(.not.valid_mixing_input(selected%mixing))return
+if(selected%mixing%method=='simple_dm'.and.yn_spinorbit/='y')return
 if(selected%max_iterations<1.or.selected%max_iterations>=huge(0))return
 if(selected%pre_scf_steps<1)return
 if(.not.ieee_is_finite(selected%threshold))return
@@ -148,12 +158,14 @@ if(selected%pre_scf_threshold>0d0)then
  if(theory/='dft'.or.yn_restart/='n'.or.yn_md/='n'.or.yn_opt/='n'.or..not.is_hybrid(xc))return
  if(yn_dc=='y'.and.temperature<=0d0)return
  if(checkpoint_interval>0.or.time_shutdown>0d0)return
- if(method_mixing=='simple_potential')return
- if(convergence/='rho_dne'.and.convergence/='norm_rho'.and.convergence/='norm_rho_dng')return
+ if(selected%mixing%method=='simple_potential')return
+ if(selected%convergence_metric/='rho_dne'.and.selected%convergence_metric/='norm_rho'.and. &
+    selected%convergence_metric/='norm_rho_dng')return
 endif
 if(theory=='dft_band'.and.iperiodic/=3) return
 ctx%active=.true.
 ctx%system%gs_input=selected;ctx%system%gs_input_owned=.true.
+ctx%mixing%input=selected%mixing;ctx%mixing%input_owned=.true.
 
 if(yn_dc=='y') then
   call init_dcdft(ctx%dc,ctx%pp,ctx%mixing,ctx%ewald)
@@ -234,7 +246,7 @@ if(iopt>=2)then
   call dealloc_init_ps(ctx%ppg)
   call init_ps(ctx%lg,ctx%mg,ctx%system,ctx%info,ctx%fg,ctx%poisson,ctx%pp,ctx%ppg,ctx%vpsl)
   call calc_nlcc(ctx%pp, ctx%system, ctx%mg, ctx%ppn)
-  if(yn_auto_mixing=='y') call reset_mixing_rate(ctx%mixing)
+  if(ctx%mixing%input%auto_mixing=='y') call reset_mixing_rate(ctx%mixing)
   call timer_end(LOG_INIT_GS)
 end if
 
@@ -493,6 +505,8 @@ subroutine gs_probe_write(ctx,unit)
  write(unit)ctx%iterations,ctx%energy%E_tot,ctx%energy%E_xc
  write(unit)ctx%spsi%zwf,ctx%rho%f,ctx%vh%f,ctx%vpsl%f
  write(unit)ctx%system%rocc,ctx%system%Force
+ write(unit)ctx%mixing%input,ctx%mixing%input_owned,ctx%mixing%num_rho_stock,ctx%mixing%flag_mix_zero
+ write(unit)ctx%mixing%mixrate,ctx%mixing%alpha_mb,ctx%mixing%beta_p,ctx%mixing%convergence_value_prev
  if(allocated(ctx%mixing%rho_in))then
   do i=1,size(ctx%mixing%rho_in)
    if(allocated(ctx%mixing%rho_in(i)%f))write(unit)ctx%mixing%rho_in(i)%f

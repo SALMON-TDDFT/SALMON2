@@ -493,10 +493,38 @@ The remaining same-input GS lifecycle check is provided by `tools/test_gs_lifecy
 
 ### Explicit GS SCF controls
 
-`gs_input_config(value)` captures the legacy maximum SCF iterations, convergence threshold, pre-SCF threshold and consecutive-step requirement into `s_gs_run_config`. Pass it as `gs_run(ctx, status, config=value)`; the context validates and copies it before initialization. Omitting it captures the same inputs once for compatibility. `max_iterations` must be positive and below the integer maximum, both thresholds finite and nonnegative, and `pre_scf_steps` positive. Invalid configuration returns status 1 before activating the context.
+`gs_input_config(value)` captures the legacy maximum SCF iterations, convergence metric, convergence threshold, pre-SCF threshold and consecutive-step requirement into `s_gs_run_config`. Pass it as `gs_run(ctx, status, config=value)`; the context validates and copies it before initialization. Omitting it captures the same inputs once for compatibility. `max_iterations` must be positive and below the integer maximum, both thresholds finite and nonnegative, and `pre_scf_steps` positive. Invalid configuration returns status 1 before activating the context.
 
-SCF loop bounds and convergence checks use the owned values, including adaptive-exchange readiness thresholds. Mutating the caller's value or those four legacy globals does not change the selected settings. The convergence metric, mixing options, initial no-mixing stage, geometry/material inputs and other global controls are not extracted by this change. No general different-input/concurrent GS claim follows.
+SCF loop bounds and convergence checks use the owned values, including adaptive-exchange readiness thresholds. Mutating the caller's value or the corresponding legacy globals does not change the selected settings. Electron-count normalization inputs, geometry/material inputs and other global controls remain shared. No general different-input/concurrent GS claim follows.
 
 An explicitly positive pre-SCF threshold must also satisfy the original fresh-static-hybrid prerequisites: no restart/MD/optimization, positive temperature for DC, no checkpoint interval/shutdown request, and density mixing/convergence. These are checked again at the context boundary. The legacy executable wrapper reports invalid run configuration as a nonzero failure instead of silently skipping the calculation.
 
 For Python support collecting local files, see [PREPARATION.en.md](PREPARATION.en.md). It does not resolve target compatibility/dependencies or install packages.
+
+The owned `convergence_metric` accepts rho_dne, norm_rho, norm_rho_dng, norm_pot
+and norm_pot_dng. SCF arithmetic/normalization formulas and reduction order are
+unchanged; selection and labels use the owned value. Supply thresholds in the
+internal atomic-unit convention for the chosen metric. Mixing, normalization's
+electron-count inputs and general material initialization remain shared.
+
+### Per-state GS mixing settings
+
+Internal `s_gs_run_config%mixing` (`s_mixing_config`) owns `method`, `mixrate`,
+`alpha_mb`, `beta_p`, `nmemory_p`, `auto_mixing`, `update_ratio` and
+`initial_no_mix_steps`. Capture with `gs_input_config`, optionally edit the value,
+and pass it to `gs_run`. It is copied before initialization. Adaptive coefficients,
+previous residual and density/potential histories remain separate mutable data in
+each state's `s_mixing`. Halving and pre-SCF resets use that state's initial values.
+
+Methods: simple/broyden/pulay/simple_potential/simple_dm; auto_mixing: y/n.
+Coefficients and update_ratio must be finite, Pulay memory 1–21, initial no-mixing
+steps nonnegative and below the integer maximum. simple_dm still requires
+spin-orbit. Storage capacity remains 21; formulas and execution order are unchanged.
+This is an internal Fortran contract, not a new Python API or concurrent GS support.
+Legacy initialization captures inputs at initialization; the separate DFT-MD entry
+still uses a global auto-mixing switch.
+
+Use `tools/test_gs_lifecycle.py ... --mixing pulay --auto-mixing --distinct-mixing`
+to compare two states with different mixing settings for the same material against
+the original executable under each setting. See
+`docs/gs-mixing-config-validation-2026-11-16.md` for evidence and untested scope.

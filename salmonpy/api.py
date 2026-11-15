@@ -53,7 +53,7 @@ PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spe
                    'FDTDMPI',
                    'SalmonExecutable'),
  'salmonpy.isolated_tddft': ('IsolatedRuntime', 'load_isolated_runtime', 'DipoleObservables', 'IsolatedTDDFTInitialState', 'IsolatedTDDFTState'),
- 'salmonpy.dipole_source': ('DipoleMap', 'drive_native_dipoles'),
+ 'salmonpy.dipole_source': ('DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field'),
  'salmonpy.field_sampling': ('SampledField', 'sample_packet'),
  'salmonpy.field_input': ('FieldValue', 'FieldPacket', 'FieldContract', 'FieldAdapter'),
  'salmonpy.fields': ('FieldSamples', 'AcosPulse', 'sample_pulses'),

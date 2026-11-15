@@ -95,7 +95,16 @@ module structures
     integer :: required_steps=1,count=0,first_iteration=1
   end type
 
+  type s_mixing_config
+    character(32) :: method='simple'
+    character(1) :: auto_mixing='n'
+    integer :: nmemory_p=4,initial_no_mix_steps=1
+    real(8) :: mixrate=0.5d0,alpha_mb=0.75d0,beta_p=0.75d0,update_ratio=3d0
+  end type
+
   type s_gs_run_config
+    type(s_mixing_config) :: mixing
+    character(32) :: convergence_metric='rho_dne'
     integer :: max_iterations=1,pre_scf_steps=1
     real(8) :: threshold=0d0,pre_scf_threshold=0d0
   end type
@@ -587,6 +596,8 @@ module structures
   end type s_cg
 
   type s_mixing
+    type(s_mixing_config) :: input
+    logical :: input_owned=.false.
     logical :: flag_mix_zero
     integer :: num_rho_stock
     type(s_scalar),allocatable :: rho_in(:), rho_out(:), rho_s_in(:,:), rho_s_out(:,:)

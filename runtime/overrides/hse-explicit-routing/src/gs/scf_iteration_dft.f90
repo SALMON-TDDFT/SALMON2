@@ -104,6 +104,7 @@ type(s_dcdft),optional :: dc
 logical :: rion_update, flag_conv,pre_scf_pending
 integer :: i,j, icnt_conv_nomix,max_iterations
 real(8) :: scf_threshold
+character(32) :: scf_metric
 logical :: is_checkpoint_iter, is_shutdown_time
 type(s_scalar) :: rho_old,Vlocal_old
 real(8) :: rNe
@@ -116,10 +117,11 @@ integer :: adaptive_comm,not_ready_local,not_ready_total,phase_status
 logical :: pre_scf_root,pre_scf_ready
 #endif
 
-max_iterations=nscf;scf_threshold=threshold
+max_iterations=nscf;scf_threshold=threshold;scf_metric=convergence
 if(system%gs_input_owned)then
  max_iterations=system%gs_input%max_iterations
  scf_threshold=system%gs_input%threshold
+ scf_metric=system%gs_input%convergence_metric
 endif
 mixing_age=Miter
 #ifdef USE_HSE
@@ -149,9 +151,9 @@ if(calc_mode=='DFT_BAND') then
    esp_old=0d0
 endif
 
-if(nscf_init_mix_zero.gt.1)then
+if(mixing%input%initial_no_mix_steps.gt.1)then
    icnt_conv_nomix = 0
-   DFT_NoMix_Iteration : do iter=1,nscf_init_mix_zero
+   DFT_NoMix_Iteration : do iter=1,mixing%input%initial_no_mix_steps
 
       if(yn_jm=='n') rion_update = check_rion_update() .or. (iter == 1)
       call solve_orbitals(mg,system,info,stencil,spsi,shpsi,sttpsi,srg,cg,ppg,v_local,iter,nscf_init_no_diagonal)
@@ -278,7 +280,7 @@ DFT_Iteration : do iter=Miter+1,max_iterations
    ! only for the orbital solve. XC refresh below restores the physical payload
    ! before energy/band evaluation and before writing the final state.
 #ifndef USE_OPENACC
-   if(calc_mode/='DFT_BAND'.and.yn_dc=='n'.and.yn_spinorbit=='y'.and.method_mixing=='simple_dm') &
+   if(calc_mode/='DFT_BAND'.and.yn_dc=='n'.and.yn_spinorbit=='y'.and.mixing%input%method=='simple_dm') &
      call snapshot_density_noncollinear(spin_density_before)
 #endif
 #ifdef USE_HSE
@@ -457,7 +459,7 @@ DFT_Iteration : do iter=Miter+1,max_iterations
          end do
       end do
 
-      select case(convergence)
+      select case(scf_metric)
       case('rho_dne' )     ; write(*,200) Miter, sum1
       case('norm_rho')     ; write(*,201) Miter, sum1
       case('norm_rho_dng') ; write(*,202) Miter, sum1
@@ -496,7 +498,7 @@ DFT_Iteration : do iter=Miter+1,max_iterations
    end if  !ilevel_print
 
 ! modification of mixing rate for auto_mixing
-   if(yn_auto_mixing=='y')then
+   if(mixing%input%auto_mixing=='y')then
      call check_mixing_half(Miter,sum1,mixing)
    end if
  
@@ -705,7 +707,7 @@ contains
     !
     real(8) :: sum0
     
-    select case(convergence)
+    select case(scf_metric)
     case('rho_dne')
       sum0=0d0
       !$OMP parallel do reduction(+:sum0) private(iz,iy,ix)
@@ -729,7 +731,7 @@ contains
       end do
       end do
       call comm_summation(sum0,sum1,info%icomm_r)
-      if(convergence=='norm_rho_dng')then
+      if(scf_metric=='norm_rho_dng')then
         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
     case('norm_pot','norm_pot_dng')
@@ -743,7 +745,7 @@ contains
       end do
       end do
       call comm_summation(sum0,sum1,info%icomm_r)
-      if(convergence=='norm_pot_dng')then
+      if(scf_metric=='norm_pot_dng')then
         sum1 = sum1/dble(lg%num(1)*lg%num(2)*lg%num(3))
       end if
     end select

@@ -351,10 +351,15 @@ tools/test_gs_lifecycle.pyでスカラー結果と全生成restartファイル�
 入力・並列・タイマーなどの共有は残るため、明示入力のGS API完成や並行実行対応とは案内しません。
 複数状態保持の検証は同一入力のスカラーHSEに限定します。
 
-内部GSの4つのSCF設定はgs_input_configでs_gs_run_configに取り込み、gs_run(config=value)へ渡します。
+内部GSの収束指標を含む5つのSCF設定はgs_input_configでs_gs_run_configに取り込み、gs_run(config=value)へ渡します。
 max_iterationsは正かつ整数最大値未満、threshold/pre_scf_thresholdは有限・非負、pre_scf_stepsは正です。
 不正値は初期化前にstatus=1、正常設定はコピーして使います。省略時は共有入力を一度取り込みます。
-この分離は反復上限・収束閾値・pre-SCFの2設定だけで、収束指標や混合・構造・物質入力の分離完了とは説明しません。
+convergence_metricはrho_dne/norm_rho/norm_rho_dng/norm_pot/norm_pot_dng。指標と閾値の内部単位を一致させます。
+GS混合はs_gs_run_config%mixingにmethod/mixrate/alpha_mb/beta_p/nmemory_p/auto_mixing/update_ratio/initial_no_mix_stepsを保持します。
+初期化前にコピーし、適応係数と履歴は各状態で独立です。係数は有限、nmemory_pは1〜21、無混合回数は0以上・整数最大値未満。
+methodはsimple/broyden/pulay/simple_potential/simple_dm、auto_mixingはy/n。simple_dmにはspin-orbitが必要です。
+内部Fortranのみ。規格化用電子数・構造・物質入力の分離完了、DFT-MD設定の独立化や並行GS対応とは説明しません。
+同じ物質で異なる混合条件の二状態を元SALMONと比較します。物理収束の保証ではありません。
 
 明示pre-SCF設定も入力読込と同じ適用条件を再検査します。restart/MD/最適化、checkpoint指定や密度以外の収束などを
 設定構造体で迂回しないでください。不正な実行設定は内部status=1、従来実行入口では非ゼロ終了になります。
@@ -521,3 +526,14 @@ response.timing_recordsに元/変換後の宣言が残ります。FIELD_INPUT.md
 mpi_packet_couplingの--adapt-a、--runtime/--bundleを参照してください。
 
 packetize_A_bindingはleader_only・一物質群1ランクに限定し、collective物質backendを拒否します。
+
+分子への電場選択はdipole_source.select_molecular_fieldで方針を明示します。
+provided_driveまたはenvironment_scattered_onlyを使い、対象自身だけの真空参照と
+配置・観測・源履歴の一致を宣言します。宣言は計算条件の独立検証ではありません。
+DIPOLE_RADIATION.md/enとmolecular_field_selection例を参照してください。
+純粋な標本選択であり、native/孤立系TDDFTの双方向結合・放射反作用の完成とは説明しません。
+
+分子のnative/reference帰還は開発用振動子で順序検証済みですが、保持したEによる
+結合仕事の差が1次で減るだけで、結合全体の保存則は未達です。振動子単体の約2次精度と
+混同せず、孤立系TDDFTの双方向対応を宣言しません。新しい検証スキルの一般判定も、
+SALMON固有の更新順・固定dt・資源予算やユーザー所有の物理収束判断を上書きしません。

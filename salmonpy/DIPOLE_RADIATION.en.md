@@ -102,3 +102,51 @@ Replace 8000 with the physical volume of each intended FDTD cell in bohr³.
 This verifies units, uniform sample times, polarization-current construction and
 conservation; it does not launch FDTD. Full native propagation remains in the
 MPI regression script described above.
+
+## Explicit molecular drive selection
+
+`select_molecular_field` selects already sampled electric `FieldValue` data.
+It does not run a two-way solver. Always specify a policy:
+
+- `provided_drive`: retain the caller-selected drive and record its physical
+  `meaning` in provenance. Supplying a reference is an error.
+- `environment_scattered_only`: subtract only this molecule's own-source vacuum
+  reference from the total environment field. External illumination and other
+  molecules' fields remain. This also removes vacuum radiation reaction; it
+  does not represent full radiative dynamics or spontaneous emission.
+
+Both samples must use E:au, bohr, point sampling, exactly equal times/positions.
+Reference provenance requires `source_ids=[molecule_id]`, `medium='vacuum'`,
+`incident=False`. Both provenance objects must declare matching `footprint_id`,
+`sample_map_id`, `own_source_history_id`. These IDs describe matching deposition,
+observation and own-source history; they are caller declarations, not proof that
+separate Maxwell calculations used identical settings. Missing or inconsistent
+references are rejected, never replaced with zero or an implicit total-field drive.
+
+The returned `MolecularDrive.field` and `.metadata` are immutable; `.record()`
+returns a detached JSON-compatible record containing input/reference/selected E,
+position, time, policy, molecule ID and provenance. No interpolation or units
+conversion occurs. The pure additive regression sample is:
+
+```sh
+python -m salmonpy.examples.molecular_field_selection
+```
+
+A causal native/reference schedule, oscillator source-work regression and actual
+isolated-TDDFT feedback remain future work. This selector does not close that gap.
+
+### Development feedback schedule (not a public TDDFT loop)
+
+The source-only `tools/test_molecular_feedback_mpi.py` exercises a harmonic
+oscillator with two independent native vacuum fields. After an explicit first
+interval hold, sampled E(n) drives the next dipole interval and its current is
+supplied to field step n+1. Four total ranks, one thread each, suffice. A separate
+illumination-only baseline verifies own-source subtraction. This is an oscillator
+fixture; its midpoint integrator is not the isolated TDDFT endpoint-E algorithm.
+
+The oscillator's work identity passes, but the held-drive field coupling has a
+first-order temporal work discrepancy. In the recorded short pulse test, reducing
+dt from .003 to .0015 to .00075 au reduced its magnitude from 3.60e-11 to 1.75e-11
+to 8.63e-12 au; these remain material relative to the absorbed work. Consequently
+neither total coupled-energy conservation nor production molecular feedback is
+established. See the source validation record for the separate accepted checks.

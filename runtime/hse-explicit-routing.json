@@ -32,7 +32,8 @@
     "src/gs/scf_iteration.f90",
     "src/gs/main_dft.f90",
     "src/xc/exx_gs_metadata.f90",
-    "src/gs/dc/dcdft.f90"
+    "src/gs/dc/dcdft.f90",
+    "src/gs/mixing.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -62,6 +63,6 @@
   ],
   "scope": "explicit serial full-support fast HSE native system ownership; common immutable global configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "3fad4ca7a2afe118a89d5fcdd145ee6e9a6c444b8c89a06551fb65caad9f265c",
+  "replacements_sha256": "67cc37a8fa5b817823510dcdeb2e7d0e1620b6e760f7d3b4438a6c741cf6ce4e",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

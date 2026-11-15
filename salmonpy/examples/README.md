@@ -184,3 +184,5 @@ MPIサンプルも通常のPythonから `--help` を表示できます。実計�
 [field_sampling.py](field_sampling.py): 合成場の時刻差と明示的な空間重みを使う補間。外部データ・ソルバー不要。
 
 [mpi_packet_coupling.py](mpi_packet_coupling.py): 合成物質と1D／native場のpacket往復結合。3ランク（nativeは4ランクも可）。
+
+- `molecular_field_selection.py`：分子自身の真空場だけを引く電場選択。人工標本のみ、ソルバー不要。

@@ -4,7 +4,7 @@ import numpy as np
 from .errors import InputError, NumericalError
 from .field_input import _real
 
-__all__ = ['DipoleMap', 'drive_native_dipoles']
+__all__ = ['DipoleMap', 'drive_native_dipoles', 'MolecularDrive', 'select_molecular_field']
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -122,3 +122,86 @@ def drive_native_dipoles(field, mapping, dipoles, *, dt):
             'j': _real(currents, (len(p)-1, len(mapping.point_ids), 3), 'charge current'),
             'j_time': _real((np.arange(len(p)-1)+.5)*dt, (len(p)-1,), 'current time'),
             'point_ids': mapping.point_ids, 'molecule_ids': mapping.molecule_ids}
+
+
+@dataclass(frozen=True, slots=True)
+class MolecularDrive:
+    """Immutable sampled drive and caller-declared selection provenance."""
+    field: object
+    metadata: object
+
+    def __post_init__(self):
+        from .field_input import FieldValue
+        from .config import _copy_json, _freeze
+        if not isinstance(self.field, FieldValue):
+            raise InputError('FieldValue required')
+        object.__setattr__(self, 'metadata', _freeze(_copy_json(self.metadata)))
+
+    def record(self):
+        """Return a detached JSON-compatible selection record."""
+        from .config import _thaw
+        return _thaw(self.metadata)
+
+
+def select_molecular_field(total, *, molecule_id, policy, provenance,
+                           reference=None, reference_provenance=None):
+    """Select E explicitly; never start a solver or infer a local-field model.
+
+    provided_drive preserves an already selected field with a required meaning.
+    environment_scattered_only subtracts this molecule's declared own-source
+    vacuum reference. It removes vacuum radiation reaction too. Provenance is
+    caller-declared, not independent verification of Maxwell simulations.
+    """
+    from .field_input import FieldValue
+    from .config import _copy_json, _identifier
+    _identifier(molecule_id, 'molecule_id')
+
+    def electric(sample):
+        if (not isinstance(sample, FieldValue) or sample.unit != 'E:au'
+                or sample.position_unit != 'bohr' or sample.sampling != 'point'):
+            raise InputError('point-sampled E:au FieldValue at bohr positions required')
+
+    def info(raw):
+        result = _copy_json(raw)
+        if type(result) is not dict:
+            raise InputError('provenance must be a JSON object')
+        return result
+
+    electric(total)
+    declaration = info(provenance)
+    ref_info = None
+    if policy == 'provided_drive':
+        if reference is not None or reference_provenance is not None:
+            raise InputError('provided_drive does not subtract a reference')
+        meaning = declaration.get('meaning')
+        if type(meaning) is not str or not meaning.strip():
+            raise InputError('provided_drive requires a provenance meaning')
+        result = total.value
+    elif policy == 'environment_scattered_only':
+        electric(reference)
+        ref_info = info(reference_provenance)
+        if (reference.time != total.time or not np.array_equal(reference.position, total.position)):
+            raise InputError('reference time and position must match exactly; interpolate explicitly')
+        if (ref_info.get('source_ids') != [molecule_id] or ref_info.get('medium') != 'vacuum'
+                or ref_info.get('incident') is not False):
+            raise InputError('reference must contain only this molecule in vacuum, with no incident field')
+        for key in ('footprint_id', 'sample_map_id', 'own_source_history_id'):
+            _identifier(declaration.get(key), key)
+            if ref_info.get(key) != declaration[key]:
+                raise InputError('reference differs in '+key)
+        with np.errstate(over='raise', invalid='raise'):
+            try:
+                result = total.value-reference.value
+            except FloatingPointError as exc:
+                raise NumericalError('selected molecular field overflow') from exc
+    else:
+        raise InputError('explicit provided_drive or environment_scattered_only policy required')
+    selected = FieldValue(result, total.time, total.position, 'E:au')
+    metadata = {'schema':'salmonpy.molecular-drive/1', 'molecule_id':molecule_id,
+                'policy':policy, 'time':total.time, 'position':total.position.tolist(),
+                'unit':'E:au', 'position_unit':'bohr', 'sampling':'point',
+                'input_E':total.value.tolist(), 'selected_E':selected.value.tolist(),
+                'reference_E':None if reference is None else reference.value.tolist(),
+                'provenance':declaration, 'reference_provenance':ref_info,
+                'provenance_status':'caller-declared; not solver-certified'}
+    return MolecularDrive(selected, metadata)
