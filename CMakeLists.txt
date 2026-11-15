@@ -42,6 +42,7 @@ option(USE_HSE "Enable native CPU HSE (dependencies are prepared automatically)"
 ## OpenACC/CUDA GPU libraries (only meaningful when USE_OPENACC is on)
 option_set(USE_GEMM      "Use cuBLAS batched-GEMM for pseudo-pt" ON)
 option_set(USE_NCCL      "Use NCCL for the pseudo-pt allreduce"  ON)
+option_set(USE_NCCL_KO   "Use NCCL for the icomm_ko density allreduce" OFF)
 
 # USE_CUDA selects the CUDA C++ kernels, which run on OpenACC's stream and data.
 if (USE_CUDA AND NOT USE_OPENACC)
@@ -67,7 +68,7 @@ option_set(USE_OPT_EXPLICIT_VECTORIZATION  "Enable explicit vectorization for th
 # cublas/cusolver are always linked by the nvhpc-openacc toolchain files; NCCL is the one
 # GPU library that's genuinely optional, so it needs its own link flag. -cudalib= is an
 # nvhpc-only flag, so guard on USE_OPENACC: USE_NCCL defaults on even for non-GPU builds.
-if (USE_OPENACC AND USE_NCCL)
+if (USE_OPENACC AND (USE_NCCL OR USE_NCCL_KO))
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cudalib=nccl")
   set(CMAKE_C_FLAGS       "${CMAKE_C_FLAGS} -cudalib=nccl")
 endif ()
