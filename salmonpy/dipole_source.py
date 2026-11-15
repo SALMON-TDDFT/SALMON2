@@ -1,0 +1,124 @@
+"""One-way charge-dipole sources, in atomic units, for native E/H fields."""
+from dataclasses import dataclass
+import numpy as np
+from .errors import InputError, NumericalError
+from .field_input import _real
+
+__all__ = ['DipoleMap', 'drive_native_dipoles']
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class DipoleMap:
+    """Map molecular dipoles (e*bohr) to macro-cell polarization (e/bohr**2).
+
+    weights[point,molecule] sums to one for each molecule. Volumes are physical
+    FDTD cell volumes in bohr**3, not molecular electronic-box volumes. Dipoles
+    must already be rotated into laboratory axes and include the intended count
+    of molecules. The native field separately deposits macro currents on Yee edges.
+    """
+    molecule_ids: tuple
+    point_ids: tuple
+    weights: object
+    cell_volumes: object
+
+    def __post_init__(self):
+        molecules = tuple(self.molecule_ids)
+        points = tuple(self.point_ids)
+        if (not molecules or any(type(x) is not str or not x.strip() for x in molecules)
+                or len(set(molecules)) != len(molecules)):
+            raise InputError('distinct nonempty molecule IDs required')
+        if (not points or any(type(x) is not int or x < 0 for x in points)
+                or len(set(points)) != len(points)):
+            raise InputError('distinct nonnegative integer point IDs required')
+        weights = _real(self.weights, (len(points), len(molecules)), 'weights')
+        volumes = _real(self.cell_volumes, (len(points),), 'cell volumes')
+        if np.any(weights < 0) or not np.allclose(weights.sum(axis=0), 1, rtol=0, atol=1.e-12):
+            raise InputError('nonnegative weights must sum to one per molecule')
+        if np.any(volumes <= 0):
+            raise InputError('positive physical cell volumes required')
+        for name, value in (('molecule_ids', molecules), ('point_ids', points),
+                            ('weights', weights), ('cell_volumes', volumes)):
+            object.__setattr__(self, name, value)
+
+    def polarization(self, dipoles):
+        p = _real(dipoles, (len(self.molecule_ids), 3), 'charge dipoles')
+        with np.errstate(over='raise', invalid='raise', divide='raise'):
+            try:
+                result = (self.weights @ p)/self.cell_volumes[:, None]
+            except FloatingPointError as exc:
+                raise NumericalError('polarization overflow') from exc
+        return _real(result, (len(self.point_ids), 3), 'polarization')
+
+    def current(self, old_dipoles, new_dipoles, *, dt):
+        """Interval-average charge current; timestamp is midpoint of the interval."""
+        dt = float(_real(dt, (), 'dt'))
+        if dt <= 0:
+            raise InputError('positive dt required')
+        old = _real(old_dipoles, (len(self.molecule_ids), 3), 'old dipoles')
+        new = _real(new_dipoles, old.shape, 'new dipoles')
+        with np.errstate(over='raise', invalid='raise', divide='raise'):
+            try:
+                result = (self.weights @ ((new-old)/dt))/self.cell_volumes[:, None]
+            except FloatingPointError as exc:
+                raise NumericalError('dipole current overflow') from exc
+        return _real(result, (len(self.point_ids), 3), 'charge current')
+
+
+def drive_native_dipoles(field, mapping, dipoles, *, dt):
+    """Collectively drive a fresh NativeEHField with precomputed charge dipoles.
+
+    dipoles has shape (intervals+1,molecules,3), at times n*dt starting at zero.
+    The first interval must produce zero current. To play a nonstationary trace,
+    explicitly repeat its initial sample, introducing a declared one-dt delay.
+    Call on every field-group rank with identical inputs. Field lifetime is owned
+    by caller; backend failure is not a whole-trajectory rollback. One-way only.
+    """
+    from .coupled import NativeEHField
+    if not isinstance(field, NativeEHField):
+        raise InputError('NativeEHField required')
+    comm = field.context.solver_comm
+    error = None
+    try:
+        if not isinstance(mapping, DipoleMap):
+            raise InputError('DipoleMap required')
+        dt = float(_real(dt, (), 'dt'))
+        if dt != field.dt or dt <= 0:
+            raise InputError('dipole dt must equal field dt; resample explicitly')
+        if field.closed or field.failed or field.step_index != 0:
+            raise InputError('fresh usable field required')
+        if mapping.point_ids != tuple(field.point_ids):
+            raise InputError('mapping point order differs from native field')
+        if not np.allclose(mapping.cell_volumes, field.manifest['cell_volume'], rtol=1.e-14, atol=0):
+            raise InputError('mapping volumes differ from native field cells')
+        raw = np.asarray(dipoles)
+        if raw.ndim != 3 or raw.shape[0] < 2:
+            raise InputError('at least two dipole time samples required')
+        p = _real(raw, (len(raw), len(mapping.molecule_ids), 3), 'dipole trajectory')
+        if len(p)-1 > field.capacity:
+            raise InputError('dipole trajectory exceeds field capacity')
+        currents = np.array([mapping.current(a,b,dt=dt) for a,b in zip(p[:-1],p[1:])])
+        if np.any(currents[0]):
+            raise InputError('first interval current must be zero; explicitly hold initial dipoles for one step')
+        descriptor = (dt, mapping.molecule_ids, mapping.point_ids, mapping.weights.tobytes(),
+                      mapping.cell_volumes.tobytes(), p.tobytes())
+    except Exception as exc:
+        error = f'{type(exc).__name__}: {exc}'
+    errors = comm.allgather(error)
+    if any(errors):
+        raise InputError(next(e for e in errors if e))
+    # Agree the entire trajectory before advancing even the first field step.
+    import hashlib
+    key = (descriptor[:3], hashlib.sha256(b''.join(descriptor[3:])).hexdigest(), p.shape)
+    keys = comm.allgather(key)
+    if any(k != keys[0] for k in keys):
+        raise InputError('dipole source differs across field ranks')
+    electric = [field.E.copy()]
+    for current in currents:
+        field.advance(current)
+        electric.append(field.E.copy())
+    shape = (len(p), len(mapping.point_ids), 3)
+    return {'E': _real(electric, shape, 'sampled E'),
+            'E_time': _real(np.arange(len(p))*dt, (len(p),), 'E time'),
+            'j': _real(currents, (len(p)-1, len(mapping.point_ids), 3), 'charge current'),
+            'j_time': _real((np.arange(len(p)-1)+.5)*dt, (len(p)-1,), 'current time'),
+            'point_ids': mapping.point_ids, 'molecule_ids': mapping.molecule_ids}

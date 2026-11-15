@@ -1,6 +1,6 @@
 # Python samples
 
-[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-14.1`
+[日本語](README.md) · Topic: `examples` · Paired revision: `2026-11-15.1`
 
 [Si starter: wheel to current](../SI_INTRO.en.md) includes a fixed pseudopotential, input and reference, and explicitly selects a prebuilt runtime.
 
@@ -36,7 +36,7 @@ python -m salmonpy.examples.field_coupling new-field-coupling-output
 python -m salmonpy.examples.outputs_roundtrip new-ld-output
 ```
 
-These five examples need no external input dataset. Synthetic SBE data illustrates
+These six examples need no external input dataset. Synthetic SBE data illustrates
 the API, not an actual material. Core units are atomic units; A means A/c and
 crystalline outputs are the electric (charge) current density j (SALMON matter current = −j). LD is E-driven.
 
@@ -147,3 +147,20 @@ Prepare a structure/grid input bundle with [prepare_structure.py](prepare_struct
 Run two LD materials with explicit IDs: [configured_ld.py](configured_ld.py). Requires a new output directory and installed native library.
 
 Run configured Si DFT→TDDFT: [configured_si.py](configured_si.py), [guide](../DFT_CONFIG.en.md). Requires an existing runtime and ASE/f90nml.
+
+## Additional connection and input samples
+
+| Sample | Purpose | Requirements / arguments |
+|---|---|---|
+| [field_inputs.py](field_inputs.py) | A/E/H input contract and custom response | LD kernel |
+| [point_ld.py](point_ld.py) | LD with material and point identities | LD kernel; new output |
+| [point_tddft_restart.py](point_tddft_restart.py) | Per-point TDDFT restart | Catalog, runtime, waveform; new output |
+| [catalog_tddft.py](catalog_tddft.py) | TDDFT from a catalog | Catalog, runtime, waveform; see --help |
+| [mpi_configured_native.py](mpi_configured_native.py) | Configured LD/TDDFT MPI response | 3 ranks; catalog, waveform; TDDFT runtime |
+| [mpi_recorded_material.py](mpi_recorded_material.py) | Recorded custom/SBE serial–MPI comparison | 3 ranks; optional SBE catalog |
+| [mpi_point_identity.py](mpi_point_identity.py) | Point and material identities over MPI | 3 ranks; new output |
+| [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1D field coupled to independent TDDFT groups | 3 ranks with --material-ranks 1; native build and GS |
+| [isolated_response.py](isolated_response.py) | Isolated E-driven dipole response | Validated E-worker, receipt, GS bundle, E NPZ |
+| [dipole_radiation.py](dipole_radiation.py) | Dipole-to-current mapping for FDTD | No data, or --archive and --cell-volume; no FDTD propagation |
+
+MPI samples also display `--help` from ordinary Python. Computation requires mpi4py and compatible MPI. Check rank options before launching; some defaults exceed a four-core budget.

@@ -10,7 +10,6 @@ import numpy as np
 
 
 def main():
-    from mpi4py import MPI
     from salmonpy.builtin_materials import builtin_material_registry, material_from_catalog
     from salmonpy.config import load_materials
     from salmonpy.initial_states import tddft_from_catalog
@@ -27,6 +26,7 @@ def main():
     parser.add_argument('--mode', choices=('ld-endpoints', 'tddft'), required=True)
     parser.add_argument('--runtime', type=Path)
     args = parser.parse_args()
+    from mpi4py import MPI
     if (args.mode == 'tddft') != (args.runtime is not None):
         parser.error('--runtime is required only for tddft')
     world = MPI.COMM_WORLD

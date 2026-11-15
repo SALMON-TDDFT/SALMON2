@@ -20,6 +20,7 @@
 
 subroutine main_tddft
 use tddft_worker
+use dip, only: subdip
 use density_matrix, only: calc_current
 use hamiltonian, only: update_kvector_nonlocalpt
 use math_constants, only: pi
@@ -62,7 +63,7 @@ type(s_pp_nlcc) :: ppn
 type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
-real(8) :: worker_A(3),worker_current(3,2)
+real(8) :: worker_A(3),worker_current(3,2),worker_ne
 integer :: Mit, itt
 logical :: is_checkpoint_iter, is_shutdown_time, is_checkpoint
 
@@ -83,11 +84,16 @@ call initialization_rt( Mit, system, energy, ewald, rt, md, &
                         pp, ppg, ppn, unfold )
 
 if(worker_requested()) then
+  if(worker_E_requested()) then
+    call subdip(info%icomm_r,0,rt,lg,mg,system,rho_s,worker_ne,poisson,energy%E_tot,pp)
+    call worker_reply_E(0,rt%dDp_e(:,0),rt%Dp_e(:,0)+rt%Dp_i(:,0))
+  else
   system%vec_Ac=worker_initial_A
   call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
   call calc_current(system,mg,stencil,info,srg,spsi_in,ppg,worker_current(:,1:system%nspin))
   spsi_in%update_zwf_overlap=.true.
   call worker_reply(0,sum(worker_current(:,1:system%nspin),dim=2))
+  end if
 end if
 
 #ifdef __FUJITSU
@@ -112,8 +118,13 @@ call timer_begin(LOG_RT_ITERATION)
 TE : do itt=Mit+1,nt
   if(worker_requested()) then
     if(.not.worker_next_A(worker_A)) exit TE
-    rt%Ac_ext(:,itt)=worker_A
-    rt%Ac_tot(:,itt)=worker_A
+    if(worker_E_requested()) then
+      rt%E_ext(:,itt)=worker_A
+      rt%E_tot(:,itt)=worker_A
+    else
+      rt%Ac_ext(:,itt)=worker_A
+      rt%Ac_tot(:,itt)=worker_A
+    end if
   end if
   call nvtxStartRange('main loop', itt)
 
@@ -127,7 +138,13 @@ TE : do itt=Mit+1,nt
      & ,Vpsl,fg,energy,ewald,md,ofl,poisson,singlescale,unfold)
   end if
 
-  if(worker_requested()) call worker_reply(itt,rt%curr(:,itt))
+  if(worker_requested()) then
+    if(worker_E_requested()) then
+      call worker_reply_E(itt,rt%dDp_e(:,itt),rt%Dp_e(:,itt)+rt%Dp_i(:,itt))
+    else
+      call worker_reply(itt,rt%curr(:,itt))
+    end if
+  end if
 
   is_checkpoint_iter = (checkpoint_interval >= 1) .and. (mod(itt,checkpoint_interval) == 0)
   is_shutdown_time   = (time_shutdown > 0d0) .and. (adjust_elapse_time(timer_now(LOG_TOTAL)) > time_shutdown)

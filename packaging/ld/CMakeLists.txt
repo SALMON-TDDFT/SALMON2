@@ -148,3 +148,7 @@ install(FILES "${ROOT}/salmonpy/CONFIGURED_NATIVE.md" "${ROOT}/salmonpy/CONFIGUR
 install(FILES "${ROOT}/salmonpy/_point_checkpoint.py" "${ROOT}/salmonpy/POINT_CHECKPOINTS.md" "${ROOT}/salmonpy/POINT_CHECKPOINTS.en.md" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/field_input.py" "${ROOT}/salmonpy/FIELD_INPUT.md" "${ROOT}/salmonpy/FIELD_INPUT.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/dipole_source.py" "${ROOT}/salmonpy/DIPOLE_RADIATION.md" "${ROOT}/salmonpy/DIPOLE_RADIATION.en.md" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/isolated_tddft.py" "${ROOT}/salmonpy/ISOLATED_TDDFT.md" "${ROOT}/salmonpy/ISOLATED_TDDFT.en.md" DESTINATION salmonpy)

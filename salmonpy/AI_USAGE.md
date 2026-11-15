@@ -476,3 +476,16 @@ AはA/c、HはBではありません。結晶はAのまま、LDはE。長さゲ�
 既存stepへの橋はlegacy_quantityを明示し、A/c:auまたはE:auの端点値だけを渡します。
 自作step_fieldsには宣言成分だけ渡し、半ステップや単位・位置を検査します。補間・微分・単位変換はしません。
 現MPIはA通信のみ。E/H転送や磁気物理の対応を推測しません。状態は借用、backend例外でadapterは無効です。
+
+## 孤立系E-workerの現在の範囲
+
+FIELD_INPUT.mdの検証用E1プロトコルは、ソースから明示的にビルドしたstandard runtimeで
+PZ・固定イオン・中点伝播の双極子を比較する開発用接続です。結晶のTDDFTInitialStateにEを
+渡したり、検証用driverを公開初期状態ローダーとして案内したりしないでください。
+公開入口はISOLATED_TDDFT.mdのload_isolated_runtimeとIsolatedTDDFTInitialStateです。
+ローカル検証記録に結び付いたバイナリに限定し、メモリ上のsnapshot/restoreを提供します。
+既存配布runtimeの自動対応、電流密度への暗黙変換、ディスクcheckpoint、MPI E通信は未対応です。
+
+分子双極子からFDTDへの一方向接続はDIPOLE_RADIATION.mdを参照してください。電荷双極子、
+FDTDセル体積、配向・個数を明示し、最初の区間電流をゼロにする保持時間を隠さないでください。
+双方向の自己場帰還や静的双極子の静電場を計算済みとは案内しないでください。

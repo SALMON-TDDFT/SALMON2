@@ -1,6 +1,6 @@
 # Pythonサンプル集
 
-[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-14.1`
+[English](README.en.md) · Topic: `examples` · Paired revision: `2026-11-15.1`
 対応するSALMONpy wheelを導入したPython環境で実行します。ソースツリーでも実行できますが、
 [Si入門：wheelから電流まで](../SI_INTRO.md)は、固定の擬ポテンシャル・入力・期待値を同梱し、配布済みランタイムを明示して使う手順です。
 
@@ -161,3 +161,20 @@ See [CONFIG.en.md](../CONFIG.en.md) / [CONFIG.md](../CONFIG.md).
 物質ID付き設定からLD二物質を実行：[configured_ld.py](configured_ld.py)。新規出力先と同梱nativeライブラリが必要です。
 
 物質設定からSiのDFT→TDDFTを実行：[configured_si.py](configured_si.py)。[手順](../DFT_CONFIG.md)。既存ランタイムとASE/f90nmlが必要です。
+
+## 追加の接続・入力サンプル
+
+| サンプル | 目的 | 必要条件・引数 |
+|---|---|---|
+| [field_inputs.py](field_inputs.py) | A/E/H入力の契約と自作応答 | LD kernel |
+| [point_ld.py](point_ld.py) | 材料IDと点IDを保持したLD計算 | LD kernel; new output |
+| [point_tddft_restart.py](point_tddft_restart.py) | 点ごとのTDDFT再開 | Catalog, runtime, waveform; new output |
+| [catalog_tddft.py](catalog_tddft.py) | カタログからTDDFTを開始 | Catalog, runtime, waveform; see --help |
+| [mpi_configured_native.py](mpi_configured_native.py) | 設定済みLD／TDDFTのMPI応答 | 3 ranks; catalog, waveform; TDDFT runtime |
+| [mpi_recorded_material.py](mpi_recorded_material.py) | 記録付き自作物質／SBEの直列・MPI比較 | 3 ranks; optional SBE catalog |
+| [mpi_point_identity.py](mpi_point_identity.py) | MPIで点IDと材料情報を保持 | 3 ranks; new output |
+| [mpi_multiscale_tddft.py](mpi_multiscale_tddft.py) | 1次元場と独立TDDFT群を結合 | 3 ranks with --material-ranks 1; native build and GS |
+| [isolated_response.py](isolated_response.py) | 孤立系のE駆動・双極子出力 | Validated E-worker, receipt, GS bundle, E NPZ |
+| [dipole_radiation.py](dipole_radiation.py) | 双極子からFDTDへ渡す電流を作成 | No data, or --archive and --cell-volume; no FDTD propagation |
+
+MPIサンプルも通常のPythonから `--help` を表示できます。実計算には mpi4py と互換MPIが必要です。MPIの既定ランク数が予算を超える場合は、そのまま実行せず、対応するランク数指定を確認してください。

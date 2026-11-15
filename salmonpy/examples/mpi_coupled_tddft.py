@@ -9,7 +9,6 @@ Set OpenMP/BLAS threads in the launch environment; example budget assumes one.
 import argparse,json
 from pathlib import Path
 import numpy as np
-from mpi4py import MPI
 from salmonpy.fdtd import FDTD,PlaneWave
 from salmonpy.geometry import Grid,Geometry
 from salmonpy.fields import AcosPulse
@@ -23,7 +22,9 @@ p.add_argument('build_record');p.add_argument('bundle');p.add_argument('input');
 p.add_argument('--field-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--material-ranks',type=int,choices=(1,2),default=2)
 p.add_argument('--steps',type=int,default=64)
-a=p.parse_args();world=MPI.COMM_WORLD
+a=p.parse_args()
+from mpi4py import MPI
+world=MPI.COMM_WORLD
 try:
     nf=a.field_ranks;nm=a.material_ranks
     if world.size!=nf+2*nm:raise ValueError('launch field-ranks + 2*material-ranks MPI ranks')

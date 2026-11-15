@@ -1,4 +1,4 @@
-"""Run from checkout root: python3 -m salmonpy.examples.ld_response"""
+"""Run in the installed Python environment: python -m salmonpy.examples.ld_response"""
 import numpy as np
 from salmonpy import LorentzDrude
 

@@ -31,7 +31,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
                      V_local, Vbox, Vh, Vh_stock1, Vh_stock2, Vxc, Vpsl,&
                      pp, ppg, ppn, unfold  )
   use inputoutput
-  use tddft_worker, only: worker_requested,worker_initial_A
+  use tddft_worker, only: worker_requested,worker_initial_A,worker_E_requested
   use math_constants, only: pi, zi
   use structures
   use parallelization, only: nproc_id_global, nproc_group_global
@@ -183,7 +183,7 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   
   call calc_Ac_ext_t(0d0, dt, 0, nt+1, rt%Ac_ext(:, 0:nt+1))
 
-  if(worker_requested()) then
+  if(worker_requested().and..not.worker_E_requested()) then
     do itt=0,nt+1
       rt%Ac_ext(:,itt)=worker_initial_A
     end do
@@ -195,6 +195,11 @@ subroutine initialization_rt( Mit, system, energy, ewald, rt, md, &
   rt%E_ext(:, nt+1) = rt%E_ext(:, nt) 
   
   rt%Ac_tot(1:3, 0:nt+1) = rt%Ac_ext(1:3, 0:nt+1)
+  if(worker_E_requested()) then
+    do itt=0,nt+1
+      rt%E_ext(:,itt)=worker_initial_A
+    end do
+  end if
   rt%E_tot(1:3, 0:nt+1) = rt%E_ext(1:3, 0:nt+1) 
   
   if (yn_restart == 'n') Mit=0

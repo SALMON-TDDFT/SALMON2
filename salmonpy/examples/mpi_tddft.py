@@ -7,7 +7,6 @@ TDDFT MPI or FDTD propagation. Size memory for all two resident electronic state
 import argparse,json
 from pathlib import Path
 import numpy as np
-from mpi4py import MPI
 from salmonpy.distributed import ParallelPlan,SolverGroup,ParallelContext
 from salmonpy.material_response import MaterialBinding,ResponseSession,TDDFTMaterialProvider,TDDFTResponseBackend
 
@@ -15,6 +14,7 @@ p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('runtime');p.add_argument('bundle');p.add_argument('input');p.add_argument('output')
 p.add_argument('--dt',type=float,default=.02);p.add_argument('--steps',type=int,default=3)
 a=p.parse_args()
+from mpi4py import MPI
 if MPI.COMM_WORLD.size!=3: raise ValueError('launch exactly three MPI ranks')
 if a.steps<1: raise ValueError('positive steps required')
 plan=ParallelPlan((SolverGroup('field',(0,),role='field'),SolverGroup('left',(1,),point_ids=(1,)),SolverGroup('right',(2,),point_ids=(2,))))

@@ -4,6 +4,7 @@ module tddft_worker
   implicit none
   private
   public :: worker_requested, worker_configure, worker_initial_A, worker_next_A, worker_reply
+  public :: worker_E_requested, worker_reply_E
   ! Embedded mode is set only by the explicit host-MPI ABI, once per process.
   logical,public,save :: worker_embedded=.false.
   real(8),public,save :: embedded_dt
@@ -14,7 +15,14 @@ contains
     character(8) :: value
     integer :: status
     call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
-    worker_requested=worker_embedded.or.(status==0.and.trim(value)=='1')
+    worker_requested=worker_embedded.or.(status==0.and.(trim(value)=='1'.or.trim(value)=='E1'))
+  end function
+
+  logical function worker_E_requested()
+    character(8) :: value
+    integer :: status
+    call get_environment_variable('SALMONPY_TDDFT_WORKER',value,status=status)
+    worker_E_requested=.not.worker_embedded.and.status==0.and.trim(value)=='E1'
   end function
 
   subroutine worker_configure()
@@ -27,8 +35,14 @@ contains
     logical :: plus_u_file
     if(.not.worker_requested()) return
     if(.not.worker_embedded.and.nproc_size_global/=1) error stop 'SALMONpy TDDFT requires one MPI rank'
+    if(worker_E_requested()) then
+      if(theory/='tddft_pulse'.or.yn_periodic/='n'.or.yn_md/='n') &
+        error stop 'SALMONpy E worker requires isolated fixed-ion tddft_pulse'
+      if(xc/='pz'.or.num_dipole_source/=0) error stop 'SALMONpy E worker requires PZ without dipole sources'
+    else
     if(theory/='tddft_pulse'.or.yn_periodic/='y'.or.yn_md/='n') &
       error stop 'SALMONpy TDDFT requires periodic fixed-ion tddft_pulse'
+    end if
     if(propagator/='middlepoint'.or.trans_longi/='tr') &
       error stop 'SALMONpy TDDFT requires middlepoint and transverse supplied total A'
     if(yn_restart/='n'.or.yn_dc/='n'.or.yn_conventional_from_dcdft/='n') &
@@ -70,7 +84,11 @@ contains
     else
       read(*,*,iostat=ios) command,dt,nt,worker_initial_A
     end if
-    if(ios/=0.or.trim(command)/='INIT') error stop 'SALMONpy: expected INIT dt capacity A'
+    if(worker_E_requested()) then
+      if(ios/=0.or.trim(command)/='INIT_E') error stop 'SALMONpy: expected INIT_E dt capacity E'
+    else
+      if(ios/=0.or.trim(command)/='INIT') error stop 'SALMONpy: expected INIT dt capacity A'
+    end if
     if(.not.ieee_is_finite(dt)) error stop 'SALMONpy: invalid dt'
     if(dt<=0d0.or.nt<1) error stop 'SALMONpy: invalid dt/capacity'
     do i=1,3
@@ -105,7 +123,11 @@ contains
     if(ios/=0) error stop 'SALMONpy: missing command'
     if(trim(command)=='CLOSE') return
     read(line,*,iostat=ios) command,A
-    if(ios/=0.or.trim(command)/='STEP') error stop 'SALMONpy: expected STEP A'
+    if(worker_E_requested()) then
+      if(ios/=0.or.trim(command)/='STEP_E') error stop 'SALMONpy: expected STEP_E E'
+    else
+      if(ios/=0.or.trim(command)/='STEP') error stop 'SALMONpy: expected STEP A'
+    end if
     do i=1,3
       if(.not.ieee_is_finite(A(i))) error stop 'SALMONpy: invalid A'
     end do
@@ -123,6 +145,19 @@ contains
       if(.not.ieee_is_finite(J(i))) error stop 'SALMONpy: nonfinite current'
     end do
     write(output_unit,'(a,1x,i0,3(1x,es26.17e3))') 'SALMONPY_TDDFT_V1',step,J
+    flush(output_unit)
+  end subroutine
+  subroutine worker_reply_E(step,delta_dipole,total_dipole)
+    use iso_fortran_env, only: output_unit
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    integer,intent(in) :: step
+    real(8),intent(in) :: delta_dipole(3),total_dipole(3)
+    integer :: i
+    do i=1,3
+      if(.not.ieee_is_finite(delta_dipole(i)).or..not.ieee_is_finite(total_dipole(i))) &
+        error stop 'SALMONpy: nonfinite dipole'
+    end do
+    write(output_unit,'(a,1x,i0,6(1x,es26.17e3))') 'SALMONPY_TDDFT_E_V1',step,delta_dipole,total_dipole
     flush(output_unit)
   end subroutine
 end module

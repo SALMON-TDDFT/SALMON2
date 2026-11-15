@@ -79,3 +79,31 @@ The installed-wheel example verifies native LD/direct equality and custom stagge
 E/H delivery. Local native SBE/direct parity is covered by tests. Isolated native
 TDDFT length-gauge connection and MPI E/H transport are follow-up implementation,
 not capabilities established by these tests.
+
+## Experimental isolated native E connection (source checkout)
+
+The bundled standard runtime now has a separate validation-only
+`SALMONPY_TDDFT_WORKER=E1` protocol: `INIT_E dt capacity E0`, `STEP_E Ex Ey Ez`,
+and replies `SALMONPY_TDDFT_E_V1 step delta_dipole[3] total_dipole[3]`.
+Values use atomic units; dipoles use e·bohr. The electronic dipole change and total
+charge dipole match native `rt.data` conventions. They are not current density.
+Do not infer a dipole derivative or divide by the vacuum-cell volume implicitly.
+
+This first validation covers isolated, fixed-ion, unpolarized PZ, scalar
+pseudopotentials, one rank and midpoint propagation, with zero initial E. The
+field passed at step n is the E used by native `calcVbox` at index n. The batch
+reference prepares that sample from -(A[n+1]-A[n])/dt; no hidden A reconstruction
+occurs in the worker. AETRS, external dipole sources and magnetic coupling are not
+supported. Periodic TDDFT continues to use the original A-only protocol.
+
+Developer checks: `tools/test_isolated_reference.py` prepares a small C2H2 batch
+reference; `tools/test_isolated_worker.py` compares the new executable, interleaves
+two independent child processes through FieldAdapter, and checks replayed E
+history. `tools/isolated_worker_driver.py` is a validation tool, not an installed
+public loader or an atomic snapshot/restore API. A backend error closes its child.
+The tests do not establish optical convergence or full solver reentrancy.
+
+Use an explicitly built, source-audited executable; existing release runtimes do
+not thereby gain E support. The public isolated loader and in-memory replay are now documented in
+ISOLATED_TDDFT.en.md, requiring a local binary-bound validation receipt.
+Prebuilt catalog distribution, disk checkpoints and MPI E transport remain pending. See `docs/isolated-worker-validation-2026-11-15.md` in the source checkout.

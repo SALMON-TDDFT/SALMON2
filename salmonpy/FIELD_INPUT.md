@@ -66,3 +66,29 @@ python -m salmonpy.examples.field_inputs
 wheelサンプルはnative LDの直接呼出しとの一致と、自作の時間差付きE/H受渡しを確認します。
 native SBEの直接計算との一致もテスト対象です。孤立系native TDDFT長さゲージとMPI E/H通信は
 後続の接続作業であり、この検証で実装済みとは扱いません。
+
+## 実験的な孤立系native E接続（ソース作業コピー）
+
+同梱standardランタイムに検証用の別プロトコルを追加しました。
+`SALMONPY_TDDFT_WORKER=E1`で`INIT_E dt capacity E0`、`STEP_E Ex Ey Ez`を受け、
+`SALMONPY_TDDFT_E_V1 step delta_dipole[3] total_dipole[3]`を返します。
+単位は原子単位、双極子はe·bohrです。電子双極子の変化と全電荷双極子はnativeの
+rt.dataと同じ定義です。電流密度ではなく、暗黙の時間微分や真空セル体積での除算はしません。
+
+検証範囲は孤立系・固定イオン・非偏極PZ・スカラー擬ポテンシャル・1ランク・中点伝播、
+初期E=0です。step nに渡すEはnativeのcalcVboxがindex nで使う値です。
+バッチ参照ではこの値を-(A[n+1]-A[n])/dtで準備しますが、worker内ではAを再構成しません。
+AETRS、外部双極子源、磁場との結合は未対応です。周期系は従来のA駆動のままです。
+
+開発用の`tools/test_isolated_reference.py`でC₂H₂参照計算を作り、
+`tools/test_isolated_worker.py`で専用実行ファイルとの比較、FieldAdapter経由で2つの
+子プロセスを交互に更新する独立性、E履歴の再実行を検証します。
+`tools/isolated_worker_driver.py`は検証用で、インストール済み公開ローダーや原子的な
+snapshot/restore APIではありません。backend異常時は子プロセスを閉じます。
+光学物性の収束や同一プロセス内の複数solverを保証するテストではありません。
+
+ソースを検査して明示的にビルドした実行ファイルを使用します。既存の配布済みランタイムが
+自動的にE対応するわけではありません。公開ローダーとメモリ上の復元APIはISOLATED_TDDFT.mdを参照してください。
+ローカルのバイナリ別検証記録で対応を判定します。ビルド済みcatalog配布、ディスクcheckpoint、
+MPI E通信は残作業です。ソース内の
+`docs/isolated-worker-validation-2026-11-15.md`に検証記録があります。

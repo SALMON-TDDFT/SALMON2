@@ -87,7 +87,65 @@ M6c evidence: `../point-checkpoint-validation-2026-11-15.md`. MPI whole-session 
 
 - [x] F1: immutable local A/c/E/H packet with None distinct from zero; per-component time/position/unit/sampling, TimeSpec-based requirements and declared gauge.
 - [x] F2 (local adapter): explicit legacy endpoint A/E compatibility and custom multiport step_fields; declared backend clocks checked; native LD/SBE direct parity. No implicit conversions or magnetic-physics claim.
-- [ ] F3: connect isolated-system native TDDFT length-gauge E input and validate against original calculations.
+- [x] F3a (experimental standard runtime): dedicated E1/STEP_E protocol, PZ isolated fixed-ion midpoint, dipole observables; FieldPacket driver and reference/interleaved/history-replay checks. Validation-only tools, not an installed public loader.
+- [x] F3b (local E1 scope): binary-bound validation loader, public isolated native initial-state snapshot, independent E states and in-memory atomic replay restore.
+- [ ] F3c: published E-enabled runtime catalog and isolated disk checkpoints; self-field physics remains caller-selected.
 - [ ] F4: extend MPI field payloads/required-port agreement and explicit field-position/time interpolation, preserving A-only crystal paths.
 
 F1/F2 evidence: `../field-input-validation-2026-11-15.md`. These do not complete native E/H physics or MPI transport.
+
+F3a evidence: `../isolated-worker-validation-2026-11-15.md`. RT step-config overlay rejects E1; HSE/embedded routes are not E1-enabled.
+
+## One-way molecular radiation
+
+- [x] R1: conservative explicit dipole-to-macro-cell polarization/current map, immutable atomic-unit contract and molecule/point IDs.
+- [x] R2: precomputed dipole trajectory to NativeEHField, explicit initial hold and midpoint current times; collective preflight before updates, no native numerical change.
+- [x] R3: native impulse sign/deposition, one/two field-rank parity and recorded C2H2 one-way smoke test.
+- [x] R4a: finite-window analytic point-dipole refinement and source-work comparison; finest field error 4.3%, not production convergence.
+- [ ] R4b (development): explicit self/local-field selection and two-way molecular coupling contract, with sign/time/conservation regressions. Production boundary/flux/physical convergence is user-owned, not a pending developer sweep.
+
+Evidence: `../dipole-radiation-validation-2026-11-15.md`.
+
+R4a evidence: `../radiation-refinement-validation-2026-11-15.md`. Self-field design: `2026-11-15-molecular-self-field.md`.
+
+F3b evidence: `../isolated-public-api-validation-2026-11-15.md`. Physics convergence
+is the user's task; no further convergence sweeps are part of this API work.
+
+## Backlog audit after the sample review (2026-11-15)
+
+The unchecked M4–M6 headings are umbrella milestones, not statements that their
+subtasks are unimplemented. Preserve the scoped completion records above:
+
+| Milestone | Implemented scope | Remaining scope |
+|---|---|---|
+| M4 | LD/SBE adapters, configured periodic DFT, GS/1 selection and managed TDDFT bridge | Broader initial-data/model compatibility, including isolated configuration integration; do not infer support from the local E loader |
+| M5 | Serial per-point states, recorded/custom bindings, MPI identity and dedicated serial-native providers | Collective native provider capability integration; full native state/input isolation |
+| M6 | Serial/MPI postprocessing identities and managed TDDFT per-point disk resume | MPI whole-session restart, other backend disk formats, branch and in-memory point identity semantics |
+
+- [x] S1: audit all 39 Python sample entry points; run 13 lightweight examples,
+  two preparation examples, serial two-layer FDTD and three three-rank MPI cases.
+  Other input-dependent workflows received CLI checks only, not fresh scientific runs.
+- [x] S2: repair six MPI help entry points, update paired sample indexes and add
+  a regression that blocks mpi4py. Full source suite: 409 tests, one skip.
+- [x] S3 (Apple Silicon/macOS/Python 3.14): build from sdist, install a fresh
+  wheel, run 409 tests (two explicit skips), all 39 sample execution/help checks
+  and archive-to-dipole handoff; public native isolated replay/independence/recovery
+  also passes. No Linux/Windows/Intel Mac validation or publication in this step.
+- [x] Delivery: read-only independent review and local commit of the isolated
+  E/radiation/sample changes; no required correctness fixes identified. Review
+  inspected code/tests; execution evidence remains the separate validation records.
+  No push or Actions run is implied by local completion.
+
+Sample evidence: `../examples-audit-2026-11-15.md`.
+
+Recommended continuation within the approved work: F3c isolated disk checkpoints,
+then F4 MPI A/E/H transport.
+Publishing an E-enabled runtime is a separate part of F3c and requires its own
+packaging/platform evidence. The original native GS/TDDFT isolation objective
+above remains open; the process-isolated Python APIs do not complete it.
+
+Physical convergence for each user's material/geometry is explicitly user-owned.
+Developer work supplies numerical regression, interface checks and usable samples;
+it does not continue the radiation refinement study as a prerequisite for API work.
+This is an active-work audit, not a declaration that the wider historical backlog
+(non-collinear/Ehrenfest, broader XC/platform coverage, etc.) is complete.

@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-from mpi4py import MPI
 
 from salmonpy.coupled import CoupledStepper
 from salmonpy.distributed import ParallelContext, ParallelPlan, SolverGroup
@@ -29,6 +28,7 @@ def main():
     parser.add_argument('--material-ranks', type=int, choices=(1, 2), default=2)
     parser.add_argument('--steps', type=int, default=400)
     args = parser.parse_args()
+    from mpi4py import MPI
     world = MPI.COMM_WORLD
     size = args.material_ranks
     if world.size != 1 + 2 * size:
@@ -92,7 +92,13 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except SystemExit as exc:
+        if exc.code in (0, 2):
+            raise
+        from mpi4py import MPI
+        MPI.COMM_WORLD.Abort(1)
     except BaseException:
+        from mpi4py import MPI
         # No cross-group rollback. A launcher timeout also bounds native hangs.
         import traceback
         traceback.print_exc()

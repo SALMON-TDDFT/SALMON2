@@ -19,7 +19,6 @@ class RecordedExample(ExampleMaterial):
 
 
 def main():
-    from mpi4py import MPI
     from salmonpy.distributed import ParallelPlan, ParallelContext, SolverGroup
     from salmonpy.materials import bind_recorded_material, response_identity
     from salmonpy.material_response import ResponseSession
@@ -30,6 +29,7 @@ def main():
     parser.add_argument('--catalog', type=Path)
     parser.add_argument('--material')
     args = parser.parse_args()
+    from mpi4py import MPI
     if bool(args.catalog) != bool(args.material):
         parser.error('provide both catalog and material')
     world = MPI.COMM_WORLD

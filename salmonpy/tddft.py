@@ -170,12 +170,12 @@ class TDDFTInitialState:
     def __exit__(self,*args): self.close()
 
 
-def _read_output(stream,events,log):
+def _read_output(stream,events,log,prefix='SALMONPY_TDDFT_V1 '):
     try:
         with log.open('w') as output:
             for line in stream:
                 output.write(line);output.flush()
-                if line.startswith('SALMONPY_TDDFT_V1 '): events.put(line)
+                if line.startswith(prefix): events.put(line)
     finally:
         stream.close();events.put(None)
 
@@ -187,6 +187,12 @@ class TDDFTState(_SnapshotMixin):
     A history is replayed into a new process before the error is returned. If
     replay itself fails the state is closed and cannot silently continue.
     """
+    _worker_mode = '1'
+    _reply_prefix = 'SALMONPY_TDDFT_V1 '
+    _init_command = 'INIT'
+    _step_command = 'STEP'
+    _reply_size = 3
+
     def __init__(self,initial,dt,A):
         self._model=initial
         self._dt=dt;self._steps=0;self._history=[];self._A0=A.copy()
@@ -238,11 +244,11 @@ class TDDFTState(_SnapshotMixin):
         self._events=queue.Queue()
         self._proc=subprocess.Popen([str(self._executable.path)],cwd=work,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,
-            env={**environment,'SALMONPY_TDDFT_WORKER':'1','OMP_NUM_THREADS':str(self._threads)})
-        self._reader=threading.Thread(target=_read_output,args=(self._proc.stdout,self._events,work/'worker.log'),daemon=True)
+            env={**environment,'SALMONPY_TDDFT_WORKER':self._worker_mode,'OMP_NUM_THREADS':str(self._threads)})
+        self._reader=threading.Thread(target=_read_output,args=(self._proc.stdout,self._events,work/'worker.log',self._reply_prefix),daemon=True)
         self._reader.start()
         self._send(self._input.rstrip()+'\n!SALMONPY_END_INPUT\n'+
-                   f'INIT {self.dt:.17e} {self._capacity} '+' '.join(f'{v:.17e}' for v in self._A0))
+                   f'{self._init_command} {self.dt:.17e} {self._capacity} '+' '.join(f'{v:.17e}' for v in self._A0))
         self._current=self._receive(0)
 
     def _send(self,text):
@@ -279,8 +285,8 @@ class TDDFTState(_SnapshotMixin):
             log=Path(self._work.name)/'run/worker.log'
             raise RuntimeFailure('SALMON TDDFT worker exited before reply:\n'+log.read_text()[-6000:])
         fields=line.split()
-        if len(fields)!=5 or int(fields[1])!=index: raise RuntimeFailure('TDDFT worker protocol sequence mismatch')
-        return _array([float(x) for x in fields[2:]],'worker current',(3,))
+        if len(fields)!=2+self._reply_size or int(fields[1])!=index: raise RuntimeFailure('TDDFT worker protocol sequence mismatch')
+        return _array([float(x) for x in fields[2:]],'worker observables',(self._reply_size,))
 
     def _stop(self,*,cleanup=True):
         returncode=None
@@ -307,14 +313,14 @@ class TDDFTState(_SnapshotMixin):
         if not np.isfinite((self._steps+1)*self.dt): raise InputError('time overflow')
         previous=self._current.copy()
         try:
-            self._send('STEP '+' '.join(f'{v:.17e}' for v in A))
+            self._send(self._step_command+' '+' '.join(f'{v:.17e}' for v in A))
             current=self._receive(self._steps+1)
         except Exception as exc:
             self._stop()
             try:
                 self._spawn()
                 for index,oldA in enumerate(self._history,1):
-                    self._send('STEP '+' '.join(f'{v:.17e}' for v in oldA))
+                    self._send(self._step_command+' '+' '.join(f'{v:.17e}' for v in oldA))
                     self._current=self._receive(index)
                 if not np.allclose(self._current,previous,rtol=1e-12,atol=1e-14):
                     raise RuntimeFailure('TDDFT replay differs from the accepted state')
@@ -339,7 +345,7 @@ class TDDFTState(_SnapshotMixin):
     def _snapshot_arrays(self):
         return {'_A0': self._A0, '_J0': self._J0, '_current': self._current,
                 '_history': np.asarray(self._history, dtype=float).reshape(-1, 3),
-                '_curr_history': np.asarray(self._curr_history, dtype=float).reshape(-1, 3)}
+                '_curr_history': np.asarray(self._curr_history, dtype=float).reshape(-1, self._reply_size)}
 
     def snapshot(self):
         """Save immutable accepted A/current history for in-memory replay.
@@ -417,8 +423,9 @@ class TDDFTState(_SnapshotMixin):
         if type(n) is not int or not 0 <= n <= self._capacity:
             raise SnapshotError('invalid snapshot step index')
         # Reuse the common schema/integrity checks, allowing variable history size.
-        expected = {name: np.empty((n, 3) if name in ('_history', '_curr_history') else (3,))
-                    for name in self._snapshot_arrays()}
+        expected = {'_A0': np.empty(3), '_J0': np.empty(self._reply_size),
+                    '_current': np.empty(self._reply_size), '_history': np.empty((n,3)),
+                    '_curr_history': np.empty((n,self._reply_size))}
         validated = SimpleNamespace(dt=self.dt, _snapshot_kind=self._snapshot_kind,
             _snapshot_counter='_steps', _snapshot_capacity=self._capacity,
             _snapshot_owner=self._snapshot_owner, _snapshot_settings=self._snapshot_settings,
@@ -429,7 +436,7 @@ class TDDFTState(_SnapshotMixin):
                 or not np.array_equal(validated._current,
                                       validated._curr_history[-1] if n else validated._J0)):
             raise SnapshotError('inconsistent TDDFT snapshot history')
-        candidate = object.__new__(TDDFTState)
+        candidate = object.__new__(type(self))
         candidate.__dict__ = self.__dict__.copy()
         candidate._proc = candidate._work = candidate._reader = candidate._owner = None
         candidate._retain_outputs = False
@@ -442,7 +449,7 @@ class TDDFTState(_SnapshotMixin):
             candidate._J0 = candidate._current.copy()
             replayed_currents = []
             for index, (A, J) in enumerate(zip(validated._history, validated._curr_history), 1):
-                candidate._send('STEP '+' '.join(format(v, '.17e') for v in A))
+                candidate._send(candidate._step_command+' '+' '.join(format(v, '.17e') for v in A))
                 candidate._current = candidate._receive(index)
                 if not np.allclose(candidate._current, J, rtol=1e-12, atol=1e-14):
                     raise SnapshotError(f'replay current differs at step {index}')
