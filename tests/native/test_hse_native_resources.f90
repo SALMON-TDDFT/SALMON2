@@ -2,6 +2,7 @@
 program probe
  use iso_fortran_env,only:int64
  use structures
+ use occupation,only:occupation_input_config
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear,rt_state_bytes
  use exx_native,only:exx_refresh,exx_add_action,exx_bind_system,exx_unbind_system,exx_set_phase,exx_pre_scf
  use exx_native,only:exx_set_scf_flags,exx_adaptive_is_ready,exx_is_frozen,exx_support_has_changed, &
@@ -44,20 +45,28 @@ program probe
  sa%xc_input%exchange_fraction=.25d0;sa%xc_input%screened_exchange=.true.
  sa%xc_input%hse_omega=.11d0
  call exx_set_phase(sa,.false.)
+ call occupation_input_config(sa%occupation_input);sa%occupation_input_ready=.true.
  sb=sa;sref=sa
  sb%xc_input%hse_omega=.17d0
  sb%hgs=1.2d0;sb%hvol=1.2d0**3
  sb%primitive_a=1.2d0*sa%primitive_a;sb%primitive_b=sa%primitive_b/1.2d0
- sb%vec_k=sa%vec_k/1.2d0;srefb=sb
+ sb%vec_k=sa%vec_k/1.2d0
+ sb%occupation_input%nelec=2;sb%occupation_input%temperature=-2d0;sb%occupation_input%nstate=3
+ sb%rocc(2,:,1)=0d0;srefb=sb
  allocate(psi%zwf(2,2,2,1,2,2,1),hpsi%zwf(2,2,2,1,2,2,1))
  u=0d0;v=0d0
- do k=1,2
-  u(1,1,k)=1d0;u(2,2,k)=1d0;v(3,1,k)=1d0;v(4,2,k)=1d0
- enddo
+ ! Dense orthogonal orbitals give the empty target nonzero exchange overlap.
+ ! Disjoint delta orbitals make the one-occupied-band ACE metric singular.
+ do k=1,2;do j=1,2;do i=1,8
+  u(i,j,k)=exp(cmplx(0d0,2d0*acos(-1d0)*(i-1)*(j-1)/8d0,8))/sqrt(8d0)
+  v(i,j,k)=exp(cmplx(0d0,2d0*acos(-1d0)*(i-1)*j/8d0,8))/sqrt(8d0)
+ enddo;enddo;enddo
  do k=1,2;do j=1,2;do i=1,8
   target(i,j,k)=cmplx(.01d0*i,.02d0*j*k,8)
  enddo;enddo;enddo
  call get_command_argument(2,isolated)
+ ! Owned electron/temperature/capacity inputs must take precedence even during owner binding.
+ nelec=99;temperature=.5d0;nstate=0
  theory='dft';yn_opt='n'
  call exx_bind_gs_system(sa,info,a,status);if(status/=0)stop 1
  info%isize_r=2
@@ -89,12 +98,12 @@ program probe
  info%isize_k=1
  if(trim(isolated)=='solo_b')then
   call refresh(sb,v/sqrt(sb%hvol));call action(sb,actual)
-  call save_action('b_native.dat',actual)
+  call save_action('b_native.dat',actual,b%exx_exchange_energy)
   call exx_unbind_system(sb);call rt_state_clear(b)
   stop
  endif
  call refresh(sa,u);call action(sa,expected)
- call save_action('a_native.dat',expected)
+ call save_action('a_native.dat',expected,a%exx_exchange_energy)
  if(trim(isolated)=='solo_a')then
   call exx_unbind_system(sa);call rt_state_clear(a)
   stop
@@ -117,13 +126,14 @@ program probe
  if(any(actual/=expected))stop 27
  call refresh(sb,v/sqrt(sb%hvol));call refresh(srefb,v/sqrt(sb%hvol))
  call action(sb,actual);if(any(actual/=saved))stop 26
- call save_action('b_native.dat',saved)
+ call save_action('b_native.dat',saved,b%exx_exchange_energy)
  call action(srefb,actual);if(any(actual/=saved))stop 13
  call refresh(sa,v);call refresh(sref,v)
  call action(sa,actual);call action(sref,expected)
  if(any(actual/=expected))stop 5
  call action(sb,actual);if(any(actual/=saved))stop 6
  if(abs(a%exx_exchange_energy-reference%exx_exchange_energy)>1d-14)stop 7
+ if(abs(b%exx_exchange_energy-reference_b%exx_exchange_energy)>1d-14)stop 36
  call exx_unbind_system(sa);call rt_state_clear(a)
  call action(sb,actual);if(any(actual/=saved))stop 8
  call exx_bind_system(sa,a,status);if(status/=0)stop 9
@@ -137,11 +147,13 @@ program probe
  call exx_unbind_system(srefb);call rt_state_clear(reference_b)
  print *,'Native optimized HSE resources: refresh/action, energy, interleave, close/reopen PASS'
 contains
- subroutine save_action(name,x)
+ subroutine save_action(name,x,energy)
  character(*),intent(in)::name
  complex(8),intent(in)::x(:,:,:)
+ real(8),intent(in)::energy
  integer::unit,i,j,k
  open(newunit=unit,file=name,status='new')
+ write(unit,'(a,es26.17)')'# exchange_energy=',energy
  do k=1,size(x,3);do j=1,size(x,2);do i=1,size(x,1)
   write(unit,'(2es26.17)')real(x(i,j,k),8),aimag(x(i,j,k))
  enddo;enddo;enddo

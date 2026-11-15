@@ -550,6 +550,15 @@ outputs remain unchanged. Evidence and limits are recorded in
 
 Internal `s_dft_system%occupation_input` captures nelec, nelec_spin, nstate, spin, spinorbit, temperature and redistribution_delay at initialization. Initial filling, ordinary ne2mu, the ordinary GS redistribution gate and occupied-band index for gap reporting use that value. Uninitialized systems retain the legacy-input fallback. Temperature uses internal atomic units.
 
-Do not modify a live state's record. This is not a new occupation override for gs_run. HSE exchange, the separate DC solver and parallel setup still reference shared inputs; arbitrary different-count/temperature concurrent GS is not established.
+Do not modify a live state's record. This is not a new occupation override for gs_run. The separate DC solver, parallel setup and other HSE settings still reference shared inputs; arbitrary different-count/temperature concurrent GS is not established.
 
 Tests: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT` and `tools/test_gs_occupation_runtime.py BUILD_RECORD REFERENCE_RECORD NEW_OUTPUT`. The previous uncommitted files were unavailable after reboot and reconstructed from the conversation. Fresh evidence: `docs/gs-occupation-recovery-validation-2026-11-16.md`.
+
+### HSE state-owned occupation inputs
+
+HSE electron count, temperature and state capacity (nelec/temperature/nstate) now use the same `occupation_input` value. Legacy uninitialized systems keep their fallback. Arithmetic and update order are unchanged.
+
+Independence coverage is serial CPU, periodic scalar unpolarized, integer occupation, full-support fast HSE. Two states with 4/2 electrons are compared in solo/interleaved execution, destruction/recreation and action/exchange energy while legacy inputs are poisoned. Finite-temperature GS is compared with the original solver; independent thermal/Wannier owners are not established. The nstate-dependent Wannier branch is also outside the new independence test.
+
+The outer TDDFT configuration guard remains: other consumers still use shared inputs. This is not a new API permitting arbitrary simultaneous TDDFT electron counts or temperatures. Never mutate a live occupation record.
+Run `tools/test_hse_explicit_state.py BUILD_RECORD NEW_OUTPUT --native-resources` (optionally `--threads 2`). Evidence: `docs/hse-occupation-inputs-validation-2026-11-16.md`.

@@ -229,3 +229,7 @@ implemented in their documented scope; do not list them as wholly unimplemented.
 
 ## Recovery 2026-11-16
 Occupation snapshot and tests reconstructed after temporary checkout loss; fresh persistent evidence in docs/gs-occupation-recovery-validation-2026-11-16.md. HSE shared-input work follows this checkpoint.
+
+### HSE occupation routing (2026-11-16)
+
+HSE nelec/temperature/nstate now resolve from each system's occupation snapshot. Native scalar full-support two-owner checks poison global values and compare actions/energies. Other shared controls and the outer TDDFT configuration guard remain. See docs/hse-occupation-inputs-validation-2026-11-16.md for measured scope; thermal/Wannier simultaneous owners are not established.

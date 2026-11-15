@@ -3,7 +3,7 @@
   "files": {
     "src/xc/exx_native.f90": {
       "before_sha256": "2d9375f186815bb62c34405237b77fa70ac80b58a53ef704ea137014c96c68ae",
-      "after_sha256": "ad359c5c2a6c2f4b7596227ce212e94776497a94076665928e48e18fb0252231",
+      "after_sha256": "3f00d964ed88c5453d5e6c3c9096e7d4ce0d6b937ac00a372a1e364cb32bba70",
       "source": "overrides/hse-explicit-routing/src/xc/exx_native.f90"
     },
     "src/xc/exx_rt_state.f90": {

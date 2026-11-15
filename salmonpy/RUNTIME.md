@@ -501,6 +501,15 @@ DCでは従来どおり状態内の`dc%elec_num_tot`が優先されます。
 
 内部`s_dft_system%occupation_input`はnelec、nelec_spin、nstate、spin、spinorbit、temperature、redistribution_delayを初期化時にコピーします。初期充填・通常ne2mu・通常GS再分配条件・ギャップの占有バンド番号はその値を使います。未初期化systemには従来入力の互換経路があります。温度は内部原子単位です。
 
-生存中の値は変更しません。gs_runの新しい占有数上書きAPIではありません。HSE交換・DC専用ソルバー・並列配置等には共有入力が残り、任意の電子数・温度の同時GS実行を保証しません。
+生存中の値は変更しません。gs_runの新しい占有数上書きAPIではありません。DC専用ソルバー・並列配置やHSEの他の設定等には共有入力が残り、任意の電子数・温度の同時GS実行を保証しません。
 
 検証: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT`、`tools/test_gs_occupation_runtime.py BUILD_RECORD REFERENCE_RECORD NEW_OUTPUT`。前回の未コミットファイルは再起動後に見つからず、会話から再構成しました。復旧後の証拠は`docs/gs-occupation-recovery-validation-2026-11-16.md`です。
+
+### HSEの状態別占有数入力
+
+HSE交換の電子数・温度・状態数（nelec/temperature/nstate）は、同じ`occupation_input`を参照します。初期化前の従来経路は維持し、演算式・更新順は変更しません。
+
+独立性の検証範囲は、直列CPU・周期境界・非スピン分極・整数占有・全支持の高速HSEです。電子数4/2の二状態について、共有入力を書き換えた単独・交互実行、解放・再作成、作用と交換エネルギーを検査します。有限温度GSは従来版との一致を検査しますが、有限温度/Wannierの複数状態独立性は未検証です。nstateのWannier分岐も新たな独立性検証の対象ではありません。
+
+外側のTDDFT設定一致ガードは維持します。HSE以外の共有入力が残るため、電子数や温度が異なる任意のTDDFT状態を同時に作れる新APIとは案内しません。生存中の占有数設定は変更しません。
+検査は`tools/test_hse_explicit_state.py BUILD_RECORD NEW_OUTPUT --native-resources`（必要なら`--threads 2`）。検証記録は`docs/hse-occupation-inputs-validation-2026-11-16.md`です。

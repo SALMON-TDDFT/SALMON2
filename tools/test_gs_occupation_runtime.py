@@ -18,7 +18,7 @@ def main():
     pseudo=root/'salmonpy/examples/si_intro_data/Si_rps.dat'
     if not pseudo.exists():pseudo=root.parent/'examples/si_intro_data/Si_rps.dat'
     out.mkdir(parents=True,exist_ok=False);cases=[]
-    for xc,ne,temp in [('pz',3,-1),('pz',4,-1),('pz',4,0),('pz',3,.05),('hse06',4,-1),('hse06',4,.05)]:
+    for xc,ne,temp in [('pz',3,-1),('pz',4,-1),('pz',4,0),('pz',3,.05),('hse06',2,-1),('hse06',4,-1),('hse06',4,.05)]:
         case=out/f'{xc}-ne{ne}-temp{temp}';case.mkdir()
         text=INPUT.replace("xc='hse06'",f"xc='{xc}'").replace('exx_pre_scf_threshold=1d8','exx_pre_scf_threshold=0')
         text=text.replace('nelec=4, nstate=2',f'nelec={ne}, nstate=4, temperature={temp}')

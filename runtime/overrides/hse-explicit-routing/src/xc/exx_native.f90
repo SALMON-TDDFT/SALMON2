@@ -15,6 +15,7 @@ module exx_native
   use iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use structures
+  use occupation, only: get_occupation_input
   use plusU_global, only: PLUS_U_ON
   use exx_k_exchange, only: exx_k_kernel,exx_k_kernel_init,exx_k_kernel_apply_distributed
   use exx_spinor, only: exx_spinor_apply_distributed,exx_spinor_weight_sources
@@ -31,7 +32,7 @@ module exx_native
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_opt,yn_predictor_corrector, &
     yn_symmetrized_stencil,propagator,hse_omega, &
-    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
+    pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
     exx_factor_mode,yn_exx_fft_orbits, &
@@ -69,6 +70,17 @@ module exx_native
     module procedure finite_real_3d
   end interface
 contains
+  ! Value copies isolate HSE decisions; uninitialized legacy systems retain fallback inputs.
+  subroutine hse_occupation_input(system,nelec,temperature,nstate)
+    type(s_dft_system),intent(in)::system
+    integer,intent(out)::nelec,nstate
+    real(8),intent(out)::temperature
+    type(s_occupation_config)::value
+    call get_occupation_input(system,value)
+    nelec=value%nelec
+    temperature=value%temperature
+    nstate=value%nstate
+  end subroutine hse_occupation_input
   function exx_context(system) result(owner)
     type(s_dft_system),intent(in)::system
     type(s_exx_rt_state),pointer::owner
@@ -212,6 +224,9 @@ contains
   logical function native_owner_supported(system,info) result(ok)
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
       yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and..not.system%kpoint_input%use_symmetry.and. &
       info%isize_r==1.and.info%isize_o==1.and.info%isize_k==1.and.info%numm==1.and. &
@@ -275,6 +290,9 @@ contains
 
   logical function thermal_scf_damping(system)
     type(s_dft_system),intent(in) :: system
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     thermal_scf_damping=exx_enabled(system).and.theory=='dft'.and.yn_spinorbit=='y'.and. &
       yn_dc=='n'.and.temperature>=0d0.and.propagator/='hse_taylor4_full'
   end function
@@ -339,6 +357,9 @@ contains
     implicit none
     type(s_dft_system),intent(in) :: system
     integer :: occupied
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     occupied=nelec/2
     valid=.false.
     if(yn_spinorbit=='y')then
@@ -365,6 +386,9 @@ contains
     type(s_exx_rt_state),pointer::exx_state_owner
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     exx_state_owner=>resolve_rt_context(rt_context,system)
     valid=yn_spinorbit=='y'.and.temperature>=0d0.and.exx_factor_mode=='learned'.and. &
       product(system%kmesh)>1.and.exx_kpoint_backend=='cpu'.and. &
@@ -381,6 +405,9 @@ contains
     type(s_parallel_info),intent(in)::info
     logical,intent(in)::initialize
     integer::i,j,k,bad,total
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     exx_state_owner=>resolve_rt_context(rt_context,system)
     if(.not.exx_state_owner%factor_experiment.or.yn_spinorbit/='y'.or.temperature<0d0)return
     if(.not.allocated(exx_state_owner%factor_occupation))then
@@ -1066,6 +1093,9 @@ contains
     logical :: thermal_spinor
     integer :: ierr,total_error,ng,nk,no,n,mesh,j,first_full,count_full
     procedure(k_backend_factory),pointer :: create_backend
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     exx_state_owner=>resolve_rt_context(rt_context,system)
     if(present(rt_status))rt_status=0
     if(.not.associated(exx_state_owner,rt_owned))then
@@ -1305,6 +1335,9 @@ contains
     integer :: local_layout(2*info%isize_k),layout(2*info%isize_k),np,j,index,total_error
     integer :: band,ng
     complex(8),allocatable :: expanded_target(:,:,:),expanded_action(:,:,:),rotated(:,:),expanded_source(:,:,:)
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
@@ -1732,6 +1765,9 @@ contains
   logical function use_wannier_exchange(system)
     implicit none
     type(s_dft_system),intent(in) :: system
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     if(yn_spinorbit=='y')then
       use_wannier_exchange=.false.
       return
@@ -2019,6 +2055,9 @@ contains
     complex(8),allocatable :: local(:,:,:),send(:,:,:),allpsi(:,:,:),allw(:,:,:),w(:,:,:)
     real(8) :: ex,offdiag(3,3)
     integer :: ng,no,nk,ik,j,status,changed,total_changed,maxiter
+    integer :: nelec,nstate
+    real(8) :: temperature
+    call hse_occupation_input(system,nelec,temperature,nstate)
     exx_state_owner=>resolve_rt_context(rt_context,system)
     ng=product(mg%num);no=system%no;nk=system%nk
     if(system%kpoint_input%use_symmetry.or.nk/=product(system%kmesh))error stop 'HSE Wannier: full k mesh required'
