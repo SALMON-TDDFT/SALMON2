@@ -10,6 +10,7 @@ from pathlib import Path
 from .errors import InputError
 
 NLCC_PATCH_SHA256 = '62817e02b40eb7db00132a8affcdb179b15b9c5445598c2ea371105bb46f6c7a'
+NLCC_SOURCE_TREE_SHA256 = 'ea5eb1925545326349170d19a963ad4caaa109e7d51af3cfc4c38a0bcbcefbc4'
 NLCC_XC = ('pz', 'libxc_pz', 'libxc_pbe')
 
 
@@ -21,12 +22,13 @@ def _bounded(value, limit):
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= limit
 
 
-def validate_nlcc_receipt(receipt, *, executable_sha256, source_patch_sha256):
+def validate_nlcc_receipt(receipt, *, executable_sha256, source_patch_sha256, source_tree_sha256=None):
     """Validate evidence and its binary/source/scope binding; return XC scope."""
     try:
         if (receipt['schema'] != 'salmonpy.nlcc-forces/1' or receipt['status'] != 'passed'
                 or receipt['executable_sha256'] != executable_sha256
                 or source_patch_sha256 != NLCC_PATCH_SHA256
+                or (source_tree_sha256 is not None and source_tree_sha256 != NLCC_SOURCE_TREE_SHA256)
                 or receipt['source_patch_sha256'] != source_patch_sha256):
             raise InputError('NLCC validation binary/source mismatch')
         if not re.fullmatch('[0-9a-f]{64}', receipt['build_executable_sha256']):

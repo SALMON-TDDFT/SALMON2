@@ -1,0 +1,15 @@
+{
+  "schema": "salmonpy.source-replacements/1",
+  "files": {
+    "src/xc/exx_native.f90": {
+      "before_sha256": "2d9375f186815bb62c34405237b77fa70ac80b58a53ef704ea137014c96c68ae",
+      "after_sha256": "321cee69195d456236520d5a2de7012d058ae8f21906b95d09f8681f86304e15",
+      "source": "overrides/hse-explicit-routing/src/xc/exx_native.f90"
+    },
+    "src/xc/exx_rt_state.f90": {
+      "before_sha256": "e89744ccbacb48935437a81ae3178ea3039d8c746ddcf131b7cb82722d30714d",
+      "after_sha256": "a916817cdb4d1f3891637938205f44ae958007991936ceeeb1e27a0d69c05c2d",
+      "source": "overrides/hse-explicit-routing/src/xc/exx_rt_state.f90"
+    }
+  }
+}

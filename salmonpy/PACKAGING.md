@@ -2,10 +2,10 @@
 
 Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
 
-> Standalone layout: full SALMON sources are no longer bundled. Source-checkout
-> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
-> the pinned external upstream checkout. Historical validation commands below
-> describe the old source layout and are not current build instructions.
+> Solver sources are bundled under `runtime/sources` (inside `_runtime_source`
+> in wheels). Prepare a new external build directory using the current runtime
+> guide. No upstream checkout or compatibility-patch application is required.
+> Historical validation commands below describe earlier layouts.
 
 The package uses scikit-build-core and a separate CMake project. LD and velocity-gauge SBE kernels, C ABI adapters and Python APIs are installed.
 The SALMON executable and MPI are not required. SBE links system Accelerate on
@@ -174,7 +174,7 @@ These are configured checks; historical runs above do not certify the current re
 
 SALMONpy is intended for a separate repository, not a merge into the SALMON main
 repository. Native source provenance and full-executable compatibility must be
-preserved when moving it. Only the three LD/SBE kernels are bundled in native/. Full SALMON source is prepared externally from runtime/source.json and its compatibility patch.
+preserved when moving it. The three LD/SBE kernels live in native/. Full solver sources and verified completed replacements are bundled under runtime/ and copied into a new external build directory.
 
 Native checksums are generated after CMake installs the shared library, including
 its RPATH/install-name changes. Direct source installation therefore does not

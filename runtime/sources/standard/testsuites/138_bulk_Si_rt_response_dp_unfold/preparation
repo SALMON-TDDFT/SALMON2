@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Test preparation script
+#
+# The preparation script is automatically executed before starting SALMON.
+# if required, this script file can utilized for the preparation of
+# the input data for the following calculations.
+
+cp ../pseudo/Si_rps.dat ./
+
+# supercell ground state -> normal RT restart (directory_read_data default: restart/)
+ln -s ../137_bulk_Si_gs_dp_unfold_super/data_for_restart ./restart
+
+# primitive-cell ground state -> consumed via the hardcoded relative path
+# 'primitive/wfn.bin', 'primitive/occupation.bin', 'primitive/tm.bin'
+# in src/analysis/dm_unfold.f90 (init_dm_unfold)
+ln -s ../136_bulk_Si_gs_dp_unfold_primitive/data_for_restart ./primitive

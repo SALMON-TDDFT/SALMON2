@@ -1,0 +1,73 @@
+&calculation
+  theory = 'sbe'
+/
+
+&control
+  sysname = 'Si'
+/
+
+&parallel
+  nproc_k = 4
+  nproc_ob = 1
+  nproc_rgrid(1) = 1
+  nproc_rgrid(2) = 1
+  nproc_rgrid(3) = 1
+/
+
+&units
+  unit_system = 'au'
+/
+
+&system
+  yn_periodic = 'y'
+  al(1:3) = 10.26d0, 10.26d0, 10.26d0
+  nelem = 1
+  natom = 8
+  nelec = 32
+  nstate = 32
+/
+
+&pseudo
+  file_pseudo(1) = './Si_rps.dat'
+  izatom(1) = 14
+  lmax_ps(1) = 2
+  lloc_ps(1) = 2
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  dl = 0.855d0, 0.855d0, 0.855d0
+/
+
+&kgrid
+  num_kgrid = 4, 4, 4
+/
+
+&tgrid
+  dt = 0.05d0
+  nt = 100
+/
+
+&emfield
+  ae_shape1 = "impulse"
+  epdir_re1(1:3) = 0.0d0, 0.0d0, 1.0d0
+/
+
+&sbe
+  norder_correction = 3
+/
+
+&atomic_red_coor
+  'Si'  .0      .0      .0      1
+  'Si'  .25     .25     .25     1
+  'Si'  .5      .0      .5      1
+  'Si'  .0      .5      .5      1
+  'Si'  .5      .5      .0      1
+  'Si'  .75     .25     .75     1
+  'Si'  .25     .75     .75     1
+  'Si'  .75     .75     .25     1
+/
+

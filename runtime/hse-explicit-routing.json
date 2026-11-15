@@ -2,7 +2,6 @@
   "schema": "salmonpy.hse-explicit-routing-overlay/1",
   "base_commit": "c9e8ce431f43eefd4a88998134adb4796f8ec837",
   "parent_patch_sha256": "a25f4cf5e71700546836e7310ca40f4458e8320dfab40a550f90595259d182a8",
-  "patch": "patches/hse-explicit-routing.patch",
   "patch_sha256": "55482bcc735b542fc81e059d58e8154d60254a6cdb04b9d73d53fa719ed64af9",
   "modified_sources": [
     "src/xc/exx_native.f90",
@@ -34,5 +33,8 @@
     "thermal_factor_supported",
     "warn_fixed_radius"
   ],
-  "scope": "explicit serial dense ACE/lifecycle RT routing; nondefault refresh/direct/shared-geometry paths rejected"
+  "scope": "explicit serial dense ACE/lifecycle RT routing; nondefault refresh/direct/shared-geometry paths rejected",
+  "replacements": "source-trees/hse-explicit-routing-replacements.json",
+  "replacements_sha256": "4e617ca92b8cf10932628bec3f2e1c5d5000285a3d6e1bad176c02f9d74a02e5",
+  "patch_sha256_role": "historical migration identity; no patch is applied"
 }

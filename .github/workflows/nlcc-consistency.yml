@@ -10,6 +10,7 @@ on:
       - 'tools/validate_nlcc_ci_results.py'
       - 'tools/test_validate_nlcc_ci_results.py'
       - 'tools/prepare_salmon_runtime.py'
+      - 'tools/runtime_sources.py'
       - 'tools/check_forbidden_eigensolvers.py'
       - 'salmonpy/runtime.py'
       - '.github/workflows/nlcc-consistency.yml'
@@ -22,6 +23,7 @@ on:
       - 'tools/validate_nlcc_ci_results.py'
       - 'tools/test_validate_nlcc_ci_results.py'
       - 'tools/prepare_salmon_runtime.py'
+      - 'tools/runtime_sources.py'
       - 'tools/check_forbidden_eigensolvers.py'
       - 'salmonpy/runtime.py'
       - '.github/workflows/nlcc-consistency.yml'
@@ -47,11 +49,6 @@ jobs:
           python -m pip install numpy
       - name: Validate CI result rejection tests
         run: python tools/test_validate_nlcc_ci_results.py
-      - uses: actions/checkout@v4
-        with:
-          repository: SALMON-TDDFT/SALMON2
-          ref: 3322d0561c0cad5180679136b3eddbe8b909487c
-          path: upstream-salmon
       - name: Build pinned Libxc legacy Fortran interface
         shell: bash
         run: |
@@ -71,7 +68,7 @@ jobs:
       - name: Build audited serial Libxc runtime
         shell: bash
         run: |
-          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/nlcc-serial" --jobs 2 \
+          python -m salmonpy.runtime build "$RUNNER_TEMP/nlcc-serial" --jobs 2 \
             --cmake-arg=-DCMAKE_C_COMPILER=gcc \
             --cmake-arg=-DCMAKE_Fortran_COMPILER=gfortran \
             --cmake-arg=-DUSE_LIBXC=ON --cmake-arg=-DLIBXC_INSTALLDIR="$RUNNER_TEMP/libxc" \
@@ -89,7 +86,7 @@ jobs:
       - name: Build audited MPI Libxc runtime
         shell: bash
         run: |
-          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/nlcc-mpi-build" --jobs 2 \
+          python -m salmonpy.runtime build "$RUNNER_TEMP/nlcc-mpi-build" --jobs 2 \
             --cmake-arg=-DCMAKE_C_COMPILER=mpicc --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
             --cmake-arg=-DUSE_MPI=ON --cmake-arg=-DUSE_LIBXC=ON \
             --cmake-arg=-DLIBXC_INSTALLDIR="$RUNNER_TEMP/libxc" \

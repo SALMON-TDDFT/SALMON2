@@ -1,6 +1,7 @@
 """Opt-in preparation validation and failed-snapshot preservation (no build)."""
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,10 +18,11 @@ PROFILE=json.loads((root/'runtime/rt-step-config.json').read_text())
 class StepConfigPreparation(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.source=Path(self.tmp.name)/'source';self.source.mkdir()
-        (self.source/'src').mkdir();(self.source/'src/safe.f90').write_text('module safe\nend module\n')
-        (self.source/'salmonpy-runtime-source.json').write_text(json.dumps(dict(
-            upstream_commit=PROFILE['upstream_commit'],patch_sha256=PROFILE['base_patch_sha256'])))
+        self.source=Path(self.tmp.name)/'source'
+        base=json.loads((root/'runtime/source.json').read_text())
+        shutil.copytree(root/'runtime'/base['source_tree'],self.source)
+        (self.source/'salmonpy-runtime-source.json').write_text(json.dumps(base))
+        self.original=(self.source/'src/main.f90').read_bytes()
         self.output=Path(self.tmp.name)/'output'
 
     def test_profile_and_recursive_output_rejected_before_copy(self):
@@ -36,14 +38,27 @@ class StepConfigPreparation(unittest.TestCase):
         self.assertEqual(list(self.output.iterdir()),[keep])
 
     def test_failed_copy_keeps_explicit_unapproved_record(self):
-        with patch.object(overlay.shutil,'copytree',side_effect=OSError('simulated copy failure')):
+        with patch.object(overlay.store,'copy_files',side_effect=OSError('simulated copy failure')):
             with self.assertRaisesRegex(OSError,'simulated copy failure'):
                 overlay.prepare(self.source,self.output)
         marker=json.loads((self.output/'salmonpy-rt-step-config.json').read_text())
         self.assertEqual(marker['status'],'failed-not-approved')
-        self.assertEqual((self.source/'src/safe.f90').read_text(),'module safe\nend module\n')
+        self.assertEqual((self.source/'src/main.f90').read_bytes(),self.original)
 
     def test_already_modified_source_rejected(self):
         (self.source/'salmonpy-rt-step-config.json').write_text('existing evidence')
         with self.assertRaisesRegex(ValueError,'already has'):overlay.prepare(self.source,self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_modified_unreplaced_source_is_rejected_before_copy(self):
+        (self.source/'src/main.f90').write_text('changed')
+        with self.assertRaisesRegex(ValueError,'source hash changed'):
+            overlay.prepare(self.source,self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_failed_preparation_cannot_be_used(self):
+        p=self.source/'salmonpy-runtime-source.json';record=json.loads(p.read_text())
+        record['status']='failed-not-approved';p.write_text(json.dumps(record))
+        with self.assertRaisesRegex(ValueError,'verified current base'):
+            overlay.prepare(self.source,self.output)
         self.assertFalse(self.output.exists())

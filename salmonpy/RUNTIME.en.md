@@ -61,12 +61,10 @@ pseudopotentials, which are not part of the executable bundle.
 ## Explicit fallback build
 
 Only offer a build when no appropriate prebuilt/existing runtime is available.
-Explain required tools and confirm the user's CPU/memory budget. Obtain the
-pinned upstream source, then explicitly build in a new directory:
+Explain required tools and confirm the user's CPU/memory budget. Use the bundled sources and explicitly build in a new directory:
 
 ```sh
-git clone https://github.com/SALMON-TDDFT/SALMON2.git UPSTREAM
-python -m salmonpy.runtime build UPSTREAM NEW_BUILD --jobs 2 \
+python -m salmonpy.runtime build NEW_BUILD --jobs 2 \
   --cmake-arg=-DCMAKE_Fortran_COMPILER=gfortran \
   --cmake-arg=-DCMAKE_C_COMPILER=gcc \
   --cmake-arg=-DBLA_VENDOR=OpenBLAS \
@@ -77,14 +75,14 @@ python -m salmonpy.runtime build UPSTREAM NEW_BUILD --jobs 2 \
 
 These are GNU compiler options, not universal platform flags. Supply the actual
 GNU C compiler path on macOS; `/usr/bin/gcc` is normally Apple Clang. Install
-CMake >=3.22, Git, GNU Fortran/C and LP64 OpenBLAS beforehand. The command never installs
+CMake >=3.22, GNU Fortran/C and LP64 OpenBLAS beforehand. The command never installs
 system dependencies. Windows native full-solver support is unvalidated; use a
 supported Linux environment/WSL or a separately validated site build.
 `--jobs` controls build concurrency, not simulation threads or a memory limit.
 For Libxc supply `--cmake-arg=-DUSE_LIBXC=ON` and
 `--cmake-arg=-DLIBXC_INSTALLDIR=LIBXC_PREFIX` for a compatible Fortran-enabled Libxc.
 
-The wheel includes the pinned patch, shared-kernel references and audit scripts,
+The wheel includes the complete pinned solver sources, verified file inventories and audit scripts,
 so no SALMONpy checkout is needed. Source preparation, compilation and object
 checks are logged in `NEW_BUILD/build.log`; `build.json` records status, exact
 commands and the resulting executable SHA256. Failures preserve the log and
@@ -134,7 +132,7 @@ The user's fast PR-intended implementation is the HSE baseline. This PZ regressi
 
 ## Experimental fast-PR HSE RT state extraction
 
-A separate HSE profile pins the user's PR-intended revision `c9e8ce431f43eefd4a88998134adb4796f8ec837`. Run `python tools/prepare_hse_rt_state.py LOCAL_PR_GIT NEW_DIRECTORY` to prepare a new external overlaid source, or add `--reference-only` for the unchanged numerical reference. Both retain mandatory source/object audits in CMake configure/incremental builds. The PR checkout and default SALMONpy runtime are unchanged.
+A separate HSE profile pins the user's PR-intended revision `c9e8ce431f43eefd4a88998134adb4796f8ec837`. Run `python tools/prepare_hse_rt_state.py NEW_DIRECTORY` to prepare a new external source copy, or add `--reference-only` for the unchanged numerical reference. Both retain mandatory source/object audits in CMake configure/incremental builds. The PR checkout and default SALMONpy runtime are unchanged.
 
 This stage groups ACE factors, accepted prediction histories, PT-CN history/dt, Taylor trials and action caches under `s_exx_rt_state`. Lifecycle operations take explicit state arguments and reject invalid dt/stages before mutation. Optional owned-allocation byte accounting includes allocated history-array descriptors/fixed fields and nested buffers; it is not RSS.
 
@@ -142,10 +140,68 @@ The legacy HSE adapter still uses one default state. Geometry/kernel/Wannier res
 
 ## Experimental explicit HSE RT routing
 
-Add `--explicit-routing` to the preceding preparation command to apply a child overlay after verifying its parent hash. It cannot be combined with `--reference-only`. Default preparation and existing calls remain unchanged.
+Add `--explicit-routing` to the preceding preparation command to copy the completed routing sources after verifying their input/output hashes. It cannot be combined with `--reference-only`. Default preparation and existing calls remain unchanged.
 
 Twenty-four exchange/history procedures forward a caller-supplied RT state through their internal calls. Resolution uses local references, without switching a process-wide active state or copying all arrays. Public legacy flags/energy are state-owned; old names are aliases to the default owner only. Reassociating those aliases is unsupported.
 
 The certified routing scope is common exchange configuration, serial CPU scalar dense ACE action and lifecycle. Nondefault refresh, direct/full, packed/distributed and spin routes are rejected before shared resources are reached. With optional `rt_status`, `exx_refresh`/`exx_add_action` return nonzero for this capability mismatch without changing accepted state/output. Without it native errors may terminate the process. This is not general failure atomicity or material C ABI conformance.
 
 This route is not yet bound to each TDDFT electronic state or different material configurations. Kernel/Wannier/geometry/input ownership remains to be extracted. FDTD common dt, the process-isolated API and fixed jobs remain unchanged.
+
+## Experimental independent HSE resource primitive
+
+`salmonpy/native_adapters/hse_resource_context.f90` is SALMONpy-owned source,
+shipped in this repository and wheel. It links to the preceding pinned fast-PR
+kernel modules; the full solver sources are also bundled, and compilation remains explicit.
+Stage-specific completed files are maintained under runtime/overrides.
+
+`hse_context` owns its FFT kernel and accepted RT/ACE data. `hse_open` fixes the
+orthogonal rectangular grid, uniform full k mesh, spacings, screening and hybrid
+fraction; `hse_refresh` accepts an occupied orthonormal complex frame, and
+`hse_apply` evaluates fraction-scaled ACE action. Arrays use (grid, orbital, k)
+order. Source occupations are one per spin, with no spin multiplier; this is an
+exchange primitive, not the physical charge-current interface. Source overlaps
+must equal the identity within 1e-8 with grid volume weighting. Layout is fixed
+strided CPU FFT. It uses the generic kernel action, not the optimized full
+adapter dispatch; no performance or full-TDDFT equivalence claim is made.
+
+Call `hse_close` explicitly, including after failed construction; repeated close
+is safe. Do not copy/assign contexts, serialize their memory, or invoke them
+concurrently. They own opaque FFT plans, unlike copyable RT-only snapshots.
+Status 0 means success, 1 invalid input/lifecycle, 2 caught adapter allocation
+failure, and 3 a kernel/ACE/numerical failure. Reported refresh failures preserve
+accepted ACE/source data, and reported apply failures preserve the output.
+Internal FFT work buffers may change. Existing kernel allocation/FFT failures
+can still terminate a process; this is not a general failure-atomic public ABI.
+
+```sh
+python tools/test_hse_explicit_state.py HSE_BUILD_RECORD NEW_OUTPUT --resource-context --threads 2
+```
+
+The probe audits sources and all linked application objects, then tests different
+grid sizes, k counts and screening/fraction parameters, interleaved refresh,
+independent reference kernel/ACE results, invalid input retention and both close
+orders. It is a synthetic ownership regression, not a converged material test.
+The primitive is not yet connected to `exx_refresh` or Python TDDFT states.
+Wannier, spatial/MPI exchange, symmetry, spin, prediction, total energy/current,
+and optimized routing remain outside this stage. FDTD still requires common dt.
+
+## Source ownership and updates
+
+The repository and wheel carry the standard solver and the fast-PR HSE baseline,
+including original licenses and provenance. Preparation verifies complete file
+inventories, copies sources, and installs stage-specific completed files after
+checking both their old and new hashes. It does not use Git or apply patches.
+The old UPSTREAM OUTPUT preparation/build arguments remain accepted, but the
+bundled pinned source is used and the supplied checkout is never modified.
+HSE is supported only through the fast profile; USE_HSE=ON in the standard
+profile fails explicitly. Reference-only fast sources are comparison fixtures.
+
+`source_tree_sha256` identifies the bundled tree inventory; `replacements_sha256`
+identifies completed stage files. Historical `patch_sha256` values remain solely
+for provenance and existing binary receipts, not as evidence of new source
+content. NLCC loading additionally rejects unknown source-tree identities when
+present. Future numerical source changes require new scientific validation.
+Update sources, inventories and their hashes in the same reviewed commit; verify
+shared native kernels and rebuild/test affected profiles before distribution.
+The independent HSE resource primitive is still not bound to full native TDDFT.

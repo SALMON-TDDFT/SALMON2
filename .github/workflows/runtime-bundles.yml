@@ -28,15 +28,10 @@ jobs:
           echo "FC=$(brew --prefix)/bin/gfortran" >> "$GITHUB_ENV"
           echo "CC=$(brew --prefix)/bin/gcc-$(gfortran -dumpversion | cut -d. -f1)" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openblas)" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
-        with:
-          repository: SALMON-TDDFT/SALMON2
-          ref: 3322d0561c0cad5180679136b3eddbe8b909487c
-          path: upstream-salmon
       - name: Explicit build using the public command
         shell: bash
         run: |
-          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/runtime-build" --jobs 2 \
+          python -m salmonpy.runtime build "$RUNNER_TEMP/runtime-build" --jobs 2 \
             --cmake-arg=-DCMAKE_Fortran_COMPILER="${FC:-gfortran}" \
             --cmake-arg=-DCMAKE_C_COMPILER="${CC:-gcc}" \
             --cmake-arg=-DBLA_VENDOR=OpenBLAS \
@@ -78,7 +73,7 @@ jobs:
           OMPI_MCA_rmaps_base_oversubscribe: '1'
         run: |
           sudo apt-get install -y libopenmpi-dev openmpi-bin
-          python -m salmonpy.runtime build upstream-salmon "$RUNNER_TEMP/mpi-build" --jobs 2 \
+          python -m salmonpy.runtime build "$RUNNER_TEMP/mpi-build" --jobs 2 \
             --cmake-arg=-DUSE_MPI=ON --cmake-arg=-DCMAKE_Fortran_COMPILER=mpifort \
             --cmake-arg=-DCMAKE_C_COMPILER=mpicc --cmake-arg=-DBLA_VENDOR=OpenBLAS \
             --cmake-arg=-DOPENMP_FLAGS=-fopenmp --cmake-arg=-DCMAKE_BUILD_TYPE=Release \

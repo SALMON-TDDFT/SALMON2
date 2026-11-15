@@ -24,7 +24,7 @@ def load_build(path, expected_source, mpi):
         raise ValueError('completed audited build required')
     if record.get('build_configuration', {}).get('mpi_enabled') is not mpi:
         raise ValueError('build MPI capability does not match role')
-    for key in ('upstream_commit', 'patch_sha256'):
+    for key in ('upstream_commit', 'patch_sha256') + (('source_tree_sha256',) if 'source_tree_sha256' in expected_source else ()):
         if record.get('source', {}).get(key) != expected_source[key]:
             raise ValueError('build source revision mismatch: '+key)
     exe = Path(record['executable']).resolve()

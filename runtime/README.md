@@ -1,68 +1,43 @@
-# Optional full SALMON runtime / 外部SALMON実行環境
+# Bundled SALMON solver sources / 同梱ソルバーソース
 
-Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](../salmonpy/RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
-
-SALMONpy's wheel contains LD/SBE kernels only. DFT, TDDFT, FDTD and band workflows
-need a compatible **external** full executable. The full SALMON source is not
-part of this repository's working tree. It is prepared outside the checkout.
-
-`source.json` pins upstream SALMON commit
-`3322d0561c0cad5180679136b3eddbe8b909487c` and the SHA256 of
-`patches/salmonpy-runtime.patch`. The patch preserves the already validated worker,
-GS status/force, band-path, LD/SBE extraction and PZHEEVD changes. It is not a
-request to merge these changes into SALMON upstream.
-
-## Prepare and build
-
-Use paths appropriate for your system. UPSTREAM and RUNTIME must be distinct;
-RUNTIME must not exist and must be outside UPSTREAM.
+The repository and wheel contain complete standard and fast-PR solver snapshots
+under `sources/`, with original licenses and acknowledgements. The only supported
+HSE implementation is the fast PR profile. `overrides/` holds completed source
+files for experimental stages. All copies are bound to inventories in
+`source-trees/`; there are no compatibility patch files or git-apply steps.
 
 ```sh
-git clone https://github.com/SALMON-TDDFT/SALMON2.git UPSTREAM
-python tools/prepare_salmon_runtime.py UPSTREAM RUNTIME
-cmake -S RUNTIME -B RUNTIME_BUILD -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_C_COMPILER=gcc -DBLA_VENDOR=OpenBLAS -DCMAKE_BUILD_TYPE=Release
-cmake --build RUNTIME_BUILD --target salmon --parallel 2
-python tools/check_forbidden_eigensolvers.py --object-tree RUNTIME_BUILD/src
+python tools/prepare_salmon_runtime.py NEW_SOURCE
+python -m salmonpy.runtime build NEW_BUILD --jobs 2 --cmake-arg=-DBLA_VENDOR=OpenBLAS
+python tools/prepare_hse_rt_state.py NEW_HSE_SOURCE --explicit-routing
 ```
 
-Preparation archives only the pinned commit (ignoring uncommitted files), checks
-and applies the patch, checks that the shared kernels match `native/`, and runs
-the forbidden-eigensolver source audit. It never changes the upstream checkout.
-It records provenance in the prepared tree. No private Git history is required:
-only the explicitly obtained upstream checkout and files in this repository.
+Choose explicit compiler/library flags using [the runtime guide](../salmonpy/RUNTIME.en.md).
+Preparation does not download, compile, change an external checkout or overwrite
+a destination. Build output must be outside this checkout. The historical
+UPSTREAM OUTPUT form is accepted but the repository-owned source is used.
+The HSE reference-only profile is for numerical comparison, not an alternative
+supported implementation. Standard USE_HSE=ON is rejected.
 
-Compiler flags, OpenMP/MPI and Libxc must be configured for the intended runtime.
-On the tested Apple Silicon GNU Fortran build use LP64 OpenBLAS for full SALMON,
-not Accelerate. Libxc functionals require a compatible `USE_LIBXC=ON` build.
-The SHA256 used by `SalmonExecutable` must be recorded from the audited executable.
-A fresh hash alone does not establish compatibility. Existing validated external
-executables remain usable; source cleanup does not change their interface.
-
-The CI workflow prepares this same source and compares ordinary TDDFT execution
-with its interactive worker. For local native adapter checks set
-`SALMONPY_RUNTIME_SOURCE` to RUNTIME; the tests obtain the Si pseudopotential from
-that pinned source. `tools/test_band_path_native.py RUNTIME` tests the prepared
-band implementation. SALMONpy does not bundle the general SALMON sample library.
+Update source files and inventory digests together. Compare shared LD/SBE kernels
+against native/, run source/object prohibition audits and relevant regressions.
+The upstream commit and legacy patch_sha256 preserve provenance and existing
+binary receipt compatibility; current files are bound by source_tree_sha256 and
+replacements_sha256. Numerical changes require renewed capability validation.
+No source is compiled on import, and full solver compilation is not part of
+ordinary wheel installation. Prefer compatible prebuilt runtimes for users.
 
 ## 日本語
 
-本体の全ソース・機種別設定・一般サンプルはSALMONpyには同梱しません。
-固定した公開SALMON版に互換パッチを適用し、別の場所で本体を構築します。
-上記の準備コマンドは元チェックアウトを変更せず、新規保存先だけに出力します。
-必要な本体変更を削除したわけではなく、パッチと由来情報へ分離しています。
-wheelのみを使うLD/SBE・構造・解析では、この準備は不要です。
-
-## Maintenance
-
-When updating a shared kernel, regenerate the corresponding patch hunk and
-record its new hash in source.json; preparation rejects mismatched copies.
-Updating the upstream commit requires explicitly revalidating all native adapters.
-Keep upstream LICENSE, LICENSE.THIRD-PARTY and acknowledgements in the prepared
-runtime; do not substitute SALMONpy's narrower third-party notice for them.
+本体ソースをリポジトリとwheelに同梱し、SALMONpyと同じ版で更新・検証します。
+固定した本体を検証して外部の新規ディレクトリへコピーし、段階別の完成形を配置します。
+外部Gitチェックアウトと互換パッチ適用は不要です。HSEは高速PR版だけを保守します。
+旧patch_sha256は由来情報であり、現在のファイルの識別には別のハッシュを使います。
+ライセンス・元コミットを保持し、import時にはコンパイルしません。
 
 ## NLCC consistency patch (CPU, unpolarized NC)
 
-The current compatibility patch aligns Libxc's NLCC energy weighting and GGA
+The current bundled source aligns Libxc's NLCC energy weighting and GGA
 core-density gradients, and adds the explicit force from the sampled core-density
 interpolant. Atoms are the outer OpenMP work items. The core force is reduced
 over spatial ranks only, before force symmetry, without k/orbital multiplicity.
@@ -79,7 +54,7 @@ Piecewise-linear radial knots and the existing hard core cutoff need not be
 differentiable; tests distinguish interior derivatives from boundary crossings.
 Spin-polarized Libxc-NLCC remains unsupported. Meta-GGA force validation is not
 claimed, and an OpenACC NLCC-force path explicitly fails as unvalidated.
-Existing binary bundles are not changed by this source patch. The Calculator
+Existing binary bundles are not changed by this source update. The Calculator
 enables NLCC forces only when a matching validation receipt is loaded with
 `load_validated_build` or `load_runtime`. The receipt binds the executable and
 patch hashes to native checks and a whole-application regression; relocation

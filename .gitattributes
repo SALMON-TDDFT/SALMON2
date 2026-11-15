@@ -2,5 +2,9 @@
 salmonpy/examples/si_intro_data/* -text
 
 # Pinned overlays and shared kernels are verified by their exact bytes.
-runtime/patches/*.patch -text
 native/*.f90 -text
+
+# Full solver and replacement inventories are byte-exact across platforms.
+runtime/sources/** -text
+runtime/overrides/** -text
+runtime/source-trees/** -text

@@ -118,7 +118,8 @@ def package(build, source, destination, *, base_url=None, license_dirs=(),
         from validate_nlcc_runtime import certify_relocated
         receipt = json.loads(Path(nlcc_validation).read_text())
         validate_nlcc_receipt(receipt, executable_sha256=record['sha256'],
-                              source_patch_sha256=expected['patch_sha256'])
+                              source_patch_sha256=expected['patch_sha256'],
+                              source_tree_sha256=expected.get('source_tree_sha256'))
         # Relocation changes bytes: re-run the complete scalar application check
         # against the relocated binary instead of merely rewriting its hash.
         receipt = certify_relocated(receipt, executable, nlcc_potential,

@@ -41,8 +41,7 @@ python -m salmonpy.runtime install my-runtime --catalog downloaded/catalog.json 
 必要な開発環境と利用者の計算資源を確認してから実行します。
 
 ```sh
-git clone https://github.com/SALMON-TDDFT/SALMON2.git UPSTREAM
-python -m salmonpy.runtime build UPSTREAM NEW_BUILD --jobs 2 \
+python -m salmonpy.runtime build NEW_BUILD --jobs 2 \
   --cmake-arg=-DCMAKE_Fortran_COMPILER=gfortran \
   --cmake-arg=-DCMAKE_C_COMPILER=gcc \
   --cmake-arg=-DBLA_VENDOR=OpenBLAS \
@@ -51,11 +50,11 @@ python -m salmonpy.runtime build UPSTREAM NEW_BUILD --jobs 2 \
   --cmake-arg='-DCMAKE_Fortran_FLAGS_RELEASE=-O2 -ffree-line-length-none -fallow-argument-mismatch'
 ```
 
-これはGNUコンパイラ用の例です。macOSではGNU Cコンパイラの実際のパスを指定します。通常 `/usr/bin/gcc` はApple Clangです。Git・CMake 3.22以上・GNU Fortran/C・LP64 OpenBLASは事前に必要です。システムへの自動インストールはしません。Windows本体の直接ビルドは未検証で、Linux／WSLや別途検証した環境を使います。`--jobs` はビルド並列数で、計算スレッド数やメモリ制限ではありません。
+これはGNUコンパイラ用の例です。macOSではGNU Cコンパイラの実際のパスを指定します。通常 `/usr/bin/gcc` はApple Clangです。CMake 3.22以上・GNU Fortran/C・LP64 OpenBLASは事前に必要です。システムへの自動インストールはしません。Windows本体の直接ビルドは未検証で、Linux／WSLや別途検証した環境を使います。`--jobs` はビルド並列数で、計算スレッド数やメモリ制限ではありません。
 
 Libxcが必要なら互換性のあるFortran対応Libxcを準備し、`--cmake-arg=-DUSE_LIBXC=ON` と `--cmake-arg=-DLIBXC_INSTALLDIR=LIBXC_PREFIX` を追加します。
 
-固定版パッチ・共有カーネル参照・監査ツールはwheelにも含めるため、SALMONpyのGitチェックアウトは不要です。`build.log` と `build.json` にコマンド・成否・実行ファイルのハッシュを保存します。失敗してもログとソースを保持し、新しい場所で再試行します。成功はビルドとオブジェクト監査の完了を表し、科学的精度の検証ではありません。対象ワークフローの回帰検証後、記録したハッシュを使います。
+固定した本体ソース一式・ファイルのハッシュ一覧・監査ツールはwheelにも含めるため、SALMONpyのGitチェックアウトは不要です。`build.log` と `build.json` にコマンド・成否・実行ファイルのハッシュを保存します。失敗してもログとソースを保持し、新しい場所で再試行します。成功はビルドとオブジェクト監査の完了を表し、科学的精度の検証ではありません。対象ワークフローの回帰検証後、記録したハッシュを使います。
 
 ```python
 import json
@@ -96,7 +95,7 @@ HSEの基準には利用者のPR予定高速版を用います。今回のPZ検�
 
 ## 実験用：高速HSE版のRT状態分離
 
-HSEは利用者のPR予定版`c9e8ce431f43eefd4a88998134adb4796f8ec837`を別プロファイルとして固定します。`python tools/prepare_hse_rt_state.py LOCAL_PR_GIT NEW_DIRECTORY`で、新しい外部ソースにのみ追加パッチを適用します。`--reference-only`は比較用の元コードを作ります。両方とも必須のソース・object検査をCMakeの構成・増分ビルドへ保持し、PRチェックアウトは変更しません。既定のSALMONpyランタイムは置き換えません。
+HSEは利用者のPR予定版`c9e8ce431f43eefd4a88998134adb4796f8ec837`を別プロファイルとして固定します。`python tools/prepare_hse_rt_state.py NEW_DIRECTORY`で、同梱ソースを新しい外部ディレクトリへコピーし、検証した完成形のファイルを配置します。`--reference-only`は比較用の元コードを作ります。両方とも必須のソース・object検査をCMakeの構成・増分ビルドへ保持し、PRチェックアウトは変更しません。既定のSALMONpyランタイムは置き換えません。
 
 この段階では、ACE因子、受理済み予測履歴、PT-CN履歴とdt、Taylor試行、交換作用キャッシュを`s_exx_rt_state`へまとめています。Taylor/PT-CNの寿命管理は状態を引数に取り、異常なdtや段階の指定を変更前に拒否します。所有する確保済み配列のバイト数も診断できます（履歴配列のdescriptor等を含み、RSSではありません）。
 
@@ -104,10 +103,62 @@ HSEは利用者のPR予定版`c9e8ce431f43eefd4a88998134adb4796f8ec837`を別プ
 
 ## 実験用：HSE状態を交換作用へ明示的に渡す経路
 
-前節の準備に`--explicit-routing`を加えると、親パッチのhashを照合したうえで追加の経路分離パッチを適用します。`--reference-only`とは併用できません。既定の準備・既存の呼び出し方は維持します。
+前節の準備に`--explicit-routing`を加えると、変更前後のファイルのhashを照合したうえで経路分離済みの完成形を配置します。`--reference-only`とは併用できません。既定の準備・既存の呼び出し方は維持します。
 
 交換・履歴処理の24手続きは、指定されたRT状態を内部呼び出しにも渡します。各呼び出しのローカル参照を使い、プロセス全体のactive状態を切り替えたり全配列をコピーしたりしません。公開legacyフラグと交換エネルギーはRT状態が所有し、旧名は標準状態だけを参照する互換用aliasです。aliasの関連先を利用者が変更することは対応範囲外です。
 
 検証対象は共通の交換設定を使う直列CPU・scalar dense ACE作用と寿命管理です。非標準状態によるrefresh、直接/full交換、packed・分散・spin経路は未対応で、共有資源へ到達する前に拒否します。`exx_refresh`と`exx_add_action`で`rt_status`を指定した場合、この能力不一致は非ゼロを返して状態/出力を保ちます。省略時のnativeエラーはプロセス停止になり得ます。一般的な失敗原子性や公開C ABIへの適合ではありません。
 
 この経路はまだ各TDDFT電子状態や異なる材料設定へ接続していません。kernel/Wannier/幾何・入力設定等の分離が必要です。FDTDの共通dt、旧来のプロセス分離API、固定ジョブは変更しません。
+
+## 実験用：独立したHSE資源の部品
+
+`salmonpy/native_adapters/hse_resource_context.f90` はSALMONpy固有のソースとして、
+このリポジトリとwheelに同梱します。前節の固定した高速PR版のkernelモジュールへ
+リンクします。本体ソース一式も同梱し、コンパイルは明示的に行います。
+段階別の変更ファイルの完成形は runtime/overrides に保持します。
+
+`hse_context` はFFT kernelと受理済みRT/ACEデータを所有します。`hse_open` で
+直交した直方体格子、均一な全k点メッシュ、格子間隔、遮蔽・混合率を固定し、
+`hse_refresh` に規格直交した複素占有軌道を渡し、`hse_apply` で混合率を掛けた
+ACE作用を得ます。配列順序は(grid, orbital, k)です。占有はスピンごとに1で、
+スピンの倍率は含めません。電荷電流を返す入口ではなく交換計算の部品です。
+格子体積を含む軌道の重なりが単位行列に対して1e-8以内であることを検査します。
+CPUのstrided FFTに限定し、汎用kernel作用を使います。最適化済み本体の全経路、
+性能、本体TDDFTとの等価性を保証するものではありません。
+
+失敗した構築も含めて `hse_close` を明示的に呼びます。繰り返しのcloseは可能です。
+コンテキストのコピー・代入、メモリの直列化、同時呼び出しは不可です。
+コピー可能なRT履歴と異なり、FFT計画のポインタを所有します。
+statusは0=成功、1=入力・寿命の誤り、2=アダプターで捕捉した確保失敗、
+3=kernel/ACE/数値エラーです。戻り値で報告するrefresh失敗は受理済みACEと軌道を、
+apply失敗は出力を保持します。FFT作業領域は変わり得ます。既存kernel内部の
+確保・FFT失敗によるプロセス停止までは回復しないため、一般的な失敗原子性を
+備えた公開ABIではありません。
+
+```sh
+python tools/test_hse_explicit_state.py HSE_BUILD_RECORD NEW_OUTPUT --resource-context --threads 2
+```
+
+ソースと全リンク対象のアプリケーションobjectを検査してから、異なる格子・k点数・
+遮蔽・混合率の状態で交互refresh、独立したkernel/ACE参照との一致、不正入力時の
+状態保持、両方の破棄順序を試験します。実材料の収束検証ではなく合成回帰試験です。
+この部品はまだ `exx_refresh` やPython TDDFT状態へ接続していません。
+Wannier、空間分割・MPI、対称性、spin、予測、全エネルギー・電流、最適化経路の
+接続は次の段階です。FDTDの共通dtは維持します。
+
+## ソースの所有と更新
+
+標準ソルバーと高速PR版HSEの本体ソース一式を、元のライセンス・由来情報とともに
+リポジトリとwheelに保持します。準備時は全ファイルのハッシュを検証してコピーし、
+段階別の完成形について変更前後のハッシュを確認して配置します。Gitやパッチ適用は不要です。
+旧形式の UPSTREAM OUTPUT 引数も受け付けますが、使用するのは同梱した固定ソースであり、
+指定された外部チェックアウトは変更しません。HSEの保守対象は高速版のみです。標準版の
+USE_HSE=ON は明示的に拒否し、高速版のreference-onlyは比較専用とします。
+
+source_tree_sha256 は同梱ツリーの一覧、replacements_sha256 は段階別の完成形一覧を
+識別します。旧patch_sha256は既存バイナリの検証記録との対応・由来情報としてのみ残し、
+新しいソースの検証済み証明には使いません。NLCCの読込はsource-tree識別子が存在する場合、
+未知の値を追加で拒否します。今後の数値変更には改めて検証が必要です。
+ソース・一覧・ハッシュは同じコミットで更新し、共有カーネルの一致と影響するプロファイルの
+ビルド・回帰を確認します。独立HSE資源部品と本体TDDFTの接続は引き続き次段階です。

@@ -244,3 +244,7 @@ TDDFTの保存用GSは状態の参照で保持し、初期モデルclose後も�
 GS書き出しは新しいexporter付きGammaRestartConverterを明示指定します。実数/複素数の直列Γ点のみ、原子単位のgs_eigen.dataとネイティブ占有数の一致を必須にします。密度は軌道と占有数から再構成し、混合履歴の保存と呼びません。provenanceに由来・元GS等のhash・局所チャネルを記録し、再入力時の局所チャネルも検査します。実GSを収集せず合成データで接続試験することと物理検証を区別します。
 
 複数k点は新しいSerialRestartConverterを明示指定し、座標軸に沿う直交セル・直列・非スピン分極のみです。GammaRestartConverterはΓ限定を維持します。元GS書き出しは検証済み通常kmeshとgs_k.dataを照合し、再入力はhash付きkpoints.datをfile_kwへ渡します。密度・電子数はk点重みを含めます。波動関数/占有数と、k点テキスト・重み再規格化による電流丸め差を区別し、一般メッシュの電流比較はrtol1e-12/atol1e-14を使います。
+
+## 本体ソースの管理（2026-11-15）
+
+本体ソースはruntime/sourcesに同梱し、段階別完成形はruntime/overridesで管理します。外部SALMONのcloneや互換パッチ適用を案内せず、`python -m salmonpy.runtime build NEW_BUILD --jobs N`を明示的ビルド入口にします。HSEは高速PR版のみ。標準版でUSE_HSEを有効にして代替しません。元コミット・ライセンス・全ファイルのハッシュを保持し、import時はビルドしません。旧patch_sha256は由来と過去記録の互換用識別子で、新しいソースの認証ではありません。新規数値変更はsource-tree/replacementsのハッシュと対応する検証を更新します。

@@ -1,0 +1,43 @@
+# SALMON sources
+set(SALMON_SOURCES)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/parallel)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/io)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/math)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/gs)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/rt)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/xc)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/atom)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/poisson)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/maxwell)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/common)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ext)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/misc)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/symmetry)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/so)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/plusu)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ms)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ttm)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/paw)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ssbe)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/analysis)
+
+# Executable binary
+add_executable(${TARGET_NAME} main.f90 ${SALMON_SOURCES})
+target_link_libraries(${TARGET_NAME} ${EXTERNAL_LIBS})
+if(USE_EXX_CUFFT)
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/xc/exx_cufft.f90
+    ${CMAKE_CURRENT_SOURCE_DIR}/xc/exx_k_cufft.f90
+    PROPERTIES COMPILE_OPTIONS "-acc")
+  target_link_options(${TARGET_NAME} PRIVATE -acc -cudalib=cufft)
+endif()
+if(EXTERNAL_PROJECT_TARGETS)
+  add_dependencies(${TARGET_NAME} ${EXTERNAL_PROJECT_TARGETS})
+endif()
+
+# Install binary
+install(TARGETS ${TARGET_NAME} DESTINATION "bin")
+
+add_dependencies(${TARGET_NAME} salmonpy_prohibition_sources)
+add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+  COMMAND "${Python3_EXECUTABLE}" "${SALMONPY_CHECKER}" --object-tree "${CMAKE_BINARY_DIR}" VERBATIM)

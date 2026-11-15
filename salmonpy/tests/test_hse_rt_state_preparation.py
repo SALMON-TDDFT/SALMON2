@@ -26,11 +26,12 @@ class HSEStatePreparation(unittest.TestCase):
                 prepare.prepare(self.source,self.source/'nested')
         self.assertFalse((self.source/'nested').exists())
 
-    def test_wrong_pin_rejected_before_creating_output(self):
-        with patch.object(prepare.subprocess,'check_output',return_value='0'*40):
-            with self.assertRaisesRegex(ValueError,'pinned PR'):
-                prepare.prepare(self.source,self.output)
-        self.assertFalse(self.output.exists())
+    def test_corrupt_bundled_source_is_not_approved(self):
+        with patch.object(prepare.store,'copy_tree',side_effect=ValueError('source hash changed')):
+            with self.assertRaisesRegex(ValueError,'source hash changed'):
+                prepare.prepare(self.output)
+        marker=json.loads((self.output/'salmonpy-hse-rt-state.json').read_text())
+        self.assertEqual(marker['status'],'failed-not-approved')
 
     def test_existing_evidence_is_preserved(self):
         self.output.mkdir();keep=self.output/'keep';keep.write_text('existing evidence')

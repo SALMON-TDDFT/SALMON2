@@ -2,7 +2,7 @@ name: TDDFT native worker
 on:
   workflow_dispatch:
   push:
-    paths: ['salmonpy/**', 'native/**', 'runtime/**', 'tools/prepare_salmon_runtime.py', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
+    paths: ['salmonpy/**', 'native/**', 'runtime/**', 'tools/prepare_salmon_runtime.py', 'tools/runtime_sources.py', 'tools/test_tddft_entrypoint.py', '.github/workflows/tddft-worker.yml']
 permissions:
   contents: read
 jobs:
@@ -17,16 +17,10 @@ jobs:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y gfortran libopenblas-dev
       - run: python -m pip install numpy
-      - name: Obtain pinned upstream SALMON source
-        uses: actions/checkout@v4
-        with:
-          repository: SALMON-TDDFT/SALMON2
-          ref: 3322d0561c0cad5180679136b3eddbe8b909487c
-          path: upstream-salmon
       - name: Test runtime preparation
-        run: python tools/test_runtime_preparation.py upstream-salmon
+        run: python tools/test_runtime_preparation.py
       - name: Prepare optional external runtime
-        run: python tools/prepare_salmon_runtime.py upstream-salmon "$RUNNER_TEMP/salmon-runtime"
+        run: python tools/prepare_salmon_runtime.py "$RUNNER_TEMP/salmon-runtime"
       - name: Build and audit current executable
         shell: bash
         run: |

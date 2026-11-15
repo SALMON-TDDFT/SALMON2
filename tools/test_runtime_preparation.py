@@ -27,6 +27,7 @@ class PreparationTests(unittest.TestCase):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('upstream')
-    UPSTREAM=Path(parser.parse_args().upstream).resolve()
+    parser.add_argument('upstream',nargs='?')
+    value=parser.parse_args().upstream
+    UPSTREAM=Path(value).resolve() if value else None
     unittest.main(argv=['test_runtime_preparation'])

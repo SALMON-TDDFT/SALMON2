@@ -2,9 +2,9 @@ name: LD wheels
 on:
   workflow_dispatch:
   push:
-    paths: ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', '.github/workflows/ld-wheels.yml']
+    paths: ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', 'runtime/**', '.github/workflows/ld-wheels.yml']
   pull_request:
-    paths: ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', '.github/workflows/ld-wheels.yml']
+    paths: ['.gitattributes', 'salmonpy/**', 'packaging/ld/**', 'pyproject.toml', 'tools/**', 'native/**', 'runtime/**', '.github/workflows/ld-wheels.yml']
 permissions:
   contents: read
 jobs:

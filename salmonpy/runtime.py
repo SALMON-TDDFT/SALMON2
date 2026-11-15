@@ -166,7 +166,8 @@ def load_runtime(directory, *, required=(), host=None):
         receipt = json.loads((Path(directory).expanduser().resolve()/relative).read_text())
         from ._runtime_capabilities import validate_nlcc_receipt
         scope = validate_nlcc_receipt(receipt, executable_sha256=engine.sha256,
-            source_patch_sha256=meta.get('provenance', {}).get('patch_sha256'))
+            source_patch_sha256=meta.get('provenance', {}).get('patch_sha256'),
+            source_tree_sha256=meta.get('provenance', {}).get('source_tree_sha256'))
         object.__setattr__(engine, '_nlcc_force_xc', scope)
     return engine
 
@@ -191,7 +192,8 @@ def load_validated_build(build_record, validation_record):
     if receipt.get('build_executable_sha256') != record['sha256']:
         raise InputError('NLCC evidence belongs to another build')
     scope = validate_nlcc_receipt(receipt, executable_sha256=record['sha256'],
-                                source_patch_sha256=record.get('source',{}).get('patch_sha256'))
+                                source_patch_sha256=record.get('source',{}).get('patch_sha256'),
+                                source_tree_sha256=record.get('source',{}).get('source_tree_sha256'))
     engine = SalmonExecutable(exe,record['sha256'])
     object.__setattr__(engine,'_nlcc_force_xc',scope)
     return engine
@@ -259,7 +261,7 @@ def install_runtime(directory, *, catalog=None, required=(), artifact=None, host
             raise
 
 
-def build_runtime(upstream, directory, *, jobs, cmake_args=()):
+def build_runtime(upstream=None, directory=None, *, jobs, cmake_args=()):
     """Explicit local build. Retain logs/source on failure; no dependency install.
 
     Returns the audited executable path and hash, not a portable distribution or
@@ -276,13 +278,16 @@ def build_runtime(upstream, directory, *, jobs, cmake_args=()):
     checker = resources/'tools/check_forbidden_eigensolvers.py'
     if not prepare.is_file() or not checker.is_file():
         raise RuntimeFailure('runtime build resources missing; reinstall a complete SALMONpy wheel')
+    if directory is None:
+        directory, upstream = upstream, None
+    if directory is None:
+        raise InputError('a new build directory is required')
     work = Path(directory).expanduser().resolve()
-    upstream = Path(upstream).expanduser().resolve()
-    if work.is_relative_to(upstream) or work.is_relative_to(resources):
+    if work.is_relative_to(resources) or (upstream is not None and work.is_relative_to(Path(upstream).expanduser().resolve())):
         raise InputError('build directory must be outside source checkouts')
     work.mkdir(parents=True, exist_ok=False)
     commands = [
-        [sys.executable, str(prepare), str(upstream), str(work/'source')],
+        [sys.executable, str(prepare), str(work/'source')],
         ['cmake', '-S', str(work/'source'), '-B', str(work/'build'), *cmake_args,
          '-DCMAKE_REQUIRE_FIND_PACKAGE_LAPACK=TRUE', '-DCMAKE_REQUIRE_FIND_PACKAGE_LIBXCF90=TRUE'],
         ['cmake', '--build', str(work/'build'), '--target', 'salmon', '--parallel', str(jobs)],
@@ -320,8 +325,8 @@ def main(argv=None):
         if name == 'install':
             p.add_argument('directory'); p.add_argument('--artifact')
             p.add_argument('--archive', help='local ZIP downloaded from CI; verified against the catalog')
-    p = sub.add_parser('build', help='explicit source build; requires compilers, libraries, CMake and Git')
-    p.add_argument('upstream'); p.add_argument('directory')
+    p = sub.add_parser('build', help='explicit source build; requires compilers, libraries and CMake; uses bundled sources')
+    p.add_argument('upstream', help='new output directory, or legacy upstream argument'); p.add_argument('directory', nargs='?')
     p.add_argument('--jobs', required=True, type=int)
     p.add_argument('--cmake-arg', action='append', default=[], help='repeat --cmake-arg=-DNAME=VALUE')
     p = sub.add_parser('verify')

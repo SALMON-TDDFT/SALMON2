@@ -2,10 +2,10 @@
 
 Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
 
-> Standalone layout: full SALMON sources are no longer bundled. Source-checkout
-> runtime setup: `runtime/README.md`; use `tools/prepare_salmon_runtime.py` with
-> the pinned external upstream checkout. Historical validation commands below
-> describe the old source layout and are not current build instructions.
+> Solver sources are bundled under `runtime/sources` (inside `_runtime_source`
+> in wheels). Prepare a new external build directory using the current runtime
+> guide. No upstream checkout or compatibility-patch application is required.
+> Historical validation commands below describe earlier layouts.
 
 [日本語](README.md) · Topic: `getting-started` · Paired revision: `2026-11-13.4`
 

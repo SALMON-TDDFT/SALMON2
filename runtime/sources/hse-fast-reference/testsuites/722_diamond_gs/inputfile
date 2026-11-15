@@ -1,0 +1,75 @@
+&calculation
+  theory='dft'
+/
+
+&control
+  sysname = 'diamond'
+/
+
+&units
+  unit_system = 'a.u.'
+/
+
+&system
+  yn_periodic = 'y'
+  al = 6.72d0, 6.72d0, 6.72d0
+  nstate = 32
+  nelec = 32
+  nelem = 1
+  natom = 8
+/
+
+&pseudo
+  izatom(1) = 6
+  file_pseudo(1) = './C_rps.dat'
+  lloc_ps(1) = 1
+/
+
+&functional
+  xc = 'PZ'
+/
+
+&rgrid
+  num_rgrid(1:3) = 12, 12, 12
+/
+
+&kgrid
+  num_kgrid = 4, 4, 4
+/
+
+&tgrid
+  nt = 3000
+  dt = 0.16
+/
+
+&scf
+  ncg = 4
+  nscf = 120
+  threshold = 1.d-9
+/
+
+&emfield
+  trans_longi = 'lo'
+  ae_shape1 = 'impulse'
+  epdir_re1 = 0., 0., 1.
+/
+
+&analysis
+  nenergy = 1000
+  de = 0.001
+  yn_out_tm = "y"
+  yn_out_dos = "y"
+  yn_out_dos_set_fe_origin = "y"
+/
+
+&atomic_red_coor
+  'C'   .0      .0      .0      1
+  'C'   .25     .25     .25     1
+  'C'   .5      .0      .5      1
+  'C'   .0      .5      .5      1
+  'C'   .5      .5      .0      1
+  'C'   .75     .25     .75     1
+  'C'   .25     .75     .75     1
+  'C'   .75     .75     .25     1
+/
+

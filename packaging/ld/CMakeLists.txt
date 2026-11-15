@@ -55,7 +55,7 @@ install(FILES "${ROOT}/salmonpy/runtime.py" "${ROOT}/salmonpy/runtime_catalog.js
 install(FILES "${ROOT}/tools/prepare_salmon_runtime.py" "${ROOT}/tools/check_forbidden_eigensolvers.py"
   DESTINATION salmonpy/_runtime_source/tools)
 install(DIRECTORY "${ROOT}/runtime/" DESTINATION salmonpy/_runtime_source/runtime
-  FILES_MATCHING PATTERN "*.json" PATTERN "*.patch")
+  PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
 install(DIRECTORY "${ROOT}/native/" DESTINATION salmonpy/_runtime_source/native
   FILES_MATCHING PATTERN "*.f90")
 
@@ -120,3 +120,7 @@ install(FILES "${ROOT}/tests/native/test_hse_rt_state.f90" DESTINATION salmonpy/
 
 install(FILES "${ROOT}/tools/test_hse_explicit_state.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_hse_explicit_state.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_hse_resource_context.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tools/runtime_sources.py" DESTINATION salmonpy/_runtime_source/tools)

@@ -27,3 +27,8 @@ source/hash provenance are retained in salmonpy/examples/si_intro_data/.
 This legacy KY data file does not encode pseudopotential-generator metadata;
 the starter follows its accompanying upstream PZ example and does not certify
 transferability or convergence for other conditions.
+
+Bundled full solver snapshots: see runtime/sources/standard/LICENSE.THIRD-PARTY
+and runtime/sources/hse-fast-reference/LICENSE.THIRD-PARTY, including their
+ACKNOWLEDGEMENTS and file-specific license headers. These notices are retained
+in installed source resources and in explicitly packaged solver runtimes.

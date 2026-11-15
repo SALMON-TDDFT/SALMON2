@@ -3,15 +3,14 @@
 Full-runtime setup: prefer a compatible prebuilt binary, with an explicit source-build fallback. See [runtime guide](salmonpy/RUNTIME.en.md). Branch CI artifacts and public releases are distinct.
 
 Python components for material response, electronic dynamics, electromagnetic
-simulation and visualization. This is the independent SALMONpy repository; it is not a SALMON application
-source checkout.
+simulation and visualization. This is the independent SALMONpy repository; it includes pinned solver sources maintained with the Python integration.
 
 - [English guide](salmonpy/README.en.md) · [日本語ガイド](salmonpy/README.md)
 - [Python examples](salmonpy/examples/README.en.md) · [サンプル集](salmonpy/examples/README.md)
 - [Optional full SALMON runtime](runtime/README.md)
 - [AI task catalog](salmonpy/manual.json)
 
-The wheel bundles only the LD/SBE native kernels. DFT, TDDFT, bands and FDTD use
+The wheel compiles LD/SBE native kernels and also carries the full solver sources for explicit builds. DFT, TDDFT, bands and FDTD use
 a separately built compatible SALMON executable. No compilation occurs on import.
 
 ## Repository layout
@@ -21,7 +20,7 @@ a separately built compatible SALMON executable. No compilation occurs on import
 | `salmonpy/` | Python APIs, C ABI wrappers, examples, bilingual guides and tests |
 | `native/` | Three shared LD/SBE Fortran kernel files |
 | `packaging/` | Wheel build/repair configuration and runtime license notices |
-| `runtime/` | Pinned upstream revision and compatibility patch for optional full SALMON |
+| `runtime/` | Complete solver sources, hash inventories and stage-specific replacement files |
 | `tests/native/` | Independent numerical reference routines and native checks |
 | `tools/` | SALMONpy packaging, runtime preparation and integration checks |
 | `docs/` | Design and validation history; older source paths describe past layouts |

@@ -58,6 +58,13 @@ class NLCCCapabilities(unittest.TestCase):
             with self.subTest(token=token),self.assertRaises(InputError):runtime.load_validated_build(*self.records(token))
         b,v=self.records();self.exe.write_bytes(b'changed')
         with self.assertRaises(InputError):runtime.load_validated_build(b,v)
+    def test_unknown_source_tree_cannot_reuse_legacy_patch_identity(self):
+        b,v=self.records();data=json.loads(b.read_text())
+        data['source']['source_tree_sha256']='0'*64;b.write_text(json.dumps(data))
+        with self.assertRaises(InputError):runtime.load_validated_build(b,v)
+        from salmonpy._runtime_capabilities import NLCC_SOURCE_TREE_SHA256
+        data['source']['source_tree_sha256']=NLCC_SOURCE_TREE_SHA256;b.write_text(json.dumps(data))
+        self.assertIn('libxc_pbe',runtime.load_validated_build(b,v).nlcc_force_xc)
     def test_bundle_feature_without_valid_receipt_is_not_trusted(self):
         from salmonpy._runtime_capabilities import NLCC_PATCH_SHA256
         bundle=self.root/'bundle';(bundle/'bin').mkdir(parents=True);exe=bundle/'bin/salmon';exe.write_bytes(b'fixture');exe.chmod(0o755)
