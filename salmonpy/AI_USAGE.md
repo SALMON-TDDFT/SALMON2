@@ -300,3 +300,19 @@ s_rgrid_configとinit_grid_whole_configは、実空間格子の境界・halo・�
 resolve_cellはs_cell_configからセル形状と格子間隔を決める内部ルーチンです。結果は値として独立し、
 不正値・体積ゼロでは変更しません。native互換層のglobal al正規化とk/pseudo/XCの依存は残るため、
 セル設定全体の独立化や異なるセルのTDDFT対応済みとは案内しません。
+
+
+内部Fortranのk点・radial擬ポテンシャル・XC入力はs_kpoint_config / s_pp_input_config / s_xc_configへ分離しました。
+RUNTIME.md/enの「入力の所有」に従い、値設定はコピー、初期化済みLibxc/HSEハンドルはコピー禁止です。
+calc_xcのpre_scf_active省略は本計算を意味します。互換ラッパーは既存SCF段階を明示的に渡します。
+下位部品の異設定・共有入力変更テストを、異物質TDDFT全体・MPI・同時呼出し対応と説明しないでください。
+SOC/+U専用処理・SCF/アルゴリズム・MPI/ファイル単位の共有は残り、共通grid/k/XCガードを維持します。
+検査範囲はdocs/shared-input-validation-2026-11-15.mdで確認し、未検証PP形式や物理収束を保証しません。
+
+
+スカラー擬ポテンシャルの格子配置はs_pp_grid_configをppgが保持し、原子数・原子種はsystemから取得します。
+init_ps(config=...)の独立経路はscalar/+Uなし。作成後の設定・原子数・種対応変更は拒否し、位置変更だけ従来順序で更新します。
+SOC/+U専用状態、MPI資源、タイマー、異物質TDDFT全体の共有解消済みとは案内しません。
+検証はdocs/pp-grid-validation-2026-11-15.mdとtools/test_pp_grid_config.pyを参照してください。
+
+PP格子を更新する間、読み込んだradial数値表と格子形状は不変です。表内容は毎stepで再hashせず、設定・構成のみ検査します。

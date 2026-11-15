@@ -17,7 +17,8 @@ program probe
  integer::i,j,k,status
  integer(int64)::state_bytes
  character(8)::mode,isolated
- xc='hse06';theory='tddft_response';propagator='hse_taylor4';num_kgrid=[2,1,1];num_rgrid=2
+ xc='hse06';theory='tddft_response';propagator='hse_taylor4';num_kgrid=[2,1,1]
+  sa%kmesh=[2,1,1];sa%kpoint_input%num_kgrid=[2,1,1];num_rgrid=2
  yn_periodic='y';yn_spinorbit='n';yn_hse_wannier='n';yn_dc='n';yn_md='n';yn_jm='n'
  yn_symmetrized_stencil='n';yn_conventional_from_dcdft='n';temperature=-1d0;nstate=2;nelec=4
  call get_command_argument(1,mode)
@@ -37,7 +38,11 @@ program probe
  enddo
  allocate(sa%vec_k(3,2),sa%wtk(2),sa%rocc(2,2,1))
  sa%vec_k=0d0;sa%vec_k(1,2)=acos(-1d0)/2d0;sa%wtk=.5d0;sa%rocc=2d0
+ sa%xc_input_ready=.true.;sa%xc_input%xcname='hse06'
+ sa%xc_input%exchange_fraction=.25d0;sa%xc_input%screened_exchange=.true.
+ sa%xc_input%hse_omega=.11d0
  sb=sa;sref=sa
+ sb%xc_input%hse_omega=.17d0
  sb%hgs=1.2d0;sb%hvol=1.2d0**3
  sb%primitive_a=1.2d0*sa%primitive_a;sb%primitive_b=sa%primitive_b/1.2d0
  sb%vec_k=sa%vec_k/1.2d0;srefb=sb
@@ -73,6 +78,8 @@ program probe
   call exx_unbind_system(sa);call rt_state_clear(a)
   stop
  endif
+ ! Owned inputs must survive unrelated legacy input changes between calls.
+ num_kgrid=[9,9,9];use_symmetry=.true.;xc='pz';hse_omega=9d0;pbeh_coulomb_radius=7d0
  call refresh(sb,v/sqrt(sb%hvol));call refresh(srefb,v/sqrt(sb%hvol));call action(sa,actual)
  if(any(actual/=expected))stop 4
  call action(sb,saved)

@@ -22,7 +22,12 @@
     "src/common/hamiltonian.f90",
     "src/common/density_matrix.f90",
     "src/common/force.f90",
-    "src/common/initialization.f90"
+    "src/common/initialization.f90",
+    "src/symmetry/symmetry_kvector.f90",
+    "src/common/lattice.f90",
+    "src/atom/pp/input_pp.f90",
+    "src/atom/pp/salmon_pp.f90",
+    "src/atom/pp/prep_pp.f90"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -52,6 +57,6 @@
   ],
   "scope": "explicit serial full-support fast HSE native system ownership; common immutable global configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "a9b38700aadb8b565144b7940264d2000f3d19955a76b8428451a26850e7937d",
+  "replacements_sha256": "774c5a99c4c0c3f45b99336a22bd8ded9c1c6a0776724ec5350203306fd5106d",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

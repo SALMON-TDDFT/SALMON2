@@ -185,6 +185,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
   use exx_functional, only: is_hybrid
+  use salmon_xc, only: xc_input_config
   implicit none
   type(s_rgrid)      :: lg
   type(s_dft_system) :: system
@@ -197,6 +198,8 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   integer :: ii,jj
   real(8) :: rsize(3),hgs(3),cnmat(0:12,12),bnmat(4,4)
 
+  call xc_input_config(system%xc_input)
+  system%xc_input_ready=.true.
   cell_input%lengths=al;cell_input%spacing=dl;cell_input%points=num_rgrid
   cell_input%vectors(:,1)=al_vec1;cell_input%vectors(:,2)=al_vec2;cell_input%vectors(:,3)=al_vec3
   call resolve_cell(cell_input,cell,cell_status)
@@ -220,7 +223,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
     case(0)
       system%if_real_orbital = .true.
     case(3)
-      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1 .and. stencil%if_orthogonal) then
+      if(product(system%kmesh)==1 .and. stencil%if_orthogonal) then
         system%if_real_orbital = .true.
       else
         system%if_real_orbital = .false.

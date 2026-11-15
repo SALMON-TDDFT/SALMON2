@@ -1230,18 +1230,24 @@ subroutine update_kvector_nonlocalpt(ik_s,ik_e,system,ppg)
   !
   integer :: ilma,iatom,j,ik
   real(8) :: x,y,z
+  logical :: use_so,use_plus_u
   complex(8) :: ekr
   real(8),allocatable :: kAc(:,:)
   
+  if(ppg%input_config_ready)then
+    use_so=ppg%input_config%yn_spinorbit=='y';use_plus_u=ppg%input_config%plus_u
+  else
+    use_so=yn_spinorbit=='y';use_plus_u=PLUS_U_ON
+  endif
   allocate(kAc(3,ik_s:ik_e))
   do ik=ik_s,ik_e
     kAc(1:3,ik) = system%vec_k(1:3,ik) + system%vec_Ac(1:3)
   end do
   
-  if ( yn_spinorbit=='y' ) then
+  if ( use_so ) then
     call update_kvector_so( ppg, kAc, ik_s, ik_e )
   end if
-  if ( PLUS_U_ON ) then
+  if ( use_plus_u ) then
     call update_kvector_plusU( ppg, kAc, ik_s, ik_e )
   end if
   

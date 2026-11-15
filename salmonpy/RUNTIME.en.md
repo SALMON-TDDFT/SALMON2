@@ -403,3 +403,26 @@ not completion of global cell/k/pseudo/XC removal or heterogeneous TDDFT support
 `tools/test_cell_config.py HSE_BUILD_RECORD NEW_OUTPUT` checks precedence,
 tilted geometry, independence and failed-call retention. See
 `docs/cell-config-validation-2026-11-15.md`.
+
+
+### Owned k-point, pseudopotential and XC inputs
+
+The fast-HSE development profile separates internal Fortran inputs into value types:
+
+- `s_kpoint_config` → `lattice:init_kvector_config(system, unfold, config)`: deep-copies mesh, shift, k-file, unfolding and symmetry inputs. The effective mesh is `system%kmesh`; HSE consumes that mesh and owned symmetry operations.
+- `s_pp_input_config` → `salmon_pp:read_pslfile(system, pp, config)`: copies species, files, local channels and masking settings into `pp%input_config`. Detected formats and parser scratch flags also belong to `pp`.
+- `s_xc_config` → `salmon_xc:init_xc_config(functional, config, status)`: retains functional identity, spin, coefficients, HSE screening and rVV10 settings. Never copy initialized Libxc handles; call `finalize_xc` before reinitializing. `calc_xc(..., pre_scf_active=...)` takes an explicit evaluation phase, defaulting to production.
+
+Legacy entries remain input-capture adapters. Explicit paths never temporarily swap shared input. These are internal initialization/evaluation components, not new public Python or C interfaces. Specialized SOC/+U PP setup, SCF phase/algorithm controls, communicators and file units still have shared dependencies. Full native TDDFT therefore retains its common grid/k/XC guard. These internal interfaces assume validated input and do not guarantee atomic failure for all native errors or I/O failures.
+
+Run `tools/test_kpoint_config.py`, `tools/test_pp_input_config.py` and `tools/test_xc_input_config.py` with `HSE_BUILD_RECORD NEW_OUTPUT`. See `docs/shared-input-validation-2026-11-15.md` for measured scope and limitations.
+
+
+### Scalar pseudopotential grid placement
+
+The internal `prep_pp_sub:init_ps(..., config=...)` copies `s_pp_grid_config` into `ppg`.
+Periodicity, Poisson/FFT selection and diagnostics are fixed at construction; the legacy entry also retains its first captured configuration.
+Atom count/species come from `system`, and species count from loaded PP arrays. Updates with changed atom count, species mapping, grid geometry, radial layout or configuration are rejected. Reuse the same loaded radial numerical tables unchanged: guards check configuration/layout, not table contents, and do not hash or copy full tables each step. Position changes retain the existing `dealloc_init_ps` → `init_ps` sequence and are compared with a fresh grid at the same geometry.
+Cache, interpolation and projector communication-table helpers use owned array sizes. NLCC grid placement reads `system%kion` and the periodicity captured by the radial loader.
+
+The explicitly independent path is scalar, without +U. Legacy SOC/+U entries remain, but their specialized shared state has not been extracted. MPI resource ownership, global timers and heterogeneous full-TDDFT restrictions remain. Run `tools/test_pp_grid_config.py HSE_BUILD_RECORD NEW_OUTPUT` for the focused probe.

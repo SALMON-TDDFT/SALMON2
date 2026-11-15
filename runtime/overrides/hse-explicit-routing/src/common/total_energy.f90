@@ -567,9 +567,9 @@ CONTAINS
 
     call timer_begin(LOG_EIGEN_ENERGY_HPSI)
 #ifdef USE_HSE
-    if(exx_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc-exx_system_energy(system)
+    if(exx_enabled(system).and.yn_dc/='y')energy%E_xc=energy%E_xc-exx_system_energy(system)
     call exx_refresh(system,mg,info,tpsi)
-    if(exx_enabled().and.yn_dc/='y')energy%E_xc=energy%E_xc+exx_system_energy(system)
+    if(exx_enabled(system).and.yn_dc/='y')energy%E_xc=energy%E_xc+exx_system_energy(system)
 #endif
     call hpsi(tpsi,htpsi,info,mg,V_local,system,stencil,srg,ppg,ttpsi)
     call timer_end(LOG_EIGEN_ENERGY_HPSI)
@@ -804,7 +804,7 @@ CONTAINS
 #ifdef USE_HSE
     ! Scalar nonlocal energy is inferred from Hpsi and includes Fock exchange.
     ! SOC evaluates pseudo_so directly, so its ionic energy has no Fock term.
-    if(exx_enabled().and.yn_spinorbit=='n')energy%E_ion_nloc=energy%E_ion_nloc-2d0*exx_system_energy(system)
+    if(exx_enabled(system).and.yn_spinorbit=='n')energy%E_ion_nloc=energy%E_ion_nloc-2d0*exx_system_energy(system)
 #endif
     call timer_end(LOG_EIGEN_ENERGY_COMM_COLL)
 

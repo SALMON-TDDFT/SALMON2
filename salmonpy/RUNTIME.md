@@ -321,3 +321,34 @@ DFT/RT初期化もこのルーチンを使います。互換層には後続処�
 セル/k点/擬ポテンシャル/XCの共有入力の完全分離や、異なるセルのTDDFT全体への対応ではありません。
 `tools/test_cell_config.py HSE_BUILD_RECORD NEW_OUTPUT`で優先順位・斜交セル・独立性・
 失敗時の保持を検査します。記録は`docs/cell-config-validation-2026-11-15.md`です。
+
+
+### k点・擬ポテンシャル・XC入力の所有
+
+高速HSE開発プロファイルでは、内部Fortranの入力を次の値型へ分離しています。
+
+- `s_kpoint_config` → `lattice:init_kvector_config(system, unfold, config)`。メッシュ・シフト・k点ファイル・unfold・対称操作をコピーし、実効メッシュを`system%kmesh`に保持します。HSEもこのメッシュと対称操作を参照します。
+- `s_pp_input_config` → `salmon_pp:read_pslfile(system, pp, config)`。元素・ファイル・局所チャネル・マスクなどを`pp%input_config`へコピーします。検出形式とパーサーの作業フラグも`pp`が所有します。
+- `s_xc_config` → `salmon_xc:init_xc_config(functional, config, status)`。汎関数名・スピン・係数・HSE遮蔽・rVV10設定を保持します。初期化済みLibxcハンドルはコピーせず、再初期化前に`finalize_xc`を呼びます。`calc_xc(..., pre_scf_active=...)`は評価段階を明示し、省略時は本計算です。
+
+従来の入口は入力を取得する互換層として残します。明示経路は共有入力を一時的に切り替えません。
+これは内部の初期化・評価部品の分離です。SOC/+U専用の擬ポテンシャル処理、SCF段階・アルゴリズム設定、MPIとファイル単位には共有が残ります。異なるk点・XC・物質を持つTDDFT全体の同居はまだ許可しません。内部入力は検証済み設定を前提とし、I/O失敗などの全失敗原子性は保証しません。
+
+検査ツールは`tools/test_kpoint_config.py`、`tools/test_pp_input_config.py`、`tools/test_xc_input_config.py`です（引数は`HSE_BUILD_RECORD NEW_OUTPUT`）。検証範囲と結果は`docs/shared-input-validation-2026-11-15.md`を参照してください。
+
+
+### スカラー擬ポテンシャルの格子配置
+
+`prep_pp_sub:init_ps(..., config=...)`は内部値型`s_pp_grid_config`をコピーし、`ppg`に保持します。
+周期性・Poisson/FFT選択・診断設定は作成時に固定し、省略時の従来入口も最初の取得後は保持します。
+原子数・原子種対応は`system`、元素数は読み込んだ擬ポテンシャル配列から取得します。
+原子数・種対応・格子形状・格子配置設定・radial配列構成が変わる更新は拒否します。
+読み込んだradial数値表は変更せず同じものを再利用してください。検査対象は設定と配列構成で、
+毎ステップの表内容のハッシュ計算・全コピーは行いません。原子位置の変更には従来の
+`dealloc_init_ps` → `init_ps`の順序を使い、同じ設定で新規作成した結果との一致を検査します。
+キャッシュ・補間・射影子の通信表も、共有の原子数ではなく所有配列のサイズを使います。
+NLCCの格子配置は、`system%kion`と読み込み時に保持した周期性を参照します。
+
+明示的に独立な入口はスカラー・+Uなしです。従来のSOC/+U入口は残しますが、専用モジュールの
+共有状態を分離したとは説明しません。MPI通信資源・グローバルなタイマー・異物質TDDFT全体の
+制約も残ります。検査は`tools/test_pp_grid_config.py HSE_BUILD_RECORD NEW_OUTPUT`です。

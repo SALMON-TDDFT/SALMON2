@@ -62,12 +62,38 @@ module structures
     real(8),allocatable :: rho_s_1d(:),rho_s_sp_1d(:,:),exc_1d(:),eexc_1d(:),vexc_1d(:),vexc_sp_1d(:,:)
   end type
   type s_xc_workspace
+    logical :: rv_reported=.false.
     integer :: grid(3)=0,spins=0
     real(8),allocatable :: rho_tmp(:,:,:),rho_s_tmp(:,:,:,:),eexc_tmp(:,:,:),vxc_tmp(:,:,:),vxc_s_tmp(:,:,:,:)
     type(s_xc_pz_workspace) :: pz
   end type
 
+  type s_kpoint_config
+    integer :: num_kgrid(3)=[1,1,1],num_lkgrid(3)=[1,1,1],num_skgrid(3)=[1,1,1]
+    real(8) :: dk_shift(3)=0d0
+    character(256) :: file_kw='none',dm_unfold_option='no'
+    character(1) :: yn_gamma_centered='n'
+    logical :: use_symmetry=.false.,display=.false.
+    real(8),allocatable :: symmat_b(:,:,:),symmat_a(:,:,:)
+  end type
+
+  type s_xc_config
+ character(256) :: xcname='none', xname='none', cname='none'
+ character(32) :: spin='unpolarized'
+ real(8) :: cval=0d0, hse_omega=0.11d0
+ real(8) :: pbeh_coulomb_radius=0d0
+ real(8) :: exchange_fraction=0d0
+ logical :: screened_exchange=.false., use_rvv10=.false.
+ real(8) :: rvv10_b=6.3d0, rvv10_c=0.0093d0
+ integer :: rvv10_nq=20
+ character(32) :: rvv10_fft='ffte'
+  end type
+
   type s_dft_system
+    type(s_xc_config) :: xc_input
+    logical :: xc_input_ready=.false.
+    integer :: kmesh(3)=[1,1,1]
+    type(s_kpoint_config) :: kpoint_input
     type(s_xc_workspace) :: xc_work
     ! Borrowed explicit HSE owner; never copied as an owning handle.
     class(*),pointer :: salmonpy_hse_owner=>null()
@@ -256,7 +282,21 @@ module structures
   end type s_stencil
 
 ! pseudopotential
+  type s_pp_input_config
+    integer :: iperiodic=3, nelem=0
+    integer,allocatable :: izatom(:),lloc_ps(:),lmax_ps(:)
+    character(256),allocatable :: file_pseudo(:)
+    character(1) :: yn_psmask='n',yn_spinorbit='n',yn_pseudo_atomic_orbital='n'
+    real(8) :: alpha_mask=0d0,eta_mask=0d0,gamma_mask=0d0
+    character(16) :: method_init_density=''
+    logical :: quiet=.false.
+    character(256) :: base_directory=''
+  end type s_pp_input_config
+
   type s_pp_info
+    type(s_pp_input_config) :: input_config
+    character(16),allocatable :: ps_format(:)
+    logical :: flag_potential_is_given=.true.,flag_beta_proj_is_given=.false.,flag_so=.false.
     real(8) :: zion ! ionic charge read from the pseudopotential file
     integer :: lmax,lmax0 ! angular-momentum capacities: element tables and work arrays
     integer :: nrmax,nrmax0 ! radial capacities: element tables and work arrays
@@ -318,7 +358,20 @@ module structures
   end type s_pp_info
 
 ! pseudopotential on r-space grid
+  type s_pp_grid_config
+    integer :: iperiodic=3
+    logical :: quiet=.false.,plus_u=.false.
+    character(1) :: yn_spinorbit='n',yn_ffte='n',yn_fftw='n'
+    character(16) :: method_poisson='cg'
+  end type
+
   type s_pp_grid
+    type(s_pp_grid_config) :: input_config
+    logical :: input_config_ready=.false.
+    integer,allocatable :: atom_species(:),radial_layout(:)
+    type(s_pp_input_config) :: radial_input
+    integer :: grid_layout(18)=0
+    real(8) :: grid_geometry(22)=0d0
     integer :: nps
     integer,allocatable :: mps(:)
     integer,allocatable :: jxyz(:,:,:)
@@ -391,6 +444,7 @@ module structures
 
 ! exchange-correlation functional
   type s_xc_functional
+    type(s_xc_config) :: config
     integer :: xctype(3)
     integer :: ispin
     real(8) :: cval

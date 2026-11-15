@@ -28,10 +28,9 @@ module exx_native
   use exx_spatial
   use exx_wannier
   use exx_symmetry
-  use sym_sub, only: use_symmetry,SymMatA,SymMatB
   use communication, only: comm_summation,comm_alltoall,comm_get_max,comm_bcast
   use salmon_global, only: xc,yn_periodic,yn_spinorbit,yn_jm,yn_dc,yn_md,yn_predictor_corrector, &
-    yn_symmetrized_stencil,propagator,num_kgrid,hse_omega, &
+    yn_symmetrized_stencil,propagator,hse_omega, &
     pbeh_coulomb_radius,theory,yn_conventional_from_dcdft,num_rgrid,temperature,nstate,nelec, &
     yn_hse_wannier,exx_mlwf_interval,exx_mlwf_maxiter,exx_mlwf_tolerance,exx_mlwf_radius,exx_mlwf_norm_fraction,exx_local_fft, &
     exx_factor_exact_interval,exx_factor_warmup_steps,exx_factor_n_teach, &
@@ -71,6 +70,40 @@ contains
     type(s_exx_rt_state),pointer::owner
     owner=>resolve_rt_context(system=system)
   end function
+  function system_functional(system) result(name)
+    type(s_dft_system),intent(in) :: system
+    character(256) :: name
+    if(system%xc_input_ready)then
+      name=system%xc_input%xcname
+    else
+      name=xc
+    endif
+  end function
+  real(8) function system_coulomb_radius(system) result(value)
+    type(s_dft_system),intent(in) :: system
+    if(system%xc_input_ready)then
+      value=system%xc_input%pbeh_coulomb_radius
+    else
+      value=pbeh_coulomb_radius
+    endif
+  end function
+  real(8) function system_exchange_fraction(system) result(value)
+    type(s_dft_system),intent(in) :: system
+    if(system%xc_input_ready)then
+      value=system%xc_input%exchange_fraction
+    else
+      value=exchange_fraction()
+    endif
+  end function
+  real(8) function system_exchange_screening(system) result(value)
+    type(s_dft_system),intent(in) :: system
+    if(system%xc_input_ready)then
+      value=0d0
+      if(system%xc_input%screened_exchange)value=system%xc_input%hse_omega
+    else
+      value=exchange_screening()
+    endif
+  end function
   real(8) function exx_system_energy(system) result(value)
     type(s_dft_system),intent(in)::system
     type(s_exx_rt_state),pointer::owner
@@ -94,8 +127,8 @@ contains
   logical function native_owner_supported(system,info) result(ok)
     type(s_dft_system),intent(in)::system
     type(s_parallel_info),intent(in)::info
-    ok=xc=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
-      yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and..not.use_symmetry.and. &
+    ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
+      yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and..not.system%kpoint_input%use_symmetry.and. &
       info%isize_r==1.and.info%isize_o==1.and.info%isize_k==1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
   end function
@@ -200,7 +233,7 @@ contains
     if(mod(nelec,2)/=0.or.occupied<1.or.occupied>system%no)return
     if(maxval(abs(system%rocc(:occupied,:,:)-2d0))>1d-12)return
     if(system%no>occupied)then
-      if(yn_dc/='n'.or.product(num_kgrid)==1)return
+      if(yn_dc/='n'.or.product(system%kmesh)==1)return
       if(maxval(abs(system%rocc(occupied+1:,:,:)))>1d-12)return
     endif
     valid=.true.
@@ -217,7 +250,7 @@ contains
     type(s_parallel_info),intent(in)::info
     exx_state_owner=>resolve_rt_context(rt_context,system)
     valid=yn_spinorbit=='y'.and.temperature>=0d0.and.exx_factor_mode=='learned'.and. &
-      product(num_kgrid)>1.and.exx_kpoint_backend=='cpu'.and. &
+      product(system%kmesh)>1.and.exx_kpoint_backend=='cpu'.and. &
       info%isize_r==1.and.info%isize_o==1.and.info%numm==1.and. &
       all(hse_q_reduction==1).and.exx_state_owner%factor_restart_step<0
   end function
@@ -270,9 +303,9 @@ contains
         if(exx_factor_mode/='strict'.and.exx_factor_mode/='learned')error stop 'Invalid factor history mode'
         exx_state_owner%factor_learned=exx_factor_mode=='learned'
 
-        if(xc/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
+        if(system_functional(system)/='hse06'.or.yn_dc/='n'.or.yn_md/='n'.or. &
           propagator/='hse_taylor4'.or. &
-          product(num_kgrid)<2.or.hse_sr_tolerance/=0d0.or. &
+          product(system%kmesh)<2.or.hse_sr_tolerance/=0d0.or. &
           exx_mlwf_radius/=0d0.or. &
           exx_mlwf_norm_fraction/=0d0.or.exx_ace_support/='occupied'.or. &
           exx_pair_screening/='off'.or. &
@@ -281,12 +314,12 @@ contains
           error stop 'Factor history requires static full-support dense-k HSE and compatible occupations'
         if(info%isize_o>1.and..not.distributed_metric_available(info%icomm_ro)) &
           error stop 'Orbital-distributed factor history requires ScaLAPACK'
-        if(product(num_kgrid)>1)then
+        if(product(system%kmesh)>1)then
           if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
             error stop 'Factor k history requires k-only MPI'
           if(info%numk<1.or.info%ik_s<1.or.info%ik_e>system%nk.or. &
              info%ik_e-info%ik_s+1/=info%numk)error stop 'Invalid factor representative k layout'
-          if(.not.use_symmetry.and.product(num_kgrid)/=system%nk) &
+          if(.not.system%kpoint_input%use_symmetry.and.product(system%kmesh)/=system%nk) &
             error stop 'Factor k history requires full mesh without symmetry'
           if(any(hse_q_reduction/=1))error stop 'Factor k history requires all q points'
           do ik=1,system%nk
@@ -296,7 +329,7 @@ contains
           if(any(system%wtk(:system%nk)<=0d0).or. &
              abs(sum(system%wtk(:system%nk))-1d0)>1d-12)error stop 'Invalid factor k weights'
           if(info%id_rko==0)write(*,'(a,l1,2i10)') &
-            'FACTOR_HISTORY symmetry/full/representatives: ',use_symmetry,product(num_kgrid),system%nk
+            'FACTOR_HISTORY symmetry/full/representatives: ',system%kpoint_input%use_symmetry,product(system%kmesh),system%nk
         endif
         if(exx_factor_exact_interval<1)error stop 'Factor interval must be positive'
         allocate(exx_state_owner%factor_history(info%numk))
@@ -688,7 +721,7 @@ contains
     do ik=1,info%numk
     do j=1,info%numo
       io=info%io_s+j-1
-      ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(io,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1) &
+      ex=ex+.5d0*system_exchange_fraction(system)*system%hvol*system%rocc(io,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1) &
         *real(sum(conjg(exx_state_owner%target_work(:,j,ik))*exx_state_owner%action_work(:,j,ik)),8)
     enddo
     enddo
@@ -840,9 +873,10 @@ contains
     exx_state_owner%radius_warning_reported=.true.
   end subroutine warn_fixed_radius
 
-  logical function dc_gamma_pairs_requested()
+  logical function dc_gamma_pairs_requested(system)
     implicit none
-    dc_gamma_pairs_requested=dc_canonical().and.product(num_kgrid)==1.and. &
+    type(s_dft_system),intent(in) :: system
+    dc_gamma_pairs_requested=dc_canonical().and.product(system%kmesh)==1.and. &
       yn_hse_sr_pair_symmetry=='y'.and.hse_sr_tolerance==0d0
   end function
 
@@ -851,10 +885,15 @@ contains
     dc_canonical=yn_dc=='y'.and.yn_exx_dc_mlwf=='n'
   end function
 
-  logical function exx_enabled()
+  logical function exx_enabled(system)
     use exx_functional, only: is_hybrid
     implicit none
-    exx_enabled=(is_hybrid(xc)).and..not.exx_pre_scf_active
+    type(s_dft_system),optional,intent(in) :: system
+    if(present(system))then
+      exx_enabled=is_hybrid(system_functional(system)).and..not.exx_pre_scf_active
+    else
+      exx_enabled=is_hybrid(xc).and..not.exx_pre_scf_active
+    endif
   end function
 
   subroutine exx_pack(psi,mg,info,a)
@@ -927,7 +966,7 @@ contains
         error stop 'Independent HSE owner requires serial full-support non-spinor configuration'
       endif
     endif
-    if(.not.exx_enabled())return
+    if(.not.exx_enabled(system))return
     if(theory=='tddft_response'.or.theory=='tddft_pulse')call factor_configure(system,info, &
       & rt_context=exx_state_owner)
     call factor_check_occupation(system,info,.false., &
@@ -940,7 +979,7 @@ contains
     if(yn_periodic/='y'.or.(system%nspin/=1.and.yn_spinorbit/='y').or..not.allocated(psi%zwf)) &
       error stop 'HSE06: periodic complex unpolarized orbitals required'
     if(yn_md=='y'.and.theory/='dft_md')then
-      if((.not.is_global_hybrid(xc)).or. &
+      if((.not.is_global_hybrid(system_functional(system))).or. &
          (theory/='tddft_response'.and.theory/='tddft_pulse').or.yn_conventional_from_dcdft/='y') &
         error stop 'Hybrid: unsupported real-time ionic extension'
     endif
@@ -951,7 +990,7 @@ contains
     ! Select occupation semantics before the integer-prefix native route.
     ! Nonnegative temperature retains the existing occupation-weighted source.
     if(temperature>=0d0.and.yn_spinorbit/="y")then
-      if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
+      if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested(system).or. &
          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call refresh_spatial(system,mg,info,psi, &
       & rt_context=exx_state_owner)
@@ -961,11 +1000,11 @@ contains
       endif
       return
     endif
-    if((.not.exx_state_owner%factor_experiment.or.product(num_kgrid)==1).and. &
-       (info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
+    if((.not.exx_state_owner%factor_experiment.or.product(system%kmesh)==1).and. &
+       (info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested(system).or. &
         (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0)).and. &
        ((theory=='dft').or. &
-        (yn_dc=='n'.and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(xc)).and. &
+        (yn_dc=='n'.and.(yn_conventional_from_dcdft=='y'.or.is_global_hybrid(system_functional(system))).and. &
          (theory=='tddft_response'.or.theory=='tddft_pulse'))))then
       call refresh_spatial(system,mg,info,psi, &
       & rt_context=exx_state_owner)
@@ -974,7 +1013,7 @@ contains
     if(info%isize_r/=1.or.info%isize_o/=1.or.info%numm/=1) &
       error stop 'HSE06: initial native support requires k-only MPI distribution'
 
-    if(use_wannier_exchange().and.(.not.exx_state_owner%factor_experiment.or.product(num_kgrid)==1))then
+    if(use_wannier_exchange(system).and.(.not.exx_state_owner%factor_experiment.or.product(system%kmesh)==1))then
       call refresh_wannier(system,mg,info,psi, &
       & rt_context=exx_state_owner)
       return
@@ -982,13 +1021,13 @@ contains
     ng=product(mg%num);nk=system%nk;no=system%no;n=mg%num(1);mesh=nint(real(nk,8)**(1d0/3d0))
     if(spinor_pair_fft_requested().and.(exx_kpoint_backend/='cpu'.or.any(hse_q_reduction/=1))) &
       error stop 'Spinor pair FFT requires CPU full-q native exchange'
-    if(use_symmetry.and.any(hse_q_reduction/=1))error stop 'HSE q reduction requires an unreduced k mesh'
-    if(use_symmetry)mesh=num_kgrid(1)
-    if(.not.use_symmetry.and.product(num_kgrid)/=nk) &
+    if(system%kpoint_input%use_symmetry.and.any(hse_q_reduction/=1))error stop 'HSE q reduction requires an unreduced k mesh'
+    if(system%kpoint_input%use_symmetry)mesh=system%kmesh(1)
+    if(.not.system%kpoint_input%use_symmetry.and.product(system%kmesh)/=nk) &
       error stop 'EXX: full uniform k mesh required'
-    if(use_symmetry.and.any(mg%num/=num_rgrid))error stop 'EXX symmetry requires the full real-space grid'
+    if(system%kpoint_input%use_symmetry.and.any(mg%num/=num_rgrid))error stop 'EXX symmetry requires the full real-space grid'
     thermal_spinor=yn_spinorbit=='y'.and.temperature>=0d0
-    if(.not.use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12) &
+    if(.not.system%kpoint_input%use_symmetry.and.maxval(abs(system%wtk-1d0/nk))>1d-12) &
       error stop 'HSE06: uniform k weights required'
     if(.not.thermal_spinor.and..not.native_integer_occupation(system)) &
       error stop 'HSE06: occupied-prefix spin pairs required'
@@ -1002,9 +1041,9 @@ contains
       nullify(create_backend)
       if(exx_kpoint_backend=='cufft')create_backend=>exx_k_cufft_create
       ! Keep representatives persistent; expand only rank-local stars for EXX.
-      if(use_symmetry)then
+      if(system%kpoint_input%use_symmetry)then
         call symmetry_init(exx_state_owner%native_symmetry,mg%num,system%hgs,system%vec_k(:,:nk),system%wtk(:nk), &
-          SymMatA,SymMatB,num_kgrid,ierr,cell=system%primitive_a)
+          system%kpoint_input%symmat_a,system%kpoint_input%symmat_b,system%kmesh,ierr,cell=system%primitive_a)
         call comm_summation(ierr,total_error,info%icomm_rko)
         if(total_error/=0)error stop 'HSE symmetry: invalid grid, stars or weights'
         call symmetry_validate_atoms(exx_state_owner%native_symmetry,system%Rion,system%kion,ierr)
@@ -1012,18 +1051,20 @@ contains
         if(total_error/=0)error stop 'HSE symmetry: operation does not preserve atoms'
         first_full=exx_state_owner%native_symmetry%first(info%ik_s)
         count_full=exx_state_owner%native_symmetry%first(info%ik_e+1)-first_full
-        call exx_k_kernel_init(exx_state_owner%native_kernel,mg%num,num_kgrid,system%hgs,exx_state_owner%native_symmetry%full_k,exchange_screening(), &
+        call exx_k_kernel_init(exx_state_owner%native_kernel,mg%num,system%kmesh,system%hgs, &
+          exx_state_owner%native_symmetry%full_k,system_exchange_screening(system), &
           max(1,min(16,64/info%isize_k)),ierr,first_full,count_full, &
           block_rows=hse_block_rows,fft_layout=hse_fft_layout, &
-          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
+          create_backend=create_backend,coulomb_radius=system_coulomb_radius(system), &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
           defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'), &
           fft_layout_sync=synchronize_fft_layout)
       else
-        call exx_k_kernel_init(exx_state_owner%native_kernel,mg%num,num_kgrid,system%hgs,system%vec_k,exchange_screening(), &
+        call exx_k_kernel_init(exx_state_owner%native_kernel,mg%num,system%kmesh,system%hgs,system%vec_k, &
+          system_exchange_screening(system), &
           max(1,min(16,64/info%isize_k)),ierr,info%ik_s,info%numk, &
           block_rows=hse_block_rows,fft_layout=hse_fft_layout, &
-          create_backend=create_backend,coulomb_radius=pbeh_coulomb_radius, &
+          create_backend=create_backend,coulomb_radius=system_coulomb_radius(system), &
           cell=system%primitive_a,reciprocal=system%primitive_b,q_reduction=hse_q_reduction, &
           defer_fft=spinor_pair_fft_requested().or.(yn_spinorbit=='y'.and.yn_exx_fft_orbits=='y'), &
           fft_layout_sync=synchronize_fft_layout)
@@ -1032,12 +1073,12 @@ contains
       if(total_error/=0)error stop 'HSE06: kernel initialization failed'
       if(allocated(exx_state_owner%native_kernel%accelerator).and.info%id_k==0) &
         write(*,'(a)')'EXX_KPOINT_BACKEND=cufft (experimental; GPU stage includes packing, FFT, kernel and transfers)'
-      call check_k_algorithm(exx_state_owner)
+      call check_k_algorithm(exx_state_owner,system)
       if(info%id_k==0)then
-        call report_k_algorithm(exx_state_owner)
+        call report_k_algorithm(exx_state_owner,system)
         write(*,'(a)')'EXX_DISTRIBUTED_K: full-support density tiles'
         write(*,'(a,3i6,a,i10)')'EXX_Q_REDUCTION: ',hse_q_reduction,' q points=',exx_state_owner%native_kernel%nq
-        if(k_pairs_enabled(exx_state_owner))write(*,'(a,2i18)')'EXX_K_PAIR_SYMMETRY unique/full pairs: ', &
+        if(k_pairs_enabled(exx_state_owner,system))write(*,'(a,2i18)')'EXX_K_PAIR_SYMMETRY unique/full pairs: ', &
           int(exx_state_owner%native_kernel%ng,int64)*(int(exx_state_owner%native_kernel%ng,int64)+1)/2,int(exx_state_owner%native_kernel%ng,int64)**2
         if(propagator=='hse_taylor4_full')write(*,'(a)')'EXX_DIRECT: ACE construction disabled'
       endif
@@ -1088,9 +1129,9 @@ contains
       endif
     endif
     if(thermal_spinor)then
-      call apply_distributed(weighted,local,w,info,ierr,exx_state_owner)
+      call apply_distributed(weighted,local,w,info,ierr,exx_state_owner,system)
     else
-      call apply_distributed(local,local,w,info,ierr,exx_state_owner)
+      call apply_distributed(local,local,w,info,ierr,exx_state_owner,system)
     endif
     call comm_summation(ierr,total_error,info%icomm_k)
     if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
@@ -1106,7 +1147,7 @@ contains
     if(thermal_spinor)exx_state_owner%cached_occupation=system%rocc(:,:,1)
     ex=0d0
     do j=1,info%numk
-      ex=ex+.5d0*exchange_fraction()*sum(sum(real(conjg(local(:,:,j))*w(:,:,j),8),dim=1) &
+      ex=ex+.5d0*system_exchange_fraction(system)*sum(sum(real(conjg(local(:,:,j))*w(:,:,j),8),dim=1) &
         *system%rocc(:,info%ik_s+j-1,1))*system%hvol*system%wtk(info%ik_s+j-1)
     enddo
     call comm_summation(ex,exx_state_owner%exx_exchange_energy,info%icomm_k)
@@ -1123,18 +1164,21 @@ contains
   end subroutine
 
   ! Crystal reuse takes precedence. Unsupported backends retain their reference route.
-  logical function k_pairs_enabled(exx_state_owner)
+  logical function k_pairs_enabled(exx_state_owner,system)
     use salmon_global, only: yn_exx_k_pair_symmetry
     implicit none
+    type(s_dft_system),intent(in) :: system
     type(s_exx_rt_state),intent(in)::exx_state_owner
-    k_pairs_enabled=yn_spinorbit=='n'.and.yn_exx_k_pair_symmetry=='y'.and..not.use_symmetry.and.yn_dc=='n'.and. &
+    k_pairs_enabled=yn_spinorbit=='n'.and.yn_exx_k_pair_symmetry=='y'.and. &
+          .not.system%kpoint_input%use_symmetry.and.yn_dc=='n'.and. &
       exx_state_owner%native_kernel%nk>1.and.exx_state_owner%native_kernel%nq==exx_state_owner%native_kernel%nk.and..not.allocated(exx_state_owner%native_kernel%accelerator).and. &
       (theory=='dft'.or.theory=='tddft_response'.or.theory=='tddft_pulse')
   end function k_pairs_enabled
 
-  subroutine apply_distributed(source,target,action,info,ierr,exx_state_owner)
+  subroutine apply_distributed(source,target,action,info,ierr,exx_state_owner,system)
     use exx_k_pairs, only: apply_k_pairs
     implicit none
+    type(s_dft_system),intent(in) :: system
     type(s_exx_rt_state),intent(inout)::exx_state_owner
     complex(8),intent(in) :: source(:,:,:),target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
@@ -1146,13 +1190,13 @@ contains
     np=info%isize_k;local_layout=0
     local_layout(info%id_k+1)=info%ik_s
     local_layout(np+info%id_k+1)=info%numk
-    if(use_symmetry)then
+    if(system%kpoint_input%use_symmetry)then
       local_layout(info%id_k+1)=exx_state_owner%native_symmetry%first(info%ik_s)
       local_layout(np+info%id_k+1)=exx_state_owner%native_symmetry%first(info%ik_e+1)-exx_state_owner%native_symmetry%first(info%ik_s)
     endif
     call comm_summation(local_layout,layout,size(layout),info%icomm_k)
     if(yn_spinorbit=='y')then
-      if(use_symmetry)then
+      if(system%kpoint_input%use_symmetry)then
         call symmetry_expand(exx_state_owner%native_symmetry,info%ik_s,source,target,expanded_source,expanded_target,ierr)
         call comm_summation(ierr,total_error,info%icomm_k)
         if(total_error/=0)then
@@ -1194,7 +1238,7 @@ contains
       endif
       return
     endif
-    if(use_symmetry)then
+    if(system%kpoint_input%use_symmetry)then
       ierr=0
       if(.not.salmon_all_finite(real(source)).or..not.salmon_all_finite(aimag(source)))ierr=1
       call comm_summation(ierr,total_error,info%icomm_k)
@@ -1246,7 +1290,7 @@ contains
       endif
       return
     endif
-    if(k_pairs_enabled(exx_state_owner))then
+    if(k_pairs_enabled(exx_state_owner,system))then
       if(temperature<0d0)then
         call apply_k_pairs(exx_state_owner%native_kernel,source(:,:nelec/2,:),target,action,layout(:np),layout(np+1:), &
           info%id_k,info%icomm_k,transpose_k_tiles,ierr)
@@ -1336,34 +1380,36 @@ contains
 #endif
   end subroutine transpose_orbit_tiles
 
-  subroutine check_k_algorithm(exx_state_owner)
+  subroutine check_k_algorithm(exx_state_owner,system)
     use salmon_global, only: exx_k_algorithm
     implicit none
+    type(s_dft_system),intent(in) :: system
     type(s_exx_rt_state),intent(in)::exx_state_owner
     if(exx_k_algorithm=='pair')then
       if(yn_spinorbit=='y')then
         if(.not.spinor_pair_fft_requested())error stop 'Manual spinor pair algorithm was not selected'
       else
-        if(.not.k_pairs_enabled(exx_state_owner))error stop 'Manual scalar pair algorithm is unavailable for this layout'
+        if(.not.k_pairs_enabled(exx_state_owner,system))error stop 'Manual scalar pair algorithm is unavailable for this layout'
       endif
     else if(exx_k_algorithm=='orbits')then
-      if(.not.use_symmetry) &
+      if(.not.system%kpoint_input%use_symmetry) &
         error stop 'Manual orbit algorithm is unavailable for this layout'
     endif
   end subroutine check_k_algorithm
 
-  subroutine report_k_algorithm(exx_state_owner)
+  subroutine report_k_algorithm(exx_state_owner,system)
     use salmon_global, only: exx_k_algorithm,exx_k_algorithm_reason
     implicit none
+    type(s_dft_system),intent(in) :: system
     type(s_exx_rt_state),intent(in)::exx_state_owner
     character(16) :: selected
     selected='reference'
     if(yn_spinorbit=='y')then
       if(spinor_pair_fft_requested())selected='spinor_pair'
-      if(use_symmetry.and.yn_exx_fft_orbits=='y')selected='spinor_orbits'
-    else if(use_symmetry.and.yn_exx_fft_orbits=='y')then
+      if(system%kpoint_input%use_symmetry.and.yn_exx_fft_orbits=='y')selected='spinor_orbits'
+    else if(system%kpoint_input%use_symmetry.and.yn_exx_fft_orbits=='y')then
       selected='orbits'
-    else if(k_pairs_enabled(exx_state_owner))then
+    else if(k_pairs_enabled(exx_state_owner,system))then
       selected='scalar_pair'
     endif
     write(*,'(4a)')'EXX_K_ALGORITHM requested=',trim(exx_k_algorithm),' selected=',trim(selected)
@@ -1410,7 +1456,7 @@ contains
         error stop 'Independent HSE owner requires serial full-support non-spinor configuration'
       endif
     endif
-    if(.not.exx_enabled())return
+    if(.not.exx_enabled(system))return
     if(propagator=='hse_taylor4_full')then
       if(.not.allocated(exx_state_owner%full_source))error stop 'EXX: direct exchange source is not initialized'
     else
@@ -1418,7 +1464,7 @@ contains
     endif
     if(info%isize_o>1)orbital_comm=info%icomm_o
     ng=product(mg%num)*size(psi%zwf,4)
-    if(exx_state_owner%ace%packed.and.product(num_kgrid)==1.and..not.exx_state_owner%exx_force_full_action.and. &
+    if(exx_state_owner%ace%packed.and.product(system%kmesh)==1.and..not.exx_state_owner%exx_force_full_action.and. &
        .not.(exx_state_owner%taylor_active.and.propagator=='hse_taylor4_full'))then
       if(.not.(exx_state_owner%taylor_active.and.exx_state_owner%taylor_midpoint).or.exx_state_owner%initial_ace%packed)then
         call apply_packed_blocks()
@@ -1434,35 +1480,41 @@ contains
     if(.not.allocated(exx_state_owner%target_work))allocate(exx_state_owner%target_work(ng,info%numo,info%numk))
     if(.not.allocated(exx_state_owner%action_work))allocate(exx_state_owner%action_work(ng,info%numo,info%numk))
     call exx_pack(psi,mg,info,exx_state_owner%target_work)
-    action_scale=exchange_fraction()
-    if(use_wannier_exchange().and.exx_state_owner%exx_force_full_action)then
-      if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested().or. &
+    action_scale=system_exchange_fraction(system)
+    if(use_wannier_exchange(system).and.exx_state_owner%exx_force_full_action)then
+      if(info%isize_r>1.or.info%isize_o>1.or.dc_gamma_pairs_requested(system).or. &
          (exx_mlwf_norm_fraction>0d0.and.exx_mlwf_radius==0d0))then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,exx_state_owner%target_work,exx_state_owner%action_work,info_error,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+          system_coulomb_radius(system),exx_state_owner%target_work,exx_state_owner%action_work,info_error, &
+          omega=system_exchange_screening(system),comm_o=orbital_comm)
         if(info_error/=0)error stop 'Spatial EXX: full action failed'
       else
-        call apply_wannier_collective(exx_state_owner%target_work,exx_state_owner%action_work,info)
+        call apply_wannier_collective(exx_state_owner%target_work,exx_state_owner%action_work,info,system)
       endif
       ierr=0
     else if(exx_state_owner%exx_force_full_action)then
-      call apply_distributed(exx_state_owner%cached_source,exx_state_owner%target_work,exx_state_owner%action_work,info,ierr,exx_state_owner)
+      call apply_distributed(exx_state_owner%cached_source,exx_state_owner%target_work,exx_state_owner%action_work, &
+          info,ierr,exx_state_owner,system)
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'EXX: full trial action failed'
     else if(propagator=='hse_taylor4_full')then
       if(exx_state_owner%taylor_active.and.exx_state_owner%taylor_midpoint)then
         ! Keep occupied-prefix selection separate for the two endpoint sources.
-        call apply_distributed(exx_state_owner%initial_source,exx_state_owner%target_work,exx_state_owner%action_work,info,ierr,exx_state_owner)
+        call apply_distributed(exx_state_owner%initial_source,exx_state_owner%target_work, &
+          exx_state_owner%action_work,info,ierr,exx_state_owner,system)
         call comm_summation(ierr,total_error,info%icomm_k)
         if(total_error/=0)error stop 'HSE Taylor initial full target action failed'
-        call add_mesh_action(.5d0*exchange_fraction())
-        call apply_distributed(exx_state_owner%full_source,exx_state_owner%target_work,exx_state_owner%action_work,info,ierr,exx_state_owner)
-        action_scale=.5d0*exchange_fraction()
+        call add_mesh_action(.5d0*system_exchange_fraction(system))
+        call apply_distributed(exx_state_owner%full_source,exx_state_owner%target_work,exx_state_owner%action_work, &
+          info,ierr,exx_state_owner,system)
+        action_scale=.5d0*system_exchange_fraction(system)
       else if(exx_state_owner%taylor_active)then
-        call apply_distributed(exx_state_owner%initial_source,exx_state_owner%target_work,exx_state_owner%action_work,info,ierr,exx_state_owner)
+        call apply_distributed(exx_state_owner%initial_source,exx_state_owner%target_work, &
+          exx_state_owner%action_work,info,ierr,exx_state_owner,system)
       else
-        call apply_distributed(exx_state_owner%full_source,exx_state_owner%target_work,exx_state_owner%action_work,info,ierr,exx_state_owner)
+        call apply_distributed(exx_state_owner%full_source,exx_state_owner%target_work,exx_state_owner%action_work, &
+          info,ierr,exx_state_owner,system)
       endif
       call comm_summation(ierr,total_error,info%icomm_k)
       if(total_error/=0)error stop 'HSE Taylor full target action failed'
@@ -1470,8 +1522,8 @@ contains
       if(exx_state_owner%taylor_active.and.exx_state_owner%taylor_midpoint)then
         call apply_endpoint(exx_state_owner%initial_ace)
         if(ierr/=0)error stop 'HSE06: initial endpoint ACE application failed'
-        call add_mesh_action(.5d0*exchange_fraction())
-        action_scale=.5d0*exchange_fraction()
+        call add_mesh_action(.5d0*system_exchange_fraction(system))
+        action_scale=.5d0*system_exchange_fraction(system)
       endif
       call apply_endpoint(exx_state_owner%ace)
     endif
@@ -1510,11 +1562,11 @@ contains
           enddo
         enddo
 !$omp end parallel do
-        block_weight=exchange_fraction()
+        block_weight=system_exchange_fraction(system)
         if(exx_state_owner%taylor_active.and.exx_state_owner%taylor_midpoint)then
           call apply_endpoint(exx_state_owner%initial_ace)
           if(ierr/=0)error stop 'EXX: initial block ACE application failed'
-          block_weight=.5d0*exchange_fraction()
+          block_weight=.5d0*system_exchange_fraction(system)
           call add_mesh_action(block_weight,first,first+count-1)
         endif
         call apply_endpoint(exx_state_owner%ace)
@@ -1559,8 +1611,9 @@ contains
       a=total
     end subroutine
   end subroutine
-  logical function use_wannier_exchange()
+  logical function use_wannier_exchange(system)
     implicit none
+    type(s_dft_system),intent(in) :: system
     if(yn_spinorbit=='y')then
       use_wannier_exchange=.false.
       return
@@ -1569,7 +1622,7 @@ contains
     ! hybrid. Retain Wannier for DC, fractional/empty states and localized support.
     use_wannier_exchange=temperature>=0d0.or.yn_dc=='y'.or. &
       exx_mlwf_radius>0d0.or.exx_mlwf_norm_fraction>0d0.or. &
-      (yn_hse_wannier=='y'.and.(product(num_kgrid)==1.or.temperature>=0d0.or. &
+      (yn_hse_wannier=='y'.and.(product(system%kmesh)==1.or.temperature>=0d0.or. &
         (nstate>0.and.nstate*2/=nelec)))
   end function
 
@@ -1598,7 +1651,7 @@ contains
     if(info%isize_k/=1.or.info%numm/=1.or.system%nk/=1) &
       error stop 'Spatial EXX: Gamma spatial domains required'
     if(info%isize_o>system%no)error stop 'Spatial EXX: each orbital group must own at least one state'
-    if(any(num_kgrid/=1).or.maxval(abs(system%vec_k))>1d-12.or.use_symmetry) &
+    if(any(system%kmesh/=1).or.maxval(abs(system%vec_k))>1d-12.or.system%kpoint_input%use_symmetry) &
       error stop 'Spatial EXX: unshifted Gamma required'
     if(theory/='dft'.and.maxval(abs(system%rocc-2d0))>1d-12) &
       error stop 'Spatial EXX: occupied spin pairs required'
@@ -1753,7 +1806,7 @@ contains
     ex=0d0
     do j=1,info%numo
       io=info%io_s+j-1
-      ex=ex+.5d0*exchange_fraction()*system%hvol*system%rocc(io,1,1)*system%wtk(1) &
+      ex=ex+.5d0*system_exchange_fraction(system)*system%hvol*system%rocc(io,1,1)*system%wtk(1) &
         *real(sum(conjg(local(:,j,1))*w(:,j,1)),8)
     enddo
     call comm_summation(ex,exx_state_owner%exx_exchange_energy,info%icomm_ro)
@@ -1774,21 +1827,21 @@ contains
       complex(8),allocatable :: localized_action(:,:,:),adjoint(:,:)
       integer,allocatable :: counts(:)
       integer :: first,workers,thread_state(3)
-      if(requested_screen_mode==0.and.dc_gamma_pairs_requested())then
+      if(requested_screen_mode==0.and.dc_gamma_pairs_requested(system))then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm, &
+          system_coulomb_radius(system),local,w,status,omega=system_exchange_screening(system),comm_o=orbital_comm, &
           pair_weight=.5d0*system%rocc(info%io_s:info%io_e,1,1))
       else if(requested_screen_mode==0)then
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,local,w,status,omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+          system_coulomb_radius(system),local,w,status,omega=system_exchange_screening(system),comm_o=orbital_comm)
       else
         allocate(localized_action(size(w,1),size(w,2),1))
         call spatial_exx_apply(spatial,num_rgrid,system%hgs,[info%isize_x,info%isize_y,info%isize_z], &
           [info%id_x,info%id_y,info%id_z],[info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r, &
-          pbeh_coulomb_radius,spatial%previous,localized_action,status, &
-          omega=merge(hse_omega,0d0,xc=='hse06'),comm_o=orbital_comm)
+          system_coulomb_radius(system),spatial%previous,localized_action,status, &
+          omega=system_exchange_screening(system),comm_o=orbital_comm)
         if(status/=0)return
         if(allocated(spatial%gauge_tiles%matrix))then
           call gauge_tiles_rotate(spatial%gauge_tiles,localized_action(:,:,1),info%icomm_r,info%icomm_o, &
@@ -1850,7 +1903,7 @@ contains
     integer :: ng,no,nk,ik,j,status,changed,total_changed,maxiter
     exx_state_owner=>resolve_rt_context(rt_context,system)
     ng=product(mg%num);no=system%no;nk=system%nk
-    if(use_symmetry.or.nk/=product(num_kgrid))error stop 'HSE Wannier: full k mesh required'
+    if(system%kpoint_input%use_symmetry.or.nk/=product(system%kmesh))error stop 'HSE Wannier: full k mesh required'
     if(maxval(abs(system%wtk-1d0/nk))>1d-12)error stop 'HSE Wannier: uniform k weights required'
     if(temperature>=0d0.and.yn_dc=='n')then
       do ik=1,nk
@@ -1887,12 +1940,12 @@ contains
     status=0
     if(info%id_k==0)then
       if(wannier%ng==0)then
-        if(xc=='hse06')then
-          call wannier_init(wannier,mg%num,num_kgrid,system%hgs,system%vec_k,hse_omega,status)
+        if(system_functional(system)=='hse06')then
+          call wannier_init(wannier,mg%num,system%kmesh,system%hgs,system%vec_k,system_exchange_screening(system),status)
         else
-          call wannier_init(wannier,mg%num,num_kgrid,system%hgs,system%vec_k,0d0,status,pbeh_coulomb_radius)
+          call wannier_init(wannier,mg%num,system%kmesh,system%hgs,system%vec_k,0d0,status,system_coulomb_radius(system))
           write(*,*)'PBEh40 Coulomb radius (bohr): ', &
-            merge(pbeh_coulomb_radius,.5d0*minval(mg%num*num_kgrid*system%hgs),pbeh_coulomb_radius>0d0)
+            merge(system_coulomb_radius(system),.5d0*minval(mg%num*system%kmesh*system%hgs),system_coulomb_radius(system)>0d0)
         endif
       endif
       if(status==0)then
@@ -1947,22 +2000,23 @@ contains
     ex=0d0
     do ik=1,info%numk
       do j=1,no
-        ex=ex+.5d0*exchange_fraction()*system%rocc(j,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1)*system%hvol &
+        ex=ex+.5d0*system_exchange_fraction(system)*system%rocc(j,info%ik_s+ik-1,1)*system%wtk(info%ik_s+ik-1)*system%hvol &
           *real(sum(conjg(local(:,j,ik))*w(:,j,ik)),8)
       enddo
     enddo
     call comm_summation(ex,exx_state_owner%exx_exchange_energy,info%icomm_k)
   end subroutine
 
-  subroutine apply_wannier_collective(target,action,info)
+  subroutine apply_wannier_collective(target,action,info,system)
     use communication, only: comm_bcast
     implicit none
+    type(s_dft_system),intent(in) :: system
     complex(8),intent(in) :: target(:,:,:)
     complex(8),intent(out) :: action(:,:,:)
     type(s_parallel_info),intent(in) :: info
     complex(8),allocatable :: send(:,:,:),alltarget(:,:,:),allaction(:,:,:)
     integer :: ng,nt,nk,status
-    ng=size(target,1);nt=size(target,2);nk=product(num_kgrid)
+    ng=size(target,1);nt=size(target,2);nk=product(system%kmesh)
     allocate(send(ng,nt,nk),alltarget(ng,nt,nk),allaction(ng,nt,nk))
     send=0d0;send(:,:,info%ik_s:info%ik_e)=target
     call comm_summation(send,alltarget,size(send),info%icomm_k)
@@ -1988,7 +2042,7 @@ contains
     integer :: ix,iy,iz,io,ik,g
     exx_state_owner=>resolve_rt_context(rt_context,system)
     if(.not.allocated(exx_state_owner%cached_action))error stop 'DC HSE: refreshed exchange action missing'
-    prefactor=.5d0*exchange_fraction()*system%hvol
+    prefactor=.5d0*system_exchange_fraction(system)*system%hvol
     local=0d0
 !$omp parallel do collapse(4) default(none) schedule(static) &
 !$omp private(ik,io,iz,iy,ix,g) shared(info,mg,core,system,psi,exx_state_owner,prefactor) reduction(+:local)
