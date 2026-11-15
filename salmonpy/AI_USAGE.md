@@ -130,7 +130,7 @@ manual.jsonの `beginner_intake` を必ず適用します。新しい計算を�
 `manual.search` は常に `getting_started` と `task_catalog` を返します。一致しない検索語では
 目的別一覧を示して目的を確認し、対応不能とは即断しません。
 
-本リポジトリはSALMONpy専用です。本体のsrcパスは `runtime/README.md` の手順で準備した外部ツリーを指します。SALMON本体を本リポジトリへ復元・同梱しないでください。
+本リポジトリはSALMONpy専用です。同梱本体ソースはruntime/sources、段階別完成形はruntime/overridesです。ビルド用srcは `runtime/README.md` の手順でリポジトリ外に準備します。
 
 ## 並列経路を選ぶ
 
@@ -258,3 +258,45 @@ FFT・ACE・履歴の交互実行検査と、本体電流/エネルギーの32�
 異なるglobal XC/dt・MPI/Wannierの完全な独立性や、Pythonからの新規HSE APIを案内しません。
 owner/結合済みsystemはコピーせず、unbind後clearで解放します。資源付き状態のbytes=-1・
 status=2は計測不可です。GitHub Actionsは利用枠節約のため、新規起動せずローカル検証を優先します。
+
+## TDDFT全体の独立状態の開発用検査
+
+RUNTIME.md/enの「状態ごとの固定dtを持つTDDFT全体の独立状態」に従います。tddft_context.f90は
+nativeの全step引数を所有し、dt以外は同じ設定・同じGSから独立初期化した2状態の交互実行を検査します。
+異なるA波形、逆順、片方の破棄/再生成、別プロセス参照との配列比較、本体Acos2参照を使います。
+rt_stepの返すjは電荷電流、エネルギーは毎ステップ、単位は原子単位です。
+内部Fortranの開発用入口であり、既存Python TDDFTの制約を解除したとは説明しません。
+XC作業配列・modulo表は各状態へ移しましたが、global入力・初期化設定の共有は残ります。異なるXC/grid/k、MPI、同時呼出しは
+未対応です。保存した基本設定の変更や非有限Aは進める前に拒否しますが、全native失敗の原子性や
+RSS上限は保証しません。traceは合成検査専用で、checkpointではありません。
+
+内部Fortranのrt_open(..., delta_t=...)では状態ごとの固定dtを指定できます。有限・正の値のみ、
+省略時は入力dtを取得します。異なるdtの別プロセス参照と旧global dtを変更した交互実行を比較します。
+適応刻み・途中のdt変更・FDTDサブサイクル・公開Python APIの拡張とは説明しません。
+
+
+XC作業配列はsystem%xc_work、周期境界表・最適化可否はstencilが所有します。
+calc_xcのworkspace省略時は呼び出し内で確保します。下位の異形状PZ/配列検査を、異なる格子/XCの
+TDDFT全体の対応と読み替えないでください。共通格子/k点/XCの保護は維持しています。
+AVX/SVE最適化経路・MPI・GPUはこのローカル検証の対象外です。
+
+
+OpenMPのステンシル/電流/力の分割フラグは状態ごとに固定します。内部rt_openのopenmp_modeは
+省略時に従来入力、指定時はauto/orbital/rgridです。プロセスのスレッド数設定・MPIランク分割・
+同時実行対応とは別です。異なる分割方法の交互実行試験を、異なる格子/XCや力の検証と説明しません。
+
+
+内部Fortranの作成時設定はs_rt_run_configです。rt_input_configで従来入力から値を取得し、
+rt_open(config=...)へ渡します。dt・最大ステップ数・3種類のOpenMP分割指定をコピーして固定します。
+configと旧delta_t/openmp_modeの混在は拒否します。容量の整数検査をメモリ保証と扱わず、
+格子/XCなど入力全体が独立化されたとは説明しません。上限到達後のstepは更新前に拒否します。
+
+
+s_rgrid_configとinit_grid_whole_configは、実空間格子の境界・halo・添字配列のみを初期化する内部入口です。
+座標配列やMPI分割表は後続処理で扱います。明示的な設定での異形状・孤立境界の検査を、
+異なる格子/XCや孤立系TDDFT全体の対応と読み替えないでください。不正値は既存格子を変更せず返します。
+
+
+resolve_cellはs_cell_configからセル形状と格子間隔を決める内部ルーチンです。結果は値として独立し、
+不正値・体積ゼロでは変更しません。native互換層のglobal al正規化とk/pseudo/XCの依存は残るため、
+セル設定全体の独立化や異なるセルのTDDFT対応済みとは案内しません。

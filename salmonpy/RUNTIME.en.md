@@ -242,3 +242,164 @@ present. Future numerical source changes require new scientific validation.
 Update sources, inventories and their hashes in the same reviewed commit; verify
 shared native kernels and rebuild/test affected profiles before distribution.
 The optimized native HSE owner is connected as described above; the standalone generic resource primitive remains a separate diagnostic component.
+
+
+## Experimental full TDDFT contexts with a fixed timestep per state
+
+`salmonpy/native_adapters/tddft_context.f90` provides internal Fortran development
+entries `rt_open`, `rt_step`, and `rt_close`. Each context owns the arguments of
+the actual native initialization/time-step routines: orbitals, density, Hartree
+and XC/local potentials, propagation history, pseudopotential working arrays,
+XC handle, HSE owner and output handles. States are initialized independently
+from the same restart; initialized contexts are never copied. `rt_step` receives
+endpoint A/c and returns charge current density j (the negative of native matter
+current) and total energy in atomic units. Every-step energy sampling is required.
+
+The process must first initialize its native configuration and serial runtime;
+see `tests/native/test_tddft_contexts.f90`. This is not a stable Python/C ABI.
+Scope is periodic unpolarized fast HSE, serial CPU/FFTE, fixed ions, transverse
+driving, zero initial A, and common immutable settings except the owned dt. Only the tested
+Taylor/ACE, learned Taylor, direct Taylor and PT-CN paths are claimed. MPI,
+OpenACC, FFTW Poisson builds, secondary fields, restarts and optional spatial,
+projection or decomposed-current output are rejected. Context names use simple
+letters/digits/underscore/hyphen and existing output files are not overwritten.
+
+Core settings (grid/k counts, bands/electrons, XC, screening,
+temperature, propagator/predictor and factor settings) are captured and changes
+are rejected before stepping or initializing another context. This is a guard,
+not complete removal of `salmon_global`. Global input initialization still requires a shared configuration; arbitrary global mutation
+is unsupported. Different XC/grid/k per context remains future work.
+The optional internal `rt_open(..., delta_t=...)` fixes a finite positive timestep
+for that context; omission captures the input dt. Initialization, Taylor
+coefficients, PT-CN, field evaluation and output times use the owned timestep.
+Changing dt during a state lifetime, adaptive stepping and FDTD subcycling are
+not supported. Other guarded configuration must remain common.
+Do not copy contexts or call them concurrently; use `rt_close` explicitly.
+Invalid A or guarded-setting changes are rejected before advancement, but native
+allocation/numerical errors may still stop the process. Memory/RSS is not capped.
+
+```sh
+python tools/test_tddft_contexts.py HSE_BUILD_RECORD SYNTHETIC_FIXTURES NEW_OUTPUT --reference FAST_REFERENCE_RECORD --threads 2
+```
+
+The test advances two distinct A waveforms through the real full TDDFT step,
+compares with separate-process references, reverses call order, and closes/reopens
+one state while the other continues. It compares current/energy, orbitals,
+densities, potentials and HSE histories, and checks returned current sign and
+energy against the unchanged native driver using its supported Acos2 pulse.
+The native reference rejects arbitrary sampled-field input; it is not patched to
+bypass that restriction. Binary traces are synthetic test diagnostics, not
+restart/checkpoint files. Local implementation regression does not certify
+physical convergence, mixed configurations, MPI or a new Python TDDFT interface.
+
+Use `--different-dt` with the context regression tool to test dt=0.001/0.0015
+against separate processes configured with those values. The mixed runs poison
+the old global dt and also check reverse order and close/reopen. See
+`docs/tddft-state-settings-validation-2026-11-15.md` for local evidence.
+
+
+## Owned XC workspaces and stencil tables (development)
+
+The explicit fast-HSE profile stores XC grid buffers and PZ work arrays in each
+`s_dft_system%xc_work`. `calc_xc(..., workspace=...)` can reuse an explicit PZ
+workspace; omission creates call-local storage. Shape/spin changes resize only
+that owner. Functional/Libxc handles are not copied or made mutable for scratch.
+Modulo tables and the optimized-stencil capability flag are owned by each
+`s_stencil` and passed to Hamiltonian/stencil consumers. Context destruction
+releases these allocatable buffers automatically.
+
+`tools/test_owned_workspaces.py HSE_BUILD_RECORD NEW_OUTPUT --threads 2` checks
+PZ evaluation against the original built-in routines, two shapes, spin/shape
+resize, table contents and continued use after the other owner is released.
+This is a lower-level workspace test, not heterogeneous full TDDFT. The full
+context regression still requires common grid/k/XC: input and other global
+initialization settings remain. AVX/SVE tuned kernels,
+MPI, GPU and concurrent calls are not validated by the local Apple Silicon test.
+See `docs/tddft-workspaces-validation-2026-11-15.md`.
+
+
+## Owned OpenMP selection (development)
+
+Stencil, current and force OpenMP selection flags are captured in `s_stencil`.
+Numerical kernels do not read process-global selection flags. The internal
+`rt_open(..., openmp_mode=...)` accepts `auto`, `orbital` or `rgrid`, fixed for
+that state and applied to the three kernels. Omission preserves the three
+independent input settings and original auto threshold. Invalid values are
+rejected before initialization. This selects loop decomposition, not the process
+thread count; concurrent host calls remain unsupported.
+
+Add `--different-openmp` to the full-context test for orbital A and real-space B.
+Each is compared with its own isolated reference, including reverse order and
+close/reopen; mixed runs also poison old input selection strings. It can be
+combined with `--different-dt`. Common grid/k/XC restrictions remain. Force
+selection is wired but fixed-ion current regressions do not validate ionic forces.
+See `docs/tddft-openmp-validation-2026-11-15.md`.
+
+
+## Explicit construction configuration (development)
+
+`structures:s_rt_run_config` contains `delta_t`, `max_steps`, `stencil_mode`,
+`current_mode` and `force_mode`. After native process/input initialization,
+`rt_input_config(options)` captures the existing input into a value object.
+Set its fields and pass `rt_open(state, name, status, config=options)` to create
+an independent state. This copies values; later changes to options do not alter
+the state. It does not retain pointers to the configuration.
+
+The configuration requires finite positive dt, capacity 1..huge(default_integer)-1,
+and selectors auto/orbital/rgrid. It cannot be combined with the legacy delta_t
+or openmp_mode keywords. Invalid/mixed values are rejected before initialization.
+The bound prevents endpoint integer overflow, not memory exhaustion. Allocation
+can still fail; this is not a memory estimator or a hard resource budget.
+
+RT arrays and last-step handling use the state's capacity; over-capacity steps
+are rejected before advancement. `--different-capacity` tests A=12/B=6 steps with
+independent dt and OpenMP options, separate references, reverse/close/reopen,
+source-options capacity mutation, and global-nt poisoning. The other state's
+calculation continues after capacity exhaustion. Grid/k/XC and remaining input
+settings still require common immutable values. No general input-object API or
+public Python backend is introduced. See `docs/tddft-config-validation-2026-11-15.md`.
+
+
+## Explicit grid bounds initialization (development)
+
+`structures:s_rgrid_config` holds periodicity (0 or 3), requested point counts,
+spacing and consistency-check lengths. `grid_config_from_input(lengths, config)`
+captures native input; for Maxwell it preserves the existing al_em/dl_em rule.
+`initialization_sub:init_grid_whole_config(lengths, spacing, config, grid, status)`
+then reads only its explicit geometry/configuration arguments. The old
+`init_grid_whole` remains a compatibility wrapper using that route.
+
+This initializes bounds, halo ranges and index arrays only. Coordinates and MPI
+partition maps are left untouched, as in the legacy routine, and must be handled
+by the subsequent initialization stages; this is not a complete standalone grid
+or solver constructor. Invalid geometry/configuration returns status=1 before
+changing the destination. Allocation failure returns status=2; successful trial
+arrays are transferred only after all checks. Integer bounds are not a RAM budget.
+The legacy wrapper retains process-terminating behavior on failure.
+
+`tools/test_grid_config.py HSE_BUILD_RECORD NEW_OUTPUT` covers even/odd periodic
+and isolated bounds, point/spacing inputs, separate shapes, poisoned old globals,
+Maxwell consistency and invalid-call retention. This lower-level isolated-grid
+test does not add isolated TDDFT support. Cell/k/pseudopotential/XC/HSE initialization
+still has shared-input dependencies, so full TDDFT retains common grid/k/XC.
+See `docs/grid-config-validation-2026-11-15.md`.
+
+
+## Explicit cell resolution (development)
+
+`initialization_sub:resolve_cell(config, geometry, status)` uses only the
+value-only `s_cell_config` (lengths, vectors, spacing, points) and returns
+`s_cell_geometry` (primitive vectors, lengths, spacing, orthogonality).
+Orthogonal precedence is explicit lengths, diagonal vectors, then points times
+spacing. Tilted cells use their vectors and original norm calculation. Explicit
+spacing takes precedence over lengths divided by points. Invalid/nonfinite,
+nonpositive or zero-volume geometry returns nonzero without changing the result;
+a scaled determinant detects singular cells without forming huge volume products.
+This does not certify conditioning of nearly singular cells.
+
+Native DFT/RT initialization calls this resolver; its compatibility layer still
+normalizes global al for downstream consumers. This is a local cell resolver,
+not completion of global cell/k/pseudo/XC removal or heterogeneous TDDFT support.
+`tools/test_cell_config.py HSE_BUILD_RECORD NEW_OUTPUT` checks precedence,
+tilted geometry, independence and failed-call retention. See
+`docs/cell-config-validation-2026-11-15.md`.

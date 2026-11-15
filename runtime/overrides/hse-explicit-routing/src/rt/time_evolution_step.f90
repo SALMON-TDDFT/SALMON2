@@ -171,7 +171,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 #if defined(USE_HSE) || defined(USE_SCALAPACK)
   if(propagator=='hse_ptcn')then
-    call native_ptcn_step(dt,rt%Ac_tot(:,itt-1),rt%Ac_tot(:,itt),lg,mg,system,info,stencil,xc_func, &
+    call native_ptcn_step(rt%time_step,rt%Ac_tot(:,itt-1),rt%Ac_tot(:,itt),lg,mg,system,info,stencil,xc_func, &
       srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
   else
 #endif
@@ -303,7 +303,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   call timer_begin(LOG_CALC_PROJECTION)
   if(projection_option/='no' .and. (itt==1.or.itt==itotNtime.or.mod(itt,out_projection_step)==0)) then
-    call projection(itt,ofl,dt,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
+    call projection(itt,ofl,rt%time_step,mg,system,info,stencil,V_local,ppg,spsi_out,energy,rt)
   end if
   call timer_end(LOG_CALC_PROJECTION)
 
@@ -391,7 +391,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   ! Output 
   !(Export to SYSname_trj.xyz)
   if( (yn_md=='y'.or.yn_out_rvf_rt=='y') .and. mod(itt,out_rvf_rt_step)==0 )then
-     write(comment_line,10) itt, itt*dt
+     write(comment_line,10) itt, itt*rt%time_step
 10   format("#rt   step=",i8,"   time=",e16.6)
      if(yn_md=='y') write(comment_line,11) trim(comment_line),md%Temperature
 11   format(a,"   T=",f12.4)
@@ -407,13 +407,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
      !(Export to SYSname_rt.data)
      select case(iperiodic)
      case(0)
-        call write_rt_data_0d(itt,ofl,dt,system,rt)
+        call write_rt_data_0d(itt,ofl,rt%time_step,system,rt)
      case(3)
-        call write_rt_data_3d(itt,ofl,dt,system,curr_e_tmp,curr_i_tmp)
+        call write_rt_data_3d(itt,ofl,rt%time_step,system,curr_e_tmp,curr_i_tmp)
      end select
 
      !(Export to SYSname_rt_energy.data)
-     call write_rt_energy_data(itt,ofl,dt,energy,md)
+     call write_rt_energy_data(itt,ofl,rt%time_step,energy,md)
 
   endif
 

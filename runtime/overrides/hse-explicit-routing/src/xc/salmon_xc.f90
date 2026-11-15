@@ -22,7 +22,7 @@
 #endif
 
 module salmon_xc
-  use structures, only: s_xc_functional, s_xc_operator_payload
+  use structures, only: s_xc_functional, s_xc_operator_payload, s_xc_workspace, s_xc_pz_workspace
 #ifdef USE_HSE
   use exx_native,only:exx_context,exx_system_energy
   use exx_native, only: exx_refresh,exx_enabled,exx_exchange_energy
@@ -60,22 +60,23 @@ module salmon_xc
 ! The identifier is also inspected by HSE-only NLCC gradient handling.
   integer, parameter :: salmon_xctype_libxc = 101
 
-  ! workspace used in exchange_correlation
-  real(8),allocatable :: rho_tmp(:,:,:)
-  real(8),allocatable :: rho_s_tmp(:,:,:,:)
-  real(8),allocatable :: eexc_tmp(:,:,:)
-  real(8),allocatable :: vxc_tmp(:,:,:)
-  real(8),allocatable :: vxc_s_tmp(:,:,:,:)
-
-  ! workspace used in exec_builtin_pz
-  real(8),allocatable :: rho_s_1d(:)
-  real(8),allocatable :: rho_s_sp_1d(:,:)
-  real(8),allocatable :: exc_1d(:)
-  real(8),allocatable :: eexc_1d(:)
-  real(8),allocatable :: vexc_1d(:)
-  real(8),allocatable :: vexc_sp_1d(:,:)
 
 contains
+
+  subroutine ensure_xc_workspace(work,grid,spins)
+    type(s_xc_workspace),intent(inout)::work
+    integer,intent(in)::grid(3),spins
+    if(any(grid<=0).or.(spins/=1.and.spins/=2))error stop 'Invalid XC workspace shape'
+    if(all(work%grid==grid).and.work%spins==spins)return
+    work=s_xc_workspace()
+    work%grid=grid;work%spins=spins
+    allocate(work%eexc_tmp(grid(1),grid(2),grid(3)))
+    if(spins==1)then
+      allocate(work%rho_tmp(grid(1),grid(2),grid(3)),work%vxc_tmp(grid(1),grid(2),grid(3)))
+    else
+      allocate(work%rho_s_tmp(grid(1),grid(2),grid(3),2),work%vxc_s_tmp(grid(1),grid(2),grid(3),2))
+    endif
+  end subroutine ensure_xc_workspace
 
 
 ! wrapper for calc_xc
@@ -114,11 +115,11 @@ contains
     real(8),allocatable :: rv_local(:,:,:),rv_global(:,:,:)
 #endif
     real(8) :: tot_exc
-    ! real(8) :: rho_tmp(mg%num(1), mg%num(2), mg%num(3))
-    ! real(8) :: rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
-    ! real(8) :: eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
-    ! real(8) :: vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
-    ! real(8) :: vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
+    ! real(8) :: system%xc_work%rho_tmp(mg%num(1), mg%num(2), mg%num(3))
+    ! real(8) :: system%xc_work%rho_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
+    ! real(8) :: system%xc_work%eexc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    ! real(8) :: system%xc_work%vxc_tmp(mg%num(1), mg%num(2), mg%num(3))
+    ! real(8) :: system%xc_work%vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3), 2)
     real(8),allocatable :: rhd(:,:,:), delr(:,:,:,:), grho(:,:,:,:), lrho(:,:,:), j(:,:,:,:), tau(:,:,:)
     real(8),allocatable :: n_orb(:,:,:)
     real(8),allocatable :: rdedd_tmp(:,:,:,:),rdedd(:,:,:),drdedd_tmp(:,:,:,:),drdedd(:,:,:)
@@ -142,14 +143,7 @@ contains
 
     nspin = system%nspin
 
-    if (nspin==1) then
-      if (.not.allocated(rho_tmp)) allocate(rho_tmp(mg%num(1), mg%num(2), mg%num(3)))
-      if (.not.allocated(vxc_tmp)) allocate(vxc_tmp(mg%num(1), mg%num(2), mg%num(3)))
-    else if(nspin==2)then
-      if (.not.allocated(rho_s_tmp)) allocate(rho_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
-      if (.not.allocated(vxc_s_tmp)) allocate(vxc_s_tmp(mg%num(1), mg%num(2), mg%num(3),2))
-    endif
-    if (.not.allocated(eexc_tmp)) allocate(eexc_tmp(mg%num(1), mg%num(2), mg%num(3)))
+    call ensure_xc_workspace(system%xc_work,mg%num,nspin)
 
     if(nspin==1)then
 #ifdef USE_OPENACC
@@ -160,7 +154,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        rho_tmp(ix,iy,iz)=rho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        system%xc_work%rho_tmp(ix,iy,iz)=rho_s(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -183,7 +177,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        rho_s_tmp(ix,iy,iz,is)=rho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
+        system%xc_work%rho_s_tmp(ix,iy,iz,is)=rho_s(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
       end do
       end do
       end do
@@ -350,19 +344,22 @@ contains
     if (xc_func%use_gradient) then
 !      if(nspin==2) stop "error: GGA or metaGGA & spin/='unpolarized'"
       if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
+        call calc_xc(xc_func, pp, workspace=system%xc_work%pz, rho=system%xc_work%rho_tmp, &
+    & eexc=system%xc_work%eexc_tmp, vxc=system%xc_work%vxc_tmp, rdedd=rdedd_tmp , grho=delr, & 
                &     rlrho=lrho, tau=tau, rj=j, rho_nlcc=ppn%rho_nlcc, payload=system%xc_payload)
       elseif(nspin==2)then
 !!!!!   Currently, only gga is working  !!!!!!!!!!!!!!!!!
-        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, grho_s=delr_s, & 
-         & eexc=eexc_tmp,vxc_s=vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc) 
+        call calc_xc(xc_func, pp, workspace=system%xc_work%pz, rho_s=system%xc_work%rho_s_tmp, grho_s=delr_s, & 
+         & eexc=system%xc_work%eexc_tmp,vxc_s=system%xc_work%vxc_s_tmp,rdedd_s=rdedd_tmp_s,rho_nlcc=ppn%rho_nlcc) 
 !               &     rlrho_s=lrho_s, tau_s=tau_s, rj_s=j_s, rho_nlcc=ppn%rho_nlcc)
       endif 
     else
       if(nspin==1)then
-        call calc_xc(xc_func, pp, rho=rho_tmp, eexc=eexc_tmp, vxc=vxc_tmp, rho_nlcc=ppn%rho_nlcc)
+        call calc_xc(xc_func, pp, workspace=system%xc_work%pz, rho=system%xc_work%rho_tmp, &
+    & eexc=system%xc_work%eexc_tmp, vxc=system%xc_work%vxc_tmp, rho_nlcc=ppn%rho_nlcc)
       else if(nspin==2)then
-        call calc_xc(xc_func, pp, rho_s=rho_s_tmp, eexc=eexc_tmp, vxc_s=vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
+        call calc_xc(xc_func, pp, workspace=system%xc_work%pz, rho_s=system%xc_work%rho_s_tmp, &
+    & eexc=system%xc_work%eexc_tmp, vxc_s=system%xc_work%vxc_s_tmp, rho_nlcc=ppn%rho_nlcc)
       end if
     end if
 
@@ -379,15 +376,15 @@ contains
       enddo
       rv_ng=product(mg%num)
       allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
-      rv_r=reshape(rho_tmp,[rv_ng]);rv_s=reshape(sum(delr**2,dim=4),[rv_ng])
+      rv_r=reshape(system%xc_work%rho_tmp,[rv_ng]);rv_s=reshape(sum(delr**2,dim=4),[rv_ng])
       call rvv10_evaluate_distributed(rv_shape,mg%is,mg%num, &
         [info%isize_x,info%isize_y,info%isize_z],[info%id_x,info%id_y,info%id_z], &
         [info%icomm_x,info%icomm_y,info%icomm_z],info%icomm_r,system%hgs,rv_r,rv_s, &
         rvv10_b,rvv10_c,rvv10_nq,rv_e,rv_v,rv_w,rv_used,rv_status,rvv10_fft=='fftw')
       if(rv_used)then
         if(rv_status/=0)error stop 'rVV10: distributed evaluation failed'
-        eexc_tmp=eexc_tmp+reshape(rv_e,mg%num)
-        vxc_tmp=vxc_tmp+reshape(rv_v,mg%num)
+        system%xc_work%eexc_tmp=system%xc_work%eexc_tmp+reshape(rv_e,mg%num)
+        system%xc_work%vxc_tmp=system%xc_work%vxc_tmp+reshape(rv_v,mg%num)
         do idir=1,3
           rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir)-2*reshape(rv_w,mg%num)*delr(:,:,:,idir)
         enddo
@@ -397,7 +394,7 @@ contains
         allocate(rv_r(rv_ng),rv_s(rv_ng),rv_e(rv_ng),rv_v(rv_ng),rv_w(rv_ng))
         allocate(rv_local(rv_shape(1),rv_shape(2),rv_shape(3)),rv_global(rv_shape(1),rv_shape(2),rv_shape(3)))
         rv_local=0d0
-        rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=rho_tmp
+        rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=system%xc_work%rho_tmp
         call comm_summation(rv_local,rv_global,rv_ng,info%icomm_r)
         rv_r=reshape(rv_global,[rv_ng]);rv_local=0d0
         rv_local(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))=sum(delr**2,dim=4)
@@ -411,9 +408,9 @@ contains
         call comm_bcast(rv_v,info%icomm_r,0)
         call comm_bcast(rv_w,info%icomm_r,0)
         rv_global=reshape(rv_e,rv_shape)
-        eexc_tmp=eexc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+        system%xc_work%eexc_tmp=system%xc_work%eexc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
         rv_global=reshape(rv_v,rv_shape)
-        vxc_tmp=vxc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
+        system%xc_work%vxc_tmp=system%xc_work%vxc_tmp+rv_global(rv_lo(1):rv_hi(1),rv_lo(2):rv_hi(2),rv_lo(3):rv_hi(3))
         rv_global=reshape(rv_w,rv_shape)
         do idir=1,3
           rdedd_tmp(:,:,:,idir)=rdedd_tmp(:,:,:,idir) &
@@ -501,10 +498,10 @@ contains
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
         if (xc_func%use_gradient) then
-          Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz) & 
+          Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=system%xc_work%vxc_tmp(ix,iy,iz) & 
         &  +drdedd(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)
         else
-          Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_tmp(ix,iy,iz)
+          Vxc(1)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=system%xc_work%vxc_tmp(ix,iy,iz)
         endif
       end do
       end do
@@ -529,10 +526,10 @@ contains
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
         if (xc_func%use_gradient) then
-          Vxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is) &
+          Vxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=system%xc_work%vxc_s_tmp(ix,iy,iz,is) &
          &  +drdedd_s(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1,is)
         else
-          Vxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=vxc_s_tmp(ix,iy,iz,is)
+          Vxc(is)%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1)=system%xc_work%vxc_s_tmp(ix,iy,iz,is)
         endif
       end do
       end do
@@ -557,7 +554,7 @@ contains
     do iz=1,mg%num(3)
     do iy=1,mg%num(2)
     do ix=1,mg%num(1)
-      tot_exc=tot_exc+eexc_tmp(ix,iy,iz)
+      tot_exc=tot_exc+system%xc_work%eexc_tmp(ix,iy,iz)
     end do
     end do
     end do
@@ -577,7 +574,7 @@ contains
       do iz=1,mg%num(3)
       do iy=1,mg%num(2)
       do ix=1,mg%num(1)
-        eexc%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1) = eexc_tmp(ix,iy,iz)
+        eexc%f(mg%is(1)+ix-1,mg%is(2)+iy-1,mg%is(3)+iz-1) = system%xc_work%eexc_tmp(ix,iy,iz)
       end do
       end do
       end do    
@@ -1156,7 +1153,7 @@ contains
   subroutine calc_xc(xc, pp, rho, rho_s, exc, eexc, vxc, vxc_s, rdedd, rdedd_s, &
       & grho, grho_s, rlrho, rlrho_s, tau, tau_s, rj, rj_s, &
       & rho_nlcc, payload, &
-      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz)
+      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, workspace)
 !      & nd, ifdx, ifdy, ifdz, nabx, naby, nabz, Hxyz, aLxyz)
     use structures, only: s_pp_info
     use nvtx_wrapper
@@ -1203,7 +1200,12 @@ contains
     ! real(8), intent(in), optional :: aLxyz
     !===============================================================
 
+    type(s_xc_pz_workspace),optional,target,intent(inout)::workspace
+    type(s_xc_pz_workspace),target::local_workspace
+    type(s_xc_pz_workspace),pointer::work
     integer :: nx, ny, nz, nl
+    work=>local_workspace
+    if(present(workspace))work=>workspace
     call nvtxStartRange('calc_xc', __LINE__)
 
     ! Detect size of 3-dimensional grid
@@ -1383,29 +1385,33 @@ contains
     subroutine exec_builtin_pz()
       use nvtx_wrapper
       implicit none
+      if(work%points/=nl.or.work%spin/=xc%ispin)then
+        work=s_xc_pz_workspace()
+        work%points=nl;work%spin=xc%ispin
+      endif
       call nvtxStartRange('exec_builtin_pz', __LINE__)
 
       if (xc%ispin == 0) then
-        if (.not.allocated(rho_s_1d)) allocate(rho_s_1d(nl))
-        if (.not.allocated(vexc_1d)) allocate(vexc_1d(nl))
+        if (.not.allocated(work%rho_s_1d)) allocate(work%rho_s_1d(nl))
+        if (.not.allocated(work%vexc_1d)) allocate(work%vexc_1d(nl))
       else
-        if (.not.allocated(rho_s_sp_1d)) allocate(rho_s_sp_1d(nl,2))
-        if (.not.allocated(vexc_sp_1d)) allocate(vexc_sp_1d(nl,2))
+        if (.not.allocated(work%rho_s_sp_1d)) allocate(work%rho_s_sp_1d(nl,2))
+        if (.not.allocated(work%vexc_sp_1d)) allocate(work%vexc_sp_1d(nl,2))
       endif
-      if (.not.allocated(exc_1d)) allocate(exc_1d(nl))
-      if (.not.allocated(eexc_1d)) allocate(eexc_1d(nl))
+      if (.not.allocated(work%exc_1d)) allocate(work%exc_1d(nl))
+      if (.not.allocated(work%eexc_1d)) allocate(work%eexc_1d(nl))
 
 #ifdef USE_OPENACC
       if (xc%ispin == 0) then
-        call exec_builtin_calc_ax(rho_s_1d, 0.5d0, rho, nl)
+        call exec_builtin_calc_ax(work%rho_s_1d, 0.5d0, rho, nl)
       else if (xc%ispin == 1) then
-        call exec_builtin_calc_ax(rho_s_sp_1d, 1.0d0, rho_s, nl*2)
+        call exec_builtin_calc_ax(work%rho_s_sp_1d, 1.0d0, rho_s, nl*2)
       end if
 #else
       if (xc%ispin == 0) then
-        rho_s_1d = reshape(rho, (/nl/)) * 0.5
+        work%rho_s_1d = reshape(rho, (/nl/)) * 0.5
       else if (xc%ispin == 1) then
-        rho_s_sp_1d = reshape(rho_s, (/nl,2/))
+        work%rho_s_sp_1d = reshape(rho_s, (/nl,2/))
       end if
 #endif
 
@@ -1413,59 +1419,59 @@ contains
       if (present(rho_nlcc)) then
 #ifdef USE_OPENACC
         if ( xc%ispin == 0 ) then
-          call exec_builtin_calc_axpy(rho_s_1d, 0.5d0, rho_nlcc, nl)
+          call exec_builtin_calc_axpy(work%rho_s_1d, 0.5d0, rho_nlcc, nl)
         else if ( xc%ispin == 1 ) then
-          call exec_builtin_calc_axpy(rho_s_sp_1d(:,1), 0.5d0, rho_nlcc, nl)
-          call exec_builtin_calc_axpy(rho_s_sp_1d(:,2), 0.5d0, rho_nlcc, nl)
+          call exec_builtin_calc_axpy(work%rho_s_sp_1d(:,1), 0.5d0, rho_nlcc, nl)
+          call exec_builtin_calc_axpy(work%rho_s_sp_1d(:,2), 0.5d0, rho_nlcc, nl)
         end if
 #else
         if ( xc%ispin == 0 ) then
-          rho_s_1d = rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
+          work%rho_s_1d = work%rho_s_1d + reshape(rho_nlcc, (/nl/)) * 0.5
         else if ( xc%ispin == 1 ) then
-          rho_s_sp_1d(:,1) = rho_s_sp_1d(:,1) + reshape(rho_nlcc, (/nl/)) * 0.5
-          rho_s_sp_1d(:,2) = rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
+          work%rho_s_sp_1d(:,1) = work%rho_s_sp_1d(:,1) + reshape(rho_nlcc, (/nl/)) * 0.5
+          work%rho_s_sp_1d(:,2) = work%rho_s_sp_1d(:,2) + reshape(rho_nlcc, (/nl/)) * 0.5
         end if
 #endif
       endif
 #endif
 
       if (xc%ispin == 0) then
-        call exc_cor_pz(nl, rho_s_1d, exc_1d, eexc_1d, vexc_1d)
+        call exc_cor_pz(nl, work%rho_s_1d, work%exc_1d, work%eexc_1d, work%vexc_1d)
       else if (xc%ispin == 1) then
-        call exc_cor_pz_sp(nl, rho_s_sp_1d, exc_1d, eexc_1d, vexc_sp_1d)
+        call exc_cor_pz_sp(nl, work%rho_s_sp_1d, work%exc_1d, work%eexc_1d, work%vexc_sp_1d)
       end if
 
       if (xc%ispin == 0) then
         if (present(vxc)) then
 #ifdef USE_OPENACC
-          call exec_builtin_calc_axpy(vxc, 1.0d0, vexc_1d, nl)
+          call exec_builtin_calc_axpy(vxc, 1.0d0, work%vexc_1d, nl)
 #else
-          vxc = vxc + reshape(vexc_1d, (/nx, ny, nz/))
+          vxc = vxc + reshape(work%vexc_1d, (/nx, ny, nz/))
 #endif
         endif
       else if(xc%ispin == 1) then
         if (present(vxc_s)) then
 #ifdef USE_OPENACC
-          call exec_builtin_calc_axpy(vxc_s, 1.0d0, vexc_sp_1d, nl*2)
+          call exec_builtin_calc_axpy(vxc_s, 1.0d0, work%vexc_sp_1d, nl*2)
 #else
-          vxc_s = vxc_s + reshape(vexc_sp_1d, (/nx, ny, nz,2/))
+          vxc_s = vxc_s + reshape(work%vexc_sp_1d, (/nx, ny, nz,2/))
 #endif
         endif
       end if
 
       if (present(exc)) then
 #ifdef USE_OPENACC
-        call exec_builtin_calc_axpy(exc, 1.0d0, exc_1d, nl)
+        call exec_builtin_calc_axpy(exc, 1.0d0, work%exc_1d, nl)
 #else
-        exc = exc + reshape(exc_1d, (/nx, ny, nz/))
+        exc = exc + reshape(work%exc_1d, (/nx, ny, nz/))
 #endif
       endif
 
       if (present(eexc)) then
 #ifdef USE_OPENACC
-        call exec_builtin_calc_axpy(eexc, 1.0d0, eexc_1d, nl)
+        call exec_builtin_calc_axpy(eexc, 1.0d0, work%eexc_1d, nl)
 #else
-         eexc = eexc + reshape(eexc_1d, (/nx, ny, nz/))
+         eexc = eexc + reshape(work%eexc_1d, (/nx, ny, nz/))
 #endif
       endif
 

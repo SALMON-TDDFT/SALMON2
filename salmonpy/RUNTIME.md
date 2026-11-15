@@ -194,3 +194,130 @@ source_tree_sha256 は同梱ツリーの一覧、replacements_sha256 は段階�
 未知の値を追加で拒否します。今後の数値変更には改めて検証が必要です。
 ソース・一覧・ハッシュは同じコミットで更新し、共有カーネルの一致と影響するプロファイルの
 ビルド・回帰を確認します。高速HSEの本体接続は上記の所有者経路を使い、独立した汎用資源部品は診断用として別に保持します。
+
+
+## 実験用：状態ごとの固定dtを持つTDDFT全体の独立状態
+
+`salmonpy/native_adapters/tddft_context.f90` に内部Fortran開発用の `rt_open`、
+`rt_step`、`rt_close` を用意します。本体の初期化・時間発展ルーチンの引数である
+波動関数、密度、Hartree/XC/局所ポテンシャル、伝播履歴、擬ポテンシャル作業配列、
+XCハンドル、HSE所有者、出力ハンドルを各状態が保持します。同じrestartから各状態を
+別々に初期化し、初期化済み状態をコピーしません。stepは端点A/cを受け取り、電荷電流密度j
+（native物質電流の逆符号）と全エネルギーを原子単位で返します。エネルギーは毎ステップ計算します。
+
+事前にプロセス共通のnative入力と直列ランタイムを初期化します。具体例は
+`tests/native/test_tddft_contexts.f90`です。安定したPython/C ABIではありません。
+対象は周期・非スピン分極の高速HSE、直列CPU/FFTE、固定イオン、transverse、初期A=0、
+dt以外は共通かつ不変のglobal設定です。通常/learned Taylor、直接Taylor、PT-CNを検証対象とします。
+MPI、OpenACC、FFTW Poissonビルド、第2波形、restart、空間分布・射影・分解電流などの
+追加出力は拒否します。状態名は英数字・underscore・hyphenに限定し、既存出力を上書きしません。
+
+格子/k点数・バンド/電子数・XC・遮蔽・温度・伝播/予測法・factor設定を保存し、
+stepや別状態の初期化前に変更を拒否します。これは保護であり、salmon_global全体の分離ではありません。
+入力・初期化設定には共有が残り、global変数の任意の変更は未対応です。
+異なるXC・格子・k点を同一プロセス内で併存させる作業は残ります。
+内部入口 `rt_open(..., delta_t=...)` で状態ごとの有限・正のdtを固定します。省略時は入力dtを取得します。
+初期化、Taylor係数、PT-CN、電場評価、出力時刻は状態のdtを参照します。
+途中のdt変更、適応刻み、FDTDサブサイクルは未対応です。
+状態をコピー・同時実行せず、rt_closeで明示的に解放します。不正Aや検査対象設定の変更は
+進める前に拒否しますが、native内部の確保・数値エラーはプロセス停止になり得ます。RSS上限はありません。
+
+```sh
+python tools/test_tddft_contexts.py HSE_BUILD_RECORD SYNTHETIC_FIXTURES NEW_OUTPUT --reference FAST_REFERENCE_RECORD --threads 2
+```
+
+本体のTDDFTステップで異なるA波形の2状態を交互実行し、別プロセス参照、逆順実行、
+片方を破棄・再生成しながら他方を継続する場合を比較します。電流・エネルギーだけでなく、
+軌道・密度・ポテンシャル・HSE履歴も比較します。返す電流の符号とエネルギーは、
+元の本体が対応するAcos2パルスでも直接照合します。元の本体は任意波形ファイルを拒否するため、
+その制限を外す変更はしていません。バイナリtraceは合成試験の診断用で、restartではありません。
+ローカルでの実装回帰であり、物理収束、異なる格子/XC/k点、MPI、新しいPython APIの保証ではありません。
+
+検査ツールに `--different-dt` を付けるとdt=0.001/0.0015を、そのdtを入力した別プロセス参照と比較します。
+交互実行時には旧global dtを意図的に変更し、逆順・破棄/再生成も検査します。
+ローカル検証の記録は `docs/tddft-state-settings-validation-2026-11-15.md` に残します。
+
+
+## 開発用：XC作業配列とステンシル表の所有
+
+explicit高速HSEプロファイルでは、XC格子配列とPZ作業配列を各`s_dft_system%xc_work`が所有します。
+`calc_xc(..., workspace=...)`は指定したPZ作業配列を再利用し、省略時は呼び出し内だけで確保します。
+形状・スピン数の変更では対象の配列だけを再確保します。XC設定・Libxcハンドルはコピーしません。
+周期境界のmodulo表と最適化ステンシルの可否フラグは各`s_stencil`が所有し、
+Hamiltonianとステンシルの処理へ明示的に渡します。状態の破棄で配列も解放されます。
+
+`tools/test_owned_workspaces.py HSE_BUILD_RECORD NEW_OUTPUT --threads 2`で、
+元のPZルーチンとの比較、異なる2形状、形状・スピン数の再確保、表の内容、他方の解放後の継続を検査します。
+これは作業配列の検査であり、異なる格子のTDDFT全体を検証したものではありません。
+入力・初期化設定などに共有が残るため、TDDFT全体の共通格子/k点/XC制約は維持します。
+Apple Siliconのローカル検査ではAVX/SVE最適化カーネル、MPI、GPU、同時呼び出しは検証しません。
+記録は`docs/tddft-workspaces-validation-2026-11-15.md`です。
+
+
+## 開発用：状態ごとのOpenMP分割方法
+
+ステンシル・電流・力のOpenMP分割フラグを各`s_stencil`へ保存し、計算中は共有フラグを参照しません。
+内部入口`rt_open(..., openmp_mode=...)`は`auto`・`orbital`・`rgrid`を受け付け、
+3カーネルに共通の指定を状態作成時に固定します。省略時は従来の個別入力と自動選択の閾値を保ちます。
+不正値は初期化前に拒否します。これはループの分割方法であり、スレッド数の変更ではありません。
+同時呼び出しは引き続き未対応です。
+
+全体検査に`--different-openmp`を付けると、Aを軌道方向、Bを実空間方向に分割し、
+各々の別プロセス参照・逆順・破棄/再生成と比較します。交互実行時は旧入力文字列も変更します。
+`--different-dt`との併用が可能です。共通格子/k点/XC制約は維持します。
+力の分割方法も接続しましたが、固定イオンの電流回帰を力の数値検証とは扱いません。
+記録は`docs/tddft-openmp-validation-2026-11-15.md`です。
+
+
+## 開発用：明示的な作成時設定
+
+`structures:s_rt_run_config`は`delta_t`・`max_steps`・`stencil_mode`・`current_mode`・
+`force_mode`を持つ値オブジェクトです。native入力を初期化した後、`rt_input_config(options)`で
+従来入力を取得し、必要な項目を設定して`rt_open(state, name, status, config=options)`へ渡します。
+値をコピーするため、作成後に元のoptionsを変更しても状態は変わりません。
+
+dtは有限・正、容量は1以上かつ既定整数の最大値未満、分割指定はauto/orbital/rgridです。
+従来のdelta_t/openmp_modeキーワードとの同時指定は拒否し、不正値は初期化前に返します。
+容量上限の検査は端点整数のオーバーフロー対策であり、メモリ見積もり・確保成功の保証ではありません。
+
+RT配列と最終ステップ判定は状態の容量を使い、上限超過は更新前に拒否します。
+`--different-capacity`ではA=12/B=6ステップを、異なるdt・分割方法、別プロセス参照、
+逆順・破棄/再生成、元設定の容量変更、旧global nt変更と組み合わせて検査します。
+一方が上限に達しても他方は継続できます。格子/k点/XCなど残る入力は共通かつ不変のままです。
+汎用入力オブジェクトや公開Pythonバックエンドの完成とは扱いません。
+記録は`docs/tddft-config-validation-2026-11-15.md`です。
+
+
+## 開発用：明示的な格子境界の初期化
+
+`structures:s_rgrid_config`に周期性（0または3）、指定点数、格子間隔、整合確認用の長さを保持します。
+`grid_config_from_input(lengths, config)`で従来入力を取得し、Maxwellでは既存のal_em/dl_em規則を保ちます。
+`initialization_sub:init_grid_whole_config(lengths, spacing, config, grid, status)`は
+明示的に渡した値だけから境界・halo範囲・添字配列を生成します。旧init_grid_wholeは互換ラッパーとして残します。
+
+座標配列とMPI分割表は従来どおり変更せず、後続の初期化処理が担当します。
+完全な格子・ソルバーのコンストラクターではありません。不正な設定はstatus=1、確保失敗はstatus=2で返し、
+成功するまで渡された格子を変更しません。整数範囲の検査はメモリ予算の保証ではありません。
+旧ラッパーの失敗は従来同様にプロセス停止となります。
+
+`tools/test_grid_config.py HSE_BUILD_RECORD NEW_OUTPUT`で、偶数/奇数の周期・孤立境界、
+点数/間隔指定、異なる2形状、旧globalの変更、Maxwell整合性、不正呼び出し後の状態保持を検査します。
+下位の孤立格子検査を孤立系TDDFTの追加対応とは扱いません。
+セル・k点・擬ポテンシャル・XC/HSE初期化には共有入力が残り、TDDFT全体の共通格子/k点/XC制約は維持します。
+記録は`docs/grid-config-validation-2026-11-15.md`です。
+
+
+## 開発用：明示的なセル形状の決定
+
+`initialization_sub:resolve_cell(config, geometry, status)`は値オブジェクト
+`s_cell_config`（長さ・ベクトル・間隔・点数）だけを読み、`s_cell_geometry`
+（基本ベクトル・長さ・間隔・直交性）を返します。直交セルでは明示的な長さ、対角ベクトル、
+点数×間隔の優先順位を保ち、斜交セルでは元のベクトルとノルム計算を使います。
+明示的な格子間隔は長さ÷点数より優先します。不正・非有限・非正・体積ゼロのセルは
+結果を変更せず非ゼロstatusで返します。規格化した行列の行列式で特異セルを検査しますが、
+ほぼ特異なセルの数値条件までは保証しません。
+
+DFT/RT初期化もこのルーチンを使います。互換層には後続処理向けのglobal alの正規化が残ります。
+セル/k点/擬ポテンシャル/XCの共有入力の完全分離や、異なるセルのTDDFT全体への対応ではありません。
+`tools/test_cell_config.py HSE_BUILD_RECORD NEW_OUTPUT`で優先順位・斜交セル・独立性・
+失敗時の保持を検査します。記録は`docs/cell-config-validation-2026-11-15.md`です。

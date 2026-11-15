@@ -57,7 +57,18 @@ module structures
     type(s_vector) :: uvel         ! u, local grid (mg%is:mg%ie)
   end type s_xc_operator_payload
 
+  type s_xc_pz_workspace
+    integer :: points=0,spin=-1
+    real(8),allocatable :: rho_s_1d(:),rho_s_sp_1d(:,:),exc_1d(:),eexc_1d(:),vexc_1d(:),vexc_sp_1d(:,:)
+  end type
+  type s_xc_workspace
+    integer :: grid(3)=0,spins=0
+    real(8),allocatable :: rho_tmp(:,:,:),rho_s_tmp(:,:,:,:),eexc_tmp(:,:,:),vxc_tmp(:,:,:),vxc_s_tmp(:,:,:,:)
+    type(s_xc_pz_workspace) :: pz
+  end type
+
   type s_dft_system
+    type(s_xc_workspace) :: xc_work
     ! Borrowed explicit HSE owner; never copied as an owning handle.
     class(*),pointer :: salmonpy_hse_owner=>null()
     logical :: if_real_orbital
@@ -102,6 +113,20 @@ module structures
     integer :: ng_bk, ng_r, ng_s, ng_e
     character(1) :: yn_bookkeep
   end type s_ewald_ion_ion
+
+  type s_cell_config
+    real(8) :: lengths(3)=0d0,vectors(3,3)=0d0,spacing(3)=0d0
+    integer :: points(3)=0
+  end type
+  type s_cell_geometry
+    real(8) :: primitive(3,3)=0d0,lengths(3)=0d0,spacing(3)=0d0
+    logical :: orthogonal=.true.
+  end type
+
+  type s_rgrid_config
+    integer :: periodicity=3,points(3)=0
+    real(8) :: spacing(3)=0d0,lengths(3)=0d0
+  end type
 
   type s_rgrid
     integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
@@ -221,6 +246,9 @@ module structures
   end type s_orbital
 
   type s_stencil
+    logical :: stencil_is_parallelized_by_omp=.false.,current_omp_mode=.true.,force_omp_mode=.true.
+    integer,allocatable :: modx(:),mody(:),modz(:)
+    logical :: optimized_stencil_is_callable=.false.
     logical :: if_orthogonal
     real(8) :: coef_lap0,coef_lap(4,3),coef_nab(4,3) ! (4,3) --> (Nd,3) (future work)
     real(8) :: coef_lap0_nd1,coef_lap_nd1(1,3),coef_nab_nd1(1,3)
@@ -550,7 +578,16 @@ module structures
 ! | for TDDFT real-time calculations |
 ! +----------------------------------+
 
+  type s_rt_run_config
+    real(8) :: delta_t=0d0
+    integer :: max_steps=0
+    character(16) :: stencil_mode='auto',current_mode='auto',force_mode='auto'
+  end type
+
   type s_rt
+    integer :: max_steps=0
+    ! Fixed at RT initialization; no per-step global timestep selection.
+    real(8) :: time_step = 0d0
     real(8) :: Dp0_e(3)     !rename later
     real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
     real(8), allocatable :: rIe(:)    !rename later
