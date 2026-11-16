@@ -285,3 +285,5 @@ The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-m
 - [x] Japanese/English coupling guides, AI task catalog/API inventory and packaged sample synchronized.
 - Remaining: full mixed-session restart, memory estimation/cap, production scaling, simultaneous field2+TDDFT2 configuration within a larger resource budget, general native reentrancy. Layout planning does not automatically prepare materials or launch MPI; arbitrary user models enter as explicit bindings. Molecular work remains paused.
 - Evidence: docs/native-layer-assembly-validation-2026-11-16.md; design:2026-11-16-native-layer-assembly.md.
+
+- [x] Repeated-material layer validation: independently evolved Si×2 and SBE×2 in separate groups, four ranks each; distinct point IDs/drives/currents, exact independent serial replay for all three electronic points. Reproduction recipes added to both coupling guides and AI JSON. Evidence: docs/repeated-mixed-material-validation-2026-11-16.md. Full coupled-session restart remains the next acceptance milestone; native same-process reentrancy remains separate.

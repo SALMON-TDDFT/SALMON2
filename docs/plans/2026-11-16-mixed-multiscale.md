@@ -29,3 +29,9 @@ Two field ranks with SBE1+TDDFT1 pass all x/y/z split comparisons against field1
 ## Usability follow-up after topology checks
 
 Topology demonstrations do not yet construct an entire native mixed run from user material IDs,layer geometry and rank budgets. Reuse the existing configuration/identity helpers for that next integration; avoid a duplicate input schema. Preserve explicit LD E versus crystalline A/c timing. Track the known prefilled-incident longitudinal validation gap before broadening admission. Whole-session restart and recoverable collective errors remain separate milestones. The active checklist contains the current prioritized audit.
+
+## Layer entry and repeated-material update
+
+The input entry and prefilled-incident validation gap above are addressed in01d43cc1; see2026-11-16-native-layer-assembly.md. Next acceptance step5 remains open: complete coupled-field/LD/electronic checkpoint and restart is not implemented.
+
+Repeated Si and repeated SBE layouts now each run within four ranks, sharing material definitions/initial data while assigning distinct point IDs, MPI groups and evolving states. Every point matches an independent serial replay exactly over128 steps. This verifies process/group isolation, not multiple native TDDFT owners in one process. Evidence: docs/repeated-mixed-material-validation-2026-11-16.md.

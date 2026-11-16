@@ -242,3 +242,22 @@ print(report["required_ranks"], report["layers"])
 電子物質の各格子セルに独立した状態とMPI群を割り当て、LDは場のランク内で管理します。有限の直方体配置であり、無限膜の均質化や代表点への間引きはしません。厚みや断面積を増やすと電子点と必要ランクが増えます。ランク予算超過、未知のID、バックエンド不整合、吸収境界との重なり、LD構成則の近傍に入る電子点を拒否します。真空の隙間も明示指定が必要です。ランク予算はメモリ上限ではなく、`memory_bytes` は未推定です。初期状態準備、MPI起動、物理的な収束確認は別途行います。
 
 上記4ランクの `mpi_mixed_native` コマンドに `--layers 配置JSONのパス --rank-budget 4` を追加できます。このサンプルの既知IDは `sbe-point`、`si-tddft`、`drude`、`lorentz` です。公開の構成関数では任意の明示的な物質IDを使えます。SBE/LDだけの配置ではTDDFTのランタイムとGSは不要で、サンプルの位置引数には未使用の仮パスを指定できます。LDだけならFDTD単独入口を使います。
+
+### 同じ物質から複数の独立点を作る
+
+同梱の配置JSONを読み、Si層の厚みを2から4 Bohrへ変えると、Siが2セルになり、同じ初期状態を使う独立したTDDFT点が2つ作られます。
+
+```python
+import json
+from pathlib import Path
+
+layout = json.loads(Path("mixed_layers.json").read_text())
+for layer in layout["layers"]:
+    if layer["material_id"] == "si-tddft":
+        layer["thickness"] = 4
+Path("two_si_points.json").write_text(json.dumps(layout, indent=2))
+```
+
+`mpi_mixed_native` に `--layers two_si_points.json --tddft-ranks 1 --rank-budget 4` を指定して4ランクで実行します（場1＋SBE1＋TDDFT1×2）。物質IDは共通でも、点IDとMPI群と時間発展状態は別です。厚みを増やすと後続の層も移動するため、報告されるセル範囲を確認してください。
+
+SBEを2点にする場合は、上の条件を `sbe-point` に変更します。どちらも128ステップで各点の異なるA/c履歴を独立に再生し、電流一致を確認しています。同一プロセスに複数のnative TDDFT状態を置く検証ではありません。

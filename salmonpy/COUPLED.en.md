@@ -270,3 +270,22 @@ The variables above are explicitly prepared models, Grid, PlaneWave and calculat
 Every electronic grid cell gets its own state and MPI group; LD cells stay on field ranks. These are finite rectangular regions, not automatically homogenized infinite films. Increasing transverse area or thickness can greatly increase electronic ranks. The planner rejects excess ranks, unknown IDs, incompatible backends, absorbing-boundary overlap and electronic points in an LD constitutive neighborhood. It inserts no implicit gap. The rank budget is not a memory limit (`memory_bytes` is unknown). Initial-state preparation, MPI startup and physical convergence remain explicit.
 
 Run the installed fixture by adding `--layers PATH_TO_mixed_layers.json --rank-budget 4` to the four-rank `mpi_mixed_native` command above. The sample recognizes `sbe-point`, `si-tddft`, `drude` and `lorentz`; the public planner accepts arbitrary explicitly bound IDs. An SBE/LD-only layout needs no TDDFT runtime or GS; the sample's positional runtime/bundle arguments may then be unused placeholders. Pure LD uses FDTD directly.
+
+### Independent points sharing one material
+
+Read the packaged layout and increase the Si thickness from2 to4 Bohr to create two independent TDDFT points from the same initial state:
+
+```python
+import json
+from pathlib import Path
+
+layout = json.loads(Path("mixed_layers.json").read_text())
+for layer in layout["layers"]:
+    if layer["material_id"] == "si-tddft":
+        layer["thickness"] = 4
+Path("two_si_points.json").write_text(json.dumps(layout, indent=2))
+```
+
+Run `mpi_mixed_native` with four ranks and `--layers two_si_points.json --tddft-ranks 1 --rank-budget 4` (field1 + SBE1 + two TDDFT groups of one rank). Material ID is shared; point IDs, MPI groups and evolving states are distinct. Increasing thickness also shifts subsequent layers; inspect reported cell bounds.
+
+To repeat SBE instead, change the condition above to `sbe-point`. Both layouts were checked over128 steps by independently replaying each point's distinct A/c history and comparing currents. This does not test multiple native TDDFT states within one process.
