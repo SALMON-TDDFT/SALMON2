@@ -7,6 +7,7 @@ Tiny 3D connection fixture, not recommended production TDDFT geometry.
 """
 import argparse
 import json
+import hashlib
 from pathlib import Path
 import numpy as np
 from salmonpy.coupled import NativeEHField, CoupledStepper
@@ -15,7 +16,7 @@ from salmonpy.embedded_tddft import NativeTDDFTMaterialProvider, NativeTDDFTBack
 from salmonpy.material_response import MaterialBinding, ResponseSession
 from salmonpy.materials import bind_material
 from salmonpy.examples.mpi_mixed_multiscale import models
-from salmonpy.fdtd import FDTD, PlaneWave
+from salmonpy.fdtd import FDTD, FDTDMPI, PlaneWave
 from salmonpy.geometry import Grid, Geometry, Shape
 from salmonpy.ld import LorentzDrude
 from salmonpy.fields import AcosPulse
@@ -33,7 +34,11 @@ def main():
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
     parser.add_argument('--steps', type=int, default=128)
     parser.add_argument('--without-ld', action='store_true', help='vacuum control for local LD regions')
+    parser.add_argument('--save-at', type=int, help='stop after this step and save a replay checkpoint')
+    parser.add_argument('--resume', type=Path, help='reconstruct and continue a replay checkpoint')
     args = parser.parse_args()
+    if args.save_at is not None and not 0 < args.save_at < args.steps:
+        parser.error('save-at must be between zero and steps')
     if args.layers is not None and args.without_ld: parser.error('express vacuum in the layout; do not combine --layers with --without-ld')
     if args.steps < 1: parser.error('positive steps required')
     if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
@@ -83,6 +88,35 @@ def main():
                 raise ValueError(f"launch exactly {assembly.record()['required_ranks']} ranks for this layout")
             calculation = assembly.calculation; geometry = calculation.geometry
             points = assembly.points; bindings = assembly.bindings; plan = assembly.parallel_plan
+        # Replay checkpoints deliberately reconstruct native hidden histories from zero.
+        # Bind to input bytes and the native library, excluding output-directory identities.
+        def digest_file(path):
+            h = hashlib.sha256()
+            with Path(path).open('rb') as stream:
+                for block in iter(lambda: stream.read(1024*1024), b''): h.update(block)
+            return h.hexdigest()
+        build = json.loads(args.build.read_text())
+        assets = {}
+        if 'si-tddft' in selected:
+            assets = {str(p.relative_to(args.bundle)): digest_file(p)
+                      for p in sorted(args.bundle.rglob('*')) if p.is_file()}
+        signature = {'input': FDTDMPI(tuple(args.field_grid)).input_text(calculation),
+                     'points': {str(k): list(v) for k,v in points.items()},
+                     'materials': {str(k): v.key for k,v in bindings.items()},
+                     'library': digest_file(build['library']), 'assets': assets,
+                     'field_grid': list(args.field_grid), 'tddft_ranks': args.tddft_ranks,
+                     'layout': layout, 'steps': args.steps}
+        restored = None
+        if args.resume is not None:
+            metadata = json.loads((args.resume/'checkpoint.json').read_text())
+            if metadata.get('schema') != 'salmonpy.native-replay/1' or metadata['signature'] != signature:
+                raise ValueError('replay checkpoint input/library/topology differs')
+            if digest_file(args.resume/'history.npz') != metadata['history_sha256']:
+                raise ValueError('replay checkpoint checksum mismatch')
+            with np.load(args.resume/'history.npz', allow_pickle=False) as archive:
+                restored = {k: archive[k].copy() for k in ('A_over_c','E_at_points','J_charge')}
+            if not 0 < metadata['step'] < args.steps or any(v.shape != (metadata['step'],len(points),3) for v in restored.values()):
+                raise ValueError('invalid replay checkpoint step/shape')
         history = []
         context = ParallelContext.create(world, plan)
         field = None
@@ -90,13 +124,32 @@ def main():
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
         session = ResponseSession(context, bindings, dt=dt)
         coupled = CoupledStepper(session, field)
-        for _ in range(args.steps):
+        stop = args.save_at if args.save_at is not None else args.steps
+        if restored is not None and stop <= metadata['step']:
+            raise ValueError('save-at must advance beyond the resumed checkpoint')
+        for index in range(stop):
             frame = coupled.step()
-            if frame is not None: history.append(frame)
+            if frame is not None:
+                if restored is not None and index < metadata['step']:
+                    for key, values in restored.items():
+                        np.testing.assert_array_equal(frame[key], values[index])
+                history.append(frame)
         communication = session.communication_report()
         session.close()
         if field is not None: field.close()
         context.close()
+        if args.save_at is not None:
+            if world.rank == 0:
+                checkpoint = output/'checkpoint'
+                checkpoint.mkdir()
+                np.savez(checkpoint/'history.npz', **{key: np.asarray([h[key] for h in history])
+                         for key in ('A_over_c','E_at_points','J_charge')})
+                (checkpoint/'checkpoint.json').write_text(json.dumps({
+                    'schema': 'salmonpy.native-replay/1', 'step': stop,
+                    'signature': signature, 'history_sha256': digest_file(checkpoint/'history.npz')}, indent=2)+'\n')
+                print(checkpoint)
+            world.Barrier()
+            return
         # Native lifetimes are finished; replay material drives in independent serial states.
         if world.rank == 0:
             A = np.asarray([h['A_over_c'] for h in history])

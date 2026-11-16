@@ -287,3 +287,6 @@ The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-m
 - Evidence: docs/native-layer-assembly-validation-2026-11-16.md; design:2026-11-16-native-layer-assembly.md.
 
 - [x] Repeated-material layer validation: independently evolved Si×2 and SBE×2 in separate groups, four ranks each; distinct point IDs/drives/currents, exact independent serial replay for all three electronic points. Reproduction recipes added to both coupling guides and AI JSON. Evidence: docs/repeated-mixed-material-validation-2026-11-16.md. Full coupled-session restart remains the next acceptance milestone; native same-process reentrancy remains separate.
+
+- [x] Sample-level replay restart: save at64, reconstruct field/local-LD/electronic histories in a new four-rank job, continue to128; full A/E/j exactly matches continuous execution. Inputs/library/GS/topology and saved histories are checked. Evidence: docs/native-replay-restart-validation-2026-11-16.md.
+- [ ] Direct serialization/restoration of all native field, LD and electronic internals and generic coupled-session archive remain open; replay currently repeats prior computation and is restricted to the supplied sample.
