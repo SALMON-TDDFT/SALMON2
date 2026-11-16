@@ -191,7 +191,9 @@ integer(c_int) function sp_tddft_close() bind(C)
   sp_tddft_close=0
 end function
 
-! Native ABI checkpoint v1. Caller authenticates the file, binary, GS and configuration.
+! Native ABI checkpoint v2. Caller authenticates the file, binary, GS and configuration.
+! XC identity and scalar cval are stored; Libxc resources are rebuilt by initialization.
+! TB-mBJ's automatic c is evaluation-local, not a persistent mutable XC field.
 ! All ranks call collectively with DISTINCT paths and an unchanged process topology.
 ! restore=0 creates a new file; restore=1 loads into a fresh initialized context, without stepping.
 integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
@@ -203,15 +205,27 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   type(checkpoint_payload),allocatable::copy
   character(4096)::filename
   character(32)::magic
+  character(256)::xc_names(3),expected_xc_names(3)
   character(1)::extra
   integer::i,u,ios,close_status,status,header(33),expected(33),allocation_status
-  real(8)::saved_dt,cell(3,3)
-  logical::reading,opened
+  real(8)::saved_dt,cell(3,3),saved_input_cval,saved_xc_cval
+  integer::xc_codes(4),expected_xc_codes(4)
+  logical::reading,opened,xc_flags(4),expected_xc_flags(4)
   sp_tddft_checkpoint=1
   if(.not.allocated(state))return
   status=0;opened=.false.;reading=restore==1
   if(restore/=0.and.restore/=1)status=2
-  if(xc/='pz'.or.spin/='unpolarized'.or.yn_spinorbit/='n'.or.yn_md/='n')status=2
+  select case(trim(xc))
+  case('pz','tbmbj')
+#ifdef USE_LIBXC
+  case('libxc_pz','libxc_pbe')
+#endif
+  case default
+    status=2
+  end select
+  if(xname/='none'.or.cname/='none')status=2
+  if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.yn_md/='n')status=2
+  if(.not.ieee_is_finite(cval).or..not.ieee_is_finite(state%xc_func%cval))status=2
   if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=2
   if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=2
   if(reading.and.state%itt/=state%Mit)status=2
@@ -235,7 +249,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   if(allocated(state%spsi_in%zwf))checkpoint_array_limit=max(checkpoint_array_limit,size(state%spsi_in%zwf,kind=8))
   if(allocated(state%spsi_in%rwf))checkpoint_array_limit=max(checkpoint_array_limit,size(state%spsi_in%rwf,kind=8))
   call checkpoint_copy(copy,.false.)
-  expected=[1,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
+  expected=[2,nproc_size_global,nproc_id_global,nt,state%system%nspin,state%system%no,state%system%nk, &
     state%lg%num,state%mg%is,state%mg%ie,state%mg%is_array,state%mg%ie_array, &
     state%info%io_s,state%info%io_e,state%info%ik_s,state%info%ik_e,state%info%im_s,state%info%im_e, &
     storage_size(1d0),storage_size(1),storage_size((0d0,0d0)),0,0]
@@ -246,23 +260,41 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   endif
   opened=ios==0
   if(opened)then
-    magic='SALMONPY_TDDFT_NATIVE_V1'
+    magic='SALMONPY_TDDFT_NATIVE_V2'
     header=expected;saved_dt=dt;cell=state%system%primitive_a
+    expected_xc_names=[character(256)::xc,xname,cname]
+    expected_xc_codes=[state%xc_func%xctype,state%xc_func%ispin]
+    expected_xc_flags=[state%xc_func%use_gradient,state%xc_func%use_laplacian, &
+      state%xc_func%use_kinetic_energy,state%xc_func%use_current]
+    xc_names=expected_xc_names;xc_codes=expected_xc_codes;xc_flags=expected_xc_flags
+    saved_input_cval=cval;saved_xc_cval=state%xc_func%cval
     if(reading)then
       read(u,iostat=ios)magic,header,saved_dt,cell
       if(ios==0)then
-        if(magic/='SALMONPY_TDDFT_NATIVE_V1'.or.any(header/=expected))ios=1
+        if(magic/='SALMONPY_TDDFT_NATIVE_V2'.or.any(header/=expected))ios=1
         if(saved_dt/=dt.or.any(cell/=state%system%primitive_a))ios=1
       endif
     else
       write(u,iostat=ios)magic,header,saved_dt,cell
     endif
+    if(ios==0)then
+      if(reading)then
+        read(u,iostat=ios)xc_names,xc_codes,xc_flags,saved_input_cval,saved_xc_cval
+        if(ios==0)then
+          if(any(xc_names/=expected_xc_names).or.any(xc_codes/=expected_xc_codes))ios=1
+          if(any(xc_flags.neqv.expected_xc_flags))ios=1
+          if(saved_input_cval/=cval.or..not.ieee_is_finite(saved_xc_cval))ios=1
+        endif
+      else
+        write(u,iostat=ios)xc_names,xc_codes,xc_flags,saved_input_cval,saved_xc_cval
+      endif
+    endif
     if(ios==0)call checkpoint_io(u,reading,copy,ios)
     if(ios==0)then
-      magic='SALMONPY_TDDFT_COMPLETE_V1'
+      magic='SALMONPY_TDDFT_COMPLETE_V2'
       if(reading)then
         read(u,iostat=ios)magic
-        if(ios==0.and.magic/='SALMONPY_TDDFT_COMPLETE_V1')ios=1
+        if(ios==0.and.magic/='SALMONPY_TDDFT_COMPLETE_V2')ios=1
         if(ios==0)then
           read(u,iostat=ios)extra
           if(is_iostat_end(ios))then
@@ -286,6 +318,8 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   call comm_get_max(status,nproc_group_global)
   if(status==0.and.reading)then
     call checkpoint_copy(copy,.true.)
+    ! Preserve initialized func/info Libxc handles; only the scalar coefficient is restored.
+    state%xc_func%cval=saved_xc_cval
     ! PP phase factors and communication caches are reconstructed, not serialized handles.
     call update_kvector_nonlocalpt(state%info%ik_s,state%info%ik_e,state%system,state%ppg)
     state%spsi_in%update_zwf_overlap=.true.

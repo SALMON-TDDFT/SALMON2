@@ -609,4 +609,4 @@ x/y/z各方向の2分割は、128ステップで場1ランクの結果と完全�
 
 ## native混在サンプルの直接保存／復元
 
-`examples/mpi_mixed_native.py` の `--direct-save-at N` と `--direct-resume PATH` を使う。入力・nativeライブラリ・GS・分割・全ステップ数は同じに保ち、新しい出力先へ復元する。場/PML/LD/SBE/周期PZ中点TDDFTの内部状態と積算A・直前電流・時計を直接復元する。`restored_step` と `native_steps_this_job` で過去の時間発展を再計算していないことを確認する。参照用の独立シリアル計算は検証のため別途実行される。保存は同じ環境・MPI構成の同梱サンプル用であり、汎用バックエンド保存や他XCの直接復元を推定しない。詳細はCOUPLED日英ガイド。
+`examples/mpi_mixed_native.py` の `--direct-save-at N` と `--direct-resume PATH` を使う。入力・nativeライブラリ・GS・分割・全ステップ数は同じに保ち、新しい出力先へ復元する。場/PML/LD/SBE/周期PZ／TB-mBJ／Libxc-PZ・PBE中点TDDFTの内部状態と積算A・直前電流・時計を直接復元する。`restored_step` と `native_steps_this_job` で過去の時間発展を再計算していないことを確認する。参照用の独立シリアル計算は検証のため別途実行される。保存は同じ環境・MPI構成の同梱サンプル用であり、汎用バックエンド保存やHSE・未検証XCの直接復元を推定しない。詳細はCOUPLED日英ガイド。

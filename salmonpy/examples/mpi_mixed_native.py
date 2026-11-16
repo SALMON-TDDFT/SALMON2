@@ -16,7 +16,7 @@ from salmonpy.embedded_tddft import NativeTDDFTMaterialProvider, NativeTDDFTBack
 from salmonpy.material_response import MaterialBinding, ResponseSession
 from salmonpy.materials import bind_material
 from salmonpy.examples.mpi_mixed_multiscale import models
-from salmonpy.fdtd import FDTD, FDTDMPI, PlaneWave
+from salmonpy.fdtd import FDTD, FDTDMPI, PlaneWave, SalmonExecutable
 from salmonpy.geometry import Grid, Geometry, Shape
 from salmonpy.ld import LorentzDrude
 from salmonpy.fields import AcosPulse
@@ -189,7 +189,8 @@ def main():
             initial = None
             try:
                 if any(b.key == 'si-tddft' for b in bindings.values()):
-                    initial = TDDFTInitialState.from_salmon(args.bundle, 'rt.inp', executable=load_runtime(args.runtime),
+                    initial = TDDFTInitialState.from_salmon(args.bundle, 'rt.inp', executable=(SalmonExecutable(args.runtime, digest_file(args.runtime))
+                                                                      if args.runtime.is_file() else load_runtime(args.runtime)),
                                                           max_steps=args.steps, threads=1)
                 for column, point in enumerate(points):
                     is_sbe = bindings[point].key == 'sbe-point'

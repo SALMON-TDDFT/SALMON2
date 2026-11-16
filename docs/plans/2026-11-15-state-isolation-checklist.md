@@ -290,3 +290,10 @@ The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-m
 
 - [x] Sample-level replay restart: save at64, reconstruct field/local-LD/electronic histories in a new four-rank job, continue to128; full A/E/j exactly matches continuous execution. Inputs/library/GS/topology and saved histories are checked. Evidence: docs/native-replay-restart-validation-2026-11-16.md.
 - [x] Direct native field/PML/LD/SBE/PZ-electronic internal state save/restore in the supplied mixed fixture;64 and63 step restart matches continuous128, with64/65 propagation calls. Generic user-backend archives/other XC and changed-topology restart remain open. See docs/native-direct-checkpoint-validation-2026-11-16.md.
+
+### Non-PZ direct checkpoint (2026-11-16)
+
+- [x] CheckpointV2 XC identity/derivative flags/input cval validation; restore scalar cval and rebuild Libxc handles from original configuration.
+- [x] TB-mBJ automatic/fixed cval,Libxc-PZ,Libxc-PBE and PZ regression: per-XC converged Si SCF, continuous128 vs direct63+65; A/E/j bit-identical in all five cases. Three ranks(field1/SBE1/TDDFT1), no elapsed-time replay.
+- [x] Source/wheel446 tests (one skipped each), packaging, source manifest update, English/Japanese/AI guides.
+- Remaining: non-PZ internally parallel groups need separate campaign; HSE native direct checkpoint, other XC, changed topology and generic backend persistence remain open. Molecular work stays paused. Evidence: docs/xc-direct-checkpoint-validation-2026-11-16.md.
