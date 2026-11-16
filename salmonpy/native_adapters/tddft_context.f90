@@ -14,7 +14,7 @@ module salmonpy_tddft_context
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
- public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write
+ public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step
  type fixed_settings
   real(8)::omega,electronic_temperature
   integer::grid(3),mesh(3),bands,energy_interval,electrons,hamil,exact_interval,warmup,teachers
@@ -51,9 +51,22 @@ type(s_singlescale) :: singlescale
 type(s_unfold) :: unfold
 
  type(s_exx_rt_state)::hse
+ type(s_rt_run_config)::run_settings
+ logical::checkpoint_failed=.false.
  type(fixed_settings)::settings
  integer::Mit=0,accepted=0
  end type
+type :: checkpoint_payload
+  type(s_orbital) :: spsi_in,spsi_out,tpsi
+  type(s_scalar) :: rho,rho_jm,Vh,Vh_stock1,Vh_stock2,Vbox,Vpsl
+  type(s_scalar),allocatable :: rho_s(:),V_local(:),Vxc(:)
+  type(s_rt) :: rt
+  type(s_poisson) :: poisson
+  type(s_dft_energy) :: energy
+  real(8) :: fields(3,5)
+  integer :: Mit,accepted
+end type
+integer(8),save::checkpoint_array_limit=0_8
 contains
  subroutine rt_input_config(value)
  type(s_rt_run_config),intent(out)::value
@@ -158,6 +171,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
                         ctx%V_local, ctx%Vbox, ctx%Vh, ctx%Vh_stock1, ctx%Vh_stock2, ctx%Vxc, ctx%Vpsl,&
                         ctx%pp, ctx%ppg, ctx%ppn, ctx%unfold, run_config=selected )
  sysname=saved_name
+ ctx%run_settings=selected
  ctx%settings=capture_settings()
  process_settings=ctx%settings;settings_pinned=.true.
  ctx%accepted=ctx%Mit
@@ -174,6 +188,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(.not.settings_match(ctx%settings))then
   status=2;return
  endif
+ if(ctx%checkpoint_failed)return
  if(ctx%accepted>=ctx%rt%max_steps)return
  do i=1,3
   if(.not.ieee_is_finite(ac(i)))return
@@ -229,4 +244,2995 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
   enddo
  endif
  end subroutine
+
+ ! Same-build, same-input serial native archive. Caller verifies the binary/GS
+ ! provenance and authenticates the file before load. Opaque context, FFT, XC,
+ ! MPI and output handles are never serialized or intrinsically copied.
+ ! Restore only into a fresh rt_open; no propagation is performed. Output files
+ ! are fresh streams, not a resumed text log. On a late restore error discard
+ ! the context (HSE owner may have been partly loaded).
+ subroutine rt_checkpoint(ctx,path,restore,status)
+ use hse_checkpoint,only:hse_checkpoint_write,hse_checkpoint_read
+ use hamiltonian,only:update_kvector_nonlocalpt
+ use exx_native,only:exx_refresh
+ type(tddft_context),pointer,intent(inout)::ctx
+ character(*),intent(in)::path
+ logical,intent(in)::restore
+ integer,intent(out)::status
+ type(checkpoint_payload),allocatable::copy
+ type(fixed_settings)::saved_settings
+ type(s_rt_run_config)::saved_run
+ integer::u,ios,closing,allocation_status,header(27),expected(27)
+ real(8)::cell(3,3),spacing(3),saved_initial_energy
+ character(32)::magic
+ character(1)::extra
+ logical::hse_loaded
+ status=1;hse_loaded=.false.
+ if(.not.associated(ctx))return
+ if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))return
+ if(len_trim(path)==0)return
+ if(restore.and.ctx%accepted/=ctx%Mit)return
+ if(nproc_size_global/=1.or.xc/='hse06'.or.yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_md/='n')return
+ if(projection_option/='no'.or.dm_unfold_option/='no'.or.ctx%singlescale%flag_use)return
+ expected=[1,ctx%rt%max_steps,ctx%system%nspin,ctx%system%no,ctx%system%nk, &
+    ctx%lg%num,ctx%mg%is,ctx%mg%ie,ctx%mg%is_array,ctx%mg%ie_array, &
+    ctx%info%io_s,ctx%info%io_e,ctx%info%ik_s,ctx%info%ik_e, &
+    storage_size(1d0),storage_size(1),storage_size((0d0,0d0))]
+ checkpoint_array_limit=max(64_8*(int(ctx%rt%max_steps,8)+1_8),64_8*int(ctx%system%ngrid,8))
+ if(allocated(ctx%spsi_in%zwf))checkpoint_array_limit=max(checkpoint_array_limit,size(ctx%spsi_in%zwf,kind=8))
+ if(allocated(ctx%spsi_in%rwf))checkpoint_array_limit=max(checkpoint_array_limit,size(ctx%spsi_in%rwf,kind=8))
+ allocate(copy,stat=allocation_status)
+ if(allocation_status/=0)return
+ call checkpoint_copy(ctx,copy,.false.)
+ if(restore)then
+  open(newunit=u,file=trim(path),access='stream',form='unformatted',status='old',action='read',iostat=ios)
+ else
+  open(newunit=u,file=trim(path),access='stream',form='unformatted',status='new',action='write',iostat=ios)
+ endif
+ if(ios/=0)return
+ magic='SALMONPY_FAST_HSE_RT_V1';header=expected
+ saved_settings=ctx%settings;saved_run=ctx%run_settings
+ cell=ctx%system%primitive_a;spacing=ctx%system%hgs;saved_initial_energy=ctx%energy%E_tot0
+ if(restore)then
+  read(u,iostat=ios)magic,header,saved_settings,saved_run,cell,spacing,saved_initial_energy
+  if(ios==0)then
+   if(magic/='SALMONPY_FAST_HSE_RT_V1'.or.any(header/=expected))ios=1
+   if(.not.settings_match(saved_settings))ios=1
+   if(saved_run%delta_t/=ctx%run_settings%delta_t.or.saved_run%max_steps/=ctx%run_settings%max_steps)ios=1
+   if(saved_run%stencil_mode/=ctx%run_settings%stencil_mode.or. &
+      saved_run%current_mode/=ctx%run_settings%current_mode.or.saved_run%force_mode/=ctx%run_settings%force_mode)ios=1
+   if(any(cell/=ctx%system%primitive_a).or.any(spacing/=ctx%system%hgs))ios=1
+   if(.not.ieee_is_finite(saved_initial_energy).or.saved_initial_energy/=ctx%energy%E_tot0)ios=1
+  endif
+ else
+  write(u,iostat=ios)magic,header,saved_settings,saved_run,cell,spacing,saved_initial_energy
+ endif
+ if(ios==0)call checkpoint_io(u,restore,copy,ios)
+ if(ios==0.and.restore)then
+  if(copy%Mit/=ctx%Mit.or.copy%accepted<copy%Mit.or.copy%accepted>ctx%rt%max_steps)ios=1
+  if(.not.all(ieee_is_finite(copy%fields(:,1:4))))ios=1
+  if(copy%energy%E_tot0/=saved_initial_energy)ios=1
+ endif
+ if(ios==0)then
+  if(restore)then
+   ! Rebuild the fresh CPU kernel only if initialization did not need exchange.
+   ! This prepares a static operator from the initial GS, never an RT step.
+   if(.not.allocated(ctx%hse%native_kernel))then
+    call exx_refresh(ctx%system,ctx%mg,ctx%info,ctx%spsi_in,rt_context=ctx%hse,rt_status=ios)
+   endif
+   if(ios==0)then
+    hse_loaded=.true.
+    call hse_checkpoint_read(u,ctx%hse,ios)
+   endif
+  else
+   call hse_checkpoint_write(u,ctx%hse,ios)
+  endif
+ endif
+ if(ios==0)then
+  magic='SALMONPY_FAST_HSE_RT_COMPLETE_1'
+  if(restore)then
+   read(u,iostat=ios)magic
+   if(ios==0.and.magic/='SALMONPY_FAST_HSE_RT_COMPLETE_1')ios=1
+   if(ios==0)then
+    read(u,iostat=ios)extra
+    if(is_iostat_end(ios))then
+     ios=0
+    else
+     ios=1
+    endif
+   endif
+  else
+   write(u,iostat=ios)magic
+  endif
+ endif
+ close(u,iostat=closing)
+ if(closing/=0)ios=closing
+ if(ios/=0)then
+  if(restore.and.hse_loaded)ctx%checkpoint_failed=.true.
+  return
+ endif
+ if(restore)then
+  call checkpoint_copy(ctx,copy,.true.)
+  call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
+  ctx%spsi_in%update_zwf_overlap=.true.
+  ctx%spsi_out%update_zwf_overlap=.true.
+  ctx%tpsi%update_zwf_overlap=.true.
+ endif
+ status=0
+ end subroutine rt_checkpoint
+
+ integer function rt_accepted_step(ctx) result(step)
+ type(tddft_context),pointer,intent(in)::ctx
+ step=-1
+ if(associated(ctx))then
+  if(.not.ctx%checkpoint_failed)step=ctx%accepted
+ endif
+ end function rt_accepted_step
+
+subroutine checkpoint_copy(ctx,copy,restore)
+  type(tddft_context),intent(inout)::ctx
+  type(checkpoint_payload),intent(inout)::copy
+  logical,intent(in)::restore
+  if(restore)then
+    ctx%spsi_in=copy%spsi_in
+    ctx%spsi_out=copy%spsi_out
+    ctx%tpsi=copy%tpsi
+    ctx%rho=copy%rho
+    ctx%rho_jm=copy%rho_jm
+    ctx%Vh=copy%Vh
+    ctx%Vh_stock1=copy%Vh_stock1
+    ctx%Vh_stock2=copy%Vh_stock2
+    ctx%Vbox=copy%Vbox
+    ctx%Vpsl=copy%Vpsl
+    if(allocated(copy%rho_s))then
+      ctx%rho_s=copy%rho_s
+    else
+      if(allocated(ctx%rho_s))deallocate(ctx%rho_s)
+    endif
+    if(allocated(copy%V_local))then
+      ctx%V_local=copy%V_local
+    else
+      if(allocated(ctx%V_local))deallocate(ctx%V_local)
+    endif
+    if(allocated(copy%Vxc))then
+      ctx%Vxc=copy%Vxc
+    else
+      if(allocated(ctx%Vxc))deallocate(ctx%Vxc)
+    endif
+    ctx%energy=copy%energy
+    ctx%poisson=copy%poisson
+    ctx%Mit=copy%Mit
+    ctx%accepted=copy%accepted
+    ctx%rt%Dp0_e=copy%rt%Dp0_e
+    if(allocated(copy%rt%dDp_e))then
+      ctx%rt%dDp_e=copy%rt%dDp_e
+    else
+      if(allocated(ctx%rt%dDp_e))deallocate(ctx%rt%dDp_e)
+    endif
+    if(allocated(copy%rt%Dp_e))then
+      ctx%rt%Dp_e=copy%rt%Dp_e
+    else
+      if(allocated(ctx%rt%Dp_e))deallocate(ctx%rt%Dp_e)
+    endif
+    if(allocated(copy%rt%Dp_i))then
+      ctx%rt%Dp_i=copy%rt%Dp_i
+    else
+      if(allocated(ctx%rt%Dp_i))deallocate(ctx%rt%Dp_i)
+    endif
+    if(allocated(copy%rt%Qp_e))then
+      ctx%rt%Qp_e=copy%rt%Qp_e
+    else
+      if(allocated(ctx%rt%Qp_e))deallocate(ctx%rt%Qp_e)
+    endif
+    if(allocated(copy%rt%rIe))then
+      ctx%rt%rIe=copy%rt%rIe
+    else
+      if(allocated(ctx%rt%rIe))deallocate(ctx%rt%rIe)
+    endif
+    if(allocated(copy%rt%curr))then
+      ctx%rt%curr=copy%rt%curr
+    else
+      if(allocated(ctx%rt%curr))deallocate(ctx%rt%curr)
+    endif
+    if(allocated(copy%rt%E_ext))then
+      ctx%rt%E_ext=copy%rt%E_ext
+    else
+      if(allocated(ctx%rt%E_ext))deallocate(ctx%rt%E_ext)
+    endif
+    if(allocated(copy%rt%E_ind))then
+      ctx%rt%E_ind=copy%rt%E_ind
+    else
+      if(allocated(ctx%rt%E_ind))deallocate(ctx%rt%E_ind)
+    endif
+    if(allocated(copy%rt%E_tot))then
+      ctx%rt%E_tot=copy%rt%E_tot
+    else
+      if(allocated(ctx%rt%E_tot))deallocate(ctx%rt%E_tot)
+    endif
+    if(allocated(copy%rt%Ac_ext))then
+      ctx%rt%Ac_ext=copy%rt%Ac_ext
+    else
+      if(allocated(ctx%rt%Ac_ext))deallocate(ctx%rt%Ac_ext)
+    endif
+    if(allocated(copy%rt%Ac_ind))then
+      ctx%rt%Ac_ind=copy%rt%Ac_ind
+    else
+      if(allocated(ctx%rt%Ac_ind))deallocate(ctx%rt%Ac_ind)
+    endif
+    if(allocated(copy%rt%Ac_tot))then
+      ctx%rt%Ac_tot=copy%rt%Ac_tot
+    else
+      if(allocated(ctx%rt%Ac_tot))deallocate(ctx%rt%Ac_tot)
+    endif
+    if(allocated(copy%rt%zc))then
+      ctx%rt%zc=copy%rt%zc
+    else
+      if(allocated(ctx%rt%zc))deallocate(ctx%rt%zc)
+    endif
+    if(allocated(copy%rt%vloc_t))then
+      ctx%rt%vloc_t=copy%rt%vloc_t
+    else
+      if(allocated(ctx%rt%vloc_t))deallocate(ctx%rt%vloc_t)
+    endif
+    if(allocated(copy%rt%vloc_new))then
+      ctx%rt%vloc_new=copy%rt%vloc_new
+    else
+      if(allocated(ctx%rt%vloc_new))deallocate(ctx%rt%vloc_new)
+    endif
+    if(allocated(copy%rt%vloc_old))then
+      ctx%rt%vloc_old=copy%rt%vloc_old
+    else
+      if(allocated(ctx%rt%vloc_old))deallocate(ctx%rt%vloc_old)
+    endif
+    if(allocated(copy%rt%rho0_s))then
+      ctx%rt%rho0_s=copy%rt%rho0_s
+    else
+      if(allocated(ctx%rt%rho0_s))deallocate(ctx%rt%rho0_s)
+    endif
+    ctx%rt%vonf=copy%rt%vonf
+    ctx%rt%j_e=copy%rt%j_e
+    ctx%rt%E_old=copy%rt%E_old
+    ctx%rt%rho0_loaded=copy%rt%rho0_loaded
+    ctx%system%vec_Ac=copy%fields(:,1)
+    ctx%system%vec_Ac_ext=copy%fields(:,2)
+    ctx%system%vec_E=copy%fields(:,3)
+    ctx%system%vec_E_ext=copy%fields(:,4)
+  else
+    copy%spsi_in=ctx%spsi_in
+    copy%spsi_out=ctx%spsi_out
+    copy%tpsi=ctx%tpsi
+    copy%rho=ctx%rho
+    copy%rho_jm=ctx%rho_jm
+    copy%Vh=ctx%Vh
+    copy%Vh_stock1=ctx%Vh_stock1
+    copy%Vh_stock2=ctx%Vh_stock2
+    copy%Vbox=ctx%Vbox
+    copy%Vpsl=ctx%Vpsl
+    if(allocated(ctx%rho_s))then
+      copy%rho_s=ctx%rho_s
+    else
+      if(allocated(copy%rho_s))deallocate(copy%rho_s)
+    endif
+    if(allocated(ctx%V_local))then
+      copy%V_local=ctx%V_local
+    else
+      if(allocated(copy%V_local))deallocate(copy%V_local)
+    endif
+    if(allocated(ctx%Vxc))then
+      copy%Vxc=ctx%Vxc
+    else
+      if(allocated(copy%Vxc))deallocate(copy%Vxc)
+    endif
+    copy%energy=ctx%energy
+    copy%poisson=ctx%poisson
+    copy%Mit=ctx%Mit
+    copy%accepted=ctx%accepted
+    copy%rt%Dp0_e=ctx%rt%Dp0_e
+    if(allocated(ctx%rt%dDp_e))then
+      copy%rt%dDp_e=ctx%rt%dDp_e
+    else
+      if(allocated(copy%rt%dDp_e))deallocate(copy%rt%dDp_e)
+    endif
+    if(allocated(ctx%rt%Dp_e))then
+      copy%rt%Dp_e=ctx%rt%Dp_e
+    else
+      if(allocated(copy%rt%Dp_e))deallocate(copy%rt%Dp_e)
+    endif
+    if(allocated(ctx%rt%Dp_i))then
+      copy%rt%Dp_i=ctx%rt%Dp_i
+    else
+      if(allocated(copy%rt%Dp_i))deallocate(copy%rt%Dp_i)
+    endif
+    if(allocated(ctx%rt%Qp_e))then
+      copy%rt%Qp_e=ctx%rt%Qp_e
+    else
+      if(allocated(copy%rt%Qp_e))deallocate(copy%rt%Qp_e)
+    endif
+    if(allocated(ctx%rt%rIe))then
+      copy%rt%rIe=ctx%rt%rIe
+    else
+      if(allocated(copy%rt%rIe))deallocate(copy%rt%rIe)
+    endif
+    if(allocated(ctx%rt%curr))then
+      copy%rt%curr=ctx%rt%curr
+    else
+      if(allocated(copy%rt%curr))deallocate(copy%rt%curr)
+    endif
+    if(allocated(ctx%rt%E_ext))then
+      copy%rt%E_ext=ctx%rt%E_ext
+    else
+      if(allocated(copy%rt%E_ext))deallocate(copy%rt%E_ext)
+    endif
+    if(allocated(ctx%rt%E_ind))then
+      copy%rt%E_ind=ctx%rt%E_ind
+    else
+      if(allocated(copy%rt%E_ind))deallocate(copy%rt%E_ind)
+    endif
+    if(allocated(ctx%rt%E_tot))then
+      copy%rt%E_tot=ctx%rt%E_tot
+    else
+      if(allocated(copy%rt%E_tot))deallocate(copy%rt%E_tot)
+    endif
+    if(allocated(ctx%rt%Ac_ext))then
+      copy%rt%Ac_ext=ctx%rt%Ac_ext
+    else
+      if(allocated(copy%rt%Ac_ext))deallocate(copy%rt%Ac_ext)
+    endif
+    if(allocated(ctx%rt%Ac_ind))then
+      copy%rt%Ac_ind=ctx%rt%Ac_ind
+    else
+      if(allocated(copy%rt%Ac_ind))deallocate(copy%rt%Ac_ind)
+    endif
+    if(allocated(ctx%rt%Ac_tot))then
+      copy%rt%Ac_tot=ctx%rt%Ac_tot
+    else
+      if(allocated(copy%rt%Ac_tot))deallocate(copy%rt%Ac_tot)
+    endif
+    if(allocated(ctx%rt%zc))then
+      copy%rt%zc=ctx%rt%zc
+    else
+      if(allocated(copy%rt%zc))deallocate(copy%rt%zc)
+    endif
+    if(allocated(ctx%rt%vloc_t))then
+      copy%rt%vloc_t=ctx%rt%vloc_t
+    else
+      if(allocated(copy%rt%vloc_t))deallocate(copy%rt%vloc_t)
+    endif
+    if(allocated(ctx%rt%vloc_new))then
+      copy%rt%vloc_new=ctx%rt%vloc_new
+    else
+      if(allocated(copy%rt%vloc_new))deallocate(copy%rt%vloc_new)
+    endif
+    if(allocated(ctx%rt%vloc_old))then
+      copy%rt%vloc_old=ctx%rt%vloc_old
+    else
+      if(allocated(copy%rt%vloc_old))deallocate(copy%rt%vloc_old)
+    endif
+    if(allocated(ctx%rt%rho0_s))then
+      copy%rt%rho0_s=ctx%rt%rho0_s
+    else
+      if(allocated(copy%rt%rho0_s))deallocate(copy%rt%rho0_s)
+    endif
+    copy%rt%vonf=ctx%rt%vonf
+    copy%rt%j_e=ctx%rt%j_e
+    copy%rt%E_old=ctx%rt%E_old
+    copy%rt%rho0_loaded=ctx%rt%rho0_loaded
+    copy%fields=0d0
+    copy%fields(:,1)=ctx%system%vec_Ac
+    copy%fields(:,2)=ctx%system%vec_Ac_ext
+    copy%fields(:,3)=ctx%system%vec_E
+    copy%fields(:,4)=ctx%system%vec_E_ext
+  endif
+end subroutine
+subroutine checkpoint_io(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(checkpoint_payload),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  call checkpoint_io_s_orbital(unit,reading,value%spsi_in,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_orbital(unit,reading,value%spsi_out,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_orbital(unit,reading,value%tpsi,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%rho,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%rho_jm,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vh,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock1,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vh_stock2,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vbox,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_scalar(unit,reading,value%Vpsl,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_rt(unit,reading,value%rt,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_poisson(unit,reading,value%poisson,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_dft_energy(unit,reading,value%energy,ios)
+  if(ios/=0)return
+  present_array=allocated(value%rho_s)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%rho_s))deallocate(value%rho_s)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%rho_s))then
+        if(any(lo(1:1)/=lbound(value%rho_s)).or.any(hi(1:1)/=ubound(value%rho_s)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%rho_s(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%rho_s);hi(1:1)=ubound(value%rho_s)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%rho_s,1),ubound(value%rho_s,1)
+    call checkpoint_io_s_scalar(unit,reading,value%rho_s(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  present_array=allocated(value%V_local)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%V_local))deallocate(value%V_local)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%V_local))then
+        if(any(lo(1:1)/=lbound(value%V_local)).or.any(hi(1:1)/=ubound(value%V_local)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%V_local(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%V_local);hi(1:1)=ubound(value%V_local)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%V_local,1),ubound(value%V_local,1)
+    call checkpoint_io_s_scalar(unit,reading,value%V_local(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  present_array=allocated(value%Vxc)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Vxc))deallocate(value%Vxc)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Vxc))then
+        if(any(lo(1:1)/=lbound(value%Vxc)).or.any(hi(1:1)/=ubound(value%Vxc)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Vxc(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%Vxc);hi(1:1)=ubound(value%Vxc)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%Vxc,1),ubound(value%Vxc,1)
+    call checkpoint_io_s_scalar(unit,reading,value%Vxc(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  if(reading)then
+    read(unit,iostat=ios) value%fields
+  else
+    write(unit,iostat=ios) value%fields
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%Mit
+  else
+    write(unit,iostat=ios) value%Mit
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%accepted
+  else
+    write(unit,iostat=ios) value%accepted
+  endif
+  if(ios/=0)return
+end subroutine
+subroutine checkpoint_io_s_scalar(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_scalar),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  present_array=allocated(value%f)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%f))deallocate(value%f)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%f))then
+        if(any(lo(1:3)/=lbound(value%f)).or.any(hi(1:3)/=ubound(value%f)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%f(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%f);hi(1:3)=ubound(value%f)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%f
+    else
+      write(unit,iostat=ios) value%f
+    endif
+    if(ios/=0)return
+  endif
+end subroutine
+subroutine checkpoint_io_s_vector(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_vector),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  present_array=allocated(value%v)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%v))deallocate(value%v)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:4),hi(1:4)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,4
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%v))then
+        if(any(lo(1:4)/=lbound(value%v)).or.any(hi(1:4)/=ubound(value%v)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%v(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),lo(4):hi(4)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:4)=lbound(value%v);hi(1:4)=ubound(value%v)
+      write(unit,iostat=ios)lo(1:4),hi(1:4)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%v
+    else
+      write(unit,iostat=ios) value%v
+    endif
+    if(ios/=0)return
+  endif
+end subroutine
+subroutine checkpoint_io_s_orbital(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_orbital),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  present_array=allocated(value%rwf)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%rwf))deallocate(value%rwf)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:7),hi(1:7)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,7
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%rwf))then
+        if(any(lo(1:7)/=lbound(value%rwf)).or.any(hi(1:7)/=ubound(value%rwf)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%rwf(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),lo(4):hi(4), &
+          lo(5):hi(5),lo(6):hi(6),lo(7):hi(7)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:7)=lbound(value%rwf);hi(1:7)=ubound(value%rwf)
+      write(unit,iostat=ios)lo(1:7),hi(1:7)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%rwf
+    else
+      write(unit,iostat=ios) value%rwf
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%zwf)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%zwf))deallocate(value%zwf)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:7),hi(1:7)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,7
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%zwf))then
+        if(any(lo(1:7)/=lbound(value%zwf)).or.any(hi(1:7)/=ubound(value%zwf)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%zwf(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3),lo(4):hi(4), &
+          lo(5):hi(5),lo(6):hi(6),lo(7):hi(7)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:7)=lbound(value%zwf);hi(1:7)=ubound(value%zwf)
+      write(unit,iostat=ios)lo(1:7),hi(1:7)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%zwf
+    else
+      write(unit,iostat=ios) value%zwf
+    endif
+    if(ios/=0)return
+  endif
+  if(reading)then
+    read(unit,iostat=ios) value%update_zwf_overlap
+  else
+    write(unit,iostat=ios) value%update_zwf_overlap
+  endif
+  if(ios/=0)return
+end subroutine
+subroutine checkpoint_io_s_dft_energy(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_dft_energy),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  present_array=allocated(value%esp)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%esp))deallocate(value%esp)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%esp))then
+        if(any(lo(1:3)/=lbound(value%esp)).or.any(hi(1:3)/=ubound(value%esp)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%esp(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%esp);hi(1:3)=ubound(value%esp)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%esp
+    else
+      write(unit,iostat=ios) value%esp
+    endif
+    if(ios/=0)return
+  endif
+  if(reading)then
+    read(unit,iostat=ios) value%E_tot
+  else
+    write(unit,iostat=ios) value%E_tot
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_kin
+  else
+    write(unit,iostat=ios) value%E_kin
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_h
+  else
+    write(unit,iostat=ios) value%E_h
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_xc
+  else
+    write(unit,iostat=ios) value%E_xc
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_ion_ion
+  else
+    write(unit,iostat=ios) value%E_ion_ion
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_ion_loc
+  else
+    write(unit,iostat=ios) value%E_ion_loc
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_ion_nloc
+  else
+    write(unit,iostat=ios) value%E_ion_nloc
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_U
+  else
+    write(unit,iostat=ios) value%E_U
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_tot0
+  else
+    write(unit,iostat=ios) value%E_tot0
+  endif
+  if(ios/=0)return
+end subroutine
+subroutine checkpoint_io_s_poisson(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_poisson),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%iterVh
+  else
+    write(unit,iostat=ios) value%iterVh
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%npole_partial
+  else
+    write(unit,iostat=ios) value%npole_partial
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%npole_total
+  else
+    write(unit,iostat=ios) value%npole_total
+  endif
+  if(ios/=0)return
+  present_array=allocated(value%ipole_tbl)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ipole_tbl))deallocate(value%ipole_tbl)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ipole_tbl))then
+        if(any(lo(1:1)/=lbound(value%ipole_tbl)).or.any(hi(1:1)/=ubound(value%ipole_tbl)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ipole_tbl(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%ipole_tbl);hi(1:1)=ubound(value%ipole_tbl)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ipole_tbl
+    else
+      write(unit,iostat=ios) value%ipole_tbl
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ig_num)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ig_num))deallocate(value%ig_num)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ig_num))then
+        if(any(lo(1:1)/=lbound(value%ig_num)).or.any(hi(1:1)/=ubound(value%ig_num)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ig_num(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%ig_num);hi(1:1)=ubound(value%ig_num)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ig_num
+    else
+      write(unit,iostat=ios) value%ig_num
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ig)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ig))deallocate(value%ig)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ig))then
+        if(any(lo(1:3)/=lbound(value%ig)).or.any(hi(1:3)/=ubound(value%ig)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ig(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ig);hi(1:3)=ubound(value%ig)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ig
+    else
+      write(unit,iostat=ios) value%ig
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ig_bound)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ig_bound))deallocate(value%ig_bound)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ig_bound))then
+        if(any(lo(1:3)/=lbound(value%ig_bound)).or.any(hi(1:3)/=ubound(value%ig_bound)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ig_bound(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ig_bound);hi(1:3)=ubound(value%ig_bound)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ig_bound
+    else
+      write(unit,iostat=ios) value%ig_bound
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%wkbound)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%wkbound))deallocate(value%wkbound)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%wkbound))then
+        if(any(lo(1:1)/=lbound(value%wkbound)).or.any(hi(1:1)/=ubound(value%wkbound)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%wkbound(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%wkbound);hi(1:1)=ubound(value%wkbound)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%wkbound
+    else
+      write(unit,iostat=ios) value%wkbound
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%wkbound2)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%wkbound2))deallocate(value%wkbound2)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%wkbound2))then
+        if(any(lo(1:1)/=lbound(value%wkbound2)).or.any(hi(1:1)/=ubound(value%wkbound2)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%wkbound2(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%wkbound2);hi(1:1)=ubound(value%wkbound2)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%wkbound2
+    else
+      write(unit,iostat=ios) value%wkbound2
+    endif
+    if(ios/=0)return
+  endif
+  if(reading)then
+    read(unit,iostat=ios) value%n_multipole_xyz
+  else
+    write(unit,iostat=ios) value%n_multipole_xyz
+  endif
+  if(ios/=0)return
+  present_array=allocated(value%zrhoG_ele)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%zrhoG_ele))deallocate(value%zrhoG_ele)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%zrhoG_ele))then
+        if(any(lo(1:3)/=lbound(value%zrhoG_ele)).or.any(hi(1:3)/=ubound(value%zrhoG_ele)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%zrhoG_ele(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%zrhoG_ele);hi(1:3)=ubound(value%zrhoG_ele)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%zrhoG_ele
+    else
+      write(unit,iostat=ios) value%zrhoG_ele
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff1x)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff1x))deallocate(value%ff1x)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff1x))then
+        if(any(lo(1:3)/=lbound(value%ff1x)).or.any(hi(1:3)/=ubound(value%ff1x)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff1x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff1x);hi(1:3)=ubound(value%ff1x)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff1x
+    else
+      write(unit,iostat=ios) value%ff1x
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff1y)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff1y))deallocate(value%ff1y)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff1y))then
+        if(any(lo(1:3)/=lbound(value%ff1y)).or.any(hi(1:3)/=ubound(value%ff1y)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff1y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff1y);hi(1:3)=ubound(value%ff1y)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff1y
+    else
+      write(unit,iostat=ios) value%ff1y
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff1z)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff1z))deallocate(value%ff1z)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff1z))then
+        if(any(lo(1:3)/=lbound(value%ff1z)).or.any(hi(1:3)/=ubound(value%ff1z)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff1z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff1z);hi(1:3)=ubound(value%ff1z)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff1z
+    else
+      write(unit,iostat=ios) value%ff1z
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff2x)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff2x))deallocate(value%ff2x)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff2x))then
+        if(any(lo(1:3)/=lbound(value%ff2x)).or.any(hi(1:3)/=ubound(value%ff2x)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff2x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff2x);hi(1:3)=ubound(value%ff2x)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff2x
+    else
+      write(unit,iostat=ios) value%ff2x
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff2y)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff2y))deallocate(value%ff2y)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff2y))then
+        if(any(lo(1:3)/=lbound(value%ff2y)).or.any(hi(1:3)/=ubound(value%ff2y)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff2y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff2y);hi(1:3)=ubound(value%ff2y)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff2y
+    else
+      write(unit,iostat=ios) value%ff2y
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff2z)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff2z))deallocate(value%ff2z)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff2z))then
+        if(any(lo(1:3)/=lbound(value%ff2z)).or.any(hi(1:3)/=ubound(value%ff2z)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff2z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff2z);hi(1:3)=ubound(value%ff2z)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff2z
+    else
+      write(unit,iostat=ios) value%ff2z
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff1)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff1))deallocate(value%ff1)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff1))then
+        if(any(lo(1:3)/=lbound(value%ff1)).or.any(hi(1:3)/=ubound(value%ff1)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff1(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff1);hi(1:3)=ubound(value%ff1)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff1
+    else
+      write(unit,iostat=ios) value%ff1
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff2)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff2))deallocate(value%ff2)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff2))then
+        if(any(lo(1:3)/=lbound(value%ff2)).or.any(hi(1:3)/=ubound(value%ff2)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff2(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff2);hi(1:3)=ubound(value%ff2)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff2
+    else
+      write(unit,iostat=ios) value%ff2
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff3x)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff3x))deallocate(value%ff3x)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff3x))then
+        if(any(lo(1:3)/=lbound(value%ff3x)).or.any(hi(1:3)/=ubound(value%ff3x)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff3x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff3x);hi(1:3)=ubound(value%ff3x)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff3x
+    else
+      write(unit,iostat=ios) value%ff3x
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff3y)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff3y))deallocate(value%ff3y)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff3y))then
+        if(any(lo(1:3)/=lbound(value%ff3y)).or.any(hi(1:3)/=ubound(value%ff3y)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff3y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff3y);hi(1:3)=ubound(value%ff3y)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff3y
+    else
+      write(unit,iostat=ios) value%ff3y
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff3z)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff3z))deallocate(value%ff3z)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff3z))then
+        if(any(lo(1:3)/=lbound(value%ff3z)).or.any(hi(1:3)/=ubound(value%ff3z)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff3z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff3z);hi(1:3)=ubound(value%ff3z)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff3z
+    else
+      write(unit,iostat=ios) value%ff3z
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff4x)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff4x))deallocate(value%ff4x)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff4x))then
+        if(any(lo(1:3)/=lbound(value%ff4x)).or.any(hi(1:3)/=ubound(value%ff4x)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff4x(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff4x);hi(1:3)=ubound(value%ff4x)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff4x
+    else
+      write(unit,iostat=ios) value%ff4x
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff4y)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff4y))deallocate(value%ff4y)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff4y))then
+        if(any(lo(1:3)/=lbound(value%ff4y)).or.any(hi(1:3)/=ubound(value%ff4y)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff4y(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff4y);hi(1:3)=ubound(value%ff4y)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff4y
+    else
+      write(unit,iostat=ios) value%ff4y
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%ff4z)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%ff4z))deallocate(value%ff4z)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%ff4z))then
+        if(any(lo(1:3)/=lbound(value%ff4z)).or.any(hi(1:3)/=ubound(value%ff4z)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%ff4z(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%ff4z);hi(1:3)=ubound(value%ff4z)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%ff4z
+    else
+      write(unit,iostat=ios) value%ff4z
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%dgf)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%dgf))deallocate(value%dgf)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%dgf))then
+        if(any(lo(1:3)/=lbound(value%dgf)).or.any(hi(1:3)/=ubound(value%dgf)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%dgf(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%dgf);hi(1:3)=ubound(value%dgf)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%dgf
+    else
+      write(unit,iostat=ios) value%dgf
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%a_ffte)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%a_ffte))deallocate(value%a_ffte)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%a_ffte))then
+        if(any(lo(1:3)/=lbound(value%a_ffte)).or.any(hi(1:3)/=ubound(value%a_ffte)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%a_ffte(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%a_ffte);hi(1:3)=ubound(value%a_ffte)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%a_ffte
+    else
+      write(unit,iostat=ios) value%a_ffte
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%b_ffte)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%b_ffte))deallocate(value%b_ffte)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%b_ffte))then
+        if(any(lo(1:3)/=lbound(value%b_ffte)).or.any(hi(1:3)/=ubound(value%b_ffte)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%b_ffte(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%b_ffte);hi(1:3)=ubound(value%b_ffte)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%b_ffte
+    else
+      write(unit,iostat=ios) value%b_ffte
+    endif
+    if(ios/=0)return
+  endif
+end subroutine
+subroutine checkpoint_io_s_rt(unit,reading,value,ios)
+  integer,intent(in)::unit
+  logical,intent(in)::reading
+  type(s_rt),intent(inout)::value
+  integer,intent(inout)::ios
+  logical::present_array
+  integer::lo(7),hi(7),i1,i2,k,allocation_status
+  integer(8)::elements,extent
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%Dp0_e
+  else
+    write(unit,iostat=ios) value%Dp0_e
+  endif
+  if(ios/=0)return
+  present_array=allocated(value%dDp_e)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%dDp_e))deallocate(value%dDp_e)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%dDp_e))then
+        if(any(lo(1:2)/=lbound(value%dDp_e)).or.any(hi(1:2)/=ubound(value%dDp_e)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%dDp_e(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%dDp_e);hi(1:2)=ubound(value%dDp_e)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%dDp_e
+    else
+      write(unit,iostat=ios) value%dDp_e
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%Dp_e)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Dp_e))deallocate(value%Dp_e)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Dp_e))then
+        if(any(lo(1:2)/=lbound(value%Dp_e)).or.any(hi(1:2)/=ubound(value%Dp_e)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Dp_e(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%Dp_e);hi(1:2)=ubound(value%Dp_e)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%Dp_e
+    else
+      write(unit,iostat=ios) value%Dp_e
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%Dp_i)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Dp_i))deallocate(value%Dp_i)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Dp_i))then
+        if(any(lo(1:2)/=lbound(value%Dp_i)).or.any(hi(1:2)/=ubound(value%Dp_i)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Dp_i(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%Dp_i);hi(1:2)=ubound(value%Dp_i)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%Dp_i
+    else
+      write(unit,iostat=ios) value%Dp_i
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%Qp_e)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Qp_e))deallocate(value%Qp_e)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,3
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Qp_e))then
+        if(any(lo(1:3)/=lbound(value%Qp_e)).or.any(hi(1:3)/=ubound(value%Qp_e)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Qp_e(lo(1):hi(1),lo(2):hi(2),lo(3):hi(3)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:3)=lbound(value%Qp_e);hi(1:3)=ubound(value%Qp_e)
+      write(unit,iostat=ios)lo(1:3),hi(1:3)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%Qp_e
+    else
+      write(unit,iostat=ios) value%Qp_e
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%rIe)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%rIe))deallocate(value%rIe)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%rIe))then
+        if(any(lo(1:1)/=lbound(value%rIe)).or.any(hi(1:1)/=ubound(value%rIe)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%rIe(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%rIe);hi(1:1)=ubound(value%rIe)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%rIe
+    else
+      write(unit,iostat=ios) value%rIe
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%curr)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%curr))deallocate(value%curr)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%curr))then
+        if(any(lo(1:2)/=lbound(value%curr)).or.any(hi(1:2)/=ubound(value%curr)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%curr(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%curr);hi(1:2)=ubound(value%curr)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%curr
+    else
+      write(unit,iostat=ios) value%curr
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%E_ext)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%E_ext))deallocate(value%E_ext)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%E_ext))then
+        if(any(lo(1:2)/=lbound(value%E_ext)).or.any(hi(1:2)/=ubound(value%E_ext)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%E_ext(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%E_ext);hi(1:2)=ubound(value%E_ext)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%E_ext
+    else
+      write(unit,iostat=ios) value%E_ext
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%E_ind)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%E_ind))deallocate(value%E_ind)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%E_ind))then
+        if(any(lo(1:2)/=lbound(value%E_ind)).or.any(hi(1:2)/=ubound(value%E_ind)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%E_ind(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%E_ind);hi(1:2)=ubound(value%E_ind)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%E_ind
+    else
+      write(unit,iostat=ios) value%E_ind
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%E_tot)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%E_tot))deallocate(value%E_tot)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%E_tot))then
+        if(any(lo(1:2)/=lbound(value%E_tot)).or.any(hi(1:2)/=ubound(value%E_tot)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%E_tot(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%E_tot);hi(1:2)=ubound(value%E_tot)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%E_tot
+    else
+      write(unit,iostat=ios) value%E_tot
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%Ac_ext)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Ac_ext))deallocate(value%Ac_ext)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Ac_ext))then
+        if(any(lo(1:2)/=lbound(value%Ac_ext)).or.any(hi(1:2)/=ubound(value%Ac_ext)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Ac_ext(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%Ac_ext);hi(1:2)=ubound(value%Ac_ext)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%Ac_ext
+    else
+      write(unit,iostat=ios) value%Ac_ext
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%Ac_ind)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Ac_ind))deallocate(value%Ac_ind)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Ac_ind))then
+        if(any(lo(1:2)/=lbound(value%Ac_ind)).or.any(hi(1:2)/=ubound(value%Ac_ind)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Ac_ind(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%Ac_ind);hi(1:2)=ubound(value%Ac_ind)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%Ac_ind
+    else
+      write(unit,iostat=ios) value%Ac_ind
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%Ac_tot)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%Ac_tot))deallocate(value%Ac_tot)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%Ac_tot))then
+        if(any(lo(1:2)/=lbound(value%Ac_tot)).or.any(hi(1:2)/=ubound(value%Ac_tot)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%Ac_tot(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%Ac_tot);hi(1:2)=ubound(value%Ac_tot)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%Ac_tot
+    else
+      write(unit,iostat=ios) value%Ac_tot
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%zc)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%zc))deallocate(value%zc)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%zc))then
+        if(any(lo(1:1)/=lbound(value%zc)).or.any(hi(1:1)/=ubound(value%zc)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%zc(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%zc);hi(1:1)=ubound(value%zc)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    if(reading)then
+      read(unit,iostat=ios) value%zc
+    else
+      write(unit,iostat=ios) value%zc
+    endif
+    if(ios/=0)return
+  endif
+  present_array=allocated(value%vloc_t)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%vloc_t))deallocate(value%vloc_t)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%vloc_t))then
+        if(any(lo(1:1)/=lbound(value%vloc_t)).or.any(hi(1:1)/=ubound(value%vloc_t)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%vloc_t(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%vloc_t);hi(1:1)=ubound(value%vloc_t)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%vloc_t,1),ubound(value%vloc_t,1)
+    call checkpoint_io_s_scalar(unit,reading,value%vloc_t(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  present_array=allocated(value%vloc_new)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%vloc_new))deallocate(value%vloc_new)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%vloc_new))then
+        if(any(lo(1:1)/=lbound(value%vloc_new)).or.any(hi(1:1)/=ubound(value%vloc_new)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%vloc_new(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%vloc_new);hi(1:1)=ubound(value%vloc_new)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%vloc_new,1),ubound(value%vloc_new,1)
+    call checkpoint_io_s_scalar(unit,reading,value%vloc_new(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  present_array=allocated(value%vloc_old)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%vloc_old))deallocate(value%vloc_old)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,2
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%vloc_old))then
+        if(any(lo(1:2)/=lbound(value%vloc_old)).or.any(hi(1:2)/=ubound(value%vloc_old)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%vloc_old(lo(1):hi(1),lo(2):hi(2)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:2)=lbound(value%vloc_old);hi(1:2)=ubound(value%vloc_old)
+      write(unit,iostat=ios)lo(1:2),hi(1:2)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%vloc_old,1),ubound(value%vloc_old,1)
+    do i2=lbound(value%vloc_old,2),ubound(value%vloc_old,2)
+    call checkpoint_io_s_scalar(unit,reading,value%vloc_old(i1,i2),ios)
+    if(ios/=0)return
+    enddo
+    enddo
+  endif
+  present_array=allocated(value%rho0_s)
+  if(reading)then
+    read(unit,iostat=ios) present_array
+  else
+    write(unit,iostat=ios) present_array
+  endif
+  if(ios/=0)return
+  if(reading.and..not.present_array)then
+    if(allocated(value%rho0_s))deallocate(value%rho0_s)
+  endif
+  if(present_array)then
+    if(reading)then
+      read(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+      elements=1_8
+      do k=1,1
+        extent=int(hi(k),8)-int(lo(k),8)+1_8
+        if(extent<0_8.or.extent>checkpoint_array_limit)then
+          ios=1;return
+        endif
+        if(extent>0_8)then
+          if(elements>checkpoint_array_limit/extent)then
+            ios=1;return
+          endif
+        endif
+        elements=elements*extent
+      enddo
+      if(allocated(value%rho0_s))then
+        if(any(lo(1:1)/=lbound(value%rho0_s)).or.any(hi(1:1)/=ubound(value%rho0_s)))then
+          ios=1;return
+        endif
+      else
+        allocate(value%rho0_s(lo(1):hi(1)),stat=allocation_status)
+        if(allocation_status/=0)then
+          ios=1;return
+        endif
+      endif
+    else
+      lo(1:1)=lbound(value%rho0_s);hi(1:1)=ubound(value%rho0_s)
+      write(unit,iostat=ios)lo(1:1),hi(1:1)
+      if(ios/=0)return
+    endif
+    do i1=lbound(value%rho0_s,1),ubound(value%rho0_s,1)
+    call checkpoint_io_s_scalar(unit,reading,value%rho0_s(i1),ios)
+    if(ios/=0)return
+    enddo
+  endif
+  call checkpoint_io_s_scalar(unit,reading,value%vonf,ios)
+  if(ios/=0)return
+  call checkpoint_io_s_vector(unit,reading,value%j_e,ios)
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%E_old
+  else
+    write(unit,iostat=ios) value%E_old
+  endif
+  if(ios/=0)return
+  if(reading)then
+    read(unit,iostat=ios) value%rho0_loaded
+  else
+    write(unit,iostat=ios) value%rho0_loaded
+  endif
+  if(ios/=0)return
+end subroutine
 end module

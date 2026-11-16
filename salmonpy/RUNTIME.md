@@ -519,3 +519,19 @@ HSE交換の電子数・温度・状態数（nelec/temperature/nstate）は、�
 `subdip`の電子数チェックも、状態の`occupation_input.nelec/nelec_spin`を使います。2スピンで正のスピン電子数合計があればそれを優先し、その他はnelecを使う従来規則を維持します。上下限の厳密な不等号、出力、停止処理は変更しません。未初期化状態は従来入力を参照します。
 これは広い範囲の異常検知（指定電子数の0.1倍から10倍の間）であり、精密な電子数保存や物理的収束を保証する検査ではありません。共有I/O・イオン情報や外側TDDFTガードは残ります。
 検査: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT --dip`。検証範囲は`docs/dip-occupation-inputs-validation-2026-11-16.md`を参照してください。
+
+### 高速PR版HSEの直接保存／復元（内部Fortran入口）
+
+`native_adapters/tddft_context.f90` の `rt_checkpoint(ctx,path,restore,status)` は高速PR版HSEの数値状態を直接保存します。保存は `restore=.false.`、復元は `.true.`。新しいプロセスで同じ入力・GSから `rt_open` した直後に復元し、`rt_accepted_step(ctx)+1` から残りを進めます。保存時刻までの時間発展は繰り返しません。静的な交換演算子・FFT資源は新しいプロセスで作り直し、生のFFTハンドルは保存しません。
+
+保存対象は波動関数の両バッファ、密度・局所／Hartreeポテンシャルと履歴、RT履歴、場・電流・エネルギー基準・受理済みステップ、ACE、学習因子／PT-CN履歴、交換計算のキャッシュです。復元前に入力・GS・実行ファイル・アダプター・保存ファイルのハッシュを呼び出し側で確認してください。同じバイナリと設定専用のnative形式で、汎用アーカイブではありません。設定不一致は拒否し、途中まで復元して失敗した状態は以後の `rt_step` を拒否します。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint.py FAST_HSE_BUILD_RECORD SYNTHETIC_FIXTURES NEW_OUTPUT
+```
+
+ツールは高速PR版の監査済みオブジェクトからアダプターを明示コンパイルし、別プロセスで連続・保存・直接再開を比較します。2／3 k点、Taylor（ACE／学習ACE／高速PR版内full-action）と学習PT-CNを6／7ステップで分割し、残り6／5ステップの電流・全エネルギー・内部トレースが完全一致しました。1／2 OpenMPスレッドで検証しています。通常版HSEや比較用ベースラインは実行エンジンとして使いません。
+
+現段階は周期・スカラー・固定占有・固定イオン・全支持領域のserial CPU高速HSE内部Fortran入口です。Python/Cの安定API、内部MPI、FDTDとのHSE結合、GPU、対称性・分散ACE・縮約q点などへの対応を示すものではありません。合成軌道の数値回帰であり、実材料の物理収束は別途確認します。既存nativeテキスト出力の過去のファイル位置は再開しません。
+
+保存は交換資源が初期化された受理済みステップで行います。初期化直後のステップ0保存は検証対象外です。

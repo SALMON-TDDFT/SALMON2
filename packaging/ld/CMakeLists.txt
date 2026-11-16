@@ -157,3 +157,7 @@ install(FILES "${ROOT}/salmonpy/field_sampling.py" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/layers.py" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/examples/mixed_layers.json" DESTINATION salmonpy/examples)
+
+# Fast-PR HSE direct numerical checkpoint regression, explicitly built only.
+install(FILES "${ROOT}/tools/test_hse_direct_checkpoint.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tests/native/test_hse_direct_checkpoint.f90" DESTINATION salmonpy/_runtime_source/tests/native)

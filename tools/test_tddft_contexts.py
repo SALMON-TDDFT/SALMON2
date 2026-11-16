@@ -33,7 +33,7 @@ def main():
     checker=Path(__file__).with_name('check_forbidden_eigensolvers.py')
     adapter=root/'salmonpy/native_adapters/tddft_context.f90'
     if not adapter.exists():adapter=root.parent/'native_adapters/tddft_context.f90'
-    shutil.copy2(adapter,src/'context.f90');shutil.copy2(root/'tests/native/test_tddft_contexts.f90',src/'probe.f90')
+    shutil.copy2(adapter,src/'context.f90');shutil.copy2(adapter.with_name('hse_checkpoint.f90'),src/'hse_checkpoint.f90');shutil.copy2(root/'tests/native/test_tddft_contexts.f90',src/'probe.f90')
     config=(build/'config.h').read_text()
     if not re.search(r'^#define USE_HSE\b',config,re.M) or re.search(r'^#define (USE_MPI|USE_OPENACC|USE_FFTW)\b',config,re.M):
         raise ValueError('serial CPU HSE/FFTE build required')
@@ -47,11 +47,11 @@ def main():
             commands.append([str(v) for v in cmd]);subprocess.run(cmd,stdout=log,stderr=subprocess.STDOUT,check=True,**kw)
         run([sys.executable,checker,'--source-root',record['source_root']+'/src'])
         run([sys.executable,checker,'--source-root',src])
-        for name in ['context','probe']:
+        for name in ['hse_checkpoint','context','probe']:
             run([fc,*options,'-I'+str(out),*includes,'-J'+str(out),'-c',src/(name+'.f90'),'-o',out/(name+'.o')],cwd=out)
         run([sys.executable,checker,'--object-tree',build]);run([sys.executable,checker,'--object-tree',out])
         link=shlex.split((build/'src/CMakeFiles/salmon.dir/link.txt').read_text());link[link.index('-o')+1]=str(out/'probe')
-        link=[str(out/'probe.o') if v=='CMakeFiles/salmon.dir/main.f90.o' else v for v in link];link.insert(1,str(out/'context.o'))
+        link=[str(out/'probe.o') if v=='CMakeFiles/salmon.dir/main.f90.o' else v for v in link];link.insert(1,str(out/'context.o'));link.insert(1,str(out/'hse_checkpoint.o'))
         run(link,cwd=build/'src')
     from salmonpy.bands import _input_groups
     results=[]

@@ -568,3 +568,19 @@ Run `tools/test_hse_explicit_state.py BUILD_RECORD NEW_OUTPUT --native-resources
 The `subdip` electron-count check uses the state's `occupation_input.nelec/nelec_spin`. The existing precedence is preserved: for two spin channels, use the positive sum of spin counts; otherwise use nelec. Strict inequalities, output and termination behavior are unchanged. Uninitialized systems retain legacy-input fallback.
 This is a coarse anomaly check (strictly between 0.1 and 10 times the specified count), not a precision conservation or physical-convergence guarantee. Shared I/O, ionic inputs and outer TDDFT guards remain.
 Test: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT --dip`. Scope: `docs/dip-occupation-inputs-validation-2026-11-16.md`.
+
+### Direct fast-PR HSE checkpoint (internal Fortran entry)
+
+`native_adapters/tddft_context.f90` provides `rt_checkpoint(ctx,path,restore,status)`: false writes numerical state, true loads it immediately after `rt_open` from the same original GS/input in a fresh process. Continue at `rt_accepted_step(ctx)+1`; no elapsed time evolution is repeated. Rebuild static exchange/FFT resources in the new process; never serialize raw FFT handles.
+
+The payload covers both orbital buffers, density/local/Hartree potentials and histories, RT history, fields/current/energy reference/accepted step, ACE, learned-factor/PT-CN histories and exchange caches. The caller must authenticate original inputs/GS, runtime/adapter and archive hashes before loading. This same-binary native format is not a generic portable archive. Settings mismatch is rejected; a late restore failure invalidates further stepping.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint.py FAST_HSE_BUILD_RECORD SYNTHETIC_FIXTURES NEW_OUTPUT
+```
+
+The tool explicitly compiles adapters against audited fast-PR objects and compares separate continuous/save/resume processes. Two/three k points, Taylor ACE/learned ACE/full-action within the fast-PR engine, and learned PT-CN, split6/7, match currents,total energy and internal traces exactly after6/5 remaining steps. Validated at OpenMP1/2. Conventional HSE and comparison baselines are not execution engines.
+
+Scope: internal serial CPU Fortran entry, periodic scalar fixed occupation/ions, full support. This does not provide a stable Python/C API, inner MPI, HSE-to-FDTD coupling, GPU, symmetry, distributed ACE or reduced-q support. Synthetic numerical regression is separate from physical convergence. Historical native text-file positions are not resumed.
+
+Save at an accepted step with initialized exchange resources. Step-zero saving immediately after initialization is not established.

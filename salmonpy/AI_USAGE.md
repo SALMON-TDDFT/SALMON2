@@ -614,3 +614,5 @@ x/y/z各方向の2分割は、128ステップで場1ランクの結果と完全�
 TB-mBJ（自動／固定cval）とLibxc-PBEは、場1＋SBE1＋TDDFT内部軌道MPI2の4ランクでも、直接保存63→残り65ステップの再開が連続128ステップとビット単位で一致した。分割を同じに保つこと。場2＋SBE1＋TDDFT2は5ランク必要で、4コア枠では未検証。
 
 HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベースラインを利用者向けエンジンに追加しない。高速HSEの直接保存／復元はACE・因子履歴・専用伝播器・native資源を含む対応が必要で、中点伝播のXC許可リストへ名前だけを追加しない。
+
+高速PR版HSEは `native_adapters/tddft_context.f90` の内部serial Fortran入口で直接保存／復元に対応した。`rt_checkpoint(ctx,path,restore,status)` と `rt_accepted_step(ctx)` を使い、新しいプロセスで同じ元GS・入力から初期化した後に内部数値状態を読み、残りだけ進める。ACE・因子／PT-CN履歴とFFT資源の再構築を含む。`tools/test_hse_direct_checkpoint.py` は1／2スレッド、2／3 k点、4伝播設定、6／7分割の32ケースで電流・エネルギー・内部トレースが完全一致した。これはhost-MPI/FDTD結合の高速HSE対応や安定したPython/C APIを意味しない。通常HSEは追加しない。詳細はRUNTIME日英ガイド。

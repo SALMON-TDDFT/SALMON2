@@ -15,6 +15,8 @@ The dated sections below retain the scope at their completion time. Older statem
 - [x] Existing configured material adapters, serial/MPI point identity and managed TDDFT point replay are available in the documented M4/M5/M6 subsets. Do not describe them as entirely missing.
 - [x] Same-topology direct field/PML/LD/SBE/TDDFT restart: PZ, TB-mBJ automatic/fixed coefficient and Libxc-PBE include native TDDFT orbital MPI2;63 saved/65 resumed steps match continuous128 bit-for-bit. Libxc-PZ is validated with TDDFT1. Generic archives/HSE remain below.
 
+- [x] Fast-PR HSE serial Fortran context direct checkpoint: ACE/exact/learned/PT-CN histories and RT buffers, fresh-process6/7→12,32 cases overOMP1/2; listed internal traces match. Coupled/MPI HSE remains separate.
+
 ### Delivery status and remaining mixed-material work
 
 1. [x] Delivery: native/distributed-field samples and evidence pushed in b5b2053c, layer setup in01d43cc1, direct persistence in1851c533, non-PZ persistence inea22fe15. No routine Actions.
@@ -25,7 +27,7 @@ The dated sections below retain the scope at their completion time. Older statem
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
 8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC/HSE resources and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC, coupled/MPI HSE resources and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
@@ -318,3 +320,11 @@ Only fast-PR HSE is an eligible execution engine. Do not add conventional HSE or
 - [x] Installed Libxc-PBE innerMPI2 direct63→65 remains bit-identical to continuous128. Checksum-streamed bytes82,191,025 vs328,764,100 at4 ranks; no memory or wall-time guarantee.
 - [x] Source/wheel450 tests (one skip), package and guide synchronization pass. Evidence: docs/checkpoint-verification-io-validation-2026-11-16.md.
 - Fast-PR HSE direct persistence remains open; no conventional HSE engine is introduced.
+
+### Fast-PR HSE direct internal persistence (2026-11-16)
+
+- [x] Internal Fortran rt_checkpoint/rt_accepted_step, native numeric payload and HSE ACE/factor/PT-CN/source/action/history serialization; retain fresh FFT resources, never serialize opaque handles.
+- [x] Thirty-two fresh-process cases:2/3k,ACE/learnedACE/full-action Taylor and learned PT-CN,split6/7,OMP1/2; currents,total energy and selected internal trace bit-identical, only6/5 remaining calls.
+- [x] Truncated archive, changed settings and trailing-byte errors rejected; late-load failure invalidates stepping. Prior eight two-context interleaving/lifetime/configuration regressions pass.
+- [x] Only fast-PR HSE objects used. No conventional HSE engine or comparison baseline engine added.
+- Remaining: host-MPI/coupled HSE, public Python/C persistence API, broader symmetry/localized/distributed/GPU resources and physical convergence. Existing HSE-open notes above are historical; serial internal checkpoint is complete within this scope. Evidence: docs/fast-hse-direct-checkpoint-validation-2026-11-16.md.
