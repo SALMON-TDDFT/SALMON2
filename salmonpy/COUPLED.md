@@ -214,3 +214,31 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 REFERENCE_OUTPUTには、同じサンプルを場1ランク・TDDFT1ランク（外側3ランク）で実行した出力を指定します。`--compare`を省略すれば単独実行です。比較は同じステップ数・dt・材料設定・点順を要求し、A/c・E・jの履歴を確認します。必要な外側ランク数は`product(field-grid)+1+tddft-ranks`です。
 
 x/y/z各方向の2分割は、128ステップで場1ランクの結果と完全一致しました。y/z分割では両LD材料が両方の場区画に分かれます。場2ランクとTDDFT内部2ランクを同時に使う5ランク構成は、今回の4コア枠では未検証です。大規模性能・メモリ上限の保証ではありません。記録: `docs/distributed-field-mixed-validation-2026-11-16.md`。
+
+## 物質ID・並び・厚みからMPI構成を準備する
+
+`salmonpy.layers.assemble_native_layers` は `salmonpy.native-layers/1` の配置と、物質IDからLDモデルまたは `MaterialBinding` への辞書を受け取ります。物理パラメータと初期状態は既存の設定ローダーで用意し、配置ではIDを参照します。自作応答コードも明示的な `MaterialBinding` で接続できます。
+
+```python
+import json
+from salmonpy.layers import assemble_native_layers
+
+layout = json.loads(layout_path.read_text())
+assembly = assemble_native_layers(
+    layout, materials, grid=grid, dt=dt, steps=steps, source=source,
+    field_grid=(1, 1, 1),
+    ranks_per_point={"sbe-point": 1, "si-tddft": 2}, rank_budget=4,
+)
+report = assembly.record()
+print(report["required_ranks"], report["layers"])
+# parallel_plan を ParallelContext.create、calculation と points を
+# NativeEHField、bindings を ResponseSession に渡します。
+```
+
+上の変数は事前に用意したモデル、Grid、PlaneWaveと計算条件です。構成の作成はソルバー・MPIの起動やダウンロードをしません。表示された必要ランク数で、環境のMPI起動方法を使います。
+
+`examples/mixed_layers.json` はSBE、Si、真空、Drude、Lorentzの順の例です。長さは明示的にBohr。各層は一意な `id`、`material_id`（真空はnull）、`thickness`、横方向2軸の `transverse_cells` を持ちます。`axis` は光源の伝播軸と一致させ、`origin_cell` は最初の軸方向セルと横方向の基準セルです。厚みは格子幅で切り上げ、要求値・実際の厚み・終端を含まないセル範囲・物質ID・ランクを記録します。横方向の開始位置は `anchor-count//2` です。
+
+電子物質の各格子セルに独立した状態とMPI群を割り当て、LDは場のランク内で管理します。有限の直方体配置であり、無限膜の均質化や代表点への間引きはしません。厚みや断面積を増やすと電子点と必要ランクが増えます。ランク予算超過、未知のID、バックエンド不整合、吸収境界との重なり、LD構成則の近傍に入る電子点を拒否します。真空の隙間も明示指定が必要です。ランク予算はメモリ上限ではなく、`memory_bytes` は未推定です。初期状態準備、MPI起動、物理的な収束確認は別途行います。
+
+上記4ランクの `mpi_mixed_native` コマンドに `--layers 配置JSONのパス --rank-budget 4` を追加できます。このサンプルの既知IDは `sbe-point`、`si-tddft`、`drude`、`lorentz` です。公開の構成関数では任意の明示的な物質IDを使えます。SBE/LDだけの配置ではTDDFTのランタイムとGSは不要で、サンプルの位置引数には未使用の仮パスを指定できます。LDだけならFDTD単独入口を使います。

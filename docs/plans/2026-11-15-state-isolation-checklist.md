@@ -276,3 +276,12 @@ The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-m
 - [x] Native mixed fixture: field-local two-material LD + SBE + TDDFT internal orbital MPI (1/2 ranks), original serial replay, LD-only batch parity and LD vacuum contrast. Installed wheel runs4 ranks. Scope/evidence: docs/native-mixed-material-validation-2026-11-16.md. Multiple field ranks were subsequently verified below; scaling and mixed-session restart remain open.
 
 - [x] Mixed FDTD field decomposition: x/y/z2-way field MPI with SBE1/TDDFT1,128 steps, exact A/E/j parity to field1. Sample exposes --field-grid and --compare. Simultaneous2field+2TDDFT ranks,scaling and full-session restart remain unverified. Evidence: docs/distributed-field-mixed-validation-2026-11-16.md.
+
+### Mixed layer input entry (2026-11-16)
+
+- [x] Reject longitudinal incident content in Multiscale1D's prefilled history, not only boundary samples; preserve valid transverse history.
+- [x] Public native layer assembly from explicit material IDs/models, order, thickness, transverse counts and rank settings. Preserve actual thickness, point/material identities and backend provenance in the report.
+- [x] Installed4-rank layout matches manual A/E/j exactly; installed2-rank SBE/LD needs no TDDFT files. Source and wheel442 tests pass (one skipped each).
+- [x] Japanese/English coupling guides, AI task catalog/API inventory and packaged sample synchronized.
+- Remaining: full mixed-session restart, memory estimation/cap, production scaling, simultaneous field2+TDDFT2 configuration within a larger resource budget, general native reentrancy. Layout planning does not automatically prepare materials or launch MPI; arbitrary user models enter as explicit bindings. Molecular work remains paused.
+- Evidence: docs/native-layer-assembly-validation-2026-11-16.md; design:2026-11-16-native-layer-assembly.md.

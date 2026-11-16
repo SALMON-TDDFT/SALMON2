@@ -407,7 +407,10 @@ class _Multiscale1DState(_FieldState):
         left = np.arange(self._is-1, 1)
         k = left - (self._is-1)
         for array, t0 in ((self._new, -dt), (self._cur, -2*dt), (self._old, -3*dt)):
-            array[k] = _evaluate(model.incident, t0 - left*h/c)
+            values = _evaluate(model.incident, t0 - left*h/c)
+            if np.any(values[:, 0] != 0):
+                raise InputError('incident wave must be transverse: x is the propagation axis')
+            array[k] = values
         self._j = np.zeros((size, 3))
         # One update to the t=0 profile (SALMON: itt=0 weyl_calc with j_em=0).
         self._old, self._cur, self._new = self._update(self._cur, self._new, self._j, 0)

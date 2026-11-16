@@ -242,3 +242,31 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 REFERENCE_OUTPUT is the same sample with one field and one TDDFT rank (three outer ranks). Omit `--compare` to run independently. Comparison requires matching steps,dt,material configuration and point order, then checks A/c,E,j histories. Required outer ranks: `product(field-grid)+1+tddft-ranks`.
 
 Two-way x/y/z field decompositions each matched the one-field-rank result exactly over128 steps. The y/z layouts split both LD materials across both field blocks. Simultaneous two-field/two-TDDFT-group ranks require five ranks and were not tested within this four-core campaign. This is not a large-scale performance or memory-cap guarantee. Evidence: `docs/distributed-field-mixed-validation-2026-11-16.md`.
+
+## Assemble ordered layers before launching MPI
+
+`salmonpy.layers.assemble_native_layers` accepts a `salmonpy.native-layers/1` layout and an explicit mapping from material IDs to LD models or `MaterialBinding` objects. Use existing configured material loaders/bindings for physical parameters and initial states; the layout references their IDs. Custom response backends use the same `MaterialBinding` contract.
+
+```python
+import json
+from salmonpy.layers import assemble_native_layers
+
+layout = json.loads(layout_path.read_text())
+assembly = assemble_native_layers(
+    layout, materials, grid=grid, dt=dt, steps=steps, source=source,
+    field_grid=(1, 1, 1),
+    ranks_per_point={"sbe-point": 1, "si-tddft": 2}, rank_budget=4,
+)
+report = assembly.record()
+print(report["required_ranks"], report["layers"])
+# Pass assembly.parallel_plan to ParallelContext.create, assembly.calculation
+# and assembly.points to NativeEHField, and assembly.bindings to ResponseSession.
+```
+
+The variables above are explicitly prepared models, Grid, PlaneWave and calculation settings, not automatically downloaded assets. Planning starts no solver or MPI process. Launch exactly the reported rank count with the site's MPI launcher.
+
+`examples/mixed_layers.json` provides an ordered SBE/Si/vacuum/Drude/Lorentz fixture. Lengths are explicitly Bohr. Each layer has a unique `id`, a `material_id` (null for vacuum), `thickness` and two `transverse_cells` counts. `axis` must match the source; `origin_cell` gives the first axial cell and transverse anchor. Thickness rounds upward by the axial grid spacing. The report preserves requested/actual thickness, exclusive cell bounds, material identity and ranks. Even transverse counts are anchored at `anchor-count//2`.
+
+Every electronic grid cell gets its own state and MPI group; LD cells stay on field ranks. These are finite rectangular regions, not automatically homogenized infinite films. Increasing transverse area or thickness can greatly increase electronic ranks. The planner rejects excess ranks, unknown IDs, incompatible backends, absorbing-boundary overlap and electronic points in an LD constitutive neighborhood. It inserts no implicit gap. The rank budget is not a memory limit (`memory_bytes` is unknown). Initial-state preparation, MPI startup and physical convergence remain explicit.
+
+Run the installed fixture by adding `--layers PATH_TO_mixed_layers.json --rank-budget 4` to the four-rank `mpi_mixed_native` command above. The sample recognizes `sbe-point`, `si-tddft`, `drude` and `lorentz`; the public planner accepts arbitrary explicitly bound IDs. An SBE/LD-only layout needs no TDDFT runtime or GS; the sample's positional runtime/bundle arguments may then be unused placeholders. Pure LD uses FDTD directly.

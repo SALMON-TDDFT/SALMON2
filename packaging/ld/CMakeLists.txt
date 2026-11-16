@@ -154,3 +154,6 @@ install(FILES "${ROOT}/salmonpy/dipole_source.py" "${ROOT}/salmonpy/DIPOLE_RADIA
 install(FILES "${ROOT}/salmonpy/isolated_tddft.py" "${ROOT}/salmonpy/ISOLATED_TDDFT.md" "${ROOT}/salmonpy/ISOLATED_TDDFT.en.md" DESTINATION salmonpy)
 
 install(FILES "${ROOT}/salmonpy/field_sampling.py" DESTINATION salmonpy)
+
+install(FILES "${ROOT}/salmonpy/layers.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/examples/mixed_layers.json" DESTINATION salmonpy/examples)

@@ -135,6 +135,16 @@ class UniformFieldTests(unittest.TestCase):
 
 
 class Multiscale1DTests(unittest.TestCase):
+    def test_longitudinal_prefill_rejected_with_zero_boundary_samples(self):
+        pulse = AcosPulse(.001, .5, 6., polarization=(1., 0., 0.))
+        with self.assertRaisesRegex(ValueError, 'transverse'):
+            Multiscale1D(2, 5., vacuum=(300, 50), incident=pulse).new_state(dt=.02, steps=10)
+
+    def test_transverse_prefill_retained_with_zero_boundary_samples(self):
+        pulse = AcosPulse(.001, .5, 6., polarization=(0., 0., 1.))
+        state = Multiscale1D(2, 5., vacuum=(300, 50), incident=pulse).new_state(dt=.02, steps=10)
+        self.assertGreater(np.max(np.abs(state.grid_A)), 0.)
+
     def test_vacuum_propagation_at_magic_time_step(self):
         dt = .05; h = C*dt
         pulse = AcosPulse(amplitude=1e-3, omega=.1, duration=200., polarization=(0, 0, 1))

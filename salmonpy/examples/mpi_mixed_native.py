@@ -27,18 +27,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, drude, lorentz')
+    parser.add_argument('--rank-budget', type=int, help='planning cap; defaults to the launched world size')
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
     parser.add_argument('--steps', type=int, default=128)
     parser.add_argument('--without-ld', action='store_true', help='vacuum control for local LD regions')
     args = parser.parse_args()
+    if args.layers is not None and args.without_ld: parser.error('express vacuum in the layout; do not combine --layers with --without-ld')
     if args.steps < 1: parser.error('positive steps required')
     if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
     field_ranks = int(np.prod(args.field_grid))
     from mpi4py import MPI
     world = MPI.COMM_WORLD
     try:
-        if world.size != field_ranks + 1 + args.tddft_ranks:
+        if args.layers is None and world.size != field_ranks + 1 + args.tddft_ranks:
             raise ValueError('launch product(field-grid) + 1 + tddft-ranks MPI ranks')
         output = args.output.resolve()
         if world.rank == 0: output.mkdir(parents=True, exist_ok=False)
@@ -55,12 +58,31 @@ def main():
         calculation = FDTD(geometry, () if args.without_ld else materials, dt, args.steps,
                            source=PlaneWave(AcosPulse(.001, 20., .15), 0, -16.), observations=observations)
         _, sbe = models()
-        bindings = {10: bind_material(sbe, key='sbe-point', identity='synthetic-two-band-v1'),
-                    20: MaterialBinding('si-tddft', NativeTDDFTMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
-                        NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1)))}
-        plan = ParallelPlan((SolverGroup('field', tuple(range(field_ranks)), role='field'),
-                             SolverGroup('sbe', (field_ranks,), point_ids=(10,)),
-                             SolverGroup('tddft', tuple(range(field_ranks+1, world.size)), point_ids=(20,))))
+        layout = json.loads(args.layers.read_text()) if args.layers is not None else None
+        selected = {layer['material_id'] for layer in layout.get('layers', [])} if layout is not None else {'sbe-point','si-tddft'}
+        available = {'drude': materials[0], 'lorentz': materials[1]}
+        if 'sbe-point' in selected:
+            available['sbe-point'] = bind_material(sbe, key='sbe-point', identity='synthetic-two-band-v1')
+        if 'si-tddft' in selected:
+            available['si-tddft'] = MaterialBinding('si-tddft',
+                NativeTDDFTMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
+                NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1)))
+        assembly = None
+        if layout is None:
+            bindings = {10: available['sbe-point'], 20: available['si-tddft']}
+            plan = ParallelPlan((SolverGroup('field', tuple(range(field_ranks)), role='field'),
+                                 SolverGroup('sbe', (field_ranks,), point_ids=(10,)),
+                                 SolverGroup('tddft', tuple(range(field_ranks+1, world.size)), point_ids=(20,))))
+        else:
+            from salmonpy.layers import assemble_native_layers
+            rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks}.items() if key in selected}
+            assembly = assemble_native_layers(layout, available,
+                grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
+                ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size)
+            if assembly.record()['required_ranks'] != world.size:
+                raise ValueError(f"launch exactly {assembly.record()['required_ranks']} ranks for this layout")
+            calculation = assembly.calculation; geometry = calculation.geometry
+            points = assembly.points; bindings = assembly.bindings; plan = assembly.parallel_plan
         history = []
         context = ParallelContext.create(world, plan)
         field = None
@@ -83,17 +105,22 @@ def main():
             peaks = np.max(abs(j), axis=(0, 2))
             if not np.all(peaks > 0): raise AssertionError('nonzero response required for both electronic materials')
             replay = np.empty_like(j)
-            state = sbe.new_state(dt=dt)
+            initial = None
             try:
-                for n in range(args.steps): replay[n, 0] = state.step(A[n, 0])
-            finally: state.close()
-            with TDDFTInitialState.from_salmon(args.bundle, 'rt.inp', executable=load_runtime(args.runtime),
-                                              max_steps=args.steps, threads=1) as initial:
-                with initial.new_state(dt=dt) as state:
-                    for n in range(args.steps): replay[n, 1] = state.step(A[n, 1])
-            np.testing.assert_array_equal(j[:, 0], replay[:, 0])
-            np.testing.assert_allclose(j[:, 1], replay[:, 1], rtol=2e-10, atol=2e-12)
-            previous = np.zeros((2, 3)); old_A = np.zeros((2, 3))
+                if any(b.key == 'si-tddft' for b in bindings.values()):
+                    initial = TDDFTInitialState.from_salmon(args.bundle, 'rt.inp', executable=load_runtime(args.runtime),
+                                                          max_steps=args.steps, threads=1)
+                for column, point in enumerate(points):
+                    is_sbe = bindings[point].key == 'sbe-point'
+                    state = sbe.new_state(dt=dt) if is_sbe else initial.new_state(dt=dt)
+                    try:
+                        for n in range(args.steps): replay[n, column] = state.step(A[n, column])
+                    finally: state.close()
+                    if is_sbe: np.testing.assert_array_equal(j[:, column], replay[:, column])
+                    else: np.testing.assert_allclose(j[:, column], replay[:, column], rtol=2e-10, atol=2e-12)
+            finally:
+                if initial is not None: initial.close()
+            previous = np.zeros((len(points), 3)); old_A = np.zeros((len(points), 3))
             for n, frame in enumerate(history, 1):
                 np.testing.assert_array_equal(frame['J_previous'], previous)
                 np.testing.assert_allclose(frame['A_over_c'], old_A-dt*frame['E_at_points'], rtol=0, atol=1e-18)
@@ -102,12 +129,15 @@ def main():
             np.savez(output/'response.npz', point_ids=list(points), A_over_c=A, E=E, j=j, serial_replay=replay)
             ids, counts = np.unique(geometry.material_ids(), return_counts=True)
             report = {'status': 'passed', 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks, 'field_grid': list(args.field_grid),
-                      'point_materials': {'10': 'sbe-point', '20': 'si-tddft'},
+                      'point_materials': {str(p): bindings[p].key for p in points},
                       'constitutive_cell_counts': dict(zip(map(str, ids.tolist()), counts.tolist())),
                       'ld_materials': {} if args.without_ld else {'1': 'drude', '2': 'two-lorentz-poles'},
                       'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),
                       'timing': coupled.timing, 'communication': communication,
                       'scope': 'tiny native E/H coupling fixture; no physical convergence or whole-session restart claim'}
+            if assembly is not None:
+                report['assembly'] = assembly.record()
+                report['ld_materials'] = {str(v): k for k, v in assembly.record()['constitutive_material_ids'].items()}
             if args.compare is not None:
                 expected = json.loads((args.compare/'result.json').read_text())
                 if expected.get('status') != 'passed': raise ValueError('successful comparison run required')

@@ -602,3 +602,7 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 REFERENCE_OUTPUTには、同じサンプルを場1ランク・TDDFT1ランク（外側3ランク）で実行した出力を指定します。`--compare`を省略すれば単独実行です。比較は同じステップ数・dt・材料設定・点順を要求し、A/c・E・jの履歴を確認します。必要な外側ランク数は`product(field-grid)+1+tddft-ranks`です。
 
 x/y/z各方向の2分割は、128ステップで場1ランクの結果と完全一致しました。y/z分割では両LD材料が両方の場区画に分かれます。場2ランクとTDDFT内部2ランクを同時に使う5ランク構成は、今回の4コア枠では未検証です。大規模性能・メモリ上限の保証ではありません。記録: `docs/distributed-field-mixed-validation-2026-11-16.md`。
+
+## 混在層の構成入口
+
+配置には `salmonpy.layers.assemble_native_layers` と `examples/mixed_layers.json` を使用する。物理設定を配置JSONへ重複させず、準備済みの物質IDとモデル／MaterialBindingを渡す。Bohr単位、厚み切り上げ、全電子セルの独立点化、必要ランク数と実際の厚みを利用者へ示す。ランク予算はメモリ制限ではない。LDと電子点の禁止された近接を真空で黙って変更しない。構成関数はMPI・GS計算・ダウンロードを開始しない。自作コードも明示的なMaterialBindingで接続する。詳細と実行例はCOUPLED.md／COUPLED.en.md。
