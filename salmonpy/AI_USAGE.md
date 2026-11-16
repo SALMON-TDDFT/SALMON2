@@ -624,3 +624,5 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 層構成では任意の `backend.supported_group_sizes` を検査する。高速HSEは(1,2)。対応ランク数の宣言は空でない正の整数の重複なしtuple。未宣言の自作バックエンドへ未確認の能力を推定しない。数値・再開の能力検査は別途必要。
 
 対応ランク数の任意宣言はResponseSessionの直接接続でも物質準備前に集合検査する。宣言を全群で照合し、tupleの順序差は同一視する。Aパケットラッパーも宣言を保持する。
+
+直接保存サンプルはnative-direct/2の互換情報を全ランクで照合してからLOADする。保存方式・save/restore宣言・所有ランク／点・場と電子の内部分割を比較する。同じ総ランク数でも分割が違えば拒否する。manifest/1は情報不足のため新経路では復元不可、元の対応版を使う。任意のsnapshotを直接保存とみなさず、再生方式を混入させない。自作direct-state/1にはcheckpoint_format／checkpoint_modes／checkpoint_decompositionを明示する。汎用保存APIの完成や原子的復元を意味しない。

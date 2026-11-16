@@ -136,6 +136,7 @@ class NativeTDDFTBackend:
         native=NativeParallelContext(owner,self.library,self.sha256)
         _used=True
         state=_NativeState(native,lib,work,initial.max_steps)
+        state.checkpoint_decomposition=self.decomposition
         try:
             J=np.empty(3)
             code=state._call(lib.sp_tddft_init,os.fsencode(initial.input_file),float(dt),initial.max_steps,

@@ -348,10 +348,19 @@ Only fast-PR HSE is an eligible execution engine. Do not add conventional HSE or
 - [x] Fast-PR HSE host-MPI/k-only direct continuation delivered in ace8a557. Historical HSE-inner-MPI-open notes above are superseded within this scope, not separate unfinished tasks.
 - [x] Native layer planning admission: optional backend `supported_group_sizes` positive unique integer tuple, fast-HSE `(1,2)`. Reject unsupported/malformed declarations before MPI or material preparation. Undeclared custom backends retain existing execution/decomposition checks. This is not certification of their numerical or restart capabilities.
 - [x] Direct ResponseSession admission and cross-group declaration agreement, shared with layer planning; A-packet wrapper forwards declarations.
-- [ ] Next: checkpoint/decomposition capability compatibility; retain custom backend freedom without assuming undeclared capabilities.
+- [x] Supplied mixed direct checkpoint: collectively compare persistence routes/modes, exact MPI ownership and field/electronic decomposition before LOAD; same-size different layouts rejected. Legacy manifest/1 requires original reader; arbitrary snapshot-only/replay backends are not admitted.
+- [ ] Next: broader public checkpoint capability contracts and generic archive portability; retain custom backend freedom without assuming undeclared capabilities.
 - [ ] Remaining primary work: native recoverable-error/handle contracts, remaining GS/TDDFT global ownership, generic checkpoint archives and changed topology, resource estimates/caps and scaling, platform/runtime distribution evidence. See current audit items5–10.
 - [ ] Orbital/rgrid HSE is distinct from completed k-only HSE; no claim of support. Molecular work remains paused.
 
 Validation for parallel admission: failing regression reproduced acceptance of an unsupported3-rank collective group before the fix; valid2-rank planning and malformed declarations now pass their checks without invoking provider.prepare. Source and installed-wheel suites each pass471 tests (one skip); sdist→wheel succeeds. Persistent artifacts: `/Users/otobetoshihito/.codex/outputs/salmonpy-parallel-admission-20261117`. No native kernel, update order or numerical formula changed; no new remote Actions run.
 
 Direct-session admission validation: nine real three-rank collective rejections before callbacks, canonical tuple-order agreement and legacy undeclared trajectories verified in source/installed environments. Installed native FDTD+LD+SBE+HSE-k2 256-step outputs remain byte-identical. Source/wheel473 tests pass (one skip each). Evidence: `../response-admission-validation-2026-11-17.md`. This closes rank-admission agreement only; restart capability compatibility and broader native failure/ownership work remain open.
+
+### Restart admission — 2026-11-17
+
+- [x] Native-direct/2 sample manifests bind persistence formats/modes, exact group/point ownership and inner field/k/orbital/rgrid layouts; collective comparison precedes every LOAD. Fresh-candidate and within-group agreement checks included.
+- [x] Require actual native payload filenames in inventory and reject collisions; unsupported save leaves no output directory. Old archives lacking compatibility metadata require their original reader.
+- [x] Eight three-rank MPI preflight failures have zero LOAD calls. Final installed HSEk2 Taylor/PT-CN,Libxc-PBE orbital2 and field2+serialHSE direct resumes remain byte-identical to continuous with only129/65 new calls.
+- [x] Source/wheel476 tests (one skip each),sdist→wheel and JP/EN/AI synchronization. Evidence: `../restart-preflight-validation-2026-11-17.md`.
+- Remaining: generic public checkpoint contracts and portable/changing MPI layouts; full native error atomicity and state/input ownership; resource/cross-platform work. The sample's preflight does not complete these broader items.

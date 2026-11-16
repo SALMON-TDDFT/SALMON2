@@ -42,6 +42,102 @@ def _verify_files(root, files, rank, ranks):
     return {'rank': rank, 'files_checked': checked, 'bytes_checked': size}
 
 
+def _compatibility(world, coupled, *, restore, saved=None):
+    """Agree direct persistence routes and exact MPI layouts before any LOAD.
+
+    This is the supplied sample's metadata contract, not a generic archive API.
+    Static candidate initialization has already happened; no state I/O is called.
+    """
+    import math
+    from dataclasses import asdict
+    from salmonpy.sbe import SBEState
+    from salmonpy.ld import LDState
+
+    def component(state, *, symbol=None, native_format=None, ranks=1):
+        if getattr(state,'closed',False):
+            raise ValueError('checkpoint capability requires a live state')
+        if restore and getattr(state,'steps',getattr(state,'step_index',0))!=0:
+            raise ValueError('checkpoint compatibility requires a fresh unadvanced state')
+        if symbol is not None:
+            if not callable(getattr(state.lib,symbol,None)):
+                raise ValueError('missing native checkpoint capability '+symbol)
+            fmt=native_format
+            modes=('save','restore')
+        elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
+            if not callable(getattr(state,'checkpoint',None)):
+                raise ValueError('missing direct checkpoint capability')
+            fmt=getattr(state,'checkpoint_format',None)
+            modes=getattr(state,'checkpoint_modes',None)
+        else:
+            raw=getattr(state,'_raw',None)
+            if not isinstance(raw,(SBEState,LDState)):
+                raise ValueError('backend has no declared direct checkpoint capability; snapshot may require replay')
+            if not callable(getattr(raw,'snapshot',None)) or not callable(getattr(raw,'restore',None)):
+                raise ValueError('snapshot/restore capability required')
+            if restore and raw._steps!=0:
+                raise ValueError('checkpoint compatibility requires a fresh snapshot state')
+            if ranks!=1:
+                raise ValueError('snapshot checkpoint capability requires one rank per group')
+            return {'format':'salmonpy.'+raw._snapshot_kind+'-snapshot/1',
+                    'modes':['restore','save'],'decomposition':[1]}
+        if (not isinstance(fmt,str) or not fmt.strip() or not isinstance(modes,tuple)
+                or not modes or any(m not in ('save','restore') for m in modes)
+                or len(set(modes))!=len(modes) or ('restore' if restore else 'save') not in modes):
+            raise ValueError('explicit checkpoint format and save/restore capability required')
+        layout=getattr(state,'checkpoint_decomposition',None)
+        if (not isinstance(layout,tuple) or not layout
+                or any(type(n) is not int or n<1 for n in layout) or math.prod(layout)!=ranks):
+            raise ValueError('checkpoint compatibility requires the actual MPI decomposition')
+        return {'format':fmt,'modes':sorted(modes),'decomposition':list(layout)}
+
+    error=None;topology=None;participant=None
+    try:
+        r=coupled.response;c=r.context
+        if getattr(r,'failed',False):
+            raise ValueError('checkpoint capability unavailable after session failure')
+        if restore and (getattr(coupled,'step_index',0)!=0 or getattr(r,'step_index',0)!=0):
+            raise ValueError('checkpoint compatibility requires a fresh unadvanced session')
+        c.plan.validate(world.size)
+        topology=[asdict(g) for g in c.plan.groups]
+        if world.rank not in c.group.ranks or set(r.states)!=set(c.group.point_ids):
+            raise ValueError('checkpoint compatibility ownership differs from plan')
+        ranks=len(c.group.ranks)
+        if (coupled.field is not None)!=(c.group.role=='field'):
+            raise ValueError('checkpoint compatibility field role differs')
+        field=None
+        if coupled.field is not None:
+            field=component(coupled.field,symbol='sp_eh_checkpoint',native_format='salmonpy.eh-native/1',ranks=ranks)
+        states={}
+        for point,state in r.states.items():
+            if hasattr(state,'native'):
+                states[str(point)]=component(state,symbol='sp_tddft_checkpoint',native_format='salmonpy.tddft-native/2',ranks=ranks)
+            else:
+                states[str(point)]=component(state,ranks=ranks)
+        participant={'rank':world.rank,'group':c.group.name,'field':field,'states':states}
+    except Exception as exc:
+        error=str(exc)
+    gathered=world.allgather((error,topology,participant))
+    if any(x[0] for x in gathered):
+        raise ValueError('checkpoint capability/compatibility: '+str([x[0] for x in gathered]))
+    # JSON normalization makes tuples portable and avoids output-directory IDs.
+    normalize=lambda x:json.loads(json.dumps(x,sort_keys=True,allow_nan=False))
+    topology=normalize(topology)
+    if any(normalize(x[1])!=topology for x in gathered):
+        raise ValueError('checkpoint compatibility plans differ across ranks')
+    participants=[x[2] for x in gathered]
+    if [x['rank'] for x in participants]!=list(range(world.size)):
+        raise ValueError('checkpoint compatibility rank inventory differs')
+    for group in topology:
+        members=[participants[rank] for rank in group['ranks']]
+        declarations=[(x['field'],x['states']) for x in members]
+        if any(x['group']!=group['name'] for x in members) or any(x!=declarations[0] for x in declarations):
+            raise ValueError('checkpoint capability/compatibility declarations differ within MPI group '+group['name'])
+    current=normalize({'schema':'salmonpy.direct-compatibility/1','groups':topology,'participants':participants})
+    if restore and (saved is None or normalize(saved)!=current):
+        raise ValueError('checkpoint compatibility metadata missing or MPI layout/format/capability differs; legacy archives require their original reader')
+    return current
+
+
 def checkpoint(world, coupled, directory, signature, *, restore=False, frames=None):
     r = coupled.response
     field = coupled.field
@@ -51,6 +147,8 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
     try:
         if sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1' for s in r.states.values())>1:
             raise ValueError('one worker checkpoint per rank required')
+        if sum(hasattr(s,'native') for s in r.states.values())>1:
+            raise ValueError('one native electronic checkpoint per rank required')
         for state in r.states.values():
             if hasattr(state, 'native'):
                 getattr(state.lib, 'sp_tddft_checkpoint')
@@ -62,7 +160,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         if restore:
             manifest = json.loads((root/'complete.json').read_text())
             manifest_id = hashlib.sha256(json.dumps(manifest,sort_keys=True,allow_nan=False).encode()).hexdigest()
-            if manifest['schema'] != 'salmonpy.native-direct/1' or manifest['signature'] != signature or manifest['ranks'] != world.size:
+            if manifest['schema'] not in ('salmonpy.native-direct/1','salmonpy.native-direct/2') or manifest['signature'] != signature or manifest['ranks'] != world.size:
                 raise ValueError('checkpoint input/library/topology mismatch')
             if type(manifest['step']) is not int or not 0 < manifest['step'] < signature['steps']:
                 raise ValueError('invalid checkpoint step')
@@ -94,14 +192,30 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                         current = np.asarray(data['states'][str(point)]['current'],dtype=float)
                         if current.shape!=(3,) or not np.isfinite(current).all():
                             raise ValueError('invalid checkpoint material current')
-        elif world.rank == 0:
-            root.mkdir(parents=True, exist_ok=False)
     except Exception as exc: error = str(exc)
     agreement = world.allgather((error, manifest_id))
     errors = [item[0] for item in agreement]
     if any(errors): raise ValueError(str(errors))
     if restore and len({item[1] for item in agreement}) != 1:
         raise ValueError('checkpoint manifests differ across ranks')
+    compatibility=_compatibility(world,coupled,restore=restore,
+        saved=manifest.get('compatibility') if restore else None)
+    if restore:
+        required=set()
+        if field is not None: required.add(f'field-{world.rank}.bin')
+        if any(hasattr(s,'native') for s in r.states.values()): required.add(f'electronic-{world.rank}.bin')
+        if any(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1' for s in r.states.values()):
+            required.add(f'worker-{world.rank}.bin')
+        error=None if required<=set(manifest['files']) else 'checkpoint compatibility missing required payload '+str(sorted(required-set(manifest['files'])))
+        errors=world.allgather(error)
+        if any(errors): raise ValueError(str(errors))
+    if not restore:
+        error=None
+        if world.rank==0:
+            try: root.mkdir(parents=True,exist_ok=False)
+            except Exception as exc: error=str(exc)
+        errors=world.allgather(error)
+        if any(errors): raise ValueError(str(errors))
     if restore:
         coupled.checkpoint_validation = world.allgather(verification)
     world.Barrier()
@@ -169,7 +283,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
             {k: v.tolist() if isinstance(v,np.ndarray) else v for k,v in h.items()}
             for h in frames], allow_nan=False)+'\n')
         files = {p.name: digest(p) for p in sorted(root.iterdir())}
-        (root/'complete.tmp').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+        (root/'complete.tmp').write_text(json.dumps({'schema':'salmonpy.native-direct/2','compatibility':compatibility,
             'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}, indent=2)+'\n')
         (root/'complete.tmp').replace(root/'complete.json')
     world.Barrier()

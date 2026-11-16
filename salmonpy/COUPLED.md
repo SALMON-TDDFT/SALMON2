@@ -347,3 +347,5 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.example
 Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しました。Taylor／学習PT-CNとも場1＋SBE1＋HSE2、dt=.001、256ステップ中127で直接保存し、残り129回の呼出後にA/c・E・jの全履歴がビット単位で一致しました。独立serial高速PR応答との最大HSE電流差は4.07e-16／1.71e-16 auです。接続・再開の回帰検査であり、物理収束・大規模性能の保証ではありません。記録：`docs/fast-hse-kmpi-validation-2026-11-16.md`。
 
 層構成時、バックエンドは任意で `supported_group_sizes=(1,2)` のように対応ランク数を宣言できます。空でない正の整数の重複なしtupleに限定し、未対応ランク数はMPI・初期状態準備より前に拒否します。高速HSEは `(1,2)` を宣言します。宣言しない自作バックエンドは既存のexecution・分割検査を使います。この属性は数値精度・再開機能の認証ではなく、直接ResponseSessionへ接続する場合にも、同じ検査と宣言のランク間照合を物質準備前に行います。
+
+直接保存のサンプルはmanifest形式`salmonpy.native-direct/2`に、保存方式、save/restore対応、各MPI群の所有ランク・点ID、場の分割と電子状態のk／軌道／実空間分割を記録します。全ランクで現在の状態と照合してからLOADを呼ぶため、総ランク数だけが同じ分割変更も拒否します。初期資源の作成は検査前に行いますが、検査中の伝播・snapshot/restore/LOAD呼出はありません。旧manifest/1には必要な互換情報がないため新しい経路では復元を拒否します。旧保存データは対応する元の版で扱ってください。nativeペイロードの形式は変更していません。自作direct-state/1コールバックには、明示的なcheckpoint_format、checkpoint_modes（save/restoreのtuple）、checkpoint_decomposition（群サイズを積に持つ正の整数tuple）が必要です。宣言は利用者の契約であり、その実装・失敗時の原子的復元を認証するものではありません。単にsnapshotメソッドがあるだけでは直接再開と判定せず、同梱LD/SBE以外の再生方式を混入させません。

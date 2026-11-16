@@ -91,6 +91,7 @@ class NativeEHField:
             if (self.directory/'inputfile').read_text()!=text:raise InputError('shared field directory required')
         except Exception as exc:error=str(exc)
         _agree(comm,error)
+        self.checkpoint_decomposition=tuple(grid)
         self.context=context;self.lib=lib;self.dt=calculation.dt;self.capacity=calculation.steps
         self.step_index=0;self.A=np.zeros((len(self.point_ids),3));self.E=np.zeros_like(self.A)
         self.closed=False;self.initialized=False;self.failed=False

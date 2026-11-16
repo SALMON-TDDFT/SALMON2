@@ -152,8 +152,11 @@ class NativeFastHSEBackend:
 
 class _State:
     checkpoint_protocol = 'salmonpy.direct-state/1'
+    checkpoint_format = 'salmonpy.fast-hse-kmpi-native/2'
+    checkpoint_modes = ('save','restore')
 
     def __init__(self,native,lib,work,dt,capacity,propagator):
+        self.checkpoint_decomposition=(native.context.solver_comm.size,1,1,1,1)
         self._native = native  # Avoid the legacy sp_tddft checkpoint dispatch.
         self.lib = lib
         self.work = work

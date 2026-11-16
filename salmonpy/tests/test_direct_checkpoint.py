@@ -114,3 +114,52 @@ class DirectCheckpointTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'one worker checkpoint'):
                 checkpoint(self.world(),c,p,{})
             self.assertFalse(p.exists())
+
+    def test_restart_layout_includes_inner_decomposition_and_capability(self):
+        from salmonpy.examples._direct_checkpoint import _compatibility
+        from salmonpy.distributed import ParallelPlan,SolverGroup
+        from unittest.mock import Mock
+        group=SolverGroup('electronic',(0,),point_ids=(1,))
+        state=SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1',
+            checkpoint_format='custom-numeric/1',checkpoint_modes=('save','restore'),
+            checkpoint_decomposition=(1,1,1,1,1),checkpoint=Mock())
+        context=SimpleNamespace(group=group,plan=ParallelPlan((group,SolverGroup('field',(1,),role='field'))))
+        coupled=SimpleNamespace(response=SimpleNamespace(states={1:state},context=context),field=None)
+        record=_compatibility(self.compat_world(),coupled,restore=False)
+        self.assertEqual(record,_compatibility(self.compat_world(),coupled,restore=True,saved=record))
+        bad=json.loads(json.dumps(record));bad['participants'][0]['states']['1']['decomposition']=[1,2,1,1,1]
+        with self.assertRaisesRegex(ValueError,'compatibility'):
+            _compatibility(self.compat_world(),coupled,restore=True,saved=bad)
+        state.checkpoint_modes=('save',)
+        with self.assertRaisesRegex(ValueError,'capability'):
+            _compatibility(self.compat_world(),coupled,restore=True,saved=record)
+        state.checkpoint_modes=('save','restore');state.steps=1
+        with self.assertRaisesRegex(ValueError,'fresh'):
+            _compatibility(self.compat_world(),coupled,restore=True,saved=record)
+        state.checkpoint.assert_not_called()
+
+    def test_snapshot_alone_does_not_prove_direct_restart_support(self):
+        from salmonpy.examples._direct_checkpoint import _compatibility
+        from salmonpy.distributed import ParallelPlan,SolverGroup
+        from unittest.mock import Mock
+        group=SolverGroup('electronic',(0,),point_ids=(1,))
+        raw=SimpleNamespace(snapshot=Mock(),restore=Mock())
+        coupled=SimpleNamespace(field=None,response=SimpleNamespace(states={1:SimpleNamespace(_raw=raw)},
+            context=SimpleNamespace(group=group,plan=ParallelPlan((group,SolverGroup('field',(1,),role='field'))))))
+        with self.assertRaisesRegex(ValueError,'capability'):
+            _compatibility(self.compat_world(),coupled,restore=False)
+        raw.snapshot.assert_not_called();raw.restore.assert_not_called()
+
+    def compat_world(self):
+        def gather(value):
+            return [value,(None,value[1],{'rank':1,'group':'field','states':{},'field':{'format':'field/1'}})]
+        return SimpleNamespace(rank=0,size=2,allgather=gather)
+
+    def test_multiple_native_files_cannot_collide(self):
+        coupled=self.coupled()
+        coupled.response.states={1:SimpleNamespace(native=object()),2:SimpleNamespace(native=object())}
+        with tempfile.TemporaryDirectory() as d:
+            target=Path(d)/'checkpoint'
+            with self.assertRaisesRegex(ValueError,'one native electronic checkpoint'):
+                checkpoint(self.world(),coupled,target,{})
+            self.assertFalse(target.exists())

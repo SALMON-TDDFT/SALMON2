@@ -197,6 +197,9 @@ class FastHSEResponseBackend:
 
 class _State:
     checkpoint_protocol = 'salmonpy.direct-state/1'
+    checkpoint_format = 'salmonpy.fast-hse-worker-native/2'
+    checkpoint_modes = ('save','restore')
+    checkpoint_decomposition = (1,1,1,1,1)
 
     def __init__(self, backend, work, dt, capacity, propagator):
         self.work = work
