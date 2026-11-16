@@ -616,3 +616,5 @@ TB-mBJ（自動／固定cval）とLibxc-PBEは、場1＋SBE1＋TDDFT内部軌道
 HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベースラインを利用者向けエンジンに追加しない。高速HSEの直接保存／復元はACE・因子履歴・専用伝播器・native資源を含む対応が必要で、中点伝播のXC許可リストへ名前だけを追加しない。
 
 高速PR版HSEは `native_adapters/tddft_context.f90` の内部serial Fortran入口で直接保存／復元に対応した。`rt_checkpoint(ctx,path,restore,status)` と `rt_accepted_step(ctx)` を使い、新しいプロセスで同じ元GS・入力から初期化した後に内部数値状態を読み、残りだけ進める。ACE・因子／PT-CN履歴とFFT資源の再構築を含む。`tools/test_hse_direct_checkpoint.py` は1／2スレッド、2／3 k点、4伝播設定、6／7分割の32ケースで電流・エネルギー・内部トレースが完全一致した。これはhost-MPI/FDTD結合の高速HSE対応や安定したPython/C APIを意味しない。通常HSEは追加しない。詳細はRUNTIME日英ガイド。
+
+高速PR版HSEの外側MPI／FDTD接続は `fast_hse.FastHSEMaterialProvider` と `FastHSEResponseBackend` を使う。専用serialワーカーを明示ビルドし、各HSE点は1ランク群にする。HSE内部MPIではない。場1／2ランク＋SBE1＋HSE1と場内LDを結合し、共有保存先へ直接保存／復元する。`mpi_mixed_native --fast-hse-build ... --layers mixed_hse_layers.json` の手順はCOUPLED日英ガイド。初期電流は実測値を返し、差し引かない。ゼロ場サンプルでは1e-12 au以下を要求。入力の高速伝播器と学習条件を守り、通常HSE・Gammaの未対応学習モードへフォールバックしない。全ランクの保存検査後にHSE LOADを行い、counter/current/Aを照合する。

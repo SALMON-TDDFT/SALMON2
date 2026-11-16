@@ -78,3 +78,5 @@ model explicitly to resume from Zarr history in another process. GS payloads are
 not included. See [state persistence](SNAPSHOTS.en.md).
 
 For one serial model contract, the explicit conformance checker and the point-MPI adapter, see [MATERIALS.en.md](MATERIALS.en.md).
+
+`fast_hse.FastHSEMaterialProvider` / `FastHSEResponseBackend` are preview entries for an explicitly built serial fast-PR worker in outer-MPI response groups; see COUPLED.en.md. They do not initialize inner HSE MPI.

@@ -584,3 +584,5 @@ The tool explicitly compiles adapters against audited fast-PR objects and compar
 Scope: internal serial CPU Fortran entry, periodic scalar fixed occupation/ions, full support. This does not provide a stable Python/C API, inner MPI, HSE-to-FDTD coupling, GPU, symmetry, distributed ACE or reduced-q support. Synthetic numerical regression is separate from physical convergence. Historical native text-file positions are not resumed.
 
 Save at an accepted step with initialized exchange resources. Step-zero saving immediately after initialization is not established.
+
+For outer-MPI/FDTD fast-HSE coupling, explicitly build the dedicated worker and use FastHSEResponseBackend. The internal Fortran entry remains serial; each outer material rank calls its own process. See COUPLED.en.md for build/coupling/direct-restart instructions. This does not add inner HSE MPI.

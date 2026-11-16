@@ -285,3 +285,36 @@ SBEを2点にする場合は、上の条件を `sbe-point` に変更します。
 TB-mBJ（自動係数／cval=1.2）とLibxc-PBEで、この構成の再開後65ステップと連続128ステップのA/c・E・電流がビット単位で一致しました。同じ二段階MPI構成での直接再開の検証であり、MPI分割を変更する再開は対象外です。場2ランクとTDDFT2ランクを同時に使うにはSBEを含め5ランクとなり、今回の4コア枠では未検証です。
 
 直接再開のチェックサム検証はランク間で分担します。全ランクが同じ完了manifestを読み、検証がすべて成功したことを確認してから内部状態を復元します。保存先は全ランクから同じ内容を参照できる共有ディレクトリが必要です。ノードごとの異なるローカルコピーは対象外です。`result.json` の `checkpoint_validation` に各ランクの検証ファイル数・バイト数を記録します。
+
+## 高速PR版HSEを外側MPI／FDTDへ接続する
+
+`FastHSEMaterialProvider` と `FastHSEResponseBackend` は、高速PR版HSEの専用serialワーカーを既存のA/c→電荷電流j契約へ接続します。FDTDは既存のMPI入口、LDは場ランク内、各HSE点は1ランクの物質群が独立した子プロセスを所有します。HSE内部MPIは使用しません。ホストのカレントディレクトリを変更せず、import時にMPI初期化・ビルド・取得はしません。
+
+```python
+from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
+from salmonpy.material_response import MaterialBinding
+
+binding = MaterialBinding(
+    "hse-point",
+    FastHSEMaterialProvider(bundle_directory, "rt.inp", max_steps=256),
+    FastHSEResponseBackend(worker_build_json, existing_work_root, threads=1),
+)
+# このbindingを既存のassemble_native_layers / ResponseSessionへ渡します。
+```
+
+監査済み高速PR版ビルド記録から、ワーカーを新しい外部ディレクトリへ明示構築します。通常版HSEを指定しません。
+
+```sh
+python tools/build_fast_hse_worker.py FAST_PR_BUILD_JSON NEW_WORKER_DIRECTORY
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.mpi_mixed_native FIELD_BUILD_JSON UNUSED_REFERENCE HSE_BUNDLE NEW_OUTPUT --fast-hse-build NEW_WORKER_DIRECTORY/build.json --layers PATH_TO_mixed_hse_layers.json --dt .001 --steps 256 --rank-budget 3
+```
+
+`mixed_hse_layers.json` はLD2材料＋SBE＋HSEの配置です。`UNUSED_REFERENCE` はこのHSE専用例では未使用の位置引数で、存在しない仮パスで構いません。HSEの独立参照計算は同じ専用ワーカーで行います。場2ランクでは `mpiexec -n 4 ... --field-grid 1 2 1 --rank-budget 4` とします。各HSE群は1ランク限定です。子ワーカーがその群の割り当てCPUを使い、呼出元ランクは応答を待ちます。OpenMPを増やす場合は別途CPU予算を割り当ててください。
+
+入力は `tddft_response`、`xc='hse06'`、明示的な高速伝播器（`hse_taylor4`／`hse_taylor4_full`／`hse_ptcn`）を含む元GS/RTバンドルです。ワーカーは選択したdtと上限ステップ数だけを設定し、他の物理条件を保持します。内部並列数は1、学習型には対応するdense-k／固定占有／全支持領域の条件が必要です。初期ゼロ場のサンプルは初期HSE電流が1e-12 au以下であることを要求し、基準電流を差し引きません。合成テスト入力は `tools/prepare_fast_hse_coupled_fixture.py` で作れますが、実材料のGSや物理収束の代わりにはなりません。
+
+`--direct-save-at 127` で場/PML/LD/SBEとHSEワーカーの内部状態を同時刻に保存し、新しいジョブで `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT` を指定します。HSEのLOAD応答により受理済みステップ・電流も復元し、保存したA・結合履歴と照合します。過去127ステップを再実行せず、残り129ステップを進めます。共有保存先・同一ワーカー／初期バンドル／入力／MPI構成が必要です。新しいワーカーの初期資源作成と、検証用の独立参照再生は別途行います。
+
+対象はmacOS/Linux向けPOSIXワーカー（`/dev/stdin`使用）です。今回の実測はApple Silicon。HSE内部MPI、変更した分割への再開、GPU、任意バックエンドの一般保存、native異常後の継続は未対応です。
+
+HSEワーカーへの入力は原子単位（unit_system=au）に限定します。内部パルスを無効にし、ae_shape1はnoneまたは明示的なゼロimpulse、ae_shape2はnone、trans_longiはtrとします。FDTDからのAと内部パルスの二重駆動を拒否します。状態のtimeは受理済みstep×dtです。

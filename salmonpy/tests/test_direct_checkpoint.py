@@ -87,3 +87,30 @@ class DirectCheckpointTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'manifests differ'):
                 checkpoint(world,coupled,p,{'steps':128},restore=True)
             self.assertFalse(coupled.response.failed)
+
+    def test_worker_A_mismatch_rejected_before_loading(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)
+            data={'step':64,'J':[[0.,0.,0.]],'response_A':[[0.,0.,0.]],
+                  'states':{'1':{'A':[1.,0.,0.],'current':[0.,0.,0.]}}}
+            (p/'rank-0.json').write_text(json.dumps(data));(p/'frames.json').write_text('[]')
+            files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
+            (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+                'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
+            coupled=self.coupled()
+            coupled.response.states={1:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1',
+                checkpoint=lambda *a,**k:self.fail('must reject before native load'))}
+            coupled.response.context=SimpleNamespace(plan=SimpleNamespace(point_ids=(1,)))
+            with self.assertRaisesRegex(ValueError,'A differs'):
+                checkpoint(self.world(),coupled,p,{'steps':128},restore=True)
+            self.assertFalse(coupled.response.failed)
+
+    def test_multiple_worker_files_cannot_collide(self):
+        c=self.coupled()
+        state=lambda:SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1',checkpoint=lambda *a,**k:None)
+        c.response.states={1:state(),2:state()}
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'checkpoint'
+            with self.assertRaisesRegex(ValueError,'one worker checkpoint'):
+                checkpoint(self.world(),c,p,{})
+            self.assertFalse(p.exists())

@@ -535,3 +535,5 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint
 現段階は周期・スカラー・固定占有・固定イオン・全支持領域のserial CPU高速HSE内部Fortran入口です。Python/Cの安定API、内部MPI、FDTDとのHSE結合、GPU、対称性・分散ACE・縮約q点などへの対応を示すものではありません。合成軌道の数値回帰であり、実材料の物理収束は別途確認します。既存nativeテキスト出力の過去のファイル位置は再開しません。
 
 保存は交換資源が初期化された受理済みステップで行います。初期化直後のステップ0保存は検証対象外です。
+
+高速PR版HSEの外側MPI／FDTD接続には、明示ビルドした専用ワーカーと `FastHSEResponseBackend` を使います。上の内部Fortran入口のserial制限は維持したまま、外側MPIの各物質点から別プロセスを呼びます。構築・結合・直接再開はCOUPLED.mdを参照してください。HSE内部MPIへの対応ではありません。

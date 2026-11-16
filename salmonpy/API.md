@@ -68,3 +68,5 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 初期GS本体は保存しません。詳細は[状態保存](SNAPSHOTS.md)を参照してください。
 
 直列モデルの共通契約、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。
+
+`fast_hse` の `FastHSEMaterialProvider`／`FastHSEResponseBackend` は明示ビルドした高速PR版serialワーカーを外側MPIの物質応答へ接続するプレビュー入口です。COUPLED.mdを参照してください。HSE内部MPIを初期化しません。

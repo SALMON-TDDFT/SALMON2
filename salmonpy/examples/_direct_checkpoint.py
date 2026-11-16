@@ -49,9 +49,13 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
     error = None
     manifest_id = None
     try:
+        if sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1' for s in r.states.values())>1:
+            raise ValueError('one worker checkpoint per rank required')
         for state in r.states.values():
             if hasattr(state, 'native'):
                 getattr(state.lib, 'sp_tddft_checkpoint')
+            elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1' and callable(getattr(state,'checkpoint',None)):
+                pass
             elif not callable(getattr(getattr(state, '_raw', None), 'snapshot', None)):
                 raise ValueError('backend has no direct checkpoint capability')
         if field is not None: getattr(field.lib, 'sp_eh_checkpoint')
@@ -80,6 +84,16 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                         raise ValueError('invalid checkpoint field arrays')
             if set(data['states']) != {str(p) for p in r.states}:
                 raise ValueError('checkpoint point IDs differ')
+            for point,state in r.states.items():
+                if hasattr(state,'native') or getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
+                    A = np.asarray(data['states'][str(point)]['A'],dtype=float)
+                    index = list(r.context.plan.point_ids).index(point)
+                    if A.shape!=(3,) or not np.isfinite(A).all() or not np.array_equal(A,np.asarray(data['response_A'])[index]):
+                        raise ValueError('checkpoint material A differs from response history')
+                    if getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
+                        current = np.asarray(data['states'][str(point)]['current'],dtype=float)
+                        if current.shape!=(3,) or not np.isfinite(current).all():
+                            raise ValueError('invalid checkpoint material current')
         elif world.rank == 0:
             root.mkdir(parents=True, exist_ok=False)
     except Exception as exc: error = str(exc)
@@ -117,6 +131,13 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                 if restore:
                     state.steps = data['step']; state.A = np.asarray(data['states'][key]['A'])
                 else: data['states'][key] = {'A': state.A.tolist()}
+            elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
+                state.checkpoint(root/f'worker-{world.rank}.bin', restore=restore)
+                if restore:
+                    if state.steps != data['step']: raise ValueError('worker checkpoint clock differs')
+                    state.A = np.asarray(data['states'][key]['A'])
+                    np.testing.assert_array_equal(state.current,np.asarray(data['states'][key]['current']))
+                else: data['states'][key] = {'A':state.A.tolist(),'current':state.current.tolist()}
             else:
                 raw = state._raw
                 token = raw.snapshot()

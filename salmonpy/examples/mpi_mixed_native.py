@@ -27,8 +27,10 @@ from salmonpy.tddft import TDDFTInitialState
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
+    parser.add_argument('--fast-hse-build', type=Path, help='explicit fast-PR serial worker build record for hse-point')
+    parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
-    parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, drude, lorentz')
+    parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
     parser.add_argument('--rank-budget', type=int, help='planning cap; defaults to the launched world size')
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
@@ -46,6 +48,8 @@ def main():
     if args.save_at is not None and not 0 < args.save_at < args.steps:
         parser.error('save-at must be between zero and steps')
     if args.layers is not None and args.without_ld: parser.error('express vacuum in the layout; do not combine --layers with --without-ld')
+    if not np.isfinite(args.dt) or args.dt <= 0: parser.error('positive finite dt required')
+    if args.fast_hse_build is not None and args.layers is None: parser.error('fast HSE requires an explicit layer layout')
     if args.steps < 1: parser.error('positive steps required')
     if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
     field_ranks = int(np.prod(args.field_grid))
@@ -57,7 +61,7 @@ def main():
         output = args.output.resolve()
         if world.rank == 0: output.mkdir(parents=True, exist_ok=False)
         world.Barrier()
-        dt = .003
+        dt = args.dt
         grid = Grid((40, 40, 40), (2., 2., 2.))
         points = {10: (19, 20, 20), 20: (20, 20, 20)}
         shapes = (Shape('box', (2., 4., 4.), (7., 1., 1.), material=1),
@@ -78,6 +82,12 @@ def main():
             available['si-tddft'] = MaterialBinding('si-tddft',
                 NativeTDDFTMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
                 NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1)))
+        if 'hse-point' in selected:
+            if args.fast_hse_build is None: raise ValueError('hse-point requires --fast-hse-build')
+            from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
+            available['hse-point'] = MaterialBinding('hse-point',
+                FastHSEMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
+                FastHSEResponseBackend(args.fast_hse_build, output))
         assembly = None
         if layout is None:
             bindings = {10: available['sbe-point'], 20: available['si-tddft']}
@@ -86,7 +96,7 @@ def main():
                                  SolverGroup('tddft', tuple(range(field_ranks+1, world.size)), point_ids=(20,))))
         else:
             from salmonpy.layers import assemble_native_layers
-            rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks}.items() if key in selected}
+            rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks, 'hse-point': 1}.items() if key in selected}
             assembly = assemble_native_layers(layout, available,
                 grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
                 ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size)
@@ -103,7 +113,7 @@ def main():
             return h.hexdigest()
         build = json.loads(args.build.read_text())
         assets = {}
-        if 'si-tddft' in selected:
+        if 'si-tddft' in selected or 'hse-point' in selected:
             assets = {str(p.relative_to(args.bundle)): digest_file(p)
                       for p in sorted(args.bundle.rglob('*')) if p.is_file()}
         signature = {'input': FDTDMPI(tuple(args.field_grid)).input_text(calculation),
@@ -115,6 +125,8 @@ def main():
                      'sbe_model': hashlib.sha256(b''.join(np.asarray(getattr(sbe, k)).tobytes()
                          for k in ('eigen','momentum','nonlocal_velocity','weights','lattice'))
                          + repr((sbe.electrons,sbe.correction_order,sbe.nonlocal_correction)).encode()).hexdigest()}
+        if 'hse-point' in selected:
+            signature['fast_hse_backend'] = available['hse-point'].backend.identity
         restored = None
         if args.resume is not None:
             metadata = json.loads((args.resume/'checkpoint.json').read_text())
@@ -132,6 +144,9 @@ def main():
         if context.group.role == 'field':
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
         session = ResponseSession(context, bindings, dt=dt)
+        for point,binding in bindings.items():
+            if binding.key=='hse-point' and np.max(np.abs(session.initial_current[point]))>1e-12:
+                raise ValueError('zero-initial FDTD requires negligible initial HSE current (<=1e-12 au); prepare a zero-current initial state')
         coupled = CoupledStepper(session, field)
         start = 0
         if args.direct_resume is not None:
@@ -194,9 +209,19 @@ def main():
                                                           max_steps=args.steps, threads=1)
                 for column, point in enumerate(points):
                     is_sbe = bindings[point].key == 'sbe-point'
-                    state = sbe.new_state(dt=dt) if is_sbe else initial.new_state(dt=dt)
+                    is_hse = bindings[point].key == 'hse-point'
+                    if is_hse:
+                        from types import SimpleNamespace
+                        from salmonpy.material_response import SolverContext
+                        local = SolverContext(SimpleNamespace(rank=0,size=1),'serial-reference',(point,))
+                        binding = bindings[point]
+                        state = binding.backend.create_state(binding.provider.prepare(local),point,dt,local)
+                    else: state = sbe.new_state(dt=dt) if is_sbe else initial.new_state(dt=dt)
                     try:
-                        for n in range(args.steps): replay[n, column] = state.step(A[n, column])
+                        old = np.zeros(3)
+                        for n in range(args.steps):
+                            replay[n, column] = state.advance(old,A[n,column]) if is_hse else state.step(A[n,column])
+                            old = A[n,column].copy()
                     finally: state.close()
                     if is_sbe: np.testing.assert_array_equal(j[:, column], replay[:, column])
                     else: np.testing.assert_allclose(j[:, column], replay[:, column], rtol=2e-10, atol=2e-12)
@@ -210,8 +235,12 @@ def main():
                 previous = frame['J_charge']; old_A = frame['A_over_c']
             np.savez(output/'response.npz', point_ids=list(points), A_over_c=A, E=E, j=j, serial_replay=replay)
             ids, counts = np.unique(geometry.material_ids(), return_counts=True)
-            report = {'status': 'passed', 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks, 'field_grid': list(args.field_grid),
+            report = {'status': 'passed', 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks if 'si-tddft' in selected else 0, 'field_grid': list(args.field_grid),
                       'point_materials': {str(p): bindings[p].key for p in points},
+                      'initial_charge_current': session.initial_current,
+                      'outer_mpi_ranks':world.size,
+                      'serial_hse_workers':sum(b.key=='hse-point' for b in bindings.values()),
+                      'hse_internal_mpi':False,
                       'constitutive_cell_counts': dict(zip(map(str, ids.tolist()), counts.tolist())),
                       'ld_materials': {} if args.without_ld else {'1': 'drude', '2': 'two-lorentz-poles'},
                       'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),

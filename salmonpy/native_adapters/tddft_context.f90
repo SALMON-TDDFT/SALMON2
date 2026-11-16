@@ -14,7 +14,7 @@ module salmonpy_tddft_context
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
- public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step
+ public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current
  type fixed_settings
   real(8)::omega,electronic_temperature
   integer::grid(3),mesh(3),bands,energy_interval,electrons,hamil,exact_interval,warmup,teachers
@@ -209,6 +209,31 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  total_energy=ctx%energy%E_tot
  status=0
  end subroutine
+ ! Physical charge current at the accepted endpoint, without propagation.
+ subroutine rt_current(ctx,current,status)
+ use density_matrix,only:calc_current
+ use hamiltonian,only:update_kvector_nonlocalpt
+ type(tddft_context),pointer,intent(inout)::ctx
+ real(8),intent(out)::current(3)
+ integer,intent(out)::status
+ real(8)::matter(3,2)
+ status=1;current=0d0
+ if(.not.associated(ctx))return
+ if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))return
+ if(ctx%accepted>ctx%Mit)then
+  current=-ctx%rt%curr(:,ctx%accepted)
+ else
+  ! Initialization has not evaluated the t=0 observable; query the initial GS.
+  ! Nonlocal phases follow the same endpoint convention as rt_step.
+  call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
+  call calc_current(ctx%system,ctx%mg,ctx%stencil,ctx%info,ctx%srg,ctx%spsi_in,ctx%ppg, &
+                    matter(:,1:ctx%system%nspin))
+  ctx%spsi_in%update_zwf_overlap=.true.
+  current=-sum(matter(:,1:ctx%system%nspin),dim=2)
+ endif
+ if(.not.all(ieee_is_finite(current)))return
+ status=0
+ end subroutine rt_current
  subroutine rt_close(ctx)
  type(tddft_context),pointer,intent(inout)::ctx
  if(.not.associated(ctx))return

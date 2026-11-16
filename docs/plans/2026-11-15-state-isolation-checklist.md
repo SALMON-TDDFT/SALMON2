@@ -15,7 +15,9 @@ The dated sections below retain the scope at their completion time. Older statem
 - [x] Existing configured material adapters, serial/MPI point identity and managed TDDFT point replay are available in the documented M4/M5/M6 subsets. Do not describe them as entirely missing.
 - [x] Same-topology direct field/PML/LD/SBE/TDDFT restart: PZ, TB-mBJ automatic/fixed coefficient and Libxc-PBE include native TDDFT orbital MPI2;63 saved/65 resumed steps match continuous128 bit-for-bit. Libxc-PZ is validated with TDDFT1. Generic archives/HSE remain below.
 
-- [x] Fast-PR HSE serial Fortran context direct checkpoint: ACE/exact/learned/PT-CN histories and RT buffers, fresh-process6/7→12,32 cases overOMP1/2; listed internal traces match. Coupled/MPI HSE remains separate.
+- [x] Fast-PR HSE serial Fortran context direct checkpoint: ACE/exact/learned/PT-CN histories and RT buffers, fresh-process6/7→12,32 cases overOMP1/2; listed internal traces match. Native-host/inner-MPI HSE remains separate; outer serial-worker coupling is covered below.
+
+- [x] Fast-PR HSE outer-MPI/FDTD coupling via one serial worker per material rank: field1/2+SBE1+HSE1 with local LD, Taylor/learned PT-CN direct127→256; all four trajectories match continuous exactly. HSE inner MPI remains unsupported.
 
 ### Delivery status and remaining mixed-material work
 
@@ -27,7 +29,7 @@ The dated sections below retain the scope at their completion time. Older statem
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
 8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC, coupled/MPI HSE resources and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC, inner-MPI/native-host HSE resources and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
@@ -328,3 +330,13 @@ Only fast-PR HSE is an eligible execution engine. Do not add conventional HSE or
 - [x] Truncated archive, changed settings and trailing-byte errors rejected; late-load failure invalidates stepping. Prior eight two-context interleaving/lifetime/configuration regressions pass.
 - [x] Only fast-PR HSE objects used. No conventional HSE engine or comparison baseline engine added.
 - Remaining: host-MPI/coupled HSE, public Python/C persistence API, broader symmetry/localized/distributed/GPU resources and physical convergence. Existing HSE-open notes above are historical; serial internal checkpoint is complete within this scope. Evidence: docs/fast-hse-direct-checkpoint-validation-2026-11-16.md.
+
+### Fast-PR HSE outer MPI / FDTD direct restart (2026-11-16)
+
+- [x] Explicitly audited fast-only worker builder and flushed STEP/SAVE/LOAD protocol; actual initial charge current query, no baseline subtraction, no host cwd changes or import-time compile/MPI init.
+- [x] Public FastHSEMaterialProvider / FastHSEResponseBackend, one rank/group owning a serial child; immutable bundle/worker identities, independent work copies, timeout and cleanup.
+- [x] Same-epoch native field/PML/LD, SBE, HSE worker internal state plus Python counters/current/A; generic worker checkpoint callback checks step/current/A and refuses unsupported many-workers-per-rank collisions.
+- [x] Installed-wheel Taylor/learned PT-CN × field1/2, externalMPI3/4 ranks: save127/new-job remaining129 through256. A/E/j bit-identical to continuous; field1/2 also bit-identical. Real worker command logs contain exactly128..256 after LOAD127.
+- [x] Source and installed459 tests (one skipped each), sdist-to-wheel, public API and English/Japanese/AI instructions synchronized.
+- Remaining: HSE inner MPI/native-host integration, other topologies/resources, generic public checkpoint archives, recoverable native errors, memory caps and production/physical convergence. Outer-MPI/FDTD HSE connection is now complete within the serial-worker profile; older HSE-coupling-open notes are historical. Molecular work stays paused.
+- Evidence: docs/fast-hse-mpi-coupled-checkpoint-validation-2026-11-16.md.

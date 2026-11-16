@@ -313,3 +313,36 @@ Use matching-XC GS/RT bundles and four outer ranks: field1,SBE1,TDDFT orbital ra
 For TB-mBJ (automatic coefficient/fixed cval1.2) and Libxc-PBE, the65 resumed steps produced complete A/c,E,current histories bit-identical to continuous128. This validates direct same-topology two-level MPI restart. Changing decomposition remains unsupported. Field2+SBE1+TDDFT2 needs five ranks and remains outside this four-core campaign.
 
 Checksum verification on direct restart is partitioned across ranks. Every rank must read the same completed manifest and all checks must succeed before state restoration. Payloads must reside in one shared directory visible with identical contents to all ranks; different node-local copies are outside this contract. `result.json` records per-rank file/byte counts in `checkpoint_validation`.
+
+## Fast-PR HSE in outer MPI / FDTD coupling
+
+`FastHSEMaterialProvider` / `FastHSEResponseBackend` connect a dedicated serial fast-PR worker to the existing A/c→charge-current j contract. FDTD keeps its native MPI entry, LD stays on field ranks, and each HSE point's single-rank group owns an independent child process. This is outer MPI coupling, not internally parallel HSE. Host cwd is unchanged; import starts no MPI, build or download.
+
+```python
+from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
+from salmonpy.material_response import MaterialBinding
+
+binding = MaterialBinding(
+    "hse-point",
+    FastHSEMaterialProvider(bundle_directory, "rt.inp", max_steps=256),
+    FastHSEResponseBackend(worker_build_json, existing_work_root, threads=1),
+)
+# Pass this binding to existing assemble_native_layers / ResponseSession.
+```
+
+Explicitly link the worker from an audited fast-PR build into a new external directory. Conventional HSE is not an engine option.
+
+```sh
+python tools/build_fast_hse_worker.py FAST_PR_BUILD_JSON NEW_WORKER_DIRECTORY
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.mpi_mixed_native FIELD_BUILD_JSON UNUSED_REFERENCE HSE_BUNDLE NEW_OUTPUT --fast-hse-build NEW_WORKER_DIRECTORY/build.json --layers PATH_TO_mixed_hse_layers.json --dt .001 --steps 256 --rank-budget 3
+```
+
+The packaged layout contains two LD materials,SBE,HSE. `UNUSED_REFERENCE` is an unused positional argument for this HSE-only example and may be a nonexistent placeholder; independent reference validation uses another identical worker. For two field ranks use `mpiexec -n 4 ... --field-grid 1 2 1 --rank-budget 4`. Each HSE group requires one rank. The child uses that group's CPU while its MPI caller waits. Budget extra CPUs explicitly before increasing OpenMP threads.
+
+Supply an original GS/RT bundle with tddft_response,hse06 and an explicit fast propagator (hse_taylor4/hse_taylor4_full/hse_ptcn). Only selected dt/step capacity are overridden; other physics inputs remain. Use serial internal parallel settings and the fast engine's dense-k/fixed-occupation/full-support restrictions for learned modes. The zero-initial-field sample requires initial HSE current<=1e-12 au and subtracts no background current. The preparation tool generates a synthetic continuation fixture, not a converged material GS.
+
+`--direct-save-at 127` captures field/PML/LD/SBE and worker internal state at one epoch. A new job uses `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. LOAD restores accepted step/current, with saved A/coupling histories checked. Only129 remaining steps are propagated; no elapsed127-step reconstruction. Fresh static initialization and independent serial validation replay remain separate. Same worker,bundle,input,MPI topology and shared archive directory are required.
+
+POSIX macOS/Linux worker uses /dev/stdin; measured here on Apple Silicon. Inner-MPI HSE, changed-topology restore,GPU,generic backend archives and continuation after native failure remain unsupported.
+
+Worker inputs must use atomic units (unit_system=au), no internal pulses: ae_shape1=none or explicit zero impulse, ae_shape2=none, trans_longi=tr. Double driving by an internal pulse and external FDTD A is rejected. State time is accepted step×dt.
