@@ -11,9 +11,21 @@ User priority: one multiscale calculation may mix LD, SBE, TDDFT and user materi
 ## Acceptance sequence
 
 1. LD+SBE on one Multiscale1D field: nonzero response, exact independent serial/MPI schedule comparison, timing and point order. Implemented sample: mpi_mixed_multiscale.py (3 ranks).
-2. Add an actual TDDFT point (4 ranks for managed serial worker), compare serial/MPI currents and field. Sample options are prepared, but three-way execution is not yet validated. Real GS/runtime must be supplied explicitly; no downloads or builds on import.
+2. Add an actual TDDFT point (4 ranks for managed serial worker), compare serial/MPI currents and field. Validated for the Si starter PZ GS over100 steps; all A/j values match an independent serial schedule exactly. Real GS/runtime must be supplied explicitly; no downloads or builds on import.
 3. Repeat with internally parallel native TDDFT groups; verify communicator ownership, run IDs and communication measurements.
 4. Native MPI E/H FDTD with local multi-material LD plus remote SBE/TDDFT: preserve LD native update order and interface deposition, compare pure-LD and pure-electronic limits before mixed layers. One-field-rank demonstration does not establish this topology.
 5. Persist material/point/state identity, snapshots and whole-session restart, with explicit capability refusal for unsupported backends.
 
 Numerical regression is not convergence of a real composite. Keep 4GiB/4-core local budget, explicit resource reporting and no routine remote CI.
+
+## Native acceptance update
+
+Steps3/4 now have a bounded native fixture: one E/H rank with two field-local LD materials, one SBE rank and one/two TDDFT orbital ranks. Native/serial material replay,1/2-rank full-history parity,LD vacuum contrast and pure-LD batch parity pass. See docs/native-mixed-material-validation-2026-11-16.md. Multiple field ranks were subsequently verified in the update below. Large numbers of LD cells and whole-session restart remain open.
+
+## Distributed-field acceptance update
+
+Two field ranks with SBE1+TDDFT1 pass all x/y/z split comparisons against field1+SBE1+TDDFT1. Both LD materials span both y/z field blocks. Four-core campaign does not test simultaneous field2+SBE1+TDDFT2 (five ranks). Scaling,aggregate memory measurement and whole-session restart remain open. See docs/distributed-field-mixed-validation-2026-11-16.md.
+
+## Usability follow-up after topology checks
+
+Topology demonstrations do not yet construct an entire native mixed run from user material IDs,layer geometry and rank budgets. Reuse the existing configuration/identity helpers for that next integration; avoid a duplicate input schema. Preserve explicit LD E versus crystalline A/c timing. Track the known prefilled-incident longitudinal validation gap before broadening admission. Whole-session restart and recoverable collective errors remain separate milestones. The active checklist contains the current prioritized audit.

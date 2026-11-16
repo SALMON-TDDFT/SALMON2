@@ -2,6 +2,32 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. New XC coverage is deferred until the existing isolation work is addressed.
 
+## Current audit — 2026-11-16 (takes precedence over historical status notes)
+
+The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
+
+### Completed within measured scope
+
+- [x] GS mixing, normalization and occupation inputs; HSE electron-count/temperature/state-capacity routing; TDDFT electron-count diagnostics. Broader initialization and shared controls remain below.
+- [x] Mixed LD/SBE/managed Si TDDFT, with exact serial/MPI field/current comparison.
+- [x] Native E/H field-local two-material LD + SBE + internally parallel TDDFT (1/2 orbital ranks), serial response replay and pure-LD regression.
+- [x] Two-way x/y/z FDTD decomposition with SBE1/TDDFT1: exact A/E/j parity to a single field rank. Installed-wheel samples and JP/EN/AI instructions updated.
+- [x] Existing configured material adapters, serial/MPI point identity and managed TDDFT point replay are available in the documented M4/M5/M6 subsets. Do not describe them as entirely missing.
+
+### Remaining, prioritized for mixed-material usability
+
+1. [ ] Delivery: commit/push the post-a0ab5f4d native/distributed-field sample, evidence and guide changes. Do not run routine Actions.
+2. [ ] Correctness follow-up: reject longitudinal incident components in Multiscale1D prefilled history even when boundary samples are all zero. Found during mixed sample validation; the sample uses correct transverse polarization and checks nonzero response, but the general validator is not fixed.
+3. [ ] Configuration-to-native-mixed setup: connect user material IDs, geometry/thickness, saved initial data and explicit rank allocation to the native mixed bindings. Existing samples still hard-code material/point layout; existing configuration/identity helpers are not a complete native factory.
+4. [ ] Mixed-session checkpoint/restart: capture field, local LD, SBE, native TDDFT and coupling history/clocks/IDs consistently. Individual snapshots/managed point replay do not complete this.
+5. [ ] Native failure contract: recoverable errors and collective failure atomicity. Current native samples abort the MPI job on error.
+6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
+7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
+8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
+9. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
+
+Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
+
 ## Completed within documented scopes
 
 - [x] Independent native HSE resources and TDDFT interleaving regression.
@@ -243,4 +269,10 @@ HSE nelec/temperature/nstate now resolve from each system's occupation snapshot.
 
 ## Mixed-material priority (2026-11-16)
 
-The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-mixed-multiscale.md. LD+SBE endpoint 1D MPI/serial parity is the first acceptance step; actual three-way TDDFT and field-local LD/native E/H topology remain open. Preserve the molecular pause and don't equate full reentrancy with mixed-backend integration.
+The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-mixed-multiscale.md. LD+SBE endpoint parity, managed three-way TDDFT, native field-local LD and distributed-field mixed fixtures are now verified within the scopes below. Preserve the molecular pause and don't equate full reentrancy with mixed-backend integration.
+
+- [x] Mixed managed-worker LD/SBE/TDDFT: real Si starter GS,4 ranks,100 steps, nonzero current at all three points and exact serial/MPI A/j parity. Evidence: docs/mixed-three-material-validation-2026-11-16.md. Native internally parallel TDDFT and field-local LD were subsequently verified below.
+
+- [x] Native mixed fixture: field-local two-material LD + SBE + TDDFT internal orbital MPI (1/2 ranks), original serial replay, LD-only batch parity and LD vacuum contrast. Installed wheel runs4 ranks. Scope/evidence: docs/native-mixed-material-validation-2026-11-16.md. Multiple field ranks were subsequently verified below; scaling and mixed-session restart remain open.
+
+- [x] Mixed FDTD field decomposition: x/y/z2-way field MPI with SBE1/TDDFT1,128 steps, exact A/E/j parity to field1. Sample exposes --field-grid and --compare. Simultaneous2field+2TDDFT ranks,scaling and full-session restart remain unverified. Evidence: docs/distributed-field-mixed-validation-2026-11-16.md.

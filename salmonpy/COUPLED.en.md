@@ -215,6 +215,30 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.example
 ```
 One field rank and two material ranks check nonzero responses and exact agreement with an independent serial schedule. Output includes point IDs10/20, material keys, A/c, charge current j and communication timing. Endpoint LD derives E from the A difference; it is not the native E/H semi-implicit LD scheme.
 
-With four ranks, `--runtime RUNTIME --bundle GS_BUNDLE --input rt.inp` prepares a third managed serial TDDFT worker point. **Three-way execution has not yet been validated.** Supply a compatible real GS/runtime explicitly. This is separate from internally MPI-parallel native TDDFT.
+With four ranks, `--runtime RUNTIME --bundle GS_BUNDLE --input rt.inp` prepares a third managed serial TDDFT worker point. Four-rank,100-step three-way execution using the Si starter GS (PZ,16³ grid,2×2×2 k mesh) matches an independent serial calculation exactly. Supply a compatible GS/runtime explicitly. This validates the managed serial worker, not internally MPI-parallel TDDFT or converged optical properties. Evidence: `docs/mixed-three-material-validation-2026-11-16.md`.
 
 The final topology keeps many LD states local to FDTD ranks while electronic groups own SBE/TDDFT states. Do not copy the demonstration's one-LD-cell-per-rank layout into large production jobs. This is not real-material convergence or validated 3D mixed coupling.
+
+## Field-local native LD with SBE and internally parallel TDDFT
+
+`mpi_mixed_native` uses one field rank holding two LD regions, one SBE rank and two ranks for one TDDFT point. Four outer ranks exercise orbital decomposition inside the TDDFT group.
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native BUILD_JSON SERIAL_RUNTIME GS_BUNDLE NEW_OUTPUT
+```
+Use three outer ranks with `--tddft-ranks 1`. `--without-ld` replaces LD regions with vacuum. BUILD_JSON is an explicit `tools/build_embedded_tddft.py` build for the host MPI; SERIAL_RUNTIME provides an independent response replay. Nothing builds or downloads implicitly.
+
+LD retains native E/H coefficients, auxiliary variables and update order. Electronic points retain A/c drive and charge current j. Point10 is SBE,20 TDDFT; constitutive IDs1/2 belong to the field material grid. Electronic neighborhoods do not overlap LD. Field half-step clocks are distinct from electronic local time.
+
+This tiny40³/2-electronic-point 3D fixture is a connection regression; keep recommending 1D propagation for practical TDDFT. It does not establish large-scale LD performance, multiple distributed field ranks, whole-session restart or physical convergence. Native failures are not recoverable; the sample aborts its MPI job.
+
+Validated:128 steps,1/2 internal TDDFT rank field/current comparison, serial response replay, vacuum-LD contrast, original LD-only parity and installed-wheel execution. Scope/errors: `docs/native-mixed-material-validation-2026-11-16.md`.
+
+### Parallelize the field group too
+
+Two field ranks along y, one SBE rank and one TDDFT rank:
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native BUILD_JSON SERIAL_RUNTIME GS_BUNDLE NEW_OUTPUT --field-grid 1 2 1 --tddft-ranks 1 --compare REFERENCE_OUTPUT
+```
+REFERENCE_OUTPUT is the same sample with one field and one TDDFT rank (three outer ranks). Omit `--compare` to run independently. Comparison requires matching steps,dt,material configuration and point order, then checks A/c,E,j histories. Required outer ranks: `product(field-grid)+1+tddft-ranks`.
+
+Two-way x/y/z field decompositions each matched the one-field-rank result exactly over128 steps. The y/z layouts split both LD materials across both field blocks. Simultaneous two-field/two-TDDFT-group ranks require five ranks and were not tested within this four-core campaign. This is not a large-scale performance or memory-cap guarantee. Evidence: `docs/distributed-field-mixed-validation-2026-11-16.md`.

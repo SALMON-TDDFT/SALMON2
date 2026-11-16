@@ -1,0 +1,135 @@
+"""Native E/H with field-local LD, SBE and internally parallel TDDFT.
+
+mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native BUILD RUNTIME GS_BUNDLE NEW_OUTPUT
+Use --tddft-ranks 1 with 3 ranks for a decomposition comparison.
+Use --field-grid 1 2 1 --tddft-ranks 1 with 4 ranks for distributed fields.
+Tiny 3D connection fixture, not recommended production TDDFT geometry.
+"""
+import argparse
+import json
+from pathlib import Path
+import numpy as np
+from salmonpy.coupled import NativeEHField, CoupledStepper
+from salmonpy.distributed import ParallelPlan, ParallelContext, SolverGroup
+from salmonpy.embedded_tddft import NativeTDDFTMaterialProvider, NativeTDDFTBackend
+from salmonpy.material_response import MaterialBinding, ResponseSession
+from salmonpy.materials import bind_material
+from salmonpy.examples.mpi_mixed_multiscale import models
+from salmonpy.fdtd import FDTD, PlaneWave
+from salmonpy.geometry import Grid, Geometry, Shape
+from salmonpy.ld import LorentzDrude
+from salmonpy.fields import AcosPulse
+from salmonpy.runtime import load_runtime
+from salmonpy.tddft import TDDFTInitialState
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
+    parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
+    parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
+    parser.add_argument('--steps', type=int, default=128)
+    parser.add_argument('--without-ld', action='store_true', help='vacuum control for local LD regions')
+    args = parser.parse_args()
+    if args.steps < 1: parser.error('positive steps required')
+    if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
+    field_ranks = int(np.prod(args.field_grid))
+    from mpi4py import MPI
+    world = MPI.COMM_WORLD
+    try:
+        if world.size != field_ranks + 1 + args.tddft_ranks:
+            raise ValueError('launch product(field-grid) + 1 + tddft-ranks MPI ranks')
+        output = args.output.resolve()
+        if world.rank == 0: output.mkdir(parents=True, exist_ok=False)
+        world.Barrier()
+        dt = .003
+        grid = Grid((40, 40, 40), (2., 2., 2.))
+        points = {10: (19, 20, 20), 20: (20, 20, 20)}
+        shapes = (Shape('box', (2., 4., 4.), (7., 1., 1.), material=1),
+                  Shape('box', (2., 4., 4.), (9., 1., 1.), material=2))
+        materials = (LorentzDrude(plasma_frequency=20., strength=[1.], resonance=[0.], damping=[2.]),
+                     LorentzDrude(plasma_frequency=15., strength=[.7, .3], resonance=[25., 35.], damping=[2., 3.]))
+        geometry = Geometry(grid, () if args.without_ld else shapes)
+        observations = tuple(tuple(grid.coordinates[d][p[d]] for d in range(3)) for p in points.values())
+        calculation = FDTD(geometry, () if args.without_ld else materials, dt, args.steps,
+                           source=PlaneWave(AcosPulse(.001, 20., .15), 0, -16.), observations=observations)
+        _, sbe = models()
+        bindings = {10: bind_material(sbe, key='sbe-point', identity='synthetic-two-band-v1'),
+                    20: MaterialBinding('si-tddft', NativeTDDFTMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
+                        NativeTDDFTBackend(args.build, output, decomposition=(1, args.tddft_ranks, 1, 1, 1)))}
+        plan = ParallelPlan((SolverGroup('field', tuple(range(field_ranks)), role='field'),
+                             SolverGroup('sbe', (field_ranks,), point_ids=(10,)),
+                             SolverGroup('tddft', tuple(range(field_ranks+1, world.size)), point_ids=(20,))))
+        history = []
+        context = ParallelContext.create(world, plan)
+        field = None
+        if context.group.role == 'field':
+            field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
+        session = ResponseSession(context, bindings, dt=dt)
+        coupled = CoupledStepper(session, field)
+        for _ in range(args.steps):
+            frame = coupled.step()
+            if frame is not None: history.append(frame)
+        communication = session.communication_report()
+        session.close()
+        if field is not None: field.close()
+        context.close()
+        # Native lifetimes are finished; replay material drives in independent serial states.
+        if world.rank == 0:
+            A = np.asarray([h['A_over_c'] for h in history])
+            j = np.asarray([h['J_charge'] for h in history])
+            E = np.asarray([h['E_at_points'] for h in history])
+            peaks = np.max(abs(j), axis=(0, 2))
+            if not np.all(peaks > 0): raise AssertionError('nonzero response required for both electronic materials')
+            replay = np.empty_like(j)
+            state = sbe.new_state(dt=dt)
+            try:
+                for n in range(args.steps): replay[n, 0] = state.step(A[n, 0])
+            finally: state.close()
+            with TDDFTInitialState.from_salmon(args.bundle, 'rt.inp', executable=load_runtime(args.runtime),
+                                              max_steps=args.steps, threads=1) as initial:
+                with initial.new_state(dt=dt) as state:
+                    for n in range(args.steps): replay[n, 1] = state.step(A[n, 1])
+            np.testing.assert_array_equal(j[:, 0], replay[:, 0])
+            np.testing.assert_allclose(j[:, 1], replay[:, 1], rtol=2e-10, atol=2e-12)
+            previous = np.zeros((2, 3)); old_A = np.zeros((2, 3))
+            for n, frame in enumerate(history, 1):
+                np.testing.assert_array_equal(frame['J_previous'], previous)
+                np.testing.assert_allclose(frame['A_over_c'], old_A-dt*frame['E_at_points'], rtol=0, atol=1e-18)
+                if frame['electronic_field_clock'] != (n+.5)*dt: raise AssertionError('electronic clock shifted')
+                previous = frame['J_charge']; old_A = frame['A_over_c']
+            np.savez(output/'response.npz', point_ids=list(points), A_over_c=A, E=E, j=j, serial_replay=replay)
+            ids, counts = np.unique(geometry.material_ids(), return_counts=True)
+            report = {'status': 'passed', 'steps': args.steps, 'dt': dt, 'tddft_ranks': args.tddft_ranks, 'field_grid': list(args.field_grid),
+                      'point_materials': {'10': 'sbe-point', '20': 'si-tddft'},
+                      'constitutive_cell_counts': dict(zip(map(str, ids.tolist()), counts.tolist())),
+                      'ld_materials': {} if args.without_ld else {'1': 'drude', '2': 'two-lorentz-poles'},
+                      'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),
+                      'timing': coupled.timing, 'communication': communication,
+                      'scope': 'tiny native E/H coupling fixture; no physical convergence or whole-session restart claim'}
+            if args.compare is not None:
+                expected = json.loads((args.compare/'result.json').read_text())
+                if expected.get('status') != 'passed': raise ValueError('successful comparison run required')
+                for key in ('steps', 'dt', 'point_materials', 'constitutive_cell_counts', 'ld_materials'):
+                    if expected.get(key) != report[key]: raise ValueError('comparison configuration differs: '+key)
+                differences = {}
+                with np.load(args.compare/'response.npz', allow_pickle=False) as reference:
+                    np.testing.assert_array_equal(reference['point_ids'], list(points))
+                    for key, actual in (('A_over_c', A), ('E', E), ('j', j)):
+                        if actual.shape != reference[key].shape or not np.isfinite(reference[key]).all():
+                            raise ValueError('invalid comparison history: '+key)
+                        np.testing.assert_allclose(actual, reference[key], rtol=2e-10, atol=2e-12)
+                        differences[key] = float(np.max(abs(actual-reference[key])))
+                report['decomposition_comparison'] = {'maximum_absolute_difference': differences,
+                                                       'rtol': 2e-10, 'atol': 2e-12}
+            (output/'result.json').write_text(json.dumps(report, indent=2)+'\n')
+            print(output)
+    except BaseException:
+        # Native errors are not recoverable: avoid stranding peers in cleanup collectives.
+        import traceback
+        traceback.print_exc()
+        world.Abort(1)
+
+
+if __name__ == '__main__': main()
