@@ -74,3 +74,19 @@ class LayerAssemblyTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.assemble(d)
         with self.assertRaises(ValueError):self.assemble(ranks_per_point={'sbe':2,'td':1},rank_budget=5)
         with self.assertRaises(ValueError):self.assemble(ranks_per_point={'sbe':1,'td':1,'drude':1})
+
+    def test_declared_collective_group_sizes_are_checked_before_execution(self):
+        from unittest.mock import patch
+        materials=self.materials()
+        backend=SimpleNamespace(identity='custom-k-only', execution='collective', reduction='leader',
+                                supported_group_sizes=(1,2))
+        materials['td']=MaterialBinding('td',materials['td'].provider,backend)
+        with patch.object(self,'materials',return_value=materials):
+            with self.assertRaisesRegex(ValueError,'td.*supported_group_sizes'):
+                self.assemble(ranks_per_point={'sbe':1,'td':3},rank_budget=6)
+            valid=self.assemble(ranks_per_point={'sbe':1,'td':2},rank_budget=5)
+            self.assertEqual(valid.record()['required_ranks'],5)
+            for invalid in ((),(True,),(0,),(1,1),'1,2'):
+                backend.supported_group_sizes=invalid
+                with self.assertRaisesRegex(ValueError,'supported_group_sizes'):
+                    self.assemble()

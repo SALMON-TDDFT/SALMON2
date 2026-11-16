@@ -620,3 +620,7 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 高速PR版HSEの外側MPI／FDTD接続は `fast_hse.FastHSEMaterialProvider` と `FastHSEResponseBackend` を使う。専用serialワーカーを明示ビルドし、各HSE点は1ランク群にする。HSE内部MPIではない。場1／2ランク＋SBE1＋HSE1と場内LDを結合し、共有保存先へ直接保存／復元する。`mpi_mixed_native --fast-hse-build ... --layers mixed_hse_layers.json` の手順はCOUPLED日英ガイド。初期電流は実測値を返し、差し引かない。ゼロ場サンプルでは1e-12 au以下を要求。入力の高速伝播器と学習条件を守り、通常HSE・Gammaの未対応学習モードへフォールバックしない。全ランクの保存検査後にHSE LOADを行い、counter/current/Aを照合する。
 
 内部k点MPIの高速PR版HSEは `fast_hse_mpi.NativeFastHSEBackend` を明示ビルドしたホストMPIライブラリへ接続する。物質群1／2ランク、軌道／実空間分割なし、1群1点、メインスレッド・1プロセス1寿命。場1＋SBE1＋HSE2と場内LDの4ランク例は `--fast-hse-mpi-build ... --hse-ranks 2`。同じ分割・バイナリ・共有保存先でランク別直接保存／復元し、過去ステップの再計算をしない。静的初期化と独立serial参照比較は別途行う。全shardの検査後に反映するが、後段I/O失敗や群間での原子的巻戻しは保証しない。失敗後はジョブを中止する。入力、制約、計測範囲はCOUPLED日英ガイドに従う。
+
+層構成では任意の `backend.supported_group_sizes` を検査する。高速HSEは(1,2)。対応ランク数の宣言は空でない正の整数の重複なしtuple。未宣言の自作バックエンドへ未確認の能力を推定しない。数値・再開の能力検査は別途必要。
+
+対応ランク数の任意宣言はResponseSessionの直接接続でも物質準備前に集合検査する。宣言を全群で照合し、tupleの順序差は同一視する。Aパケットラッパーも宣言を保持する。

@@ -52,6 +52,7 @@ class NativeFastHSEBackend:
     each group has one shared work copy and one point. Errors can invalidate the
     whole MPI job; native process-terminating failures are not recoverable.
     """
+    supported_group_sizes = (1,2)
     execution = 'collective'
     reduction = 'leader'
 

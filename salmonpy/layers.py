@@ -16,7 +16,7 @@ from .errors import InputError, InputTypeError
 from .geometry import Grid, Geometry, Shape
 from .fdtd import FDTD, FDTDMPI, PlaneWave
 from .ld import LorentzDrude
-from .material_response import MaterialBinding
+from .material_response import MaterialBinding, _supported_group_sizes
 from .distributed import ParallelPlan, SolverGroup
 
 __all__ = ['NativeLayerAssembly', 'assemble_native_layers']
@@ -113,6 +113,7 @@ def assemble_native_layers(layout, materials, *, grid, dt, steps, source,
                 if mode not in ('leader_only','collective'): raise InputError('backend execution declaration required')
                 if mode=='leader_only' and rank_count!=1:
                     raise InputError('leader-only layer backend requires one rank per point')
+                _supported_group_sizes(model.backend,rank_count,mid)
                 from .embedded_tddft import NativeTDDFTBackend
                 if isinstance(model.backend,NativeTDDFTBackend) and math.prod(model.backend.decomposition)!=rank_count:
                     raise InputError('TDDFT inner decomposition differs from ranks_per_point')

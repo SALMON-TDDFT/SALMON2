@@ -144,3 +144,5 @@ For one serial model contract, the explicit conformance checker and the point-MP
 
 For explicit identity propagation/output in MPI response sessions see
 [MPI_IDENTITY.en.md](MPI_IDENTITY.en.md). PointRun itself remains serial; restart is not provided.
+
+Before provider preparation, ResponseSession validates optional backend.supported_group_sizes: a nonempty tuple of unique positive integers. Declarations must agree across all groups; tuple order is irrelevant. Undeclared backends retain existing execution/reduction checks, without capability certification. The A-packet wrapper forwards the original declaration.

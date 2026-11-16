@@ -2,7 +2,7 @@
 
 Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. The current user-approved priority includes direct mixed-session persistence and non-PZ inner-MPI validation; wider isolation continues as a separate objective.
 
-## Current audit — 2026-11-16 (takes precedence over historical status notes)
+## Current audit — 2026-11-17 (takes precedence over historical status notes)
 
 The dated sections below retain the scope at their completion time. Older statements such as "occupation remains shared" or "multiple field ranks remain open" are superseded by the later evidence, not separate unfinished tasks.
 
@@ -342,3 +342,16 @@ Only fast-PR HSE is an eligible execution engine. Do not add conventional HSE or
 - [x] Source and installed459 tests (one skipped each), sdist-to-wheel, public API and English/Japanese/AI instructions synchronized.
 - Remaining: HSE inner MPI/native-host integration, other topologies/resources, generic public checkpoint archives, recoverable native errors, memory caps and production/physical convergence. Outer-MPI/FDTD HSE connection is now complete within the serial-worker profile; older HSE-coupling-open notes are historical. Molecular work stays paused.
 - Evidence: docs/fast-hse-mpi-coupled-checkpoint-validation-2026-11-16.md.
+
+### Backlog check — 2026-11-17
+
+- [x] Fast-PR HSE host-MPI/k-only direct continuation delivered in ace8a557. Historical HSE-inner-MPI-open notes above are superseded within this scope, not separate unfinished tasks.
+- [x] Native layer planning admission: optional backend `supported_group_sizes` positive unique integer tuple, fast-HSE `(1,2)`. Reject unsupported/malformed declarations before MPI or material preparation. Undeclared custom backends retain existing execution/decomposition checks. This is not certification of their numerical or restart capabilities.
+- [x] Direct ResponseSession admission and cross-group declaration agreement, shared with layer planning; A-packet wrapper forwards declarations.
+- [ ] Next: checkpoint/decomposition capability compatibility; retain custom backend freedom without assuming undeclared capabilities.
+- [ ] Remaining primary work: native recoverable-error/handle contracts, remaining GS/TDDFT global ownership, generic checkpoint archives and changed topology, resource estimates/caps and scaling, platform/runtime distribution evidence. See current audit items5–10.
+- [ ] Orbital/rgrid HSE is distinct from completed k-only HSE; no claim of support. Molecular work remains paused.
+
+Validation for parallel admission: failing regression reproduced acceptance of an unsupported3-rank collective group before the fix; valid2-rank planning and malformed declarations now pass their checks without invoking provider.prepare. Source and installed-wheel suites each pass471 tests (one skip); sdist→wheel succeeds. Persistent artifacts: `/Users/otobetoshihito/.codex/outputs/salmonpy-parallel-admission-20261117`. No native kernel, update order or numerical formula changed; no new remote Actions run.
+
+Direct-session admission validation: nine real three-rank collective rejections before callbacks, canonical tuple-order agreement and legacy undeclared trajectories verified in source/installed environments. Installed native FDTD+LD+SBE+HSE-k2 256-step outputs remain byte-identical. Source/wheel473 tests pass (one skip each). Evidence: `../response-admission-validation-2026-11-17.md`. This closes rank-admission agreement only; restart capability compatibility and broader native failure/ownership work remain open.

@@ -35,6 +35,20 @@ class MaterialBinding:
             object.__setattr__(self, 'material_record', _freeze(_identity(dict(self.material_record))))
 
 
+def _supported_group_sizes(backend, count, key):
+    """Optional rank admission, shared by layout planning and direct sessions."""
+    sizes=getattr(backend,'supported_group_sizes',None)
+    if sizes is None:
+        return None
+    if (not isinstance(sizes,tuple) or not sizes
+            or any(type(n) is not int or n<1 for n in sizes)
+            or len(set(sizes))!=len(sizes)):
+        raise InputError(key+': supported_group_sizes must be a nonempty tuple of unique positive integers')
+    if count not in sizes:
+        raise InputError(key+': ranks_per_point not in supported_group_sizes '+str(sizes))
+    return tuple(sorted(sizes))
+
+
 def _point_metadata(plan, record, mapping):
     if record is None and mapping is None:
         return None
@@ -161,7 +175,8 @@ class ResponseSession:
                 if mode not in ('collective','leader_only') or reduction not in ('sum','leader'): raise InputError('unsupported execution/reduction')
                 owner=next(g for g in context.plan.groups if p in g.point_ids)
                 if mode=='leader_only' and len(owner.ranks)!=1: raise InputError('leader-only backends require one rank per group')
-                descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt)))
+                sizes=_supported_group_sizes(b.backend,len(owner.ranks),b.key)
+                descriptors.append((p,b.key,b.provider.identity,b.backend.identity,mode,reduction,float(dt),sizes))
         except Exception as exc: error=f'{type(exc).__name__}: {exc}'
         self._agree(error)
         # Metadata agreement catches mismatched backend selection before callbacks.
@@ -702,6 +717,10 @@ class _APacketBackend:
         self.identity = backend.identity+'/packet-A/'+phase+'/1'
         self.execution = backend.execution
         self.reduction = backend.reduction
+
+    @property
+    def supported_group_sizes(self):
+        return getattr(self._backend,'supported_group_sizes',None)
 
     def create_state(self, initial, point_id, dt, context):
         raw = self._backend.create_state(initial, point_id, dt, context)
