@@ -513,3 +513,9 @@ HSE交換の電子数・温度・状態数（nelec/temperature/nstate）は、�
 
 外側のTDDFT設定一致ガードは維持します。HSE以外の共有入力が残るため、電子数や温度が異なる任意のTDDFT状態を同時に作れる新APIとは案内しません。生存中の占有数設定は変更しません。
 検査は`tools/test_hse_explicit_state.py BUILD_RECORD NEW_OUTPUT --native-resources`（必要なら`--threads 2`）。検証記録は`docs/hse-occupation-inputs-validation-2026-11-16.md`です。
+
+### TDDFTの電子数診断
+
+`subdip`の電子数チェックも、状態の`occupation_input.nelec/nelec_spin`を使います。2スピンで正のスピン電子数合計があればそれを優先し、その他はnelecを使う従来規則を維持します。上下限の厳密な不等号、出力、停止処理は変更しません。未初期化状態は従来入力を参照します。
+これは広い範囲の異常検知（指定電子数の0.1倍から10倍の間）であり、精密な電子数保存や物理的収束を保証する検査ではありません。共有I/O・イオン情報や外側TDDFTガードは残ります。
+検査: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT --dip`。検証範囲は`docs/dip-occupation-inputs-validation-2026-11-16.md`を参照してください。

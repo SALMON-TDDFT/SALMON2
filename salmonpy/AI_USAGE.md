@@ -560,3 +560,21 @@ HSE交換の電子数・温度・状態数（nelec/temperature/nstate）は、�
 
 外側のTDDFT設定一致ガードは維持します。HSE以外の共有入力が残るため、電子数や温度が異なる任意のTDDFT状態を同時に作れる新APIとは案内しません。生存中の占有数設定は変更しません。
 検査は`tools/test_hse_explicit_state.py BUILD_RECORD NEW_OUTPUT --native-resources`（必要なら`--threads 2`）。検証記録は`docs/hse-occupation-inputs-validation-2026-11-16.md`です。
+
+### TDDFTの電子数診断
+
+`subdip`の電子数チェックも、状態の`occupation_input.nelec/nelec_spin`を使います。2スピンで正のスピン電子数合計があればそれを優先し、その他はnelecを使う従来規則を維持します。上下限の厳密な不等号、出力、停止処理は変更しません。未初期化状態は従来入力を参照します。
+これは広い範囲の異常検知（指定電子数の0.1倍から10倍の間）であり、精密な電子数保存や物理的収束を保証する検査ではありません。共有I/O・イオン情報や外側TDDFTガードは残ります。
+検査: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT --dip`。検証範囲は`docs/dip-occupation-inputs-validation-2026-11-16.md`を参照してください。
+
+## LD・SBE・TDDFTの混在に向けた入口
+
+`mpi_mixed_multiscale`は、同じ1次元場にLDと合成SBEを配置する接続サンプルです。
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.examples.mpi_mixed_multiscale NEW_OUTPUT
+```
+場1ランク、物質点2ランクで動かし、非ゼロの応答と独立した直列更新との一致を検査します。点ID10/20と物質キー、A/c・電荷電流j、通信時間を保存します。LDは端点A差分からEを得ます。native E/Hの半陰的LD更新と同じ方式ではありません。
+
+4ランクにして`--runtime RUNTIME --bundle GS_BUNDLE --input rt.inp`を指定すると、管理済み直列TDDFTワーカーを第三点に接続する入口を使えます。**この三種類混在実行はまだ検証していません。** 実GSと対応ランタイムを明示的に用意してください。内部MPIのTDDFT接続とは別の経路です。
+
+最終構成は、FDTDランク内の多数のLD状態と、別MPI群のSBE/TDDFT状態の混在です。この小規模サンプルの「LD一セルに一ランク」を本番の配置方針にしないでください。実材料の収束や三次元混在対応を保証するサンプルではありません。

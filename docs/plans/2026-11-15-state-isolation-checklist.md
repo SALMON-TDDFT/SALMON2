@@ -233,3 +233,14 @@ Occupation snapshot and tests reconstructed after temporary checkout loss; fresh
 ### HSE occupation routing (2026-11-16)
 
 HSE nelec/temperature/nstate now resolve from each system's occupation snapshot. Native scalar full-support two-owner checks poison global values and compare actions/energies. Other shared controls and the outer TDDFT configuration guard remain. See docs/hse-occupation-inputs-validation-2026-11-16.md for measured scope; thermal/Wannier simultaneous owners are not established.
+
+### TDDFT electron-count diagnostic ownership (2026-11-16)
+
+- [x] subdip electron counts use system occupation input, retaining spin precedence, strict bounds and legacy fallback.
+- [x] Four original-output comparisons, eight bounds, full TDDFT eight-case regression and packaged native probe pass.
+- [x] Japanese/English/AI guides synchronized.
+- Shared ionic/I/O/parallel controls and native STOP remain; outer TDDFT guards are not removed. Evidence: docs/dip-occupation-inputs-validation-2026-11-16.md.
+
+## Mixed-material priority (2026-11-16)
+
+The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-mixed-multiscale.md. LD+SBE endpoint 1D MPI/serial parity is the first acceptance step; actual three-way TDDFT and field-local LD/native E/H topology remain open. Preserve the molecular pause and don't equate full reentrancy with mixed-backend integration.

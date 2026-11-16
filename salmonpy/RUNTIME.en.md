@@ -562,3 +562,9 @@ Independence coverage is serial CPU, periodic scalar unpolarized, integer occupa
 
 The outer TDDFT configuration guard remains: other consumers still use shared inputs. This is not a new API permitting arbitrary simultaneous TDDFT electron counts or temperatures. Never mutate a live occupation record.
 Run `tools/test_hse_explicit_state.py BUILD_RECORD NEW_OUTPUT --native-resources` (optionally `--threads 2`). Evidence: `docs/hse-occupation-inputs-validation-2026-11-16.md`.
+
+### TDDFT electron-count diagnostics
+
+The `subdip` electron-count check uses the state's `occupation_input.nelec/nelec_spin`. The existing precedence is preserved: for two spin channels, use the positive sum of spin counts; otherwise use nelec. Strict inequalities, output and termination behavior are unchanged. Uninitialized systems retain legacy-input fallback.
+This is a coarse anomaly check (strictly between 0.1 and 10 times the specified count), not a precision conservation or physical-convergence guarantee. Shared I/O, ionic inputs and outer TDDFT guards remain.
+Test: `tools/test_occupation_inputs.py BUILD_RECORD NEW_OUTPUT --dip`. Scope: `docs/dip-occupation-inputs-validation-2026-11-16.md`.

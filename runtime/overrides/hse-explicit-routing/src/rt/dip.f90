@@ -21,11 +21,12 @@ contains
 
 !===================================================================================================================================
 subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
-  use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info
+  use structures, only: s_rt,s_rgrid,s_scalar,s_poisson,s_dft_system,s_pp_info,s_occupation_config
   use parallelization, only: nproc_id_global
   use communication, only: comm_is_root, comm_summation
   use inputoutput, only: au_length_aa, au_energy_ev, natom, au_time_fs
-  use salmon_global
+  use salmon_global, only: yn_jm,kion,iperiodic,quiet,out_rt_energy_step
+  use occupation, only: get_occupation_input
   use inputoutput, only: yn_md
   use nvtx_wrapper
   implicit none
@@ -40,10 +41,14 @@ subroutine subdip(comm,itt,rt,lg,mg,system,rho_s,rNe,poisson,Etot,pp)
   real(8),intent(out)        :: rNe
   type(s_poisson),intent(in) :: poisson
   type(s_pp_info),intent(in) :: pp
-  integer :: ia
+  integer :: ia,nelec,nelec_spin(2)
+  type(s_occupation_config) :: occupation_input
   real(8) :: rbox_array2(4)
   real(8) :: rbox1
   real(8) :: time, Hvol,Hgs(3)
+  call get_occupation_input(system,occupation_input)
+  nelec=occupation_input%nelec
+  nelec_spin=occupation_input%nelec_spin
   call nvtxStartRange('subdip', __LINE__)
   
   rbox1 = 0d0 !what's it? (no value causes crush)
