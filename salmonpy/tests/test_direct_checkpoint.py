@@ -152,7 +152,8 @@ class DirectCheckpointTests(unittest.TestCase):
 
     def compat_world(self):
         def gather(value):
-            return [value,(None,value[1],{'rank':1,'group':'field','states':{},'field':{'format':'field/1'}})]
+            return [value,(None,value[1],{'rank':1,'group':'field','states':{},
+                'field':{'format':'field/1','modes':['restore','save'],'decomposition':[1]}},value[3],value[4])]
         return SimpleNamespace(rank=0,size=2,allgather=gather)
 
     def test_multiple_native_files_cannot_collide(self):
@@ -163,3 +164,18 @@ class DirectCheckpointTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'one native electronic checkpoint'):
                 checkpoint(self.world(),coupled,target,{})
             self.assertFalse(target.exists())
+
+    def test_public_capability_object_on_custom_backend(self):
+        from salmonpy.checkpointing import CheckpointCapability
+        from salmonpy.distributed import ParallelPlan,SolverGroup
+        from salmonpy.examples._direct_checkpoint import _compatibility
+        from unittest.mock import Mock
+        group=SolverGroup('electronic',(0,),point_ids=(1,))
+        state=SimpleNamespace(checkpoint_protocol='salmonpy.direct-state/1',
+            checkpoint_capability=CheckpointCapability('custom/1',('save','restore'),(1,),identity='model-v1'),
+            checkpoint=Mock())
+        coupled=SimpleNamespace(field=None,response=SimpleNamespace(states={1:state},
+            context=SimpleNamespace(group=group,plan=ParallelPlan((group,SolverGroup('field',(1,),role='field'))))))
+        record=_compatibility(self.compat_world(),coupled,restore=False)
+        self.assertEqual(record['participants'][0]['states']['1']['identity'],'model-v1')
+        state.checkpoint.assert_not_called()

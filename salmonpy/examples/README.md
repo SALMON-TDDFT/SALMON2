@@ -16,6 +16,7 @@ LDと内蔵SBEはwheel同梱のネイティブライブラリを使います。�
 
 | 目的 | サンプル | 追加で必要なもの |
 |---|---|---|
+| 自作バックエンドの保存対応・互換性検査と独立再開 | [custom_checkpoint.py](custom_checkpoint.py) | 新規出力先。外部ソルバー不要 |
 | LDの時間応答・誘電率 | [ld_response.py](ld_response.py) | wheel内のLDライブラリ |
 | パルス作成・スペクトル | [pulse_spectrum.py](pulse_spectrum.py) | なし |
 | 形状・材料ID・PMLとの接触確認 | [geometry_preview.py](geometry_preview.py) | 新規.npz保存先 |

@@ -31,7 +31,7 @@ The dated sections below retain the scope at their completion time. Older statem
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
 8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC, HSE orbital/rgrid decomposition and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+9. [ ] Generic coupled-session archive: custom-backend archive I/O/migration/execution contract, changed-topology restore, other XC, HSE orbital/rgrid decomposition and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
@@ -349,7 +349,7 @@ Only fast-PR HSE is an eligible execution engine. Do not add conventional HSE or
 - [x] Native layer planning admission: optional backend `supported_group_sizes` positive unique integer tuple, fast-HSE `(1,2)`. Reject unsupported/malformed declarations before MPI or material preparation. Undeclared custom backends retain existing execution/decomposition checks. This is not certification of their numerical or restart capabilities.
 - [x] Direct ResponseSession admission and cross-group declaration agreement, shared with layer planning; A-packet wrapper forwards declarations.
 - [x] Supplied mixed direct checkpoint: collectively compare persistence routes/modes, exact MPI ownership and field/electronic decomposition before LOAD; same-size different layouts rejected. Legacy manifest/1 requires original reader; arbitrary snapshot-only/replay backends are not admitted.
-- [ ] Next: broader public checkpoint capability contracts and generic archive portability; retain custom backend freedom without assuming undeclared capabilities.
+- [ ] Next: generic archive I/O/capability migrations and archive portability; retain custom backend freedom without assuming undeclared capabilities.
 - [ ] Remaining primary work: native recoverable-error/handle contracts, remaining GS/TDDFT global ownership, generic checkpoint archives and changed topology, resource estimates/caps and scaling, platform/runtime distribution evidence. See current audit items5–10.
 - [ ] Orbital/rgrid HSE is distinct from completed k-only HSE; no claim of support. Molecular work remains paused.
 
@@ -364,3 +364,12 @@ Direct-session admission validation: nine real three-rank collective rejections 
 - [x] Eight three-rank MPI preflight failures have zero LOAD calls. Final installed HSEk2 Taylor/PT-CN,Libxc-PBE orbital2 and field2+serialHSE direct resumes remain byte-identical to continuous with only129/65 new calls.
 - [x] Source/wheel476 tests (one skip each),sdist→wheel and JP/EN/AI synchronization. Evidence: `../restart-preflight-validation-2026-11-17.md`.
 - Remaining: generic public checkpoint contracts and portable/changing MPI layouts; full native error atomicity and state/input ownership; resource/cross-platform work. The sample's preflight does not complete these broader items.
+
+### Common checkpoint admission API — 2026-11-17
+
+- [x] Public immutable CheckpointCapability and serial/host-MPI check_checkpoint_compatibility; ordinary group mappings and explicit custom model identity, no SALMON context requirement.
+- [x] Shared declaration,mode,saved-record,exact partition and optional required-file admission; earlier caller errors can be agreed with local_error. No file I/O, MPI initialization or backend callbacks in the API.
+- [x] Existing native sample bridges lifecycle/ABI checks to the public validator, retaining direct-compatibility/1 record shape and legacy native-direct/2 archives.
+- [x] Packaged user-model JSON persistence/independent continuation example and paired/AI guide entry. Generic archive writers,changed-topology redistribution and native rollback remain separate work.
+
+Common-API evidence: `../common-checkpoint-api-validation-2026-11-17.md`. Source/wheel485 tests (one skip), public MPI3 ten rejection cases, existing coordinator eight rejection cases and a complete user-model17+15 restart pass. Four native continuation routes read unchanged earlier native-direct/2 archives and remain byte-identical to continuous execution, with129/65 new calls only. Public declaration/admission is complete within this scope; generic I/O,redistribution,resource controls and native rollback remain open.

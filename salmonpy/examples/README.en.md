@@ -12,6 +12,7 @@ For SALMON input exported by `FieldSamples.write_salmon`, use `ae_shape1='input'
 
 | Module under `salmonpy.examples` | Purpose / additional input |
 |---|---|
+| `custom_checkpoint` | User-backend capability/identity/compatibility checks and independent continuation; new output directory, no external solver |
 | `ld_response` | LD time response and permittivity; bundled native kernel |
 | `pulse_spectrum` | Pulses and Fourier spectrum; no solver |
 | `geometry_preview` | Material IDs, middle slice, PML contact; new NPZ path |
