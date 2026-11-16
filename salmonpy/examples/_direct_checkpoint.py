@@ -18,11 +18,36 @@ def digest(path):
     return h.hexdigest()
 
 
+def _verify_files(root, files, rank, ranks):
+    """Hash each payload on one rank; caller agrees errors before any load."""
+    if not isinstance(files, dict) or not files:
+        raise ValueError('invalid checkpoint inventory')
+    checked = 0
+    size = 0
+    for index, (name, sha) in enumerate(sorted(files.items())):
+        if not isinstance(name, str) or Path(name).name != name or name in ('.','..','complete.json'):
+            raise ValueError('invalid checkpoint filename')
+        path = root/name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('invalid checkpoint payload')
+        if not isinstance(sha, str) or len(sha) != 64 or any(c not in '0123456789abcdef' for c in sha):
+            raise ValueError('checkpoint checksum mismatch')
+        if index % ranks == rank:
+            if digest(path) != sha:
+                raise ValueError('checkpoint checksum mismatch')
+            checked += 1
+            size += path.stat().st_size
+    if set(files) != {p.name for p in root.iterdir() if p.name != 'complete.json'}:
+        raise ValueError('checkpoint file inventory mismatch')
+    return {'rank': rank, 'files_checked': checked, 'bytes_checked': size}
+
+
 def checkpoint(world, coupled, directory, signature, *, restore=False, frames=None):
     r = coupled.response
     field = coupled.field
     root = Path(directory).resolve()
     error = None
+    manifest_id = None
     try:
         for state in r.states.values():
             if hasattr(state, 'native'):
@@ -32,17 +57,14 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         if field is not None: getattr(field.lib, 'sp_eh_checkpoint')
         if restore:
             manifest = json.loads((root/'complete.json').read_text())
+            manifest_id = hashlib.sha256(json.dumps(manifest,sort_keys=True,allow_nan=False).encode()).hexdigest()
             if manifest['schema'] != 'salmonpy.native-direct/1' or manifest['signature'] != signature or manifest['ranks'] != world.size:
                 raise ValueError('checkpoint input/library/topology mismatch')
-            if not 0 < manifest['step'] < signature['steps']:
+            if type(manifest['step']) is not int or not 0 < manifest['step'] < signature['steps']:
                 raise ValueError('invalid checkpoint step')
             if not ({f'rank-{i}.json' for i in range(world.size)} | {'frames.json'}) <= set(manifest['files']):
                 raise ValueError('missing rank checkpoint')
-            for name, sha in manifest['files'].items():
-                p = root/name
-                if p.parent != root or digest(p) != sha: raise ValueError('checkpoint checksum mismatch')
-            if set(manifest['files']) != {p.name for p in root.iterdir() if p.name != 'complete.json'}:
-                raise ValueError('checkpoint file inventory mismatch')
+            verification = _verify_files(root, manifest['files'], world.rank, world.size)
             data = json.loads((root/f'rank-{world.rank}.json').read_text())
             if data['step'] != manifest['step']:
                 raise ValueError('checkpoint epochs differ')
@@ -61,8 +83,13 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         elif world.rank == 0:
             root.mkdir(parents=True, exist_ok=False)
     except Exception as exc: error = str(exc)
-    errors = world.allgather(error)
+    agreement = world.allgather((error, manifest_id))
+    errors = [item[0] for item in agreement]
     if any(errors): raise ValueError(str(errors))
+    if restore and len({item[1] for item in agreement}) != 1:
+        raise ValueError('checkpoint manifests differ across ranks')
+    if restore:
+        coupled.checkpoint_validation = world.allgather(verification)
     world.Barrier()
     path = root/f'rank-{world.rank}.json'
     data = data if restore else {

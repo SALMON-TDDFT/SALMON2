@@ -36,7 +36,54 @@ class DirectCheckpointTests(unittest.TestCase):
 
     def test_corrupted_rank_file_rejected(self):
         with tempfile.TemporaryDirectory() as d:
-            p=Path(d);data=p/'rank-0.json';data.write_text('{}')
-            m={'schema':'salmonpy.native-direct/1','signature':{'steps':128},'step':64,'ranks':1,'files':{data.name:digest(data), 'frames.json':'bad'}}
+            p=Path(d);data=p/'rank-0.json';data.write_text('{}');(p/'frames.json').write_text('[]')
+            m={'schema':'salmonpy.native-direct/1','signature':{'steps':128},'step':64,'ranks':1,'files':{data.name:digest(data), 'frames.json':digest(p/'frames.json')}}
             (p/'complete.json').write_text(json.dumps(m));data.write_text('changed')
             with self.assertRaisesRegex(ValueError,'checksum'):checkpoint(self.world(),self.coupled(),p,{'steps':128},restore=True)
+
+    def test_files_hashed_once_across_ranks(self):
+        from salmonpy.examples._direct_checkpoint import _verify_files
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            files={}
+            for i in range(9):
+                p=root/f'payload-{i}.bin';p.write_bytes(bytes([i])*(i+1));files[p.name]=digest(p)
+            (root/'complete.json').write_text('{}')
+            seen=[]
+            def counted(path):
+                seen.append(Path(path).name)
+                return digest(path)
+            with patch('salmonpy.examples._direct_checkpoint.digest',side_effect=counted):
+                reports=[_verify_files(root,files,rank,4) for rank in range(4)]
+            self.assertCountEqual(seen,files)
+            self.assertEqual(sum(x['files_checked'] for x in reports),9)
+            self.assertEqual(sum(x['bytes_checked'] for x in reports),45)
+
+    def test_assigned_corruption_detected(self):
+        from salmonpy.examples._direct_checkpoint import _verify_files
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);p=root/'payload';p.write_bytes(b'ok');files={p.name:digest(p)}
+            (root/'complete.json').write_text('{}');p.write_bytes(b'bad')
+            with self.assertRaisesRegex(ValueError,'checksum'):_verify_files(root,files,0,4)
+
+    def test_reject_path_escape_on_nonassigned_rank(self):
+        from salmonpy.examples._direct_checkpoint import _verify_files
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):_verify_files(Path(d),{'../escape':'0'*64},3,4)
+
+
+    def test_manifest_disagreement_rejected_before_mutation(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)
+            data={'step':64,'J':[[0.,0.,0.]],'response_A':[[0.,0.,0.]],'states':{'1':{}}}
+            (p/'rank-0.json').write_text(json.dumps(data));(p/'frames.json').write_text('[]')
+            files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
+            (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
+                'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
+            world=self.world();world.allgather=lambda value:[value,(None,'different-manifest')]
+            coupled=self.coupled();coupled.response.context=SimpleNamespace(plan=SimpleNamespace(point_ids=(1,)))
+            with self.assertRaisesRegex(ValueError,'manifests differ'):
+                checkpoint(world,coupled,p,{'steps':128},restore=True)
+            self.assertFalse(coupled.response.failed)

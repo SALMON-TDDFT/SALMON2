@@ -1,6 +1,6 @@
 # Active state-isolation checklist
 
-Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. New XC coverage is deferred until the existing isolation work is addressed.
+Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. The current user-approved priority includes direct mixed-session persistence and non-PZ inner-MPI validation; wider isolation continues as a separate objective.
 
 ## Current audit — 2026-11-16 (takes precedence over historical status notes)
 
@@ -13,18 +13,20 @@ The dated sections below retain the scope at their completion time. Older statem
 - [x] Native E/H field-local two-material LD + SBE + internally parallel TDDFT (1/2 orbital ranks), serial response replay and pure-LD regression.
 - [x] Two-way x/y/z FDTD decomposition with SBE1/TDDFT1: exact A/E/j parity to a single field rank. Installed-wheel samples and JP/EN/AI instructions updated.
 - [x] Existing configured material adapters, serial/MPI point identity and managed TDDFT point replay are available in the documented M4/M5/M6 subsets. Do not describe them as entirely missing.
+- [x] Same-topology direct field/PML/LD/SBE/TDDFT restart: PZ, TB-mBJ automatic/fixed coefficient and Libxc-PBE include native TDDFT orbital MPI2;63 saved/65 resumed steps match continuous128 bit-for-bit. Libxc-PZ is validated with TDDFT1. Generic archives/HSE remain below.
 
-### Remaining, prioritized for mixed-material usability
+### Delivery status and remaining mixed-material work
 
-1. [ ] Delivery: commit/push the post-a0ab5f4d native/distributed-field sample, evidence and guide changes. Do not run routine Actions.
-2. [ ] Correctness follow-up: reject longitudinal incident components in Multiscale1D prefilled history even when boundary samples are all zero. Found during mixed sample validation; the sample uses correct transverse polarization and checks nonzero response, but the general validator is not fixed.
-3. [ ] Configuration-to-native-mixed setup: connect user material IDs, geometry/thickness, saved initial data and explicit rank allocation to the native mixed bindings. Existing samples still hard-code material/point layout; existing configuration/identity helpers are not a complete native factory.
-4. [ ] Mixed-session checkpoint/restart: capture field, local LD, SBE, native TDDFT and coupling history/clocks/IDs consistently. Individual snapshots/managed point replay do not complete this.
+1. [x] Delivery: native/distributed-field samples and evidence pushed in b5b2053c, layer setup in01d43cc1, direct persistence in1851c533, non-PZ persistence inea22fe15. No routine Actions.
+2. [x] Reject longitudinal incident components in Multiscale1D prefilled histories, including zero boundary-sample cases. Regression and valid transverse preservation verified.
+3. [x] Configuration-to-native-mixed setup: explicit material IDs/models or bindings, ordered geometry/thickness and rank budget via assemble_native_layers. Initial-state preparation remains explicit, not an automatic arbitrary backend factory.
+4. [x] Same-topology supplied mixed fixture direct checkpoint/restart: native field/PML/local LD/SBE/TDDFT numerical state and coupling history/clocks/point IDs captured together; no elapsed propagation replay. PZ and non-PZ measured scopes below. Generic user-backend archives, changed topology and cross-group atomic rollback remain open.
 5. [ ] Native failure contract: recoverable errors and collective failure atomicity. Current native samples abort the MPI job on error.
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
 8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
+9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC/HSE resources and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
 
@@ -296,4 +298,23 @@ The user explicitly targets LD/SBE/TDDFT in one multiscale run. See 2026-11-16-m
 - [x] CheckpointV2 XC identity/derivative flags/input cval validation; restore scalar cval and rebuild Libxc handles from original configuration.
 - [x] TB-mBJ automatic/fixed cval,Libxc-PZ,Libxc-PBE and PZ regression: per-XC converged Si SCF, continuous128 vs direct63+65; A/E/j bit-identical in all five cases. Three ranks(field1/SBE1/TDDFT1), no elapsed-time replay.
 - [x] Source/wheel446 tests (one skipped each), packaging, source manifest update, English/Japanese/AI guides.
-- Remaining: non-PZ internally parallel groups need separate campaign; HSE native direct checkpoint, other XC, changed topology and generic backend persistence remain open. Molecular work stays paused. Evidence: docs/xc-direct-checkpoint-validation-2026-11-16.md.
+- Subsequent campaign below validates TB-mBJ/Libxc-PBE orbital MPI2. Fast-PR HSE native direct checkpoint, other XC, changed topology and generic backend persistence remain open. Molecular work stays paused. Evidence: docs/xc-direct-checkpoint-validation-2026-11-16.md.
+
+### TB-mBJ / Libxc-PBE inner-MPI direct checkpoint (2026-11-16)
+
+- [x] ea22fe15 delivered to independent SALMONpy branch.
+- [x] Four outer ranks(field1/SBE1/TDDFT2), verified actual nproc_ob=2: TB-mBJ automatic/fixed cval and Libxc-PBE continuous128 versus direct save63/new-job restore65, all full A/E/j histories bit-identical.
+- [x] Both electronic rank files, completion inventory and all hashes checked; clocks/lagged current and independent serial response pass.
+- [x] Current audit reconciled: old delivery, incident validation, layer setup and sample direct restart are completed; broad GS ownership/native failure/resources/generic archive/environment work remains open.
+- Evidence: docs/xc-inner-mpi-direct-checkpoint-validation-2026-11-16.md. No extra native implementation was needed. Field2+SBE1+TDDFT2 is still five ranks and outside budget. No unrestricted reentrancy or physical convergence claim.
+
+### HSE engine constraint reaffirmed
+
+Only fast-PR HSE is an eligible execution engine. Do not add conventional HSE or comparison baselines as runtime options. A future direct checkpoint must include the fast engine's ACE/factor-history/native resources and its dedicated propagator; adding hse06 to the semilocal middlepoint whitelist is insufficient.
+
+### Checkpoint verification I/O (2026-11-16)
+
+- [x] Partition payload SHA256 work across ranks, agree canonical manifest and all errors before restoration, retain shared-directory contract and inventory checks.
+- [x] Installed Libxc-PBE innerMPI2 direct63→65 remains bit-identical to continuous128. Checksum-streamed bytes82,191,025 vs328,764,100 at4 ranks; no memory or wall-time guarantee.
+- [x] Source/wheel450 tests (one skip), package and guide synchronization pass. Evidence: docs/checkpoint-verification-io-validation-2026-11-16.md.
+- Fast-PR HSE direct persistence remains open; no conventional HSE engine is introduced.

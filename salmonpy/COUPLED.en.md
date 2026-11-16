@@ -305,3 +305,11 @@ Saved state includes native E/H/PML, LD P/J/Q and old fields, electronic orbital
 Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible native library. Generic custom-backend persistence, changed MPI partitions, HSE and other XC profiles require further implementation/validation. Abort the job on native restore failure; this is not atomic rollback of an existing live session. Allow storage and memory for full states.
 
 Direct checkpoint format v2 validates XC names, derivative settings and input cval while retaining freshly initialized Libxc handles. Preserve runtime/checkpoint hashes. The sample RUNTIME argument also accepts an explicitly built/audited serial SALMON executable for reference validation; do not use an MPI binary as this child process. Use matching GS and RT functional inputs for each XC.
+
+#### Internally parallel TB-mBJ/Libxc-PBE direct restart
+
+Use matching-XC GS/RT bundles and four outer ranks: field1,SBE1,TDDFT orbital ranks2. Supply `--tddft-ranks 2 --rank-budget 4 --layers LAYOUT_JSON`. Run a continuous reference, a save job with `--direct-save-at 63`, and a fresh output/job with `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. Keep total steps128.
+
+For TB-mBJ (automatic coefficient/fixed cval1.2) and Libxc-PBE, the65 resumed steps produced complete A/c,E,current histories bit-identical to continuous128. This validates direct same-topology two-level MPI restart. Changing decomposition remains unsupported. Field2+SBE1+TDDFT2 needs five ranks and remains outside this four-core campaign.
+
+Checksum verification on direct restart is partitioned across ranks. Every rank must read the same completed manifest and all checks must succeed before state restoration. Payloads must reside in one shared directory visible with identical contents to all ranks; different node-local copies are outside this contract. `result.json` records per-rank file/byte counts in `checkpoint_validation`.

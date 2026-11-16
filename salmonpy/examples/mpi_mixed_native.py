@@ -217,6 +217,7 @@ def main():
                       'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),
                       'timing': coupled.timing, 'communication': communication,
                       'native_steps_this_job': stop-start, 'restored_step': start,
+                      'checkpoint_validation': getattr(coupled, 'checkpoint_validation', None),
                       'scope': 'tiny native E/H coupling fixture; no physical convergence or whole-session restart claim'}
             if assembly is not None:
                 report['assembly'] = assembly.record()
