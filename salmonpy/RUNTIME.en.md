@@ -581,8 +581,10 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python tools/test_hse_direct_checkpoint
 
 The tool explicitly compiles adapters against audited fast-PR objects and compares separate continuous/save/resume processes. Two/three k points, Taylor ACE/learned ACE/full-action within the fast-PR engine, and learned PT-CN, split6/7, match currents,total energy and internal traces exactly after6/5 remaining steps. Validated at OpenMP1/2. Conventional HSE and comparison baselines are not execution engines.
 
-Scope: internal serial CPU Fortran entry, periodic scalar fixed occupation/ions, full support. This does not provide a stable Python/C API, inner MPI, HSE-to-FDTD coupling, GPU, symmetry, distributed ACE or reduced-q support. Synthetic numerical regression is separate from physical convergence. Historical native text-file positions are not resumed.
+Scope: internal serial CPU Fortran entry, periodic scalar fixed occupation/ions, full support. This does not provide a stable native ABI, GPU, symmetry, orbital/grid-distributed ACE or reduced-q support. Explicit host-MPI k-only HSE and FDTD coupling use the separate entry below. Synthetic numerical regression is separate from physical convergence. Historical native text-file positions are not resumed.
 
 Save at an accepted step with initialized exchange resources. Step-zero saving immediately after initialization is not established.
 
-For outer-MPI/FDTD fast-HSE coupling, explicitly build the dedicated worker and use FastHSEResponseBackend. The internal Fortran entry remains serial; each outer material rank calls its own process. See COUPLED.en.md for build/coupling/direct-restart instructions. This does not add inner HSE MPI.
+For outer-MPI/FDTD fast-HSE coupling, explicitly build the dedicated worker and use FastHSEResponseBackend. In this worker mode each outer material rank calls its own serial process. See COUPLED.en.md for build/coupling/direct-restart instructions. This does not add inner HSE MPI.
+
+For internal k-only MPI use `tools/build_fast_hse_mpi.py` and `salmonpy.fast_hse_mpi.NativeFastHSEBackend`. Supported material groups have one or two ranks, no orbital/rgrid split, and one native lifetime per process on the main thread. The host owns MPI; the backend temporarily changes cwd. Same-topology rank-local direct restart preserves numerical HSE histories and rebuilds static FFT resources. See COUPLED.en.md for the four-rank FDTD/SBE/HSE example and failure limits.

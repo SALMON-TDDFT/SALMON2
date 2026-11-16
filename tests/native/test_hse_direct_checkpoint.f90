@@ -28,15 +28,11 @@ program probe
  call timer_initialize
  call rt_open(ctx,'run',code);if(code/=0)stop 1
  first=0;last=nt
- if(mode=='reject'.or.mode=='reject-late')then
+ if(mode=='reject')then
    call rt_checkpoint(ctx,trim(path),.true.,code)
    if(code==0)stop 8
-   if(mode=='reject-late')then
-     if(rt_accepted_step(ctx)/=-1)stop 9
-     ac=0d0
-     call rt_step(ctx,ac,j,energy,code)
-     if(code==0)stop 10
-   endif
+   ! Header, payload and footer are all validated before a numerical commit.
+   if(rt_accepted_step(ctx)/=0)stop 9
    open(newunit=meta,file='calls.dat',status='new')
    write(meta,*)0,0,rt_accepted_step(ctx)
    close(meta)

@@ -117,11 +117,11 @@ def main():
             trailing=case/'trailing.bin';trailing.write_bytes(content+b'x')
             for label,path,input_text in [('reject-truncated',broken,None),
                     ('reject-settings',case/'checkpoint-7.bin',text.replace('dt=.001','dt=.002')),
-                    ('reject-late',trailing,None)]:
-                rejected=execute(label,'reject-late' if label=='reject-late' else 'reject',7,path,input_text)
+                    ('reject-trailing',trailing,None)]:
+                rejected=execute(label,'reject',7,path,input_text)
                 calls=np.loadtxt(rejected/'calls.dat',dtype=int)
                 assert calls[1]==0
-                if label=='reject-late':assert calls[2]==-1
+                assert calls[2]==0
                 rejections.append({'nk':nk,'propagator':prop,'factor':factor,'case':label,'propagation_calls':0})
     (out/'result.json').write_text(json.dumps({'status':'passed','scope':'serial fast-PR HSE direct context restart; synthetic input, no coupled MPI claim',
         'threads':args.threads,'engine_sha256':record['sha256'],'source_hashes':{p.name:digest(p) for p in src.iterdir()},

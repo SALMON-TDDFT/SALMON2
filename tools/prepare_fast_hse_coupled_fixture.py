@@ -3,22 +3,29 @@ Not a converged GS or production material recipe. No engine run/download/build.
 Usage: python -I tools/prepare_fast_hse_coupled_fixture.py PSEUDOPOTENTIAL NEW_DIR
 """
 from pathlib import Path
-import hashlib,json,struct,shutil,sys
+import argparse,hashlib,json,struct,shutil,sys
 import numpy as np
 
-pseudo=Path(sys.argv[1]).resolve();out=Path(sys.argv[2]).resolve();out.mkdir(parents=True,exist_ok=False)
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('pseudo', type=Path);parser.add_argument('output', type=Path)
+parser.add_argument('--kpoints', type=int, default=3)
+parser.add_argument('--propagator', choices=('taylor','ptcn'), default='taylor')
+args=parser.parse_args()
+if args.kpoints < 1: parser.error('kpoints must be positive')
+nk=args.kpoints
+pseudo=args.pseudo.resolve();out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
 r=out/'data_for_restart';r.mkdir()
 def record(stream,payload):
     stream.write(struct.pack('=i',len(payload)));stream.write(payload);stream.write(struct.pack('=i',len(payload)))
 with (r/'info.bin').open('wb') as stream:
-    for n in (3,2,0,1,0):record(stream,struct.pack('=i',n))
-with (r/'occupation.bin').open('wb') as stream:record(stream,np.full((2,3),2.,dtype='=f8').tobytes(order='F'))
+    for n in (nk,2,0,1,0):record(stream,struct.pack('=i',n))
+with (r/'occupation.bin').open('wb') as stream:record(stream,np.full((2,nk),2.,dtype='=f8').tobytes(order='F'))
 x=np.arange(8)[:,None,None]
 psi=np.empty((8,8,8,2),dtype='=c16',order='F')
 psi[:,:,:,0]=1/np.sqrt(512.)
 psi[:,:,:,1]=np.sqrt(2/512.)*np.cos(2*np.pi*x/8)
 np.testing.assert_allclose(psi.reshape(512,2,order='F').conj().T@psi.reshape(512,2,order='F'),np.eye(2),atol=1e-14)
-(r/'wfn.bin').write_bytes(np.repeat(psi[...,None],3,axis=4).tobytes(order='F'));shutil.copy2(pseudo,out/'pseudo1_rps.dat')
+(r/'wfn.bin').write_bytes(np.repeat(psi[...,None],nk,axis=4).tobytes(order='F'));shutil.copy2(pseudo,out/'pseudo1_rps.dat')
 for prop,factor,tag in [('hse_taylor4','learned','taylor'),('hse_ptcn','learned','ptcn')]:
     text=f"""&calculation
  theory='tddft_response'
@@ -42,7 +49,7 @@ for prop,factor,tag in [('hse_taylor4','learned','taylor'),('hse_ptcn','learned'
  num_rgrid=8,8,8
 /
 &kgrid
- num_kgrid=3,1,1
+ num_kgrid={nk},1,1
 /
 &tgrid
  dt=.001,nt=256
@@ -64,6 +71,6 @@ for prop,factor,tag in [('hse_taylor4','learned','taylor'),('hse_ptcn','learned'
 /
 """
     (out/f'{tag}.inp').write_text(text)
-shutil.copy2(out/'taylor.inp',out/'rt.inp')
+shutil.copy2(out/(args.propagator+'.inp'),out/'rt.inp')
 (out/'fixture.json').write_text(json.dumps({'scope':'zero-current real-orbital time-reversal synthetic continuation regression; not converged GS',
     'files':{str(p.relative_to(out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in out.rglob('*') if p.is_file()}},indent=2)+'\n')

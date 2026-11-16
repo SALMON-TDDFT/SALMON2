@@ -1,0 +1,263 @@
+"""Experimental fast-PR HSE on an explicitly supplied k-only MPI subgroup.
+
+Build explicitly against the host MPI. One native lifetime on the main thread
+per process. Input and shared work directories are caller-owned. No MPI import,
+initialization, finalization, compilation or download occurs on module import.
+"""
+import ctypes as c
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+import threading
+from types import SimpleNamespace
+
+import numpy as np
+
+from . import embedded_tddft as embedded
+from .distributed import NativeParallelContext
+from .errors import InputError, InputTypeError, RuntimeFailure
+from .fast_hse import _Initial, _input_text, _positive, _vector
+from .material_response import _response_timing
+from .tddft import _copy_bundle, _digest
+
+__all__ = ['NativeFastHSEBackend']
+_used = False
+
+
+def _agree(comm, error, *, runtime=False):
+    errors = comm.allgather(error)
+    if any(errors):
+        raise (RuntimeFailure if runtime else InputError)(str(errors))
+
+
+def _configure(lib):
+    vec = np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, shape=(3,), flags='C_CONTIGUOUS')
+    lib.sp_fast_hse_init.argtypes = [c.c_char_p, c.c_double, c.c_int, vec]
+    lib.sp_fast_hse_step.argtypes = [vec, vec, vec, c.POINTER(c.c_double)]
+    lib.sp_fast_hse_checkpoint.argtypes = [c.c_char_p, c.c_int]
+    lib.sp_fast_hse_info.argtypes = [c.POINTER(c.c_int), vec, vec]
+    lib.sp_fast_hse_close.argtypes = []
+    for name in ('init','step','checkpoint','info','close'):
+        getattr(lib, 'sp_fast_hse_'+name).restype = c.c_int
+
+
+class NativeFastHSEBackend:
+    """Collective fast-PR HSE response; k-only groups of one or two ranks.
+
+    The explicit build receipt binds a host-MPI native library. No conventional
+    HSE engine or fallback is supported. Material points require separate groups;
+    each group has one shared work copy and one point. Errors can invalidate the
+    whole MPI job; native process-terminating failures are not recoverable.
+    """
+    execution = 'collective'
+    reduction = 'leader'
+
+    def __init__(self, build_record, work_root):
+        record = json.loads(Path(build_record).expanduser().resolve().read_text())
+        if record.get('schema') != 'salmonpy.fast-hse-mpi/1' or record.get('status') != 'built-and-audited':
+            raise InputError('audited fast-PR HSE host-MPI build record required')
+        self.library = Path(record['library']).expanduser().resolve()
+        self.sha256 = record['sha256']
+        self.origin_sha256 = record.get('origin_sha256')
+        for value in (self.sha256, self.origin_sha256):
+            if not isinstance(value,str) or re.fullmatch('[0-9a-f]{64}',value) is None:
+                raise InputError('native library and fast-PR origin hashes required')
+        if not self.library.is_file() or _digest(self.library) != self.sha256:
+            raise InputError('fast HSE MPI library checksum mismatch')
+        self.work_root = Path(work_root).expanduser().resolve()
+        if not self.work_root.is_dir():
+            raise InputError('existing shared work root required')
+        self.identity = 'salmonpy.fast-hse-mpi/1/' + hashlib.sha256(json.dumps(
+            [self.sha256,self.origin_sha256]).encode()).hexdigest()
+
+    def create_state(self, initial, point_id, dt, context):
+        global _used
+        comm = context.solver_comm
+        error = None
+        try:
+            if _used or embedded._used:
+                raise InputError('one native lifetime per process; use a fresh MPI job')
+            if threading.current_thread() is not threading.main_thread():
+                raise InputError('native fast HSE requires the main thread')
+            if len(context.point_ids) != 1 or context.point_ids[0] != point_id:
+                raise InputError('one fast HSE point per solver group required')
+            if comm.size not in (1,2):
+                raise InputError('validated fast HSE k-only group requires one or two ranks')
+            if not isinstance(initial, _Initial):
+                raise InputTypeError('prepared FastHSEMaterialProvider state required')
+            if self.work_root.is_relative_to(initial.directory):
+                raise InputError('work root must be outside the initial bundle')
+            dt = _positive(dt,'dt')
+            if embedded._manifest(initial.directory) != initial.manifest:
+                raise InputError('initial fast HSE bundle changed')
+            if _digest(self.library) != self.sha256:
+                raise InputError('fast HSE MPI library changed')
+            groups, propagator = _input_text((initial.directory/initial.input_file).read_text())
+            groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
+            groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
+            text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'
+            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text)
+        except Exception as exc:
+            error = str(exc)
+        _agree(comm,error)
+        descriptors = comm.allgather(descriptor)
+        _agree(comm,'fast HSE configuration differs within subgroup' if any(x!=descriptor for x in descriptors) else None)
+        work = None; error = None; expected = None
+        if comm.rank == 0:
+            try:
+                tag = hashlib.sha256(str(point_id).encode()).hexdigest()[:12]
+                parent = Path(tempfile.mkdtemp(prefix='native-fast-hse-'+tag+'-',dir=self.work_root))
+                work = parent/'bundle'
+                if _copy_bundle(initial.directory,work) != initial.manifest:
+                    raise InputError('initial bundle changed during copy')
+                (work/'inputfile').write_text(text)
+                expected = embedded._manifest(work)
+            except Exception as exc:
+                error = str(exc)
+        error, work, expected = comm.bcast((error,str(work) if work else None,expected),root=0)
+        if error:
+            raise InputError(error)
+        work = Path(work); error = None
+        try:
+            if embedded._manifest(work) != expected:
+                raise InputError('fast HSE work directory is not shared identically')
+            lib = c.CDLL(str(self.library))
+            _configure(lib)
+        except Exception as exc:
+            error = str(exc)
+        _agree(comm,error)
+        owner = SimpleNamespace(solver_comm=comm,closed=False,_dependents=0)
+        native = NativeParallelContext(owner,self.library,self.sha256)
+        _used = embedded._used = True
+        state = _State(native,lib,work,dt,initial.max_steps,propagator)
+        try:
+            current = np.empty(3)
+            code = state._call(lib.sp_fast_hse_init,b'inputfile',dt,initial.max_steps,current)
+            state.initialized = code == 0
+            statuses = comm.allgather((int(code),bool(np.isfinite(current).all())))
+            if any(code or not finite for code,finite in statuses):
+                raise RuntimeFailure('native fast HSE initialization failed: '+str(statuses))
+            state.current = current.copy()
+            state.initial_current = current.copy()
+            return state
+        except BaseException:
+            state.failed = True
+            state.close()
+            raise
+
+
+class _State:
+    checkpoint_protocol = 'salmonpy.direct-state/1'
+
+    def __init__(self,native,lib,work,dt,capacity,propagator):
+        self._native = native  # Avoid the legacy sp_tddft checkpoint dispatch.
+        self.lib = lib
+        self.work = work
+        self.dt = dt
+        self.capacity = capacity
+        self.steps = 0
+        self.A = np.zeros(3)
+        self.current = np.zeros(3)
+        self.initial_current = np.zeros(3)
+        self.energy = None
+        self.closed = False
+        self.failed = False
+        self.initialized = False
+        self.timing = _response_timing(dt,'native fast-PR HSE '+propagator+'; k-only MPI; charge current j')
+
+    @property
+    def time(self):
+        return self.steps*self.dt
+
+    def _call(self,fn,*args):
+        self._native._live()
+        previous = Path.cwd()
+        try:
+            os.chdir(self.work)
+            return fn(*args)
+        finally:
+            os.chdir(previous)
+
+    def _validate(self,callback):
+        error = None; result = None
+        try:
+            if self.closed or self.failed:
+                raise InputError('fast HSE state is closed or failed')
+            self._native._live()
+            result = callback()
+        except Exception as exc:
+            error = str(exc)
+        _agree(self._native.context.solver_comm,error)
+        return result
+
+    def advance(self,old,new):
+        def validate():
+            a = _vector(old, 'old A')
+            b = _vector(new, 'new A')
+            if not np.array_equal(a,self.A):
+                raise InputError('stale fast HSE A endpoint')
+            if self.steps>=self.capacity:
+                raise InputError('fast HSE propagation capacity exhausted')
+            return a,b
+        a,b = self._validate(validate)
+        comm = self._native.context.solver_comm
+        endpoints = comm.allgather((a.tolist(),b.tolist(),self.steps))
+        _agree(comm,'A endpoints differ within fast HSE subgroup' if any(x!=endpoints[0] for x in endpoints) else None)
+        current = np.empty(3); energy = c.c_double()
+        code = self._call(self.lib.sp_fast_hse_step,a,b,current,c.byref(energy))
+        statuses = comm.allgather((int(code),bool(np.isfinite(current).all() and np.isfinite(energy.value))))
+        if any(code or not finite for code,finite in statuses):
+            self.failed = True
+            raise RuntimeFailure('fast HSE native step failed: '+str(statuses))
+        self.steps += 1; self.A = b.copy(); self.current = current.copy(); self.energy = energy.value
+        return self.current.copy()
+
+    def step(self,A):
+        return self.advance(self.A.copy(),A)
+
+    def checkpoint(self,path,restore):
+        def validate():
+            if type(restore) is not bool:
+                raise InputTypeError('restore must be boolean')
+            p = Path(path).expanduser().resolve()
+            if any(x in str(p) for x in ('\x00','\n','\r')) or len(os.fsencode(p))>4000:
+                raise InputError('invalid native checkpoint filename')
+            if restore and (self.steps!=0 or not p.is_file()):
+                raise InputError('restore requires a fresh state and an existing checkpoint')
+            if not restore and (p.exists() or not p.parent.is_dir()):
+                raise InputError('new checkpoint filename in an existing directory required')
+            return p
+        p = self._validate(validate)
+        comm = self._native.context.solver_comm
+        modes = comm.allgather((restore,self.steps))
+        _agree(comm,'checkpoint epoch/mode differs within subgroup' if any(x!=modes[0] for x in modes) else None)
+        code = self._call(self.lib.sp_fast_hse_checkpoint,os.fsencode(p),int(restore))
+        codes = comm.allgather(int(code))
+        if any(codes):
+            self.failed = True
+            raise RuntimeFailure('fast HSE native checkpoint failed: '+str(codes))
+        if restore:
+            step = c.c_int(); A = np.empty(3); current = np.empty(3)
+            code = self._call(self.lib.sp_fast_hse_info,c.byref(step),A,current)
+            statuses = comm.allgather((int(code),int(step.value),bool(np.isfinite(A).all() and np.isfinite(current).all())))
+            if (any(code or not finite or not 0<=n<=self.capacity for code,n,finite in statuses)
+                    or len({n for _,n,_ in statuses})!=1):
+                self.failed = True
+                raise RuntimeFailure('restored native fast HSE metadata invalid: '+str(statuses))
+            self.steps = step.value; self.A = A.copy(); self.current = current.copy(); self.energy = None
+
+    def close(self):
+        if self.closed:
+            return
+        code = 0
+        if self.initialized:
+            code = self._call(self.lib.sp_fast_hse_close)
+        codes = self._native.context.solver_comm.allgather(int(code))
+        if any(codes):
+            self.failed = True
+            raise RuntimeFailure('fast HSE native close failed: '+str(codes))
+        self._native.close()
+        self.closed = True

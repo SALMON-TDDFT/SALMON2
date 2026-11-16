@@ -159,10 +159,10 @@ install(FILES "${ROOT}/salmonpy/layers.py" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/examples/mixed_layers.json" DESTINATION salmonpy/examples)
 
 # Fast-PR HSE direct numerical checkpoint regression, explicitly built only.
-install(FILES "${ROOT}/tools/test_hse_direct_checkpoint.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_hse_direct_checkpoint.py" "${ROOT}/tools/test_fast_hse_mpi_checkpoint.py" DESTINATION salmonpy/_runtime_source/tools)
 install(FILES "${ROOT}/tests/native/test_hse_direct_checkpoint.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 
 # Explicit process-isolated fast-PR HSE material adapter and worker sources.
-install(FILES "${ROOT}/salmonpy/fast_hse.py" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/fast_hse.py" "${ROOT}/salmonpy/fast_hse_mpi.py" DESTINATION salmonpy)
 install(FILES "${ROOT}/salmonpy/examples/mixed_hse_layers.json" DESTINATION salmonpy/examples)
-install(FILES "${ROOT}/tools/build_fast_hse_worker.py" "${ROOT}/tools/prepare_fast_hse_coupled_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/build_fast_hse_worker.py" "${ROOT}/tools/build_fast_hse_mpi.py" "${ROOT}/tools/prepare_fast_hse_coupled_fixture.py" DESTINATION salmonpy/_runtime_source/tools)

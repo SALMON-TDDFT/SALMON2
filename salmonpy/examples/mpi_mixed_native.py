@@ -28,6 +28,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
     parser.add_argument('--fast-hse-build', type=Path, help='explicit fast-PR serial worker build record for hse-point')
+    parser.add_argument('--fast-hse-mpi-build', type=Path, help='explicit native fast-PR host-MPI build record')
+    parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
     parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
@@ -49,7 +51,10 @@ def main():
         parser.error('save-at must be between zero and steps')
     if args.layers is not None and args.without_ld: parser.error('express vacuum in the layout; do not combine --layers with --without-ld')
     if not np.isfinite(args.dt) or args.dt <= 0: parser.error('positive finite dt required')
-    if args.fast_hse_build is not None and args.layers is None: parser.error('fast HSE requires an explicit layer layout')
+    if (args.fast_hse_build is not None or args.fast_hse_mpi_build is not None) and args.layers is None:
+        parser.error('fast HSE requires an explicit layer layout')
+    if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
+        parser.error('hse-ranks > 1 requires --fast-hse-mpi-build')
     if args.steps < 1: parser.error('positive steps required')
     if any(v < 1 for v in args.field_grid): parser.error('positive field-grid entries required')
     field_ranks = int(np.prod(args.field_grid))
@@ -85,9 +90,11 @@ def main():
         if 'hse-point' in selected:
             if args.fast_hse_build is None: raise ValueError('hse-point requires --fast-hse-build')
             from salmonpy.fast_hse import FastHSEMaterialProvider, FastHSEResponseBackend
+            from salmonpy.fast_hse_mpi import NativeFastHSEBackend
             available['hse-point'] = MaterialBinding('hse-point',
                 FastHSEMaterialProvider(args.bundle, 'rt.inp', max_steps=args.steps),
-                FastHSEResponseBackend(args.fast_hse_build, output))
+                (FastHSEResponseBackend(args.fast_hse_build, output) if args.fast_hse_mpi_build is None
+                 else NativeFastHSEBackend(args.fast_hse_mpi_build, output)))
         assembly = None
         if layout is None:
             bindings = {10: available['sbe-point'], 20: available['si-tddft']}
@@ -96,7 +103,7 @@ def main():
                                  SolverGroup('tddft', tuple(range(field_ranks+1, world.size)), point_ids=(20,))))
         else:
             from salmonpy.layers import assemble_native_layers
-            rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks, 'hse-point': 1}.items() if key in selected}
+            rank_settings = {key: count for key, count in {'sbe-point': 1, 'si-tddft': args.tddft_ranks, 'hse-point': args.hse_ranks}.items() if key in selected}
             assembly = assemble_native_layers(layout, available,
                 grid=grid, dt=dt, steps=args.steps, source=calculation.source, field_grid=tuple(args.field_grid),
                 ranks_per_point=rank_settings, rank_budget=args.rank_budget if args.rank_budget is not None else world.size)
@@ -127,6 +134,7 @@ def main():
                          + repr((sbe.electrons,sbe.correction_order,sbe.nonlocal_correction)).encode()).hexdigest()}
         if 'hse-point' in selected:
             signature['fast_hse_backend'] = available['hse-point'].backend.identity
+            signature['hse_ranks'] = args.hse_ranks
         restored = None
         if args.resume is not None:
             metadata = json.loads((args.resume/'checkpoint.json').read_text())
@@ -215,7 +223,9 @@ def main():
                         from salmonpy.material_response import SolverContext
                         local = SolverContext(SimpleNamespace(rank=0,size=1),'serial-reference',(point,))
                         binding = bindings[point]
-                        state = binding.backend.create_state(binding.provider.prepare(local),point,dt,local)
+                        from salmonpy.fast_hse import FastHSEResponseBackend
+                        reference = FastHSEResponseBackend(args.fast_hse_build, output)
+                        state = reference.create_state(binding.provider.prepare(local),point,dt,local)
                     else: state = sbe.new_state(dt=dt) if is_sbe else initial.new_state(dt=dt)
                     try:
                         old = np.zeros(3)
@@ -239,8 +249,9 @@ def main():
                       'point_materials': {str(p): bindings[p].key for p in points},
                       'initial_charge_current': session.initial_current,
                       'outer_mpi_ranks':world.size,
-                      'serial_hse_workers':sum(b.key=='hse-point' for b in bindings.values()),
-                      'hse_internal_mpi':False,
+                      'serial_hse_workers':sum(b.key=='hse-point' for b in bindings.values()) if args.fast_hse_mpi_build is None else 0,
+                      'hse_internal_mpi':args.fast_hse_mpi_build is not None,
+                      'hse_k_ranks':args.hse_ranks,
                       'constitutive_cell_counts': dict(zip(map(str, ids.tolist()), counts.tolist())),
                       'ld_materials': {} if args.without_ld else {'1': 'drude', '2': 'two-lorentz-poles'},
                       'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),

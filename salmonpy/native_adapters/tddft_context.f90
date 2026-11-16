@@ -1,5 +1,5 @@
 ! Copyright 2026 SALMONpy contributors. Apache-2.0.
-! Internal serial development context; not a stable or failure-atomic public ABI.
+! Internal serial/k-only MPI development context; not a stable or failure-atomic public ABI.
 ! Global input configuration must remain common and immutable. Never copy contexts.
 #include "config.h"
 module salmonpy_tddft_context
@@ -9,12 +9,13 @@ module salmonpy_tddft_context
  use initialization_rt_sub,only:initialization_rt
  use salmon_xc,only:finalize_xc
  use salmon_global
- use parallelization,only:nproc_size_global
+ use parallelization,only:nproc_size_global,nproc_group_global,nproc_id_global
+ use communication,only:comm_summation
  use sym_sub,only:use_symmetry
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
  private
- public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current
+ public::rt_input_config,tddft_context,rt_open,rt_step,rt_close,rt_probe_write,rt_checkpoint,rt_accepted_step,rt_current,rt_vector_potential
  type fixed_settings
   real(8)::omega,electronic_temperature
   integer::grid(3),mesh(3),bands,energy_interval,electrons,hamil,exact_interval,warmup,teachers
@@ -110,51 +111,58 @@ contains
  logical::exists
  integer::i
  status=1
-#if defined(USE_MPI) || defined(USE_OPENACC) || defined(USE_FFTW)
- return
+#if defined(USE_OPENACC) || defined(USE_FFTW)
+ goto 900
 #endif
- if(theory/='tddft_response'.or.out_rt_energy_step/=1)return
- if(spin/='unpolarized'.or.temperature>=0d0.or.any(hse_q_reduction/=1))return
- if(associated(ctx))return
+ if(theory/='tddft_response'.or.out_rt_energy_step/=1)goto 900
+ if(spin/='unpolarized'.or.temperature>=0d0.or.any(hse_q_reduction/=1))goto 900
+ if(associated(ctx))goto 900
  if(present(config))then
-  if(present(delta_t).or.present(openmp_mode))return
+  if(present(delta_t).or.present(openmp_mode))goto 900
   selected=config
  else
   call rt_input_config(selected)
   if(present(delta_t))selected%delta_t=delta_t
   if(present(openmp_mode))then
-   if(.not.valid_mode(openmp_mode))return
+   if(.not.valid_mode(openmp_mode))goto 900
    selected%stencil_mode=openmp_mode;selected%current_mode=openmp_mode;selected%force_mode=openmp_mode
   endif
  endif
- if(.not.ieee_is_finite(selected%delta_t))return
- if(selected%delta_t<=0d0)return
- if(selected%max_steps<1.or.selected%max_steps>=huge(0))return
+ if(.not.ieee_is_finite(selected%delta_t))goto 900
+ if(selected%delta_t<=0d0)goto 900
+ if(selected%max_steps<1.or.selected%max_steps>=huge(0))goto 900
  if(.not.valid_mode(selected%stencil_mode).or..not.valid_mode(selected%current_mode).or. &
-    .not.valid_mode(selected%force_mode))return
+    .not.valid_mode(selected%force_mode))goto 900
  if(settings_pinned)then
   if(.not.settings_match(process_settings))then
-   status=2;return
+   status=2;goto 900
   endif
  endif
- if(nproc_size_global/=1.or.xc/='hse06'.or.yn_periodic/='y'.or.yn_spinorbit/='n'.or. &
-    yn_hse_wannier/='n'.or.use_symmetry.or.yn_md/='n'.or.yn_dc/='n'.or.trans_longi/='tr')return
- if(yn_restart/='n'.or.e_impulse/=0d0.or.ae_shape1/='impulse'.or.ae_shape2/='none')return
+ if(nproc_size_global>1)then
+  if(nproc_ob/=1.or.any(nproc_rgrid/=1).or.nproc_k/=nproc_size_global)goto 900
+ endif
+ if(xc/='hse06'.or.yn_periodic/='y'.or.yn_spinorbit/='n'.or. &
+    yn_hse_wannier/='n'.or.use_symmetry.or.yn_md/='n'.or.yn_dc/='n'.or.trans_longi/='tr')goto 900
+ if(yn_restart/='n'.or.e_impulse/=0d0.or.ae_shape1/='impulse'.or.ae_shape2/='none')goto 900
  if(yn_out_current_decomposed/='n'.or.yn_out_intraband_current/='n'.or.yn_out_dns_ac_je/='n'.or. &
     yn_out_mag_decomposed_rt/='n'.or.yn_out_mag_micro_rt/='n'.or.yn_out_spin_current_decomposed/='n'.or. &
-    yn_out_spin_current_micro/='n'.or.yn_out_mom_distr_rt/='n'.or.yn_out_rt_energy_components/='n')return
- if(projection_option/='no'.or.dm_unfold_option/='no'.or.yn_out_rvf_rt/='n')return
- if(len_trim(name)<1.or.len_trim(name)>len(sysname)-32)return
+    yn_out_spin_current_micro/='n'.or.yn_out_mom_distr_rt/='n'.or.yn_out_rt_energy_components/='n')goto 900
+ if(projection_option/='no'.or.dm_unfold_option/='no'.or.yn_out_rvf_rt/='n')goto 900
+ if(len_trim(name)<1.or.len_trim(name)>len(sysname)-32)goto 900
  do i=1,len_trim(name)
-  if(index('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-',name(i:i))==0)return
+  if(index('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-',name(i:i))==0)goto 900
  enddo
  inquire(file=trim(base_directory)//trim(name)//'_rt.data',exist=exists)
- if(exists)return
+ if(exists)goto 900
  inquire(file=trim(base_directory)//trim(name)//'_rt_energy.data',exist=exists)
- if(exists)return
- if(yn_out_dns_rt/='n'.or.yn_out_micro_je/='n'.or.yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n')return
+ if(exists)goto 900
+ if(yn_out_dns_rt/='n'.or.yn_out_micro_je/='n'.or.yn_out_elf_rt/='n'.or.yn_out_estatic_rt/='n')goto 900
+ status=0
+900 call checkpoint_collective_status(status)
+ if(status/=0)return
  allocate(ctx)
  call exx_bind_system(ctx%system,ctx%hse,status)
+ call checkpoint_collective_status(status)
  if(status/=0)then
   deallocate(ctx);return
  endif
@@ -234,10 +242,25 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  if(.not.all(ieee_is_finite(current)))return
  status=0
  end subroutine rt_current
+ subroutine rt_vector_potential(ctx,A,status)
+ type(tddft_context),pointer,intent(in)::ctx
+ real(8),intent(out)::A(3)
+ integer,intent(out)::status
+ status=1;A=0d0
+ if(.not.associated(ctx))return
+ if(ctx%checkpoint_failed)return
+ A=ctx%rt%Ac_tot(:,ctx%accepted)
+ status=0
+ end subroutine
  subroutine rt_close(ctx)
+ use sendrecv_grid,only:dealloc_cache
  type(tddft_context),pointer,intent(inout)::ctx
  if(.not.associated(ctx))return
- close(ctx%ofl%fh_rt);close(ctx%ofl%fh_rt_energy)
+ if(nproc_id_global==0)then
+  close(ctx%ofl%fh_rt);close(ctx%ofl%fh_rt_energy)
+ endif
+ call dealloc_cache(ctx%srg)
+ call dealloc_cache(ctx%srg_scalar)
  call finalize_xc(ctx%xc_func)
  call exx_unbind_system(ctx%system)
  call rt_state_clear(ctx%hse)
@@ -270,7 +293,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  endif
  end subroutine
 
- ! Same-build, same-input serial native archive. Caller verifies the binary/GS
+ ! Same-build, same-input rank-local native archive. Caller verifies the binary/GS
  ! provenance and authenticates the file before load. Opaque context, FFT, XC,
  ! MPI and output handles are never serialized or intrinsically copied.
  ! Restore only into a fresh rt_open; no propagation is performed. Output files
@@ -287,26 +310,36 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  type(checkpoint_payload),allocatable::copy
  type(fixed_settings)::saved_settings
  type(s_rt_run_config)::saved_run
- integer::u,ios,closing,allocation_status,header(27),expected(27)
+ integer::u,ios,closing,allocation_status,header(32),expected(32)
+ integer::hse_position,need_kernel
+ logical::opened
  real(8)::cell(3,3),spacing(3),saved_initial_energy
  character(32)::magic
  character(1)::extra
  logical::hse_loaded
  status=1;hse_loaded=.false.
- if(.not.associated(ctx))return
- if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))return
- if(len_trim(path)==0)return
- if(restore.and.ctx%accepted/=ctx%Mit)return
- if(nproc_size_global/=1.or.xc/='hse06'.or.yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_md/='n')return
- if(projection_option/='no'.or.dm_unfold_option/='no'.or.ctx%singlescale%flag_use)return
- expected=[1,ctx%rt%max_steps,ctx%system%nspin,ctx%system%no,ctx%system%nk, &
+ ios=0
+ if(.not.associated(ctx))ios=1
+ call checkpoint_collective_status(ios)
+ if(ios/=0)return
+ if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))ios=1
+ if(len_trim(path)==0)ios=1
+ if(restore.and.ctx%accepted/=ctx%Mit)ios=1
+ if(xc/='hse06'.or.yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_md/='n')ios=1
+ if(projection_option/='no'.or.dm_unfold_option/='no'.or.ctx%singlescale%flag_use)ios=1
+ if(ctx%info%isize_r/=1.or.ctx%info%isize_o/=1.or.ctx%info%isize_k/=nproc_size_global)ios=1
+ call checkpoint_collective_status(ios)
+ if(ios/=0)return
+ expected=[2,ctx%rt%max_steps,ctx%system%nspin,ctx%system%no,ctx%system%nk, &
     ctx%lg%num,ctx%mg%is,ctx%mg%ie,ctx%mg%is_array,ctx%mg%ie_array, &
     ctx%info%io_s,ctx%info%io_e,ctx%info%ik_s,ctx%info%ik_e, &
-    storage_size(1d0),storage_size(1),storage_size((0d0,0d0))]
+    storage_size(1d0),storage_size(1),storage_size((0d0,0d0)), &
+    nproc_size_global,nproc_id_global,ctx%info%isize_r,ctx%info%isize_o,ctx%info%isize_k]
  checkpoint_array_limit=max(64_8*(int(ctx%rt%max_steps,8)+1_8),64_8*int(ctx%system%ngrid,8))
  if(allocated(ctx%spsi_in%zwf))checkpoint_array_limit=max(checkpoint_array_limit,size(ctx%spsi_in%zwf,kind=8))
  if(allocated(ctx%spsi_in%rwf))checkpoint_array_limit=max(checkpoint_array_limit,size(ctx%spsi_in%rwf,kind=8))
  allocate(copy,stat=allocation_status)
+ call checkpoint_collective_status(allocation_status)
  if(allocation_status/=0)return
  call checkpoint_copy(ctx,copy,.false.)
  if(restore)then
@@ -314,7 +347,12 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  else
   open(newunit=u,file=trim(path),access='stream',form='unformatted',status='new',action='write',iostat=ios)
  endif
- if(ios/=0)return
+ opened=ios==0
+ call checkpoint_collective_status(ios)
+ if(ios/=0)then
+  if(opened)close(u)
+  return
+ endif
  magic='SALMONPY_FAST_HSE_RT_V1';header=expected
  saved_settings=ctx%settings;saved_run=ctx%run_settings
  cell=ctx%system%primitive_a;spacing=ctx%system%hgs;saved_initial_energy=ctx%energy%E_tot0
@@ -338,16 +376,21 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
   if(.not.all(ieee_is_finite(copy%fields(:,1:4))))ios=1
   if(copy%energy%E_tot0/=saved_initial_energy)ios=1
  endif
+ call checkpoint_collective_status(ios)
  if(ios==0)then
   if(restore)then
    ! Rebuild the fresh CPU kernel only if initialization did not need exchange.
    ! This prepares a static operator from the initial GS, never an RT step.
-   if(.not.allocated(ctx%hse%native_kernel))then
+   need_kernel=0
+   if(.not.allocated(ctx%hse%native_kernel))need_kernel=1
+   call checkpoint_collective_status(need_kernel)
+   if(need_kernel/=0)then
     call exx_refresh(ctx%system,ctx%mg,ctx%info,ctx%spsi_in,rt_context=ctx%hse,rt_status=ios)
    endif
+   call checkpoint_collective_status(ios)
    if(ios==0)then
-    hse_loaded=.true.
-    call hse_checkpoint_read(u,ctx%hse,ios)
+    inquire(unit=u,pos=hse_position)
+    call hse_checkpoint_read(u,ctx%hse,ios,validate_only=.true.)
    endif
   else
    call hse_checkpoint_write(u,ctx%hse,ios)
@@ -370,8 +413,19 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
    write(u,iostat=ios)magic
   endif
  endif
+ ! Every shard and both archive footers must validate before any owner commits.
+ call checkpoint_collective_status(ios)
+ if(ios==0.and.restore)then
+  read(u,pos=hse_position,iostat=ios)
+  call checkpoint_collective_status(ios)
+  if(ios==0)then
+   hse_loaded=.true.
+   call hse_checkpoint_read(u,ctx%hse,ios)
+  endif
+ endif
  close(u,iostat=closing)
  if(closing/=0)ios=closing
+ call checkpoint_collective_status(ios)
  if(ios/=0)then
   if(restore.and.hse_loaded)ctx%checkpoint_failed=.true.
   return
@@ -385,6 +439,15 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  endif
  status=0
  end subroutine rt_checkpoint
+
+ subroutine checkpoint_collective_status(status)
+ integer,intent(inout)::status
+ integer::local_failure,total_failure
+ local_failure=0
+ if(status/=0)local_failure=1
+ call comm_summation(local_failure,total_failure,nproc_group_global)
+ status=total_failure
+ end subroutine
 
  integer function rt_accepted_step(ctx) result(step)
  type(tddft_context),pointer,intent(in)::ctx

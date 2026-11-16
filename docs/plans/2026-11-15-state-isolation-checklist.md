@@ -13,11 +13,13 @@ The dated sections below retain the scope at their completion time. Older statem
 - [x] Native E/H field-local two-material LD + SBE + internally parallel TDDFT (1/2 orbital ranks), serial response replay and pure-LD regression.
 - [x] Two-way x/y/z FDTD decomposition with SBE1/TDDFT1: exact A/E/j parity to a single field rank. Installed-wheel samples and JP/EN/AI instructions updated.
 - [x] Existing configured material adapters, serial/MPI point identity and managed TDDFT point replay are available in the documented M4/M5/M6 subsets. Do not describe them as entirely missing.
-- [x] Same-topology direct field/PML/LD/SBE/TDDFT restart: PZ, TB-mBJ automatic/fixed coefficient and Libxc-PBE include native TDDFT orbital MPI2;63 saved/65 resumed steps match continuous128 bit-for-bit. Libxc-PZ is validated with TDDFT1. Generic archives/HSE remain below.
+- [x] Same-topology direct field/PML/LD/SBE/TDDFT restart: PZ, TB-mBJ automatic/fixed coefficient and Libxc-PBE include native TDDFT orbital MPI2;63 saved/65 resumed steps match continuous128 bit-for-bit. Libxc-PZ is validated with TDDFT1. Generic archives and other HSE partitions remain below.
 
-- [x] Fast-PR HSE serial Fortran context direct checkpoint: ACE/exact/learned/PT-CN histories and RT buffers, fresh-process6/7→12,32 cases overOMP1/2; listed internal traces match. Native-host/inner-MPI HSE remains separate; outer serial-worker coupling is covered below.
+- [x] Fast-PR HSE serial Fortran context direct checkpoint: ACE/exact/learned/PT-CN histories and RT buffers, fresh-process6/7→12,32 cases overOMP1/2; listed internal traces match. Native-host/k-only inner-MPI HSE and outer serial-worker coupling are covered below.
 
-- [x] Fast-PR HSE outer-MPI/FDTD coupling via one serial worker per material rank: field1/2+SBE1+HSE1 with local LD, Taylor/learned PT-CN direct127→256; all four trajectories match continuous exactly. HSE inner MPI remains unsupported.
+- [x] Fast-PR HSE outer-MPI/FDTD coupling via one serial worker per material rank: field1/2+SBE1+HSE1 with local LD, Taylor/learned PT-CN direct127→256; all four trajectories match continuous exactly. The separate native k-only inner-MPI entry is covered below.
+
+- [x] Fast-PR HSE native host-MPI k-only groups1/2, field1+SBE1+HSE2 with two field-local LD materials. Taylor/learned PT-CN direct127→256: all A/E/j histories match continuous bit-for-bit, only129 new step calls. HSE-only continuation current/energy also match exactly; rank1 truncation and swapped shards are collectively rejected. Ordinary serial HSE regression16 cases remains exact. Evidence: `../fast-hse-kmpi-validation-2026-11-16.md`. Orbital/rgrid HSE, changed topology and cross-group atomic rollback remain open.
 
 ### Delivery status and remaining mixed-material work
 
@@ -29,7 +31,7 @@ The dated sections below retain the scope at their completion time. Older statem
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
 8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC, inner-MPI/native-host HSE resources and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+9. [ ] Generic coupled-session archive: public custom-backend persistence/capability contract, changed-topology restore, other XC, HSE orbital/rgrid decomposition and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.

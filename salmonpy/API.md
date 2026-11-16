@@ -70,3 +70,5 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 直列モデルの共通契約、適合チェッカー、MPI点分散への接続は[MATERIALS.md](MATERIALS.md)を参照してください。
 
 `fast_hse` の `FastHSEMaterialProvider`／`FastHSEResponseBackend` は明示ビルドした高速PR版serialワーカーを外側MPIの物質応答へ接続するプレビュー入口です。COUPLED.mdを参照してください。HSE内部MPIを初期化しません。
+
+`fast_hse_mpi.NativeFastHSEBackend` は高速PR版HSEの実験的なホストMPI入口です。k点のみ1／2ランクの物質群と、同じ分割での直接保存／復元に対応します。メインスレッド・1プロセス1回のnative寿命に限定します。COUPLED.mdを参照してください。

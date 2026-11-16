@@ -3,7 +3,7 @@
   "files": {
     "src/xc/exx_native.f90": {
       "before_sha256": "2d9375f186815bb62c34405237b77fa70ac80b58a53ef704ea137014c96c68ae",
-      "after_sha256": "3f00d964ed88c5453d5e6c3c9096e7d4ce0d6b937ac00a372a1e364cb32bba70",
+      "after_sha256": "3f66adf165fbddef441fef4198bede4272d875c1561ab1d2e7a1466c389899f9",
       "source": "overrides/hse-explicit-routing/src/xc/exx_native.f90"
     },
     "src/xc/exx_rt_state.f90": {
@@ -155,6 +155,16 @@
       "before_sha256": "eaedfbb883690d02f104321eb5389c09796dbfa98c8f5acf2092013cd102a764",
       "source": "overrides/hse-explicit-routing/src/gs/occupation.f90",
       "after_sha256": "f12e519e5e23e6de39d52f87c16620f67c77c7233a97041ce9d44f2210232494"
+    },
+    "src/parallel/communication.f90": {
+      "before_sha256": "f5d59d05168f2fa77a8fbaf36da361a60fb52a491e6f63940edd87d50405ee18",
+      "after_sha256": "d4478217c301c0a68d64abaac238691b76fe95ed9d729acd848a90fbfb9308f0",
+      "source": "overrides/hse-explicit-routing/src/parallel/communication.f90"
+    },
+    "src/io/inputoutput.f90": {
+      "before_sha256": "c0c59b0f332864d79f2e78dffcf2140697e2fce8603fe3af263b8ffcc3a66fbf",
+      "after_sha256": "8594e92c92a3ee7035d6e6c4a55667a0dfc22bfeab8f83a7e7e1b7c5ac3e1a72",
+      "source": "overrides/hse-explicit-routing/src/io/inputoutput.f90"
     }
   }
 }

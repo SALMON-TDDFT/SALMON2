@@ -302,7 +302,7 @@ Use `mpi_mixed_native --direct-save-at 64` to stop at64 and save rank-local stat
 
 Saved state includes native E/H/PML, LD P/J/Q and old fields, electronic orbital buffers/density/potentials/Hartree/RT histories/A/current, SBE density matrix, and Python integrated A/lagged current/clocks. Initialization rebuilds static coefficients/resources before loading dynamic arrays. A completed file inventory with SHA256 checks is required; changed inputs/library/topology are rejected.
 
-Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible native library. Generic custom-backend persistence, changed MPI partitions, HSE and other XC profiles require further implementation/validation. Abort the job on native restore failure; this is not atomic rollback of an existing live session. Allow storage and memory for full states.
+Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible native library. Generic custom-backend persistence, changed MPI partitions and other XC profiles require further implementation/validation; fast-PR HSE has a separate entry below. Abort the job on native restore failure; this is not atomic rollback of an existing live session. Allow storage and memory for full states.
 
 Direct checkpoint format v2 validates XC names, derivative settings and input cval while retaining freshly initialized Libxc handles. Preserve runtime/checkpoint hashes. The sample RUNTIME argument also accepts an explicitly built/audited serial SALMON executable for reference validation; do not use an MPI binary as this child process. Use matching GS and RT functional inputs for each XC.
 
@@ -343,6 +343,33 @@ Supply an original GS/RT bundle with tddft_response,hse06 and an explicit fast p
 
 `--direct-save-at 127` captures field/PML/LD/SBE and worker internal state at one epoch. A new job uses `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. LOAD restores accepted step/current, with saved A/coupling histories checked. Only129 remaining steps are propagated; no elapsed127-step reconstruction. Fresh static initialization and independent serial validation replay remain separate. Same worker,bundle,input,MPI topology and shared archive directory are required.
 
-POSIX macOS/Linux worker uses /dev/stdin; measured here on Apple Silicon. Inner-MPI HSE, changed-topology restore,GPU,generic backend archives and continuation after native failure remain unsupported.
+POSIX macOS/Linux worker uses /dev/stdin; measured here on Apple Silicon. Orbital/grid-parallel HSE, changed-topology restore,GPU,generic backend archives and continuation after native failure remain unsupported.
 
 Worker inputs must use atomic units (unit_system=au), no internal pulses: ae_shape1=none or explicit zero impulse, ae_shape2=none, trans_longi=tr. Double driving by an internal pulse and external FDTD A is rejected. State time is accepted step×dt.
+
+## Fast-PR HSE with internal k-point MPI
+
+`salmonpy.fast_hse_mpi.NativeFastHSEBackend` runs fast-PR HSE collectively on an explicitly supplied material communicator. The host initializes MPI and retains ownership of finalization. Import does not load MPI or compile. Each group owns one point and one native lifetime per process, on the main thread. The native call temporarily changes the process working directory: do not use other threads that access relative paths.
+
+Prepare a new explicit-routing source with `tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing`, then explicitly build it with `tools/build_fast_hse_mpi.py PREPARED_SOURCE NEW_OUTPUT --jobs 2 --cmake-arg=...`. Use matching host-MPI Fortran/C compilers, OpenBLAS/LAPACK, FFTW and optional Libxc paths as in the runtime build guide. This build requires MPI/HSE and rejects GPU, Poisson-FFTW, ScaLAPACK and EigenExa profiles. The receipt binds source and adapter hashes. Only the pinned fast-PR profile is an engine option.
+
+```python
+from salmonpy.fast_hse import FastHSEMaterialProvider
+from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+from salmonpy.material_response import MaterialBinding
+
+binding = MaterialBinding("hse-point",
+    FastHSEMaterialProvider(bundle_directory, "rt.inp", max_steps=256),
+    NativeFastHSEBackend(mpi_build_json, existing_shared_work_root))
+# Assign two ranks to this point with assemble_native_layers / ParallelPlan.
+```
+
+Supported decomposition is k-only, one or two ranks, `nproc_ob=1,nproc_rgrid=1,1,1`. The backend overrides `nproc_k` to the communicator size and overrides dt/step capacity explicitly. Use enough k points for the group. Other driving/fixed-occupation/full-support restrictions above remain. The sample requires a serial worker receipt too, for independent reference validation after the coupled run.
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native FIELD_BUILD_JSON UNUSED_REFERENCE HSE_BUNDLE NEW_OUTPUT --fast-hse-build SERIAL_WORKER_BUILD_JSON --fast-hse-mpi-build MPI_BUILD_JSON --hse-ranks 2 --layers PATH_TO_mixed_hse_layers.json --dt .001 --steps 256 --rank-budget 4
+```
+
+This assigns field1,SBE1,HSE2; both LD materials stay local to the field rank. Use three separate jobs with the same arguments: continuous, `--direct-save-at 127`, then `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. Rank-local HSE shards include group size/rank and k ranges; all shards are checked before committing numerical state. Fresh initialization recreates static exchange/FFT resources, not elapsed propagation. Restore requires the same binary, bundle, communicator topology and shared archive directory. Early invalid/truncated shards are rejected before numerical commit. A late I/O failure invalidates the contexts; abort the job rather than retrying a live session. No cross-group atomic rollback is promised.
+
+Measured on Apple Silicon with a synthetic 8³ microscopic grid and 4×1×1 k mesh: Taylor/learned PT-CN, field1+SBE1+HSE2, 256 steps at dt=.001, direct split127. All A/c,E,j history arrays matched bit-for-bit after129 resumed calls. Against independent serial fast-PR response, maximum HSE current differences were4.07e-16 and1.71e-16 au. These are connection/restart regressions, not material convergence or scaling certification. Evidence: `docs/fast-hse-kmpi-validation-2026-11-16.md`.

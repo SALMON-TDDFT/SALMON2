@@ -229,7 +229,7 @@ contains
     call hse_occupation_input(system,nelec,temperature,nstate)
     ok=system_functional(system)=='hse06'.and.yn_periodic=='y'.and.yn_spinorbit=='n'.and.system%nspin==1.and. &
       yn_dc=='n'.and.yn_hse_wannier=='n'.and.temperature<0d0.and..not.system%kpoint_input%use_symmetry.and. &
-      info%isize_r==1.and.info%isize_o==1.and.info%isize_k==1.and.info%numm==1.and. &
+      info%isize_r==1.and.info%isize_o==1.and.info%isize_k>=1.and.info%numm==1.and. &
       exx_mlwf_radius==0d0.and.exx_mlwf_norm_fraction==0d0.and.exx_kpoint_backend=='cpu'
   end function
   function resolve_rt_context(rt_context,system) result(owner)

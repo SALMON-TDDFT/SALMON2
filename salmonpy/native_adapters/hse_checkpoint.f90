@@ -1,5 +1,5 @@
 ! Copyright 2026 SALMONpy contributors. Apache-2.0.
-! Same-binary numerical checkpoint for serial full-support fast-PR HSE.
+! Same-binary numerical checkpoint for serial or k-only MPI full-support fast-PR HSE.
 ! This module owns no FFT plans, C pointers, accelerators or communicators.
 ! Callers authenticate the archive/configuration and initialize the fresh CPU
 ! kernel by exx_refresh before read (operator construction, no propagation).
@@ -68,10 +68,11 @@ contains
   magic='SALMONPY_HSE_COMPLETE_V1'
   write(unit,iostat=status)magic
  end subroutine
- subroutine hse_checkpoint_read(unit,state,status)
+ subroutine hse_checkpoint_read(unit,state,status,validate_only)
   integer,intent(in)::unit
   type(s_exx_rt_state),intent(inout)::state
   integer,intent(out)::status
+  logical,optional,intent(in)::validate_only
   type(numeric_payload)::candidate
   type(kernel_metadata)::metadata,expected
   character(32)::magic
@@ -97,6 +98,9 @@ contains
   if(status/=0)return
   if(magic/='SALMONPY_HSE_COMPLETE_V1'.or..not.valid_payload(candidate))then
     status=1;return
+  endif
+  if(present(validate_only))then
+    if(validate_only)return
   endif
   ! Numerical-only commit. In particular, never assign the whole HSE state.
   state%exx_freeze=candidate%exx_freeze
@@ -210,6 +214,7 @@ contains
   type(s_exx_rt_state),intent(in)::state
   type(numeric_payload),intent(out)::value
   type(kernel_metadata),intent(out)::metadata
+  integer::axis
   value%exx_freeze=state%exx_freeze
   value%exx_force_full_action=state%exx_force_full_action
   value%exx_adaptive_ready=state%exx_adaptive_ready
@@ -261,12 +266,23 @@ contains
   if(allocated(state%native_kernel%order))metadata%order=state%native_kernel%order
   if(allocated(state%native_kernel%point))metadata%point=state%native_kernel%point
   if(allocated(state%native_kernel%shift))metadata%shift=state%native_kernel%shift
-  if(allocated(state%native_kernel%distance_index))metadata%distance_index=state%native_kernel%distance_index
+  if(allocated(state%native_kernel%distance_index))then
+    ! The kernel initializes only each axis's active rectangle. Padding in the
+    ! max-dimension allocation is undefined and must never enter an archive.
+    allocate(metadata%distance_index(0:maxval(metadata%n)-1,0:maxval(metadata%n)-1, &
+      0:maxval(metadata%mesh)-1,3),source=0)
+    do axis=1,3
+      metadata%distance_index(0:metadata%n(axis)-1,0:metadata%n(axis)-1,0:metadata%mesh(axis)-1,axis)= &
+        state%native_kernel%distance_index(0:metadata%n(axis)-1,0:metadata%n(axis)-1, &
+          0:metadata%mesh(axis)-1,axis)
+    enddo
+  endif
   if(allocated(state%native_kernel%kernel))metadata%kernel=state%native_kernel%kernel
   if(allocated(state%native_kernel%phase))metadata%phase=state%native_kernel%phase
  end subroutine
  logical function same_metadata(a,b) result(ok)
   type(kernel_metadata),intent(in)::a,b
+  integer::axis
   ok=.false.
   if(any(a%n/=b%n))return
   if(any(a%mesh/=b%mesh))return
@@ -297,7 +313,11 @@ contains
   if(allocated(a%distance_index))then
     if(any(shape(a%distance_index)/=shape(b%distance_index)))return
     if(any(lbound(a%distance_index)/=lbound(b%distance_index)))return
-    if(any(a%distance_index/=b%distance_index))return
+    ! Older same-binary archives can contain arbitrary unused padding too.
+    do axis=1,3
+      if(any(a%distance_index(0:a%n(axis)-1,0:a%n(axis)-1,0:a%mesh(axis)-1,axis)/= &
+             b%distance_index(0:b%n(axis)-1,0:b%n(axis)-1,0:b%mesh(axis)-1,axis)))return
+    enddo
   endif
   if(allocated(a%kernel).neqv.allocated(b%kernel))return
   if(allocated(a%kernel))then

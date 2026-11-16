@@ -315,6 +315,33 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 3 python -m salmonpy.example
 
 `--direct-save-at 127` で場/PML/LD/SBEとHSEワーカーの内部状態を同時刻に保存し、新しいジョブで `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT` を指定します。HSEのLOAD応答により受理済みステップ・電流も復元し、保存したA・結合履歴と照合します。過去127ステップを再実行せず、残り129ステップを進めます。共有保存先・同一ワーカー／初期バンドル／入力／MPI構成が必要です。新しいワーカーの初期資源作成と、検証用の独立参照再生は別途行います。
 
-対象はmacOS/Linux向けPOSIXワーカー（`/dev/stdin`使用）です。今回の実測はApple Silicon。HSE内部MPI、変更した分割への再開、GPU、任意バックエンドの一般保存、native異常後の継続は未対応です。
+対象はmacOS/Linux向けPOSIXワーカー（`/dev/stdin`使用）です。今回の実測はApple Silicon。このワーカー方式ではHSE内部MPIを使いません。変更した分割への再開、GPU、任意バックエンドの一般保存、native異常後の継続は未対応です。
 
 HSEワーカーへの入力は原子単位（unit_system=au）に限定します。内部パルスを無効にし、ae_shape1はnoneまたは明示的なゼロimpulse、ae_shape2はnone、trans_longiはtrとします。FDTDからのAと内部パルスの二重駆動を拒否します。状態のtimeは受理済みstep×dtです。
+
+## 高速PR版HSEの内部k点MPI
+
+`salmonpy.fast_hse_mpi.NativeFastHSEBackend` は、Python側で用意した物質コミュニケータ内で高速PR版HSEを集合的に実行します。MPIの初期化・終了はホストが管理します。import時にMPI読込やビルドは行いません。1群1点、1プロセス1回のnative寿命、メインスレッド専用です。呼出中は作業ディレクトリを一時変更するため、相対パスを使う別スレッドと併用しないでください。
+
+`tools/prepare_hse_rt_state.py NEW_SOURCE --explicit-routing` で新しいソースを準備し、`tools/build_fast_hse_mpi.py PREPARED_SOURCE NEW_OUTPUT --jobs 2 --cmake-arg=...` で明示ビルドします。ホストと同じMPIのFortran/Cコンパイラ、OpenBLAS/LAPACK、FFTW、必要ならLibxcのパスをRUNTIMEガイドに従って指定します。MPI/HSEを必須とし、GPU・Poisson-FFTW・ScaLAPACK・EigenExa構成は拒否します。記録にはソースとアダプターのハッシュを含めます。実行エンジンは固定した高速PR版のみです。
+
+```python
+from salmonpy.fast_hse import FastHSEMaterialProvider
+from salmonpy.fast_hse_mpi import NativeFastHSEBackend
+from salmonpy.material_response import MaterialBinding
+
+binding = MaterialBinding("hse-point",
+    FastHSEMaterialProvider(bundle_directory, "rt.inp", max_steps=256),
+    NativeFastHSEBackend(mpi_build_json, existing_shared_work_root))
+# assemble_native_layers / ParallelPlanでこの点に2ランクを割り当てる。
+```
+
+k点のみの1／2ランク分割に対応し、軌道と実空間は分割しません（`nproc_ob=1,nproc_rgrid=1,1,1`）。バックエンドは`nproc_k`を群サイズに、dtと容量を指定値に設定します。群に十分なk点を用意してください。外場・固定占有・全支持領域の制約は上記と共通です。サンプルでは結合後の独立比較用にserialワーカーのビルド記録も指定します。
+
+```sh
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native FIELD_BUILD_JSON UNUSED_REFERENCE HSE_BUNDLE NEW_OUTPUT --fast-hse-build SERIAL_WORKER_BUILD_JSON --fast-hse-mpi-build MPI_BUILD_JSON --hse-ranks 2 --layers PATH_TO_mixed_hse_layers.json --dt .001 --steps 256 --rank-budget 4
+```
+
+場1＋SBE1＋HSE2で4ランクを使い、2種類のLDは場ランク内に保持します。同じ引数で連続実行、`--direct-save-at 127`、新しいジョブで`--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`を順に実行します。HSEは群サイズ・群内ランク・k範囲を含むランク別ファイルを保存し、全ファイルを検査してから数値状態を反映します。初期化は静的な交換／FFT資源を再構築し、過去の時間発展は行いません。同じバイナリ・元GS・入力・分割と共有保存先が必要です。早期の不正・切断ファイルは数値反映前に拒否します。後段のI/O失敗時は状態を無効化し、ジョブを中止してください。群をまたぐ原子的な巻き戻しは保証しません。
+
+Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しました。Taylor／学習PT-CNとも場1＋SBE1＋HSE2、dt=.001、256ステップ中127で直接保存し、残り129回の呼出後にA/c・E・jの全履歴がビット単位で一致しました。独立serial高速PR応答との最大HSE電流差は4.07e-16／1.71e-16 auです。接続・再開の回帰検査であり、物理収束・大規模性能の保証ではありません。記録：`docs/fast-hse-kmpi-validation-2026-11-16.md`。
