@@ -606,3 +606,7 @@ x/y/z各方向の2分割は、128ステップで場1ランクの結果と完全�
 ## 混在層の構成入口
 
 配置には `salmonpy.layers.assemble_native_layers` と `examples/mixed_layers.json` を使用する。物理設定を配置JSONへ重複させず、準備済みの物質IDとモデル／MaterialBindingを渡す。Bohr単位、厚み切り上げ、全電子セルの独立点化、必要ランク数と実際の厚みを利用者へ示す。ランク予算はメモリ制限ではない。LDと電子点の禁止された近接を真空で黙って変更しない。構成関数はMPI・GS計算・ダウンロードを開始しない。自作コードも明示的なMaterialBindingで接続する。詳細と実行例はCOUPLED.md／COUPLED.en.md。
+
+## native混在サンプルの直接保存／復元
+
+`examples/mpi_mixed_native.py` の `--direct-save-at N` と `--direct-resume PATH` を使う。入力・nativeライブラリ・GS・分割・全ステップ数は同じに保ち、新しい出力先へ復元する。場/PML/LD/SBE/周期PZ中点TDDFTの内部状態と積算A・直前電流・時計を直接復元する。`restored_step` と `native_steps_this_job` で過去の時間発展を再計算していないことを確認する。参照用の独立シリアル計算は検証のため別途実行される。保存は同じ環境・MPI構成の同梱サンプル用であり、汎用バックエンド保存や他XCの直接復元を推定しない。詳細はCOUPLED日英ガイド。

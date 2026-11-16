@@ -36,7 +36,13 @@ def main():
     parser.add_argument('--without-ld', action='store_true', help='vacuum control for local LD regions')
     parser.add_argument('--save-at', type=int, help='stop after this step and save a replay checkpoint')
     parser.add_argument('--resume', type=Path, help='reconstruct and continue a replay checkpoint')
+    parser.add_argument('--direct-save-at', type=int, help='save internal states and stop at this step')
+    parser.add_argument('--direct-resume', type=Path, help='load internal states without replay')
     args = parser.parse_args()
+    if args.direct_save_at is not None and not 0 < args.direct_save_at < args.steps:
+        parser.error('direct-save-at must be between zero and steps')
+    if (args.direct_save_at is not None or args.direct_resume is not None) and (args.save_at is not None or args.resume is not None):
+        parser.error('direct and replay checkpoint options cannot be mixed')
     if args.save_at is not None and not 0 < args.save_at < args.steps:
         parser.error('save-at must be between zero and steps')
     if args.layers is not None and args.without_ld: parser.error('express vacuum in the layout; do not combine --layers with --without-ld')
@@ -105,7 +111,10 @@ def main():
                      'materials': {str(k): v.key for k,v in bindings.items()},
                      'library': digest_file(build['library']), 'assets': assets,
                      'field_grid': list(args.field_grid), 'tddft_ranks': args.tddft_ranks,
-                     'layout': layout, 'steps': args.steps}
+                     'layout': layout, 'steps': args.steps,
+                     'sbe_model': hashlib.sha256(b''.join(np.asarray(getattr(sbe, k)).tobytes()
+                         for k in ('eigen','momentum','nonlocal_velocity','weights','lattice'))
+                         + repr((sbe.electrons,sbe.correction_order,sbe.nonlocal_correction)).encode()).hexdigest()}
         restored = None
         if args.resume is not None:
             metadata = json.loads((args.resume/'checkpoint.json').read_text())
@@ -124,20 +133,39 @@ def main():
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
         session = ResponseSession(context, bindings, dt=dt)
         coupled = CoupledStepper(session, field)
-        stop = args.save_at if args.save_at is not None else args.steps
+        start = 0
+        if args.direct_resume is not None:
+            from salmonpy.examples._direct_checkpoint import checkpoint
+            start = checkpoint(world, coupled, args.direct_resume, signature, restore=True)
+            if world.rank == 0:
+                history = json.loads((args.direct_resume/'frames.json').read_text())
+                for frame in history:
+                    for key, value in frame.items():
+                        if isinstance(value, list): frame[key] = np.asarray(value)
+                if len(history) != start: raise ValueError('checkpoint frame count mismatch')
+        stop = args.direct_save_at or args.save_at or args.steps
+        if args.direct_resume is not None and stop <= start:
+            raise ValueError('direct save/stop must advance beyond restored step')
         if restored is not None and stop <= metadata['step']:
             raise ValueError('save-at must advance beyond the resumed checkpoint')
-        for index in range(stop):
+        for index in range(start, stop):
             frame = coupled.step()
             if frame is not None:
                 if restored is not None and index < metadata['step']:
                     for key, values in restored.items():
                         np.testing.assert_array_equal(frame[key], values[index])
                 history.append(frame)
+        if args.direct_save_at is not None:
+            from salmonpy.examples._direct_checkpoint import checkpoint, digest
+            destination = output/'direct-checkpoint'
+            checkpoint(world, coupled, destination, signature, frames=history)
         communication = session.communication_report()
         session.close()
         if field is not None: field.close()
         context.close()
+        if args.direct_save_at is not None:
+            if world.rank == 0: print(output/'direct-checkpoint')
+            return
         if args.save_at is not None:
             if world.rank == 0:
                 checkpoint = output/'checkpoint'
@@ -187,6 +215,7 @@ def main():
                       'ld_materials': {} if args.without_ld else {'1': 'drude', '2': 'two-lorentz-poles'},
                       'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),
                       'timing': coupled.timing, 'communication': communication,
+                      'native_steps_this_job': stop-start, 'restored_step': start,
                       'scope': 'tiny native E/H coupling fixture; no physical convergence or whole-session restart claim'}
             if assembly is not None:
                 report['assembly'] = assembly.record()

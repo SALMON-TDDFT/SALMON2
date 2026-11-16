@@ -294,4 +294,12 @@ To repeat SBE instead, change the condition above to `sbe-point`. Both layouts w
 
 `mpi_mixed_native --save-at 64` stops at step64 and writes input fingerprints and A/E/current histories to `OUTPUT/checkpoint/`. Use the same total steps, layout, library, GS and MPI topology with a new output directory and `--resume PREVIOUS_OUTPUT/checkpoint`. Add `--compare CONTINUOUS_OUTPUT` to compare complete histories.
 
-This reconstructs field, LD and electronic histories by rerunning their original schedule from initial conditions. Recorded A/E/current must match exactly before continuation. It requires the original assets and repeats the elapsed computation; it is not a direct internal-state dump. Scope is the supplied sample in the same environment/topology. General coupled-state archives and fast direct restore remain unimplemented.
+This reconstructs field, LD and electronic histories by rerunning their original schedule from initial conditions. Recorded A/E/current must match exactly before continuation. It requires the original assets and repeats the elapsed computation; it is not a direct internal-state dump. Scope is the supplied sample in the same environment/topology. General coupled-state archives remain unimplemented; see the direct sample restart below.
+
+### Direct internal-state restart
+
+Use `mpi_mixed_native --direct-save-at 64` to stop at64 and save rank-local state in `OUTPUT/direct-checkpoint/`. Start a new output/job with the same inputs, library, GS and MPI topology and `--direct-resume PREVIOUS_OUTPUT/direct-checkpoint`. Keep the original total128 steps. No propagation to the saved time is repeated. `--compare CONTINUOUS_OUTPUT` compares histories; `result.json` reports `restored_step` and `native_steps_this_job`.
+
+Saved state includes native E/H/PML, LD P/J/Q and old fields, electronic orbital buffers/density/potentials/Hartree/RT histories/A/current, SBE density matrix, and Python integrated A/lagged current/clocks. Initialization rebuilds static coefficients/resources before loading dynamic arrays. A completed file inventory with SHA256 checks is required; changed inputs/library/topology are rejected.
+
+Scope is the supplied periodic PZ middlepoint fixture with the same environment/decomposition. Generic custom-backend persistence, changed MPI partitions and other XC restore profiles require separate validation. Abort the job on native restore failure; this is not atomic rollback of an existing live session. Allow storage and memory for full states.
