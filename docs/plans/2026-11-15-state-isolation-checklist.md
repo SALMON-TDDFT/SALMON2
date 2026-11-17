@@ -1,6 +1,6 @@
 # Active state-isolation checklist
 
-Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. The current user-approved priority includes direct mixed-session persistence and non-PZ inner-MPI validation; wider isolation continues as a separate objective.
+Continuation of handoff §7.3–4 and the approved GS/TDDFT ownership work. This is not a replacement for the wider project backlog. Historical plans record their completion-time scope; later evidence below extends it. Direct mixed-session persistence, non-PZ inner-MPI validation and protected ordinary mixed restoration are completed within the recorded scopes. Wider isolation, resources and distribution continue as separate objectives.
 
 ## Current audit — 2026-11-17 (takes precedence over historical status notes)
 
@@ -19,19 +19,22 @@ The dated sections below retain the scope at their completion time. Older statem
 
 - [x] Fast-PR HSE outer-MPI/FDTD coupling via one serial worker per material rank: field1/2+SBE1+HSE1 with local LD, Taylor/learned PT-CN direct127→256; all four trajectories match continuous exactly. The separate native k-only inner-MPI entry is covered below.
 
-- [x] Fast-PR HSE native host-MPI k-only groups1/2, field1+SBE1+HSE2 with two field-local LD materials. Taylor/learned PT-CN direct127→256: all A/E/j histories match continuous bit-for-bit, only129 new step calls. HSE-only continuation current/energy also match exactly; rank1 truncation and swapped shards are collectively rejected. Ordinary serial HSE regression16 cases remains exact. Evidence: `../fast-hse-kmpi-validation-2026-11-16.md`. Orbital/rgrid HSE, changed topology and cross-group atomic rollback remain open.
+- [x] Fast-PR HSE native host-MPI k-only groups1/2, field1+SBE1+HSE2 with two field-local LD materials. Taylor/learned PT-CN direct127→256: all A/E/j histories match continuous bit-for-bit, only129 new step calls. HSE-only continuation current/energy also match exactly; rank1 truncation and swapped shards are collectively rejected. Ordinary serial HSE regression16 cases remains exact. Evidence: `../fast-hse-kmpi-validation-2026-11-16.md`. Orbital/rgrid HSE, changed topology and general native-step recovery remain open; handled restore failures are covered by the later protected-restoration evidence.
+
+- [x] Common checkpoint admission/execution and backend-owned isolated-candidate restore. Ordinary native mixed direct resume now protects field/PML/all local LD, SBE and native TDDFT/fast-PR HSE against handled staging failure; retry and fresh CLI continuation verified. Source/wheel502 tests, one skip each. Latest evidence: `../mixed-protected-restore-validation-2026-11-17.md` (fe286bc1).
+- [x] GS/2 Zarr-v3 array archive, strict Gamma export/import and opt-in serial multi-k bridge exist within documented periodic/unpolarized/fixed-ion scopes. Do not list GS archive v2 as wholly missing. MPI/spin/DC/general portability remain separate extensions; see salmonpy/GS_ARCHIVE.en.md.
 
 ### Delivery status and remaining mixed-material work
 
 1. [x] Delivery: native/distributed-field samples and evidence pushed in b5b2053c, layer setup in01d43cc1, direct persistence in1851c533, non-PZ persistence inea22fe15. No routine Actions.
 2. [x] Reject longitudinal incident components in Multiscale1D prefilled histories, including zero boundary-sample cases. Regression and valid transverse preservation verified.
 3. [x] Configuration-to-native-mixed setup: explicit material IDs/models or bindings, ordered geometry/thickness and rank budget via assemble_native_layers. Initial-state preparation remains explicit, not an automatic arbitrary backend factory.
-4. [x] Same-topology supplied mixed fixture direct checkpoint/restart: native field/PML/local LD/SBE/TDDFT numerical state and coupling history/clocks/point IDs captured together; no elapsed propagation replay. PZ and non-PZ measured scopes below. Generic user-backend archives, changed topology and cross-group atomic rollback remain open.
-5. [ ] Native failure contract: recoverable errors and collective failure atomicity. Current native samples abort the MPI job on error.
+4. [x] Same-topology supplied mixed fixture direct checkpoint/restart: native field/PML/local LD/SBE/TDDFT numerical state and coupling history/clocks/point IDs captured together; no elapsed propagation replay. PZ and non-PZ measured scopes below. Generic user-backend archives and changed topology remain open. Handled mixed restore failures are now protected as recorded below.
+5. [ ] General native failure contract: recoverable step/initialization errors and process-terminating native paths remain open. Handled mixed restore staging failures already preserve originals and permit continuation/retry; do not list that completed subset as missing. The CLI still exits on an unhandled error.
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
-8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Generic coupled-session archive: archive interoperability/completion and migration contracts, changed-topology restore, other XC, HSE orbital/rgrid decomposition and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not fresh Linux/Intel Mac validation or a published matching runtime catalog. Windows native support/delivery policy is distinct from existing lightweight wheel support.
+9. [ ] General coupled archives: interoperable archive layout/version migrations, full arbitrary-backend identity propagation, changed-topology restore and complete historical native output streams. Common admission/execution and protected restore already exist; the current native sample remains same binary/input/topology. Unsupported XC/resource profiles and HSE orbital/rgrid decomposition require their own validation.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
@@ -413,3 +416,10 @@ Evidence: `../native-candidate-restore-validation-2026-11-17.md`. Cache validity
 - [ ] Stable public native ABI,changed MPI topology,arbitrary backend cloning and native allocation/process-failure recovery remain separate work; this does not finish unrestricted multi-context ownership.
 
 Evidence: `../mixed-protected-restore-validation-2026-11-17.md`.
+
+### Checklist reconciliation after fe286bc1 — 2026-11-17
+
+- [x] Corrected the current audit's stale cross-group restore/open statements; ordinary protected restore is complete for the measured supported paths.
+- [x] Distinguished completed common checkpoint API and GS/2 subsets from broader archive/identity/MPI portability work. M4–M6 remain umbrella milestones with completed subtasks, not wholly missing features.
+- [x] Kept molecular work paused and preserved historical completion records. Ordinary native output-file truncation, process/OOM recovery and general step failure atomicity were not marked complete.
+- Suggested next practical priority: aggregate memory estimation and budget admission, including candidate coexistence during protected restore. Stable native context/ABI ownership and supported-platform runtime evidence remain parallel broader objectives. This reconciliation adds no feature or new numerical test claim.
