@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-17.1`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.1`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -35,11 +35,27 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 `_runtime_source/tests/native/test_hse_symmetry_resources.f90` に同梱します。
 対応する監査済み高速PR版モジュール／ライブラリから明示的にコンパイルします。
 
+## 状態所有の場の検査
+
+内部Fortran入口 `symmetry_check_field(map, A, status)` と
+`exx_validate_vector_potential(system, A, status)` で、一様なA/cが保持したCartesianの
+対称操作と両立するか検査します。共有の対称性設定は参照しません。statusは0が適合、
+1が不正／未準備、2が場による対称群の破れです。非ゼロAは最大成分で規格化してから
+方向の許容誤差1e-10を適用するため、振幅が微小でも禁止方向は通りません。
+ゼロAにも有効なマップが必要です。この入口は状態変更・通信を行いません。
+
+TDDFTアダプターでは数値状態のバックアップ／時間発展より前に検査し、既存の集団通信で
+失敗を共有します。独立したC2z／mirror-x、傾いたセル、微小／巨大な場、不正値、設定不整合、
+終了済みownerを検証しました。場とマップの境界の検査であり、対称性情報全体やnative初期化の
+保証ではありません。対称性付きTDDFTのopenと保存復元の禁止は維持し、対称性付き時間発展・
+再開への対応とは扱いません。明示ビルド用プローブは
+`_runtime_source/tests/native/test_hse_symmetry_field.f90` です。
+
 ## 次の接続作業
 
 縮約k点をTDDFT／FDTDへ解放する前に、次を実装・検証します。
 
-1. 実際のA(t)が保持した対称操作のlittle groupに収まることを、更新前に検査する。
+1. 状態所有の実A検査は実装済み。保存復元の準備後に対称性付き時間発展でも検証する。
    軸フラグだけでは最終操作行列を保証できず、任意のA(t)は固定偏光で有効な縮約を破り得る。
 2. マップ・履歴・キャッシュの識別情報を直接／保護付き保存復元へ接続する。
    所有ハンドルの複製や受理済みステップの再生に頼らない。

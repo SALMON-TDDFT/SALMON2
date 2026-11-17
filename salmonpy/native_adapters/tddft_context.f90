@@ -13,6 +13,7 @@ module salmonpy_tddft_context
  use salmon_global
  use parallelization,only:nproc_size_global,nproc_group_global,nproc_id_global
  use communication,only:comm_summation,comm_bcast
+ use exx_native,only:exx_validate_vector_potential
  use sym_sub,only:use_symmetry
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
@@ -265,7 +266,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  real(8),intent(in)::ac(3)
  real(8),intent(out)::current(3),total_energy
  integer,intent(out)::status
- integer::itt,i,guard_status
+ integer::itt,i,guard_status,field_status
  type(checkpoint_payload)::accepted_payload
  type(numeric_payload)::accepted_exchange
  type(s_xc_operator_payload)::accepted_xc
@@ -280,6 +281,10 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  do i=1,3
   if(.not.ieee_is_finite(ac(i)))guard_status=2
  enddo
+ if(guard_status==0)then
+  call exx_validate_vector_potential(ctx%system,ac,field_status)
+  if(field_status/=0)guard_status=2
+ endif
  call comm_summation(guard_status,status,nproc_group_global)
  if(status/=0)return
  call hse_checkpoint_capture(ctx%hse,accepted_exchange,status)

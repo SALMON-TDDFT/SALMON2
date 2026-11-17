@@ -585,3 +585,11 @@ Evidence: `../orbital-initialization-validation-2026-11-17.md`.
 - [ ] Next priority: owned actual-A little-group checks,complete symmetry-map/history/cache direct/protected persistence,then reduced internal-k MPI and mixed fault/resume. Current TDDFT/FDTD/checkpoint symmetry prohibitions remain. Core proof does not establish symmetric TDDFT or physical convergence. Molecular work paused.
 
 Evidence: `../fast-hse-symmetry-validation-2026-11-17.md`.
+
+### 2026-11-18 owned fast-PR uniform-field admission
+
+- [x] Read-only state-owned Cartesian little-group check for uniform A/c; normalized nonzero direction/tolerance1e-10, finite/readiness/geometry/operation identity checks and status0/1/2. No shared symmetry fallback. TDDFT local pre-backup/propagation hook with existing collective admission.
+- [x] Native independent C2z/mirror-x/rotated-cell, zero/tiny/huge/nonfinite fields, tolerance boundary, malformed/stale/closed owners and preservation; existing16 exchange cases and non-reduced GS/mixed/protected retry/direct restore remain exact.
+- [ ] Complete symmetry-map/history/cache persistence; reduced internal-k MPI and symmetric mixed failure/retry/resume. Symmetric TDDFT/FDTD/checkpoints remain prohibited. No conventional HSE engine; molecular work paused; budgets advisory only.
+
+Evidence: `../owned-hse-field-validation-2026-11-18.md`.

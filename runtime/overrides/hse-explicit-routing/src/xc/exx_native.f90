@@ -43,6 +43,7 @@ module exx_native
     hse_fft_layout
   implicit none
   private
+  public :: exx_validate_vector_potential
   public :: exx_set_phase,exx_pre_scf
   public :: exx_pre_scf_initialize,exx_pre_scf_begin,exx_pre_scf_not_ready,exx_pre_scf_count_ready
   public :: exx_bind_system,exx_unbind_system,exx_context,exx_system_energy
@@ -260,6 +261,81 @@ contains
       ok=.true.
     endif
   end function
+  subroutine exx_validate_vector_potential(system,ac,status)
+    type(s_dft_system),intent(in)::system
+    real(8),intent(in)::ac(3)
+    integer,intent(out)::status
+    type(s_rgrid)::grid_view
+    real(8)::cartesian(3,3)
+    integer::field_status,i,j,k
+    integer(int64)::points
+    status=1
+    do i=1,3
+      if(.not.ieee_is_finite(ac(i)))return
+    enddo
+    ! No fallback to the legacy process-global HSE owner or sym_sub settings.
+    if(.not.associated(system%salmonpy_hse_owner))return
+    select type(owner=>system%salmonpy_hse_owner)
+    type is(s_exx_rt_state)
+      if(.not.owner%native_resources_enabled)return
+      if(.not.system%kpoint_input%use_symmetry)then
+        if(owner%native_symmetry%nsym/=0.or.owner%native_symmetry%nfull/=0.or.owner%native_symmetry%nrep/=0)return
+        status=0;return
+      endif
+      call symmetry_check_field(owner%native_symmetry,ac,field_status)
+      if(field_status==1)return
+      if(owner%native_symmetry%nrep/=system%nk)return
+      grid_view%num=owner%native_symmetry%n
+      if(.not.owned_symmetry_grid_matches(system,grid_view))return
+      do j=1,3
+        if(.not.ieee_is_finite(owner%native_symmetry%h(j)))return
+        do i=1,3
+          if(.not.ieee_is_finite(owner%native_symmetry%cell(i,j)))return
+          if(.not.ieee_is_finite(owner%native_symmetry%inverse_cell(i,j)))return
+        enddo
+      enddo
+      if(any(owner%native_symmetry%cell/=system%primitive_a).or.any(owner%native_symmetry%h/=system%hgs))return
+      points=1_int64
+      do i=1,3
+        if(system%kmesh(i)<1)return
+        if(int(system%kmesh(i),int64)>int(owner%native_symmetry%nfull,int64)/points)return
+        points=points*int(system%kmesh(i),int64)
+      enddo
+      if(points/=int(owner%native_symmetry%nfull,int64))return
+      if(.not.allocated(system%kpoint_input%symmat_a).or..not.allocated(system%kpoint_input%symmat_b))return
+      if(any(shape(system%kpoint_input%symmat_a)/=[3,4,owner%native_symmetry%nsym]))return
+      if(any(shape(system%kpoint_input%symmat_b)/=[3,4,owner%native_symmetry%nsym]))return
+      if(any(lbound(system%kpoint_input%symmat_a)/=1).or.any(lbound(system%kpoint_input%symmat_b)/=1))return
+      if(.not.allocated(owner%native_symmetry%rotation).or..not.allocated(owner%native_symmetry%translation))return
+      if(any(shape(owner%native_symmetry%rotation)/=[3,3,owner%native_symmetry%nsym]))return
+      if(any(shape(owner%native_symmetry%translation)/=[3,owner%native_symmetry%nsym]))return
+      if(any(lbound(owner%native_symmetry%rotation)/=1).or.any(lbound(owner%native_symmetry%translation)/=1))return
+      do k=1,owner%native_symmetry%nsym
+        do j=1,4;do i=1,3
+          if(.not.ieee_is_finite(system%kpoint_input%symmat_a(i,j,k)))return
+          if(.not.ieee_is_finite(system%kpoint_input%symmat_b(i,j,k)))return
+        enddo;enddo
+        do j=1,3;do i=1,3
+          if(.not.ieee_is_finite(owner%native_symmetry%rotation(i,j,k)))return
+        enddo;enddo
+        do i=1,3
+          if(.not.ieee_is_finite(owner%native_symmetry%translation(i,k)))return
+        enddo
+        if(any(system%kpoint_input%symmat_a(:,1:3,k)/=owner%native_symmetry%rotation(:,:,k)))return
+        if(any(system%kpoint_input%symmat_b(:,1:3,k)/=owner%native_symmetry%rotation(:,:,k)))return
+        if(any(system%kpoint_input%symmat_a(:,4,k)/=owner%native_symmetry%translation(:,k)))return
+        cartesian=matmul(system%primitive_a, &
+          matmul(owner%native_symmetry%rotation(:,:,k),owner%native_symmetry%inverse_cell))
+        do j=1,3;do i=1,3
+          if(.not.ieee_is_finite(cartesian(i,j)))return
+        enddo;enddo
+        if(maxval(abs(cartesian-owner%native_symmetry%cart_rotation(:,:,k)))>1d-10)return
+      enddo
+      status=field_status
+    class default
+      return
+    end select
+  end subroutine exx_validate_vector_potential
   logical function owned_symmetry_grid_matches(system,mg) result(ok)
     type(s_dft_system),intent(in)::system
     type(s_rgrid),intent(in)::mg

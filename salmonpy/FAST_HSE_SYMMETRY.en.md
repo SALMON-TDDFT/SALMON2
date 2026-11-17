@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-17.1`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.1`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -44,11 +44,30 @@ The native probe is packaged under
 `_runtime_source/tests/native/test_hse_symmetry_resources.f90`; compilation is
 explicit and requires matching audited fast-PR modules/library.
 
+## Owned field validation
+
+The internal `symmetry_check_field(map, A, status)` and
+`exx_validate_vector_potential(system, A, status)` now check uniform A/c against
+the retained Cartesian operation matrices, without reading shared symmetry
+settings. Status is 0 for compatible, 1 for invalid/unready input, and 2 for a
+broken field little group. For nonzero A, the maximum component normalizes the
+vector before a 1e-10 directional tolerance is applied; arbitrarily small
+amplitude does not excuse a forbidden direction. Zero A still requires a valid
+map. These internal Fortran entries do not mutate state or communicate.
+
+The TDDFT adapter invokes the owner check before numerical backup/propagation
+and agrees guard failure collectively. Tests cover independent C2z/mirror-x
+owners, a rotated cell, tiny/huge fields, invalid values, stale configuration
+and closed owners. This checks the field/map boundary, not all symmetry data
+or native initialization. Symmetric TDDFT opening and checkpoint prohibitions
+remain; symmetric time evolution and restart are not certified. The explicit
+native probe is `_runtime_source/tests/native/test_hse_symmetry_field.f90`.
+
 ## Next connection work
 
 Before admitting reduced-k states into TDDFT/FDTD, implement and verify all of:
 
-1. Check the actual A(t) against the retained field little group before advancing.
+1. The owned actual-A check is implemented; verify it in symmetric time evolution once persistence is ready.
    Axis flags alone do not certify the final operation matrices. Arbitrary A(t)
    can break a reduction valid for a fixed polarization.
 2. Preserve complete map/history/cache identity through direct and protected

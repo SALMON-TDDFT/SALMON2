@@ -3,7 +3,7 @@
   "files": {
     "src/xc/exx_native.f90": {
       "before_sha256": "2d9375f186815bb62c34405237b77fa70ac80b58a53ef704ea137014c96c68ae",
-      "after_sha256": "dd5531cd0bfb54cf33a1e2dfcde4bbbe52fe8e7c6c99ce078d39a24ebab2f9f2",
+      "after_sha256": "d95e626a4d630534e343502fdac3663d9d66a952ff65fcb68a85fac57083a1d6",
       "source": "overrides/hse-explicit-routing/src/xc/exx_native.f90"
     },
     "src/xc/exx_rt_state.f90": {
@@ -180,6 +180,11 @@
       "before_sha256": "e1bcb34e8a4c0d3059d240c29d6c0ae7f3354c72e4fd2051aba3b102288f0834",
       "after_sha256": "afbc7e613fbc054e0db4a492afe08f5f6eaf960a4ef8be01b1ba0088874b016b",
       "source": "overrides/hse-explicit-routing/src/rt/CMakeLists.txt"
+    },
+    "src/xc/exx_symmetry.f90": {
+      "before_sha256": "bc374fcdde702f480174a78b4cef5a9e34d6ca86b0c62a832ffa5a15ee3c8a40",
+      "after_sha256": "fd6707902bc1ad089d6e41fdc856dde9be5a2ddd2c28b3b65c3bc487cf7d3f23",
+      "source": "overrides/hse-explicit-routing/src/xc/exx_symmetry.f90"
     }
   }
 }

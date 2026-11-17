@@ -127,3 +127,5 @@ RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択�
 HSEは高速PR版を本筋に進めます。[対称性の対応範囲](FAST_HSE_SYMMETRY.md)で、今回検証した
 独立交換コアと、まだ拒否する対称性付きTDDFT／FDTD／checkpointを区別しています。
 コア試験だけで公開接続の対応範囲を広げたとは扱いません。
+
+高速PR版HSEの内部A検査は状態所有のCartesian操作・規格化方向で行う。対称性付きTDDFT／FDTD・保存復元は引き続き未対応。詳細は[対称性ガイド](FAST_HSE_SYMMETRY.md)。

@@ -147,3 +147,5 @@ k-point/symmetry/communicator and other solver dependencies still apply.
 Fast-PR HSE is the primary HSE path; see [the symmetry capability boundary](FAST_HSE_SYMMETRY.en.md)
 for the newly tested independent exchange core versus still-rejected symmetric
 TDDFT/FDTD/checkpoint profiles. Core evidence does not extend public connection capabilities.
+
+Fast-PR HSE now validates uniform A/c with owned Cartesian operations and a normalized direction internally. Symmetric TDDFT/FDTD and checkpoint admission remain unsupported. See [symmetry guide](FAST_HSE_SYMMETRY.en.md).
