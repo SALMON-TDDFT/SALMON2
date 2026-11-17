@@ -557,3 +557,12 @@ Evidence: `../ion-initialization-validation-2026-11-17.md`.
 - [ ] Compatibility wrappers still consume shared inputs;whole grid coordinates,parallel ownership,k/symmetry/FFT resources and full heterogeneous GS/TDDFT initialization remain open. Explicit resolver ownership does not establish arbitrary native reentrancy or stable handles. Molecular work paused;budget warning-only.
 
 Evidence: `../cell-grid-initialization-validation-2026-11-17.md`.
+
+### 2026-11-17 initial orbital layout ownership
+
+- [x] Standard/fast-PR capture mode,periodicity,spin/SOC,state/electron counts,temperature and kmesh/file sentinel into explicit value input. Shared selector resolves nspin/no/real storage without globals. HSE uses owned occupation/effective kmesh/legacy hybrid predicate;standard initial occupation consumes captured electron/SOC values. Existing type layouts/public API unchanged.
+- [x] Native GS Gamma/non-Gamma/file/nonorthogonal/isolated/SOC/hybrid and RT even/odd/SOC/spin-resolved/temperature-threshold cases,global poisoning,alternating results and rejection preservation pass standard/HSE/RT OMP1/2. Cell/grid/ion probes also pass. Strict manifests/preparation,new external matching-profile builds and shared-kernel equality verified.
+- [x] MPI2 fresh GS energy/eigen/k/force exact;five-rank PBE/HSE Taylor/PT-CN and seven-rank mixed failure/retry exact. Direct restore failure/original continuation/retry exact without replay. Source/installed545 tests(one skip each),sdist→wheel/native hashes,installed seven-rank mixed/five-rank1D fault-retry and JP/EN/AI updated. No Actions.
+- [ ] Full occupation-capacity/SCF-input ownership,remaining k/symmetry/communicator dependencies and arbitrary heterogeneous native GS/TDDFT initialization remain open. This closes only the initial orbital-selection slice;no new native initialization-failure/handle guarantee. Molecular work paused,budgets advisory only.
+
+Evidence: `../orbital-initialization-validation-2026-11-17.md`.

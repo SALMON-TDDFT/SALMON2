@@ -111,7 +111,7 @@
     "src/common/force.f90": "bd9004eca8cc48b42ec822724964be1eafb2bb7e22ed85aab6deeed94d150bdf",
     "src/common/hamiltonian.f90": "ec2d609e355090460ed852af4f05496410774b6a3acdf8071197f01bf7a7ba44",
     "src/common/ieee_finite_check.f90": "972f8a9ed2df89b91edf6400110518be7080c1ef36efc604440aa7f715e45585",
-    "src/common/initialization.f90": "ec87f2048cb097f7ac2368d7f1ed553837f2040ba988a40f2518fa969eba3a27",
+    "src/common/initialization.f90": "3c278e910922e1e6f191bb671c7e2f817baa34c98412a2789762e8cf5f934e56",
     "src/common/lattice.f90": "21511a483a0cd37e304d3ba9b6ca864be966110e1c5f215d6c2d98d229df2f7d",
     "src/common/nonlocal_potential.f90": "a5401e19788b95724e7f4b7d102670dcb6ec0cb1e554a744027dd2bfd86a0cca",
     "src/common/pack_unpack.f90": "56cde6c4957f197bfa32b42397cde19a94aa4fe7b8d5fa096878f1007f46c848",

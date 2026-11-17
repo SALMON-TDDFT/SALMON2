@@ -126,3 +126,20 @@ Existing initialization wrappers still capture legacy inputs and normalize `al`
 for downstream consumers. This is not complete different-cell GS/TDDFT reentrancy
 or a new public Python/C interface. The optional RT-step structure profile carries
 the same value types; preparation verifies its new before/after source hashes.
+
+### Explicit initial orbital layout
+
+Standard and fast-PR initialization now capture mode, periodicity, spin/SOC,
+state/electron counts, temperature and the k-mesh selection into internal
+`s_orbital_initial_config`. `resolve_orbital_layout` chooses spin count, orbital
+count and real/complex storage without reading shared inputs. Resolved cell
+orthogonality is supplied explicitly; fast-PR uses its owned occupation settings,
+effective k mesh and the same captured legacy hybrid predicate. Standard
+file-supplied k points retain the legacy `-1` mesh sentinel for this decision.
+
+Valid GS/RT selection rules, including the `temperature < -1e-12` RT branch, are
+unchanged. Invalid mode, nonfinite temperature or an unusable resulting layout
+reject without changing the result object. This is selection of initial array
+layout, not full occupation-capacity/physical validation, SCF-input ownership or
+recoverable native initialization. No new public Python/C API is added; remaining
+k-point/symmetry/communicator and other solver dependencies still apply.

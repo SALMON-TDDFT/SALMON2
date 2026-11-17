@@ -20,6 +20,19 @@ module initialization_sub
   implicit none
   integer,parameter,private :: Nd=4
 
+  type s_orbital_initial_config
+    character(2)::mode='GS'
+    character(32)::spin='unpolarized'
+    character(1)::spinorbit='n'
+    integer::periodicity=3,kmesh(3)=1,nstate=0,nelec=0,nelec_spin(2)=0
+    real(8)::temperature=0d0
+    logical::orthogonal=.true.,hybrid=.false.
+  end type s_orbital_initial_config
+  type s_orbital_initial_layout
+    integer::nspin=0,no=0
+    logical::real_orbital=.false.
+  end type s_orbital_initial_layout
+
   ! Value-only initialization input; no solver resource owners.
   type s_ion_initial_config
     integer :: nion=0, nelem=0
@@ -29,6 +42,68 @@ module initialization_sub
   end type s_ion_initial_config
 
 contains
+
+subroutine orbital_input_config(value)
+  use salmon_global,only:calc_mode,iperiodic,spin,yn_spinorbit,nstate,nelec,nelec_spin, &
+                        temperature,num_kgrid,file_kw
+  implicit none
+  type(s_orbital_initial_config),intent(out)::value
+  value%mode=calc_mode;value%periodicity=iperiodic
+  value%spin=spin;value%spinorbit=yn_spinorbit
+  value%nstate=nstate;value%nelec=nelec;value%nelec_spin=nelec_spin;value%temperature=temperature
+  value%kmesh=num_kgrid
+  ! init_kvector's compatibility wrapper assigns this sentinel for file input.
+  if(file_kw/='none')value%kmesh=-1
+end subroutine orbital_input_config
+
+subroutine resolve_orbital_layout(value,result,status)
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  type(s_orbital_initial_config),intent(in)::value
+  type(s_orbital_initial_layout),intent(inout)::result
+  integer,intent(out)::status
+  type(s_orbital_initial_layout)::trial
+  status=1
+  if(.not.ieee_is_finite(value%temperature))return
+  if(value%spin=='unpolarized')then
+    trial%nspin=1
+  else
+    trial%nspin=2
+  endif
+  select case(value%mode)
+  case('RT')
+    trial%real_orbital=.false.
+  case('GS')
+    select case(value%periodicity)
+    case(0)
+      trial%real_orbital=.true.
+    case(3)
+      if(any(value%kmesh<=0).and..not.all(value%kmesh==-1))return
+      trial%real_orbital=all(value%kmesh==1).and.value%orthogonal
+    case default
+      return
+    end select
+    if(value%spinorbit=='y'.or.value%hybrid)trial%real_orbital=.false.
+  case default
+    return
+  end select
+  if(value%mode=='RT'.and.value%temperature<-1.d-12)then
+    if(value%spinorbit=='y')then
+      trial%no=value%nelec
+    else if(trial%nspin==2.and.sum(int(value%nelec_spin,kind=8))>0_8)then
+      trial%no=maxval(value%nelec_spin)
+    else
+      ! Same ceiling(nelec/2) for valid nonnegative counts, without nelec+1 overflow.
+      if(value%nelec<0)return
+      trial%no=value%nelec/2+mod(value%nelec,2)
+    endif
+  else
+    trial%no=value%nstate
+  endif
+  if(trial%no<=0)return
+  result=trial
+  status=0
+end subroutine resolve_orbital_layout
 
 subroutine ion_input_config(value)
   use salmon_global,only:natom,nelem,Rion,Rion_red,kion,iflag_atom_coor,ntype_atom_coor_reduced
@@ -264,9 +339,7 @@ end subroutine resolve_cell
 subroutine init_dft_system(lg,system,stencil,unfold)
   use structures
   use lattice
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,spin,nstate,iperiodic,num_kgrid,num_rgrid,dl, &
-  & Rion,nelec,calc_mode,temperature,nelec_spin,yn_spinorbit, &
-  & quiet
+  use salmon_global,only:al,Rion,quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -281,10 +354,17 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   integer::cell_status
   type(s_ion_initial_config)::ion_input
   integer::ion_status
+  type(s_orbital_initial_config)::orbital_input
+  type(s_orbital_initial_layout)::orbital_layout
+  integer::orbital_status
+  integer::nelec,nelec_spin(2)
+  character(1)::yn_spinorbit
   integer :: ii,jj
   real(8) :: rsize(3),hgs(3),cnmat(0:12,12),bnmat(4,4)
 
   call ion_input_config(ion_input)
+  call orbital_input_config(orbital_input)
+  nelec=orbital_input%nelec;nelec_spin=orbital_input%nelec_spin;yn_spinorbit=orbital_input%spinorbit
 
   call cell_config_from_input(cell_input)
   call resolve_cell(cell_input,cell,cell_status)
@@ -301,48 +381,18 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   call init_sym_sub( system%primitive_a, system%primitive_b )
   call init_kvector(system,unfold)
 
-  if(calc_mode=='RT') then
-    system%if_real_orbital = .false.
-  else if(calc_mode=='GS') then
-    select case(iperiodic)
-    case(0)
-      system%if_real_orbital = .true.
-    case(3)
-      if(num_kgrid(1)*num_kgrid(2)*num_kgrid(3)==1 .and. stencil%if_orthogonal) then
-        system%if_real_orbital = .true.
-      else
-        system%if_real_orbital = .false.
-      end if
-    end select
-    if ( yn_spinorbit=='y' ) system%if_real_orbital=.false.
-  end if
+  orbital_input%orthogonal=stencil%if_orthogonal
+  call resolve_orbital_layout(orbital_input,orbital_layout,orbital_status)
+  if(orbital_status/=0)error stop 'Invalid orbital initialization configuration'
+  system%if_real_orbital=orbital_layout%real_orbital
   if ((.not. quiet) .and. comm_is_root(nproc_id_global)) then
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital
   endif
 
   system%nion = ion_input%nion
 
-  if(spin=='unpolarized') then
-    system%nspin=1
-  else !if(spin=='polarized') then
-    system%nspin=2
-  end if
-
-  if(calc_mode=='RT'.and. temperature<-1.d-12)then
-    if( yn_spinorbit=='y' )then
-       system%no = nelec
-    else if(system%nspin==2.and.sum(nelec_spin(:))>0)then
-       system%no = maxval(nelec_spin(:))
-    else
-       if(mod(nelec,2)==0)then
-          system%no = nelec/2
-       else
-          system%no = (nelec+1)/2
-       end if
-    end if
-  else
-    system%no = nstate
-  end if
+  system%nspin=orbital_layout%nspin
+  system%no=orbital_layout%no
 
   call initialize_ions(system,ion_input,ion_status)
   if(ion_status/=0)error stop 'Invalid ion initialization configuration'

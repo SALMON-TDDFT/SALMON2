@@ -188,3 +188,5 @@ install(FILES "${ROOT}/tools/test_native_protected_step_mpi.py" "${ROOT}/tools/t
 install(FILES "${ROOT}/salmonpy/examples/mixed_multipoint_layers.json" DESTINATION salmonpy/examples)
 
 install(FILES "${ROOT}/tests/native/test_ion_initialization.f90" DESTINATION salmonpy/_runtime_source/tests/native)
+
+install(FILES "${ROOT}/tests/native/test_orbital_initialization.f90" DESTINATION salmonpy/_runtime_source/tests/native)
