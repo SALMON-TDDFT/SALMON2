@@ -3,11 +3,13 @@
 mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native BUILD RUNTIME GS_BUNDLE NEW_OUTPUT
 Use --tddft-ranks 1 with 3 ranks for a decomposition comparison.
 Use --field-grid 1 2 1 --tddft-ranks 1 with 4 ranks for distributed fields.
-Tiny 3D connection fixture, not recommended production TDDFT geometry.
+3D connection fixture; --field-shape changes Maxwell workload, not TDDFT precision.
 """
 import argparse
 import json
 import hashlib
+import time
+import math
 from dataclasses import asdict
 from pathlib import Path
 import numpy as np
@@ -25,6 +27,23 @@ from salmonpy.runtime import load_runtime
 from salmonpy.tddft import TDDFTInitialState
 
 
+def _field_layout(shape):
+    shape=tuple(shape)
+    if len(shape)!=3 or any(type(n) is not int or n<40 or n%2 for n in shape):
+        raise ValueError('sample field-shape requires three even integers >=40')
+    grid=Grid(shape,(2.,2.,2.))
+    center=tuple(n//2 for n in shape)
+    return grid,{10:(center[0]-1,*center[1:]),20:center}
+
+
+def _clock():
+    try:
+        value=time.perf_counter()
+        return value if math.isfinite(value) else None
+    except Exception:
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'runtime', 'bundle', 'output'): parser.add_argument(name, type=Path)
@@ -38,6 +57,7 @@ def main():
     parser.add_argument('--legacy-checkpoint-identity', action='store_true', help='explicit unidentified session for old checkpoint readers; cannot bypass identified archives')
     parser.add_argument('--memory-budget-gib', type=float, help='aggregate advisory memory budget across MPI ranks; warning only')
     parser.add_argument('--rank-budget', type=int, help='planning cap; defaults to the launched world size')
+    parser.add_argument('--field-shape', type=int, nargs=3, default=(40,40,40), help='even Maxwell grid counts >=40; electronic GS grid is unchanged')
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
     parser.add_argument('--compare', type=Path, help='compare against an existing same-physics run with another MPI decomposition')
     parser.add_argument('--steps', type=int, default=128)
@@ -48,6 +68,10 @@ def main():
     parser.add_argument('--direct-resume', type=Path, help='protected internal-state restore without replay; candidate-capable runtime required')
     parser.add_argument('--unprotected-direct-restore', action='store_true', help='explicit legacy restore with no failure-preservation guarantee')
     args = parser.parse_args()
+    try:
+        grid,points=_field_layout(args.field_shape)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.unprotected_direct_restore and args.direct_resume is None:
         parser.error('unprotected-direct-restore requires direct-resume')
     if args.direct_save_at is not None and not 0 < args.direct_save_at < args.steps:
@@ -76,8 +100,6 @@ def main():
         if world.rank == 0: output.mkdir(parents=True, exist_ok=False)
         world.Barrier()
         dt = args.dt
-        grid = Grid((40, 40, 40), (2., 2., 2.))
-        points = {10: (19, 20, 20), 20: (20, 20, 20)}
         shapes = (Shape('box', (2., 4., 4.), (7., 1., 1.), material=1),
                   Shape('box', (2., 4., 4.), (9., 1., 1.), material=2))
         materials = (LorentzDrude(plasma_frequency=20., strength=[1.], resonance=[0.], damping=[2.]),
@@ -222,6 +244,7 @@ def main():
             raise ValueError('direct save/stop must advance beyond restored step')
         if restored is not None and stop <= metadata['step']:
             raise ValueError('save-at must advance beyond the resumed checkpoint')
+        loop_start=_clock()
         for index in range(start, stop):
             frame = coupled.step()
             if frame is not None:
@@ -229,6 +252,9 @@ def main():
                     for key, values in restored.items():
                         np.testing.assert_array_equal(frame[key], values[index])
                 history.append(frame)
+        loop_end=_clock()
+        elapsed=None if loop_start is None or loop_end is None else loop_end-loop_start
+        loop_seconds=world.allgather(elapsed)
         if args.direct_save_at is not None:
             from salmonpy.examples._direct_checkpoint import checkpoint, digest
             destination = output/'direct-checkpoint'
@@ -313,6 +339,9 @@ def main():
                       'point_materials': {str(p): bindings[p].key for p in points},
                       'initial_charge_current': session.initial_current,
                       'outer_mpi_ranks':world.size,
+                      'field_shape':list(grid.counts),
+                      'coupled_loop_seconds_by_rank':loop_seconds,
+                      'coupled_loop_seconds_max':None if any(v is None for v in loop_seconds) else max(loop_seconds),
                       'serial_hse_workers':sum(b.key=='hse-point' for b in bindings.values()) if args.fast_hse_mpi_build is None else 0,
                       'hse_internal_mpi':args.fast_hse_mpi_build is not None,
                       'hse_k_ranks':args.hse_ranks,
@@ -332,6 +361,7 @@ def main():
                 if expected.get('status') != 'passed': raise ValueError('successful comparison run required')
                 for key in ('steps', 'dt', 'point_materials', 'constitutive_cell_counts', 'ld_materials'):
                     if expected.get(key) != report[key]: raise ValueError('comparison configuration differs: '+key)
+                if expected.get('field_shape',[40,40,40]) != report['field_shape']: raise ValueError('comparison field shape differs')
                 differences = {}
                 with np.load(args.compare/'response.npz', allow_pickle=False) as reference:
                     np.testing.assert_array_equal(reference['point_ids'], list(points))

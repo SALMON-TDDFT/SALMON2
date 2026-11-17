@@ -33,7 +33,7 @@ The dated sections below retain the scope at their completion time. Older statem
 5. [ ] General native failure contract: recoverable step/initialization errors and process-terminating native paths remain open. Handled mixed restore staging failures already preserve originals and permit continuation/retry; do not list that completed subset as missing. The CLI still exits on an unhandled error.
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Remaining scaling/resource work: larger numbers of points/LD cells, calibrated backend memory models and communication scaling. Aggregate CPU memory advice including restore candidates is now implemented below. Budget excess only warns by user decision; hard enforcement is not a pending requirement. Four-core runs do not certify a universal4GiB cap.
-8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not fresh Linux/Intel Mac validation or a published matching runtime catalog. Windows native support/delivery policy is distinct from existing lightweight wheel support.
+8. [ ] Additional environment/topology validation: field2+SBE1+TDDFT2 (5 ranks) and96³ field12+SBE1+TDDFT2 (15 ranks) are now validated below; new native mixed paths still have local Apple Silicon evidence, not fresh Linux/Intel Mac validation or a published matching runtime catalog. Windows native support/delivery policy is distinct from existing lightweight wheel support.
 9. [ ] General coupled archives: interoperable archive layout/version migrations, full arbitrary-backend identity propagation, changed-topology restore and complete historical native output streams. Common admission/execution and protected restore already exist; the current native sample remains same binary/input/topology. Unsupported XC/resource profiles and HSE orbital/rgrid decomposition require their own validation.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
@@ -176,7 +176,7 @@ subtasks are unimplemented. Preserve the scoped completion records above:
 |---|---|---|
 | M4 | LD/SBE adapters, configured periodic DFT, GS/1 selection and managed TDDFT bridge | Broader initial-data/model compatibility, including isolated configuration integration; do not infer support from the local E loader |
 | M5 | Serial per-point states, recorded/custom bindings, MPI identity and dedicated serial-native providers | Collective native provider capability integration; full native state/input isolation |
-| M6 | Serial/MPI postprocessing, managed TDDFT point resume, ordinary native mixed-session restart identity | Other backend disk formats, branch and in-memory point identity semantics |
+| M6 | Serial/MPI postprocessing, managed TDDFT point resume, ordinary native mixed-session restart identity | Other backend disk formats and branch semantics; process-local point identity completed below |
 
 - [x] S1: audit all 39 Python sample entry points; run 13 lightweight examples,
   two preparation examples, serial two-layer FDTD and three three-rank MPI cases.
@@ -458,3 +458,14 @@ Evidence: `../point-snapshot-identity-validation-2026-11-17.md`. General branch 
 - [ ] General native failure contract remains OPEN: deep initialization/step STOP, nonfinite results after mutation, allocations, native FDTD/fast-HSE equivalents, whole-session step rollback and process/MPI failures are not solved by admission.
 
 Evidence: `../native-tddft-admission-validation-2026-11-17.md`. The current audit item5 remains partial; do not mark general native failure recovery complete.
+
+### 2026-11-17 expanded Mac resource campaign
+
+- [x] User supplied host capacity64GB/18 cores. Preserve4GiB/4-core beginner profile. Campaign uses48GiB advisory budget, at most15 ranks, OMP/BLAS1 and sequential jobs.
+- [x] Sample --field-shape: even counts>=40, default40³ and centered physical point positions preserved. Field dimensions now explicit in comparison/result metadata; loop timing excludes setup/output/serial replay. Electronic GS grid/k sampling unchanged.
+- [x] Previously unverified5-rank field2+SBE1+TDDFT2 protected restore passes; native fast-PR HSE k2 also passes with field2 and SBE1.96³(13.824×40³ cells) field1/2/4/8/12, total4/5/7/11/15 ranks, two repetitions each: all128-step A/E/j arrays exactly equal to baseline.
+- [x]96³/15-rank protected late-failure rollback preserves all original native bytes and Python states; original continues, retry and3 future frames exactly match uninterrupted execution without replay. Normal summed rank peaks<=1.83GiB; failure-injection path about5.1GiB, not simultaneous RSS or a universal bound.
+- [x] Source/wheel524 tests (one skip),sdist→wheel, sample/controller and JP/EN/AI guides. No native numerical source changes, no remote Actions.
+- [ ] Larger electronic grids/k meshes, many material points, scaling beyond this local fixture and cross-platform/runtime delivery remain open. Native post-update error recovery is unchanged.
+
+Evidence: `../expanded-mixed-scaling-validation-2026-11-17.md`.

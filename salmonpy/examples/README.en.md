@@ -173,3 +173,5 @@ MPI samples also display `--help` from ordinary Python. Computation requires mpi
 [mpi_packet_coupling.py](mpi_packet_coupling.py): synthetic packet feedback with 1D/native fields; three ranks (native also supports four).
 
 - `molecular_field_selection.py`: explicit own-source vacuum field subtraction on synthetic samples; no solver required.
+
+Larger parallel checks: `mpi_mixed_native` supports `--field-shape`. See [COUPLED.en.md](../COUPLED.en.md) for5–15-rank layouts and measurement scope. The4GiB/4-core beginner profile remains available.

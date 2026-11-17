@@ -170,3 +170,5 @@ install(FILES "${ROOT}/salmonpy/examples/mixed_hse_layers.json" DESTINATION salm
 install(FILES "${ROOT}/tools/build_fast_hse_worker.py" "${ROOT}/tools/build_fast_hse_mpi.py" "${ROOT}/tools/prepare_fast_hse_coupled_fixture.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_native_tddft_admission_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_mixed_scaling.py" DESTINATION salmonpy/_runtime_source/tools)

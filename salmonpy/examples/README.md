@@ -187,3 +187,5 @@ MPIサンプルも通常のPythonから `--help` を表示できます。実計�
 [mpi_packet_coupling.py](mpi_packet_coupling.py): 合成物質と1D／native場のpacket往復結合。3ランク（nativeは4ランクも可）。
 
 - `molecular_field_selection.py`：分子自身の真空場だけを引く電場選択。人工標本のみ、ソルバー不要。
+
+大きな並列テスト: `mpi_mixed_native` は `--field-shape` に対応します。5〜15ランクの構成と計測の範囲は [COUPLED.md](../COUPLED.md) を参照してください。4GiB・4コアの入門条件は引き続き利用できます。
