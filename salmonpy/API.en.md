@@ -145,7 +145,7 @@ recoverable native initialization. No new public Python/C API is added; remainin
 k-point/symmetry/communicator and other solver dependencies still apply.
 
 Fast-PR is the only supported HSE engine. `NativeFastHSEBackend(build_record, work_root,
-allow_symmetry=True)` explicitly permits scalar periodic CPU/full-q/internal-k1,
+allow_symmetry=True)` explicitly permits scalar periodic CPU/full-q/internal-k1/2,
 factor-off Taylor symmetry. Shared symmetry settings are immutable, one native
 lifetime per process. The default False and existing C init remain symmetry-denied.
 Learned/PT-CN symmetry and reduced internal-k MPI2 are unsupported.
@@ -159,3 +159,5 @@ loop retry. Common direct/staged checkpoint integration is available.
 See [the symmetry guide](FAST_HSE_SYMMETRY.en.md) for mixed samples, exact scope and
 stable near-zero-gradient XC evaluation and regression checks. Connectivity/restart tests are not
 physical-convergence certificates.
+
+Reduced-k symmetry now supports two internal k ranks and same-partition direct resume with the separate native k-MPI capability. Checkpoint repartitioning remains unsupported; see the symmetry guide.

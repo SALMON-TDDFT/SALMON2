@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.5`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.6`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -8,16 +8,16 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 
 | 層 | 現在の範囲 |
 |---|---|
-| 高速PR版の交換コア | 対称性マップ・位相キャッシュ・FFT資源を独立所有。周期・非スピン分極・CPU・full-q・内部kランク1を検証 |
+| 高速PR版の交換コア | 対称性マップ・位相キャッシュ・FFT資源を独立所有。周期・非スピン分極・CPU・full-q・内部kランク1／2を検証 |
 | 対称性／orbit／ACEの比較 | 縮約4代表k点と独立に列挙した全8k点。C2z／mirror-x、異なるセル・遮蔽係数・軌道 |
-| 内部Fortran TDDFT | 明示opt-in、1プロセス1初期化／内部k1、factor-off Taylor。直接／候補再開を検証 |
-| Python／native-C／FDTD | 新プロトコルの明示opt-in。group1・factor-off Taylorの保護付き混在を検証。既定は拒否 |
+| 内部Fortran TDDFT | 明示opt-in、1プロセス1初期化／内部k1／2、factor-off Taylor。直接／候補再開を検証 |
+| Python／native-C／FDTD | 新プロトコルの明示opt-in。group1／2・factor-off Taylorの保護付き混在を検証。既定は拒否 |
 | 保存復元 | 内部交換コアV2と明示的内部TDDFTの直接／候補再開を検証。限定した公開の保護付き混在再開を検証 |
-| 対称性付き内部k MPI2 | 今回は未解放。テストのMPI2プロセスは各々COMM_SELFの交換コアを所有 |
+| 対称性付き内部k MPI2 | 専用capabilityを持つ新ライブラリで明示対応。全／縮約比較と直接再開を検証 |
 
 ## 独立した交換コアの所有
 
-内部の `exx_bind_system` 経路で、限定した内部kランク1の対称性付きコアを扱えるように
+内部の `exx_bind_system` 経路で、限定した内部kランク1／2の対称性付きコアを扱えるように
 しました。各systemがk点設定を持ち、各HSE ownerが対称性マップ・位相・FFT資源を所有します。
 全格子検査にはそのsystemのngrid・primitiveセル・格子幅を使い、共有num_rgridには依存しません。
 対応するrt_status入口では、格子次元／点数の不一致や未対応owner分割をrefresh／actionの変更前に
@@ -55,7 +55,7 @@ TDDFTアダプターでは数値状態のバックアップ／時間発展より
 ## 内部交換コアの対称性checkpoint
 
 既存の内部 `hse_checkpoint_write/read/capture/install` で、対応済みの周期・非スピン分極・
-CPU・full-q・内部kランク1の交換コアについて、値だけの対称性マップ／キャッシュを扱えます。
+CPU・full-q・内部kランク1／2の交換コアについて、値だけの対称性マップ／キャッシュを扱えます。
 非縮約ownerは従来のV1をバイト一致で維持します。対称性ownerは同一バイナリ用V2として、
 保持したマップ・kernel識別情報・source／ACE／履歴値・任意の全位相キャッシュを保存します。
 このraw streamは呼び出し側でアーカイブ・モデルを認証する前提で、独立した可搬形式ではありません。
@@ -76,7 +76,7 @@ ownerの作り直しを含め、復元直後の作用・エネルギーと、そ
 ## 明示的な内部TDDFTの検証
 
 内部Fortranの `rt_open(..., allow_symmetry=.true.)` で、交換コアとTDDFT全体のcheckpointを
-接続します。周期・非スピン分極・CPU・full-q・内部kランク1・factor-offのTaylor／ACEと、
+接続します。周期・非スピン分極・CPU・full-q・内部kランク1／2・factor-offのTaylor／ACEと、
 zを保つ対称群に限定します。full-actionは比較検証用のみです。初期化は1プロセス1回で、
 独立したTDDFTの実行には新しいプロセスを用意します。
 
@@ -107,8 +107,8 @@ nativeの `test_hse_symmetry_tddft.f90` と、補助ツール
 既定Falseは従来の `sp_fast_hse_init` を選びます。Trueには `sp_fast_hse_init_symmetry` と
 `sp_fast_hse_symmetry_protocol()==1` が必要です。新initの引数は従来と同じ
 `(const char *path, double dt, int capacity, double J[3])` です。opt-inをbackendの識別情報に
-含め、内部kランク1だけを許可します。入力操作行列は変更しません。未対応・未知のプロトコルは
-native寿命を取得する前に拒否します。学習／PT-CNの対称性と縮約内部k2は未対応、full-actionは
+含め、内部kランク1／2を許可します。入力操作行列は変更しません。未対応・未知のプロトコルは
+native寿命を取得する前に拒否します。学習／PT-CNの対称性は未対応、full-actionは
 比較検証用のみです。
 
 有限かつ全ランク一致のstatus34と専用プロトコルが揃った場合だけ、Pythonは受理状態を保つ
@@ -119,7 +119,7 @@ native寿命を取得する前に拒否します。学習／PT-CNの対称性と
 
 通常の `mpi_mixed_native` 例は `--hse-symmetry` と、等価な全k点初期状態を明示した
 `--hse-reference-bundle FULL_K_BUNDLE` を受け付けます。従来のシリアル高速PR版と比較するための
-参照で、任意のGSを自動変換しません。`--hse-ranks 1` が必要です。配置・LD・SBE・半局所TDDFTと
+参照で、任意のGSを自動変換しません。`--hse-ranks 1` または `--hse-ranks 2` を指定します。配置・LD・SBE・半局所TDDFTと
 直接保存再開の入口は従来どおりです。5／6ランクで、field1／2・場内2種類LD・SBE1・PBE-TDDFT2・
 対称性HSE1を検証しました。故障・保護付き復元と新規直接再開で、受理済みステップの再生なしに
 軌跡を維持します。合成初期状態の接続試験であり、物質・場の適合性と物理収束は別途確認します。
@@ -162,5 +162,34 @@ wrapperを直しても `low_gradient_sensitivity_detected=True` になり得ま�
 この診断をwrapperの失敗・合格と取り違えず、新しい上記検証とソース／バイナリのハッシュを残します。
 過去のphase.23は接続用fixtureとして残しますが、今回の修正確認は元のphase0です。
 
-次は縮約内部k MPI・より広い初期化の検証です。高速PR版のみの方針を維持します。
+次はより広い初期化・並列分割・実材料での検証です。高速PR版のみの方針を維持します。
 メモリ予算は警告のみ、分子の作業は保留です。
+
+
+## 縮約k点の内部MPI（2ランク）
+
+内部2ランクでは `sp_fast_hse_symmetry_kmpi_protocol()==1` が追加で必要です。
+旧ライブラリはnative寿命の取得前に拒否します。CPU・非スピン分極・周期・full-q・
+factor-off Taylorの範囲を維持し、各ランクが連続した代表k点とそのstar位相を所有します。
+空の担当範囲、実空間／軌道分割、学習／PT-CN対称性は今回の対象外です。
+
+保存時は全k点を各ランクへ複製せず、担当範囲の位相キャッシュを保存します。
+復元先で独立に初期化した範囲・MPIランク数・担当と照合し、不一致を拒否します。
+**保存時と同じMPI分割で再開してください。分割変更を伴う再開には対応しません。**
+状態を保つstatus34はMPI内で最大値を共有し、ランク数倍しません。
+
+```sh
+mpiexec -n 4 python tools/test_fast_hse_low_gradient_mpi.py \
+  BUILD_RECORD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT --group-size 2
+mpiexec -n 4 python tools/test_fast_hse_symmetry_mpi.py \
+  BUILD_RECORD REDUCED_K_BUNDLE NEW_SAVE --mode save --group-size 2 --checkpoint CHECKPOINT
+mpiexec -n 4 python tools/test_fast_hse_symmetry_mpi.py \
+  BUILD_RECORD REDUCED_K_BUNDLE NEW_RESUME --mode resume --group-size 2 --checkpoint CHECKPOINT
+```
+
+二つの独立群（各2ランク）で異なる遮蔽係数を使い、7→32ステップの電流・エネルギーと
+最終checkpointバイトを連続実行と照合します。受理済み時間ステップの再計算はありません。
+初期化に必要な演算子の構築は行います。元のphase0・弱い局所場で全8／縮約4 k点を
+OMP1／2で比較しました。通常の混在例も `--hse-ranks 2` を受け付けます。
+旧ライブラリの拒否検査は `--mode deny-old-k2`（旧ビルド専用）です。
+従来のCOMM_SELF検証の記述は履歴として残します。物理収束の保証ではありません。

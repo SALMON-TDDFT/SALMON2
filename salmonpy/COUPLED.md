@@ -424,9 +424,11 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 
 ## 高速PR版HSEの対称性opt-in
 
-NativeFastHSEBackend(...,allow_symmetry=True)は内部kランク1・factor-off Taylorに限定。
+NativeFastHSEBackend(...,allow_symmetry=True)は内部kランク1／2・factor-off Taylorに限定。
 通常混在例は--hse-symmetry --hse-reference-bundle FULL_K_BUNDLEを明示する。
 Aが対称性を破ったときのInputErrorから、全体を戻すには--protect-steps／step_protectedを使う。
 直接／保護付き再開と2種類の場内LD・SBE・PBE-TDDFT・HSE混在を検証した。
 初期状態・場の局所方向・XCの適合性は別途確認する。極小勾配の安定評価と元の失敗例での検証も含め、
 [対称性ガイド](FAST_HSE_SYMMETRY.md)を参照。
+
+縮約k点の内部2ランクと同一分割での直接再開に対応します。追加のnative k-MPI capabilityが必要です。分割変更による再開は未対応。詳しくは対称性ガイドを参照してください。

@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.5`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.6`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -10,17 +10,17 @@ the fast-PR algorithm.
 
 | Layer | Current scope |
 |---|---|
-| Fast-PR exchange core | Independent symmetry maps/phase caches/FFT owners; tested scalar periodic CPU, full q, one internal k rank |
+| Fast-PR exchange core | Independent symmetry maps/phase caches/FFT owners; tested scalar periodic CPU, full q, one/two internal k ranks |
 | Symmetry/orbit/ACE comparison | Reduced4 k representatives vs independently enumerated full8 k points; C2z and mirror-x groups, different cells/omega/sources |
-| Internal Fortran TDDFT | Explicit opt-in, one initialization/process/internal-k1, factor-off Taylor; direct/staged resume tested |
-| Python/native-C/FDTD | Explicit new-protocol allow_symmetry opt-in; group1 factor-off Taylor, protected mixed tests; default remains denied |
+| Internal Fortran TDDFT | Explicit opt-in, one initialization/process/internal-k1/2, factor-off Taylor; direct/staged resume tested |
+| Python/native-C/FDTD | Explicit new-protocol allow_symmetry opt-in; groups1/2 factor-off Taylor, protected mixed tests; default remains denied |
 | Checkpoint | Internal exchange V2 and explicit internal TDDFT direct/staged resume tested; bounded public protected mixed resume tested |
-| Symmetry internal MPI k2 | Not enabled by this change; two test MPI processes each own COMM_SELF cores |
+| Symmetry internal MPI k2 | Explicit new capability; full/reduced comparison and direct resume verified |
 
 ## Independent exchange owners
 
 The internal `exx_bind_system` core can now admit symmetry within the bounded
-single-k-rank profile. Each system retains its own k-point configuration and each
+one/two-k-rank profile. Each system retains its own k-point configuration and each
 HSE owner retains its own symmetry map, phases and FFT resources. The full-grid
 check uses that system's ngrid, primitive cell and spacing, without selecting from
 shared num_rgrid. Dimension/count mismatch or an unsupported owner layout rejects
@@ -67,7 +67,7 @@ native probe is `_runtime_source/tests/native/test_hse_symmetry_field.f90`.
 ## Internal symmetry checkpoint
 
 The existing internal `hse_checkpoint_write/read/capture/install` now support a
-value-only symmetry map/cache for the admitted scalar CPU/full-q/internal-k1
+value-only symmetry map/cache for the admitted scalar CPU/full-q/internal-k1/2
 exchange core. Non-reduced owners still write V1 byte-for-byte. Symmetric owners
 write same-binary V2: retained map, kernel identity, source/ACE/history values and
 optional complete phase cache. The caller authenticates the archive and model;
@@ -92,7 +92,7 @@ reduced internal-k MPI and ordinary symmetric mixed failure/resume remain open.
 
 An internal Fortran `rt_open(..., allow_symmetry=.true.)` opt-in now connects the
 exchange core to the complete TDDFT checkpoint path. It is bounded to scalar
-periodic CPU/full-q, one internal k rank, factor-off Taylor/ACE and a retained
+periodic CPU/full-q, one/two internal k ranks, factor-off Taylor/ACE and a retained
 group preserving z. Full-action is test-only. One initialization per process is
 allowed; initialize a fresh process for each independent TDDFT lifetime.
 
@@ -127,9 +127,9 @@ Use `NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)`.
 The default False selects existing `sp_fast_hse_init`. True requires
 `sp_fast_hse_init_symmetry` and `sp_fast_hse_symmetry_protocol()==1`; the new init
 has the same `(const char *path, double dt, int capacity, double J[3])` arguments.
-The opt-in is included in backend identity, admits one internal k rank, and never
+The opt-in is included in backend identity, admits one/two internal k ranks, and never
 changes the supplied operation matrices. Missing/unknown protocols reject before
-acquiring a native lifetime. Learned/PT-CN symmetry and reduced internal-k2 stay
+acquiring a native lifetime. Learned/PT-CN symmetry stays
 unsupported; full-action remains test-only.
 
 Only unanimous finite status34 plus the specific protocol becomes a Python
@@ -142,7 +142,7 @@ loop, use `CoupledStepper.step_protected`/`--protect-steps`, and retry only when
 The ordinary `mpi_mixed_native` sample accepts `--hse-symmetry` and requires
 `--hse-reference-bundle FULL_K_BUNDLE` with an explicitly supplied equivalent full-k
 state for the existing serial fast-PR comparison. No arbitrary GS conversion is
-performed. `--hse-ranks 1` is required. The layout/LD/SBE/semilocal-TDDFT APIs and
+performed. Select `--hse-ranks 1` or `--hse-ranks 2`. The layout/LD/SBE/semilocal-TDDFT APIs and
 direct save/resume flags remain the same. Tested five/six-rank mixtures contain
 field1/2, two field-local LD materials, SBE1, PBE-TDDFT2 and symmetry HSE1.
 Odd/fault/protected restore tests and fresh direct resume preserve trajectories
@@ -193,5 +193,37 @@ wrapper. Do not interpret that diagnostic as wrapper success/failure: retain the
 new verification results and source/binary hashes. Historical phase.23 integration
 fixtures remain; this fix is verified on the original phase0.
 
-Next: reduced internal-k MPI and broader initialization. Fast-PR-only policy,
+Next: broader initialization/partitions and converged real-material tests. Fast-PR-only policy,
 warning-only memory budgets and paused molecular work remain unchanged.
+
+
+## Reduced-k internal MPI (two ranks)
+
+Two internal ranks additionally require `sp_fast_hse_symmetry_kmpi_protocol()==1`.
+Old libraries reject before acquiring a native lifetime. The scalar periodic
+CPU/full-q/factor-off Taylor profile is unchanged. Each rank owns contiguous
+representatives and their star phases. Empty ownership, real-space/orbital
+partitioning and learned/PT-CN symmetry are outside this validation.
+
+Archives store rank-local phase caches rather than replicating all k points per
+rank. Restore compares these to independently initialized ownership and the
+pinned MPI rank count/partition. **Use the same MPI decomposition on resume;
+checkpoint repartitioning is unsupported.** Consensus uses MAX for recoverable
+status34, avoiding multiplication by the number of ranks.
+
+```sh
+mpiexec -n 4 python tools/test_fast_hse_low_gradient_mpi.py \
+  BUILD_RECORD FULL_K_BUNDLE REDUCED_K_BUNDLE NEW_OUTPUT --group-size 2
+mpiexec -n 4 python tools/test_fast_hse_symmetry_mpi.py \
+  BUILD_RECORD REDUCED_K_BUNDLE NEW_SAVE --mode save --group-size 2 --checkpoint CHECKPOINT
+mpiexec -n 4 python tools/test_fast_hse_symmetry_mpi.py \
+  BUILD_RECORD REDUCED_K_BUNDLE NEW_RESUME --mode resume --group-size 2 --checkpoint CHECKPOINT
+```
+
+Two independent two-rank groups use different screening parameters. Fresh7→32
+resume matches continuous current/energy traces and final checkpoint bytes without
+accepted-step replay. Initialization still constructs the required operators.
+The unchanged phase0 weak local-field case compares full8/reduced4 k points with
+OMP1/2. The ordinary mixed example accepts `--hse-ranks 2`. Old-library rejection
+uses `--mode deny-old-k2` against an old build only. Earlier COMM_SELF tests remain
+historical evidence; these numerical checks do not certify physical convergence.

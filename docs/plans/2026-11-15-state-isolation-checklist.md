@@ -11,11 +11,11 @@ The dated sections below retain the scope at their completion time. Older statem
 Project lead directs HSE development through the fast-PR profile with symmetry as
 central. Owned actual-A checks, exchange-map/cache persistence and explicit internal
 TDDFT direct/staged resume plus explicit public C/Python opt-in/retry and protected
-mixed connection are verified in the bounded single-k profile. The Libxc HSE near-zero-gradient cancellation is now resolved in the complete
+mixed connection are verified in the bounded one/two-k-rank profile. The Libxc HSE near-zero-gradient cancellation is now resolved in the complete
 wrapper source by stable evaluation of the same WPBEh formula. The unchanged
 phase0 full/reduced case, ordinary regressions and80-digit energy differences
-pass; old failure evidence is retained. Next come
-reduced-k internal-MPI partition/failure/restart tests. Default/old init and serial
+pass; old failure evidence is retained. Reduced-k internal-MPI2 partition/failure/direct restart tests now pass. Next are
+broader initialization and converged physical benchmarks. Default/old init and serial
 workers still reject symmetry. No physical-convergence certificate is implied.
 The standard k-point port is deferred; its distinct arithmetic is not the target
 for modifying fast-PR symmetry. Conventional HSE remains unsupported.
@@ -641,3 +641,13 @@ Evidence: `../public-hse-symmetry-validation-2026-11-18.md`.
 Historical unresolved sensitivity notes above describe the old binaries. Both
 serial full-k reference and MPI runtime need explicit rebuilding from new sources.
 Raw Libxc diagnostic sensitivity remains expected; no library binary is patched.
+
+
+## 2026-11-18 — Reduced-k symmetry internal MPI2
+
+- [x] Explicit one/two k-rank profile; separate capability rejects old libraries.
+- [x] Rank-local star/phase cache checkpoint bounds and authenticated same-partition restore.
+- [x] MPI consensus preserves recoverable status34; rejected field leaves state unchanged.
+- [x] Phase0 full8/reduced4-k comparison; two independent2-rank save7→32 resume traces/final bytes.
+- [x] Ordinary mixed sample supports --hse-ranks2; same-decomposition direct resume.
+- [ ] Broader partitions/initialization and converged physical validation; checkpoint repartitioning is not supported.

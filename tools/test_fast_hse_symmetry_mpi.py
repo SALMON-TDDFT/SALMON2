@@ -1,7 +1,8 @@
 """Explicit public symmetry opt-in and direct restart on independent MPI groups.
 
 mpiexec -n 1|2 python TOOL BUILD BUNDLE NEW_OUTPUT --mode save|resume --checkpoint DIR
-Every process owns COMM_SELF, not internal-k MPI2. Input states are synthetic
+Use --group-size2 for two internal k ranks per independent group.
+The deny-old-k2 mode targets an old library lacking the k-MPI capability. Input states are synthetic
 when using prepare_fast_hse_symmetry_fixture.py; no physical convergence claim.
 """
 import argparse
@@ -23,21 +24,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('build', 'bundle', 'output'):
         parser.add_argument(name, type=Path)
-    parser.add_argument('--mode', choices=('save', 'resume', 'deny-default', 'deny-k2', 'deny-old'), required=True)
+    parser.add_argument('--mode', choices=('save', 'resume', 'deny-default', 'deny-old-k2', 'deny-old'), required=True)
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--steps', type=int, default=32)
+    parser.add_argument('--group-size', type=int, choices=(1,2), default=1)
     parser.add_argument('--split', type=int, default=7)
     args = parser.parse_args()
     if not 3 < args.split < args.steps:
         raise ValueError('require 3 < split < steps')
     world = MPI.COMM_WORLD
-    comm = world if args.mode == 'deny-k2' else MPI.COMM_SELF
-    point = 0 if args.mode == 'deny-k2' else world.rank
+    if world.size % args.group_size:
+        raise ValueError('world size must be divisible by group size')
+    comm = world if args.mode == 'deny-old-k2' else world.Split(world.rank//args.group_size,world.rank)
+    point = 0 if args.mode == 'deny-old-k2' else world.rank//args.group_size
     root = args.output.resolve() / f'rank-{world.rank}'
     root.mkdir(parents=True, exist_ok=False)
     bundle = root / 'initial'
     shutil.copytree(args.bundle, bundle)
-    text = (bundle / 'rt.inp').read_text().replace("xc='hse06'", f"xc='hse06',hse_omega={.11+.01*world.rank:.17g}")
+    text = (bundle / 'rt.inp').read_text().replace("xc='hse06'", f"xc='hse06',hse_omega={.11+.01*point:.17g}")
     (bundle / 'rt.inp').write_text(text)
     provider = FastHSEMaterialProvider(bundle, max_steps=args.steps)
     context = SimpleNamespace(solver_comm=comm, point_ids=(point,))

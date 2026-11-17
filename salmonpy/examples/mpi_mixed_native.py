@@ -90,8 +90,8 @@ def main():
         parser.error('fast HSE requires an explicit layer layout')
     if args.hse_bundle is not None and args.fast_hse_build is None:
         parser.error('--hse-bundle requires --fast-hse-build')
-    if args.hse_symmetry and (args.fast_hse_mpi_build is None or args.hse_ranks != 1 or args.hse_reference_bundle is None):
-        parser.error('--hse-symmetry requires native HSE group1 and --hse-reference-bundle')
+    if args.hse_symmetry and (args.fast_hse_mpi_build is None or args.hse_reference_bundle is None):
+        parser.error('--hse-symmetry requires native HSE and --hse-reference-bundle')
     if args.hse_reference_bundle is not None and not args.hse_symmetry:
         parser.error('--hse-reference-bundle requires --hse-symmetry')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:

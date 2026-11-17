@@ -247,11 +247,11 @@ contains
     if(.not.ok)return
     if(system%kpoint_input%use_symmetry)then
       ok=.false.
-      ! First explicit-owner symmetry scope: serial k, CPU full-q scalar exchange.
+      ! Explicit-owner symmetry scope: one/two k ranks, CPU full-q scalar exchange.
       ! Learned/PT-CN symmetry needs its own history/persistence validation.
       if(exx_factor_mode/='off')return
       if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full')return
-      if(info%isize_k/=1.or.any(hse_q_reduction/=1).or.any(system%kmesh<1))return
+      if(info%isize_k>2.or.info%isize_k>system%nk.or.any(hse_q_reduction/=1).or.any(system%kmesh<1))return
       if(.not.allocated(system%kpoint_input%symmat_a))return
       if(.not.allocated(system%kpoint_input%symmat_b))return
       if(any(shape(system%kpoint_input%symmat_a)/=shape(system%kpoint_input%symmat_b)))return

@@ -246,7 +246,7 @@ contains
   if(settings_pinned)goto 900
   if(.not.present(allow_symmetry))goto 900
   if(.not.allow_symmetry)goto 900
-  if(nproc_size_global/=1.or.exx_factor_mode/='off')goto 900
+  if(nproc_size_global<1.or.nproc_size_global>2.or.exx_factor_mode/='off')goto 900
   if(propagator/='hse_taylor4'.and.propagator/='hse_taylor4_full')goto 900
  endif
  if(yn_restart/='n'.or.e_impulse/=0d0.or.ae_shape1/='impulse'.or.ae_shape2/='none')goto 900
@@ -316,7 +316,11 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
   if(field_status==1)guard_status=2
   if(field_status==2)guard_status=34
  endif
- call comm_summation(guard_status,status,nproc_group_global)
+ block
+ use communication,only:comm_get_max
+ status=guard_status
+ call comm_get_max(status,nproc_group_global)
+ end block
  if(status/=0)return
  call hse_checkpoint_capture(ctx%hse,accepted_exchange,status)
  call checkpoint_collective_status(status)

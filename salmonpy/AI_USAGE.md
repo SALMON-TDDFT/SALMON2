@@ -722,8 +722,8 @@ FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照。通常�
 別の縮約演算に合わせて高速版を変更しない。
 
 NativeFastHSEBackend(...,allow_symmetry=True) と新しい対応nativeライブラリを明示する。
-既定Falseは対称性を拒否。対称性opt-inは内部k1・CPU・周期・非スピン分極・full-q・factor-off
-Taylor、1プロセス1寿命・共有対称化設定不変。学習／PT-CN対称性と内部k2を選ばない。
+既定Falseは対称性を拒否。対称性opt-inは内部k1／2・CPU・周期・非スピン分極・full-q・factor-off
+Taylor、1プロセス1寿命・共有対称化設定不変。学習／PT-CN対称性は選ばない。内部2ランクにはsp_fast_hse_symmetry_kmpi_protocol()==1を確認する。
 新C入口sp_fast_hse_init_symmetryとsp_fast_hse_symmetry_protocol()==1が必要。旧バイナリから
 対応を推定しない。有限で一致したstatus34だけが状態維持のInputErrorで、Aの修正後に再試行可。
 外場の自動投影・微小成分の切捨て・通常HSEへのfallbackは禁止。FDTD全体にはstep_protectedを使う。
@@ -739,4 +739,4 @@ test_fast_hse_low_gradient_mpi.pyは元のphase0・全／縮約k点の比較に�
 probe_hse_low_gradient.pyは生のLibxc診断で、wrapper修正後も感度Trueになり得る。
 これをwrapperの失敗と取り違えない。密度・勾配・Aをfloor/smoothせず、許容誤差を緩めない。
 元の失敗例と通常回帰の結果・ハッシュを保持する。数値一致は物理収束の保証ではない。
-次の課題は縮約内部MPIと初期化範囲の検証。分子の作業は保留。
+内部MPI2で全／縮約k点と直接再開を検証済み。保存時と同じ分割を使い、分割変更はしない。次は初期化範囲の検証。分子の作業は保留。

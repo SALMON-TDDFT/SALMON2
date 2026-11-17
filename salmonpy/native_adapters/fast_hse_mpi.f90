@@ -13,7 +13,7 @@ module salmonpy_fast_hse_mpi
  use structures,only:s_rt_run_config
  implicit none
  private
- public::sp_fast_hse_init_symmetry,sp_fast_hse_symmetry_protocol
+ public::sp_fast_hse_init_symmetry,sp_fast_hse_symmetry_protocol,sp_fast_hse_symmetry_kmpi_protocol
  public::sp_fast_hse_init,sp_fast_hse_step,sp_fast_hse_checkpoint,sp_fast_hse_close,sp_fast_hse_info
  type(tddft_context),pointer,save::state=>null()
  logical,save::used=.false.,ready=.false.,failed=.false.
@@ -76,6 +76,9 @@ end function
  if(i>len(filename).or.len_trim(filename)==0)return
  status=0
  end subroutine
+ integer(c_int) function sp_fast_hse_symmetry_kmpi_protocol() bind(C)
+ sp_fast_hse_symmetry_kmpi_protocol=1
+ end function
  integer(c_int) function sp_fast_hse_symmetry_protocol() bind(C)
  sp_fast_hse_symmetry_protocol=1
  end function
@@ -133,7 +136,7 @@ end function
  if(status/=0)return
  call read_input(trim(filename))
  if(theory/='tddft_response'.or.xc/='hse06')status=1
- if(allow_symmetry.and.nproc_size_global/=1)status=1
+ if(allow_symmetry.and.(nproc_size_global<1.or.nproc_size_global>2))status=1
  if(nproc_k/=nproc_size_global.or.nproc_ob/=1.or.any(nproc_rgrid/=1))status=1
 #ifdef USE_MPI
  if(service_enabled())status=1

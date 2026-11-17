@@ -354,13 +354,14 @@ contains
   if(.not.allocated(map%cached_phase))then
     if(map%cached_first/=1.or.map%cached_count/=0)return
   else
-    if(map%cached_first/=1.or.map%cached_count/=nf)return
-    if(any(lbound(map%phase_offset)/=1).or.size(map%phase_offset)/=nf+1)return
+    if(map%cached_first<1.or.map%cached_count<1.or.map%cached_count>nf)return
+    if(map%cached_first>nf-map%cached_count+1)return
+    if(any(lbound(map%phase_offset)/=1).or.size(map%phase_offset)/=map%cached_count+1)return
     if(map%phase_offset(1)/=0)return
     total=0
-    do i=1,nf
-      if(map%multiplicity(i)>huge(0)-total)return
-      total=total+map%multiplicity(i)
+    do i=1,map%cached_count
+      if(map%multiplicity(map%cached_first+i-1)>huge(0)-total)return
+      total=total+map%multiplicity(map%cached_first+i-1)
       if(map%phase_offset(i+1)/=total)return
     enddo
     if(any(lbound(map%cached_phase)/=1))return
@@ -583,7 +584,8 @@ contains
     write(unit,iostat=status)cached,first,count
   endif
   if(status/=0)return
-  if(first/=1.or.(cached.and.count/=expected%nfull).or.(.not.cached.and.count/=0))then
+  if((cached.neqv.allocated(expected%cached_phase)).or. &
+     first/=expected%cached_first.or.count/=expected%cached_count)then
     status=1;return
   endif
   if(reading)then
@@ -592,7 +594,7 @@ contains
     value%cached_first=first;value%cached_count=count
     if(cached)then
       columns=0
-      do i=1,expected%nfull
+      do i=first,first+count-1
         if(expected%multiplicity(i)>huge(0)-columns)then
           status=1;return
         endif
@@ -629,9 +631,18 @@ contains
     if(.not.valid_symmetry(state%native_symmetry))return
     if(any(state%native_symmetry%n/=state%native_kernel%n))return
     if(state%native_symmetry%nfull/=state%native_kernel%nk)return
-    ! Bounded admitted core: complete phase coverage, no internal k partition.
-    if(state%native_kernel%phase_start/=1.or..not.allocated(state%native_kernel%phase))return
-    if(size(state%native_kernel%phase,2)/=state%native_symmetry%nfull)return
+    ! Rank-local full-star phase coverage; the outer archive pins MPI ownership.
+    if(.not.allocated(state%native_kernel%phase))return
+    if(state%native_kernel%phase_start<1.or.size(state%native_kernel%phase,2)<1)return
+    if(size(state%native_kernel%phase,2)>state%native_symmetry%nfull)return
+    if(state%native_kernel%phase_start>state%native_symmetry%nfull-size(state%native_kernel%phase,2)+1)return
+    if(.not.any(state%native_symmetry%first(:state%native_symmetry%nrep)==state%native_kernel%phase_start))return
+    if(.not.any(state%native_symmetry%first(2:)== &
+        state%native_kernel%phase_start+size(state%native_kernel%phase,2)))return
+    if(allocated(state%native_symmetry%cached_phase))then
+      if(state%native_symmetry%cached_first/=state%native_kernel%phase_start)return
+      if(state%native_symmetry%cached_count/=size(state%native_kernel%phase,2))return
+    endif
     if(state%factor_experiment.or.state%factor_learned)return
   endif
   if(state%ace%metric_distributed.or.state%initial_ace%metric_distributed.or. &

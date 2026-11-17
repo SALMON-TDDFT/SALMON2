@@ -451,10 +451,12 @@ Audited native aggregate protection uses the separate protocol and `--protect-st
 
 ## Fast-PR HSE symmetry opt-in
 
-NativeFastHSEBackend(...,allow_symmetry=True) is bounded to internal-k1,
+NativeFastHSEBackend(...,allow_symmetry=True) is bounded to internal-k1/2,
 factor-off Taylor. The ordinary mixed sample explicitly selects --hse-symmetry
 --hse-reference-bundle FULL_K_BUNDLE. Use --protect-steps/step_protected to roll
 back the entire loop when InputError rejects a symmetry-breaking A. Direct/protected
 resume and local two-LD/SBE/PBE-TDDFT/HSE mixtures are tested. Material/field/XC
 compatibility and physical convergence remain separate; see the
 [symmetry guide](FAST_HSE_SYMMETRY.en.md), including stable low-gradient evaluation and the original-case regression.
+
+Reduced-k symmetry now supports two internal k ranks and same-partition direct resume with the separate native k-MPI capability. Checkpoint repartitioning remains unsupported; see the symmetry guide.

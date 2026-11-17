@@ -56,7 +56,7 @@ class NativeFastHSETests(unittest.TestCase):
             ordinary = self.backend()
             symmetric = NativeFastHSEBackend(self.record, self.root, allow_symmetry=True)
         self.assertEqual(ordinary.supported_group_sizes, (1, 2))
-        self.assertEqual(symmetric.supported_group_sizes, (1,))
+        self.assertEqual(symmetric.supported_group_sizes, (1,2))
         self.assertNotEqual(ordinary.identity, symmetric.identity)
         for value in (1, 'yes', None):
             with self.assertRaises(InputError):
@@ -101,13 +101,21 @@ class NativeFastHSETests(unittest.TestCase):
             else:
                 with self.assertRaises(InputError):_initializer(lib,True)
 
-    def test_symmetry_k2_rejected_before_loading_native(self):
-        backend = NativeFastHSEBackend(self.record,self.root,allow_symmetry=True)
-        comm = FakeComm();comm.size = 2
-        ctx = SimpleNamespace(solver_comm=comm,point_ids=(1,))
-        with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('no native load')):
-            with self.assertRaisesRegex(InputError,'one internal k rank'):
-                backend.create_state(object(),1,.01,ctx)
+    def test_symmetry_kmpi_requires_separate_native_capability(self):
+        from salmonpy.fast_hse_mpi import _initializer
+        old = lambda *a: 0
+        old.argtypes = []
+        new = lambda *a: 0
+        lib = SimpleNamespace(sp_fast_hse_init=old,sp_fast_hse_init_symmetry=new,
+                              sp_fast_hse_symmetry_protocol=lambda:1)
+        with self.assertRaisesRegex(InputError,'k-MPI'):
+            _initializer(lib,True,2)
+        for value in (0,1,2):
+            lib.sp_fast_hse_symmetry_kmpi_protocol = lambda:value
+            if value == 1:
+                self.assertIs(_initializer(lib,True,2),new)
+            else:
+                with self.assertRaisesRegex(InputError,'k-MPI'):_initializer(lib,True,2)
 
     def test_missing_symmetry_asset_rejected_before_native_lifetime(self):
         from salmonpy.fast_hse import FastHSEMaterialProvider

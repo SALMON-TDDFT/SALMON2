@@ -125,9 +125,9 @@ RTの `temperature < -1e-12` 分岐など、正常入力の既存GS／RT選択�
 コミュニケータなどの共有依存は引き続き残ります。
 
 HSEは高速PR版のみです。`NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)` で
-対称性を明示的に許可できます。内部kランク1・周期・非スピン分極・CPU・full-q・factor-off
+対称性を明示的に許可できます。内部kランク1／2・周期・非スピン分極・CPU・full-q・factor-off
 Taylorに限定し、共有の対称化設定は不変、1プロセス1寿命です。既定値Falseと既存C入口は
-対称性を拒否します。学習／PT-CNの対称性と内部k MPI2は未対応です。
+対称性を拒否します。内部2ランクはsp_fast_hse_symmetry_kmpi_protocol()==1が必要。学習／PT-CN対称性は未対応です。
 
 新C入口 `sp_fast_hse_init_symmetry` は既存initと同じ引数で、
 `sp_fast_hse_symmetry_protocol()==1` を宣言します。全ランクの有限なstatus34とこの宣言を
@@ -137,3 +137,5 @@ Taylorに限定し、共有の対称化設定は不変、1プロセス1寿命で
 
 [対称性ガイド](FAST_HSE_SYMMETRY.md)には、混在サンプル、対応範囲と極小勾配XCの安定評価と回帰検証を
 記載しています。接続・保存復元のテストを物理収束の証明と解釈しないでください。
+
+縮約k点の内部2ランクと同一分割での直接再開に対応します。追加のnative k-MPI capabilityが必要です。分割変更による再開は未対応。詳しくは対称性ガイドを参照してください。

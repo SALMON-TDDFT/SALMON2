@@ -45,7 +45,7 @@ def _configure(lib):
         getattr(lib, 'sp_fast_hse_'+name).restype = c.c_int
 
 
-def _initializer(lib, allow_symmetry):
+def _initializer(lib, allow_symmetry, group_size=1):
     if not allow_symmetry:
         return lib.sp_fast_hse_init
     query = getattr(lib, 'sp_fast_hse_symmetry_protocol', None)
@@ -56,6 +56,14 @@ def _initializer(lib, allow_symmetry):
     query.restype = c.c_int
     if query() != 1:
         raise InputError('unsupported native symmetry opt-in protocol')
+    if group_size > 1:
+        kquery = getattr(lib, 'sp_fast_hse_symmetry_kmpi_protocol', None)
+        if kquery is None:
+            raise InputError('native build has no symmetry k-MPI protocol')
+        kquery.argtypes = []
+        kquery.restype = c.c_int
+        if kquery() != 1:
+            raise InputError('unsupported native symmetry k-MPI protocol')
     entry.argtypes = lib.sp_fast_hse_init.argtypes
     entry.restype = c.c_int
     return entry
@@ -68,8 +76,8 @@ class NativeFastHSEBackend:
     HSE engine or fallback is supported. Material points require separate groups;
     each group has one shared work copy and one point. Errors can invalidate the
     whole MPI job; native process-terminating failures are not recoverable.
-    allow_symmetry is explicit, identity-bound and restricted to one internal
-    rank/factor-off Taylor; see FAST_HSE_SYMMETRY for numerical limitations.
+    allow_symmetry is explicit, identity-bound and restricted to one/two internal
+    ranks/factor-off Taylor; see FAST_HSE_SYMMETRY for numerical limitations.
     """
     supported_group_sizes = (1,2)
     execution = 'collective'
@@ -79,7 +87,7 @@ class NativeFastHSEBackend:
         if type(allow_symmetry) is not bool:
             raise InputTypeError('allow_symmetry must be boolean')
         self.allow_symmetry = allow_symmetry
-        self.supported_group_sizes = (1,) if allow_symmetry else (1,2)
+        self.supported_group_sizes = (1,2)
         record = json.loads(Path(build_record).expanduser().resolve().read_text())
         if record.get('schema') != 'salmonpy.fast-hse-mpi/1' or record.get('status') != 'built-and-audited':
             raise InputError('audited fast-PR HSE host-MPI build record required')
@@ -111,7 +119,7 @@ class NativeFastHSEBackend:
             if len(context.point_ids) != 1 or context.point_ids[0] != point_id:
                 raise InputError('one fast HSE point per solver group required')
             if comm.size not in self.supported_group_sizes:
-                raise InputError('symmetry opt-in requires one internal k rank' if self.allow_symmetry else 'validated fast HSE k-only group requires one or two ranks')
+                raise InputError('validated fast HSE k-only group requires one or two ranks')
             if not isinstance(initial, _Initial):
                 raise InputTypeError('prepared FastHSEMaterialProvider state required')
             if self.work_root.is_relative_to(initial.directory):
@@ -161,7 +169,7 @@ class NativeFastHSEBackend:
                 raise InputError('fast HSE work directory is not shared identically')
             lib = c.CDLL(str(self.library))
             _configure(lib)
-            initializer = _initializer(lib,self.allow_symmetry)
+            initializer = _initializer(lib,self.allow_symmetry,comm.size)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
