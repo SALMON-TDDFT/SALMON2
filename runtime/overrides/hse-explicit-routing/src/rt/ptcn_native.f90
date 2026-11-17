@@ -11,7 +11,7 @@ module ptcn_native
  public::native_ptcn_step
 contains
  subroutine native_ptcn_step(dt,ac0,ac1,lg,mg,system,info,stencil,xc_func,srg,srg_scalar,pp,ppg,ppn, &
-   input,output,rho,rho_s,vlocal,vh,vxc,vpsl,fg,poisson,energy)
+   input,output,rho,rho_s,vlocal,vh,vxc,vpsl,fg,poisson,energy,rt_status)
  use structures
  use ptcn_core,only:exx_ptcn_solve,pt_orthogonalize,pt_uniform_occupation
 #ifdef USE_SCALAPACK
@@ -32,6 +32,7 @@ contains
  use hamiltonian,only:hpsi,update_vlocal,update_kvector_nonlocalpt
  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
  implicit none
+ integer,optional,intent(out)::rt_status
 #ifdef USE_HSE
  type(s_exx_rt_state),pointer::exx_owner
 #endif
@@ -61,9 +62,11 @@ contains
  complex(8),allocatable::initial_hu(:,:,:),rhs_cn(:,:,:),work_hu(:,:,:)
  real(8)::residual,gram,gram_k,ne_local,ne,expected,qvec(3),kvec(3),symbol,fmetric(6),pre_seconds,tick
  real(8)::gram_before,ne_before,post_residual,correction_norm,lowdin_seconds
- integer::ng,no,nk,builds,apps,err,k,j,ik,io,is,g,ix,iy,iz,ns,status
+ integer::ng,no,nk,builds,apps,err,k,j,ik,io,is,g,ix,iy,iz,ns,status,callback_status,symbol_error
  logical::first_action,hybrid
  character(12)::label
+ callback_status=0;symbol_error=0
+ if(present(rt_status))rt_status=0
  if(info%isize_r/=1.or.any(mg%num/=lg%num))error stop 'Native PT-CN requires full local spatial domain'
  hybrid=xc=='hse06'
  if(.not.hybrid)error stop 'Native PT-CN: unsupported functional'
@@ -96,7 +99,12 @@ contains
  allocate(u(ns*ng,no,nk),x(ns*ng,no,nk),den(ng,nk),pre_in(ng,ns*no),pre_out(ng,ns*no))
  call ptcn_fft_create(fft,mg%num,ns*no,err)
  status=err;call comm_get_max(status,info%icomm_rko)
- if(status/=0)error stop 'Native PT-CN FFT setup failed'
+ if(status/=0)then
+   if(present(rt_status))then
+     rt_status=32;goto 900
+   endif
+   error stop 'Native PT-CN FFT setup failed'
+ endif
  fmetric=stencil%coef_F
  if(stencil%if_orthogonal)fmetric=[1d0,1d0,1d0,0d0,0d0,0d0]
  do k=1,nk
@@ -106,10 +114,17 @@ contains
    g=g+1;qvec=2*acos(-1d0)*real([ix,iy,iz],8)/mg%num
    call ptcn_kinetic_symbol(qvec,stencil%coef_lap0,stencil%coef_lap,stencil%coef_nab, &
      fmetric,system%rmatrix_B,kvec,symbol,err)
-   if(err/=0)error stop 'Native PT-CN kinetic symbol rejected'
+   if(err/=0)then
+     if(.not.present(rt_status))error stop 'Native PT-CN kinetic symbol rejected'
+     symbol_error=1;symbol=0d0
+   endif
    den(g,k)=1+(0d0,.5d0)*dt*symbol
   enddo;enddo;enddo
  enddo
+ call comm_get_max(symbol_error,info%icomm_rko)
+ if(symbol_error/=0)then
+   rt_status=32;goto 900
+ endif
  pre_seconds=0d0
 #ifdef USE_SCALAPACK
  call ptcn_owner_create(owner,ns*ng,system%no,info%io_s,info%io_e,info%icomm_o,err)
@@ -117,7 +132,12 @@ contains
  err=0
 #endif
  status=err;call comm_get_max(status,info%icomm_rko)
- if(status/=0)error stop 'Native PT-CN owner setup failed'
+ if(status/=0)then
+   if(present(rt_status))then
+     rt_status=32;goto 900
+   endif
+   error stop 'Native PT-CN owner setup failed'
+ endif
  call pack(input,u)
 #ifdef USE_HSE
  exx_owner=>exx_context(system)
@@ -129,6 +149,14 @@ contains
   ! Keep the exact initial RHS for an independent post-retraction residual.
   ! This is the same starting callback the solver otherwise executes, not a duplicate.
   call action(u,initial_hu,.true.)
+  status=callback_status
+#ifdef USE_HSE
+  if(hybrid)status=max(status,exx_owner%step_error)
+#endif
+  call comm_get_max(status,info%icomm_rko)
+  if(status/=0.and.present(rt_status))then
+    rt_status=32;goto 900
+  endif
   call project(u,initial_hu,system%hvol,work_hu,system%no)
   rhs_cn=u-(0d0,.5d0)*dt*work_hu
   call exx_ptcn_solve(u,dt,system%hvol,action,precondition,global_norm,x,residual,builds,apps,err, &
@@ -142,14 +170,26 @@ contains
 #ifdef USE_HSE
  if(hybrid)exx_owner%exx_freeze=.false.
 #endif
- status=err;call comm_get_max(status,info%icomm_rko)
+ status=max(abs(err),callback_status)
+#ifdef USE_HSE
+ if(hybrid)status=max(status,exx_owner%step_error)
+#endif
+ call comm_get_max(status,info%icomm_rko)
  if(status/=0)then
   if(comm_is_root(info%id_rko))write(*,*)trim(label)//'_REJECT residual/builds/apps',residual,builds,apps
+  if(present(rt_status))then
+    rt_status=32;goto 900
+  endif
   error stop 'Native PT-CN nonlinear convergence failed'
  endif
  ! Preserve the original raw Gram/electron gate: do not hide large drift.
  call state_metrics(x,gram,ne,status)
- if(status/=0)error stop 'Native PT-CN raw Gram/electron gate failed'
+ if(status/=0)then
+   if(present(rt_status))then
+     rt_status=32;goto 900
+   endif
+   error stop 'Native PT-CN raw Gram/electron gate failed'
+ endif
  if(hybrid)then
   gram_before=gram;ne_before=ne;initial_hu=x
   tick=omp_get_wtime()
@@ -163,10 +203,20 @@ contains
 #endif
   lowdin_seconds=omp_get_wtime()-tick
   status=abs(err);call comm_get_max(status,info%icomm_rko)
-  if(status/=0)error stop 'Native HSE PT-CN Lowdin failed'
+  if(status/=0)then
+   if(present(rt_status))then
+     rt_status=32;goto 900
+   endif
+   error stop 'Native HSE PT-CN Lowdin failed'
+ endif
   correction_norm=global_norm(x-initial_hu)/global_norm(u)
   call state_metrics(x,gram,ne,status)
-  if(status/=0)error stop 'Native HSE PT-CN post-Lowdin Gram/electron gate failed'
+  if(status/=0)then
+   if(present(rt_status))then
+     rt_status=32;goto 900
+   endif
+   error stop 'Native HSE PT-CN post-Lowdin Gram/electron gate failed'
+ endif
   ! Retraction is after the CN nonlinear solve, as in the original HSE route.
   ! Rebuild H/ACE at the ACTUAL output state, before committing an exact teacher.
   call action(x,work_hu,.true.)
@@ -176,7 +226,12 @@ contains
   status=0
   if(.not.ieee_is_finite(post_residual).or..not.ieee_is_finite(correction_norm))status=1
   call comm_get_max(status,info%icomm_rko)
-  if(status/=0)error stop 'Native HSE post-Lowdin residual is nonfinite'
+  if(status/=0)then
+   if(present(rt_status))then
+     rt_status=32;goto 900
+   endif
+   error stop 'Native HSE post-Lowdin residual is nonfinite'
+ endif
   if(comm_is_root(info%id_rko))write(*,'(5(a,es22.13))') &
    'HSE_PT_CN_ORTH pre_gram=',gram_before,' post_gram=',gram, &
    ' pre_residual=',residual,' post_residual=',post_residual,' correction=',correction_norm
@@ -186,10 +241,20 @@ contains
 #ifdef USE_HSE
  if(hybrid)call exx_ptcn_accept(system,info)
 #endif
+#ifdef USE_HSE
+ if(hybrid.and.present(rt_status))then
+   status=exx_owner%step_error
+   call comm_get_max(status,info%icomm_rko)
+   if(status/=0)then
+     rt_status=status;goto 900
+   endif
+ endif
+#endif
  call unpack(x,output)
  if(comm_is_root(info%id_rko))write(*,'(a,es22.13,a,i0,a,i0,a,es22.13,a,es22.13)') &
   trim(label)//' residual=',residual,' builds=',builds,' applications=',apps,' Gram=',gram,' electrons=',ne
  if(comm_is_root(info%id_rko))write(*,'(a,es22.13)')trim(label)//'_PRECONDITION seconds=',pre_seconds
+900 continue
  call ptcn_fft_destroy(fft)
 #ifdef USE_SCALAPACK
  call ptcn_owner_destroy(owner)
@@ -244,6 +309,10 @@ contains
  end subroutine
  subroutine consensus(code)
  integer,intent(inout)::code
+ code=max(code,callback_status)
+#ifdef USE_HSE
+ if(hybrid)code=max(code,exx_owner%step_error)
+#endif
  call comm_get_max(code,info%icomm_rko)
  end subroutine
  subroutine project(a,b,dv,r,noccupied)
@@ -295,6 +364,13 @@ contains
  if(hybrid)exx_owner%exx_freeze=.not.refresh
 #endif
  call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,trial,stencil,vxc,energy%E_xc)
+#ifdef USE_HSE
+ if(hybrid.and.present(rt_status))then
+   if(exx_owner%step_error/=0)then
+     callback_status=exx_owner%step_error;b=0d0;return
+   endif
+ endif
+#endif
  call update_vlocal(mg,system%nspin,vh,vpsl,vxc,vlocal)
  call hpsi(trial,htrial,info,mg,vlocal,system,stencil,srg,ppg)
  call pack(htrial,b)
@@ -308,7 +384,10 @@ contains
  do kk=1,size(a,3)
   pre_in=reshape(a(:,:,kk),[ng,ns*no])
   call ptcn_fft_apply(fft,pre_in,den(:,kk),pre_out,code)
-  if(code/=0)error stop 'Native PT-CN FFT precondition failed'
+  if(code/=0)then
+    if(.not.present(rt_status))error stop 'Native PT-CN FFT precondition failed'
+    callback_status=32;pre_out=0d0
+  endif
   b(:,:,kk)=reshape(pre_out,[ns*ng,no])
  enddo
  pre_seconds=pre_seconds+omp_get_wtime()-start

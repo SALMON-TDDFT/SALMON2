@@ -153,3 +153,24 @@ class NativeFastHSETests(unittest.TestCase):
             state.checkpoint(self.root/'new',False)
         self.assertTrue(state.failed)
         state.close()
+
+    def test_declared_deep_recovery_preserves_state_and_allows_retry(self):
+        from salmonpy.errors import NumericalError
+        for protocol in (0,1):
+            state,_=self.state()
+            code=[30]
+            def reject(old,new,current,energy):
+                current[:]=0
+                c.cast(energy,c.POINTER(c.c_double)).contents.value=0
+                return code[0]
+            state.lib.sp_fast_hse_step=reject
+            state.lib.sp_fast_hse_recovery_protocol=lambda:protocol
+            with self.subTest(protocol=protocol),self.assertRaises(NumericalError if protocol else RuntimeFailure):
+                state.step([.1,0,0])
+            np.testing.assert_array_equal(state.A,np.zeros(3))
+            self.assertEqual(state.steps,0)
+            self.assertEqual(state.failed,not bool(protocol))
+            if protocol:
+                code[0]=0
+                state.step([.1,0,0])
+                self.assertEqual(state.steps,1)

@@ -4,7 +4,7 @@
 #include "config.h"
 module salmonpy_tddft_context
  use structures
- use hse_checkpoint,only:numeric_payload,hse_checkpoint_install
+ use hse_checkpoint,only:numeric_payload,hse_checkpoint_install,hse_checkpoint_capture
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear
  use exx_native,only:exx_bind_system,exx_unbind_system
  use initialization_rt_sub,only:initialization_rt
@@ -194,17 +194,30 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  real(8),intent(in)::ac(3)
  real(8),intent(out)::current(3),total_energy
  integer,intent(out)::status
- integer::itt,i
+ integer::itt,i,guard_status
+ type(checkpoint_payload)::accepted_payload
+ type(numeric_payload)::accepted_exchange
+ type(s_xc_operator_payload)::accepted_xc
+ real(8)::accepted_cval
  status=1;current=0d0;total_energy=0d0
  if(.not.associated(ctx))return
- if(.not.settings_match(ctx%settings))then
-  status=2;return
- endif
- if(ctx%checkpoint_failed)return
- if(ctx%accepted>=ctx%rt%max_steps)return
+ guard_status=0
+ if(.not.settings_match(ctx%settings))guard_status=2
+ if(associated(pending_owner,ctx))guard_status=2
+ if(ctx%checkpoint_failed)guard_status=2
+ if(ctx%accepted>=ctx%rt%max_steps)guard_status=2
  do i=1,3
-  if(.not.ieee_is_finite(ac(i)))return
+  if(.not.ieee_is_finite(ac(i)))guard_status=2
  enddo
+ call comm_summation(guard_status,status,nproc_group_global)
+ if(status/=0)return
+ call hse_checkpoint_capture(ctx%hse,accepted_exchange,status)
+ call checkpoint_collective_status(status)
+ if(status/=0)return
+ call checkpoint_copy(ctx,accepted_payload,.false.)
+ accepted_xc=ctx%system%xc_payload;accepted_cval=ctx%xc_func%cval
+ ctx%rt%recover_errors=.true.;ctx%rt%step_error=0
+ ctx%hse%recover_errors=.true.;ctx%hse%step_error=0
  itt=ctx%accepted+1
  ctx%rt%Ac_ext(:,itt)=ac;ctx%rt%Ac_tot(:,itt)=ac
  if(mod(itt-ctx%Mit,2)==1)then
@@ -215,6 +228,25 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
     call time_evolution_step(ctx%Mit,ctx%rt%max_steps,itt,ctx%lg,ctx%mg,ctx%system,ctx%rt,ctx%info,ctx%stencil,ctx%xc_func &
      & ,ctx%srg,ctx%srg_scalar,ctx%pp,ctx%ppg,ctx%ppn,ctx%spsi_out,ctx%spsi_in,ctx%tpsi,ctx%rho,ctx%rho_jm,ctx%rho_s,ctx%V_local,ctx%Vbox,ctx%Vh,ctx%Vh_stock1,ctx%Vh_stock2,ctx%Vxc &
      & ,ctx%Vpsl,ctx%fg,ctx%energy,ctx%ewald,ctx%md,ctx%ofl,ctx%poisson,ctx%singlescale,ctx%unfold)
+ endif
+ guard_status=ctx%hse%step_error
+ if(guard_status==0)guard_status=ctx%rt%step_error
+ block
+ use communication,only:comm_get_max
+ call comm_get_max(guard_status,nproc_group_global)
+ end block
+ ctx%rt%recover_errors=.false.;ctx%rt%step_error=0
+ ctx%hse%recover_errors=.false.;ctx%hse%step_error=0
+ if(guard_status/=0)then
+   call hse_checkpoint_install(ctx%hse,accepted_exchange)
+   call checkpoint_copy(ctx,accepted_payload,.true.)
+   ctx%system%xc_payload=accepted_xc;ctx%xc_func%cval=accepted_cval
+   block
+   use hamiltonian,only:update_kvector_nonlocalpt
+   call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
+   end block
+   status=guard_status
+   return
  endif
  ctx%accepted=itt
  current=-ctx%rt%curr(:,itt)

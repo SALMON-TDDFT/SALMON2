@@ -18,6 +18,10 @@ module salmonpy_fast_hse_mpi
  logical,save::used=.false.,ready=.false.,failed=.false.
  real(8),save::accepted_A(3)=0d0
 contains
+integer(c_int) function sp_fast_hse_recovery_protocol() bind(C)
+  sp_fast_hse_recovery_protocol=1
+end function
+
 integer(c_int) function sp_fast_hse_checkpoint_protocol() bind(C)
   sp_fast_hse_checkpoint_protocol=1
 end function
@@ -141,7 +145,13 @@ end function
  call rt_step(state,Anew,J,energy,status)
  call agree(status)
  if(status/=0)then
-  failed=.true.;return
+  select case(status)
+  case(20:25,30,32,33)
+    sp_fast_hse_step=status
+  case default
+    failed=.true.
+  end select
+  return
  endif
  accepted_A=Anew
  sp_fast_hse_step=0

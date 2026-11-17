@@ -323,3 +323,15 @@ A state returned by Python `NativeTDDFTBackend` raises `NumericalError` from `ad
 Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE. SOC,+U,jellium, ionic motion/force output, Gram–Schmidt, projection/unfold and microscopic Maxwell coupling are outside the protected profile and return15 before updating. Ordinary batch calculations retain their existing route; external checkpoint encoding is unchanged. Per-step copies/checks add memory and runtime overhead: leave resource headroom. Budgets remain warning-only.
 
 This is a TDDFT-group guarantee, not automatic rollback of an entire mixed FDTD step whose other components may have advanced. MPI/process death, allocation failures, uncontrolled third-party STOP, deep initialization STOP and output-device failures are excluded. One-rank fault injection exists only in a separately compiled `SALMONPY_RECOVERY_TESTING` build; production builds export no injection entry.
+
+## Deep numerical recovery for fast-PR HSE
+
+New libraries for `NativeFastHSEBackend` declare `sp_fast_hse_recovery_protocol() == 1`. The guarded profile is periodic, unpolarized, fixed-ion fast-PR HSE06 with Taylor4 / learned PT-CN and internal k-only MPI1/2. Conventional HSE is not a fallback.
+
+Each step backs up electronic arrays and ACE, factor/PT-CN histories, exchange caches and counters. FFT plans, MPI communicators and other owning resources are not copied. Collective checks cover finite orbitals, density, Hartree, XC and endpoints, plus handled ACE operator errors, PT-CN convergence/Gram/retraction checks and history updates. Handled failures directly restore accepted numerical state without replaying propagation or exchange history. A, clocks, current and energy remain unchanged; failed attempts append no ordinary RT records. Diagnostic logs may remain.
+
+Only a declared protocol and unanimous known error permit Python to raise `NumericalError` and retry with corrected input at the same accepted time. Old libraries and unknown errors retain conservative `RuntimeFailure` behavior. Neither dt nor drive amplitude changes automatically. Per-step backups/checks add memory and runtime cost; budgets remain advisory.
+
+The guarantee covers the HSE material group, not automatic rollback of an entire mixed step containing FDTD and other materials. Deep initialization, allocation failure, process/MPI termination, uncontrolled external STOP and output-device failure remain excluded. Do not infer recovery after an unhandled failure.
+
+Run `tools/test_fast_hse_deep_recovery_mpi.py BUILD GS NEW_OUTPUT --steps 32 --fault-step 13` with two ranks, OMP/BLAS1 and an external timeout. `--split` uses two independent two-rank groups. `--overflow-A 1e100` stresses real PT-CN numerical divergence; it is not a scientific input. `--faults` requires a separate explicit `SALMONPY_RECOVERY_TESTING` build; production exports no injection entry point. See `docs/fast-hse-deep-recovery-validation-2026-11-17.md`. These small synthetic cases verify implementation, not converged physical accuracy.

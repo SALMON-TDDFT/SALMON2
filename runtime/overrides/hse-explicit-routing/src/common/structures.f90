@@ -680,6 +680,8 @@ module structures
   end type
 
   type s_rt
+    logical :: recover_errors=.false.
+    integer :: step_error=0
     integer :: max_steps=0
     ! Fixed at RT initialization; no per-step global timestep selection.
     real(8) :: time_step = 0d0

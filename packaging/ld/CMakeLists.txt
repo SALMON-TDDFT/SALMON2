@@ -174,3 +174,5 @@ install(FILES "${ROOT}/tools/test_native_tddft_admission_mpi.py" DESTINATION sal
 install(FILES "${ROOT}/tools/test_mixed_scaling.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_tddft_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/tools/test_fast_hse_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)

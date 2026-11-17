@@ -25,7 +25,7 @@ module salmon_xc
   use structures, only: s_xc_config, s_xc_functional, s_xc_operator_payload, s_xc_workspace, s_xc_pz_workspace
 #ifdef USE_HSE
   use exx_native,only:exx_context,exx_system_energy,exx_pre_scf
-  use exx_native, only: exx_refresh,exx_enabled,exx_exchange_energy
+  use exx_native, only: exx_recovery_status, exx_refresh,exx_enabled,exx_exchange_energy
   use hybrid_semilocal, only: hse_semilocal_evaluate,pbeh_semilocal_evaluate,hybrid_density_evaluate
   use rvv10, only: rvv10_evaluate
   use rvv10_distributed, only: rvv10_evaluate_distributed
@@ -139,6 +139,10 @@ contains
       if(pp%flag_nlcc.and.(yn_md/='n'.or.yn_opt/='n')) &
         error stop 'Hybrid NLCC: fixed-ion calculations only'
       call exx_refresh(system,mg,info,spsi)
+      if(exx_recovery_status(system)/=0)then
+        call nvtxEndRange
+        return
+      endif
     endif
 #endif
     ! Payload reset each call; a functional without a tau derivative leaves no stale one behind.

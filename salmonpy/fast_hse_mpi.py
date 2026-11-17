@@ -18,7 +18,7 @@ import numpy as np
 
 from . import embedded_tddft as embedded
 from .distributed import NativeParallelContext
-from .errors import InputError, InputTypeError, RuntimeFailure
+from .errors import InputError, InputTypeError, RuntimeFailure, NumericalError
 from .fast_hse import _Initial, _input_text, _positive, _vector
 from .material_response import _response_timing
 from .tddft import _copy_bundle, _digest
@@ -214,6 +214,10 @@ class _State:
         code = self._call(self.lib.sp_fast_hse_step,a,b,current,c.byref(energy))
         statuses = comm.allgather((int(code),bool(np.isfinite(current).all() and np.isfinite(energy.value))))
         if any(code or not finite for code,finite in statuses):
+            from .embedded_tddft import _admission_rejected
+            if _admission_rejected(self.lib,statuses,allowed=(20,21,22,23,24,25,30,32,33),
+                                   query_name='sp_fast_hse_recovery_protocol'):
+                raise NumericalError('fast-PR HSE step failed; accepted electronic/exchange state restored without replay; retry permitted: '+str(statuses))
             self.failed = True
             raise RuntimeFailure('fast HSE native step failed: '+str(statuses))
         self.steps += 1; self.A = b.copy(); self.current = current.copy(); self.energy = energy.value

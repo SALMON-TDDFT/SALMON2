@@ -3,6 +3,7 @@
 ! Gamma hybrid SCF and native mesh RT preserve three-dimensional Cartesian spatial blocks.
 ! Its source and ACE factors retain only local grid rows; overlaps are reduced.
 module exx_native
+  use rt_step_recovery,only:recovery_agree
 #ifdef USE_MPI
   use exx_worker_service, only: service_enabled,service_exchange
 #endif
@@ -69,7 +70,16 @@ module exx_native
   interface salmon_all_finite
     module procedure finite_real_3d
   end interface
+public::exx_recovery_status
 contains
+  integer function exx_recovery_status(system) result(code)
+    type(s_dft_system),intent(in)::system
+    type(s_exx_rt_state),pointer::owner
+    owner=>resolve_rt_context(system=system)
+    code=0
+    if(owner%recover_errors)code=owner%step_error
+  end function
+
   ! Value copies isolate HSE decisions; uninitialized legacy systems retain fallback inputs.
   subroutine hse_occupation_input(system,nelec,temperature,nstate)
     type(s_dft_system),intent(in)::system
@@ -802,11 +812,18 @@ contains
       error stop 'Factor endpoint representative/history mismatch'
     do ik=1,info%numk
       call history_accept(exx_state_owner%factor_history(ik),exx_state_owner%ace%factors(:,:,ik),system%hvol,step,sumgrid,stat,aligngrid)
-      if(stat/=0)error stop 'Factor k history alignment/teacher failed'
+        if(stat/=0)then
+          if(.not.exx_state_owner%recover_errors)error stop 'Factor k history alignment/teacher failed'
+          exx_state_owner%step_error=33
+        endif
       if(info%id_r==0)write(*,'(a,4i8,2es18.9,l2)')'FACTOR_HISTORY k/teacher/step/count/coeff/ready: ', &
         info%ik_s+ik-1,exx_state_owner%factor_history(ik)%teachers,step,exx_state_owner%factor_history(ik)%count, &
         exx_state_owner%factor_history(ik)%coeff,exx_state_owner%factor_history(ik)%ready
     enddo
+    if(exx_state_owner%recover_errors)then
+      call recovery_agree(info,33,exx_state_owner%step_error/=0,exx_state_owner%step_error)
+      if(exx_state_owner%step_error/=0)return
+    endif
     ! Readiness can change only after exact teachers; synchronize here, not every RT step.
     not_ready=count(.not.exx_state_owner%factor_history%ready)
     call comm_summation(not_ready,total_not_ready,info%icomm_rko)
@@ -843,13 +860,19 @@ contains
     type(s_parallel_info),intent(in)::info
     type(s_orbital),intent(in)::psi
     real(8)::ex
-    integer::j,io,stat,ik
+    integer::j,io,stat,ik,bad
     exx_state_owner=>resolve_rt_context(rt_context,system)
     if(.not.exx_state_owner%factor_prediction_installed)then
+      bad=0
       do ik=1,info%numk
         call history_predict(exx_state_owner%factor_history(ik),exx_state_owner%factor_step-exx_state_owner%factor_history(ik)%last,exx_state_owner%ace%factors(:,:,ik),stat)
-        if(stat/=0)error stop 'Factor k predictor failed'
+        bad=max(bad,abs(stat))
+        if(stat/=0.and..not.exx_state_owner%recover_errors)error stop 'Factor k predictor failed'
       enddo
+      if(exx_state_owner%recover_errors)then
+        call recovery_agree(info,33,bad/=0,exx_state_owner%step_error)
+        if(exx_state_owner%step_error/=0)return
+      endif
       exx_state_owner%factor_prediction_installed=.true.
     endif
     if(.not.allocated(exx_state_owner%target_work))allocate(exx_state_owner%target_work(product(mg%num)*size(psi%zwf,4),info%numo,info%numk))
@@ -859,6 +882,10 @@ contains
       call orbital_ace_apply(exx_state_owner%ace,exx_state_owner%target_work,exx_state_owner%action_work,info%icomm_r,info%icomm_o,stat)
     else
       call exx_ace_apply(exx_state_owner%ace,exx_state_owner%target_work,exx_state_owner%action_work,stat,thread_control=exx_blas_thread_control)
+    endif
+    if(exx_state_owner%recover_errors)then
+      call recovery_agree(info,30,stat/=0,exx_state_owner%step_error)
+      if(exx_state_owner%step_error/=0)return
     endif
     if(stat/=0)error stop 'Predicted ACE expectation failed'
     ex=0d0
@@ -907,11 +934,19 @@ contains
       exx_state_owner%ptcn_history%n_teach=exx_factor_n_teach
     endif
     aligned=exx_state_owner%ace%factors
+    bad=0
     do k=1,info%numk
       call history_accept(exx_state_owner%ptcn_history(k),aligned(:,:,k),system%hvol,step,sumgrid,status,aligngrid)
-      bad=abs(status);call comm_get_max(bad,info%icomm_rko)
-      if(bad/=0)error stop 'CN exact teacher alignment failed'
+      bad=max(bad,abs(status))
+      if(.not.exx_state_owner%recover_errors)then
+        call comm_get_max(bad,info%icomm_rko)
+        if(bad/=0)error stop 'CN exact teacher alignment failed'
+      endif
     enddo
+    if(exx_state_owner%recover_errors)then
+      call recovery_agree(info,33,bad/=0,exx_state_owner%step_error)
+      if(exx_state_owner%step_error/=0)return
+    endif
     exx_state_owner%ace%factors=aligned
   contains
     subroutine sumgrid(a)
@@ -946,6 +981,7 @@ contains
     ! The first exact RHS action already installed H[u_n]; record only step zero.
     if(.not.allocated(exx_state_owner%ptcn_history))call ptcn_collect_exact(system,info,0, &
       & rt_context=exx_state_owner)
+    if(exx_state_owner%recover_errors.and.exx_state_owner%step_error/=0)return
     bad=count(.not.exx_state_owner%ptcn_history%ready);call comm_get_max(bad,info%icomm_rko)
     if(bad/=0)return
     prediction=exx_state_owner%ace%factors
@@ -1097,6 +1133,7 @@ contains
     real(8) :: temperature
     call hse_occupation_input(system,nelec,temperature,nstate)
     exx_state_owner=>resolve_rt_context(rt_context,system)
+    if(exx_state_owner%recover_errors.and.exx_state_owner%step_error/=0)return
     if(present(rt_status))rt_status=0
     if(.not.associated(exx_state_owner,rt_owned))then
       if(.not.exx_state_owner%native_resources_enabled)then
@@ -1282,6 +1319,10 @@ contains
       call apply_distributed(local,local,w,info,ierr,exx_state_owner,system)
     endif
     call comm_summation(ierr,total_error,info%icomm_k)
+    if(exx_state_owner%recover_errors)then
+      call recovery_agree(info,30,total_error/=0,exx_state_owner%step_error)
+      if(exx_state_owner%step_error/=0)return
+    endif
     if(total_error/=0)error stop 'HSE06: distributed exchange action failed'
     if(.not.exx_state_owner%reported_team.and.info%id_k==0)write(*,'(a,i0)')'HSE_OPENMP threads=',exx_state_owner%native_kernel%threads_used
     if(.not.exx_state_owner%reported_team.and.info%id_k==0)write(*,'(a,l1)')'HSE_FFT_CONTIGUOUS=',exx_state_owner%native_kernel%contiguous_fft
@@ -1289,7 +1330,11 @@ contains
     if(propagator/='hse_taylor4_full')then
       call exx_ace_build(exx_state_owner%ace,local,w,system%hvol,ierr,thread_control=exx_blas_thread_control)
       call comm_summation(ierr,total_error,info%icomm_k)
-      if(total_error/=0)error stop 'HSE06: ACE metric failed'
+      if(exx_state_owner%recover_errors)then
+      call recovery_agree(info,30,total_error/=0,exx_state_owner%step_error)
+      if(exx_state_owner%step_error/=0)return
+    endif
+    if(total_error/=0)error stop 'HSE06: ACE metric failed'
     endif
     exx_state_owner%cached_source=local
     if(thermal_spinor)exx_state_owner%cached_occupation=system%rocc(:,:,1)
@@ -1587,6 +1632,7 @@ contains
     integer,allocatable :: orbital_comm
     real(8) :: action_scale
     exx_state_owner=>resolve_rt_context(rt_context,system)
+    if(exx_state_owner%recover_errors.and.exx_state_owner%step_error/=0)return
     if(present(rt_status))rt_status=0
     if(.not.associated(exx_state_owner,rt_owned).and..not.exx_state_owner%native_resources_enabled)then
       if(exx_state_owner%exx_force_full_action.or.propagator=='hse_taylor4_full'.or. &
@@ -1672,11 +1718,19 @@ contains
     else
       if(exx_state_owner%taylor_active.and.exx_state_owner%taylor_midpoint)then
         call apply_endpoint(exx_state_owner%initial_ace)
+        if(exx_state_owner%recover_errors)then
+          call recovery_agree(info,30,ierr/=0,exx_state_owner%step_error)
+          if(exx_state_owner%step_error/=0)return
+        endif
         if(ierr/=0)error stop 'HSE06: initial endpoint ACE application failed'
         call add_mesh_action(.5d0*system_exchange_fraction(system))
         action_scale=.5d0*system_exchange_fraction(system)
       endif
       call apply_endpoint(exx_state_owner%ace)
+    endif
+    if(exx_state_owner%recover_errors)then
+      call recovery_agree(info,30,ierr/=0,exx_state_owner%step_error)
+      if(exx_state_owner%step_error/=0)return
     endif
     if(ierr/=0)error stop 'HSE06: ACE application failed'
     call add_mesh_action(action_scale)

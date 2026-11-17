@@ -480,3 +480,13 @@ Evidence: `../expanded-mixed-scaling-validation-2026-11-17.md`.
 - [ ] This closes the measured TDDFT-group numerical failure subset, not whole mixed-step rollback, allocation/MPI/process failures, third-party STOP, deep initialization recovery, HSE/FDTD equivalents, stable native handles or general reentrancy. Per-step copying/checking has resource overhead; budgets remain warning-only.
 
 Evidence: `../tddft-deep-recovery-validation-2026-11-17.md`.
+
+### 2026-11-17 fast-PR HSE deep numerical recovery
+
+- [x] Separate HSE recovery protocol1; per-step electronic/XC and ACE/history/cache/counter numerical backup, with no copied FFT/MPI owners. Handled collective finite/operator/PT-CN/history errors restore accepted state without replay. Failed attempts append no ordinary RT records.
+- [x] Internal k-only MPI2 Taylor/PT-CN, first/warm exact/warm prediction/final-step faults, genuine overflow and PT-CN nonlinear rejection, independent two-group MPI4. Payload bytes preserved; twelve32-step current/energy trajectories and accepted output match the old fixed binary exactly.
+- [x] Five-rank FDTD2+LD+SBE1+HSE2 normal128-step A/E/j exact to old; protected late-failure restore/continuation/retry regression passes without replay. Raw exhausted-capacity ABI rejection tested after a reviewer-found defect was fixed.
+- [x] Source/installed526 tests (one skip),sdist→wheel/hash/layout checks, JP/EN and AI JSON sync. No remote Actions.
+- [ ] General initialization/third-party STOP, allocation/process/MPI failures, native FDTD deep failure and whole mixed-step rollback remain open. k-only HSE recovery does not establish arbitrary native reentrancy or physical convergence.
+
+Evidence: `../fast-hse-deep-recovery-validation-2026-11-17.md`. Earlier entries describe their historical scope; the supported HSE-group subset is now closed, not the general failure contract.

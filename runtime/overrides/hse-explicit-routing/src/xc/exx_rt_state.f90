@@ -12,6 +12,8 @@ module exx_rt_state
  private
  public::s_exx_rt_state,rt_taylor_stage,rt_ptcn_begin,rt_state_clear,rt_state_bytes
  type s_exx_rt_state
+  logical::recover_errors=.false.
+  integer::step_error=0
   ! FFT owners are never intrinsically copied. Close before releasing this state.
   logical :: native_resources_enabled=.false.
   type(exx_k_kernel),allocatable :: native_kernel

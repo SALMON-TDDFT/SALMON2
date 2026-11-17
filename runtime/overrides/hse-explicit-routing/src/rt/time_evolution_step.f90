@@ -21,12 +21,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
+  use rt_step_recovery,only:recovery_wave,recovery_scalar,recovery_values,recovery_agree
 #if defined(USE_HSE) || defined(USE_SCALAPACK)
   use ptcn_native,only:native_ptcn_step
 #endif
   use noncollinear_module, only: snapshot_xc_noncollinear,average_xc_noncollinear
 #ifdef USE_HSE
-  use exx_native,only:exx_context,exx_system_energy
+  use exx_native,only:exx_context,exx_system_energy,exx_recovery_status
   use exx_native, only: exx_taylor_stage,exx_factor_begin,exx_factor_endpoint
 #endif
   use communication, only: comm_is_root, comm_summation, comm_bcast
@@ -93,6 +94,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call nvtxStartRange('time_evolution_step', __LINE__)
 #ifdef USE_HSE
   call exx_factor_begin(itt,system,mg,info,spsi_in)
+  if(rt%recover_errors)then
+    rt%step_error=exx_recovery_status(system)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
 #endif
 
   spsi_out%update_zwf_overlap = .false. 
@@ -143,6 +151,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       else if(propagator == 'aetrs') then
         system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
       else
+        if(rt%recover_errors)then
+          rt%step_error=25
+          call timer_end(LOG_CALC_VBOX)
+          call nvtxEndRange
+          return
+        endif
         stop 'invalid propagator'
       end if
       if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
@@ -171,8 +185,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   call timer_begin(LOG_CALC_TIME_PROPAGATION)
 #if defined(USE_HSE) || defined(USE_SCALAPACK)
   if(propagator=='hse_ptcn')then
+    if(rt%recover_errors)then
+    call native_ptcn_step(rt%time_step,rt%Ac_tot(:,itt-1),rt%Ac_tot(:,itt),lg,mg,system,info,stencil,xc_func, &
+      srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy,rt_status=rt%step_error)
+      call recovery_agree(info,32,rt%step_error/=0,rt%step_error)
+    else
     call native_ptcn_step(rt%time_step,rt%Ac_tot(:,itt-1),rt%Ac_tot(:,itt),lg,mg,system,info,stencil,xc_func, &
       srg,srg_scalar,pp,ppg,ppn,spsi_in,spsi_out,rho,rho_s,V_local,Vh,Vxc,Vpsl,fg,poisson,energy)
+    endif
   else
 #endif
 
@@ -186,18 +206,32 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call predictor_corrector
   end if
 
+  if(rt%recover_errors.and.rt%step_error/=0)then
+    call timer_end(LOG_CALC_TIME_PROPAGATION)
+    call nvtxEndRange
+    return
+  endif
   if(info%numo.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
   end if
     
 #ifdef USE_HSE
-    if(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')call exx_taylor_stage(2,rt_context=exx_context(system))
+    if(rt%step_error==0.and.(propagator=='hse_taylor4'.or.propagator=='hse_taylor4_full')) &
+      call exx_taylor_stage(2,rt_context=exx_context(system))
 #endif
 #if defined(USE_HSE) || defined(USE_SCALAPACK)
   endif
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
+  if(rt%recover_errors)then
+    rt%step_error=max(rt%step_error,exx_recovery_status(system))
+    call recovery_wave(mg,info,spsi_out,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
   if(pbeh_mesh_md)then
     system%Rion=rion_endpoint
     call update_pseudo_rt(itt,info,system,lg,mg,poisson,fg,pp,ppg,ppn,Vpsl)
@@ -254,6 +288,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
   
   call timer_end(LOG_CALC_RHO)
+  if(rt%recover_errors)then
+    rt%step_error=max(rt%step_error,exx_recovery_status(system))
+    call recovery_scalar(mg,info,rho,21,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
   
   if(singlescale%flag_use .or. yn_out_micro_je=='y') then
     if(info%if_divide_rspace) then
@@ -284,10 +326,26 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call nvtxEndRange
     end if
     call timer_end(LOG_CALC_HARTREE)
+  if(rt%recover_errors)then
+    rt%step_error=max(rt%step_error,exx_recovery_status(system))
+    call recovery_scalar(mg,info,Vh,22,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
+  if(rt%recover_errors)then
+    rt%step_error=max(rt%step_error,exx_recovery_status(system))
+    call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
     
   end if
 
@@ -362,6 +420,20 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   end select
 
+  if(rt%recover_errors)then
+    call recovery_values(info,[rt%curr(:,itt),energy%E_tot],24,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+    call exx_factor_endpoint(system,info,itt)
+    rt%step_error=max(rt%step_error,exx_recovery_status(system))
+    call recovery_agree(info,33,rt%step_error/=0,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
   call timer_begin(LOG_WRITE_ENERGIES)
   call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
   call timer_end(LOG_WRITE_ENERGIES)
@@ -455,7 +527,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
 #ifdef USE_HSE
   ! One capture per completed step; predictor stages never call the collector.
-  call exx_factor_endpoint(system,info,itt)
+  if(.not.rt%recover_errors)call exx_factor_endpoint(system,info,itt)
 #endif
   call nvtxEndRange
   return
@@ -496,6 +568,14 @@ contains
     ! spsi_in --> spsi_out (tpsi = working array)
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
     
+    if(rt%recover_errors)then
+      rt%step_error=max(rt%step_error,exx_recovery_status(system))
+      call recovery_wave(mg,info,spsi_out,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     call calc_density(system,rho_s,spsi_out,info,mg)
     if(nspin==1)then
       !$omp workshare
@@ -509,10 +589,32 @@ contains
     
     if(yn_jm=='y') rho%f = rho%f + rho_jm%f
     
+    if(rt%recover_errors)then
+      call recovery_scalar(mg,info,rho,21,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+      if(rt%recover_errors)then
+        call recovery_scalar(mg,info,Vh,22,rt%step_error)
+        if(rt%step_error/=0)then
+          call nvtxEndRange
+          return
+        endif
+      endif
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     end if
+    if(rt%recover_errors)then
+      rt%step_error=max(rt%step_error,exx_recovery_status(system))
+      call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
     !$omp workshare

@@ -36,7 +36,10 @@
     "src/gs/mixing.f90",
     "src/gs/occupation.f90",
     "src/parallel/communication.f90",
-    "src/io/inputoutput.f90"
+    "src/io/inputoutput.f90",
+    "src/rt/taylor.f90",
+    "src/rt/step_recovery.f90",
+    "src/rt/CMakeLists.txt"
   ],
   "routed_procedures": [
     "exx_add_action",
@@ -66,6 +69,6 @@
   ],
   "scope": "explicit full-support fast HSE native ownership; serial and experimental k-only host-MPI CPU contexts, common immutable per-group configuration",
   "replacements": "source-trees/hse-explicit-routing-replacements.json",
-  "replacements_sha256": "6c722533f5457f9c25f166f5581771646cc78a0b6ed7c3be0f2adebea60e12d2",
+  "replacements_sha256": "26cf6ee6457972a5d62b030bfbdf19828dcc2c73e521390cb158f0359467b5e2",
   "patch_sha256_role": "historical migration identity; no patch is applied"
 }

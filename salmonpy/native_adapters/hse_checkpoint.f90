@@ -12,7 +12,7 @@ module hse_checkpoint
  use exx_k_exchange,only:exx_k_kernel
  implicit none
  private
- public::hse_checkpoint_write,hse_checkpoint_read,numeric_payload,hse_checkpoint_install
+ public::hse_checkpoint_write,hse_checkpoint_read,numeric_payload,hse_checkpoint_install,hse_checkpoint_capture
  type numeric_payload
   logical::exx_freeze=.false.,exx_force_full_action=.false.
   logical::exx_adaptive_ready=.false.,exx_support_changed=.false.
@@ -109,6 +109,15 @@ contains
     return
   endif
   call hse_checkpoint_install(state,candidate)
+ end subroutine
+ subroutine hse_checkpoint_capture(state,value,status)
+  type(s_exx_rt_state),intent(in)::state
+  type(numeric_payload),intent(out)::value
+  integer,intent(out)::status
+  status=1
+  if(.not.supported(state))return
+  call capture(state,value)
+  status=0
  end subroutine
  subroutine hse_checkpoint_install(state,candidate)
   type(s_exx_rt_state),intent(inout)::state
@@ -224,7 +233,7 @@ contains
  subroutine capture(state,value,metadata)
   type(s_exx_rt_state),intent(in)::state
   type(numeric_payload),intent(out)::value
-  type(kernel_metadata),intent(out)::metadata
+  type(kernel_metadata),optional,intent(out)::metadata
   integer::axis
   value%exx_freeze=state%exx_freeze
   value%exx_force_full_action=state%exx_force_full_action
@@ -267,6 +276,7 @@ contains
   if(allocated(state%action_work))value%action_work=state%action_work
   value%reported_team=state%reported_team
   value%kernel_pair_fft_pairs=state%native_kernel%pair_fft_pairs
+  if(.not.present(metadata))return
   metadata%n=state%native_kernel%n
   metadata%mesh=state%native_kernel%mesh
   metadata%ng=state%native_kernel%ng

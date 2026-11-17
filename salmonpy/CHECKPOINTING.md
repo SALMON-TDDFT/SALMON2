@@ -272,3 +272,15 @@ Pythonの `NativeTDDFTBackend` が返す状態の `advance(A_old,A_new)` は、�
 対象は周期・非スピン分極・固定イオン・中点伝播のPZ、TB-mBJ（自動／固定係数）、Libxc-PZ/PBEです。SOC、+U、jellium、イオン運動／力出力、Gram–Schmidt、projection/unfold、microscopic Maxwell結合などの保護対象外設定は更新前に15を返します。標準バッチ計算は従来の演算経路を使います。既存の外部checkpoint形式も変更しません。メモリ退避・有限性検査の費用が毎ステップ増えるため、資源見積もりには余裕を残してください。予算は警告のみです。
 
 これはTDDFT群の状態保証です。FDTD・他の物質がすでに進んだ混在ステップ全体を自動巻き戻しする契約ではありません。MPI／プロセス停止、確保失敗、未制御の外部ライブラリSTOP、初期化深部のSTOPや出力装置障害は未対応です。試験専用の一部ランク障害注入は `SALMONPY_RECOVERY_TESTING` を明示して別ビルドした場合のみで、本番ビルドには注入用C入口がありません。
+
+## 高速PR版HSEの深部数値異常からの復帰
+
+新しい `NativeFastHSEBackend` 用ライブラリは `sp_fast_hse_recovery_protocol() == 1` を宣言します。対応範囲は周期・非スピン分極・固定イオンの高速PR版HSE06、Taylor4／学習PT-CN、物質群内k点分割のMPI1／2です。通常版HSEへの切替はしません。
+
+各ステップ前に電子状態とACE・因子／PT-CN履歴・交換キャッシュ・カウンタを退避します。FFTプランやMPIコミュニケータなどの所有資源はコピーしません。波動関数・密度・Hartree・XC・端点の有限性検査に加え、対応したACE演算エラー、PT-CNの収束／Gram／射影検査、履歴更新エラーを物質群全体で合意して返します。受理済み状態を直接戻し、過去ステップや交換履歴を再計算しません。失敗試行の通常RT出力を追加せず、A・時計・電流・エネルギーを維持します。診断ログは残ることがあります。
+
+Pythonは宣言された版と全ランクの既知エラーを確認できる場合だけ `NumericalError` を返し、同じ受理時刻から修正した入力で再試行できます。旧ライブラリ・未知エラーは `RuntimeFailure` の保守的扱いを維持します。dtや入力振幅を自動変更しません。退避と検査のメモリ・時間費用は増え、予算超過は警告のみです。
+
+これはHSE物質群の保証で、FDTDや他の物質を含む混在ステップ全体の自動巻戻しではありません。初期化深部、確保失敗、プロセス／MPI停止、未制御の外部STOP、出力装置障害は対象外です。異常を捕捉できない場合に継続を推定しないでください。
+
+検証用 `tools/test_fast_hse_deep_recovery_mpi.py BUILD GS NEW_OUTPUT --steps 32 --fault-step 13` は2ランク、OMP／BLAS1、外側のtimeoutで実行します。`--split` は4ランクの独立2群です。`--overflow-A 1e100` はPT-CNの実数値発散試験用で、科学計算の入力ではありません。`--faults` は `SALMONPY_RECOVERY_TESTING` を明示した別ビルドだけに使い、本番には注入用入口を含めません。検証記録は `docs/fast-hse-deep-recovery-validation-2026-11-17.md` です。合成小規模系の実装検証であり、物理精度の収束保証ではありません。
