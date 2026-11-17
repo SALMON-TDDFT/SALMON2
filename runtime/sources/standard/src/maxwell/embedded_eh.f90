@@ -25,7 +25,7 @@ module salmonpy_eh_context
   use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
   use lorentz_drude, only: s_ld_state,ld_finalize
   use sendrecv_grid, only: dealloc_cache
-  use communication, only: comm_summation
+  use communication, only: comm_summation,comm_bcast
   use parallelization, only: setup_parallel,nproc_group_global
   implicit none
   private
@@ -39,8 +39,19 @@ module salmonpy_eh_context
     integer :: step=0,capacity
   end type
   type(field_context),allocatable,save :: state
+  type :: restore_candidate
+    type(ls_fdtd_eh) :: fe
+    type(s_ld_state) :: ld
+    real(8),allocatable :: current(:,:,:,:)
+    integer :: step
+  end type
+  type(restore_candidate),allocatable,save :: pending
   logical,save :: used=.false.
 contains
+integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
+  sp_eh_checkpoint_protocol=1
+end function
+
   integer(c_int) function sp_eh_init(path,npoints,indices) bind(C)
     use inputoutput, only: read_input
     use math_constants, only: set_math_constants
@@ -166,12 +177,30 @@ contains
     type(ls_fdtd_eh) :: fe
     type(s_ld_state) :: ld
     real(8),allocatable :: current(:,:,:,:)
-    integer :: i,ios,total,step,unit,close_status
+    integer :: i,ios,total,step,unit,close_status,mode
     logical :: loading
     sp_eh_checkpoint=1
     ios=0;filename=''
     if(.not.allocated(state))ios=1
-    if(restore/=0.and.restore/=1)ios=1
+    if(restore<0.or.restore>4)ios=1
+    mode=restore
+    call comm_bcast(mode,nproc_group_global)
+    if(mode/=restore)ios=1
+    if(restore==3.and..not.allocated(pending))ios=1
+    call comm_summation(ios,total,nproc_group_global)
+    if(total/=0)return
+    if(restore==3)then
+      if(.not.allocated(pending))return
+      state%fe=pending%fe;state%ld=pending%ld
+      call move_alloc(pending%current,state%current)
+      state%step=pending%step
+      deallocate(pending);sp_eh_checkpoint=0;return
+    endif
+    if(restore==4)then
+      if(allocated(pending))deallocate(pending)
+      sp_eh_checkpoint=0;return
+    endif
+    if(restore==2.and.allocated(pending))ios=1
     do i=1,len(filename)
       if(path(i)==c_null_char)exit
       filename(i:i)=path(i)
@@ -179,7 +208,7 @@ contains
     if(i>len(filename).or.len_trim(filename)==0)ios=1
     call comm_summation(ios,total,nproc_group_global)
     if(total/=0)return
-    loading=restore==1
+    loading=restore==1.or.restore==2
     ! Work on detached allocatable storage; fs and its communicator/cache remain live.
     fe=state%fe;ld=state%ld;current=state%current;step=state%step
     if(loading)then
@@ -197,7 +226,12 @@ contains
     if(ios/=0)ios=1
     call comm_summation(ios,total,nproc_group_global)
     if(total/=0)return
-    if(loading)then
+    if(restore==2)then
+      allocate(pending)
+      pending%fe=fe;pending%ld=ld
+      call move_alloc(current,pending%current)
+      pending%step=step
+    else if(loading)then
       state%fe=fe;state%ld=ld;state%current=current;state%step=step
     endif
     sp_eh_checkpoint=0

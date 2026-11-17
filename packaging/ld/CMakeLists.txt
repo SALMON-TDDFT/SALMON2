@@ -75,7 +75,7 @@ install(DIRECTORY "${ROOT}/salmonpy/examples/si_intro_data/"
 install(FILES "${ROOT}/salmonpy/SI_INTRO.md" "${ROOT}/salmonpy/SI_INTRO.en.md"
   DESTINATION salmonpy)
 
-install(FILES "${ROOT}/salmonpy/checkpointing.py" "${ROOT}/salmonpy/CHECKPOINTING.md" "${ROOT}/salmonpy/CHECKPOINTING.en.md" DESTINATION salmonpy)
+install(FILES "${ROOT}/salmonpy/checkpointing.py" "${ROOT}/salmonpy/_native_checkpoint.py" "${ROOT}/salmonpy/CHECKPOINTING.md" "${ROOT}/salmonpy/CHECKPOINTING.en.md" DESTINATION salmonpy)
 
 # Public Python integration contract and in-memory state snapshots.
 install(FILES "${ROOT}/salmonpy/_version.py" "${ROOT}/salmonpy/errors.py"

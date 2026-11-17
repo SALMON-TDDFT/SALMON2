@@ -12,7 +12,7 @@ module hse_checkpoint
  use exx_k_exchange,only:exx_k_kernel
  implicit none
  private
- public::hse_checkpoint_write,hse_checkpoint_read
+ public::hse_checkpoint_write,hse_checkpoint_read,numeric_payload,hse_checkpoint_install
  type numeric_payload
   logical::exx_freeze=.false.,exx_force_full_action=.false.
   logical::exx_adaptive_ready=.false.,exx_support_changed=.false.
@@ -68,11 +68,12 @@ contains
   magic='SALMONPY_HSE_COMPLETE_V1'
   write(unit,iostat=status)magic
  end subroutine
- subroutine hse_checkpoint_read(unit,state,status,validate_only)
+ subroutine hse_checkpoint_read(unit,state,status,validate_only,staged)
   integer,intent(in)::unit
   type(s_exx_rt_state),intent(inout)::state
   integer,intent(out)::status
   logical,optional,intent(in)::validate_only
+  type(numeric_payload),allocatable,optional,intent(out)::staged
   type(numeric_payload)::candidate
   type(kernel_metadata)::metadata,expected
   character(32)::magic
@@ -102,6 +103,16 @@ contains
   if(present(validate_only))then
     if(validate_only)return
   endif
+  if(present(staged))then
+    allocate(staged)
+    staged=candidate
+    return
+  endif
+  call hse_checkpoint_install(state,candidate)
+ end subroutine
+ subroutine hse_checkpoint_install(state,candidate)
+  type(s_exx_rt_state),intent(inout)::state
+  type(numeric_payload),intent(inout)::candidate
   ! Numerical-only commit. In particular, never assign the whole HSE state.
   state%exx_freeze=candidate%exx_freeze
   state%exx_force_full_action=candidate%exx_force_full_action
@@ -184,7 +195,7 @@ contains
   endif
   state%reported_team=candidate%reported_team
   state%native_kernel%pair_fft_pairs=candidate%kernel_pair_fft_pairs
-  status=0
+
  end subroutine
  logical function supported(state) result(ok)
   type(s_exx_rt_state),intent(in)::state

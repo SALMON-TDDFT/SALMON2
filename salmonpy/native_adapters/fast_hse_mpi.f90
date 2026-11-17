@@ -18,6 +18,10 @@ module salmonpy_fast_hse_mpi
  logical,save::used=.false.,ready=.false.,failed=.false.
  real(8),save::accepted_A(3)=0d0
 contains
+integer(c_int) function sp_fast_hse_checkpoint_protocol() bind(C)
+  sp_fast_hse_checkpoint_protocol=1
+end function
+
  logical function attached_main_thread() result(ok)
 #ifdef USE_MPI
  use mpi,only:MPI_Is_thread_main,MPI_SUCCESS
@@ -149,9 +153,10 @@ contains
  integer::status,mode
  sp_fast_hse_checkpoint=1
  if(.not.attached_main_thread())return
- call c_path(path,filename,status)
+ status=0;filename=""
+ if(restore<3)call c_path(path,filename,status)
  if(.not.ready.or.failed.or..not.associated(state))status=1
- if(restore/=0.and.restore/=1)status=1
+ if(restore<0.or.restore>4)status=1
  call agree(status)
  if(status/=0)return
  mode=restore
@@ -160,13 +165,17 @@ contains
  call agree(status)
  if(status/=0)return
  ! Caller passes distinct per-rank paths, authenticated together outside native.
- call rt_checkpoint(state,trim(filename),restore==1,status)
+ if(restore>=2)then
+  call rt_checkpoint(state,trim(filename),.true.,status,stage=restore)
+ else
+  call rt_checkpoint(state,trim(filename),restore==1,status)
+ endif
  call agree(status)
  if(status/=0)then
   if(restore==1)failed=.true.
   return
  endif
- if(restore==1)then
+ if(restore==1.or.restore==3)then
   call rt_vector_potential(state,accepted_A,status)
   call agree(status)
   if(status/=0)then

@@ -172,10 +172,28 @@ assert original == {"step": 5}
 
 `execute_checkpoint(..., operation='restore', atomic=True, live=live)`も同じ保護経路です。
 従来のexecute_checkpointは互換性のため非原子的な実行を既定とします。通常のLOADだけを持つ対象は、保護経路では
-LOADを呼ぶ前に拒否し、自動で従来方式へ切り替えません。現行のプロセス内native FDTD／TDDFT／高速HSE ABIには
-独立候補の生成口がないため、同梱native例は`atomic=False`を明示し、従来の失敗時制限を維持します。
+LOADを呼ぶ前に拒否し、自動で従来方式へ切り替えません。
 LD/SBEはnew_stateとsnapshot復元で候補を作れます。自作JSONファクトリーは実行可能なサンプルを参照してください。
-native候補生成への対応は別の残作業です。
+
+### native数値候補（実験的）
+
+明示的に再ビルドしたnative FDTD・標準TDDFT・高速PR版HSEには、checkpoint_protocol=1の候補ABIがあります。
+checkpointのmodeは0=保存、1=従来の即時復元、2=独立した数値候補の読込、3=準備済み候補の反映、4=破棄です。
+候補は1 native lifetimeにつき1個です。元の計算を止め、全群で2を完了・合意してから3を呼びます。
+失敗時は全群で4を呼び、元の状態から継続できます。HSE履歴も候補に保持し、3ではファイルを再読込しません。
+古いライブラリには対応を推測せず、版確認で拒否します。
+
+内部ヘルパー`salmonpy._native_checkpoint.NativeRestoreCandidate`と
+`tools/test_native_restore_candidates_mpi.py`が共通APIとの接続を示します。
+stage_restore／discard_restoreには候補のstage／discardを結び、共通APIで全候補の成功を確認した後、
+各群でpublishを呼び、保存時のPython側A・電流・時計も準備済みデータで合わせます。
+一般のホルダー切替だけではnative反映は完了しません。この内部契約は安定した公開C ABIではありません。
+
+独立しているのは可変の数値候補です。MPI・Libxc・FFT等の初期化済み資源は既存のコンテキストに残り、
+複数native計算の同時実行を可能にするものではありません。反映後に旧参照で旧計算を継続することもできません。
+反映は準備済みメモリを使いますが、一部の代入は割当を伴い、メモリ枯渇・プロセス異常は回復保証外です。
+既存のmpi_mixed_nativeの通常経路は引き続きatomic=Falseです。候補試験の成功を、既存サンプル全体の
+保護対応と説明してはいけません。互換なMPI分割・入力・ハッシュの検査も引き続き必要です。
 
 保証は、参加MPIランクが正常で、正しい独立候補ファクトリーが扱える例外の範囲です。
 プロセス異常、通信断、Fortran STOP、準備中に元を変更・共有するバックエンドからの回復は対象外です。

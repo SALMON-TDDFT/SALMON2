@@ -388,6 +388,17 @@ Execution evidence: `../checkpoint-execution-validation-2026-11-17.md`. Source/w
 - [x] Common `restore_checkpoint` and `CheckpointState`: independent candidates, collective readiness vote, single local bundle publication; no destructive fallback.
 - [x] Late-failure cleanup preserves originals; cleanup failures reported separately. Successful replacement returns previous objects for explicit host retirement.
 - [x] Real four-rank MPI/custom backend failure injection and successful retry, actual LD/SBE future-result equality, source/wheel495 tests (one skip each), sdist→wheel, JP/EN/AI synchronization.
-- [ ] Native in-process FDTD/TDDFT/HSE candidate ABI remains required for protected native restore. Current native coordinator is explicitly non-atomic; protected entry rejects direct-only backends before LOAD.
+- [x] Experimental native numerical candidate ABI added below; old direct-only backends remain rejected. Current ordinary native coordinator is still explicitly non-atomic.
 
 Evidence: `../atomic-restore-validation-2026-11-17.md`. Backend isolation and healthy collective progress are required; process crashes, hidden shared mutable state and topology redistribution are outside this guarantee.
+
+### Native numerical restore candidates — 2026-11-17
+
+- [x] Standard native FDTD/TDDFT and fast-PR HSE stage detached numerical payloads; publish after collective success without checkpoint re-read, or discard while preserving originals.
+- [x] Group mode/readiness agreement and HSE context ownership; older binaries rejected by candidate protocol query. One pending candidate per native lifetime.
+- [x] Real four-rank feedback tests with field2, TDDFT2 and HSE2 layouts: late HSE shard failure preserves every original shard byte-for-byte; originals continue, retry16-step A/E/j agrees exactly with continuous. Taylor and installed-wheel PT-CN agree with previous native binaries; legacy HSE immediate save/resume also passes.
+- [x] Paired/AI documentation distinguishes numerical candidates and explicit native publication from the generic holder and the unchanged ordinary non-atomic coordinator.
+- [ ] Integrate prepared candidates and Python/session metadata as an automatic protected path in the ordinary mixed-native coordinator. Current low-level candidate test is not that integration.
+- [ ] Stable public native ABI, allocation-failure recovery, unrestricted multi-context native runtime and changed-topology restart remain open.
+
+Evidence: `../native-candidate-restore-validation-2026-11-17.md`. Cache validity flags are deliberately reconstructed; do not claim full post-success electronic archive byte identity from current/field equality.

@@ -4,6 +4,7 @@
 #include "config.h"
 module salmonpy_tddft_context
  use structures
+ use hse_checkpoint,only:numeric_payload,hse_checkpoint_install
  use exx_rt_state,only:s_exx_rt_state,rt_state_clear
  use exx_native,only:exx_bind_system,exx_unbind_system
  use initialization_rt_sub,only:initialization_rt
@@ -67,6 +68,9 @@ type :: checkpoint_payload
   real(8) :: fields(3,5)
   integer :: Mit,accepted
 end type
+type(tddft_context),pointer,save::pending_owner=>null()
+type(checkpoint_payload),allocatable,save::pending
+type(numeric_payload),allocatable,save::pending_hse
 integer(8),save::checkpoint_array_limit=0_8
 contains
  subroutine rt_input_config(value)
@@ -299,7 +303,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  ! Restore only into a fresh rt_open; no propagation is performed. Output files
  ! are fresh streams, not a resumed text log. On a late restore error discard
  ! the context (HSE owner may have been partly loaded).
- subroutine rt_checkpoint(ctx,path,restore,status)
+ subroutine rt_checkpoint(ctx,path,restore,status,stage)
  use hse_checkpoint,only:hse_checkpoint_write,hse_checkpoint_read
  use hamiltonian,only:update_kvector_nonlocalpt
  use exx_native,only:exx_refresh
@@ -307,6 +311,7 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  character(*),intent(in)::path
  logical,intent(in)::restore
  integer,intent(out)::status
+ integer,optional,intent(in)::stage
  type(checkpoint_payload),allocatable::copy
  type(fixed_settings)::saved_settings
  type(s_rt_run_config)::saved_run
@@ -318,13 +323,36 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  character(1)::extra
  logical::hse_loaded
  status=1;hse_loaded=.false.
+ if(.not.present(stage).and.associated(pending_owner))return
+ if(present(stage))then
+  if(associated(pending_owner))then
+   if(.not.associated(pending_owner,ctx))return
+  endif
+  if(stage==4)then
+   if(allocated(pending))deallocate(pending)
+   if(allocated(pending_hse))deallocate(pending_hse)
+   nullify(pending_owner)
+   status=0;return
+  endif
+  if(stage==3)then
+   if(.not.allocated(pending).or..not.allocated(pending_hse))return
+   call hse_checkpoint_install(ctx%hse,pending_hse)
+   call checkpoint_copy(ctx,pending,.true.)
+   call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
+   ctx%spsi_in%update_zwf_overlap=.true.
+   ctx%spsi_out%update_zwf_overlap=.true.
+   ctx%tpsi%update_zwf_overlap=.true.
+   deallocate(pending,pending_hse);nullify(pending_owner);status=0;return
+  endif
+  if(stage/=2.or.allocated(pending).or.allocated(pending_hse))return
+ endif
  ios=0
  if(.not.associated(ctx))ios=1
  call checkpoint_collective_status(ios)
  if(ios/=0)return
  if(ctx%checkpoint_failed.or..not.settings_match(ctx%settings))ios=1
  if(len_trim(path)==0)ios=1
- if(restore.and.ctx%accepted/=ctx%Mit)ios=1
+ if(restore.and..not.present(stage).and.ctx%accepted/=ctx%Mit)ios=1
  if(xc/='hse06'.or.yn_spinorbit/='n'.or.yn_dc/='n'.or.yn_md/='n')ios=1
  if(projection_option/='no'.or.dm_unfold_option/='no'.or.ctx%singlescale%flag_use)ios=1
  if(ctx%info%isize_r/=1.or.ctx%info%isize_o/=1.or.ctx%info%isize_k/=nproc_size_global)ios=1
@@ -384,13 +412,14 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
    need_kernel=0
    if(.not.allocated(ctx%hse%native_kernel))need_kernel=1
    call checkpoint_collective_status(need_kernel)
-   if(need_kernel/=0)then
+   if(need_kernel/=0.and.present(stage))ios=1
+   if(need_kernel/=0.and..not.present(stage))then
     call exx_refresh(ctx%system,ctx%mg,ctx%info,ctx%spsi_in,rt_context=ctx%hse,rt_status=ios)
    endif
    call checkpoint_collective_status(ios)
    if(ios==0)then
     inquire(unit=u,pos=hse_position)
-    call hse_checkpoint_read(u,ctx%hse,ios,validate_only=.true.)
+    call hse_checkpoint_read(u,ctx%hse,ios,staged=pending_hse)
    endif
   else
    call hse_checkpoint_write(u,ctx%hse,ios)
@@ -415,22 +444,20 @@ call initialization_rt( ctx%Mit, ctx%system, ctx%energy, ctx%ewald, ctx%rt, ctx%
  endif
  ! Every shard and both archive footers must validate before any owner commits.
  call checkpoint_collective_status(ios)
- if(ios==0.and.restore)then
-  read(u,pos=hse_position,iostat=ios)
-  call checkpoint_collective_status(ios)
-  if(ios==0)then
-   hse_loaded=.true.
-   call hse_checkpoint_read(u,ctx%hse,ios)
-  endif
- endif
+
  close(u,iostat=closing)
  if(closing/=0)ios=closing
  call checkpoint_collective_status(ios)
  if(ios/=0)then
-  if(restore.and.hse_loaded)ctx%checkpoint_failed=.true.
+  if(allocated(pending_hse))deallocate(pending_hse)
   return
  endif
- if(restore)then
+ if(restore.and.present(stage))then
+  call move_alloc(copy,pending)
+  pending_owner=>ctx
+ else if(restore)then
+  call hse_checkpoint_install(ctx%hse,pending_hse)
+  deallocate(pending_hse)
   call checkpoint_copy(ctx,copy,.true.)
   call update_kvector_nonlocalpt(ctx%info%ik_s,ctx%info%ik_e,ctx%system,ctx%ppg)
   ctx%spsi_in%update_zwf_overlap=.true.

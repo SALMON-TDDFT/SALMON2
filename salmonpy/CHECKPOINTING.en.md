@@ -203,11 +203,33 @@ objects. Under the backend isolation contract, no original is passed to discard.
 `execute_checkpoint(..., operation='restore', atomic=True, live=live)` is the same
 protected path. Existing execute_checkpoint defaults to non-atomic execution for
 compatibility; direct-only targets are rejected by the protected path with zero
-LOAD calls, without fallback. Current in-process native FDTD/TDDFT/fast-HSE bindings
-have no isolated candidate factory in their ABI: the supplied native sample explicitly
-uses `atomic=False` and retains its prior failure/discard-job limits. LD/SBE states
-can be staged via new_state plus snapshot restore; custom JSON factories are shown
-in the runnable example. Native candidate support is separate remaining work.
+LOAD calls, without fallback. LD/SBE states can be staged via new_state plus
+snapshot restore; custom JSON factories are shown in the runnable example.
+
+### Native numerical candidates (experimental)
+
+Explicitly rebuilt native FDTD, standard TDDFT and fast-PR HSE expose
+checkpoint_protocol=1: modes0 save,1 legacy immediate restore,2 stage a detached
+numerical candidate,3 publish prepared memory,4 discard. One candidate per native
+lifetime is allowed. Pause evolution, finish mode2 and agree success across every
+host group before mode3. On handled failure every group discards with mode4 and
+can continue its original. HSE retains validated exchange/history data in memory;
+mode3 never reopens the checkpoint. Reject older libraries via the protocol query.
+
+The internal `salmonpy._native_checkpoint.NativeRestoreCandidate` helper and
+`tools/test_native_restore_candidates_mpi.py` demonstrate the common entry:
+bind stage/discard callbacks, use the common API for collective preparation,
+then call publish in each group and install preprepared Python A/current/clocks.
+The generic holder switch alone does not finish native publication. This is an
+internal experimental contract, not a stable public C ABI.
+
+Only mutable numerical candidates are detached. Initialized MPI/Libxc/FFT resources
+remain in the existing context; this does not enable concurrent native lifetimes
+or continued use of an old alias after publication. Publication uses prepared
+memory but includes allocating assignments: allocation failure/process death is
+outside the recoverable contract. The ordinary mpi_mixed_native coordinator still
+uses atomic=False; do not infer protected support for that entire sample from the
+candidate test. Exact-layout/input/hash admission is still required.
 
 This contract covers handled exceptions with healthy participating MPI ranks and
 correct isolated factories. It does not recover process crashes, communicator loss,

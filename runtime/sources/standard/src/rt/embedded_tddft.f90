@@ -82,11 +82,17 @@ type :: checkpoint_payload
   real(8) :: fields(3,5),worker_A(3),worker_current(3,2),accepted_A(3)
   integer :: Mit,itt
 end type
+type(checkpoint_payload),allocatable,save :: pending
+real(8),save :: pending_xc_cval
 type(rt_context),allocatable,save :: state
 logical,save :: used=.false.
 real(8),save :: accepted_A(3)=0d0
 integer(8),save :: checkpoint_array_limit=0_8
 contains
+integer(c_int) function sp_tddft_checkpoint_protocol() bind(C)
+  sp_tddft_checkpoint_protocol=1
+end function
+
 integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition, J) bind(C)
   use inputoutput, only: read_input
   use parallelization, only: setup_parallel
@@ -207,14 +213,32 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   character(32)::magic
   character(256)::xc_names(3),expected_xc_names(3)
   character(1)::extra
-  integer::i,u,ios,close_status,status,header(33),expected(33),allocation_status
+  integer::i,u,ios,close_status,status,header(33),expected(33),allocation_status,mode
   real(8)::saved_dt,cell(3,3),saved_input_cval,saved_xc_cval
   integer::xc_codes(4),expected_xc_codes(4)
   logical::reading,opened,xc_flags(4),expected_xc_flags(4)
   sp_tddft_checkpoint=1
-  if(.not.allocated(state))return
-  status=0;opened=.false.;reading=restore==1
-  if(restore/=0.and.restore/=1)status=2
+  status=0;opened=.false.;reading=restore==1.or.restore==2
+  if(.not.allocated(state))status=2
+  mode=restore
+  call comm_bcast(mode,nproc_group_global)
+  if(mode/=restore.or.restore<0.or.restore>4)status=2
+  if(restore==3.and..not.allocated(pending))status=2
+  call comm_get_max(status,nproc_group_global)
+  if(status/=0)then
+    sp_tddft_checkpoint=status;return
+  endif
+  if(restore==4)then
+    if(allocated(pending))deallocate(pending)
+    sp_tddft_checkpoint=0;return
+  endif
+  if(restore==3)then
+    if(.not.allocated(pending))return
+    call checkpoint_install(pending,pending_xc_cval)
+    deallocate(pending);sp_tddft_checkpoint=0;return
+  endif
+  if(restore==2.and.allocated(pending))status=2
+  if(restore<0.or.restore>4)status=2
   select case(trim(xc))
   case('pz','tbmbj')
 #ifdef USE_LIBXC
@@ -228,7 +252,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   if(.not.ieee_is_finite(cval).or..not.ieee_is_finite(state%xc_func%cval))status=2
   if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=2
   if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=2
-  if(reading.and.state%itt/=state%Mit)status=2
+  if(restore==1.and.state%itt/=state%Mit)status=2
   filename=''
   do i=1,len(filename)
     if(path(i)==c_null_char)exit
@@ -317,6 +341,19 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
   endif
   call comm_get_max(status,nproc_group_global)
   if(status==0.and.reading)then
+    if(restore==2)then
+      call move_alloc(copy,pending)
+      pending_xc_cval=saved_xc_cval
+    else
+      call checkpoint_install(copy,saved_xc_cval)
+    endif
+  endif
+  sp_tddft_checkpoint=status
+end function
+
+subroutine checkpoint_install(copy,saved_xc_cval)
+  type(checkpoint_payload),intent(inout)::copy
+  real(8),intent(in)::saved_xc_cval
     call checkpoint_copy(copy,.true.)
     ! Preserve initialized func/info Libxc handles; only the scalar coefficient is restored.
     state%xc_func%cval=saved_xc_cval
@@ -325,9 +362,7 @@ integer(c_int) function sp_tddft_checkpoint(path,restore) bind(C)
     state%spsi_in%update_zwf_overlap=.true.
     state%spsi_out%update_zwf_overlap=.true.
     state%tpsi%update_zwf_overlap=.true.
-  endif
-  sp_tddft_checkpoint=status
-end function
+end subroutine
 
 subroutine checkpoint_copy(copy,restore)
   type(checkpoint_payload),intent(inout)::copy
