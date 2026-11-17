@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--steps', type=int, default=32)
     parser.add_argument('--group-size', type=int, choices=(1,2), default=1)
+    parser.add_argument('--admission-fault', choices=('truncated','nonfinite','nonclosed'))
     parser.add_argument('--split', type=int, default=7)
     args = parser.parse_args()
     if not 3 < args.split < args.steps:
@@ -58,6 +59,28 @@ def main():
         if world.rank == 0:
             print('Public symmetry rejection before lifetime PASS', args.mode, flush=True)
         return
+    if args.admission_fault:
+        path = bundle/'sym.dat'
+        original = path.read_text()
+        if comm.rank == comm.size-1:
+            if args.admission_fault == 'truncated':
+                damaged = original+'1 0 0 0\n'
+            elif args.admission_fault == 'nonfinite':
+                damaged = original.replace('1.0','NaN',1)
+            else:
+                damaged = '1 0 0 0\n0 1 0 0\n0 0 1 0\n0 -1 0 0\n1 0 0 0\n0 0 1 0\n'
+            path.write_text(damaged)
+        try:
+            invalid_provider = FastHSEMaterialProvider(bundle,max_steps=args.steps)
+            rejected = backend.create_state(invalid_provider.prepare(context), point, .001, context)
+        except InputError as error:
+            assert 'sym.dat' in str(error)
+            assert not fast_hse_mpi._used and not embedded_tddft._used
+        else:
+            rejected.close()
+            raise AssertionError('malformed rank-local symmetry admitted')
+        path.write_text(original)
+        comm.Barrier()
     state = backend.create_state(provider.prepare(context), point, .001, context)
     target = args.checkpoint.resolve() / f'rank-{world.rank}'
     if args.mode == 'save':
@@ -107,7 +130,8 @@ def main():
             assert (root / 'final.bin').read_bytes() == (target / 'final.bin').read_bytes()
         (root / 'result.json').write_text(json.dumps(dict(status='passed', mode=args.mode,
             point_id=point, internal_ranks=comm.size, steps=args.steps, resumed_calls=args.steps-first,
-            elapsed_steps_replayed=0, field_rejection_preserved=True))+'\n')
+            elapsed_steps_replayed=0, field_rejection_preserved=True,
+            admission_fault=args.admission_fault, admission_retry_preserved=True if args.admission_fault else None))+'\n')
         world.Barrier()
         if world.rank == 0:
             print('Public symmetry direct checkpoint/field retry PASS', args.mode, flush=True)

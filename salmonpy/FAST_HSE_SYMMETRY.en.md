@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.6`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.7`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -227,3 +227,27 @@ The unchanged phase0 weak local-field case compares full8/reduced4 k points with
 OMP1/2. The ordinary mixed example accepts `--hse-ranks 2`. Old-library rejection
 uses `--mode deny-old-k2` against an old build only. Earlier COMM_SELF tests remain
 historical evidence; these numerical checks do not certify physical convergence.
+
+
+## Symmetry-file admission before initialization
+
+Python checks `sym.dat` before loading native code, acquiring a lifetime or
+creating a work copy. The canonical format has three records per operation and
+four finite real values per record. D exponents, commas, `2*0` repeats and inline
+`!` comments are supported. No rewriting or missing-value substitution occurs.
+The Fortran disabled-axis filter is applied before checking retained signed
+permutations, identity, duplicates modulo lattice translations and group closure.
+
+A malformed file on one rank produces collective `InputError` for the entire
+solver group. No native lifetime has been acquired: repair the original input,
+construct a new material provider and retry. Editing an already prepared
+provider's inputs is still rejected by existing hash checks.
+Passing this preflight does NOT validate cell isometries, atomic/species mapping,
+grids, k-stars or restart binaries. Their native initialization/STOP paths remain
+separate work; do not advertise general initialization recovery.
+
+Add `--admission-fault truncated`, `nonfinite` or `nonclosed` to the preceding
+save command to corrupt only the last rank of each group and verify rejection,
+repair and subsequent start. Normal input/numerical formulas remain unchanged.
+
+Axis flags must contain one to three lowercase `y`/`n` characters; unsupported forms are rejected rather than silently normalized.

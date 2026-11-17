@@ -133,6 +133,25 @@ class NativeFastHSETests(unittest.TestCase):
             with self.assertRaisesRegex(InputError,'sym.dat'):
                 backend.create_state(provider.prepare(ctx),1,.01,ctx)
 
+    def test_malformed_symmetry_rejected_without_native_or_work_copy(self):
+        from salmonpy.fast_hse import FastHSEMaterialProvider
+        bundle = self.root/'bundle';bundle.mkdir()
+        restart = bundle/'data_for_restart';restart.mkdir()
+        for name in ('info.bin','occupation.bin','wfn.bin'):
+            (restart/name).write_bytes(b'synthetic')
+        (bundle/'rt.inp').write_text("&calculation theory='tddft_response' /\n"
+            "&system yn_symmetry='yyn' /\n&functional xc='hse06',exx_factor_mode='off' /\n"
+            "&propagation propagator='hse_taylor4' /\n")
+        (bundle/'sym.dat').write_text('NaN 0 0 0\n0 1 0 0\n0 0 1 0\n')
+        provider = FastHSEMaterialProvider(bundle,max_steps=3)
+        backend = NativeFastHSEBackend(self.record,self.root,allow_symmetry=True)
+        ctx = SimpleNamespace(solver_comm=FakeComm(),point_ids=(1,))
+        before=set(self.root.iterdir())
+        with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('no native load')):
+            with self.assertRaisesRegex(InputError,'sym.dat'):
+                backend.create_state(provider.prepare(ctx),1,.01,ctx)
+        self.assertEqual(set(self.root.iterdir()),before)
+
     def test_constructor_is_lazy_and_hash_bound(self):
         with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('must not load')):
             backend=self.backend()

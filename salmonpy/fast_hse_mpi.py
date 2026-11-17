@@ -34,6 +34,83 @@ def _agree(comm, error, *, runtime=False):
         raise (RuntimeFailure if runtime else InputError)(str(errors))
 
 
+
+def _symmetry_preflight(path, setting):
+    """Read-only checks of the retained fast-PR group, before native lifetime.
+
+    This is NOT a cell/atom/grid/k-star/restart validator. Native checks remain.
+    Match symmetry.f90 record/filter semantics and exx_symmetry.f90 group rules.
+    """
+    def fail(reason):
+        raise InputError('sym.dat: '+reason)
+
+    if not isinstance(setting,str) or re.fullmatch(r'[yn]{1,3}',setting) is None:
+        fail('yn_symmetry must contain one to three lowercase y/n characters')
+    try:
+        lines = Path(path).read_text().splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise InputError('sym.dat: cannot read symmetry operations') from exc
+    if not lines or len(lines) % 3:
+        fail('require three records per operation')
+    rows = []
+    for line in lines:
+        row = []
+        # List-directed real literals, including Fortran D exponents/repeats.
+        content = line.split('!',1)[0]
+        if re.search(r',\s*,',content) or content.strip().startswith(',') or content.rstrip().endswith(','):
+            fail('null values are not allowed')
+        try:
+            for token in content.replace(',',' ').split():
+                count = 1
+                if '*' in token:
+                    repeat, token = token.split('*',1)
+                    if re.fullmatch(r'[0-9]+',repeat) is None:
+                        fail('invalid Fortran repeat count')
+                    count = int(repeat)
+                if count < 1 or count > 4-len(row):
+                    fail('each record must contain exactly four real values')
+                if re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eEdD][+-]?[0-9]+)?',token) is None:
+                    fail('invalid Fortran real literal')
+                value = float(token.replace('D','e').replace('d','e'))
+                row.extend([value]*count)
+        except (ValueError, OverflowError) as exc:
+            raise InputError('sym.dat: invalid real literal') from exc
+        if len(row) != 4 or not np.isfinite(row).all():
+            fail('each record must contain four finite real values')
+        rows.append(row)
+    operations = np.asarray(rows,dtype=float).reshape(-1,3,4)
+    identity = np.eye(3)
+    # read_sw_symmetry initializes axes on when any y is present; each n
+    # disables its own column using exact comparisons, before validation.
+    disabled = [i for i,c in enumerate(setting) if c == 'n']
+    retained = [op for op in operations if all(np.array_equal(op[:,i],identity[:,i]) for i in disabled)]
+    if not retained:
+        fail('no retained operations')
+    ops = np.asarray(retained)
+    rotation, translation = ops[:,:,:3],ops[:,:,3]
+    tolerance = 1e-10
+    for r in rotation:
+        if np.max(abs(r-np.rint(r))) > tolerance or np.max(abs(r.T@r-identity)) > tolerance:
+            fail('fast-PR rotations must be fractional signed permutations')
+    if not any(np.max(abs(r-identity)) < tolerance and np.max(abs(t)) < tolerance
+               for r,t in zip(rotation,translation)):
+        fail('retained group has no identity')
+    for a in range(len(ops)):
+        delta = translation[a]-translation
+        same_rotation = np.max(abs(rotation[a]-rotation),axis=(1,2)) < tolerance
+        same_translation = np.max(abs(delta-np.rint(delta)),axis=1) < tolerance
+        if np.count_nonzero(same_rotation & same_translation) != 1:
+            fail('duplicate operation modulo lattice translations')
+        for b in range(len(ops)):
+            product = rotation[a]@rotation[b]
+            shift = rotation[a]@translation[b]+translation[a]
+            delta = shift-translation
+            matched = (np.max(abs(rotation-product),axis=(1,2)) < tolerance) & (
+                np.max(abs(delta-np.rint(delta)),axis=1) < tolerance)
+            if np.count_nonzero(matched) != 1:
+                fail('retained operations do not form a closed group')
+
+
 def _configure(lib):
     vec = np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, shape=(3,), flags='C_CONTIGUOUS')
     lib.sp_fast_hse_init.argtypes = [c.c_char_p, c.c_double, c.c_int, vec]
@@ -130,15 +207,18 @@ class NativeFastHSEBackend:
             if _digest(self.library) != self.sha256:
                 raise InputError('fast HSE MPI library changed')
             groups, propagator = _input_text((initial.directory/initial.input_file).read_text())
-            symmetry = 'y' in _scalar(groups.get('system',''), 'yn_symmetry', default='n').lower()
+            symmetry_setting = _scalar(groups.get('system',''), 'yn_symmetry', default='n')
+            if re.fullmatch(r'[yn]{1,3}',symmetry_setting) is None:
+                raise InputError('yn_symmetry requires one to three lowercase y/n characters')
+            symmetry = 'y' in symmetry_setting
             if symmetry and not self.allow_symmetry:
                 raise InputError('symmetry input requires explicit allow_symmetry=True')
             if symmetry:
                 factor = _scalar(groups.get('functional',''), 'exx_factor_mode', default='off')
                 if factor != 'off' or propagator not in ('hse_taylor4','hse_taylor4_full'):
                     raise InputError('symmetry requires factor-off fast-PR Taylor (full-action is test-only)')
-                if not (initial.directory/'sym.dat').is_file():
-                    raise InputError('symmetry input requires sym.dat in the initial bundle')
+                _symmetry_preflight(initial.directory/'sym.dat',
+                    symmetry_setting)
             groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
             groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
             text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'

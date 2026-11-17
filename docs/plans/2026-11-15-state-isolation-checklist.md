@@ -15,7 +15,8 @@ mixed connection are verified in the bounded one/two-k-rank profile. The Libxc H
 wrapper source by stable evaluation of the same WPBEh formula. The unchanged
 phase0 full/reduced case, ordinary regressions and80-digit energy differences
 pass; old failure evidence is retained. Reduced-k internal-MPI2 partition/failure/direct restart tests now pass. Next are
-broader initialization and converged physical benchmarks. Default/old init and serial
+broader initialization hardening and converged physical benchmarks. sym.dat format/retained-group
+admission now runs before native lifetime; atom/cell/grid/restart STOP paths remain. Default/old init and serial
 workers still reject symmetry. No physical-convergence certificate is implied.
 The standard k-point port is deferred; its distinct arithmetic is not the target
 for modifying fast-PR symmetry. Conventional HSE remains unsupported.
@@ -651,3 +652,22 @@ Raw Libxc diagnostic sensitivity remains expected; no library binary is patched.
 - [x] Phase0 full8/reduced4-k comparison; two independent2-rank save7→32 resume traces/final bytes.
 - [x] Ordinary mixed sample supports --hse-ranks2; same-decomposition direct resume.
 - [ ] Broader partitions/initialization and converged physical validation; checkpoint repartitioning is not supported.
+
+
+## 2026-11-18 — Symmetry initialization admission
+
+- [x] Read-only canonical sym.dat parsing and finite/retained-group checks before native lifetime/work copy.
+- [x] Disabled-axis filtering and fast-PR signed-permutation/identity/duplicate/closure rules; Fortran D/repeat syntax.
+- [x] One malformed rank per2-rank group: collective rejection, no lifetime, repaired provider starts normally; three fault kinds.
+- [x] Normal current/energy traces retained; own save/restart still direct without temporal replay.
+- [ ] Cell isometry, atomic/species/grid/k-star/restart and general Fortran initialization failures remain native hardening work.
+
+### Next actionable backlog (historical unchecked notes above are superseded)
+
+1. Broader initialization admission/recovery for selected native assets; no general STOP recovery yet.
+2. Learned/PT-CN symmetry has not been admitted by the factor-off Taylor work.
+3. Broader ownership/handles (different-input GS/TDDFT, MPI/I/O/timers and specialized resources).
+4. Additional environments, calibrated resource/scaling models and interoperable archives.
+
+Physical convergence remains material/user-owned; molecular work stays paused.
+Larger MPI partitions and checkpoint repartitioning are not implied by MPI2 results.
