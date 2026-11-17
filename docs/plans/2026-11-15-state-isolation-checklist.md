@@ -441,3 +441,11 @@ Evidence: `../memory-advice-validation-2026-11-17.md`. The earlier recommendatio
 - [x] Four-rank TDDFT and fast-PR HSE k-only two-rank tests preserve all original state after injected failure and resume exactly without replay; fresh installed-wheel TDDFT continuation also matches exactly.
 
 Evidence: `../mixed-identity-validation-2026-11-17.md`. M6 remains an umbrella milestone: arbitrary backend formats, branch semantics and general in-memory identity remain open. Memory budgets remain advisory warnings.
+
+### 2026-11-17 point snapshot identity
+
+- [x] M6e: PointState process-local snapshots wrap backend tokens with exact run/point/material/initial identity, schema and version. Reject mismatches and closed targets before callbacks. No arbitrary token conversion, implicit cloning or branch semantics.
+- [x] Real LD/SBE same-point future currents match exactly after restore; cross-point rejection leaves the other state unchanged. Matching IDs do not bypass backend dt/model checks. Custom opaque payloads remain backend-owned.
+- [x] Updated point_ld sample and JP/EN/AI guides. Source/wheel517 tests (one skip), sdist→wheel and installed example pass. No solver or MPI code changed; no remote Actions.
+
+Evidence: `../point-snapshot-identity-validation-2026-11-17.md`. General branch APIs, arbitrary disk payloads, changed topology and native ownership/recoverable errors remain open. Molecular work stays paused.

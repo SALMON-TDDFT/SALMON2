@@ -80,3 +80,11 @@ For explicit identity propagation/output in MPI response sessions see
 
 Point-bound managed TDDFT disk restore is now available: [POINT_CHECKPOINTS.en.md](POINT_CHECKPOINTS.en.md).
 The earlier restart limitations still apply to MPI whole sessions and general backends.
+
+## In-memory snapshots with point identity
+
+`PointState.snapshot()` wraps the backend-owned snapshot with immutable `salmonpy.point-snapshot/1` identity. `state.restore(saved)` checks run, point, material-definition and initial-state identity plus package version before calling the backend. Cross-point/run and raw backend tokens are rejected. Even with explicit matching run/point IDs, the backend must still validate its model, time step and other settings.
+
+This is process-local rewind, not branching, cloning, disk persistence or an MPI-wide transaction. Unsupported custom backends raise `SnapshotError`. Backend restore-failure guarantees remain the backend's responsibility; identity rejection invokes no backend restore callback. Raw-state snapshot APIs are unchanged.
+
+`python -m salmonpy.examples.point_ld /new/output/directory` also verifies cross-point rejection and exact current continuation after same-point restore.

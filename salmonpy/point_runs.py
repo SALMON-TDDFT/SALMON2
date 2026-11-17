@@ -7,7 +7,8 @@ from uuid import uuid4
 import numpy as np
 
 from .config import _identifier, _copy_json, _freeze
-from .errors import InputError
+from .errors import InputError, SnapshotError
+from ._version import __version__
 from .outputs import OutputArchive, save_arrays
 
 __all__ = ['PointRun', 'PointState', 'open_point_arrays']
@@ -67,6 +68,26 @@ def _axes(axes, shapes, count):
     return result
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class _PointSnapshot:
+    """Process-local identity envelope; the backend owns the opaque payload."""
+    _identity: tuple
+    _payload: object
+    schema: str = 'salmonpy.point-snapshot/1'
+    version: str = __version__
+
+    def record(self):
+        return dict(self._identity)
+
+    @property
+    def step_index(self):
+        return self._payload.step_index
+
+    @property
+    def time(self):
+        return self._payload.time
+
+
 @dataclass(frozen=True, init=False)
 class PointState:
     """One serial state; its prepared model is borrowed, not owned."""
@@ -88,6 +109,33 @@ class PointState:
 
     def record(self):
         return dict(self._identity)
+
+    def snapshot(self):
+        """Save a process-local backend token with this exact point/run identity."""
+        if self._closed:
+            raise SnapshotError('point state is closed')
+        callback = getattr(self._state, 'snapshot', None)
+        if not callable(callback):
+            raise SnapshotError('point backend does not support snapshots')
+        return _PointSnapshot(tuple(sorted(self._identity.items())), callback())
+
+    def restore(self, snapshot):
+        """Reject mismatched identity before the backend's own restore checks.
+
+        Backend snapshot semantics, settings checks and failure atomicity remain
+        its responsibility. This is not a branch, clone or MPI transaction API.
+        """
+        if self._closed:
+            raise SnapshotError('point state is closed')
+        if (type(snapshot) is not _PointSnapshot
+                or snapshot.schema != 'salmonpy.point-snapshot/1'
+                or snapshot.version != __version__
+                or snapshot._identity != tuple(sorted(self._identity.items()))):
+            raise SnapshotError('point snapshot identity/version mismatch')
+        callback = getattr(self._state, 'restore', None)
+        if not callable(callback):
+            raise SnapshotError('point backend does not support restore')
+        return callback(snapshot._payload)
 
     def save_checkpoint(self, directory):
         """Save known TDDFT replay state with exact point/run identity; new path only."""

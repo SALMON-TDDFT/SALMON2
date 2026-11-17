@@ -125,3 +125,78 @@ class PointRunTests(unittest.TestCase):
             data['metadata']['point_run']['points'][1]['point_id'] = 'b'
             manifest.write_text(json.dumps(data))
             with self.assertRaises(InputError): self.open(path)
+
+    def test_snapshot_rejects_cross_point_before_backend_callback(self):
+        class Saved(State):
+            def snapshot(self): return tuple(self.current)
+            def restore(self, token):
+                self.calls=getattr(self,'calls',0)+1
+                self.current=np.asarray(token).copy()
+        class SnapshotModel(Model):
+            def new_state(self, **kwargs): return Saved()
+        with self.Run({'p': SnapshotModel(),'q': SnapshotModel()},run_id='run') as run:
+            p=run.new_state('p');q=run.new_state('q')
+            p.step([1,2,3]);token=p.snapshot()
+            with self.assertRaisesRegex(InputError,'identity'):q.restore(token)
+            self.assertEqual(getattr(q._state,'calls',0),0)
+            np.testing.assert_array_equal(q.current,np.zeros(3))
+            p.step([3,2,1]);p.restore(token)
+            np.testing.assert_array_equal(p.current,[1,2,3])
+            with self.assertRaises(InputError):p.restore((1,2,3))
+            p.close()
+            with self.assertRaises(InputError):p.snapshot()
+            with self.assertRaises(InputError):p.restore(token)
+
+    def test_snapshot_all_identity_fields_version_and_unsupported(self):
+        from dataclasses import replace, FrozenInstanceError
+        class Saved(State):
+            def snapshot(self):return tuple(self.current)
+            def restore(self, token):raise AssertionError('must reject before callback')
+        class M(Model):
+            def new_state(self, **kwargs):return Saved()
+            def record(self):
+                return {**super().record(),'initial_state_id':'gs','initial_state_digest':'b'*64}
+        with self.Run({'p':M()},run_id='r') as run:
+            state=run.new_state('p');saved=state.snapshot()
+            for key in state.record():
+                wrong=dict(saved._identity);wrong[key]='wrong'
+                with self.subTest(key=key),self.assertRaises(InputError):
+                    state.restore(replace(saved,_identity=tuple(sorted(wrong.items()))))
+            for option in ({'schema':'unknown'},{'version':'unknown'}):
+                with self.assertRaises(InputError):state.restore(replace(saved,**option))
+            with self.assertRaises(FrozenInstanceError):saved.schema='changed'
+            detached=saved.record();detached['point_id']='wrong'
+            self.assertEqual(saved.record()['point_id'],'p')
+        with self.Run({'p':Model()}) as run:
+            with self.assertRaisesRegex(InputError,'support'):run.new_state('p').snapshot()
+
+    def test_ld_sbe_rewind_and_cross_point_independence(self):
+        from salmonpy.ld import LorentzDrude
+        from salmonpy.sbe import SBEInitialState
+        def observe(state):
+            return {key:np.array(getattr(state,key),copy=True)
+                    for key in ('time','current','polarization','density') if hasattr(state,key)}
+        ld=LorentzDrude(plasma_frequency=.7,strength=[.3,.8],resonance=[0.,.9],damping=[.02,.06])
+        with np.load(Path(__file__).with_name('sbe_reference.npz')) as data:
+            sbe=SBEInitialState(**{key:data[key] for key in ('eigen','momentum','nonlocal_velocity','weights','lattice')},electrons=2)
+        class Recorded(Model):
+            def __init__(self,raw):self.raw=raw
+            def new_state(self,**kw):return self.raw.new_state(**kw)
+        for raw in (ld,sbe):
+            with self.subTest(backend=type(raw).__name__),self.Run({'p':Recorded(raw),'q':Recorded(raw)},run_id='r') as run:
+                p=run.new_state('p',dt=.02);q=run.new_state('q',dt=.02)
+                p.step([.01,.02,0]);saved=p.snapshot();untouched=observe(q)
+                with self.Run({'p':Recorded(raw)},run_id='r') as other:
+                    different_dt=other.new_state('p',dt=.03)
+                    before=observe(different_dt)
+                    with self.assertRaises(InputError):different_dt.restore(saved)
+                    for key,value in before.items():np.testing.assert_array_equal(getattr(different_dt,key),value)
+                values=[[.02,.01,0],[.03,0,.01],[0,.01,.02]]
+                expected=[]
+                for value in values:p.step(value);expected.append(observe(p))
+                with self.assertRaises(InputError):q.restore(saved)
+                for key,value in untouched.items():np.testing.assert_array_equal(getattr(q,key),value)
+                p.restore(saved)
+                for value,want in zip(values,expected):
+                    p.step(value)
+                    for key,actual in observe(p).items():np.testing.assert_array_equal(actual,want[key])

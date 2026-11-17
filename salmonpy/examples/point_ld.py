@@ -5,6 +5,7 @@ import numpy as np
 from salmonpy.builtin_materials import builtin_material_registry, material_from_catalog
 from salmonpy.config import resolve_materials
 from salmonpy.point_runs import PointRun, open_point_arrays
+from salmonpy.errors import SnapshotError
 
 
 def run(directory):
@@ -33,10 +34,27 @@ def run(directory):
                 electric.append(np.stack([field, -field]))
         if np.array_equal(right.current, left.current):
             raise AssertionError('opposite drives produced identical currents')
+        saved = right.snapshot()
+        before = left.current.copy()
+        try:
+            left.restore(saved)
+        except SnapshotError:
+            pass
+        else:
+            raise AssertionError('cross-point restore accepted')
+        np.testing.assert_array_equal(left.current, before)
+        probe = [.01, .02, 0.]
+        right.step(probe)
+        expected = right.current.copy()
+        right.restore(saved)
+        right.step(probe)
+        np.testing.assert_array_equal(right.current, expected)
+        right.restore(saved)  # Output still ends at the original twentieth step.
         calculation.save_arrays(directory, {'current': current, 'E': electric, 'time': np.arange(21)*dt},
                                 point_axes={'current': 1, 'E': 1},
                                 metadata={'units': 'atomic_gaussian', 'drive': 'E',
                                           'scope': 'synthetic LD connection check',
+                                          'snapshot_identity_checked': True, 'snapshot_continuation_exact': True,
                                           'direct_reference_exact': True, 'independent_states': True})
         record = calculation.record()
     loaded = open_point_arrays(directory)

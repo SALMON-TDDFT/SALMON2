@@ -69,3 +69,11 @@ PointRun自体の直列専用という制約やrestart未対応は維持しま�
 
 管理TDDFTの点ID付きディスク復元を別途追加しました。[POINT_CHECKPOINTS.md](POINT_CHECKPOINTS.md)参照。
 上記のrestart未対応はMPI全体・汎用backendの制約です。
+
+## 点ID付きのメモリsnapshot
+
+`PointState.snapshot()` は内部バックエンドのsnapshotを `salmonpy.point-snapshot/1` の不変な点情報で包みます。`state.restore(saved)` は実験・点・物質定義・初期状態のIDとパッケージ版を照合してからバックエンドを呼びます。別の点や実験、裸のバックエンドtokenは拒否されます。明示した同一run/point IDであっても、バックエンドのモデル・時間刻み等の整合性検査は引き続き必要です。
+
+これはプロセス内の巻き戻し用であり、分岐・複製やディスク保存、MPI全体のトランザクションではありません。snapshot未対応の自作バックエンドでは `SnapshotError` となります。バックエンドの復元失敗時の保証はその実装に従います。点ID不一致の拒否では内部のrestoreを呼びません。裸の状態に対する従来のsnapshot APIは変わりません。
+
+`python -m salmonpy.examples.point_ld /new/output/directory` は別の点への復元拒否と、同一点での復元後の電流一致も確認します。
