@@ -421,3 +421,12 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 `CoupledStepper.step_protected(targets)` は自作コードと完全な退避・復元コールバックを接続する任意の入口です。[STEPPING.md](STEPPING.md) と6ランクの `examples/mpi_protected_step.py` を参照。native全体の保護は未対応で、個別ソルバーの復帰から推定しません。
 
 監査済みnative全体の保護は [NATIVE_STEPPING.md](NATIVE_STEPPING.md) の別プロトコルと `--protect-steps` で利用できます。別のHSE GSは `--hse-bundle`、同時TDDFT／HSEの例は `examples/mixed_tddft_hse_layers.json` です。
+
+## 高速PR版HSEの対称性opt-in
+
+NativeFastHSEBackend(...,allow_symmetry=True)は内部kランク1・factor-off Taylorに限定。
+通常混在例は--hse-symmetry --hse-reference-bundle FULL_K_BUNDLEを明示する。
+Aが対称性を破ったときのInputErrorから、全体を戻すには--protect-steps／step_protectedを使う。
+直接／保護付き再開と2種類の場内LD・SBE・PBE-TDDFT・HSE混在を検証した。
+初期状態・場の局所方向・XCの適合性は別途確認する。極小勾配の既知の感度も含め、
+[対称性ガイド](FAST_HSE_SYMMETRY.md)を参照。

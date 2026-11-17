@@ -144,12 +144,18 @@ layout, not full occupation-capacity/physical validation, SCF-input ownership or
 recoverable native initialization. No new public Python/C API is added; remaining
 k-point/symmetry/communicator and other solver dependencies still apply.
 
-Fast-PR HSE is the primary HSE path; see [the symmetry capability boundary](FAST_HSE_SYMMETRY.en.md)
-for the newly tested independent exchange core versus still-rejected public symmetric
-TDDFT/FDTD/checkpoint profiles. Core evidence does not extend public connection capabilities.
+Fast-PR is the only supported HSE engine. `NativeFastHSEBackend(build_record, work_root,
+allow_symmetry=True)` explicitly permits scalar periodic CPU/full-q/internal-k1,
+factor-off Taylor symmetry. Shared symmetry settings are immutable, one native
+lifetime per process. The default False and existing C init remain symmetry-denied.
+Learned/PT-CN symmetry and reduced internal-k MPI2 are unsupported.
 
-Fast-PR HSE now validates uniform A/c with owned Cartesian operations and a normalized direction internally. Ordinary Python/native-C symmetric TDDFT/FDTD and checkpoint admission remain unsupported. See [symmetry guide](FAST_HSE_SYMMETRY.en.md).
+`sp_fast_hse_init_symmetry` has the existing init arguments and declares
+`sp_fast_hse_symmetry_protocol()==1`. Only unanimous finite status34 with that
+protocol becomes a state-preserving Python `InputError`; correct A before retrying.
+Unknown/old ABI errors do not imply recovery. Use `step_protected` for whole FDTD
+loop retry. Common direct/staged checkpoint integration is available.
 
-Internal fast-PR exchange checkpoint V2 supports symmetry map/cache values. Non-reduced V1 is unchanged; public symmetric TDDFT and coupled resume remain prohibited.
-
-Explicit internal Fortran opt-in now tests single-k-rank factor-off Taylor symmetric TDDFT and direct/staged resume. Shared symmetry settings remain immutable, one initialization per process. Ordinary Python/C entry points remain default-denied; internal status34 is not a public retry protocol. See FAST_HSE_SYMMETRY.en.md.
+See [the symmetry guide](FAST_HSE_SYMMETRY.en.md) for mixed samples, exact scope and
+the known near-zero-gradient XC sensitivity. Connectivity/restart tests are not
+physical-convergence certificates.

@@ -448,3 +448,13 @@ Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OM
 `CoupledStepper.step_protected(targets)` is an opt-in entry for complete backend-owned backup/rollback callbacks. See [STEPPING.en.md](STEPPING.en.md) and the six-rank `examples/mpi_protected_step.py`. Aggregate native transaction/output protection is not inferred from individual solver recovery.
 
 Audited native aggregate protection uses the separate protocol and `--protect-steps` described in [NATIVE_STEPPING.en.md](NATIVE_STEPPING.en.md). Use `--hse-bundle` for distinct HSE initial data and `examples/mixed_tddft_hse_layers.json` for simultaneous TDDFT/HSE.
+
+## Fast-PR HSE symmetry opt-in
+
+NativeFastHSEBackend(...,allow_symmetry=True) is bounded to internal-k1,
+factor-off Taylor. The ordinary mixed sample explicitly selects --hse-symmetry
+--hse-reference-bundle FULL_K_BUNDLE. Use --protect-steps/step_protected to roll
+back the entire loop when InputError rejects a symmetry-breaking A. Direct/protected
+resume and local two-LD/SBE/PBE-TDDFT/HSE mixtures are tested. Material/field/XC
+compatibility and physical convergence remain separate; see the
+[symmetry guide](FAST_HSE_SYMMETRY.en.md), including the low-gradient sensitivity.

@@ -50,6 +50,8 @@ def main():
     parser.add_argument('--fast-hse-build', type=Path, help='explicit fast-PR serial worker build record for hse-point')
     parser.add_argument('--fast-hse-mpi-build', type=Path, help='explicit native fast-PR host-MPI build record')
     parser.add_argument('--hse-bundle', type=Path, help='optional separate fast-PR HSE GS bundle; default is BUNDLE')
+    parser.add_argument('--hse-symmetry', action='store_true', help='explicit factor-off symmetry opt-in; native HSE group1 only')
+    parser.add_argument('--hse-reference-bundle', type=Path, help='explicit equivalent full-k HSE bundle for serial comparison')
     parser.add_argument('--hse-ranks', type=int, choices=(1, 2), default=1)
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
@@ -88,6 +90,10 @@ def main():
         parser.error('fast HSE requires an explicit layer layout')
     if args.hse_bundle is not None and args.fast_hse_build is None:
         parser.error('--hse-bundle requires --fast-hse-build')
+    if args.hse_symmetry and (args.fast_hse_mpi_build is None or args.hse_ranks != 1 or args.hse_reference_bundle is None):
+        parser.error('--hse-symmetry requires native HSE group1 and --hse-reference-bundle')
+    if args.hse_reference_bundle is not None and not args.hse_symmetry:
+        parser.error('--hse-reference-bundle requires --hse-symmetry')
     if args.hse_ranks != 1 and args.fast_hse_mpi_build is None:
         parser.error('hse-ranks > 1 requires --fast-hse-mpi-build')
     if args.memory_budget_gib is not None and (not np.isfinite(args.memory_budget_gib) or args.memory_budget_gib <= 0):
@@ -115,6 +121,8 @@ def main():
         _, sbe = models()
         layout = json.loads(args.layers.read_text()) if args.layers is not None else None
         selected = {layer['material_id'] for layer in layout.get('layers', [])} if layout is not None else {'sbe-point','si-tddft'}
+        if args.hse_symmetry and 'hse-point' not in selected:
+            raise ValueError('--hse-symmetry requires an hse-point layer')
         if args.hse_bundle is not None and 'hse-point' not in selected:
             raise ValueError('--hse-bundle requires an hse-point layer')
         available = {'drude': materials[0], 'lorentz': materials[1]}
@@ -131,7 +139,7 @@ def main():
             available['hse-point'] = MaterialBinding('hse-point',
                 FastHSEMaterialProvider(args.hse_bundle or args.bundle, 'rt.inp', max_steps=args.steps),
                 (FastHSEResponseBackend(args.fast_hse_build, output) if args.fast_hse_mpi_build is None
-                 else NativeFastHSEBackend(args.fast_hse_mpi_build, output)))
+                 else NativeFastHSEBackend(args.fast_hse_mpi_build, output, allow_symmetry=args.hse_symmetry)))
         assembly = None
         if layout is None:
             bindings = {10: available['sbe-point'], 20: available['si-tddft']}
@@ -172,6 +180,10 @@ def main():
         if 'hse-point' in selected:
             signature['fast_hse_backend'] = available['hse-point'].backend.identity
             signature['hse_ranks'] = args.hse_ranks
+            if args.hse_symmetry:
+                signature['hse_symmetry'] = True
+                signature['hse_reference_assets'] = {str(p.relative_to(args.hse_reference_bundle)): digest_file(p)
+                    for p in sorted(args.hse_reference_bundle.rglob('*')) if p.is_file()}
             if args.hse_bundle is not None:
                 signature['hse_assets'] = {str(p.relative_to(args.hse_bundle)): digest_file(p)
                     for p in sorted(args.hse_bundle.rglob('*')) if p.is_file()}
@@ -331,7 +343,12 @@ def main():
                         binding = bindings[point]
                         from salmonpy.fast_hse import FastHSEResponseBackend
                         reference = FastHSEResponseBackend(args.fast_hse_build, output)
-                        state = reference.create_state(binding.provider.prepare(local),point,dt,local)
+                        if args.hse_reference_bundle is not None:
+                            from salmonpy.fast_hse import FastHSEMaterialProvider
+                            reference_provider = FastHSEMaterialProvider(args.hse_reference_bundle, max_steps=args.steps)
+                        else:
+                            reference_provider = binding.provider
+                        state = reference.create_state(reference_provider.prepare(local),point,dt,local)
                     else: state = sbe.new_state(dt=dt) if is_sbe else initial.new_state(dt=dt)
                     try:
                         old = np.zeros(3)
@@ -361,6 +378,7 @@ def main():
                       'serial_hse_workers':sum(b.key=='hse-point' for b in bindings.values()) if args.fast_hse_mpi_build is None else 0,
                       'hse_internal_mpi':args.fast_hse_mpi_build is not None,
                       'hse_k_ranks':args.hse_ranks,
+                      'hse_symmetry':args.hse_symmetry,
                       'constitutive_cell_counts': dict(zip(map(str, ids.tolist()), counts.tolist())),
                       'ld_materials': {} if args.without_ld else {'1': 'drude', '2': 'two-lorentz-poles'},
                       'maximum_abs_current': peaks.tolist(), 'maximum_replay_error': np.max(abs(j-replay), axis=(0, 2)).tolist(),

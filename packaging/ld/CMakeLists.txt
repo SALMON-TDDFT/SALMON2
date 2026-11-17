@@ -196,5 +196,6 @@ install(FILES "${ROOT}/tests/native/test_hse_symmetry_field.f90" DESTINATION sal
 install(FILES "${ROOT}/tests/native/test_hse_symmetry_checkpoint.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 install(FILES "${ROOT}/tests/native/test_hse_symmetry_tddft.f90" DESTINATION salmonpy/_runtime_source/tests/native)
 install(FILES "${ROOT}/tools/prepare_fast_hse_symmetry_fixture.py" "${ROOT}/tools/test_fast_hse_symmetry_tddft.py" DESTINATION salmonpy/_runtime_source/tools)
+install(FILES "${ROOT}/tools/test_fast_hse_symmetry_mpi.py" "${ROOT}/tools/probe_hse_low_gradient.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/salmonpy/FAST_HSE_SYMMETRY.md" "${ROOT}/salmonpy/FAST_HSE_SYMMETRY.en.md" DESTINATION salmonpy)

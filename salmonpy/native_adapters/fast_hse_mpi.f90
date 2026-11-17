@@ -13,6 +13,7 @@ module salmonpy_fast_hse_mpi
  use structures,only:s_rt_run_config
  implicit none
  private
+ public::sp_fast_hse_init_symmetry,sp_fast_hse_symmetry_protocol
  public::sp_fast_hse_init,sp_fast_hse_step,sp_fast_hse_checkpoint,sp_fast_hse_close,sp_fast_hse_info
  type(tddft_context),pointer,save::state=>null()
  logical,save::used=.false.,ready=.false.,failed=.false.
@@ -75,7 +76,24 @@ end function
  if(i>len(filename).or.len_trim(filename)==0)return
  status=0
  end subroutine
+ integer(c_int) function sp_fast_hse_symmetry_protocol() bind(C)
+ sp_fast_hse_symmetry_protocol=1
+ end function
  integer(c_int) function sp_fast_hse_init(path,timestep,capacity,J) bind(C)
+ character(c_char),intent(in)::path(*)
+ real(c_double),value::timestep
+ integer(c_int),value::capacity
+ real(c_double),intent(out)::J(3)
+ sp_fast_hse_init=initialize(path,timestep,capacity,J,.false.)
+ end function
+ integer(c_int) function sp_fast_hse_init_symmetry(path,timestep,capacity,J) bind(C)
+ character(c_char),intent(in)::path(*)
+ real(c_double),value::timestep
+ integer(c_int),value::capacity
+ real(c_double),intent(out)::J(3)
+ sp_fast_hse_init_symmetry=initialize(path,timestep,capacity,J,.true.)
+ end function
+ integer(c_int) function initialize(path,timestep,capacity,J,allow_symmetry)
  use inputoutput,only:read_input
  use math_constants,only:set_math_constants
  use plusU_global,only:read_Hubbard_parameters
@@ -85,6 +103,7 @@ end function
 #ifdef USE_MPI
  use exx_worker_service,only:service_enabled
 #endif
+ logical,intent(in)::allow_symmetry
  character(c_char),intent(in)::path(*)
  real(c_double),value::timestep
  integer(c_int),value::capacity
@@ -94,7 +113,7 @@ end function
  integer::status,saved_capacity
  real(8)::saved_dt
  logical::exists
- sp_fast_hse_init=1;J=0d0
+ initialize=1;J=0d0
  if(.not.attached_main_thread())return
  call c_path(path,filename,status)
  if(used.or.capacity<1.or.capacity>=huge(0))status=1
@@ -114,6 +133,7 @@ end function
  if(status/=0)return
  call read_input(trim(filename))
  if(theory/='tddft_response'.or.xc/='hse06')status=1
+ if(allow_symmetry.and.nproc_size_global/=1)status=1
  if(nproc_k/=nproc_size_global.or.nproc_ob/=1.or.any(nproc_rgrid/=1))status=1
 #ifdef USE_MPI
  if(service_enabled())status=1
@@ -126,7 +146,7 @@ end function
  call timer_initialize
  call rt_input_config(config)
  config%delta_t=timestep;config%max_steps=capacity
- call rt_open(state,'native_fast_hse',status,config=config)
+ call rt_open(state,'native_fast_hse',status,config=config,allow_symmetry=allow_symmetry)
  call agree(status)
  if(status/=0)then
   failed=.true.;return
@@ -139,7 +159,7 @@ end function
   call rt_close(state)
   failed=.true.;return
  endif
- ready=.true.;sp_fast_hse_init=0
+ ready=.true.;initialize=0
  end function
  integer(c_int) function sp_fast_hse_step(Aold,Anew,J,energy) bind(C)
  real(c_double),intent(in)::Aold(3),Anew(3)
@@ -163,7 +183,7 @@ end function
  call agree(status)
  if(status/=0)then
   select case(status)
-  case(20:25,30,32,33)
+  case(20:25,30,32,33,34)
     sp_fast_hse_step=status
   case default
     failed=.true.

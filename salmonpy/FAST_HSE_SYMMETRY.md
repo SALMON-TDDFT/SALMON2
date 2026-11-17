@@ -1,6 +1,6 @@
 # 高速PR版HSEと対称性
 
-[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.3`
+[English](FAST_HSE_SYMMETRY.en.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.4`
 
 HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成・orbit再利用・ACEと対称性を
 中心に進めます。通常版HSEを代替エンジンにはしません。標準SALMONの対称性縮約とは演算が
@@ -11,8 +11,8 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 | 高速PR版の交換コア | 対称性マップ・位相キャッシュ・FFT資源を独立所有。周期・非スピン分極・CPU・full-q・内部kランク1を検証 |
 | 対称性／orbit／ACEの比較 | 縮約4代表k点と独立に列挙した全8k点。C2z／mirror-x、異なるセル・遮蔽係数・軌道 |
 | 内部Fortran TDDFT | 明示opt-in、1プロセス1初期化／内部k1、factor-off Taylor。直接／候補再開を検証 |
-| PythonのTDDFT／FDTD接続 | 対称性は引き続き拒否。既存の非縮約高速PR版接続はCOUPLEDを参照 |
-| 保存復元 | 内部交換コアV2と明示的内部TDDFTの直接／候補再開を検証。公開の結合再開は禁止 |
+| Python／native-C／FDTD | 新プロトコルの明示opt-in。group1・factor-off Taylorの保護付き混在を検証。既定は拒否 |
+| 保存復元 | 内部交換コアV2と明示的内部TDDFTの直接／候補再開を検証。限定した公開の保護付き混在再開を検証 |
 | 対称性付き内部k MPI2 | 今回は未解放。テストのMPI2プロセスは各々COMM_SELFの交換コアを所有 |
 
 ## 独立した交換コアの所有
@@ -48,8 +48,8 @@ HSEの開発・検証は高速PR版を本筋とし、代表k点・star再構成�
 TDDFTアダプターでは数値状態のバックアップ／時間発展より前に検査し、既存の集団通信で
 失敗を共有します。独立したC2z／mirror-x、傾いたセル、微小／巨大な場、不正値、設定不整合、
 終了済みownerを検証しました。場とマップの境界の検査であり、対称性情報全体やnative初期化の
-保証ではありません。通常worker／native-Cのopenと結合保存復元の禁止は維持し、公開の対称性付き時間発展・
-結合再開への対応とは扱いません。明示ビルド用プローブは
+保証ではありません。通常worker／native-Cのopenと結合保存復元の禁止は維持し、無制限な対称性付き時間発展・
+結合再開への対応とは扱いません。明示opt-inの範囲は後節を参照してください。明示ビルド用プローブは
 `_runtime_source/tests/native/test_hse_symmetry_field.f90` です。
 
 ## 内部交換コアの対称性checkpoint
@@ -70,7 +70,7 @@ nativeプローブ `_runtime_source/tests/native/test_hse_symmetry_checkpoint.f9
 star／orbits、キャッシュ有無、OMP1／2、MPI1／2プロセスの独立COMM_SELFコアを検証します。
 ownerの作り直しを含め、復元直後の作用・エネルギーと、その後のrefresh／actionのcheckpoint
 バイト列が連続実行と一致します。これは交換コアの保存復元です。別枠の内部TDDFT検証は次節を参照してください。
-FDTD再開や通常Python／native-C TDDFTのopen禁止は維持します。学習／PT-CNの
+既定のPython／native-C TDDFTの拒否は維持します。限定した公開opt-inは後節を参照してください。学習／PT-CNの
 対称性、縮約内部k MPI、対称性付き混在計算の失敗・再開は残作業です。
 
 ## 明示的な内部TDDFTの検証
@@ -86,9 +86,8 @@ zを保つ対称群に限定します。full-actionは比較検証用のみで�
 制御された復帰を保証するものではありません。
 
 実Aの所有検査は、場が対称性を破る場合に内部status34を返します。バックアップ／時間発展前の
-拒否なので、内部呼び出し側はAを直して再試行できます。このstatusはまだ公開C／Pythonの再試行契約
-ではありません。通常のworker／native-Cはopt-inを指定しないため、対称性を拒否します。
-Python／FDTDの対応範囲は広げていません。
+拒否なので、内部呼び出し側はAを直して再試行できます。このstatusは後述の新しい公開プロトコルで宣言します。旧バイナリから推定しません。
+通常のworker／旧C入口は対称性を拒否し、新しい明示opt-inだけが限定範囲を有効にします。
 
 nativeの `test_hse_symmetry_tddft.f90` と、補助ツール
 `prepare_fast_hse_symmetry_fixture.py`／`test_fast_hse_symmetry_tddft.py` を
@@ -102,18 +101,41 @@ nativeの `test_hse_symmetry_tddft.f90` と、補助ツール
 
 対称性付き保存では、保存されない重なりキャッシュの無効フラグを保存用コピー内でtrueにそろえます。計算中のフラグと非縮約V1は変更しません。
 
-## 次の接続作業
+## 公開native／Pythonと混在opt-in
 
-縮約k点をTDDFT／FDTDへ解放する前に、次を実装・検証します。
+`NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)` を明示します。
+既定Falseは従来の `sp_fast_hse_init` を選びます。Trueには `sp_fast_hse_init_symmetry` と
+`sp_fast_hse_symmetry_protocol()==1` が必要です。新initの引数は従来と同じ
+`(const char *path, double dt, int capacity, double J[3])` です。opt-inをbackendの識別情報に
+含め、内部kランク1だけを許可します。入力操作行列は変更しません。未対応・未知のプロトコルは
+native寿命を取得する前に拒否します。学習／PT-CNの対称性と縮約内部k2は未対応、full-actionは
+比較検証用のみです。
 
-1. 所有する実A検査と内部TDDFTの再試行は検証済み。明示的な公開C／Pythonの受付契約へ接続する。
-   軸フラグだけでは最終操作行列を保証できず、任意のA(t)は固定偏光で有効な縮約を破り得る。
-2. 内部コア・TDDFTの直接／候補再開は検証済み。公開の混在・保護付き保存復元へ接続する。
-   所有ハンドルの複製や受理済みステップの再生に頼らない。
-3. 内部k MPIで代表点／starの分割を検証し、通常の混在サンプルで失敗・巻戻し・再開を確認する。
+有限かつ全ランク一致のstatus34と専用プロトコルが揃った場合だけ、Pythonは受理状態を保つ
+`InputError` を返します。Aを修正してから再試行します。群は入射偏光だけでなく、実際のFDTD局所場と
+適合しなければなりません。Aの投影・微小成分の切捨て・別エンジンへの自動切替は行いません。
+全体の巻戻しには `CoupledStepper.step_protected`／`--protect-steps` を使い、
+`StepRecoveryError.original_preserved` がTrueかつ解放成功の場合だけ再試行します。
 
-これらが通るまで既存の接続／checkpoint禁止を維持します。コア比較が通っただけで禁止を
-外したり、外場を黙って変更したり、通常HSEへ切り替えたりしません。メモリ予算は警告のみで、
-物理収束は利用者が選んだ物質・計算について確認します。
+通常の `mpi_mixed_native` 例は `--hse-symmetry` と、等価な全k点初期状態を明示した
+`--hse-reference-bundle FULL_K_BUNDLE` を受け付けます。従来のシリアル高速PR版と比較するための
+参照で、任意のGSを自動変換しません。`--hse-ranks 1` が必要です。配置・LD・SBE・半局所TDDFTと
+直接保存再開の入口は従来どおりです。5／6ランクで、field1／2・場内2種類LD・SBE1・PBE-TDDFT2・
+対称性HSE1を検証しました。故障・保護付き復元と新規直接再開で、受理済みステップの再生なしに
+軌跡を維持します。合成初期状態の接続試験であり、物質・場の適合性と物理収束は別途確認します。
 
-full-actionは同じ高速PR版ソース内の比較検証用で、別の対応エンジンや本番伝播設定を追加するものではありません。
+## 既知の極小勾配XC感度
+
+このMacのLibxc5.2.3 HSE評価で、ほぼゼロの密度勾配に対する大きな微分感度を実測しました。
+合成状態で密度差約7e-15からポテンシャル差約0.016が生じ、全／縮約k点の電流差約5.7e-10が出ました。
+刻みを小さくしても消えず、FDTDや巻戻しなしのLibxc単独診断でも再現します。これは未解決です。
+smoothing／clamping・許容誤差の緩和・ソースやライブラリへのパッチは適用していません。
+
+`probe_hse_low_gradient.py BUILD_RECORD NEW_JSON` はハッシュ確認済みライブラリを明示的に読みます。
+`low_gradient_sensitivity_detected` を確認し、exit0や `status=diagnostic` を物理検証の合格と
+解釈しません。接続試験は本番HSEの精度保証ではなく、計算結果には感度の記録も残します。
+成功した混在fixtureは `--orbital-phase .23` を明示し、平坦勾配の試験節点を避けています。
+利用者のGS変更や一般的な数値対策ではありません。元のphase0の不一致も記録に保持しています。
+
+次は、数学的に整合し検証された低勾配微分の扱いと、縮約内部k MPI・より広い初期化の検証です。
+高速PR版の演算と通常HSE非対応の方針は維持します。メモリ予算は警告のみ、分子の作業は保留です。

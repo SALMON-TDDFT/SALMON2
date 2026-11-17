@@ -51,6 +51,80 @@ class NativeFastHSETests(unittest.TestCase):
         state.initialized=True
         return state,calls
 
+    def test_symmetry_opt_in_is_lazy_bounded_and_identity_bound(self):
+        with patch('salmonpy.fast_hse_mpi.c.CDLL', side_effect=AssertionError('lazy')):
+            ordinary = self.backend()
+            symmetric = NativeFastHSEBackend(self.record, self.root, allow_symmetry=True)
+        self.assertEqual(ordinary.supported_group_sizes, (1, 2))
+        self.assertEqual(symmetric.supported_group_sizes, (1,))
+        self.assertNotEqual(ordinary.identity, symmetric.identity)
+        for value in (1, 'yes', None):
+            with self.assertRaises(InputError):
+                NativeFastHSEBackend(self.record, self.root, allow_symmetry=value)
+
+    def test_field_rejection_requires_specific_protocol_and_preserves_state(self):
+        for protocol in (None, 0, 1):
+            state, _ = self.state()
+            code = [34]
+            def reject(old, new, current, energy):
+                current[:] = 0
+                c.cast(energy, c.POINTER(c.c_double)).contents.value = 0
+                return code[0]
+            state.lib.sp_fast_hse_step = reject
+            if protocol is not None:
+                state.lib.sp_fast_hse_symmetry_protocol = lambda: protocol
+            with self.subTest(protocol=protocol), self.assertRaises(InputError if protocol == 1 else RuntimeFailure):
+                state.step([1e-250, 0, 0])
+            self.assertEqual(state.failed, protocol != 1)
+            self.assertEqual(state.steps, 0)
+            np.testing.assert_array_equal(state.A, np.zeros(3))
+            if protocol == 1:
+                code[0] = 0
+                state.step([0, 0, .1])
+                self.assertEqual(state.steps, 1)
+            state.close()
+
+    def test_symmetry_entry_requires_capability_and_preserves_legacy_selection(self):
+        from salmonpy.fast_hse_mpi import _initializer
+        old = lambda *a: 0
+        old.argtypes = []
+        new = lambda *a: 0
+        legacy = SimpleNamespace(sp_fast_hse_init=old)
+        self.assertIs(_initializer(legacy,False),old)
+        with self.assertRaises(InputError):
+            _initializer(legacy,True)
+        for protocol in (0,1,2):
+            lib = SimpleNamespace(sp_fast_hse_init=old,sp_fast_hse_init_symmetry=new,
+                                  sp_fast_hse_symmetry_protocol=lambda:protocol)
+            if protocol == 1:
+                self.assertIs(_initializer(lib,True),new)
+            else:
+                with self.assertRaises(InputError):_initializer(lib,True)
+
+    def test_symmetry_k2_rejected_before_loading_native(self):
+        backend = NativeFastHSEBackend(self.record,self.root,allow_symmetry=True)
+        comm = FakeComm();comm.size = 2
+        ctx = SimpleNamespace(solver_comm=comm,point_ids=(1,))
+        with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('no native load')):
+            with self.assertRaisesRegex(InputError,'one internal k rank'):
+                backend.create_state(object(),1,.01,ctx)
+
+    def test_missing_symmetry_asset_rejected_before_native_lifetime(self):
+        from salmonpy.fast_hse import FastHSEMaterialProvider
+        bundle = self.root/'bundle';bundle.mkdir()
+        restart = bundle/'data_for_restart';restart.mkdir()
+        for name in ('info.bin','occupation.bin','wfn.bin'):
+            (restart/name).write_bytes(b'synthetic')
+        (bundle/'rt.inp').write_text("&calculation theory='tddft_response' /\n"
+            "&system yn_symmetry='yyn' /\n&functional xc='hse06',exx_factor_mode='off' /\n"
+            "&propagation propagator='hse_taylor4' /\n")
+        provider = FastHSEMaterialProvider(bundle,max_steps=3)
+        backend = NativeFastHSEBackend(self.record,self.root,allow_symmetry=True)
+        ctx = SimpleNamespace(solver_comm=FakeComm(),point_ids=(1,))
+        with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('no native load')):
+            with self.assertRaisesRegex(InputError,'sym.dat'):
+                backend.create_state(provider.prepare(ctx),1,.01,ctx)
+
     def test_constructor_is_lazy_and_hash_bound(self):
         with patch('salmonpy.fast_hse_mpi.c.CDLL',side_effect=AssertionError('must not load')):
             backend=self.backend()

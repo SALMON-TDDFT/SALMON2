@@ -19,6 +19,7 @@ import numpy as np
 from . import embedded_tddft as embedded
 from .distributed import NativeParallelContext
 from .errors import InputError, InputTypeError, RuntimeFailure, NumericalError
+from .bands import _scalar
 from .fast_hse import _Initial, _input_text, _positive, _vector
 from .material_response import _response_timing
 from .tddft import _copy_bundle, _digest
@@ -44,6 +45,22 @@ def _configure(lib):
         getattr(lib, 'sp_fast_hse_'+name).restype = c.c_int
 
 
+def _initializer(lib, allow_symmetry):
+    if not allow_symmetry:
+        return lib.sp_fast_hse_init
+    query = getattr(lib, 'sp_fast_hse_symmetry_protocol', None)
+    entry = getattr(lib, 'sp_fast_hse_init_symmetry', None)
+    if query is None or entry is None:
+        raise InputError('native build has no symmetry opt-in protocol; build explicitly with current sources')
+    query.argtypes = []
+    query.restype = c.c_int
+    if query() != 1:
+        raise InputError('unsupported native symmetry opt-in protocol')
+    entry.argtypes = lib.sp_fast_hse_init.argtypes
+    entry.restype = c.c_int
+    return entry
+
+
 class NativeFastHSEBackend:
     """Collective fast-PR HSE response; k-only groups of one or two ranks.
 
@@ -51,12 +68,18 @@ class NativeFastHSEBackend:
     HSE engine or fallback is supported. Material points require separate groups;
     each group has one shared work copy and one point. Errors can invalidate the
     whole MPI job; native process-terminating failures are not recoverable.
+    allow_symmetry is explicit, identity-bound and restricted to one internal
+    rank/factor-off Taylor; see FAST_HSE_SYMMETRY for numerical limitations.
     """
     supported_group_sizes = (1,2)
     execution = 'collective'
     reduction = 'leader'
 
-    def __init__(self, build_record, work_root):
+    def __init__(self, build_record, work_root, *, allow_symmetry=False):
+        if type(allow_symmetry) is not bool:
+            raise InputTypeError('allow_symmetry must be boolean')
+        self.allow_symmetry = allow_symmetry
+        self.supported_group_sizes = (1,) if allow_symmetry else (1,2)
         record = json.loads(Path(build_record).expanduser().resolve().read_text())
         if record.get('schema') != 'salmonpy.fast-hse-mpi/1' or record.get('status') != 'built-and-audited':
             raise InputError('audited fast-PR HSE host-MPI build record required')
@@ -71,8 +94,10 @@ class NativeFastHSEBackend:
         self.work_root = Path(work_root).expanduser().resolve()
         if not self.work_root.is_dir():
             raise InputError('existing shared work root required')
-        self.identity = 'salmonpy.fast-hse-mpi/1/' + hashlib.sha256(json.dumps(
-            [self.sha256,self.origin_sha256]).encode()).hexdigest()
+        identity = [self.sha256,self.origin_sha256]
+        if allow_symmetry:
+            identity.append('symmetry-v1')
+        self.identity = 'salmonpy.fast-hse-mpi/1/' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
     def create_state(self, initial, point_id, dt, context):
         global _used
@@ -85,8 +110,8 @@ class NativeFastHSEBackend:
                 raise InputError('native fast HSE requires the main thread')
             if len(context.point_ids) != 1 or context.point_ids[0] != point_id:
                 raise InputError('one fast HSE point per solver group required')
-            if comm.size not in (1,2):
-                raise InputError('validated fast HSE k-only group requires one or two ranks')
+            if comm.size not in self.supported_group_sizes:
+                raise InputError('symmetry opt-in requires one internal k rank' if self.allow_symmetry else 'validated fast HSE k-only group requires one or two ranks')
             if not isinstance(initial, _Initial):
                 raise InputTypeError('prepared FastHSEMaterialProvider state required')
             if self.work_root.is_relative_to(initial.directory):
@@ -97,10 +122,19 @@ class NativeFastHSEBackend:
             if _digest(self.library) != self.sha256:
                 raise InputError('fast HSE MPI library changed')
             groups, propagator = _input_text((initial.directory/initial.input_file).read_text())
+            symmetry = 'y' in _scalar(groups.get('system',''), 'yn_symmetry', default='n').lower()
+            if symmetry and not self.allow_symmetry:
+                raise InputError('symmetry input requires explicit allow_symmetry=True')
+            if symmetry:
+                factor = _scalar(groups.get('functional',''), 'exx_factor_mode', default='off')
+                if factor != 'off' or propagator not in ('hse_taylor4','hse_taylor4_full'):
+                    raise InputError('symmetry requires factor-off fast-PR Taylor (full-action is test-only)')
+                if not (initial.directory/'sym.dat').is_file():
+                    raise InputError('symmetry input requires sym.dat in the initial bundle')
             groups['tgrid'] = groups.get('tgrid','') + '\n dt='+format(dt,'.17g')+', nt='+str(initial.max_steps)+'\n'
             groups['parallel'] = groups.get('parallel','') + '\n nproc_k='+str(comm.size)+', nproc_ob=1, nproc_rgrid=1,1,1\n'
             text = '\n'.join('&'+k+v+'/' for k,v in groups.items())+'\n'
-            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text)
+            descriptor = (self.sha256,initial.manifest,point_id,dt,initial.max_steps,text,self.allow_symmetry)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
@@ -127,6 +161,7 @@ class NativeFastHSEBackend:
                 raise InputError('fast HSE work directory is not shared identically')
             lib = c.CDLL(str(self.library))
             _configure(lib)
+            initializer = _initializer(lib,self.allow_symmetry)
         except Exception as exc:
             error = str(exc)
         _agree(comm,error)
@@ -134,9 +169,10 @@ class NativeFastHSEBackend:
         native = NativeParallelContext(owner,self.library,self.sha256)
         _used = embedded._used = True
         state = _State(native,lib,work,dt,initial.max_steps,propagator)
+        state.symmetry_enabled = symmetry
         try:
             current = np.empty(3)
-            code = state._call(lib.sp_fast_hse_init,b'inputfile',dt,initial.max_steps,current)
+            code = state._call(initializer,b'inputfile',dt,initial.max_steps,current)
             state.initialized = code == 0
             statuses = comm.allgather((int(code),bool(np.isfinite(current).all())))
             if any(code or not finite for code,finite in statuses):
@@ -215,6 +251,9 @@ class _State:
         statuses = comm.allgather((int(code),bool(np.isfinite(current).all() and np.isfinite(energy.value))))
         if any(code or not finite for code,finite in statuses):
             from .embedded_tddft import _admission_rejected
+            if _admission_rejected(self.lib,statuses,allowed=(34,),
+                                   query_name='sp_fast_hse_symmetry_protocol'):
+                raise InputError('A breaks the retained symmetry little group; accepted state unchanged; correct A and retry')
             if _admission_rejected(self.lib,statuses,allowed=(20,21,22,23,24,25,30,32,33),
                                    query_name='sp_fast_hse_recovery_protocol'):
                 raise NumericalError('fast-PR HSE step failed; accepted electronic/exchange state restored without replay; retry permitted: '+str(statuses))

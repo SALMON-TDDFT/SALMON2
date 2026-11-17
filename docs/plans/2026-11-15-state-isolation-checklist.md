@@ -10,10 +10,12 @@ The dated sections below retain the scope at their completion time. Older statem
 
 Project lead directs HSE development through the fast-PR profile with symmetry as
 central. Owned actual-A checks, exchange-map/cache persistence and explicit internal
-TDDFT direct/staged resume are verified in the bounded single-k profile. Next are
-public native-C/Python opt-in/retry and protected mixed connection, followed by
-reduced-k internal-MPI partition/failure/restart tests. Ordinary worker/C defaults
-still reject symmetry; do not infer public support from internal opt-in tests.
+TDDFT direct/staged resume plus explicit public C/Python opt-in/retry and protected
+mixed connection are verified in the bounded single-k profile. The highest newly
+observed numerical issue is Libxc HSE near-zero-gradient derivative sensitivity;
+it remains unresolved, with the original failed comparison retained. Then come
+reduced-k internal-MPI partition/failure/restart tests. Default/old init and serial
+workers still reject symmetry. No physical-convergence certificate is implied.
 The standard k-point port is deferred; its distinct arithmetic is not the target
 for modifying fast-PR symmetry. Conventional HSE remains unsupported.
 
@@ -611,3 +613,13 @@ Evidence: `../symmetry-checkpoint-validation-2026-11-18.md`.
 - [ ] Public native-C/Python opt-in and field-admission retry contract, protected symmetric mixed/FDTD testing; reduced internal-k MPI partitions/failure/restart. No claim of arbitrary heterogeneous same-process initialization, learned/PT-CN symmetry or physical convergence. Molecular work paused; budgets advisory.
 
 Evidence: `../symmetry-tddft-validation-2026-11-18.md`.
+
+
+### 2026-11-18 public symmetry and protected mixed connection
+
+- [x] Backward-compatible C default init plus explicit symmetry init/query1. NativeFastHSEBackend allow_symmetry=True is lazy, identity-bound and group1-only; old/missing protocols and inappropriate inputs reject before lifetime. Declared unanimous finite34 yields state-preserving InputError; corrected A retry verified in independent2 groups and fresh direct restart.
+- [x] Ordinary sample --hse-symmetry/--hse-reference-bundle, no arbitrary GS conversion or field projection. Synthetic phase.23 full/reduced inputs: field1/2 + two local LD + SBE1 + PBE-TDDFT2 + HSE1, five/six ranks; before/after late/deep/field-admission failure bytes and ordinary streams preserved. Protected restore save16/fail18 preserves all originals, retry3 future frames exact; fresh CLI16→32 continuation equals continuous, no accepted replay.
+- [ ] NEW numerical issue: Libxc5.2.3 HSE near-zero-gradient derivatives are sensitive; phase0 failed full/reduced current comparison~5.7e-10, not fixed by dt refinement. Pure Libxc diagnostic reproduces finite but large derivative variation. No smoothing/clamping/tolerance change/library patch applied. Phase.23 is an explicit integration fixture, not a production remedy. Resolve with a mathematically consistent verified treatment before claiming robust physical accuracy.
+- [ ] Reduced internal-k MPI2, learned/PT-CN symmetry, broader initialization/physical convergence remain open. Default remains denied and molecular work paused. Resource budgets advisory only; no Actions.
+
+Evidence: `../public-hse-symmetry-validation-2026-11-18.md`.

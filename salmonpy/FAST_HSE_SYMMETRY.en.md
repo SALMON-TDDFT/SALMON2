@@ -1,6 +1,6 @@
 # Fast-PR HSE and symmetry
 
-[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.3`
+[日本語](FAST_HSE_SYMMETRY.md) · Topic: `fast_hse_symmetry` · Revision: `2026-11-18.4`
 
 Fast-PR HSE is the primary HSE development and validation path. Symmetry-aware
 representative k points, star reconstruction, orbit reuse and ACE are central to
@@ -13,8 +13,8 @@ the fast-PR algorithm.
 | Fast-PR exchange core | Independent symmetry maps/phase caches/FFT owners; tested scalar periodic CPU, full q, one internal k rank |
 | Symmetry/orbit/ACE comparison | Reduced4 k representatives vs independently enumerated full8 k points; C2z and mirror-x groups, different cells/omega/sources |
 | Internal Fortran TDDFT | Explicit opt-in, one initialization/process/internal-k1, factor-off Taylor; direct/staged resume tested |
-| Python TDDFT/FDTD connection | Symmetry remains rejected; existing non-reduced fast-PR connection is documented in COUPLED |
-| Checkpoint | Internal exchange V2 and explicit internal TDDFT direct/staged resume tested; public coupled resume still prohibited |
+| Python/native-C/FDTD | Explicit new-protocol allow_symmetry opt-in; group1 factor-off Taylor, protected mixed tests; default remains denied |
+| Checkpoint | Internal exchange V2 and explicit internal TDDFT direct/staged resume tested; bounded public protected mixed resume tested |
 | Symmetry internal MPI k2 | Not enabled by this change; two test MPI processes each own COMM_SELF cores |
 
 ## Independent exchange owners
@@ -61,7 +61,7 @@ and agrees guard failure collectively. Tests cover independent C2z/mirror-x
 owners, a rotated cell, tiny/huge fields, invalid values, stale configuration
 and closed owners. This checks the field/map boundary, not all symmetry data
 or native initialization. Default worker/native-C opening and coupled-checkpoint prohibitions
-remain; public symmetric evolution/coupled restart are not certified. The explicit
+remain unless the explicit public opt-in below is selected; this is not unrestricted support. The explicit
 native probe is `_runtime_source/tests/native/test_hse_symmetry_field.f90`.
 
 ## Internal symmetry checkpoint
@@ -85,7 +85,7 @@ checks full/ACE, star/orbits, cache on/off, OMP1/2 and MPI1/2 processes using
 independent COMM_SELF cores. Restored action/energy and subsequent refresh/action
 checkpoint bytes match continuous core execution, including reopening an owner.
 This is exchange-core persistence; the separate internal TDDFT tests are described below.
-The ordinary Python/native-C TDDFT open prohibition stays in force. Learned/PT-CN symmetry,
+Ordinary/default Python/native-C init stays symmetry-denied; the explicit opt-in is described below. Learned/PT-CN symmetry,
 reduced internal-k MPI and ordinary symmetric mixed failure/resume remain open.
 
 ## Explicit internal TDDFT validation
@@ -105,8 +105,8 @@ contexts or controlled recovery from malformed initialization assets.
 
 The actual-A owner check returns internal status34 for a broken field little
 group, before backup or propagation. An internal caller can correct A and retry.
-This status is not yet a public C/Python retry protocol. Ordinary worker/native-C
-calls omit the opt-in and still refuse symmetry; Python/FDTD admission is unchanged.
+The new public protocol below now declares this status; do not infer it for old libraries.
+The ordinary init/serial worker remain denied; the separate public opt-in enables the bounded profile.
 
 The native `test_hse_symmetry_tddft.f90` probe and companion
 `prepare_fast_hse_symmetry_fixture.py` / `test_fast_hse_symmetry_tddft.py` tools are
@@ -121,22 +121,52 @@ optical-convergence recipe; no download, SCF or build is performed by the fixtur
 
 Symmetry archive copies mark nonserialized overlap caches dirty. Live flags and non-reduced V1 bytes are unchanged.
 
-## Next connection work
+## Public native/Python and mixed opt-in
 
-Before admitting reduced-k states into TDDFT/FDTD, implement and verify all of:
+Use `NativeFastHSEBackend(build_record, work_root, allow_symmetry=True)`.
+The default False selects existing `sp_fast_hse_init`. True requires
+`sp_fast_hse_init_symmetry` and `sp_fast_hse_symmetry_protocol()==1`; the new init
+has the same `(const char *path, double dt, int capacity, double J[3])` arguments.
+The opt-in is included in backend identity, admits one internal k rank, and never
+changes the supplied operation matrices. Missing/unknown protocols reject before
+acquiring a native lifetime. Learned/PT-CN symmetry and reduced internal-k2 stay
+unsupported; full-action remains test-only.
 
-1. Owned actual-A checks and internal symmetric TDDFT retry are verified; expose an explicit C/Python admission protocol.
-   Axis flags alone do not certify the final operation matrices. Arbitrary A(t)
-   can break a reduction valid for a fixed polarization.
-2. Internal core and TDDFT direct/staged persistence are verified; connect public protected mixed
-   save/restore without cloning resource handles or replaying accepted steps.
-3. Validate representative/star partitioning for internal k MPI, plus failure,
-   rollback and resume in the ordinary mixed sample.
+Only unanimous finite status34 plus the specific protocol becomes a Python
+`InputError` preserving the accepted state. Correct A before retrying. A reduced
+model must match the actual local FDTD field, not only the incident polarization.
+Do not project A, drop tiny components or switch engines automatically. For a whole
+loop, use `CoupledStepper.step_protected`/`--protect-steps`, and retry only when
+`StepRecoveryError.original_preserved` is true and cleanup succeeded.
 
-The existing adapter/checkpoint prohibitions stay in place until those tests
-pass. Do not remove them merely because a core comparison passes, silently
-change the field or use conventional HSE. Memory advice remains warning-only;
-physical convergence belongs to the user's chosen material/calculation.
+The ordinary `mpi_mixed_native` sample accepts `--hse-symmetry` and requires
+`--hse-reference-bundle FULL_K_BUNDLE` with an explicitly supplied equivalent full-k
+state for the existing serial fast-PR comparison. No arbitrary GS conversion is
+performed. `--hse-ranks 1` is required. The layout/LD/SBE/semilocal-TDDFT APIs and
+direct save/resume flags remain the same. Tested five/six-rank mixtures contain
+field1/2, two field-local LD materials, SBE1, PBE-TDDFT2 and symmetry HSE1.
+Odd/fault/protected restore tests and fresh direct resume preserve trajectories
+without accepted-step replay. Fixtures are synthetic; compare material/field
+compatibility and convergence separately.
 
-Full-action is a test-only comparison inside the same fast-PR sources. It does
-not add a supported alternative engine or change production propagation profiles.
+## Known near-zero-gradient XC sensitivity
+
+The local Libxc5.2.3 HSE evaluation showed large derivative sensitivity at nearly
+zero density gradients: a density difference about7e-15 yielded a potential
+difference about0.016 in one synthetic case, and full/reduced currents differed
+about5.7e-10. Smaller time steps did not remove it. The pure Libxc diagnostic
+reproduces this without FDTD or a rollback operation. This issue is unresolved;
+no smoothing/clamping, tolerance relaxation or source/library patch is applied.
+
+`probe_hse_low_gradient.py BUILD_RECORD NEW_JSON` loads the hash-verified selected
+library explicitly. Inspect `low_gradient_sensitivity_detected`; exit0 and
+`status=diagnostic` are not a physical pass. Production HSE accuracy is not
+certified by these integration tests. Keep a sensitivity report with results.
+The successful mixed fixture explicitly uses `--orbital-phase .23`, avoiding the
+flat-gradient test nodes; it is not a modification to any user's GS or a general
+numerical remedy. The original phase0 case/failed comparison is retained.
+
+Next: resolve the low-gradient derivative issue with a mathematically consistent
+validated treatment; validate reduced internal-k MPI and broader initialization.
+Preserve fast-PR algorithms and conventional-HSE exclusion. Memory budgets remain
+warning-only and molecular work remains paused.

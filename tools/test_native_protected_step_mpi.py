@@ -92,6 +92,8 @@ def main():
             has_sbe=any(MPI.COMM_WORLD.allgather(local_sbe))
             has_eh=any(MPI.COMM_WORLD.allgather(coupled.field is not None and hasattr(coupled.field,'lib')))
             cases=['field-late']+(['sbe-late'] if has_sbe else [])+['electronic-late','electronic-deep']
+            if any(MPI.COMM_WORLD.allgather(any(getattr(s,'symmetry_enabled',False) for s in r.states.values()))):
+                cases.append('electronic-field')
             if step==13 and has_eh:cases.append('field-deep')
             for case in cases:
                 before=freeze(coupled,f'{step}-{case}-before');replacements=[]
@@ -109,8 +111,12 @@ def main():
                     native=hasattr(s,'native') or getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1'
                     if case.startswith('electronic') and native:
                         fn=s.advance
-                        def call(old,new,fn=fn,case=case):
-                            value=fn(old,np.array([1e100,0.,0.]) if case=='electronic-deep' else new)
+                        def call(old,new,fn=fn,case=case,s=s):
+                            overflow = [0.,0.,1e100] if getattr(s,'symmetry_enabled',False) else [1e100,0.,0.]
+                            drive = np.array(overflow) if case=='electronic-deep' else new
+                            if case=='electronic-field' and getattr(s,'symmetry_enabled',False):
+                                drive = np.array([1e-250,0.,0.])
+                            value=fn(old,drive)
                             if case=='electronic-late' and r.context.solver_comm.rank==r.context.solver_comm.size-1:
                                 raise ValueError('late electronic failure')
                             return value

@@ -717,15 +717,23 @@ NATIVE_STEPPING日英ガイドを参照。対応する新規ビルドとnative_s
 
 ## HSEの本筋と対称性
 
-HSEは高速PR版を本筋にし、対称性・代表k点・star／orbit再利用・ACEを中心に進める。
-FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照する。標準側の別の縮約演算や
-通常HSEへ合わせて高速版を変更しない。独立した対称性交換コアの検証と、TDDFT／FDTD接続・
-保存復元の対応を区別する。現在のコア対称性はCPU・非スピン分極・full-q・内部kランク1の限定範囲。
-MPI2プロセスのCOMM_SELF試験を、縮約k点の内部MPI2対応と解釈しない。状態所有の実A検査は実装済みだが、
-対称性マップ／履歴の完全な保存復元、対称性付き時間発展・MPI分割／混在再試行が通る前に既存の対称性禁止を解除しない。
+HSEは高速PR版のみを使い、対称性・star／orbit再利用・ACEを本筋とする。
+FAST_HSE_SYMMETRY日英ガイドとfast_hse_symmetryタスクを参照。通常版へ切り替えたり、標準側の
+別の縮約演算に合わせて高速版を変更しない。
 
-高速PR版HSEの内部A検査は状態所有のCartesian操作・規格化方向で行う。通常Python／native-Cの対称性付きTDDFT／FDTD・保存復元は引き続き未対応。詳細は[対称性ガイド](FAST_HSE_SYMMETRY.md)。
+NativeFastHSEBackend(...,allow_symmetry=True) と新しい対応nativeライブラリを明示する。
+既定Falseは対称性を拒否。対称性opt-inは内部k1・CPU・周期・非スピン分極・full-q・factor-off
+Taylor、1プロセス1寿命・共有対称化設定不変。学習／PT-CN対称性と内部k2を選ばない。
+新C入口sp_fast_hse_init_symmetryとsp_fast_hse_symmetry_protocol()==1が必要。旧バイナリから
+対応を推定しない。有限で一致したstatus34だけが状態維持のInputErrorで、Aの修正後に再試行可。
+外場の自動投影・微小成分の切捨て・通常HSEへのfallbackは禁止。FDTD全体にはstep_protectedを使う。
 
-内部交換コアの対称性checkpoint V2は実装済み。非縮約V1は維持。復元先の静的マップ照合後に値のみ反映する。これは公開の対称性付きTDDFT／FDTD再開への対応ではなく、通常open禁止を解除しない。詳細はFAST_HSE_SYMMETRY。
+通常混在例は--hse-symmetryと--hse-reference-bundleで明示した等価な全k点初期状態を使う。
+実際の局所Aが群を破ると保護付きで拒否される。未適合な物質・配置の例を無理に通さない。
+合成検証は--orbital-phase .23を明示するが、利用者のGSを黙って変更してはならない。
 
-明示的な内部Fortran opt-inでは、内部kランク1・factor-off Taylorの対称性付きTDDFTと直接／候補再開を検証済み。共有対称化設定は不変・1プロセス1初期化。通常Python／C入口は既定で拒否し、内部status34を公開の再試行契約と解釈しない。詳細はFAST_HSE_SYMMETRY。
+極小勾配のLibxc HSE評価で、有限値のまま大きな微分感度が出るケースを実測した。
+probe_hse_low_gradient.py BUILD_RECORD NEW_JSONは診断のみ。exit0やstatus=diagnosticを物理検証の
+合格と解釈せず、low_gradient_sensitivity_detectedがTrueなら未解決の数値感度として報告する。
+密度・勾配を勝手にfloor/smoothせず、許容誤差を緩めて一致を装わない。接続検証の通過は
+物理量の収束保証ではない。次の課題はこの低勾配微分の安定化と縮約内部MPIの検証。

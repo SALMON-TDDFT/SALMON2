@@ -18,8 +18,11 @@ def main():
     parser.add_argument('pseudo', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--group', choices=('c2z', 'mirror-x', 'full'), default='c2z')
+    parser.add_argument('--orbital-phase', type=float, default=0., help='explicit phase for cos(z+phase); nonzero avoids flat-gradient diagnostic nodes')
     parser.add_argument('--propagator', choices=('hse_taylor4', 'hse_taylor4_full'), default='hse_taylor4')
     args = parser.parse_args()
+    if not np.isfinite(args.orbital_phase):
+        parser.error('finite orbital phase required')
     pseudo = args.pseudo.resolve(strict=True)
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -40,7 +43,7 @@ def main():
     z = np.arange(8)[None, None, :]
     psi = np.empty((8, 8, 8, 2), dtype='=c16', order='F')
     psi[..., 0] = 1 / np.sqrt(512.)
-    psi[..., 1] = np.sqrt(2 / 512.) * np.cos(2 * np.pi * z / 8)
+    psi[..., 1] = np.sqrt(2 / 512.) * np.cos(2 * np.pi * z / 8 + args.orbital_phase)
     flat = psi.reshape(512, 2, order='F')
     np.testing.assert_allclose(flat.conj().T @ flat, np.eye(2), atol=1e-14)
     (restart / 'wfn.bin').write_bytes(np.repeat(psi[..., None], nk, axis=4).tobytes(order='F'))
@@ -98,7 +101,7 @@ def main():
     (out / 'rt.inp').write_text(text)
     (out / 'fixture.json').write_text(json.dumps({
         'scope': 'synthetic symmetry-preserving orbitals; not converged GS',
-        'group': args.group, 'grid': [8, 8, 8], 'full_kpoints': 8, 'representatives': nk,
+        'group': args.group, 'orbital_phase': args.orbital_phase, 'grid': [8, 8, 8], 'full_kpoints': 8, 'representatives': nk,
         'files': {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in out.rglob('*') if p.is_file()},
     }, indent=2) + '\n')
