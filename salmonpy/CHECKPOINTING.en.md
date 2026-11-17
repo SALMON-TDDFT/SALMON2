@@ -2,8 +2,8 @@
 
 [日本語](CHECKPOINTING.md) · Topic: `checkpoint_compatibility` · Paired revision: `2026-11-17.1`
 
-`salmonpy.checkpointing` provides a common admission step for built-in and user
-backends. Call it before your own SAVE/LOAD functions. It returns detached JSON
+`salmonpy.checkpointing` provides common admission and execution for built-in and user
+backends. `execute_checkpoint` calls explicitly bound SAVE/LOAD functions after admission. It returns detached JSON
 metadata after checking all participating ranks. Serial hosts pass `comm=None`;
 MPI hosts supply their existing communicator. No solver context or inheritance
 is required. Import and checking perform no MPI initialization, file access,
@@ -29,6 +29,49 @@ of the contract: `(2,1)` differs from `(1,2)`. Pin implementation, fixed model/i
 and runtime identity with `identity`. An empty identity is omitted from metadata
 for compatibility with existing native-direct/2 archives. Checks compare the
 explicit declarations; model identity and file integrity remain caller-owned.
+
+## Execute backend-owned persistence
+
+Bind zero-argument callbacks with `CheckpointTarget`, then call `execute_checkpoint`
+with operation=save or restore. Paths and payload formats belong to the backend;
+use closures or `functools.partial` to supply arguments. A complete file-based
+example runs with `python -m salmonpy.examples.custom_checkpoint NEW_OUTPUT`.
+
+The same entry can also transport an in-memory backend token:
+
+```python
+from salmonpy.checkpointing import CheckpointCapability, CheckpointTarget, execute_checkpoint
+
+groups = [{"name": "user", "ranks": [0], "point_ids": ["film"]}]
+cap = CheckpointCapability("user-memory/1", ("save", "restore"), (1,), identity="model-v1")
+state = {"value": 17}
+saved_run = execute_checkpoint(
+    None, groups, operation="save",
+    states={"film": CheckpointTarget(cap, save=lambda: dict(state))})
+payload = saved_run["states"]["film"]
+candidate = {}
+execute_checkpoint(
+    None, groups, operation="restore", saved=saved_run["compatibility"],
+    states={"film": CheckpointTarget(cap, restore=lambda: candidate.update(payload))})
+assert candidate == state and candidate is not state
+```
+
+The result contains `compatibility` JSON, a process-local `field` callback result
+and a `states` mapping keyed by string point IDs. Opaque tokens, arrays and receipts
+remain local; they are not copied or sent through MPI. The backend controls their
+ownership. Callback return values, including None, are accepted; callbacks must
+raise exceptions to report failure. A return value of False is not an error signal.
+
+Capability and callback availability are checked collectively before the first
+callback. Groups execute their own point order in synchronized slots, so groups
+with different point counts are supported. An ordinary callback exception becomes
+RuntimeFailure on every rank; later slots stop. Completed state changes remain.
+A collective backend must complete its own MPI protocol before raising; the common
+entry cannot unblock ranks stranded inside a backend collective or recover a
+Fortran STOP/process crash. Hosts decide whether to discard affected candidates
+or abort their native job. MPI initialization, splitting and finalization stay
+with the host. Metadata/hash authentication and completion publication also remain
+host/backend policies; the native sample preserves its existing inventory/marker.
 
 ## Serial user backend
 
@@ -65,7 +108,7 @@ check_checkpoint_compatibility(
 `available_files` is a names-only inventory. The API checks safe relative POSIX
 paths and required-file presence; it does not read files or verify their hashes.
 The host must authenticate payloads and check that the restore candidate is fresh
-before calling its own loader. The sample above illustrates metadata admission;
+before binding its own loader to the execution entry. The sample above illustrates metadata admission;
 the runnable example supplies the actual I/O and checksum checks.
 
 ## MPI hosts and failure agreement
@@ -114,7 +157,7 @@ Required-file inventories may be rank-local. Errors use `salmonpy.errors.InputEr
 
 ## Existing mixed native calculations
 
-The native mixed sample now uses this common API, retaining solver-specific
+The native mixed sample uses both common admission and execution, retaining solver-specific
 fresh-state and native-ABI checks. Existing native-direct/2 compatibility metadata
 is unchanged; pinned native payloads and numerical update order are unchanged.
 Custom direct-state/1 sample adapters may expose `checkpoint_capability` as an
@@ -124,6 +167,6 @@ A/current requirements are described in [COUPLED.en.md](COUPLED.en.md).
 
 Current admission requires the same topology and declared format/identity. Payload
 conversion, changed-topology redistribution, generic archive I/O and atomic rollback
-remain backend/host responsibilities. The API does not execute or certify an
-arbitrary backend's persistence implementation. Historical native-direct/1 archives
+remain backend/host responsibilities. The execution entry runs supplied functions without certifying the backend's
+persistence implementation or atomic rollback. Historical native-direct/1 archives
 without compatibility metadata require their original matching reader.

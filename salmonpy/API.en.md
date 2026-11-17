@@ -84,3 +84,5 @@ For one serial model contract, the explicit conformance checker and the point-MP
 `fast_hse_mpi.NativeFastHSEBackend`: experimental host-MPI fast-PR HSE, k-only one/two-rank material groups and same-topology direct restart. One native lifetime per process, main thread only; see COUPLED.en.md.
 
 `checkpointing.CheckpointCapability` and `check_checkpoint_compatibility` provide shared declaration/admission for user backends; see [CHECKPOINTING.en.md](CHECKPOINTING.en.md).
+
+`checkpointing.CheckpointTarget` and `execute_checkpoint` invoke backend-owned persistence after admission and return opaque results locally.

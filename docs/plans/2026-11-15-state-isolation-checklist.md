@@ -31,7 +31,7 @@ The dated sections below retain the scope at their completion time. Older statem
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Mixed scaling/resource support: larger numbers of points/LD cells, aggregate memory estimates and budget enforcement, communication scaling. Four-core runs do not certify a4GiB cap.
 8. [ ] Additional environment/topology validation: simultaneous field2+SBE1+TDDFT2 requires5 ranks and remains untested; new native mixed paths have local Apple Silicon evidence, not Linux/Windows/Intel Mac evidence or a published runtime catalog.
-9. [ ] Generic coupled-session archive: custom-backend archive I/O/migration/execution contract, changed-topology restore, other XC, HSE orbital/rgrid decomposition and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
+9. [ ] Generic coupled-session archive: archive interoperability/completion and migration contracts, changed-topology restore, other XC, HSE orbital/rgrid decomposition and complete historical native output streams. Current sample checkpoint is same binary/environment/topology.
 10. [ ] Optional later scheduling: interpolation/subcycling and heterogeneous dt. Current mixed paths use explicit fixed clocks and matching dt.
 
 Molecular feedback/energy-schedule work remains paused. Physical convergence for each user's material is user-owned; do not turn it into a mandatory developer sweep. This audit does not close the broader historical backlog.
@@ -373,3 +373,12 @@ Direct-session admission validation: nine real three-rank collective rejections 
 - [x] Packaged user-model JSON persistence/independent continuation example and paired/AI guide entry. Generic archive writers,changed-topology redistribution and native rollback remain separate work.
 
 Common-API evidence: `../common-checkpoint-api-validation-2026-11-17.md`. Source/wheel485 tests (one skip), public MPI3 ten rejection cases, existing coordinator eight rejection cases and a complete user-model17+15 restart pass. Four native continuation routes read unchanged earlier native-direct/2 archives and remain byte-identical to continuous execution, with129/65 new calls only. Public declaration/admission is complete within this scope; generic I/O,redistribution,resource controls and native rollback remain open.
+
+### Common checkpoint execution — 2026-11-17
+
+- [x] CheckpointTarget binds backend-owned zero-argument save/restore callbacks; execute_checkpoint admits before callbacks and returns opaque results locally without MPI serialization.
+- [x] Synchronized group-local component slots support unequal point counts; callback failure stops later slots collectively. Completed changes are not rolled back; backend collective progress remains its responsibility.
+- [x] Custom JSON example and native field/electronic/snapshot routes use the shared entry; completion-marker publication errors are also agreed collectively in the native coordinator.
+- Remaining: portable generic archive layouts,redistribution,aggregate resource limits and native failure recovery/ownership. The common dispatcher prescribes no payload encoding.
+
+Execution evidence: `../checkpoint-execution-validation-2026-11-17.md`. Source/wheel489 tests (one skip),MPI unequal-group/opaque-result/failure-slot tests and collective completion-publication failure pass. New common-entry saves and direct resumes across HSEk2 Taylor/PT-CN,PBEorbital2 and field2/serialHSE remain byte-identical to continuous with129/65 new calls. Pre-existing native-direct/2 archives remain readable. Generic callback execution is complete within this contract; archive interoperability/migration,redistribution and native rollback remain separate.

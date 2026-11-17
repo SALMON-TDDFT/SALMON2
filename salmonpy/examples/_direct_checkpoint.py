@@ -8,6 +8,9 @@ import hashlib
 import json
 from pathlib import Path
 from dataclasses import replace
+from functools import partial
+from salmonpy.checkpointing import CheckpointTarget, execute_checkpoint
+from salmonpy.errors import RuntimeFailure
 import numpy as np
 
 
@@ -195,42 +198,58 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         code = owner._call(fn, str(root/stem).encode(), int(restore))
         if code: raise RuntimeError(f'{symbol} failed with code {code}')
 
-    try:
-        if field is not None:
-            native_call(field, 'sp_eh_checkpoint', f'field-{world.rank}.bin')
+    def field_io():
+        native_call(field, 'sp_eh_checkpoint', f'field-{world.rank}.bin')
+        if restore:
+            field.A = np.asarray(data['field_A']); field.E = np.asarray(data['field_E'])
+            field.step_index = data['step']
+        else:
+            data.update(field_A=field.A.tolist(), field_E=field.E.tolist())
+
+    def state_io(point,state):
+        key = str(point)
+        if hasattr(state, 'native'):
+            native_call(state, 'sp_tddft_checkpoint', f'electronic-{world.rank}.bin')
             if restore:
-                field.A = np.asarray(data['field_A']); field.E = np.asarray(data['field_E'])
-                field.step_index = data['step']
+                state.steps = data['step']; state.A = np.asarray(data['states'][key]['A'])
+            else: data['states'][key] = {'A': state.A.tolist()}
+        elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
+            state.checkpoint(root/f'worker-{world.rank}.bin', restore=restore)
+            if restore:
+                if state.steps != data['step']: raise ValueError('worker checkpoint clock differs')
+                state.A = np.asarray(data['states'][key]['A'])
+                np.testing.assert_array_equal(state.current,np.asarray(data['states'][key]['current']))
+            else: data['states'][key] = {'A':state.A.tolist(),'current':state.current.tolist()}
+        else:
+            raw = state._raw
+            token = raw.snapshot()
+            if restore:
+                item = data['states'][key]
+                payload = tuple((n,tuple(shape),dtype,order,bytes.fromhex(hexdata))
+                                for n,shape,dtype,order,hexdata in item['data'])
+                raw.restore(replace(token, step_index=item['step'], time=item['time'],
+                                    _settings=item['settings'], _data=payload, _integrity=item['integrity']))
+                state._steps = data['step']
             else:
-                data.update(field_A=field.A.tolist(), field_E=field.E.tolist())
-        for point, state in r.states.items():
-            key = str(point)
-            if hasattr(state, 'native'):
-                native_call(state, 'sp_tddft_checkpoint', f'electronic-{world.rank}.bin')
-                if restore:
-                    state.steps = data['step']; state.A = np.asarray(data['states'][key]['A'])
-                else: data['states'][key] = {'A': state.A.tolist()}
-            elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
-                state.checkpoint(root/f'worker-{world.rank}.bin', restore=restore)
-                if restore:
-                    if state.steps != data['step']: raise ValueError('worker checkpoint clock differs')
-                    state.A = np.asarray(data['states'][key]['A'])
-                    np.testing.assert_array_equal(state.current,np.asarray(data['states'][key]['current']))
-                else: data['states'][key] = {'A':state.A.tolist(),'current':state.current.tolist()}
-            else:
-                raw = state._raw
-                token = raw.snapshot()
-                if restore:
-                    item = data['states'][key]
-                    payload = tuple((n,tuple(shape),dtype,order,bytes.fromhex(hexdata))
-                                    for n,shape,dtype,order,hexdata in item['data'])
-                    raw.restore(replace(token, step_index=item['step'], time=item['time'],
-                                        _settings=item['settings'], _data=payload, _integrity=item['integrity']))
-                    state._steps = data['step']
-                else:
-                    data['states'][key] = {'step': token.step_index, 'time': token.time,
-                        'settings': token._settings, 'integrity': token._integrity,
-                        'data': [(n,shape,dtype,order,payload.hex()) for n,shape,dtype,order,payload in token._data]}
+                data['states'][key] = {'step': token.step_index, 'time': token.time,
+                    'settings': token._settings, 'integrity': token._integrity,
+                    'data': [(n,shape,dtype,order,payload.hex()) for n,shape,dtype,order,payload in token._data]}
+
+    participant=compatibility['participants'][world.rank]
+    field_target=(CheckpointTarget(participant['field'],save=field_io,restore=field_io)
+                  if field is not None else None)
+    targets={point:CheckpointTarget(participant['states'][str(point)],
+        save=partial(state_io,point,state),restore=partial(state_io,point,state))
+        for point,state in r.states.items()}
+    try:
+        run=execute_checkpoint(world,compatibility['groups'],group=r.context.group.name,
+            field=field_target,states=targets,operation='restore' if restore else 'save',
+            saved=manifest.get('compatibility') if restore else None)
+        compatibility=run['compatibility']
+    except RuntimeFailure:
+        r.failed=True
+        raise
+    try:
         if restore:
             coupled.step_index = r.step_index = data['step']
             coupled.J = np.asarray(data['J']); r._A = np.asarray(data['response_A'])
@@ -243,13 +262,21 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         r.failed = True
         raise RuntimeError(str(errors))
     world.Barrier()
-    if not restore and world.rank == 0:
-        (root/'frames.json').write_text(json.dumps([
-            {k: v.tolist() if isinstance(v,np.ndarray) else v for k,v in h.items()}
-            for h in frames], allow_nan=False)+'\n')
-        files = {p.name: digest(p) for p in sorted(root.iterdir())}
-        (root/'complete.tmp').write_text(json.dumps({'schema':'salmonpy.native-direct/2','compatibility':compatibility,
-            'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}, indent=2)+'\n')
-        (root/'complete.tmp').replace(root/'complete.json')
+    error=None
+    try:
+        if not restore and world.rank == 0:
+            (root/'frames.json').write_text(json.dumps([
+                {k: v.tolist() if isinstance(v,np.ndarray) else v for k,v in h.items()}
+                for h in frames], allow_nan=False)+'\n')
+            files = {p.name: digest(p) for p in sorted(root.iterdir())}
+            (root/'complete.tmp').write_text(json.dumps({'schema':'salmonpy.native-direct/2','compatibility':compatibility,
+                'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}, indent=2)+'\n')
+            (root/'complete.tmp').replace(root/'complete.json')
+    except Exception as exc:
+        error=type(exc).__name__+': '+str(exc)
+    errors=world.allgather(error)
+    if any(e is not None for e in errors):
+        r.failed=True
+        raise RuntimeFailure('checkpoint completion publication failed: '+str(errors))
     world.Barrier()
     return data['step']

@@ -8,7 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import numpy as np
-from salmonpy.checkpointing import CheckpointCapability, check_checkpoint_compatibility
+from salmonpy.checkpointing import CheckpointCapability, CheckpointTarget, execute_checkpoint
 
 GROUPS = [{'name': 'user', 'ranks': [0], 'role': 'material', 'point_ids': ['film']}]
 
@@ -54,9 +54,10 @@ def run(directory):
     expected = np.array([reference.step(A) for A in wave])
     original = UserCurrent()
     prefix = np.array([original.step(A) for A in wave[:split]])
-    record = check_checkpoint_compatibility(None, GROUPS, states={'film': original.checkpoint_capability})
     payload = directory/'state.json'
-    original.save(payload)
+    saved_run = execute_checkpoint(None, GROUPS, operation='save',
+        states={'film': CheckpointTarget(original.checkpoint_capability, save=lambda: original.save(payload))})
+    record = saved_run['compatibility']
     sha = hashlib.sha256(payload.read_bytes()).hexdigest()
     metadata = {'compatibility': record, 'state_sha256': sha}
     (directory/'checkpoint.json').write_text(json.dumps(metadata, indent=2))
@@ -66,11 +67,12 @@ def run(directory):
     if hashlib.sha256(payload.read_bytes()).hexdigest() != metadata['state_sha256']:
         raise ValueError('user payload checksum differs')
     restored = UserCurrent()
-    check_checkpoint_compatibility(None, GROUPS, states={'film': restored.checkpoint_capability},
+    assert restored.load_calls == 0
+    execute_checkpoint(None, GROUPS,
+        states={'film': CheckpointTarget(restored.checkpoint_capability, restore=lambda: restored.load(payload))},
         operation='restore', saved=metadata['compatibility'],
         required_files=('state.json',), available_files=('state.json',))
-    assert restored.load_calls == 0
-    restored.load(payload)
+    assert restored.load_calls == 1
     assert restored.steps == split
     suffix = np.array([restored.step(A) for A in wave[split:]])
     actual = np.concatenate((prefix, suffix))
@@ -81,7 +83,8 @@ def run(directory):
     incompatible = UserCurrent(decay=.5)
     rejected = False
     try:
-        check_checkpoint_compatibility(None, GROUPS, states={'film': incompatible.checkpoint_capability},
+        execute_checkpoint(None, GROUPS,
+            states={'film': CheckpointTarget(incompatible.checkpoint_capability, restore=lambda: incompatible.load(payload))},
             operation='restore', saved=record)
     except ValueError:
         rejected = True

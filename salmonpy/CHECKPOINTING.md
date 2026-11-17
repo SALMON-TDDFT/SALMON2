@@ -2,8 +2,8 @@
 
 [English](CHECKPOINTING.en.md) · Topic: `checkpoint_compatibility` · Paired revision: `2026-11-17.1`
 
-`salmonpy.checkpointing` は、内蔵・自作バックエンドに共通する保存／復元前の検査を提供します。
-自分のSAVE／LOAD関数を呼ぶ前に使い、全参加ランクの検査後に独立したJSONメタデータを返します。
+`salmonpy.checkpointing` は、内蔵・自作バックエンドに共通する保存／復元の検査と実行を提供します。
+`execute_checkpoint` は全参加ランクの検査後に、明示的に渡したSAVE／LOAD関数を呼びます。
 直列ホストは`comm=None`、MPIホストは自分のコミュニケータを渡します。ソルバーの内部型や継承は不要です。
 importや検査時にMPI初期化、ファイル操作、コンパイル、ダウンロード、時間発展、保存／復元のコールバックは行いません。
 
@@ -25,6 +25,42 @@ assert CheckpointCapability.from_dict(record) == capability
 `(2,1)`と`(1,2)`は異なります。実装・固定モデル入力・ランタイムの識別には`identity`へ検証した識別子や
 ハッシュを渡します。空のidentityは既存native-direct/2との互換性のため記録から省略します。
 検査対象は明示された宣言です。モデルの識別と保存ファイルの完全性はホスト側で管理します。
+
+## バックエンド独自の保存／復元を実行する
+
+`CheckpointTarget`へ引数なしのコールバックを登録し、`execute_checkpoint`のoperationにsave／restoreを指定します。
+パスと保存形式はバックエンドが決めます。引数を渡す場合はクロージャーや`functools.partial`を使えます。
+ファイル形式の完全な例は`python -m salmonpy.examples.custom_checkpoint NEW_OUTPUT`で実行できます。
+
+同じ入口から、メモリ上のバックエンド独自トークンも受け渡せます。
+
+```python
+from salmonpy.checkpointing import CheckpointCapability, CheckpointTarget, execute_checkpoint
+
+groups = [{"name": "user", "ranks": [0], "point_ids": ["film"]}]
+cap = CheckpointCapability("user-memory/1", ("save", "restore"), (1,), identity="model-v1")
+state = {"value": 17}
+saved_run = execute_checkpoint(
+    None, groups, operation="save",
+    states={"film": CheckpointTarget(cap, save=lambda: dict(state))})
+payload = saved_run["states"]["film"]
+candidate = {}
+execute_checkpoint(
+    None, groups, operation="restore", saved=saved_run["compatibility"],
+    states={"film": CheckpointTarget(cap, restore=lambda: candidate.update(payload))})
+assert candidate == state and candidate is not state
+```
+
+戻り値には`compatibility`のJSON、プロセス内の`field`の戻り値、文字列の点IDをキーにした`states`の戻り値が含まれます。
+不透明なトークン、配列、保存情報はコピーやMPI転送を行わず、そのプロセス内に保持します。所有権はバックエンドが管理します。
+Noneを含む任意の戻り値を受け付け、失敗は例外で通知します。Falseを返すだけでは失敗扱いになりません。
+
+対応能力とコールバックの存在を全ランクで検査してから処理を始めます。各群の点順を同期したスロットで進めるため、
+群ごとの点数が違っても使えます。通常のコールバック例外は全ランクでRuntimeFailureとなり、後続スロットを停止します。
+実行済みの状態変更は残ります。MPIを使うバックエンドは、自分の群の通信手順を完了してから例外を返してください。
+バックエンド内で待ち続けるランクの解放や、Fortran STOP・プロセス異常からの回復は共通入口では行いません。
+影響した候補を破棄するか、nativeジョブを中止するかはホストが判断します。MPI初期化・分割・終了もホストが管理します。
+メタデータ・ファイルのハッシュ照合と完了情報の公開はホスト／バックエンドの方針に従い、native例では既存の一覧とmarkerを維持します。
 
 ## 直列の自作バックエンド
 
@@ -58,7 +94,7 @@ check_checkpoint_compatibility(
 
 `available_files`はファイル名の一覧です。APIは安全な相対POSIXパスと必須ファイルの存在を一覧上で確認します。
 ファイルの読込やハッシュ照合は行いません。ホスト側で保存内容を認証し、候補が未進行状態であることを確認してから
-ローダーを呼びます。上の断片はメタデータの検査例で、実際のI/Oとハッシュ検査は実行可能な同梱例に含まれます。
+ローダーを実行入口へ登録します。上の断片はメタデータの検査例で、実際のI/Oとハッシュ検査は実行可能な同梱例に含まれます。
 
 ## MPIホストと失敗の共有
 
@@ -98,7 +134,7 @@ saved = check_checkpoint_compatibility(
 
 ## 既存の混在native計算
 
-混在サンプルも共通APIを使い、ソルバー固有の未進行状態・native ABIの確認を維持します。
+混在サンプルも共通の検査・実行APIを使い、ソルバー固有の未進行状態・native ABIの確認を維持します。
 既存native-direct/2の互換情報、固定したnativeペイロード、数値の更新順は変えません。
 自作のdirect-state/1サンプルアダプターは、`checkpoint_capability`へオブジェクト／mappingを公開できます。
 従来のcheckpoint_format／checkpoint_modes／checkpoint_decompositionも使えます。
@@ -106,4 +142,4 @@ saved = check_checkpoint_compatibility(
 
 現在は同じ分割と宣言された形式・識別子を照合します。保存内容の変換、MPI分割変更時の再配置、
 汎用アーカイブのI/O、失敗時の原子的な巻き戻しはバックエンド／ホスト側の担当です。
-APIが任意の保存実装を実行・認証することはありません。互換情報のない旧native-direct/1は、元の対応版で扱います。
+共通入口は渡された関数を実行しますが、保存実装の正しさや原子的復元を認証するものではありません。互換情報のない旧native-direct/1は、元の対応版で扱います。

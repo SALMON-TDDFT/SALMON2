@@ -9,7 +9,7 @@ from types import MappingProxyType
 __all__ = ['PUBLIC_API']
 PUBLIC_API = MappingProxyType({'salmonpy.analysis': ('Table', 'read_table', 'Spectrum', 'spectrum'),
  'salmonpy.api': ('PUBLIC_API',),
- 'salmonpy.checkpointing': ('CheckpointCapability', 'check_checkpoint_compatibility'),
+ 'salmonpy.checkpointing': ('CheckpointCapability', 'check_checkpoint_compatibility', 'CheckpointTarget', 'execute_checkpoint'),
  'salmonpy.ase': ('BOHR_ANGSTROM', 'explicit_path',
                   'atoms_from_initial',
                   'validate_structure',

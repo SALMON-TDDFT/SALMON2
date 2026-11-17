@@ -81,3 +81,56 @@ class CheckpointingTests(unittest.TestCase):
         cap=CheckpointCapability('user/1',('save','restore'),(1,))
         with self.assertRaises(InputError):
             check_checkpoint_compatibility(None,[BrokenGroup(GROUPS[0])],states={10:cap})
+
+    def test_execution_returns_backend_owned_tokens_and_restores(self):
+        from salmonpy.checkpointing import CheckpointTarget, execute_checkpoint
+        cap=CheckpointCapability('opaque/1',('save','restore'),(1,),identity='model')
+        token=object();calls=[]
+        target=CheckpointTarget(cap,save=lambda:token,restore=lambda:calls.append('restore'))
+        saved=execute_checkpoint(None,GROUPS,states={10:target},operation='save')
+        self.assertIs(saved['states']['10'],token)
+        execute_checkpoint(None,GROUPS,states={10:target},operation='restore',saved=saved['compatibility'])
+        self.assertEqual(calls,['restore'])
+
+    def test_bad_callback_or_compatibility_runs_no_backend(self):
+        from salmonpy.checkpointing import CheckpointTarget, execute_checkpoint
+        from unittest.mock import Mock
+        cap=CheckpointCapability('user/1',('save','restore'),(1,))
+        callback=Mock()
+        target=CheckpointTarget(cap,save=callback)
+        with self.assertRaisesRegex(ValueError,'callback'):
+            execute_checkpoint(None,GROUPS,states={10:target},operation='restore',saved={})
+        target=CheckpointTarget(cap,save=callback,restore=callback)
+        with self.assertRaisesRegex(ValueError,'compatibility'):
+            execute_checkpoint(None,GROUPS,states={10:target},operation='restore',saved={})
+        callback.assert_not_called()
+
+    def test_callback_failure_stops_later_point_and_preserves_error_family(self):
+        from salmonpy.checkpointing import CheckpointTarget, execute_checkpoint
+        from salmonpy.errors import RuntimeFailure
+        from unittest.mock import Mock
+        groups=[{'name':'user','ranks':[0],'point_ids':['a','b']}]
+        cap=CheckpointCapability('user/1',('save','restore'),(1,))
+        def broken(): raise ValueError('disk full')
+        later=Mock()
+        with self.assertRaisesRegex(RuntimeFailure,'disk full'):
+            execute_checkpoint(None,groups,states={'a':CheckpointTarget(cap,save=broken),
+                'b':CheckpointTarget(cap,save=later)},operation='save')
+        later.assert_not_called()
+
+    def test_ld_snapshot_payload_remains_backend_owned_and_exact(self):
+        import numpy as np
+        from salmonpy.ld import LorentzDrude
+        from salmonpy.checkpointing import CheckpointTarget, execute_checkpoint
+        material=LorentzDrude(plasma_frequency=1.,strength=[1.],resonance=[.5],damping=[.1])
+        cap=CheckpointCapability('ld-token/1',('save','restore'),(1,))
+        with material.new_state(dt=.01) as original, material.new_state(dt=.01) as restored:
+            original.step([.01,0,0])
+            saved=execute_checkpoint(None,GROUPS,states={10:CheckpointTarget(cap,save=original.snapshot)})
+            token=saved['states']['10']
+            execute_checkpoint(None,GROUPS,operation='restore',saved=saved['compatibility'],
+                states={10:CheckpointTarget(cap,restore=lambda:restored.restore(token))})
+            for n in range(2,8):
+                expected=original.step([n*.01,0,0])
+                actual=restored.step([n*.01,0,0])
+                for a,b in zip(actual,expected): np.testing.assert_array_equal(a,b)

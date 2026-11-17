@@ -351,3 +351,5 @@ Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しま�
 直接保存のサンプルはmanifest形式`salmonpy.native-direct/2`に、保存方式、save/restore対応、各MPI群の所有ランク・点ID、場の分割と電子状態のk／軌道／実空間分割を記録します。全ランクで現在の状態と照合してからLOADを呼ぶため、総ランク数だけが同じ分割変更も拒否します。初期資源の作成は検査前に行いますが、検査中の伝播・snapshot/restore/LOAD呼出はありません。旧manifest/1には必要な互換情報がないため新しい経路では復元を拒否します。旧保存データは対応する元の版で扱ってください。nativeペイロードの形式は変更していません。自作direct-state/1コールバックには、明示的なcheckpoint_format、checkpoint_modes（save/restoreのtuple）、checkpoint_decomposition（群サイズを積に持つ正の整数tuple）が必要です。宣言は利用者の契約であり、その実装・失敗時の原子的復元を認証するものではありません。単にsnapshotメソッドがあるだけでは直接再開と判定せず、同梱LD/SBE以外の再生方式を混入させません。
 
 保存対応の宣言とMPI互換性の照合は共通API `salmonpy.checkpointing` を使います。自作バックエンドや直列ホストからの利用は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。既存のnative-direct/2の記録形式と再開経路は維持します。
+
+native混在サンプルの場・電子・LD/SBE保存処理も `CheckpointTarget`／`execute_checkpoint` を通します。保存形式とnative-direct/2の互換情報は維持し、コールバック失敗を共有した後は次の処理へ進みません。完了情報の公開失敗も全ランクへ通知します。

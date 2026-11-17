@@ -1,7 +1,7 @@
-"""Declarative checkpoint admission for serial and host-owned MPI programs.
+"""Checkpoint admission and explicit backend-owned execution.
 
-No solver imports, MPI initialization, filesystem access or persistence callbacks.
-The caller owns actual I/O, file authentication and state lifetime validation.
+Metadata checks perform no I/O or callbacks. Execution calls only explicitly
+bound backend functions. Hosts own MPI, storage, authentication and lifetimes.
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -10,9 +10,10 @@ import json
 from pathlib import PurePosixPath
 
 from .config import _copy_json
-from .errors import InputError
+from .errors import InputError, RuntimeFailure
 
-__all__ = ['CheckpointCapability', 'check_checkpoint_compatibility']
+__all__ = ['CheckpointCapability', 'check_checkpoint_compatibility',
+           'CheckpointTarget', 'execute_checkpoint']
 
 
 def _text(value, name, *, empty=False):
@@ -220,3 +221,95 @@ def check_checkpoint_compatibility(comm, groups, *, group=None, field=None, stat
     if operation == 'restore' and (saved_record is None or canonical(saved_record) != canonical(current)):
         raise InputError('checkpoint compatibility metadata missing or MPI layout/format/capability/identity differs; legacy archives require their original reader')
     return current
+
+
+@dataclass(frozen=True)
+class CheckpointTarget:
+    """Bind an explicit capability to backend-owned zero-argument I/O functions.
+
+    Validation occurs inside execute_checkpoint's collective. Callback results
+    remain local and may be opaque tokens, arrays, receipts or None. Bind paths
+    using closures or functools.partial; the common API prescribes no payload.
+    """
+    capability: object
+    save: object = None
+    restore: object = None
+
+
+def execute_checkpoint(comm, groups, *, group=None, field=None, states=None,
+                       operation='save', saved=None, required_files=(),
+                       available_files=None, local_error=None):
+    """Admit then execute backend callbacks; return compatibility/field/states.
+
+    Arguments match check_checkpoint_compatibility, using CheckpointTarget
+    bindings for field and states. All ranks agree callback availability before
+    any I/O. One group-local component runs per slot, followed by a global error
+    agreement; unequal point counts are allowed. Collective callbacks
+    must complete their group protocol before raising; this function cannot
+    unblock peers stranded inside a backend collective. RuntimeFailure
+    stops later slots but does not roll back completed callbacks. Opaque return
+    values are never included in MPI messages. Preflight raises InputError.
+    """
+    declarations = {}
+    field_declaration = None
+    callbacks = {}
+    field_callback = None
+    error = local_error
+    try:
+        if error is None:
+            if type(operation) is not str or operation not in ('save', 'restore'):
+                raise InputError('checkpoint operation must be save or restore')
+
+            def binding(value):
+                if not isinstance(value, CheckpointTarget):
+                    raise InputError('CheckpointTarget required for checkpoint execution')
+                callback = getattr(value, operation)
+                if not callable(callback):
+                    raise InputError('checkpoint ' + operation + ' callback required')
+                return value.capability, callback
+
+            if field is not None:
+                field_declaration, field_callback = binding(field)
+            targets = {} if states is None else states
+            if not isinstance(targets, Mapping):
+                raise InputError('checkpoint states must map point IDs to targets')
+            for point, target in targets.items():
+                declarations[point], callbacks[point] = binding(target)
+    except Exception as exc:
+        error = type(exc).__name__ + ': ' + str(exc)
+    record = check_checkpoint_compatibility(comm, groups, group=group,
+        field=field_declaration, states=declarations, operation=operation,
+        saved=saved, required_files=required_files, available_files=available_files,
+        local_error=error)
+    rank = 0 if comm is None else comm.rank
+    gather = (lambda value: [value]) if comm is None else comm.allgather
+    owner = next(g for g in record['groups'] if rank in g['ranks'])
+    canonical_callbacks = {_point_key(p): callback for p, callback in callbacks.items()}
+    if owner['role'] == 'field':
+        schedule = [('field', field_callback)]
+    else:
+        schedule = [(str(p), canonical_callbacks[str(p)]) for p in owner['point_ids']]
+    slots = max(1 if g['role'] == 'field' else len(g['point_ids']) for g in record['groups'])
+    result = {'compatibility': record, 'field': None, 'states': {}}
+    for slot in range(slots):
+        error = None
+        cause = None
+        component = None
+        if slot < len(schedule):
+            component, callback = schedule[slot]
+            try:
+                value = callback()
+                if owner['role'] == 'field':
+                    result['field'] = value
+                else:
+                    result['states'][component] = value
+            except Exception as exc:
+                cause = exc
+                error = type(exc).__name__ + ': ' + str(exc)
+        statuses = gather((rank, component, error))
+        failures = [status for status in statuses if status[2] is not None]
+        if failures:
+            raise RuntimeFailure('checkpoint ' + operation + ' callback failure at slot '
+                + str(slot) + ': ' + str(failures)
+                + '; later callbacks stopped; completed state changes are not rolled back') from cause
+    return result
