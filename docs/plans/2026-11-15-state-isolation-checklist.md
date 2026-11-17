@@ -529,3 +529,12 @@ Evidence: `../native-protected-step-validation-2026-11-17.md`. Earlier open aggr
 - [ ] Larger electronic grids/k meshes, many material points/LD cells, transferable backend calibration, cross-platform evidence and output/initialization failure contracts remain open. These measurements do not prescribe production rank choices or certify physical convergence. Molecular work remains paused.
 
 Evidence: `../protected-mixed-scaling-validation-2026-11-17.md`. Audit item7 is reduced only by this measured subset; no universal memory model is claimed.
+
+### 2026-11-17 repeated material definitions and independent points
+
+- [x] New packaged64³ multipoint layout:four field ranks,SBE4 independent points,Libxc-PBE2 points with two orbital ranks each,fast-PR HSE PT-CN2 points with two k ranks each,total16 ranks. Drude/Lorentz1152 cells each remain field-local.
+- [x]64-step uninterrupted/protected arrays and every ordinary output stream exact; independent serial response checks pass at all8 points. Same-material points have distinct drives/currents. Direct31→64 restart advances only33 native steps,all full-history arrays exact; logical/material/LD identities preserved.
+- [x] Warm13 failure in just one HSE point group and actual field overflow restore all groups' original payload hashes/Python states/outputs; explicit retry exact without elapsed-history replay. Source/installed545 tests(one skip),sdist→wheel/native hashes and paired JP/EN/AI synchronization pass. Packaged-layout installed restart verified. No solver/API changes or Actions.
+- [ ] Many more points, larger electronic grids/k meshes, transferable capacity models and arbitrary in-process native multi-context ownership remain open. Existing one-point-per-group architecture and same-topology restart remain; molecular work stays paused. Budget excess only warns.
+
+Evidence: `../multipoint-mixed-validation-2026-11-17.md`. Audit item7 now includes this8-point/2304-LD-cell subset, not general production scaling.

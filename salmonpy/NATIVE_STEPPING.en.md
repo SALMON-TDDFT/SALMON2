@@ -1,6 +1,6 @@
 # Protected native mixed steps
 
-[日本語](NATIVE_STEPPING.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.2`
+[日本語](NATIVE_STEPPING.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.3`
 
 `salmonpy.native_steps.native_step_targets` connects supported native components to
 [the common protected-step entry](STEPPING.en.md). It requires a newly and explicitly
@@ -110,3 +110,31 @@ field4/total9 took 7.08/7.66 seconds. Maximum sums of rank peak RSS were
 matched exactly. These are local measured examples, not memory bounds or a rank
 recommendation. Only the Maxwell grid grew; electronic precision is unchanged.
 Keep unknown memory allowances unknown and compare on the actual target system.
+
+## Multiple points of the same material
+
+The packaged `examples/mixed_multipoint_layers.json` is a larger connection
+fixture: SBE4, Libxc-PBE TDDFT2 and fast-PR HSE2 independent points, plus 1,152
+Drude and 1,152 Lorentz cells owned by FDTD ranks. One electronic cell creates one
+state and its own solver group; repeating a material ID reuses its definition,
+not its evolving state. Distinct logical point IDs and ownership persist through
+checkpoint/restart. This sample uses 64³ Maxwell, not the default 40³ domain.
+
+Use the seven-rank command above with `LAYOUT_JSON` pointing at this file, change
+to `mpiexec -n 16`, `--field-grid 2 2 1 --field-shape 64 64 64`, and select
+`--steps 64 --rank-budget 16` (or the actual larger allocation). This means four
+field ranks, four SBE ranks, two TDDFT groups of two ranks and two HSE groups of
+two ranks. LD needs no dedicated groups. The grid/geometry/rank counts are coupled;
+do not merely increase layer thickness without recalculating the plan.
+
+For a direct restart, run with `--direct-save-at 31` and then start a fresh MPI job
+with `--direct-resume PREVIOUS_OUTPUT/direct-checkpoint`, the same inputs/binaries/
+topology and a new output directory. Keep `--steps 64` in both jobs. Only the
+remaining 33 native steps run; accepted propagation is not replayed. Ordinary
+output files in the new job describe that segment; full response-array history
+is retained by the mixed checkpoint. Do not assume historical RT files are merged.
+
+The local 16-rank fixture passes uninterrupted/protected/direct-resume comparisons
+and one-group failure/retry. It is a resource/connection test, not converged
+three-dimensional TDDFT physics. Start practical TDDFT in 1D and size from actual
+user resources. Custom materials continue to use explicit bindings and contracts.

@@ -1,6 +1,6 @@
 # nativeを含む混在ステップの保護
 
-[English](NATIVE_STEPPING.en.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.2`
+[English](NATIVE_STEPPING.en.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.3`
 
 `salmonpy.native_steps.native_step_targets` は対応したnative部品を
 [共通のステップ保護](STEPPING.md)へ接続します。明示的に新しくビルドした対応ホストMPI
@@ -95,3 +95,26 @@ PT-CN2を64ステップ進め、保護なし／ありを各2回比較しまし�
 それぞれ2.012／2.692GiB、2.949／4.417GiBです。全配列と通常出力が完全一致しました。
 これはローカルの測定例で、メモリ上限や推奨並列数ではありません。拡大したのはMaxwell格子で、
 電子状態の精度は変えていません。未知のメモリ量を確定値に置き換えず、実際の計算環境で比較してください。
+
+## 同じ物質を複数の点へ配置する
+
+同梱の `examples/mixed_multipoint_layers.json` は、SBE4点・Libxc-PBE TDDFT2点・
+高速PR版HSE2点と、Drude／Lorentz各1,152セルを配置する接続例です。電子物質の各セルに
+独立した状態とMPI群を作り、同じ物質IDを繰り返しても時間発展中の状態は共有しません。
+各点の論理IDと担当情報は保存・再開にも引き継がれます。Maxwell格子は既定の40³ではなく64³です。
+
+上の7ランク例の `LAYOUT_JSON` をこのファイルに変更し、`mpiexec -n 16` と
+`--field-grid 2 2 1 --field-shape 64 64 64 --steps 64 --rank-budget 16`
+を指定します。場4ランク、SBE4ランク、TDDFT2ランク×2群、HSE2ランク×2群です。
+LD専用群は不要です。格子・形状・並列数は対応しているため、層を厚くするだけでなく
+必要並列数も再確認します。予算は実際の割当に合わせてください。
+
+直接再開は、最初に `--direct-save-at 31` で保存し、同じ入力・バイナリ・MPI分割の
+別実行から `--direct-resume PREVIOUS_OUTPUT/direct-checkpoint` を指定します。
+出力先は新しくし、両実行とも `--steps 64` を維持します。残り33ステップだけを進め、
+受理済み伝播は再実行しません。新しい実行の通常RTファイルはその区間分です。応答配列の
+全履歴は混在checkpointに保持されますが、過去のRTファイルが結合されるとは解釈しません。
+
+ローカル16ランクで連続実行・保護付き実行・直接再開と、1物質群の失敗／再試行を検証しました。
+これは接続・資源検証であり、収束した3次元TDDFTの物理結果ではありません。実用TDDFTは
+引き続き1次元から始め、利用者の資源に合わせます。自作物質は明示的なbindingと契約で接続します。
