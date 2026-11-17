@@ -415,3 +415,7 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 対象は現在のnative E/H平面波経路と場内LDです。TTM、線形応答専用経路、ASE／ART、周波数別観測は更新前に拒否します。バッチFDTDは従来経路を維持します。新しい入口を持たない旧バイナリ・未知エラーでは復帰を推定せず、従来の失敗扱いです。初期化・確保・MPI／プロセス停止・外部STOP・出力装置障害は保証外です。場群単体の保証であり、`CoupledStepper`／`ResponseSession`全体を自動巻戻し・自動再試行する機能ではありません。退避と検査の費用を見込み、メモリ予算は引き続き警告に使います。
 
 `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` を1／2ランク、OMP／BLAS1、外側timeoutで実行します。`--split` は4ランクの独立2群です。`--faults` は明示した別の `SALMONPY_RECOVERY_TESTING` ビルドだけに使います。本番には注入入口を含めません。数値オーバーフローの試験値は科学入力ではありません。
+
+## 明示した契約での混在ステップ保護
+
+`CoupledStepper.step_protected(targets)` は自作コードと完全な退避・復元コールバックを接続する任意の入口です。[STEPPING.md](STEPPING.md) と6ランクの `examples/mpi_protected_step.py` を参照。native全体の保護は未対応で、個別ソルバーの復帰から推定しません。

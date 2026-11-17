@@ -80,3 +80,5 @@ FortranのSTOP／abortを回復可能なPython例外にする変更ではあり�
 `CheckpointState`／`restore_checkpoint` は、独立候補を全ランクで準備した後にまとめて公開する保護付き復元です。`AtomicRestoreError`で元のホルダー維持と候補の破棄エラーを区別します。
 
 メモリ助言の公開入口はsalmonpy.memoryのMemoryEstimate／MemoryReport／memory_advice／process_memoryです。予算超過は警告のみで、実行可否や上限の保証ではありません。詳細は[MEMORY.md](MEMORY.md)。
+
+`stepping.StepTarget`・`guarded_step`・`StepRecoveryError` は明示した完全退避契約によるステップ保護のプレビュー入口です。STEPPING日英ガイドを参照してください。

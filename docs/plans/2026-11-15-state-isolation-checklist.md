@@ -499,3 +499,13 @@ Evidence: `../fast-hse-deep-recovery-validation-2026-11-17.md`. Earlier entries 
 - [ ] General initialization/TTM/LR/ASE/ART/frequency-observation paths, allocation/process/MPI/uncontrolled STOP/output-device failures and whole mixed-step rollback remain open. Field-group recovery does not complete general native failure atomicity or multi-context ownership.
 
 Evidence: `../fdtd-deep-recovery-validation-2026-11-17.md`. Current audit item5 now includes scoped standard TDDFT, fast-PR HSE and native field numerical recovery; broader work remains open.
+
+### 2026-11-17 common explicit protected-step entry
+
+- [x] Public StepTarget/guarded_step/StepRecoveryError with opaque local tokens, group key/release-policy agreement, unequal target counts, partial-capture release(None) and reverse rollback/cleanup. Unsafe rollback never claims preservation; cleanup failure after success reports possible acceptance.
+- [x] CoupledStepper.step_protected requires all local field/material owners and additionally restores coupling A/J/clocks/adapters/measurement metadata. Incomplete rollback/cleanup invalidates the response and field. Ordinary step unchanged; no automatic native target inference.
+- [x] Six-rank Multiscale1D + real LD/SBE + collective custom two-point group: source/installed first/warm/final custom failures, LD and post-field mutations preserve original signatures; retry80 frames exactly match ordinary execution without replay. Missing owner/release policy/partial capture and rollback/release failure negatives pass.
+- [x] Source/installed534 tests (one skip),sdist→wheel/hash/layout, installed example/manual search and JP/EN/AI sync. No solver changes or remote Actions.
+- [ ] Native aggregate numerical/output transactions remain open. Individual E/H/TDDFT/fast-PR HSE recovery and direct checkpoint protocols do not establish whole-step atomicity. User callbacks must explicitly cover all effects; MPI/process/native STOP/deadlock/OOM remain outside this contract.
+
+Evidence: `../protected-step-validation-2026-11-17.md`. This closes a common-API/light/custom subset, not the broader native failure item5.

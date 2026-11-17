@@ -442,3 +442,7 @@ New standard host-MPI libraries declare `sp_eh_recovery_protocol() == 1`. `Nativ
 The guarded profile is the existing native E/H plane-wave path with local LD. TTM, dedicated linear response, ASE/ART and frequency-resolved observation are rejected before updating. Batch FDTD retains its old path. Old binaries without the checked entry and unknown failures remain conservative. Initialization, allocation, MPI/process termination, external STOP and output-device failure remain excluded. This protects the field group alone; it does not automatically roll back or retry a whole `CoupledStepper` / `ResponseSession` step. Budget for backup/check overhead; memory limits remain advisory.
 
 Run `tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` with one/two ranks, OMP/BLAS1 and an external timeout. `--split` uses two independent two-rank groups. `--faults` requires a separate explicit `SALMONPY_RECOVERY_TESTING` build; production exports no injection entry. Overflow stress values are not scientific inputs.
+
+## Explicit mixed-step protection
+
+`CoupledStepper.step_protected(targets)` is an opt-in entry for complete backend-owned backup/rollback callbacks. See [STEPPING.en.md](STEPPING.en.md) and the six-rank `examples/mpi_protected_step.py`. Aggregate native transaction/output protection is not inferred from individual solver recovery.

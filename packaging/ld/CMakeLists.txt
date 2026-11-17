@@ -178,3 +178,5 @@ install(FILES "${ROOT}/tools/test_tddft_deep_recovery_mpi.py" DESTINATION salmon
 install(FILES "${ROOT}/tools/test_fast_hse_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
 
 install(FILES "${ROOT}/tools/test_eh_deep_recovery_mpi.py" DESTINATION salmonpy/_runtime_source/tools)
+
+install(FILES "${ROOT}/salmonpy/stepping.py" "${ROOT}/salmonpy/STEPPING.md" "${ROOT}/salmonpy/STEPPING.en.md" DESTINATION salmonpy)

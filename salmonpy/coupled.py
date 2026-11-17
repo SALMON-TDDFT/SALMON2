@@ -377,6 +377,64 @@ class CoupledStepper:
         if context.is_leader:result=context.leaders.bcast(result,root=context.field_group)
         return context.solver_comm.bcast(result,root=0)
 
+    def step_protected(self, targets):
+        """Opt-in mixed step with explicit full-state/side-effect rollback targets.
+
+        Provide exactly one StepTarget per local field/material owner. No native
+        capability is inferred. Known callback failures must return quiescently
+        everywhere. Retry only when StepRecoveryError.original_preserved is true
+        and cleanup_errors is empty. Ordinary step retains its old behavior.
+        """
+        from .stepping import StepTarget, StepRecoveryError, guarded_step
+        r=self.response;error=None;items=()
+        try:
+            if r.closed or r.failed or r.context.closed:
+                raise InputError('usable response required for protected step')
+            items=tuple(targets)
+            expected=([self.field] if self.field is not None else [])+list(r.states.values())
+            if any(not isinstance(t,StepTarget) for t in items):
+                raise InputError('explicit StepTarget required for each local owner')
+            if (len(items)!=len(expected) or len({id(t.owner) for t in items})!=len(items)
+                    or {id(t.owner) for t in items}!={id(s) for s in expected}):
+                raise InputError('protected step must cover exactly every local field/material owner')
+        except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+        r.agree(error)
+
+        def capture():
+            m=r._measurements
+            arrays={'J':(self.J,self.J.copy()),'A':(r._A,r._A.copy())}
+            adapters={p:(a.A,a.A.copy()) for p,a in r._adapters.items()}
+            return {'step':self.step_index,'response_step':r.step_index,'failed':r.failed,
+                    'arrays':arrays,'adapters':adapters,
+                    'seconds':(m.seconds,dict(m.seconds)),
+                    'calls':(m.calls,dict(m.calls)),'errors':(m.errors,list(m.errors))}
+
+        def rollback(token):
+            # Preserve original array/dictionary aliases as well as values.
+            self.step_index=token['step'];r.step_index=token['response_step']
+            r.failed=token['failed']
+            for original,values in token['arrays'].values():
+                if not np.array_equal(original,values):original[:]=values
+            self.J=token['arrays']['J'][0];r._A=token['arrays']['A'][0]
+            for p,(original,values) in token['adapters'].items():
+                if not np.array_equal(original,values):original[:]=values
+                r._adapters[p].A=original
+            for name in ('seconds','calls'):
+                original,values=token[name]
+                original.clear();original.update(values)
+                setattr(r._measurements,name,original)
+            original,values=token['errors'];original[:]=values
+            r._measurements.errors=original
+
+        metadata=StepTarget('__coupling_metadata__',self,capture,rollback)
+        try:
+            return guarded_step(self.step,(metadata,)+items,context=r.context)
+        except StepRecoveryError as exc:
+            if not exc.original_preserved or exc.cleanup_errors:
+                r.failed=True
+                if self.field is not None:self.field.failed=True
+            raise
+
     def step(self):
         r=self.response;context=r.context;A=None;error=None
         if r.closed or r.failed:error='response is not usable'
