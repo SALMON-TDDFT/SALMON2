@@ -6,6 +6,7 @@ set(SOURCES
     main_tddft.f90
     md.f90
     taylor.f90
+    step_recovery.f90
     time_evolution_step.f90
    )
 

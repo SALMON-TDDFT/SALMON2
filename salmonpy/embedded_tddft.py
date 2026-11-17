@@ -4,7 +4,7 @@ One native electronic lifetime per Python process, on its main thread. SALMON
 module configuration is not reentrant: start a fresh MPI job for another run.
 A shared writable work root is required across members of each material group.
 """
-from .errors import InputError, InputTypeError, RuntimeFailure
+from .errors import InputError, InputTypeError, RuntimeFailure, NumericalError
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
@@ -60,12 +60,12 @@ class NativeTDDFTMaterialProvider:
         return self.initial
 
 
-def _admission_rejected(lib, outcomes, allowed=(10, 11, 12, 13, 14)):
+def _admission_rejected(lib, outcomes, allowed=(10, 11, 12, 13, 14, 15), query_name='sp_tddft_error_protocol'):
     """Only a declared protocol and unanimous status establish no mutation."""
     codes = [status for status, finite in outcomes]
     if not codes or codes[0] not in allowed or len(set(codes)) != 1 or not all(finite for _, finite in outcomes):
         return False
-    query = getattr(lib, 'sp_tddft_error_protocol', None)
+    query = getattr(lib, query_name, None)
     if query is None:
         return False
     import ctypes as c
@@ -78,7 +78,8 @@ class NativeTDDFTBackend:
     """Collective native A/c-to-charge-current adapter, one point per group.
 
     decomposition is (k, orbital, x, y, z); its product must equal group size.
-    Native errors may terminate the process. Use an MPI job timeout/abort policy.
+    Declared deep numerical errors restore accepted state before returning.
+    Unknown native errors may terminate the process; retain an MPI timeout policy.
     """
     execution='collective'
     reduction='leader'
@@ -210,6 +211,9 @@ class _NativeState:
         if any(code or not finite for code,finite in outcomes):
             if _admission_rejected(self.lib,outcomes):
                 raise InputError('native step rejected before update; accepted state unchanged: '+str(outcomes))
+            if _admission_rejected(self.lib,outcomes,allowed=(20,21,22,23,24,25),
+                                   query_name='sp_tddft_recovery_protocol'):
+                raise NumericalError('native TDDFT step failed; accepted state restored without replay; retry permitted: '+str(outcomes))
             raise RuntimeFailure('native step failed; numerical state is not guaranteed unchanged: '+str(outcomes))
         self.A=new.copy();self.steps+=1
         return -J  # Physical charge-current density, converted exactly once.

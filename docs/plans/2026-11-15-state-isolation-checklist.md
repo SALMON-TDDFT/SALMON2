@@ -30,7 +30,7 @@ The dated sections below retain the scope at their completion time. Older statem
 2. [x] Reject longitudinal incident components in Multiscale1D prefilled histories, including zero boundary-sample cases. Regression and valid transverse preservation verified.
 3. [x] Configuration-to-native-mixed setup: explicit material IDs/models or bindings, ordered geometry/thickness and rank budget via assemble_native_layers. Initial-state preparation remains explicit, not an automatic arbitrary backend factory.
 4. [x] Same-topology supplied mixed fixture direct checkpoint/restart: native field/PML/local LD/SBE/TDDFT numerical state and coupling history/clocks/point IDs captured together; no elapsed propagation replay. PZ and non-PZ measured scopes below. Generic user-backend archives and changed topology remain open. Handled mixed restore failures are now protected as recorded below.
-5. [ ] General native failure contract: recoverable step/initialization errors and process-terminating native paths remain open. Handled mixed restore staging failures already preserve originals and permit continuation/retry; do not list that completed subset as missing. The CLI still exits on an unhandled error.
+5. [ ] General native failure contract: standard semilocal TDDFT deep numerical recovery is now implemented below; initialization/unsupported native errors and process-terminating paths remain open. Handled mixed restore staging failures already preserve originals and permit continuation/retry; do not list that completed subset as missing. The CLI still exits on an unhandled error.
 6. [ ] Remaining GS/TDDFT initialization, ionic/I/O/timer/DC/SOC/+U/localized-exchange ownership and stable native handle interface. Required where the chosen backend/capability needs it; full reentrancy is not a prerequisite for already tested MPI/process-isolated mixtures.
 7. [ ] Remaining scaling/resource work: larger numbers of points/LD cells, calibrated backend memory models and communication scaling. Aggregate CPU memory advice including restore candidates is now implemented below. Budget excess only warns by user decision; hard enforcement is not a pending requirement. Four-core runs do not certify a universal4GiB cap.
 8. [ ] Additional environment/topology validation: field2+SBE1+TDDFT2 (5 ranks) and96³ field12+SBE1+TDDFT2 (15 ranks) are now validated below; new native mixed paths still have local Apple Silicon evidence, not fresh Linux/Intel Mac validation or a published matching runtime catalog. Windows native support/delivery policy is distinct from existing lightweight wheel support.
@@ -469,3 +469,14 @@ Evidence: `../native-tddft-admission-validation-2026-11-17.md`. The current audi
 - [ ] Larger electronic grids/k meshes, many material points, scaling beyond this local fixture and cross-platform/runtime delivery remain open. Native post-update error recovery is unchanged.
 
 Evidence: `../expanded-mixed-scaling-validation-2026-11-17.md`.
+
+### 2026-11-17 standard TDDFT deep numerical recovery
+
+- [x] Native per-step in-memory numerical backup and state-owned stage status. Collective finite checks after propagation/density/Hartree/XC/endpoint; predictor-corrector errors return collectively with balanced timers. Protected invalid-propagator error returns status instead of STOP. Production code owns no new mutable recovery globals.
+- [x] Rollback copies original numerical payload/XC state and reconstructs PP phases without replay. Preserve original overlap flags, unlike external disk LOAD normalization. Failed attempts write no ordinary RT records. Unsupported protected profiles reject before mutation.
+- [x] Real overflow and separately compiled one-rank fault stages20..24; PZ, automatic/fixed TB-mBJ,Libxc-PZ/PBE internal orbital MPI2, plus PBE k/rgrid MPI2. Every rejected numerical checkpoint is byte-identical; retry16-step currents and accepted energy/current records match the corresponding old binary/decomposition exactly. Odd/even buffers and two independent MPI groups also pass.
+- [x] Installed production/fault paths and 128-step normal5-rank FDTD2+LD+SBE1+TDDFT2 A/E/j/serial replay exact to old binary. Existing5-rank protected checkpoint/failure/retry still passes.
+- [x] Source/installed525 tests (one skip), sdist→wheel and JP/EN/AI sync. No remote Actions. Test-only injection symbol absent in production.
+- [ ] This closes the measured TDDFT-group numerical failure subset, not whole mixed-step rollback, allocation/MPI/process failures, third-party STOP, deep initialization recovery, HSE/FDTD equivalents, stable native handles or general reentrancy. Per-step copying/checking has resource overhead; budgets remain warning-only.
+
+Evidence: `../tddft-deep-recovery-validation-2026-11-17.md`.

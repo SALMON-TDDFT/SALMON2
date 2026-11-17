@@ -21,6 +21,7 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 &   pp,ppg,ppn,spsi_in,spsi_out,tpsi,rho,rho_jm,rho_s,V_local,Vbox,Vh,Vh_stock1,Vh_stock2,Vxc,Vpsl,fg,energy, &
 &   ewald,md,ofl,poisson,singlescale,unfold)
   use structures
+  use rt_step_recovery,only:recovery_wave,recovery_scalar,recovery_values
 #ifdef USE_HSE
   use hse_native, only: hse_taylor_stage
 #endif
@@ -129,6 +130,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       else if(propagator == 'aetrs') then
         system%vec_Ac(1:3) = rt%Ac_tot(1:3,itt)
       else
+        if(rt%recover_errors)then
+          rt%step_error=25
+          call timer_end(LOG_CALC_VBOX)
+          call nvtxEndRange
+          return
+        endif
         stop 'invalid propagator'
       end if
       if(yn_jm=='n') call update_kvector_nonlocalpt(info%ik_s,info%ik_e,system,ppg)
@@ -154,6 +161,12 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
     call predictor_corrector
   end if
 
+  if(rt%recover_errors.and.rt%step_error/=0)then
+    call timer_end(LOG_CALC_TIME_PROPAGATION)
+    call nvtxEndRange
+    return
+  endif
+
   if(info%numo.ge.1)then
     ! spsi_in --> spsi_out (tpsi = working array)
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
@@ -163,7 +176,14 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   if(propagator=='hse_taylor4')call hse_taylor_stage(2)
 #endif
   call timer_end(LOG_CALC_TIME_PROPAGATION)
-  
+  if(rt%recover_errors)then
+    call recovery_wave(mg,info,spsi_out,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
+
   ! Gram Schmidt orghonormalization
   if((gram_schmidt_interval >= 1) .and. (mod(itt,gram_schmidt_interval) == 0)) then
     call gram_schmidt(system, mg, info, spsi_out)
@@ -214,6 +234,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
   if(yn_jm=='y') rho%f = rho%f + rho_jm%f
   
   call timer_end(LOG_CALC_RHO)
+  if(rt%recover_errors)then
+    call recovery_scalar(mg,info,rho,21,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
   
   if(singlescale%flag_use .or. yn_out_micro_je=='y') then
     if(info%if_divide_rspace) then
@@ -243,10 +270,25 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
       call nvtxEndRange
     end if
     call timer_end(LOG_CALC_HARTREE)
+    if(rt%recover_errors)then
+      call recovery_scalar(mg,info,Vh,22,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
 
     call timer_begin(LOG_CALC_EXC_COR)
     call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     call timer_end(LOG_CALC_EXC_COR)
+    if(rt%recover_errors)then
+      call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+      call recovery_values(info,[energy%E_xc],23,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     
   end if
 
@@ -315,6 +357,13 @@ SUBROUTINE time_evolution_step(Mit,itotNtime,itt,lg,mg,system,rt,info,stencil,xc
 
   end select
 
+  if(rt%recover_errors)then
+    call recovery_values(info,[rt%curr(:,itt),energy%E_tot],24,rt%step_error)
+    if(rt%step_error/=0)then
+      call nvtxEndRange
+      return
+    endif
+  endif
   call timer_begin(LOG_WRITE_ENERGIES)
   call subdip(info%icomm_r,itt,rt,lg,mg,system,rho_s,rNe,poisson,energy%E_tot,pp)
   call timer_end(LOG_WRITE_ENERGIES)
@@ -437,6 +486,13 @@ contains
     ! spsi_in --> spsi_out (tpsi = working array)
     call taylor(mg,system,info,stencil,srg,spsi_in,spsi_out,tpsi,ppg,V_local,rt)
     
+    if(rt%recover_errors)then
+      call recovery_wave(mg,info,spsi_out,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     call calc_density(system,rho_s,spsi_out,info,mg)
     if(nspin==1)then
       !$omp workshare
@@ -450,10 +506,32 @@ contains
     
     if(yn_jm=='y') rho%f = rho%f + rho_jm%f
     
+    if(rt%recover_errors)then
+      call recovery_scalar(mg,info,rho,21,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     if(yn_fix_func=='n') then
       call hartree(lg,mg,info,system,fg,poisson,srg_scalar,stencil,rho,Vh)
+      if(rt%recover_errors)then
+        call recovery_scalar(mg,info,Vh,22,rt%step_error)
+        if(rt%step_error/=0)then
+          call nvtxEndRange
+          return
+        endif
+      endif
       call exchange_correlation(system,xc_func,mg,srg_scalar,srg,rho_s,pp,ppn,info,spsi_out,stencil,Vxc,energy%E_xc)
     end if
+    if(rt%recover_errors)then
+      call recovery_scalar(mg,info,Vxc(1),23,rt%step_error)
+      call recovery_values(info,[energy%E_xc],23,rt%step_error)
+      if(rt%step_error/=0)then
+        call nvtxEndRange
+        return
+      endif
+    endif
     call update_vlocal(mg,system%nspin,Vh,Vpsl,Vxc,V_local)
     
     !$omp workshare

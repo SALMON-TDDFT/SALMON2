@@ -145,3 +145,23 @@ class EmbeddedTDDFTTest(unittest.TestCase):
             self.assertFalse(_admission_rejected(lib,outcomes))
         self.assertFalse(_admission_rejected(SimpleNamespace(),[(10,True)]))
         self.assertFalse(_admission_rejected(lib,[(12,True)],allowed=(10,11)))
+
+    def test_deep_native_error_restored_state_can_retry(self):
+        import numpy as np
+        from types import SimpleNamespace
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.errors import NumericalError,RuntimeFailure
+        for declared,error in ((True,NumericalError),(False,RuntimeFailure)):
+            result=[23]
+            def step(old,new,current):current[:]=0.;return result[0]
+            lib=SimpleNamespace(sp_tddft_step=step)
+            if declared:lib.sp_tddft_recovery_protocol=lambda:1
+            comm=SimpleNamespace(allgather=lambda value:[value,value])
+            state=_NativeState(SimpleNamespace(context=SimpleNamespace(solver_comm=comm)),lib,None,4)
+            state._call=lambda fn,*args:fn(*args)
+            with self.subTest(declared=declared),self.assertRaises(error):state.advance(np.zeros(3),np.ones(3))
+            self.assertEqual(state.steps,0)
+            np.testing.assert_array_equal(state.A,np.zeros(3))
+            result[0]=0
+            state.advance(np.zeros(3),np.ones(3))
+            self.assertEqual(state.steps,1)

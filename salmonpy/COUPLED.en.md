@@ -34,8 +34,7 @@ Simply reducing transverse grid counts to one does not implement a 1D solver.
 
 First establish intent, total memory allowance and CPU concurrency. The standard
 sample uses two field ranks plus two two-rank material groups: six ranks and two
-electronic states. Start with one OpenMP/BLAS thread per rank. Memory estimation and
-hard enforcement are not implemented; measure a small GS before scaling.
+electronic states. Start with one OpenMP/BLAS thread per rank. The mixed sample offers uncertain memory estimates and measurements; excess only warns. Measure a small GS before scaling.
 
 Explicitly build a **shared library against the host MPI**. Portable serial runtimes
 and the communication-only bridge cannot substitute for it. Nothing builds on import.
@@ -185,11 +184,11 @@ cells must be vacuum. LD may occupy other regions.
   and restore it afterward. Main thread only; do not perform concurrent relative
   file I/O in the same process.
 - Advancing a field/material independently after coupling is rejected as lost
-  synchronization. Post-native errors invalidate the state; no retry or rollback.
+  synchronization. Coupled-step errors still invalidate the session. Standalone TDDFT numerical failures have the scoped recovery contract below.
 - Collectively close response, field, then Python context. Fortran does not finalize
   MPI. Native hangs/failures require launcher timeouts; the sample aborts the job on error.
-- Restart, nonzero initial fields, impulse sources, rotations, unequal macro volumes,
-  subcycling and TTM are not supported by this entry.
+- Same-topology protected restart is documented below. Nonzero initial fields,
+  impulse sources, rotations, unequal macro volumes, subcycling and TTM remain unsupported.
 
 `response.json` stores point-ordered A/c, sampled E, previous/new charge currents
 and both clocks. `salmonpy-coupled-field.json` records mapping, MPI decomposition,
@@ -302,7 +301,7 @@ Use `mpi_mixed_native --direct-save-at 64` to stop at64 and save rank-local stat
 
 Saved state includes native E/H/PML, LD P/J/Q and old fields, electronic orbital buffers/density/potentials/Hartree/RT histories/A/current, SBE density matrix, and Python integrated A/lagged current/clocks. Initialization rebuilds static coefficients/resources before loading dynamic arrays. A completed file inventory with SHA256 checks is required; changed inputs/library/topology are rejected.
 
-Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible native library. Generic custom-backend persistence, changed MPI partitions and other XC profiles require further implementation/validation; fast-PR HSE has a separate entry below. Abort the job on native restore failure; this is not atomic rollback of an existing live session. Allow storage and memory for full states.
+Scope is periodic middlepoint propagation with the same environment/decomposition: PZ, TB-mBJ (automatic/fixed cval), Libxc-PZ/PBE. Libxc requires an explicitly built compatible native library. Generic custom-backend persistence, changed MPI partitions and other XC profiles require further implementation/validation; fast-PR HSE has a separate entry below. Protected candidate restore is now the default and preserves originals on handled staging failures; the explicit unprotected route has no rollback guarantee. Allow storage and memory for full states.
 
 Direct checkpoint format v2 validates XC names, derivative settings and input cval while retaining freshly initialized Libxc handles. Preserve runtime/checkpoint hashes. The sample RUNTIME argument also accepts an explicitly built/audited serial SALMON executable for reference validation; do not use an MPI binary as this child process. Use matching GS and RT functional inputs for each XC.
 
@@ -370,7 +369,7 @@ Supported decomposition is k-only, one or two ranks, `nproc_ob=1,nproc_rgrid=1,1
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 4 python -m salmonpy.examples.mpi_mixed_native FIELD_BUILD_JSON UNUSED_REFERENCE HSE_BUNDLE NEW_OUTPUT --fast-hse-build SERIAL_WORKER_BUILD_JSON --fast-hse-mpi-build MPI_BUILD_JSON --hse-ranks 2 --layers PATH_TO_mixed_hse_layers.json --dt .001 --steps 256 --rank-budget 4
 ```
 
-This assigns field1,SBE1,HSE2; both LD materials stay local to the field rank. Use three separate jobs with the same arguments: continuous, `--direct-save-at 127`, then `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. Rank-local HSE shards include group size/rank and k ranges; all shards are checked before committing numerical state. Fresh initialization recreates static exchange/FFT resources, not elapsed propagation. Restore requires the same binary, bundle, communicator topology and shared archive directory. Early invalid/truncated shards are rejected before numerical commit. A late I/O failure invalidates the contexts; abort the job rather than retrying a live session. No cross-group atomic rollback is promised.
+This assigns field1,SBE1,HSE2; both LD materials stay local to the field rank. Use three separate jobs with the same arguments: continuous, `--direct-save-at 127`, then `--direct-resume SAVE_OUTPUT/direct-checkpoint --compare CONTINUOUS_OUTPUT`. Rank-local HSE shards include group size/rank and k ranges; all shards are checked before committing numerical state. Fresh initialization recreates static exchange/FFT resources, not elapsed propagation. Restore requires the same binary, bundle, communicator topology and shared archive directory. Early invalid/truncated shards are rejected before numerical commit. Default protected restore preserves original states on handled staging failures. Explicit unprotected restore and unhandled native failures have no retry guarantee.
 
 Measured on Apple Silicon with a synthetic 8³ microscopic grid and 4×1×1 k mesh: Taylor/learned PT-CN, field1+SBE1+HSE2, 256 steps at dt=.001, direct split127. All A/c,E,j history arrays matched bit-for-bit after129 resumed calls. Against independent serial fast-PR response, maximum HSE current differences were4.07e-16 and1.71e-16 au. These are connection/restart regressions, not material convergence or scaling certification. Evidence: `docs/fast-hse-kmpi-validation-2026-11-16.md`.
 
@@ -398,7 +397,7 @@ Use `--legacy-checkpoint-identity` explicitly only for old unidentified checkpoi
 
 Newly prepared and built standard embedded TDDFT exposes `sp_tddft_error_protocol() == 1`. Validation is collective on the attached material communicator:10 invalid/nonfinite input, stale A or missing input file;11 rank disagreement;12 unavailable lifecycle or repeated initialization;13 exhausted step capacity;14 pending restore candidate. These codes return unanimously before numerical mutation. Initial admission codes10/11 do not consume the lifetime; Python initialization can be retried with corrected input. Failed work directories remain for diagnosis.
 
-Python maps only protocol-declared unanimous rejection to `InputError`. Old libraries, unknown codes or nonfinite results retain `RuntimeFailure`, with no inferred state guarantee. Every solver-group member must enter the same call. Invalid pointers, MPI/process failure, allocation errors, deep solver STOP and failures after numerical updates are excluded. Actual initialization still consumes the one-process lifetime. Fast HSE and native FDTD error contracts are unchanged.
+Python maps only protocol-declared unanimous rejection to `InputError`. Old libraries, unknown codes or nonfinite results retain `RuntimeFailure`, with no inferred state guarantee. Every solver-group member must enter the same call. Invalid pointers, MPI/process failure, allocation errors, deep solver STOP and failures after numerical updates are outside this admission-only contract; see the limited deep-recovery contract below. Actual initialization still consumes the one-process lifetime. Fast HSE and native FDTD error contracts are unchanged.
 
 This guarantee concerns an individual TDDFT state's pre-update rejection. A coupled session may already have advanced another component; it remains failed under the existing driver policy. This does not implement general coupled-step rollback.
 
@@ -413,3 +412,13 @@ Field2+SBE1+TDDFT2 uses `mpiexec -n 5 ... --field-grid 1 2 1 --tddft-ranks 2`. F
 Source-distribution tool `tools/test_mixed_scaling.py BUILD RUNTIME GS NEW_OUTPUT --rank-budget 18 --memory-budget-gib 48` uses the installed wheel and runs4/5/7/11/15 ranks sequentially twice on identical96³ inputs. A/E/j histories are compared with the first case. Different grid shapes are rejected. Supply MPI-vendor-specific flags with `--launcher-arg`; avoid other heavy work during timing.
 
 `coupled_loop_seconds_max` excludes initialization, output and serial reference replay. Communication metrics include waits, not pure link bandwidth; native FDTD halo exchanges are not separately decomposed. Memory is the sum of per-rank peak RSS values, not simultaneous aggregate RSS or whole-system usage. Resource/timer measurement failures are distinct from calculation failures. These short repeats do not establish universal scalability or physical accuracy.
+
+## Direct rollback after deep TDDFT numerical errors
+
+New standard native TDDFT exposes `sp_tddft_recovery_protocol() == 1` and retains a per-step numerical payload in memory. Collective checks cover propagated wavefunctions(20), density(21), Hartree field(22), XC potential/energy(23), current/total energy(24), and a protected propagator error(25). Every material-group rank agrees before returning. Errors restore accepted orbitals, densities, fields, propagation history, XC state, counters and original overlap flags without propagation replay. Failed attempts add no ordinary RT output records.
+
+A state returned by Python `NativeTDDFTBackend` raises `NumericalError` from `advance(A_old,A_new)` only for protocol-declared unanimous recovery. Its `A` and `steps` remain accepted; correct the cause and retry from that time. No automatic pulse weakening or dt changes are applied. Old libraries and unknown errors retain conservative `RuntimeFailure` handling without inferred recovery.
+
+Supported: periodic, unpolarized, fixed-ion middlepoint PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE. SOC,+U,jellium, ionic motion/force output, Gram–Schmidt, projection/unfold and microscopic Maxwell coupling are outside the protected profile and return15 before updating. Ordinary batch calculations retain their existing route; external checkpoint encoding is unchanged. Per-step copies/checks add memory and runtime overhead: leave resource headroom. Budgets remain warning-only.
+
+This is a TDDFT-group guarantee, not automatic rollback of an entire mixed FDTD step whose other components may have advanced. MPI/process death, allocation failures, uncontrolled third-party STOP, deep initialization STOP and output-device failures are excluded. One-rank fault injection exists only in a separately compiled `SALMONPY_RECOVERY_TESTING` build; production builds export no injection entry.

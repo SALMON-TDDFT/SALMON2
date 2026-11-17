@@ -556,6 +556,8 @@ module structures
   end type s_rt_step_config
 
   type s_rt
+    logical :: recover_errors = .false.
+    integer :: step_error = 0
     type(s_rt_step_config) :: step
     real(8) :: Dp0_e(3)     !rename later
     real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later

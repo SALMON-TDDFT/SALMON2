@@ -547,6 +547,8 @@ module structures
 ! +----------------------------------+
 
   type s_rt
+    logical :: recover_errors = .false.
+    integer :: step_error = 0
     real(8) :: Dp0_e(3)     !rename later
     real(8), allocatable :: dDp_e(:,:), Dp_e(:,:), Dp_i(:,:), Qp_e(:,:,:)    !rename later
     real(8), allocatable :: rIe(:)    !rename later

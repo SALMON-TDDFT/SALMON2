@@ -11,6 +11,6 @@
   "interface_revision": "salmonpy-runtime/2",
   "source_tree": "sources/standard",
   "source_tree_manifest": "source-trees/standard.json",
-  "source_tree_sha256": "7078bb70c4013481a783bd825a460e804ba0a331443f5fbdb6e92b8316fa6190",
+  "source_tree_sha256": "69bd32d77b1c80b6204473e18a9019bd262031c090e388e9bd0b7832a0a2d03f",
   "patch_sha256_role": "historical equivalent-source migration identity for existing binary receipts; no patch is applied"
 }

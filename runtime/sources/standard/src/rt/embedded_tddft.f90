@@ -94,6 +94,10 @@ integer(c_int) function sp_tddft_error_protocol() bind(C)
   sp_tddft_error_protocol=1
 end function
 
+integer(c_int) function sp_tddft_recovery_protocol() bind(C)
+  sp_tddft_recovery_protocol=1
+end function
+
 integer(c_int) function sp_tddft_checkpoint_protocol() bind(C)
   sp_tddft_checkpoint_protocol=1
 end function
@@ -199,12 +203,15 @@ end if
   sp_tddft_init=0
 end function
 integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
+  use pseudo_pt_plusU_sub,only:PLUS_U_ON
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use communication, only: comm_get_max, comm_get_globalinfo
   real(c_double),intent(in) :: Aold(3),Anew(3)
   real(c_double),intent(out) :: J(3)
   integer :: status,reference_step,admission_group,admission_rank,admission_size,i
-  real(8) :: reference_old(3),reference_new(3)
+  real(8) :: reference_old(3),reference_new(3),saved_xc_cval
+  type(checkpoint_payload) :: before_step
+  type(s_xc_operator_payload) :: saved_xc_payload
   call comm_get_globalinfo(admission_group,admission_rank,admission_size)
   J=0d0
   status=0
@@ -232,6 +239,26 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
   if(status/=0)then
     sp_tddft_step=status;return
   endif
+  ! The transaction covers fixed-ion periodic scalar semilocal propagation.
+  select case(trim(xc))
+  case('pz','tbmbj','libxc_pz','libxc_pbe')
+  case default
+    status=15
+  end select
+  if(xname/='none'.or.cname/='none')status=15
+  if(spin/='unpolarized'.or.yn_spinorbit/='n'.or.yn_md/='n'.or.yn_jm/='n')status=15
+  if(iperiodic/=3.or.propagator/='middlepoint'.or.trans_longi/='tr')status=15
+  if(projection_option/='no'.or.dm_unfold_option/='no'.or.state%singlescale%flag_use)status=15
+  if(yn_out_rvf_rt/='n'.or.PLUS_U_ON.or.gram_schmidt_interval>=1)status=15
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_step=status;return
+  endif
+  call checkpoint_copy(before_step,.false.)
+  saved_xc_cval=state%xc_func%cval
+  saved_xc_payload=state%system%xc_payload
+  state%rt%recover_errors=.true.
+  state%rt%step_error=0
   state%itt=state%itt+1
   state%rt%Ac_ext(:,state%itt)=Anew
   state%rt%Ac_tot(:,state%itt)=Anew
@@ -247,6 +274,20 @@ integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
      & ,state%Vpsl,state%fg,state%energy,state%ewald,state%md,state%ofl,state%poisson,state%singlescale,state%unfold)
   end if
 
+  status=state%rt%step_error
+  call comm_get_max(status,admission_group)
+  state%rt%recover_errors=.false.
+  state%rt%step_error=0
+  if(status/=0)then
+    call checkpoint_copy(before_step,.true.)
+    state%xc_func%cval=saved_xc_cval
+    call update_kvector_nonlocalpt(state%info%ik_s,state%info%ik_e,state%system,state%ppg)
+    ! The complete in-memory wavefunctions include their accepted halo bytes
+    ! and original overlap flags; disk LOAD's normalization is not appropriate.
+    state%system%xc_payload=saved_xc_payload
+    sp_tddft_step=status
+    return
+  endif
   J=state%rt%curr(:,state%itt)
 
   accepted_A=Anew
