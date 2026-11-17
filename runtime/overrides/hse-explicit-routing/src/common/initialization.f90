@@ -20,7 +20,84 @@ module initialization_sub
   implicit none
   integer,parameter,private :: Nd=4
 
+  ! Value-only initialization input; no solver resource owners.
+  type s_ion_initial_config
+    integer :: nion=0, nelem=0
+    logical :: reduced=.false.
+    real(8),allocatable :: positions(:,:)
+    integer,allocatable :: species(:)
+  end type s_ion_initial_config
+
 contains
+
+subroutine ion_input_config(value)
+  use salmon_global,only:natom,nelem,Rion,Rion_red,kion,iflag_atom_coor,ntype_atom_coor_reduced
+  implicit none
+  type(s_ion_initial_config),intent(out)::value
+  value%nion=natom;value%nelem=nelem
+  value%reduced=iflag_atom_coor==ntype_atom_coor_reduced
+  if(value%reduced)then
+    if(allocated(Rion_red))value%positions=Rion_red
+  else
+    if(allocated(Rion))value%positions=Rion
+  endif
+  if(allocated(kion))value%species=kion
+  if(natom==0)then
+    if(.not.allocated(value%positions))allocate(value%positions(3,0))
+    if(.not.allocated(value%species))allocate(value%species(0))
+  endif
+end subroutine ion_input_config
+
+subroutine initialize_ions(system,value,status)
+  use structures,only:s_dft_system
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  type(s_dft_system),intent(inout)::system
+  type(s_ion_initial_config),intent(in)::value
+  integer,intent(out)::status
+  real(8),allocatable::positions(:,:),mass(:),velocity(:,:),force(:,:)
+  integer,allocatable::species(:)
+  integer::i,j
+  status=1
+  if(value%nion<0.or.value%nelem<0)return
+  if(.not.allocated(value%positions).or..not.allocated(value%species))return
+  if(any(shape(value%positions)/=[3,value%nion]))return
+  if(size(value%species)/=value%nion)return
+  if(any(lbound(value%positions)/=[1,1]).or.lbound(value%species,1)/=1)return
+  if(any(value%species<1).or.any(value%species>value%nelem))return
+  do i=1,value%nion
+    do j=1,3
+      if(.not.ieee_is_finite(value%positions(j,i)))return
+    enddo
+  enddo
+  if(value%reduced)then
+    do i=1,3
+      do j=1,3
+        if(.not.ieee_is_finite(system%primitive_a(j,i)))return
+      enddo
+    enddo
+    positions=matmul(system%primitive_a,value%positions)
+  else
+    positions=value%positions
+  endif
+  do i=1,value%nion
+    do j=1,3
+      if(.not.ieee_is_finite(positions(j,i)))return
+    enddo
+  enddo
+  species=value%species
+  allocate(mass(value%nelem),velocity(3,value%nion),force(3,value%nion))
+  velocity=0d0
+  ! Mass and force retain the legacy initialization policy: their owning
+  ! pseudopotential/force routines populate them before physical use.
+  call move_alloc(positions,system%Rion)
+  call move_alloc(species,system%kion)
+  call move_alloc(mass,system%mass)
+  call move_alloc(velocity,system%Velocity)
+  call move_alloc(force,system%Force)
+  system%nion=value%nion
+  status=0
+end subroutine initialize_ions
 
 !===================================================================================================================================
 
@@ -179,9 +256,9 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   use structures
   use lattice
   use occupation,only:occupation_input_config,initialize_occupations
-  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,natom,nelem,iperiodic,num_kgrid,num_rgrid,dl, &
-  & Rion,Rion_red,kion,calc_mode,xc, &
-  & iflag_atom_coor,ntype_atom_coor_reduced,quiet
+  use salmon_global, only: al_vec1,al_vec2,al_vec3,al,iperiodic,num_kgrid,num_rgrid,dl, &
+  & Rion,calc_mode,xc, &
+  & quiet
   use sym_sub, only: init_sym_sub
   use communication, only: comm_is_root
   use parallelization, only: nproc_id_global
@@ -200,8 +277,12 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   real(8) :: temperature
   character(32) :: spin
   character(1) :: yn_spinorbit
+  type(s_ion_initial_config)::ion_input
+  integer::ion_status
   integer :: ii,jj
   real(8) :: rsize(3),hgs(3),cnmat(0:12,12),bnmat(4,4)
+
+  call ion_input_config(ion_input)
 
   call occupation_input_config(system%occupation_input)
   system%occupation_input_ready=.true.
@@ -245,7 +326,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
      write(*,*) "  use of real value orbitals = ", system%if_real_orbital
   endif
 
-  system%nion = natom
+  system%nion = ion_input%nion
 
   if(spin=='unpolarized') then
     system%nspin=1
@@ -269,22 +350,13 @@ subroutine init_dft_system(lg,system,stencil,unfold)
     system%no = nstate
   end if
 
-  allocate(system%mass(1:nelem))
-  if ( allocated(system%Rion) ) deallocate(system%Rion)
-  if ( allocated(system%rocc) ) deallocate(system%rocc)
-  if ( allocated(system%Velocity) ) deallocate(system%Velocity)
-  if ( allocated(system%Force) ) deallocate(system%Force)
-  if ( allocated(system%kion)) deallocate(system%kion)
-  allocate(system%Rion(3,system%nion),system%rocc(system%no,system%nk,system%nspin))
-  allocate(system%Velocity(3,system%nion),system%Force(3,system%nion))
-  allocate(system%kion(system%nion))
-  system%Velocity(:,:) =0d0
-
-  if(iflag_atom_coor==ntype_atom_coor_reduced) then
-    Rion = matmul(system%primitive_a,Rion_red) ! [ a1, a2, a3 ] * R_ion
-  end if
-  system%Rion = Rion
-  system%kion = kion
+  call initialize_ions(system,ion_input,ion_status)
+  if(ion_status/=0)error stop 'Invalid ion initialization configuration'
+  if(allocated(system%rocc))deallocate(system%rocc)
+  allocate(system%rocc(system%no,system%nk,system%nspin))
+  ! Keep legacy input normalization for downstream consumers until extracted.
+  ! Explicit initialize_ions above never reads or writes shared input.
+  if(ion_input%reduced)Rion=system%Rion
 
   call initialize_occupations(system)
 

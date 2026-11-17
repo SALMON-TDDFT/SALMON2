@@ -94,3 +94,19 @@ Advisory memory APIs are MemoryEstimate/MemoryReport/memory_advice/process_memor
 `stepping.StepTarget`, `guarded_step` and `StepRecoveryError` are preview APIs for explicit complete backend rollback contracts. See the paired STEPPING guides.
 
 `native_steps.native_step_targets` is the preview bridge from audited native state/ordinary-output transactions to common protected steps. See the paired NATIVE_STEPPING guides.
+
+### Ion inputs during solver initialization
+
+The standard solver and fast-PR HSE now capture atom/element counts, positions
+(Cartesian or reduced) and species IDs into the internal value object
+`s_ion_initial_config`. `initialize_ions` resolves against the selected system
+lattice and creates independent owned arrays. Invalid dimensions, nonfinite
+positions, out-of-range species and non-one-based input arrays reject before
+changing the target. The explicit helper never reads/writes shared input.
+The compatibility initialization path retains its old reduced-to-Cartesian input
+normalization for downstream consumers, with unchanged valid calculation results.
+
+This is an internal ownership boundary, not a new Python API or stable C ABI.
+Cell/k/symmetry/communicator and other initialization dependencies remain; it does
+not establish arbitrary different-input GS/TDDFT contexts in one process. Memory
+allocation failures and global initialization STOP paths remain outside recovery.

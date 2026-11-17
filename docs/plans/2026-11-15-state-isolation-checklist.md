@@ -538,3 +538,13 @@ Evidence: `../protected-mixed-scaling-validation-2026-11-17.md`. Audit item7 is 
 - [ ] Many more points, larger electronic grids/k meshes, transferable capacity models and arbitrary in-process native multi-context ownership remain open. Existing one-point-per-group architecture and same-topology restart remain; molecular work stays paused. Budget excess only warns.
 
 Evidence: `../multipoint-mixed-validation-2026-11-17.md`. Audit item7 now includes this8-point/2304-LD-cell subset, not general production scaling.
+
+### 2026-11-17 ion initialization ownership
+
+- [x] Standard and fast-PR full-source value-owned ion input (atom/element counts,Cartesian/reduced positions,species). Explicit initializer validates allocation/shape/lower bounds/species/finiteness before changing state and owns ion arrays. No global reads/writes or resource-owner copies in explicit helper; legacy wrapper retains downstream Rion normalization.
+- [x] Two different captured configurations,poisoned globals,alternating initialized systems and malformed inputs:standard/HSE native probes OMP1/2 pass. Lower-bound review finding fixed with rejection regressions. No arbitrary full-GS different-input independence claim.
+- [x] MPI2 GS fresh three-iteration energy/eigen/k/force outputs exact to old;32-step five-rank PBE/HSE Taylor/PT-CN and seven-rank combined protected step/fault/retry results exact. Seven-rank direct restore/failure/continuation/retry and identity negatives pass without replay.
+- [x] Manifests/provenance refreshed,new external builds,source/installed545 tests(one skip each),source-distribution→wheel/native hashes,installed seven-rank mixed/five-rank1D protected retries and paired JP/EN/AI guides. No Actions or shared-kernel changes.
+- [ ] Remaining cell/k/symmetry/communicator/ionic dynamics/I/O/timer/DC/SOC/+U ownership,stable handles and general initialization/allocation-failure recovery remain open. Legacy wrapper still normalizes shared Rion for downstream code. This only closes the captured ion-input/owned-array slice of audit item6.
+
+Evidence: `../ion-initialization-validation-2026-11-17.md`.
