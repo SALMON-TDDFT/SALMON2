@@ -382,3 +382,12 @@ Common-API evidence: `../common-checkpoint-api-validation-2026-11-17.md`. Source
 - Remaining: portable generic archive layouts,redistribution,aggregate resource limits and native failure recovery/ownership. The common dispatcher prescribes no payload encoding.
 
 Execution evidence: `../checkpoint-execution-validation-2026-11-17.md`. Source/wheel489 tests (one skip),MPI unequal-group/opaque-result/failure-slot tests and collective completion-publication failure pass. New common-entry saves and direct resumes across HSEk2 Taylor/PT-CN,PBEorbital2 and field2/serialHSE remain byte-identical to continuous with129/65 new calls. Pre-existing native-direct/2 archives remain readable. Generic callback execution is complete within this contract; archive interoperability/migration,redistribution and native rollback remain separate.
+
+### Protected candidate restore — 2026-11-17
+
+- [x] Common `restore_checkpoint` and `CheckpointState`: independent candidates, collective readiness vote, single local bundle publication; no destructive fallback.
+- [x] Late-failure cleanup preserves originals; cleanup failures reported separately. Successful replacement returns previous objects for explicit host retirement.
+- [x] Real four-rank MPI/custom backend failure injection and successful retry, actual LD/SBE future-result equality, source/wheel495 tests (one skip each), sdist→wheel, JP/EN/AI synchronization.
+- [ ] Native in-process FDTD/TDDFT/HSE candidate ABI remains required for protected native restore. Current native coordinator is explicitly non-atomic; protected entry rejects direct-only backends before LOAD.
+
+Evidence: `../atomic-restore-validation-2026-11-17.md`. Backend isolation and healthy collective progress are required; process crashes, hidden shared mutable state and topology redistribution are outside this guarantee.

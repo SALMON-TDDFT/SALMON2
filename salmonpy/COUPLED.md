@@ -353,3 +353,5 @@ Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しま�
 保存対応の宣言とMPI互換性の照合は共通API `salmonpy.checkpointing` を使います。自作バックエンドや直列ホストからの利用は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。既存のnative-direct/2の記録形式と再開経路は維持します。
 
 native混在サンプルの場・電子・LD/SBE保存処理も `CheckpointTarget`／`execute_checkpoint` を通します。保存形式とnative-direct/2の互換情報は維持し、コールバック失敗を共有した後は次の処理へ進みません。完了情報の公開失敗も全ランクへ通知します。
+
+保護付き復元の共通APIはCHECKPOINTING.mdを参照してください。現行のプロセス内native ABIには独立候補生成がなく、このサンプルは非原子的な`atomic=False`経路です。共通の保護経路は未対応対象をLOAD前に拒否し、自動的にこの経路へ切り替えません。

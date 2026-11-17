@@ -381,3 +381,5 @@ The direct sample writes manifest schema `salmonpy.native-direct/2` with persist
 Capability and MPI compatibility checks use the common `salmonpy.checkpointing` API. See [CHECKPOINTING.en.md](CHECKPOINTING.en.md) for custom backends and serial hosts. Existing native-direct/2 records and continuation routes are retained.
 
 Native mixed field/electronic/LD/SBE persistence also uses CheckpointTarget/execute_checkpoint. Formats and native-direct/2 metadata are retained; callback failures stop subsequent slots, and completion-publication errors are agreed on all ranks.
+
+For protected restoration see CHECKPOINTING.en.md. Current in-process native ABIs lack isolated candidate creation; this example explicitly uses the legacy atomic=False route. Protected admission refuses unsupported targets before LOAD and never silently falls back to this route.

@@ -132,6 +132,54 @@ saved = check_checkpoint_compatibility(
 復元時はoperation=restoreとし、全ランクで同じ保存メタデータを渡します。必須ファイルの一覧はランクごとに用意できます。
 エラーは`salmonpy.errors.InputError`（ValueErrorの派生）で通知し、成功時は`salmonpy.direct-compatibility/1`のJSONを返します。
 
+## 復元失敗時に元の状態を維持する
+
+保護付き復元には`restore_checkpoint`を使います。同時に切り替える必要があるローカルな可変状態を、
+一つの`CheckpointState`へ保持します。呼出中は計算を停止し、成功後はこのホルダーから状態を参照してください。
+`stage_restore()`は独立した候補へ読込・検証を行って返します。元の状態を書き換えたり、候補と可変の数値資源を
+共有したりしないことが契約です。元と同じオブジェクト、候補の使い回し、Noneの返却は拒否します。
+
+```python
+from salmonpy.checkpointing import (CheckpointCapability, CheckpointTarget,
+                                   CheckpointState, restore_checkpoint)
+
+groups = [{"name": "user", "ranks": [0], "point_ids": ["film"]}]
+cap = CheckpointCapability("user-memory/1", ("save", "restore"), (1,), identity="model-v1")
+from salmonpy.checkpointing import check_checkpoint_compatibility
+saved = check_checkpoint_compatibility(None, groups, states={"film": cap})
+original = {"step": 5}
+live = CheckpointState(states={"film": original})
+run = restore_checkpoint(
+    None, groups, live=live, saved=saved,
+    states={"film": CheckpointTarget(cap, stage_restore=lambda: {"step": 17})})
+assert live.states["film"]["step"] == 17
+assert run["previous"]["states"]["film"] is original
+assert original == {"step": 5}
+```
+
+共通入口は全候補を準備し、MPIで失敗を共有し、成功の合意後に各ランクのローカル状態一式を一回の参照代入で切り替えます。
+切替中に利用者のコードは呼びません。以前の状態は`run['previous']`へ保持するため、成功後の資源破棄は明示的に行います。
+既存の外部変数は旧オブジェクトを指し続けます。バインディングを作り直すか、ホルダーを参照するクロージャーを使ってください。
+準備中は元と候補が共存する分のメモリ・資源が必要です。
+
+通常の準備失敗では`AtomicRestoreError`（RuntimeFailureの派生）が`original_preserved=True`を返し、
+全ホルダーは元の状態一式を維持します。元の状態から計算を継続できます。任意の`discard_restore(candidate)`で、
+準備を試みた候補を逆順の同期スロットで破棄できます。準備中の例外や危険な参照を検出した場合は、
+該当する全ランクで`discard_restore(None)`も呼びます。部分的な準備資源とNoneを扱い、例外前に自群の通信手順を
+完了してください。候補ファクトリー自身が失敗時の割当資源を片付けてから例外を返す方法も使えます。
+破棄時のエラーは`error.cleanup_errors`へ分けて報告します。破棄処理でも元の状態を変更してはいけません。
+バックエンドの独立性契約の下で、元のオブジェクトを破棄コールバックへ渡すことはありません。
+
+`execute_checkpoint(..., operation='restore', atomic=True, live=live)`も同じ保護経路です。
+従来のexecute_checkpointは互換性のため非原子的な実行を既定とします。通常のLOADだけを持つ対象は、保護経路では
+LOADを呼ぶ前に拒否し、自動で従来方式へ切り替えません。現行のプロセス内native FDTD／TDDFT／高速HSE ABIには
+独立候補の生成口がないため、同梱native例は`atomic=False`を明示し、従来の失敗時制限を維持します。
+LD/SBEはnew_stateとsnapshot復元で候補を作れます。自作JSONファクトリーは実行可能なサンプルを参照してください。
+native候補生成への対応は別の残作業です。
+
+保証は、参加MPIランクが正常で、正しい独立候補ファクトリーが扱える例外の範囲です。
+プロセス異常、通信断、Fortran STOP、準備中に元を変更・共有するバックエンドからの回復は対象外です。
+
 ## 既存の混在native計算
 
 混在サンプルも共通の検査・実行APIを使い、ソルバー固有の未進行状態・native ABIの確認を維持します。

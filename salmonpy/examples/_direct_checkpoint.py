@@ -243,7 +243,7 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         for point,state in r.states.items()}
     try:
         run=execute_checkpoint(world,compatibility['groups'],group=r.context.group.name,
-            field=field_target,states=targets,operation='restore' if restore else 'save',
+            field=field_target,states=targets,operation='restore' if restore else 'save',atomic=False,
             saved=manifest.get('compatibility') if restore else None)
         compatibility=run['compatibility']
     except RuntimeFailure:

@@ -155,6 +155,64 @@ For restore, pass operation=restore and the same saved metadata on all ranks.
 Required-file inventories may be rank-local. Errors use `salmonpy.errors.InputError`
 (a ValueError), and successful calls return `salmonpy.direct-compatibility/1` JSON.
 
+## Preserve live state on restore failure
+
+Use `restore_checkpoint` for protected restoration. Keep every mutable local
+component that must switch together in one `CheckpointState` holder. Pause
+computation during the call, and access the states through the holder afterward.
+`stage_restore()` loads and validates a fully independent candidate; it must never
+mutate original states or share mutable numerical resources with them. Returning
+the original object, a reused candidate or None is rejected.
+
+```python
+from salmonpy.checkpointing import (CheckpointCapability, CheckpointTarget,
+                                   CheckpointState, restore_checkpoint)
+
+groups = [{"name": "user", "ranks": [0], "point_ids": ["film"]}]
+cap = CheckpointCapability("user-memory/1", ("save", "restore"), (1,), identity="model-v1")
+from salmonpy.checkpointing import check_checkpoint_compatibility
+saved = check_checkpoint_compatibility(None, groups, states={"film": cap})
+original = {"step": 5}
+live = CheckpointState(states={"film": original})
+run = restore_checkpoint(
+    None, groups, live=live, saved=saved,
+    states={"film": CheckpointTarget(cap, stage_restore=lambda: {"step": 17})})
+assert live.states["film"]["step"] == 17
+assert run["previous"]["states"]["film"] is original
+assert original == {"step": 5}
+```
+
+The common entry stages all components, shares errors across MPI, then votes before
+publishing each rank's entire local bundle with one pointer assignment. Publication
+calls no user code. Previous states remain strongly referenced in `run['previous']`;
+retire their resources explicitly after success. Existing external aliases continue
+to refer to old objects, so recreate bindings or use closures reading the holder.
+The operation uses additional memory/resources while old and candidate states coexist.
+
+On an ordinary staging failure, `AtomicRestoreError` (a RuntimeFailure) reports
+`original_preserved=True`. All holders retain the original bundle, and computation
+can continue from the originals. Optional `discard_restore(candidate)` cleans
+attempted candidates in reverse synchronized slots. It is called on every relevant
+rank, including `discard_restore(None)` when staging threw or returned an unsafe
+alias. It must handle partial staging resources and complete its subgroup protocol
+before raising. A stage factory can instead clean its own failed allocations before
+raising. Cleanup errors are reported in `error.cleanup_errors`, separately from
+preservation of the live states. Candidate cleanup never authorizes changing live
+objects. Under the backend isolation contract, no original is passed to discard.
+
+`execute_checkpoint(..., operation='restore', atomic=True, live=live)` is the same
+protected path. Existing execute_checkpoint defaults to non-atomic execution for
+compatibility; direct-only targets are rejected by the protected path with zero
+LOAD calls, without fallback. Current in-process native FDTD/TDDFT/fast-HSE bindings
+have no isolated candidate factory in their ABI: the supplied native sample explicitly
+uses `atomic=False` and retains its prior failure/discard-job limits. LD/SBE states
+can be staged via new_state plus snapshot restore; custom JSON factories are shown
+in the runnable example. Native candidate support is separate remaining work.
+
+This contract covers handled exceptions with healthy participating MPI ranks and
+correct isolated factories. It does not recover process crashes, communicator loss,
+Fortran STOP or a backend which mutates/shares its original state during staging.
+
 ## Existing mixed native calculations
 
 The native mixed sample uses both common admission and execution, retaining solver-specific

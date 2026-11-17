@@ -8,7 +8,8 @@ import hashlib
 import json
 from pathlib import Path
 import numpy as np
-from salmonpy.checkpointing import CheckpointCapability, CheckpointTarget, execute_checkpoint
+from salmonpy.checkpointing import (CheckpointCapability, CheckpointTarget, CheckpointState,
+    execute_checkpoint, restore_checkpoint, AtomicRestoreError)
 
 GROUPS = [{'name': 'user', 'ranks': [0], 'role': 'material', 'point_ids': ['film']}]
 
@@ -66,13 +67,36 @@ def run(directory):
     metadata = json.loads((directory/'checkpoint.json').read_text())
     if hashlib.sha256(payload.read_bytes()).hexdigest() != metadata['state_sha256']:
         raise ValueError('user payload checksum differs')
-    restored = UserCurrent()
-    assert restored.load_calls == 0
-    execute_checkpoint(None, GROUPS,
-        states={'film': CheckpointTarget(restored.checkpoint_capability, restore=lambda: restored.load(payload))},
-        operation='restore', saved=metadata['compatibility'],
-        required_files=('state.json',), available_files=('state.json',))
-    assert restored.load_calls == 1
+    live = CheckpointState(states={'film': UserCurrent()})
+    previous = live.states['film']
+    for A in wave[:4]: previous.step(A)
+    before = (previous.A.tobytes(), previous.current.tobytes(), previous.steps, previous.load_calls)
+
+    def stage(fail=False):
+        candidate = UserCurrent()
+        candidate.load(payload)
+        if fail:
+            candidate.current[:] = 12345.
+            raise OSError('failure after partial candidate load')
+        return candidate
+
+    preserved = False
+    try:
+        restore_checkpoint(None, GROUPS, live=live,
+            states={'film': CheckpointTarget(previous.checkpoint_capability, stage_restore=lambda: stage(True))},
+            saved=metadata['compatibility'], required_files=('state.json',), available_files=('state.json',))
+    except AtomicRestoreError as exc:
+        preserved = exc.original_preserved
+    assert preserved and live.states['film'] is previous
+    assert before == (previous.A.tobytes(), previous.current.tobytes(), previous.steps, previous.load_calls)
+    np.testing.assert_array_equal(previous.step(wave[4]), expected[4])
+
+    restored_run = restore_checkpoint(None, GROUPS, live=live,
+        states={'film': CheckpointTarget(previous.checkpoint_capability, stage_restore=stage)},
+        saved=metadata['compatibility'], required_files=('state.json',), available_files=('state.json',))
+    restored = live.states['film']
+    assert restored_run['previous']['states']['film'] is previous
+    assert previous.steps == 5 and previous.load_calls == 0 and restored.load_calls == 1
     assert restored.steps == split
     suffix = np.array([restored.step(A) for A in wave[split:]])
     actual = np.concatenate((prefix, suffix))
@@ -81,17 +105,25 @@ def run(directory):
     assert not np.shares_memory(original.current, restored.current)
 
     incompatible = UserCurrent(decay=.5)
+    other_live = CheckpointState(states={'film': incompatible})
+    stage_calls = []
+    def incompatible_stage():
+        stage_calls.append('load')
+        candidate = UserCurrent(decay=.5)
+        candidate.load(payload)
+        return candidate
     rejected = False
     try:
-        execute_checkpoint(None, GROUPS,
-            states={'film': CheckpointTarget(incompatible.checkpoint_capability, restore=lambda: incompatible.load(payload))},
-            operation='restore', saved=record)
+        restore_checkpoint(None, GROUPS, live=other_live,
+            states={'film': CheckpointTarget(incompatible.checkpoint_capability, stage_restore=incompatible_stage)},
+            saved=record)
     except ValueError:
         rejected = True
-    assert rejected and incompatible.load_calls == 0
+    assert rejected and not stage_calls and incompatible.load_calls == 0
     result = {'status': 'passed', 'steps': total, 'restored_step': split,
               'new_steps_after_load': total-split, 'maximum_error': float(abs(actual-expected).max()),
-              'independent_states': True, 'changed_model_rejected_before_load': rejected}
+              'independent_states': True, 'changed_model_rejected_before_load': rejected,
+              'failed_restore_original_preserved': preserved}
     np.savez(directory/'response.npz', A=wave, current=actual, reference=expected)
     (directory/'result.json').write_text(json.dumps(result, indent=2)+'\n')
     return result

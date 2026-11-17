@@ -134,3 +134,140 @@ class CheckpointingTests(unittest.TestCase):
                 expected=original.step([n*.01,0,0])
                 actual=restored.step([n*.01,0,0])
                 for a,b in zip(actual,expected): np.testing.assert_array_equal(a,b)
+
+    def test_atomic_failure_preserves_all_originals_and_allows_continuation(self):
+        from salmonpy.checkpointing import CheckpointState, CheckpointTarget, restore_checkpoint, AtomicRestoreError
+        groups=[{'name':'user','ranks':[0],'point_ids':['a','b']}]
+        cap=CheckpointCapability('candidate/1',('save','restore'),(1,))
+        old_a={'step':7};old_b={'step':9}
+        live=CheckpointState(states={'a':old_a,'b':old_b})
+        discarded=[]
+        def fail():
+            candidate={'step':100}
+            candidate['partial']=True
+            raise ValueError('failed after partial candidate load')
+        targets={'a':CheckpointTarget(cap,stage_restore=lambda:{'step':10},discard_restore=lambda c:discarded.append(c)),
+                 'b':CheckpointTarget(cap,stage_restore=fail,discard_restore=lambda c:discarded.append(c))}
+        saved=check_checkpoint_compatibility(None,groups,states={'a':cap,'b':cap})
+        with self.assertRaises(AtomicRestoreError) as caught:
+            restore_checkpoint(None,groups,live=live,states=targets,saved=saved)
+        self.assertTrue(caught.exception.original_preserved)
+        self.assertIs(live.states['a'],old_a);self.assertIs(live.states['b'],old_b)
+        self.assertEqual((old_a,old_b),({'step':7},{'step':9}))
+        self.assertEqual(discarded,[None,{'step':10}])
+        live.states['a']['step']+=1
+        self.assertEqual(old_a['step'],8)
+
+    def test_atomic_success_publishes_candidates_together(self):
+        from salmonpy.checkpointing import CheckpointState, CheckpointTarget, restore_checkpoint
+        cap=CheckpointCapability('candidate/1',('save','restore'),(1,))
+        original={'step':3};candidate={'step':17}
+        live=CheckpointState(states={10:original})
+        saved=check_checkpoint_compatibility(None,GROUPS,states={10:cap})
+        run=restore_checkpoint(None,GROUPS,live=live,saved=saved,
+            states={10:CheckpointTarget(cap,stage_restore=lambda:candidate)})
+        self.assertIs(live.states['10'],candidate)
+        self.assertIs(run['previous']['states']['10'],original)
+        self.assertEqual(original,{'step':3})
+
+    def test_atomic_rejects_direct_only_and_live_alias(self):
+        from salmonpy.checkpointing import CheckpointState, CheckpointTarget, restore_checkpoint, AtomicRestoreError
+        from unittest.mock import Mock
+        cap=CheckpointCapability('candidate/1',('save','restore'),(1,))
+        original={};live=CheckpointState(states={10:original})
+        saved=check_checkpoint_compatibility(None,GROUPS,states={10:cap})
+        direct=Mock()
+        with self.assertRaises(ValueError):
+            restore_checkpoint(None,GROUPS,live=live,saved=saved,states={10:CheckpointTarget(cap,restore=direct)})
+        direct.assert_not_called()
+        with self.assertRaises(AtomicRestoreError):
+            restore_checkpoint(None,GROUPS,live=live,saved=saved,
+                states={10:CheckpointTarget(cap,stage_restore=lambda:original)})
+        self.assertIs(live.states['10'],original)
+
+    def test_atomic_cleanup_failure_reports_preserved_original(self):
+        from salmonpy.checkpointing import CheckpointState, CheckpointTarget, restore_checkpoint, AtomicRestoreError
+        groups=[{'name':'user','ranks':[0],'point_ids':['a','b']}]
+        cap=CheckpointCapability('candidate/1',('save','restore'),(1,))
+        live=CheckpointState(states={'a':{'step':1},'b':{'step':2}})
+        original=live.states
+        saved=check_checkpoint_compatibility(None,groups,states={'a':cap,'b':cap})
+        def fail(): raise OSError('candidate load error')
+        def cleanup(candidate): raise OSError('candidate cleanup error')
+        with self.assertRaises(AtomicRestoreError) as caught:
+            restore_checkpoint(None,groups,live=live,saved=saved,states={
+                'a':CheckpointTarget(cap,stage_restore=lambda:{'step':17},discard_restore=cleanup),
+                'b':CheckpointTarget(cap,stage_restore=fail)})
+        self.assertIs(live.states,original)
+        self.assertTrue(caught.exception.original_preserved)
+        self.assertIn('cleanup error',str(caught.exception.cleanup_errors))
+
+    def test_atomic_ld_state_candidate_continues_exactly(self):
+        import numpy as np
+        from salmonpy.ld import LorentzDrude
+        from salmonpy.checkpointing import CheckpointState, CheckpointTarget, execute_checkpoint, restore_checkpoint
+        material=LorentzDrude(plasma_frequency=1.,strength=[1.],resonance=[.5],damping=[.1])
+        cap=CheckpointCapability('ld-token/1',('save','restore'),(1,))
+        old=material.new_state(dt=.01)
+        live=CheckpointState(states={10:old})
+        old.step([.01,0,0])
+        saved=execute_checkpoint(None,GROUPS,states={10:CheckpointTarget(cap,save=old.snapshot)})
+        token=saved['states']['10']
+        def stage():
+            candidate=material.new_state(dt=.01)
+            try: candidate.restore(token)
+            except BaseException:
+                candidate.close();raise
+            return candidate
+        try:
+            restored=restore_checkpoint(None,GROUPS,live=live,saved=saved['compatibility'],
+                states={10:CheckpointTarget(cap,stage_restore=stage,discard_restore=lambda c:c.close() if c is not None else None)})
+            self.assertIsNot(live.states['10'],old)
+            self.assertIs(restored['previous']['states']['10'],old)
+            for n in range(2,8):
+                for a,b in zip(old.step([n*.01,0,0]),live.states['10'].step([n*.01,0,0])):
+                    np.testing.assert_array_equal(a,b)
+        finally:
+            if live.states['10'] is not old: live.states['10'].close()
+            old.close()
+
+    def test_atomic_sbe_abort_and_retry_preserve_future_currents(self):
+        import numpy as np
+        from salmonpy.examples.mpi_mixed_multiscale import models
+        from salmonpy.checkpointing import CheckpointState, CheckpointTarget, restore_checkpoint, AtomicRestoreError
+        _,model=models()
+        cap=CheckpointCapability('sbe-token/1',('save','restore'),(1,))
+        other=CheckpointCapability('counter/1',('save','restore'),(1,))
+        groups=[{'name':'user','ranks':[0],'point_ids':[10,20]}]
+        old=model.new_state(dt=.01);reference=model.new_state(dt=.01)
+        wave=[[0,0,.0001*n] for n in range(1,13)]
+        expected=[reference.step(A).copy() for A in wave]
+        for A in wave[:5]: old.step(A)
+        token=old.snapshot()
+        for A in wave[5:8]: old.step(A)
+        counter={'step':8};live=CheckpointState(states={10:old,20:counter})
+        saved=check_checkpoint_compatibility(None,groups,states={10:cap,20:other})
+        def stage():
+            c=model.new_state(dt=.01)
+            try:c.restore(token)
+            except BaseException:c.close();raise
+            return c
+        def fail():raise OSError('second point failed')
+        target=CheckpointTarget(cap,stage_restore=stage,discard_restore=lambda c:c.close() if c is not None else None)
+        before=old.snapshot()
+        try:
+            with self.assertRaises(AtomicRestoreError):
+                restore_checkpoint(None,groups,live=live,saved=saved,
+                    states={10:target,20:CheckpointTarget(other,stage_restore=fail)})
+            self.assertIs(live.states['10'],old)
+            self.assertEqual(old.snapshot()._integrity,before._integrity)
+            self.assertEqual(counter,{'step':8})
+            np.testing.assert_array_equal(old.step(wave[8]),expected[8])
+            restore_checkpoint(None,groups,live=live,saved=saved,
+                states={10:target,20:CheckpointTarget(other,stage_restore=lambda:{'step':5})})
+            for A,j in zip(wave[5:],expected[5:]):
+                np.testing.assert_array_equal(live.states['10'].step(A),j)
+            self.assertEqual(counter,{'step':8})
+        finally:
+            if live.states['10'] is not old:live.states['10'].close()
+            old.close();reference.close()
