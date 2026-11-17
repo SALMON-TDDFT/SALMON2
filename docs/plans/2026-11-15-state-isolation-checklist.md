@@ -449,3 +449,12 @@ Evidence: `../mixed-identity-validation-2026-11-17.md`. M6 remains an umbrella m
 - [x] Updated point_ld sample and JP/EN/AI guides. Source/wheel517 tests (one skip), sdist→wheel and installed example pass. No solver or MPI code changed; no remote Actions.
 
 Evidence: `../point-snapshot-identity-validation-2026-11-17.md`. General branch APIs, arbitrary disk payloads, changed topology and native ownership/recoverable errors remain open. Molecular work stays paused.
+
+### 2026-11-17 recoverable standard TDDFT admission
+
+- [x] Standard embedded TDDFT protocol1 rejects statuses10..14 collectively on the attached communicator before initialization latch or numerical update. Invalid/nonfinite/stale/rank-inconsistent inputs, lifecycle/capacity and pending-candidate checks; scalar IEEE checks only.
+- [x] Python initialization retry only for declared unanimous pre-setup10/11; step InputError only for declared unanimous pre-update rejection. Old/unknown binaries retain conservative RuntimeFailure; successful native initialization remains one lifetime.
+- [x] Two independent2-rank groups, raw ABI13 negative cases with numerical checkpoint byte preservation, Python init retry and valid8-step old/new current parity. Four-rank ordinary mixed64-step old/new A/E/j exact, protected-failure/retry regression exact. Source/wheel519 tests (one skip),sdist→wheel and JP/EN/AI sync; no Actions.
+- [ ] General native failure contract remains OPEN: deep initialization/step STOP, nonfinite results after mutation, allocations, native FDTD/fast-HSE equivalents, whole-session step rollback and process/MPI failures are not solved by admission.
+
+Evidence: `../native-tddft-admission-validation-2026-11-17.md`. The current audit item5 remains partial; do not mark general native failure recovery complete.

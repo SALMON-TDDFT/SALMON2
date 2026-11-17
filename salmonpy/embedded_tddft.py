@@ -60,6 +60,20 @@ class NativeTDDFTMaterialProvider:
         return self.initial
 
 
+def _admission_rejected(lib, outcomes, allowed=(10, 11, 12, 13, 14)):
+    """Only a declared protocol and unanimous status establish no mutation."""
+    codes = [status for status, finite in outcomes]
+    if not codes or codes[0] not in allowed or len(set(codes)) != 1 or not all(finite for _, finite in outcomes):
+        return False
+    query = getattr(lib, 'sp_tddft_error_protocol', None)
+    if query is None:
+        return False
+    import ctypes as c
+    query.argtypes = []
+    query.restype = c.c_int
+    return query() == 1
+
+
 class NativeTDDFTBackend:
     """Collective native A/c-to-charge-current adapter, one point per group.
 
@@ -137,6 +151,7 @@ class NativeTDDFTBackend:
         _used=True
         state=_NativeState(native,lib,work,initial.max_steps)
         state.checkpoint_decomposition=self.decomposition
+        retryable_initialization=False
         try:
             J=np.empty(3)
             code=state._call(lib.sp_tddft_init,os.fsencode(initial.input_file),float(dt),initial.max_steps,
@@ -146,11 +161,16 @@ class NativeTDDFTBackend:
             state.timing=_response_timing(float(dt),'embedded SALMON middlepoint TDDFT; charge current -J_native')
             outcomes=comm.allgather((int(code),bool(np.isfinite(J).all())))
             if any(code or not finite for code,finite in outcomes):
+                retryable_initialization=_admission_rejected(lib,outcomes,allowed=(10,11))
+                if retryable_initialization:
+                    raise InputError('native initialization rejected before setup; retry permitted: '+str(outcomes))
                 raise RuntimeFailure('native initialization failed: '+str(outcomes))
             state.initial_current=-J
             return state
         except BaseException:
             state.close()
+            if retryable_initialization:
+                _used=False
             raise
 
 
@@ -187,7 +207,10 @@ class _NativeState:
         J=np.empty(3)
         code=self._call(self.lib.sp_tddft_step,old,new,J)
         outcomes=comm.allgather((int(code),bool(np.isfinite(J).all())))
-        if any(code or not finite for code,finite in outcomes):raise RuntimeFailure('native step failed: '+str(outcomes))
+        if any(code or not finite for code,finite in outcomes):
+            if _admission_rejected(self.lib,outcomes):
+                raise InputError('native step rejected before update; accepted state unchanged: '+str(outcomes))
+            raise RuntimeFailure('native step failed; numerical state is not guaranteed unchanged: '+str(outcomes))
         self.A=new.copy();self.steps+=1
         return -J  # Physical charge-current density, converted exactly once.
 

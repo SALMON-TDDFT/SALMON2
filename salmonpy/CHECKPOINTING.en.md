@@ -305,3 +305,11 @@ Use `--legacy-checkpoint-identity` explicitly only for old unidentified checkpoi
 This is process-local rewind, not branching, cloning, disk persistence or an MPI-wide transaction. Unsupported custom backends raise `SnapshotError`. Backend restore-failure guarantees remain the backend's responsibility; identity rejection invokes no backend restore callback. Raw-state snapshot APIs are unchanged.
 
 `python -m salmonpy.examples.point_ld /new/output/directory` also verifies cross-point rejection and exact current continuation after same-point restore.
+
+## Native TDDFT rejection before update (limited scope)
+
+Newly prepared and built standard embedded TDDFT exposes `sp_tddft_error_protocol() == 1`. Validation is collective on the attached material communicator:10 invalid/nonfinite input, stale A or missing input file;11 rank disagreement;12 unavailable lifecycle or repeated initialization;13 exhausted step capacity;14 pending restore candidate. These codes return unanimously before numerical mutation. Initial admission codes10/11 do not consume the lifetime; Python initialization can be retried with corrected input. Failed work directories remain for diagnosis.
+
+Python maps only protocol-declared unanimous rejection to `InputError`. Old libraries, unknown codes or nonfinite results retain `RuntimeFailure`, with no inferred state guarantee. Every solver-group member must enter the same call. Invalid pointers, MPI/process failure, allocation errors, deep solver STOP and failures after numerical updates are excluded. Actual initialization still consumes the one-process lifetime. Fast HSE and native FDTD error contracts are unchanged.
+
+This guarantee concerns an individual TDDFT state's pre-update rejection. A coupled session may already have advanced another component; it remains failed under the existing driver policy. This does not implement general coupled-step rollback.

@@ -89,11 +89,18 @@ logical,save :: used=.false.
 real(8),save :: accepted_A(3)=0d0
 integer(8),save :: checkpoint_array_limit=0_8
 contains
+! Protocol1: statuses10..14 reject collectively before numerical/latch changes.
+integer(c_int) function sp_tddft_error_protocol() bind(C)
+  sp_tddft_error_protocol=1
+end function
+
 integer(c_int) function sp_tddft_checkpoint_protocol() bind(C)
   sp_tddft_checkpoint_protocol=1
 end function
 
 integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition, J) bind(C)
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use communication, only: comm_get_max, comm_get_globalinfo
   use inputoutput, only: read_input
   use parallelization, only: setup_parallel
   use math_constants, only: set_math_constants
@@ -105,16 +112,51 @@ integer(c_int) function sp_tddft_init(path, timestep, capacity, A, decomposition
   integer(c_int),intent(in) :: decomposition(5)
   real(c_double),intent(out) :: J(3)
   character(4096) :: filename
-  integer :: i
-  sp_tddft_init=1
-  if(used) return
-  used=.true.
+  integer :: i,status,reference_capacity,reference_decomposition(5),admission_group,admission_rank,admission_size
+  real(8) :: reference_dt,reference_A(3)
+  character(4096) :: reference_filename
+  logical :: exists
+  call comm_get_globalinfo(admission_group,admission_rank,admission_size)
+  J=0d0
+  status=0
+  if(used)status=12
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_init=status;return
+  endif
   filename=''
   do i=1,len(filename)
     if(path(i)==c_null_char) exit
     filename(i:i)=path(i)
   end do
-  if(i>len(filename)) return
+  if(i>len(filename).or.len_trim(filename)==0)status=10
+  if(.not.ieee_is_finite(timestep).or.timestep<=0d0.or.capacity<1.or.capacity>huge(capacity)-2)status=10
+  do i=1,3
+    if(.not.ieee_is_finite(A(i)))status=10
+  enddo
+  if(any(decomposition<1))status=10
+  if(product(real(decomposition,8))/=real(admission_size,8))status=10
+  inquire(file=trim(filename),exist=exists)
+  if(.not.exists)status=10
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_init=status;return
+  endif
+  reference_dt=timestep;reference_capacity=capacity;reference_A=A
+  reference_decomposition=decomposition;reference_filename=filename
+  call comm_bcast(reference_dt,admission_group)
+  call comm_bcast(reference_capacity,admission_group)
+  call comm_bcast(reference_A,admission_group)
+  call comm_bcast(reference_decomposition,admission_group)
+  call comm_bcast(reference_filename,admission_group)
+  if(reference_dt/=timestep.or.reference_capacity/=capacity.or.any(reference_A/=A).or. &
+     any(reference_decomposition/=decomposition).or.reference_filename/=filename)status=11
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_init=status;return
+  endif
+  ! Only actual initialization consumes the process-owned lifetime.
+  used=.true.
   worker_embedded=.true.
   worker_initial_A=A; embedded_dt=timestep; embedded_steps=capacity
   embedded_decomposition=decomposition
@@ -157,11 +199,39 @@ end if
   sp_tddft_init=0
 end function
 integer(c_int) function sp_tddft_step(Aold,Anew,J) bind(C)
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use communication, only: comm_get_max, comm_get_globalinfo
   real(c_double),intent(in) :: Aold(3),Anew(3)
   real(c_double),intent(out) :: J(3)
-  sp_tddft_step=1
-  if(.not.allocated(state)) return
-  if(any(Aold/=accepted_A).or.state%itt>=nt) return
+  integer :: status,reference_step,admission_group,admission_rank,admission_size,i
+  real(8) :: reference_old(3),reference_new(3)
+  call comm_get_globalinfo(admission_group,admission_rank,admission_size)
+  J=0d0
+  status=0
+  if(.not.allocated(state))status=12
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_step=status;return
+  endif
+  do i=1,3
+    if(.not.ieee_is_finite(Aold(i)).or..not.ieee_is_finite(Anew(i)))status=10
+  enddo
+  if(any(Aold/=accepted_A))status=10
+  if(state%itt>=nt)status=13
+  if(allocated(pending))status=14
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_step=status;return
+  endif
+  reference_old=Aold;reference_new=Anew;reference_step=state%itt
+  call comm_bcast(reference_old,admission_group)
+  call comm_bcast(reference_new,admission_group)
+  call comm_bcast(reference_step,admission_group)
+  if(any(reference_old/=Aold).or.any(reference_new/=Anew).or.reference_step/=state%itt)status=11
+  call comm_get_max(status,admission_group)
+  if(status/=0)then
+    sp_tddft_step=status;return
+  endif
   state%itt=state%itt+1
   state%rt%Ac_ext(:,state%itt)=Anew
   state%rt%Ac_tot(:,state%itt)=Anew

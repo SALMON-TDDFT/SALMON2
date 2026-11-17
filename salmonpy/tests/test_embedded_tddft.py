@@ -113,3 +113,35 @@ class EmbeddedTDDFTTest(unittest.TestCase):
         self.assertTrue(field.failed)
         with self.assertRaises(ValueError):field.advance(np.zeros((1,3)))
         self.assertEqual(len(calls),1)
+
+    def test_queryable_native_rejection_is_retryable_without_advancing(self):
+        import numpy as np
+        from types import SimpleNamespace
+        from salmonpy.embedded_tddft import _NativeState
+        from salmonpy.errors import InputError, RuntimeFailure
+        for protocol, expected in ((1,InputError),(0,RuntimeFailure)):
+            code=[10]
+            def native_step(old,new,J):
+                J[:]=0
+                return code[0]
+            comm=SimpleNamespace(allgather=lambda value:[value,value])
+            lib=SimpleNamespace(sp_tddft_step=native_step,sp_tddft_error_protocol=lambda:protocol)
+            state=_NativeState(SimpleNamespace(context=SimpleNamespace(solver_comm=comm)),lib,None,8)
+            state._call=lambda function,*args:function(*args)
+            with self.subTest(protocol=protocol),self.assertRaises(expected):
+                state.advance(np.zeros(3),np.ones(3))
+            np.testing.assert_array_equal(state.A,np.zeros(3))
+            self.assertEqual(state.steps,0)
+            code[0]=0
+            np.testing.assert_array_equal(state.advance(np.zeros(3),np.ones(3)),np.zeros(3))
+            self.assertEqual(state.steps,1)
+
+    def test_rejection_guarantee_requires_protocol_and_unanimous_status(self):
+        from types import SimpleNamespace
+        from salmonpy.embedded_tddft import _admission_rejected
+        lib=SimpleNamespace(sp_tddft_error_protocol=lambda:1)
+        self.assertTrue(_admission_rejected(lib,[(11,True),(11,True)]))
+        for outcomes in ([],[(0,True),(10,True)],[(1,True),(1,True)],[(10,False),(10,True)]):
+            self.assertFalse(_admission_rejected(lib,outcomes))
+        self.assertFalse(_admission_rejected(SimpleNamespace(),[(10,True)]))
+        self.assertFalse(_admission_rejected(lib,[(12,True)],allowed=(10,11)))
