@@ -548,3 +548,12 @@ Evidence: `../multipoint-mixed-validation-2026-11-17.md`. Audit item7 now includ
 - [ ] Remaining cell/k/symmetry/communicator/ionic dynamics/I/O/timer/DC/SOC/+U ownership,stable handles and general initialization/allocation-failure recovery remain open. Legacy wrapper still normalizes shared Rion for downstream code. This only closes the captured ion-input/owned-array slice of audit item6.
 
 Evidence: `../ion-initialization-validation-2026-11-17.md`.
+
+### 2026-11-17 standard cell/grid initialization ownership
+
+- [x] Port existing fast-PR cell/grid value types and explicit resolvers to standard solver/optional RT-step structures. Both profiles have capture-only cell_config_from_input. Existing derived-type layouts,valid cell precedence/arithmetic,grid epsilon/parity and compatibility al normalization preserved.
+- [x] Standard/HSE cell/grid/ion probes OMP1/2,global-poisoning and frozen periodic/isolated/Maxwell grid references pass;invalid input preserves original geometry/indices. Standard/RT-step/HSE source preparation and manifest chains verified;shared kernels unchanged. Optional RT-step full fresh4-worker build and matching-profile cell/grid/ion OMP1/2 probes pass;no full RT-profile dynamics claim.
+- [x] MPI2 fresh GS energy/eigen/k/force exact;five-rank PBE/HSE Taylor/PT-CN and seven-rank mixed protected failure/retry exact. Seven-rank direct restore failure/original continuation/retry pass without replay. Source/installed545 tests(one skip each),sdist→wheel/native hashes and JP/EN/AI guides synchronized. No Actions.
+- [ ] Compatibility wrappers still consume shared inputs;whole grid coordinates,parallel ownership,k/symmetry/FFT resources and full heterogeneous GS/TDDFT initialization remain open. Explicit resolver ownership does not establish arbitrary native reentrancy or stable handles. Molecular work paused;budget warning-only.
+
+Evidence: `../cell-grid-initialization-validation-2026-11-17.md`.

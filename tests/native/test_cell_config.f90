@@ -1,12 +1,17 @@
 program probe
  use structures,only:s_cell_config,s_cell_geometry
- use initialization_sub,only:resolve_cell
+ use initialization_sub,only:resolve_cell,cell_config_from_input
+ use salmon_global,only:al,dl,num_rgrid,al_vec1,al_vec2,al_vec3
  use,intrinsic::ieee_arithmetic,only:ieee_value,ieee_quiet_nan
  implicit none
  type(s_cell_config)::a,b
  type(s_cell_geometry)::ga,gb,before
  integer::status
- a%lengths=[8d0,12d0,16d0];a%points=[8,12,16]
+ al=[8d0,12d0,16d0];num_rgrid=[8,12,16];dl=0d0
+ al_vec1=0d0;al_vec2=0d0;al_vec3=0d0
+ call cell_config_from_input(a)
+ al=-99d0;num_rgrid=-99;dl=-99d0;al_vec1=-99d0;al_vec2=-99d0;al_vec3=-99d0
+ if(any(a%lengths/=[8d0,12d0,16d0]).or.any(a%points/=[8,12,16]))stop 9
  a%vectors=0d0;a%vectors(1,1)=10;a%vectors(2,2)=20;a%vectors(3,3)=30
  call resolve_cell(a,ga,status)
  if(status/=0.or.any(ga%lengths/=a%lengths).or.any(ga%spacing/=1d0))stop 1

@@ -179,6 +179,88 @@ end subroutine init_dft
 
 !===================================================================================================================================
 
+subroutine cell_config_from_input(config)
+  use structures,only:s_cell_config
+  use salmon_global,only:al,dl,num_rgrid,al_vec1,al_vec2,al_vec3
+  implicit none
+  type(s_cell_config),intent(out)::config
+  config%lengths=al;config%spacing=dl;config%points=num_rgrid
+  config%vectors(:,1)=al_vec1;config%vectors(:,2)=al_vec2;config%vectors(:,3)=al_vec3
+end subroutine cell_config_from_input
+
+subroutine resolve_cell(config,result,status)
+  use structures,only:s_cell_config,s_cell_geometry
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
+  implicit none
+  type(s_cell_config),intent(in)::config
+  type(s_cell_geometry),intent(inout)::result
+  integer,intent(out)::status
+  type(s_cell_geometry)::trial
+  real(8)::al(3),al_vec1(3),al_vec2(3),al_vec3(3),dl(3),rsize(3),hgs(3)
+  real(8)::scaled(3,3),volume
+  integer::num_rgrid(3),i,j
+  status=1
+  al=config%lengths;al_vec1=config%vectors(:,1);al_vec2=config%vectors(:,2);al_vec3=config%vectors(:,3)
+  dl=config%spacing;num_rgrid=config%points
+  do i=1,3
+    if(.not.ieee_is_finite(al(i)).or..not.ieee_is_finite(dl(i)))return
+    do j=1,3
+      if(.not.ieee_is_finite(config%vectors(i,j)))return
+    enddo
+  enddo
+  if(sum(abs(dl))==0d0)then
+    if(any(num_rgrid<=0))return
+  else
+    if(any(dl<=0d0))return
+  endif
+  if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
+     al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
+    trial%orthogonal = .true.
+    if(al(1)*al(2)*al(3)==0d0) then
+      if(al_vec1(1)*al_vec2(2)*al_vec3(3)/=0d0) then
+        al(1) = al_vec1(1)
+        al(2) = al_vec2(2)
+        al(3) = al_vec3(3)
+      else if(all(num_rgrid>0) .and. dl(1)*dl(2)*dl(3)/=0d0) then
+        al = dl * dble(num_rgrid)
+      else
+        return
+      end if
+    end if
+    trial%primitive = 0d0
+    trial%primitive(1,1) = al(1)
+    trial%primitive(2,2) = al(2)
+    trial%primitive(3,3) = al(3)
+    rsize = al
+  else
+    trial%orthogonal = .false.
+    trial%primitive(1:3,1) = al_vec1
+    trial%primitive(1:3,2) = al_vec2
+    trial%primitive(1:3,3) = al_vec3
+    rsize(1) = sqrt(sum(al_vec1**2))
+    rsize(2) = sqrt(sum(al_vec2**2))
+    rsize(3) = sqrt(sum(al_vec3**2))
+  end if
+
+  if(sum(abs(dl)) == 0d0) then
+    hgs(1:3) = rsize(1:3) / dble(num_rgrid(1:3))
+  else
+    hgs(1:3) = dl(1:3)
+  end if
+  do i=1,3
+    if(.not.ieee_is_finite(rsize(i)).or..not.ieee_is_finite(hgs(i)))return
+    if(rsize(i)<=0d0.or.hgs(i)<=0d0)return
+  enddo
+  scaled=trial%primitive/maxval(abs(trial%primitive))
+  volume=scaled(1,1)*(scaled(2,2)*scaled(3,3)-scaled(2,3)*scaled(3,2)) &
+       -scaled(1,2)*(scaled(2,1)*scaled(3,3)-scaled(2,3)*scaled(3,1)) &
+       +scaled(1,3)*(scaled(2,1)*scaled(3,2)-scaled(2,2)*scaled(3,1))
+  if(volume==0d0)return
+  trial%lengths=rsize;trial%spacing=hgs
+  result=trial
+  status=0
+end subroutine resolve_cell
+
 subroutine init_dft_system(lg,system,stencil,unfold)
   use structures
   use lattice
@@ -194,6 +276,9 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   type(s_stencil)    :: stencil
   type(s_unfold)     :: unfold
   !
+  type(s_cell_config)::cell_input
+  type(s_cell_geometry)::cell
+  integer::cell_status
   type(s_ion_initial_config)::ion_input
   integer::ion_status
   integer :: ii,jj
@@ -201,40 +286,13 @@ subroutine init_dft_system(lg,system,stencil,unfold)
 
   call ion_input_config(ion_input)
 
-  if(al_vec1(2)==0d0 .and. al_vec1(3)==0d0 .and. al_vec2(1)==0d0 .and. &
-     al_vec2(3)==0d0 .and. al_vec3(1)==0d0 .and. al_vec3(2)==0d0) then
-    stencil%if_orthogonal = .true.
-    if(al(1)*al(2)*al(3)==0d0) then
-      if(al_vec1(1)*al_vec2(2)*al_vec3(3)/=0d0) then
-        al(1) = al_vec1(1)
-        al(2) = al_vec2(2)
-        al(3) = al_vec3(3)
-      else if(num_rgrid(1)*num_rgrid(2)*num_rgrid(3)/=0 .and. dl(1)*dl(2)*dl(3)/=0d0) then
-        al = dl * dble(num_rgrid)
-      else
-        stop "error: invalid cell"
-      end if
-    end if
-    system%primitive_a = 0d0
-    system%primitive_a(1,1) = al(1)
-    system%primitive_a(2,2) = al(2)
-    system%primitive_a(3,3) = al(3)
-    rsize = al
-  else
-    stencil%if_orthogonal = .false.
-    system%primitive_a(1:3,1) = al_vec1
-    system%primitive_a(1:3,2) = al_vec2
-    system%primitive_a(1:3,3) = al_vec3
-    rsize(1) = sqrt(sum(al_vec1**2))
-    rsize(2) = sqrt(sum(al_vec2**2))
-    rsize(3) = sqrt(sum(al_vec3**2))
-  end if
-
-  if(sum(abs(dl)) == 0d0) then
-    hgs(1:3) = rsize(1:3) / dble(num_rgrid(1:3))
-  else
-    hgs(1:3) = dl(1:3)
-  end if
+  call cell_config_from_input(cell_input)
+  call resolve_cell(cell_input,cell,cell_status)
+  if(cell_status/=0)error stop 'Invalid cell configuration'
+  stencil%if_orthogonal=cell%orthogonal
+  system%primitive_a=cell%primitive;rsize=cell%lengths;hgs=cell%spacing
+  ! Preserve legacy normalization for downstream input consumers until extracted.
+  if(cell%orthogonal)al=cell%lengths
   call init_grid_whole(rsize,hgs,lg)
   system%hgs = hgs
   system%ngrid = lg%num(1) * lg%num(2) * lg%num(3)
@@ -481,74 +539,119 @@ end subroutine init_parallel_dft
 
 !===================================================================================================================================
 
+subroutine grid_config_from_input(rsize,config)
+  use structures,only:s_rgrid_config
+  use salmon_global,only:iperiodic,dl,num_rgrid,theory,al_em,dl_em,num_rgrid_em
+  real(8),intent(in)::rsize(3)
+  type(s_rgrid_config),intent(out)::config
+  config%periodicity=iperiodic
+  if(theory=='maxwell')then
+    config%points=num_rgrid_em;config%spacing=dl_em;config%lengths=al_em
+  else
+    config%points=num_rgrid;config%spacing=dl;config%lengths=rsize
+  endif
+end subroutine
+
 subroutine init_grid_whole(rsize,hgs,lg)
-  use structures, only: s_rgrid
-  use salmon_global, only: iperiodic,dl,num_rgrid,theory,al_em,dl_em,num_rgrid_em
+  use structures,only:s_rgrid,s_rgrid_config
+  real(8),intent(in)::rsize(3),hgs(3)
+  type(s_rgrid),intent(inout)::lg
+  type(s_rgrid_config)::config
+  integer::status
+  call grid_config_from_input(rsize,config)
+  call init_grid_whole_config(rsize,hgs,config,lg,status)
+  if(status/=0)error stop 'Invalid or unavailable real-space grid'
+end subroutine init_grid_whole
+
+subroutine init_grid_whole_config(rsize,hgs,config,lg,status)
+  use structures,only:s_rgrid,s_rgrid_config
+  use,intrinsic::ieee_arithmetic,only:ieee_is_finite
   implicit none
-  real(8),intent(in) :: rsize(3),hgs(3)
-  type(s_rgrid)      :: lg
-  !
-  real(8),parameter :: epsilon=1.d-10
-  integer :: j
+  real(8),intent(in)::rsize(3),hgs(3)
+  type(s_rgrid_config),intent(in)::config
+  type(s_rgrid),intent(inout)::lg
+  integer,intent(out)::status
+  type(s_rgrid)::trial
+  real(8),parameter::epsilon=1d-10
+  real(8)::ratio
+  integer::j,total,allocation_status
+  status=1
+  if(config%periodicity/=0.and.config%periodicity/=3)return
+  do j=1,3
+    if(.not.ieee_is_finite(rsize(j)).or..not.ieee_is_finite(hgs(j)))return
+    if(.not.ieee_is_finite(config%spacing(j)).or..not.ieee_is_finite(config%lengths(j)))return
+    if(rsize(j)<=0d0.or.hgs(j)<=0d0)return
+    ratio=(rsize(j)+epsilon)/hgs(j)
+    if(.not.ieee_is_finite(ratio))return
+    if(ratio>dble(huge(0)-2*Nd-2))return
+  enddo
+  trial%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
+  trial%nd = Nd
 
-  lg%ndir = 3 ! high symmetry nonorthogonal lattice is not implemented
-  lg%nd = Nd
-
-  select case(iperiodic)
+  select case(config%periodicity)
     case(0)
-      lg%ie(:)=int((rsize(:)+epsilon)/2.d0/Hgs(:))
+      trial%ie(:)=int((rsize(:)+epsilon)/2.d0/Hgs(:))
       do j=1,3
         if(mod(int(rsize(j)/Hgs(j)+1.d-12),2)==1)then
-          lg%is(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))
+          trial%is(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))
         else
-          lg%is(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))+1
+          trial%is(j)=-(int((rsize(j)+epsilon)/2.d0/Hgs(j)))+1
         end if
       end do
     case(3)
-      lg%is(:)=1
-      lg%ie(:)=int((rsize(:)+epsilon)/Hgs(:))
+      trial%is(:)=1
+      trial%ie(:)=int((rsize(:)+epsilon)/Hgs(:))
   end select
-  lg%num(:)=lg%ie(:)-lg%is(:)+1
+  trial%num(:)=trial%ie(:)-trial%is(:)+1
 
-  lg%is_overlap(1:3) = lg%is(1:3) - Nd
-  lg%ie_overlap(1:3) = lg%ie(1:3) + Nd
-  lg%is_array(1:3)   = lg%is_overlap(1:3)
-  lg%ie_array(1:3)   = lg%ie_overlap(1:3)
+  trial%is_overlap(1:3) = trial%is(1:3) - Nd
+  trial%ie_overlap(1:3) = trial%ie(1:3) + Nd
+  trial%is_array(1:3)   = trial%is_overlap(1:3)
+  trial%ie_array(1:3)   = trial%ie_overlap(1:3)
 
-  if ( allocated(lg%idx) ) deallocate(lg%idx)
-  if ( allocated(lg%idy) ) deallocate(lg%idy)
-  if ( allocated(lg%idz) ) deallocate(lg%idz)
-  allocate(lg%idx(lg%is_overlap(1):lg%ie_overlap(1)) &
-          ,lg%idy(lg%is_overlap(2):lg%ie_overlap(2)) &
-          ,lg%idz(lg%is_overlap(3):lg%ie_overlap(3)))
+  if(any(trial%num<=0))return
+  total=1
+  do j=1,3
+    if(trial%num(j)>huge(0)/total)return
+    total=total*trial%num(j)
+  enddo
+  if(sum(abs(config%spacing))<=1d-12)then
+    if(any(config%points/=trial%num))return
+  else
+    if(any(config%spacing<=0d0))return
+    do j=1,3
+      ratio=config%lengths(j)/config%spacing(j)
+      if(.not.ieee_is_finite(ratio))return
+      if(abs(ratio-dble(trial%num(j)))>1d-4)return
+    enddo
+  endif
+  allocate(trial%idx(trial%is_overlap(1):trial%ie_overlap(1)) &
+          ,trial%idy(trial%is_overlap(2):trial%ie_overlap(2)) &
+          ,trial%idz(trial%is_overlap(3):trial%ie_overlap(3)),stat=allocation_status)
+  if(allocation_status/=0)then
+    status=2;return
+  endif
 
-  do j=lg%is_overlap(1),lg%ie_overlap(1)
-    lg%idx(j) = j
+  do j=trial%is_overlap(1),trial%ie_overlap(1)
+    trial%idx(j) = j
   end do
-  do j=lg%is_overlap(2),lg%ie_overlap(2)
-    lg%idy(j) = j
+  do j=trial%is_overlap(2),trial%ie_overlap(2)
+    trial%idy(j) = j
   end do
-  do j=lg%is_overlap(3),lg%ie_overlap(3)
-    lg%idz(j) = j
+  do j=trial%is_overlap(3),trial%ie_overlap(3)
+    trial%idz(j) = j
   end do
 
-  select case(theory)
-  case('maxwell')
-    if(sum(abs(dl_em)) <= 1d-12) then
-      if( maxval(abs(num_rgrid_em-lg%num)) > 0) stop "error: num_rgrid_em /= lg%num"
-    else
-      if( maxval(abs((al_em/dl_em)-dble(lg%num))) > 1d-4 ) stop "error: abs((al_em/dl_em)-dble(lg%num)) is too large"
-    end if
-  case default
-    if(sum(abs(dl)) <= 1d-12) then
-      if( maxval(abs(num_rgrid-lg%num)) > 0) stop "error: num_rgrid /= lg%num"
-    else
-      if( maxval(abs((rsize/dl)-dble(lg%num))) > 1d-4 ) stop "error: abs((rsize/dl)-dble(lg%num)) is too large"
-    end if
-  end select
 
-  return
-end subroutine init_grid_whole
+  lg%ndir=trial%ndir;lg%nd=trial%nd
+  lg%is=trial%is;lg%ie=trial%ie;lg%num=trial%num
+  lg%is_overlap=trial%is_overlap;lg%ie_overlap=trial%ie_overlap
+  lg%is_array=trial%is_array;lg%ie_array=trial%ie_array
+  call move_alloc(trial%idx,lg%idx)
+  call move_alloc(trial%idy,lg%idy)
+  call move_alloc(trial%idz,lg%idz)
+  status=0
+end subroutine init_grid_whole_config
 
 !===================================================================================================================================
 

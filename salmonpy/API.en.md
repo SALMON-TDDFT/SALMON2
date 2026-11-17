@@ -110,3 +110,19 @@ This is an internal ownership boundary, not a new Python API or stable C ABI.
 Cell/k/symmetry/communicator and other initialization dependencies remain; it does
 not establish arbitrary different-input GS/TDDFT contexts in one process. Memory
 allocation failures and global initialization STOP paths remain outside recovery.
+
+### Explicit cell and real-space grid resolution
+
+The standard solver now shares fast-PR HSE's value interfaces: `s_cell_config`,
+`s_cell_geometry`, `s_rgrid_config`, `resolve_cell` and `init_grid_whole_config`.
+Both profiles use capture-only `cell_config_from_input`; the explicit resolvers
+read no global input. They preserve valid legacy cell precedence, arithmetic,
+periodic/isolated index placement, epsilon rounding and Maxwell consistency
+lengths. Rejected resolutions retain the target geometry/index arrays. These
+helpers resolve cell values and whole-grid indices; they do not initialize all
+coordinates, parallel decomposition, symmetry or FFT resources.
+
+Existing initialization wrappers still capture legacy inputs and normalize `al`
+for downstream consumers. This is not complete different-cell GS/TDDFT reentrancy
+or a new public Python/C interface. The optional RT-step structure profile carries
+the same value types; preparation verifies its new before/after source hashes.

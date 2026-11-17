@@ -179,6 +179,15 @@ end subroutine init_dft
 
 !===================================================================================================================================
 
+subroutine cell_config_from_input(config)
+  use structures,only:s_cell_config
+  use salmon_global,only:al,dl,num_rgrid,al_vec1,al_vec2,al_vec3
+  implicit none
+  type(s_cell_config),intent(out)::config
+  config%lengths=al;config%spacing=dl;config%points=num_rgrid
+  config%vectors(:,1)=al_vec1;config%vectors(:,2)=al_vec2;config%vectors(:,3)=al_vec3
+end subroutine cell_config_from_input
+
 subroutine resolve_cell(config,result,status)
   use structures,only:s_cell_config,s_cell_geometry
   use,intrinsic::ieee_arithmetic,only:ieee_is_finite
@@ -291,8 +300,7 @@ subroutine init_dft_system(lg,system,stencil,unfold)
   spin=system%occupation_input%spin;yn_spinorbit=system%occupation_input%spinorbit
   call xc_input_config(system%xc_input)
   system%xc_input_ready=.true.
-  cell_input%lengths=al;cell_input%spacing=dl;cell_input%points=num_rgrid
-  cell_input%vectors(:,1)=al_vec1;cell_input%vectors(:,2)=al_vec2;cell_input%vectors(:,3)=al_vec3
+  call cell_config_from_input(cell_input)
   call resolve_cell(cell_input,cell,cell_status)
   if(cell_status/=0)error stop 'Invalid cell configuration'
   stencil%if_orthogonal=cell%orthogonal

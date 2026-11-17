@@ -101,6 +101,20 @@ module structures
     character(1) :: yn_bookkeep
   end type s_ewald_ion_ion
 
+  type s_cell_config
+    real(8) :: lengths(3)=0d0,vectors(3,3)=0d0,spacing(3)=0d0
+    integer :: points(3)=0
+  end type
+  type s_cell_geometry
+    real(8) :: primitive(3,3)=0d0,lengths(3)=0d0,spacing(3)=0d0
+    logical :: orthogonal=.true.
+  end type
+
+  type s_rgrid_config
+    integer :: periodicity=3,points(3)=0
+    real(8) :: spacing(3)=0d0,lengths(3)=0d0
+  end type
+
   type s_rgrid
     integer              :: ndir,Nd                 ! ndir=3 --> dir=xx,yy,zz, ndir=6 --> dir=xx,yy,zz,yz,zx,xy
     integer,dimension(3) :: is,ie,num &             ! num=ie-is+1
