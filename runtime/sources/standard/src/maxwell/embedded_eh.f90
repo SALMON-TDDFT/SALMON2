@@ -20,6 +20,7 @@
 ! Native E_n clock, A/J at (n+1/2)dt; sample map matches eh_sendrecv('s').
 #include "config.h"
 module salmonpy_eh_context
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use iso_c_binding
   use structures, only: s_fdtd_system
   use fdtd_eh, only: ls_fdtd_eh,eh_init,eh_calc,eh_finalize
@@ -47,6 +48,9 @@ module salmonpy_eh_context
   end type
   type(restore_candidate),allocatable,save :: pending
   logical,save :: used=.false.
+#ifdef SALMONPY_RECOVERY_TESTING
+  integer,save :: fault_stage=0,fault_rank=-1
+#endif
 contains
 integer(c_int) function sp_eh_checkpoint_protocol() bind(C)
   sp_eh_checkpoint_protocol=1
@@ -86,18 +90,87 @@ end function
     sp_eh_init=0
   end function
 
+  integer(c_int) function sp_eh_recovery_protocol() bind(C)
+    sp_eh_recovery_protocol=1
+  end function
+#ifdef SALMONPY_RECOVERY_TESTING
+  integer(c_int) function sp_eh_test_fault(stage,rank) bind(C)
+    integer(c_int),value :: stage,rank
+    sp_eh_test_fault=1
+    if(stage<20.or.stage>23.or.rank<0)return
+    fault_stage=stage;fault_rank=rank;sp_eh_test_fault=0
+  end function
+#endif
+
   integer(c_int) function sp_eh_step(npoints,J,E) bind(C)
     integer(c_int),value :: npoints
     real(c_double),intent(in) :: J(3,npoints)
     real(c_double),intent(out) :: E(3,npoints)
-    real(8) :: local_E(3,npoints)
-    integer :: p,d,side,index(3),i,jj,k
-    sp_eh_step=1
-    if(.not.allocated(state)) return
-    if(state%step>=state%capacity.or.npoints/=size(state%points,2)) return
+    sp_eh_step=step_checked(npoints,J,E)
+  end function
+
+  integer(c_int) function sp_eh_step_checked(npoints,J,A,E) bind(C)
+    integer(c_int),value :: npoints
+    real(c_double),intent(in) :: J(3,npoints),A(3,npoints)
+    real(c_double),intent(out) :: E(3,npoints)
+    sp_eh_step_checked=step_checked(npoints,J,E,A)
+  end function
+
+  integer function step_checked(npoints,J,E,A) result(status)
+    use salmon_global,only:dt_em,obs_samp_em
+    use ttm,only:use_ttm
+    use communication,only:comm_get_max
+    integer,intent(in) :: npoints
+    real(8),intent(in) :: J(3,npoints)
+    real(8),intent(in),optional :: A(3,npoints)
+    real(8),intent(out) :: E(3,npoints)
+    type(restore_candidate) :: before
+    real(8) :: local_E(3,npoints),reference(3,npoints)
+    integer :: p,d,side,index(3),i,jj,k,error,mode
+    status=10;E=0d0;error=0
+    if(.not.allocated(state))error=12
+    call comm_get_max(error,nproc_group_global)
+    if(error/=0)then
+      status=error;return
+    endif
+    mode=merge(1,0,present(A))
+    call comm_bcast(mode,nproc_group_global)
+    if(mode/=merge(1,0,present(A)))error=11
+    call comm_get_max(error,nproc_group_global)
+    if(error/=0)then
+      status=error;return
+    endif
+    if(npoints/=size(state%points,2))error=10
+    if(state%step>=state%capacity)error=13
+    if(allocated(pending))error=14
+    if(use_ttm.or.state%fe%flag_lr.or.state%fe%flag_ase.or.state%fe%flag_art)error=15
+    if(allocated(state%fe%iobs_num_ene))then
+      if(any(state%fe%iobs_num_ene>0))error=15
+    endif
+    if(.not.all(ieee_is_finite(J)))error=10
+    if(present(A))then
+      if(.not.all(ieee_is_finite(A)))error=10
+    endif
+    call comm_get_max(error,nproc_group_global)
+    if(error/=0)then
+      status=error;return
+    endif
+    reference=J
+    call comm_bcast(reference,nproc_group_global)
+    if(any(reference/=J))error=11
+    if(present(A))then
+      reference=A
+      call comm_bcast(reference,nproc_group_global)
+      if(any(reference/=A))error=11
+    endif
+    call comm_get_max(error,nproc_group_global)
+    if(error/=0)then
+      status=error;return
+    endif
+    before%fe=state%fe;before%ld=state%ld
+    before%current=state%current;before%step=state%step
     state%current=0d0
-    ! S transpose: each macro density contributes half to each adjacent edge.
-    ! One macro point per grid cell, equal cell volumes; no extra volume factor.
+    ! Preserve SALMON's S-transpose edge weighting and E -> LD -> H order.
     do p=1,npoints
       do d=1,3
         do side=0,1
@@ -105,26 +178,102 @@ end function
           if(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)) &
             state%current(d,index(1),index(2),index(3))= &
             state%current(d,index(1),index(2),index(3))+.5d0*J(d,p)
-        end do
-      end do
-    end do
+        enddo
+      enddo
+    enddo
     state%step=state%step+1
     state%fe%iter_sta=state%step;state%fe%iter_end=state%step
-    call eh_calc(state%fs,state%fe,state%ld,state%current)
-    local_E=0d0
-    do p=1,npoints
-      index=state%points(:,p)
-      if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie))) cycle
-      i=index(1);jj=index(2);k=index(3)
-      local_E(1,p)=.5d0*(state%fe%ex_y(i,jj,k)+state%fe%ex_z(i,jj,k) &
-                       +state%fe%ex_y(i-1,jj,k)+state%fe%ex_z(i-1,jj,k))
-      local_E(2,p)=.5d0*(state%fe%ey_z(i,jj,k)+state%fe%ey_x(i,jj,k) &
-                       +state%fe%ey_z(i,jj-1,k)+state%fe%ey_x(i,jj-1,k))
-      local_E(3,p)=.5d0*(state%fe%ez_x(i,jj,k)+state%fe%ez_y(i,jj,k) &
-                       +state%fe%ez_x(i,jj,k-1)+state%fe%ez_y(i,jj,k-1))
-    end do
-    call comm_summation(local_E,E,3*npoints,nproc_group_global)
-    sp_eh_step=0
+    call eh_calc(state%fs,state%fe,state%ld,state%current,guard)
+    if(error/=0)then
+      state%fe=before%fe;state%ld=before%ld
+      call move_alloc(before%current,state%current)
+      state%step=before%step;E=0d0;status=error;return
+    endif
+    status=0
+  contains
+    logical function guard(stage)
+      use parallelization,only:nproc_id_global
+      integer,intent(in) :: stage
+      logical :: valid
+      real(8) :: H(3,npoints),ev(3),hv(3)
+      integer :: h_status,ix,iy,iz
+      valid=.true.
+      select case(stage)
+      case(20)
+        valid=all(ieee_is_finite(state%fe%ex_y)).and.all(ieee_is_finite(state%fe%ex_z)) &
+          .and.all(ieee_is_finite(state%fe%ey_x)).and.all(ieee_is_finite(state%fe%ey_z)) &
+          .and.all(ieee_is_finite(state%fe%ez_x)).and.all(ieee_is_finite(state%fe%ez_y))
+      case(21)
+        if(state%ld%enabled)then
+          valid=valid.and.all(ieee_is_finite(state%ld%rjx_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjy_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjz_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjx_old_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjy_old_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjz_old_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%px_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%py_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%pz_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjx_fdtd_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjy_fdtd_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%rjz_fdtd_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%ex_old_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%ey_old_ld))
+          valid=valid.and.all(ieee_is_finite(state%ld%ez_old_ld))
+        endif
+      case(22)
+        valid=all(ieee_is_finite(state%fe%hx_y)).and.all(ieee_is_finite(state%fe%hx_z)) &
+          .and.all(ieee_is_finite(state%fe%hy_x)).and.all(ieee_is_finite(state%fe%hy_z)) &
+          .and.all(ieee_is_finite(state%fe%hz_x)).and.all(ieee_is_finite(state%fe%hz_y))
+      case(23)
+        local_E=0d0
+        do p=1,npoints
+          index=state%points(:,p)
+          if(.not.(all(index>=state%fs%mg%is).and.all(index<=state%fs%mg%ie)))cycle
+          i=index(1);jj=index(2);k=index(3)
+          local_E(1,p)=.5d0*(state%fe%ex_y(i,jj,k)+state%fe%ex_z(i,jj,k) &
+            +state%fe%ex_y(i-1,jj,k)+state%fe%ex_z(i-1,jj,k))
+          local_E(2,p)=.5d0*(state%fe%ey_z(i,jj,k)+state%fe%ey_x(i,jj,k) &
+            +state%fe%ey_z(i,jj-1,k)+state%fe%ey_x(i,jj-1,k))
+          local_E(3,p)=.5d0*(state%fe%ez_x(i,jj,k)+state%fe%ez_y(i,jj,k) &
+            +state%fe%ez_x(i,jj,k-1)+state%fe%ez_y(i,jj,k-1))
+        enddo
+        call comm_summation(local_E,E,3*npoints,nproc_group_global)
+        valid=all(ieee_is_finite(E))
+        if(present(A))valid=valid.and.all(ieee_is_finite(A-dt_em*E))
+        h_status=sp_eh_sample_h(npoints,H)
+        valid=valid.and.h_status==0.and.all(ieee_is_finite(H))
+        ! Verify the ordinary point-output/maxima arithmetic before any append.
+        ! Keep the actual output path and its arithmetic unchanged.
+        if(state%fe%flag_obs.and.mod(state%step,obs_samp_em)==0)then
+          do iz=state%fs%mg%is(3),state%fs%mg%ie(3)
+          do iy=state%fs%mg%is(2),state%fs%mg%ie(2)
+          do ix=state%fs%mg%is(1),state%fs%mg%ie(1)
+            ev=[state%fe%ex_y(ix,iy,iz)+state%fe%ex_z(ix,iy,iz), &
+                state%fe%ey_z(ix,iy,iz)+state%fe%ey_x(ix,iy,iz), &
+                state%fe%ez_x(ix,iy,iz)+state%fe%ez_y(ix,iy,iz)]
+            hv=[(state%fe%hx_s(ix,iy,iz)+(state%fe%hx_y(ix,iy,iz)+state%fe%hx_z(ix,iy,iz)))/2d0, &
+                (state%fe%hy_s(ix,iy,iz)+(state%fe%hy_z(ix,iy,iz)+state%fe%hy_x(ix,iy,iz)))/2d0, &
+                (state%fe%hz_s(ix,iy,iz)+(state%fe%hz_x(ix,iy,iz)+state%fe%hz_y(ix,iy,iz)))/2d0]
+            valid=valid.and.all(ieee_is_finite(ev*state%fe%uVperm_from_au)) &
+              .and.all(ieee_is_finite(hv*state%fe%uAperm_from_au))
+            valid=valid.and.ieee_is_finite(sqrt(sum(ev**2))*state%fe%uVperm_from_au) &
+              .and.ieee_is_finite(sqrt(sum(hv**2))*state%fe%uAperm_from_au)
+          enddo
+          enddo
+          enddo
+        endif
+      end select
+#ifdef SALMONPY_RECOVERY_TESTING
+      if(fault_stage==stage)then
+        if(nproc_id_global==fault_rank)valid=.false.
+        fault_stage=0;fault_rank=-1
+      endif
+#endif
+      if(.not.valid)error=stage
+      call comm_get_max(error,nproc_group_global)
+      guard=error==0
+    end function
   end function
 
   ! Read raw H at (step+1/2)*dt, centered spatially on each macro cell.

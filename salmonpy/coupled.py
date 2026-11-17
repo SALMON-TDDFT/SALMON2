@@ -3,7 +3,7 @@
 E is at native time n*dt. Electronic local time n*dt corresponds to field clock
 (n+1/2)*dt; native saved H is centered at E time, not the raw H endpoint.
 """
-from .errors import InputError, InputTypeError
+from .errors import InputError, InputTypeError, NumericalError
 from pathlib import Path
 import ctypes as c
 import json
@@ -193,11 +193,23 @@ class NativeEHField:
         _agree(comm,'field currents differ across ranks' if any(v!=values[0] for v in values) else None)
         E=np.empty_like(self.A)
         try:
-            code=self._call(self.lib.sp_eh_step,len(self.point_ids),J,E)
+            checked=getattr(self.lib,'sp_eh_step_checked',None)
+            if checked is not None:
+                floats=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
+                checked.argtypes=[c.c_int,floats,floats,floats]
+                checked.restype=c.c_int
+                code=self._call(checked,len(self.point_ids),J,self.A,E)
+            else:
+                code=self._call(self.lib.sp_eh_step,len(self.point_ids),J,E)
+            outcomes=comm.allgather((int(code),bool(np.isfinite(E).all())))
+            if embedded._admission_rejected(self.lib,outcomes,allowed=(20,21,22,23),query_name='sp_eh_recovery_protocol'):
+                raise NumericalError('native field numerical state restored without replay; retry permitted: '+str(outcomes))
             _agree(comm,'native field advance failed' if code or not np.isfinite(E).all() else None)
             with np.errstate(over="ignore",invalid="ignore"):
                 updated_A=self.A-self.dt*E
             _agree(comm,'nonfinite integrated A' if not np.isfinite(updated_A).all() else None)
+        except NumericalError:
+            raise
         except BaseException as exc:
             self.failed=True
             self.manifest['failure']=str(exc)

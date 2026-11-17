@@ -3080,7 +3080,7 @@ contains
   
   !===========================================================================================
   != calculate eh-FDTD =======================================================================
-  subroutine eh_calc(fs,fe,ld,external_current)
+  subroutine eh_calc(fs,fe,ld,external_current,step_guard)
     use salmon_global,   only: dt_em,obs_num_em,obs_samp_em,yn_obs_plane_em,yn_obs_plane_integral_em,&
                                base_directory,nt_em,yn_periodic,ek_dir1,t1_t2,t1_start,              &
                                E_amplitude1,tw1,omega1,phi_cep1,epdir_re1,epdir_im1,ae_shape1,       &
@@ -3101,6 +3101,13 @@ contains
     real(8),optional,intent(in) :: external_current(3, &
       fs%mg%is_array(1):fs%mg%ie_array(1),fs%mg%is_array(2):fs%mg%ie_array(2), &
       fs%mg%is_array(3):fs%mg%ie_array(3))
+    ! Optional native transaction gate. Batch calls retain the original path.
+    interface
+      logical function step_guard(stage)
+        integer,intent(in) :: stage
+      end function
+    end interface
+    optional :: step_guard
     integer            :: iter,ii,ix,iy,iz
     integer            :: is5(5),ie5(5)
     real(8)            :: elapsed_time
@@ -3154,11 +3161,18 @@ contains
           external_current(2,:,:,:),external_current(3,:,:,:))
       end if
       call eh_sendrecv(fs,fe,'e')
+      if(present(step_guard))then
+        if(.not.step_guard(20))return
+      endif
       
       !update lorentz-drude
       if(ld%enabled) call ld_update(ld,fs%mg%is_array,fs%mg%ie_array,fs%mg%is,fs%mg%ie,dt_em, &
         fe%ex_y,fe%ex_z,fe%ey_z,fe%ey_x,fe%ez_x,fe%ez_y)
       
+      if(present(step_guard))then
+        if(.not.step_guard(21))return
+      endif
+
       !calculate linear response
       if(fe%flag_lr) call eh_calc_lr
       
@@ -3193,6 +3207,10 @@ contains
       call eh_fd(fe%ihz_y_is,fe%ihz_y_ie,      fs%mg%is,fs%mg%ie,fe%Nd,&
                  fe%c1_hz_y,fe%c2_hz_y,fe%hz_y,fe%ex_y,fe%ex_z,'h','y',cb_y = fe%c_ebloch_y) !hz_y
       call eh_sendrecv(fs,fe,'h')
+      if(present(step_guard))then
+        if(.not.step_guard(22))return
+        if(.not.step_guard(23))return
+      endif
       
       !ttm
       if( use_ttm )then

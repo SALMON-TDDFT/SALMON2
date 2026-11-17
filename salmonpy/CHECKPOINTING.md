@@ -284,3 +284,11 @@ Pythonは宣言された版と全ランクの既知エラーを確認できる�
 これはHSE物質群の保証で、FDTDや他の物質を含む混在ステップ全体の自動巻戻しではありません。初期化深部、確保失敗、プロセス／MPI停止、未制御の外部STOP、出力装置障害は対象外です。異常を捕捉できない場合に継続を推定しないでください。
 
 検証用 `tools/test_fast_hse_deep_recovery_mpi.py BUILD GS NEW_OUTPUT --steps 32 --fault-step 13` は2ランク、OMP／BLAS1、外側のtimeoutで実行します。`--split` は4ランクの独立2群です。`--overflow-A 1e100` はPT-CNの実数値発散試験用で、科学計算の入力ではありません。`--faults` は `SALMONPY_RECOVERY_TESTING` を明示した別ビルドだけに使い、本番には注入用入口を含めません。検証記録は `docs/fast-hse-deep-recovery-validation-2026-11-17.md` です。合成小規模系の実装検証であり、物理精度の収束保証ではありません。
+
+## native FDTDの数値異常復帰
+
+新しい標準ホストMPIライブラリは `sp_eh_recovery_protocol() == 1` を宣言します。`NativeEHField.advance` は対応する検査付き入口を選び、場・PML・場内の全LD・電流格子・時計をメモリ退避します。E更新後（20）、LD更新後（21）、H更新後（22）、点サンプル／積算A／通常観測出力の演算（23）の異常を場MPI群で合意し、退避した状態へ直接戻します。波の再伝播はしません。既知の復帰では `NumericalError` を返し、PythonのA・E・時計・failedも維持するため、入力を修正して再試行できます。失敗試行の通常観測ファイルは追加しませんが、診断・進行表示は残る場合があります。
+
+対象は現在のnative E/H平面波経路と場内LDです。TTM、線形応答専用経路、ASE／ART、周波数別観測は更新前に拒否します。バッチFDTDは従来経路を維持します。新しい入口を持たない旧バイナリ・未知エラーでは復帰を推定せず、従来の失敗扱いです。初期化・確保・MPI／プロセス停止・外部STOP・出力装置障害は保証外です。場群単体の保証であり、`CoupledStepper`／`ResponseSession`全体を自動巻戻し・自動再試行する機能ではありません。退避と検査の費用を見込み、メモリ予算は引き続き警告に使います。
+
+`tools/test_eh_deep_recovery_mpi.py BUILD NEW_OUTPUT` を1／2ランク、OMP／BLAS1、外側timeoutで実行します。`--split` は4ランクの独立2群です。`--faults` は明示した別の `SALMONPY_RECOVERY_TESTING` ビルドだけに使います。本番には注入入口を含めません。数値オーバーフローの試験値は科学入力ではありません。
