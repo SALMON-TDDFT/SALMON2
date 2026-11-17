@@ -519,3 +519,13 @@ Evidence: `../protected-step-validation-2026-11-17.md`. This closes a common-API
 - [ ] Broader audit item5 remains open for initialization/unsupported profiles, I/O/allocation/process/MPI failures and unreturned STOP calls. This is not durable or observer-invisible file publication; private output ownership is required. General native reentrancy and physical convergence are separate work.
 
 Evidence: `../native-protected-step-validation-2026-11-17.md`. Earlier open aggregate-step notes are superseded only within this measured scope. Memory budgets remain warning-only.
+
+### 2026-11-17 enlarged protected mixed-step measurements
+
+- [x] Existing installed wheel/production libraries:96³ Maxwell + two local LD materials + SBE1 + Libxc-PBE2 + separate fast-PR HSE PT-CN2. Field2/4,total7/9 ranks,64 accepted steps,two repetitions each with/without whole-step protection. All eight arrays and every ordinary stream exactly equal across repetitions/decompositions/protection modes.
+- [x] Local protected/plain mean loop ratios1.198(field2)/1.082(field4); protected maximum summed rank peak RSS2.692/4.417GiB. Peaks are not simultaneous totals or heap bounds. Unknown resource allowances remain unknown;48GiB budget advisory only,OMP/BLAS1,no Actions.
+- [x]96³ seven-rank step13 late-electronic and actual field-overflow rejection preserve full numerical payload hashes,Python references/clocks and ordinary output bytes. Explicit retry64-step arrays/streams equal uninterrupted execution; zero elapsed-history replay. Diagnostic summed rank peaks3.943GiB.
+- [x] Paired JP/EN resource notes and AI JSON synchronized;11 manual tests pass. No solver/API/packaging changes or rebuild required. Recipes,commands,measurements,arrays/streams and diagnostic harness retained persistently.
+- [ ] Larger electronic grids/k meshes, many material points/LD cells, transferable backend calibration, cross-platform evidence and output/initialization failure contracts remain open. These measurements do not prescribe production rank choices or certify physical convergence. Molecular work remains paused.
+
+Evidence: `../protected-mixed-scaling-validation-2026-11-17.md`. Audit item7 is reduced only by this measured subset; no universal memory model is claimed.

@@ -1,6 +1,6 @@
 # Protected native mixed steps
 
-[日本語](NATIVE_STEPPING.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.1`
+[日本語](NATIVE_STEPPING.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.2`
 
 `salmonpy.native_steps.native_step_targets` connects supported native components to
 [the common protected-step entry](STEPPING.en.md). It requires a newly and explicitly
@@ -98,3 +98,15 @@ values. Local tests cover standard PZ, automatic/fixed TB-mBJ, Libxc-PZ/PBE and
 fast-PR HSE Taylor4/learned PT-CN with internal MPI2, plus the 1D two-TDDFT-group
 route. See the validation record for measured scope; no fresh cross-platform CI
 or general physical-convergence claim follows from these fixtures.
+
+
+## Measured larger-grid overhead
+
+On the local 64GB/18-core Apple Silicon host, 96³ Maxwell + local LD + SBE +
+Libxc-PBE2 + fast-PR HSE PT-CN2 passed 64-step comparisons with/without protection.
+Two repetitions each: field2/total7 took 12.00/14.38 seconds mean (plain/protected),
+field4/total9 took 7.08/7.66 seconds. Maximum sums of rank peak RSS were
+2.012/2.692 GiB and 2.949/4.417 GiB respectively. All arrays and ordinary streams
+matched exactly. These are local measured examples, not memory bounds or a rank
+recommendation. Only the Maxwell grid grew; electronic precision is unchanged.
+Keep unknown memory allowances unknown and compare on the actual target system.

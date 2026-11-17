@@ -1,6 +1,6 @@
 # nativeを含む混在ステップの保護
 
-[English](NATIVE_STEPPING.en.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.1`
+[English](NATIVE_STEPPING.en.md) · Topic: `native_protected_step` · Paired revision: `2026-11-17.2`
 
 `salmonpy.native_steps.native_step_targets` は対応したnative部品を
 [共通のステップ保護](STEPPING.md)へ接続します。明示的に新しくビルドした対応ホストMPI
@@ -85,3 +85,13 @@ OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 mpiexec -n 7 python -m salmonpy.example
 ローカル検証は標準PZ・TB-mBJ自動／固定係数・Libxc-PZ/PBEと、高速PR版HSE Taylor4／学習PT-CNの
 内部MPI2、ならびに1次元の独立2 TDDFT群です。測定範囲は検証記録を参照し、今回の小規模系だけで
 新たな他OS対応・物理収束が保証されたとは判断しないでください。
+
+
+## 大きめの格子で測った保護の負担
+
+64GB・18コアのApple Siliconで、96³のMaxwell＋局所LD＋SBE＋Libxc-PBE2＋高速PR版HSE
+PT-CN2を64ステップ進め、保護なし／ありを各2回比較しました。場2／全7ランクの平均は
+12.00／14.38秒、場4／全9ランクでは7.08／7.66秒でした。各ランクのピークRSSの合計の最大値は
+それぞれ2.012／2.692GiB、2.949／4.417GiBです。全配列と通常出力が完全一致しました。
+これはローカルの測定例で、メモリ上限や推奨並列数ではありません。拡大したのはMaxwell格子で、
+電子状態の精度は変えていません。未知のメモリ量を確定値に置き換えず、実際の計算環境で比較してください。
