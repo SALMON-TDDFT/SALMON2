@@ -227,9 +227,8 @@ Only mutable numerical candidates are detached. Initialized MPI/Libxc/FFT resour
 remain in the existing context; this does not enable concurrent native lifetimes
 or continued use of an old alias after publication. Publication uses prepared
 memory but includes allocating assignments: allocation failure/process death is
-outside the recoverable contract. The ordinary mpi_mixed_native coordinator still
-uses atomic=False; do not infer protected support for that entire sample from the
-candidate test. Exact-layout/input/hash admission is still required.
+outside the recoverable contract. The ordinary mpi_mixed_native integration is described below.
+Exact-layout/input/hash admission is still required.
 
 This contract covers handled exceptions with healthy participating MPI ranks and
 correct isolated factories. It does not recover process crashes, communicator loss,
@@ -250,3 +249,41 @@ conversion, changed-topology redistribution, generic archive I/O and atomic roll
 remain backend/host responsibilities. The execution entry runs supplied functions without certifying the backend's
 persistence implementation or atomic rollback. Historical native-direct/1 archives
 without compatibility metadata require their original matching reader.
+
+## Protected restore in the ordinary mixed sample
+
+`mpi_mixed_native --direct-resume PATH` now defaults to protected restore.
+Initialized field/standard TDDFT/fast-PR HSE require candidate-capable runtimes.
+The field candidate includes PML and every LD material's P/J/update history.
+SBE loads snapshots into independent new handles. Python clocks, currents, A,
+response adapters, ownership lists and frames.json are prepared before publication.
+All MPI participants must succeed before anything live is published. No extra SCF
+or time propagation is performed by restore.
+
+The internal `examples._direct_checkpoint.checkpoint(..., restore=True)` also
+accepts advanced paused sessions. A staging failure raises AtomicRestoreError on
+all ranks and preserves original field/LD/electronic states, clocks, references
+and failed flags. Make the same collective decision everywhere: continue the old
+trajectory or remove the failure cause and retry the same checkpoint. Input/history
+admission errors are rejected before LOAD as well.
+
+After success retrieve current states through session.states; old SBE handles are
+retired. Release errors are separate coupled.checkpoint_cleanup_errors diagnostics,
+not a failed restoration. Native resources still have one lifetime; allocation
+failure during publication, process death and failed MPI remain outside recovery.
+
+Older ABIs, process-isolated HSE workers and custom direct-only LOAD targets are
+rejected before loading. Only explicitly request legacy behavior with CLI
+`--unprotected-direct-restore` or internal `protected=False`; it does not preserve
+original states on mid-load failure. There is no automatic fallback.
+
+`tools/test_mixed_protected_restore_mpi.py` takes the ordinary sample arguments,
+injects a rank failure after loading a later electronic candidate, then checks
+original preservation (including two field-local LD materials), continued old
+evolution and exact retry results for SBE plus internal-MPI TDDFT/fast-PR HSE.
+Source-tree tests can explicitly select a built LD/SBE library with `--kernel LIB`;
+installed-wheel users do not need that override.
+
+Live rewind does not truncate native output files already written. Manage the
+trajectory with the saved frames plus subsequent step returns, or resume in a
+fresh MPI job/output directory to keep native output streams separate.

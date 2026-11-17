@@ -45,7 +45,7 @@ def _verify_files(root, files, rank, ranks):
     return {'rank': rank, 'files_checked': checked, 'bytes_checked': size}
 
 
-def _compatibility(world, coupled, *, restore, saved=None, available_files=None):
+def _compatibility(world, coupled, *, restore, saved=None, available_files=None, protected=False):
     """Solver-specific admission adapted onto the public metadata validator."""
     from dataclasses import asdict
     from salmonpy.checkpointing import CheckpointCapability, check_checkpoint_compatibility
@@ -53,9 +53,9 @@ def _compatibility(world, coupled, *, restore, saved=None, available_files=None)
     from salmonpy.ld import LDState
 
     def component(state, *, symbol=None, native_format=None, ranks=1):
-        if getattr(state,'closed',False):
+        if getattr(state,'closed',False) or getattr(state,'failed',False):
             raise ValueError('checkpoint capability requires a live state')
-        if restore and getattr(state,'steps',getattr(state,'step_index',0))!=0:
+        if restore and not protected and getattr(state,'steps',getattr(state,'step_index',0))!=0:
             raise ValueError('checkpoint compatibility requires a fresh unadvanced state')
         if symbol is not None:
             if not callable(getattr(state.lib,symbol,None)):
@@ -75,7 +75,7 @@ def _compatibility(world, coupled, *, restore, saved=None, available_files=None)
             raise ValueError('backend has no declared direct checkpoint capability; snapshot may require replay')
         if not callable(getattr(raw,'snapshot',None)) or not callable(getattr(raw,'restore',None)):
             raise ValueError('snapshot/restore capability required')
-        if restore and raw._steps!=0:
+        if restore and not protected and raw._steps!=0:
             raise ValueError('checkpoint compatibility requires a fresh snapshot state')
         if ranks!=1:
             raise ValueError('snapshot checkpoint capability requires one rank per group')
@@ -86,7 +86,7 @@ def _compatibility(world, coupled, *, restore, saved=None, available_files=None)
         r=coupled.response;c=r.context
         if getattr(r,'failed',False):
             raise ValueError('checkpoint capability unavailable after session failure')
-        if restore and (getattr(coupled,'step_index',0)!=0 or getattr(r,'step_index',0)!=0):
+        if restore and not protected and (getattr(coupled,'step_index',0)!=0 or getattr(r,'step_index',0)!=0):
             raise ValueError('checkpoint compatibility requires a fresh unadvanced session')
         c.plan.validate(world.size)
         groups=[asdict(g) for g in c.plan.groups]
@@ -114,13 +114,157 @@ def _compatibility(world, coupled, *, restore, saved=None, available_files=None)
         required_files=required if available_files is not None else (),available_files=available_files)
 
 
-def checkpoint(world, coupled, directory, signature, *, restore=False, frames=None):
+class _SnapshotCandidate:
+    """Detached endpoint-model state; no original handle is restored in place."""
+    def __init__(self, state, item, step, A, adapter, owner_plan):
+        self.original = state
+        self.item = item
+        self.step = step
+        self.A = A
+        self.adapter = adapter
+        self.owner_plan = owner_plan
+        self.raw = None
+        self.state = None
+
+    def stage(self):
+        from copy import copy
+        from salmonpy.sbe import SBEState
+        raw = self.original._raw
+        if isinstance(raw, SBEState):
+            self.raw = raw._initial.new_state(dt=raw.dt,time0=raw._time0)
+        else:
+            self.raw = raw._material.new_state(dt=raw.dt,initial_field=raw.config.initial_field)
+        token = raw.snapshot()
+        item = self.item
+        payload = tuple((n,tuple(shape),dtype,order,bytes.fromhex(hexdata))
+                        for n,shape,dtype,order,hexdata in item['data'])
+        self.raw.restore(replace(token,step_index=item['step'],time=item['time'],
+            _settings=item['settings'],_data=payload,_integrity=item['integrity']))
+        if self.raw._steps != self.step:
+            raise ValueError('snapshot checkpoint clock differs')
+        if isinstance(raw,SBEState) and not np.array_equal(self.raw._A,self.A):
+            raise ValueError('snapshot A differs from response history')
+        self.state = copy(self.original)
+        self.state._raw = self.raw
+        self.state._steps = self.step
+        self.new_adapter = copy(self.adapter)
+        self.new_adapter.state = self.state
+        self.new_adapter.A = self.A
+        for index, old in enumerate(self.owner_plan):
+            if old is raw:
+                self.owner_plan[index] = self.raw
+                break
+        else:
+            raise ValueError('snapshot state has no matching live owner')
+        return self
+
+    def discard(self):
+        if self.raw is not None:
+            self.raw.close()
+
+
+def _restore_protected(world,coupled,root,data,compatibility,verification,history=None):
+    """Stage all numerical and Python state before publishing any live owner.
+
+    Native publication may allocate; fatal native/process/MPI failures are outside
+    handled-exception recovery. There is no archive I/O after the ready vote.
+    """
+    from copy import copy
+    from salmonpy._native_checkpoint import NativeRestoreCandidate
+    from salmonpy.checkpointing import CheckpointState, restore_checkpoint
+    from salmonpy.materials import _EndpointState
+    from salmonpy.material_response import _StepAdapter
+    from salmonpy.sbe import SBEState
+    from salmonpy.ld import LDState
+    r=coupled.response;field=coupled.field
+    participant=compatibility['participants'][world.rank]
+    error=None;field_target=None;targets={};native=[];snapshots=[];updates=[];owners={}
+    try:
+        step=data['step']
+        J=np.array(data['J'],dtype=float,copy=True)
+        response_A=np.array(data['response_A'],dtype=float,copy=True)
+        states=dict(r.states);adapters=dict(r._adapters)
+        if field is not None:
+            candidate=NativeRestoreCandidate(field,'sp_eh_checkpoint',root/f'field-{world.rank}.bin')
+            native.append(candidate)
+            field_target=CheckpointTarget(participant['field'],stage_restore=candidate.stage,
+                discard_restore=lambda unused,candidate=candidate:candidate.discard())
+            updates.extend(((field,'A',np.array(data['field_A'],dtype=float)),
+                            (field,'E',np.array(data['field_E'],dtype=float)),(field,'step_index',step)))
+        for point,state in r.states.items():
+            A=response_A[list(r.context.plan.point_ids).index(point)].copy()
+            adapter=r._adapters[point]
+            if type(adapter) is not _StepAdapter:
+                raise ValueError('protected native sample requires endpoint response adapters')
+            if hasattr(state,'native'):
+                candidate=NativeRestoreCandidate(state,'sp_tddft_checkpoint',root/f'electronic-{world.rank}.bin')
+                updates.extend(((state,'steps',step),(state,'A',A)))
+                native.append(candidate)
+            elif getattr(state,'checkpoint_protocol',None)=='salmonpy.direct-state/1':
+                candidate=NativeRestoreCandidate(state,'sp_fast_hse_checkpoint',root/f'worker-{world.rank}.bin')
+                updates.extend(((state,'steps',step),(state,'A',A),
+                    (state,'current',np.array(data['states'][str(point)]['current'],dtype=float)),(state,'energy',None)))
+                native.append(candidate)
+            else:
+                if not isinstance(state,_EndpointState) or not isinstance(state._raw,(SBEState,LDState)):
+                    raise ValueError('protected snapshot requires an owned built-in endpoint state')
+                prepared=state._prepared
+                if id(prepared) not in owners:
+                    owners[id(prepared)]=(prepared,list(prepared.live))
+                candidate=_SnapshotCandidate(state,data['states'][str(point)],step,A,adapter,owners[id(prepared)][1])
+                snapshots.append((point,candidate))
+            targets[point]=CheckpointTarget(participant['states'][str(point)],stage_restore=candidate.stage,
+                discard_restore=lambda unused,candidate=candidate:candidate.discard())
+            replacement=copy(adapter);replacement.A=A
+            adapters[point]=replacement
+        holder=CheckpointState(field=field,states=r.states)
+        validation=verification
+    except Exception as exc:
+        error=type(exc).__name__+': '+str(exc)
+    # Admission also agrees local preparation/protocol errors; no old ABI fallback.
+    restore_checkpoint(world,compatibility['groups'],group=r.context.group.name,live=holder if error is None else None,
+        field=field_target,states=targets,saved=compatibility,local_error=error)
+    # Snapshot-dependent bindings are constructed by the stage callbacks, before
+    # their global ready vote. These assignments invoke no user/backend callbacks.
+    for point,candidate in snapshots:
+        states[point]=candidate.state
+        adapters[point]=candidate.new_adapter
+    publication_error=None
+    try:
+        for candidate in native:
+            candidate.publish()
+    except Exception as exc:
+        publication_error=type(exc).__name__+': '+str(exc)
+    failures=world.allgather(publication_error)
+    if any(failures):
+        r.failed=True
+        raise RuntimeFailure('native publication failed after ready vote; original preservation is not guaranteed: '+str(failures))
+    for owner,name,value in updates:
+        setattr(owner,name,value)
+    for prepared,planned in owners.values():
+        prepared.live=planned
+    r.states=states;r._adapters=adapters
+    coupled.step_index=r.step_index=step
+    coupled.J=J;r._A=response_A
+    coupled.checkpoint_validation=validation
+    coupled.checkpoint_frames=history
+    cleanup=[]
+    for point,candidate in snapshots:
+        try:candidate.original.close()
+        except Exception as exc:cleanup.append((str(point),type(exc).__name__+': '+str(exc)))
+    coupled.checkpoint_cleanup_errors=world.allgather(cleanup)
+    return step
+
+
+def checkpoint(world, coupled, directory, signature, *, restore=False, frames=None, protected=True):
     r = coupled.response
     field = coupled.field
     root = Path(directory).resolve()
     error = None
     manifest_id = None
     try:
+        if type(restore) is not bool or type(protected) is not bool:
+            raise ValueError("restore and protected must be booleans")
         if sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1' for s in r.states.values())>1:
             raise ValueError('one worker checkpoint per rank required')
         if sum(hasattr(s,'native') for s in r.states.values())>1:
@@ -169,14 +313,17 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                         if current.shape!=(3,) or not np.isfinite(current).all():
                             raise ValueError('invalid checkpoint material current')
     except Exception as exc: error = str(exc)
-    agreement = world.allgather((error, manifest_id))
+    policy=(restore if type(restore) is bool else None,protected if type(protected) is bool else None)
+    agreement = world.allgather((error, manifest_id, policy))
     errors = [item[0] for item in agreement]
     if any(errors): raise ValueError(str(errors))
+    if any(item[2]!=policy for item in agreement):
+        raise ValueError('checkpoint policies differ across ranks')
     if restore and len({item[1] for item in agreement}) != 1:
         raise ValueError('checkpoint manifests differ across ranks')
     compatibility=_compatibility(world,coupled,restore=restore,
         saved=manifest.get('compatibility') if restore else None,
-        available_files=manifest['files'] if restore else None)
+        available_files=manifest['files'] if restore else None,protected=protected and restore)
     if not restore:
         error=None
         if world.rank==0:
@@ -184,6 +331,26 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
             except Exception as exc: error=str(exc)
         errors=world.allgather(error)
         if any(errors): raise ValueError(str(errors))
+    if restore and protected:
+        error=None;history=None
+        try:
+            history=json.loads((root/'frames.json').read_text())
+            if not isinstance(history,list) or len(history)!=data['step']:
+                raise ValueError('checkpoint frame count mismatch')
+            for frame in history:
+                for name in ('A_over_c','E_at_points','J_charge','J_previous'):
+                    values=np.asarray(frame[name],dtype=float)
+                    if values.shape!=(count,3) or not np.isfinite(values).all():
+                        raise ValueError('invalid checkpoint frame arrays')
+                for name in ('field_time','electronic_local_time','electronic_field_clock','E_time'):
+                    value=np.asarray(frame[name],dtype=float)
+                    if value.shape!=() or not np.isfinite(value):
+                        raise ValueError('invalid checkpoint frame clock')
+        except Exception as exc:error=type(exc).__name__+': '+str(exc)
+        errors=world.allgather(error)
+        if any(errors):raise ValueError('checkpoint history admission failed: '+str(errors))
+        verification=world.allgather(verification)
+        return _restore_protected(world,coupled,root,data,compatibility,verification,history)
     if restore:
         coupled.checkpoint_validation = world.allgather(verification)
     world.Barrier()

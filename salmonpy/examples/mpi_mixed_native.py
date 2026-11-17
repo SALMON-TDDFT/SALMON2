@@ -41,8 +41,11 @@ def main():
     parser.add_argument('--save-at', type=int, help='stop after this step and save a replay checkpoint')
     parser.add_argument('--resume', type=Path, help='reconstruct and continue a replay checkpoint')
     parser.add_argument('--direct-save-at', type=int, help='save internal states and stop at this step')
-    parser.add_argument('--direct-resume', type=Path, help='load internal states without replay')
+    parser.add_argument('--direct-resume', type=Path, help='protected internal-state restore without replay; candidate-capable runtime required')
+    parser.add_argument('--unprotected-direct-restore', action='store_true', help='explicit legacy restore with no failure-preservation guarantee')
     args = parser.parse_args()
+    if args.unprotected_direct_restore and args.direct_resume is None:
+        parser.error('unprotected-direct-restore requires direct-resume')
     if args.direct_save_at is not None and not 0 < args.direct_save_at < args.steps:
         parser.error('direct-save-at must be between zero and steps')
     if (args.direct_save_at is not None or args.direct_resume is not None) and (args.save_at is not None or args.resume is not None):
@@ -159,9 +162,10 @@ def main():
         start = 0
         if args.direct_resume is not None:
             from salmonpy.examples._direct_checkpoint import checkpoint
-            start = checkpoint(world, coupled, args.direct_resume, signature, restore=True)
+            start = checkpoint(world, coupled, args.direct_resume, signature, restore=True, protected=not args.unprotected_direct_restore)
             if world.rank == 0:
-                history = json.loads((args.direct_resume/'frames.json').read_text())
+                history = (json.loads((args.direct_resume/'frames.json').read_text()) if args.unprotected_direct_restore
+                           else coupled.checkpoint_frames)
                 for frame in history:
                     for key, value in frame.items():
                         if isinstance(value, list): frame[key] = np.asarray(value)

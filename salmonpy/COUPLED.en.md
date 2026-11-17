@@ -382,4 +382,4 @@ Capability and MPI compatibility checks use the common `salmonpy.checkpointing` 
 
 Native mixed field/electronic/LD/SBE persistence also uses CheckpointTarget/execute_checkpoint. Formats and native-direct/2 metadata are retained; callback failures stop subsequent slots, and completion-publication errors are agreed on all ranks.
 
-For protected restoration see CHECKPOINTING.en.md. Rebuilt native libraries have an experimental numerical-candidate protocol, demonstrated by tools/test_native_restore_candidates_mpi.py; this example itself still uses the legacy atomic=False route. Protected admission refuses unsupported targets before LOAD and never silently falls back to this route.
+The ordinary sample's `--direct-resume` defaults to protected restoration of field-local LD, SBE, native TDDFT/fast-PR HSE and Python clocks/currents after all groups prepare candidates. Old ABIs/direct-only targets are rejected before LOAD, without fallback. Explicit legacy behavior is `--unprotected-direct-restore`. See [CHECKPOINTING.en.md](CHECKPOINTING.en.md) for collective continuation/retry and failure exclusions.

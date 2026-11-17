@@ -398,7 +398,18 @@ Evidence: `../atomic-restore-validation-2026-11-17.md`. Backend isolation and he
 - [x] Group mode/readiness agreement and HSE context ownership; older binaries rejected by candidate protocol query. One pending candidate per native lifetime.
 - [x] Real four-rank feedback tests with field2, TDDFT2 and HSE2 layouts: late HSE shard failure preserves every original shard byte-for-byte; originals continue, retry16-step A/E/j agrees exactly with continuous. Taylor and installed-wheel PT-CN agree with previous native binaries; legacy HSE immediate save/resume also passes.
 - [x] Paired/AI documentation distinguishes numerical candidates and explicit native publication from the generic holder and the unchanged ordinary non-atomic coordinator.
-- [ ] Integrate prepared candidates and Python/session metadata as an automatic protected path in the ordinary mixed-native coordinator. Current low-level candidate test is not that integration.
+- [x] Ordinary mixed-native coordinator now defaults to prepared native/snapshot candidates and Python/session metadata publication after global agreement; details below.
 - [ ] Stable public native ABI, allocation-failure recovery, unrestricted multi-context native runtime and changed-topology restart remain open.
 
 Evidence: `../native-candidate-restore-validation-2026-11-17.md`. Cache validity flags are deliberately reconstructed; do not claim full post-success electronic archive byte identity from current/field equality.
+
+### Ordinary mixed-native protected restoration — 2026-11-17
+
+- [x] Default direct resume stages field/PML/all field-local LD, SBE handles, native TDDFT/fast-PR HSE and Python arrays/clocks/adapters/ownership before publication. Advanced paused sessions can restore and retry.
+- [x] Handled staging failure preserves original numerical bytes and live references/flags; originals remain usable. Snapshot retirement occurs after success with separate cleanup diagnostics.
+- [x] Restore/protected mode agreement and history parsing/validation precede LOAD. Older ABIs/direct-only backends reject without fallback; explicit unprotected flag retains the legacy route.
+- [x] Four-rank source/wheel tests cover field2, TDDFT2 and HSE2 (Taylor/PT-CN) with two field-local LD materials plus SBE; late rank failure preserves all originals, three subsequent frames after retry match continuous exactly. A fresh ordinary installed CLI job also resumes64→68 and matches continuous65–67 exactly.
+- [x] Source/wheel502 tests (one skip each),sdist→wheel,eight existing MPI preflight rejections and JP/EN/AI synchronization. No remote Actions.
+- [ ] Stable public native ABI,changed MPI topology,arbitrary backend cloning and native allocation/process-failure recovery remain separate work; this does not finish unrestricted multi-context ownership.
+
+Evidence: `../mixed-protected-restore-validation-2026-11-17.md`.

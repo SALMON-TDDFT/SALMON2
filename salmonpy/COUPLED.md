@@ -354,4 +354,4 @@ Apple Siliconで微視的8³格子・4×1×1 k点の合成入力を実測しま�
 
 native混在サンプルの場・電子・LD/SBE保存処理も `CheckpointTarget`／`execute_checkpoint` を通します。保存形式とnative-direct/2の互換情報は維持し、コールバック失敗を共有した後は次の処理へ進みません。完了情報の公開失敗も全ランクへ通知します。
 
-保護付き復元の共通APIはCHECKPOINTING.mdを参照してください。再ビルドしたnativeには実験的な数値候補ABIがあり、tools/test_native_restore_candidates_mpi.pyで検証しています。このサンプル自体は引き続き非原子的な`atomic=False`経路です。共通の保護経路は未対応対象をLOAD前に拒否し、自動的にこの経路へ切り替えません。
+通常サンプルの`--direct-resume`は保護付き復元が既定です。場内LD・SBE・native TDDFT／高速PR HSEとPython側の時計・電流を、全群の候補成功後に反映します。古いABIと即時LOADのみの対象は読込前に拒否し、自動で従来方式へ切り替えません。明示的な従来方式は`--unprotected-direct-restore`です。途中失敗からの継続・再試行と保証範囲は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。

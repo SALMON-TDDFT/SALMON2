@@ -82,7 +82,7 @@ class DirectCheckpointTests(unittest.TestCase):
             files={n:digest(p/n) for n in ('rank-0.json','frames.json')}
             (p/'complete.json').write_text(json.dumps({'schema':'salmonpy.native-direct/1',
                 'signature':{'steps':128},'ranks':1,'step':64,'files':files}))
-            world=self.world();world.allgather=lambda value:[value,(None,'different-manifest')]
+            world=self.world();world.allgather=lambda value:[value,(None,'different-manifest',value[2])]
             coupled=self.coupled();coupled.response.context=SimpleNamespace(plan=SimpleNamespace(point_ids=(1,)))
             with self.assertRaisesRegex(ValueError,'manifests differ'):
                 checkpoint(world,coupled,p,{'steps':128},restore=True)
@@ -179,3 +179,15 @@ class DirectCheckpointTests(unittest.TestCase):
         record=_compatibility(self.compat_world(),coupled,restore=False)
         self.assertEqual(record['participants'][0]['states']['1']['identity'],'model-v1')
         state.checkpoint.assert_not_called()
+
+    def test_protected_policy_agreed_before_branch(self):
+        from unittest.mock import patch
+        world=self.world()
+        world.allgather=lambda value:[value,(None,value[1],(False,False))]
+        coupled=self.coupled()
+        with tempfile.TemporaryDirectory() as root:
+            with patch('salmonpy.examples._direct_checkpoint._compatibility') as admission:
+                with self.assertRaisesRegex(ValueError,'checkpoint policies differ'):
+                    checkpoint(world,coupled,Path(root)/'new',{},protected=True)
+                admission.assert_not_called()
+        self.assertFalse(coupled.response.failed)
