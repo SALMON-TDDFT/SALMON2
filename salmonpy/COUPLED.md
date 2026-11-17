@@ -357,3 +357,11 @@ native混在サンプルの場・電子・LD/SBE保存処理も `CheckpointTarge
 通常サンプルの`--direct-resume`は保護付き復元が既定です。場内LD・SBE・native TDDFT／高速PR HSEとPython側の時計・電流を、全群の候補成功後に反映します。古いABIと即時LOADのみの対象は読込前に拒否し、自動で従来方式へ切り替えません。明示的な従来方式は`--unprotected-direct-restore`です。途中失敗からの継続・再試行と保証範囲は[CHECKPOINTING.md](CHECKPOINTING.md)を参照してください。
 
 `--memory-budget-gib 4`は全MPIランク合計4GiBの助言予算です。通常状態と復元候補の同時保持分を報告し、超過時も停止しません。[MEMORY.md](MEMORY.md)を参照してください。
+
+## 混在サンプルのIDと再開
+
+`python -m salmonpy.examples.mpi_mixed_native` は `--run-id`、論理点ID、物質ID、物質定義・初期状態のSHA256、MPI所有ランク、LDの材料番号対応を保存します。`mixed-example` は試験用の既定ラベルです。実験ごとに明示した `--run-id` を使用してください。定義の識別には出力先や一時ディレクトリを含めません。
+
+`identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/3`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
+
+IDのない旧保存を使う場合だけ `--legacy-checkpoint-identity` を明示します。これは識別情報を検証できない旧経路であり、新形式のID不一致を回避する指定ではありません。保護付き復元は引き続き既定です。自作ホストでは `ResponseSession` の `point_record` / `point_map` に識別情報を渡してください。IDは呼び出し側の宣言であり、物理精度の認証ではありません。

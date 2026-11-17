@@ -385,3 +385,11 @@ Native mixed field/electronic/LD/SBE persistence also uses CheckpointTarget/exec
 The ordinary sample's `--direct-resume` defaults to protected restoration of field-local LD, SBE, native TDDFT/fast-PR HSE and Python clocks/currents after all groups prepare candidates. Old ABIs/direct-only targets are rejected before LOAD, without fallback. Explicit legacy behavior is `--unprotected-direct-restore`. See [CHECKPOINTING.en.md](CHECKPOINTING.en.md) for collective continuation/retry and failure exclusions.
 
 `--memory-budget-gib 4` supplies an aggregate4GiB advisory budget. Live/candidate coexistence is reported and excess never stops the run. See [MEMORY.en.md](MEMORY.en.md).
+
+## Mixed sample identity and restart
+
+`python -m salmonpy.examples.mpi_mixed_native` preserves `--run-id`, logical point IDs, material IDs, material-definition and initial-state SHA256 digests, MPI ownership, and the LD cell-material mapping. The default `mixed-example` is a fixture label; provide an explicit run ID for each experiment. Output and temporary directories are excluded from definition fingerprints.
+
+The same identity appears in `identity.json`, normal-run `result.json`, and the `point-response` archive. Identified direct checkpoints use `salmonpy.native-direct/3`; replay checkpoints use `salmonpy.native-replay/2`. Numerical payload formats and update order are unchanged. Direct restore checks identity and MPI ownership before loading numerical state; save checks agreement across all ranks.
+
+Use `--legacy-checkpoint-identity` explicitly only for old unidentified checkpoints. This cannot bypass identity mismatches in identified checkpoints and does not disable protected restore. Custom hosts supply `ResponseSession` point records through `point_record` / `point_map`. These are caller declarations, not certification of physical accuracy.

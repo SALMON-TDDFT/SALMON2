@@ -8,6 +8,7 @@ Tiny 3D connection fixture, not recommended production TDDFT geometry.
 import argparse
 import json
 import hashlib
+from dataclasses import asdict
 from pathlib import Path
 import numpy as np
 from salmonpy.coupled import NativeEHField, CoupledStepper
@@ -33,6 +34,8 @@ def main():
     parser.add_argument('--dt', type=float, default=.003)
     parser.add_argument('--tddft-ranks', type=int, choices=(1, 2), default=2)
     parser.add_argument('--layers', type=Path, help='native-layers/1 JSON referencing sbe-point, si-tddft, hse-point, drude, lorentz')
+    parser.add_argument('--run-id', default='mixed-example', help='explicit experiment/run identity; fixture default mixed-example')
+    parser.add_argument('--legacy-checkpoint-identity', action='store_true', help='explicit unidentified session for old checkpoint readers; cannot bypass identified archives')
     parser.add_argument('--memory-budget-gib', type=float, help='aggregate advisory memory budget across MPI ranks; warning only')
     parser.add_argument('--rank-budget', type=int, help='planning cap; defaults to the launched world size')
     parser.add_argument('--field-grid', type=int, nargs=3, default=(1, 1, 1), metavar=('PX', 'PY', 'PZ'))
@@ -144,7 +147,7 @@ def main():
         restored = None
         if args.resume is not None:
             metadata = json.loads((args.resume/'checkpoint.json').read_text())
-            if metadata.get('schema') != 'salmonpy.native-replay/1' or metadata['signature'] != signature:
+            if metadata.get('schema') not in ('salmonpy.native-replay/1','salmonpy.native-replay/2') or metadata['signature'] != signature:
                 raise ValueError('replay checkpoint input/library/topology differs')
             if digest_file(args.resume/'history.npz') != metadata['history_sha256']:
                 raise ValueError('replay checkpoint checksum mismatch')
@@ -165,11 +168,37 @@ def main():
         field = None
         if context.group.role == 'field':
             field = NativeEHField(context, calculation, args.build, output/'field', points=points, grid=tuple(args.field_grid))
-        session = ResponseSession(context, bindings, dt=dt)
+        point_record=point_map=constitutive_identity=None
+        if not args.legacy_checkpoint_identity:
+            from salmonpy.examples._mixed_identity import sample_records
+            ld_records={}
+            if assembly is None:
+                ld_definitions={} if args.without_ld else {mid:asdict(model.config) for mid,model in zip(('drude','lorentz'),materials)}
+                cell_ids={} if args.without_ld else {'1':'drude','2':'lorentz'}
+            else:
+                ar=assembly.record()
+                ld_definitions={mid:entry['parameters'] for mid,entry in ar['materials'].items() if entry['kind']=='ld'}
+                ld_records={mid:entry.get('material_record') for mid,entry in ar['materials'].items() if entry['kind']=='ld'}
+                cell_ids={str(number):mid for mid,number in ar['constitutive_material_ids'].items()}
+            point_record,point_map,constitutive_identity=sample_records(args.run_id,signature,points,bindings,
+                constitutive=ld_definitions,cell_ids=cell_ids,assembly=assembly,constitutive_records=ld_records)
+        session = ResponseSession(context, bindings, dt=dt,point_record=point_record,point_map=point_map)
         for point,binding in bindings.items():
             if binding.key=='hse-point' and np.max(np.abs(session.initial_current[point]))>1e-12:
                 raise ValueError('zero-initial FDTD requires negligible initial HSE current (<=1e-12 au); prepare a zero-current initial state')
         coupled = CoupledStepper(session, field)
+        if constitutive_identity is not None:
+            coupled.constitutive_identity=constitutive_identity
+        from salmonpy.examples._mixed_identity import checkpoint_identity
+        identity=checkpoint_identity(coupled)
+        if args.resume is not None:
+            from salmonpy.examples._mixed_identity import check_identity
+            check_identity(identity,metadata.get('identity'),metadata['schema'])
+        error=None
+        if world.rank==0:
+            try:(output/'identity.json').write_text(json.dumps(identity,indent=2)+'\n')
+            except Exception as exc:error=str(exc)
+        session.agree(error)
         coupled.memory_budget_bytes=budget
         coupled.memory_report_path=memory_path
         coupled.memory_reports=memory_reports if memory_enabled else None
@@ -204,6 +233,15 @@ def main():
             from salmonpy.examples._direct_checkpoint import checkpoint, digest
             destination = output/'direct-checkpoint'
             checkpoint(world, coupled, destination, signature, frames=history)
+        if identity is not None and args.direct_save_at is None and args.save_at is None:
+            arrays=destination=axes=info=None
+            if world.rank==0:
+                destination=output/'point-response'
+                arrays={key:np.asarray([frame[source] for frame in history])
+                        for key,source in (('A_over_c','A_over_c'),('E','E_at_points'),('j','J_charge'))}
+                axes={key:1 for key in arrays}
+                info={'mixed_identity':identity,'units':{'A_over_c':'A/c:au','E':'E:au','j':'charge-current-density:au'}}
+            session.save_arrays(destination,arrays,point_axes=axes,metadata=info)
         communication = session.communication_report()
         if memory_enabled:
             live_advice(world,budget,memory_reports,memory_path,
@@ -222,7 +260,7 @@ def main():
                 np.savez(checkpoint/'history.npz', **{key: np.asarray([h[key] for h in history])
                          for key in ('A_over_c','E_at_points','J_charge')})
                 (checkpoint/'checkpoint.json').write_text(json.dumps({
-                    'schema': 'salmonpy.native-replay/1', 'step': stop,
+                    'schema': ('salmonpy.native-replay/2' if identity is not None else 'salmonpy.native-replay/1'), 'identity': identity, 'step': stop,
                     'signature': signature, 'history_sha256': digest_file(checkpoint/'history.npz')}, indent=2)+'\n')
                 print(checkpoint)
             world.Barrier()
@@ -284,7 +322,8 @@ def main():
                       'timing': coupled.timing, 'communication': communication,
                       'native_steps_this_job': stop-start, 'restored_step': start,
                       'checkpoint_validation': getattr(coupled, 'checkpoint_validation', None),
-                      'scope': 'tiny native E/H coupling fixture; no physical convergence or whole-session restart claim'}
+                      'identity':identity,
+                      'scope': 'tiny native E/H fixture; fixed-binary/input/topology restart; no physical convergence claim'}
             if assembly is not None:
                 report['assembly'] = assembly.record()
                 report['ld_materials'] = {str(v): k for k, v in assembly.record()['constitutive_material_ids'].items()}

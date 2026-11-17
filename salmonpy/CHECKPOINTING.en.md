@@ -289,3 +289,11 @@ trajectory with the saved frames plus subsequent step returns, or resume in a
 fresh MPI job/output directory to keep native output streams separate.
 
 Memory advice includes concurrent candidate storage; see [MEMORY.en.md](MEMORY.en.md). Exceeding the ordinary sample budget only warns and does not refuse protected restore.
+
+## Mixed sample identity and restart
+
+`python -m salmonpy.examples.mpi_mixed_native` preserves `--run-id`, logical point IDs, material IDs, material-definition and initial-state SHA256 digests, MPI ownership, and the LD cell-material mapping. The default `mixed-example` is a fixture label; provide an explicit run ID for each experiment. Output and temporary directories are excluded from definition fingerprints.
+
+The same identity appears in `identity.json`, normal-run `result.json`, and the `point-response` archive. Identified direct checkpoints use `salmonpy.native-direct/3`; replay checkpoints use `salmonpy.native-replay/2`. Numerical payload formats and update order are unchanged. Direct restore checks identity and MPI ownership before loading numerical state; save checks agreement across all ranks.
+
+Use `--legacy-checkpoint-identity` explicitly only for old unidentified checkpoints. This cannot bypass identity mismatches in identified checkpoints and does not disable protected restore. Custom hosts supply `ResponseSession` point records through `point_record` / `point_map`. These are caller declarations, not certification of physical accuracy.

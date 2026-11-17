@@ -238,3 +238,11 @@ SBEは新しい独立ハンドルへsnapshotを復元します。Python側の時
 step戻り値で時系列を管理してください。ファイル出力を分ける場合は、新しいMPIジョブ・出力先で再開します。
 
 復元候補の同時保持を含むメモリ助言は[MEMORY.md](MEMORY.md)を参照してください。通常混在サンプルの予算超過は警告のみで、保護付き復元を拒否しません。
+
+## 混在サンプルのIDと再開
+
+`python -m salmonpy.examples.mpi_mixed_native` は `--run-id`、論理点ID、物質ID、物質定義・初期状態のSHA256、MPI所有ランク、LDの材料番号対応を保存します。`mixed-example` は試験用の既定ラベルです。実験ごとに明示した `--run-id` を使用してください。定義の識別には出力先や一時ディレクトリを含めません。
+
+`identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/3`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
+
+IDのない旧保存を使う場合だけ `--legacy-checkpoint-identity` を明示します。これは識別情報を検証できない旧経路であり、新形式のID不一致を回避する指定ではありません。保護付き復元は引き続き既定です。自作ホストでは `ResponseSession` の `point_record` / `point_map` に識別情報を渡してください。IDは呼び出し側の宣言であり、物理精度の認証ではありません。

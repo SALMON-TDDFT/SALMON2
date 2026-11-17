@@ -176,7 +176,7 @@ subtasks are unimplemented. Preserve the scoped completion records above:
 |---|---|---|
 | M4 | LD/SBE adapters, configured periodic DFT, GS/1 selection and managed TDDFT bridge | Broader initial-data/model compatibility, including isolated configuration integration; do not infer support from the local E loader |
 | M5 | Serial per-point states, recorded/custom bindings, MPI identity and dedicated serial-native providers | Collective native provider capability integration; full native state/input isolation |
-| M6 | Serial/MPI postprocessing identities and managed TDDFT per-point disk resume | MPI whole-session restart, other backend disk formats, branch and in-memory point identity semantics |
+| M6 | Serial/MPI postprocessing, managed TDDFT point resume, ordinary native mixed-session restart identity | Other backend disk formats, branch and in-memory point identity semantics |
 
 - [x] S1: audit all 39 Python sample entry points; run 13 lightweight examples,
   two preparation examples, serial two-layer FDTD and three three-rank MPI cases.
@@ -433,3 +433,11 @@ Evidence: `../mixed-protected-restore-validation-2026-11-17.md`.
 - [ ] Broader backend-specific calibration, children/unsupported-platform measurement, aggregate production scaling and capacity predictions remain open. No universal heap/RSS upper bound or physical-convergence guarantee is claimed.
 
 Evidence: `../memory-advice-validation-2026-11-17.md`. The earlier recommendation for budget admission is superseded by the user's explicit warning-only decision.
+
+### 2026-11-17 ordinary mixed-session identity
+
+- [x] M6d: ordinary native mixed sample carries run, logical point, material, definition and initial-state identity plus MPI ownership and LD cell mapping into direct/replay checkpoints and normal output archives. Explicit configured LD/electronic records are retained.
+- [x] Reject identity mismatch before native load; agree identity across ranks before checkpoint writes. Old unidentified archives require explicit legacy identity mode; protected restore remains default.
+- [x] Four-rank TDDFT and fast-PR HSE k-only two-rank tests preserve all original state after injected failure and resume exactly without replay; fresh installed-wheel TDDFT continuation also matches exactly.
+
+Evidence: `../mixed-identity-validation-2026-11-17.md`. M6 remains an umbrella milestone: arbitrary backend formats, branch semantics and general in-memory identity remain open. Memory budgets remain advisory warnings.

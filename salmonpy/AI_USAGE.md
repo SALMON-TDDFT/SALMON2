@@ -638,3 +638,11 @@ HSEの実行エンジンは高速PR版のみ。通常版HSEや比較用ベース
 
 ## メモリ助言（停止しない）
 既知の4GiB・4コア等は聞き直さず再利用する。通常混在では--memory-budget-gibを設定し、MPIランク×OMPスレッドを割当コア数内にする（BLASも1スレッド）。初期化前概算・初期化後最大RSS・復元前の候補同時保持と一時コピーをmemory-advice.jsonで確認する。超過時は警告と超過量を示し、勝手に停止・格子変更・ランク変更しない。強制上限はユーザーが撤回済み。MEMORY日英ガイドとmemory.MemoryEstimate／memory_adviceを参照。未取得部分をゼロにしない。Noneとunknownは不明。低い見積もりを実行可能保証にせず、倍率はnative heap上限の証明ではない。最大RSSは現在値でも子ワーカー合計でもない。資源計測・警告・助言出力の失敗を計算失敗と区別し、failedを立てない。自作バックエンドは明示したバッファ量と根拠を渡し、見積もり失敗でも集合呼出を省略せず不明を渡す。
+
+## 混在サンプルのIDと再開
+
+`python -m salmonpy.examples.mpi_mixed_native` は `--run-id`、論理点ID、物質ID、物質定義・初期状態のSHA256、MPI所有ランク、LDの材料番号対応を保存します。`mixed-example` は試験用の既定ラベルです。実験ごとに明示した `--run-id` を使用してください。定義の識別には出力先や一時ディレクトリを含めません。
+
+`identity.json`、通常実行の `result.json` と `point-response` アーカイブに同じ識別情報を引き継ぎます。直接保存の外側の形式は `salmonpy.native-direct/3`、再計算方式は `salmonpy.native-replay/2` です。数値状態の内部形式と更新順は変更しません。直接復元はIDとMPI分割を数値状態の読み込み前に照合し、保存時は全ランクでのID一致を検査します。
+
+IDのない旧保存を使う場合だけ `--legacy-checkpoint-identity` を明示します。これは識別情報を検証できない旧経路であり、新形式のID不一致を回避する指定ではありません。保護付き復元は引き続き既定です。自作ホストでは `ResponseSession` の `point_record` / `point_map` に識別情報を渡してください。IDは呼び出し側の宣言であり、物理精度の認証ではありません。

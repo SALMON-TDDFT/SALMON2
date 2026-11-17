@@ -262,7 +262,12 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
     root = Path(directory).resolve()
     error = None
     manifest_id = None
+    identity_digest=None
+    current_identity=None
     try:
+        from salmonpy.examples._mixed_identity import checkpoint_identity,check_identity,digest_record
+        current_identity=checkpoint_identity(coupled)
+        identity_digest=None if current_identity is None else digest_record(current_identity)
         if type(restore) is not bool or type(protected) is not bool:
             raise ValueError("restore and protected must be booleans")
         if sum(getattr(s,'checkpoint_protocol',None)=='salmonpy.direct-state/1' for s in r.states.values())>1:
@@ -280,8 +285,9 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
         if restore:
             manifest = json.loads((root/'complete.json').read_text())
             manifest_id = hashlib.sha256(json.dumps(manifest,sort_keys=True,allow_nan=False).encode()).hexdigest()
-            if manifest['schema'] not in ('salmonpy.native-direct/1','salmonpy.native-direct/2') or manifest['signature'] != signature or manifest['ranks'] != world.size:
+            if manifest['schema'] not in ('salmonpy.native-direct/1','salmonpy.native-direct/2','salmonpy.native-direct/3') or manifest['signature'] != signature or manifest['ranks'] != world.size:
                 raise ValueError('checkpoint input/library/topology mismatch')
+            check_identity(current_identity,manifest.get('identity'),manifest['schema'])
             if type(manifest['step']) is not int or not 0 < manifest['step'] < signature['steps']:
                 raise ValueError('invalid checkpoint step')
             if not ({f'rank-{i}.json' for i in range(world.size)} | {'frames.json'}) <= set(manifest['files']):
@@ -314,13 +320,15 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                             raise ValueError('invalid checkpoint material current')
     except Exception as exc: error = str(exc)
     policy=(restore if type(restore) is bool else None,protected if type(protected) is bool else None)
-    agreement = world.allgather((error, manifest_id, policy))
+    agreement = world.allgather((error, manifest_id, policy, identity_digest))
     errors = [item[0] for item in agreement]
     if any(errors): raise ValueError(str(errors))
     if any(item[2]!=policy for item in agreement):
         raise ValueError('checkpoint policies differ across ranks')
     if restore and len({item[1] for item in agreement}) != 1:
         raise ValueError('checkpoint manifests differ across ranks')
+    if any(item[3]!=identity_digest for item in agreement):
+        raise ValueError('checkpoint identity differs across ranks')
     compatibility=_compatibility(world,coupled,restore=restore,
         saved=manifest.get('compatibility') if restore else None,
         available_files=manifest['files'] if restore else None,protected=protected and restore)
@@ -438,8 +446,10 @@ def checkpoint(world, coupled, directory, signature, *, restore=False, frames=No
                 {k: v.tolist() if isinstance(v,np.ndarray) else v for k,v in h.items()}
                 for h in frames], allow_nan=False)+'\n')
             files = {p.name: digest(p) for p in sorted(root.iterdir())}
-            (root/'complete.tmp').write_text(json.dumps({'schema':'salmonpy.native-direct/2','compatibility':compatibility,
-                'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}, indent=2)+'\n')
+            completion={'schema':'salmonpy.native-direct/3' if current_identity is not None else 'salmonpy.native-direct/2',
+                'compatibility':compatibility,'ranks':world.size,'signature':signature,'step':coupled.step_index,'files':files}
+            if current_identity is not None:completion['identity']=current_identity
+            (root/'complete.tmp').write_text(json.dumps(completion, indent=2)+'\n')
             (root/'complete.tmp').replace(root/'complete.json')
     except Exception as exc:
         error=type(exc).__name__+': '+str(exc)

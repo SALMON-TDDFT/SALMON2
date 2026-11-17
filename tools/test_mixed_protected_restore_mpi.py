@@ -95,6 +95,48 @@ def main():
             except ValueError as error:
                 assert 'policies differ' in str(error)
         assert not called and not coupled.response.failed
+        manifest=json.loads((Path(directory)/'complete.json').read_text())
+        identity_cases=[]
+        if manifest['schema']=='salmonpy.native-direct/3':
+            from copy import deepcopy
+            assert manifest['identity']==json.loads((root/'identity.json').read_text())
+            for name in ('run','point','material','definition','initial','initial_digest','ld','ownership','bool'):
+                changed=deepcopy(manifest)
+                record=changed['identity']['point_metadata']['point_run']
+                if name=='run':record['run_id']='other-run'
+                elif name=='ld':changed['identity']['constitutive']['cell_ids']['1']='other-material'
+                elif name=='ownership':changed['identity']['point_metadata']['mpi_point_map'][0]['ranks']=[world.size-1]
+                elif name=='bool':changed['identity']['point_metadata']['mpi_point_map'][0]['ranks']=[True]
+                else:
+                    key={'point':'point_id','material':'material_id','definition':'definition_digest',
+                         'initial':'initial_state_id','initial_digest':'initial_state_digest'}[name]
+                    record['points'][0][key]='e'*64
+                mismatch=root/('identity-mismatch-'+name)
+                if world.rank==0:
+                    mismatch.mkdir()
+                    (mismatch/'complete.json').write_text(json.dumps(changed))
+                world.Barrier()
+                with patch.object(NativeRestoreCandidate,'stage',forbidden):
+                    try:
+                        original(world,coupled,mismatch,signature,restore=True)
+                        raise AssertionError('identity mismatch accepted: '+name)
+                    except ValueError as error:assert 'identity' in str(error)
+                assert not called and not coupled.response.failed
+                identity_cases.append(name)
+            old_identity=deepcopy(coupled.constitutive_identity)
+            try:
+                if world.rank==world.size-1:
+                    coupled.constitutive_identity['materials']['drude']['definition_digest']='f'*64
+                destination=root/'rank-identity-mismatch-save'
+                with patch.object(NativeRestoreCandidate,'stage',forbidden):
+                    try:
+                        original(world,coupled,destination,signature,frames=frames)
+                        raise AssertionError('different rank identity accepted')
+                    except ValueError as error:assert 'identity' in str(error)
+                assert not destination.exists() and not called
+                identity_cases.append('rank-agreement')
+            finally:
+                coupled.constitutive_identity=old_identity
         bad_history=root/'bad-history-checkpoint'
         if world.rank==0:
             shutil.copytree(directory,bad_history)
@@ -138,6 +180,7 @@ def main():
                 'failure_step':saved+2,'continued_after_failure':True,
                 'all_original_state_bytes_preserved':True,'field_LD_materials':2,
                 'retry_future_steps_exact':3,'mixed_policy_rejected_before_stage':True,'invalid_history_rejected_before_stage':True,'restore_replayed_steps':0,
+                'identity_cases_rejected_before_load':identity_cases,
                 'memory_probe_failure_injected':args.simulate_memory_probe_failure,
                 'memory_budget_bytes':getattr(coupled,'memory_budget_bytes',None),
                 'memory_restore_reports':len([r for r in (getattr(coupled,'memory_reports',None) or []) if r['label']=='mixed_protected_restore']),
